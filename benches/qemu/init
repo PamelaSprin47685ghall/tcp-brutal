@@ -1,0 +1,848 @@
+#!/bin/sh
+# benches/qemu/init - PID 1 of the benchmark guest.
+#
+# One boot runs one scenario named in /bench.txt and prints machine-readable
+# rows that benches/run.sh turns into a CSV:
+#
+#   BENCHROW  row=<name> k=v ...        one measurement
+#   BENCHCAR  row=<name> carrier=...    one carrier of that measurement
+#   BENCHNOTE <text>                    progress or a diagnostic
+#   BENCHMETA k=v ...                   environment of this boot
+#   BENCH_DONE <scenario>               the scenario finished
+#
+# Everything is driven through the module's operator surface (`echo` into
+# /proc/net/tbtun/*), the same way tests/qemu/init drives probes. The shaped
+# path is the probe-I technique: one htb class of 10 Mbit per source port, a
+# u32 filter per port, and netem on each class, all inside the guest.
+#
+# The transfer is host/tbt_burst.c's strict send-then-read phase: 40 MiB are
+# sent with blocking send() and then read back and compared, so a completed
+# row is also a byte-exactness result. Rates are sampled over a 2 s window
+# while the transfer runs, from the counters at the same layer probe I uses.
+set -u
+export PATH=/bin
+
+CFG=/proc/net/tbtun/config
+PORTS=/proc/net/tbtun/ports
+PEERS=/proc/net/tbtun/peers
+TUNNELS=/proc/net/tbtun/tunnels
+PUB_PORT=${TBT_BENCH_PUB_PORT:-19100}
+CAR_PORT=${TBT_BENCH_CAR_PORT:-19101}
+ECHO_PORT=${TBT_BENCH_ECHO_PORT:-19102}
+SINK_PORT=${TBT_BENCH_SINK_PORT:-19103}
+GUEST_IP=10.0.2.15
+GATEWAY=10.0.2.2
+# The module's carrier port block: 16 ports is max_carriers, so n=16 uses it
+# exactly. The qdisc has 32 classes; the extra 16 ports (41016..41031) are
+# control/latency flows that must be shaped like a carrier but must never be
+# picked by the module.
+PORTBLOCK_LO=41000
+PORTBLOCK_MOD=16
+CLASS_PORTS=32
+CTRL_SPORT_BASE=41024
+CAR_HOSTPORT=29101
+ECHO_HOSTPORT=29102
+SINK_HOSTPORT=29103
+
+# Scenario parameters, filled from /bench.txt.
+P_scenario=
+P_nlist=1,2,4,8
+P_mib=40
+P_profile=raw
+P_dup=0
+P_loss=0,10000,50000,100000
+P_iters=10000
+P_loss_iters=2000
+P_bytes=1024
+P_netem='delay|20ms|10ms'
+P_rx_reorder=2097152
+P_hole_budget=5000
+P_window=2
+P_profiles=raw,http-kal,http-kal-drip
+P_control=1
+P_control_mbit=0
+
+# Globals a measurement leaves for its row.
+X_N=0 X_M=0 X_PROFILE=none X_MIB=0 X_RC=99 X_STRICT=0
+X_MBIT=0 X_APP_MBIT=0 X_WALL=0 X_WIRE=0 X_APP=0 X_WPA=0
+X_FRAMES=0 X_WPS=0 X_CSYS=0 X_CSOFT=0 X_CTOT=0 X_KW=0
+X_RETX=0 X_DUP=0 X_INFL=0 X_HD=0 X_HR=0 X_HU=0
+X_STALL=0 X_DEPTH=0 X_TXQ=0 X_RXQ=0 X_OOO=0 X_RET=0 X_SPEC=0
+X_UP=0 X_NTOT=0
+C_T0=0 C_BUSY0=0 C_SYS0=0 C_SOFT0=0 KW0=0 T_START=0
+ctrl_seq=0
+sampler_pid=
+memsampler_pid=
+echo_pid=
+
+bench_note()
+{
+    printf 'BENCHNOTE %s\n' "$*"
+}
+
+bench_row()
+{
+    _row=$1
+    shift
+    printf 'BENCHROW row=%s' "$_row"
+    for _kv in "$@"; do
+        printf ' %s' "$_kv"
+    done
+    printf '\n'
+}
+
+fatal()
+{
+    printf 'BENCH_FATAL %s\n' "$*"
+    sync
+    poweroff -f
+    exec /bin/busybox poweroff -f
+}
+
+# --- operator-surface helpers ----------------------------------------------
+tunnel_stat()
+{
+    awk -v id="$1" -v key="$2" '
+        $1 == "tunnel" && $2 == id {
+            for (i = 1; i <= NF; i++)
+                if (index($i, key "=") == 1) { split($i, a, "="); print a[2] }
+        }' /proc/net/tbtun/stats
+}
+stat_sum()
+{
+    awk -v key="$1" '
+        $1 == "tunnel" {
+            for (i = 1; i <= NF; i++)
+                if (index($i, key "=") == 1) { split($i, a, "="); s += a[2] }
+        }
+        END { print s + 0 }' /proc/net/tbtun/stats
+}
+stat_max()
+{
+    awk -v key="$1" '
+        $1 == "tunnel" {
+            for (i = 1; i <= NF; i++)
+                if (index($i, key "=") == 1) { split($i, a, "="); if (a[2] + 0 > m) m = a[2] + 0 }
+        }
+        END { print m + 0 }' /proc/net/tbtun/stats
+}
+peer_sum()
+{
+    awk -v id="$1" -v n="$2" '$1 == id { s += $n } END { print s + 0 }' /proc/net/tbtun/peers
+}
+peers_up()
+{
+    awk -v id="$1" '$1 == id && $8 == "up" { n++ } END { print n + 0 }' /proc/net/tbtun/peers
+}
+peers_total()
+{
+    awk -v id="$1" '$1 == id { n++ } END { print n + 0 }' /proc/net/tbtun/peers
+}
+peer_retx_max()
+{
+    awk -v id="$1" '$1 == id { if ($16 + 0 > m) m = $16 + 0 } END { print m + 0 }' \
+        /proc/net/tbtun/peers
+}
+
+flush_and_wait()
+{
+    echo 'flush' > "$CFG" 2> /dev/null || true
+    sleep 1
+}
+
+configure()
+{
+    _n=$1 _m=$2 _p=$3 _d=$4 _x=${5:-}
+    echo "ports $PORTBLOCK_LO-$((PORTBLOCK_LO + PORTBLOCK_MOD - 1))" > "$PORTS" || return 1
+    # The far listener must bind the eth0 address: qemu's hostfwd delivers the
+    # carrier connection there, not to loopback.
+    echo "tunnel 1 role=far profile=$_p listen=$GUEST_IP:$CAR_PORT target=127.0.0.1:$ECHO_PORT n=$_n m=$_m dup=$_d rx_reorder_bytes=$P_rx_reorder hole_budget_ms=$P_hole_budget $_x" \
+        > "$CFG" || return 1
+    echo "tunnel 2 role=near profile=$_p listen=127.0.0.1:$PUB_PORT peer=$GATEWAY:$CAR_HOSTPORT n=$_n m=$_m dup=$_d rx_reorder_bytes=$P_rx_reorder hole_budget_ms=$P_hole_budget $_x" \
+        > "$CFG" || return 1
+    return 0
+}
+
+# --- CPU accounting ---------------------------------------------------------
+# /proc/stat fields after "cpu": user nice system idle iowait irq softirq
+# steal ...; system+irq+softirq is the kernel cost of the transfer, and the
+# tick rate is 100 Hz, so delta_ticks / wall_seconds is percent of one vCPU.
+cpu_now()
+{
+    awk '/^cpu / { busy = $4 + $7 + $8; sys = $4; soft = $8; tot = 0;
+                   for (i = 2; i <= 9; i++) tot += $i;
+                   printf "%d %d %d %d\n", tot, busy, sys, soft }' /proc/stat
+}
+kworker_ticks()
+{
+    awk '
+        {
+            c = substr($0, index($0, "(") + 1)
+            c = substr(c, 1, index(c, ")") - 1)
+            if (c !~ /^kworker/) next
+            rest = substr($0, index($0, ")") + 2)
+            split(rest, a, " ")
+            s += a[12] + a[13]
+        }
+        END { print s + 0 }' /proc/[0-9]*/stat
+}
+cpu_begin()
+{
+    C_T0=$(up_now)
+    set -- $(cpu_now)
+    C_BUSY0=$2 C_SYS0=$3 C_SOFT0=$4
+    KW0=$(kworker_ticks)
+}
+cpu_end()
+{
+    set -- $(cpu_now)
+    _busy=$2 _sys=$3 _soft=$4
+    _kw=$(kworker_ticks)
+    # The caller sets T_WALL (transfer wall time) before this runs; ticks are
+    # 100/s, so delta_ticks / wall_s is percent of one vCPU.
+    X_CSYS=$(awk -v d="$((_sys - C_SYS0))" -v w="$T_WALL" 'BEGIN { if (w > 0) printf "%.1f", d / w; else print 0 }')
+    X_CSOFT=$(awk -v d="$((_soft - C_SOFT0))" -v w="$T_WALL" 'BEGIN { if (w > 0) printf "%.1f", d / w; else print 0 }')
+    X_CTOT=$(awk -v d="$((_busy - C_BUSY0))" -v w="$T_WALL" 'BEGIN { if (w > 0) printf "%.1f", d / w; else print 0 }')
+    X_KW=$(awk -v d="$((_kw - KW0))" -v w="$T_WALL" 'BEGIN { if (w > 0) printf "%.1f", d / w; else print 0 }')
+}
+
+up_now()
+{
+    read -r _up _rest < /proc/uptime
+    echo "$_up"
+}
+
+# --- queue-depth sampler ----------------------------------------------------
+# One awk and one sleep per 250 ms. It reads only the two /proc files, so its
+# own cost stays below a percent of one vCPU; every scenario records the
+# maximum it saw, not the last value.
+q_sample()
+{
+    awk '
+        FILENAME ~ /peers/ {
+            if ($1 != "#" && $7 + 0 > infl) infl = $7 + 0
+            next
+        }
+        /^tunnel / {
+            for (i = 1; i <= NF; i++) {
+                if (index($i, "=") == 0) continue
+                split($i, a, "="); k = a[1]; v = a[2] + 0
+                if (k == "txq" && v > txq) txq = v
+                else if (k == "rxq" && v > rxq) rxq = v
+                else if (k == "ooo_bytes" && v > ooo) ooo = v
+                else if (k == "retain_bytes" && v > ret) ret = v
+                else if (k == "spec_bytes_max" && v > spec) spec = v
+                else if (k == "pub_wmem" && v > pw) pw = v
+                else if (k == "car_wmem" && v > cw) cw = v
+            }
+        }
+        END { printf "%d %d %d %d %d %d %d %d\n", infl, txq, rxq, ooo, ret, spec, pw, cw }
+    ' "$PEERS" /proc/net/tbtun/stats
+}
+sampler_start()
+{
+    rm -f /tmp/q.log /tmp/qstop
+    (
+        while [ ! -e /tmp/qstop ]; do
+            printf '%s ' "$(up_now)" >> /tmp/q.log
+            q_sample >> /tmp/q.log
+            sleep 0.25
+        done
+    ) &
+    sampler_pid=$!
+}
+sampler_stop()
+{
+    [ -n "${sampler_pid:-}" ] || return 0
+    : > /tmp/qstop
+    wait "$sampler_pid" 2> /dev/null
+    sampler_pid=
+}
+q_max()
+{
+    awk -v f="$1" '{ if ($f + 0 > m) m = $f + 0 } END { print m + 0 }' /tmp/q.log 2> /dev/null || echo 0
+}
+
+# --- memory sampler ---------------------------------------------------------
+mem_used()
+{
+    awk '/^MemTotal:/ { t = $2 } /^MemAvailable:/ { a = $2 } END { print t - a }' /proc/meminfo
+}
+proc_rss()
+{
+    awk '{ s += $2 } END { print s * 4 }' /proc/[0-9]*/statm 2> /dev/null
+}
+slab_used()
+{
+    awk '/^Slab:/ { print $2 }' /proc/meminfo
+}
+mem_sample()
+{
+    printf '%s %s %s %s\n' "$(up_now)" "$(mem_used)" "$(proc_rss)" "$(slab_used)"
+}
+memsampler_start()
+{
+    rm -f /tmp/m.log /tmp/mstop
+    (
+        while [ ! -e /tmp/mstop ]; do
+            mem_sample >> /tmp/m.log
+            sleep 1
+        done
+    ) &
+    memsampler_pid=$!
+}
+memsampler_stop()
+{
+    [ -n "${memsampler_pid:-}" ] || return 0
+    : > /tmp/mstop
+    wait "$memsampler_pid" 2> /dev/null
+    memsampler_pid=
+}
+m_max()
+{
+    awk -v f="$1" '{ if ($f + 0 > m) m = $f + 0 } END { print m + 0 }' /tmp/m.log 2> /dev/null || echo 0
+}
+
+# --- tc: 10 Mbit per source port, netem on each class -----------------------
+tc_clear()
+{
+    /bin/tc qdisc del dev eth0 root 2> /dev/null
+}
+tc_setup()
+{
+    tc_clear
+    /bin/tc qdisc add dev eth0 root handle 1: htb default 99 || return 1
+    /bin/tc class add dev eth0 parent 1: classid 1:1 htb rate 1000mbit ceil 1000mbit || return 1
+    /bin/tc class add dev eth0 parent 1:1 classid 1:99 htb rate 1000mbit ceil 1000mbit || return 1
+    i=0
+    while [ $i -lt $CLASS_PORTS ]; do
+        port=$((PORTBLOCK_LO + i))
+        cls=$((10 + i))
+        /bin/tc class add dev eth0 parent 1:1 classid "1:$cls" htb rate 10mbit ceil 10mbit || return 1
+        if [ -n "$NETEM_ARGS" ]; then
+            /bin/tc qdisc add dev eth0 parent "1:$cls" handle "$((100 + i)):" netem $NETEM_ARGS || return 1
+        fi
+        /bin/tc filter add dev eth0 parent 1: protocol ip prio 1 u32 \
+            match ip sport "$port" 0xffff flowid "1:$cls" || return 1
+        i=$((i + 1))
+    done
+}
+tc_class_bytes()
+{
+    # iproute2 prints the byte counter on the line after the class header:
+    #   class htb 1:34 root leaf 34: prio 0 rate 10Mbit ...
+    #    Sent 1234 bytes 5 pkt (dropped 0, overlimits 0 requeues 0)
+    /bin/tc -s class show dev eth0 2> /dev/null | awk -v c="1:$1" '
+        $1 == "class" && $2 == "htb" && $3 == c { found = 1; next }
+        found && $1 == "class" { exit }
+        found && $1 == "Sent" { print $2; exit }'
+}
+
+# --- one tunnel transfer ----------------------------------------------------
+# xfer N M PROFILE DUP MIB ROW [extra config] [drop_ppm]
+# Fills the X_* globals. It does not print a row: the scenario decides which
+# fields it wants and calls emit_xfer_row. drop_ppm arms the deterministic
+# injector on carriers 1 and 2 after the tunnel exists and before the burst;
+# it is a runtime action, so it cannot be part of the tunnel line.
+xfer()
+{
+    X_N=$1 X_M=$2 X_PROFILE=$3 X_DUP=$4 X_MIB=$5
+    _row=$6
+    _extra=${7:-}
+    _ppm=${8:-0}
+    X_RC=99 X_STRICT=0 X_MBIT=0 X_APP_MBIT=0 X_WALL=0
+    X_WIRE=0 X_APP=0 X_WPA=0 X_FRAMES=0 X_WPS=0
+    X_RETX=0 X_DUP=0 X_INFL=0 X_HD=0 X_HR=0 X_HU=0 X_STALL=0 X_DEPTH=0
+    X_TXQ=0 X_RXQ=0 X_OOO=0 X_RET=0 X_SPEC=0 X_UP=0 X_NTOT=0
+
+    flush_and_wait
+    if ! configure "$X_N" "$X_M" "$X_PROFILE" "$X_DUP" "$_extra"; then
+        bench_note "row=$_row: config rejected"
+        return 1
+    fi
+    _i=0
+    while [ $_i -lt 100 ]; do
+        [ "$(peers_up 2)" -ge "$X_N" ] && break
+        sleep 0.05
+        _i=$((_i + 1))
+    done
+    if [ "$_ppm" -gt 0 ]; then
+        echo "carrier 1 drop_ppm $_ppm" > "$PEERS" ||
+            bench_note "row=$_row: carrier 1 drop_ppm rejected"
+        echo "carrier 2 drop_ppm $_ppm" > "$PEERS" ||
+            bench_note "row=$_row: carrier 2 drop_ppm rejected"
+        bench_note "row=$_row: armed drop_ppm=$_ppm on carriers 1 and 2"
+    fi
+    X_UP=$(peers_up 2)
+    X_NTOT=$(peers_total 2)
+    bench_note "row=$_row: n=$X_N m=$X_M profile=$X_PROFILE carriers_up=$X_UP/$X_NTOT"
+
+    # Whole-transfer baselines, taken before the burst.
+    _wb=$(peer_sum 2 14)
+    _ab=$(tunnel_stat 2 submit_bytes)
+    _fb=$(peer_sum 2 13)
+    : "${_ab:=0}"
+
+    sampler_start
+    T_START=$(up_now)
+    cpu_begin
+    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$X_MIB" 120 > /tmp/burst.log 2>&1 &
+    _bpid=$!
+
+    # Start the rate window once the tunnel has actually captured data: a
+    # window that begins during connection setup measures the handshake.
+    _i=0
+    while [ $_i -lt 6000 ]; do
+        _s=$(tunnel_stat 2 submit_bytes)
+        [ "${_s:-0}" -ge 262144 ] && break
+        kill -0 "$_bpid" 2> /dev/null || break
+        sleep 0.05
+        _i=$((_i + 1))
+    done
+    if kill -0 "$_bpid" 2> /dev/null; then
+        _t0=$(up_now)
+        _w0=$(peer_sum 2 14)
+        _a0=$(tunnel_stat 2 submit_bytes)
+        _f0=$(peer_sum 2 13)
+        sleep "$P_window"
+        _t1=$(up_now)
+        _w1=$(peer_sum 2 14)
+        _a1=$(tunnel_stat 2 submit_bytes)
+        _f1=$(peer_sum 2 13)
+        X_MBIT=$(awk -v a="$_w0" -v b="$_w1" -v x="$_t0" -v y="$_t1" \
+            'BEGIN { t = y - x; if (t <= 0) t = 1; printf "%.2f", (b - a) * 8 / 1000000 / t }')
+        X_APP_MBIT=$(awk -v a="$_a0" -v b="$_a1" -v x="$_t0" -v y="$_t1" \
+            'BEGIN { t = y - x; if (t <= 0) t = 1; printf "%.2f", (b - a) * 8 / 1000000 / t }')
+        X_WPS=$(awk -v a="$_f0" -v b="$_f1" -v x="$_t0" -v y="$_t1" \
+            'BEGIN { t = y - x; if (t <= 0) t = 1; printf "%.1f", (b - a) / t }')
+        _ad=$((_a1 - _a0))
+        _wd=$((_w1 - _w0))
+        X_WPA=$(awk -v w="$_wd" -v a="$_ad" 'BEGIN { if (a > 0) printf "%.4f", w / a; else print 0 }')
+        if ! kill -0 "$_bpid" 2> /dev/null; then
+            bench_note "row=$_row: transfer ended inside the rate window"
+        fi
+    else
+        bench_note "row=$_row: transfer ended before the rate window"
+    fi
+
+    wait "$_bpid"
+    X_RC=$?
+    T_END=$(up_now)
+    T_WALL=$(awk -v a="$T_START" -v b="$T_END" 'BEGIN { printf "%.3f", b - a }')
+    cpu_end
+    sampler_stop
+
+    _w2=$(peer_sum 2 14)
+    _a2=$(tunnel_stat 2 submit_bytes)
+    _f2=$(peer_sum 2 13)
+    X_WIRE=$((_w2 - _wb))
+    X_APP=$((_a2 - _ab))
+    X_FRAMES=$((_f2 - _fb))
+    # X_WALL is the transfer's wall time, not the rate window's.
+    X_WALL=$T_WALL
+    grep -q 'strict phase passed' /tmp/burst.log && X_STRICT=1
+    [ "$X_RC" -eq 0 ] || bench_note "row=$_row: tbt_burst rc=$X_RC $(tail -n 2 /tmp/burst.log | tr '\n' ' ')"
+
+    X_RETX=$(peer_retx_max 2)
+    X_DUP=$(tunnel_stat 2 dup_tx)
+    X_INFL=$(tunnel_stat 2 inflate_ppm)
+    X_HD=$(tunnel_stat 2 holes_declared)
+    X_HR=$(tunnel_stat 2 holes_repaired)
+    X_HU=$(tunnel_stat 2 holes_unrecoverable)
+    X_STALL=$(tunnel_stat 2 rx_max_stall_us)
+    X_DEPTH=$(tunnel_stat 2 reorder_max_depth)
+    : "${X_DUP:=0}" "${X_INFL:=0}" "${X_HD:=0}" "${X_HR:=0}" "${X_HU:=0}" "${X_STALL:=0}" "${X_DEPTH:=0}"
+
+    X_TXQ=$(q_max 3)
+    X_RXQ=$(q_max 4)
+    X_OOO=$(q_max 5)
+    X_RET=$(q_max 6)
+    X_SPEC=$(q_max 7)
+
+    # Per-carrier evidence, near side (the shaped direction).
+    awk -v row="$_row" '$1 == 2 {
+        printf "BENCHCAR row=%s carrier=%s sport=%s state=%s profile=%s bytes=%s frames=%s dropped=%s retx_ppm=%s inflight=%s\n",
+               row, $2, $3, $8, $9, $14, $13, $15, $16, $7
+    }' "$PEERS"
+    return 0
+}
+
+emit_xfer_row()
+{
+    _row=$1
+    shift
+    bench_row "$_row" n="$X_N" m="$X_M" profile="$X_PROFILE" mib="$X_MIB" \
+        goodput_mbit="$X_MBIT" app_mbit="$X_APP_MBIT" wall_s="$X_WALL" \
+        wire_bytes="$X_WIRE" app_bytes="$X_APP" wire_per_app="$X_WPA" \
+        frames="$X_FRAMES" frames_s="$X_WPS" \
+        cpu_sys_pct="$X_CSYS" cpu_softirq_pct="$X_CSOFT" cpu_total_pct="$X_CTOT" \
+        kworker_pct="$X_KW" retx_ppm="$X_RETX" dup_tx="$X_DUP" inflate_ppm="$X_INFL" \
+        holes_declared="$X_HD" holes_repaired="$X_HR" holes_unrecoverable="$X_HU" \
+        rx_max_stall_us="$X_STALL" reorder_max_depth="$X_DEPTH" \
+        carriers_up="$X_UP/$X_NTOT" txq_max="$X_TXQ" rxq_max="$X_RXQ" \
+        ooo_bytes_max="$X_OOO" retain_bytes_max="$X_RET" spec_bytes_max="$X_SPEC" \
+        rc="$X_RC" strict="$X_STRICT" "$@"
+}
+
+# --- the control: dd | nc over one shaped 5-tuple ---------------------------
+# The sender is busybox nc bound to a source port inside the shaped block, so
+# the flow meets exactly one 10 Mbit htb class, like one carrier. Rates are
+# read from that class's byte counter, which is the same place (above the
+# wire) the tunnel's carrier bytes are counted. Completion is the class
+# counter reaching MIB, not dd returning: close() does not wait for the
+# socket buffer to drain.
+control_measure()
+{
+    _mib=$1
+    ctrl_seq=$((ctrl_seq + 1))
+    _sport=$((CTRL_SPORT_BASE + ctrl_seq))
+    _cls=$((10 + _sport - PORTBLOCK_LO))
+    if ! tc_setup; then
+        bench_note "control: tc setup failed"
+        bench_row control n=0 m=0 profile=control mib="$_mib" rc=1
+        return 1
+    fi
+    _b0=$(tc_class_bytes "$_cls")
+    : "${_b0:=0}"
+    T_START=$(up_now)
+    cpu_begin
+    (
+        dd if=/dev/zero bs=65536 count=$((_mib * 16)) 2> /tmp/dd.log |
+            nc -p "$_sport" -w 3 "$GATEWAY" "$SINK_HOSTPORT"
+    ) &
+    _cpid=$!
+
+    _i=0
+    while [ $_i -lt 600 ]; do
+        _b=$(tc_class_bytes "$_cls")
+        [ "${_b:-0}" -ge 262144 ] && break
+        kill -0 "$_cpid" 2> /dev/null || break
+        sleep 0.05
+        _i=$((_i + 1))
+    done
+    if ! kill -0 "$_cpid" 2> /dev/null; then
+        bench_note "control: dd|nc exited before 256 KiB reached the class (sent=${_b:-0})"
+        bench_row control n=0 m=0 profile=control mib="$_mib" rc=1
+        wait "$_cpid" 2> /dev/null
+        return 1
+    fi
+    _b0=$(tc_class_bytes "$_cls")
+    _u0=$(up_now)
+    sleep "$P_window"
+    _b1=$(tc_class_bytes "$_cls")
+    _u1=$(up_now)
+    _mb=$(awk -v a="$_b0" -v b="$_b1" -v x="$_u0" -v y="$_u1" \
+        'BEGIN { t = y - x; if (t <= 0) t = 1; printf "%.2f", (b - a) * 8 / 1000000 / t }')
+
+    # Completion: the class must have carried the whole volume. 90 s covers
+    # 40 MiB at 4 Mbit/s with margin.
+    _i=0
+    _want=$((_mib * 1048576))
+    while [ $_i -lt 3000 ]; do
+        _b=$(tc_class_bytes "$_cls")
+        [ "${_b:-0}" -ge "$_want" ] && break
+        kill -0 "$_cpid" 2> /dev/null || break
+        sleep 0.05
+        _i=$((_i + 1))
+    done
+    _b2=$(tc_class_bytes "$_cls")
+    T_END=$(up_now)
+    T_WALL=$(awk -v a="$T_START" -v b="$T_END" 'BEGIN { printf "%.3f", b - a }')
+    cpu_end
+    wait "$_cpid" 2> /dev/null
+    _rc=$?
+    _done=0
+    [ "${_b2:-0}" -ge "$_want" ] && _done=1
+    bench_note "control: class=1:$_cls sport=$_sport class_bytes=${_b2:-0} want=$_want done=$_done"
+    bench_row control n=0 m=0 profile=control mib="$_mib" control_mbit="$_mb" \
+        goodput_mbit="$_mb" app_mbit="$_mb" wall_s="$T_WALL" \
+        wire_bytes="${_b2:-0}" app_bytes="$_want" \
+        wire_per_app=$(awk -v w="${_b2:-0}" -v a="$_want" 'BEGIN { if (a > 0) printf "%.4f", w / a; else print 0 }') \
+        cpu_sys_pct="$X_CSYS" cpu_softirq_pct="$X_CSOFT" cpu_total_pct="$X_CTOT" \
+        kworker_pct="$X_KW" rc="$_rc" strict="$_done"
+    CONTROL_MBIT=$_mb
+    return 0
+}
+
+# --- scenarios --------------------------------------------------------------
+bench_throughput()
+{
+    tc_setup || fatal "tc setup failed (htb + u32 + netem)"
+    # One boot per N keeps each run short and avoids a module flush between
+    # rows (observed to block after a large transfer). --control-mbit lets a
+    # later boot reuse the control measured in the first one.
+    if [ "$P_control" -eq 1 ]; then
+        control_measure "$P_mib"
+    else
+        CONTROL_MBIT=$P_control_mbit
+    fi
+    for _n in $(echo "$P_nlist" | tr ',' ' '); do
+        if xfer "$_n" 0 "$P_profile" "$P_dup" "$P_mib" "n$_n"; then
+            _ratio=$(awk -v t="$X_MBIT" -v c="${CONTROL_MBIT:-0}" \
+                'BEGIN { if (c > 0) printf "%.2f", t / c; else print 0 }')
+            emit_xfer_row "n$_n" control_mbit="${CONTROL_MBIT:-0}" tunnel_mbit="$X_MBIT" ratio="$_ratio"
+        else
+            bench_row "n$_n" n="$_n" m=0 profile="$P_profile" mib="$P_mib" rc=1
+        fi
+    done
+    tc_clear
+}
+
+bench_profile()
+{
+    tc_setup || fatal "tc setup failed"
+    for _p in $(echo "$P_profiles" | tr ',' ' '); do
+        if xfer 4 1 "$_p" "$P_dup" "$P_mib" "profile-$_p"; then
+            emit_xfer_row "profile-$_p"
+        else
+            bench_row "profile-$_p" n=4 m=1 profile="$_p" mib="$P_mib" rc=1
+        fi
+    done
+    tc_clear
+}
+
+bench_loss()
+{
+    tc_setup || fatal "tc setup failed"
+    for _ppm in $(echo "$P_loss" | tr ',' ' '); do
+        if xfer 4 0 raw "$P_dup" "$P_mib" "loss-$_ppm" "" "$_ppm"; then
+            _dropped=$(awk '$1 == 2 && ($2 == 1 || $2 == 2) { s += $15 } END { print s + 0 }' "$PEERS")
+            bench_note "row=loss-$_ppm: injector dropped $_dropped records on carriers 1,2"
+            emit_xfer_row "loss-$_ppm" drop_ppm="$_ppm" dropped_by_ppm="$_dropped"
+        else
+            bench_row "loss-$_ppm" n=4 m=0 profile=raw mib="$P_mib" drop_ppm="$_ppm" rc=1
+        fi
+    done
+    tc_clear
+}
+
+# --- latency ----------------------------------------------------------------
+# Two public connections per boot is not possible: the module resets the
+# second one (observed, ECONNRESET on its first read). So the clean and lossy
+# phases share one connection: tbt_lat runs phase 1, touches a marker, and
+# waits for a go file; this script arms the injector in between.
+lat_parse()
+{
+    # $1 = raw tbt_lat output, $2 = phase number. Sets LAT_KV.
+    _line=$(printf '%s\n' "$1" | grep "^lat phase=$2 " | tail -n 1)
+    LAT_KV=
+    [ -n "$_line" ] || return 0
+    for _f in $_line; do
+        case $_f in
+        phase=*) ;;
+        complete=* | min_us=* | p50_us=* | p90_us=* | p95_us=* | p99_us=* | \
+            max_us=* | mean_us=* | err=* | failed_at=*)
+            LAT_KV="$LAT_KV lat_$_f"
+            ;;
+        *=*) LAT_KV="$LAT_KV $_f" ;;
+        esac
+    done
+}
+lat_ok()
+{
+    case $LAT_KV in *"lat_complete=1"*) return 0 ;; esac
+    return 1
+}
+bench_latency()
+{
+    NETEM_ARGS=$(echo "$P_netem" | tr '|' ' ')
+    tc_setup || fatal "tc setup failed"
+
+    _out=$(/bin/tbt_lat "$GATEWAY" "$ECHO_HOSTPORT" "$P_iters" "$P_bytes" \
+        "$((CTRL_SPORT_BASE + 4))" 30 2>&1)
+    _rc=$?
+    bench_note "lat direct: rc=$_rc raw=$(printf '%s' "$_out" | tr '\n' '|')"
+    lat_parse "$_out" 1
+    if lat_ok; then _r=0; else _r=1; fi
+    bench_row lat-direct n=0 m=0 profile=direct iters="$P_iters" \
+        bytes="$P_bytes" $LAT_KV rc="$_r"
+
+    flush_and_wait
+    configure 4 0 raw 0 || fatal "latency tunnel rejected"
+    sleep 1
+
+    rm -f /tmp/lat_marker /tmp/lat_go /tmp/lat.out
+    /bin/tbt_lat 127.0.0.1 "$PUB_PORT" "$P_iters" "$P_bytes" 0 8 \
+        "$P_loss_iters" /tmp/lat_marker /tmp/lat_go > /tmp/lat.out 2>&1 &
+    _lp=$!
+    _i=0
+    # Phase 1 is ITERS round trips (about 1.3 ms each here); wait long enough
+    # for 10k iterations, and stop early if the client died.
+    while [ ! -e /tmp/lat_marker ] && kill -0 "$_lp" 2> /dev/null && [ $_i -lt 3000 ]; do
+        sleep 0.02
+        _i=$((_i + 1))
+    done
+    _armed=0
+    if [ -e /tmp/lat_marker ]; then
+        echo 'carrier 1 drop_ppm 10000' > "$PEERS"
+        echo 'carrier 2 drop_ppm 10000' > "$PEERS"
+        _armed=1
+        bench_note "lat tunnel: phase 2 armed at t=$(up_now) retx_before=$(peer_retx_max 2)"
+    else
+        bench_note "lat tunnel: phase 1 ended before the marker"
+    fi
+    : > /tmp/lat_go
+    wait "$_lp"
+    _rc=$?
+    _out=$(cat /tmp/lat.out)
+    bench_note "lat tunnel: rc=$_rc raw=$(printf '%s' "$_out" | tr '\n' '|')"
+    lat_parse "$_out" 1
+    if lat_ok; then _r=0; else _r=1; fi
+    bench_row lat-tunnel-n4 n=4 m=0 profile=raw iters="$P_iters" \
+        bytes="$P_bytes" $LAT_KV rc="$_r"
+    lat_parse "$_out" 2
+    _dropped=$(awk '$1 == 2 && ($2 == 1 || $2 == 2) { s += $15 } END { print s + 0 }' "$PEERS")
+    if [ "$_armed" -eq 1 ] && lat_ok; then _r=0; else _r=1; fi
+    bench_row lat-tunnel-n4-loss1pct n=4 m=0 profile=raw drop_ppm=10000 \
+        iters="$P_loss_iters" bytes="$P_bytes" dropped_by_ppm="$_dropped" $LAT_KV rc="$_r"
+    bench_note "lat loss: t=$(up_now) holes=$(tunnel_stat 2 holes_declared)/$(tunnel_stat 2 holes_repaired)/$(tunnel_stat 2 holes_unrecoverable) stall_us=$(tunnel_stat 2 rx_max_stall_us) retx_ppm_max=$(peer_retx_max 2) depth=$(tunnel_stat 2 reorder_max_depth)"
+    bench_note "lat loss peers: $(grep -v '^#' "$PEERS" | tr '\n' '|')"
+    tc_clear
+}
+
+# --- memory -----------------------------------------------------------------
+slab_top()
+{
+    awk '
+        FNR == NR { if (FNR > 2 && $1 != "#") before[$1] = $3 * $4; next }
+        FNR > 2 && $1 != "#" {
+            d = $3 * $4 - before[$1]
+            if (d > 0) printf "%s:%d\n", $1, d / 1024
+        }' /tmp/slab.before /tmp/slab.after 2> /dev/null |
+        sort -t: -k2 -rn | head -5 | tr '\n' ';'
+}
+bench_memory()
+{
+    tc_setup || fatal "tc setup failed"
+    _before=$(mem_used)
+    _rss0=$(proc_rss)
+    _slab0=$(slab_used)
+    cat /proc/slabinfo > /tmp/slab.before 2> /dev/null
+    memsampler_start
+    xfer 4 1 raw 0 "$P_mib" mem
+    memsampler_stop
+    cat /proc/slabinfo > /tmp/slab.after 2> /dev/null
+    _after=$(mem_used)
+    _slab1=$(slab_used)
+    _peak=$(m_max 2)
+    _rsspeak=$(m_max 3)
+    _slabpeak=$(m_max 4)
+    _top=$(slab_top)
+    emit_xfer_row mem mem_before_kb="$_before" mem_peak_kb="$_peak" \
+        mem_after_kb="$_after" proc_rss_before_kb="$_rss0" proc_rss_peak_kb="$_rsspeak" \
+        slab_before_kb="$_slab0" slab_peak_kb="$_slabpeak" slab_after_kb="$_slab1" \
+        slab_top="$_top" notes=no_private_kmem_cache
+    tc_clear
+}
+
+bench_scale()
+{
+    tc_setup || fatal "tc setup failed"
+    for _n in $(echo "$P_nlist" | tr ',' ' '); do
+        if xfer "$_n" 0 raw "$P_dup" "$P_mib" "n$_n"; then
+            _cf=$(tunnel_stat 2 connect_fail)
+            _af=$(tunnel_stat 2 alloc_fail)
+            _lost=$(tunnel_stat 2 lost)
+            _rep=$(tunnel_stat 2 replaced)
+            : "${_cf:=0}" "${_af:=0}" "${_lost:=0}" "${_rep:=0}"
+            emit_xfer_row "n$_n" connect_fail="$_cf" alloc_fail="$_af" \
+                carrier_lost="$_lost" carrier_replaced="$_rep"
+        else
+            bench_row "n$_n" n="$_n" m=0 profile=raw mib="$P_mib" rc=1
+        fi
+    done
+    tc_clear
+}
+
+# --- boot -------------------------------------------------------------------
+mkdir -p /proc /sys /dev /tmp
+mount -t proc proc /proc || fatal "mount /proc"
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev 2> /dev/null || mount -t ramfs ramfs /dev
+mount -t tmpfs tmpfs /tmp || fatal "mount /tmp"
+
+if [ -r /bench.txt ]; then
+    while IFS= read -r _line; do
+        case $_line in '' | '#'*) continue ;; esac
+        _k=${_line%%=*}
+        _v=${_line#*=}
+        case $_k in
+        scenario | nlist | mib | profile | dup | loss | iters | loss_iters | bytes | \
+            netem | rx_reorder | hole_budget | window | profiles | control | control_mbit)
+            eval "P_$_k=\$_v"
+            ;;
+        *) bench_note "unknown bench key $_k" ;;
+        esac
+    done < /bench.txt
+else
+    fatal "no /bench.txt"
+fi
+[ -n "$P_scenario" ] || fatal "no scenario in /bench.txt"
+NETEM_ARGS=$(echo "$P_netem" | tr '|' ' ')
+
+if [ -r /hostfwd.txt ]; then
+    while IFS= read -r _line; do
+        case $_line in '' | '#'*) continue ;; esac
+        _k=${_line%%=*}
+        _v=${_line#*=}
+        case $_k in
+        car) CAR_HOSTPORT=$_v ;;
+        echo) ECHO_HOSTPORT=$_v ;;
+        sink) SINK_HOSTPORT=$_v ;;
+        esac
+    done < /hostfwd.txt
+fi
+
+/bin/busybox ip link set lo up 2> /dev/null || fatal "cannot bring loopback up"
+for _m in failover net_failover virtio_net sch_htb sch_netem cls_u32 sch_tbf; do
+    [ -f "/$_m.ko" ] && insmod "/$_m.ko" 2> /dev/null
+done
+/bin/busybox ip link show eth0 > /dev/null 2>&1 || fatal "no eth0 (run without --no-net)"
+/bin/busybox ip link set eth0 up
+/bin/busybox ip addr add "$GUEST_IP/24" dev eth0 2> /dev/null
+/bin/busybox ip route add default via "$GATEWAY" 2> /dev/null
+
+# The strict send-then-read phase holds the echoed volume it has not read yet;
+# at the default ~6 MB receive buffer 40 MiB would deadlock and look like a
+# tunnel stall. Same setting probe I uses.
+echo 67108864 > /proc/sys/net/core/rmem_max 2> /dev/null
+echo 67108864 > /proc/sys/net/core/wmem_max 2> /dev/null
+echo "4096 262144 67108864" > /proc/sys/net/ipv4/tcp_rmem 2> /dev/null
+echo "4096 262144 67108864" > /proc/sys/net/ipv4/tcp_wmem 2> /dev/null
+
+insmod /tbtun.ko debug=0 debug_loss=1 || fatal "insmod tbtun.ko"
+[ -e "$CFG" ] || fatal "$CFG missing after load"
+echo "ports $PORTBLOCK_LO-$((PORTBLOCK_LO + PORTBLOCK_MOD - 1))" > "$PORTS" || fatal "ports directive rejected"
+
+# The echo peer (tunnel target and direct latency peer) and the control sink.
+/bin/tbt_echo "$ECHO_PORT" echo &
+echo_pid=$!
+nc -lk -p "$SINK_PORT" > /dev/null 2>&1 &
+sink_pid=$!
+sleep 0.5
+kill -0 "$echo_pid" 2> /dev/null || fatal "tbt_echo did not start"
+kill -0 "$sink_pid" 2> /dev/null || fatal "sink nc did not start"
+
+bench_note "guest $(uname -r) scenario=$P_scenario mib=$P_mib netem='$NETEM_ARGS'"
+bench_note "clock ticks=$(getconf CLK_TCK 2> /dev/null || echo 100) ncpu=$(grep -c '^cpu[0-9]' /proc/stat)"
+bench_note "module $(grep '^tbtun ' /proc/modules | awk '{print $1, $2}') $(head -n 1 /proc/net/tbtun/stats)"
+bench_note "tc=$(command -v tc) $(ls -l /bin/tc 2>&1) version=$(/bin/tc -V 2>&1 | head -n 1)"
+
+case $P_scenario in
+throughput) bench_throughput ;;
+profile) bench_profile ;;
+loss) bench_loss ;;
+latency) bench_latency ;;
+memory) bench_memory ;;
+scale) bench_scale ;;
+*) fatal "unknown scenario $P_scenario" ;;
+esac
+
+printf 'BENCH_DONE %s\n' "$P_scenario"
+# Cleanup is best effort and comes after the marker: a stream stuck in the
+# module must not cost the rows that were already printed.
+echo 'flush' > "$CFG" 2> /dev/null || true
+kill "$echo_pid" "$sink_pid" 2> /dev/null
+sync
+poweroff -f
+exec /bin/busybox poweroff -f

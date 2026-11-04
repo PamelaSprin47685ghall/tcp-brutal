@@ -1,0 +1,6 @@
+stamp,scenario,row,carrier,sport,state,profile,bytes,frames,dropped,retx_ppm,inflight
+20261105T042650,memory,mem,0,41000,up,raw,27351808,4790,0,155114,0
+20261105T042650,memory,mem,1,41001,up,raw,27548949,4796,0,101542,0
+20261105T042650,memory,mem,2,41002,up,raw,27038527,4770,0,171698,0
+20261105T042650,memory,mem,3,41003,up,raw,27014749,4714,0,187738,0
+20261105T042650,memory,mem,4,41004,spare,raw,183671,1509,0,0,0

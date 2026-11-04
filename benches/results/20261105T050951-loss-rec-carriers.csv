@@ -1,0 +1,5 @@
+stamp,scenario,row,carrier,sport,state,profile,bytes,frames,dropped,retx_ppm,inflight
+20261105T050951,loss,loss-0,0,41000,up,raw,27137415,5044,0,197660,0
+20261105T050951,loss,loss-0,1,41001,up,raw,27800671,5145,0,104761,0
+20261105T050951,loss,loss-0,2,41002,up,raw,27376404,5182,0,126592,0
+20261105T050951,loss,loss-0,3,41003,up,raw,27159674,5120,0,156445,0

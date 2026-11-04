@@ -1,0 +1,6 @@
+stamp,scenario,row,carrier,sport,state,profile,bytes,frames,dropped,retx_ppm,inflight
+20261105T045749,profile,profile-http-kal-drip,0,41000,up,http-kal-drip,27952932,5389,0,143440,24576
+20261105T045749,profile,profile-http-kal-drip,1,41001,up,http-kal-drip,27011820,5259,0,202509,0
+20261105T045749,profile,profile-http-kal-drip,2,41002,up,http-kal-drip,28407597,5468,0,112289,0
+20261105T045749,profile,profile-http-kal-drip,3,41003,up,http-kal-drip,27909928,5364,0,134041,0
+20261105T045749,profile,profile-http-kal-drip,4,41004,spare,http-kal-drip,263080,2056,0,0,0
