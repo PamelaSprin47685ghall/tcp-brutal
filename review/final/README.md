@@ -1,8 +1,10 @@
 # Final acceptance evidence
 
-Tree under test: 9f5bfda (w-final-qemu + w-adv2 merged on cfa2e46). The commit
-984198f adds only this evidence directory; it does not change code. Module:
-sha256 0b8f0006a7a10fe33e6e35e927aaf916047e142528bc32729ed04826fdccdb63.
+Tree under test: b57b438 (`w-adv3`, `w-docs3` and `w-dkms-qemu` merged with
+`--no-ff` on c641c5a). No product code changed: the diff against c641c5a
+touches only `adversarial/`, five documents and `review/dkms-qemu/`, and the
+module is byte-identical to the 9f5bfda build. Module: sha256
+0b8f0006a7a10fe33e6e35e927aaf916047e142528bc32729ed04826fdccdb63.
 Evidence locations: `review/final/` (this directory; host, QEMU A-K and
 adversarial summaries), `review/final-qemu/` (QEMU/adversarial run logs and
 consoles) and `review/final-bench/` (throughput CSVs, flush, writer and DKMS
@@ -21,34 +23,39 @@ no bench was started, as required for a stable measurement.
 ## QEMU probes A-K
 
 `tests/qemu/run.sh --probes A,B,C,D,E,F,G,H,I,J,K --timeout 900`:
-11 PASS / 0 FAIL / 0 SKIP in 159 s. Per-probe lines and key evidence are in
+11 PASS / 0 FAIL / 0 SKIP in 165 s, run under
+`flock -x /tmp/tbtun-qemu.lock`. Per-probe lines and key evidence are in
 `qemu-AK-summary.txt`; the raw console is
-`review/final-qemu/qemu-AK-console.log`.
+`review/final-qemu/qemu-AK-console-b57b438.log`.
 
 ## Adversarial suite
 
 `TBT_ADV_PUBLIC_TIMEOUT=3000 adversarial/run.sh --no-build`: 78 passed,
-0 failed, 0 skipped in 238 s. All 15 default groups ran (public, control,
+0 failed, 0 skipped in 230 s. All 15 default groups ran (public, control,
 resource, slab, final, replay, rmmod, flush, catconfig, cfg_mix, param, port,
 near, far, stall) plus the isolated close-flush crash repro. Full result lines
 are in `adversarial-results.txt`; the klog scanner reported no oops/warning.
 The green run prints 78 `ADV_RESULT` PASS lines; `console.klog.*` prints only
 on failure, so there is no 79th line.
 
-Two contracts changed in the final tree:
+Two contracts changed in the final tree. `w-adv3` replaced the writer verdict;
+the churn contract is unchanged from 9f5bfda.
 
 - `pub.churn`: 10,000 connect/send/close cycles, 2 s timeout per cycle, and one
   retry only after a timeout (`retried=`). The verdict still requires
-  `usable=10000 refused=0 other=0`. Two final-criterion runs read 10000/10000
-  (`retried=1` and `retried=0`); the archived run is
+  `usable=10000 refused=0 other=0`. This run read
   `usable=10000 refused=0 other=0 retried=0`.
-- `pub.writer`: either the write completes (`sent==total`) or it stops with a
-  bounded `EAGAIN` refusal (`legal=1`), followed by a flush and `MemAvailable`
-  recovering to within 50 MB of the pre-write value. Both final runs PASS:
-  100 MiB `sent=75044366/104857600 errno=11 legal=1`, `after_flush` 396844 kB
-  against `before` 398972 kB; 1 GiB `sent=74978883/1073741824 errno=11
-  legal=1`, `after_flush` 398404 kB against `before` 398620 kB; `flush=1`
-  0.03 s and `oom=0->0` in both.
+- `pub.writer`: the write must finish (`sent==total`) or still be blocked in
+  `write()` when the 10 s observation ends (`blocked=1`, `child_state=running`).
+  The probe no longer sets `SO_SNDTIMEO`: `EAGAIN` would be the probe's own
+  timeout firing, not module backpressure, and is a failure. The writer runs in
+  a forked child that the parent kills and reaps; the socket is then closed and
+  a synchronous `flush` must bring `MemAvailable` back to within 50 MB of the
+  pre-write value, with no OOM/RST. Both runs PASS with `errno=0 eagain=0
+  blocked=1`: 100 MiB `sent=74448896/104857600`, `after_flush` 397228 kB
+  against `before` 396852 kB; 1 GiB `sent=74448896/1073741824`, `after_flush`
+  396388 kB against `before` 396992 kB; `flush_secs=0.03` and `oom=0->0` in
+  both.
 
 ## Bench (QEMU lab emulation)
 
@@ -76,10 +83,11 @@ full matrix and `review/final-bench/csv/` the CSVs.
 A custom guest ran two 40 MiB strict transfers and then
 `echo flush > /proc/net/tbtun/config`: `FLUSH_RESULT hung=0 start=8.27 end=8.29
 secs=0.02`, config empty afterwards, `FLUSH_VERDICT PASS`
-(`review/final-bench/flush-two-transfer-console.log`). The writer runs stop at
-about 75 MB accepted with `errno=11` when the application never reads; a
-post-write flush returns `MemAvailable` to within 50 MB of the pre-write value
-in 0.03 s, and there is no OOM (`adversarial-results.txt`; the older
+(`review/final-bench/flush-two-transfer-console.log`). The writer runs stall at
+about 74.4 MB accepted, still blocked inside `write()` with `errno=0`, when the
+application never reads; a post-write flush returns `MemAvailable` to within
+50 MB of the pre-write value in 0.03 s, and there is no OOM
+(`adversarial-results.txt`; the older
 `review/final-bench/writer-memory-*.log` ledger used the previous verdict and
 is historical).
 
@@ -88,7 +96,13 @@ is historical).
 `scripts/mkdkmsconf.sh --version` and `make dkms.conf` print `0.0.1`;
 `make dkms-tarball` builds `dkms.tar.gz` (sha256 `4aa0b69a…`). The equivalent
 `/tmp` DKMS add/build/install/ldtarball flow passes and `modinfo` reports
-`version: 0.0.1`. The real-machine install is blocked on this host (sudo needs
-a password, no `dkms`, no matching kernel headers), so no real `modprobe` or
-`rmmod` was run; the module was loaded by the QEMU guests in every probe and
-adversarial run. See `review/final-bench/version-dkms.txt`.
+`version: 0.0.1`. The host cannot run the real flow (uid 1000, no `dkms`, no
+`/lib/modules/7.2.9-1-MANJARO/build`, `sudo` needs a password), so
+`w-dkms-qemu` ran it in a QEMU guest on the clean distribution kernel
+`7.2.9-1-MANJARO` with the real dkms 3.4.4: `scripts/install_dkms.sh`
+staged/built/installed `tbtun/0.0.1`, `modprobe` published `/proc/net/tbtun`,
+a tunnel line round-tripped canonically, `rmmod` unloaded it, `modprobe` again
+reloaded it, `rmmod` unloaded it, and `--uninstall` removed every DKMS entry,
+source tree and module file. 38 steps, 39 checks, 0 failures; console and
+per-step logs in `review/dkms-qemu/`. See also
+`review/final-bench/version-dkms.txt`.

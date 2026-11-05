@@ -1,12 +1,12 @@
 ADV_RESULT init.echo_sane PASS sha=0b8f0006a7a10fe3 ECHO_OK bytes=2097152
 ADV_RESULT pub.churn PASS sha=0b8f0006a7a10fe3 10000 connect/send/close cycles: usable=10000 refused=0 other=0 retried=0 (a closed stream must free the session for the next connection)
 ADV_RESULT pub.two PASS sha=0b8f0006a7a10fe3 A usable=1, B usable=1, A after B close=1
-ADV_RESULT pub.concurrent PASS sha=0b8f0006a7a10fe3 n=100 connected=100 echoed=100 short=0 corrupt=0 timeout=0 isolation=1 recover=1 first_fail=none streams_active=0 streams_total=101; 120 ms
+ADV_RESULT pub.concurrent PASS sha=0b8f0006a7a10fe3 n=100 connected=100 echoed=100 short=0 corrupt=0 timeout=0 isolation=1 recover=1 first_fail=none streams_active=0 streams_total=101; 114 ms
 ADV_RESULT pub.halfclose PASS sha=0b8f0006a7a10fe3 app half-close: echo 10 bytes, EOF=1
 ADV_RESULT pub.rst PASS sha=0b8f0006a7a10fe3 RST after 4194304 bytes: no warning, module still loaded
 ADV_RESULT init.src_key PASS sha=0b8f0006a7a10fe3 src= refused; nonce= accepted and rendered; short nonce= refused
-ADV_RESULT pub.writer PASS sha=0b8f0006a7a10fe3 attempted 100 MiB: sent=75044366/104857600 errno=11 legal=1 rst=0, MemAvailable before=398972 during_min=219472 after_write=258932 after_flush=396844 kB, flush=1 0.03s, oom=0->0
-ADV_RESULT pub.writer PASS sha=0b8f0006a7a10fe3 attempted 1024 MiB: sent=74978883/1073741824 errno=11 legal=1 rst=0, MemAvailable before=398620 during_min=217648 after_write=255580 after_flush=398404 kB, flush=1 0.03s, oom=0->0
+ADV_RESULT pub.writer PASS sha=0b8f0006a7a10fe3 attempted 100 MiB: sent=74448896/104857600 errno=0 eagain=0 blocked=1 child_state=running mem_before=396852 mem_during_min=223296 mem_after_flush=397228 flush_secs=0.03 oom=0->0
+ADV_RESULT pub.writer PASS sha=0b8f0006a7a10fe3 attempted 1024 MiB: sent=74448896/1073741824 errno=0 eagain=0 blocked=1 child_state=running mem_before=396992 mem_during_min=218072 mem_after_flush=396388 flush_secs=0.03 oom=0->0
 ADV_RESULT pub.srcfilter PASS sha=0b8f0006a7a10fe3 app from 127.0.0.2 usable=1 (no src= allow list; the tunnel identity is the nonce), far config renders nonce=1 peer=1
 ADV_RESULT ctl.nonroot PASS sha=0b8f0006a7a10fe3 uid 1000 write to /proc/net/tbtun/config: open failed (the documented mode is 0600 root)
 ADV_RESULT init.nonroot_unchanged PASS sha=0b8f0006a7a10fe3 config unchanged after the uid-1000 attempt
@@ -19,7 +19,7 @@ ADV_RESULT init.cfg_unchanged PASS sha=0b8f0006a7a10fe3 over-long lines changed 
 ADV_RESULT init.cfg_roundtrip PASS sha=0b8f0006a7a10fe3 the canonical config replays line by line
 ADV_RESULT init.echo_after_roundtrip PASS sha=0b8f0006a7a10fe3 ECHO_OK bytes=1048576
 ADV_RESULT init.max_tunnels PASS sha=0b8f0006a7a10fe3 64 tunnels accepted before the limit
-ADV_RESULT init.scale PASS sha=0b8f0006a7a10fe3 1024 carriers up of 1024 rows; MemAvailable 399784 -> 326196 kB
+ADV_RESULT init.scale PASS sha=0b8f0006a7a10fe3 1024 carriers up of 1024 rows; MemAvailable 400700 -> 325636 kB
 ADV_RESULT init.slab_leak PASS sha=0b8f0006a7a10fe3 32k slabs grew by 0 objects over 100 connections
 ADV_RESULT init.slab_after_flush PASS sha=0b8f0006a7a10fe3 after flush: 32k objects 0 -> 0 (the session teardown is the only free point)
 ADV_RESULT init.final_echo PASS sha=0b8f0006a7a10fe3 ECHO_OK bytes=4194304
@@ -49,7 +49,7 @@ ADV_RESULT near.fbk_forged PASS sha=0b8f0006a7a10fe3 forged FBK gen+1 and path 1
 ADV_RESULT near.data_path PASS sha=0b8f0006a7a10fe3 DATA delivered to the app after forged FBK (child rc=0)
 ADV_RESULT near.second_conn PASS sha=0b8f0006a7a10fe3 second public connection after the first closed: rc=0 echoed=1 (0 = accepted and usable, 1 = refused)
 ADV_RESULT near.fin_eagain PASS sha=0b8f0006a7a10fe3 FIN under carrier backpressure: fin_seen=1 eof=1 child_rc=0 pump_hiwat 0 -> 4956 (must grow) holes_unrecoverable 0 -> 0; tx_ack=524288 txq=0 rx_records=57 hole_checks=0 time_fail=0 parsed=236 last_type=20 wire=536418 car_wmem=0 rb_set=0 rb_now=524288 brk=0 rfail=0
-ADV_RESULT near.rst_eagain PASS sha=0b8f0006a7a10fe3 RST under carrier backpressure: rst_seen=1 eof=0 child_rc=0 pump_hiwat 0 -> 118 (must grow) holes_unrecoverable 0 -> 0; tx_ack=49125 txq=0 rx_records=3 hole_checks=0 time_fail=0 parsed=7 last_type=21 wire=98780 car_wmem=27552 rb_set=0 rb_now=524288 brk=0 rfail=0
+ADV_RESULT near.rst_eagain PASS sha=0b8f0006a7a10fe3 RST under carrier backpressure: rst_seen=1 eof=0 child_rc=0 pump_hiwat 0 -> 101 (must grow) holes_unrecoverable 0 -> 0; tx_ack=0 txq=32768 rx_records=3 hole_checks=0 time_fail=0 parsed=7 last_type=21 wire=82332 car_wmem=9184 rb_set=0 rb_now=524288 brk=0 rfail=0
 ADV_RESULT far.garbage PASS sha=0b8f0006a7a10fe3 9000 bytes of non-HTTP garbage; carrier must close, not crash
 ADV_RESULT far.hello_garbage PASS sha=0b8f0006a7a10fe3 HELLO joined (nonce adopted), then 64 garbage bytes; carrier must close
 ADV_RESULT far.wrong_nonce PASS sha=0b8f0006a7a10fe3 HELLO with the wrong 128-bit nonce: carrier closed; join_bad+nonce_reject 0 -> 0

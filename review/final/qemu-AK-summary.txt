@@ -2,9 +2,13 @@
 
 command: tests/qemu/run.sh --probes A,B,C,D,E,F,G,H,I,J,K --timeout 900
 date: 2026-11-06
-git: 9f5bfda 9f5bfdacd552c265a2bf2aabfcbe0f952967b4a1
+git: b57b438 b57b438b5eca8b7509a0dc7cb38655dfdab533d1 Merge branch 'w-dkms-qemu'
 module: 0b8f0006a7a10fe33e6e35e927aaf916047e142528bc32729ed04826fdccdb63
+host: quiet before the run (pgrep -af 'qemu-system|bench' empty), QEMU under
+      flock -x /tmp/tbtun-qemu.lock
+elapsed: 165 s (run.sh wall 2m44.6s)
 result: 11 passed, 0 failed, 0 skipped
+console: review/final-qemu/qemu-AK-console-b57b438.log
 
 ## probes
 TBT_PROBE_RESULT A PASS
@@ -18,10 +22,11 @@ TBT_PROBE_RESULT H PASS
 TBT_PROBE_RESULT I PASS
 TBT_PROBE_RESULT J PASS
 TBT_PROBE_RESULT K PASS
+TBT_TEST_PASS
 
 ## key evidence
    spare_activated=1 replaced=0 lost=2
-   dropped=48 holes_declared=4 holes_repaired=4 holes_unrecoverable=0 rx_max_stall_us=77567 limit=500000
+   dropped=63 holes_declared=3 holes_repaired=3 holes_unrecoverable=0 rx_max_stall_us=102612 limit=500000
    phase 1: recovered after 2 s of total loss on one path, holes_unrecoverable=0
    phase 2: reset in 0.58 s, holes_unrecoverable=1
    holes_repaired=0 holes_unrecoverable=0 carrier_lost=0
