@@ -78,8 +78,9 @@ accel=tcg
 phase_list() {
     case $1 in
     stable) echo "public control resource slab final replay rmmod flush param" ;;
-    near) echo "near" ;;
-    far) echo "far" ;;
+    public) echo "public srcfilter" ;;
+    near) echo "near nearx" ;;
+    far) echo "far farx" ;;
     *) echo "$1" ;;
     esac
 }

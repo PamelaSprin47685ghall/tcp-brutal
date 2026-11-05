@@ -366,6 +366,122 @@ static int send_frame(int fd, const struct fr *f, const void *body, size_t blen)
     return send_chunk(fd, rec, 32 + blen);
 }
 
+/* The raw profile has no HTTP container: one record follows another.  The
+ * near side's raw carrier keeps a partial record in the module and returns
+ * -EAGAIN for the *next* frame, which is the narrow path review 22 is about;
+ * the http container reports a short write as -EIO and retires the carrier,
+ * so the backpressure test must use raw. */
+static int raw_send_frame(int fd, const struct fr *f, const void *body, size_t blen)
+{
+    unsigned char rec[32 + 8192];
+    struct fr h = *f;
+
+    h.blen = (uint16_t)blen;
+    fr_encode(rec, &h);
+    if (blen)
+        memcpy(rec + 32, body, blen);
+    return send_all(fd, rec, 32 + blen);
+}
+
+static int raw_send_pad(int fd, int idx, uint32_t sid, uint8_t sidhi, uint64_t uack)
+{
+    struct fr p = { .type = TBT_F_PAD,
+                    .path = (uint8_t)idx,
+                    .sid = sid,
+                    .sidhi = sidhi,
+                    .uack = uack,
+                    .conv = TBT_CONV };
+
+    return raw_send_frame(fd, &p, NULL, 0);
+}
+
+static int raw_send_fin(int fd, int idx, uint32_t sid, uint8_t sidhi, uint64_t seq)
+{
+    struct fr f = { .type = TBT_F_FIN,
+                    .path = (uint8_t)idx,
+                    .sid = sid,
+                    .sidhi = sidhi,
+                    .seq = seq,
+                    .conv = TBT_CONV };
+
+    return raw_send_frame(fd, &f, NULL, 0);
+}
+
+
+/* One DATA record.  The far side orders it by `seq` in the stream, not by the
+ * order the records arrive on the wire; the overlap attack depends on that. */
+static int send_data(int fd, int idx, uint32_t sid, uint8_t sidhi, uint64_t seq,
+                     const void *buf, size_t len)
+{
+    struct fr d = { .type = TBT_F_DATA,
+                    .path = (uint8_t)idx,
+                    .sid = sid,
+                    .sidhi = sidhi,
+                    .seq = seq,
+                    .conv = TBT_CONV };
+
+    return send_frame(fd, &d, buf, len);
+}
+
+/* A PAD with a stream id and a cumulative ack.  The header uack is applied to
+ * the named stream before the frame type is dispatched (tbt_rx_frame()), so a
+ * PAD is the cheapest way to advance the peer's tx_ack without carrying data
+ * in the reverse direction. */
+static int send_pad(int fd, int idx, uint32_t sid, uint8_t sidhi, uint64_t uack)
+{
+    struct fr p = { .type = TBT_F_PAD,
+                    .path = (uint8_t)idx,
+                    .sid = sid,
+                    .sidhi = sidhi,
+                    .uack = uack,
+                    .conv = TBT_CONV };
+
+    return send_frame(fd, &p, NULL, 0);
+}
+
+
+/* Byte at stream offset i is (i * 7 + 3) & 0xff, so a delivered run can be
+ * checked against its own offsets rather than against a copy of the payload. */
+static void pattern_fill(unsigned char *p, size_t n, uint64_t off)
+{
+    size_t i;
+
+    for (i = 0; i < n; i++)
+        p[i] = (unsigned char)((off + i) * 7u + 3u);
+}
+
+/* Assemble a byte stream from DATA frames that may coalesce, split, or be
+ * retransmitted.  `have` is the contiguous prefix already assembled.
+ * Returns 1 when the frame extended the stream, 0 when it repeated delivered
+ * bytes that matched, -1 when it contradicted them, skipped a gap, or ran
+ * past the buffer.  A retransmission is normal on a lossy or slow path; only
+ * a contradiction is corruption. */
+static int acc_feed(unsigned char *buf, size_t cap, size_t *have,
+                    const unsigned char *body, size_t blen, uint64_t seq)
+{
+    size_t overlap;
+
+    if (seq > *have || seq + blen > cap)
+        return -1;
+    if (seq + blen <= *have)
+        return memcmp(buf + seq, body, blen) ? -1 : 0;
+    overlap = (seq < *have) ? *have - (size_t)seq : 0;
+    if (overlap && memcmp(buf + seq, body, overlap))
+        return -1;
+    memcpy(buf + seq, body, blen);
+    *have = (size_t)seq + blen;
+    return 1;
+}
+
+static int set_nonblock(int fd)
+{
+    int fl = fcntl(fd, F_GETFL, 0);
+
+    if (fl < 0)
+        return -1;
+    return fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+}
+
 /* ------------------------------------------------------------------ */
 /* The exact request header block tbtun emits (DESIGN.md 3.2).         */
 
@@ -570,6 +686,28 @@ static int rb_frame(struct rb *r, struct fr *f, unsigned char *body, size_t cap,
     }
 }
 
+static int raw_read_frame(struct rb *r, struct fr *f, unsigned char *body,
+                          size_t cap, int ms)
+{
+    while (r->have < 32)
+    {
+        if (rb_fill(r, ms))
+            return -1;
+    }
+    fr_decode(r->b, f);
+    if (f->blen > cap)
+        return -1;
+    while (r->have < (size_t)32 + f->blen)
+    {
+        if (rb_fill(r, ms))
+            return -1;
+    }
+    if (f->blen)
+        memcpy(body, r->b + 32, f->blen);
+    rb_consume(r, (size_t)32 + f->blen);
+    return 0;
+}
+
 static void hello_body(unsigned char *b, int role, const unsigned char *nonce, unsigned char pg)
 {
     b[0] = 1; /* version major */
@@ -711,6 +849,43 @@ static unsigned long long peer_uack(int tunnel, int carrier)
     }
     fclose(p);
     return v;
+}
+
+/* Does the canonical config contain `needle` on the line for `tunnel`?  This
+ * is the operator-visible half of the nonce/anchor contract: a key that is
+ * accepted but not rendered cannot survive a save/restore. */
+static int cfg_line_has(int tunnel, const char *needle)
+{
+    FILE *p = fopen("/proc/net/tbtun/config", "r");
+    char line[2048];
+    char want[32];
+    int found = 0;
+
+    if (!p)
+        return 0;
+    snprintf(want, sizeof(want), "tunnel %d ", tunnel);
+    while (fgets(line, sizeof(line), p))
+    {
+        if (strstr(line, want) && strstr(line, needle))
+        {
+            found = 1;
+            break;
+        }
+    }
+    fclose(p);
+    return found;
+}
+
+/* A labelled block from a /proc table on the console.  The host ignores
+ * non-ADV lines; the block is evidence for where a frame went, which no
+ * single result line can carry. */
+static void dump_table(const char *tag, const char *cmd)
+{
+    printf("FAR_TABLE_%s_BEGIN\n", tag);
+    fflush(stdout);
+    system(cmd);
+    printf("FAR_TABLE_%s_END\n", tag);
+    fflush(stdout);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1060,19 +1235,88 @@ static int far_suite(int port, int tunnel)
     klog_check("far.headers_big");
     msleep(300);
 
-    /* 15. OPEN with a different stream id while the anchor owns the session. */
-    fd = far_join(port, nonce, 1, 1, NULL, NULL);
-    if (fd >= 0)
+    /* 15. Multiconn: an OPEN for a second sid on a second carrier is legal.
+     *     It must be adopted as its own stream, its DATA must come back under
+     *     that sid, and stream 1 must not see its bytes. */
     {
-        struct fr o = { .type = TBT_F_OPEN, .path = 1, .sid = sid ^ 0x55, .conv = TBT_CONV };
+        uint32_t sid2 = sid ^ 0x55;
+        static struct rb r2;
+        int fd2 = far_join_rb(port, nonce, 1, 1, NULL, NULL, &r2);
 
-        send_frame(fd, &o, NULL, 0);
-        result("far.open_other_sid", expect_close(fd, 3000),
-               "OPEN for a second sid must be PROTO, not a second stream");
-        close(fd);
+        if (fd2 < 0)
+        {
+            result("far.open_other_sid", 0, "the second carrier did not join");
+        }
+        else
+        {
+            struct fr o = { .type = TBT_F_OPEN, .path = 1, .sid = sid2,
+                            .conv = TBT_CONV };
+            unsigned char s2body[8192];
+            int echoed = 0, crossed = 0, closed = 0;
+            long end2;
+
+            send_frame(fd2, &o, NULL, 0);
+            msleep(300);
+            send_data(fd2, 1, sid2, 0, 0, "two!", 4);
+            end2 = now_ms() + 4000;
+            while (now_ms() < end2 && !echoed)
+            {
+                struct pollfd p[2];
+                int pr, k;
+
+                p[0].fd = anchor;
+                p[0].events = POLLIN;
+                p[0].revents = 0;
+                p[1].fd = fd2;
+                p[1].events = POLLIN;
+                p[1].revents = 0;
+                pr = poll(p, 2, 200);
+                if (pr <= 0)
+                {
+                    /* A closed carrier is the old contract; the second
+                     * stream must not cost the carrier. */
+                    if (recv(fd2, s2body, 1, MSG_DONTWAIT | MSG_PEEK) == 0)
+                    {
+                        closed = 1;
+                        break;
+                    }
+                    continue;
+                }
+                for (k = 0; k < 2; k++)
+                {
+                    struct rb *rr = k ? &r2 : &ar;
+                    int rc;
+
+                    if (!(p[k].revents & POLLIN))
+                        continue;
+                    rc = rb_frame(rr, &f, s2body, sizeof(s2body), 200);
+                    if (rc)
+                        continue;
+                    if (f.type == TBT_F_DATA && f.blen)
+                    {
+                        if (f.sid == sid2 && f.seq == 0 && f.blen == 4 &&
+                            !memcmp(s2body, "two!", 4))
+                            echoed = 1;
+                        else if (f.sid == sid)
+                            crossed = 1; /* stream 1 saw stream 2's payload */
+                    }
+                }
+            }
+            /* Retire the second stream; stream 1 must survive. */
+            {
+                struct fr rst = { .type = TBT_F_RST, .path = 1, .sid = sid2,
+                                  .conv = TBT_CONV };
+
+                send_frame(fd2, &rst, NULL, 0);
+            }
+            result("far.open_other_sid", echoed && !crossed && !closed,
+                   "second OPEN (sid %08x) on carrier 1: adopted and echoed=%d, "
+                   "stream 1 crossed=%d, carrier closed=%d (multiconn accepts "
+                   "a second stream; it must not be a PROTO close)",
+                   sid2, echoed, crossed, closed);
+            close(fd2);
+        }
     }
-    else
-        result("far.open_other_sid", 0, "carrier join failed");
     klog_check("far.open_other_sid");
     msleep(400);
 
@@ -1132,35 +1376,62 @@ static int far_suite(int port, int tunnel)
     if (anchor >= 0)
     {
         struct fr d = { .type = TBT_F_DATA, .path = 0, .sid = sid, .conv = TBT_CONV };
-        int ok = 1, got_ping = 0, got_pong = 0, extra = 0;
+        unsigned char stream[16];
+        size_t have = 0;
+        int ok = 1, corrupt = 0;
+        long end18, idle = 0;
 
+        memset(stream, 0, sizeof(stream));
+        dump_table("PEERS_BEFORE_DATA", "cat /proc/net/tbtun/peers");
         d.seq = 0;
         send_frame(anchor, &d, "ping", 4);
         d.seq = 4;
         send_frame(anchor, &d, "pong", 4);
         d.seq = 0;
         send_frame(anchor, &d, "XXXX", 4); /* duplicate seq: must be dropped */
-        for (i = 0; i < 20; i++)
+        /* Five seconds, not one: the far may have to announce the stream on
+         * the carrier again after the preceding carrier churn, and a single
+         * 1 s rb_frame() timeout would blame the wrong layer. */
+        end18 = now_ms() + 5000;
+        while (now_ms() < end18)
         {
-            if (rb_frame(&ar, &f, body, sizeof(body), 1000))
-                break;
-            if (f.type == TBT_F_DATA && f.sid == sid)
+            struct pollfd p = { .fd = anchor, .events = POLLIN };
+            int pr = poll(&p, 1, 200);
+
+            if (pr <= 0)
             {
-                if (f.seq == 0 && f.blen == 4 && !memcmp(body, "ping", 4))
-                    got_ping = 1;
-                else if (f.seq == 4 && f.blen == 4 && !memcmp(body, "pong", 4))
-                    got_pong = 1;
-                else
-                    extra++;
+                if (have >= 8 && ++idle >= 3)
+                    break;
+                continue;
+            }
+            if (p.revents & (POLLERR | POLLHUP | POLLNVAL))
+                break;
+            if (rb_frame(&ar, &f, body, sizeof(body), 200))
+                continue;
+            idle = 0;
+            if (f.type == TBT_F_DATA && f.sid == sid && f.blen)
+            {
+                /* The far may coalesce the two 4-byte writes into one frame
+                 * and retransmit it until the echo is acked; both are legal.
+                 * The delivered byte stream is what must be exact. */
+                if (acc_feed(stream, sizeof(stream), &have, body, f.blen,
+                             f.seq) < 0)
+                    corrupt = 1;
             }
         }
-        if (!got_ping || !got_pong || extra)
+        dump_table("PEERS_AFTER_DATA", "cat /proc/net/tbtun/peers");
+        if (corrupt || have != 8 || memcmp(stream, "pingpong", 8))
             ok = 0;
         result("far.data_path", ok,
-               "anchor echo: ping=%d pong=%d unexpected=%d (duplicate seq must not deliver); "
-               "far stats rx_records=%llu capture_runs=%llu actor_calls=%llu submit_bytes=%llu "
-               "tx_ack=%llu",
-               got_ping, got_pong, extra, stat_key(tunnel, "rx_records"),
+               "anchor echo: %zu bytes '%c%c%c%c%c%c%c%c' corrupt=%d "
+               "(ping+pong, coalescing/retransmit allowed; duplicate seq must "
+               "not add XXXX); far stats capture_runs=%llu actor_calls=%llu "
+               "submit_bytes=%llu tx_ack=%llu",
+               have, have > 0 ? stream[0] : '.', have > 1 ? stream[1] : '.',
+               have > 2 ? stream[2] : '.', have > 3 ? stream[3] : '.',
+               have > 4 ? stream[4] : '.', have > 5 ? stream[5] : '.',
+               have > 6 ? stream[6] : '.', have > 7 ? stream[7] : '.',
+               corrupt,
                stat_key(tunnel, "capture_runs"), stat_key(tunnel, "actor_calls"),
                stat_key(tunnel, "submit_bytes"), stat_key(tunnel, "tx_ack"));
         klog_check("far.data_path");
@@ -1169,6 +1440,391 @@ static int far_suite(int port, int tunnel)
     else
         result("far.data_path", 0, "no anchor");
 
+    return failures;
+}
+
+/* ------------------------------------------------------------------ */
+/* Attack 1b: the far-side contract (nonce= and peer=) and carrier     */
+/* input after the first connection.                                   */
+
+/* `nonce=` pins the session nonce: the far must not adopt it, a wrong nonce
+ * is refused even on the first HELLO, and only the first authenticated source
+ * may join carriers.  The last property is what makes a leaked nonce
+ * unreplayable from another address. */
+static int mode_noncepinned(int port, int tunnel)
+{
+    static const unsigned char pinned[16] = { 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+                                              0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb,
+                                              0xcc, 0xdd, 0xee, 0xff };
+    unsigned char wrong[16];
+    unsigned char body[256];
+    struct fr f;
+    static struct rb r;
+    int fd, joined = 0, wrong_refused = 0, stranger_refused = 0;
+    long jsr0, jsr1;
+    unsigned long long jb0, jb1;
+
+    memcpy(wrong, pinned, sizeof(wrong));
+    wrong[0] ^= 0x80;
+    klog_start();
+    jsr0 = stat_key_opt(tunnel, "join_src_reject", -1);
+    jb0 = stat_key(tunnel, "join_bad");
+
+    /* 1. The configured nonce from the first source: the far must answer. */
+    fd = far_conn(port);
+    if (fd < 0)
+    {
+        result("far.nonce_pinned", 0, "cannot connect to the carrier port");
+        return failures;
+    }
+    memset(&r, 0, sizeof(r));
+    r.fd = fd;
+    send_hello(fd, pinned, 0, 1, TBT_ROLE_NEAR);
+    joined = read_hello(&r, &f, body, sizeof(body), NULL, NULL) == 0;
+    close(fd);
+    msleep(300);
+
+    /* 2. A wrong nonce from the same source, free index: refused. */
+    fd = far_conn(port);
+    if (fd >= 0)
+    {
+        memset(&r, 0, sizeof(r));
+        r.fd = fd;
+        send_hello(fd, wrong, 1, 1, TBT_ROLE_NEAR);
+        wrong_refused = expect_close(fd, 3000);
+        close(fd);
+    }
+    msleep(300);
+
+    /* 3. The correct pinned nonce from a stranger address: refused.  A
+     *    replay that joins here would hijack a carrier slot without knowing
+     *    anything but the (cleartext) nonce. */
+    fd = connect_to("127.0.0.1", port, "127.0.0.2");
+    if (fd >= 0)
+    {
+        int accepted;
+
+        memset(&r, 0, sizeof(r));
+        r.fd = fd;
+        send_request(fd, 0, 0);
+        send_hello(fd, pinned, 1, 1, TBT_ROLE_NEAR);
+        accepted = read_hello(&r, &f, body, sizeof(body), NULL, NULL) == 0;
+        stranger_refused = !accepted;
+        close(fd);
+    }
+    msleep(300);
+    jsr1 = stat_key_opt(tunnel, "join_src_reject", -1);
+    jb1 = stat_key(tunnel, "join_bad");
+    result("far.nonce_pinned", joined && wrong_refused && stranger_refused,
+           "nonce= pinned: first source joined=%d, wrong nonce refused=%d, "
+           "stranger 127.0.0.2 with the correct nonce refused=%d "
+           "(join_src_reject %ld -> %ld, join_bad %llu -> %llu)",
+           joined, wrong_refused, stranger_refused, jsr0, jsr1, jb0, jb1);
+    klog_check("far.nonce_pinned");
+    return failures;
+}
+
+/* `peer=` on a far tunnel anchors the only near source allowed to join.  The
+ * anchored source may join any index; a different source must be refused even
+ * with the right nonce, and the key must survive the canonical config. */
+static int mode_srcanchor(int port, int tunnel)
+{
+    unsigned char nonce[16];
+    unsigned char body[256];
+    struct fr f;
+    static struct rb r;
+    int fd, i, first = 0, anchored = 0, stranger_refused = 0, rendered;
+    long jsr0, jsr1;
+
+    for (i = 0; i < 16; i++)
+        nonce[i] = (unsigned char)(0x30 + i);
+    klog_start();
+    jsr0 = stat_key_opt(tunnel, "join_src_reject", -1);
+
+    /* 1. The anchored source opens the session; it adopts the nonce (no
+     *    nonce= on this tunnel) and becomes the anchor. */
+    fd = far_conn(port);
+    if (fd < 0)
+    {
+        result("far.src_anchor", 0, "cannot connect to the carrier port");
+        return failures;
+    }
+    memset(&r, 0, sizeof(r));
+    r.fd = fd;
+    send_hello(fd, nonce, 0, 1, TBT_ROLE_NEAR);
+    first = read_hello(&r, &f, body, sizeof(body), NULL, NULL) == 0;
+    close(fd);
+    msleep(300);
+
+    /* 2. The same source on a second index: normal, must join. */
+    fd = far_conn(port);
+    if (fd >= 0)
+    {
+        memset(&r, 0, sizeof(r));
+        r.fd = fd;
+        send_hello(fd, nonce, 1, 1, TBT_ROLE_NEAR);
+        anchored = read_hello(&r, &f, body, sizeof(body), NULL, NULL) == 0;
+        close(fd);
+    }
+    msleep(300);
+
+    /* 3. A different source with the same nonce, free index: refused. */
+    fd = connect_to("127.0.0.1", port, "127.0.0.2");
+    if (fd >= 0)
+    {
+        int accepted;
+
+        memset(&r, 0, sizeof(r));
+        r.fd = fd;
+        send_request(fd, 0, 0);
+        send_hello(fd, nonce, 2, 1, TBT_ROLE_NEAR);
+        accepted = read_hello(&r, &f, body, sizeof(body), NULL, NULL) == 0;
+        stranger_refused = !accepted;
+        close(fd);
+    }
+    msleep(300);
+    jsr1 = stat_key_opt(tunnel, "join_src_reject", -1);
+    rendered = cfg_line_has(tunnel, "peer=127.0.0.1:1");
+    result("far.src_anchor", first && anchored && stranger_refused && rendered,
+           "peer= anchor: anchored source joined=%d and joined index 1=%d, "
+           "stranger 127.0.0.2 refused=%d, config renders peer=%d "
+           "(join_src_reject %ld -> %ld)",
+           first, anchored, stranger_refused, rendered, jsr0, jsr1);
+    klog_check("far.src_anchor");
+    return failures;
+}
+
+/* review 20: a tree node that a later contiguous frame has already delivered
+ * past must leave the tree, and a frame that straddles rx_next must keep only
+ * its tail.  Three rounds of [seq+4096 len 8192][seq+12288 len 4096]
+ * [seq len 8192] cover 48 KiB.  Without the three-branch pull the first round
+ * delivers 8 KiB and leaves 12 KiB in the tree forever; the hole budget then
+ * kills the stream (or the reorder budget does).  With the fix every round
+ * delivers 16 KiB, the tree returns to zero, and no budget fires. */
+static int mode_overlap(int port, int tunnel)
+{
+    unsigned char nonce[16];
+    unsigned char body[8192];
+    unsigned char want[3 * 16384];
+    unsigned char echo[3 * 16384];
+    struct fr f;
+    static struct rb r;
+    int fd, i, round, bad = 0;
+    uint32_t sid = 0x51d0b00bu;
+    size_t have = 0;
+    unsigned long long ooo0, of0, ro0, hu0, ooo1, of1, ro1, hu1;
+    long end;
+
+    for (i = 0; i < 16; i++)
+        nonce[i] = (unsigned char)(0x60 + i);
+    pattern_fill(want, sizeof(want), 0);
+    klog_start();
+    ooo0 = stat_key(tunnel, "ooo_bytes");
+    of0 = stat_key(tunnel, "ooo_frames");
+    ro0 = stat_key(tunnel, "reorder_overflow");
+    hu0 = stat_key(tunnel, "holes_unrecoverable");
+
+    fd = far_join_rb(port, nonce, 0, 1, NULL, NULL, &r);
+    if (fd < 0)
+    {
+        result("far.overlap", 0, "carrier join failed");
+        return failures;
+    }
+    {
+        struct fr o = { .type = TBT_F_OPEN, .path = 0, .sid = sid, .conv = TBT_CONV };
+
+        send_frame(fd, &o, NULL, 0);
+    }
+    msleep(300);
+
+    for (round = 0; round < 3; round++)
+    {
+        uint64_t base = (uint64_t)round * 16384;
+        unsigned char buf[8192];
+
+        /* The tail first, then the head: the head's direct delivery advances
+         * rx_next past the tail's start, which is the straddle case. */
+        pattern_fill(buf, sizeof(buf), base + 4096);
+        send_data(fd, 0, sid, 0, base + 4096, buf, sizeof(buf));
+        pattern_fill(buf, 4096, base + 12288);
+        send_data(fd, 0, sid, 0, base + 12288, buf, 4096);
+        pattern_fill(buf, sizeof(buf), base);
+        send_data(fd, 0, sid, 0, base, buf, sizeof(buf));
+    }
+
+    end = now_ms() + 6000;
+    while (have < sizeof(want) && now_ms() < end)
+    {
+        struct pollfd p = { .fd = fd, .events = POLLIN };
+        int pr = poll(&p, 1, 300);
+
+        if (pr == 0)
+            continue;
+        if (pr < 0)
+            break;
+        if (p.revents & (POLLERR | POLLHUP | POLLNVAL))
+            break;
+        if (rb_frame(&r, &f, body, sizeof(body), 200))
+            break;
+        if (f.type == TBT_F_DATA && f.sid == sid && f.blen)
+        {
+            if (acc_feed(echo, sizeof(echo), &have, body, f.blen, f.seq) < 0)
+            {
+                bad = 1;
+                break;
+            }
+            /* The far's tx window is half this tunnel's reorder budget
+             * (16 KiB); ack so the 48 KiB echo can leave. */
+            send_pad(fd, 0, sid, 0, have);
+        }
+    }
+    if (have == sizeof(want) && memcmp(echo, want, sizeof(want)))
+        bad = 1;
+    ooo1 = stat_key(tunnel, "ooo_bytes");
+    of1 = stat_key(tunnel, "ooo_frames");
+    ro1 = stat_key(tunnel, "reorder_overflow");
+    hu1 = stat_key(tunnel, "holes_unrecoverable");
+    result("far.overlap",
+           have == sizeof(want) && !bad && ooo1 == 0 && of1 == 0 && ro1 == ro0 &&
+               hu1 == hu0 && klog_check("far.overlap") == 0,
+           "3 rounds of [seq+4096 len 8192][seq+12288 len 4096][seq len 8192]: "
+           "echoed %zu/%zu bytes corrupt=%d; ooo_bytes %llu -> %llu, ooo_frames "
+           "%llu -> %llu, reorder_overflow %llu -> %llu, holes_unrecoverable "
+           "%llu -> %llu (a stale node leaves ooo_bytes at 8192+ and the hole "
+           "budget kills the stream)",
+           have, sizeof(want), bad, ooo0, ooo1, of0, of1, ro0, ro1, hu0, hu1);
+    close(fd);
+    return failures;
+}
+
+/* F6: the far must keep accepting and reading carriers after the first one is
+ * established.  The first carrier opens the stream; the second, a fresh TCP
+ * connection on a free index, carries a PAD and the next DATA record.  The
+ * echo proves the far's receive work ran on the second carrier; a missing
+ * HELLO answer proves it never parsed it at all. */
+static int mode_secondcarrier(int port, int tunnel)
+{
+    unsigned char nonce[16];
+    unsigned char body[8192];
+    unsigned char echo[16];
+    struct fr f;
+    static struct rb r0, r1;
+    int fd0, fd1 = -1, i, hello1 = 0, pad_ok = 0, bad = 0;
+    uint32_t sid = 0x2c0a7710u;
+    uint8_t sidhi = 0;
+    size_t got = 0; /* contiguous bytes assembled in echo[] */
+    long end;
+    static const char want[] = "alphabeta!";
+    const size_t want_len = sizeof(want) - 1; /* no NUL on the wire */
+
+    for (i = 0; i < 16; i++)
+        nonce[i] = (unsigned char)(0x70 + i);
+    klog_start();
+    fd0 = far_join_rb(port, nonce, 0, 1, NULL, NULL, &r0);
+    if (fd0 < 0)
+    {
+        result("far.second_carrier", 0, "the first carrier did not join");
+        return failures;
+    }
+    {
+        struct fr o = { .type = TBT_F_OPEN, .path = 0, .sid = sid, .conv = TBT_CONV };
+
+        send_frame(fd0, &o, NULL, 0);
+    }
+    msleep(300);
+    send_data(fd0, 0, sid, 0, 0, "alpha", 5);
+
+    /* The first 5 bytes must come back before the second carrier is used, so
+     * the stream's reverse offset is known. */
+    end = now_ms() + 3000;
+    while (got < 5 && now_ms() < end)
+    {
+        struct pollfd p = { .fd = fd0, .events = POLLIN };
+
+        if (poll(&p, 1, 200) <= 0)
+            continue;
+        if (p.revents & (POLLERR | POLLHUP | POLLNVAL))
+            break;
+        if (rb_frame(&r0, &f, body, sizeof(body), 200))
+            break;
+        if (f.type == TBT_F_DATA && f.sid == sid && f.blen)
+        {
+            if (acc_feed(echo, sizeof(echo), &got, body, f.blen, f.seq) < 0)
+            {
+                bad = 1;
+                break;
+            }
+            send_pad(fd0, 0, sid, sidhi, got);
+        }
+    }
+
+    /* A new TCP connection on a free index, same nonce.  The far must answer
+     * the HELLO and then process records from it. */
+    fd1 = far_conn(port);
+    if (fd1 >= 0)
+    {
+        memset(&r1, 0, sizeof(r1));
+        r1.fd = fd1;
+        send_hello(fd1, nonce, 1, 1, TBT_ROLE_NEAR);
+        hello1 = read_hello(&r1, &f, body, sizeof(body), NULL, NULL) == 0;
+        if (hello1)
+        {
+            pad_ok = send_pad(fd1, 1, sid, sidhi, got) == 0;
+            send_data(fd1, 1, sid, sidhi, 5, "beta!", 5);
+        }
+    }
+
+    end = now_ms() + 5000;
+    while (hello1 && got < want_len && now_ms() < end)
+    {
+        struct pollfd p[2];
+        int pr, k;
+
+        p[0].fd = fd0;
+        p[0].events = POLLIN;
+        p[0].revents = 0;
+        p[1].fd = fd1;
+        p[1].events = POLLIN;
+        p[1].revents = 0;
+        pr = poll(p, 2, 200);
+        if (pr <= 0)
+            continue;
+        for (k = 0; k < 2; k++)
+        {
+            struct rb *rr = k ? &r1 : &r0;
+            int rc;
+
+            if (!(p[k].revents & POLLIN))
+                continue;
+            rc = rb_frame(rr, &f, body, sizeof(body), 200);
+            if (rc)
+                continue;
+            if (f.type == TBT_F_DATA && f.sid == sid && f.blen)
+            {
+                if (acc_feed(echo, sizeof(echo), &got, body, f.blen, f.seq) < 0)
+                {
+                    bad = 1;
+                    break;
+                }
+                send_pad(k ? fd1 : fd0, k, sid, sidhi, got);
+            }
+        }
+        if (bad)
+            break;
+    }
+    if (got == want_len && memcmp(echo, want, want_len))
+        bad = 1;
+    result("far.second_carrier",
+           hello1 && pad_ok && got == want_len && !bad &&
+               klog_check("far.second_carrier") == 0,
+           "second carrier after the first: HELLO answered=%d, PAD sent=%d, "
+           "echo %zu/%zu corrupt=%d, rx_adopt_events=%llu join_dup=%llu "
+           "(a far that never reads the new carrier leaves it unanswered)",
+           hello1, pad_ok, got, want_len, bad,
+           stat_key(tunnel, "rx_adopt_events"), stat_key(tunnel, "join_dup"));
+    if (fd1 >= 0)
+        close(fd1);
+    close(fd0);
     return failures;
 }
 
@@ -1508,6 +2164,380 @@ static int fakefar_suite(int port, int pubport, int tunnel)
     }
     close(ls);
     return failures - failures0;
+}
+
+/* ------------------------------------------------------------------ */
+/* review 22: a pinned FIN or RST freed on -EAGAIN.                    */
+
+/* Write until the application's own socket pushes back, or `want` bytes were
+ * accepted.  The near side's accepted socket buffers 1 MiB and this child's
+ * send buffer another 2 MiB, so the loop reaches EAGAIN well after the
+ * carrier's 512 KiB send queue is full. */
+static int write_until_eagain(int fd, size_t want)
+{
+    unsigned char buf[65536];
+    size_t sent = 0;
+
+    memset(buf, 'F', sizeof(buf));
+    while (sent < want)
+    {
+        size_t n = want - sent < sizeof(buf) ? want - sent : sizeof(buf);
+        ssize_t r = send(fd, buf, n, MSG_NOSIGNAL);
+
+        if (r > 0)
+        {
+            sent += (size_t)r;
+            continue;
+        }
+        break; /* EAGAIN or a dead socket: the bytes already accepted count */
+    }
+    return (int)sent;
+}
+
+/* read_to() is recv(2), so it cannot read the status pipes. */
+static int pipe_read(int fd, void *buf, size_t len, int ms)
+{
+    struct pollfd p = { .fd = fd, .events = POLLIN };
+    int r = poll(&p, 1, ms);
+
+    if (r == 0)
+        return -2;
+    if (r < 0)
+        return -1;
+    return (int)read(fd, buf, len);
+}
+
+/* The abusive application.  `rst` selects the close shape: a clean half-close
+ * (FIN) or SO_LINGER 0 (RST).  The child reports through pipes, never through
+ * the console, so its exit cannot interleave with the parent's verdict. */
+/* The carrier's send queue is 512 KiB (SO_SNDBUF 256 KiB, doubled).  The
+ * application must hand over a little more than that, but no more than the
+ * send queue plus the stream's 64 KiB queue: the capture can then finish and
+ * queue the FIN/RST while the carrier is still full.  A larger write would
+ * leave the FIN behind uncaptured application bytes and the test would
+ * measure the capture gate, not the control frame. */
+#define BP_BYTES (560 * 1024)
+
+static void app_backpressure_child(int pubport, int rst, int sigfd, int donefd)
+{
+    int fd = connect_to("127.0.0.1", pubport, NULL);
+    char b[4096];
+    int sb = 2 * 1024 * 1024;
+
+    if (fd < 0)
+        _exit(2);
+    setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sb, sizeof(sb));
+    set_nonblock(fd);
+    write_until_eagain(fd, BP_BYTES);
+    if (rst)
+    {
+        char c;
+
+        /* The parent fills the carrier first; closing with SO_LINGER 0 then
+         * makes the near emit RST, not FIN. */
+        if (pipe_read(sigfd, &c, 1, 8000) != 1)
+            _exit(4);
+        close_rst(fd);
+        _exit(0);
+    }
+    shutdown(fd, SHUT_WR);
+    {
+        char c = 'S';
+
+        if (write(donefd, &c, 1) != 1)
+            _exit(4);
+    }
+    for (;;)
+    {
+        ssize_t n = read_to(fd, b, sizeof(b), 6000);
+
+        if (n == 0)
+            _exit(0); /* EOF: the peer's FIN crossed the tunnel */
+        if (n == -2)
+            _exit(3); /* timeout: no FIN, no reset, just silence */
+        if (n < 0)
+            _exit(2); /* reset or other socket error */
+    }
+}
+
+static int wait_child_timeout(pid_t pid, int ms)
+{
+    long end = now_ms() + ms;
+    int st = 0;
+
+    while (now_ms() < end)
+    {
+        pid_t r = waitpid(pid, &st, WNOHANG);
+
+        if (r == pid)
+            return WIFEXITED(st) ? WEXITSTATUS(st) : -1;
+        if (r < 0)
+            return -1;
+        msleep(20);
+    }
+    kill(pid, SIGKILL);
+    waitpid(pid, &st, 0);
+    return 4;
+}
+
+/* Advance the near's tx_ack in 64 KiB steps.  A single huge ack would mark
+ * the queued frames delivered before the pump ever wrote them; a ramp lets
+ * the pump fill the carrier's send queue while the capture keeps moving. */
+static void ack_ramp(int fd, int idx, uint32_t sid, uint8_t sidhi, long ms)
+{
+    long end = now_ms() + ms;
+    uint64_t ack = 0;
+
+    while (now_ms() < end)
+    {
+        ack += 65536;
+        raw_send_pad(fd, idx, sid, sidhi, ack);
+        msleep(30);
+    }
+}
+
+/* Same ramp, but stop as soon as `donefd` reports the application's shutdown.
+ * The ack must run while the application is still writing: the capture gate
+ * stops at 64 KiB and the peer's stall budget is 500 ms, so waiting for the
+ * write to finish before the first ack is a race against the reset timer. */
+static int ack_ramp_until(int fd, int idx, uint32_t sid, uint8_t sidhi, long ms,
+                          int donefd)
+{
+    long end = now_ms() + ms;
+    uint64_t ack = 0;
+    int done = 0;
+
+    while (now_ms() < end)
+    {
+        ack += 65536;
+        raw_send_pad(fd, idx, sid, sidhi, ack);
+        if (!done && donefd >= 0)
+        {
+            struct pollfd p = { .fd = donefd, .events = POLLIN };
+            char c;
+
+            if (poll(&p, 1, 0) > 0 && (p.revents & POLLIN) &&
+                read(donefd, &c, 1) == 1)
+                done = 1;
+        }
+        msleep(30);
+    }
+    return done;
+}
+
+/* The near's carrier send queue is full when the application half-closes (or
+ * resets).  A pinned control frame that meets -EAGAIN must be requeued; the
+ * baseline frees it.  FIN has a retry from the FBK tick, RST has none, so the
+ * pair separates "control frame survives backpressure" from "FIN happens to
+ * be retried". */
+static int mode_fineagain(int port, int pubport, int tunnel, int rst)
+{
+    const char *name = rst ? "near.rst_eagain" : "near.fin_eagain";
+    int ls = listen_on(port);
+    int fd, sig[2], done[2], have_open = 0, i, gen = 0, idx = 0, seen = 0;
+    unsigned char nonce[16], body[8192];
+    struct fr f;
+    static struct rb r;
+    uint32_t sid = 0;
+    uint8_t sidhi = 0;
+    unsigned long long hiwat0, hiwat1, hu0, hu1;
+    long end, next_ack;
+    pid_t pid;
+    int rc = -1;
+
+    if (ls < 0)
+    {
+        result(name, 0, "cannot bind the fake far port %d", port);
+        return failures;
+    }
+    klog_start();
+    hiwat0 = stat_key(tunnel, "hiwat");
+    hu0 = stat_key(tunnel, "holes_unrecoverable");
+    fd = accept_to(ls, 8000);
+    if (fd < 0)
+    {
+        result(name, 0, "the near side never dialled the fake far");
+        close(ls);
+        return failures;
+    }
+    {
+        int rb_sz = 4096;
+
+        /* A tiny receive buffer closes the near's TCP window early, so its
+         * carrier send queue fills after a few hundred KiB. */
+        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rb_sz, sizeof(rb_sz));
+    }
+    memset(&r, 0, sizeof(r));
+    r.fd = fd;
+    {
+        int have_hello = 0;
+
+        for (i = 0; i < 8; i++)
+        {
+            if (raw_read_frame(&r, &f, body, sizeof(body), 3000))
+                break;
+            if (f.type == TBT_F_HELLO)
+            {
+                memcpy(nonce, body + 2, sizeof(nonce));
+                gen = (body[22] >> 2) & 0xf;
+                idx = f.path;
+                have_hello = 1;
+                break;
+            }
+        }
+        if (!have_hello)
+        {
+            result(name, 0, "no HELLO from the near carrier");
+            close(fd);
+            close(ls);
+            return failures;
+        }
+    }
+    {
+        struct fr h = { .type = TBT_F_HELLO, .path = (uint8_t)idx, .conv = TBT_CONV };
+
+        /* The near tunnel is profile=raw, whose HELLO profile bits are 3. */
+        hello_body(body, TBT_ROLE_FAR, nonce, (unsigned char)(3 | gen << 2));
+        raw_send_frame(fd, &h, body, 23);
+    }
+
+    /* The OPEN exists only once the application connects, so start the app
+     * first and then wait for the near to announce the stream. */
+    if (pipe(sig) || pipe(done))
+    {
+        result(name, 0, "pipe() failed");
+        close(fd);
+        close(ls);
+        return failures;
+    }
+    pid = fork();
+    if (pid == 0)
+    {
+        close(sig[1]);
+        close(done[0]);
+        close(ls);
+        app_backpressure_child(pubport, rst, sig[0], done[1]);
+        _exit(2);
+    }
+    close(sig[0]);
+    close(done[1]);
+
+    for (i = 0; i < 40 && !have_open; i++)
+    {
+        if (raw_read_frame(&r, &f, body, sizeof(body), 1000))
+            break;
+        if (f.type == TBT_F_OPEN)
+        {
+            sid = f.sid;
+            sidhi = f.sidhi;
+            have_open = 1;
+        }
+    }
+    if (!have_open)
+    {
+        kill(pid, SIGKILL);
+        wait_child(pid);
+        close(sig[1]);
+        close(done[0]);
+        result(name, 0, "the near side sent no OPEN for the application");
+        close(fd);
+        close(ls);
+        return failures;
+    }
+
+    if (!rst)
+    {
+        int signalled = ack_ramp_until(fd, idx, sid, sidhi, 1200, done[0]);
+
+        if (!signalled)
+        {
+            char c;
+
+            /* The app wrote its bytes and shut the write side down. */
+            if (pipe_read(done[0], &c, 1, 3000) != 1)
+            {
+                kill(pid, SIGKILL);
+                wait_child(pid);
+                result(name, 0, "the application never reported its shutdown");
+                close(fd);
+                close(ls);
+                return failures;
+            }
+            ack_ramp(fd, idx, sid, sidhi, 600);
+        }
+    }
+    else
+    {
+        /* Fill the carrier before the reset, then let the app close. */
+        ack_ramp(fd, idx, sid, sidhi, 1200);
+        if (write(sig[1], "G", 1) != 1)
+        {
+            kill(pid, SIGKILL);
+            wait_child(pid);
+        }
+        msleep(300);
+    }
+    close(sig[1]);
+    close(done[0]);
+    hiwat1 = stat_key(tunnel, "hiwat");
+
+    /* Drain the carrier.  The near's queued records can leave now; a pinned
+     * FIN/RST freed on -EAGAIN never reappears.  Keep acking so the capture
+     * finishes and the FIN stays eligible (tx_ack == tx_seq). */
+    end = now_ms() + 6000;
+    next_ack = 0;
+    while (now_ms() < end && !seen)
+    {
+        struct pollfd p = { .fd = fd, .events = POLLIN };
+        int pr;
+
+        if (!rst && now_ms() >= next_ack)
+        {
+            raw_send_pad(fd, idx, sid, sidhi, UINT64_MAX);
+            next_ack = now_ms() + 50;
+        }
+        pr = poll(&p, 1, 50);
+        if (pr <= 0)
+            continue;
+        if (p.revents & (POLLERR | POLLHUP | POLLNVAL))
+            break;
+        if (raw_read_frame(&r, &f, body, sizeof(body), 100))
+            continue;
+        if (f.sid == sid && f.type == (rst ? TBT_F_RST : TBT_F_FIN))
+            seen = 1;
+    }
+    if (seen && !rst)
+    {
+        /* The far's FIN for this stream.  seq 0: no DATA ever went toward the
+         * application.  It turns the app's read into EOF once its bytes are
+         * all delivered. */
+        raw_send_fin(fd, idx, sid, sidhi, 0);
+        rc = wait_child_timeout(pid, 6000);
+    }
+    else if (rst)
+    {
+        rc = wait_child_timeout(pid, 1000);
+    }
+    else
+    {
+        kill(pid, SIGKILL);
+        wait_child(pid);
+    }
+    hu1 = stat_key(tunnel, "holes_unrecoverable");
+    result(name,
+           rst ? (seen && hiwat1 > hiwat0 && klog_check(name) == 0)
+               : (seen && rc == 0 && hiwat1 > hiwat0 && klog_check(name) == 0),
+           "%s under carrier backpressure: %s=%d eof=%d child_rc=%d "
+           "pump_hiwat %llu -> %llu (must grow) holes_unrecoverable %llu -> %llu; "
+           "tx_ack=%llu txq=%llu rx_records=%llu hole_checks=%llu time_fail=%llu",
+           rst ? "RST" : "FIN", rst ? "rst_seen" : "fin_seen", seen,
+           !rst && rc == 0, rc, hiwat0, hiwat1, hu0, hu1,
+           stat_key(tunnel, "tx_ack"), stat_key(tunnel, "txq"),
+           stat_key(tunnel, "rx_records"), stat_key(tunnel, "hole_checks"),
+           stat_key(tunnel, "time_fail"));
+    close(fd);
+    close(ls);
+    return failures;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1951,23 +2981,30 @@ static int mode_rst(int port, int mib)
     return 0;
 }
 
-static int mode_srcfilter(int port)
+/* The old `src=` allow list is gone, and its test with it.  The public port
+ * has no application-source filter by design: the tunnel's identity is the
+ * session nonce (and, on the far side, the peer anchor), not the address the
+ * application happens to use.  What must hold is that both keys survive the
+ * canonical config, or a save/restore silently drops the pin. */
+static int mode_srcfilter(int port, int tunnel)
 {
     int fd = connect_to("127.0.0.1", port, "127.0.0.2");
     char buf[8];
-    int ok;
+    int usable = 0, nonce_rendered, peer_rendered;
 
-    if (fd < 0)
+    if (fd >= 0)
     {
-        result("pub.srcfilter", 0, "cannot connect from 127.0.0.2");
-        return 1;
+        send_all(fd, "src", 3);
+        usable = read_to(fd, buf, 3, 3000) == 3 && !memcmp(buf, "src", 3);
+        close(fd);
     }
-    send_all(fd, "src", 3);
-    ok = read_to(fd, buf, 3, 3000) == 3 && !memcmp(buf, "src", 3);
-    result("pub.srcfilter", 0,
-           "connection from 127.0.0.2 was accepted=%d: no src= allow list exists", ok);
-    close(fd);
-    return 0;
+    nonce_rendered = cfg_line_has(tunnel, "nonce=00112233445566778899aabbccddeeff");
+    peer_rendered = cfg_line_has(tunnel, "peer=127.0.0.1:1");
+    result("pub.srcfilter", usable && nonce_rendered && peer_rendered,
+           "app from 127.0.0.2 usable=%d (no src= allow list; the tunnel "
+           "identity is the nonce), far config renders nonce=%d peer=%d",
+           usable, nonce_rendered, peer_rendered);
+    return usable && nonce_rendered && peer_rendered ? 0 : 1;
 }
 
 static unsigned long mem_available_kb(void)
@@ -2400,11 +3437,16 @@ static void usage(void)
             "       adv_probe concurrent <pub_port> <n> <bytes> <timeout_s> <tunnel_id>\n"
             "       adv_probe halfclose <pub_port>\n"
             "       adv_probe rst <pub_port> <mib>\n"
-            "       adv_probe srcfilter <pub_port>\n"
+            "       adv_probe srcfilter <pub_port> <tunnel_id>\n"
             "       adv_probe writer <pub_port> <mib> <read>\n"
             "       adv_probe echo <pub_port> <mib> <delay_ms>\n"
             "       adv_probe garbage <carrier_port> <n>\n"
             "       adv_probe stall <carrier_port> <n> <tunnel_id>\n"
+            "       adv_probe noncepinned <carrier_port> <tunnel_id>\n"
+            "       adv_probe srcanchor <carrier_port> <tunnel_id>\n"
+            "       adv_probe overlap <carrier_port> <tunnel_id>\n"
+            "       adv_probe secondcarrier <carrier_port> <tunnel_id>\n"
+            "       adv_probe fineagain <fake_port> <pub_port> <tunnel_id> fin|rst\n"
             "       adv_probe target <port>\n"
             "       adv_probe partial <config_path> <line-without-newline>\n"
             "       adv_probe nonroot <path>\n"
@@ -2434,8 +3476,8 @@ int main(int argc, char **argv)
         return mode_halfclose(atoi(argv[2]));
     if (!strcmp(argv[1], "rst") && argc == 4)
         return mode_rst(atoi(argv[2]), atoi(argv[3]));
-    if (!strcmp(argv[1], "srcfilter") && argc == 3)
-        return mode_srcfilter(atoi(argv[2]));
+    if (!strcmp(argv[1], "srcfilter") && argc == 4)
+        return mode_srcfilter(atoi(argv[2]), atoi(argv[3]));
     if (!strcmp(argv[1], "writer") && argc == 5)
         return mode_writer(atoi(argv[2]), atoi(argv[3]), atoi(argv[4]));
     if (!strcmp(argv[1], "echo") && argc == 5)
@@ -2444,6 +3486,18 @@ int main(int argc, char **argv)
         return mode_garbage(atoi(argv[2]), atoi(argv[3]));
     if (!strcmp(argv[1], "stall") && argc == 5)
         return mode_stall(atoi(argv[2]), atoi(argv[3]), atoi(argv[4]));
+    if (!strcmp(argv[1], "noncepinned") && argc == 4)
+        return mode_noncepinned(atoi(argv[2]), atoi(argv[3]));
+    if (!strcmp(argv[1], "srcanchor") && argc == 4)
+        return mode_srcanchor(atoi(argv[2]), atoi(argv[3]));
+    if (!strcmp(argv[1], "overlap") && argc == 4)
+        return mode_overlap(atoi(argv[2]), atoi(argv[3]));
+    if (!strcmp(argv[1], "secondcarrier") && argc == 4)
+        return mode_secondcarrier(atoi(argv[2]), atoi(argv[3]));
+    if (!strcmp(argv[1], "fineagain") && argc == 6 &&
+        (!strcmp(argv[5], "fin") || !strcmp(argv[5], "rst")))
+        return mode_fineagain(atoi(argv[2]), atoi(argv[3]), atoi(argv[4]),
+                              !strcmp(argv[5], "rst"));
     if (!strcmp(argv[1], "target") && argc == 3)
         return mode_target(atoi(argv[2]));
     if (!strcmp(argv[1], "partial") && argc == 4)
