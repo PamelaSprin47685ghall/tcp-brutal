@@ -28,7 +28,7 @@ ko=$root/tbtun.ko
 timeout_s=${TBT_ADV_TIMEOUT:-600}
 carrier_timeout=${TBT_ADV_CARRIER_TIMEOUT:-240}
 public_timeout=${TBT_ADV_PUBLIC_TIMEOUT:-2400}
-groups=${TBT_ADV_GROUPS:-"public control resource slab final replay rmmod flush catconfig cfg_mix param port near far stall"}
+groups=${TBT_ADV_GROUPS:-"public control resource slab final replay rmmod flush catconfig cfg_mix param port near far stall httptorn hole create"}
 build=1
 crash=1
 results_file=$adv/results.txt
@@ -81,6 +81,8 @@ phase_list() {
     public) echo "public srcfilter" ;;
     near) echo "near nearx" ;;
     far) echo "far farx" ;;
+    catconfig) echo "catconfig bigcfg" ;;
+    writer) echo "writer writerdrain" ;;
     *) echo "$1" ;;
     esac
 }
@@ -170,6 +172,7 @@ for g in $groups; do
     case $g in
     public) run_group public "$public_timeout" ;;
     stable) run_group stable "$timeout_s" ;;
+    writer) run_group writer 600 ;;
     *) run_group "$g" "$carrier_timeout" ;;
     esac
 done
