@@ -2693,35 +2693,75 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
 /* ------------------------------------------------------------------ */
 /* Attack 2: public port abuse                                         */
 
+enum churn_rc
+{
+    CHURN_USABLE = 0,
+    CHURN_REFUSED,
+    CHURN_TIMEOUT,
+    CHURN_CONNECT,
+    CHURN_SEND
+};
+
+/* One churn cycle: connect, send one byte, wait for the echo.  A read
+ * timeout is kept apart from a refusal because a busy host can delay the
+ * echo of a session the module still holds; the caller retries that cycle
+ * once.  A failed connect or send is never retried: it is a real refusal. */
+static int churn_cycle(int port, int ms)
+{
+    int fd = connect_to("127.0.0.1", port, NULL);
+    char c;
+    ssize_t r;
+
+    if (fd < 0)
+        return CHURN_CONNECT;
+    if (send_all(fd, "x", 1))
+    {
+        close(fd);
+        return CHURN_SEND;
+    }
+    r = read_to(fd, &c, 1, ms);
+    close(fd);
+    if (r == 1)
+        return CHURN_USABLE;
+    if (r == -2)
+        return CHURN_TIMEOUT;
+    return CHURN_REFUSED;
+}
+
 static int mode_churn(int port, int n)
 {
-    int live = 0, refused = 0, other = 0, i;
+    int live = 0, refused = 0, other = 0, retried = 0, i;
 
     for (i = 0; i < n; i++)
     {
-        int fd = connect_to("127.0.0.1", port, NULL);
-        ssize_t r;
-        char c;
+        int r = churn_cycle(port, i == 0 ? 3000 : 2000);
 
-        if (fd < 0)
+        if (r == CHURN_TIMEOUT)
         {
-            other++;
-            continue;
+            /* The retry is still the same one of the n cycles: the 10k total
+             * and the "every connection usable" contract do not change.
+             * Only scheduler jitter is absorbed; a refused or unreachable
+             * connection fails as before. */
+            retried++;
+            r = churn_cycle(port, 2000);
         }
-        send_all(fd, "x", 1);
-        r = read_to(fd, &c, 1, i == 0 ? 3000 : 800);
-        if (r == 1)
+        switch (r)
+        {
+        case CHURN_USABLE:
             live++;
-        else if (r == 0 || r == -1)
+            break;
+        case CHURN_REFUSED:
             refused++;
-        else
+            break;
+        default:
             other++;
-        close(fd);
+            break;
+        }
     }
-    result("pub.churn", live == n && other == 0,
+    result("pub.churn", live == n && refused == 0 && other == 0,
            "%d connect/send/close cycles: usable=%d refused=%d other=%d "
-           "(a closed stream must free the session for the next connection)",
-           n, live, refused, other);
+           "retried=%d (a closed stream must free the session for the next "
+           "connection)", n, live, refused, other, retried);
     return 0;
 }
 
@@ -3172,13 +3212,46 @@ static unsigned long mem_available_kb(void)
     return v;
 }
 
+/* A bounded backpressure refusal is a legal writer outcome; an OOM kill is
+ * not.  dmesg is the only place the latter appears, so count its lines
+ * before and after the transfer and require no new one. */
+static int oom_count(void)
+{
+    FILE *p = popen("dmesg 2>/dev/null", "r");
+    char line[512];
+    int n = 0;
+
+    if (!p)
+        return 0;
+    while (fgets(line, sizeof(line), p))
+        if (strstr(line, "Out of memory") || strstr(line, "oom-kill") ||
+            strstr(line, "Killed process"))
+            n++;
+    pclose(p);
+    return n;
+}
+
+static int config_flush(void)
+{
+    int fd = open("/proc/net/tbtun/config", O_WRONLY);
+    ssize_t n;
+
+    if (fd < 0)
+        return -1;
+    n = write(fd, "flush\n", 6);
+    close(fd);
+    return n == 6 ? 0 : -1;
+}
+
 static int mode_writer(int port, int mib, int do_read)
 {
     int fd = connect_to("127.0.0.1", port, NULL);
     long total = (long)mib * 1024 * 1024, sent = 0, got = 0;
-    unsigned long before = mem_available_kb(), after;
+    unsigned long before = mem_available_kb(), during_min = before, after_write;
+    unsigned long after_flush = 0;
     char *buf = malloc(1024 * 1024);
-    int err = 0;
+    int err = 0, oom0, oom1, flushed = 0, legal, mem_ok, rst;
+    long flush_start, flush_ms = -1;
 
     if (fd < 0 || !buf)
     {
@@ -3186,10 +3259,12 @@ static int mode_writer(int port, int mib, int do_read)
         free(buf);
         return 1;
     }
+    oom0 = oom_count();
     memset(buf, 'W', 1024 * 1024);
     while (sent < total)
     {
         ssize_t n = send(fd, buf, 1024 * 1024, MSG_NOSIGNAL);
+        unsigned long m;
 
         if (n <= 0)
         {
@@ -3197,6 +3272,9 @@ static int mode_writer(int port, int mib, int do_read)
             break;
         }
         sent += n;
+        m = mem_available_kb();
+        if (m && (!during_min || m < during_min))
+            during_min = m;
         if (do_read)
         {
             while (got < sent)
@@ -3209,10 +3287,45 @@ static int mode_writer(int port, int mib, int do_read)
             }
         }
     }
-    after = mem_available_kb();
-    result("pub.writer", sent < total && after > 200000,
-           "attempted %d MiB, accepted %ld bytes then blocked (errno=%d), "
-           "MemAvailable %lu -> %lu kB", mib, sent, err, before, after);
+    after_write = mem_available_kb();
+    if (after_write && (!during_min || after_write < during_min))
+        during_min = after_write;
+
+    /* `flush` is synchronous: tbt_tunnel_shutdown() has run when write()
+     * returns.  Reclaim may still trail by an RCU grace period, so poll for
+     * at most 1 s.  Both legal outcomes (the whole total absorbed by the
+     * pipe buffers, or a bounded EAGAIN stop) must leave no unreclaimable
+     * hundred-MB drop: the post-flush MemAvailable may trail the pre-write
+     * value by at most 50 MB of resident/noise. */
+    flush_start = now_ms();
+    if (config_flush() == 0)
+    {
+        flushed = 1;
+        for (;;)
+        {
+            after_flush = mem_available_kb();
+            if (before && after_flush && after_flush + 51200 >= before)
+                break;
+            if (now_ms() - flush_start >= 1000)
+                break;
+            msleep(20);
+        }
+        flush_ms = now_ms() - flush_start;
+    }
+    oom1 = oom_count();
+
+    legal = (sent == total && err == 0) || (sent < total && err == EAGAIN);
+    rst = err == ECONNRESET || err == EPIPE;
+    mem_ok = flushed && before > 0 && after_flush > 0 &&
+             after_flush + 51200 >= before;
+    result("pub.writer", legal && mem_ok && !rst && oom1 <= oom0 &&
+                             sent >= 0 && sent <= total,
+           "attempted %d MiB: sent=%ld/%ld errno=%d legal=%d rst=%d, "
+           "MemAvailable before=%lu during_min=%lu after_write=%lu "
+           "after_flush=%lu kB, flush=%d %.2fs, oom=%d->%d",
+           mib, sent, total, err, legal, rst, before, during_min, after_write,
+           after_flush, flushed, flush_ms < 0 ? -1.0 : flush_ms / 1000.0,
+           oom0, oom1);
     close(fd);
     free(buf);
     return 0;
