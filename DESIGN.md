@@ -1017,12 +1017,15 @@ carrier, no fixed stride). Resource estimate at 256 carriers: 256 TCP sockets an
 session-level scan (20 wakes/s) before 256 is enabled, and the per-carrier keepalive
 must batch. The 128 MiB socket-buffer budget bounds the kernel side.
 
-**Platform.** The 256-carrier, 1G target is ARM64. The MT7621 endpoint
-(1004Kc, 880 MHz, no MSA, 440 MiB, kernel 3.4.113) is not that platform: its
-1G is L2 switching, the CPU endpoint measures 300-500 Mbit/s, and tbtun needs
-a 6.1+ kernel and a substantial backport to run there. The carrier-layer
-scaling above is generic and kept, but none of the 256/1G estimates apply to
-that MIPS device.
+**Platform.** 1G is the physical port; 500-750 Mbit/s at the application is
+the accepted target. The 256-carrier, 1G target is ARM64. The `.74` host
+(x86_64, 4 x 1.8 GHz, AVX1, one queue) is the 1G functional candidate: it can
+run the functional and 1G tests, but it has not been proven. The MT7621
+endpoint (1004Kc, 880 MHz, no MSA, 440 MiB, kernel 3.4.113) is not that
+platform: its 1G is L2 switching, the CPU endpoint measures 300-500 Mbit/s,
+and tbtun needs a 6.1+ kernel and a substantial backport to run there. The
+carrier-layer scaling above is generic and kept, but none of the 256/1G
+estimates apply to that MIPS device.
 
 **Inflation control.** `dup_degree` is the knob; `max_inflate` the ceiling (§4.7).
 

@@ -115,7 +115,9 @@ grouped entries close the remaining lifetime, wire and input-handling findings.
   `wscale=0`, `rmem_alloc=0`). The tunnel delivered 2.35 Mbit/s, 98% of that
   cap: a harness artifact, not a module limit. A non-slirp link or the real
   WAN is required for a >1 MiB carrier window. The 256-carrier/1G
-  target is ARM64; the MT7621 MIPS endpoint (1004Kc, 880 MHz, no MSA,
+  target is ARM64 (1G physical port, 500-750 Mbit/s at the application).
+  The `.74` host (x86_64, 4 x 1.8 GHz, AVX1, one queue) is the functional/1G
+  candidate but unproven. The MT7621 MIPS endpoint (1004Kc, 880 MHz, no MSA,
   440 MiB, kernel 3.4.113, 300-500 Mbit/s CPU) is not that platform and needs
   a 6.1+ backport.
 - **Shared statistics counters:** every session counter with more than one writer
