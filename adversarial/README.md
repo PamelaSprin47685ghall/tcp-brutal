@@ -135,7 +135,7 @@ near's nonce, index and generation from its own HELLO.
 | --- | --- | --- |
 | `init.max_tunnels` | 80 tunnel lines with `max_tunnels=64` | the 65th is refused |
 | `init.scale` | 32 near/far pairs, 16 carriers each | carriers up; memory reported; no OOM |
-| `init.port_exhaust` | a 16-port block, then two 16-carrier tunnels | the second fails cleanly and says so |
+| `init.port_exhaust` | a 16-port block, then two 16-carrier tunnels | the second reports `port_exhaust` and keeps retrying; it is not killed |
 | `init.max_carriers` | `n=8` with `max_carriers=4` | refused |
 
 ### Kernel-state sanity (`ADV_KLOG`, `init.dmesg`, `console.klog.*`)

@@ -717,7 +717,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                 }
                 rcu_read_unlock();
                 seq_printf(m, "tunnel %llu c3 n=%u up=%u lost=%llu replaced=%llu "
-                              "spare_activated=%llu alloc_fail=%llu connect_fail=%llu "
+                              "spare_activated=%llu alloc_fail=%llu "
+                              "port_exhaust=%llu port_alloc_fail=%llu connect_fail=%llu "
                               "join_dup=%llu join_bad=%llu join_nonce_reject=%llu "
                               "join_src_reject=%llu "
                               "fbk_tx=%llu fbk_rx=%llu "
@@ -726,7 +727,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "ooo_frames=%u retain_bytes=%u tx_ack=%llu rx_ack=%llu "
                               "peer_paused=%u fb_delay_us=%u rto_us=%u una_stall_us=%u\n",
                            t->cfg.id, n, up, s->carrier_lost, s->carrier_replaced,
-                           s->spare_activated, s->carrier_alloc_fail, s->connect_fail,
+                           s->spare_activated, s->carrier_alloc_fail,
+                           s->port_exhaust, s->port_alloc_fail, s->connect_fail,
                            s->session_join_dup, s->session_join_bad,
                            s->join_nonce_reject, s->join_src_reject, s->fbk_tx,
                            s->fbk_rx, s->retx_frames, s->retx_bytes, s->retain_drop,

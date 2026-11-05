@@ -962,6 +962,33 @@ void tbt_carrier_free(struct tbt_carrier *c)
     kfree(c);
 }
 
+/* Turn a port-allocation failure into an operator-visible reason.  The
+ * carrier stays alive and retries; nothing is killed.  The warning is
+ * ratelimited because the retry loop runs every 200 ms. */
+static void tbt_port_alloc_note(struct tbt_session *sess, u8 index,
+                                enum tbt_port_alloc_err why)
+{
+    u16 lo, hi;
+    bool configured;
+
+    switch (why)
+    {
+    case TBT_PORT_ALLOC_EXHAUSTED:
+        sess->port_exhaust++;
+        tbt_portmap_get(&lo, &hi, &configured);
+        pr_warn_ratelimited("tbtun: tunnel %llu carrier %u: source port block %u-%u is exhausted; carrier retries\n",
+                            sess->tunnel->cfg.id, index, lo, hi);
+        break;
+    case TBT_PORT_ALLOC_NOMEM:
+        sess->port_alloc_fail++;
+        pr_warn_ratelimited("tbtun: tunnel %llu carrier %u: cannot allocate the source port bitmap; carrier retries\n",
+                            sess->tunnel->cfg.id, index);
+        break;
+    default:
+        break;
+    }
+}
+
 /* The near side dials n carriers. The far side dials none: its carriers are
  * accepted and join the session by HELLO. */
 int tbt_carriers_start(struct tbt_tunnel *t, struct tbt_session *sess)
@@ -1033,8 +1060,11 @@ void tbt_replace_work(struct work_struct *w)
         if (sess->tunnel->cfg.role == TBT_ROLE_NEAR)
         {
             struct tbt_carrier *nc = tbt_carrier_new(sess, (u8)i);
+            enum tbt_port_alloc_err perr = TBT_PORT_ALLOC_OK;
 
-            if (nc && (nc->local_port = tbt_port_alloc()) != 0)
+            if (nc)
+                nc->local_port = tbt_port_alloc(&perr);
+            if (nc && nc->local_port)
             {
                 sess->car[i] = nc;
                 sess->carrier_replaced++;
@@ -1043,7 +1073,10 @@ void tbt_replace_work(struct work_struct *w)
             else
             {
                 if (nc)
+                {
+                    tbt_port_alloc_note(sess, (u8)i, perr);
                     tbt_carrier_free(nc);
+                }
                 sess->car[i] = NULL;
                 sess->carrier_alloc_fail++;
             }
@@ -1194,10 +1227,13 @@ static void tbt_car_connect_work(struct work_struct *w)
 
     if (!c->local_port)
     {
-        c->local_port = tbt_port_alloc();
+        enum tbt_port_alloc_err perr = TBT_PORT_ALLOC_OK;
+
+        c->local_port = tbt_port_alloc(&perr);
         if (!c->local_port)
         {
             sess->carrier_alloc_fail++;
+            tbt_port_alloc_note(sess, c->index, perr);
             c->retry_at_ns = ktime_get_ns() + 200 * NSEC_PER_MSEC;
             schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
             return;

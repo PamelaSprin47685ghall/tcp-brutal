@@ -96,6 +96,15 @@ struct tbt_portmap
     unsigned long *used;
 };
 
+/* Why tbt_port_alloc() returned 0.  The caller turns this into a per-session
+ * counter and a ratelimited warning; a carrier is never killed for it. */
+enum tbt_port_alloc_err
+{
+    TBT_PORT_ALLOC_OK = 0,
+    TBT_PORT_ALLOC_NOMEM,     /* the bitmap allocation failed */
+    TBT_PORT_ALLOC_EXHAUSTED, /* every port in the block is in use */
+};
+
 /* tbt_core.c */
 u32 tbt_passive_port(void);
 bool tbt_debug_loss(void);
@@ -105,7 +114,7 @@ extern struct tbt_portmap tbt_ports;
 int tbt_portmap_set(u16 lo, u16 hi);
 void tbt_portmap_get(u16 *lo, u16 *hi, bool *configured);
 void tbt_portmap_show(struct seq_file *m);
-u16 tbt_port_alloc(void);
+u16 tbt_port_alloc(enum tbt_port_alloc_err *err);
 void tbt_port_free(u16 port);
 int tbt_carrier_init(void);
 int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net);
@@ -459,6 +468,7 @@ struct tbt_session
     u64 recv_partial_discard;
     /* C3 counters (DESIGN.md §8.7). */
     u64 carrier_lost, carrier_replaced, carrier_alloc_fail, connect_fail;
+    u64 port_exhaust, port_alloc_fail; /* tbt_port_alloc() failure reasons */
     u64 spare_activated; /* idle spares promoted to DATA-carrying */
     u64 profile_mismatch; /* HELLO carried a different profile */
     u64 http_parse_err;   /* container framing/header protocol error */

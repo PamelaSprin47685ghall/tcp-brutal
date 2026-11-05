@@ -510,8 +510,9 @@ out_unlock:
 // guarded by tbt_ports.lock. Ports are released when the carrier goes away, so
 // a replacement carrier can reuse one immediately.
 
-u16 tbt_port_alloc(void)
+u16 tbt_port_alloc(enum tbt_port_alloc_err *err)
 {
+    enum tbt_port_alloc_err why = TBT_PORT_ALLOC_OK;
     unsigned long n;
     u16 port = 0;
 
@@ -524,19 +525,27 @@ u16 tbt_port_alloc(void)
         n = tbt_ports.hi - tbt_ports.lo + 1;
         tbt_ports.used = bitmap_zalloc(n, GFP_KERNEL);
         if (!tbt_ports.used)
+        {
+            why = TBT_PORT_ALLOC_NOMEM;
             goto out;
+        }
     }
     n = tbt_ports.hi - tbt_ports.lo + 1;
     {
         unsigned long bit = find_next_zero_bit(tbt_ports.used, n, 0);
 
         if (bit >= n)
+        {
+            why = TBT_PORT_ALLOC_EXHAUSTED;
             goto out;
+        }
         __set_bit(bit, tbt_ports.used);
         port = tbt_ports.lo + bit;
     }
 out:
     mutex_unlock(&tbt_ports.lock);
+    if (err)
+        *err = why;
     return port;
 }
 

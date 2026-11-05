@@ -1521,12 +1521,18 @@ is the 50 ms liveness net's evidence counter. Two internal fields are not render
 their own names: the debug injector's per-carrier drop count appears as the `peers` column
 `dropped`, and `recv_partial_discard` has no view.
 
-C3 adds per tunnel: `n, up, lost, replaced, spare_activated, alloc_fail, connect_fail,
-join_dup, join_bad, join_nonce_reject, fbk_tx, fbk_rx, retx_frames, retx_bytes, retain_drop,
+C3 adds per tunnel: `n, up, lost, replaced, spare_activated, alloc_fail, port_exhaust,
+port_alloc_fail, connect_fail, join_dup, join_bad, join_nonce_reject, join_src_reject,
+fbk_tx, fbk_rx, retx_frames, retx_bytes, retain_drop,
 reorder_overflow, reorder_max_depth, ooo_bytes, ooo_frames, retain_bytes, tx_ack, rx_ack,
 peer_paused, fb_delay_us, rto_us, una_stall_us`; the stream census line prints
 `streams_active, n_streams, n_pending`. `join_dup` counts a HELLO that named an index
 already occupied by a live carrier (the duplicate is closed, not the session);
+`join_src_reject` counts a far-side HELLO from an address other than the session anchor;
+`port_exhaust` counts a carrier that found every port in the global block in use, and
+`port_alloc_fail` counts a failed port-bitmap allocation; both leave the carrier alive
+and retrying, and the same reason is logged ratelimited. `alloc_fail` is the older
+carrier-start failure total and still includes both port cases;
 `reorder_overflow` counts streams killed by the reorder bound; `reorder_max_depth` is the
 deepest out-of-order backlog ever held, in frames; `retain_drop` counts frames released
 by a configured `tx_retain_bytes` cap; `tx_ack`/`rx_ack` are the two directions'
