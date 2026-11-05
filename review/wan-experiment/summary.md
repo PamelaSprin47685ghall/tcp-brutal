@@ -161,9 +161,9 @@ systemd-run --unit=tbtun-iperf3-5201 \
 | c5-raw-n4m1d1 | 2 | 139,264 | 0.00 | 0.0 | 2,457 | 1 |
 
 - 总 in-flight 在 n=1/4/8 都停在 **120-131 KB**（122,880 B；122,880-130,807 B；130,860-131,072 B），不随 n 增长。
-- 在 234-300 ms RTT 下，120-131 KB 的理论上限约 **3.3-4.1 Mbit/s**（按 240-300 ms 计），与实测 3.45-4.27 一致。按 218 ms × 17.08 Mbit/s，直连 BDP 约 **465 kB**；隧道窗口只有它的约 26-28%。
+- peer 快照的 RTT 为 234-300 ms。按 120-131 KB 与约 240-300 ms 的有效 RTT 估算，理论上限约 **3.3-4.1 Mbit/s**；实测 3.45-4.27 与之一致。按 218 ms × 17.08 Mbit/s，直连 BDP 约 **465 kB**；隧道窗口只有它的约 26-28%。
 - n≥4 的多数 raw 运行结束时 far `rxq` 仍有 **3.15-3.71 MiB**，`rx_max_stall_us` 为 264-602 ms；说明 far 侧有序交付/窗口释放也在拖后腿，15 s 内没有到稳态。
-- raw 运行每轮都有载体 `lost`/`replaced`：r1 为 **1/5/9/8**（c1/c2/c3/c5），r2 为 **1/5/9/7**；`holes_unrecoverable` 全 0。n≥4 的 raw 运行伴随 264-602 ms 的 far 接收停顿；c1 和 c5-r2 的末次采样为 0，说明停顿不是每次重建都必然被采到。
+- raw 运行每轮都有载体 `lost`/`replaced`：r1 为 **1/5/9/8**（c1/c2/c3/c5），r2 为 **1/5/9/7**；`holes_unrecoverable` 全 0。c2/c3/c5-r1 的 far 接收停顿为 264-602 ms；c1 和 c5-r2 的末次采样为 0，说明停顿不是每次重建都必然被采到。
 - `m=1`：c2-r1、c3-r1、c5-r1/r2 出现 `spare_activated=1`；spare 也承载流量（near peers `tx_bytes` 348 KB/592 KB），不是纯待机。m=1 没有提高吞吐，价值是冗余（raw 每轮丢载体但无不可恢复 hole）。c1（m=0）丢了唯一载体一次也恢复了。
 - `dup=1`：c5 `wire/submit` 2.018/2.016，near `dup_bytes` 9.28/9.75 MB，`inflate_ppm` 约 1.96e6；唯一无歧义的效应是 wire 翻倍。c5 的 receiver 4.07/5.04（均值 4.55）高于 c2，但 c5 的 near 负载低得多（10.9/34.5% vs 83.0/53.6%），且 c5-r2 的 `rxq=0`、in-flight 139-189 KB；两个样本不足以证明 dup 带来吞吐增益。
 - `http-kal`：c4 `lost=0`、`rxq=0`、far busy 9.5-9.9%，稳定性最好；但均值 3.14，比 raw n=4 的 3.65 低约 14%，c4-r2 只有 2.27 Mbit/s 且 retx 55,258 ppm。HTTP 容器可见（near `http_req=5`、far `http_resp=5`、`pad_tx`/`drip_tx` 非零），但这条路径上没有看到 HTTP QoS 增益。
@@ -174,7 +174,7 @@ systemd-run --unit=tbtun-iperf3-5201 \
 
 2. **n 不扩展的直接原因是 in-flight/窗口，不是载体数不够。** 所有配置的总 in-flight 都停在约 120-131 KB，n=1 和 n=4 都是 122,880 B，n=8 也只有 130,860-131,072 B。按 218 ms × 17.08 Mbit/s，直连 BDP 约 465 kB；隧道窗口只有约 26-28%。在 234-300 ms RTT 下，120-131 KB 只能支撑 3.3-4.1 Mbit/s，正好是实测区间。增加 n 只是把同一个窗口分给更多载体，并增加重排序工作；far 侧还积压 3+ MiB、停顿 0.26-0.60 s，说明接收侧的有序交付也没有跟上。
 
-3. **raw 载体每轮 lost/rebuild。** near `lost` 增量为 1/5/9/8（r1）和 1/5/9/7（r2），对应 `replaced` 和源端口变化；数据没有不可恢复丢失（`holes_unrecoverable=0`），n≥4 的 raw 运行伴随 264-602 ms 的 far 接收停顿（c1 和 c5-r2 的末次采样为 0）。工作假设：raw 载体不发 PAD（`pad_tx=0`），而 `carrier_stall_ms=15000` 与 15 s 测试窗口重合，stall 计时可能没有被数据/ACK 重置。本矩阵没有改公共参数，因此没有验证这个假设。
+3. **raw 载体每轮 lost/rebuild。** near `lost` 增量为 1/5/9/8（r1）和 1/5/9/7（r2），对应 `replaced` 和源端口变化；数据没有不可恢复丢失（`holes_unrecoverable=0`），c2/c3/c5-r1 的 far 接收停顿为 264-602 ms（c1 和 c5-r2 的末次采样为 0）。工作假设：raw 载体不发 PAD（`pad_tx=0`），而 `carrier_stall_ms=15000` 与 15 s 测试窗口重合，stall 计时可能没有被数据/ACK 重置。本矩阵没有改公共参数，因此没有验证这个假设。
 
 4. **http-kal 稳定但更慢。** `lost=0`、`rxq=0`、far CPU 更低，说明 HTTP 容器确实让载体更稳；但吞吐均值 3.14，比 raw n=4 低约 14%，r2 还出现 55,258 ppm 重传。在这条没有真实 QoS 的路径上，http-kal 没有带来吞吐优势。
 
