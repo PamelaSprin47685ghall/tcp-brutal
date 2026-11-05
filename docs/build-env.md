@@ -75,11 +75,19 @@ payload's `Module.symvers`.
   `/lib/modules/...` needs `zstd -19 --rm` plus `depmod` to match the rest of the tree.
 - **Staging installs**: `make -C $KDIR M=$PWD INSTALL_MOD_PATH=/tmp/pkg modules_install`.
 - **GCC kernel**: no `LLVM=1` needed (the repo Makefile detects this itself).
-- **Root is needed only to load the module** — see below.
+- **Root is needed to load the module and to install through DKMS** — see below.
 
 ## Root
 
 Building never needs root. Loading does: `insmod` requires `CAP_SYS_MODULE`.
+
+`scripts/install_dkms.sh` is the exception: it writes `/usr/src` and
+`/lib/modules`, so it needs root, and it requires the distribution headers at
+`/lib/modules/$(uname -r)/build`. The extracted payload below serves `make` and
+`scripts/build.sh` only; DKMS resolves its own kernel source tree and does not
+read `env.sh`. On a host without the headers package, stage the sources with
+`DKMS_ROOT=<writable dir> scripts/install_dkms.sh --stage-only` and build with
+`scripts/build.sh`.
 
 > **Warning:** on this box `pkexec` runs commands as root *without*
 > authentication, and no `/usr/share/polkit-1/rules.d` rule appears to grant
