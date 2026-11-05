@@ -1,0 +1,60 @@
+# tbtun 0.0.1 version / DKMS evidence
+# generated 2026-11-06T00:36:31+08:00 on 7.2.9-1-MANJARO
+
+## git
+$ git rev-parse HEAD
+68bfbaa52c366f998527b4eb1050746283302757
+$ git status --short
+?? review/final-bench/
+
+## scripts/mkdkmsconf.sh --version
+0.0.1
+rc=0
+
+## make dkms.conf
+./scripts/mkdkmsconf.sh > dkms.conf
+rc=0
+
+## modinfo ./tbtun.ko
+filename:       /home/kunweiz/tbtun-worktrees/final-bench/./tbtun.ko
+author:         tbtun contributors
+version:        0.0.1
+description:    tbtun: TCP tunnel over N+M HTTP/1.1-ish carrier connections
+license:        GPL
+srcversion:     533B6F5D7025857930ACD8B
+depends:        
+name:           tbtun
+retpoline:      Y
+vermagic:       7.2.9-1-MANJARO SMP preempt mod_unload 
+parm:           debug:Debug verbosity (0..3) (uint)
+parm:           max_tunnels:Maximum configured tunnels (default 64) (uint)
+parm:           max_carriers:Carrier sockets per session, 1..16 (default 16) (uint)
+parm:           debug_loss:Allow carrier drop_ppm (frame loss injection) writes; 0 refuses them (bool)
+
+## sha256sum tbtun.ko dkms.tar.gz
+0b8f0006a7a10fe33e6e35e927aaf916047e142528bc32729ed04826fdccdb63  tbtun.ko
+4aa0b69a5311e8eb55c541b39147859a37573476e3f938d735db1499713f65a5  dkms.tar.gz
+
+## make dkms-tarball
+./scripts/mkdkmsconf.sh > dkms.conf
+tar zcf dkms.tar.gz \
+	--transform 's,^,./dkms_source_tree/,' \
+	dkms.conf \
+	Makefile tbtun/tbtun.h tbtun/tbt_uapi.h tbtun/tbt_parse.h tbtun/tbt_proto.h tbtun/tbt_rec.h tbtun/tbt_http.h tbtun/tbt_core.c tbtun/tbt_session.c tbtun/tbt_procfs.c tbtun/tbt_listen.c tbtun/tbt_carrier.c tbtun/tbt_sock.c tbtun/tbt_tx.c tbtun/tbt_rx.c tbtun/tbt_parse.c tbtun/tbt_proto.c tbtun/tbt_rec.c tbtun/tbt_http.c scripts/mkdkmsconf.sh scripts/install_dkms.sh .clang-format
+rc=0
+
+## dkms availability
+dkms: not installed on this host (no passwordless sudo; real install is an environment blocker)
+
+## extracted tarball rebuild (direct make, the dkms.conf MAKE[0] command)
+$ tar xzf dkms.tar.gz -C /tmp/tbtun-dkms-final-bench
+$ cd /tmp/tbtun-dkms-final-bench/dkms_source_tree && make KERNEL_DIR=<KDIR> all
+rc=0 (8.27 s)
+e136b1fd47823d36d8c3e2dd5c4031e5e457ecb19ddbc5c90ae4e2607df2c385  /tmp/tbtun-dkms-final-bench/dkms_source_tree/tbtun.ko
+version:        0.0.1
+srcversion:     533B6F5D7025857930ACD8B
+name:           tbtun
+vermagic:       7.2.9-1-MANJARO SMP preempt mod_unload 
+
+note: the extracted-tree module sha differs from the in-tree tbtun.ko;
+both report version 0.0.1 and the same vermagic. Build-id/BTF paths differ.
