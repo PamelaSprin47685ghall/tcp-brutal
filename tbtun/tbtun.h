@@ -796,6 +796,7 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c);
 int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c,
                      struct tbt_frame *fr);
 int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock);
+void tbt_car_setsockbuf(struct socket *s, const struct tbt_cfg *cfg, u16 n_pri);
 int tbt_carrier_open_target(struct tbt_stream *st);
 void tbt_replace_work(struct work_struct *w);
 int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp);

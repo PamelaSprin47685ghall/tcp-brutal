@@ -1316,33 +1316,36 @@ bool tbt_carrier_dead(struct tbt_carrier *c)
  * carrier and push the uack/FBK feedback 2-4 s behind the write (measured:
  * probe I interleaved, uack frozen at 46,142,674 for 4.5 s while the peer had
  * already received 47,129,015). The old fixed 256 KiB reached the kernel as
- * ~512 KiB of unacked bytes per carrier, which capped a 1-8 MiB window. */
-static int tbt_car_sockbuf(const struct tbt_session *sess)
+ * ~512 KiB of unacked bytes per carrier, which capped a 1-8 MiB window.
+ *
+ * The buffer must be set before the TCP handshake, not after: the SYN/SYN-ACK
+ * fixes the window scale and window_clamp from the socket's receive buffer,
+ * and raising sk_rcvbuf later cannot widen them. That is why the far listener
+ * (which answers every SYN-ACK) and the dialled socket before kernel_connect
+ * both call this. */
+void tbt_car_setsockbuf(struct socket *s, const struct tbt_cfg *cfg, u16 n_pri)
 {
-    const struct tbt_cfg *cfg = &sess->tunnel->cfg;
     u32 win = cfg->tx_window_bytes;
     u32 per;
+    int v;
 
     if (!win)
         win = cfg->rx_reorder_bytes;
-    per = win / (sess->n_pri ? sess->n_pri : 1) + 2 * TBT_CHUNK_MAX;
+    per = win / (n_pri ? n_pri : 1) + 2 * TBT_CHUNK_MAX;
     /* SO_SNDBUF/SO_RCVBUF double the value in the kernel: pass half the byte
      * budget we want, so one carrier can hold its share of the window. */
-    return clamp_t(u32, per / 2, 128 * 1024, 4 * 1024 * 1024);
-}
+    v = clamp_t(u32, per / 2, 128 * 1024, 4 * 1024 * 1024);
 
-/* Set one carrier buffer past net.core.{w,r}mem_max. The plain option is
- * capped at that sysctl (208 KiB on a default boot), so a 256 KiB request
- * reached the kernel as 208 KiB and 2 x 208 KiB was the most a carrier could
- * hold -- less than one BDP on the 218 ms WAN. The FORCE option needs
- * CAP_NET_ADMIN, which the module's workqueue has in the init namespace; a
- * namespace that lacks it falls back to the capped option rather than failing
- * the carrier. */
-static void tbt_car_setsockbuf(struct socket *s, int opt, int force_opt, int val)
-{
-    if (sock_setsockopt(s, SOL_SOCKET, force_opt, KERNEL_SOCKPTR(&val),
-                        sizeof(val)))
-        sock_setsockopt(s, SOL_SOCKET, opt, KERNEL_SOCKPTR(&val), sizeof(val));
+    /* The plain option is capped at net.core.wmem_max/rmem_max (208 KiB on a
+     * default boot), so a 256 KiB request reached the kernel as 208 KiB and
+     * 2 x 208 KiB was the most a carrier could hold -- less than one BDP on
+     * the 218 ms WAN. The FORCE option needs CAP_NET_ADMIN, which the
+     * module's workqueue has in the init namespace; a namespace that lacks it
+     * falls back to the capped option rather than failing the carrier. */
+    if (sock_setsockopt(s, SOL_SOCKET, SO_SNDBUFFORCE, KERNEL_SOCKPTR(&v), sizeof(v)))
+        sock_setsockopt(s, SOL_SOCKET, SO_SNDBUF, KERNEL_SOCKPTR(&v), sizeof(v));
+    if (sock_setsockopt(s, SOL_SOCKET, SO_RCVBUFFORCE, KERNEL_SOCKPTR(&v), sizeof(v)))
+        sock_setsockopt(s, SOL_SOCKET, SO_RCVBUF, KERNEL_SOCKPTR(&v), sizeof(v));
 }
 
 static void tbt_car_connect_work(struct work_struct *w)
@@ -1395,6 +1398,9 @@ static void tbt_car_connect_work(struct work_struct *w)
     err = kernel_bind(s, (struct sockaddr_unsized *)&local, sizeof(local));
     if (err)
         goto release;
+    /* Before the SYN: the handshake freezes the window scale from this
+     * socket's receive buffer. */
+    tbt_car_setsockbuf(s, &t->cfg, sess->n_pri);
     s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
     err = kernel_connect(s, (struct sockaddr_unsized *)&addr, sizeof(addr), 0);
     if (err)
@@ -1412,14 +1418,6 @@ static void tbt_car_connect_work(struct work_struct *w)
     s->sk->sk_state_change = tbt_car_state_change;
     write_unlock_bh(&s->sk->sk_callback_lock);
 
-    {
-        /* Size both buffers for this carrier's share of the sender window;
-         * see tbt_car_sockbuf(). */
-        int v = tbt_car_sockbuf(sess);
-
-        tbt_car_setsockbuf(s, SO_SNDBUF, SO_SNDBUFFORCE, v);
-        tbt_car_setsockbuf(s, SO_RCVBUF, SO_RCVBUFFORCE, v);
-    }
     atomic_set(&c->connected, 1);
     c->state = TBT_CAR_CONNECTING; /* up after the pump writes HELLO */
     c->last_una = tcp_sk(s->sk)->snd_una;
@@ -1583,14 +1581,9 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
     newsock->sk->sk_state_change = tbt_car_state_change;
     write_unlock_bh(&newsock->sk->sk_callback_lock);
 
-    {
-        /* Same budget on the accepted side; see tbt_car_sockbuf(). A far
-         * tunnel whose cfg mirrors the near's sizes alike. */
-        int v = tbt_car_sockbuf(sess);
-
-        tbt_car_setsockbuf(newsock, SO_SNDBUF, SO_SNDBUFFORCE, v);
-        tbt_car_setsockbuf(newsock, SO_RCVBUF, SO_RCVBUFFORCE, v);
-    }
+    /* The listener already fixed the window scale; this sizes the accepted
+     * socket's buffers to the same share. */
+    tbt_car_setsockbuf(newsock, &sess->tunnel->cfg, sess->n_pri);
     atomic_set(&c->connected, 1);
     spin_lock(&sess->lock);
     list_add_tail(&c->node, &sess->prov);
