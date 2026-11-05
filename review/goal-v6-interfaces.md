@@ -635,6 +635,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **close-drain 修复归属**：已开 `window-close` 修 public close 的 drain 顺序（先排空 capture/txq，再 FIN/RST）；T1 未绿，不合并。
 
+**close-drain 修复（`w-window ddef988`，srcversion `62E75E1C`）**：FIN 只在 capture 全部 submit 且 `tx_ack` 覆盖 `tx_seq` 后发出；`close_since_ns` + `tbt_tx_close_check()` 对无进展的 FIN 等待有界 reset；FIN 已写出但对端 FIN 缺失 → `max(60s, 2×budget)` 后 detach（不 reset）；对端 FIN 已到但 delivery 队列不缩 → `tbt_rx_deliver_stall_check()` 有界 reset；FIN order gate 改为 `state != DEAD`。回归：adversarial `closedrain` PASS、`closedrain_timeout`；make check/lint PASS；A–K/near/full adversarial/SAN 由 `window-verify` 补跑。T1 等 sink HND0 重跑。
+
 **验收口径修正（2026-11-06）**：iperf3 server 在 `TEST_END` 主动 close 数据 socket，receiver 13,500,416 B **不是 tunnel 丢数据**；T1 的 byte-exact 改用 **sink 读满 16MiB + EOF**，iperf3 只作吞吐/信息。close-drain 仍是真 bug（near FIN 早于 capture/txq 排空），`window-close`/A3 继续修；T1 仍未绿。
 
 **sink 测试就绪（`hnd0-n1b`）**：`sink.py`（accept 一次、读到 EOF、记录 bytes/expected/ok/secs）与 `send16m.py`（写满 16MiB、`shutdown(SHUT_WR)`、等 EOF）本地 loopback 验证 `16,777,216 B ok=1`；HND0 `/tmp/tbtun-sink/sink.py` `py_compile` 通过。下一轮证据目录 `review/wan-experiment/t1-n1-auto-rx1m-sink/`，保留 `a2a37ed` 的 iperf3 失败证据；等 `window-close`/A3 新 head。
