@@ -631,6 +631,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **用户裁决（模块 invariant）**：ko sha 依赖 build-path/kernel；`3edf84e0` 不是 f8023a2 的确定性 sha。Invariant = **same source `f8023a2` + per-end build + `srcversion=475868A5` + per-end sha 记录**；`hnd0-n1b` 按此跑 N=1 auto。`window-verify` 负责本机 A–K/完整 adversarial。
 
+**f8023a2 rx1m 结果（`hnd0-n1b a2a37ed`）**：控制流 starvation 修复生效——`rc=0`、无 `TXSTALLKILL`、far `fbk_rx=1089`、`holes=0`、`carrier_lost=0`、`lost=0`；near `tx_window=1MiB` cap、`bdp=1321474`、`k=200`；far `tx_window=210880`、`bdp=99902`；CPU near 9.66%、far 21.71%。**但 16MiB 未逐字节**：sender 16,777,216 B，receiver 13,500,416 B（80.47%）；near `submit_bytes=15,996,575`（780,641 B 留在 public socket 接收队列未 capture）、`tx=14,007,990`、`wire=14,118,309`、流结束 `txq=1,113,317`；far `rx_delivered=13,614,558`；数据流 sid …905 close 时 `state=5 kill=5`、`rxq=24576`。机制：public socket close 直接 kill stream，未先排空 capture/txq，FIN/RST 越过队列数据。**close-drain 是新的/遗留阻塞，G1 不能判绿**；A 诊断修复。
+
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
 
 | 项 | 内容 |
