@@ -381,7 +381,7 @@ static inline bool tbt_http_chunk_done(const struct tbt_http_chunk_parser *p)
 
 /* Encode one frame as one HTTP chunk. The chunk data is exactly the record:
  * the 32-byte header followed by hdr->body_len body bytes, with no length
- * prefix of any kind (TBT_CONV 0x0004). hdr->body_len is authoritative and is
+ * prefix of any kind (TBT_CONV 0x0005). hdr->body_len is authoritative and is
  * validated with tbt_hdr_check(); a TBT_F_PAD record must have body_len 0 and
  * is emitted as the canonical 38-byte PAD chunk.
  *
