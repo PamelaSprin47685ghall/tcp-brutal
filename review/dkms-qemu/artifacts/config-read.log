@@ -1,0 +1,1 @@
+tunnel 1 role=near listen=127.0.0.1:9000 peer=203.0.113.9:443 n=4 m=1 dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=500 rx_reorder_bytes=262144 tx_retain_bytes=0 carrier_stall_ms=3000 portblock=0-0

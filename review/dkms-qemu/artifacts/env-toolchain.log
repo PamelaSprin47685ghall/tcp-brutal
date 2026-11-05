@@ -1,0 +1,7 @@
+gcc (GCC) 16.2.1 20260810
+GNU Make 4.4.1
+v1.32
+*** Zstandard CLI (64-bit) v1.5.7, by Yann Collet ***
+kmod version 34.2
+dkms-3.4.4
+165cfb35ac92e6dc7ad47a49da352d4f7ba49f2a10d7a73979797313149fd61f  /opt/dkms/bin/dkms

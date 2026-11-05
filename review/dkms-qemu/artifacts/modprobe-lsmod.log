@@ -1,0 +1,15 @@
+tbtun 172032 0 - Live 0xffffffffc0431000 (OE)
+filename:       /lib/modules/7.2.9-1-MANJARO/updates/dkms/tbtun.ko.zst
+author:         tbtun contributors
+version:        0.0.1
+description:    tbtun: TCP tunnel over N+M HTTP/1.1-ish carrier connections
+license:        GPL
+srcversion:     533B6F5D7025857930ACD8B
+depends:        
+name:           tbtun
+retpoline:      Y
+vermagic:       7.2.9-1-MANJARO SMP preempt mod_unload 
+parm:           debug:Debug verbosity (0..3) (uint)
+parm:           max_tunnels:Maximum configured tunnels (default 64) (uint)
+parm:           max_carriers:Carrier sockets per session, 1..16 (default 16) (uint)
+parm:           debug_loss:Allow carrier drop_ppm (frame loss injection) writes; 0 refuses them (bool)
