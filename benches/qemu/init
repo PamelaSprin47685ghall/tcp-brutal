@@ -62,6 +62,9 @@ P_profiles=raw,http-kal,http-kal-drip
 P_control=1
 P_control_mbit=0
 P_hole_iters=2000
+P_wan_mbit=17
+P_wan_delay=109
+P_tx_window=0
 
 # Globals a measurement leaves for its row.
 X_N=0 X_M=0 X_PROFILE=none X_MIB=0 X_RC=99 X_STRICT=0
@@ -127,22 +130,68 @@ stat_max()
         }
         END { print m + 0 }' /proc/net/tbtun/stats
 }
+# peers columns: the module prints its order in the header line, and a release
+# may insert a column (the WAN work adds delivery_rate_bps, cwnd_bytes and
+# snd_wnd after inflight). Resolve the indices once from that header so a
+# column shift cannot silently turn tx_bytes into something else.
+PC_TUNNEL=1 PC_CARRIER=2 PC_SPORT=3 PC_UACK=5 PC_RTT=6 PC_INFLIGHT=7
+PC_STATE=8 PC_PROFILE=9 PC_FRAMES=13 PC_BYTES=14 PC_DROPPED=15 PC_RETX=16
+PC_RATE=0 PC_CWND=0 PC_SNDWND=0
+peer_cols_init()
+{
+    # The header's first token is "#", which is not a column: the names start
+    # at the second token but describe data field 1.
+    _i=0
+    for _f in $(awk '/^#/ { print; exit }' "$PEERS"); do
+        case $_f in
+        id) PC_TUNNEL=$_i ;;
+        tunnel) PC_TUNNEL=$_i ;;
+        carrier) PC_CARRIER=$_i ;;
+        sport) PC_SPORT=$_i ;;
+        uack) PC_UACK=$_i ;;
+        rtt_us) PC_RTT=$_i ;;
+        inflight) PC_INFLIGHT=$_i ;;
+        delivery_rate_bps) PC_RATE=$_i ;;
+        cwnd_bytes) PC_CWND=$_i ;;
+        snd_wnd) PC_SNDWND=$_i ;;
+        state) PC_STATE=$_i ;;
+        class) PC_PROFILE=$_i ;;
+        tx_frames) PC_FRAMES=$_i ;;
+        tx_bytes) PC_BYTES=$_i ;;
+        dropped) PC_DROPPED=$_i ;;
+        retx_ppm) PC_RETX=$_i ;;
+        esac
+        _i=$((_i + 1))
+    done
+}
 peer_sum()
 {
-    awk -v id="$1" -v n="$2" '$1 == id { s += $n } END { print s + 0 }' /proc/net/tbtun/peers
+    awk -v id="$1" -v n="$2" '$1 == id { s += $n } END { print s + 0 }' "$PEERS"
 }
 peers_up()
 {
-    awk -v id="$1" '$1 == id && $8 == "up" { n++ } END { print n + 0 }' /proc/net/tbtun/peers
+    awk -v id="$1" -v c="$PC_STATE" '$1 == id && $c == "up" { n++ } END { print n + 0 }' \
+        "$PEERS"
 }
 peers_total()
 {
-    awk -v id="$1" '$1 == id { n++ } END { print n + 0 }' /proc/net/tbtun/peers
+    awk -v id="$1" '$1 == id { n++ } END { print n + 0 }' "$PEERS"
 }
 peer_retx_max()
 {
-    awk -v id="$1" '$1 == id { if ($16 + 0 > m) m = $16 + 0 } END { print m + 0 }' \
-        /proc/net/tbtun/peers
+    awk -v id="$1" -v c="$PC_RETX" '$1 == id { if ($c + 0 > m) m = $c + 0 } END { print m + 0 }' \
+        "$PEERS"
+}
+peer_rtt_max()
+{
+    awk -v id="$1" -v c="$PC_RTT" '$1 == id && $c + 0 > m { m = $c + 0 } END { print m + 0 }' \
+        "$PEERS"
+}
+peer_rtt_min()
+{
+    awk -v id="$1" -v c="$PC_RTT" '
+        $1 == id && $c + 0 > 0 && (m == 0 || $c + 0 < m) { m = $c + 0 }
+        END { print m + 0 }' "$PEERS"
 }
 
 flush_and_wait()
@@ -227,9 +276,19 @@ up_now()
 # maximum it saw, not the last value.
 q_sample()
 {
-    awk '
+    awk -v p_inf="$PC_INFLIGHT" -v p_rate="$PC_RATE" \
+        -v p_cwnd="$PC_CWND" -v p_wnd="$PC_SNDWND" '
         FILENAME ~ /peers/ {
-            if ($1 != "#" && $7 + 0 > infl) infl = $7 + 0
+            if ($1 == "#") next
+            if (p_inf && $p_inf + 0 > infl) infl = $p_inf + 0
+            # Tunnel 2 is the near side: its carriers carry the application
+            # bytes, so the in-flight and window evidence comes from here.
+            if ($1 == 2) {
+                if (p_inf) isum += $p_inf + 0
+                if (p_rate) drate += $p_rate + 0
+                if (p_cwnd) cwnd += $p_cwnd + 0
+                if (p_wnd) sndw += $p_wnd + 0
+            }
             next
         }
         /^tunnel / {
@@ -242,9 +301,15 @@ q_sample()
                 else if (k == "retain_bytes" && v > ret) ret = v
                 else if (k == "pub_wmem" && v > pw) pw = v
                 else if (k == "car_wmem" && v > cw) cw = v
+                else if (k == "tx_window" && $2 == 2 && v > win) win = v
             }
         }
-        END { printf "%d %d %d %d %d %d %d\n", infl, txq, rxq, ooo, ret, pw, cw }
+        END {
+            if (win > 0 && isum > win) over = isum - win
+            printf "%d %d %d %d %d %d %d %d %d %d %d %d %d\n",
+                      infl, txq, rxq, ooo, ret, pw, cw, isum, win,
+                      drate, cwnd, sndw, over
+        }
     ' "$PEERS" /proc/net/tbtun/stats
 }
 sampler_start()
@@ -335,6 +400,41 @@ tc_setup()
         i=$((i + 1))
     done
 }
+
+# --- tc: the WAN path, one boot ---------------------------------------------
+# The measured path was 218 ms RTT at 17 Mbit/s. The delay is split over the
+# two directions because both leave through eth0: the carrier's DATA matches
+# its port class and pays one delay, and the far side's ACKs match no filter,
+# so they take the default class and pay the other. htb on the port class is
+# the carrier rate; the default class only delays. The u32 filters are the
+# same per-port filters tc_setup() installs.
+#
+# burst 32k: htb's default 1500-byte bucket drains in 0.7 ms at 17 Mbit, so a
+# 1 ms tick would cap the class near 12 Mbit. limit 10000: the default class
+# carries the echo direction at 1 Gbit, where netem's 1000-packet queue would
+# drop a burst above ~1.4 MB instead of delaying it.
+tc_setup_wan()
+{
+    _mb=${P_wan_mbit:-17}
+    _d=${P_wan_delay:-109}
+    tc_clear
+    /bin/tc qdisc add dev eth0 root handle 1: htb default 99 || return 1
+    /bin/tc class add dev eth0 parent 1: classid 1:1 htb rate 1000mbit ceil 1000mbit || return 1
+    /bin/tc class add dev eth0 parent 1:1 classid 1:99 htb rate 1000mbit ceil 1000mbit || return 1
+    /bin/tc qdisc add dev eth0 parent 1:99 handle 99: netem delay "${_d}ms" limit 10000 || return 1
+    i=0
+    while [ $i -lt $CLASS_PORTS ]; do
+        port=$((PORTBLOCK_LO + i))
+        cls=$((10 + i))
+        /bin/tc class add dev eth0 parent 1:1 classid "1:$cls" htb rate "${_mb}mbit" \
+            ceil "${_mb}mbit" burst 32k cburst 32k || return 1
+        /bin/tc qdisc add dev eth0 parent "1:$cls" handle "$((100 + i)):" \
+            netem delay "${_d}ms" limit 10000 || return 1
+        /bin/tc filter add dev eth0 parent 1: protocol ip prio 1 u32 \
+            match ip sport "$port" 0xffff flowid "1:$cls" || return 1
+        i=$((i + 1))
+    done
+}
 tc_class_bytes()
 {
     # iproute2 prints the byte counter on the line after the class header:
@@ -362,6 +462,8 @@ xfer()
     X_WIRE=0 X_APP=0 X_WPA=0 X_FRAMES=0 X_WPS=0
     X_RETX=0 X_DUP=0 X_INFL=0 X_HD=0 X_HR=0 X_HU=0 X_STALL=0 X_DEPTH=0
     X_TXQ=0 X_RXQ=0 X_OOO=0 X_RET=0 X_UP=0 X_NTOT=0
+    X_RX_MBIT=0 X_INFL_SUM=0 X_WIN=0 X_DELIV=0 X_CWND=0 X_SNDW=0
+    X_OVER=0
 
     flush_and_wait
     if ! configure "$X_N" "$X_M" "$X_PROFILE" "$X_DUP" "$_extra"; then
@@ -387,9 +489,9 @@ xfer()
     bench_note "row=$_row: n=$X_N m=$X_M profile=$X_PROFILE carriers_up=$X_UP/$X_NTOT"
 
     # Whole-transfer baselines, taken before the burst.
-    _wb=$(peer_sum 2 14)
+    _wb=$(peer_sum 2 "$PC_BYTES")
     _ab=$(tunnel_stat 2 submit_bytes)
-    _fb=$(peer_sum 2 13)
+    _fb=$(peer_sum 2 "$PC_FRAMES")
     : "${_ab:=0}"
 
     sampler_start
@@ -410,17 +512,24 @@ xfer()
     done
     if kill -0 "$_bpid" 2> /dev/null; then
         _t0=$(up_now)
-        _w0=$(peer_sum 2 14)
+        _w0=$(peer_sum 2 "$PC_BYTES")
         _a0=$(tunnel_stat 2 submit_bytes)
-        _f0=$(peer_sum 2 13)
+        _f0=$(peer_sum 2 "$PC_FRAMES")
+        _x0=$(tunnel_stat 2 rx_delivered)
         sleep "$P_window"
         _t1=$(up_now)
-        _w1=$(peer_sum 2 14)
+        _w1=$(peer_sum 2 "$PC_BYTES")
         _a1=$(tunnel_stat 2 submit_bytes)
-        _f1=$(peer_sum 2 13)
+        _f1=$(peer_sum 2 "$PC_FRAMES")
+        _x1=$(tunnel_stat 2 rx_delivered)
         X_MBIT=$(awk -v a="$_w0" -v b="$_w1" -v x="$_t0" -v y="$_t1" \
             'BEGIN { t = y - x; if (t <= 0) t = 1; printf "%.2f", (b - a) * 8 / 1000000 / t }')
         X_APP_MBIT=$(awk -v a="$_a0" -v b="$_a1" -v x="$_t0" -v y="$_t1" \
+            'BEGIN { t = y - x; if (t <= 0) t = 1; printf "%.2f", (b - a) * 8 / 1000000 / t }')
+        # The receiver side: bytes the near tunnel accepted on the burst's
+        # public socket. It is the echo direction, so it is sampled over the
+        # same window as the wire rate.
+        X_RX_MBIT=$(awk -v a="${_x0:-0}" -v b="${_x1:-0}" -v x="$_t0" -v y="$_t1" \
             'BEGIN { t = y - x; if (t <= 0) t = 1; printf "%.2f", (b - a) * 8 / 1000000 / t }')
         X_WPS=$(awk -v a="$_f0" -v b="$_f1" -v x="$_t0" -v y="$_t1" \
             'BEGIN { t = y - x; if (t <= 0) t = 1; printf "%.1f", (b - a) / t }')
@@ -441,16 +550,20 @@ xfer()
     cpu_end
     sampler_stop
 
-    _w2=$(peer_sum 2 14)
+    _w2=$(peer_sum 2 "$PC_BYTES")
     _a2=$(tunnel_stat 2 submit_bytes)
-    _f2=$(peer_sum 2 13)
+    _f2=$(peer_sum 2 "$PC_FRAMES")
     X_WIRE=$(( ${_w2:-0} - ${_wb:-0} ))
     X_APP=$(( ${_a2:-0} - ${_ab:-0} ))
     X_FRAMES=$(( ${_f2:-0} - ${_fb:-0} ))
     # X_WALL is the transfer's wall time, not the rate window's.
     X_WALL=$T_WALL
     grep -q 'strict phase passed' /tmp/burst.log && X_STRICT=1
-    [ "$X_RC" -eq 0 ] || bench_note "row=$_row: tbt_burst rc=$X_RC $(tail -n 2 /tmp/burst.log | tr '\n' ' ')"
+    if [ "$X_RC" -ne 0 ]; then
+        bench_note "row=$_row: tbt_burst rc=$X_RC"
+        # The banner carries the errno and the phase; the stats dump follows.
+        awk '{ print "BENCHSTATS burst " $0 }' /tmp/burst.log 2> /dev/null
+    fi
 
     # Honest retransmit rate: DATA copies / unique DATA records, session-wide.
     # peer_retx_max is the old per-carrier ratio over every record (FBK
@@ -474,12 +587,31 @@ xfer()
     X_RXQ=$(q_max 4)
     X_OOO=$(q_max 5)
     X_RET=$(q_max 6)
+    X_INFL_SUM=$(q_max 8)
+    X_WIN=$(q_max 9)
+    X_DELIV=$(q_max 10)
+    X_CWND=$(q_max 11)
+    X_SNDW=$(q_max 12)
+    X_OVER=$(q_max 13)
 
     # Per-carrier evidence, near side (the shaped direction).
-    awk -v row="$_row" '$1 == 2 {
-        printf "BENCHCAR row=%s carrier=%s sport=%s state=%s profile=%s bytes=%s frames=%s dropped=%s retx_ppm=%s inflight=%s\n",
-               row, $2, $3, $8, $9, $14, $13, $15, $16, $7
-    }' "$PEERS"
+    # delivery_rate_bps, cwnd_bytes and snd_wnd exist only after the sender
+    # window work; the other columns are addressed by name so the extra
+    # columns cannot shift them. rtt_us is the carrier's own TCP RTT.
+    awk -v row="$_row" -v p_car="$PC_CARRIER" -v p_sport="$PC_SPORT" \
+        -v p_state="$PC_STATE" -v p_prof="$PC_PROFILE" -v p_bytes="$PC_BYTES" \
+        -v p_frames="$PC_FRAMES" -v p_drop="$PC_DROPPED" -v p_retx="$PC_RETX" \
+        -v p_inf="$PC_INFLIGHT" -v p_rate="$PC_RATE" -v p_cwnd="$PC_CWND" \
+        -v p_wnd="$PC_SNDWND" -v p_rtt="$PC_RTT" '
+        $1 == 2 {
+            printf "BENCHCAR row=%s carrier=%s sport=%s state=%s profile=%s bytes=%s frames=%s dropped=%s retx_ppm=%s inflight=%s rtt_us=%s",
+                   row, $p_car, $p_sport, $p_state, $p_prof, $p_bytes, $p_frames,
+                   $p_drop, $p_retx, $p_inf, $p_rtt
+            if (p_rate) printf " delivery_rate_bps=%s", $p_rate
+            if (p_cwnd) printf " cwnd_bytes=%s", $p_cwnd
+            if (p_wnd) printf " snd_wnd=%s", $p_wnd
+            printf "\n"
+        }' "$PEERS"
     return 0
 }
 
@@ -626,7 +758,8 @@ bench_loss()
     tc_setup || fatal "tc setup failed"
     for _ppm in $(echo "$P_loss" | tr ',' ' '); do
         if xfer 4 0 raw "$P_dup" "$P_mib" "loss-$_ppm" "" "$_ppm"; then
-            _dropped=$(awk '$1 == 2 && ($2 == 1 || $2 == 2) { s += $15 } END { print s + 0 }' "$PEERS")
+            _dropped=$(awk -v p_car="$PC_CARRIER" -v p_drop="$PC_DROPPED" \
+                '$1 == 2 && ($p_car == 1 || $p_car == 2) { s += $p_drop } END { print s + 0 }' "$PEERS")
             bench_note "row=loss-$_ppm: injector dropped $_dropped records on carriers 1,2"
             emit_xfer_row "loss-$_ppm" drop_ppm="$_ppm" dropped_by_ppm="$_dropped"
         else
@@ -714,7 +847,8 @@ bench_latency()
     bench_row lat-tunnel-n4 n=4 m=0 profile=raw iters="$P_iters" \
         bytes="$P_bytes" $LAT_KV rc="$_r"
     lat_parse "$_out" 2
-    _dropped=$(awk '$1 == 2 && ($2 == 1 || $2 == 2) { s += $15 } END { print s + 0 }' "$PEERS")
+    _dropped=$(awk -v p_car="$PC_CARRIER" -v p_drop="$PC_DROPPED" \
+        '$1 == 2 && ($p_car == 1 || $p_car == 2) { s += $p_drop } END { print s + 0 }' "$PEERS")
     _hd=$(( $(tunnel_stat 2 holes_declared) - _hd0 ))
     _hr=$(( $(tunnel_stat 2 holes_repaired) - _hr0 ))
     _hu=$(( $(tunnel_stat 2 holes_unrecoverable) - _hu0 ))
@@ -779,6 +913,125 @@ bench_scale()
                 carrier_lost="$_lost" carrier_replaced="$_rep"
         else
             bench_row "n$_n" n="$_n" m=0 profile=raw mib="$P_mib" rc=1
+        fi
+    done
+    tc_clear
+}
+
+# --- end-of-row diagnostics -------------------------------------------------
+# The complete c3 and live lines for both tunnels, every peers line, the top
+# kworker with its stack, and the last dmesg lines. Printed as BENCHSTATS so
+# the CSV writer ignores them and the console keeps the raw text.
+bench_stats()
+{
+    awk '$1 == "tunnel" && ($2 == 1 || $2 == 2) && ($3 == "c3" || $3 == "live") {
+             print "BENCHSTATS stats " $0 }' /proc/net/tbtun/stats
+    awk '{ print "BENCHSTATS peers " $0 }' /proc/net/tbtun/peers
+    # Top three kworkers by CPU since boot, four stack samples each: one
+    # sample usually lands between work items and shows only worker_thread.
+    awk '
+        {
+            c = substr($0, index($0, "(") + 1)
+            c = substr(c, 1, index(c, ")") - 1)
+            if (c !~ /^kworker/) next
+            rest = substr($0, index($0, ")") + 2)
+            split(rest, a, " ")
+            print a[12] + a[13], $1, c
+        }' /proc/[0-9]*/stat 2> /dev/null | sort -rn | head -n 3 |
+    while read -r _kt _kp _kc; do
+        _ks=
+        _wc=$(cat "/proc/$_kp/wchan" 2> /dev/null)
+        [ -n "$_wc" ] || _wc=-
+        _i=0
+        while [ $_i -lt 10 ]; do
+            _s=$(tr '\n' '|' < "/proc/$_kp/stack" 2> /dev/null)
+            [ -n "$_s" ] && _ks="$_ks[$_i]$_s "
+            _i=$((_i + 1))
+            sleep 0.01
+        done
+        [ -n "$_ks" ] || _ks=-
+        printf 'BENCHSTATS kworker pid=%s comm=%s ticks=%s wchan=%s stack=%s\n' \
+            "$_kp" "$_kc" "$_kt" "$_wc" "$_ks"
+    done
+    _dm=$(dmesg 2> /dev/null | tail -n 40)
+    case $_dm in
+    '') printf 'BENCHSTATS dmesg -\n' ;;
+    *) printf '%s\n' "$_dm" | awk '{ print "BENCHSTATS dmesg " $0 }' ;;
+    esac
+}
+
+# --- wan: one raw stream over the measured 218 ms / 17 Mbit path ------------
+# rx_mbit is the echo direction's rate into the burst's socket; goodput_mbit
+# is the carrier wire rate over the same window. inflight_sum is the sampler's
+# peak sum over the near carriers and tx_window the peak the module reported,
+# so the row shows whether the sender window covers the path's BDP.
+bench_wan()
+{
+    tc_setup_wan || fatal "wan tc setup failed (htb + netem + u32)"
+    bench_note "wan: ${P_wan_mbit}mbit per carrier port class, ${P_wan_delay}ms netem per direction"
+    _tw=${P_tx_window:-0}
+    for _n in $(echo "$P_nlist" | tr ',' ' '); do
+        # RTO is SRTT + 4*RTTVAR with a 200 ms floor, so ~300 ms on this
+        # path; a 1500 ms hole budget is 3-5x that and still leaves room for
+        # a repair, and 3000 ms of silence is a real stall, not jitter.
+        _stall=3000
+        _x="carrier_stall_ms=$_stall keepalive=2000"
+        [ "$_tw" -gt 0 ] && _x="$_x tx_window_bytes=$_tw"
+        if xfer "$_n" 0 "$P_profile" "$P_dup" "$P_mib" "wan-n$_n" \
+            "$_x"; then
+            _win=$(tunnel_stat 2 tx_window)
+            _rttmean=$(tunnel_stat 2 rtt_mean_us)
+            _rttvar=$(tunnel_stat 2 rttvar_us)
+            _rttmaxc3=$(tunnel_stat 2 rtt_max_us)
+            _wkv= _rkv= _ckv=
+            [ -n "$_win" ] && _wkv="tx_window=$X_WIN"
+            [ -n "$_rttmean" ] && _rkv="rtt_mean_us=$_rttmean rttvar_us=$_rttvar rtt_max_us=$_rttmaxc3"
+            # The row-end peers snapshot: the module reports rtt_us=0 while
+            # the stream is busy and only fills it in when the carrier goes
+            # quiet, so the across-carrier values come from here, not from
+            # the 250 ms sampler.
+            _rttmaxp=$(peer_rtt_max 2)
+            _rttmin=$(peer_rtt_min 2)
+            _ncar=$(peers_total 2)
+            _deliv=0
+            [ "$PC_RATE" -gt 0 ] && _deliv=$(peer_sum 2 "$PC_RATE")
+            : "${_rttmaxp:=0}" "${_rttmin:=0}" "${_ncar:=0}" "${_deliv:=0}"
+            if [ "$_rttmaxp" -gt 0 ]; then
+                _ckv="$_ckv car_srtt_ms=$(awk -v u="$_rttmaxp" 'BEGIN { printf "%.1f", u / 1000 }')"
+                _ckv="$_ckv rtt_min_us=$_rttmin n_carriers=$_ncar"
+            fi
+            if [ "$PC_RATE" -gt 0 ]; then
+                _ckv="$_ckv car_delivery_mbps=$(awk -v r="$X_DELIV" 'BEGIN { printf "%.2f", r * 8 / 1000000 }')"
+                _ckv="$_ckv car_cwnd_kb=$(awk -v b="$X_CWND" 'BEGIN { printf "%.1f", b / 1024 }')"
+                _ckv="$_ckv car_snd_wnd_kb=$(awk -v b="$X_SNDW" 'BEGIN { printf "%.1f", b / 1024 }')"
+                if [ "$_deliv" -gt 0 ]; then
+                    _ckv="$_ckv sum_delivery_mbps=$(awk -v r="$_deliv" 'BEGIN { printf "%.2f", r * 8 / 1000000 }')"
+                    if [ "$X_WIN" -gt 0 ] && [ -n "$_rttmean" ] && [ "$_rttmean" -gt 0 ]; then
+                        _bdp=$(awk -v u="$_rttmean" -v r="$_deliv" \
+                            'BEGIN { printf "%.1f", u * r / 1000000 / 1024 }')
+                        _cov=$(awk -v w="$X_WIN" -v u="$_rttmean" -v r="$_deliv" \
+                            'BEGIN { b = u * r / 1000000; if (b > 0) printf "%.2f", w / b; else print 0 }')
+                        # coverage and k_eff are the same quantity: how many
+                        # mean BDPs the peak window covers.
+                        _ckv="$_ckv mean_bdp_kb=$_bdp coverage=$_cov k_eff=$_cov"
+                    fi
+                fi
+            fi
+            emit_xfer_row "wan-n$_n" wan_mbit="$P_wan_mbit" \
+                wan_delay_us="$((P_wan_delay * 1000))" rx_mbit="$X_RX_MBIT" \
+                inflight_sum="$X_INFL_SUM" tx_ack="$(tunnel_stat 2 tx_ack)" \
+                carrier_lost="$(tunnel_stat 2 lost)" \
+                win_block="$(tunnel_stat 2 win_block)" \
+                pump_hw_armed="$(tunnel_stat 2 pump_hw_armed)" \
+                pump_hw_fired="$(tunnel_stat 2 pump_hw_fired)" \
+                car_sndbuf="$(tunnel_stat 2 car_sndbuf)" \
+                car_rcvbuf="$(tunnel_stat 2 car_rcvbuf)" \
+                inflight_over_window="$X_OVER" \
+                hole_budget_ms="$P_hole_budget" carrier_stall_ms="$_stall" \
+                $_wkv $_rkv $_ckv
+            bench_stats
+        else
+            bench_row "wan-n$_n" n="$_n" m=0 profile="$P_profile" mib="$P_mib" rc=1
         fi
     done
     tc_clear
@@ -859,13 +1112,15 @@ bench_hole_cost()
     configure 4 0 raw 0 || fatal "hole-cost tunnel rejected"
     sleep 1
     echo 'carrier 1 drop_ppm 1000000' > "$PEERS" || bench_note "hole-cost: arm rejected"
-    _d0=$(awk '$2 == 1 { s += $15 } END { print s + 0 }' "$PEERS")
+    _d0=$(awk -v p_car="$PC_CARRIER" -v p_drop="$PC_DROPPED" \
+        '$p_car == 1 { s += $p_drop } END { print s + 0 }' "$PEERS")
     _hd0=$(stat_sum holes_declared) _hr0=$(stat_sum holes_repaired)
     _hu0=$(stat_sum holes_unrecoverable)
     : "${_hd0:=0}" "${_hr0:=0}" "${_hu0:=0}"
     _out=$(/bin/tbt_lat 127.0.0.1 "$PUB_PORT" "$P_hole_iters" "$P_bytes" 0 30 2>&1)
     _rc=$?
-    _d1=$(awk '$2 == 1 { s += $15 } END { print s + 0 }' "$PEERS")
+    _d1=$(awk -v p_car="$PC_CARRIER" -v p_drop="$PC_DROPPED" \
+        '$p_car == 1 { s += $p_drop } END { print s + 0 }' "$PEERS")
     _holes=$((_d1 - _d0))
     bench_note "hole-cost: rc=$_rc dropped=$_holes raw=$(printf '%s' "$_out" | tr '\n' '|')"
     lat_parse "$_out" 1
@@ -895,7 +1150,8 @@ if [ -r /bench.txt ]; then
         _v=${_line#*=}
         case $_k in
         scenario | nlist | mib | profile | dup | loss | iters | loss_iters | bytes | \
-            netem | rx_reorder | hole_budget | window | profiles | control | control_mbit | hole_iters)
+            netem | rx_reorder | hole_budget | window | profiles | control | control_mbit | \
+            hole_iters | wan_mbit | wan_delay | tx_window)
             eval "P_$_k=\$_v"
             ;;
         *) bench_note "unknown bench key $_k" ;;
@@ -941,6 +1197,7 @@ echo "4096 262144 67108864" > /proc/sys/net/ipv4/tcp_wmem 2> /dev/null
 insmod /tbtun.ko debug=0 debug_loss=1 || fatal "insmod tbtun.ko"
 [ -e "$CFG" ] || fatal "$CFG missing after load"
 echo "ports $PORTBLOCK_LO-$((PORTBLOCK_LO + PORTBLOCK_MOD - 1))" > "$PORTS" || fatal "ports directive rejected"
+peer_cols_init
 
 # The echo peer (tunnel target and direct latency peer) and the control sink.
 /bin/tbt_echo "$ECHO_PORT" echo &
@@ -970,6 +1227,7 @@ bench_note "tc=$(command -v tc) $(ls -l /bin/tc 2>&1) version=$(/bin/tc -V 2>&1 
     flush-hang) bench_flush_hang ;;
     second-connection) bench_second_conn ;;
     hole-cost) bench_hole_cost ;;
+    wan) bench_wan ;;
     *) fatal "unknown scenario $P_scenario" ;;
     esac
 )
