@@ -66,6 +66,13 @@ full-suite pass.
   any per-path high-water; it is repaired by the retransmit timer and the geometric
   test. `recv_lag` remains loss evidence for the hole gate, but it no longer disables
   the receipt proof.
+- **Retransmit accounting and the slow path:** each copy is tagged where it is queued
+  (hole / slow / carrier loss) and counted where the carrier accepts the write;
+  `retx_ppm` is DATA copies over unique DATA records and `dup_bytes_ppm` is copy
+  payload over application bytes, so FBK no longer dilutes the rate. The slow path's
+  grace moved from 2xRTO to 3xRTO: on a clean 40 MiB n=4 run the old grace copied 310
+  frames that the peer had queued, not lost (whole-run wire/app 1.047 -> 1.024, honest
+  retx 30k -> 8k; probes J/K still 3/3).
 - **Short-write tail offset:** after a partial carrier write, the retained tail is
   copied from `fr->data + (done - TBT_HDR_LEN)` instead of `fr->data`, keeping the
   header/payload split aligned. This fixes the strict `n=4` payload corruption at
