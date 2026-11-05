@@ -157,8 +157,55 @@ carrier_ctor_order_violation() {
     fi
 }
 
+# Session statistics counters that must stay atomic64_t (DESIGN.md §8.7).
+# Keep this list in step with struct tbt_session: the declaration half of the
+# check fails if one is changed back to u64, and the access half fails on a
+# bare read or write. Per-carrier counters are not listed: tbt_carrier_xmit()
+# is their only writer, under pump_lock.
+atomic_stats_names='
+    stats_gap rx_work_runs rx_drain_entries rx_drain_bytes rx_paused_skips
+    rx_parse_proto rx_records rx_ready_calls rx_work_early rx_reads
+    rx_read_bytes rx_resume_calls rx_read_zero rx_resume_busy rx_errs
+    carrier_write_space_runs poll_rescues tx_wake_calls tx_wake_busy
+    tx_work_runs carrier_ws_calls pump_hw_fired carrier_lost carrier_replaced
+    carrier_alloc_fail connect_fail port_exhaust port_alloc_fail
+    profile_mismatch http_parse_err http_status_err pad_tx drip_tx dup_bytes
+    dup_used dup_suppressed holes_unrecoverable hole_checks hole_gate_fail
+    hole_depth_fail hole_time_fail session_join_bad join_nonce_reject
+    join_src_reject fbk_rx retx_queued sack_rx sack_unknown
+    rx_reorder_overflow rx_data_frames rx_delivered_bytes pub_capture_runs
+    pub_actor_calls tx_submit_calls tx_submit_bytes dbg_alloc_fail
+    dbg_over_qmax dbg_copy_fail dbg_empty_len dbg_pump_runs dbg_pump_nocar
+    ctl_lost retired_tx_bytes retired_data_frames retired_retx_data
+'
+
+# Print one line per access to one of the named session counters that is not
+# wrapped in an atomic64_* call (or tbt_stat_read()). Labels such as
+# `retx_queued:` and the key text inside seq_printf strings are ignored: the
+# match requires `->name`, and comment-only lines are skipped.
+atomic_stats_violations() {
+    _file=$1
+    shift
+    for _name in "$@"; do
+        awk -v name="$_name" '
+            {
+                line = $0
+                sub(/^[[:space:]]+/, "", line)
+                if (line ~ /^\*/ || line ~ /^\/\*/)
+                    next
+                gsub(/\/\*[^*]*\*\//, "", line)
+                if (line !~ ("->[[:space:]]*" name "([^A-Za-z0-9_]|$)"))
+                    next
+                if (line ~ /atomic64_(read|set|inc|add|sub|dec|xchg|cmpxchg|add_return|inc_return|dec_return|fetch_add|fetch_sub|try_cmpxchg)[[:space:]]*\(/ ||
+                    line ~ /tbt_stat_read[[:space:]]*\(/)
+                    next
+                printf "%s:%d: %s\n", FILENAME, FNR, $0
+            }' "$_file"
+    done
+}
+
 # ---------------------------------------------------------------------------
-# The 15 checks.
+# The 16 checks.
 
 check_pump_lock() {
     v=$(pump_lock_violations "$1/tbtun/tbt_carrier.c")
@@ -394,6 +441,26 @@ check_chunk_one_record() {
     return 1
 }
 
+check_atomic_stats() {
+    hdr="$1/tbtun/tbtun.h"
+    bad=""
+    for n in $atomic_stats_names; do
+        awk -v name="$n" '
+            /^struct tbt_session$/ { p = 1; next }
+            p && /^};/ { p = 0 }
+            p && $0 ~ ("(^|[^A-Za-z0-9_])" name "([^A-Za-z0-9_]|$)") &&
+                 $0 ~ /^[[:space:]]*atomic64_t([[:space:]]|$)/ { ok = 1 }
+            END { exit ok ? 0 : 1 }' "$hdr" || bad="$bad $n(decl)"
+    done
+    for f in "$1"/tbtun/*.c; do
+        v=$(atomic_stats_violations "$f" $atomic_stats_names)
+        [ -z "$v" ] || bad="$bad $(printf '%s' "$v" | tr '\n' ';')"
+    done
+    [ -z "$bad" ] && return 0
+    printf 'not atomic64_t or bare access:%s' "$bad"
+    return 1
+}
+
 run_check() {
     name=$1
     fn=$2
@@ -422,6 +489,7 @@ run_check kfree-marker-proof check_kfree_markers
 run_check no-gfp-kernel-in-rx check_no_gfp_rx
 run_check retx-snd-una-gated check_retx_snd_una
 run_check chunk-one-record check_chunk_one_record
+run_check atomic-stats-atomic64 check_atomic_stats
 
 # ---------------------------------------------------------------------------
 # Self-tests: feed the checker functions snippets with known verdicts.
@@ -596,7 +664,33 @@ o2=$(carrier_ctor_order_violation "$d/ctor_order_bad.c")
 st ctor-order-ok empty "$o1"
 st ctor-order-bad nonempty "$o2"
 
+# atomic stats: a bare increment/read fails; the atomic wrappers, a label with
+# the same spelling, and a seq_printf key do not.
+cat >"$d/atomic_bad.c" <<'EOF'
+void f(struct tbt_session *s)
+{
+    s->rx_data_frames++;
+    x = s->rx_errs;
+}
+EOF
+cat >"$d/atomic_ok.c" <<'EOF'
+void f(struct tbt_session *s)
+{
+    atomic64_inc(&s->rx_data_frames);
+    atomic64_add(1, &s->rx_drain_bytes);
+    x = tbt_stat_read(&s->rx_errs);
+    seq_printf(m, "tunnel %llu rx_errs=%llu\n", id, tbt_stat_read(&s->rx_errs));
+    goto retx_queued;
+retx_queued:
+    return;
+}
+EOF
+a1=$(atomic_stats_violations "$d/atomic_bad.c" rx_data_frames rx_errs)
+a2=$(atomic_stats_violations "$d/atomic_ok.c" rx_data_frames rx_drain_bytes rx_errs)
+st atomic-stats-bare-access nonempty "$a1"
+st atomic-stats-wrapped-access empty "$a2"
+
 echo
-printf '%d/%d checks passed, %d failed\n' "$((15 - fails))" 15 "$fails"
+printf '%d/%d checks passed, %d failed\n' "$((16 - fails))" 16 "$fails"
 printf '%d/%d self-tests passed, %d failed\n' "$st_pass" "$((st_pass + st_fail))" "$st_fail"
 [ "$fails" -eq 0 ] && [ "$st_fail" -eq 0 ]

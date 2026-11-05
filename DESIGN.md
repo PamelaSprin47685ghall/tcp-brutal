@@ -1058,7 +1058,7 @@ struct tbt_session {
     u16 n_pending, n_streams, n_active;
     u64 far_sid, next_sid;
     u32 sid_prefix;
-    /* plain u64 counters (§8.7); no __percpu block */
+    /* atomic64_t statistics + single-writer u64 counters (§8.7) */
 };
 
 struct tbt_stream {
@@ -1510,10 +1510,38 @@ block, in this order: `debug_loss=<0|1>`, `gaps_total=<n>`, `streams_total=<n>`
 (`key=value`, no spaces). A script may parse them without knowing any per-tunnel
 counter. Everything after them is per tunnel.
 
-All counters are plain per-session fields, incremented without atomics on the
-writer's CPU and read without a lock. They are racy by design and operator-only; a
-sampled value is an estimate, never an accounting fact. The per-tunnel keys rendered
-today are: `capture_runs, actor_calls, submit_bytes, tx, wire, err, short, rx_work_runs,
+A statistics counter with more than one writer context — several carriers' rx
+work, a stream work, `sk_write_space` softirq, the pump, `/proc` — is
+`atomic64_t`, incremented with `atomic64_inc/add` and read with
+`atomic64_read()` (or `tbt_stat_read()` when the value is a `%llu` argument).
+A counter with a single writer stays `u64` and names that writer in
+`struct tbt_session`; the pump is the single writer of the TX aggregates
+because it runs under `pump_lock`, and one carrier's rx work is the single
+writer of that carrier's `rx_frames/rx_bytes`. Per-carrier TX counters
+(`data_frames`, `tx_frames`, `tx_bytes`, `payload_bytes_sent`, `retx_data`) are
+written only by `tbt_carrier_xmit()` under `pump_lock`; cross-context readers
+use `READ_ONCE()`. The hole gate keeps comparing the same values with the same
+logic; only the access discipline is explicit.
+
+The session aggregates are sums over every carrier that ever wrote, while
+`peers` lists only the live slots. A carrier that leaves `sess->car[]` (a
+replacement, or a joining generation on the far side) moves its
+`tx_bytes/data_frames/retx_data` into `retired_*` once
+(`tbt_carrier_stats_retire()`), and the `reconcile` line publishes both halves:
+
+```
+tunnel <id> reconcile live_bytes=... live_data=... live_retx=...
+                          retired_bytes=... retired_data=... retired_retx=...
+```
+
+At rest `wire == live_bytes + retired_bytes`, `data_tx == live_data +
+retired_data`, `retx_frames == live_retx + retired_retx`, and `live_bytes`
+equals the sum of the `peers` `tx_bytes` column. `review/lint.sh` refuses a
+plain `u64` declaration or a bare access for the atomic set, so a counter
+cannot silently lose its atomicity again.
+
+The per-tunnel keys rendered today are: `capture_runs, actor_calls, submit_bytes, tx,
+wire, err, short, rx_work_runs,
 rx_drain_entries, rx_drain_bytes, rx_paused_skips, rx_adopt_events, rx_records,
 carrier_write_space_runs, poll_rescues, rx_ready_calls, rx_reads, rx_read_bytes,
 rx_read_zero, rx_resume, rx_resume_busy, rx_last_drained, rx_proto, rx_errs, rx_last_err,
@@ -1541,7 +1569,10 @@ contiguous byte offsets. `peers` additionally exposes per carrier `recv_cnt`,
 `rx_lag_ppm`, `minrtt_us`, `tx_frames`, `tx_bytes`, `dropped` and `retx_ppm`;
 `rx_lag_ppm` counts frames the receiver has not yet accounted for below the sender's
 write high-water (in-flight included, not packet loss), and `retx_ppm` is retransmitted
-frames over frames written.
+frames over frames written. The `reconcile` line prints `live_bytes, live_data,
+live_retx, retired_bytes, retired_data, retired_retx`; the retired half is the
+contribution of carriers that have left `sess->car[]`, so the session aggregates stay
+auditable against the live `peers` rows after a replacement.
 
 Review 22 adds the control-frame lifetime line: `ctl_lost, ctl_retry, ctl_requeue,
 ctl_obsolete, ctl_queued`. A pinned HELLO/OPEN/RETIRE/FIN/RST frame is never freed on

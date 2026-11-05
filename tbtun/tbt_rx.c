@@ -174,7 +174,7 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
     }
     c->rx_frames++;
     c->rx_bytes += len;
-    sess->rx_data_frames++;
+    atomic64_inc(&sess->rx_data_frames);
     /* Feedback cadence: every 10 ms, or sooner after TBT_FBK_FRAMES. */
     if (++st->fbk_frames >= TBT_FBK_FRAMES)
     {
@@ -221,7 +221,7 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
         st->rx_next = fr->hdr.seq + (len - dup);
         tbt_rx_pull_locked(st);
         if (hdr->flags & TBT_FF_LOW_PRIO)
-            sess->dup_used++;
+            atomic64_inc(&sess->dup_used);
     }
     else if (hdr->seq == st->rx_next)
     {
@@ -230,7 +230,7 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
         st->rx_next = hdr->seq + len;
         tbt_rx_pull_locked(st);
         if (hdr->flags & TBT_FF_LOW_PRIO)
-            sess->dup_used++;
+            atomic64_inc(&sess->dup_used);
     }
     else if (!tbt_rx_tree_insert_locked(st, fr))
     {
@@ -246,7 +246,7 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
         if (!st->hole_since_ns)
             st->hole_since_ns = ktime_get_ns();
         if (hdr->flags & TBT_FF_LOW_PRIO)
-            sess->dup_used++;
+            atomic64_inc(&sess->dup_used);
         if (st->rx_ooo_bytes > st->rx_limit)
             kill = true;
     }
@@ -260,8 +260,8 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
 
     if (kill)
     {
-        sess->rx_reorder_overflow++;
-        sess->stats_gap++;
+        atomic64_inc(&sess->rx_reorder_overflow);
+        atomic64_inc(&sess->stats_gap);
         tbt_stream_kill(st, TBT_ST_REORDER);
     }
     tbt_rx_flush(st);
@@ -318,7 +318,7 @@ static int tbt_rx_fbk(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *body
         if (state == 2)
             paused = true;
     }
-    sess->fbk_rx++;
+    atomic64_inc(&sess->fbk_rx);
     st = tbt_stream_get(sess, tbt_hdr_sid(hdr), false, false);
     if (st)
     {
@@ -397,10 +397,10 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
         st = tbt_stream_get(sess, tbt_hdr_sid(hdr), false, false);
         if (!st)
         {
-            sess->sack_unknown++;
+            atomic64_inc(&sess->sack_unknown);
             return 0;
         }
-        sess->sack_rx++;
+        atomic64_inc(&sess->sack_rx);
         if (READ_ONCE(st->peer_paused) && payload[0] != 2)
             st->pause_cleared_ns = ktime_get_ns();
         WRITE_ONCE(st->peer_paused, payload[0] == 2);
@@ -445,7 +445,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
 
         if (prof != want)
         {
-            sess->profile_mismatch++;
+            atomic64_inc(&sess->profile_mismatch);
             return -EPROTO;
         }
         c->peer_gen = gen;
@@ -467,7 +467,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
          * cannot probe the nonce. */
         if (sess->anchor_set && src != sess->anchor_addr)
         {
-            sess->join_src_reject++;
+            atomic64_inc(&sess->join_src_reject);
             spin_unlock(&sess->lock);
             return -EPROTO;
         }
@@ -475,7 +475,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
         {
             if (memcmp(body + 2, sess->nonce, sizeof(sess->nonce)))
             {
-                sess->session_join_bad++;
+                atomic64_inc(&sess->session_join_bad);
                 spin_unlock(&sess->lock);
                 return -EPROTO;
             }
@@ -490,7 +490,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
             if (!c->sk || (t->cfg.peer_addr &&
                            inet_sk(c->sk)->inet_daddr != t->cfg.peer_addr))
             {
-                sess->join_nonce_reject++;
+                atomic64_inc(&sess->join_nonce_reject);
                 spin_unlock(&sess->lock);
                 return -EPROTO;
             }
@@ -499,7 +499,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
         }
         else if (memcmp(body + 2, sess->nonce, sizeof(sess->nonce)))
         {
-            sess->session_join_bad++;
+            atomic64_inc(&sess->session_join_bad);
             spin_unlock(&sess->lock);
             return -EPROTO;
         }
@@ -584,7 +584,7 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
             take = min_t(size_t, p->have, TBT_HTTP_HDR_MAX - c->http_have);
             if (!take)
             {
-                sess->http_parse_err++;
+                atomic64_inc(&sess->http_parse_err);
                 return -EPROTO;
             }
             memcpy(c->http_hdr + c->http_have, p->buf, take);
@@ -601,19 +601,19 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                 {
                     if (c->http_have == TBT_HTTP_HDR_MAX)
                     {
-                        sess->http_parse_err++;
+                        atomic64_inc(&sess->http_parse_err);
                         return -EPROTO;
                     }
                     return 0;
                 }
                 if (perr == TBT_HTTP_PROTO)
                 {
-                    sess->http_parse_err++;
+                    atomic64_inc(&sess->http_parse_err);
                     return -EPROTO;
                 }
                 if (resp.status != 200 || !resp.chunked || !resp.keep_alive)
                 {
-                    sess->http_status_err++;
+                    atomic64_inc(&sess->http_status_err);
                     return -EPROTO;
                 }
             }
@@ -626,19 +626,19 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                 {
                     if (c->http_have == TBT_HTTP_HDR_MAX)
                     {
-                        sess->http_parse_err++;
+                        atomic64_inc(&sess->http_parse_err);
                         return -EPROTO;
                     }
                     return 0;
                 }
                 if (perr == TBT_HTTP_PROTO)
                 {
-                    sess->http_parse_err++;
+                    atomic64_inc(&sess->http_parse_err);
                     return -EPROTO;
                 }
                 if (!req.chunked || !req.keep_alive)
                 {
-                    sess->http_parse_err++;
+                    atomic64_inc(&sess->http_parse_err);
                     return -EPROTO;
                 }
                 c->http_req_done = true;
@@ -646,7 +646,7 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
             }
             if (hlen > c->http_have)
             {
-                sess->http_parse_err++;
+                atomic64_inc(&sess->http_parse_err);
                 return -EPROTO;
             }
             {
@@ -696,7 +696,7 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                 }
                 break;
             }
-            sess->http_parse_err++;
+            atomic64_inc(&sess->http_parse_err);
             return -EPROTO;
         }
         if (c->http_hdr_done)
@@ -733,11 +733,11 @@ static int tbt_rx_parse_raw(struct tbt_carrier *c)
                 print_hex_dump(KERN_INFO, "tbtun rx: ", DUMP_PREFIX_OFFSET,
                                16, 1, p->buf, min_t(size_t, p->have, 64), false);
             }
-            c->sess->rx_parse_proto++;
+            atomic64_inc(&c->sess->rx_parse_proto);
             return -EPROTO;
         }
 
-        c->sess->rx_records++;
+        atomic64_inc(&c->sess->rx_records);
 
         /* The first frame on a carrier must be HELLO: it carries the session
          * nonce and the path index, and it is what authorises the peer to name
@@ -931,7 +931,7 @@ void tbt_rx_check_hole(struct tbt_stream *st)
             pr_info("tbtun: RXHOLEKILL sid=%llu age_us=%llu ooo=%u limit=%u queued=%u\n",
                     (unsigned long long)st->sid, age / NSEC_PER_USEC,
                     st->rx_ooo_bytes, budget_bytes, st->rx_queued);
-        sess->holes_unrecoverable++;
+        atomic64_inc(&sess->holes_unrecoverable);
         tbt_stream_kill(st, TBT_ST_HOLE);
     }
 }

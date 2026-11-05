@@ -50,6 +50,16 @@ full-suite pass.
 
 ### Fixed
 
+- **Shared statistics counters:** every session counter with more than one writer
+  context is `atomic64_t`, incremented with `atomic64_inc/add` and read through
+  `tbt_stat_read()`, so concurrent carriers and stream workers can no longer lose
+  an update. Counters written only by the pump or by one carrier's rx work stay
+  `u64`, with the writer named in `struct tbt_session`; the hole gate reads the
+  same values with the same comparison. A carrier that leaves the live array now
+  moves its `tx_bytes`/`data_frames`/`retx_data` into session-wide retired totals,
+  and the new `reconcile` stats line publishes both halves so the aggregates stay
+  equal to the live `peers` rows plus the retired carriers. `review/lint.sh`
+  refuses a regression to a plain field access.
 - **Review 23:** `hole_budget_ms=0` and `rx_reorder_bytes=0` are refused with `EINVAL`
   instead of creating a tunnel that dies on its first hole or reordered frame. The
   accepted ranges are now `1..60000` and `1..268435456`; omitted keys keep their
@@ -264,6 +274,18 @@ QEMU probes and adversarial cases (recorded in
 - `review/findings.md` still marks F4 (sequential churn) and review 34 OPEN. The code
   has since detached the stream on a completed FIN handshake (`tbt_sock.c`) and uses
   `remove_proc_subtree()` (`tbt_procfs.c`); the table is stale.
+- Counter reconciliation on this tree (`tests/qemu/run.sh --probes C,E`, module
+  sha256 `cdaf9ad8…`): both probes **PASS**. Each probe reads ten samples, requires
+  every aggregate to be monotone, then requires `wire == live_bytes +
+  retired_bytes`, `data_tx == live_data + retired_data`, `retx_frames == live_retx
+  + retired_retx` and `live_bytes == sum(peers tx_bytes)`; every delta was 0.
+  Probe C kept `retired_bytes=197463 retired_data=24 retired_retx=15`; probe E
+  `329047/40/25`.
+- `TBT_ADV_GROUPS=public adversarial/run.sh --no-build --no-crash`: 10/10 **PASS**,
+  including `pub.concurrent` n=100 (118 ms). Its post-run stats snapshot shows
+  `wire=474428 == live_bytes`, `data_tx=102 == live_data`, and
+  `submit_bytes=409728` exactly (100 x 4096 + 128 for the recovery connection), so
+  the multi-writer adds did not lose a byte.
 - This is **not** a full A–K/adversarial green.
 
 Bench (QEMU lab emulation, one 10 Mbit htb class per source port, netem
