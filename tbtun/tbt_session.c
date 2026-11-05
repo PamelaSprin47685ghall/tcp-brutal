@@ -28,12 +28,39 @@
 #include <net/sock.h>
 
 #include "tbtun.h"
+#include "tbt_portmap.h"
 
 struct tbt_portmap tbt_ports = {
     .lock = __MUTEX_INITIALIZER(tbt_ports.lock),
     .lo = 40000,
-    .hi = 40063,
+    .hi = 44095,
 };
+
+/* Carrier socket buffers committed by live sessions, in KiB. The budget is
+ * module-wide, not per session: max_tunnels sessions must share it, so two
+ * 64 MiB sessions fit a 128 MiB budget and a third does not. */
+static atomic64_t tbt_buf_used_kib = ATOMIC64_INIT(0);
+
+/* Reserve `kib` from the module budget. The add-then-compare order is what
+ * makes concurrent session creations safe: the loser sees the overrun and
+ * rolls its own add back. */
+static int tbt_buf_reserve(u32 kib)
+{
+    s64 used = atomic64_add_return(kib, &tbt_buf_used_kib);
+
+    if (used > (s64)READ_ONCE(carrier_buffer_budget_mib) * 1024)
+    {
+        atomic64_sub(kib, &tbt_buf_used_kib);
+        return -ENOSPC;
+    }
+    return 0;
+}
+
+static void tbt_buf_release(u32 kib)
+{
+    if (kib)
+        atomic64_sub(kib, &tbt_buf_used_kib);
+}
 
 static const char *tbt_role_name(u8 role)
 {
@@ -61,11 +88,11 @@ static const char *tbt_state_name(const struct tbt_tunnel *t)
 int tbt_portmap_set(u16 lo, u16 hi)
 {
     unsigned long *used;
-    size_t n;
+    unsigned int n;
 
-    if (!lo || lo > hi)
+    n = tbt_portmap_words(lo, hi);
+    if (!n)
         return -EINVAL;
-    n = BITS_TO_LONGS(hi - lo + 1);
     used = kcalloc(n, sizeof(*used), GFP_KERNEL);
     if (!used)
         return -ENOMEM;
@@ -106,6 +133,8 @@ void tbt_portmap_show(struct seq_file *m)
 
 static bool tbt_cfg_sane(const struct tbt_cfg *c, int *err)
 {
+    unsigned int limit;
+
     if (!c->id)
     {
         *err = -EINVAL;
@@ -116,11 +145,18 @@ static bool tbt_cfg_sane(const struct tbt_cfg *c, int *err)
         *err = -EINVAL;
         return false;
     }
-    /* max_carriers is a module_param (kernel-only). The host parser cannot
-     * see it, so the bound is enforced here, before any allocation or session
+    /* The old ARQ data plane is frozen at 16 carrier slots: its path_ack_mask
+     * is u16 and its FBK/WINDOW bodies hold 16 entries. Only a session that
+     * asked for FEC may claim more, and even that is capped by max_carriers.
+     * max_carriers is a module_param (kernel-only); the host parser cannot see
+     * it, so the bound is enforced here, before any allocation or session
      * creation. The compile-time limit still applies. */
-    if (!c->n || c->n + c->m > TBT_MAX_CARRIERS_LIMIT ||
-        c->n + c->m > READ_ONCE(max_carriers))
+    limit = READ_ONCE(max_carriers);
+    if (!c->fec && limit > TBT_LEGACY_MAX_CARRIERS)
+        limit = TBT_LEGACY_MAX_CARRIERS;
+    if (limit > TBT_MAX_CARRIERS_LIMIT)
+        limit = TBT_MAX_CARRIERS_LIMIT;
+    if (!c->n || c->n + c->m > limit)
     {
         *err = -EINVAL;
         return false;
@@ -525,35 +561,32 @@ out_unlock:
 u16 tbt_port_alloc(enum tbt_port_alloc_err *err)
 {
     enum tbt_port_alloc_err why = TBT_PORT_ALLOC_OK;
-    unsigned long n;
     u16 port = 0;
+    int rc;
 
     mutex_lock(&tbt_ports.lock);
-    /* The block has a usable default (40000-40063, DESIGN.md §7.3): a tunnel
-     * must work without the operator writing `ports` first. Allocate the
-     * bitmap on first use. */
+    /* The block has a usable default (40000-44095, 4096 ports): a tunnel must
+     * work without the operator writing `ports` first, and a session may dial
+     * up to 256 carriers. Allocate the bitmap on first use. */
     if (!tbt_ports.used)
     {
-        n = tbt_ports.hi - tbt_ports.lo + 1;
-        tbt_ports.used = bitmap_zalloc(n, GFP_KERNEL);
+        unsigned int words = tbt_portmap_words(tbt_ports.lo, tbt_ports.hi);
+
+        tbt_ports.used = words ?
+            bitmap_zalloc(words * BITS_PER_LONG, GFP_KERNEL) : NULL;
         if (!tbt_ports.used)
         {
             why = TBT_PORT_ALLOC_NOMEM;
             goto out;
         }
     }
-    n = tbt_ports.hi - tbt_ports.lo + 1;
-    {
-        unsigned long bit = find_next_zero_bit(tbt_ports.used, n, 0);
-
-        if (bit >= n)
-        {
-            why = TBT_PORT_ALLOC_EXHAUSTED;
-            goto out;
-        }
-        __set_bit(bit, tbt_ports.used);
-        port = tbt_ports.lo + bit;
-    }
+    /* The bit arithmetic lives in tbt_portmap.c so the host test exercises
+     * the same allocator over the same 4096-port block. */
+    rc = tbt_portmap_alloc(tbt_ports.used, tbt_ports.lo, tbt_ports.hi, &port);
+    if (rc == -ENOSPC)
+        why = TBT_PORT_ALLOC_EXHAUSTED;
+    else if (rc)
+        why = TBT_PORT_ALLOC_NOMEM; /* -EINVAL: the block is unusable */
 out:
     mutex_unlock(&tbt_ports.lock);
     if (err)
@@ -564,8 +597,7 @@ out:
 void tbt_port_free(u16 port)
 {
     mutex_lock(&tbt_ports.lock);
-    if (tbt_ports.used && port >= tbt_ports.lo && port <= tbt_ports.hi)
-        __clear_bit(port - tbt_ports.lo, tbt_ports.used);
+    tbt_portmap_free(tbt_ports.used, tbt_ports.lo, tbt_ports.hi, port);
     mutex_unlock(&tbt_ports.lock);
 }
 
@@ -955,10 +987,37 @@ out:
 int tbt_session_create(struct tbt_tunnel *t)
 {
     struct tbt_session *s;
+    u32 kib;
+    int err;
+
+    /* FEC is part of the grammar so an operator can write the line and read it
+     * back, but its data plane is not merged. Refuse the session before it
+     * allocates a carrier, and say why. A refusal is a failed tunnel line, not
+     * a half-created session: tbt_tunnel_add() undoes the listener and drops
+     * the tunnel. */
+    if (t->cfg.fec)
+    {
+        pr_info("tbtun: tunnel %llu requests fec=on; the FEC data plane is not merged\n",
+                (unsigned long long)t->cfg.id);
+        return -EOPNOTSUPP;
+    }
+
+    /* Every carrier owns two socket buffers at each end, and the kernel sizes
+     * each from carrier_sockbuf_kib. Reserve this session's share before any
+     * allocation; the budget is module-wide, so max_tunnels sessions share
+     * it. A refusal is -ENOSPC, the same errno a full tunnel table uses. */
+    kib = (u32)(t->cfg.n + t->cfg.m) * 4 * READ_ONCE(carrier_sockbuf_kib);
+    err = tbt_buf_reserve(kib);
+    if (err)
+        return err;
 
     s = kzalloc(sizeof(*s), GFP_KERNEL);
     if (!s)
+    {
+        tbt_buf_release(kib);
         return -ENOMEM;
+    }
+    s->buf_kib = kib;
     s->net = get_net(t->net);
     s->tunnel = t;
     s->def_ops = t->def_ops;
@@ -980,6 +1039,7 @@ int tbt_session_create(struct tbt_tunnel *t)
     INIT_DELAYED_WORK(&s->w_pending, tbt_pending_work);
     INIT_DELAYED_WORK(&s->w_fbk, tbt_fbk_work);
     INIT_DELAYED_WORK(&s->w_reap, tbt_reap_work);
+    INIT_DELAYED_WORK(&s->w_poll, tbt_session_poll_work);
     for (int i = 0; i < TBT_STREAM_HT; i++)
         INIT_HLIST_HEAD(&s->streams[i]);
     /* A tunnel `nonce=` turns a far side's trust-on-first-use into a
@@ -1015,7 +1075,14 @@ int tbt_session_create(struct tbt_tunnel *t)
     s->sid_prefix = get_random_u32() & 0xffff; // 16 random bits (§3.6)
     s->next_sid = 0;                           // monotonic 24-bit counter
     t->sess = s;
-    return tbt_carriers_start(t, s);
+    err = tbt_carriers_start(t, s);
+    if (err)
+        return err;
+    /* One session-wide liveness timer drives every carrier slot and every
+     * provisional carrier; a per-carrier timer would cost one wakeup per
+     * carrier per 50 ms at 256 carriers. */
+    schedule_delayed_work(&s->w_poll, msecs_to_jiffies(50));
+    return 0;
 }
 
 // Tear a session down in the only order that is safe for module unload:
@@ -1047,6 +1114,9 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     cancel_work_sync(&s->w_replace);
     cancel_delayed_work_sync(&s->w_pending);
     cancel_delayed_work_sync(&s->w_reap);
+    /* Stop the poll before any carrier is retired: it reads sess->car[] and
+     * sess->prov, and it can ask for a replacement. */
+    cancel_delayed_work_sync(&s->w_poll);
 
     /* Stop every pump before any stream goes away. A pump takes the stream's
      * retention list and its frames after dropping tx_lock, so a stream freed
@@ -1054,6 +1124,10 @@ void tbt_session_destroy(struct tbt_tunnel *t)
      * carriers_stop cancels w_tx and w_pump for every carrier, and the queue
      * is dropped while no pump can run. */
     tbt_carriers_stop(s); // cancels work items, releases sockets, frees structs
+    /* Barrier: a socket callback could have re-armed the poll between the
+     * cancel above and the callback restore inside carriers_stop. No callback
+     * can run after that restore, so this cancel makes the free below safe. */
+    cancel_delayed_work_sync(&s->w_poll);
 
     /* First pass: stop every producer that can enqueue into tx_q.  The hash
      * is stable here: carriers are stopped, closing is set, and w_reap /
@@ -1123,6 +1197,8 @@ void tbt_session_destroy(struct tbt_tunnel *t)
      * second cancel is the barrier that makes freeing the session safe. */
     cancel_delayed_work_sync(&s->w_fbk);
     cancel_work_sync(&s->w_replace);
+    tbt_buf_release(s->buf_kib);
+    s->buf_kib = 0;
     put_net(s->net);
     kfree(s);
 }

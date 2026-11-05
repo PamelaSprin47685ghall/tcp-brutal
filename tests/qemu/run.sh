@@ -161,7 +161,7 @@ tail -n 40 "$console" | sed 's/^/    /'
 
 # The guest reports one line per probe; the runner owns the verdict, so a
 # missing marker or a crashed guest cannot be mistaken for a pass.
-results=$(grep '^TBT_PROBE_RESULT ' "$console" || true)
+results=$(grep -a '^TBT_PROBE_RESULT ' "$console" || true)
 if [ -z "$results" ]; then
     echo "run.sh: FAIL: no TBT_PROBE_RESULT lines on the console (rc=$rc)"
     exit 1

@@ -33,7 +33,24 @@ MODULE_PARM_DESC(max_tunnels, "Maximum configured tunnels (default 64)");
 
 unsigned int max_carriers = TBT_MAX_CARRIERS_LIMIT;
 module_param(max_carriers, uint, 0444);
-MODULE_PARM_DESC(max_carriers, "Carrier sockets per session, 1..16 (default 16)");
+MODULE_PARM_DESC(max_carriers, "Carrier sockets per session, 1..256 (default 256)");
+
+/* Per-carrier socket buffer, in KiB, applied as both SO_SNDBUF and SO_RCVBUF.
+ * It bounds the queueing delay that sits between a write and its feedback,
+ * because the uack and the FBK share the carrier's ordered TCP stream with the
+ * data. The default keeps that delay short; a high-BDP path needs more.
+ * Validated at load, read-only afterwards. */
+unsigned int carrier_sockbuf_kib = 64;
+module_param(carrier_sockbuf_kib, uint, 0444);
+MODULE_PARM_DESC(carrier_sockbuf_kib, "Per-carrier SO_SNDBUF/SO_RCVBUF in KiB, 16..256 (default 64)");
+
+/* Module-wide upper bound on carrier socket buffers. Each session reserves
+ * (n + m) carriers x 4 buffers x carrier_sockbuf_kib KiB when it is created
+ * and returns that reservation when it is destroyed; a session that would push
+ * the module past this budget is refused with -ENOSPC. */
+unsigned int carrier_buffer_budget_mib = 128;
+module_param(carrier_buffer_budget_mib, uint, 0444);
+MODULE_PARM_DESC(carrier_buffer_budget_mib, "Carrier socket buffer budget in MiB, 1..1024 (default 128)");
 
 /* Debug-only loss injection gate. `carrier <n> drop_ppm <ppm>` is refused
  * unless the module was loaded with debug_loss=1, so a production module
@@ -79,7 +96,7 @@ static void tbt_wire_layout_check(void)
     BUILD_BUG_ON(offsetof(struct tbt_hdr, reserved2) != TBT_H_RES2);
     BUILD_BUG_ON(offsetof(struct tbt_hdr, conv) != TBT_H_CONV);
     BUILD_BUG_ON(sizeof(struct tbt_hdr) != TBT_HDR_LEN);
-    BUILD_BUG_ON(TBT_MAX_CARRIERS_LIMIT > 16); // path_ack_mask is u16
+    BUILD_BUG_ON(TBT_LEGACY_MAX_CARRIERS > 16); // path_ack_mask is u16
     BUILD_BUG_ON(TBT_LINE_MAX < 256);          // room for the longest documented line
 }
 
@@ -107,6 +124,16 @@ static int __init tbtun_init(void)
         pr_err("tbtun: max_carriers must be 1..%d\n", TBT_MAX_CARRIERS_LIMIT);
         return -EINVAL;
     }
+    if (carrier_sockbuf_kib < 16 || carrier_sockbuf_kib > 256)
+    {
+        pr_err("tbtun: carrier_sockbuf_kib must be 16..256\n");
+        return -EINVAL;
+    }
+    if (!carrier_buffer_budget_mib || carrier_buffer_budget_mib > 1024)
+    {
+        pr_err("tbtun: carrier_buffer_budget_mib must be 1..1024\n");
+        return -EINVAL;
+    }
     if (!max_tunnels)
     {
         pr_err("tbtun: max_tunnels must be >= 1\n");
@@ -128,9 +155,11 @@ static int __init tbtun_init(void)
         tbt_procfs_exit();
         return err;
     }
-    pr_info("tbtun %u.%u.%u loaded: %u tunnels max, %u carriers max\n",
+    pr_info("tbtun %u.%u.%u loaded: %u tunnels max, %u carriers max, "
+            "carrier buffers %u KiB in a %u MiB budget\n",
             TBT_VERSION_MAJOR, TBT_VERSION_MINOR, TBT_VERSION_PATCH,
-            max_tunnels, max_carriers);
+            max_tunnels, max_carriers, carrier_sockbuf_kib,
+            carrier_buffer_budget_mib);
     return 0;
 }
 

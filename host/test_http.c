@@ -2327,7 +2327,7 @@ static int make_valid_hdr(u8 type, u16 len, struct tbt_hdr *h)
         if (len % TBT_FBK_ENTRY_LEN)
             return 0;
         h->path_ack_count = (u8)(len / TBT_FBK_ENTRY_LEN);
-        if (h->path_ack_count > TBT_MAX_CARRIERS_LIMIT)
+        if (h->path_ack_count > TBT_LEGACY_MAX_CARRIERS)
             return 0;
         break;
     case TBT_F_WINDOW:

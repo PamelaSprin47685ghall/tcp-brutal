@@ -1,0 +1,38 @@
+$ make check
+  CC [M]  tbtun/tbt_fec.o
+  LD [M]  tbtun.o
+  MODPOST Module.symvers
+  CC [M]  tbtun.mod.o
+  LD [M]  tbtun.ko
+  BTF [M] tbtun.ko
+make[2]: Leaving directory '/home/kunweiz/tbtun-worktrees/fec-v6'
+make[1]: Leaving directory '/home/kunweiz/.cache/tbtun-build/linux72-headers/usr/lib/modules/7.2.9-1-MANJARO/build'
+cc -std=gnu99 -O2 -Wall -Wextra -Werror -I tbtun -o host/test_portmap host/test_portmap.c tbtun/tbt_portmap.c tbtun/tbt_parse.c
+412 checks, 0 failures
+test_fuzz: seed=1 checks=7550734 failures=0 buffers=200000 bodies=200000
+test_http: seed=0x9e3779b97f4a7c15 checks=249 failures=0
+test_reorder: 52792 checks, 0 failures
+test_ack: 10026 checks, 0 failures
+test_control: 181 checks, 0 failures
+test_multistream: 68580 checks, 0 failures
+124 checks, 0 failures
+1430 checks, 0 failures
+33999 checks, 0 failures
+h11: accepted POST /api/v2/upload HTTP/1.1 and HTTP/1.1 200 OK; 4 chunks and 112 body bytes each, headers in order
+
+$ make host-test-san
+cc -std=gnu99 -O2 -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -I tbtun -o host/test_parse_san host/test_parse.c tbtun/tbt_parse.c
+cc -std=gnu99 -O2 -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -I tbtun -o host/test_fec_san host/test_fec.c tbtun/tbt_fec.c
+cc -std=gnu99 -O2 -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -I tbtun -o host/test_portmap_san host/test_portmap.c tbtun/tbt_portmap.c tbtun/tbt_parse.c
+412 checks, 0 failures
+test_fuzz: seed=1 checks=7550734 failures=0 buffers=200000 bodies=200000
+test_http: seed=0x9e3779b97f4a7c15 checks=249 failures=0
+test_http_fuzz: seed=0x0000000000000001 checks=4078276 failures=0 buffers=200000
+1430 checks, 0 failures
+33999 checks, 0 failures
+
+$ ./review/lint.sh
+SELFTEST PASS  atomic-stats-wrapped-access
+
+16/16 checks passed, 0 failed
+14/14 self-tests passed, 0 failed

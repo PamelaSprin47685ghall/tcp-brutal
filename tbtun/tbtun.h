@@ -53,8 +53,9 @@ struct tbt_hole {
 /* struct tbt_cfg, struct tbt_linebuf and TBT_LINE_MAX live in tbt_parse.h,
  * which compiles both into the module and into host/test_parse.c. */
 #include "tbt_parse.h"
-
-#define TBT_PORTMAP_MAX 4096
+/* The port-block bitmap and TBT_PORTMAP_MAX are pure code, shared with the
+ * host test (tbt_portmap.h). */
+#include "tbt_portmap.h"
 
 /* The four callbacks sock_init_data() installs.  Take the snapshot from a
  * fresh sock_create_kern() socket, before this module replaces anything.
@@ -95,6 +96,8 @@ extern struct mutex tbt_lock;
 extern unsigned int debug;
 extern unsigned int max_tunnels;
 extern unsigned int max_carriers;
+extern unsigned int carrier_sockbuf_kib;
+extern unsigned int carrier_buffer_budget_mib;
 
 /* Port block for carrier sources (DESIGN.md §7.2). Owned by tbt_session.c. */
 struct tbt_portmap
@@ -414,8 +417,10 @@ struct tbt_session
     struct hlist_head streams[TBT_STREAM_HT];
 
     struct tbt_carrier *car[TBT_MAX_CARRIERS_LIMIT]; /* indexed by path */
-    u16 n_car;   /* cfg.n + cfg.m, 1..16: every dialled carrier */
+    u16 n_car;   /* cfg.n + cfg.m, 1..256: every dialled carrier */
     u16 n_pri;   /* cfg.n: carriers 0..n_pri-1 carry DATA by default */
+    u32 buf_kib; /* carrier socket buffer KiB reserved from the module budget;
+                  * returned in tbt_session_destroy() */
     bool closing; /* session teardown started: no new joins, no new work */
     struct list_head prov; /* accepted carriers waiting for HELLO */
     struct list_head dead; /* retired carriers, freed at session destroy */
@@ -434,6 +439,8 @@ struct tbt_session
     struct delayed_work w_fbk;    /* feedback tick and retransmit timer */
     struct delayed_work w_reap;   /* P1: tombstone sweeper */
     struct delayed_work w_pending; /* P1: starts one queued public socket */
+    struct delayed_work w_poll;   /* 50 ms liveness net: every carrier slot and
+                                   * every provisional carrier, one pass */
     struct list_head pending;     /* P1: accepted sockets waiting for the gate */
     u16 n_pending;
     u16 n_streams;    /* hash entries, including tombstones */
@@ -615,7 +622,6 @@ struct tbt_carrier
     struct work_struct w_connect; /* sock_create/bind/connect off the writer */
     struct work_struct w_rx;      /* drains carrier input -> tbt_rx */
     struct work_struct w_tx;      /* write-space wake -> tbt_tx_pump */
-    struct delayed_work w_poll;   /* C2 liveness net for lost wakes */
     struct delayed_work w_pump;   /* correctness wake while a carrier is full */
     atomic_t connected;           /* socket installed, callbacks live */
     atomic_t up;                  /* HELLO written; usable for scheduling */
@@ -769,6 +775,8 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock);
 int tbt_carrier_open_target(struct tbt_stream *st);
 void tbt_replace_work(struct work_struct *w);
 int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp);
+/* Session-level 50 ms liveness poll (tbt_carrier.c), armed by tbt_session.c. */
+void tbt_session_poll_work(struct work_struct *w);
 
 void tbt_far_open_seen(struct tbt_stream *st);
 void tbt_target_detach(struct tbt_stream *st);

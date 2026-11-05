@@ -34,7 +34,8 @@
 
 #include "tbtun.h"
 
-/* A connect that has not completed inside this window is retried by w_poll.
+/* A connect that has not completed inside this window is retried by the
+ * session poll.
  * The kernel default is the full SYN retry schedule (~130 s), which a session
  * teardown would inherit: tbt_carriers_stop() cancels w_connect, and flush
  * must return in bounded time even when a carrier is dialling an unreachable
@@ -146,7 +147,11 @@ static void tbt_car_state_change(struct sock *sk)
         read_unlock_bh(&sk->sk_callback_lock);
         return;
     }
-    schedule_delayed_work(&c->w_poll, 0);
+    /* The session poll is the only path that notices a closed socket while no
+     * data is moving. Shorten a pending 50 ms wait: schedule_delayed_work
+     * would leave an already-armed timer in place. */
+    if (c->sess && !READ_ONCE(c->sess->closing))
+        mod_delayed_work(system_wq, &c->sess->w_poll, 0);
     read_unlock_bh(&sk->sk_callback_lock);
 }
 
@@ -219,11 +224,15 @@ static bool tbt_car_paused(struct tbt_session *sess)
     return paused;
 }
 
-/* C2/C3 liveness net. The event-driven path is the normal driver, but a wake
- * can be coalesced with a run that then finds nothing, or lost against a pause
- * transition; a queue then sits full with no scheduled reader. Re-check the
- * three queues every 50 ms and re-arm the work item that has something to do.
- * It never copies and never takes a socket lock.
+/* C2/C3 liveness net, for one carrier. The session's 50 ms poll calls this for
+ * every slot and every provisional carrier; it never re-arms itself, so a
+ * session pays one timer instead of one per carrier.
+ *
+ * The event-driven path is the normal driver, but a wake can be coalesced with
+ * a run that then finds nothing, or lost against a pause transition; a queue
+ * then sits full with no scheduled reader. Re-check the three queues every
+ * 50 ms and re-arm the work item that has something to do. It never copies
+ * application bytes; the only socket lock it takes is the drip write.
  *
  * It is also the carrier's health check: a closed socket, or unacknowledged
  * data that has not moved for carrier_stall_ms, marks the carrier lost and
@@ -232,9 +241,8 @@ static bool tbt_car_paused(struct tbt_session *sess)
  *
  * Deletion condition: remove the queue re-arm when probes B/C/D and T7 record
  * poll_rescues = 0; the health check has no other driver. */
-static void tbt_car_poll_work(struct work_struct *w)
+static void tbt_car_poll_one(struct tbt_carrier *c)
 {
-    struct tbt_carrier *c = container_of(to_delayed_work(w), struct tbt_carrier, w_poll);
     struct tbt_session *sess = c->sess;
     struct tbt_stream *st;
     struct tcp_sock *tp;
@@ -270,7 +278,6 @@ static void tbt_car_poll_work(struct work_struct *w)
                  READ_ONCE(tcp_sk(psk)->rcv_nxt) ||
              c->parser->have))
             schedule_work(&c->w_rx);
-        schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
         return;
     }
     if (!atomic_read(&c->connected))
@@ -282,7 +289,6 @@ static void tbt_car_poll_work(struct work_struct *w)
             c->retry_at_ns = now + 200 * NSEC_PER_MSEC;
             schedule_work(&c->w_connect);
         }
-        schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
         return;
     }
 
@@ -408,7 +414,51 @@ static void tbt_car_poll_work(struct work_struct *w)
     rcu_read_unlock();
     if (rescued)
         atomic64_inc(&sess->poll_rescues);
-    schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
+}
+
+/* The session's liveness pass: every carrier slot, then every provisional
+ * carrier, once per 50 ms. A carrier object is never freed before
+ * tbt_carriers_stop() cancels this work, so a pointer read from sess->car[] or
+ * from sess->prov stays valid across the poll.
+ *
+ * The provisional list is walked by rotating its head to the tail: each
+ * element is moved under sess->lock and polled with the lock dropped, because
+ * the poll can take socket locks. A join that removes the element in between
+ * is fine; a carrier that joins mid-pass is simply polled next round. */
+void tbt_session_poll_work(struct work_struct *w)
+{
+    struct tbt_session *sess =
+        container_of(to_delayed_work(w), struct tbt_session, w_poll);
+    struct tbt_carrier *c;
+    unsigned int nprov = 0;
+    int i;
+
+    if (!sess->tunnel || READ_ONCE(sess->closing))
+        return;
+    for (i = 0; i < sess->n_car; i++)
+    {
+        c = READ_ONCE(sess->car[i]);
+        if (c)
+            tbt_car_poll_one(c);
+    }
+    spin_lock(&sess->lock);
+    list_for_each_entry(c, &sess->prov, node)
+        nprov++;
+    spin_unlock(&sess->lock);
+    while (nprov--)
+    {
+        spin_lock(&sess->lock);
+        if (list_empty(&sess->prov))
+        {
+            spin_unlock(&sess->lock);
+            break;
+        }
+        c = list_first_entry(&sess->prov, struct tbt_carrier, node);
+        list_move_tail(&c->node, &sess->prov);
+        spin_unlock(&sess->lock);
+        tbt_car_poll_one(c);
+    }
+    schedule_delayed_work(&sess->w_poll, msecs_to_jiffies(50));
 }
 
 /* One non-EAGAIN receive error: count it and stop this carrier. Shared by the
@@ -868,7 +918,6 @@ struct tbt_carrier *tbt_carrier_new(struct tbt_session *sess, u8 index)
     INIT_WORK(&c->w_connect, tbt_car_connect_work);
     INIT_WORK(&c->w_rx, tbt_car_rx_work);
     INIT_WORK(&c->w_tx, tbt_car_tx_work);
-    INIT_DELAYED_WORK(&c->w_poll, tbt_car_poll_work);
     INIT_DELAYED_WORK(&c->w_pump, tbt_pump_work);
     return c;
 }
@@ -943,7 +992,6 @@ static void tbt_carrier_release(struct tbt_session *sess, struct tbt_carrier *c)
     if (!c)
         return;
     atomic_set(&c->stopping, 1);
-    cancel_delayed_work_sync(&c->w_poll);
     cancel_work_sync(&c->w_connect);
     cancel_work_sync(&c->w_rx);
     /* w_tx and w_pump take pump_lock; callers of retire may hold it
@@ -1095,8 +1143,9 @@ int tbt_carriers_start(struct tbt_tunnel *t, struct tbt_session *sess)
 void tbt_replace_work(struct work_struct *w)
 {
     struct tbt_session *sess = container_of(w, struct tbt_session, w_replace);
-    struct tbt_carrier *retire[TBT_MAX_CARRIERS_LIMIT];
-    struct tbt_carrier *start[TBT_MAX_CARRIERS_LIMIT];
+    struct tbt_carrier **slots;
+    struct tbt_carrier **retire;
+    struct tbt_carrier **start;
     struct tbt_carrier *c, *tmp;
     LIST_HEAD(victims);
     u64 now = ktime_get_ns();
@@ -1104,6 +1153,15 @@ void tbt_replace_work(struct work_struct *w)
 
     if (!sess->tunnel || READ_ONCE(sess->closing))
         return;
+    /* 256 slots x two pointer arrays do not belong on the kernel stack. The
+     * allocation may sleep; this is a work item, not softirq. If it fails,
+     * the 50 ms session poll sees the still-stopping carrier and schedules
+     * this work again. */
+    slots = kcalloc((size_t)sess->n_car * 2, sizeof(*slots), GFP_KERNEL);
+    if (!slots)
+        return;
+    retire = slots;
+    start = slots + sess->n_car;
     mutex_lock(&sess->pump_lock);
     for (i = 0; i < sess->n_car; i++)
     {
@@ -1195,12 +1253,17 @@ retire_one:
         schedule_work(&start[i]->w_connect);
     if (nret)
         tbt_tx_wake(sess);
+    kfree(slots);
 }
 
 void tbt_carriers_stop(struct tbt_session *sess)
 {
     struct tbt_carrier *c, *tmp;
     int i;
+
+    /* Stop the session poll first: it reads sess->car[] and sess->prov and can
+     * ask for a replacement, so it must not run while the arrays are drained. */
+    cancel_delayed_work_sync(&sess->w_poll);
 
     /* Stop every writer before any socket goes away: a pump runs outside its
      * own carrier's work item, so retiring one carrier while another's w_tx is
@@ -1244,8 +1307,10 @@ void tbt_carriers_stop(struct tbt_session *sess)
         /* retire() re-links the node onto sess->dead; the free helper unlinks
          * it again, so the list never keeps a freed node. */
         tbt_carrier_retire(sess, c);
-        /* A w_poll that passed its stopping check can queue w_tx after the
-         * pre-lock cancel.  Nothing can queue it now; cancel before free. */
+        /* A write-space callback that ran before tbt_carrier_release()
+         * restored the core callbacks can queue w_tx after the pre-lock
+         * cancel. Nothing can queue it once the callbacks are restored;
+         * cancel before free. */
         cancel_work_sync(&c->w_tx);
         cancel_delayed_work_sync(&c->w_pump);
         tbt_carrier_free(c);
@@ -1308,7 +1373,6 @@ static void tbt_car_connect_work(struct work_struct *w)
             atomic64_inc(&sess->carrier_alloc_fail);
             tbt_port_alloc_note(sess, c->index, perr);
             c->retry_at_ns = ktime_get_ns() + 200 * NSEC_PER_MSEC;
-            schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
             return;
         }
     }
@@ -1343,14 +1407,12 @@ static void tbt_car_connect_work(struct work_struct *w)
     {
         /* The buffer is the queueing delay, and the queueing delay is the
          * feedback delay: the uack and the FBK travel in the same ordered TCP
-         * stream as the data. 1 MiB at 10 Mbit is ~840 ms per carrier, and
-         * four carriers in flight pushed the ack 2-4 s behind the write --
-         * past the RTO (88-250 ms) and close to hole_budget_ms (measured:
-         * probe I interleaved, uack frozen at 46,142,674 for 4.5 s while the
-         * peer had already received 47,129,015). 256 KiB covers the
-         * 4x10 Mbit x 50 ms BDP (~250 KB) and bounds the delay to 200-400 ms.
-         */
-        int v = 256 * 1024;
+         * stream as the data. carrier_sockbuf_kib bounds that delay (default
+         * 64 KiB); a high-BDP path raises it. tbt_session_create() reserves
+         * the session's four buffers per carrier from the module-wide
+         * carrier_buffer_budget_mib, and tbt_core.c validates both parameters
+         * at load. */
+        int v = (int)READ_ONCE(carrier_sockbuf_kib) * 1024;
 
         sock_setsockopt(s, SOL_SOCKET, SO_SNDBUF, KERNEL_SOCKPTR(&v), sizeof(v));
         sock_setsockopt(s, SOL_SOCKET, SO_RCVBUF, KERNEL_SOCKPTR(&v), sizeof(v));
@@ -1367,7 +1429,6 @@ static void tbt_car_connect_work(struct work_struct *w)
      * in the receive queue and the carrier never comes up (measured: probe I,
      * the near dialled 73 carriers, every far accept waited for HELLO). */
     schedule_work(&c->w_rx);
-    schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
     pr_info("tbtun: tunnel %llu carrier %u DIALED lport=%u peer=%pI4:%u\n", t->cfg.id,
             c->index, ntohs(inet_sk(s->sk)->inet_sport), &t->cfg.peer_addr,
             ntohs(t->cfg.peer_port));
@@ -1388,7 +1449,6 @@ fail:
     }
     atomic64_inc(&sess->connect_fail);
     c->retry_at_ns = ktime_get_ns() + 200 * NSEC_PER_MSEC;
-    schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
     pr_warn("tbtun: tunnel %llu carrier %u failed to connect: %d\n", t->cfg.id, c->index, err);
 }
 
@@ -1521,7 +1581,7 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
         /* Same bound on the accepted side; see the comment in the connect
          * path. Both ends must agree or the larger one still holds the
          * queue. */
-        int v = 256 * 1024;
+        int v = (int)READ_ONCE(carrier_sockbuf_kib) * 1024;
 
         sock_setsockopt(newsock, SOL_SOCKET, SO_SNDBUF, KERNEL_SOCKPTR(&v), sizeof(v));
         sock_setsockopt(newsock, SOL_SOCKET, SO_RCVBUF, KERNEL_SOCKPTR(&v), sizeof(v));
@@ -1535,7 +1595,6 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
      * given our callbacks/proto looks exactly like a silent peer. */
     WARN_ON_ONCE(newsock->sk->sk_data_ready != tbt_car_ready);
     WARN_ON_ONCE(newsock->sk->sk_prot == &tcp_prot);
-    schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
     schedule_work(&c->w_rx);
     pr_info("tbtun: tunnel %llu carrier ACCEPTED lport=%u rport=%u, awaiting HELLO\n",
             t->cfg.id, ntohs(inet_sk(newsock->sk)->inet_sport),

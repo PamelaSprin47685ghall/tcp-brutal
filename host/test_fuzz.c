@@ -273,11 +273,12 @@ static void test_header_ranges(void)
 
     n = rec_make(rec, TBT_F_PAD, 0, 0, 1, 0, 0);
 
-    /* path_id names a carrier: 0..TBT_MAX_CARRIERS_LIMIT-1. */
-    rec[TBT_H_PATH] = TBT_MAX_CARRIERS_LIMIT - 1;
+    /* path_id names a carrier: 0..TBT_LEGACY_MAX_CARRIERS-1. The old ARQ
+     * record stays at 16 even though the carrier layer grows to 256. */
+    rec[TBT_H_PATH] = TBT_LEGACY_MAX_CARRIERS - 1;
     case_no++;
     expect("path_id at the limit", rec, n, TBT_REC_OK);
-    rec[TBT_H_PATH] = TBT_MAX_CARRIERS_LIMIT;
+    rec[TBT_H_PATH] = TBT_LEGACY_MAX_CARRIERS;
     case_no++;
     expect("path_id over the limit", rec, n, TBT_REC_PROTO);
     rec[TBT_H_PATH] = 0xff;
@@ -285,11 +286,11 @@ static void test_header_ranges(void)
     expect("path_id 0xff", rec, n, TBT_REC_PROTO);
     rec[TBT_H_PATH] = 0;
 
-    /* path_ack_count counts feedback entries: 0..TBT_MAX_CARRIERS_LIMIT. */
-    rec[TBT_H_ACKC] = TBT_MAX_CARRIERS_LIMIT;
+    /* path_ack_count counts feedback entries: 0..TBT_LEGACY_MAX_CARRIERS. */
+    rec[TBT_H_ACKC] = TBT_LEGACY_MAX_CARRIERS;
     case_no++;
     expect("path_ack_count at the limit", rec, n, TBT_REC_OK);
-    rec[TBT_H_ACKC] = TBT_MAX_CARRIERS_LIMIT + 1;
+    rec[TBT_H_ACKC] = TBT_LEGACY_MAX_CARRIERS + 1;
     case_no++;
     expect("path_ack_count over the limit", rec, n, TBT_REC_PROTO);
     rec[TBT_H_ACKC] = 0xff;
