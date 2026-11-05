@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -3243,15 +3244,27 @@ static int config_flush(void)
     return n == 6 ? 0 : -1;
 }
 
+/* The writer publishes its progress through a shared page: the parent must
+ * decide from state, not from a child that may be parked inside write(). */
+struct writer_state {
+    long sent;
+    int err;
+};
+
 static int mode_writer(int port, int mib, int do_read)
 {
     int fd = connect_to("127.0.0.1", port, NULL);
-    long total = (long)mib * 1024 * 1024, sent = 0, got = 0;
+    long total = (long)mib * 1024 * 1024, sent = 0;
     unsigned long before = mem_available_kb(), during_min = before, after_write;
     unsigned long after_flush = 0;
+    struct timeval zero = { 0, 0 };
+    struct writer_state *st;
     char *buf = malloc(1024 * 1024);
     int err = 0, oom0, oom1, flushed = 0, legal, mem_ok, rst;
-    long flush_start, flush_ms = -1;
+    int blocked = 0, reaped = 0, st_status = 0;
+    const char *child_state = "unknown";
+    long flush_start, flush_ms = -1, deadline;
+    pid_t pid;
 
     if (fd < 0 || !buf)
     {
@@ -3259,44 +3272,107 @@ static int mode_writer(int port, int mib, int do_read)
         free(buf);
         return 1;
     }
+    /* The public socket is ordinary TCP.  connect_to()'s 5 s send timeout is
+     * a convenience for the short echo paths; here it would turn the module's
+     * backpressure into EAGAIN, which is the opposite of what a blocked
+     * application looks like.  Zero disables the timeout for this socket. */
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &zero, sizeof(zero));
+    st = mmap(NULL, sizeof(*st), PROT_READ | PROT_WRITE,
+              MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (st == MAP_FAILED)
+    {
+        result("pub.writer", 0, "mmap of the writer state failed");
+        close(fd);
+        free(buf);
+        return 1;
+    }
+    memset(st, 0, sizeof(*st));
     oom0 = oom_count();
     memset(buf, 'W', 1024 * 1024);
-    while (sent < total)
+
+    pid = fork();
+    if (pid == 0)
     {
-        ssize_t n = send(fd, buf, 1024 * 1024, MSG_NOSIGNAL);
-        unsigned long m;
+        long got = 0;
 
-        if (n <= 0)
+        while (__atomic_load_n(&st->sent, __ATOMIC_RELAXED) < total)
         {
-            err = errno;
-            break;
-        }
-        sent += n;
-        m = mem_available_kb();
-        if (m && (!during_min || m < during_min))
-            during_min = m;
-        if (do_read)
-        {
-            while (got < sent)
+            ssize_t n = send(fd, buf, 1024 * 1024, MSG_NOSIGNAL);
+
+            if (n <= 0)
             {
-                ssize_t r = read_to(fd, buf, 1024 * 1024, 2000);
+                __atomic_store_n(&st->err, errno, __ATOMIC_RELAXED);
+                break;
+            }
+            __atomic_store_n(&st->sent,
+                             __atomic_load_n(&st->sent, __ATOMIC_RELAXED) + n,
+                             __ATOMIC_RELAXED);
+            if (do_read)
+            {
+                while (got < __atomic_load_n(&st->sent, __ATOMIC_RELAXED))
+                {
+                    ssize_t r = read_to(fd, buf, 1024 * 1024, 2000);
 
-                if (r <= 0)
-                    break;
-                got += r;
+                    if (r <= 0)
+                        break;
+                    got += r;
+                }
             }
         }
+        _exit(0);
     }
+    if (pid < 0)
+    {
+        result("pub.writer", 0, "fork of the writer failed: errno=%d", errno);
+        munmap(st, sizeof(*st));
+        close(fd);
+        free(buf);
+        return 1;
+    }
+
+    /* Observe for at most 10 s.  A child that has not exited is still inside
+     * write(): that is the contract, not a timeout. */
+    deadline = now_ms() + 10000;
+    for (;;)
+    {
+        unsigned long m = mem_available_kb();
+        pid_t r;
+
+        if (m && (!during_min || m < during_min))
+            during_min = m;
+        r = waitpid(pid, &st_status, WNOHANG);
+        if (r == pid)
+        {
+            reaped = 1;
+            break;
+        }
+        if (r < 0 && errno != EINTR)
+            break;
+        if (now_ms() >= deadline)
+        {
+            blocked = 1;
+            break;
+        }
+        msleep(20);
+    }
+    sent = __atomic_load_n(&st->sent, __ATOMIC_ACQUIRE);
+    err = __atomic_load_n(&st->err, __ATOMIC_ACQUIRE);
+    if (!reaped)
+    {
+        kill(pid, SIGKILL);
+        waitpid(pid, &st_status, 0);
+    }
+    child_state = blocked ? "running" : reaped ? "exited" : "unknown";
     after_write = mem_available_kb();
     if (after_write && (!during_min || after_write < during_min))
         during_min = after_write;
+    close(fd);
 
     /* `flush` is synchronous: tbt_tunnel_shutdown() has run when write()
      * returns.  Reclaim may still trail by an RCU grace period, so poll for
-     * at most 1 s.  Both legal outcomes (the whole total absorbed by the
-     * pipe buffers, or a bounded EAGAIN stop) must leave no unreclaimable
-     * hundred-MB drop: the post-flush MemAvailable may trail the pre-write
-     * value by at most 50 MB of resident/noise. */
+     * at most 3 s.  The socket is closed first, so no live queue can keep
+     * the memory: after a flush the pre-write MemAvailable may trail by at
+     * most 50 MB of resident/noise, and a hundred-MB drop is a leak. */
     flush_start = now_ms();
     if (config_flush() == 0)
     {
@@ -3306,7 +3382,7 @@ static int mode_writer(int port, int mib, int do_read)
             after_flush = mem_available_kb();
             if (before && after_flush && after_flush + 51200 >= before)
                 break;
-            if (now_ms() - flush_start >= 1000)
+            if (now_ms() - flush_start >= 3000)
                 break;
             msleep(20);
         }
@@ -3314,19 +3390,22 @@ static int mode_writer(int port, int mib, int do_read)
     }
     oom1 = oom_count();
 
-    legal = (sent == total && err == 0) || (sent < total && err == EAGAIN);
+    /* PASS: the write finished, or the child was still blocked in write()
+     * when the observation ended.  An exited child with a partial write is
+     * a failure: EAGAIN, a reset, or any other errno means the module turned
+     * backpressure into an error instead of a stall. */
+    legal = err == 0 && sent >= 0 && sent <= total && (sent == total || blocked);
     rst = err == ECONNRESET || err == EPIPE;
     mem_ok = flushed && before > 0 && after_flush > 0 &&
              after_flush + 51200 >= before;
-    result("pub.writer", legal && mem_ok && !rst && oom1 <= oom0 &&
-                             sent >= 0 && sent <= total,
-           "attempted %d MiB: sent=%ld/%ld errno=%d legal=%d rst=%d, "
-           "MemAvailable before=%lu during_min=%lu after_write=%lu "
-           "after_flush=%lu kB, flush=%d %.2fs, oom=%d->%d",
-           mib, sent, total, err, legal, rst, before, during_min, after_write,
-           after_flush, flushed, flush_ms < 0 ? -1.0 : flush_ms / 1000.0,
+    result("pub.writer", legal && mem_ok && !rst && oom1 <= oom0,
+           "attempted %d MiB: sent=%ld/%ld errno=%d eagain=%d blocked=%d "
+           "child_state=%s mem_before=%lu mem_during_min=%lu "
+           "mem_after_flush=%lu flush_secs=%.2f oom=%d->%d",
+           mib, sent, total, err, err == EAGAIN, blocked, child_state, before,
+           during_min, after_flush, flush_ms < 0 ? -1.0 : flush_ms / 1000.0,
            oom0, oom1);
-    close(fd);
+    munmap(st, sizeof(*st));
     free(buf);
     return 0;
 }
