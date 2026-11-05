@@ -1,0 +1,17 @@
+debug_loss=0
+gaps_total=0
+streams_total=2
+tunnel 1 capture_runs=258 actor_calls=535 submit_bytes=9632614 tx=18953757 wire=19442234 err=0 short=0
+tunnel 1 rx_work_runs=55083 rx_drain_entries=2509 rx_drain_bytes=429933 rx_paused_skips=0 rx_adopt_events=0 rx_records=4177 carrier_write_space_runs=12 poll_rescues=1802
+tunnel 1 rx_ready_calls=4054 rx_reads=55083 rx_read_bytes=429933 rx_read_zero=52605 rx_resume=0 rx_resume_busy=0 rx_last_drained=104 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=535 rx_delivered=337
+tunnel 1 dbg rcv_nxt=1516056491 copied=1514035787 after=1514068555 qlen=7 allocf=0 over=486 copyf=0 hiwat=2882 pdead=0 prun=19055 pmoved=5888 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=65536 txp=1 pub_state=5 pub_wmem=0 pub_una=805487872 pub_nxt=805487872 car_wmem=81607 car_nxt=192316708 car_copied=192316708 car_rcvbuf=524288 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=22404 txwake_busy=6889 txwork=17256
+tunnel 1 ws_calls=12
+tunnel 1 c3 n=5 up=4 lost=8 replaced=7 spare_activated=1 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=1 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=3487 fbk_rx=3455 retx_frames=14 retx_bytes=106321 retain_drop=0 retx_hole=1 retx_slow=1 retx_pathloss=12 retx_other=0 data_tx=2353 retx_data_ppm=11754 dup_bytes_ppm=11037 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=254711 tx_ack=9475705 rx_ack=337 peer_paused=0 fb_delay_us=3231 rto_us=500000 una_stall_us=199064 stall_paused_skips=0 win_block=2882 win_resume=9
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=2 ctl_queued=0
+tunnel 1 streams streams_active=1 n_streams=1 n_pending=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=1793 gate_fail=1669 depth_fail=102 time_fail=22
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=1148 dup_used=2 dup_suppressed=0 dup_same_path=0 inflate_ppm=1963430 dup_bytes=9280358
+tunnel 1 reconcile live_bytes=7475283 live_data=877 live_retx=8 retired_bytes=11966951 retired_data=1476 retired_retx=6

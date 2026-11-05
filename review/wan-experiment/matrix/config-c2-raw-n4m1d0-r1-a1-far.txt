@@ -1,0 +1,1 @@
+tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5201 n=4 m=1 dup=0 profile=raw keepalive=2000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=30000 rx_reorder_bytes=262144 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=31300-31399 nonce=00112233445566778899aabbccddeeff

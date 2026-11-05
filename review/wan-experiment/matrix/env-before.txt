@@ -1,0 +1,28 @@
+Fri 06 Nov 2026 03:38:54 AM CST
+ 03:38:54  up 4 days  8:52,  3 users,  load average: 5.57, 7.70, 11.98
+===PS
+    PID  %CPU ELAPSED    COMMAND
+3053194 113.6 00:00      /tmp/cy-asan/tests/test_nv12_pipeline /tmp/cy-asan/media /tmp/cy-asan/tests/libcy_test_marker.so /tmp/cy-asan/tests /tmp/cy-wt-verify/dist/models/yolo26s.o
+3053157  97.7 00:01      /usr/lib/gcc/x86_64-pc-linux-gnu/16/cc1plus -quiet -I /tmp/cy-vulkan/src/notifier/cy_notifier_autogen/include -I /tmp/cy-wt-verify/src/notifier -I /tmp/cy-
+3053153  96.9 00:01      /usr/lib/gcc/x86_64-pc-linux-gnu/16/cc1plus -quiet -I /tmp/cy-vulkan/src/drawer_actor/cy_drawer_actor_autogen/include -I /tmp/cy-wt-verify/src/drawer_actor
+3053167  96.5 00:00      /usr/lib/gcc/x86_64-pc-linux-gnu/16/cc1plus -quiet -I /tmp/cy-vulkan/src/output/cy_output_autogen/include -I /tmp/cy-wt-verify/src/output -I /tmp/cy-wt-ver
+3053172  96.3 00:00      /usr/lib/gcc/x86_64-pc-linux-gnu/16/cc1plus -quiet -I /tmp/cy-vulkan/src/actor_ifaces/cy_actor_ifaces_autogen/include -I /tmp/cy-wt-verify/src/actor_ifaces
+3053183  94.4 00:00      /usr/lib/gcc/x86_64-pc-linux-gnu/16/cc1plus -quiet -I /tmp/cy-vulkan/src/drawer_actor/cy_drawer_actor_autogen/include -I /tmp/cy-wt-verify/src/drawer_actor
+3053205  93.5 00:00      /usr/lib/gcc/x86_64-pc-linux-gnu/16/cc1plus -quiet -I /tmp/cy-vulkan/src/event_actor/cy_event_actor_autogen/include -I /tmp/cy-wt-verify/src/event_actor -I
+3053213  89.5 00:00      /usr/lib/gcc/x86_64-pc-linux-gnu/16/cc1plus -quiet -I /tmp/cy-vulkan/src/event_actor/cy_event_actor_autogen/include -I /tmp/cy-wt-verify/src/event_actor -I
+2302386   8.9 08:20:12   omp
+2837776   6.8 34:10      omp
+2837632   5.3 34:12      /usr/bin/alacritty
+1725542   4.2 19:22:40   /usr/bin/alacritty
+ 892618   3.3 1-09:09:11 tmux new-session
+    742   3.3 4-08:52:41 /usr/lib/Xorg :0 -seat seat0 -auth /run/lightdm/root/:0 -nolisten tcp vt7 -novtswitch
+===MPSTAT
+error: command not found: mpstat
+===ROUTE
+45.11.1.62 via 192.168.123.254 dev wlp4s0 src 192.168.123.69 uid 1000 
+    cache 
+===HND0
+ 19:38:59 up 1 day, 12:27,  1 user,  load average: 0.38, 0.55, 0.63
+07:39:00 PM  all    1.01    0.00    0.51    0.00    0.00    0.00    0.00    0.00    0.00   98.48
+07:39:01 PM  all    0.00    0.00    0.00    0.00    0.00    0.51    0.00    0.00    0.00   99.49
+Average:     all    0.51    0.00    0.25    0.00    0.00    0.25    0.00    0.00    0.00   98.98

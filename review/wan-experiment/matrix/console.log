@@ -1,0 +1,21 @@
+run c1-raw-n1m0d0 r1 attempt 1 portblock 30100-30199/31100-31199
+  -> ok=True receiver=3.58 client=3.58 rc=0 err=None
+run c1-raw-n1m0d0 r2 attempt 1 portblock 30200-30299/31200-31299
+  -> ok=True receiver=3.993 client=3.993 rc=0 err=None
+run c2-raw-n4m1d0 r1 attempt 1 portblock 30300-30399/31300-31399
+  -> ok=True receiver=3.851 client=3.851 rc=0 err=None
+run c2-raw-n4m1d0 r2 attempt 1 portblock 30400-30499/31400-31499
+  -> ok=True receiver=3.447 client=3.447 rc=0 err=None
+run c3-raw-n8m1d0 r1 attempt 1 portblock 30500-30599/31500-31599
+  -> ok=True receiver=4.266 client=4.267 rc=0 err=None
+run c3-raw-n8m1d0 r2 attempt 1 portblock 30600-30699/31600-31699
+  -> ok=True receiver=4.062 client=4.06 rc=0 err=None
+run c4-httpkal-n4m1d0 r1 attempt 1 portblock 30700-30799/31700-31799
+  -> ok=True receiver=4.006 client=4.007 rc=0 err=None
+run c4-httpkal-n4m1d0 r2 attempt 1 portblock 30800-30899/31800-31899
+  -> ok=True receiver=2.265 client=2.268 rc=0 err=None
+run c5-raw-n4m1d1 r1 attempt 1 portblock 30900-30999/31900-31999
+  -> ok=True receiver=4.068 client=4.064 rc=0 err=None
+run c5-raw-n4m1d1 r2 attempt 1 portblock 31000-31099/32000-32099
+  -> ok=True receiver=5.04 client=5.043 rc=0 err=None
+summary written

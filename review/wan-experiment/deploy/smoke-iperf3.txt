@@ -1,0 +1,3 @@
+Connecting to host 127.0.0.1, port 9001
+[  5] local 127.0.0.1 port 57708 connected to 127.0.0.1 port 9001
+iperf3: error - unable to send control message - port may not be available, the other side may have stopped running, etc.: Broken pipe

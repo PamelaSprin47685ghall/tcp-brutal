@@ -1,0 +1,16 @@
+proxy-path (invalid for WAN comparison)
+
+Every result in this directory (baseline/) was measured through the local mihomo
+TUN path: ip route get 45.11.1.62 showed via 198.18.0.2 dev Meta src 198.18.0.1.
+iperf3 TCP therefore terminated at the userspace proxy, not at HND0.
+
+Consequences:
+- iperf3 sender Mbit/s is inflated by proxy buffering and MUST NOT be used as
+  a WAN capacity number.
+- iperf3 JSON mean_rtt / retransmits describe only the local TUN segment
+  (1-30 ms, 10-34 retransmits), not the ~218 ms WAN path.
+- The receiver Mbit/s figures are still proxy-mediated and are not a clean
+  direct-path baseline.
+
+Use ../baseline-direct/ for the real WAN baseline (policy rule to 45.11.1.62
+lookup main, via wlp4s0). These files are kept only for comparison.

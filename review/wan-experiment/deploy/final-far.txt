@@ -1,0 +1,61 @@
+tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5201 n=4 m=1 dup=1 profile=raw keepalive=2000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=30000 rx_reorder_bytes=262144 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=31000-31099 nonce=00112233445566778899aabbccddeeff
+===TUN===
+# id role state listen peer target n m streams
+1 far listening 0.0.0.0:9000 0.0.0.0:0 127.0.0.1:5201 4 1 15
+===PEERS===
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm
+1 0 9000 171.120.34.226:9443 2 392174 0 up raw 2 0 330210 9 315 0 0
+1 1 9000 171.120.34.226:40003 4 388787 0 up raw 3 0 349792 11 487 0 1000000
+1 3 9000 171.120.34.226:40002 5 383022 0 up raw 4 0 347926 9 316 0 333333
+1 4 9000 171.120.34.226:9441 0 330892 0 spare raw 0 0 251326 4729 491408 0 0
+===STATS===
+debug_loss=0
+gaps_total=0
+streams_total=15
+tunnel 1 capture_runs=19 actor_calls=11 submit_bytes=341 tx=688 wire=872205 err=5 short=0
+tunnel 1 rx_work_runs=5135393 rx_drain_entries=8044 rx_drain_bytes=15459871 rx_paused_skips=0 rx_adopt_events=15 rx_records=9605 carrier_write_space_runs=15 poll_rescues=266
+tunnel 1 rx_ready_calls=9640 rx_reads=5135393 rx_read_bytes=15459871 rx_read_zero=5127411 rx_resume=0 rx_resume_busy=0 rx_last_drained=208 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=11 rx_delivered=7475492
+tunnel 1 dbg rcv_nxt=2259275472 copied=2259275471 after=2259275472 qlen=1 allocf=0 over=0 copyf=0 hiwat=1 pdead=5 prun=21678 pmoved=8356 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=8 pub_wmem=0 pub_una=3085266578 pub_nxt=3085266578 car_wmem=0 car_nxt=689012076 car_copied=689012076 car_rcvbuf=524288 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=36493 txwake_busy=18924 txwork=17589
+tunnel 1 ws_calls=15
+tunnel 1 c3 n=5 up=4 lost=11 replaced=0 spare_activated=1 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=7746 fbk_rx=7711 retx_frames=6 retx_bytes=6 retain_drop=0 retx_hole=4 retx_slow=2 retx_pathloss=0 retx_other=0 data_tx=28 retx_data_ppm=545454 dup_bytes_ppm=17595 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=5 rx_ack=182 peer_paused=0 fb_delay_us=5000 rto_us=500000 una_stall_us=10210113 stall_paused_skips=0 win_block=0 win_resume=0
+tunnel 1 ctl ctl_lost=0 ctl_retry=1 ctl_requeue=1 ctl_obsolete=1 ctl_queued=0
+tunnel 1 streams streams_active=2 n_streams=2 n_pending=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=224 gate_fail=224 depth_fail=0 time_fail=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=11 dup_used=444 dup_suppressed=0 dup_same_path=0 inflate_ppm=2000000 dup_bytes=341
+tunnel 1 reconcile live_bytes=492734 live_data=9 live_retx=3 retired_bytes=379471 retired_data=19 retired_retx=3
+===PORTS===
+# block 40000-40063 (64 ports)
+# default, not yet set
+ports 40000-40063
+===IPERF_LOG===
+[  5]  12.00-13.00  sec   512 KBytes  4.19 Mbits/sec                  
+[  5]  13.00-14.00  sec   512 KBytes  4.19 Mbits/sec                  
+[  5]  14.00-15.00  sec   512 KBytes  4.20 Mbits/sec                  
+[  5]  15.00-15.27  sec  0.00 Bytes  0.00 bits/sec                  
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate
+[  5]   0.00-15.27  sec  7.00 MBytes  3.84 Mbits/sec                  receiver
+warning: Failed to read JSON data size
+warning: Failed to read JSON data size - read returned 0; errno=9
+iperf3: error - unable to receive results: Bad file descriptor
+-----------------------------------------------------------
+Server listening on 5201 (test #6)
+-----------------------------------------------------------
+Accepted connection from 127.0.0.1, port 37296
+[  5] local 127.0.0.1 port 5201 connected to 127.0.0.1 port 37298
+[ ID] Interval           Transfer     Bitrate
+[  5]   0.00-1.00   sec  0.00 Bytes  0.00 bits/sec                  
+[  5]   1.00-2.00   sec  0.00 Bytes  0.00 bits/sec                  
+[  5]   2.00-3.00   sec  0.00 Bytes  0.00 bits/sec                  
+[  5]   3.00-4.00   sec  0.00 Bytes  0.00 bits/sec                  
+[  5]   4.00-5.00   sec  0.00 Bytes  0.00 bits/sec                  
+[  5]   5.00-5.33   sec  0.00 Bytes  0.00 bits/sec                  
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate
+[  5]   0.00-5.33   sec  0.00 Bytes  0.00 bits/sec                  receiver
+===SS===
+LISTEN 0      128          0.0.0.0:9000       0.0.0.0:*                                                          
+LISTEN 0      4096       127.0.0.1:5201       0.0.0.0:*    users:(("iperf3",pid=699110,fd=3))                    

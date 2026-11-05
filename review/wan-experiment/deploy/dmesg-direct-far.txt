@@ -1,0 +1,10 @@
+[130348.248842] audit: type=1400 audit(1793906611.298:420): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=702529 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[130348.249304] audit: type=1400 audit(1793906611.299:421): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=702529 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[130348.249336] audit: type=1400 audit(1793906611.299:422): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=702529 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[130351.905613] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9397, awaiting HELLO
+[130351.919668] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[130351.969770] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40008, awaiting HELLO
+[130351.969878] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[130351.969972] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9399, awaiting HELLO
+[130358.199503] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[130358.201630] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO

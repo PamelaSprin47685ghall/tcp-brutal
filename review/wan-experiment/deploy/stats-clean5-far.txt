@@ -1,0 +1,48 @@
+debug_loss=0
+gaps_total=0
+streams_total=8
+tunnel 1 capture_runs=8 actor_calls=5 submit_bytes=5 tx=14 wire=350616 err=0 short=0
+tunnel 1 rx_work_runs=6439234 rx_drain_entries=2546 rx_drain_bytes=2703371 rx_paused_skips=0 rx_adopt_events=8 rx_records=3190 carrier_write_space_runs=8 poll_rescues=293
+tunnel 1 rx_ready_calls=2710 rx_reads=6439234 rx_read_bytes=2703371 rx_read_zero=6436706 rx_resume=0 rx_resume_busy=0 rx_last_drained=122 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=5 rx_delivered=1056881
+tunnel 1 dbg rcv_nxt=1996054357 copied=1996054356 after=1996054357 qlen=1 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=14399 pmoved=2968 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=8 pub_wmem=0 pub_una=410417041 pub_nxt=410417041 car_wmem=0 car_nxt=1507446480 car_copied=1507446480 car_rcvbuf=524288 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=14830 txwake_busy=2853 txwork=12015
+tunnel 1 ws_calls=8
+tunnel 1 c3 n=5 up=5 lost=3 replaced=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=2838 fbk_rx=2863 retx_frames=4 retx_bytes=4 retain_drop=0 retx_hole=1 retx_slow=3 retx_pathloss=0 retx_other=0 data_tx=14 retx_data_ppm=800000 dup_bytes_ppm=800000 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=5 rx_ack=1056699 peer_paused=0 fb_delay_us=0 rto_us=500000 una_stall_us=10041232 stall_paused_skips=0 win_block=0 win_resume=0
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0
+tunnel 1 streams streams_active=1 n_streams=1 n_pending=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=116 gate_fail=64 depth_fail=52 time_fail=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=5 dup_used=64 dup_suppressed=0 dup_same_path=0 inflate_ppm=2000000 dup_bytes=5
+tunnel 1 reconcile live_bytes=350616 live_data=14 live_retx=4 retired_bytes=0 retired_data=0 retired_retx=0
+===PEERS===
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm
+1 0 9000 171.120.34.226:40000 5 447616 0 up raw 5 250000 276075 97 3219 0 666666
+1 1 9000 171.120.34.226:40001 4 512701 0 up raw 4 0 72047 9 315 0 333333
+1 2 9000 171.120.34.226:40002 2 517002 0 up raw 2 0 272139 9 315 0 0
+1 3 9000 171.120.34.226:9449 3 469369 0 up raw 3 0 272829 9 315 0 500000
+1 4 9000 171.120.34.226:40004 0 385813 0 spare raw 0 0 235424 2845 346574 0 0
+===TUN===
+# id role state listen peer target n m streams
+1 far listening 0.0.0.0:9000 0.0.0.0:0 127.0.0.1:5201 4 1 8
+===IPERF===
+[ ID] Interval           Transfer     Bitrate
+[  5]   0.00-5.33   sec  0.00 Bytes  0.00 bits/sec                  receiver
+warning: Failed to read JSON data size
+warning: Failed to read JSON data size - read returned 0; errno=9
+iperf3: error - unable to receive results: Bad file descriptor
+-----------------------------------------------------------
+Server listening on 5201 (test #7)
+-----------------------------------------------------------
+Accepted connection from 127.0.0.1, port 36210
+[  5] local 127.0.0.1 port 5201 connected to 127.0.0.1 port 36214
+[ ID] Interval           Transfer     Bitrate
+[  5]   0.00-1.00   sec  0.00 Bytes  0.00 bits/sec                  
+[  5]   1.00-2.00   sec   128 KBytes  1.05 Mbits/sec                  
+[  5]   2.00-3.00   sec   256 KBytes  2.10 Mbits/sec                  
+[  5]   3.00-4.00   sec   256 KBytes  2.10 Mbits/sec                  
+[  5]   4.00-5.00   sec   256 KBytes  2.10 Mbits/sec                  
+[  5]   5.00-5.28   sec  0.00 Bytes  0.00 bits/sec                  
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate
+[  5]   0.00-5.28   sec   896 KBytes  1.39 Mbits/sec                  receiver

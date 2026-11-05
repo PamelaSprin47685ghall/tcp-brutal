@@ -1,0 +1,40 @@
+# /etc/sudoers.d/90-tbtun-exp — installed 2026-11-06
+
+Purpose: let the matrix worker (user kunweiz) read /proc/net/tbtun/* and write
+/proc/net/tbtun/config without a password. Installed via su -P (root channel);
+root password never written to disk or logs.
+
+File content (mode 0440 root:root):
+
+kunweiz ALL=(root) NOPASSWD: /usr/bin/tee /proc/net/tbtun/config, /usr/bin/cat /proc/net/tbtun/config, /usr/bin/cat /proc/net/tbtun/stats, /usr/bin/cat /proc/net/tbtun/peers, /usr/bin/cat /proc/net/tbtun/tunnels, /usr/bin/cat /proc/net/tbtun/ports
+
+Install commands used:
+
+  install -m 440 -o root -g root /tmp/90-tbtun-exp /etc/sudoers.d/90-tbtun-exp
+  rm -f /tmp/90-tbtun-exp
+  visudo -cf /etc/sudoers.d/90-tbtun-exp
+  # -> /etc/sudoers.d/90-tbtun-exp: parsed OK
+
+Existing /etc/sudoers.d/10-installer left untouched.
+
+Verification as ordinary user (all rc=0):
+
+  sudo -n cat /proc/net/tbtun/stats >/dev/null        -> rc=0
+  printf '\n' | sudo -n tee /proc/net/tbtun/config >/dev/null -> rc=0
+  sudo -n cat /proc/net/tbtun/{config,stats,peers,tunnels,ports} -> rc=0 each
+
+sudo -n -l relevant line:
+
+  (root) NOPASSWD: /usr/bin/tee /proc/net/tbtun/config, /usr/bin/cat /proc/net/tbtun/config, /usr/bin/cat /proc/net/tbtun/stats, /usr/bin/cat /proc/net/tbtun/peers, /usr/bin/cat /proc/net/tbtun/tunnels, /usr/bin/cat /proc/net/tbtun/ports
+
+Post-write state (blank line is a no-op; tunnel not cleared):
+
+  # id role state listen peer target n m streams
+  1 near listening 127.0.0.1:9001 45.11.1.62:9000 - 4 1 2
+
+Teardown command (run by the closing worker):
+
+  rm -f /etc/sudoers.d/90-tbtun-exp
+
+Note: module, far/near tunnels, ip rule pref 100, and iperf3 target were not
+touched by this change.

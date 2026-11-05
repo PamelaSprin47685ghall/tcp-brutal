@@ -1,0 +1,15 @@
+[130188.689195] audit: type=1400 audit(1793906451.737:392): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=699689 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[130210.906587] audit: type=1400 audit(1793906473.956:393): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=700123 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[130210.906623] audit: type=1400 audit(1793906473.956:394): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=700123 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[130210.907070] audit: type=1400 audit(1793906473.956:395): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=700123 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[130210.907083] audit: type=1400 audit(1793906473.956:396): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=700123 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[130210.907092] audit: type=1400 audit(1793906473.957:397): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=700123 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[130210.907100] audit: type=1400 audit(1793906473.957:398): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=700123 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[130210.907340] audit: type=1400 audit(1793906473.957:399): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=700123 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[130210.907352] audit: type=1400 audit(1793906473.957:400): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=700123 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[130210.907602] audit: type=1400 audit(1793906473.957:401): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=700123 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[130210.907614] audit: type=1400 audit(1793906473.957:402): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=700123 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[130222.739480] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=36328, awaiting HELLO
+[130222.755794] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=36340, awaiting HELLO
+[130222.763711] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=36338, awaiting HELLO
+[130222.842374] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=36356, awaiting HELLO

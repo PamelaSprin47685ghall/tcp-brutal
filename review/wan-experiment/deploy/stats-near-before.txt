@@ -1,0 +1,18 @@
+Password: 
+debug_loss=0
+gaps_total=0
+streams_total=0
+tunnel 1 capture_runs=0 actor_calls=0 submit_bytes=0 tx=0 wire=275 err=0 short=0
+tunnel 1 rx_work_runs=10 rx_drain_entries=5 rx_drain_bytes=275 rx_paused_skips=0 rx_adopt_events=0 rx_records=5 carrier_write_space_runs=5 poll_rescues=0
+tunnel 1 rx_ready_calls=5 rx_reads=10 rx_read_bytes=275 rx_read_zero=5 rx_resume=0 rx_resume_busy=0 rx_last_drained=55 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=0 rx_delivered=0
+tunnel 1 dbg rcv_nxt=0 copied=0 after=0 qlen=0 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=14 pmoved=5 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=0 car_nxt=1061468957 car_copied=1061468957 car_rcvbuf=524288 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=30 txwake_busy=21 txwork=14
+tunnel 1 ws_calls=5
+tunnel 1 c3 n=5 up=5 lost=0 replaced=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=0 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=0 una_stall_us=0 stall_paused_skips=0 win_block=0 win_resume=0
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0
+tunnel 1 streams streams_active=0 n_streams=0 n_pending=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=0 dup_bytes=0
+tunnel 1 reconcile live_bytes=275 live_data=0 live_retx=0 retired_bytes=0 retired_data=0 retired_retx=0

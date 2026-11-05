@@ -1,0 +1,11 @@
+Password: 
+[376632.394181] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[376632.394281] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[376632.412959] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[376660.064208] tbtun: tunnel 1 carrier 4 DIALED lport=40005 peer=45.11.1.62:9000
+[376660.077861] tbtun: tunnel 1 carrier 1 DIALED lport=40006 peer=45.11.1.62:9000
+[376660.103268] tbtun: tunnel 1 carrier 2 DIALED lport=40007 peer=45.11.1.62:9000
+[376660.103319] tbtun: tunnel 1 carrier 3 DIALED lport=40008 peer=45.11.1.62:9000
+[376660.103356] tbtun: tunnel 1 carrier 0 DIALED lport=40004 peer=45.11.1.62:9000
+[376666.377813] tbtun: tunnel 1 carrier 3 DIALED lport=40001 peer=45.11.1.62:9000
+[376666.378052] tbtun: tunnel 1 carrier 2 DIALED lport=40000 peer=45.11.1.62:9000

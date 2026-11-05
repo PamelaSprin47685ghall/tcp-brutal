@@ -1,0 +1,21 @@
+=== local iperf3 ===
+iperf 3.20 (cJSON 1.7.15)
+Linux 7940HS 7.2.9-1-MANJARO #1 SMP PREEMPT_DYNAMIC Sat, 03 Oct 2026 15:02:22 +0000 x86_64
+Optional features available: CPU affinity setting, IPv6 flow label, TCP congestion algorithm setting, sendfile / zerocopy, socket pacing, authentication, bind to device, support IPv4 don't fragment, POSIX threads
+=== sysctl ===
+net.ipv4.tcp_congestion_control = bbr
+net.core.rmem_max = 4194304
+net.core.wmem_max = 4194304
+net.ipv4.tcp_rmem = 4096	131072	33554432
+net.ipv4.tcp_wmem = 4096	16384	4194304
+=== route ===
+45.11.1.62 via 198.18.0.2 dev Meta table 2022 src 198.18.0.1 uid 1000 
+    cache 
+=== mihomo ===
+893251 /opt/mihomo/mihomo -d /opt/mihomo
+=== nproc/mem ===
+16
+               total        used        free      shared  buff/cache   available
+Mem:           63496       31385       11591       20649       41874       32111
+=== cpu model ===
+model name	: AMD Ryzen 9 7940H  w/ Radeon 780M Graphics
