@@ -127,8 +127,8 @@ near's nonce, index and generation from its own HELLO.
 | `pub.rst` | 4 MiB then `SO_LINGER 0` | RST mid-stream, no warning |
 | `init.src_key` | a `src=` line, then `nonce=` and a short `nonce=` | `src=` is refused, `nonce=` is accepted and rendered, a short nonce is refused |
 | `pub.srcfilter` | far+near pinned with `nonce=` and far `peer=`, then an application from 127.0.0.2 | the application is served (no `src=` allow list exists; identity is the nonce) and both keys render in the canonical config |
-| `pub.writer` (100 MiB) | app writes and never reads | two legal outcomes: `sent==total` (the pipe buffers absorbed it) or `sent<total` with `errno=EAGAIN` (bounded flow-control refusal). Both require no OOM/RST, a live process, and accepted bytes `<= total`. A synchronous `flush` follows; `MemAvailable` may trail the pre-write value by at most 50 MB (51200 kB) and must not show an unreclaimable hundred-MB drop |
-| `pub.writer` (1024 MiB) | app attempts 1 GiB and never reads | the same verdict; the detail prints `sent/total/errno/mem_before/mem_during_min/mem_after_flush/flush_secs` |
+| `pub.writer` (100 MiB) | app writes and never reads | the write must either finish (`sent==total`) or still be blocked in `write()` when the 10 s observation ends: the public socket is ordinary TCP, so a full queue stalls the application and never surfaces as `EAGAIN`. The forked writer is killed and reaped, the socket is closed, and a synchronous `flush` follows; `MemAvailable` must recover to within 50 MB (51200 kB) of the pre-write value, with no OOM/RST |
+| `pub.writer` (1024 MiB) | app attempts 1 GiB and never reads | the same verdict; the detail prints `sent/total/errno/eagain/blocked/child_state/mem_before/mem_during_min/mem_after_flush/flush_secs/oom` |
 
 ### Control surface (`ctl.*`, `init.*`)
 
@@ -190,13 +190,17 @@ the console log holds the evidence.
 - The guest is one 512 MiB machine. The suite measures the direction and the
   amount of backpressure; it does not try to force an OOM kill.
 - `pub.writer` never reads from the application socket by design. Its contract
-  is "finish the write, or stop with an explainable `EAGAIN`", not "deliver
-  1 GiB into an application that never reads": `EAGAIN` is the designed
-  boundary, and a completed write means the pipe buffers absorbed the total.
-  The 50 MB slack after `flush` covers resident buffers and noise; it does not
-  permit an unreclaimable hundred-MB drop. The 2 s churn echo timeout plus one
-  retry absorbs scheduler jitter on a loaded host; it does not relax the
-  per-connection usability requirement.
+  is "the write finishes, or it is still blocked in `write()` when the 10 s
+  observation ends", not "deliver 1 GiB into an application that never reads":
+  the public socket is ordinary TCP, so backpressure is a stall. `EAGAIN` would
+  mean the probe's own 5 s send timeout fired, not that the module pushed back,
+  and is a failure. The writer runs in a forked child so the parent can kill
+  and reap it after the observation; the socket is then closed and `flush` must
+  return `MemAvailable` to within 50 MB of its pre-write value. That slack
+  covers resident buffers and noise; it does not permit an unreclaimable
+  hundred-MB drop. The 2 s churn echo timeout plus one retry absorbs scheduler
+  jitter on a loaded host; it does not relax the per-connection usability
+  requirement.
 - The fake far and the hostile carrier are both in the guest, so they can bind
   the ports the module dials. That is deliberate: the module's peer is
   untrusted by assumption.
