@@ -2,7 +2,8 @@
 # deploy_hnd0.sh — tbtun far-side deploy / rollback driver for HND0.
 #
 # Target box: HND0 45.11.1.62, 2 vCPU / 955 MiB, physical 1G, 256-flow.
-# Interface contract: review/goal-v6-interfaces.md (master 7105507).
+# Interface contract: review/goal-v6-interfaces.md (master ab1d297; ABI
+# identical to 7105507).
 #
 # Two ABIs:
 #   v6 (default)  fec=on mode=grouped n=4 m=4 w=0 carriers=256 crypto=on
@@ -18,8 +19,9 @@
 #     stopped or restarted by deploy. Their state is snapshotted, and rollback
 #     restarts only a service that was active before deploy and is inactive
 #     now.
-#   - The script owns only: the tbtun module, /proc/net/tbtun/config, the
-#     transient unit tbtun-iperf3-<target-port>, and the two experiment ports.
+#   - The script owns only: the tbtun module, /proc/net/tbtun/config,
+#     /proc/net/tbtun/ports, the transient unit tbtun-iperf3-<target-port>,
+#     and the two experiment ports.
 #   - No routing or firewall change is made. Routes are recorded and compared,
 #     never written.
 #   - execute takes /tmp/tbtun-hnd0.lock (flock -w 1800) and writes a holder
@@ -48,7 +50,8 @@
 #   --window-bytes W       legacy only: tx_window_bytes (default 0 = auto)
 #   --carrier-port P       far listen port (default 9000)
 #   --target-port P        local target port (default 5201)
-#   --portblock LO-HI      source port block (default 30000-34095, 4096 ports)
+#   --portblock LO-HI      global source port block written to
+#                          /proc/net/tbtun/ports (default 30000-34095, 4096 ports)
 #   --app-target-mbps M    acceptance floor for T5.2 (default 33.72)
 #   --loss-p PPM           recorded loss target for T5.2 (default 0)
 #   --evidence-dir DIR     runtime evidence copy (default /tmp/tbtun-hnd0-evidence)
@@ -136,6 +139,28 @@ listening_on() {
 
 service_state() { systemctl is-active "$1" 2>/dev/null || true; }
 
+# Warn only; never change sysctl. Returns 0 when the reserved list overlaps
+# the experiment block, 1 otherwise.
+portblock_overlap_reserved() {
+    local res lo hi a b tok
+    res=$(sysctl -n net.ipv4.ip_local_reserved_ports 2>/dev/null || true)
+    [[ -z $res ]] && return 1
+    lo=${PORTBLOCK%-*}
+    hi=${PORTBLOCK#*-}
+    local IFS=,
+    for tok in $res; do
+        a=${tok%-*}
+        b=${tok#*-}
+        [[ $tok == *-* ]] || b=$a
+        if (( a <= hi && b >= lo )); then
+            printf 'warning: net.ipv4.ip_local_reserved_ports=%s overlaps portblock=%s\n' \
+                "$res" "$PORTBLOCK" >&2
+            return 0
+        fi
+    done
+    return 1
+}
+
 snapshot() {
     local stamp file
     stamp=$(date +%Y%m%d-%H%M%S)
@@ -203,19 +228,30 @@ validate_profile() {
     if [[ $ABI == v6 ]]; then
         (( CARRIERS >= 1 && CARRIERS <= 256 )) || die "--carriers must be 1..256 for v6"
         (( N >= 1 && N <= 255 )) || die "--n must be 1..255"
-        (( M >= 1 && M <= 255 )) || die "--m must be 1..255 for fec=on"
+        if [[ $FEC == on ]]; then
+            (( M >= 1 && M <= 255 )) || die "--m must be 1..255 when fec=on"
+        else
+            (( M >= 0 && M <= 255 )) || die "--m must be 0..255 when fec=off"
+        fi
         (( N + M <= 256 )) || die "n+m must be <= 256"
         (( CARRIERS % (N + M) == 0 )) || die "carriers must divide by (n+m) for 1 share/carrier"
+        if [[ $FEC == on ]]; then
+            (( CARRIERS >= N + M )) || die "fec=on requires carriers >= n+m"
+        fi
         if [[ $CRYPTO == on && $FEC == off ]]; then
             die "crypto=on requires fec=on"
         fi
-        if [[ $FEC_MODE == grouped || $FEC_MODE == rlnc ]]; then
-            (( W == 0 || W >= N )) || die "--w must be 0 or >= n"
-            (( W <= 1024 )) || die "--w must be <= 1024"
+        if [[ $FEC_MODE == sc-ldpc ]]; then
+            (( W == 0 || W == 256 || W == 512 )) || die "--w for sc-ldpc must be 0, 256, or 512"
+        else
+            (( W == 0 || (W >= N && W <= 1024) )) || die "--w must be 0 or n..1024"
+        fi
+        if [[ $CRYPTO_KEY != - ]]; then
+            [[ $CRYPTO_KEY =~ ^[0-9a-fA-F]{64}$ ]] || die "--crypto-key must be 64 hex digits or -"
         fi
     else
-        (( N + M <= 16 )) || die "legacy ARQ supports n+m <= 16; use --abi v6 for 256 carriers"
-        (( CARRIERS <= 16 )) || die "legacy ARQ supports carriers <= 16"
+        (( N + M <= 16 )) || die "legacy ARQ supports n+m <= 16 and max_carriers <= 16"
+        (( CARRIERS <= 16 )) || die "legacy ARQ supports n+m <= 16 and max_carriers <= 16"
     fi
     [[ $PORTBLOCK =~ ^[0-9]+-[0-9]+$ ]] || die "--portblock must be LO-HI"
 }
@@ -225,8 +261,7 @@ config_line() {
     if [[ $ABI == v6 ]]; then
         line="tunnel 1 role=far listen=0.0.0.0:$CARRIER_PORT target=127.0.0.1:$TARGET_PORT"
         line+=" n=$N m=$M fec=$FEC mode=$FEC_MODE w=$W carriers=$CARRIERS crypto=$CRYPTO crypto_key=$CRYPTO_KEY"
-        line+=" dup=1 profile=$PROFILE keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000"
-        line+=" hole_budget_ms=30000 rx_reorder_bytes=262144 tx_retain_bytes=0 carrier_stall_ms=15000"
+        line+=" profile=$PROFILE keepalive=5000 drip_ms=1000 carrier_stall_ms=15000"
         line+=" portblock=$PORTBLOCK nonce=$NONCE"
     else
         line="tunnel 1 role=far listen=0.0.0.0:$CARRIER_PORT target=127.0.0.1:$TARGET_PORT"
@@ -267,6 +302,10 @@ do_status() {
     for p in "$CARRIER_PORT" "$TARGET_PORT"; do
         if listening_on "$p"; then printf '  %s=listening\n' "$p"; else printf '  %s=free\n' "$p"; fi
     done
+    if module_loaded; then
+        printf 'ports_block=%s\n' "$(cat /proc/net/tbtun/ports 2>/dev/null | awk '$1=="ports"{print $2; exit}')"
+    fi
+    portblock_overlap_reserved || true
     printf 'snapshots:\n'
     if [[ -L $STATE_DIR/latest ]]; then printf '  latest=%s\n' "$(readlink -f "$STATE_DIR/latest")"; else printf '  none\n'; fi
     printf 'lock:\n'
@@ -309,6 +348,10 @@ do_deploy() {
             note "insmod failed for $CARRIERS carriers; rollback with: $PROG rollback --execute"
             return 1
         fi
+    fi
+    if ! run_sh "printf 'ports %s\\n' '$PORTBLOCK' > /proc/net/tbtun/ports"; then
+        note "ports block write failed; rollback with: $PROG rollback --execute"
+        return 1
     fi
     local line
     line=$(config_line)
@@ -363,8 +406,21 @@ do_rollback() {
 do_verify() {
     print_plan
     local fail=0
-    if module_loaded; then printf 'module=loaded\n'; else printf 'module=absent\n'; fi
+    if module_loaded; then
+        printf 'module=loaded\n'
+        local got
+        got=$(cat /proc/net/tbtun/ports 2>/dev/null | awk '$1=="ports"{print $2; exit}')
+        if [[ $got == "$PORTBLOCK" ]]; then
+            printf 'ports_block=%s (matches)\n' "$got"
+        else
+            printf 'ports_block=%s (expected %s)\n' "${got:-missing}" "$PORTBLOCK"
+            fail=1
+        fi
+    else
+        printf 'module=absent\n'
+    fi
     if [[ -d /proc/net/tbtun ]]; then printf 'proc=present\n'; else printf 'proc=absent\n'; fi
+    portblock_overlap_reserved || true
     for s in $PROD_SERVICES; do
         local st; st=$(service_state "$s")
         printf 'service %s=%s\n' "$s" "$st"
