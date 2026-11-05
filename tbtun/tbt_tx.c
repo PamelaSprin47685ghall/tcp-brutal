@@ -62,6 +62,8 @@ static bool tbt_retain_tcp_done(struct tbt_session *sess, struct tbt_retain *r,
 static bool tbt_retain_paths_stalled(struct tbt_session *sess, struct tbt_retain *r,
                                      u64 now, u64 rto);
 static bool tbt_hole_copy_inflight(struct tbt_session *sess, struct tbt_retain *r);
+static void tbt_tx_ctl_arm(struct tbt_session *sess, struct tbt_carrier *pref,
+                           unsigned int ms);
 
 static void tbt_frame_free(struct tbt_frame *fr)
 {
@@ -216,6 +218,14 @@ int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
     sess->ctl_queued++;
     spin_unlock(&sess->tx_lock);
     tbt_tx_wake(sess);
+    /* schedule_work(&c->w_tx) is lost when that work is already running and
+     * has passed the queue scan. A control frame that is the last thing a
+     * dying stream sends (the RST) then waits for a wake that never comes:
+     * the stream is dead, so the feedback tick stops re-arming. The bounded
+     * pump is a delayed work, so mod_delayed_work always leaves one run
+     * pending (measured: near.rst_eagain, the RST queued at 12.63 s and never
+     * written while the far drained for 60 s). */
+    tbt_tx_ctl_arm(sess, NULL, 0);
     return 0;
 }
 

@@ -1,7 +1,7 @@
 # HND0 生产 carrier profile：N/M/W/d 与三档配置
 
 **日期**：2026-11-06
-**代码基线**：`w-window` HEAD `45cb119` + 工作树未提交的 retx 诊断改动（worktree `/home/kunweiz/tbtun-worktrees/window`，2026-11-06）
+**代码基线**：`w-window` HEAD `45cb119` + `6024ed5`（retx hole filler 的 txq/窗口/停泊路径修复与 gate 计数；worktree `/home/kunweiz/tbtun-worktrees/window`，2026-11-06）
 **实测基线**：`review/wan-experiment/summary.md`（HEAD `8d676dd`），RTT 185.5-256.2 ms，均值 217.9 ms（summary.md:67）
 **HND0**：45.11.1.62，2 vCPU，955 MiB，`7.0.0-42-generic` x86_64（summary.md:30）
 
@@ -223,7 +223,7 @@ tunnel 1 role=near listen=127.0.0.1:9001 peer=45.11.1.62:9000 n=16 m=0 dup=0 pro
 口径：
 
 - **W 帧缓冲** = `2W`：`2N` 个帧 × 16 KiB slab；会话 tx 队列的实际上限是 `2×(W + 65824)`，比 `2W` 多约 128 KiB。
-- **会话 tx 队列 slab** = `2 × txq_max` = `2 × (W + 65824)`：队列是全会话共享的一条 `sess->tx_q`，不是每流一份；每个 8 KiB 负载占 16 KiB slab。未提交的 retx 改动允许 hole filler 越过 `txq_max` 一帧（约 16 KiB slab），下表忽略这一帧。
+- **会话 tx 队列 slab** = `2 × txq_max` = `2 × (W + 65824)`：队列是全会话共享的一条 `sess->tx_q`，不是每流一份；每个 8 KiB 负载占 16 KiB slab。`6024ed5` 允许 hole filler 越过 `txq_max`：每个 RTO 最多一条 8 KiB 副本，写出即释放；下表忽略这条副本（约 16 KiB slab）。
 - **retain 上限** = `W + 8 MiB` 负载（未 ack 的 W 永不淘汰 + 已 ack 的 8 MiB 预算），slab 再乘 2。
 - **单流稳态** = retain（按每流 4.25 Mbit/s、1 s 保留 ≈ 0.5 MiB 估算）+ 就绪队列（按 4 MiB + W，slab 2×；WAN 矩阵实测 3.15-3.71 MiB）+ 重排树份额（R/8，slab 2×）+ 固定堆/8。
 - **8 流稳态** = 8 × 单流 + 会话 tx 队列 + 载体 socket 缓冲计费上限（每载体 4 MiB）；固定堆已经含在“单流”里。socket 缓冲是计费上限，不是预分配（DESIGN.md:992-993）。
