@@ -619,6 +619,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **T1 后续**：`hnd0-n1b` 已 stand down，不重复 1MiB 跑；A 在 full adversarial 后诊断控制流 stall。T1 未绿，`w-window` 不合并。
 
+**控制流 stall 机制（`hnd0-n1b` 诊断，待 A 修）**：`tbt_tx.c:tbt_tx_stall_check()` 的 `budget = hole_budget_ms ? hole_budget_ms : 1000ms`，再取 `max(budget, 2.5×RTO)`；本次 `hole_budget_ms=0` → 1s（RTO=200ms，floor=0.5s），`carrier_stall_ms=15000` 不参与。iperf3 控制流第 172 字节在 far 目标侧 3s 未被读走，`tx_ack` 停在 171，3.17s 后被杀；kill 发 RST → HND0 iperf3 server 关闭控制 socket、停止读数据 socket → far 数据流残留 `rxq=2.65MB`、`tgt_state=7`，target-close 未传回 near。修复方向：`hole_budget_ms=0` 时改用 `carrier_stall_ms` 或禁用 sender stall kill；target CLOSE 时主动拆流/回传 close。证据缺口：`t1-n1-auto/` 缺 `/proc/net/tbtun/config` dump；下次复跑补 config/ports 快照。
+
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
 
 | 项 | 内容 |
