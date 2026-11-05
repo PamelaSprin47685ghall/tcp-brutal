@@ -1,0 +1,3 @@
+total 108
+-rw-r--r-- 1 root root 109749 Nov  6 01:46 tbtun.ko.zst
+340e5d6090fef01754d13feb7732b4bfb69a862233fb1a1a57ea9f31a909652e  /lib/modules/7.2.9-1-MANJARO/updates/dkms/tbtun.ko.zst

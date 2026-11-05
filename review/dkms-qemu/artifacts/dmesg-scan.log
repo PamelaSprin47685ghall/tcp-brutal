@@ -1,0 +1,16 @@
+[    9.003394] tbtun: loading out-of-tree module taints kernel.
+[    9.004331] tbtun: module verification failed: signature and/or required key missing - tainting kernel
+[    9.010517] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[    9.339986] tbtun: tunnel 1 carrier 0 failed to connect: -101
+[    9.340851] tbtun: tunnel 1 carrier 1 failed to connect: -101
+[    9.341773] tbtun: tunnel 1 carrier 2 failed to connect: -101
+[    9.342880] tbtun: tunnel 1 carrier 3 failed to connect: -101
+[    9.343930] tbtun: tunnel 1 carrier 4 failed to connect: -101
+[    9.505639] tbtun: unloaded
+[    9.547597] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[    9.599174] tbtun: tunnel 1 carrier 0 failed to connect: -101
+[    9.600141] tbtun: tunnel 1 carrier 1 failed to connect: -101
+[    9.601157] tbtun: tunnel 1 carrier 2 failed to connect: -101
+[    9.602378] tbtun: tunnel 1 carrier 3 failed to connect: -101
+[    9.603452] tbtun: tunnel 1 carrier 4 failed to connect: -101
+[    9.654639] tbtun: unloaded

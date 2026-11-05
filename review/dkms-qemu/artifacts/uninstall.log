@@ -1,0 +1,10 @@
+Removing tbtun
+Module tbtun/0.0.1 for kernel 7.2.9-1-MANJARO (x86_64):
+Before uninstall, this module version was ACTIVE on this kernel.
+Deleting /usr/lib/modules/7.2.9-1-MANJARO/updates/dkms/tbtun.ko.zst
+Running depmod... done.
+
+Deleting module tbtun/0.0.1 completely from the DKMS tree.
+Removing staged sources under /usr/src
+Removing installed module files
+Done.
