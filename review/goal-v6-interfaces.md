@@ -406,18 +406,21 @@ key 规则：
 - `crypto=off`：`crypto=0`，key 字段全 0；接收端不初始化 cipher。
 - key 在 HELLO 中明文传输：**只混淆、不认证**；不提供对抗被动监听的机密性，也不防主动攻击。需要安全时用 WireGuard。
 
+**每方向 nonce（必须，2026-11-06 补）**：`crypto_nonce[8]` 不是 session 共享值。每一端为自己的 **TX 方向**生成独立的 8B 随机 nonce，写进自己的 HELLO v6 body `+26`；**RX 方向使用对端 HELLO 的 nonce**。`crypto_key=` 预共享时 key 共享，nonce 仍各自独立。session 维护 **tx/rx 两个 `tbt_crypto_ctx`**；禁止一个 ctx 同时 seal/open 两个方向。这样 near/far 的 `seq` 都从 0 开始时，相同 `(seq,parity,block)` 也不会复用同一段 keystream。该语义不新增字段、不改 ABI；`crypto_nonce` 字段本来就在 `+26`。
+
 ### 2.4 默认与配置
 
 - `fec=on` 时 `crypto` 默认 **on**；`fec=off` 时默认 off（旧路径没有解密点）。
 - `crypto=off` 显式关闭；`crypto=on` 且 `fec=off` 拒绝（`-EINVAL`）。
-- 每 session 独立 key/nonce；epoch 切换不换 key；carrier 重建不换 key（session 级）。
-- counter 空间：`(seq << 8) | (parity << 7) | (offset / 64)`；S=8192 时 offset/64 ∈ 0..127，bit7 区分 parity；`seq < 2^56` 时无回绕。
+- 每 session 独立 key；**每方向独立 8B nonce**（near TX / far TX 各一个），session 维护 tx/rx 两个 ctx；`crypto_nonce` 在 HELLO v6 body `+26` 交换。epoch 切换不换 key/nonce；carrier 重建不换 key/nonce（session 级）；新 session/方向重启必须换 nonce。
+- counter 空间：`(seq << 8) | (parity << 7) | (offset / 64)`；S=8192 时 offset/64 ∈ 0..127，bit7 区分 parity；`seq < 2^56` 时无回绕。**counter 本身不带方向位**，方向隔离完全靠 nonce；禁止两端共用同一 nonce。
 
 ### 2.5 KAT 与性能门
 
 - TC1：128-bit 全零 key/IV，8 轮，首块 `e28a5fa4a67f8c5defed3e6fb7303486...`。
 - 256-bit 向量：key `00..1f`、IV `a0..a7`、counter 0，首块 `9a1e949f0d71a3a307da58730300dea7...`。
 - `host/test_crypto` 必须逐字节比对；失败即 gate 失败。
+- `host/test_crypto` 必须覆盖：同一 key、两个不同 nonce、相同 `(seq,parity,block)` 的 keystream 不同；tx/rx 两个 ctx 不串用。
 - HND0 参考数字：ChaCha8 648.6 MB/s、3.39 cycles/byte；1G 单核 19.3%。app 33.72M 时约 4.2 MB/s，CPU 约 0.65%。
 
 ---
