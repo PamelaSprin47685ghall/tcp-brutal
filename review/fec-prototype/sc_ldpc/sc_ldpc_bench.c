@@ -39,6 +39,7 @@
 #include "sc_ldpc.h"
 
 #include <math.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -321,6 +322,156 @@ static void measure_dec(sc_code *c, int p_mil, double *mbps, long *reps_out)
     free(recv);
 }
 
+/* Multi-threaded decoder throughput: one independent code object per worker.
+ * The reported number is aggregate payload MB/s, so a worker count that does
+ * not scale shows up as less than N times the single-thread rate. */
+typedef struct {
+    sc_code *c;
+    int p_mil;
+    long reps;
+    double mbps;
+    pthread_barrier_t *bar;
+} dec_worker_arg;
+
+static void *dec_worker(void *arg)
+{
+    dec_worker_arg *a = arg;
+    sc_info in;
+    uint8_t *code, *mask, *out, *recv;
+    crng rng;
+    double t0, t1, dt;
+    long r;
+    int i;
+
+    sc_get_info(a->c, &in);
+    code = calloc((size_t)in.n, 1);
+    mask = calloc((size_t)in.n, 1);
+    out = calloc((size_t)in.n, 1);
+    recv = calloc((size_t)in.n, 1);
+    if (!code || !mask || !out || !recv) {
+        free(code);
+        free(mask);
+        free(out);
+        free(recv);
+        a->mbps = 0.0;
+        pthread_barrier_wait(a->bar);
+        return NULL;
+    }
+    for (i = 0; i < in.n_data; i++)
+        code[i] = (uint8_t)(((i * 40503u) >> 7) & 1u);
+    if (sc_systematic(a->c))
+        (void)sc_encode(a->c, code);
+    memcpy(recv, code, (size_t)in.n);
+    crng_seed(&rng, 999331u + (uint64_t)(uintptr_t)a);
+    make_mask(a->c, a->p_mil, SC_MODEL_SYMMETRIC, &rng, mask);
+
+    pthread_barrier_wait(a->bar);
+    t0 = now_sec();
+    for (r = 0; r < a->reps; r++)
+        (void)sc_decode(a->c, recv, mask, out, 1);
+    t1 = now_sec();
+    dt = t1 - t0;
+    if (dt <= 0.0)
+        dt = 1e-9;
+    a->mbps = payload_bytes(a->c) * (double)a->reps / dt / 1e6;
+    free(code);
+    free(mask);
+    free(out);
+    free(recv);
+    return NULL;
+}
+
+static void measure_dec_mt(sc_code **codes, int ncodes, int threads, int p_mil,
+                           double *mbps, long *reps_out)
+{
+    dec_worker_arg arg[8];
+    pthread_t tid[8];
+    pthread_barrier_t bar;
+    sc_info in;
+    double t0, t1, dt, sum_mbps = 0.0;
+    long reps, total = 0;
+    int t, started = 0;
+
+    if (threads > ncodes)
+        threads = ncodes;
+    if (threads > 8)
+        threads = 8;
+    if (threads < 2) {
+        measure_dec(codes[0], p_mil, mbps, reps_out);
+        return;
+    }
+
+    /* Calibrate the per-worker repetition count on one code object. */
+    sc_get_info(codes[0], &in);
+    {
+        uint8_t *code = calloc((size_t)in.n, 1);
+        uint8_t *mask = calloc((size_t)in.n, 1);
+        uint8_t *out = calloc((size_t)in.n, 1);
+        crng rng;
+        double one;
+        if (!code || !mask || !out) {
+            free(code);
+            free(mask);
+            free(out);
+            *mbps = 0.0;
+            *reps_out = 0;
+            return;
+        }
+        for (t = 0; t < in.n_data; t++)
+            code[t] = (uint8_t)(((t * 40503u) >> 7) & 1u);
+        if (sc_systematic(codes[0]))
+            (void)sc_encode(codes[0], code);
+        crng_seed(&rng, 999331u);
+        make_mask(codes[0], p_mil, SC_MODEL_SYMMETRIC, &rng, mask);
+        t0 = now_sec();
+        (void)sc_decode(codes[0], code, mask, out, 1);
+        t1 = now_sec();
+        one = t1 - t0;
+        if (one < 1e-7)
+            one = 1e-7;
+        reps = (long)(0.20 / one);
+        if (reps < 1)
+            reps = 1;
+        if (reps > 200000)
+            reps = 200000;
+        free(code);
+        free(mask);
+        free(out);
+    }
+
+    pthread_barrier_init(&bar, NULL, (unsigned)threads + 1);
+    for (t = 0; t < threads; t++) {
+        arg[t].c = codes[t];
+        arg[t].p_mil = p_mil;
+        arg[t].reps = reps;
+        arg[t].mbps = 0.0;
+        arg[t].bar = &bar;
+        if (pthread_create(&tid[t], NULL, dec_worker, &arg[t]) == 0)
+            started++;
+    }
+    if (started != threads) {
+        pthread_barrier_destroy(&bar);
+        *mbps = 0.0;
+        *reps_out = 0;
+        return;
+    }
+    t0 = now_sec();
+    pthread_barrier_wait(&bar);
+    for (t = 0; t < threads; t++)
+        pthread_join(tid[t], NULL);
+    t1 = now_sec();
+    pthread_barrier_destroy(&bar);
+    dt = t1 - t0;
+    if (dt <= 0.0)
+        dt = 1e-9;
+    for (t = 0; t < threads; t++) {
+        sum_mbps += arg[t].mbps;
+        total += arg[t].reps;
+    }
+    *mbps = sum_mbps;
+    *reps_out = total;
+}
+
 /* ------------------------------------------------------------------ */
 /* payload round trip                                                  */
 /* ------------------------------------------------------------------ */
@@ -454,7 +605,7 @@ static void block_diag(sc_code *c, int L, int p_mil, int model, uint64_t seed,
 /* ------------------------------------------------------------------ */
 
 typedef struct {
-    int block, L, rate_pct, trials, codes, extra_dc, term, model;
+    int block, L, rate_pct, trials, codes, extra_dc, term, model, threads;
     double p;
     uint64_t seed;
     long seg_bytes;
@@ -551,7 +702,10 @@ static int run_cfg(const cfg *g, int want_report, FILE *rep, const char *series,
 
     if (g->term != SC_TERM_NATIVE)
         measure_enc(codes[0], &enc, &reps_e);
-    measure_dec(codes[0], p_mil, &dec, &reps_d);
+    if (g->threads > 1)
+        measure_dec_mt(codes, ncodes, g->threads, p_mil, &dec, &reps_d);
+    else
+        measure_dec(codes[0], p_mil, &dec, &reps_d);
 
     lat_ms = (double)g->L * (double)g->seg_bytes * 8.0 / 1e9 * 1000.0;
 
@@ -618,12 +772,13 @@ static int run_cfg(const cfg *g, int want_report, FILE *rep, const char *series,
 static void usage(void)
 {
     fprintf(stderr,
-            "usage: sc_ldpc_bench --block N --L N --rate 0.30..0.70 --p 0.30 "
+            "usage: sc_ldpc_bench --block N --L N --rate 0.25..0.70 --p 0.30 "
             "[--trials N] [options]\n"
             "  --model systematic|symmetric  channel model (default systematic)\n"
             "  --term acc|causal|native      boundary rule (default acc)\n"
             "  --extra-dc N                  extra check payload degree (5)\n"
             "  --codes N                     code instances (4)\n"
+            "  --threads N                   decoder worker threads (1)\n"
             "  --seed N                      seed (1)\n"
             "  --seg-bytes N                 payload bytes per coupling block "
             "for the latency model (8192)\n"
@@ -655,6 +810,7 @@ int main(int argc, char **argv)
     g.p = 0.30;
     g.trials = 2000;
     g.codes = 4;
+    g.threads = 1;
     g.extra_dc = 5;
     g.term = SC_TERM_ACC;
     g.model = SC_MODEL_SYSTEMATIC;
@@ -691,6 +847,8 @@ int main(int argc, char **argv)
             g.trials = (int)strtol(argv[++i], NULL, 10);
         } else if (!strcmp(a, "--codes") && i + 1 < argc) {
             g.codes = (int)strtol(argv[++i], NULL, 10);
+        } else if (!strcmp(a, "--threads") && i + 1 < argc) {
+            g.threads = (int)strtol(argv[++i], NULL, 10);
         } else if (!strcmp(a, "--extra-dc") && i + 1 < argc) {
             g.extra_dc = (int)strtol(argv[++i], NULL, 10);
         } else if (!strcmp(a, "--seed") && i + 1 < argc) {

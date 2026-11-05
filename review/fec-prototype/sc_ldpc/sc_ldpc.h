@@ -50,7 +50,7 @@ typedef enum {
 typedef struct {
     int block;      /* variable nodes per coupling block, q*m; even, >= 16 */
     int L;          /* coupling length, >= 2 */
-    int rate_pct;   /* target rate in percent: 30, 35, 40, 45, 50, 60, 70 */
+    int rate_pct;   /* target rate in percent: 25, 30, 35, 40, 45, 50, 60, 70 */
     int term;       /* sc_term; rate_pct != 50 requires SC_TERM_ACC */
     int extra_dc;   /* payload degree of each extra check node (rate < 50) */
     uint64_t seed;  /* construction seed */
