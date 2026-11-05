@@ -270,6 +270,43 @@ int tbt_crypto_init(struct tbt_crypto_ctx *c, const u8 key[TBT_CRYPTO_KEY_LEN],
                             TBT_CRYPTO_ROUNDS);
 }
 
+int tbt_crypto_pair_init(struct tbt_crypto_pair *p,
+                         const u8 key[TBT_CRYPTO_KEY_LEN],
+                         const u8 tx_nonce[TBT_CRYPTO_NONCE_LEN],
+                         const u8 rx_nonce[TBT_CRYPTO_NONCE_LEN])
+{
+    int rc;
+
+    if (p == NULL)
+        return -EINVAL;
+
+    memset(p, 0, sizeof(*p));
+    p->tx.pos = TBT_CRYPTO_BLOCK_LEN;
+    p->rx.pos = TBT_CRYPTO_BLOCK_LEN;
+
+    if (key == NULL)
+        return 0; /* crypto=off: both directions are no-ops */
+
+    if (tx_nonce == NULL || rx_nonce == NULL)
+        return -EINVAL;
+    if (memcmp(tx_nonce, rx_nonce, TBT_CRYPTO_NONCE_LEN) == 0)
+        return -EINVAL; /* one nonce for both directions repeats the stream */
+
+    rc = tbt_crypto_init(&p->tx, key, tx_nonce, 0);
+    if (rc)
+        return rc;
+    return tbt_crypto_init(&p->rx, key, rx_nonce, 0);
+}
+
+void tbt_crypto_pair_wipe(struct tbt_crypto_pair *p)
+{
+    if (p == NULL)
+        return;
+
+    tbt_crypto_wipe(&p->tx);
+    tbt_crypto_wipe(&p->rx);
+}
+
 void tbt_crypto_set_counter(struct tbt_crypto_ctx *c, u64 counter)
 {
     if (c == NULL)

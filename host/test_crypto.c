@@ -850,6 +850,50 @@ static void test_hello(void)
     {
         printf("PASS hello: unknown key_id rejected\n");
     }
+
+    /* A truncated body cannot carry the frozen +26..+65 fields. */
+    if (tbt_crypto_hello_parse(body, TBT_CRYPTO_HELLO_LEN - 1, NULL, NULL,
+                               NULL, NULL) != -EPROTO)
+    {
+        printf("FAIL hello: truncated body accepted\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS hello: truncated body rejected\n");
+    }
+
+    /* crypto=off writes a zero crypto byte and no key material. */
+    fill(body, sizeof(body), 0xa5);
+    tbt_crypto_hello_fill(body, false, TBT_CRYPTO_KEY_ID_NONE, NULL, NULL);
+    {
+        u8 zero[32] = {0};
+        u8 zero_nonce[8] = {0};
+
+        if (body[TBT_CRYPTO_HELLO_CRYPTO] != 0 ||
+            body[TBT_CRYPTO_HELLO_KEY_ID] != TBT_CRYPTO_KEY_ID_NONE ||
+            memcmp(body + TBT_CRYPTO_HELLO_NONCE, zero_nonce,
+                   sizeof(zero_nonce)) != 0 ||
+            memcmp(body + TBT_CRYPTO_HELLO_KEY, zero, sizeof(zero)) != 0)
+        {
+            printf("FAIL hello: crypto=off wrote fields\n");
+            failures++;
+        }
+        else if (tbt_crypto_hello_parse(body, sizeof(body), &enabled, &key_id,
+                                        got_nonce, got_key) != 0 ||
+                 enabled || key_id != TBT_CRYPTO_KEY_ID_NONE)
+        {
+            printf("FAIL hello: crypto=off parse error\n");
+            failures++;
+        }
+        else
+        {
+            printf("PASS hello: crypto=off is zero and parses\n");
+        }
+    }
+    fill(body, sizeof(body), 0xa5);
+    tbt_crypto_hello_fill(body, true, TBT_CRYPTO_KEY_ID_NONE, nonce, NULL);
+
     body[TBT_CRYPTO_HELLO_KEY_ID] = TBT_CRYPTO_KEY_ID_HELLO;
     body[TBT_CRYPTO_HELLO_CRYPTO] = TBT_CRYPTO_HELLO_ENABLED;
     if (tbt_crypto_hello_parse(body, sizeof(body), NULL, NULL, NULL, NULL) != -EPROTO)
@@ -1038,6 +1082,143 @@ static void test_direction_nonce(void)
     }
 }
 
+/* The pair helper keeps both directions in one object: TX seals with this
+ * side's nonce, RX opens with the peer's. */
+static void test_pair(void)
+{
+    u8 key[32];
+    u8 near_nonce[8];
+    u8 far_nonce[8];
+    u8 payload[256];
+    u8 near_wire[256];
+    u8 far_wire[256];
+    u8 tmp[256];
+    struct tbt_crypto_pair near;
+    struct tbt_crypto_pair far;
+    struct tbt_crypto_pair bad;
+
+    fill(key, sizeof(key), 0x19);
+    fill(near_nonce, sizeof(near_nonce), 0x29);
+    fill(far_nonce, sizeof(far_nonce), 0x39);
+    fill(payload, sizeof(payload), 0x49);
+
+    /* One nonce for both directions is the keystream reuse T0 §2.4 forbids. */
+    if (tbt_crypto_pair_init(&bad, key, near_nonce, near_nonce) != -EINVAL)
+    {
+        printf("FAIL pair: equal nonces accepted\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS pair: equal nonces rejected\n");
+    }
+    if (tbt_crypto_pair_init(NULL, key, near_nonce, far_nonce) != -EINVAL ||
+        tbt_crypto_pair_init(&bad, key, NULL, far_nonce) != -EINVAL ||
+        tbt_crypto_pair_init(&bad, key, near_nonce, NULL) != -EINVAL)
+    {
+        printf("FAIL pair: NULL argument accepted\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS pair: NULL argument rejected\n");
+    }
+
+    /* near: tx = near_nonce, rx = far_nonce; far is the mirror image. */
+    if (tbt_crypto_pair_init(&near, key, near_nonce, far_nonce) != 0 ||
+        tbt_crypto_pair_init(&far, key, far_nonce, near_nonce) != 0)
+    {
+        printf("FAIL pair: init error\n");
+        failures++;
+        return;
+    }
+
+    memcpy(near_wire, payload, sizeof(payload));
+    memcpy(far_wire, payload, sizeof(payload));
+    if (tbt_crypto_body_xor(&near.tx, 9, true, near_wire,
+                            sizeof(near_wire)) != 0 ||
+        tbt_crypto_body_xor(&far.tx, 9, true, far_wire,
+                            sizeof(far_wire)) != 0)
+    {
+        printf("FAIL pair: body xor error\n");
+        failures++;
+        return;
+    }
+    if (memcmp(near_wire, far_wire, sizeof(payload)) == 0)
+    {
+        printf("FAIL pair: both directions produced the same stream\n");
+        failures++;
+    }
+
+    memcpy(tmp, near_wire, sizeof(tmp));
+    if (tbt_crypto_body_xor(&far.rx, 9, true, tmp, sizeof(tmp)) != 0 ||
+        memcmp(tmp, payload, sizeof(payload)) != 0)
+    {
+        printf("FAIL pair: far rx did not open near tx\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS pair: far rx opens near tx\n");
+    }
+
+    memcpy(tmp, far_wire, sizeof(tmp));
+    if (tbt_crypto_body_xor(&near.rx, 9, true, tmp, sizeof(tmp)) != 0 ||
+        memcmp(tmp, payload, sizeof(payload)) != 0)
+    {
+        printf("FAIL pair: near rx did not open far tx\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS pair: near rx opens far tx\n");
+    }
+
+    /* A wrong pairing (near tx against far tx) must not decrypt. */
+    memcpy(tmp, near_wire, sizeof(tmp));
+    tbt_crypto_body_xor(&far.tx, 9, true, tmp, sizeof(tmp));
+    if (memcmp(tmp, payload, sizeof(payload)) == 0)
+    {
+        printf("FAIL pair: near tx stream opened by far tx\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS pair: a mismatched pairing does not decrypt\n");
+    }
+
+    /* crypto=off: both directions are no-ops. */
+    if (tbt_crypto_pair_init(&bad, NULL, NULL, NULL) != 0)
+    {
+        printf("FAIL pair: crypto=off init error\n");
+        failures++;
+        return;
+    }
+    memcpy(tmp, payload, sizeof(tmp));
+    if (tbt_crypto_body_xor(&bad.tx, 9, false, tmp, sizeof(tmp)) != 0 ||
+        tbt_crypto_body_xor(&bad.rx, 9, false, tmp, sizeof(tmp)) != 0 ||
+        memcmp(tmp, payload, sizeof(payload)) != 0)
+    {
+        printf("FAIL pair: crypto=off transformed the payload\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS pair: crypto=off is a no-op in both directions\n");
+    }
+
+    tbt_crypto_pair_wipe(&near);
+    if (near.tx.ready || near.rx.ready)
+    {
+        printf("FAIL pair: wipe left a ready context\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS pair: wipe clears both directions\n");
+    }
+}
+
 /* The full key path the session will use: each side fills its own HELLO v6
  * with its own TX nonce, parses the peer's, and keeps tx/rx contexts. */
 static void test_session_path(void)
@@ -1190,6 +1371,7 @@ int main(void)
     test_body_xor();
     test_hello();
     test_direction_nonce();
+    test_pair();
     test_session_path();
 
     if (failures != 0)

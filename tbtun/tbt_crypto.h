@@ -101,6 +101,31 @@ struct tbt_crypto_ctx
 int tbt_crypto_init(struct tbt_crypto_ctx *c, const u8 key[TBT_CRYPTO_KEY_LEN],
                     const u8 nonce[TBT_CRYPTO_NONCE_LEN], u64 counter);
 
+/* The two directions of one session (T0 §2.3/§2.4). This is a convenience
+ * for the session layer, not part of the frozen wire ABI: it adds no field
+ * and no allocation. The counter has no direction bit and both sides start
+ * seq at 0, so the directions must not share a nonce or a context. `tx` is
+ * sealed with this side's HELLO nonce; `rx` is opened with the peer's HELLO
+ * nonce. */
+struct tbt_crypto_pair
+{
+    struct tbt_crypto_ctx tx;
+    struct tbt_crypto_ctx rx;
+};
+
+/* Install both directions. `tx_nonce` is this side's TX nonce and `rx_nonce`
+ * is the peer's HELLO nonce. Equal nonces would repeat the keystream for the
+ * same (seq, parity, block), so they are rejected with -EINVAL. `key == NULL`
+ * means crypto is off: both contexts become not-ready and the nonces are
+ * ignored. Returns 0, -EINVAL, or the tbt_crypto_init() error. */
+int tbt_crypto_pair_init(struct tbt_crypto_pair *p,
+                         const u8 key[TBT_CRYPTO_KEY_LEN],
+                         const u8 tx_nonce[TBT_CRYPTO_NONCE_LEN],
+                         const u8 rx_nonce[TBT_CRYPTO_NONCE_LEN]);
+
+/* Erase both directions. */
+void tbt_crypto_pair_wipe(struct tbt_crypto_pair *p);
+
 /* Set the next block number and discard any buffered partial block. */
 void tbt_crypto_set_counter(struct tbt_crypto_ctx *c, u64 counter);
 
