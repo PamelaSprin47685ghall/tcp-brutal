@@ -5,7 +5,9 @@
  * stream byte offset and delivers only the contiguous run that starts at
  * `rx_next`. A hole is normal and is filled by the sender's retransmit; a hole
  * that lets the tree grow past `rx_reorder_bytes` kills the stream with
- * TBT_ST_REORDER (C5 replaces that rule with placeholders).
+ * TBT_ST_REORDER. There is no placeholder frame: delivery never advances
+ * across a gap, and a hole the sender cannot fill ends in the bounded reset
+ * of tbt_rx_check_hole().
  *
  * Owns:
  *   - driving the per-carrier partial-record buffer (the buffer itself lives on
@@ -248,8 +250,6 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
         if (st->rx_ooo_bytes > st->rx_limit)
             kill = true;
     }
-    if (st->predict_seq == hdr->seq)
-        st->predict_seq = 0; /* the true bytes arrived; placeholder resolved */
     /* The ack is the contiguous *received* offset: it bounds the sender's
      * window (and therefore this tree), and it advances even while delivery to
      * the application is slow. Delivery backpressure is the pause rule below,
@@ -308,9 +308,6 @@ static int tbt_rx_fbk(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *body
          * check: records written below this path's high-water that the peer's
          * recv_cnt does not account for. A frame still in our own socket queue
          * is above the high-water and cannot bias it. */
-        /* The placeholder is resolved once the path has delivered past it. */
-        if (pc->spec_bytes && uack >= READ_ONCE(pc->spec_path_end))
-            pc->spec_bytes = 0;
         WRITE_ONCE(pc->recv_cnt, cnt);
         if (rtt)
         {
@@ -329,29 +326,10 @@ static int tbt_rx_fbk(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *body
             st->pause_cleared_ns = ktime_get_ns();
         WRITE_ONCE(st->peer_paused, paused);
         WRITE_ONCE(sess->peer_paused, paused); /* proc/control mirror */
-        tbt_tx_hole_check(sess, st, hdr->path_ack_mask);
+        tbt_tx_hole_check(sess, st);
         tbt_stream_put(st);
     }
     return 0;
-}
-
-/* Is this exact seq already in the reorder tree? Called with rx_lock held. */
-static bool tbt_rx_tree_has_locked(struct tbt_stream *st, u64 seq)
-{
-    struct rb_node *n = st->rx_tree.rb_root.rb_node;
-
-    while (n)
-    {
-        struct tbt_frame *fr = rb_entry(n, struct tbt_frame, rb);
-
-        if (seq < fr->hdr.seq)
-            n = n->rb_left;
-        else if (seq > fr->hdr.seq)
-            n = n->rb_right;
-        else
-            return true;
-    }
-    return false;
 }
 
 static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *payload, u16 len)
@@ -432,56 +410,14 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
         tbt_stream_put(st);
         return 0;
 
-    case TBT_F_PREDICT:
-    {
-        if (tbt_rx_bind_stream(c, hdr, false))
-            return -EPROTO;
-        c->rx_bytes += len;
-        st = tbt_stream_get(sess, tbt_hdr_sid(hdr), false, false);
-        if (!st)
-            return 0;
-        spin_lock_bh(&st->rx_lock);
-        if (hdr->seq < st->rx_next || tbt_rx_tree_has_locked(st, hdr->seq))
-        {
-            sess->predict_cancelled++;
-        }
-        else
-        {
-            sess->predict_used++;
-            st->predict_seq = hdr->seq;
-            st->predict_ns = ktime_get_ns();
-            st->predict_has_token = len == TBT_PREDICT_TOKEN_LEN;
-            if (st->predict_has_token && len)
-                memcpy(st->predict_token, payload, TBT_PREDICT_TOKEN_LEN);
-        }
-        spin_unlock_bh(&st->rx_lock);
-        tbt_stream_put(st);
-        return 0;
-    }
-
-    case TBT_F_CANCEL:
-    {
-        st = tbt_stream_get(sess, tbt_hdr_sid(hdr), false, false);
-        if (!st)
-            return 0;
-        spin_lock_bh(&st->rx_lock);
-        if (st->predict_seq == hdr->seq)
-        {
-            st->predict_seq = 0;
-            sess->predict_cancelled++;
-        }
-        spin_unlock_bh(&st->rx_lock);
-        tbt_stream_put(st);
-        return 0;
-    }
-
     case TBT_F_PAD:
         return 0;
 
     default:
-        /* PREDICT/CANCEL/WINDOW belong to C5/C6 and are refused until then,
-         * rather than silently ignored: a peer that sends them is speaking a
-         * revision this module does not implement. */
+        /* WINDOW belongs to C5 and is refused until then, rather than
+         * silently ignored: a peer that sends it is speaking a revision this
+         * module does not implement. The 0x11/0x12 placeholder frames were
+         * removed in TBT_CONV 0x0005 and land here too. */
         return -EPROTO;
     }
 }

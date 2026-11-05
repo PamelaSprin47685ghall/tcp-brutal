@@ -63,10 +63,8 @@ void tbt_hdr_encode(u8 *p, const struct tbt_hdr *h)
 
 // Validate every field of the header, once, for every type: conv, flags,
 // path_id, path_ack_count, path_ack_mask, body_len, sid_hi, reserved2, and the
-// per-type body bounds. Two types also have an exact length that depends on
-// another header field:
-//   - PREDICT carries the 16-byte resume token iff MUST_ORDER is set,
-//   - FBK carries exactly path_ack_count 8-byte entries.
+// per-type body bounds. One type also has an exact length that depends on
+// another header field: FBK carries exactly path_ack_count 8-byte entries.
 // Returns 0 or -EPROTO. Body *contents* are not interpreted here: OPEN and
 // HELLO carry fields their consumer reads later, and that consumer validates
 // them. This function makes the framing total, not the payloads.
@@ -96,9 +94,6 @@ int tbt_hdr_check(const struct tbt_hdr *h)
 
     switch (h->type)
     {
-    case TBT_F_PREDICT:
-        return h->body_len == ((h->flags & TBT_FF_MUST_ORDER) ? TBT_PREDICT_TOKEN_LEN : 0) ? 0
-                                                                                           : -EPROTO;
     case TBT_F_FBK:
         return h->body_len == (u16)(h->path_ack_count * TBT_FBK_ENTRY_LEN) ? 0 : -EPROTO;
     default:

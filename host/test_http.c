@@ -2317,13 +2317,6 @@ static int make_valid_hdr(u8 type, u16 len, struct tbt_hdr *h)
     {
     case TBT_F_DATA:
         break;
-    case TBT_F_PREDICT:
-        if (len == TBT_PREDICT_TOKEN_LEN)
-            h->flags = TBT_FF_MUST_ORDER;
-        else if (len != 0)
-            return 0;
-        break;
-    case TBT_F_CANCEL:
     case TBT_F_OPEN:
     case TBT_F_FIN:
     case TBT_F_RST:
@@ -2361,8 +2354,8 @@ static int make_valid_hdr(u8 type, u16 len, struct tbt_hdr *h)
 static void test_frame_codec(void)
 {
     static const u8 types[] = {
-        TBT_F_DATA, TBT_F_PREDICT, TBT_F_CANCEL, TBT_F_OPEN, TBT_F_FIN,
-        TBT_F_RST,  TBT_F_FBK,     TBT_F_WINDOW, TBT_F_HELLO, TBT_F_PAD,
+        TBT_F_DATA, TBT_F_OPEN, TBT_F_FIN,   TBT_F_RST,    TBT_F_FBK,
+        TBT_F_WINDOW, TBT_F_HELLO, TBT_F_PAD,
     };
     struct tbt_http_out out;
     struct tbt_http_rx rx;

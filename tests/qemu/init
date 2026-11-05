@@ -15,16 +15,15 @@
 #   D. the deterministic loss injector (drop_ppm) and reorder accounting.
 #   E. spares: a warm spare takes over when an active carrier is taken down.
 #   F. duplication: dup=2 under injected loss, no duplicate on the same path.
-#   G. prediction on one lossy path, bounded reorder stall.
+#   G. hole repair on one lossy path, bounded reorder stall.
 #   H. sustained loss, recovery, and the bounded reset.
 #   I. the thesis: carriers cross eth0, an htb class of 10 Mbit per source port
 #      shapes each 5-tuple, and 40 MiB must still arrive byte-exact at more than
 #      3.0 x 10 Mbit. This is the only probe that measures the product claim.
 #   J. loss and reorder on every carrier class (1% loss, 2% reorder).
 #   K. one carrier's class forced to 100% loss mid-transfer, then restored.
-#
-# J and K report SKIP until the module exports predict_tx: without prediction
-# there is nothing to judge, and a skip is honest where a pass would not be.
+# J and K are byte-exactness probes under carrier-TCP loss; they need no
+# placeholder frame, because the sender repairs holes from the replay ring.
 #
 # Probes are selected with tbt_probes=A,B,I on the kernel command line, which
 # tests/qemu/run.sh --probes sets. One marker is printed last, on the console:
@@ -80,8 +79,8 @@ I_NETEM=${TBT_I_NETEM-delay 20ms 10ms}
 # queue. 0 disables the pacer.
 I_PACE_MBIT=${TBT_I_PACE_MBIT:-0}
 # Optional hole budget override for probe I. The default 500 ms is shorter than
-# a carrier stall on a 20 ms shaped path, and without prediction a gap that
-# long is fatal; TBT_I_HOLE_BUDGET=5000 is the control case for that.
+# a carrier stall on a 20 ms shaped path, and a gap that long is fatal;
+# TBT_I_HOLE_BUDGET=5000 is the control case for that.
 I_HOLE_BUDGET=${TBT_I_HOLE_BUDGET:-5000}
 GUEST_IP=10.0.2.15
 GATEWAY=10.0.2.2
@@ -538,9 +537,9 @@ probe_f() {
     echo "== probe F: pass"
 }
 
-# --- probe G: prediction on one lossy path ---------------------------------
+# --- probe G: hole repair on one lossy path --------------------------------
 probe_g() {
-    echo "== probe G: prediction under loss on one path"
+    echo "== probe G: hole repair under loss on one path"
     # A hole only exists if the injector actually dropped inside the window the
     # probe inspects. With a clean window the strong assertions below would
     # fail for a correct reason, so retry the whole window and skip if three
@@ -872,16 +871,6 @@ probe_i() {
 }
 
 # --- probes J and K: loss, reorder, and a dead carrier ----------------------
-# Both judge prediction, so both skip while the module exports no predict_tx
-# counter (C6). The setup and the assertions are written so that landing C6
-# turns them on without touching the harness again.
-# Prediction is available when the module renders the counter at all. The
-# value is per tunnel, and every probe starts with a fresh tunnel, so a zero
-# here says nothing about the module.
-prediction_ready() {
-    grep -q 'predict_tx=' /proc/net/tbtun/stats
-}
-
 probe_j() {
     echo "== probe J: 1% loss and 2% reorder on every carrier"
     if ! net_ready; then
@@ -903,10 +892,6 @@ probe_j() {
     echo "tunnel 2 role=near profile=raw listen=$GUEST_IP:$PUB_PORT peer=$GATEWAY:$HOSTFWD_PORT n=4 m=1 dup=0" \
         > "$CFG" || fail "probe J: near tunnel rejected"
     sleep 1
-    if ! prediction_ready; then
-        skip J "module exports no predict_tx counter; prediction (C6) is not landed"
-        return 0
-    fi
     /bin/tbt_burst "$GUEST_IP" "$PUB_PORT" "$C_MIB" "${TBT_ENDPOINT_TIMEOUT:-120}"
     rc=$?
     [ "$rc" -eq 0 ] || fail "probe J: byte-exact completion failed under 1% loss / 2% reorder (rc=$rc)"
@@ -917,7 +902,7 @@ probe_j() {
     # while the data is byte-exact. The tunnel's own hole repair is covered by
     # probe G, which injects loss the carrier cannot hide (drop_ppm). The
     # criteria that matter here are byte-exactness in both phases, above.
-    echo "   holes_repaired=$(stat_sum holes_repaired) predict_tx=$(stat_sum predict_tx)"
+    echo "   holes_repaired=$(stat_sum holes_repaired)"
     kill "$j_pid" 2> /dev/null
     tc_clear
     echo "== probe J: pass"
@@ -943,11 +928,6 @@ probe_k() {
     echo "tunnel 2 role=near profile=raw listen=$GUEST_IP:$PUB_PORT peer=$GATEWAY:$HOSTFWD_PORT n=4 m=1 dup=0" \
         > "$CFG" || fail "probe K: near tunnel rejected"
     sleep 1
-    if ! prediction_ready; then
-        skip K "module exports no predict_tx counter; prediction (C6) is not landed"
-        return 0
-    fi
-
     # Carrier 0's real source port decides which class to kill: the mapping
     # from carrier index to portblock entry is the module's business.
     sport=$(peer_field 2 0 3)
@@ -980,7 +960,7 @@ probe_k() {
     # hole machinery correctly declines to declare it. The tunnel's own repair
     # is covered by probe G (drop_ppm). The criteria here are byte-exactness
     # after the dead carrier and the bounded-reset behaviour.
-    echo "   holes_repaired=$(stat_sum holes_repaired) predict_tx=$(stat_sum predict_tx)"
+    echo "   holes_repaired=$(stat_sum holes_repaired)"
     kill "$k_pid" 2> /dev/null
     tc_clear
     echo "== probe K: pass"
