@@ -1535,6 +1535,17 @@ contiguous byte offsets. `peers` additionally exposes per carrier `recv_cnt`,
 write high-water (in-flight included, not packet loss), and `retx_ppm` is retransmitted
 frames over frames written.
 
+Review 22 adds the control-frame lifetime line: `ctl_lost, ctl_retry, ctl_requeue,
+ctl_obsolete, ctl_queued`. A pinned HELLO/OPEN/RETIRE/FIN/RST frame is never freed on
+`-EAGAIN`, `-ENOMEM` or `-EIO`; it is requeued (`ctl_retry`/`ctl_requeue`) and retried
+2 ms apart, up to `TBT_CTL_MAX_RETRIES`. A dead carrier slot waits at the replacement
+cadence instead, because a dial is already in flight. FIN/RST re-pin to the replacement's
+generation; HELLO/OPEN/RETIRE of a replaced generation are obsolete and counted in
+`ctl_obsolete`. Only a frame that exhausts the bound is abandoned, as `ctl_lost`; a FIN
+with no written copy then kills the stream rather than leaving the peer half-open.
+`ctl_queued` is the live control-queue depth against `TBT_CTL_QUEUE_MAX`; a producer that
+reaches it gets `-ENOSPC` and retries after the pump drains.
+
 The write-space contract of §5.5 keeps `pump_hw_armed, pump_hw_disarmed, pump_hw_fired`
 as plain fields (not rendered); the rendered key is `ws_calls` (every `sk_write_space`
 entry), and the live snapshot renders `car_ws` (`snap_car_ws_ok`), whether the carrier's

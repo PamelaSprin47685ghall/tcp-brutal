@@ -736,6 +736,14 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            retain_bytes, READ_ONCE(s->tx_ack), READ_ONCE(s->rx_ack),
                            READ_ONCE(s->peer_paused), READ_ONCE(s->fb_delay_us),
                            READ_ONCE(s->rto_us), READ_ONCE(s->una_stall_us));
+                /* Review 22: pinned control-frame lifetime. ctl_queued is the
+                 * live control-queue depth; the other four are the retry,
+                 * re-pin, obsolete-generation and explicit-loss record. */
+                seq_printf(m, "tunnel %llu ctl ctl_lost=%llu ctl_retry=%llu "
+                              "ctl_requeue=%llu ctl_obsolete=%llu ctl_queued=%u\n",
+                           t->cfg.id, s->ctl_lost, s->ctl_retry,
+                           s->ctl_requeue, s->ctl_obsolete,
+                           READ_ONCE(s->ctl_queued));
                 /* Session stream census, next to the carrier block. n_active
                  * is the non-detached stream count (the concurrency bound),
                  * n_streams includes tombstones that reap has not yet

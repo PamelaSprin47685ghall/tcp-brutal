@@ -165,6 +165,15 @@ void tbt_listen_stop(struct tbt_tunnel *t);
 #define TBT_FBK_INTERVAL_MS 10
 #define TBT_FBK_FRAMES 32
 
+/* Pinned control-frame lifetime (review 22). A control frame is never freed
+ * on a transient write error: it is retried this many times, 2 ms apart, and
+ * only then counted in ctl_lost. A dead carrier slot waits longer because a
+ * replacement dial is already in flight. */
+#define TBT_CTL_MAX_RETRIES 4
+#define TBT_CTL_RETRY_MS 2
+#define TBT_CTL_PATH_RETRY_MS 100
+#define TBT_CTL_QUEUE_MAX 256
+
 /* Retransmit timer: a retained frame whose last write is older than this and
  * that the peer has not delivered is re-sent on another path. The floor is
  * two feedback intervals, so ordinary ack latency never looks like loss, and
@@ -205,6 +214,8 @@ struct tbt_frame
     bool dropped;        /* drop_ppm discarded it: a real hole, not a queue */
     u8 path;             /* pinned path, or 0xff until the pump picks one */
     u32 gen;             /* pinned frames: carrier generation they belong to */
+    u8 retries;          /* transient control failures (review 22) */
+    u64 retry_at_ns;     /* earliest next attempt; 0 = now */
     u16 avoid_mask;      /* paths this copy must not reuse */
     struct tbt_retain *ret; /* ring entry for a DATA frame, valid in the pump */
     struct tbt_stream *st;  /* DATA owner; holds a ref */
@@ -294,8 +305,18 @@ struct tbt_stream
     u8 sack_state;            /* last SACK state sent */
     bool sack_dirty;          /* rx_next/state changed since last SACK */
     u32 fbk_frames;           /* DATA frames since this stream's last FBK */
-    bool tx_fin_sent;         /* FIN requested once (p1-misc idempotence) */
-    bool tx_fin_queued;       /* at least one FIN frame entered tx_q */
+    bool tx_fin_sent;         /* FIN wanted: set by the producer before the
+                               * first tbt_tx_fin(); the FBK tick retries while
+                               * tx_fin_queued is false */
+    bool tx_fin_queued;       /* at least one FIN copy entered tx_q */
+    bool tx_fin_written;      /* at least one FIN copy reached the wire */
+    bool tx_fin_seq_set;      /* tx_fin_seq frozen at the first request */
+    u64 tx_fin_seq;           /* byte offset every FIN copy names */
+    unsigned long tx_fin_mask;     /* carriers that already have a FIN copy */
+    unsigned long tx_fin_inflight; /* FIN copies queued, not yet written/dropped */
+    bool tx_rst_written;      /* at least one RST copy reached the wire */
+    unsigned long tx_rst_mask;     /* carriers that already have an RST copy */
+    unsigned long tx_rst_inflight; /* RST copies queued, not yet written/dropped */
     bool tx_open_sent;        /* tbt_tx_announce() ran before capture attached */
     u16 announced_mask;       /* carriers whose OPEN for this stream was written */
     u8 announced_gen[16];     /* generation of each announced carrier */
@@ -508,6 +529,12 @@ struct tbt_session
     u64 dbg_pump_hiwat, dbg_pump_dead, dbg_pump_runs, dbg_pump_moved;
     u64 dbg_pump_nocar, dbg_pump_down, dbg_pump_stop;
     u64 dbg_pump_empty, dbg_pump_qlen;
+    /* Review 22: pinned control-frame lifetime. ctl_retry counts failed
+     * attempts, ctl_requeue counts frames put back on tx_q (including a
+     * generation re-pin), ctl_lost counts frames abandoned after the retry
+     * bound, and ctl_obsolete counts HELLO/OPEN/RETIRE copies dropped because
+     * their carrier generation is gone. */
+    u64 ctl_lost, ctl_retry, ctl_requeue, ctl_obsolete;
     u32 pub_last_rcv_nxt, pub_last_copied, pub_last_after;
     u32 pub_last_qlen;
     /* Live snapshot, read by /proc/net/tbtun/stats. Diagnostic only. */
@@ -524,6 +551,7 @@ struct tbt_session
     spinlock_t tx_lock;
     struct list_head tx_q;
     u32 tx_queued;            /* payload bytes queued */
+    u32 ctl_queued;           /* pinned control frames queued or in a batch */
 };
 
 #define TBT_STREAM_BUCKET(sid) \

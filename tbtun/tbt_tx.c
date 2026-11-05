@@ -88,6 +88,8 @@ static struct tbt_frame *tbt_frame_alloc(u16 len, gfp_t gfp)
     fr->ret = NULL;
     fr->st = NULL;
     fr->gen = 0;
+    fr->retries = 0;
+    fr->retry_at_ns = 0;
     return fr;
 }
 
@@ -192,7 +194,22 @@ int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
     fr->hdr.sid_hi = (u8)(sid >> 32);
     if (len && body)
         memcpy(fr->data, body, len);
-    tbt_tx_enqueue(sess, fr, head);
+    /* The control queue has a hard bound. A producer that gets -ENOSPC must
+     * retry after the pump drains; no FIN/RST is dropped here. */
+    spin_lock(&sess->tx_lock);
+    if (sess->ctl_queued >= TBT_CTL_QUEUE_MAX)
+    {
+        spin_unlock(&sess->tx_lock);
+        tbt_frame_free(fr);
+        return -ENOSPC;
+    }
+    if (head)
+        list_add(&fr->list, &sess->tx_q);
+    else
+        list_add_tail(&fr->list, &sess->tx_q);
+    sess->tx_queued += fr->len;
+    sess->ctl_queued++;
+    spin_unlock(&sess->tx_lock);
     tbt_tx_wake(sess);
     return 0;
 }
@@ -229,14 +246,22 @@ void tbt_tx_announce(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
 
 /* FIN is stream-ordered: its seq is the byte offset after the last DATA byte,
  * so a receiver that still has a hole does not shut the write side early. One
- * copy per usable carrier. */
+ * copy per usable carrier, at most one per (stream, index). A second call is
+ * idempotent: the per-index mask already names every copy. */
 int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
 {
     u64 seq;
-    int i, queued = 0;
+    int i, queued = 0, err = 0;
 
     spin_lock(&sess->tx_lock);
-    seq = st->tx_seq;
+    /* Freeze the offset once: a retry must name the same byte, even if a late
+     * capture submitted more DATA after the first request. */
+    if (!st->tx_fin_seq_set)
+    {
+        st->tx_fin_seq = st->tx_seq;
+        st->tx_fin_seq_set = true;
+    }
+    seq = st->tx_fin_seq;
     spin_unlock(&sess->tx_lock);
     for (i = 0; i < sess->n_car; i++)
     {
@@ -248,21 +273,37 @@ int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
          * FIN anyway instead of dropping it silently. */
         if (!c || !READ_ONCE(c->hello_sent) || atomic_read(&c->stopping))
             continue;
-        if (!tbt_tx_control_pinned(sess, st, (u8)i, TBT_F_FIN, st->sid, seq,
-                                   NULL, 0, false, gfp))
-            queued++;
+        if (test_and_set_bit(i, &st->tx_fin_mask))
+            continue;
+        /* Set the in-flight bit before the frame can be seen by the pump: the
+         * pump clears it on the write, and a stale bit would hide the loss of
+         * the last copy. */
+        set_bit(i, &st->tx_fin_inflight);
+        err = tbt_tx_control_pinned(sess, st, (u8)i, TBT_F_FIN, st->sid,
+                                    seq, NULL, 0, false, gfp);
+        if (err)
+        {
+            clear_bit(i, &st->tx_fin_inflight);
+            clear_bit(i, &st->tx_fin_mask);
+            if (err == -ENOMEM)
+                sess->dbg_alloc_fail++;
+            continue;
+        }
+        queued++;
     }
+    if (queued)
+        WRITE_ONCE(st->tx_fin_queued, true);
     tbt_tx_wake(sess);
     /* The number of copies actually enqueued: 0 means no carrier was usable,
      * and the caller must not treat the FIN as sent. */
-    return queued;
+    return queued ? queued : err;
 }
 
 /* RST is not stream-ordered; one copy per live carrier is enough for one of
- * them to arrive. */
+ * them to arrive. The per-index mask makes a second tbt_tx_rst() a no-op. */
 int tbt_tx_rst(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
 {
-    int i, err = 0;
+    int i, queued = 0, err = 0;
 
     for (i = 0; i < sess->n_car; i++)
     {
@@ -270,13 +311,23 @@ int tbt_tx_rst(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
 
         if (!c || !READ_ONCE(c->hello_sent) || atomic_read(&c->stopping))
             continue;
+        if (test_and_set_bit(i, &st->tx_rst_mask))
+            continue;
+        set_bit(i, &st->tx_rst_inflight);
         err = tbt_tx_control_pinned(sess, st, (u8)i, TBT_F_RST, st->sid, 0, NULL, 0,
                                     false, gfp);
         if (err)
-            break;
+        {
+            clear_bit(i, &st->tx_rst_inflight);
+            clear_bit(i, &st->tx_rst_mask);
+            if (err == -ENOMEM)
+                sess->dbg_alloc_fail++;
+            continue;
+        }
+        queued++;
     }
     tbt_tx_wake(sess);
-    return err;
+    return queued ? queued : err;
 }
 
 // ---------------------------------------------------------------------------
@@ -1439,6 +1490,143 @@ static struct tbt_carrier *tbt_sched_pick(struct tbt_session *sess,
 // ---------------------------------------------------------------------------
 // The pump
 
+/* A pinned frame left tx_q (selected into a batch, written or dropped). The
+ * session's control-frame count includes frames in a batch, so it is
+ * decremented only when the frame is finished. */
+static void tbt_tx_ctl_put(struct tbt_session *sess, struct tbt_frame *fr)
+{
+    if (!fr->pinned)
+        return;
+    spin_lock(&sess->tx_lock);
+    if (sess->ctl_queued)
+        sess->ctl_queued--;
+    spin_unlock(&sess->tx_lock);
+}
+
+/* Wake a carrier's 2 ms pump. A stopping carrier's w_pump returns early, so
+ * prefer any live one; when none exists the replacement/FBK work owns the
+ * next attempt. */
+static void tbt_tx_ctl_arm(struct tbt_session *sess, struct tbt_carrier *pref,
+                           unsigned int ms)
+{
+    struct tbt_carrier *c = pref;
+    int i;
+
+    if (!c || atomic_read(&c->stopping) || !atomic_read(&c->connected))
+        c = NULL;
+    for (i = 0; !c && i < sess->n_car; i++)
+    {
+        struct tbt_carrier *it = READ_ONCE(sess->car[i]);
+
+        if (it && !atomic_read(&it->stopping) &&
+            atomic_read(&it->connected))
+            c = it;
+    }
+    if (c)
+        mod_delayed_work(system_dfl_wq, &c->w_pump, msecs_to_jiffies(ms));
+}
+
+/* Put a pinned frame back on the queue after a transient failure. The bound is
+ * per frame: after TBT_CTL_MAX_RETRIES the caller must fail it explicitly.
+ * A dead carrier slot waits at the poll cadence; a full write buffer waits
+ * 2 ms. */
+static bool tbt_tx_ctl_retry(struct tbt_session *sess, struct tbt_frame *fr,
+                             bool path_wait)
+{
+    unsigned int ms = path_wait ? TBT_CTL_PATH_RETRY_MS : TBT_CTL_RETRY_MS;
+    struct tbt_carrier *c = NULL;
+
+    if (fr->retries >= TBT_CTL_MAX_RETRIES)
+        return false;
+    fr->retries++;
+    sess->ctl_retry++;
+    sess->ctl_requeue++;
+    fr->retry_at_ns = tbt_now_ns() + (u64)ms * NSEC_PER_MSEC;
+    if (fr->path < sess->n_car)
+        c = READ_ONCE(sess->car[fr->path]);
+    tbt_tx_enqueue(sess, fr, true);
+    tbt_tx_ctl_arm(sess, c, ms);
+    sess->dbg_pump_hiwat++;
+    return true;
+}
+
+/* Explicit failure after the retry bound. A FIN/RST copy is redundant when
+ * another copy was written or is still in flight; only the last one with no
+ * written copy makes the stream terminal. */
+static void tbt_tx_ctl_fail(struct tbt_session *sess, struct tbt_frame *fr)
+{
+    u8 type = fr->hdr.type;
+
+    sess->ctl_lost++;
+    if (fr->st)
+    {
+        if (type == TBT_F_FIN)
+        {
+            if (fr->path < TBT_MAX_CARRIERS_LIMIT)
+                clear_bit(fr->path, &fr->st->tx_fin_inflight);
+            if (!READ_ONCE(fr->st->tx_fin_written) &&
+                !fr->st->tx_fin_inflight)
+            {
+                WRITE_ONCE(fr->st->tx_fin_queued, false);
+                tbt_stream_kill(fr->st, TBT_ST_DEAD);
+            }
+        }
+        else if (type == TBT_F_RST)
+        {
+            if (fr->path < TBT_MAX_CARRIERS_LIMIT)
+                clear_bit(fr->path, &fr->st->tx_rst_inflight);
+            if (!READ_ONCE(fr->st->tx_rst_written) &&
+                !fr->st->tx_rst_inflight)
+                tbt_stream_kill(fr->st, TBT_ST_DEAD);
+        }
+    }
+    tbt_tx_ctl_put(sess, fr);
+    tbt_frame_free(fr);
+}
+
+/* A pinned frame reached the wire. The per-index mask stays set: a duplicate
+ * FIN/RST on the same carrier is never wanted. */
+static void tbt_tx_ctl_written(struct tbt_session *sess, struct tbt_frame *fr)
+{
+    u8 type = fr->hdr.type;
+
+    if (fr->st)
+    {
+        if (type == TBT_F_FIN)
+        {
+            WRITE_ONCE(fr->st->tx_fin_written, true);
+            if (fr->path < TBT_MAX_CARRIERS_LIMIT)
+                clear_bit(fr->path, &fr->st->tx_fin_inflight);
+        }
+        else if (type == TBT_F_RST)
+        {
+            WRITE_ONCE(fr->st->tx_rst_written, true);
+            if (fr->path < TBT_MAX_CARRIERS_LIMIT)
+                clear_bit(fr->path, &fr->st->tx_rst_inflight);
+        }
+    }
+    tbt_tx_ctl_put(sess, fr);
+}
+
+/* A RETIRE names its victim (index, generation) in the body; the carrier that
+ * sends the notice is incidental. After that sender is replaced, move the
+ * notice to another live carrier instead of dropping it. */
+static int tbt_tx_retire_alt(struct tbt_session *sess, u8 path)
+{
+    int i;
+
+    for (i = 0; i < sess->n_car; i++)
+    {
+        struct tbt_carrier *c = READ_ONCE(sess->car[i]);
+
+        if (i == path || !c || atomic_read(&c->stopping) ||
+            !atomic_read(&c->up))
+            continue;
+        return i;
+    }
+    return -1;
+}
+
 /* Take every frame that can be written right now out of the session queue,
  * then write them with no lock held. A frame is left queued when its path is
  * at the write-queue high-water mark, when the send window is closed, or when
@@ -1497,6 +1685,7 @@ int tbt_tx_pump(struct tbt_session *sess)
     {
         LIST_HEAD(batch);
         LIST_HEAD(drop);
+        LIST_HEAD(fail);
         struct tbt_frame *fr, *tmp;
         u16 blocked = 0;
         bool progress = false;
@@ -1515,20 +1704,76 @@ int tbt_tx_pump(struct tbt_session *sess)
 
             if (fr->pinned)
             {
+                bool stream_ctl = (type == TBT_F_FIN || type == TBT_F_RST);
+                u64 now = tbt_now_ns();
+
                 if (fr->path >= sess->n_car)
                     goto drop;
                 c = READ_ONCE(sess->car[fr->path]);
-                if (!c)
-                    goto drop;
-                if (atomic_read(&c->stopping))
-                    goto drop;
+                /* A replacement may be ready before the retry timer fires.
+                 * Re-pin FIN/RST immediately: the generation change is the
+                 * event that matters, not the timer. */
+                if (c && !atomic_read(&c->stopping) && fr->gen &&
+                    fr->gen != c->gen && stream_ctl)
+                {
+                    fr->gen = c->gen;
+                    fr->retry_at_ns = 0;
+                    sess->ctl_requeue++;
+                    continue;
+                }
+                if (fr->retry_at_ns && now < fr->retry_at_ns)
+                    continue;
+                if (!c || atomic_read(&c->stopping))
+                {
+                    /* The slot is being replaced. HELLO/OPEN/RETIRE belong to
+                     * the old generation and are obsolete; FIN/RST belong to
+                     * the stream and wait for the replacement. */
+                    if (!stream_ctl)
+                        goto drop;
+                    if (fr->retries >= TBT_CTL_MAX_RETRIES)
+                        goto ctl_fail;
+                    fr->retries++;
+                    sess->ctl_retry++;
+                    sess->ctl_requeue++;
+                    fr->retry_at_ns = now +
+                        (u64)TBT_CTL_PATH_RETRY_MS * NSEC_PER_MSEC;
+                    tbt_tx_ctl_arm(sess, c, TBT_CTL_PATH_RETRY_MS);
+                    continue;
+                }
                 /* A pinned frame from a carrier that has since been replaced
-                 * must never be written on the replacement. */
+                 * must never be written on the replacement, with one exception:
+                 * FIN/RST are stream-level and re-pin to the new generation.
+                 * RETIRE names its victim in the body, so its sender may move
+                 * to another live carrier. */
                 if (fr->gen && fr->gen != c->gen)
+                {
+                    if (stream_ctl)
+                    {
+                        fr->gen = c->gen;
+                        fr->retry_at_ns = 0;
+                        sess->ctl_requeue++;
+                        continue;
+                    }
+                    if (type == TBT_F_RETIRE)
+                    {
+                        int alt = tbt_tx_retire_alt(sess, fr->path);
+
+                        if (alt >= 0)
+                        {
+                            fr->path = (u8)alt;
+                            fr->gen = READ_ONCE(sess->car[alt])->gen;
+                            fr->retry_at_ns = 0;
+                            sess->ctl_requeue++;
+                            continue;
+                        }
+                    }
                     goto drop;
+                }
                 if (type == TBT_F_HELLO)
                 {
-                    if (!atomic_read(&c->connected) || READ_ONCE(c->hello_sent))
+                    if (READ_ONCE(c->hello_sent))
+                        goto drop;
+                    if (!atomic_read(&c->connected))
                         continue;
                 }
                 else if (type == TBT_F_OPEN)
@@ -1539,6 +1784,22 @@ int tbt_tx_pump(struct tbt_session *sess)
                      * another stream's OPEN does not make this one stale. */
                     if (!fr->st || tbt_stream_announced(fr->st, c))
                         goto drop;
+                }
+                else if (type == TBT_F_RETIRE && !atomic_read(&c->up))
+                {
+                    /* The carrier that carried the notice is not usable yet.
+                     * Another live carrier can send it now. */
+                    int alt = tbt_tx_retire_alt(sess, fr->path);
+
+                    if (alt >= 0)
+                    {
+                        fr->path = (u8)alt;
+                        fr->gen = READ_ONCE(sess->car[alt])->gen;
+                        fr->retry_at_ns = 0;
+                        sess->ctl_requeue++;
+                        continue;
+                    }
+                    continue;
                 }
                 else if (!atomic_read(&c->up))
                 {
@@ -1648,10 +1909,12 @@ int tbt_tx_pump(struct tbt_session *sess)
                 sess->tokens -= fr->len;
             continue;
 drop:
-            /* A FIN that never reaches the wire must not keep the stream's
-             * "queued" claim: the FBK tick retries it on a usable carrier. */
-            if (type == TBT_F_FIN && fr->st)
-                WRITE_ONCE(fr->st->tx_fin_queued, false);
+            /* FIN/RST never disappear here: a stale path is an explicit
+             * failure, not a silent free. */
+            if (fr->pinned && (type == TBT_F_FIN || type == TBT_F_RST))
+                goto ctl_fail;
+            if (fr->pinned)
+                sess->ctl_obsolete++;
             list_del(&fr->list);
             sess->tx_queued -= fr->len;
             if (fr->dup_copy)
@@ -1663,13 +1926,26 @@ drop:
             }
             list_add_tail(&fr->list, &drop);
             progress = true;
+            continue;
+ctl_fail:
+            list_del(&fr->list);
+            sess->tx_queued -= fr->len;
+            list_add_tail(&fr->list, &fail);
+            progress = true;
         }
         }
         spin_unlock(&sess->tx_lock);
         list_for_each_entry_safe(fr, tmp, &drop, list)
         {
             list_del(&fr->list);
+            if (fr->pinned)
+                tbt_tx_ctl_put(sess, fr);
             tbt_frame_free(fr);
+        }
+        list_for_each_entry_safe(fr, tmp, &fail, list)
+        {
+            list_del(&fr->list);
+            tbt_tx_ctl_fail(sess, fr);
         }
 
         list_for_each_entry_safe(fr, tmp, &batch, list)
@@ -1681,6 +1957,16 @@ drop:
             list_del(&fr->list);
             if (!c)
             {
+                /* The carrier vanished between selection and write. A
+                 * FIN/RST keeps its promise and waits for the replacement;
+                 * other pinned frames fail explicitly after the bound. */
+                if (fr->pinned)
+                {
+                    if (tbt_tx_ctl_retry(sess, fr, true))
+                        continue;
+                    tbt_tx_ctl_fail(sess, fr);
+                    continue;
+                }
                 tbt_frame_free(fr);
                 continue;
             }
@@ -1721,9 +2007,11 @@ drop:
                     }
                     if (fr->pinned)
                     {
-                        if (type == TBT_F_FIN && fr->st)
-                            WRITE_ONCE(fr->st->tx_fin_queued, false);
-                        tbt_frame_free(fr);
+                        /* Never free a pinned frame on backpressure: put it
+                         * back and let the 2 ms w_pump retry it. */
+                        if (tbt_tx_ctl_retry(sess, fr, false))
+                            continue;
+                        tbt_tx_ctl_fail(sess, fr);
                         continue;
                     }
                     fr->path = 0xff;
@@ -1742,9 +2030,12 @@ drop:
                 tbt_carrier_lost(sess, c);
                 if (fr->pinned)
                 {
-                    if (type == TBT_F_FIN && fr->st)
-                        WRITE_ONCE(fr->st->tx_fin_queued, false);
-                    tbt_frame_free(fr);
+                    /* -EIO may have written a prefix; the carrier dies, but
+                     * the frame is still owed to the peer. It re-pins to the
+                     * replacement or fails explicitly at the bound. */
+                    if (tbt_tx_ctl_retry(sess, fr, true))
+                        continue;
+                    tbt_tx_ctl_fail(sess, fr);
                     continue;
                 }
                 /* Unpinned: give it another path. A short send may have put a
@@ -1866,6 +2157,8 @@ drop:
             default:
                 break;
             }
+            if (fr->pinned)
+                tbt_tx_ctl_written(sess, fr);
             tbt_frame_free(fr);
         }
 
@@ -2277,6 +2570,7 @@ void tbt_tx_free_queue(struct tbt_session *sess)
         list_add_tail(&fr->list, &free);
     }
     sess->tx_queued = 0;
+    sess->ctl_queued = 0;
     spin_unlock(&sess->tx_lock);
     list_for_each_entry_safe(fr, tmp, &free, list)
     {
