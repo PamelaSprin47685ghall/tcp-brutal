@@ -201,18 +201,19 @@ void tbt_listen_stop(struct tbt_tunnel *t);
  * peer's contiguous received offset. `tx_window_bytes=0` (the default)
  * derives it from the path:
  *
- *   auto = clamp(2 x (max_rtt_p99 + fb_delay) x sum(delivery_rate),
- *                1 MiB, rx_reorder_bytes)
+ *   auto = clamp(k x mean_BDP, 1 MiB, rx_reorder_bytes)
+ *   k = (RTO + one_way + fb_delay) / mean_srtt
  *
- * delivery_rate and srtt come from each carrier's own TCP BBR estimator
- * (rate_delivered/rate_interval_us, srtt_us); the slowest carrier's sliding
- * high-percentile RTT sets the headroom, and the feedback delay is added
- * because the ack crosses the FBK cadence and the peer's delivery. A fixed
- * 128 KiB (the old rx_reorder_bytes/2) capped a 218 ms,
- * 17 Mbit path at ~4 Mbit; that path's BDP is ~465 KiB. The ceiling is the
- * receiver's reorder budget, never a sum of carrier cwnd: carrier TCP frees
- * cwnd on its own ACK while the bytes still sit in the receiver's tree. A
- * frame beyond the budget is a stream kill, not a retransmit. */
+ * mean_BDP = mean_srtt x sum(delivery_rate), with the rate and SRTT from each
+ * carrier's own TCP BBR estimator (rate_delivered/rate_interval_us, srtt_us)
+ * and RTTVAR from mdev_us. The window covers one loss-repair interval, so
+ * the receiver's peak reorder occupancy is the whole window and the capacity
+ * identity is R >= W (DESIGN.md §5.4). A fixed 128 KiB (the old
+ * rx_reorder_bytes/2) capped a 218 ms, 17 Mbit path at ~4 Mbit; that path's
+ * BDP is ~465 KiB. The ceiling is the receiver's reorder budget, never a sum
+ * of carrier cwnd: carrier TCP frees cwnd on its own ACK while the bytes
+ * still sit in the receiver's tree. A frame beyond the budget is a stream
+ * kill, not a retransmit. */
 #define TBT_TX_WINDOW_MIN (16 * 1024)
 #define TBT_TX_WINDOW_AUTO_FLOOR (1024 * 1024)
 

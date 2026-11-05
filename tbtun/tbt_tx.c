@@ -516,13 +516,14 @@ static u64 tbt_car_delivery_bps(const struct tcp_sock *tp)
  * must absorb. The feedback delay is added because the ack that frees the
  * window crosses the FBK cadence and the peer's delivery.
  *
- * This is a target, not a bound. 2 x mean BDP covers most of the distribution
- * when the jitter is bounded; a heavy tail needs a high percentile of the
- * spread, which only widens the target. The hard ceiling is the receiver's
- * reorder budget (or a WINDOW credit), never sum(2 x BDP_i), a single mean
- * sample, or sum(snd_cwnd)/sum(snd_wnd): a carrier TCP releases cwnd when its
- * own ACK arrives while those bytes stay in the receiver's tree, and a cwnd
- * sum can exceed the tree and overflow it. */
+ * This is a target, not a bound. k is 2-5 for the measured paths, and the
+ * 1 MiB floor dominates at 218 ms / 17 Mbit; a heavy tail needs a high
+ * percentile of the spread, which only widens the target. The hard ceiling
+ * is the receiver's reorder budget (or a WINDOW credit), never
+ * sum(2 x BDP_i), a single mean sample, or sum(snd_cwnd)/sum(snd_wnd): a
+ * carrier TCP releases cwnd when its own ACK arrives while those bytes stay
+ * in the receiver's tree, and a cwnd sum can exceed the tree and overflow
+ * it. */
 static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
                              u32 *var_out, u32 *max_out)
 {
