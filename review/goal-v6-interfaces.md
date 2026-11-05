@@ -378,6 +378,7 @@ FEC payload（DATA/PARITY）      加密
 - 加密顺序：TX 先算 `payload_crc32c`（明文），再 `tbt_crypto_body_xor()`；RX 先解密，再校验 `payload_crc32c`。
 - 控制帧（ACK/NACK/FEC_CFG/FEC_FBK/PAD）**不加密**；它们不含应用字节，且需要在 FEC 头明文下调度。
 - HTTP 头明文是硬要求：整条 TLS/全包加密会丢掉 HTTP 容器的 QoS 可见性。
+- 职责边界（B 确认）：HELLO v6 body 的 key/nonce 由 C 的 session/crypto 层填写；FEC 层（B）只接收 tx/rx 两个 `tbt_crypto_ctx` 并调用 `tbt_crypto_body_xor`，不自己生成/交换 key/nonce。
 
 ### 2.3 key 来源与 HELLO v6 body
 
@@ -558,6 +559,7 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **合并列车（用户裁决）：`w-window` → `w-fec-v6` → `w-crypto` → `w-sclc` → `w-hnd0` → master（F/T7）。**
 每一步只在 master 上合并前一等的 head；不允许跨序合并。D 的当前 worktree 仍是 `w-fec`，合并前改名为 `w-sclc` 或由 F 记录等价映射；不得因此改变 D 的提交内容。
+**`w-window` 未过 G1，暂不进入合并列车**；A 修 RST adversarial、lint、auto budget 后再评估。
 
 | 文件 | 冲突方 | 裁决 |
 |---|---|---|
@@ -605,6 +607,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 | 通过 | N=1 慢载体 `rc=0`；far `holes_unrecoverable=0`；`fbk_rx>0`；`W≈136–250 KB`；`raw lost=0`；A–K 11/11、0 skip；adversarial 91/91、0 failed/0 skipped；host/SAN/lint 全绿 |
 | 失败 | 任一计数不符、skip、crash、hang |
 
+**G1 现状（挂起）**：A 的 lab 5s budget 通过；auto budget 被 slirp 64KiB 限制；RST adversarial 1/91 未解；lint 未跑。T1 完成前**不合并 `w-window`**。
+
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
 
 | 项 | 内容 |
@@ -622,6 +626,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 | 证据 | `review/crypto/`、`host/test_crypto` 输出、HND0 日志 |
 | 通过 | TC1 + 256-bit KAT 逐字节；body-only（HTTP 头/FEC 头明文）；默认开、`crypto=off` 可关；HND0 MB/s/cycles/byte 记录；1G 单核占用 ≤25% |
 | 失败 | KAT 不符、头被加密、无法关闭、CPU 超预算 |
+
+**T3 现状（未完成）**：C `w-crypto b16af3b`，KAT 40/40，`make check`/`host-test-san` 绿；**per-direction nonce 未实现**，C 正在按 §2.3/§2.4 补（各自 HELLO +26、tx/rx ctx、双向 KAT）。等 C 新 head + HND0 优化版 microbench；不合并。
 
 ### G4 — T4 SC-LDPC BEC 容量门（D）
 
@@ -642,6 +648,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 | 证据 | `review/hnd0-v6/`（原始日志、CSV、procfs 快照、服务恢复检查） |
 | 通过 | 256/256 carriers；app ≥33.72 Mbit/s；记录 p、near/far CPU/RAM、wire/app、holes、raw lost；frps/Caddy/hysteria/xray 全部 active；无持久改动 |
 | 失败 | <33.72M、carrier 掉线、服务未恢复、OOM、无回滚 |
+
+**T5.1 已接受 `c435ba9`**：全局 `/proc/net/tbtun/ports` 写入/verify、v6 行去 legacy 键、端口保留告警反转、dry-run 提交；T5.2 等 G5。
 
 ### G6 — T6 SC-LDPC 最终 + HND0 256-flow（D+E）
 
