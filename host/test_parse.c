@@ -1245,9 +1245,10 @@ int main(void)
     /* 20. The peers column contract, pinned verbatim. */
     ok(!strcmp(TBT_PEERS_COLUMNS, "id carrier sport peer uack rtt_us inflight state class"
                                   " recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped"
-                                  " retx_ppm delivery_rate_bps cwnd_bytes snd_wnd"),
+                                  " retx_ppm delivery_rate_bps cwnd_bytes snd_wnd"
+                                  " wscale rcv_wnd window_clamp rmem_alloc"),
        "peers column contract", TBT_PEERS_COLUMNS);
-    ok(count_words(TBT_PEERS_COLUMNS) == 19, "peers has exactly 19 columns", NULL);
+    ok(count_words(TBT_PEERS_COLUMNS) == 23, "peers has exactly 23 columns", NULL);
     ok(count_words(TBT_TUNNELS_COLUMNS) == 9, "tunnels has exactly 9 columns", NULL);
 
     /* 21. Action verbs: canonical text, round-trip, refusals, config exclusion. */

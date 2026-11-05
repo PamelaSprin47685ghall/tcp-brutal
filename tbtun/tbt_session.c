@@ -370,6 +370,7 @@ void tbt_peers_show(struct seq_file *m)
             u16 sport;
             u32 inflight, rx_lag_ppm = 0, retx_ppm = 0, rtt;
             u32 cwnd_bytes = 0, snd_wnd = 0;
+            u32 wscale = 0, rcv_wnd = 0, window_clamp = 0, rmem_alloc = 0;
             u64 uack, frames, bytes, dropped, delivery_bps = 0;
 
             if (!c)
@@ -409,6 +410,18 @@ void tbt_peers_show(struct seq_file *m)
                     mss = READ_ONCE(tp->mss_cache);
                     cwnd_bytes = READ_ONCE(tp->snd_cwnd) * mss;
                     snd_wnd = READ_ONCE(tp->snd_wnd);
+                    /* Window-scale diagnostics: the handshake freezes
+                     * rcv_wscale/window_clamp, and a receive queue that is
+                     * full shows up as a small rcv_wnd with a large
+                     * rmem_alloc. Both look like a small snd_wnd from the
+                     * sender, so the four fields tell them apart. */
+                    /* Bit-fields: no READ_ONCE (it cannot take their
+                     * address); a diagnostic read of a 4-bit field is fine. */
+                    wscale = ((u32)tp->rx_opt.rcv_wscale << 4) |
+                             (tp->rx_opt.snd_wscale & 0xf);
+                    rcv_wnd = READ_ONCE(tp->rcv_wnd);
+                    window_clamp = READ_ONCE(tp->window_clamp);
+                    rmem_alloc = atomic_read(&sk->sk_rmem_alloc);
                     sock_put(sk);
                     if (srtt > READ_ONCE(c->rtt_us))
                         rtt = srtt;
@@ -440,12 +453,13 @@ void tbt_peers_show(struct seq_file *m)
                 retx_ppm = unique ? (u32)min_t(u64, copies * 1000000 / unique,
                                                1000000) : 0;
             }
-            seq_printf(m, "%llu %u %u %pI4:%u %llu %u %u %s %s %u %u %u %llu %llu %llu %u %llu %u %u\n",
+            seq_printf(m, "%llu %u %u %pI4:%u %llu %u %u %s %s %u %u %u %llu %llu %llu %u %llu %u %u %u %u %u %u\n",
                        t->cfg.id, i, sport, &peer, ntohs(port), uack,
                        rtt, inflight, tbt_car_state_name(c->state),
                        tbt_profile_name(c->profile), READ_ONCE(c->recv_cnt),
                        rx_lag_ppm, READ_ONCE(c->rtt_min_us), frames, bytes,
-                       dropped, retx_ppm, delivery_bps, cwnd_bytes, snd_wnd);
+                       dropped, retx_ppm, delivery_bps, cwnd_bytes, snd_wnd,
+                       wscale, rcv_wnd, window_clamp, rmem_alloc);
         }
     }
     mutex_unlock(&tbt_lock);
