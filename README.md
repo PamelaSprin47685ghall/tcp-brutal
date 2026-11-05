@@ -63,6 +63,11 @@ HTTP container, and the reorder/ack/control/multistream/anchor models — which
 need no root, no module and no kernel headers.
 `make host-test` runs only those tests.
 
+`test_parse` now reports 357 checks; 365 was the older snapshot taken before the
+five dead keys `framing`/`chunk`/`max_retry`/`dev`/`uid` and their parse cases
+were deleted. What was deleted is the tests for keys already removed from the
+grammar, not behavioural coverage; `make check` still reports 0 failures.
+
 If the distribution's headers are not installed, the build can use an extracted
 header payload instead of `/lib/modules/$(uname -r)/build`; see
 [docs/build-env.md](docs/build-env.md) for the one-time setup, the `env.sh` it

@@ -326,6 +326,11 @@ Host tests:
 - `bash review/lint.sh`: **16/16 checks**, **14/14 self-tests**, exit 0. The
   atomic-stats, proc-entries-removed and retain-trim checks are part of the 16.
 
+`test_parse` now reports **357 checks**; 365 was the older snapshot taken before
+the five dead keys `framing`/`chunk`/`max_retry`/`dev`/`uid` and their parse
+cases were deleted. What was deleted is the tests for keys already removed from
+the grammar, not behavioural coverage; `make check` still reports 0 failures.
+
 Parser and `/proc` checks:
 
 - `test_parse` 357/0 is the grammar check; `test_fuzz` and `test_http_fuzz` are
