@@ -156,11 +156,11 @@ streaming、in-place、counter wrap、invalid args、wipe）。bench 自带 TC1 
 跑前 load 82.6、`bun`/`tq_tp5_dw_alloc` 占 CPU，数字不可用：ChaCha8 200.0/179.3/146.7 MB/s
 （1G 62.5–85.2%）。等负载回落后重跑，**不要引用这一行**。
 
-### 8.3 HND0 的初步读数（w-crypto 75dcf9f，受并发污染）
+### 8.3 HND0
 
-与 microbench2 同时在 cpu0 上跑，07:04–07:07 的三轮里 ChaCha8 8 KiB 在 153–668 MB/s
-之间跳（1G 18.7–81.6%）；我已在 07:07 停掉并让出 cpu0。**这组数字只说明测量环境被污染，
-不作为结论**。等 microbench2 的干净三遍结束后，用 w-crypto 最终 head（33238ca）重跑。
+HND0 的权威数字见 §9（microbench2 的 8 遍干净复核，w-crypto 33238ca）：
+ChaCha8 8 KiB max 635.0 MB/s（3.46 c/B，1G 单核 19.7%），中位 505.6 MB/s（24.7%）。
+我早前与 microbench2 并发时测到的一组数字已作废，不在此引用。
 
 ### 读数
 
