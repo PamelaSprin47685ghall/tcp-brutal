@@ -5,8 +5,8 @@ ADV_RESULT pub.concurrent PASS sha=0b8f0006a7a10fe3 n=100 connected=100 echoed=1
 ADV_RESULT pub.halfclose PASS sha=0b8f0006a7a10fe3 app half-close: echo 10 bytes, EOF=1
 ADV_RESULT pub.rst PASS sha=0b8f0006a7a10fe3 RST after 4194304 bytes: no warning, module still loaded
 ADV_RESULT init.src_key PASS sha=0b8f0006a7a10fe3 src= refused; nonce= accepted and rendered; short nonce= refused
-ADV_RESULT pub.writer PASS sha=0b8f0006a7a10fe3 attempted 100 MiB, accepted 74978883 bytes then blocked (errno=11), MemAvailable 397476 -> 254416 kB
-ADV_RESULT pub.writer PASS sha=0b8f0006a7a10fe3 attempted 1024 MiB, accepted 75187154 bytes then blocked (errno=11), MemAvailable 398188 -> 252768 kB
+ADV_RESULT pub.writer FAIL sha=0b8f0006a7a10fe3 attempted 100 MiB, accepted 104857600 bytes then blocked (errno=0), MemAvailable 397588 -> 186840 kB
+ADV_RESULT pub.writer FAIL sha=0b8f0006a7a10fe3 attempted 1024 MiB, accepted 120435907 bytes then blocked (errno=11), MemAvailable 398204 -> 176028 kB
 ADV_RESULT pub.srcfilter PASS sha=0b8f0006a7a10fe3 app from 127.0.0.2 usable=1 (no src= allow list; the tunnel identity is the nonce), far config renders nonce=1 peer=1
 ADV_RESULT ctl.nonroot PASS sha=0b8f0006a7a10fe3 uid 1000 write to /proc/net/tbtun/config: open failed (the documented mode is 0600 root)
 ADV_RESULT init.nonroot_unchanged PASS sha=0b8f0006a7a10fe3 config unchanged after the uid-1000 attempt
@@ -19,13 +19,12 @@ ADV_RESULT init.cfg_unchanged PASS sha=0b8f0006a7a10fe3 over-long lines changed 
 ADV_RESULT init.cfg_roundtrip PASS sha=0b8f0006a7a10fe3 the canonical config replays line by line
 ADV_RESULT init.echo_after_roundtrip PASS sha=0b8f0006a7a10fe3 ECHO_OK bytes=1048576
 ADV_RESULT init.max_tunnels PASS sha=0b8f0006a7a10fe3 64 tunnels accepted before the limit
-ADV_RESULT init.scale PASS sha=0b8f0006a7a10fe3 1024 carriers up of 1024 rows; MemAvailable 404164 -> 328840 kB
+ADV_RESULT init.scale PASS sha=0b8f0006a7a10fe3 1024 carriers up of 1024 rows; MemAvailable 403028 -> 327580 kB
 ADV_RESULT init.slab_leak PASS sha=0b8f0006a7a10fe3 32k slabs grew by 0 objects over 100 connections
 ADV_RESULT init.slab_after_flush PASS sha=0b8f0006a7a10fe3 after flush: 32k objects 0 -> 0 (the session teardown is the only free point)
 ADV_RESULT init.final_echo PASS sha=0b8f0006a7a10fe3 ECHO_OK bytes=4194304
 ADV_RESULT init.dmesg PASS sha=0b8f0006a7a10fe3 no WARNING/BUG/Oops/INFO: task in the guest log
-ADV_RESULT console.klog.final FAIL sha=0b8f0006a7a10fe3 1 kernel oops/warning lines (console /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/console-final.log)
-ADV_RESULT init.cfg_replay PASS sha=0b8f0006a7a10fe3 line-by-line config replay rc=0, transfer closed cleanly: ECHO_ABORT op=read errno=104 bytes=1114112
+ADV_RESULT init.cfg_replay PASS sha=0b8f0006a7a10fe3 line-by-line config replay rc=0, transfer closed cleanly: ECHO_ABORT op=send errno=104 bytes=1179648
 ADV_RESULT init.echo_after_replay PASS sha=0b8f0006a7a10fe3 ECHO_OK bytes=1048576
 ADV_RESULT init.rmmod PASS sha=0b8f0006a7a10fe3 rmmod rc=0, app closed cleanly: ECHO_ABORT op=read errno=104 bytes=1114112
 ADV_RESULT init.reload PASS sha=0b8f0006a7a10fe3 module reloaded
@@ -49,8 +48,8 @@ ADV_RESULT near.drip_pad PASS sha=0b8f0006a7a10fe3 a drip chunk and a PAD chunk 
 ADV_RESULT near.fbk_forged PASS sha=0b8f0006a7a10fe3 forged FBK gen+1 and path 15: uack 5000 -> 5000 (must stay 5000)
 ADV_RESULT near.data_path PASS sha=0b8f0006a7a10fe3 DATA delivered to the app after forged FBK (child rc=0)
 ADV_RESULT near.second_conn PASS sha=0b8f0006a7a10fe3 second public connection after the first closed: rc=0 echoed=1 (0 = accepted and usable, 1 = refused)
-ADV_RESULT near.fin_eagain PASS sha=0b8f0006a7a10fe3 FIN under carrier backpressure: fin_seen=1 eof=1 child_rc=0 pump_hiwat 0 -> 4956 (must grow) holes_unrecoverable 0 -> 0; tx_ack=524288 txq=0 rx_records=57 hole_checks=0 time_fail=0 parsed=236 last_type=20 wire=536418 car_wmem=1010 rb_set=0 rb_now=524288 brk=0 rfail=0
-ADV_RESULT near.rst_eagain PASS sha=0b8f0006a7a10fe3 RST under carrier backpressure: rst_seen=1 eof=0 child_rc=0 pump_hiwat 0 -> 219 (must grow) holes_unrecoverable 0 -> 0; tx_ack=49125 txq=0 rx_records=4 hole_checks=0 time_fail=0 parsed=9 last_type=21 wire=98880 car_wmem=27552 rb_set=0 rb_now=524288 brk=0 rfail=0
+ADV_RESULT near.fin_eagain PASS sha=0b8f0006a7a10fe3 FIN under carrier backpressure: fin_seen=1 eof=1 child_rc=0 pump_hiwat 0 -> 4970 (must grow) holes_unrecoverable 0 -> 0; tx_ack=524288 txq=0 rx_records=57 hole_checks=0 time_fail=0 parsed=236 last_type=20 wire=536418 car_wmem=1010 rb_set=0 rb_now=524288 brk=0 rfail=0
+ADV_RESULT near.rst_eagain PASS sha=0b8f0006a7a10fe3 RST under carrier backpressure: rst_seen=1 eof=0 child_rc=0 pump_hiwat 0 -> 209 (must grow) holes_unrecoverable 0 -> 0; tx_ack=49125 txq=0 rx_records=4 hole_checks=0 time_fail=0 parsed=9 last_type=21 wire=98880 car_wmem=27552 rb_set=0 rb_now=524288 brk=0 rfail=0
 ADV_RESULT far.garbage PASS sha=0b8f0006a7a10fe3 9000 bytes of non-HTTP garbage; carrier must close, not crash
 ADV_RESULT far.hello_garbage PASS sha=0b8f0006a7a10fe3 HELLO joined (nonce adopted), then 64 garbage bytes; carrier must close
 ADV_RESULT far.wrong_nonce PASS sha=0b8f0006a7a10fe3 HELLO with the wrong 128-bit nonce: carrier closed; join_bad+nonce_reject 0 -> 0
