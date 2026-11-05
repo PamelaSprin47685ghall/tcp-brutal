@@ -54,6 +54,9 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+# The frozen p1 baseline copy is evidence: review/baseline/p1-tree/SHA256SUMS
+# lists it, so the generic rule above must not hide it.
+!review/baseline/p1-tree/dkms.conf
 
 ### C++ ###
 # Prerequisites
