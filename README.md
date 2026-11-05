@@ -135,8 +135,8 @@ program, and `echo`/`cat` are the whole interface.
 | `tunnels` | one line per tunnel: role, state, listen/peer/target, n, m, streams |
 | `peers` | one line per carrier slot, 16 columns (below) |
 | `ports` | the global source port block and whether it is configured |
-| `stats` | `debug_loss=<0\|1>`, gap and stream totals, then per-tunnel counters (`txq`, `rxq`, holes, prediction, duplication, carrier replacement) |
-| `http` | debug only (`debug>=2`): a snapshot of the last HTTP request header block the near side's carrier 0 put on the wire, for checking the container against a parser; it is not a live stream |
+| `stats` | `debug_loss=<0\|1>`, gap and stream totals, then per-tunnel counters (`txq`, `rxq`, holes, prediction, duplication, carrier replacement, port exhaustion, source-anchor rejects) |
+| `http` | debug only (`debug>=2`): the last **emitted** HTTP request header block from the near side's carrier 0 (headers only), for checking the container against a parser; not a received request, a response, or a live stream |
 
 `drop_ppm` is refused with `EPERM` unless the module was loaded with
 `debug_loss=1`; `stats` starts with that gate's state so a script can check it

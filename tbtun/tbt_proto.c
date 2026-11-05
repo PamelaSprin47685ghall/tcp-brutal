@@ -6,8 +6,9 @@
  * Owns:
  *   - the 32-byte header exactly as DESIGN.md §3.3 lays it out (offsets are
  *     the authority; this file must never disagree with it).
- *   - the `raw` container for C2: `u32 len (LE) | header | payload`, which is
- *     also the body of an http-kal chunk when the QoS layer lands in C8.
+ *   - the `raw` container for C2: `header | payload`, one record with
+ *     `body_len` at header offset +6 and no separate length prefix; the same
+ *     record is the body of an http-kal chunk.
  *   - header validation strict enough that a corrupt or hostile stream is
  *     rejected per carrier instead of being parsed into a wrong action.
  *
@@ -66,7 +67,7 @@ void tbt_hdr_encode(u8 *p, const struct tbt_hdr *h)
 // per-type body bounds. Two types also have an exact length that depends on
 // another header field:
 //   - PREDICT carries the 16-byte resume token iff MUST_ORDER is set,
-//   - FBK carries exactly path_ack_count 8-byte entries.
+//   - FBK carries exactly path_ack_count 18-byte entries.
 // Returns 0 or -EPROTO. Body *contents* are not interpreted here: OPEN and
 // HELLO carry fields their consumer reads later, and that consumer validates
 // them. This function makes the framing total, not the payloads.

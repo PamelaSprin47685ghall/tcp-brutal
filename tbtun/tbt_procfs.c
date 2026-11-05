@@ -864,6 +864,11 @@ int tbt_procfs_init(void)
     return 0;
 
 fail:
+    /* review 34: never remove names one by one.  Entries after the failed
+     * one were never created, and remove_proc_entry() WARNs on a missing
+     * name.  tbt_procfs_exit() removes the subtree, which deletes exactly
+     * the children that exist and is silent when a partial failure left
+     * none. */
     tbt_procfs_exit();
     return -ENOMEM;
 }

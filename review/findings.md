@@ -125,12 +125,12 @@ are from the 18:50 tree; re-read the cited symbol before acting on one.
 | 9 short write | medium-high | FIXED (code evidence; rerun pending) | the unwritten tail stays in `c->part` (`tbt_carrier.c:764-765`) and is drained first (`:708-728`). |
 | 10 peers `c->sk` | medium | FIXED (code evidence; rerun pending) | `sock_hold`/`sock_put` around each dereference (`tbt_session.c:385`, `:402`). |
 | 11 RETIRE / TBT_CONV | medium | FIXED (doc + code) | `TBT_CONV 0x0004` and `TBT_F_RETIRE 0x24` (`tbt_uapi.h:46`, `:66`), bounded at `:156`; DESIGN lists the type once. A static property, not a runtime claim. |
-| 12 HELLO bit layout | medium | FIXED (doc); code comment OPEN | DESIGN §3.3 matches `profile OR gen<<2`; `tbt_carrier.c:1287` still says "zero flags byte". |
+| 12 HELLO bit layout | medium | FIXED (doc + code comment) | DESIGN §3.3 matches `profile OR gen<<2`; the HELLO comment in `tbt_carrier.c` now gives the 5:2 layout (profile bits 1:0, gen bits 5:2, bits 7:6 zero). |
 | 13 PREDICT inert | medium | OPEN | `predict_seq` is only recorded (`tbt_rx.c:438-458`) and cleared (`:251-252`, `:466-472`); nothing advances `rx_next` or promotes a placeholder. |
 | 14 `data_frames` before send | medium | FIXED (code evidence; rerun pending) | increments only after a send, or on the injector's deliberate drop (`tbt_carrier.c:603`, `:686`, `:770`). |
 | 15 `fbk_mask` unused | medium | OPEN | `tbt_tx_hole_check(..., u16 fbk_mask)` still ignores the parameter (`tbt_tx.c:1040`); pending the data-plane freeze. |
 | 16 first-HELLO nonce | medium | FIXED (code; QEMU far rerun pending) | `tbt_session_create()` pins `cfg.nonce`, seeds the anchor from far `peer=`, and warns on TOFU; `tbt_rx_hello()` checks the anchor before the nonce (`join_src_reject++`), sets it only after the nonce passes, and `tbt_session_join()` asserts it. `host/test_anchor` 124/0; `far.anchor`/`far.dup_index`/`far.srcaddr_free` are the QEMU acceptance. |
-| 17 http proc entry | medium | FIXED (code evidence; rerun pending) | `remove_proc_entry(TBT_HTTP_NAME, ...)` (`tbt_procfs.c:854`). |
+| 17 http proc entry | medium | FIXED (code evidence; rerun pending) | covered by `remove_proc_subtree(TBT_PROC_SUBDIR, init_net.proc_net)` in `tbt_procfs_exit()`. |
 | 18 module parameters | medium | FIXED (code evidence; rerun pending) | `max_carriers` is checked in `tbt_session.c:123`, `max_tunnels` in `:199`; `netns_optin` is gone. |
 | 19 one-shot config read | low | FIXED (code evidence; rerun pending) | exact-size `kvmalloc` snapshot served by offset (`tbt_procfs.c:244-344`). The host suites do not exercise `tbt_procfs.c`, so 355/0 is not evidence for this row. |
 | 20 overlapping reorder | low | FIXED (code evidence; rerun pending) | `tbt_rx_pull_locked()` evicts a fully stale node and clips a straddling one (`tbt_rx.c:33-80`). No targeted test. |
@@ -147,8 +147,8 @@ are from the 18:50 tree; re-read the cited symbol before acting on one.
 | 31 release overflow | medium | FIXED (code evidence; rerun pending) | the drain refuses an over-long tail (`tbt_procfs.c:140-146`). |
 | 32 blank line to `/ports` | low | FIXED (code evidence; rerun pending) | a blank line and 0-0 are no-ops (`tbt_procfs.c:415-430`). |
 | 33 torn http read | low | FIXED (code evidence; rerun pending) | the block is copied under `pump_lock` (`tbt_procfs.c:548-555`). |
-| 34 partial procfs init | low | OPEN | `fail:` calls `tbt_procfs_exit()`, which removes every name, including the ones never created (`tbt_procfs.c:842-855`). |
-| 35 dead keys/functions | nit | FIXED (keys; host run); declarations OPEN | the five keys are gone from the grammar (grep is empty, `test_parse` covers the parse); `tbt_passive_port()` and `tbt_tunnel_flush()` remain declared (`tbtun.h:100`, `:113`). |
+| 34 partial procfs init | low | FIXED (code + lint) | `tbt_procfs_exit()` uses `remove_proc_subtree(TBT_PROC_SUBDIR, init_net.proc_net)`, which deletes only existing children and is silent when a partial init left none; `fail:` only calls it. `review/lint.sh` `proc-entries-removed` accepts the subtree proof and self-tests both verdicts. |
+| 35 dead keys/functions | nit | FIXED | the five keys are gone from the grammar; the two dead declarations `tbt_passive_port()` and `tbt_tunnel_flush()` are removed from `tbtun.h`, and `grep -rn 'tbt_passive_port\|tbt_tunnel_flush' tbtun/` is empty. |
 | 36a snd_una gate | high | FIXED (code evidence; rerun pending) | `first_sent_seq[]`/`una_observed_ns[]` are back (`tbtun.h:222-227`); the gate tests `snd_una` against the mark (`tbt_tx.c:829-835`). |
 | 36b trim vs batch | high | FIXED (code evidence; rerun pending) | the trim runs only from the pump (`tbt_tx.c:364`, `:1552`). |
 | 36c teardown | high | FIXED (code evidence; rerun pending) | `tbt_carriers_stop()` then `tbt_tx_free_queue()` before the unlink loop (`tbt_session.c:1025`, `:1053`). |
@@ -407,13 +407,12 @@ pointer that retire clears before `sock_release()` and then `synchronize_rcu()`s
     `saw_hello`), so there is no unauthenticated path. Fix: add the type and its
     body/seq meaning to DESIGN §3.3 and bump `TBT_CONV`.
 
-12. **medium — HELLO profile/generation bit layout disagrees with DESIGN** (DESIGN fixed; code comment pending).
+12. **medium — HELLO profile/generation bit layout disagrees with DESIGN** (fixed).
     `tbtun/tbt_carrier.c:1202-1204` writes `profile | (gen << 2)` (profile bits 1:0, gen
     bits 5:2); `tbtun/tbt_rx.c:460-461` reads `& 3` / `>> 2`. DESIGN §3.1.1 and §3.3 now
     both give the same 5:2 layout; the old §3.3 "high four bits" sentence and the
-    "TBT_CONV not bumped" claim were stale (`TBT_CONV` is `0x0003`). Remaining: the code
-    comment at `tbt_carrier.c:1190` still says "zero flags byte"; remove it when the
-    data plane is free.
+    "TBT_CONV not bumped" claim were stale (`TBT_CONV` is `0x0003`). The code comment in
+    `tbt_carrier.c` now gives the same 5:2 layout; it no longer says "zero flags byte".
 
 13. **medium — PREDICT is inert on the receiver.** `tbtun/tbt_rx.c:438-458` records
     `st->predict_seq`/`predict_token`, and nothing ever reads them to advance
@@ -442,10 +441,11 @@ pointer that retire clears before `sock_release()` and then `synchronize_rcu()`s
     (`tbt_session.c:380-400`). DESIGN's claim that a hostile connection "cannot name a
     stream without the session nonce" does not hold for the first join. Fix: require
     `nonce_pinned` for far tunnels (refuse the first HELLO otherwise), or document the
-    trust model in §9.5. **Current (2026-11-05):** still open. A pinned nonce is checked
-    (`tbt_rx.c:525-533`) and an unpinned tunnel whose `peer=` is configured accepts the
-    first HELLO only from that address (`:534-552`); a far tunnel with no configured
-    peer still trusts the first connection.
+    trust model in §9.5. **Fixed (2026-11-05):** a pinned nonce is checked, a configured
+    `peer=` fixes the source anchor at session creation, and a far tunnel with neither
+    still trusts the first connection but warns once. The anchor is checked before the
+    nonce (`join_src_reject`), set only by a HELLO that passes the nonce check, and
+    asserted again in `tbt_session_join()`.
 
 17. **medium — `/proc/net/tbtun/http` is created but never removed.** `tbt_procfs.c:643`
     creates it; `tbt_procfs_exit()` (`tbt_procfs.c:652-663`) removes every other file
@@ -582,18 +582,19 @@ These are findings 27-35, from a second pass over `tbt_procfs.c`, `tbt_parse.c` 
     half-written block; this is the debug surface meant to prove conformance. Fix: copy
     the block under `pump_lock` into a local buffer before `seq_write()`.
 
-34. **low — a partial procfs init removes entries that were never created.**
+34. **low — a partial procfs init removes entries that were never created** (fixed).
     `tbt_procfs_init()` `goto fail` calls `tbt_procfs_exit()` (`tbt_procfs.c:842-855`),
     which calls `remove_proc_entry()` for every name, including those after the failed
-    one; procfs warns on a missing entry. Fix: track which entries were created, or use
-    `remove_proc_subtree()` on the directory.
+    one; procfs warns on a missing entry. Fixed by removing the subtree: only entries
+    that exist are deleted, and a missing subtree returns `-ENOENT` without a WARN.
+    `review/lint.sh` verifies that every created name is either removed by name or
+    created under the removed directory.
 
-35. **nit — dead code and accepted-but-unused keys on this surface** (keys fixed; dead declarations pending).
+35. **nit — dead code and accepted-but-unused keys on this surface** (fixed).
     The inert keys (`cfg.framing`, `cfg.chunk`, `cfg.max_retry`, `cfg.uid`, `cfg.dev`)
-    were removed from the grammar. Remaining dead declarations: `tbt_passive_port()` and
-    `tbt_tunnel_flush()` (`tbtun.h:98`/`:111`). `tbt_http_skip_request_header()` is not
-    dead: `host/test_http.c` exercises it. Remove the declarations after the data-plane
-    freeze.
+    were removed from the grammar, and the dead declarations `tbt_passive_port()` and
+    `tbt_tunnel_flush()` are removed from `tbtun.h`. `tbt_http_skip_request_header()` is
+    not dead: `host/test_http.c` exercises it.
 
 36. **high — the retransmit state machine lost its per-copy `snd_una` gate, and the
     retention trim can still free an entry the pump is using.** Four defects in the

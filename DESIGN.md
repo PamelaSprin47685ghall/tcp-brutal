@@ -1202,11 +1202,14 @@ random at tunnel creation).
   rejected with a message and no partial effect. The same verbs are accepted on
   `config`; `peers` is the state view they act on. The index applies to **every
   tunnel that has a carrier with that index**; there is no tunnel-qualified form.
-- `http` (read, debug-only, `debug >= 2`): the last request header block this side
-  emitted, verbatim, headers only and never a body, at most `TBT_HTTP_REQ_MAX` (4096)
-  bytes. Empty when `debug < 2`. It exists because the QoS claim is about the bytes the
-  ISP sees; the only end-to-end check is parsing what the module actually emitted inside
-  the guest with a strict HTTP parser (§8.4).
+- `http` (read, debug-only, `debug >= 2`): the last **emitted** request header block,
+  verbatim, headers only and never a body, at most `TBT_HTTP_REQ_MAX` (4096) bytes. The
+  source is the near side's carrier 0 request emitter in the `http-kal`/`http-kal-drip`
+  container (`tbt_carrier.c`); it is a snapshot of bytes put on the wire, not a received
+  request, a response, or a live stream. Empty when `debug < 2`. With more than one
+  tunnel captured, the reader renders the longest block. It exists because the QoS claim
+  is about the bytes the ISP sees; the only end-to-end check is parsing what the module
+  actually emitted inside the guest with a strict HTTP parser (§8.4).
 - `stats` (read): the stable leading block is exactly three lines, in this order:
   `debug_loss=<0|1>`, `gaps_total=<n>`, `streams_total=<n>`; one `key=value` per line,
   no spaces. Per-tunnel counters follow (§8.7).
@@ -1612,10 +1615,9 @@ returns `-ENOSPC` before `kzalloc`/list insert; re-sending an existing id still 
 it. `max_carriers` is enforced in `tbt_cfg_sane()`: `n + m > max_carriers` returns
 `-EINVAL` before any allocation or session creation.
 
-**Known dead declarations (review 35, pending).** `tbt_passive_port()` and
-`tbt_tunnel_flush()` are declared in `tbtun.h` with no definition or caller. They stay
-until the data plane is frozen, then are removed. `tbt_http_skip_request_header()` is
-not dead: `host/test_http.c` exercises it.
+**Dead declarations removed (review 35).** `tbt_passive_port()` and
+`tbt_tunnel_flush()` had declarations but no definition or caller; they are gone.
+`tbt_http_skip_request_header()` is not dead: `host/test_http.c` exercises it.
 
 Unload always succeeds, in this order and no other: unregister `/proc` (no new writer can
 start) → `tbt_tunnel_shutdown()` stops listeners, cancels every work item, **detaches every

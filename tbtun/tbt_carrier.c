@@ -1320,8 +1320,9 @@ fail:
 
 /* HELLO: the first record on every carrier, in both directions. The body
  * carries the wire version, the sender's role, the session nonce, the two
- * payload ceilings and a zero flags byte (DESIGN.md §3.3). The header's
- * path_id is the carrier index. */
+ * payload ceilings and the last byte `profile | (gen << 2)`: profile in bits
+ * 1:0, carrier generation in bits 5:2, bits 7:6 zero (DESIGN.md §3.3). The
+ * header's path_id is the carrier index. */
 int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp)
 {
     u8 body[TBT_HELLO_BODY_LEN];

@@ -106,7 +106,6 @@ enum tbt_port_alloc_err
 };
 
 /* tbt_core.c */
-u32 tbt_passive_port(void);
 bool tbt_debug_loss(void);
 
 /* tbt_session.c */
@@ -119,7 +118,6 @@ void tbt_port_free(u16 port);
 int tbt_carrier_init(void);
 int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net);
 int tbt_tunnel_del(u64 id);
-void tbt_tunnel_flush(void);
 void tbt_tunnel_show(struct seq_file *m);
 void tbt_peers_show(struct seq_file *m);
 int tbt_action_apply(const struct tbt_cmd *cmd);
