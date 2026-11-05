@@ -38,13 +38,17 @@
  * the two must not drift apart. */
 static_assert(TBT_PAYLOAD_MAX <= U16_MAX, "payload length must fit u16");
 
-/* The send queue's hard bound. TBT_SQ_MAX is the capture backpressure line;
- * retransmit copies share the same queue and must never grow it without
- * bound. TBT_RX_RING_MAX is the *receive* delivery ring (64 MiB) and must
- * never be used here: it let the queue reach 13.8-27 MB and starved capture
- * (measured: Q7 baseline, txq_max 13.8 MB, app 1.31 Mbit/s).
- */
-#define TBT_TXQ_HARD_MAX (TBT_SQ_MAX + 4 * TBT_CHUNK_MAX)
+/* The send queue's bound is derived from the sender window (sess->txq_max):
+ * the queue only has to hold the frames the window admits while the carriers
+ * drain. The old fixed 96 KiB (TBT_SQ_MAX + 4 chunks) was calibrated when the
+ * window itself was 128 KiB; with a 1-8 MiB window it paused capture every
+ * 64 KiB and left the carriers idle between bursts. TBT_SQ_MAX remains the
+ * floor. The memory bound is window (retention) + txq_max (queue) + the
+ * carriers' own buffers, all bounded by the same window. TBT_RX_RING_MAX is
+ * the *receive* delivery ring (64 MiB) and must never be used here: it let
+ * the queue reach 13.8-27 MB and starved capture (measured: Q7 baseline,
+ * txq_max 13.8 MB, app 1.31 Mbit/s). */
+#define TBT_TXQ_MIN (TBT_SQ_MAX + 4 * TBT_CHUNK_MAX)
 
 static u64 tbt_now_ns(void)
 {
@@ -453,22 +457,6 @@ static void tbt_tx_retain_trim(struct tbt_session *sess, struct tbt_stream *st)
     }
 }
 
-/* How far this frame may be from the peer's delivered offset. Half the
- * receiver's reorder budget leaves room for the frames already inside the
- * carrier pipes; the floor keeps a tiny configured budget from deadlocking. */
-static u64 tbt_tx_window(struct tbt_session *sess)
-{
-    u64 cap = sess->tunnel->cfg.rx_reorder_bytes / TBT_TX_WINDOW_DIV;
-
-    return cap < 16384 ? 16384 : cap;
-}
-
-static bool tbt_tx_window_ok(struct tbt_stream *st, const struct tbt_frame *fr)
-{
-    return fr->hdr.seq + fr->len <=
-           READ_ONCE(st->tx_ack) + tbt_tx_window(st->sess);
-}
-
 /* The carrier's own TCP stack measures the path RTT from its ACKs; the FBK
  * estimate is the peer's view and can be stale or zero. Use the larger, or a
  * shaped 40 ms path looks like a 1 ms one and every delayed frame is declared
@@ -481,6 +469,134 @@ static u32 tbt_path_rtt_us(struct tbt_carrier *c)
     if (c->sk)
         srtt = READ_ONCE(tcp_sk(c->sk)->srtt_us) >> 3;
     return srtt > rtt ? srtt : rtt;
+}
+
+/* One carrier's BBR bandwidth sample, in bytes per second. This kernel does
+ * not keep a `delivery_rate` field on struct tcp_sock: tcp_rate_gen() stores
+ * the raw sample BBR's bw filter consumes, rate_delivered packets over
+ * rate_interval_us. Use that, rather than inventing a second estimator.
+ * rate_app_limited says the sender, not the path, limited the sample; it is
+ * still an upper bound on the rate, which is what a window needs. */
+static u64 tbt_car_delivery_bps(const struct tcp_sock *tp)
+{
+    u32 delivered = READ_ONCE(tp->rate_delivered);
+    u32 interval = READ_ONCE(tp->rate_interval_us);
+    u32 mss = READ_ONCE(tp->mss_cache);
+
+    if (!delivered || !interval || !mss)
+        return 0;
+    return (u64)delivered * mss * 1000000ULL / interval;
+}
+
+/* The target behind the auto window:
+ *
+ *   2 x max_rtt x sum(delivery_rate_i)
+ *
+ * This is not a second congestion controller: each carrier's TCP owns
+ * congestion control, and this value only decides how many
+ * delivered-but-unacked bytes the tunnel may keep in flight so the receiver's
+ * reorder tree can absorb cross-path reordering and the 10 ms feedback
+ * cadence. The slowest carrier's RTT, not the average, is what a frame on
+ * that carrier must survive; summing per-carrier BDPs would understate the
+ * headroom a reordered frame needs.
+ *
+ * The ceiling is the receiver's reorder budget, never a sum of congestion
+ * windows: a carrier TCP releases cwnd when its own ACK arrives, but those
+ * bytes stay in the receiver's reorder tree until the gap fills, so the
+ * tunnel lead can exceed sum(snd_cwnd) for a long time; and sum(snd_cwnd) can
+ * exceed the reorder budget and overflow the tree. snd_cwnd and snd_wnd are
+ * cross-checks only. */
+static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *rtt_out)
+{
+    u64 sum_rate = 0;
+    u32 rtt_max = 0;
+    int i;
+
+    for (i = 0; i < sess->n_car; i++)
+    {
+        struct tbt_carrier *c = READ_ONCE(sess->car[i]);
+        struct tcp_sock *tp;
+        u32 rtt;
+        u64 rate;
+
+        if (!c || !c->sk)
+            continue;
+        tp = tcp_sk(c->sk);
+        rtt = tbt_path_rtt_us(c);
+        rate = tbt_car_delivery_bps(tp);
+        if (!rtt || !rate)
+            continue;
+        sum_rate += rate;
+        if (rtt > rtt_max)
+            rtt_max = rtt;
+    }
+    if (rtt_out)
+        *rtt_out = rtt_max;
+    return 2 * (u64)rtt_max * sum_rate / 1000000ULL;
+}
+
+/* Effective sender window: how far a frame may be ahead of the peer's
+ * delivered offset. Explicit config wins; auto uses the BBR-derived BDP with
+ * a 1 MiB floor (a path with no sample yet still gets a window that can
+ * carry a 218 ms, 17 Mbit BDP). The peer's reorder budget is the ceiling:
+ * a frame beyond it is a stream kill, not a retransmit. */
+static u32 tbt_tx_window(struct tbt_session *sess)
+{
+    const struct tbt_cfg *cfg = &sess->tunnel->cfg;
+    u64 cap = cfg->rx_reorder_bytes;
+    u32 rtt = 0;
+    u64 win;
+
+    /* Always refresh the RTT gauge, so /proc shows the estimator input even
+     * when the window is configured explicitly. */
+    win = tbt_tx_bdp_window(sess, &rtt);
+    if (rtt)
+        sess->rtt_max_us = rtt;
+    if (cfg->tx_window_bytes)
+    {
+        win = cfg->tx_window_bytes;
+    }
+    else
+    {
+        if (win < TBT_TX_WINDOW_AUTO_FLOOR)
+            win = TBT_TX_WINDOW_AUTO_FLOOR;
+    }
+    if (win > cap)
+        win = cap;
+    /* Liveness floor: one maximum frame is 8 KiB, so a window below two
+     * frames can never pass a frame and would deadlock the stream. A reorder
+     * budget below 16 KiB is below one frame and cannot lower the window
+     * below it either. */
+    if (win < TBT_TX_WINDOW_MIN)
+        win = TBT_TX_WINDOW_MIN;
+    return win ? (u32)win : 1;
+}
+
+/* Recompute once per pump pass, not per frame. Grow at once; shrink only
+ * after a 25% overshoot, so one stale rate sample cannot collapse a window
+ * that is already filling the path. */
+static void tbt_tx_window_update(struct tbt_session *sess)
+{
+    u32 old = sess->tx_window;
+    u32 win = tbt_tx_window(sess);
+
+    if (!old || win > old || win + win / 4 < old)
+        sess->tx_window = win;
+    sess->txq_max = sess->tx_window + 8 * TBT_CHUNK_MAX;
+}
+
+/* Session birth: no carrier has a rate sample yet, so this lands on the 1 MiB
+ * floor (or the configured value) and gives capture and the carriers a bound
+ * before the first ACK. The pump recomputes it from then on. */
+void tbt_tx_window_init(struct tbt_session *sess)
+{
+    tbt_tx_window_update(sess);
+}
+
+static bool tbt_tx_window_ok(struct tbt_stream *st, const struct tbt_frame *fr)
+{
+    return fr->hdr.seq + fr->len <=
+           READ_ONCE(st->tx_ack) + READ_ONCE(st->sess->tx_window);
 }
 
 /* Retransmit timeout: four RTTs, floored at two feedback intervals so ordinary
@@ -697,7 +813,7 @@ static void tbt_tx_retx(struct tbt_session *sess, struct tbt_stream *st)
                  * data. Cap them at half the queue so the frames that carry a
                  * fresh uack always have room; a dead path and the hole above
                  * are exempt because they are the only ways forward. */
-                if (READ_ONCE(sess->tx_queued) + r->len > TBT_TXQ_HARD_MAX / 2)
+                if (READ_ONCE(sess->tx_queued) + r->len > sess->txq_max / 2)
                     continue;
             }
             else
@@ -784,7 +900,7 @@ retx_queued:
          * window-blocked new data: it is the frame that advances the window.
          * Head insertion and a bounded overage keep the queue finite while
          * letting the hole filler through first. */
-        if (READ_ONCE(sess->tx_queued) > TBT_TXQ_HARD_MAX)
+        if (READ_ONCE(sess->tx_queued) > sess->txq_max)
         {
             for (; i < n; i++)
                 cand[i]->pending = false;
@@ -813,7 +929,7 @@ retx_queued:
          * new frame can carry a fresh uack. Above the line the copy goes to
          * the tail instead. */
         tbt_tx_enqueue(sess, fr,
-                       READ_ONCE(sess->tx_queued) <= TBT_TXQ_HARD_MAX / 2);
+                       READ_ONCE(sess->tx_queued) <= sess->txq_max / 2);
         /* Counted when the carrier accepts the write, not here: a copy the
          * pump drops because the ack passed never reaches the wire, and
          * counting it made retx_ppm read 25% while wire/app was 1.01. The
@@ -981,7 +1097,7 @@ static void tbt_tx_inject_locked(struct tbt_session *sess, struct tbt_stream *st
         /* Called with tx_lock held: this is the authoritative bound. A hole
          * filler that cannot enter is not lost; the retransmit timer offers
          * it again on the next pump. */
-        if (sess->tx_queued + r->len > TBT_TXQ_HARD_MAX)
+        if (sess->tx_queued + r->len > sess->txq_max)
         {
             sess->inject_skip++;
             break;
@@ -1724,6 +1840,7 @@ int tbt_tx_pump(struct tbt_session *sess)
             sess->last_refill_ns = now;
         }
     }
+    tbt_tx_window_update(sess);
     nsnap = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
     tbt_tx_path_lost_drain(sess, snap, nsnap);
     for (i = 0; i < nsnap; i++)
@@ -2290,7 +2407,7 @@ ctl_fail:
                 sess->pump_hw_disarmed++;
         }
     }
-    if (READ_ONCE(sess->tx_queued) <= TBT_SQ_MAX / 2)
+    if (READ_ONCE(sess->tx_queued) <= sess->txq_max / 2)
     {
         struct tbt_stream *it;
         int i;
@@ -2340,7 +2457,7 @@ size_t tbt_tx_submit(struct tbt_stream *st, struct sk_buff *skb, unsigned int of
         u64 seq;
 
         spin_lock(&sess->tx_lock);
-        if (sess->tx_queued + chunk > TBT_TXQ_HARD_MAX)
+        if (sess->tx_queued + chunk > sess->txq_max)
         {
             spin_unlock(&sess->tx_lock);
             /* Backpressure, not a loss: the bytes stay in the public socket's
@@ -2378,7 +2495,7 @@ size_t tbt_tx_submit(struct tbt_stream *st, struct sk_buff *skb, unsigned int of
         r->hdr.sid_hi = (u8)(st->sid >> 32);
 
         spin_lock(&sess->tx_lock);
-        if (sess->tx_queued + chunk > TBT_TXQ_HARD_MAX)
+        if (sess->tx_queued + chunk > sess->txq_max)
         {
             spin_unlock(&sess->tx_lock);
             kfree(r);
@@ -2433,7 +2550,7 @@ size_t tbt_tx_submit(struct tbt_stream *st, struct sk_buff *skb, unsigned int of
             dup->ret = r;
             memcpy(dup->data, r->data, chunk);
             spin_lock(&sess->tx_lock);
-            if (sess->tx_queued + chunk > TBT_TXQ_HARD_MAX)
+            if (sess->tx_queued + chunk > sess->txq_max)
             {
                 spin_unlock(&sess->tx_lock);
                 kfree(dup);

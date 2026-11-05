@@ -369,7 +369,8 @@ void tbt_peers_show(struct seq_file *m)
             __be16 port = t->cfg.peer_port;
             u16 sport;
             u32 inflight, rx_lag_ppm = 0, retx_ppm = 0, rtt;
-            u64 uack, frames, bytes, dropped;
+            u32 cwnd_bytes = 0, snd_wnd = 0;
+            u64 uack, frames, bytes, dropped, delivery_bps = 0;
 
             if (!c)
                 continue;
@@ -397,13 +398,25 @@ void tbt_peers_show(struct seq_file *m)
 
                 if (sk)
                 {
-                    u32 srtt;
+                    struct tcp_sock *tp;
+                    u32 srtt, delivered, interval, mss;
 
                     sock_hold(sk);
-                    srtt = READ_ONCE(tcp_sk(sk)->srtt_us) >> 3;
+                    tp = tcp_sk(sk);
+                    srtt = READ_ONCE(tp->srtt_us) >> 3;
+                    delivered = READ_ONCE(tp->rate_delivered);
+                    interval = READ_ONCE(tp->rate_interval_us);
+                    mss = READ_ONCE(tp->mss_cache);
+                    cwnd_bytes = READ_ONCE(tp->snd_cwnd) * mss;
+                    snd_wnd = READ_ONCE(tp->snd_wnd);
                     sock_put(sk);
                     if (srtt > READ_ONCE(c->rtt_us))
                         rtt = srtt;
+                    /* The BBR rate sample the auto window is built from, so a
+                     * regression can show the input next to the window. */
+                    if (delivered && interval && mss)
+                        delivery_bps = (u64)delivered * mss * 1000000ULL /
+                                       interval;
                 }
             }
             frames = READ_ONCE(c->tx_frames);
@@ -427,12 +440,12 @@ void tbt_peers_show(struct seq_file *m)
                 retx_ppm = unique ? (u32)min_t(u64, copies * 1000000 / unique,
                                                1000000) : 0;
             }
-            seq_printf(m, "%llu %u %u %pI4:%u %llu %u %u %s %s %u %u %u %llu %llu %llu %u\n",
+            seq_printf(m, "%llu %u %u %pI4:%u %llu %u %u %s %s %u %u %u %llu %llu %llu %u %llu %u %u\n",
                        t->cfg.id, i, sport, &peer, ntohs(port), uack,
                        rtt, inflight, tbt_car_state_name(c->state),
                        tbt_profile_name(c->profile), READ_ONCE(c->recv_cnt),
                        rx_lag_ppm, READ_ONCE(c->rtt_min_us), frames, bytes,
-                       dropped, retx_ppm);
+                       dropped, retx_ppm, delivery_bps, cwnd_bytes, snd_wnd);
         }
     }
     mutex_unlock(&tbt_lock);
@@ -973,6 +986,9 @@ int tbt_session_create(struct tbt_tunnel *t)
     s->n_pending = 0;
     s->n_car = t->cfg.n + t->cfg.m;
     s->n_pri = t->cfg.n;
+    /* The sender window is a session property from birth: capture, the pump
+     * and the carrier socket sizing all read it before the first ACK. */
+    tbt_tx_window_init(s);
     /* Every session-owned work item is initialised at birth. cancel_work_sync()
      * on a work_struct that was never INIT_WORK'd is a WARNING and, once the
      * memory is reused, a call through a stale function pointer. */

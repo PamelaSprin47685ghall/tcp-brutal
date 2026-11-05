@@ -684,6 +684,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
             seq_printf(m, "tunnel %llu live rxq=%u rxp=%u txq=%u txp=%u "
                           "pub_state=%u pub_wmem=%u pub_una=%u pub_nxt=%u "
                           "car_wmem=%u car_nxt=%u car_copied=%u car_rcvbuf=%u "
+                          "car_sndbuf=%u "
                           "car_state=%u car_stop=%u car_ud=%u car_ready=%u "
                           "car_ws=%u txw_pend=%u txw_busy=%u\n",
                        t->cfg.id, s->snap_rx_queued, s->snap_rx_paused,
@@ -692,6 +693,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                        s->snap_pub_snd_una, s->snap_pub_snd_nxt,
                        s->snap_car_wmem, s->snap_car_rcv_nxt,
                        s->snap_car_copied, s->snap_car_rcvbuf,
+                       s->snap_car_sndbuf,
                        s->snap_car_state, s->snap_car_stopping,
                        s->snap_car_ud, s->snap_car_ready_ok, s->snap_car_ws_ok,
                        s->snap_txw_pending, s->snap_txw_busy);
@@ -770,7 +772,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "reorder_overflow=%llu reorder_max_depth=%u ooo_bytes=%u "
                               "ooo_frames=%u retain_bytes=%u tx_ack=%llu rx_ack=%llu "
                               "peer_paused=%u fb_delay_us=%u rto_us=%u una_stall_us=%u "
-                              "stall_paused_skips=%llu win_block=%llu win_resume=%llu\n",
+                              "stall_paused_skips=%llu stall_idle_skips=%llu "
+                              "stall_declared=%llu tx_window=%u rtt_max_us=%u "
+                              "txq_max=%u win_block=%llu win_resume=%llu\n",
                            t->cfg.id, n, up, tbt_stat_read(&s->carrier_lost),
                            tbt_stat_read(&s->carrier_replaced),
                            READ_ONCE(s->spare_activated),
@@ -796,6 +800,10 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            READ_ONCE(s->peer_paused), READ_ONCE(s->fb_delay_us),
                            READ_ONCE(s->rto_us), READ_ONCE(s->una_stall_us),
                            tbt_stat_read(&s->stall_paused_skips),
+                           tbt_stat_read(&s->stall_idle_skips),
+                           tbt_stat_read(&s->stall_declared),
+                           READ_ONCE(s->tx_window), READ_ONCE(s->rtt_max_us),
+                           READ_ONCE(s->txq_max),
                            READ_ONCE(s->win_block), READ_ONCE(s->win_resume));
                 /* Review 22: pinned control-frame lifetime. ctl_queued is the
                  * live control-queue depth; the other four are the retry,

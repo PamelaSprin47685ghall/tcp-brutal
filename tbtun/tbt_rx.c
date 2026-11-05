@@ -54,6 +54,7 @@ static void tbt_rx_pull_locked(struct tbt_stream *st)
             rb_erase_cached(&fr->rb, &st->rx_tree);
             st->rx_ooo_bytes -= fr->len;
             st->rx_ooo_frames--;
+            atomic64_sub(fr->len, &st->sess->rx_ooo_total);
             kfree(fr);
             continue;
         }
@@ -64,6 +65,7 @@ static void tbt_rx_pull_locked(struct tbt_stream *st)
             rb_erase_cached(&fr->rb, &st->rx_tree);
             st->rx_ooo_bytes -= fr->len;
             st->rx_ooo_frames--;
+            atomic64_sub(fr->len, &st->sess->rx_ooo_total);
             list_add_tail(&fr->list, &st->rx_q);
             st->rx_queued += fr->len;
             st->rx_next = fr->hdr.seq + fr->len;
@@ -78,6 +80,7 @@ static void tbt_rx_pull_locked(struct tbt_stream *st)
             rb_erase_cached(&fr->rb, &st->rx_tree);
             st->rx_ooo_bytes -= fr->len;
             st->rx_ooo_frames--;
+            atomic64_sub(fr->len, &st->sess->rx_ooo_total);
             fr->off += dup;
             fr->hdr.seq = st->rx_next;
             list_add_tail(&fr->list, &st->rx_q);
@@ -131,6 +134,7 @@ static bool tbt_rx_tree_insert_locked(struct tbt_stream *st, struct tbt_frame *f
     rb_insert_color_cached(&fr->rb, &st->rx_tree, leftmost);
     st->rx_ooo_bytes += fr->len;
     st->rx_ooo_frames++;
+    atomic64_add(fr->len, &st->sess->rx_ooo_total);
     if (st->rx_ooo_frames > st->rx_max_depth)
         st->rx_max_depth = st->rx_ooo_frames;
     return true;
@@ -247,7 +251,14 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
             st->hole_since_ns = ktime_get_ns();
         if (hdr->flags & TBT_FF_LOW_PRIO)
             atomic64_inc(&sess->dup_used);
-        if (st->rx_ooo_bytes > st->rx_limit)
+        /* Two bounds: one stream's tree, and the session's whole tree. The
+         * per-stream limit alone would let 128 streams hold 128 x the
+         * configured budget; the session total is what makes the memory
+         * bound explainable. A concurrent insert on another stream can
+         * overshoot by at most one frame before this check fires. */
+        if (st->rx_ooo_bytes > st->rx_limit ||
+            atomic64_read(&sess->rx_ooo_total) >
+                sess->tunnel->cfg.rx_reorder_bytes)
             kill = true;
     }
     /* The ack is the contiguous *received* offset: it bounds the sender's
@@ -968,6 +979,7 @@ void tbt_rx_free_queue(struct tbt_stream *st)
         rb_erase_cached(&fr->rb, &st->rx_tree);
         kfree(fr);
     }
+    atomic64_sub(st->rx_ooo_bytes, &st->sess->rx_ooo_total);
     st->rx_queued = 0;
     st->rx_ooo_bytes = 0;
     st->rx_ooo_frames = 0;
