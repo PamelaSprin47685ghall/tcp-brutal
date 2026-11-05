@@ -15,6 +15,11 @@
 # path is the probe-I technique: one htb class of 10 Mbit per source port, a
 # u32 filter per port, and netem on each class, all inside the guest.
 #
+# The wan scenario delays both directions of the carrier path: the egress
+# htb classes shape the carrier DATA, and an ingress redirect to ifb0 delays
+# the ACKs that arrive on eth0. One delay per direction is one carrier TCP
+# round trip.
+#
 # The transfer is host/tbt_burst.c's strict send-then-read phase: 40 MiB are
 # sent with blocking send() and then read back and compared, so a completed
 # row is also a byte-exactness result. Rates are sampled over a 2 s window
@@ -75,6 +80,7 @@ X_STALL=0 X_DEPTH=0 X_TXQ=0 X_RXQ=0 X_OOO=0 X_RET=0
 X_UP=0 X_NTOT=0
 C_T0=0 C_BUSY0=0 C_SYS0=0 C_SOFT0=0 KW0=0 T_START=0
 ctrl_seq=0
+WAN_INGRESS=0
 sampler_pid=
 memsampler_pid=
 echo_pid=
@@ -137,6 +143,7 @@ stat_max()
 PC_TUNNEL=1 PC_CARRIER=2 PC_SPORT=3 PC_UACK=5 PC_RTT=6 PC_INFLIGHT=7
 PC_STATE=8 PC_PROFILE=9 PC_FRAMES=13 PC_BYTES=14 PC_DROPPED=15 PC_RETX=16
 PC_RATE=0 PC_CWND=0 PC_SNDWND=0
+PC_WSCALE=0 PC_RCVWND=0 PC_CLAMP=0 PC_RMEM=0
 peer_cols_init()
 {
     # The header's first token is "#", which is not a column: the names start
@@ -154,6 +161,10 @@ peer_cols_init()
         delivery_rate_bps) PC_RATE=$_i ;;
         cwnd_bytes) PC_CWND=$_i ;;
         snd_wnd) PC_SNDWND=$_i ;;
+        wscale) PC_WSCALE=$_i ;;
+        rcv_wnd) PC_RCVWND=$_i ;;
+        window_clamp) PC_CLAMP=$_i ;;
+        rmem_alloc) PC_RMEM=$_i ;;
         state) PC_STATE=$_i ;;
         class) PC_PROFILE=$_i ;;
         tx_frames) PC_FRAMES=$_i ;;
@@ -402,12 +413,13 @@ tc_setup()
 }
 
 # --- tc: the WAN path, one boot ---------------------------------------------
-# The measured path was 218 ms RTT at 17 Mbit/s. The delay is split over the
-# two directions because both leave through eth0: the carrier's DATA matches
-# its port class and pays one delay, and the far side's ACKs match no filter,
-# so they take the default class and pay the other. htb on the port class is
-# the carrier rate; the default class only delays. The u32 filters are the
-# same per-port filters tc_setup() installs.
+# The measured path was 218 ms RTT at 17 Mbit/s. Each direction of the carrier
+# TCP pays one delay. Egress: the carrier's DATA matches its port class and
+# pays D; the far leg's ACKs to slirp match no filter and take the default
+# class, which also delays by D. Ingress: the ACKs slirp sends back arrive on
+# eth0 and are redirected to ifb0, which delays them by D. htb on the port
+# class is the carrier rate; the default class only delays. The u32 filters
+# are the same per-port filters tc_setup() installs.
 #
 # burst 32k: htb's default 1500-byte bucket drains in 0.7 ms at 17 Mbit, so a
 # 1 ms tick would cap the class near 12 Mbit. limit 10000: the default class
@@ -434,6 +446,68 @@ tc_setup_wan()
             match ip sport "$port" 0xffff flowid "1:$cls" || return 1
         i=$((i + 1))
     done
+    if wan_ingress_setup "$_d"; then
+        WAN_INGRESS=1
+    else
+        WAN_INGRESS=0
+        bench_note "wan: ingress shaping unavailable; only the egress direction is delayed"
+    fi
+    return 0
+}
+
+# --- tc: the return path, one ingress delay per direction -------------------
+# The carrier's ACKs arrive on eth0 ingress, where the root qdisc cannot reach
+# them. Redirect every IPv4 ingress packet to ifb0 and put the same one-way
+# delay on ifb0's egress: each carrier TCP packet then pays D leaving the
+# guest and D entering it, so its RTT is 2 x D.
+#
+# rp_filter must be off. The reverse route to 10.0.2.2 is via eth0; a packet
+# re-injected from ifb0 has no route back through ifb0, and strict reverse
+# path filtering would drop it as a martian.
+wan_ingress_clear()
+{
+    /bin/tc qdisc del dev eth0 ingress 2> /dev/null
+    [ -x /bin/ip ] && /bin/ip link del ifb0 2> /dev/null
+}
+wan_ingress_setup()
+{
+    _d=$1
+    if [ ! -x /bin/ip ]; then
+        bench_note "wan: no /bin/ip; pass the host /usr/bin/ip as a --bin asset"
+        return 1
+    fi
+    wan_ingress_clear
+    for _p in all default eth0; do
+        echo 0 > "/proc/sys/net/ipv4/conf/$_p/rp_filter" 2> /dev/null
+    done
+    rm -f /tmp/ifb.err
+    if ! /bin/ip link add ifb0 type ifb 2> /tmp/ifb.err; then
+        bench_note "wan: ip link add ifb0 failed: $(tr '\n' '|' < /tmp/ifb.err)"
+        return 1
+    fi
+    if ! /bin/ip link set ifb0 up 2>> /tmp/ifb.err; then
+        bench_note "wan: ip link set ifb0 up failed: $(tr '\n' '|' < /tmp/ifb.err)"
+        wan_ingress_clear
+        return 1
+    fi
+    echo 0 > /proc/sys/net/ipv4/conf/ifb0/rp_filter 2> /dev/null
+    if ! /bin/tc qdisc add dev ifb0 root handle 1: netem delay "${_d}ms" limit 10000; then
+        bench_note "wan: netem on ifb0 failed"
+        wan_ingress_clear
+        return 1
+    fi
+    if ! /bin/tc qdisc add dev eth0 handle ffff: ingress; then
+        bench_note "wan: ingress qdisc on eth0 failed"
+        wan_ingress_clear
+        return 1
+    fi
+    if ! /bin/tc filter add dev eth0 parent ffff: protocol ip u32 \
+        match u32 0 0 action mirred egress redirect dev ifb0; then
+        bench_note "wan: mirred filter on eth0 failed"
+        wan_ingress_clear
+        return 1
+    fi
+    return 0
 }
 tc_class_bytes()
 {
@@ -583,16 +657,18 @@ xfer()
     X_DEPTH=$(tunnel_stat 2 reorder_max_depth)
     : "${X_DUP:=0}" "${X_INFL:=0}" "${X_HD:=0}" "${X_HR:=0}" "${X_HU:=0}" "${X_STALL:=0}" "${X_DEPTH:=0}"
 
+    # /tmp/q.log fields: 1 uptime, then the 13 q_sample values in order:
+    # infl txq rxq ooo ret pw cw isum win drate cwnd sndw over.
     X_TXQ=$(q_max 3)
     X_RXQ=$(q_max 4)
     X_OOO=$(q_max 5)
     X_RET=$(q_max 6)
-    X_INFL_SUM=$(q_max 8)
-    X_WIN=$(q_max 9)
-    X_DELIV=$(q_max 10)
-    X_CWND=$(q_max 11)
-    X_SNDW=$(q_max 12)
-    X_OVER=$(q_max 13)
+    X_INFL_SUM=$(q_max 9)
+    X_WIN=$(q_max 10)
+    X_DELIV=$(q_max 11)
+    X_CWND=$(q_max 12)
+    X_SNDW=$(q_max 13)
+    X_OVER=$(q_max 14)
 
     # Per-carrier evidence, near side (the shaped direction).
     # delivery_rate_bps, cwnd_bytes and snd_wnd exist only after the sender
@@ -602,7 +678,9 @@ xfer()
         -v p_state="$PC_STATE" -v p_prof="$PC_PROFILE" -v p_bytes="$PC_BYTES" \
         -v p_frames="$PC_FRAMES" -v p_drop="$PC_DROPPED" -v p_retx="$PC_RETX" \
         -v p_inf="$PC_INFLIGHT" -v p_rate="$PC_RATE" -v p_cwnd="$PC_CWND" \
-        -v p_wnd="$PC_SNDWND" -v p_rtt="$PC_RTT" '
+        -v p_wnd="$PC_SNDWND" -v p_rtt="$PC_RTT" \
+        -v p_ws="$PC_WSCALE" -v p_rcv="$PC_RCVWND" -v p_clamp="$PC_CLAMP" \
+        -v p_rmem="$PC_RMEM" '
         $1 == 2 {
             printf "BENCHCAR row=%s carrier=%s sport=%s state=%s profile=%s bytes=%s frames=%s dropped=%s retx_ppm=%s inflight=%s rtt_us=%s",
                    row, $p_car, $p_sport, $p_state, $p_prof, $p_bytes, $p_frames,
@@ -610,6 +688,10 @@ xfer()
             if (p_rate) printf " delivery_rate_bps=%s", $p_rate
             if (p_cwnd) printf " cwnd_bytes=%s", $p_cwnd
             if (p_wnd) printf " snd_wnd=%s", $p_wnd
+            if (p_ws) printf " wscale=%s", $p_ws
+            if (p_rcv) printf " rcv_wnd=%s", $p_rcv
+            if (p_clamp) printf " window_clamp=%s", $p_clamp
+            if (p_rmem) printf " rmem_alloc=%s", $p_rmem
             printf "\n"
         }' "$PEERS"
     return 0
@@ -968,7 +1050,7 @@ bench_stats()
 bench_wan()
 {
     tc_setup_wan || fatal "wan tc setup failed (htb + netem + u32)"
-    bench_note "wan: ${P_wan_mbit}mbit per carrier port class, ${P_wan_delay}ms netem per direction"
+    bench_note "wan: ${P_wan_mbit}mbit per carrier port class, ${P_wan_delay}ms netem per direction, ingress_ifb=$WAN_INGRESS"
     _tw=${P_tx_window:-0}
     for _n in $(echo "$P_nlist" | tr ',' ' '); do
         # RTO is SRTT + 4*RTTVAR with a 200 ms floor, so ~300 ms on this
@@ -980,6 +1062,8 @@ bench_wan()
         if xfer "$_n" 0 "$P_profile" "$P_dup" "$P_mib" "wan-n$_n" \
             "$_x"; then
             _win=$(tunnel_stat 2 tx_window)
+            _modbdp=$(tunnel_stat 2 bdp_bytes)
+            _kx=$(tunnel_stat 2 k_x100)
             _rttmean=$(tunnel_stat 2 rtt_mean_us)
             _rttvar=$(tunnel_stat 2 rttvar_us)
             _rttmaxc3=$(tunnel_stat 2 rtt_max_us)
@@ -1019,6 +1103,9 @@ bench_wan()
             fi
             emit_xfer_row "wan-n$_n" wan_mbit="$P_wan_mbit" \
                 wan_delay_us="$((P_wan_delay * 1000))" rx_mbit="$X_RX_MBIT" \
+                wan_ingress="$WAN_INGRESS" \
+                bdp_bytes="${_modbdp:-0}" k_x100="${_kx:-0}" \
+                rx_reorder_bytes="$P_rx_reorder" \
                 inflight_sum="$X_INFL_SUM" tx_ack="$(tunnel_stat 2 tx_ack)" \
                 carrier_lost="$(tunnel_stat 2 lost)" \
                 win_block="$(tunnel_stat 2 win_block)" \
@@ -1034,6 +1121,7 @@ bench_wan()
             bench_row "wan-n$_n" n="$_n" m=0 profile="$P_profile" mib="$P_mib" rc=1
         fi
     done
+    wan_ingress_clear
     tc_clear
 }
 
@@ -1178,7 +1266,8 @@ if [ -r /hostfwd.txt ]; then
 fi
 
 /bin/busybox ip link set lo up 2> /dev/null || fatal "cannot bring loopback up"
-for _m in failover net_failover virtio_net sch_htb sch_netem cls_u32 sch_tbf; do
+for _m in failover net_failover virtio_net sch_htb sch_netem cls_u32 sch_tbf \
+    act_gact act_mirred ifb sch_ingress; do
     [ -f "/$_m.ko" ] && insmod "/$_m.ko" 2> /dev/null
 done
 /bin/busybox ip link show eth0 > /dev/null 2>&1 || fatal "no eth0 (run without --no-net)"
@@ -1193,11 +1282,15 @@ echo 67108864 > /proc/sys/net/core/rmem_max 2> /dev/null
 echo 67108864 > /proc/sys/net/core/wmem_max 2> /dev/null
 echo "4096 262144 67108864" > /proc/sys/net/ipv4/tcp_rmem 2> /dev/null
 echo "4096 262144 67108864" > /proc/sys/net/ipv4/tcp_wmem 2> /dev/null
+bench_note "sysctl tcp_window_scaling=$(cat /proc/sys/net/ipv4/tcp_window_scaling 2> /dev/null) rmem_max=$(cat /proc/sys/net/core/rmem_max 2> /dev/null) wmem_max=$(cat /proc/sys/net/core/wmem_max 2> /dev/null) tcp_rmem=$(tr ' ' '|' < /proc/sys/net/ipv4/tcp_rmem 2> /dev/null) tcp_wmem=$(tr ' ' '|' < /proc/sys/net/ipv4/tcp_wmem 2> /dev/null)"
 
 insmod /tbtun.ko debug=0 debug_loss=1 || fatal "insmod tbtun.ko"
 [ -e "$CFG" ] || fatal "$CFG missing after load"
 echo "ports $PORTBLOCK_LO-$((PORTBLOCK_LO + PORTBLOCK_MOD - 1))" > "$PORTS" || fatal "ports directive rejected"
 peer_cols_init
+# The peers header is the contract; print the resolved indices so a column
+# inserted by a later module cannot silently turn one field into another.
+bench_note "peers columns tunnel=$PC_TUNNEL carrier=$PC_CARRIER sport=$PC_SPORT uack=$PC_UACK rtt=$PC_RTT inflight=$PC_INFLIGHT state=$PC_STATE class=$PC_PROFILE frames=$PC_FRAMES bytes=$PC_BYTES dropped=$PC_DROPPED retx=$PC_RETX rate=$PC_RATE cwnd=$PC_CWND snd_wnd=$PC_SNDWND wscale=$PC_WSCALE rcv_wnd=$PC_RCVWND clamp=$PC_CLAMP rmem=$PC_RMEM"
 
 # The echo peer (tunnel target and direct latency peer) and the control sink.
 /bin/tbt_echo "$ECHO_PORT" echo &
