@@ -977,13 +977,14 @@ retx_queued:
         fr->retx_src = srcs[i];
         refcount_inc(&st->refs);
         memcpy(fr->data, r->data, r->len);
-        /* Head insertion is what lets a hole filler overtake window-blocked
-         * new data, but when the queue is already over half full it does the
-         * opposite: the copies take the space the new frames need, and only a
-         * new frame can carry a fresh uack. Above the line the copy goes to
-         * the tail instead. */
-        tbt_tx_enqueue(sess, fr,
-                       READ_ONCE(sess->tx_queued) <= sess->txq_max / 2);
+        /* A retransmit copy always goes to the head. The old "over half the
+         * queue -> tail" rule assumed the copies compete with new frames for
+         * a small queue; with a large txq and a small carrier window it put
+         * the only frame that can advance the ack behind megabytes of new
+         * data, so it was never written before the receiver's budget expired
+         * (measured: retx_evident=255, retx_cand=6, retx_frames=0, far
+         * holes_unrecoverable=1). */
+        tbt_tx_enqueue(sess, fr, true);
         /* Counted when the carrier accepts the write, not here: a copy the
          * pump drops because the ack passed never reaches the wire, and
          * counting it made retx_ppm read 25% while wire/app was 1.01. The
