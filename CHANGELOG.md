@@ -50,6 +50,15 @@ full-suite pass.
 
 ### Fixed
 
+- **Zero-length control frames and the carrier pump:** `tbt_pump_work()` only ran the
+  pump when `tx_queued` was non-zero, but `tx_queued` counts payload bytes and a pinned
+  HELLO/OPEN/FIN/RST has `body_len=0`. After a stream was killed its DATA frames were
+  purged and a lone RST no longer woke the 2 ms timer; it waited for an unrelated
+  `sk_write_space` that a quiet carrier never produces. The timer now also tests
+  `ctl_queued`, the pinned-frame count (paired on enqueue, write, failure and obsolete
+  drop; zeroed with the queue). Measured: `near.rst_eagain` went from `rst_seen=0`
+  (record already in `wire`, `ctl_lost=0`) to `rst_seen=1` with `ctl_lost=0` and
+  `ctl_queued=0`; near 14/14, three consecutive runs.
 - **Review 23:** `hole_budget_ms=0` and `rx_reorder_bytes=0` are refused with `EINVAL`
   instead of creating a tunnel that dies on its first hole or reordered frame. The
   accepted ranges are now `1..60000` and `1..268435456`; omitted keys keep their

@@ -837,6 +837,19 @@ armed so the socket layer's own wakeups cooperate. The old 64 KiB admission line
 shaped 10 Mbit carrier idle for 840 ms per burst; the measured single-carrier control rose
 from 2.7–3.2 Mbit/s to 5.5–6.5 Mbit/s after the change (probe I).
 
+**Zero-length control frames and the pump wake.** `tx_queued` counts payload bytes, so a
+pinned HELLO/OPEN/FIN/RST (`body_len` zero) adds nothing to it. A killed stream's DATA
+frames are purged and only its RST remains; the 2 ms `w_pump` timer then tested
+`tx_queued == 0` and skipped the pump, so the RST waited for an unrelated
+`sk_write_space` that a quiet carrier never produces. `tbt_pump_work()` also tests
+`ctl_queued`, the pinned-frame count: `tbt_tx_control_pinned()` increments it on enqueue,
+`tbt_tx_ctl_written()`/`tbt_tx_ctl_fail()`/the pump's obsolete drop decrement it, and
+`tbt_tx_free_queue()` zeroes it with the queue. The timer now runs the pump for a
+control frame with no payload; the frame is written on its first retry after the
+carrier's memory frees. Measured with `near.rst_eagain` (raw n=1, 512 KiB backlog):
+the RST reached the far in the same 30 s window that previously reported
+`rst_seen=0` with the record already in `wire`; `ctl_lost=0`, `ctl_queued=0`.
+
 **RTT.** The sender maintains `rtt_min_us` and an EWMA (`(7*old + new)/8`) per path from
 two sources: the FBK's `rtt_us` (the receiver's TCP SRTT of the carrier), and, when a path's
 ack advances to a byte inside a retained frame last sent on that path, the elapsed time

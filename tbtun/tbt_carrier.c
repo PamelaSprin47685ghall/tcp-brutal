@@ -155,7 +155,15 @@ static void tbt_car_state_change(struct sock *sk)
  * once the pump has handed every frame to TCP and the queue is empty, an ACK
  * that frees memory does not call sk_write_space. A short timer, armed only
  * while frames are queued and a carrier is full, is the wake that exists; the
- * write-space callback stays as the cheap fast path. */
+ * write-space callback stays as the cheap fast path.
+ *
+ * `tx_queued` counts payload bytes, so a pinned HELLO/OPEN/FIN/RST (body_len
+ * zero) adds nothing to it.  A RST left alone in the queue after the stream's
+ * data frames were purged therefore did not wake this timer at all: the frame
+ * sat until some unrelated sk_write_space, which a quiet carrier never
+ * produces.  `ctl_queued` is the pinned-frame count, incremented in
+ * tbt_tx_control_pinned() and decremented on write/failure/drop (and zeroed
+ * with the whole queue in tbt_tx_free_queue), so it is the missing term. */
 static void tbt_pump_work(struct work_struct *w)
 {
     struct tbt_carrier *c = container_of(to_delayed_work(w), struct tbt_carrier, w_pump);
@@ -166,7 +174,7 @@ static void tbt_pump_work(struct work_struct *w)
     if (atomic_read(&c->stopping))
         return;
     sess->pump_hw_fired++;
-    if (READ_ONCE(sess->tx_queued))
+    if (READ_ONCE(sess->tx_queued) || READ_ONCE(sess->ctl_queued))
         tbt_tx_pump(sess);
 }
 
