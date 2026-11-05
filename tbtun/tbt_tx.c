@@ -488,42 +488,32 @@ static u64 tbt_car_delivery_bps(const struct tcp_sock *tp)
     return (u64)delivered * mss * 1000000ULL / interval;
 }
 
-/* The byte budget behind the auto window:
+/* The byte budget behind the auto window: W = k x B.
  *
- *   (mean_srtt + 4 x RTTVAR + one_way + feedback_delay) x sum(delivery_rate_i)
+ * B is the aggregate BDP, sum(rate_i x (srtt_i + feedback_delay)): the bytes
+ * an average carrier can have in flight while one round trip plus the tunnel
+ * ack elapses. rate_i and srtt_i are each carrier's own TCP BBR estimator
+ * (rate_delivered/rate_interval_us, srtt_us); this kernel has no
+ * tcp_sock.delivery_rate field, and tcp_rate_gen publishes exactly the sample
+ * BBR's bandwidth filter consumes. The feedback delay is the measured uack
+ * lag after the carrier TCP ack, floored at the 10 ms FBK cadence. The rate
+ * is an EWMA by construction, and a carrier with no sample contributes
+ * nothing, so a new carrier cannot distort the aggregate.
  *
- * which is k x BDP with k = (RTO + one_way + feedback_delay) / mean_srtt.
- * The loss clock starts at the frame's send, so a repair cannot arrive
- * before RTO + one_way; the window must cover that whole interval or the
- * pipe idles waiting for the repair. The receiver's peak reorder occupancy
- * is then the whole window (the last BDP is still in flight and arrives
- * before the repair), so the capacity identity is R >= W = k x BDP, not
- * (k-1) x BDP.
+ * k is the loss-decision time in units of the mean RTT: k = RTO / mean_srtt,
+ * clamped to 2..5. The RTO is SRTT + 4 x RTTVAR (the same shape TCP uses),
+ * floored at 200 ms, so the jitter is absorbed by k rather than by using the
+ * slowest carrier's absolute RTT as the expected demand. This is a target,
+ * not a bound: the ceiling is the receiver's reorder budget R (or a WINDOW
+ * credit), never sum(2 x BDP_i), a single mean sample, or
+ * sum(snd_cwnd)/sum(snd_wnd). A carrier TCP releases cwnd when its own ACK
+ * arrives while those bytes stay in the receiver's tree, and a cwnd sum can
+ * exceed the tree and overflow it.
  *
- * This is not a second congestion controller: each carrier's TCP owns
- * congestion control, and this value only decides how many
- * delivered-but-unacked bytes the tunnel may keep in flight so the receiver's
- * reorder tree can absorb cross-path reordering and the 10 ms feedback
- * cadence.
- *
- * The sender splits deterministically; what a frame actually experiences is
- * the path's SRTT plus its jitter. TCP's own loss test is
- * SRTT + 4 x RTTVAR, so the same two terms form the byte budget: one RTO of
- * data at the aggregate delivery rate. mean_srtt is the delivery-weighted
- * mean across carriers (the RTT an average byte sees), not the slowest
- * carrier's RTT: a slow carrier is a jitter sample, not the expected demand.
- * RTTVAR is the largest per-carrier mdev_us, i.e. the spread that reordering
- * must absorb. The feedback delay is added because the ack that frees the
- * window crosses the FBK cadence and the peer's delivery.
- *
- * This is a target, not a bound. k is 2-5 for the measured paths, and the
- * 1 MiB floor dominates at 218 ms / 17 Mbit; a heavy tail needs a high
- * percentile of the spread, which only widens the target. The hard ceiling
- * is the receiver's reorder budget (or a WINDOW credit), never
- * sum(2 x BDP_i), a single mean sample, or sum(snd_cwnd)/sum(snd_wnd): a
- * carrier TCP releases cwnd when its own ACK arrives while those bytes stay
- * in the receiver's tree, and a cwnd sum can exceed the tree and overflow
- * it. */
+ * The capacity identity is R >= W = k x B: the loss clock starts when a frame
+ * is sent, so the receiver's peak reorder occupancy is the whole window (the
+ * last BDP is still in flight and arrives before the repair). A configuration
+ * with R < k x B must lower k or raise R; the sender never exceeds R. */
 static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
                              u32 *var_out, u32 *max_out)
 {
@@ -564,18 +554,24 @@ static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
     if (!sum_rate)
         return 0;
     {
+        u32 mean = (u32)(sum_rtt_rate / sum_rate);
         u64 fb = READ_ONCE(sess->fb_delay_us);
-        u64 mean = sum_rtt_rate / sum_rate;
-        /* k x BDP, with k = (RTO + one-way + feedback) / SRTT. The one-way
-         * term is the retransmit's travel time: the loss clock starts when
-         * the frame was sent, and the repair cannot arrive before one more
-         * one-way delay. Counting it makes the peak tree occupancy equal the
-         * window, so R >= W is the capacity identity (not (k-1) x BDP: the
-         * last BDP is still in flight and arrives before the repair). */
-        u64 rtt_eff = mean + mean / 2 + (u64)4 * var_max +
-                      max_t(u64, fb, (u64)TBT_FBK_INTERVAL_MS * 1000);
+        u64 rtt_eff;
+        u64 bdp;
+        u64 rto;
+        u64 k;
 
-        return rtt_eff * sum_rate / 1000000ULL;
+        fb = max_t(u64, fb, (u64)TBT_FBK_INTERVAL_MS * 1000);
+        rtt_eff = (u64)mean + fb;
+        bdp = rtt_eff * sum_rate / 1000000ULL;
+        sess->bdp_bytes = bdp > U32_MAX ? U32_MAX : (u32)bdp;
+        /* The same RTO shape as tbt_tx_rto_ns(), without a stream's
+         * bootstrap state: the worst carrier sets it, floored at 200 ms. */
+        rto = max_t(u64, (u64)rtt_max + 4ULL * var_max, 200000ULL);
+        k = rto / mean;
+        k = clamp_t(u64, k, 2, 5);
+        sess->k_x100 = (u32)(k * 100);
+        return k * bdp;
     }
 }
 
@@ -625,8 +621,17 @@ static void tbt_tx_window_update(struct tbt_session *sess)
 {
     u32 old = sess->tx_window;
     u32 win = tbt_tx_window(sess);
+    u64 now = tbt_now_ns();
+    bool recent_loss = sess->last_loss_ns &&
+                       now - sess->last_loss_ns < NSEC_PER_SEC;
 
-    if (!old || win > old || win + win / 4 < old)
+    /* Grow at once: the anti-self-lock rule is that a full window with no
+     * loss for 1 s must reach k x B, and growing at once dominates the
+     * 25%/s ramp. Shrink only after a 25% overshoot and only when no loss
+     * was seen in the last second: a hole is evidence about the path, not a
+     * reason to collapse the window over and over. The 1 MiB floor lives in
+     * tbt_tx_window(). */
+    if (!old || win > old || (!recent_loss && win + win / 4 < old))
         sess->tx_window = win;
     sess->txq_max = sess->tx_window + 8 * TBT_CHUNK_MAX;
 }
@@ -928,6 +933,7 @@ retx_queued:
             r->pending = true;
             srcs[n] = src;
             cand[n++] = r;
+            sess->last_loss_ns = now;
         }
         if (n == ARRAY_SIZE(cand))
             break;
@@ -1464,7 +1470,9 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
          * feedback, so the sender waits at least 2.5 RTOs. This is the same
          * 2-3 x RTO rule the receiver's hole budget follows, applied where the
          * RTO is actually known. */
-        u64 budget = (u64)sess->tunnel->cfg.hole_budget_ms * NSEC_PER_MSEC;
+        u64 budget = sess->tunnel->cfg.hole_budget_ms
+                         ? (u64)sess->tunnel->cfg.hole_budget_ms * NSEC_PER_MSEC
+                         : NSEC_PER_SEC;
         u64 floor = 5 * tbt_tx_rto_ns(sess, st) / 2;
 
         if (budget < floor)

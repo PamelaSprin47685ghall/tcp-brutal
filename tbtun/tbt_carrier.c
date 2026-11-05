@@ -305,6 +305,27 @@ static void tbt_car_poll_work(struct work_struct *w)
         u32 wmem = READ_ONCE(sk->sk_wmem_queued);
         bool progress = una != c->last_una;
         bool paused = tbt_car_paused(sess);
+        /* Explicit carrier_stall_ms wins; auto is 3 x this carrier's RTO
+         * (SRTT + 4 x RTTVAR, floored at 200 ms), itself floored at 3 s so a
+         * brief scheduling delay cannot retire a healthy carrier. */
+        u64 stall_ns;
+        {
+            u32 ms = sess->tunnel->cfg.carrier_stall_ms;
+
+            if (ms)
+            {
+                stall_ns = (u64)ms * NSEC_PER_MSEC;
+            }
+            else
+            {
+                u32 srtt = READ_ONCE(tp->srtt_us) >> 3;
+                u32 mdev = READ_ONCE(tp->mdev_us);
+                u64 rto = max_t(u64, (u64)srtt + 4ULL * mdev, 200000ULL);
+
+                stall_ns = max_t(u64, 3 * rto * NSEC_PER_USEC,
+                                 3000ULL * NSEC_PER_MSEC);
+            }
+        }
         /* Start of the current "unacked bytes, no progress, window open"
          * interval; c->last_una_ns carries it between polls. */
         u64 stall_since_ns = c->last_una_ns;
@@ -361,8 +382,7 @@ static void tbt_car_poll_work(struct work_struct *w)
         {
             if (!stall_since_ns)
                 stall_since_ns = now;
-            else if (now - stall_since_ns >
-                     (u64)sess->tunnel->cfg.carrier_stall_ms * NSEC_PER_MSEC)
+            else if (now - stall_since_ns > stall_ns)
             {
                 atomic64_inc(&sess->stall_declared);
                 if (debug >= 2)

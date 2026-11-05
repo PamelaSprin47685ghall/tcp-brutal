@@ -31,6 +31,23 @@
 #include "tbtun.h"
 #include "tbt_rec.h"
 
+/* The receiver's hole budget. Explicit config wins; auto is k x SRTT with
+ * k's upper bound (5), floored at 1 s so the sender's RTO plus one one-way
+ * always fits before the stream is reset (DESIGN.md §5.4). rtt_mean_us is 0
+ * until the pump has a sample, so a fresh session gets the 1 s floor. */
+static u64 tbt_rx_hole_budget_ns(struct tbt_session *sess)
+{
+    u32 ms = sess->tunnel->cfg.hole_budget_ms;
+    u64 us;
+
+    if (ms)
+        return (u64)ms * NSEC_PER_MSEC;
+    us = 5ULL * READ_ONCE(sess->rtt_mean_us);
+    if (us < 1000000ULL)
+        us = 1000000ULL;
+    return us * NSEC_PER_USEC;
+}
+
 /* Move every tree frame that continues the contiguous run into rx_q. Called
  * with rx_lock held. */
 static void tbt_rx_pull_locked(struct tbt_stream *st)
@@ -927,8 +944,7 @@ void tbt_rx_check_hole(struct tbt_stream *st)
     budget_bytes = sess->tunnel->cfg.rx_reorder_bytes;
     if (budget_bytes < TBT_HOLE_BUDGET_BYTES)
         budget_bytes = TBT_HOLE_BUDGET_BYTES;
-    if (now - st->hole_since_ns >
-            (u64)sess->tunnel->cfg.hole_budget_ms * NSEC_PER_MSEC ||
+    if (now - st->hole_since_ns > tbt_rx_hole_budget_ns(sess) ||
         st->rx_ooo_bytes > budget_bytes)
     {
         age = now - st->hole_since_ns;

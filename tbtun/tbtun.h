@@ -491,6 +491,9 @@ struct tbt_session
      * window cannot be throttled by the old 64 KiB queue. */
     u32 tx_window;
     u32 txq_max;
+    u32 bdp_bytes;    /* aggregate BDP B = sum(rate_i x (srtt_i + fb)) */
+    u32 k_x100;       /* window multiplier k = RTO / mean_srtt, x100 */
+    u64 last_loss_ns; /* last retransmit queued: hold the window for 1 s */
     u32 rtt_mean_us;  /* delivery-weighted mean SRTT: the window's base */
     u32 rttvar_us;    /* largest carrier mdev_us: the window's jitter term */
     u32 rtt_max_us;   /* largest carrier SRTT, a distribution fact */
