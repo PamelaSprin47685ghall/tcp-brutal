@@ -1982,8 +1982,11 @@ lockdown `none`. Headers are **not** installed at `/lib/modules/$(uname -r)/buil
 machine (Manjaro ships them as `linux72-headers`); `make` fails until they are installed —
 state this in the build docs, do not work around it.
 
-`system_dfl_wq` is used for replacement, drain and pending work; that workqueue does not
-exist in 6.1, so **7.2.9 is the build target and 6.1 is not supported**.
+`system_dfl_wq` is used for replacement, drain and pending work; that workqueue exists
+from 6.5. 6.1 builds through the `TBT_WQ` shim (`system_unbound_wq`, unbound and
+concurrency-managed; the module's works are short and sleepable, so the difference does
+not change behavior). 7.2.9 is the measured target; 6.1.172 is the `.65` build target.
+A kernel older than 6.1 fails at compile time with an explicit `#error`.
 
 Symbols the module needs and why they are safe:
 

@@ -842,7 +842,7 @@ void tbt_stream_detach_from_session(struct tbt_stream *st)
      * would never run and the tombstone (and its socket) would stay forever.
      * The tombstone deadline still decides when the stream may be unlinked. */
     if (detached && !READ_ONCE(sess->closing))
-        mod_delayed_work(system_dfl_wq, &sess->w_reap,
+        mod_delayed_work(TBT_WQ, &sess->w_reap,
                          msecs_to_jiffies(TBT_REAP_INTERVAL_MS));
 }
 
@@ -901,7 +901,7 @@ void tbt_stream_kill(struct tbt_stream *st, u8 reason)
 
     /* w_kill can outlive the hash reference; it owns this reference. */
     refcount_inc(&st->refs);
-    if (!queue_work(system_dfl_wq, &st->w_kill))
+    if (!queue_work(TBT_WQ, &st->w_kill))
         tbt_stream_put(st);
 }
 
@@ -972,7 +972,7 @@ out:
     }
 
     if (again && !READ_ONCE(sess->closing))
-        mod_delayed_work(system_dfl_wq, &sess->w_reap,
+        mod_delayed_work(TBT_WQ, &sess->w_reap,
                          msecs_to_jiffies(TBT_REAP_INTERVAL_MS));
 }
 

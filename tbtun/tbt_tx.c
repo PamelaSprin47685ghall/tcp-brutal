@@ -1755,7 +1755,7 @@ static void tbt_tx_ctl_arm(struct tbt_session *sess, struct tbt_carrier *pref,
             c = it;
     }
     if (c)
-        mod_delayed_work(system_dfl_wq, &c->w_pump, msecs_to_jiffies(ms));
+        mod_delayed_work(TBT_WQ, &c->w_pump, msecs_to_jiffies(ms));
 }
 
 /* Put a pinned frame back on the queue after a transient failure. The bound is
@@ -2380,7 +2380,7 @@ ctl_fail:
                  * far side a moment to process it before the next stream's
                  * OPEN (which is inserted at the queue head) can race it. */
                 if (!READ_ONCE(sess->far_sid) && READ_ONCE(sess->n_pending))
-                    queue_delayed_work(system_dfl_wq, &sess->w_pending,
+                    queue_delayed_work(TBT_WQ, &sess->w_pending,
                                        msecs_to_jiffies(1));
                 break;
             case TBT_F_DATA:
@@ -2763,9 +2763,9 @@ void tbt_fbk_kick(struct tbt_session *sess, bool now)
      * with the data-path works let it slip hundreds of milliseconds under
      * load, which starves the retransmit timer's view of the ack. */
     if (now)
-        mod_delayed_work(system_dfl_wq, &sess->w_fbk, 0);
+        mod_delayed_work(TBT_WQ, &sess->w_fbk, 0);
     else if (!work_pending(&sess->w_fbk.work))
-        queue_delayed_work(system_dfl_wq, &sess->w_fbk,
+        queue_delayed_work(TBT_WQ, &sess->w_fbk,
                            msecs_to_jiffies(TBT_FBK_INTERVAL_MS));
 }
 
@@ -2844,7 +2844,7 @@ void tbt_fbk_work(struct work_struct *w)
         tbt_stream_put(snap[i]);
     tbt_tx_pump(sess);
     if (alive && !READ_ONCE(sess->closing))
-        queue_delayed_work(system_dfl_wq, &sess->w_fbk,
+        queue_delayed_work(TBT_WQ, &sess->w_fbk,
                            msecs_to_jiffies(TBT_FBK_INTERVAL_MS));
 }
 

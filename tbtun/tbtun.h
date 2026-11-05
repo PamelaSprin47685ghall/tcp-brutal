@@ -28,6 +28,21 @@
 
 /* Wire constants, /proc names and the version live in the shared header. */
 #include "tbt_uapi.h"
+#include <linux/version.h>
+
+/* system_dfl_wq exists from 6.5. Its documented semantics are "unbound, not
+ * concurrency managed, all queued works run immediately while max_active
+ * allows". 6.1's system_unbound_wq is unbound and concurrency managed; the
+ * module's works are short and sleepable, so the difference does not change
+ * behavior. Keep one name so a 6.1 build needs no scattered guards. */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+#error "tbtun needs Linux 6.1 or newer (README, DESIGN §2)"
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+#define TBT_WQ system_dfl_wq
+#else
+#define TBT_WQ system_unbound_wq
+#endif
 
 /* Read a statistics counter (DESIGN.md §8.7) as the u64 the renderers print
  * with %llu. Every read of an atomic64_t counter goes through this or

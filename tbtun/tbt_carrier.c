@@ -1726,7 +1726,7 @@ int tbt_carrier_open_target(struct tbt_stream *st)
     if (start)
     {
         refcount_inc(&st->refs);
-        if (!queue_work(system_dfl_wq, &st->w_target))
+        if (!queue_work(TBT_WQ, &st->w_target))
             tbt_stream_put(st);
     }
     return 0;

@@ -149,7 +149,7 @@ static void __exit tbtun_exit(void)
      * started before the teardown, then for the module-text RCU callbacks.
      * flush_workqueue(system_wq) is not a barrier: it does not stop new
      * scheduling, does not flush delayed work, and does not cover
-     * system_dfl_wq (w_kill, w_fbk, w_pump). */
+     * TBT_WQ (w_kill, w_fbk, w_pump; system_dfl_wq on 6.5+, system_unbound_wq on 6.1). */
     synchronize_rcu();
     rcu_barrier();
     pr_info("tbtun: unloaded\n");

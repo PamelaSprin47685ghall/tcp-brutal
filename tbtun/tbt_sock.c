@@ -409,10 +409,10 @@ static void tbt_kill_work(struct work_struct *w)
 
     if (!READ_ONCE(sess->closing))
     {
-        mod_delayed_work(system_dfl_wq, &sess->w_reap,
+        mod_delayed_work(TBT_WQ, &sess->w_reap,
                          msecs_to_jiffies(TBT_REAP_INTERVAL_MS));
         if (sess->tunnel && sess->tunnel->cfg.role == TBT_ROLE_NEAR)
-            queue_delayed_work(system_dfl_wq, &sess->w_pending, 0);
+            queue_delayed_work(TBT_WQ, &sess->w_pending, 0);
     }
 
     tbt_stream_put(st); /* the reference taken in tbt_stream_kill() */
@@ -647,7 +647,7 @@ void tbt_pending_work(struct work_struct *w)
             list_add(&p->node, &sess->pending);
             sess->n_pending++;
             spin_unlock(&sess->lock);
-            queue_delayed_work(system_dfl_wq, &sess->w_pending,
+            queue_delayed_work(TBT_WQ, &sess->w_pending,
                                msecs_to_jiffies(1));
             return;
         }
@@ -717,7 +717,7 @@ int tbt_stream_start(struct tbt_session *sess, struct socket *sock)
     sess->n_pending++;
     spin_unlock(&sess->lock);
 
-    queue_delayed_work(system_dfl_wq, &sess->w_pending, 0);
+    queue_delayed_work(TBT_WQ, &sess->w_pending, 0);
     return 0; /* ownership transferred; accept loop must not release */
 }
 
