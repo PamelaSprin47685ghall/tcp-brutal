@@ -1,6 +1,6 @@
 # tbtun v6 接口冻结（T0）
 
-状态：**冻结**，2026-11-06。基线 `master 0db5166`。
+状态：**冻结，T0 已验收**（Main 裁决，2026-11-06；验收基线 `7105507`，745 行）。本文件后续只追加裁决/跟踪，ABI 未变。基线 `master 0db5166`。
 权威来源：B（`fec-v6`）的 40B header / 控制帧提案，经用户批准为 T0 冻结基线；本文件是 T0 的唯一接口契约。
 变更控制：任何 wire 字段、偏移、类型、CRC 顺序的变更，必须 B 与 integrator 书面同意，并 bump `TBT_FEC_CONV`（当前 `0x1001`）。只改文档、不改 ABI 的编辑不 bump。
 范围：T0 只写文档，不改 `tbtun/` 产品代码。本文中的头文件签名是 B/C/D 的实现契约，不是已落地的代码。
@@ -26,7 +26,7 @@
 | key 来源 | 每 session 随机 256-bit；HELLO v6 body 明文下发；`crypto_key=` 预共享覆盖 | C |
 | 配置键 | `fec=` `mode=` `n=` `m=` `w=` `carriers=` `crypto=` `crypto_key=` | B/C |
 | 流数 | v6 一隧道一 app stream；header 无 sid；多流留 v7 | B |
-| 合并顺序 | A（w-window）→ B（w-fec-v6）→ C（w-crypto）→ D（w-fec）→ E（w-hnd0）→ F（integration） | F |
+| 合并顺序 | A（w-window）→ B（w-fec-v6）→ C（w-crypto）→ D（w-sclc）→ E（w-hnd0）→ F（integration/T7） | F |
 
 ---
 
@@ -381,7 +381,7 @@ FEC payload（DATA/PARITY）      加密
 
 ### 2.3 key 来源与 HELLO v6 body
 
-**与目标文字的唯一偏差，需 Main 确认（见 §9 Q1）**：目标合同写「FEC_CFG 明文下发 key」；B 的冻结基线把 key 放 HELLO 层，FEC_CFG 固定 32B，不新增 `0x36`。T0 按 B 的基线冻结。
+**已裁决（§9.1）**：目标合同写「FEC_CFG 明文下发 key」；B 的冻结基线把 key 放 HELLO 层，FEC_CFG 固定 32B，不新增 `0x36`。Main 维持 B 方案，记录为等价偏差（每会话明文 key、只混淆不认证）；B/C 不改 ABI。
 
 HELLO v6 body（`type=0x22`，`conv=0x1001`，固定 66 B）：
 
@@ -547,13 +547,14 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 | A `wan-overhaul2` | `w-window` | `/home/kunweiz/tbtun-worktrees/window` | T1 N=1 retx/控制面 | `tbt_tx.c`、`tbt_rx.c`、`tbt_carrier.c`（parser/poll/stall）、`tbt_procfs.c` 计数、QEMU A–K/adversarial |
 | B `fec-v6` | `w-fec-v6` | `/home/kunweiz/tbtun-worktrees/fec-v6` | T2 FEC v6 + 256 carriers + 中间码 | `tbt_fec.h`、`tbt_fec.c`、`tbt_fec_tx.c`、`tbt_fec_rx.c`、`tbt_uapi.h`、`tbt_parse.*`、`tbt_procfs.c`、`tbt_session.c`、`tbt_carrier.c` 256 缩放、`tbt_tx.c`/`tbt_rx.c` 的 FEC 钩子 |
 | C `crypto-v6` | `w-crypto` | `/home/kunweiz/tbtun-worktrees/crypto` | T3 ChaCha8 | `tbt_crypto.h/.c`、`host/test_crypto.c`、`tbt_fec.c` 的 body hook、HELLO key、`tbt_parse.*` 的 crypto 键、`tbt_procfs.c` |
-| D `fec-core2` | `w-fec` | `/home/kunweiz/tbtun-worktrees/fec` | T4 SC-LDPC | `review/fec-prototype/sc_ldpc/*`、`tbt_sclDPC.c`/`tbt_fec_ops` 实现；不先写内核 |
+| D `fec-core2` | `w-sclc`（当前 worktree `w-fec`，合并前统一命名） | `/home/kunweiz/tbtun-worktrees/fec` | T4 SC-LDPC | `review/fec-prototype/sc_ldpc/*`、`tbt_sclDPC.c`/`tbt_fec_ops` 实现；不先写内核 |
 | E `wan-deploy` | `w-hnd0` | `/home/kunweiz/tbtun-worktrees/hnd0` | T5/T6 HND0 | 部署/回滚脚本、HND0 证据、`review/hnd0-v6/`；产品码只在必要时改 |
 | F `goal-integrator` | `master` | `/home/kunweiz/Desktop/vibe/tcp-brutal` | T0/T7 | 本文档、合并顺序、冲突裁决、最终门禁 |
 
 ### 5.2 冲突文件与合并顺序
 
-**总顺序：A → B → C → D → E → F（T7）。** 每一步只在 master 上合并前一等的 head；不允许跨序合并。
+**合并列车（用户裁决）：`w-window` → `w-fec-v6` → `w-crypto` → `w-sclc` → `w-hnd0` → master（F/T7）。**
+每一步只在 master 上合并前一等的 head；不允许跨序合并。D 的当前 worktree 仍是 `w-fec`，合并前改名为 `w-sclc` 或由 F 记录等价映射；不得因此改变 D 的提交内容。
 
 | 文件 | 冲突方 | 裁决 |
 |---|---|---|
@@ -705,14 +706,22 @@ trap 'flock -u 9' EXIT
 
 ---
 
-## 9. 未决接口问题（需 Main/B 确认）
+## 9. 接口裁决与跟踪
 
-1. **ChaCha8 key 的载体与目标文字冲突。** 目标合同写「FEC_CFG 明文下发 256-bit key」；B 的冻结基线把 key 放 HELLO v6 body（FEC_CFG 固定 32B，不新增 `0x36`）。T0 按 B 冻结。若 Main 坚持 FEC_CFG，则 FEC_CFG 变 64B（32B 参数 + 32B key），B 必须改 ABI；T0 不建议。**需 Main 在 T3 前确认。**
-2. **grouped 的条带化与 `block_id` 语义。** T0 冻结 `group=carrier/(n+m)`、`group=seq%G`、`block_id` 为组内 generation；B 的 host grouped 实现若采用连续块而非 `seq%G`，必须在 G2 前对齐；不改 wire 字段，只改映射。
-3. **`TBT_MAX_CARRIERS_LIMIT=256` 的旧代码拆分。** B 必须一次改完 `path_ack_mask`/FBK/WINDOW/path_gen/path_end 到 `TBT_LEGACY_MAX_CARRIERS=16`；A 的 T1 分支不得把新常量用于旧 mask。合并时 F 检查。
-4. **`mode=sc-ldpc` 的 `w`/L 配置面。** T0 只冻结 `w=0→256`、显式 256/512、L=8；D 若需要 `L=`/`block=` 新键，先与 B/F 对齐，不静默加。
-5. **末包 `payload_len < S`。** T0 冻结「最后一个 DATA 用 `flags.LAST` + 实际 `payload_len`」；B 的 RLNC host API 仍按 S 字节零填充编码。若 B 的实现要求 DATA 恒 S，需要把末包长度移到 FIN body，这会改控制帧 ABI；G2 前定。
-6. **`w=`/`carriers=` 的 auto 渲染。** T0 冻结「0 解析为 auto，读回渲染 effective 值」；这会改变旧测试的逐字节期望，B 需更新 `host/test_parse.c` 的 golden 行。
+### 9.1 已裁决：ChaCha8 key 载体（原 Q1）
+
+**维持 B 的 HELLO v6 body 方案。** FEC_CFG 保持 32B，不新增 `0x36`；goal 文本里的「FEC_CFG 明文下发」按「HELLO v6 body 明文下发」记录为**等价偏差**（都是每会话明文 key、只混淆不认证）。B/C 不改 ABI。
+
+### 9.2 跟踪项（负责人 / 截止门 / 验收）
+
+| # | 项 | 负责人 | 截止门 | 验收 |
+|---:|---|---|---|---|
+| 1 | grouped 条带化与 `block_id` 映射：T0 冻结 `group=carrier/(n+m)`、`group=seq%G`、`block_id` 为组内 generation | B 确认 | G2 前 | B 在 `tbt_fec.c`/host 测试中按此实现；若改连续块，只改映射、不改 wire 字段，并书面回复 F |
+| 2 | 旧 16 槽拆分：`path_ack_mask`/FBK/WINDOW/path_gen/path_end 改用 `TBT_LEGACY_MAX_CARRIERS=16`；`TBT_MAX_CARRIERS_LIMIT=256` 只给载体槽/新 FEC | B 实现；A 合入时检查；F 裁决 | G2 / A 合并时 | `n+m=256` 不截断；`fec=off` 的 `n+m>16` 被拒；旧 wire 常量不变 |
+| 3 | SC-LDPC `w`/L 配置面：T0 冻结 `w=0→256`、显式 256/512、L=8；不新增键 | D 与 B/F 对齐 | G4 前 | D 的 `tbt_fec_ops` 实现接受该配置；若要 `L=`/`block=` 新键，先书面改 ABI |
+| 4 | 末包 `payload_len < S`：T0 冻结 `flags.LAST` + 实际 `payload_len`；RLNC 内部按 S 零填充 | B 定稿 | G2 前 | B 的 host 测试覆盖末包 1..S；若改 FIN body 方案，先改控制帧 ABI |
+| 5 | `w=`/`carriers=` auto 渲染：0 解析为 auto，读回渲染 effective 值 | B 更新 golden | G2 前 | `host/test_parse.c` 的 golden 行同步；`cat config > backup; cat backup > config` 仍逐字节回环 |
+| 6 | 合并列车：`w-window` → `w-fec-v6` → `w-crypto` → `w-sclc` → `w-hnd0` → master | F | 全程 | 不合并直到门禁；D 的 `w-fec` worktree 在合并前映射到 `w-sclc` |
 
 ---
 
