@@ -1,7 +1,8 @@
 # tbtun
 
 一个 Linux 内核 TCP 隧道：把 TCP 流分散到 `N + M` 个独立的五元组上，
-让运营商"每流限速"的额度按 `N + M` 份生效；设计上以预测而非重传来跨过载体停顿。
+让运营商"每流限速"的额度按 `N + M` 份生效；载体停顿时，用重放环里的真实字节补洞，
+而不是让一次停顿杀死整条流。
 
 ## 工作原理
 
@@ -19,7 +20,7 @@
 按流分散带来的收益仍然存在。
 
 当前代码实现了 [DESIGN.md](DESIGN.md) 的 C1–C8：`/proc` 控制面、监听器与远端、
-备用载体与带 RETIRE 握手的载体替换、带重放环的重复发送、带 PREDICT/CANCEL 的空洞预测，
+备用载体与带 RETIRE 握手的载体替换、带重放环的重复发送、保留字节重放的空洞修复，
 以及 `http-kal`/`http-kal-drip` 容器。载体字节流里的空洞由重放环补齐，而不是终止整条流。
 超过 `hole_budget_ms` 或 `rx_reorder_bytes` 仍补不上的空洞计入 `holes_unrecoverable`；
 重排溢出导致的重置计入 `gaps_total`；这两种情况都会重置流。
@@ -49,8 +50,8 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0/0/1`，发布候选）。线上版本是
-`TBT_WIRE_VERSION=1` 与 `TBT_CONV=0x0004`，二者都与模块版本独立。
+`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.0.1`，发布候选）。线上版本是
+`TBT_WIRE_VERSION=1` 与 `TBT_CONV=0x0005`，二者都与模块版本独立。
 `scripts/mkdkmsconf.sh` 派生
 `PACKAGE_VERSION="<major>.<minor>.<patch>"`；`dkms.conf` 是生成物，由
 `make dkms.conf` / `make dkms-tarball` 写出，不要手改。
@@ -118,7 +119,7 @@ cat /proc/net/tbtun/tunnels
 | `tunnels` | 每条隧道一行：角色、状态、listen/peer/target、n、m、streams |
 | `peers` | 每个载体槽一行，共 16 列（见下） |
 | `ports` | 全局源端口段，以及它是否已经配置 |
-| `stats` | 第一行是 `debug_loss=<0\|1>`，然后是空洞与流总数，再往后是每条隧道的计数器（`txq`、`rxq`、空洞、预测、重复、载体替换） |
+| `stats` | 第一行是 `debug_loss=<0\|1>`，然后是空洞与流总数，再往后是每条隧道的计数器（`txq`、`rxq`、空洞、重复、重传、载体替换） |
 | `http` | 仅调试（`debug>=2`）：近端 0 号载体最近一次真正发到线上的 HTTP 请求头块快照，用来对照解析器检查容器；不是实时流 |
 
 除非加载时带 `debug_loss=1`，否则 `drop_ppm` 会被拒绝并返回 `EPERM`；
@@ -146,7 +147,7 @@ cat /proc/net/tbtun/tunnels
 | `drip_ms` | `1000` | `http-kal-drip` 空闲时每字节的间隔，毫秒 |
 | `replay` | `8388608` | 重放环字节数 |
 | `tunnel_rate` | `0` | 字节/秒上限，`0` 表示不设 |
-| `max_inflate` | `2.000` | 预测膨胀上限 |
+| `max_inflate` | `2.000` | 重复膨胀上限 |
 | `hole_budget_ms` | `500` | 空洞允许存在的时间，毫秒，`1..60000`；`0` 会被拒绝 |
 | `rx_reorder_bytes` | `262144` | 接收端重排缓冲字节数，`1..268435456`；`0` 会被拒绝 |
 | `tx_retain_bytes` | `0` | 发送端保留字节数，`0` 表示不限 |
@@ -163,7 +164,7 @@ cat /proc/net/tbtun/tunnels
 低 64 位，并在规范输出中左补零。`role=near` 时它是本端放进 HELLO 的 nonce；
 `role=far` 时它是远端要求近端使用的 nonce，每一条 HELLO 都必须匹配。未配置
 `nonce=` 的 far 会采纳第一条 HELLO 的 nonce（首连信任，TOFU），谁赢得首个
-连接谁就定义了会话。nonce 在 HELLO 里明文传输：它是会话标识与反混淆 token，
+连接谁就定义了会话，并且不打印任何告警。nonce 在 HELLO 里明文传输：它是会话标识与反混淆 token，
 不是密码；链路不可信时套 WireGuard。64 个 hex 字符（256 位）会被拒绝：
 HELLO 的 nonce 字段只有 128 位。
 
