@@ -1,0 +1,5 @@
+stamp,scenario,row,carrier,sport,state,profile,bytes,frames,dropped,retx_ppm,inflight
+20261106T001021,throughput,n4,0,41000,up,raw,17052108,3975,0,3391,0
+20261106T001021,throughput,n4,1,41001,up,raw,18931644,4099,0,2624,0
+20261106T001021,throughput,n4,2,41002,up,raw,16982395,3914,0,1943,0
+20261106T001021,throughput,n4,3,41003,up,raw,32077460,5808,0,512,0
