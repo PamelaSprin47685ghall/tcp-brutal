@@ -43,12 +43,14 @@ parser side (23, 25, 27, 29 and the key removal in 35); they do not cover `tbt_p
 
 ## Final status (0.0.1, 2026-11-06)
 
-**Tree.** `9f5bfda`; `984198f` adds only the evidence under `review/final/`. The
-module built from this tree is
+**Tree.** `b57b438`; `a9d7c47` adds only the evidence under `review/final/`,
+`review/final-qemu/`, `review/final-bench/` and `review/dkms-qemu/`. The module
+built from this tree is
 `sha256 0b8f0006a7a10fe33e6e35e927aaf916047e142528bc32729ed04826fdccdb63`
 (the same hash in every 2026-11-06 bench and adversarial row quoted below).
 Evidence: `review/final/` (host, QEMU A–K, adversarial), `review/final-qemu/`
-(run logs) and `review/final-bench/` (throughput, flush, writer, DKMS). Line
+(run logs), `review/final-bench/` (throughput, flush, writer) and
+`review/dkms-qemu/` (DKMS install/load/unload on a clean guest kernel). Line
 numbers are final-tree line numbers; the per-finding sections that follow keep the
 original analysis and the "Fixed (…)" rationale.
 
@@ -95,7 +97,13 @@ grammar, not behavioural coverage; `make check` still reports 0 failures.
 
 The QEMU A–K probes and the adversarial groups are separate suites; their final
 results are archived under `review/final/`, `review/final-qemu/` and
-`review/final-bench/`. The host suites
+`review/final-bench/`. On this tree: QEMU A–K is 11 PASS / 0 FAIL / 0 SKIP
+(164.7 s); adversarial is 78 PASS / 0 FAIL / 0 SKIP (229.8 s, all 15 groups plus
+the crash repro); `pub.churn` is 10000/10000 with `retried=0`; `pub.writer`
+stays blocked in `write()` (`errno=0 eagain=0 blocked=1 child_state=running`,
+no `EAGAIN`) and `flush` returns the memory; DKMS install/load/unload/uninstall
+is 38 steps / 39 checks / 0 failures on a clean guest kernel
+(`review/dkms-qemu/`). The host suites
 exercise `tbt_parse.c`, `tbt_rec.c`, `tbt_proto.c`, `tbt_http.c` and the stream
 control unit only. Findings 1–10 are in kernel object lifetime, locking and
 accounting code: the host suites cannot reach them, so their evidence is the
