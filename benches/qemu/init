@@ -1068,7 +1068,10 @@ bench_wan()
             _rttvar=$(tunnel_stat 2 rttvar_us)
             _rttmaxc3=$(tunnel_stat 2 rtt_max_us)
             _wkv= _rkv= _ckv=
-            [ -n "$_win" ] && _wkv="tx_window=$X_WIN"
+            # The steady value from the c3 line, not the 250 ms sampler's
+            # peak: a session that started at the 1 MiB bootstrap would
+            # otherwise report 1 MiB forever. Keep the peak as a second key.
+            [ -n "$_win" ] && _wkv="tx_window=$_win tx_window_peak=$X_WIN"
             [ -n "$_rttmean" ] && _rkv="rtt_mean_us=$_rttmean rttvar_us=$_rttvar rtt_max_us=$_rttmaxc3"
             # The row-end peers snapshot: the module reports rtt_us=0 while
             # the stream is busy and only fills it in when the carrier goes
