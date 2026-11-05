@@ -6,6 +6,8 @@
 （commit `040304a`）一致。原始日志 `review/microbench/logs/chacha-ref-*.log`。
 2026-11-06 测得。
 
+§8 是 crypto-v6 移植的跨机读数，§9 是 w-crypto 33238ca 优化版的 HND0 复核。
+
 ## 0. 结论
 
 1. **参考实现下 ChaCha8 仍明显快于软件 AES，但倍数从手写版的 10× 降到 4.8×。**
@@ -18,6 +20,10 @@
 4. **两个测试向量逐字节通过**：TC1（128-bit 全零 key/IV，8 轮）与 256-bit 生成向量
    （key `00..1f`、IV `a0..a7`、counter 0）在三台机器的每次运行前都打印
    `SELFTEST tc1 PASS` / `SELFTEST v256 PASS`，失败即中止。
+5. **优化版（w-crypto 33238ca）在 HND0 的 8 KiB 记录上达到 ≤25%。** 8 遍干净测量：
+   最好 **635.0 MB/s**（3.46 c/B）→ 1G 单核 **19.7%**，中位 505.6 MB/s → **24.7%**；
+   旧 crypto-v6 是 458.9 MB/s / 27.2%。64 KiB 两口径 19.5%/21.6%；1 KiB 中位
+   25.4%，略超线。KAT 55/55。详见 §9。
 
 ## 1. 实现与向量
 
@@ -164,6 +170,80 @@ streaming、in-place、counter wrap、invalid args、wipe）。bench 自带 TC1 
 - ChaCha8 仍是 HND0 上最省的软件档：1G 下 27% 单核，ChaCha20 要 45%。
 - .74 的 ChaCha8 占 57%，ChaCha20 占 89%：这台 1.8 GHz 老 x86 上只有 8 轮才划算。
 - **.65 仍然跳过**：跑前 load 5.25、`coreyolo` 占 341% CPU（cpu7），按避让规则不跑。
+
+## 9. 优化版 ChaCha8（w-crypto 33238ca）HND0 复核
+
+2026-11-06 在 HND0 上复核 `w-crypto` 的优化版。源码用
+`git archive 33238ca -- Makefile tbtun host` 取出；`tbt_crypto.c`、`tbt_crypto.h`、
+`bench_crypto.c`、`test_crypto.c` 的 sha256 与本地 `git show 33238ca:...` 逐字节
+一致。`tbt_crypto.c` 自 43bbbff 起只加了 `tbt_crypto_pair_init/wipe`，热路径未变。
+原始日志 `logs/chacha8-33238ca-hnd0.log`。
+
+### 9.1 KAT
+
+`cc -std=gnu99 -O2 -Wall -Wextra -Werror` 构建 `host/test_crypto`，
+`nice -n 19 taskset -c 0` 运行：**55/55 PASS**，`all checks passed`。覆盖 TC1、
+256-bit 生成向量、RFC 8439、counter carry/wrap、streaming、xor_at、in-place、
+invalid args、wipe、body counter `(seq<<8)|(parity<<7)`、HELLO v6 字段/截断/off、
+key 解析、per-direction nonce、pair init/wipe、session 双向。失败即非零退出，
+不出性能数字。
+
+### 9.2 方法
+
+- `cc -std=gnu99 -O3 -Wall -Wextra -Werror` 构建 `host/bench_crypto`；
+  1/8/64 KiB 热缓冲、in-place XOR、每次调用 counter 0；
+  `--seconds 0.3 --mhz 2200`，每格是程序内 3 个样本的中位数。
+- `nice -n 19 taskset -c 0`，完整矩阵跑 8 遍；下表跨 8 遍取最大值与中位数。
+- HND0 是 KVM 客户机（QEMU Virtual CPU 2.5+，2 vCPU，SSE2-only，2200 MHz 标签）。
+  8 遍期间 `ps` 没有竞争进程，cpu0 的 steal 计数从 7272 只走到 7273（客户机侧
+  steal ≈ 0），但 MB/s 仍有约 2 倍波动；这是宿主机共享物理核/频率造成的，不是
+  客户机调度。8 KiB 的最大值在三遍里是 634.7/634.9/635.0，可重复，所以用最大值
+  作为“无争用能力”，中位数作为“典型争用值”。
+- 07:02–07:09 的 75dcf9f/43bbbff 试跑与另一 worker 的 `bench_old`/`bench_new`
+  （cpu0）和内核编译（cpu1）重叠，数字作废；§8.3 已记录。
+
+### 9.3 结果（MB/s，max / 8 遍中位）
+
+| rounds | 1 KiB | 8 KiB | 64 KiB |
+|---:|---:|---:|---:|
+| 8 | 609.0 / 492.9 | **635.0 / 505.6** | 642.0 / 577.7 |
+| 12 | 474.4 / 394.5 | 498.7 / 425.9 | 497.9 / 443.6 |
+| 20 | 320.5 / 293.0 | 320.5 / 309.5 | 320.6 / 258.6 |
+
+8 轮最大值的 c/B（2200 MHz 标签折算）：1 KiB 3.61、8 KiB 3.46、64 KiB 3.43；
+12 轮 4.64/4.41/4.42；20 轮 6.86。标签频率不等于宿主机实际频率，所以 c/B 只作
+标尺，1G 占比与频率无关。8 轮 8 KiB 的 8 遍范围是 311.1–635.0 MB/s。
+
+### 9.4 1 Gbit/s（125 MB/s）单核占比
+
+| 机 | 口径 | ChaCha8 8 KiB | 占比 | ChaCha8 64 KiB | 占比 |
+|---|---|---:|---:|---:|---:|
+| HND0 | 8 遍最大 | 635.0 MB/s | **19.7%** | 642.0 | 19.5% |
+| HND0 | 8 遍中位 | 505.6 MB/s | **24.7%** | 577.7 | 21.6% |
+| HND0 | 旧 crypto-v6（0615b3d，单遍） | 458.9 MB/s | 27.2% | 419.0 | 29.8% |
+
+**8 KiB 记录口径：是，≤25%。** 最好 19.7%，8 遍中位 24.7%（只剩 0.3 个百分点
+余量）；64 KiB 两个口径都低于线；1 KiB 中位 492.9 MB/s = 25.4%，略高于线，
+最大值 20.5%。旧版 458.9/27.2% → 新版 635.0/19.7%：吞吐 +38%，单核占比 −7.5
+个百分点；按中位算是 +10% / −2.5 个百分点。
+
+### 9.5 读数
+
+- 优化版与 Bernstein 参考实现（4 MiB，648.6 MB/s，19.3%）只差 2%。两者口径
+  不同（4 MiB vs 8 KiB 热缓冲、每次调用 init+wipe），只能作量级对照。
+- 优化点（显式展开 4 个 double round、8 字节 XOR、64-bit counter）在 HND0 的
+  SSE2-only vCPU 上有效：同机同 bench 口径，旧 crypto-v6 最好 458.9，新 635.0。
+- HND0 的宿主机争用无法从客户机内消除：8 KiB 的 max 比中位高 26%，1 KiB 高
+  24%，64 KiB 高 11%。只看单遍容易得到 300–450 MB/s 的假低值；报告“是否 ≤25%”
+  时必须同时给最大值与中位。
+- 与 Ryzen 的 1207–1221 MB/s / 4.01–4.06 c/B / 10.2–10.4% 比：那是同一份代码在
+  安静主机上的数字；HND0 的 3.46 c/B 看似更低，是因为 2200 MHz 只是标签频率，
+  不能跨机比 c/B，只能比 1G 占比。
+- .65 本轮只做避让检查、未跑：load 0.71（1 分钟），但 mediamtx/ffmpeg 生产服务
+  在跑、有 3 个登录会话。.65 的 33238ca 数字见 §8.1（另一 worker 的窗口），不是
+  本节的 HND0 数据。
+- 全程未装包、未加载模块、未改网络/服务；HND0 的 `/tmp` 临时目录已删，本地未产生
+  临时文件。
 
 ## 7. 复现
 

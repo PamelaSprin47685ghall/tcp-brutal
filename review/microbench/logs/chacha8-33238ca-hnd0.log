@@ -1,0 +1,313 @@
+# HND0 w-crypto 33238ca ChaCha8 KAT+bench root@45.11.1.62  2026-11-06T07:10:43+08:00
+# commit 33238ca; tree = git archive 33238ca -- Makefile tbtun host
+# host: KVM guest, QEMU Virtual CPU version 2.5+, 2 vCPU, 2200 MHz label
+# run: nice -n 19 taskset -c 0 ./host/test_crypto
+#      nice -n 19 taskset -c 0 ./host/bench_crypto --seconds 0.3 --mhz 2200  (8 passes)
+# no package install, no module load, no network/service change
+
+## env / build / source hashes
+## env
+Thu Nov  5 11:10:43 PM UTC 2026
+ 23:10:43 up 1 day, 15:59,  1 user,  load average: 0.63, 0.84, 0.66
+2
+model name	: QEMU Virtual CPU version 2.5+
+cpu MHz		: 2199.996
+cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+## src sha256
+01c3d7abb08990c57f4abe8e87e9b246e4577ee0b413615b5d931e50c69917f3  tbtun/tbt_crypto.c
+ea2b9d3014c4d1c9fbb646bc33915954d1b83af88b762f8048a34044fdb4b447  tbtun/tbt_crypto.h
+ae567ee35da29054d5712ae95f78f5c0e6d5598787560d16646aa6f54f9f2631  host/bench_crypto.c
+30423cbc9ebe81f08acecfc819b6d9cb18ba95d99123db8e1e4456a53249225b  host/test_crypto.c
+## build test -O2
+TEST_BUILD_OK
+## build bench -O3
+BENCH_BUILD_OK
+
+## KAT (55 checks)
+PASS TC1 ChaCha8 128-bit zero key, blocks 0-1
+PASS ChaCha8 256-bit zero key, block 0
+PASS ChaCha12 256-bit zero key, block 0
+PASS ChaCha20 256-bit zero key, block 0
+PASS ChaCha8 key 00..1f, nonce a0..a7, 128 bytes
+PASS RFC 8439 2.3.2 ChaCha20 block, counter 1
+PASS RFC 8439 2.4.2 ChaCha20 encryption
+PASS counter start: counter 1 matches block 1 of counter 0
+PASS counter carry: 0xffffffff + 1 == 0x100000000
+PASS streaming: 7 chunks match one-shot
+PASS streaming: a split inside a block is buffered
+PASS xor_at: block 3 matches the stream
+PASS xor_at: counter is unchanged
+PASS xor_at: the buffered block is undisturbed
+PASS counter wrap: post-wrap call rejected
+PASS counter wrap: 65-byte call fails after first block
+PASS invalid args: 20 rejection checks
+PASS wipe: context zeroed
+PASS body: 8192-byte round trip
+PASS body: counter is (seq << 8) | (parity << 7)
+PASS body: parity separates the keystream
+PASS body: seq separates the keystream
+PASS body: oversized payload rejected
+PASS body: seq overflow rejected
+PASS body: crypto=off is a no-op
+PASS body: retransmit is identical
+PASS hello: crypto/key_id/reserved offsets
+PASS hello: nonce at +26 and key at +34
+PASS hello: parse recovers the fields
+PASS hello: key_id=0 zeroes the key field
+PASS hello: nonzero reserved rejected
+PASS hello: unknown key_id rejected
+PASS hello: truncated body rejected
+PASS hello: crypto=off is zero and parses
+PASS hello: key_id/key_in_hello mismatch rejected
+PASS key: a configured crypto_key= wins
+PASS key: the HELLO key is adopted
+PASS key: local key plus HELLO key is a conflict
+PASS key: no key at all is rejected
+PASS key: crypto=off resolves to a zero key
+PASS direction: different nonces give different keystreams
+PASS direction: far rx opens near tx
+PASS direction: near rx opens far tx
+PASS direction: a rx context rejects its own tx stream
+PASS direction: far rx rejects its own tx stream
+PASS pair: equal nonces rejected
+PASS pair: NULL argument rejected
+PASS pair: far rx opens near tx
+PASS pair: near rx opens far tx
+PASS pair: a mismatched pairing does not decrypt
+PASS pair: crypto=off is a no-op in both directions
+PASS pair: wipe clears both directions
+PASS session: near key -> HELLO -> far decrypt
+PASS session: per-direction nonce, both ways
+PASS session: crypto_key= pre-shared path
+
+all checks passed
+
+## bench raw (8 passes; each cell = median of 3 samples)
+### pass 1
+Thu Nov  5 11:10:56 PM UTC 2026
+0.61 0.82 0.66 1/204 871903
+cpu0_before cpu0 345279 37237 375075 13482043 7539 0 20947 7272 0 0
+    PID %CPU PSR COMMAND
+ 871905  200   1 ps
+ 871901 16.6   0 bash
+ 871851  3.2   0 sshd-session
+cpu_mhz: 2200
+buffer: hot cache, in-place xor, counter 0 per pass
+rounds      bytes         MB/s     cycles/B     1G core%
+1G core% = 125 MB/s divided by this rate
+8            1024        490.1         4.49        25.5%
+8            8192        423.4         5.20        29.5%
+8           65536        492.6         4.47        25.4%
+12           1024        319.4         6.89        39.1%
+12           8192        406.5         5.41        30.7%
+12          65536        497.9         4.42        25.1%
+20           1024        300.9         7.31        41.5%
+20           8192        318.8         6.90        39.2%
+20          65536        208.6        10.54        59.9%
+sink: 356863167
+pass_rc=0
+cpu0_after cpu0 345283 39780 375079 13482048 7539 0 20947 7272 0 0
+### pass 2
+Thu Nov  5 11:11:22 PM UTC 2026
+0.84 0.86 0.68 2/204 871912
+cpu0_before cpu0 345283 39780 375079 13482051 7539 0 20947 7272 0 0
+    PID %CPU PSR COMMAND
+ 871914  200   1 ps
+ 871693  1.2   1 systemd
+ 287503  0.6   1 frps
+cpu_mhz: 2200
+buffer: hot cache, in-place xor, counter 0 per pass
+rounds      bytes         MB/s     cycles/B     1G core%
+1G core% = 125 MB/s divided by this rate
+8            1024        583.4         3.77        21.4%
+8            8192        635.0         3.46        19.7%
+8           65536        635.1         3.46        19.7%
+12           1024        473.8         4.64        26.4%
+12           8192        395.9         5.56        31.6%
+12          65536        332.9         6.61        37.5%
+20           1024        268.0         8.21        46.6%
+20           8192        312.8         7.03        40.0%
+20          65536        213.6        10.30        58.5%
+sink: 436864191
+pass_rc=0
+cpu0_after cpu0 345285 42303 375082 13482054 7539 0 20948 7272 0 0
+### pass 3
+Thu Nov  5 11:11:47 PM UTC 2026
+0.89 0.87 0.69 2/203 871919
+cpu0_before cpu0 345285 42303 375083 13482054 7539 0 20948 7272 0 0
+    PID %CPU PSR COMMAND
+ 871921  100   0 ps
+ 871693  0.7   1 systemd
+ 287503  0.6   1 frps
+cpu_mhz: 2200
+buffer: hot cache, in-place xor, counter 0 per pass
+rounds      bytes         MB/s     cycles/B     1G core%
+1G core% = 125 MB/s divided by this rate
+8            1024        580.6         3.79        21.5%
+8            8192        499.6         4.40        25.0%
+8           65536        634.7         3.47        19.7%
+12           1024        466.2         4.72        26.8%
+12           8192        498.7         4.41        25.1%
+12          65536        477.8         4.60        26.2%
+20           1024        298.1         7.38        41.9%
+20           8192        290.1         7.58        43.1%
+20          65536        309.4         7.11        40.4%
+sink: 466203839
+pass_rc=0
+cpu0_after cpu0 345286 44893 375086 13482056 7539 0 20948 7272 0 0
+### pass 4
+Thu Nov  5 11:12:13 PM UTC 2026
+1.04 0.91 0.71 1/202 871926
+cpu0_before cpu0 345286 44893 375087 13482060 7539 0 20948 7272 0 0
+    PID %CPU PSR COMMAND
+ 871928  200   1 ps
+ 871929  100   0 head
+ 287503  0.6   1 frps
+cpu_mhz: 2200
+buffer: hot cache, in-place xor, counter 0 per pass
+rounds      bytes         MB/s     cycles/B     1G core%
+1G core% = 125 MB/s divided by this rate
+8            1024        312.1         7.05        40.1%
+8            8192        475.7         4.62        26.3%
+8           65536        638.4         3.45        19.6%
+12           1024        474.4         4.64        26.4%
+12           8192        482.8         4.56        25.9%
+12          65536        494.5         4.45        25.3%
+20           1024        301.3         7.30        41.5%
+20           8192        306.2         7.19        40.8%
+20          65536        303.5         7.25        41.2%
+sink: 439284927
+pass_rc=0
+cpu0_after cpu0 345288 47470 375094 13482063 7539 0 20948 7272 0 0
+### pass 5
+Thu Nov  5 11:12:39 PM UTC 2026
+1.16 0.95 0.73 2/202 871933
+cpu0_before cpu0 345288 47470 375095 13482063 7539 0 20948 7272 0 0
+    PID %CPU PSR COMMAND
+ 871935  100   0 ps
+ 287503  0.6   1 frps
+   8537  0.6   0 hysteria
+cpu_mhz: 2200
+buffer: hot cache, in-place xor, counter 0 per pass
+rounds      bytes         MB/s     cycles/B     1G core%
+1G core% = 125 MB/s divided by this rate
+8            1024        495.6         4.44        25.2%
+8            8192        634.7         3.47        19.7%
+8           65536        642.0         3.43        19.5%
+12           1024        355.2         6.19        35.2%
+12           8192        429.5         5.12        29.1%
+12          65536        409.3         5.38        30.5%
+20           1024        284.1         7.74        44.0%
+20           8192        288.9         7.61        43.3%
+20          65536        188.5        11.67        66.3%
+sink: 386366655
+pass_rc=0
+cpu0_after cpu0 345290 49782 375099 13482063 7539 0 20948 7273 0 0
+### pass 6
+Thu Nov  5 11:13:02 PM UTC 2026
+1.10 0.96 0.74 1/202 871940
+cpu0_before cpu0 345290 49782 375101 13482063 7539 0 20948 7273 0 0
+    PID %CPU PSR COMMAND
+ 871942  100   0 ps
+ 287503  0.6   1 frps
+   8537  0.6   0 hysteria
+cpu_mhz: 2200
+buffer: hot cache, in-place xor, counter 0 per pass
+rounds      bytes         MB/s     cycles/B     1G core%
+1G core% = 125 MB/s divided by this rate
+8            1024        337.9         6.51        37.0%
+8            8192        311.1         7.07        40.2%
+8           65536        520.6         4.23        24.0%
+12           1024        257.3         8.55        48.6%
+12           8192        422.2         5.21        29.6%
+12          65536        492.6         4.47        25.4%
+20           1024        320.5         6.87        39.0%
+20           8192        313.3         7.02        39.9%
+20          65536        161.1        13.65        77.6%
+sink: 327083199
+pass_rc=0
+cpu0_after cpu0 345291 52262 375105 13482064 7539 0 20949 7273 0 0
+### pass 7
+Thu Nov  5 11:13:27 PM UTC 2026
+1.07 0.96 0.74 2/202 871947
+cpu0_before cpu0 345292 52262 375108 13482064 7539 0 20949 7273 0 0
+    PID %CPU PSR COMMAND
+ 287503  0.6   1 frps
+   8537  0.6   0 hysteria
+    363  0.5   1 systemd-udevd
+cpu_mhz: 2200
+buffer: hot cache, in-place xor, counter 0 per pass
+rounds      bytes         MB/s     cycles/B     1G core%
+1G core% = 125 MB/s divided by this rate
+8            1024        474.6         4.64        26.3%
+8            8192        511.7         4.30        24.4%
+8           65536        513.1         4.29        24.4%
+12           1024        428.4         5.14        29.2%
+12           8192        215.1        10.23        58.1%
+12          65536        329.4         6.68        38.0%
+20           1024        287.9         7.64        43.4%
+20           8192        320.5         6.86        39.0%
+20          65536        310.3         7.09        40.3%
+sink: 381203647
+pass_rc=0
+cpu0_after cpu0 345294 54753 375112 13482065 7539 0 20950 7273 0 0
+### pass 8
+Thu Nov  5 11:13:52 PM UTC 2026
+1.04 0.97 0.75 1/202 871954
+cpu0_before cpu0 345294 54753 375113 13482065 7539 0 20950 7273 0 0
+    PID %CPU PSR COMMAND
+ 287503  0.6   1 frps
+   8537  0.6   0 hysteria
+    363  0.5   1 systemd-udevd
+cpu_mhz: 2200
+buffer: hot cache, in-place xor, counter 0 per pass
+rounds      bytes         MB/s     cycles/B     1G core%
+1G core% = 125 MB/s divided by this rate
+8            1024        609.0         3.61        20.5%
+8            8192        634.9         3.47        19.7%
+8           65536        401.4         5.48        31.1%
+12           1024        360.6         6.10        34.7%
+12           8192        444.3         4.95        28.1%
+12          65536        393.2         5.60        31.8%
+20           1024        145.2        15.15        86.1%
+20           8192        286.8         7.67        43.6%
+20          65536        320.6         6.86        39.0%
+sink: 342867135
+pass_rc=0
+cpu0_after cpu0 345295 57183 375118 13482065 7539 0 20950 7273 0 0
+DONE
+
+## summary across 8 passes (MB/s; c/B and 1G% from the max)
+rounds  bytes     min  median     max  max c/B  max 1G%  med 1G%
+     8   1024   312.1   492.9   609.0     3.61    20.5%    25.4%
+     8   8192   311.1   505.6   635.0     3.46    19.7%    24.7%
+     8  65536   401.4   577.7   642.0     3.43    19.5%    21.6%
+    12   1024   257.3   394.5   474.4     4.64    26.3%    31.7%
+    12   8192   215.1   425.9   498.7     4.41    25.1%    29.4%
+    12  65536   329.4   443.6   497.9     4.42    25.1%    28.2%
+    20   1024   145.2   293.0   320.5     6.86    39.0%    42.7%
+    20   8192   286.8   309.5   320.5     6.86    39.0%    40.4%
+    20  65536   161.1   258.6   320.6     6.86    39.0%    48.3%
+
+## .65 skip check (no run)
+2026-11-06 07:12:03 +0800
+ 07:12:03 up 14 days, 23:18,  3 users,  load average: 0.71, 0.98, 2.38
+0.71 0.98 2.38 1/338 852123
+8
+    PID %CPU PSR COMMAND
+ 852120 25.0   3 bash
+ 471210  3.8   6 mediamtx
+ 851761  1.5   0 sshd-session
+ 625575  0.5   4 ffmpeg
+ 625572  0.4   6 ffmpeg
+ 625573  0.4   4 ffmpeg
+ 625570  0.4   5 ffmpeg
+# .65 skipped: production services (mediamtx, ffmpeg) and another session active; no bench run.
+
+## note on HND0 noise
+# /proc/stat cpu0 steal was constant 7272->7273 over all 8 passes (guest steal ~0),
+# and ps showed no competing process during the passes. The MB/s spread is host-side
+# (shared physical core / host frequency), not guest scheduling. The 8 KiB max is
+# repeatable: 634.7, 634.9, 635.0 MB/s in three separate passes.
+# Earlier 07:02-07:09 runs of 75dcf9f/43bbbff overlapped another worker's bench_old/
+# bench_new on cpu0 and a kernel build on cpu1; those numbers are discarded.
