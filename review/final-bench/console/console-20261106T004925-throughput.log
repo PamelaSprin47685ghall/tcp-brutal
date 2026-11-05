@@ -1,0 +1,40 @@
+c[?7l[2J[0mSeaBIOS (version Arch Linux 1.17.0-2-2)
+
+
+iPXE (http://ipxe.org) 00:02.0 C000 PCI2.10 PnP PMM+1EFD3E30+1EF33E30 C000
+Press Ctrl-B to configure iPXE (PCI 00:02.0)...                                                                               
+
+
+Booting from ROM...
+Probing EDD (edd=off to disable)... oc[?7l[2J[    0.074855] virt/tdx: TDX not supported by the host platform
+tbt_echo: listening on 19102 (echo)
+BENCHNOTE guest 7.2.9-1-MANJARO scenario=throughput mib=40 netem='delay 20ms 10ms'
+BENCHNOTE clock ticks=100 ncpu=2
+BENCHNOTE module tbtun 172032 debug_loss=1
+BENCHNOTE tc=tc -rwxr-xr-x    1 1000     1001        671352 Nov  5 16:49 /bin/tc version=tc utility, iproute2-7.2.0, libbpf 1
+Warning: sch_htb: quantum of class 10001 is big. Consider r2q change.
+Warning: sch_htb: quantum of class 10099 is big. Consider r2q change.
+Warning: sch_htb: quantum of class 10001 is big. Consider r2q change.
+Warning: sch_htb: quantum of class 10099 is big. Consider r2q change.
+BENCHNOTE control: class=1:35 sport=41025 class_bytes=41946714 want=41943040 done=1
+BENCHROW row=control n=0 m=0 profile=control mib=40 control_mbit=2.63 goodput_mbit=2.63 app_mbit=2.63 wall_s=130.340 wire_bytes=41946714 app_bytes=41943040 wire_per_app=1.0001 cpu_sys_pct=5.0 cpu_softirq_pct=1.4 cpu_total_pct=6.9 kworker_pct=0.0 rc=0 strict=1
+BENCHCFG|ports|41000-41015;tunnel|1|role=far|listen=10.0.2.15:19101|target=127.0.0.1:19102|n=16|m=0|dup=0|profile=raw|keepalive=5000|drip_ms=1000|replay=8388608|tunnel_rate=0|max_inflate=2.000|hole_budget_ms=5000|rx_reorder_bytes=2097152|tx_retain_bytes=0|carrier_stall_ms=3000|portblock=0-0;tunnel|2|role=near|listen=127.0.0.1:19100|peer=10.0.2.2:29100|n=16|m=0|dup=0|profile=raw|keepalive=5000|drip_ms=1000|replay=8388608|tunnel_rate=0|max_inflate=2.000|hole_budget_ms=5000|rx_reorder_bytes=2097152|tx_retain_bytes=0|carrier_stall_ms=3000|portblock=0-0; BENCHNOTE row=n16: n=16 m=0 profile=raw carriers_up=16/16
+BENCHCAR row=n16 carrier=0 sport=41000 state=up profile=raw bytes=5471236 frames=1057 dropped=0 retx_ppm=10785 inflight=0
+BENCHCAR row=n16 carrier=1 sport=41001 state=up profile=raw bytes=5442844 frames=844 dropped=0 retx_ppm=13761 inflight=0
+BENCHCAR row=n16 carrier=2 sport=41002 state=up profile=raw bytes=5455149 frames=940 dropped=0 retx_ppm=21806 inflight=0
+BENCHCAR row=n16 carrier=3 sport=41003 state=up profile=raw bytes=5327449 frames=889 dropped=0 retx_ppm=17405 inflight=0
+BENCHCAR row=n16 carrier=4 sport=41004 state=up profile=raw bytes=5318550 frames=886 dropped=0 retx_ppm=20634 inflight=8192
+BENCHCAR row=n16 carrier=5 sport=41005 state=up profile=raw bytes=5296494 frames=791 dropped=0 retx_ppm=6240 inflight=0
+BENCHCAR row=n16 carrier=6 sport=41006 state=up profile=raw bytes=5300741 frames=787 dropped=0 retx_ppm=17350 inflight=0
+BENCHCAR row=n16 carrier=7 sport=41007 state=up profile=raw bytes=5320258 frames=856 dropped=0 retx_ppm=6259 inflight=0
+BENCHCAR row=n16 carrier=8 sport=41008 state=up profile=raw bytes=5368742 frames=814 dropped=0 retx_ppm=17187 inflight=0
+BENCHCAR row=n16 carrier=9 sport=41009 state=up profile=raw bytes=5388140 frames=836 dropped=0 retx_ppm=10785 inflight=0
+BENCHCAR row=n16 carrier=10 sport=41010 state=up profile=raw bytes=5401819 frames=798 dropped=0 retx_ppm=16975 inflight=0
+BENCHCAR row=n16 carrier=11 sport=41011 state=up profile=raw bytes=5369283 frames=785 dropped=0 retx_ppm=7704 inflight=0
+BENCHCAR row=n16 carrier=12 sport=41012 state=up profile=raw bytes=5328899 frames=775 dropped=0 retx_ppm=6201 inflight=0
+BENCHCAR row=n16 carrier=13 sport=41013 state=up profile=raw bytes=5430925 frames=793 dropped=0 retx_ppm=16871 inflight=0
+BENCHCAR row=n16 carrier=14 sport=41014 state=up profile=raw bytes=5446626 frames=956 dropped=0 retx_ppm=7704 inflight=0
+BENCHCAR row=n16 carrier=15 sport=41015 state=up profile=raw bytes=5465031 frames=1166 dropped=0 retx_ppm=6191 inflight=0
+BENCHROW row=n16 n=16 m=0 profile=raw mib=40 goodput_mbit=33.68 app_mbit=32.75 wall_s=27.750 wire_bytes=86130986 app_bytes=83886080 wire_per_app=1.0285 frames=13956 frames_s=647.0 cpu_sys_pct=103.3 cpu_softirq_pct=5.7 cpu_total_pct=109.9 kworker_pct=98.2 retx_ppm=12719 dup_tx=0 inflate_ppm=1000000 retx_hole=0 retx_slow=131 retx_pathloss=0 dup_bytes_ppm=12787 fb_delay_us=4552 rto_us=93252 fbk_tx=2520 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=23917 reorder_max_depth=35 carriers_up=16/16 txq_max=98304 rxq_max=28000461 ooo_bytes_max=793829 retain_bytes_max=5838564 spec_bytes_max=0 rc=0 strict=1 control_mbit=2.63 tunnel_mbit=33.68 ratio=12.81
+BENCH_DONE throughput
+[  165.036145] reboot: Power down

@@ -1,0 +1,12 @@
+QEMU_RC 0 console=/home/kunweiz/tbtun-worktrees/final-bench/review/final-bench/writer-memory-console.log
+WRITER_CASE mib=100 rc=0 start=3.48 end=19.96 secs=16.48
+WRITER_OUT ADV_RESULT pub.writer PASS attempted 100 MiB, accepted 75105611 bytes then blocked (errno=11), MemAvailable 386184 -> 262648 kB|
+MEM_AVAIL mib=100 before=386404 min=230888 after=276292 quiesce=276292 kB
+STATS mib=100 tunnel 1 capture_runs=1601 actor_calls=2772 submit_bytes=69449709 tx=69801911 wire=70170224 err=0 short=0
+WRITER_CASE mib=1024 rc=0 start=22.51 end=38.90 secs=16.39
+WRITER_OUT ADV_RESULT pub.writer PASS attempted 1024 MiB, accepted 75044366 bytes then blocked (errno=11), MemAvailable 406596 -> 267808 kB|
+MEM_AVAIL mib=1024 before=406804 min=233384 after=280148 quiesce=279744 kB
+STATS mib=1024 tunnel 1 capture_runs=1549 actor_calls=2904 submit_bytes=69454000 tx=69732501 wire=70109268 err=0 short=0
+MEM_BEFORE_FINAL_FLUSH 279380
+MEM_AFTER_FINAL_FLUSH 410836
+TBT_ADV_DONE
