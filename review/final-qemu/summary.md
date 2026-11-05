@@ -1,8 +1,9 @@
 > **SUPERSEDED（历史快照）**
 >
-> 本文件基于 master 68bfbaa 的旧 QEMU 运行，**已被 b57b438 / 3ba0e6a 的最终证据取代**。
+> 本文件基于 master 68bfbaa 的旧 QEMU 运行，**已被 f1282df 的最终证据取代**
+> （f1282df = 3ba0e6a + w-docs5 + w-evidence2；模块与 b57b438 逐字节相同）。
 > 当前最终结果见 `review/final/README.md` 与
-> `review/final-qemu/adversarial-results-b57b438.txt`。
+> `review/final-qemu/adversarial-results-f1282df.txt`。
 > 旧内容（包括“adversarial 未达到 79 PASS / 0 FAIL”和 68bfbaa 的旧失败）保留仅作历史；
 > 不要按本文件的结论判断 0.0.1 是否可发布。
 

@@ -97,12 +97,14 @@ grammar, not behavioural coverage; `make check` still reports 0 failures.
 
 The QEMU A–K probes and the adversarial groups are separate suites; their final
 results are archived under `review/final/`, `review/final-qemu/` and
-`review/final-bench/`. On this tree: QEMU A–K is 11 PASS / 0 FAIL / 0 SKIP
-(164.7 s); adversarial is 78 PASS / 0 FAIL / 0 SKIP (229.8 s, all 15 groups plus
-the crash repro); `pub.churn` is 10000/10000 with `retried=0`; `pub.writer`
-stays blocked in `write()` (`errno=0 eagain=0 blocked=1 child_state=running`,
-no `EAGAIN`) and `flush` returns the memory; DKMS install/load/unload/uninstall
-is 38 steps / 39 checks / 0 failures on a clean guest kernel
+`review/final-bench/`. On this tree (f1282df, same module sha as b57b438): QEMU
+A–K is 11 PASS / 0 FAIL / 0 SKIP (165.7 s); adversarial is 91 PASS / 0 FAIL /
+0 SKIP (284.4 s, all 18 groups plus the crash repro); `pub.churn` is 10000/10000
+with `retried=0`; `pub.writer` stays blocked in `write()` (`errno=0 eagain=0
+blocked=1 child_state=running`, no `EAGAIN`) and `flush` returns the memory,
+while `pub.writer_drain`/`_1g` complete 100 MiB/1 GiB byte-exact; DKMS
+install/load/unload/uninstall is 38 steps / 39 checks / 0 failures on a clean
+guest kernel
 (`review/dkms-qemu/`). The host suites
 exercise `tbt_parse.c`, `tbt_rec.c`, `tbt_proto.c`, `tbt_http.c` and the stream
 control unit only. Findings 1–10 are in kernel object lifetime, locking and
@@ -162,7 +164,7 @@ key removal in 35 are host-covered.
 | ID | Severity | Status | Final evidence |
 |---|---|---|---|
 | F1 close-flush | critical | FIXED | `ADV_RESULT ctl.close_flush PASS` (`review/final/adversarial-results.txt`, module `0b8f0006…`). |
-| F2 rmmod | critical | FIXED (static + runtime) | teardown order `tbt_procfs_exit` → `tbt_tunnel_shutdown` → `synchronize_rcu` → `rcu_barrier` (`tbt_core.c`); every stream socket is detached/released before the module text goes away. QEMU A–K 11/11 PASS on `0b8f0006…` exercises load/unload; the final 78 PASS run includes `init.rmmod` (rmmod rc=0, app closed cleanly) and `init.dmesg_after_rmmod` (no warning/BUG/oops), archived in `review/final/adversarial-results.txt`. The older 12:02 FAIL was the probe printing `ECHO_ABORT op=read errno=0`; `read_to()` now reports the pending `SO_ERROR` (`adv_probe.c:189-218`). |
+| F2 rmmod | critical | FIXED (static + runtime) | teardown order `tbt_procfs_exit` → `tbt_tunnel_shutdown` → `synchronize_rcu` → `rcu_barrier` (`tbt_core.c`); every stream socket is detached/released before the module text goes away. QEMU A–K 11/11 PASS on `0b8f0006…` exercises load/unload; the final 91 PASS run includes `init.rmmod` (rmmod rc=0, app closed cleanly) and `init.dmesg_after_rmmod` (no warning/BUG/oops), archived in `review/final/adversarial-results.txt`. The older 12:02 FAIL was the probe printing `ECHO_ABORT op=read errno=0`; `read_to()` now reports the pending `SO_ERROR` (`adv_probe.c:189-218`). |
 | F4 two connections / churn | high | FIXED | `pub.two` PASS; `pub.churn` PASS 10,000/10,000 usable, 0 refused, 0 other; `pub.concurrent` PASS 100/100. The churn verdict uses a 2 s timeout per cycle and one retry only after a timeout (`retried=`); two final-criterion runs read `retried=1` and `retried=0`, and the archived `review/final/adversarial-results.txt` is the `retried=0` run. The far stream detaches on the graceful FIN path (`tbt_stream_detach_from_session()`, `tbt_session.c:800`), so `n_active` no longer climbs to 128. |
 | F5 half-close | high | FIXED | `pub.halfclose` PASS, EOF=1. |
 | F6 far-side carrier input / delivery stall | high | FIXED | the RX work is re-armed on every `-EAGAIN`/read-zero path (`review/analysis/multiconn-p01-plan.md`); QEMU `far.second_carrier` PASS (`rx_adopt_events=2`), `far.open_other_sid` PASS, `far.data_path` PASS, `near.data_path` PASS, `near.second_conn` PASS. |
