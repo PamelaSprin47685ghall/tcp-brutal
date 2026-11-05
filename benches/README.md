@@ -160,11 +160,11 @@ measures and leaves the rest empty.
 | `goodput_mbit` | the row's measured one-way rate (control or tunnel) |
 | `app_mbit` | application payload rate over the same window |
 | `wall_s` | wall time of the whole transfer |
-| `wire_bytes`, `app_bytes`, `wire_per_app` | whole-transfer carrier bytes, captured app bytes, and their ratio |
+| `wire_bytes`, `app_bytes`, `wire_per_app` | whole-transfer carrier bytes, captured app bytes, and their ratio **over the 2 s rate window**; for the whole run divide `wire_bytes` by `app_bytes` |
 | `frames`, `frames_s` | records written by the near side and their rate |
 | `cpu_sys_pct`, `cpu_softirq_pct`, `cpu_total_pct` | kernel CPU over the transfer, percent of one vCPU |
 | `kworker_pct` | `kworker*` CPU over the transfer, percent of one vCPU |
-| `retx_ppm`, `dup_tx`, `inflate_ppm` | retransmitted frames per million, duplicates written, inflation |
+| `retx_ppm`, `retx_hole`, `retx_slow`, `retx_pathloss`, `dup_bytes_ppm`, `dup_tx`, `inflate_ppm` | tunnel-wide DATA copies per million unique DATA records (total and by the branch that queued them: hole, slow path, carrier loss), copy payload per million application bytes, duplication counters, inflation |
 | `holes_declared`, `holes_repaired`, `holes_unrecoverable` | prediction's hole accounting (near tunnel) |
 | `rx_max_stall_us` | longest app-visible stall before a hole was filled or reset |
 | `reorder_max_depth` | deepest out-of-order backlog, frames |
@@ -337,6 +337,58 @@ by 16 x 10 Mbit classes is far above the 34 Mbit observed, and the control
 shows a single flow capping at 2.6-2.7 Mbit. Going wider would need a second
 port block and a second shaping range; it is not a module limit at 16.
 
+### 7. Retransmit attribution and the slow-path grace (2026-11-05 19:11-20:41)
+
+The earlier sweep could only report `retx_ppm`, which divided copies by every
+record on the path (FBK was 45% of that denominator) and took the worst
+carrier. The module now tags each copy where it is queued and counts it where
+the carrier accepts the write; `retx_ppm` is `DATA copies / unique DATA
+records`, `dup_bytes_ppm` is copy payload over application bytes, and the
+`wire/app` column below is the whole-run `wire_bytes / app_bytes` (the CSV's
+`wire_per_app` is a 2 s window ratio and reads lower).
+
+Command: `benches/run.sh throughput --n 4 --mib 40` (and `--n 1` for the
+single-carrier row). Every row is one boot.
+
+| run | CSV stamp | commit | app Mbit/s | wall s | wire/app | retx_ppm | hole | slow | pathloss | dup_bytes_ppm | rc | strict | others |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| attribution only | 20261105T191128 | 92d2821 | 11.21 | 100.63 | 1.0467 | 30417 | 3 | 310 | 0 | 30318 | 0 | 1 | 0 |
+| attribution only | 20261105T191701 | 92d2821 | 11.86 | 98.71 | 1.0388 | 22495 | 1 | 231 | 0 | 22539 | 0 | 1 | 0 |
+| 3xRTO slow path | 20261105T192806 | 92d2821 | 10.41 | 87.44 | 1.0185 | 3692 | 0 | 38 | 0 | 3710 | 0 | 1 | 0 |
+| 3xRTO slow path | 20261105T193751 | 847c784 | 12.22 | 96.44 | 1.0174 | 1456 | 0 | 15 | 0 | 1464 | 0 | 1 | 1 |
+| 3xRTO slow path | 20261105T195705 | 847c784 | 10.68 | 93.02 | 1.0235 | 7951 | 1 | 81 | 0 | 7999 | 0 | 1 | 0 |
+| 3xRTO + stalled-path fix | 20261105T203309 | 8e54c42 | 13.51 | 100.96 | 1.0242 | 7763 | 1 | 79 | 0 | 7809 | 0 | 1 | 0 |
+| n=1, final tree | 20261105T204157 | 8e54c42 | 3.02 | 214.52 | 1.0191 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
+
+Reading:
+
+- In a clean 40 MiB n=4 run the slow path made **310 of 313 copies**; the
+  hole branch made 3 and carrier loss made 0. The peer's delivery queue
+  reached 26-32 MB, so a frame whose carrier TCP had acked it still waited
+  seconds for the contiguous `uack`; at 2xRTO every frame in that band was
+  copied again. This is the mechanism the earlier "Observed module
+  behaviour" item 3 inferred, now counted by source.
+- Widening the slow path to 3xRTO cut copies by 3-20x (231-310 to 15-81),
+  the honest rate from 22-30k to 1.5-8k, and the whole-run wire/app from
+  1.039-1.047 to 1.017-1.024. App throughput stayed above the 9.20 Mbit/s
+  floor in every run and the wall time fell. The spread between the three
+  3xRTO rows is run-to-run variance, not a different mechanism: the slow
+  branch is still the only source.
+- `dup_bytes_ppm` tracks `retx_ppm` because a copy is one 8 KiB record; at
+  1.5-8k ppm the copies cost 0.15-0.8% of the application bytes.
+- The K regression found a second, independent bug. The scheduler ranks paths
+  by `payload_bytes_sent - tx_ack`; a blackholed path stops being written, so
+  that difference falls to zero and it wins the pick exactly when it can
+  deliver nothing. K failed 1/3 (`TXSTALLKILL ack=73728 age_us=504198`) because
+  the hole copy landed on the dead carrier on every timer tick. A retransmit
+  copy now skips a path that has unacked bytes (`snd_una != snd_nxt`) and has
+  not moved `snd_una` for an RTO; idle paths stay eligible and new data is
+  unaffected. With the fix, J and K pass **3/3** on the final tree
+  (`tests/qemu/run.sh --probes J,K --timeout 300`), and the probe prints
+  `holes_unrecoverable=0 carrier_lost=0`; there is no RST storm.
+- The n=1 40 MiB row is byte-exact (`rc=0 strict=1`) with zero copies and a
+  whole-run wire/app of 1.019, down from the recorded 1.98/`rc=3`.
+
 ## Reading the numbers
 
 **The control is not 10 Mbit/s.** One TCP flow in a 10 Mbit htb class with
@@ -351,7 +403,9 @@ recorded tables.
 **Use the app goodput for the tunnel, not the wire rate.** The module
 retransmits on a path with no configured loss: `retx_ppm` is 115k-304k and
 `wire_per_app` is 1.17-1.98 in the 40 MiB rows below, with
-`holes_declared` in the tens and `holes_repaired` equal to it. The wire rate
+`holes_declared` in the tens and `holes_repaired` equal to it (these are the
+old per-record ratios; section 7 gives the honest data-frame rate and the
+3xRTO fix). The wire rate
 therefore overstates what the application received; the `app_mbit` column is
 the comparable one. The ratio in the table is `app_mbit / control_mbit`. This
 retransmission is a real cost of the current prediction path and the largest
@@ -414,9 +468,7 @@ reported because they bound what the numbers above can mean.
    byte-exact check (`tbt_burst rc=3`) after 205 s. A plausible cause is the
    feedback lag on a 40 ms path: `tx_ack` is stale by a window's worth of
    bytes, and the retransmit path re-sends frames that are merely in flight.
-   The counters to confirm it are `retx_frames`/`retx_bytes` (per tunnel) and
-   `hole_checks`/`gate_fail`/`time_fail` (per stream), which this CSV does
-   not yet record.
+   Section 7 confirms it with per-source counters and records the fix.
 4. **One flow on this path tops out at ~2.6-3.2 Mbit/s.** This is the
    control and probe I's n=1 result agreeing; the 10 Mbit class is not the
    limit, the 20 ms +/- 10 ms jitter is.

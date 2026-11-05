@@ -412,9 +412,21 @@ void tbt_peers_show(struct seq_file *m)
             /* rx_lag_ppm: frames the receiver has not yet accounted for below
              * the sender's write high-water; includes in-flight frames and
              * frames sitting in the peer's parser. Not packet loss.
-             * retx_ppm: retransmitted frames / frames written, a loss proxy. */
+             * retx_ppm: DATA copies written / unique DATA records written.
+             * The old formula divided copies by every record on the path,
+             * including FBK (45% of them in a bench run), which under-reported
+             * the retransmit rate by about half. Both counters are stamped
+             * where the carrier accepts the write, so neither includes a copy
+             * the pump later dropped. */
             rx_lag_ppm = READ_ONCE(c->loss_ppm) > 0 ? (u32)READ_ONCE(c->loss_ppm) : 0;
-            retx_ppm = frames ? (u32)((u64)READ_ONCE(c->lost_frames) * 1000000 / frames) : 0;
+            {
+                u64 copies = READ_ONCE(c->retx_data);
+                u64 data = READ_ONCE(c->data_frames);
+                u64 unique = data > copies ? data - copies : 0;
+
+                retx_ppm = unique ? (u32)min_t(u64, copies * 1000000 / unique,
+                                               1000000) : 0;
+            }
             seq_printf(m, "%llu %u %u %pI4:%u %llu %u %u %s %s %u %u %u %llu %llu %llu %u\n",
                        t->cfg.id, i, sport, &peer, ntohs(port), uack,
                        rtt, inflight, tbt_car_state_name(c->state),
