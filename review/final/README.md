@@ -26,6 +26,10 @@ five dead keys `framing`/`chunk`/`max_retry`/`dev`/`uid` and their parse cases
 were deleted. The deleted cases covered keys already removed from the grammar,
 not behavioural coverage.
 
+Full per-step lineage and the evidence boundary: `review/test_parse-lineage.md`.
+The older `review/final-checklist.md` and `review/final-qemu/summary.md` are
+historical; both now carry a SUPERSEDED header. Do not use their verdicts.
+
 ## QEMU probes A-K
 
 `tests/qemu/run.sh --probes A,B,C,D,E,F,G,H,I,J,K --timeout 900`:
