@@ -2233,7 +2233,10 @@ static int pipe_read(int fd, void *buf, size_t len, int ms)
  * worth of payload fills the socket while leaving the stream's own 64 KiB
  * queue as the only remainder, so the capture finishes and queues the FIN/RST
  * before the drain.  A larger write leaves uncaptured bytes behind the
- * control frame and the test measures the capture gate, not review 22. */
+ * control frame and the test measures the capture gate, not review 22.  The
+ * RST variant waits for the pump's hiwat proof before it closes, because a
+ * fixed ramp raced the fill and could kill the stream while the carrier was
+ * still below its line. */
 #define BP_BYTES (512 * 1024)
 
 static void app_backpressure_child(int pubport, int rst, int sigfd, int donefd)
@@ -2298,37 +2301,85 @@ static int wait_child_timeout(pid_t pid, int ms)
     return 4;
 }
 
-/* Advance the near's tx_ack in 64 KiB steps.  A single huge ack would mark
- * the queued frames delivered before the pump ever wrote them; a ramp lets
- * the pump fill the carrier's send queue while the capture keeps moving. */
-static void ack_ramp(int fd, int idx, uint32_t sid, uint8_t sidhi, long ms)
+/* A SACK carries our delivery state as one byte; state 2 means "my delivery
+ * queue is full, do not count my silence as loss".  The fake far is not
+ * reading its application side either, so it reports the same state the real
+ * far would: the near's stall/retransmit timers are suppressed while a peer
+ * is paused, and a truthful ack can be used without racing them. */
+static int raw_send_sack(int fd, int idx, uint32_t sid, uint8_t sidhi,
+                         uint8_t state)
+{
+    struct fr s = { .type = TBT_F_SACK,
+                    .path = (uint8_t)idx,
+                    .sid = sid,
+                    .sidhi = sidhi,
+                    .conv = TBT_CONV };
+
+    return raw_send_frame(fd, &s, &state, 1);
+}
+
+/* The near's `tx` stat is the payload the pump has already handed to the
+ * carrier's TCP send queue.  Acking exactly that bootstraps the near's
+ * application-level window (128 KiB above tx_ack) without ever acking a frame
+ * the pump has not written: the old 64 KiB ramp ran to 2.6 MiB while the pump
+ * had written 475 KiB, so the pump dropped the rest as "already delivered".
+ * The ack is still a test shortcut -- the fake far has not read the bytes --
+ * but it is bounded by the write cursor, which is what keeps the frame stream
+ * intact. */
+static uint64_t near_tx_ack(int tunnel)
+{
+    /* " tx=", not "tx": stat_key() matches a substring, and the same stats
+     * block later carries "dup_tx=0", which a bare "tx" would match and
+     * return as zero. */
+    return (uint64_t)stat_key(tunnel, " tx");
+}
+
+/* Keep the carrier's read side moving with the bounded ack above. */
+static void pad_for(int fd, int idx, uint32_t sid, uint8_t sidhi,
+                    int tunnel, long ms)
 {
     long end = now_ms() + ms;
-    uint64_t ack = 0;
 
     while (now_ms() < end)
     {
-        ack += 65536;
-        raw_send_pad(fd, idx, sid, sidhi, ack);
+        raw_send_pad(fd, idx, sid, sidhi, near_tx_ack(tunnel));
         msleep(30);
     }
 }
 
-/* Same ramp, but stop as soon as `donefd` reports the application's shutdown.
- * The ack must run while the application is still writing: the capture gate
- * stops at 64 KiB and the peer's stall budget is 500 ms, so waiting for the
- * write to finish before the first ack is a race against the reset timer. */
-static int ack_ramp_until(int fd, int idx, uint32_t sid, uint8_t sidhi, long ms,
-                          int donefd)
+/* Wait for the pump's -EAGAIN proof.  The RST must be queued while the
+ * carrier's send buffer is full; a fixed ramp raced the fill (measured on the
+ * same guest: hiwat 0 -> 0 in one run, 0 -> 2732 in the next).  Returns the
+ * last value read, so the caller can report it; the common hiwat gate below
+ * still runs. */
+static unsigned long long pad_until_hiwat(int fd, int idx, uint32_t sid,
+                                          uint8_t sidhi, long ms, int tunnel,
+                                          unsigned long long hiwat0)
 {
     long end = now_ms() + ms;
-    uint64_t ack = 0;
+    unsigned long long hiwat = hiwat0;
+
+    while (now_ms() < end)
+    {
+        raw_send_pad(fd, idx, sid, sidhi, near_tx_ack(tunnel));
+        hiwat = stat_key(tunnel, "hiwat");
+        if (hiwat > hiwat0)
+            break;
+        msleep(30);
+    }
+    return hiwat;
+}
+
+/* Same, but stop as soon as `donefd` reports the application's shutdown. */
+static int pad_until_done(int fd, int idx, uint32_t sid, uint8_t sidhi,
+                          int tunnel, long ms, int donefd)
+{
+    long end = now_ms() + ms;
     int done = 0;
 
     while (now_ms() < end)
     {
-        ack += 65536;
-        raw_send_pad(fd, idx, sid, sidhi, ack);
+        raw_send_pad(fd, idx, sid, sidhi, near_tx_ack(tunnel));
         if (!done && donefd >= 0)
         {
             struct pollfd p = { .fd = donefd, .events = POLLIN };
@@ -2359,6 +2410,10 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
     uint32_t sid = 0;
     uint8_t sidhi = 0;
     unsigned long long hiwat0, hiwat1, hu0, hu1;
+    int parsed = 0;
+    uint8_t last_type = 0;
+    int rb_set = -1, rb_now = 0;
+    int brk = 0, rfail = 0;
     long end, next_ack;
     pid_t pid;
     int rc = -1;
@@ -2463,9 +2518,15 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
         return failures;
     }
 
+    /* The fake far is not reading its application side yet: tell the near the
+     * state the real far reports when its delivery queue is full, so the
+     * stall/retransmit timers do not count this window as loss.  The acks
+     * below stay truthful (0 until DATA is parsed). */
+    raw_send_sack(fd, idx, sid, sidhi, 2);
+
     if (!rst)
     {
-        int signalled = ack_ramp_until(fd, idx, sid, sidhi, 1200, done[0]);
+        int signalled = pad_until_done(fd, idx, sid, sidhi, tunnel, 1200, done[0]);
 
         if (!signalled)
         {
@@ -2481,13 +2542,29 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
                 close(ls);
                 return failures;
             }
-            ack_ramp(fd, idx, sid, sidhi, 600);
+            pad_for(fd, idx, sid, sidhi, tunnel, 600);
         }
     }
     else
     {
-        /* Fill the carrier before the reset, then let the app close. */
-        ack_ramp(fd, idx, sid, sidhi, 1200);
+        /* Fill the carrier before the reset, then let the app close.  The
+         * reset must be queued while the carrier's send buffer is full, so
+         * wait for the pump's -EAGAIN proof instead of racing a fixed ramp;
+         * keep acking while waiting so the capture can finish.  The common
+         * gate below still requires hiwat to have grown. */
+        pad_until_hiwat(fd, idx, sid, sidhi, 3000, tunnel, hiwat0);
+        /* Widen the far's window now, not after the close: the carrier's TCP
+         * has been in zero-window for seconds, and a 512 KiB window lets the
+         * queued bytes drain before the reset record has to wait behind the
+         * slow-start/persist recovery.  The backpressure proof is already
+         * taken; this does not undo it. */
+        {
+            int rb = 256 * 1024;
+            socklen_t rbl = sizeof(rb_now);
+
+            rb_set = setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rb, sizeof(rb));
+            getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rb_now, &rbl);
+        }
         if (write(sig[1], "G", 1) != 1)
         {
             kill(pid, SIGKILL);
@@ -2507,13 +2584,36 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
     }
     hiwat1 = stat_key(tunnel, "hiwat");
 
+    /* The 4 KiB window did its job: the carrier filled and hiwat grew.  Widen
+     * it now so the 512 KiB backlog and the control record drain in about a
+     * second instead of tens of seconds.  The backpressure verdict was already
+     * taken above; this only shortens the observation window. */
+    {
+        int rb = 256 * 1024;
+        socklen_t rbl = sizeof(rb_now);
+
+        rb_set = setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rb, sizeof(rb));
+        getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rb_now, &rbl);
+    }
+
     /* Drain the carrier.  This is the half the earlier construction missed:
      * a fake far that never reads keeps the send queue full forever, so the
      * capture can never finish and the FIN is never emitted.  Read as fast as
-     * the socket delivers, keep acking so the stream's tx_ack tracks tx_seq,
-     * and give the pump time to write the queued records and the control
-     * frame.  A pinned FIN/RST freed on -EAGAIN never reappears. */
-    end = now_ms() + 12000;
+     * the socket delivers, ack the near's write cursor (its tx stat), and give
+     * the pump time to write the queued records and the control frame.  A
+     * pinned FIN/RST freed on -EAGAIN never reappears.  Acking ahead of the
+     * read (the old UINT64_MAX) made the pump drop frames it had not written
+     * yet, so the carrier never reached its memory line during the fill.
+     *
+     * The 4 KiB receive buffer (8 KiB after the kernel's doubling) makes
+     * stock TCP deliver at roughly 35 KiB/s: one window per delayed-ACK /
+     * persist cycle (measured on this kernel: 8 KiB every ~208 ms; 512 KiB
+     * takes 10-16 s depending on how long the peer was idle).  The control
+     * record sits after all 512 KiB of DATA, so a 12 s budget expired even
+     * though the FIN/RST had already been written; the window is widened
+     * above; the guest measured 68-72 of the ~78 records in 30 s (1.8-2.5
+     * records/s), so 60 s covers the measured drain with margin. */
+    end = now_ms() + 60000;
     next_ack = 0;
     while (now_ms() < end && !seen)
     {
@@ -2522,16 +2622,24 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
 
         if (!rst && now_ms() >= next_ack)
         {
-            raw_send_pad(fd, idx, sid, sidhi, UINT64_MAX);
+            raw_send_pad(fd, idx, sid, sidhi, near_tx_ack(tunnel));
             next_ack = now_ms() + 50;
         }
         pr = poll(&p, 1, 20);
         if (pr <= 0)
             continue;
         if (p.revents & (POLLERR | POLLHUP | POLLNVAL))
+        {
+            brk = p.revents;
             break;
+        }
         if (raw_read_frame(&r, &f, body, sizeof(body), 50))
+        {
+            rfail++;
             continue;
+        }
+        parsed++;
+        last_type = f.type;
         if (f.sid == sid && f.type == (rst ? TBT_F_RST : TBT_F_FIN))
             seen = 1;
     }
@@ -2539,8 +2647,17 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
     {
         /* The far's FIN for this stream.  seq 0: no DATA ever went toward the
          * application.  It turns the app's read into EOF once its bytes are
-         * all delivered. */
-        raw_send_fin(fd, idx, sid, sidhi, 0);
+         * all delivered.  Send it more than once: the near's FIN handling is
+         * idempotent (rx_fin_seen is set once), and a duplicate costs 32
+         * bytes.  With the old 4 KiB window a single record after the long
+         * PAD stream was measured not to reach the near's parser at all. */
+        int i;
+
+        for (i = 0; i < 3; i++)
+        {
+            raw_send_fin(fd, idx, sid, sidhi, 0);
+            msleep(100);
+        }
         rc = wait_child_timeout(pid, 6000);
     }
     else if (rst)
@@ -2558,12 +2675,16 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
                : (seen && rc == 0 && hiwat1 > hiwat0 && klog_check(name) == 0),
            "%s under carrier backpressure: %s=%d eof=%d child_rc=%d "
            "pump_hiwat %llu -> %llu (must grow) holes_unrecoverable %llu -> %llu; "
-           "tx_ack=%llu txq=%llu rx_records=%llu hole_checks=%llu time_fail=%llu",
+           "tx_ack=%llu txq=%llu rx_records=%llu hole_checks=%llu time_fail=%llu "
+           "parsed=%d last_type=%u wire=%llu car_wmem=%llu rb_set=%d rb_now=%d "
+           "brk=%d rfail=%d",
            rst ? "RST" : "FIN", rst ? "rst_seen" : "fin_seen", seen,
            !rst && rc == 0, rc, hiwat0, hiwat1, hu0, hu1,
            stat_key(tunnel, "tx_ack"), stat_key(tunnel, "txq"),
            stat_key(tunnel, "rx_records"), stat_key(tunnel, "hole_checks"),
-           stat_key(tunnel, "time_fail"));
+           stat_key(tunnel, "time_fail"), parsed, last_type,
+           stat_key(tunnel, "wire"), stat_key(tunnel, "car_wmem"),
+           rb_set, rb_now, brk, rfail);
     close(fd);
     close(ls);
     return failures;
