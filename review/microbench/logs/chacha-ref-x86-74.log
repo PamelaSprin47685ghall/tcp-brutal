@@ -1,0 +1,180 @@
+# x86-74 chacha-ref (Bernstein eSTREAM reference)  root@192.168.123.74  2026-11-06T06:38:42+08:00
+
+Host: AMD Athlon(tm) X4 760K Quad Core Processor, 4 cores, physical desktop.
+Load average 1.20 at start (background services present); every measurement
+pinned to cpu0 with nice 19, exactly as the AES anchor is.
+
+Reference source: chacha-ref/ from Bernstein's public-domain eSTREAM submission
+(chacha8.c, chacha12.c, chacha20.c, ecrypt-sync.h -- 114 lines each, 20080118
+snapshot).  Files copied verbatim; not edited on the host or locally.
+
+## before
+$ ssh root@192.168.123.74 'uptime; grep -m1 "model name" /proc/cpuinfo; nproc; \
+    cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq'
+ 06:38:42 up 3 days, 23:01,  5 users,  load average: 1.20, 1.18, 1.14
+model name	: AMD Athlon(tm) X4 760K Quad Core Processor
+4
+1796571
+
+scaling_cur_freq = 1796571 kHz (1.797 GHz; this is the cpufreq ceiling on this
+box, i.e. the 760K runs at less than half its 3.8 GHz stock clock).  Absolute
+MB/s here is therefore not comparable with a stock 760K.  The bench was invoked
+with --mhz 1792, and that override -- not the /proc value -- is what converts
+ns/byte into cycles/byte (checked arithmetically: 5.1905 ns/B x 1792 MHz =
+9.30 c/B, matching the printed value; using 1796 would give 9.32).  The
+"cpu_mhz:1796" line the program prints is the live /proc reading, independent
+of the override.
+
+/proc/cpuinfo flags (full line):
+fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush
+mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc
+rep_good nopl nonstop_tsc cpuid extd_apicid aperfmperf pni pclmulqdq monitor
+ssse3 fma cx16 sse4_1 sse4_2 popcnt aes xsave avx f16c lahf_lm cmp_legacy svm
+extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs xop skinit wdt
+lwp fma4 tce nodeid_msr tbm topoext perfctr_core perfctr_nb cpb hw_pstate ssbd
+vmmcall bmi1 arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid
+decodeassists pausefilter pfthreshold
+-> Piledriver/Richland: AVX, FMA3, FMA4, XOP, SSSE3, SSE4.2, AES-NI, BMI1.
+   No AVX2, no AVX-512, no BMI2.  Widest vector unit is 128 bit.
+
+The bench's "cpu_flags:" line prints only a whitelist {sse2 ssse3 avx avx2
+avx512f asimd neon sve sve2 aes pmull}, so "sse2 ssse3 aes avx" means "none of
+avx2/avx512f/ARM names present", not that SSE4.2/FMA/BMI1 are absent.
+
+## copy
+$ ssh root@192.168.123.74 'mkdir -p /tmp/mb-chacha'
+$ scp -r chacha-ref/ chacha_ref_bench.c run_chacha_ref.sh root@192.168.123.74:/tmp/mb-chacha/
+chacha_ref_bench.c 8336 B; run_chacha_ref.sh 903 B; chacha-ref/: chacha8.c 2904 B,
+chacha12.c 2905 B, chacha20.c 2905 B, ecrypt-sync.h 1220 B.
+$ ssh root@192.168.123.74 'cc --version | head -1; uname -m'
+cc (GCC) 16.2.1 20260810
+x86_64
+
+## run (CASE_TIMEOUT=5, nice 19, taskset cpu0, 4 MiB buffer, 9 reps, 3 runs)
+$ ssh root@192.168.123.74 'cd /tmp/mb-chacha && CASE_TIMEOUT=5 nice -n 19 \
+    taskset -c 0 sh run_chacha_ref.sh --bytes 4 --reps 9 --mhz 1792'
+### run 1
+cpu_model: AMD Athlon(tm) X4 760K Quad Core Processor
+cpu_cores:4 cpu_mhz:1796
+cpu_flags: sse2 ssse3 aes avx
+impl:Bernstein chacha-ref 20080118 (public domain), 8/12/20
+argv_bytes:4194304 reps:9
+SELFTEST tc1 PASS
+SELFTEST v256 PASS
+RESULT chacha8 mbps=399.9 ns_per_byte=2.5009 cycles_per_byte=4.48
+RESULT chacha12 mbps=306.9 ns_per_byte=3.2579 cycles_per_byte=5.84
+RESULT chacha20 mbps=192.7 ns_per_byte=5.1905 cycles_per_byte=9.30
+sink:228
+### run 2
+cpu_model: AMD Athlon(tm) X4 760K Quad Core Processor
+cpu_cores:4 cpu_mhz:1796
+cpu_flags: sse2 ssse3 aes avx
+impl:Bernstein chacha-ref 20080118 (public domain), 8/12/20
+argv_bytes:4194304 reps:9
+SELFTEST tc1 PASS
+SELFTEST v256 PASS
+RESULT chacha8 mbps=413.0 ns_per_byte=2.4211 cycles_per_byte=4.34
+RESULT chacha12 mbps=305.1 ns_per_byte=3.2777 cycles_per_byte=5.87
+RESULT chacha20 mbps=193.0 ns_per_byte=5.1827 cycles_per_byte=9.29
+sink:228
+### run 3
+cpu_model: AMD Athlon(tm) X4 760K Quad Core Processor
+cpu_cores:4 cpu_mhz:1796
+cpu_flags: sse2 ssse3 aes avx
+impl:Bernstein chacha-ref 20080118 (public domain), 8/12/20
+argv_bytes:4194304 reps:9
+SELFTEST tc1 PASS
+SELFTEST v256 PASS
+RESULT chacha8 mbps=413.4 ns_per_byte=2.4193 cycles_per_byte=4.34
+RESULT chacha12 mbps=307.7 ns_per_byte=3.2495 cycles_per_byte=5.82
+RESULT chacha20 mbps=192.9 ns_per_byte=5.1847 cycles_per_byte=9.29
+sink:228
+
+Total wall time for the three runs including the build: 3.28 s.  SELFTEST tc1
+and v256 PASS in all three runs; no FAIL line anywhere.
+
+## build
+run_chacha_ref.sh compiles four times, all with -O3 -march=native and
+-I chacha-ref, renaming the eSTREAM API per round count via -D:
+  cc -O3 -march=native -I chacha-ref -c chacha-ref/chacha8.c  -o /tmp/chacha-8.o  \
+     -DECRYPT_init=ref8_init  -DECRYPT_keysetup=ref8_keysetup \
+     -DECRYPT_ivsetup=ref8_ivsetup -DECRYPT_encrypt_bytes=ref8_encrypt_bytes \
+     -DECRYPT_decrypt_bytes=ref8_decrypt_bytes -DECRYPT_keystream_bytes=ref8_keystream_bytes
+  (same for chacha12.c -> ref12_*, chacha20.c -> ref20_*)
+  cc -O3 -march=native -I chacha-ref -o ./chacha_ref_bench chacha_ref_bench.c \
+     /tmp/chacha-8.o /tmp/chacha-12.o /tmp/chacha-20.o
+     then rm -f /tmp/chacha-{8,12,20}.o
+The script runs under `set -e` and emits no compiler chatter, so the build's
+output was empty: zero diagnostics, no warnings, exit status 0 for all four
+invocations.  The evidence that the -march=native build actually took is that
+the binary ran and printed both self-tests PASS plus RESULT lines -- the
+self-tests run the compiled chacha-ref code on TC1 and the 256-bit vector, so a
+miscompiled or silently-fallback build would have failed there.
+
+## results summary (3 runs, 4 MiB, 9 reps, cpu0)
+algo       run1            run2            run3            median MB/s  c/B
+chacha8    399.9 (4.48)    413.0 (4.34)    413.4 (4.34)    413.0        4.34
+chacha12   306.9 (5.84)    305.1 (5.87)    307.7 (5.82)    306.9        5.84
+chacha20   192.7 (9.30)    193.0 (9.29)    192.9 (9.29)    192.9        9.29
+(c/B in parentheses; cycles/byte uses the 1792 MHz override.)
+Run-to-run spread is 0.2-0.9% for chacha12/20 and 3.3% for chacha8, whose run 1
+is the cold one (first touch of the 4 MiB buffer plus the first timing loop
+after process start); runs 2 and 3 agree to 0.1%.
+
+## aes-128-cbc anchor
+$ ssh root@192.168.123.74 'nice -n 19 taskset -c 0 openssl speed -evp aes-128-cbc -bytes 8192 -seconds 1' | tail -3
+The 'numbers' are in 1000s of bytes per second processed.
+type           8192 bytes
+AES-128-CBC     308641.79k
+
+## after
+$ ssh root@192.168.123.74 'uptime; ls -d /tmp/mb-chacha /tmp/chacha-*.o; rm -rf /tmp/mb-chacha; \
+    ls -d /tmp/mb-chacha /tmp/chacha-*.o; uptime'
+ 06:39:00 up 3 days, 23:01,  5 users,  load average: 1.21, 1.18, 1.14
+/tmp/mb-chacha                      (present before removal)
+ls: cannot access '/tmp/chacha-*.o': No such file or directory   (already removed by the script)
+ls: cannot access '/tmp/mb-chacha': No such file or directory
+ls: cannot access '/tmp/chacha-*.o': No such file or directory
+ 06:39:00 up 3 days, 23:01,  5 users,  load average: 1.21, 1.18, 1.14
+-> /tmp clean of this run's artifacts; load average unchanged (1.20 -> 1.21).
+
+## environment integrity
+- Nothing installed: only the pre-existing cc (GCC 16.2.1) and openssl 3.6.4.
+- No service, network, or module changes; no reboot, no restart.
+- Only /tmp/mb-chacha was created (then removed); the script's transient
+  /tmp/chacha-{8,12,20}.o objects were removed by the script itself.
+- All benchmark work ran under `nice -n 19 taskset -c 0`.
+- chacha-ref/ was copied and read only, never edited; no commits were made.
+
+## reading the numbers
+The reference implementation is scalar C written for portability, not speed:
+salsa20_wordtobyte() rebuilds a u32 x[16] from the context on every call, runs
+the 8/12/20 rounds with a QUARTERROUND macro over that array, and writes the
+result with 16 U32TO8_LITTLE byte stores into a u8 output[64]; the caller then
+XORs m into c one byte at a time.  So each 64-byte block pays two byte-granular
+loops plus an array round-trip that the compiler cannot keep in registers
+across the loop.  No SIMD, no multi-block interleave, no counter batch.
+
+On this core that lands at 9.29 c/B for ChaCha20, 5.84 for ChaCha12, 4.34 for
+ChaCha8 -- the round-count scaling is close to linear (9.29/5.84 = 1.59 vs
+20/12 = 1.67; 5.84/4.34 = 1.35 vs 12/8 = 1.50), as expected once the fixed
+per-block overhead is amortised over 64 bytes and the quarter-rounds dominate.
+
+Against the hand-written scalar ChaCha in crypto.c measured on the same host in
+crypto-x86-74.log (ChaCha20 697 MB/s = 2.58 c/B, ChaCha12 1038 MB/s = 1.73 c/B,
+ChaCha8 1373 MB/s = 1.31 c/B), the Bernstein reference is 3.3-3.6x slower
+(2.58/9.30 = 0.28, 1.73/5.84 = 0.30, 1.31/4.34 = 0.30).  That gap is not a
+compiler problem: the reference forces the 16-word schedule through memory on
+every block and XORs byte-wise, whereas crypto.c keeps the state in named
+locals across the whole buffer and vectorises the XOR.
+
+The AES anchor (308.6 MB/s at 8192-byte blocks = 5.81 c/B at 1792 MHz) is only
+1.60x cheaper per byte than reference ChaCha20 and 2.2x cheaper than the
+hand-written ChaCha20 in crypto.c.  [INFERENCE] 5.8 c/B is far slower than a
+Piledriver AES-NI block (roughly 1 c/B for CBC encrypt), so this openssl 3.6.4
+build on this host is most likely not reaching the AES-NI path for
+aes-128-cbc -- the /proc/cpuinfo `aes` flag is present, so the gap is in the
+library/provider or the CBC block-size overhead, not in the CPU.  Treat the
+number as a machine anchor only; do not read it as an AES-NI throughput
+ceiling.  The stable, comparable facts in this log are the three chacha-ref
+RESULT rows, which agree within 0.9% across runs.

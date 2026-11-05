@@ -1,0 +1,61 @@
+# HND0 Bernstein-ref ChaCha root@45.11.1.62  2026-11-06T06:39:54+08:00
+## before
+ 22:39:57 up 1 day, 15:28,  1 user,  load average: 1.64, 1.07, 0.68
+               total        used        free      shared  buff/cache   available
+Mem:             955         397         193           1         510         557
+model name	: QEMU Virtual CPU version 2.5+
+cpu MHz		: 2199.996
+2
+    PID PSR %CPU COMMAND
+ 863655   1  400 ps
+ 863648   1 10.0 bash
+ 863466   0  4.1 systemd
+ 863598   1  2.5 sshd-session
+ 863351   1  1.0 warp-go
+   8537   0  0.6 hysteria
+ 287503   0  0.6 frps
+## run (nice 19, cpu0, 4 MiB, 15 reps, 3 runs, timeout 5/run)
+### run 1
+cpu_model: QEMU Virtual CPU version 2.5+
+cpu_cores:2 cpu_mhz:2199
+cpu_flags: sse2
+impl:Bernstein chacha-ref 20080118 (public domain), 8/12/20
+argv_bytes:4194304 reps:15
+SELFTEST tc1 PASS
+SELFTEST v256 PASS
+RESULT chacha8 mbps=262.4 mbps_max=489.6 ns_per_byte=2.0423 cycles_per_byte=4.49
+RESULT chacha12 mbps=232.0 mbps_max=260.6 ns_per_byte=3.8367 cycles_per_byte=8.44
+RESULT chacha20 mbps=227.3 mbps_max=248.0 ns_per_byte=4.0324 cycles_per_byte=8.87
+sink:228
+### run 2
+cpu_model: QEMU Virtual CPU version 2.5+
+cpu_cores:2 cpu_mhz:2199
+cpu_flags: sse2
+impl:Bernstein chacha-ref 20080118 (public domain), 8/12/20
+argv_bytes:4194304 reps:15
+SELFTEST tc1 PASS
+SELFTEST v256 PASS
+RESULT chacha8 mbps=506.7 mbps_max=550.0 ns_per_byte=1.8181 cycles_per_byte=4.00
+RESULT chacha12 mbps=382.2 mbps_max=404.2 ns_per_byte=2.4741 cycles_per_byte=5.44
+RESULT chacha20 mbps=273.9 mbps_max=294.6 ns_per_byte=3.3941 cycles_per_byte=7.47
+sink:228
+### run 3
+cpu_model: QEMU Virtual CPU version 2.5+
+cpu_cores:2 cpu_mhz:2199
+cpu_flags: sse2
+impl:Bernstein chacha-ref 20080118 (public domain), 8/12/20
+argv_bytes:4194304 reps:15
+SELFTEST tc1 PASS
+SELFTEST v256 PASS
+RESULT chacha8 mbps=602.0 mbps_max=648.6 ns_per_byte=1.5417 cycles_per_byte=3.39
+RESULT chacha12 mbps=459.7 mbps_max=502.5 ns_per_byte=1.9899 cycles_per_byte=4.38
+RESULT chacha20 mbps=304.0 mbps_max=328.4 ns_per_byte=3.0454 cycles_per_byte=6.70
+sink:228
+## aes-128-cbc anchor
+The 'numbers' are in 1000s of bytes per second processed.
+type           8192 bytes
+AES-128-CBC     136173.00k
+## after
+ 22:40:10 up 1 day, 15:29,  1 user,  load average: 1.54, 1.07, 0.69
+               total        used        free      shared  buff/cache   available
+Mem:             955         399         191           1         511         556
