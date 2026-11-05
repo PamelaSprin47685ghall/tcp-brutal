@@ -56,9 +56,18 @@ full-suite pass.
   purged and a lone RST no longer woke the 2 ms timer; it waited for an unrelated
   `sk_write_space` that a quiet carrier never produces. The timer now also tests
   `ctl_queued`, the pinned-frame count (paired on enqueue, write, failure and obsolete
-  drop; zeroed with the queue). Measured: `near.rst_eagain` went from `rst_seen=0`
-  (record already in `wire`, `ctl_lost=0`) to `rst_seen=1` with `ctl_lost=0` and
-  `ctl_queued=0`; near 14/14, three consecutive runs.
+  drop; zeroed with the queue). Measured: before the fix the RST sometimes never left
+  the module queue (`wire` lacked the 32-byte record); after it the record is in `wire`
+  with `ctl_lost=0`, `ctl_queued=0`. Delivery can still be delayed by the carrier's TCP
+  zero-window persist (next entry).
+- **Carrier stall vs peer pause:** `tbt_car_poll_work()` now defers the stall/loss
+  decision while `peer_paused` (session or stream) or our own delivery pause is set,
+  restarts the window, and counts `stall_paused_skips`. Measured in
+  `near.rst_eagain`: `peer_paused=1`, `lost=0`, `replaced=0`,
+  `stall_paused_skips=1184` during the paused drain; previously `lost=1 replaced=1`.
+  A separate zero-window persist delay still keeps that attack red: the RST is in
+  `wire`, `brk=0`, `rfail=0`, but the far stops at ~71 records and the sender does
+  not deliver the last ~282 bytes for 60 s.
 - **Review 23:** `hole_budget_ms=0` and `rx_reorder_bytes=0` are refused with `EINVAL`
   instead of creating a tunnel that dies on its first hole or reordered frame. The
   accepted ranges are now `1..60000` and `1..268435456`; omitted keys keep their

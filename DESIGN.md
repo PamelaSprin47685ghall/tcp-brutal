@@ -847,8 +847,20 @@ frames are purged and only its RST remains; the 2 ms `w_pump` timer then tested
 `tbt_tx_free_queue()` zeroes it with the queue. The timer now runs the pump for a
 control frame with no payload; the frame is written on its first retry after the
 carrier's memory frees. Measured with `near.rst_eagain` (raw n=1, 512 KiB backlog):
-the RST reached the far in the same 30 s window that previously reported
-`rst_seen=0` with the record already in `wire`; `ctl_lost=0`, `ctl_queued=0`.
+before the fix the RST sometimes never left the module queue (`wire` lacked the
+32-byte record); after it the record is in `wire` with `ctl_lost=0`, `ctl_queued=0`.
+Delivery can still be delayed by the carrier's TCP zero-window persist, a separate
+condition documented under "Carrier stall vs peer pause" below.
+
+**Carrier stall vs peer pause.** `tbt_car_poll_work()` marks a carrier lost when
+`snd_una` has not moved for `carrier_stall_ms` while `snd_nxt` did. A peer that reports a
+full delivery queue (FBK rx_state=2, published as `peer_paused`) or whose delivery queue
+we see full (`st->paused`) cannot advance the ack, so the decision is deferred: the
+window restarts each poll and `stall_paused_skips` counts the deferral, matching
+`tbt_tx_stall_check()`. A resume gets a full `carrier_stall_ms`; a genuinely dead socket
+still fails on `!sk` or a non-ESTABLISHED state. Measured in `near.rst_eagain`:
+`peer_paused=1`, `lost=0`, `replaced=0`, `stall_paused_skips=1184` during the paused
+drain; before the gate the same window reported `lost=1 replaced=1`.
 
 **RTT.** The sender maintains `rtt_min_us` and an EWMA (`(7*old + new)/8`) per path from
 two sources: the FBK's `rtt_us` (the receiver's TCP SRTT of the carrier), and, when a path's

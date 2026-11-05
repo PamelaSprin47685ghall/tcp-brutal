@@ -190,6 +190,35 @@ static void tbt_car_tx_work(struct work_struct *w)
     tbt_tx_pump(c->sess);
 }
 
+/* A peer that is not reading cannot advance snd_una; the same rule
+ * tbt_tx_stall_check() applies to the stream timer.  Scan the live streams so
+ * a per-stream pause is seen even when the session mirror has moved on. */
+static bool tbt_car_paused(struct tbt_session *sess)
+{
+    struct tbt_stream *st;
+    bool paused = READ_ONCE(sess->peer_paused);
+    int i;
+
+    if (paused)
+        return true;
+    rcu_read_lock();
+    for (i = 0; i < TBT_STREAM_HT; i++)
+    {
+        hlist_for_each_entry_rcu(st, &sess->streams[i], node)
+        {
+            if (READ_ONCE(st->peer_paused) || READ_ONCE(st->paused))
+            {
+                paused = true;
+                break;
+            }
+        }
+        if (paused)
+            break;
+    }
+    rcu_read_unlock();
+    return paused;
+}
+
 /* C2/C3 liveness net. The event-driven path is the normal driver, but a wake
  * can be coalesced with a run that then finds nothing, or lost against a pause
  * transition; a queue then sits full with no scheduled reader. Re-check the
@@ -279,6 +308,7 @@ static void tbt_car_poll_work(struct work_struct *w)
          * loss. Only "sent but never acked" (snd_una static while the wire
          * moved) or a closed socket counts as a stall. */
         bool blocked = nxt == c->last_nxt && wmem > 0;
+        bool paused = tbt_car_paused(sess);
 
         if (una != c->last_una)
         {
@@ -289,7 +319,16 @@ static void tbt_car_poll_work(struct work_struct *w)
             c->last_una_move_ns = now;
         }
         c->last_nxt = nxt;
-        if (blocked)
+        if (paused)
+        {
+            /* Delivery backpressure, not loss: while the peer reports a full
+             * queue (or our own delivery queue is full) no ack can move.
+             * Restart the window so a resume gets a full carrier_stall_ms,
+             * and count the deferred decision in stats. */
+            c->last_una_ns = now;
+            sess->stall_paused_skips++;
+        }
+        else if (blocked)
         {
             c->last_una_ns = now;
         }

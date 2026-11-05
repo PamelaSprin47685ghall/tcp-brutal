@@ -482,6 +482,7 @@ struct tbt_session
     s32 rx_last_err;
     u64 carrier_write_space_runs;
     u64 poll_rescues;
+    u64 stall_paused_skips; /* carrier stall decisions deferred by peer pause */
     u64 tx_wake_calls, tx_wake_busy, tx_work_runs;
     u64 carrier_bytes, carrier_err, carrier_short;
     u64 carrier_ws_calls;
