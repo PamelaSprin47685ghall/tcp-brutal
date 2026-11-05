@@ -28,8 +28,16 @@ Current result: `test_rlnc` PASS, 1000/1000 window-loss cases recovered,
 
 ## Parameters
 
-Production shape: `N+M=256`, `K=N`, `W=2K`, `S=8192`, `d=16`.
-Dynamic `M = clamp(ceil(256*(p+0.09)), 16, 128)` rounded up to 8.
+Production shape (HND0): 256 carriers = 32 groups x 8, 1 share/carrier.
+Per group `N=8-M`, `K=N`, `W=2N`, `S=8192`, `d=W/2` (never `d=W`: the
+generator then produces identical all-ones rows and rank 1), with
+`M=4/d=4` (500M, default), `M=5/d=3` (375M), `M=6/d=2` (250M);
+`M=3/d=5` (625M) only holds at p<=1%.
+The controller picks `M` per group from the measured loss rate; the packet
+window `W` is not the send byte window `k*BDP`.
+
+Small `N=4/M=1` or `N=16/M=4` runs are debug/control shapes, not the
+production profile.
 
 ## Not tested here
 

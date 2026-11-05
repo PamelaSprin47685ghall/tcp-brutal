@@ -1,0 +1,41 @@
+# HND0 root@45.11.1.62  2026-11-06T06:08:37+08:00
+## before
+ 22:08:39 up 1 day, 14:57,  1 user,  load average: 0.20, 0.33, 0.36
+               total        used        free      shared  buff/cache   available
+Mem:             955         359         117           1         625         596
+Swap:            511          66         445
+model name	: QEMU Virtual CPU version 2.5+
+2
+## build + single-core run (nice 19, cpu0, mem 128 MiB)
+cpu_model: QEMU Virtual CPU version 2.5+
+cpu_cores:2
+cpu_mhz_cpu0:0
+cpu_flags: sse2
+build_macros: sse2 gcc=15.2
+argv_mem_mib:128
+argv_threads:1
+packet_bytes:1200 generation_packets:16 rlnc_data_bytes:1048576
+RESULT memcpy threads=1 mbps=4031.5 ns_per_byte=0.2480
+RESULT xor threads=1 mbps=2432.4 ns_per_byte=0.4111
+RESULT encode W=8 d=8 mbps=1031.7 ns_per_byte=0.9693
+SKIP encode W=8 d=12 (d>W)
+SKIP encode W=8 d=16 (d>W)
+RESULT encode W=16 d=8 mbps=988.1 ns_per_byte=1.0121
+RESULT encode W=16 d=12 mbps=685.1 ns_per_byte=1.4596
+RESULT encode W=16 d=16 mbps=460.0 ns_per_byte=2.1739
+RESULT encode W=32 d=8 mbps=1015.3 ns_per_byte=0.9850
+RESULT encode W=32 d=12 mbps=669.8 ns_per_byte=1.4930
+RESULT encode W=32 d=16 mbps=519.2 ns_per_byte=1.9261
+RESULT decode W=16 k=2 mbps=842.4 ns_per_byte=1.1871 verify=ok
+RESULT decode W=16 k=4 mbps=719.9 ns_per_byte=1.3891 verify=ok
+RESULT decode W=16 k=8 mbps=739.9 ns_per_byte=1.3515 verify=ok
+sink:0
+## openssl aes-128-cbc anchor
+The 'numbers' are in 1000s of bytes per second processed.
+type           8192 bytes
+AES-128-CBC     144523.26k
+## after
+ 22:08:48 up 1 day, 14:57,  1 user,  load average: 0.80, 0.45, 0.40
+               total        used        free      shared  buff/cache   available
+Mem:             955         363         297           1         441         592
+Swap:            511          67         444

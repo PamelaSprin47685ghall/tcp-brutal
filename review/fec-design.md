@@ -10,17 +10,15 @@
 |---|---|
 | 块式还是流式 | **流式滑窗**。块式的交付条件是「凑够 N 份 share」，这是 `max of N` 的尾延迟，发生在正常路径；流式逐包交付，没有块 barrier。§4 |
 | 编码方案 | **唯一的码型：流式 GF(2) 稀疏随机线性码（sliding-window RLNC）**。逐包、无块 barrier、XOR 成本 `(M/K)×d`；可行性取决于 `d` 与 `W` 的比例，见 §3.5。 |
-| 生产参数（1G 物理口，定稿） | **grouped 32×8**：`M=2/d=12` → 750M；`M=3/d=10` → 625M；`M=4/d=8` → 500M；`M=5/d=6` → 375M（p=30% 要 99.9% 时）。§3.8 |
-| **1G 物理口 + 256 五元组** | **grouped 滑窗 RLNC：32 组 × 8 carriers；M 在 2/3/4 间切；app 500–750 Mbit/s**。§3.8 |
-
+| **HND0 生产（定稿）** | **256 carriers；先测 p 再选码型：p≤20% single sparse 256（M=64/d=64，750M，5.33 GB/s，恢复 0.9994+）；20%<p≤30% grouped 32×8（M=5/d=3 375M）；p=30–50% SC-LDPC 首选（基于 npminh12 的 C 原型，等数据），grouped M=6/d=2 250M 是 fallback。`d=W` 退化，禁止。p=50% 的 app 上界 500M，现实 350–450M；500–750M 只适用 p≤20%。**§13 |
 | 可行参数（低速率） | `W<=32, d<=16`：2–4 XOR/byte，所有架构可行（17M/300M）。§3.5 |
-| 小参数（原型 / 17M WAN） | `N=4, M=1, carriers=5, K=8, W=16, d=8, fec=rlnc`：wire 1.129，最坏恢复 46 ms。§8.7 |
-| 动态码率 | `M = clamp(ceil(256×(p+0.09)), M_min, M_max)`，`N=256-M`；epoch 1 s、滞回 8；epoch 只改 parity 参数，不改数据 seq。§3.7 |
+| 小参数（**非生产对照**） | `N=4, M=1, carriers=5, K=8, W=16, d=8`：wire 1.129，最坏恢复 46 ms；只用于调试/对照。§8.7 |
+| 动态码率（grouped） | 按 p 阈值切每组 M（≤1%→3，≤20%→4，≤30%→5，>30%→6）；`d=W/2`；epoch 1 s、滞回 1；epoch 只改 parity 参数，不改数据 seq。§3.8.7、§13.2 |
 | wire format | **独立的 FEC 格式（conv 0x1001）**：40 字节头、`share_index` u16、`epoch` u16、`n/m` u8、256 位反馈 bitmap。**不复用旧 16-carrier ARQ 的帧头/FBK/WINDOW**；改常量解决不了 16 槽限制。§2.2、§11.2 |
 | 窗口 | `W_send = k × BDP_wire / (S × (K+M)/K)`，`k = clamp(RTO/mean_srtt, 2, 5)`；上限由接收端缓冲与 credit 决定。§7 |
 | 失败模型 | 1 share/carrier 时 carrier 级故障 = 1 个 share erasure，MDS 直接适用；`M=32` 容忍 32 条 carrier 同时断。若改成 k shares/carrier，必须 `M >= k × 目标故障数`。§11.6 |
 | 迁移 | 保留 carrier/HTTP/procfs/sock；替换 per-frame seq/retain/retx/dup/hole。§9 |
-| 参考实现 | Kodo 的 sliding-window / sparse RLNC（算法与测试向量参考，不复制代码）；其他码型不采用。§12 |
+| 参考实现 | Kodo 的 sliding-window / sparse RLNC（算法与测试向量参考，不复制代码）；其他码型不采用。§14 |
 | 第一交付 | 本文档；原型在 `review/fec-prototype/`，先 host，不写内核。§9.5 |
 
 **一句话**：用 N 条数据载体连续发 packet，M 条 parity 载体发覆盖滑动窗口的 GF(2) 随机线性组合；接收端逐包交付，缺包用 GF(2) 消元恢复；N+M 固定 256，M 随实测丢包率动态调整；没有块边界，没有 GF(2^8) 乘加。
@@ -63,7 +61,7 @@ WAN 实测（`review/wan-experiment/summary.md`）：直连 P1/P4/P8 为 17.08/3
 - 双向、字节精确、有序的应用字节流，语义与普通 TCP 连接一致。
 - 数据面全内核；无用户态进程、无字符设备、无每流 syscall 对。
 - **流式滑窗 (N+M, N) 纠删码，N/M/W 全部运行时配置**：N 条数据载体 + M 条 parity 载体；parity 覆盖滑动窗口 W；接收端任意足够方程可重构；没有块交付边界。
-- **通用 N/M**：总 share 数 `N+M <= 255`；GF 约束是编码矩阵 `M+W <= 256`。`n/m` 是 FEC 参数，`carriers=` 是 TCP 连接数；目标部署是 **1 share/carrier**（`carriers = n+m`），也允许 `carriers < n+m` 的降级映射。不写死 N=4/M=1。
+- **通用 N/M**：总 share 数 `N+M <= 256`；索引用 `u16`（`u8` 在 256 处截断，见 §11.9）；GF 约束是编码矩阵 `M+W <= 256`。`n/m` 是每组 FEC 参数，`carriers=` 是 TCP 连接数；生产是 **1 share/carrier**（`carriers = groups × (n+m) = 256`），也允许 `carriers < n+m` 的降级映射。不写死 N=4/M=1。
 - **单一码型**：GF(2) 滑窗 RLNC；无 GF(2^8) 乘加、无块 barrier、mips 可行。`fec=rlnc` 是唯一值。§3。
 - 解码前沿 `next_deliver` 推进；窗口滑动；窗口外不可恢复时有界 reset。
 - 窗口 `W_send = k × BDP / wire_rate`；硬上限由接收端包缓冲决定；给出内存上界与 credit。
@@ -74,7 +72,7 @@ WAN 实测（`review/wan-experiment/summary.md`）：直连 P1/P4/P8 为 17.08/3
 
 - **不做块式 FEC 作为主路径。** 块式（每 B 字节独立编码、等 N 份 share）只作为对照与极端 fallback；它的 `max of N` 尾延迟是本设计要消除的对象。§4 给出完整对比。
 - **不做 ARQ 产品。** NACK 是可选的修复通道，不是主路径；主路径是「parity 方程一到就解」。
-- **不做加密。** 与 `http-kal` 的明文可见性冲突，沿用旧设计：要机密性就整体套 WireGuard。
+- **v1 不做加密。** 当前 tbtun 无加密；微基准里的 AES 只是算力锚点，不是产品算法。若以后加 payload 混淆，用 **ChaCha8/12**（软件快、无 AES-NI 依赖），只加密 HTTP chunk body、保留 HTTP 头以维持 QoS；不要整条 TLS/加密，否则丢掉 HTTP 容器的 QoS。FEC 设计不受影响；等 `microbench` 的 crypto 数字再定。
 - **不做 MDS。** 恢复保证是 iid 擦除下的高概率，不是「任意 M 个」的确定性保证；§3.5 给出 p 曲线。
 - **不复用旧 16-carrier wire。** 旧 ARQ 的 `path_ack_mask`/FBK/WINDOW/`path_gen[16]` 是结构性限制；FEC 用独立格式，两者靠 `conv` 区分。§2.2、§11.2。
 - **不做跨流交织。** 每流独立的 packet 空间。
@@ -332,7 +330,7 @@ for j in 0..d-1:
 - `session_nonce` 是 128 位，取低 64 位参与 seed；高 64 位混入。
 - 接收端只需要 `(nonce, g, r, W, d)`，不需要额外的系数头。
 
-**参考实现**：Kodo 的 sliding-window RLNC 用同一思路（确定性 PRNG + 收发共享 seed）。本设计不复制 Kodo 代码，只用它的算法结构与测试向量；详见 §12。
+**参考实现**：Kodo 的 sliding-window RLNC 用同一思路（确定性 PRNG + 收发共享 seed）。本设计不复制 Kodo 代码，只用它的算法结构与测试向量；详见 §14。
 
 **安全边界**：系数是公开的（可复现），不提供机密性；只提供「随机性」以避免对抗性擦除模式。若担心对手构造擦除，可以在 nonce 里加一个随机段。
 
@@ -425,9 +423,17 @@ M × (d/W) >= k = W × p        =>        d >= W² × p / M
 
 **为什么 W>K 不会让恢复变差**：窗口内丢失数 `W×p` 增加，但覆盖方程数 `(W/K)×M` 也按同样比例增加；净 overhead 不变，而「跨组修复」多了一层。模拟显示 W=2K 在所有 p 下都是 1.000。
 
-### 3.6 不采用的码型（一句话）
+### 3.6 码型取舍：主路径、升级候选、fallback
 
-RS 需要 `M` 次 GF 乘加/byte，mips 不可行；RaptorQ/LT 是块式 barrier；product/staircase 非 MDS 且恢复模式难验证；SC-LDPC 复杂度高一个量级。它们都不满足「流式 + 大 N/M + mips 可行」的组合，不进实现。
+| 码型 | 定位 | 结论 |
+|---|---|---|
+| **sparse RLNC（本设计）** | v1 主路径 | 流式、XOR、低 p 便宜；高 p 需要 dense `d`，CPU 顶到 |
+| **SC-LDPC** | single 256 的**升级候选** | near-capacity、低度 XOR；**决定基于 npminh12（MIT，单文件 C++ 构造/BP）clean-room 改写为 C99**，放 `review/fec-prototype/sc_ldpc/`；支持块 256/512、L=8/16/32、码率 0.5/0.4/0.35；host 原型，不先写内核 |
+| **RaptorQ（nanorq）** | **block fallback / 对照** | 有成熟 C11/MIT 实现（RFC 6330，golden MD5）；**不是流式**，block barrier；只作高 p fallback 与对照，不替代主路径 |
+| **RS GF(2^8)** | 对照 | MDS，但 `M` 次 GF 乘加/byte，CPU 太高；不采用 |
+| **dense GF(2) RLNC** | 对照 | XOR，但 `d=W` 太贵；只作上界参考 |
+
+product/staircase 非 MDS 且恢复模式难验证，不采用。**SC-LDPC 是升级候选，不是生产承诺；RaptorQ 是 fallback，不是流式主路径。**
 
 
 ### 3.7 动态码率：N+M=256，M 随 p 调整
@@ -587,7 +593,7 @@ fec_hysteresis=8
 
 ```
 256 carriers = 32 groups × 8 carriers
-每组: N = 8 - M, K = N, W = 2N, d = min(W, 8..10)
+每组: N = 8 - M, K = N, W = 2N, d = W/2（禁止 d=W）
 应用字节流按 group = seq % 32 条带化（striping）
 ```
 
@@ -618,6 +624,13 @@ host 模拟（GF(2) 随机稀疏，800 次/点，`K=N`, `W=2N`）：
 - `M=4, d=8`（稠密）在 p<=30% 是 0.996，接近 99.9%。
 - **要 99.9%+，M 必须随 p 增大**；`M=4` 是 p<=20% 的安全档。
 
+> **2026-11-06 修正（覆盖 3.8.2–3.8.7 的旧表）**：上表 `d=W` 的行
+> （M=4/N=4/d=8、M=5/N=3/d=6、M=6/N=2/d=4）在实现上退化：
+> `rlnc_coeffs()` 取 `d` 个互异位置，`d=W` 时每个 parity 行都是整窗全 1，
+> 组内 M 行逐字节相同，秩恒为 1。实测见 `review/hnd0-sim.md` §2–3；
+> 这些行的 99% 数字不成立。`d<W` 的行也无法按原 trial 复现，只作量级参考。
+> **生产参数以 §3.8.7 的修正表和 §13.2 为准，且一律 `d=W/2`。**
+
 #### 3.8.2.1 32×8 vs 16×16
 
 host 模拟（500 次/点，`K=N`, `W=2N`）：
@@ -642,6 +655,8 @@ host 模拟（500 次/点，`K=N`, `W=2N`）：
 
 编码 XOR/byte = `(M/N) × d × q`，q=2。
 
+**2026-11-06 修正**：上表的 `d=W` 行（M=3/d=10、M=4/d=8）退化，不能上线；M=2/d=12 也退化。生产用 `d=W/2`：M=2/d=6 → 4 XOR/byte → 0.5 GB/s；M=3/d=5 → 6 → 0.75 GB/s；M=4/d=4 → 8 → 1.0 GB/s。上表的 667 MB/s 是 M=2/d=8 的值，仅作参考。详见 §13.3。
+
 **arm64 SIMD 32B**：1.5 GB/s = 46.9 M 指令/s，约 5–10% 单核；2.0 GB/s = 62.5 M，约 8–15%。**可行。**
 **mips**：DRAM 271 MiB/s，1.5 GB/s 是它的 5.5 倍；不可行。
 
@@ -665,6 +680,10 @@ host 模拟（500 次/点，`K=N`, `W=2N`）：
 - **一组 reset 不等于全局 reset**：该组的 seq 空洞由 NACK 或窗口外判据处理；若该组永久不可恢复，只有该组的 seq 被丢弃（应用层看到的是流中断，不是整条隧道 reset）。这是 grouped 相对单码的另一个优势。
 
 #### 3.8.6 动态 M
+
+> **2026-11-06 修正**：本节旧规则与恢复率基于 `d=W`，已作废（`d=W` 退化，
+> 见 §3.8.2 的修正段）。控制器以 §3.8.7 的阈值表为准：p≤1% → M=3/d=5；
+> p≤20% → M=4/d=4；p≤30% → M=5/d=3；p>30% → M=6/d=2。`d` 始终 `W/2`。
 
 两种规则对比（32×8，`W=2(8-M)`）：
 
@@ -711,23 +730,25 @@ M_group = clamp(ceil(1.3 × W × p) + 1, 1, 4)   /* W = 2(8 - M_group) */
 
 **定稿（选项 A）**：**256 carriers + 物理口 1G + app goodput 500–750 Mbit/s**。不要求 1G app；parity 占满物理口是设计的一部分。
 
-| p | M | N | W | d | 码率 | app | 恢复率 |
-|---:|---:|---:|---:|---:|---:|---:|---:|
-| <=5% | 2 | 6 | 12 | 12 | 75% | 750 Mbit/s | 98.9%（d=12） |
-| <=10% | 3 | 5 | 10 | 10 | 62.5% | 625 | 100% |
-| <=20% | 4 | 4 | 8 | 8 | 50% | 500 | 99.1% |
-| <=30% | 5 | 3 | 6 | 6 | 37.5% | 375 | 99.9% |
-| p>30% | 6 | 2 | 4 | 4 | 25% | 250 | 100% |
+**2026-11-06 修正：`d=W` 是退化的。** `rlnc_coeffs()` 取 `d` 个互异位置，`d=W` 时每个 parity 行都是整窗全 1，组内 M 行逐字节相同，秩恒为 1。原表所有 `d=W` 行（M=2/3/4/5/6 的 d=12/10/8/6/4）作废。**生产用 `d=W/2`**，实测见 `review/hnd0-sim.md`：
+
+| p 区间 | M | N | W | d | 码率 | app | 32 组联合恢复率 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| ≤1% | 3 | 5 | 10 | 5 | 62.5% | 625 Mbit/s | 0.9974 |
+| ≤20% | 4 | 4 | 8 | 4 | 50% | **500** | 0.9987（p=10%）、0.9898（p=20%）；1.000（≤5%） |
+| ≤30% | 5 | 3 | 6 | 3 | 37.5% | 375 | ≥0.9971（0/50000 失败下界） |
+| >30% | 6 | 2 | 4 | 2 | 25% | 250 | ≥0.9971（0/50000 失败下界） |
 
 **tradeoff（定稿）**：
 
-- `p=5%` 要 99.9% → `M=3/d=10`（app 625M）；`M=2/d=12` 只有 98.9%。
-- `p=30%` 要 99.9% → `M=5/d=6`（app 375M）；`M=4/d=8` 只有 99.5%。
-- `M=4/500M` 在 p=30% 的 99.5% 是硬上限，不是实现问题。
+- `p=10%` 要 ≥0.998 → `M=4/d=4`（app 500M）；`M=3/d=5` 只有 0.660。
+- `p=30%` 要 ≥0.997 → `M=5/d=3`（app 375M）；`M=4/d=4` 只有 0.9278。
+- **750M 档不可用**：`M=2/N=6/d=6` 在 p=1% 联合只有 0.705。
+- `M=4/500M` 在 p=30% 的 0.9278 是硬上限，不是实现问题。
 
 **控制器按 p 选 M，不承诺「任意 p 都 99.9% + 500M」**；p 越高，app 越低，这是信息论的代价。
 
-**控制器**：`M = clamp(ceil(1.3×W×p)+2, 1, 6)`，按 p 在 M=2..6 间切；滞回 1（M 变化 >=1 就切，因为 M 只有 1..6）。
+**控制器**：按上表阈值切 M（p≤1% → M=3；p≤20% → M=4；p≤30% → M=5；p>30% → M=6）；滞回 1。`d` 始终取 `W/2`，**禁止 `d=W`**。
 
 **不再考虑降 carriers 或降吞吐。**
 
@@ -1338,7 +1359,7 @@ S 超过 8192 需要同步放大 `TBT_PAYLOAD_MAX`/`TBT_REC_MAX`/`TBT_CHUNK_MAX`
 
 | 场景 | 配置 | 理由 |
 |---|---|---|
-| 原型 / 17M WAN | `N=4, M=1, carriers=5, K=8, W=16, S=8K, d=8, fec=rlnc` | wire 1.129；最坏恢复 46 ms；XOR 成本 <1% |
+| 原型 / 单流对照（**非 HND0 生产**） | `N=4, M=1, carriers=5, K=8, W=16, S=8K, d=8, fec=rlnc` | wire 1.129；最坏恢复 46 ms；XOR 成本 <1%；只用于调试与对照 |
 | **1G 物理口 + 256 carriers（定稿）** | `32×8, M=2..5, K=N, W=2N, d=12/10/8/6` | app 750/625/500/375 Mbit/s；编码 667 MB/s–2.0 GB/s |
 | 1G mips | 同上，但 `M_max=48`, `d=8` | 编码 5–15% 单核；goodput ≤ 812 Mbit/s |
 | 中等规模对照 | `N=96, M=32, carriers=128, K=96, W=96, S=8K, d=16` | wire 1.333；2.29 XOR/byte |
@@ -1562,6 +1583,8 @@ test_fec: PASS — 2260 个解码组合 + 1000 轮 fuzz
 
 拓扑与 `review/wan-experiment` 相同：JYSZ（near，NAT）→ HND0（far），RTT 约 218 ms，直连 P1 17.08 Mbit/s。
 
+**以下是小 N/M 的单流对照，不是 HND0 生产验收。** 256 carriers grouped 32×8 的生产验收见 §13.8。
+
 | 配置 | 目标 |
 |---|---|
 | `N=4, M=1, K=8, W=16, S=8 KiB` | 单流 ≥ 17.08 Mbit/s；`wire/app ≤ 1.2`；`fec_reset = 0` |
@@ -1579,7 +1602,7 @@ test_fec: PASS — 2260 个解码组合 + 1000 轮 fuzz
 4. **吞吐**：真实 WAN 单流 ≥ 17.08 Mbit/s（直连 P1 基线），且不低于 `w-window` 同链路最好值。
 5. **开销**：`wire/app ≤ 1.2`（K=8/M=1）；`wire/app ≤ 1.2`（K=16/M=2）。
 6. **内存**：`fec_rx_mem_kb ≤ fec_rx_mem_max`；发送端缓冲 ≤ `W_send × S × (1 + M/K)`。
-7. **CPU**：1 Gbit/s 下 `cpu_total_pct ≤ 50%`（单核，含 TCP 22–31% + FEC ≤ 8% + 余量）；mips ≤ 70%。
+7. **CPU**：1 Gbit/s 下 2 vCPU 总占用 `≤80%`、单核 `≤70%`（含 TCP 22–31% + FEC + softirq）；HND0 的 256 条生产验收见 §13.8；mips ≤ 70%。
 8. **无回归**：`N=1, M=0` 退化路径的吞吐不低于旧实现的同配置。
 9. **可观测**：`/proc/net/tbtun/stats` 能解释每一次 reset（`fec_timeout`、`fec_crc_fail`、`fec_window_exceeded` 至少一项非零）。
 
@@ -1710,15 +1733,18 @@ per-carrier buffer = 512 KiB（实际值，含 snd+rcv）
 
 ### 11.7 推荐参数
 
-**生产默认**：
+**生产默认（HND0，256 carriers，grouped 32×8）**：
 
 ```
-n=16 m=4 carriers=20 packet=8192 k=16 w=32 d=16 fec=rlnc
-fec_m_min=4 fec_m_max=16 fec_margin=0.09 fec_epoch_ms=1000
-fec_hysteresis=8
+groups=32 group_size=8 carriers=256 packet=8192 fec=rlnc
+# 每组：N=4 M=4 K=4 W=8 d=4（默认，app 500M；d=W/2，禁止 d=W）
+# p<=1% 可用 M=3/N=5/W=10/d=5（625M）；p>20% 升 M=5/N=3/W=6/d=3（375M）；
+# p>30% M=6/N=2/W=4/d=2（250M）
+fec_m_min=4 fec_m_max=6 fec_epoch_ms=1000
+fec_hysteresis=1
 ```
 
-启动 `M=16`，控制器 2–3 个 epoch 内收敛。若链路质量未知，从 `M=32` 起步。mips 的 `M_max=48`、`d=8`。
+启动 `M=4`，控制器在 1–2 个 epoch 内按实测 `p` 收敛。**256 carriers 是 HND0 的生产形态**；5/10/20 条小 N/M 只是调试对照，不是生产默认。mips 的 `M_max=48`、`d=8` 仅适用于 MIPS 实验机，不适用于 HND0。
 
 **mips 降档**：`d=8` 把 M=64 的成本从 5.33 降到 2.67 XOR/byte（5–10% 单核）；恢复率与 d=16 差异 < 5%。
 
@@ -1768,7 +1794,7 @@ fec_hysteresis=8
 
 ### 12.2 可行性判定：这台设备不是 1G 平台
 
-**结论：1G / 256 carriers / RLNC 在 MT7621 上不可行。1G 目标只能放在 ARM64（NEON/多核）。**
+**结论：1G / 256 carriers / RLNC 在 MT7621 上不可行。1G 目标只能放在多核 x86_64 / ARM64；HND0 是 x86_64 2 vCPU，`.65` 是 ARM64 lab。**
 
 **先分清两种「不够」**：
 
@@ -1793,7 +1819,7 @@ fec_hysteresis=8
 - **RLNC W≤8 约 30–90 Mbps**。
 - **1G 口只是 L2 交换的 1G**：桥接模式下客户端流量走硬件交换，不进 CPU。
 
-**不要把 1G/256 的估算套到这台设备上。** §8、§11 的 1G 预算是 ARM64/x86 的目标。
+**不要把 1G/256 的估算套到这台设备上。** §8、§11、§13 的 1G 预算是 x86_64（HND0）与 ARM64 lab 的目标。
 
 ### 12.2.1 如果一定要在这台设备上跑
 
@@ -1838,13 +1864,349 @@ fec_hysteresis=8
 
 **纸面结论**：grouped 32×8 在 1G 物理口 / app 500–750 Mbit/s 是纸面可行（编码 667 MB/s–2.0 GB/s，A76 NEON 预计 5–15% 单核）；单 256 码不可行。**未实测**：RK3588 的实际 NEON 吞吐、`st_gmac` 单队列在 1G 下的 pps 上限、生产负载对测量的污染。
 
-**`.74` 的定位**：可以做 1G 物理口的功能与性能测试（装内核 headers 后可编译模块）；但它是 x86_64 + AVX1 + 单队列，不能代表 ARM64 的 NEON/多核表现。**ARM64（`.65`）仍优先，但不是硬性前提。**
+**`.74` 的定位**：可以做 1G 物理口的功能与性能测试（装内核 headers 后可编译模块）；但它是 x86_64 + AVX1 + 单队列，不能代表 ARM64 的 NEON/多核表现。**`.65` 是 ARM64 lab，`.74` 是 x86_64 lab；生产对端是 HND0。** ARM64 只影响移植验证，不改变 §13 的生产 profile。
 
-## 13. 参考实现、测试向量与移植边界
+## 13. HND0 生产 profile：256 carriers / single 256 或 grouped 32×8 / app 500–750 Mbit/s
+
+这一节把「生产」钉死。**HND0 就是 256 条流、1G 物理口**；五元组限速把每条流压到 3.91 Mbit/s 量级，聚合才是 1G。256/1G 不是 lab，是生产目标。lab 是 `.65`/`.74`，不是 HND0。
+
+### 13.1 对端事实
+
+| 项 | 值 |
+|---|---|
+| 主机 | HND0，`45.11.1.62`，eth0 |
+| 架构 / 内核 | x86_64，`7.0.0-42-generic` |
+| CPU / RAM | **2 vCPU / 955 MiB** |
+| 物理口 | 1 Gbit/s |
+| WAN RTT | 约 218 ms（JYSZ ↔ HND0） |
+| 直连单流（绕过 mihomo） | P1 **17.08**、P4 **30.03**、P8 **33.72** Mbit/s |
+| 旧 tbtun 单流 | **3.14–4.55 Mbit/s**（约直连的 18–27%） |
+
+旧 tbtun 的 3–4 Mbit/s 不是路径上限。它的 in-flight 被钳在 120–131 KB；218 ms 下理论上限 `131 KB / 0.218 s × 8 ≈ 4.9 Mbit/s`，实测 3.14–4.55，吻合。**这是窗口 bug，不是 ISP 五元组限速的证明。** 修掉窗口后，单流应接近 17–34 Mbit/s；256 条五元组聚合才谈 1G。
+
+### 13.2 生产形态：先选码型，再选参数
+
+**码型不是默认 grouped。** single 256 与 grouped 32×8 都保留 256 carriers/1G，差别在恢复模型与 CPU：
+
+| 码型 | 结构 | 恢复模型 | 1G XOR 成本 | 适用 |
+|---|---|---|---:|---|
+| **single 256** | 1 组 256 share，`K=N`，`W=2N` | 窗口内任意 `M` 个丢失（近似 MDS），全局 any-N | M=64/d=64 → **5.33 GB/s**；M=96/d=32 → 4.8；M=128/d=32 → 8.0 | **p≤20%** |
+| **grouped 32×8** | 32 组 × 8，每组独立 | 每组内恢复，跨组重组；失去全局 any-N | M=4/d=4 → **1.0 GB/s** | **p>20%** |
+| **SC-LDPC（候选）** | 空间耦合 LDPC，码率 0.5/0.4/0.35，块 256/512 | peeling/BP，near-capacity | 低度 XOR，待实测 | **p=30–50% 首选候选**；等 `microbench` |
+
+**决策：先测 p，再选码型**（§13.11）。`p≤20%` 用 single 256（M=64/N=192/W=384/d=64，750M，5.33 GB/s，恢复 0.99945–0.99995，在 HND0 7.8–9.1 GB/s 内）；`20%<p≤30%` 用 grouped 32×8（M=5/d=3，375M）；`p=30–50%` 的首选是 **SC-LDPC**（基于 npminh12 的 C 原型，等 p=30/40/50% 数据），grouped M=6/N=2（250M）是当前可算的 fallback。**single 是低/中 p 的首选，grouped 是高 p fallback；grouped 不是免费升级**——它用 CPU 换恢复率，并放弃全局 any-N。**不要把 grouped 写成默认。**
+
+**容量上界（必须先写）**：
+
+| p | 理论码率上界 | app 上界 @1G | 有限长 + 99.9% 的现实码率 | 现实 app |
+|---:|---:|---:|---:|---:|
+| ≤20% | ≤0.80 | ≤800M | 0.50–0.62 | 500–625M |
+| ≤30% | ≤0.70 | ≤700M | 0.50–0.60 | 500–600M |
+| ≤40% | ≤0.60 | ≤600M | 0.40–0.50 | 400–500M |
+| **50%** | **≤0.50** | **≤500M** | **0.35–0.45** | **350–450M** |
+
+**500–750M 只适用于 p≤20–30%，不能写成 p=50% 的目标。** p=50% 的 1G 物理口上，app 上限是 500M（码率 0.5 的 BEC 容量），有限长与 99.9% 要求把码率压到 0.35–0.45，即 app 350–450M。grouped 的 M=6/N=2（25%）只到 250M，低于这个上界；这是分组粒度（每组 8 carriers）的限制，不是信息论限制。
+
+grouped 档的结构与参数（`p` 为组内丢包率；恢复率为 host 模拟，见 §13.9）：
+
+```
+256 carriers = 32 groups × 8 carriers
+1 share / carrier；每组独立滑窗 RLNC；组间不共享方程
+应用字节流按 seq % 32 条带化；接收端按 seq 重组
+packet = 8192 B；每组 K=N, W=2N, d=W/2
+```
+
+| 档 | p 区间 | M | N | W | d | 码率 | app @1G | 32 组联合恢复率 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| **grouped 默认** | ≤20% | **4** | **4** | **8** | **4** | **50%** | **500 Mbit/s** | **0.9987 @10%、0.9898 @20%；1.000 @≤5%** |
+| 高丢包 | ≤30% | 5 | 3 | 6 | 3 | 37.5% | 375 | ≥0.9971（0/50000 失败下界） |
+| 极端 40% | ≤40% | 6 | 2 | 4 | 2 | 25% | 250 | 待测 p=40% |
+| 极端 50% | ≤50% | 6 | 2 | 4 | 2 | 25% | 250 | 待测 p=50% |
+| 低 p 可选 | ≤1% | 3 | 5 | 10 | 5 | 62.5% | 625 | 0.9974 |
+
+**single 256 在高 p 的 M_max 与代价**（`M_max` 从 128 提到 **192**，`N≥64`，码率 25% 的极端档）：
+
+| p | M | N | W | 需要的 d | 码率 | app | 1G XOR | 判定 |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| 30% | 128 | 128 | 256 | ≥154 | 50% | 500M | 约 38.5 GB/s | **CPU 不可行**（>7.8–9.1） |
+| 40% | 160 | 96 | 192 | ≥93 | 37.5% | 375M | 约 38.8 GB/s | **CPU 不可行** |
+| 50% | 192 | 64 | 128 | ≥43 | 25% | 250M | 约 32.3 GB/s | **CPU 不可行** |
+
+`M_max=192` 是配置上限（`N=64`，码率 25%），但 **single sparse RLNC 在 p≥30% 的 XOR 成本已经 32–39 GB/s，远超 HND0 的 7.8–9.1**；`M_max` 提高只是让配置能表达极端档，不代表 sparse single 在 p=50% 可跑。**p=30–50% 必须换 SC-LDPC 或接受 grouped 的 250M。**
+
+**grouped 档推荐默认：M=4 / N=4 / W=8 / d=4，app 500 Mbit/s。** 它是唯一在保住 50% 码率的同时、p=30% 每组仍有 0.9977 的实测配置；p=10% 联合 0.9987，p=20% 联合 0.9898。32 组缓冲 6.0 MiB，1G 下最坏恢复延迟 12.6 ms，编码占单核 1.35%（本机）。
+
+**必须写清楚的修正**：`d=W` 是退化的。`rlnc_coeffs()` 取 `d` 个互异位置；`d=W` 时每个 parity 行都是整窗全 1，组内 M 行逐字节相同，秩恒为 1。设计稿 §3.8 原表的 `d=W` 行（M=2/3/4 标 750/625/500M）全部作废：p=1% 的 32 组联合只有 0.90/0.94/0.96，p=30% 全部趋近 0。**生产一律用 `d=W/2`**：M=4→d=4，M=5→d=3，M=6→d=2。
+
+**750 Mbit/s 档不可用。** M=2/N=6/W=12/d=6 在 p=1% 的 32 组联合只有 0.705，p=5% 是 0.138。625M 档（M=3/d=5）只在 p≤1% 成立（联合 0.9974），p=5% 掉到 0.917。**当前系数生成器下，500M 是唯一在 p≤10% 稳定达标的档；625/750M 需要更密的系数或跨组修复，不在 v1。** 生产目标写 500–750M，默认落 500M。
+
+`app @1G` 是物理口 1G、`wire = app / 码率` 的账；实际 HND0 的五元组限速会把单流压在 17–34 Mbit/s，但 256 条聚合仍按 1G 物理口预算。**不要用单流 17 Mbit/s 去推生产参数。**
+
+**CPU/FEC 的边界**（§13.3、§13.10）：grouped 需求 0.75–1.5 GB/s，HND0 有 5.2–12× headroom；single 256 在 p≤20% 用 M=64/d=64 需 5.33 GB/s，仍在 7.8–9.1 GB/s 内（约 1.5×）；p>20% 要 M=96/128，XOR 9.6–16 GB/s 就顶到。**生产风险不在低 p 的编码，而在 256 条 TCP/HTTP/BBR/softirq、五元组/ISP 行为，以及真实 share loss p。**
+
+### 13.3 CPU 预算（2 vCPU）：低 p 的 FEC 不是瓶颈
+
+1G、MSS 1460 → 约 85.6k pps，256 条各 334 pps。TCP/HTTP 的单核占比（§11.4）：
+
+| 项 | 单核占比 |
+|---|---:|
+| TCP 收发（含 ACK、窗口、重传） | 17–26% |
+| HTTP chunk 解析 | 4.3% |
+| session 级 50 ms poll（合并后） | 0.5% |
+| **TCP/HTTP 小计** | **22–31%** |
+
+FEC 的实测（HND0 本机，`review/microbench.md`；单核 `taskset -c 0`，热缓存）：
+
+| 项 | HND0 实测 | 1G 需求（生产档） | headroom |
+|---|---:|---:|---:|
+| XOR 字节吞吐 | **7.8–9.1 GB/s** | 0.75–1.5 GB/s | **5.2–12×** |
+| RLNC 解码（k=2/4/8） | **842 / 720 / 740 MB/s** | p=30% 时 19–28 MB/s | 26–44× |
+
+口径：编码 MB/s 是**输出 parity 字节**；设计稿的 0.667–2.0 GB/s 是 **XOR 字节吞吐**（输出 × (d+1)）。两者不能直接比。
+微基准的编码输出 **988 / 685 / 460 MB/s** 对应 `d=8/12/16`，仅作参考；生产档 `d=2..6` 的 XOR 成本见下表。
+
+生产档按 `d=W/2` 重算（`q=2`）：
+
+| 每组 M | d | XOR/byte | 1G 编码字节率 | HND0 headroom | 用途 |
+|---:|---:|---:|---:|---:|---|
+| 4 | 4 | 8.0 | 1.0 GB/s | 7.8–9.1× | 默认，500M |
+| 5 | 3 | 10.0 | 1.25 GB/s | 6.2–7.3× | 高丢包，375M |
+| 6 | 2 | 12.0 | 1.5 GB/s | 5.2–6.1× | 极端，250M |
+| 3 | 5 | 6.0 | 0.75 GB/s | 10–12× | 625M，仅 p≤1% |
+| 2 | 6 | 4.0 | 0.5 GB/s | 16–18× | 750M，恢复率不可用 |
+
+HND0 的 QEMU vCPU 只有 SSE2，每 GHz 编码约 **449 MB/s/GHz**，低于 A76 的 1106 和 Athlon 的 734；它够用是因为 1G 的需求本身不高（4.5–13× headroom），不是因为机器快。第二个 vCPU 留给网络与解码。
+
+**结论：p≤20% 时 CPU/FEC 不是瓶颈。** 纸面 TCP/HTTP 22–31% + grouped FEC 2–10% 在 2 vCPU 上仍有余量。**p=30–50% 时 sparse single 的 XOR 到 32–39 GB/s，会顶到 HND0；这时必须换 SC-LDPC 或降码率。** 剩余风险是 256 条 TCP/HTTP/BBR/softirq 的 pps、内存与 slab，以及五元组/ISP 行为。256 flows 的 softirq 分布、`tcp_sock`/`sk_buff` slab、端口耗尽必须在 HND0 上实测（§13.8）。
+
+### 13.4 RAM 预算（955 MiB）
+
+| 项 | 量 |
+|---|---:|
+| socket 缓冲（推荐 64 KiB 设置值，256 条） | 64 MiB |
+| 发送/接收字节窗口，两侧合计（k=2–5） | 52–130 MiB（M=4 档；sim 表） |
+| FEC 组缓冲（32 组 × `(W×S + M×S + rhs)`） | 6.0 MiB（M=4）；5.0–7.0 MiB 全档 |
+| 固定开销（tcp_sock、HTTP、work item、procfs） | 约 1.3 MiB |
+| **合计** | **约 123–201 MiB**（socket 128 MiB 档到 265 MiB） |
+
+955 MiB 下余量充足（13–28%）；真正的约束是 256 条 socket 的 softirq/slab，不是窗口缓冲。`fec_buffer_budget` 仍按 128 MiB 上限，`max_tunnels × 256 × 256 KiB` 在创建时拒绝超限。
+
+### 13.5 为什么必须 v6 wire + grouped
+
+**旧 ABI 是 16，不是 256。** 限制分布在全链路：`TBT_MAX_CARRIERS_LIMIT=16`、`path_ack_mask` 是 `u16`、FBK body 16 项、WINDOW body 16 项、`announced_mask`/`path_gen[16]`/`path_end[16]`、FIN/RST mask 16 槽。**改常量会同时改帧头布局、FBK/WINDOW 编码、HELLO 协商和全部 host 测试，不能直接上。** FEC 必须走独立 wire（`conv 0x1001`，40 字节头，`share_index` u16、`epoch` u16、`n/m` u8、256 位反馈 bitmap）；旧 ARQ 原样保留，两者靠 `conv` 区分。
+
+**单 256 码不可行。** `W=448` 时稀疏约束 `d >= W²p/M` 把 `d` 推到接近稠密，1G 编码量约 14 GB/s。grouped 32×8 把每组 `W` 降到 4–12；生产用 `d=W/2`（M=4→d=4，M=5→d=3，M=6→d=2），编码量 0.75–1.5 GB/s，才落进 x86 单核预算。**注意 `d=W` 会退化**（§13.2）：全窗全 1 系数，M 个 parity 行相同，秩恒为 1；生产禁止 `d=W`。
+
+落地顺序：**v6 wire → grouped 32×8 → 256 carriers**。三步都完成之前，256/1G 不能算生产可用；16-carrier 旧 wire 只能跑对照。
+
+### 13.6 两个窗口不是一回事
+
+| 窗口 | 定义 | HND0 量级 |
+|---|---|---|
+| FEC packet window `W` | 每组编码窗口，单位 packet | `W=2N` = 4–12 包（32–96 KiB/组） |
+| 发送字节窗口 `W_send` | 流控窗口，单位字节 | `k × BDP`；k=2–5 |
+
+`W=2N` 只决定「一个数据包被几组 parity 覆盖」和组内恢复延迟，**不是**发送窗口。发送窗口按字节算：
+
+```
+BDP_aggregate = 256 × 106 KiB = 27 MiB      (1G, RTT 218 ms)
+W_send        = k × BDP_aggregate = 54–135 MiB (k=2–5，未除 wire 膨胀的保守上界)
+```
+
+单流对照：HND0 的 P1（17.08 Mbit/s）BDP 约 **465 KB** @218 ms；P8（33.72）约 918 KB。旧实现把 in-flight 钳在 120–131 KB，才只有 3–4 Mbit/s。**修窗口是第一步，FEC 是第二步；两者不能互相替代。**
+
+### 13.7 lab 与生产边界
+
+| 机器 | 角色 | 结论 |
+|---|---|---|
+| **HND0 `45.11.1.62`** | **生产对端** | x86_64 / 2 vCPU / 955 MiB / 1G；单核 XOR 7.8–9.1 GB/s；grouped 有 5.2–12× headroom，single d=64 约 1.5×，p=30–50% 的 sparse single 会到 32–39 GB/s；**低 p 的 CPU 够，256 flows 的 pps/slab/softirq 与高 p 码型必须实测** |
+| `.65` RK3588 | **本地 ARM 优先平台**（lab/移植） | A76 2.304 GHz：编码 2.55 GB/s（HND0 的 2.6×、Athlon 的 1.9×）、解码 1.5–1.76 GB/s、AES 1.8 GB/s；每瓦算力约 Athlon 的 25–30×（推断）。6.1.172；`system_dfl_wq` 需 shim（源码 16 处引用，**overhaul 负责**，FEC 侧不重复造）；eth0 单队列、IRQ 全 CPU0、共享生产负载；不是 HND0 生产，也不替代 HND0 实测 |
+| `.74` Athlon X4 760K | **x86 对照 lab** | 固定 1.8 GHz：编码 d8/d12/d16 = 1.32/0.88/0.65 GB/s；可编译模块、可跑 1G 功能；仅对照，不代表 HND0 或 ARM |
+| `.254` MT7621 | MIPS 实验机 | **不行**：DRAM 271 MiB/s，grouped 的 1.5–2.0 GB/s 编码量是它的 5.5–7.4 倍 |
+
+**256/1G 是生产；本地平台 ARM 优先（省电 + 单核更强）；`.74` 仅 x86 对照；`.254` 不是 1G 平台。** 不要把 lab 的构建成功写成 HND0 的生产验证。
+
+### 13.8 验收与风险
+
+HND0 实测清单（全部通过才算生产）：
+
+| 项 | 阈值 |
+|---|---|
+| carriers up | 256/256，持续 10 min 无 reset |
+| app 吞吐 | p≤20% ≥500M；p≤30% ≥375M；p=40–50% ≥350M（SC-LDPC 目标）或 250M（grouped fallback） |
+| wire/app | ≤2.0（M=4 默认）；M=5 为 2.67；M=6 为 4.0；SC-LDPC 按码率 0.35–0.5 计 2.0–2.86 |
+| CPU | 2 vCPU 总占用 <80%；单核 softirq <70% |
+| RSS | <300 MiB（含 64 MiB socket 缓冲） |
+| 恢复率 | p≤10% ≥0.998；p=30% 保 500M 时 0.9278，或降 M=5/375M 到 ≥0.997；p=40–50% 待 SC-LDPC 实测，门槛 ≥0.999 |
+| 恢复延迟 | p95 <100 ms；无跨组阻塞 |
+| 稳定性 | 1 h 无 reset、无 OOM、无端口耗尽 |
+
+风险按优先级：
+
+0. **恢复率不是 99.9% 的保证；p=50% 的 app 上限是 500M，现实是 350–450M。** p=30% 时 500M 档（M=4/N=4/d=4）32 组联合 0.9278，约 0.46 s 一个需要 NACK/重传的窗口；要 ≥0.997 必须降到 375M（M=5/N=3/d=3）。p=50% 的 BEC 容量只允许码率 ≤0.5（app ≤500M），有限长 99.9% 要 0.35–0.45（app 350–450M）；**不能把 500–750M 写成 p=50% 的目标**。grouped M=6/N=2 只有 250M，低于容量上界。这是信息论与分组粒度的代价，不是实现问题。
+1. **256 条 TCP/HTTP/BBR 的 pps 与 softirq 分布**：85.6k pps 若落在 CPU0，单核先满；HND0 只有 2 vCPU，没有 4 核可 RPS/RFS 分散。这是头号风险；FEC 的 XOR 已实测足够（§13.3）。必须实测 `mpstat -P ALL`、`/proc/softirqs`、`ss -ti`。
+2. **256 flows 的 slab 与内存**：`tcp_sock`/`sk_buff`/`request_sock` 的 slab 在 955 MiB 下的峰值；64 MiB socket 缓冲只是预算的一部分。实测 `/proc/meminfo`、`slabtop`、`ss -m`。
+3. **pump 串行点**：`sess->pump_lock` 在 256 carriers 下是瓶颈，需改成每 carrier 独立 `w_tx`。
+4. **端口耗尽**：`portblock=4096`，多次重建后 TIME_WAIT 是否够。
+5. **五元组/ISP 限速波动**：单流 17–34 Mbit/s 随路径变化，控制器要按组内 `p` 而不是全局 `p` 调 M；ISP 是否按 256 条五元组公平限速，只能实测。
+6. **SIMD 上下文成本**：`kernel_neon_begin/end` 每包 1–2 µs；x86 用 AVX2 时也要看内核是否允许。先靠编译器自动向量化，不手写 SIMD；HND0 的 vCPU 只有 SSE2，手写 AVX2 也不会生效。
+
+### 13.9 host 模拟与实测状态
+
+三份证据分开写：
+
+| 证据 | 回答什么 | 不回答什么 |
+|---|---|---|
+| `review/microbench.md`（HND0 / `.65` / `.74` 本机） | FEC 编码/解码/XOR 的单核算力；HND0 有 4.5–13× headroom | 256 条 TCP 的 softirq、slab、pps |
+| `review/hnd0-sim.md`（host 模拟） | grouped 32×8 的恢复率、延迟、内存、发送窗口；**发现 `d=W` 退化，给出 `d=W/2` 的替代参数** | HND0 的真实 p、ISP 五元组行为 |
+| HND0 现场测试（待做） | 256 carriers up、app ≥500M、2 vCPU 占用、RSS/slab、p95 恢复、无 reset | — |
+
+**CPU/FEC 已由微基准回答；剩余风险是 256 flows 的网络栈与五元组/ISP，不是 XOR。** 本文档不把模拟数字写成 HND0 实测。
+
+### 13.10 single 256 sparse RLNC 的实测曲线
+
+模型：`N+M=256`，`K=N`，`W=2N`，单组，`G=2`，总 parity `2M`；`S=64`，每点 20000 trial，99% CI ≤0.00073。数据：`review/single-sim.csv`。
+
+| M | N | W | d | app @1G | XOR GB/s | p=1% | 2% | 5% | 10% | 20% |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 64 | 192 | 384 | 32 | 750M | 2.67 | 0.9929 | 0.9856 | 0.9627 | 0.9280 | 0.8564 |
+| **64** | **192** | **384** | **64** | **750M** | **5.33** | **0.99995** | **0.99995** | **0.99990** | **0.99980** | **0.99945** |
+| 96 | 160 | 320 | 32 | 625M | 4.80 | 0.99995 | 0.99990 | 0.99980 | 0.99920 | 0.99850 |
+| 96 | 160 | 320 | 64 | 625M | 9.60 | 1.00000 | 1.00000 | 1.00000 | 1.00000 | 1.00000 |
+| 128 | 128 | 256 | 32 | 500M | 8.00 | 1.00000 | 1.00000 | 1.00000 | 1.00000 | 0.99995 |
+| 128 | 128 | 256 | 64 | 500M | 16.00 | 1.00000 | 1.00000 | 1.00000 | 1.00000 | 1.00000 |
+
+**读数**：
+
+- **p≤20% 的默认：M=64 / N=192 / W=384 / d=64，app 750M，XOR 5.33 GB/s**。恢复率 0.99945–0.99995，在 HND0 7.8–9.1 GB/s 内（约 1.5× headroom）。这是 single 256 的最优档。
+- `d=32` 不够：M=64/d=32 在 p=1% 只有 0.9929，p=20% 掉到 0.8564。**single 256 的 `d` 至少要 64**。
+- 625M 档（M=96）用 d=32（4.8 GB/s）在 p≤10% 恢复 ≥0.9992；d=64（9.6 GB/s）全 1.000 但略超 HND0 9.1。
+- 500M 档（M=128）用 d=32（8.0 GB/s）在 p≤20% 全 1.000；d=64 的 16 GB/s 超预算。
+- **p>20% 没有测**。M=64 的总方程 128 在 p=30% 对约 115 个丢失只剩边缘；要稳需 M=96/128，XOR 升到 9.6–16 GB/s，顶到或超过 HND0。**p>20% 转 SC-LDPC 或 grouped。**
+
+**这修正了「single 只适用 p≤2%」的保守估计**：实测 p≤20% 用 M=64/d=64 就能到 99.9%+，app 750M。**single 256 是低/中 p 的首选，不是只限极低 p。**
+
+### 13.11 dual-mode：single 256 与 grouped 32×8
+
+**p 是什么。** `p` 是接收端看到的 **FEC packet 丢失率**（窗口内未到达的数据包比例）。它不是：
+
+| 容易混淆的量 | 为什么不是 p |
+|---|---|
+| TCP retransmit 率 | TCP 已经重传修复的丢包，接收端看不到；用它会把 p 低估 |
+| 五元组限速 | 限速是 **rate**（Mbit/s），不是 loss；但限速队列溢出会表现为丢包 |
+| 单流 17–34 Mbit/s 直连吞吐 | 那是 rate，不是 p |
+| `ss -ti` 的 retrans | 含拥塞/超时重传，不等于 FEC 窗口内的 share loss |
+
+**测量方法（HND0 现场，先做这个再选码型）**：
+
+1. 256 条 TCP carrier 建立，1 share/carrier，发 8 KiB FEC packet，带 `seq`。
+2. 接收端按窗口统计 `missing/W`，并记录 burst 长度（连续丢失数）。
+3. 按 32 组分别统计 `p`（组间可能不均）；控制器用**组内 p**，不是全局 p。
+4. 同时记录 `ss -ti`、`nstat` 的 `TcpRetransSegs`，区分「TCP 已修复」与「FEC 看到」。
+5. 跑 10 min，取 p50/p95/p99；**尾部 p 决定 M**，均值不够。
+
+**dual-mode 规则**：
+
+```
+p <= 20%: single sparse 256, M=64, d=64, app 750M, XOR 5.33 GB/s
+20% < p <= 30%: grouped 32x8, M=5, d=3, app 375M
+30% < p <= 50%: SC-LDPC 首选（等 microbench）；fallback grouped M=6, d=2, app 250M
+p > 50%: 无可行码（BEC 容量 <0.5）；必须降 app 或加 carrier
+```
+
+single 的 `d` **不要低于 64**：M=64/d=32 在 p=1% 只有 0.9929。`p≤20%` 统一用 d=64（5.33 GB/s）；`p>20%` 切 grouped/SC-LDPC。**`p=30–50%` 不要用 single sparse**：M=128/160/192 的 XOR 是 32–39 GB/s，远超 HND0。切换时保持 256 carriers，只换编码结构（`fec_mode=single|grouped|sc-ldpc`）；v1 建议切换时 reset 该流的 FEC 状态（有界，不静默丢字节）。
+
+**为什么 grouped 不是「免费升级」**：
+
+| 维度 | single 256 | grouped 32×8 |
+|---|---|---|
+| 全局 any-N | **保留**：窗口内任意 M 个丢失（近似 MDS） | **失去**：32 个独立的 any-N 小组；跨组 reorder，任一组卡住阻塞该组 seq |
+| 1G XOR（低 p） | 5.33 GB/s（d=64） | 1.0 GB/s（M=4/d=4） |
+| 码率 / app | 75% / 750M | 50% / 500M |
+| 高 p | p=2% 就要 d=128 → 10.7 GB/s，顶到 HND0 7.8–9.1；p=30–50% 要 32–39 GB/s | p≤30% 用 W=8/6，d=4/3 就够；p=40–50% 只能 M=6/N=2，app 250M |
+| 失败模式 | 窗口内 >M 个丢失 → 整窗不可恢复 | 单组不可恢复只影响该组 seq，不全局 reset |
+| p=50% | **不可行**（XOR 32.3 GB/s） | 250M，恢复率待测；低于容量上界 350–450M |
+
+**结论**：低 p 用 single（高码率、高 CPU），中 p 用 grouped（低码率、低 CPU），**p=30–50% 的首选是 SC-LDPC**（near-capacity、低度 XOR），grouped M=6/N=2 只是 250M 的 fallback。**默认不是 grouped；默认是先测 p。** 首次部署可以启动 single（低 CPU、高码率），用前 1–2 个 epoch 测 p；`p>2%` 再切 grouped；`p>30%` 切 SC-LDPC（若 microbench 证明可行）或 grouped 250M。若现场无法先测 p，保守启动 grouped，但要在 procfs 标出「p 未知，保守模式」。
+
+**未定**：single↔grouped 切换是否清空窗口、是否重置 seq。v1 取「切换即 reset 该流 FEC 状态」，把不确定性限制在一次有界 reset。
+
+### 13.12 SC-LDPC 升级候选（基于 npminh12 改写，评估中）
+
+sparse RLNC 在 p>2% 需要 dense `d`，XOR 成本顶到 HND0 的 7.8–9.1 GB/s。**SC-LDPC（空间耦合 LDPC / streaming LDPC）是 single 256 的首选升级候选。**
+
+**决定：基于 npminh12 改写。** npminh12（MIT，commit `3d403f4`）是单文件 C++ SC-LDPC 构造 + BEC BP 仿真（506 行）；把它 **clean-room 改写为 C99**（无 C++/STL），放 `review/fec-prototype/sc_ldpc/`，保留 MIT attribution，不复制 C++ 代码。host 原型支持块 256/512、L=8/16/32、码率 0.5/0.4/0.35、p=30/40/50%。
+
+评估口径：
+
+| 项 | 口径 |
+|---|---|
+| 码率 | 0.50 / 0.40 / 0.35（按 p 档） |
+| 块 | 256 / 512 |
+| 耦合长度 L | 8 / 16 / 32 |
+| 度分布 | npminh12 的 regular `(l,k)` + coupling + protograph；0.4/0.35 加额外校验节点（写明度/边规则） |
+| 解码 | peeling / BP on BEC |
+| p | **30% / 40% / 50%** |
+| 平台 | HND0 / `.65` / `.74` 本机 |
+| 指标 | encode/decode MB/s、迭代次数、恢复率、延迟；与 RLNC 对比 |
+
+**理论边界先写清楚**：码率 `R` 的 BEC 容量阈值是 `p < 1-R`。
+
+| p | 可用码率上界 | 有限长 99.9% 的现实码率 |
+|---:|---:|---:|
+| 10% | 0.90 | 0.65–0.75 |
+| 20% | 0.80 | 0.55–0.65 |
+| 30% | 0.70 | 0.50–0.60 |
+| 40% | 0.60 | 0.40–0.50 |
+| **50%** | **0.50** | **0.35–0.45** |
+
+所以 **SC-LDPC 必须按 p 选码率**：0.5 覆盖 p<50%，0.4 覆盖 p<60%，0.35 覆盖 p<65%；p=30/40/50% 分别用 0.5/0.4/0.35。评估门槛：encode+decode ≤ HND0 7.8–9.1 GB/s 的 50%；p=30% 恢复 ≥0.999（R=0.5）；p=50% 恢复 ≥0.999（R=0.35–0.45）；延迟 ≤ `L × 16.8 ms`（L=8 → 134 ms）。**若达标，SC-LDPC 取代 sparse single 成为高 p 首选；若不达标，保留 sparse RLNC（低 p）+ grouped（高 p 250M）。** 不写内核，不先改 §13.10 的推荐。
+
+**开源现实（`review/fec-open-source-sclc.md`，commit 183926f）**：
+
+- `npminh12` 是唯一可直接借鉴的 SC-LDPC 构造/BP 实现（MIT，506 行 C++ 仿真）；**没有成熟 packet codec**，所以 C 改写仍是自研，风险在窗口/调度/测试向量。
+- aff3ct/IT++ 是 block LDPC，只能借鉴 BP/peeling；`libcoding` 源码缺失；SCA-LDPC 是 Rust 且无 license。
+- RaptorQ `nanorq` 是成熟 C11/MIT，但 **block**，不是流式。
+- **`microbench` 的 C 原型与 p=30/40/50% 数据是决定性实验**；在它回来之前，不写内核、不声称生产。
+
+**RaptorQ（nanorq）作为 block fallback / 对照**：
+
+| 项 | 值 |
+|---|---|
+| 实现 | nanorq，C11，MIT，RFC 6330；低层 API 无 libc、caller arena；有 golden MD5 向量 |
+| 形状 | **block**，不是流式；K×T 整块 + 矩阵求逆 |
+| 评估参数 | K=64/128/256；T=1400/8192；overhead 2–5% |
+| 内存/块 | K=64/T=1400 约 223 KB；K=128/T=1400 约 403 KB；K=256/T=1400 约 721 KB；K=256/T=8192 约 **2.74 MB** |
+| 本机解码 | K=256/T=8192 约 14 ms（Ryzen 9 7940H，单次）；HND0 2 vCPU 必须重测 |
+| block 延迟 | `K×T / app`：K=256/T=8192 @750M 约 22 ms，加解码；不是逐包低延迟 |
+| 内核移植 | 低层 C11 可行；需替换 `calloc/free`、去 `-march=native`、x86 SIMD（AVX512/GFNI）不可移植，ARM64 走标量 |
+| 其他实现 | foxsen/raptorQ（Apache-2.0，C++）、libRaptorQ（LGPLv3/GPLv3）、orq（MIT，C++）、cberner（Rust，Apache-2.0）：许可/语言不适合 GPLv2 内核 |
+
+**当前 C 原型状态（2026-11-06，`review/fec-prototype/sc_ldpc/`）**：
+
+- `systematic` 模型（parity 全到）是退化的：parity 子矩阵块下三角，recovery 恒 1.000，**不能作为 FEC 结论**。
+- `symmetric` 模型（数据与 parity 都按 p 擦除，FEC 的真实模型）在 block 256 / L=8 / rate 0.50 / p=0.30 跑出 **recovery 0.000000**。这说明当前原型的构造/解码还没通过，**不能声称 SC-LDPC 可行**。
+- 本机标量 C99 的编码 29 MB/s、解码 14.6 MB/s（block 256/L=8/p=0.30）；1G app 需要 125 MB/s，**CPU 也是硬约束**，除非 SIMD/多核优化。
+- 结论：**SC-LDPC 仍是候选，不是生产路径。** 先修 symmetric 解码/构造，再由 `microbench` 在 HND0/.65/.74 上测；本文档不先定稿。
+
+**结论**：SC-LDPC 是算法升级候选（无现成 C codec，microbench 决定）；RaptorQ 是 block fallback/对照（成熟但非流式）。**v1 主路径仍是 sparse RLNC；p=30–50% 先等 microbench，不先定稿。**
+
+### 13.13 加密边界（v1 不做）
+
+| 项 | 结论 |
+|---|---|
+| 当前状态 | tbtun **无加密**；微基准里的 AES 只是算力锚点，不是产品算法 |
+| 以后若做 payload 混淆 | **ChaCha8/12**：软件快、无 AES-NI 依赖；HND0 的 QEMU vCPU 只有 SSE2，AES 走软件只有 144.5 MB/s，不适合做产品算法 |
+| 实现状态 | `review/fec-prototype/crypto/` 的 **ChaCha8 host 原型**（C99，无外部依赖）；测 MB/s、cycles/byte，并与 ChaCha20/AES 锚点对比；不写内核 |
+| 加密范围 | **只加密 HTTP chunk body，保留 HTTP 头**；整条 TLS/加密会丢掉 HTTP 容器的 QoS（头字段、优先级、keepalive 都不可见） |
+| 与 FEC 的关系 | **不受影响**：FEC 在 chunk body 上做 XOR，加密在编码之后/之前都可以，只要字节边界不变 |
+| 定稿条件 | 等 `microbench` 的 crypto 数字；v1 不写内核、不引入加密依赖 |
+
+## 14. 参考实现、测试向量与移植边界
 
 这一节回答三个问题：**算法从哪来**、**怎么证明对**、**哪些代码能进内核**。原则是先站在成熟实现上，不自己发明矩阵或解码器。
 
-### 13.1 唯一的参考：Kodo 的 sliding-window RLNC
+### 14.1 唯一的参考：Kodo 的 sliding-window RLNC
 
 Kodo（Steinwurf）是网络编码的参考实现，包含 full RLNC、sparse RLNC、sliding-window RLNC。
 
@@ -1864,7 +2226,7 @@ Kodo（Steinwurf）是网络编码的参考实现，包含 full RLNC、sparse RL
 - Kodo 的 coefficient buffer 按 generation 分块；本设计是「每 parity 一行稀疏索引」。测试向量要按「同一组系数下的编码结果」对齐，不是按内存布局对齐。
 - 本设计的 PRNG 是自己写的 `splitmix64`，不是 Kodo 的；跨架构一致性与内核可控性优先。
 
-### 13.2 license：没有可直接用的 permissive 实现
+### 14.2 license：没有可直接用的 permissive 实现
 
 调研结论（`review/fec-open-source.md`）：
 
@@ -1872,22 +2234,25 @@ Kodo（Steinwurf）是网络编码的参考实现，包含 full RLNC、sparse RL
 |---|---|---|---|
 | **Kodo**（Steinwurf） | **Steinwurf Research License** | **不可复制、不可链接** | 只读论文与 API 形状，不复制代码 |
 | **badrlnc / tetrys** | **Apache-2.0** | **不兼容**（专利条款） | 只做 benchmark |
+| **nanorq（RaptorQ）** | **MIT，C11** | **兼容**（低层无 libc、caller arena） | **block fallback/对照**；需替换 `calloc/free`、去 `-march=native`、x86 SIMD 不可移植 |
+| **SC-LDPC** | 无成熟 C/C++ codec | 无可用实现 | aff3ct/IT++ 是 block LDPC；`npminh12` 是 MIT 仿真；`libcoding` 源码缺失；v1 只做算法原型 |
+| foxsen/raptorQ、libRaptorQ、orq | Apache-2.0 / LGPLv3 / MIT(C++) | 不兼容或 C++ | 只作 RFC 参考 |
 | 其他 RLNC C 实现 | 无 permissive 的 | — | — |
 
-**结论：只能 clean-room。** 没有 BSD/MIT 的 sliding-window RLNC C 实现可用；Kodo 的 license 明确限制复制与链接，Apache-2.0 与 GPLv2 不兼容。算法与数学不受版权保护，但代码结构、注释、测试向量受。
+**结论：RLNC 只能 clean-room；RaptorQ 有 nanorq（MIT）可作 block fallback；SC-LDPC 没有可复用 C codec。** Kodo 的 license 明确限制复制与链接，Apache-2.0 与 GPLv2 不兼容。算法与数学不受版权保护，但代码结构、注释、测试向量受。
 
-### 13.2.1 没有 golden vectors：自己冻结
+### 14.2.1 没有 golden vectors：自己冻结
 
 调研没有找到 Kodo 的可运行测试向量（license 也不允许直接取用）。所以：
 
 1. **冻结自己的向量**：固定 `(W, d, seed)` 三元组，生成 parity 与恢复结果的 SHA-256，写进 `test_rlnc.c` 的常量表。
-2. **至少三组**：`W=16, d=16`；`W=64, d=16`；`W=256, d=16`。
-3. **覆盖两种路径**：编码输出（parity 字节）与解码恢复（丢 k 个包后的字节）。
+2. **已冻结 352 行**：22 个 `(W,d)` 组合 × 16 个 seed；grouped 生产 `d=W/2`、grouped 退化 `d=W`、single/lab 大窗口都在表里。
+3. **覆盖两种路径**：每行断言 `rlnc_decode` 恢复 1 个丢失包并逐字节相等，digest = SHA256(parity || recovered data)。
 4. **跨架构一致**：向量只依赖 `splitmix64` 与 GF(2) 运算，不依赖字节序或编译器。
 
 这样即使将来换 PRNG 或优化内层循环，向量能立刻发现回归。
 
-### 13.3 内核移植边界
+### 14.3 内核移植边界
 
 | 约束 | 具体要求 |
 |---|---|
@@ -1906,7 +2271,7 @@ Kodo（Steinwurf）是网络编码的参考实现，包含 full RLNC、sparse RL
 - `tbt_rlnc.c`：PRNG、系数生成、编码、GF(2) 消元，约 800 行。
 - 无 GF(2^8) 表、无 Cauchy 矩阵、无 SIMD 依赖。
 
-### 13.4 测试向量交叉验证
+### 14.4 测试向量交叉验证
 
 | 项 | 参考 | 向量形式 | 验收 |
 |---|---|---|---|
@@ -1920,13 +2285,13 @@ Kodo（Steinwurf）是网络编码的参考实现，包含 full RLNC、sparse RL
 
 
 
-## 14. 开放问题
+## 15. 开放问题
 
-1. **K 与 W 的最终取值。** 本文档推荐 K=8/W=16（M=1）与 K=16/W=32（M=2）。若实测恢复延迟仍偏高，降到 K=4/W=8；若 wire 压力大，升到 K=16/W=32。P3 用 K=4 起步（最容易调试），P5 再定。
+1. **grouped 32×8 的 W/d 最终取值。** 生产定稿是每组 `K=N`、`W=2N`、`d=min(W,12)`；M=2..6 对应 W=12/10/8/6/4、d=12/10/8/6/4。若 HND0 实测恢复延迟偏高，先查 p 估计与跨组重组，不要把 W 加到 4N（编码成本上升，延迟不再改善）。小 N/M 的 K=4/W=8 只用于调试，不是生产。
 2. **恢复延迟是否真的比块式小。** 这是本设计最核心的断言，必须由 P0 的尾延迟模拟证明，而不是靠推理。若模拟显示在真实速率分布下流式不占优，应重新评估。
 3. **NACK 是否进 v1。** 本文档列为 P4；若 P3 的 QEMU 结果显示「parity 已覆盖绝大多数丢失」，可以推迟到 P6。
 4. **跨窗口方程组合。** 当前设计只在同一窗口内组合方程。若允许跨窗口组合（例如两个窗口各缺 1 个包，用两个 parity 交叉解），恢复能力更强，但复杂度上升。v1 不做。
-5. **`W` 与内存的乘积。** 窗口内的组数是 `ceil(W_send/K) + ceil(W/K)`。`W_send=512, K=16, W=32` → 34 组；每组 `rhs` 是 `M × S`（M=2、S=8K → 16 KiB），加 `missing_seq` 表 32 × 8 B；合计约 553 KiB。可接受，但要在 `fec_rx_mem_max` 里计入。
+5. **`W` 与内存的乘积。** 窗口内的组数是 `ceil(W_send/K) + ceil(W/K)`。生产每组 `K=6, W=12`，`W_send` 由字节窗口换算（1G 下数千包）；每组 `rhs` 是 `M × S`（M=2、S=8K → 16 KiB），加 `missing_seq` 表；32 组合计约 3–4 MiB。可接受，但要在 `fec_rx_mem_max` 里计入。
 6. **CRC 是否默认开启。** 默认开启（每包一次）；若实测 CPU 占比超过 1%，改为 debug 模式。
 7. **多流共享载体。** 当前设计是每 tunnel 一组载体、每 stream 独立 packet 空间。若多条 stream 共享同一组载体，调度需要跨流公平；v1 先假设单流或少量流。
 8. **与 `w-window` 的合并顺序。** 载体层修复（buffer/parser/stall）先 cherry-pick；窗口公式以函数复用；per-frame ARQ 整段删除。合并时以本文档 §9.4 的接口约定为准。
@@ -1947,8 +2312,23 @@ tunnel 1 role=near listen=127.0.0.1:9001 peer=45.11.1.62:9000 \
 
 新增关键字：`carriers=`、`packet=`、`k=`、`w=`、`d=`、`fec=rlnc`、`fec_timeout_ms=`、`fec_reset_ms=`、`fec_nack=0|1`、`fec_window_pkts=`、`fec_rx_mem_max=`。
 
-`n`/`m` 是 FEC 的 share 数；`carriers` 是实际 TCP 连接数，默认 `n+m`（1 share/carrier）。映射规则：share `s` 走 carrier `s % carriers`。约束：`carriers <= 256`、`carriers <= n+m`。目标部署是 `n=96, m=32, carriers=128`；资源账见 §11。
+`n`/`m` 是 FEC 的 share 数；`carriers` 是实际 TCP 连接数，默认 `n+m`（1 share/carrier）。映射规则：share `s` 走 carrier `s % carriers`。约束：`carriers <= 256`、`carriers <= n+m`。**生产部署是 256 carriers = 32 组 × 8（每组 `n=6, m=2` 起步）；128 五元组只是对照。** 资源账见 §11 与 §13。
 `fec=block` 只用于对照/fallback（§4.5）；默认 `auto`，按 §3.11 的规则选择。
+HND0 生产（256 carriers，grouped 32×8）：
+
+```
+tunnel 1 role=near listen=127.0.0.1:9001 peer=45.11.1.62:9000 \
+  groups=32 group_size=8 carriers=256 packet=8192 fec=rlnc \
+  n=6 m=2 k=6 w=12 d=12 \
+  fec_m_min=2 fec_m_max=6 fec_epoch_ms=1000 fec_hysteresis=1 \
+  fec_timeout_ms=500 fec_reset_ms=2000 fec_nack=1 \
+  fec_window_pkts=0 fec_rx_mem_max=134217728 \
+  profile=raw keepalive=2000 drip_ms=1000 \
+  carrier_stall_ms=0 portblock=30000-34095 nonce=...
+```
+
+grouped 模式下 `n`/`m`/`k`/`w`/`d` 是**每组**参数；`carriers = groups × group_size`；控制器按每组 `p` 调 `m`，总 parity 随动。
+
 128 五元组部署：
 
 ```
