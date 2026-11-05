@@ -2640,6 +2640,20 @@ redial:
         struct pollfd p = { .fd = fd, .events = POLLIN | POLLRDHUP };
         int pr;
 
+        /* A frame can arrive in the same read as the previous one and stay
+         * in the 128 KiB buffer; poll() then reports nothing, because those
+         * bytes are no longer in the socket. Take a buffered frame first or
+         * the last record of a burst is never parsed (measured: the RST
+         * shared the read with the second DATA and sat in the buffer while
+         * poll() waited out the 60 s drain, parsed=2, last_type=DATA). */
+        if (r.have && !raw_read_frame(&r, &f, body, sizeof(body), 0))
+        {
+            parsed++;
+            last_type = f.type;
+            if (f.sid == sid && f.type == (rst ? TBT_F_RST : TBT_F_FIN))
+                seen = 1;
+            continue;
+        }
         if (!rst && now_ms() >= next_ack)
         {
             raw_send_pad(fd, idx, sid, sidhi, near_tx_ack(tunnel));
