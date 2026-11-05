@@ -1000,10 +1000,10 @@ wlp4s0 192.168.123.69                    eth0 45.11.1.62
       ≈ <span class="hl">465 kB</span>（454 KiB）
 
 上限  ≈ 窗口 ÷ RTT
-      = 120–131 KB ÷ 0.234–0.300 s
-      ≈ <span class="hl">3.3–4.1 Mbit/s</span>（源报告估算）
+      = 120–131 KB ÷ 0.240–0.300 s
+      ≈ <span class="hl">3.3–4.4 Mbit/s</span>
       按 peer 快照 224–300 ms 重算 ≈ 3.3–4.7 Mbit/s</div>
-  <p>实测 3.45–4.27 Mbit/s，落在估算区间内；无论取哪组 RTT，上限都只有个位数 Mbit/s。raw dup=0 的 n=1 和 n=4 都是 <strong>122,880 B</strong>，n=8 也只有 <strong>130,860–131,072 B</strong>：增加载体只是把同一个窗口分给更多载体，并增加重排序工作，不会放大窗口。120–131 KB 只有直连 BDP 的约 <strong>26–28%</strong>。</p>
+  <p>实测 3.45–4.27 Mbit/s，落在 3.3–4.7 Mbit/s 的重算区间内；无论取哪组 RTT，上限都只有个位数 Mbit/s。raw dup=0 的 n=1 为 <strong>122,880 B</strong>，n=4 为 <strong>122,880–130,807 B</strong>，n=8 也只有 <strong>130,860–131,072 B</strong>：增加载体只是把同一个窗口分给更多载体，并增加重排序工作，不会放大窗口。120–131 KB 只有直连 BDP 的约 <strong>26–28%</strong>。</p>
   <p>http-kal 的 in-flight 更低（81,920–114,688 B），c5 因 dup=1 升到 139,264–189,175 B，仍不到 BDP 的一半。窗口不随 n 增长，是“n 不扩展”的直接原因，不是载体数不够。</p>
 
   <h3>2. raw 载体每轮 lost/rebuild</h3>
@@ -1020,7 +1020,7 @@ wlp4s0 192.168.123.69                    eth0 45.11.1.62
   <p>c5 的 <code>wire/submit</code> 为 <strong>2.018 / 2.016</strong>，而 c2（dup=0）是 1.038 / 1.041；near <code>dup_bytes</code> 9.28 / 9.75 MB，<code>inflate_ppm</code> 约 1.96e6。receiver 4.07 / 5.04（均值 4.55）高于 c2，但 c5 的 near 负载低得多（10.9/34.5% 对 83.0/53.6%），且 c5-r2 的 <code>rxq=0</code>；c5 的 in-flight 为 139–189 KB。两个样本不足以证明 dup 带来吞吐增益；唯一确定的代价是 wire 翻倍。</p>
 
   <h3>6. far rxq 积压：接收侧也没有跟上</h3>
-  <p>n≥4 的多数 raw 运行结束时 far <code>rxq</code> 仍有 <strong>3.15–3.71 MiB</strong>，<code>rx_max_stall_us</code> 为 264–602 ms。near 提交 8.84–9.90 MB，far 交付 6.27–7.77 MB（c2/c3/c5-r1）；15 s 内没有到稳态。因此 receiver 数字是下界，不是该配置的稳态上限；有序交付/窗口释放也在拖后腿。</p>
+  <p>n≥4 的多数 raw 运行结束时 far <code>rxq</code> 仍有 <strong>3.15–3.71 MiB</strong>，<code>rx_max_stall_us</code> 为 264–602 ms。near 提交 9.27–10.38 MB，far 交付 6.57–8.15 MB（rxq&gt;0 的 5 次运行：c2/c3 各 2 次 + c5-r1）；15 s 内没有到稳态。因此 receiver 数字是下界，不是该配置的稳态上限；有序交付/窗口释放也在拖后腿。</p>
 </section>
 
 <section id="limits">
@@ -1030,7 +1030,7 @@ wlp4s0 192.168.123.69                    eth0 45.11.1.62
       <h2>限制</h2>
       <ol>
         <li><strong>near 并行负载污染。</strong>矩阵期间 near 在跑无关的 <code>cc1plus</code> / <code>test_multistream</code> / <code>test_nv12_pipeline</code>，1 分钟 load 3.5–9.0，机器 busy 10.9–85%。near CPU 列是机器级数据，不能当作 tbtun 开销。直连基线也在类似负载下测，仍达到 17–34 Mbit/s，所以负载不能单独解释约 4 Mbit/s。</li>
-        <li><strong>15 s 窗口，raw n≥4 未稳态。</strong>c2/c3/c5-r1 结束时 far <code>rxq</code> 还有 3.1–3.7 MiB；near 提交 8.84–9.90 MB，far 交付 6.27–7.77 MB（c2/c3/c5-r1）。receiver 是下界。</li>
+        <li><strong>15 s 窗口，raw n≥4 未稳态。</strong>c2/c3 各 2 次与 c5-r1 结束时 far <code>rxq</code> 还有 3.1–3.7 MiB；near 提交 9.27–10.38 MB，far 交付 6.57–8.15 MB。receiver 是下界。</li>
         <li><strong>短测试曾 EOF / Broken pipe。</strong>部署阶段的 smoke 短跑出现过；矩阵统一 15 s 后 10/10 成功。不要把 smoke 的短跑数字与矩阵混用。</li>
         <li><strong>没有做参数扫描。</strong><code>rx_reorder_bytes</code>、<code>carrier_stall_ms</code>、<code>hole_budget_ms</code>、发送窗口/队列上限都没有扫；矩阵只改了 n/m/dup/profile。</li>
         <li><strong>near iperf3 进程 CPU 未被矩阵采样器捕获。</strong>补充的 c2 15 s 运行测得 0.0% of one core（31 个样本），机器 busy 33.3%，该次 5.38 Mbit/s；far iperf3 为 0.17–0.56%。客户端不是瓶颈。</li>
