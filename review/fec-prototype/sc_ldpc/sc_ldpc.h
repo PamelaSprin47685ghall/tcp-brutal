@@ -107,4 +107,7 @@ int sc_data_var(const sc_code *c, int k);
 /* 1 if the code is systematic (SC_TERM_CAUSAL), 0 otherwise. */
 int sc_systematic(const sc_code *c);
 
+/* Decoder knowledge after the last sc_decode(): 1 = value known. */
+const uint8_t *sc_known_bits(const sc_code *c);
+
 #endif /* SC_LDPC_H */
