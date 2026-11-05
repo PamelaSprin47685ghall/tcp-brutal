@@ -561,7 +561,7 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **合并列车（用户裁决）：`w-window` → `w-fec-v6` → `w-crypto` → `w-sclc` → `w-hnd0` → master（F/T7）。**
 每一步只在 master 上合并前一等的 head；不允许跨序合并。D 的当前 worktree 仍是 `w-fec`，合并前改名为 `w-sclc` 或由 F 记录等价映射；不得因此改变 D 的提交内容。
-**`w-window` 未过 G1（HND0 N=1 auto 失败），暂不进入合并列车**；A 修 RST adversarial、lint、auto budget、HND0 stall 后再评估。
+**`w-window` 未过 G1（HND0 N=1 auto 根因已定位，待重跑），暂不进入合并列车**；A 的 `rx_reorder_bytes=1MiB` 重跑通过后再评估。
 
 | 文件 | 冲突方 | 裁决 |
 |---|---|---|
@@ -609,7 +609,7 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 | 通过 | N=1 慢载体 `rc=0`；far `holes_unrecoverable=0`；`fbk_rx>0`；`W≈136–250 KB`；`raw lost=0`；A–K 11/11、0 skip；adversarial 91/91、0 failed/0 skipped；host/SAN/lint 全绿 |
 | 失败 | 任一计数不符、skip、crash、hang |
 
-**G1 现状（挂起，HND0 N=1 auto 失败）**：A 的 lab 5s budget 通过；HND0 N=1 auto（`w-hnd0 cb92fbf`，证据 `review/wan-experiment/t1-n1-auto/`）rc=1：16MiB 只收 11.2MiB、control socket closed；第二次 1.06MiB 停 120s。far `holes=0`、`fbk_rx>0`、`carrier_lost=0`，但 near `holes_unrecoverable=1`、`W=121–262KB` 低于 203ms BDP≈431KB、far c6 `gate_fail=45/depth_fail=92`。A 诊断中；RST adversarial 1/91 未解；lint 未跑。T1 完成前**不合并 `w-window`**。
+**G1 现状（挂起，HND0 N=1 auto 根因已定位）**：A `w-window 3f4f1f0`（模块同 c672843）定位：① W 被 `rx_reorder_bytes=262144` 钳住，不是公式；near `bdp_bytes=375286`、`k=2` → 750572，实测 10.3 Mbit/s = 262144/192.7ms；far `W=121–125KB` 是反方向控制流。重跑：两端 `rx_reorder_bytes=1048576`、`tx_window_bytes=0`、`hole_budget_ms=0`、`carrier_stall_ms=15000`、`profile=raw`、`debug=2`，`W=min(750KB,1MiB)=750KB`，17 Mbit/s 可行。② near `holes_unrecoverable=1` 是 sender-side `tbt_tx_stall_check` 杀掉被 reaped 的 iperf3 控制流（`rx_max_stall_us=0`；数据流 `kill=5` 是 app close），不是 rx hole；控制流 `tx_ack` 为何停 >1s 待 debug 打印。RST 用例已修（near 15/15；测试 bug），lint 16/16+14/14，adversarial 全套仍在跑。T1 未绿，**不合并 `w-window`**。
 
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
 
@@ -619,6 +619,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 | 证据 | `review/fec-v6/`、`host/test_fec` 输出、QEMU 日志、`/proc/net/tbtun/peers` 256 行快照 |
 | 通过 | `conv=0x1001`；40B 偏移/CRC 与本文一致；`share_index/epoch/win_len` u16；256-bit bitmap；`n+m=256` 不截断；1 share/carrier；RLNC/grouped host 向量 p=1–50%；控制帧 partial 测试通过；A–K 11/11；adversarial 91/91 |
 | 失败 | 任何字段偏移不符、16 槽泄漏、`n+m=256` 截断、QEMU 回归 |
+
+**G2 现状（T2.1–T2.4 完成，T2 parent 进行）**：B `w-fec-v6 a767b63` 落地 40B header/ABI、`tbt_fec`、256 carrier slots/portmap（4096；host test 30000–34095）、grouped RLNC host codec；`test_fec 1430/0`、`test_portmap 33999/0`、`parse 412/0`、host/SAN/lint、QEMU A–K 11/11。`fec=on` 仍是 parser/procfs，`tbt_session_create()` 返回 `-EOPNOTSUPP`；数据面等 A/G1 后接。T2.1–T2.4 完成，T2 parent 进行；不合并。
 
 ### G3 — T3 ChaCha8（C）
 
