@@ -1,0 +1,66 @@
+tbtun 0.0.1 final QEMU probe run (A-K)
+=======================================
+
+Tree:    /home/kunweiz/tbtun-worktrees/final-qemu
+Branch:  w-final-qemu
+HEAD:    68bfbaa52c366f998527b4eb1050746283302757
+Module:  tbtun.ko 5,950,104 B
+sha256:  0b8f0006a7a10fe33e6e35e927aaf916047e142528bc32729ed04826fdccdb63
+Build:   source ~/.cache/tbtun-build/env.sh && make check -> rc=0
+         test_parse 357 checks/0 fail; test_fuzz 7550734 checks/0 fail;
+         test_http 249 checks/0 fail; test_reorder 52792/0; test_ack 10026/0;
+         test_control 181/0; test_multistream 68580/0; 124 checks/0; h11 OK.
+         Full log: review/final-qemu/make-check.log
+
+Command (under flock -x /tmp/tbtun-qemu.lock):
+  tests/qemu/run.sh --probes A,B,C,D,E,F,G,H,I,J,K --timeout 900 \
+    --log review/final-qemu/qemu-AK-console.log
+
+Result: exit code 0; 11/11 PASS, 0 SKIP; wall time 182.63 s.
+  A PASS
+  B PASS
+  C PASS
+  D PASS
+  E PASS
+  F PASS
+  G PASS
+  H PASS
+  I PASS
+  J PASS
+  K PASS
+
+Console: review/final-qemu/qemu-AK-console.log
+Run log: review/final-qemu/qemu-AK-run.log
+Kernel oops/WARN scan of the console: none (BUG:/Oops/WARNING:/Call Trace:/
+general protection/INFO: task ... blocked/deprecated workqueue/refcount_t:/
+KASAN/UBSAN all absent).
+
+Probe C reconcile (tunnel 2), console lines 572-575:
+   reconcile: wire=11636228 live=11496196 retired=140032 peers=11496196 d_wire=0
+   reconcile: data_tx=1421 live=1404 retired=17 d_data=0
+   reconcile: retx_frames=390 live=377 retired=13 d_retx=0
+   reconcile: live_bytes-peers_tx_bytes=0
+  live+retired=session: 11496196+140032=11636228 OK
+                        1404+17=1421 OK
+                        377+13=390 OK
+  peers sum: live_bytes 11496196 == sum(peers tx_bytes) 11496196 OK
+  C detail: carrier_lost=2 carrier_replaced=1 carrier0=up frames=349 bytes=2641572
+
+Probe E reconcile (tunnel 2), console lines 686-689:
+   reconcile: wire=12905466 live=12716227 retired=189239 peers=12716227 d_wire=0
+   reconcile: data_tx=1578 live=1555 retired=23 d_data=0
+   reconcile: retx_frames=544 live=530 retired=14 d_retx=0
+   reconcile: live_bytes-peers_tx_bytes=0
+  live+retired=session: 12716227+189239=12905466 OK
+                        1555+23=1578 OK
+                        530+14=544 OK
+  peers sum: live_bytes 12716227 == sum(peers tx_bytes) 12716227 OK
+  E detail: spare 4 took over: state=up bytes=2766274
+            spare_activated=1 replaced=0 lost=2
+
+10-sample monotonicity: check_reconcile 2 (tests/qemu/init:233-275) takes 10
+samples per probe, rejects any decrease of wire/data_tx/retx_frames, then
+requires the exact equalities above on the last sample. Probe C and E both
+PASS and the console contains no "reconcile: counter went backwards" or
+"reconcile: short sample" line, so all 10 samples were monotone and the final
+sample reconciled exactly. The console prints only the last sample.
