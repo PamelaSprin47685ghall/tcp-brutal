@@ -254,7 +254,8 @@ key 解析、per-direction nonce、pair init/wipe、session 双向。失败即�
 - 与 Ryzen 的 1207–1221 MB/s / 4.01–4.06 c/B / 10.2–10.4% 比：那是同一份代码在
   安静主机上的数字；HND0 的 3.46 c/B 看似更低，是因为 2200 MHz 只是标签频率，
   不能跨机比 c/B，只能比 1G 占比。
-- .65 的 33238ca 数字见 §8.1（07:11 的安静窗口，load 0.15，flock + taskset cpu0）；
-  本节只复核 HND0。
+- .65 的 33238ca 数字见 §8.1（07:11 的安静窗口，load 0.15，flock + taskset cpu0）。
+  microbench2 没有在 .65 上跑；07:12 的避让检查（load 0.71、mediamtx/ffmpeg、
+  3 个登录会话）记在 `logs/chacha8-33238ca-hnd0.log`。本节只复核 HND0。
 - 全程未装包、未加载模块、未改网络/服务；HND0 的 `/tmp` 临时目录已删，本地未产生
   临时文件。
