@@ -631,9 +631,11 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                           "tx=%llu wire=%llu err=%llu short=%llu\n",
                        t->cfg.id, tbt_stat_read(&t->sess->pub_capture_runs),
                        tbt_stat_read(&t->sess->pub_actor_calls),
-                       tbt_stat_read(&t->sess->tx_submit_bytes), t->sess->stats_tx,
-                       t->sess->carrier_bytes, t->sess->carrier_err,
-                       t->sess->carrier_short);
+                       tbt_stat_read(&t->sess->tx_submit_bytes),
+                       READ_ONCE(t->sess->stats_tx),
+                       READ_ONCE(t->sess->carrier_bytes),
+                       READ_ONCE(t->sess->carrier_err),
+                       READ_ONCE(t->sess->carrier_short));
             seq_printf(m, "tunnel %llu rx_work_runs=%llu rx_drain_entries=%llu "
                           "rx_drain_bytes=%llu rx_paused_skips=%llu rx_adopt_events=%llu "
                           "rx_records=%llu carrier_write_space_runs=%llu poll_rescues=%llu\n",
@@ -641,7 +643,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                        tbt_stat_read(&t->sess->rx_drain_entries),
                        tbt_stat_read(&t->sess->rx_drain_bytes),
                        tbt_stat_read(&t->sess->rx_paused_skips),
-                       t->sess->rx_adopt_events,
+                       READ_ONCE(t->sess->rx_adopt_events),
                        tbt_stat_read(&t->sess->rx_records),
                        tbt_stat_read(&t->sess->carrier_write_space_runs),
                        tbt_stat_read(&t->sess->poll_rescues));
@@ -655,9 +657,10 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                        tbt_stat_read(&t->sess->rx_read_zero),
                        tbt_stat_read(&t->sess->rx_resume_calls),
                        tbt_stat_read(&t->sess->rx_resume_busy),
-                       t->sess->rx_last_drained,
+                       READ_ONCE(t->sess->rx_last_drained),
                        tbt_stat_read(&t->sess->rx_parse_proto),
-                       tbt_stat_read(&t->sess->rx_errs), t->sess->rx_last_err,
+                       tbt_stat_read(&t->sess->rx_errs),
+                       READ_ONCE(t->sess->rx_last_err),
                        tbt_stat_read(&t->sess->tx_submit_calls),
                        tbt_stat_read(&t->sess->rx_delivered_bytes));
             seq_printf(m, "tunnel %llu dbg rcv_nxt=%u copied=%u after=%u qlen=%u "
@@ -669,13 +672,15 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                        tbt_stat_read(&t->sess->dbg_alloc_fail),
                        tbt_stat_read(&t->sess->dbg_over_qmax),
                        tbt_stat_read(&t->sess->dbg_copy_fail),
-                       t->sess->dbg_pump_hiwat,
-                       t->sess->dbg_pump_dead,
+                       READ_ONCE(t->sess->dbg_pump_hiwat),
+                       READ_ONCE(t->sess->dbg_pump_dead),
                        tbt_stat_read(&t->sess->dbg_pump_runs),
-                       t->sess->dbg_pump_moved,
+                       READ_ONCE(t->sess->dbg_pump_moved),
                        tbt_stat_read(&t->sess->dbg_pump_nocar),
-                       t->sess->dbg_pump_down, t->sess->dbg_pump_stop,
-                       t->sess->dbg_pump_empty, t->sess->dbg_pump_qlen);
+                       READ_ONCE(t->sess->dbg_pump_down),
+                       READ_ONCE(t->sess->dbg_pump_stop),
+                       READ_ONCE(t->sess->dbg_pump_empty),
+                       READ_ONCE(t->sess->dbg_pump_qlen));
             seq_printf(m, "tunnel %llu live rxq=%u rxp=%u txq=%u txp=%u "
                           "pub_state=%u pub_wmem=%u pub_una=%u pub_nxt=%u "
                           "car_wmem=%u car_nxt=%u car_copied=%u car_rcvbuf=%u "
@@ -767,19 +772,22 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "peer_paused=%u fb_delay_us=%u rto_us=%u una_stall_us=%u\n",
                            t->cfg.id, n, up, tbt_stat_read(&s->carrier_lost),
                            tbt_stat_read(&s->carrier_replaced),
-                           s->spare_activated,
+                           READ_ONCE(s->spare_activated),
                            tbt_stat_read(&s->carrier_alloc_fail),
                            tbt_stat_read(&s->port_exhaust),
                            tbt_stat_read(&s->port_alloc_fail),
                            tbt_stat_read(&s->connect_fail),
-                           s->session_join_dup,
+                           READ_ONCE(s->session_join_dup),
                            tbt_stat_read(&s->session_join_bad),
                            tbt_stat_read(&s->join_nonce_reject),
-                           tbt_stat_read(&s->join_src_reject), s->fbk_tx,
-                           tbt_stat_read(&s->fbk_rx), s->retx_frames,
-                           s->retx_bytes, s->retain_drop,
-                           s->retx_hole, s->retx_slow, s->retx_pathloss,
-                           s->retx_other, s->data_tx, retx_data_ppm,
+                           tbt_stat_read(&s->join_src_reject),
+                           READ_ONCE(s->fbk_tx),
+                           tbt_stat_read(&s->fbk_rx), READ_ONCE(s->retx_frames),
+                           READ_ONCE(s->retx_bytes), READ_ONCE(s->retain_drop),
+                           READ_ONCE(s->retx_hole), READ_ONCE(s->retx_slow),
+                           READ_ONCE(s->retx_pathloss),
+                           READ_ONCE(s->retx_other), READ_ONCE(s->data_tx),
+                           retx_data_ppm,
                            dup_bytes_ppm,
                            tbt_stat_read(&s->rx_reorder_overflow), max_depth,
                            ooo_bytes, ooo_frames,
@@ -791,8 +799,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                  * re-pin, obsolete-generation and explicit-loss record. */
                 seq_printf(m, "tunnel %llu ctl ctl_lost=%llu ctl_retry=%llu "
                               "ctl_requeue=%llu ctl_obsolete=%llu ctl_queued=%u\n",
-                           t->cfg.id, tbt_stat_read(&s->ctl_lost), s->ctl_retry,
-                           s->ctl_requeue, s->ctl_obsolete,
+                           t->cfg.id, tbt_stat_read(&s->ctl_lost),
+                           READ_ONCE(s->ctl_retry), READ_ONCE(s->ctl_requeue),
+                           READ_ONCE(s->ctl_obsolete),
                            READ_ONCE(s->ctl_queued));
                 /* Session stream census, next to the carrier block. n_active
                  * is the non-detached stream count (the concurrency bound),
@@ -811,7 +820,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "holes_unrecoverable=%llu rx_max_stall_us=%u "
                               "hole_checks=%llu gate_fail=%llu depth_fail=%llu "
                               "time_fail=%llu\n",
-                           t->cfg.id, s->holes_declared, s->holes_repaired,
+                           t->cfg.id, READ_ONCE(s->holes_declared),
+                           READ_ONCE(s->holes_repaired),
                            tbt_stat_read(&s->holes_unrecoverable), max_stall_us,
                            tbt_stat_read(&s->hole_checks),
                            tbt_stat_read(&s->hole_gate_fail),
@@ -822,8 +832,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "pad_tx=%llu drip_tx=%llu\n",
                            t->cfg.id, tbt_stat_read(&s->profile_mismatch),
                            tbt_stat_read(&s->http_parse_err),
-                           tbt_stat_read(&s->http_status_err), s->http_req,
-                           s->http_resp, tbt_stat_read(&s->pad_tx),
+                           tbt_stat_read(&s->http_status_err),
+                           READ_ONCE(s->http_req), READ_ONCE(s->http_resp),
+                           tbt_stat_read(&s->pad_tx),
                            tbt_stat_read(&s->drip_tx));
                 {
                     u64 goodput = tbt_stat_read(&s->tx_submit_bytes);
@@ -833,10 +844,10 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                     seq_printf(m, "tunnel %llu c5 dup_tx=%llu dup_used=%llu "
                                   "dup_suppressed=%llu dup_same_path=%llu "
                                   "inflate_ppm=%llu dup_bytes=%llu\n",
-                               t->cfg.id, s->dup_tx,
+                               t->cfg.id, READ_ONCE(s->dup_tx),
                                tbt_stat_read(&s->dup_used),
                                tbt_stat_read(&s->dup_suppressed),
-                               s->dup_same_path, inflate, dupb);
+                               READ_ONCE(s->dup_same_path), inflate, dupb);
                 }
                 /* Reconciliation: the session aggregates count every carrier
                  * that ever wrote, while `peers` lists only the live slots.
