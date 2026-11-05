@@ -259,6 +259,16 @@ static void tbt_drain_work(struct work_struct *w)
          * is retried when the output socket's window opens (sk_write_space
          * schedules this work again). */
         done = tbt_sock_deliver(st, fr->data + fr->off, left);
+        if (done == -EPIPE || done == -ECONNRESET || done == -ESHUTDOWN)
+        {
+            /* The target is gone (EPIPE/ECONNRESET) with frames still queued:
+             * they can never be delivered. Abort the stream now so the peer
+             * resets its application, instead of holding the backlog until
+             * its own stall budget (measured: the far held 2.65 MB with
+             * tgt_state=7 while the near kept sending). */
+            tbt_stream_kill(st, TBT_ST_DEAD);
+            break;
+        }
         if (done <= 0)
             break;
 
@@ -363,6 +373,11 @@ static void tbt_ctrl_work(struct work_struct *w)
          * already be CLOSE after FIN_WAIT2 -> tcp_time_wait -> tcp_done.  The
          * capture work item emits the FIN once the preceding bytes are in. */
         schedule_work(&st->w_read);
+        /* A target that closed with our delivery queue non-empty cannot take
+         * those bytes any more; let w_drain discover the write error and
+         * abort the stream instead of leaving the queue parked. */
+        if (READ_ONCE(st->rx_queued))
+            schedule_work(&st->w_drain);
         return;
     }
     /* TCP_CLOSE without sk_err is a graceful or local close, not a reset.

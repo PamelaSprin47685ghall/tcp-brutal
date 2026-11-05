@@ -65,6 +65,23 @@ static bool tbt_hole_copy_inflight(struct tbt_session *sess, struct tbt_retain *
 static void tbt_tx_ctl_arm(struct tbt_session *sess, struct tbt_carrier *pref,
                            unsigned int ms);
 
+/* A stream with at most two records outstanding is control-like: its next
+ * bytes are what the peer's application needs to make progress, not bulk.
+ * Both carrier admission gates exempt it, so a bulk stream that fills the
+ * peer window or the socket memory cannot starve it (measured: the 172nd
+ * byte of an iperf3 control stream sat in tx_q while the bulk used the whole
+ * 785 KB window, and the sender's stall timer killed the stream). */
+static bool tbt_stream_small_backlog(const struct tbt_stream *st)
+{
+    u64 seq, ack;
+
+    if (!st)
+        return false;
+    seq = READ_ONCE(st->tx_seq);
+    ack = READ_ONCE(st->tx_ack);
+    return seq >= ack && seq - ack <= 2 * TBT_PAYLOAD_MAX;
+}
+
 static void tbt_frame_free(struct tbt_frame *fr)
 {
     struct tbt_stream *st = fr->st;
@@ -1492,13 +1509,30 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
          * feedback, so the sender waits at least 2.5 RTOs. This is the same
          * 2-3 x RTO rule the receiver's hole budget follows, applied where the
          * RTO is actually known. */
-        u64 budget = sess->tunnel->cfg.hole_budget_ms
-                         ? (u64)sess->tunnel->cfg.hole_budget_ms * NSEC_PER_MSEC
-                         : NSEC_PER_SEC;
-        u64 floor = 5 * tbt_tx_rto_ns(sess, st) / 2;
+        u64 rto = tbt_tx_rto_ns(sess, st);
+        u64 budget;
 
-        if (budget < floor)
-            budget = floor;
+        if (sess->tunnel->cfg.hole_budget_ms)
+            budget = (u64)sess->tunnel->cfg.hole_budget_ms * NSEC_PER_MSEC;
+        else
+        {
+            /* Auto must not fall back to one second. The receiver's own auto
+             * hole budget is max(1 s, 5*mean_srtt), and the sender has to add
+             * its RTO plus one one-way on top; one second is shorter than
+             * that, and it killed a 172-byte control stream whose last byte
+             * waited behind a bulk window (measured: TXSTALLKILL ack=171
+             * txseq=172 age=3.17 s while carrier_stall_ms=15000 was
+             * ignored). The operator's dead-path bound wins when set; 5 s or
+             * 5 RTOs otherwise. An explicit hole_budget_ms keeps its exact
+             * meaning (probe H asserts 500 ms). */
+            budget = max_t(u64, 5 * NSEC_PER_SEC, 5 * rto);
+            if (sess->tunnel->cfg.carrier_stall_ms)
+                budget = max_t(u64, budget,
+                               (u64)sess->tunnel->cfg.carrier_stall_ms *
+                                   NSEC_PER_MSEC);
+        }
+        if (budget < 5 * rto / 2)
+            budget = 5 * rto / 2;
         /* A timestamp stamped on another CPU can be a few nanoseconds ahead
          * of this CPU's ktime_get_ns(); the unsigned subtraction then looks
          * like a 584-year stall and kills a healthy stream (measured: probe G,
@@ -2176,26 +2210,32 @@ int tbt_tx_pump(struct tbt_session *sess)
                 u32 wnd = READ_ONCE(tp->snd_wnd);
                 u32 limit = wnd ? wnd : TBT_CHUNK_MAX;
 
-                if ((u32)(queued - una) >= limit)
+                /* Per-stream order is kept: the queue is FIFO and the small
+                 * stream's earlier frames are already ahead, so exempting it
+                 * here cannot reorder its bytes. */
                 {
-                    c->win_paused = true;
-                    sess->win_block++;
-                    if (c->sk->sk_socket)
-                        set_bit(SOCK_NOSPACE, &c->sk->sk_socket->flags);
-                    /* No timer here. SOCK_NOSPACE makes tcp_check_space()
-                     * call sk_write_space when the peer's window opens, and
-                     * the 10 ms FBK tick pumps anyway. Arming the 2 ms
-                     * fallback once per blocked frame only to have the
-                     * pump's own disarm cancel it was 3-44k schedule/cancel
-                     * pairs per second (measured: pump_hw_armed 84380 in a
-                     * 1.9 s run, pump_hw_fired 0). */
-                    sess->dbg_pump_hiwat++;
-                    continue;
-                }
-                if (c->win_paused)
-                {
-                    c->win_paused = false;
-                    sess->win_resume++;
+                    if ((u32)(queued - una) >= limit &&
+                        !tbt_stream_small_backlog(fr->st))
+                    {
+                        c->win_paused = true;
+                        sess->win_block++;
+                        if (c->sk->sk_socket)
+                            set_bit(SOCK_NOSPACE, &c->sk->sk_socket->flags);
+                        /* No timer here. SOCK_NOSPACE makes tcp_check_space()
+                         * call sk_write_space when the peer's window opens,
+                         * and the 10 ms FBK tick pumps anyway. Arming the
+                         * 2 ms fallback once per blocked frame only to have
+                         * the pump's own disarm cancel it was 3-44k
+                         * schedule/cancel pairs per second (measured:
+                         * pump_hw_armed 84380 in a 1.9 s run, fired 0). */
+                        sess->dbg_pump_hiwat++;
+                        continue;
+                    }
+                    if (c->win_paused)
+                    {
+                        c->win_paused = false;
+                        sess->win_resume++;
+                    }
                 }
             }
             /* The real admission test tcp_sendmsg_locked() uses: the
@@ -2211,7 +2251,9 @@ int tbt_tx_pump(struct tbt_session *sess)
              * fbk_rx=0, tx_ack=0, both directions stuck at 64 KB). An FBK is
              * a few dozen bytes and tcp_sendmsg_locked still accepts it at
              * the line; a failure just re-queues it as -EAGAIN. */
-            if (c->sk && type != TBT_F_FBK && !sk_stream_memory_free(c->sk))
+            if (c->sk && type != TBT_F_FBK &&
+                !(type == TBT_F_DATA && tbt_stream_small_backlog(fr->st)) &&
+                !sk_stream_memory_free(c->sk))
             {
                 blocked |= BIT(c->index);
                 if (c->sk->sk_socket)
