@@ -985,9 +985,13 @@ value) ≈ 3 × window; plus ≤ `rx_reorder_bytes` of reorder tree and ≤ 64 M
 queue per stream.
 
 **Carrier buffers.** `SO_SNDBUF`/`SO_RCVBUF` are no longer a hardcoded 256 KiB. Each
-carrier gets `clamp((window_share + 2 × TBT_CHUNK_MAX) / 2, 128 KiB, 4 MiB)`, where
-`window_share = (tx_window_bytes ?: rx_reorder_bytes) / n_pri` and the division by two is
-the kernel's own doubling. The value is set with `SO_SNDBUFFORCE`/`SO_RCVBUFFORCE`,
+carrier gets `clamp(max(window_share, TBT_CAR_SOCKBUF_TOTAL / n_pri) / 2, 64 KiB, 1 MiB)`,
+where `window_share = (tx_window_bytes ?: rx_reorder_bytes) / n_pri`, the division by two
+is the kernel's own doubling, and `TBT_CAR_SOCKBUF_TOTAL` is 64 MiB. The total budget is
+what makes the layer scalable: at 256 carriers each carrier gets 256 KiB effective
+(64 MiB total), at n=1 it gets 2 MiB effective, and an 8 MiB-per-carrier setting can no
+longer become 2 GiB. The cap is an accounting limit, not a reservation; the demand is the
+in-flight share. The value is set with `SO_SNDBUFFORCE`/`SO_RCVBUFFORCE`,
 falling back to the plain option when the kernel refuses the force call (no
 `CAP_NET_ADMIN`): the plain option is clamped to `net.core.wmem_max`/`rmem_max` (208 KiB
 on a default boot), so a 256 KiB request reached the kernel as 208 KiB, 416 KiB effective
@@ -996,6 +1000,22 @@ next to `car_rcvbuf`. The queueing delay is bounded by in-flight / rate, and in-
 bounded by the window, so a buffer that holds one carrier's share adds no delay. The old
 fixed 256 KiB reached the kernel as ~512 KiB of unacked bytes per carrier and capped a
 1–8 MiB window.
+
+**Carrier-count scaling (256 target).** The current ABI limit is 16 carriers, not a
+tunable: `path_ack_mask` is a 16-bit wire field (`BUILD_BUG_ON(TBT_MAX_CARRIERS_LIMIT >
+16)`), the FBK body is `18 × 16 = 288` bytes and the WINDOW body is `8 + 8 × 16 + 2`, and
+the ARQ path masks and per-path arrays are `u16`/`[16]` (`avoid_mask`, `path_mask`,
+`reserve_mask`, `announced_mask`, `path_gen[]`, `path_end[]`, `first_sent_seq[]`,
+`una_observed_ns[]`, `sched.order[]`, and the `unsigned long` FIN/RST masks). Raising the
+limit to 256 requires widening those to 256-bit masks and chunking or enlarging the FBK
+and WINDOW bodies; that is a data-plane change and is deferred to the FEC block model.
+What is already scalable: the socket-buffer budget above, `TBT_PORTMAP_MAX` (4096 ports,
+so a 1024-port block is fine), the per-stream limits, and the procfs renderers (per
+carrier, no fixed stride). Resource estimate at 256 carriers: 256 TCP sockets and
+5 work structs each (poll/pump/rx/tx/connect), 256 × ~24 KiB of HTTP/parser state
+(~6 MiB), and a per-carrier 50 ms poll = 5120 wakes/s; the poll must become one
+session-level scan (20 wakes/s) before 256 is enabled, and the per-carrier keepalive
+must batch. The 64 MiB socket-buffer budget bounds the kernel side.
 
 **Inflation control.** `dup_degree` is the knob; `max_inflate` the ceiling (§4.7).
 
