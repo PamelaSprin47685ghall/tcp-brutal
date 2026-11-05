@@ -213,11 +213,9 @@ phase_public() {
     timeout 120 /bin/adv_probe writer "$PUB" 1024 0
     flush_all
 
-    # The other half of writer standard 7: the same 100 MiB with a reader
-    # draining the echo must complete byte-exact, not merely block.
-    setup_raw
-    timeout 200 /bin/adv_probe writerdrain "$PUB" 100
-    flush_all
+    # The other half of writer standard 7: with a reader draining the echo
+    # the same bytes must come back, not merely block.
+    writer_drain_cases
 }
 
 phase_control() {
@@ -655,16 +653,28 @@ phase_create() {
     flush_all
 }
 
-# --- 100 MiB write with the application reading (writer standard 7) --------
+# --- write with the application reading (writer standard 7) ---------------
 
-phase_writerdrain() {
-    echo "== pub.writer with a draining reader"
+# The completion half of writer standard 7. 100 MiB measures the drain rate;
+# 1 GiB is kept because it finishes well inside the budget (the result line
+# prints secs/mbps, so a future slowdown is visible instead of silent).
+writer_drain_cases() {
     setup_raw
     timeout 200 /bin/adv_probe writerdrain "$PUB" 100
     case $? in
-    124 | 143) res pub.writer_drain TIMEOUT "adv_probe writerdrain did not finish in 200s" ;;
+    124 | 143) res pub.writer_drain TIMEOUT "adv_probe writerdrain 100 MiB did not finish in 200s" ;;
+    esac
+    setup_raw
+    timeout 300 /bin/adv_probe writerdrain "$PUB" 1024
+    case $? in
+    124 | 143) res pub.writer_drain_1g TIMEOUT "adv_probe writerdrain 1 GiB did not finish in 300s" ;;
     esac
     flush_all
+}
+
+phase_writerdrain() {
+    echo "== pub.writer with a draining reader"
+    writer_drain_cases
 }
 
 phase_catconfig() {

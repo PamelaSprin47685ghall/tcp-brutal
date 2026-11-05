@@ -172,6 +172,7 @@ for g in $groups; do
     case $g in
     public) run_group public "$public_timeout" ;;
     stable) run_group stable "$timeout_s" ;;
+    writer) run_group writer 600 ;;
     *) run_group "$g" "$carrier_timeout" ;;
     esac
 done

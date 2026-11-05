@@ -4114,12 +4114,13 @@ static int mode_writerdrain(int port, int mib)
 {
     int fd = connect_to("127.0.0.1", port, NULL);
     long total = (long)mib * 1024 * 1024;
+    const char *name = mib >= 1024 ? "pub.writer_drain_1g" : "pub.writer_drain";
     struct timeval zero = { 0, 0 };
     struct drain_state *st;
     char *buf = malloc(1024 * 1024);
     unsigned long before, during_min, after_write, after_flush = 0;
     int oom0, oom1, flushed = 0, legal, mem_ok, rst, eagain;
-    long flush_start, flush_ms = -1, deadline;
+    long flush_start, flush_ms = -1, deadline, t0, elapsed_ms;
     long sent, got;
     int werr, rerr, writer_done = 0, reader_done = 0;
     int wstatus = 0, rstatus = 0;
@@ -4127,7 +4128,7 @@ static int mode_writerdrain(int port, int mib)
 
     if (fd < 0 || !buf)
     {
-        result("pub.writer_drain", 0, "cannot connect or allocate");
+        result(name, 0, "cannot connect or allocate");
         free(buf);
         return 1;
     }
@@ -4140,7 +4141,7 @@ static int mode_writerdrain(int port, int mib)
               MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     if (st == MAP_FAILED)
     {
-        result("pub.writer_drain", 0, "mmap of the drain state failed");
+        result(name, 0, "mmap of the drain state failed");
         close(fd);
         free(buf);
         return 1;
@@ -4150,6 +4151,7 @@ static int mode_writerdrain(int port, int mib)
     before = mem_available_kb();
     during_min = before;
     oom0 = oom_count();
+    t0 = now_ms();
 
     rp = fork();
     if (rp == 0)
@@ -4208,7 +4210,7 @@ static int mode_writerdrain(int port, int mib)
             kill(wp, SIGKILL);
             waitpid(wp, &wstatus, 0);
         }
-        result("pub.writer_drain", 0, "fork failed: errno=%d", errno);
+        result(name, 0, "fork failed: errno=%d", errno);
         munmap(st, sizeof(*st));
         close(fd);
         free(buf);
@@ -4263,6 +4265,7 @@ static int mode_writerdrain(int port, int mib)
         kill(rp, SIGKILL);
         waitpid(rp, &rstatus, 0);
     }
+    elapsed_ms = now_ms() - t0;
     sent = __atomic_load_n(&st->sent, __ATOMIC_ACQUIRE);
     got = __atomic_load_n(&st->got, __ATOMIC_ACQUIRE);
     werr = __atomic_load_n(&st->werr, __ATOMIC_ACQUIRE);
@@ -4296,11 +4299,14 @@ static int mode_writerdrain(int port, int mib)
     eagain = werr == EAGAIN || rerr == EAGAIN;
     mem_ok = flushed && before > 0 && after_flush > 0 &&
              after_flush + 51200 >= before;
-    result("pub.writer_drain", legal && !rst && !eagain && mem_ok && oom1 <= oom0,
+    result(name, legal && !rst && !eagain && mem_ok && oom1 <= oom0,
            "attempted %d MiB with a draining reader: sent=%ld/%ld got=%ld/%ld "
-           "errno=%d/%d eagain=%d blocked=%d mem_before=%lu mem_during_min=%lu "
-           "mem_after_flush=%lu flush_secs=%.2f oom=%d->%d",
+           "errno=%d/%d eagain=%d blocked=%d secs=%.2f mbps=%.1f "
+           "mem_before=%lu mem_during_min=%lu mem_after_flush=%lu "
+           "flush_secs=%.2f oom=%d->%d",
            mib, sent, total, got, total, werr, rerr, eagain, !writer_done,
+           elapsed_ms / 1000.0,
+           elapsed_ms > 0 ? (double)mib / (elapsed_ms / 1000.0) : 0.0,
            before, during_min, after_flush,
            flush_ms < 0 ? -1.0 : flush_ms / 1000.0, oom0, oom1);
     munmap(st, sizeof(*st));

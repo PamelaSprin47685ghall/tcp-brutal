@@ -133,7 +133,8 @@ near's nonce, index and generation from its own HELLO.
 | `pub.srcfilter` | far+near pinned with `nonce=` and far `peer=`, then an application from 127.0.0.2 | the application is served (no `src=` allow list exists; identity is the nonce) and both keys render in the canonical config |
 | `pub.writer` (100 MiB) | app writes and never reads | the write must either finish (`sent==total`) or still be blocked in `write()` when the 10 s observation ends: the public socket is ordinary TCP, so a full queue stalls the application and never surfaces as `EAGAIN`. The forked writer is killed and reaped, the socket is closed, and a synchronous `flush` follows; `MemAvailable` must recover to within 50 MB (51200 kB) of the pre-write value, with no OOM/RST |
 | `pub.writer` (1024 MiB) | app attempts 1 GiB and never reads | the same verdict; the detail prints `sent/total/errno/eagain/blocked/child_state/mem_before/mem_during_min/mem_after_flush/flush_secs/oom` |
-| `pub.writer_drain` (100 MiB) | app writes 100 MiB while a second process drains the echo | the write finishes byte-exact: `sent==total`, `got==total`, `errno=0`, `eagain=0`, no RST/OOM, and `flush` returns `MemAvailable` to within 50 MB. This is the completion half of writer standard 7; the 1 GiB case above can only block because nothing reads |
+| `pub.writer_drain` (100 MiB) | app writes 100 MiB while a second process drains the echo | the write finishes byte-exact: `sent==total`, `got==total`, `errno=0`, `eagain=0`, no RST/OOM, and `flush` returns `MemAvailable` to within 50 MB. Measured 1.37 s at 73.2 MiB/s. This is the completion half of writer standard 7 |
+| `pub.writer_drain_1g` (1 GiB) | the same with 1 GiB | the same verdict plus `secs`/`mbps` in the detail. Measured 15.00 s at 68.3 MiB/s (a second run read 15.83 s at 64.7), so 1 GiB is inside the 120 s budget; the case fails on a timeout or on any short/mismatched byte count |
 
 ### Control surface (`ctl.*`, `init.*`)
 
@@ -171,7 +172,7 @@ near's nonce, index and generation from its own HELLO.
 | `hole.age` | a far stream with `hole_budget_ms=100` receives `DATA seq=1 len=1`, leaving offset 0 missing | the 10 ms feedback tick kills the stream; `dmesg` holds one `RXHOLEKILL` with `50000 <= age_us < 5000000`, i.e. the measured hole (~100 ms), not the ktime epoch. Requires `debug=2` |
 | `create.baseline` | the normal far+near pair echoes 1 MiB | byte-exact |
 | `create.failure` | a stranger holds `127.0.0.1:19199`; a new tunnel id is written on that port | the write fails visibly, no tunnel row appears, the running tunnels still echo, and the retry after the port is released succeeds; no oops |
-| `create.replace` | the same stranger; a replacement line for the running tunnel id on the held port | the write fails and the old tunnel is not left half-configured: either it still serves or it is cleanly removed (`old_survived` prints which). The current undo path destroys the old tunnel; the detail records that instead of hiding it |
+| `create.replace` | the same stranger; a replacement line for the running tunnel id on the held port | the write fails and the old tunnel is not left half-configured: either it still serves or it is cleanly removed (`old_survived` prints which). Destroy-on-failure is the design choice: the undo path (`tbt_session.c:245-255`) stops the old listener, destroys the old session and drops its reference, so a failed replace never leaves a half-configured tunnel or a leak. `old_survived=0` is that contract; the test fails only if a row exists that does not serve |
 
 ### Kernel-state sanity (`ADV_KLOG`, `init.dmesg`, `console.klog.*`)
 
@@ -221,10 +222,13 @@ the console log holds the evidence.
   hundred-MB drop. The 2 s churn echo timeout plus one retry absorbs scheduler
   jitter on a loaded host; it does not relax the per-connection usability
   requirement.
-- `pub.writer_drain` is the same 100 MiB with the application reading. That
-  case must finish (`sent==total` and `got==total`): the module's queues and
-  the target's echo keep moving, so the public socket never stays full. The
-  1 GiB case cannot finish under "the application never reads" for a
+- `pub.writer_drain` runs 100 MiB and 1 GiB with the application reading.
+  Both cases must finish (`sent==total` and `got==total`): the module's queues
+  and the target's echo keep moving, so the public socket never stays full.
+  The measured rates (73.2 and 68.3 MiB/s) put 1 GiB at 15.0 s, far inside
+  the 120 s budget; the result line carries `secs`/`mbps`, so a future
+  slowdown shows as a number instead of a bare timeout. The 1 GiB case
+  cannot finish under "the application never reads" for a
   structural reason, not a slow one: the public socket's receive queue and
   the module's delivery queue are bounded, the target's echo blocks once they
   fill, and the application's `write()` then waits for a reader that never
