@@ -189,6 +189,11 @@ int sc_systematic(const sc_code *c)
     return c->par.term == SC_TERM_CAUSAL;
 }
 
+const uint8_t *sc_known_bits(const sc_code *c)
+{
+    return c->known;
+}
+
 /*
  * Extra check nodes for target rates below 0.50.
  *
