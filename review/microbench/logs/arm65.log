@@ -1,0 +1,540 @@
+=== ARM64 host 192.168.123.65 (RK3588) microbench log ===
+generated: 2026-11-06T06:08:20+08:00  from: 7940HS
+
+### uname
+Linux lubancat 6.1.172 #1 SMP Sat Oct 17 15:47:17 CST 2026 aarch64 GNU/Linux
+### environment: uptime, free -m, cpuinfo, nproc, per-core max freq, openssl, cc
+$ ssh root@192.168.123.65 'uptime; free -m; grep -m1 model name|Hardware /proc/cpuinfo; nproc; per-core cpuinfo_max_freq; scaling_cur_freq; openssl version; cc --version'
+ 06:08:25 up 14 days, 22:15,  3 users,  load average: 4.30, 2.62, 1.27
+---free -m---
+               total        used        free      shared  buff/cache   available
+Mem:            7914        4006         327        3365        6935        3908
+Swap:           2047          11        2036
+---cpuinfo---
+CPU part	: 0xd05
+---nproc---
+8
+---per-core max freq (kHz)---
+0 1800000
+1 1800000
+2 1800000
+3 1800000
+4 2304000
+5 2304000
+6 2304000
+7 2304000
+---scaling_cur_freq---
+0 1800000
+1 1800000
+2 1800000
+3 1800000
+4 2304000
+5 2304000
+6 2304000
+7 2304000
+---openssl---
+/usr/bin/openssl
+OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026)
+---cc---
+cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+### full per-core identity
+$ ssh root@192.168.123.65 'grep -E "^(processor|model name|Hardware|CPU part|CPU implementer|CPU architecture)" /proc/cpuinfo'
+processor	: 0
+CPU implementer	: 0x41
+CPU architecture: 8
+CPU part	: 0xd05
+processor	: 1
+CPU implementer	: 0x41
+CPU architecture: 8
+CPU part	: 0xd05
+processor	: 2
+CPU implementer	: 0x41
+CPU architecture: 8
+CPU part	: 0xd05
+processor	: 3
+CPU implementer	: 0x41
+CPU architecture: 8
+CPU part	: 0xd05
+processor	: 4
+CPU implementer	: 0x41
+CPU architecture: 8
+CPU part	: 0xd0b
+processor	: 5
+CPU implementer	: 0x41
+CPU architecture: 8
+CPU part	: 0xd0b
+processor	: 6
+CPU implementer	: 0x41
+CPU architecture: 8
+CPU part	: 0xd0b
+processor	: 7
+CPU implementer	: 0x41
+CPU architecture: 8
+CPU part	: 0xd0b
+
+### staging files to /tmp/mb-arm65
+$ ssh root@192.168.123.65 'mkdir -p /tmp/mb-arm65'
+$ scp microbench.c run.sh root@192.168.123.65:/tmp/mb-arm65/
+$ ssh root@192.168.123.65 'ls -l /tmp/mb-arm65; md5sum /tmp/mb-arm65/*'
+total 20
+-rw-r--r-- 1 root root 13258 Nov  6 06:07 microbench.c
+-rwxr-xr-x 1 root root   440 Nov  6 06:08 run.sh
+34054ca670041f44510672260b48f1bf  /tmp/mb-arm65/microbench.c
+033abbc61376c0c1cc28c6de09a15627  /tmp/mb-arm65/run.sh
+local md5sum for comparison:
+34054ca670041f44510672260b48f1bf  /home/kunweiz/Desktop/vibe/w-microbench/review/microbench/microbench.c
+033abbc61376c0c1cc28c6de09a15627  /home/kunweiz/Desktop/vibe/w-microbench/review/microbench/run.sh
+
+### build check: does -march=native work on this host?
+$ ssh root@192.168.123.65 'cd /tmp/mb-arm65 && cc -O3 -march=native -pthread -o /tmp/mb-arm65/mb-native microbench.c; echo native_rc=$?'
+native_rc=0
+(native_rc=0 means -march=native was accepted; run.sh therefore never took its -O3 fallback)
+$ ssh root@192.168.123.65 'cc -march=native -### -c -x c /dev/null 2>&1 | tr " " "\n" | grep -m1 "^-march="'
+$ ssh root@192.168.123.65 'cc -march=native -Q --help=target 2>/dev/null | grep -E "-march=" | head -2'
+  -march=                     		
+---
+march=armv8.2-a+dotprod+crc+crypto+fp16+rcpc
+
+### single-core run: big core 4 (Cortex-A76 2.304 GHz)
+$ ssh root@192.168.123.65 'cd /tmp/mb-arm65 && nice -n 19 taskset -c 4 sh run.sh --mem 256 --threads 1'
+cpu_model:unknown
+cpu_cores:8
+cpu_mhz_cpu0:1800
+cpu_flags: asimd aes pmull sha2 crc32 asimdrdm
+build_macros: neon aarch64 gcc=15.2
+argv_mem_mib:256
+argv_threads:1
+packet_bytes:1200 generation_packets:16 rlnc_data_bytes:1048576
+RESULT memcpy threads=1 mbps=6787.2 ns_per_byte=0.1473
+RESULT xor threads=1 mbps=3702.8 ns_per_byte=0.2701
+RESULT encode W=8 d=8 mbps=2582.9 ns_per_byte=0.3872
+SKIP encode W=8 d=12 (d>W)
+SKIP encode W=8 d=16 (d>W)
+RESULT encode W=16 d=8 mbps=2548.2 ns_per_byte=0.3924
+RESULT encode W=16 d=12 mbps=1658.0 ns_per_byte=0.6031
+RESULT encode W=16 d=16 mbps=1277.3 ns_per_byte=0.7829
+RESULT encode W=32 d=8 mbps=2482.3 ns_per_byte=0.4028
+RESULT encode W=32 d=12 mbps=1682.3 ns_per_byte=0.5944
+RESULT encode W=32 d=16 mbps=1265.9 ns_per_byte=0.7899
+RESULT decode W=16 k=2 mbps=1756.3 ns_per_byte=0.5694 verify=ok
+RESULT decode W=16 k=4 mbps=1572.9 ns_per_byte=0.6358 verify=ok
+RESULT decode W=16 k=8 mbps=1497.3 ns_per_byte=0.6678 verify=ok
+sink:0
+
+real	0m2.578s
+user	0m0.316s
+sys	0m0.044s
+
+### multi-core run: big cores 4-7, --threads 4 (memcpy/XOR scaling; RLNC rows are single-threaded by construction)
+$ ssh root@192.168.123.65 'cd /tmp/mb-arm65 && nice -n 19 taskset -c 4-7 sh run.sh --mem 256 --threads 4'
+cpu_model:unknown
+cpu_cores:8
+cpu_mhz_cpu0:1800
+cpu_flags: asimd aes pmull sha2 crc32 asimdrdm
+build_macros: neon aarch64 gcc=15.2
+argv_mem_mib:256
+argv_threads:4
+packet_bytes:1200 generation_packets:16 rlnc_data_bytes:1048576
+RESULT memcpy threads=1 mbps=8574.5 ns_per_byte=0.1166
+RESULT xor threads=1 mbps=4372.3 ns_per_byte=0.2287
+RESULT memcpy threads=4 mbps=8795.8 ns_per_byte=0.1137
+RESULT xor threads=4 mbps=4851.8 ns_per_byte=0.2061
+RESULT encode W=8 d=8 mbps=2465.7 ns_per_byte=0.4056
+SKIP encode W=8 d=12 (d>W)
+SKIP encode W=8 d=16 (d>W)
+RESULT encode W=16 d=8 mbps=2562.9 ns_per_byte=0.3902
+RESULT encode W=16 d=12 mbps=1714.8 ns_per_byte=0.5832
+RESULT encode W=16 d=16 mbps=1223.2 ns_per_byte=0.8175
+RESULT encode W=32 d=8 mbps=2332.5 ns_per_byte=0.4287
+RESULT encode W=32 d=12 mbps=1664.2 ns_per_byte=0.6009
+RESULT encode W=32 d=16 mbps=1162.8 ns_per_byte=0.8600
+RESULT decode W=16 k=2 mbps=976.6 ns_per_byte=1.0240 verify=ok
+RESULT decode W=16 k=4 mbps=1356.8 ns_per_byte=0.7371 verify=ok
+RESULT decode W=16 k=8 mbps=1470.1 ns_per_byte=0.6802 verify=ok
+sink:0
+
+real	0m2.353s
+user	0m2.753s
+sys	0m0.566s
+
+### AES anchor: openssl speed aes-128-cbc on big core 4
+$ ssh root@192.168.123.65 'nice -n 19 taskset -c 4 openssl speed -evp aes-128-cbc -bytes 8192 -seconds 1'
+Doing AES-128-CBC ops for 1s on 8192 size blocks: 219271 AES-128-CBC ops in 1.00s
+version: 3.5.5
+built on: Wed Sep 30 18:46:30 2026 UTC
+options: bn(64,64)
+compiler: gcc -fPIC -pthread -Wa,--noexecstack -Wall -fzero-call-used-regs=used-gpr -Wa,--noexecstack -g -O2 -Werror=implicit-function-declaration -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -ffile-prefix-map=/build/openssl-JItSJk/openssl-3.5.5=. -fstack-protector-strong -fstack-clash-protection -Wformat -Werror=format-security -mbranch-protection=standard -fdebug-prefix-map=/build/openssl-JItSJk/openssl-3.5.5=/usr/src/openssl-3.5.5-1ubuntu3.7 -DOPENSSL_USE_NODELETE -DOPENSSL_PIC -DOPENSSL_BUILDING_OPENSSL -DZLIB -DZSTD -DNDEBUG -Wdate-time -D_FORTIFY_SOURCE=3
+CPUINFO: OPENSSL_armcap=0xbd
+The 'numbers' are in 1000s of bytes per second processed.
+type           8192 bytes
+AES-128-CBC    1796268.03k
+
+real	0m2.939s
+user	0m0.802s
+sys	0m0.335s
+
+### single-core repeat (variance check: run 1 vs run 2 single-thread memcpy differed 26%)
+$ ssh root@192.168.123.65 'cd /tmp/mb-arm65 && nice -n 19 taskset -c 4 sh run.sh --mem 256 --threads 1'
+cpu_model:unknown
+cpu_cores:8
+cpu_mhz_cpu0:1800
+cpu_flags: asimd aes pmull sha2 crc32 asimdrdm
+build_macros: neon aarch64 gcc=15.2
+argv_mem_mib:256
+argv_threads:1
+packet_bytes:1200 generation_packets:16 rlnc_data_bytes:1048576
+RESULT memcpy threads=1 mbps=9991.8 ns_per_byte=0.1001
+RESULT xor threads=1 mbps=4208.3 ns_per_byte=0.2376
+RESULT encode W=8 d=8 mbps=2242.3 ns_per_byte=0.4460
+SKIP encode W=8 d=12 (d>W)
+SKIP encode W=8 d=16 (d>W)
+RESULT encode W=16 d=8 mbps=2517.5 ns_per_byte=0.3972
+RESULT encode W=16 d=12 mbps=1703.3 ns_per_byte=0.5871
+RESULT encode W=16 d=16 mbps=1285.6 ns_per_byte=0.7778
+RESULT encode W=32 d=8 mbps=2540.9 ns_per_byte=0.3936
+RESULT encode W=32 d=12 mbps=1693.5 ns_per_byte=0.5905
+RESULT encode W=32 d=16 mbps=1264.6 ns_per_byte=0.7908
+RESULT decode W=16 k=2 mbps=1615.8 ns_per_byte=0.6189 verify=ok
+RESULT decode W=16 k=4 mbps=1586.9 ns_per_byte=0.6302 verify=ok
+RESULT decode W=16 k=8 mbps=1571.5 ns_per_byte=0.6363 verify=ok
+sink:0
+
+### after: uptime and load
+$ ssh root@192.168.123.65 'uptime; free -m | head -2'
+ 06:09:12 up 14 days, 22:16,  4 users,  load average: 4.25, 2.82, 1.41
+               total        used        free      shared  buff/cache   available
+Mem:            7914        4396         598        3511        6521        3518
+
+### cleanup
+$ ssh root@192.168.123.65 'rm -rf /tmp/mb-arm65; ls -d /tmp/mb-arm65 2>&1; ls /tmp'
+ls: cannot access '/tmp/mb-arm65': No such file or directory
+--- /tmp contents ---
+.X11-unix
+.ses
+.tmp1Di301
+.tmpHWt8yw
+.tmpflXz4Q
+.tmplvK1jx
+apply-sniff.sh
+base360p30.mp4
+before.md5
+core.739350
+core.739351
+cy-verify-coreyolo
+cy_mpp_test.avi
+d.1.log
+d.10.log
+d.11.log
+d.12.log
+d.13.log
+d.14.log
+d.15.log
+d.16.log
+d.17.log
+d.18.log
+d.19.log
+d.2.log
+d.20.log
+d.3.log
+d.4.log
+d.5.log
+d.6.log
+d.7.log
+d.8.log
+d.9.log
+d20.1.log
+d20.10.log
+d20.11.log
+d20.12.log
+d20.13.log
+d20.14.log
+d20.15.log
+d20.16.log
+d20.17.log
+d20.18.log
+d20.19.log
+d20.2.log
+d20.20.log
+d20.3.log
+d20.4.log
+d20.5.log
+d20.6.log
+d20.7.log
+d20.8.log
+d20.9.log
+d20b.1.log
+d20b.10.log
+d20b.11.log
+d20b.12.log
+d20b.13.log
+d20b.14.log
+d20b.15.log
+d20b.16.log
+d20b.17.log
+d20b.18.log
+d20b.19.log
+d20b.2.log
+d20b.20.log
+d20b.3.log
+d20b.4.log
+d20b.5.log
+d20b.6.log
+d20b.7.log
+d20b.8.log
+d20b.9.log
+enable-sniff.patch
+ff.err
+g5-mem-fps15-60s.log
+g5-mem-sample.sh
+g5-run-fps15-60s-mem.log
+g5-run-mem.sh
+g5_cpu12.log
+g5_cpu12b.log
+g5_cpu15.log
+g5_fps12.log
+g5_fps12.out
+g5_fps12b.log
+g5_fps12b.out
+g5_fps15.log
+g5_fps15.out
+g5_fps30.log
+g5_fps30.out
+g5_i1_f15.log
+g5_i1_f15.out
+g5_i2_f12.log
+g5_i2_f12.out
+g5_i2_f15.log
+g5_i2_f15.out
+g5_npu12.log
+g5_npu12b.log
+g5_npu15.log
+g5_npu3.log
+g5_npu3.out
+g5_npu30.log
+g5_npu9.log
+g5_npu9.out
+g5_stag15.log
+g5_stag15.out
+g5_stag15_npu.log
+glibc_probe
+google-health-result
+google-health-update.sh
+listen.log
+mb-build.log
+mediamtx
+mediamtx.log
+mediamtx.pid
+mp.1.log
+mp.2.log
+mp.3.log
+mp.4.log
+mp.5.log
+mp.6.log
+mp.7.log
+mp.8.log
+mt.tgz
+out_rkmpp.mp4
+pub0.log
+pub1.log
+pub12_0.pid
+pub12_1.pid
+pub12_2.pid
+pub12_3.pid
+pub12_4.pid
+pub12_5.pid
+pub2.log
+pub3.log
+pub30_0.pid
+pub30_1.pid
+pub30_2.pid
+pub30_3.pid
+pub30_4.pid
+pub30_5.pid
+pub4.log
+pub5.log
+qt_probe
+rga-visual
+rk-app
+rk-app-verify
+rk-g4
+rk-media
+rknn-toolkit2-master
+rknn-toolkit2.tar.gz
+rtsp_listen_test.mp4
+snap-private-tmp
+sniff-result
+src.log
+systemd-private-ad6af6b47c1a4860b585c7bd1d506b77-ModemManager.service-Fgrs1D
+systemd-private-ad6af6b47c1a4860b585c7bd1d506b77-bluetooth.service-rqPKGJ
+systemd-private-ad6af6b47c1a4860b585c7bd1d506b77-chrony.service-AePV8Q
+systemd-private-ad6af6b47c1a4860b585c7bd1d506b77-fwupd.service-4rKB3N
+systemd-private-ad6af6b47c1a4860b585c7bd1d506b77-lm-sensors.service-6Ymq18
+systemd-private-ad6af6b47c1a4860b585c7bd1d506b77-omp-renice.service-eqebzJ
+systemd-private-ad6af6b47c1a4860b585c7bd1d506b77-polkit.service-pO6ReZ
+systemd-private-ad6af6b47c1a4860b585c7bd1d506b77-systemd-logind.service-WwamCA
+systemd-private-ad6af6b47c1a4860b585c7bd1d506b77-upower.service-JTpdxK
+tcp.1.log
+tcp.2.log
+tcp.3.log
+tcp.4.log
+tcp.5.log
+tcp.6.log
+tcp.7.log
+tcp.8.log
+test360p.mp4
+test360p_h265.mp4
+tmux-1001
+tomlplusplus-3.4.0
+tomlplusplus-3.4.0.tar.gz
+tu.1.log
+tu.2.log
+tu.3.log
+tu.4.log
+tu.5.log
+tu.6.log
+tu.7.log
+tu.8.log
+tu2.1.log
+tu2.2.log
+tu2.3.log
+tu2.4.log
+tu2.5.log
+tu2.6.log
+tu2.7.log
+tu2.8.log
+
+### note: run.sh writes compiler stderr to absolute path /tmp/mb-build.log (outside /tmp/mb-arm65)
+$ ssh root@192.168.123.65 'ls -l --time-style=full-iso /tmp/mb-build.log; wc -c /tmp/mb-build.log'
+-rw-r--r-- 1 root root 0 2026-11-06 06:09:08.225521681 +0800 /tmp/mb-build.log
+0 /tmp/mb-build.log
+$ ssh root@192.168.123.65 'rm -f /tmp/mb-build.log; ls -d /tmp/mb-arm65 /tmp/mb-build.log 2>&1'
+ls: cannot access '/tmp/mb-arm65': No such file or directory
+ls: cannot access '/tmp/mb-build.log': No such file or directory
+tmp-clean-rc=2
+
+=========================================================================
+SUMMARY  (host 192.168.123.65, log written 2026-11-06)
+=========================================================================
+
+CPU model
+  Board/kernel : lubancat, Linux 6.1.172 aarch64 (Rockchip RK3588 SoC)
+  /proc/cpuinfo carries no "model name"/"Hardware" line, so the bench
+  itself prints "cpu_model:unknown". Identity comes from CPU part:
+    cores 0-3 : CPU part 0xd05 = Cortex-A55  @ 1800 MHz max  (LITTLE)
+    cores 4-7 : CPU part 0xd0b = Cortex-A76  @ 2304000 kHz = 2.304 GHz (BIG)
+  nproc = 8.  scaling_cur_freq == cpuinfo_max_freq on every core at the
+  time of the run (no thermal/frequency throttling observed).
+  cpu_flags seen by the bench: asimd aes pmull sha2 crc32 asimdrdm
+  OpenSSL armcap = 0xbd  -> AES + PMULL crypto extensions are in use.
+
+Big-core list: 4 5 6 7   (all four are A76 @ 2.304 GHz)
+  Single-core runs pinned to core 4; multi-core run pinned to 4-7.
+
+Compiler / build
+  gcc 15.2.0 (Ubuntu 15.2.0-16ubuntu1)
+  -march=native was ACCEPTED (native_rc=0) and resolved to
+      -march=armv8.2-a+dotprod+crc+crypto+fp16+rcpc
+  -> run.sh never took its "-O3" fallback; no fallback note needed.
+  (/tmp/mb-build.log, the file run.sh uses for compiler stderr, was
+   empty and was removed together with /tmp/mb-arm65.)
+
+System load during the runs (shared production host: mihomo/ffmpeg/frpc/rclone)
+  before : up 14 days 22:15, load avg 4.30 2.62 1.27, mem 4006/7914 MiB used
+  after  : up 14 days 22:16, load avg 4.25 2.82 1.41, mem 4396/7914 MiB used
+  Load average ~4 on 8 cores is why the numbers below are noisy; see the
+  variance note.
+
+-------------------------------------------------------------------------
+RESULT lines, run 1 -- single core 4, --mem 256 --threads 1
+-------------------------------------------------------------------------
+RESULT memcpy threads=1 mbps=6787.2 ns_per_byte=0.1473
+RESULT xor threads=1 mbps=3702.8 ns_per_byte=0.2701
+RESULT encode W=8 d=8 mbps=2582.9 ns_per_byte=0.3872
+SKIP encode W=8 d=12 (d>W)
+SKIP encode W=8 d=16 (d>W)
+RESULT encode W=16 d=8 mbps=2548.2 ns_per_byte=0.3924
+RESULT encode W=16 d=12 mbps=1658.0 ns_per_byte=0.6031
+RESULT encode W=16 d=16 mbps=1277.3 ns_per_byte=0.7829
+RESULT encode W=32 d=8 mbps=2482.3 ns_per_byte=0.4028
+RESULT encode W=32 d=12 mbps=1682.3 ns_per_byte=0.5944
+RESULT encode W=32 d=16 mbps=1265.9 ns_per_byte=0.7899
+RESULT decode W=16 k=2 mbps=1756.3 ns_per_byte=0.5694 verify=ok
+RESULT decode W=16 k=4 mbps=1572.9 ns_per_byte=0.6358 verify=ok
+RESULT decode W=16 k=8 mbps=1497.3 ns_per_byte=0.6678 verify=ok
+
+-------------------------------------------------------------------------
+RESULT lines, run 2 -- big cores 4-7, --mem 256 --threads 4
+(threads=1 rows inside this run are a second single-core sample)
+-------------------------------------------------------------------------
+RESULT memcpy threads=1 mbps=8574.5 ns_per_byte=0.1166
+RESULT xor threads=1 mbps=4372.3 ns_per_byte=0.2287
+RESULT memcpy threads=4 mbps=8795.8 ns_per_byte=0.1137
+RESULT xor threads=4 mbps=4851.8 ns_per_byte=0.2061
+RESULT encode W=8 d=8 mbps=2465.7 ns_per_byte=0.4056
+RESULT encode W=16 d=8 mbps=2562.9 ns_per_byte=0.3902
+RESULT encode W=16 d=12 mbps=1714.8 ns_per_byte=0.5832
+RESULT encode W=16 d=16 mbps=1223.2 ns_per_byte=0.8175
+RESULT encode W=32 d=8 mbps=2332.5 ns_per_byte=0.4287
+RESULT encode W=32 d=12 mbps=1664.2 ns_per_byte=0.6009
+RESULT encode W=32 d=16 mbps=1162.8 ns_per_byte=0.8600
+RESULT decode W=16 k=2 mbps=976.6 ns_per_byte=1.0240 verify=ok
+RESULT decode W=16 k=4 mbps=1356.8 ns_per_byte=0.7371 verify=ok
+RESULT decode W=16 k=8 mbps=1470.1 ns_per_byte=0.6802 verify=ok
+
+-------------------------------------------------------------------------
+RESULT lines, run 3 -- single core 4 repeat (variance check)
+-------------------------------------------------------------------------
+RESULT memcpy threads=1 mbps=9991.8 ns_per_byte=0.1001
+RESULT xor threads=1 mbps=4208.3 ns_per_byte=0.2376
+RESULT encode W=8 d=8 mbps=2242.3 ns_per_byte=0.4460
+RESULT encode W=16 d=8 mbps=2517.5 ns_per_byte=0.3972
+RESULT encode W=16 d=12 mbps=1703.3 ns_per_byte=0.5871
+RESULT encode W=16 d=16 mbps=1285.6 ns_per_byte=0.7778
+RESULT encode W=32 d=8 mbps=2540.9 ns_per_byte=0.3936
+RESULT encode W=32 d=12 mbps=1693.5 ns_per_byte=0.5905
+RESULT encode W=32 d=16 mbps=1264.6 ns_per_byte=0.7908
+RESULT decode W=16 k=2 mbps=1615.8 ns_per_byte=0.6189 verify=ok
+RESULT decode W=16 k=4 mbps=1586.9 ns_per_byte=0.6302 verify=ok
+RESULT decode W=16 k=8 mbps=1571.5 ns_per_byte=0.6363 verify=ok
+
+-------------------------------------------------------------------------
+AES anchor -- openssl speed -evp aes-128-cbc -bytes 8192 -seconds 1, core 4
+-------------------------------------------------------------------------
+Doing AES-128-CBC ops for 1s on 8192 size blocks: 219271 AES-128-CBC ops in 1.00s
+type           8192 bytes
+AES-128-CBC    1796268.03k
+  => 1.796 GB/s of AES-128-CBC payload (0.557 ns/byte), 219271 x 8192 B.
+  OpenSSL 3.5.5, OPENSSL_armcap=0xbd.
+
+-------------------------------------------------------------------------
+Interpretation
+-------------------------------------------------------------------------
+* memcpy single-core is NOT stable on this host: three samples on core 4
+  gave 6787.2 / 8574.5 / 9991.8 MB/s (spread 47 %, median 8574.5).
+  The host runs at load avg ~4.2 with ffmpeg/mihomo/frpc/rclone active,
+  and memory churn (used 4006 -> 4396 MiB, available 3908 -> 3518 MiB
+  across the session; each 256 MiB buffer set is 768 MiB of that).
+  Treat ~8.5-10 GB/s as the A76 memcpy ceiling and 6.8 GB/s as a
+  loaded-host floor. Do not read 26-47 % differences as real.
+* XOR is ~half of memcpy throughput (3702-4372 MB/s single core), i.e.
+  the 2-stream read + 1-stream write pattern costs about what a third
+  memory stream predicts.
+* Thread scaling on the four A76 cores is poor and memory-bound:
+  memcpy 8574.5 -> 8795.8 MB/s (x1.03), XOR 4372.3 -> 4851.8 (x1.11).
+  Adding cores buys almost nothing for these kernels; the RK3588
+  memory controller, not the cores, is the limit.
+* RLNC encode scales as expected with d, and not at all with W:
+  d=8 ~2.5 GB/s, d=12 ~1.67 GB/s, d=16 ~1.26 GB/s (0.39 / 0.59 / 0.78
+  ns per byte). W=8/16/32 land within ~5 % of each other, so the
+  generation width costs nothing per byte -- consistent with the code
+  XOR-ing d sources per parity packet regardless of W.
+* RLNC decode (Gauss-Jordan, W=16) sits at 1.5-1.75 GB/s for k=2..8
+  on a quiet core; the one low k=2 sample (976.6 MB/s) came from the
+  4-thread run where the host was busy. verify=ok in every run, so the
+  GF(2) math is correct on aarch64/NEON.
+* AES-128-CBC 1.80 GB/s with armcap 0xbd confirms the crypto
+  extensions work; this is the anchor that says the A76 is running at
+  its rated clock and not throttled.
+* No failures. Nothing was installed, no service touched, no module
+  loaded. /tmp/mb-arm65 and /tmp/mb-build.log removed; /tmp verified
+  clean of both.

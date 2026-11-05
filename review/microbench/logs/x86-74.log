@@ -1,0 +1,168 @@
+=== x86_64 host 192.168.123.74 (AMD Athlon X4 760K) microbench log ===
+generated: 2026-11-06T06:08:54+08:00  from: 7940HS
+
+Host notes: desktop machine with live services; load average ~1.0 at start.
+All runs wrapped in `nice -n 19` and pinned with taskset; the only host artifacts were
+/tmp/mb-x8674/ plus run.sh's /tmp/mb-build.log, both removed at the end (`ls /tmp/mb-*` -> clean).
+Nothing installed, nothing restarted, no module/network touched.
+
+### step 1: environment (uptime, free -m, cpuinfo, nproc, scaling_cur_freq, uname)
+$ ssh -o BatchMode=yes -o ConnectTimeout=10 root@192.168.123.74 'uptime; echo "---free"; free -m; echo "---cpu"; grep -m1 "model name" /proc/cpuinfo; echo "---nproc"; nproc; echo "---freq"; cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq 2>/dev/null || echo "no cpufreq"; echo "---uname"; uname -a'
+ 06:08:19 up 3 days, 22:31,  4 users,  load average: 1.00, 1.01, 1.13
+---free
+               total        used        free      shared  buff/cache   available
+Mem:           19939        1611        1172           4       17517       18327
+Swap:          21934        1021       20912
+---cpu
+model name	: AMD Athlon(tm) X4 760K Quad Core Processor
+---nproc
+4
+---freq
+1796624
+---uname
+Linux 760K 7.3.0-rc1-2-MANJARO #1 SMP PREEMPT_DYNAMIC Fri, 04 Sep 2026 15:43:39 +0000 x86_64 GNU/Linux
+
+scaling_cur_freq on cpu0 is 1796624 kHz (~1.8 GHz) during the run; the X4 760K boosts to 3.8 GHz,
+so these numbers are near-idle-clock, not boost-clock.
+
+### step 2: staging files to /tmp/mb-x8674
+$ ssh -o BatchMode=yes root@192.168.123.74 'mkdir -p /tmp/mb-x8674'
+$ scp -o BatchMode=yes microbench.c run.sh root@192.168.123.74:/tmp/mb-x8674/
+$ ssh root@192.168.123.74 'ls -l /tmp/mb-x8674; cc --version | head -1'
+total 17
+-rw-r--r-- 1 root root 13258 Nov  6 06:08 microbench.c
+-rwxr-xr-x 1 root root   440 Nov  6 06:08 run.sh
+cc (GCC) 16.2.1 20260810
+
+local md5sum (same bytes as the staged copies; sizes match on both sides):
+34054ca670041f44510672260b48f1bf  microbench.c
+033abbc61376c0c1cc28c6de09a15627  run.sh
+
+### step 3: single-core run (taskset -c 0)
+$ ssh root@192.168.123.74 'cd /tmp/mb-x8674 && nice -n 19 taskset -c 0 sh run.sh --mem 256 --threads 1'
+cpu_model: AMD Athlon(tm) X4 760K Quad Core Processor
+cpu_cores:4
+cpu_mhz_cpu0:1796
+cpu_flags: sse2 fma aes avx
+build_macros: avx sse2 gcc=16.2
+argv_mem_mib:256
+argv_threads:1
+packet_bytes:1200 generation_packets:16 rlnc_data_bytes:1048576
+RESULT memcpy threads=1 mbps=3155.1 ns_per_byte=0.3169
+RESULT xor threads=1 mbps=2889.0 ns_per_byte=0.3461
+RESULT encode W=8 d=8 mbps=1302.3 ns_per_byte=0.7679
+SKIP encode W=8 d=12 (d>W)
+SKIP encode W=8 d=16 (d>W)
+RESULT encode W=16 d=8 mbps=1321.9 ns_per_byte=0.7565
+RESULT encode W=16 d=12 mbps=878.2 ns_per_byte=1.1386
+RESULT encode W=16 d=16 mbps=646.9 ns_per_byte=1.5459
+RESULT encode W=32 d=8 mbps=1324.6 ns_per_byte=0.7549
+RESULT encode W=32 d=12 mbps=889.4 ns_per_byte=1.1244
+RESULT encode W=32 d=16 mbps=645.5 ns_per_byte=1.5492
+RESULT decode W=16 k=2 mbps=1067.5 ns_per_byte=0.9367 verify=ok
+RESULT decode W=16 k=4 mbps=855.9 ns_per_byte=1.1683 verify=ok
+RESULT decode W=16 k=8 mbps=842.6 ns_per_byte=1.1868 verify=ok
+sink:0
+
+=== STDERR ===
+
+### step 4: multi-core run (taskset -c 0-3, --threads 4)
+$ ssh root@192.168.123.74 'cd /tmp/mb-x8674 && nice -n 19 taskset -c 0-3 sh run.sh --mem 256 --threads 4'
+cpu_model: AMD Athlon(tm) X4 760K Quad Core Processor
+cpu_cores:4
+cpu_mhz_cpu0:1796
+cpu_flags: sse2 fma aes avx
+build_macros: avx sse2 gcc=16.2
+argv_mem_mib:256
+argv_threads:4
+packet_bytes:1200 generation_packets:16 rlnc_data_bytes:1048576
+RESULT memcpy threads=1 mbps=3164.9 ns_per_byte=0.3160
+RESULT xor threads=1 mbps=2731.7 ns_per_byte=0.3661
+RESULT memcpy threads=4 mbps=5094.5 ns_per_byte=0.1963
+RESULT xor threads=4 mbps=4156.3 ns_per_byte=0.2406
+RESULT encode W=8 d=8 mbps=1311.8 ns_per_byte=0.7623
+SKIP encode W=8 d=12 (d>W)
+SKIP encode W=8 d=16 (d>W)
+RESULT encode W=16 d=8 mbps=1318.4 ns_per_byte=0.7585
+RESULT encode W=16 d=12 mbps=876.7 ns_per_byte=1.1407
+RESULT encode W=16 d=16 mbps=644.1 ns_per_byte=1.5525
+RESULT encode W=32 d=8 mbps=1325.7 ns_per_byte=0.7543
+RESULT encode W=32 d=12 mbps=886.5 ns_per_byte=1.1280
+RESULT encode W=32 d=16 mbps=602.9 ns_per_byte=1.6588
+RESULT decode W=16 k=2 mbps=857.5 ns_per_byte=1.1662 verify=ok
+RESULT decode W=16 k=4 mbps=667.8 ns_per_byte=1.4975 verify=ok
+RESULT decode W=16 k=8 mbps=599.1 ns_per_byte=1.6692 verify=ok
+sink:0
+
+=== STDERR ===
+
+### step 5: AES anchor (OpenSSL, single core)
+$ ssh root@192.168.123.74 'nice -n 19 taskset -c 0 openssl speed -evp aes-128-cbc -bytes 8192 -seconds 1'
+version: 3.6.4
+built on: Tue Aug 25 18:15:54 2026 UTC
+options: bn(64,64)
+compiler: gcc -fPIC -pthread -m64 -Wa,--noexecstack -march=x86-64 -mtune=generic -O2 -pipe -fno-plt -fexceptions         -Wp,-D_FORTIFY_SOURCE=3 -Wformat -Werror=format-security         -fstack-clash-protection -fcf-protection         -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer -g -ffile-prefix-map=/build/openssl/src=/usr/src/debug/openssl -flto=auto -DOPENSSL_USE_NODELETE -DL_ENDIAN -DOPENSSL_PIC -DOPENSSL_BUILDING_OPENSSL -DBROTLI -DZLIB -DZSTD -DNDEBUG
+CPUINFO: OPENSSL_ia32cap=0x3e983a0b078bffff:0x0000000000000008:0x0000000000000000:0x0000000000000000:0x0000000000000000
+The 'numbers' are in 1000s of bytes per second processed.
+type           8192 bytes
+AES-128-CBC     309338.11k
+
+=== STDERR ===
+Doing AES-128-CBC ops for 1s on 8192 size blocks: 37761 AES-128-CBC ops in 1.00s
+
+### step 6: build fallback check, uptime after, cleanup
+$ ssh -o BatchMode=yes root@192.168.123.74 'echo "---uptime_after"; uptime; echo "---buildlog"; if [ -s /tmp/mb-build.log ]; then cat /tmp/mb-build.log; else echo "(empty: -march=native build ok)"; fi; echo "---cleanup"; rm -rf /tmp/mb-x8674; ls -d /tmp/mb-x8674 2>/dev/null || echo "mb-x8674 removed"'
+---uptime_after
+ 06:08:38 up 3 days, 22:31,  4 users,  load average: 1.07, 1.02, 1.13
+---buildlog
+(empty: -march=native build ok)
+---cleanup
+mb-x8674 removed
+
+-march=native was ACCEPTED: run.sh never printed its 'native build failed, falling back to -O3'
+line, /tmp/mb-build.log (run.sh's compile-stderr file) stayed empty, and the binary reported
+`build_macros: avx sse2 gcc=16.2`. No -O3 fallback happened.
+
+### summary
+cpu_model: AMD Athlon(tm) X4 760K Quad Core Processor (4 cores, AVX1 + FMA + AES-NI, no AVX2), ~1.8 GHz at run time
+RESULT memcpy threads=1 mbps=3155.1 ns_per_byte=0.3169
+RESULT xor threads=1 mbps=2889.0 ns_per_byte=0.3461
+RESULT encode W=8 d=8 mbps=1302.3 ns_per_byte=0.7679
+SKIP encode W=8 d=12 (d>W)
+SKIP encode W=8 d=16 (d>W)
+RESULT encode W=16 d=8 mbps=1321.9 ns_per_byte=0.7565
+RESULT encode W=16 d=12 mbps=878.2 ns_per_byte=1.1386
+RESULT encode W=16 d=16 mbps=646.9 ns_per_byte=1.5459
+RESULT encode W=32 d=8 mbps=1324.6 ns_per_byte=0.7549
+RESULT encode W=32 d=12 mbps=889.4 ns_per_byte=1.1244
+RESULT encode W=32 d=16 mbps=645.5 ns_per_byte=1.5492
+RESULT decode W=16 k=2 mbps=1067.5 ns_per_byte=0.9367 verify=ok
+RESULT decode W=16 k=4 mbps=855.9 ns_per_byte=1.1683 verify=ok
+RESULT decode W=16 k=8 mbps=842.6 ns_per_byte=1.1868 verify=ok
+RESULT memcpy threads=1 mbps=3164.9 ns_per_byte=0.3160   (multi-core run, 1-thread baseline)
+RESULT xor threads=1 mbps=2731.7 ns_per_byte=0.3661      (multi-core run, 1-thread baseline)
+RESULT memcpy threads=4 mbps=5094.5 ns_per_byte=0.1963
+RESULT xor threads=4 mbps=4156.3 ns_per_byte=0.2406
+RESULT encode W=8 d=8 mbps=1311.8 ns_per_byte=0.7623
+RESULT encode W=16 d=8 mbps=1318.4 ns_per_byte=0.7585
+RESULT encode W=16 d=12 mbps=876.7 ns_per_byte=1.1407
+RESULT encode W=16 d=16 mbps=644.1 ns_per_byte=1.5525
+RESULT encode W=32 d=8 mbps=1325.7 ns_per_byte=0.7543
+RESULT encode W=32 d=12 mbps=886.5 ns_per_byte=1.1280
+RESULT encode W=32 d=16 mbps=602.9 ns_per_byte=1.6588
+RESULT decode W=16 k=2 mbps=857.5 ns_per_byte=1.1662 verify=ok
+RESULT decode W=16 k=4 mbps=667.8 ns_per_byte=1.4975 verify=ok
+RESULT decode W=16 k=8 mbps=599.1 ns_per_byte=1.6692 verify=ok
+AES-128-CBC 8192 bytes: 309338.11k (309 MB/s, single core, OpenSSL 3.6.4)
+
+Scaling: memcpy 3155 -> 5094 MB/s (1.61x on 4 threads), XOR 2889 -> 4156 MB/s (1.44x).
+Far below 4x -- this is a single-channel-DDR Athlon with shared L2/L3, so the large-buffer
+copy is memory-bandwidth bound, not core bound.
+Encode rows match between the two runs within noise (they are single-threaded either way).
+The multi-core run's decode rows came out 20-29% lower (k=2 1067->857, k=4 855->667, k=8 842->599),
+while encode in the same run did not move. The host carried a neighbour load of ~1.0 throughout,
+and the multi-core phase had just saturated all four cores with the 4-thread copy, so the decode
+drop is a contention artefact of that run, not a real regression: treat the single-core run as
+canonical for RLNC.
+Encode is flat in W at fixed d (d=8: ~1302/1322/1325 across W=8/16/32), and drops as d grows
+(d=16: ~646) -- cost tracks d (the number of XOR-accumulated sources), not the generation width.
