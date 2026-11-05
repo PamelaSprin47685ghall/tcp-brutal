@@ -221,6 +221,13 @@ void tbt_listen_stop(struct tbt_tunnel *t);
  * kill, not a retransmit. */
 #define TBT_TX_WINDOW_AUTO_FLOOR (1024 * 1024)
 
+/* Total carrier socket-buffer budget, divided by the carrier count. At 128
+ * carriers this is 512 KiB each (the kernel doubles the setsockopt value);
+ * at n=1 it is capped by the per-carrier 1 MiB setsockopt value (2 MiB
+ * effective), enough for the 1 MiB window. Without this bound, an 8 MiB
+ * per-carrier setting would allocate 1 GiB at 128 carriers. */
+#define TBT_CAR_SOCKBUF_TOTAL (64 * 1024 * 1024)
+
 /* A carrier that never presents a HELLO is retired after this long. */
 #define TBT_JOIN_TIMEOUT_MS 5000
 

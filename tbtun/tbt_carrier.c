@@ -1353,15 +1353,22 @@ bool tbt_carrier_dead(struct tbt_carrier *c)
 void tbt_car_setsockbuf(struct socket *s, const struct tbt_cfg *cfg, u16 n_pri)
 {
     u32 win = cfg->tx_window_bytes;
-    u32 per;
+    u32 n = n_pri ? n_pri : 1;
+    u32 share, budget, per;
     int v;
 
     if (!win)
         win = cfg->rx_reorder_bytes;
-    per = win / (n_pri ? n_pri : 1) + 2 * TBT_CHUNK_MAX;
-    /* SO_SNDBUF/SO_RCVBUF double the value in the kernel: pass half the byte
-     * budget we want, so one carrier can hold its share of the window. */
-    v = clamp_t(u32, per / 2, 128 * 1024, 4 * 1024 * 1024);
+    /* Two bounds, both divided by the carrier count:
+     *   share  = this carrier's slice of the reorder/window budget + slack;
+     *   budget = the module's total carrier-buffer budget (64 MiB), so
+     *            128 carriers cannot turn an 8 MiB-per-carrier setting into
+     *            a 1 GiB allocation.
+     * The kernel doubles SO_*BUF, so pass half of the byte target. */
+    share = win / n + 2 * TBT_CHUNK_MAX;
+    budget = TBT_CAR_SOCKBUF_TOTAL / n;
+    per = max(share, budget);
+    v = clamp_t(u32, per / 2, 64 * 1024, 1024 * 1024);
 
     /* The plain option is capped at net.core.wmem_max/rmem_max (208 KiB on a
      * default boot), so a 256 KiB request reached the kernel as 208 KiB and
