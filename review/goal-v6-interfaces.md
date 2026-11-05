@@ -639,6 +639,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **验收口径修正（2026-11-06）**：iperf3 server 在 `TEST_END` 主动 close 数据 socket，receiver 13,500,416 B **不是 tunnel 丢数据**；T1 的 byte-exact 改用 **sink 读满 16MiB + EOF**，iperf3 只作吞吐/信息。close-drain 仍是真 bug（near FIN 早于 capture/txq 排空），`window-close`/A3 继续修；T1 仍未绿。
 
+**window-verify 重建（ddef988）**：clean rebuild HEAD `ddef988f…`，ko `/home/kunweiz/tbtun-worktrees/window/tbtun.ko` sha256 `c476bd48…`，size 6,071,368，`srcversion=62E75E1CE05E5C4887C9AAA`，vermagic `7.2.9-1-MANJARO`。A–K 运行中（`bg_670`）；随后 near 15/15、full adversarial（期望 91/91）、`host-test-san`；`writer_1g` 超时隔离复跑并分别报告。不合并/push，不碰 HND0。
+
 **sink 测试就绪（`hnd0-n1b`）**：`sink.py`（accept 一次、读到 EOF、记录 bytes/expected/ok/secs）与 `send16m.py`（写满 16MiB、`shutdown(SHUT_WR)`、等 EOF）本地 loopback 验证 `16,777,216 B ok=1`；HND0 `/tmp/tbtun-sink/sink.py` `py_compile` 通过。下一轮证据目录 `review/wan-experiment/t1-n1-auto-rx1m-sink/`，保留 `a2a37ed` 的 iperf3 失败证据；等 `window-close`/A3 新 head。
 
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
