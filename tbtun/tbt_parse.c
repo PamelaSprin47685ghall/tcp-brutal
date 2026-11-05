@@ -25,6 +25,7 @@
 #define TBT_U64_MAX (~(u64)0)
 #define TBT_REPLAY_MAX 268435456u /* max_replay_bytes, §8.4.2 */
 #define TBT_REORDER_MAX 268435456u /* rx_reorder_bytes, same ceiling as replay */
+#define TBT_WINDOW_MAX 268435456u  /* tx_window_bytes, same ceiling as replay */
 #define TBT_STALL_MAX 3600000u     /* carrier_stall_ms, one hour */
 #define TBT_INFLATE_MAX 1000000u  /* 1000.000 */
 
@@ -372,7 +373,8 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     cfg->tunnel_rate = 0;
     cfg->max_inflate_milli = 2000;
     cfg->hole_budget_ms = 500;
-    cfg->rx_reorder_bytes = 262144;
+    cfg->rx_reorder_bytes = 8388608;
+    cfg->tx_window_bytes = 0; /* auto: the sender derives it from the BDP */
     cfg->tx_retain_bytes = 0; /* unlimited */
     cfg->carrier_stall_ms = 3000;
 
@@ -481,6 +483,13 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
                 cfg->rx_reorder_bytes > TBT_REORDER_MAX)
                 return tbt_fail(e, key, "rx_reorder_bytes must be 1..268435456 bytes");
         }
+        else if (!strcmp(key, "tx_window_bytes"))
+        {
+            if (tbt_parse_u32(val, &cfg->tx_window_bytes) ||
+                cfg->tx_window_bytes > TBT_WINDOW_MAX)
+                return tbt_fail(e, key, "tx_window_bytes must be 0..268435456 bytes"
+                                           " and no more than rx_reorder_bytes");
+        }
         else if (!strcmp(key, "tx_retain_bytes"))
         {
             if (tbt_parse_u32(val, &cfg->tx_retain_bytes))
@@ -528,6 +537,12 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         return tbt_fail(e, "target", "role=far needs target=addr:port");
     if (cfg->n + cfg->m > TBT_MAX_CARRIERS_LIMIT)
         return tbt_fail(e, "n", "n + m exceeds the 16-carrier limit");
+    /* A sender window above the peer's reorder budget kills the stream on the
+     * first frame past that budget, so the two keys are checked together once
+     * both are known; the line may name them in either order. */
+    if (cfg->tx_window_bytes > cfg->rx_reorder_bytes)
+        return tbt_fail(e, "tx_window_bytes", "tx_window_bytes must be 0..268435456 bytes"
+                                                " and no more than rx_reorder_bytes");
     return 0;
 }
 
@@ -839,12 +854,14 @@ int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
                   " n=%u m=%u dup=%u profile=%s keepalive=%u"
                   " drip_ms=%u replay=%u tunnel_rate=%u"
                   " max_inflate=%u.%03u hole_budget_ms=%u rx_reorder_bytes=%u"
-                  " tx_retain_bytes=%u carrier_stall_ms=%u portblock=%u-%u",
+                  " tx_window_bytes=%u tx_retain_bytes=%u carrier_stall_ms=%u"
+                  " portblock=%u-%u",
                   c->n, c->m, c->dup, profiles[c->profile & 3], c->keepalive_ms,
                   c->drip_ms, c->replay, c->tunnel_rate,
                   c->max_inflate_milli / 1000, c->max_inflate_milli % 1000,
-                  c->hole_budget_ms, c->rx_reorder_bytes, c->tx_retain_bytes,
-                  c->carrier_stall_ms, c->portblock_lo, c->portblock_hi);
+                  c->hole_budget_ms, c->rx_reorder_bytes, c->tx_window_bytes,
+                  c->tx_retain_bytes, c->carrier_stall_ms, c->portblock_lo,
+                  c->portblock_hi);
     if (rc)
         return rc;
     if (c->nonce_set)
