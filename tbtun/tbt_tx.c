@@ -950,15 +950,28 @@ retx_queued:
             r->pending = false;
             continue;
         }
-        /* A retransmit must be able to enter a queue that is full of
-         * window-blocked new data: it is the frame that advances the window.
-         * Head insertion and a bounded overage keep the queue finite while
-         * letting the hole filler through first. */
-        if (READ_ONCE(sess->tx_queued) > sess->txq_max)
+        /* A hole filler enters even when the queue is far past its bound.
+         * The capture path keeps the frames the window cannot carry in this
+         * queue, so it is deepest exactly when a hole exists; the old bound
+         * refused the one frame that advances the ack (measured:
+         * retx_evident=256, retx_cand=7, retx_txqdrop=7, tx_queued=1.1 MB,
+         * txq_max=200 KB, retx_frames=0, far holes_unrecoverable=1). One
+         * 8 KiB copy per RTO is the whole exposure, and it is freed as soon
+         * as the pump writes it. Slow and path-loss copies keep the bound:
+         * they are not the only way forward. */
+        if (srcs[i] != TBT_RETX_HOLE &&
+            READ_ONCE(sess->tx_queued) > sess->txq_max)
         {
-            for (; i < n; i++)
-                cand[i]->pending = false;
-            break;
+            sess->dbg_retx_txqdrop++;
+            if (debug >= 1)
+                pr_info_ratelimited("tbtun: retx txqdrop seq=%llu len=%u src=%u tx_queued=%llu txq_max=%u\n",
+                                    (unsigned long long)r->seq,
+                                    (unsigned int)r->len,
+                                    (unsigned int)srcs[i],
+                                    (unsigned long long)READ_ONCE(sess->tx_queued),
+                                    (unsigned int)sess->txq_max);
+            r->pending = false;
+            continue;
         }
         fr = tbt_frame_alloc(r->len, GFP_KERNEL);
         if (!fr)
@@ -2088,13 +2101,44 @@ int tbt_tx_pump(struct tbt_session *sess)
                 if (!c && avoid)
                     c = tbt_sched_pick(sess, sst, blocked | stalled,
                                        type == TBT_F_DATA);
+                /* A stalled path is one whose snd_una has not moved for an
+                 * RTO with bytes still unacked: the copy is better sent
+                 * elsewhere. When every remaining path is stalled -- and with
+                 * N=1 that is always the case -- refusing to schedule means
+                 * the hole can never fill, and the peer's hole budget resets
+                 * the stream with the bytes still in our queue (measured:
+                 * retx_evident=255, retx_cand=6, retx_frames=0). A copy on a
+                 * stalled path is no worse than no copy: the path may be
+                 * slow, but the record is what the receiver is waiting for. */
+                if (!c && stalled)
+                    c = tbt_sched_pick(sess, sst, blocked | avoid,
+                                       type == TBT_F_DATA);
+                if (!c && stalled)
+                    c = tbt_sched_pick(sess, sst, blocked,
+                                       type == TBT_F_DATA);
                 if (!c)
+                {
+                    if (fr->retx_copy)
+                    {
+                        sess->dbg_retx_nopick++;
+                        if (stalled)
+                            sess->dbg_retx_stalled++;
+                    }
                     continue;
+                }
                 if (!atomic_read(&c->up))
+                {
+                    if (fr->retx_copy)
+                        sess->dbg_retx_notup++;
                     continue;
+                }
                 if (type == TBT_F_DATA &&
                     (!fr->st || !tbt_stream_announced(fr->st, c)))
+                {
+                    if (fr->retx_copy)
+                        sess->dbg_retx_notann++;
                     continue;
+                }
             }
             /* Keep at most one peer window in the carrier's TCP send buffer.
              * Filling sndbuf past the advertised window only parks the tail in
@@ -2190,6 +2234,8 @@ int tbt_tx_pump(struct tbt_session *sess)
                 r->reserve_mask |= BIT(c->index);
             }
             fr->path = c->index;
+            if (fr->retx_copy)
+                sess->dbg_retx_batch++;
             list_move_tail(&fr->list, &batch);
             sess->tx_queued -= fr->len;
             if (type == TBT_F_DATA && sess->tunnel->cfg.tunnel_rate)
@@ -2306,6 +2352,18 @@ ctl_fail:
                     fr->path = 0xff;
                     fr->avoid_mask = BIT(c->index);
                     sess->dbg_pump_hiwat++;
+                    if (fr->retx_copy)
+                    {
+                        sess->dbg_retx_eagain++;
+                        if (debug >= 1)
+                            pr_info_ratelimited("tbtun: retx eagain seq=%llu len=%u path=%u src=%u tx_queued=%llu txq_max=%u\n",
+                                                (unsigned long long)fr->hdr.seq,
+                                                (unsigned int)fr->len,
+                                                (unsigned int)c->index,
+                                                (unsigned int)fr->retx_src,
+                                                (unsigned long long)READ_ONCE(sess->tx_queued),
+                                                (unsigned int)sess->txq_max);
+                    }
                     tbt_tx_enqueue(sess, fr, false);
                     continue;
                 }

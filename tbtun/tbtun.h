@@ -594,6 +594,20 @@ struct tbt_session
     atomic64_t dbg_retx_evident; /* hole at the ack was evident */
     atomic64_t dbg_retx_cand;    /* retransmit candidates queued */
     atomic64_t dbg_retx_nosends; /* skipped: never written */
+    /* Why a retransmit copy did not reach the wire. A copy that is created
+     * but never written is the failure that let the receiver's hole budget
+     * reset a stream with the bytes still in our own queue; each branch of
+     * the pump and of the carrier's all-or-nothing pre-check owns one
+     * counter, so /proc names the blocking gate. */
+    u64 dbg_retx_txqdrop;  /* dropped by the txq byte bound */
+    u64 dbg_retx_nopick;   /* no carrier after the avoid/stalled fallback */
+    u64 dbg_retx_stalled;  /* ... and the stalled-path mask was non-empty */
+    u64 dbg_retx_notup;    /* carrier not up */
+    u64 dbg_retx_notann;   /* stream not announced on that carrier */
+    u64 dbg_retx_batch;    /* entered the write batch */
+    u64 dbg_retx_eagain;   /* carrier returned -EAGAIN */
+    u64 dbg_retx_memshort; /* pre-check: sndbuf has no room for the record */
+    u64 dbg_retx_wndshort; /* pre-check: peer window short (copy still queued) */
     u64 holes_declared;  /* geometric test declared a lost frame; tx_lock */
     u64 holes_repaired;  /* a declared hole was filled; tx_lock */
     atomic64_t holes_unrecoverable; /* case B: the stream was reset */

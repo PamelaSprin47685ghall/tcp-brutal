@@ -777,7 +777,10 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "rtt_mean_us=%u rttvar_us=%u "
                               "rtt_max_us=%u txq_max=%u win_block=%llu win_resume=%llu "
                               "pump_hw_armed=%llu pump_hw_fired=%llu "
-                              "retx_evident=%llu retx_cand=%llu retx_nosends=%llu\n",
+                              "retx_evident=%llu retx_cand=%llu retx_nosends=%llu "
+                              "retx_txqdrop=%llu retx_nopick=%llu retx_stalled=%llu "
+                              "retx_notup=%llu retx_notann=%llu retx_batch=%llu "
+                              "retx_eagain=%llu retx_memshort=%llu retx_wndshort=%llu\n",
                            t->cfg.id, n, up, tbt_stat_read(&s->carrier_lost),
                            tbt_stat_read(&s->carrier_replaced),
                            READ_ONCE(s->spare_activated),
@@ -814,7 +817,16 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->pump_hw_fired),
                            tbt_stat_read(&s->dbg_retx_evident),
                            tbt_stat_read(&s->dbg_retx_cand),
-                           tbt_stat_read(&s->dbg_retx_nosends));
+                           tbt_stat_read(&s->dbg_retx_nosends),
+                           READ_ONCE(s->dbg_retx_txqdrop),
+                           READ_ONCE(s->dbg_retx_nopick),
+                           READ_ONCE(s->dbg_retx_stalled),
+                           READ_ONCE(s->dbg_retx_notup),
+                           READ_ONCE(s->dbg_retx_notann),
+                           READ_ONCE(s->dbg_retx_batch),
+                           READ_ONCE(s->dbg_retx_eagain),
+                           READ_ONCE(s->dbg_retx_memshort),
+                           READ_ONCE(s->dbg_retx_wndshort));
                 /* Review 22: pinned control-frame lifetime. ctl_queued is the
                  * live control-queue depth; the other four are the retry,
                  * re-pin, obsolete-generation and explicit-loss record. */

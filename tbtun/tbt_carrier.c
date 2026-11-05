@@ -861,8 +861,38 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
         u64 wnd_avail = wnd > (u32)(queued - una) ?
                         wnd - (u32)(queued - una) : 0;
 
-        if (min(mem_avail, wnd_avail) < total)
+        if (mem_avail < total)
+        {
+            if (fr->retx_copy)
+            {
+                sess->dbg_retx_memshort++;
+                if (debug >= 1)
+                    pr_info_ratelimited("tbtun: retx memshort seq=%llu len=%u total=%zu mem_avail=%llu sndbuf=%u wmem=%u wnd_avail=%llu\n",
+                                        fr->hdr.seq, fr->len, total, mem_avail,
+                                        sndbuf, wmem, wnd_avail);
+            }
             return -EAGAIN;
+        }
+        /* A retransmit copy is admitted past the peer window.
+         * tcp_sendmsg_locked() queues into the socket's write memory
+         * regardless of the advertised window, and TCP sends the record when
+         * the window opens; the record stays atomic because it is one
+         * contiguous byte range in the write queue. Refusing here kept the
+         * copy out of the queue exactly while the window was closed, so the
+         * next window update had nothing to carry and the receiver's hole
+         * budget expired first (measured: retx_evident=255, retx_cand=6,
+         * retx_frames=0, far holes_unrecoverable=1). New data keeps the
+         * window test: it must not park its tail in zero-window persist. */
+        if (wnd_avail < total)
+        {
+            if (!fr->retx_copy)
+                return -EAGAIN;
+            sess->dbg_retx_wndshort++;
+            if (debug >= 1)
+                pr_info_ratelimited("tbtun: retx wndshort seq=%llu len=%u total=%zu wnd=%u inflight=%u wnd_avail=%llu mem_avail=%llu\n",
+                                    fr->hdr.seq, fr->len, total, wnd,
+                                    (u32)(queued - una), wnd_avail, mem_avail);
+        }
     }
     msg.msg_flags = MSG_DONTWAIT;
     lock_sock(c->sk);
