@@ -201,8 +201,13 @@ void tbt_listen_stop(struct tbt_tunnel *t);
  * peer's contiguous received offset. `tx_window_bytes=0` (the default)
  * derives it from the path:
  *
- *   auto = clamp(k x mean_BDP, 1 MiB, rx_reorder_bytes)
+ *   auto = min(max(k x mean_BDP, 2 frames), rx_reorder_bytes)
  *   k = (RTO + one_way + fb_delay) / mean_srtt
+ *
+ * The 1 MiB bootstrap value applies only while no carrier has a sample; it
+ * must not override k x B afterwards (measured: a 70 KB BDP at k=2 turned
+ * into a 1 MiB window, whose 3.4 s drain at 2.4 Mbit broke the 1.5 s hole
+ * budget).
  *
  * mean_BDP = mean_srtt x sum(delivery_rate), with the rate and SRTT from each
  * carrier's own TCP BBR estimator (rate_delivered/rate_interval_us, srtt_us)
@@ -214,7 +219,6 @@ void tbt_listen_stop(struct tbt_tunnel *t);
  * of carrier cwnd: carrier TCP frees cwnd on its own ACK while the bytes
  * still sit in the receiver's tree. A frame beyond the budget is a stream
  * kill, not a retransmit. */
-#define TBT_TX_WINDOW_MIN (16 * 1024)
 #define TBT_TX_WINDOW_AUTO_FLOOR (1024 * 1024)
 
 /* A carrier that never presents a HELLO is retired after this long. */

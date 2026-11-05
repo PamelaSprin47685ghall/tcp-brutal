@@ -595,22 +595,20 @@ static u32 tbt_tx_window(struct tbt_session *sess)
     if (max)
         sess->rtt_max_us = max;
     if (cfg->tx_window_bytes)
-    {
         win = cfg->tx_window_bytes;
-    }
-    else
-    {
-        if (win < TBT_TX_WINDOW_AUTO_FLOOR)
-            win = TBT_TX_WINDOW_AUTO_FLOOR;
-    }
+    else if (!win)
+        /* Bootstrap only: no carrier has a rate/RTT sample yet, so k x B is
+         * undefined. 1 MiB lets the first frames establish the samples. */
+        win = TBT_TX_WINDOW_AUTO_FLOOR;
+    /* Liveness: two maximum frames must fit, or no frame can ever pass and
+     * the stream deadlocks. This is a frame-granularity floor, not a 1 MiB
+     * one: once samples exist, W = k x B and the floor must not override it
+     * (a 70 KB BDP at k=2 would otherwise become a 15x-B window whose 3.4 s
+     * drain breaks the hole budget). */
+    if (win < 2 * TBT_PAYLOAD_MAX)
+        win = 2 * TBT_PAYLOAD_MAX;
     if (win > cap)
         win = cap;
-    /* Liveness floor: one maximum frame is 8 KiB, so a window below two
-     * frames can never pass a frame and would deadlock the stream. A reorder
-     * budget below 16 KiB is below one frame and cannot lower the window
-     * below it either. */
-    if (win < TBT_TX_WINDOW_MIN)
-        win = TBT_TX_WINDOW_MIN;
     return win ? (u32)win : 1;
 }
 
