@@ -618,8 +618,7 @@ static int run_cfg(const cfg *g, int want_report, FILE *rep, const char *series,
 static void usage(void)
 {
     fprintf(stderr,
-            "usage: sc_ldpc_bench --block N --L N --rate 0.50|0.60|0.70 "
-            "--p 0.30 "
+            "usage: sc_ldpc_bench --block N --L N --rate 0.30..0.70 --p 0.30 "
             "[--trials N] [options]\n"
             "  --model systematic|symmetric  channel model (default systematic)\n"
             "  --term acc|causal|native      boundary rule (default acc)\n"

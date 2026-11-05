@@ -287,8 +287,11 @@ sc_code *sc_build(const sc_params *p, char *err, size_t errlen)
         snprintf(err, errlen, "L must be in [2,4096]");
         return NULL;
     }
-    if (p->rate_pct != 50 && p->rate_pct != 60 && p->rate_pct != 70) {
-        snprintf(err, errlen, "rate_pct must be 50, 60 or 70");
+    if (p->rate_pct != 30 && p->rate_pct != 35 && p->rate_pct != 40 &&
+        p->rate_pct != 45 && p->rate_pct != 50 && p->rate_pct != 60 &&
+        p->rate_pct != 70) {
+        snprintf(err, errlen,
+                 "rate_pct must be 30, 35, 40, 45, 50, 60 or 70");
         return NULL;
     }
     if (p->term != SC_TERM_CAUSAL && p->term != SC_TERM_NATIVE &&
