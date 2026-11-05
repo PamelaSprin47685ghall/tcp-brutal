@@ -613,7 +613,9 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **HND0 验收口径**：`W≈k×BDP`（203ms×17M→~862KB；1MiB cap 下 ~750KB），不用 lab 的 136–250KB 绝对值；通过条件仍是 `rc=0`、far `holes=0`、`fbk_rx>0`、`carrier_lost=0`、`raw lost=0`。
 
-**重跑状态**：E 上一轮 `t9` 仍是旧 `rx_reorder_bytes=262144` 配置，**不作数**；wan-deploy 会话 orphan，新 worker `hnd0-n1b` 按新 spec（两端 1MiB）执行 HND0 N=1 auto；等 `rc/W/fbk/holes` 证据。T1 未绿，`w-window` 不合并。
+**重跑状态（1MiB，E `cb5771e`）**：rc=1；bulk 16MiB/3s（44.7 Mbit/s sender）、far `rx_ack=16777253`、`holes=0`、`lost=0`；`W=1MiB` cap、`bdp=1.17–1.26MB`、`k=2`；但 near `TXSTALLKILL sid=…760 ack=171 txseq=172 age=3.17s`，far 控制流 `tgt_state=7`、2.65MB 未交付；near c6 `gate_fail=314/depth_fail=67/time_fail=35`。**W 修复对 bulk 生效，剩余阻塞是控制流 stall**；A/`hnd0-n1b` 诊断中。T1 未绿，`w-window` 不合并。
+
+**Adversarial 状态**：A 报告 91/91 cases pass；full suite 90/1，仅 `pub.writer_drain_1g` 在 host load 3.3–4.7 下超时；isolated writer 4/4 绿；A 正在安静主机重跑全套。RST 是 fake far parser 的 test bug（已修 3f4f1f0），lint 16/16+14/14。
 
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
 
