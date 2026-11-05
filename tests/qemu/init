@@ -674,6 +674,10 @@ probe_g() {
         unrec=$(stat_sum holes_unrecoverable)
         stall=$(stat_max rx_max_stall_us)
         budget_ms=$(awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^hole_budget_ms=/) { split($i, a, "="); print a[2] } }' "$CFG" | head -1)
+        # 0 = auto: the receiver derives max(1 s, 5 x SRTT). This probe does
+        # not read the session's SRTT, so use the documented 1 s floor as the
+        # limit; the old omitted-key default was 500 ms.
+        [ "${budget_ms:-0}" -eq 0 ] && budget_ms=1000
         budget_ms=${budget_ms:-500}
         # One hole budget covers the wait for the missing bytes; the margin
         # covers a scheduling round trip on either side. Documented in
