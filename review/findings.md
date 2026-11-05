@@ -88,6 +88,11 @@ grep -rn 'fbk_mask' tbtun/                   # empty
 grep -rn 'src=' tbtun/                       # empty (the key does not exist)
 ```
 
+`test_parse` now reports 357 checks; 365 was the older snapshot taken before the
+five dead keys `framing`/`chunk`/`max_retry`/`dev`/`uid` and their parse cases
+were deleted. What was deleted is the tests for keys already removed from the
+grammar, not behavioural coverage; `make check` still reports 0 failures.
+
 The QEMU A–K probes and the adversarial groups are separate suites; their final
 results are archived under `review/final/`, `review/final-qemu/` and
 `review/final-bench/`. The host suites

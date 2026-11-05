@@ -51,6 +51,10 @@ make check
 以及 reorder/ack/control/multistream/anchor 模型；
 这些测试不需要 root、不需要加载模块，也不需要内核头文件。只跑这些测试用 `make host-test`。
 
+`test_parse` 现为 357 checks；365 是删除 `framing`/`chunk`/`max_retry`/`dev`/`uid`
+五个死键及其解析用例之前的旧快照。删除的是已从语法移除的键的测试，不是行为覆盖；
+`make check` 仍为 0 failures。
+
 如果系统没有安装内核头文件，可以改用解包出来的头文件负载，不必使用
 `/lib/modules/$(uname -r)/build`；一次性准备步骤、生成的 `env.sh` 以及 pahole 的注意事项见
 [docs/build-env.md](docs/build-env.md)。该环境存在时，`make check` 会自动加载它。
