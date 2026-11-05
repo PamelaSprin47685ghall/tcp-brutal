@@ -1,0 +1,45 @@
+# .74 crypto-v6 ChaCha8 KAT+bench root@192.168.123.74  2026-11-06T06:49:31+08:00
+## before
+ 06:49:31 up 3 days, 23:12,  5 users,  load average: 1.85, 2.64, 2.29
+               total        used        free      shared  buff/cache   available
+Mem:           19939        1575         221           0       18542       18364
+model name	: AMD Athlon(tm) X4 760K Quad Core Processor
+4
+1796707
+## build
+BUILD_OK
+## KAT
+PASS TC1 ChaCha8 128-bit zero key, blocks 0-1
+PASS ChaCha8 256-bit zero key, block 0
+PASS ChaCha12 256-bit zero key, block 0
+PASS ChaCha20 256-bit zero key, block 0
+PASS ChaCha8 key 00..1f, nonce a0..a7, 128 bytes
+PASS RFC 8439 2.3.2 ChaCha20 block, counter 1
+PASS RFC 8439 2.4.2 ChaCha20 encryption
+PASS counter start: counter 1 matches block 1 of counter 0
+PASS counter carry: 0xffffffff + 1 == 0x100000000
+PASS streaming: 7 chunks match one-shot
+PASS in-place: in == out matches one-shot
+PASS partial lengths: 1..64 bytes match prefix
+PASS counter wrap: post-wrap call rejected
+PASS counter wrap: 65-byte call fails after first block
+PASS invalid args: 19 rejection checks
+PASS wipe: context zeroed
+
+all checks passed
+## bench
+cpu_mhz: 1792
+buffer: hot cache, in-place xor, counter 0 per pass
+rounds      bytes         MB/s     cycles/B
+8            1024        210.1         8.53
+8            8192        217.5         8.24
+8           65536        217.3         8.25
+12           1024        183.8         9.75
+12           8192        181.7         9.86
+12          65536        179.7         9.97
+20           1024        132.0        13.58
+20           8192        135.1        13.26
+20          65536        140.3        12.78
+sink: 148176063
+## after
+ 06:49:56 up 3 days, 23:12,  5 users,  load average: 2.32, 2.69, 2.31

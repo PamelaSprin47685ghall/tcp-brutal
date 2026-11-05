@@ -1,0 +1,45 @@
+# HND0 crypto-v6 ChaCha8 KAT+bench root@45.11.1.62  2026-11-06T06:49:40+08:00
+## before
+ 22:49:42 up 1 day, 15:38,  1 user,  load average: 0.57, 0.38, 0.48
+               total        used        free      shared  buff/cache   available
+Mem:             955         382         199           1         520         573
+model name	: QEMU Virtual CPU version 2.5+
+cpu MHz		: 2199.996
+2
+## build
+BUILD_OK
+## KAT
+PASS TC1 ChaCha8 128-bit zero key, blocks 0-1
+PASS ChaCha8 256-bit zero key, block 0
+PASS ChaCha12 256-bit zero key, block 0
+PASS ChaCha20 256-bit zero key, block 0
+PASS ChaCha8 key 00..1f, nonce a0..a7, 128 bytes
+PASS RFC 8439 2.3.2 ChaCha20 block, counter 1
+PASS RFC 8439 2.4.2 ChaCha20 encryption
+PASS counter start: counter 1 matches block 1 of counter 0
+PASS counter carry: 0xffffffff + 1 == 0x100000000
+PASS streaming: 7 chunks match one-shot
+PASS in-place: in == out matches one-shot
+PASS partial lengths: 1..64 bytes match prefix
+PASS counter wrap: post-wrap call rejected
+PASS counter wrap: 65-byte call fails after first block
+PASS invalid args: 19 rejection checks
+PASS wipe: context zeroed
+
+all checks passed
+## bench
+cpu_mhz: 2200
+buffer: hot cache, in-place xor, counter 0 per pass
+rounds      bytes         MB/s     cycles/B
+8            1024        373.4         5.89
+8            8192        458.9         4.79
+8           65536        419.0         5.25
+12           1024        199.1        11.05
+12           8192        300.9         7.31
+12          65536        343.7         6.40
+20           1024        203.2        10.83
+20           8192        270.3         8.14
+20          65536        275.5         7.99
+sink: 240897215
+## after
+ 22:50:16 up 1 day, 15:39,  2 users,  load average: 0.63, 0.42, 0.49

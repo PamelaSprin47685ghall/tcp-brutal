@@ -99,6 +99,48 @@
 - AES 只测 `aes-128-cbc`（8192 B 块），未测 GCM/CTR；CBC 有链式依赖，偏保守。
 - 三机均未安装软件、未改服务/网络、未加载模块；`/tmp` 已清空。
 
+
+## 8. crypto-v6 实现的 KAT 与吞吐（w-fec 0615b3d）
+
+fec-core2/crypto-v6 的 host 移植（`review/fec-prototype/crypto/`，C99，64-bit counter +
+8-byte nonce）已提交。构建 `cc -std=c99 -O2 -Wall -Wextra -Werror`（KAT）与
+`-O3`（bench），KAT 16 项全部 PASS（含 TC1、256-bit 向量、RFC 8439、counter carry、
+streaming、in-place、counter wrap、invalid args、wipe）。bench 自带 TC1 自检，
+失败拒绝出数。日志：`logs/chacha8-impl-{hnd0,x86-74}.log`。
+
+### HND0（2.2 GHz，SSE2；`--seconds 0.3 --mhz 2200`）
+
+| rounds | 1 KiB MB/s (c/B) | 8 KiB MB/s (c/B) | 64 KiB MB/s (c/B) |
+|---:|---:|---:|---:|
+| 8 | 373.4 (5.89) | **458.9 (4.79)** | 419.0 (5.25) |
+| 12 | 199.1 (11.05) | 300.9 (7.31) | 343.7 (6.40) |
+| 20 | 203.2 (10.83) | 270.3 (8.14) | 275.5 (7.99) |
+
+### .74（1.792 GHz；`--seconds 0.3 --mhz 1792`）
+
+| rounds | 1 KiB MB/s (c/B) | 8 KiB MB/s (c/B) | 64 KiB MB/s (c/B) |
+|---:|---:|---:|---:|
+| 8 | 210.1 (8.53) | **217.5 (8.24)** | 217.3 (8.25) |
+| 12 | 183.8 (9.75) | 181.7 (9.86) | 179.7 (9.97) |
+| 20 | 132.0 (13.58) | 135.1 (13.26) | 140.3 (12.78) |
+
+### 1 Gbit/s 单核占比
+
+| 机 | ChaCha8 | 占比 | ChaCha20 | 占比 |
+|---|---|---:|---|---:|
+| HND0 | 458.9 MB/s | **27.2%** | 275.5 | 45.4% |
+| .74 | 217.5 MB/s | 57.5% | 140.3 | 89.1% |
+| .65 | — | — | — | — |
+
+### 读数
+
+- 同一台 HND0 上，crypto-v6 实现比 Bernstein 参考慢约 30%（458.9 vs 648.6 MB/s）；
+  .74 上慢约 47%（217.5 vs 413.4）。差异来自实现结构（64-bit counter、in-place、
+  无展开）与 bench 口径（64 KiB 热缓存、0.3 s），不是测量错误；两套数字都保留。
+- ChaCha8 仍是 HND0 上最省的软件档：1G 下 27% 单核，ChaCha20 要 45%。
+- .74 的 ChaCha8 占 57%，ChaCha20 占 89%：这台 1.8 GHz 老 x86 上只有 8 轮才划算。
+- **.65 仍然跳过**：跑前 load 5.25、`coreyolo` 占 341% CPU（cpu7），按避让规则不跑。
+
 ## 7. 复现
 
 ```sh
