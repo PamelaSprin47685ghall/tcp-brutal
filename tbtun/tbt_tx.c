@@ -626,11 +626,16 @@ static void tbt_tx_retx(struct tbt_session *sess, struct tbt_stream *st)
                 src = TBT_RETX_SLOW;
                 /* Slow path: a record TCP delivered but the parser never saw.
                  * Path progress proves nothing there. Bounded to one copy per
-                 * 2xRTO so it cannot become a per-RTO flood. */
+                 * 3xRTO so it cannot become a per-RTO flood. Two RTOs sat
+                 * inside the measured feedback lag: the peer's delivery queue
+                 * was tens of MB, so the uack crossed a TCP-acked frame only
+                 * seconds later, and every frame in that band was copied
+                 * again every 2xRTO (measured: 310 of 313 copies in one
+                 * bench run came from this branch, no loss injected). */
                 if (READ_ONCE(st->last_ack_ns) &&
                     tbt_retain_tcp_done(sess, r, now, &done_ns))
                 {
-                    if (now - done_ns < 2 * rto)
+                    if (now - done_ns < 3 * rto)
                         continue;
                 }
                 else if (!tbt_retain_paths_stalled(sess, r, now, rto))
