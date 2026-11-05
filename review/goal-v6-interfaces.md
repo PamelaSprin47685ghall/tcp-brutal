@@ -623,6 +623,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **控制流 stall 根因（A，`cb5771e`，覆盖上段的“修复方向”）**：不是 FBK/远端口 hole，是 per-carrier peer-window gate 的跨流饥饿。near 控制流 172B，far `uack=171`；kill 时 carrier window 满（`retx wndshort inflight=785496 wnd=785248`），pump gate `(queued-una) >= snd_wnd` 是 per-carrier FIFO；bulk 16.9MB backlog/1MiB window 每次 window 开启先吃满，控制流 1B frame 停在 session `tx_q` 尾部；`sends=0` 使 retx 跳过、无 HOLE copy；`tx_stall_check` 在 `max(1s,2.5×RTO)=1s` 触发 `TXSTALLKILL ack=171 txseq=172 age=3.17s`。后果：near 控制 RST 关 far iperf3 control target → iperf3 abort → far data `tgt_state=7`/2.65MB 未交付 → far 停 ack bulk → near data 也 stall（`kill=4`）。far rx hole 不是触发（`rx_max_stall_us=388ms<1s`、far `holes=0`）；bulk repair 正常（`retx_frames=26`、`hole=2`、far `rx_ack=16.7MB`）。修复：`tbt_tx_pump` 的 peer-window gate 对 `tx_seq-tx_ack <= 2*TBT_PAYLOAD_MAX` 的小 backlog DATA frame 豁免，保持流内顺序；更严格可两遍选择。A 未打补丁，先本地回归（bulk+control 同 carrier）再 HND0 auto 重跑；head 仍 `3f4f1f0`。
 
+**代码路径确认（`hnd0-n1b`）**：`tbt_tx_pump()` 的 carrier admission 对 `TBT_F_DATA` 走 `sk_stream_memory_free(c->sk)`（只有 FBK 豁免）；控制流 1B DATA frame 与 bulk 共用同一 peer-window/sndbuf 门；`tbt_tx_window_ok()` 本身通过（`172 <= 171 + 1MiB`），饥饿点在 carrier send-memory 门，不在 tunnel 窗口公式。A 的小 backlog DATA 豁免正对此段。重跑证据放 `review/wan-experiment/t1-n1-auto-rx1m/`（不覆盖 E 的 `t1-n1-auto/`），补 `config`/`ports` 快照和两条 stream 的 per-stream 行。
+
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
 
 | 项 | 内容 |
