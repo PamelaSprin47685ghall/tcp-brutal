@@ -625,6 +625,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **代码路径确认（`hnd0-n1b`）**：`tbt_tx_pump()` 的 carrier admission 对 `TBT_F_DATA` 走 `sk_stream_memory_free(c->sk)`（只有 FBK 豁免）；控制流 1B DATA frame 与 bulk 共用同一 peer-window/sndbuf 门；`tbt_tx_window_ok()` 本身通过（`172 <= 171 + 1MiB`），饥饿点在 carrier send-memory 门，不在 tunnel 窗口公式。A 的小 backlog DATA 豁免正对此段。重跑证据放 `review/wan-experiment/t1-n1-auto-rx1m/`（不覆盖 E 的 `t1-n1-auto/`），补 `config`/`ports` 快照和两条 stream 的 per-stream 行。
 
+**A 补丁（`w-window f8023a2`）**：① cross-stream 小 backlog DATA 豁免（`tx_seq-tx_ack <= 2*TBT_PAYLOAD_MAX`，peer-window 与 send-memory 两门）；② `hole_budget_ms=0` 的 sender stall budget 改为 `max(5s, 5×RTO, carrier_stall_ms)`（显式 `hole_budget_ms` 保持原义）；③ target close（EPIPE/ECONNRESET/ESHUTDOWN）主动 abort/传播，`-ENOTCONN` 仍 transient。本地 build/make check/near 15/15/A–K 11/11/lint 绿；完整 adversarial 待 HND0 rerun 后安静跑。**module sha 待确认**：worktree `tbtun.ko` sha256=`686797c5…`（07:22，早于 f8023a2 的 07:26），与用户报的 `3edf84e0` 不一致；`hnd0-n1b` 必须用 A 确认的 f8023a2 构建，不能用 stale ko。
+
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
 
 | 项 | 内容 |
