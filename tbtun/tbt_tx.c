@@ -809,7 +809,10 @@ static void tbt_tx_retx(struct tbt_session *sess, struct tbt_stream *st)
         if (r->seq + r->len <= ack)
             continue;
         if (!r->sends)
+        {
+            atomic64_inc(&sess->dbg_retx_nosends);
             continue;
+        }
         /* The frame containing the peer's contiguous delivered offset has
          * explicit receiver evidence: the uack stopped inside it. That
          * outranks the per-path high-water, which counts every record that
@@ -830,6 +833,7 @@ static void tbt_tx_retx(struct tbt_session *sess, struct tbt_stream *st)
                 continue;
             if (hole_evident)
             {
+                atomic64_inc(&sess->dbg_retx_evident);
                 src = TBT_RETX_HOLE;
                 if (r->last_sent_ns && now - r->last_sent_ns < rto)
                     continue;
@@ -926,6 +930,7 @@ retx_queued:
             r->pending = true;
             srcs[n] = src;
             cand[n++] = r;
+            atomic64_inc(&sess->dbg_retx_cand);
             sess->last_loss_ns = now;
         }
         if (n == ARRAY_SIZE(cand))

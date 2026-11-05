@@ -776,7 +776,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "stall_declared=%llu tx_window=%u bdp_bytes=%u k_x100=%u "
                               "rtt_mean_us=%u rttvar_us=%u "
                               "rtt_max_us=%u txq_max=%u win_block=%llu win_resume=%llu "
-                              "pump_hw_armed=%llu pump_hw_fired=%llu\n",
+                              "pump_hw_armed=%llu pump_hw_fired=%llu "
+                              "retx_evident=%llu retx_cand=%llu retx_nosends=%llu\n",
                            t->cfg.id, n, up, tbt_stat_read(&s->carrier_lost),
                            tbt_stat_read(&s->carrier_replaced),
                            READ_ONCE(s->spare_activated),
@@ -810,7 +811,10 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            READ_ONCE(s->txq_max),
                            READ_ONCE(s->win_block), READ_ONCE(s->win_resume),
                            READ_ONCE(s->pump_hw_armed),
-                           tbt_stat_read(&s->pump_hw_fired));
+                           tbt_stat_read(&s->pump_hw_fired),
+                           tbt_stat_read(&s->dbg_retx_evident),
+                           tbt_stat_read(&s->dbg_retx_cand),
+                           tbt_stat_read(&s->dbg_retx_nosends));
                 /* Review 22: pinned control-frame lifetime. ctl_queued is the
                  * live control-queue depth; the other four are the retry,
                  * re-pin, obsolete-generation and explicit-loss record. */

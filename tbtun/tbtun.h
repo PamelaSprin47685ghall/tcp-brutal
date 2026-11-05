@@ -591,6 +591,9 @@ struct tbt_session
     atomic64_t dup_used;        /* duplicate copies that filled a gap first */
     atomic64_t dup_suppressed;  /* duplicates skipped by max_inflate */
     u64 dup_same_path;   /* duplicates forced onto an already-used path */
+    atomic64_t dbg_retx_evident; /* hole at the ack was evident */
+    atomic64_t dbg_retx_cand;    /* retransmit candidates queued */
+    atomic64_t dbg_retx_nosends; /* skipped: never written */
     u64 holes_declared;  /* geometric test declared a lost frame; tx_lock */
     u64 holes_repaired;  /* a declared hole was filled; tx_lock */
     atomic64_t holes_unrecoverable; /* case B: the stream was reset */
