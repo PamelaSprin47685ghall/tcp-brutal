@@ -617,6 +617,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **Adversarial 状态**：A 报告 91/91 cases pass；full suite 90/1，仅 `pub.writer_drain_1g` 在 host load 3.3–4.7 下超时；isolated writer 4/4 绿；A 正在安静主机重跑全套。RST 是 fake far parser 的 test bug（已修 3f4f1f0），lint 16/16+14/14。
 
+**T1 后续**：`hnd0-n1b` 已 stand down，不重复 1MiB 跑；A 在 full adversarial 后诊断控制流 stall。T1 未绿，`w-window` 不合并。
+
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
 
 | 项 | 内容 |
