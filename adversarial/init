@@ -402,6 +402,18 @@ phase_flush() {
     flush_all
 }
 
+# The two pub.writer cases alone.  They live in phase_public too; this phase
+# exists so the backpressure budget can be re-run without the 10k-cycle churn
+# (about 31 minutes) that precedes them.
+phase_writer() {
+    echo "== pub.writer backpressure"
+    setup_raw
+    timeout 120 /bin/adv_probe writer "$PUB" 100 0
+    setup_raw
+    timeout 180 /bin/adv_probe writer "$PUB" 1024 0
+    flush_all
+}
+
 phase_catconfig() {
     echo "== cat config > config"
     flush_all
@@ -537,7 +549,7 @@ phase_stall() {
     # be wedged by the first one.
 }
 
-for _p in public control resource slab final replay rmmod flush catconfig cfg_mix param port near far stall; do
+for _p in public control resource slab final replay rmmod flush catconfig cfg_mix param port near far stall writer; do
     want "$_p" || continue
     echo "PHASE_START $_p"
     "phase_$_p"

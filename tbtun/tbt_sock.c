@@ -86,6 +86,15 @@ static void tbt_pub_capture_work(struct work_struct *w)
     might_sleep();
     if (!sk)
         return;
+    /* The session queue is full: tbt_tx_submit() left the remaining bytes in
+     * this socket's receive queue, so TCP advertises a closed window and the
+     * application's send() is blocked in the kernel.  Re-entering
+     * tcp_read_sock() cannot take a byte; it only contends for the socket
+     * lock on every sk_data_ready.  The pump clears tx_paused and schedules
+     * this work once the queue is back below half (tbt_tx_pump), so skipping
+     * here never loses the wake. */
+    if (READ_ONCE(st->tx_paused))
+        return;
     read_lock(&sk->sk_callback_lock);
     if (sk->sk_user_data != st)
     {
