@@ -83,6 +83,7 @@ static struct tbt_frame *tbt_frame_alloc(u16 len, gfp_t gfp)
     fr->pinned = false;
     fr->dup_copy = false;
     fr->retx_copy = false;
+    fr->retx_src = TBT_RETX_NONE;
     fr->path = 0xff;
     fr->avoid_mask = 0;
     fr->ret = NULL;
@@ -542,6 +543,7 @@ static void tbt_tx_path_lost_drain(struct tbt_session *sess,
 static void tbt_tx_retx(struct tbt_session *sess, struct tbt_stream *st)
 {
     struct tbt_retain *cand[8];
+    u8 srcs[ARRAY_SIZE(cand)];
     struct tbt_retain *r, *first = NULL;
     int n = 0, i;
     u64 now = tbt_now_ns();
@@ -582,6 +584,8 @@ static void tbt_tx_retx(struct tbt_session *sess, struct tbt_stream *st)
     spin_lock(&sess->tx_lock);
     list_for_each_entry(r, &st->retain, list)
     {
+        u8 src;
+
         if (r->seq + r->len <= ack)
             continue;
         if (!r->sends)
@@ -611,32 +615,38 @@ static void tbt_tx_retx(struct tbt_session *sess, struct tbt_stream *st)
 
             if (hole_evident)
             {
+                src = TBT_RETX_HOLE;
                 if (r->last_sent_ns && now - r->last_sent_ns < rto)
                     continue;
             }
             else if (!r->retx_now)
-        {
-            u64 done_ns = 0;
-
-            /* Slow path: a record TCP delivered but the parser never saw.
-             * Path progress proves nothing there. Bounded to one copy per
-             * 2xRTO so it cannot become a per-RTO flood. */
-            if (READ_ONCE(st->last_ack_ns) &&
-                tbt_retain_tcp_done(sess, r, now, &done_ns))
             {
-                if (now - done_ns < 2 * rto)
+                u64 done_ns = 0;
+
+                src = TBT_RETX_SLOW;
+                /* Slow path: a record TCP delivered but the parser never saw.
+                 * Path progress proves nothing there. Bounded to one copy per
+                 * 2xRTO so it cannot become a per-RTO flood. */
+                if (READ_ONCE(st->last_ack_ns) &&
+                    tbt_retain_tcp_done(sess, r, now, &done_ns))
+                {
+                    if (now - done_ns < 2 * rto)
+                        continue;
+                }
+                else if (!tbt_retain_paths_stalled(sess, r, now, rto))
+                {
+                    continue;
+                }
+                /* Retransmit copies are inserted at the head, ahead of new
+                 * data. Cap them at half the queue so the frames that carry a
+                 * fresh uack always have room; a dead path and the hole above
+                 * are exempt because they are the only ways forward. */
+                if (READ_ONCE(sess->tx_queued) + r->len > TBT_TXQ_HARD_MAX / 2)
                     continue;
             }
-            else if (!tbt_retain_paths_stalled(sess, r, now, rto))
+            else
             {
-                continue;
-            }
-            /* Retransmit copies are inserted at the head, ahead of new data.
-             * Cap them at half the queue so the frames that carry a fresh
-             * uack always have room; a dead path and the hole above are
-             * exempt because they are the only ways forward. */
-            if (READ_ONCE(sess->tx_queued) + r->len > TBT_TXQ_HARD_MAX / 2)
-                continue;
+                src = TBT_RETX_PATHLOSS;
             }
         }
         if (!first)
@@ -694,6 +704,7 @@ static void tbt_tx_retx(struct tbt_session *sess, struct tbt_stream *st)
 retx_queued:
             r->last_sent_ns = now;
             r->pending = true;
+            srcs[n] = src;
             cand[n++] = r;
         }
         if (n == ARRAY_SIZE(cand))
@@ -737,6 +748,7 @@ retx_queued:
         fr->avoid_mask = r->path_mask;
         fr->ret = r;
         fr->st = st;
+        fr->retx_src = srcs[i];
         refcount_inc(&st->refs);
         memcpy(fr->data, r->data, r->len);
         /* Head insertion is what lets a hole filler overtake window-blocked
@@ -931,6 +943,7 @@ static void tbt_tx_inject_locked(struct tbt_session *sess, struct tbt_stream *st
         fr->avoid_mask = r->path_mask;
         fr->ret = r;
         fr->st = st;
+        fr->retx_src = TBT_RETX_HOLE; /* a declared-hole filler */
         refcount_inc(&st->refs);
         memcpy(fr->data, r->data, r->len);
         list_add(&fr->list, &sess->tx_q);
@@ -1891,6 +1904,9 @@ drop:
                 if (r)
                 {
                     spin_lock(&sess->tx_lock);
+                    /* Every DATA record the carrier accepted, copies
+                     * included: the honest retransmit denominator. */
+                    sess->data_tx++;
                     r->path_mask |= BIT(c->index);
                     r->reserve_mask &= ~BIT(c->index);
                     r->path_gen[c->index] = c->gen & 0xf;
@@ -1909,6 +1925,22 @@ drop:
                     {
                         sess->retx_frames++;
                         sess->retx_bytes += fr->len;
+                        c->retx_data++;
+                        switch (fr->retx_src)
+                        {
+                        case TBT_RETX_HOLE:
+                            sess->retx_hole++;
+                            break;
+                        case TBT_RETX_SLOW:
+                            sess->retx_slow++;
+                            break;
+                        case TBT_RETX_PATHLOSS:
+                            sess->retx_pathloss++;
+                            break;
+                        default:
+                            sess->retx_other++;
+                            break;
+                        }
                         if (r->last_path < sess->n_car)
                         {
                             struct tbt_carrier *pc = READ_ONCE(sess->car[r->last_path]);

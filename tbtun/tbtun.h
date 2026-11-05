@@ -187,6 +187,16 @@ void tbt_listen_stop(struct tbt_tunnel *t);
 #define TBT_MAX_SPEC_BYTES 32768u /* per-path speculative placeholder cap */
 #define TBT_PREDICT_MIN_NS (10ull * 1000 * 1000)
 
+/* Why a timer or injection copy exists. Stamped when the copy is queued and
+ * counted when the carrier accepts the write, so retx_ppm can name its own
+ * numerator instead of guessing after the fact. */
+enum tbt_retx_src {
+    TBT_RETX_NONE = 0,
+    TBT_RETX_HOLE,     /* frame at the ack, stalled >= 2 x RTO */
+    TBT_RETX_SLOW,     /* TCP delivered it, uack has not covered it */
+    TBT_RETX_PATHLOSS, /* carrier_lost marked it retx_now */
+};
+
 struct tbt_frame
 {
     struct list_head list;
@@ -197,6 +207,7 @@ struct tbt_frame
     bool pinned;         /* path is fixed: HELLO/OPEN/FIN/RST copies */
     bool dup_copy;       /* a duplicate copy (LOW_PRIO on the wire) */
     bool retx_copy;      /* a timer/injection copy: counted when written */
+    u8 retx_src;         /* enum tbt_retx_src: which branch queued it */
     bool dropped;        /* drop_ppm discarded it: a real hole, not a queue */
     u8 path;             /* pinned path, or 0xff until the pump picks one */
     u32 gen;             /* pinned frames: carrier generation they belong to */
@@ -483,6 +494,8 @@ struct tbt_session
     u64 session_join_dup, session_join_bad, join_nonce_reject;
     u64 fbk_tx, fbk_rx;
     u64 retx_frames, retx_bytes;
+    u64 retx_hole, retx_slow, retx_pathloss, retx_other; /* by source */
+    u64 data_tx;         /* DATA records written, copies included */
     u64 inject_skip;     /* hole fillers refused by the send-queue bound */
     u64 retx_queued;     /* copies enqueued, written or dropped by the pump */
     u32 fb_delay_us;     /* EWMA: app-ack lag after the carrier TCP ack */
@@ -554,6 +567,7 @@ struct tbt_carrier
     u64 uack;                     /* peer's per-path high-water, this path */
     u64 uack_ns;                  /* when that value was last published */
     u64 data_frames;              /* DATA records written on this path */
+    u64 retx_data;                /* DATA copies written on this path */
     s32 loss_ppm;                 /* confirmed record loss / records acked */
     u64 payload_bytes_sent;       /* DATA+PREDICT payload bytes written here */
     u32 rtt_us;                   /* EWMA RTT */

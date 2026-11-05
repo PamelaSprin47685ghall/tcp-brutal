@@ -689,6 +689,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                 unsigned int up = 0, n = s->n_car;
                 u32 max_depth = 0, ooo_bytes = 0, retain_bytes = 0;
                 u32 ooo_frames = 0, max_stall_us = 0;
+                u64 rt_copies, rt_data, rt_unique, app_bytes, dup_copies;
+                u64 retx_data_ppm, dup_bytes_ppm;
                 int k;
 
                 for (k = 0; k < s->n_car; k++)
@@ -716,11 +718,33 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                     }
                 }
                 rcu_read_unlock();
+                /* Honest retransmit rates. The numerator is copies the
+                 * carrier accepted; the denominator is unique DATA records
+                 * (all DATA writes minus those copies), so FBK, PAD and HELLO
+                 * can no longer dilute the ratio. dup_bytes_ppm is the copy
+                 * payload over application bytes, the wire cost that the
+                 * receiver pays. */
+                rt_copies = READ_ONCE(s->retx_frames);
+                rt_data = READ_ONCE(s->data_tx);
+                /* Duplication-tunnel copies are unique-by-design work, not
+                 * retransmits: subtract them too or the ratio understates. */
+                dup_copies = READ_ONCE(s->dup_tx);
+                rt_unique = rt_data > rt_copies + dup_copies ?
+                    rt_data - rt_copies - dup_copies : 0;
+                app_bytes = READ_ONCE(s->tx_submit_bytes);
+                retx_data_ppm = rt_unique ?
+                    min_t(u64, rt_copies * 1000000 / rt_unique, 1000000) : 0;
+                dup_bytes_ppm = app_bytes ?
+                    min_t(u64, READ_ONCE(s->retx_bytes) * 1000000 / app_bytes,
+                          1000000) : 0;
                 seq_printf(m, "tunnel %llu c3 n=%u up=%u lost=%llu replaced=%llu "
                               "spare_activated=%llu alloc_fail=%llu connect_fail=%llu "
                               "join_dup=%llu join_bad=%llu join_nonce_reject=%llu "
                               "fbk_tx=%llu fbk_rx=%llu "
                               "retx_frames=%llu retx_bytes=%llu retain_drop=%llu "
+                              "retx_hole=%llu retx_slow=%llu retx_pathloss=%llu "
+                              "retx_other=%llu data_tx=%llu retx_data_ppm=%llu "
+                              "dup_bytes_ppm=%llu "
                               "reorder_overflow=%llu reorder_max_depth=%u ooo_bytes=%u "
                               "ooo_frames=%u retain_bytes=%u tx_ack=%llu rx_ack=%llu "
                               "peer_paused=%u fb_delay_us=%u rto_us=%u una_stall_us=%u\n",
@@ -729,6 +753,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            s->session_join_dup, s->session_join_bad,
                            s->join_nonce_reject, s->fbk_tx,
                            s->fbk_rx, s->retx_frames, s->retx_bytes, s->retain_drop,
+                           s->retx_hole, s->retx_slow, s->retx_pathloss,
+                           s->retx_other, s->data_tx, retx_data_ppm,
+                           dup_bytes_ppm,
                            s->rx_reorder_overflow, max_depth, ooo_bytes, ooo_frames,
                            retain_bytes, READ_ONCE(s->tx_ack), READ_ONCE(s->rx_ack),
                            READ_ONCE(s->peer_paused), READ_ONCE(s->fb_delay_us),

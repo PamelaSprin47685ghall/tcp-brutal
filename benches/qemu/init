@@ -453,7 +453,15 @@ xfer()
     grep -q 'strict phase passed' /tmp/burst.log && X_STRICT=1
     [ "$X_RC" -eq 0 ] || bench_note "row=$_row: tbt_burst rc=$X_RC $(tail -n 2 /tmp/burst.log | tr '\n' ' ')"
 
-    X_RETX=$(peer_retx_max 2)
+    # Honest retransmit rate: DATA copies / unique DATA records, session-wide.
+    # peer_retx_max is the old per-carrier ratio over every record (FBK
+    # included); it stays available for the latency notes.
+    X_RETX=$(tunnel_stat 2 retx_data_ppm)
+    X_RH=$(tunnel_stat 2 retx_hole)
+    X_RS=$(tunnel_stat 2 retx_slow)
+    X_RP=$(tunnel_stat 2 retx_pathloss)
+    X_RDP=$(tunnel_stat 2 dup_bytes_ppm)
+    : "${X_RETX:=0}" "${X_RH:=0}" "${X_RS:=0}" "${X_RP:=0}" "${X_RDP:=0}"
     X_DUP=$(tunnel_stat 2 dup_tx)
     X_INFL=$(tunnel_stat 2 inflate_ppm)
     X_HD=$(tunnel_stat 2 holes_declared)
@@ -487,6 +495,8 @@ emit_xfer_row()
         frames="$X_FRAMES" frames_s="$X_WPS" \
         cpu_sys_pct="$X_CSYS" cpu_softirq_pct="$X_CSOFT" cpu_total_pct="$X_CTOT" \
         kworker_pct="$X_KW" retx_ppm="$X_RETX" dup_tx="$X_DUP" inflate_ppm="$X_INFL" \
+        retx_hole="$X_RH" retx_slow="$X_RS" retx_pathloss="$X_RP" \
+        dup_bytes_ppm="$X_RDP" \
         fb_delay_us="$(tunnel_stat 2 fb_delay_us)" rto_us="$(tunnel_stat 2 rto_us)" \
         fbk_tx="$(tunnel_stat 2 fbk_tx)" \
         holes_declared="$X_HD" holes_repaired="$X_HR" holes_unrecoverable="$X_HU" \
