@@ -627,7 +627,7 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 | 通过 | TC1 + 256-bit KAT 逐字节；body-only（HTTP 头/FEC 头明文）；默认开、`crypto=off` 可关；HND0 MB/s/cycles/byte 记录；1G 单核占用 ≤25% |
 | 失败 | KAT 不符、头被加密、无法关闭、CPU 超预算 |
 
-**T3 现状（未完成）**：C `w-crypto b16af3b`，KAT 40/40，`make check`/`host-test-san` 绿；**per-direction nonce 未实现**，C 正在按 §2.3/§2.4 补（各自 HELLO +26、tx/rx ctx、双向 KAT）。等 C 新 head + HND0 优化版 microbench；不合并。
+**T3 现状（未完成）**：C `w-crypto 43bbbff` 已补 per-direction nonce（各自 HELLO +26、tx/rx ctx），KAT 46/46，`make check`/`host-test-san` 绿；HND0 优化版 bench 由 `microbench2` 用 43bbbff 跑。T3 仍等 HND0 bench + rebase；不合并。
 
 ### G4 — T4 SC-LDPC BEC 容量门（D）
 
@@ -638,7 +638,7 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 | 通过 | p=30/40/50 对应 rate ≤0.70/0.60/0.50；恢复 ≥99.9%（500 trials 的 0 失败或置信区间下界达标）；codec ≥125 MB/s（encode/decode，HND0 单/双核）；块延迟/内存记录 |
 | 失败 | recovery 0、systematic-only 作弊、<125 MB/s、无置信区间 |
 
-**G4 现状（`sclc2`，HND0 复测中，2026-11-06）**：SC-IRA 修正后小 N=16/32、L=2/4 bit-exact；容量点 `(0.70,0.30)/(0.60,0.40)/(0.50,0.50)` 有限长 0.999 不成立。D 的 `a694637` 低码率数字是**本地 Ryzen**（doc 自述 HND0 比本机低 6–8×），**不作验收**：本地 p40 rate0.40 block512 L=8/16 = 0.9995/1.0000、decode 7.2/6.9；p50 rate0.30 block256 L=16 = 1.0000、decode 4.4。按 HND0 早先 1.6 MB/s（rate0.5/p30）与本机 11 MB/s 的比例，本地 4.4 → HND0 约 0.6 MB/s，远低于 app 4.2；这只是估算，必须实测。`sclc2` 正在 HND0 跑 p30 rate0.50、p40 rate0.40、p50 rate0.30 block256/L16，并继续 rate0.25/L32/2 线程探索；**不用本地数字宣称 p50 可行**。等 HND0 decode：若 ≥4.2 再谈 margin；若 <4.2，用户在 B（RLNC/grouped 降级）/C（SC-LDPC 硬门阻塞）之间选。**G4 不改，T6 挂起，不合并 SC-LDPC。**
+**G4 现状（`sclc2`，HND0 无可行点，2026-11-06）**：HND0（QEMU 2 vCPU，taskset 0）实测 decode **0.32–1.99 MB/s**，全部低于 app 4.215 MB/s（最好 47%）；2 线程最好 1.96；encode **2.65–9.54**，低于 wire 需求 8.4–14.1。恢复率不是障碍：p30 rate0.50、p40 rate0.40 为 1.0000；p50 rate0.25 block256/L16 为 0.9995、L32 为 1.0000，但 decode 0.43–0.46。本地 Ryzen 是 HND0 的 6–12×，不能当验收；extra_dc 6/8 与 5 相同、3/4 更差，已无旋钮。**HND0 上 SC-LDPC 无可行点，G4 不修订，T6 阻塞；等用户 B（RLNC/grouped 降级）/C（SC-LDPC 硬门阻塞）裁决；不合并。**
 
 ### G5 — T5 HND0 256-flow 中间 FEC + ChaCha8（E）
 
@@ -660,7 +660,7 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 | 通过 | G4 全绿；G5 全绿；app ≥33.72M；无 RLNC/grouped 兜底；服务恢复；最终门 |
 | 失败 | 任何中间码回退、G4 未过、HND0 不达标 |
 
-**T6 状态：挂起。** 等 `sclc2` 的 HND0 p30 rate0.50、p40 rate0.40、p50 rate0.30 block256/L16 decode 数据；G4 不改，不合并 SC-LDPC。
+**T6 状态：阻塞。** HND0 SC-LDPC decode 0.32–1.99 MB/s < app 4.215、encode 2.65–9.54 < wire 8.4–14.1；G4 不修订，等用户 B/C 裁决，不合并 SC-LDPC。
 
 ### G7 — T7 文档/0.0.2/合并 push（F）
 
@@ -708,7 +708,7 @@ trap 'flock -u 9' EXIT
 
 | # | 风险 | 证据/量级 | 处理 |
 |---|---|---|---|
-| R1 | **SC-LDPC 最终门：HND0 复测中** | 容量点 `(0.70,0.30)/(0.60,0.40)/(0.50,0.50)` 有限长 0.999 不成立（cbf4c4f）；D a694637 低码率数字是本地 Ryzen，不作验收；HND0 早先 decode 1.6 MB/s < app 4.2；按 1.6/11 比例本地 p50 4.4 → HND0 约 0.6；sclc2 在 HND0 跑 p30/0.50、p40/0.40、p50/0.30 block256/L16 + rate0.25/L32/2 线程 | 等 HND0 decode；若 <4.2 用户在 B/C 之间选；G4 不改；T6 挂起；不合并 SC-LDPC；不静默降级 |
+| R1 | **SC-LDPC 最终门：HND0 无可行点** | HND0 decode 0.32–1.99 MB/s < app 4.215；2 线程 1.96；encode 2.65–9.54 < wire 8.4–14.1；恢复率可 0.9995–1.0（p50 rate0.25），但 CPU 不过；本地 Ryzen 6–12× 不作验收；extra_dc 无改善 | G4 不修订；T6 阻塞；用户 B/C 裁决；不合并 SC-LDPC；不静默降级 |
 | R2 | **app ≥33.72M 依赖 256-flow 聚合** | 33.72M 是直连 P8 单流；FEC 后 app = 聚合 × 码率；若路径本身只有 ~34M，FEC 开销可能达不到 | 先测 256-flow 聚合 > 33.72/码率；记录 p；不静默改目标；达不到按 blocker 规则停问 |
 | R3 | **HND0 2 vCPU/955 MiB** | TCP/HTTP 22–31% 单核；256 flows 的 softirq/slab/端口；FEC grouped 0.75–1.5 GB/s（5–12× headroom） | session poll 合并；每 carrier `w_tx`；RPS/RFS 不可用（只有 2 vCPU），靠预算与实测；`max_tunnels=1`；64 MiB socket 缓冲 |
 | R4 | **v6 回归** | 旧 conv 0x0005/16 槽仍在；`TBT_MAX_CARRIERS_LIMIT` 改 256 容易把旧 mask 截断 | `TBT_LEGACY_MAX_CARRIERS=16` 分离；`fec=off` 默认；A–K/adversarial 每步回归；`n+m>16` 旧路径拒绝 |
