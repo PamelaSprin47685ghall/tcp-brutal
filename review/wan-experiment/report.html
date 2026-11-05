@@ -1,0 +1,1075 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>tbtun 真实 WAN 实验报告 · JYSZ → HND0 · 2026-11-06</title>
+<style>
+  :root {
+    --bg: #f4f1ea;
+    --paper: #fffdf8;
+    --ink: #1b1e21;
+    --muted: #5c646c;
+    --rule: #dcd6ca;
+    --rule-soft: #e9e3d7;
+    --accent: #0d5c4d;
+    --accent-soft: #e6f0ec;
+    --direct: #2f6f8f;
+    --tunnel: #b4652f;
+    --wire: #8a7a4e;
+    --code-bg: #efeae0;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.75;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .wrap {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 52px 30px 76px;
+  }
+
+  .masthead {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 22px;
+    margin-bottom: 30px;
+  }
+
+  .eyebrow {
+    margin: 0 0 8px;
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+  }
+
+  h1 {
+    margin: 0 0 10px;
+    font-size: 38px;
+    line-height: 1.25;
+    letter-spacing: 0.01em;
+    font-weight: 750;
+  }
+
+  .subtitle {
+    margin: 0 0 6px;
+    color: var(--muted);
+    font-size: 17px;
+  }
+
+  .meta {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13.5px;
+  }
+
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 0.92em;
+    background: var(--code-bg);
+    padding: 0.12em 0.36em;
+    border-radius: 3px;
+  }
+
+  .verdict {
+    background: var(--accent-soft);
+    border: 1px solid #bcd3ca;
+    border-left: 7px solid var(--accent);
+    border-radius: 5px;
+    padding: 24px 28px;
+    margin: 0 0 36px;
+  }
+
+  .verdict-kicker {
+    color: var(--accent);
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    margin-bottom: 8px;
+  }
+
+  .verdict p {
+    margin: 0;
+    font-size: 19.5px;
+    line-height: 1.7;
+    font-weight: 500;
+  }
+
+  .verdict strong {
+    color: #08463b;
+    font-weight: 750;
+  }
+
+  section { margin: 0 0 46px; }
+
+  h2 {
+    font-size: 25px;
+    line-height: 1.35;
+    margin: 0 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--rule);
+    font-weight: 700;
+  }
+
+  h3 {
+    font-size: 18px;
+    line-height: 1.45;
+    margin: 28px 0 8px;
+    font-weight: 700;
+  }
+
+  p { margin: 0 0 14px; }
+
+  .lede {
+    color: #30363b;
+    font-size: 16.5px;
+  }
+
+  .note {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    padding: 18px 24px;
+  }
+
+  .note ol, .note ul {
+    margin: 0;
+    padding-left: 1.35em;
+  }
+
+  .note li { margin: 7px 0; }
+
+  .callout {
+    background: #fbf6ea;
+    border: 1px solid #e3d5b6;
+    border-left: 5px solid #a9812f;
+    border-radius: 4px;
+    padding: 16px 22px;
+    margin: 20px 0;
+  }
+
+  .callout p:last-child { margin-bottom: 0; }
+
+  .fig-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+    gap: 13px;
+    margin: 18px 0 8px;
+  }
+
+  .fig {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-top: 4px solid var(--accent);
+    border-radius: 4px;
+    padding: 15px 16px 13px;
+  }
+
+  .fig.direct { border-top-color: var(--direct); }
+  .fig.tunnel { border-top-color: var(--tunnel); }
+  .fig.wire { border-top-color: var(--wire); }
+
+  .fig-k {
+    color: var(--muted);
+    font-size: 12.5px;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    margin-bottom: 2px;
+  }
+
+  .fig-v {
+    font-size: 29px;
+    line-height: 1.2;
+    font-weight: 750;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  .fig-u {
+    color: var(--muted);
+    font-size: 12.5px;
+    margin-top: 2px;
+  }
+
+  .topo {
+    background: #23282b;
+    color: #e9e5da;
+    border-radius: 5px;
+    padding: 20px 22px;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 13px;
+    line-height: 1.65;
+    margin: 0 0 18px;
+    white-space: pre;
+  }
+
+  pre {
+    background: #23282b;
+    color: #e9e5da;
+    border-radius: 5px;
+    padding: 14px 18px;
+    overflow-x: auto;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 13.5px;
+    line-height: 1.6;
+    white-space: pre;
+  }
+
+  pre code {
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    font-size: inherit;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    margin: 16px 0 10px;
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    background: var(--paper);
+  }
+
+  table {
+    width: 100%;
+    min-width: 640px;
+    border-collapse: collapse;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+
+  caption {
+    caption-side: top;
+    text-align: left;
+    color: var(--muted);
+    font-size: 13px;
+    padding: 10px 14px 8px;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+
+  th, td {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+    text-align: left;
+  }
+
+  thead th {
+    background: #ece7dc;
+    color: #2a2f33;
+    font-weight: 700;
+    white-space: nowrap;
+    border-bottom: 1px solid #cfc7b7;
+  }
+
+  tbody tr:nth-child(even) { background: #faf7f0; }
+  tbody tr:last-child td { border-bottom: 0; }
+
+  td.n, th.n {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .tag {
+    display: inline-block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 12.5px;
+    background: #e8e2d6;
+    border-radius: 3px;
+    padding: 0.08em 0.42em;
+    white-space: nowrap;
+  }
+
+  .footnote {
+    color: var(--muted);
+    font-size: 13.5px;
+    line-height: 1.65;
+  }
+
+  .chart {
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 5px;
+    padding: 22px 24px 18px;
+    margin: 18px 0 22px;
+  }
+
+  .chart-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 0 0 2px;
+  }
+
+  .chart-sub {
+    color: var(--muted);
+    font-size: 12.5px;
+    margin: 0 0 16px;
+  }
+
+  .bar-row {
+    display: grid;
+    grid-template-columns: 10.5em minmax(0, 1fr) 4.2em;
+    gap: 12px;
+    align-items: center;
+    margin: 9px 0;
+  }
+
+  .bar-label {
+    font-size: 13.5px;
+    line-height: 1.35;
+    color: #2b3034;
+  }
+
+  .bar-label small {
+    display: block;
+    color: var(--muted);
+    font-size: 11.5px;
+  }
+
+  .bar-track {
+    position: relative;
+    height: 18px;
+    background: #ece8de;
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .bar {
+    height: 100%;
+    background: var(--direct);
+    border-radius: 2px 0 0 2px;
+  }
+
+  .bar.tunnel { background: var(--tunnel); }
+  .bar.receiver { background: var(--direct); }
+  .bar.wire { background: var(--wire); }
+
+  .bar-num {
+    font-size: 13.5px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 20px;
+    margin: 14px 0 0;
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+
+  .swatch {
+    display: inline-block;
+    width: 11px;
+    height: 11px;
+    border-radius: 2px;
+    margin-right: 6px;
+    vertical-align: -1px;
+  }
+
+  .dual-row {
+    display: grid;
+    grid-template-columns: 12.5em minmax(0, 1fr);
+    gap: 16px;
+    padding: 9px 0;
+    border-top: 1px dashed var(--rule);
+  }
+
+  .dual-row:first-child { border-top: 0; }
+
+  .dual-label {
+    font-size: 13.5px;
+    font-weight: 650;
+    line-height: 1.5;
+  }
+
+  .dual-label small {
+    display: block;
+    color: var(--muted);
+    font-weight: 400;
+    font-size: 11.5px;
+  }
+
+  .mini-row {
+    display: grid;
+    grid-template-columns: 4.4em minmax(0, 1fr) 3.7em;
+    gap: 8px;
+    align-items: center;
+    margin: 4px 0;
+  }
+
+  .mini-tag {
+    color: var(--muted);
+    font-size: 11.5px;
+    text-align: right;
+  }
+
+  .mini-row .bar-track { height: 12px; }
+
+  .mini-num {
+    font-size: 12.5px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .ref {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: #5f574a;
+    opacity: 0.45;
+  }
+
+  .formula {
+    background: #f1ede4;
+    border-left: 4px solid var(--accent);
+    border-radius: 3px;
+    padding: 14px 20px;
+    margin: 12px 0 16px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 14px;
+    line-height: 1.9;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .formula .hl { color: #8a3f12; font-weight: 700; }
+
+  .why h3 {
+    padding-left: 12px;
+    border-left: 4px solid var(--accent);
+  }
+
+  .why p { margin-bottom: 10px; }
+
+  .why ul {
+    margin: 6px 0 14px;
+    padding-left: 1.4em;
+  }
+
+  .why li { margin: 4px 0; }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 26px;
+  }
+
+  .two-col h2 { font-size: 22px; }
+
+  .two-col ol {
+    margin: 0;
+    padding-left: 1.35em;
+  }
+
+  .two-col li { margin: 9px 0; }
+
+  .evidence {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-top: 1px solid var(--rule);
+  }
+
+  .evidence li {
+    padding: 11px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    font-size: 14.5px;
+  }
+
+  .evidence a {
+    color: #0b5a7a;
+    text-decoration: none;
+    border-bottom: 1px solid #a9c4d0;
+  }
+
+  .evidence a:hover { border-bottom-color: #0b5a7a; }
+
+  .evidence .desc {
+    color: var(--muted);
+    margin-left: 10px;
+    font-size: 13.5px;
+  }
+
+  footer {
+    border-top: 2px solid var(--ink);
+    margin-top: 54px;
+    padding-top: 18px;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.7;
+  }
+
+  footer p { margin: 0 0 6px; }
+
+  @media (max-width: 720px) {
+    .wrap { padding: 30px 16px 52px; }
+    h1 { font-size: 29px; }
+    h2 { font-size: 22px; }
+    .verdict { padding: 18px 18px; }
+    .verdict p { font-size: 17px; }
+    .bar-row { grid-template-columns: 7.6em minmax(0, 1fr) 3.6em; gap: 8px; }
+    .bar-label { font-size: 12px; }
+    .dual-row { grid-template-columns: 1fr; gap: 4px; }
+    .two-col { grid-template-columns: 1fr; gap: 8px; }
+    .topo { font-size: 11.5px; padding: 15px 14px; }
+    table { font-size: 13px; }
+    th, td { padding: 8px 9px; }
+  }
+
+  @media print {
+    @page { size: A4; margin: 15mm; }
+    body { background: #fff; font-size: 10.5pt; }
+    .wrap { max-width: none; padding: 0; }
+    pre, .topo {
+      background: #fff !important;
+      color: #111 !important;
+      border: 1px solid #b9b2a5;
+    }
+    .two-col { grid-template-columns: 1fr; gap: 6px; }
+    .verdict, .fig, .chart, .note, .callout, .table-wrap, .formula {
+      break-inside: avoid;
+      box-shadow: none;
+    }
+    section { margin-bottom: 28px; }
+    h2, h3 { break-after: avoid; }
+    thead { display: table-header-group; }
+    tr { break-inside: avoid; }
+    a { color: inherit; text-decoration: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">JYSZ → HND0 · 真实 WAN 链路</p>
+  <h1>tbtun 真实 WAN 实验报告</h1>
+  <p class="subtitle">2026-11-06 · RTT 约 218 ms · 单条 iperf3 流 · iperf3 3.20</p>
+  <p class="meta">仓库 <code>tcp-brutal</code> · 实验时 HEAD <code>8d676dd</code> · 报告生成时 HEAD <code>6c58fca</code></p>
+</header>
+
+<section class="verdict" aria-label="一句话结论">
+  <div class="verdict-kicker">一句话结论</div>
+  <p>在约 218 ms RTT 的真实链路上，tbtun 单流接收吞吐只有 <strong>3.14–4.55 Mbit/s</strong>，是直连单流 <strong>17.08 Mbit/s</strong> 的 <strong>18–27%</strong>。直接瓶颈是 raw 配置约 <strong>120–131 KB</strong> 的隧道 in-flight 窗口和 raw 载体每轮 lost/rebuild，不是“ISP 五元组限速”的验证成功。</p>
+</section>
+
+<section id="howto">
+  <h2>怎么读这份报告</h2>
+  <div class="note">
+    <ol>
+      <li><strong>receiver 一律取 HND0 服务端。</strong>直连与隧道都用 iperf3 server 日志里的 bytes / duration；不取客户端 JSON。两端在同一台 far 主机、同一条路径、同一个 NAT 源地址上测量。</li>
+      <li><strong>P1/P4/P8 与 n 不是一回事。</strong>直连的 P1/P4/P8 是 iperf3 的 1/4/8 条<em>并行应用流</em>；tbtun 矩阵始终是 <code>-P 1</code>，配置里的 n 是<em>隧道载体数</em>，不是并行流。n=8 不能和直连 P8 直接等同；能直接对齐的是 n=1 与直连 P1。</li>
+      <li><strong>矩阵每格只有 2 次、每次 15 s。</strong>直连基线每次 10 s、每档 2 次。样本少，先看量级和方向，不要把小差别当成稳定差异。</li>
+      <li><strong>百分比默认以直连 P1 为分母。</strong>表里另给 P4/P8 参考列；P4/P8 是并行流的天花板，不是 tbtun 的同条件对照。</li>
+      <li><strong>只引用 <code>baseline-direct/</code>。</strong><code>baseline/</code> 是走 mihomo 的 proxy-path 结果，sender 被代理缓冲夸大、RTT 只反映本地 TUN，已标注无效，不要引用其吞吐。</li>
+    </ol>
+  </div>
+</section>
+
+<section id="figures">
+  <h2>关键数字</h2>
+  <div class="fig-grid">
+    <div class="fig direct">
+      <div class="fig-k">直连 P1</div>
+      <div class="fig-v">17.08</div>
+      <div class="fig-u">Mbit/s · 单流 receiver</div>
+    </div>
+    <div class="fig direct">
+      <div class="fig-k">直连 P4</div>
+      <div class="fig-v">30.03</div>
+      <div class="fig-u">Mbit/s · 4 条并行流</div>
+    </div>
+    <div class="fig direct">
+      <div class="fig-k">直连 P8</div>
+      <div class="fig-v">33.72</div>
+      <div class="fig-u">Mbit/s · 8 条并行流</div>
+    </div>
+    <div class="fig tunnel">
+      <div class="fig-k">tbtun 最好</div>
+      <div class="fig-v">4.55</div>
+      <div class="fig-u">Mbit/s · 配置均值 · c5，dup=1</div>
+    </div>
+    <div class="fig tunnel">
+      <div class="fig-k">tbtun 最差</div>
+      <div class="fig-v">3.14</div>
+      <div class="fig-u">Mbit/s · 配置均值 · c4，http-kal</div>
+    </div>
+    <div class="fig">
+      <div class="fig-k">路径 RTT</div>
+      <div class="fig-v">217.9</div>
+      <div class="fig-u">ms 平均 · 0% 丢包</div>
+    </div>
+    <div class="fig wire">
+      <div class="fig-k">raw 窗口</div>
+      <div class="fig-v">120–131</div>
+      <div class="fig-u">KB · n=1/4/8 不随 n 增长</div>
+    </div>
+    <div class="fig wire">
+      <div class="fig-k">直连 BDP</div>
+      <div class="fig-v">~465</div>
+      <div class="fig-u">KB · 218 ms × 17.08 Mbit/s</div>
+    </div>
+  </div>
+  <p class="footnote">直连 P1/P4/P8 为两次运行的 receiver 均值；tbtun 为对应配置两次运行的均值。RTT 来自 <code>ping -c 20</code>：min/avg/max/mdev = 185.5/217.9/256.2/18.0 ms，20/20 收到。</p>
+</section>
+
+<section id="env">
+  <h2>实验环境与路径</h2>
+  <pre class="topo">JYSZ (near)                              HND0 (far)
+wlp4s0 192.168.123.69                    eth0 45.11.1.62
+  │  NAT 171.120.34.226                    │
+  └──────────── WAN ~218 ms ───────────────┘
+  tbtun near 127.0.0.1:9001  ────────►  tbtun far 0.0.0.0:9000
+                                             │
+                                             └─► iperf3 -s 127.0.0.1:5201</pre>
+
+  <div class="table-wrap">
+    <table>
+      <caption>两端主机与模块</caption>
+      <thead>
+        <tr>
+          <th>角色</th>
+          <th>主机</th>
+          <th>地址</th>
+          <th>内核</th>
+          <th>tbtun</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>near</td>
+          <td>JYSZ</td>
+          <td><code>192.168.123.69</code>（wlp4s0），NAT <code>171.120.34.226</code></td>
+          <td><code>7.2.9-1-MANJARO</code> x86_64</td>
+          <td><code>0.0.1</code>，sha256 <code>0b8f0006…</code></td>
+        </tr>
+        <tr>
+          <td>far</td>
+          <td>HND0</td>
+          <td><code>45.11.1.62</code>（eth0）</td>
+          <td><code>7.0.0-42-generic</code> x86_64</td>
+          <td><code>0.0.1</code>，sha256 <code>85426787…</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <p><strong>mihomo 绕行。</strong>默认 <code>ip route get 45.11.1.62</code> 命中本地 mihomo TUN（<code>198.18.0.2</code>），TCP 会终止在本地，不能作为 WAN 基线。实验期间临时加规则：</p>
+    <pre><code>ip rule add to 45.11.1.62/32 lookup main pref 100</code></pre>
+    <p>验证后 <code>ip route get</code> 走 <code>wlp4s0</code>，出口地址为 <code>171.120.34.226</code>；HND0 看到的载体源地址是 <code>171.120.34.226:&lt;port&gt;</code>，从未出现 <code>198.18.x.x</code>。实验结束后已删除该规则，当前 <code>ip rule</code> 无 pref 100，路由回到 Meta。</p>
+  </div>
+
+  <p class="footnote">构建两端都有 <code>-Wframe-larger-than=1024</code> 警告（<code>tbt_procfs</code>/<code>tbt_carrier</code>/<code>tbt_tx</code>），无错误；HND0 缺 <code>vmlinux</code>，构建时跳过 BTF。完整命令见 <code>deploy/commands.md</code>。</p>
+</section>
+
+<section id="baseline">
+  <h2>直连基线（绕过 mihomo）</h2>
+  <p class="lede">方法：<code>iperf3 -c 45.11.1.62 -p 10000 -t 10 -P {1,4,8} --json</code>，每档 2 次。receiver 取 HND0 server 日志，与 client JSON 的 <code>end.sum_received</code> 一致；retransmits 为各流之和。直连也有大量重传，不是干净链路。</p>
+
+  <figure class="chart">
+    <p class="chart-title">图 1 · 直连与 tbtun 的 receiver 吞吐对比</p>
+    <p class="chart-sub">Mbit/s，越高越好；直连为 1/4/8 条并行应用流，tbtun 为单条 iperf3 流、n 个隧道载体。横轴统一到 35 Mbit/s。</p>
+
+    <div class="bar-row">
+      <div class="bar-label">直连 P8<small>8 条并行流</small></div>
+      <div class="bar-track"><div class="bar" style="width:96.35%"></div></div>
+      <div class="bar-num">33.72</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">直连 P4<small>4 条并行流</small></div>
+      <div class="bar-track"><div class="bar" style="width:85.80%"></div></div>
+      <div class="bar-num">30.03</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">直连 P1<small>1 条流</small></div>
+      <div class="bar-track"><div class="bar" style="width:48.81%"></div></div>
+      <div class="bar-num">17.08</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">tbtun c5<small>raw n=4 dup=1</small></div>
+      <div class="bar-track"><div class="bar tunnel" style="width:13.01%"></div></div>
+      <div class="bar-num">4.55</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">tbtun c3<small>raw n=8</small></div>
+      <div class="bar-track"><div class="bar tunnel" style="width:11.90%"></div></div>
+      <div class="bar-num">4.16</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">tbtun c1<small>raw n=1</small></div>
+      <div class="bar-track"><div class="bar tunnel" style="width:10.82%"></div></div>
+      <div class="bar-num">3.79</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">tbtun c2<small>raw n=4</small></div>
+      <div class="bar-track"><div class="bar tunnel" style="width:10.43%"></div></div>
+      <div class="bar-num">3.65</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">tbtun c4<small>http-kal n=4</small></div>
+      <div class="bar-track"><div class="bar tunnel" style="width:8.96%"></div></div>
+      <div class="bar-num">3.14</div>
+    </div>
+
+    <div class="legend">
+      <span><span class="swatch" style="background:#2f6f8f"></span>直连 TCP</span>
+      <span><span class="swatch" style="background:#b4652f"></span>tbtun 隧道</span>
+    </div>
+  </figure>
+
+  <div class="table-wrap">
+    <table>
+      <caption>直连基线逐次结果（10 s，2 次；receiver 取 HND0 服务端）</caption>
+      <thead>
+        <tr>
+          <th>并行流</th>
+          <th class="n">receiver Mbit/s<br>r1 / r2 / 均值</th>
+          <th class="n">sender Mbit/s<br>r1 / r2 / 均值</th>
+          <th class="n">retransmits<br>r1 / r2 / 均值</th>
+          <th class="n">iperf 流 RTT ms<br>r1 / r2</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>P1</strong></td>
+          <td class="n">14.390 / 19.779 / <strong>17.084</strong></td>
+          <td class="n">17.825 / 23.171 / <strong>20.498</strong></td>
+          <td class="n">691 / 1,252 / <strong>972</strong></td>
+          <td class="n">260.7 / 284.2</td>
+        </tr>
+        <tr>
+          <td><strong>P4</strong></td>
+          <td class="n">27.717 / 32.344 / <strong>30.031</strong></td>
+          <td class="n">38.270 / 45.922 / <strong>42.096</strong></td>
+          <td class="n">12,677 / 13,602 / <strong>13,140</strong></td>
+          <td class="n">269.4 / 247.1</td>
+        </tr>
+        <tr>
+          <td><strong>P8</strong></td>
+          <td class="n">32.817 / 34.626 / <strong>33.722</strong></td>
+          <td class="n">56.614 / 57.033 / <strong>56.824</strong></td>
+          <td class="n">18,287 / 13,063 / <strong>15,675</strong></td>
+          <td class="n">250.4 / 237.6</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="footnote">基线在 near 有外部负载时测得（<code>local_busy_median</code> 28.0–99.8%），仍达到 17–34 Mbit/s；far 侧 load 0.4–0.75，iperf3 进程 CPU 0.08–0.44 s/10 s，不是 far 端瓶颈。直连 P1 的 cwnd 达 1.9–4.7 MB，足以填满约 465 KB 的 BDP。</p>
+</section>
+
+<section id="matrix">
+  <h2>tbtun 矩阵</h2>
+  <p class="lede">5 个配置 × 2 次 × 15 s。每次先两端 <code>del 1</code>，写 far、写 near，等 3 s，回读 canonical config，再跑 <code>iperf3 -c 127.0.0.1 -p 9001 -t 15 -P 1 --json</code>。receiver 取 HND0 server 日志切片；每次独立 portblock。10/10 成功，无 EOF、无 Broken pipe、无重试。</p>
+
+  <p class="footnote">公共参数：<code>keepalive=2000</code> · <code>hole_budget_ms=30000</code> · <code>carrier_stall_ms=15000</code> · <code>replay=8388608</code> · <code>rx_reorder_bytes=262144</code>；far <code>listen=0.0.0.0:9000 target=127.0.0.1:5201</code>；near <code>listen=127.0.0.1:9001 peer=45.11.1.62:9000</code>。</p>
+
+  <figure class="chart">
+    <p class="chart-title">图 2 · tbtun 各配置的 receiver 与 wire/submit</p>
+    <p class="chart-sub">每个配置两根条：receiver 均值（Mbit/s，标尺 0–5）与 wire/submit 均值（倍率，标尺 0–2.2）。两种指标各自独立标尺，只比较同色条之间；wire 条上的细线标记 1.0 与 2.0。</p>
+
+    <div class="dual-row">
+      <div class="dual-label">c1 · raw n=1<small>m=0 dup=0</small></div>
+      <div>
+        <div class="mini-row">
+          <div class="mini-tag">receiver</div>
+          <div class="bar-track"><div class="bar receiver" style="width:75.74%"></div></div>
+          <div class="mini-num">3.79</div>
+        </div>
+        <div class="mini-row">
+          <div class="mini-tag">wire</div>
+          <div class="bar-track"><div class="bar wire" style="width:45.86%"></div><span class="ref" style="left:45.45%"></span><span class="ref" style="left:90.91%"></span></div>
+          <div class="mini-num">1.009</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dual-row">
+      <div class="dual-label">c2 · raw n=4<small>m=1 dup=0</small></div>
+      <div>
+        <div class="mini-row">
+          <div class="mini-tag">receiver</div>
+          <div class="bar-track"><div class="bar receiver" style="width:72.98%"></div></div>
+          <div class="mini-num">3.65</div>
+        </div>
+        <div class="mini-row">
+          <div class="mini-tag">wire</div>
+          <div class="bar-track"><div class="bar wire" style="width:47.25%"></div><span class="ref" style="left:45.45%"></span><span class="ref" style="left:90.91%"></span></div>
+          <div class="mini-num">1.040</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dual-row">
+      <div class="dual-label">c3 · raw n=8<small>m=1 dup=0</small></div>
+      <div>
+        <div class="mini-row">
+          <div class="mini-tag">receiver</div>
+          <div class="bar-track"><div class="bar receiver" style="width:83.28%"></div></div>
+          <div class="mini-num">4.16</div>
+        </div>
+        <div class="mini-row">
+          <div class="mini-tag">wire</div>
+          <div class="bar-track"><div class="bar wire" style="width:49.57%"></div><span class="ref" style="left:45.45%"></span><span class="ref" style="left:90.91%"></span></div>
+          <div class="mini-num">1.091</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dual-row">
+      <div class="dual-label">c4 · http-kal n=4<small>m=1 dup=0</small></div>
+      <div>
+        <div class="mini-row">
+          <div class="mini-tag">receiver</div>
+          <div class="bar-track"><div class="bar receiver" style="width:62.72%"></div></div>
+          <div class="mini-num">3.14</div>
+        </div>
+        <div class="mini-row">
+          <div class="mini-tag">wire</div>
+          <div class="bar-track"><div class="bar wire" style="width:49.32%"></div><span class="ref" style="left:45.45%"></span><span class="ref" style="left:90.91%"></span></div>
+          <div class="mini-num">1.085</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dual-row">
+      <div class="dual-label">c5 · raw n=4<small>m=1 dup=1</small></div>
+      <div>
+        <div class="mini-row">
+          <div class="mini-tag">receiver</div>
+          <div class="bar-track"><div class="bar receiver" style="width:91.08%"></div></div>
+          <div class="mini-num">4.55</div>
+        </div>
+        <div class="mini-row">
+          <div class="mini-tag">wire</div>
+          <div class="bar-track"><div class="bar wire" style="width:91.68%"></div><span class="ref" style="left:45.45%"></span><span class="ref" style="left:90.91%"></span></div>
+          <div class="mini-num">2.017</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <span><span class="swatch" style="background:#2f6f8f"></span>receiver（Mbit/s，0–5）</span>
+      <span><span class="swatch" style="background:#8a7a4e"></span>wire/submit（倍率，0–2.2）</span>
+    </div>
+  </figure>
+
+  <div class="table-wrap">
+    <table>
+      <caption>tbtun 矩阵逐次结果（15 s，每配置 2 次；receiver 取 HND0 服务端）</caption>
+      <thead>
+        <tr>
+          <th>配置</th>
+          <th class="n">receiver Mbit/s<br>r1 / r2（均值）</th>
+          <th class="n">wire/submit<br>r1 / r2</th>
+          <th class="n">retx_ppm<br>r1 / r2</th>
+          <th class="n">lost<br>r1 / r2</th>
+          <th>备注</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="tag">c1</span> raw n=1 m=0 dup=0</td>
+          <td class="n">3.580 / 3.993（<strong>3.787</strong>）</td>
+          <td class="n">1.020 / 0.998</td>
+          <td class="n">2,290 / 1,039</td>
+          <td class="n">1 / 1</td>
+          <td>单载体基线；in-flight 122,880 B</td>
+        </tr>
+        <tr>
+          <td><span class="tag">c2</span> raw n=4 m=1 dup=0</td>
+          <td class="n">3.851 / 3.447（<strong>3.649</strong>）</td>
+          <td class="n">1.038 / 1.041</td>
+          <td class="n">5,828 / 6,161</td>
+          <td class="n">5 / 5</td>
+          <td>far rxq 3.43–3.71 MiB；15 s 未稳态</td>
+        </tr>
+        <tr>
+          <td><span class="tag">c3</span> raw n=8 m=1 dup=0</td>
+          <td class="n">4.266 / 4.062（<strong>4.164</strong>）</td>
+          <td class="n">1.095 / 1.086</td>
+          <td class="n">43,171 / 26,655</td>
+          <td class="n">9 / 9</td>
+          <td>重排与 dup 窗口值升高；n 未带来扩展</td>
+        </tr>
+        <tr>
+          <td><span class="tag">c4</span> http-kal n=4 m=1 dup=0</td>
+          <td class="n">4.006 / 2.265（<strong>3.136</strong>）</td>
+          <td class="n">1.052 / 1.118</td>
+          <td class="n">11,247 / 55,258</td>
+          <td class="n">0 / 0</td>
+          <td>载体最稳，但均值最低；r2 重传高</td>
+        </tr>
+        <tr>
+          <td><span class="tag">c5</span> raw n=4 m=1 dup=1</td>
+          <td class="n">4.068 / 5.040（<strong>4.554</strong>）</td>
+          <td class="n">2.018 / 2.016</td>
+          <td class="n">11,754 / 1,650</td>
+          <td class="n">8 / 7</td>
+          <td>wire 翻倍；near 负载更低，增益不可归因</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>与直连基线的百分比</h3>
+  <div class="table-wrap">
+    <table>
+      <caption>tbtun 配置均值相对直连 receiver 均值的比例（P4/P8 为并行流参考上限，非同条件对照）</caption>
+      <thead>
+        <tr>
+          <th>配置</th>
+          <th class="n">均值 Mbit/s</th>
+          <th class="n">vs P1 17.08</th>
+          <th class="n">vs P4 30.03</th>
+          <th class="n">vs P8 33.72</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>c1 raw n=1 m=0 dup=0</td><td class="n">3.787</td><td class="n">22.2%</td><td class="n">12.6%</td><td class="n">11.2%</td></tr>
+        <tr><td>c2 raw n=4 m=1 dup=0</td><td class="n">3.649</td><td class="n">21.4%</td><td class="n">12.2%</td><td class="n">10.8%</td></tr>
+        <tr><td>c3 raw n=8 m=1 dup=0</td><td class="n">4.164</td><td class="n">24.4%</td><td class="n">13.9%</td><td class="n">12.3%</td></tr>
+        <tr><td>c4 http-kal n=4 m=1 dup=0</td><td class="n">3.136</td><td class="n">18.4%</td><td class="n">10.4%</td><td class="n">9.3%</td></tr>
+        <tr><td>c5 raw n=4 m=1 dup=1</td><td class="n">4.554</td><td class="n">26.7%</td><td class="n">15.2%</td><td class="n">13.5%</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>最好的 c5 也只有直连 P1 的 <strong>26.7%</strong>；c3（n=8）只有直连 P8 的 <strong>12.3%</strong>。全部配置落在直连 P1 的 <strong>18–27%</strong>、P8 的 <strong>9–15%</strong>。n 从 1 到 8 只增加约 10%（3.787 → 4.164），而直连 P1→P8 增加约 97%，这是“n 不扩展”的核心事实。</p>
+
+  <p class="footnote"><code>retx_ppm</code> 与 <code>dup_ppm</code> 是 near 的窗口值，不是累计比例；<code>lost</code> 是 near <code>lost</code> 的增量（载体丢失/替换事件），不是丢数据；<code>holes_unrecoverable</code> 全为 0。near/far busy 是机器级 CPU，不是 tbtun 进程 CPU。</p>
+
+  <h3>in-flight、far rxq 与载体</h3>
+  <div class="table-wrap">
+    <table>
+      <caption>运行结束时的窗口与接收队列快照（near peers / far stats）</caption>
+      <thead>
+        <tr>
+          <th>配置</th>
+          <th class="n">run</th>
+          <th class="n">总 in-flight B</th>
+          <th class="n">far rxq MiB</th>
+          <th class="n">far 接收停顿 ms</th>
+          <th class="n">near win_block</th>
+          <th class="n">spare 激活</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>c1 raw n=1</td><td class="n">1</td><td class="n">122,880</td><td class="n">0.00</td><td class="n">0.0</td><td class="n">1,330</td><td class="n">0</td></tr>
+        <tr><td>c1 raw n=1</td><td class="n">2</td><td class="n">122,880</td><td class="n">0.00</td><td class="n">0.0</td><td class="n">1,227</td><td class="n">0</td></tr>
+        <tr><td>c2 raw n=4</td><td class="n">1</td><td class="n">122,880</td><td class="n">3.43</td><td class="n">322.4</td><td class="n">583</td><td class="n">1</td></tr>
+        <tr><td>c2 raw n=4</td><td class="n">2</td><td class="n">130,807</td><td class="n">3.71</td><td class="n">601.9</td><td class="n">2,016</td><td class="n">0</td></tr>
+        <tr><td>c3 raw n=8</td><td class="n">1</td><td class="n">130,860</td><td class="n">3.27</td><td class="n">263.9</td><td class="n">4,197</td><td class="n">1</td></tr>
+        <tr><td>c3 raw n=8</td><td class="n">2</td><td class="n">131,072</td><td class="n">3.57</td><td class="n">297.2</td><td class="n">0</td><td class="n">0</td></tr>
+        <tr><td>c4 http-kal n=4</td><td class="n">1</td><td class="n">114,688</td><td class="n">0.00</td><td class="n">0.0</td><td class="n">0</td><td class="n">0</td></tr>
+        <tr><td>c4 http-kal n=4</td><td class="n">2</td><td class="n">81,920</td><td class="n">0.00</td><td class="n">0.0</td><td class="n">0</td><td class="n">0</td></tr>
+        <tr><td>c5 raw n=4 dup=1</td><td class="n">1</td><td class="n">189,175</td><td class="n">3.15</td><td class="n">393.7</td><td class="n">2,882</td><td class="n">1</td></tr>
+        <tr><td>c5 raw n=4 dup=1</td><td class="n">2</td><td class="n">139,264</td><td class="n">0.00</td><td class="n">0.0</td><td class="n">2,457</td><td class="n">1</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="footnote">peer 快照的 RTT 跨度为 163–300 ms；raw dup=0 的 n=1/4/8 为 224–300 ms。c4 的 in-flight 更低（81,920–114,688 B），c5 因近端复制升到 139,264–189,175 B；两者都远低于约 465 KB 的直连 BDP。</p>
+</section>
+
+<section id="why" class="why">
+  <h2>为什么慢</h2>
+
+  <h3>1. 窗口 / BDP：120–131 KB 只能支撑约 4 Mbit/s</h3>
+  <div class="formula">BDP   = 带宽 × RTT
+      = 17.08 Mbit/s × 0.218 s ÷ 8 bit/B
+      ≈ <span class="hl">465 kB</span>（454 KiB）
+
+上限  ≈ 窗口 ÷ RTT
+      = 120–131 KB ÷ 0.234–0.300 s
+      ≈ <span class="hl">3.3–4.1 Mbit/s</span>（源报告估算）
+      按 peer 快照 224–300 ms 重算 ≈ 3.3–4.7 Mbit/s</div>
+  <p>实测 3.45–4.27 Mbit/s，落在估算区间内；无论取哪组 RTT，上限都只有个位数 Mbit/s。raw dup=0 的 n=1 和 n=4 都是 <strong>122,880 B</strong>，n=8 也只有 <strong>130,860–131,072 B</strong>：增加载体只是把同一个窗口分给更多载体，并增加重排序工作，不会放大窗口。120–131 KB 只有直连 BDP 的约 <strong>26–28%</strong>。</p>
+  <p>http-kal 的 in-flight 更低（81,920–114,688 B），c5 因 dup=1 升到 139,264–189,175 B，仍不到 BDP 的一半。窗口不随 n 增长，是“n 不扩展”的直接原因，不是载体数不够。</p>
+
+  <h3>2. raw 载体每轮 lost/rebuild</h3>
+  <p>near <code>lost</code> 增量在 r1 为 <strong>1 / 5 / 9 / 8</strong>（c1/c2/c3/c5），r2 为 <strong>1 / 5 / 9 / 7</strong>，对应 <code>replaced</code> 和源端口变化。数据没有不可恢复丢失（<code>holes_unrecoverable=0</code>），但 c2/c3/c5-r1 的 far 接收停顿为 <strong>264–602 ms</strong>；c1 和 c5-r2 的末次采样为 0，说明停顿不是每次重建都必然被采到。</p>
+  <p>工作假设（本矩阵未验证）：raw 载体不发 PAD（<code>pad_tx=0</code>），而 <code>carrier_stall_ms=15000</code> 与 15 s 测试窗口重合，stall 计时可能没有被数据/ACK 重置。矩阵没有改公共参数，因此这仍是待检验的线索。</p>
+
+  <h3>3. http-kal：更稳，但更慢</h3>
+  <p>c4 的 <code>lost=0</code>、<code>rxq=0</code>、far busy 9.5–9.9%，是稳定性最好的配置。但均值 <strong>3.14</strong>，比 raw n=4 的 3.65 低约 <strong>14%</strong>；r2 只有 2.27 Mbit/s，同时 retx 达 55,258 ppm。HTTP 容器确实可见（near <code>http_req=5</code>、far <code>http_resp=5</code>、<code>pad_tx</code>/<code>drip_tx</code> 非零），但这条没有真实 QoS 的路径上没有看到吞吐增益。</p>
+
+  <h3>4. m=1：冗余，不是吞吐</h3>
+  <p>c2-r1、c3-r1、c5-r1/r2 出现 <code>spare_activated=1</code>；spare 也承载流量（near peers <code>tx_bytes</code> 348 KB / 592 KB），不是纯待机。m=1 没有提高吞吐，价值是冗余：raw 每轮丢载体但没有不可恢复 hole。c1（m=0）丢了唯一载体一次也恢复了。</p>
+
+  <h3>5. dup=1：唯一无歧义的效应是 wire 翻倍</h3>
+  <p>c5 的 <code>wire/submit</code> 为 <strong>2.018 / 2.016</strong>，而 c2（dup=0）是 1.038 / 1.041；near <code>dup_bytes</code> 9.28 / 9.75 MB，<code>inflate_ppm</code> 约 1.96e6。receiver 4.07 / 5.04（均值 4.55）高于 c2，但 c5 的 near 负载低得多（10.9/34.5% 对 83.0/53.6%），且 c5-r2 的 <code>rxq=0</code>；c5 的 in-flight 为 139–189 KB。两个样本不足以证明 dup 带来吞吐增益；唯一确定的代价是 wire 翻倍。</p>
+
+  <h3>6. far rxq 积压：接收侧也没有跟上</h3>
+  <p>n≥4 的多数 raw 运行结束时 far <code>rxq</code> 仍有 <strong>3.15–3.71 MiB</strong>，<code>rx_max_stall_us</code> 为 264–602 ms。near 提交 8.84–9.90 MB，far 交付 6.27–7.77 MB（c2/c3/c5-r1）；15 s 内没有到稳态。因此 receiver 数字是下界，不是该配置的稳态上限；有序交付/窗口释放也在拖后腿。</p>
+</section>
+
+<section id="limits">
+  <h2>限制与下一步</h2>
+  <div class="two-col">
+    <div>
+      <h2>限制</h2>
+      <ol>
+        <li><strong>near 并行负载污染。</strong>矩阵期间 near 在跑无关的 <code>cc1plus</code> / <code>test_multistream</code> / <code>test_nv12_pipeline</code>，1 分钟 load 3.5–9.0，机器 busy 10.9–85%。near CPU 列是机器级数据，不能当作 tbtun 开销。直连基线也在类似负载下测，仍达到 17–34 Mbit/s，所以负载不能单独解释约 4 Mbit/s。</li>
+        <li><strong>15 s 窗口，raw n≥4 未稳态。</strong>c2/c3/c5-r1 结束时 far <code>rxq</code> 还有 3.1–3.7 MiB；near 提交 8.84–9.90 MB，far 交付 6.27–7.77 MB（c2/c3/c5-r1）。receiver 是下界。</li>
+        <li><strong>短测试曾 EOF / Broken pipe。</strong>部署阶段的 smoke 短跑出现过；矩阵统一 15 s 后 10/10 成功。不要把 smoke 的短跑数字与矩阵混用。</li>
+        <li><strong>没有做参数扫描。</strong><code>rx_reorder_bytes</code>、<code>carrier_stall_ms</code>、<code>hole_budget_ms</code>、发送窗口/队列上限都没有扫；矩阵只改了 n/m/dup/profile。</li>
+        <li><strong>near iperf3 进程 CPU 未被矩阵采样器捕获。</strong>补充的 c2 15 s 运行测得 0.0% of one core（31 个样本），机器 busy 33.3%，该次 5.38 Mbit/s；far iperf3 为 0.17–0.56%。客户端不是瓶颈。</li>
+        <li><strong>样本少、有混杂。</strong>每个配置只有 2 次；c5 的 near 负载明显低于 c2，且 c5-r2 的 rxq=0，不能把 c5 的高值直接归因于 dup。http-kal 的 far <code>dup_bytes_ppm=1000000</code> 是窗口 stale 值，未用于结论。</li>
+        <li><strong>直连 10 s、矩阵 15 s。</strong>两者都受 near 负载和 WAN 波动影响；RTT 本身在 185–256 ms（ping）和 225–284 ms（iperf 流）之间变化。</li>
+      </ol>
+    </div>
+    <div>
+      <h2>下一步（按优先级）</h2>
+      <ol>
+        <li><strong>把发送窗口/in-flight 与 n、BDP 解耦并放大。</strong>当前 raw dup=0 的窗口被钳在 120–131 KB；目标是至少一个 BDP（约 465 kB），并让窗口随 n 和实测 RTT 增长。先定位上限是隧道级全局配额、每载体 40 KB 配额，还是 <code>rx_reorder_bytes</code>/队列上限；同时观察 far <code>rxq</code> 和 <code>rx_max_stall_us</code> 是否随窗口放大而下降。验收：单流 receiver 明显超过当前约 4 Mbit/s 的窗口上限，且 n=4/8 能随 n 提升。</li>
+        <li><strong>排查 raw 载体 lost/rebuild。</strong>重点看 <code>carrier_stall_ms</code> 计时是否被数据/ACK 重置，以及 <code>pad_tx=0</code> 时载体如何维持 up 判定；<code>carrier_stall_ms=15000</code> 与 15 s 测试窗口重合，可能是计时器从未被重置的线索。建议加调试计数（last_rx/last_tx/stall_deadline），再用 <code>carrier_stall_ms=60000</code>、强制 PAD、或更长 keepalive 做对照。验收：raw 运行 <code>lost</code> 降到 0 或接近 0，且没有 0.26–0.60 s 的重建停顿。</li>
+        <li><strong>用真实 QoS 对比 http-kal。</strong>当前路径没有施加限速/丢包，http-kal 只是更慢。下一步应在受控 <code>tc netem</code>/真实 ISP QoS 下比较 raw 与 http-kal 的吞吐、丢包和识别行为。验收：同一 QoS 条件下两者有可重复的差异，而不是单次波动。</li>
+        <li><strong>默认关 dup。</strong>dup=1 的 wire 翻倍是确定的，吞吐增益未被证实；在窗口问题解决前，dup 只会放大拥塞和 wire 成本。若保留，应作为显式 opt-in，并在干净链路、长窗口下重测。</li>
+        <li><strong>在干净主机复测 P8。</strong>换一台没有 <code>cc1plus</code>/<code>test_multistream</code> 的 near 主机，跑 30–60 s 稳态；同时用 <code>-P 1</code> 和 <code>-P 4/8</code> 通过隧道，分离“单流窗口限制”与“隧道总容量”。验收：给出稳态 receiver、in-flight、rxq、stall 和 near/far 进程 CPU，排除负载混杂。</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section id="evidence">
+  <h2>证据索引</h2>
+  <ul class="evidence">
+    <li><a href="summary.md"><code>summary.md</code></a><span class="desc">中文主报告：目的、拓扑、直连基线、矩阵、结论、复现、限制、下一步。</span></li>
+    <li><a href="matrix/summary.md"><code>matrix/summary.md</code></a><span class="desc">英文详细矩阵报告，含逐次资源与接收队列表。</span></li>
+    <li><a href="matrix/results.jsonl"><code>matrix/results.jsonl</code></a><span class="desc">矩阵 10 次运行的逐次解析记录（JSON Lines）。</span></li>
+    <li><a href="baseline-direct/parsed.json"><code>baseline-direct/parsed.json</code></a><span class="desc">直连基线解析后的 sender/receiver/retransmits/RTT/CPU。</span></li>
+    <li><a href="baseline-direct/summary.json"><code>baseline-direct/summary.json</code></a><span class="desc">直连基线逐次原始采样与运行元数据。</span></li>
+    <li><a href="README.md"><code>README.md</code></a><span class="desc">目录说明与复现入口。</span></li>
+    <li><a href="deploy/commands.md"><code>deploy/commands.md</code></a><span class="desc">两端构建、加载、绕行、配置与清理命令。</span></li>
+  </ul>
+  <p class="footnote">路径均相对于本文件（<code>review/wan-experiment/</code>）。</p>
+</section>
+
+<footer>
+  <p>本页只汇总既有实验记录，未修改任何实验数据或代码。数字以 <code>baseline-direct/parsed.json</code>、<code>matrix/results.jsonl</code> 与两端 <code>/proc/net/tbtun</code> 快照为准。</p>
+  <p>报告生成于 2026-11-06 · 仓库 <code>tcp-brutal</code> · HEAD <code>6c58fca</code> · 单文件、无外部 CSS/JS/字体。</p>
+</footer>
+
+</div>
+</body>
+</html>
