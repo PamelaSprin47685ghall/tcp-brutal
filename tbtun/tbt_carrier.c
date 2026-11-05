@@ -319,6 +319,23 @@ static void tbt_car_poll_work(struct work_struct *w)
         }
         c->last_nxt = nxt;
 
+        /* Sliding high-percentile RTT for the auto window. srtt is the
+         * kernel's EWMA and mdev_us its mean deviation; srtt + 3*mdev is a
+         * ~p99 proxy for a light-tailed path, and a decaying high-water mark
+         * catches the tail a mean cannot. Recompute every 50 ms poll; decay
+         * 1/32 per poll (~1.5 s half life), so one spike cannot pin the
+         * window for the life of the session. */
+        {
+            u32 srtt = READ_ONCE(tp->srtt_us) >> 3;
+            u64 p = (u64)srtt + 3ULL * READ_ONCE(tp->mdev_us);
+            u32 hi = c->rtt_hi_us;
+
+            hi -= hi / 32;
+            if (p > hi)
+                hi = p > U32_MAX ? U32_MAX : (u32)p;
+            c->rtt_hi_us = hi;
+        }
+
         /* Stall clock. An idle carrier cannot stall: with una == nxt nothing
          * is on the wire. Refreshing the clock here is what the old code
          * missed; without it the whole idle gap before the next burst counted

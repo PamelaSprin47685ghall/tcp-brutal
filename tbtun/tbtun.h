@@ -201,11 +201,14 @@ void tbt_listen_stop(struct tbt_tunnel *t);
  * peer's contiguous received offset. `tx_window_bytes=0` (the default)
  * derives it from the path:
  *
- *   auto = clamp(2 x max_rtt x sum(delivery_rate), 1 MiB, rx_reorder_bytes)
+ *   auto = clamp(2 x (max_rtt_p99 + fb_delay) x sum(delivery_rate),
+ *                1 MiB, rx_reorder_bytes)
  *
  * delivery_rate and srtt come from each carrier's own TCP BBR estimator
- * (rate_delivered/rate_interval_us, srtt_us); the slowest carrier's RTT sets
- * the headroom. A fixed 128 KiB (the old rx_reorder_bytes/2) capped a 218 ms,
+ * (rate_delivered/rate_interval_us, srtt_us); the slowest carrier's sliding
+ * high-percentile RTT sets the headroom, and the feedback delay is added
+ * because the ack crosses the FBK cadence and the peer's delivery. A fixed
+ * 128 KiB (the old rx_reorder_bytes/2) capped a 218 ms,
  * 17 Mbit path at ~4 Mbit; that path's BDP is ~465 KiB. The ceiling is the
  * receiver's reorder budget, never a sum of carrier cwnd: carrier TCP frees
  * cwnd on its own ACK while the bytes still sit in the receiver's tree. A
@@ -678,6 +681,9 @@ struct tbt_carrier
                                    * whichever rx work handles the frame, and
                                    * a lost EWMA sample is harmless */
     u32 rtt_min_us;               /* minimum observed RTT; gauge */
+    u32 rtt_hi_us;                /* sliding high-percentile RTT estimate
+                                   * (srtt + 3*mdev with a decaying
+                                   * high-water), written by the 50 ms poll */
     u32 inflight;                 /* snapshot for peers */
     u64 tx_frames;                /* records written here; pump */
     u64 tx_bytes;                 /* bytes written here; pump */

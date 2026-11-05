@@ -490,15 +490,21 @@ static u64 tbt_car_delivery_bps(const struct tcp_sock *tp)
 
 /* The target behind the auto window:
  *
- *   2 x max_rtt x sum(delivery_rate_i)
+ *   2 x (max_rtt_p99 + feedback_delay) x sum(delivery_rate_i)
  *
  * This is not a second congestion controller: each carrier's TCP owns
  * congestion control, and this value only decides how many
  * delivered-but-unacked bytes the tunnel may keep in flight so the receiver's
  * reorder tree can absorb cross-path reordering and the 10 ms feedback
- * cadence. The slowest carrier's RTT, not the average, is what a frame on
- * that carrier must survive; summing per-carrier BDPs would understate the
- * headroom a reordered frame needs.
+ * cadence. max_rtt_p99 is the slowest carrier's sliding high percentile
+ * (srtt + 3*mdev with a decaying high-water, tbt_car_poll_work), not a single
+ * mean sample: the slowest carrier's RTT is what a reordered frame on that
+ * carrier must survive. Summing per-carrier BDPs (sum 2*rate_i*rtt_i) is not
+ * a substitute: with N > 1 and dispersed RTTs the total need tracks
+ * (slowest RTT x total rate), and that sum can be below it (uniform
+ * 100-300 ms: ~1.54x short at N=4, ~1.44x at N=8; exponential RTTs: 0.96x
+ * and 0.74x). The feedback delay is added because the ack that frees the
+ * window crosses the FBK cadence and the peer's delivery.
  *
  * The ceiling is the receiver's reorder budget, never a sum of congestion
  * windows: a carrier TCP releases cwnd when its own ACK arrives, but those
@@ -523,6 +529,8 @@ static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *rtt_out)
             continue;
         tp = tcp_sk(c->sk);
         rtt = tbt_path_rtt_us(c);
+        if (READ_ONCE(c->rtt_hi_us) > rtt)
+            rtt = READ_ONCE(c->rtt_hi_us);
         rate = tbt_car_delivery_bps(tp);
         if (!rtt || !rate)
             continue;
@@ -532,7 +540,15 @@ static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *rtt_out)
     }
     if (rtt_out)
         *rtt_out = rtt_max;
-    return 2 * (u64)rtt_max * sum_rate / 1000000ULL;
+    if (!rtt_max || !sum_rate)
+        return 0;
+    {
+        u64 fb = READ_ONCE(sess->fb_delay_us);
+        u64 rtt_eff = (u64)rtt_max +
+                      max_t(u64, fb, (u64)TBT_FBK_INTERVAL_MS * 1000);
+
+        return 2 * rtt_eff * sum_rate / 1000000ULL;
+    }
 }
 
 /* Effective sender window: how far a frame may be ahead of the peer's
@@ -2052,8 +2068,12 @@ int tbt_tx_pump(struct tbt_session *sess)
                     sess->win_block++;
                     if (c->sk->sk_socket)
                         set_bit(SOCK_NOSPACE, &c->sk->sk_socket->flags);
-                    mod_delayed_work(system_dfl_wq, &c->w_pump,
-                                     msecs_to_jiffies(2));
+                    /* schedule, not mod: every blocked frame in this pass
+                     * reaches here, and mod_delayed_work would reset the same
+                     * 2 ms timer once per frame (a timer-lock storm at a
+                     * large queue). One pending fallback is enough; the
+                     * peer's window update also calls sk_write_space. */
+                    schedule_delayed_work(&c->w_pump, msecs_to_jiffies(2));
                     sess->pump_hw_armed++;
                     /* The test's hiwat proof is "the pump met real
                      * backpressure"; a full peer window is one. */
@@ -2084,8 +2104,7 @@ int tbt_tx_pump(struct tbt_session *sess)
                 blocked |= BIT(c->index);
                 if (c->sk->sk_socket)
                     set_bit(SOCK_NOSPACE, &c->sk->sk_socket->flags);
-                mod_delayed_work(system_dfl_wq, &c->w_pump,
-                                 msecs_to_jiffies(2));
+                schedule_delayed_work(&c->w_pump, msecs_to_jiffies(2));
                 sess->pump_hw_armed++;
                 sess->dbg_pump_hiwat++;
                 continue;
