@@ -129,7 +129,7 @@ are from the 18:50 tree; re-read the cited symbol before acting on one.
 | 13 PREDICT inert | medium | OPEN | `predict_seq` is only recorded (`tbt_rx.c:438-458`) and cleared (`:251-252`, `:466-472`); nothing advances `rx_next` or promotes a placeholder. |
 | 14 `data_frames` before send | medium | FIXED (code evidence; rerun pending) | increments only after a send, or on the injector's deliberate drop (`tbt_carrier.c:603`, `:686`, `:770`). |
 | 15 `fbk_mask` unused | medium | OPEN | `tbt_tx_hole_check(..., u16 fbk_mask)` still ignores the parameter (`tbt_tx.c:1040`); pending the data-plane freeze. |
-| 16 first-HELLO nonce | medium | OPEN | a pinned nonce is enforced (`tbt_rx.c:525-533`); an unpinned far tunnel with `peer_addr=0` still adopts the first HELLO (`:534-552`). |
+| 16 first-HELLO nonce | medium | FIXED (code; QEMU far rerun pending) | `tbt_session_create()` pins `cfg.nonce`, seeds the anchor from far `peer=`, and warns on TOFU; `tbt_rx_hello()` checks the anchor before the nonce (`join_src_reject++`), sets it only after the nonce passes, and `tbt_session_join()` asserts it. `host/test_anchor` 124/0; `far.anchor`/`far.dup_index`/`far.srcaddr_free` are the QEMU acceptance. |
 | 17 http proc entry | medium | FIXED (code evidence; rerun pending) | `remove_proc_entry(TBT_HTTP_NAME, ...)` (`tbt_procfs.c:854`). |
 | 18 module parameters | medium | FIXED (code evidence; rerun pending) | `max_carriers` is checked in `tbt_session.c:123`, `max_tunnels` in `:199`; `netns_optin` is gone. |
 | 19 one-shot config read | low | FIXED (code evidence; rerun pending) | exact-size `kvmalloc` snapshot served by offset (`tbt_procfs.c:244-344`). The host suites do not exercise `tbt_procfs.c`, so 355/0 is not evidence for this row. |

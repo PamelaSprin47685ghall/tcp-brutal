@@ -978,6 +978,20 @@ int tbt_session_create(struct tbt_tunnel *t)
     {
         get_random_bytes(s->nonce, sizeof(s->nonce));
     }
+    /* A configured far `peer=` fixes the anchor before the first HELLO.  The
+     * port is grammar filler: the far side compares the carrier's source
+     * address only.  Without `peer=` or `nonce=` the first HELLO that passes
+     * the nonce check still fixes the anchor (trust-on-first-use), but say so
+     * once because that first connection chooses the session. */
+    if (t->cfg.role == TBT_ROLE_FAR && t->cfg.peer_addr)
+    {
+        s->anchor_addr = t->cfg.peer_addr;
+        s->anchor_set = true;
+    }
+    if (t->cfg.role == TBT_ROLE_FAR && !t->cfg.nonce_set && !t->cfg.peer_addr)
+        pr_warn_once("tbtun: tunnel %llu far side uses trust-on-first-use; "
+                     "configure nonce= or peer= to pin it\n",
+                     (unsigned long long)t->cfg.id);
     s->sid_prefix = get_random_u32() & 0xffff; // 16 random bits (§3.6)
     s->next_sid = 0;                           // monotonic 24-bit counter
     t->sess = s;
@@ -1118,11 +1132,23 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
 {
     struct tbt_carrier *old;
     struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
+    struct sock *csk;
+    __be32 src;
     int nsnap, i;
 
-    if (index >= sess->n_car)
+    csk = c ? READ_ONCE(c->sk) : NULL;
+    if (index >= sess->n_car || !csk)
         return -EINVAL;
+    src = inet_sk(csk)->inet_daddr;
     spin_lock(&sess->lock);
+    if (!sess->anchor_set || src != sess->anchor_addr)
+    {
+        /* tbt_rx_hello() is the only caller and already counted this
+         * rejection; fail closed for any future caller.  Do not count it
+         * here, or one rejection would increment twice. */
+        spin_unlock(&sess->lock);
+        return -EPROTO;
+    }
     if (sess->closing)
     {
         spin_unlock(&sess->lock);

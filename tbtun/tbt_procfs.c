@@ -719,6 +719,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                 seq_printf(m, "tunnel %llu c3 n=%u up=%u lost=%llu replaced=%llu "
                               "spare_activated=%llu alloc_fail=%llu connect_fail=%llu "
                               "join_dup=%llu join_bad=%llu join_nonce_reject=%llu "
+                              "join_src_reject=%llu "
                               "fbk_tx=%llu fbk_rx=%llu "
                               "retx_frames=%llu retx_bytes=%llu retain_drop=%llu "
                               "reorder_overflow=%llu reorder_max_depth=%u ooo_bytes=%u "
@@ -727,7 +728,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            t->cfg.id, n, up, s->carrier_lost, s->carrier_replaced,
                            s->spare_activated, s->carrier_alloc_fail, s->connect_fail,
                            s->session_join_dup, s->session_join_bad,
-                           s->join_nonce_reject, s->fbk_tx,
+                           s->join_nonce_reject, s->join_src_reject, s->fbk_tx,
                            s->fbk_rx, s->retx_frames, s->retx_bytes, s->retain_drop,
                            s->rx_reorder_overflow, max_depth, ooo_bytes, ooo_frames,
                            retain_bytes, READ_ONCE(s->tx_ack), READ_ONCE(s->rx_ack),

@@ -564,14 +564,21 @@ static void test_far_peer(void)
     refuse("far with peer port 0",
            "tunnel 9 role=far listen=203.0.113.9:443 target=127.0.0.1:7000 peer=0.0.0.0:0",
            TBT_PARSE_EINVAL, NULL, "port");
-    /* A far line that does carry a valid peer parses, and the peer is
-     * normalized away on render. */
+    /* A far line that does carry a valid peer parses and renders it: the
+     * address is the only near source allowed to join the session. */
     ok(parse("tunnel 9 role=far listen=203.0.113.9:443 target=127.0.0.1:7000"
              " peer=198.51.100.7:8443",
              &cmd, &perr) == 0,
        "far line with a valid peer parses", NULL);
     tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
-    ok(strstr(buf, " peer=") == NULL, "far line normalizes peer away", buf);
+    ok(strstr(buf, " peer=198.51.100.7:8443") != NULL,
+       "far line renders its peer anchor", buf);
+    /* Without peer= the canonical far line stays anchor-free. */
+    ok(parse("tunnel 9 role=far listen=203.0.113.9:443 target=127.0.0.1:7000",
+             &cmd, &perr) == 0,
+       "far line without a peer parses", NULL);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(strstr(buf, " peer=") == NULL, "far line without a peer omits it", buf);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -900,10 +907,11 @@ int main(void)
         " drip_ms=250 replay=0 tunnel_rate=1048576"
         " max_inflate=1.500 hole_budget_ms=50 rx_reorder_bytes=262144"
         " tx_retain_bytes=0 carrier_stall_ms=3000 portblock=0-0\n";
-    /* A far tunnel has no peer, so the canonical line omits the key: the
-     * renderer must never emit peer=0.0.0.0:0 (port 0 is not parseable). */
+    /* A far peer= is an anchor: the renderer emits it when set and never
+     * emits peer=0.0.0.0:0 (port 0 is not parseable). */
     static const char *const full_far_canon =
         "tunnel 9 role=far listen=203.0.113.9:443 target=127.0.0.1:7000"
+        " peer=198.51.100.7:8443"
         " n=2 m=0 dup=0 profile=raw keepalive=1000"
         " drip_ms=250 replay=0 tunnel_rate=1048576 max_inflate=1.500"
         " hole_budget_ms=50 rx_reorder_bytes=262144 tx_retain_bytes=0"

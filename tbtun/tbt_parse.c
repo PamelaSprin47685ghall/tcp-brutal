@@ -813,8 +813,6 @@ int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
                   la, tbt_port_load(c->listen_port));
     if (rc)
         return rc;
-    /* A far tunnel has no peer; omitting the key keeps the canonical line
-     * parseable by the same grammar (peer=0.0.0.0:0 is rejected as port 0). */
     if (c->role == TBT_ROLE_NEAR)
     {
         rc = tbt_addf(buf, size, &off, " peer=%s:%u", pa, tbt_port_load(c->peer_port));
@@ -826,6 +824,16 @@ int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
         rc = tbt_addf(buf, size, &off, " target=%s:%u", ta, tbt_port_load(c->target_port));
         if (rc)
             return rc;
+        /* Far: the near source address allowed to join carriers.  The port is
+         * grammar filler; only the address is used.  Omitted when unset, so a
+         * far line without an anchor stays unchanged. */
+        if (c->peer_addr && c->peer_port)
+        {
+            rc = tbt_addf(buf, size, &off, " peer=%s:%u", pa,
+                          tbt_port_load(c->peer_port));
+            if (rc)
+                return rc;
+        }
     }
     rc = tbt_addf(buf, size, &off,
                   " n=%u m=%u dup=%u profile=%s keepalive=%u"

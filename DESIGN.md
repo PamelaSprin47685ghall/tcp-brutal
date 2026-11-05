@@ -519,7 +519,13 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
   for an unknown sid is dropped, because only OPEN may create a stream. OPEN is sent once
   per carrier for each stream. A late OPEN for a stream that is already closing is
   dropped. The HELLO gate is stronger than C2's OPEN gate: a port-reusing or hostile
-  connection cannot name a stream at all without the session nonce.
+  connection cannot name a stream at all without the session nonce. On the far side the
+  nonce is pinned by `nonce=`, or adopted from the first HELLO that passes the source
+  check (trust-on-first-use); the source address of that first authenticated HELLO
+  becomes the session **anchor**, and every later HELLO from another address is refused
+  before its nonce is examined (`join_src_reject`). A configured far `peer=` fixes the
+  anchor at session creation. Without `nonce=`/`peer=` the first connection chooses the
+  session; configure both to remove that race.
 - **Initiator rule**: only the near side allocates sids and only the near side opens
   carriers. The far side never initiates. The far side's *public* connections (target-side)
   are created by the module but their stream ids come from the same near-side allocator —
@@ -1045,6 +1051,8 @@ struct tbt_session {
     struct list_head prov, dead;    /* accepted-not-joined; retired */
     u8 nonce[16];
     bool nonce_set, nonce_pinned;
+    __be32 anchor_addr;             /* far: the only accepted near source */
+    bool anchor_set;
     struct work_struct w_replace;
     struct delayed_work w_fbk;      /* 10 ms feedback tick + retransmit timer */
     struct delayed_work w_reap;     /* tombstone sweeper */
@@ -1151,7 +1159,9 @@ random at tunnel creation).
   global port block** (`/proc/net/tbtun/ports`) shared by every tunnel. Per-tunnel blocks
   are not implemented. Known gap, tracked.
 - `role=near` requires `listen` (public) and `peer` (carrier destination).
-- `role=far` requires `listen` (carrier destination) and `target` (literal).
+- `role=far` requires `listen` (carrier destination) and `target` (literal). An
+  optional `peer=` on a far line is the near source address allowed to join
+  carriers: the anchor. The port is grammar filler; only the address is used.
 - `nonce=` pins the 128-bit session nonce. 32 hex digits are the full value;
   16 hex digits pin the low 64 bits and are left-padded with zeros. On
   `role=near` it is the local session nonce; on `role=far` it is the nonce the
@@ -1163,6 +1173,10 @@ random at tunnel creation).
   A 64-hex-digit (256-bit) value is refused because the HELLO nonce field is
   128 bits. The runtime `session <id> nonce=` action remains for reproducible
   tests.
+- A far tunnel that has neither `nonce=` nor `peer=` is trust-on-first-use: the
+  first HELLO that passes the nonce check fixes the source anchor, and every
+  later HELLO from another address is refused before the nonce is examined.
+  The module logs one warning at session creation for this configuration.
 - `max_tunnels`/`max_carriers` are enforced before any allocation: a new tunnel id
   when the global list is at `max_tunnels` returns `-ENOSPC` and changes nothing
   (re-sending an existing id still replaces it), and `n + m > max_carriers` returns
@@ -1235,14 +1249,19 @@ included. The list key (`srcaddrs`) and `nonce` are rendered only when set.
 The order is
 
 ```
-role listen [peer] [target] n m dup profile keepalive drip_ms replay
+role listen [peer] [target] [peer] n m dup profile keepalive drip_ms replay
 tunnel_rate max_inflate hole_budget_ms rx_reorder_bytes tx_retain_bytes
 carrier_stall_ms portblock [nonce] [srcaddrs]
 ```
 
-`peer` is rendered only for `role=near` and `target` only for `role=far`; a far tunnel
-has no peer, so `peer=0.0.0.0:0` never appears in canonical output (it is not parseable:
-port 0 is refused).
+`peer` is the near peer on a `role=near` line (always present) and the far source
+anchor on a `role=far` line (present only when configured); a far line therefore
+prints `target` before `peer`.
+
+`peer` is rendered for `role=near` always and for `role=far` only when it is configured
+(the source anchor); `target` is rendered only for `role=far`. A far tunnel without
+`peer=` omits the key, so `peer=0.0.0.0:0` never appears in canonical output (it is not
+parseable: port 0 is refused).
 
 `nonce` follows `portblock`, before the list key `srcaddrs`.
 

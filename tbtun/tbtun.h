@@ -382,6 +382,12 @@ struct tbt_session
     u8 nonce[16];      /* the session key carried in HELLO */
     bool nonce_set;    /* far side: adopted from the first HELLO */
     bool nonce_pinned; /* `session <id> nonce=` set it explicitly */
+    /* Far side: the only near source allowed to join carriers.  Set from a
+     * configured `peer=` at session creation, else fixed by the first HELLO
+     * that passes the nonce check.  A session property: it survives carrier
+     * death and replacement. */
+    __be32 anchor_addr;
+    bool anchor_set;
 
     struct work_struct w_replace; /* dials replacements for dead carriers */
     struct delayed_work w_fbk;    /* feedback tick and retransmit timer */
@@ -481,6 +487,7 @@ struct tbt_session
     u64 pause_cleared_ns; /* loss timers restart when backpressure ends */
     u64 last_uack_sum;
     u64 session_join_dup, session_join_bad, join_nonce_reject;
+    u64 join_src_reject; /* far: HELLO from a source other than the anchor */
     u64 fbk_tx, fbk_rx;
     u64 retx_frames, retx_bytes;
     u64 inject_skip;     /* hole fillers refused by the send-queue bound */
