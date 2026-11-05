@@ -139,26 +139,47 @@ listening_on() {
 
 service_state() { systemctl is-active "$1" 2>/dev/null || true; }
 
-# Warn only; never change sysctl. Returns 0 when the reserved list overlaps
-# the experiment block, 1 otherwise.
-portblock_overlap_reserved() {
-    local res lo hi a b tok
+# Returns 0 when the reserved ranges fully cover [lo,hi], 1 otherwise.
+# ip_local_reserved_ports means "reserved from ephemeral allocation", so
+# coverage is desirable; a gap is the risk.
+portblock_fully_reserved() {
+    local res lo hi tok a b
     res=$(sysctl -n net.ipv4.ip_local_reserved_ports 2>/dev/null || true)
     [[ -z $res ]] && return 1
     lo=${PORTBLOCK%-*}
     hi=${PORTBLOCK#*-}
-    local IFS=,
-    for tok in $res; do
+    local -a ranges=()
+    for tok in ${res//,/ }; do
         a=${tok%-*}
         b=${tok#*-}
         [[ $tok == *-* ]] || b=$a
-        if (( a <= hi && b >= lo )); then
-            printf 'warning: net.ipv4.ip_local_reserved_ports=%s overlaps portblock=%s\n' \
-                "$res" "$PORTBLOCK" >&2
-            return 0
-        fi
+        [[ $a =~ ^[0-9]+$ && $b =~ ^[0-9]+$ ]] || continue
+        ranges+=("$a $b")
     done
+    (( ${#ranges[@]} )) || return 1
+    local sorted cur_lo=-1 cur_hi=-1
+    sorted=$(printf '%s\n' "${ranges[@]}" | sort -n -k1,1)
+    while read -r a b; do
+        [[ -z $a ]] && continue
+        if (( cur_lo < 0 )); then
+            cur_lo=$a; cur_hi=$b
+        elif (( a <= cur_hi + 1 )); then
+            (( b > cur_hi )) && cur_hi=$b
+        else
+            (( cur_lo <= lo && cur_hi >= hi )) && return 0
+            cur_lo=$a; cur_hi=$b
+        fi
+    done <<< "$sorted"
+    (( cur_lo >= 0 && cur_lo <= lo && cur_hi >= hi )) && return 0
     return 1
+}
+
+# Warn only; never change sysctl.
+portblock_reserved_warn() {
+    if ! portblock_fully_reserved; then
+        printf 'warning: net.ipv4.ip_local_reserved_ports does not fully cover portblock=%s (ephemeral ports may collide)\n' \
+            "$PORTBLOCK" >&2
+    fi
 }
 
 snapshot() {
@@ -305,7 +326,7 @@ do_status() {
     if module_loaded; then
         printf 'ports_block=%s\n' "$(cat /proc/net/tbtun/ports 2>/dev/null | awk '$1=="ports"{print $2; exit}')"
     fi
-    portblock_overlap_reserved || true
+    portblock_reserved_warn
     printf 'snapshots:\n'
     if [[ -L $STATE_DIR/latest ]]; then printf '  latest=%s\n' "$(readlink -f "$STATE_DIR/latest")"; else printf '  none\n'; fi
     printf 'lock:\n'
@@ -420,7 +441,7 @@ do_verify() {
         printf 'module=absent\n'
     fi
     if [[ -d /proc/net/tbtun ]]; then printf 'proc=present\n'; else printf 'proc=absent\n'; fi
-    portblock_overlap_reserved || true
+    portblock_reserved_warn
     for s in $PROD_SERVICES; do
         local st; st=$(service_state "$s")
         printf 'service %s=%s\n' "$s" "$st"
