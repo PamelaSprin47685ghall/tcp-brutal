@@ -606,7 +606,7 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 |---|---|
 | 命令 | `make check`；`tests/qemu/run.sh --probes A,B,C,D,E,F,G,H,I,J,K --timeout 480`；`bash adversarial/run.sh`；N=1 慢载体脚本 |
 | 证据 | `review/final-qemu/`、`review/final-bench/`、`adversarial/results.txt`、`review/wan-experiment/t1-n1-auto/`、N=1 原始日志 |
-| 通过 | N=1 慢载体 `rc=0`；far `holes_unrecoverable=0`；`fbk_rx>0`；`carrier_lost=0`；`raw lost=0`；lab `W≈136–250 KB`，HND0 按 `W≈k×BDP`（203ms×17M→~862KB，1MiB cap 下 ~750KB）判，不用 lab 绝对值；A–K 11/11、0 skip；adversarial 91/91、0 failed/0 skipped；host/SAN/lint 全绿 |
+| 通过 | N=1 慢载体 `rc=0`；far `holes_unrecoverable=0`；`fbk_rx>0`；`carrier_lost=0`；`raw lost=0`；**byte-exact = sink 读满 16MiB + EOF**（iperf3 只作吞吐/信息）；lab `W≈136–250 KB`，HND0 按 `W≈k×BDP`（203ms×17M→~862KB，1MiB cap 下 ~750KB）判，不用 lab 绝对值；A–K 11/11、0 skip；adversarial 91/91、0 failed/0 skipped；host/SAN/lint 全绿 |
 | 失败 | 任一计数不符、skip、crash、hang |
 
 **G1 现状（挂起，HND0 N=1 auto 根因已定位）**：A `w-window 3f4f1f0`（模块同 c672843）定位：① W 被 `rx_reorder_bytes=262144` 钳住，不是公式；near `bdp_bytes=375286`、`k=2` → 750572，实测 10.3 Mbit/s = 262144/192.7ms；far `W=121–125KB` 是反方向控制流。重跑：两端 `rx_reorder_bytes=1048576`、`tx_window_bytes=0`、`hole_budget_ms=0`、`carrier_stall_ms=15000`、`profile=raw`、`debug=2`，`W=min(750KB,1MiB)=750KB`，17 Mbit/s 可行。② near `holes_unrecoverable=1` 是 sender-side `tbt_tx_stall_check` 杀掉被 reaped 的 iperf3 控制流（`rx_max_stall_us=0`；数据流 `kill=5` 是 app close），不是 rx hole；控制流 `tx_ack` 为何停 >1s 待 debug 打印。RST 用例已修（near 15/15；测试 bug），lint 16/16+14/14，adversarial 全套仍在跑。T1 未绿，**不合并 `w-window`**。
@@ -634,6 +634,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 **f8023a2 rx1m 结果（`hnd0-n1b a2a37ed`）**：控制流 starvation 修复生效——`rc=0`、无 `TXSTALLKILL`、far `fbk_rx=1089`、`holes=0`、`carrier_lost=0`、`lost=0`；near `tx_window=1MiB` cap、`bdp=1321474`、`k=200`；far `tx_window=210880`、`bdp=99902`；CPU near 9.66%、far 21.71%。**但 16MiB 未逐字节**：sender 16,777,216 B，receiver 13,500,416 B（80.47%）；near `submit_bytes=15,996,575`（780,641 B 留在 public socket 接收队列未 capture）、`tx=14,007,990`、`wire=14,118,309`、流结束 `txq=1,113,317`；far `rx_delivered=13,614,558`；数据流 sid …905 close 时 `state=5 kill=5`、`rxq=24576`。机制：public socket close 直接 kill stream，未先排空 capture/txq，FIN/RST 越过队列数据。**close-drain 是新的/遗留阻塞，G1 不能判绿**；A 诊断修复。
 
 **close-drain 修复归属**：已开 `window-close` 修 public close 的 drain 顺序（先排空 capture/txq，再 FIN/RST）；T1 未绿，不合并。
+
+**验收口径修正（2026-11-06）**：iperf3 server 在 `TEST_END` 主动 close 数据 socket，receiver 13,500,416 B **不是 tunnel 丢数据**；T1 的 byte-exact 改用 **sink 读满 16MiB + EOF**，iperf3 只作吞吐/信息。close-drain 仍是真 bug（near FIN 早于 capture/txq 排空），`window-close`/A3 继续修；T1 仍未绿。
 
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
 
