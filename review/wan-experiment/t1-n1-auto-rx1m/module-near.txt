@@ -1,0 +1,5 @@
+path=/tmp/tbtun-t1-f8023a2-near/tbtun.ko
+cd1999a40b036a2bffb1988d078479cd1067e6e985864be04fe523687116ba6c  /tmp/tbtun-t1-f8023a2-near/tbtun.ko
+version:        0.0.1
+srcversion:     475868A5062251A7C237E22
+vermagic:       7.2.9-1-MANJARO SMP preempt mod_unload 

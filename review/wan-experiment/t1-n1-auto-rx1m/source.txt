@@ -1,0 +1,7 @@
+source_commit=f8023a20ebae167c52cc130ebe0dc02a8b1b40c9 (w-window)
+source_tarball_sha256=3a9781415c03feff7278eeba0732b2af951aa3b13b7161a20feac6af7e85adc8
+build_near=make KERNEL_DIR=$KDIR PAHOLE=$PAHOLE -j2  (7.2.9-1-MANJARO)
+build_far=make -C /lib/modules/7.0.0-42-generic/build M=$PWD PAHOLE=false -j1 modules
+near_ko=/tmp/tbtun-t1-f8023a2-near/tbtun.ko sha256=cd1999a40b036a2bffb1988d078479cd1067e6e985864be04fe523687116ba6c srcversion=475868A5062251A7C237E22 vermagic=7.2.9-1-MANJARO
+far_ko=/tmp/tbtun-t1-f8023a2/tbtun.ko sha256=b0ad315a7c0dfb3cb27c051fcdf583616ed5b2316ed9590e1c66a3fb1c328f70 srcversion=475868A5062251A7C237E22 vermagic=7.0.0-42-generic
+invariant=same source f8023a2 + per-end build + srcversion 475868A5; ko sha differs by build path/kernel

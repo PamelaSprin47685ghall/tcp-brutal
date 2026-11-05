@@ -1,0 +1,20 @@
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=12951036 age_us=267162 rtt_us=267370
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=13123068 age_us=515407 rtt_us=289864
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=13213180 age_us=504925 rtt_us=307075
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=13352179 age_us=370115 rtt_us=317319
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=13352179 age_us=370152 rtt_us=304157
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=13352179 age_us=370182 rtt_us=294087
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=13352179 age_us=370218 rtt_us=286375
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=13352179 age_us=370244 rtt_us=280447
+[Fri Nov  6 07:31:28 2026] tbt_tx_hole_check: 57 callbacks suppressed
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:33:57 2026] tbtun: unloaded
