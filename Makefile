@@ -8,10 +8,11 @@ TAR             ?= tar
 CLANG_FORMAT    ?= clang-format-18
 SRCS            := Makefile \
                    tbtun/tbtun.h tbtun/tbt_uapi.h tbtun/tbt_parse.h tbtun/tbt_proto.h \
-                   tbtun/tbt_rec.h tbtun/tbt_http.h \
+                   tbtun/tbt_rec.h tbtun/tbt_http.h tbtun/tbt_crypto.h \
                    tbtun/tbt_core.c tbtun/tbt_session.c tbtun/tbt_procfs.c tbtun/tbt_listen.c \
                    tbtun/tbt_carrier.c tbtun/tbt_sock.c tbtun/tbt_tx.c tbtun/tbt_rx.c \
                    tbtun/tbt_parse.c tbtun/tbt_proto.c tbtun/tbt_rec.c tbtun/tbt_http.c \
+                   tbtun/tbt_crypto.c \
                    scripts/mkdkmsconf.sh scripts/install_dkms.sh \
                    .clang-format
 FORMAT_SRCS     := $(filter %.c %.h,$(SRCS))
@@ -20,7 +21,7 @@ HOSTCC          ?= cc
 HOST_CFLAGS     ?= -std=gnu99 -O2 -Wall -Wextra -Werror
 HOST_TEST       := host/test_parse
 HOST_TEST_SRCS  := host/test_parse.c tbtun/tbt_parse.c
-HOST_TEST_HDRS  := tbtun/tbt_parse.h tbtun/tbt_uapi.h
+HOST_TEST_HDRS  := tbtun/tbt_parse.h tbtun/tbt_uapi.h tbtun/tbt_crypto.h
 HOST_FUZZ       := host/test_fuzz
 HOST_FUZZ_SRCS  := host/test_fuzz.c tbtun/tbt_rec.c tbtun/tbt_proto.c
 HOST_FUZZ_HDRS  := tbtun/tbt_rec.h tbtun/tbt_proto.h tbtun/tbt_uapi.h
@@ -31,6 +32,12 @@ HOST_HTTP_H11   := host/test_http_h11.py
 HOST_HTTP_FUZZ  := host/test_http_fuzz
 HOST_HTTP_FUZZ_SRCS := host/test_http_fuzz.c tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
 HOST_HTTP_FUZZ_HDRS := tbtun/tbt_http.h tbtun/tbt_uapi.h tbtun/tbt_proto.h tbtun/tbt_rec.h
+HOST_CRYPTO     := host/test_crypto
+HOST_CRYPTO_SRCS := host/test_crypto.c tbtun/tbt_crypto.c tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
+HOST_CRYPTO_HDRS := tbtun/tbt_crypto.h tbtun/tbt_http.h tbtun/tbt_proto.h tbtun/tbt_rec.h tbtun/tbt_uapi.h
+HOST_BENCH_CRYPTO := host/bench_crypto
+HOST_BENCH_CRYPTO_SRCS := host/bench_crypto.c tbtun/tbt_crypto.c tbtun/tbt_proto.c
+HOST_BENCH_CRYPTO_HDRS := tbtun/tbt_crypto.h tbtun/tbt_proto.h tbtun/tbt_uapi.h
 HOST_HTTP_LIVE  := host/test_http_live
 HOST_HTTP_LIVE_SRCS := host/test_http_live.c tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
 HOST_HTTP_LIVE_HDRS := tbtun/tbt_http.h tbtun/tbt_uapi.h tbtun/tbt_proto.h tbtun/tbt_rec.h
@@ -50,9 +57,13 @@ obj-m           += tbtun.o
 tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
                    tbtun/tbt_listen.o tbtun/tbt_proto.o tbtun/tbt_carrier.o \
                    tbtun/tbt_sock.o tbtun/tbt_tx.o tbtun/tbt_rx.o tbtun/tbt_rec.o \
-                   tbtun/tbt_parse.o tbtun/tbt_http.o
+                   tbtun/tbt_parse.o tbtun/tbt_http.o tbtun/tbt_crypto.o
 
 ccflags-y       := -std=gnu99 -I$(src)/tbtun
+# ChaCha8 is a hot per-byte loop; keep the kernel's -O2 for the rest of the
+# module and let this one file unroll its fixed 8-round permutation. The
+# variable must name the object path Kbuild sees for a composite module.
+CFLAGS_tbtun/tbt_crypto.o := -O3
 
 .PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-live
 
@@ -70,10 +81,11 @@ check:
 # root, no module and no kernel headers: the grammar test (tbt_parse.c), the
 # hostile-input test (tbt_rec.c + tbt_proto.c) and the HTTP container test
 # (tbt_http.c + tbt_proto.c).
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_MULTISTREAM) $(HOST_ANCHOR)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_MULTISTREAM) $(HOST_ANCHOR)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
+	@./$(HOST_CRYPTO)
 	@./$(HOST_REORDER)
 	@./$(HOST_ACK)
 	@./$(HOST_CONTROL)
@@ -106,6 +118,17 @@ $(HOST_FUZZ): $(HOST_FUZZ_SRCS) $(HOST_FUZZ_HDRS)
 $(HOST_HTTP): $(HOST_HTTP_SRCS) $(HOST_HTTP_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_HTTP_SRCS)
 
+$(HOST_CRYPTO): $(HOST_CRYPTO_SRCS) $(HOST_CRYPTO_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_CRYPTO_SRCS)
+
+$(HOST_BENCH_CRYPTO): $(HOST_BENCH_CRYPTO_SRCS) $(HOST_BENCH_CRYPTO_HDRS)
+	$(HOSTCC) -std=gnu99 -O3 -Wall -Wextra -Werror -I tbtun -o $@ $(HOST_BENCH_CRYPTO_SRCS)
+
+# Throughput and cycles/byte for the host port. Not part of `check`: it is a
+# measurement, not a gate.
+host-bench-crypto: $(HOST_BENCH_CRYPTO)
+	@./$(HOST_BENCH_CRYPTO)
+
 $(HOST_REORDER): $(HOST_REORDER_SRCS)
 	$(HOSTCC) $(HOST_CFLAGS) -o $@ $(HOST_REORDER_SRCS)
 
@@ -130,11 +153,12 @@ host-test-san:
 		echo "host-test-san: skipped, $(HOSTCC) cannot link -fsanitize=address,undefined"; \
 	fi
 
-host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san
+host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san
 	@./host/test_parse_san
 	@./host/test_fuzz_san
 	@./host/test_http_san
 	@./host/test_http_fuzz_san
+	@./host/test_crypto_san
 
 host/test_parse_san: $(HOST_TEST_SRCS) $(HOST_TEST_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_TEST_SRCS)
@@ -147,6 +171,9 @@ host/test_http_san: $(HOST_HTTP_SRCS) $(HOST_HTTP_HDRS)
 
 host/test_http_fuzz_san: $(HOST_HTTP_FUZZ_SRCS) $(HOST_HTTP_FUZZ_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_HTTP_FUZZ_SRCS)
+
+host/test_crypto_san: $(HOST_CRYPTO_SRCS) $(HOST_CRYPTO_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_CRYPTO_SRCS)
 
 $(HOST_HTTP_LIVE): $(HOST_HTTP_LIVE_SRCS) $(HOST_HTTP_LIVE_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_HTTP_LIVE_SRCS)
@@ -167,7 +194,7 @@ host-test-live: $(HOST_HTTP_LIVE)
 	fi
 
 clean: clean-dkms.conf clean-dkms-tarball
-	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_MULTISTREAM) $(HOST_ANCHOR) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san
+	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_MULTISTREAM) $(HOST_ANCHOR) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
 
 load:
