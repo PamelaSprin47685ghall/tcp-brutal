@@ -134,7 +134,7 @@ are from the 18:50 tree; re-read the cited symbol before acting on one.
 | 18 module parameters | medium | FIXED (code evidence; rerun pending) | `max_carriers` is checked in `tbt_session.c:123`, `max_tunnels` in `:199`; `netns_optin` is gone. |
 | 19 one-shot config read | low | FIXED (code evidence; rerun pending) | exact-size `kvmalloc` snapshot served by offset (`tbt_procfs.c:244-344`). The host suites do not exercise `tbt_procfs.c`, so 355/0 is not evidence for this row. |
 | 20 overlapping reorder | low | FIXED (code evidence; rerun pending) | `tbt_rx_pull_locked()` evicts a fully stale node and clips a straddling one (`tbt_rx.c:33-80`). No targeted test. |
-| 21 non-atomic counters | low | OPEN | plain increments from concurrent carriers and the pump (`tbt_rx.c:173-175`, `tbt_carrier.c:603`); the fields are still `u64` (`tbtun.h:490`). |
+| 21 non-atomic counters | low | FIXED (code + lint; QEMU C/E pending) | session counters with more than one writer are `atomic64_t` and only touched through `atomic64_inc/add` and `tbt_stat_read()`; per-carrier TX counters stay `u64` because `tbt_carrier_xmit()` runs under `pump_lock`; `review/lint.sh`'s `atomic-stats` check refuses a regression. |
 | 22 pinned control on `-EAGAIN` | low | OPEN | a pinned frame is freed and dropped on `-EAGAIN` (`tbt_tx.c:1761-1764`). |
 | 23 zero reorder/hole budgets | low | FIXED (host run) | `hole_budget_ms` and `rx_reorder_bytes` are refused at 0 (`tbt_parse.c:474-482`); `test_parse` 355 checks, 0 failures, and the parser sources are unchanged since that build. |
 | 24 hole age | nit | OPEN | `hole_since_ns` is zeroed (`tbt_rx.c:968`) before the age is printed (`:976`). |
@@ -473,11 +473,17 @@ pointer that retire clears before `sock_release()` and then `synchronize_rcu()`s
     (`tbt_rx.c:33-80`) evicts a fully stale node and clips a straddling one; no targeted
     test exists.
 
-21. **low — load-bearing RX counters are not atomic.** `c->rx_frames++`,
-    `sess->rx_data_frames++`, `sess->fbk_frames++` (`tbt_rx.c:173-175`) and
-    `c->data_frames++` (`tbt_carrier.c:603`) are plain `u64`/`u32` increments from
-    concurrent carriers and the pump. Lost updates skew `recv_cnt`, which the hole gate
-    uses. Fix: `atomic64_t` (or per-CPU) for the counters that feed decisions.
+21. **low — load-bearing RX counters are not atomic.** (fixed) `c->rx_frames++`,
+    `sess->rx_data_frames++` (`tbt_rx.c:175-177`) were plain `u64` increments from
+    concurrent carriers. `sess->rx_data_frames` and every other session counter with
+    more than one writer are now `atomic64_t`, incremented with `atomic64_inc/add`
+    and read with `tbt_stat_read()`. `c->rx_frames/rx_bytes` are single-writer per
+    carrier (that carrier's rx work) and stay `u64`, with `READ_ONCE()` at the FBK
+    reader. `c->data_frames` is written only by `tbt_carrier_xmit()` under
+    `pump_lock`, so it had no lost update; it stays `u64` and the hole gate's
+    comparison is unchanged. `st->fbk_frames` is a per-stream cadence counter
+    whose lost update only delays one FBK kick; it stays a plain `u32` on purpose.
+    `review/lint.sh` now pins the atomic set.
 
 22. **low — pinned control frames are dropped on `-EAGAIN`** (pending). `tbt_tx.c:1761-1764`
     frees a pinned frame when the carrier returns `-EAGAIN`; there is no retry for FIN
@@ -723,7 +729,7 @@ implement it, and no test fails. Ordered by DESIGN section.
 
 | DESIGN | Invariant the text states | What the code does |
 |---|---|---|
-| §2.2 | "`tbt_stats.c` — Per-CPU counters" | No per-CPU counters; plain `u64` fields incremented from several CPUs (`tbt_rx.c:173-175`, `tbt_carrier.c:603`). Finding 21. |
+| §2.2 | "`tbt_stats.c` — Per-CPU counters" | No per-CPU block; the session counters with several writers are `atomic64_t` (`tbtun.h`, §8.7) and the single-writer ones are documented as such. Finding 21 fixed. |
 | §2.5, §9.6 | The replay ring keeps a reference to the `skb`, "instead of copying it" | `skb_copy_bits()` into `r->data` (`tbt_tx.c:1525`), then `memcpy()` into the frame (`:1532`): two copies per byte. |
 | §3.1.1, §3.3 | Profile in bits 1:0, generation in bits 5:2, 7:6 zero | DESIGN §3.1.1/§3.3 now agree; TX `profile \| gen << 2` (`tbt_carrier.c:1301`), RX `& 3` / `>> 2` (`tbt_rx.c:519-520`). Doc fixed; code comment `tbt_carrier.c:1287` pending. Finding 12. |
 | §3.2 rule 5 | A data-bearing chunk is `[0x800, 0x2020]` (2048..8224) | No `TBT_CHUNK_MIN` exists in the code; a 1-byte DATA frame emits a 39-byte chunk (measured). Small writes are outside the classification floor. |

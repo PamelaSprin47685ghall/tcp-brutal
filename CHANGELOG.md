@@ -50,6 +50,16 @@ full-suite pass.
 
 ### Fixed
 
+- **Shared statistics counters:** every session counter with more than one writer
+  context is `atomic64_t`, incremented with `atomic64_inc/add` and read through
+  `tbt_stat_read()`, so concurrent carriers and stream workers can no longer lose
+  an update. Counters written only by the pump or by one carrier's rx work stay
+  `u64`, with the writer named in `struct tbt_session`; the hole gate reads the
+  same values with the same comparison. A carrier that leaves the live array now
+  moves its `tx_bytes`/`data_frames`/`retx_data` into session-wide retired totals,
+  and the new `reconcile` stats line publishes both halves so the aggregates stay
+  equal to the live `peers` rows plus the retired carriers. `review/lint.sh`
+  refuses a regression to a plain field access.
 - **Review 23:** `hole_budget_ms=0` and `rx_reorder_bytes=0` are refused with `EINVAL`
   instead of creating a tunnel that dies on its first hole or reordered frame. The
   accepted ranges are now `1..60000` and `1..268435456`; omitted keys keep their
