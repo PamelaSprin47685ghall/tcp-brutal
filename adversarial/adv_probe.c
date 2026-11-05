@@ -2210,13 +2210,13 @@ static int pipe_read(int fd, void *buf, size_t len, int ms)
 /* The abusive application.  `rst` selects the close shape: a clean half-close
  * (FIN) or SO_LINGER 0 (RST).  The child reports through pipes, never through
  * the console, so its exit cannot interleave with the parent's verdict. */
-/* The carrier's send queue is 512 KiB (SO_SNDBUF 256 KiB, doubled).  The
- * application must hand over a little more than that, but no more than the
- * send queue plus the stream's 64 KiB queue: the capture can then finish and
- * queue the FIN/RST while the carrier is still full.  A larger write would
- * leave the FIN behind uncaptured application bytes and the test would
- * measure the capture gate, not the control frame. */
-#define BP_BYTES (560 * 1024)
+/* The carrier's send queue is 512 KiB (SO_SNDBUF 256 KiB, doubled) and the
+ * raw record header adds 32 bytes per 8 KiB.  Writing exactly one send queue
+ * worth of payload fills the socket while leaving the stream's own 64 KiB
+ * queue as the only remainder, so the capture finishes and queues the FIN/RST
+ * before the drain.  A larger write leaves uncaptured bytes behind the
+ * control frame and the test measures the capture gate, not review 22. */
+#define BP_BYTES (512 * 1024)
 
 static void app_backpressure_child(int pubport, int rst, int sigfd, int donefd)
 {
@@ -2479,12 +2479,23 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
     }
     close(sig[1]);
     close(done[0]);
+    /* The verdict needs proof that the pinned frame met real backpressure:
+     * wait for the pump's -EAGAIN counter to move before draining. */
+    {
+        long endw = now_ms() + 3000;
+
+        while (now_ms() < endw && stat_key(tunnel, "hiwat") <= hiwat0)
+            msleep(20);
+    }
     hiwat1 = stat_key(tunnel, "hiwat");
 
-    /* Drain the carrier.  The near's queued records can leave now; a pinned
-     * FIN/RST freed on -EAGAIN never reappears.  Keep acking so the capture
-     * finishes and the FIN stays eligible (tx_ack == tx_seq). */
-    end = now_ms() + 6000;
+    /* Drain the carrier.  This is the half the earlier construction missed:
+     * a fake far that never reads keeps the send queue full forever, so the
+     * capture can never finish and the FIN is never emitted.  Read as fast as
+     * the socket delivers, keep acking so the stream's tx_ack tracks tx_seq,
+     * and give the pump time to write the queued records and the control
+     * frame.  A pinned FIN/RST freed on -EAGAIN never reappears. */
+    end = now_ms() + 12000;
     next_ack = 0;
     while (now_ms() < end && !seen)
     {
@@ -2496,12 +2507,12 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
             raw_send_pad(fd, idx, sid, sidhi, UINT64_MAX);
             next_ack = now_ms() + 50;
         }
-        pr = poll(&p, 1, 50);
+        pr = poll(&p, 1, 20);
         if (pr <= 0)
             continue;
         if (p.revents & (POLLERR | POLLHUP | POLLNVAL))
             break;
-        if (raw_read_frame(&r, &f, body, sizeof(body), 100))
+        if (raw_read_frame(&r, &f, body, sizeof(body), 50))
             continue;
         if (f.sid == sid && f.type == (rst ? TBT_F_RST : TBT_F_FIN))
             seen = 1;

@@ -112,7 +112,7 @@ near's nonce, index and generation from its own HELLO.
 | `near.fbk_forged` | huge `uack`/`recv_cnt`, gen+1, path 15 | ignored; `uack` unchanged |
 | `near.data_path` | DATA with the sid from the near's OPEN | the app reads exactly the sent bytes |
 | `near.second_conn` | a second application after the first closed | accepted and usable |
-| `near.fin_eagain` | raw near carrier; the fake far stops reading (4 KiB receive buffer), the app writes 560 KiB and `shutdown(SHUT_WR)`, then the far drains | the near's FIN crosses, the app reads EOF, `pump_hiwat` grew; a FIN freed on `-EAGAIN` never appears and the app times out |
+| `near.fin_eagain` | raw near carrier; the fake far stops reading (4 KiB receive buffer), the app writes 512 KiB and `shutdown(SHUT_WR)`, the far proves hiwat grew, then drains for 12 s | the near's FIN crosses, the app reads EOF, `pump_hiwat` grew; a FIN freed on `-EAGAIN` never appears and the app times out |
 | `near.rst_eagain` | same raw backpressure, the app closes with `SO_LINGER 0` | the near's RST crosses and `pump_hiwat` grew; a pinned RST freed on `-EAGAIN` never appears and the far never learns |
 
 ### Public port abuse (`pub.*`, `init.*`)
@@ -196,10 +196,10 @@ the console log holds the evidence.
   claim is `tests/qemu/` probe I, not this suite.
 - `near.fin_eagain`/`near.rst_eagain` do not inject `-EAGAIN` directly; they
   make it overwhelmingly likely by shrinking the fake far's receive buffer,
-  stopping its read loop, and pushing 560 KiB through one raw carrier whose send
-  buffer is 512 KiB. 560 KiB is chosen to exceed the send queue but stay
-  below queue + the stream's 64 KiB capture gate, so the capture can finish
-  and queue the FIN/RST while the carrier is still full. The verdict requires `stats`' `hiwat` (the pump's
+  stopping its read loop, and pushing 512 KiB through one raw carrier whose send
+  buffer is 512 KiB. 512 KiB is chosen to fill the send queue while leaving
+  the stream 64 KiB capture gate as the only remainder, so the capture can
+  finish and queue the FIN/RST before the drain. The verdict requires `stats`' `hiwat` (the pump's
   `-EAGAIN` count) to grow, so a run that never reached backpressure cannot
   pass by accident. If a future kernel changes the buffer accounting enough
   that `hiwat` stays flat, the attack reports FAIL with `hiwat ... -> ...`
@@ -209,7 +209,9 @@ the console log holds the evidence.
   `fin_seen=0`/`rst_seen=0` with `holes_unrecoverable=0` and
   `tx_ack == tx_seq`: the carrier's send queue is full, the pump cannot move
   the last retained frames, and the capture stops with `copied < rcv_nxt`, so
-  the FIN is never emitted (`txq=0`, `retain_bytes=48 KiB`). The result line
+  the FIN is never emitted (`txq=0`, `retain_bytes=48 KiB`; after the 12 s
+  drain the baseline still reports `rcv_nxt - copied` of 48897 (FIN) and
+  32821 (RST) bytes). The result line
   and the `NEARX_STATS` block are the evidence; this is a capture/queue-gate
   finding, not a timeout in the probe. The RST variant additionally shows the
   carrier replaced (`lost=1 replaced=1 connect_fail=1 streams_active=0`) once
