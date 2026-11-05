@@ -364,6 +364,66 @@ static long payload_check(sc_code *c, int p_mil, long seg_bytes, uint64_t seed,
     return bad;
 }
 
+/*
+ * Diagnostic: where do the unresolved payload bits sit along the coupling
+ * chain?  Prints one count per coupling block to stderr.
+ */
+static void block_diag(sc_code *c, int L, int p_mil, int model, uint64_t seed,
+                       int trials)
+{
+    sc_info in;
+    int m, t, v;
+    long *hist;
+    long total = 0, clean = 0;
+    uint8_t *mask, *out, *recv;
+    crng rng;
+
+    sc_get_info(c, &in);
+    if (L < 1)
+        return;
+    m = in.n_data / L;
+    if (m < 1)
+        return;
+    hist = calloc((size_t)L, sizeof(long));
+    mask = calloc((size_t)in.n, 1);
+    out = calloc((size_t)in.n, 1);
+    recv = calloc((size_t)in.n, 1);
+    if (!hist || !mask || !out || !recv) {
+        free(hist);
+        free(mask);
+        free(out);
+        free(recv);
+        return;
+    }
+    crng_seed(&rng, seed ^ 0x5bd1e995u);
+    for (t = 0; t < trials; t++) {
+        const uint8_t *kn;
+        int nz = 0;
+        make_mask(c, p_mil, model, &rng, mask);
+        (void)sc_decode(c, recv, mask, out,
+                        model == SC_MODEL_SYSTEMATIC);
+        kn = sc_known_bits(c);
+        for (v = 0; v < in.n_data; v++) {
+            if (!kn[v]) {
+                hist[v / m]++;
+                nz++;
+            }
+        }
+        total += nz;
+        if (nz == 0)
+            clean++;
+    }
+    fprintf(stderr, "diag: trials=%d clean=%ld unresolved_total=%ld per_block=",
+            trials, clean, total);
+    for (v = 0; v < L; v++)
+        fprintf(stderr, "%s%ld", v ? ":" : "", hist[v]);
+    fprintf(stderr, "\n");
+    free(hist);
+    free(mask);
+    free(out);
+    free(recv);
+}
+
 /* ------------------------------------------------------------------ */
 /* one CSV row                                                         */
 /* ------------------------------------------------------------------ */
@@ -413,7 +473,7 @@ static void print_report_row(FILE *f, const char *series, const cfg *g,
 /* ------------------------------------------------------------------ */
 
 static int run_cfg(const cfg *g, int want_report, FILE *rep, const char *series,
-                   int do_payload)
+                   int do_payload, int do_diag)
 {
     sc_code *codes[16];
     char err[160];
@@ -481,6 +541,9 @@ static int run_cfg(const cfg *g, int want_report, FILE *rep, const char *series,
                 "payload_check: bytes=%ld codewords=%ld bit_errors=%ld ok=%d\n",
                 g->seg_bytes, cw, bad, bad == 0 ? 1 : 0);
     }
+    if (do_diag)
+        block_diag(codes[0], g->L, p_mil, g->model, g->seed + 29,
+                   g->trials < 400 ? g->trials : 400);
 
     fprintf(stderr,
             "point: block=%d L=%d rate=%.2f p=%.2f model=%s term=%s "
@@ -528,7 +591,7 @@ static void usage(void)
 int main(int argc, char **argv)
 {
     cfg g;
-    int i, header = 1, sweep = 0, full = 0, do_payload = 0;
+    int i, header = 1, sweep = 0, full = 0, do_payload = 0, do_diag = 0;
     const char *report_path = NULL;
     FILE *rep = NULL;
 
@@ -559,6 +622,8 @@ int main(int argc, char **argv)
             full = 1;
         } else if (!strcmp(a, "--payload-check")) {
             do_payload = 1;
+        } else if (!strcmp(a, "--diag")) {
+            do_diag = 1;
         } else if (!strcmp(a, "--block") && i + 1 < argc) {
             g.block = (int)strtol(argv[++i], NULL, 10);
         } else if (!strcmp(a, "--L") && i + 1 < argc) {
@@ -625,7 +690,7 @@ int main(int argc, char **argv)
         print_header(stdout);
 
     if (!sweep) {
-        int rc = run_cfg(&g, rep != NULL, rep, "point", do_payload);
+        int rc = run_cfg(&g, rep != NULL, rep, "point", do_payload, do_diag);
         if (rep)
             fclose(rep);
         return rc == 0 ? 0 : 1;
@@ -649,7 +714,7 @@ int main(int argc, char **argv)
                         s.p = ps[pi];
                         s.model = SC_MODEL_SYSTEMATIC;
                         s.term = SC_TERM_CAUSAL;
-                        if (run_cfg(&s, rep != NULL, rep, "pcurve_b", 0) != 0)
+                        if (run_cfg(&s, rep != NULL, rep, "pcurve_b", 0, 0) != 0)
                             return 1;
                     }
                 }
@@ -668,7 +733,7 @@ int main(int argc, char **argv)
                             s.p = ps[pi];
                             s.model = SC_MODEL_SYMMETRIC;
                             s.term = SC_TERM_CAUSAL;
-                            if (run_cfg(&s, rep != NULL, rep, "pcurve_a", 0) != 0)
+                            if (run_cfg(&s, rep != NULL, rep, "pcurve_a", 0, 0) != 0)
                                 return 1;
                         }
                     }
@@ -684,7 +749,7 @@ int main(int argc, char **argv)
                         s.p = ps[pi];
                         s.model = SC_MODEL_SYMMETRIC;
                         s.term = SC_TERM_NATIVE;
-                        if (run_cfg(&s, rep != NULL, rep, "native_a", 0) != 0)
+                        if (run_cfg(&s, rep != NULL, rep, "native_a", 0, 0) != 0)
                             return 1;
                     }
                 }
@@ -700,7 +765,7 @@ int main(int argc, char **argv)
                         s.p = 0.10 + 0.05 * (double)qi;
                         s.model = SC_MODEL_SYMMETRIC;
                         s.term = SC_TERM_CAUSAL;
-                        if (run_cfg(&s, rep != NULL, rep, "fine_a", 0) != 0)
+                        if (run_cfg(&s, rep != NULL, rep, "fine_a", 0, 0) != 0)
                             return 1;
                     }
                 }
