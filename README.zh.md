@@ -271,7 +271,7 @@ virtio-net，每个源端口一条 10 Mbit 的 htb 类并挂 `delay 20ms 10ms` �
 对照组是单个 `dd | nc` 流，同样走在一条被整形的五元组上。`app` 是近端隧道的
 `submit_bytes` 速率；`wire/app` 是整次运行的载体字节除以应用字节；`retx_ppm`
 是每百万条唯一 DATA 记录中的副本数。被测模块是 sha256 `0b8f0006…`，也就是
-最终树 `9f5bfda` 构建出的模块；原始 CSV、console 与验收表在
+最终树 `b57b438` 构建出的模块；原始 CSV、console 与验收表在
 `review/final-bench/`。
 
 | 载体数 | 对照 (Mbit/s) | 应用 (Mbit/s) | 应用/对照 | wire/app | retx_ppm | strict / rc | CSV |
@@ -289,9 +289,12 @@ CSV 的 2 s 窗口列在 `n=4` 读到 1.0333。同一模块（`0b8f0006…`）�
 11.37 Mbit/s，所以方差是真实的；比值才是主张。`n=16` 是单载体应用速率的
 10.5 倍。完整矩阵与 CSV 在 `review/final-bench/summary.md`。
 
-代码树 `9f5bfda`（模块 `0b8f0006…`）的验收证据：主机、QEMU A–K 与
-adversarial 在 `review/final/` 和 `review/final-qemu/`；吞吐、flush 与 writer
-在 `review/final-bench/`。
+代码树 `b57b438`（模块 `0b8f0006…`，证据提交 `a9d7c47`）的验收证据：主机、
+QEMU A–K（11/11）与 adversarial（78 PASS / 0 FAIL / 0 SKIP）在 `review/final/`
+和 `review/final-qemu/`；吞吐、flush 与 writer 在 `review/final-bench/`；
+干净客户机内核上的 DKMS 安装/加载/卸载全流程在 `review/dkms-qemu/`。
+writer 探针阻塞在 `write()` 中（`errno=0 eagain=0`），flush 后内存回收；
+详见 `review/final/README.md`。
 
 比值仍是主张：`N` 个五元组胜过一条流。这些是 QEMU/slirp 实验室数字，
 每个源端口一个 10 Mbit htb 类，netem `delay 20ms 10ms`；不是 ISP 实测。
@@ -335,13 +338,13 @@ adversarial 在 `review/final/` 和 `review/final-qemu/`；吞吐、flush 与 wr
   跨到下一档 slab：4 KiB 记录占 8 KiB 对象，满 8 KiB 记录占 16 KiB 对象。
   严格的先发后读传输还会把回显留在公共套接字的接收队列里；客户机已用内存的峰值
   约为所传 40 MiB 的两倍（内存行中 75 MB → 163 MB）。请按此规划客户机内存。
-- **真实机器上的 DKMS 安装没有跑过。** `sudo scripts/install_dkms.sh`、
-  `modprobe` 和 `rmmod` 在这里都无法执行：`sudo` 需要密码，`dkms` 和匹配的
-  内核头文件都没有安装，所以即使有 root，脚本也会停在头文件检查处。
-  同一套流程在重定向到 `/tmp` 的树里通过了（`dkms add`、`dkms build`、
-  `dkms install`、`dkms status` 显示 `installed`、`dkms ldtarball`），
-  并且用这棵树构建的模块在 QEMU 客户机里运行过。不要把这条读成真实机器
-  `modprobe` 成功。
+- **DKMS 安装已在干净客户机内核上验证，宿主本机未直接执行。** 本机无法运行：
+  `sudo` 需要密码，`dkms` 和匹配的内核头文件都没有安装。在 QEMU 客户机里，
+  用干净的 `7.2.9-1-MANJARO` 内核、真实的 `dkms 3.4.4` 和 `linux72` 头文件，
+  `scripts/install_dkms.sh` 完成暂存、构建并安装 `tbtun/0.0.1`，`modprobe`
+  发布 `/proc/net/tbtun`，隧道行写入后按规范读回，`rmmod` 卸载，再次
+  `modprobe`/`rmmod` 通过，`--uninstall` 删除全部条目与文件：38 步、
+  39 项检查、0 失败（`review/dkms-qemu/`）。不要把这读成宿主安装成功。
 
 ## 运维
 

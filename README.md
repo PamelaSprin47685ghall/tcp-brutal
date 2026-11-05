@@ -307,7 +307,7 @@ send-then-read phase (byte-exact), one configuration per boot. The control is a
 single `dd | nc` flow on one shaped 5-tuple. `app` is the near tunnel's
 `submit_bytes` rate; `wire/app` is whole-run carrier bytes over application
 bytes; `retx_ppm` is copies per million unique DATA records. The module under
-test is sha256 `0b8f0006…`, the module the final tree `9f5bfda` builds; raw
+test is sha256 `0b8f0006…`, the module the final tree `b57b438` builds; raw
 CSVs, consoles and the acceptance table are in `review/final-bench/`.
 
 | Carriers | Control (Mbit/s) | App (Mbit/s) | App/control | wire/app | retx_ppm | strict / rc | CSV |
@@ -326,9 +326,13 @@ the whole-run ratio; the CSV's 2 s window reads 1.0333 at `n=4`. One earlier
 ratio is the claim. `n=16` is 10.5x the one-carrier app rate. The full matrix
 and CSVs are in `review/final-bench/summary.md`.
 
-Acceptance evidence for tree `9f5bfda` (module `0b8f0006…`): host, QEMU A–K and
-adversarial results are in `review/final/` and `review/final-qemu/`;
-throughput, flush and writer results are in `review/final-bench/`.
+Acceptance evidence for tree `b57b438` (module `0b8f0006…`, evidence commit
+`a9d7c47`): host, QEMU A–K (11/11) and adversarial (78 PASS / 0 FAIL / 0 SKIP)
+results are in `review/final/` and `review/final-qemu/`; throughput, flush and
+writer results are in `review/final-bench/`; the DKMS install/load/unload run
+on a clean guest kernel is in `review/dkms-qemu/`. The writer probe blocks in
+`write()` with `errno=0 eagain=0` and `flush` returns the memory; see
+`review/final/README.md`.
 
 The ratio is still the claim: `N` five-tuples beat one. These are laboratory
 numbers from QEMU/slirp with one 10 Mbit htb class per source port and netem
@@ -382,14 +386,15 @@ real line.
   strict send-then-read transfer also holds the echo in the public socket's
   receive queue; the guest's used memory peaked at about twice the 40 MiB
   transferred (75 MB → 163 MB in the memory row). Size the guest accordingly.
-- **DKMS install on a real host was not exercised.** `sudo
-  scripts/install_dkms.sh`, `modprobe`, and `rmmod` could not run here: `sudo`
-  needs a password, and neither `dkms` nor the matching kernel headers is
-  installed, so the script would stop at its headers check even with root. The
-  same pipeline passed in a redirected `/tmp` tree (`dkms add`, `dkms build`,
-  `dkms install`, `dkms status` "installed", `dkms ldtarball`), and a module
-  built from this tree was exercised in the QEMU guest. Do not read that as a
-  real-machine `modprobe` success.
+- **DKMS install was verified in a clean guest kernel, not on this host.** The
+  host cannot run it: `sudo` needs a password, and neither `dkms` nor the
+  matching kernel headers is installed. In a QEMU guest booting the clean
+  `7.2.9-1-MANJARO` kernel with the real `dkms 3.4.4` and the `linux72` headers,
+  `scripts/install_dkms.sh` staged, built and installed `tbtun/0.0.1`,
+  `modprobe` published `/proc/net/tbtun`, a tunnel line round-tripped
+  canonically, `rmmod` unloaded it, a second `modprobe`/`rmmod` passed, and
+  `--uninstall` removed every entry and file: 38 steps, 39 checks, 0 failures
+  (`review/dkms-qemu/`). Do not read that as a host install.
 
 ## Operations
 

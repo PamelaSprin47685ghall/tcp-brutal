@@ -3,7 +3,8 @@
 Tree under test: b57b438 (`w-adv3`, `w-docs3` and `w-dkms-qemu` merged with
 `--no-ff` on c641c5a). No product code changed: the diff against c641c5a
 touches only `adversarial/`, five documents and `review/dkms-qemu/`, and the
-module is byte-identical to the 9f5bfda build. Module: sha256
+module is byte-identical to the earlier 9f5bfda build (historical; the same
+module sha256). Module: sha256
 0b8f0006a7a10fe33e6e35e927aaf916047e142528bc32729ed04826fdccdb63.
 Evidence locations: `review/final/` (this directory; host, QEMU A-K and
 adversarial summaries), `review/final-qemu/` (QEMU/adversarial run logs and
@@ -20,10 +21,15 @@ no bench was started, as required for a stable measurement.
   http_fuzz 4078276/0.
 - `review/lint.sh`: 16/16 checks, 14/14 self-tests.
 
+`test_parse` reports 357 checks; 365 was the older snapshot taken before the
+five dead keys `framing`/`chunk`/`max_retry`/`dev`/`uid` and their parse cases
+were deleted. The deleted cases covered keys already removed from the grammar,
+not behavioural coverage.
+
 ## QEMU probes A-K
 
 `tests/qemu/run.sh --probes A,B,C,D,E,F,G,H,I,J,K --timeout 900`:
-11 PASS / 0 FAIL / 0 SKIP in 165 s, run under
+11 PASS / 0 FAIL / 0 SKIP in 164.7 s, run under
 `flock -x /tmp/tbtun-qemu.lock`. Per-probe lines and key evidence are in
 `qemu-AK-summary.txt`; the raw console is
 `review/final-qemu/qemu-AK-console-b57b438.log`.
@@ -31,7 +37,7 @@ no bench was started, as required for a stable measurement.
 ## Adversarial suite
 
 `TBT_ADV_PUBLIC_TIMEOUT=3000 adversarial/run.sh --no-build`: 78 passed,
-0 failed, 0 skipped in 230 s. All 15 default groups ran (public, control,
+0 failed, 0 skipped in 229.8 s. All 15 default groups ran (public, control,
 resource, slab, final, replay, rmmod, flush, catconfig, cfg_mix, param, port,
 near, far, stall) plus the isolated close-flush crash repro. Full result lines
 are in `adversarial-results.txt`; the klog scanner reported no oops/warning.
@@ -39,7 +45,7 @@ The green run prints 78 `ADV_RESULT` PASS lines; `console.klog.*` prints only
 on failure, so there is no 79th line.
 
 Two contracts changed in the final tree. `w-adv3` replaced the writer verdict;
-the churn contract is unchanged from 9f5bfda.
+the churn contract is unchanged from the earlier 9f5bfda tree (historical).
 
 - `pub.churn`: 10,000 connect/send/close cycles, 2 s timeout per cycle, and one
   retry only after a timeout (`retried=`). The verdict still requires

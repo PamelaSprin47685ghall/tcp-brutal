@@ -257,13 +257,16 @@ grouped entries close the remaining lifetime, wire and input-handling findings.
   no `dev=`/`uid=` filter. The final `pub.srcfilter` case passes under the redefined
   contract: a connection from 127.0.0.2 is usable, and the tunnel identity is the
   nonce. Do not read that as source filtering.
-- **`pub.writer` stops at about 75 MiB when the application never reads.** The
-  final contract accepts either a completed write or a bounded `EAGAIN`
-  refusal. Both the 100 MiB and 1 GiB offers stop at about 75 MB accepted with
-  `errno=11` (`legal=1`, no RST, no OOM); a post-write `flush` returns the
-  memory (`after_flush` 396844/398404 kB against `before` 398972/398620 kB,
-  0.03 s). The ~75 MB point is flow control, not a leak: offered volume does
-  not become resident memory, and repeated cases do not grow without bound.
+- **`pub.writer` blocks at about 74.4 MB when the application never reads.**
+  The final contract requires the write to finish (`sent==total`) or to still be
+  blocked inside `write()` when the 10 s observation ends (`blocked=1`,
+  `child_state=running`); the probe sets no `SO_SNDTIMEO`, so `EAGAIN` would be
+  a failure. Both the 100 MiB and 1 GiB offers accept 74,448,896 B with
+  `errno=0 eagain=0` and stay blocked. Closing the socket and issuing `flush`
+  returns `MemAvailable` from a low of 218–223 MB to 396–397 MB in 0.03 s, with
+  `oom=0->0` and no RST. The ~74 MB point is flow control, not a leak: offered
+  volume does not become resident memory, and repeated cases do not grow without
+  bound.
 - **The peer-window gate is a heuristic.** DATA is admitted while
   `write_seq - snd_una < snd_wnd`; a full peer window counts as the pump's hiwat
   proof. `win_block`/`win_resume` report the gate, and control frames bypass it.
@@ -305,13 +308,15 @@ grouped entries close the remaining lifetime, wire and input-handling findings.
 
 ### Verification
 
-Status on 2026-11-06. The final code tree is `9f5bfda`; `984198f` adds only the
-evidence files under `review/final/`. The host, QEMU, adversarial and bench rows
-below were measured with module sha256 `0b8f0006…`, the module the final tree
-builds. Evidence lives in `review/final/` (host, QEMU A–K, adversarial),
-`review/final-qemu/` (QEMU and adversarial run logs) and `review/final-bench/`
-(throughput, flush, writer and DKMS runs). The counter-reconciliation row names
-its own module.
+Status on 2026-11-06. The final code tree is `b57b438`; `a9d7c47` adds only the
+evidence files under `review/final/`, `review/final-qemu/`, `review/final-bench/`
+and `review/dkms-qemu/`. The host, QEMU, adversarial and bench rows below were
+measured with module sha256 `0b8f0006…`, the module the final tree builds.
+Evidence lives in `review/final/` (host, QEMU A–K, adversarial),
+`review/final-qemu/` (QEMU and adversarial run logs), `review/final-bench/`
+(throughput, flush and writer runs) and `review/dkms-qemu/` (DKMS install, load
+and unload on a clean guest kernel). The counter-reconciliation row names its own
+module.
 
 Host tests:
 
@@ -347,14 +352,15 @@ Parser and `/proc` checks:
 QEMU probes:
 
 - `tests/qemu/run.sh --probes A,B,C,D,E,F,G,H,I,J,K --timeout 900`: **11 PASS /
-  0 FAIL / 0 SKIP** in 159 s on module sha256 `0b8f0006…`
-  (`review/final/qemu-AK-summary.txt`, `review/final-qemu/qemu-AK-console.log`).
+  0 FAIL / 0 SKIP** in 164.7 s on module sha256 `0b8f0006…`
+  (`review/final/qemu-AK-summary.txt`,
+  `review/final-qemu/qemu-AK-console-b57b438.log`).
 
 Adversarial:
 
 - `TBT_ADV_PUBLIC_TIMEOUT=3000 adversarial/run.sh --no-build` on the final
   module (sha256 `0b8f0006…`, 2026-11-06): **78 PASS / 0 FAIL / 0 SKIP** in
-  238 s, all 15 default groups plus the isolated close-flush crash repro. The
+  229.8 s, all 15 default groups plus the isolated close-flush crash repro. The
   green run prints 78 `ADV_RESULT` PASS lines; `console.klog.*` prints only on
   failure, so there is no 79th line. Archive:
   `review/final/adversarial-results.txt`; run logs in `review/final-qemu/`.
@@ -363,14 +369,15 @@ Adversarial:
   The contract is still `usable=10000 refused=0 other=0`. Two final-criterion
   runs read 10000/10000 (`retried=1` and `retried=0`); the archived run is
   `usable=10000 refused=0 other=0 retried=0`.
-- `pub.writer` (100 MiB and 1 GiB) is judged by two legal outcomes: the write
-  completes (`sent==total`) or it stops with a bounded `EAGAIN` refusal
-  (`legal=1`), followed by a flush and `MemAvailable` recovering to within
-  50 MB of the pre-write value. Both final runs PASS: 100 MiB
-  `sent=75044366/104857600 errno=11 legal=1`, `after_flush` 396844 kB against
-  `before` 398972 kB; 1 GiB `sent=74978883/1073741824 errno=11 legal=1`,
-  `after_flush` 398404 kB against `before` 398620 kB; `flush=1` 0.03 s and
-  `oom=0->0` in both.
+- `pub.writer` (100 MiB and 1 GiB) must either finish the write
+  (`sent==total`) or still be blocked in `write()` when the 10 s window ends
+  (`blocked=1`, `child_state=running`). The probe sets no `SO_SNDTIMEO`;
+  `EAGAIN` would be the probe's own timeout, not module backpressure, and is a
+  failure. Both final runs read `errno=0 eagain=0 blocked=1
+  child_state=running`: 100 MiB `sent=74448896/104857600`, 1 GiB
+  `sent=74448896/1073741824`. After the child is killed and the socket closed,
+  `flush` takes 0.03 s, `MemAvailable` rises from a low of 223,296/218,072 kB
+  to 397,228/396,388 kB against 396,852/396,992 kB before, and `oom=0->0`.
 
 Bench (QEMU lab emulation, one 10 Mbit htb class per source port, netem
 `delay 20ms 10ms`, 40 MiB each way; not an ISP path). Every row is `rc=0`,
@@ -408,12 +415,20 @@ Version and packaging:
   writable `DKMS_ROOT` writes the staged tree and a `dkms.conf` whose
   `PACKAGE_VERSION` is `0.0.1`.
 
-DKMS: the real-machine install is blocked on this host (sudo needs a password,
-`dkms` is not installed, and there is no matching header tree under
-`/lib/modules/$(uname -r)/build`). The equivalent flow with `dkms 3.4.4`
-extracted from the Manjaro `extra` package,
-`--sourcetree`/`--dkmstree`/`--installtree` redirected to `/tmp`, and the header
-payload from `docs/build-env.md`, passes:
+DKMS: the full install/load/unload flow was verified in a QEMU guest on the
+clean distribution kernel `7.2.9-1-MANJARO` (KVM, real `dkms 3.4.4`, the
+`linux72` headers and module tree). `scripts/install_dkms.sh` staged, built and
+installed `tbtun/0.0.1`; `modprobe tbtun` published `/proc/net/tbtun`; a tunnel
+line was written and read back canonically; `rmmod tbtun` unloaded it; a second
+`modprobe`/`rmmod` pair passed; and `--uninstall` removed every DKMS entry,
+source tree and module file. 38 steps, 39 checks, 0 failures; console and
+per-step logs are in `review/dkms-qemu/`.
+
+The host was not used directly: `sudo` needs a password, `dkms` is not
+installed, and there is no matching header tree under
+`/lib/modules/$(uname -r)/build`. The earlier redirected-`/tmp` checks (the same
+real `dkms 3.4.4`, `--sourcetree`/`--dkmstree`/`--installtree` under `/tmp`, and
+the header payload from `docs/build-env.md`) remain historical support:
 
 - `make dkms-tarball` on the final tree exits 0 (`dkms.tar.gz` sha256
   `4aa0b69a…`). Extracting it and running the `dkms.conf` make command in
@@ -432,17 +447,16 @@ payload from `docs/build-env.md`, passes:
   stays under `--sourcetree`; `--uninstall` removes it with
   `rm -rf "$DKMS_ROOT"/tbtun-*`.
 - No second kernel release is installed (`/lib/modules` holds only
-  `7.2.9-1-MANJARO`), so the cross-kernel DKMS path was not exercised.
-- **Not run on this host:** the system install (`sudo scripts/install_dkms.sh`),
-  `modprobe`, `rmmod` and `/proc/net/tbtun`. `sudo -n true` fails with "a
+  `7.2.9-1-MANJARO`), and the guest uses that same release, so the cross-kernel
+  DKMS path was not exercised.
+- **Not executed on the host:** the system install
+  (`sudo scripts/install_dkms.sh`), `modprobe`, `rmmod` and `/proc/net/tbtun`
+  were exercised in the guest, not on this host. `sudo -n true` fails with "a
   password is required"; `dkms` and the kernel headers are not installed, and
   `/lib/modules/7.2.9-1-MANJARO/build` does not exist, so `install_dkms.sh`
   would stop at its headers check even with root. `insmod` of the built module
-  fails with `EPERM` (no `CAP_SYS_MODULE`). The DKMS runs above used a user
-  namespace only for the root check in `dkms install` and never wrote to the
-  real `/lib/modules`. The equivalent `/tmp` DKMS build passed, and the module
-  built from this tree is loaded by the QEMU guests in every probe and
-  adversarial run; no real-machine `modprobe` or `rmmod` was run.
+  fails with `EPERM` (no `CAP_SYS_MODULE`). The guest run is the clean-kernel
+  evidence; the host remains unverified.
 
 ### Acceptance
 
@@ -469,13 +483,14 @@ make dkms-tarball                        # dkms.tar.gz
 scripts/install_dkms.sh --dry-run
 ```
 
-The measured host, QEMU, adversarial and bench results are in Verification.
-Raw evidence: `review/final/` (`git-sha.txt`, `module.sha256`,
+The measured host, QEMU, adversarial, writer, bench and DKMS results are in
+Verification. Raw evidence: `review/final/` (`git-sha.txt`, `module.sha256`,
 `qemu-AK-summary.txt`, `adversarial-results.txt`), `review/final-qemu/` (run
-logs and consoles) and `review/final-bench/` (CSVs, consoles, `summary.md`).
-The code tree is `9f5bfda`; `984198f` only adds `review/final/`.
-The operator install and unload procedure was not executed on this host (see
-the DKMS block):
+logs and consoles), `review/final-bench/` (CSVs, consoles, `summary.md`) and
+`review/dkms-qemu/` (DKMS console and per-step logs).
+The code tree is `b57b438`; `a9d7c47` only adds the evidence directories.
+The operator install and unload procedure was executed end to end in the clean
+QEMU guest (see the DKMS block); it was not executed directly on this host:
 
 ```sh
 # install (root; matching headers under /lib/modules/$(uname -r)/build)
