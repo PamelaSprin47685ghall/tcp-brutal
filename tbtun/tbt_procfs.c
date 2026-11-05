@@ -831,11 +831,14 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                  * live control-queue depth; the other four are the retry,
                  * re-pin, obsolete-generation and explicit-loss record. */
                 seq_printf(m, "tunnel %llu ctl ctl_lost=%llu ctl_retry=%llu "
-                              "ctl_requeue=%llu ctl_obsolete=%llu ctl_queued=%u\n",
+                              "ctl_requeue=%llu ctl_obsolete=%llu ctl_queued=%u "
+                              "close_timeouts=%llu close_detaches=%llu\n",
                            t->cfg.id, tbt_stat_read(&s->ctl_lost),
                            READ_ONCE(s->ctl_retry), READ_ONCE(s->ctl_requeue),
                            READ_ONCE(s->ctl_obsolete),
-                           READ_ONCE(s->ctl_queued));
+                           READ_ONCE(s->ctl_queued),
+                           tbt_stat_read(&s->close_timeouts),
+                           tbt_stat_read(&s->close_detaches));
                 /* Session stream census, next to the carrier block. n_active
                  * is the non-detached stream count (the concurrency bound),
                  * n_streams includes tombstones that reap has not yet
@@ -864,11 +867,17 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                             struct sock *ps = READ_ONCE(st->sk);
                             struct socket *tg = READ_ONCE(st->target);
                             struct sock *ts = tg ? READ_ONCE(tg->sk) : NULL;
+                            u64 ds = READ_ONCE(st->deliver_since_ns);
+                            u64 dage = ds && ktime_get_ns() > ds
+                                           ? (ktime_get_ns() - ds) / NSEC_PER_MSEC
+                                           : 0;
 
                             seq_printf(m, "tunnel %llu stream sid=%llu state=%u "
                                           "kill=%u attached=%#lx rxq=%u rxp=%u "
                                           "txp=%u peer_paused=%u skerr=%d "
-                                          "tgt_state=%u tgt_err=%d\n",
+                                          "tgt_state=%u tgt_err=%d "
+                                          "fin_seq=%llu fin_q=%u fin_w=%u rst_w=%u "
+                                          "rxf=%u/%u dage_ms=%llu\n",
                                        t->cfg.id, st->sid,
                                        READ_ONCE(st->state),
                                        READ_ONCE(st->kill_reason),
@@ -879,21 +888,31 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                                        READ_ONCE(st->peer_paused),
                                        ps ? READ_ONCE(ps->sk_err) : 0,
                                        ts ? READ_ONCE(ts->sk_state) : 0,
-                                       ts ? READ_ONCE(ts->sk_err) : 0);
+                                       ts ? READ_ONCE(ts->sk_err) : 0,
+                                       READ_ONCE(st->tx_fin_seq),
+                                       READ_ONCE(st->tx_fin_queued),
+                                       READ_ONCE(st->tx_fin_written),
+                                       READ_ONCE(st->tx_rst_written),
+                                       READ_ONCE(st->rx_fin_seen),
+                                       READ_ONCE(st->rx_fin_done),
+                                       dage);
                         }
                 }
                 rcu_read_unlock();
                 seq_printf(m, "tunnel %llu c6 holes_declared=%llu holes_repaired=%llu "
                               "holes_unrecoverable=%llu rx_max_stall_us=%u "
                               "hole_checks=%llu gate_fail=%llu depth_fail=%llu "
-                              "time_fail=%llu\n",
+                              "time_fail=%llu deliver_timeouts=%llu "
+                              "deliver_checks=%llu\n",
                            t->cfg.id, READ_ONCE(s->holes_declared),
                            READ_ONCE(s->holes_repaired),
                            tbt_stat_read(&s->holes_unrecoverable), max_stall_us,
                            tbt_stat_read(&s->hole_checks),
                            tbt_stat_read(&s->hole_gate_fail),
                            tbt_stat_read(&s->hole_depth_fail),
-                           tbt_stat_read(&s->hole_time_fail));
+                           tbt_stat_read(&s->hole_time_fail),
+                           tbt_stat_read(&s->deliver_timeouts),
+                           tbt_stat_read(&s->dbg_deliver_checks));
                 seq_printf(m, "tunnel %llu c8 profile_mismatch=%llu http_parse_err=%llu "
                               "http_status_err=%llu http_req=%llu http_resp=%llu "
                               "pad_tx=%llu drip_tx=%llu\n",

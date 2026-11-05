@@ -132,14 +132,9 @@ static void tbt_pub_capture_work(struct work_struct *w)
         if (queued > 0)
         {
             WRITE_ONCE(st->tx_fin_queued, true);
-            if (READ_ONCE(st->rx_fin_done))
-            {
-                /* Both directions have finished: our FIN is queued and the
-                 * peer's FIN has been delivered.  Leave the session now so
-                 * the next connection can start; a half-closed stream stays
-                 * attached so the peer's return traffic still reaches it. */
-                tbt_stream_detach_from_session(st);
-            }
+            /* Never detach on the queued copy: the pump still has to write it
+             * after tx_ack covers tx_seq.  maybe_detach() waits for both. */
+            tbt_stream_maybe_detach(st);
         }
         /* queued == 0: no carrier was usable.  tx_fin_sent stays set and the
          * FBK tick retries; never detach without a FIN in the queue. */
@@ -326,11 +321,12 @@ static void tbt_drain_work(struct work_struct *w)
     if (eof)
     {
         tbt_sock_shutdown_wr(st);
-        /* The near side may have sent its FIN first; this EOF is the other
-         * half of the close.  detach() only takes sess->lock and stamps the
-         * tombstone, so it is safe inside w_drain. */
-        if (READ_ONCE(st->tx_fin_queued))
-            tbt_stream_detach_from_session(st);
+        /* The peer's FIN is delivered; this is one half of the close.  Leave
+         * the session only after our own FIN is written as well, so its order
+         * gate is not released while DATA is still unacknowledged.  detach()
+         * only takes sess->lock and stamps the tombstone, so it is safe
+         * inside w_drain. */
+        tbt_stream_maybe_detach(st);
     }
 }
 

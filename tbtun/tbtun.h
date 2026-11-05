@@ -373,6 +373,10 @@ struct tbt_stream
     bool tx_fin_written;      /* at least one FIN copy reached the wire */
     bool tx_fin_seq_set;      /* tx_fin_seq frozen at the first request */
     u64 tx_fin_seq;           /* byte offset every FIN copy names */
+    u64 close_since_ns;       /* first FIN request; the bounded close timer
+                               * runs from here and from the last ack, so a
+                               * slow but progressing drain is not cut short */
+    u64 close_fin_written_ns; /* our FIN reached the wire: the peer-FIN bound */
     unsigned long tx_fin_mask;     /* carriers that already have a FIN copy */
     unsigned long tx_fin_inflight; /* FIN copies queued, not yet written/dropped */
     bool tx_rst_written;      /* at least one RST copy reached the wire */
@@ -409,6 +413,8 @@ struct tbt_stream
     u64 rx_fin_seq;           /* byte offset the peer's FIN follows */
     bool rx_fin_seen;
     bool rx_fin_done;
+    u64 deliver_mark;         /* last rx_delivered the FBK tick saw */
+    u64 deliver_since_ns;     /* no delivery progress since this time */
     u8 rx_err;                /* pending socket error, 0 = none */
     bool paused;              /* rx_q full: stop reading carriers */
 
@@ -611,6 +617,10 @@ struct tbt_session
     u64 holes_declared;  /* geometric test declared a lost frame; tx_lock */
     u64 holes_repaired;  /* a declared hole was filled; tx_lock */
     atomic64_t holes_unrecoverable; /* case B: the stream was reset */
+    atomic64_t close_timeouts;   /* a FIN wait exceeded its bound: reset */
+    atomic64_t close_detaches;   /* FIN written, peer FIN absent: detached */
+    atomic64_t deliver_timeouts; /* peer FIN seen, delivery made no progress */
+    atomic64_t dbg_deliver_checks; /* FBK: peer FIN seen, rxq non-empty */
     atomic64_t hole_checks;      /* diagnostic: hole test had a candidate */
     atomic64_t hole_gate_fail;   /* diagnostic: consistency gate refused */
     atomic64_t hole_depth_fail;  /* diagnostic: depth below k_max_hole */
@@ -834,6 +844,8 @@ int tbt_rx_flush(struct tbt_stream *st);
 int tbt_target_attach(struct tbt_stream *st, struct socket *s);
 int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body);
 void tbt_rx_check_hole(struct tbt_stream *st);
+void tbt_rx_deliver_stall_check(struct tbt_stream *st);
+u64 tbt_tx_wait_budget_ns(struct tbt_session *sess, struct tbt_stream *st);
 void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st);
 
 /* tbt_carrier.c */
@@ -871,6 +883,7 @@ enum tbt_bind_result
 int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open);
 void tbt_stream_put(struct tbt_stream *st);
 void tbt_stream_detach_from_session(struct tbt_stream *st);
+void tbt_stream_maybe_detach(struct tbt_stream *st);
 void tbt_stream_kill(struct tbt_stream *st, u8 reason);
 void tbt_stream_kill_by_sid(struct tbt_session *sess, u64 sid, u8 reason);
 void tbt_session_destroy(struct tbt_tunnel *t);

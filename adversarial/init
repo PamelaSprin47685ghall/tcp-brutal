@@ -28,6 +28,9 @@ CAR_OVERLAP=19112
 CAR_SECOND=19113
 FAKE_FIN=19120
 PUB_FIN=19121
+# Close-drain: a bulk stream and a short control stream on one carrier.
+SINK=19073
+CDPUB=19130
 
 PHASES=$(cat /adv-phases.txt 2> /dev/null)
 [ -n "$PHASES" ] || PHASES="public control resource slab final replay rmmod flush param near far"
@@ -938,7 +941,124 @@ phase_stall() {
     # be wedged by the first one.
 }
 
-for _p in public srcfilter control resource slab final replay rmmod flush catconfig bigcfg cfg_mix param port near nearx far farx stall writer writerdrain halfclose httptorn hole create; do
+# Close-drain: the application writes 16 MiB and closes while the tunnel still
+# holds a queue; the target reads until EOF and must count every byte.  The
+# sink reads slowly so the queue is still non-empty at close, and a short
+# control stream on the same carrier must complete as well.  The near's FIN is
+# checked against the final offset in /proc: a FIN that named less would let
+# the far report EOF before the last byte.
+phase_closedrain() {
+    echo "== close drain"
+    /bin/adv_probe sink "$SINK" 5 > /tmp/sink.out 2>&1 &
+    _sp=$!
+    sleep 1
+    flush_all
+    echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR target=127.0.0.1:$SINK n=1 m=0" \
+        > "$CFG" || res pub.closedrain FAIL "far tunnel rejected"
+    echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$CDPUB peer=127.0.0.1:$CAR n=1 m=0" \
+        > "$CFG" || res pub.closedrain FAIL "near tunnel rejected"
+    sleep 1
+    _ctl=$(timeout 30 /bin/adv_probe ctlping "$CDPUB" ping 2>&1)
+    _bulk=$(timeout 180 /bin/adv_probe sendclose "$CDPUB" 16 2 2>&1)
+    # The sink parent accepts forever; wait for both child verdicts, not for
+    # the parent to exit, and read the stream evidence before the 2 s
+    # tombstone reaps it.
+    _i=0
+    while [ "$_i" -lt 60 ]; do
+        grep -q '^SINK_BULK' /tmp/sink.out 2> /dev/null &&
+            grep -q '^SINK_CTRL' /tmp/sink.out 2> /dev/null && break
+        sleep 1
+        _i=$((_i + 1))
+    done
+    kill "$_sp" 2> /dev/null
+    wait "$_sp" 2> /dev/null
+    _sink=$(cat /tmp/sink.out)
+    cat /proc/net/tbtun/stats > /tmp/closedrain.stats 2>/dev/null
+    _stats=$(cat /tmp/closedrain.stats)
+    _finseqs=$(grep -o 'fin_seq=[0-9]*' /tmp/closedrain.stats 2> /dev/null |
+        sort -u | tr '\n' ',')
+    case "$_stats" in
+    *"fin_seq=16777216"*) _fin=1 ;;
+    *) _fin=0 ;;
+    esac
+    case "$_bulk" in
+    *"SENDCLOSE_OK"*) _b=1 ;;
+    *) _b=0 ;;
+    esac
+    case "$_ctl" in
+    *"CTLPING_OK"*) _c=1 ;;
+    *) _c=0 ;;
+    esac
+    case "$_sink" in
+    *"SINK_BULK bytes=16777216 eof=1"*) _sb=1 ;;
+    *) _sb=0 ;;
+    esac
+    case "$_sink" in
+    *"SINK_CTRL echoed=4"*) _sc=1 ;;
+    *) _sc=0 ;;
+    esac
+    _drain=$((_b & _c & _sb & _sc))
+    case "$_bulk" in
+    *"txq_after=0"*) _queued=0 ;;
+    *) _queued=1 ;;
+    esac
+    if [ "$_drain" -eq 1 ] && [ "$_fin" -eq 1 ] && [ "$_queued" -eq 1 ]; then
+        res pub.closedrain PASS "$_sink; $_bulk; $_ctl; fin_seq=$_finseqs"
+    else
+        res pub.closedrain FAIL "$_sink; $_bulk; $_ctl; fin_seq_match=$_fin fin_seq=$_finseqs"
+        grep 'stream sid=' /tmp/closedrain.stats 2> /dev/null
+    fi
+}
+
+# Bounded close: the target accepts and then stops reading, so the far can
+# never deliver the tail and tx_ack never covers the FIN's offset.  The close
+# must end in a reset after the budget, not pin the stream and its socket
+# forever.  hole_budget_ms=1000 makes the budget deterministic.
+phase_closedrain_timeout() {
+    echo "== close drain timeout"
+    /bin/adv_probe sink "$SINK" 30000 > /tmp/sink_stall.out 2>&1 &
+    _sp=$!
+    sleep 1
+    flush_all
+    echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR target=127.0.0.1:$SINK n=1 m=0 rx_reorder_bytes=8388608 hole_budget_ms=1000" \
+        > "$CFG" || res pub.closedrain_timeout FAIL "far tunnel rejected"
+    echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$CDPUB peer=127.0.0.1:$CAR n=1 m=0 tx_window_bytes=8388608 hole_budget_ms=1000" \
+        > "$CFG" || res pub.closedrain_timeout FAIL "near tunnel rejected"
+    sleep 1
+    _out=$(timeout 60 /bin/adv_probe sendclose "$CDPUB" 4 2 2>&1)
+    # The reset is due one budget after the FIN arrives and delivery stops;
+    # the FIN itself travels behind the data, so poll instead of guessing.
+    _i=0
+    while [ "$_i" -lt 40 ]; do
+        cat /proc/net/tbtun/stats > /tmp/closedrain_timeout.stats 2> /dev/null
+        grep -q 'deliver_timeouts=[1-9]' /tmp/closedrain_timeout.stats && break
+        sleep 1
+        _i=$((_i + 1))
+    done
+    _ct=$(grep -o 'close_timeouts=[0-9]*' /tmp/closedrain_timeout.stats 2> /dev/null | head -1)
+    _dt=$(grep -o 'deliver_timeouts=[0-9]*' /tmp/closedrain_timeout.stats 2> /dev/null | sort -u | tr '\n' ',')
+    _act=$(grep -o 'streams_active=[0-9]*' /tmp/closedrain_timeout.stats 2> /dev/null | head -1)
+    kill "$_sp" 2> /dev/null
+    wait "$_sp" 2> /dev/null
+    case "$_out" in
+    *"SENDCLOSE_OK"*) _ok=1 ;;
+    *) _ok=0 ;;
+    esac
+    if echo "$_dt" | grep -q 'deliver_timeouts=[1-9]'; then
+        _d=1
+    else
+        _d=0
+    fi
+    if [ "$_ok" -eq 1 ] && [ "$_d" -eq 1 ] &&
+        [ "$_act" = "streams_active=0" ]; then
+        res pub.closedrain_timeout PASS "$_out; $_dt; $_ct; $_act"
+    else
+        res pub.closedrain_timeout FAIL "$_out; $_dt; $_ct; $_act"
+        cat /tmp/closedrain_timeout.stats 2> /dev/null
+    fi
+}
+
+for _p in public srcfilter control resource slab final replay rmmod flush catconfig bigcfg cfg_mix param port near nearx far farx stall writer writerdrain halfclose httptorn hole create closedrain closedrain_timeout; do
     want "$_p" || continue
     echo "PHASE_START $_p"
     "phase_$_p"

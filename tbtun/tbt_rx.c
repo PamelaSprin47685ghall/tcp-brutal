@@ -963,6 +963,59 @@ void tbt_rx_check_hole(struct tbt_stream *st)
     }
 }
 
+/* The peer has closed its write side (its FIN is in), so no more bytes will
+ * arrive; the ready queue can only shrink.  If it does not, the output socket
+ * has stopped accepting bytes -- the target or application stopped reading --
+ * and the FIN that ends the handshake can never be delivered.  The stream
+ * would then pin both ends and the output socket until the session dies.
+ *
+ * The test is progress, not queue depth: a slow reader that keeps consuming
+ * is never cut, and one large frame in flight is not a stall.  The check is
+ * gated on rx_fin_seen so ordinary backpressure before a close is never
+ * treated as a dead peer.  The FBK tick is the only caller, so the marks need
+ * no lock. */
+void tbt_rx_deliver_stall_check(struct tbt_stream *st)
+{
+    struct tbt_session *sess = st->sess;
+    u64 delivered = READ_ONCE(st->rx_delivered);
+    u64 now = ktime_get_ns();
+
+    if (READ_ONCE(st->state) == TBT_ST_DEAD ||
+        !READ_ONCE(st->rx_fin_seen) || READ_ONCE(st->rx_fin_done) ||
+        !READ_ONCE(st->rx_queued))
+    {
+        st->deliver_mark = delivered;
+        st->deliver_since_ns = 0;
+        return;
+    }
+    if (delivered != st->deliver_mark)
+    {
+        st->deliver_mark = delivered;
+        st->deliver_since_ns = 0;
+        return;
+    }
+    atomic64_inc(&sess->dbg_deliver_checks);
+    if (!st->deliver_since_ns)
+    {
+        st->deliver_since_ns = now;
+        /* Rule out a missed wake before calling the target dead. */
+        tbt_sock_kick(st);
+        return;
+    }
+    if (now > st->deliver_since_ns &&
+        now - st->deliver_since_ns > tbt_tx_wait_budget_ns(sess, st))
+    {
+        if (debug >= 2)
+            pr_info("tbtun: DELIVERTIMEOUT sid=%llu rxq=%u delivered=%llu age_us=%llu\n",
+                    (unsigned long long)st->sid, READ_ONCE(st->rx_queued),
+                    delivered,
+                    (now - st->deliver_since_ns) / NSEC_PER_USEC);
+        st->deliver_since_ns = 0;
+        atomic64_inc(&sess->deliver_timeouts);
+        tbt_stream_kill(st, TBT_ST_DEAD);
+    }
+}
+
 int tbt_rx_flush(struct tbt_stream *st)
 {
     bool pause;

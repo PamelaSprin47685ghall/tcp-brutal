@@ -846,6 +846,22 @@ void tbt_stream_detach_from_session(struct tbt_stream *st)
                          msecs_to_jiffies(TBT_REAP_INTERVAL_MS));
 }
 
+/* A graceful stream leaves the session only after both halves are complete:
+ * the peer's FIN has been delivered to the output socket, and our own FIN has
+ * reached the wire.  A written FIN also means every DATA byte before it was
+ * acknowledged: the pump holds the FIN while tx_ack is short of tx_seq.
+ * Detaching on the queued FIN instead would clear ACTIVE, release the pump's
+ * order gate, and let the FIN run past DATA that is still unacknowledged.
+ * A kill never needs this: tbt_stream_kill() detaches unconditionally. */
+void tbt_stream_maybe_detach(struct tbt_stream *st)
+{
+    if (!READ_ONCE(st->tx_fin_written) || !READ_ONCE(st->rx_fin_done))
+        return;
+    if (!test_bit(TBT_STREAM_F_ACTIVE, &st->attached))
+        return;
+    tbt_stream_detach_from_session(st);
+}
+
 /* Drop queued payload for a dead sid.  Control frames stay: the far side
  * still needs the FIN/RST.  Lives here, not in tbt_tx.c, so P1 does not
  * touch the data-plane file. */

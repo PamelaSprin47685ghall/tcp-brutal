@@ -295,6 +295,11 @@ int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
     }
     seq = st->tx_fin_seq;
     spin_unlock(&sess->tx_lock);
+    /* The close timer starts at the first request, not at the write: a FIN
+     * that never gets a carrier, or whose preceding DATA the peer never
+     * acknowledges, must end in a bounded reset instead of a pinned stream. */
+    if (!READ_ONCE(st->close_since_ns))
+        WRITE_ONCE(st->close_since_ns, tbt_now_ns());
     for (i = 0; i < sess->n_car; i++)
     {
         struct tbt_carrier *c = READ_ONCE(sess->car[i]);
@@ -1465,6 +1470,42 @@ unlock:
         tbt_tx_wake(sess);
 }
 
+/* How long a stream may wait on the peer before it is reset. One rule serves
+ * the sender stall timer and the close FIN: the configured budget is a floor
+ * for a low-RTT path; it must never fire before this session's own repair can
+ * arrive. One RTO finds the loss, and one more RTO plus a one-way covers the
+ * retransmit and its feedback, so the wait is at least 2.5 RTOs. This is the
+ * same 2-3 x RTO rule the receiver's hole budget follows, applied where the
+ * RTO is actually known. */
+u64 tbt_tx_wait_budget_ns(struct tbt_session *sess, struct tbt_stream *st)
+{
+    u64 rto = tbt_tx_rto_ns(sess, st);
+    u64 budget;
+
+    if (sess->tunnel->cfg.hole_budget_ms)
+        budget = (u64)sess->tunnel->cfg.hole_budget_ms * NSEC_PER_MSEC;
+    else
+    {
+        /* Auto must not fall back to one second. The receiver's own auto
+         * hole budget is max(1 s, 5*mean_srtt), and the sender has to add
+         * its RTO plus one one-way on top; one second is shorter than
+         * that, and it killed a 172-byte control stream whose last byte
+         * waited behind a bulk window (measured: TXSTALLKILL ack=171
+         * txseq=172 age=3.17 s while carrier_stall_ms=15000 was
+         * ignored). The operator's dead-path bound wins when set; 5 s or
+         * 5 RTOs otherwise. An explicit hole_budget_ms keeps its exact
+         * meaning (probe H asserts 500 ms). */
+        budget = max_t(u64, 5 * NSEC_PER_SEC, 5 * rto);
+        if (sess->tunnel->cfg.carrier_stall_ms)
+            budget = max_t(u64, budget,
+                           (u64)sess->tunnel->cfg.carrier_stall_ms *
+                               NSEC_PER_MSEC);
+    }
+    if (budget < 5 * rto / 2)
+        budget = 5 * rto / 2;
+    return budget;
+}
+
 /* Sender-side bounded reset. It must fire on *no progress*, not on the age of
  * the oldest frame: one dead path leaves an old frame at the ack while the
  * other paths keep repairing holes, and resetting there would turn a
@@ -1503,36 +1544,8 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
     }
     spin_unlock(&sess->tx_lock);
     {
-        /* The configured budget is a floor for a low-RTT path; it must never
-         * fire before this session's own repair can arrive. One RTO finds the
-         * loss, and one more RTO plus a one-way covers the retransmit and its
-         * feedback, so the sender waits at least 2.5 RTOs. This is the same
-         * 2-3 x RTO rule the receiver's hole budget follows, applied where the
-         * RTO is actually known. */
-        u64 rto = tbt_tx_rto_ns(sess, st);
-        u64 budget;
+        u64 budget = tbt_tx_wait_budget_ns(sess, st);
 
-        if (sess->tunnel->cfg.hole_budget_ms)
-            budget = (u64)sess->tunnel->cfg.hole_budget_ms * NSEC_PER_MSEC;
-        else
-        {
-            /* Auto must not fall back to one second. The receiver's own auto
-             * hole budget is max(1 s, 5*mean_srtt), and the sender has to add
-             * its RTO plus one one-way on top; one second is shorter than
-             * that, and it killed a 172-byte control stream whose last byte
-             * waited behind a bulk window (measured: TXSTALLKILL ack=171
-             * txseq=172 age=3.17 s while carrier_stall_ms=15000 was
-             * ignored). The operator's dead-path bound wins when set; 5 s or
-             * 5 RTOs otherwise. An explicit hole_budget_ms keeps its exact
-             * meaning (probe H asserts 500 ms). */
-            budget = max_t(u64, 5 * NSEC_PER_SEC, 5 * rto);
-            if (sess->tunnel->cfg.carrier_stall_ms)
-                budget = max_t(u64, budget,
-                               (u64)sess->tunnel->cfg.carrier_stall_ms *
-                                   NSEC_PER_MSEC);
-        }
-        if (budget < 5 * rto / 2)
-            budget = 5 * rto / 2;
         /* A timestamp stamped on another CPU can be a few nanoseconds ahead
          * of this CPU's ktime_get_ns(); the unsigned subtraction then looks
          * like a 584-year stall and kills a healthy stream (measured: probe G,
@@ -1550,6 +1563,64 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
         atomic64_inc(&sess->holes_unrecoverable);
         tbt_stream_kill(st, TBT_ST_HOLE);
     }
+}
+
+/* Bounded close. The FIN is queued only after the capture work has submitted
+ * every byte the producer sent (tbt_pub_capture_work), and the pump holds it
+ * until tx_ack covers tx_seq. Both waits must end: a producer that closed
+ * while the path died cannot pin the stream and its socket forever. The timer
+ * runs from the later of the FIN request and the last ack advance, so a slow
+ * but progressing drain is never cut at the budget; only no progress is. Once
+ * all data is acked the only remaining wait is the FIN copy itself, and that
+ * is bounded from the request. */
+static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
+{
+    u64 since = READ_ONCE(st->close_since_ns);
+    u64 start, budget, now;
+
+    if (!since)
+        return;
+    if (READ_ONCE(st->tx_fin_written))
+    {
+        /* Our half is on the wire and every byte before it was acked.  If the
+         * peer never closes its half and there is nothing left to deliver to
+         * the application, the stream must still not pin a session slot and a
+         * socket forever.  Detach, do not reset: the peer may yet send data,
+         * it is dropped, and the peer's own stall timer resets it. */
+        u64 fw = READ_ONCE(st->close_fin_written_ns);
+        u64 bound = max_t(u64, 60 * NSEC_PER_SEC,
+                          2 * tbt_tx_wait_budget_ns(sess, st));
+
+        now = tbt_now_ns();
+        if (!fw || READ_ONCE(st->rx_fin_done) || READ_ONCE(st->rx_queued))
+            return;
+        if (now <= fw || now - fw <= bound)
+            return;
+        atomic64_inc(&sess->close_detaches);
+        tbt_stream_detach_from_session(st);
+        return;
+    }
+    start = since;
+    if (READ_ONCE(st->tx_ack) < READ_ONCE(st->tx_seq))
+    {
+        u64 ack_ns = READ_ONCE(st->last_ack_ns);
+
+        if (ack_ns > start)
+            start = ack_ns;
+    }
+    if (READ_ONCE(st->pause_cleared_ns) > start)
+        start = READ_ONCE(st->pause_cleared_ns);
+    budget = tbt_tx_wait_budget_ns(sess, st);
+    now = tbt_now_ns();
+    if (now <= start || now - start <= budget)
+        return;
+    if (debug >= 2)
+        pr_info("tbtun: CLOSETIMEOUT sid=%llu ack=%llu txseq=%llu fin=%llu age_us=%llu\n",
+                (unsigned long long)st->sid, READ_ONCE(st->tx_ack),
+                READ_ONCE(st->tx_seq), READ_ONCE(st->tx_fin_seq),
+                (now - start) / NSEC_PER_USEC);
+    atomic64_inc(&sess->close_timeouts);
+    tbt_stream_kill(st, TBT_ST_DEAD);
 }
 
 /* Apply one ack value (a byte offset below which the peer has delivered
@@ -1890,8 +1961,14 @@ static void tbt_tx_ctl_written(struct tbt_session *sess, struct tbt_frame *fr)
         if (type == TBT_F_FIN)
         {
             WRITE_ONCE(fr->st->tx_fin_written, true);
+            if (!READ_ONCE(fr->st->close_fin_written_ns))
+                WRITE_ONCE(fr->st->close_fin_written_ns, tbt_now_ns());
             if (fr->path < TBT_MAX_CARRIERS_LIMIT)
                 clear_bit(fr->path, &fr->st->tx_fin_inflight);
+            /* Both halves may already be done: the peer's FIN can arrive
+             * before ours reaches the wire.  This is the moment the stream
+             * may leave the session. */
+            tbt_stream_maybe_detach(fr->st);
         }
         else if (type == TBT_F_RST)
         {
@@ -2108,11 +2185,13 @@ int tbt_tx_pump(struct tbt_session *sess)
                  * A FIN that overtook gated DATA would make the receiver's
                  * rx_next stop below rx_fin_seq, and its drain would never
                  * reach EOF.  RST is not ordered and is exempt.  The FBK tick
-                 * re-runs the pump, so waiting here is bounded.  A stream that
-                 * has already left the session has no ack left to wait for;
-                 * let its FIN go rather than pin a frame to a dead stream. */
+                 * re-runs the pump and the close deadline bounds the wait.  A
+                 * killed stream has no ack left to wait for: let its FIN go
+                 * rather than pin a frame to a dead stream.  A graceful stream
+                 * that merely left the session still waits: ACTIVE is cleared
+                 * only after its FIN was written (tbt_stream_maybe_detach). */
                 if (type == TBT_F_FIN && fr->st &&
-                    test_bit(TBT_STREAM_F_ACTIVE, &fr->st->attached) &&
+                    READ_ONCE(fr->st->state) != TBT_ST_DEAD &&
                     READ_ONCE(fr->st->tx_ack) != READ_ONCE(fr->st->tx_seq))
                     continue;
             }
@@ -2928,6 +3007,7 @@ void tbt_fbk_work(struct work_struct *w)
         bool one_alive;
 
         st->fbk_frames = 0;
+        tbt_tx_close_check(sess, st);
         tbt_tx_fbk(sess, st, GFP_KERNEL);
         one_alive = READ_ONCE(st->state) != TBT_ST_DEAD;
         if (READ_ONCE(st->sack_dirty) ||
@@ -2941,19 +3021,18 @@ void tbt_fbk_work(struct work_struct *w)
         }
         if (one_alive)
             tbt_rx_check_hole(st);
+        tbt_rx_deliver_stall_check(st);
         tbt_tx_stall_check(sess, st);
         /* The capture work emits a FIN once.  If no carrier was usable then,
-         * the request stays set and is retried here; only a FIN that actually
-         * entered the queue may trigger the detach. */
+         * the request stays set and is retried here.  The stream leaves the
+         * session only after that FIN is written and the peer's FIN has been
+         * delivered (tbt_stream_maybe_detach), never on the queued copy. */
         if (one_alive && READ_ONCE(st->tx_fin_sent) &&
             !READ_ONCE(st->tx_fin_queued) &&
             test_bit(TBT_STREAM_F_ACTIVE, &st->attached) &&
             tbt_tx_fin(sess, st, GFP_KERNEL) > 0)
-        {
             WRITE_ONCE(st->tx_fin_queued, true);
-            if (READ_ONCE(st->rx_fin_done))
-                tbt_stream_detach_from_session(st);
-        }
+        tbt_stream_maybe_detach(st);
         alive |= one_alive;
     }
     for (i = 0; i < nsnap; i++)

@@ -3708,6 +3708,204 @@ static int mode_target(int port)
     return 0;
 }
 
+/* Close-drain sink.  Each connection names its direction in one byte:
+ *   'B' bulk: count the rest until EOF, then report bytes and EOF.
+ *   'C' control: echo the rest until EOF.
+ * The bulk read is deliberately slow (delay_ms per 64 KiB chunk) so the
+ * tunnel is still holding a queue when the writer closes: that is the case
+ * under test, and a fast loopback drain would hide it. */
+static int mode_sink(int port, int delay_ms)
+{
+    int ls = listen_on(port);
+
+    if (ls < 0)
+    {
+        printf("SINK_FAIL bind %d errno=%d\n", port, errno);
+        return 1;
+    }
+    printf("SINK_READY port=%d delay_ms=%d\n", port, delay_ms);
+    fflush(stdout);
+    signal(SIGCHLD, SIG_IGN);
+    for (;;)
+    {
+        int fd = accept(ls, NULL, NULL);
+        pid_t pid;
+
+        if (fd < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+        pid = fork();
+        if (pid == 0)
+        {
+            char mode = 0, b[65536];
+            ssize_t n;
+
+            close(ls);
+            n = read(fd, &mode, 1);
+            if (n == 1 && mode == 'B')
+            {
+                /* The mode byte is part of the application's 16 MiB. */
+                long total = 1;
+                int eof = 0;
+
+                while ((n = read(fd, b, sizeof(b))) > 0)
+                {
+                    total += n;
+                    if (delay_ms)
+                        msleep(delay_ms);
+                }
+                eof = (n == 0);
+                printf("SINK_BULK bytes=%ld eof=%d\n", total, eof);
+            }
+            else if (n == 1 && mode == 'C')
+            {
+                long echoed = 0;
+
+                while ((n = read(fd, b, sizeof(b))) > 0)
+                {
+                    if (send_all(fd, b, (size_t)n))
+                        break;
+                    echoed += n;
+                }
+                printf("SINK_CTRL echoed=%ld\n", echoed);
+            }
+            else
+            {
+                printf("SINK_BAD mode=%d\n", n == 1 ? (int)mode : -1);
+            }
+            fflush(stdout);
+            close(fd);
+            _exit(0);
+        }
+        close(fd);
+        while (waitpid(-1, NULL, WNOHANG) > 0)
+            ;
+    }
+    return 0;
+}
+
+/* The near session's live txq depth.  Read right after close(): the close
+ * must not discard it, so a non-zero value is the drain under test. */
+static unsigned long live_txq(int tunnel)
+{
+    FILE *p = fopen("/proc/net/tbtun/stats", "r");
+    char line[2048], want[32];
+    unsigned long q = 0;
+
+    if (!p)
+        return 0;
+    snprintf(want, sizeof(want), "tunnel %d live ", tunnel);
+    while (fgets(line, sizeof(line), p))
+    {
+        char *at;
+
+        if (strncmp(line, want, strlen(want)))
+            continue;
+        at = strstr(line, "txq=");
+        if (at)
+            sscanf(at, "txq=%lu", &q);
+        break;
+    }
+    fclose(p);
+    return q;
+}
+
+/* 16 MiB then close(): the application's FIN follows every byte.  The sink
+ * must read all of it plus a clean EOF, and the tunnel queue at close must
+ * be non-empty (a zero would mean the test proved nothing). */
+static int mode_sendclose(int port, int mib, int tunnel)
+{
+    int fd = connect_to("127.0.0.1", port, NULL);
+    long total = (long)mib * 1024 * 1024 - 1; /* one byte is the mode */
+    long sent = 0;
+    char *buf = malloc(65536);
+    unsigned long txq;
+
+    if (fd < 0 || !buf)
+    {
+        printf("SENDCLOSE_FAIL connect\n");
+        free(buf);
+        return 1;
+    }
+    /* The 5 s convenience timeout in connect_to() would turn the tunnel's
+     * backpressure into EAGAIN, which is not what a blocked application
+     * looks like.  The drain is the point of this test. */
+    {
+        struct timeval zero = { 0, 0 };
+
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &zero, sizeof(zero));
+    }
+    memset(buf, 'B', 65536);
+    if (send_all(fd, "B", 1))
+    {
+        printf("SENDCLOSE_FAIL mode errno=%d\n", errno);
+        goto out;
+    }
+    while (sent < total)
+    {
+        size_t want = (size_t)((total - sent) < 65536 ? (total - sent) : 65536);
+
+        if (send_all(fd, buf, want))
+        {
+            printf("SENDCLOSE_FAIL send errno=%d bytes=%ld\n", errno, sent);
+            goto out;
+        }
+        sent += (long)want;
+    }
+    if (close(fd))
+    {
+        printf("SENDCLOSE_FAIL close errno=%d\n", errno);
+        fd = -1;
+        goto out;
+    }
+    fd = -1;
+    txq = live_txq(tunnel);
+    printf("SENDCLOSE_OK bytes=%ld txq_after=%lu\n", sent + 1, txq);
+out:
+    if (fd >= 0)
+        close(fd);
+    free(buf);
+    return 0;
+}
+
+/* A short control stream on the same carrier as the bulk: it must still
+ * complete while the bulk is closing. */
+static int mode_ctlping(int port, const char *text)
+{
+    int fd = connect_to("127.0.0.1", port, NULL);
+    char buf[256];
+    size_t len = strlen(text), got = 0;
+
+    if (fd < 0)
+    {
+        printf("CTLPING_FAIL connect\n");
+        return 1;
+    }
+    if (send_all(fd, "C", 1) || send_all(fd, text, len))
+    {
+        printf("CTLPING_FAIL send errno=%d\n", errno);
+        close(fd);
+        return 1;
+    }
+    while (got < len)
+    {
+        ssize_t n = read_to(fd, buf + got, len - got, 10000);
+
+        if (n <= 0)
+            break;
+        got += (size_t)n;
+    }
+    close(fd);
+    if (got == len && !memcmp(buf, text, len))
+        printf("CTLPING_OK got=%zu\n", got);
+    else
+        printf("CTLPING_FAIL got=%zu errno=%d\n", got, errno);
+    return 0;
+}
+
 /* ------------------------------------------------------------------ */
 /* Attack 4: control surface                                           */
 
@@ -4489,6 +4687,9 @@ static void usage(void)
             "       adv_probe secondcarrier <carrier_port> <tunnel_id>\n"
             "       adv_probe fineagain <fake_port> <pub_port> <tunnel_id> fin|rst\n"
             "       adv_probe target <port>\n"
+            "       adv_probe sink <port> [delay_ms]\n"
+            "       adv_probe sendclose <pub_port> <mib> <tunnel_id>\n"
+            "       adv_probe ctlping <pub_port> <text>\n"
             "       adv_probe partial <config_path> <line-without-newline>\n"
             "       adv_probe nonroot <path>\n"
             "       adv_probe cfgwrite <path> 513|512|512nonl\n"
@@ -4546,6 +4747,12 @@ int main(int argc, char **argv)
                               !strcmp(argv[5], "rst"));
     if (!strcmp(argv[1], "target") && argc == 3)
         return mode_target(atoi(argv[2]));
+    if (!strcmp(argv[1], "sink") && (argc == 3 || argc == 4))
+        return mode_sink(atoi(argv[2]), argc == 4 ? atoi(argv[3]) : 0);
+    if (!strcmp(argv[1], "sendclose") && argc == 5)
+        return mode_sendclose(atoi(argv[2]), atoi(argv[3]), atoi(argv[4]));
+    if (!strcmp(argv[1], "ctlping") && argc == 4)
+        return mode_ctlping(atoi(argv[2]), argv[3]);
     if (!strcmp(argv[1], "partial") && argc == 4)
         return mode_partial(argv[2], argv[3]);
     if (!strcmp(argv[1], "nonroot") && argc == 3)
