@@ -837,6 +837,44 @@ armed so the socket layer's own wakeups cooperate. The old 64 KiB admission line
 shaped 10 Mbit carrier idle for 840 ms per burst; the measured single-carrier control rose
 from 2.7–3.2 Mbit/s to 5.5–6.5 Mbit/s after the change (probe I).
 
+**Zero-length control frames and the pump wake.** `tx_queued` counts payload bytes, so a
+pinned HELLO/OPEN/FIN/RST (`body_len` zero) adds nothing to it. A killed stream's DATA
+frames are purged and only its RST remains; the 2 ms `w_pump` timer then tested
+`tx_queued == 0` and skipped the pump, so the RST waited for an unrelated
+`sk_write_space` that a quiet carrier never produces. `tbt_pump_work()` also tests
+`ctl_queued`, the pinned-frame count: `tbt_tx_control_pinned()` increments it on enqueue,
+`tbt_tx_ctl_written()`/`tbt_tx_ctl_fail()`/the pump's obsolete drop decrement it, and
+`tbt_tx_free_queue()` zeroes it with the queue. The timer now runs the pump for a
+control frame with no payload; the frame is written on its first retry after the
+carrier's memory frees. Measured with `near.rst_eagain` (raw n=1, 512 KiB backlog):
+before the fix the RST sometimes never left the module queue (`wire` lacked the
+32-byte record); after it the record is in `wire` with `ctl_lost=0`, `ctl_queued=0`.
+Delivery can still be delayed by the carrier's TCP zero-window persist, a separate
+condition documented under "Carrier stall vs peer pause" below.
+
+**Carrier stall vs peer pause.** `tbt_car_poll_work()` marks a carrier lost when
+`snd_una` has not moved for `carrier_stall_ms` while `snd_nxt` did. A peer that reports a
+full delivery queue (FBK rx_state=2, published as `peer_paused`) or whose delivery queue
+we see full (`st->paused`) cannot advance the ack, so the decision is deferred: the
+window restarts each poll and `stall_paused_skips` counts the deferral, matching
+`tbt_tx_stall_check()`. A resume gets a full `carrier_stall_ms`; a genuinely dead socket
+still fails on `!sk` or a non-ESTABLISHED state. Measured in `near.rst_eagain`:
+`peer_paused=1`, `lost=0`, `replaced=0`, `stall_paused_skips=1184` during the paused
+drain; before the gate the same window reported `lost=1 replaced=1`.
+
+**Peer-window admission.** DATA is admitted only while
+`write_seq - snd_una < snd_wnd` (or one chunk when `snd_wnd` is 0). `snd_nxt` is not
+enough: it counts sent bytes, so a send buffer filled past the window would still show a
+small in-flight value and the gate would never fire. The queued cursor `write_seq` is the
+right measure. Filling the carrier's sndbuf past the advertised window parks the tail in
+zero-window persist, where recovery is the persist timer rather than the next ACK
+(measured: `near.rst_eagain`, the last ~282 bytes static for 60 s while the far's window
+was open). DATA stays in the module queue; control frames bypass the gate, so a pinned
+RST can leave after the in-window bytes. The gate arms the 2 ms `w_pump` and counts
+`win_block`/`win_resume`; a full peer window counts as the pump's hiwat proof. Measured:
+`near.rst_eagain` 3/3 with `win_block=152..216`, `win_resume=1`, RST in `wire` at
+~98 KiB, `ctl_lost=0`, `ctl_queued=0`.
+
 **RTT.** The sender maintains `rtt_min_us` and an EWMA (`(7*old + new)/8`) per path from
 two sources: the FBK's `rtt_us` (the receiver's TCP SRTT of the carrier), and, when a path's
 ack advances to a byte inside a retained frame last sent on that path, the elapsed time

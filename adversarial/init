@@ -452,6 +452,15 @@ phase_writer() {
     flush_all
 }
 
+# pub.halfclose alone: the public group's 10k-cycle churn takes about 31
+# minutes and is unrelated to the half-close contract.
+phase_halfclose() {
+    echo "== pub.halfclose"
+    setup_raw
+    timeout 30 /bin/adv_probe halfclose "$PUB"
+    flush_all
+}
+
 phase_catconfig() {
     echo "== cat config > config"
     flush_all
@@ -537,16 +546,16 @@ dump_stats() {
 phase_nearx() {
     echo "== near FIN/RST under carrier backpressure"
     # The fake far stops reading (a 4 KiB receive buffer and no drain), the
-    # application writes 560 KiB and then half-closes or resets.  The near's
+    # application writes 512 KiB and then half-closes or resets.  The near's
     # carrier send queue is full when the pinned FIN/RST is queued; the
     # verdict is whether the frame still reaches the far.
     flush_all
-    timeout 70 /bin/adv_probe fineagain "$FAKE_FIN" "$PUB_FIN" 2 fin > /tmp/fin_eagain.out 2>&1 &
+    timeout 100 /bin/adv_probe fineagain "$FAKE_FIN" "$PUB_FIN" 2 fin > /tmp/fin_eagain.out 2>&1 &
     _fp=$!
     sleep 1
     if echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_FIN peer=127.0.0.1:$FAKE_FIN n=1 m=0" \
         > "$CFG" 2> /dev/null; then
-        wait_timeout "$_fp" 60
+        wait_timeout "$_fp" 90
         [ $? -eq 137 ] && res near.fin_eagain TIMEOUT "the FIN backpressure probe did not finish"
         cat /tmp/fin_eagain.out
         dump_stats
@@ -556,12 +565,12 @@ phase_nearx() {
     fi
 
     flush_all
-    timeout 70 /bin/adv_probe fineagain "$FAKE_FIN" "$PUB_FIN" 2 rst > /tmp/rst_eagain.out 2>&1 &
+    timeout 100 /bin/adv_probe fineagain "$FAKE_FIN" "$PUB_FIN" 2 rst > /tmp/rst_eagain.out 2>&1 &
     _fp=$!
     sleep 1
     if echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_FIN peer=127.0.0.1:$FAKE_FIN n=1 m=0" \
         > "$CFG" 2> /dev/null; then
-        wait_timeout "$_fp" 60
+        wait_timeout "$_fp" 90
         [ $? -eq 137 ] && res near.rst_eagain TIMEOUT "the RST backpressure probe did not finish"
         cat /tmp/rst_eagain.out
         dump_stats
@@ -706,7 +715,7 @@ phase_stall() {
     # be wedged by the first one.
 }
 
-for _p in public srcfilter control resource slab final replay rmmod flush catconfig cfg_mix param port near nearx far farx stall writer; do
+for _p in public srcfilter control resource slab final replay rmmod flush catconfig cfg_mix param port near nearx far farx stall writer halfclose; do
     want "$_p" || continue
     echo "PHASE_START $_p"
     "phase_$_p"

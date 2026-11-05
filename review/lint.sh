@@ -177,6 +177,7 @@ atomic_stats_names='
     pub_actor_calls tx_submit_calls tx_submit_bytes dbg_alloc_fail
     dbg_over_qmax dbg_copy_fail dbg_empty_len dbg_pump_runs dbg_pump_nocar
     ctl_lost retired_tx_bytes retired_data_frames retired_retx_data
+    stall_paused_skips
 '
 
 # Print one line per access to one of the named session counters that is not

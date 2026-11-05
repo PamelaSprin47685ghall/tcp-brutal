@@ -501,6 +501,12 @@ struct tbt_session
     s32 rx_last_err;      /* last value; carrier rx work */
     atomic64_t carrier_write_space_runs;
     atomic64_t poll_rescues;
+    /* Each carrier's poll work writes this for itself; several carriers run
+     * concurrently, so it is atomic like the rx counters above. */
+    atomic64_t stall_paused_skips;
+    /* DATA admissions deferred by the peer window; tbt_tx_pump() only, and
+     * the pump is serialised by sess->pump_lock, so a plain u64 is safe. */
+    u64 win_block, win_resume;
     atomic64_t tx_wake_calls, tx_wake_busy, tx_work_runs;
     /* Reconciliation totals for carriers that left sess->car[] (a
      * replacement or a joining generation). The aggregates below count every
@@ -622,6 +628,7 @@ struct tbt_carrier
     bool lost_counted;            /* carrier_lost counted once */
     unsigned long stats_retired;  /* bit 0: counters moved to the session's
                                    * retired totals (one-shot) */
+    bool win_paused;              /* DATA deferred at the peer's window */
     bool spare;                   /* index >= n_pri: idle unless activated */
     bool active;                  /* spare that now carries DATA */
     u32 drop_ppm;                 /* debug-only loss injection, 0..1e6 */

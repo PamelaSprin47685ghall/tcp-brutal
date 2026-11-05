@@ -112,8 +112,8 @@ near's nonce, index and generation from its own HELLO.
 | `near.fbk_forged` | huge `uack`/`recv_cnt`, gen+1, path 15 | ignored; `uack` unchanged |
 | `near.data_path` | DATA with the sid from the near's OPEN | the app reads exactly the sent bytes |
 | `near.second_conn` | a second application after the first closed | accepted and usable |
-| `near.fin_eagain` | raw near carrier; the fake far stops reading (4 KiB receive buffer), the app writes 512 KiB and `shutdown(SHUT_WR)`, the far proves hiwat grew, then drains for 12 s | the near's FIN crosses, the app reads EOF, `pump_hiwat` grew; a FIN freed on `-EAGAIN` never appears and the app times out |
-| `near.rst_eagain` | same raw backpressure, the app closes with `SO_LINGER 0` | the near's RST crosses and `pump_hiwat` grew; a pinned RST freed on `-EAGAIN` never appears and the far never learns |
+| `near.fin_eagain` | raw near carrier; the fake far stops reading (4 KiB receive buffer), the app writes 512 KiB and `shutdown(SHUT_WR)`, the far proves hiwat grew, then drains for 60 s | the near's FIN crosses, the app reads EOF, `pump_hiwat` grew; a FIN freed on `-EAGAIN` never appears and the app times out |
+| `near.rst_eagain` | same raw backpressure; the far waits for `hiwat` to grow before the app closes with `SO_LINGER 0`, then drains for 60 s | the near's RST crosses and `pump_hiwat` grew; a pinned RST freed on `-EAGAIN` never appears and the far never learns |
 
 ### Public port abuse (`pub.*`, `init.*`)
 
@@ -199,7 +199,40 @@ the console log holds the evidence.
   stopping its read loop, and pushing 512 KiB through one raw carrier whose send
   buffer is 512 KiB. 512 KiB is chosen to fill the send queue while leaving
   the stream 64 KiB capture gate as the only remainder, so the capture can
-  finish and queue the FIN/RST before the drain. The verdict requires `stats`' `hiwat` (the pump's
+  finish and queue the FIN/RST before the drain. The RST variant waits for
+  `hiwat` to grow before it lets the application close: a fixed ack ramp raced
+  the carrier fill and sometimes killed the stream while its send queue was
+  still below the line (measured on one guest: `hiwat 0 -> 0` in one run,
+  `0 -> 2732` in the next).
+  The fake far reports SACK state 2 (delivery paused) after the OPEN, the same
+  state the real far publishes when its queue is full, so the near's stall and
+  retransmit timers do not read this deliberate silence as loss. Its PAD acks
+  carry the near's own `tx` counter, not `UINT64_MAX`: the near only writes
+  128 KiB past `tx_ack` (the reorder window), so the ack must advance to let
+  the 512 KiB carrier queue fill, but acking ahead of the write cursor made
+  the pump drop frames it had not written yet (measured: `tx=475163`,
+  `retain_bytes=524288`, `hiwat` still flat at the pre-drain sample). Acking
+  the write cursor bootstraps the window and never overtakes the pump.
+  The 4 KiB receive window is widened to 256 KiB immediately after the
+  `hiwat` sample (the RST variant does it before it lets the app close): the
+  backpressure proof is already taken, and the wider window lets the backlog
+  drain instead of waiting on the tiny window (measured 1.1 s with a fresh
+  connection).
+  This also lets the far's own FIN reach the near's parser promptly; with the
+  tiny window a single 32-byte record after the PAD stream could sit behind
+  the throttled data until the budget expired.
+  The drain budget is 60 s, not 12 s: the 4 KiB receive buffer (8 KiB after
+  the kernel's doubling) makes stock TCP deliver one window per delayed-ACK /
+  persist cycle, about 35 KiB/s, so 512 KiB of DATA plus the control record
+  needs 10-16 s depending on how long the peer was idle (measured 8 KiB every
+  ~208 ms on this kernel). The control record is behind all the DATA, so a
+  12 s budget expired after the FIN/RST had already been written and the
+  verdict measured the drain rate instead of the frame's survival. The
+  pinned control frame is now written as soon as its 2 ms retry fires even
+  when the data frames are gone (`ctl_queued` wakes the carrier pump), so the
+  record is in the carrier stream early; the guest measured 68-72 of the ~78
+  records in 30 s (1.8-2.5 records/s), so 60 s covers the drain.
+  The verdict requires `stats`' `hiwat` (the pump's
   `-EAGAIN` count) to grow, so a run that never reached backpressure cannot
   pass by accident. If a future kernel changes the buffer accounting enough
   that `hiwat` stays flat, the attack reports FAIL with `hiwat ... -> ...`
