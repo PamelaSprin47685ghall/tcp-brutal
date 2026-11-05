@@ -2102,7 +2102,13 @@ int tbt_tx_pump(struct tbt_session *sess)
              * not snd_nxt: snd_nxt counts bytes already sent, so a sndbuf
              * filled past the window would still show a small in-flight
              * value and the gate would never fire. */
-            if (type == TBT_F_DATA && c->sk)
+            /* A retransmit copy is exempt from the peer-window gate: it is
+             * the only frame that can fill the hole, and queueing it in the
+             * carrier's TCP send buffer is exactly what makes the peer's next
+             * window update send it. Gating it behind the 64 KiB window left
+             * the hole unfilled while the receiver's budget expired
+             * (measured: far holes_unrecoverable=1, near retx_hole=0). */
+            if (type == TBT_F_DATA && c->sk && !fr->retx_copy)
             {
                 struct tcp_sock *tp = tcp_sk(c->sk);
                 u32 una = READ_ONCE(tp->snd_una);
