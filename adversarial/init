@@ -20,6 +20,14 @@ PUB=19100
 CAR=19101
 FAKE=19102
 TGT=19070
+# Dedicated listen ports for the contract/carrier phases.  They are separate
+# tunnels so a failure in one attack cannot poison the next.
+CAR_NONCE=19110
+CAR_ANCHOR=19111
+CAR_OVERLAP=19112
+CAR_SECOND=19113
+FAKE_FIN=19120
+PUB_FIN=19121
 
 PHASES=$(cat /adv-phases.txt 2> /dev/null)
 [ -n "$PHASES" ] || PHASES="public control resource slab final replay rmmod flush param near far"
@@ -165,16 +173,37 @@ phase_public() {
     setup_raw
     timeout 30 /bin/adv_probe rst "$PUB" 4
 
-    # The documented src= allow list: does the grammar even accept it?
-    if echo "tunnel 9 role=near profile=raw listen=127.0.0.1:$PUB peer=127.0.0.1:$CAR n=1 m=0 src=127.0.0.0/8" \
+    # F8 contract: `src=` is gone.  The tunnel identity is the session nonce
+    # (`nonce=`), which must be accepted and rendered back by the canonical
+    # config; a short nonce is refused.  The data-path half of this contract
+    # is phase srcfilter.
+    if echo "tunnel 9 role=near profile=raw listen=127.0.0.1:$((PUB + 9)) peer=127.0.0.1:19199 n=1 m=0 src=127.0.0.0/8" \
         > "$CFG" 2> /dev/null; then
-        res init.src_key FAIL "src= was accepted by the grammar"
+        res init.src_key FAIL "src= is still accepted; the inbound allow list was deleted"
         echo 'del 9' > "$CFG" 2> /dev/null
     else
-        res init.src_key FAIL "src= is not a key; the documented inbound allow list does not exist"
+        _n=00112233445566778899aabbccddeeff
+        if echo "tunnel 9 role=near profile=raw listen=127.0.0.1:$((PUB + 9)) peer=127.0.0.1:19199 n=1 m=0 nonce=$_n" \
+            > "$CFG" 2> /dev/null; then
+            _line=$(awk '$1 == "tunnel" && $2 == 9' "$CFG")
+            case $_line in
+            *"nonce=$_n"*)
+                if echo "tunnel 9 role=near profile=raw listen=127.0.0.1:$((PUB + 9)) peer=127.0.0.1:19199 n=1 m=0 nonce=0011" \
+                    > "$CFG" 2> /dev/null; then
+                    res init.src_key FAIL "a 2-byte nonce= was accepted"
+                else
+                    res init.src_key PASS "src= refused; nonce= accepted and rendered; short nonce= refused"
+                fi
+                ;;
+            *)
+                res init.src_key FAIL "nonce= was accepted but not rendered: $_line"
+                ;;
+            esac
+        else
+            res init.src_key FAIL "nonce= is not a tunnel key"
+        fi
+        echo 'del 9' > "$CFG" 2> /dev/null
     fi
-    setup_raw
-    timeout 30 /bin/adv_probe srcfilter "$PUB"
 
     setup_raw
     timeout 90 /bin/adv_probe writer "$PUB" 100 0
@@ -272,15 +301,24 @@ phase_port() {
     echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR target=127.0.0.1:$TGT n=1 m=0" > "$CFG"
     echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB peer=127.0.0.1:$CAR n=16 m=0" > "$CFG"
     sleep 1
-    echo "tunnel 3 role=near profile=raw listen=127.0.0.1:$((PUB + 3)) peer=127.0.0.1:$CAR n=16 m=0" > "$CFG"
+    echo "tunnel 3 role=near profile=raw listen=127.0.0.1:$((PUB + 3)) peer=127.0.0.1:$CAR n=16 m=0" > "$CFG" 2> /dev/null
     sleep 2
+    _has3=$(grep -c '^3 ' /proc/net/tbtun/tunnels 2> /dev/null)
     _fail=$(awk '$1 == "tunnel" && $2 == 3 {for (i = 1; i <= NF; i++) if (index($i, "alloc_fail=") == 1) {split($i, a, "="); print a[2]}}' /proc/net/tbtun/stats)
-    _exh=$(awk '$1 == "tunnel" && $2 == 3 {for (i = 1; i <= NF; i++) if (index($i, "port_exhaust=") == 1) {split($i, a, "="); print a[2]}}' /proc/net/tbtun/stats)
-    _line=$(awk '$1 == "tunnel" && $2 == 3 && $3 == "c3" {print; exit}' /proc/net/tbtun/stats)
-    if [ -n "$_exh" ] && [ "$_exh" -gt 0 ]; then
-        res init.port_exhaust PASS "port exhaustion reported: port_exhaust=$_exh alloc_fail=$_fail; tunnel 3 stays up and retries; stats: $_line"
+    # A silent alloc_fail= is the defect, not the proof: the operator needs a
+    # reason.  Either the tunnel is refused at write time (the all-or-nothing
+    # admission), or a dedicated counter/log names the exhausted port block.
+    _vis=$(grep -oE '(port_alloc_fail|port_exhaust|port_retry|degraded)=[0-9]+' /proc/net/tbtun/stats 2> /dev/null |
+        grep -vE '=0$' | head -n 4 | tr '\n' ' ')
+    _log=$(dmesg 2> /dev/null | grep -ciE 'port block exhausted|no free port|port .*exhaust' || true)
+    if [ "$_has3" -eq 0 ]; then
+        res init.port_exhaust PASS "tunnel 3 was refused (no row in tunnels); alloc_fail=${_fail:-none}; visible=${_vis:-none}; log lines=$_log"
+    elif [ -n "$_vis" ]; then
+        res init.port_exhaust PASS "tunnel 3 accepted but the exhaustion is operator-visible: $_vis (alloc_fail=$_fail, log lines=$_log)"
+    elif [ "$_log" -gt 0 ]; then
+        res init.port_exhaust PASS "tunnel 3 accepted but the kernel log names the exhausted port block ($_log lines, alloc_fail=$_fail)"
     else
-        res init.port_exhaust FAIL "port block exhausted: tunnel 3 alloc_fail=$_fail, port_exhaust=${_exh:-missing}; no operator-visible reason"
+        res init.port_exhaust FAIL "port block exhausted: tunnel 3 accepted, alloc_fail=$_fail, no port_alloc_fail/port_exhaust/port_retry/degraded counter and no log line"
     fi
     # No flush: this group's purpose is the result above, and teardown is a
     # separate (hanging) test.
@@ -487,6 +525,53 @@ phase_near() {
     flush_all
 }
 
+# The near's own counters are the evidence for "did the carrier read the acks"
+# and "did the stream die".  Printed before the tunnel is flushed.
+dump_stats() {
+    echo "NEARX_STATS_BEGIN"
+    cat /proc/net/tbtun/stats 2> /dev/null
+    cat /proc/net/tbtun/peers 2> /dev/null
+    echo "NEARX_STATS_END"
+}
+
+phase_nearx() {
+    echo "== near FIN/RST under carrier backpressure"
+    # The fake far stops reading (a 4 KiB receive buffer and no drain), the
+    # application writes 560 KiB and then half-closes or resets.  The near's
+    # carrier send queue is full when the pinned FIN/RST is queued; the
+    # verdict is whether the frame still reaches the far.
+    flush_all
+    timeout 70 /bin/adv_probe fineagain "$FAKE_FIN" "$PUB_FIN" 2 fin > /tmp/fin_eagain.out 2>&1 &
+    _fp=$!
+    sleep 1
+    if echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_FIN peer=127.0.0.1:$FAKE_FIN n=1 m=0" \
+        > "$CFG" 2> /dev/null; then
+        wait_timeout "$_fp" 60
+        [ $? -eq 137 ] && res near.fin_eagain TIMEOUT "the FIN backpressure probe did not finish"
+        cat /tmp/fin_eagain.out
+        dump_stats
+    else
+        kill -9 "$_fp" 2> /dev/null
+        res near.fin_eagain FAIL "the near tunnel was rejected"
+    fi
+
+    flush_all
+    timeout 70 /bin/adv_probe fineagain "$FAKE_FIN" "$PUB_FIN" 2 rst > /tmp/rst_eagain.out 2>&1 &
+    _fp=$!
+    sleep 1
+    if echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_FIN peer=127.0.0.1:$FAKE_FIN n=1 m=0" \
+        > "$CFG" 2> /dev/null; then
+        wait_timeout "$_fp" 60
+        [ $? -eq 137 ] && res near.rst_eagain TIMEOUT "the RST backpressure probe did not finish"
+        cat /tmp/rst_eagain.out
+        dump_stats
+    else
+        kill -9 "$_fp" 2> /dev/null
+        res near.rst_eagain FAIL "the near tunnel was rejected"
+    fi
+    flush_all
+}
+
 phase_far() {
     echo "== hostile carrier (http-kal, far side)"
     flush_all
@@ -503,6 +588,78 @@ phase_far() {
     cat /proc/net/tbtun/stats 2> /dev/null
     cat /proc/net/tbtun/peers 2> /dev/null
     echo "FAR_STATS_END"
+    flush_all
+}
+
+phase_farx() {
+    echo "== far contract, overlap, second carrier"
+    # 1. nonce= pins the session nonce and the first authenticated source.
+    flush_all
+    if echo "tunnel 5 role=far profile=http-kal listen=127.0.0.1:$CAR_NONCE target=127.0.0.1:$TGT n=4 m=0 nonce=00112233445566778899aabbccddeeff" \
+        > "$CFG" 2> /dev/null; then
+        sleep 1
+        timeout 40 /bin/adv_probe noncepinned "$CAR_NONCE" 5
+        case $? in
+        124 | 143) res far.nonce_pinned TIMEOUT "the pinned-nonce probe did not finish" ;;
+        esac
+    else
+        res far.nonce_pinned FAIL "the far line with nonce= was rejected by the grammar"
+    fi
+
+    # 2. peer= anchors the only near source allowed to join, and must render.
+    flush_all
+    if echo "tunnel 6 role=far profile=http-kal listen=127.0.0.1:$CAR_ANCHOR target=127.0.0.1:$TGT n=4 m=0 peer=127.0.0.1:1" \
+        > "$CFG" 2> /dev/null; then
+        sleep 1
+        timeout 40 /bin/adv_probe srcanchor "$CAR_ANCHOR" 6
+        case $? in
+        124 | 143) res far.src_anchor TIMEOUT "the source-anchor probe did not finish" ;;
+        esac
+    else
+        res far.src_anchor FAIL "the far line with peer= was rejected by the grammar"
+    fi
+
+    # 3. Overlapping reorder frames on an authenticated carrier.
+    flush_all
+    echo "tunnel 7 role=far profile=http-kal listen=127.0.0.1:$CAR_OVERLAP target=127.0.0.1:$TGT n=4 m=0 rx_reorder_bytes=32768" \
+        > "$CFG" || res far.overlap FAIL "far tunnel rejected"
+    sleep 1
+    timeout 60 /bin/adv_probe overlap "$CAR_OVERLAP" 7
+    case $? in
+    124 | 143) res far.overlap TIMEOUT "the overlap probe did not finish" ;;
+    esac
+
+    # 4. A second carrier after the first is established (F6).
+    flush_all
+    echo "tunnel 8 role=far profile=http-kal listen=127.0.0.1:$CAR_SECOND target=127.0.0.1:$TGT n=4 m=0" \
+        > "$CFG" || res far.second_carrier FAIL "far tunnel rejected"
+    sleep 1
+    timeout 40 /bin/adv_probe secondcarrier "$CAR_SECOND" 8
+    case $? in
+    124 | 143) res far.second_carrier TIMEOUT "the second-carrier probe did not finish" ;;
+    esac
+    flush_all
+}
+
+phase_srcfilter() {
+    echo "== pinned nonce and far anchor on the public path"
+    flush_all
+    _n=00112233445566778899aabbccddeeff
+    if echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR target=127.0.0.1:$TGT n=1 m=0 nonce=$_n peer=127.0.0.1:1" \
+        > "$CFG" 2> /dev/null; then
+        if echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB peer=127.0.0.1:$CAR n=1 m=0 nonce=$_n" \
+            > "$CFG" 2> /dev/null; then
+            sleep 1
+            timeout 30 /bin/adv_probe srcfilter "$PUB" 1
+            case $? in
+            124 | 143) res pub.srcfilter TIMEOUT "the srcfilter probe did not finish" ;;
+            esac
+        else
+            res pub.srcfilter FAIL "the near line with nonce= was rejected"
+        fi
+    else
+        res pub.srcfilter FAIL "the far line with nonce= peer= was rejected"
+    fi
     flush_all
 }
 
@@ -549,7 +706,7 @@ phase_stall() {
     # be wedged by the first one.
 }
 
-for _p in public control resource slab final replay rmmod flush catconfig cfg_mix param port near far stall writer; do
+for _p in public srcfilter control resource slab final replay rmmod flush catconfig cfg_mix param port near nearx far farx stall writer; do
     want "$_p" || continue
     echo "PHASE_START $_p"
     "phase_$_p"
