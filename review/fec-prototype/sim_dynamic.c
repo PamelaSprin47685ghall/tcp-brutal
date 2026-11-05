@@ -144,7 +144,7 @@ static void controller(void)
     unsigned m_current = 32;
     unsigned epoch;
 
-    printf("\ncontroller: margin=0.05 M_min=16 M_max=128 hysteresis=8\n");
+    printf("\ncontroller: margin=0.09 M_min=16 M_max=128 hysteresis=8\n");
     printf("epoch,p_true,p_ewma,M_target,M_current,recovery\n");
 
     for (epoch = 0; epoch < sizeof(steps) / sizeof(steps[0]); epoch++)
@@ -162,7 +162,7 @@ static void controller(void)
         }
 
         n = 256 - m_current;
-        rec = recovery(n, m_current, n, 16, n, steps[epoch], 2000,
+        rec = recovery(n, m_current, 2 * n, 16, n, steps[epoch], 2000,
                        0x1234u + epoch);
 
         printf("%u,%.3f,%.4f,%u,%u,%.4f\n", epoch, steps[epoch], p_ewma,
@@ -177,7 +177,7 @@ static void rate_table(void)
     unsigned mi;
     unsigned pi;
 
-    printf("\nrate table: W=N=256-M K=N d=16\n");
+    printf("\nrate table: W=2K=2N=2(256-M) K=N d=16\n");
     printf("M,N");
     for (pi = 0; pi < sizeof(ps) / sizeof(ps[0]); pi++)
     {
@@ -193,7 +193,7 @@ static void rate_table(void)
         printf("%u,%u", m, n);
         for (pi = 0; pi < sizeof(ps) / sizeof(ps[0]); pi++)
         {
-            double rec = recovery(n, m, n, 16, n, ps[pi], 2000,
+            double rec = recovery(n, m, 2 * n, 16, n, ps[pi], 2000,
                                   0xabcdu + mi * 16 + pi);
 
             printf(",%.3f", rec);
@@ -277,7 +277,7 @@ static void cost_table(void)
     static const unsigned ms[] = {16, 32, 48, 56, 64, 80, 96, 104, 128};
     unsigned i;
 
-    printf("\ncost: W=K=N=256-M d=16 S=8192 encode XOR/byte = M*d/N, "
+    printf("\ncost: W=2K=2N d=16 S=8192 encode XOR/byte = M*d/N, "
            "window bytes = 256*S\n");
     printf("M,N,goodput_Mbit_s,encode_xor_per_byte,window_kib,"
            "encode_core_pct_at_125MBps\n");

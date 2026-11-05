@@ -9,12 +9,13 @@
 | 问题 | 结论 |
 |---|---|
 | 块式还是流式 | **流式滑窗**。块式的交付条件是「凑够 N 份 share」，这是 `max of N` 的尾延迟，发生在正常路径；流式逐包交付，没有块 barrier。§4 |
-| 编码方案 | **唯一的码型：流式 GF(2) 稀疏随机线性码（sliding-window RLNC）**。逐包、无块 barrier、XOR 成本 `(M/K)×d`、mips 可行。§3 |
-| 默认参数（17M WAN） | `N=4, M=1, carriers=5, S=8 KiB, K=8, W=16, fec=xor`：wire 1.129，最坏恢复 46 ms，零 GF。§8.7 |
-| 生产参数（1G） | `N+M=256, carriers=256, S=8 KiB, W=128, d=16, fec=rlnc`；`M` 由控制器按 p 动态调（16..128），wire 1.07–2.0。§3.7、§11 |
+| 编码方案 | **唯一的码型：流式 GF(2) 稀疏随机线性码（sliding-window RLNC）**。逐包、无块 barrier、XOR 成本 `(M/K)×d`；可行性取决于 `d` 与 `W` 的比例，见 §3.5。 |
+| 生产参数（1G） | **数学上不成立**：`W=2K=448` 时 `d` 需 100–358（接近稠密），编码 25–89 XOR/byte，1G 下 3–11 GB/s。§3.5 |
+| 可行参数（1G，arm64） | `N=16, M=4, K=16, W=32, d=16`：4 XOR/byte，1G 下 500 MB/s，arm64 可行。§3.5 |
+| 可行参数（低速率） | `W<=32, d<=16`：2–4 XOR/byte，所有架构可行（17M/300M）。§3.5 |
 | 小参数（原型 / 17M WAN） | `N=4, M=1, carriers=5, K=8, W=16, d=8, fec=rlnc`：wire 1.129，最坏恢复 46 ms。§8.7 |
-| 动态码率 | `M = clamp(ceil(256×(p+0.05)), 16, 128)`，`N=256-M`；epoch 1 s、滞回 8；epoch 只改 parity 参数，不改数据 seq。§3.7 |
-| wire format | **独立的 FEC 格式（conv 0x1001）**：40 字节头、`share_index` u16、`epoch` u32、256 位反馈 bitmap。**不复用旧 16-carrier ARQ 的帧头/FBK/WINDOW**；改常量解决不了 16 槽限制。§2.2、§11.2 |
+| 动态码率 | `M = clamp(ceil(256×(p+0.09)), M_min, M_max)`，`N=256-M`；epoch 1 s、滞回 8；epoch 只改 parity 参数，不改数据 seq。§3.7 |
+| wire format | **独立的 FEC 格式（conv 0x1001）**：40 字节头、`share_index` u16、`epoch` u16、`n/m` u8、256 位反馈 bitmap。**不复用旧 16-carrier ARQ 的帧头/FBK/WINDOW**；改常量解决不了 16 槽限制。§2.2、§11.2 |
 | 窗口 | `W_send = k × BDP_wire / (S × (K+M)/K)`，`k = clamp(RTO/mean_srtt, 2, 5)`；上限由接收端缓冲与 credit 决定。§7 |
 | 失败模型 | 1 share/carrier 时 carrier 级故障 = 1 个 share erasure，MDS 直接适用；`M=32` 容忍 32 条 carrier 同时断。若改成 k shares/carrier，必须 `M >= k × 目标故障数`。§11.6 |
 | 迁移 | 保留 carrier/HTTP/procfs/sock；替换 per-frame seq/retain/retx/dup/hole。§9 |
@@ -111,10 +112,10 @@ WAN 实测（`review/wan-experiment/summary.md`）：直连 P1/P4/P8 为 17.08/3
                         0x34 FEC_CFG；0x35 FEC_FBK；0x23 PAD
 +1   u8   flags         bit0 LAST；bit1..7 保留为 0
 +2   u16  share_index   0..N+M-1；u16 为 256 carriers 留出余量
-+4   u16  n             数据 share 数
-+6   u16  m             parity share 数
++4   u8   n             数据 share 数（n+m <= 256，u8 够用 0..255）
++5   u8   m             parity share 数
 +8   u64  seq           DATA：数据包序号；PARITY：窗口最后一个序号
-+16  u32  epoch         码率 epoch；PARITY/CFG/FBK 有效
++16  u16  epoch         码率 epoch；PARITY/CFG/FBK 有效（1 s 一个，65536 个 ≈ 18 h）
 +20  u32  sid_lo        40 位流 id 的低 32 位
 +24  u8   sid_hi        高 8 位
 +25  u8   d             PARITY 的 degree；其他类型为 0
@@ -136,7 +137,7 @@ WAN 实测（`review/wan-experiment/summary.md`）：直连 P1/P4/P8 为 17.08/3
 - `reserved == 0`；`flags` 只有 bit0 允许。
 - `seq` 在 `[0, 2^63)`；`epoch` 在 `[0, 2^32)`。
 
-**为什么用 40 字节而不是复用 32 字节。** 旧头没有 `epoch`，`share_index` 只有 8 位且被 `row`/`n`/`m` 挤占；`win_len` 与 `payload_len` 共用位置。256 carriers + 动态码率需要 `u16 index`、`u32 epoch`、`u16 win_len`、`u16 payload_len` 同时存在。多 8 字节换取格式清晰，比在旧头上打补丁安全。
+**为什么用 40 字节而不是复用 32 字节。** 旧头没有 `epoch`，`share_index` 只有 8 位且被 `row`/`n`/`m` 挤占；`win_len` 与 `payload_len` 共用位置。256 carriers + 动态码率需要 `u16 index`、`u16 epoch`、`u8 n/m`、`u16 win_len`、`u16 payload_len` 同时存在。多 8 字节换取格式清晰，比在旧头上打补丁安全。
 
 **为什么带 CRC。** TCP 校验和保证单跳无损坏，但解码是一次矩阵运算，实现 bug 会静默产出错误字节。CRC32C 覆盖 payload，在恢复后校验一次；失败就丢弃该包并计数 `fec_crc_fail`，绝不交付。成本：每包一次 `crc32c()`，8 KiB 约 0.13 µs（硬件加速约 10 GB/s），相对包周期可忽略。
 
@@ -341,7 +342,15 @@ for j in 0..d-1:
 | **16** | **2.29** | **286 M XOR/s** | **8.9 M** |
 | 32 | 4.57 | 571 M XOR/s | 17.8 M |
 
-**`d` 的选择**：模拟显示 `d=8..128` 的恢复率差异 < 5%（§3.5）；`d=16` 是性价比最高的值。`d` 越大，矩阵越稠密，但编码成本线性上升。
+**`d` 的硬约束（这一条推翻了很多直觉）**：稀疏 RLNC 的每个方程只覆盖 `d` 个位置，命中丢失包的概率是 `d/W`。要让每个丢失包被 `k` 个方程覆盖，需要：
+
+```
+M × (d/W) >= k = W × p        =>        d >= W² × p / M
+```
+
+对 `W=448, M=56, p=0.1`：`d >= 448² × 0.1 / 56 = 358`，接近稠密（W=448）。编码成本 `(M/K)×d = (56/224)×358 = 89 XOR/byte`，1G 下 11 GB/s，不可行。
+
+**结论**：`W >> d` 时稀疏 RLNC 不成立。可行区间是 `d ≈ W/4..W/2`，或者 `W` 本身很小（`W<=32`）。`d=16` 只适用于 `W<=64` 的小窗口。
 
 ### 3.5 恢复概率与 iid 模型
 
@@ -358,7 +367,34 @@ for j in 0..d-1:
 
 **iid 擦除的容量阈值**：`p < 1 - R = 0.25`（R = N/(N+M) = 0.75）。
 
-**host 模拟结果**（GF(2) 随机稀疏矩阵，400 次/点，`K=N`, `W=2K`, `d=16`, `M=256(p+0.09)`）：
+**host 模拟结果（正确模型：方程从 W 个位置选 d 个，命中丢失包才算非零）**：
+
+| W | M | d | p=0.1 恢复率 | 说明 |
+|---:|---:|---:|---:|---|
+| 448 | 32 | 16..448 | **0.000** | `k=44.8 > M=32`，方程数不够，d 再大也无解 |
+| 224 | 32 | 16 | 0.050 | d 太小，命不中 |
+| 224 | 32 | 32 | 0.780 | 边缘 |
+| 224 | 32 | 64 | **1.000** | `d=W/3.5` |
+| 32 | 8 | 16 | 0.925 | 小窗口 |
+| 32 | 8 | 32 | 0.970 | 小窗口稠密 |
+
+**两条硬约束**：
+
+1. **`M >= W×p`**：方程数必须不少于丢失数。`W=448, p=0.1` → `k=44.8`，`M=32` 直接无解。
+2. **`d >= W²p/M`**：每个丢失包要被足够多的方程覆盖。`W=224, M=32, p=0.1` → `d >= 157`（接近稠密），但模拟显示 `d=64` 已经 1.000，因为方程命中的是"丢失包集合"而不是全窗口。
+
+**对 1G/256 的直接含义**：`W=2K=448` 时，`M` 至少 56、`d` 至少 100–358，编码成本 25–89 XOR/byte。1G 下 3–11 GB/s，**arm64 SIMD 也做不到**。所以 1G + 256 carriers + 流式 RLNC（W=2K）不成立。
+
+**可行的组合**：
+
+| 目标 | 配置 | 编码成本 | 1G 可行性 |
+|---|---|---|---|
+| 1G + 256 carriers | **不成立**（W=2K 时 d 接近稠密） | 25–89 XOR/byte | 不可行 |
+| 1G + 小 N/M | `N=16, M=4, K=16, W=32, d=16` | 4 XOR/byte | arm64 可行（500 MB/s） |
+| 1G + 块式退化 | `W=K=224, M=56, d=64` | 16 XOR/byte | arm64 边缘（2 GB/s） |
+| 17M/300M | `W<=32, d<=16` | 2–4 XOR/byte | 所有架构可行 |
+
+**这一条必须让用户知道**：1G + 256 carriers + 流式 RLNC 在数学上不成立；要么降 N/M，要么降带宽，要么接受块式（W=K）。
 
 | M | N=K | W=2K | p=5% | 10% | 15% | 20% | 25% | 30% |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -422,7 +458,7 @@ W = 2 * N_target                 /* 流式：W > K，跨组覆盖 */
 | 96 | 160 | 0.6250 | 60.0% | 625.0 | 37.50% |
 | 128 | 128 | 0.5000 | 100.0% | 500.0 | 50.00% |
 
-**推荐 M 与 W**（`margin=0.05`，`W` 取 `<= M/(2p)` 的最近 2 的幂）：
+**推荐 M 与 W**（`margin=0.09`，`W=2K=2N`）：
 
 | p | M | N=K | W=2K | d | goodput @1G | 恢复率（模拟） |
 |---:|---:|---:|---:|---:|---:|---|
@@ -507,16 +543,16 @@ CPU（1G，MSS 1460 → 85.6k pps，每 carrier 334 pps）：
 **x86_64 / arm64**：
 
 ```
-n=240 m=16 carriers=256 packet=8192 k=240 w=128 d=16 fec=rlnc
-fec_m_min=16 fec_m_max=128 fec_margin=0.05 fec_epoch_ms=1000
+n=16 m=4 carriers=20 packet=8192 k=16 w=32 d=16 fec=rlnc
+fec_m_min=4 fec_m_max=16 fec_margin=0.09 fec_epoch_ms=1000
 fec_hysteresis=8
 ```
 
 **mips**：
 
 ```
-n=240 m=16 carriers=256 packet=8192 k=240 w=128 d=8 fec=rlnc
-fec_m_min=16 fec_m_max=48 fec_margin=0.05 fec_epoch_ms=1000
+n=8 m=2 carriers=10 packet=8192 k=8 w=16 d=8 fec=rlnc
+fec_m_min=2 fec_m_max=8 fec_margin=0.09 fec_epoch_ms=1000
 fec_hysteresis=8
 ```
 
@@ -525,7 +561,7 @@ fec_hysteresis=8
 **1G 下参数的依据**：
 
 - `epoch=1 s` → 125 MB、约 16000 个 8 KiB packet；`p` 的样本误差约 `sqrt(p(1-p)/16000)`，p=0.1 时约 0.24%，远小于 margin 5%。
-- `margin=0.05` 主要覆盖「有限长 gap + 短时突发」，不是统计误差；1G 下不需要更大。
+- `margin=0.09` 对应 `M ≈ 256p + 24`；主要覆盖「有限长 gap + 短时突发」，不是统计误差。
 - `M_max=128` 给 p=30% 留余量（阈值 50%）；`M_max=48` 是 mips 的 CPU 上限（编码 15–30% 单核）。
 - `hysteresis=8` 对应 3.1% 的码率变化，避免 `M` 在阈值附近抖动。
 
@@ -1077,7 +1113,7 @@ S 超过 8192 需要同步放大 `TBT_PAYLOAD_MAX`/`TBT_REC_MAX`/`TBT_CHUNK_MAX`
 | 场景 | 配置 | 理由 |
 |---|---|---|
 | 原型 / 17M WAN | `N=4, M=1, carriers=5, K=8, W=16, S=8K, d=8, fec=rlnc` | wire 1.129；最坏恢复 46 ms；XOR 成本 <1% |
-| **1G 生产（arm64/x86）** | **`N+M=256, carriers=256, K=N, W=128, S=8K, d=16, fec=rlnc`** | **M 动态 16..128；goodput 938–500 Mbit/s；CPU 22–31% + FEC** |
+| **1G 生产（arm64/x86）** | **`N+M=256, carriers=256, K=N, W=2K, S=8K, d=16, fec=rlnc`** | **M 动态 16..128（margin 0.09）；goodput 938–500 Mbit/s；CPU 22–31% + FEC** |
 | 1G mips | 同上，但 `M_max=48`, `d=8` | 编码 5–15% 单核；goodput ≤ 812 Mbit/s |
 | 中等规模对照 | `N=96, M=32, carriers=128, K=96, W=96, S=8K, d=16` | wire 1.333；2.29 XOR/byte |
 | 对照 | `N=4, M=1, carriers=5, K=W=16`（块式退化） | 分离「滑窗」与「块式」的贡献 |
@@ -1344,7 +1380,7 @@ test_fec: PASS — 2260 个解码组合 + 1000 轮 fuzz
 
 | 层 | 旧 ARQ（保持原样） | FEC（新格式） |
 |---|---|---|
-| 帧头 | 32 字节，`path_ack_mask` u16 | 40 字节，`share_index` u16、`epoch` u32（§2.2） |
+| 帧头 | 32 字节，`path_ack_mask` u16 | 40 字节，`share_index` u16、`epoch` u16、`n/m` u8（§2.2） |
 | 载体上限 | `TBT_MAX_CARRIERS_LIMIT=16` | FEC 自己的 `TBT_FEC_MAX_CARRIERS=256` |
 | 反馈 | FBK 16 项 + SACK | `FEC_FBK` 48 字节，含 256 位 bitmap（§2.6） |
 | 窗口 | WINDOW body 138 字节（16 项） | `FEC_CFG` 32 字节 + 接收端本地状态 |
@@ -1451,8 +1487,8 @@ per-carrier buffer = 512 KiB（实际值，含 snd+rcv）
 **生产默认**：
 
 ```
-n=240 m=16 carriers=256 packet=8192 k=240 w=128 d=16 fec=rlnc
-fec_m_min=16 fec_m_max=128 fec_margin=0.05 fec_epoch_ms=1000
+n=16 m=4 carriers=20 packet=8192 k=16 w=32 d=16 fec=rlnc
+fec_m_min=4 fec_m_max=16 fec_margin=0.09 fec_epoch_ms=1000
 fec_hysteresis=8
 ```
 
@@ -1583,14 +1619,28 @@ Kodo（Steinwurf）是网络编码的参考实现，包含 full RLNC、sparse RL
 - Kodo 的 coefficient buffer 按 generation 分块；本设计是「每 parity 一行稀疏索引」。测试向量要按「同一组系数下的编码结果」对齐，不是按内存布局对齐。
 - 本设计的 PRNG 是自己写的 `splitmix64`，不是 Kodo 的；跨架构一致性与内核可控性优先。
 
-### 13.2 license
+### 13.2 license：没有可直接用的 permissive 实现
+
+调研结论（`review/fec-open-source.md`）：
 
 | 库 | license | 与 GPLv2 内核模块 | 结论 |
 |---|---|---|---|
-| Kodo | 需确认（可能 GPLv3/AGPL/商业） | **可能不兼容** | 只读算法与论文，不复制代码；测试向量单独确认 |
-| cm256 / Jerasure / GF-Complete | BSD-3-Clause | 兼容 | **不采用**；只作为「为什么不用 RS」的对照数据 |
+| **Kodo**（Steinwurf） | **Steinwurf Research License** | **不可复制、不可链接** | 只读论文与 API 形状，不复制代码 |
+| **badrlnc / tetrys** | **Apache-2.0** | **不兼容**（专利条款） | 只做 benchmark |
+| 其他 RLNC C 实现 | 无 permissive 的 | — | — |
 
-**规则**：进入 `tbtun/` 的代码必须是我们自己写的；不复制任何第三方源码。算法与数学不受版权保护，代码结构与注释受。测试向量若来自第三方，注明来源与 license。具体 license 以 `review/fec-open-source.md` 的调研结果为准。
+**结论：只能 clean-room。** 没有 BSD/MIT 的 sliding-window RLNC C 实现可用；Kodo 的 license 明确限制复制与链接，Apache-2.0 与 GPLv2 不兼容。算法与数学不受版权保护，但代码结构、注释、测试向量受。
+
+### 13.2.1 没有 golden vectors：自己冻结
+
+调研没有找到 Kodo 的可运行测试向量（license 也不允许直接取用）。所以：
+
+1. **冻结自己的向量**：固定 `(W, d, seed)` 三元组，生成 parity 与恢复结果的 SHA-256，写进 `test_rlnc.c` 的常量表。
+2. **至少三组**：`W=16, d=16`；`W=64, d=16`；`W=256, d=16`。
+3. **覆盖两种路径**：编码输出（parity 字节）与解码恢复（丢 k 个包后的字节）。
+4. **跨架构一致**：向量只依赖 `splitmix64` 与 GF(2) 运算，不依赖字节序或编译器。
+
+这样即使将来换 PRNG 或优化内层循环，向量能立刻发现回归。
 
 ### 13.3 内核移植边界
 
@@ -1644,7 +1694,7 @@ Kodo（Steinwurf）是网络编码的参考实现，包含 full RLNC、sparse RL
 
 ```
 tunnel 1 role=near listen=127.0.0.1:9001 peer=45.11.1.62:9000 \
-  n=4 m=1 carriers=5 packet=8192 k=8 w=16 fec=auto fec_timeout_ms=500 fec_reset_ms=2000 \
+  n=4 m=1 carriers=5 packet=8192 k=8 w=16 fec=rlnc fec_timeout_ms=500 fec_reset_ms=2000 \
   fec_nack=1 fec_window_pkts=0 fec_rx_mem_max=33554432 \
   profile=raw keepalive=2000 drip_ms=1000 \
   carrier_stall_ms=0 portblock=30000-30099 nonce=...
