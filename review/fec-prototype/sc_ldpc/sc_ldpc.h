@@ -1,20 +1,14 @@
 /*
- * sc_ldpc.h - spatially coupled (5,10) LDPC for the binary erasure channel.
+ * sc_ldpc.h - spatially coupled LDPC for the binary erasure channel.
  *
- * Construction and BEC peeling decoder re-implemented in C99 from the
- * description of npminh12's "Spatially-coupled-LDPC" simulation:
+ * The construction follows npminh12's "Spatially-coupled-LDPC" simulation:
  *
  *   https://github.com/npminh12/Spatially-coupled-LDPC
  *   commit 3d403f4, MIT License, Copyright (c) 2019 npminh12.
  *
  * Only the construction rules and the BEC message semantics were taken from
  * that source.  No C++ code is copied.  See review/sc-ldpc-sim.md for the
- * rules restated in prose and for the three documented deviations:
- *
- *   1. causal termination (L check blocks instead of L+4) so that the
- *      systematic code has design rate exactly n_data/(n_data+n_parity);
- *   2. a systematic split (stream 0 = payload, stream 1 = parity);
- *   3. extra check nodes for target rates below 0.50.
+ * rules restated in prose and for the documented deviations.
  *
  * Host-only, no external dependencies.
  */
@@ -31,9 +25,18 @@ typedef enum {
      * Not systematic; only useful as the literal reference code. */
     SC_TERM_NATIVE = 0,
     /* npminh12 rule with the trailing l-1 check blocks dropped: M = L*m.
-     * Each check owns exactly one parity bit, so the code is systematic and
-     * the design rate is exact for every L. */
-    SC_TERM_CAUSAL = 1
+     * Each check owns exactly one parity bit, but the last l-1 variable
+     * blocks lose their right-hand checks and form 2-variable stopping
+     * sets.  Kept for comparison; it fails at any L. */
+    SC_TERM_CAUSAL = 1,
+    /* Ring payload window plus a non-wrapping parity accumulator.  Payload
+     * block i is connected to check supernodes (base..base+4) mod n_base,
+     * base = floor(i*n_base/L), degree 5; parity block a is connected to
+     * checks a and a+1 (degree 2, the last block degree 1).  n_base = L
+     * gives M = L*m and rate exactly 0.5; rate 0.60/0.70 shrink n_base to
+     * round(L*(1-R)/R).  The encoder is a single forward sweep and no
+     * 2-variable stopping set exists. */
+    SC_TERM_ACC = 2
 } sc_term;
 
 /* Which bits the channel erases. */
@@ -46,10 +49,10 @@ typedef enum {
 
 typedef struct {
     int block;      /* variable nodes per coupling block, q*m; even, >= 16 */
-    int L;          /* coupling length, >= 5 */
-    int rate_pct;   /* target rate in percent: 50, 40 or 35 */
-    int term;       /* sc_term; rate_pct != 50 requires SC_TERM_CAUSAL */
-    int extra_dc;   /* data degree of each extra check node (rate < 50) */
+    int L;          /* coupling length, >= 2 */
+    int rate_pct;   /* target rate in percent: 50, 60 or 70 */
+    int term;       /* sc_term; rate_pct != 50 requires SC_TERM_ACC */
+    int extra_dc;   /* payload degree of each extra check node (rate < 50) */
     uint64_t seed;  /* construction seed */
 } sc_params;
 
@@ -64,7 +67,7 @@ typedef struct {
     long edges;
     int dl_max;
     int dc_max;
-    double rate;    /* n_data / n for causal, 1 - n_chk/n for native */
+    double rate;    /* n_data / n for systematic, 1 - n_chk/n for native */
     size_t mem_bytes;
 } sc_info;
 
@@ -84,7 +87,7 @@ void sc_get_info(const sc_code *c, sc_info *out);
 /*
  * Systematic encoder.  code[0 .. n_data-1] holds the payload on entry; the
  * parity bits code[n_data .. n-1] are written.  Returns 0 on success, -1 if
- * the code is not systematic (SC_TERM_NATIVE).
+ * the code is not systematically encodable (SC_TERM_NATIVE).
  */
 int sc_encode(sc_code *c, uint8_t *code);
 
@@ -104,10 +107,22 @@ sc_dec_stat sc_decode(sc_code *c, const uint8_t *recv, const uint8_t *erased,
 /* Variable index of payload bit k; k must be < n_data. */
 int sc_data_var(const sc_code *c, int k);
 
-/* 1 if the code is systematic (SC_TERM_CAUSAL), 0 otherwise. */
+/* 1 if the code is systematic (SC_TERM_CAUSAL or SC_TERM_ACC), 0 otherwise. */
 int sc_systematic(const sc_code *c);
 
 /* Decoder knowledge after the last sc_decode(): 1 = value known. */
 const uint8_t *sc_known_bits(const sc_code *c);
+
+/*
+ * Degree histograms, for the matrix dump.  vhist[i] = number of variable
+ * nodes of degree i, chist[i] = number of check nodes of degree i.  The
+ * arrays must hold SC_DEG_MAX + 1 entries; entries above the maximum degree
+ * are left at 0.  Returns the maximum degree found.
+ */
+#define SC_DEG_MAX 64
+int sc_degrees(const sc_code *c, int *vhist, int *chist);
+
+/* Termination name, "native", "causal" or "acc". */
+const char *sc_term_name(const sc_code *c);
 
 #endif /* SC_LDPC_H */

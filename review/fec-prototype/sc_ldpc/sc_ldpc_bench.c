@@ -3,7 +3,7 @@
  *
  * Single point (the interface the cross-machine harness uses):
  *
- *   cc -O2 -std=c99 -Wall -Wextra -Werror sc_ldpc.c sc_ldpc_bench.c -lm \
+ *   cc -O3 -std=c99 -Wall -Wextra -Werror sc_ldpc.c sc_ldpc_bench.c -lm \
  *      -o sc_ldpc_bench
  *   ./sc_ldpc_bench --block 256 --L 8 --rate 0.50 --p 0.30 --trials 2000
  *
@@ -21,7 +21,7 @@
  *
  * Extra flags:
  *   --model systematic|symmetric  channel model (default systematic)
- *   --term causal|native          boundary rule (default causal)
+ *   --term acc|causal|native      boundary rule (default acc)
  *   --extra-dc N                  payload degree of extra checks (default 5)
  *   --codes N                     code instances averaged (default 4)
  *   --seed N                      construction / channel seed
@@ -157,8 +157,22 @@ static point_res run_point(sc_code **codes, int ncodes, long trials, int p_mil,
     for (k = 0; k < ncodes && done < trials; k++) {
         sc_info in;
         long per, t;
-        crng rng;
+        crng rng, prng;
+        uint8_t *code;
+        long target;
         sc_get_info(codes[k], &in);
+        target = (model == SC_MODEL_SYSTEMATIC) ? in.n_data : in.n;
+        code = calloc((size_t)in.n, 1);
+        if (!code)
+            continue;
+        /* One random codeword per instance; every trial keeps it and only
+         * redraws the erasure mask.  recv is the codeword itself, so a
+         * "recovered" bit must also match the transmitted value. */
+        crng_seed(&prng, seed + (uint64_t)(k * 1000003) + 0x9e3779b9u);
+        for (t = 0; t < in.n_data; t++)
+            code[t] = (uint8_t)(crng_next(&prng) & 1u);
+        (void)sc_encode(codes[k], code);
+        memcpy(recv, code, (size_t)in.n);
         per = (trials - done) / (ncodes - k);
         if (per <= 0)
             per = 1;
@@ -167,15 +181,26 @@ static point_res run_point(sc_code **codes, int ncodes, long trials, int p_mil,
         crng_seed(&rng, seed + (uint64_t)(k * 1000003) + (uint64_t)p_mil);
         for (t = 0; t < per; t++) {
             sc_dec_stat st;
+            int ok;
+            long v;
             make_mask(codes[k], p_mil, model, &rng, mask);
-            st = sc_decode(codes[k], recv, mask, out, model == SC_MODEL_SYSTEMATIC);
+            st = sc_decode(codes[k], code, mask, out,
+                           model == SC_MODEL_SYSTEMATIC);
             done++;
-            if (st.unresolved == 0)
+            ok = (st.unresolved == 0);
+            if (ok)
+                for (v = 0; v < target; v++)
+                    if (out[v] != code[v]) {
+                        ok = 0;
+                        break;
+                    }
+            if (ok)
                 full++;
             sum_unres += (double)st.unresolved / (double)st.target;
             sum_rounds += (double)st.rounds;
             sum_visits += (double)st.edge_visits;
         }
+        free(code);
     }
     r.trials = done;
     r.recovery = done ? (double)full / (double)done : 0.0;
@@ -262,12 +287,12 @@ static void measure_dec(sc_code *c, int p_mil, double *mbps, long *reps_out)
         return;
     }
     for (i = 0; i < in.n_data; i++)
-        code[i] = (uint8_t)((i * 40503u) >> 7);
+        code[i] = (uint8_t)(((i * 40503u) >> 7) & 1u);
     if (sc_systematic(c))
         (void)sc_encode(c, code);
     memcpy(recv, code, (size_t)in.n);
     crng_seed(&rng, 999331u);
-    make_mask(c, p_mil, SC_MODEL_SYSTEMATIC, &rng, mask);
+    make_mask(c, p_mil, SC_MODEL_SYMMETRIC, &rng, mask);
 
     t0 = now_sec();
     (void)sc_decode(c, recv, mask, out, 1);
@@ -473,7 +498,7 @@ static void print_report_row(FILE *f, const char *series, const cfg *g,
 /* ------------------------------------------------------------------ */
 
 static int run_cfg(const cfg *g, int want_report, FILE *rep, const char *series,
-                   int do_payload, int do_diag)
+                   int do_payload, int do_diag, int do_dump)
 {
     sc_code *codes[16];
     char err[160];
@@ -524,7 +549,7 @@ static int run_cfg(const cfg *g, int want_report, FILE *rep, const char *series,
     r = run_point(codes, ncodes, g->trials, p_mil, g->model, g->seed, recv, out,
                   mask);
 
-    if (g->term == SC_TERM_CAUSAL)
+    if (g->term != SC_TERM_NATIVE)
         measure_enc(codes[0], &enc, &reps_e);
     measure_dec(codes[0], p_mil, &dec, &reps_d);
 
@@ -544,6 +569,29 @@ static int run_cfg(const cfg *g, int want_report, FILE *rep, const char *series,
     if (do_diag)
         block_diag(codes[0], g->L, p_mil, g->model, g->seed + 29,
                    g->trials < 400 ? g->trials : 400);
+    if (do_dump) {
+        int vh[SC_DEG_MAX + 1], ch[SC_DEG_MAX + 1], d, first;
+        sc_degrees(codes[0], vh, ch);
+        fprintf(stderr, "matrix: term=%s n=%d data=%d par=%d chk=%d extra=%d "
+                        "edges=%ld rate=%.5f\n",
+                sc_term_name(codes[0]), in.n, in.n_data, in.n_par, in.n_chk,
+                in.n_extra, in.edges, in.rate);
+        fprintf(stderr, "vdeg:");
+        first = 1;
+        for (d = 0; d <= SC_DEG_MAX; d++)
+            if (vh[d]) {
+                fprintf(stderr, "%s%d:%d", first ? "" : " ", d, vh[d]);
+                first = 0;
+            }
+        fprintf(stderr, "\ncdeg:");
+        first = 1;
+        for (d = 0; d <= SC_DEG_MAX; d++)
+            if (ch[d]) {
+                fprintf(stderr, "%s%d:%d", first ? "" : " ", d, ch[d]);
+                first = 0;
+            }
+        fprintf(stderr, "\n");
+    }
 
     fprintf(stderr,
             "point: block=%d L=%d rate=%.2f p=%.2f model=%s term=%s "
@@ -551,7 +599,7 @@ static int run_cfg(const cfg *g, int want_report, FILE *rep, const char *series,
             "enc=%.3fMB/s(%ld) dec=%.3fMB/s(%ld)\n",
             g->block, g->L, (double)g->rate_pct / 100.0, g->p,
             g->model == SC_MODEL_SYSTEMATIC ? "systematic" : "symmetric",
-            g->term == SC_TERM_CAUSAL ? "causal" : "native", in.n, in.n_data,
+            sc_term_name(codes[0]), in.n, in.n_data,
             in.n_chk, in.edges, in.rate, in.mem_bytes, enc, reps_e, dec,
             reps_d);
 
@@ -570,10 +618,11 @@ static int run_cfg(const cfg *g, int want_report, FILE *rep, const char *series,
 static void usage(void)
 {
     fprintf(stderr,
-            "usage: sc_ldpc_bench --block N --L N --rate 0.50 --p 0.30 "
+            "usage: sc_ldpc_bench --block N --L N --rate 0.50|0.60|0.70 "
+            "--p 0.30 "
             "[--trials N] [options]\n"
             "  --model systematic|symmetric  channel model (default systematic)\n"
-            "  --term causal|native          boundary rule (default causal)\n"
+            "  --term acc|causal|native      boundary rule (default acc)\n"
             "  --extra-dc N                  extra check payload degree (5)\n"
             "  --codes N                     code instances (4)\n"
             "  --seed N                      seed (1)\n"
@@ -585,6 +634,10 @@ static void usage(void)
             "sweeps\n"
             "  --report FILE                 extended CSV output\n"
             "  --payload-check               verify a payload round trip "
+            "(stderr)\n"
+            "  --diag                        unresolved-bit histogram per "
+            "block (stderr)\n"
+            "  --dump                        matrix and degree histograms "
             "(stderr)\n");
 }
 
@@ -592,6 +645,7 @@ int main(int argc, char **argv)
 {
     cfg g;
     int i, header = 1, sweep = 0, full = 0, do_payload = 0, do_diag = 0;
+    int do_dump = 0;
     const char *report_path = NULL;
     FILE *rep = NULL;
 
@@ -603,7 +657,7 @@ int main(int argc, char **argv)
     g.trials = 2000;
     g.codes = 4;
     g.extra_dc = 5;
-    g.term = SC_TERM_CAUSAL;
+    g.term = SC_TERM_ACC;
     g.model = SC_MODEL_SYSTEMATIC;
     g.seed = 1;
     g.seg_bytes = 8192;
@@ -624,6 +678,8 @@ int main(int argc, char **argv)
             do_payload = 1;
         } else if (!strcmp(a, "--diag")) {
             do_diag = 1;
+        } else if (!strcmp(a, "--dump")) {
+            do_dump = 1;
         } else if (!strcmp(a, "--block") && i + 1 < argc) {
             g.block = (int)strtol(argv[++i], NULL, 10);
         } else if (!strcmp(a, "--L") && i + 1 < argc) {
@@ -655,7 +711,7 @@ int main(int argc, char **argv)
         } else if (!strcmp(a, "--term") && i + 1 < argc) {
             const char *m = argv[++i];
             if (!strcmp(m, "causal"))
-                g.term = SC_TERM_CAUSAL;
+                g.term = SC_TERM_ACC;
             else if (!strcmp(m, "native"))
                 g.term = SC_TERM_NATIVE;
             else {
@@ -679,18 +735,23 @@ int main(int argc, char **argv)
         g.p = 1.0;
 
     if (report_path) {
-        rep = fopen(report_path, "w");
+        long sz;
+        rep = fopen(report_path, "a");
         if (!rep) {
             fprintf(stderr, "cannot open %s\n", report_path);
             return 1;
         }
-        print_report_header(rep);
+        fseek(rep, 0, SEEK_END);
+        sz = ftell(rep);
+        if (sz == 0)
+            print_report_header(rep);
     }
     if (header)
         print_header(stdout);
 
     if (!sweep) {
-        int rc = run_cfg(&g, rep != NULL, rep, "point", do_payload, do_diag);
+        int rc = run_cfg(&g, rep != NULL, rep, "point", do_payload, do_diag,
+                         do_dump);
         if (rep)
             fclose(rep);
         return rc == 0 ? 0 : 1;
@@ -699,7 +760,7 @@ int main(int argc, char **argv)
     {
         static const int blocks[2] = {256, 512};
         static const int Ls[3] = {8, 16, 32};
-        static const int rates[3] = {50, 40, 35};
+        static const int rates[3] = {70, 60, 50};
         static const double ps[3] = {0.30, 0.40, 0.50};
         int bi, li, ri, pi;
         cfg s = g;
@@ -713,8 +774,8 @@ int main(int argc, char **argv)
                         s.rate_pct = rates[ri];
                         s.p = ps[pi];
                         s.model = SC_MODEL_SYSTEMATIC;
-                        s.term = SC_TERM_CAUSAL;
-                        if (run_cfg(&s, rep != NULL, rep, "pcurve_b", 0, 0) != 0)
+                        s.term = SC_TERM_ACC;
+                        if (run_cfg(&s, rep != NULL, rep, "pcurve_b", 0, 0, 0) != 0)
                             return 1;
                     }
                 }
@@ -732,8 +793,8 @@ int main(int argc, char **argv)
                             s.rate_pct = rates[ri];
                             s.p = ps[pi];
                             s.model = SC_MODEL_SYMMETRIC;
-                            s.term = SC_TERM_CAUSAL;
-                            if (run_cfg(&s, rep != NULL, rep, "pcurve_a", 0, 0) != 0)
+                            s.term = SC_TERM_ACC;
+                            if (run_cfg(&s, rep != NULL, rep, "pcurve_a", 0, 0, 0) != 0)
                                 return 1;
                         }
                     }
@@ -749,7 +810,7 @@ int main(int argc, char **argv)
                         s.p = ps[pi];
                         s.model = SC_MODEL_SYMMETRIC;
                         s.term = SC_TERM_NATIVE;
-                        if (run_cfg(&s, rep != NULL, rep, "native_a", 0, 0) != 0)
+                        if (run_cfg(&s, rep != NULL, rep, "native_a", 0, 0, 0) != 0)
                             return 1;
                     }
                 }
@@ -764,8 +825,8 @@ int main(int argc, char **argv)
                         s.rate_pct = rates[ri];
                         s.p = 0.10 + 0.05 * (double)qi;
                         s.model = SC_MODEL_SYMMETRIC;
-                        s.term = SC_TERM_CAUSAL;
-                        if (run_cfg(&s, rep != NULL, rep, "fine_a", 0, 0) != 0)
+                        s.term = SC_TERM_ACC;
+                        if (run_cfg(&s, rep != NULL, rep, "fine_a", 0, 0, 0) != 0)
                             return 1;
                     }
                 }

@@ -6,5 +6,5 @@
 set -e
 cd "$(dirname "$0")"
 CC=${CC:-cc}
-$CC -O2 -std=c99 -Wall -Wextra -Werror sc_ldpc.c sc_ldpc_bench.c -lm -o sc_ldpc_bench
+$CC -O3 -std=c99 -Wall -Wextra -Werror sc_ldpc.c sc_ldpc_bench.c -lm -o sc_ldpc_bench
 echo "built ./sc_ldpc_bench"
