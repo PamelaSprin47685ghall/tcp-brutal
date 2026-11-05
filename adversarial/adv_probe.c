@@ -2191,7 +2191,7 @@ static int fakefar_suite(int port, int pubport, int tunnel)
 /* Write until the application's own socket pushes back, or `want` bytes were
  * accepted.  The near side's accepted socket buffers 1 MiB and this child's
  * send buffer another 2 MiB, so the loop reaches EAGAIN well after the
- * carrier's 512 KiB send queue is full. */
+ * carrier's 2 MiB send queue is full. */
 static int write_until_eagain(int fd, size_t want)
 {
     unsigned char buf[65536];
@@ -2229,16 +2229,16 @@ static int pipe_read(int fd, void *buf, size_t len, int ms)
 /* The abusive application.  `rst` selects the close shape: a clean half-close
  * (FIN) or SO_LINGER 0 (RST).  The child reports through pipes, never through
  * the console, so its exit cannot interleave with the parent's verdict. */
-/* The carrier's send queue is 512 KiB (SO_SNDBUF 256 KiB, doubled) and the
- * raw record header adds 32 bytes per 8 KiB.  Writing exactly one send queue
- * worth of payload fills the socket while leaving the stream's own 64 KiB
- * queue as the only remainder, so the capture finishes and queues the FIN/RST
- * before the drain.  A larger write leaves uncaptured bytes behind the
- * control frame and the test measures the capture gate, not review 22.  The
- * RST variant waits for the pump's hiwat proof before it closes, because a
- * fixed ramp raced the fill and could kill the stream while the carrier was
- * still below its line. */
-#define BP_BYTES (512 * 1024)
+/* The carrier's send queue is 2 MiB: tbt_car_setsockbuf() asks for 1 MiB and
+ * the kernel doubles it, and the raw record header adds 32 bytes per 8 KiB.
+ * A 512 KiB write could never fill that queue, so hiwat stayed flat and the
+ * verdict measured the application, not review 22.  The tunnel line under
+ * test sets tx_window_bytes=8388608, so the near admits the whole 4 MiB write
+ * (the stream's reorder window no longer caps it) and the pump must meet
+ * -EAGAIN once the 2 MiB queue is full.  The RST variant waits for the pump's
+ * hiwat proof before it closes, because a fixed ramp raced the fill and could
+ * kill the stream while the carrier was still below its line. */
+#define BP_BYTES (4 * 1024 * 1024)
 
 static void app_backpressure_child(int pubport, int rst, int sigfd, int donefd)
 {
@@ -2320,13 +2320,12 @@ static int raw_send_sack(int fd, int idx, uint32_t sid, uint8_t sidhi,
 }
 
 /* The near's `tx` stat is the payload the pump has already handed to the
- * carrier's TCP send queue.  Acking exactly that bootstraps the near's
- * application-level window (128 KiB above tx_ack) without ever acking a frame
- * the pump has not written: the old 64 KiB ramp ran to 2.6 MiB while the pump
- * had written 475 KiB, so the pump dropped the rest as "already delivered".
- * The ack is still a test shortcut -- the fake far has not read the bytes --
- * but it is bounded by the write cursor, which is what keeps the frame stream
- * intact. */
+ * carrier's TCP send queue.  Acking exactly that advances the near's window
+ * and retention without ever acking a frame the pump has not written: the old
+ * 64 KiB ack ramp ran to 2.6 MiB while the pump had written 475 KiB, so the
+ * pump dropped the rest as "already delivered".  The ack is still a test
+ * shortcut -- the fake far has not read the bytes -- but it is bounded by the
+ * write cursor, which is what keeps the frame stream intact. */
 static uint64_t near_tx_ack(int tunnel)
 {
     /* " tx=", not "tx": stat_key() matches a substring, and the same stats
@@ -2395,6 +2394,58 @@ static int pad_until_done(int fd, int idx, uint32_t sid, uint8_t sidhi,
     return done;
 }
 
+/* Accept one near carrier and answer its HELLO.  The near dials a replacement
+ * when it loses a carrier, so mode_fineagain() calls this again for the second
+ * connection instead of reading a dead socket.  Returns the connected fd, or
+ * -1 with *err naming the failure. */
+static int carrier_join(int ls, struct rb *r, struct fr *f, unsigned char *body,
+                        size_t cap, int *idx, int *gen, unsigned char *nonce,
+                        const char **err)
+{
+    struct fr h;
+    int fd, i, have_hello = 0;
+
+    *err = "the near side never dialled the fake far";
+    fd = accept_to(ls, 8000);
+    if (fd < 0)
+        return -1;
+    {
+        int rb_sz = 4096;
+
+        /* A tiny receive buffer closes the near's TCP window early, so the
+         * 2 MiB carrier send queue fills long before the 4 MiB application
+         * write ends. */
+        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rb_sz, sizeof(rb_sz));
+    }
+    memset(r, 0, sizeof(*r));
+    r->fd = fd;
+    for (i = 0; i < 8; i++)
+    {
+        if (raw_read_frame(r, f, body, cap, 3000))
+            break;
+        if (f->type == TBT_F_HELLO)
+        {
+            memcpy(nonce, body + 2, 16);
+            *gen = (body[22] >> 2) & 0xf;
+            *idx = f->path;
+            have_hello = 1;
+            break;
+        }
+    }
+    if (!have_hello)
+    {
+        *err = "no HELLO from the near carrier";
+        close(fd);
+        return -1;
+    }
+    h = (struct fr){ .type = TBT_F_HELLO, .path = (uint8_t)*idx,
+                     .conv = TBT_CONV };
+    /* The near tunnel is profile=raw, whose HELLO profile bits are 3. */
+    hello_body(body, TBT_ROLE_FAR, nonce, (unsigned char)(3 | *gen << 2));
+    raw_send_frame(fd, &h, body, 23);
+    return fd;
+}
+
 /* The near's carrier send queue is full when the application half-closes (or
  * resets).  A pinned control frame that meets -EAGAIN must be requeued; the
  * baseline frees it.  FIN has a retry from the FBK tick, RST has none, so the
@@ -2405,6 +2456,7 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
     const char *name = rst ? "near.rst_eagain" : "near.fin_eagain";
     int ls = listen_on(port);
     int fd, sig[2], done[2], have_open = 0, i, gen = 0, idx = 0, seen = 0;
+    int redialed = 0;
     unsigned char nonce[16], body[8192];
     struct fr f;
     static struct rb r;
@@ -2427,52 +2479,17 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
     klog_start();
     hiwat0 = stat_key(tunnel, "hiwat");
     hu0 = stat_key(tunnel, "holes_unrecoverable");
-    fd = accept_to(ls, 8000);
-    if (fd < 0)
     {
-        result(name, 0, "the near side never dialled the fake far");
-        close(ls);
-        return failures;
-    }
-    {
-        int rb_sz = 4096;
+        const char *err;
 
-        /* A tiny receive buffer closes the near's TCP window early, so its
-         * carrier send queue fills after a few hundred KiB. */
-        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rb_sz, sizeof(rb_sz));
-    }
-    memset(&r, 0, sizeof(r));
-    r.fd = fd;
-    {
-        int have_hello = 0;
-
-        for (i = 0; i < 8; i++)
+        fd = carrier_join(ls, &r, &f, body, sizeof(body), &idx, &gen, nonce,
+                          &err);
+        if (fd < 0)
         {
-            if (raw_read_frame(&r, &f, body, sizeof(body), 3000))
-                break;
-            if (f.type == TBT_F_HELLO)
-            {
-                memcpy(nonce, body + 2, sizeof(nonce));
-                gen = (body[22] >> 2) & 0xf;
-                idx = f.path;
-                have_hello = 1;
-                break;
-            }
-        }
-        if (!have_hello)
-        {
-            result(name, 0, "no HELLO from the near carrier");
-            close(fd);
+            result(name, 0, "%s", err);
             close(ls);
             return failures;
         }
-    }
-    {
-        struct fr h = { .type = TBT_F_HELLO, .path = (uint8_t)idx, .conv = TBT_CONV };
-
-        /* The near tunnel is profile=raw, whose HELLO profile bits are 3. */
-        hello_body(body, TBT_ROLE_FAR, nonce, (unsigned char)(3 | gen << 2));
-        raw_send_frame(fd, &h, body, 23);
     }
 
     /* The OPEN exists only once the application connects, so start the app
@@ -2554,9 +2571,10 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
          * keep acking while waiting so the capture can finish.  The common
          * gate below still requires hiwat to have grown. */
         pad_until_hiwat(fd, idx, sid, sidhi, 3000, tunnel, hiwat0);
-        /* Widen the far's window now, not after the close: the carrier's TCP
-         * has been in zero-window for seconds, and a 512 KiB window lets the
-         * queued bytes drain before the reset record has to wait behind the
+        /* Widen the far's receive buffer now, not after the close: the
+         * carrier's TCP has been in zero-window for seconds, and the 256 KiB
+         * request (512 KiB after the kernel's doubling) lets the multi-MiB
+         * backlog drain before the reset record has to wait behind the
          * slow-start/persist recovery.  The backpressure proof is already
          * taken; this does not undo it. */
         {
@@ -2586,9 +2604,10 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
     hiwat1 = stat_key(tunnel, "hiwat");
 
     /* The 4 KiB window did its job: the carrier filled and hiwat grew.  Widen
-     * it now so the 512 KiB backlog and the control record drain in about a
-     * second instead of tens of seconds.  The backpressure verdict was already
-     * taken above; this only shortens the observation window. */
+     * it now so the multi-MiB backlog and the control record drain well inside
+     * the 60 s budget instead of at the tiny-window rate.  The backpressure
+     * verdict was already taken above; this only shortens the observation
+     * window. */
     {
         int rb = 256 * 1024;
         socklen_t rbl = sizeof(rb_now);
@@ -2606,19 +2625,19 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
      * read (the old UINT64_MAX) made the pump drop frames it had not written
      * yet, so the carrier never reached its memory line during the fill.
      *
-     * The 4 KiB receive buffer (8 KiB after the kernel's doubling) makes
-     * stock TCP deliver at roughly 35 KiB/s: one window per delayed-ACK /
-     * persist cycle (measured on this kernel: 8 KiB every ~208 ms; 512 KiB
-     * takes 10-16 s depending on how long the peer was idle).  The control
-     * record sits after all 512 KiB of DATA, so a 12 s budget expired even
-     * though the FIN/RST had already been written; the window is widened
-     * above; the guest measured 68-72 of the ~78 records in 30 s (1.8-2.5
-     * records/s), so 60 s covers the measured drain with margin. */
+     * The 4 KiB receive buffer (8 KiB after the kernel's doubling) delivers
+     * at roughly 35 KiB/s: one window per delayed-ACK / persist cycle
+     * (measured on this kernel: 8 KiB every ~208 ms).  A 4 MiB backlog would
+     * need minutes at that rate, so the buffer is widened above before this
+     * drain; the 60 s budget covers the widened-window drain of the multi-MiB
+     * backlog with margin.  The verdict still requires the FIN/RST record
+     * itself, so a drain that merely runs out the clock cannot pass. */
     end = now_ms() + 60000;
     next_ack = 0;
+redial:
     while (now_ms() < end && !seen)
     {
-        struct pollfd p = { .fd = fd, .events = POLLIN };
+        struct pollfd p = { .fd = fd, .events = POLLIN | POLLRDHUP };
         int pr;
 
         if (!rst && now_ms() >= next_ack)
@@ -2629,14 +2648,33 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
         pr = poll(&p, 1, 20);
         if (pr <= 0)
             continue;
-        if (p.revents & (POLLERR | POLLHUP | POLLNVAL))
+        if (p.revents & (POLLERR | POLLNVAL))
         {
             brk = p.revents;
             break;
         }
-        if (raw_read_frame(&r, &f, body, sizeof(body), 50))
+        if (p.revents & POLLIN)
         {
-            rfail++;
+            if (raw_read_frame(&r, &f, body, sizeof(body), 50))
+            {
+                /* Readable but no complete frame: a peer FIN (POLLRDHUP)
+                 * is a broken carrier, not a slow sender. */
+                if (p.revents & POLLRDHUP)
+                {
+                    brk = p.revents;
+                    break;
+                }
+                rfail++;
+                continue;
+            }
+        }
+        else if (p.revents & (POLLHUP | POLLRDHUP))
+        {
+            brk = p.revents;
+            break;
+        }
+        else
+        {
             continue;
         }
         parsed++;
@@ -2644,14 +2682,39 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
         if (f.sid == sid && f.type == (rst ? TBT_F_RST : TBT_F_FIN))
             seen = 1;
     }
+    /* The near re-dials a carrier it lost and re-pins the RST to the
+     * replacement.  Accept that one connection so the frame can still be
+     * read; the stream's sid does not change.  The 60 s budget is shared, so
+     * the redial cannot stretch the test past the runner's timeout. */
+    if (!seen && rst && brk && !redialed)
+    {
+        const char *err;
+        int nfd = carrier_join(ls, &r, &f, body, sizeof(body), &idx, &gen,
+                               nonce, &err);
+
+        if (nfd >= 0)
+        {
+            int rb = 256 * 1024;
+
+            /* The fill proof was taken on the first carrier; a tiny window on
+             * the replacement would park the RST behind the retransmitted
+             * DATA at the persist-cycle rate. */
+            setsockopt(nfd, SOL_SOCKET, SO_RCVBUF, &rb, sizeof(rb));
+            close(fd);
+            fd = nfd;
+            redialed = 1;
+            goto redial;
+        }
+    }
     if (seen && !rst)
     {
         /* The far's FIN for this stream.  seq 0: no DATA ever went toward the
          * application.  It turns the app's read into EOF once its bytes are
          * all delivered.  Send it more than once: the near's FIN handling is
          * idempotent (rx_fin_seen is set once), and a duplicate costs 32
-         * bytes.  With the old 4 KiB window a single record after the long
-         * PAD stream was measured not to reach the near's parser at all. */
+         * bytes.  With the 4 KiB window in place (before the widening above)
+         * a single record after the long PAD stream was measured not to reach
+         * the near's parser at all. */
         int i;
 
         for (i = 0; i < 3; i++)
@@ -2678,14 +2741,14 @@ static int mode_fineagain(int port, int pubport, int tunnel, int rst)
            "pump_hiwat %llu -> %llu (must grow) holes_unrecoverable %llu -> %llu; "
            "tx_ack=%llu txq=%llu rx_records=%llu hole_checks=%llu time_fail=%llu "
            "parsed=%d last_type=%u wire=%llu car_wmem=%llu rb_set=%d rb_now=%d "
-           "brk=%d rfail=%d",
+           "brk=%d rfail=%d redialed=%d",
            rst ? "RST" : "FIN", rst ? "rst_seen" : "fin_seen", seen,
            !rst && rc == 0, rc, hiwat0, hiwat1, hu0, hu1,
            stat_key(tunnel, "tx_ack"), stat_key(tunnel, "txq"),
            stat_key(tunnel, "rx_records"), stat_key(tunnel, "hole_checks"),
            stat_key(tunnel, "time_fail"), parsed, last_type,
            stat_key(tunnel, "wire"), stat_key(tunnel, "car_wmem"),
-           rb_set, rb_now, brk, rfail);
+           rb_set, rb_now, brk, rfail, redialed);
     close(fd);
     close(ls);
     return failures;

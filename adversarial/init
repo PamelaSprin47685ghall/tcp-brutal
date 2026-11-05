@@ -473,14 +473,17 @@ phase_halfclose() {
 
 # --- config larger than 32 KiB (review 19/30) ------------------------------
 
-# The canonical line is maximal in every scalar: 64 of them are 33,335 bytes,
+# The canonical line is maximal in every scalar: 64 of them are 34,487 bytes,
 # past the old 32 KiB TBT_CFG_RENDER_MAX. `id` and the listen port are the
-# only per-tunnel values; every other field is at its parser maximum, and the
-# 8-entry srcaddrs list is exactly the 127-byte parse limit.
+# only per-tunnel values; every other field is at its parser maximum, the
+# 8-entry srcaddrs list is exactly the 127-byte parse limit, and
+# tx_window_bytes=0 is the renderer's default (auto) in the position the
+# renderer prints it.  The probe compares this input with the render
+# byte-for-byte, so a new renderer field must be added here too.
 bigcfg_lines() {
     awk 'BEGIN {
         for (i = 1; i <= 64; i++)
-            printf "tunnel %d role=far listen=127.0.0.1:%d target=255.255.255.255:65535 peer=255.255.255.255:65535 n=16 m=0 dup=3 profile=http-kal-drip keepalive=86400000 drip_ms=3600000 replay=268435456 tunnel_rate=4294967295 max_inflate=1000.000 hole_budget_ms=60000 rx_reorder_bytes=268435456 tx_retain_bytes=4294967295 carrier_stall_ms=3600000 portblock=0-0 nonce=00112233445566778899aabbccddeeff srcaddrs=255.255.255.255,255.255.255.255,255.255.255.255,255.255.255.255,255.255.255.255,255.255.255.255,255.255.255.255,255.255.255.255\n", i, 22000 + i
+            printf "tunnel %d role=far listen=127.0.0.1:%d target=255.255.255.255:65535 peer=255.255.255.255:65535 n=16 m=0 dup=3 profile=http-kal-drip keepalive=86400000 drip_ms=3600000 replay=268435456 tunnel_rate=4294967295 max_inflate=1000.000 hole_budget_ms=60000 rx_reorder_bytes=268435456 tx_window_bytes=0 tx_retain_bytes=4294967295 carrier_stall_ms=3600000 portblock=0-0 nonce=00112233445566778899aabbccddeeff srcaddrs=255.255.255.255,255.255.255.255,255.255.255.255,255.255.255.255,255.255.255.255,255.255.255.255,255.255.255.255,255.255.255.255\n", i, 22000 + i
     }'
 }
 
@@ -762,14 +765,18 @@ dump_stats() {
 phase_nearx() {
     echo "== near FIN/RST under carrier backpressure"
     # The fake far stops reading (a 4 KiB receive buffer and no drain), the
-    # application writes 512 KiB and then half-closes or resets.  The near's
+    # application writes 4 MiB and then half-closes or resets.  The near's
     # carrier send queue is full when the pinned FIN/RST is queued; the
-    # verdict is whether the frame still reaches the far.
+    # verdict is whether the frame still reaches the far.  The explicit
+    # 8 MiB window (equal to the default rx_reorder_bytes, so the parser
+    # accepts it) lets the near admit the whole write instead of deriving a
+    # smaller BDP window (auto is capped by rx_reorder_bytes); the one-hour
+    # stall timer keeps a slow fill from being read as a dead carrier.
     flush_all
     timeout 100 /bin/adv_probe fineagain "$FAKE_FIN" "$PUB_FIN" 2 fin > /tmp/fin_eagain.out 2>&1 &
     _fp=$!
     sleep 1
-    if echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_FIN peer=127.0.0.1:$FAKE_FIN n=1 m=0" \
+    if echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_FIN peer=127.0.0.1:$FAKE_FIN n=1 m=0 tx_window_bytes=8388608 carrier_stall_ms=3600000" \
         > "$CFG" 2> /dev/null; then
         wait_timeout "$_fp" 90
         [ $? -eq 137 ] && res near.fin_eagain TIMEOUT "the FIN backpressure probe did not finish"
@@ -784,7 +791,7 @@ phase_nearx() {
     timeout 100 /bin/adv_probe fineagain "$FAKE_FIN" "$PUB_FIN" 2 rst > /tmp/rst_eagain.out 2>&1 &
     _fp=$!
     sleep 1
-    if echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_FIN peer=127.0.0.1:$FAKE_FIN n=1 m=0" \
+    if echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_FIN peer=127.0.0.1:$FAKE_FIN n=1 m=0 tx_window_bytes=8388608 carrier_stall_ms=3600000" \
         > "$CFG" 2> /dev/null; then
         wait_timeout "$_fp" 90
         [ $? -eq 137 ] && res near.rst_eagain TIMEOUT "the RST backpressure probe did not finish"
