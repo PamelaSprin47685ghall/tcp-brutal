@@ -561,7 +561,7 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **合并列车（用户裁决）：`w-window` → `w-fec-v6` → `w-crypto` → `w-sclc` → `w-hnd0` → master（F/T7）。**
 每一步只在 master 上合并前一等的 head；不允许跨序合并。D 的当前 worktree 仍是 `w-fec`，合并前改名为 `w-sclc` 或由 F 记录等价映射；不得因此改变 D 的提交内容。
-**`w-window` 未过 G1，暂不进入合并列车**；A 修 RST adversarial、lint、auto budget 后再评估。
+**`w-window` 未过 G1（HND0 N=1 auto 失败），暂不进入合并列车**；A 修 RST adversarial、lint、auto budget、HND0 stall 后再评估。
 
 | 文件 | 冲突方 | 裁决 |
 |---|---|---|
@@ -605,11 +605,11 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 | 项 | 内容 |
 |---|---|
 | 命令 | `make check`；`tests/qemu/run.sh --probes A,B,C,D,E,F,G,H,I,J,K --timeout 480`；`bash adversarial/run.sh`；N=1 慢载体脚本 |
-| 证据 | `review/final-qemu/`、`review/final-bench/`、`adversarial/results.txt`、N=1 原始日志 |
+| 证据 | `review/final-qemu/`、`review/final-bench/`、`adversarial/results.txt`、`review/wan-experiment/t1-n1-auto/`、N=1 原始日志 |
 | 通过 | N=1 慢载体 `rc=0`；far `holes_unrecoverable=0`；`fbk_rx>0`；`W≈136–250 KB`；`raw lost=0`；A–K 11/11、0 skip；adversarial 91/91、0 failed/0 skipped；host/SAN/lint 全绿 |
 | 失败 | 任一计数不符、skip、crash、hang |
 
-**G1 现状（挂起）**：A 的 lab 5s budget 通过；auto budget 被 slirp 64KiB 限制；RST adversarial 1/91 未解；lint 未跑。T1 完成前**不合并 `w-window`**。
+**G1 现状（挂起，HND0 N=1 auto 失败）**：A 的 lab 5s budget 通过；HND0 N=1 auto（`w-hnd0 cb92fbf`，证据 `review/wan-experiment/t1-n1-auto/`）rc=1：16MiB 只收 11.2MiB、control socket closed；第二次 1.06MiB 停 120s。far `holes=0`、`fbk_rx>0`、`carrier_lost=0`，但 near `holes_unrecoverable=1`、`W=121–262KB` 低于 203ms BDP≈431KB、far c6 `gate_fail=45/depth_fail=92`。A 诊断中；RST adversarial 1/91 未解；lint 未跑。T1 完成前**不合并 `w-window`**。
 
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
 
