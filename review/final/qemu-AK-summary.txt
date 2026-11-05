@@ -1,0 +1,28 @@
+# tbtun final acceptance: QEMU probes A-K
+
+command: tests/qemu/run.sh --probes A,B,C,D,E,F,G,H,I,J,K --timeout 900
+date: 2026-11-06
+git: 9f5bfda 9f5bfdacd552c265a2bf2aabfcbe0f952967b4a1
+module: 0b8f0006a7a10fe33e6e35e927aaf916047e142528bc32729ed04826fdccdb63
+result: 11 passed, 0 failed, 0 skipped
+
+## probes
+TBT_PROBE_RESULT A PASS
+TBT_PROBE_RESULT B PASS
+TBT_PROBE_RESULT C PASS
+TBT_PROBE_RESULT D PASS
+TBT_PROBE_RESULT E PASS
+TBT_PROBE_RESULT F PASS
+TBT_PROBE_RESULT G PASS
+TBT_PROBE_RESULT H PASS
+TBT_PROBE_RESULT I PASS
+TBT_PROBE_RESULT J PASS
+TBT_PROBE_RESULT K PASS
+
+## key evidence
+   spare_activated=1 replaced=0 lost=2
+   dropped=48 holes_declared=4 holes_repaired=4 holes_unrecoverable=0 rx_max_stall_us=77567 limit=500000
+   phase 1: recovered after 2 s of total loss on one path, holes_unrecoverable=0
+   phase 2: reset in 0.58 s, holes_unrecoverable=1
+   holes_repaired=0 holes_unrecoverable=0 carrier_lost=0
+   holes_repaired=0 holes_unrecoverable=0 carrier_lost=0

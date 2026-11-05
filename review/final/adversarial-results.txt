@@ -1,0 +1,78 @@
+ADV_RESULT init.echo_sane PASS sha=0b8f0006a7a10fe3 ECHO_OK bytes=2097152
+ADV_RESULT pub.churn PASS sha=0b8f0006a7a10fe3 10000 connect/send/close cycles: usable=10000 refused=0 other=0 retried=0 (a closed stream must free the session for the next connection)
+ADV_RESULT pub.two PASS sha=0b8f0006a7a10fe3 A usable=1, B usable=1, A after B close=1
+ADV_RESULT pub.concurrent PASS sha=0b8f0006a7a10fe3 n=100 connected=100 echoed=100 short=0 corrupt=0 timeout=0 isolation=1 recover=1 first_fail=none streams_active=0 streams_total=101; 120 ms
+ADV_RESULT pub.halfclose PASS sha=0b8f0006a7a10fe3 app half-close: echo 10 bytes, EOF=1
+ADV_RESULT pub.rst PASS sha=0b8f0006a7a10fe3 RST after 4194304 bytes: no warning, module still loaded
+ADV_RESULT init.src_key PASS sha=0b8f0006a7a10fe3 src= refused; nonce= accepted and rendered; short nonce= refused
+ADV_RESULT pub.writer PASS sha=0b8f0006a7a10fe3 attempted 100 MiB: sent=75044366/104857600 errno=11 legal=1 rst=0, MemAvailable before=398972 during_min=219472 after_write=258932 after_flush=396844 kB, flush=1 0.03s, oom=0->0
+ADV_RESULT pub.writer PASS sha=0b8f0006a7a10fe3 attempted 1024 MiB: sent=74978883/1073741824 errno=11 legal=1 rst=0, MemAvailable before=398620 during_min=217648 after_write=255580 after_flush=398404 kB, flush=1 0.03s, oom=0->0
+ADV_RESULT pub.srcfilter PASS sha=0b8f0006a7a10fe3 app from 127.0.0.2 usable=1 (no src= allow list; the tunnel identity is the nonce), far config renders nonce=1 peer=1
+ADV_RESULT ctl.nonroot PASS sha=0b8f0006a7a10fe3 uid 1000 write to /proc/net/tbtun/config: open failed (the documented mode is 0600 root)
+ADV_RESULT init.nonroot_unchanged PASS sha=0b8f0006a7a10fe3 config unchanged after the uid-1000 attempt
+ADV_RESULT ctl.line513 PASS sha=0b8f0006a7a10fe3 513-byte line + newline: write=-1 errno=22 (refused or buffered; the current line buffer is 1024 bytes)
+ADV_RESULT ctl.line512 PASS sha=0b8f0006a7a10fe3 512-byte line + newline: write=-1 errno=22 (refused or buffered)
+ADV_RESULT ctl.line512nonl PASS sha=0b8f0006a7a10fe3 512 bytes with no newline: write=512 errno=0 (buffered or refused, never applied)
+ADV_RESULT ctl.line1025 PASS sha=0b8f0006a7a10fe3 1025-byte line + newline: write=-1 errno=7 (must be refused with the 1024-byte buffer)
+ADV_RESULT ctl.line1024nonl PASS sha=0b8f0006a7a10fe3 1024 bytes with no newline: write=-1 errno=7
+ADV_RESULT init.cfg_unchanged PASS sha=0b8f0006a7a10fe3 over-long lines changed nothing
+ADV_RESULT init.cfg_roundtrip PASS sha=0b8f0006a7a10fe3 the canonical config replays line by line
+ADV_RESULT init.echo_after_roundtrip PASS sha=0b8f0006a7a10fe3 ECHO_OK bytes=1048576
+ADV_RESULT init.max_tunnels PASS sha=0b8f0006a7a10fe3 64 tunnels accepted before the limit
+ADV_RESULT init.scale PASS sha=0b8f0006a7a10fe3 1024 carriers up of 1024 rows; MemAvailable 399784 -> 326196 kB
+ADV_RESULT init.slab_leak PASS sha=0b8f0006a7a10fe3 32k slabs grew by 0 objects over 100 connections
+ADV_RESULT init.slab_after_flush PASS sha=0b8f0006a7a10fe3 after flush: 32k objects 0 -> 0 (the session teardown is the only free point)
+ADV_RESULT init.final_echo PASS sha=0b8f0006a7a10fe3 ECHO_OK bytes=4194304
+ADV_RESULT init.dmesg PASS sha=0b8f0006a7a10fe3 no WARNING/BUG/Oops/INFO: task in the guest log
+ADV_RESULT init.cfg_replay PASS sha=0b8f0006a7a10fe3 line-by-line config replay rc=0, transfer closed cleanly: ECHO_ABORT op=read errno=104 bytes=1114112
+ADV_RESULT init.echo_after_replay PASS sha=0b8f0006a7a10fe3 ECHO_OK bytes=1048576
+ADV_RESULT init.rmmod PASS sha=0b8f0006a7a10fe3 rmmod rc=0, app closed cleanly: ECHO_ABORT op=read errno=104 bytes=1114112
+ADV_RESULT init.reload PASS sha=0b8f0006a7a10fe3 module reloaded
+ADV_RESULT init.dmesg_after_rmmod PASS sha=0b8f0006a7a10fe3 no warning/BUG/oops after rmmod
+ADV_RESULT init.flush_midstream PASS sha=0b8f0006a7a10fe3 flush mid-transfer: app closed cleanly, ECHO_ABORT op=read errno=104 bytes=1114112
+ADV_RESULT init.echo_after_flush PASS sha=0b8f0006a7a10fe3 ECHO_OK bytes=1048576
+ADV_RESULT cat.cfg_self PASS sha=0b8f0006a7a10fe3 cat config > config rc=0, 2 tunnels still present: 
+ADV_RESULT init.echo_after_cat PASS sha=0b8f0006a7a10fe3 ECHO_OK bytes=1048576
+ADV_RESULT cat.cfg_mix PASS sha=0b8f0006a7a10fe3 bad line not applied, far line applied (write rc=0)
+ADV_RESULT init.max_carriers PASS sha=0b8f0006a7a10fe3 n=8 refused with max_carriers=4
+ADV_RESULT init.port_exhaust PASS sha=0b8f0006a7a10fe3 tunnel 3 accepted but the exhaustion is operator-visible: port_exhaust=15 port_exhaust=16  (alloc_fail=16, log lines=10)
+ADV_RESULT near.resp_not_chunked PASS sha=0b8f0006a7a10fe3 200 with Content-Length instead of chunked: carrier poisoned
+ADV_RESULT near.resp_500 PASS sha=0b8f0006a7a10fe3 500 response: carrier poisoned
+ADV_RESULT near.resp_hdr_big PASS sha=0b8f0006a7a10fe3 response header > carrier buffer: carrier poisoned
+ADV_RESULT near.resp_close PASS sha=0b8f0006a7a10fe3 Connection: close response: carrier poisoned
+ADV_RESULT near.hello_wrong_nonce PASS sha=0b8f0006a7a10fe3 response HELLO with a wrong nonce: carrier poisoned
+ADV_RESULT near.chunk_huge PASS sha=0b8f0006a7a10fe3 chunk size 0xFFFFFFFF in a response: carrier poisoned
+ADV_RESULT near.split_record PASS sha=0b8f0006a7a10fe3 chunk 32 with body_len 100 in a response: carrier poisoned
+ADV_RESULT near.chunk_oversize PASS sha=0b8f0006a7a10fe3 chunk 8229 in a response: carrier poisoned
+ADV_RESULT near.drip_pad PASS sha=0b8f0006a7a10fe3 a drip chunk and a PAD chunk between records accepted
+ADV_RESULT near.fbk_forged PASS sha=0b8f0006a7a10fe3 forged FBK gen+1 and path 15: uack 5000 -> 5000 (must stay 5000)
+ADV_RESULT near.data_path PASS sha=0b8f0006a7a10fe3 DATA delivered to the app after forged FBK (child rc=0)
+ADV_RESULT near.second_conn PASS sha=0b8f0006a7a10fe3 second public connection after the first closed: rc=0 echoed=1 (0 = accepted and usable, 1 = refused)
+ADV_RESULT near.fin_eagain PASS sha=0b8f0006a7a10fe3 FIN under carrier backpressure: fin_seen=1 eof=1 child_rc=0 pump_hiwat 0 -> 4956 (must grow) holes_unrecoverable 0 -> 0; tx_ack=524288 txq=0 rx_records=57 hole_checks=0 time_fail=0 parsed=236 last_type=20 wire=536418 car_wmem=0 rb_set=0 rb_now=524288 brk=0 rfail=0
+ADV_RESULT near.rst_eagain PASS sha=0b8f0006a7a10fe3 RST under carrier backpressure: rst_seen=1 eof=0 child_rc=0 pump_hiwat 0 -> 118 (must grow) holes_unrecoverable 0 -> 0; tx_ack=49125 txq=0 rx_records=3 hole_checks=0 time_fail=0 parsed=7 last_type=21 wire=98780 car_wmem=27552 rb_set=0 rb_now=524288 brk=0 rfail=0
+ADV_RESULT far.garbage PASS sha=0b8f0006a7a10fe3 9000 bytes of non-HTTP garbage; carrier must close, not crash
+ADV_RESULT far.hello_garbage PASS sha=0b8f0006a7a10fe3 HELLO joined (nonce adopted), then 64 garbage bytes; carrier must close
+ADV_RESULT far.wrong_nonce PASS sha=0b8f0006a7a10fe3 HELLO with the wrong 128-bit nonce: carrier closed; join_bad+nonce_reject 0 -> 0
+ADV_RESULT far.anchor PASS sha=0b8f0006a7a10fe3 carrier joined index 0, far generation 4
+ADV_RESULT far.dup_index PASS sha=0b8f0006a7a10fe3 duplicate (nonce,index=0): carrier closed; join_dup 0 -> 0; anchor must survive
+ADV_RESULT far.srcaddr_dup PASS sha=0b8f0006a7a10fe3 same nonce and index from 127.0.0.2: refused as a duplicate
+ADV_RESULT far.srcaddr_free PASS sha=0b8f0006a7a10fe3 same nonce from 127.0.0.2 on a free index: refused
+ADV_RESULT far.chunk_huge PASS sha=0b8f0006a7a10fe3 chunk size 0xFFFFFFFF must be PROTO
+ADV_RESULT far.bodylen_tail PASS sha=0b8f0006a7a10fe3 8224-byte chunk, 35 bytes sent, then FIN: no warning, no overread
+ADV_RESULT far.split_record PASS sha=0b8f0006a7a10fe3 chunk 32 with body_len 100 (record split across chunks) must be PROTO
+ADV_RESULT far.drip_split PASS sha=0b8f0006a7a10fe3 drip chunk between header and body must still be PROTO
+ADV_RESULT far.chunk_oversize PASS sha=0b8f0006a7a10fe3 chunk 8229 > TBT_CHUNK_MAX (8228) must be PROTO
+ADV_RESULT far.no_host PASS sha=0b8f0006a7a10fe3 request without Host must be PROTO
+ADV_RESULT far.headers_big PASS sha=0b8f0006a7a10fe3 9000-byte header block must be PROTO (effective cap: carrier buffer)
+ADV_RESULT far.open_other_sid PASS sha=0b8f0006a7a10fe3 second OPEN (sid 1357243d) on carrier 1: adopted and echoed=1, stream 1 crossed=0, carrier closed=0 (multiconn accepts a second stream; it must not be a PROTO close)
+ADV_RESULT far.fbk_forged PASS sha=0b8f0006a7a10fe3 FBK uack 999999 with gen+1 and path 15: carrier 0 uack 5000 -> 5000 (must stay 5000)
+ADV_RESULT far.hello_profile0 PASS sha=0b8f0006a7a10fe3 HELLO with profile 0 must be refused
+ADV_RESULT far.hello_profile9 PASS sha=0b8f0006a7a10fe3 HELLO byte 9 = profile 1, generation 2: accepted as a generation, not a profile
+ADV_RESULT far.data_path PASS sha=0b8f0006a7a10fe3 anchor echo: 8 bytes 'pingpong' corrupt=0 (ping+pong, coalescing/retransmit allowed; duplicate seq must not add XXXX); far stats capture_runs=4 actor_calls=2 submit_bytes=12 tx_ack=0
+ADV_RESULT far.nonce_pinned PASS sha=0b8f0006a7a10fe3 nonce= pinned: first source joined=1, wrong nonce refused=1, stranger 127.0.0.2 with the correct nonce refused=1 (join_src_reject 0 -> 1, join_bad 0 -> 1)
+ADV_RESULT far.src_anchor PASS sha=0b8f0006a7a10fe3 peer= anchor: anchored source joined=1 and joined index 1=1, stranger 127.0.0.2 refused=1, config renders peer=1 (join_src_reject 0 -> 1)
+ADV_RESULT far.overlap PASS sha=0b8f0006a7a10fe3 3 rounds of [seq+4096 len 8192][seq+12288 len 4096][seq len 8192]: echoed 49152/49152 bytes corrupt=0; ooo_bytes 0 -> 0, ooo_frames 0 -> 0, reorder_overflow 0 -> 0, holes_unrecoverable 0 -> 0 (a stale node leaves ooo_bytes at 8192+ and the hole budget kills the stream)
+ADV_RESULT far.second_carrier PASS sha=0b8f0006a7a10fe3 second carrier after the first: HELLO answered=1, PAD sent=1, echo 10/10 corrupt=0, rx_adopt_events=2 join_dup=0 (a far that never reads the new carrier leaves it unanswered)
+ADV_RESULT stall.hello_chain PASS sha=0b8f0006a7a10fe3 15 sequential joins: every HELLO answered=1, rx_adopt_events=15, join_dup=0, join_nonce_reject=0
+ADV_RESULT stall.flush PASS sha=0b8f0006a7a10fe3 flush completed after the carrier chain
+ADV_RESULT ctl.close_flush PASS sha=0b8f0006a7a10fe3 the guest survived the close flush (console: /home/kunweiz/Desktop/vibe/tcp-brutal/adversarial/crash-console.log)
