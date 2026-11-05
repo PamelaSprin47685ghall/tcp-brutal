@@ -1,0 +1,54 @@
+# HND0 crypto root@45.11.1.62  2026-11-06T06:29:12+08:00
+## before
+ 22:29:13 up 1 day, 15:18,  1 user,  load average: 0.52, 0.46, 0.44
+               total        used        free      shared  buff/cache   available
+Mem:             955         358         240           1         503         596
+model name	: QEMU Virtual CPU version 2.5+
+cpu MHz		: 2199.996
+2
+OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026)
+## run (nice 19, cpu0, 4 MiB, 9 reps x3)
+### run 1
+cpu_model: QEMU Virtual CPU version 2.5+
+cpu_cores:2 cpu_mhz:2199
+cpu_flags: sse2
+argv_bytes:4194304 reps:9
+RESULT chacha20 mbps=265.4 ns_per_byte=3.7676 cycles_per_byte=8.29
+RESULT chacha20x4 mbps=622.7 ns_per_byte=1.6058 cycles_per_byte=3.53
+RESULT chacha12 mbps=500.0 ns_per_byte=1.9998 cycles_per_byte=4.40
+RESULT chacha12x4 mbps=956.3 ns_per_byte=1.0457 cycles_per_byte=2.30
+RESULT chacha8 mbps=769.8 ns_per_byte=1.2990 cycles_per_byte=2.86
+RESULT chacha8x4 mbps=1316.8 ns_per_byte=0.7594 cycles_per_byte=1.67
+sink:216
+### run 2
+cpu_model: QEMU Virtual CPU version 2.5+
+cpu_cores:2 cpu_mhz:2199
+cpu_flags: sse2
+argv_bytes:4194304 reps:9
+RESULT chacha20 mbps=330.0 ns_per_byte=3.0306 cycles_per_byte=6.66
+RESULT chacha20x4 mbps=647.4 ns_per_byte=1.5447 cycles_per_byte=3.40
+RESULT chacha12 mbps=548.1 ns_per_byte=1.8245 cycles_per_byte=4.01
+RESULT chacha12x4 mbps=996.6 ns_per_byte=1.0034 cycles_per_byte=2.21
+RESULT chacha8 mbps=768.3 ns_per_byte=1.3015 cycles_per_byte=2.86
+RESULT chacha8x4 mbps=1350.9 ns_per_byte=0.7403 cycles_per_byte=1.63
+sink:216
+### run 3
+cpu_model: QEMU Virtual CPU version 2.5+
+cpu_cores:2 cpu_mhz:2199
+cpu_flags: sse2
+argv_bytes:4194304 reps:9
+RESULT chacha20 mbps=377.7 ns_per_byte=2.6476 cycles_per_byte=5.82
+RESULT chacha20x4 mbps=737.0 ns_per_byte=1.3569 cycles_per_byte=2.98
+RESULT chacha12 mbps=559.5 ns_per_byte=1.7872 cycles_per_byte=3.93
+RESULT chacha12x4 mbps=1048.2 ns_per_byte=0.9541 cycles_per_byte=2.10
+RESULT chacha8 mbps=878.2 ns_per_byte=1.1387 cycles_per_byte=2.50
+RESULT chacha8x4 mbps=1058.0 ns_per_byte=0.9452 cycles_per_byte=2.08
+sink:216
+## aes-128-cbc anchor
+type           8192 bytes
+AES-128-CBC     130989.25k
+15830 AES-128-CBC ops in 0.99s
+## after
+ 22:29:22 up 1 day, 15:18,  1 user,  load average: 0.51, 0.47, 0.44
+               total        used        free      shared  buff/cache   available
+Mem:             955         371         227           1         503         584

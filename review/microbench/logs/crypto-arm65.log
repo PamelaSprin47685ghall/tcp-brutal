@@ -1,0 +1,133 @@
+# crypto bench root@192.168.123.65 (RK3588, shared production)  2026-11-06T06:29+08:00
+Host: lubancat  Linux 6.1.172 #1 SMP Sat Oct 17 15:47:17 CST 2026 aarch64
+Method: crypto.c + run_crypto.sh copied to /tmp/mb-crypto, run as
+  nice -n 19 taskset -c 4 sh run_crypto.sh --bytes 4 --reps 9   (3 invocations, 4 MiB, 9 reps)
+All work confined to /tmp/mb-crypto; removed at the end. No installs, no service changes.
+
+## 1. environment (BatchMode ssh)
+$ ssh -o BatchMode=yes root@192.168.123.65 'uptime; grep -m1 -E "model name|Hardware" /proc/cpuinfo; nproc; cat /sys/devices/system/cpu/cpu4/cpufreq/scaling_cur_freq; openssl version'
+ 06:29:08 up 14 days, 22:36,  3 users,  load average: 0.48, 0.39, 0.84
+(grep model name|Hardware: no match -- this vendor kernel prints neither field)
+8
+2304000
+OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026)
+
+$ ssh ... 'uname -a; grep -E "^(processor|model name|Hardware|Model|Revision|Serial)" /proc/cpuinfo | head -20; grep -m1 ^Features /proc/cpuinfo; ls /sys/devices/system/cpu/cpufreq/; cat cpu4/scaling_cur_freq cpu4/scaling_governor; cc --version | head -1; df -h /tmp | tail -1; free -m | head -2'
+Linux lubancat 6.1.172 #1 SMP Sat Oct 17 15:47:17 CST 2026 aarch64 GNU/Linux
+processor	: 0
+processor	: 1
+processor	: 2
+processor	: 3
+processor	: 4
+processor	: 5
+processor	: 6
+processor	: 7
+Serial		: c55013404cfdd113
+Features	: fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid asimdrdm lrcpc dcpop asimddp
+policy0
+policy4
+policy6
+2304000
+performance
+cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+tmpfs           3.9G  3.6G  273M  94% /tmp
+               total        used        free      shared  buff/cache   available
+Mem:            7914        4181        1887        3545        5474        3733
+
+CPU topology: 3 cpufreq policies (0-3 A55 @1.8 GHz, 4-5 A76 @2.304 GHz, 6-7 A76 @2.304 GHz).
+Pinned core cpu4 = Cortex-A76, scaling_cur_freq 2304000 kHz, governor "performance".
+/tmp was 94% full (273 MiB free) before the run -- pre-existing, unrelated to this bench; build + 4 MiB buffer still fit.
+
+## 2. deploy
+$ ssh ... 'mkdir -p /tmp/mb-crypto'
+$ scp crypto.c run_crypto.sh root@192.168.123.65:/tmp/mb-crypto/
+-rw-r--r-- 1 root root 10590 Nov  6 06:29 /tmp/mb-crypto/crypto.c
+-rwxr-xr-x 1 root root   464 Nov  6 06:29 /tmp/mb-crypto/run_crypto.sh
+
+## 3. build + 3 runs
+$ ssh ... 'cd /tmp/mb-crypto && nice -n 19 taskset -c 4 sh run_crypto.sh --bytes 4 --reps 9'
+### run 1
+cpu_model:unknown
+cpu_cores:8 cpu_mhz:1800
+cpu_flags: asimd aes pmull
+argv_bytes:4194304 reps:9
+RESULT chacha20 mbps=396.0 ns_per_byte=2.5254 cycles_per_byte=4.55
+RESULT chacha20x4 mbps=651.4 ns_per_byte=1.5351 cycles_per_byte=2.76
+RESULT chacha12 mbps=634.1 ns_per_byte=1.5769 cycles_per_byte=2.84
+RESULT chacha12x4 mbps=1027.6 ns_per_byte=0.9731 cycles_per_byte=1.75
+RESULT chacha8 mbps=905.4 ns_per_byte=1.1045 cycles_per_byte=1.99
+RESULT chacha8x4 mbps=1433.2 ns_per_byte=0.6978 cycles_per_byte=1.26
+sink:216
+### run 2
+cpu_model:unknown
+cpu_cores:8 cpu_mhz:1800
+cpu_flags: asimd aes pmull
+argv_bytes:4194304 reps:9
+RESULT chacha20 mbps=396.6 ns_per_byte=2.5215 cycles_per_byte=4.54
+RESULT chacha20x4 mbps=650.2 ns_per_byte=1.5380 cycles_per_byte=2.77
+RESULT chacha12 mbps=633.9 ns_per_byte=1.5776 cycles_per_byte=2.84
+RESULT chacha12x4 mbps=1029.5 ns_per_byte=0.9713 cycles_per_byte=1.75
+RESULT chacha8 mbps=904.6 ns_per_byte=1.1055 cycles_per_byte=1.99
+RESULT chacha8x4 mbps=1432.3 ns_per_byte=0.6982 cycles_per_byte=1.26
+sink:216
+### run 3
+cpu_model:unknown
+cpu_cores:8 cpu_mhz:1800
+cpu_flags: asimd aes pmull
+argv_bytes:4194304 reps:9
+RESULT chacha20 mbps=396.6 ns_per_byte=2.5216 cycles_per_byte=4.54
+RESULT chacha20x4 mbps=651.1 ns_per_byte=1.5358 cycles_per_byte=2.76
+RESULT chacha12 mbps=634.8 ns_per_byte=1.5754 cycles_per_byte=2.84
+RESULT chacha12x4 mbps=1030.6 ns_per_byte=0.9703 cycles_per_byte=1.75
+RESULT chacha8 mbps=905.0 ns_per_byte=1.1050 cycles_per_byte=1.99
+RESULT chacha8x4 mbps=1439.9 ns_per_byte=0.6945 cycles_per_byte=1.25
+sink:216
+
+### build check -- native build did NOT fall back
+$ ssh ... 'ls -l /tmp/crypto-build.log; wc -c < /tmp/crypto-build.log; cat /tmp/crypto-build.log; file /tmp/mb-crypto/crypto'
+-rw-r--r-- 1 root root 0 Nov  6 06:29 /tmp/crypto-build.log
+0
+(/tmp/crypto-build.log empty => `cc -O3 -march=native` succeeded; the "-O3" fallback path never ran)
+/tmp/mb-crypto/crypto: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked
+-rwxr-xr-x 1 root root 71704 Nov  6 06:29 /tmp/mb-crypto/crypto
+
+## 4. AES anchor (cpu4, nice 19)
+$ ssh ... 'nice -n 19 taskset -c 4 openssl speed -evp aes-128-cbc -bytes 8192 -seconds 1' | tail -3
+The 'numbers' are in 1000s of bytes per second processed.
+type           8192 bytes
+AES-128-CBC    1809899.52k
+
+(Full header of the same invocation, for provenance:
+OpenSSL 3.5.5 27 Jan 2026, built Wed Sep 30 18:46:30 2026 UTC, gcc -O2 -mbranch-protection=standard,
+CPUINFO: OPENSSL_armcap=0xbd  -> AES+PMULL+ASIMD hw crypto path active)
+
+## 5. after + cleanup
+$ ssh ... 'uptime'
+ 06:29:28 up 14 days, 22:36,  3 users,  load average: 1.24, 0.57, 0.90   (load 1.24 during/after bench)
+
+$ ssh ... 'rm -rf /tmp/mb-crypto /tmp/crypto-build.log; ...'
+ls: cannot access '/tmp/mb-crypto': No such file or directory
+ls: cannot access '/tmp/crypto-build.log': No such file or directory
+tmpfs           3.9G  3.6G  273M  94% /tmp
+(find /tmp -maxdepth 2 -name "crypto*" -> no output: nothing left behind)
+ 06:29:39 up 14 days, 22:36,  3 users,  load average: 0.97, 0.54, 0.88
+
+## medians of the three runs (mbps)
+chacha20   396.6   chacha20x4  651.1   x4 gain 1.64x
+chacha12   634.1   chacha12x4 1029.5   x4 gain 1.62x
+chacha8    905.0   chacha8x4  1439.9   x4 gain 1.59x
+Spread across the three runs is <0.5% on every line -- the host was quiet enough for a stable read.
+
+## caveats
+1. cpu_model:unknown is expected here, not a failure: this vendor kernel's /proc/cpuinfo carries
+   no "model name" and no "Hardware" line (only processor/Features/Serial), so crypto.c's probe
+   finds nothing. The board is RK3588 (8x Cortex-A76/A55, 3 frequency policies, 2.304 GHz on cpu4).
+2. cpu_mhz:1800 in the RESULT header is cpu0's scaling_cur_freq (A55 cluster, 1.8 GHz), because
+   crypto.c reads cpu0 unconditionally. The measured thread ran on cpu4 at 2304 MHz, so the
+   cycles_per_byte column is scaled with 1800 MHz and understates true cpu4 cycles by 2304/1800 = 1.28x.
+   Use ns_per_byte (clock-independent) for cross-host comparison; true cpu4 cycles/byte =
+   ns_per_byte x 2.304 (e.g. chacha20x4 -> 3.54 c/B, chacha8x4 -> 1.60 c/B).
+3. cpu_flags line only prints the probe's shortlist (asimd aes pmull); the full /proc/cpuinfo Features
+   set is recorded in section 1 and also includes sha1/sha2/crc32/atomics/asimddp/asimdrdm/lrcpc/dcpop.
+4. No SVE/SVE2 on this SoC, so the x4 path is plain NEON 4-lane (QR4V), as intended.
+5. No failures: all 3 invocations completed, all 18 RESULT lines emitted, exit status 0.
