@@ -1,0 +1,119 @@
+REMOTE_SYNTAX_OK
+===STATUS===
+mode=dry-run cmd=status abi=v6
+fec=on mode=grouped n=4 m=4 w=0 carriers=256 crypto=on crypto_key=-
+carrier_port=9000 target_port=5201 portblock=30000-34095 app_target_mbps=33.72 loss_ppm=0
+module=./tbtun.ko state_dir=/tmp/tbtun-hnd0 evidence_dir=/tmp/tbtun-hnd0-evidence lock=/tmp/tbtun-hnd0.lock
+module: absent
+proc: absent
+services:
+  frps=active
+  caddy=active
+  hysteria-server=active
+  xray=active
+ports:
+  9000=free
+  5201=free
+snapshots:
+  none
+lock:
+  /tmp/tbtun-hnd0.lock absent
+===V6_256===
+mode=dry-run cmd=deploy abi=v6
+fec=on mode=grouped n=4 m=4 w=0 carriers=256 crypto=on crypto_key=-
+carrier_port=9000 target_port=5201 portblock=30000-34095 app_target_mbps=33.72 loss_ppm=0
+module=./tbtun.ko state_dir=/tmp/tbtun-hnd0 evidence_dir=/tmp/tbtun-hnd0-evidence lock=/tmp/tbtun-hnd0.lock
+[dry-run] flock -w 1800 /tmp/tbtun-hnd0.lock (holder: tbtun HND0 deploy/rollback)
+deploy_hnd0.sh: module missing: ./tbtun.ko (dry-run continues; build before --execute)
+port 9000: free
+port 5201: free
+[dry-run] snapshot -> /tmp/tbtun-hnd0/state-20261105-225328.txt (copy to /tmp/tbtun-hnd0-evidence/)
+deploy_hnd0.sh: v6: carriers=256 n=4 m=4 -> groups=32 groups, 1 share/carrier
+deploy_hnd0.sh: v6: insmod max_carriers=256 max_tunnels=1 (128 MiB budget, §3.3)
+deploy_hnd0.sh: 256-carrier deploy requires the FEC v6 branch; a module without fec= keys will reject the config line
+[dry-run] insmod ./tbtun.ko max_carriers=256 max_tunnels=1 
+[dry-run] sh -c printf '%s\n' 'tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5201 n=4 m=4 fec=on mode=grouped w=0 carriers=256 crypto=on crypto_key=- dup=1 profile=raw keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=30000 rx_reorder_bytes=262144 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=30000-34095 nonce=00112233445566778899aabbccddeeff' > /proc/net/tbtun/config
+[dry-run] sh -c cat /proc/net/tbtun/config; cat /proc/net/tbtun/tunnels; cat /proc/net/tbtun/ports
+[dry-run] systemd-run --unit=tbtun-iperf3-5201 --property=StandardOutput=file:/tmp/tbtun-hnd0/iperf3-5201.log --property=StandardError=file:/tmp/tbtun-hnd0/iperf3-5201.log /usr/bin/iperf3 -s -B 127.0.0.1 -p 5201 
+[dry-run] sh -c ss -lntH | awk '$4 ~ ":9000$" || $4 ~ ":5201$"'
+deploy_hnd0.sh: deploy requested; verify with: deploy_hnd0.sh verify
+===V6_SCLDPC===
+mode=dry-run cmd=deploy abi=v6
+fec=on mode=sc-ldpc n=4 m=4 w=256 carriers=256 crypto=on crypto_key=-
+carrier_port=9000 target_port=5201 portblock=30000-34095 app_target_mbps=33.72 loss_ppm=0
+module=./tbtun.ko state_dir=/tmp/tbtun-hnd0 evidence_dir=/tmp/tbtun-hnd0-evidence lock=/tmp/tbtun-hnd0.lock
+[dry-run] flock -w 1800 /tmp/tbtun-hnd0.lock (holder: tbtun HND0 deploy/rollback)
+deploy_hnd0.sh: module missing: ./tbtun.ko (dry-run continues; build before --execute)
+port 9000: free
+port 5201: free
+[dry-run] snapshot -> /tmp/tbtun-hnd0/state-20261105-225328.txt (copy to /tmp/tbtun-hnd0-evidence/)
+[dry-run] insmod ./tbtun.ko max_carriers=256 max_tunnels=1 
+[dry-run] sh -c printf '%s\n' 'tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5201 n=4 m=4 fec=on mode=sc-ldpc w=256 carriers=256 crypto=on crypto_key=- dup=1 profile=raw keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=30000 rx_reorder_bytes=262144 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=30000-34095 nonce=00112233445566778899aabbccddeeff' > /proc/net/tbtun/config
+[dry-run] sh -c cat /proc/net/tbtun/config; cat /proc/net/tbtun/tunnels; cat /proc/net/tbtun/ports
+[dry-run] systemd-run --unit=tbtun-iperf3-5201 --property=StandardOutput=file:/tmp/tbtun-hnd0/iperf3-5201.log --property=StandardError=file:/tmp/tbtun-hnd0/iperf3-5201.log /usr/bin/iperf3 -s -B 127.0.0.1 -p 5201 
+[dry-run] sh -c ss -lntH | awk '$4 ~ ":9000$" || $4 ~ ":5201$"'
+deploy_hnd0.sh: v6: carriers=256 n=4 m=4 -> groups=32 groups, 1 share/carrier
+deploy_hnd0.sh: v6: insmod max_carriers=256 max_tunnels=1 (128 MiB budget, §3.3)
+deploy_hnd0.sh: 256-carrier deploy requires the FEC v6 branch; a module without fec= keys will reject the config line
+deploy_hnd0.sh: deploy requested; verify with: deploy_hnd0.sh verify
+===LEGACY_4===
+mode=dry-run cmd=deploy abi=legacy
+n=4 m=1 profile=raw window_bytes=0
+carrier_port=9000 target_port=5201 portblock=30000-34095 app_target_mbps=33.72 loss_ppm=0
+module=./tbtun.ko state_dir=/tmp/tbtun-hnd0 evidence_dir=/tmp/tbtun-hnd0-evidence lock=/tmp/tbtun-hnd0.lock
+[dry-run] flock -w 1800 /tmp/tbtun-hnd0.lock (holder: tbtun HND0 deploy/rollback)
+deploy_hnd0.sh: module missing: ./tbtun.ko (dry-run continues; build before --execute)
+port 9000: free
+port 5201: free
+[dry-run] snapshot -> /tmp/tbtun-hnd0/state-20261105-225328.txt (copy to /tmp/tbtun-hnd0-evidence/)
+deploy_hnd0.sh: legacy ARQ: n+m=5 <= 16; no fec=/mode=/carriers= keys are written
+[dry-run] insmod ./tbtun.ko max_carriers=4 
+[dry-run] sh -c printf '%s\n' 'tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5201 n=4 m=1 profile=raw keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=30000 rx_reorder_bytes=262144 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=30000-34095 nonce=00112233445566778899aabbccddeeff' > /proc/net/tbtun/config
+[dry-run] sh -c cat /proc/net/tbtun/config; cat /proc/net/tbtun/tunnels; cat /proc/net/tbtun/ports
+[dry-run] systemd-run --unit=tbtun-iperf3-5201 --property=StandardOutput=file:/tmp/tbtun-hnd0/iperf3-5201.log --property=StandardError=file:/tmp/tbtun-hnd0/iperf3-5201.log /usr/bin/iperf3 -s -B 127.0.0.1 -p 5201 
+[dry-run] sh -c ss -lntH | awk '$4 ~ ":9000$" || $4 ~ ":5201$"'
+deploy_hnd0.sh: deploy requested; verify with: deploy_hnd0.sh verify
+===LEGACY_256_REJECT===
+mode=dry-run cmd=deploy abi=legacy
+n=4 m=4 profile=raw window_bytes=0
+carrier_port=9000 target_port=5201 portblock=30000-34095 app_target_mbps=33.72 loss_ppm=0
+module=./tbtun.ko state_dir=/tmp/tbtun-hnd0 evidence_dir=/tmp/tbtun-hnd0-evidence lock=/tmp/tbtun-hnd0.lock
+===ROLLBACK===
+deploy_hnd0.sh: legacy ARQ supports carriers <= 16
+mode=dry-run cmd=rollback abi=v6
+fec=on mode=grouped n=4 m=4 w=0 carriers=256 crypto=on crypto_key=-
+carrier_port=9000 target_port=5201 portblock=30000-34095 app_target_mbps=33.72 loss_ppm=0
+module=./tbtun.ko state_dir=/tmp/tbtun-hnd0 evidence_dir=/tmp/tbtun-hnd0-evidence lock=/tmp/tbtun-hnd0.lock
+[dry-run] flock -w 1800 /tmp/tbtun-hnd0.lock (holder: tbtun HND0 deploy/rollback)
+[dry-run] sh -c systemctl stop 'tbtun-iperf3-5201.service' 2>/dev/null || true
+[dry-run] sh -c systemctl reset-failed 'tbtun-iperf3-5201.service' 2>/dev/null || true
+module: already absent
+[dry-run] sh -c test ! -d /proc/net/tbtun
+[dry-run] sh -c ! ss -lntH | awk '$4 ~ ":9000$" || $4 ~ ":5201$"' | grep -q .
+deploy_hnd0.sh: no snapshot found; checking services as-is
+  frps=active
+  caddy=active
+  hysteria-server=active
+  xray=active
+routes (unchanged by this script):
+default via 45.11.1.126 dev eth0 proto static 
+1.1.1.1 via 45.11.1.126 dev eth0 proto static 
+1.2.4.8 via 45.11.1.126 dev eth0 proto static 
+45.11.1.0/25 dev eth0 proto kernel scope link src 45.11.1.62 
+deploy_hnd0.sh: rollback requested; verify with: deploy_hnd0.sh verify
+===VERIFY===
+mode=dry-run cmd=verify abi=v6
+fec=on mode=grouped n=4 m=4 w=0 carriers=256 crypto=on crypto_key=-
+carrier_port=9000 target_port=5201 portblock=30000-34095 app_target_mbps=33.72 loss_ppm=0
+module=./tbtun.ko state_dir=/tmp/tbtun-hnd0 evidence_dir=/tmp/tbtun-hnd0-evidence lock=/tmp/tbtun-hnd0.lock
+module=absent
+proc=absent
+service frps=active
+service caddy=active
+service hysteria-server=active
+service xray=active
+port 9000=free
+port 5201=free
+snapshot=none
+app_target_mbps=33.72 loss_ppm=0 (throughput is measured by T5.2, not here)
+VERIFY_RC=0

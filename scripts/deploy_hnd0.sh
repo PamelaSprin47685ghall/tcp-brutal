@@ -2,11 +2,14 @@
 # deploy_hnd0.sh — tbtun far-side deploy / rollback driver for HND0.
 #
 # Target box: HND0 45.11.1.62, 2 vCPU / 955 MiB, physical 1G, 256-flow.
-# Final production profile: 256 carriers grouped 32x8, app 500-750 Mbit/s.
-# Current w-window module is capped at 16 carriers; a 256-carrier deploy is
-# expected to fail at insmod until the FEC v6/grouped branch lands. This
-# script never silently shrinks the request: a rejected insmod aborts and
-# points at rollback.
+# Interface contract: review/goal-v6-interfaces.md (master 7105507).
+#
+# Two ABIs:
+#   v6 (default)  fec=on mode=grouped n=4 m=4 w=0 carriers=256 crypto=on
+#                 crypto_key=-  -> 32 groups x 8 shares, 1 share/carrier.
+#                 insmod max_carriers=256 max_tunnels=1.
+#   legacy        old ARQ keys (n/m/profile/nonce, optional tx_window_bytes),
+#                 n+m <= 16. Used for the A-side N=1/4/8 stepping stone.
 #
 # Invariants:
 #   - Dry-run is the default. Nothing is loaded and no service is touched
@@ -19,25 +22,37 @@
 #     transient unit tbtun-iperf3-<target-port>, and the two experiment ports.
 #   - No routing or firewall change is made. Routes are recorded and compared,
 #     never written.
+#   - execute takes /tmp/tbtun-hnd0.lock (flock -w 1800) and writes a holder
+#     line; the lock is the maintenance-window claim required by §7.
 #
 # Usage:
 #   ./deploy_hnd0.sh status
-#   ./deploy_hnd0.sh deploy --execute --carriers 4 --spares 1
+#   ./deploy_hnd0.sh deploy --execute                 # v6 production profile
+#   ./deploy_hnd0.sh deploy --execute --abi legacy --carriers 4 --spares 1
 #   ./deploy_hnd0.sh rollback --execute
 #   ./deploy_hnd0.sh verify
 #
 # Options (deploy):
+#   --abi v6|legacy        config dialect (default v6)
 #   --module PATH          tbtun.ko to load (default ./tbtun.ko)
-#   --carriers N           active carriers (default 4; production 256)
-#   --spares M             spare carriers (default 1)
-#   --window-bytes W       tx_window_bytes (default 0 = module auto); the
-#                          key name/unit must be confirmed against the fixed
-#                          branch README before a non-zero value is used
+#   --fec on|off           v6 only (default on)
+#   --mode rlnc|grouped|sc-ldpc   v6 only (default grouped)
+#   --n N                  data shares per group (default 4)
+#   --m M                  parity shares per group (default 4; legacy 1)
+#   --w W                  window (default 0 = auto; v6 renders 2*n)
+#   --carriers N           carrier count (default 256; legacy 4)
+#   --crypto on|off        v6 only (default on)
+#   --crypto-key HEX|-     64 hex or '-' (default -)
+#   --profile P            legacy profile (default raw)
+#   --nonce HEX            32 hex digits (default fixed experiment nonce)
+#   --window-bytes W       legacy only: tx_window_bytes (default 0 = auto)
 #   --carrier-port P       far listen port (default 9000)
 #   --target-port P        local target port (default 5201)
-#   --app-target-mbps M    acceptance floor recorded for T5.2 (default 33.72)
-#   --nonce HEX            32 hex digits (default fixed experiment nonce)
-#   --state-dir DIR        snapshot directory (default /tmp/tbtun-hnd0)
+#   --portblock LO-HI      source port block (default 30000-34095, 4096 ports)
+#   --app-target-mbps M    acceptance floor for T5.2 (default 33.72)
+#   --loss-p PPM           recorded loss target for T5.2 (default 0)
+#   --evidence-dir DIR     runtime evidence copy (default /tmp/tbtun-hnd0-evidence)
+#   --state-dir DIR        runtime snapshot directory (default /tmp/tbtun-hnd0)
 #   --execute              actually run; without it everything is dry-run
 
 set -euo pipefail
@@ -46,19 +61,33 @@ PROG=${0##*/}
 CMD=status
 MODE=dry-run
 
+ABI=v6
 MODULE=./tbtun.ko
-CARRIERS=4
-SPARES=1
+FEC=on
+FEC_MODE=grouped
+N=4
+M=4
+W=0
+CARRIERS=256
+CRYPTO=on
+CRYPTO_KEY=-
+PROFILE=raw
+NONCE=00112233445566778899aabbccddeeff
 WINDOW_BYTES=0
 CARRIER_PORT=9000
 TARGET_PORT=5201
+PORTBLOCK=30000-34095
 APP_TARGET_MBPS=33.72
-NONCE=00112233445566778899aabbccddeeff
+LOSS_PPM=0
+EVIDENCE_DIR=/tmp/tbtun-hnd0-evidence
 STATE_DIR=/tmp/tbtun-hnd0
+LOCK_FILE=/tmp/tbtun-hnd0.lock
+LOCK_WAIT=1800
+PURPOSE="${PURPOSE:-tbtun HND0 deploy/rollback}"
 PROD_SERVICES="frps caddy hysteria-server xray"
 
 usage() {
-    sed -n '2,50p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,62p' "$0" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -90,6 +119,15 @@ require_root() {
     [[ $(id -u) -eq 0 ]] || die "deploy/rollback must run as root"
 }
 
+take_lock() {
+    [[ $MODE == dry-run ]] && { printf '[dry-run] flock -w %s %s (holder: %s)\n' "$LOCK_WAIT" "$LOCK_FILE" "$PURPOSE"; return 0; }
+    exec 9>"$LOCK_FILE"
+    flock -w "$LOCK_WAIT" 9 || die "lock busy: $LOCK_FILE (do not kill the holder)"
+    printf '%s %s %s %s\n' "$$" "$(date -Is)" "$(whoami)" "$PURPOSE" >&9
+    trap 'flock -u 9' EXIT
+    printf 'lock: %s holder: %s\n' "$LOCK_FILE" "$PURPOSE"
+}
+
 module_loaded() { lsmod | awk '$1=="tbtun"{found=1} END{exit !found}'; }
 
 listening_on() {
@@ -103,7 +141,7 @@ snapshot() {
     stamp=$(date +%Y%m%d-%H%M%S)
     file="$STATE_DIR/state-$stamp.txt"
     if [[ $MODE == dry-run ]]; then
-        printf '[dry-run] snapshot -> %s\n' "$file"
+        printf '[dry-run] snapshot -> %s (copy to %s/)\n' "$file" "$EVIDENCE_DIR"
         return 0
     fi
     mkdir -p "$STATE_DIR"
@@ -112,6 +150,9 @@ snapshot() {
         printf 'kernel=%s\n' "$(uname -r)"
         printf 'nproc=%s\n' "$(nproc)"
         printf 'mem_total_kb=%s\n' "$(awk '/MemTotal/{print $2}' /proc/meminfo)"
+        printf 'abi=%s fec=%s mode=%s n=%s m=%s w=%s carriers=%s crypto=%s\n' \
+            "$ABI" "$FEC" "$FEC_MODE" "$N" "$M" "$W" "$CARRIERS" "$CRYPTO"
+        printf 'app_target_mbps=%s loss_ppm=%s\n' "$APP_TARGET_MBPS" "$LOSS_PPM"
         if module_loaded; then printf 'module=loaded\n'; else printf 'module=absent\n'; fi
         printf 'services:\n'
         for s in $PROD_SERVICES; do printf '  %s=%s\n' "$s" "$(service_state "$s")"; done
@@ -123,7 +164,13 @@ snapshot() {
         ip rule show | sed 's/^/  /'
     } > "$file"
     ln -sf "$file" "$STATE_DIR/latest"
-    printf 'snapshot: %s\n' "$file"
+    if [[ -n $EVIDENCE_DIR ]]; then
+        mkdir -p "$EVIDENCE_DIR"
+        cp -f "$file" "$EVIDENCE_DIR/"
+        printf 'snapshot: %s (evidence copy in %s/)\n' "$file" "$EVIDENCE_DIR"
+    else
+        printf 'snapshot: %s\n' "$file"
+    fi
 }
 
 latest_snapshot() {
@@ -141,11 +188,71 @@ check_ports_free() {
     done
 }
 
+validate_profile() {
+    case $ABI in
+        v6|legacy) ;;
+        *) die "--abi must be v6 or legacy" ;;
+    esac
+    case $FEC in on|off) ;; *) die "--fec must be on or off" ;; esac
+    case $FEC_MODE in rlnc|grouped|sc-ldpc) ;; *) die "--mode must be rlnc, grouped, or sc-ldpc" ;; esac
+    case $CRYPTO in on|off) ;; *) die "--crypto must be on or off" ;; esac
+    [[ $N =~ ^[0-9]+$ ]] || die "--n must be decimal"
+    [[ $M =~ ^[0-9]+$ ]] || die "--m must be decimal"
+    [[ $W =~ ^[0-9]+$ ]] || die "--w must be decimal"
+    [[ $CARRIERS =~ ^[0-9]+$ ]] || die "--carriers must be decimal"
+    if [[ $ABI == v6 ]]; then
+        (( CARRIERS >= 1 && CARRIERS <= 256 )) || die "--carriers must be 1..256 for v6"
+        (( N >= 1 && N <= 255 )) || die "--n must be 1..255"
+        (( M >= 1 && M <= 255 )) || die "--m must be 1..255 for fec=on"
+        (( N + M <= 256 )) || die "n+m must be <= 256"
+        (( CARRIERS % (N + M) == 0 )) || die "carriers must divide by (n+m) for 1 share/carrier"
+        if [[ $CRYPTO == on && $FEC == off ]]; then
+            die "crypto=on requires fec=on"
+        fi
+        if [[ $FEC_MODE == grouped || $FEC_MODE == rlnc ]]; then
+            (( W == 0 || W >= N )) || die "--w must be 0 or >= n"
+            (( W <= 1024 )) || die "--w must be <= 1024"
+        fi
+    else
+        (( N + M <= 16 )) || die "legacy ARQ supports n+m <= 16; use --abi v6 for 256 carriers"
+        (( CARRIERS <= 16 )) || die "legacy ARQ supports carriers <= 16"
+    fi
+    [[ $PORTBLOCK =~ ^[0-9]+-[0-9]+$ ]] || die "--portblock must be LO-HI"
+}
+
+config_line() {
+    local line
+    if [[ $ABI == v6 ]]; then
+        line="tunnel 1 role=far listen=0.0.0.0:$CARRIER_PORT target=127.0.0.1:$TARGET_PORT"
+        line+=" n=$N m=$M fec=$FEC mode=$FEC_MODE w=$W carriers=$CARRIERS crypto=$CRYPTO crypto_key=$CRYPTO_KEY"
+        line+=" dup=1 profile=$PROFILE keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000"
+        line+=" hole_budget_ms=30000 rx_reorder_bytes=262144 tx_retain_bytes=0 carrier_stall_ms=15000"
+        line+=" portblock=$PORTBLOCK nonce=$NONCE"
+    else
+        line="tunnel 1 role=far listen=0.0.0.0:$CARRIER_PORT target=127.0.0.1:$TARGET_PORT"
+        line+=" n=$N m=$M profile=$PROFILE"
+        line+=" keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000"
+        line+=" hole_budget_ms=30000 rx_reorder_bytes=262144 tx_retain_bytes=0 carrier_stall_ms=15000"
+        line+=" portblock=$PORTBLOCK nonce=$NONCE"
+        if (( WINDOW_BYTES > 0 )); then
+            line+=" tx_window_bytes=$WINDOW_BYTES"
+        fi
+    fi
+    printf '%s\n' "$line"
+}
+
 print_plan() {
-    printf 'mode=%s cmd=%s\n' "$MODE" "$CMD"
-    printf 'carriers=%s spares=%s window_bytes=%s\n' "$CARRIERS" "$SPARES" "$WINDOW_BYTES"
-    printf 'carrier_port=%s target_port=%s app_target_mbps=%s\n' "$CARRIER_PORT" "$TARGET_PORT" "$APP_TARGET_MBPS"
-    printf 'module=%s state_dir=%s\n' "$MODULE" "$STATE_DIR"
+    printf 'mode=%s cmd=%s abi=%s\n' "$MODE" "$CMD" "$ABI"
+    if [[ $ABI == v6 ]]; then
+        printf 'fec=%s mode=%s n=%s m=%s w=%s carriers=%s crypto=%s crypto_key=%s\n' \
+            "$FEC" "$FEC_MODE" "$N" "$M" "$W" "$CARRIERS" "$CRYPTO" "$CRYPTO_KEY"
+    else
+        printf 'n=%s m=%s profile=%s window_bytes=%s\n' "$N" "$M" "$PROFILE" "$WINDOW_BYTES"
+    fi
+    printf 'carrier_port=%s target_port=%s portblock=%s app_target_mbps=%s loss_ppm=%s\n' \
+        "$CARRIER_PORT" "$TARGET_PORT" "$PORTBLOCK" "$APP_TARGET_MBPS" "$LOSS_PPM"
+    printf 'module=%s state_dir=%s evidence_dir=%s lock=%s\n' \
+        "$MODULE" "$STATE_DIR" "$EVIDENCE_DIR" "$LOCK_FILE"
 }
 
 do_status() {
@@ -162,11 +269,15 @@ do_status() {
     done
     printf 'snapshots:\n'
     if [[ -L $STATE_DIR/latest ]]; then printf '  latest=%s\n' "$(readlink -f "$STATE_DIR/latest")"; else printf '  none\n'; fi
+    printf 'lock:\n'
+    if [[ -e $LOCK_FILE ]]; then printf '  %s present\n' "$LOCK_FILE"; else printf '  %s absent\n' "$LOCK_FILE"; fi
 }
 
 do_deploy() {
     print_plan
+    validate_profile
     require_root
+    take_lock
     if [[ ! -f $MODULE ]]; then
         if [[ $MODE == dry-run ]]; then
             note "module missing: $MODULE (dry-run continues; build before --execute)"
@@ -179,24 +290,33 @@ do_deploy() {
     fi
     check_ports_free
     snapshot
-    if [[ $CARRIERS -gt 16 ]]; then
-        note "requesting $CARRIERS carriers; the w-window module caps at 16."
-        note "insmod is expected to fail until the FEC v6/grouped branch lands."
-        note "this script will abort and print the rollback command, not shrink the request."
+    if [[ $ABI == v6 ]]; then
+        note "v6: carriers=$CARRIERS n=$N m=$M -> groups=$((CARRIERS / (N + M))) groups, 1 share/carrier"
+        note "v6: insmod max_carriers=$CARRIERS max_tunnels=1 (128 MiB budget, §3.3)"
+        if (( CARRIERS > 16 )); then
+            note "256-carrier deploy requires the FEC v6 branch; a module without fec= keys will reject the config line"
+        fi
+    else
+        note "legacy ARQ: n+m=$((N + M)) <= 16; no fec=/mode=/carriers= keys are written"
     fi
-    if ! run insmod "$MODULE" max_carriers="$CARRIERS"; then
-        note "insmod failed for $CARRIERS carriers; rollback with: $PROG rollback --execute"
-        return 1
+    if [[ $ABI == v6 ]]; then
+        if ! run insmod "$MODULE" max_carriers="$CARRIERS" max_tunnels=1; then
+            note "insmod failed for $CARRIERS carriers; rollback with: $PROG rollback --execute"
+            return 1
+        fi
+    else
+        if ! run insmod "$MODULE" max_carriers="$CARRIERS"; then
+            note "insmod failed for $CARRIERS carriers; rollback with: $PROG rollback --execute"
+            return 1
+        fi
     fi
-    local line="tunnel 1 role=far listen=0.0.0.0:$CARRIER_PORT target=127.0.0.1:$TARGET_PORT n=$CARRIERS m=$SPARES profile=raw nonce=$NONCE portblock=31000-31099"
-    if [[ $WINDOW_BYTES -gt 0 ]]; then
-        line+=" tx_window_bytes=$WINDOW_BYTES"
-    fi
+    local line
+    line=$(config_line)
     if ! run_sh "printf '%s\\n' '$line' > /proc/net/tbtun/config"; then
         note "config write failed; rollback with: $PROG rollback --execute"
         return 1
     fi
-    run_sh "cat /proc/net/tbtun/config; cat /proc/net/tbtun/tunnels"
+    run_sh "cat /proc/net/tbtun/config; cat /proc/net/tbtun/tunnels; cat /proc/net/tbtun/ports"
     run systemd-run --unit="tbtun-iperf3-$TARGET_PORT" \
         --property=StandardOutput=file:"$STATE_DIR/iperf3-$TARGET_PORT.log" \
         --property=StandardError=file:"$STATE_DIR/iperf3-$TARGET_PORT.log" \
@@ -208,6 +328,7 @@ do_deploy() {
 do_rollback() {
     print_plan
     require_root
+    take_lock
     # Transient units do not appear in list-unit-files; stop is idempotent.
     run_sh "systemctl stop 'tbtun-iperf3-$TARGET_PORT.service' 2>/dev/null || true"
     run_sh "systemctl reset-failed 'tbtun-iperf3-$TARGET_PORT.service' 2>/dev/null || true"
@@ -257,7 +378,7 @@ do_verify() {
     else
         printf 'snapshot=none\n'
     fi
-    printf 'app_target_mbps=%s (throughput is measured by T5.2, not here)\n' "$APP_TARGET_MBPS"
+    printf 'app_target_mbps=%s loss_ppm=%s (throughput is measured by T5.2, not here)\n' "$APP_TARGET_MBPS" "$LOSS_PPM"
     return "$fail"
 }
 
@@ -266,14 +387,25 @@ while (($#)); do
         status|deploy|rollback|verify) CMD=$1; shift ;;
         --dry-run) MODE=dry-run; shift ;;
         --execute) MODE=execute; shift ;;
+        --abi) ABI=$2; shift 2 ;;
         --module) MODULE=$2; shift 2 ;;
+        --fec) FEC=$2; shift 2 ;;
+        --mode) FEC_MODE=$2; shift 2 ;;
+        --n) N=$2; shift 2 ;;
+        --m) M=$2; shift 2 ;;
+        --w) W=$2; shift 2 ;;
         --carriers) CARRIERS=$2; shift 2 ;;
-        --spares) SPARES=$2; shift 2 ;;
+        --crypto) CRYPTO=$2; shift 2 ;;
+        --crypto-key) CRYPTO_KEY=$2; shift 2 ;;
+        --profile) PROFILE=$2; shift 2 ;;
+        --nonce) NONCE=$2; shift 2 ;;
         --window-bytes) WINDOW_BYTES=$2; shift 2 ;;
         --carrier-port) CARRIER_PORT=$2; shift 2 ;;
         --target-port) TARGET_PORT=$2; shift 2 ;;
+        --portblock) PORTBLOCK=$2; shift 2 ;;
         --app-target-mbps) APP_TARGET_MBPS=$2; shift 2 ;;
-        --nonce) NONCE=$2; shift 2 ;;
+        --loss-p) LOSS_PPM=$2; shift 2 ;;
+        --evidence-dir) EVIDENCE_DIR=$2; shift 2 ;;
         --state-dir) STATE_DIR=$2; shift 2 ;;
         -h|--help) usage 0 ;;
         *) die "unknown argument: $1 (try --help)" ;;
