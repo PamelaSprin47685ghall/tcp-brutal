@@ -337,7 +337,7 @@ by 16 x 10 Mbit classes is far above the 34 Mbit observed, and the control
 shows a single flow capping at 2.6-2.7 Mbit. Going wider would need a second
 port block and a second shaping range; it is not a module limit at 16.
 
-### 7. Retransmit attribution and the slow-path grace (2026-11-05 19:xx)
+### 7. Retransmit attribution and the slow-path grace (2026-11-05 19:11-20:41)
 
 The earlier sweep could only report `retx_ppm`, which divided copies by every
 record on the path (FBK was 45% of that denominator) and took the worst
@@ -357,7 +357,8 @@ single-carrier row). Every row is one boot.
 | 3xRTO slow path | 20261105T192806 | 92d2821 | 10.41 | 87.44 | 1.0185 | 3692 | 0 | 38 | 0 | 3710 | 0 | 1 | 0 |
 | 3xRTO slow path | 20261105T193751 | 847c784 | 12.22 | 96.44 | 1.0174 | 1456 | 0 | 15 | 0 | 1464 | 0 | 1 | 1 |
 | 3xRTO slow path | 20261105T195705 | 847c784 | 10.68 | 93.02 | 1.0235 | 7951 | 1 | 81 | 0 | 7999 | 0 | 1 | 0 |
-| n=1, 3xRTO | 20261105T194827 | 847c784 | 3.77 | 212.88 | 1.0190 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
+| 3xRTO + stalled-path fix | 20261105T203309 | 8e54c42 | 13.51 | 100.96 | 1.0242 | 7763 | 1 | 79 | 0 | 7809 | 0 | 1 | 0 |
+| n=1, final tree | 20261105T204157 | 8e54c42 | 3.02 | 214.52 | 1.0191 | 0 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 
 Reading:
 
@@ -375,9 +376,18 @@ Reading:
   branch is still the only source.
 - `dup_bytes_ppm` tracks `retx_ppm` because a copy is one 8 KiB record; at
   1.5-8k ppm the copies cost 0.15-0.8% of the application bytes.
-- Regression: `tests/qemu/run.sh --probes J,K --timeout 300` passed J and K
-  **3/3** with `holes_unrecoverable=0` and no RST storm; the n=1 40 MiB row
-  is byte-exact (`rc=0 strict=1`) with zero copies.
+- The K regression found a second, independent bug. The scheduler ranks paths
+  by `payload_bytes_sent - tx_ack`; a blackholed path stops being written, so
+  that difference falls to zero and it wins the pick exactly when it can
+  deliver nothing. K failed 1/3 (`TXSTALLKILL ack=73728 age_us=504198`) because
+  the hole copy landed on the dead carrier on every timer tick. A retransmit
+  copy now skips a path that has unacked bytes (`snd_una != snd_nxt`) and has
+  not moved `snd_una` for an RTO; idle paths stay eligible and new data is
+  unaffected. With the fix, J and K pass **3/3** on the final tree
+  (`tests/qemu/run.sh --probes J,K --timeout 300`), and the probe prints
+  `holes_unrecoverable=0 carrier_lost=0`; there is no RST storm.
+- The n=1 40 MiB row is byte-exact (`rc=0 strict=1`) with zero copies and a
+  whole-run wire/app of 1.019, down from the recorded 1.98/`rc=3`.
 
 ## Reading the numbers
 

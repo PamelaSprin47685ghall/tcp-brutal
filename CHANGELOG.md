@@ -73,6 +73,12 @@ full-suite pass.
   grace moved from 2xRTO to 3xRTO: on a clean 40 MiB n=4 run the old grace copied 310
   frames that the peer had queued, not lost (whole-run wire/app 1.047 -> 1.024, honest
   retx 30k -> 8k; probes J/K still 3/3).
+- **Retransmit scheduling onto a dead path:** a retransmit copy now skips a carrier
+  whose TCP has unacked bytes and has not moved `snd_una` for an RTO. A blackholed
+  carrier stops being written, so the lowest-inflight scheduler
+  (`payload_bytes_sent - tx_ack`) used to pick it exactly when it could deliver
+  nothing; probe K failed 1/3 with `TXSTALLKILL` at the 500 ms budget. Idle paths stay
+  eligible and new data is unaffected. J/K pass 3/3 with `holes_unrecoverable=0`.
 - **Short-write tail offset:** after a partial carrier write, the retained tail is
   copied from `fr->data + (done - TBT_HDR_LEN)` instead of `fr->data`, keeping the
   header/payload split aligned. This fixes the strict `n=4` payload corruption at
