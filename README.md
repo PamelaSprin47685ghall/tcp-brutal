@@ -307,7 +307,7 @@ send-then-read phase (byte-exact), one configuration per boot. The control is a
 single `dd | nc` flow on one shaped 5-tuple. `app` is the near tunnel's
 `submit_bytes` rate; `wire/app` is whole-run carrier bytes over application
 bytes; `retx_ppm` is copies per million unique DATA records. The module under
-test is sha256 `0b8f0006…`, the module the final tree `b57b438` builds; raw
+test is sha256 `0b8f0006…`, the module the final tree `f1282df` builds; raw
 CSVs, consoles and the acceptance table are in `review/final-bench/`.
 
 | Carriers | Control (Mbit/s) | App (Mbit/s) | App/control | wire/app | retx_ppm | strict / rc | CSV |
@@ -326,12 +326,24 @@ the whole-run ratio; the CSV's 2 s window reads 1.0333 at `n=4`. One earlier
 ratio is the claim. `n=16` is 10.5x the one-carrier app rate. The full matrix
 and CSVs are in `review/final-bench/summary.md`.
 
-Acceptance evidence for tree `b57b438` (module `0b8f0006…`, evidence commit
-`a9d7c47`): host, QEMU A–K (11/11) and adversarial (78 PASS / 0 FAIL / 0 SKIP)
-results are in `review/final/` and `review/final-qemu/`; throughput, flush and
-writer results are in `review/final-bench/`; the DKMS install/load/unload run
-on a clean guest kernel is in `review/dkms-qemu/`. The writer probe blocks in
-`write()` with `errno=0 eagain=0` and `flush` returns the memory; see
+Acceptance evidence for tree `f1282df` (module `0b8f0006…`, evidence commit
+`af3b9ba`): host, QEMU A–K (11/11) and adversarial (18 groups plus the crash
+repro, 91 PASS / 0 FAIL / 0 SKIP in 284.4 s) results are in `review/final/`
+and `review/final-qemu/`; throughput, flush and writer results are in
+`review/final-bench/`; the DKMS install/load/unload run on a clean guest kernel
+is in `review/dkms-qemu/`.
+
+The writer probes cover two contracts. `pub.writer`, where the application
+never reads, stays blocked inside `write()`: the 100 MiB offer is still blocked
+at `sent=73400320/104857600` and the 1 GiB offer at
+`sent=74448896/1073741824`, both with `errno=0 eagain=0 blocked=1`, so there is
+no `EAGAIN` (the probe sets no `SO_SNDTIMEO`); memory stays bounded
+(`oom=0->0`), and `flush` returns the memory in 0.03 s. `pub.writer_drain` and
+`pub.writer_drain_1g`, where the application drains, complete: the 100 MiB run
+reports `sent=104857600/104857600`, `got=104857600/104857600`, 71.5 MiB/s in
+1.40 s; the 1 GiB run reports `sent=1073741824/1073741824`,
+`got=1073741824/1073741824`, 69.9 MiB/s in 14.64 s. Both report
+`errno=0/0 eagain=0 blocked=0 oom=0->0`, and `flush` takes 0.01 s. See
 `review/final/README.md`.
 
 The ratio is still the claim: `N` five-tuples beat one. These are laboratory

@@ -1,3 +1,12 @@
+> **SUPERSEDED（历史快照，writer 部分）**
+>
+> 本文件的 writer 探针基于 b57b438 时代的旧程序（应用从不读取，且设置了
+> `SO_SNDTIMEO`，所以把 `errno=11` 当成终点）。该结论已被 f1282df 的最终证据
+> 取代：当前 `pub.writer` 应用不读时保持 `blocked=1 errno=0 eagain=0`（无
+> EAGAIN），`pub.writer_drain`/`pub.writer_drain_1g` 应用读取时分别完成
+> 100 MiB 与 1 GiB。当前最终结果见 `review/final/README.md` 与
+> `review/final/adversarial-results.txt`。旧数字保留仅作历史。
+
 # tbtun 0.0.1 final performance/resource acceptance
 
 Run date: 2026-11-06 00:37–01:06 +08:00.
@@ -122,7 +131,7 @@ ADV_RESULT ctl.close_flush PASS sha=0b8f0006a7a10fe3 the guest survived the clos
 
 `run.sh: 5 passed, 0 failed, 0 skipped`. **PASS.**
 
-## 3. Writer backpressure and memory ledger
+## 3. Writer backpressure and memory ledger (historical probe)
 
 Required group:
 
@@ -159,9 +168,10 @@ Reading:
 
 - The 1 GiB offer accepted the same ~75 MB as the 100 MiB offer: the public
   socket/module backpressure stops the writer at a bounded buffer, so offered
-  volume does not become resident memory. `errno=11` (EAGAIN) is the observed
-  flow-control boundary, not an OOM or a crash. The guest never came near OOM
-  (minimum MemAvailable 230–233 MB of 512 MB).
+  volume does not become resident memory. The guest never came near OOM
+  (minimum MemAvailable 230–233 MB of 512 MB). The `errno=11` above came from
+  this old probe's own `SO_SNDTIMEO`, not from the module: the final probe sets
+  no timeout, and the unread writer stays `blocked=1 errno=0 eagain=0`.
 - The bytes held after the app's close are released by a tunnel flush:
   279,380 -> 410,836 kB (+131 MB) with one `echo flush`. The second case's
   `before=406,804` is also post-flush and confirms the same recovery.
@@ -215,9 +225,10 @@ review/final-bench/
    column parse is valid. The higher throughput may be the flip side of a
    polling trade-off, but the ~20-30x workqueue CPU increase needs profiling
    and a bisect before release.
-2. **`errno=11` is the designed backpressure boundary.** Both writer cases stop
-   at ~75 MB accepted; memory stays bounded and is released by `flush`, not by
-   stream close within 5 s.
+2. **Writer contract (superseded here).** The old probe's `errno=11` was its
+   own timeout, not a designed module boundary. The final contract is in
+   `review/final/README.md`: an unread writer stays blocked with
+   `errno=0 eagain=0`, and a draining writer completes 100 MiB and 1 GiB.
 3. **The whole-run `wire/app` is the acceptance number**, not the CSV's
    `wire_per_app` (2 s window). At n=4 the window column reads 1.0333 while the
    whole run is 1.0138.

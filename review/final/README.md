@@ -7,8 +7,9 @@ module is byte-identical to the earlier b57b438 build. Module: sha256
 0b8f0006a7a10fe33e6e35e927aaf916047e142528bc32729ed04826fdccdb63.
 Evidence locations: `review/final/` (this directory; host, QEMU A-K and
 adversarial summaries), `review/final-qemu/` (QEMU/adversarial run logs and
-consoles, `*-f1282df.log` / `*-f1282df.txt`) and `review/final-bench/`
-(throughput CSVs, flush, writer and DKMS runs). Host was quiet before every
+consoles, `*-f1282df.log` / `*-f1282df.txt`), `review/dkms-qemu/` (DKMS
+install/load/unload on the clean guest kernel) and `review/final-bench/`
+(throughput CSVs and flush runs). Host was quiet before every
 run (`pgrep -af 'qemu-system|bench'` empty); no bench was started, as required
 for a stable measurement.
 
@@ -78,6 +79,58 @@ isolated close-flush crash repro. Full result lines are in
   `write2=-1 errno=7` and tunnel 77 is never applied.
 
 `pub.churn` still reads `usable=10000 refused=0 other=0 retried=0`.
+
+## Finding → runtime evidence
+
+Each code finding from `review/findings.md` is paired with the final-tree
+runtime test that exercises its path and a fragment of the observed result.
+`代码级/不可运行时区分` marks a removal or internal ordering change that leaves
+no runtime-distinguishable signal; the reason is stated in the result cell.
+
+| Finding | Runtime evidence | Result line |
+|---|---|---|
+| 1 orphaned carrier | `init.rmmod`, `near.fin_eagain` | `rmmod rc=0, app closed cleanly`; `fin_seen=1 eof=1 child_rc=0`, `holes_unrecoverable 0 -> 0` |
+| 2 trim UAF | `near.fin_eagain`, `init.slab_leak` | `fin_seen=1 eof=1 child_rc=0`; `32k slabs grew by 0 objects over 100 connections` |
+| 3 create failure / old leak | `create.failure`, `create.replace` | `new-id create refused, no tunnel 9, tunnels 1/2 still echo, retry after release works`; `old tunnel survived=0 usable=0` |
+| 4 callback teardown | `ctl.close_flush`, `init.rmmod` | `the guest survived the close flush`; `rmmod rc=0, app closed cleanly` |
+| 5 double stream insert | `pub.concurrent` | `n=100 connected=100 echoed=100 short=0 corrupt=0 timeout=0 isolation=1` |
+| 6 pump-lock deadlock | `ctl.close_flush`, `near.fin_eagain` | `the guest survived the close flush`; `fin_seen=1 eof=1 child_rc=0` |
+| 7 sk release order | `init.rmmod`, `ctl.close_flush` | `rmmod rc=0, app closed cleanly`; `the guest survived the close flush` |
+| 8 accept before session | `pub.concurrent` | `n=100 connected=100 echoed=100 short=0 corrupt=0 timeout=0 isolation=1` |
+| 9 short write | `init.echo_sane`, `pub.writer_drain` | `ECHO_OK bytes=2097152`; `sent=104857600/104857600 got=104857600/104857600 errno=0/0 eagain=0 blocked=0 secs=1.40` |
+| 10 peers c->sk | `cat.cfg_self`, `far.data_path` | `cat config > config rc=0, 2 tunnels still present`; `anchor echo: 8 bytes 'pingpong' corrupt=0` |
+| 11 RETIRE / TBT_CONV | `far.anchor`, QEMU `E`/`K` | `carrier joined index 0, far generation 4`; `K PASS`, `spare_activated=1 replaced=0 lost=2` |
+| 12 HELLO bit layout | `far.hello_profile9`, `far.hello_profile0` | `HELLO byte 9 = profile 1, generation 2: accepted as a generation`; `profile 0 must be refused` |
+| 13 PREDICT inert | 代码级/不可运行时区分 | `grep -rn 'predict_' tbtun/ is empty; 0x11/0x12 removed, no runtime path` |
+| 14 data_frames before send | `far.data_path`, `near.fin_eagain` | `submit_bytes=12 tx_ack=0`; `tx_ack=524288 txq=0` |
+| 15 fbk_mask unused | 代码级/不可运行时区分 | `grep -rn fbk_mask tbtun/ is empty; parameter and call-site argument removed, no runtime path` |
+| 16 first-HELLO nonce | `far.anchor`, `far.dup_index`, `far.nonce_pinned`, `far.src_anchor` | `joined index 0, far generation 4`; `join_src_reject 0 -> 1, join_bad 0 -> 1` |
+| 17 http proc entry | `init.rmmod`, `init.reload` | `rmmod rc=0, app closed cleanly`; `module reloaded` |
+| 18 module parameters | `init.max_carriers`, `init.max_tunnels` | `n=8 refused with max_carriers=4`; `64 tunnels accepted before the limit` |
+| 19 one-shot config read | `cfg.big_roundtrip` | `one-shot read 33335 bytes; expected 33335 bytes; byte-identical` |
+| 20 overlapping reorder | `far.overlap` | `echoed 49152/49152 bytes corrupt=0`; `ooo_bytes 0 -> 0`; `holes_unrecoverable 0 -> 0` |
+| 21 non-atomic counters | QEMU `C`/`E` | `C: d_wire=0 d_data=0 d_retx=0`; `E: d_wire=0 d_data=0 d_retx=0`; `live_bytes-peers_tx_bytes=0` |
+| 22 pinned control on -EAGAIN | `near.fin_eagain`, `near.rst_eagain` | `fin_seen=1 eof=1 child_rc=0`; `rst_seen=1 eof=0 child_rc=0` |
+| 23 zero reorder/hole budgets | `test_parse` | `357 checks, 0 failures` |
+| 24 hole age | `hole.age` | `RXHOLEKILL x1 age_us=109970 with hole_budget_ms=100` |
+| 25 ports 0-0 | `init.cfg_roundtrip` | `the canonical config replays line by line` |
+| 26 carrier SO_REUSEADDR | QEMU `E`/`K` | `TBT_PROBE_RESULT E PASS`; `TBT_PROBE_RESULT K PASS` |
+| 27 zero-length DATA | `test_fuzz` | `checks=7550734 failures=0` |
+| 28 http header buffer | `far.headers_big`, `near.resp_hdr_big` | `9000-byte header block must be PROTO`; `response header > carrier buffer: carrier poisoned` |
+| 29 render > line max | `cfg.big_write`, `test_parse` | `wrote 33335 bytes / 64 maximal tunnel lines, rc=0`; `357 checks, 0 failures` |
+| 30 32 KiB truncation | `cfg.big_roundtrip` | `served in 1000-byte reads: 33335 bytes, 64 lines`; `byte-identical and larger than 32768` |
+| 31 release overflow | `ctl.release_overflow` | `write2=-1 errno=7; tunnel 77 applied=0` |
+| 32 blank line to /ports | `cat.cfg_mix` | `bad line not applied, far line applied (write rc=0)` |
+| 33 torn http read | `cat.http_torn` | `complete=100 empty=0 partial=0 first_bad=-1` |
+| 34 partial procfs init | `init.rmmod`, `init.reload` | `rmmod rc=0, app closed cleanly`; `module reloaded` |
+| 35 dead keys/functions | 代码级/不可运行时区分 | `five dead keys and tbt_passive_port()/tbt_tunnel_flush() removed; grep is empty, no runtime path` |
+| 36a snd_una gate | `near.fin_eagain` | `pump_hiwat 0 -> 4956 (must grow)`; `holes_unrecoverable 0 -> 0` |
+| 36b trim vs batch | `near.fin_eagain` | `txq=0`; `holes_unrecoverable 0 -> 0`; `tx_ack=524288` |
+| 36c teardown | `init.rmmod`, `ctl.close_flush` | `rmmod rc=0, app closed cleanly`; `the guest survived the close flush` |
+| 36d short-write accounting | `near.fin_eagain` | `tx_ack=524288 txq=0`; `wire=536418`; `holes_unrecoverable 0 -> 0` |
+| 37 http_rx NULL | `near.resp_hdr_big`, `far.headers_big` | `response header > carrier buffer: carrier poisoned`; `9000-byte header block must be PROTO` |
+| 38 buffer leak | `init.slab_leak`, `init.slab_after_flush` | `32k slabs grew by 0 objects over 100 connections`; `after flush: 32k objects 0 -> 0` |
+| 39 constructor order | `create.failure` | `held port: new-id create refused, no tunnel 9, tunnels 1/2 still echo, retry after release works` |
 
 ## Bench (QEMU lab emulation)
 

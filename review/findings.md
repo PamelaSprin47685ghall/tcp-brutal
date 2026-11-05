@@ -43,7 +43,7 @@ parser side (23, 25, 27, 29 and the key removal in 35); they do not cover `tbt_p
 
 ## Final status (0.0.1, 2026-11-06)
 
-**Tree.** `b57b438`; `a9d7c47` adds only the evidence under `review/final/`,
+**Tree.** `f1282df` (master HEAD `af3b9ba`); `af3b9ba` adds only the evidence under `review/final/`,
 `review/final-qemu/`, `review/final-bench/` and `review/dkms-qemu/`. The module
 built from this tree is
 `sha256 0b8f0006a7a10fe33e6e35e927aaf916047e142528bc32729ed04826fdccdb63`
