@@ -1432,6 +1432,40 @@ static u32 tbt_path_inflight(struct tbt_session *sess, struct tbt_stream *st,
     return high - ack > U32_MAX ? U32_MAX : (u32)(high - ack);
 }
 
+/* Paths that have bytes TCP has not acked and have not moved snd_una for an
+ * RTO. A retransmit copy must not be scheduled there: a blackholed path stops
+ * being written, so its payload_bytes_sent - tx_ack falls to zero and the
+ * lowest-inflight scheduler picks it exactly when it can deliver nothing.
+ * An idle path (snd_una == snd_nxt) is not stalled: a copy sent there only
+ * waits for the next new frame to move the clock. Measured: probe K, the hole
+ * copy landed on the blackholed carrier on every timer tick and the sender's
+ * 500 ms budget reset the stream. */
+static u16 tbt_path_stalled_mask(struct tbt_session *sess)
+{
+    u64 now = tbt_now_ns();
+    u64 rto = (u64)READ_ONCE(sess->rto_us) * NSEC_PER_USEC;
+    u16 mask = 0;
+    int i;
+
+    if (!rto)
+        return 0;
+    for (i = 0; i < sess->n_car; i++)
+    {
+        struct tbt_carrier *c = READ_ONCE(sess->car[i]);
+        struct sock *sk;
+
+        if (!c || !c->last_una_move_ns ||
+            now - c->last_una_move_ns < rto)
+            continue;
+        sk = READ_ONCE(c->sk);
+        if (!sk)
+            continue;
+        if (READ_ONCE(tcp_sk(sk)->snd_una) != READ_ONCE(tcp_sk(sk)->snd_nxt))
+            mask |= BIT(i);
+    }
+    return mask;
+}
+
 static bool tbt_sched_better(struct tbt_session *sess, struct tbt_stream *st,
                              const struct tbt_sched *s, u8 a, u8 b)
 {
@@ -1645,6 +1679,7 @@ int tbt_tx_pump(struct tbt_session *sess)
             else
             {
                 u16 avoid = fr->avoid_mask;
+                u16 stalled = fr->retx_copy ? tbt_path_stalled_mask(sess) : 0;
                 /* DATA and stream-owned control use this stream's scheduler;
                  * FBK stays on the session-level control scheduler. */
                 struct tbt_stream *sst =
@@ -1657,7 +1692,7 @@ int tbt_tx_pump(struct tbt_session *sess)
                  * probe). */
                 if (type == TBT_F_DATA && fr->ret)
                     avoid |= fr->ret->path_mask | fr->ret->reserve_mask;
-                c = tbt_sched_pick(sess, sst, blocked | avoid,
+                c = tbt_sched_pick(sess, sst, blocked | avoid | stalled,
                                    type == TBT_F_DATA);
                 if (!c && avoid && fr->dup_copy)
                 {
@@ -1668,7 +1703,7 @@ int tbt_tx_pump(struct tbt_session *sess)
                     goto drop;
                 }
                 if (!c && avoid)
-                    c = tbt_sched_pick(sess, sst, blocked,
+                    c = tbt_sched_pick(sess, sst, blocked | stalled,
                                        type == TBT_F_DATA);
                 if (!c)
                     continue;

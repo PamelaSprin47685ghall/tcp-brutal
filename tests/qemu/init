@@ -917,7 +917,7 @@ probe_j() {
     # while the data is byte-exact. The tunnel's own hole repair is covered by
     # probe G, which injects loss the carrier cannot hide (drop_ppm). The
     # criteria that matter here are byte-exactness in both phases, above.
-    echo "   holes_repaired=$(stat_sum holes_repaired) predict_tx=$(stat_sum predict_tx)"
+    echo "   holes_repaired=$(stat_sum holes_repaired) holes_unrecoverable=$(stat_sum holes_unrecoverable) carrier_lost=$(stat_sum carrier_lost) predict_tx=$(stat_sum predict_tx)"
     kill "$j_pid" 2> /dev/null
     tc_clear
     echo "== probe J: pass"
@@ -980,7 +980,7 @@ probe_k() {
     # hole machinery correctly declines to declare it. The tunnel's own repair
     # is covered by probe G (drop_ppm). The criteria here are byte-exactness
     # after the dead carrier and the bounded-reset behaviour.
-    echo "   holes_repaired=$(stat_sum holes_repaired) predict_tx=$(stat_sum predict_tx)"
+    echo "   holes_repaired=$(stat_sum holes_repaired) holes_unrecoverable=$(stat_sum holes_unrecoverable) carrier_lost=$(stat_sum carrier_lost) predict_tx=$(stat_sum predict_tx)"
     kill "$k_pid" 2> /dev/null
     tc_clear
     echo "== probe K: pass"
