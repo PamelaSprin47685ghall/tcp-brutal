@@ -862,7 +862,7 @@ int tbt_rx_skb(struct tbt_carrier *c, struct sk_buff *skb, unsigned int offset,
 void tbt_rx_check_hole(struct tbt_stream *st)
 {
     struct tbt_session *sess = st->sess;
-    u64 now;
+    u64 now, age = 0;
     u32 budget_bytes;
     bool kill = false;
 
@@ -901,6 +901,7 @@ void tbt_rx_check_hole(struct tbt_stream *st)
             (u64)sess->tunnel->cfg.hole_budget_ms * NSEC_PER_MSEC ||
         st->rx_ooo_bytes > budget_bytes)
     {
+        age = now - st->hole_since_ns;
         st->hole_since_ns = 0;
         kill = true;
     }
@@ -909,7 +910,7 @@ void tbt_rx_check_hole(struct tbt_stream *st)
     {
         if (debug >= 2)
             pr_info("tbtun: RXHOLEKILL sid=%llu age_us=%llu ooo=%u limit=%u queued=%u\n",
-                    (unsigned long long)st->sid, (now - st->hole_since_ns) / NSEC_PER_USEC,
+                    (unsigned long long)st->sid, age / NSEC_PER_USEC,
                     st->rx_ooo_bytes, budget_bytes, st->rx_queued);
         sess->holes_unrecoverable++;
         tbt_stream_kill(st, TBT_ST_HOLE);
