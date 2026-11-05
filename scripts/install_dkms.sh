@@ -180,7 +180,7 @@ remove_all_dkms_entries() {
                 fi
             done
         else
-            printf '  + dkms remove -m %s --all  # no entries found\n' "$MODULE"
+            printf '  # no DKMS entries found for %s\n' "$MODULE"
         fi
         return 0
     fi
@@ -268,6 +268,10 @@ while [ $# -gt 0 ]; do
 done
 
 if [ "$UNINSTALL" -eq 1 ]; then
+    if [ -n "$KERNEL" ] || [ "$STAGE_ONLY" -eq 1 ]; then
+        printf '%s: note: --kernel and --stage-only do not apply to --uninstall; ignoring\n' \
+            "$PROGRAM" >&2
+    fi
     if [ "$DRY_RUN" -eq 0 ] && [ "$(id -u)" -ne 0 ]; then
         die "uninstalling needs root; re-run with sudo"
     fi
