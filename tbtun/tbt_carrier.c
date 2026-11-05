@@ -34,6 +34,14 @@
 
 #include "tbtun.h"
 
+/* A connect that has not completed inside this window is retried by w_poll.
+ * The kernel default is the full SYN retry schedule (~130 s), which a session
+ * teardown would inherit: tbt_carriers_stop() cancels w_connect, and flush
+ * must return in bounded time even when a carrier is dialling an unreachable
+ * peer. 1 s is above any ordinary LAN/WAN SYN round trip and below the
+ * operator-visible flush budget. */
+#define TBT_CONNECT_TIMEOUT_MS 1000
+
 // A private copy of tcp_prot so carriers carry our sendmsg/recvmsg. Same shape
 // as the deleted brutal_sockopt.c used, for a different reason: there we wanted
 // a setsockopt hook, here we want the TX/RX to be ours without a kprobe.
@@ -1214,6 +1222,7 @@ static void tbt_car_connect_work(struct work_struct *w)
     err = kernel_bind(s, (struct sockaddr_unsized *)&local, sizeof(local));
     if (err)
         goto release;
+    s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
     err = kernel_connect(s, (struct sockaddr_unsized *)&addr, sizeof(addr), 0);
     if (err)
         goto release;
@@ -1450,6 +1459,9 @@ void tbt_target_work_fn(struct work_struct *w)
     err = sock_create_kern(t->net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &s);
     if (err)
         goto fail;
+    /* Same bound as a carrier dial: session teardown cancels w_target, and
+     * the default connect timeout is the full SYN retry schedule. */
+    s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
     err = kernel_connect(s, (struct sockaddr_unsized *)&addr, sizeof(addr), 0);
     if (err)
     {

@@ -195,8 +195,26 @@ static ssize_t read_to(int fd, void *buf, size_t len, int ms)
         return -2;
     if (r < 0)
         return errno == EINTR ? -2 : -1;
+    /* A teardown may surface as POLLERR before the pending socket error is
+     * read.  Report the real errno; without this the caller prints errno=0
+     * and the reset contract (104/32/103) cannot be checked.  A zero
+     * SO_ERROR is not an error: recv() below then reports data or EOF. */
     if (p.revents & (POLLERR | POLLNVAL))
-        return -1;
+    {
+        int e = 0;
+        socklen_t el = sizeof(e);
+
+        if (p.revents & POLLNVAL)
+        {
+            errno = EBADF;
+            return -1;
+        }
+        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &e, &el) == 0 && e)
+        {
+            errno = e;
+            return -1;
+        }
+    }
     return recv(fd, buf, len, MSG_DONTWAIT);
 }
 
