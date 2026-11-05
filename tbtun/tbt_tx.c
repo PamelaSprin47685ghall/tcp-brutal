@@ -119,9 +119,9 @@ void tbt_tx_wake(struct tbt_session *sess)
         c = READ_ONCE(sess->car[i]);
         if (c && atomic_read(&c->connected) && !atomic_read(&c->stopping))
         {
-            sess->tx_wake_calls++;
+            atomic64_inc(&sess->tx_wake_calls);
             if (!schedule_work(&c->w_tx))
-                sess->tx_wake_busy++;
+                atomic64_inc(&sess->tx_wake_busy);
         }
     }
 }
@@ -287,7 +287,7 @@ int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
             clear_bit(i, &st->tx_fin_inflight);
             clear_bit(i, &st->tx_fin_mask);
             if (err == -ENOMEM)
-                sess->dbg_alloc_fail++;
+                atomic64_inc(&sess->dbg_alloc_fail);
             continue;
         }
         queued++;
@@ -322,7 +322,7 @@ int tbt_tx_rst(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
             clear_bit(i, &st->tx_rst_inflight);
             clear_bit(i, &st->tx_rst_mask);
             if (err == -ENOMEM)
-                sess->dbg_alloc_fail++;
+                atomic64_inc(&sess->dbg_alloc_fail);
             continue;
         }
         queued++;
@@ -795,7 +795,7 @@ retx_queued:
         {
             for (; i < n; i++)
                 cand[i]->pending = false;
-            sess->dbg_alloc_fail++;
+            atomic64_inc(&sess->dbg_alloc_fail);
             break;
         }
         fr->hdr = r->hdr;
@@ -818,7 +818,7 @@ retx_queued:
          * pump drops because the ack passed never reaches the wire, and
          * counting it made retx_ppm read 25% while wire/app was 1.01. The
          * enqueue is kept as a separate diagnostic. */
-        sess->retx_queued++;
+        atomic64_inc(&sess->retx_queued);
         fr->retx_copy = true;
     }
 }
@@ -990,7 +990,7 @@ static void tbt_tx_inject_locked(struct tbt_session *sess, struct tbt_stream *st
 
         if (!fr)
         {
-            sess->dbg_alloc_fail++;
+            atomic64_inc(&sess->dbg_alloc_fail);
             break;
         }
         fr->hdr = r->hdr;
@@ -1004,7 +1004,7 @@ static void tbt_tx_inject_locked(struct tbt_session *sess, struct tbt_stream *st
         memcpy(fr->data, r->data, r->len);
         list_add(&fr->list, &sess->tx_q);
         sess->tx_queued += r->len;
-        sess->retx_queued++;
+        atomic64_inc(&sess->retx_queued);
         fr->retx_copy = true;
     }
 }
@@ -1085,7 +1085,7 @@ void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st)
     }
     if (hole->declared || !hole->sends)
         goto unlock;
-    sess->hole_checks++;
+    atomic64_inc(&sess->hole_checks);
     /* Gate: a path the hole was sent on must show a received-count lag, and
      * every other live path must have moved past the hole's seq. The lossy
      * path's own uack is not required to be fresh: while it is dropping, no
@@ -1175,14 +1175,14 @@ void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st)
     }
     if (!gate)
     {
-        sess->hole_gate_fail++;
+        atomic64_inc(&sess->hole_gate_fail);
         if (debug >= 2)
             pr_info_ratelimited("tbtun: hole gatefail seq=%llu mask=%#x ack=%llu\n",
                                 hole->seq, hole->path_mask, ack);
     }
     else if (tbt_late_tab[g] >= tbt_late_tab[TBT_K_MAX_HOLE])
     {
-        sess->hole_depth_fail++;
+        atomic64_inc(&sess->hole_depth_fail);
         if (debug >= 2)
             pr_info_ratelimited("tbtun: hole depthfail seq=%llu g=%d mask=%#x\n",
                                 hole->seq, g, hole->path_mask);
@@ -1191,7 +1191,7 @@ void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st)
              now - hole->first_sent_ns <
                  (u64)(rtt > 500 ? rtt : 500) * 2 * NSEC_PER_USEC)
     {
-        sess->hole_time_fail++;
+        atomic64_inc(&sess->hole_time_fail);
         if (debug >= 2)
             pr_info_ratelimited("tbtun: hole timefail seq=%llu age_us=%llu rtt_us=%u\n",
                                 hole->seq,
@@ -1304,7 +1304,7 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
             pr_info("tbtun: TXSTALLKILL sid=%llu ack=%llu txseq=%llu age_us=%llu\n",
                     (unsigned long long)st->sid, ack, READ_ONCE(st->tx_seq),
                     (now - start) / NSEC_PER_USEC);
-        sess->holes_unrecoverable++;
+        atomic64_inc(&sess->holes_unrecoverable);
         tbt_stream_kill(st, TBT_ST_HOLE);
     }
 }
@@ -1609,7 +1609,7 @@ static void tbt_tx_ctl_fail(struct tbt_session *sess, struct tbt_frame *fr)
 {
     u8 type = fr->hdr.type;
 
-    sess->ctl_lost++;
+    atomic64_inc(&sess->ctl_lost);
     if (fr->st)
     {
         if (type == TBT_F_FIN)
@@ -1690,10 +1690,10 @@ int tbt_tx_pump(struct tbt_session *sess)
     int pass, moved = 0;
 
     might_sleep();
-    sess->dbg_pump_runs++;
+    atomic64_inc(&sess->dbg_pump_runs);
     if (!sess->tunnel)
     {
-        sess->dbg_pump_nocar++;
+        atomic64_inc(&sess->dbg_pump_nocar);
         return 0;
     }
     mutex_lock(&sess->pump_lock);
@@ -1895,7 +1895,7 @@ int tbt_tx_pump(struct tbt_session *sess)
                     /* No path free of the primary: a duplicate on the same
                      * path is worse than none. The harness asserts
                      * dup_same_path == 0; suppress instead of falling back. */
-                    sess->dup_suppressed++;
+                    atomic64_inc(&sess->dup_suppressed);
                     goto drop;
                 }
                 if (!c && avoid)
@@ -1972,8 +1972,10 @@ drop:
             sess->tx_queued -= fr->len;
             if (fr->dup_copy)
             {
-                if (sess->dup_bytes >= fr->len)
-                    sess->dup_bytes -= fr->len;
+                /* Only this pump subtracts (under pump_lock); captures only
+                 * add, so the guard cannot underflow between read and sub. */
+                if (tbt_stat_read(&sess->dup_bytes) >= fr->len)
+                    atomic64_sub(fr->len, &sess->dup_bytes);
                 if (fr->ret && fr->ret->dup_pending)
                     fr->ret->dup_pending--;
             }
@@ -2288,7 +2290,7 @@ size_t tbt_tx_submit(struct tbt_stream *st, struct sk_buff *skb, unsigned int of
     struct tbt_session *sess = st->sess;
     size_t done = 0;
 
-    sess->tx_submit_calls++;
+    atomic64_inc(&sess->tx_submit_calls);
 
     while (done < len)
     {
@@ -2305,7 +2307,7 @@ size_t tbt_tx_submit(struct tbt_stream *st, struct sk_buff *skb, unsigned int of
              * receive queue, its window closes, and the application's send()
              * blocks. */
             WRITE_ONCE(st->tx_paused, true);
-            sess->dbg_over_qmax++;
+            atomic64_inc(&sess->dbg_over_qmax);
             break;
         }
         spin_unlock(&sess->tx_lock);
@@ -2316,14 +2318,14 @@ size_t tbt_tx_submit(struct tbt_stream *st, struct sk_buff *skb, unsigned int of
         {
             kfree(r);
             kfree(fr);
-            sess->dbg_alloc_fail++;
+            atomic64_inc(&sess->dbg_alloc_fail);
             break;
         }
         if (skb_copy_bits(skb, off + done, r->data, chunk))
         {
             kfree(r);
             kfree(fr);
-            sess->dbg_copy_fail++;
+            atomic64_inc(&sess->dbg_copy_fail);
             break;
         }
         memcpy(fr->data, r->data, chunk);
@@ -2342,7 +2344,7 @@ size_t tbt_tx_submit(struct tbt_stream *st, struct sk_buff *skb, unsigned int of
             kfree(r);
             kfree(fr);
             WRITE_ONCE(st->tx_paused, true);
-            sess->dbg_over_qmax++;
+            atomic64_inc(&sess->dbg_over_qmax);
             break;
         }
         if (!st->tx_start_ns)
@@ -2369,20 +2371,20 @@ size_t tbt_tx_submit(struct tbt_stream *st, struct sk_buff *skb, unsigned int of
          * are not duplication). */
         for (u32 k = 0; k < sess->tunnel->cfg.dup; k++)
         {
-            u64 goodput = READ_ONCE(sess->tx_submit_bytes) + chunk;
-            u64 dup_after = READ_ONCE(sess->dup_bytes) + chunk;
+            u64 goodput = tbt_stat_read(&sess->tx_submit_bytes) + chunk;
+            u64 dup_after = tbt_stat_read(&sess->dup_bytes) + chunk;
             struct tbt_frame *dup;
 
             if ((goodput + dup_after) * 1000 >
                 goodput * sess->tunnel->cfg.max_inflate_milli)
             {
-                sess->dup_suppressed++;
+                atomic64_inc(&sess->dup_suppressed);
                 break;
             }
             dup = tbt_frame_alloc(chunk, GFP_ATOMIC);
             if (!dup)
             {
-                sess->dbg_alloc_fail++;
+                atomic64_inc(&sess->dbg_alloc_fail);
                 break;
             }
             dup->hdr = fr->hdr;
@@ -2398,7 +2400,7 @@ size_t tbt_tx_submit(struct tbt_stream *st, struct sk_buff *skb, unsigned int of
                 break;
             }
             sess->tx_queued += chunk;
-            sess->dup_bytes += chunk;
+            atomic64_add(chunk, &sess->dup_bytes);
             if (r->dup_pending < U8_MAX)
                 r->dup_pending++;
             dup->st = st;
@@ -2408,7 +2410,7 @@ size_t tbt_tx_submit(struct tbt_stream *st, struct sk_buff *skb, unsigned int of
         }
 
         done += chunk;
-        sess->tx_submit_bytes += chunk;
+        atomic64_add(chunk, &sess->tx_submit_bytes);
     }
 
     /* Always wake the carrier writer, including on the short return that hit
@@ -2465,7 +2467,7 @@ int tbt_tx_fbk(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
          * FBK header's uack stays the global contiguous offset used by the
          * send window and retention. */
         tbt_put_le64(e + TBT_FBK_UACK, READ_ONCE(c->rx_bytes));
-        tbt_put_le32(e + TBT_FBK_RECVCNT, (u32)c->rx_frames);
+        tbt_put_le32(e + TBT_FBK_RECVCNT, (u32)READ_ONCE(c->rx_frames));
         tbt_put_le32(e + TBT_FBK_RTT, rtt);
         mask |= BIT(i);
         nr++;

@@ -15,6 +15,7 @@
 #ifndef _TBTUN_H
 #define _TBTUN_H
 
+#include <linux/atomic.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/net.h>
@@ -27,6 +28,15 @@
 
 /* Wire constants, /proc names and the version live in the shared header. */
 #include "tbt_uapi.h"
+
+/* Read a statistics counter (DESIGN.md §8.7) as the u64 the renderers print
+ * with %llu. Every read of an atomic64_t counter goes through this or
+ * atomic64_read(); the lint check in review/lint.sh refuses a bare field
+ * read. */
+static inline u64 tbt_stat_read(const atomic64_t *v)
+{
+    return (u64)atomic64_read(v);
+}
 
 /* struct tbt_hdr and the frame codec, shared with the host parser test. */
 #include "tbt_proto.h"
@@ -468,86 +478,106 @@ struct tbt_session
     u8 join_retries;  /* consecutive join_dup retries, capped before failing */
     struct tbt_sched ctrl_sched;
 
-    u64 stats_gap;    /* holes detected (TBT_ST_GAP / reorder overflow) */
-    u64 stats_tx;     /* DATA bytes handed to a carrier */
+    /* Statistics (DESIGN.md §8.7). A counter with more than one writer
+     * context (a carrier's rx work, a stream work, sk_write_space softirq,
+     * the pump, /proc) is atomic64_t and is only touched through
+     * atomic64_inc/add and tbt_stat_read(). A counter with a single writer
+     * stays u64 and names that writer, so a second writer is a visible
+     * change instead of a silent lost update. */
+    atomic64_t stats_gap; /* holes detected (TBT_ST_GAP / reorder overflow);
+                           * written by every carrier's rx work */
+    u64 stats_tx;         /* DATA bytes handed to a carrier; pump only */
     /* Far-side liveness counters (DESIGN §8.5). They exist so "the far side
-     * saw nothing" can be told apart from "the far side never ran". */
-    u64 rx_work_runs, rx_drain_entries, rx_drain_bytes;
-    u64 rx_paused_skips, rx_adopt_events, rx_parse_proto, rx_records;
-    u64 rx_ready_calls, rx_work_early, rx_reads, rx_read_bytes;
-    u64 rx_resume_calls, rx_read_zero;
-    u64 rx_resume_busy;
-    u32 rx_last_drained;
-    u64 rx_errs;
-    s32 rx_last_err;
-    u64 carrier_write_space_runs;
-    u64 poll_rescues;
-    u64 tx_wake_calls, tx_wake_busy, tx_work_runs;
-    u64 carrier_bytes, carrier_err, carrier_short;
-    u64 carrier_ws_calls;
-    u64 pump_hw_armed, pump_hw_disarmed, pump_hw_fired;
-    u64 dropped_by_ppm;
-    u64 recv_partial_discard;
+     * saw nothing" can be told apart from "the far side never ran". Carrier
+     * work and socket callbacks write them, so they are atomic. */
+    atomic64_t rx_work_runs, rx_drain_entries, rx_drain_bytes;
+    atomic64_t rx_paused_skips, rx_parse_proto, rx_records;
+    u64 rx_adopt_events;  /* listen work only */
+    atomic64_t rx_ready_calls, rx_work_early, rx_reads, rx_read_bytes;
+    atomic64_t rx_resume_calls, rx_read_zero;
+    atomic64_t rx_resume_busy;
+    u32 rx_last_drained;  /* last value; carrier rx work */
+    atomic64_t rx_errs;
+    s32 rx_last_err;      /* last value; carrier rx work */
+    atomic64_t carrier_write_space_runs;
+    atomic64_t poll_rescues;
+    atomic64_t tx_wake_calls, tx_wake_busy, tx_work_runs;
+    /* Reconciliation totals for carriers that left sess->car[] (a
+     * replacement or a joining generation). The aggregates below count every
+     * carrier that ever wrote; /proc/net/tbtun/peers lists only live slots,
+     * so these totals close the difference on the `reconcile` line. */
+    atomic64_t retired_tx_bytes, retired_data_frames, retired_retx_data;
+    u64 carrier_bytes, carrier_err, carrier_short; /* pump (tbt_carrier_xmit) */
+    atomic64_t carrier_ws_calls;
+    u64 pump_hw_armed, pump_hw_disarmed; /* pump only */
+    atomic64_t pump_hw_fired;            /* per-carrier pump work */
+    u64 dropped_by_ppm;                  /* pump only */
+    u64 recv_partial_discard;            /* carrier release, serialised */
     /* C3 counters (DESIGN.md §8.7). */
-    u64 carrier_lost, carrier_replaced, carrier_alloc_fail, connect_fail;
-    u64 port_exhaust, port_alloc_fail; /* tbt_port_alloc() failure reasons */
-    u64 spare_activated; /* idle spares promoted to DATA-carrying */
-    u64 profile_mismatch; /* HELLO carried a different profile */
-    u64 http_parse_err;   /* container framing/header protocol error */
-    u64 http_status_err;  /* non-200 or non-chunked/non-keepalive response */
-    u64 http_req, http_resp; /* header blocks emitted */
-    u64 pad_tx, drip_tx;  /* keepalive/drip chunks emitted */
-    u64 dup_bytes;       /* duplicate payload bytes created (inflation cap) */
-    u64 dup_tx;          /* duplicate copies written */
-    u64 dup_used;        /* duplicate copies that filled a gap first */
-    u64 dup_suppressed;  /* duplicates skipped by max_inflate */
+    atomic64_t carrier_lost, carrier_replaced, carrier_alloc_fail, connect_fail;
+    atomic64_t port_exhaust, port_alloc_fail; /* tbt_port_alloc() reasons */
+    u64 spare_activated; /* idle spares promoted to DATA; w_replace only */
+    atomic64_t profile_mismatch; /* HELLO carried a different profile */
+    atomic64_t http_parse_err;   /* container framing/header protocol error */
+    atomic64_t http_status_err;  /* non-200 or non-chunked/non-keepalive */
+    u64 http_req, http_resp; /* header blocks emitted; pump only */
+    atomic64_t pad_tx, drip_tx;  /* keepalive/drip chunks emitted */
+    atomic64_t dup_bytes;       /* duplicate payload bytes created, minus
+                                 * copies the pump dropped unwritten */
+    u64 dup_tx;          /* duplicate copies written; pump only */
+    atomic64_t dup_used;        /* duplicate copies that filled a gap first */
+    atomic64_t dup_suppressed;  /* duplicates skipped by max_inflate */
     u64 dup_same_path;   /* duplicates forced onto an already-used path */
-    u64 holes_declared;  /* geometric test declared a lost frame */
-    u64 holes_repaired;  /* a declared hole was filled */
-    u64 holes_unrecoverable; /* case B: the stream was reset */
-    u64 hole_checks;      /* diagnostic: hole test ran with a candidate */
-    u64 hole_gate_fail;   /* diagnostic: consistency gate refused */
-    u64 hole_depth_fail;  /* diagnostic: depth below k_max_hole */
-    u64 hole_time_fail;   /* diagnostic: younger than 2 x RTT */
+    u64 holes_declared;  /* geometric test declared a lost frame; tx_lock */
+    u64 holes_repaired;  /* a declared hole was filled; tx_lock */
+    atomic64_t holes_unrecoverable; /* case B: the stream was reset */
+    atomic64_t hole_checks;      /* diagnostic: hole test had a candidate */
+    atomic64_t hole_gate_fail;   /* diagnostic: consistency gate refused */
+    atomic64_t hole_depth_fail;  /* diagnostic: depth below k_max_hole */
+    atomic64_t hole_time_fail;   /* diagnostic: younger than 2 x RTT */
     /* Tunnel-wide token bucket (DESIGN.md §5.3); rate_bps 0 = unlimited. */
     u64 tokens;
     u64 last_refill_ns;
     u64 pause_cleared_ns; /* loss timers restart when backpressure ends */
     u64 last_uack_sum;
-    u64 session_join_dup, session_join_bad, join_nonce_reject;
-    u64 join_src_reject; /* far: HELLO from a source other than the anchor */
-    u64 fbk_tx, fbk_rx;
-    u64 retx_frames, retx_bytes;
-    u64 retx_hole, retx_slow, retx_pathloss, retx_other; /* by source */
-    u64 data_tx;         /* DATA records written, copies included */
-    u64 inject_skip;     /* hole fillers refused by the send-queue bound */
-    u64 retx_queued;     /* copies enqueued, written or dropped by the pump */
+    u64 session_join_dup; /* tbt_session_join(), under sess->lock */
+    atomic64_t session_join_bad, join_nonce_reject;
+    atomic64_t join_src_reject; /* far: HELLO from a source other than the anchor */
+    u64 fbk_tx;             /* w_fbk work only */
+    atomic64_t fbk_rx;
+    u64 retx_frames, retx_bytes; /* pump only */
+    u64 retx_hole, retx_slow, retx_pathloss, retx_other; /* by source; pump */
+    u64 data_tx;         /* DATA records written, copies included; pump */
+    u64 inject_skip;     /* hole fillers refused by the queue bound; tx_lock */
+    atomic64_t retx_queued; /* pump and hole check (tx_lock) */
     u32 fb_delay_us;     /* EWMA: app-ack lag after the carrier TCP ack */
     u32 rto_us;          /* last RTO the retransmit timer used */
     u32 una_stall_us;    /* oldest snd_una progress at the last retx pass */
-    u64 retain_drop;
-    u64 sack_tx;
-    u64 sack_rx;
-    u64 sack_unknown;
-    u64 rx_reorder_overflow;
-    u64 rx_data_frames;
-    u64 rx_delivered_bytes;
-    u64 sched_sorts;
-    u64 path_switches;
-    u64 pub_capture_runs, pub_actor_calls;
-    u64 tx_submit_calls, tx_submit_bytes;
-    u64 dbg_alloc_fail, dbg_over_qmax, dbg_copy_fail, dbg_empty_len;
-    u64 dbg_announce_mismatch;
-    u64 dbg_snap_overflow;
-    u64 dbg_pump_hiwat, dbg_pump_dead, dbg_pump_runs, dbg_pump_moved;
-    u64 dbg_pump_nocar, dbg_pump_down, dbg_pump_stop;
-    u64 dbg_pump_empty, dbg_pump_qlen;
+    u64 retain_drop;     /* pump only */
+    u64 sack_tx;         /* w_fbk work only */
+    atomic64_t sack_rx;
+    atomic64_t sack_unknown;
+    atomic64_t rx_reorder_overflow;
+    atomic64_t rx_data_frames;
+    atomic64_t rx_delivered_bytes;
+    u64 sched_sorts;     /* pump only */
+    u64 path_switches;   /* reserved; no writer today */
+    atomic64_t pub_capture_runs, pub_actor_calls;
+    atomic64_t tx_submit_calls, tx_submit_bytes;
+    atomic64_t dbg_alloc_fail, dbg_over_qmax, dbg_copy_fail, dbg_empty_len;
+    u64 dbg_announce_mismatch; /* pump only */
+    u64 dbg_snap_overflow;     /* stream snapshot, under sess->lock */
+    u64 dbg_pump_hiwat, dbg_pump_dead, dbg_pump_moved; /* pump only */
+    atomic64_t dbg_pump_runs, dbg_pump_nocar; /* counted before pump_lock */
+    u64 dbg_pump_down, dbg_pump_stop;          /* reserved; no writer */
+    u64 dbg_pump_empty, dbg_pump_qlen;         /* reserved; no writer */
     /* Review 22: pinned control-frame lifetime. ctl_retry counts failed
      * attempts, ctl_requeue counts frames put back on tx_q (including a
      * generation re-pin), ctl_lost counts frames abandoned after the retry
      * bound, and ctl_obsolete counts HELLO/OPEN/RETIRE copies dropped because
      * their carrier generation is gone. */
-    u64 ctl_lost, ctl_retry, ctl_requeue, ctl_obsolete;
+    atomic64_t ctl_lost;  /* pump and the RST retry path */
+    u64 ctl_retry, ctl_requeue, ctl_obsolete; /* pump only */
     u32 pub_last_rcv_nxt, pub_last_copied, pub_last_after;
     u32 pub_last_qlen;
     /* Live snapshot, read by /proc/net/tbtun/stats. Diagnostic only. */
@@ -590,23 +620,34 @@ struct tbt_carrier
     bool peer_hello;              /* the peer's HELLO validated */
     bool provisional;             /* accepted, not yet joined to a slot */
     bool lost_counted;            /* carrier_lost counted once */
+    unsigned long stats_retired;  /* bit 0: counters moved to the session's
+                                   * retired totals (one-shot) */
     bool spare;                   /* index >= n_pri: idle unless activated */
     bool active;                  /* spare that now carries DATA */
     u32 drop_ppm;                 /* debug-only loss injection, 0..1e6 */
     u32 drop_snd_nxt;             /* snd_nxt when the injector dropped */
-    u64 dropped_by_ppm;
+    /* Per-carrier counters. The pump is the only writer of the TX side
+     * (tbt_carrier_xmit() runs under sess->pump_lock), and this carrier's rx
+     * work is the only writer of the RX side; both are u64 on purpose. The
+     * cross-context readers use READ_ONCE(). A counter that gains a second
+     * writer moves to atomic64_t, like the session counters in §8.7. */
+    u64 dropped_by_ppm;           /* pump */
     u64 uack;                     /* peer's per-path high-water, this path */
     u64 uack_ns;                  /* when that value was last published */
-    u64 data_frames;              /* DATA records written on this path */
-    u64 retx_data;                /* DATA copies written on this path */
+    u64 data_frames;              /* DATA records written here; pump */
+    u64 retx_data;                /* DATA copies written here; pump */
     s32 loss_ppm;                 /* confirmed record loss / records acked */
-    u64 payload_bytes_sent;       /* DATA payload bytes written here */
-    u32 rtt_us;                   /* EWMA RTT */
-    u32 rtt_min_us;               /* minimum observed RTT */
+    u64 payload_bytes_sent;       /* DATA payload bytes written here; pump */
+    u32 rtt_us;                   /* EWMA RTT; a gauge, not a counter: FBK
+                                   * entries for this path are applied by
+                                   * whichever rx work handles the frame, and
+                                   * a lost EWMA sample is harmless */
+    u32 rtt_min_us;               /* minimum observed RTT; gauge */
     u32 inflight;                 /* snapshot for peers */
-    u64 tx_frames;                /* records written on this path */
-    u64 tx_bytes;
-    u32 recv_cnt;                 /* peer's frame count on this path */
+    u64 tx_frames;                /* records written here; pump */
+    u64 tx_bytes;                 /* bytes written here; pump */
+    u32 recv_cnt;                 /* peer's frame count on this path; rx work
+                                   * publishes the whole value */
     u64 recv_lag;                 /* confirmed record loss: sent below the
                                    * peer's high-water minus its recv_cnt */
     u64 last_una;                 /* last snd_una observed */
@@ -617,8 +658,8 @@ struct tbt_carrier
     u64 last_tx_ns;
     u64 join_deadline_ns;         /* provisional carriers only */
     u64 retry_at_ns;              /* next connect attempt */
-    u64 rx_frames;                /* DATA frames received on this path */
-    u64 rx_bytes;
+    u64 rx_frames;                /* DATA frames received here; this rx work */
+    u64 rx_bytes;                 /* bytes received here; this rx work */
     u8 rx_state;                  /* what our FBK reports for this path */
     u8 profile;                   /* effective container: 1 http-kal, 2 drip, 3 raw */
     u8 peer_gen;                  /* peer's generation for this path (HELLO) */
@@ -712,6 +753,7 @@ void tbt_carriers_stop(struct tbt_session *sess);
 struct tbt_carrier *tbt_carrier_new(struct tbt_session *sess, u8 index);
 u8 tbt_carrier_profile(const struct tbt_session *sess, u8 index, bool spare);
 void tbt_carrier_retire(struct tbt_session *sess, struct tbt_carrier *c);
+void tbt_carrier_stats_retire(struct tbt_session *sess, struct tbt_carrier *c);
 void tbt_carrier_free(struct tbt_carrier *c);
 void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c);
 int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c,

@@ -80,7 +80,7 @@ static void tbt_car_ready(struct sock *sk)
         read_unlock_bh(&sk->sk_callback_lock);
         return;
     }
-    c->sess->rx_ready_calls++;
+    atomic64_inc(&c->sess->rx_ready_calls);
     schedule_work(&c->w_rx);
     read_unlock_bh(&sk->sk_callback_lock);
 }
@@ -101,13 +101,13 @@ static void tbt_car_write_space(struct sock *sk)
         read_unlock_bh(&sk->sk_callback_lock);
         return;
     }
-    c->sess->carrier_ws_calls++;
+    atomic64_inc(&c->sess->carrier_ws_calls);
     if (atomic_read(&c->stopping))
     {
         read_unlock_bh(&sk->sk_callback_lock);
         return;
     }
-    c->sess->carrier_write_space_runs++;
+    atomic64_inc(&c->sess->carrier_write_space_runs);
     /* The pump armed SOCK_NOSPACE when it stopped at its high-water mark.
      * Clear it once the queue is back below that mark; otherwise every ACK
      * would keep calling us for nothing. */
@@ -165,7 +165,7 @@ static void tbt_pump_work(struct work_struct *w)
         return;
     if (atomic_read(&c->stopping))
         return;
-    sess->pump_hw_fired++;
+    atomic64_inc(&sess->pump_hw_fired);
     if (READ_ONCE(sess->tx_queued))
         tbt_tx_pump(sess);
 }
@@ -174,7 +174,7 @@ static void tbt_car_tx_work(struct work_struct *w)
 {
     struct tbt_carrier *c = container_of(w, struct tbt_carrier, w_tx);
 
-    c->sess->tx_work_runs++;
+    atomic64_inc(&c->sess->tx_work_runs);
     /* The pump also writes HELLO/OPEN, so a connected carrier is enough; `up`
      * only gates DATA and would deadlock the handshake if required here. */
     if (atomic_read(&c->stopping) || !atomic_read(&c->connected))
@@ -315,7 +315,7 @@ static void tbt_car_poll_work(struct work_struct *w)
             if (n && !tbt_carrier_send(c, b, n))
             {
                 c->last_tx_ns = ktime_get_ns();
-                sess->drip_tx++;
+                atomic64_inc(&sess->drip_tx);
             }
         }
         else if (tbt_http_need_pad(c->last_tx_ns, now, ka_ms) &&
@@ -323,7 +323,7 @@ static void tbt_car_poll_work(struct work_struct *w)
         {
             if (!tbt_tx_control_pinned(sess, NULL, c->index, TBT_F_PAD, 0, 0, NULL, 0,
                                        false, GFP_ATOMIC))
-                sess->pad_tx++;
+                atomic64_inc(&sess->pad_tx);
         }
     }
     if (READ_ONCE(tp->copied_seq) != READ_ONCE(tp->rcv_nxt))
@@ -360,7 +360,7 @@ static void tbt_car_poll_work(struct work_struct *w)
             }
     rcu_read_unlock();
     if (rescued)
-        sess->poll_rescues++;
+        atomic64_inc(&sess->poll_rescues);
     schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
 }
 
@@ -368,7 +368,7 @@ static void tbt_car_poll_work(struct work_struct *w)
  * actor and the pending-parse retry so the two cannot drift. */
 static void tbt_car_rx_error(struct tbt_carrier *c, int err)
 {
-    c->sess->rx_errs++;
+    atomic64_inc(&c->sess->rx_errs);
     c->sess->rx_last_err = err;
     if (err == -EALREADY)
     {
@@ -379,7 +379,7 @@ static void tbt_car_rx_error(struct tbt_carrier *c, int err)
     }
     /* A protocol error is a per-carrier event: mark the carrier dead and stop
      * reading it. The stream lives or dies by its own rules. */
-    c->sess->rx_parse_proto++;
+    atomic64_inc(&c->sess->rx_parse_proto);
     atomic_set(&c->stopping, 1);
 }
 
@@ -391,8 +391,8 @@ static int tbt_car_rx_actor(read_descriptor_t *desc, struct sk_buff *skb, unsign
 
     if (!c || atomic_read(&c->stopping))
         return 0;
-    c->sess->rx_drain_entries++;
-    c->sess->rx_drain_bytes += len;
+    atomic64_inc(&c->sess->rx_drain_entries);
+    atomic64_add(len, &c->sess->rx_drain_bytes);
 
     while (used < len)
     {
@@ -428,11 +428,11 @@ static void tbt_car_rx_work(struct work_struct *w)
     struct sock *sk;
     int i, drained;
 
-    c->sess->rx_work_runs++;
+    atomic64_inc(&c->sess->rx_work_runs);
     sk = READ_ONCE(c->sk);
     if (atomic_read(&c->stopping) || !sk)
     {
-        c->sess->rx_work_early++;
+        atomic64_inc(&c->sess->rx_work_early);
         return;
     }
 
@@ -452,7 +452,7 @@ static void tbt_car_rx_work(struct work_struct *w)
             {
                 if (READ_ONCE(st->paused) && READ_ONCE(st->sk))
                 {
-                    c->sess->rx_paused_skips++;
+                    atomic64_inc(&c->sess->rx_paused_skips);
                     rcu_read_unlock();
                     return;
                 }
@@ -462,7 +462,7 @@ static void tbt_car_rx_work(struct work_struct *w)
     }
     desc.arg.data = c;
 
-    c->sess->rx_reads++;
+    atomic64_inc(&c->sess->rx_reads);
     lock_sock(sk);
     /* Retry a record an earlier -EAGAIN left in the parser before reading the
      * socket. Without this, the record is unreachable: its bytes are already
@@ -489,9 +489,9 @@ static void tbt_car_rx_work(struct work_struct *w)
     drained = tcp_read_sock(sk, &desc, tbt_car_rx_actor);
     release_sock(sk);
     if (drained > 0)
-        c->sess->rx_read_bytes += drained;
+        atomic64_add(drained, &c->sess->rx_read_bytes);
     else
-        c->sess->rx_read_zero++;
+        atomic64_inc(&c->sess->rx_read_zero);
     c->sess->rx_last_drained = drained > 0 ? drained : 0;
     if (drained > 0)
         c->last_rx_ns = ktime_get_ns();
@@ -646,7 +646,7 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
             if (!hlen)
             {
                 kfree(hdr);
-                sess->http_parse_err++;
+                atomic64_inc(&sess->http_parse_err);
                 return -EIO;
             }
             /* /proc/net/tbtun/http keeps the near side's carrier 0 segment:
@@ -680,7 +680,7 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
         {
             /* The encoder never emits partial output; a 0 is a bug or a short
              * buffer, and either way this carrier must not be trusted. */
-            sess->http_parse_err++;
+            atomic64_inc(&sess->http_parse_err);
             return -EIO;
         }
         if (sess->tunnel->cfg.role == TBT_ROLE_NEAR && c->index == 0)
@@ -838,7 +838,7 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c)
     if (!c->lost_counted)
     {
         c->lost_counted = true;
-        sess->carrier_lost++;
+        atomic64_inc(&sess->carrier_lost);
     }
     /* Tell the far to free this (index, gen) before the replacement dials.
      * Without it the replacement's HELLO hits join_dup and the two sides
@@ -937,6 +937,23 @@ static void tbt_carrier_release(struct tbt_session *sess, struct tbt_carrier *c)
     }
 }
 
+/* Move a carrier's cumulative counters into the session's retired totals,
+ * once. A retired slot leaves sess->car[], so /proc/net/tbtun/peers stops
+ * listing it; without this the session aggregate could no longer be
+ * reconciled with the live rows. The caller serialises with the pump (retire
+ * runs under pump_lock or after the pump that owned the slot finished), so
+ * the values are final when this reads them. */
+void tbt_carrier_stats_retire(struct tbt_session *sess, struct tbt_carrier *c)
+{
+    if (!sess || !c)
+        return;
+    if (test_and_set_bit(0, &c->stats_retired))
+        return;
+    atomic64_add(READ_ONCE(c->tx_bytes), &sess->retired_tx_bytes);
+    atomic64_add(READ_ONCE(c->data_frames), &sess->retired_data_frames);
+    atomic64_add(READ_ONCE(c->retx_data), &sess->retired_retx_data);
+}
+
 /* Release the carrier and park the struct on sess->dead until teardown: a
  * work item scheduled just before `stopping` was set may still run, and it
  * must find valid memory (it checks stopping and returns). Called with no
@@ -945,6 +962,7 @@ void tbt_carrier_retire(struct tbt_session *sess, struct tbt_carrier *c)
 {
     if (!c)
         return;
+    tbt_carrier_stats_retire(sess, c);
     tbt_carrier_release(sess, c);
     spin_lock(&sess->lock);
     list_del_init(&c->node);
@@ -982,13 +1000,13 @@ static void tbt_port_alloc_note(struct tbt_session *sess, u8 index,
     switch (why)
     {
     case TBT_PORT_ALLOC_EXHAUSTED:
-        sess->port_exhaust++;
+        atomic64_inc(&sess->port_exhaust);
         tbt_portmap_get(&lo, &hi, &configured);
         pr_warn_ratelimited("tbtun: tunnel %llu carrier %u: source port block %u-%u is exhausted; carrier retries\n",
                             sess->tunnel->cfg.id, index, lo, hi);
         break;
     case TBT_PORT_ALLOC_NOMEM:
-        sess->port_alloc_fail++;
+        atomic64_inc(&sess->port_alloc_fail);
         pr_warn_ratelimited("tbtun: tunnel %llu carrier %u: cannot allocate the source port bitmap; carrier retries\n",
                             sess->tunnel->cfg.id, index);
         break;
@@ -1011,7 +1029,7 @@ int tbt_carriers_start(struct tbt_tunnel *t, struct tbt_session *sess)
 
         if (!c)
         {
-            sess->carrier_alloc_fail++;
+            atomic64_inc(&sess->carrier_alloc_fail);
             return -ENOMEM;
         }
         sess->car[i] = c;
@@ -1075,7 +1093,7 @@ void tbt_replace_work(struct work_struct *w)
             if (nc && nc->local_port)
             {
                 sess->car[i] = nc;
-                sess->carrier_replaced++;
+                atomic64_inc(&sess->carrier_replaced);
                 start[nstart++] = nc;
             }
             else
@@ -1086,7 +1104,7 @@ void tbt_replace_work(struct work_struct *w)
                     tbt_carrier_free(nc);
                 }
                 sess->car[i] = NULL;
-                sess->carrier_alloc_fail++;
+                atomic64_inc(&sess->carrier_alloc_fail);
             }
         }
         else
@@ -1240,7 +1258,7 @@ static void tbt_car_connect_work(struct work_struct *w)
         c->local_port = tbt_port_alloc(&perr);
         if (!c->local_port)
         {
-            sess->carrier_alloc_fail++;
+            atomic64_inc(&sess->carrier_alloc_fail);
             tbt_port_alloc_note(sess, c->index, perr);
             c->retry_at_ns = ktime_get_ns() + 200 * NSEC_PER_MSEC;
             schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
@@ -1321,7 +1339,7 @@ fail:
         tbt_port_free(c->local_port);
         c->local_port = 0;
     }
-    sess->connect_fail++;
+    atomic64_inc(&sess->connect_fail);
     c->retry_at_ns = ktime_get_ns() + 200 * NSEC_PER_MSEC;
     schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
     pr_warn("tbtun: tunnel %llu carrier %u failed to connect: %d\n", t->cfg.id, c->index, err);
@@ -1356,7 +1374,7 @@ void tbt_carrier_resume(struct tbt_session *sess)
 
     if (READ_ONCE(sess->closing))
         return;
-    sess->rx_resume_calls++;
+    atomic64_inc(&sess->rx_resume_calls);
     spin_lock(&sess->lock);
     for (i = 0; i < sess->n_car; i++)
     {
@@ -1364,7 +1382,7 @@ void tbt_carrier_resume(struct tbt_session *sess)
         if (c && READ_ONCE(c->sk) && !atomic_read(&c->stopping))
         {
             if (!schedule_work(&c->w_rx))
-                sess->rx_resume_busy++;
+                atomic64_inc(&sess->rx_resume_busy);
         }
     }
     list_for_each_entry(c, &sess->prov, node)
@@ -1372,7 +1390,7 @@ void tbt_carrier_resume(struct tbt_session *sess)
         if (READ_ONCE(c->sk) && !atomic_read(&c->stopping))
         {
             if (!schedule_work(&c->w_rx))
-                sess->rx_resume_busy++;
+                atomic64_inc(&sess->rx_resume_busy);
         }
     }
     spin_unlock(&sess->lock);

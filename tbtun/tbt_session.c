@@ -1190,7 +1190,7 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
     list_del_init(&c->node);
     if (old && old != c)
     {
-        sess->carrier_replaced++;
+        atomic64_inc(&sess->carrier_replaced);
         atomic_set(&old->stopping, 1);
         /* The replaced carrier is on no list once joined; put it on the
          * graveyard so carriers_stop/w_replace retire its socket and port. */
@@ -1200,7 +1200,14 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
     spin_unlock(&sess->lock);
 
     if (old && old != c)
+    {
+        /* The old slot was dead or stopping, so no pump can still be writing
+         * it; move its counters now, while its values are final. Taking
+         * pump_lock here would deadlock: this runs under the carrier socket
+         * lock, and a pump holding pump_lock may wait for that same lock. */
+        tbt_carrier_stats_retire(sess, old);
         schedule_work(&sess->w_replace);
+    }
     /* Our HELLO is the first frame in this direction. */
     tbt_tx_hello(sess, index, GFP_ATOMIC);
     /* Announce and target every active stream; the pump writes HELLO first

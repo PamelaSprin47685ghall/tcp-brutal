@@ -68,9 +68,9 @@ static int tbt_pub_actor(read_descriptor_t *desc, struct sk_buff *skb,
 
     if (!st)
         return 0;
-    st->sess->pub_actor_calls++;
+    atomic64_inc(&st->sess->pub_actor_calls);
     if (!len)
-        st->sess->dbg_empty_len++;
+        atomic64_inc(&st->sess->dbg_empty_len);
     taken = tbt_tx_submit(st, skb, offset, len);
     desc->count += taken;
     return taken;
@@ -104,7 +104,7 @@ static void tbt_pub_capture_work(struct work_struct *w)
     read_unlock(&sk->sk_callback_lock);
 
     desc.arg.data = st;
-    st->sess->pub_capture_runs++;
+    atomic64_inc(&st->sess->pub_capture_runs);
     lock_sock(sk);
     st->sess->pub_last_rcv_nxt = tcp_sk(sk)->rcv_nxt;
     st->sess->pub_last_copied = tcp_sk(sk)->copied_seq;
@@ -266,7 +266,7 @@ static void tbt_drain_work(struct work_struct *w)
         fr->off += done;
         st->rx_queued -= done;
         st->rx_delivered += done;
-        st->sess->rx_delivered_bytes += done;
+        atomic64_add(done, &st->sess->rx_delivered_bytes);
         if (fr->off == fr->len)
         {
             list_del(&fr->list);
@@ -338,7 +338,7 @@ static void tbt_tx_rst_retry(struct tbt_session *sess, struct tbt_stream *st)
             return;
         msleep(TBT_CTL_RETRY_MS);
     }
-    sess->ctl_lost++;
+    atomic64_inc(&sess->ctl_lost);
 }
 
 static void tbt_ctrl_work(struct work_struct *w)
