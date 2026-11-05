@@ -810,29 +810,24 @@ static void tbt_tx_retx(struct tbt_session *sess, struct tbt_stream *st)
             continue;
         if (!r->sends)
             continue;
-        /* The global ack can be stale by a feedback interval. A frame that
-         * the peer's per-path high-water says it received is not a hole; the
-         * real hole is later in the ring. Chasing the stale ack re-sent a
-         * received frame until the receiver's budget reset the stream. */
-        if (tbt_retain_received(sess, st, r))
-            continue;
-        /* The frame at the peer's delivered offset has explicit receiver
-         * evidence: the contiguous uack stopped exactly at this seq. That is
-         * the only signal that covers both halves of the dead zone -- a copy
-         * on a blackholed carrier whose snd_una never passes, and a copy the
-         * peer's TCP took but whose parser never saw. So it outranks the
-         * heuristic gates. It still pays the RTO throttle (one copy per RTO)
-         * and the total queue bound; only the copy share and the path gate
-         * are waived. */
+        /* The frame containing the peer's contiguous delivered offset has
+         * explicit receiver evidence: the uack stopped inside it. That
+         * outranks the per-path high-water, which counts every record that
+         * arrived on the path -- including the ones behind the gap -- and is
+         * therefore not proof that this particular record was parsed. It also
+         * covers the two dead zones: a copy on a blackholed carrier whose
+         * snd_una never passes, and a copy the peer's TCP took but whose
+         * parser never saw. The wait is one RTO, not two: the receiver's hole
+         * budget is 2-3 x RTO, so a copy at 2 x RTO plus one one-way can
+         * arrive after the stream was already reset (measured: the 2.4 Mbit
+         * slirp carrier reset at 1.5 s with retx_frames=0). */
         {
-            /* A brief tx_ack stall is feedback latency, not a hole: the frame
-             * may simply be in flight. Only a stall longer than two RTOs, or
-             * the bootstrap window where no tunnel ack has ever landed, is
-             * receiver evidence that the bytes at the ack are missing. */
             u64 ack_ns = READ_ONCE(st->last_ack_ns);
-            bool hole_evident = r->seq == ack &&
-                                (!ack_ns || now - ack_ns >= 2 * rto);
+            bool hole_evident = r->seq <= ack && ack < r->seq + r->len &&
+                                (!ack_ns || now - ack_ns >= rto);
 
+            if (!hole_evident && tbt_retain_received(sess, st, r))
+                continue;
             if (hole_evident)
             {
                 src = TBT_RETX_HOLE;
