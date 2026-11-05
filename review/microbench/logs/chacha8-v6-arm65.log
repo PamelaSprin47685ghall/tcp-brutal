@@ -1,0 +1,64 @@
+# .65 w-crypto 33238ca ChaCha8 KAT+bench root@192.168.123.65  2026-11-06T07:10:58+08:00
+## before (uptime + top processes)
+ 07:10:59 up 14 days, 23:17,  3 users,  load average: 0.15, 0.95, 2.47
+    PID PSR %CPU COMMAND
+ 471210   7  3.8 mediamtx
+ 846266   7  0.8 sshd-session
+ 625575   7  0.5 ffmpeg
+ 625572   1  0.4 ffmpeg
+ 625573   3  0.4 ffmpeg
+ 625570   5  0.4 ffmpeg
+ 625571   4  0.4 ffmpeg
+ 625574   7  0.4 ffmpeg
+ 263363   5  0.2 frpc
+ 195773   0  0.1 mihomo
+  97760   7  0.0 node-MainThread
+8
+1800000
+## build
+BUILD_OK
+## KAT (flock, cpu0, timeout 10)
+PASS pair: a mismatched pairing does not decrypt
+PASS pair: crypto=off is a no-op in both directions
+PASS pair: wipe clears both directions
+PASS session: near key -> HELLO -> far decrypt
+PASS session: per-direction nonce, both ways
+PASS session: crypto_key= pre-shared path
+
+all checks passed
+## bench run 1 (flock, cpu0, timeout 5)
+BENCH_FAILED
+## bench run 2 (flock, cpu0, timeout 5)
+BENCH_FAILED
+## bench run 3 (flock, cpu0, timeout 5)
+BENCH_FAILED
+## after
+ 07:11:25 up 14 days, 23:18,  3 users,  load average: 0.71, 1.02, 2.45
+    PID PSR %CPU COMMAND
+ 471210   2  3.8 mediamtx
+ 848487   5  2.4 sshd-session
+ 625575   7  0.5 ffmpeg
+ 625572   3  0.4 ffmpeg
+ 625573   3  0.4 ffmpeg
+# .65 w-crypto 33238ca bench retry root@192.168.123.65  2026-11-06T07:11:36+08:00
+## before
+ 07:11:37 up 14 days, 23:18,  3 users,  load average: 0.68, 1.00, 2.42
+BUILD_OK
+## bench full output, timeout 15
+cpu_mhz: 1800
+buffer: hot cache, in-place xor, counter 0 per pass
+rounds      bytes         MB/s     cycles/B     1G core%
+1G core% = 125 MB/s divided by this rate
+8            1024        294.6         6.11        42.4%
+8            8192        314.0         5.73        39.8%
+8           65536        313.3         5.75        39.9%
+12           1024        238.0         7.56        52.5%
+12           8192        250.5         7.19        49.9%
+12          65536        249.9         7.20        50.0%
+20           1024        165.2        10.90        75.7%
+20           8192        171.2        10.51        73.0%
+20          65536        170.9        10.53        73.1%
+sink: 126606527
+RC=0
+## after
+ 07:11:56 up 14 days, 23:18,  3 users,  load average: 0.77, 1.00, 2.39

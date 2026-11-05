@@ -132,6 +132,30 @@ streaming、in-place、counter wrap、invalid args、wipe）。bench 自带 TC1 
 | .74 | 217.5 MB/s | 57.5% | 140.3 | 89.1% |
 | .65 | — | — | — | — |
 
+
+### 8.1 .65（RK3588 A55 1.8 GHz，w-crypto 33238ca）
+
+按避让规则在 load 0.15 的窗口、`flock /tmp/tbtun-rk3588.lock` + `nice -n 19 taskset -c 0`
+上跑；KAT 全绿（含 per-direction nonce 与 HELLO gap 用例），三次 bench 各 `timeout` 包住。
+日志 `logs/chacha8-v6-arm65.log`。
+
+| rounds | 1 KiB MB/s (c/B) | 8 KiB MB/s (c/B) | 64 KiB MB/s (c/B) | 1G 单核 |
+|---:|---:|---:|---:|---:|
+| 8 | 294.6 (6.11) | **314.0 (5.73)** | 313.3 (5.75) | **39.8–42.4%** |
+| 12 | 238.0 (7.56) | 250.5 (7.19) | 249.9 (7.20) | 49.9–52.5% |
+| 20 | 165.2 (10.90) | 171.2 (10.51) | 170.9 (10.53) | 73.0–75.7% |
+
+### 8.2 .74（Athlon 1.792 GHz，w-crypto 75dcf9f，load 82）
+
+跑前 load 82.6、`bun`/`tq_tp5_dw_alloc` 占 CPU，数字不可用：ChaCha8 200.0/179.3/146.7 MB/s
+（1G 62.5–85.2%）。等负载回落后重跑，**不要引用这一行**。
+
+### 8.3 HND0 的初步读数（w-crypto 75dcf9f，受并发污染）
+
+与 microbench2 同时在 cpu0 上跑，07:04–07:07 的三轮里 ChaCha8 8 KiB 在 153–668 MB/s
+之间跳（1G 18.7–81.6%）；我已在 07:07 停掉并让出 cpu0。**这组数字只说明测量环境被污染，
+不作为结论**。等 microbench2 的干净三遍结束后，用 w-crypto 最终 head（33238ca）重跑。
+
 ### 读数
 
 - 同一台 HND0 上，crypto-v6 实现比 Bernstein 参考慢约 30%（458.9 vs 648.6 MB/s）；
