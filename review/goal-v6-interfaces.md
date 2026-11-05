@@ -722,6 +722,8 @@ trap 'flock -u 9' EXIT
 | 4 | 末包 `payload_len < S`：T0 冻结 `flags.LAST` + 实际 `payload_len`；RLNC 内部按 S 零填充 | B 定稿 | G2 前 | B 的 host 测试覆盖末包 1..S；若改 FIN body 方案，先改控制帧 ABI |
 | 5 | `w=`/`carriers=` auto 渲染：0 解析为 auto，读回渲染 effective 值 | B 更新 golden | G2 前 | `host/test_parse.c` 的 golden 行同步；`cat config > backup; cat backup > config` 仍逐字节回环 |
 | 6 | 合并列车：`w-window` → `w-fec-v6` → `w-crypto` → `w-sclc` → `w-hnd0` → master | F | 全程 | 不合并直到门禁；D 的 `w-fec` worktree 在合并前映射到 `w-sclc` |
+| 7 | `fec=on` 时 legacy 键（`dup`/`replay`/`max_inflate`/`hole_budget_ms`/`rx_reorder_bytes`/`tx_retain_bytes`）的行为 | B 定 | G2 前 | 建议「解析/渲染但数据面不读」；`dup` 绝不能在 FEC 路径复制数据；host 测试 `fec=on`+`dup=1` 无重复发送 |
+| 8 | 全局端口块：部署脚本必须在 insmod 后写 `/proc/net/tbtun/ports`（`ports 30000-34095`），不能只写 tunnel 行 `portblock=` | E 修；F 检查 | G5 前 | `verify` 检查 `cat ports` 等于 `$PORTBLOCK`；256 carriers 不在第 17 条起 bind 失败 |
 
 ---
 
