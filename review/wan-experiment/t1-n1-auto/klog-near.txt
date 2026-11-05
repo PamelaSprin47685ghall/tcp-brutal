@@ -1,0 +1,51 @@
+Password: 
+[378283.946433] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[378283.950378] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[378283.951065] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[378283.951879] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[378283.970408] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[378427.953468] tbtun: unloaded
+[389918.268000] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[390203.848022] tbtun: unloaded
+[390597.999802] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[390627.181119] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[390627.191849] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[390627.203060] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[390627.213891] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[390627.224924] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[390627.235886] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[390627.248056] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[390627.257841] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[390627.327607] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[390627.327611] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[390627.489891] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[390627.501954] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[390627.512002] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[390627.522842] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[390627.533838] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[390627.545088] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[390627.556124] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[390627.566747] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[390627.578426] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[390627.589240] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[390630.499630] tbtun: TXSTALLKILL sid=939272437760 ack=171 txseq=172 age_us=3170447
+[390630.654912] tbtun: retx wndshort seq=13507085 len=8192 total=8224 wnd=785248 inflight=785496 wnd_avail=0 mem_avail=1148456
+[390630.668105] tbtun: retx wndshort seq=13777156 len=8192 total=8224 wnd=886432 inflight=881097 wnd_avail=5335 mem_avail=1053815
+[390630.668116] tbtun: retx wndshort seq=13768964 len=8192 total=8224 wnd=886432 inflight=889321 wnd_avail=0 mem_avail=1045591
+[390630.668121] tbtun: retx wndshort seq=13760772 len=8192 total=8224 wnd=886432 inflight=897545 wnd_avail=0 mem_avail=1036407
+[390630.668124] tbtun: retx wndshort seq=13752580 len=8192 total=8224 wnd=886432 inflight=905769 wnd_avail=0 mem_avail=1028183
+[390630.668127] tbtun: retx wndshort seq=13744388 len=8192 total=8224 wnd=886432 inflight=913993 wnd_avail=0 mem_avail=1019959
+[390630.668133] tbtun: retx wndshort seq=13736196 len=8192 total=8224 wnd=886432 inflight=922217 wnd_avail=0 mem_avail=1011735
+[390630.668136] tbtun: retx wndshort seq=13728004 len=8192 total=8224 wnd=886432 inflight=930441 wnd_avail=0 mem_avail=1003511
+[390630.668139] tbtun: retx wndshort seq=13719812 len=8192 total=8224 wnd=886432 inflight=938665 wnd_avail=0 mem_avail=995287
+[390630.668231] tbtun: retx wndshort seq=13777156 len=8192 total=8224 wnd=886432 inflight=946889 wnd_avail=0 mem_avail=987063
+[390630.755453] tbtun: hole timefail seq=14063611 age_us=375436 rtt_us=248489
+[390630.820015] tbtun: hole timefail seq=14112763 age_us=6030 rtt_us=188591
+[390630.833278] tbtun: hole timefail seq=14112763 age_us=19294 rtt_us=185380
+[390630.842143] tbtun: hole timefail seq=14112763 age_us=28180 rtt_us=185380
+[390630.853616] tbtun: hole timefail seq=14112763 age_us=39549 rtt_us=185497
+[390630.863897] tbtun: hole timefail seq=14112763 age_us=49985 rtt_us=189475
+[390630.875011] tbtun: hole timefail seq=14112763 age_us=61043 rtt_us=193110
+[390630.887360] tbtun: hole timefail seq=14112763 age_us=73127 rtt_us=193378
+[390630.896928] tbtun: hole timefail seq=14112763 age_us=82935 rtt_us=193551
+[390630.908273] tbtun: hole timefail seq=14112763 age_us=94324 rtt_us=193400

@@ -1,0 +1,50 @@
+[131752.488770] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[131752.526279] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[131753.819205] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9623, awaiting HELLO
+[131770.748386] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[131770.764154] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9627, awaiting HELLO
+[131770.795300] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9631, awaiting HELLO
+[131770.795400] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9629, awaiting HELLO
+[131770.828713] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[131786.945139] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9632, awaiting HELLO
+[131786.995205] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[131812.829599] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9635, awaiting HELLO
+[131812.833327] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[131812.834995] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[131812.835183] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[131812.862824] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[131828.417968] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[131828.427481] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9641, awaiting HELLO
+[131828.432363] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9637, awaiting HELLO
+[131828.434750] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9639, awaiting HELLO
+[131828.465951] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40008, awaiting HELLO
+[131844.404253] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9646, awaiting HELLO
+[131975.687265] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40003, awaiting HELLO
+[131975.691152] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9662, awaiting HELLO
+[131975.695988] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[131975.698389] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[131975.734639] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[132123.720275] tbtun: unloaded
+[143609.667202] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[143898.686572] tbtun: unloaded
+[144289.334636] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[144318.355012] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[144318.365581] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[144318.377163] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[144318.389723] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[144318.401586] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[144318.412719] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[144318.423785] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[144318.434861] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[144318.446174] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[144318.502699] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[144318.513394] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[144318.524935] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[144318.534907] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[144318.546794] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[144318.557037] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[144318.568772] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[144318.579606] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[144318.590816] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[144318.602630] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[144318.614504] tbtun: hole depthfail seq=1 g=1 mask=0x1

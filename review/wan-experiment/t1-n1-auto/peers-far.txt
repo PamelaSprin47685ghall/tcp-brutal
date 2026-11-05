@@ -1,0 +1,2 @@
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+1 0 9000 171.120.34.226:40000 9 173780 0 up raw 9 0 147562 2967 143778 0 1000000 391381 194600 981216 85 1171456 1171456 0
