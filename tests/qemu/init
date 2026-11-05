@@ -187,6 +187,93 @@ peer_sum() {
     awk -v id="$1" -v n="$2" '$1 == id { s += $n } END { print s + 0 }' /proc/net/tbtun/peers
 }
 
+# One counter-reconciliation sample for tunnel $1:
+#   wire data_tx retx_frames live_bytes live_data live_retx
+#   retired_bytes retired_data retired_retx peers_tx_bytes
+# `wire`, `data_tx` and `retx_frames` are the session aggregates; the live and
+# retired halves come from the `reconcile` line; peers_tx_bytes sums the live
+# carriers' tx_bytes column. The peers row merges peer and port into one field,
+# so tx_bytes is column 14 (tx_frames is 13).
+stats_reconcile_sample() {
+    awk -v id="$1" '
+        function val(key,   i, a) {
+            for (i = 1; i <= NF; i++)
+                if (index($i, key "=") == 1) { split($i, a, "="); return a[2] + 0 }
+            return 0
+        }
+        FNR == NR {
+            if ($1 == "tunnel" && $2 == id) {
+                if ($3 == "reconcile") {
+                    lb = val("live_bytes"); ld = val("live_data"); lr = val("live_retx")
+                    rb = val("retired_bytes"); rd = val("retired_data")
+                    rr = val("retired_retx")
+                } else {
+                    if (index($0, "wire=")) w = val("wire")
+                    if (index($0, "data_tx=")) d = val("data_tx")
+                    if (index($0, "retx_frames=")) r = val("retx_frames")
+                }
+            }
+            next
+        }
+        $1 == id { pb += $14 }
+        END {
+            printf "%.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f %.0f\n",
+                   w, d, r, lb, ld, lr, rb, rd, rr, pb
+        }
+    ' /proc/net/tbtun/stats /proc/net/tbtun/peers
+}
+
+# Prove the session aggregates are the per-carrier sums and never go
+# backwards. Ten samples; every aggregate must be monotone, and the last
+# sample must reconcile exactly:
+#   wire == live_bytes + retired_bytes
+#   data_tx == live_data + retired_data
+#   retx_frames == live_retx + retired_retx
+#   live_bytes == sum(peers tx_bytes)
+check_reconcile() {
+    _id=$1
+    _n=${2:-10}
+    _i=0
+    _pw=0
+    _pd=0
+    _pr=0
+    _last=
+    while [ "$_i" -lt "$_n" ]; do
+        _s=$(stats_reconcile_sample "$_id") || return 1
+        set -- $_s
+        [ $# -eq 10 ] || { echo "   reconcile: short sample: $_s"; return 1; }
+        if [ "$1" -lt "$_pw" ] || [ "$2" -lt "$_pd" ] || [ "$3" -lt "$_pr" ]; then
+            echo "   reconcile: counter went backwards: wire $_pw->$1 data $_pd->$2 retx $_pr->$3"
+            return 1
+        fi
+        _pw=$1
+        _pd=$2
+        _pr=$3
+        _last=$_s
+        _i=$((_i + 1))
+    done
+    set -- $_last
+    _wire=$1
+    _data=$2
+    _retx=$3
+    _lb=$4
+    _ld=$5
+    _lr=$6
+    _rb=$7
+    _rd=$8
+    _rr=$9
+    _pb=${10}
+    _dw=$((_wire - _lb - _rb))
+    _dd=$((_data - _ld - _rd))
+    _dr=$((_retx - _lr - _rr))
+    _dp=$((_lb - _pb))
+    echo "   reconcile: wire=$_wire live=$_lb retired=$_rb peers=$_pb d_wire=$_dw"
+    echo "   reconcile: data_tx=$_data live=$_ld retired=$_rd d_data=$_dd"
+    echo "   reconcile: retx_frames=$_retx live=$_lr retired=$_rr d_retx=$_dr"
+    echo "   reconcile: live_bytes-peers_tx_bytes=$_dp"
+    [ "$_dw" -eq 0 ] && [ "$_dd" -eq 0 ] && [ "$_dr" -eq 0 ] && [ "$_dp" -eq 0 ]
+}
+
 flush_and_wait() {
     echo 'flush' > "$CFG" || fail "flush rejected"
     sleep 1
@@ -400,6 +487,12 @@ probe_c() {
     [ "${c0_frames:-0}" -ge 8 ] || fail "probe C: replaced carrier 0 carried $c0_frames frames"
     [ "${c0_bytes:-0}" -ge 65536 ] || fail "probe C: replaced carrier 0 carried $c0_bytes bytes"
     echo "   carrier_lost=$lost carrier_replaced=$replaced carrier0=$c0_state frames=$c0_frames bytes=$c0_bytes"
+    # The burst has closed; let the last FIN/FBK settle, then prove the
+    # session aggregates are the live rows plus the retired carriers, ten
+    # samples in a row, with no counter moving backwards.
+    sleep 1
+    check_reconcile 2 ||
+        fail "probe C: session counters do not reconcile with the carrier rows"
     echo "== probe C: pass"
 }
 
@@ -496,6 +589,9 @@ probe_e() {
     lost=$(stat_sum lost)
     [ "$lost" -ge 1 ] || fail "probe E: carrier_lost is $lost"
     echo "   spare_activated=$sa replaced=$rep lost=$lost"
+    sleep 1
+    check_reconcile 2 ||
+        fail "probe E: session counters do not reconcile with the carrier rows"
     echo "== probe E: pass"
 }
 
