@@ -1,0 +1,117 @@
+run.sh: module sha256 0b8f0006a7a10fe33e6e35e927aaf916047e142528bc32729ed04826fdccdb63
+run.sh: building adv_probe
+run.sh: group public: qemu accel=kvm timeout=3000s sha=0b8f0006a7a10fe3 phases=public srcfilter
+run.sh: group control: qemu accel=kvm timeout=240s sha=0b8f0006a7a10fe3 phases=control
+run.sh: group resource: qemu accel=kvm timeout=240s sha=0b8f0006a7a10fe3 phases=resource
+run.sh: group slab: qemu accel=kvm timeout=240s sha=0b8f0006a7a10fe3 phases=slab
+run.sh: group final: qemu accel=kvm timeout=240s sha=0b8f0006a7a10fe3 phases=final
+run.sh: group replay: qemu accel=kvm timeout=240s sha=0b8f0006a7a10fe3 phases=replay
+run.sh: group rmmod: qemu accel=kvm timeout=240s sha=0b8f0006a7a10fe3 phases=rmmod
+run.sh: group flush: qemu accel=kvm timeout=240s sha=0b8f0006a7a10fe3 phases=flush
+run.sh: group catconfig: qemu accel=kvm timeout=240s sha=0b8f0006a7a10fe3 phases=catconfig
+run.sh: group cfg_mix: qemu accel=kvm timeout=240s sha=0b8f0006a7a10fe3 phases=cfg_mix
+run.sh: group param: qemu accel=kvm timeout=240s sha=0b8f0006a7a10fe3 phases=param
+run.sh: group port: qemu accel=kvm timeout=240s sha=0b8f0006a7a10fe3 phases=port
+run.sh: group near: qemu accel=kvm timeout=240s sha=0b8f0006a7a10fe3 phases=near nearx
+run.sh: group far: qemu accel=kvm timeout=240s sha=0b8f0006a7a10fe3 phases=far farx
+run.sh: group stall: qemu accel=kvm timeout=240s sha=0b8f0006a7a10fe3 phases=stall
+run.sh: booting the close-flush crash repro (isolated guest)
+
+ATTACK                           RESULT BUILD              DETAIL
+-------------------------------- ------ ------------------ ------
+init.echo_sane                   PASS   sha=0b8f0006a7a10fe3 ECHO_OK bytes=2097152
+pub.churn                        FAIL   sha=0b8f0006a7a10fe3 10000 connect/send/close cycles: usable=9998 refused=0 other=2 (a closed stream must free the session for the next connection)
+pub.two                          PASS   sha=0b8f0006a7a10fe3 A usable=1, B usable=1, A after B close=1
+pub.concurrent                   PASS   sha=0b8f0006a7a10fe3 n=100 connected=100 echoed=100 short=0 corrupt=0 timeout=0 isolation=1 recover=1 first_fail=none streams_active=0 streams_total=101; 119 ms
+pub.halfclose                    PASS   sha=0b8f0006a7a10fe3 app half-close: echo 10 bytes, EOF=1
+pub.rst                          PASS   sha=0b8f0006a7a10fe3 RST after 4194304 bytes: no warning, module still loaded
+init.src_key                     PASS   sha=0b8f0006a7a10fe3 src= refused; nonce= accepted and rendered; short nonce= refused
+pub.writer                       PASS   sha=0b8f0006a7a10fe3 attempted 100 MiB, accepted 75110697 bytes then blocked (errno=11), MemAvailable 396200 -> 253328 kB
+pub.writer                       PASS   sha=0b8f0006a7a10fe3 attempted 1024 MiB, accepted 74859739 bytes then blocked (errno=11), MemAvailable 397940 -> 257408 kB
+pub.srcfilter                    PASS   sha=0b8f0006a7a10fe3 app from 127.0.0.2 usable=1 (no src= allow list; the tunnel identity is the nonce), far config renders nonce=1 peer=1
+ctl.nonroot                      PASS   sha=0b8f0006a7a10fe3 uid 1000 write to /proc/net/tbtun/config: open failed (the documented mode is 0600 root)
+init.nonroot_unchanged           PASS   sha=0b8f0006a7a10fe3 config unchanged after the uid-1000 attempt
+ctl.line513                      PASS   sha=0b8f0006a7a10fe3 513-byte line + newline: write=-1 errno=22 (refused or buffered; the current line buffer is 1024 bytes)
+ctl.line512                      PASS   sha=0b8f0006a7a10fe3 512-byte line + newline: write=-1 errno=22 (refused or buffered)
+ctl.line512nonl                  PASS   sha=0b8f0006a7a10fe3 512 bytes with no newline: write=512 errno=0 (buffered or refused, never applied)
+ctl.line1025                     PASS   sha=0b8f0006a7a10fe3 1025-byte line + newline: write=-1 errno=7 (must be refused with the 1024-byte buffer)
+ctl.line1024nonl                 PASS   sha=0b8f0006a7a10fe3 1024 bytes with no newline: write=-1 errno=7
+init.cfg_unchanged               PASS   sha=0b8f0006a7a10fe3 over-long lines changed nothing
+init.cfg_roundtrip               PASS   sha=0b8f0006a7a10fe3 the canonical config replays line by line
+init.echo_after_roundtrip        PASS   sha=0b8f0006a7a10fe3 ECHO_OK bytes=1048576
+init.max_tunnels                 PASS   sha=0b8f0006a7a10fe3 64 tunnels accepted before the limit
+init.scale                       PASS   sha=0b8f0006a7a10fe3 1024 carriers up of 1024 rows; MemAvailable 403916 -> 328684 kB
+init.slab_leak                   PASS   sha=0b8f0006a7a10fe3 32k slabs grew by 0 objects over 100 connections
+init.slab_after_flush            PASS   sha=0b8f0006a7a10fe3 after flush: 32k objects 0 -> 0 (the session teardown is the only free point)
+init.final_echo                  PASS   sha=0b8f0006a7a10fe3 ECHO_OK bytes=4194304
+init.dmesg                       PASS   sha=0b8f0006a7a10fe3 no WARNING/BUG/Oops/INFO: task in the guest log
+init.cfg_replay                  PASS   sha=0b8f0006a7a10fe3 line-by-line config replay rc=0, transfer closed cleanly: ECHO_ABORT op=read errno=104 bytes=1114112
+init.echo_after_replay           PASS   sha=0b8f0006a7a10fe3 ECHO_OK bytes=1048576
+init.rmmod                       PASS   sha=0b8f0006a7a10fe3 rmmod rc=0, app closed cleanly: ECHO_ABORT op=read errno=104 bytes=1114112
+init.reload                      PASS   sha=0b8f0006a7a10fe3 module reloaded
+init.dmesg_after_rmmod           PASS   sha=0b8f0006a7a10fe3 no warning/BUG/oops after rmmod
+init.flush_midstream             PASS   sha=0b8f0006a7a10fe3 flush mid-transfer: app closed cleanly, ECHO_ABORT op=read errno=104 bytes=1114112
+init.echo_after_flush            PASS   sha=0b8f0006a7a10fe3 ECHO_OK bytes=1048576
+cat.cfg_self                     PASS   sha=0b8f0006a7a10fe3 cat config > config rc=0, 2 tunnels still present: 
+init.echo_after_cat              PASS   sha=0b8f0006a7a10fe3 ECHO_OK bytes=1048576
+cat.cfg_mix                      PASS   sha=0b8f0006a7a10fe3 bad line not applied, far line applied (write rc=0)
+init.max_carriers                PASS   sha=0b8f0006a7a10fe3 n=8 refused with max_carriers=4
+init.port_exhaust                PASS   sha=0b8f0006a7a10fe3 tunnel 3 accepted but the exhaustion is operator-visible: port_exhaust=15 port_exhaust=16 (alloc_fail=16, log lines=10)
+near.resp_not_chunked            PASS   sha=0b8f0006a7a10fe3 200 with Content-Length instead of chunked: carrier poisoned
+near.resp_500                    PASS   sha=0b8f0006a7a10fe3 500 response: carrier poisoned
+near.resp_hdr_big                PASS   sha=0b8f0006a7a10fe3 response header > carrier buffer: carrier poisoned
+near.resp_close                  PASS   sha=0b8f0006a7a10fe3 Connection: close response: carrier poisoned
+near.hello_wrong_nonce           PASS   sha=0b8f0006a7a10fe3 response HELLO with a wrong nonce: carrier poisoned
+near.chunk_huge                  PASS   sha=0b8f0006a7a10fe3 chunk size 0xFFFFFFFF in a response: carrier poisoned
+near.split_record                PASS   sha=0b8f0006a7a10fe3 chunk 32 with body_len 100 in a response: carrier poisoned
+near.chunk_oversize              PASS   sha=0b8f0006a7a10fe3 chunk 8229 in a response: carrier poisoned
+near.drip_pad                    PASS   sha=0b8f0006a7a10fe3 a drip chunk and a PAD chunk between records accepted
+near.fbk_forged                  PASS   sha=0b8f0006a7a10fe3 forged FBK gen+1 and path 15: uack 5000 -> 5000 (must stay 5000)
+near.data_path                   PASS   sha=0b8f0006a7a10fe3 DATA delivered to the app after forged FBK (child rc=0)
+near.second_conn                 PASS   sha=0b8f0006a7a10fe3 second public connection after the first closed: rc=0 echoed=1 (0 = accepted and usable, 1 = refused)
+near.fin_eagain                  PASS   sha=0b8f0006a7a10fe3 FIN under carrier backpressure: fin_seen=1 eof=1 child_rc=0 pump_hiwat 0 -> 4970 (must grow) holes_unrecoverable 0 -> 0; tx_ack=524288 txq=0 rx_records=57 hole_checks=0 time_fail=0 parsed=236 last_type=20 wire=536418 car_wmem=1010 rb_set=0 rb_now=524288 brk=0 rfail=0
+near.rst_eagain                  PASS   sha=0b8f0006a7a10fe3 RST under carrier backpressure: rst_seen=1 eof=0 child_rc=0 pump_hiwat 0 -> 208 (must grow) holes_unrecoverable 0 -> 0; tx_ack=49125 txq=0 rx_records=4 hole_checks=0 time_fail=0 parsed=9 last_type=21 wire=98880 car_wmem=27552 rb_set=0 rb_now=524288 brk=0 rfail=0
+far.garbage                      PASS   sha=0b8f0006a7a10fe3 9000 bytes of non-HTTP garbage; carrier must close, not crash
+far.hello_garbage                PASS   sha=0b8f0006a7a10fe3 HELLO joined (nonce adopted), then 64 garbage bytes; carrier must close
+far.wrong_nonce                  PASS   sha=0b8f0006a7a10fe3 HELLO with the wrong 128-bit nonce: carrier closed; join_bad+nonce_reject 0 -> 0
+far.anchor                       PASS   sha=0b8f0006a7a10fe3 carrier joined index 0, far generation 4
+far.dup_index                    PASS   sha=0b8f0006a7a10fe3 duplicate (nonce,index=0): carrier closed; join_dup 0 -> 0; anchor must survive
+far.srcaddr_dup                  PASS   sha=0b8f0006a7a10fe3 same nonce and index from 127.0.0.2: refused as a duplicate
+far.srcaddr_free                 PASS   sha=0b8f0006a7a10fe3 same nonce from 127.0.0.2 on a free index: refused
+far.chunk_huge                   PASS   sha=0b8f0006a7a10fe3 chunk size 0xFFFFFFFF must be PROTO
+far.bodylen_tail                 PASS   sha=0b8f0006a7a10fe3 8224-byte chunk, 35 bytes sent, then FIN: no warning, no overread
+far.split_record                 PASS   sha=0b8f0006a7a10fe3 chunk 32 with body_len 100 (record split across chunks) must be PROTO
+far.drip_split                   PASS   sha=0b8f0006a7a10fe3 drip chunk between header and body must still be PROTO
+far.chunk_oversize               PASS   sha=0b8f0006a7a10fe3 chunk 8229 > TBT_CHUNK_MAX (8228) must be PROTO
+far.no_host                      PASS   sha=0b8f0006a7a10fe3 request without Host must be PROTO
+far.headers_big                  PASS   sha=0b8f0006a7a10fe3 9000-byte header block must be PROTO (effective cap: carrier buffer)
+far.open_other_sid               PASS   sha=0b8f0006a7a10fe3 second OPEN (sid 1357243d) on carrier 1: adopted and echoed=1, stream 1 crossed=0, carrier closed=0 (multiconn accepts a second stream; it must not be a PROTO close)
+far.fbk_forged                   PASS   sha=0b8f0006a7a10fe3 FBK uack 999999 with gen+1 and path 15: carrier 0 uack 5000 -> 5000 (must stay 5000)
+far.hello_profile0               PASS   sha=0b8f0006a7a10fe3 HELLO with profile 0 must be refused
+far.hello_profile9               PASS   sha=0b8f0006a7a10fe3 HELLO byte 9 = profile 1, generation 2: accepted as a generation, not a profile
+far.data_path                    PASS   sha=0b8f0006a7a10fe3 anchor echo: 8 bytes 'pingpong' corrupt=0 (ping+pong, coalescing/retransmit allowed; duplicate seq must not add XXXX); far stats capture_runs=4 actor_calls=2 submit_bytes=12 tx_ack=0
+far.nonce_pinned                 PASS   sha=0b8f0006a7a10fe3 nonce= pinned: first source joined=1, wrong nonce refused=1, stranger 127.0.0.2 with the correct nonce refused=1 (join_src_reject 0 -> 1, join_bad 0 -> 1)
+far.src_anchor                   PASS   sha=0b8f0006a7a10fe3 peer= anchor: anchored source joined=1 and joined index 1=1, stranger 127.0.0.2 refused=1, config renders peer=1 (join_src_reject 0 -> 1)
+far.overlap                      PASS   sha=0b8f0006a7a10fe3 3 rounds of [seq+4096 len 8192][seq+12288 len 4096][seq len 8192]: echoed 49152/49152 bytes corrupt=0; ooo_bytes 0 -> 0, ooo_frames 0 -> 0, reorder_overflow 0 -> 0, holes_unrecoverable 0 -> 0 (a stale node leaves ooo_bytes at 8192+ and the hole budget kills the stream)
+far.second_carrier               PASS   sha=0b8f0006a7a10fe3 second carrier after the first: HELLO answered=1, PAD sent=1, echo 10/10 corrupt=0, rx_adopt_events=2 join_dup=0 (a far that never reads the new carrier leaves it unanswered)
+stall.hello_chain                PASS   sha=0b8f0006a7a10fe3 15 sequential joins: every HELLO answered=1, rx_adopt_events=15, join_dup=0, join_nonce_reject=0
+stall.flush                      PASS   sha=0b8f0006a7a10fe3 flush completed after the carrier chain
+ctl.close_flush                  PASS   sha=0b8f0006a7a10fe3 the guest survived the close flush (console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/crash-console.log)
+
+run.sh: 77 passed, 1 failed, 0 skipped
+run.sh: group public console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/console-public.log
+run.sh: group control console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/console-control.log
+run.sh: group resource console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/console-resource.log
+run.sh: group slab console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/console-slab.log
+run.sh: group final console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/console-final.log
+run.sh: group replay console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/console-replay.log
+run.sh: group rmmod console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/console-rmmod.log
+run.sh: group flush console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/console-flush.log
+run.sh: group catconfig console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/console-catconfig.log
+run.sh: group cfg_mix console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/console-cfg_mix.log
+run.sh: group param console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/console-param.log
+run.sh: group port console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/console-port.log
+run.sh: group near console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/console-near.log
+run.sh: group far console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/console-far.log
+run.sh: group stall console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/console-stall.log
+run.sh: crash console: /home/kunweiz/tbtun-worktrees/final-qemu/adversarial/crash-console.log

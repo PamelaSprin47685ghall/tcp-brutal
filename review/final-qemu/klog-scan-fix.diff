@@ -1,0 +1,42 @@
+diff --git a/adversarial/run.sh b/adversarial/run.sh
+index bb51685..a52981a 100755
+--- a/adversarial/run.sh
++++ b/adversarial/run.sh
+@@ -85,6 +85,28 @@ phase_list() {
+     esac
+ }
+ 
++# Count kernel oops/warning lines on a guest console.  Harness output shares
++# the serial console with printk, and a PASS detail can name the very patterns
++# this scan looks for ("no WARNING/BUG/Oops/..."), so skip harness lines before
++# matching.  Only timestamped kernel lines or lines that start with a kernel
++# marker are considered; the rest of the console is userspace chatter.
++klog_count() {
++    awk '
++        /^ADV_/ || /^PHASE_/ || /^TBT_/ || /^NEARX_/ || /^FAR_/ ||
++        /^CONC_/ || /^REPRO_/ || /^PARTIAL_WROTE/ || /^burst:/ ||
++        /^== / || /^# / { next }
++        /^\[[[:space:]]*[0-9]+\.[0-9]+\]/ {
++            if ($0 ~ /WARNING:|BUG:|Oops|general protection fault|Call Trace:|INFO: task .* blocked|refcount_t:|KASAN|UBSAN|deprecated workqueue/) n++
++            next
++        }
++        /^(WARNING:|BUG:|Oops|general protection fault|Call Trace:|INFO: task|refcount_t:|KASAN|UBSAN|deprecated workqueue)/ {
++            if ($0 ~ /WARNING:|BUG:|Oops|general protection fault|Call Trace:|INFO: task .* blocked|refcount_t:|KASAN|UBSAN|deprecated workqueue/) n++
++            next
++        }
++        END { print n + 0 }
++    ' "$1"
++}
++
+ run_group() {
+     g=$1
+     phases=$(phase_list "$g")
+@@ -135,7 +157,7 @@ run_group() {
+             dead=1
+         fi
+     done
+-    n=$(grep -cE 'BUG:|Oops|general protection fault|INFO: task .* blocked|deprecated workqueue' "$console" 2> /dev/null || true)
++    n=$(klog_count "$console")
+     if [ "${n:-0}" -gt 0 ]; then
+         echo "ADV_RESULT console.klog.$g FAIL sha=$gsha $n kernel oops/warning lines (console $console)" >> "$results_file"
+     fi
