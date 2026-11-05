@@ -840,6 +840,30 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
         }
         c->part_len = c->part_off = 0;
     }
+    /* Record-level all-or-nothing for DATA. A short write leaves a partial
+     * record in the ordered stream; the peer's parser cannot skip it, so
+     * every control record written after it (FBK, SACK, FIN) waits behind an
+     * incomplete record. Measured on a 64 KiB carrier: the far parsed 0 of
+     * 253 FBKs, the near-to-far uack never advanced, and the strict phase
+     * ended in EOF. Check the socket's free send memory and the peer's
+     * remaining window for the whole record first; if it does not fit, let
+     * the pump requeue it and retry on write_space. The c->part path above
+     * stays as a safety net for a kernel-side short write. */
+    if (fr->hdr.type == TBT_F_DATA)
+    {
+        struct tcp_sock *tp = tcp_sk(c->sk);
+        u32 una = READ_ONCE(tp->snd_una);
+        u32 queued = READ_ONCE(tp->write_seq);
+        u32 wnd = READ_ONCE(tp->snd_wnd);
+        u32 wmem = READ_ONCE(c->sk->sk_wmem_queued);
+        u32 sndbuf = READ_ONCE(c->sk->sk_sndbuf);
+        u64 mem_avail = sndbuf > wmem ? sndbuf - wmem : 0;
+        u64 wnd_avail = wnd > (u32)(queued - una) ?
+                        wnd - (u32)(queued - una) : 0;
+
+        if (min(mem_avail, wnd_avail) < total)
+            return -EAGAIN;
+    }
     msg.msg_flags = MSG_DONTWAIT;
     lock_sock(c->sk);
     err = tcp_sendmsg_locked(c->sk, &msg, total);
