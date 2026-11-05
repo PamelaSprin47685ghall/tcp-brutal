@@ -216,16 +216,36 @@ check_listen_order() {
 }
 
 check_proc_entries() {
+    src="$1/tbtun/tbt_procfs.c"
     bad=""
-    for name in $(grep -oE '#define TBT_[A-Z_]+_NAME' "$1/tbtun/tbt_procfs.c" | awk '{print $2}'); do
-        c=$(grep -cE "(proc_create|tbt_proc_create)\($name," "$1/tbtun/tbt_procfs.c")
-        r=$(grep -cE "remove_proc_entry\($name," "$1/tbtun/tbt_procfs.c")
-        if [ "$c" -gt 0 ] && [ "$r" -eq 0 ]; then
+    # remove_proc_subtree() on the directory is proof for every child created
+    # under it (review 34: a partial init must not remove names it never
+    # created).  It only covers entries actually created under that directory,
+    # so the directory assignment and the helper's parent are checked too.
+    subtree=0
+    if grep -q 'remove_proc_subtree(TBT_PROC_SUBDIR' "$src" &&
+       grep -q 'tbt_proc_dir = proc_mkdir(TBT_PROC_SUBDIR' "$src" &&
+       grep -q 'proc_create_data(name, mode, tbt_proc_dir' "$src"; then
+        subtree=1
+    fi
+    for name in $(grep -oE '#define TBT_[A-Z_]+_NAME' "$src" | awk '{print $2}'); do
+        c=$(grep -cE "(proc_create|tbt_proc_create)\($name," "$src")
+        r=$(grep -cE "remove_proc_entry\($name," "$src")
+        [ "$c" -eq 0 ] || [ "$r" -gt 0 ] && continue
+        if [ "$subtree" -eq 0 ]; then
             bad="$bad $name"
+            continue
+        fi
+        # A direct proc_create() must name the removed directory as parent;
+        # entries made through tbt_proc_create() are covered by the helper
+        # check above.
+        if grep -qE "([^_a-zA-Z]|^)proc_create\($name," "$src" &&
+           ! grep -qE "([^_a-zA-Z]|^)proc_create\($name, [^,]+, tbt_proc_dir," "$src"; then
+            bad="$bad $name(parent)"
         fi
     done
-    mk=$(grep -c 'proc_mkdir(TBT_PROC_SUBDIR' "$1/tbtun/tbt_procfs.c")
-    rm=$(grep -c 'remove_proc_entry(TBT_PROC_SUBDIR' "$1/tbtun/tbt_procfs.c")
+    mk=$(grep -c 'proc_mkdir(TBT_PROC_SUBDIR' "$src")
+    rm=$(grep -cE 'remove_proc_entry\(TBT_PROC_SUBDIR|remove_proc_subtree\(TBT_PROC_SUBDIR' "$src")
     [ "$mk" -gt 0 ] && [ "$rm" -eq 0 ] && bad="$bad TBT_PROC_SUBDIR"
     [ -z "$bad" ] && return 0
     printf 'created but not removed:%s' "$bad"

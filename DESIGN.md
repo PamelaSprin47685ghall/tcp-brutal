@@ -520,7 +520,13 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
   for an unknown sid is dropped, because only OPEN may create a stream. OPEN is sent once
   per carrier for each stream. A late OPEN for a stream that is already closing is
   dropped. The HELLO gate is stronger than C2's OPEN gate: a port-reusing or hostile
-  connection cannot name a stream at all without the session nonce.
+  connection cannot name a stream at all without the session nonce. On the far side the
+  nonce is pinned by `nonce=`, or adopted from the first HELLO that passes the source
+  check (trust-on-first-use); the source address of that first authenticated HELLO
+  becomes the session **anchor**, and every later HELLO from another address is refused
+  before its nonce is examined (`join_src_reject`). A configured far `peer=` fixes the
+  anchor at session creation. Without `nonce=`/`peer=` the first connection chooses the
+  session; configure both to remove that race.
 - **Initiator rule**: only the near side allocates sids and only the near side opens
   carriers. The far side never initiates. The far side's *public* connections (target-side)
   are created by the module but their stream ids come from the same near-side allocator —
@@ -1035,6 +1041,8 @@ struct tbt_session {
     struct list_head prov, dead;    /* accepted-not-joined; retired */
     u8 nonce[16];
     bool nonce_set, nonce_pinned;
+    __be32 anchor_addr;             /* far: the only accepted near source */
+    bool anchor_set;
     struct work_struct w_replace;
     struct delayed_work w_fbk;      /* 10 ms feedback tick + retransmit timer */
     struct delayed_work w_reap;     /* tombstone sweeper */
@@ -1141,7 +1149,9 @@ random at tunnel creation).
   global port block** (`/proc/net/tbtun/ports`) shared by every tunnel. Per-tunnel blocks
   are not implemented. Known gap, tracked.
 - `role=near` requires `listen` (public) and `peer` (carrier destination).
-- `role=far` requires `listen` (carrier destination) and `target` (literal).
+- `role=far` requires `listen` (carrier destination) and `target` (literal). An
+  optional `peer=` on a far line is the near source address allowed to join
+  carriers: the anchor. The port is grammar filler; only the address is used.
 - `nonce=` pins the 128-bit session nonce. 32 hex digits are the full value;
   16 hex digits pin the low 64 bits and are left-padded with zeros. On
   `role=near` it is the local session nonce; on `role=far` it is the nonce the
@@ -1153,6 +1163,10 @@ random at tunnel creation).
   A 64-hex-digit (256-bit) value is refused because the HELLO nonce field is
   128 bits. The runtime `session <id> nonce=` action remains for reproducible
   tests.
+- A far tunnel that has neither `nonce=` nor `peer=` is trust-on-first-use: the
+  first HELLO that passes the nonce check fixes the source anchor, and every
+  later HELLO from another address is refused before the nonce is examined.
+  The module logs one warning at session creation for this configuration.
 - `max_tunnels`/`max_carriers` are enforced before any allocation: a new tunnel id
   when the global list is at `max_tunnels` returns `-ENOSPC` and changes nothing
   (re-sending an existing id still replaces it), and `n + m > max_carriers` returns
@@ -1178,11 +1192,14 @@ random at tunnel creation).
   rejected with a message and no partial effect. The same verbs are accepted on
   `config`; `peers` is the state view they act on. The index applies to **every
   tunnel that has a carrier with that index**; there is no tunnel-qualified form.
-- `http` (read, debug-only, `debug >= 2`): the last request header block this side
-  emitted, verbatim, headers only and never a body, at most `TBT_HTTP_REQ_MAX` (4096)
-  bytes. Empty when `debug < 2`. It exists because the QoS claim is about the bytes the
-  ISP sees; the only end-to-end check is parsing what the module actually emitted inside
-  the guest with a strict HTTP parser (§8.4).
+- `http` (read, debug-only, `debug >= 2`): the last **emitted** request header block,
+  verbatim, headers only and never a body, at most `TBT_HTTP_REQ_MAX` (4096) bytes. The
+  source is the near side's carrier 0 request emitter in the `http-kal`/`http-kal-drip`
+  container (`tbt_carrier.c`); it is a snapshot of bytes put on the wire, not a received
+  request, a response, or a live stream. Empty when `debug < 2`. With more than one
+  tunnel captured, the reader renders the longest block. It exists because the QoS claim
+  is about the bytes the ISP sees; the only end-to-end check is parsing what the module
+  actually emitted inside the guest with a strict HTTP parser (§8.4).
 - `stats` (read): the stable leading block is exactly three lines, in this order:
   `debug_loss=<0|1>`, `gaps_total=<n>`, `streams_total=<n>`; one `key=value` per line,
   no spaces. Per-tunnel counters follow (§8.7).
@@ -1225,14 +1242,19 @@ included. The list key (`srcaddrs`) and `nonce` are rendered only when set.
 The order is
 
 ```
-role listen [peer] [target] n m dup profile keepalive drip_ms replay
+role listen [peer] [target] [peer] n m dup profile keepalive drip_ms replay
 tunnel_rate max_inflate hole_budget_ms rx_reorder_bytes tx_retain_bytes
 carrier_stall_ms portblock [nonce] [srcaddrs]
 ```
 
-`peer` is rendered only for `role=near` and `target` only for `role=far`; a far tunnel
-has no peer, so `peer=0.0.0.0:0` never appears in canonical output (it is not parseable:
-port 0 is refused).
+`peer` is the near peer on a `role=near` line (always present) and the far source
+anchor on a `role=far` line (present only when configured); a far line therefore
+prints `target` before `peer`.
+
+`peer` is rendered for `role=near` always and for `role=far` only when it is configured
+(the source anchor); `target` is rendered only for `role=far`. A far tunnel without
+`peer=` omits the key, so `peer=0.0.0.0:0` never appears in canonical output (it is not
+parseable: port 0 is refused).
 
 `nonce` follows `portblock`, before the list key `srcaddrs`.
 
@@ -1492,12 +1514,18 @@ is the 50 ms liveness net's evidence counter. Two internal fields are not render
 their own names: the debug injector's per-carrier drop count appears as the `peers` column
 `dropped`, and `recv_partial_discard` has no view.
 
-C3 adds per tunnel: `n, up, lost, replaced, spare_activated, alloc_fail, connect_fail,
-join_dup, join_bad, join_nonce_reject, fbk_tx, fbk_rx, retx_frames, retx_bytes, retain_drop,
+C3 adds per tunnel: `n, up, lost, replaced, spare_activated, alloc_fail, port_exhaust,
+port_alloc_fail, connect_fail, join_dup, join_bad, join_nonce_reject, join_src_reject,
+fbk_tx, fbk_rx, retx_frames, retx_bytes, retain_drop,
 reorder_overflow, reorder_max_depth, ooo_bytes, ooo_frames, retain_bytes, tx_ack, rx_ack,
 peer_paused, fb_delay_us, rto_us, una_stall_us`; the stream census line prints
 `streams_active, n_streams, n_pending`. `join_dup` counts a HELLO that named an index
 already occupied by a live carrier (the duplicate is closed, not the session);
+`join_src_reject` counts a far-side HELLO from an address other than the session anchor;
+`port_exhaust` counts a carrier that found every port in the global block in use, and
+`port_alloc_fail` counts a failed port-bitmap allocation; both leave the carrier alive
+and retrying, and the same reason is logged ratelimited. `alloc_fail` is the older
+carrier-start failure total and still includes both port cases;
 `reorder_overflow` counts streams killed by the reorder bound; `reorder_max_depth` is the
 deepest out-of-order backlog ever held, in frames; `retain_drop` counts frames released
 by a configured `tx_retain_bytes` cap; `tx_ack`/`rx_ack` are the two directions'
@@ -1577,10 +1605,9 @@ returns `-ENOSPC` before `kzalloc`/list insert; re-sending an existing id still 
 it. `max_carriers` is enforced in `tbt_cfg_sane()`: `n + m > max_carriers` returns
 `-EINVAL` before any allocation or session creation.
 
-**Known dead declarations (review 35, pending).** `tbt_passive_port()` and
-`tbt_tunnel_flush()` are declared in `tbtun.h` with no definition or caller. They stay
-until the data plane is frozen, then are removed. `tbt_http_skip_request_header()` is
-not dead: `host/test_http.c` exercises it.
+**Dead declarations removed (review 35).** `tbt_passive_port()` and
+`tbt_tunnel_flush()` had declarations but no definition or caller; they are gone.
+`tbt_http_skip_request_header()` is not dead: `host/test_http.c` exercises it.
 
 Unload always succeeds, in this order and no other: unregister `/proc` (no new writer can
 start) → `tbt_tunnel_shutdown()` stops listeners, cancels every work item, **detaches every

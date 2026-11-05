@@ -135,8 +135,8 @@ program, and `echo`/`cat` are the whole interface.
 | `tunnels` | one line per tunnel: role, state, listen/peer/target, n, m, streams |
 | `peers` | one line per carrier slot, 16 columns (below) |
 | `ports` | the global source port block and whether it is configured |
-| `stats` | `debug_loss=<0\|1>`, gap and stream totals, then per-tunnel counters (`txq`, `rxq`, holes, prediction, duplication, carrier replacement) |
-| `http` | debug only (`debug>=2`): a snapshot of the last HTTP request header block the near side's carrier 0 put on the wire, for checking the container against a parser; it is not a live stream |
+| `stats` | `debug_loss=<0\|1>`, gap and stream totals, then per-tunnel counters (`txq`, `rxq`, holes, prediction, duplication, carrier replacement, port exhaustion, source-anchor rejects) |
+| `http` | debug only (`debug>=2`): the last **emitted** HTTP request header block from the near side's carrier 0 (headers only), for checking the container against a parser; not a received request, a response, or a live stream |
 
 `drop_ppm` is refused with `EPERM` unless the module was loaded with
 `debug_loss=1`; `stats` starts with that gate's state so a script can check it
@@ -156,7 +156,7 @@ ignored; a `#` after a token is not a comment and the line is refused.
 |---|---|---|
 | `role` | — | `near` or `far`; required |
 | `listen` | — | `a.b.c.d:port`; near: public address; far: carrier address |
-| `peer` | — | near only: where carriers are sent |
+| `peer` | — | near: where carriers are sent; far: the only near source address allowed to join (the anchor) |
 | `target` | — | far only: literal address the payload is delivered to |
 | `n` | `4` | Active carriers, `1..16` |
 | `m` | `1` | Spares, `0..16`; `n + m <= 16` |
@@ -184,10 +184,13 @@ Keys that were parsed but never acted on (`framing=`, `chunk=`, `max_retry=`,
 tunnel it is the nonce the far side requires from the near side: every HELLO
 must match it. Without `nonce=`, a far tunnel adopts the nonce from the first
 HELLO (trust-on-first-use), so whoever wins that first connection defines the
-session. The nonce travels in clear text in HELLO: it is a session identifier
-and an anti-confusion token, not a cryptographic secret. Use WireGuard when
-the path is hostile. A 64-hex-digit (256-bit) value is refused: the HELLO
-nonce field is 128 bits.
+session. The source address of that first authenticated HELLO becomes the
+session anchor: every later HELLO from another address is refused before the
+nonce is examined (`join_src_reject`), and a far `peer=` fixes the anchor at
+creation instead. The nonce travels in clear text in HELLO: it is a session
+identifier and an anti-confusion token, not a cryptographic secret. Use
+WireGuard when the path is hostile. A 64-hex-digit (256-bit) value is refused:
+the HELLO nonce field is 128 bits.
 
 Other directives: `del <id>`, `flush`, `carrier <index> down|up|drop_ppm <n>`,
 and `session <id> nonce=<hex>` (pins the session nonce for reproducible tests).

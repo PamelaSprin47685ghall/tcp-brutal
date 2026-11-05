@@ -455,15 +455,28 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
 
     if (t->cfg.role == TBT_ROLE_FAR)
     {
-        if (h->path_id >= sess->n_car)
+        struct sock *csk = READ_ONCE(c->sk);
+        __be32 src;
+
+        if (h->path_id >= sess->n_car || !csk)
             return -EPROTO;
+        src = inet_sk(csk)->inet_daddr;
         spin_lock(&sess->lock);
+        /* An established anchor rejects every other source, free carrier
+         * index included, before the nonce is even examined: a stranger
+         * cannot probe the nonce. */
+        if (sess->anchor_set && src != sess->anchor_addr)
+        {
+            sess->join_src_reject++;
+            spin_unlock(&sess->lock);
+            return -EPROTO;
+        }
         if (sess->nonce_pinned)
         {
             if (memcmp(body + 2, sess->nonce, sizeof(sess->nonce)))
             {
-                spin_unlock(&sess->lock);
                 sess->session_join_bad++;
+                spin_unlock(&sess->lock);
                 return -EPROTO;
             }
         }
@@ -486,9 +499,15 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
         }
         else if (memcmp(body + 2, sess->nonce, sizeof(sess->nonce)))
         {
-            spin_unlock(&sess->lock);
             sess->session_join_bad++;
+            spin_unlock(&sess->lock);
             return -EPROTO;
+        }
+        /* Only a HELLO that passed the nonce check may fix the anchor. */
+        if (!sess->anchor_set)
+        {
+            sess->anchor_addr = src;
+            sess->anchor_set = true;
         }
         spin_unlock(&sess->lock);
         err = tbt_session_join(sess, c, h->path_id);

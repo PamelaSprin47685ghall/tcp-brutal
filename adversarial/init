@@ -275,10 +275,12 @@ phase_port() {
     echo "tunnel 3 role=near profile=raw listen=127.0.0.1:$((PUB + 3)) peer=127.0.0.1:$CAR n=16 m=0" > "$CFG"
     sleep 2
     _fail=$(awk '$1 == "tunnel" && $2 == 3 {for (i = 1; i <= NF; i++) if (index($i, "alloc_fail=") == 1) {split($i, a, "="); print a[2]}}' /proc/net/tbtun/stats)
-    if [ -n "$_fail" ] && [ "$_fail" -gt 0 ]; then
-        res init.port_exhaust FAIL "port block exhausted: tunnel 3 accepted, alloc_fail=$_fail, carriers retry forever with no operator-visible error"
+    _exh=$(awk '$1 == "tunnel" && $2 == 3 {for (i = 1; i <= NF; i++) if (index($i, "port_exhaust=") == 1) {split($i, a, "="); print a[2]}}' /proc/net/tbtun/stats)
+    _line=$(awk '$1 == "tunnel" && $2 == 3 && $3 == "c3" {print; exit}' /proc/net/tbtun/stats)
+    if [ -n "$_exh" ] && [ "$_exh" -gt 0 ]; then
+        res init.port_exhaust PASS "port exhaustion reported: port_exhaust=$_exh alloc_fail=$_fail; tunnel 3 stays up and retries; stats: $_line"
     else
-        res init.port_exhaust PASS "port exhaustion reported cleanly (alloc_fail=$_fail)"
+        res init.port_exhaust FAIL "port block exhausted: tunnel 3 alloc_fail=$_fail, port_exhaust=${_exh:-missing}; no operator-visible reason"
     fi
     # No flush: this group's purpose is the result above, and teardown is a
     # separate (hanging) test.

@@ -118,8 +118,8 @@ cat /proc/net/tbtun/tunnels
 | `tunnels` | 每条隧道一行：角色、状态、listen/peer/target、n、m、streams |
 | `peers` | 每个载体槽一行，共 16 列（见下） |
 | `ports` | 全局源端口段，以及它是否已经配置 |
-| `stats` | 第一行是 `debug_loss=<0\|1>`，然后是空洞与流总数，再往后是每条隧道的计数器（`txq`、`rxq`、空洞、预测、重复、载体替换） |
-| `http` | 仅调试（`debug>=2`）：近端 0 号载体最近一次真正发到线上的 HTTP 请求头块快照，用来对照解析器检查容器；不是实时流 |
+| `stats` | 第一行是 `debug_loss=<0\|1>`，然后是空洞与流总数，再往后是每条隧道的计数器（`txq`、`rxq`、空洞、预测、重复、载体替换、端口耗尽、源锚拒绝） |
+| `http` | 仅调试（`debug>=2`）：近端 0 号载体最近一次**发出的** HTTP 请求头块（只有头部），用来对照解析器检查容器；不是收到的请求、不是响应、也不是实时流 |
 
 除非加载时带 `debug_loss=1`，否则 `drop_ppm` 会被拒绝并返回 `EPERM`；
 `stats` 的第一行就是这个开关的状态，脚本可以先读它再决定是否注入。
@@ -137,7 +137,7 @@ cat /proc/net/tbtun/tunnels
 |---|---|---|
 | `role` | — | `near` 或 `far`，必填 |
 | `listen` | — | `a.b.c.d:port`；近端为对外地址，远端为载体地址 |
-| `peer` | — | 仅近端：载体的目的地 |
+| `peer` | — | 近端：载体的目的地；远端：唯一允许加入载体的近端源地址（锚） |
 | `target` | — | 仅远端：负载投递到的字面地址 |
 | `n` | `4` | 活跃载体数，`1..16` |
 | `m` | `1` | 备用载体数，`0..16`；`n + m <= 16` |
@@ -163,9 +163,11 @@ cat /proc/net/tbtun/tunnels
 低 64 位，并在规范输出中左补零。`role=near` 时它是本端放进 HELLO 的 nonce；
 `role=far` 时它是远端要求近端使用的 nonce，每一条 HELLO 都必须匹配。未配置
 `nonce=` 的 far 会采纳第一条 HELLO 的 nonce（首连信任，TOFU），谁赢得首个
-连接谁就定义了会话。nonce 在 HELLO 里明文传输：它是会话标识与反混淆 token，
-不是密码；链路不可信时套 WireGuard。64 个 hex 字符（256 位）会被拒绝：
-HELLO 的 nonce 字段只有 128 位。
+连接谁就定义了会话。第一条通过 nonce 检查的 HELLO 的源地址会成为会话锚：
+之后来自其他地址的 HELLO 在检查 nonce 之前就被拒绝（`join_src_reject`）；
+far 的 `peer=` 则在创建会话时就固定锚。nonce 在 HELLO 里明文传输：它是会话
+标识与反混淆 token，不是密码；链路不可信时套 WireGuard。64 个 hex 字符
+（256 位）会被拒绝：HELLO 的 nonce 字段只有 128 位。
 
 其它指令：`del <id>`、`flush`、`carrier <index> down|up|drop_ppm <n>`，
 以及 `session <id> nonce=<hex>`（固定会话 nonce，用于可复现的测试）。

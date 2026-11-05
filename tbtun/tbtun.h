@@ -96,8 +96,16 @@ struct tbt_portmap
     unsigned long *used;
 };
 
+/* Why tbt_port_alloc() returned 0.  The caller turns this into a per-session
+ * counter and a ratelimited warning; a carrier is never killed for it. */
+enum tbt_port_alloc_err
+{
+    TBT_PORT_ALLOC_OK = 0,
+    TBT_PORT_ALLOC_NOMEM,     /* the bitmap allocation failed */
+    TBT_PORT_ALLOC_EXHAUSTED, /* every port in the block is in use */
+};
+
 /* tbt_core.c */
-u32 tbt_passive_port(void);
 bool tbt_debug_loss(void);
 
 /* tbt_session.c */
@@ -105,12 +113,11 @@ extern struct tbt_portmap tbt_ports;
 int tbt_portmap_set(u16 lo, u16 hi);
 void tbt_portmap_get(u16 *lo, u16 *hi, bool *configured);
 void tbt_portmap_show(struct seq_file *m);
-u16 tbt_port_alloc(void);
+u16 tbt_port_alloc(enum tbt_port_alloc_err *err);
 void tbt_port_free(u16 port);
 int tbt_carrier_init(void);
 int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net);
 int tbt_tunnel_del(u64 id);
-void tbt_tunnel_flush(void);
 void tbt_tunnel_show(struct seq_file *m);
 void tbt_peers_show(struct seq_file *m);
 int tbt_action_apply(const struct tbt_cmd *cmd);
@@ -374,6 +381,12 @@ struct tbt_session
     u8 nonce[16];      /* the session key carried in HELLO */
     bool nonce_set;    /* far side: adopted from the first HELLO */
     bool nonce_pinned; /* `session <id> nonce=` set it explicitly */
+    /* Far side: the only near source allowed to join carriers.  Set from a
+     * configured `peer=` at session creation, else fixed by the first HELLO
+     * that passes the nonce check.  A session property: it survives carrier
+     * death and replacement. */
+    __be32 anchor_addr;
+    bool anchor_set;
 
     struct work_struct w_replace; /* dials replacements for dead carriers */
     struct delayed_work w_fbk;    /* feedback tick and retransmit timer */
@@ -445,6 +458,7 @@ struct tbt_session
     u64 recv_partial_discard;
     /* C3 counters (DESIGN.md §8.7). */
     u64 carrier_lost, carrier_replaced, carrier_alloc_fail, connect_fail;
+    u64 port_exhaust, port_alloc_fail; /* tbt_port_alloc() failure reasons */
     u64 spare_activated; /* idle spares promoted to DATA-carrying */
     u64 profile_mismatch; /* HELLO carried a different profile */
     u64 http_parse_err;   /* container framing/header protocol error */
@@ -469,6 +483,7 @@ struct tbt_session
     u64 pause_cleared_ns; /* loss timers restart when backpressure ends */
     u64 last_uack_sum;
     u64 session_join_dup, session_join_bad, join_nonce_reject;
+    u64 join_src_reject; /* far: HELLO from a source other than the anchor */
     u64 fbk_tx, fbk_rx;
     u64 retx_frames, retx_bytes;
     u64 inject_skip;     /* hole fillers refused by the send-queue bound */
