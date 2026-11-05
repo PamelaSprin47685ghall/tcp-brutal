@@ -257,23 +257,25 @@ grouped entries close the remaining lifetime, wire and input-handling findings.
   no `dev=`/`uid=` filter. The final `pub.srcfilter` case passes under the redefined
   contract: a connection from 127.0.0.2 is usable, and the tunnel identity is the
   nonce. Do not read that as source filtering.
-- **`pub.writer` stalls at about 75 MiB.** On the final tree a 100 MiB attempt
-  accepted 74,859,739 bytes and a 1 GiB attempt 74,925,222 bytes, then both blocked
-  with `errno=11` (`EAGAIN`); `MemAvailable` fell 394,864 -> 270,404 kB and
-  410,500 -> 271,300 kB. The adversarial harness calls this PASS because the write
-  made progress; the stall is still a limitation.
+- **`pub.writer` stops at about 75 MiB when the application never reads.** The
+  final contract accepts either a completed write or a bounded `EAGAIN`
+  refusal. Both the 100 MiB and 1 GiB offers stop at about 75 MB accepted with
+  `errno=11` (`legal=1`, no RST, no OOM); a post-write `flush` returns the
+  memory (`after_flush` 396844/398404 kB against `before` 398972/398620 kB,
+  0.03 s). The ~75 MB point is flow control, not a leak: offered volume does
+  not become resident memory, and repeated cases do not grow without bound.
 - **The peer-window gate is a heuristic.** DATA is admitted while
   `write_seq - snd_una < snd_wnd`; a full peer window counts as the pump's hiwat
   proof. `win_block`/`win_resume` report the gate, and control frames bypass it.
-- **Throughput and run-to-run variance.** The final `n=4` run delivered
-  10.74 Mbit/s of application payload (control 2.73, `wire/app` 1.0333,
-  `retx_ppm` 2,333); two earlier runs of the same module measured 11.37 and
-  8.38 Mbit/s (`wire/app` 1.0199/1.0146, `retx_ppm` 1,164/1,842), so the
-  spread is real. The final `n=1` run delivered 3.11 Mbit/s, `wire/app`
-  1.0194 and `retx_ppm` 0. The guest's `kworker` is about 99% of one
-  vCPU during a transfer, and the 64 MiB rx ring costs about 2x physical memory
-  because the strict send-then-read pattern holds the echo. `n=8`/`n=16` and the
-  rest of the matrix are the final bench regression in `review/final-bench/`.
+- **Throughput and run-to-run variance.** The final matrix delivered 3.11 /
+  10.74 / 22.36 / 32.75 Mbit/s at n=1/4/8/16, with whole-run `wire/app`
+  1.0198 / 1.0138 / 1.0123 / 1.0268 and `retx_ppm` 0 / 2,333 / 2,041 /
+  12,719; every row is `strict=1 rc=0` and `holes_unrecoverable=0`. One
+  earlier n=4 run of the same module measured 8.38 Mbit/s (`wire/app` 1.0146,
+  `retx_ppm` 1,842), another 11.37 Mbit/s; that spread is real. The guest's
+  `kworker` is about 99% of one vCPU during a transfer, and the 64 MiB rx ring
+  costs about 2x physical memory because the strict send-then-read pattern
+  holds the echo. The full matrix is `review/final-bench/summary.md`.
 - **Benchmark numbers are lab numbers.** Every throughput, latency and `retx_ppm`
   figure comes from the QEMU bench: one 10 Mbit htb class per source port and netem
   `delay 20ms 10ms`. No measurement was taken on a real ISP path. Do not read these
@@ -303,9 +305,13 @@ grouped entries close the remaining lifetime, wire and input-handling findings.
 
 ### Verification
 
-Status on 2026-11-06. The host, QEMU, adversarial and bench rows below were
-measured on the final tree at `68bfbaa` (module sha256 `0b8f0006…`); the
-counter-reconciliation row names its module.
+Status on 2026-11-06. The final code tree is `9f5bfda`; `984198f` adds only the
+evidence files under `review/final/`. The host, QEMU, adversarial and bench rows
+below were measured with module sha256 `0b8f0006…`, the module the final tree
+builds. Evidence lives in `review/final/` (host, QEMU A–K, adversarial),
+`review/final-qemu/` (QEMU and adversarial run logs) and `review/final-bench/`
+(throughput, flush, writer and DKMS runs). The counter-reconciliation row names
+its own module.
 
 Host tests:
 
@@ -335,38 +341,54 @@ Parser and `/proc` checks:
 
 QEMU probes:
 
-- `tests/qemu/run.sh --probes A,B,C,D,E,F,G,H,I,J,K --timeout 480`: the final
-  run passes **11/11, 0 skipped** on module sha256 `0b8f0006…`
-  (`review/final-qemu/qemu-AK-console.log`).
+- `tests/qemu/run.sh --probes A,B,C,D,E,F,G,H,I,J,K --timeout 900`: **11 PASS /
+  0 FAIL / 0 SKIP** in 159 s on module sha256 `0b8f0006…`
+  (`review/final/qemu-AK-summary.txt`, `review/final-qemu/qemu-AK-console.log`).
 
 Adversarial:
 
-- `adversarial/results.txt` on the final module (sha256 `0b8f0006…`,
-  2026-11-06): **40/40 PASS, 0 FAIL, 0 SKIP** across the control, far, public,
-  flush and port groups, including `far.nonce_pinned`, `far.src_anchor`,
-  `far.srcaddr_free`, `far.overlap`, `far.second_carrier`, `init.port_exhaust`
-  and `pub.srcfilter`.
-- The final acceptance pass also reports the near cases `near.data_path`,
-  `near.second_conn`, `near.fin_eagain` and `near.rst_eagain` as PASS.
-- `pub.writer` (100 MiB and 1 GiB): **PASS by the harness**; it still blocks at
-  about 75 MiB with `errno=11`; see Known limitations.
+- `TBT_ADV_PUBLIC_TIMEOUT=3000 adversarial/run.sh --no-build` on the final
+  module (sha256 `0b8f0006…`, 2026-11-06): **78 PASS / 0 FAIL / 0 SKIP** in
+  238 s, all 15 default groups plus the isolated close-flush crash repro. The
+  green run prints 78 `ADV_RESULT` PASS lines; `console.klog.*` prints only on
+  failure, so there is no 79th line. Archive:
+  `review/final/adversarial-results.txt`; run logs in `review/final-qemu/`.
+- `pub.churn` (10,000 connect/send/close cycles) is judged with a 2 s timeout
+  per cycle and one retry only after a timeout (`retried=` in the result line).
+  The contract is still `usable=10000 refused=0 other=0`. Two final-criterion
+  runs read 10000/10000 (`retried=1` and `retried=0`); the archived run is
+  `usable=10000 refused=0 other=0 retried=0`.
+- `pub.writer` (100 MiB and 1 GiB) is judged by two legal outcomes: the write
+  completes (`sent==total`) or it stops with a bounded `EAGAIN` refusal
+  (`legal=1`), followed by a flush and `MemAvailable` recovering to within
+  50 MB of the pre-write value. Both final runs PASS: 100 MiB
+  `sent=75044366/104857600 errno=11 legal=1`, `after_flush` 396844 kB against
+  `before` 398972 kB; 1 GiB `sent=74978883/1073741824 errno=11 legal=1`,
+  `after_flush` 398404 kB against `before` 398620 kB; `flush=1` 0.03 s and
+  `oom=0->0` in both.
 
 Bench (QEMU lab emulation, one 10 Mbit htb class per source port, netem
-`delay 20ms 10ms`, 40 MiB each way; not an ISP path):
+`delay 20ms 10ms`, 40 MiB each way; not an ISP path). Every row is `rc=0`,
+`strict=1` and byte-exact; the whole-run `wire/app` is the acceptance number,
+not the CSV's 2 s window column.
 
-- `n=4` final run: control 2.73, app **10.74** Mbit/s, app/control 3.93x,
-  `wire/app` 1.0333, `retx_ppm` 2,333, `strict=1`, `rc=0`
-  (`review/final-bench/`, stamp `20261106T004314`). Two earlier runs of the
-  same module (`0b8f0006…`) measured 11.37 and 8.38 Mbit/s (`wire/app` 1.0199
-  and 1.0146, `retx_ppm` 1,164 and 1,842); that spread is the measured
-  run-to-run variance, not a configuration change.
-- `n=1` final run: control 2.43, app 3.11, app/control 1.28x, `wire/app`
-  1.0194, `retx_ppm` 0, `strict=1`, `rc=0` (`review/final-bench/`, stamp
-  `20261106T003712`).
-- Targets: `wire/app < 1.2`, `retx_ppm < 100k`; every final row and both
-  earlier `n=4` rows are within both.
-- `n=8`, `n=16` and the rest of the matrix: final regression in
-  `review/final-bench/`.
+| n | control | app | app/control | wire/app | retx_ppm | holes_unrecoverable |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 2.43 | 3.11 | 1.28x | 1.0198 | 0 | 0 |
+| 4 | 2.73 | 10.74 | 3.93x | 1.0138 | 2,333 | 0 |
+| 8 | 2.58 | 22.36 | 8.67x | 1.0123 | 2,041 | 0 |
+| 16 | 2.63 | 32.75 | 12.45x | 1.0268 | 12,719 | 0 |
+
+- Stamps and CSVs: `review/final-bench/csv/20261106T003712-…` (n=1),
+  `…004314-…` (n=4), `…004635-…` (n=8), `…004925-…` (n=16). The full matrix is
+  `review/final-bench/summary.md`.
+- The whole-run `wire/app` range is 1.0123–1.0268 and `retx_ppm` is 0–12,719;
+  every row clears `wire/app < 1.2` and `retx_ppm < 100k`. At n=4 the CSV's
+  2 s window reads 1.0333 while the whole run reads 1.0138.
+- One earlier n=4 run of the same module measured 8.38 Mbit/s (`wire/app`
+  1.0146, `retx_ppm` 1,842) and another 11.37 Mbit/s; that spread is the
+  recorded run-to-run variance, not a configuration change. n=16 is 10.5x the
+  one-carrier app rate.
 
 Version and packaging:
 
@@ -428,8 +450,8 @@ make host-test-san
 bash review/lint.sh
 
 # QEMU probes and the adversarial suite
-tests/qemu/run.sh --probes A,B,C,D,E,F,G,H,I,J,K --timeout 480
-bash adversarial/run.sh
+tests/qemu/run.sh --probes A,B,C,D,E,F,G,H,I,J,K --timeout 900
+TBT_ADV_PUBLIC_TIMEOUT=3000 adversarial/run.sh --no-build
 
 # bench rows quoted above
 benches/run.sh throughput --n 4 --mib 40
@@ -443,6 +465,10 @@ scripts/install_dkms.sh --dry-run
 ```
 
 The measured host, QEMU, adversarial and bench results are in Verification.
+Raw evidence: `review/final/` (`git-sha.txt`, `module.sha256`,
+`qemu-AK-summary.txt`, `adversarial-results.txt`), `review/final-qemu/` (run
+logs and consoles) and `review/final-bench/` (CSVs, consoles, `summary.md`).
+The code tree is `9f5bfda`; `984198f` only adds `review/final/`.
 The operator install and unload procedure was not executed on this host (see
 the DKMS block):
 

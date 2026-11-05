@@ -266,19 +266,28 @@ virtio-net，每个源端口一条 10 Mbit 的 htb 类并挂 `delay 20ms 10ms` �
 用 `tbt_burst` 的严格先发后读阶段传 40 MiB（逐字节校验），每次启动只测一种配置。
 对照组是单个 `dd | nc` 流，同样走在一条被整形的五元组上。`app` 是近端隧道的
 `submit_bytes` 速率；`wire/app` 是整次运行的载体字节除以应用字节；`retx_ppm`
-是每百万条唯一 DATA 记录中的副本数。
+是每百万条唯一 DATA 记录中的副本数。被测模块是 sha256 `0b8f0006…`，也就是
+最终树 `9f5bfda` 构建出的模块；原始 CSV、console 与验收表在
+`review/final-bench/`。
 
 | 载体数 | 对照 (Mbit/s) | 应用 (Mbit/s) | 应用/对照 | wire/app | retx_ppm | strict / rc | CSV |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `n=1` | 2.43 | 3.11 | 1.28x | 1.0194 | 0 | `strict=1`, `rc=0` | `review/final-bench/` (`20261106T003712`) |
-| `n=4` | 2.73 | 10.74 | 3.93x | 1.0333 | 2,333 | `strict=1`, `rc=0` | `review/final-bench/` (`20261106T004314`) |
-| `n=8` | — | — | — | — | — | 最终回归 | `review/final-bench/` |
-| `n=16` | — | — | — | — | — | 最终回归 | `review/final-bench/` |
+| `n=1` | 2.43 | 3.11 | 1.28x | 1.0198 | 0 | `strict=1`, `rc=0` | `review/final-bench/` (`20261106T003712`) |
+| `n=4` | 2.73 | 10.74 | 3.93x | 1.0138 | 2,333 | `strict=1`, `rc=0` | `review/final-bench/` (`20261106T004314`) |
+| `n=8` | 2.58 | 22.36 | 8.67x | 1.0123 | 2,041 | `strict=1`, `rc=0` | `review/final-bench/` (`20261106T004635`) |
+| `n=16` | 2.63 | 32.75 | 12.45x | 1.0268 | 12,719 | `strict=1`, `rc=0` | `review/final-bench/` (`20261106T004925`) |
 
-最终 `n=4` 是 10.74 Mbit/s。同一模块（`0b8f0006…`）的两次更早运行是 8.38 与
-11.37 Mbit/s，所以方差是真实的；比值才是主张，所有行都满足当前目标
-（`wire/app < 1.2`、`retx_ppm < 100k`）。`n=1` 为 3.11 Mbit/s、0 个副本。最终的
-`n=8`/`n=16` 回归在 `review/final-bench/`；这里不对这两个宽度作倍数承诺。
+每一行都逐字节校验通过，`holes_unrecoverable=0`；整段 `wire/app` 范围是
+1.0123–1.0268，`retx_ppm` 是 0–12,719，所有行都满足当前目标
+（`wire/app < 1.2`、`retx_ppm < 100k`）。表中的 `wire/app` 是整次运行的比值；
+CSV 的 2 s 窗口列在 `n=4` 读到 1.0333。同一模块（`0b8f0006…`）的一次更早
+`n=4` 运行是 8.38 Mbit/s（`wire/app` 1.0146、`retx_ppm` 1,842），另一次是
+11.37 Mbit/s，所以方差是真实的；比值才是主张。`n=16` 是单载体应用速率的
+10.5 倍。完整矩阵与 CSV 在 `review/final-bench/summary.md`。
+
+代码树 `9f5bfda`（模块 `0b8f0006…`）的验收证据：主机、QEMU A–K 与
+adversarial 在 `review/final/` 和 `review/final-qemu/`；吞吐、flush 与 writer
+在 `review/final-bench/`。
 
 比值仍是主张：`N` 个五元组胜过一条流。这些是 QEMU/slirp 实验室数字，
 每个源端口一个 10 Mbit htb 类，netem `delay 20ms 10ms`；不是 ISP 实测。
@@ -310,9 +319,11 @@ virtio-net，每个源端口一条 10 Mbit 的 htb 类并挂 `delay 20ms 10ms` �
   请保持一个稳定的源地址，例如用 `srcaddrs=`。
 - **不固定就是首连信任。** 既没有 `nonce=` 也没有 `peer=` 时，第一条 HELLO
   同时固定 nonce 和锚，模块会打印一次告警。路径不可信时把两者都固定。
-- **吞吐会逐次波动。** 同一 `n=4` 配置的 0.0.1 验收运行分别是 8.38 与 11.37
-  Mbit/s（`retx_ppm` 1,842 与 1,164，`wire/app` 1.014 与 1.013）；`n=1` 是
-  3.14 Mbit/s。最终的 `n=8`/`n=16` 回归在 `review/final-bench/`。
+- **吞吐会逐次波动。** 最终 `n=4` 运行是 10.74 Mbit/s（`retx_ppm` 2,333，
+  整段 `wire/app` 1.0138）；同一模块的一次更早运行是 8.38 Mbit/s
+  （`retx_ppm` 1,842、`wire/app` 1.0146），另一次是 11.37 Mbit/s。最终
+  `n=1`/`n=8`/`n=16` 分别是 3.11/22.36/32.75 Mbit/s；完整矩阵在
+  `review/final-bench/`。
 - **客户机 CPU 是瓶颈。** 最新 QEMU 运行中 `kworker` 约占一个 vCPU 的 99%。
   上面的绝对 Mbit/s 是这个客户机给出的下限，不是线路的属性。
 - **接收环的物理内存约为负载的两倍。** `TBT_RX_RING_MAX` 是每条流 64 MiB，

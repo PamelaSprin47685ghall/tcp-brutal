@@ -301,21 +301,29 @@ a KVM guest: virtio-net, one 10 Mbit htb class per source port with
 send-then-read phase (byte-exact), one configuration per boot. The control is a
 single `dd | nc` flow on one shaped 5-tuple. `app` is the near tunnel's
 `submit_bytes` rate; `wire/app` is whole-run carrier bytes over application
-bytes; `retx_ppm` is copies per million unique DATA records.
+bytes; `retx_ppm` is copies per million unique DATA records. The module under
+test is sha256 `0b8f0006…`, the module the final tree `9f5bfda` builds; raw
+CSVs, consoles and the acceptance table are in `review/final-bench/`.
 
 | Carriers | Control (Mbit/s) | App (Mbit/s) | App/control | wire/app | retx_ppm | strict / rc | CSV |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `n=1` | 2.43 | 3.11 | 1.28x | 1.0194 | 0 | `strict=1`, `rc=0` | `review/final-bench/` (`20261106T003712`) |
-| `n=4` | 2.73 | 10.74 | 3.93x | 1.0333 | 2,333 | `strict=1`, `rc=0` | `review/final-bench/` (`20261106T004314`) |
-| `n=8` | — | — | — | — | — | final regression | `review/final-bench/` |
-| `n=16` | — | — | — | — | — | final regression | `review/final-bench/` |
+| `n=1` | 2.43 | 3.11 | 1.28x | 1.0198 | 0 | `strict=1`, `rc=0` | `review/final-bench/` (`20261106T003712`) |
+| `n=4` | 2.73 | 10.74 | 3.93x | 1.0138 | 2,333 | `strict=1`, `rc=0` | `review/final-bench/` (`20261106T004314`) |
+| `n=8` | 2.58 | 22.36 | 8.67x | 1.0123 | 2,041 | `strict=1`, `rc=0` | `review/final-bench/` (`20261106T004635`) |
+| `n=16` | 2.63 | 32.75 | 12.45x | 1.0268 | 12,719 | `strict=1`, `rc=0` | `review/final-bench/` (`20261106T004925`) |
 
-The final `n=4` row is 10.74 Mbit/s. Two earlier runs of the same module
-(`0b8f0006…`) measured 8.38 and 11.37 Mbit/s, so the spread is real; the ratio
-is the claim, and every row clears the current targets (`wire/app < 1.2`,
-`retx_ppm < 100k`). `n=1` is 3.11 Mbit/s and 0 copies. The final `n=8`/`n=16`
-regression is in `review/final-bench/`; no multiplier is claimed for those
-widths here.
+Every row is byte-exact, with `holes_unrecoverable=0`; the whole-run `wire/app`
+range is 1.0123–1.0268 and `retx_ppm` is 0–12,719, so every row clears the
+current targets (`wire/app < 1.2`, `retx_ppm < 100k`). The `wire/app` column is
+the whole-run ratio; the CSV's 2 s window reads 1.0333 at `n=4`. One earlier
+`n=4` run of the same module (`0b8f0006…`) measured 8.38 Mbit/s (`wire/app`
+1.0146, `retx_ppm` 1,842) and another 11.37 Mbit/s, so the spread is real; the
+ratio is the claim. `n=16` is 10.5x the one-carrier app rate. The full matrix
+and CSVs are in `review/final-bench/summary.md`.
+
+Acceptance evidence for tree `9f5bfda` (module `0b8f0006…`): host, QEMU A–K and
+adversarial results are in `review/final/` and `review/final-qemu/`;
+throughput, flush and writer results are in `review/final-bench/`.
 
 The ratio is still the claim: `N` five-tuples beat one. These are laboratory
 numbers from QEMU/slirp with one 10 Mbit htb class per source port and netem
@@ -354,10 +362,11 @@ real line.
 - **Trust on first use (TOFU) unless pinned.** Without `nonce=` and `peer=`, the first
   HELLO fixes both the nonce and the anchor, and the module logs one warning.
   Pin both on an untrusted path.
-- **Throughput varies run to run.** On the same `n=4` configuration the 0.0.1
-  acceptance runs measured 8.38 and 11.37 Mbit/s (`retx_ppm` 1,842 and 1,164,
-  `wire/app` 1.014 and 1.013); `n=1` measured 3.14 Mbit/s. The final `n=8` and
-  `n=16` regression is in `review/final-bench/`.
+- **Throughput varies run to run.** The final `n=4` run measured 10.74 Mbit/s
+  (`retx_ppm` 2,333, whole-run `wire/app` 1.0138); one earlier run of the same
+  module measured 8.38 Mbit/s (`retx_ppm` 1,842, `wire/app` 1.0146) and another
+  11.37 Mbit/s. The final `n=1`/`n=8`/`n=16` rows are 3.11/22.36/32.75 Mbit/s;
+  the full matrix is in `review/final-bench/`.
 - **Guest CPU is the bottleneck.** In the latest QEMU runs `kworker` used about
   99% of one vCPU. The absolute Mbit/s above are a floor set by this guest, not
   a property of the line.
