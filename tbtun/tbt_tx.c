@@ -1946,13 +1946,6 @@ drop:
                             sess->retx_other++;
                             break;
                         }
-                        if (r->last_path < sess->n_car)
-                        {
-                            struct tbt_carrier *pc = READ_ONCE(sess->car[r->last_path]);
-
-                            if (pc)
-                                pc->lost_frames++;
-                        }
                     }
                     r->last_path = c->index;
                     r->last_sent_ns = now;

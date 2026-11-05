@@ -867,19 +867,27 @@ whose receiver has a real in-order hole at its parser (the frame at `rx_next` mi
 later frames fill the tree) reads the hole: probe I's shaped carriers still show
 0–12,800 ppm from such holes even with no configured loss, because the ratio reports what
 the receiver has not received, not what the wire dropped. A separate `retx_ppm` column is
-the operator-visible loss proxy: retransmitted frames / frames written, from the
-retransmit attribution (`lost_frames/tx_frames`). An earlier build sampled the raw `data_frames`/`recv_cnt` deltas
+the operator-visible retransmit rate: DATA copies written / unique DATA records written,
+counted where the carrier accepts the write, with the tunnel's c3 line splitting the
+copies by the branch that queued them (`retx_hole`, `retx_slow`, `retx_pathloss`) and
+reporting `dup_bytes_ppm` (copy payload / application bytes). The earlier definition
+divided copies by every record on the path, FBK included, and under-reported the rate by
+about half. An earlier build sampled the raw `data_frames`/`recv_cnt` deltas
 as an EWMA and read 20,000–100,000 ppm on probe I's clean shaped carriers: the carrier's
 1 MiB send queue held frames past the retransmit cap and the queued frames inflated the
 sent count. The estimator is fixed: it now counts only confirmed loss, and the retention
 keeps an acked frame until every per-path copy's high-water has passed it, so a copy still
-queued in the receiver's parser is not counted as a drop. The retransmit timer still
+queued in the receiver's parser is not counted as a drop. The slow path waits 3×RTO:
+on a clean 40 MiB n=4 run, 310 of 313 copies came from frames whose carrier TCP had
+acked them while the peer's delivery queue (26–32 MB) held the contiguous uack back;
+3×RTO cut them to 15–81 and whole-run wire/app from 1.047 to 1.024, with probes J/K
+still 3/3 (`benches/README.md` §7). The retransmit timer still
 starts at the handoff; the `snd_una`-gated rule was attempted and reverted because it
 deadlocked probe I's strict phase through the carrier-stall/`join_dup` replacement loop
 (§4.3). The send buffer stays 1 MiB; BDP-sized buffers (both 128 KiB and a
 clamp(2 × BDP, 64 KiB, 1 MiB) variant) broke the strict phase by closing the window and
-are recorded in §15. `retx_ppm` remains 9–20% on shaped carriers until the replacement
-loop is fixed.
+are recorded in §15. `retx_ppm` read 9–20% on shaped carriers under the old 2×RTO grace;
+with 3×RTO it reads 0.15–0.8% in the clean 40 MiB n=4 runs.
 
 **Hole detection and prediction (C6).** The geometric test of §4.3 runs once per FBK. When
 it declares a hole, the real retained bytes are re-sent on paths the sequence has not used

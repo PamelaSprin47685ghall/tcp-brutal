@@ -578,7 +578,6 @@ struct tbt_carrier
     u32 recv_cnt;                 /* peer's frame count on this path */
     u64 recv_lag;                 /* confirmed record loss: sent below the
                                    * peer's high-water minus its recv_cnt */
-    u32 lost_frames;              /* frames attributed lost on this path */
     u64 last_una;                 /* last snd_una observed */
     u32 last_nxt;                 /* last snd_nxt observed (wire progress) */
     u64 last_una_ns;              /* when snd_una last moved (or blocked) */
