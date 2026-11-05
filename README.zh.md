@@ -271,7 +271,7 @@ virtio-net，每个源端口一条 10 Mbit 的 htb 类并挂 `delay 20ms 10ms` �
 对照组是单个 `dd | nc` 流，同样走在一条被整形的五元组上。`app` 是近端隧道的
 `submit_bytes` 速率；`wire/app` 是整次运行的载体字节除以应用字节；`retx_ppm`
 是每百万条唯一 DATA 记录中的副本数。被测模块是 sha256 `0b8f0006…`，也就是
-最终树 `b57b438` 构建出的模块；原始 CSV、console 与验收表在
+最终树 `f1282df` 构建出的模块；原始 CSV、console 与验收表在
 `review/final-bench/`。
 
 | 载体数 | 对照 (Mbit/s) | 应用 (Mbit/s) | 应用/对照 | wire/app | retx_ppm | strict / rc | CSV |
@@ -289,11 +289,21 @@ CSV 的 2 s 窗口列在 `n=4` 读到 1.0333。同一模块（`0b8f0006…`）�
 11.37 Mbit/s，所以方差是真实的；比值才是主张。`n=16` 是单载体应用速率的
 10.5 倍。完整矩阵与 CSV 在 `review/final-bench/summary.md`。
 
-代码树 `b57b438`（模块 `0b8f0006…`，证据提交 `a9d7c47`）的验收证据：主机、
-QEMU A–K（11/11）与 adversarial（78 PASS / 0 FAIL / 0 SKIP）在 `review/final/`
-和 `review/final-qemu/`；吞吐、flush 与 writer 在 `review/final-bench/`；
-干净客户机内核上的 DKMS 安装/加载/卸载全流程在 `review/dkms-qemu/`。
-writer 探针阻塞在 `write()` 中（`errno=0 eagain=0`），flush 后内存回收；
+代码树 `f1282df`（模块 `0b8f0006…`，证据提交 `af3b9ba`）的验收证据：主机、
+QEMU A–K（11/11）与 adversarial（18 组外加崩溃复现，共 91 PASS / 0 FAIL / 0 SKIP，
+284.4 s）在 `review/final/` 和 `review/final-qemu/`；吞吐、flush 与 writer 在
+`review/final-bench/`；干净客户机内核上的 DKMS 安装/加载/卸载全流程在
+`review/dkms-qemu/`。
+
+writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻塞在 `write()` 内：
+100 MiB 那次仍阻塞在 `sent=73400320/104857600`，1 GiB 那次仍阻塞在
+`sent=74448896/1073741824`，两者都是 `errno=0 eagain=0 blocked=1`，
+没有 `EAGAIN`（探针未设置 `SO_SNDTIMEO`）；
+内存有界（`oom=0->0`），flush 在 0.03 s 内归还内存。`pub.writer_drain` 与
+`pub.writer_drain_1g` 中应用持续读取，写能完成：100 MiB 为
+`sent=104857600/104857600`、`got=104857600/104857600`，71.5 MiB/s，用时 1.40 s；
+1 GiB 为 `sent=1073741824/1073741824`、`got=1073741824/1073741824`，69.9 MiB/s，
+用时 14.64 s。两者都是 `errno=0/0 eagain=0 blocked=0 oom=0->0`，flush 用时 0.01 s。
 详见 `review/final/README.md`。
 
 比值仍是主张：`N` 个五元组胜过一条流。这些是 QEMU/slirp 实验室数字，

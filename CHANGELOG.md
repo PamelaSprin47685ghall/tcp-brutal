@@ -257,16 +257,23 @@ grouped entries close the remaining lifetime, wire and input-handling findings.
   no `dev=`/`uid=` filter. The final `pub.srcfilter` case passes under the redefined
   contract: a connection from 127.0.0.2 is usable, and the tunnel identity is the
   nonce. Do not read that as source filtering.
-- **`pub.writer` blocks at about 74.4 MB when the application never reads.**
-  The final contract requires the write to finish (`sent==total`) or to still be
-  blocked inside `write()` when the 10 s observation ends (`blocked=1`,
+- **`pub.writer` covers two cases: an application that never reads and one that
+  drains.** The final contract requires the write to finish (`sent==total`) or to
+  still be blocked inside `write()` when the 10 s observation ends (`blocked=1`,
   `child_state=running`); the probe sets no `SO_SNDTIMEO`, so `EAGAIN` would be
-  a failure. Both the 100 MiB and 1 GiB offers accept 74,448,896 B with
-  `errno=0 eagain=0` and stay blocked. Closing the socket and issuing `flush`
-  returns `MemAvailable` from a low of 218–223 MB to 396–397 MB in 0.03 s, with
-  `oom=0->0` and no RST. The ~74 MB point is flow control, not a leak: offered
-  volume does not become resident memory, and repeated cases do not grow without
-  bound.
+  a failure. With no reader, the 100 MiB and 1 GiB offers stop at
+  `sent=73400320/104857600` and `sent=74448896/1073741824`, both with
+  `errno=0 eagain=0` and still blocked. With a draining reader,
+  `pub.writer_drain` moves 100 MiB (104,857,600/104,857,600 sent and received,
+  `errno=0/0 eagain=0 blocked=0`) in 1.40 s at 71.5 MiB/s (`mbps` in the
+  result line), and
+  `pub.writer_drain_1g` moves 1 GiB (1,073,741,824/1,073,741,824 sent and
+  received, `errno=0/0 eagain=0 blocked=0`) in 14.64 s at 69.9 MiB/s. Closing
+  the socket and issuing `flush` returns `MemAvailable`
+  from a low of 218–223 MB to 396–397 MB in 0.03 s, with `oom=0->0` and no RST;
+  both draining runs read `oom=0->0` and flush in 0.01 s. Where the unread
+  write stops depends on the send window at that moment; it is neither a fixed
+  ceiling nor a leak, and repeated cases do not grow without bound.
 - **The peer-window gate is a heuristic.** DATA is admitted while
   `write_seq - snd_una < snd_wnd`; a full peer window counts as the pump's hiwat
   proof. `win_block`/`win_resume` report the gate, and control frames bypass it.
@@ -308,7 +315,7 @@ grouped entries close the remaining lifetime, wire and input-handling findings.
 
 ### Verification
 
-Status on 2026-11-06. The final code tree is `b57b438`; `a9d7c47` adds only the
+Status on 2026-11-06. The final code tree is `f1282df`; `af3b9ba` adds only the
 evidence files under `review/final/`, `review/final-qemu/`, `review/final-bench/`
 and `review/dkms-qemu/`. The host, QEMU, adversarial and bench rows below were
 measured with module sha256 `0b8f0006…`, the module the final tree builds.
@@ -352,17 +359,17 @@ Parser and `/proc` checks:
 QEMU probes:
 
 - `tests/qemu/run.sh --probes A,B,C,D,E,F,G,H,I,J,K --timeout 900`: **11 PASS /
-  0 FAIL / 0 SKIP** in 164.7 s on module sha256 `0b8f0006…`
+  0 FAIL / 0 SKIP** in 165.7 s on module sha256 `0b8f0006…`
   (`review/final/qemu-AK-summary.txt`,
-  `review/final-qemu/qemu-AK-console-b57b438.log`).
+  `review/final-qemu/qemu-AK-console-f1282df.log`).
 
 Adversarial:
 
 - `TBT_ADV_PUBLIC_TIMEOUT=3000 adversarial/run.sh --no-build` on the final
-  module (sha256 `0b8f0006…`, 2026-11-06): **78 PASS / 0 FAIL / 0 SKIP** in
-  229.8 s, all 15 default groups plus the isolated close-flush crash repro. The
-  green run prints 78 `ADV_RESULT` PASS lines; `console.klog.*` prints only on
-  failure, so there is no 79th line. Archive:
+  module (sha256 `0b8f0006…`, 2026-11-06): **91 PASS / 0 FAIL / 0 SKIP** in
+  284.4 s, all 18 default groups plus the isolated close-flush crash repro. The
+  green run prints 91 `ADV_RESULT` PASS lines; `console.klog.*` prints only on
+  failure, so there is no 92nd line. Archive:
   `review/final/adversarial-results.txt`; run logs in `review/final-qemu/`.
 - `pub.churn` (10,000 connect/send/close cycles) is judged with a 2 s timeout
   per cycle and one retry only after a timeout (`retried=` in the result line).
@@ -374,10 +381,17 @@ Adversarial:
   (`blocked=1`, `child_state=running`). The probe sets no `SO_SNDTIMEO`;
   `EAGAIN` would be the probe's own timeout, not module backpressure, and is a
   failure. Both final runs read `errno=0 eagain=0 blocked=1
-  child_state=running`: 100 MiB `sent=74448896/104857600`, 1 GiB
-  `sent=74448896/1073741824`. After the child is killed and the socket closed,
-  `flush` takes 0.03 s, `MemAvailable` rises from a low of 223,296/218,072 kB
-  to 397,228/396,388 kB against 396,852/396,992 kB before, and `oom=0->0`.
+  child_state=running`: 100 MiB `sent=73400320/104857600`, 1 GiB
+  `sent=74448896/1073741824`. With a reader that drains, `pub.writer_drain`
+  moves 100 MiB, `sent=104857600/104857600 got=104857600/104857600
+  errno=0/0 eagain=0 blocked=0` in 1.40 s at 71.5 MiB/s (`mbps` in the result
+  line), and
+  `pub.writer_drain_1g` moves 1 GiB, `sent=1073741824/1073741824
+  got=1073741824/1073741824 errno=0/0 eagain=0 blocked=0`, in 14.64 s at
+  69.9 MiB/s; both flush in 0.01 s with `oom=0->0`. After the child is killed
+  and the socket closed, `flush` takes 0.03 s, `MemAvailable` rises from a low
+  of 223,296/218,072 kB to 397,228/396,388 kB against 396,852/396,992 kB
+  before, and `oom=0->0`.
 
 Bench (QEMU lab emulation, one 10 Mbit htb class per source port, netem
 `delay 20ms 10ms`, 40 MiB each way; not an ISP path). Every row is `rc=0`,
@@ -488,7 +502,7 @@ Verification. Raw evidence: `review/final/` (`git-sha.txt`, `module.sha256`,
 `qemu-AK-summary.txt`, `adversarial-results.txt`), `review/final-qemu/` (run
 logs and consoles), `review/final-bench/` (CSVs, consoles, `summary.md`) and
 `review/dkms-qemu/` (DKMS console and per-step logs).
-The code tree is `b57b438`; `a9d7c47` only adds the evidence directories.
+The code tree is `f1282df`; `af3b9ba` only adds the evidence directories.
 The operator install and unload procedure was executed end to end in the clean
 QEMU guest (see the DKMS block); it was not executed directly on this host:
 
