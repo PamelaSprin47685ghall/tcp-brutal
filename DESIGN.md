@@ -862,6 +862,19 @@ still fails on `!sk` or a non-ESTABLISHED state. Measured in `near.rst_eagain`:
 `peer_paused=1`, `lost=0`, `replaced=0`, `stall_paused_skips=1184` during the paused
 drain; before the gate the same window reported `lost=1 replaced=1`.
 
+**Peer-window admission.** DATA is admitted only while
+`write_seq - snd_una < snd_wnd` (or one chunk when `snd_wnd` is 0). `snd_nxt` is not
+enough: it counts sent bytes, so a send buffer filled past the window would still show a
+small in-flight value and the gate would never fire. The queued cursor `write_seq` is the
+right measure. Filling the carrier's sndbuf past the advertised window parks the tail in
+zero-window persist, where recovery is the persist timer rather than the next ACK
+(measured: `near.rst_eagain`, the last ~282 bytes static for 60 s while the far's window
+was open). DATA stays in the module queue; control frames bypass the gate, so a pinned
+RST can leave after the in-window bytes. The gate arms the 2 ms `w_pump` and counts
+`win_block`/`win_resume`; a full peer window counts as the pump's hiwat proof. Measured:
+`near.rst_eagain` 3/3 with `win_block=152..216`, `win_resume=1`, RST in `wire` at
+~98 KiB, `ctl_lost=0`, `ctl_queued=0`.
+
 **RTT.** The sender maintains `rtt_min_us` and an EWMA (`(7*old + new)/8`) per path from
 two sources: the FBK's `rtt_us` (the receiver's TCP SRTT of the carrier), and, when a path's
 ack advances to a byte inside a retained frame last sent on that path, the elapsed time

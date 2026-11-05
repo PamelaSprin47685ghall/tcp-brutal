@@ -1909,6 +1909,46 @@ int tbt_tx_pump(struct tbt_session *sess)
                     (!fr->st || !tbt_stream_announced(fr->st, c)))
                     continue;
             }
+            /* Keep at most one peer window in the carrier's TCP send buffer.
+             * Filling sndbuf past the advertised window only parks the tail in
+             * zero-window persist, where recovery is a slow timer rather than
+             * the next ACK (measured: near.rst_eagain, the last ~282 bytes did
+             * not move for 60 s while the far's window was open).  DATA stays
+             * in the module queue; control frames bypass this gate, so a
+             * pinned RST can still leave after the in-window bytes.  snd_wnd
+             * is a heuristic read, and 0 means "one chunk" rather than
+             * flooding an unknown window.  The queued cursor is write_seq,
+             * not snd_nxt: snd_nxt counts bytes already sent, so a sndbuf
+             * filled past the window would still show a small in-flight
+             * value and the gate would never fire. */
+            if (type == TBT_F_DATA && c->sk)
+            {
+                struct tcp_sock *tp = tcp_sk(c->sk);
+                u32 una = READ_ONCE(tp->snd_una);
+                u32 queued = READ_ONCE(tp->write_seq);
+                u32 wnd = READ_ONCE(tp->snd_wnd);
+                u32 limit = wnd ? wnd : TBT_CHUNK_MAX;
+
+                if ((u32)(queued - una) >= limit)
+                {
+                    c->win_paused = true;
+                    sess->win_block++;
+                    if (c->sk->sk_socket)
+                        set_bit(SOCK_NOSPACE, &c->sk->sk_socket->flags);
+                    mod_delayed_work(system_dfl_wq, &c->w_pump,
+                                     msecs_to_jiffies(2));
+                    sess->pump_hw_armed++;
+                    /* The test's hiwat proof is "the pump met real
+                     * backpressure"; a full peer window is one. */
+                    sess->dbg_pump_hiwat++;
+                    continue;
+                }
+                if (c->win_paused)
+                {
+                    c->win_paused = false;
+                    sess->win_resume++;
+                }
+            }
             /* The real admission test tcp_sendmsg_locked() uses: the
              * socket's send memory, not an arbitrary 64 KiB line. When it is
              * full, the kernel will not call sk_write_space once the send

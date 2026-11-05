@@ -68,6 +68,16 @@ full-suite pass.
   A separate zero-window persist delay still keeps that attack red: the RST is in
   `wire`, `brk=0`, `rfail=0`, but the far stops at ~71 records and the sender does
   not deliver the last ~282 bytes for 60 s.
+- **Peer-window admission:** DATA is now admitted only while
+  `write_seq - snd_una < snd_wnd` (one chunk when `snd_wnd` is 0). Filling the carrier's
+  TCP sndbuf past the advertised window parked the tail in zero-window persist, where
+  the last ~282 bytes of `near.rst_eagain` did not move for 60 s. `snd_nxt` was the
+  wrong cursor (it counts sent bytes); `write_seq` includes the queued tail. Control
+  frames bypass the gate, so a pinned RST leaves after the in-window bytes. Counters
+  `win_block`/`win_resume` are on the `c3` stats line; a full peer window counts as the
+  pump's hiwat proof. Measured: `near.rst_eagain` 3/3 with `win_block=152..216`,
+  `win_resume=1`, RST in `wire` at ~98 KiB, `ctl_lost=0`, `ctl_queued=0`; near 14/14
+  three consecutive runs.
 - **Review 23:** `hole_budget_ms=0` and `rx_reorder_bytes=0` are refused with `EINVAL`
   instead of creating a tunnel that dies on its first hole or reordered frame. The
   accepted ranges are now `1..60000` and `1..268435456`; omitted keys keep their

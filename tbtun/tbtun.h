@@ -483,6 +483,7 @@ struct tbt_session
     u64 carrier_write_space_runs;
     u64 poll_rescues;
     u64 stall_paused_skips; /* carrier stall decisions deferred by peer pause */
+    u64 win_block, win_resume; /* DATA admissions deferred by the peer window */
     u64 tx_wake_calls, tx_wake_busy, tx_work_runs;
     u64 carrier_bytes, carrier_err, carrier_short;
     u64 carrier_ws_calls;
@@ -591,6 +592,7 @@ struct tbt_carrier
     bool peer_hello;              /* the peer's HELLO validated */
     bool provisional;             /* accepted, not yet joined to a slot */
     bool lost_counted;            /* carrier_lost counted once */
+    bool win_paused;              /* DATA deferred at the peer's window */
     bool spare;                   /* index >= n_pri: idle unless activated */
     bool active;                  /* spare that now carries DATA */
     u32 drop_ppm;                 /* debug-only loss injection, 0..1e6 */

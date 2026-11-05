@@ -750,7 +750,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "reorder_overflow=%llu reorder_max_depth=%u ooo_bytes=%u "
                               "ooo_frames=%u retain_bytes=%u tx_ack=%llu rx_ack=%llu "
                               "peer_paused=%u fb_delay_us=%u rto_us=%u una_stall_us=%u "
-                              "stall_paused_skips=%llu\n",
+                              "stall_paused_skips=%llu win_block=%llu win_resume=%llu\n",
                            t->cfg.id, n, up, s->carrier_lost, s->carrier_replaced,
                            s->spare_activated, s->carrier_alloc_fail,
                            s->port_exhaust, s->port_alloc_fail, s->connect_fail,
@@ -764,7 +764,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            retain_bytes, READ_ONCE(s->tx_ack), READ_ONCE(s->rx_ack),
                            READ_ONCE(s->peer_paused), READ_ONCE(s->fb_delay_us),
                            READ_ONCE(s->rto_us), READ_ONCE(s->una_stall_us),
-                           READ_ONCE(s->stall_paused_skips));
+                           READ_ONCE(s->stall_paused_skips),
+                           READ_ONCE(s->win_block), READ_ONCE(s->win_resume));
                 /* Review 22: pinned control-frame lifetime. ctl_queued is the
                  * live control-queue depth; the other four are the retry,
                  * re-pin, obsolete-generation and explicit-loss record. */
