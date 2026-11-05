@@ -833,6 +833,40 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "n_pending=%u\n",
                            t->cfg.id, READ_ONCE(s->n_active),
                            READ_ONCE(s->n_streams), READ_ONCE(s->n_pending));
+                /* Per-stream terminal state. A reset whose reason is not a
+                 * hole/gap/reorder kill shows up here as state/kill and as
+                 * the socket error the app saw, so "who closed it" is a
+                 * reading, not a guess. */
+                rcu_read_lock();
+                {
+                    struct tbt_stream *st;
+                    int bi;
+
+                    for (bi = 0; bi < TBT_STREAM_HT; bi++)
+                        hlist_for_each_entry_rcu(st, &s->streams[bi], node)
+                        {
+                            struct sock *ps = READ_ONCE(st->sk);
+                            struct socket *tg = READ_ONCE(st->target);
+                            struct sock *ts = tg ? READ_ONCE(tg->sk) : NULL;
+
+                            seq_printf(m, "tunnel %llu stream sid=%llu state=%u "
+                                          "kill=%u attached=%#lx rxq=%u rxp=%u "
+                                          "txp=%u peer_paused=%u skerr=%d "
+                                          "tgt_state=%u tgt_err=%d\n",
+                                       t->cfg.id, st->sid,
+                                       READ_ONCE(st->state),
+                                       READ_ONCE(st->kill_reason),
+                                       READ_ONCE(st->attached),
+                                       READ_ONCE(st->rx_queued),
+                                       READ_ONCE(st->paused),
+                                       READ_ONCE(st->tx_paused),
+                                       READ_ONCE(st->peer_paused),
+                                       ps ? READ_ONCE(ps->sk_err) : 0,
+                                       ts ? READ_ONCE(ts->sk_state) : 0,
+                                       ts ? READ_ONCE(ts->sk_err) : 0);
+                        }
+                }
+                rcu_read_unlock();
                 seq_printf(m, "tunnel %llu c6 holes_declared=%llu holes_repaired=%llu "
                               "holes_unrecoverable=%llu rx_max_stall_us=%u "
                               "hole_checks=%llu gate_fail=%llu depth_fail=%llu "
