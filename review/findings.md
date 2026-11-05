@@ -15,7 +15,7 @@ Reviewer: independent (no file ownership). Scope: `tbtun/*.c`, `tbtun/*.h` again
 are against the working tree as of that rewrite, git HEAD `d2397ff`. If the
 files move again, re-check the cited lines before acting.
 
-**Status (05:27 snapshot).** 15 of 15 lint checks pass and 12 of 12 self-tests
+**Status (05:27 snapshot).** 16 of 16 lint checks pass and 14 of 14 self-tests
 pass. The code findings 1–11, 17, 27–29, 31, 33, 36a–d, 37, 38 and 39 were fixed
 at that snapshot (23 was fixed later, after the parser change); the resolution tables
 below give the line numbers as of 05:19/05:27.
@@ -43,9 +43,12 @@ parser side (23, 25, 27, 29 and the key removal in 35); they do not cover `tbt_p
 
 ## Final status (0.0.1, 2026-11-06)
 
-**Tree.** master `68bfbaa` plus the documentation branch `w-docs`. The module built
-from this tree is `sha256 0b8f0006a7a10fe33e6e35e927aaf916047e142528bc32729ed04826fdccdb63`
-(the same hash in every 2026-11-06 bench and adversarial row quoted below). Line
+**Tree.** `9f5bfda`; `984198f` adds only the evidence under `review/final/`. The
+module built from this tree is
+`sha256 0b8f0006a7a10fe33e6e35e927aaf916047e142528bc32729ed04826fdccdb63`
+(the same hash in every 2026-11-06 bench and adversarial row quoted below).
+Evidence: `review/final/` (host, QEMU A–K, adversarial), `review/final-qemu/`
+(run logs) and `review/final-bench/` (throughput, flush, writer, DKMS). Line
 numbers are final-tree line numbers; the per-finding sections that follow keep the
 original analysis and the "Fixed (…)" rationale.
 
@@ -86,7 +89,8 @@ grep -rn 'src=' tbtun/                       # empty (the key does not exist)
 ```
 
 The QEMU A–K probes and the adversarial groups are separate suites; their final
-results are archived under `review/final-qemu/` and `adversarial/`. The host suites
+results are archived under `review/final/`, `review/final-qemu/` and
+`review/final-bench/`. The host suites
 exercise `tbt_parse.c`, `tbt_rec.c`, `tbt_proto.c`, `tbt_http.c` and the stream
 control unit only. Findings 1–10 are in kernel object lifetime, locking and
 accounting code: the host suites cannot reach them, so their evidence is the
@@ -144,9 +148,9 @@ key removal in 35 are host-covered.
 
 | ID | Severity | Status | Final evidence |
 |---|---|---|---|
-| F1 close-flush | critical | FIXED | `ADV_RESULT ctl.close_flush PASS` (`adversarial/results.txt`, module `0b8f0006…`). |
-| F2 rmmod | critical | FIXED (static + dmesg) | teardown order `tbt_procfs_exit` → `tbt_tunnel_shutdown` → `synchronize_rcu` → `rcu_barrier` (`tbt_core.c`); every stream socket is detached/released before the module text goes away. QEMU A–K 11/11 PASS on `0b8f0006…` exercises load/unload; latest archived `init.dmesg_after_rmmod` is PASS (no warning/BUG/oops). The `init.rmmod` clean-close assertion was FAIL in the 12:02 log because the old probe printed `ECHO_ABORT op=read errno=0`; `read_to()` now reports the pending `SO_ERROR` (`adv_probe.c:189-218`), but the adversarial rmmod group was not re-run on `0b8f0006…`. |
-| F4 two connections / churn | high | FIXED (code + pre-final run) | `pub.two` PASS; `pub.churn` PASS 10,000 cycles, 0 refused; `pub.concurrent` PASS 100/100 in `adversarial/console-public.log` (2026-11-05, after the detach fix). The final `0b8f0006…` `results.txt` did not re-run the churn group. The far stream detaches on the graceful FIN path (`tbt_stream_detach_from_session()`, `tbt_session.c:800`), so `n_active` no longer climbs to 128. |
+| F1 close-flush | critical | FIXED | `ADV_RESULT ctl.close_flush PASS` (`review/final/adversarial-results.txt`, module `0b8f0006…`). |
+| F2 rmmod | critical | FIXED (static + runtime) | teardown order `tbt_procfs_exit` → `tbt_tunnel_shutdown` → `synchronize_rcu` → `rcu_barrier` (`tbt_core.c`); every stream socket is detached/released before the module text goes away. QEMU A–K 11/11 PASS on `0b8f0006…` exercises load/unload; the final 78 PASS run includes `init.rmmod` (rmmod rc=0, app closed cleanly) and `init.dmesg_after_rmmod` (no warning/BUG/oops), archived in `review/final/adversarial-results.txt`. The older 12:02 FAIL was the probe printing `ECHO_ABORT op=read errno=0`; `read_to()` now reports the pending `SO_ERROR` (`adv_probe.c:189-218`). |
+| F4 two connections / churn | high | FIXED | `pub.two` PASS; `pub.churn` PASS 10,000/10,000 usable, 0 refused, 0 other; `pub.concurrent` PASS 100/100. The churn verdict uses a 2 s timeout per cycle and one retry only after a timeout (`retried=`); two final-criterion runs read `retried=1` and `retried=0`, and the archived `review/final/adversarial-results.txt` is the `retried=0` run. The far stream detaches on the graceful FIN path (`tbt_stream_detach_from_session()`, `tbt_session.c:800`), so `n_active` no longer climbs to 128. |
 | F5 half-close | high | FIXED | `pub.halfclose` PASS, EOF=1. |
 | F6 far-side carrier input / delivery stall | high | FIXED | the RX work is re-armed on every `-EAGAIN`/read-zero path (`review/analysis/multiconn-p01-plan.md`); QEMU `far.second_carrier` PASS (`rx_adopt_events=2`), `far.open_other_sid` PASS, `far.data_path` PASS, `near.data_path` PASS, `near.second_conn` PASS. |
 | F7 deprecated workqueue | high | FIXED | no `system_unbound_wq`/`alloc_workqueue` in `tbtun/`; `w_fbk` runs on `system_dfl_wq` (`tbt_tx.c:2578`). |
@@ -163,11 +167,11 @@ key removal in 35 are host-covered.
 | P0-1 replacement/retire lock-order regression | FIXED | `review/lint.sh` 16/16 + 14/14; QEMU A–K 11/11 PASS (E/K included). |
 | P0-2 F1/F2 regression | FIXED | `ctl.close_flush` PASS; `init.dmesg_after_rmmod` PASS; final `init.rmmod` archive as above. |
 | P1-3 PREDICT receiver advance | FIXED (removed) | placeholder path deleted; `TBT_CONV 0x0005`; QEMU A–K 11/11 PASS, G/H included, `holes_unrecoverable=0`. |
-| P1-4 sequential churn | FIXED (code + pre-final run) | `pub.churn` 10,000/0 refused in `console-public.log`; the final `results.txt` did not re-run it; detach is in the final tree (`tbt_session.c:800`). |
+| P1-4 sequential churn | FIXED | `pub.churn` 10,000/10,000 usable, 0 refused, 0 other in `review/final/adversarial-results.txt` (`retried=0`); the second final-criterion run read `retried=1`. Detach is in the final tree (`tbt_session.c:800`). |
 | P1-5 first-HELLO nonce | FIXED | `far.nonce_pinned`/`far.src_anchor` PASS; `test_anchor` 124/0. |
 | P1-6 F6 far-side input | FIXED | `far.second_carrier`/`far.data_path` PASS. |
 | P1-7 near.data_path / near.second_conn | FIXED | both PASS in `adversarial/console-near.log`. |
-| P2-8 `retx_ppm` | FIXED | Final bench `20261106T004314`: `retx_ppm 2333`, `wire/app 1.0333`, app 10.74 Mbit/s, control 2.73, `4/4`, `strict=1 rc=0`; `20261106T003712` n=1: 0, 3.11 Mbit/s. Two earlier runs of the same module read 1,164 and 1,842 ppm (8.38 and 11.37 Mbit/s), which is the measured variance. The 96k–304k figures were the old accounting; the split is `retx_hole/retx_slow/retx_pathloss/retx_other`. |
+| P2-8 `retx_ppm` | FIXED | Final matrix in `review/final-bench/summary.md`: n=1 0 (3.11 Mbit/s), n=4 2,333 (10.74), n=8 2,041 (22.36), n=16 12,719 (32.75); whole-run `wire/app` 1.0123–1.0268, all `strict=1 rc=0`, `holes_unrecoverable=0`. At n=4 the CSV's 2 s window reads 1.0333 while the whole run reads 1.0138. One earlier n=4 run of the same module read 1,842 ppm (8.38 Mbit/s) and another 11.37 Mbit/s, which is the measured variance. The 96k–304k figures were the old accounting; the split is `retx_hole/retx_slow/retx_pathloss/retx_other`. |
 | P2-9 `flush` block | FIXED | `init.flush_midstream` PASS (app closes cleanly, `ECHO_ABORT errno=104`), `init.echo_after_flush` PASS, `stall.flush` PASS. |
 | P3-10 comment/doc drift | FIXED | `tbt_proto.c` header/payload comment; HELLO 5:2 comment; DESIGN §3.3. |
 | P3-11 F8 test contract | FIXED (contract) | `init.src_key`/`pub.srcfilter` rewritten to the nonce/peer contract and passing. |
