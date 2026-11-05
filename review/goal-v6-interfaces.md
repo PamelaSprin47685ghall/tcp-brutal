@@ -629,6 +629,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 | 通过 | p=30/40/50 对应 rate ≤0.70/0.60/0.50；恢复 ≥99.9%（500 trials 的 0 失败或置信区间下界达标）；codec ≥125 MB/s（encode/decode，HND0 单/双核）；块延迟/内存记录 |
 | 失败 | recovery 0、systematic-only 作弊、<125 MB/s、无置信区间 |
 
+**G4 现状（D，margin 测试中，2026-11-06）**：SC-IRA 修正后小 N=16/32、L=2/4 bit-exact。`(0.70,0.30)/(0.60,0.40)/(0.50,0.50)` 正好是 BEC 容量点（`rate=1-p`），有限长 0.999 不成立；实测 rate0.50 p30 0.999–1.000、p40 0.9945–0.9985、p50 0；rate0.60 p30 0.9395–1.000、p≥40 0；rate0.70 p≥30 全 0。目标写 `rate ≤`，允许降 rate 留 margin；D 正在补测 **p30 rate0.50、p40 rate0.45/0.40、p50 rate0.40/0.35**，按 app 33.72M 的 wire（8–12 MB/s）评估，不以 1G 125 MB/s 为当前口径。125 MB/s 阈值是否放宽待用户决定；T6 仍等，**不合并 SC-LDPC**。
+
 ### G5 — T5 HND0 256-flow 中间 FEC + ChaCha8（E）
 
 | 项 | 内容 |
@@ -693,7 +695,7 @@ trap 'flock -u 9' EXIT
 
 | # | 风险 | 证据/量级 | 处理 |
 |---|---|---|---|
-| R1 | **SC-LDPC 最终门未过** | 当前 symmetric p=30/rate0.5 recovery=0.000000；decode 0.4–1.6 MB/s；无成熟 C codec | D 专用 worker 无限迭代；先小 N=16/32、L=2/4 正确性，再 p=30/40/50；只有证明数学不可能才停问；不阻塞其他工作，只阻塞 T6/T7 |
+| R1 | **SC-LDPC 最终门：margin 测试中** | 容量点 `(0.70,0.30)/(0.60,0.40)/(0.50,0.50)` 有限长 0.999 不成立（D cbf4c4f）；D 补测 p30 rate0.50、p40 0.45/0.40、p50 0.40/0.35；125 MB/s 与 33.72M 口径待用户 | 不关闭 G4；按 8–12 MB/s wire 评估；不合并 SC-LDPC；不静默降级；只阻塞 T6/T7 |
 | R2 | **app ≥33.72M 依赖 256-flow 聚合** | 33.72M 是直连 P8 单流；FEC 后 app = 聚合 × 码率；若路径本身只有 ~34M，FEC 开销可能达不到 | 先测 256-flow 聚合 > 33.72/码率；记录 p；不静默改目标；达不到按 blocker 规则停问 |
 | R3 | **HND0 2 vCPU/955 MiB** | TCP/HTTP 22–31% 单核；256 flows 的 softirq/slab/端口；FEC grouped 0.75–1.5 GB/s（5–12× headroom） | session poll 合并；每 carrier `w_tx`；RPS/RFS 不可用（只有 2 vCPU），靠预算与实测；`max_tunnels=1`；64 MiB socket 缓冲 |
 | R4 | **v6 回归** | 旧 conv 0x0005/16 槽仍在；`TBT_MAX_CARRIERS_LIMIT` 改 256 容易把旧 mask 截断 | `TBT_LEGACY_MAX_CARRIERS=16` 分离；`fec=off` 默认；A–K/adversarial 每步回归；`n+m>16` 旧路径拒绝 |
