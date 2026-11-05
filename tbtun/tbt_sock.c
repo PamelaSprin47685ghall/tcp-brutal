@@ -45,6 +45,7 @@
  *   - report EOF before every byte that precedes the FIN has been delivered.
  */
 #include <linux/skbuff.h>
+#include <linux/delay.h>
 #include <linux/uio.h>
 #include <linux/wait.h>
 #include <net/sock.h>
@@ -314,6 +315,23 @@ static void tbt_drain_work(struct work_struct *w)
     }
 }
 
+/* RST is the last control frame the stream will ever send. A full control
+ * queue or a transient allocation failure must not turn it into a silent
+ * loss: retry after the pump drains, bounded, then count the loss. */
+static void tbt_tx_rst_retry(struct tbt_session *sess, struct tbt_stream *st)
+{
+    int i, rc = 0;
+
+    for (i = 0; i <= TBT_CTL_MAX_RETRIES; i++)
+    {
+        rc = tbt_tx_rst(sess, st, GFP_KERNEL);
+        if (rc != -ENOSPC && rc != -ENOMEM)
+            return;
+        msleep(TBT_CTL_RETRY_MS);
+    }
+    sess->ctl_lost++;
+}
+
 static void tbt_ctrl_work(struct work_struct *w)
 {
     struct tbt_stream *st = container_of(w, struct tbt_stream, w_ctrl);
@@ -326,7 +344,7 @@ static void tbt_ctrl_work(struct work_struct *w)
         return;
     if (READ_ONCE(sk->sk_err))
     {
-        tbt_tx_rst(st->sess, st, GFP_KERNEL);
+        tbt_tx_rst_retry(st->sess, st);
         tbt_stream_kill(st, TBT_ST_DEAD);
         return;
     }
@@ -374,7 +392,7 @@ static void tbt_kill_work(struct work_struct *w)
     struct tbt_session *sess = st->sess;
 
     might_sleep();
-    tbt_tx_rst(sess, st, GFP_KERNEL);
+    tbt_tx_rst_retry(sess, st);
     cancel_work_sync(&st->w_target);
 
     /* No self cancel: this is the w_kill work item. */
