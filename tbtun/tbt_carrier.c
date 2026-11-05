@@ -349,9 +349,10 @@ static void tbt_car_poll_work(struct work_struct *w)
          *
          * carrier_stall_ms must exceed several RTTs plus the feedback
          * cadence: an ACK cannot arrive before one RTT, and the uack/FBK
-         * feedback shares the ordered stream with the data. The 3000 ms
-         * default is ~13 RTT on the measured 218 ms WAN path; the WAN
-         * experiment that exposed the false kills used 15000 ms.
+         * feedback shares the ordered stream with the data. The default 0
+         * derives 3 x this carrier's RTO (SRTT + 4 x RTTVAR, floored at
+         * 200 ms), itself floored at 3 s, so the timer follows the path
+         * instead of a constant.
          *
          * sk_wmem_queued cannot distinguish backpressure from loss: it counts
          * data TCP still holds for retransmission, so it is positive for any

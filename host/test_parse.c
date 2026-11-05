@@ -206,9 +206,9 @@ static void test_tunnel_nonce(void)
     static const char *const canon_near =
         "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
         " n=4 m=1 dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
-        " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=500"
+        " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
         " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
-        " carrier_stall_ms=3000"
+        " carrier_stall_ms=0"
         " portblock=0-0 nonce=00112233445566778899aabbccddeeff\n";
     char text[TBT_LINE_MAX];
     struct tbt_cmd cmd;
@@ -223,9 +223,9 @@ static void test_tunnel_nonce(void)
     roundtrip("tunnel nonce 64-bit pin", text,
               "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
               " n=4 m=1 dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
-              " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=500"
+              " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
               " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
-              " carrier_stall_ms=3000"
+              " carrier_stall_ms=0"
               " portblock=0-0 nonce=00000000000000000011223344556677\n");
 
     /* Uppercase input normalises to lowercase. */
@@ -238,9 +238,9 @@ static void test_tunnel_nonce(void)
               " nonce=00112233445566778899aabbccddeeff",
               "tunnel 2 role=far listen=10.0.0.1:1 target=10.0.0.2:2"
               " n=4 m=1 dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
-              " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=500"
+              " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
               " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
-              " carrier_stall_ms=3000"
+              " carrier_stall_ms=0"
               " portblock=0-0 nonce=00112233445566778899aabbccddeeff\n");
 
     /* A line without the key must not grow one. */
@@ -896,8 +896,8 @@ int main(void)
         "tunnel 1 role=near listen=10.123.0.1:9000 peer=10.123.0.2:443"
         " n=4 m=1 dup=1 profile=http-kal keepalive=5000"
         " drip_ms=1000 replay=8388608 tunnel_rate=0"
-        " max_inflate=2.000 hole_budget_ms=500 rx_reorder_bytes=8388608"
-        " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=3000"
+        " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608"
+        " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0"
         " portblock=0-0\n";
     static const char *const full_near =
         "tunnel 7 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443"
@@ -1114,11 +1114,11 @@ int main(void)
     }
     parse("tunnel 4 role=near listen=10.0.0.1:1 peer=10.0.0.2:2", &cmd, &perr);
     tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
-    ok(cmd.cfg.hole_budget_ms == 500 && cmd.cfg.rx_reorder_bytes == 8388608 &&
-           cmd.cfg.tx_window_bytes == 0,
+    ok(cmd.cfg.hole_budget_ms == 0 && cmd.cfg.carrier_stall_ms == 0 &&
+           cmd.cfg.rx_reorder_bytes == 8388608 && cmd.cfg.tx_window_bytes == 0,
        "C3 budgets default when omitted", NULL);
-    ok(strstr(buf, " hole_budget_ms=500 rx_reorder_bytes=8388608 tx_window_bytes=0"
-                    " tx_retain_bytes=0 carrier_stall_ms=3000 ") != NULL,
+    ok(strstr(buf, " hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0"
+                    " tx_retain_bytes=0 carrier_stall_ms=0 ") != NULL,
        "C3 defaults render when omitted", buf);
     /* tx_window_bytes: 0 means auto and is the default; an explicit window
      * above the peer's reorder budget kills the stream, so both keys are
@@ -1143,15 +1143,39 @@ int main(void)
           " tx_window_bytes=4096 rx_reorder_bytes=4096",
           &cmd, &perr);
     ok(cmd.cfg.tx_window_bytes == 4096, "tx_window_bytes equal to rx_reorder_bytes accepted", NULL);
-    /* Zero is not a value for the two budgets that gate stream death: a zero
-     * reorder bound kills the first out-of-order frame, a zero hole budget
-     * kills the first hole, so both are refused before the tunnel exists. */
+    /* A zero reorder bound kills the first out-of-order frame, so it is
+     * refused before the tunnel exists. The two time budgets accept 0 as
+     * auto; their upper bounds are checked below. */
     refuse("rx_reorder_bytes=0",
            "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 rx_reorder_bytes=0",
            TBT_PARSE_EINVAL, "rx_reorder_bytes", "1..268435456");
-    refuse("hole_budget_ms=0",
-           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 hole_budget_ms=0",
-           TBT_PARSE_EINVAL, "hole_budget_ms", "1..60000");
+    /* Zero is the auto setting for both time budgets: it parses, renders and
+     * round-trips like any other value. */
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+          " hole_budget_ms=0 carrier_stall_ms=0",
+          &cmd, &perr);
+    ok(cmd.cfg.hole_budget_ms == 0 && cmd.cfg.carrier_stall_ms == 0,
+       "auto budgets accept 0", NULL);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(strstr(buf, " hole_budget_ms=0 rx_reorder_bytes=8388608") != NULL &&
+           strstr(buf, " carrier_stall_ms=0 ") != NULL,
+       "auto budgets render as 0", buf);
+    {
+        struct tbt_cmd again;
+
+        parse(buf, &again, &perr);
+        ok(again.cfg.hole_budget_ms == 0 && again.cfg.carrier_stall_ms == 0,
+           "auto budgets round-trip through the render", NULL);
+    }
+    refuse("hole_budget_ms over max",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 hole_budget_ms=60001",
+           TBT_PARSE_EINVAL, "hole_budget_ms", "0..60000");
+    refuse("hole_budget_ms negative",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 hole_budget_ms=-1",
+           TBT_PARSE_EINVAL, "hole_budget_ms", "0..60000");
+    refuse("hole_budget_ms non-numeric",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 hole_budget_ms=abc",
+           TBT_PARSE_EINVAL, "hole_budget_ms", "0..60000");
     refuse("rx_reorder_bytes over max",
            "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 rx_reorder_bytes=268435457",
            TBT_PARSE_EINVAL, "rx_reorder_bytes", "268435456");

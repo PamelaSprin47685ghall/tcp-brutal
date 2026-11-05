@@ -372,11 +372,11 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     cfg->replay = 8388608;
     cfg->tunnel_rate = 0;
     cfg->max_inflate_milli = 2000;
-    cfg->hole_budget_ms = 500;
+    cfg->hole_budget_ms = 0; /* auto: the receiver derives it from the RTT */
     cfg->rx_reorder_bytes = 8388608;
     cfg->tx_window_bytes = 0; /* auto: the sender derives it from the BDP */
     cfg->tx_retain_bytes = 0; /* unlimited */
-    cfg->carrier_stall_ms = 3000;
+    cfg->carrier_stall_ms = 0; /* auto: derived from the measured RTO */
 
     tok = tbt_next_tok(&args);
     if (!tok || tbt_parse_u64(tok, &id) || !id)
@@ -473,9 +473,8 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         }
         else if (!strcmp(key, "hole_budget_ms"))
         {
-            if (tbt_parse_u32(val, &cfg->hole_budget_ms) || !cfg->hole_budget_ms ||
-                cfg->hole_budget_ms > 60000u)
-                return tbt_fail(e, key, "hole_budget_ms must be 1..60000");
+            if (tbt_parse_u32(val, &cfg->hole_budget_ms) || cfg->hole_budget_ms > 60000u)
+                return tbt_fail(e, key, "hole_budget_ms must be 0..60000 ms (0 = auto)");
         }
         else if (!strcmp(key, "rx_reorder_bytes"))
         {
@@ -498,7 +497,7 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         else if (!strcmp(key, "carrier_stall_ms"))
         {
             if (tbt_parse_u32(val, &cfg->carrier_stall_ms) || cfg->carrier_stall_ms > TBT_STALL_MAX)
-                return tbt_fail(e, key, "carrier_stall_ms must be 0..3600000 ms");
+                return tbt_fail(e, key, "carrier_stall_ms must be 0..3600000 ms (0 = auto)");
         }
         else if (!strcmp(key, "profile"))
         {
