@@ -274,6 +274,18 @@ QEMU probes and adversarial cases (recorded in
 - `review/findings.md` still marks F4 (sequential churn) and review 34 OPEN. The code
   has since detached the stream on a completed FIN handshake (`tbt_sock.c`) and uses
   `remove_proc_subtree()` (`tbt_procfs.c`); the table is stale.
+- Counter reconciliation on this tree (`tests/qemu/run.sh --probes C,E`, module
+  sha256 `cdaf9ad8…`): both probes **PASS**. Each probe reads ten samples, requires
+  every aggregate to be monotone, then requires `wire == live_bytes +
+  retired_bytes`, `data_tx == live_data + retired_data`, `retx_frames == live_retx
+  + retired_retx` and `live_bytes == sum(peers tx_bytes)`; every delta was 0.
+  Probe C kept `retired_bytes=197463 retired_data=24 retired_retx=15`; probe E
+  `329047/40/25`.
+- `TBT_ADV_GROUPS=public adversarial/run.sh --no-build --no-crash`: 10/10 **PASS**,
+  including `pub.concurrent` n=100 (118 ms). Its post-run stats snapshot shows
+  `wire=474428 == live_bytes`, `data_tx=102 == live_data`, and
+  `submit_bytes=409728` exactly (100 x 4096 + 128 for the recovery connection), so
+  the multi-writer adds did not lose a byte.
 - This is **not** a full A–K/adversarial green.
 
 Bench (QEMU lab emulation, one 10 Mbit htb class per source port, netem
