@@ -747,13 +747,11 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            t->cfg.id, READ_ONCE(s->n_active),
                            READ_ONCE(s->n_streams), READ_ONCE(s->n_pending));
                 seq_printf(m, "tunnel %llu c6 holes_declared=%llu holes_repaired=%llu "
-                              "holes_unrecoverable=%llu predict_tx=%llu predict_used=%llu "
-                              "predict_cancelled=%llu rx_max_stall_us=%u "
+                              "holes_unrecoverable=%llu rx_max_stall_us=%u "
                               "hole_checks=%llu gate_fail=%llu depth_fail=%llu "
                               "time_fail=%llu\n",
                            t->cfg.id, s->holes_declared, s->holes_repaired,
-                           s->holes_unrecoverable, s->predict_tx, s->predict_used,
-                           s->predict_cancelled, max_stall_us, s->hole_checks,
+                           s->holes_unrecoverable, max_stall_us, s->hole_checks,
                            s->hole_gate_fail, s->hole_depth_fail, s->hole_time_fail);
                 seq_printf(m, "tunnel %llu c8 profile_mismatch=%llu http_parse_err=%llu "
                               "http_status_err=%llu http_req=%llu http_resp=%llu "
@@ -768,9 +766,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
 
                     seq_printf(m, "tunnel %llu c5 dup_tx=%llu dup_used=%llu "
                                   "dup_suppressed=%llu dup_same_path=%llu "
-                                  "inflate_ppm=%llu dup_bytes=%llu spec_bytes_max=%u\n",
+                                  "inflate_ppm=%llu dup_bytes=%llu\n",
                                t->cfg.id, s->dup_tx, s->dup_used, s->dup_suppressed,
-                               s->dup_same_path, inflate, dupb, s->spec_bytes_max);
+                               s->dup_same_path, inflate, dupb);
                 }
             }
         }

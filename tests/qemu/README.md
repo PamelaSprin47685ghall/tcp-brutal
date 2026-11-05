@@ -23,18 +23,17 @@ probes, all through the operator surface only (`echo` into `/proc/net/tbtun/*`):
 | D | the deterministic loss injector (`drop_ppm`) and reorder accounting |
 | E | a warm spare takes over when an active carrier is taken down |
 | F | duplication: `dup=2` under injected loss, no duplicate lands on the same path |
-| G | prediction on one lossy path, bounded reorder stall |
+| G | hole repair on one lossy path, bounded reorder stall |
 | H | sustained loss, recovery, and the bounded reset |
 | I | **the thesis**: one shaped carrier (control) versus four on the same path; four must be at least 1.8x one |
-| J | 1% loss and 2% reorder on every carrier; needs prediction |
-| K | one carrier's class forced to 100% loss mid-transfer, then restored; needs prediction |
+| J | 1% loss and 2% reorder on every carrier; byte-exactness |
+| K | one carrier's class forced to 100% loss mid-transfer, then restored; byte-exactness |
 
-G, J and K report `TBT_TEST_SKIP` while the module exports `predict_tx=0`:
-without prediction there is nothing to judge, and a skip is honest where a pass
-would not be. G additionally retries its whole window up to three times when the
-injector happened to drop nothing, and skips with `no loss observed in 3
-windows` rather than failing for a correct reason. All three are written so that
-landing C6 turns them on without touching the harness again.
+G retries its whole window up to three times when the injector happened to drop
+nothing, and skips with `no loss observed in 3 windows` rather than failing for
+a correct reason. J and K judge byte-exactness under carrier-TCP loss and need
+no placeholder frame: the sender repairs a hole from the replay ring, and the
+receiver's bounded reset is the fallback.
 
 The guest prints one `TBT_PROBE_RESULT <probe> PASS|FAIL|SKIP <detail>` line per
 probe, then `TBT_TEST_PASS` and `poweroff -f`. `run.sh` judges from the
@@ -270,7 +269,6 @@ Failure text and its meaning:
   carriers than configured; `peers` shows which slots are `up`.
 - `probe J/K` start their own `nc -lk` echo (on `TARGET_PORT3` and
   `TARGET_PORT4`) and tear it down; they no longer depend on probe I's target.
-  They skip when the module renders no `predict_tx` counter.
   Probe G retries its window when the injector dropped nothing and skips after
   three clean windows; it does not fail for a correct reason.
 - `probe I: transfer finished before the rate window` or a client `ECONNRESET`:

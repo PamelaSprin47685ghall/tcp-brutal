@@ -38,7 +38,6 @@
 /* Documented body sizes (DESIGN.md §3.3). Repeated as literals on purpose:
  * the test must fail if the header's constants drift from the design. */
 #define DOC_DATA_MAX 8192u
-#define DOC_PREDICT_TOKEN 16u
 #define DOC_FBK_ENTRY 18u
 #define DOC_FBK_MAX_ENTRIES 16u
 #define DOC_WINDOW_LEN 138u /* 8 + 8*16 + 2 */
@@ -157,7 +156,7 @@ static void expect(const char *what, const u8 *buf, size_t len, int want)
 }
 
 /* The accepted set DESIGN.md §3.3 documents, independent of the codec. */
-static int doc_accepts(u8 type, u8 flags, u8 ackc, unsigned len)
+static int doc_accepts(u8 type, u8 ackc, unsigned len)
 {
     if (len > DOC_DATA_MAX)
         return 0;
@@ -165,9 +164,6 @@ static int doc_accepts(u8 type, u8 flags, u8 ackc, unsigned len)
     {
     case TBT_F_DATA:
         return len >= 1;
-    case TBT_F_PREDICT:
-        return len == ((flags & TBT_FF_MUST_ORDER) ? DOC_PREDICT_TOKEN : 0);
-    case TBT_F_CANCEL:
     case TBT_F_OPEN:
     case TBT_F_FIN:
     case TBT_F_RST:
@@ -189,9 +185,8 @@ static int doc_accepts(u8 type, u8 flags, u8 ackc, unsigned len)
 }
 
 static const u8 all_types[] = {
-    TBT_F_DATA, TBT_F_PREDICT, TBT_F_CANCEL, TBT_F_OPEN, TBT_F_FIN,
-    TBT_F_RST,  TBT_F_FBK,     TBT_F_WINDOW, TBT_F_HELLO, TBT_F_PAD,
-    TBT_F_RETIRE, TBT_F_SACK,
+    TBT_F_DATA, TBT_F_OPEN, TBT_F_FIN,   TBT_F_RST,    TBT_F_FBK,
+    TBT_F_WINDOW, TBT_F_HELLO, TBT_F_PAD, TBT_F_RETIRE, TBT_F_SACK,
 };
 
 /* The bounds table must say exactly what the design says. */
@@ -203,8 +198,6 @@ static void test_bounds_table(void)
         u16 min, max;
     } want[] = {
         { TBT_F_DATA, 1, DOC_DATA_MAX },
-        { TBT_F_PREDICT, 0, DOC_PREDICT_TOKEN },
-        { TBT_F_CANCEL, 0, 0 },
         { TBT_F_OPEN, 0, 0 },
         { TBT_F_FIN, 0, 0 },
         { TBT_F_RST, 0, 0 },
@@ -220,7 +213,7 @@ static void test_bounds_table(void)
     char d[64];
 
     case_no++;
-    check(TBT_HDR_LEN == 32 && TBT_CHUNK_MAX == 8228 && TBT_REC_MAX == 8224 && TBT_CONV == 0x0004,
+    check(TBT_HDR_LEN == 32 && TBT_CHUNK_MAX == 8228 && TBT_REC_MAX == 8224 && TBT_CONV == 0x0005,
           "design constants", NULL);
     for (i = 0; i < sizeof(want) / sizeof(want[0]); i++)
     {
@@ -234,10 +227,16 @@ static void test_bounds_table(void)
     check(!tbt_body_bounds(0x00, &min, &max), "bounds: type 0x00 unknown", NULL);
     case_no++;
     check(!tbt_body_bounds(0xff, &min, &max), "bounds: type 0xff unknown", NULL);
+    /* 0x11/0x12 were PREDICT/CANCEL before TBT_CONV 0x0005; a retired type
+     * must not pass a bound check by accident. */
+    case_no++;
+    check(!tbt_body_bounds(0x11, &min, &max), "bounds: retired PREDICT unknown", NULL);
+    case_no++;
+    check(!tbt_body_bounds(0x12, &min, &max), "bounds: retired CANCEL unknown", NULL);
 }
 
 /* Every type against every body length. flags/ackc are fixed per pass, so the
- * exact-length rules for PREDICT and FBK collapse to a single accepted value. */
+ * exact-length rule for FBK collapses to a single accepted value. */
 static void matrix_pass(u8 flags, u8 ackc)
 {
     static u8 rec[TBT_REC_MAX];
@@ -256,7 +255,7 @@ static void matrix_pass(u8 flags, u8 ackc)
 
             case_no++;
             snprintf(d, sizeof(d), "type=0x%02x flags=0x%02x ackc=%u len=%u", all_types[t], flags, ackc, len);
-            check((st == TBT_REC_OK) == doc_accepts(all_types[t], flags, ackc, len), "matrix: acceptance", d);
+            check((st == TBT_REC_OK) == doc_accepts(all_types[t], ackc, len), "matrix: acceptance", d);
             check(used <= n, "matrix: consumed more than given", d);
             if (st == TBT_REC_OK)
                 check(used == n && r.body_len == len, "matrix: record shape", d);
@@ -460,9 +459,6 @@ static void test_adversarial(void)
     n = rec_make(rec, TBT_F_RST, 0, 0, 1, 0, 1);
     case_no++;
     expect("RST with a body", rec, n, TBT_REC_PROTO);
-    n = rec_make(rec, TBT_F_CANCEL, 0, 0, 1, 0, 1);
-    case_no++;
-    expect("CANCEL with a body", rec, n, TBT_REC_PROTO);
     n = rec_make(rec, TBT_F_PAD, 0, 0, 1, 0, 1);
     case_no++;
     expect("PAD with a body", rec, n, TBT_REC_PROTO);
@@ -495,24 +491,6 @@ static void test_adversarial(void)
     n = rec_make(rec, TBT_F_HELLO, 0, 0, 1, 0, DOC_HELLO_LEN + 1);
     case_no++;
     expect("HELLO one byte long", rec, n, TBT_REC_PROTO);
-
-    /* Flags/type contradictions: PREDICT's body is the resume token iff
-     * MUST_ORDER is set. */
-    n = rec_make(rec, TBT_F_PREDICT, 0, 0, 1, 0, 0);
-    case_no++;
-    expect("PREDICT, no MUST_ORDER, empty", rec, n, TBT_REC_OK);
-    n = rec_make(rec, TBT_F_PREDICT, 0, 0, 1, 0, DOC_PREDICT_TOKEN);
-    case_no++;
-    expect("PREDICT, no MUST_ORDER, with token", rec, n, TBT_REC_PROTO);
-    n = rec_make(rec, TBT_F_PREDICT, TBT_FF_MUST_ORDER, 0, 1, 0, DOC_PREDICT_TOKEN);
-    case_no++;
-    expect("PREDICT, MUST_ORDER, with token", rec, n, TBT_REC_OK);
-    n = rec_make(rec, TBT_F_PREDICT, TBT_FF_MUST_ORDER, 0, 1, 0, 0);
-    case_no++;
-    expect("PREDICT, MUST_ORDER, empty", rec, n, TBT_REC_PROTO);
-    n = rec_make(rec, TBT_F_PREDICT, TBT_FF_MUST_ORDER | TBT_FF_KEEP, 0, 1, 0, DOC_PREDICT_TOKEN);
-    case_no++;
-    expect("PREDICT, MUST_ORDER plus another flag", rec, n, TBT_REC_OK);
 
     /* seq wrap: no rule depends on seq, and the value must survive. */
     n = rec_make(rec, TBT_F_DATA, 0, 0, 1, ~(u64)0, 1);
@@ -768,13 +746,6 @@ static size_t gen_record(u8 *buf, size_t room)
         break;
     case TBT_F_RETIRE:
         len = 1;
-        break;
-    case TBT_F_PREDICT:
-        if (rnd64() & 1)
-        {
-            flags = TBT_FF_MUST_ORDER;
-            len = DOC_PREDICT_TOKEN;
-        }
         break;
     case TBT_F_FBK:
         ackc = (u8)rnd_below(DOC_FBK_MAX_ENTRIES + 1);

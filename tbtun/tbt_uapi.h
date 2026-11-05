@@ -36,7 +36,7 @@ typedef uint64_t u64;
 #define TBT_ROLE_NEAR 2
 #define TBT_ROLE_FAR 3
 
-/* Wire protocol revision: u16 at frame offset +30, 0x0004. Independent of the
+/* Wire protocol revision: u16 at frame offset +30, 0x0005. Independent of the
  * module version (DESIGN.md §11); bump it alone on any wire change.
  * 0x0002 moved body_len into the header (+6) and removed the 4-byte prefix.
  * 0x0003 carries RETIRE (24) and the HELLO profile|gen byte; a 0x0002 peer
@@ -51,8 +51,14 @@ typedef uint64_t u64;
  * tbt_hdr_check() requires conv == TBT_CONV (tbt_proto.c:77), the first
  * record (HELLO) fails with -EPROTO, and the carrier closes. Neither side
  * parses the other's bytes under the wrong layout; both ends must be upgraded
- * together. */
-#define TBT_CONV 0x0004u
+ * together.
+ * 0x0005 removes the placeholder frames 0x11 (PREDICT) and 0x12 (CANCEL).
+ * The receiver never advanced delivery or promoted a copy from them, so they
+ * carried no application byte and bought no progress; a 0x0004 peer that
+ * still sends one fails tbt_hdr_check() and its carrier closes. The sender's
+ * real repair path (retained bytes plus duplicate) and the receiver's bounded
+ * hole reset are unchanged. */
+#define TBT_CONV 0x0005u
 
 /* HELLO body[0]: wire-protocol version, independent of TBT_VERSION. */
 #define TBT_WIRE_VERSION 1
@@ -61,8 +67,7 @@ typedef uint64_t u64;
 enum tbt_frame_type
 {
     TBT_F_DATA = 0x10,
-    TBT_F_PREDICT = 0x11,
-    TBT_F_CANCEL = 0x12,
+    /* 0x11 (PREDICT) and 0x12 (CANCEL) were removed in TBT_CONV 0x0005. */
     TBT_F_OPEN = 0x13,
     TBT_F_FIN = 0x14,
     TBT_F_RST = 0x15,
@@ -109,9 +114,8 @@ enum tbt_frame_type
 
 /* Body length bounds per frame type (DESIGN.md §3.3, "Payload layouts").
  * tbt_hdr_check() accepts a type only if tbt_body_bounds() knows it and the
- * body length is inside its range; PREDICT and FBK also have an exact length
- * that depends on another header field, and the checker enforces that too. */
-#define TBT_PREDICT_TOKEN_LEN 16
+ * body length is inside its range; FBK also has an exact length that depends
+ * on another header field, and the checker enforces that too. */
 /* FBK body: nr entries, each 18 bytes, no padding. nr is path_ack_count
  * (0..16), so the body is 0..288 bytes and the checker bounds it by
  * TBT_FBK_MAX. Fields are read byte by byte; uack at +2 is not 8-aligned on
@@ -150,11 +154,6 @@ static inline bool tbt_body_bounds(u8 type, u16 *min, u16 *max)
         *min = 1;
         *max = TBT_PAYLOAD_MAX;
         return true;
-    case TBT_F_PREDICT:
-        *min = 0;
-        *max = TBT_PREDICT_TOKEN_LEN;
-        return true;
-    case TBT_F_CANCEL:
     case TBT_F_OPEN:
     case TBT_F_FIN:
     case TBT_F_RST:

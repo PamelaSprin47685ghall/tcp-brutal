@@ -1,7 +1,7 @@
 # tbtun — Design
 
 Status: v0, kernel-only, **HTTP-as-QoS-profile**. A kernel TCP tunnel over `N + M`
-pluggable carrier profiles with predictive loss compensation, built on top of (and
+pluggable carrier profiles with replay-ring loss repair, built on top of (and
 replacing the product of) the `tcp-brutal` repository.
 
 Audience: kernel engineers. Everything in this document is implementable by one person
@@ -37,8 +37,9 @@ Two independent sources of gain:
    `raw` profile for when it does not (§4.2).
 
 Third property, the hard one: **do not wait for retransmission.** When a gap appears in a
-carrier's stream, the receiver advances past it using a placeholder and repairs from the
-sender's replay ring when the bytes turn up. Byte exactness is never traded (§4).
+carrier's stream, the sender re-emits the withheld bytes from its replay ring on a path
+the sequence has not used. Delivery never advances across the gap: if the bytes are gone,
+the receiver's bounded hole budget resets the stream. Byte exactness is never traded (§4).
 
 Everything runs **entirely in the kernel**. After configuration, there is no userspace
 process in the data path, no character device, no per-stream syscall pair, no userspace
@@ -112,8 +113,8 @@ as KeLS and similar L4 tunnel modules do — is retained only as the **fallback 
 | `tbt_sock.c` | The public socket's data path: `sk_data_ready` → work → `tcp_read_sock()` feeding the tunnel; tunnel output delivered by `tcp_sendmsg_locked()` on the same socket (the accepted socket near, the target connection far) (§8.5). |
 | `tbt_carrier.c` | Carrier sockets: `sock_create_kern`/`kernel_connect`, the `sk_prot` copy, HTTP header emission/parsing, health check, replacement and RETIRE. |
 | `tbt_session.c` | Tunnel/session/stream objects, sid allocation, port bitmap, `/proc` tunnels/peers rendering, lifecycle. |
-| `tbt_tx.c` | Frame queue, seq assignment, replay retention, duplication, prediction, token bucket, FBK generation. |
-| `tbt_rx.c` | Carrier record parser, dedupe, reorder, second-chance merge. |
+| `tbt_tx.c` | Frame queue, seq assignment, replay retention, duplication, hole detection, token bucket, FBK generation. |
+| `tbt_rx.c` | Carrier record parser, dedupe, reorder, hole accounting. |
 | `tbt_rec.c` | Record framing: 32-byte header plus `body_len`; no length prefix. |
 | `tbt_proto.c` | Frame encode/decode (pure code, shared with the host tests). |
 | `tbt_http.c` | HTTP/1.1 container generation and parsing (pure code, shared with the host tests). |
@@ -137,7 +138,7 @@ sequenceDiagram
     PL->>PS: accept → struct sock owned by module
     A->>PS: write(data)
     PS->>TX: sk_receive_queue → tcp_read_sock()
-    TX->>TX: replay ring, seq, dup, predict
+    TX->>TX: replay ring, seq, dup, hole detect
     TX->>CR: tcp_sendmsg_locked(body bytes)
     CR->>RX: HTTP/1.1 chunked body
     RX->>RX: parse, dedupe, reorder, merge
@@ -147,7 +148,7 @@ sequenceDiagram
 
 Owner per step: listener/accept = `tbt_listen`; application-facing TCP = stock TCP on a
 socket we own; capture = `tcp_read_sock()` (does **not** copy into userspace, does not touch
-`copied_seq` invariants incorrectly — see §8.5); framing/seq/dup/predict = `tbt_tx`;
+`copied_seq` invariants incorrectly — see §8.5); framing/seq/dup/hole = `tbt_tx`;
 carrier write = `tcp_sendmsg_locked` on a socket we created (§9.2); far side is the mirror
 image, with the target connection created by `kernel_connect` in `tbt_carrier.c`.
 
@@ -165,9 +166,9 @@ sequenceDiagram
 
     T->>FK: data (+ FIN)
     FK->>FTX: tcp_read_sock()
-    FTX->>CR: dup / CANCEL speculation / predict
+    FTX->>CR: dup / hole repair
     CR->>NRX: body bytes
-    NRX->>NRX: reorder, hole test, second-chance merge
+    NRX->>NRX: reorder, hole test, bounded reset
     NRX->>NP: tcp_sendmsg_locked()
     NP->>A: app reads its client fd
 ```
@@ -232,8 +233,9 @@ bit  7 6 5 4 3 2 1 0
 
 Bits 1..0 are the profile (`1` http-kal, `2` http-kal-drip, `3` raw; `0` invalid), bits
 5..2 are the carrier's **path generation** (§4.3), bits 7..6 are zero. The byte was zero (reserved
-flags) in the first C3 build, and `TBT_CONV` was `0x0002` then; it is `0x0004` now that
-RETIRE, this byte, and the 40-bit sid are part of the wire, and `host/test_fuzz.c` pins the new value. An
+flags) in the first C3 build, and `TBT_CONV` was `0x0002` then; it is `0x0005` now that
+RETIRE, this byte, the 40-bit sid, and the removal of the placeholder frames are part of
+the wire, and `host/test_fuzz.c` pins the new value. An
 old peer therefore reads a nonzero flags byte, which it already rejects as unknown; a new
 peer rejects a profile it cannot honour, and reads the 4-bit generation from bits 5..2.
 The generation travels here rather than in a new field so the HELLO body length is
@@ -248,7 +250,7 @@ unchanged.
 Properties:
 
 - **Same frame header** across profiles; only the container and cadence differ.
-- **Same replay ring, prediction, dedupe, feedback** — none of it knows the profile.
+- **Same replay ring, hole repair, dedupe, feedback** — none of it knows the profile.
 - `http-kal-drip` exists because classifiers commonly tier flows by *duration and byte
   count*: a flow that stays open but idles gets reaped, and a flow that reconnects every
   30 s gets re-classified from scratch (paying the TLS/HTTP handshake classification cost
@@ -372,20 +374,21 @@ constants:   TBT_HDR = 32, TBT_PAYLOAD_MAX = 8192, TBT_REC_MAX = 32 + 8192 = 822
 Frame header, exactly 32 bytes (offsets add up):
 
 ```
-+0  u8   type        10 DATA / 11 PREDICT / 12 CANCEL / 13 OPEN / 14 FIN / 15 RST
++0  u8   type        10 DATA / 13 OPEN / 14 FIN / 15 RST
                      20 FBK / 21 WINDOW / 22 HELLO / 23 PAD / 24 RETIRE / 25 SACK
+                     (11 PREDICT and 12 CANCEL were removed in 0x0005)
 +1  u8   flags       bit0 HEAD_OF_RUN, bit1 DATA_VERIFIED, bit2 KEEP, bit3 low-prio,
-                     bit4 MUST_ORDER, bit5 has-token; bits 6..7 must be zero
+                     bit4/bit5 reserved (were MUST_ORDER / has-token); bits 6..7 zero
 +2  u8   path_id     index of the carrier this copy will be sent on (0..15)
 +3  u8   path_ack_count (0..16)
 +4  u16  path_ack_mask   bit p set ⇔ feedback present for path p
 +6  u16  body_len    bytes of payload after this header (0..8192)
-+8  u64  seq          stream sequence (DATA) or predicted seq (PREDICT)
++8  u64  seq          stream sequence (DATA)
 +16 u64  uack         cumulative seq received on this frame's own path
 +24 u32  sid_lo       low 32 bits of the 40-bit stream id
 +28 u8   sid_hi       high 8 bits of the 40-bit stream id (v4 uses them)
 +29 u8   reserved2 (0)
-+30 u16  conv         0x0004
++30 u16  conv         0x0005
 (total: 32 bytes)
 ```
 
@@ -404,13 +407,11 @@ Payload layouts:
 - **DATA**: payload = raw application bytes (1..8192); a zero-length DATA frame is
   refused on receive, because it wedges the receiver and the emitter never sends one.
 - **OPEN**: payload empty; the header's `sid_hi:sid_lo` names the stream.
-- **PREDICT**: payload = resume token (16 B) when `flags & MUST_ORDER`, or empty when the
-  placeholder is for a *small* frame.
 - **FBK**: payload = `nr × 18 B`, one entry per path, `nr = path_ack_count`:
   `u8 path_id; u8 rx_state; u64 uack; u32 recv_cnt; u32 rtt_us`. `path_id`'s low nibble is
   the carrier index and its high nibble is the *peer's* generation for that path (learned
   from the peer's HELLO), so stale feedback for a replaced carrier is ignored (§4.3).
-  `uack` is the cumulative DATA+PREDICT payload bytes received on that path (v4); it is
+  `uack` is the cumulative DATA payload bytes received on that path (v4); it is
   used for inflight and negative proof, not as a per-stream delivery proof. `recv_cnt`
   is the DATA records received on that path; `rtt_us` is the receiver's TCP SRTT for the
   carrier (0 when unmeasured). `rx_state`: 0 ok, 1 any stream has a hole, 2 any stream
@@ -465,7 +466,7 @@ than the emit rules, because it must accept a peer and a middlebox that only rel
   1) is filler and is discarded. PAD and drip may interleave between records. This is
   a security-relevant stance: it removes the ambiguous framing a hostile peer could
   use to smuggle bytes.
-- The frame layout is `TBT_CONV` 0x0004: `body_len` is the u16 at header offset +6 and
+- The frame layout is `TBT_CONV` 0x0005: `body_len` is the u16 at header offset +6 and
   there is no 4-byte prefix. `tbt_uapi.h`/`tbt_proto.c` are authoritative for the current
   wire.
 - The response parser requires status 200, accepts HTTP/1.0 and HTTP/1.1 status lines,
@@ -552,7 +553,7 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
 
 ---
 
-## 4. The N + M redundancy and prediction model
+## 4. The N + M redundancy and hole-repair model
 
 ### 4.1 Vocabulary
 
@@ -561,13 +562,12 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
   dead carrier inside an RTT and provide a low-load second copy target when a duplicate
   must be placed. `M = 1` with `N = 4` is the default.
 - **dup_degree** — total copies of each new frame: `1` primary + `d` duplicates.
-- **speculation** — emitting a copy of, or a placeholder for, a frame the receiver has not
-  acknowledged.
+- **speculation** — emitting a copy of a frame the receiver has not acknowledged.
 
 ### 4.2 Why not duplicate everything
 
 Every duplicate byte is billed by the ISP per 5-tuple. Full duplication halves effective
-capacity. Prediction fires only when a hole actually exists, so the steady-state overhead
+capacity. Hole repair fires only when a hole actually exists, so the steady-state overhead
 is `d/(1+d)` of the data volume *only for frames selected for duplication*, and ~0 for the
 rest.
 
@@ -601,13 +601,7 @@ is greater than zero — and every other live path's `uack` is ≥ `q`. There is
 no freshness requirement on the lossy path: while it is dropping, no fresh `uack` from it
 can exist, so requiring one makes the gate unsatisfiable. No sender-side estimate
 (retransmit attribution, loss EWMA, own high-water) takes part. Without this gate the test
-fires on mere reordering and floods the wire with useless placeholders.
-
-> **Pending (review 15, data-plane freeze).** `tbt_tx_hole_check()` still takes
-> an unused `u16 fbk_mask` argument (`tbt_tx.c`); the gate above uses the
-> per-path persistent `uack`/`recv_cnt` state, not the current FBK mask. The
-> parameter and its call-site argument are to be removed once `tbt_tx.c` and
-> `tbt_rx.c` are frozen; the behaviour must not change.
+fires on mere reordering and floods the wire with useless speculative copies.
 
 **Generation, not just index.** A replacement carrier at the same index is a new path with
 an empty sequence space. Every carrier has `{u8 index; u8 gen;}`, the generation travels in
@@ -671,21 +665,23 @@ For a lost seq `q` at depth `g`:
    *actual withheld frame* as `d2` copies on paths not already used —
    `d2 = dup_degree` for `g == 1`, `dup_degree − 1` for `g > 1`. This is not extrapolation,
    it is immediate loss recovery without RTO.
-2. **Bytes no longer in the ring** (only if the ring underflowed, §9.6): emit a PREDICT
-   placeholder (16 B). The receiver, if it has the bytes from another copy, drops it; if
-   not, §4.6 case D applies.
+2. **Bytes no longer in the ring** (only if the ring underflowed, §9.6): nothing is
+   emitted. The receiver never advances across a gap, so `hole_budget_ms` bounds the wait
+   and the stream is reset when the true bytes never arrive (§4.6 case B). A placeholder
+   that carries no application byte cannot advance delivery; one that advances it without
+   the bytes would break byte exactness.
 
 We never invent payload bytes. Under TCP-over-TCP no receiver can know the content of a
-lost segment; inventing it breaks byte exactness. What the placeholder invents is the
-*license to advance*, which is where the latency comes from.
+lost segment; inventing it breaks byte exactness.
 
-### 4.5 Receiver: jitter queue and second-chance merge
+### 4.5 Receiver: jitter queue and delivery rule
 
 Per stream, one ordered queue (`rb_root_cached` keyed by seq) plus `next_expected`.
 
 - On arrival: dedupe (§9.5), insert, advance `next_expected` while contiguous, deliver.
-- On a hole: start `second_chance_us` (default 250 µs). Die at expiry if
-  `p_late(g) < threshold`, exactly mirroring §4.3.
+- On a hole: start the hole budget. The sender's geometric test decides whether to repair
+  from the replay ring; there is no receiver-side second chance, because without the true
+  bytes there is nothing to promote.
 - Implemented policy, stated exactly: delivery advances `next_expected` **only on an exact
   seq match**; a frame ahead of the gap waits in the tree, and a frame behind it is a
   duplicate. The planned *transparent hole* advance (deliver past a gap and backfill) is
@@ -709,21 +705,20 @@ restart the deadline; if it did, a full send window could keep the hole alive fo
 deadlock (measured: probe I strict phase, the near's window closed on the far's hole and
 the transfer reset).
 
-### 4.6 Resolution of a placeholder
+### 4.6 Resolution of a hole
 
 | Case | Condition | Result |
 |---|---|---|
 | A | true bytes arrive (any copy) before `hole_budget` | hole removed; delivery continues; no visible effect |
-| B | true bytes arrive before `second_chance_us` | placeholder torn down before use |
-| C | only a duplicate arrives (original never did), token `withheld_h2` matches the copy's tag | copy promoted to DATA (`DATA_VERIFIED`); byte-exact |
-| D | the tree head does not advance for `hole_budget_ms` (500 ms), or the reorder tree exceeds `hole_budget_bytes` (64 KiB, or `rx_reorder_bytes` when larger) | stream RST to the app: `ECONNRESET` on the public socket; far side RSTs the target |
+| B | the tree head does not advance for `hole_budget_ms` (500 ms), or the reorder tree exceeds `hole_budget_bytes` (64 KiB, or `rx_reorder_bytes` when larger) | stream RST to the app: `ECONNRESET` on the public socket; far side RSTs the target |
 
-**The honest tradeoff**: case D converts an unbounded TCP retransmit hang into a bounded
+**The honest tradeoff**: case B converts an unbounded TCP retransmit hang into a bounded
 reset. On a path with persistent, uncorrelated loss this is a real regression versus plain
 TCP. It is correct only when loss is *bursty and short* — which is the profile of
-ISP policer drops. The mitigation is that case D requires the replay ring to have
-underflowed *and* every copy to have failed; with `replay_ms = 1000` that is ~1 s of
-sustained total loss on all carriers (§19 Q2).
+ISP policer drops. The mitigation is that the sender repairs from the replay ring before
+the budget expires; with `replay_ms = 1000` a reset needs ~1 s of sustained total loss on
+all carriers (§19 Q2). The receiver never advances past a gap: there is no placeholder
+frame, because a frame that invents no byte cannot advance delivery.
 
 ### 4.7 Duplicate degree policy
 
@@ -783,16 +778,13 @@ inject a two-second outage.
 
 ### 5.4 Inflation control
 
-`dup_degree` is the knob; `max_inflate` the ceiling (§4.7). Speculation cap: no path may
-hold more than `max_spec_bytes` (32 KiB) of *unacknowledged predictive* traffic; a dead path
-therefore cannot accumulate a wall of stale placeholders that fires on recovery.
+`dup_degree` is the knob; `max_inflate` the ceiling (§4.7).
 
 **Implemented in C5/C6:** the duplicate cap is checked before a copy is created against
 the projected `(goodput + duplicate payload) / goodput`, so `inflate_ppm` cannot exceed
-`max_inflate` (headers and loss retransmits are not duplication). The speculative cap is
-tracked per carrier (`spec_bytes`/`spec_bytes_max`); PREDICT is only emitted when the ring
-has underflowed, and each placeholder is at most 16 bytes, so a dead path can accumulate at
-most `32 KiB / 16` outstanding placeholders before the cap suppresses more.
+`max_inflate` (headers and loss retransmits are not duplication). There is no speculative
+placeholder budget: hole repair re-sends retained bytes and is accounted as retransmission,
+not as inflation.
 
 ### 5.5 Feedback and selection
 
@@ -881,13 +873,11 @@ clamp(2 × BDP, 64 KiB, 1 MiB) variant) broke the strict phase by closing the wi
 are recorded in §15. `retx_ppm` remains 9–20% on shaped carriers until the replacement
 loop is fixed.
 
-**Hole detection and prediction (C6).** The geometric test of §4.3 runs once per FBK. When
+**Hole detection and repair (C6).** The geometric test of §4.3 runs once per FBK. When
 it declares a hole, the real retained bytes are re-sent on paths the sequence has not used
 (`d2 = dup + 1` for a depth-1 hole, `dup` otherwise, at least one); if the ring has
-underflowed, a 16-byte PREDICT placeholder is emitted instead, rate-limited to one per
-10 ms. A repaired hole sends CANCEL for any placeholder that covered it. The receiver keeps
-an outstanding placeholder in `predict_seq` and counts `predict_used` when it arrives for a
-still-missing seq, `predict_cancelled` when the true bytes beat it or a CANCEL arrives.
+underflowed, nothing is sent, because no frame can advance delivery without the true bytes,
+and the receiver's bounded hole budget resets the stream (§4.6 case B).
 The depth is the record run of §4.3 and the gate uses the receiver's `recv_cnt`; the
 per-hole retransmit timer declares the first hole once, deferring while a copy is in flight.
 `holes_declared`/`holes_repaired` therefore count primary-path holes; a tunnel with `dup`
@@ -1007,7 +997,7 @@ tbtun/
   tbt_sock.c       public-side TCP endpoint (capture and delivery)
   tbt_carrier.c    carrier sockets, sk_prot copy, HTTP headers, health, replacement
   tbt_session.c    tunnel/session/stream objects, sid, port bitmap, tunnels/peers
-  tbt_tx.c         frame queue, seq, replay retention, dup/predict, token bucket, FBK
+  tbt_tx.c         frame queue, seq, replay retention, dup/hole, token bucket, FBK
   tbt_rx.c         record parser, dedupe, reorder, merge
   tbt_rec.c        record framing (32-byte header + body_len; no prefix)
   tbt_proto.c      frame encode/decode
@@ -1069,7 +1059,7 @@ struct tbt_stream {
     struct work_struct w_kill;      /* reset close: detach, RST, release */
     struct work_struct w_target;    /* far side: dial this stream's target */
     struct socket *target;
-    /* tx_seq/tx_ack, retain list, rx_q/rx_tree, hole and prediction state */
+    /* tx_seq/tx_ack, retain list, rx_q/rx_tree, hole state */
 };
 
 struct tbt_carrier {
@@ -1523,8 +1513,8 @@ entry), and the live snapshot renders `car_ws` (`snap_car_ws_ok`), whether the c
 write space was free at the last snapshot.
 
 C4/C5/C6 add: `dup_tx, dup_used, dup_suppressed, dup_same_path, inflate_ppm, dup_bytes,
-spec_bytes_max, holes_declared, holes_repaired, holes_unrecoverable, predict_tx,
-predict_used, predict_cancelled, rx_max_stall_us, hole_checks, gate_fail, depth_fail,
+holes_declared, holes_repaired, holes_unrecoverable,
+rx_max_stall_us, hole_checks, gate_fail, depth_fail,
 time_fail`. `spare_activated` counts a warm spare promoted to DATA; `dup_tx` counts
 duplicate copies written; `dup_used` counts duplicates that were the first arrival of a
 seq; `dup_suppressed` counts copies the inflation cap refused; `inflate_ppm` is
@@ -1860,7 +1850,7 @@ makes this design different from a generic L4 tunnel.
 | `tests/*.sh` | **new** |
 
 Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the current tree reports `0.0.1`
-(release candidate; final regression still pending). The wire revision `TBT_CONV=0x0004`
+(release candidate; final regression still pending). The wire revision `TBT_CONV=0x0005`
 bumps independently. HELLO `body[0]` carries `TBT_WIRE_VERSION=1`, not the module
 version, so the module version and the wire version are now decoupled. The cutover is
 recorded in `review/analysis/p3-contract.md` §16.5.
@@ -1896,7 +1886,7 @@ covers; no known leak remains but a long-soak kref/RCU audit is still worthwhile
 | # | Risk | Mitigation |
 |---|---|---|
 | R1 | **Duplex backpressure deadlock**: a single-threaded application sends a full volume before reading, while the echo's return path fills | Capture and transmit use opposite queues; the queue caps pause a direction instead of dropping; the strict 4 MiB send-then-read case is the acceptance test (T2). The sender's window is the peer's *received* offset, never its delivered offset: a delivered window was measured deadlocking this case in C3 (§15). The strict volume must still fit the application's own socket buffers; 4 MiB does. |
-| R2 | Byte exactness vs prediction | Reset beats corruption (§4.6 D); `holes_unrecoverable` monitored. |
+| R2 | Byte exactness vs hole repair | Reset beats corruption (§4.6 B); `holes_unrecoverable` monitored. |
 | R3 | Ring under-protects fast links | Refuse `replay_bytes < 2×BDP_est`; document 8 MiB default for ≤ 1 Gbps; T8. |
 | R4 | Port starvation | Reserved block + per-netns bitmap + retry; T9. |
 | R5 | sid collision | Random prefix + monotonic per session; the allocator skips a live/tombstone sid, and a repeated OPEN for a live stream is idempotent. |
@@ -1912,7 +1902,7 @@ covers; no known leak remains but a long-soak kref/RCU audit is still worthwhile
 | R14 | `CONFIG_DEBUG_INFO_BTF_MODULES=y` requires pahole | Document in build; DKMS `MAKE` already inherits kernel config. |
 | R15 | Manjaro headers package name | Build doc: `sudo pacman -S linux72-headers` (or matching `linux-*-headers`), then `make`. |
 | R16 | Memory at 10 Gbps | Caps + T8; `max_replay_bytes` 256 MiB. |
-| R17 | Jitter adds RTT | `second_chance_us` 250 µs; in-order path adds zero delay (T1 asserts). |
+| R17 | Jitter adds RTT | The reorder tree is consulted only past a gap; the in-order path adds zero delay (T1 asserts). |
 | R18 | `inet_csk_reset_xmit_timer` etc. drift | Not used; stock timers only. |
 
 ---
@@ -1954,8 +1944,8 @@ controls do not apply; these replace them.
 2. No byte is ever *delivered* across a gap. Out-of-order frames wait in the reorder tree;
    the ready queue holds only the contiguous run that starts at `rx_next`, and the drain
    reads only that queue. A hole is an absence, never a placeholder byte.
-3. No byte is delivered to the app that did not come from the far side; placeholders are
-   never bytes. Delivery is an ordinary TCP transmit, so the app's own peer data and the
+3. No byte is delivered to the app that did not come from the far side; the tunnel never
+   forges one. Delivery is an ordinary TCP transmit, so the app's own peer data and the
    tunnel's data share no cursor and cannot reorder each other.
 4. Every carrier byte on the wire is inside a legal container: on `raw` the record is the
    frame itself (32-byte header + `body_len`); on `http-*` one HTTP chunk carries one
@@ -1977,8 +1967,8 @@ controls do not apply; these replace them.
     retransmit is a byte-identical copy of the retained frame (same seq, same payload).
 11. A duplicate copy is byte-identical to its primary and never shares a path with any
     other copy of that sequence while at least two paths are usable (`dup_same_path` is 0).
-12. Prediction never invents payload. A hole is repaired with the real retained bytes; a
-    PREDICT placeholder carries no application byte and cannot advance delivery.
+12. Hole repair never invents payload. A hole is repaired with the real retained bytes; no
+    frame advances delivery without the true bytes.
 13. A stream whose hole outlives `hole_budget_ms`, or whose oldest unacked frame does, is
     reset with RST; bytes are never delivered out of order or substituted.
 
@@ -2150,10 +2140,9 @@ Each commit leaves a testable system.
    for `hole_budget_ms`), which could not read the peer's feedback while the stream was
    delivery-paused. It is now suppressed on local or remote backpressure and keys on global
    progress with paused time discounted.
-6. **C6 — prediction**: the geometric hole test with per-path high-water feedback, true-byte
-   re-injection or PREDICT when the ring underflows, CANCEL on repair, the receiver's hole
-   budget, and the sender's bounded reset when total loss leaves the receiver with no frame
-   to time. Test: probes G, H.
+6. **C6 — hole repair**: the geometric hole test with per-path high-water feedback, true-byte
+   re-injection from the replay ring, the receiver's hole budget, and the sender's bounded
+   reset when total loss leaves the receiver with no frame to time. Test: probes G, H.
 7. **C7 — spares and replacement**: `M`, carrier replacement. Test: T5, T14.
 8. **C8 — profiles and conformance**: `raw` profile (needed early for loopback/N=1 testing),
    then the `http-kal` header template, drip cadence, offline-parser conformance (T13/T14),
@@ -2161,7 +2150,7 @@ Each commit leaves a testable system.
 9. **C9 — hardening**: T8–T10, T15, netns opt-in, DKMS, docs.
 
 C1–C3 is the minimal path that proves the kernel-only thesis. Do not start C5 before C4's
-feedback is trustworthy: prediction without accurate per-path ack state fires constantly.
+feedback is trustworthy: hole repair without accurate per-path ack state fires constantly.
 
 ---
 

@@ -774,8 +774,8 @@ static void tbt_stream_tombstone_locked(struct tbt_stream *st)
 }
 
 /* Detach a terminal stream from the session. `far_sid` is only a
- * last/primary compatibility pointer now; every per-stream ack, hole and
- * prediction state is released with the stream. */
+ * last/primary compatibility pointer now; every per-stream ack and hole
+ * state is released with the stream. */
 void tbt_stream_detach_from_session(struct tbt_stream *st)
 {
     struct tbt_session *sess = st->sess;
@@ -813,8 +813,7 @@ static void tbt_tx_purge_stream(struct tbt_session *sess, struct tbt_stream *st)
 
         if (fr->st != st)
             continue;
-        if (type != TBT_F_DATA && type != TBT_F_PREDICT &&
-            type != TBT_F_CANCEL)
+        if (type != TBT_F_DATA)
             continue;
         list_del(&fr->list);
         sess->tx_queued -= fr->len;

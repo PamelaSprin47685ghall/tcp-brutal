@@ -184,8 +184,6 @@ void tbt_listen_stop(struct tbt_tunnel *t);
 #define TBT_K_MAX_HOLE 3          /* 0.919^3 is the declare threshold */
 #define TBT_HOLE_BUDGET_BYTES 65536u
 #define TBT_HOLES_MAX 256         /* declared-hole FIFO, per session */
-#define TBT_MAX_SPEC_BYTES 32768u /* per-path speculative placeholder cap */
-#define TBT_PREDICT_MIN_NS (10ull * 1000 * 1000)
 
 struct tbt_frame
 {
@@ -202,7 +200,7 @@ struct tbt_frame
     u32 gen;             /* pinned frames: carrier generation they belong to */
     u16 avoid_mask;      /* paths this copy must not reuse */
     struct tbt_retain *ret; /* ring entry for a DATA frame, valid in the pump */
-    struct tbt_stream *st;  /* DATA/PREDICT/CANCEL owner; holds a ref */
+    struct tbt_stream *st;  /* DATA owner; holds a ref */
     struct tbt_hdr hdr;  /* already filled in, including sid and seq */
     u8 data[];           /* len bytes, or a PAD frame with len 0 */
 };
@@ -285,8 +283,6 @@ struct tbt_stream
     u64 last_ack_ns;          /* this stream's last tx_ack advance */
     u64 pause_cleared_ns;     /* this stream's loss timers restart time */
     bool peer_paused;         /* this stream's peer reports a full queue */
-    u64 tx_predict_seq;       /* sender: last placeholder emitted for this seq */
-    u64 tx_predict_ns;
     u64 sack_next;            /* last SACK offset sent */
     u8 sack_state;            /* last SACK state sent */
     bool sack_dirty;          /* rx_next/state changed since last SACK */
@@ -321,10 +317,6 @@ struct tbt_stream
     u64 rx_next;              /* next byte offset expected from the network */
     u64 rx_delivered;         /* bytes accepted by the output socket */
     u64 hole_since_ns;        /* a hole is outstanding since this time */
-    u64 predict_seq;          /* receiver: outstanding PREDICT placeholder */
-    u64 predict_ns;
-    u8 predict_token[16];
-    bool predict_has_token;
     u64 rx_fin_seq;           /* byte offset the peer's FIN follows */
     bool rx_fin_seen;
     bool rx_fin_done;
@@ -347,7 +339,7 @@ enum tbt_stream_state
     TBT_ST_OPEN,
     TBT_ST_GAP, /* a hole C2 cannot fill: distinct from a plain reset */
     TBT_ST_REORDER, /* reorder window overflow: distinct from a gap */
-    TBT_ST_HOLE, /* hole budget expired: bounded reset, DESIGN.md §4.6 D */
+    TBT_ST_HOLE, /* hole budget expired: bounded reset, DESIGN.md §4.6 B */
     TBT_ST_DEAD,
 };
 
@@ -464,17 +456,13 @@ struct tbt_session
     u64 dup_used;        /* duplicate copies that filled a gap first */
     u64 dup_suppressed;  /* duplicates skipped by max_inflate */
     u64 dup_same_path;   /* duplicates forced onto an already-used path */
-    u32 spec_bytes_max;  /* deepest speculative backlog seen on any path */
     u64 holes_declared;  /* geometric test declared a lost frame */
     u64 holes_repaired;  /* a declared hole was filled */
-    u64 holes_unrecoverable; /* case D: the stream was reset */
+    u64 holes_unrecoverable; /* case B: the stream was reset */
     u64 hole_checks;      /* diagnostic: hole test ran with a candidate */
     u64 hole_gate_fail;   /* diagnostic: consistency gate refused */
     u64 hole_depth_fail;  /* diagnostic: depth below k_max_hole */
     u64 hole_time_fail;   /* diagnostic: younger than 2 x RTT */
-    u64 predict_tx;      /* PREDICT placeholders emitted */
-    u64 predict_used;    /* placeholders received for a still-missing seq */
-    u64 predict_cancelled; /* placeholders torn down before use */
     /* Tunnel-wide token bucket (DESIGN.md §5.3); rate_bps 0 = unlimited. */
     u64 tokens;
     u64 last_refill_ns;
@@ -555,7 +543,7 @@ struct tbt_carrier
     u64 uack_ns;                  /* when that value was last published */
     u64 data_frames;              /* DATA records written on this path */
     s32 loss_ppm;                 /* confirmed record loss / records acked */
-    u64 payload_bytes_sent;       /* DATA+PREDICT payload bytes written here */
+    u64 payload_bytes_sent;       /* DATA payload bytes written here */
     u32 rtt_us;                   /* EWMA RTT */
     u32 rtt_min_us;               /* minimum observed RTT */
     u32 inflight;                 /* snapshot for peers */
@@ -573,8 +561,6 @@ struct tbt_carrier
     u64 last_tx_ns;
     u64 join_deadline_ns;         /* provisional carriers only */
     u64 retry_at_ns;              /* next connect attempt */
-    u32 spec_bytes;               /* PREDICT placeholder bytes not yet acked */
-    u64 spec_path_end;            /* path payload offset of newest placeholder */
     u64 rx_frames;                /* DATA frames received on this path */
     u64 rx_bytes;
     u8 rx_state;                  /* what our FBK reports for this path */
@@ -662,8 +648,7 @@ int tbt_rx_flush(struct tbt_stream *st);
 int tbt_target_attach(struct tbt_stream *st, struct socket *s);
 int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body);
 void tbt_rx_check_hole(struct tbt_stream *st);
-void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st,
-                       u16 fbk_mask);
+void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st);
 
 /* tbt_carrier.c */
 int tbt_carriers_start(struct tbt_tunnel *t, struct tbt_session *sess);

@@ -940,69 +940,13 @@ static void tbt_tx_inject_locked(struct tbt_session *sess, struct tbt_stream *st
     }
 }
 
-/* The true bytes are gone from the ring: send the 16-byte placeholder that
- * tells the receiver the sender knows about the hole (§4.4 item 2). */
-static void tbt_tx_predict_locked(struct tbt_session *sess, struct tbt_stream *st, u64 seq)
-{
-    struct tbt_frame *fr;
-    u8 token[TBT_PREDICT_TOKEN_LEN] = {};
-
-    if (st->tx_predict_seq == seq && st->tx_predict_ns &&
-        tbt_now_ns() - st->tx_predict_ns < TBT_PREDICT_MIN_NS)
-        return;
-    fr = tbt_frame_alloc(TBT_PREDICT_TOKEN_LEN, GFP_ATOMIC);
-    if (!fr)
-    {
-        sess->dbg_alloc_fail++;
-        return;
-    }
-    tbt_put_le64(token + 8, seq); /* withheld_seq; the rest stays zero */
-    memcpy(fr->data, token, sizeof(token));
-    fr->hdr = (struct tbt_hdr){
-        .type = TBT_F_PREDICT,
-        .flags = TBT_FF_MUST_ORDER,
-        .body_len = TBT_PREDICT_TOKEN_LEN,
-        .sid_lo = (u32)st->sid,
-        .seq = seq,
-        .conv = TBT_CONV,
-    };
-    fr->hdr.sid_hi = (u8)(st->sid >> 32);
-    fr->st = st;
-    refcount_inc(&st->refs);
-    list_add_tail(&fr->list, &sess->tx_q);
-    sess->tx_queued += TBT_PREDICT_TOKEN_LEN;
-    sess->predict_tx++;
-    st->tx_predict_seq = seq;
-    st->tx_predict_ns = tbt_now_ns();
-}
-
-static void tbt_tx_cancel(struct tbt_session *sess, struct tbt_stream *st, u64 seq)
-{
-    struct tbt_frame *fr = tbt_frame_alloc(0, GFP_ATOMIC);
-
-    if (!fr)
-        return;
-    fr->hdr = (struct tbt_hdr){
-        .type = TBT_F_CANCEL,
-        .sid_lo = (u32)st->sid,
-        .seq = seq,
-        .conv = TBT_CONV,
-    };
-    fr->hdr.sid_hi = (u8)(st->sid >> 32);
-    fr->st = st;
-    refcount_inc(&st->refs);
-    tbt_tx_enqueue(sess, fr, false);
-    tbt_tx_wake(sess);
-}
-
-/* Pop this stream's repaired holes in seq order and cancel any placeholder
- * that covered them. Each stream owns its ring and counters, so one stream's
- * unrepaired head cannot block another. */
+/* Pop this stream's repaired holes in seq order. Each stream owns its ring
+ * and counters, so one stream's unrepaired head cannot block another. */
 static void tbt_tx_holes_repaired(struct tbt_session *sess,
                                    struct tbt_stream *st)
 {
     struct tbt_hole *holes;
-    u64 ack, cancel = 0;
+    u64 ack;
 
     if (!st)
         return;
@@ -1017,9 +961,6 @@ static void tbt_tx_holes_repaired(struct tbt_session *sess,
 
         if (holes[idx].seq + holes[idx].len > ack)
             break;
-        if (st->tx_predict_seq >= holes[idx].seq &&
-            st->tx_predict_seq < holes[idx].seq + holes[idx].len)
-            cancel = st->tx_predict_seq;
         if (debug >= 2)
             pr_info_ratelimited("tbtun: hole repair seq=%llu age_us=%llu\n",
                                 holes[idx].seq,
@@ -1029,11 +970,6 @@ static void tbt_tx_holes_repaired(struct tbt_session *sess,
         sess->holes_repaired++;
     }
     spin_unlock(&sess->tx_lock);
-    if (cancel)
-    {
-        WRITE_ONCE(st->tx_predict_seq, 0);
-        tbt_tx_cancel(sess, st, cancel);
-    }
 }
 
 /* The geometric hole test, run once per FBK. The gate is the important part:
@@ -1041,8 +977,7 @@ static void tbt_tx_holes_repaired(struct tbt_session *sess,
  * frame, and every other live path must have moved past it. `g` is 1 plus the
  * number of later frames the peer has actually received, i.e. the depth the
  * hole has reached; p_late(g) < 0.919^k_max_hole declares it lost. */
-void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st,
-                       u16 fbk_mask)
+void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st)
 {
     struct tbt_retain *r, *hole = NULL;
     u64 ack, now;
@@ -1073,10 +1008,10 @@ void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st,
     }
     if (!hole || hole->seq > ack)
     {
-        /* The bytes at the ack are no longer in the ring: a placeholder is the
-         * only thing left to send (DESIGN.md §4.4 item 2). */
-        if (ack < READ_ONCE(st->tx_seq))
-            tbt_tx_predict_locked(sess, st, ack);
+        /* The bytes at the ack are no longer in the ring. There is no
+         * placeholder frame: delivery never advances across a gap, and the
+         * receiver's bounded hole budget resets the stream if the true bytes
+         * never arrive (DESIGN.md §4.6 case B). */
         goto unlock;
     }
     if (hole->declared || !hole->sends)
@@ -1695,8 +1630,6 @@ int tbt_tx_pump(struct tbt_session *sess)
                 if (sess->tunnel->cfg.tunnel_rate && sess->tokens < fr->len)
                     continue;
             }
-            if (type == TBT_F_PREDICT && c->spec_bytes + fr->len > TBT_MAX_SPEC_BYTES)
-                continue;
             /* Reserve the path now, not on write success: the duplicate copy
              * of this seq is selected later in the same pass and must see the
              * primary's path in the mask. */
@@ -1875,13 +1808,6 @@ drop:
                 if (!READ_ONCE(sess->far_sid) && READ_ONCE(sess->n_pending))
                     queue_delayed_work(system_dfl_wq, &sess->w_pending,
                                        msecs_to_jiffies(1));
-                break;
-            case TBT_F_PREDICT:
-                c->spec_bytes += fr->len;
-                c->payload_bytes_sent += fr->len;
-                c->spec_path_end = c->payload_bytes_sent;
-                if (c->spec_bytes > sess->spec_bytes_max)
-                    sess->spec_bytes_max = c->spec_bytes;
                 break;
             case TBT_F_DATA:
             {
