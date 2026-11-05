@@ -1819,9 +1819,17 @@ fec_hysteresis=8
 
 | 目标 | 架构 | 结论 |
 |---|---|---|
-| `192.168.123.254` | MIPS MT7621 / 1004Kc | 不是 1G 平台；见 §12.1–12.4 |
-| `192.168.123.74` | **x86_64 Athlon X4 760K / 4×1.8 GHz / AVX1 / 19.5 GB / RTL8168 单队列 1G** | **1G 物理口的功能/性能候选**；装 headers 后可跑 grouped；单 IRQ/单队列是瓶颈；不是 ARM64，但用户确认「ARM64 优先、非硬性」 |
-| ARM64（`.65`，侦察中） | 待确认 | 1G 目标的唯一候选；等 `review/arm64-target.md` |
+| `192.168.123.254` | MIPS MT7621 / 1004Kc V2.15 / 2×880 MHz / 无 MSA / 440 MiB / kernel 3.4.113 | **不是 1G 平台**；见 §12.1–12.4 |
+| `192.168.123.74` | x86_64 Athlon X4 760K / 4×1.8 GHz / AVX1 / 19.5 GB / RTL8168 单队列 1G | 1G 物理口的功能候选；不是 ARM64；未实测 grouped |
+| **`192.168.123.65`** | **ARM64 RK3588 LubanCat-5 V2：4×Cortex-A76 2.3 GHz + 4×Cortex-A55 1.8 GHz，NEON（无 SVE），7.7 GiB，kernel 6.1.172，headers/gcc 15.2.0 齐全；eth0 `st_gmac` 1G 单队列，IRQ 全 CPU0，RPS off，rx_drops 13.8 万** | **同网段唯一确认的 ARM64 目标**；适合移植/构建，**不是干净 benchmark 机**（mihomo/mediamtx/ffmpeg/frpc/rclone 共享负载；单队列 + IRQ CPU0 是瓶颈） |
+
+**1G 验收的前提**：
+
+1. **`.65` 需要维护窗口或独立接口**：当前是共享生产机，且 `st_gmac` 单队列、IRQ 全在 CPU0、RPS off；即使 FEC 编码只占 5–15%，TCP 的 22–31% 也会和 IRQ 抢 CPU0。验收时要么停掉 mihomo/mediamtx/ffmpeg，要么用独立网卡/接口。
+2. **构建需要 6.1 的 `system_dfl_wq` 适配**：overhaul 会加 shim；FEC 侧不重复造。
+3. **`.74` 不是 ARM64**，`.254` 的 MIPS 不行；`.65` 是唯一确认的 ARM64 目标。
+
+**纸面结论**：grouped 32×8 在 1G 物理口 / app 500–750 Mbit/s 是纸面可行（编码 667 MB/s–2.0 GB/s，A76 NEON 预计 5–15% 单核）；单 256 码不可行。**未实测**：RK3588 的实际 NEON 吞吐、`st_gmac` 单队列在 1G 下的 pps 上限、生产负载对测量的污染。
 
 **`.74` 的定位**：可以做 1G 物理口的功能与性能测试（装内核 headers 后可编译模块）；但它是 x86_64 + AVX1 + 单队列，不能代表 ARM64 的 NEON/多核表现。**ARM64（`.65`）仍优先，但不是硬性前提。**
 
