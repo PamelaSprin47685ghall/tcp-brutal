@@ -719,7 +719,13 @@ M_group = clamp(ceil(1.3 × W × p) + 1, 1, 4)   /* W = 2(8 - M_group) */
 | <=30% | 5 | 3 | 6 | 6 | 37.5% | 375 | 99.9% |
 | p>30% | 6 | 2 | 4 | 4 | 25% | 250 | 100% |
 
-**p=30% 的诚实边界**：`M=4/d=8` 只有 99.5%，达不到 99.9%；要 99.9% 必须 `M=5/d=6`（app 降到 375M）或 `M=6/d=4`（250M）。这是 32×8 分组在 p=30% 的硬上限，不是实现问题。
+**tradeoff（定稿）**：
+
+- `p=5%` 要 99.9% → `M=3/d=10`（app 625M）；`M=2/d=12` 只有 98.9%。
+- `p=30%` 要 99.9% → `M=5/d=6`（app 375M）；`M=4/d=8` 只有 99.5%。
+- `M=4/500M` 在 p=30% 的 99.5% 是硬上限，不是实现问题。
+
+**控制器按 p 选 M，不承诺「任意 p 都 99.9% + 500M」**；p 越高，app 越低，这是信息论的代价。
 
 **控制器**：`M = clamp(ceil(1.3×W×p)+2, 1, 6)`，按 p 在 M=2..6 间切；滞回 1（M 变化 >=1 就切，因为 M 只有 1..6）。
 
@@ -1821,13 +1827,14 @@ fec_hysteresis=8
 |---|---|---|
 | `192.168.123.254` | MIPS MT7621 / 1004Kc V2.15 / 2×880 MHz / 无 MSA / 440 MiB / kernel 3.4.113 | **不是 1G 平台**；见 §12.1–12.4 |
 | `192.168.123.74` | x86_64 Athlon X4 760K / 4×1.8 GHz / AVX1 / 19.5 GB / RTL8168 单队列 1G | 1G 物理口的功能候选；不是 ARM64；未实测 grouped |
-| **`192.168.123.65`** | **ARM64 RK3588 LubanCat-5 V2：4×Cortex-A76 2.3 GHz + 4×Cortex-A55 1.8 GHz，NEON（无 SVE），7.7 GiB，kernel 6.1.172，headers/gcc 15.2.0 齐全；eth0 `st_gmac` 1G 单队列，IRQ 全 CPU0，RPS off，rx_drops 13.8 万** | **同网段唯一确认的 ARM64 目标**；适合移植/构建，**不是干净 benchmark 机**（mihomo/mediamtx/ffmpeg/frpc/rclone 共享负载；单队列 + IRQ CPU0 是瓶颈） |
+| **`192.168.123.65`** | **ARM64 RK3588 LubanCat-5 V2：4×Cortex-A76 r4p0 2.3 GHz + 4×Cortex-A55 r2p0 1.8 GHz；NEON（asimd，无 SVE）；7.73 GiB；kernel 6.1.172（gcc 15.2.0，headers 齐全，MODVERSIONS=y，MODULE_SIG off）；eth0 `st_gmac` 1000 Mb/s 单队列（1 RX/1 TX），IRQ 全 CPU0，RPS off，rx_drops 13.8 万；无 kprobe（tbtun 不需要）** | **同网段唯一确认的 ARM64 目标**；适合移植/构建；**不是干净 benchmark 机**（mihomo/mediamtx/ffmpeg/frpc/rclone 共享负载，load 0.35） |
 
 **1G 验收的前提**：
 
-1. **`.65` 需要维护窗口或独立接口**：当前是共享生产机，且 `st_gmac` 单队列、IRQ 全在 CPU0、RPS off；即使 FEC 编码只占 5–15%，TCP 的 22–31% 也会和 IRQ 抢 CPU0。验收时要么停掉 mihomo/mediamtx/ffmpeg，要么用独立网卡/接口。
-2. **构建需要 6.1 的 `system_dfl_wq` 适配**：overhaul 会加 shim；FEC 侧不重复造。
-3. **`.74` 不是 ARM64**，`.254` 的 MIPS 不行；`.65` 是唯一确认的 ARM64 目标。
+1. **`.65` 需要维护窗口或独立接口**：eth0 是单队列、IRQ 全在 CPU0、RPS off；即使 FEC 编码只占 5–15%，TCP 的 22–31% 也会和 IRQ 抢 CPU0。eth1 可用（当前 NO-CARRIER），建议验收时用 eth1 或停掉生产负载。
+2. **构建需要 6.1 的 `system_dfl_wq` 适配**：源码有 16 处引用；overhaul 会加 shim，FEC 侧不重复造。
+3. **256-carrier 受 ABI 硬限 16 限制**：旧 wire 的 `TBT_MAX_CARRIERS_LIMIT=16`；FEC 的独立 v6 wire（conv 0x1001）绕开它，但旧 ARQ 不做硬改。
+4. **`.74` 是 x86_64**（Athlon X4 760K），`.254` 是 MIPS；两者都不是 ARM64 目标。
 
 **纸面结论**：grouped 32×8 在 1G 物理口 / app 500–750 Mbit/s 是纸面可行（编码 667 MB/s–2.0 GB/s，A76 NEON 预计 5–15% 单核）；单 256 码不可行。**未实测**：RK3588 的实际 NEON 吞吐、`st_gmac` 单队列在 1G 下的 pps 上限、生产负载对测量的污染。
 
