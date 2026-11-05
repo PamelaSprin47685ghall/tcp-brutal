@@ -79,8 +79,11 @@ grouped entries close the remaining lifetime, wire and input-handling findings.
   bound against the peer's contiguous delivered offset, sized once per pump pass
   as `k × mean BDP`, where `mean_BDP = mean_srtt × Σ BBR rate` and
   `k = (RTO + one_way + feedback_delay) / mean_srtt` (2–5 on the measured paths),
-  with a 1 MiB floor, a cap at `rx_reorder_bytes`, immediate growth and a 25%
-  shrink hysteresis. `RTTVAR` is the largest per-carrier `mdev_us`,
+  with a 1 MiB bootstrap value (no sample yet), a two-frame liveness floor, a
+  cap at `rx_reorder_bytes`, immediate growth and a 25% shrink hysteresis. The
+  1 MiB value must not override `k × B` once a sample exists: a 70 KB BDP at
+  k=2 would become a 15×-B window whose 3.4 s drain at 2.4 Mbit outlived the
+  1.5 s hole budget and aborted the strict phase with EPIPE. `RTTVAR` is the largest per-carrier `mdev_us`,
   `one_way = mean_srtt / 2`, and the feedback delay is the measured uack lag,
   floored at the 10 ms FBK cadence. A sum of per-carrier BDPs, a max-RTT product
   and a cwnd sum are not bounds: the sender splits deterministically, so jitter,
@@ -105,7 +108,13 @@ grouped entries close the remaining lifetime, wire and input-handling findings.
   gains `delivery_rate_bps`, `cwnd_bytes` and `snd_wnd`; the `c3` line gains
   `tx_window`, `rtt_mean_us`, `rttvar_us`, `rtt_max_us`, `txq_max`,
   `stall_idle_skips`, `stall_declared`, `pump_hw_armed` and `pump_hw_fired`; the
-  `live` line gains `car_sndbuf`.
+  `live` line gains `car_sndbuf`. Local harness note: the single-guest QEMU
+  bench terminates each carrier at libslirp 4.9.5, which does not parse
+  `TCPOPT_WINDOW`, so its SYN-ACK carries no window scale and the local
+  carrier is capped at 64 KiB / RTT = 2.40 Mbit/s at 218 ms (`snd_wnd=65535`,
+  `wscale=0`, `rmem_alloc=0`). The tunnel delivered 2.35 Mbit/s, 98% of that
+  cap: a harness artifact, not a module limit. A non-slirp link or the real
+  WAN is required for a >1 MiB carrier window.
 - **Shared statistics counters:** every session counter with more than one writer
   context is `atomic64_t`, incremented with `atomic64_inc/add` and read through
   `tbt_stat_read()`, so concurrent carriers and stream workers can no longer lose

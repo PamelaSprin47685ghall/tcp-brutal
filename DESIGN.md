@@ -868,9 +868,17 @@ the only rate source. This kernel has no `tcp_sock.delivery_rate` field: `tcp_ra
 stores the sample BBR's bandwidth filter consumes, `rate_delivered` packets over
 `rate_interval_us`; multiply by `mss_cache` for bytes/s. The byte budget is
 
-    W = min(R or credit, max(k × mean_BDP, 1 MiB))
+    W = min(R or credit, max(k × mean_BDP, 2 × TBT_PAYLOAD_MAX))
     mean_BDP = mean_srtt × Σ delivery_rate_i
     k = (RTO + one_way + feedback_delay) / mean_srtt
+
+The 1 MiB value is a bootstrap floor only: it applies while no carrier has a
+rate/RTT sample (`k × mean_BDP` undefined). Once a sample exists, the window
+is `k × mean_BDP` and a 1 MiB floor must not override it: on a 2.4 Mbit carrier
+with `mean_BDP` 70 KB and `k = 2`, a 1 MiB window is 15 × B, drains in 3.4 s,
+and outlives the 1.5 s hole budget (measured: the strict phase aborted with
+EPIPE). The only floor after bootstrap is two maximum frames, the liveness
+bound below which no frame can pass.
 
 where `mean_srtt` is the delivery-weighted mean SRTT across carriers (the RTT an average
 byte sees), `RTTVAR` is the largest per-carrier `mdev_us` (the spread reordering must
@@ -884,8 +892,8 @@ SRTT + 4 × RTTVAR shape TCP uses for its own RTO.
 
 **Why not `max RTT × total rate`.** The sender splits deterministically, so the variable is
 link jitter, not a persistently slow carrier: a slow carrier is a jitter sample, not the
-expected demand. With the jitter term and the 1 MiB floor, `k` is 2–5 on the measured
-paths; the regression reports `k = W / mean_BDP`. A heavy tail needs a high percentile of
+expected demand. With the jitter term, `k` is 2–5 on the measured paths; the regression
+reports `k = W / mean_BDP`. A heavy tail needs a high percentile of
 the spread, which only widens the target. It is never an upper bound: the hard bound is
 `R` or a receiver credit. `2 × Σ BDP_i`, a single mean sample, and `Σ snd_cwnd` /
 `Σ snd_wnd` are not bounds either.
@@ -911,10 +919,11 @@ while the tunnel's in-flight spans every carrier. `snd_cwnd` and `snd_wnd` are
 cross-checks, never inputs.
 
 **Bootstrap and hysteresis.** At session birth no carrier has a sample (`delivery_rate` or
-`srtt_us` is zero), so the window starts at the 1 MiB floor and grows as samples arrive.
-It is recomputed once per pump pass, not per frame: grow immediately, shrink only when the
-new estimate is below 75% of the current window, so one stale sample cannot collapse a
-window that is already filling the path.
+`srtt_us` is zero), so the window starts at 1 MiB (bootstrap only) and switches to
+`k × mean_BDP` as soon as a sample exists. It is recomputed once per pump pass, not per
+frame: grow immediately, shrink only when no retransmit was queued in the last second and
+the new estimate is below 75% of the current window, so one stale sample or one hole
+cannot collapse a window that is already filling the path.
 
 **Bounds.** The window is capped at `R`: `rx_reorder_bytes` in this revision, or a receiver
 credit when WINDOW is implemented. A frame beyond the peer's reorder budget is a stream
@@ -948,7 +957,18 @@ cap, and the CPU cost of one pegged kworker dropping from 98-99% to 2%; it did n
 the 13.7 Mbit/s acceptance target because the carrier's advertised window stayed at
 64 KiB, which is the open item. The old configuration was
 internally inconsistent: 128 KiB is 0.275 × BDP on that path, while a 30 s hole budget is
-about 137 RTTs; the byte budget and the time budget contradicted each other. The
+about 137 RTTs; the byte budget and the time budget contradicted each other.
+
+**Local harness limit.** The single-guest QEMU bench terminates each carrier's TCP at
+libslirp, and libslirp 4.9.5 does not parse `TCPOPT_WINDOW`, so its SYN-ACK carries no
+window scale; Linux then fixes `snd_wscale = rcv_wscale = 0` and clamps `window_clamp` to
+65535. A local carrier is therefore capped at 65535 B / RTT = 2.40 Mbit/s at 218 ms no
+matter how large the module's buffers are (measured: `snd_wnd=65535`, `wscale=0`,
+`rmem_alloc=0`, `rcv_wnd=5.7 MB`, `window_clamp=5.7 MB`; the tunnel delivered
+2.35 Mbit/s = 98% of the cap). This is a harness artifact, not a module limit; a
+non-slirp link (two guests with `-netdev socket`) or the real WAN is required to exercise
+a carrier window above 1 MiB. The module still sizes its listener before `listen`, because
+on a real link that listener is the far endpoint whose SYN-ACK fixes the scale. The
 regression verifies `W`, `R` and `k` together (`W ≥ in-flight`, `R ≥ W`,
 `k = W / mean_BDP` in 2–5) and reports per-carrier SRTT and RTTVAR, the RTT distribution
 and `N`, in-flight bytes, reorder-tree occupancy, `hole_budget_ms` and the RTO; it must
@@ -2380,7 +2400,7 @@ controls do not apply; these replace them.
 9. A DATA frame is written only inside the send window `seq + len <= tx_ack + tx_window`,
    where `tx_ack` is the peer's contiguous delivered (received) offset and `tx_window` is
    the configured value or the BBR-derived auto value, capped at `rx_reorder_bytes` (the
-   auto value's 1 MiB floor is itself subject to that cap). A conforming peer therefore
+   auto value's bootstrap 1 MiB and the two-frame liveness floor are subject to that cap). A conforming peer therefore
    cannot make the reorder tree exceed `rx_reorder_bytes`; a non-conforming one is killed
    with `TBT_ST_REORDER`.
    The cap is a configuration contract until a WINDOW credit exists (§5.4).
