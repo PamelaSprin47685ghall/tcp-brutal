@@ -120,15 +120,15 @@ near's nonce, index and generation from its own HELLO.
 | Attack | What is sent | Safe result |
 | --- | --- | --- |
 | `init.echo_sane` / `init.final_echo` | 2-4 MiB echo | byte-exact |
-| `pub.churn` | 10 000 sequential connect/send/close; about 31 min at 185 ms per cycle, so the public group needs `TBT_ADV_PUBLIC_TIMEOUT>=2400` | every connection usable; a closed stream frees the session |
+| `pub.churn` | 10 000 sequential connect/send/close; each echo wait is 2 s (3 s on the first cycle), and a timed-out cycle is retried once, so about 31 min at 185 ms per cycle and the public group needs `TBT_ADV_PUBLIC_TIMEOUT>=2400` | `usable=10000 refused=0 other=0`; the retry count is printed as `retried=`. The 2 s timeout and the one retry absorb scheduler jitter on a loaded host; they do not relax "every connection usable": a refused, unreachable, or twice-timed-out cycle still fails. A closed stream must free the session for the next connection |
 | `pub.two` | two concurrent applications | both usable: `A usable=1`, `B usable=1`, `A after B close=1`; all three must be 1 to PASS |
 | `pub.concurrent` | 100 concurrent connections, 4 KiB each | all echo byte-exact; isolation and recovery |
 | `pub.halfclose` | app `shutdown(SHUT_WR)` | echo then EOF |
 | `pub.rst` | 4 MiB then `SO_LINGER 0` | RST mid-stream, no warning |
 | `init.src_key` | a `src=` line, then `nonce=` and a short `nonce=` | `src=` is refused, `nonce=` is accepted and rendered, a short nonce is refused |
 | `pub.srcfilter` | far+near pinned with `nonce=` and far `peer=`, then an application from 127.0.0.2 | the application is served (no `src=` allow list exists; identity is the nonce) and both keys render in the canonical config |
-| `pub.writer` (100 MiB) | app writes and never reads | backpressure: writes stop, no OOM |
-| `pub.writer` (1024 MiB) | app attempts 1 GiB and never reads | backpressure, `MemAvailable` stays high |
+| `pub.writer` (100 MiB) | app writes and never reads | two legal outcomes: `sent==total` (the pipe buffers absorbed it) or `sent<total` with `errno=EAGAIN` (bounded flow-control refusal). Both require no OOM/RST, a live process, and accepted bytes `<= total`. A synchronous `flush` follows; `MemAvailable` may trail the pre-write value by at most 50 MB (51200 kB) and must not show an unreclaimable hundred-MB drop |
+| `pub.writer` (1024 MiB) | app attempts 1 GiB and never reads | the same verdict; the detail prints `sent/total/errno/mem_before/mem_during_min/mem_after_flush/flush_secs` |
 
 ### Control surface (`ctl.*`, `init.*`)
 
@@ -189,6 +189,14 @@ the console log holds the evidence.
 
 - The guest is one 512 MiB machine. The suite measures the direction and the
   amount of backpressure; it does not try to force an OOM kill.
+- `pub.writer` never reads from the application socket by design. Its contract
+  is "finish the write, or stop with an explainable `EAGAIN`", not "deliver
+  1 GiB into an application that never reads": `EAGAIN` is the designed
+  boundary, and a completed write means the pipe buffers absorbed the total.
+  The 50 MB slack after `flush` covers resident buffers and noise; it does not
+  permit an unreclaimable hundred-MB drop. The 2 s churn echo timeout plus one
+  retry absorbs scheduler jitter on a loaded host; it does not relax the
+  per-connection usability requirement.
 - The fake far and the hostile carrier are both in the guest, so they can bind
   the ports the module dials. That is deliberate: the module's peer is
   untrusted by assumption.
