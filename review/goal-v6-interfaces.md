@@ -613,6 +613,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **HND0 验收口径**：`W≈k×BDP`（203ms×17M→~862KB；1MiB cap 下 ~750KB），不用 lab 的 136–250KB 绝对值；通过条件仍是 `rc=0`、far `holes=0`、`fbk_rx>0`、`carrier_lost=0`、`raw lost=0`。
 
+**重跑状态**：E 上一轮 `t9` 仍是旧 `rx_reorder_bytes=262144` 配置，**不作数**；wan-deploy 会话 orphan，新 worker `hnd0-n1b` 按新 spec（两端 1MiB）执行 HND0 N=1 auto；等 `rc/W/fbk/holes` 证据。T1 未绿，`w-window` 不合并。
+
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
 
 | 项 | 内容 |
@@ -633,7 +635,7 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 | 通过 | TC1 + 256-bit KAT 逐字节；body-only（HTTP 头/FEC 头明文）；默认开、`crypto=off` 可关；HND0 MB/s/cycles/byte 记录；1G 单核占用 ≤25% |
 | 失败 | KAT 不符、头被加密、无法关闭、CPU 超预算 |
 
-**T3 现状（未完成）**：C2 `w-crypto 33238ca` 加 `tbt_crypto_pair {tx,rx}`、per-direction nonce、等 nonce 拒绝、HELLO 双向；KAT 55/55，`make check`/`host-test`/`host-test-san` 绿；bench 1207–1221 MB/s、4.01–4.06 c/B、1G 10.2–10.4% 单核。HND0 优化版 bench 仍等 `microbench2`；T3 未完成（等 bench + B 后 rebase）；不合并。
+**T3 现状（G3 通过，待 B 后 rebase）**：C2 `w-crypto 33238ca` 加 `tbt_crypto_pair {tx,rx}`、per-direction nonce、等 nonce 拒绝、HELLO 双向；KAT 55/55，`make check`/`host-test`/`host-test-san` 绿；HND0 ChaCha8 8KiB max **635.0 MB/s / 3.46 c/B / 19.7% 单核**（median 24.7%），body-only/per-direction/default/可关。T3 标完成；合并前等 B 后 rebase；不合并。
 
 ### G4 — T4 SC-LDPC BEC 容量门（D）
 
