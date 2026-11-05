@@ -773,8 +773,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "ooo_frames=%u retain_bytes=%u tx_ack=%llu rx_ack=%llu "
                               "peer_paused=%u fb_delay_us=%u rto_us=%u una_stall_us=%u "
                               "stall_paused_skips=%llu stall_idle_skips=%llu "
-                              "stall_declared=%llu tx_window=%u rtt_max_us=%u "
-                              "txq_max=%u win_block=%llu win_resume=%llu "
+                              "stall_declared=%llu tx_window=%u rtt_mean_us=%u rttvar_us=%u "
+                              "rtt_max_us=%u txq_max=%u win_block=%llu win_resume=%llu "
                               "pump_hw_armed=%llu pump_hw_fired=%llu\n",
                            t->cfg.id, n, up, tbt_stat_read(&s->carrier_lost),
                            tbt_stat_read(&s->carrier_replaced),
@@ -803,7 +803,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->stall_paused_skips),
                            tbt_stat_read(&s->stall_idle_skips),
                            tbt_stat_read(&s->stall_declared),
-                           READ_ONCE(s->tx_window), READ_ONCE(s->rtt_max_us),
+                           READ_ONCE(s->tx_window), READ_ONCE(s->rtt_mean_us),
+                           READ_ONCE(s->rttvar_us), READ_ONCE(s->rtt_max_us),
                            READ_ONCE(s->txq_max),
                            READ_ONCE(s->win_block), READ_ONCE(s->win_resume),
                            READ_ONCE(s->pump_hw_armed),

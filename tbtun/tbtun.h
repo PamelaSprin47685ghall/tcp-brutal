@@ -185,12 +185,12 @@ void tbt_listen_stop(struct tbt_tunnel *t);
 #define TBT_CTL_QUEUE_MAX 256
 
 /* Retransmit timer: a retained frame whose last write is older than this and
- * that the peer has not delivered is re-sent on another path. The floor is
- * two feedback intervals, so ordinary ack latency never looks like loss, and
- * it must stay below the receiver's byte budget divided by the data rate or
- * the budget fires first (measured: probe D, 2% loss at 8 MB/s, 256 KiB
- * reorder budget, 40 ms floor: the near reset the stream one run in three). */
-#define TBT_RETX_MIN_US 20000
+ * that the peer has not delivered is re-sent on another path. The timeout is
+ * SRTT + 4 x RTTVAR (tbt_tx_rto_ns); the floor is TCP's 200 ms minimum, so a
+ * jittery path does not declare a frame lost while its ack is still inside
+ * the jitter band. It must stay below the receiver's hole budget: a 200 ms
+ * floor leaves room for a repair to arrive before the 500 ms default. */
+#define TBT_RETX_MIN_US 200000
 #define TBT_RETX_MAX_US 500000 /* must cover 2x the feedback delay */
 
 /* Replay ring: acked frames stay available for re-send for this long, or
@@ -490,7 +490,9 @@ struct tbt_session
      * window cannot be throttled by the old 64 KiB queue. */
     u32 tx_window;
     u32 txq_max;
-    u32 rtt_max_us;
+    u32 rtt_mean_us;  /* delivery-weighted mean SRTT: the window's base */
+    u32 rttvar_us;    /* largest carrier mdev_us: the window's jitter term */
+    u32 rtt_max_us;   /* largest carrier SRTT, a distribution fact */
 
     /* Scheduler: a striping window over the carriers, rebuilt on the lowest
      * inflight and at most every 10 ms. Only the pump touches it. DATA uses
@@ -681,9 +683,6 @@ struct tbt_carrier
                                    * whichever rx work handles the frame, and
                                    * a lost EWMA sample is harmless */
     u32 rtt_min_us;               /* minimum observed RTT; gauge */
-    u32 rtt_hi_us;                /* sliding high-percentile RTT estimate
-                                   * (srtt + 3*mdev with a decaying
-                                   * high-water), written by the 50 ms poll */
     u32 inflight;                 /* snapshot for peers */
     u64 tx_frames;                /* records written here; pump */
     u64 tx_bytes;                 /* bytes written here; pump */

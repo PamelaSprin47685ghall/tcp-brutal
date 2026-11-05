@@ -488,66 +488,79 @@ static u64 tbt_car_delivery_bps(const struct tcp_sock *tp)
     return (u64)delivered * mss * 1000000ULL / interval;
 }
 
-/* The target behind the auto window:
+/* The byte budget behind the auto window:
  *
- *   2 x (max_rtt_p99 + feedback_delay) x sum(delivery_rate_i)
+ *   (mean_srtt + 4 x RTTVAR + feedback_delay) x sum(delivery_rate_i)
  *
  * This is not a second congestion controller: each carrier's TCP owns
  * congestion control, and this value only decides how many
  * delivered-but-unacked bytes the tunnel may keep in flight so the receiver's
  * reorder tree can absorb cross-path reordering and the 10 ms feedback
- * cadence. max_rtt_p99 is the slowest carrier's sliding high percentile
- * (srtt + 3*mdev with a decaying high-water, tbt_car_poll_work), not a single
- * mean sample: the slowest carrier's RTT is what a reordered frame on that
- * carrier must survive. Summing per-carrier BDPs (sum 2*rate_i*rtt_i) is not
- * a substitute: with N > 1 and dispersed RTTs the total need tracks
- * (slowest RTT x total rate), and that sum can be below it (uniform
- * 100-300 ms: ~1.54x short at N=4, ~1.44x at N=8; exponential RTTs: 0.96x
- * and 0.74x). The feedback delay is added because the ack that frees the
+ * cadence.
+ *
+ * The sender splits deterministically; what a frame actually experiences is
+ * the path's SRTT plus its jitter. TCP's own loss test is
+ * SRTT + 4 x RTTVAR, so the same two terms form the byte budget: one RTO of
+ * data at the aggregate delivery rate. mean_srtt is the delivery-weighted
+ * mean across carriers (the RTT an average byte sees), not the slowest
+ * carrier's RTT: a slow carrier is a jitter sample, not the expected demand.
+ * RTTVAR is the largest per-carrier mdev_us, i.e. the spread that reordering
+ * must absorb. The feedback delay is added because the ack that frees the
  * window crosses the FBK cadence and the peer's delivery.
  *
- * The ceiling is the receiver's reorder budget, never a sum of congestion
- * windows: a carrier TCP releases cwnd when its own ACK arrives, but those
- * bytes stay in the receiver's reorder tree until the gap fills, so the
- * tunnel lead can exceed sum(snd_cwnd) for a long time; and sum(snd_cwnd) can
- * exceed the reorder budget and overflow the tree. snd_cwnd and snd_wnd are
- * cross-checks only. */
-static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *rtt_out)
+ * This is a target, not a bound. 2 x mean BDP covers most of the distribution
+ * when the jitter is bounded; a heavy tail needs a high percentile of the
+ * spread, which only widens the target. The hard ceiling is the receiver's
+ * reorder budget (or a WINDOW credit), never sum(2 x BDP_i), a single mean
+ * sample, or sum(snd_cwnd)/sum(snd_wnd): a carrier TCP releases cwnd when its
+ * own ACK arrives while those bytes stay in the receiver's tree, and a cwnd
+ * sum can exceed the tree and overflow it. */
+static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
+                             u32 *var_out, u32 *max_out)
 {
-    u64 sum_rate = 0;
-    u32 rtt_max = 0;
+    u64 sum_rate = 0, sum_rtt_rate = 0;
+    u32 rtt_max = 0, var_max = 0;
     int i;
 
     for (i = 0; i < sess->n_car; i++)
     {
         struct tbt_carrier *c = READ_ONCE(sess->car[i]);
         struct tcp_sock *tp;
-        u32 rtt;
+        u32 srtt, mdev;
         u64 rate;
 
         if (!c || !c->sk)
             continue;
         tp = tcp_sk(c->sk);
-        rtt = tbt_path_rtt_us(c);
-        if (READ_ONCE(c->rtt_hi_us) > rtt)
-            rtt = READ_ONCE(c->rtt_hi_us);
+        srtt = READ_ONCE(tp->srtt_us) >> 3;
+        mdev = READ_ONCE(tp->mdev_us);
+        if (!srtt)
+            srtt = READ_ONCE(c->rtt_us);
         rate = tbt_car_delivery_bps(tp);
-        if (!rtt || !rate)
+        if (!srtt || !rate)
             continue;
         sum_rate += rate;
-        if (rtt > rtt_max)
-            rtt_max = rtt;
+        sum_rtt_rate += (u64)srtt * rate;
+        if (srtt > rtt_max)
+            rtt_max = srtt;
+        if (mdev > var_max)
+            var_max = mdev;
     }
-    if (rtt_out)
-        *rtt_out = rtt_max;
-    if (!rtt_max || !sum_rate)
+    if (mean_out)
+        *mean_out = sum_rate ? (u32)(sum_rtt_rate / sum_rate) : 0;
+    if (var_out)
+        *var_out = var_max;
+    if (max_out)
+        *max_out = rtt_max;
+    if (!sum_rate)
         return 0;
     {
         u64 fb = READ_ONCE(sess->fb_delay_us);
-        u64 rtt_eff = (u64)rtt_max +
+        u64 rtt_eff = sum_rtt_rate / sum_rate +
+                      (u64)4 * var_max +
                       max_t(u64, fb, (u64)TBT_FBK_INTERVAL_MS * 1000);
 
-        return 2 * rtt_eff * sum_rate / 1000000ULL;
+        return rtt_eff * sum_rate / 1000000ULL;
     }
 }
 
@@ -560,14 +573,16 @@ static u32 tbt_tx_window(struct tbt_session *sess)
 {
     const struct tbt_cfg *cfg = &sess->tunnel->cfg;
     u64 cap = cfg->rx_reorder_bytes;
-    u32 rtt = 0;
+    u32 mean = 0, var = 0, max = 0;
     u64 win;
 
-    /* Always refresh the RTT gauge, so /proc shows the estimator input even
+    /* Always refresh the RTT gauges, so /proc shows the estimator inputs even
      * when the window is configured explicitly. */
-    win = tbt_tx_bdp_window(sess, &rtt);
-    if (rtt)
-        sess->rtt_max_us = rtt;
+    win = tbt_tx_bdp_window(sess, &mean, &var, &max);
+    sess->rtt_mean_us = mean;
+    sess->rttvar_us = var;
+    if (max)
+        sess->rtt_max_us = max;
     if (cfg->tx_window_bytes)
     {
         win = cfg->tx_window_bytes;
@@ -615,52 +630,56 @@ static bool tbt_tx_window_ok(struct tbt_stream *st, const struct tbt_frame *fr)
            READ_ONCE(st->tx_ack) + READ_ONCE(st->sess->tx_window);
 }
 
-/* Retransmit timeout: four RTTs, floored at two feedback intervals so ordinary
- * ack latency never looks like loss, capped so a dead path is noticed. */
+/* Retransmit timeout, from the same two terms TCP uses: SRTT + 4 x RTTVAR.
+ * The worst carrier sets it, because a frame is only lost when the path that
+ * carried it is silent. The floor is TCP's 200 ms minimum; the feedback delay
+ * (uack lag after the carrier TCP ack) can raise it, and the 500 ms cap makes
+ * a dead path noticeable. A fixed 4 x SRTT was wrong on a jittery path: it
+ * fired on frames whose ack was still inside the jitter band. */
 static u64 tbt_tx_rto_ns(struct tbt_session *sess, struct tbt_stream *st)
 {
-    u32 rtt = 0;
+    u32 rto_us = 0;
     int i;
 
     for (i = 0; i < sess->n_car; i++)
     {
         struct tbt_carrier *c = READ_ONCE(sess->car[i]);
-        u32 r;
+        u32 srtt, mdev, r;
 
-        if (!c)
+        if (!c || !c->sk)
             continue;
-        r = tbt_path_rtt_us(c);
-        if (r > rtt)
-            rtt = r;
+        srtt = READ_ONCE(tcp_sk(c->sk)->srtt_us) >> 3;
+        mdev = READ_ONCE(tcp_sk(c->sk)->mdev_us);
+        if (!srtt)
+        {
+            srtt = tbt_path_rtt_us(c);
+            mdev = 0;
+        }
+        r = srtt + 4 * mdev;
+        if (r > rto_us)
+            rto_us = r;
     }
-    if (!rtt)
-        rtt = TBT_RETX_MIN_US / 4;
+    if (!rto_us)
+        rto_us = TBT_RETX_MIN_US / 4;
     /* Bootstrap: before the first tunnel-level ack the only RTT we can read is
      * the carrier's own, and where only the peer's egress is shaped that
      * sample is ~0.1 ms while the feedback path (peer's egress + FBK cadence)
-     * is ~22 ms. An RTO built from it (the 20 ms floor) retransmits every
-     * frame before its ack arrives; the duplicates then drown the very
-     * feedback that would end the bootstrap (measured: probe J, far
-     * rto_us=20000, srtt_us=80-238, c_rtt_us=0, a 131 KB stream inflated to
-     * 7.7 MB). Hold 200 ms until a tunnel ack lands; after that, 4xRTT. */
+     * is ~22 ms. An RTO built from it retransmits every frame before its ack
+     * arrives; the duplicates then drown the very feedback that would end the
+     * bootstrap (measured: probe J, far rto_us=20000, srtt_us=80-238,
+     * c_rtt_us=0, a 131 KB stream inflated to 7.7 MB). Hold 200 ms until a
+     * tunnel ack lands. */
     if (!READ_ONCE(st->last_ack_ns))
         return 200 * NSEC_PER_MSEC;
-    /* The RTO must exceed the end-to-end feedback delay, not just four RTTs:
-     * a frame whose uack is still in flight (tx_q + carrier buffers + FBK
-     * cadence + the peer's delivery) is not lost. With a 1 MiB carrier buffer
-     * that delay reached 2-4 s and every frame was retransmitted ~16x before
-     * its ack arrived (measured: bench n=4, retx_ppm 558k, wire/app 11.1).
-     * The cap moves to 500 ms for the same reason: 2 x a 200 ms delay does
-     * not fit under 250 ms. */
     {
         u32 fb = READ_ONCE(sess->fb_delay_us);
-        u64 rto_us = (u64)rtt * 4;
+        u64 r = rto_us;
 
-        if (fb && (u64)fb * 2 > rto_us)
-            rto_us = (u64)fb * 2;
-        return clamp_t(u64, rto_us * NSEC_PER_USEC,
-                       TBT_RETX_MIN_US * NSEC_PER_USEC,
-                       TBT_RETX_MAX_US * NSEC_PER_USEC);
+        if (fb && (u64)fb * 2 > r)
+            r = (u64)fb * 2;
+        return clamp_t(u64, r * NSEC_PER_USEC,
+                       (u64)TBT_RETX_MIN_US * NSEC_PER_USEC,
+                       (u64)TBT_RETX_MAX_US * NSEC_PER_USEC);
     }
 }
 
