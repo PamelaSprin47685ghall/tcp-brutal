@@ -1456,13 +1456,26 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
         break;
     }
     spin_unlock(&sess->tx_lock);
-    /* A timestamp stamped on another CPU can be a few nanoseconds ahead of
-     * this CPU's ktime_get_ns(); the unsigned subtraction then looks like a
-     * 584-year stall and kills a healthy stream (measured: probe G, one run in
-     * three, age_us=18446744073709519). */
-    if (start && now > start && ack < READ_ONCE(st->tx_seq) &&
-        now - start > (u64)sess->tunnel->cfg.hole_budget_ms * NSEC_PER_MSEC)
-        kill = true;
+    {
+        /* The configured budget is a floor for a low-RTT path; it must never
+         * fire before this session's own repair can arrive. One RTO finds the
+         * loss, and one more RTO plus a one-way covers the retransmit and its
+         * feedback, so the sender waits at least 2.5 RTOs. This is the same
+         * 2-3 x RTO rule the receiver's hole budget follows, applied where the
+         * RTO is actually known. */
+        u64 budget = (u64)sess->tunnel->cfg.hole_budget_ms * NSEC_PER_MSEC;
+        u64 floor = 5 * tbt_tx_rto_ns(sess, st) / 2;
+
+        if (budget < floor)
+            budget = floor;
+        /* A timestamp stamped on another CPU can be a few nanoseconds ahead
+         * of this CPU's ktime_get_ns(); the unsigned subtraction then looks
+         * like a 584-year stall and kills a healthy stream (measured: probe G,
+         * one run in three, age_us=18446744073709519). */
+        if (start && now > start && ack < READ_ONCE(st->tx_seq) &&
+            now - start > budget)
+            kill = true;
+    }
     if (kill)
     {
         if (debug >= 2)
