@@ -490,7 +490,15 @@ static u64 tbt_car_delivery_bps(const struct tcp_sock *tp)
 
 /* The byte budget behind the auto window:
  *
- *   (mean_srtt + 4 x RTTVAR + feedback_delay) x sum(delivery_rate_i)
+ *   (mean_srtt + 4 x RTTVAR + one_way + feedback_delay) x sum(delivery_rate_i)
+ *
+ * which is k x BDP with k = (RTO + one_way + feedback_delay) / mean_srtt.
+ * The loss clock starts at the frame's send, so a repair cannot arrive
+ * before RTO + one_way; the window must cover that whole interval or the
+ * pipe idles waiting for the repair. The receiver's peak reorder occupancy
+ * is then the whole window (the last BDP is still in flight and arrives
+ * before the repair), so the capacity identity is R >= W = k x BDP, not
+ * (k-1) x BDP.
  *
  * This is not a second congestion controller: each carrier's TCP owns
  * congestion control, and this value only decides how many
@@ -556,8 +564,14 @@ static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
         return 0;
     {
         u64 fb = READ_ONCE(sess->fb_delay_us);
-        u64 rtt_eff = sum_rtt_rate / sum_rate +
-                      (u64)4 * var_max +
+        u64 mean = sum_rtt_rate / sum_rate;
+        /* k x BDP, with k = (RTO + one-way + feedback) / SRTT. The one-way
+         * term is the retransmit's travel time: the loss clock starts when
+         * the frame was sent, and the repair cannot arrive before one more
+         * one-way delay. Counting it makes the peak tree occupancy equal the
+         * window, so R >= W is the capacity identity (not (k-1) x BDP: the
+         * last BDP is still in flight and arrives before the repair). */
+        u64 rtt_eff = mean + mean / 2 + (u64)4 * var_max +
                       max_t(u64, fb, (u64)TBT_FBK_INTERVAL_MS * 1000);
 
         return rtt_eff * sum_rate / 1000000ULL;
