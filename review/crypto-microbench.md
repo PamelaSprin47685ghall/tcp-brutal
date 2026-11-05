@@ -106,6 +106,19 @@
 - 三机均未安装软件、未改服务/网络、未加载模块；`/tmp` 已清空。
 
 
+## 7. 复现
+
+```sh
+cd review/microbench
+./run_chacha_ref.sh --bytes 4 --reps 15 --mhz 2200   # HND0
+./run_chacha_ref.sh --bytes 4 --reps 15 --mhz 1792   # .74
+# AES 锚点
+nice -n 19 taskset -c 0 openssl speed -evp aes-128-cbc -bytes 8192 -seconds 1
+```
+
+脚本会先编译三个参考源文件（符号重命名），再跑三遍；日志见
+`logs/chacha-ref-hnd0.log`、`logs/chacha-ref-x86-74.log`。
+
 ## 8. crypto-v6 实现的 KAT 与吞吐（w-fec 0615b3d）
 
 fec-core2/crypto-v6 的 host 移植（`review/fec-prototype/crypto/`，C99，64-bit counter +
@@ -241,21 +254,7 @@ key 解析、per-direction nonce、pair init/wipe、session 双向。失败即�
 - 与 Ryzen 的 1207–1221 MB/s / 4.01–4.06 c/B / 10.2–10.4% 比：那是同一份代码在
   安静主机上的数字；HND0 的 3.46 c/B 看似更低，是因为 2200 MHz 只是标签频率，
   不能跨机比 c/B，只能比 1G 占比。
-- .65 本轮只做避让检查、未跑：load 0.71（1 分钟），但 mediamtx/ffmpeg 生产服务
-  在跑、有 3 个登录会话。.65 的 33238ca 数字见 §8.1（另一 worker 的窗口），不是
-  本节的 HND0 数据。
+- .65 的 33238ca 数字见 §8.1（07:11 的安静窗口，load 0.15，flock + taskset cpu0）；
+  本节只复核 HND0。
 - 全程未装包、未加载模块、未改网络/服务；HND0 的 `/tmp` 临时目录已删，本地未产生
   临时文件。
-
-## 7. 复现
-
-```sh
-cd review/microbench
-./run_chacha_ref.sh --bytes 4 --reps 15 --mhz 2200   # HND0
-./run_chacha_ref.sh --bytes 4 --reps 15 --mhz 1792   # .74
-# AES 锚点
-nice -n 19 taskset -c 0 openssl speed -evp aes-128-cbc -bytes 8192 -seconds 1
-```
-
-脚本会先编译三个参考源文件（符号重命名），再跑三遍；日志见
-`logs/chacha-ref-hnd0.log`、`logs/chacha-ref-x86-74.log`。
