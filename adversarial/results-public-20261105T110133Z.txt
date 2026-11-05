@@ -1,0 +1,10 @@
+ADV_RESULT init.echo_sane PASS sha=19219a48e6520b88 ECHO_OK bytes=2097152
+ADV_RESULT pub.churn PASS sha=19219a48e6520b88 10000 connect/send/close cycles: usable=10000 refused=0 other=0 (a closed stream must free the session for the next connection)
+ADV_RESULT pub.two PASS sha=19219a48e6520b88 A usable=1, B usable=1, A after B close=1
+ADV_RESULT pub.concurrent PASS sha=19219a48e6520b88 n=100 connected=100 echoed=100 short=0 corrupt=0 timeout=0 isolation=1 recover=1 first_fail=none streams_active=0 streams_total=101; 123 ms
+ADV_RESULT pub.halfclose PASS sha=19219a48e6520b88 app half-close: echo 10 bytes, EOF=1
+ADV_RESULT pub.rst PASS sha=19219a48e6520b88 RST after 4194304 bytes: no warning, module still loaded
+ADV_RESULT init.src_key FAIL sha=19219a48e6520b88 src= is not a key; the documented inbound allow list does not exist
+ADV_RESULT pub.srcfilter FAIL sha=19219a48e6520b88 connection from 127.0.0.2 was accepted=1: no src= allow list exists
+ADV_RESULT pub.writer PASS sha=19219a48e6520b88 attempted 100 MiB, accepted 74979731 bytes then blocked (errno=11), MemAvailable 397328 -> 258816 kB
+ADV_RESULT pub.writer PASS sha=19219a48e6520b88 attempted 1024 MiB, accepted 75044366 bytes then blocked (errno=11), MemAvailable 398588 -> 258828 kB

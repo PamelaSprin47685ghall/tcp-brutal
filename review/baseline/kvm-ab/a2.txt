@@ -1,0 +1,49 @@
+mkinitramfs: endpoint /home/kunweiz/Desktop/vibe/tcp-brutal/host/tbt_burst
+mkinitramfs: /home/kunweiz/.cache/tbtun-build/qemu/initramfs.cpio.gz (5.6M)
+run.sh: qemu accel=kvm kernel=vmlinuz-7.2.9-1-MANJARO timeout=120s probes=B net=1
+run.sh: qemu exited 0; console tail (review/baseline/kvm-ab/a2.log):
+    burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+    [    2.819856] tbtun: hole timefail seq=6414177 age_us=289 rtt_us=345
+    [    2.832255] tbtun: hole timefail seq=7887624 age_us=189 rtt_us=494
+    burst: interleaved coverage phase passed
+    burst: 4 MiB crossed each way
+       established during transfer:
+      sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode                                                     
+       3: 0100007F:4A9D 0100007F:9C40 01 00000020:00000000 01:00000014 00000000     0        0 216 3 00000000aaa084fc 20 4 1 32 32                       
+       5: 0100007F:9C40 0100007F:4A9D 01 00000000:00000000 00:00000000 00000000     0        0 214 3 00000000aa2b364c 20 4 1 50 50                       
+       stats after: debug_loss=1
+    gaps_total=0
+    streams_total=2
+    tunnel 1 capture_runs=145 actor_calls=249 submit_bytes=8388608 tx=9373473 wire=9414327 err=0 short=0
+    tunnel 1 rx_work_runs=172 rx_drain_entries=1056 rx_drain_bytes=9203654 rx_paused_skips=0 rx_adopt_events=1 rx_records=1205 carrier_write_space_runs=1 poll_rescues=2
+    tunnel 1 rx_ready_calls=1198 rx_reads=172 rx_read_bytes=9203654 rx_read_zero=2 rx_resume=0 rx_resume_busy=0 rx_last_drained=32 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=249 rx_delivered=8388608
+    tunnel 1 dbg rcv_nxt=1577504984 copied=1577504983 after=1577504984 qlen=1 allocf=0 over=135 copyf=0 hiwat=0 pdead=0 prun=247 pmoved=1253 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+    tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=7 pub_wmem=0 pub_una=1101442430 pub_nxt=1101442430 car_wmem=992 car_nxt=3740931286 car_copied=3740931286 car_rcvbuf=524288 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+    tunnel 1 txwake=470 txwake_busy=266 txwork=206
+    tunnel 1 ws_calls=1
+    tunnel 1 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 fbk_tx=39 fbk_rx=39 retx_frames=126 retx_bytes=984865 retain_drop=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=8388608 tx_ack=8388608 rx_ack=8388608 peer_paused=0 fb_delay_us=661 rto_us=20000 una_stall_us=46217
+    tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 predict_tx=0 predict_used=0 predict_cancelled=0 rx_max_stall_us=0 hole_checks=15 gate_fail=13 depth_fail=1 time_fail=0
+    tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+    tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0 spec_bytes_max=0
+    tunnel 2 capture_runs=110 actor_calls=254 submit_bytes=8388608 tx=9164332 wire=9203654 err=0 short=0
+    tunnel 2 rx_work_runs=167 rx_drain_entries=1071 rx_drain_bytes=9414327 rx_paused_skips=0 rx_adopt_events=0 rx_records=1253 carrier_write_space_runs=1 poll_rescues=1
+    tunnel 2 rx_ready_calls=1253 rx_reads=167 rx_read_bytes=9414327 rx_read_zero=7 rx_resume=0 rx_resume_busy=0 rx_last_drained=32 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=254 rx_delivered=8388608
+    tunnel 2 dbg rcv_nxt=3657443021 copied=3657443021 after=3657443021 qlen=0 allocf=0 over=202 copyf=0 hiwat=0 pdead=0 prun=208 pmoved=1205 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+    tunnel 2 live rxq=0 rxp=0 txq=0 txp=0 pub_state=7 pub_wmem=0 pub_una=2450308764 pub_nxt=2450308764 car_wmem=0 car_nxt=1978764038 car_copied=1978764038 car_rcvbuf=524288 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+    tunnel 2 txwake=474 txwake_busy=309 txwork=168
+    tunnel 2 ws_calls=1
+    tunnel 2 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 fbk_tx=39 fbk_rx=39 retx_frames=95 retx_bytes=775724 retain_drop=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=8388608 tx_ack=0 rx_ack=0 peer_paused=0 fb_delay_us=355 rto_us=20000 una_stall_us=35439
+    tunnel 2 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 predict_tx=0 predict_used=0 predict_cancelled=0 rx_max_stall_us=0 hole_checks=15 gate_fail=13 depth_fail=0 time_fail=2
+    tunnel 2 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+    tunnel 2 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0 spec_bytes_max=0
+    == probe B: pass
+    TBT_PROBE_RESULT B PASS
+    TBT_TEST_PASS
+    punt!
+    [    2.964883] ACPI: PM: Preparing to enter system sleep state S5
+    [    2.966201] reboot: Power down
+run.sh: probe summary
+  B   PASS
+run.sh: PASS: 1 probe(s) passed, 0 skipped
+wall_s=5.90
+rc=0

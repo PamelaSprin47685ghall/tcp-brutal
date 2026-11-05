@@ -5,49 +5,66 @@ on:
     tags:
       - v*.*.*
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    env:
-      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
 
     steps:
       - name: Check out
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Check that the tag matches the version in brutal.c
+      - name: Check that the tag matches the module version
         run: |
           version=$(./scripts/mkdkmsconf.sh | sed -n 's/^PACKAGE_VERSION="\(.*\)"$/\1/p')
           if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "brutal.c version is $version but the tag is $GITHUB_REF_NAME"
+            echo "module version is $version but the tag is $GITHUB_REF_NAME"
             exit 1
           fi
 
-      - name: Run build script
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential dwarves zstd linux-headers-generic
+
+      - name: Select the newest generic header tree
+        id: kernel
+        run: |
+          kdir=$(ls -d /usr/src/linux-headers-*-generic 2>/dev/null | sort -V | tail -1)
+          if [ -z "$kdir" ] || [ ! -f "$kdir/Makefile" ]; then
+            echo "no kernel header tree found under /usr/src" >&2
+            exit 1
+          fi
+          release=$(basename "$kdir" | sed 's/^linux-headers-//')
+          echo "kdir=$kdir" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+      - name: Build the DKMS tarball
         run: |
           make dkms-tarball
-          mkdir -p build/
-          mv dkms.tar.gz build/tcp-brutal.dkms.tar.gz
+          mkdir -p build
+          mv dkms.tar.gz "build/tbtun-${{ steps.kernel.outputs.release }}.dkms.tar.gz"
+
+      - name: Build the module
+        run: |
+          make KERNEL_DIR="${{ steps.kernel.outputs.kdir }}" all
+          cp tbtun.ko "build/tbtun-${{ steps.kernel.outputs.release }}.ko"
+
+      - name: Run the host grammar test
+        run: make host-test
 
       - name: Generate hashes
         run: |
-          for file in build/*; do
-            sha256sum $file >> build/hashes.txt
-          done
+          cd build
+          sha256sum ./* > hashes.txt
+          cat hashes.txt
 
-      - name: Upload GitHub
+      - name: Upload GitHub release
         uses: softprops/action-gh-release@v1
         with:
           files: build/*
-
-      - name: Publish to API
-        env:
-          HY2_API_POST_KEY: ${{ secrets.HY2_API_POST_KEY }}
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          code=$(echo "$version" | awk -F. '{ print $1 * 10000 + $2 * 100 + $3 }')
-          curl -fsS -X POST https://api.hy2.io/v1/update \
-            -H "Authorization: $HY2_API_POST_KEY" \
-            -H "Content-Type: application/json" \
-            -d "{\"code\": $code, \"ver\": \"$GITHUB_REF_NAME\", \"chan\": \"tcp-brutal\", \"url\": \"https://github.com/HyNetworks/tcp-brutal/releases\", \"urgent\": false}"

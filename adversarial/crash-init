@@ -1,0 +1,47 @@
+#!/bin/sh
+# crash-init - minimal guest for the config close-flush crash repro.
+#
+# One complete `tunnel` line is applied by write().  A second, identical line
+# is written with no trailing newline from a shell that then exits.  The proc
+# file's release() applies the buffered line, which calls tbt_tunnel_add() in
+# the exiting task.  If that task's nsproxy is already gone, the module
+# dereferences NULL.  No transfer, no other test: this isolates the defect.
+set -u
+
+CFG=/proc/net/tbtun/config
+
+mkdir -p /proc /sys /dev /tmp
+mount -t proc proc /proc || poweroff -f
+mount -t sysfs sysfs /sys 2> /dev/null
+mount -t devtmpfs devtmpfs /dev 2> /dev/null || mount -t ramfs ramfs /dev
+mount -t tmpfs tmpfs /tmp 2> /dev/null
+/bin/busybox ip link set lo up 2> /dev/null ||
+    /bin/busybox ifconfig lo 127.0.0.1 up 2> /dev/null
+
+insmod /tbtun.ko debug=1 || {
+    echo "TBT_REPRO_FATAL insmod failed"
+    poweroff -f
+}
+echo 7 > /proc/sys/kernel/printk 2> /dev/null || true
+
+echo "tunnel 1 role=far profile=raw listen=127.0.0.1:19101 target=127.0.0.1:19070 n=1 m=0" \
+    > "$CFG" || {
+    echo "TBT_REPRO_FATAL first tunnel line rejected"
+    poweroff -f
+}
+echo "REPRO_READY"
+
+# A process that exits with the proc file still open is the trigger: its
+# release runs from task_work after exit_task_namespaces, so current->nsproxy
+# is NULL when tbt_config_apply() reaches tbt_tunnel_add().  adv_probe's
+# partial mode writes the line, does not close the descriptor, and _exit()s,
+# which is exactly that path.  The line is valid and unterminated, so the
+# close flush applies it.
+/bin/adv_probe partial "$CFG" \
+    "tunnel 1 role=near profile=raw listen=127.0.0.1:19102 peer=127.0.0.1:19101 n=1 m=0"
+
+echo "REPRO_SURVIVED"
+sleep 1
+echo "TBT_REPRO_DONE"
+sync
+poweroff -f

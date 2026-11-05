@@ -1,0 +1,35 @@
+=== adversarial/console-catconfig.log ===
+(none)
+=== adversarial/console-cfg_mix.log ===
+(none)
+=== adversarial/console-control.log ===
+(none)
+=== adversarial/console-far.log ===
+411:[    3.705534] workqueue: work func tbt_fbk_work [tbtun] enqueued on deprecated workqueue. Use system_{percpu|dfl}_wq instead.
+=== adversarial/console-final.log ===
+407:[    3.625281] workqueue: work func tbt_fbk_work [tbtun] enqueued on deprecated workqueue. Use system_{percpu|dfl}_wq instead.
+=== adversarial/console-flush.log ===
+(none)
+=== adversarial/console-near.log ===
+(none)
+=== adversarial/console-param.log ===
+(none)
+=== adversarial/console-port.log ===
+(none)
+=== adversarial/console-public.log ===
+(none)
+=== adversarial/console-replay.log ===
+(none)
+=== adversarial/console-resource.log ===
+(none)
+=== adversarial/console-rmmod.log ===
+405:[    5.649190] Oops: int3: 0000 [#1] SMP NOPTI
+421:[    5.649284] Call Trace:
+=== adversarial/console-slab.log ===
+(none)
+=== adversarial/console-stable.log ===
+(none)
+=== adversarial/console-stall.log ===
+408:[    3.642940] workqueue: work func tbt_fbk_work [tbtun] enqueued on deprecated workqueue. Use system_{percpu|dfl}_wq instead.
+=== adversarial/crash-console.log ===
+(none)

@@ -1,0 +1,125 @@
+=== date ===
+2026-11-05T13:27:21+08:00
+=== git rev-parse HEAD ===
+ee0e5e632c90704c77a4364182e185fe0aed61e1
+=== git status --porcelain ===
+ M .github/workflows/release.yml
+ D .github/workflows/scripts.yml
+ M .gitignore
+ M Makefile
+ M README.md
+ M README.zh.md
+ M benches/qemu/init
+ M benches/run.sh
+ M benches/src/tbt_lat.c
+D  brutal.h
+D  brutal_cc.c
+D  brutal_rules.c
+D  brutal_sockopt.c
+D  example/client.py
+D  example/server.py
+ M flake.nix
+ M scripts/install_dkms.sh
+ M scripts/mkdkmsconf.sh
+D  tools/Makefile
+D  tools/brutalctl.c
+?? .pi/
+?? AGENTS.md
+?? CHANGELOG.md
+?? DESIGN.md
+?? adversarial/
+?? benches/results/20261105T051929-second-connection-val-carriers.csv
+?? benches/results/20261105T051929-second-connection-val.csv
+?? benches/results/20261105T051942-second-connection-val-carriers.csv
+?? benches/results/20261105T051942-second-connection-val.csv
+?? benches/results/20261105T052027-second-connection-val-carriers.csv
+?? benches/results/20261105T052027-second-connection-val.csv
+?? benches/results/20261105T052041-second-connection-val-carriers.csv
+?? benches/results/20261105T052041-second-connection-val.csv
+?? benches/results/20261105T052655-second-connection-meta-carriers.csv
+?? benches/results/20261105T052655-second-connection-meta.csv
+?? benches/results/20261105T052709-hole-cost-meta-carriers.csv
+?? benches/results/20261105T052709-hole-cost-meta.csv
+?? benches/results/20261105T052754-latency-meta-carriers.csv
+?? benches/results/20261105T052754-latency-meta.csv
+?? benches/results/20261105T052836-hole-cost-meta-carriers.csv
+?? benches/results/20261105T052836-hole-cost-meta.csv
+?? benches/results/20261105T053019-flush-hang-meta-carriers.csv
+?? benches/results/20261105T053019-flush-hang-meta.csv
+?? benches/results/20261105T053042-flush-hang-meta-carriers.csv
+?? benches/results/20261105T053042-flush-hang-meta.csv
+?? benches/results/20261105T072953-throughput-carriers.csv
+?? benches/results/20261105T072953-throughput.csv
+?? benches/results/20261105T073256-throughput-carriers.csv
+?? benches/results/20261105T073256-throughput.csv
+?? benches/results/20261105T075128-throughput-carriers.csv
+?? benches/results/20261105T075128-throughput.csv
+?? benches/results/20261105T080509-throughput-carriers.csv
+?? benches/results/20261105T080509-throughput.csv
+?? benches/results/20261105T082157-throughput-carriers.csv
+?? benches/results/20261105T082157-throughput.csv
+?? benches/results/20261105T083143-throughput-carriers.csv
+?? benches/results/20261105T083143-throughput.csv
+?? benches/results/20261105T083643-throughput-carriers.csv
+?? benches/results/20261105T083643-throughput.csv
+?? benches/results/20261105T090643-throughput-carriers.csv
+?? benches/results/20261105T090643-throughput.csv
+?? benches/results/20261105T091501-throughput-carriers.csv
+?? benches/results/20261105T091501-throughput.csv
+?? benches/results/20261105T092610-throughput-carriers.csv
+?? benches/results/20261105T092610-throughput.csv
+?? benches/results/20261105T093213-throughput-carriers.csv
+?? benches/results/20261105T093213-throughput.csv
+?? benches/results/20261105T095727-throughput-carriers.csv
+?? benches/results/20261105T095727-throughput.csv
+?? benches/results/20261105T101144-throughput-carriers.csv
+?? benches/results/20261105T101144-throughput.csv
+?? benches/results/20261105T101820-throughput-carriers.csv
+?? benches/results/20261105T101820-throughput.csv
+?? benches/results/20261105T103235-throughput-carriers.csv
+?? benches/results/20261105T103235-throughput.csv
+?? benches/results/20261105T103713-throughput-carriers.csv
+?? benches/results/20261105T103713-throughput.csv
+?? benches/results/20261105T104844-throughput-carriers.csv
+?? benches/results/20261105T104844-throughput.csv
+?? benches/results/20261105T105910-throughput-carriers.csv
+?? benches/results/20261105T105910-throughput.csv
+?? benches/results/20261105T110314-throughput-carriers.csv
+?? benches/results/20261105T110314-throughput.csv
+?? benches/results/20261105T111603-throughput-carriers.csv
+?? benches/results/20261105T111603-throughput.csv
+?? benches/results/20261105T112245-throughput-carriers.csv
+?? benches/results/20261105T112245-throughput.csv
+?? benches/results/20261105T112725-throughput-carriers.csv
+?? benches/results/20261105T112725-throughput.csv
+?? benches/results/20261105T131203-throughput-carriers.csv
+?? benches/results/20261105T131203-throughput.csv
+?? benches/src/tbt_conn.c
+?? docs/
+?? host/
+?? mptcpd/
+?? openvpn/
+?? review/
+?? scripts/build.sh
+?? tbtun/
+?? tests/
+?? "\344\272\244\346\216\245.md"
+=== git diff --stat ===
+ .github/workflows/release.yml |   61 +-
+ .github/workflows/scripts.yml |   28 -
+ .gitignore                    |   35 ++
+ Makefile                      |  169 +++++-
+ README.md                     |  472 +++++++++++-----
+ README.zh.md                  |  507 +++++++++--------
+ benches/qemu/init             |  173 +++++-
+ benches/run.sh                |   81 ++-
+ benches/src/tbt_lat.c         |   84 ++-
+ flake.nix                     |   78 +--
+ scripts/install_dkms.sh       | 1221 ++++++-----------------------------------
+ scripts/mkdkmsconf.sh         |   85 ++-
+ 12 files changed, 1408 insertions(+), 1586 deletions(-)
+=== module ===
+-rw-r--r-- 1 kunweiz kunweiz 5521408 Nov  5 13:04 tbtun.ko
+5d2e1209f639726dbb4056f34c5b11958a1ced05015abf941327720da8ff57d4  tbtun.ko
+=== uname ===
+7.2.9-1-MANJARO

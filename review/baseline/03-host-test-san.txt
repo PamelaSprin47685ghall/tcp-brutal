@@ -1,0 +1,7 @@
+cc -std=gnu99 -O2 -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -I tbtun -o host/test_http_san host/test_http.c tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
+cc -std=gnu99 -O2 -Wall -Wextra -Werror -g -fsanitize=address,undefined -fno-omit-frame-pointer -I tbtun -o host/test_http_fuzz_san host/test_http_fuzz.c tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
+365 checks, 0 failures
+test_fuzz: seed=1 checks=8349443 failures=0 buffers=200000 bodies=200000
+test_http: seed=0x9e3779b97f4a7c15 checks=249 failures=0
+test_http_fuzz: seed=0x0000000000000001 checks=4078276 failures=0 buffers=200000
+RC=0

@@ -1,0 +1,13 @@
+=== date ===
+2026-11-05T16:27:19+08:00
+=== qemu ===
+none
+=== ports ===
+free
+=== bench lock ===
+no lock
+=== head ===
+ee0e5e632c90704c77a4364182e185fe0aed61e1
+=== module ===
+-rw-r--r-- 1 kunweiz kunweiz 5589640 Nov  5 16:25 tbtun.ko
+96d5a997e6ab86ae410c63304c5d66ad6f1271b01af1859ad7cd4827989da0f1  tbtun.ko

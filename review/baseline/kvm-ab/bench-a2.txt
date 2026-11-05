@@ -1,0 +1,11 @@
+benches/run.sh: scenario=throughput mib=8 n=4 netem=delay|20ms|10ms window=1s accel=kvm
+
+== throughput  (/home/kunweiz/Desktop/vibe/tcp-brutal/benches/results/20261105T163005-throughput-kvm-ab-a2.csv)
+row                         control_mbit   tunnel_mbit         ratio  goodput_mbit  wire_per_app      frames_s cpu_total_pct   kworker_pct            rc        strict
+
+control                             3.39                                      3.39        1.0002                         6.2           0.0             0             1
+n4                                  3.39         11.67          3.44         11.67        0.9894         311.9         147.1         122.3             0             1
+   carriers: /home/kunweiz/Desktop/vibe/tcp-brutal/benches/results/20261105T163005-throughput-kvm-ab-a2-carriers.csv
+   console:  /home/kunweiz/.cache/tbtun-build/bench/console-20261105T163005-throughputkvm-ab-a2.log
+   qemu peak RSS: 239232 kB
+RC=0 WALL=46.75

@@ -146,27 +146,103 @@ static void report(int phase, const struct phase *p, long bytes, uint64_t *s)
 {
     long done = p->done;
     uint64_t sum = 0;
+    long over5 = 0, over20 = 0, h[8] = {0};
+    long first_tail = -1, tn = 0;
+    double tmin = 0, tp50 = 0, tp90 = 0, tp99 = 0, tmax = 0;
+    long nout = 0;
+    char out[64 * 12 + 1];
+    size_t ooff = 0;
     double mean;
 
     if (done <= 0)
     {
-        printf("lat phase=%d complete=%d iters=0 bytes=%ld err=%d failed_at=%ld\n",
+        printf("lat phase=%d complete=%d iters=0 bytes=%ld err=%d failed_at=%ld "
+               "over5ms=0 over20ms=0 hist=empty outliers=none\n",
                phase, p->complete, bytes, p->err, p->failed_at);
         return;
     }
     qsort(s, (size_t)done, sizeof(*s), cmp_u64);
     for (long i = 0; i < done; i++)
+    {
+        long us = (long)(s[i] / 1000);
+        int b;
+
         sum += s[i];
+        if (us > 5000)
+            over5++;
+        if (us > 20000)
+            over20++;
+        if (us < 1000)
+            b = 0;
+        else if (us < 2000)
+            b = 1;
+        else if (us < 5000)
+            b = 2;
+        else if (us < 10000)
+            b = 3;
+        else if (us < 20000)
+            b = 4;
+        else if (us < 50000)
+            b = 5;
+        else if (us < 100000)
+            b = 6;
+        else
+            b = 7;
+        h[b]++;
+        /* The tail is the measurement: keep every sample over 5 ms, up to a
+         * bounded list, so a re-run can show the distribution, not one max. */
+        if (us > 5000 && nout < 64)
+        {
+            int n = snprintf(out + ooff, sizeof(out) - ooff, "%s%ld",
+                             nout ? ";" : "", us);
+
+            if (n > 0 && (size_t)n < sizeof(out) - ooff)
+            {
+                ooff += (size_t)n;
+                nout++;
+            }
+        }
+    }
+    if (!nout)
+        snprintf(out, sizeof(out), "none");
+    out[sizeof(out) - 1] = 0;
+    /* The tail is the hole cost: every sample over 5 ms is one iteration
+     * that hit a hole (the request/response stream carries one frame each
+     * way). Its percentiles are the per-hole distribution the max alone
+     * cannot show. */
+    for (long i = 0; i < done; i++)
+        if (s[i] > 5000ull * 1000)
+        {
+            first_tail = i;
+            break;
+        }
+    if (first_tail >= 0)
+    {
+        tn = done - first_tail;
+        tmin = (double)s[first_tail] / 1000.0;
+        tp50 = (double)s[first_tail + (tn - 1) * 50 / 100] / 1000.0;
+        tp90 = (double)s[first_tail + (tn - 1) * 90 / 100] / 1000.0;
+        tp99 = (double)s[first_tail + (tn - 1) * 99 / 100] / 1000.0;
+        tmax = (double)s[done - 1] / 1000.0;
+    }
     mean = (double)sum / (double)done;
     printf("lat phase=%d complete=%d iters=%ld bytes=%ld min_us=%.1f p50_us=%.1f "
-           "p90_us=%.1f p95_us=%.1f p99_us=%.1f max_us=%.1f mean_us=%.1f "
-           "err=%d failed_at=%ld\n",
+           "p90_us=%.1f p95_us=%.1f p99_us=%.1f p999_us=%.1f max_us=%.1f "
+           "mean_us=%.1f err=%d failed_at=%ld "
+           "over5ms=%ld over20ms=%ld "
+           "hist=0-1ms:%ld;1-2ms:%ld;2-5ms:%ld;5-10ms:%ld;10-20ms:%ld;"
+           "20-50ms:%ld;50-100ms:%ld;100ms+:%ld outliers=%s "
+           "tail_n=%ld tail_min_us=%.1f tail_p50_us=%.1f tail_p90_us=%.1f "
+           "tail_p99_us=%.1f tail_max_us=%.1f\n",
            phase, p->complete, done, bytes, (double)s[0] / 1000.0,
            (double)s[(done - 1) * 50 / 100] / 1000.0,
            (double)s[(done - 1) * 90 / 100] / 1000.0,
            (double)s[(done - 1) * 95 / 100] / 1000.0,
            (double)s[(done - 1) * 99 / 100] / 1000.0,
-           (double)s[done - 1] / 1000.0, mean / 1000.0, p->err, p->failed_at);
+           (double)s[(done - 1) * 999 / 1000] / 1000.0,
+           (double)s[done - 1] / 1000.0, mean / 1000.0, p->err, p->failed_at,
+           over5, over20, h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], out,
+           tn, tmin, tp50, tp90, tp99, tmax);
 }
 
 int main(int argc, char **argv)

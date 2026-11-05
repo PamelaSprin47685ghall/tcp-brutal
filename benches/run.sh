@@ -98,7 +98,7 @@ done
 [ -n "$scenario" ] || { usage; exit 2; }
 
 case $scenario in
-throughput | profile | loss | latency | memory | scale) ;;
+throughput | profile | loss | latency | memory | scale | flush-hang | second-connection | hole-cost) ;;
 all) ;;
 *) die "unknown scenario $scenario" ;;
 esac
@@ -155,6 +155,21 @@ scale)
     [ -n "$window" ] || window=2
     [ -n "$timeout_s" ] || timeout_s=360
     ;;
+flush-hang)
+    [ -n "$mib" ] || mib=8
+    [ -n "$netem" ] || netem='delay|20ms|10ms'
+    [ -n "$timeout_s" ] || timeout_s=240
+    ;;
+second-connection)
+    [ -n "$netem" ] || netem=none
+    [ -n "$timeout_s" ] || timeout_s=120
+    ;;
+hole-cost)
+    [ -n "$iters" ] || iters=2000
+    # 1 ms, not 20 ms: the tail must be holes, not the path's own RTT.
+    [ -n "$netem" ] || netem='delay|1ms|500us'
+    [ -n "$timeout_s" ] || timeout_s=180
+    ;;
 esac
 if [ "$quick" -eq 1 ]; then
     case $scenario in
@@ -209,7 +224,7 @@ free_port_triple()
     return 1
 }
 
-csv_header='stamp,scenario,row,n,m,profile,mib,drop_ppm,iters,bytes,control_mbit,tunnel_mbit,ratio,goodput_mbit,app_mbit,wall_s,wire_bytes,app_bytes,wire_per_app,frames,frames_s,cpu_sys_pct,cpu_softirq_pct,cpu_total_pct,kworker_pct,retx_ppm,dup_tx,inflate_ppm,holes_declared,holes_repaired,holes_unrecoverable,rx_max_stall_us,reorder_max_depth,carriers_up,txq_max,rxq_max,ooo_bytes_max,retain_bytes_max,spec_bytes_max,mem_before_kb,mem_peak_kb,mem_after_kb,proc_rss_before_kb,proc_rss_peak_kb,slab_before_kb,slab_peak_kb,slab_after_kb,slab_top,lat_min_us,lat_p50_us,lat_p90_us,lat_p95_us,lat_p99_us,lat_max_us,lat_mean_us,lat_complete,dropped_by_ppm,connect_fail,alloc_fail,carrier_lost,carrier_replaced,qemu_rss_peak_kb,host_qemu_others,rc,strict,notes'
+csv_header='stamp,scenario,row,git_rev,git_dirty,ko_sha256,src_sha256,src_status,kernel,qemu_sha256,n,m,profile,mib,drop_ppm,iters,bytes,control_mbit,tunnel_mbit,ratio,goodput_mbit,app_mbit,wall_s,wire_bytes,app_bytes,wire_per_app,frames,frames_s,cpu_sys_pct,cpu_softirq_pct,cpu_total_pct,kworker_pct,retx_ppm,fb_delay_us,rto_us,fbk_tx,dup_tx,inflate_ppm,holes_declared,holes_repaired,holes_unrecoverable,rx_max_stall_us,reorder_max_depth,carriers_up,txq_max,rxq_max,ooo_bytes_max,retain_bytes_max,spec_bytes_max,mem_before_kb,mem_peak_kb,mem_after_kb,proc_rss_before_kb,proc_rss_peak_kb,slab_before_kb,slab_peak_kb,slab_after_kb,slab_top,lat_min_us,lat_p50_us,lat_p90_us,lat_p95_us,lat_p99_us,lat_p999_us,lat_max_us,lat_mean_us,lat_complete,lat_over5ms,lat_over20ms,lat_hist,lat_outliers,lat_tail_n,lat_tail_min_us,lat_tail_p50_us,lat_tail_p90_us,lat_tail_p99_us,lat_tail_max_us,dropped_by_ppm,connect_fail,alloc_fail,carrier_lost,carrier_replaced,qemu_rss_peak_kb,host_qemu_others,config,verdict,flush_s,hung,wchan,stack,while_active,errno_active,ms_active,after_close,errno_after,ms_after,rc,strict,notes'
 carrier_header='stamp,scenario,row,carrier,sport,state,profile,bytes,frames,dropped,retx_ppm,inflight'
 
 build_bins()
@@ -217,6 +232,7 @@ build_bins()
     cc=${HOSTCC:-cc}
     "$cc" -std=gnu99 -O2 -Wall -Wextra -Werror -o "$here/bin/tbt_lat" "$here/src/tbt_lat.c"
     "$cc" -std=gnu99 -O2 -Wall -Wextra -Werror -o "$here/bin/tbt_echo" "$here/src/tbt_echo.c"
+    "$cc" -std=gnu99 -O2 -Wall -Wextra -Werror -o "$here/bin/tbt_conn" "$here/src/tbt_conn.c"
     "$cc" -std=gnu99 -O2 -Wall -Wextra -Werror -o "$here/bin/tbt_burst" "$root/host/tbt_burst.c"
 }
 
@@ -274,8 +290,8 @@ run_one()
 
     printf 'scenario=%s\nmib=%s\nnlist=%s\nprofile=raw\ndup=0\n' \
         "$_scen" "$_mib" "$_nlist" > "$bench_cache/bench.txt"
-    printf 'iters=%s\nloss_iters=%s\nloss=%s\nbytes=1024\nnetem=%s\n' \
-        "$_iters" "$_lossiters" "$_losslist" "$_netem" >> "$bench_cache/bench.txt"
+    printf 'iters=%s\nloss_iters=%s\nhole_iters=%s\nloss=%s\nbytes=1024\nnetem=%s\n' \
+        "$_iters" "$_lossiters" "$_iters" "$_losslist" "$_netem" >> "$bench_cache/bench.txt"
     printf 'rx_reorder=2097152\nhole_budget=5000\nwindow=%s\n' "$_window" >> "$bench_cache/bench.txt"
     printf 'profiles=%s\ncontrol=%s\ncontrol_mbit=%s\n' "${only:-raw,http-kal,http-kal-drip}" \
         "$((1 - no_control))" "${control_mbit:-0}" >> "$bench_cache/bench.txt"
@@ -293,7 +309,7 @@ run_one()
     # shellcheck disable=SC2046,SC2086
     "$here/qemu/mkinitramfs.sh" --ko "$root/tbtun.ko" --out "$initrd" \
         --init "$here/qemu/init" --endpoint "$here/bin/tbt_burst" \
-        --bin "$here/bin/tbt_lat" --bin "$here/bin/tbt_echo" \
+        --bin "$here/bin/tbt_lat" --bin "$here/bin/tbt_echo" --bin "$here/bin/tbt_conn" \
         $tc_arg \
         --asset "$bench_cache/bench.txt" --asset "$bench_cache/hostfwd.txt" \
         $(net_assets) > /dev/null || die "initramfs build failed"
@@ -306,14 +322,16 @@ run_one()
     [ -w /dev/kvm ] || accel=tcg
 
     echo "benches/run.sh: scenario=$_scen mib=$_mib n=$_nlist netem=$_netem window=${_window}s accel=$accel"
-    qemu-system-x86_64 \
+    set -- qemu-system-x86_64 \
         -accel "$accel" -cpu max -smp "${TBT_BENCH_SMP:-2}" -m 512 \
         -kernel "$kernel" -initrd "$initrd" \
         -append "console=ttyS0 panic=-1 loglevel=4 tsc=unstable" \
         -nographic -no-reboot -nodefaults \
         -netdev "user,id=n0,hostfwd=tcp::$car_port-:19101,hostfwd=tcp::$echo_port-:19102,hostfwd=tcp::$sink_port-:19103" \
         -device virtio-net-pci,netdev=n0 \
-        -display none -monitor none -serial "file:$console" > "$qlog" 2>&1 &
+        -display none -monitor none -serial "file:$console"
+    qemu_sha256=$(printf '%s\n' "$@" | sha256sum | cut -c1-16)
+    "$@" > "$qlog" 2>&1 &
     qpid=$!
 
     (
@@ -365,14 +383,21 @@ run_one()
     {
         printf '%s\n' "$csv_header"
         awk -v cols="$csv_header" -v stamp="$stamp" -v scen="$_scen" \
-            -v rss="$qemu_rss" -v others="$others" '
+            -v rss="$qemu_rss" -v others="$others" -v grev="$git_rev" \
+            -v gdirty="$git_dirty" -v kosha="$ko_sha256" -v kern="$kernel_name" \
+            -v qsha="$qemu_sha256" -v srcsha="$src_sha256" -v srcstat="$src_status" '
             BEGIN { n = split(cols, c, ","); for (i = 1; i <= n; i++) idx[c[i]] = i }
             { gsub(/\r/, "") }
+            /^BENCHCFG/ { cfg = $0; sub(/^BENCHCFG[| ]?/, "", cfg); next }
             /^BENCHROW / {
                 delete v
                 for (i = 2; i <= NF; i++) { split($i, a, "="); v[a[1]] = a[2] }
                 v["stamp"] = stamp; v["scenario"] = scen
                 v["qemu_rss_peak_kb"] = rss; v["host_qemu_others"] = others
+                v["git_rev"] = grev; v["git_dirty"] = gdirty
+                v["ko_sha256"] = kosha; v["kernel"] = kern
+                v["qemu_sha256"] = qsha; v["config"] = cfg
+                v["src_sha256"] = srcsha; v["src_status"] = srcstat
                 out = ""
                 for (i = 1; i <= n; i++) {
                     x = v[c[i]]
@@ -418,15 +443,53 @@ run_one()
     scale)
         print_table "$out" row goodput_mbit carriers_up connect_fail alloc_fail carrier_lost carrier_replaced rc strict
         ;;
+    flush-hang)
+        print_table "$out" row hung flush_s verdict wchan stack
+        ;;
+    second-connection)
+        print_table "$out" row while_active errno_active ms_active after_close errno_after ms_after verdict rc
+        ;;
+    hole-cost)
+        print_table "$out" row iters lat_p50_us lat_p99_us lat_max_us lat_tail_n lat_tail_min_us lat_tail_p50_us lat_tail_p90_us lat_tail_p99_us lat_tail_max_us dropped_by_ppm holes_declared holes_repaired holes_unrecoverable rc
+        ;;
     esac
     echo "   carriers: $cars"
     echo "   console:  $console"
     echo "   qemu peak RSS: ${qemu_rss} kB"
-    return 0
+    _ret=0
+    case $_scen in
+    flush-hang | second-connection)
+        if awk -F, 'NR == 1 { for (i = 1; i <= NF; i++) h[$i] = i; next }
+                    $(h["verdict"]) == "FAIL" { f = 1 }
+                    END { exit f ? 0 : 1 }' "$out"; then
+            echo "benches/run.sh: $_scen reports the known defect (verdict=FAIL)"
+            _ret=1
+        fi
+        ;;
+    esac
+    return $_ret
 }
 
 # --- main -------------------------------------------------------------------
 build_bins
+ko_sha256=$(sha256sum "$root/tbtun.ko" | awk '{print $1}')
+git_rev=$(git -C "$root" rev-parse --short HEAD 2> /dev/null || echo none)
+git_dirty=0
+if [ -n "$(git -C "$root" status --porcelain --untracked-files=no 2> /dev/null)" ]; then
+    git_dirty=1
+fi
+# tbtun/ is not tracked by this repository, so `git status` cannot identify
+# the module sources; a hash of the sources does, and src_status says whether
+# git knows them at all.
+src_sha256=$(find "$root/tbtun" -maxdepth 1 \( -name '*.c' -o -name '*.h' \) |
+    sort | xargs sha256sum | sha256sum | cut -c1-16)
+src_status=clean
+case $(git -C "$root" status --porcelain -- tbtun 2> /dev/null | head -1) in
+'') ;;
+??*) src_status=untracked ;;
+*) src_status=modified ;;
+esac
+kernel_name=$(basename "$kernel")
 tc_bin=
 [ -x /usr/bin/tc ] && tc_bin=/usr/bin/tc
 [ -n "$tc_bin" ] || die "no /usr/bin/tc (the guest's busybox tc has no u32 filters)"

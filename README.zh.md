@@ -1,282 +1,324 @@
-# <img src="logo.png" width="400">
+# tbtun
 
-TCP Brutal 是 [Hysteria](https://hysteria.network/) 的 Brutal 拥塞控制算法在 TCP 上的实现，以 Linux 内核模块的形式提供。关于 Brutal 算法本身的详细说明，请参阅 [Hysteria 文档](https://hysteria.network/zh/docs/advanced/Full-Server-Config/#_6)。
-
-作为 Hysteria 的官方子项目，TCP Brutal 会持续维护，并与 Hysteria 中的 Brutal 实现保持同步。
-
-**English: [README.md](README.md)**
-
-> **v2 新特性：** TCP Brutal 不再需要上层应用专门适配。只需为某个目标地址设置一次速率，任何程序、任何基于 TCP 的协议，所有连向该地址的连接都会自动使用 Brutal。不必哀求开发者支持，现在你就能用！
-
-https://github.com/user-attachments/assets/ba5f938b-265a-49a5-8b60-ce7efac0c6e2
-
-## 快速开始
-
-### 安装
-
-```bash
-bash <(curl -fsSL https://tcp.hy2.sh/)
-```
-
-该脚本会通过 DKMS 安装内核模块，并将 `brutalctl` 工具安装到 `/usr/local/bin`。需要 Linux 5.10 或更高版本。
-
-如果使用带 flakes 的 NixOS，可以在 `flake.nix` 中加入该模块，同时也会提供 `brutalctl`：
-
-```nix
-{
-  inputs.tcp-brutal.url = "github:HyNetworks/tcp-brutal";
-
-  outputs = { nixpkgs, tcp-brutal, ... }: {
-    nixosConfigurations.myHost = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux";
-      modules = [
-        # ... your configuration.nix ...
-        tcp-brutal.nixosModules.default
-        { boot.tcp-brutal.enable = true; }
-      ];
-    };
-  };
-}
-```
-
-### 为目标地址启用 Brutal
-
-在**发送数据的一端**执行下面的命令。例如，如果用户从你的服务器下载文件，就应该在服务器上运行：
-
-```bash
-# 所有发往 203.0.113.5 的连接总共使用 100 Mbps，
-# 无论这些连接来自哪个程序
-brutalctl add 203.0.113.5/32 100
-```
-
-这里设置的是发往该目标地址的**所有连接合计速率**，通常填写接收方网络实际下载带宽。
-
-如果当前只有一条活跃连接，它可以使用全部带宽；如果有多条连接，则会动态平衡共享。不需要上层应用提供额外支持：普通 Web 服务器、代理工具、rsync、SSH 等连接到该地址时都会自动生效。
-
-```bash
-brutalctl list                    # 查看规则，以及每条规则当前有多少连接
-brutalctl add 203.0.113.5/32 50   # 修改速率；已有连接会立即使用新速率
-brutalctl del 203.0.113.5/32
-brutalctl flush
-```
-
-**连接只会在建立时匹配规则，因此应该先添加规则，再建立需要使用 Brutal 的连接。无需重启正在运行的程序，但程序已经建立好的连接不会应用新规则。已有规则后，如果对同一前缀再次执行 `add`，会实时修改整个连接组的速率；执行 `del` 后，新连接将不再匹配该规则，但已有连接仍会继续使用原来的速率，直到连接关闭。**
-
-规则在重启后不会保留。如果需要持久化，请将相应的 `add` 命令加入启动脚本。
-
-### 检查是否正常工作
-
-可以从服务器下载文件并观察速率，也可以使用 [example](example) 中的测速程序。客户端会同时建立多条连接，并让它们作为一个连接组共享同一速率。
-
-```bash
-# 服务端，在 TCP 1234 端口监听
-python server.py -p 1234
-
-# 客户端，连接 example.com:1234
-# 总下载速率设为 50 Mbps
-# 使用 4 条连接（-n），持续 10 秒（-t）
-python client.py -p 1234 example.com 50
-```
-
-示例程序会直接与内核模块通信，因此即使没有配置规则也能工作。**如果已经为客户端地址配置了规则，则以规则中的速率为准。**
+一个 Linux 内核 TCP 隧道：把 TCP 流分散到 `N + M` 个独立的五元组上，
+让运营商"每流限速"的额度按 `N + M` 份生效；设计上以预测而非重传来跨过载体停顿。
 
 ## 工作原理
 
-**Brutal 会按照你设置的速率发送数据。** 它不会像 CUBIC 或 BBR 那样主动探测可用带宽，而是直接按照配置的速率进行数据包 pacing。当发生丢包时，它会发送更多数据，以尽量让实际成功送达的数据速率维持在目标值。
+近端在某个端口上监听。客户端连上来之后，内核接受每条连接，不会把它交给任何用户态进程。
+每条连接成为一个流，并发流共用同一组载体。每条流的负载被切成帧，
+通过 `N` 条活跃载体连接和 `M` 条备用连接送到远端；每条载体有自己的源端口，
+因此各自占用一个独立的限速桶。远端把字节流重新拼起来，连到 `target=`，回程沿原路返回。
+接受连接、发起连接、封帧、排序、投递，全部在内核里完成。没有字符设备，没有代理进程，
+也没有辅助程序：配置模块的唯一方式是向 `/proc/net/tbtun/config` 写文本。
 
-因此 Brutal 的前提是：你大致知道路径上可用的带宽。如果把速率设得过高，只会制造额外的丢包。
+收益有两个独立来源。按五元组计费是确定的那一个：`N + M` 条流，就有 `N + M` 份额度。
+第二个是赌注：`http-kal` 档位把载体包装成普通的 HTTP/1.1 keep-alive 流量，
+假设运营商的分类器会给 HTTP 更高优先级。这个假设要被测量，而不是被相信，
+见 [QoS 说明](#qos-说明)。如果测量结果相反，`profile=raw` 会关掉这层包装，
+按流分散带来的收益仍然存在。
 
-**只需要部署在一端。** Brutal 控制的是发送行为，并不会改变线上传输的 TCP 协议，因此连接另一端不需要安装或支持任何东西。对于代理服务来说，大部分流量通常都是客户端下载，因此一般只在服务器端启用就能获得主要收益。
+当前代码实现了 [DESIGN.md](DESIGN.md) 的 C1–C8：`/proc` 控制面、监听器与远端、
+备用载体与带 RETIRE 握手的载体替换、带重放环的重复发送、带 PREDICT/CANCEL 的空洞预测，
+以及 `http-kal`/`http-kal-drip` 容器。载体字节流里的空洞由重放环补齐，而不是终止整条流。
+超过 `hole_budget_ms` 或 `rx_reorder_bytes` 仍补不上的空洞计入 `holes_unrecoverable`；
+重排溢出导致的重置计入 `gaps_total`；这两种情况都会重置流。
 
-**连接组（Groups）。** 同一组中的连接共享一个总速率。带宽并不是静态地平均分给每条连接：哪条连接当前需要发送数据，就可以使用相应带宽；如果某条连接没有用完自己的部分，其余连接可以直接使用剩余带宽。
+## 环境要求
 
-连接组有两种创建方式：
+- Linux 6.1 或更新版本，以及用于编译的对应内核头文件。
+- 如果内核开启了 `CONFIG_DEBUG_INFO_BTF_MODULES=y`，需要 `pahole`（dwarves 包）；
+  没有它，模块的 BTF 步骤会失败。
+- 加载模块和写 `/proc/net/tbtun/*` 需要 root（文件权限为 `0600`，
+  仅调试用的 `http` 为 `0400`）。
 
-* 通过上面介绍的目标地址规则自动创建；
-* 由应用程序直接为 socket 设置 group id。
+## 编译
 
-**规则（Rules）。** 一条规则会把某个目标地址前缀映射到一个连接组。要让规则真正生效，需要同时完成两件事，`brutalctl` 会自动处理：
-
-1. 将规则写入模块维护的 `/proc/net/tcp_brutal/rules`；
-2. 添加一条路由，让内核在新建到该地址前缀的连接时自动选择 Brutal 拥塞控制。
-
-对应的效果类似于：
-
-```bash
-ip route replace <prefix> via <gateway> congctl lock brutal proto 233
+```sh
+make check
 ```
 
-其中下一跳网关会从当前路由表中自动复制。
+`check` 会编译 `tbtun.ko`，然后运行宿主机的测试——语法、模糊测试、HTTP 容器，
+以及 reorder/ack/control/multistream/anchor 模型；
+这些测试不需要 root、不需要加载模块，也不需要内核头文件。只跑这些测试用 `make host-test`。
 
-`brutalctl` 创建的路由都会带有 `proto 233`，因此可以通过下面的命令查看：
+如果系统没有安装内核头文件，可以改用解包出来的头文件负载，不必使用
+`/lib/modules/$(uname -r)/build`；一次性准备步骤、生成的 `env.sh` 以及 pahole 的注意事项见
+[docs/build-env.md](docs/build-env.md)。该环境存在时，`make check` 会自动加载它。
 
-```bash
-ip route show proto 233
+## 打包
+
+模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
+`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0/0/1`，发布候选）。线上版本是
+`TBT_WIRE_VERSION=1` 与 `TBT_CONV=0x0004`，二者都与模块版本独立。
+`scripts/mkdkmsconf.sh` 派生
+`PACKAGE_VERSION="<major>.<minor>.<patch>"`；`dkms.conf` 是生成物，由
+`make dkms.conf` / `make dkms-tarball` 写出，不要手改。
+`scripts/install_dkms.sh` 通过 `mkdkmsconf.sh --version` 读取同一个值。
+开发构建可用 `TBT_DKMS_GIT_SUFFIX=1` 追加 `.r<commits>.<sha>`；
+默认是纯语义版本。
+
+## 加载
+
+```sh
+sudo insmod tbtun.ko debug_loss=0
 ```
 
-`brutalctl` 不会修改其他路由。
+模块参数在加载后只读：
 
-如果你自行管理路由，例如目标地址通过某个策略路由表访问，可以使用 `noroute`，让 `brutalctl` 只管理规则本身。
+| 参数 | 默认值 | 含义 |
+|---|---|---|
+| `debug` | `0` | 日志详细程度，`0..3` |
+| `max_tunnels` | `64` | 最多可配置的隧道数；新 id 超过上限返回 `ENOSPC` |
+| `max_carriers` | `16` | 每个会话的载体数，`1..16`；`n + m` 超过上限返回 `EINVAL` |
+| `debug_loss` | `0` | 是否允许写 `drop_ppm`（确定性丢包注入） |
 
-当多条规则同时匹配时，使用**最长前缀匹配**。
+控制面只在 `init_net` 中创建；没有 per-netns 视图。
+卸载用 `sudo rmmod tbtun`。卸载会清空所有隧道，关闭所有监听端口和载体。
 
-**规则只对新连接生效。** 连接会在建立时加入对应规则的连接组。添加规则不会影响已经存在的连接；对已有规则再次执行 `add` 修改速率时，连接组中的已有连接会立即使用新的速率；删除规则后，已有连接仍会共享旧速率直到关闭，新连接则不再匹配该规则。
+## 双机示例
 
-**默认锁定。** 规则默认会配合路由中的 `lock` 使用。启用锁定后，应用程序无法自行修改这些连接使用的拥塞控制算法或 Brutal 参数。
+近端主机 `10.0.0.1`，远端主机 `203.0.113.9`，远端有一个服务监听在 `127.0.0.1:5201`。
 
-如果某个本身支持 TCP Brutal 的应用尝试设置参数，会收到 `EPERM`，此时应用应该直接继续工作即可。
+在近端执行：
 
-如果希望允许应用程序自行设置 Brutal 参数，可以添加规则时使用 `nolock`。
-
-**不要把 Brutal 设置成系统默认拥塞控制算法。** 对于既没有匹配规则、应用程序也没有主动设置参数的连接，Brutal 默认只会以 1 Mbps 发送。
-
-支持 TCP Brutal 的应用程序可以自行在 socket 上启用，而普通应用可以通过规则覆盖，因此没有必要将 Brutal 设置成系统全局默认值。
-
-## 开发者指南
-
-### 在 socket 上启用 Brutal
-
-```python
-s.setsockopt(socket.IPPROTO_TCP, TCP_CONGESTION, "brutal".encode())
+```sh
+echo 'tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443 n=4 m=1' \
+     > /proc/net/tbtun/config
 ```
 
-然后设置发送速率、拥塞窗口增益，以及可选的连接组 ID。
+在远端执行：
 
-建议的拥塞窗口增益为 1.5x～2x。由于 Linux 内核不能直接使用浮点数，这里用十分之一为单位表示，因此 15 代表 1.5，20 代表 2.0：
-
-```c
-struct brutal_params
-{
-    u64 rate;       // 发送速率，单位 bytes/s
-    u32 cwnd_gain;  // CWND 增益，以十分之一为单位（10 = 1.0）
-    u64 group_id;   // 0 = 速率只作用于当前连接（v1 行为）
-} __packed;
+```sh
+echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=1' \
+     > /proc/net/tbtun/config
 ```
 
-Python 示例：
+然后在任意一端查看：
 
-```python
-TCP_BRUTAL_PARAMS = 23301
-
-rate = 2000000 # 2 MB/s
-cwnd_gain = 15
-group_id = 42
-
-brutal_params_value = struct.pack("<QIQ", rate, cwnd_gain, group_id)
-
-conn.setsockopt(
-    socket.IPPROTO_TCP,
-    TCP_BRUTAL_PARAMS,
-    brutal_params_value
-)
+```sh
+cat /proc/net/tbtun/tunnels
 ```
 
-v1 使用的、不包含 `group_id` 的 12 字节结构体仍然兼容。
+此时近端在 `10.0.0.1:9000` 上监听。连到这个端口的客户端，会经四条载体被送到远端的
+`127.0.0.1:5201`。可以用 `iperf3 -c 10.0.0.1 -p 9000 -t 60 -P 1` 对远端的
+`iperf3 -s` 做测试。
 
-也可以通过 `getsockopt` 读取当前参数。对于连接组成员，返回的是整个组的 `rate`、`cwnd_gain` 和 `group_id`：
+两端必须在隧道 id、`n`、`m` 以及 profile 家族上保持一致。远端的 `listen` 是载体到达的地址，
+近端的 `peer` 是载体发往的地址。地址只接受字面 IPv4：v0 不支持 DNS，也不支持 IPv6。
 
-```python
-rate, cwnd_gain, group_id = struct.unpack(
-    "<QIQ",
-    conn.getsockopt(
-        socket.IPPROTO_TCP,
-        TCP_BRUTAL_PARAMS,
-        20
-    )
-)
+## 能观测到什么
+
+模块知道的全部内容都在 `/proc/net/tbtun` 下。文件仅 root 可访问：除仅调试用的
+`http` 为 `0400` 外，其余为 `0600`；没有辅助程序，`echo` 和 `cat` 就是全部接口。
+
+| 文件 | 读它能看到什么 |
+| --- | --- |
+| `config` | 规范形式的配置；隧道行、`del`、`flush`、`carrier ...` 动作都写到这里 |
+| `tunnels` | 每条隧道一行：角色、状态、listen/peer/target、n、m、streams |
+| `peers` | 每个载体槽一行，共 16 列（见下） |
+| `ports` | 全局源端口段，以及它是否已经配置 |
+| `stats` | 第一行是 `debug_loss=<0\|1>`，然后是空洞与流总数，再往后是每条隧道的计数器（`txq`、`rxq`、空洞、预测、重复、载体替换） |
+| `http` | 仅调试（`debug>=2`）：近端 0 号载体最近一次真正发到线上的 HTTP 请求头块快照，用来对照解析器检查容器；不是实时流 |
+
+除非加载时带 `debug_loss=1`，否则 `drop_ppm` 会被拒绝并返回 `EPERM`；
+`stats` 的第一行就是这个开关的状态，脚本可以先读它再决定是否注入。
+
+### `config`（读写）
+
+一行一条指令。只有整行到达时才会生效：遇到换行符，或者 `close()` 时冲刷最后一段没有换行的内容。
+非法行会让 `write()` 返回 `EINVAL`，`echo` 因此会明确失败，并且该行不会有任何部分被应用。
+超过 1023 字节的行会被拒绝并返回 `E2BIG`。整行以 `#` 开头的注释会被忽略；
+写在某个 token 之后的 `#` 不算注释，整行会被拒绝。
+
+`tunnel <id>` 接受以下键：
+
+| 键 | 默认值 | 含义 |
+|---|---|---|
+| `role` | — | `near` 或 `far`，必填 |
+| `listen` | — | `a.b.c.d:port`；近端为对外地址，远端为载体地址 |
+| `peer` | — | 仅近端：载体的目的地 |
+| `target` | — | 仅远端：负载投递到的字面地址 |
+| `n` | `4` | 活跃载体数，`1..16` |
+| `m` | `1` | 备用载体数，`0..16`；`n + m <= 16` |
+| `dup` | `1` | 重复度，`0..3` |
+| `keepalive` | `5000` | 空闲 PAD 间隔，毫秒 |
+| `drip_ms` | `1000` | `http-kal-drip` 空闲时每字节的间隔，毫秒 |
+| `replay` | `8388608` | 重放环字节数 |
+| `tunnel_rate` | `0` | 字节/秒上限，`0` 表示不设 |
+| `max_inflate` | `2.000` | 预测膨胀上限 |
+| `hole_budget_ms` | `500` | 空洞允许存在的时间，毫秒，`1..60000`；`0` 会被拒绝 |
+| `rx_reorder_bytes` | `262144` | 接收端重排缓冲字节数，`1..268435456`；`0` 会被拒绝 |
+| `tx_retain_bytes` | `0` | 发送端保留字节数，`0` 表示不限 |
+| `carrier_stall_ms` | `3000` | 多久没有数据就判定载体失效，毫秒 |
+| `profile` | `http-kal` | `http-kal`、`http-kal-drip` 或 `raw` |
+| `portblock` | `0-0` | 每条隧道的源端口段，仅记录并渲染（`0-0` 表示不设）；载体使用 `/ports` 的全局端口段 |
+| `srcaddrs` | — | 逗号分隔的本地源地址；只有第一项被使用 |
+| `nonce` | — | `16` 或 `32` 个 hex 字符：固定会话 nonce；近端本地使用，远端要求对端使用 |
+
+曾被解析但从未生效的键（`framing=`、`chunk=`、`max_retry=`、`dev=`、`uid=`）
+已删除；未知键会返回 `EINVAL`。
+
+`nonce=` 固定 128 位会话 nonce。32 个 hex 字符是完整值；16 个 hex 字符固定
+低 64 位，并在规范输出中左补零。`role=near` 时它是本端放进 HELLO 的 nonce；
+`role=far` 时它是远端要求近端使用的 nonce，每一条 HELLO 都必须匹配。未配置
+`nonce=` 的 far 会采纳第一条 HELLO 的 nonce（首连信任，TOFU），谁赢得首个
+连接谁就定义了会话。nonce 在 HELLO 里明文传输：它是会话标识与反混淆 token，
+不是密码；链路不可信时套 WireGuard。64 个 hex 字符（256 位）会被拒绝：
+HELLO 的 nonce 字段只有 128 位。
+
+其它指令：`del <id>`、`flush`、`carrier <index> down|up|drop_ppm <n>`，
+以及 `session <id> nonce=<hex>`（固定会话 nonce，用于可复现的测试）。
+`drop_ppm` 需要加载时带 `debug_loss=1`，否则会被拒绝并返回 `EPERM`。
+
+读取 `config` 得到的是规范形式：所有标量键按固定顺序写出，默认值也会显式写出。
+这段文本可以逐字节往返，所以
+`cat /proc/net/tbtun/config > /etc/tbtun.conf` 与
+`cat /etc/tbtun.conf > /proc/net/tbtun/config` 能精确恢复保存时的状态。
+读取按 offset 分段返回，超过 32 KiB 的配置也能完整读出。
+
+### `tunnels`（只读）
+
+先输出 `# id role state listen peer target n m streams`，然后每条隧道一行。
+
+### `peers`（读写）
+
+每个载体槽一行，共 16 列：
+
+| 列 | 含义 |
+| --- | --- |
+| `id` | 隧道 id |
+| `carrier` | 会话内的载体序号 |
+| `sport` | 本地源端口，取自端口段 |
+| `peer` | 对端地址:端口 |
+| `uack` | 对端已确认的最大字节偏移 |
+| `rtt_us` | 平滑后的往返时延，微秒 |
+| `inflight` | 已写出但尚未确认的字节数 |
+| `state` | `connecting`、`up`、`spare`、`stalled` 或 `down` |
+| `class` | 该载体使用的容器（`raw`、`http-kal`、`http-kal-drip`） |
+| `recv_cnt` | 该载体收到的记录数 |
+| `rx_lag_ppm` | 接收端尚未统计的、位于发送端写高水位以下的记录数，单位百万分之一；包含在途记录，因此不是丢包率 |
+| `minrtt_us` | 观测到的最小往返时延，微秒 |
+| `tx_frames` | 该载体写出的记录数 |
+| `tx_bytes` | 该载体写出的字节数，含头部 |
+| `dropped` | 被 `drop_ppm` 注入器丢弃的记录数（仅调试） |
+| `retx_ppm` | 每百万条写出记录中的重传数，这才是丢包的代理指标 |
+
+写入 `carrier <index> down|up|drop_ppm <n>` 会对所有拥有该载体序号的运行中隧道生效。
+
+### `stats`（只读）
+
+第一行固定是 `debug_loss=<0|1>`，即 `drop_ppm` 的开关状态。之后是
+`gaps_total`、`streams_total`，以及每条隧道的计数器（队列深度、暂停标志、
+对外套接字的发送状态、载体读写游标）。
+
+### `ports`（读写）
+
+`ports <lo>-<hi>` 设置载体的全局源端口段。空行或 `ports 0-0` 是 no-op，
+不会改变当前端口段。
+
+## 验证过的性能
+
+数字来自 [benches/](benches/)：在 KVM 客户机里通过同样的操作接口驱动，
+virtio-net，每个源端口一条 10 Mbit 的 htb 类并挂 `delay 20ms 10ms` 的 netem，
+用 `tbt_burst` 的严格先发后读阶段传 40 MiB（逐字节校验），每次启动只测一种配置。
+对照组是单个 `dd | nc` 流，同样走在一条被整形的五元组上。
+
+| 载体数 | 对照 (Mbit/s) | 应用 (Mbit/s) | 应用/对照 | wire/app | retx_ppm | strict / rc | CSV |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `n=1` | 2.48 | 3.46 | 1.40x | 1.0316 | 1,090 | `strict=1`, `rc=0` | `benches/results/20261105T112725-throughput.csv` |
+| `n=4` | 2.24 | 11.39 | 5.08x | 1.0005 | 96,095 | `strict=1`, `rc=0` | `benches/results/20261105T112245-throughput.csv` |
+| `n=8` | — | — | — | — | — | 待最终回归 | — |
+| `n=16` | — | — | — | — | — | 待最终回归 | — |
+
+当前目标是 `wire/app < 1.2`、`retx_ppm < 100k`。最新 `n=4` 两项都在目标内
+（1.0005 与 96,095）；`n=1` 是 1.0316 与 1,090。`n=8`/`n=16` 在最终回归前
+不给出倍数承诺。
+
+比值仍是主张：`N` 个五元组胜过一条流。这些是 QEMU/slirp 实验室数字，
+每个源端口一个 10 Mbit htb 类，netem `delay 20ms 10ms`；不是 ISP 实测。
+绝对值取决于这台机器的 QEMU/slirp 路径，而不是 10 Mbit 的桶。
+
+下表的代价数据来自更早的 bench；本次 `n=1`/`n=4` 吞吐运行没有重新测量它。
+
+| 代价 | 实测 |
+| --- | --- |
+| `http-kal` 容器相对 `raw` | 字节数约多 1%（每约 4 KB 记录一个 chunk），单 vCPU 的系统态 CPU 约多 3.5 个百分点 |
+| 预测与每路径丢包 | 拐点在第一个 1%：有效吞吐 9.85 → 6.91 Mbit/s，之后到 10% 基本持平在 5.40；1%、5%、10% 三档的 `holes_unrecoverable` 都是 0 |
+| 时延（1 KB 回显） | 相对直连路径 p50 增加 156 µs、p99 增加 274 µs；补一个空洞会把 p99 推到 22–31 ms |
+
+这些是单台机器上的实验室数字，说明不了运营商是否真的给 HTTP 更高优先级；
+后者要用 [DESIGN.md §17](DESIGN.md) 在真实线路上测。
+
+## 已知限制
+
+- **整形链路上的重传。** 最新 `n=4` 为 `retx_ppm` 96,095、`wire/app` 1.0005；
+  `n=1` 为 1,090 与 1.0316。当前目标是 `retx_ppm < 100k`、`wire/app < 1.2`；
+  `n=8`/`n=16` 仍需最终回归。
+- **载体数与吞吐。** 探针 I 的 control `n=1` 通过（`rc=0`、`strict=1`、
+  `interleaved=1`，4 MiB 逐字节），`n=4` 的 strict 与 interleaved 也通过。
+  最新应用吞吐为 `n=1` 3.46 Mbit/s、`n=4` 11.39 Mbit/s；`n=1` 受单流 TCP 限制，
+  `n=8`/`n=16` 待最终回归。
+- **传输之后 `flush` 可能阻塞。** 完成一次 40 MiB 传输后，
+  `echo flush > config` 曾被观察到不返回。本次数据面运行没有复测；按“待验证”处理。
+  测量之间请重发完整的隧道行，不要用 flush。
+- **已删除的无效键**：`framing=`、`chunk=`、`max_retry=`、`dev=`、`uid=`
+  曾被解析但从未生效，现在不再接受；HTTP 容器被中间盒破坏时用 `profile=raw`。
+- **不加密。** 隧道在线上是明文，见 [安全](#安全)。
+
+## 运维
+
+修改速率、重复度或任何其它键都不需要重新加载模块：把完整的 `tunnel` 行再写一次即可，
+隧道会被替换，现有流会被重置。由于是整条替换，每次都要写全所有必填键。
+
+规则不会跨重启保留。保存一次，开机时恢复：
+
+```sh
+cat /proc/net/tbtun/config > /etc/tbtun.conf
+# 开机后、客户端连入之前：
+cat /etc/tbtun.conf > /proc/net/tbtun/config
 ```
 
-如果需要检查当前加载的是哪个版本的模块，可以在一个已经使用 Brutal 的连接上读取版本号。v1 模块以及普通 TCP socket 都会返回 `ENOPROTOOPT`：
+一个 systemd unit，`ExecStart=/bin/sh -c 'cat /etc/tbtun.conf > /proc/net/tbtun/config'`，
+`After=systemd-modules-load.service`，就够了；`rc.local` 里写一行也可以。
+模块本身要先加载，可以用 `/etc/modules-load.d/tbtun.conf` 或 `modprobe tbtun`。
 
-```python
-TCP_BRUTAL_VERSION = 23302
+## 排障
 
-# u32: major << 16 | minor << 8 | patch
-version = struct.unpack(
-    "<I",
-    conn.getsockopt(
-        socket.IPPROTO_TCP,
-        TCP_BRUTAL_VERSION,
-        4
-    )
-)[0]
+- `tunnels` 里看 `state` 和 `streams`。近端一直停在 `idle`，说明监听端口没绑上，
+  查 `dmesg` 和端口占用。
+- 卡住的载体在 `peers` 里最明显：`state` 不是 `up`，`rx_lag_ppm` 持续上升，
+  `rtt_us` 远高于 `minrtt_us`，或者 `inflight` 居高不下而 `tx_bytes` 不动。
+- `stats` 里的 `gaps_total` 不为零，说明重排溢出重置了流；
+  `holes_unrecoverable` 统计重放环补不上的空洞。
+- `debug_loss=1` 配合 `carrier <i> drop_ppm 10000`，会在载体的写边界按比例丢弃整条记录，
+  从而在没有丢包线路的情况下演练丢包处理。`peers` 里的 `dropped` 列会计数。
+- 卸载模块会关闭所有监听端口和载体；已连接的客户端会看到 EOF，而不是挂住。
 
-supports_groups = version >= 0x020000
-```
+## QoS 说明
 
-### 连接组
+`http-kal` 档位是一个赌注：假设运营商把 HTTP/1.1 当作高优先级流量。这是假设，不是事实，
+模块也无法让分类器优待任何东西。这个赌注验证起来很便宜，而且验证本身就是使用这套软件的
+一部分：[DESIGN.md §17](DESIGN.md) 给出了十分钟的测量步骤和四种配置——纯 TCP、一条
+`http-kal` 载体、四条载体、四条 `raw` 载体——并说明每种结果意味着什么。
 
-同一用户、同一 network namespace 中，只要多个连接设置了相同的非零 `group_id`，它们就会共同共享 `rate` 作为总带宽。
+如果测量显示 HTTP 档位没有带来任何提升，就设 `profile=raw`：按五元组分散的收益与它无关。
+如果 `N + M` 也没有带来提升，说明线路上存在针对整个用户的聚合限速，
+这类隧道帮不上忙；此时诚实的做法是用单条流的 WireGuard 链路。
 
-在任意一个组成员上修改参数，都会更新整个连接组。
+## 安全
 
-只要组中还有至少一条连接处于打开状态，该组就会继续存在。
+这条隧道不加密。负载字节按应用发出的原样经过网络，装在任何人于路径上都能读取的 TCP 连接里。
+配置仅限 root（`0600`），加载模块同样需要 root。如果两台主机之间的路径不可信，
+就把隧道放进 WireGuard 里跑：载体走在加密链路之上，此时只应选择 `raw` 档位，
+因为 HTTP 解析器看不到 TLS 内部。
 
-典型的代理服务器可以把同一客户端的所有连接放进同一个连接组，并使用该客户端的身份生成 group id。这样，无论客户端建立多少条连接，配置的带宽上限都会作用于这些连接的总和。
+## 适用范围
 
-TCP Brutal v1 没有连接组，因此只能用于所有流量都复用在单条 TCP 连接上的协议。v2 加入连接组后，也可以很好地支持“一条流一条 TCP 连接”的协议。
+这不是通用 VPN。它只转发 TCP，每条隧道只对应一个字面目标地址，没有路由、没有 NAT、
+没有认证、也没有加密。它的用途是放大"每流限速"的额度，并验证某个 QoS 档位是否有效。
+其它场景请用 WireGuard。
 
-### 规则与应用程序
+---
 
-如果连接匹配了一条锁定规则，那么设置 `TCP_BRUTAL_PARAMS` 会返回 `EPERM`。
-
-与此同时，由于对应路由也被锁定，即使当前连接实际上已经在使用 Brutal，下面的操作同样会返回 `EPERM`：
-
-```python
-setsockopt(TCP_CONGESTION, "brutal")
-```
-
-应用程序应该同时处理这两种情况：
-
-如果收到 `EPERM`，可以通过 `getsockopt(TCP_CONGESTION)` 检查当前拥塞控制算法。如果已经是 Brutal，就无需再做任何设置，直接发送数据即可。
-
-[example/server.py](example/server.py) 中提供了具体示例。
-
-工具程序也可以直接操作规则文件，而不必调用 `brutalctl`。
-
-读取：
-
-```text
-/proc/net/tcp_brutal/rules
-```
-
-每条规则占一行，以 `key=value` 形式显示，同时包含实时统计信息：
-
-```text
-dst=203.0.113.5/32 rate=12500000 gain=20 lock=1 id=1 members=3 sent=1834021376
-```
-
-写入时，每次 write 接受一条命令，其中速率单位为 bytes/s：
-
-```text
-add <prefix>[/<len>] rate=<bytes/s> [gain=<tenths>] [nolock]
-del <prefix>[/<len>]
-flush
-```
-
-如果对已有前缀再次执行 `add`，会直接更新原规则。
-
-需要注意的是，路由配置是独立的一步。`brutalctl` 除了管理这里的规则文件之外，还会自动负责添加对应路由。
-
-### 在代理协议中交换带宽信息
-
-Brutal 必须知道目标带宽，但大多数基于 TCP 的代理协议本身没有客户端与服务器交换带宽参数的机制。
-
-我们建议复用几乎所有代理协议都会提供的“目标地址”字段：
-
-支持 TCP Brutal 的客户端可以请求连接到一个特殊地址，例如：
-
-```text
-_BrutalBwExchange
-```
-
-如果服务器识别并接受这个特殊目标，双方就可以通过这条连接交换各自的带宽信息。
-
-### 从源码编译
-
-```bash
-make && make load   # 需要安装内核头文件，例如：
-                    # apt install linux-headers-$(uname -r)
-
-make -C tools       # 编译 brutalctl
-```
+`logo.png` 是旧的 TCP Brutal 标志，仅为保留仓库历史而留下，本手册不使用它。

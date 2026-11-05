@@ -1,0 +1,75 @@
+=== date ===
+2026-11-05T07:24:12+08:00
+=== git rev-parse HEAD ===
+ee0e5e632c90704c77a4364182e185fe0aed61e1
+=== git status --porcelain ===
+ M .github/workflows/release.yml
+ D .github/workflows/scripts.yml
+ M .gitignore
+ M Makefile
+ M README.md
+ M README.zh.md
+ M benches/qemu/init
+ M benches/run.sh
+ M benches/src/tbt_lat.c
+D  brutal.h
+D  brutal_cc.c
+D  brutal_rules.c
+D  brutal_sockopt.c
+D  example/client.py
+D  example/server.py
+ M flake.nix
+ M scripts/install_dkms.sh
+ M scripts/mkdkmsconf.sh
+D  tools/Makefile
+D  tools/brutalctl.c
+?? .pi/
+?? AGENTS.md
+?? DESIGN.md
+?? adversarial/
+?? benches/results/20261105T051929-second-connection-val-carriers.csv
+?? benches/results/20261105T051929-second-connection-val.csv
+?? benches/results/20261105T051942-second-connection-val-carriers.csv
+?? benches/results/20261105T051942-second-connection-val.csv
+?? benches/results/20261105T052027-second-connection-val-carriers.csv
+?? benches/results/20261105T052027-second-connection-val.csv
+?? benches/results/20261105T052041-second-connection-val-carriers.csv
+?? benches/results/20261105T052041-second-connection-val.csv
+?? benches/results/20261105T052655-second-connection-meta-carriers.csv
+?? benches/results/20261105T052655-second-connection-meta.csv
+?? benches/results/20261105T052709-hole-cost-meta-carriers.csv
+?? benches/results/20261105T052709-hole-cost-meta.csv
+?? benches/results/20261105T052754-latency-meta-carriers.csv
+?? benches/results/20261105T052754-latency-meta.csv
+?? benches/results/20261105T052836-hole-cost-meta-carriers.csv
+?? benches/results/20261105T052836-hole-cost-meta.csv
+?? benches/results/20261105T053019-flush-hang-meta-carriers.csv
+?? benches/results/20261105T053019-flush-hang-meta.csv
+?? benches/results/20261105T053042-flush-hang-meta-carriers.csv
+?? benches/results/20261105T053042-flush-hang-meta.csv
+?? benches/src/tbt_conn.c
+?? docs/
+?? host/
+?? mptcpd/
+?? openvpn/
+?? review/
+?? scripts/build.sh
+?? tbtun/
+?? tests/
+?? "\344\272\244\346\216\245.md"
+=== uname -r ===
+7.2.9-1-MANJARO
+=== module (pre-build) ===
+-rw-r--r-- 1 kunweiz kunweiz 5405288 Nov  5 06:28 tbtun.ko
+c18ff6c480cc1d8886d09952b93f1d754adba4e10929a72a8e322ef814a056a6  tbtun.ko
+=== env ===
+KDIR=/home/kunweiz/.cache/tbtun-build/linux72-headers/usr/lib/modules/7.2.9-1-MANJARO/build
+PAHOLE=/home/kunweiz/.cache/tbtun-build/pahole/usr/bin/pahole
+LD_LIBRARY_PATH=/home/kunweiz/.cache/tbtun-build/pahole/usr/lib
+v1.32
+=== vermagic ===
+filename:       /home/kunweiz/Desktop/vibe/tcp-brutal/tbtun.ko
+version:        1.0.0
+srcversion:     DBBF9AE2139A158FDE09BB1
+name:           tbtun
+vermagic:       7.2.9-1-MANJARO SMP preempt mod_unload 

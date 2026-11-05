@@ -1,0 +1,1208 @@
+c[?7l[2J[0mSeaBIOS (version Arch Linux 1.17.0-2-2)
+
+
+iPXE (http://ipxe.org) 00:02.0 C000 PCI2.10 PnP PMM+1EFD3E30+1EF33E30 C000
+Press Ctrl-B to configure iPXE (PCI 00:02.0)...                                                                               
+
+
+Booting from ROM...
+Probing EDD (edd=off to disable)... oc[?7l[2J[    0.000000] Linux version 7.2.9-1-MANJARO (linux72@manjaro) (gcc (GCC) 16.2.1 20260810, GNU ld (GNU Binutils) 2.47) #1 SMP PREEMPT_DYNAMIC Sat, 03 Oct 2026 15:02:22 +0000
+[    0.000000] Command line: console=ttyS0 panic=-1 loglevel=7 tsc=unstable tbt_probes=A,B,C,D,E,F,G,H,I,J,K
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff]  System RAM
+[    0.000000] BIOS-e820: [mem 0x000000000009fc00-0x000000000009ffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000000a0000-0x00000000000effff]
+[    0.000000] BIOS-e820: [mem 0x00000000000f0000-0x00000000000fffff]  device reserved
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x000000001ffdffff]  System RAM
+[    0.000000] BIOS-e820: [mem 0x000000001ffe0000-0x000000001fffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x0000000020000000-0x00000000feffbfff]
+[    0.000000] BIOS-e820: [mem 0x00000000feffc000-0x00000000feffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000ff000000-0x00000000fffbffff]
+[    0.000000] BIOS-e820: [mem 0x00000000fffc0000-0x00000000ffffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x0000000100000000-0x000000fcffffffff]
+[    0.000000] BIOS-e820: [mem 0x000000fd00000000-0x000000ffffffffff]  device reserved
+[    0.000000] NX (Execute Disable) protection: active
+[    0.000000] APIC: Static calls initialized
+[    0.000000] DMI: SMBIOS 2.8 present.
+[    0.000000] DMI: QEMU Standard PC (i440FX + PIIX, 1996), BIOS Arch Linux 1.17.0-2-2 04/01/2014
+[    0.000000] DMI: Memory slots populated: 1/1
+[    0.000000] Hypervisor detected: KVM
+[    0.000000] last_pfn = 0x1ffe0 max_arch_pfn = 0x400000000
+[    0.000000] kvm-clock: Using msrs 4b564d01 and 4b564d00
+[    0.000001] kvm-clock: using sched offset of 139414456 cycles
+[    0.000003] clocksource: kvm-clock: mask: 0xffffffffffffffff max_cycles: 0x1cd42e4dffb, max_idle_ns: 881590591483 ns
+[    0.000007] tsc: Detected 3992.500 MHz processor
+[    0.000109] last_pfn = 0x1ffe0 max_arch_pfn = 0x400000000
+[    0.000142] MTRR map: 4 entries (3 fixed + 1 variable; max 19), built from 8 variable MTRRs
+[    0.000145] x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+[    0.002018] found SMP MP-table at [mem 0x000f66c0-0x000f66cf]
+[    0.002044] Using GB pages for direct mapping
+[    0.002140] RAMDISK: [mem 0x1fa67000-0x1ffdffff]
+[    0.002151] ACPI: Early table checksum verification disabled
+[    0.002158] ACPI: RSDP 0x00000000000F64F0 000014 (v00 BOCHS )
+[    0.002163] ACPI: RSDT 0x000000001FFE235B 000034 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002172] ACPI: FACP 0x000000001FFE2207 000074 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002177] ACPI: DSDT 0x000000001FFE0040 0021C7 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002179] ACPI: FACS 0x000000001FFE0000 000040
+[    0.002181] ACPI: APIC 0x000000001FFE227B 000080 (v03 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002183] ACPI: HPET 0x000000001FFE22FB 000038 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002186] ACPI: WAET 0x000000001FFE2333 000028 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002187] ACPI: Reserving FACP table memory at [mem 0x1ffe2207-0x1ffe227a]
+[    0.002189] ACPI: Reserving DSDT table memory at [mem 0x1ffe0040-0x1ffe2206]
+[    0.002189] ACPI: Reserving FACS table memory at [mem 0x1ffe0000-0x1ffe003f]
+[    0.002189] ACPI: Reserving APIC table memory at [mem 0x1ffe227b-0x1ffe22fa]
+[    0.002190] ACPI: Reserving HPET table memory at [mem 0x1ffe22fb-0x1ffe2332]
+[    0.002190] ACPI: Reserving WAET table memory at [mem 0x1ffe2333-0x1ffe235a]
+[    0.002591] No NUMA configuration found
+[    0.002592] Faking a node at [mem 0x0000000000000000-0x000000001ffdffff]
+[    0.002600] NODE_DATA(0) allocated [mem 0x1fa3bf80-0x1fa66fff]
+[    0.003186] ACPI: PM-Timer IO Port: 0x608
+[    0.003200] ACPI: LAPIC_NMI (acpi_id[0xff] dfl dfl lint[0x1])
+[    0.003227] IOAPIC[0]: apic_id 0, version 17, address 0xfec00000, GSI 0-23
+[    0.003230] ACPI: INT_SRC_OVR (bus 0 bus_irq 0 global_irq 2 dfl dfl)
+[    0.003232] ACPI: INT_SRC_OVR (bus 0 bus_irq 5 global_irq 5 high level)
+[    0.003232] ACPI: INT_SRC_OVR (bus 0 bus_irq 9 global_irq 9 high level)
+[    0.003233] ACPI: INT_SRC_OVR (bus 0 bus_irq 10 global_irq 10 high level)
+[    0.003234] ACPI: INT_SRC_OVR (bus 0 bus_irq 11 global_irq 11 high level)
+[    0.003236] ACPI: Using ACPI (MADT) for SMP configuration information
+[    0.003237] ACPI: HPET id: 0x8086a201 base: 0xfed00000
+[    0.003240] TSC deadline timer available
+[    0.003253] CPU topo: Max. logical packages:   1
+[    0.003254] CPU topo: Max. logical nodes:      1
+[    0.003254] CPU topo: Num. nodes per package:  1
+[    0.003275] CPU topo: Max. logical dies:       1
+[    0.003276] CPU topo: Max. dies per package:   1
+[    0.003303] CPU topo: Max. threads per core:   1
+[    0.003303] CPU topo: Num. cores per package:     2
+[    0.003304] CPU topo: Num. threads per package:   2
+[    0.003304] CPU topo: Allowing 2 present CPUs plus 0 hotplug CPUs
+[    0.003319] kvm-guest: APIC: eoi() replaced with kvm_guest_apic_eoi_write()
+[    0.003346] kvm-guest: KVM setup pv remote TLB flush
+[    0.003350] kvm-guest: setup PV sched yield
+[    0.003359] PM: hibernation: Registered nosave memory: [mem 0x00000000-0x00000fff]
+[    0.003361] PM: hibernation: Registered nosave memory: [mem 0x0009f000-0x000fffff]
+[    0.003363] [gap 0x20000000-0xfeffbfff] available for PCI devices
+[    0.003365] Booting paravirtualized kernel on KVM
+[    0.003368] clocksource: refined-jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1910969940391419 ns
+[    0.008294] Zone ranges:
+[    0.008295]   DMA      [mem 0x0000000000001000-0x0000000000ffffff]
+[    0.008299]   DMA32    [mem 0x0000000001000000-0x000000001ffdffff]
+[    0.008300]   Normal   empty
+[    0.008301]   Device   empty
+[    0.008302] Movable zone start for each node
+[    0.008303] Early memory node ranges
+[    0.008304]   node   0: [mem 0x0000000000001000-0x000000000009efff]
+[    0.008305]   node   0: [mem 0x0000000000100000-0x000000001ffdffff]
+[    0.008309] Initmem setup node 0 [mem 0x0000000000001000-0x000000001ffdffff]
+[    0.008588] On node 0, zone DMA: 1 pages in unavailable ranges
+[    0.008598] On node 0, zone DMA: 97 pages in unavailable ranges
+[    0.009084] On node 0, zone DMA32: 32 pages in unavailable ranges
+[    0.009090] setup_percpu: NR_CPUS:8192 nr_cpumask_bits:2 nr_cpu_ids:2 nr_node_ids:1
+[    0.009221] percpu: Embedded 63 pages/cpu s221184 r8192 d28672 u1048576
+[    0.009278] kvm-guest: PV spinlocks enabled
+[    0.009281] PV qspinlock hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.009286] Kernel command line: console=ttyS0 panic=-1 loglevel=7 tsc=unstable tbt_probes=A,B,C,D,E,F,G,H,I,J,K
+[    0.009352] tsc: Marking TSC unstable due to boot parameter
+[    0.009362] Unknown kernel command line parameters "tbt_probes=A,B,C,D,E,F,G,H,I,J,K", will be passed to user space.
+[    0.009556] random: crng init done
+[    0.009558] printk: log buffer data + meta data: 131072 + 557056 = 688128 bytes
+[    0.009570] Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.009576] Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.009633] Fallback order for Node 0: 0 
+[    0.009636] Built 1 zonelists, mobility grouping on.  Total pages: 130942
+[    0.009638] Policy zone: DMA32
+[    0.009852] mem auto-init: stack:all(zero), heap alloc:on, heap free:off
+[    0.010536] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=2, Nodes=1
+[    0.022313] ftrace: allocating 58866 entries in 232 pages
+[    0.022315] ftrace: allocated 232 pages with 4 groups
+[    0.022396] Dynamic Preempt: full
+[    0.022492] rcu: Preemptible hierarchical RCU implementation.
+[    0.022493] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=2.
+[    0.022494] rcu: 	RCU priority boosting: priority 1 delay 500 ms.
+[    0.022495] 	Trampoline variant of Tasks RCU enabled.
+[    0.022495] 	Rude variant of Tasks RCU enabled.
+[    0.022495] 	Tracing variant of Tasks RCU enabled.
+[    0.022496] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.022496] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=2
+[    0.022500] RCU Tasks: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=2.
+[    0.022501] RCU Tasks Rude: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=2.
+[    0.025793] NR_IRQS: 524544, nr_irqs: 440, preallocated irqs: 16
+[    0.025983] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.025990] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    0.026138] kfence: initialized - using 2097152 bytes for 255 objects at 0x(____ptrval____)-0x(____ptrval____)
+[    0.026241] Console: colour *CGA 80x25
+[    0.026286] printk: legacy console [ttyS0] enabled
+[    0.180447] ACPI: Core revision 20260408
+[    0.181335] clocksource: hpet: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604467 ns
+[    0.183575] APIC: Switch to symmetric I/O mode setup
+[    0.184736] x2apic enabled
+[    0.185570] APIC: Switched APIC routing to: physical x2apic
+[    0.186739] kvm-guest: APIC: send_IPI_mask() replaced with kvm_send_ipi_mask()
+[    0.188258] kvm-guest: APIC: send_IPI_mask_allbutself() replaced with kvm_send_ipi_mask_allbutself()
+[    0.190961] kvm-guest: setup PV IPIs
+[    0.192431] ..TIMER: vector=0x30 apic1=0 pin1=2 apic2=-1 pin2=-1
+[    0.193603] Calibrating delay loop (skipped) preset value.. 7985.00 BogoMIPS (lpj=3992500)
+[    0.194702] x86/cpu: User Mode Instruction Prevention (UMIP) activated
+[    0.196616] Last level iTLB entries: 4KB 512, 2MB 255, 4MB 127
+[    0.197604] Last level dTLB entries: 4KB 512, 2MB 255, 4MB 127, 1GB 0
+[    0.198610] mitigations: Enabled attack vectors: user_kernel, user_user, guest_host, guest_guest, SMT mitigations: auto
+[    0.199604] Speculative Store Bypass: Mitigation: Speculative Store Bypass disabled via prctl
+[    0.200604] Transient Scheduler Attacks: Mitigation: Clear CPU buffers
+[    0.201604] Spectre V2 : Mitigation: Enhanced / Automatic IBRS
+[    0.202604] Speculative Return Stack Overflow: Mitigation: Safe RET
+[    0.203606] Spectre V1 : Mitigation: usercopy/swapgs barriers and __user pointer sanitization
+[    0.204614] Spectre V2 : Enabling IBPB for BPF
+[    0.205608] Spectre V2 : mitigation: Enabling conditional Indirect Branch Prediction Barrier
+[    0.206606] active return thunk: srso_alias_return_thunk
+[    0.207641] x86/fpu: Supporting XSAVE feature 0x001: 'x87 floating point registers'
+[    0.208604] x86/fpu: Supporting XSAVE feature 0x002: 'SSE registers'
+[    0.209604] x86/fpu: Supporting XSAVE feature 0x004: 'AVX registers'
+[    0.210604] x86/fpu: Supporting XSAVE feature 0x020: 'AVX-512 opmask'
+[    0.211604] x86/fpu: Supporting XSAVE feature 0x040: 'AVX-512 Hi256'
+[    0.212604] x86/fpu: Supporting XSAVE feature 0x080: 'AVX-512 ZMM_Hi256'
+[    0.213605] x86/fpu: Supporting XSAVE feature 0x200: 'Protection Keys User registers'
+[    0.214604] x86/fpu: Supporting XSAVE feature 0x800: 'Control-flow User registers'
+[    0.215604] x86/fpu: Supporting XSAVE feature 0x1000: 'Control-flow Kernel registers (KVM only)'
+[    0.216604] x86/fpu: xstate_offset[2]:  576, xstate_sizes[2]:  256
+[    0.217604] x86/fpu: xstate_offset[5]:  832, xstate_sizes[5]:   64
+[    0.218604] x86/fpu: xstate_offset[6]:  896, xstate_sizes[6]:  512
+[    0.219604] x86/fpu: xstate_offset[7]: 1408, xstate_sizes[7]: 1024
+[    0.220604] x86/fpu: xstate_offset[9]: 2432, xstate_sizes[9]:    8
+[    0.221604] x86/fpu: xstate_offset[11]: 2440, xstate_sizes[11]:   16
+[    0.222604] x86/fpu: xstate_offset[12]: 2456, xstate_sizes[12]:   24
+[    0.223604] x86/fpu: Enabled xstate features 0x1ae7, context size is 2480 bytes, using 'compacted' format.
+[    0.253344] pid_max: default: 32768 minimum: 301
+[    0.253705] landlock: Up and running.
+[    0.254605] Yama: becoming mindful.
+[    0.255772] LSM support for eBPF active
+[    0.256625] Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.257605] Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.258675] VFS: Finished mounting rootfs on nullfs
+[    0.259870] smpboot: CPU0: AMD Ryzen 9 7940HS w/ Radeon 780M Graphics (family: 0x19, model: 0x74, stepping: 0x1)
+[    0.260782] Performance Events: Fam17h+ core perfctr, AMD PMU driver.
+[    0.261613] ... version:                   2
+[    0.262428] ... bit width:                 48
+[    0.262605] ... generic counters:          6
+[    0.263441] ... generic bitmap:            000000000000003f
+[    0.263605] ... fixed-purpose counters:    0
+[    0.264457] ... fixed-purpose bitmap:      0000000000000000
+[    0.264605] ... value mask:                0000ffffffffffff
+[    0.265605] ... max period:                00007fffffffffff
+[    0.266612] ... global_ctrl mask:          000000000000003f
+[    0.267714] signal: max sigframe size: 3376
+[    0.268591] rcu: Hierarchical SRCU implementation.
+[    0.268608] rcu: 	Max phase no-delay instances is 400.
+[    0.269835] Timer migration: 1 hierarchy levels; 8 children per group; 1 crossnode level
+[    0.276254] smp: Bringing up secondary CPUs ...
+[    0.276714] smpboot: x86: Booting SMP configuration:
+[    0.277611] .... node  #0, CPUs:      #1
+[    0.277736] smp: Brought up 1 node, 2 CPUs
+[    0.279373] smpboot: Total of 2 processors activated (15970.00 BogoMIPS)
+[    0.279808] Memory: 440988K/523768K available (22162K kernel code, 3079K rwdata, 17572K rodata, 4936K init, 5020K bss, 77740K reserved, 0K cma-reserved)
+[    0.280675] devtmpfs: initialized
+[    0.281651] x86/mm: Memory block size: 128MB
+[    0.282741] posixtimers hash table entries: 1024 (order: 2, 16384 bytes, linear)
+[    0.284611] futex hash table entries: 512 (32768 bytes on 1 NUMA nodes, total 32 KiB, linear).
+[    0.286776] xor: automatically using best checksumming function   avx       
+[    0.288915] PM: RTC time: 23:24:40, date: 2026-11-04
+[    0.290274] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.291790] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    0.293630] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    0.295622] audit: initializing netlink subsys (disabled)
+[    0.296660] audit: type=2000 audit(1793834680.762:1): state=initialized audit_enabled=0 res=1
+[    0.309656] thermal_sys: Registered thermal governor 'fair_share'
+[    0.309660] thermal_sys: Registered thermal governor 'bang_bang'
+[    0.310613] thermal_sys: Registered thermal governor 'step_wise'
+[    0.311608] thermal_sys: Registered thermal governor 'user_space'
+[    0.312606] thermal_sys: Registered thermal governor 'power_allocator'
+[    0.314639] cpuidle: using governor ladder
+[    0.316608] cpuidle: using governor menu
+[    0.318694] Freeing SMP alternatives memory: 60K
+[    0.319663] acpiphp: ACPI Hot Plug PCI Controller Driver version: 0.5
+[    0.320763] PCI: Using configuration type 1 for base access
+[    0.321609] PCI: Using configuration type 1 for extended access
+[    0.323655] virt/tdx: TDX not supported by the host platform
+[    0.324643] kprobes: kprobe jump-optimization is enabled. All kprobes are optimized if possible.
+[    0.331694] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    0.332606] HugeTLB: 16380 KiB vmemmap can be freed for a 1.00 GiB page
+[    0.333606] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.336606] HugeTLB: 28 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.345610] raid6: using avx512x2 recovery algorithm
+[    0.346606] raid6: skipped pq benchmark and selected avx512x4
+[    0.347769] ACPI: Added _OSI(Module Device)
+[    0.350140] ACPI: Added _OSI(Processor Device)
+[    0.352611] ACPI: Added _OSI(Processor Aggregator Device)
+[    0.355206] ACPI: 1 ACPI AML tables successfully acquired and loaded
+[    0.357010] ACPI: \_SB_: platform _OSC: OS support mask [006e7eff]
+[    0.357774] ACPI: Interpreter enabled
+[    0.358536] ACPI: PM: (supports S0 S3 S4 S5)
+[    0.359611] ACPI: Using IOAPIC for interrupt routing
+[    0.360795] PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+[    0.362606] PCI: Using E820 reservations for host bridge windows
+[    0.364735] ACPI: Enabled 2 GPEs in block 00 to 0F
+[    0.368340] ACPI: PCI Root Bridge [PCI0] (domain 0000 [bus 00-ff])
+[    0.370023] acpiphp: Slot [2] registered
+[    0.370629] acpiphp: Slot [3] registered
+[    0.371409] acpiphp: Slot [4] registered
+[    0.371631] acpiphp: Slot [5] registered
+[    0.372479] acpiphp: Slot [6] registered
+[    0.373629] acpiphp: Slot [7] registered
+[    0.374464] acpiphp: Slot [8] registered
+[    0.375641] acpiphp: Slot [9] registered
+[    0.376461] acpiphp: Slot [10] registered
+[    0.376636] acpiphp: Slot [11] registered
+[    0.377433] acpiphp: Slot [12] registered
+[    0.378639] acpiphp: Slot [13] registered
+[    0.379518] acpiphp: Slot [14] registered
+[    0.380630] acpiphp: Slot [15] registered
+[    0.381492] acpiphp: Slot [16] registered
+[    0.381638] acpiphp: Slot [17] registered
+[    0.382527] acpiphp: Slot [18] registered
+[    0.383637] acpiphp: Slot [19] registered
+[    0.384490] acpiphp: Slot [20] registered
+[    0.385641] acpiphp: Slot [21] registered
+[    0.386491] acpiphp: Slot [22] registered
+[    0.387629] acpiphp: Slot [23] registered
+[    0.388475] acpiphp: Slot [24] registered
+[    0.388633] acpiphp: Slot [25] registered
+[    0.389471] acpiphp: Slot [26] registered
+[    0.390629] acpiphp: Slot [27] registered
+[    0.391437] acpiphp: Slot [28] registered
+[    0.392640] acpiphp: Slot [29] registered
+[    0.393499] acpiphp: Slot [30] registered
+[    0.393649] acpiphp: Slot [31] registered
+[    0.394515] PCI host bridge to bus 0000:00
+[    0.395617] pci_bus 0000:00: root bus resource [io  0x0000-0x0cf7 window]
+[    0.396606] pci_bus 0000:00: root bus resource [io  0x0d00-0xffff window]
+[    0.398606] pci_bus 0000:00: root bus resource [mem 0x000a0000-0x000bffff window]
+[    0.399606] pci_bus 0000:00: root bus resource [mem 0x20000000-0xfebfffff window]
+[    0.401606] pci_bus 0000:00: root bus resource [mem 0x100000000-0x17fffffff window]
+[    0.402606] pci_bus 0000:00: root bus resource [bus 00-ff]
+[    0.403825] pci 0000:00:00.0: [8086:1237] type 00 class 0x060000 conventional PCI endpoint
+[    0.406235] pci 0000:00:01.0: [8086:7000] type 00 class 0x060100 conventional PCI endpoint
+[    0.408238] pci 0000:00:01.1: [8086:7010] type 00 class 0x010180 conventional PCI endpoint
+[    0.410337] pci 0000:00:01.1: BAR 4 [io  0xc020-0xc02f]
+[    0.411652] pci 0000:00:01.1: BAR 0 [io  0x01f0-0x01f7]: legacy IDE quirk
+[    0.412607] pci 0000:00:01.1: BAR 1 [io  0x03f6]: legacy IDE quirk
+[    0.413607] pci 0000:00:01.1: BAR 2 [io  0x0170-0x0177]: legacy IDE quirk
+[    0.415607] pci 0000:00:01.1: BAR 3 [io  0x0376]: legacy IDE quirk
+[    0.417054] pci 0000:00:01.3: [8086:7113] type 00 class 0x068000 conventional PCI endpoint
+[    0.419098] pci 0000:00:01.3: quirk: [io  0x0600-0x063f] claimed by PIIX4 ACPI
+[    0.420618] pci 0000:00:01.3: quirk: [io  0x0700-0x070f] claimed by PIIX4 SMB
+[    0.423030] pci 0000:00:02.0: [1af4:1000] type 00 class 0x020000 conventional PCI endpoint
+[    0.425619] pci 0000:00:02.0: BAR 0 [io  0xc000-0xc01f]
+[    0.426619] pci 0000:00:02.0: BAR 1 [mem 0xfebc0000-0xfebc0fff]
+[    0.427653] pci 0000:00:02.0: BAR 4 [mem 0xfebfc000-0xfebfffff 64bit pref]
+[    0.428617] pci 0000:00:02.0: ROM [mem 0xfeb80000-0xfebbffff pref]
+[    0.438735] ACPI: PCI: Interrupt link LNKA configured for IRQ 10
+[    0.439746] ACPI: PCI: Interrupt link LNKB configured for IRQ 10
+[    0.440732] ACPI: PCI: Interrupt link LNKC configured for IRQ 11
+[    0.442732] ACPI: PCI: Interrupt link LNKD configured for IRQ 11
+[    0.443674] ACPI: PCI: Interrupt link LNKS configured for IRQ 9
+[    0.444980] iommu: Default domain type: Translated
+[    0.445606] iommu: DMA domain TLB invalidation policy: lazy mode
+[    0.447749] SCSI subsystem initialized
+[    0.448512] ACPI: bus type USB registered
+[    0.448512] usbcore: registered new interface driver usbfs
+[    0.450625] usbcore: registered new interface driver hub
+[    0.451624] usbcore: registered new device driver usb
+[    0.452675] EDAC MC: Ver: 3.0.0
+[    0.454033] NetLabel: Initializing
+[    0.454610] NetLabel:  domain hash size = 128
+[    0.455503] NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO
+[    0.456623] NetLabel:  unlabeled traffic allowed by default
+[    0.457611] mctp: management component transport protocol core
+[    0.458608] NET: Registered PF_MCTP protocol family
+[    0.459631] PCI: Using ACPI for IRQ routing
+[    0.460637] e820: register RAM buffer resource [mem 0x0009fc00-0x0009ffff]
+[    0.462606] e820: register RAM buffer resource [mem 0x1ffe0000-0x1fffffff]
+[    0.463637] vgaarb: loaded
+[    0.464663] hpet0: at MMIO 0xfed00000, IRQs 2, 8, 0
+[    0.465609] hpet0: 3 comparators, 64-bit 100.000000 MHz counter
+[    0.469708] clocksource: Switched to clocksource kvm-clock
+[    0.471651] VFS: Disk quotas dquot_6.6.0
+[    0.472429] VFS: Dquot-cache hash table entries: 512 (4096 bytes)
+[    0.473836] pnp: PnP ACPI init
+[    0.474622] ACPI: IRQ 4 override to edge(!), high(!)
+[    0.476083] pnp: PnP ACPI: found 4 devices
+[    0.483743] clocksource: acpi_pm: mask: 0xffffff max_cycles: 0xffffff, max_idle_ns: 2085701024 ns
+[    0.486479] NET: Registered PF_INET protocol family
+[    0.487497] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    0.489099] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.490852] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.492463] TCP established hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    0.494095] TCP bind hash table entries: 4096 (order: 5, 131072 bytes, linear)
+[    0.495583] TCP: Hash tables configured (established 4096 bind 4096)
+[    0.496908] MPTCP token hash table entries: 512 (order: 2, 12288 bytes, linear)
+[    0.498372] UDP hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.499641] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.500701] NET: Registered PF_XDP protocol family
+[    0.501601] pci_bus 0000:00: resource 4 [io  0x0000-0x0cf7 window]
+[    0.502785] pci_bus 0000:00: resource 5 [io  0x0d00-0xffff window]
+[    0.503971] pci_bus 0000:00: resource 6 [mem 0x000a0000-0x000bffff window]
+[    0.505452] pci_bus 0000:00: resource 7 [mem 0x20000000-0xfebfffff window]
+[    0.506794] pci_bus 0000:00: resource 8 [mem 0x100000000-0x17fffffff window]
+[    0.508236] pci 0000:00:01.0: PIIX3: Enabling Passive Release
+[    0.509346] pci 0000:00:00.0: Limiting direct PCI/PCI transfers
+[    0.510519] PCI: CLS 0 bytes, default 64
+[    0.511436] Trying to unpack rootfs image as initramfs...
+[    0.513846] Initialise system trusted keyrings
+[    0.515245] Key type blacklist registered
+[    0.516649] workingset: timestamp_bits=36 (anon: 31) max_order=17 bucket_order=0 (anon: 0)
+[    0.518522] fuse: init (API version 7.45)
+[    0.519661] integrity: Platform Keyring initialized
+[    0.520615] integrity: Machine keyring initialized
+[    0.528384] Key type asymmetric registered
+[    0.529314] Asymmetric key parser 'x509' registered
+[    0.530362] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 245)
+[    0.532007] io scheduler mq-deadline registered
+[    0.532956] io scheduler kyber registered
+[    0.533847] io scheduler bfq registered
+[    0.534972] ledtrig-cpu: registered to indicate activity on CPUs
+[    0.536374] input: Power Button as /devices/platform/LNXPWRBN:00/input/input0
+[    0.537896] ACPI: button: Power Button [PWRF]
+[    0.539975] ACPI: \_SB_.LNKB: Enabled at IRQ 10
+[    0.542384] Serial: 8250/16550 driver, 32 ports, IRQ sharing enabled
+[    0.544282] 00:03: ttyS0 at I/O 0x3f8 (irq = 4, base_baud = 115200) is a 16550A
+[    0.550701] Non-volatile memory driver v1.3
+[    0.551553] ACPI: bus type drm_connector registered
+[    0.553058] usbcore: registered new interface driver usbserial_generic
+[    0.554441] usbserial: USB Serial support registered for generic
+[    0.555698] i8042: PNP: PS/2 Controller [PNP0303:KBD,PNP0f13:MOU] at 0x60,0x64 irq 1,12
+[    0.555975] Freeing initrd memory: 5604K
+[    0.558680] serio: i8042 KBD port at 0x60,0x64 irq 1
+[    0.559728] serio: i8042 AUX port at 0x60,0x64 irq 12
+[    0.561287] input: AT Translated Set 2 keyboard as /devices/platform/i8042/serio0/input/input1
+[    0.563070] rtc_cmos PNP0B00:00: RTC can wake from S4
+[    0.564623] rtc_cmos PNP0B00:00: registered as rtc0
+[    0.565649] rtc_cmos PNP0B00:00: setting system clock to 2026-11-04T23:24:40 UTC (1793834680)
+[    0.567400] rtc_cmos PNP0B00:00: alarms up to one day, y3k, 242 bytes nvram, hpet irqs
+[    0.569360] hid: raw HID events driver (C) Jiri Kosina
+[    0.570421] usbcore: registered new interface driver usbhid
+[    0.571470] usbhid: USB HID core driver
+[    0.572302] drop_monitor: Initializing network drop monitor service
+[    0.573720] NET: Registered PF_INET6 protocol family
+[    0.575089] Segment Routing with IPv6
+[    0.575789] RPL Segment Routing with IPv6
+[    0.576574] In-situ OAM (IOAM) with IPv6
+[    0.577408] NET: Registered PF_PACKET protocol family
+[    0.578815] IPI shorthand broadcast: enabled
+[    0.582385] sched_clock: Marking stable (421001943, 160611953)->(607231699, -25617803)
+[    0.584074] registered taskstats version 1
+[    0.585093] Loading compiled-in X.509 certificates
+[    0.588103] Loaded X.509 cert 'Build time autogenerated kernel key: c2a3f38db21da023dc040f7ad1b79c9e79964d7e'
+[    0.594355] zswap: loaded using pool zstd
+[    0.595436] Demotion targets for Node 0: null
+[    0.596519] Key type .fscrypt registered
+[    0.597342] Key type fscrypt-provisioning registered
+[    0.598634] Btrfs loaded, zoned=yes, fsverity=yes
+[    0.599536] Key type big_key registered
+[    0.600550] PM:   Magic number: 2:148:453
+[    0.601436] RAS: Correctable Errors collector initialized.
+[    0.602686] clk: Disabling unused clocks
+[    0.603426] PM: genpd: Disabling unused power domains
+[    0.605344] Freeing unused decrypted memory: 2028K
+[    0.606520] Freeing unused kernel image (initmem) memory: 4936K
+[    0.607410] Write protecting the kernel read-only data: 40960k
+[    0.608558] Freeing unused kernel image (text/rodata gap) memory: 364K
+[    0.609787] Freeing unused kernel image (rodata/data gap) memory: 860K
+[    0.643360] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.644412] rodata_test: all tests were successful
+[    0.645170] Run /init as init process
+== tbtun guest: 7.2.9-1-MANJARO probes=A,B,C,D,E,F,G,H,I,J,K
+[    0.668586] u32 classifier
+[    0.669045]     Performance counters on
+[    0.669657]     input device check on
+[    0.670186]     Actions configured
+== eth0:
+   2: eth0: <NO-CARRIER,BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state DOWN qlen 1000
+       link/ether 52:54:00:12:34:56 brd ff:ff:ff:ff:ff:ff
+       inet 10.0.2.15/24 scope global eth0
+          valid_lft forever preferred_lft forever
+   default via 10.0.2.2 dev eth0 
+   10.0.2.0/24 dev eth0 scope link  src 10.0.2.15 
+== loading tbtun.ko
+[    0.683129] tbtun: loading out-of-tree module taints kernel.
+[    0.683986] tbtun: module verification failed: signature and/or required key missing - tainting kernel
+[    0.695102] tbtun 1.0.0 loaded: 64 tunnels max, 16 carriers max
+== tbtun loaded
+== probe A: /proc grammar
+[    0.700437] tbtun: tunnel 1 carrier 0 failed to connect: -111
+   config: tunnel 1 role=near listen=127.0.0.1:19100 peer=127.0.0.1:19101 n=1 m=0 dup=0 profile=http-kal keepalive=5000 max_retry=4294967295 chunk=8228 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=500 rx_reorder_bytes=262144 tx_retain_bytes=0 carrier_stall_ms=3000 framing=len portblock=0-0
+[    0.707565] tbtun: drop_ppm refused: load the module with debug_loss=1 to enable loss injection
+== probe A: pass
+TBT_PROBE_RESULT A PASS
+== reloading tbtun with debug_loss=1
+[    0.726661] tbtun: unloaded
+[    0.747266] tbtun 1.0.0 loaded: 64 tunnels max, 16 carriers max
+== probe B: data path
+[    1.750251] tbtun: tunnel 2 carrier 0 DIALED lport=40000 peer=127.0.0.1:19101
+[    1.752238] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40000, awaiting HELLO
+[    1.753924] tbtun: tunnel 1 target connected
+[    1.763635] workqueue: work func tbt_fbk_work [tbtun] enqueued on deprecated workqueue. Use system_{percpu|dfl}_wq instead.
+   tunnels:
+# id role state listen peer target n m streams
+1 far listening 127.0.0.1:19101 0.0.0.0:0 127.0.0.1:19070 1 0 1
+2 near listening 127.0.0.1:19100 127.0.0.1:19101 - 1 0 0
+   stats before: debug_loss=1
+gaps_total=0
+streams_total=1
+tunnel 1 capture_runs=0 actor_calls=0 submit_bytes=0 tx=0 wire=55 err=0 short=0
+tunnel 1 rx_work_runs=1 rx_drain_entries=1 rx_drain_bytes=55 rx_paused_skips=0 rx_adopt_events=1 rx_records=1 carrier_write_space_runs=1 poll_rescues=0
+tunnel 1 rx_ready_calls=1 rx_reads=1 rx_read_bytes=55 rx_read_zero=0 rx_resume=0 rx_resume_busy=0 rx_last_drained=55 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=0
+tunnel 1 dbg rcv_nxt=0 copied=0 after=0 qlen=0 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=4 pmoved=1 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=0 car_nxt=2778826463 car_copied=2778826463 car_rcvbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=1 txwake_busy=0 txwork=2
+tunnel 1 ws_calls=1
+tunnel 1 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=0 rx_ack=0 peer_paused=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 predict_tx=0 predict_used=0 predict_cancelled=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=0 dup_bytes=0 spec_bytes_max=0
+tunnel 2 capture_runs=0 actor_calls=0 submit_bytes=0 tx=0 wire=55 err=0 short=0
+tunnel 2 rx_work_runs=2 rx_drain_entries=1 rx_drain_bytes=55 rx_paused_skips=0 rx_adopt_events=0 rx_records=1 carrier_write_space_runs=1 poll_rescues=0
+tunnel 2 rx_ready_calls=1 rx_reads=2 rx_read_bytes=55 rx_read_zero=1 rx_resume=0 rx_resume_busy=0 rx_last_drained=55 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=0
+tunnel 2 dbg rcv_nxt=0 copied=0 after=0 qlen=0 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=1 pmoved=1 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 2 live rxq=0 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=0 car_nxt=1314957050 car_copied=1314957050 car_rcvbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 2 txwake=2 txwake_busy=2 txwork=1
+tunnel 2 ws_calls=1
+tunnel 2 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=0 rx_ack=0 peer_paused=0
+tunnel 2 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 predict_tx=0 predict_used=0 predict_cancelled=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0
+tunnel 2 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 2 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=0 dup_bytes=0 spec_bytes_max=0
+   listeners:
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode                                                     
+   0: 0100007F:4A9D 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1100 1 00000000388bdedc 100 0 0 10 0                      
+   1: 0100007F:4A9C 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 1101 1 000000006f8b6fa9 100 0 0 10 0                      
+burst: connected to 127.0.0.1:19100, 4 MiB each way, strict send-then-read first
+[    2.840736] tbtun: hole gatefail seq=389120 mask=0x1 ack=389120
+[    2.842738] tbtun: hole gatefail seq=720525 mask=0x1 ack=720525
+[    2.844881] tbtun: hole gatefail seq=646903 mask=0x1 ack=646903
+[    2.846367] tbtun: hole gatefail seq=974371 mask=0x1 ack=974371
+[    2.848414] tbtun: hole gatefail seq=908941 mask=0x1 ack=908941
+[    2.850027] tbtun: hole gatefail seq=1236250 mask=0x1 ack=1236250
+[    2.852078] tbtun: hole gatefail seq=1170979 mask=0x1 ack=1170979
+[    2.854948] tbtun: hole gatefail seq=1506321 mask=0x1 ack=1506321
+[    2.857220] tbtun: hole gatefail seq=1432858 mask=0x1 ack=1432858
+[    2.860874] tbtun: hole gatefail seq=2094499 mask=0x1 ack=2094499
+burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+[    2.954439] tbtun: hole depthfail seq=7964839 g=1 mask=0x1
+[    2.957495] tbtun: hole depthfail seq=7694927 g=1 mask=0x1
+burst: interleaved coverage phase passed
+burst: 4 MiB crossed each way
+   established during transfer:
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode                                                     
+   4: 0100007F:9C40 0100007F:4A9D 01 00000000:00000020 00:00000000 00000000     0        0 1103 3 00000000cbbd7fd3 20 4 1 25 25                      
+   5: 0100007F:4A9D 0100007F:9C40 01 00000020:00000032 01:00000014 00000000     0        0 1105 3 00000000a40d6c70 20 4 1 32 32                      
+   stats after: debug_loss=1
+gaps_total=0
+streams_total=2
+tunnel 1 capture_runs=147 actor_calls=330 submit_bytes=8388608 tx=8388608 wire=8424007 err=0 short=0
+tunnel 1 rx_work_runs=149 rx_drain_entries=970 rx_drain_bytes=8423669 rx_paused_skips=0 rx_adopt_events=1 rx_records=1073 carrier_write_space_runs=1 poll_rescues=2
+tunnel 1 rx_ready_calls=1073 rx_reads=149 rx_read_bytes=8423669 rx_read_zero=1 rx_resume=0 rx_resume_busy=0 rx_last_drained=82 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=330
+tunnel 1 dbg rcv_nxt=3852913419 copied=3852913418 after=3852913419 qlen=1 allocf=0 over=257 copyf=0 hiwat=0 pdead=0 prun=214 pmoved=1083 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=992 car_nxt=2787250077 car_copied=2787250077 car_rcvbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=527 txwake_busy=358 txwork=172
+tunnel 1 ws_calls=1
+tunnel 1 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 fbk_tx=40 fbk_rx=39 retx_frames=0 retx_bytes=0 retain_drop=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=8388608 tx_ack=8388608 rx_ack=8388608 peer_paused=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 predict_tx=0 predict_used=0 predict_cancelled=0 rx_max_stall_us=0 hole_checks=24 gate_fail=23 depth_fail=1 time_fail=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0 spec_bytes_max=0
+tunnel 2 capture_runs=136 actor_calls=303 submit_bytes=8388608 tx=8388608 wire=8423669 err=0 short=0
+tunnel 2 rx_work_runs=157 rx_drain_entries=980 rx_drain_bytes=8424007 rx_paused_skips=0 rx_adopt_events=0 rx_records=1083 carrier_write_space_runs=1 poll_rescues=1
+tunnel 2 rx_ready_calls=1083 rx_reads=157 rx_read_bytes=8424007 rx_read_zero=2 rx_resume=0 rx_resume_busy=0 rx_last_drained=32 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=303
+tunnel 2 dbg rcv_nxt=855219987 copied=855219986 after=855219987 qlen=1 allocf=0 over=247 copyf=0 hiwat=0 pdead=0 prun=206 pmoved=1073 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 2 live rxq=0 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=0 car_nxt=1323381002 car_copied=1323381002 car_rcvbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 2 txwake=494 txwake_busy=328 txwork=167
+tunnel 2 ws_calls=1
+tunnel 2 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 fbk_tx=39 fbk_rx=40 retx_frames=0 retx_bytes=0 retain_drop=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=8388608 tx_ack=8388608 rx_ack=8388608 peer_paused=0
+tunnel 2 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 predict_tx=0 predict_used=0 predict_cancelled=0 rx_max_stall_us=0 hole_checks=23 gate_fail=22 depth_fail=1 time_fail=0
+tunnel 2 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 2 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0 spec_bytes_max=0
+== probe B: pass
+TBT_PROBE_RESULT B PASS
+== probe C: carrier loss and replacement
+[    5.095196] tbtun: tunnel 2 carrier 0 DIALED lport=40000 peer=127.0.0.1:19101
+[    5.097111] tbtun: tunnel 2 carrier 1 DIALED lport=40001 peer=127.0.0.1:19101
+[    5.098847] tbtun: tunnel 2 carrier 2 DIALED lport=40002 peer=127.0.0.1:19101
+[    5.100488] tbtun: tunnel 2 carrier 3 DIALED lport=40003 peer=127.0.0.1:19101
+[    5.102099] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40000, awaiting HELLO
+[    5.103840] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40001, awaiting HELLO
+[    5.105544] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40002, awaiting HELLO
+[    5.107403] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40003, awaiting HELLO
+[    5.109302] tbtun: tunnel 1 target connected
+   peers before:
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm
+1 0 19101 127.0.0.1:40000 0 18 0 up raw 0 0 0 1 55 0 0
+1 1 19101 127.0.0.1:40001 0 11 0 up raw 0 0 0 1 55 0 0
+1 2 19101 127.0.0.1:40002 0 10 0 up [    6.101686] tbtun: hole declare seq=0 timer age_us=3310 mask=0x0 sends=1 dup_pend=0
+raw 0 0 0 1 55 0 0
+1 3 19101 12[    6.104253] tbtun: tunnel 2 carrier 0 DIALED lport=40004 peer=127.0.0.1:19101
+7.0.0.1:40003 0 [    6.106263] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40004, awaiting HELLO
+9 0 up raw 0 0 0[    6.108569] tbtun: hole repair seq=0 age_us=6884
+ 1 55 0 0
+2 0 40000 127.0.0.1:19101 0 27 0 up raw 0 0 0 1 55 0 0
+2 1 40001 127.0.0.1:19101 0 10 0 up raw 0 0 0 1 55 0 0
+2 2 40002 127.0.0.1:19101 0 17 0 up raw 0 0 0 1 55 0 0
+2 3 40003 127.0.0.1:19101 0 9 0 up raw 0 0 0 1 55 0 0
+burst: connected to 127.0.0.1:19100, 4 MiB each way, strict send-then-read first
+   taking carrier 0 down after 196608 captured bytes
+burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+burst: interleaved coverage phase passed
+burst: 4 MiB crossed each way
+   peers after:
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm
+1 0 19101 127.0.0.1:40004 8364498 5867 0 up raw 254 0 76 262 2066606 0 0
+1 1 19101 127.0.0.1:40001 8372690 1009 0 up raw 258 0 125 273 2095884 0 0
+1 2 19101 127.0.0.1:40002 8380882 632 0 up raw 264 0 116 277 2145486 0 0
+1 3 19101 127.0.0.1:40003 8388608 3475 0 up raw 261 0 118 273 2118324 0 0
+2 0 40004 127.0.0.1:19101 8364498 879 0 up raw 255 0 7 266 2087971 0 0
+2 1 40001 127.0.0.1:19101 8388608 3140 0 up raw 255 0 11 280 2093013 0 0
+2 2 40002 127.0.0.1:19101 8380882 622 0 up raw 261 0 9 271 2132199 0 0
+2 3 40003 127.0.0.1:19101 8356306 1039 0 up raw 257 0 8 265 2113094 0 0
+   carrier_lost=2 carrier_replaced=1 carrier0=up frames=268 bytes=2088035
+== probe C: pass
+TBT_PROBE_RESULT C PASS
+== probe D: ppm loss and reorder
+punt!
+[    7.365041] tbtun: tunnel 2 carrier 0 DIALED lport=40000 peer=127.0.0.1:19101
+[    7.366712] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40000, awaiting HELLO
+[    7.367758] tbtun: tunnel 2 carrier 1 DIALED lport=40001 peer=127.0.0.1:19101
+[    7.368449] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40001, awaiting HELLO
+[    7.370064] tbtun: tunnel 2 carrier 2 DIALED lport=40002 peer=127.0.0.1:19101
+[    7.371881] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40002, awaiting HELLO
+[    7.373680] tbtun: tunnel 2 carrier 3 DIALED lport=40003 peer=127.0.0.1:19101
+[    7.375431] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40003, awaiting HELLO
+[    7.378832] tbtun: tunnel 1 target connected
+burst: connected to 127.0.0.1:19100, 4 MiB each way, strict send-then-read first
+[    8.371851] tbtun: dropping frames: debug_loss=1 and drop_ppm=20000
+[    8.374229] tbt_tx_hole_check: 91 callbacks suppressed
+[    8.374232] tbtun: hole gatefail seq=515884 mask=0x8 ack=515884
+[    8.379709] tbtun: hole depthfail seq=110592 g=1 mask=0x4
+[    8.390732] tbtun: hole depthfail seq=110592 g=1 mask=0x4
+[    8.394646] tbtun: hole declare seq=110592 timer age_us=21312 mask=0x4 sends=1 dup_pend=0
+[    8.396855] tbtun: hole repair seq=110592 age_us=2211
+[    8.399064] tbtun: hole gatefail seq=1048099 mask=0x8 ack=1048099
+[    8.401920] tbtun: hole gatefail seq=741005 mask=0x2 ack=741005
+[    8.412855] tbtun: hole depthfail seq=741005 g=2 mask=0x2
+[    8.424855] tbtun: hole depthfail seq=741005 g=2 mask=0x2
+[    8.426817] tbtun: hole declare seq=741005 timer age_us=25369 mask=0x2 sends=1 dup_pend=0
+[    8.430126] tbtun: hole repair seq=741005 age_us=3312
+[    8.432216] tbtun: hole gatefail seq=2342435 mask=0x1 ack=2342435
+[    8.435812] tbtun: hole gatefail seq=1572864 mask=0x1 ack=1572864
+[    8.438438] tbtun: hole gatefail seq=1835008 mask=0x1 ack=1835008
+[    8.441296] tbtun: hole gatefail seq=3373832 mask=0x4 ack=3373832
+[    8.448823] tbtun: hole depthfail seq=1949696 g=1 mask=0x4
+[    8.460060] tbtun: hole depthfail seq=1949696 g=1 mask=0x4
+[    8.462636] tbtun: hole declare seq=1949696 timer age_us=22656 mask=0x4 sends=1 dup_pend=0
+[    8.465032] tbtun: hole repair seq=1949696 age_us=2400
+[    8.467716] tbtun: hole gatefail seq=2215565 mask=0x4 ack=2215565
+[    8.469480] tbtun: hole gatefail seq=3889345 mask=0x2 ack=3889345
+[    8.471867] tbtun: hole gatefail seq=2473507 mask=0x1 ack=2473507
+[    8.482945] tbtun: hole depthfail seq=2481699 g=2 mask=0x2
+[    8.493997] tbtun: hole depthfail seq=2481699 g=2 mask=0x2
+[    8.495582] tbtun: hole declare seq=2481699 timer age_us=24022 mask=0x2 sends=1 dup_pend=0
+[    8.504853] tbtun: hole repair seq=2481699 age_us=9276
+[    8.560120] tbtun: hole depthfail seq=3134927 g=2 mask=0x2
+[    8.570843] tbtun: hole depthfail seq=3134927 g=2 mask=0x2
+[    8.574690] tbtun: hole declare seq=3134927 timer age_us=25632 mask=0x2 sends=1 dup_pend=0
+[    8.581793] tbtun: hole repair seq=3134927 age_us=7114
+burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+[    8.717730] tbtun: hole declare seq=4276224 timer age_us=23277 mask=0x4 sends=1 dup_pend=0
+[    8.725796] tbtun: hole declare seq=4472832 timer age_us=29773 mask=0x2 sends=1 dup_pend=0
+[    8.728405] tbtun: hole repair seq=4276224 age_us=10701
+[    8.730310] tbtun: hole repair seq=4472832 age_us=4637
+[    8.754894] tbtun: hole declare seq=4636460 timer age_us=21989 mask=0x2 sends=1 dup_pend=0
+[    8.758135] tbtun: hole repair seq=4636460 age_us=3266
+[    8.783726] tbtun: hole declare seq=4808280 timer age_us=23994 mask=0x4 sends=1 dup_pend=0
+[    8.787232] tbtun: hole repair seq=4808280 age_us=3534
+burst: interleaved coverage phase passed
+burst: 4 MiB crossed each way
+   peers after:
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm
+1 0 19101 127.0.0.1:40000 8370422 1283 0 up raw 314 0 39 340 2535651 0 32352
+1 1 19101 127.0.0.1:40001 8378614 3715 0 up raw 274 25641 25 296 2230639 7 206081
+1 2 19101 127.0.0.1:40002 8386806 3178 0 up raw 269 29520 24 295 2186110 8 237288
+1 3 19101 127.0.0.1:40003 8388608 4545 0 up raw 314 0 33 337 2548293 0 14836
+2 0 40000 127.0.0.1:19101 8378614 1269 0 up raw 261 0 25 277 2133421 0 0
+2 1 40001 127.0.0.1:19101 8388608 3464 0 up raw 259 7905 26 294 2116715 2 23809
+2 2 40002 127.0.0.1:19101 8386806 2518 0 up raw 259 0 26 288 2121461 0 0
+2 3 40003 127.0.0.1:19101 8370422 2898 0 up raw 257 0 28 268 2099239 0 0
+   reorder_max_depth=16 retx_frames=154 dropped: carrier1=9 carrier2=8 (both tunnels)
+== probe D: pass
+TBT_PROBE_RESULT D PASS
+== probe E: spares
+punt!
+[   10.086707] tbtun: tunnel 2 carrier 0 DIALED lport=40000 peer=127.0.0.1:19101
+[   10.089109] tbtun: tunnel 2 carrier 1 DIALED lport=40001 peer=127.0.0.1:19101
+[   10.091772] tbtun: tunnel 2 carrier 2 DIALED lport=40002 peer=127.0.0.1:19101
+[   10.093506] tbtun: tunnel 2 carrier 3 DIALED lport=40003 peer=127.0.0.1:19101
+[   10.095126] tbtun: tunnel 2 carrier 4 DIALED lport=40004 peer=127.0.0.1:19101
+[   10.096739] tbtun: tunnel 2 carrier 5 DIALED lport=40005 peer=127.0.0.1:19101
+[   10.098315] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40000, awaiting HELLO
+[   10.100261] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40001, awaiting HELLO
+[   10.102362] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40002, awaiting HELLO
+[   10.104814] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40003, awaiting HELLO
+[   10.106686] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40004, awaiting HELLO
+[   10.108680] tbtun: tunnel 1 target connected
+[   10.109716] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40005, awaiting HELLO
+   spares warm:
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm
+1 0 19101 127.0.0.1:40000 0 33 0 up raw 0 0 0 1 55 0 0
+1 1 19101 127.0.0.1:40001 0 22 0 up raw 0 0 0 1 55 0 0
+1 2 19101 127.0.0.1:40002 0 13 0 up raw 0 0 0 1 55 0 0
+1 3 19101 127.0.0.1:40003 0 10 0 up raw 0 0 0 1 55 0 0
+1 4 19101 127.0.0.1:40004 0 10 0 spare raw 0 0 0 1 55 0 0
+1 5 19101 127.0.0.1:40005 0 9 0 spare raw 0 0 0 1 55 0 0
+2 0 40000 127.0.0.1:19101 0 72 0 up raw 0 0 0 1 55 0 0
+2 1 40001 127.0.0.1:19101 0 24 0 up raw 0 0 0 1 55 0 0
+2 2 40002 127.0.0.1:19101 0 14 0 up raw 0 0 0 1 55 0 0
+2 3 40003 127.0.0.1:19101 0 11 0 up raw 0 0 0 1 55 0 0
+2 4 40004 127.0.0.1:19101 0 9 0 spare raw 0 0 0 1 55 0 0
+2 5 40005 127.0.0.1:19101 0 9 0 spare raw 0 0 0 1 55 0 0
+burst: connected to 127.0.0.1:19100, 4 MiB each way, strict send-then-read first
+[   11.136668] tbt_tx_retx: 6 callbacks suppressed
+[   11.136673] tbtun: hole declare seq=49152 timer age_us=21626 mask=0x4 sends=1 dup_pend=0
+[   11.143765] tbtun: hole declare seq=147456 timer age_us=28652 mask=0x4 sends=1 dup_pend=0
+[   11.145945] tbt_tx_holes_repaired: 6 callbacks suppressed
+[   11.145948] tbtun: hole repair seq=49152 age_us=9282
+[   11.148539] tbtun: hole repair seq=147456 age_us=4785
+burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+burst: interleaved coverage phase passed
+burst: 4 MiB crossed each way
+   spare 4 took over: state=up bytes=2056287
+   spare_activated=1 replaced=0 lost=2
+== probe E: pass
+TBT_PROBE_RESULT E PASS
+== probe F: duplication
+punt!
+[   12.387421] tbtun: tunnel 2 carrier 0 DIALED lport=40000 peer=127.0.0.1:19101
+[   12.389036] tbtun: tunnel 2 carrier 1 DIALED lport=40001 peer=127.0.0.1:19101
+[   12.390722] tbtun: tunnel 2 carrier 2 DIALED lport=40002 peer=127.0.0.1:19101
+[   12.392334] tbtun: tunnel 2 carrier 3 DIALED lport=40003 peer=127.0.0.1:19101
+[   12.393995] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40000, awaiting HELLO
+[   12.395741] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40001, awaiting HELLO
+[   12.397464] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40002, awaiting HELLO
+[   12.399192] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40003, awaiting HELLO
+[   12.401029] tbtun: tunnel 1 target connected
+burst: connected to 127.0.0.1:19100, 4 MiB each way, strict send-then-read first
+[   13.394453] tbt_tx_hole_check: 63 callbacks suppressed
+[   13.394462] tbtun: hole gatefail seq=274432 mask=0x6 ack=274432
+[   13.397563] tbtun: hole gatefail seq=548599 mask=0x6 ack=548599
+[   13.399357] tbtun: hole gatefail seq=421888 mask=0x4 ack=421888
+[   13.401108] tbtun: hole gatefail seq=679565 mask=0xc ack=679565
+[   13.403566] tbtun: hole gatefail seq=790104 mask=0x4 ack=790104
+[   13.405594] tbtun: hole gatefail seq=941603 mask=0x6 ack=941603
+[   13.405600] tbt_tx_hole_check: 21 callbacks suppressed
+[   13.405603] tbtun: hole depthfail seq=790104 g=1 mask=0x4
+[   13.410136] tbtun: hole gatefail seq=1080867 mask=0x6 ack=1080867
+[   13.415717] tbtun: hole depthfail seq=790104 g=1 mask=0x4
+[   13.422759] tbtun: hole depthfail seq=1277210 g=1 mask=0x6
+[   13.426755] tbtun: hole depthfail seq=790104 g=1 mask=0x4
+[   13.433829] tbtun: hole depthfail seq=1277210 g=1 mask=0x6
+[   13.438754] tbtun: hole timefail seq=1056291 age_us=160 rtt_us=3167
+[   13.440950] tbtun: hole gatefail seq=1211674 mask=0x1 ack=1211674
+[   13.443448] tbtun: hole depthfail seq=1661969 g=3 mask=0xa
+[   13.445847] tbtun: hole depthfail seq=1375514 g=1 mask=0x2
+[   13.447154] tbtun: hole timefail seq=1793942 age_us=1495 rtt_us=1021
+[   13.449544] tbtun: hole gatefail seq=1933206 mask=0xa ack=1933206
+[   13.456802] tbtun: hole depthfail seq=1375514 g=1 mask=0x2
+[   13.467119] tbtun: hole timefail seq=2342806 age_us=87 rtt_us=1062
+[   13.469467] tbtun: hole timefail seq=2473878 age_us=36 rtt_us=785
+[   13.473103] tbtun: hole gatefail seq=1912726 mask=0x9 ack=1912726
+[   13.475597] tbtun: hole timefail seq=2933804 age_us=216 rtt_us=377
+[   13.477030] tbtun: hole timefail seq=2047894 age_us=1655 rtt_us=1125
+[   13.479206] tbtun: hole depthfail seq=3023916 g=1 mask=0x2
+[   13.481157] tbtun: hole timefail seq=2240459 age_us=93 rtt_us=1025
+[   13.489849] tbtun: hole depthfail seq=3023916 g=1 mask=0x2
+[   13.511644] tbtun: hole timefail seq=3550437 age_us=242 rtt_us=527
+burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+[   13.591932] tbtun: hole timefail seq=5766161 age_us=347 rtt_us=768
+[   13.596577] tbtun: hole timefail seq=5741585 age_us=338 rtt_us=896
+burst: interleaved coverage phase passed
+burst: 4 MiB crossed each way
+   dup_tx=1037 dup_used=312 dup_suppressed=1642 holes_declared=0 inflate_ppm=2000000 dup_same_path=0
+== probe F: pass
+TBT_PROBE_RESULT F PASS
+== probe G: prediction under loss on one path
+punt!
+[   14.811534] tbtun: tunnel 2 carrier 0 DIALED lport=40000 peer=127.0.0.1:19101
+[   14.813206] tbtun: tunnel 2 carrier 1 DIALED lport=40001 peer=127.0.0.1:19101
+[   14.814908] tbtun: tunnel 2 carrier 2 DIALED lport=40002 peer=127.0.0.1:19101
+[   14.816521] tbtun: tunnel 2 carrier 3 DIALED lport=40003 peer=127.0.0.1:19101
+[   14.818114] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40000, awaiting HELLO
+[   14.819861] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40001, awaiting HELLO
+[   14.821585] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40002, awaiting HELLO
+[   14.823306] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40003, awaiting HELLO
+[   14.825122] tbtun: tunnel 1 target connected
+burst: connected to 127.0.0.1:19100, 4 MiB each way, strict send-then-read first
+[   15.836656] tbtun: hole declare seq=8192 timer age_us=20811 mask=0x2 sends=1 dup_pend=0
+[   15.839064] tbtun: hole repair seq=8192 age_us=2409
+[   15.863647] tbtun: hole declare seq=73728 timer age_us=23216 mask=0x2 sends=1 dup_pend=0
+[   15.866016] tbtun: hole repair seq=73728 age_us=2370
+[   15.889643] tbtun: hole declare seq=704512 timer age_us=22282 mask=0x2 sends=1 dup_pend=0
+[   15.891759] tbtun: hole declare seq=331776 timer age_us=24011 mask=0x2 sends=1 dup_pend=0
+[   15.893872] tbtun: hole repair seq=331776 age_us=2113
+[   15.895536] tbtun: hole repair seq=704512 age_us=5896
+[   15.921638] tbtun: hole declare seq=995063 timer age_us=22747 mask=0x2 sends=1 dup_pend=0
+[   15.931762] tbtun: hole repair seq=995063 age_us=10126
+[   15.953666] tbtun: hole declare seq=1883100 timer age_us=30110 mask=0x2 sends=1 dup_pend=0
+[   15.966732] tbtun: hole declare seq=1257048 timer age_us=23847 mask=0x2 sends=1 dup_pend=0
+[   15.968909] tbtun: hole repair seq=1883100 age_us=15252
+[   15.970224] tbtun: hole repair seq=1257048 age_us=3520
+[   15.995637] tbtun: hole declare seq=1932252 timer age_us=21886 mask=0x2 sends=1 dup_pend=0
+[   15.997907] tbtun: hole repair seq=2349779 age_us=2260
+[   16.146839] tbt_tx_retx: 10 callbacks suppressed
+[   16.146850] tbtun: hole declare seq=4042106 timer age_us=20279 mask=0x2 sends=1 dup_pend=0
+[   16.151037] tbt_tx_holes_repaired: 10 callbacks suppressed
+[   16.151040] tbtun: hole repair seq=4042106 age_us=4231
+[   16.175029] tbtun: hole declare seq=3999354 timer age_us=38906 mask=0x2 sends=1 dup_pend=0
+[   16.181724] tbtun: hole declare seq=4103546 timer age_us=30632 mask=0x2 sends=1 dup_pend=0
+[   16.185789] tbtun: hole repair seq=3999354 age_us=10772
+[   16.187150] tbtun: hole repair seq=4103546 age_us=5449
+burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+[   16.239684] tbtun: hole declare seq=4456448 timer age_us=20943 mask=0x2 sends=1 dup_pend=0
+[   16.243855] tbtun: hole declare seq=4521984 timer age_us=24401 mask=0x2 sends=1 dup_pend=0
+[   16.246101] tbtun: hole repair seq=4456448 age_us=6470
+[   16.247266] tbtun: hole repair seq=4521984 age_us=3535
+[   16.272707] tbtun: hole declare seq=4591616 timer age_us=21538 mask=0x2 sends=1 dup_pend=0
+[   16.274950] tbtun: hole declare seq=4693698 timer age_us=26061 mask=0x2 sends=1 dup_pend=0
+[   16.277836] tbtun: hole repair seq=4591616 age_us=5149
+[   16.279544] tbtun: hole repair seq=4693698 age_us=4616
+[   16.301640] tbtun: hole declare seq=4730668 timer age_us=22243 mask=0x2 sends=1 dup_pend=0
+[   16.305910] tbtun: hole repair seq=4730668 age_us=4283
+[   16.330813] tbtun: hole declare seq=5422203 timer age_us=23326 mask=0x2 sends=1 dup_pend=0
+[   16.333057] tbtun: hole declare seq=5209476 timer age_us=22909 mask=0x2 sends=1 dup_pend=0
+[   16.335071] tbtun: hole repair seq=5422203 age_us=4332
+[   16.336495] tbtun: hole repair seq=5209476 age_us=3503
+burst: interleaved coverage phase passed
+burst: 4 MiB crossed each way
+   dropped=24 holes_declared=47 holes_repaired=47 holes_unrecoverable=0 rx_max_stall_us=32505 limit=500000
+== probe G: pass
+TBT_PROBE_RESULT G PASS
+== probe H: sustained loss, recovery, and the bounded reset
+punt!
+[   17.745122] tbtun: tunnel 2 carrier 0 DIALED lport=40000 peer=127.0.0.1:19101
+[   17.746894] tbtun: tunnel 2 carrier 1 DIALED lport=40001 peer=127.0.0.1:19101
+[   17.748567] tbtun: tunnel 2 carrier 2 DIALED lport=40002 peer=127.0.0.1:19101
+[   17.750235] tbtun: tunnel 2 carrier 3 DIALED lport=40003 peer=127.0.0.1:19101
+[   17.751903] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40000, awaiting HELLO
+[   17.753712] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40001, awaiting HELLO
+[   17.755487] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40002, awaiting HELLO
+[   17.757250] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40003, awaiting HELLO
+[   17.759223] tbtun: tunnel 1 target connected
+burst: connected to 127.0.0.1:19100, 4 MiB each way, strict send-then-read first
+[   18.771679] tbt_tx_hole_check: 63 callbacks suppressed
+[   18.771685] tbtun: hole gatefail seq=81920 mask=0x2 ack=81920
+[   18.782671] tbtun: hole gatefail seq=81920 mask=0x2 ack=81920
+[   18.793717] tbtun: hole gatefail seq=98304 mask=0x2 ack=98304
+[   18.800737] tbtun: hole gatefail seq=81920 mask=0x2 ack=81920
+[   18.804707] tbtun: hole gatefail seq=122880 mask=0x2 ack=122880
+[   18.811867] tbtun: hole gatefail seq=81920 mask=0x2 ack=81920
+[   18.815692] tbtun: hole gatefail seq=122880 mask=0x2 ack=122880
+[   18.826674] tbtun: hole gatefail seq=122880 mask=0x2 ack=122880
+[   18.844739] tbtun: hole gatefail seq=110592 mask=0x2 ack=110592
+[   18.848655] tbtun: hole gatefail seq=196608 mask=0x2 ack=196608
+[   20.759946] tbt_tx_hole_check: 82 callbacks suppressed
+[   20.759956] tbtun: hole depthfail seq=3000301 g=1 mask=0x2
+[   20.764773] tbtun: hole depthfail seq=3176111 g=1 mask=0x2
+[   20.770758] tbtun: hole depthfail seq=3000301 g=1 mask=0x2
+[   20.775821] tbtun: hole depthfail seq=3176111 g=1 mask=0x2
+[   20.781841] tbtun: hole depthfail seq=3000301 g=1 mask=0x2
+[   20.792997] tbtun: hole depthfail seq=3065837 g=1 mask=0x2
+[   20.797737] tbtun: hole depthfail seq=3208879 g=1 mask=0x2
+[   20.803778] tbtun: hole depthfail seq=3065837 g=1 mask=0x2
+[   20.814776] tbtun: hole depthfail seq=3065837 g=1 mask=0x2
+burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+[   23.187718] tbt_tx_retx: 24 callbacks suppressed
+[   23.187725] tbtun: hole declare seq=7928372 timer age_us=34876 mask=0x2 sends=1 dup_pend=0
+[   23.190690] tbt_tx_holes_repaired: 24 callbacks suppressed
+[   23.190692] tbtun: hole repair seq=7928372 age_us=2984
+burst: interleaved coverage phase passed
+burst: 4 MiB crossed each way
+   phase 1: recovered after 2 s of total loss on one path, holes_unrecoverable=0
+punt!
+[   24.444269] tbtun: tunnel 2 carrier 0 DIALED lport=40000 peer=127.0.0.1:19101
+[   24.445451] tbtun: tunnel 2 carrier 1 DIALED lport=40001 peer=127.0.0.1:19101
+[   24.446956] tbtun: tunnel 2 carrier 2 DIALED lport=40002 peer=127.0.0.1:19101
+[   24.448093] tbtun: tunnel 2 carrier 3 DIALED lport=40003 peer=127.0.0.1:19101
+[   24.449186] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40000, awaiting HELLO
+[   24.450265] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40001, awaiting HELLO
+[   24.451340] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40002, awaiting HELLO
+[   24.452423] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40003, awaiting HELLO
+[   24.453585] tbtun: tunnel 1 target connected
+burst: connected to 127.0.0.1:19100, 4 MiB each way, strict send-then-read first
+[   25.952702] tbtun: TXSTALLKILL sid=3989045248 ack=0 txseq=163840 age_us=502360
+burst: strict send-then-read failed: sent=4194304 recvd=0 first_mismatch=-1 errno=0 (none)
+debug_loss=1
+gaps_total=0
+streams_total=5
+tunnel 1 capture_runs=0 actor_calls=0 submit_bytes=0 tx=0 wire=476 err=0 short=0
+tunnel 1 rx_work_runs=58 rx_drain_entries=58 rx_drain_bytes=5260 rx_paused_skips=0 rx_adopt_events=4 rx_records=58 carrier_write_space_runs=4 poll_rescues=1
+tunnel 1 rx_ready_calls=58 rx_reads=58 rx_read_bytes=5260 rx_read_zero=0 rx_resume=0 rx_resume_busy=0 rx_last_drained=32 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=0
+tunnel 1 dbg rcv_nxt=0 copied=0 after=0 qlen=0 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=30 pmoved=12 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=992 car_nxt=3133420371 car_copied=3133420371 car_rcvbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=50 txwake_busy=26 txwork=28
+tunnel 1 ws_calls=4
+tunnel 1 c3 n=4 up=4 lost=0 replaced=0 spare_activated=0 alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 fbk_tx=0 fbk_rx=46 retx_frames=0 retx_bytes=0 retain_drop=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=0 rx_ack=0 peer_paused=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 predict_tx=0 predict_used=0 predict_cancelled=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=0 dup_bytes=0 spec_bytes_max=0
+tunnel 2 capture_runs=6 actor_calls=9 submit_bytes=163840 tx=1073152 wire=5260 err=0 short=0
+tunnel 2 rx_work_runs=16 rx_drain_entries=12 rx_drain_bytes=476 rx_paused_skips=0 rx_adopt_events=0 rx_records=12 carrier_write_space_runs=4 poll_rescues=40
+tunnel 2 rx_ready_calls=12 rx_reads=16 rx_read_bytes=476 rx_read_zero=4 rx_resume=0 rx_resume_busy=0 rx_last_drained=32 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=9
+tunnel 2 dbg rcv_nxt=922412312 copied=920351839 after=920351839 qlen=11 allocf=0 over=8 copyf=0 hiwat=0 pdead=0 prun=311 pmoved=189 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 2 live rxq=0 rxp=0 txq=1597440 txp=1 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=0 car_nxt=1337231319 car_copied=1337231319 car_rcvbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 2 txwake=280 txwake_busy=56 txwork=265
+tunnel 2 ws_calls=4
+tunnel 2 c3 n=4 up=4 lost=0 replaced=0 spare_activated=0 alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 fbk_tx=46 fbk_rx=0 retx_frames=306 retx_bytes=2506752 retain_drop=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=163840 tx_ack=0 rx_ack=0 peer_paused=0
+tunnel 2 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=1 predict_tx=0 predict_used=0 predict_cancelled=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0
+tunnel 2 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 2 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0 spec_bytes_max=0
+   phase 2: reset in 0.58 s, holes_unrecoverable=1
+== probe H: pass
+TBT_PROBE_RESULT H PASS
+== probe I: per-5-tuple shaping on eth0
+Warning: sch_htb: quantum of class 10001 is big. Consider r2q change.
+Warning: sch_htb: quantum of class 10099 is big. Consider r2q change.
+   qdisc:
+   qdisc htb 1: root refcnt 2 r2q 10 default 0x99 direct_packets_stat 0 direct_qlen 1000
+   qdisc netem 120: parent 1:30 limit 1000 delay 20ms  10ms seed 10103593119852848966
+   qdisc netem 122: parent 1:32 limit 1000 delay 20ms  10ms seed 11951391876650644203
+   qdisc netem 113: parent 1:23 limit 1000 delay 20ms  10ms seed 5474833469231737241
+   qdisc netem 111: parent 1:21 limit 1000 delay 20ms  10ms seed 18024132817358280746
+   qdisc netem 115: parent 1:25 limit 1000 delay 20ms  10ms seed 4903718095884205712
+   qdisc netem 100: parent 1:10 limit 1000 delay 20ms  10ms seed 4962683764730414921
+   qdisc netem 117: parent 1:27 limit 1000 delay 20ms  10ms seed 11503811859531218470
+   qdisc netem 102: parent 1:12 limit 1000 delay 20ms  10ms seed 5541232043199193869
+   qdisc netem 119: parent 1:29 limit 1000 delay 20ms  10ms seed 12393882986144772037
+   qdisc netem 106: parent 1:16 limit 1000 delay 20ms  10ms seed 3781314869252924665
+   qdisc netem 104: parent 1:14 limit 1000 delay 20ms  10ms seed 9225008865664566561
+   qdisc netem 108: parent 1:18 limit 1000 delay 20ms  10ms seed 501559870390293993
+   qdisc netem 121: parent 1:31 limit 1000 delay 20ms  10ms seed 5944864880722893014
+   qdisc netem 123: parent 1:33 limit 1000 delay 20ms  10ms seed 17234849258350442637
+   qdisc netem 110: parent 1:20 limit 1000 delay 20ms  10ms seed 7591709397727982484
+   qdisc netem 112: parent 1:22 limit 1000 delay 20ms  10ms seed 9909338002370137591
+   qdisc netem 114: parent 1:24 limit 1000 delay 20ms  10ms seed 9112338148249490096
+   qdisc netem 101: parent 1:11 limit 1000 delay 20ms  10ms seed 5440958532964991336
+   qdisc netem 118: parent 1:28 limit 1000 delay 20ms  10ms seed 11640686544441700575
+   qdisc netem 116: parent 1:26 limit 1000 delay 20ms  10ms seed 596161779546518563
+   qdisc netem 103: parent 1:13 limit 1000 delay 20ms  10ms seed 17018708824350856697
+   qdisc netem 105: parent 1:15 limit 1000 delay 20ms  10ms seed 11522534372256238355
+   qdisc netem 109: parent 1:19 limit 1000 delay 20ms  10ms seed 5879208810434742209
+   qdisc netem 107: parent 1:17 limit 1000 delay 20ms  10ms seed 14720465322588409903
+   filter protocol ip pref 1 u32 chain 0 
+   filter protocol ip pref 1 u32 chain 0 fh 800: ht divisor 1 
+   filter protocol ip pref 1 u32 chain 0 fh 800::800 order 2048 key ht 800 bkt 0 flowid 1:10 not_in_hw 
+     match a0280000/ffff0000 at 20
+   filter protocol ip pref 1 u32 chain 0 fh 800::801 order 2049 key ht 800 bkt 0 flowid 1:11 not_in_hw 
+     match a0290000/ffff0000 at 20
+   filter protocol ip pref 1 u32 chain 0 fh 800::802 order 2050 key ht 800 bkt 0 flowid 1:12 not_in_hw 
+     match a02a0000/ffff0000 at 20
+   filter protocol ip pref 1 u32 chain 0 fh 800::803 order 2051 key ht 800 bkt 0 flowid 1:13 not_in_hw 
+     match a02b0000/ffff0000 at 20
+   filter protocol ip pref 1 u32 chain 0 fh 800::804 order 2052 key ht 800 bkt 0 flowid 1:14 not_in_hw 
+     match a02c0000/ffff0000 at 20
+[   28.232494] htb: netem qdisc 100: is non-work-conserving?
+[   28.234045] htb: too many events!
+[   28.249686] tbtun: tunnel 2 carrier 0 DIALED lport=41000 peer=10.0.2.2:19101
+[   28.251690] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=43846, awaiting HELLO
+[   28.271797] tbtun: tunnel 1 target connected
+   control n=1: n=1, 4 MiB, peers before:
+   # id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm
+   1 0 19101 10.0.2.2:43846 0 1759 0 up raw 0 0 0 1 55 0 0
+   2 0 41000 10.0.2.2:19101 0 17624 0 up raw 0 0 0 1 55 0 0
+[   29.279482] tbt_tx_hole_check: 342 callbacks suppressed
+[   29.279493] tbtun: hole gatefail seq=8192 mask=0x1 ack=8192
+[   29.287766] tbtun: hole gatefail seq=8192 mask=0x1 ack=8192
+[   29.313545] tbtun: hole gatefail seq=24576 mask=0x1 ack=24576
+[   29.315337] tbtun: hole gatefail seq=24576 mask=0x1 ack=24576
+[   29.326484] tbtun: hole gatefail seq=24576 mask=0x1 ack=24576
+[   29.350182] tbtun: hole gatefail seq=32768 mask=0x1 ack=32768
+[   29.351766] tbtun: hole gatefail seq=32768 mask=0x1 ack=32768
+[   33.759919] tbtun: hole depthfail seq=1080867 g=3 mask=0x1
+[   33.760851] tbtun: hole depthfail seq=1080867 g=3 mask=0x1
+[   33.761743] tbtun: hole depthfail seq=1080867 g=3 mask=0x1
+[   33.762619] tbtun: hole depthfail seq=1080867 g=3 mask=0x1
+[   33.763477] tbtun: hole depthfail seq=1080867 g=3 mask=0x1
+[   33.764401] tbtun: hole depthfail seq=1080867 g=3 mask=0x1
+[   33.765220] tbtun: hole depthfail seq=1080867 g=3 mask=0x1
+[   33.766063] tbtun: hole depthfail seq=1080867 g=3 mask=0x1
+[   33.766863] tbtun: hole depthfail seq=1080867 g=3 mask=0x1
+[   33.767688] tbtun: hole depthfail seq=1080867 g=3 mask=0x1
+[   38.795827] tbt_tx_hole_check: 57 callbacks suppressed
+[   38.795837] tbtun: hole depthfail seq=1170979 g=3 mask=0x1
+[   38.814193] tbtun: hole depthfail seq=1170979 g=3 mask=0x1
+[   38.840177] tbtun: hole depthfail seq=1170979 g=3 mask=0x1
+[   38.841747] tbtun: hole depthfail seq=1170979 g=3 mask=0x1
+[   38.843017] tbtun: hole depthfail seq=1170979 g=3 mask=0x1
+[   38.844304] tbtun: hole depthfail seq=1170979 g=3 mask=0x1
+[   38.845503] tbtun: hole depthfail seq=1170979 g=3 mask=0x1
+[   38.846786] tbtun: hole depthfail seq=1170979 g=3 mask=0x1
+[   38.848593] tbtun: hole depthfail seq=1170979 g=3 mask=0x1
+[   38.861861] tbtun: hole depthfail seq=1170979 g=3 mask=0x1
+[   41.215697] tbtun: TXSTALLKILL sid=2533359616 ack=556844 txseq=1195555 age_us=5002587
+[   43.888520] tbt_tx_hole_check: 21 callbacks suppressed
+[   43.888525] tbtun: hole depthfail seq=1236250 g=3 mask=0x1
+[   43.891399] tbtun: hole depthfail seq=1236250 g=3 mask=0x1
+[   43.892681] tbtun: hole depthfail seq=1236250 g=3 mask=0x1
+[   43.893998] tbtun: hole depthfail seq=1236250 g=3 mask=0x1
+[   43.895186] tbtun: hole depthfail seq=1236250 g=3 mask=0x1
+[   43.896382] tbtun: hole depthfail seq=1236250 g=3 mask=0x1
+[   43.897583] tbtun: hole depthfail seq=1236250 g=3 mask=0x1
+[   43.898921] tbtun: hole depthfail seq=1236250 g=3 mask=0x1
+[   43.900154] tbtun: hole depthfail seq=1236250 g=3 mask=0x1
+[   43.901363] tbtun: hole depthfail seq=1236250 g=3 mask=0x1
+[   44.708540] tbtun: hole gatefail seq=1170979 mask=0x1 ack=1170979
+[   45.131312] tbt_tx_hole_check: 7 callbacks suppressed
+[   45.131316] tbtun: hole timefail seq=1170979 age_us=4686267 rtt_us=15613664
+[   45.134298] tbtun: hole timefail seq=1170979 age_us=4689255 rtt_us=13665266
+[   45.136136] tbtun: hole timefail seq=1170979 age_us=4691093 rtt_us=11960241
+[   45.137681] tbtun: hole timefail seq=1170979 age_us=4692637 rtt_us=10468381
+[   45.139250] tbtun: hole timefail seq=1170979 age_us=4694207 rtt_us=9162947
+[   45.140828] tbtun: hole timefail seq=1170979 age_us=4695785 rtt_us=8020813
+[   45.142637] tbtun: hole timefail seq=1170979 age_us=4697593 rtt_us=7021360
+[   45.144212] tbtun: hole timefail seq=1170979 age_us=4699169 rtt_us=6146568
+[   45.145815] tbtun: hole timefail seq=1170979 age_us=4700772 rtt_us=5380969
+[   45.147507] tbtun: hole timefail seq=1170979 age_us=4702464 rtt_us=4711190
+[   49.736896] tbt_tx_hole_check: 4 callbacks suppressed
+[   49.736904] tbtun: hole depthfail seq=1277210 g=3 mask=0x1
+[   49.761831] tbtun: hole depthfail seq=1285402 g=2 mask=0x1
+[   49.779819] tbtun: hole depthfail seq=1293594 g=1 mask=0x1
+[   49.798755] tbtun: hole depthfail seq=1293594 g=1 mask=0x1
+[   49.820735] tbtun: hole depthfail seq=1293594 g=1 mask=0x1
+[   49.834795] tbtun: hole depthfail seq=1293594 g=1 mask=0x1
+[   49.864831] tbtun: hole depthfail seq=1293594 g=1 mask=0x1
+[   49.889725] tbtun: hole depthfail seq=1293594 g=1 mask=0x1
+[   49.903753] tbtun: hole depthfail seq=1293594 g=1 mask=0x1
+[   49.931715] tbtun: hole depthfail seq=1293594 g=1 mask=0x1
+[   54.954680] tbtun: TXSTALLKILL sid=2533359616 ack=1301786 txseq=1400090 age_us=5000904
+   control n=1: one-way 7.7 Mbit/s, rc=3 strict=0 interleaved=-1
+   burst: connected to 10.0.2.15:19100, 4 MiB each way, strict send-then-read first
+   burst: strict send-then-read failed: sent=4194304 recvd=1195555 first_mismatch=581042 errno=0 (none)
+   debug_loss=1
+   gaps_total=0
+   streams_total=2
+   tunnel 1 capture_runs=167 actor_calls=185 submit_bytes=1195555 tx=53553473 wire=53858534 err=0 short=490
+   tunnel 1 rx_work_runs=3223 rx_drain_entries=3222 rx_drain_bytes=10933491 rx_paused_skips=0 rx_adopt_events=1 rx_records=2324 carrier_write_space_runs=7565 poll_rescues=357
+   tunnel 1 rx_ready_calls=3283 rx_reads=3223 rx_read_bytes=10933491 rx_read_zero=1 rx_resume=0 rx_resume_busy=0 rx_last_drained=1460 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=185
+   tunnel 1 dbg rcv_nxt=3816753172 copied=3816744980 after=3816753172 qlen=1 allocf=0 over=97 copyf=0 hiwat=170026 pdead=0 prun=6199 pmoved=8624 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+   tunnel 1 live rxq=106231 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=0 car_nxt=14581493 car_copied=14581493 car_rcvbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+   tunnel 1 txwake=1851 txwake_busy=88 txwork=2991
+   tunnel 1 ws_calls=7565
+   tunnel 1 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 fbk_tx=1615 fbk_rx=996 retx_frames=8875 retx_bytes=67637762 retain_drop=0 reorder_overflow=0 reorder_max_depth=5 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=1195555 rx_ack=1301786 peer_paused=0
+   tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=1 predict_tx=0 predict_used=0 predict_cancelled=0 rx_max_stall_us=113203 hole_checks=898 gate_fail=1 depth_fail=0 time_fail=15
+   tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+   tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0 spec_bytes_max=0
+   tunnel 2 capture_runs=30 actor_calls=61 submit_bytes=1400090 tx=12874833 wire=12995220 err=0 short=339
+   tunnel 2 rx_work_runs=2714 rx_drain_entries=3518 rx_drain_bytes=53858534 rx_paused_skips=0 rx_adopt_events=0 rx_records=8624 carrier_write_space_runs=14142 poll_rescues=504
+   tunnel 2 rx_ready_calls=3852 rx_reads=2714 rx_read_bytes=53858534 rx_read_zero=5 rx_resume=0 rx_resume_busy=0 rx_last_drained=50 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=61
+   tunnel 2 dbg rcv_nxt=145048954 copied=143110929 after=143160081 qlen=8 allocf=0 over=48 copyf=0 hiwat=217055 pdead=0 prun=16898 pmoved=2975 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+   tunnel 2 live rxq=0 rxp=0 txq=524626 txp=1 pub_state=4 pub_wmem=960 pub_una=3576534422 pub_nxt=3576534423 car_wmem=2120960 car_nxt=57442536 car_copied=57442536 car_rcvbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+   tunnel 2 txwake=2483 txwake_busy=156 txwork=9237
+   tunnel 2 ws_calls=14142
+   tunnel 2 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 fbk_tx=2327 fbk_rx=1615 retx_frames=4315 retx_bytes=35292286 retain_drop=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=98304 tx_ack=1301786 rx_ack=1195555 peer_paused=0
+   tunnel 2 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=1 predict_tx=0 predict_used=0 predict_cancelled=0 rx_max_stall_us=0 hole_checks=1593 gate_fail=7 depth_fail=124 time_fail=0
+   tunnel 2 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+   tunnel 2 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0 spec_bytes_max=0
+   --- peers ---
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm
+1 0 19101 10.0.2.2:43846 1195555 24937 0 up raw 6940 972472 2825 8626 53858634 0 1028866
+2 0 41000 10.0.2.2:19101 1301786 33324 49152 up raw 1327 980703 61 2975 12995220 0 1450420
+   --- stats ---
+debug_loss=1
+gaps_total=0
+streams_total=2
+tunnel 1 capture_runs=167 actor_calls=185 submit_bytes=1195555 tx=53553473 wire=53858634 err=0 short=490
+tunnel 1 rx_work_runs=3228 rx_drain_entries=3227 rx_drain_bytes=10946631 rx_paused_skips=0 rx_adopt_events=1 rx_records=2326 carrier_write_space_runs=7565 poll_rescues=359
+tunnel 1 rx_ready_calls=3289 rx_reads=3228 rx_read_bytes=10946631 rx_read_zero=1 rx_resume=0 rx_resume_busy=0 rx_last_drained=4380 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=185
+tunnel 1 dbg rcv_nxt=3816753172 copied=3816744980 after=3816753172 qlen=1 allocf=0 over=97 copyf=0 hiwat=170026 pdead=0 prun=6203 pmoved=8626 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=106231 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=0 car_nxt=14594633 car_copied=14594633 car_rcvbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=1853 txwake_busy=88 txwork=2993
+tunnel 1 ws_calls=7565
+tunnel 1 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 fbk_tx=1617 fbk_rx=996 retx_frames=8875 retx_bytes=67637762 retain_drop=0 reorder_overflow=0 reorder_max_depth=5 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=1195555 rx_ack=1301786 peer_paused=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=1 predict_tx=0 predict_used=0 predict_cancelled=0 rx_max_stall_us=113203 hole_checks=898 gate_fail=1 depth_fail=0 time_fail=15
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0 spec_bytes_max=0
+tunnel 2 capture_runs=30 actor_calls=61 submit_bytes=1400090 tx=12874833 wire=12995220 err=0 short=339
+tunnel 2 rx_work_runs=2716 rx_drain_entries=3520 rx_drain_bytes=53858634 rx_paused_skips=0 rx_adopt_events=0 rx_records=8626 carrier_write_space_runs=14160 poll_rescues=505
+tunnel 2 rx_ready_calls=3854 rx_reads=2716 rx_read_bytes=53858634 rx_read_zero=5 rx_resume=0 rx_resume_busy=0 rx_last_drained=50 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=61
+tunnel 2 dbg rcv_nxt=145048954 copied=143110929 after=143160081 qlen=8 allocf=0 over=48 copyf=0 hiwat=217084 pdead=0 prun=16913 pmoved=2975 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 2 live rxq=0 rxp=0 txq=524644 txp=1 pub_state=4 pub_wmem=960 pub_una=3576534422 pub_nxt=3576534423 car_wmem=2107820 car_nxt=57442636 car_copied=57442636 car_rcvbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=2
+tunnel 2 txwake=2486 txwake_busy=157 txwork=9246
+tunnel 2 ws_calls=14160
+tunnel 2 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 fbk_tx=2328 fbk_rx=1617 retx_frames=4315 retx_bytes=35292286 retain_drop=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=98304 tx_ack=1301786 rx_ack=1195555 peer_paused=0
+tunnel 2 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=1 predict_tx=0 predict_used=0 predict_cancelled=0 rx_max_stall_us=0 hole_checks=1595 gate_fail=7 depth_fail=124 time_fail=0
+tunnel 2 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 2 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0 spec_bytes_max=0
+   --- tc classes ---
+   class htb 1:11 parent 1:1 leaf 101: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:99 parent 1:1 prio 0 rate 1Gbit ceil 1Gbit burst 1600b cburst 1600b
+    Sent 56043844 bytes 40467 pkt (dropped 0, overlimits 3058 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 6117 borrowed: 0 giants: 0
+    tokens: 193 ctokens: 193
+   
+   class htb 1:10 parent 1:1 leaf 100: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 11502161 bytes 8665 pkt (dropped 0, overlimits 3269 requeues 0) 
+    backlog 7624b 5p requeues 0
+    lended: 6891 borrowed: 0 giants: 0
+    tokens: -17834 ctokens: -17834
+   
+   class htb 1:13 parent 1:1 leaf 103: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:12 parent 1:1 leaf 102: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:15 parent 1:1 leaf 105: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:14 parent 1:1 leaf 104: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:17 parent 1:1 leaf 107: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:16 parent 1:1 leaf 106: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:19 parent 1:1 leaf 109: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:18 parent 1:1 leaf 108: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:1 root rate 1Gbit ceil 1Gbit burst 1600b cburst 1600b
+    Sent 67546005 bytes 49132 pkt (dropped 0, overlimits 2266 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 193 ctokens: 193
+   
+   class htb 1:33 parent 1:1 leaf 123: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:32 parent 1:1 leaf 122: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:31 parent 1:1 leaf 121: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:30 parent 1:1 leaf 120: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:22 parent 1:1 leaf 112: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:23 parent 1:1 leaf 113: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:20 parent 1:1 leaf 110: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:21 parent 1:1 leaf 111: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:26 parent 1:1 leaf 116: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:27 parent 1:1 leaf 117: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:24 parent 1:1 leaf 114: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:25 parent 1:1 leaf 115: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:28 parent 1:1 leaf 118: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   class htb 1:29 parent 1:1 leaf 119: prio 0 rate 10Mbit ceil 10Mbit burst 1600b cburst 1600b
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+    lended: 0 borrowed: 0 giants: 0
+    tokens: 20000 ctokens: 20000
+   
+   --- lo qdisc ---
+   qdisc noqueue 0: root refcnt 2 
+    Sent 0 bytes 0 pkt (dropped 0, overlimits 0 requeues 0) 
+    backlog 0b 0p requeues 0
+TBT_PROBE_RESULT I FAIL probe I: control strict phase failed (rc=3)
+TBT_TEST_FAIL probe I: control strict phase failed (rc=3)
+punt!
+punt!
+[   55.276626] net eth0: Unexpected TXQ (0) queue failure: -5
+[   55.278142] ACPI: PM: Preparing to enter system sleep state S5
+[   55.278701] net eth0: Unexpected TXQ (0) queue failure: -5
+[   55.278704] net eth0: Unexpected TXQ (0) queue failure: -5
+punt![   55.282659] reboot: Power down
+[   55.282754] net eth0: Unexpected TXQ (0) queue failure: -5
+

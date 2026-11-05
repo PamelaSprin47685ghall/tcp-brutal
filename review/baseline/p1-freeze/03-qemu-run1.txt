@@ -1,0 +1,3 @@
+mkinitramfs: endpoint /home/kunweiz/Desktop/vibe/tcp-brutal/host/tbt_burst
+mkinitramfs: /home/kunweiz/.cache/tbtun-build/qemu/initramfs.cpio.gz (5.5M)
+run.sh: qemu accel=kvm kernel=vmlinuz-7.2.9-1-MANJARO timeout=600s probes=A,B,E,G,I,J,K net=1

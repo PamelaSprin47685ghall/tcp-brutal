@@ -259,3 +259,38 @@ $RECYCLE.BIN/
 
 /dkms.conf
 /dkms.tar.gz
+
+# host test binaries (make host-test, make host-test-san)
+host/test_parse
+host/test_fuzz
+host/test_http
+host/test_http_fuzz_san
+host/test_http_live
+host/test_parse_san
+host/test_fuzz_san
+host/test_http_san
+# guest traffic checker (tests/qemu/mkinitramfs.sh)
+host/tbt_burst
+tests/probe/*.o
+tests/probe/*.ko
+tests/probe/*.mod
+tests/probe/*.mod.c
+tests/probe/modules.order
+tests/probe/Module.symvers
+tests/probe/.tbt_probe*
+tests/probe/probe_user
+tests/probe/probe_user_san
+# probe 2 build products and initramfs assets (tests/probe2)
+tests/probe2/*.o
+tests/probe2/*.ko
+tests/probe2/*.mod
+tests/probe2/*.mod.c
+tests/probe2/modules.order
+tests/probe2/Module.symvers
+tests/probe2/.tbt_probe2*
+tests/probe2/probe2_user
+tests/probe2/initramfs_probe2_user
+tests/probe2/arm_repair
+
+# release staging (make dkms-tarball consumers)
+build/

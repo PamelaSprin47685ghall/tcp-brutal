@@ -1,0 +1,55 @@
+#!/bin/sh
+# init - PID 1 for the proto_ops probe (tests/probe), not for the tbtun tests.
+#
+# Boots, mounts the pseudo-filesystems, loads tbt_probe.ko, runs probe_user and
+# turns its verdict into the same markers run.sh understands:
+#
+#   TBT_TEST_PASS
+#   TBT_TEST_FAIL <reason>
+#
+# The module is the thing under test here; probe_user only talks to it through
+# /dev/tbtprobe and through the descriptor the module hands out.
+set -u
+
+fail() {
+    echo "TBT_TEST_FAIL $*"
+    sync
+    poweroff -f
+    exec /bin/busybox poweroff -f
+}
+
+echo "== tbt_probe guest: $(uname -r)"
+export PATH=/bin
+
+mkdir -p /proc /sys /dev /tmp
+mount -t proc proc /proc || fail "mount /proc"
+mount -t sysfs sysfs /sys || fail "mount /sys"
+mount -t devtmpfs devtmpfs /dev 2> /dev/null || mount -t ramfs ramfs /dev
+mount -t tmpfs tmpfs /tmp || fail "mount /tmp"
+grep -q ' /proc ' /proc/mounts || fail "/proc is not a mounted procfs"
+
+# The guest has no NIC; loopback is what the probe uses, and it starts down.
+ip link set lo up || fail "ip link set lo up"
+ip addr show lo | head -n 2
+
+echo "== loading tbt_probe.ko"
+insmod /tbt_probe.ko || fail "insmod /tbt_probe.ko (see the kernel log above)"
+grep -q '^tbt_probe ' /proc/modules || fail "tbt_probe not in /proc/modules"
+[ -e /dev/tbtprobe ] || fail "/dev/tbtprobe missing after load"
+echo "== tbt_probe loaded"
+
+echo "== running probe_user"
+probe_user
+rc=$?
+echo "== probe_user exited $rc"
+
+# A loadable module's console output names the facts that matter (distinct
+# sk pointers, the replaced ops); keep the last lines next to the verdict.
+dmesg | grep 'tbt_probe:' | tail -n 8
+
+if [ $rc -ne 0 ]; then
+    fail "probe_user reported a failed assertion (rc=$rc)"
+fi
+echo "TBT_TEST_PASS"
+sync
+poweroff -f

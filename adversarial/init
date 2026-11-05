@@ -1,0 +1,548 @@
+#!/bin/sh
+# init - PID 1 for the adversarial suite (adversarial/run.sh).
+#
+# It drives the module through the operator surface, then hands the wire and
+# the public port to /bin/adv_probe, which attacks from outside.  Every attack
+# prints ADV_RESULT <name> <PASS|FAIL|SKIP> <detail>; the host runner turns
+# those lines into the table.
+#
+# The phases are selected by /adv-phases.txt, one or more names per line:
+#   public control resource slab final replay rmmod flush param near far
+# run.sh boots one guest per group, so a phase that hangs the kernel cannot
+# hide the results of the phases that ran before it.  Each phase prints
+# PHASE_START/PHASE_END; the host reports a started-but-not-ended phase as a
+# hang.
+set -u
+
+CFG=/proc/net/tbtun/config
+PORTS=/proc/net/tbtun/ports
+PUB=19100
+CAR=19101
+FAKE=19102
+TGT=19070
+
+PHASES=$(cat /adv-phases.txt 2> /dev/null)
+[ -n "$PHASES" ] || PHASES="public control resource slab final replay rmmod flush param near far"
+want() {
+    case " $PHASES " in
+    *" $1 "*) return 0 ;;
+    esac
+    return 1
+}
+
+res() {
+    echo "ADV_RESULT $1 $2 $3"
+}
+
+flush_all() {
+    echo flush > "$CFG" 2> /dev/null || true
+    sleep 1
+}
+
+# Reap a background job, but not for longer than N seconds.  `kill -0` is not
+# usable here: a finished child stays a zombie until wait() and still answers
+# kill -0, so polling would always time out.
+wait_timeout() { # pid seconds
+    ( sleep "$2"; kill -9 "$1" 2> /dev/null ) &
+    _w=$!
+    wait "$1"
+    _rc=$?
+    kill "$_w" 2> /dev/null
+    return $_rc
+}
+
+# A stream torn down by the module must reach the application as EOF or a
+# reset, not as a timeout.  EAGAIN (11) means the socket stayed open with
+# nothing driving it.
+clean_abort() { # output-file
+    _o=$(cat "$1" 2> /dev/null)
+    case $_o in
+    ECHO_EOF*) return 0 ;;
+    *"errno=104"* | *"errno=32"* | *"errno=103"*) return 0 ;;
+    esac
+    return 1
+}
+
+setup_raw() {
+    flush_all
+    echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR target=127.0.0.1:$TGT n=1 m=0" \
+        > "$CFG" || res init.setup FAIL "far tunnel rejected"
+    echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB peer=127.0.0.1:$CAR n=1 m=0" \
+        > "$CFG" || res init.setup FAIL "near tunnel rejected"
+    sleep 1
+}
+
+echo_check() { # name mib
+    _out=$(timeout 60 /bin/adv_probe echo "$PUB" "$2" 0 2>&1)
+    case $_out in
+    ECHO_OK*)
+        res "$1" PASS "$_out"
+        ;;
+    *)
+        res "$1" FAIL "$_out"
+        ;;
+    esac
+}
+
+# --- boot ------------------------------------------------------------------
+export PATH=/bin
+
+mkdir -p /proc /sys /dev /tmp
+mount -t proc proc /proc || { echo "TBT_ADV_FATAL mount /proc"; poweroff -f; }
+mount -t sysfs sysfs /sys 2> /dev/null
+mount -t devtmpfs devtmpfs /dev 2> /dev/null || mount -t ramfs ramfs /dev
+mount -t tmpfs tmpfs /tmp 2> /dev/null
+/bin/busybox ip link set lo up 2> /dev/null ||
+    /bin/busybox ifconfig lo 127.0.0.1 up 2> /dev/null
+/bin/busybox ifconfig lo 2> /dev/null | grep -q 127.0.0.1 || {
+    echo "TBT_ADV_FATAL no loopback"
+    poweroff -f
+}
+
+echo "== tbtun adversarial guest: $(uname -r) phases=$PHASES"
+insmod /tbtun.ko debug=1 || {
+    echo "TBT_ADV_FATAL insmod failed"
+    poweroff -f
+}
+grep -q '^tbtun ' /proc/modules || {
+    echo "TBT_ADV_FATAL tbtun not loaded"
+    poweroff -f
+}
+[ -e "$CFG" ] || {
+    echo "TBT_ADV_FATAL $CFG missing"
+    poweroff -f
+}
+echo 'ports 40000-41023' > "$PORTS" 2> /dev/null
+
+# A deterministic echo target: it echoes until EOF and then closes, so the
+# half-close test measures the tunnel, not busybox nc's close semantics.
+/bin/adv_probe target "$TGT" > /dev/null 2>&1 &
+sleep 1
+dmesg -c > /dev/null 2>&1 || true
+# The module logs every accepted carrier at KERN_INFO.  At console loglevel 7
+# that printk interleaves with the user-space ADV_RESULT lines on the same
+# serial port and splits them.  dmesg still records everything; only the
+# console is quieted.  A group that hangs loses its dmesg, so the host also
+# scans the console for BUG/Oops lines.
+echo 3 > /proc/sys/kernel/printk 2> /dev/null || dmesg -n 3 2> /dev/null || true
+
+# --- phases ----------------------------------------------------------------
+
+phase_public() {
+    echo "== public port"
+    setup_raw
+    echo_check init.echo_sane 2
+
+    setup_raw
+    # 10 000 cycles at the measured 185 ms/cycle is about 31 minutes.  The
+    # old 150 s budget killed the probe before it could print its verdict.
+    timeout 2400 /bin/adv_probe churn "$PUB" 10000
+    case $? in
+    124 | 143) res init.churn TIMEOUT "10k connect/close did not finish" ;;
+    esac
+
+    setup_raw
+    timeout 30 /bin/adv_probe two "$PUB"
+
+    # P3b3 acceptance: 100 concurrent public connections on the same near
+    # tunnel.  All 100 are established before any payload; each sends 4096 B
+    # and must read the same bytes back; then all close.  Closing one stream
+    # must not disturb another, every stream must be released, and the tunnel
+    # must still accept a fresh connection.
+    setup_raw
+    timeout 120 /bin/adv_probe concurrent "$PUB" 100 4096 60 1
+    case $? in
+    124 | 143) res pub.concurrent TIMEOUT "adv_probe concurrent did not finish in 120s" ;;
+    esac
+    echo "CONC_STATS_BEGIN"
+    cat /proc/net/tbtun/stats 2> /dev/null
+    cat /proc/net/tbtun/tunnels 2> /dev/null
+    echo "CONC_STATS_END"
+
+    setup_raw
+    timeout 30 /bin/adv_probe halfclose "$PUB"
+
+    setup_raw
+    timeout 30 /bin/adv_probe rst "$PUB" 4
+
+    # The documented src= allow list: does the grammar even accept it?
+    if echo "tunnel 9 role=near profile=raw listen=127.0.0.1:$PUB peer=127.0.0.1:$CAR n=1 m=0 src=127.0.0.0/8" \
+        > "$CFG" 2> /dev/null; then
+        res init.src_key FAIL "src= was accepted by the grammar"
+        echo 'del 9' > "$CFG" 2> /dev/null
+    else
+        res init.src_key FAIL "src= is not a key; the documented inbound allow list does not exist"
+    fi
+    setup_raw
+    timeout 30 /bin/adv_probe srcfilter "$PUB"
+
+    setup_raw
+    timeout 90 /bin/adv_probe writer "$PUB" 100 0
+    flush_all
+
+    setup_raw
+    timeout 120 /bin/adv_probe writer "$PUB" 1024 0
+    flush_all
+}
+
+phase_control() {
+    echo "== control surface"
+    setup_raw
+    _cfg_before=$(cat "$CFG")
+    timeout 10 /bin/adv_probe nonroot "$CFG"
+    _cfg_after=$(cat "$CFG")
+    [ "$_cfg_before" = "$_cfg_after" ] &&
+        res init.nonroot_unchanged PASS "config unchanged after the uid-1000 attempt" ||
+        res init.nonroot_unchanged FAIL "config changed after the uid-1000 attempt"
+
+    timeout 10 /bin/adv_probe cfgwrite "$CFG" 513
+    timeout 10 /bin/adv_probe cfgwrite "$CFG" 512
+    timeout 10 /bin/adv_probe cfgwrite "$CFG" 512nonl
+    timeout 10 /bin/adv_probe cfgwrite "$CFG" 1025
+    timeout 10 /bin/adv_probe cfgwrite "$CFG" 1024nonl
+    _cfg_after=$(cat "$CFG")
+    [ "$_cfg_before" = "$_cfg_after" ] &&
+        res init.cfg_unchanged PASS "over-long lines changed nothing" ||
+        res init.cfg_unchanged FAIL "an over-long line changed the config"
+
+    # The documented round-trip: read the canonical config, write every line
+    # back.  No transfer here; the concurrent case is phase replay.
+    cat "$CFG" > /tmp/cfg.save
+    RC=0
+    while IFS= read -r _line; do
+        printf '%s\n' "$_line" > "$CFG" 2> /dev/null || RC=1
+    done < /tmp/cfg.save
+    [ "$RC" -eq 0 ] &&
+        res init.cfg_roundtrip PASS "the canonical config replays line by line" ||
+        res init.cfg_roundtrip FAIL "a canonical config line was rejected (the far tunnel renders peer=0.0.0.0:0, which the parser refuses: port must be 1..65535)"
+    setup_raw
+    echo_check init.echo_after_roundtrip 1
+}
+
+phase_resource() {
+    echo "== resource limits"
+    flush_all
+    _i=0
+    while [ "$_i" -lt 80 ]; do
+        echo "tunnel $((100 + _i)) role=far profile=raw listen=127.0.0.1:$((22000 + _i)) target=127.0.0.1:$TGT n=1 m=0" \
+            > "$CFG" 2> /dev/null || break
+        _i=$((_i + 1))
+    done
+    _n=$(grep -vc '^#' /proc/net/tbtun/tunnels 2> /dev/null)
+    if [ "$_n" -ge 80 ]; then
+        res init.max_tunnels FAIL "80 tunnels accepted although max_tunnels=64 (documented limit not enforced)"
+    else
+        res init.max_tunnels PASS "$_n tunnels accepted before the limit"
+    fi
+    flush_all
+
+    # 32 near/far pairs with 16 carriers each (the documented maxima).
+    flush_all
+    echo 'ports 40000-41023' > "$PORTS"
+    _mem0=$(awk '/MemAvailable/ {print $2}' /proc/meminfo)
+    _i=0
+    while [ "$_i" -lt 32 ]; do
+        echo "tunnel $((300 + _i)) role=far profile=raw listen=127.0.0.1:$((23000 + _i)) target=127.0.0.1:$TGT n=16 m=0" \
+            > "$CFG" 2> /dev/null || res init.scale_create FAIL "far $((300 + _i)) rejected"
+        _i=$((_i + 1))
+    done
+    _i=0
+    while [ "$_i" -lt 32 ]; do
+        echo "tunnel $((400 + _i)) role=near profile=raw listen=127.0.0.1:$((24000 + _i)) peer=127.0.0.1:$((23000 + _i)) n=16 m=0" \
+            > "$CFG" 2> /dev/null || res init.scale_create FAIL "near $((400 + _i)) rejected"
+        _i=$((_i + 1))
+    done
+    sleep 8
+    _up=$(awk '$8 == "up" {n++} END {print n + 0}' /proc/net/tbtun/peers)
+    _all=$(grep -vc '^#' /proc/net/tbtun/peers)
+    _mem1=$(awk '/MemAvailable/ {print $2}' /proc/meminfo)
+    if [ "$_up" -ge 400 ]; then
+        res init.scale PASS "$_up carriers up of $_all rows; MemAvailable ${_mem0} -> ${_mem1} kB"
+    else
+        res init.scale FAIL "only $_up carriers up of $_all rows; MemAvailable ${_mem0} -> ${_mem1} kB"
+    fi
+    flush_all
+
+}
+
+phase_port() {
+    echo "== port block exhaustion"
+    flush_all
+    echo 'ports 40000-40015' > "$PORTS"
+    echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR target=127.0.0.1:$TGT n=1 m=0" > "$CFG"
+    echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB peer=127.0.0.1:$CAR n=16 m=0" > "$CFG"
+    sleep 1
+    echo "tunnel 3 role=near profile=raw listen=127.0.0.1:$((PUB + 3)) peer=127.0.0.1:$CAR n=16 m=0" > "$CFG"
+    sleep 2
+    _fail=$(awk '$1 == "tunnel" && $2 == 3 {for (i = 1; i <= NF; i++) if (index($i, "alloc_fail=") == 1) {split($i, a, "="); print a[2]}}' /proc/net/tbtun/stats)
+    if [ -n "$_fail" ] && [ "$_fail" -gt 0 ]; then
+        res init.port_exhaust FAIL "port block exhausted: tunnel 3 accepted, alloc_fail=$_fail, carriers retry forever with no operator-visible error"
+    else
+        res init.port_exhaust PASS "port exhaustion reported cleanly (alloc_fail=$_fail)"
+    fi
+    # No flush: this group's purpose is the result above, and teardown is a
+    # separate (hanging) test.
+}
+
+phase_slab() {
+    echo "== slab growth"
+    flush_all
+    _slab() {
+        awk '$1 ~ /^kmalloc/ {s += $2} END {print s + 0}' /proc/slabinfo
+    }
+    _slab32() {
+        awk '$1 ~ /32k$/ {s += $2} END {print s + 0}' /proc/slabinfo
+    }
+    _s0=$(_slab)
+    _s32_0=$(_slab32)
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR target=127.0.0.1:$TGT n=4 m=0" \
+        > "$CFG"
+    sleep 1
+    timeout 120 /bin/adv_probe garbage "$CAR" 100
+    sleep 2
+    _s1=$(_slab)
+    _s32_1=$(_slab32)
+    echo "SLAB before=$_s0 32k=$_s32_0 after=$_s1 32k=$_s32_1"
+    if [ $((_s32_1 - _s32_0)) -ge 50 ]; then
+        res init.slab_leak FAIL "100 unauthenticated garbage connections grew the 32k slabs by $((_s32_1 - _s32_0)) objects (~$(((_s32_1 - _s32_0) * 32)) KiB); a carrier object is freed only at session teardown"
+    else
+        res init.slab_leak PASS "32k slabs grew by $((_s32_1 - _s32_0)) objects over 100 connections"
+    fi
+    flush_all
+    sleep 1
+    _s2=$(_slab32)
+    res init.slab_after_flush PASS "after flush: 32k objects $_s32_0 -> $_s2 (the session teardown is the only free point)"
+}
+
+phase_final() {
+    echo "== final sanity"
+    flush_all
+    setup_raw
+    echo_check init.final_echo 4
+
+    _bad=$(dmesg | grep -cE 'WARNING:|BUG:|Oops|INFO: task|general protection fault|Call Trace:|deprecated workqueue|refcount_t:|KASAN')
+    if [ "$_bad" -eq 0 ]; then
+        res init.dmesg PASS "no WARNING/BUG/Oops/INFO: task in the guest log"
+    else
+        res init.dmesg FAIL "$_bad kernel warning/BUG/oops lines; see the console"
+        dmesg | grep -E 'WARNING:|BUG:|Oops|INFO: task|general protection fault|Call Trace:|deprecated workqueue|refcount_t:|KASAN' | tail -n 20
+    fi
+}
+
+phase_replay() {
+    echo "== config replay mid-transfer"
+    setup_raw
+    timeout 60 /bin/adv_probe echo "$PUB" 8 20 > /tmp/echo_replay.out 2>&1 &
+    EP=$!
+    sleep 1
+    cat "$CFG" > /tmp/cfg.save
+    RC=0
+    while IFS= read -r _line; do
+        printf '%s\n' "$_line" > "$CFG" 2> /dev/null || RC=1
+    done < /tmp/cfg.save
+    wait_timeout "$EP" 10
+    if [ $? -ne 137 ] && clean_abort /tmp/echo_replay.out; then
+        res init.cfg_replay PASS "line-by-line config replay rc=$RC, transfer closed cleanly: $(cat /tmp/echo_replay.out)"
+    else
+        res init.cfg_replay FAIL "config replay rc=$RC, no clean transfer close: $(cat /tmp/echo_replay.out 2> /dev/null)"
+    fi
+    setup_raw
+    echo_check init.echo_after_replay 1
+}
+
+phase_rmmod() {
+    echo "== rmmod mid-transfer"
+    flush_all
+    setup_raw
+    timeout 60 /bin/adv_probe echo "$PUB" 8 20 > /tmp/echo_rmmod.out 2>&1 &
+    EP=$!
+    sleep 1
+    timeout 15 rmmod tbtun
+    RC=$?
+    wait_timeout "$EP" 8
+    [ $? -eq 137 ] && _app=hung || _app=exited
+    if [ "$RC" -eq 0 ] && [ "$_app" = exited ] && clean_abort /tmp/echo_rmmod.out; then
+        res init.rmmod PASS "rmmod rc=0, app closed cleanly: $(cat /tmp/echo_rmmod.out)"
+    else
+        res init.rmmod FAIL "rmmod rc=$RC, app $_app, no clean close: $(cat /tmp/echo_rmmod.out 2> /dev/null)"
+    fi
+    insmod /tbtun.ko debug=1 2> /dev/null || res init.reload FAIL "insmod after rmmod failed"
+    [ -e "$CFG" ] && res init.reload PASS "module reloaded" || res init.reload FAIL "no $CFG"
+    sleep 1
+    _bad=$(dmesg | grep -cE 'WARNING:|BUG:|Oops|INFO: task|general protection fault|Call Trace:|deprecated workqueue|refcount_t:|KASAN')
+    if [ "$_bad" -eq 0 ]; then
+        res init.dmesg_after_rmmod PASS "no warning/BUG/oops after rmmod"
+    else
+        res init.dmesg_after_rmmod FAIL "$_bad warning/BUG/oops lines after rmmod"
+        dmesg | grep -E 'WARNING:|BUG:|Oops|INFO: task|general protection fault|Call Trace:|deprecated workqueue|refcount_t:|KASAN' | tail -n 30
+    fi
+}
+
+phase_flush() {
+    echo "== flush mid-transfer"
+    flush_all
+    setup_raw
+    timeout 60 /bin/adv_probe echo "$PUB" 8 20 > /tmp/echo_flush.out 2>&1 &
+    EP=$!
+    sleep 1
+    echo flush > "$CFG"
+    wait_timeout "$EP" 6
+    if [ $? -ne 137 ] && clean_abort /tmp/echo_flush.out; then
+        res init.flush_midstream PASS "flush mid-transfer: app closed cleanly, $(cat /tmp/echo_flush.out)"
+    else
+        res init.flush_midstream FAIL "flush mid-transfer: no clean close: $(cat /tmp/echo_flush.out 2> /dev/null)"
+    fi
+    # The documented recovery after a flush is to configure the tunnel again
+    # and reconnect.  A teardown that leaves the listener or the port block
+    # wedged shows up here, not in the app's close.
+    setup_raw
+    echo_check init.echo_after_flush 1
+    flush_all
+}
+
+phase_catconfig() {
+    echo "== cat config > config"
+    flush_all
+    echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR target=127.0.0.1:$TGT n=1 m=0" \
+        > "$CFG"
+    echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB peer=127.0.0.1:$CAR n=1 m=0" \
+        > "$CFG"
+    sleep 1
+    # The documented save/restore in one command: read the canonical config
+    # and write it back to the same file.  The far line is the interesting
+    # one (it used to render peer=0.0.0.0:0 and be rejected).
+    _out=$(timeout 10 sh -c "cat $CFG > $CFG" 2>&1)
+    RC=$?
+    _n=$(grep -vc '^#' /proc/net/tbtun/tunnels 2> /dev/null)
+    if [ "$RC" -eq 0 ] && [ "$_n" -ge 2 ]; then
+        res cat.cfg_self PASS "cat config > config rc=0, $_n tunnels still present: $_out"
+    else
+        res cat.cfg_self FAIL "cat config > config rc=$RC, $_n tunnels: $_out"
+    fi
+    setup_raw
+    echo_check init.echo_after_cat 1
+}
+
+phase_cfg_mix() {
+    echo "== rejected line followed by a far line"
+    flush_all
+    # One write, two lines: line 1 is invalid, line 2 is a far tunnel.  The
+    # parser must consume line 1, keep the error, and still apply line 2;
+    # the line buffer must not retain a tail for the close flush.
+    printf 'tunnel 1 role=bogus listen=127.0.0.1:1 target=127.0.0.1:2\ntunnel 2 role=far profile=raw listen=127.0.0.1:19104 target=127.0.0.1:%s n=1 m=0\n' "$TGT" \
+        > "$CFG" 2> /dev/null
+    RC=$?
+    _has2=$(grep -c '^2 ' /proc/net/tbtun/tunnels 2> /dev/null)
+    _has1=$(grep -c '^1 ' /proc/net/tbtun/tunnels 2> /dev/null)
+    # The shell's printf exit status does not reliably carry a proc write
+    # error; the config effect does.  The bad line must leave no tunnel 1,
+    # and the following far line must be applied.
+    if [ "$_has2" -ge 1 ] && [ "$_has1" -eq 0 ]; then
+        res cat.cfg_mix PASS "bad line not applied, far line applied (write rc=$RC)"
+    else
+        res cat.cfg_mix FAIL "write rc=$RC, tunnel 1 present=$_has1, tunnel 2 present=$_has2 (expected 0 and 1)"
+    fi
+}
+
+phase_param() {
+    echo "== max_carriers parameter"
+    flush_all
+    rmmod tbtun
+    insmod /tbtun.ko debug=1 max_carriers=4
+    if echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR target=127.0.0.1:$TGT n=8 m=0" \
+        > "$CFG" 2> /dev/null; then
+        res init.max_carriers FAIL "n=8 accepted with max_carriers=4 (parameter not enforced)"
+    else
+        res init.max_carriers PASS "n=8 refused with max_carriers=4"
+    fi
+    flush_all
+    rmmod tbtun
+    insmod /tbtun.ko debug=1
+}
+
+phase_near() {
+    echo "== fake far listener"
+    flush_all
+    timeout 150 /bin/adv_probe fakefar "$FAKE" "$PUB" 2 &
+    FAKE_PID=$!
+    sleep 1
+    echo "tunnel 2 role=near profile=http-kal listen=127.0.0.1:$PUB peer=127.0.0.1:$FAKE n=1 m=0" \
+        > "$CFG" || res init.near_setup FAIL "near tunnel rejected"
+    wait_timeout "$FAKE_PID" 140
+    [ $? -eq 137 ] && res init.fakefar TIMEOUT "the fake far listener did not finish"
+    flush_all
+}
+
+phase_far() {
+    echo "== hostile carrier (http-kal, far side)"
+    flush_all
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR target=127.0.0.1:$TGT n=4 m=0" \
+        > "$CFG" || res init.far_setup FAIL "far tunnel rejected"
+    sleep 1
+    timeout 150 /bin/adv_probe far "$CAR" 1
+    case $? in
+    124 | 143) res init.far TIMEOUT "adv_probe far did not finish in 150s" ;;
+    esac
+    # The counters are part of the evidence: a connection that logs ACCEPTED
+    # must also appear in rx_adopt_events, and a stalled one does not.
+    echo "FAR_STATS_BEGIN"
+    cat /proc/net/tbtun/stats 2> /dev/null
+    cat /proc/net/tbtun/peers 2> /dev/null
+    echo "FAR_STATS_END"
+    flush_all
+}
+
+phase_stall() {
+    echo "== carrier accept/read chain and flush stack"
+    flush_all
+    # The ACCEPTED logs are KERN_INFO; raise the console for this phase so the
+    # per-connection STALL lines (printk, atomic) and the module's accept logs
+    # are both in the console evidence.
+    echo 7 > /proc/sys/kernel/printk 2> /dev/null
+    echo 1 > /proc/sys/kernel/sysrq 2> /dev/null
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR target=127.0.0.1:$TGT n=4 m=0" \
+        > "$CFG" || res init.stall_setup FAIL "far tunnel rejected"
+    sleep 1
+    timeout 60 /bin/adv_probe stall "$CAR" 15 1 > /tmp/stall.out 2>&1
+    RC=$?
+    echo 3 > /proc/sys/kernel/printk 2> /dev/null
+    cat /tmp/stall.out
+    case $RC in
+    124 | 143) res stall.probe TIMEOUT "adv_probe stall did not finish in 60s" ;;
+    esac
+    echo "STALL_STATS_BEGIN"
+    cat /proc/net/tbtun/stats 2> /dev/null
+    cat /proc/net/tbtun/tunnels 2> /dev/null
+    echo "STALL_STATS_END"
+
+    # The flush is in a subshell: the phase must survive long enough to dump
+    # the blocked-task stacks if the write never returns.
+    echo "STALL_FLUSH_BEGIN"
+    rm -f /tmp/flush.done
+    ( echo flush > "$CFG"; echo done > /tmp/flush.done ) &
+    sleep 5
+    if [ -e /tmp/flush.done ]; then
+        res stall.flush PASS "flush completed after the carrier chain"
+    else
+        res stall.flush FAIL "flush hung after the carrier chain; sysrq w/t follows"
+        echo w > /proc/sysrq-trigger 2> /dev/null
+        sleep 1
+        echo t > /proc/sysrq-trigger 2> /dev/null
+        sleep 2
+        dmesg | tail -200
+    fi
+    # No second flush: the group is here for the evidence, and the guest may
+    # be wedged by the first one.
+}
+
+for _p in public control resource slab final replay rmmod flush catconfig cfg_mix param port near far stall; do
+    want "$_p" || continue
+    echo "PHASE_START $_p"
+    "phase_$_p"
+    echo "PHASE_END $_p"
+done
+
+echo "TBT_ADV_DONE"
+sync
+poweroff -f
+exec /bin/busybox poweroff -f

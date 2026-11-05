@@ -1,167 +1,370 @@
-# <img src="logo.png" width="400">
+# tbtun
 
-TCP Brutal is [Hysteria](https://hysteria.network/)'s congestion control algorithm ported to TCP, as a Linux kernel module. Information about Brutal itself can be found in the [Hysteria documentation](https://hysteria.network/docs/advanced/Full-Server-Config/#bandwidth-behavior-explained).
-
-As an official subproject of Hysteria, TCP Brutal is actively maintained to be in sync with the Brutal implementation in Hysteria.
-
-**中文文档：[README.zh.md](README.zh.md)**
-
-> **New in v2:** TCP Brutal no longer needs special support from the application. Set a rate for a destination once, and every connection to it uses Brutal, any program, any TCP-based protocol. Stop waiting and use it right now!
-
-https://github.com/user-attachments/assets/26c5ab0d-759b-4499-a891-c533a8b975ce
-
-## Quick start
-
-### Install
-
-```bash
-bash <(curl -fsSL https://tcp.hy2.sh/)
-```
-
-This installs the kernel module through DKMS and the `brutalctl` tool to `/usr/local/bin`. Linux 5.10 or later is required.
-
-On NixOS with flakes, add the module to your `flake.nix`; it provides `brutalctl` as well:
-
-```nix
-{
-  inputs.tcp-brutal.url = "github:HyNetworks/tcp-brutal";
-  
-  outputs = { nixpkgs, tcp-brutal, ... }: {
-    nixosConfigurations.myHost = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux";
-      modules = [
-        # ... your configuration.nix ...
-        tcp-brutal.nixosModules.default
-        { boot.tcp-brutal.enable = true; }
-      ];
-    };
-  };
-}
-```
-
-### Use it for a destination
-
-Run this on the side that sends the data. For downloads from your server, that is the server:
-
-```bash
-# Everything sent to 203.0.113.5 shares 100 Mbps, whichever program sends it
-brutalctl add 203.0.113.5/32 100
-```
-
-The number is the total for all connections to that destination, which should be what the receiving side's link can actually take. A single active connection gets all of it; several share it. No application support is needed: a plain web server, proxy tool, rsync or SSH to that address is covered.
-
-```bash
-brutalctl list                   # rules, and how many connections each one has right now
-brutalctl add 203.0.113.5/32 50  # change the rate; existing connections follow immediately
-brutalctl del 203.0.113.5/32
-brutalctl flush
-```
-
-**A connection picks up a rule only when it is established, so add rules before making the connections that should use them; running programs need no restart, but their existing connections are unaffected. After that, `add` on the same prefix changes the rate live for every connection in the group, and `del` stops new connections from matching while existing ones keep the old rate until they close.**
-
-Rules do not survive a reboot; put the `add` commands in a boot script if needed.
-
-### Check that it works
-
-Download something from the server and watch the rate, or use the speed test in [example](example): the client opens several connections that share one rate as a group.
-
-```bash
-# Server, listening on TCP port 1234
-python server.py -p 1234
-
-# Client, connect to example.com:1234, download at 50 Mbps in total
-# over 4 connections (-n) for 10 seconds (-t)
-python client.py -p 1234 example.com 50
-```
-
-The example speaks to the module directly and works without a rule. **With a rule for the client's address in place, the rule's rate wins.**
+A Linux kernel TCP tunnel that carries TCP streams over `N + M` independent
+5-tuples, so a per-flow ISP limit applies `N + M` times instead of once, with
+loss-through prediction as the design's answer to a carrier that stalls.
 
 ## How it works
 
-**Brutal sends at the rate you set.** It does not probe for bandwidth like cubic or BBR. It paces packets at the configured rate, and when packets are lost it sends more so that the delivered rate stays at the target. This assumes you know the bandwidth of the path; set it too high and you only produce loss.
+The near host listens on a port. Clients connect to it; the kernel accepts each
+connection and never hands it to a userspace process. Each connection becomes a
+stream, and concurrent streams share the same carriers. A stream's payload is
+cut into frames, and those frames travel to the far host over `N` active carrier
+TCP connections plus `M` spares, each with its own source port, so each gets its
+own shaper bucket at the ISP. The far host reassembles the byte stream and
+connects to `target=`, and the reply travels back the same way. Everything —
+accept, connect, framing, ordering, delivery — happens in the kernel. There is
+no character device, no proxy process, no helper program: the module is
+configured by writing text to `/proc/net/tbtun/config`.
 
-**It works on one side.** Brutal controls sending, and the TCP protocol on the wire is unchanged, so the other end needs nothing. Proxy users mostly download, so running it on the server alone gives most of the benefit.
+Two independent gains are in play. Per-5-tuple accounting is the certain one:
+`N + M` flows, `N + M` budgets. The second is a bet: the `http-kal` profile
+wraps carriers so they parse as ordinary HTTP/1.1 keep-alive traffic, on the
+theory that the ISP's classifier gives HTTP priority. That theory is measured,
+not assumed; see [QoS caveat](#qos-caveat). If it turns out false, `profile=raw`
+turns the wrapping off and the per-flow gain remains.
 
-**Groups.** Connections in a group share one rate as their total. Bandwidth is not divided statically: whoever is sending gets it, and a connection that uses less than its share leaves the rest to the others. Groups are formed in two ways: by a destination rule (above), or by an application that sets a group id on its sockets (below).
+This tree implements C1–C8 of [DESIGN.md](DESIGN.md): the `/proc` surface, the
+listener and the far side, spares and carrier replacement with the RETIRE
+handshake, duplication with the replay ring, hole prediction with
+PREDICT/CANCEL, and the `http-kal`/`http-kal-drip` containers. A gap in a
+carrier's stream is filled from the replay ring instead of killing the stream.
+`holes_unrecoverable` in `stats` counts holes that outlived `hole_budget_ms` or
+overran `rx_reorder_bytes`; `gaps_total` counts reorder overflows. Either one
+resets the stream.
 
-**Rules.** A rule maps a destination prefix to a group. Two things are needed for it to take effect, and `brutalctl` does both: the rule itself, kept by the module in `/proc/net/tcp_brutal/rules`, and a route that makes the kernel pick brutal for new connections to that prefix, the same as `ip route replace <prefix> via <gateway> congctl lock brutal proto 233` with the next hop copied from the current routing table. Routes it creates carry `proto 233`, so `ip route show proto 233` lists them and `brutalctl` never touches other routes. Use `noroute` if you manage the route yourself, for example when the destination is reached through a policy routing table. When several rules match, the longest prefix wins.
+## Requirements
 
-**Rules apply to new connections.** A connection joins a rule's group when it is established. Adding a rule does not affect connections that already exist; changing a rule's rate with `add` updates its group live; deleting a rule leaves its existing connections sharing the old rate until they close, while new ones no longer match.
+- Linux 6.1 or later, with the matching kernel headers for building.
+- `pahole` (dwarves) if the kernel sets `CONFIG_DEBUG_INFO_BTF_MODULES=y`;
+  the module's BTF step fails without it.
+- Root to load the module and to write `/proc/net/tbtun/*` (the files are `0600`;
+  the debug-only `http` is `0400`).
 
-**Locked by default.** With the route's `lock` and the rule together, applications cannot change the algorithm or the rate on those connections. An application that itself supports TCP Brutal gets `EPERM` when it tries and should simply carry on. Add the rule with `nolock` if applications should be allowed to set their own params instead.
+## Build
 
-**Do not set brutal as the system default congestion control.** A connection with no rule and no application settings runs at 1 Mbps. Applications that support TCP Brutal enable it on their own sockets, and rules cover everything else, so there is no reason to make it the default.
-
-## For developers
-
-### Enabling it on a socket
-
-```python
-s.setsockopt(socket.IPPROTO_TCP, TCP_CONGESTION, "brutal".encode())
+```sh
+make check
 ```
 
-Then set the send rate, the congestion window gain (1.5x to 2x recommended, written as 15 or 20 since the kernel has no floating point) and optionally a group:
+`check` builds `tbtun.ko` and then runs the host tests — grammar, fuzz, the
+HTTP container, and the reorder/ack/control/multistream/anchor models — which
+need no root, no module and no kernel headers.
+`make host-test` runs only those tests.
 
-```c
-struct brutal_params
-{
-    u64 rate;      // Send rate in bytes per second
-    u32 cwnd_gain; // CWND gain in tenths (10=1.0)
-    u64 group_id;  // 0 = rate applies to this connection only (v1 behavior)
-} __packed;
+If the distribution's headers are not installed, the build can use an extracted
+header payload instead of `/lib/modules/$(uname -r)/build`; see
+[docs/build-env.md](docs/build-env.md) for the one-time setup, the `env.sh` it
+produces, and the pahole gotchas. `make check` sources that environment itself
+when it is present.
+
+## Packaging
+
+The module version has one authority: `TBT_VERSION_MAJOR/MINOR/PATCH` in
+`tbtun/tbt_uapi.h` (currently `0/0/1`, release candidate). The wire version is
+`TBT_WIRE_VERSION=1` with `TBT_CONV=0x0004`; both are independent of the module
+version. `scripts/mkdkmsconf.sh` derives
+`PACKAGE_VERSION="<major>.<minor>.<patch>"`; `dkms.conf` is generated by
+`make dkms.conf` / `make dkms-tarball`, so do not edit it by hand.
+`scripts/install_dkms.sh` reads the same value with
+`mkdkmsconf.sh --version`. For development builds, `TBT_DKMS_GIT_SUFFIX=1`
+adds `.r<commits>.<sha>`; the default is the pure semantic version.
+
+## Load
+
+```sh
+sudo insmod tbtun.ko debug_loss=0
 ```
 
-```python
-TCP_BRUTAL_PARAMS = 23301
+Module parameters, read-only after load:
 
-rate = 2000000 # 2 MB/s
-cwnd_gain = 15
-group_id = 42
-brutal_params_value = struct.pack("<QIQ", rate, cwnd_gain, group_id)
-conn.setsockopt(socket.IPPROTO_TCP, TCP_BRUTAL_PARAMS, brutal_params_value)
+| Parameter | Default | Meaning |
+|---|---|---|
+| `debug` | `0` | Verbosity, `0..3` |
+| `max_tunnels` | `64` | Maximum configured tunnels; a new id over the cap fails with `ENOSPC` |
+| `max_carriers` | `16` | Carriers per session, `1..16`; `n + m` over the cap fails with `EINVAL` |
+| `debug_loss` | `0` | Allow `drop_ppm` writes, the deterministic loss injector |
+
+The control surface is created in `init_net` only; there is no per-netns view.
+Unload with `sudo rmmod tbtun`. Unloading flushes every tunnel and closes every
+listener and carrier.
+
+## Two-host example
+
+Near host `10.0.0.1`, far host `203.0.113.9`, service on the far host listening
+on `127.0.0.1:5201`.
+
+On the near host:
+
+```sh
+echo 'tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443 n=4 m=1' \
+     > /proc/net/tbtun/config
 ```
 
-The 12-byte v1 struct without `group_id` is still accepted. The same option can be read back with getsockopt; a group member reports the group's rate, cwnd_gain and group_id:
+On the far host:
 
-```python
-rate, cwnd_gain, group_id = struct.unpack("<QIQ", conn.getsockopt(socket.IPPROTO_TCP, TCP_BRUTAL_PARAMS, 20))
+```sh
+echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=1' \
+     > /proc/net/tbtun/config
 ```
 
-To check which module is loaded, read its version on a connection that already uses brutal. v1 modules, and plain TCP sockets, fail with `ENOPROTOOPT`:
+Then, on either host:
 
-```python
-TCP_BRUTAL_VERSION = 23302
-
-# u32: major << 16 | minor << 8 | patch
-version = struct.unpack("<I", conn.getsockopt(socket.IPPROTO_TCP, TCP_BRUTAL_VERSION, 4))[0]
-supports_groups = version >= 0x020000
+```sh
+cat /proc/net/tbtun/tunnels
 ```
 
-### Groups
+The near side now listens on `10.0.0.1:9000`. A client connecting there is
+carried to `127.0.0.1:5201` on the far host over four carriers. Test it with
+`iperf3 -c 10.0.0.1 -p 9000 -t 60 -P 1` against an `iperf3 -s` bound to the
+target port.
 
-All connections that set the same non-zero `group_id`, from the same user and network namespace, share `rate` as their total. Setting params on any member updates the whole group. A group exists as long as one member is open.
+Both ends must agree on the tunnel id, `n`, `m`, and the profile family. The far
+side's `listen` is where carriers arrive; the near side's `peer` is where they
+are sent. Addresses are literal IPv4 only — no DNS, no IPv6 in v0.
 
-A proxy server typically puts all connections of one client into one group keyed by that client's identity, so the client's bandwidth setting holds across all of its connections. TCP Brutal v1 had no groups, so it was only usable with protocols that multiplex everything into a single TCP connection; with groups, one-connection-per-stream protocols work too.
+## What you can observe
 
-### Rules and applications
+Everything the module knows is under `/proc/net/tbtun`. The files are root-only:
+`0600`, except the debug-only `http`, which is `0400`; there is no helper
+program, and `echo`/`cat` are the whole interface.
 
-On a connection covered by a locked rule, `TCP_BRUTAL_PARAMS` returns `EPERM`, and because the route is locked, so does `setsockopt(TCP_CONGESTION, "brutal")` even though brutal is already active. Handle both: on `EPERM`, check the current algorithm with `getsockopt(TCP_CONGESTION)`, and if it is brutal, just send. [example/server.py](example/server.py) shows this.
+| File | Read it for |
+| --- | --- |
+| `config` | the canonical configuration; write tunnel lines, `del`, `flush`, `carrier ...` actions here |
+| `tunnels` | one line per tunnel: role, state, listen/peer/target, n, m, streams |
+| `peers` | one line per carrier slot, 16 columns (below) |
+| `ports` | the global source port block and whether it is configured |
+| `stats` | `debug_loss=<0\|1>`, gap and stream totals, then per-tunnel counters (`txq`, `rxq`, holes, prediction, duplication, carrier replacement) |
+| `http` | debug only (`debug>=2`): a snapshot of the last HTTP request header block the near side's carrier 0 put on the wire, for checking the container against a parser; it is not a live stream |
 
-Tools can use the rules file directly instead of `brutalctl`. Reading `/proc/net/tcp_brutal/rules` gives one rule per line as `key=value` pairs with live counters:
+`drop_ppm` is refused with `EPERM` unless the module was loaded with
+`debug_loss=1`; `stats` starts with that gate's state so a script can check it
+before trying.
 
+### `config` (read/write)
+
+One directive per line. A directive is applied only when its line is complete: a
+newline, or `close()` for a final unterminated line. A bad line returns `EINVAL`
+from `write()`, so `echo` fails visibly, and nothing from that line is applied.
+A line longer than 1023 bytes is refused with `E2BIG`. A whole-line `#` comment is
+ignored; a `#` after a token is not a comment and the line is refused.
+
+`tunnel <id>` takes these keys:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `role` | — | `near` or `far`; required |
+| `listen` | — | `a.b.c.d:port`; near: public address; far: carrier address |
+| `peer` | — | near only: where carriers are sent |
+| `target` | — | far only: literal address the payload is delivered to |
+| `n` | `4` | Active carriers, `1..16` |
+| `m` | `1` | Spares, `0..16`; `n + m <= 16` |
+| `dup` | `1` | Duplication degree, `0..3` |
+| `keepalive` | `5000` | Idle PAD interval, ms |
+| `drip_ms` | `1000` | `http-kal-drip` idle byte interval, ms |
+| `replay` | `8388608` | Replay ring bytes |
+| `tunnel_rate` | `0` | Bytes/s ceiling, `0` = unset |
+| `max_inflate` | `2.000` | Prediction inflation ceiling |
+| `hole_budget_ms` | `500` | How long a hole may stay open, `1..60000` ms; `0` is refused |
+| `rx_reorder_bytes` | `262144` | Receiver reorder buffer bytes, `1..268435456`; `0` is refused |
+| `tx_retain_bytes` | `0` | Sender retention bytes, `0` = unlimited |
+| `carrier_stall_ms` | `3000` | Silence before a carrier is declared lost |
+| `profile` | `http-kal` | `http-kal`, `http-kal-drip`, or `raw` |
+| `portblock` | `0-0` | Per-tunnel source port block, recorded and rendered only (`0-0` = none); carriers use the global block set through `/ports` |
+| `srcaddrs` | — | Comma-separated local source addresses; only the first is used |
+| `nonce` | — | `16` or `32` hex digits: pin the session nonce; near uses it locally, far requires it from the near side |
+
+Keys that were parsed but never acted on (`framing=`, `chunk=`, `max_retry=`,
+`dev=`, `uid=`) were removed; an unknown key is refused with `EINVAL`.
+
+`nonce=` pins the 128-bit session nonce. 32 hex digits are the full value;
+16 hex digits pin the low 64 bits and render left-padded with zeros. On a
+`role=near` tunnel it is the nonce this side puts in HELLO. On a `role=far`
+tunnel it is the nonce the far side requires from the near side: every HELLO
+must match it. Without `nonce=`, a far tunnel adopts the nonce from the first
+HELLO (trust-on-first-use), so whoever wins that first connection defines the
+session. The nonce travels in clear text in HELLO: it is a session identifier
+and an anti-confusion token, not a cryptographic secret. Use WireGuard when
+the path is hostile. A 64-hex-digit (256-bit) value is refused: the HELLO
+nonce field is 128 bits.
+
+Other directives: `del <id>`, `flush`, `carrier <index> down|up|drop_ppm <n>`,
+and `session <id> nonce=<hex>` (pins the session nonce for reproducible tests).
+`drop_ppm` requires `debug_loss=1` and is refused with `EPERM` otherwise.
+
+Reading `config` returns the canonical form: every scalar key, defaults
+included, in a fixed order. The text round-trips byte for byte, so
+`cat /proc/net/tbtun/config > /etc/tbtun.conf` and
+`cat /etc/tbtun.conf > /proc/net/tbtun/config` restore exactly what was saved.
+Reads are served by offset, so a configuration larger than 32 KiB is returned
+in full.
+
+### `tunnels` (read)
+
+`# id role state listen peer target n m streams`, then one line per tunnel.
+
+### `peers` (read/write)
+
+One line per carrier slot, sixteen columns:
+
+| Column | Meaning |
+| --- | --- |
+| `id` | tunnel id |
+| `carrier` | carrier index within the session |
+| `sport` | local source port, from the port block |
+| `peer` | the far side's address:port |
+| `uack` | highest byte offset the peer has acknowledged |
+| `rtt_us` | smoothed round-trip time, microseconds |
+| `inflight` | bytes written but not yet acknowledged |
+| `state` | `connecting`, `up`, `spare`, `stalled`, or `down` |
+| `class` | the container this carrier runs (`raw`, `http-kal`, `http-kal-drip`) |
+| `recv_cnt` | records received on this carrier |
+| `rx_lag_ppm` | records the receiver has not yet accounted for below the sender's write high-water, in parts per million; in-flight records are included, so this is not packet loss |
+| `minrtt_us` | minimum RTT seen, microseconds |
+| `tx_frames` | records written on this carrier |
+| `tx_bytes` | carrier bytes written, headers included |
+| `dropped` | records dropped by the `drop_ppm` injector (debug only) |
+| `retx_ppm` | retransmitted records per million written; this is the loss proxy |
+
+Writing `carrier <index> down|up|drop_ppm <n>` acts on every running tunnel
+that has that carrier index.
+
+### `stats` (read)
+
+First line is `debug_loss=<0|1>`, the gate for `drop_ppm`. Then `gaps_total`,
+`streams_total`, and per-tunnel counters (queue depths, pause flags, public
+socket send state, carrier cursors).
+
+### `ports` (read/write)
+
+`ports <lo>-<hi>` sets the global source port block for carriers. A blank
+line, or `ports 0-0`, is a no-op and leaves the block unchanged.
+
+## Verified performance
+
+Measured with [benches/](benches/), which drives the same operator surface from
+a KVM guest: virtio-net, one 10 Mbit htb class per source port with
+`delay 20ms 10ms` netem, 40 MiB sent through `tbt_burst`'s strict
+send-then-read phase (byte-exact), one configuration per boot. The control is a
+single `dd | nc` flow on one shaped 5-tuple.
+
+| Carriers | Control (Mbit/s) | App (Mbit/s) | App/control | wire/app | retx_ppm | strict / rc | CSV |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `n=1` | 2.48 | 3.46 | 1.40x | 1.0316 | 1,090 | `strict=1`, `rc=0` | `benches/results/20261105T112725-throughput.csv` |
+| `n=4` | 2.24 | 11.39 | 5.08x | 1.0005 | 96,095 | `strict=1`, `rc=0` | `benches/results/20261105T112245-throughput.csv` |
+| `n=8` | — | — | — | — | — | pending final regression | — |
+| `n=16` | — | — | — | — | — | pending final regression | — |
+
+Current targets are `wire/app < 1.2` and `retx_ppm < 100k`. The latest `n=4` run is
+within both (1.0005 and 96,095); `n=1` is 1.0316 and 1,090. `n=8` and `n=16` have
+no current multiplier claim until the final regression.
+
+The ratio is still the claim: `N` five-tuples beat one. These are laboratory
+numbers from QEMU/slirp with one 10 Mbit htb class per source port and netem
+`delay 20ms 10ms`; they are not an ISP measurement. The absolute values depend on
+this QEMU/slirp path, not on a 10 Mbit bucket.
+
+The cost table below is from earlier bench runs; the latest `n=1`/`n=4`
+throughput runs above did not re-measure it.
+
+| Cost | Measured |
+| --- | --- |
+| `http-kal` container vs `raw` | about 1% more bytes (one chunk per ~4 KB record) and about 3.5 percentage points more system CPU per vCPU |
+| Prediction, per-path loss | the knee is at the first 1%: goodput 9.85 → 6.91 Mbit/s, then flat to 5.40 at 10%; `holes_unrecoverable` stayed 0 at 1%, 5% and 10% |
+| Latency, 1 KB echo | +156 µs at p50, +274 µs at p99 over the direct path; one repaired hole moves p99 to 22–31 ms |
+
+These are laboratory numbers from one host. They say nothing about whether an
+ISP prioritises HTTP; that is [DESIGN.md §17](DESIGN.md)'s measurement, on a
+real line.
+
+## Known limitations
+
+- **Retransmission on a shaped path.** The latest `n=4` run is at `retx_ppm`
+  96,095 and `wire/app` 1.0005; `n=1` is 1,090 and 1.0316. The current targets
+  are `retx_ppm < 100k` and `wire/app < 1.2`; `n=8` and `n=16` still need the
+  final regression.
+- **Carrier count and throughput.** Probe I passes the control `n=1` case
+  (`rc=0`, `strict=1`, `interleaved=1`, 4 MiB byte-exact) and the `n=4` strict and
+  interleaved cases. The latest app throughput is 3.46 Mbit/s at `n=1` and
+  11.39 Mbit/s at `n=4`; `n=1` is limited by single-flow TCP, and `n=8`/`n=16`
+  are pending final regression.
+- **`flush` can block after a transfer.** `echo flush > config` was observed
+  not to return after a completed 40 MiB transfer. It was not re-tested in the
+  latest data-plane run; treat this as pending verification. Re-send the full
+  tunnel line instead of flushing between measurements.
+- **Removed inert keys.** `framing=`, `chunk=`, `max_retry=`, `dev=`, and
+  `uid=` were parsed but never acted on; they are no longer accepted.
+  `profile=raw` is the escape hatch when the HTTP container is mangled.
+- **No encryption.** The tunnel is plaintext on the wire; see
+  [Security](#security).
+
+## Operations
+
+Changing a rate, a duplication degree, or any other key does not need a reload:
+re-send the full `tunnel` line, which replaces the tunnel and resets its
+streams. A tunnel line replaces the whole tunnel, so include every required key.
+
+Rules do not survive a reboot. Save them once and restore them at boot:
+
+```sh
+cat /proc/net/tbtun/config > /etc/tbtun.conf
+# at boot, before clients arrive:
+cat /etc/tbtun.conf > /proc/net/tbtun/config
 ```
-dst=203.0.113.5/32 rate=12500000 gain=20 lock=1 id=1 members=3 sent=1834021376
-```
 
-Writing accepts one command per write, with the rate in bytes per second: `add <prefix>[/<len>] rate=<bytes/s> [gain=<tenths>] [nolock]`, `del <prefix>[/<len>]` and `flush`. `add` on an existing prefix updates it in place. The route is a separate step, which is what `brutalctl` adds on top.
+A systemd unit with `ExecStart=/bin/sh -c 'cat /etc/tbtun.conf > /proc/net/tbtun/config'`
+and `After=systemd-modules-load.service` is enough; so is an `rc.local` line.
+The module itself must be loaded first, by `/etc/modules-load.d/tbtun.conf` or
+`modprobe tbtun`.
 
-### Exchanging bandwidth in a proxy protocol
+## Troubleshooting
 
-Brutal needs to know the bandwidth, and most TCP proxy protocols have no way for the client and server to exchange it. We suggest using the "destination address" field that every proxy protocol has: a client that supports TCP Brutal requests a connection to a special address such as `_BrutalBwExchange`, and if the server accepts, both sides exchange their bandwidth over that connection.
+- `tunnels` shows `state` and `streams`. A tunnel stuck at `idle` on the near
+  side means the listener never bound; check `dmesg` and the port.
+- `peers` is where a stalled carrier shows up: `state` other than `up`, an
+  `rx_lag_ppm` that keeps climbing, `rtt_us` far above `minrtt_us`, or `inflight`
+  pinned high while `tx_bytes` does not move.
+- `stats` carries `gaps_total`. A non-zero count means a stream was reset by a
+  reorder overflow; `holes_unrecoverable` counts holes the replay ring could
+  not fill.
+- `debug_loss=1` plus `carrier <i> drop_ppm 10000` drops one record in a hundred
+  at the carrier's write boundary, so loss handling can be exercised without a
+  lossy line. The `dropped` column in `peers` counts it.
+- Unloading the module closes every listener and carrier; connected clients see
+  EOF, not a hang.
 
-### Building from source
+## QoS caveat
 
-```bash
-make && make load   # kernel headers required, e.g. apt install linux-headers-$(uname -r)
-make -C tools       # brutalctl
-```
+The `http-kal` profile is a bet that the ISP classifies HTTP/1.1 as priority
+traffic. It is not a fact, and the module cannot make a classifier privilege
+anything. The bet is cheap to test, and testing it is part of using this
+software: [DESIGN.md §17](DESIGN.md) gives a ten-minute procedure with four
+configurations — plain TCP, one `http-kal` carrier, four carriers, four `raw`
+carriers — and tells you what each result means.
+
+If the measurement shows no gain from the HTTP profile, set `profile=raw`: the
+per-5-tuple gain is independent of it. If it shows no gain from `N + M` either,
+the line has an aggregate policer and no tunnel of this kind will help; a
+WireGuard link with a single flow is then the honest choice.
+
+## Security
+
+The tunnel does not encrypt. Payload bytes cross the network exactly as the
+application sent them, inside TCP connections that anyone on the path can read.
+Configuration is root-only (`0600`), and so is loading the module. If the path
+between the hosts is untrusted, run the tunnel inside WireGuard: carriers then
+travel over the encrypted link, and the `raw` profile is the only sensible
+choice, because an HTTP parser cannot see inside TLS.
+
+## Scope
+
+This is not a general-purpose VPN. It forwards TCP only, to one literal target
+per tunnel, with no routing, no NAT, no authentication, and no encryption. It
+exists to multiply a per-flow rate limit and to test whether a QoS profile
+helps. For anything else, use WireGuard.
+
+---
+
+`logo.png` is the legacy TCP Brutal mark, kept for the repository's history; the
+manual does not use it.

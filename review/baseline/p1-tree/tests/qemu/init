@@ -1,0 +1,1016 @@
+#!/bin/sh
+# init - PID 1 inside the QEMU guest built by tests/qemu/mkinitramfs.sh.
+#
+# Every probe drives the module through the operator surface only (`echo` into
+# /proc/net/tbtun/*), the way DESIGN.md §8.4 says it is driven:
+#
+#   A. the control surface: `ports`, a near tunnel line, canonical read-back,
+#      a malformed line that must fail without changing anything, `del`, and
+#      the debug_loss gate.
+#   B. the data path: a far tunnel whose target is a busybox `nc -lk` echo on
+#      127.0.0.1, a near tunnel whose carrier dials the far tunnel, then
+#      /bin/tbt_burst pushes MIB MiB through the public port and compares every
+#      byte that comes back. Loopback carriers.
+#   C. carrier loss and replacement: carrier 0 is taken down mid-transfer.
+#   D. the deterministic loss injector (drop_ppm) and reorder accounting.
+#   E. spares: a warm spare takes over when an active carrier is taken down.
+#   F. duplication: dup=2 under injected loss, no duplicate on the same path.
+#   G. prediction on one lossy path, bounded reorder stall.
+#   H. sustained loss, recovery, and the bounded reset.
+#   I. the thesis: carriers cross eth0, an htb class of 10 Mbit per source port
+#      shapes each 5-tuple, and 40 MiB must still arrive byte-exact at more than
+#      3.0 x 10 Mbit. This is the only probe that measures the product claim.
+#   J. loss and reorder on every carrier class (1% loss, 2% reorder).
+#   K. one carrier's class forced to 100% loss mid-transfer, then restored.
+#
+# J and K report SKIP until the module exports predict_tx: without prediction
+# there is nothing to judge, and a skip is honest where a pass would not be.
+#
+# Probes are selected with tbt_probes=A,B,I on the kernel command line, which
+# tests/qemu/run.sh --probes sets. One marker is printed last, on the console:
+#
+#   TBT_TEST_PASS
+#   TBT_TEST_FAIL <reason>
+#
+# A probe that cannot run prints TBT_TEST_SKIP <probe>: <reason> and the run
+# continues; a probe that runs and does not meet its claim is a failure.
+set -u
+
+CFG=/proc/net/tbtun/config
+PORTS=/proc/net/tbtun/ports
+PEERS=/proc/net/tbtun/peers
+PUB_PORT=${TBT_PUB_PORT:-19100}
+CAR_PORT=${TBT_CAR_PORT:-19101}
+TARGET_PORT=${TBT_TARGET_PORT:-19070}
+TARGET_PORT2=${TBT_TARGET_PORT2:-19071}
+TARGET_PORT3=${TBT_TARGET_PORT3:-19072}
+TARGET_PORT4=${TBT_TARGET_PORT4:-19073}
+MIB=${TBT_ENDPOINT_MIB:-4}
+# C and D use the same 4 MiB volume probe B proves: the strict send-then-read
+# phase is bounded by the application's socket buffers, and a larger volume
+# would deadlock the echo path before the injection could be judged. The
+# trigger for C is a captured-byte count, not a wall-clock sleep.
+C_MIB=${TBT_C_MIB:-4}
+D_MIB=${TBT_D_MIB:-4}
+# I needs 40 MiB through four shaped carriers; the guest raises its socket
+# buffers first so the strict phase can buffer the echo it has not read yet.
+I_MIB=${TBT_I_MIB:-40}
+# The thesis is measured as a pair: one shaped carrier is the control, four
+# must beat it by a clear margin. Absolute numbers are lower than the sum of
+# the class rates because the harness's own echo path and the 20 ms jitter sit
+# on the same qdisc.
+I_MBIT_MIN=${TBT_I_MBIT_MIN:-6}
+# One shaped 10 Mbit 5-tuple must stay under its class rate. The old 4 was
+# calibrated when half the control's wire was retransmits (wire/app 1.98);
+# with those gone the same control delivers ~4.9, so the bound is 8: it still
+# proves the per-5-tuple cap without failing on the fix.
+I_CONTROL_MAX=${TBT_I_CONTROL_MAX:-8}
+I_RATIO_MIN=${TBT_I_RATIO_MIN:-1.8}
+I_CONTROL_MIB=${TBT_I_CONTROL_MIB:-4}
+I_RX_REORDER=${TBT_I_RX_REORDER:-2097152}
+# Unset runs the control+main pair; 1..4 runs only that carrier count.
+I_N=${TBT_I_N:-}
+# netem arguments for probe I's per-port classes. Empty means a bare htb, which
+# is the control case for "does the delay or the rate cause the stall".
+I_NETEM=${TBT_I_NETEM-delay 20ms 10ms}
+# The client connects to the public port over loopback, so without a shaper on
+# lo it fills the tunnel's 64 KB queue faster than the carriers drain it and
+# the module resets the stream (C2's documented over-cap kill). Pacing lo just
+# above the carriers' aggregate makes probe I measure the carriers, not the
+# queue. 0 disables the pacer.
+I_PACE_MBIT=${TBT_I_PACE_MBIT:-0}
+# Optional hole budget override for probe I. The default 500 ms is shorter than
+# a carrier stall on a 20 ms shaped path, and without prediction a gap that
+# long is fatal; TBT_I_HOLE_BUDGET=5000 is the control case for that.
+I_HOLE_BUDGET=${TBT_I_HOLE_BUDGET:-5000}
+GUEST_IP=10.0.2.15
+GATEWAY=10.0.2.2
+# The host port qemu forwards to the guest carrier listener. run.sh writes the
+# same value it puts on the qemu command line, so a caller that overrides
+# TBT_HOSTFWD_PORT still dials the right port.
+HOSTFWD_PORT=$CAR_PORT
+PORTBLOCK_LO=41000
+# Three disjoint ranges, one per shaped probe: a carrier socket that closed in
+# TIME_WAIT keeps its port for a minute, and reusing the range immediately
+# makes the next probe's bind fail with EADDRNOTAVAIL (-99).
+PORTBLOCK_PORTS=24
+I_PORTS="41000-41007"
+J_PORTS="41008-41015"
+K_PORTS="41016-41023"
+
+# Parsed after /proc is mounted (below); the default selects every probe.
+CMDLINE=
+PROBES=A,B,C,D,E,I,J,K
+echo_pid=
+echo2_pid=
+echo3_pid=
+
+want() {
+    case ",$PROBES," in
+    *",$1,"*) return 0 ;;
+    esac
+    return 1
+}
+
+CURRENT_PROBE=
+SKIPPED=0
+
+fail() {
+    echo "TBT_PROBE_RESULT ${CURRENT_PROBE:-?} FAIL $*"
+    echo "TBT_TEST_FAIL $*"
+    for _p in "$echo_pid" "${echo2_pid:-}" "${echo3_pid:-}"; do
+        [ -n "$_p" ] && kill "$_p" 2> /dev/null
+    done
+    sync
+    poweroff -f
+    # If poweroff cannot reach the kernel, halt so the runner still terminates.
+    exec /bin/busybox poweroff -f
+}
+
+skip() {
+    echo "TBT_TEST_SKIP $1: $2"
+    echo "TBT_PROBE_RESULT $1 SKIP $2"
+    SKIPPED=1
+}
+
+# Run one selected probe and record its verdict. A probe that returns without
+# calling skip() or fail() passed; fail() exits the guest, skip() sets SKIPPED.
+run_probe() {
+    CURRENT_PROBE=$1
+    SKIPPED=0
+    "probe_$(printf '%s' "$1" | tr 'A-Z' 'a-z')"
+    [ "$SKIPPED" -eq 1 ] || echo "TBT_PROBE_RESULT $1 PASS"
+}
+
+# Show where the module's directory really is when the documented path is
+# missing: an absent /proc/net/tbtun is either a mount problem or a module
+# problem, and the two need different fixes.
+diagnose_proc() {
+    echo "    /proc mounted: $(grep -c ' /proc ' /proc/mounts) entry"
+    echo "    /proc/tbtun:       $(ls -d /proc/tbtun 2>&1)"
+    echo "    /proc/net/tbtun:   $(ls -d /proc/net/tbtun 2>&1)"
+    echo "    /proc/net entries: $(ls /proc/net | wc -l)"
+    echo "    module: $(sed -n '1p' /proc/modules)"
+}
+
+# --- operator-surface helpers ----------------------------------------------
+# `tunnel_stat ID KEY` prints one scalar from that tunnel's stats lines,
+# `stat_sum KEY` sums a counter over every tunnel, `stat_max KEY` takes the
+# maximum, `peer_field ID CARRIER N` prints column N of one peers row.
+tunnel_stat() {
+    awk -v id="$1" -v key="$2" '
+        $1 == "tunnel" && $2 == id {
+            for (i = 1; i <= NF; i++)
+                if (index($i, key "=") == 1) { split($i, a, "="); print a[2] }
+        }' /proc/net/tbtun/stats
+}
+stat_sum() {
+    awk -v key="$1" '
+        $1 == "tunnel" {
+            for (i = 1; i <= NF; i++)
+                if (index($i, key "=") == 1) { split($i, a, "="); s += a[2] }
+        }
+        END { print s + 0 }' /proc/net/tbtun/stats
+}
+stat_max() {
+    awk -v key="$1" '
+        $1 == "tunnel" {
+            for (i = 1; i <= NF; i++)
+                if (index($i, key "=") == 1) { split($i, a, "="); if (a[2] + 0 > m) m = a[2] + 0 }
+        }
+        END { print m + 0 }' /proc/net/tbtun/stats
+}
+peer_field() {
+    awk -v id="$1" -v c="$2" -v n="$3" '$1 == id && $2 == c { print $n }' /proc/net/tbtun/peers
+}
+# Sum of one peers column over every row of one tunnel.
+peer_sum() {
+    awk -v id="$1" -v n="$2" '$1 == id { s += $n } END { print s + 0 }' /proc/net/tbtun/peers
+}
+
+flush_and_wait() {
+    echo 'flush' > "$CFG" || fail "flush rejected"
+    sleep 1
+}
+
+# A fresh echo target per probe (and per G attempt). Busybox `nc -lk` with
+# `-e /bin/cat` does not reliably survive many session resets; a stale target
+# makes a correct stream reset look like a prediction regression. Each restart
+# uses a new port, so no listener is ever rebound over old connections.
+echo2_port=${TBT_TARGET_PORT2_BASE:-19170}
+restart_echo() {
+    [ -n "${echo2_pid:-}" ] && kill "$echo2_pid" 2> /dev/null
+    echo2_port=$((echo2_port + 1))
+    TARGET_PORT2=$echo2_port
+    nc -lk -p "$TARGET_PORT2" -e /bin/cat &
+    echo2_pid=$!
+    sleep 1
+}
+
+# --- boot ------------------------------------------------------------------
+export PATH=/bin
+
+mkdir -p /proc /sys /dev /tmp
+mount -t proc proc /proc || fail "mount /proc"
+mount -t sysfs sysfs /sys || fail "mount /sys"
+mount -t devtmpfs devtmpfs /dev 2> /dev/null || mount -t ramfs ramfs /dev
+mount -t tmpfs tmpfs /tmp || fail "mount /tmp"
+grep -q ' /proc ' /proc/mounts || fail "/proc is not a mounted procfs"
+
+CMDLINE=$(cat /proc/cmdline 2> /dev/null)
+if [ -r /probes.txt ]; then
+    _selected=$(tr -d ' \n' < /probes.txt)
+else
+    _selected=$(printf '%s\n' "$CMDLINE" | tr ' ' '\n' | sed -n 's/^tbt_probes=//p')
+fi
+[ -n "$_selected" ] && PROBES=$_selected
+if [ -r /hostfwd.txt ]; then
+    _hp=$(tr -d ' \n' < /hostfwd.txt)
+    [ -n "$_hp" ] && HOSTFWD_PORT=$_hp
+fi
+echo "== tbtun guest: $(uname -r) probes=$PROBES"
+
+# Loopback must be up before anything binds or dials 127.0.0.1. Without it
+# connect() returns ENETUNREACH (-101), which looks like a module bug but is
+# not.
+/bin/busybox ip link set lo up 2> /dev/null ||
+    /bin/busybox ifconfig lo 127.0.0.1 up 2> /dev/null ||
+    fail "cannot bring loopback up"
+/bin/busybox ifconfig lo | grep -q '127.0.0.1' || fail "loopback has no 127.0.0.1"
+
+# eth0 comes from the qemu user-mode NIC: 10.0.2.15/24, gateway 10.0.2.2.
+# Probe I/J/K need it; the loopback probes do not.
+# The NIC's driver is a module chain in this kernel; load it before asking
+# for eth0. Absent modules mean the image was built without --net.
+for _m in failover net_failover virtio_net sch_htb sch_netem cls_u32 sch_tbf; do
+    [ -f "/$_m.ko" ] && insmod "/$_m.ko" 2> /dev/null
+done
+
+if /bin/busybox ip link show eth0 > /dev/null 2>&1; then
+    /bin/busybox ip link set eth0 up 2> /dev/null
+    /bin/busybox ip addr add "$GUEST_IP/24" dev eth0 2> /dev/null
+    /bin/busybox ip route add default via "$GATEWAY" 2> /dev/null
+    echo "== eth0:"
+    /bin/busybox ip addr show eth0 | sed 's/^/   /'
+    /bin/busybox ip route | sed 's/^/   /'
+else
+    echo "== no eth0 (run.sh --no-net)"
+fi
+
+echo "== loading tbtun.ko"
+if want A; then
+    insmod /tbtun.ko debug=2 || fail "insmod /tbtun.ko (see the kernel log above)"
+else
+    # Probes C and D inject loss, which the module refuses unless it was
+    # loaded with debug_loss=1. Without A there is no gate to test, so load
+    # with the injector enabled from the start.
+    insmod /tbtun.ko debug=2 debug_loss=1 || fail "insmod /tbtun.ko debug_loss=1"
+fi
+grep -q '^tbtun ' /proc/modules || fail "tbtun not in /proc/modules"
+if [ ! -e "$CFG" ]; then
+    diagnose_proc
+    fail "$CFG missing after load"
+fi
+echo "== tbtun loaded"
+
+# --- probe A: control surface ----------------------------------------------
+probe_a() {
+    echo "== probe A: /proc grammar"
+    echo 'ports 41000-41015' > "$PORTS" || fail "ports directive rejected"
+    grep -q 'ports 41000-41015' "$PORTS" || fail "ports directive not read back"
+
+    line="tunnel 1 role=near listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=1 m=0 dup=0"
+    echo "$line" > "$CFG" || fail "valid tunnel line rejected"
+    config=$(cat "$CFG")
+    echo "   config: $config"
+    case $config in
+    *tunnel\ 1\ role=near\ listen=127.0.0.1:"$PUB_PORT"*) ;;
+    *) fail "config read-back does not contain the tunnel: $config" ;;
+    esac
+
+    before=$(cat "$CFG")
+    if echo 'tunnel 2 role=sideways listen=127.0.0.1:1 peer=127.0.0.1:2' > "$CFG" 2> /dev/null; then
+        fail "malformed role accepted"
+    fi
+    if echo 'tunnel 3 listen=127.0.0.1:1 peer=127.0.0.1:2' > "$CFG" 2> /dev/null; then
+        fail "a tunnel without a role was accepted"
+    fi
+    after=$(cat "$CFG")
+    [ "$before" = "$after" ] || fail "a rejected line changed the configuration"
+    # The loss injector is gated by the module parameter. This module was loaded
+    # with debug_loss=0, so the write must fail and change nothing.
+    if echo 'carrier 0 drop_ppm 1000' > "$PEERS" 2> /dev/null; then
+        fail "drop_ppm accepted with debug_loss=0"
+    fi
+    echo 'del 1' > "$CFG" || fail "del 1 rejected"
+    final=$(cat "$CFG")
+    case $final in
+    *tunnel\ 1\ *) fail "tunnel 1 still configured after del: $final" ;;
+    esac
+    echo "== probe A: pass"
+}
+
+# --- probe B: data path (loopback carriers) ---------------------------------
+probe_b() {
+    echo "== probe B: data path"
+    if [ ! -x /bin/tbt_burst ]; then
+        fail "no /bin/tbt_burst; build host/tbt_burst.c (tests/qemu/README.md)"
+    fi
+
+    # The far end's target: a busybox echo. -l -k keeps it listening for the
+    # tunnel's single target connection, and -e /bin/cat echoes what it receives.
+    nc -lk -p "$TARGET_PORT" -e /bin/cat &
+    echo_pid=$!
+    sleep 1
+
+    echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT n=1 m=0 dup=0" \
+        > "$CFG" || fail "far tunnel rejected"
+    echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=1 m=0 dup=0" \
+        > "$CFG" || fail "near tunnel rejected"
+    sleep 1
+    echo "   tunnels:"
+    cat /proc/net/tbtun/tunnels
+    echo "   stats before: $(cat /proc/net/tbtun/stats)"
+    echo "   listeners:"; cat /proc/net/tcp | awk 'NR==1 || $4=="0A"'
+
+    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$MIB" "${TBT_ENDPOINT_TIMEOUT:-20}" &
+    burst_pid=$!
+    sleep 2
+    echo "   established during transfer:"
+    cat /proc/net/tcp | awk 'NR==1 || $4=="01"'
+    wait $burst_pid
+    rc=$?
+    echo "   stats after: $(cat /proc/net/tbtun/stats)"
+    case $rc in
+    0) ;;
+    2) fail "tunnel accepted the connection but carried no data (tbt_burst rc=2)" ;;
+    3) fail "bytes came back wrong or short (tbt_burst rc=3)" ;;
+    *) fail "tbt_burst exited $rc" ;;
+    esac
+    echo "== probe B: pass"
+}
+
+# --- probe C: carrier loss and replacement ----------------------------------
+probe_c() {
+    echo "== probe C: carrier loss and replacement"
+    flush_and_wait
+    restart_echo
+    echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=4 m=0 dup=0" \
+        > "$CFG" || fail "far tunnel n=4 rejected"
+    echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=4 m=0 dup=0" \
+        > "$CFG" || fail "near tunnel n=4 rejected"
+    sleep 1
+    echo "   peers before:"
+    cat "$PEERS"
+
+    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$C_MIB" "${TBT_ENDPOINT_TIMEOUT:-20}" &
+    burst_pid=$!
+    # Take carrier 0 down only after the tunnel has actually captured data: the
+    # burst is much larger than one poll's worth, so this is mid-transfer, not a
+    # race against the start.
+    sent=0
+    i=0
+    while [ $i -lt 4000 ]; do
+        sent=$(tunnel_stat 2 submit_bytes)
+        [ "${sent:-0}" -ge 65536 ] && break
+        kill -0 "$burst_pid" 2> /dev/null || break
+        i=$((i + 1))
+    done
+    kill -0 "$burst_pid" 2> /dev/null ||
+        fail "probe C: transfer finished before carrier 0 could be taken down (sent=${sent:-0})"
+    echo "   taking carrier 0 down after ${sent:-0} captured bytes"
+    echo 'carrier 0 down' > "$PEERS" || fail "carrier 0 down rejected"
+    wait $burst_pid
+    rc=$?
+    case $rc in
+    0) ;;
+    2) fail "probe C: tunnel accepted but carried no data (rc=2)" ;;
+    3) fail "probe C: bytes came back wrong or short (rc=3)" ;;
+    *) fail "probe C: tbt_burst exited $rc" ;;
+    esac
+    echo "   peers after:"
+    cat "$PEERS"
+    lost=$(stat_sum lost)
+    replaced=$(stat_sum replaced)
+    [ "$lost" -ge 1 ] || fail "probe C: carrier_lost is $lost, expected >= 1"
+    [ "$replaced" -ge 1 ] || fail "probe C: carrier_replaced is $replaced, expected >= 1"
+    c0_state=$(peer_field 2 0 8)
+    c0_frames=$(peer_field 2 0 13)
+    c0_bytes=$(peer_field 2 0 14)
+    [ "$c0_state" = "up" ] || fail "probe C: replaced carrier 0 is '$c0_state', expected up"
+    [ "${c0_frames:-0}" -ge 8 ] || fail "probe C: replaced carrier 0 carried $c0_frames frames"
+    [ "${c0_bytes:-0}" -ge 65536 ] || fail "probe C: replaced carrier 0 carried $c0_bytes bytes"
+    echo "   carrier_lost=$lost carrier_replaced=$replaced carrier0=$c0_state frames=$c0_frames bytes=$c0_bytes"
+    echo "== probe C: pass"
+}
+
+# --- probe D: ppm loss and reorder ------------------------------------------
+probe_d() {
+    echo "== probe D: ppm loss and reorder"
+    flush_and_wait
+    restart_echo
+    echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=4 m=0 dup=0" \
+        > "$CFG" || fail "far tunnel n=4 rejected (probe D)"
+    echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=4 m=0 dup=0" \
+        > "$CFG" || fail "near tunnel n=4 rejected (probe D)"
+    sleep 1
+    # 2% of DATA records are dropped on carriers 1 and 2, in both directions.
+    # The handshake is exempt by design, so this cannot lose a HELLO.
+    echo 'carrier 1 drop_ppm 20000' > "$PEERS" || fail "drop_ppm on carrier 1 rejected"
+    echo 'carrier 2 drop_ppm 20000' > "$PEERS" || fail "drop_ppm on carrier 2 rejected"
+    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$D_MIB" "${TBT_ENDPOINT_TIMEOUT:-20}"
+    rc=$?
+    case $rc in
+    0) ;;
+    2) fail "probe D: tunnel accepted but carried no data (rc=2)" ;;
+    3) fail "probe D: bytes came back wrong or short (rc=3)" ;;
+    *) fail "probe D: tbt_burst exited $rc" ;;
+    esac
+    echo "   peers after:"
+    cat "$PEERS"
+    for c in 1 2; do
+        dropped=$(awk -v c="$c" '$1 != "#" && $2 == c { s += $15 } END { print s + 0 }' "$PEERS")
+        [ "${dropped:-0}" -ge 1 ] || fail "probe D: carrier $c dropped_by_ppm is ${dropped:-0} over both tunnels"
+    done
+    depth=$(stat_max reorder_max_depth)
+    [ "$depth" -ge 1 ] || fail "probe D: rx_reorder_max_depth is $depth, expected >= 1"
+    retx=$(stat_sum retx_frames)
+    d1=$(awk '$1 != "#" && $2 == 1 { s += $15 } END { print s + 0 }' "$PEERS")
+    d2=$(awk '$1 != "#" && $2 == 2 { s += $15 } END { print s + 0 }' "$PEERS")
+    echo "   reorder_max_depth=$depth retx_frames=$retx dropped: carrier1=$d1 carrier2=$d2 (both tunnels)"
+    echo "== probe D: pass"
+}
+
+# --- probe E: spares --------------------------------------------------------
+probe_e() {
+    echo "== probe E: spares"
+    flush_and_wait
+    restart_echo
+    echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=4 m=2 dup=0" \
+        > "$CFG" || fail "far tunnel n=4 m=2 rejected"
+    echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=4 m=2 dup=0" \
+        > "$CFG" || fail "near tunnel n=4 m=2 rejected"
+    sleep 1
+    for c in 4 5; do
+        st=$(peer_field 2 "$c" 8)
+        fr=$(peer_field 2 "$c" 13)
+        [ "$st" = "spare" ] || fail "probe E: carrier $c state is '$st', expected spare"
+        [ "${fr:-0}" -ge 1 ] || fail "probe E: spare $c carried no keepalive frames"
+    done
+    echo "   spares warm:"
+    cat "$PEERS"
+    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$MIB" "${TBT_ENDPOINT_TIMEOUT:-20}" &
+    burst_pid=$!
+    sent=0
+    i=0
+    while [ $i -lt 4000 ]; do
+        sent=$(tunnel_stat 2 submit_bytes)
+        [ "${sent:-0}" -ge 65536 ] && break
+        kill -0 "$burst_pid" 2> /dev/null || break
+        i=$((i + 1))
+    done
+    kill -0 "$burst_pid" 2> /dev/null ||
+        fail "probe E: transfer finished before carrier 2 could be taken down (sent=${sent:-0})"
+    echo 'carrier 2 down' > "$PEERS" || fail "carrier 2 down rejected"
+    wait $burst_pid
+    rc=$?
+    case $rc in
+    0) ;;
+    2) fail "probe E: tunnel accepted but carried no data (rc=2)" ;;
+    3) fail "probe E: bytes came back wrong or short (rc=3)" ;;
+    *) fail "probe E: tbt_burst exited $rc" ;;
+    esac
+    sa=$(tunnel_stat 2 spare_activated)
+    [ "${sa:-0}" -ge 1 ] || fail "probe E: spare_activated is ${sa:-0}"
+    rep=$(tunnel_stat 2 replaced)
+    [ "${rep:-0}" -eq 0 ] || fail "probe E: a replacement was dialled despite an idle spare: replaced=$rep"
+    active=0
+    for c in 4 5; do
+        st=$(peer_field 2 "$c" 8)
+        by=$(peer_field 2 "$c" 14)
+        if [ "$st" = "up" ] && [ "${by:-0}" -ge 65536 ]; then
+            active=1
+            echo "   spare $c took over: state=$st bytes=$by"
+        fi
+    done
+    [ "$active" -eq 1 ] || fail "probe E: no spare took over DATA"
+    lost=$(stat_sum lost)
+    [ "$lost" -ge 1 ] || fail "probe E: carrier_lost is $lost"
+    echo "   spare_activated=$sa replaced=$rep lost=$lost"
+    echo "== probe E: pass"
+}
+
+# --- probe F: duplication --------------------------------------------------
+probe_f() {
+    echo "== probe F: duplication"
+    flush_and_wait
+    restart_echo
+    echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=4 m=0 dup=2" \
+        > "$CFG" || fail "probe F: far tunnel dup=2 rejected"
+    echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=4 m=0 dup=2" \
+        > "$CFG" || fail "probe F: near tunnel dup=2 rejected"
+    sleep 1
+    # 5% of DATA records dropped on two of four paths. The inflation cap
+    # (max_inflate=2.0) allows exactly one duplicate per frame.
+    echo 'carrier 1 drop_ppm 50000' > "$PEERS" || fail "probe F: drop_ppm carrier 1 rejected"
+    echo 'carrier 2 drop_ppm 50000' > "$PEERS" || fail "probe F: drop_ppm carrier 2 rejected"
+    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$MIB" "${TBT_ENDPOINT_TIMEOUT:-20}"
+    rc=$?
+    case $rc in
+    0) ;;
+    2) fail "probe F: tunnel accepted but carried no data (rc=2)" ;;
+    3) fail "probe F: bytes came back wrong or short (rc=3)" ;;
+    *) fail "probe F: tbt_burst exited $rc" ;;
+    esac
+    dup=$(tunnel_stat 2 dup_tx)
+    used=$(stat_sum dup_used)
+    supp=$(stat_sum dup_suppressed)
+    holes=$(stat_sum holes_declared)
+    inflate=$(stat_max inflate_ppm)
+    same=$(stat_sum dup_same_path)
+    unrec=$(stat_sum holes_unrecoverable)
+    [ "${dup:-0}" -ge 1 ] || fail "probe F: dup_tx is ${dup:-0}"
+    [ "${holes:-0}" -le 8 ] || fail "probe F: holes_declared is $holes, expected <= 8"
+    [ "${inflate:-0}" -le 2000000 ] || fail "probe F: inflate_ppm is $inflate, cap is 2000000"
+    [ "${same:-0}" -eq 0 ] || fail "probe F: dup_same_path is $same"
+    [ "${unrec:-0}" -eq 0 ] || fail "probe F: holes_unrecoverable is $unrec"
+    echo "   dup_tx=$dup dup_used=$used dup_suppressed=$supp holes_declared=$holes inflate_ppm=$inflate dup_same_path=$same"
+    echo "== probe F: pass"
+}
+
+# --- probe G: prediction on one lossy path ---------------------------------
+probe_g() {
+    echo "== probe G: prediction under loss on one path"
+    # A hole only exists if the injector actually dropped inside the window the
+    # probe inspects. With a clean window the strong assertions below would
+    # fail for a correct reason, so retry the whole window and skip if three
+    # in a row see no loss.
+    attempt=1
+    while [ "$attempt" -le 3 ]; do
+        flush_and_wait
+        restart_echo
+        echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=4 m=0 dup=0" \
+            > "$CFG" || fail "probe G: far tunnel rejected"
+        echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=4 m=0 dup=0" \
+            > "$CFG" || fail "probe G: near tunnel rejected"
+        sleep 1
+        dropped_before=$(peer_sum 2 15)
+        echo 'carrier 1 drop_ppm 100000' > "$PEERS" || fail "probe G: drop_ppm carrier 1 rejected"
+
+        /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$MIB" "${TBT_ENDPOINT_TIMEOUT:-30}"
+        rc=$?
+        dropped_after=$(peer_sum 2 15)
+        landed=$((dropped_after - dropped_before))
+        if [ "$landed" -le 0 ]; then
+            echo "   attempt $attempt: no loss landed in this window, retrying"
+            attempt=$((attempt + 1))
+            continue
+        fi
+
+        case $rc in
+        0) ;;
+        2) fail "probe G: tunnel accepted but carried no data (rc=2, dropped=$landed)" ;;
+        3) fail "probe G: bytes came back wrong or short under loss (rc=3, dropped=$landed)" ;;
+        *) fail "probe G: tbt_burst exited $rc (dropped=$landed)" ;;
+        esac
+
+        declared=$(stat_sum holes_declared)
+        repaired=$(stat_sum holes_repaired)
+        unrec=$(stat_sum holes_unrecoverable)
+        stall=$(stat_max rx_max_stall_us)
+        budget_ms=$(awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^hole_budget_ms=/) { split($i, a, "="); print a[2] } }' "$CFG" | head -1)
+        budget_ms=${budget_ms:-500}
+        # One hole budget covers the wait for the missing bytes; the margin
+        # covers a scheduling round trip on either side. Documented in
+        # tests/qemu/README.md.
+        stall_limit=$((budget_ms * 1000))
+
+        if [ "${declared:-0}" -eq 0 ]; then
+            echo "   attempt $attempt: dropped=$landed but no hole was declared, retrying"
+            attempt=$((attempt + 1))
+            continue
+        fi
+        [ $((repaired * 10)) -ge $((declared * 9)) ] ||
+            fail "probe G: repaired=$repaired of declared=$declared, expected >= 90%"
+        [ "${unrec:-0}" -eq 0 ] || fail "probe G: holes_unrecoverable is $unrec"
+        [ "${stall:-0}" -le "$stall_limit" ] ||
+            fail "probe G: rx_max_stall_us=$stall exceeds ${stall_limit} (hole_budget_ms=${budget_ms})"
+        echo "   dropped=$landed holes_declared=$declared holes_repaired=$repaired holes_unrecoverable=$unrec rx_max_stall_us=$stall limit=$stall_limit"
+        echo "== probe G: pass"
+        return 0
+    done
+    skip G "no hole was declared in 3 lossy windows"
+}
+
+# --- probe H: sustained loss, recovery, and the bounded reset ---------------
+probe_h() {
+    echo "== probe H: sustained loss, recovery, and the bounded reset"
+    flush_and_wait
+    restart_echo
+    echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=4 m=0 dup=0 tunnel_rate=2000000" \
+        > "$CFG" || fail "probe H: far tunnel rejected"
+    echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=4 m=0 dup=0 tunnel_rate=2000000" \
+        > "$CFG" || fail "probe H: near tunnel rejected"
+    sleep 1
+    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$MIB" "${TBT_ENDPOINT_TIMEOUT:-30}" &
+    burst_pid=$!
+    sent=0
+    i=0
+    while [ $i -lt 4000 ]; do
+        sent=$(tunnel_stat 2 submit_bytes)
+        [ "${sent:-0}" -ge 65536 ] && break
+        kill -0 "$burst_pid" 2> /dev/null || break
+        i=$((i + 1))
+    done
+    kill -0 "$burst_pid" 2> /dev/null ||
+        fail "probe H: transfer finished before the dead-path window (sent=${sent:-0})"
+    echo 'carrier 1 drop_ppm 1000000' > "$PEERS" || fail "probe H: carrier 1 dead-path rejected"
+    sleep 2
+    echo 'carrier 1 drop_ppm 0' > "$PEERS" || fail "probe H: carrier 1 restore rejected"
+    wait $burst_pid
+    rc=$?
+    [ "$rc" -eq 0 ] || fail "probe H: byte-exact completion failed after a 2 s dead path (rc=$rc)"
+    unrec=$(stat_sum holes_unrecoverable)
+    [ "${unrec:-0}" -eq 0 ] || fail "probe H: holes_unrecoverable is $unrec after a recoverable outage"
+    echo "   phase 1: recovered after 2 s of total loss on one path, holes_unrecoverable=0"
+
+    # Phase 2: every DATA record is dropped. No path can fill the hole, so the
+    # sender's bounded reset must fire at hole_budget_ms (500 ms), not at the
+    # application's timeout.
+    flush_and_wait
+    restart_echo
+    echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=4 m=0 dup=0 tunnel_rate=2000000" \
+        > "$CFG" || fail "probe H: far tunnel (reset phase) rejected"
+    echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=4 m=0 dup=0 tunnel_rate=2000000" \
+        > "$CFG" || fail "probe H: near tunnel (reset phase) rejected"
+    sleep 1
+    for c in 0 1 2 3; do
+        echo "carrier $c drop_ppm 1000000" > "$PEERS" || fail "probe H: carrier $c dead rejected"
+    done
+    t0=$(cut -d' ' -f1 /proc/uptime)
+    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$MIB" "${TBT_ENDPOINT_TIMEOUT:-20}"
+    rc=$?
+    t1=$(cut -d' ' -f1 /proc/uptime)
+    [ "$rc" -ne 0 ] || fail "probe H: transfer completed with every DATA record dropped"
+    [ "$rc" -ne 3 ] || fail "probe H: wrong bytes were delivered before the reset (rc=3)"
+    unrec=$(stat_sum holes_unrecoverable)
+    [ "${unrec:-0}" -ge 1 ] || fail "probe H: holes_unrecoverable is ${unrec:-0}"
+    awk -v a="$t0" -v b="$t1" 'BEGIN { d = b - a; if (d < 0.4 || d > 0.65) exit 1 }' ||
+        fail "probe H: reset took $(awk -v a="$t0" -v b="$t1" 'BEGIN { printf "%.2f", b - a }') s, expected 0.5 s +/- 20%"
+    echo "   phase 2: reset in $(awk -v a="$t0" -v b="$t1" 'BEGIN { printf "%.2f", b - a }') s, holes_unrecoverable=$unrec"
+    echo "== probe H: pass"
+}
+
+# --- tc helpers -------------------------------------------------------------
+# The carriers are TCP connections from this guest's portblock to the qemu
+# gateway, so they leave through eth0 and meet its root qdisc. One htb class
+# per source port gives each 5-tuple its own 10 Mbit bucket; the netem child
+# adds the delay/loss that probe J and K need.
+tc_clear() {
+    /bin/tc qdisc del dev eth0 root 2> /dev/null
+}
+
+tc_setup() {
+    # $@ is the netem argument list, e.g. "delay 20ms 10ms".
+    tc_clear
+    # The default class id must not collide with a port class: 1:10..1:33 are
+    # ports 41000..41023, so the unshaped default is 1:99.
+    /bin/tc qdisc add dev eth0 root handle 1: htb default 99 || return 1
+    /bin/tc class add dev eth0 parent 1: classid 1:1 htb rate 1000mbit ceil 1000mbit || return 1
+    /bin/tc class add dev eth0 parent 1:1 classid 1:99 htb rate 1000mbit ceil 1000mbit || return 1
+    i=0
+    while [ $i -lt "$PORTBLOCK_PORTS" ]; do
+        port=$((PORTBLOCK_LO + i))
+        cls=$((10 + i))
+        /bin/tc class add dev eth0 parent 1:1 classid "1:$cls" htb rate 10mbit ceil 10mbit || return 1
+        /bin/tc qdisc add dev eth0 parent "1:$cls" handle "$((100 + i)):" netem "$@" || return 1
+        /bin/tc filter add dev eth0 parent 1: protocol ip prio 1 u32 \
+            match ip sport "$port" 0xffff flowid "1:$cls" || return 1
+        i=$((i + 1))
+    done
+}
+
+# Class id for one source port, or empty when it is outside the block.
+tc_class_of_port() {
+    _p=$1
+    if [ "$_p" -ge "$PORTBLOCK_LO" ] && [ "$_p" -lt $((PORTBLOCK_LO + PORTBLOCK_PORTS)) ]; then
+        echo $((10 + _p - PORTBLOCK_LO))
+    fi
+}
+
+# Raise the guest's socket buffers so tbt_burst's strict send-then-read phase
+# can hold the echoed volume it has not read yet. Without this, 40 MiB would
+# deadlock at the default ~6 MB receive buffer and look like a tunnel stall.
+raise_socket_buffers() {
+    echo 67108864 > /proc/sys/net/core/rmem_max 2> /dev/null
+    echo 67108864 > /proc/sys/net/core/wmem_max 2> /dev/null
+    echo "4096 262144 67108864" > /proc/sys/net/ipv4/tcp_rmem 2> /dev/null
+    echo "4096 262144 67108864" > /proc/sys/net/ipv4/tcp_wmem 2> /dev/null
+}
+
+net_ready() {
+    /bin/busybox ip link show eth0 > /dev/null 2>&1 || return 1
+    /bin/busybox ip addr show eth0 | grep -q "$GUEST_IP" || return 1
+    [ -x /bin/tc ] || return 1
+    return 0
+}
+
+# Everything the module knows, printed when a network probe fails: the
+# carriers' view, the tunnel counters, and the qdisc's own byte counts.
+dump_state() {
+    echo "   --- peers ---"
+    cat "$PEERS" 2> /dev/null
+    echo "   --- stats ---"
+    cat /proc/net/tbtun/stats 2> /dev/null
+    echo "   --- tc classes ---"
+    /bin/tc -s class show dev eth0 2> /dev/null | sed 's/^/   /'
+    echo "   --- lo qdisc ---"
+    /bin/tc -s qdisc show dev lo 2> /dev/null | sed 's/^/   /'
+}
+
+# --- probe I: the thesis ----------------------------------------------------
+# One measured run of the shaped path: configure n carriers, transfer `mib`,
+# and sample the one-way carrier rate over a two-second window. Leaves the
+# result in I_RATE, I_RC, I_STRICT and I_INTER (1 pass, 0 fail, -1 not run).
+i_measure() {
+    _n=$1
+    _mib=$2
+    _label=$3
+
+    flush_and_wait
+    echo "ports $I_PORTS" > "$PORTS" || fail "probe I: ports directive rejected"
+    echo "tunnel 1 role=far profile=raw listen=$GUEST_IP:$CAR_PORT target=127.0.0.1:$TARGET_PORT3 n=$_n m=0 dup=0 rx_reorder_bytes=$I_RX_REORDER hole_budget_ms=$I_HOLE_BUDGET" \
+        > "$CFG" || fail "probe I: far tunnel rejected"
+    echo "tunnel 2 role=near profile=raw listen=$GUEST_IP:$PUB_PORT peer=$GATEWAY:$HOSTFWD_PORT n=$_n m=0 dup=0 rx_reorder_bytes=$I_RX_REORDER hole_budget_ms=$I_HOLE_BUDGET" \
+        > "$CFG" || fail "probe I: near tunnel rejected"
+    sleep 1
+    echo "   $_label: n=$_n, $_mib MiB, peers before:"
+    cat "$PEERS" | sed 's/^/   /'
+
+    /bin/tbt_burst "$GUEST_IP" "$PUB_PORT" "$_mib" "${TBT_ENDPOINT_TIMEOUT:-180}" > /tmp/burst_i.log 2>&1 &
+    burst_pid=$!
+
+    i=0
+    while [ $i -lt 6000 ]; do
+        sent=$(tunnel_stat 2 submit_bytes)
+        [ "${sent:-0}" -ge 262144 ] && break
+        kill -0 "$burst_pid" 2> /dev/null || break
+        i=$((i + 1))
+    done
+    if ! kill -0 "$burst_pid" 2> /dev/null; then
+        I_RATE=0
+        I_RC=$(wait $burst_pid; echo $?)
+        I_STRICT=0
+        I_INTER=-1
+        echo "   $_label: transfer ended before the rate window (submit_bytes=${sent:-0})"
+        cat /tmp/burst_i.log | sed 's/^/   /'
+        return 0
+    fi
+    b0=$(peer_sum 2 14)
+    t0=$(cut -d' ' -f1 /proc/uptime)
+    sleep 2
+    b1=$(peer_sum 2 14)
+    t1=$(cut -d' ' -f1 /proc/uptime)
+    I_RATE=$(awk -v a="$b0" -v b="$b1" -v x="$t0" -v y="$t1" \
+        'BEGIN { d = b - a; t = y - x; if (t <= 0) t = 1; printf "%.1f", d * 8 / 1000000 / t }')
+
+    wait $burst_pid
+    I_RC=$?
+    I_STRICT=0
+    I_INTER=-1
+    grep -q 'strict phase passed' /tmp/burst_i.log && I_STRICT=1
+    if grep -q 'interleaved coverage phase passed' /tmp/burst_i.log; then
+        I_INTER=1
+    elif grep -q 'interleaved coverage' /tmp/burst_i.log; then
+        I_INTER=0
+    fi
+    echo "   $_label: one-way ${I_RATE} Mbit/s, rc=$I_RC strict=$I_STRICT interleaved=$I_INTER"
+    cat /tmp/burst_i.log | sed 's/^/   /'
+}
+
+probe_i() {
+    echo "== probe I: per-5-tuple shaping on eth0"
+    if ! net_ready; then
+        skip I "no eth0 with $GUEST_IP or no /bin/tc in the guest; run without --no-net"
+        return 0
+    fi
+    raise_socket_buffers
+    echo "ports $I_PORTS" > "$PORTS" || fail "probe I: ports directive rejected"
+    tc_setup $I_NETEM || fail "probe I: tc setup failed (htb + u32 + netem)"
+    if [ "$I_PACE_MBIT" -gt 0 ]; then
+        /bin/tc qdisc add dev lo root handle 2: htb default 20 || fail "probe I: lo htb"
+        /bin/tc class add dev lo parent 2: classid 2:1 htb rate 1000mbit ceil 1000mbit || fail "probe I: lo class 2:1"
+        /bin/tc class add dev lo parent 2:1 classid 2:20 htb rate 1000mbit ceil 1000mbit || fail "probe I: lo class 2:20"
+        /bin/tc class add dev lo parent 2:1 classid 2:10 htb rate "${I_PACE_MBIT}mbit" ceil "${I_PACE_MBIT}mbit" ||
+            fail "probe I: lo class 2:10"
+        /bin/tc filter add dev lo parent 2: protocol ip prio 1 u32 \
+            match ip dport "$PUB_PORT" 0xffff flowid 2:10 || fail "probe I: lo filter"
+    fi
+    echo "   qdisc:"
+    /bin/tc qdisc show dev eth0 | sed 's/^/   /'
+    /bin/tc filter show dev eth0 parent 1: | head -12 | sed 's/^/   /'
+
+    nc -lk -p "$TARGET_PORT3" -e /bin/cat &
+    echo3_pid=$!
+    sleep 1
+
+    control=
+    if [ -n "$I_N" ]; then
+        # One carrier count, absolute bound only: 4 must reach the tuned
+        # threshold, 1 must stay under the control ceiling.
+        i_measure "$I_N" "$I_MIB" "single"
+        case $I_N in
+        1) bound="<= $I_CONTROL_MAX Mbit (one shaped carrier)"; cmp=le ;;
+        *) bound=">= $I_MBIT_MIN Mbit (n=$I_N shaped carriers)"; cmp=ge ;;
+        esac
+        [ "$I_STRICT" -eq 1 ] || { dump_state; fail "probe I: strict phase failed (n=$I_N rc=$I_RC)"; }
+        if [ "$I_INTER" -eq 0 ]; then
+            dump_state
+            fail "probe I: strict PASS, interleaved FAIL (n=$I_N, one-way ${I_RATE} Mbit/s) - see tx_paused/tx_stall/holes_*/rx_reorder_max_depth above"
+        fi
+        if [ "$cmp" = ge ]; then
+            ok=$(awk -v r="$I_RATE" -v m="$I_MBIT_MIN" 'BEGIN { print (r >= m) ? 1 : 0 }')
+            [ "$ok" -eq 1 ] || { dump_state; fail "probe I: ${I_RATE} Mbit/s, expected $bound"; }
+        else
+            ok=$(awk -v r="$I_RATE" -v m="$I_CONTROL_MAX" 'BEGIN { print (r <= m) ? 1 : 0 }')
+            [ "$ok" -eq 1 ] || { dump_state; fail "probe I: ${I_RATE} Mbit/s, expected $bound"; }
+        fi
+        echo "   probe I: n=$I_N one-way ${I_RATE} Mbit/s, strict=pass interleaved=${I_INTER}"
+        kill "$echo3_pid" 2> /dev/null
+        echo3_pid=
+        tc_clear
+        echo "== probe I: pass"
+        return 0
+    fi
+
+    # Control first: one carrier on the same shaped path. Then four. The claim
+    # is the ratio, not the absolute number.
+    i_measure 1 "$I_CONTROL_MIB" "control n=1"
+    [ "$I_STRICT" -eq 1 ] || { dump_state; fail "probe I: control strict phase failed (rc=$I_RC)"; }
+    control=$I_RATE
+    ok=$(awk -v r="$control" -v m="$I_CONTROL_MAX" 'BEGIN { print (r <= m) ? 1 : 0 }')
+    [ "$ok" -eq 1 ] || { dump_state; fail "probe I: control n=1 delivered ${control} Mbit/s, expected <= $I_CONTROL_MAX"; }
+
+    i_measure 4 "$I_MIB" "main n=4"
+    [ "$I_STRICT" -eq 1 ] || { dump_state; fail "probe I: strict phase failed (n=4 rc=$I_RC)"; }
+    if [ "$I_INTER" -eq 0 ]; then
+        dump_state
+        fail "probe I: strict PASS, interleaved FAIL (n=4, one-way ${I_RATE} Mbit/s) - see tx_paused/tx_stall/holes_*/rx_reorder_max_depth above"
+    fi
+    ratio=$(awk -v a="$I_RATE" -v b="$control" 'BEGIN { if (b <= 0) b = 0.1; printf "%.2f", a / b }')
+    ok=$(awk -v r="$I_RATE" -v m="$I_MBIT_MIN" 'BEGIN { print (r >= m) ? 1 : 0 }')
+    [ "$ok" -eq 1 ] || { dump_state; fail "probe I: n=4 delivered ${I_RATE} Mbit/s, expected >= $I_MBIT_MIN"; }
+    ok=$(awk -v r="$ratio" -v m="$I_RATIO_MIN" 'BEGIN { print (r >= m) ? 1 : 0 }')
+    [ "$ok" -eq 1 ] || { dump_state; fail "probe I: n=4 is ${ratio}x the n=1 control, expected >= $I_RATIO_MIN x"; }
+
+    echo "   probe I: n=1 ${control} Mbit/s, n=4 ${I_RATE} Mbit/s, ratio ${ratio}x (min $I_RATIO_MIN), strict=pass interleaved=${I_INTER}"
+    kill "$echo3_pid" 2> /dev/null
+    echo3_pid=
+    [ "$I_PACE_MBIT" -gt 0 ] && /bin/tc qdisc del dev lo root 2> /dev/null
+    tc_clear
+    echo "== probe I: pass"
+}
+
+# --- probes J and K: loss, reorder, and a dead carrier ----------------------
+# Both judge prediction, so both skip while the module exports no predict_tx
+# counter (C6). The setup and the assertions are written so that landing C6
+# turns them on without touching the harness again.
+# Prediction is available when the module renders the counter at all. The
+# value is per tunnel, and every probe starts with a fresh tunnel, so a zero
+# here says nothing about the module.
+prediction_ready() {
+    grep -q 'predict_tx=' /proc/net/tbtun/stats
+}
+
+probe_j() {
+    echo "== probe J: 1% loss and 2% reorder on every carrier"
+    if ! net_ready; then
+        skip J "no eth0 with $GUEST_IP or no /bin/tc in the guest"
+        return 0
+    fi
+    raise_socket_buffers
+    flush_and_wait
+    nc -lk -p "$TARGET_PORT3" -e /bin/cat &
+    j_pid=$!
+    sleep 1
+    echo "ports $J_PORTS" > "$PORTS" || fail "probe J: ports directive rejected"
+    tc_setup delay 20ms 10ms loss 1% reorder 2% || fail "probe J: tc setup failed"
+    # m=1: the spare carrier is the control plane. J checks byte-exactness
+    # under 1% loss + 2% reorder; with m=0 the FBK shares the DATA byte stream
+    # and a single stuck record blackholes the feedback that would unblock it.
+    echo "tunnel 1 role=far profile=raw listen=$GUEST_IP:$CAR_PORT target=127.0.0.1:$TARGET_PORT3 n=4 m=1 dup=0" \
+        > "$CFG" || fail "probe J: far tunnel rejected"
+    echo "tunnel 2 role=near profile=raw listen=$GUEST_IP:$PUB_PORT peer=$GATEWAY:$HOSTFWD_PORT n=4 m=1 dup=0" \
+        > "$CFG" || fail "probe J: near tunnel rejected"
+    sleep 1
+    if ! prediction_ready; then
+        skip J "module exports no predict_tx counter; prediction (C6) is not landed"
+        return 0
+    fi
+    /bin/tbt_burst "$GUEST_IP" "$PUB_PORT" "$C_MIB" "${TBT_ENDPOINT_TIMEOUT:-120}"
+    rc=$?
+    [ "$rc" -eq 0 ] || fail "probe J: byte-exact completion failed under 1% loss / 2% reorder (rc=$rc)"
+    # No holes_* assertion here. J's 1% netem loss is carrier-TCP loss, which
+    # TCP repairs itself; 2% reorder is absorbed by the receiver's tree. The
+    # tunnel-level hole machinery correctly declines to declare those shallow
+    # holes (gate_fail/depth_fail), so holes_repaired can legitimately be 0
+    # while the data is byte-exact. The tunnel's own hole repair is covered by
+    # probe G, which injects loss the carrier cannot hide (drop_ppm). The
+    # criteria that matter here are byte-exactness in both phases, above.
+    echo "   holes_repaired=$(stat_sum holes_repaired) predict_tx=$(stat_sum predict_tx)"
+    kill "$j_pid" 2> /dev/null
+    tc_clear
+    echo "== probe J: pass"
+}
+
+probe_k() {
+    echo "== probe K: one carrier dead mid-transfer, then restored"
+    if ! net_ready; then
+        skip K "no eth0 with $GUEST_IP or no /bin/tc in the guest"
+        return 0
+    fi
+    raise_socket_buffers
+    flush_and_wait
+    nc -lk -p "$TARGET_PORT4" -e /bin/cat &
+    k_pid=$!
+    sleep 1
+    echo "ports $K_PORTS" > "$PORTS" || fail "probe K: ports directive rejected"
+    tc_setup delay 20ms 10ms || fail "probe K: tc setup failed"
+    # m=1: the spare carries the FBK, so a carrier blackholed for two seconds
+    # cannot take the feedback down with it. The data criteria are unchanged.
+    echo "tunnel 1 role=far profile=raw listen=$GUEST_IP:$CAR_PORT target=127.0.0.1:$TARGET_PORT4 n=4 m=1 dup=0" \
+        > "$CFG" || fail "probe K: far tunnel rejected"
+    echo "tunnel 2 role=near profile=raw listen=$GUEST_IP:$PUB_PORT peer=$GATEWAY:$HOSTFWD_PORT n=4 m=1 dup=0" \
+        > "$CFG" || fail "probe K: near tunnel rejected"
+    sleep 1
+    if ! prediction_ready; then
+        skip K "module exports no predict_tx counter; prediction (C6) is not landed"
+        return 0
+    fi
+
+    # Carrier 0's real source port decides which class to kill: the mapping
+    # from carrier index to portblock entry is the module's business.
+    sport=$(peer_field 2 0 3)
+    sport=${sport##*:}
+    cls=$(tc_class_of_port "$sport")
+    [ -n "$cls" ] || fail "probe K: carrier 0 sport '$sport' is outside the portblock"
+
+    /bin/tbt_burst "$GUEST_IP" "$PUB_PORT" "$C_MIB" "${TBT_ENDPOINT_TIMEOUT:-120}" &
+    burst_pid=$!
+    i=0
+    while [ $i -lt 6000 ]; do
+        sent=$(tunnel_stat 2 submit_bytes)
+        [ "${sent:-0}" -ge 65536 ] && break
+        kill -0 "$burst_pid" 2> /dev/null || break
+        i=$((i + 1))
+    done
+    kill -0 "$burst_pid" 2> /dev/null ||
+        fail "probe K: transfer finished before carrier 0 could be killed (sent=${sent:-0})"
+    echo "   carrier 0 is sport $sport (class 1:$cls); killing it after ${sent:-0} bytes"
+    /bin/tc qdisc change dev eth0 parent "1:$cls" handle "$((100 + cls - 10)):" \
+        netem delay 20ms 10ms loss 100% || fail "probe K: could not set 100% loss on class 1:$cls"
+    sleep 2
+    /bin/tc qdisc change dev eth0 parent "1:$cls" handle "$((100 + cls - 10)):" \
+        netem delay 20ms 10ms loss 0% || fail "probe K: could not restore class 1:$cls"
+    wait $burst_pid
+    rc=$?
+    [ "$rc" -eq 0 ] || fail "probe K: byte-exact completion failed after a dead carrier (rc=$rc)"
+    # No holes_* assertion here, for the same reason as probe J: a two-second
+    # netem blackhole is carrier-TCP loss, which TCP repairs; the tunnel-level
+    # hole machinery correctly declines to declare it. The tunnel's own repair
+    # is covered by probe G (drop_ppm). The criteria here are byte-exactness
+    # after the dead carrier and the bounded-reset behaviour.
+    echo "   holes_repaired=$(stat_sum holes_repaired) predict_tx=$(stat_sum predict_tx)"
+    kill "$k_pid" 2> /dev/null
+    tc_clear
+    echo "== probe K: pass"
+}
+
+# --- run the selected probes ------------------------------------------------
+want A && run_probe A
+if want A; then
+    echo "== reloading tbtun with debug_loss=1"
+    rmmod tbtun || fail "rmmod tbtun"
+    insmod /tbtun.ko debug=2 debug_loss=1 || fail "insmod /tbtun.ko debug_loss=1"
+    [ -e "$CFG" ] || fail "$CFG missing after reload with debug_loss=1"
+    grep -q '^debug_loss=1' /proc/net/tbtun/stats || fail "stats does not report debug_loss=1"
+fi
+
+want B && run_probe B
+want C && run_probe C
+want D && run_probe D
+want E && run_probe E
+want F && run_probe F
+want G && run_probe G
+want H && run_probe H
+want I && run_probe I
+want J && run_probe J
+want K && run_probe K
+
+echo 'flush' > "$CFG" 2> /dev/null || true
+for _p in "$echo_pid" "${echo2_pid:-}" "${echo3_pid:-}"; do
+    [ -n "$_p" ] && kill "$_p" 2> /dev/null
+done
+echo "TBT_TEST_PASS"
+sync
+poweroff -f
