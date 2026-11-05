@@ -987,9 +987,9 @@ queue per stream.
 **Carrier buffers.** `SO_SNDBUF`/`SO_RCVBUF` are no longer a hardcoded 256 KiB. Each
 carrier gets `clamp(max(window_share, TBT_CAR_SOCKBUF_TOTAL / n_pri) / 2, 64 KiB, 1 MiB)`,
 where `window_share = (tx_window_bytes ?: rx_reorder_bytes) / n_pri`, the division by two
-is the kernel's own doubling, and `TBT_CAR_SOCKBUF_TOTAL` is 64 MiB. The total budget is
-what makes the layer scalable: at 256 carriers each carrier gets 256 KiB effective
-(64 MiB total), at n=1 it gets 2 MiB effective, and an 8 MiB-per-carrier setting can no
+is the kernel's own doubling, and `TBT_CAR_SOCKBUF_TOTAL` is 128 MiB. The total budget is
+what makes the layer scalable: at 256 carriers each carrier gets 512 KiB effective
+(128 MiB total), at n=1 it gets 2 MiB effective, and an 8 MiB-per-carrier setting can no
 longer become 2 GiB. The cap is an accounting limit, not a reservation; the demand is the
 in-flight share. The value is set with `SO_SNDBUFFORCE`/`SO_RCVBUFFORCE`,
 falling back to the plain option when the kernel refuses the force call (no
@@ -1015,7 +1015,7 @@ carrier, no fixed stride). Resource estimate at 256 carriers: 256 TCP sockets an
 5 work structs each (poll/pump/rx/tx/connect), 256 × ~24 KiB of HTTP/parser state
 (~6 MiB), and a per-carrier 50 ms poll = 5120 wakes/s; the poll must become one
 session-level scan (20 wakes/s) before 256 is enabled, and the per-carrier keepalive
-must batch. The 64 MiB socket-buffer budget bounds the kernel side.
+must batch. The 128 MiB socket-buffer budget bounds the kernel side.
 
 **Inflation control.** `dup_degree` is the knob; `max_inflate` the ceiling (§4.7).
 
