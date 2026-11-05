@@ -1,0 +1,41 @@
+debug_loss=0
+gaps_total=0
+streams_total=1
+tunnel 1 capture_runs=15 actor_calls=8 submit_bytes=9 tx=15 wire=1219401 err=0 short=0
+tunnel 1 rx_work_runs=17565 rx_drain_entries=19132 rx_drain_bytes=13428485 rx_paused_skips=0 rx_adopt_events=1 rx_records=25961 carrier_write_space_runs=1 poll_rescues=55
+tunnel 1 rx_ready_calls=19747 rx_reads=17565 rx_read_bytes=13428485 rx_read_zero=55 rx_resume=0 rx_resume_busy=0 rx_last_drained=100 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=8 rx_delivered=11903264
+tunnel 1 dbg rcv_nxt=3215223268 copied=3215223267 after=3215223268 qlen=1 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=24059 pmoved=24623 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=8 pub_wmem=0 pub_una=2618755591 pub_nxt=2618755591 car_wmem=37370 car_nxt=2751408997 car_copied=2751408997 car_rcvbuf=2097152 car_sndbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=24634 txwake_busy=12596 txwork=12039
+tunnel 1 ws_calls=1
+tunnel 1 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=23931 fbk_rx=24422 retx_frames=5 retx_bytes=6 retain_drop=0 retx_hole=3 retx_slow=2 retx_pathloss=0 retx_other=0 data_tx=13 retx_data_ppm=625000 dup_bytes_ppm=666666 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=4 rx_ack=37 peer_paused=0 fb_delay_us=950 rto_us=275047 una_stall_us=45039 stall_paused_skips=0 stall_idle_skips=2174 stall_declared=0 tx_window=125484 bdp_bytes=57661 k_x100=200 rtt_mean_us=208135 rttvar_us=16728 rtt_max_us=208135 txq_max=191308 win_block=0 win_resume=0 pump_hw_armed=0 pump_hw_fired=0 retx_evident=120 retx_cand=5 retx_nosends=8 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=5 retx_eagain=0 retx_memshort=0 retx_wndshort=0
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0
+tunnel 1 streams streams_active=2 n_streams=2 n_pending=0
+tunnel 1 stream sid=219227881475 state=1 kill=0 attached=0x9 rxq=0 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=8 tgt_err=0
+tunnel 1 stream sid=219227881474 state=1 kill=0 attached=0x9 rxq=0 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=8 tgt_err=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=137 gate_fail=45 depth_fail=92 time_fail=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0
+tunnel 1 reconcile live_bytes=1219401 live_data=13 live_retx=5 retired_bytes=0 retired_data=0 retired_retx=0
+===PEERS===
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+1 0 9000 171.120.34.226:40000 14 222246 1 up raw 12 100000 46674 24625 1219501 0 625000 264340 200200 409600 85 1064960 1064960 0
+===IPERF===
+[  5] 102.00-103.00 sec  0.00 Bytes  0.00 bits/sec                  
+[  5] 103.00-104.00 sec  0.00 Bytes  0.00 bits/sec                  
+[  5] 104.00-105.00 sec  0.00 Bytes  0.00 bits/sec                  
+[  5] 105.00-106.00 sec  0.00 Bytes  0.00 bits/sec                  
+[  5] 106.00-107.00 sec  0.00 Bytes  0.00 bits/sec                  
+[  5] 107.00-108.00 sec  0.00 Bytes  0.00 bits/sec                  
+[  5] 108.00-109.00 sec  0.00 Bytes  0.00 bits/sec                  
+[  5] 109.00-110.00 sec  0.00 Bytes  0.00 bits/sec                  
+[  5] 110.00-111.00 sec  0.00 Bytes  0.00 bits/sec                  
+[  5] 111.00-112.00 sec  0.00 Bytes  0.00 bits/sec                  
+[  5] 112.00-113.00 sec  0.00 Bytes  0.00 bits/sec                  
+[  5] 113.00-114.00 sec  0.00 Bytes  0.00 bits/sec                  
+[  5] 114.00iperf3: error - idle timeout for receiving data
+-115.00 sec  0.00 Bytes  0.00 bits/sec                  
+[  5] 115.00-116.00 sec  0.00 Bytes  0.00 bits/sec                  
+[  5] 116.00-117.00 sec  0.00 Bytes  0.00 bits/sec                  
+[  5] 117.00-118.00 sec  0.00 Bytes  0.00 bits/sec                  
+[  5] 118.00-119.00 sec  0.00 Bytes  0.00 bits/sec                  
