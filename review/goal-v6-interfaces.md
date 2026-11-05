@@ -627,7 +627,7 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **A 补丁（`w-window f8023a2`）**：① cross-stream 小 backlog DATA 豁免（`tx_seq-tx_ack <= 2*TBT_PAYLOAD_MAX`，peer-window 与 send-memory 两门）；② `hole_budget_ms=0` 的 sender stall budget 改为 `max(5s, 5×RTO, carrier_stall_ms)`（显式 `hole_budget_ms` 保持原义）；③ target close（EPIPE/ECONNRESET/ESHUTDOWN）主动 abort/传播，`-ENOTCONN` 仍 transient。本地 build/make check/near 15/15/A–K 11/11/lint 绿；完整 adversarial 待 HND0 rerun 后安静跑。**module sha 待确认**：worktree `tbtun.ko` sha256=`686797c5…`（07:22，早于 f8023a2 的 07:26），与用户报的 `3edf84e0` 不一致；`hnd0-n1b` 必须用 A 确认的 f8023a2 构建，不能用 stale ko。
 
-**重建状态**：`686797c5` 已确认 stale；A 正在干净重建 f8023a2，将报绝对路径/sha256/vermagic；`hnd0-n1b` hold，不用 686797c5。
+**重建/模块确认（A）**：`f8023a2` 干净重建确定性 sha256=`686797c5…`，路径 `/home/kunweiz/tbtun-worktrees/window/tbtun.ko`，vermagic `7.2.9-1-MANJARO SMP preempt mod_unload`，version 0.0.1；07:22 文件同内容哈希，**686797c5 就是 f8023a2**。`3edf84e0` 是 stale 中间切（仍会在 `-ENOTCONN` 杀 delivery），**禁用**。provenance：near 15/15 与两次 A–K 都在 `3edf84e0` 上；最终 `686797c5` 的 A–K 尚未跑，等 HND0 rx1m 后安静跑。`hnd0-n1b` 在 HND0（7.0.0-42）从 f8023a2 源码构建，far ko sha 会不同；near 可用 `686797c5` 或同源重建。
 
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
 
