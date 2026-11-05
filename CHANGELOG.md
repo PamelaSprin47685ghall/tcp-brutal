@@ -71,6 +71,41 @@ tree. The bullets record the fixes that changed observable behavior, then the
 grouped entries close the remaining lifetime, wire and input-handling findings.
 `review/findings.md` keeps the per-ID detail and the final status table.
 
+- **Sender window and the raw false-stall kill:** the send window was
+  `rx_reorder_bytes / 2`, 128 KiB with the old 262144 default. On a 218 ms /
+  17 Mbit path (BDP ~465 KiB) that held in-flight at 120–131 KB and throughput at
+  3.79–4.55 Mbit/s while direct TCP on the same 5-tuple reached 17.08 Mbit/s;
+  the window was the cause, not ISP shaping. The window is now a flow-control
+  bound against the peer's contiguous delivered offset, sized once per pump pass
+  as `k × mean BDP`, where `mean_BDP = mean_srtt × Σ BBR rate` and
+  `k = (RTO + one_way + feedback_delay) / mean_srtt` (2–5 on the measured paths),
+  with a 1 MiB floor, a cap at `rx_reorder_bytes`, immediate growth and a 25%
+  shrink hysteresis. `RTTVAR` is the largest per-carrier `mdev_us`,
+  `one_way = mean_srtt / 2`, and the feedback delay is the measured uack lag,
+  floored at the 10 ms FBK cadence. A sum of per-carrier BDPs, a max-RTT product
+  and a cwnd sum are not bounds: the sender splits deterministically, so jitter,
+  not a persistently slow carrier, sets the spread the reorder tree must absorb.
+  The same SRTT + 4 × RTTVAR shape sets the sender RTO (200 ms floor, 2 ×
+  feedback delay, 500 ms cap), and `hole_budget_ms` is sized at 2–3 × that RTO
+  plus one one-way delay. The capacity identity is `R ≥ W = k × BDP`: the peak
+  reorder occupancy is the whole window, and the 8 MiB default covers `k = 5` at
+  218 ms / 17 Mbit. `tx_window_bytes=` (0 = auto, the default) pins it and must
+  not exceed `rx_reorder_bytes`. `rx_reorder_bytes` now defaults to
+  8388608 (was 262144), bounded per stream and by a session-wide aggregate of the
+  same value. Carrier `SO_SNDBUF`/`SO_RCVBUF` and the frame queue
+  (`txq_max = tx_window + 8 chunks`) scale with the window, and the buffers use
+  `SO_SNDBUFFORCE`/`SO_RCVBUFFORCE` because the plain option is clamped to
+  `net.core.wmem_max`/`rmem_max`. The raw-carrier stall clock now runs only
+  while `snd_una != snd_nxt` and `snd_una` has not moved; an idle carrier, a
+  delivery pause or a closed peer window resets it. The old code refreshed only
+  on `snd_una` progress, so a long idle gap counted as stall time and the first
+  DATA after it killed every raw carrier (WAN: `lost = n + m`,
+  `replaced = n + m - 1`, `holes_unrecoverable = 0`; `http-kal` `lost = 0`), and
+  the old `sk_wmem_queued > 0` test masked real stalls. `/proc/net/tbtun/peers`
+  gains `delivery_rate_bps`, `cwnd_bytes` and `snd_wnd`; the `c3` line gains
+  `tx_window`, `rtt_mean_us`, `rttvar_us`, `rtt_max_us`, `txq_max`,
+  `stall_idle_skips`, `stall_declared`, `pump_hw_armed` and `pump_hw_fired`; the
+  `live` line gains `car_sndbuf`.
 - **Shared statistics counters:** every session counter with more than one writer
   context is `atomic64_t`, incremented with `atomic64_inc/add` and read through
   `tbt_stat_read()`, so concurrent carriers and stream workers can no longer lose
@@ -109,10 +144,10 @@ grouped entries close the remaining lifetime, wire and input-handling findings.
   shows `win_block=235`, `win_resume=1`, the RST in `wire` at 98,880 bytes,
   `ctl_lost=0`, `ctl_queued=0`; `near.fin_eagain` shows `win_block=6720`,
   `win_resume=1`, the FIN in `wire` at 536,418 bytes.
-- **Review 23:** `hole_budget_ms=0` and `rx_reorder_bytes=0` are refused with `EINVAL`
-  instead of creating a tunnel that dies on its first hole or reordered frame. The
-  accepted ranges are now `1..60000` and `1..268435456`; omitted keys keep their
-  defaults. Zero remains valid where it has a defined meaning (`tx_retain_bytes`,
+- **Review 23:** `rx_reorder_bytes=0` is refused with `EINVAL` instead of creating a
+  tunnel that dies on its first reordered frame. The accepted range is
+  `1..268435456`. `hole_budget_ms=0` now means auto (see above), and
+  `carrier_stall_ms=0` likewise; both derive from the measured RTO. Zero remains valid where it has a defined meaning (`tx_retain_bytes`,
   `tunnel_rate`, `replay`, `keepalive`, `drip_ms`).
 - **Module unload:** `tbtun_exit()` unregisters `/proc`, shuts every tunnel down
   (stops listeners, cancels work, clears socket callbacks and releases sockets), then
@@ -288,7 +323,9 @@ grouped entries close the remaining lifetime, wire and input-handling findings.
   holds the echo. The full matrix is `review/final-bench/summary.md`.
 - **Benchmark numbers are lab numbers.** Every throughput, latency and `retx_ppm`
   figure comes from the QEMU bench: one 10 Mbit htb class per source port and netem
-  `delay 20ms 10ms`. No measurement was taken on a real ISP path. Do not read these
+  `delay 20ms 10ms`. The one real-WAN measurement is the baseline the sender-window
+  fix targets (218 ms / 17 Mbit: tunnel 3.79–4.55 Mbit/s at 120–131 KB in flight,
+  direct TCP 17.08 Mbit/s); it is not a throughput expectation. Do not read these
   figures as expected Internet performance.
 - **No per-netns control surface.** `/proc/net/tbtun` is created in `init_net` only.
 - **Only the first `srcaddrs` entry is used.** Multi-address carriers and

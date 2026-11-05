@@ -566,7 +566,8 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
   module never sends one.
 - A carrier the classifier downgrades or drops is detected by its own TCP state: a closed
   or non-`ESTABLISHED` socket, or `snd_una` static while `snd_nxt` moved for
-  `carrier_stall_ms` (3000 ms). Delivery backpressure defers that decision (§5.5). The
+  `carrier_stall_ms` (3000 ms). The clock runs only while unacked bytes are outstanding;
+  an idle carrier, a delivery pause and a closed peer window reset it (§5.5). The
   replacement then dials from the spare pool (§9.7).
 
 ---
@@ -735,20 +736,23 @@ application-visible stream is only ever advanced by real bytes or by a bounded r
 **Implemented rule (C6).** The receiver starts a hole's deadline when the out-of-order
 tree becomes non-empty. The deadline restarts when the *head* of the tree advances (the
 contiguous prefix grew, i.e. the hole that was blocking it filled), and clears when the
-tree empties. The byte bound (`hole_budget_bytes`, at least 64 KiB, or `rx_reorder_bytes`
-when larger) is checked on every insert and is independent of the timer. The events that
-may expire a hole are: the head not advancing for `hole_budget_ms` (default 500 ms), or
-the tree exceeding the byte bound. A new frame arriving behind the hole does not by itself
-restart the deadline; if it did, a full send window could keep the hole alive forever and
-deadlock (measured: probe I strict phase, the near's window closed on the far's hole and
-the transfer reset).
+tree empties. The byte bound is `rx_reorder_bytes` per stream, plus the same value for the
+session-wide sum of every stream's tree; the per-stream and session bounds are checked on
+every insert, and the hole's own byte test uses the larger of 64 KiB and
+`rx_reorder_bytes`. Both are independent of the timer. The events that may expire a hole
+are: the head not advancing for `hole_budget_ms` (default 500 ms; size it at 2–3 × the
+sender RTO plus one one-way delay, §5.4), or the tree exceeding either byte bound. A new
+frame arriving behind the hole does not by itself restart the
+deadline; if it did, a full send window could keep the hole alive forever and deadlock
+(measured: probe I strict phase, the near's window closed on the far's hole and the
+transfer reset).
 
 ### 4.6 Resolution of a hole
 
 | Case | Condition | Result |
 |---|---|---|
 | A | true bytes arrive (any copy) before `hole_budget_ms` | hole removed; delivery continues; no visible effect |
-| B | the tree head does not advance for `hole_budget_ms` (500 ms), or the reorder tree exceeds `hole_budget_bytes` (64 KiB, or `rx_reorder_bytes` when larger) | stream RST to the app: `ECONNRESET` on the public socket; far side RSTs the target |
+| B | the tree head does not advance for `hole_budget_ms` (500 ms), or the stream's reorder tree exceeds `rx_reorder_bytes` (at least 64 KiB) or the session's tree exceeds the same budget | stream RST to the app: `ECONNRESET` on the public socket; far side RSTs the target |
 
 **The honest tradeoff**: case B converts an unbounded TCP retransmit hang into a bounded
 reset. On a path with persistent, uncorrelated loss this is a real regression versus plain
@@ -777,6 +781,9 @@ fixed per-tunnel degree in C5.
 We cannot beat `min(Σ per-5-tuple limits, LSP aggregate policer, inner RTT × BDP)`.
 TCP-over-TCP shares a failure mode when inner and outer traverse the same queue;
 carrier spreading is what avoids it, and it is also the honest limit of the claim.
+The tunnel's sender window does not add a fixed constant to that bound: it derives from the
+carriers' own BBR samples with `rx_reorder_bytes` as its ceiling (§5.4), so a path whose BDP
+fits the reorder budget is limited by the path, not by a 128 KiB default.
 
 ---
 
@@ -815,9 +822,162 @@ frames bypass it. There are no per-CPU reservations. The bucket's first job in t
 tree is test determinism: probe H uses 2 MB/s to make a 4 MiB transfer last long enough to
 inject a two-second outage.
 
-### 5.4 Inflation control
+### 5.4 Sender window and inflation control
 
-`dup_degree` is the knob; `max_inflate` the ceiling (§4.7).
+**The window is flow control, not a second congestion controller.** Each carrier's TCP
+owns congestion control and pacing (§5.2); the tunnel never sets a rate and never inflates
+on loss. `tx_window` is the byte budget a DATA frame must fit behind the peer's contiguous
+delivered offset: `seq + len <= tx_ack + tx_window`. `tx_ack` is the FBK `uack` clamped to
+the bytes assigned (§5.5): the receiver advances it when the contiguous run has arrived and
+is queued for delivery, not when the application calls `read()`. (The TX code calls this
+the peer's *delivered* offset; it is the same contiguous received offset, never the
+application's read cursor — a window on that cursor deadlocked the strict send-then-read
+case, §15 C3.) The 64 MiB ready queue (§8.5) absorbs bytes the application has not read,
+so the window bounds the receiver's reorder tree and the 10 ms feedback cadence, not the
+application's read rate.
+
+**Why the window cannot be removed.** Reliable ordered delivery over `N` carriers with a
+finite receiver reorder tree means the sender's lead `W` must stay at or below the
+receiver's reorder capacity `R`. Removing `W` is not an option: it is equivalent to
+`R = infinity` (the tree grows until an allocation fails) or to accepting a stream reset
+whenever cross-path reordering exceeds memory.
+
+**Why the tunnel keeps its own reorder tree even though the application-facing socket is
+TCP (and may run BBR).** In one line: `tcp_sendmsg_locked()` is append-only, tunnel frame
+sequence numbers are a different space from the app TCP's, and the app TCP's BBR governs
+near→app, not the `N` WAN carriers. Concretely, writing F2 first and back-filling F0 later
+is impossible, because the application would receive the byte stream F2, F0, F1. The
+application TCP's out-of-order queue reorders IP segments in its own sequence space, not
+tunnel frames; the near TCP stack assigns sequence numbers in write order, so it leaves no
+hole for a frame that has not arrived. The only ways to make that TCP absorb frame
+reordering are to wait for F0 (which is the reorder tree), to reserve a hole in the
+application TCP sequence space with a repair mode or a custom stack (still bounded by the
+application's `rwnd`; stock TCP does not support it, and this design forbids it), or one
+connection per frame (which violates the single ordered stream). The application TCP's BBR
+governs near→app — usually loopback or LAN — not the far→near carriers, so it can neither
+create WAN bandwidth nor repair ordering. Where the intuition is right: the application
+TCP and the ready queue absorb "delivered in order but the application reads slowly"
+backpressure. That is `rx_q` / `TBT_RX_RING_MAX` (64 MiB per stream), not the reorder tree
+(`rx_reorder_bytes`, 8 MiB default, session-aggregated); the two stay separate. The
+high-RTT regression reports both occupancies (`rxq` for the ready queue against its 64 MiB
+cap, `ooo_bytes`/`reorder_max_depth` for the reorder tree), so the numbers show which one
+is in use.
+
+**Auto sizing (`tx_window_bytes=0`, the default).** Each carrier's own BBR estimator is
+the only rate source. This kernel has no `tcp_sock.delivery_rate` field: `tcp_rate_gen()`
+stores the sample BBR's bandwidth filter consumes, `rate_delivered` packets over
+`rate_interval_us`; multiply by `mss_cache` for bytes/s. The byte budget is
+
+    W = min(R or credit, max(k × mean_BDP, 1 MiB))
+    mean_BDP = mean_srtt × Σ delivery_rate_i
+    k = (RTO + one_way + feedback_delay) / mean_srtt
+
+where `mean_srtt` is the delivery-weighted mean SRTT across carriers (the RTT an average
+byte sees), `RTTVAR` is the largest per-carrier `mdev_us` (the spread reordering must
+absorb), `RTO = mean_srtt + 4 × RTTVAR`, `one_way = mean_srtt / 2`, `feedback_delay` is
+the measured uack lag after the carrier TCP ack (the existing `fb_delay_us`), floored at
+the 10 ms FBK cadence, and `R` is the receiver's reorder capacity. The code computes it as
+`(mean_srtt + 4 × RTTVAR + one_way + feedback_delay) × Σ delivery_rate_i`. The loss clock
+starts when the frame is sent, so a repair cannot arrive before `RTO + one_way`; the window
+covers that whole interval or the pipe idles waiting for the repair. This is the same
+SRTT + 4 × RTTVAR shape TCP uses for its own RTO.
+
+**Why not `max RTT × total rate`.** The sender splits deterministically, so the variable is
+link jitter, not a persistently slow carrier: a slow carrier is a jitter sample, not the
+expected demand. With the jitter term and the 1 MiB floor, `k` is 2–5 on the measured
+paths; the regression reports `k = W / mean_BDP`. A heavy tail needs a high percentile of
+the spread, which only widens the target. It is never an upper bound: the hard bound is
+`R` or a receiver credit. `2 × Σ BDP_i`, a single mean sample, and `Σ snd_cwnd` /
+`Σ snd_wnd` are not bounds either.
+
+**Capacity identity: `R ≥ W = k × mean_BDP`.** The receiver's peak reorder occupancy is
+the whole window, not `(k − 1) × mean_BDP`: at the instant the loss is detected,
+`(k − 1) × mean_BDP` is already in the tree and the last BDP is still in flight; it
+arrives before the repair, so the peak is still `k × mean_BDP`. If the loss clock were
+measured from the expected arrival instead of the send, the same argument would give
+`W = (k + 1) × mean_BDP`; this implementation measures from the send, so
+`W = k × mean_BDP`. Consequently `rx_reorder_bytes` must be at least the expected
+`k × mean_BDP`; the 8 MiB default covers `k = 5` at 218 ms / 17 Mbit (2.3 MB).
+
+**The upper bound is `R`, never a cwnd or window sum.** `R` is `rx_reorder_bytes`, or the
+receiver's credit when WINDOW is implemented. `Σ snd_cwnd` is not a substitute: it is a
+per-carrier congestion snapshot, and a carrier TCP releases cwnd when its own ACK arrives
+while those bytes remain in the receiver's reorder tree until the gap fills, so the
+tunnel's lead (`H - A`) can be far larger than `Σ snd_cwnd`; `Σ snd_cwnd` can also exceed
+`R` and overflow the tree. `Σ snd_wnd` is not one either: each advertised window is per
+carrier and says nothing about cross-carrier reordering. A per-carrier `snd_cwnd` is not a
+tunnel window in the first place: BBR's initial cwnd is 10 MSS, about 0.5 Mbit at 218 ms,
+while the tunnel's in-flight spans every carrier. `snd_cwnd` and `snd_wnd` are
+cross-checks, never inputs.
+
+**Bootstrap and hysteresis.** At session birth no carrier has a sample (`delivery_rate` or
+`srtt_us` is zero), so the window starts at the 1 MiB floor and grows as samples arrive.
+It is recomputed once per pump pass, not per frame: grow immediately, shrink only when the
+new estimate is below 75% of the current window, so one stale sample cannot collapse a
+window that is already filling the path.
+
+**Bounds.** The window is capped at `R`: `rx_reorder_bytes` in this revision, or a receiver
+credit when WINDOW is implemented. A frame beyond the peer's reorder budget is a stream
+kill (`TBT_ST_REORDER`), not a retransmit, so the cap is a safety property, not tuning.
+`tx_window_bytes=N` fixes the window at `N`; the parser refuses an explicit `N` above
+`rx_reorder_bytes` in either key order (§8.4.1). This revision puts no credit on the wire:
+frame type `0x21` WINDOW is defined and reserved, the receiver refuses it with `-EPROTO`,
+and no sender emits one (§3.3). The sender therefore caps `W` by its own configured
+`rx_reorder_bytes`, and both ends must be configured with the same value. That is a
+configuration contract, not a wire guarantee; when a WINDOW credit exists,
+`W = min(credit, target)`.
+
+**The time budget: RTO, hole budget and stall timeout.** The same two terms set the
+sender's RTO: per carrier `srtt + 4 × mdev`, the largest across carriers, floored at TCP's
+200 ms minimum, raised by `2 × feedback_delay`, and capped at 500 ms. `hole_budget_ms`
+should be 2–3 × that RTO plus one one-way delay for the repair, not a fixed constant: the
+500 ms default suits low-RTT paths, and a 218 ms path needs about 1000–1500 ms.
+`carrier_stall_ms` is a multiple of the same RTO, and an idle carrier
+(`snd_una == snd_nxt`), a delivery pause or a closed peer window restarts its clock (§5.5).
+The receiver's reorder tree must hold the whole window (`R ≥ W`, above); its hard bound is
+still `R`.
+
+**Why this changed: the 128 KiB cap was the WAN result.** The old window was
+`rx_reorder_bytes / 2`, 128 KiB with the old 262144 default. A 218 ms / 17 Mbit path has a
+BDP of about 465 KiB. On the real WAN, direct TCP on the same 5-tuple measured
+17.08 Mbit/s while the tunnel held in-flight at 120–131 KB and delivered 3.79–4.55
+Mbit/s. The window was the cause; ISP shaping was not. The local netem regression
+(17 Mbit class, one carrier, measured RTT 109 ms because only the data direction was
+shaped) showed the new window reaching 1,048,576 bytes with 1.0 MB in flight, 8x the old
+cap, and the CPU cost of one pegged kworker dropping from 98-99% to 2%; it did not reach
+the 13.7 Mbit/s acceptance target because the carrier's advertised window stayed at
+64 KiB, which is the open item. The old configuration was
+internally inconsistent: 128 KiB is 0.275 × BDP on that path, while a 30 s hole budget is
+about 137 RTTs; the byte budget and the time budget contradicted each other. The
+regression verifies `W`, `R` and `k` together (`W ≥ in-flight`, `R ≥ W`,
+`k = W / mean_BDP` in 2–5) and reports per-carrier SRTT and RTTVAR, the RTT distribution
+and `N`, in-flight bytes, reorder-tree occupancy, `hole_budget_ms` and the RTO; it must
+show that the byte budget and the time budget agree, not just a throughput number.
+
+**Receiver budget and the memory bound.** `rx_reorder_bytes` now defaults to 8388608
+(8 MiB; it was 262144) and keeps its 268435456 ceiling. The reorder tree is bounded by it
+twice: per stream, and by a session-wide aggregate of the same value, so 128 concurrent
+streams cannot hold 128 × 8 MiB. The ready-to-deliver queue stays at 64 MiB per stream
+(`TBT_RX_RING_MAX`). Per session, retention (≤ window) + the frame queue
+(`txq_max = tx_window + 8 × TBT_CHUNK_MAX`, §8.5) + the carrier socket buffers (each
+sized to its share of the configured window bound; the kernel doubles the setsockopt
+value) ≈ 3 × window; plus ≤ `rx_reorder_bytes` of reorder tree and ≤ 64 MiB of ready
+queue per stream.
+
+**Carrier buffers.** `SO_SNDBUF`/`SO_RCVBUF` are no longer a hardcoded 256 KiB. Each
+carrier gets `clamp((window_share + 2 × TBT_CHUNK_MAX) / 2, 128 KiB, 4 MiB)`, where
+`window_share = (tx_window_bytes ?: rx_reorder_bytes) / n_pri` and the division by two is
+the kernel's own doubling. The value is set with `SO_SNDBUFFORCE`/`SO_RCVBUFFORCE`,
+falling back to the plain option when the kernel refuses the force call (no
+`CAP_NET_ADMIN`): the plain option is clamped to `net.core.wmem_max`/`rmem_max` (208 KiB
+on a default boot), so a 256 KiB request reached the kernel as 208 KiB, 416 KiB effective
+per carrier after the kernel's doubling. `stats live` prints the result as `car_sndbuf`
+next to `car_rcvbuf`. The queueing delay is bounded by in-flight / rate, and in-flight is
+bounded by the window, so a buffer that holds one carrier's share adds no delay. The old
+fixed 256 KiB reached the kernel as ~512 KiB of unacked bytes per carrier and capped a
+1–8 MiB window.
+
+**Inflation control.** `dup_degree` is the knob; `max_inflate` the ceiling (§4.7).
 
 **Implemented in C5/C6:** the duplicate cap is checked before a copy is created against
 the projected `(goodput + duplicate payload) / goodput`, so `inflate_ppm` cannot exceed
@@ -850,13 +1010,14 @@ across paths instead of piling onto the lowest-inflight one, and a path that has
 behind is deprioritised by its own `sent_high - tx_ack`. The measured per-carrier spread
 under 4% injected loss is in §15 C3.
 
-**Send window.** A DATA frame may be written only while
-`seq + len <= tx_ack + rx_reorder_bytes/2` (128 KiB with the default 256 KiB). This bounds
-the receiver's out-of-order tree, which is what `rx_reorder_bytes` protects. Delivery
-backpressure is separate (the pause rule of §8.5), because a *delivered*-offset window
-deadlocks the strict send-then-read case: measured in QEMU, the echo path stalled behind an
-application that was still sending, with both TX queues full and a 15-frame hole waiting.
-The window base was changed to the received offset after that measurement.
+**Send window.** The window is §5.4's: `seq + len <= tx_ack + tx_window`. `tx_ack` is the
+peer's contiguous received offset (the TX code's *delivered* offset), advanced when the
+contiguous run arrives and is queued for delivery, not when the application reads.
+Delivery backpressure is separate (the pause rule below), because a window on the
+application's *read* cursor deadlocks the strict send-then-read case: measured in QEMU, the
+echo path stalled behind an application that was still sending, with both TX queues full
+and a 15-frame hole waiting. The 64 MiB ready queue absorbs the unread echo, so the
+received-offset window does not couple the two directions' delivery progress.
 
 **Write space.** A carrier's admission test is the kernel's own
 `sk_stream_memory_free(sk)` — `sk_wmem_queued < sk_sndbuf` — not a fixed 64 KiB line. The
@@ -885,19 +1046,32 @@ before the fix the RST sometimes never left the module queue (`wire` lacked the
 Delivery can still be delayed by the carrier's TCP zero-window persist, a separate
 condition documented under "Carrier stall vs peer pause" below.
 
-**Carrier stall vs peer pause.** `tbt_car_poll_work()` marks a carrier lost when
-`snd_una` has not moved for `carrier_stall_ms` while `snd_nxt` did. A peer that reports a
-full delivery queue (FBK rx_state=2, published as `peer_paused`) or whose delivery queue
-we see full (`st->paused`) cannot advance the ack, so the decision is deferred: the
-window restarts each poll and `stall_paused_skips` counts the deferral (atomic because
-every carrier's poll work writes it), matching
-`tbt_tx_stall_check()`. A resume gets a full `carrier_stall_ms`; a genuinely dead socket
-still fails on `!sk` or a non-ESTABLISHED state. Measured in `near.rst_eagain`:
+**Carrier stall vs peer pause.** `tbt_car_poll_work()` keeps a per-carrier stall clock
+that runs only while `snd_una != snd_nxt` and `snd_una` has not moved. An idle carrier
+(`snd_una == snd_nxt`: nothing on the wire) restarts the clock and counts
+`stall_idle_skips`; real `snd_una` progress restarts it; a delivery pause (FBK rx_state=2,
+published as `peer_paused`, or our own delivery queue full) or a closed peer window
+(`snd_wnd == 0`) restarts it and counts `stall_paused_skips`. The two skip counters are
+atomic because every carrier's poll work writes them. Only a clock that has run
+`carrier_stall_ms` with none of those restarts declares the carrier lost
+(`stall_declared`), matching `tbt_tx_stall_check()`. The old code refreshed the clock only
+on `snd_una` progress, so a long idle gap counted as stall time and the first DATA after
+the gap killed every raw carrier: on the real WAN the raw run reported `lost = n + m`,
+`replaced = n + m - 1`, `holes_unrecoverable = 0`, while `http-kal`, which keeps the wire
+warm with PADs, reported `lost = 0`. The old `sk_wmem_queued > 0` backpressure test could
+not make that distinction at all: it counts TCP's own retransmission queue, so it is
+positive for every carrier with unacked bytes, blackholed or merely flow-controlled, and
+refreshed the clock forever, masking the real stalls it was meant to detect. A resume gets
+a full `carrier_stall_ms`; a genuinely dead socket still fails on `!sk` or a
+non-ESTABLISHED state. `carrier_stall_ms` must exceed several RTTs plus the 10 ms feedback
+cadence: an ACK cannot arrive before one RTT, and the uack/FBK feedback shares the ordered
+stream with the data. The 3000 ms default is about 13 RTT at 218 ms; the WAN experiment
+that exposed the false kills used 15000 ms. Measured in `near.rst_eagain`:
 `peer_paused=1`, `lost=0`, `replaced=0`, `stall_paused_skips=1184` during the paused
-drain; before the gate the same window reported `lost=1 replaced=1`. The gate trusts the
-peer's pause report: a peer that keeps reporting `rx_state=2` (or an application that never
-reads) defers loss detection indefinitely, so a dead carrier behind a paused stream is
-replaced only after the pause clears or the socket itself closes.
+drain; before the pause gate the same window reported `lost=1 replaced=1`. The gate trusts
+the peer's pause report: a peer that keeps reporting `rx_state=2` (or an application that
+never reads) defers loss detection indefinitely, so a dead carrier behind a paused stream
+is replaced only after the pause clears or the socket itself closes.
 
 **Peer-window admission.** DATA is admitted only while
 `write_seq - snd_una < snd_wnd` (or one chunk when `snd_wnd` is 0). `snd_nxt` is not
@@ -927,14 +1101,14 @@ ack advances to a byte inside a retained frame last sent on that path, the elaps
 since that write. Both feed the same EWMA; the carrier's own SRTT is the floor for the RTO
 calculation, because the FBK value can be stale or zero.
 
-**Loss estimate and RTO.** The RTO is
-`max(4 × max_path_rtt, 2 × fb_delay_us)` clamped to `[20 ms, 500 ms]`, where
-`max_path_rtt` is the larger of the path RTT EWMA and the carrier TCP's SRTT, and
-`fb_delay_us` is the measured application-ack lag after the carrier TCP ack. Before the
-first tunnel-level ack the RTO is held at 200 ms: the only sample available then is the
-carrier's own SRTT, which a shaped egress path can report as ~0.1 ms while the real
-feedback path is ~22 ms (measured: probe J, `rto_us=20000`, a 131 KB stream inflated to
-7.7 MB). The slow-path grace, the hole branch and the 2×RTO receiver evidence are in §4.3.
+**Loss estimate and RTO.** The RTO is the largest per-carrier `srtt + 4 × mdev` — the same
+SRTT + 4 × RTTVAR shape TCP uses — floored at TCP's 200 ms minimum, raised to at least
+`2 × fb_delay_us`, and capped at 500 ms; `fb_delay_us` is the measured application-ack lag
+after the carrier TCP ack. Before the first tunnel-level ack the RTO is held at 200 ms: the
+only sample available then is the carrier's own SRTT, which a shaped egress path can report
+as ~0.1 ms while the real feedback path is ~22 ms (measured: probe J, `rto_us=20000`, a
+131 KB stream inflated to 7.7 MB). The slow-path grace, the hole branch and the 2×RTO
+receiver evidence are in §4.3.
 A retransmit copy that has not been written for a whole RTO is retried even though it is
 still marked pending; a copy stuck behind a full queue otherwise leaves the hole until the
 peer's budget resets the stream (measured: probe F, one run in three). A path that is
@@ -967,8 +1141,9 @@ acked them while the peer's delivery queue (26–32 MB) held the contiguous uack
 3×RTO cut them to 15–81 and whole-run wire/app from 1.047 to 1.024, with probes J/K
 still 3/3 (`benches/README.md` §7). The snd_una gate applies to that slow path; the hole
 branch still starts at the handoff because the frame at the received ack is the one case a
-write clock cannot see. The carrier send buffer is 256 KiB; a BDP-sized buffer was
-attempted and broke the strict phase by closing the window (§15). In the final 40 MiB
+write clock cannot see. The carrier send buffer is derived from the sender window (§5.4);
+an earlier fixed BDP-sized buffer was attempted before the window existed and broke the
+strict phase by closing the window (§15). In the final 40 MiB
 n=4 runs (`20261106T001021`,
 `20261106T001824`) `retx_ppm` is 1,842 and 1,164 ppm, with `retx_hole` 10/4,
 `retx_slow` 9/8 and `retx_pathloss` 0; the n=1 run (`20261106T002627`) wrote zero
@@ -1222,7 +1397,7 @@ tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443
         profile=http-kal
         srcaddrs=10.0.0.10,10.0.0.11 portblock=40000-40063
         replay=8388608 tunnel_rate=0 max_inflate=2.0 hole_budget_ms=500
-        rx_reorder_bytes=262144 tx_retain_bytes=0 carrier_stall_ms=3000
+        rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=3000
 tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:7000
         nonce=00112233445566778899aabbccddeeff
         portblock=40000-40063 n=4 m=1 ...
@@ -1275,9 +1450,11 @@ random at tunnel creation).
   `id role state listen peer target n m streams`. `target` is `-` on a near tunnel;
   `streams` is the number of accepted public connections seen so far.
 - `peers` (read): per carrier, `id carrier sport peer uack rtt_us inflight state class
-  recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm`. Columns 1–15 keep
-  their old positions (the old `loss_ppm` is renamed `rx_lag_ppm` in place); `retx_ppm`
-  is appended.
+  recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps
+  cwnd_bytes snd_wnd`. Columns 1–15 keep their old positions (the old `loss_ppm` is
+  renamed `rx_lag_ppm` in place); `retx_ppm` is appended, then the auto window's three
+  inputs: the carrier's BBR rate sample, its `snd_cwnd` in bytes, and its advertised
+  `snd_wnd`.
 - `peers` (write, runtime actions, never part of the canonical config):
   `carrier <index> down` marks that carrier stalled/down and removes it from
   scheduling; `carrier <index> up` clears the forced-down flag and returns it
@@ -1341,8 +1518,8 @@ The order is
 
 ```
 role listen [peer] [target] [peer] n m dup profile keepalive drip_ms replay
-tunnel_rate max_inflate hole_budget_ms rx_reorder_bytes tx_retain_bytes
-carrier_stall_ms portblock [nonce] [srcaddrs]
+tunnel_rate max_inflate hole_budget_ms rx_reorder_bytes tx_window_bytes
+tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 ```
 
 `peer` is the near peer on a `role=near` line (always present) and the far source
@@ -1392,11 +1569,14 @@ therefore a **per-open-file line buffer**:
 - Defaults are rendered, not omitted, so the operator reads the effective value instead
   of having to know it. `portblock=lo-hi` is parsed, stored and rendered; `0-0` is the
   canonical spelling of "no per-tunnel block" (the module keeps one global block, §8.3).
-- `hole_budget_ms` accepts `1..60000` and `rx_reorder_bytes` accepts `1..268435456`.
-  An explicit `0` is refused with `-EINVAL`: a zero hole budget expires the first hole
-  and a zero reorder bound kills the first out-of-order frame, so such a line would
-  create a tunnel that is dead on arrival. Omitted keys keep their defaults (500 ms,
-  262144 bytes). Zero stays valid where it has a defined meaning (`tx_retain_bytes`,
+- `hole_budget_ms` accepts `1..60000`; `rx_reorder_bytes` accepts `1..268435456`; and
+  `tx_window_bytes` accepts `0..268435456`, where `0` is the auto default and an explicit
+  value must not exceed `rx_reorder_bytes` (the two are checked together after the line
+  is parsed, so either key order works). An explicit `0` for the first two is refused
+  with `-EINVAL`: a zero hole budget expires the first hole and a zero reorder bound
+  kills the first out-of-order frame, so such a line would create a tunnel that is dead
+  on arrival. Omitted keys keep their defaults (500 ms, 8388608 bytes, 0 = auto). Zero
+  stays valid where it has a defined meaning (`tx_window_bytes`, `tx_retain_bytes`,
   `tunnel_rate`, `replay`, `keepalive`, `drip_ms`).
 - The global `ports` file accepts `ports lo-hi` with `1 <= lo <= hi <= 65535`. A blank
   line and `ports 0-0` are no-ops: they leave the block unchanged. `ports 0-0` does not
@@ -1474,9 +1654,10 @@ work item, and `cancel_work_sync()` then waits for the sleeper forever: QEMU rep
 `INFO: task kworker blocked for more than 122 s` in exactly that stack. Delivery is
 therefore `MSG_DONTWAIT`, and the reset close runs on `system_dfl_wq` so it never shares
 a pool with the work it cancels. The public/target socket gets 1 MiB send/receive
-buffers; a carrier gets 256 KiB, which covers the 4×10 Mbit × 50 ms BDP and keeps the FBK
-from trailing the write by seconds. The default 16 KiB buffer is not the first thing the
-tunnel hits.
+buffers; a carrier's buffers are sized from its share of the sender window —
+`clamp((window_share + 2 × TBT_CHUNK_MAX) / 2, 128 KiB, 4 MiB)`, set with
+`SO_SNDBUFFORCE`/`SO_RCVBUFFORCE` (§5.4) — so the FBK cannot trail the write by more than
+the window allows. The default 16 KiB buffer is not the first thing the tunnel hits.
 
 **Why not receive-queue injection.** `docs/recvmsg-probe.md` measured that the
 application's descriptor is its *client* socket, a different object from the accepted
@@ -1502,11 +1683,12 @@ stops sending, capture drains nothing, the public socket's receive window closes
 
 The sizes are measured, not guessed:
 
-- `TBT_SQ_MAX` (64 KiB) is the capture backpressure line on the session TX queue; the hard
-  bound is `TBT_SQ_MAX + 4 × TBT_CHUNK_MAX` (about 96 KiB) so retransmit copies can enter a
-  full queue. Hitting the hard bound pauses capture (`struct tbt_stream.tx_paused`), closes
-  the public socket's window and blocks the app; it never kills. Capture resumes when the
-  queue falls to `TBT_SQ_MAX/2`. The `carrier <n> down`-style reset path is elsewhere.
+- The capture backpressure line is the session TX queue bound
+  `txq_max = tx_window + 8 × TBT_CHUNK_MAX` (§5.4), not a fixed 64 KiB; the old
+  96 KiB bound was calibrated for the 128 KiB window. Hitting it pauses capture
+  (`struct tbt_stream.tx_paused`), closes the public socket's window and blocks the app;
+  it never kills. Capture resumes when the queue falls to `txq_max/2`. The
+  `carrier <n> down`-style reset path is elsewhere.
 - `TBT_RX_RING_MAX` (64 MiB) is the ready-to-deliver queue. It must hold the echo a strict
   send-then-read application has not read: the application's own receive buffer does not
   autotune without reads, so this queue is the only place those bytes can wait. Probe I
@@ -1615,8 +1797,10 @@ because it runs under `pump_lock`, and one carrier's rx work is the single
 writer of that carrier's `rx_frames/rx_bytes`. Per-carrier TX counters
 (`data_frames`, `tx_frames`, `tx_bytes`, `payload_bytes_sent`, `retx_data`) are
 written only by `tbt_carrier_xmit()` under `pump_lock`; cross-context readers
-use `READ_ONCE()`. The split matters at the margins: `stall_paused_skips` is
-`atomic64_t` because every carrier's poll work writes it; `win_block`/`win_resume`
+use `READ_ONCE()`. The split matters at the margins: `stall_paused_skips`,
+`stall_idle_skips` and `stall_declared` are `atomic64_t` because every carrier's poll
+work writes them; `tx_window`, `rtt_mean_us`, `rttvar_us`, `rtt_max_us` and `txq_max` are
+pump-written `u32` read with `READ_ONCE()`; `win_block`/`win_resume`
 are plain `u64` because only the pump writes them; `ctl_lost` is atomic because the
 pump and the RST retry path both write it, while `ctl_retry`/`ctl_requeue`/
 `ctl_obsolete` are pump-only; `retx_frames`, `retx_bytes`, `retx_hole`, `retx_slow`,
@@ -1652,10 +1836,10 @@ cannot silently lose its atomicity again.
 | rx work | `rx_work_runs rx_drain_entries rx_drain_bytes rx_paused_skips rx_adopt_events rx_records carrier_write_space_runs poll_rescues` |
 | rx ready | `rx_ready_calls rx_reads rx_read_bytes rx_read_zero rx_resume rx_resume_busy rx_last_drained rx_proto rx_errs rx_last_err tx_submit_calls rx_delivered` |
 | dbg | `dbg rcv_nxt copied after qlen allocf over copyf hiwat pdead prun pmoved p_nocar p_down p_stop p_empty p_qlen` |
-| live | `live rxq rxp txq txp pub_state pub_wmem pub_una pub_nxt car_wmem car_nxt car_copied car_rcvbuf car_state car_stop car_ud car_ready car_ws txw_pend txw_busy` |
+| live | `live rxq rxp txq txp pub_state pub_wmem pub_una pub_nxt car_wmem car_nxt car_copied car_rcvbuf car_sndbuf car_state car_stop car_ud car_ready car_ws txw_pend txw_busy` |
 | tx wake | `txwake txwake_busy txwork` |
 | write space | `ws_calls` |
-| c3 | `c3 n up lost replaced spare_activated alloc_fail port_exhaust port_alloc_fail connect_fail join_dup join_bad join_nonce_reject join_src_reject fbk_tx fbk_rx retx_frames retx_bytes retain_drop retx_hole retx_slow retx_pathloss retx_other data_tx retx_data_ppm dup_bytes_ppm reorder_overflow reorder_max_depth ooo_bytes ooo_frames retain_bytes tx_ack rx_ack peer_paused fb_delay_us rto_us una_stall_us stall_paused_skips win_block win_resume` |
+| c3 | `c3 n up lost replaced spare_activated alloc_fail port_exhaust port_alloc_fail connect_fail join_dup join_bad join_nonce_reject join_src_reject fbk_tx fbk_rx retx_frames retx_bytes retain_drop retx_hole retx_slow retx_pathloss retx_other data_tx retx_data_ppm dup_bytes_ppm reorder_overflow reorder_max_depth ooo_bytes ooo_frames retain_bytes tx_ack rx_ack peer_paused fb_delay_us rto_us una_stall_us stall_paused_skips stall_idle_skips stall_declared tx_window rtt_mean_us rttvar_us rtt_max_us txq_max win_block win_resume pump_hw_armed pump_hw_fired` |
 | ctl | `ctl ctl_lost ctl_retry ctl_requeue ctl_obsolete ctl_queued` |
 | streams | `streams streams_active n_streams n_pending` |
 | c6 | `c6 holes_declared holes_repaired holes_unrecoverable rx_max_stall_us hole_checks gate_fail depth_fail time_fail` |
@@ -1669,8 +1853,14 @@ copies the carrier accepted, `data_tx` counts every DATA record accepted (copies
 included), and `dup_tx` counts duplicate copies; the two subtraction terms are why the
 ratio is over unique records. `retx_hole`/`retx_slow`/`retx_pathloss`/`retx_other` split
 those copies by the branch that queued them (§4.3). `stall_paused_skips` counts a carrier
-poll that deferred the stall decision for delivery backpressure; `win_block` counts a DATA
-admission refused by the peer-window gate and `win_resume` the transition back (§5.5).
+poll that restarted the stall clock for delivery backpressure or a closed peer window;
+`stall_idle_skips` counts one that found nothing unacked (`snd_una == snd_nxt`), and
+`stall_declared` counts the polls that actually killed a carrier. `tx_window` is the
+effective sender window, `rtt_mean_us` the delivery-weighted mean SRTT, `rttvar_us` the
+largest carrier `mdev_us` (the jitter term), `rtt_max_us` the largest carrier SRTT (a
+distribution fact), and `txq_max` the frame-queue bound derived from it (§5.4).
+`win_block` counts a DATA admission refused by the peer-window gate and `win_resume` the
+transition back (§5.5).
 `peer_paused` is the FBK `rx_state=2` mirror, `fb_delay_us` the application-ack lag EWMA,
 `rto_us` the last RTO the timer used, and `una_stall_us` the oldest `snd_una` progress at
 the last retransmit pass. `poll_rescues` is the 50 ms liveness net's evidence counter.
@@ -1689,7 +1879,9 @@ carrier-start failure total and still includes both port cases;
 deepest out-of-order backlog ever held, in frames; `retain_drop` counts frames released
 by a configured `tx_retain_bytes` cap; `tx_ack`/`rx_ack` are the two directions'
 contiguous byte offsets. `peers` additionally exposes per carrier `recv_cnt`,
-`rx_lag_ppm`, `minrtt_us`, `tx_frames`, `tx_bytes`, `dropped` and `retx_ppm`;
+`rx_lag_ppm`, `minrtt_us`, `tx_frames`, `tx_bytes`, `dropped`, `retx_ppm`,
+`delivery_rate_bps`, `cwnd_bytes` and `snd_wnd`; the last three are the auto window's
+inputs, printed next to the window so a regression can be read without a debugger;
 `rx_lag_ppm` counts frames the receiver has not yet accounted for below the sender's
 write high-water (in-flight included, not packet loss), and `retx_ppm` is that carrier's
 DATA copies over its unique DATA records (`data_frames - retx_data`). The `reconcile`
@@ -1711,10 +1903,10 @@ with no written copy then kills the stream rather than leaving the peer half-ope
 `ctl_queued` is the live control-queue depth against `TBT_CTL_QUEUE_MAX` (256); a producer
 that reaches it gets `-ENOSPC` and retries after the pump drains.
 
-The write-space contract of §5.5 keeps `pump_hw_armed, pump_hw_disarmed, pump_hw_fired`
-as plain fields (not rendered); the rendered key is `ws_calls` (every `sk_write_space`
-entry), and the live snapshot renders `car_ws` (`snap_car_ws_ok`), whether the carrier's
-write space was free at the last snapshot.
+The write-space contract of §5.5 keeps `pump_hw_disarmed` as a plain field (not rendered);
+`pump_hw_armed` and `pump_hw_fired` are rendered on the `c3` line. The rendered key is
+also `ws_calls` (every `sk_write_space` entry), and the live snapshot renders `car_ws`
+(`snap_car_ws_ok`), whether the carrier's write space was free at the last snapshot.
 
 C4/C5/C6 add: `dup_tx, dup_used, dup_suppressed, dup_same_path, inflate_ppm, dup_bytes,
 holes_declared, holes_repaired, holes_unrecoverable,
@@ -1811,7 +2003,8 @@ s->sk->sk_sndtimeo = 1000 ms              /* TBT_CONNECT_TIMEOUT_MS */
 kernel_connect(s, peer, peer_port, 0)     /* blocking in the accept worker / config ctx */
 tcp_sk(s->sk)->nonagle = TCP_NAGLE_OFF
 tbt_carrier_install_proto(s->sk)          /* sk->sk_prot = &tbt_tcp_prot (§9.2) */
-SO_SNDBUF = SO_RCVBUF = 256 KiB
+SO_SNDBUF = SO_RCVBUF = tbt_car_sockbuf(sess)  /* share of the window (§5.4) */
+                                          /* via SO_*BUFFORCE, plain fallback */
 sk_user_data = c; sk_data_ready/sk_write_space/sk_state_change = tbt_car_*
 ```
 
@@ -1967,13 +2160,15 @@ Implemented in C3, per session:
 1. Each carrier runs a 50 ms `w_poll`. It re-arms a queue that has work (the C2 liveness
    net), and it is also the health check: a socket whose `sk_state` is not
    `TCP_ESTABLISHED`, or data that is **sent but never acknowledged** (`snd_una` static
-   for `carrier_stall_ms`, default 3000 ms), is marked lost once (`carrier_lost++`).
-   Backpressure is not a stall: when `snd_nxt` has not moved since the previous poll and
-   `sk_wmem_queued > 0`, our own socket is blocked on the peer's window, so the ack clock
-   slides instead of expiring. Without that distinction a 9 MB stream whose peer stopped
-   reading declared every carrier dead and stormed replacements (measured: 191
-   replacements, 15 far-side `join_dup`, a 32 s receiver hole). A provisional carrier that
-   has not presented a HELLO within 5 s is retired.
+   while `snd_nxt` is ahead, for `carrier_stall_ms`, default 3000 ms), is marked lost once
+   (`carrier_lost++`). Backpressure is not a stall: the clock runs only while
+   `snd_una != snd_nxt`, and an idle carrier, a delivery pause or a closed peer window
+   (`snd_wnd == 0`) restarts it (§5.5). The old `sk_wmem_queued > 0` test could not tell
+   the two apart, because it counts TCP's own retransmission queue; without the
+   distinction a 9 MB stream whose peer stopped reading declared every carrier dead and
+   stormed replacements (measured: 191 replacements, 15 far-side `join_dup`, a 32 s
+   receiver hole). A provisional carrier that has not presented a HELLO within 5 s is
+   retired.
 2. `tbt_carrier_lost()` also runs on a carrier write error and on `carrier <n> down`. It
    excludes the path from scheduling immediately and marks every retained frame last sent
    on it overdue, so the normal scheduler re-sends them on the live paths.
@@ -2107,9 +2302,9 @@ covers; no known leak remains but a long-soak kref/RCU audit is still worthwhile
 
 | # | Risk | Mitigation |
 |---|---|---|
-| R1 | **Duplex backpressure deadlock**: a single-threaded application sends a full volume before reading, while the echo's return path fills | Capture and transmit use opposite queues; the queue caps pause a direction instead of dropping; the strict 4 MiB send-then-read case is the acceptance test (T2). The sender's window is the peer's *received* offset, never its delivered offset: a delivered window was measured deadlocking this case in C3 (§15). The strict volume must still fit the application's own socket buffers; 4 MiB does. |
+| R1 | **Duplex backpressure deadlock**: a single-threaded application sends a full volume before reading, while the echo's return path fills | Capture and transmit use opposite queues; the queue caps pause a direction instead of dropping; the strict 4 MiB send-then-read case is the acceptance test (T2). The window base is the peer's contiguous received offset (the TX code's delivered offset), never the application's read cursor: a window on that cursor was measured deadlocking this case in C3 (§15). The 64 MiB ready queue and a window of at least 1 MiB (§5.4) are what make the received-offset window safe. The strict volume must still fit the application's own socket buffers; 4 MiB does. |
 | R2 | Byte exactness vs hole repair | Reset beats corruption (§4.6 B); `holes_unrecoverable` monitored. |
-| R3 | Ring under-protects fast links | `replay` is a configured byte budget (8 MiB default, 64 ms at 1 Gbps); a faster path must raise it. There is no automatic BDP check; T8 measures the held bytes. |
+| R3 | Ring under-protects fast links | `replay` is a configured byte budget (8 MiB default, 64 ms at 1 Gbps); a faster path must raise it. The ring has no automatic BDP check; T8 measures the held bytes. |
 | R4 | Port starvation | Reserved block + one global bitmap + 200 ms retry; `port_exhaust`/`port_alloc_fail` make the reason visible; T9. |
 | R5 | sid collision | Random prefix + monotonic per session; the allocator skips a live/tombstone sid, and a repeated OPEN for a live stream is idempotent. |
 | R6 | **QoS classifier degrades us** if framing looks abnormal | Binary body framing, canonical headers, 5000 ms cadence, drip spares, T13/T14. Recovering from a *wrong* classification is impossible; this is the top deployment risk, not a correctness risk — and §17 exists to find out cheaply (§16). |
@@ -2123,7 +2318,7 @@ covers; no known leak remains but a long-soak kref/RCU audit is still worthwhile
 | R13 | `sk_prot` override + BPF sockops interactions | Refuse bind if `sock_flag(SOCK_BPF_ATTACHED)`; carriers are module-created so no foreign BPF. No repair mode is ever set. |
 | R14 | `CONFIG_DEBUG_INFO_BTF_MODULES=y` requires pahole | Document in build; DKMS `MAKE` already inherits kernel config. |
 | R15 | Manjaro headers package name | Build doc: `sudo pacman -S linux72-headers` (or matching `linux-*-headers`), then `make`. |
-| R16 | Memory at 10 Gbps | `replay` and `tx_retain_bytes` bound the retention; the 64 MiB delivery ring is the largest fixed cost and costs about 2× its payload in physical memory. T8 measures the peak. |
+| R16 | Memory at 10 Gbps | `tx_window_bytes` bounds retention and the frame queue (`txq_max = tx_window + 8 chunks`) and sizes the carrier buffers from the same number; `rx_reorder_bytes` bounds the reorder tree per stream and per session; the 64 MiB delivery ring is the largest fixed cost and costs about 2× its payload in physical memory. Per session the bound is about 3× window + `rx_reorder_bytes` + 64 MiB per stream (§5.4). T8 measures the peak. |
 | R17 | Jitter adds RTT | The reorder tree is consulted only past a gap; the in-order path adds zero delay (T1 asserts). |
 | R18 | `inet_csk_reset_xmit_timer` etc. drift | Not used; stock timers only. |
 
@@ -2148,8 +2343,9 @@ controls do not apply; these replace them.
   tunnel maps one target port (§19 Q6 covers lifting this).
 - **Resource limits**: `max_tunnels` (new ids over the cap return `-ENOSPC`) and
   `max_carriers` (`n + m` over the cap returns `-EINVAL`) are enforced before allocation;
-  per-tunnel `replay`/`tx_retain_bytes` bound the buffers. A hostile peer can exhaust one
-  tunnel's buffers but not the host.
+  per-tunnel `replay`, `tx_retain_bytes`, `tx_window_bytes` and `rx_reorder_bytes` bound
+  the buffers and the reorder trees. A hostile peer can exhaust one tunnel's buffers but
+  not the host.
 - **Carrier integrity**: HELLO's 128-bit nonce, the far tunnel's listener and the optional
   configured peer address prevent a third party from injecting into a session; a wrong
   nonce poisons the carrier and counts `join_bad` or `join_nonce_reject`. There is no
@@ -2181,10 +2377,13 @@ controls do not apply; these replace them.
 8. A session carries up to `TBT_STREAMS_MAX` (128) concurrent streams. The near side
    allocates each sid before attaching `sk_data_ready`; the far side adopts an unknown
    sid from OPEN and drops DATA/FIN/RST for an unknown sid.
-9. A DATA frame is written only inside the send window
-   `seq + len <= tx_ack + rx_reorder_bytes/2`, where `tx_ack` is the peer's contiguous
-   *received* offset. A conforming peer therefore cannot make the reorder tree exceed
-   `rx_reorder_bytes`; a non-conforming one is killed with `TBT_ST_REORDER`.
+9. A DATA frame is written only inside the send window `seq + len <= tx_ack + tx_window`,
+   where `tx_ack` is the peer's contiguous delivered (received) offset and `tx_window` is
+   the configured value or the BBR-derived auto value, capped at `rx_reorder_bytes` (the
+   auto value's 1 MiB floor is itself subject to that cap). A conforming peer therefore
+   cannot make the reorder tree exceed `rx_reorder_bytes`; a non-conforming one is killed
+   with `TBT_ST_REORDER`.
+   The cap is a configuration contract until a WINDOW credit exists (§5.4).
 10. A retained frame is freed only after the peer's received offset passes its end, and a
     retransmit is a byte-identical copy of the retained frame (same seq, same payload).
 11. A duplicate copy is byte-identical to its primary and never shares a path with any
@@ -2267,14 +2466,16 @@ Each commit leaves a testable system.
    ended with `rx_proto=0`, `rx_errs=0`, `carrier_err=0`, `carrier_short=0`,
    `reorder_overflow=0`, and `tx_ack` equal to the bytes the application sent.
 
-   **C3 measurement that changed the design:** a *delivered*-offset send window deadlocks
-   the strict send-then-read pattern. With 64 MiB, the application's receive buffer filled
-   at 2.7 MiB, the echo path stopped 128 KiB later, and neither direction could advance;
-   both TX queues sat full with a 15-frame hole waiting. The ack was therefore changed to
-   the contiguous *received* offset, which bounds the reorder tree without coupling the two
-   directions' delivery progress. The strict pattern's volume must still fit the
-   application's own socket buffers (4 MiB, as in C2); a larger volume cannot complete by
-   construction, tunnel or no tunnel.
+   **C3 measurement that changed the design:** a send window based on the application's
+   *read* cursor deadlocks the strict send-then-read pattern. With 64 MiB, the
+   application's receive buffer filled at 2.7 MiB, the echo path stopped 128 KiB later,
+   and neither direction could advance; both TX queues sat full with a 15-frame hole
+   waiting. The ack was therefore changed to the contiguous *received* offset — the number
+   the TX code calls the delivered offset — which bounds the reorder tree without coupling
+   the two directions' delivery progress. The window that then sat on that base was still
+   `rx_reorder_bytes / 2`, 128 KiB, the cap §5.4 removes. The strict pattern's volume must
+   still fit the application's own socket buffers (4 MiB, as in C2); a larger volume
+   cannot complete by construction, tunnel or no tunnel.
 
    **C4 acceptance (three consecutive runs, same harness):** probe E ran `n=4 m=2`. Before
    the transfer both spares were `spare` and warm; `carrier 2 down` promoted spare 4 with
@@ -2342,17 +2543,21 @@ Each commit leaves a testable system.
    sized to clamp(2 × BDP, 64 KiB, 1 MiB) at dial/accept and re-applied on >25% RTT
    movement, using tunnel_rate × RTT (or the carrier TCP's cwnd × mss when the tunnel rate
    is 0). Probe I's control strict phase failed immediately (rc=2) with the initial 64 KiB
-   buffer, before any rate could raise it. The final carrier buffer is 256 KiB: 1 MiB at
-   10 Mbit held the uack 2–4 s behind the write, past the RTO, while 256 KiB bounds the
-   delay to 200–400 ms. No kernel warnings or "blocked for more than" appeared.
+   buffer, before any rate could raise it. That attempt sized the *buffer* while the
+   sender window was still 128 KiB, so the extra buffer only held unacked bytes: 1 MiB at
+   10 Mbit pushed the uack 2–4 s behind the write, past the RTO. The current design sizes
+   the window first (§5.4) and the buffer from the window's per-carrier share, so
+   in-flight is bounded and a larger buffer adds no queueing delay. No kernel warnings or
+   "blocked for more than" appeared.
 
    **Probe J (1% loss + 2% reorder on every carrier):** 4 MiB completes byte-exact in both
    phases with `holes_repaired=65` and no warnings, once the probe has a target on
    `TARGET_PORT3`. The shared probe J starts no `nc` and relies on probe I's; running J
    alone returns rc=2 by construction, not from a module stall.
 
-   **The 64 KiB figure in the report is `TBT_SQ_MAX`, the capture line on
-   `struct tbt_session.tx_queued`; the hard bound is `TBT_SQ_MAX + 4 × TBT_CHUNK_MAX`.**
+   **The 64 KiB figure in the report was `TBT_SQ_MAX`, the old fixed capture line on
+   `struct tbt_session.tx_queued`; the bound is now
+   `txq_max = tx_window + 8 × TBT_CHUNK_MAX` (§5.4).**
    `tbt_tx_submit()` pauses capture
    (`struct tbt_stream.tx_paused`), closes the public socket's window and returns a short
    count; it never kills. The reset came from `tbt_tx_stall_check()` (no `tx_ack` progress
@@ -2557,8 +2762,10 @@ belief is wrong or the classifier is SNI-based, and the design must be told (§1
    REDIRECT`), and if so, is `nft`'s `redirect to :port` equally acceptable? Deciding this
    decides whether REDIRECT is a first-class deployment mode or an operator workaround;
    the module contains no `nf_hook_ops` code today (§8.6).
-2. **`hole_budget_ms` (500 ms) and the 1 s replay grace** are guesses against a loss
-   profile we have not measured. Need a real loss-burst distribution from the user's ISP.
+2. **`hole_budget_ms` is now sized from the RTO** (2–3 × RTO plus one one-way delay,
+   §5.4); the 500 ms default suits low-RTT paths, and a 218 ms path needs about
+   1000–1500 ms. The 1 s replay grace is still a guess against a loss profile we have not
+   measured. Need a real loss-burst distribution from the user's ISP.
 3. **What does the ISP's classifier actually key on?** §16 lists the plausible dimensions;
    §17 tells the user which apply to their line. Until that runs, `http-kal`'s value is a
    hypothesis, and T13 only proves *parsability*, not the ISP's acceptance criterion. This

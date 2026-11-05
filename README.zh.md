@@ -25,11 +25,13 @@
 超过 `hole_budget_ms` 或 `rx_reorder_bytes` 仍补不上的空洞计入 `holes_unrecoverable`；
 重排溢出导致的重置计入 `gaps_total`；这两种情况都会重置流。
 
-背压不是丢包。只有在 `carrier_stall_ms` 内没有任何确认进展时，载体才会被判为失效；
-任一侧处于暂停状态时，这个计时器会被抑制（`stall_paused_skips`）。DATA 的准入在
+背压不是丢包。只有存在未确认字节、且 `carrier_stall_ms` 内没有任何确认进展时，载体才会被判为失效；
+空闲载体、投递暂停和对端窗口关闭都会重置这个计时器（`stall_idle_skips`、`stall_paused_skips`）。DATA 的准入在
 对端通告窗口处停止，因此载体 TCP 发送缓冲里最多只有一个窗口的数据
 （`win_block`/`win_resume`）；控制帧不受这个门限约束。窗口检查读取的是 `snd_wnd`，
-所以它只是一个启发式判断；窗口未知时只放行一个 chunk。被钉住的控制帧在第一次
+所以它只是一个启发式判断；窗口未知时只放行一个 chunk。隧道自己的发送窗口按各载体的
+BBR 速率样本自动调整，下限 1 MiB，上限为 `rx_reorder_bytes`；`tx_window_bytes=`
+可以固定它。被钉住的控制帧在第一次
 `-EAGAIN` 时不会被丢弃，而是重试并重新入队；即使队列里没有负载字节，泵也会因
 `ctl_queued` 被唤醒。
 
@@ -135,7 +137,7 @@ nonce。没有 `nonce=` 时，远端会采纳第一条 HELLO 的 nonce；如果�
 | --- | --- |
 | `config` | 规范形式的配置；隧道行、`del`、`flush`、`carrier ...`、`session ...` 动作都写到这里 |
 | `tunnels` | 每条隧道一行：角色、状态、listen/peer/target、n、m、streams |
-| `peers` | 每个载体槽一行，共 16 列（见下） |
+| `peers` | 每个载体槽一行，共 19 列（见下） |
 | `ports` | 全局源端口段，以及它是否已经配置 |
 | `stats` | 前三行是 `debug_loss=<0\|1>`、空洞与流总数，之后每条隧道一个计数器块（见下） |
 | `http` | 仅调试（`debug>=2`）：近端 0 号载体最近一次**发出的** HTTP 请求头块（只有头部），用来对照解析器检查容器；不是收到的请求、不是响应、也不是实时流 |
@@ -167,7 +169,8 @@ nonce。没有 `nonce=` 时，远端会采纳第一条 HELLO 的 nonce；如果�
 | `tunnel_rate` | `0` | 字节/秒上限，`0` 表示不设 |
 | `max_inflate` | `2.000` | 重复膨胀上限 |
 | `hole_budget_ms` | `500` | 空洞允许存在的时间，毫秒，`1..60000`；`0` 会被拒绝 |
-| `rx_reorder_bytes` | `262144` | 接收端重排缓冲字节数，`1..268435456`；`0` 会被拒绝 |
+| `rx_reorder_bytes` | `8388608` | 接收端重排预算，字节，`1..268435456`；同时约束每条流的重排树和全会话总和；`0` 会被拒绝 |
+| `tx_window_bytes` | `0` | 发送端窗口字节数；`0` 表示按各载体的 BBR 样本自动推导；显式值不得大于 `rx_reorder_bytes` |
 | `tx_retain_bytes` | `0` | 发送端保留字节数，`0` 表示不限 |
 | `carrier_stall_ms` | `3000` | 多久没有数据就判定载体失效，毫秒 |
 | `profile` | `http-kal` | `http-kal`、`http-kal-drip` 或 `raw` |
@@ -206,7 +209,7 @@ HELLO 的源地址会成为会话锚：之后来自其他地址的 HELLO 在检�
 
 ### `peers`（读写）
 
-每个载体槽一行，共 16 列：
+每个载体槽一行，共 19 列：
 
 | 列 | 含义 |
 | --- | --- |
@@ -226,6 +229,9 @@ HELLO 的源地址会成为会话锚：之后来自其他地址的 HELLO 在检�
 | `tx_bytes` | 该载体写出的字节数，含头部 |
 | `dropped` | 被 `drop_ppm` 注入器丢弃的记录数（仅调试） |
 | `retx_ppm` | 每百万条唯一 DATA 记录中的重传副本数，这才是丢包的代理指标 |
+| `delivery_rate_bps` | 该载体的 BBR 速率样本，字节/秒（自动窗口的输入） |
+| `cwnd_bytes` | 该载体 TCP 的 `snd_cwnd`，字节（仅作交叉检查，不是输入） |
+| `snd_wnd` | 对端通告窗口，字节 |
 
 写入 `carrier <index> down|up|drop_ppm <n>` 会对所有拥有该载体序号的运行中隧道生效。
 
@@ -249,6 +255,7 @@ HELLO 的源地址会成为会话锚：之后来自其他地址的 HELLO 在检�
 | `join_src_reject`、`join_nonce_reject`、`join_bad`、`join_dup` | HELLO 被锚、首条 HELLO 的来源、nonce 或已占用槽位拒绝 |
 | `ctl_lost`、`ctl_retry`、`ctl_requeue`、`ctl_obsolete`、`ctl_queued` | 被钉住的控制帧：重试上限后的显式丢失、重试、重新入队、过期代、当前队列深度 |
 | `stall_paused_skips`、`win_block`、`win_resume` | 暂停时推迟失效判定 / DATA 在对端窗口门限处被挡住 / 放行 |
+| `stall_idle_skips`、`stall_declared`、`tx_window`、`rtt_mean_us`、`rttvar_us`、`rtt_max_us`、`txq_max` | 因没有未确认字节而重置失效计时 / 失效计时真正宣告载体丢失 / 生效的发送窗口及其输入 / 帧队列上限 |
 | `holes_declared`、`holes_repaired`、`holes_unrecoverable`、`rx_max_stall_us` | 空洞统计 |
 | `dup_tx`、`dup_used`、`dup_suppressed`、`inflate_ppm` | 重复发送 |
 | `reconcile live_*`/`retired_*` | 活跃 + 已退休等于会话总数（字节、DATA、重传） |
@@ -341,6 +348,17 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   （`retx_ppm` 1,842、`wire/app` 1.0146），另一次是 11.37 Mbit/s。最终
   `n=1`/`n=8`/`n=16` 分别是 3.11/22.36/32.75 Mbit/s；完整矩阵在
   `review/final-bench/`。
+- **发送窗口受重排预算封顶。** `tx_window_bytes=0` 会按各载体的 BBR 样本推导窗口，
+  但永远不会超过 `rx_reorder_bytes`；如果把 `rx_reorder_bytes` 配得低于路径的
+  BDP（RTT × 带宽），吞吐仍会被它封住。推导值是目标而非保证：它按
+  `k × mean BDP` 计算，其中 `k =（RTO + 单向延迟 + 反馈延迟）/ mean SRTT`
+  （实测路径上约 2–5）；它不是最大 RTT 乘积，也不是各载体 BDP 之和。重排预算
+  必须至少覆盖这个 `k × mean BDP`，因为重排树的峰值占用就是整个窗口。两端应使用
+  相同的 `rx_reorder_bytes`，因为接收端的预算不在线上传输：发送端只能用自己的
+  配置值给自己封顶。将来由 WINDOW 帧通告接收信用后，这个配置契约就不再需要。
+- **重排树和就绪队列是两笔不同的开销。** 乱序到达的帧等待在隧道的重排树里
+  （`rx_reorder_bytes`，默认 8 MiB，全会话共享）；已按序到达但应用尚未读取的字节
+  等待在 64 MiB 的就绪队列里。发送窗口只需要装下前者；后者是普通的背压。
 - **客户机 CPU 是瓶颈。** 最新 QEMU 运行中 `kworker` 约占一个 vCPU 的 99%。
   上面的绝对 Mbit/s 是这个客户机给出的下限，不是线路的属性。
 - **接收环的物理内存约为负载的两倍。** `TBT_RX_RING_MAX` 是每条流 64 MiB，

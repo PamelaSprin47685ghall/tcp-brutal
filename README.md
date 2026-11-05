@@ -35,14 +35,17 @@ overran `rx_reorder_bytes`; `gaps_total` counts reorder overflows. Either one
 resets the stream.
 
 Backpressure is not loss. A carrier is declared lost only after
-`carrier_stall_ms` without ack progress, and that timer is suppressed while
-either side is paused (`stall_paused_skips`). DATA admission stops at the peer's
-advertised window, so at most one window sits in the carrier's TCP send buffer
+`carrier_stall_ms` of unacked bytes with no ack progress; an idle carrier, a
+delivery pause and a closed peer window restart that clock (`stall_idle_skips`,
+`stall_paused_skips`). DATA admission stops at the peer's advertised window, so
+at most one window sits in the carrier's TCP send buffer
 (`win_block`/`win_resume`); control frames bypass that gate. The window check
 reads `snd_wnd`, so it is a heuristic, and an unknown window admits one chunk.
-Pinned control frames are retried and requeued instead of being dropped at the
-first `-EAGAIN`, and the pump wakes on `ctl_queued` even when no payload bytes
-are queued.
+The tunnel's own sender window auto-sizes from the carriers' BBR rate samples,
+with a 1 MiB floor and `rx_reorder_bytes` as the ceiling; `tx_window_bytes=`
+pins it. Pinned control frames are retried and requeued instead of being
+dropped at the first `-EAGAIN`, and the pump wakes on `ctl_queued` even when no
+payload bytes are queued.
 
 ## Requirements
 
@@ -158,7 +161,7 @@ program, and `echo`/`cat` are the whole interface.
 | --- | --- |
 | `config` | the canonical configuration; write tunnel lines, `del`, `flush`, `carrier ...`, and `session ...` actions here |
 | `tunnels` | one line per tunnel: role, state, listen/peer/target, n, m, streams |
-| `peers` | one line per carrier slot, 16 columns (below) |
+| `peers` | one line per carrier slot, 19 columns (below) |
 | `ports` | the global source port block and whether it is configured |
 | `stats` | `debug_loss=<0\|1>`, gap and stream totals, then one counter block per tunnel (below) |
 | `http` | debug only (`debug>=2`): the last **emitted** HTTP request header block from the near side's carrier 0 (headers only), for checking the container against a parser; not a received request, a response, or a live stream |
@@ -192,7 +195,8 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `tunnel_rate` | `0` | Bytes/s ceiling, `0` = unset |
 | `max_inflate` | `2.000` | Duplication inflation ceiling |
 | `hole_budget_ms` | `500` | How long a hole may stay open, `1..60000` ms; `0` is refused |
-| `rx_reorder_bytes` | `262144` | Receiver reorder buffer bytes, `1..268435456`; `0` is refused |
+| `rx_reorder_bytes` | `8388608` | Receiver reorder budget, bytes, `1..268435456`; bounds each stream's reorder tree and the session-wide sum; `0` is refused |
+| `tx_window_bytes` | `0` | Sender window bytes; `0` = auto from the carriers' BBR samples; an explicit value must not exceed `rx_reorder_bytes` |
 | `tx_retain_bytes` | `0` | Sender retention bytes, `0` = unlimited |
 | `carrier_stall_ms` | `3000` | Silence before a carrier is declared lost |
 | `profile` | `http-kal` | `http-kal`, `http-kal-drip`, or `raw` |
@@ -237,7 +241,7 @@ returned even when it is large; the snapshot is rebuilt after each write.
 
 ### `peers` (read/write)
 
-One line per carrier slot, sixteen columns:
+One line per carrier slot, nineteen columns:
 
 | Column | Meaning |
 | --- | --- |
@@ -257,6 +261,9 @@ One line per carrier slot, sixteen columns:
 | `tx_bytes` | carrier bytes written, headers included |
 | `dropped` | records dropped by the `drop_ppm` injector (debug only) |
 | `retx_ppm` | retransmitted DATA copies per million unique DATA records; this is the loss proxy |
+| `delivery_rate_bps` | the carrier's BBR rate sample, bytes/s (the auto window's input) |
+| `cwnd_bytes` | the carrier TCP's `snd_cwnd` in bytes (a cross-check, not an input) |
+| `snd_wnd` | the peer's advertised window, bytes |
 
 Writing `carrier <index> down|up|drop_ppm <n>` acts on every running tunnel
 that has that carrier index.
@@ -283,6 +290,7 @@ snapshot, `txwake`, `c3` (carriers, joins, retransmission, reorder, gates),
 | `join_src_reject`, `join_nonce_reject`, `join_bad`, `join_dup` | HELLO refused by the anchor, by the first-HELLO source, by the nonce, or by an occupied slot |
 | `ctl_lost`, `ctl_retry`, `ctl_requeue`, `ctl_obsolete`, `ctl_queued` | pinned control frames: explicit loss after the retry bound, retries, requeues, obsolete generation, live depth |
 | `stall_paused_skips`, `win_block`, `win_resume` | stall decision deferred while paused / DATA held at the peer-window gate / released |
+| `stall_idle_skips`, `stall_declared`, `tx_window`, `rtt_mean_us`, `rttvar_us`, `rtt_max_us`, `txq_max` | stall clock restarted because nothing was unacked / stall clock killed a carrier / effective sender window and its inputs / frame-queue bound |
 | `holes_declared`, `holes_repaired`, `holes_unrecoverable`, `rx_max_stall_us` | hole accounting |
 | `dup_tx`, `dup_used`, `dup_suppressed`, `inflate_ppm` | duplication |
 | `reconcile live_*`/`retired_*` | live + retired equals the session total, for bytes, DATA and retransmits |
@@ -388,6 +396,22 @@ real line.
   module measured 8.38 Mbit/s (`retx_ppm` 1,842, `wire/app` 1.0146) and another
   11.37 Mbit/s. The final `n=1`/`n=8`/`n=16` rows are 3.11/22.36/32.75 Mbit/s;
   the full matrix is in `review/final-bench/`.
+- **The sender window is capped by the reorder budget.** `tx_window_bytes=0`
+  derives the window from the carriers' BBR samples, but it never exceeds
+  `rx_reorder_bytes`; a configured `rx_reorder_bytes` below the path's BDP
+  (RTT × bandwidth) still caps throughput. The derived value is a target, not a
+  guarantee: it is `k × mean BDP`, with `k = (RTO + one-way + feedback delay) /
+  mean SRTT` (about 2–5 on measured paths), not a max-RTT product or a sum of
+  per-carrier BDPs. The reorder budget must be at least that `k × mean BDP`,
+  because the peak tree occupancy is the whole window. Both ends should use the
+  same `rx_reorder_bytes`, because the receiver's budget is not on the wire: the
+  sender caps itself with its own configured value. A future WINDOW credit would
+  remove that configuration contract.
+- **The reorder tree and the ready queue are different costs.** A frame that
+  arrives out of order waits in the tunnel's reorder tree (`rx_reorder_bytes`,
+  8 MiB default, shared by the session); bytes that arrived in order but that
+  the application has not read wait in the 64 MiB ready queue. Only the first
+  is what the sender window must fit; the second is ordinary backpressure.
 - **Guest CPU is the bottleneck.** In the latest QEMU runs `kworker` used about
   99% of one vCPU. The absolute Mbit/s above are a floor set by this guest, not
   a property of the line.
