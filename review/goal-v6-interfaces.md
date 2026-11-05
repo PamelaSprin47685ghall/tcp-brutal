@@ -364,6 +364,8 @@ void tbt_crypto_wipe(struct tbt_crypto_ctx *c);
 #endif /* _TBT_CRYPTO_H */
 ```
 
+实现可在同一头文件增加 `struct tbt_crypto_pair { struct tbt_crypto_ctx tx, rx; }` 与 pair 初始化/擦除便利函数（C2 `33238ca` 已加）；这是 session 层便利结构，不改变上述函数契约、不改 wire。pair 必须保证 tx/rx nonce 不同；等 nonce 直接拒绝。
+
 实现选择：**ChaCha8，64-bit counter + 64-bit nonce**（Bernstein eSTREAM 布局），public-domain 参考或 MIT tiny-chacha 改写均可；KAT 必须与 `review/chacha8-reference.md` §7 一致。若用 tiny-chacha 的 96-bit IV/32-bit counter，必须把 8B nonce 映射为 `00 00 00 00 || nonce` 并把 counter 扩到 64 位；32-bit counter 在 1G 下约 37 分钟回绕，**不允许**直接上线。
 
 ### 2.2 body-only 的确切范围
@@ -627,7 +629,7 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 | 通过 | TC1 + 256-bit KAT 逐字节；body-only（HTTP 头/FEC 头明文）；默认开、`crypto=off` 可关；HND0 MB/s/cycles/byte 记录；1G 单核占用 ≤25% |
 | 失败 | KAT 不符、头被加密、无法关闭、CPU 超预算 |
 
-**T3 现状（未完成）**：C `w-crypto 43bbbff` 已补 per-direction nonce（各自 HELLO +26、tx/rx ctx），KAT 46/46，`make check`/`host-test-san` 绿；HND0 优化版 bench 由 `microbench2` 用 43bbbff 跑。T3 仍等 HND0 bench + rebase；不合并。
+**T3 现状（未完成）**：C2 `w-crypto 33238ca` 加 `tbt_crypto_pair {tx,rx}`、per-direction nonce、等 nonce 拒绝、HELLO 双向；KAT 55/55，`make check`/`host-test`/`host-test-san` 绿；bench 1207–1221 MB/s、4.01–4.06 c/B、1G 10.2–10.4% 单核。HND0 优化版 bench 仍等 `microbench2`；T3 未完成（等 bench + B 后 rebase）；不合并。
 
 ### G4 — T4 SC-LDPC BEC 容量门（D）
 
@@ -638,7 +640,7 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 | 通过 | p=30/40/50 对应 rate ≤0.70/0.60/0.50；恢复 ≥99.9%（500 trials 的 0 失败或置信区间下界达标）；codec ≥125 MB/s（encode/decode，HND0 单/双核）；块延迟/内存记录 |
 | 失败 | recovery 0、systematic-only 作弊、<125 MB/s、无置信区间 |
 
-**G4 现状（`sclc2`，HND0 无可行点，2026-11-06）**：HND0（QEMU 2 vCPU，taskset 0）实测 decode **0.32–1.99 MB/s**，全部低于 app 4.215 MB/s（最好 47%）；2 线程最好 1.96；encode **2.65–9.54**，低于 wire 需求 8.4–14.1。恢复率不是障碍：p30 rate0.50、p40 rate0.40 为 1.0000；p50 rate0.25 block256/L16 为 0.9995、L32 为 1.0000，但 decode 0.43–0.46。本地 Ryzen 是 HND0 的 6–12×，不能当验收；extra_dc 6/8 与 5 相同、3/4 更差，已无旋钮。**HND0 上 SC-LDPC 无可行点，G4 不修订，T6 阻塞；等用户 B（RLNC/grouped 降级）/C（SC-LDPC 硬门阻塞）裁决；不合并。**
+**G4 现状（`sclc2`，HND0 无可行点，2026-11-06）**：HND0（QEMU 2 vCPU，taskset 0）实测 decode **0.32–1.99 MB/s**，全部低于 app 4.215 MB/s（最好 47%）；2 线程最好 1.96；encode **2.65–9.54**，低于 wire 需求 8.4–14.1。恢复率不是障碍：p30 rate0.50、p40 rate0.40 为 1.0000；p50 rate0.25 block256/L16 为 0.9995、L32 为 1.0000，但 decode 0.43–0.46。本地 Ryzen 是 HND0 的 6–12×，不能当验收；extra_dc 6/8 与 5 相同、3/4 更差，已无旋钮。证据：`review/sc-ldpc-hnd0.md`/`.csv`（head `ef5f956`）、`review/sc-ldpc-sim.md`/`.csv`；`sclc2` 已停手，`w-fec` clean。**HND0 上 SC-LDPC 无可行点，G4 不修订，T6 阻塞；等用户 B（RLNC/grouped 降级）/C（SC-LDPC 硬门阻塞）裁决；不合并。**
 
 ### G5 — T5 HND0 256-flow 中间 FEC + ChaCha8（E）
 
