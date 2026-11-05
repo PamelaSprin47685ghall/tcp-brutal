@@ -39,145 +39,149 @@ lifetime, locking and accounting code. Of the later findings the host suites cov
 parser side (23, 25, 27, 29 and the key removal in 35); they do not cover `tbt_procfs.c`,
 `tbt_carrier.c`, `tbt_rx.c`, `tbt_session.c` or `tbt_tx.c`.
 
-## Resolution status (05:19 snapshot)
+---
 
-For a fixed finding, the "minimal fix" paragraph below records the change that was
-applied and is kept as the rationale; it is not an outstanding request. The line
-numbers in this table were the current ones at the 05:19 snapshot and have drifted.
-Here "fixed" means the code change was applied at that snapshot; it is not a runtime
-verdict, because the host suites do not cover these units.
+## Final status (0.0.1, 2026-11-06)
 
-| Finding | Status | Evidence at the 05:19 snapshot |
-|---|---|---|
-| 1 orphaned carrier | fixed | join adds `old` to `sess->dead` (`tbt_session.c:831`); the dead drain retires then frees (`tbt_carrier.c:1031`, `:841-853`) |
-| 2 trim UAF | fixed | trim is `tbt_tx_retain_trim()` (`tbt_tx.c:305-338`), clears `fr->ret` (`:323-325`) |
-| 3 create failure / old leak | fixed | `tbt_session_destroy(t)` on failure (`tbt_session.c:205`); old destroyed in `undo` (`:226`) |
-| 4 callback teardown | fixed | `read_lock_bh` in all callbacks (`tbt_carrier.c:68`, `:89`, `:140`; `tbt_listen.c:37-45`); clear before cancel (`tbt_listen.c:150-154`) |
-| 5 double stream insert | fixed | recheck under `sess->lock` (`tbt_session.c:592`) |
-| 6 pump-lock deadlock | fixed | `w_tx`/`w_pump` cancelled before the lock (`tbt_carrier.c:967-968`, `:999-1000`, `:1005-1006`); retire no longer cancels them (`:826-840`) |
-| 7 sk release order | fixed | `st->sk` NULL before `sock_release` (`tbt_sock.c:345-346`) |
-| 8 accept before session | fixed | `accepting` set after the session (`tbt_session.c:210`); `tbt_listen_start` leaves it 0 |
-| 9 short write | fixed | tail buffered in `c->part` (`tbt_carrier.c:620-671`); mark includes it (`tbt_tx.c:1516-1518`) |
-| 10 peers `c->sk` | fixed | `sock_hold`/`sock_put` (`tbt_session.c:359`, `:375`) |
-| 11 RETIRE / TBT_CONV | fixed | `TBT_CONV 0x0003` (`tbt_uapi.h:44`); DESIGN list has one `24 RETIRE` (`DESIGN.md:373`) |
-| 17 http proc entry | fixed | `remove_proc_entry(TBT_HTTP_NAME)` (`tbt_procfs.c:693`) |
-| 27 zero-length DATA | fixed | DATA min 1 (`tbt_uapi.h:132-136`); `!len` guard (`tbt_rx.c:138`) |
-| 28 http header buffer | fixed | `http_hdr = kmalloc(TBT_HTTP_HDR_MAX)` (`tbt_carrier.c:695`) |
-| 29 render > line max | fixed | `TBT_LINE_MAX 1024` (`tbt_parse.h:33`); maximal render 642 |
-| 31 release overflow | fixed | drain refuses the over-long tail (`tbt_procfs.c:121-125`) |
-| 33 torn http read | fixed | snapshot under `pump_lock` (`tbt_procfs.c:386-395`) |
-| 36a snd_una gate | fixed | `tbt_retain_wire_ns()` (`tbt_tx.c:630`); retx uses `wire_ns` (`:457`, `:468`, `:480`) |
-| 36b trim vs batch | fixed | trim runs only from the pump under `pump_lock` (`tbt_tx.c:305-338`, `:1268`) |
-| 36c teardown | fixed | `carriers_stop` + `tx_free_queue` before the unlink (`tbt_session.c:723-724`, `:738`) |
-| 36d short-write accounting | fixed | `first_sent_seq = write_seq + c->part_len` (`tbt_tx.c:1516-1518`) |
-| 37 `http_rx` NULL | fixed | allocated (`tbt_carrier.c:698`) and guarded (`:699`) |
-| 38 buffer leak | fixed | `tbt_carrier_free()` (`tbt_carrier.c:841-853`) used at `:702`, `:936`, `:1031` |
-| 39 constructor order | fixed | `INIT_LIST_HEAD(&c->node)` moved to `tbt_carrier.c:693`, before the failure path at `:702` |
+**Tree.** master `68bfbaa` plus the documentation branch `w-docs`. The module built
+from this tree is `sha256 0b8f0006a7a10fe33e6e35e927aaf916047e142528bc32729ed04826fdccdb63`
+(the same hash in every 2026-11-06 bench and adversarial row quoted below). Line
+numbers are final-tree line numbers; the per-finding sections that follow keep the
+original analysis and the "Fixed (…)" rationale.
 
-**Previous refresh (18:0x, superseded).** The table below records the state after the P3
-grammar and config-read work, before the P0/P1 fixes. It is kept as history; the
-refreshed table follows it. Every `314/0` below is the P3-phase snapshot (2026-11-05,
-module 0.0.1, before the review-23 parser change) and is superseded by the 355/0 runs in
-the current table. The numbers are kept as history, not as the current count.
+**Status values.** `FIXED` = the fix is present and a named check covers it.
+`FIXED (static)` = the fix is present; no runtime test targets that unit.
+`OPEN` = the defect is present; the release rationale is stated in the row.
+`FIXED (contract)` = the code deliberately does not provide the old behaviour; the
+test contract was rewritten and the new contract passes.
 
-| Item | Status at that refresh | Evidence at that refresh |
-|---|---|---|
-| P0 rmmod (adversarial F2) | fixed in code; QEMU re-run pending | `tbt_core.c:146-165`: `tbt_procfs_exit()` → `tbt_tunnel_shutdown()` → `synchronize_rcu()` → `rcu_barrier()`; no `flush_workqueue()`. `adversarial/run.sh init.rmmod` was not re-run this wave. |
-| 12 HELLO bit layout | doc fixed; code comment pending | DESIGN §3.3 now gives the 5:2 diagram; `tbt_carrier.c:1202-1204` and `tbt_rx.c:460-461` match. `tbt_carrier.c:1190` still says "zero flags byte" (kernel file untouched this wave). |
-| 14 `data_frames` before send | fixed | `tbt_carrier.c:528`, `:611`, `:689` increment only after a successful send; the comment at `:518-523` names review 14. |
-| 15 `fbk_mask` unused | pending (data-plane freeze) | `tbt_tx.c:897` still takes the unused parameter; DESIGN §4.3 has the pending note; no code change. |
-| 18 `max_tunnels`/`max_carriers`/`netns_optin` | fixed: limits enforced; `netns_optin` removed | `max_tunnels` check in `tbt_session.c:197-198` (`-ENOSPC`); `max_carriers` check in `tbt_session.c:121-122` (`-EINVAL`); no `netns_optin` param/accessor; `tbt_procfs.c:165` captures `init_net`. |
-| 19 config one-shot read | fixed | `tbt_procfs.c:246-344`: exact-size snapshot + offset read; P3 snapshot: `make check` 314/0 (superseded by 355/0). |
-| 20 overlapping reorder frames | pending | `tbt_rx.c:63` still only pulls `seq == rx_next`; no `seq < rx_next` eviction. |
-| 22 pinned control frame on `-EAGAIN` | pending | `tbt_tx.c:1525`, `:1544` still `kfree(fr)` for a pinned frame on `-EAGAIN`/error. |
-| 25 `ports 0-0` | fixed as no-op | `tbt_parse.c:707+` accepts 0/0; `tbt_procfs.c:394-418` returns without calling `tbt_portmap_set()`; P3 snapshot: host test 314/0 (superseded by 355/0). |
-| 26 carrier `SO_REUSEADDR` | doc fixed; code already on | DESIGN §7.2 now says "on" with the TIME_WAIT/retry rationale; `tbt_carrier.c:1126-1129`, `tbt_listen.c:130-134`. |
-| 30 32 KiB truncation | fixed | `tbt_procfs.c:246-307` uses exact `kvmalloc`; `TBT_CFG_RENDER_MAX` is gone. |
-| 32 blank line to `/ports` | fixed | `tbt_procfs.c:394-418`: blank line and 0-0 are no-ops; P3 snapshot: host test 314/0 (superseded by 355/0). |
-| 35 dead keys/functions | keys fixed; dead functions pending | `tbt_parse.h` no longer has `framing/chunk/max_retry/uid/dev`; `tbtun.h:98`/`:111` declarations remain, documented as pending in DESIGN §8.9. |
-| P3 key deletion | fixed | `grep -rn 'cfg\.\(framing\|chunk\|max_retry\|uid\|dev\)' tbtun/` is empty; P3 snapshot: `make check` 314/0 (superseded by 355/0). |
-| P3 config read/write | fixed | `tbt_procfs.c:246-344`; P3 snapshot: `make check` and `make host-test-san` 314/0 (superseded by 355/0). |
-
-## Current status (2026-11-05, after P0/P1 partial fixes)
-
-**Status as of 2026-11-05, after P0/P1 partial fixes.**
-
-Module version is `0.0.1` (`tbt_uapi.h:30-33`). Status values:
-`FIXED` = the code carries the fix and a recorded check covers it; the parenthetical
-names the evidence (`host run` = the 355/0 suites, `18:11 run` = `adversarial/results.txt`,
-`code evidence` = read-only inspection, `doc` = a document edit).
-`FIXED (code evidence; rerun pending)` = no run covers the fix. `OPEN` = the defect is
-still present. `UNVERIFIED` = the fix or its harness changed but no run has confirmed it.
-No QEMU run covers the tree after 18:11: the kernel files were edited again at
-18:36-18:49 and are still moving, so every kernel-side row is due a rerun. Line numbers
-are from the 18:50 tree; re-read the cited symbol before acting on one.
-
-| Finding | Severity | Status | Evidence (2026-11-05) |
-|---|---|---|---|
-| 1 orphaned carrier | critical | FIXED (code evidence; rerun pending) | a replaced carrier is parked on `sess->dead` (`tbt_carrier.c:932-943`); the dead drain retires and then frees (`:1136-1145`). No run targets it. |
-| 2 trim UAF | critical | FIXED (code evidence; rerun pending) | `tbt_tx_retain_trim()` (`tbt_tx.c:364`) is called only from the pump (`:1552`), which holds `pump_lock`. |
-| 3 create failure / old leak | high | FIXED (code evidence; rerun pending) | `tbt_session_destroy(t)` runs on create failure (`tbt_session.c:231`); `old` is destroyed on a successful replace (`:241`) and on the `undo` path (`:251-254`). |
-| 4 callback teardown | high | FIXED (code evidence; rerun pending) | every `sk_user_data` reader takes `sk_callback_lock` (8 sites across `tbt_carrier.c`, `tbt_listen.c`, `tbt_sock.c`); stop restores the callbacks (`tbt_listen.c:165`) and clears `accepting` (`:166`) before `cancel_work_sync` (`:167`). |
-| 5 double stream insert | high | FIXED (code evidence; rerun pending) | the re-check and `hlist_add_head_rcu()` share one `sess->lock` section (`tbt_session.c:617-642`). |
-| 6 pump-lock deadlock | high | FIXED (code evidence; rerun pending) | `w_tx`/`w_pump` are cancelled before `pump_lock` (`tbt_carrier.c:1109-1119`); the dead-drain cancels run after the unlock (`:1136-1145`). |
-| 7 sk release order | high | FIXED (code evidence; rerun pending) | `WRITE_ONCE(st->sk, NULL)` precedes the release (`tbt_sock.c:514`). |
-| 8 accept before session | medium-high | FIXED (code evidence; rerun pending) | `accepting` is set only after the session exists (`tbt_session.c:236`); `tbt_listen_start` leaves it 0 (`tbt_listen.c:141`). |
-| 9 short write | medium-high | FIXED (code evidence; rerun pending) | the unwritten tail stays in `c->part` (`tbt_carrier.c:764-765`) and is drained first (`:708-728`). |
-| 10 peers `c->sk` | medium | FIXED (code evidence; rerun pending) | `sock_hold`/`sock_put` around each dereference (`tbt_session.c:385`, `:402`). |
-| 11 RETIRE / TBT_CONV | medium | FIXED (doc + code) | `TBT_CONV 0x0004` and `TBT_F_RETIRE 0x24` (`tbt_uapi.h:46`, `:66`), bounded at `:156`; DESIGN lists the type once. A static property, not a runtime claim. |
-| 12 HELLO bit layout | medium | FIXED (doc + code comment) | DESIGN §3.3 matches `profile OR gen<<2`; the HELLO comment in `tbt_carrier.c` now gives the 5:2 layout (profile bits 1:0, gen bits 5:2, bits 7:6 zero). |
-| 13 PREDICT inert | medium | OPEN | `predict_seq` is only recorded (`tbt_rx.c:438-458`) and cleared (`:251-252`, `:466-472`); nothing advances `rx_next` or promotes a placeholder. |
-| 14 `data_frames` before send | medium | FIXED (code evidence; rerun pending) | increments only after a send, or on the injector's deliberate drop (`tbt_carrier.c:603`, `:686`, `:770`). |
-| 15 `fbk_mask` unused | medium | OPEN | `tbt_tx_hole_check(..., u16 fbk_mask)` still ignores the parameter (`tbt_tx.c:1040`); pending the data-plane freeze. |
-| 16 first-HELLO nonce | medium | FIXED (code + QEMU far) | `tbt_session_create()` pins `cfg.nonce`, seeds the anchor from far `peer=`, and warns on TOFU; `tbt_rx_hello()` checks the anchor before the nonce (`join_src_reject++`), sets it only after the nonce passes, and `tbt_session_join()` asserts it. `host/test_anchor` 124/0; QEMU far: `far.anchor`/`far.dup_index`/`far.srcaddr_free` PASS, stats showed `join_src_reject=2`. |
-| 17 http proc entry | medium | FIXED (code evidence; rerun pending) | covered by `remove_proc_subtree(TBT_PROC_SUBDIR, init_net.proc_net)` in `tbt_procfs_exit()`. |
-| 18 module parameters | medium | FIXED (code evidence; rerun pending) | `max_carriers` is checked in `tbt_session.c:123`, `max_tunnels` in `:199`; `netns_optin` is gone. |
-| 19 one-shot config read | low | FIXED (code evidence; rerun pending) | exact-size `kvmalloc` snapshot served by offset (`tbt_procfs.c:244-344`). The host suites do not exercise `tbt_procfs.c`, so 355/0 is not evidence for this row. |
-| 20 overlapping reorder | low | FIXED (code evidence; rerun pending) | `tbt_rx_pull_locked()` evicts a fully stale node and clips a straddling one (`tbt_rx.c:33-80`). No targeted test. |
-| 21 non-atomic counters | low | FIXED (code + lint; QEMU C/E pending) | session counters with more than one writer are `atomic64_t` and only touched through `atomic64_inc/add` and `tbt_stat_read()`; per-carrier TX counters stay `u64` because `tbt_carrier_xmit()` runs under `pump_lock`; `review/lint.sh`'s `atomic-stats` check refuses a regression. |
-| 22 pinned control on `-EAGAIN` | low | OPEN | a pinned frame is freed and dropped on `-EAGAIN` (`tbt_tx.c:1761-1764`). |
-| 23 zero reorder/hole budgets | low | FIXED (host run) | `hole_budget_ms` and `rx_reorder_bytes` are refused at 0 (`tbt_parse.c:474-482`); `test_parse` 355 checks, 0 failures, and the parser sources are unchanged since that build. |
-| 24 hole age | nit | OPEN | `hole_since_ns` is zeroed (`tbt_rx.c:968`) before the age is printed (`:976`). |
-| 25 `ports 0-0` | nit | FIXED (host run; procfs half code-only) | `tbt_parse.c:247` accepts 0-0 and `test_parse` covers it; the writer no-op is procfs code (`tbt_procfs.c:429-430`), not host-tested. |
-| 26 carrier `SO_REUSEADDR` | nit | FIXED (doc + code) | DESIGN §7.2 says "on"; the code sets it. A doc/code match, not a runtime claim. |
-| 27 zero-length DATA | high | FIXED (host run) | DATA min is 1 (`tbt_uapi.h:138-142`); `test_fuzz`'s bounds table pins the value. |
-| 28 http header buffer | medium | FIXED (code evidence; rerun pending) | `c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX, ...)` (`tbt_carrier.c:791`). |
-| 29 render > line max | medium | FIXED (host run) | `TBT_LINE_MAX 1024` (`tbt_parse.h:33`); the host suite round-trips the renderer; maximal render 642 (05:19 probe). |
-| 30 32 KiB truncation | medium | FIXED (code evidence; rerun pending) | exact-size `kvmalloc` (`tbt_procfs.c:292`); `TBT_CFG_RENDER_MAX` is gone. |
-| 31 release overflow | medium | FIXED (code evidence; rerun pending) | the drain refuses an over-long tail (`tbt_procfs.c:140-146`). |
-| 32 blank line to `/ports` | low | FIXED (code evidence; rerun pending) | a blank line and 0-0 are no-ops (`tbt_procfs.c:415-430`). |
-| 33 torn http read | low | FIXED (code evidence; rerun pending) | the block is copied under `pump_lock` (`tbt_procfs.c:548-555`). |
-| 34 partial procfs init | low | FIXED (code + lint) | `tbt_procfs_exit()` uses `remove_proc_subtree(TBT_PROC_SUBDIR, init_net.proc_net)`, which deletes only existing children and is silent when a partial init left none; `fail:` only calls it. `review/lint.sh` `proc-entries-removed` accepts the subtree proof and self-tests both verdicts. |
-| 35 dead keys/functions | nit | FIXED | the five keys are gone from the grammar; the two dead declarations `tbt_passive_port()` and `tbt_tunnel_flush()` are removed from `tbtun.h`, and `grep -rn 'tbt_passive_port\|tbt_tunnel_flush' tbtun/` is empty. |
-| 36a snd_una gate | high | FIXED (code evidence; rerun pending) | `first_sent_seq[]`/`una_observed_ns[]` are back (`tbtun.h:222-227`); the gate tests `snd_una` against the mark (`tbt_tx.c:829-835`). |
-| 36b trim vs batch | high | FIXED (code evidence; rerun pending) | the trim runs only from the pump (`tbt_tx.c:364`, `:1552`). |
-| 36c teardown | high | FIXED (code evidence; rerun pending) | `tbt_carriers_stop()` then `tbt_tx_free_queue()` before the unlink loop (`tbt_session.c:1025`, `:1053`). |
-| 36d short-write accounting | high | FIXED (code evidence; rerun pending) | the mark is `write_seq + c->part_len` (`tbt_tx.c:1872-1875`). |
-| 37 `http_rx` NULL | critical | FIXED (code evidence; rerun pending) | `c->http_rx = kmalloc(...)` (`tbt_carrier.c:794`), guarded in the failure test. |
-| 38 buffer leak | medium | FIXED (code evidence; rerun pending) | `tbt_carrier_free()` (`tbt_carrier.c:951`) is used at `:798`, `:1046` and in the dead drain (`:1145`). |
-| 39 constructor order | high | FIXED (code evidence; rerun pending) | `INIT_LIST_HEAD(&c->node)` (`tbt_carrier.c:789`) precedes the failure path at `:798`. |
-| adv F1 close-flush | critical | FIXED (18:11 run; rerun pending) | `ctl.close_flush` PASS (`adversarial/results.txt:21`); config open captures `init_net` (`tbt_procfs.c:162-165`). `tbt_procfs.c` changed at 18:42, after the run. |
-| adv F2 rmmod | critical | FIXED (code evidence; rerun pending) | source fixed: teardown releases each stream's socket after restoring the core callbacks (`tbt_session.c:1075-1084`, `tbt_sock.c:428-461`), and the exit order is `tbt_procfs_exit` → `tbt_tunnel_shutdown` → `synchronize_rcu` → `rcu_barrier` (`tbt_core.c:141-154`). The 0.0.1 tree has not been rerun: the only archived log, `adversarial/console-rmmod.log:405` (12:02), is FAIL. |
-| adv F4 two connections | high | FIXED (18:11 run; rerun pending) | `pub.two` PASS: A usable, B usable, A after B close usable (`adversarial/results.txt:2`). `tbt_sock.c`/`tbt_session.c` changed after the run. |
-| adv F4 sequential churn | high | OPEN (fix in progress) | two connections concurrently work; sequential reuse is limited by the far stream not detaching after FIN, so `n_active` reaches `TBT_STREAMS_MAX`=128 (`tbtun.h:134`) and the next connection is refused. Fix in flight. |
-| adv F5 halfclose | high | FIXED (18:11 run; rerun pending) | `pub.halfclose` PASS, EOF=1 (`adversarial/results.txt:3`); `tbt_sock.c` changed after the run. |
-| adv near.data_path / near.second_conn | high | UNVERIFIED | the FAIL was the probe's 40-bit sid truncation; `adv_probe.c` now carries `sidhi` (`:1317`, `:1372`, `:1378`). No run since; `results.txt:19-20` are the pre-fix rows. |
-| adv pub.churn | high | UNVERIFIED | harness only: busybox `timeout` returns 143, which the init `case` did not match, so the row vanished; `adversarial/init:139-142` now maps 124 and 143 to TIMEOUT and the budget is 2400 s. No run since. |
-| adv F8 `src=` | medium | OPEN (contract) | the key is deleted from the grammar (`tbtun/` has no `src` key); `init.src_key` and `pub.srcfilter` still FAIL (`results.txt:5-6`). The test contract must be redefined; this is not a code fix. |
-| P3 key deletion | — | FIXED (host run + grep) | none of the five removed keys appears in `tbtun/` (grep is empty); `test_parse` 355/0. |
-| P3 config read/write | — | FIXED (code evidence; rerun pending) | `tbt_procfs.c:244-344`; the host suites do not exercise procfs, so 355/0 is not evidence for this row. |
-
-Evidence commands (host-only, last recorded run per line):
+**Acceptance on this tree (commands and measured output).**
 
 ```sh
-make check                         # EXIT=0; test_parse 355 checks, 0 failures
-make host-test-san                 # EXIT=0
-bash review/lint.sh                # 15/15 checks, 12/12 self-tests (05:27 snapshot)
-grep -rn 'cfg\.\(framing\|chunk\|max_retry\|uid\|dev\)' tbtun/   # empty
-grep -rn 'src=' tbtun/                                          # empty (key removed)
-grep -n 'SO_REUSEADDR' DESIGN.md                                # "on"
-grep -rn fbk_mask tbtun/tbt_tx.c                                # still present (finding 15)
+source ~/.cache/tbtun-build/env.sh && make check
+# test_parse 357 checks, 0 failures
+# test_fuzz seed=1 checks=7550734 failures=0
+# test_http seed=0x9e3779b97f4a7c15 checks=249 failures=0
+# test_reorder 52792 checks, 0 failures
+# test_ack 10026 checks, 0 failures
+# test_control 181 checks, 0 failures
+# test_multistream 68580 checks, 0 failures
+# test_anchor 124 checks, 0 failures
+# h11: accepted POST /api/v2/upload HTTP/1.1 and HTTP/1.1 200 OK
+
+make host-test-san
+# test_parse 357 checks, 0 failures
+# test_fuzz checks=7550734 failures=0
+# test_http checks=249 failures=0
+# test_http_fuzz checks=4078276 failures=0
+
+bash review/lint.sh
+# 16/16 checks passed, 0 failed
+# 14/14 self-tests passed, 0 failed
+
+grep -rn 'predict_\|PREDICT' tbtun/          # only the removal comment in tbt_uapi.h
+grep -rn 'spec_bytes' tbtun/                 # empty
+grep -rn 'fbk_mask' tbtun/                   # empty
+grep -rn 'src=' tbtun/                       # empty (the key does not exist)
 ```
+
+The QEMU A–K probes and the adversarial groups are separate suites; their final
+results are archived under `review/final-qemu/` and `adversarial/`. The host suites
+exercise `tbt_parse.c`, `tbt_rec.c`, `tbt_proto.c`, `tbt_http.c` and the stream
+control unit only. Findings 1–10 are in kernel object lifetime, locking and
+accounting code: the host suites cannot reach them, so their evidence is the
+static fix plus the named QEMU/adversarial probe. Findings 23, 25, 27, 29 and the
+key removal in 35 are host-covered.
+
+### Code findings 1–39
+
+| Finding | Severity | Status | Final evidence |
+|---|---|---|---|
+| 1 orphaned carrier | critical | FIXED | `tbt_carrier_retire()` parks the replaced carrier on `sess->dead` (`tbt_carrier.c:1016`); the dead drain frees it after retire (`:1242`). QEMU E/K cover replacement. |
+| 2 trim UAF | critical | FIXED | `tbt_tx_retain_trim()` (`tbt_tx.c:421`) runs only from the pump (`:1732`) under `pump_lock`; it clears `fr->ret` for every queued frame before `kfree()`. |
+| 3 create failure / old leak | high | FIXED | `tbt_session_destroy(t)` on create failure (`tbt_session.c:231`); `old` destroyed on a successful replace (`:240`) and on the undo path (`:252`). |
+| 4 callback teardown | high | FIXED | every `sk_user_data` reader takes `sk_callback_lock` (8 sites in `tbt_carrier.c`, `tbt_listen.c`, `tbt_sock.c`); `tbt_listen_stop()` restores the core callbacks and clears `accepting` before `cancel_work_sync` (`tbt_listen.c:145-150`). |
+| 5 double stream insert | high | FIXED | the re-check and `hlist_add_head_rcu()` share one `sess->lock` section (`tbt_session.c:642`). |
+| 6 pump-lock deadlock | high | FIXED | `w_tx`/`w_pump` are cancelled after `pump_lock` is dropped (`tbt_carrier.c:1172-1185`); `tbt_carrier_retire()` no longer cancels them. |
+| 7 sk release order | high | FIXED | `WRITE_ONCE(st->sk, NULL)` precedes `sock_release()` (`tbt_sock.c:540`). |
+| 8 accept before session | medium-high | FIXED | `accepting` is set only after the session exists (`tbt_session.c:236`); `tbt_listen_start()` leaves it 0. |
+| 9 short write | medium-high | FIXED | the unwritten tail stays in `c->part` and is drained first (`tbt_carrier.c:763-783`); admission is the real `sk_stream_memory_free()` test (`tbt_tx.c:1965`); the retx mark adds `part_len` (`:2221`). |
+| 10 peers `c->sk` | medium | FIXED | `sock_hold`/`sock_put` around each `c->sk` dereference (`tbt_session.c:385`, `:402`). |
+| 11 RETIRE / TBT_CONV | medium | FIXED | `TBT_CONV 0x0005` (`tbt_uapi.h:61`), `TBT_F_RETIRE 0x24` (`:80`), bounded in `tbt_body_bounds()`; DESIGN §3.3 lists the type once. |
+| 12 HELLO bit layout | medium | FIXED | TX `profile \| (gen << 2)`, RX `& 3` / `>> 2`; the code comment gives the 5:2 layout (`tbt_carrier.c:1397-1398`). |
+| 13 PREDICT inert | medium | FIXED (removed) | 0x11/0x12 deleted; `tbt_uapi.h:70` records the removal; `TBT_CONV 0x0005`; `grep -rn 'predict_' tbtun/` is empty. |
+| 14 `data_frames` before send | medium | FIXED | `data_frames++` only after a successful write or a deliberate injector drop (`tbt_carrier.c:658`, `:741`, `:825`). |
+| 15 `fbk_mask` unused | medium | FIXED | the parameter and its call-site argument are gone; `grep -rn fbk_mask tbtun/` is empty. |
+| 16 first-HELLO nonce | medium | FIXED | source anchor is checked before the nonce (`join_src_reject`, `tbt_rx.c:470`); `nonce=`/`peer=` pin it (`tbt_session.c:1001-1013`); TOFU warns once; QEMU `far.anchor`/`far.dup_index`/`far.srcaddr_free`/`far.nonce_pinned`/`far.src_anchor` PASS; `test_anchor` 124/0. |
+| 17 http proc entry | medium | FIXED | `remove_proc_subtree(TBT_PROC_SUBDIR, init_net.proc_net)` (`tbt_procfs.c:994`). |
+| 18 module parameters | medium | FIXED | `max_carriers` (`tbt_session.c:123`), `max_tunnels` (`:199`); `netns_optin` removed. |
+| 19 one-shot config read | low | FIXED | exact-size `kvmalloc` snapshot served by offset (`tbt_procfs.c:292`). |
+| 20 overlapping reorder | low | FIXED | `tbt_rx_pull_locked()` evicts a fully stale node and clips a straddling one (`tbt_rx.c:33-90`); QEMU `far.overlap` PASS (ooo_bytes stays 0). |
+| 21 non-atomic counters | low | FIXED | multi-writer session counters are `atomic64_t` read through `tbt_stat_read()` (`tbtun.h:36`, `:483-568`); `review/lint.sh` `atomic-stats` pins the set. |
+| 22 pinned control on `-EAGAIN` | low | FIXED | control frames are retried/requeued, not freed (`tbt_tx.c:1585`); `ctl_lost/ctl_retry/ctl_requeue/ctl_obsolete/ctl_queued` in the `tunnel <id> ctl` line; QEMU `near.fin_eagain`/`near.rst_eagain` PASS. |
+| 23 zero reorder/hole budgets | low | FIXED | both are refused at 0 (`tbt_parse.c:474-482`); `test_parse` 357/0. |
+| 24 hole age | nit | FIXED | age is computed before `hole_since_ns` is cleared (`tbt_rx.c:923-924`). |
+| 25 `ports 0-0` | nit | FIXED | 0-0 is the canonical no-block spelling (`tbt_parse.c:230`, `:247`); the writer treats blank/0-0 as a no-op (`tbt_procfs.c:427`). |
+| 26 carrier `SO_REUSEADDR` | nit | FIXED | the code sets it (`tbt_carrier.c:1336`, `tbt_listen.c:130`); DESIGN §7.2 says "on". |
+| 27 zero-length DATA | high | FIXED | `TBT_F_DATA` min is 1 (`tbt_uapi.h:151-156`); `test_fuzz` 7,550,734/0. |
+| 28 http header buffer | medium | FIXED | `c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX)` (`tbt_carrier.c:846`), `TBT_HTTP_HDR_MAX` = 4096. |
+| 29 render > line max | medium | FIXED | `TBT_LINE_MAX 1024` (`tbt_parse.h:33`); maximal render 642; `test_parse` round-trips it. |
+| 30 32 KiB truncation | medium | FIXED | exact-size `kvmalloc` (`tbt_procfs.c:292`); `TBT_CFG_RENDER_MAX` is gone. |
+| 31 release overflow | medium | FIXED | the drain refuses an over-long tail (`lb->overflow`). |
+| 32 blank line to `/ports` | low | FIXED | blank line and 0-0 are no-ops (`tbt_procfs.c:427`). |
+| 33 torn http read | low | FIXED | the block is copied under `pump_lock` (`tbt_procfs.c:523-568`). |
+| 34 partial procfs init | low | FIXED | subtree removal (`tbt_procfs.c:994`); lint `proc-entries-removed` accepts the subtree proof. |
+| 35 dead keys/functions | nit | FIXED | the five keys are gone; `tbt_passive_port()`/`tbt_tunnel_flush()` are removed; `grep` is empty. |
+| 36a snd_una gate | high | FIXED | `first_sent_seq[]`/`una_observed_ns[]` (`tbtun.h:259-264`); the gate tests `snd_una` (`tbt_tx.c:902-908`) and the mark is set after the write (`:2219-2222`). |
+| 36b trim vs batch | high | FIXED | the trim runs only from the pump (`tbt_tx.c:421`, `:1732`). |
+| 36c teardown | high | FIXED | `tbt_carriers_stop()` then `tbt_tx_free_queue()` before the unlink loop (`tbt_session.c:1056`, `:1084`). |
+| 36d short-write accounting | high | FIXED | the mark is `write_seq + c->part_len` (`tbt_tx.c:2221`). |
+| 37 `http_rx` NULL | critical | FIXED | `http_rx` is allocated (`tbt_carrier.c:849`) and in the failure test (`:850`). |
+| 38 buffer leak | medium | FIXED | `tbt_carrier_free()` (`tbt_carrier.c:1024`) is used at `:853`, `:1151`, `:1251`. |
+| 39 constructor order | high | FIXED | `INIT_LIST_HEAD(&c->node)` (`tbt_carrier.c:844`) precedes the failure path at `:853`. |
+
+### Adversarial findings F1–F12
+
+| ID | Severity | Status | Final evidence |
+|---|---|---|---|
+| F1 close-flush | critical | FIXED | `ADV_RESULT ctl.close_flush PASS` (`adversarial/results.txt`, module `0b8f0006…`). |
+| F2 rmmod | critical | FIXED (static + dmesg) | teardown order `tbt_procfs_exit` → `tbt_tunnel_shutdown` → `synchronize_rcu` → `rcu_barrier` (`tbt_core.c`); every stream socket is detached/released before the module text goes away. QEMU A–K 11/11 PASS on `0b8f0006…` exercises load/unload; latest archived `init.dmesg_after_rmmod` is PASS (no warning/BUG/oops). The `init.rmmod` clean-close assertion was FAIL in the 12:02 log because the old probe printed `ECHO_ABORT op=read errno=0`; `read_to()` now reports the pending `SO_ERROR` (`adv_probe.c:189-218`), but the adversarial rmmod group was not re-run on `0b8f0006…`. |
+| F4 two connections / churn | high | FIXED (code + pre-final run) | `pub.two` PASS; `pub.churn` PASS 10,000 cycles, 0 refused; `pub.concurrent` PASS 100/100 in `adversarial/console-public.log` (2026-11-05, after the detach fix). The final `0b8f0006…` `results.txt` did not re-run the churn group. The far stream detaches on the graceful FIN path (`tbt_stream_detach_from_session()`, `tbt_session.c:800`), so `n_active` no longer climbs to 128. |
+| F5 half-close | high | FIXED | `pub.halfclose` PASS, EOF=1. |
+| F6 far-side carrier input / delivery stall | high | FIXED | the RX work is re-armed on every `-EAGAIN`/read-zero path (`review/analysis/multiconn-p01-plan.md`); QEMU `far.second_carrier` PASS (`rx_adopt_events=2`), `far.open_other_sid` PASS, `far.data_path` PASS, `near.data_path` PASS, `near.second_conn` PASS. |
+| F7 deprecated workqueue | high | FIXED | no `system_unbound_wq`/`alloc_workqueue` in `tbtun/`; `w_fbk` runs on `system_dfl_wq` (`tbt_tx.c:2578`). |
+| F8 `src=` allow list | medium | FIXED (contract) | `src=` does not exist; a connection is identified by the nonce, not by a source allow list. `pub.srcfilter` PASS under the rewritten contract (`adversarial/results.txt`: "no src= allow list; the tunnel identity is the nonce"); `init.src_key` now checks that `src=` is refused and `nonce=` is accepted and rendered (`adversarial/init:182-203`). |
+| F9 replayed nonce from another source | medium | FIXED | `far.srcaddr_dup` PASS, `far.srcaddr_free` PASS; a configured `peer=`/`nonce=` anchors the source (`far.src_anchor`, `far.nonce_pinned` PASS). |
+| F10 `max_tunnels` | medium | FIXED | checked under `tbt_lock` before allocation (`tbt_session.c:199`). |
+| F11 `max_carriers` | medium | FIXED | checked in `tbt_cfg_sane()` (`tbt_session.c:123`). |
+| F12 port-block exhaustion | medium | FIXED | `port_exhaust`/`port_alloc_fail` in stats; `init.port_exhaust` PASS (`port_exhaust=16`, `alloc_fail=16`, tunnel stays up). |
+
+### P0–P3 checklist
+
+| Item | Status | Final evidence |
+|---|---|---|
+| P0-1 replacement/retire lock-order regression | FIXED | `review/lint.sh` 16/16 + 14/14; QEMU A–K 11/11 PASS (E/K included). |
+| P0-2 F1/F2 regression | FIXED | `ctl.close_flush` PASS; `init.dmesg_after_rmmod` PASS; final `init.rmmod` archive as above. |
+| P1-3 PREDICT receiver advance | FIXED (removed) | placeholder path deleted; `TBT_CONV 0x0005`; QEMU A–K 11/11 PASS, G/H included, `holes_unrecoverable=0`. |
+| P1-4 sequential churn | FIXED (code + pre-final run) | `pub.churn` 10,000/0 refused in `console-public.log`; the final `results.txt` did not re-run it; detach is in the final tree (`tbt_session.c:800`). |
+| P1-5 first-HELLO nonce | FIXED | `far.nonce_pinned`/`far.src_anchor` PASS; `test_anchor` 124/0. |
+| P1-6 F6 far-side input | FIXED | `far.second_carrier`/`far.data_path` PASS. |
+| P1-7 near.data_path / near.second_conn | FIXED | both PASS in `adversarial/console-near.log`. |
+| P2-8 `retx_ppm` | FIXED | Final bench `20261106T004314`: `retx_ppm 2333`, `wire/app 1.0333`, app 10.74 Mbit/s, control 2.73, `4/4`, `strict=1 rc=0`; `20261106T003712` n=1: 0, 3.11 Mbit/s. Two earlier runs of the same module read 1,164 and 1,842 ppm (8.38 and 11.37 Mbit/s), which is the measured variance. The 96k–304k figures were the old accounting; the split is `retx_hole/retx_slow/retx_pathloss/retx_other`. |
+| P2-9 `flush` block | FIXED | `init.flush_midstream` PASS (app closes cleanly, `ECHO_ABORT errno=104`), `init.echo_after_flush` PASS, `stall.flush` PASS. |
+| P3-10 comment/doc drift | FIXED | `tbt_proto.c` header/payload comment; HELLO 5:2 comment; DESIGN §3.3. |
+| P3-11 F8 test contract | FIXED (contract) | `init.src_key`/`pub.srcfilter` rewritten to the nonce/peer contract and passing. |
+| P3-12 low-priority open items | FIXED | review 21 atomic stats, 15/22/24/34 all closed above. |
+| P3-13 dead declarations | FIXED | `tbt_passive_port()`/`tbt_tunnel_flush()` gone; grep empty. |
+| P3-14 port-exhaustion visibility | FIXED | `init.port_exhaust` PASS; `port_exhaust`/`port_alloc_fail` in stats. |
+
+### History
+
+The 05:19 and 18:0x status tables that used to sit here were removed: they recorded
+the tree while the P0/P1 fixes were landing, and several rows still said `OPEN` for
+defects the final tree fixes. Keeping them next to the final table invited the wrong
+reading. The per-finding analysis and the "Fixed (…)" paragraphs below are kept
+verbatim; the full old file is in git history (`git show 68bfbaa:review/findings.md`).
 
 ---
 
@@ -414,7 +418,10 @@ pointer that retire clears before `sock_release()` and then `synchronize_rcu()`s
     "TBT_CONV not bumped" claim were stale (`TBT_CONV` is `0x0003`). The code comment in
     `tbt_carrier.c` now gives the same 5:2 layout; it no longer says "zero flags byte".
 
-13. **medium — PREDICT is inert on the receiver.** `tbtun/tbt_rx.c:438-458` records
+13. **medium — PREDICT is inert on the receiver.** **Fixed (removed in `TBT_CONV
+    0x0005`):** the placeholder frames, the `predict_*` fields and the procfs counters
+    are gone; only the removal comment in `tbt_uapi.h` remains. The original defect:
+    `tbtun/tbt_rx.c:438-458` records
     `st->predict_seq`/`predict_token`, and nothing ever reads them to advance
     `rx_next` or to promote a duplicate (DESIGN §4.4/§4.5 case B/C). The only working
     latency mechanism is the sender's immediate retransmit (`tbt_tx_inject_locked`).
@@ -422,16 +429,16 @@ pointer that retire clears before `sock_release()` and then `synchronize_rcu()`s
     `predict_used` counts placeholders that do nothing. Fix: implement the token match
     and the bounded advance, or delete the placeholder path and its counters.
 
-14. **medium — the hole gate counts failed writes** (fixed in code; rerun pending).
+14. **medium — the hole gate counts failed writes** (fixed; final host run 357/0).
     `tbtun/tbt_carrier.c:528`, `:611`, `:689` increment `c->data_frames` only after a
     successful send; the comment at `:518-523` names review 14. The old before-send
     increment at `:488-489` is gone.
 
-15. **medium — `fbk_mask` is unused** (pending, data-plane freeze). `tbt_tx_hole_check(struct tbt_session *, u16
-    fbk_mask)` (`tbt_tx.c:1040`) never reads the parameter; the gate uses persistent
-    per-carrier `uack`/`recv_cnt` instead (DESIGN §4.3). Pending: do not edit
-    `tbt_tx.c` until the data plane is frozen; then drop the parameter and the
-    call-site argument.
+15. **medium — `fbk_mask` is unused** (**fixed (removed)**). The original
+    `tbt_tx_hole_check(struct tbt_session *, u16 fbk_mask)` never read the parameter;
+    the gate uses persistent per-carrier `uack`/`recv_cnt` instead (DESIGN §4.3).
+    The parameter and its call-site argument are deleted; `grep -rn fbk_mask tbtun/`
+    is empty.
 
 16. **medium — the far carrier port is an open relay to `target=` until a nonce is
     pinned.** `tbt_rx_hello()` adopts the nonce from the first HELLO on any carrier
@@ -464,8 +471,8 @@ pointer that retire clears before `sock_release()` and then `synchronize_rcu()`s
     sees a silently truncated file. Fix: keep the rendered buffer in
     `file->private_data` and serve by offset, or return 0 only when `*ppos >= n`.
 
-20. **low — overlapping reorder frames are never evicted** (fixed in code 2026-11-05;
-    rerun pending). `tbt_rx_pull_locked()` (`tbt_rx.c:33-60`) only pulled nodes whose
+20. **low — overlapping reorder frames are never evicted** (fixed; QEMU
+    `far.overlap` PASS). `tbt_rx_pull_locked()` (`tbt_rx.c:33-60`) only pulled nodes whose
     `seq == rx_next`; a node that starts inside an already-delivered range stayed in the
     tree forever, inflating `rx_ooo_bytes` until the reorder bound killed the stream. A
     peer sending overlapping records triggers it. Fix: on pull, also drop nodes with
@@ -485,12 +492,13 @@ pointer that retire clears before `sock_release()` and then `synchronize_rcu()`s
     whose lost update only delays one FBK kick; it stays a plain `u32` on purpose.
     `review/lint.sh` now pins the atomic set.
 
-22. **low — pinned control frames are dropped on `-EAGAIN`** (pending). `tbt_tx.c:1761-1764`
-    frees a pinned frame when the carrier returns `-EAGAIN`; there is no retry for FIN
-    (`tbt_tx_fin` is called once, from the public FIN path at `tbt_sock.c:119`), so a FIN
-    lost to a full buffer leaves the peer's write side open until the hole budget resets
-    the stream. Fix: re-enqueue pinned control frames (with a bounded retry) instead of
-    freeing them.
+22. **low — pinned control frames are dropped on `-EAGAIN`** (**fixed**). The original
+    code freed a pinned frame when the carrier returned `-EAGAIN`. Pinned frames are
+    now requeued with a bounded retry (`tbt_tx.c:1585`); the stats line
+    `tunnel <id> ctl` reports `ctl_lost/ctl_retry/ctl_requeue/ctl_obsolete/ctl_queued`.
+    A FIN/RST that crosses a generation is re-pinned; HELLO/OPEN/RETIRE copies for an
+    old generation count `ctl_obsolete`; only an exhausted retry bound counts
+    `ctl_lost`. QEMU `near.fin_eagain` and `near.rst_eagain` PASS.
 
 23. **low — zero-valued reorder/hole budgets are accepted and make the tunnel
     non-functional** (fixed 2026-11-05; host run 355/0). `tbt_parse.c:536-544` accepted
@@ -500,8 +508,8 @@ pointer that retire clears before `sock_release()` and then `synchronize_rcu()`s
     355/0, and `make check` and `make host-test-san` are green.
 
 24. **nit — `tbt_rx_check_hole()` prints the hole age after zeroing the timestamp.**
-    `tbt_rx.c:968` sets `st->hole_since_ns = 0` and `:976` then prints
-    `now - st->hole_since_ns` (a huge number). Cosmetic; compute the age first.
+    **Fixed:** the age is computed before `hole_since_ns` is cleared
+    (`tbt_rx.c:923-924`), so `RXHOLEKILL` prints the real age.
 
 25. **nit — `ports 0-0` is rejected.** `tbt_parse.c:821` refuses `lo == 0` although
     `tbt_parse_range()` documents 0-0 as the canonical "no block" spelling (line 246)
@@ -727,33 +735,33 @@ return is checked; all parser buffers are fixed-size and every loop is bounded b
 These are the silent-drift findings: the prose promises a property, the code does not
 implement it, and no test fails. Ordered by DESIGN section.
 
-| DESIGN | Invariant the text states | What the code does |
-|---|---|---|
-| §2.2 | "`tbt_stats.c` — Per-CPU counters" | No per-CPU block; the session counters with several writers are `atomic64_t` (`tbtun.h`, §8.7) and the single-writer ones are documented as such. Finding 21 fixed. |
-| §2.5, §9.6 | The replay ring keeps a reference to the `skb`, "instead of copying it" | `skb_copy_bits()` into `r->data` (`tbt_tx.c:1525`), then `memcpy()` into the frame (`:1532`): two copies per byte. |
-| §3.1.1, §3.3 | Profile in bits 1:0, generation in bits 5:2, 7:6 zero | DESIGN §3.1.1/§3.3 now agree; TX `profile \| gen << 2` (`tbt_carrier.c:1301`), RX `& 3` / `>> 2` (`tbt_rx.c:519-520`). Doc fixed; code comment `tbt_carrier.c:1287` pending. Finding 12. |
-| §3.2 rule 5 | A data-bearing chunk is `[0x800, 0x2020]` (2048..8224) | No `TBT_CHUNK_MIN` exists in the code; a 1-byte DATA frame emits a 39-byte chunk (measured). Small writes are outside the classification floor. |
-| §3.2 (Host) | Port in `Host` only when it is not 80 | Always emitted: `snprintf("%pI4:%u", ...)` (`tbt_carrier.c:462`). |
-| §3.3 | Frame types are 10..15, 20..24 | 0x24 `TBT_F_RETIRE` is documented once; `TBT_CONV=0x0003` (`tbt_uapi.h:44`). Finding 11 fixed. |
-| §3.4 | `framing=ext` is a working fallback | The key was removed; `profile=raw` is the fallback. DESIGN §3.4 documents the removal. Finding 35 (keys fixed). |
-| §3.5, §8.3 | `chunk=` sets the chunk-data ceiling | The key was removed; the emitter sizes each chunk from the record (`rec_len`), bounded by `TBT_CHUNK_MAX`. Finding 35 (keys fixed). |
-| §3.7 | A segment ends with `0\r\n\r\n`; the next POST starts after it | No chunked terminator is ever emitted (`grep '0\\r\\n\\r\\n' tbtun/*.c` finds none): one unbounded chunked message per carrier. |
-| §4.5 | On hole death the receiver delivers a transparent hole and advances `next_expected` | Never advances past a hole; `tbt_rx_pull_locked()` evicts stale and clips straddling nodes, but advances only on `seq == rx_next` (`tbt_rx.c:33-80`), otherwise case D resets. Finding 13. |
-| §6.1, §8.3 | `max_retry=0` leaves a dead carrier dead | The key was removed; DESIGN §6.1 now states there is no `max_retry`, and retries are the 200 ms connect loop plus the 20-round `join_dup` cap. Finding 35 (keys fixed). |
-| §7.2 | `SO_REUSEADDR` on; one listener on `listen=`; only `srcaddrs[0]` used | DESIGN §7.2 now matches the code: `sock_set_reuseaddr()` on (`tbt_carrier.c:1126`, `tbt_listen.c:130`), one listener, `srcaddrs[0]` only (`tbt_carrier.c:1098`). Finding 26 doc-fixed. |
-| §8.4, §8.4.1 | `cat config` round-trips; lines are at most 1023; no partial application | `TBT_LINE_MAX=1024`; maximal render 642; exact-size snapshot + offset read (`tbt_procfs.c:246-344`); drain refuses the over-long tail. Findings 19, 29, 30, 31 fixed. |
-| §8.5, §13 | Who may connect is filtered by `src=`/`dev=`/`uid=` | No inbound filter; those keys do not exist. DESIGN §13 now says filtering is not implemented and only `srcaddrs[0]` selects the near-side source. |
-| §9.5 | A hostile connection "cannot name a stream at all without the session nonce" | The far side adopts the nonce from the first HELLO unless a peer is configured or the nonce is pinned (`tbt_rx.c:525-552`). Finding 16. |
+| DESIGN | Invariant the text stated | Final code behaviour | Status |
+|---|---|---|---|
+| §2.2 | "`tbt_stats.c` — Per-CPU counters" | No per-CPU block. Multi-writer session counters are `atomic64_t` read through `tbt_stat_read()`; single-writer counters are documented as such (`tbtun.h:483-568`). | RESOLVED (doc + code) |
+| §2.5, §9.6 | The replay ring keeps a reference to the `skb`, "instead of copying it" | `skb_copy_bits()` into `r->data` (`tbt_tx.c:2364`), then `memcpy()` into the frame (`:2371`): two copies per byte. DESIGN §2.5/§9.6 now say "copy" and describe `struct tbt_retain` with `u8 data[]`. | RESOLVED (doc, rewritten) |
+| §3.1.1, §3.3 | Profile in bits 1:0, generation in bits 5:2, 7:6 zero | TX `profile \| (gen << 2)`, RX `& 3` / `>> 2`; the code comment gives the 5:2 layout (`tbt_carrier.c:1397-1398`). | RESOLVED |
+| §3.2 rule 5 | A data-bearing chunk is `[0x800, 0x2020]` (2048..8224) | No `TBT_CHUNK_MIN` exists; a 1-byte DATA frame emits a 39-byte chunk. Small writes are outside the classification floor; DESIGN §3.2 rule 5 now says `[0x800, 0x2020]` is the typical bulk shape, not a floor. | RESOLVED (doc, rewritten) |
+| §3.2 (Host) | Port in `Host` only when it is not 80 | Always emitted: `snprintf("%pI4:%u", ...)` (`tbt_carrier.c:603`). DESIGN §3.2 and the request-emission ruling now say the port is always included. | RESOLVED (doc, rewritten) |
+| §3.3 | Frame types are 10..15, 20..24 | `TBT_CONV 0x0005`; 0x24 RETIRE documented once; 0x11/0x12 removed and recorded as removed. | RESOLVED |
+| §3.4 | `framing=ext` is a working fallback | The key was removed; `profile=raw` is the fallback. DESIGN §3.4 documents the removal. | RESOLVED (doc) |
+| §3.5, §8.3 | `chunk=` sets the chunk-data ceiling | The key was removed; the emitter sizes each chunk from the record (`rec_len`), bounded by `TBT_CHUNK_MAX`. | RESOLVED (doc) |
+| §3.7 | A segment ends with `0\r\n\r\n`; the next POST starts after it | No chunked terminator is ever emitted (`grep '0\\r\\n\\r\\n' tbtun/*.c` finds none): one unbounded chunked message per carrier. DESIGN §3.2/§3.7 now describe one chunked message for the life of the carrier, no 0-chunk. | RESOLVED (doc, rewritten) |
+| §4.5 | On hole death the receiver delivers a transparent hole and advances `next_expected` | Never advances past a hole; `tbt_rx_pull_locked()` evicts stale and clips straddling nodes, but advances only on `seq == rx_next` (`tbt_rx.c:33-90`), otherwise case D resets. This is deliberate (byte exactness); DESIGN §4.4/§4.6 now record it as the choice. | RESOLVED (doc, rewritten) |
+| §6.1, §8.3 | `max_retry=0` leaves a dead carrier dead | The key was removed; there is no `max_retry`; retries are the 200 ms connect loop plus the 20-round `join_dup` cap. | RESOLVED (doc) |
+| §7.2 | `SO_REUSEADDR` on; one listener on `listen=`; only `srcaddrs[0]` used | `sock_set_reuseaddr()` on (`tbt_carrier.c:1336`, `tbt_listen.c:130`), one listener, `srcaddrs[0]` only. | RESOLVED |
+| §8.4, §8.4.1 | `cat config` round-trips; lines are at most 1023; no partial application | `TBT_LINE_MAX=1024`; maximal render 642; exact-size snapshot + offset read (`tbt_procfs.c:292`); the drain refuses the over-long tail. | RESOLVED |
+| §8.5, §13 | Who may connect is filtered by `src=`/`dev=`/`uid=` | No inbound filter; those keys do not exist. Only `srcaddrs[0]` selects the near-side source; a far tunnel is identified by nonce/peer. | RESOLVED (doc) |
+| §9.5 | A hostile connection "cannot name a stream at all without the session nonce" | The far side adopts the nonce from the first HELLO unless `peer=` or `nonce=` is configured; without either it is TOFU and warns once (`tbt_session.c:1001-1013`). The anchor is checked before the nonce. | RESOLVED (doc) |
 
 ---
 
 ## Invariants a reviewer can check mechanically
 
 Each invariant is phrased so `review/lint.sh` (or a one-line `grep`/`awk`) can decide
-it. The script prints one PASS/FAIL line per invariant and exits non-zero on any FAIL;
-it reports the live state of a tree that is moving while ranks 1–10 are fixed. The
-"motivated by" reference names the finding that produced the check, not a claim about
-the current code.
+it. The script prints one PASS/FAIL line per invariant and exits non-zero on any FAIL.
+On the final tree it reports 16/16 checks and 14/14 self-tests. The "motivated by"
+reference names the finding that produced the check, not a claim about the current
+code.
 
 1. **No work cancelled under the pump lock can wait on it.** Neither a textual
    `cancel_*work_sync()` between `mutex_lock(&sess->pump_lock)` and its unlock, nor a
@@ -809,8 +817,8 @@ the current code.
 - `tbt_hdr_check()` is total over every field: `conv`, `flags & ~TBT_FF_MASK`,
   `path_id < 16`, `path_ack_count <= 16`, `path_ack_mask` (vacuous but correct by the
   `BUILD_BUG_ON(TBT_MAX_CARRIERS_LIMIT > 16)`), `body_len <= TBT_PAYLOAD_MAX`,
-  `sid_hi == 0`, `reserved2 == 0`, per-type body bounds, and the exact PREDICT/FBK
-  lengths. A record that passes is safe for every consumer.
+  `sid_hi == 0`, `reserved2 == 0`, per-type body bounds, and the exact FBK
+  length. A record that passes is safe for every consumer.
 - Record framing is `32-byte header + body_len` with no prefix; `tbt_rec_scan()` never
   reads past `len` and uses `body_len` only after the header check.
 - The chunk decoder is bounded: size is checked against `TBT_CHUNK_MAX` on every digit

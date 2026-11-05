@@ -53,7 +53,7 @@ the per-5-tuple limit, as probe I does.
 | frames/s | sum of `peers` `tx_frames` over the window | records written, control and PAD included |
 | CPU | `/proc/stat` system+irq+softirq ticks over the whole transfer | percent of one vCPU (2 vCPUs are available, so 200% is the ceiling) |
 | kworker CPU | utime+stime of every `kworker*` over the transfer | workqueue context, i.e. the module's deferred work |
-| queue peaks | `/proc/net/tbtun/stats` and `peers` sampled every 250 ms | `txq`, `rxq`, out-of-order bytes, retained bytes, speculative bytes, in-flight bytes |
+| queue peaks | `/proc/net/tbtun/stats` and `peers` sampled every 250 ms | `txq`, `rxq`, out-of-order bytes, retained bytes, in-flight bytes |
 | guest memory | `MemTotal - MemAvailable`, process RSS sum, `/proc/slabinfo` | sampled at 1 s |
 | host RSS | `/proc/<qemu-pid>/status` `VmRSS` sampled at 200 ms | the guest's resident memory as the host sees it |
 
@@ -170,7 +170,7 @@ measures and leaves the rest empty.
 | `reorder_max_depth` | deepest out-of-order backlog, frames |
 | `carriers_up` | carriers schedulable at the end of the row, `up/rows` |
 | `txq_max`, `rxq_max` | peak module queues, bytes |
-| `ooo_bytes_max`, `retain_bytes_max`, `spec_bytes_max` | peak reorder tree, replay retention, speculative bytes |
+| `ooo_bytes_max`, `retain_bytes_max` | peak reorder tree, replay retention |
 | `mem_before_kb`, `mem_peak_kb`, `mem_after_kb` | guest used memory (`MemTotal - MemAvailable`) |
 | `proc_rss_before_kb`, `proc_rss_peak_kb` | sum of all guest process RSS |
 | `slab_before_kb`, `slab_peak_kb`, `slab_after_kb` | `Slab:` from `/proc/meminfo` |
@@ -180,6 +180,12 @@ measures and leaves the rest empty.
 | `qemu_rss_peak_kb` | host-side peak RSS of the QEMU process |
 | `host_qemu_others` | foreign qemu processes at run start (contention signal) |
 | `rc`, `strict`, `notes` | transfer exit status, byte-exact strict phase passed, free-form note |
+
+`spec_bytes_max` is no longer sampled: `benches/qemu/init` dropped the
+speculative-bytes field, so new rows leave that column empty. The header in
+`benches/run.sh` (and its `memory` table selector) still carries it and is
+intentionally unchanged; the historical CSVs under `benches/results/` keep
+their recorded values, and the Results tables below come from those runs.
 
 ## Results
 
@@ -314,8 +320,8 @@ Reading:
   the application's chosen pattern, not a module leak; an interleaved
   application would not hold it.
 - The module's own queues are small: tx queue 64 KB, out-of-order tree
-  483 KB, replay retention 2.15 MB, speculative bytes 0. At 10 Mbit/s per
-  carrier these are sub-second buffers.
+  483 KB, replay retention 2.15 MB, speculative bytes 0 in that run. At
+  10 Mbit/s per carrier these are sub-second buffers.
 - The guest returns to 67,988 kB used (7.5 MB *below* its pre-transfer
   value, because the echo/sink processes and page cache settle) and the slab
   to 20,040 kB, 5 MB above baseline. The 40 MiB itself is gone; nothing

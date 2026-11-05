@@ -100,9 +100,10 @@ injection. None of those apply because *we* are the `sk` owner (the accepted soc
 created by us and never handed to userspace — it is not in any file descriptor table).
 
 The alternative — kprobe/tracepoint on `tcp_sendmsg`/`tcp_recvmsg` of an app-owned socket,
-as KeLS and similar L4 tunnel modules do — is retained only as the **fallback capture mode**
-(§8.6): it cannot be made race-free against the app's own `recvmsg`, and it breaks on
-`io_uring`/`MSG_ZEROCOPY`/`splice`. We do not use it for v0.
+as KeLS and similar L4 tunnel modules do — is rejected: it cannot be made race-free
+against the app's own `recvmsg`, and it breaks on `io_uring`/`MSG_ZEROCOPY`/`splice`. The
+supported fallback is an operator-side REDIRECT that still gives the module the socket
+(§8.6). No kprobe or tracepoint exists in the module.
 
 ### 2.2 Components (all in-kernel)
 
@@ -219,7 +220,7 @@ The old draft used chunk extensions (`;t=10;s=1;q=3`). That is syntactically leg
 statistically **abnormal**: essentially no real client emits per-chunk extensions on every
 chunk, so a normality-scoring DPI would downgrade it. **v0 therefore puts the frame header
 inside the body**, with the body length carried in the header itself, and offers chunk
-extensions only as a fallback (§3.4).
+extensions only as a fallback that was prototyped and removed (§3.4).
 
 ### 3.1.1 Carrier profiles
 
@@ -232,14 +233,15 @@ bit  7 6 5 4 3 2 1 0
 ```
 
 Bits 1..0 are the profile (`1` http-kal, `2` http-kal-drip, `3` raw; `0` invalid), bits
-5..2 are the carrier's **path generation** (§4.3), bits 7..6 are zero. The byte was zero (reserved
-flags) in the first C3 build, and `TBT_CONV` was `0x0002` then; it is `0x0005` now that
-RETIRE, this byte, the 40-bit sid, and the removal of the placeholder frames are part of
-the wire, and `host/test_fuzz.c` pins the new value. An
-old peer therefore reads a nonzero flags byte, which it already rejects as unknown; a new
-peer rejects a profile it cannot honour, and reads the 4-bit generation from bits 5..2.
-The generation travels here rather than in a new field so the HELLO body length is
-unchanged.
+5..2 are the carrier's **path generation** (§4.3), bits 7..6 are zero. The byte was a
+reserved zero flags byte in the first C3 build, which spoke `TBT_CONV` `0x0002`. Revision
+`0x0003` added RETIRE (`0x24`) and this profile|gen byte; `0x0004` made `sid_hi`
+meaningful, redefined the per-path FBK `uack` as cumulative payload bytes, added SACK
+(`0x25`), and put `TBT_WIRE_VERSION` in HELLO `body[0]`; `0x0005` removed the placeholder
+frames `0x11`/`0x12`. `host/test_fuzz.c` pins the current value. An old peer reads a
+nonzero flags byte, which it already rejects as unknown; a new peer rejects a profile it
+cannot honour, and reads the 4-bit generation from bits 5..2. The generation travels here
+rather than in a new field so the HELLO body length is unchanged.
 
 | Profile | Container | Cadence | Use |
 |---|---|---|---|
@@ -268,7 +270,7 @@ Only for `http-kal` / `http-kal-drip`. Per carrier 5-tuple, in order:
 
 ```
 > POST /api/v2/upload HTTP/1.1              ← method + absolute-path, HTTP/1.1, CRLF
-> Host: <peer address literal>              ← present, matches the connection target
+> Host: <peer ip:port>                      ← present, matches the connection target
 > User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36
 > Accept: */*
 > Accept-Encoding: identity
@@ -281,7 +283,8 @@ Only for `http-kal` / `http-kal-drip`. Per carrier 5-tuple, in order:
 > <8224 bytes: 32-byte header (body_len=8192) + 8192-byte payload>
 > \r\n
 > 1000\r\n ... \r\n                          ← subsequent chunks
-> 0\r\n\r\n                                  ← segment terminator
+>                                           ← the chunked message stays open for the
+>                                             life of the carrier; no 0-chunk is sent
 < HTTP/1.1 200 OK\r\n
 < Content-Type: application/octet-stream\r\n
 < Transfer-Encoding: chunked\r\n
@@ -289,7 +292,7 @@ Only for `http-kal` / `http-kal-drip`. Per carrier 5-tuple, in order:
 < Server: nginx\r\n
 < Date: <IMF-fixdate>\r\n
 < \r\n
-< 2024\r\n<body>\r\n ... 0\r\n\r\n
+< 2020\r\n<body>\r\n ...                  ← response chunks, same lifetime rule
 ```
 
 Rules the implementation MUST follow (each exists because a real parser would notice):
@@ -302,19 +305,22 @@ Rules the implementation MUST follow (each exists because a real parser would no
 3. **No binary in the header block**; no header names containing `tbtun`.
 4. **`Transfer-Encoding: chunked`** must be last among hop-by-hop headers; no
    `Content-Length` on the same message.
-5. **Chunk sizes**: hex, lowercase, no leading zeros. A data-bearing chunk is
-   `[0x800, 0x2020]` (2048..8224); a PAD-only keep-alive chunk is `0x20` (32) and is the
-   one exempt size (§3.3). Body content is opaque binary, which is normal for
-   `application/octet-stream` uploads.
+5. **Chunk sizes**: hex, lowercase, no leading zeros. A DATA chunk is exactly
+   `TBT_HDR_LEN + body_len` (33..8224); bulk capture with 8 KiB frames produces `0x2020`.
+   The `[0x800, 0x2020]` range is the typical bulk shape, not a floor the emitter can
+   enforce: a small application write produces a small chunk. A PAD-only keep-alive chunk
+   is `0x20` (32) and is the one exempt size (§3.3). Body content is opaque binary, which
+   is normal for `application/octet-stream` uploads.
 6. **Timing**: a carrier must never be idle for more than `keepalive_ms` (default 5000 ms)
    without *something* on the wire: a zero-length chunk is not legal mid-message, so we
-   send a **PAD chunk** (one 32-byte `TBT_PAD` frame; 32 bytes of chunk data) or, if the
-   carrier is between segments, a fresh empty POST. See §3.7.
+   send a **PAD chunk** (one 32-byte `TBT_PAD` frame; 32 bytes of chunk data). There is no
+   fresh POST and no terminator: one chunked message lives as long as the carrier. See
+   §3.7.
 7. **Response 200** arrives immediately (before request body completes). A parser sees a
    normal "upload with streamed response" conversation, which is a real pattern.
 8. **No `Expect: 100-continue`** (would add a round trip and an extra message shape).
 
-Failure to meet (1)–(5) is a *correctness* bug of the classification goal, not just
+Failure to meet (1)–(4) is a *correctness* bug of the classification goal, not just
 cosmetics; §10 T13 has a parser-based conformance check.
 
 **Implementation ruling (request emission).** The block above is fixed by
@@ -325,10 +331,8 @@ cosmetics; §10 T13 has a parser-based conformance check.
   but the explicit request block in this section has no `Date`, and a browser request
   normally has none. The emitter follows this section; `Date` is a response header.
 - `Host` is a canonical IPv4 literal followed by `:port` (`203.0.113.9:443`; the emitter
-  always includes the port, never the optional form
-  `203.0.113.9:8443`). No hostname, no IPv6 literal, no leading zeros. The port is
-  included when it is not the scheme default (80), so the value matches the connection
-  target as this section requires.
+  always includes the port, including port 80). No hostname, no IPv6 literal, no leading
+  zeros. The value matches the connection target as this section requires.
 - `X-Request-Id` is exactly 26 characters from the lowercase RFC 4648 base32 alphabet
   `[a-z2-7]`; the caller supplies it, because the container unit has no random source.
 - `Transfer-Encoding` is emitted after `Content-Type` and before `Connection`, following
@@ -378,13 +382,16 @@ Frame header, exactly 32 bytes (offsets add up):
                      20 FBK / 21 WINDOW / 22 HELLO / 23 PAD / 24 RETIRE / 25 SACK
                      (11 PREDICT and 12 CANCEL were removed in 0x0005)
 +1  u8   flags       bit0 HEAD_OF_RUN, bit1 DATA_VERIFIED, bit2 KEEP, bit3 low-prio,
-                     bit4/bit5 reserved (were MUST_ORDER / has-token); bits 6..7 zero
+                     bit4 MUST_ORDER, bit5 HAS_TOKEN; bits 6..7 must be zero.
+                     Only bit3 is ever set by this revision's emitter; the other five
+                     are defined and accepted so a later use needs no wire bump
 +2  u8   path_id     index of the carrier this copy will be sent on (0..15)
 +3  u8   path_ack_count (0..16)
 +4  u16  path_ack_mask   bit p set ⇔ feedback present for path p
 +6  u16  body_len    bytes of payload after this header (0..8192)
 +8  u64  seq          stream sequence (DATA)
-+16 u64  uack         cumulative seq received on this frame's own path
++16 u64  uack         the sender's contiguous received offset for the stream
+                     (per-path uack lives in the FBK entry, not here)
 +24 u32  sid_lo       low 32 bits of the 40-bit stream id
 +28 u8   sid_hi       high 8 bits of the 40-bit stream id (v4 uses them)
 +29 u8   reserved2 (0)
@@ -414,9 +421,12 @@ Payload layouts:
   `uack` is the cumulative DATA payload bytes received on that path (v4); it is
   used for inflight and negative proof, not as a per-stream delivery proof. `recv_cnt`
   is the DATA records received on that path; `rtt_us` is the receiver's TCP SRTT for the
-  carrier (0 when unmeasured). `rx_state`: 0 ok, 1 any stream has a hole, 2 any stream
-  is paused/connecting, 3 session closing. Per-stream state travels in SACK.
-- **WINDOW**: `u64 total_recv_ts_ns; u64 path_recv_ts_ns[16]; u16 credit`.
+  carrier (0 when unmeasured). `rx_state`: 0 ok, 1 the stream has an out-of-order
+  backlog, 2 the stream's delivery queue is at or above 2 MiB, 3 the stream is dead.
+  Per-stream state travels in SACK.
+- **WINDOW**: reserved. The type and its exact 138-byte body are defined so a later
+  revision can add it without renumbering, but this revision's receiver refuses it with
+  `-EPROTO`; no sender emits one.
 - **HELLO**: `u8 ver; u8 role; u8 nonce[16]; u16 payload_max; u16 chunk_max; u8
   profile|gen`. `ver` is `TBT_WIRE_VERSION` (1), independent of the module version. The last byte has exactly the §3.1.1 layout:
 
@@ -434,11 +444,9 @@ Payload layouts:
 - **PAD**: empty; exists only to keep the carrier warm.
 - **RETIRE**: payload = `u8 index` (exactly 1 byte); `seq` is the retired generation.
   A far-side carrier slot retires before a replacement at the same index joins (§4.3).
-- **SACK**: payload = `u8 state` (0 ok, 1 hole, 2 paused/connecting, 3 dead);
+- **SACK**: payload = `u8 state` (0 ok, 1 out-of-order backlog, 2 delivery queue full,
+  3 dead);
   header `sid_hi:sid_lo` names the stream and `uack` is its contiguous received offset.
-
-Resume token (16 B): `u8 tracks; u8 order; u16 withheld_len; u32 withheld_h2;
-u64 withheld_seq`.
 
 **Implementation ruling (chunk decode).** The receive side is deliberately more liberal
 than the emit rules, because it must accept a peer and a middlebox that only relays:
@@ -526,7 +534,13 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
   becomes the session **anchor**, and every later HELLO from another address is refused
   before its nonce is examined (`join_src_reject`). A configured far `peer=` fixes the
   anchor at session creation. Without `nonce=`/`peer=` the first connection chooses the
-  session; configure both to remove that race.
+  session, and the module logs one `trust-on-first-use` warning at session creation;
+  configure both to remove that race.
+- **One anchor, one source address.** The anchor is a single address, not a set. A near
+  host that sources carriers from several addresses (multi-homed, or a NAT that rebinds
+  mid-session) is rejected on every carrier whose source differs from the anchor, even
+  with the correct nonce. Recovery is a new session from the anchored address; pin
+  `srcaddrs=` to the address the far side will anchor on.
 - **Initiator rule**: only the near side allocates sids and only the near side opens
   carriers. The far side never initiates. The far side's *public* connections (target-side)
   are created by the module but their stream ids come from the same near-side allocator —
@@ -540,22 +554,20 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
 - **`keepalive_ms` default 5000 ms**. Rationale: DPI/state machines that reap
   idle flows are commonly configured in the 5–30 s range; 5000 ms sits below the low end. This
   is an **assumption, not a measurement** (§19 Q2, §17).
-- If a carrier has had no bytes in either direction for `keepalive_ms`, emit a PAD chunk
-  (32 bytes: one header-only PAD frame) in the request body; if the response body is idle,
-  the far side also emits one. The receiving parser discards it.
+- If a carrier has written no bytes for `keepalive_ms`, emit a PAD chunk (32 bytes: one
+  header-only PAD frame) in its request/response body. Each side runs the test on its own
+  transmit clock, so an idle far side emits its own PAD. The receiving parser discards it.
 - `http-kal-drip` carriers instead emit one byte every `drip_ms` (default 1000 ms, so
   ~8 bit/s per spare), which is cheaper than PAD bursts and keeps the flow's byte-rate
   tier alive. Recommended for the `M` spares (§3.1.1, §16.4).
-- Not implemented: the carrier never emits a chunked terminator or a fresh POST. It keeps
-  one chunked POST for the life of the carrier (headers once, then chunks; PAD/drip for
-  idle). The planned between-segment behavior — after `0\r\n\r\n` and before the next POST, the gap should also stay
-  under `keepalive_ms`; the next POST starts as soon as there is a frame to send, and an
-  empty chunked POST (`Transfer-Encoding: chunked` then `0\r\n\r\n`) — is **deferred**
-  with the fresh-POST work; the code keeps one POST. The planned empty POST is used if the gap
-  would otherwise exceed it. That is exactly what an idle upload does.
-- A carrier the classifier downgrades or drops is detected by the carrier's own TCP state
-  (RST, or `tcp_keepalive` inside the socket, or absence of the response PAD echo for
-  `keepalive_ms × 2`) and replaced from the spare pool within one RTT (§9.7).
+- The carrier never emits a chunked terminator or a fresh POST. One chunked message lives
+  for the life of the carrier: headers once, then chunks, with PAD/drip while idle. A
+  receiver that sees a `0\r\n\r\n` resets its container for the next message, but this
+  module never sends one.
+- A carrier the classifier downgrades or drops is detected by its own TCP state: a closed
+  or non-`ESTABLISHED` socket, or `snd_una` static while `snd_nxt` moved for
+  `carrier_stall_ms` (3000 ms). Delivery backpressure defers that decision (§5.5). The
+  replacement then dials from the spare pool (§9.7).
 
 ---
 
@@ -603,9 +615,10 @@ records as if they proved the hole received (`depth_fail=18` at `g < 4`, probe G
 **Consistency gate** (the real logic): the sender accepts a hole on path `p` at seq `q`
 only when the receiver's *published* view shows that path dropped records — the sender's
 writes on `p` below the peer's high-water for `p`, minus the peer's `recv_cnt` for `p`,
-is greater than zero — and every other live path's `uack` is ≥ `q`. There is deliberately
-no freshness requirement on the lossy path: while it is dropping, no fresh `uack` from it
-can exist, so requiring one makes the gate unsatisfiable. No sender-side estimate
+is greater than zero — and every other live path's `uack` has passed the hole's end on
+that path (`path_end[i]`, not `q`). There is deliberately no freshness requirement on the
+lossy path: while it is dropping, no fresh `uack` from it can exist, so requiring one
+makes the gate unsatisfiable. No sender-side estimate
 (retransmit attribution, loss EWMA, own high-water) takes part. Without this gate the test
 fires on mere reordering and floods the wire with useless speculative copies.
 
@@ -631,28 +644,39 @@ paths whose `recv_lag` (writes below the high-water minus the peer's `recv_cnt`)
 The FBK *header* keeps the global contiguous offset, which is what the send window and
 retention use.
 
-**The per-hole timer.** The retransmit timer re-sends the first hole on a path other than
-the ones the frame used, and declares it once when it does. A 20 ms floor (two 10 ms
-feedback intervals) keeps the timer from winning the race against the FBK
-cadence. The
-declaration is deferred while a copy of the frame is still in flight — a path that wrote it
-has a high-water below the frame's end, and a record is atomic, so the bytes cannot have
-arrived there yet. That test is sound even on a path with record loss, unlike the
-high-water ≥ end test. A frame already written on two paths is a *copy* hole, and a tunnel
-configured with `dup` counts its holes through `dup_tx`/`dup_used`, not `holes_declared`:
-the duplication is the mechanism under test, and its repairs must not be re-counted as
-primary-path declarations.
+**The retransmit timer.** The timer runs from the FBK tick and from every pump, considers
+retained frames in seq order, and queues at most eight copies per pass. It declares at most
+the first candidate as a hole (`holes_declared`); the geometric test above is the other
+declaration site and the only one that injects a burst. The declaration is deferred while
+a copy of the frame is still in flight — a path that wrote it has a high-water below the
+frame's end, and a record is atomic, so the bytes cannot have arrived there yet. That test
+is sound even on a path with record loss, unlike the high-water ≥ end test. A frame already
+written on two paths is a *copy* hole, and a tunnel configured with `dup` counts its holes
+through `dup_tx`/`dup_used`, not `holes_declared`: the duplication is the mechanism under
+test, and its repairs must not be re-counted as primary-path declarations.
 
-**When may a frame be retransmitted?** The intended rule is that only the carrier TCP's
-own acknowledgement (`snd_una` covering the copy's `snd_nxt` at write) may start the RTO,
-so frames queued in our own socket are never declared lost. That rule was implemented
-(`first_sent_seq`/`una_observed_ns` per path) and **reverted**: with it, probe I's near
-carriers hit the `w_poll` stall because the earlier (false) retransmits had been what kept
-`snd_una` moving; the replacements' HELLOs then hit the far's `join_dup` (the old index
-still live) and the strict phase deadlocked into a 32 s receiver hole. The retransmit
-timer therefore still starts at the handoff, and `retx_ppm` stays 9–20% on shaped
-carriers. The carrier-stall/`join_dup` replacement loop must be fixed before this rule can
-land; the `drop_ppm` injector will keep using the current `snd_nxt` as its virtual mark.
+**When may a frame be retransmitted?** Three branches, all counted where the carrier
+accepts the write (`retx_frames`, and exactly one of `retx_hole`/`retx_slow`/
+`retx_pathloss`/`retx_other`):
+
+- **Hole** (`retx_hole`): the frame at the peer's contiguous received offset
+  (`seq == tx_ack`) and no tunnel ack has landed for 2×RTO (or none has ever landed).
+  Receiver evidence outranks the heuristics: the frame gets one copy per RTO, the
+  copy-share cap is waived, and the queue bound still applies.
+- **Path loss** (`retx_pathloss`): the carrier that last wrote the frame died
+  (`retx_now`). It is re-sent immediately, with no RTO wait.
+- **Slow** (`retx_slow`): everything else. A copy is eligible only after the carrier TCP
+  has taken the bytes: every path that wrote the frame must satisfy
+  `snd_una >= first_sent_seq[i]` (the `write_seq` just past the record, plus any
+  short-write tail), and the earliest such observation must be at least 3×RTO old. If a
+  copy is not yet acked, the frame is eligible only when every path that wrote it has gone
+  a full RTO without moving `snd_una`; a path that is still making progress means the
+  frame may simply be in flight. This is the **stalled-path avoidance** rule.
+
+`retx_other` is the default tag for a copy queued without one of those three reasons; the
+current paths never produce one. A retransmit copy is also steered away from a path that
+has unacked bytes and has not moved `snd_una` for an RTO, so a blackholed carrier does not
+win the scheduler exactly when it can deliver nothing.
 
 Measured: with 10% loss on one path the test declares and repairs every hole of a 4 MiB
 transfer (one run: `dropped=23 holes_declared=109 holes_repaired=109
@@ -665,17 +689,25 @@ those, which is the intended division of labour.
 
 ### 4.4 What is injected
 
-For a lost seq `q` at depth `g`:
+For a lost seq `q` at depth `g` the sender re-emits the *actual withheld frame* from the
+retention list: `d2 = dup + 1` copies for `g == 1`, `d2 = dup` for `g > 1`, at least one,
+on paths the sequence has not used. This is not extrapolation and not a placeholder; the
+bytes are the application's own, and the receiver accepts them at the exact seq. If the
+ring no longer holds the frame (only after `tx_retain_bytes` trimmed it), nothing is
+emitted: the receiver's `hole_budget_ms` bounds the wait and the stream is reset when the
+true bytes never arrive (§4.6 case B).
 
-1. **Bytes still in the replay ring** (the normal case, `replay_ms` ≥ 1 s): re-emit the
-   *actual withheld frame* as `d2` copies on paths not already used —
-   `d2 = dup_degree` for `g == 1`, `dup_degree − 1` for `g > 1`. This is not extrapolation,
-   it is immediate loss recovery without RTO.
-2. **Bytes no longer in the ring** (only if the ring underflowed, §9.6): nothing is
-   emitted. The receiver never advances across a gap, so `hole_budget_ms` bounds the wait
-   and the stream is reset when the true bytes never arrive (§4.6 case B). A placeholder
-   that carries no application byte cannot advance delivery; one that advances it without
-   the bytes would break byte exactness.
+**Decision record: placeholder advancement removed (`TBT_CONV` 0x0005).** Earlier
+revisions carried PREDICT (`0x11`) and CANCEL (`0x12`) frames that announced an inferred
+seq range ahead of the hole and cancelled it on arrival. The receiver never advanced
+`rx_next` from them: delivery requires the exact seq with real payload, so a frame that
+carried no application byte could not move the stream, and one that moved it without the
+bytes would break byte exactness. The working mechanism is the sender-side immediate
+retransmit above. The two frame types, their sender paths, the receiver bookkeeping and
+the `predict_*` counters were deleted; `TBT_CONV` is `0x0005`, and a 0x0004 peer that
+still sends `0x11` or `0x12` fails `tbt_hdr_check()` and its carrier closes. `rx_next`
+advances only on a contiguous real byte, and a hole the sender cannot fill ends in the
+bounded reset.
 
 We never invent payload bytes. Under TCP-over-TCP no receiver can know the content of a
 lost segment; inventing it breaks byte exactness.
@@ -691,10 +723,10 @@ Per stream, one ordered queue (`rb_root_cached` keyed by seq) plus `next_expecte
 - Implemented policy, stated exactly: delivery advances `next_expected` **only on an exact
   seq match**; a frame ahead of the gap waits in the tree, and a frame behind it is a
   duplicate. The planned *transparent hole* advance (deliver past a gap and backfill) is
-  **not implemented**: there is no hole list, and a gap that the sender cannot fill ends in
-  the bounded reset of §4.6. The consequence is that a permanently missing byte costs a
-  stream reset rather than a transparent backfill; this is the safe default while the
-  sender-side retransmit is the only filler.
+  **not implemented**: there is no receiver-side hole list, and a gap that the sender
+  cannot fill ends in the bounded reset of §4.6. The consequence is that a permanently
+  missing byte costs a stream reset rather than a transparent backfill; this is the safe
+  default while the sender-side retransmit is the only filler.
 
 This is the asymmetry that makes a kernel-owned endpoint strictly better than a userspace
 bridge: the "hole" is a kernel-side concept, invisible to the application, and the
@@ -715,14 +747,14 @@ the transfer reset).
 
 | Case | Condition | Result |
 |---|---|---|
-| A | true bytes arrive (any copy) before `hole_budget` | hole removed; delivery continues; no visible effect |
+| A | true bytes arrive (any copy) before `hole_budget_ms` | hole removed; delivery continues; no visible effect |
 | B | the tree head does not advance for `hole_budget_ms` (500 ms), or the reorder tree exceeds `hole_budget_bytes` (64 KiB, or `rx_reorder_bytes` when larger) | stream RST to the app: `ECONNRESET` on the public socket; far side RSTs the target |
 
 **The honest tradeoff**: case B converts an unbounded TCP retransmit hang into a bounded
 reset. On a path with persistent, uncorrelated loss this is a real regression versus plain
 TCP. It is correct only when loss is *bursty and short* — which is the profile of
 ISP policer drops. The mitigation is that the sender repairs from the replay ring before
-the budget expires; with `replay_ms = 1000` a reset needs ~1 s of sustained total loss on
+the budget expires; with the 1 s replay grace a reset needs ~1 s of sustained total loss on
 all carriers (§19 Q2). The receiver never advances past a gap: there is no placeholder
 frame, because a frame that invents no byte cannot advance delivery.
 
@@ -758,10 +790,11 @@ scales with `d`; a loss-inflating CC reads its own duplicates as bandwidth and c
 
 ### 5.2 Carrier CC and pacing
 
-Carriers run the stock CC (default `bbr`). The module sets `sk_pacing_status =
-SK_PACING_NEEDED` when duplicating (so fq EDT paces each carrier correctly, including TSO)
-and sets `sk_pacing_rate` only for the session-wide cap of §5.3. `TCP_NODELAY` on;
-`TCP_CORK` unused.
+Carriers run the stock CC (default `bbr`) and stock pacing. The module never writes
+`sk_pacing_status` or `sk_pacing_rate`; it sets `TCP_NAGLE_OFF` on each carrier socket and
+paces only through its own token bucket (§5.3). `TCP_CORK` is unused. A duplicate is a
+separate `tcp_sendmsg_locked()` write on a different carrier, so the carrier's own CC and
+EDT see it as ordinary traffic.
 
 ### 5.3 Tunnel-wide token bucket
 
@@ -770,15 +803,15 @@ and sets `sk_pacing_rate` only for the session-wide cap of §5.3. `TCP_NODELAY` 
 C6 shape is the single `u64` token bucket described below; there is no `tbt_bucket` type in
 the tree.
 
-Default `rate_bps = 0`. The cap exists because the *inner* flow's CC (the public socket's
+Default `tunnel_rate = 0`. The cap exists because the *inner* flow's CC (the public socket's
 own congestion algorithm, running in stock TCP on a socket we own) already limits rate; the
 bucket is the outer safety net for misconfigured inner CC (`cubic` on a 10 G link with a
 long RTT).
 
 **Implemented in C6:** one `u64` token bucket per session, refilled on every pump run from
-`tunnel_rate` with `burst = 2 × n_car × TBT_CHUNK_MAX`; `rate_bps = 0` is unlimited. It is
+`tunnel_rate` (bytes/s) with `burst = 2 × n_car × TBT_CHUNK_MAX`; `tunnel_rate = 0` is unlimited. It is
 checked per DATA frame (duplicates and retransmits included) at path selection; control
-frames bypass it. There are no per-CPU reservations yet. The bucket's first job in this
+frames bypass it. There are no per-CPU reservations. The bucket's first job in this
 tree is test determinism: probe H uses 2 MB/s to make a 4 MiB transfer last long enough to
 inject a two-second outage.
 
@@ -833,9 +866,9 @@ it on transitions, not periodically), so a carrier that was full arms a per-carr
 `w_pump` delayed work on `system_dfl_wq`; the timer is cancelled when the queue drains.
 `pump_hw_armed`, `pump_hw_disarmed` and `pump_hw_fired` count the timer's life.
 `SOCK_NOSPACE` lives in `sk_socket->flags`, not `sk_flags`, and is set while the timer is
-armed so the socket layer's own wakeups cooperate. The old 64 KiB admission line left a
-shaped 10 Mbit carrier idle for 840 ms per burst; the measured single-carrier control rose
-from 2.7–3.2 Mbit/s to 5.5–6.5 Mbit/s after the change (probe I).
+armed so the socket layer's own wakeups cooperate. The old fixed 64 KiB admission line
+left a shaped carrier idle between bursts; the kernel's own memory test replaced it, so
+admission now tracks the carrier's real sndbuf.
 
 **Zero-length control frames and the pump wake.** `tx_queued` counts payload bytes, so a
 pinned HELLO/OPEN/FIN/RST (`body_len` zero) adds nothing to it. A killed stream's DATA
@@ -856,11 +889,15 @@ condition documented under "Carrier stall vs peer pause" below.
 `snd_una` has not moved for `carrier_stall_ms` while `snd_nxt` did. A peer that reports a
 full delivery queue (FBK rx_state=2, published as `peer_paused`) or whose delivery queue
 we see full (`st->paused`) cannot advance the ack, so the decision is deferred: the
-window restarts each poll and `stall_paused_skips` counts the deferral, matching
+window restarts each poll and `stall_paused_skips` counts the deferral (atomic because
+every carrier's poll work writes it), matching
 `tbt_tx_stall_check()`. A resume gets a full `carrier_stall_ms`; a genuinely dead socket
 still fails on `!sk` or a non-ESTABLISHED state. Measured in `near.rst_eagain`:
 `peer_paused=1`, `lost=0`, `replaced=0`, `stall_paused_skips=1184` during the paused
-drain; before the gate the same window reported `lost=1 replaced=1`.
+drain; before the gate the same window reported `lost=1 replaced=1`. The gate trusts the
+peer's pause report: a peer that keeps reporting `rx_state=2` (or an application that never
+reads) defers loss detection indefinitely, so a dead carrier behind a paused stream is
+replaced only after the pause clears or the socket itself closes.
 
 **Peer-window admission.** DATA is admitted only while
 `write_seq - snd_una < snd_wnd` (or one chunk when `snd_wnd` is 0). `snd_nxt` is not
@@ -871,27 +908,37 @@ zero-window persist, where recovery is the persist timer rather than the next AC
 (measured: `near.rst_eagain`, the last ~282 bytes static for 60 s while the far's window
 was open). DATA stays in the module queue; control frames bypass the gate, so a pinned
 RST can leave after the in-window bytes. The gate arms the 2 ms `w_pump` and counts
-`win_block`/`win_resume`; a full peer window counts as the pump's hiwat proof. Measured:
-`near.rst_eagain` 3/3 with `win_block=152..216`, `win_resume=1`, RST in `wire` at
-~98 KiB, `ctl_lost=0`, `ctl_queued=0`.
+`win_block` (every refused DATA admission, not a transition) and `win_resume` (the
+transition back to admitting); a full peer window counts as the pump's hiwat proof.
+Measured: `near.rst_eagain` 3/3 with `win_block=152..216`, `win_resume=1`, RST in `wire`
+at ~98 KiB, `ctl_lost=0`, `ctl_queued=0`.
+
+The gate is a **heuristic**, not a protocol guarantee. `snd_wnd` is read from the carrier's
+`tcp_sock` without the socket lock; a stale value can be too small (DATA waits for the next
+ACK/2 ms pump, harmless) or too large (up to one window of DATA enters sndbuf and parks in
+persist). A zero window admits exactly one chunk by design, so a genuinely zero-window peer
+still receives one chunk that waits for the persist timer. It gates DATA only: FBK and
+stream control bypass it, which is deliberate — feedback must not die behind the queue it
+describes.
 
 **RTT.** The sender maintains `rtt_min_us` and an EWMA (`(7*old + new)/8`) per path from
 two sources: the FBK's `rtt_us` (the receiver's TCP SRTT of the carrier), and, when a path's
 ack advances to a byte inside a retained frame last sent on that path, the elapsed time
-since that write. Both are estimates; the FBK's SRTT is the steadier one.
+since that write. Both feed the same EWMA; the carrier's own SRTT is the floor for the RTO
+calculation, because the FBK value can be stale or zero.
 
-**Loss estimate.** A retained frame whose last write is older than
-`rto = clamp(4 × max_path_rtt, 20 ms, 250 ms)` and that the peer has not received is
-re-sent on a path other than its last one when another path exists. `max_path_rtt` is the
-larger of the FBK's estimate and the carrier's own TCP SRTT: the FBK value can be stale or
-zero, and a shaped 40 ms path read as 1 ms retransmits the whole payload (measured: probe I,
-`loss_ppm` ~10% with no configured loss). Only the frame at the hole is sent on the timer:
-frames behind it may simply be waiting in the peer's reorder tree, and re-sending them would
-turn one drop into a burst of duplicates. A retransmit copy that has not been written for a
-whole RTO is retried even though it is still marked pending; a copy stuck behind a full
-queue otherwise leaves the hole until the peer's budget resets the stream (measured: probe
-F, one run in three). A path that is declared lost marks *all* of its outstanding frames for
-immediate re-send.
+**Loss estimate and RTO.** The RTO is
+`max(4 × max_path_rtt, 2 × fb_delay_us)` clamped to `[20 ms, 500 ms]`, where
+`max_path_rtt` is the larger of the path RTT EWMA and the carrier TCP's SRTT, and
+`fb_delay_us` is the measured application-ack lag after the carrier TCP ack. Before the
+first tunnel-level ack the RTO is held at 200 ms: the only sample available then is the
+carrier's own SRTT, which a shaped egress path can report as ~0.1 ms while the real
+feedback path is ~22 ms (measured: probe J, `rto_us=20000`, a 131 KB stream inflated to
+7.7 MB). The slow-path grace, the hole branch and the 2×RTO receiver evidence are in §4.3.
+A retransmit copy that has not been written for a whole RTO is retried even though it is
+still marked pending; a copy stuck behind a full queue otherwise leaves the hole until the
+peer's budget resets the stream (measured: probe F, one run in three). A path that is
+declared lost marks *all* of its outstanding frames for immediate re-send.
 
 `peers` renders `rx_lag_ppm` from the receiver-published record counts: frames the
 receiver has not yet accounted for below the sender's write high-water; includes in-flight
@@ -903,10 +950,11 @@ whose receiver has a real in-order hole at its parser (the frame at `rx_next` mi
 later frames fill the tree) reads the hole: probe I's shaped carriers still show
 0–12,800 ppm from such holes even with no configured loss, because the ratio reports what
 the receiver has not received, not what the wire dropped. A separate `retx_ppm` column is
-the operator-visible retransmit rate: DATA copies written / unique DATA records written,
-counted where the carrier accepts the write, with the tunnel's c3 line splitting the
-copies by the branch that queued them (`retx_hole`, `retx_slow`, `retx_pathloss`) and
-reporting `dup_bytes_ppm` (copy payload / application bytes). The earlier definition
+the operator-visible retransmit rate on that carrier: DATA copies written / unique DATA
+records written (`data_frames - retx_data`), counted where the carrier accepts the write.
+The tunnel's `c3` line reports the same idea session-wide as `retx_data_ppm`, and splits
+the copies by the branch that queued them (`retx_hole`, `retx_slow`, `retx_pathloss`,
+`retx_other`); `dup_bytes_ppm` is copy payload / application bytes. The earlier definition
 divided copies by every record on the path, FBK included, and under-reported the rate by
 about half. An earlier build sampled the raw `data_frames`/`recv_cnt` deltas
 as an EWMA and read 20,000–100,000 ppm on probe I's clean shaped carriers: the carrier's
@@ -917,13 +965,15 @@ queued in the receiver's parser is not counted as a drop. The slow path waits 3�
 on a clean 40 MiB n=4 run, 310 of 313 copies came from frames whose carrier TCP had
 acked them while the peer's delivery queue (26–32 MB) held the contiguous uack back;
 3×RTO cut them to 15–81 and whole-run wire/app from 1.047 to 1.024, with probes J/K
-still 3/3 (`benches/README.md` §7). The retransmit timer still
-starts at the handoff; the `snd_una`-gated rule was attempted and reverted because it
-deadlocked probe I's strict phase through the carrier-stall/`join_dup` replacement loop
-(§4.3). The send buffer stays 1 MiB; BDP-sized buffers (both 128 KiB and a
-clamp(2 × BDP, 64 KiB, 1 MiB) variant) broke the strict phase by closing the window and
-are recorded in §15. `retx_ppm` read 9–20% on shaped carriers under the old 2×RTO grace;
-with 3×RTO it reads 0.15–0.8% in the clean 40 MiB n=4 runs.
+still 3/3 (`benches/README.md` §7). The snd_una gate applies to that slow path; the hole
+branch still starts at the handoff because the frame at the received ack is the one case a
+write clock cannot see. The carrier send buffer is 256 KiB; a BDP-sized buffer was
+attempted and broke the strict phase by closing the window (§15). In the final 40 MiB
+n=4 runs (`20261106T001021`,
+`20261106T001824`) `retx_ppm` is 1,842 and 1,164 ppm, with `retx_hole` 10/4,
+`retx_slow` 9/8 and `retx_pathloss` 0; the n=1 run (`20261106T002627`) wrote zero
+copies. The copies cost 0.15–0.8% of application bytes in the clean rows, and the
+run-to-run spread is variance, not a second mechanism.
 
 **Hole detection and repair (C6).** The geometric test of §4.3 runs once per FBK. When
 it declares a hole, the real retained bytes are re-sent on paths the sequence has not used
@@ -1009,11 +1059,11 @@ costs one TCP handshake instead of a new session.
 - Bind sequence: `inet_bind()` with the exact `(src_addr, src_port)` from the bitmap, then
   `kernel_connect()`. No `IP_BIND_ADDRESS_NO_PORT` (we want a *specific* port to keep the
   LSP's flow accounting stable across carrier replacement). `SO_REUSEADDR` is **on**
-  for the carrier and listener binds (`tbt_carrier.c:1126`, `tbt_listen.c:130`): a replacement
+  for the carrier and listener binds (`tbt_carrier.c:1322`, `tbt_listen.c:130`): a replacement
   carrier (and a replaced tunnel line or reloaded module) rebinds a port just freed by
   the dead carrier while the old connection sits in `TIME_WAIT`. The cost is that a
-  `TIME_WAIT` tuple can make `connect()` fail;
-  the port-block retry below covers it by advancing to the next free bit. The block
+  `TIME_WAIT` tuple can make `connect()` fail; the retry below frees the port and draws a
+  new one on the next attempt. The block
   is reserved and the module's bitmap prevents two live carriers from sharing a port,
   so this does not steal an unrelated session's port. `SO_BINDTODEVICE` is not
   implemented; there is no `dev=` key.
@@ -1021,9 +1071,11 @@ costs one TCP handshake instead of a new session.
   key: it selects the local source address for carriers, and only the first entry is used;
   the remaining entries are recorded for round-trip. Multi-address listeners are not
   implemented.
-- Allocation retry: if the chosen port is in `TIME_WAIT` at the peer/our stack, advance to
-  the next free bit; after `repeat` ≤ 4 failures, fail the carrier and report
-  `alloc_fail` in `/proc/net/tbtun/stats`.
+- Allocation retry: a failed bind or connect frees the port and returns the carrier to the
+  50 ms poll, which re-dials after 200 ms with a fresh draw from the bitmap. There is no
+  fixed attempt count inside one dial; the carrier keeps retrying until the tunnel is
+  removed. `carrier_alloc_fail` (`alloc_fail`) counts the failed start, and
+  `port_exhaust`/`port_alloc_fail` name the bitmap reason when that is why.
 
 ### 7.3 Block sizing
 
@@ -1421,8 +1473,10 @@ holding the socket lock. The reset path (`tbt_kill_work -> tbt_sock_detach`) can
 work item, and `cancel_work_sync()` then waits for the sleeper forever: QEMU reported
 `INFO: task kworker blocked for more than 122 s` in exactly that stack. Delivery is
 therefore `MSG_DONTWAIT`, and the reset close runs on `system_dfl_wq` so it never shares
-a pool with the work it cancels. The output socket and every carrier also get 1 MiB
-send/receive buffers, so the default 16 KiB buffer is not the first thing the tunnel hits.
+a pool with the work it cancels. The public/target socket gets 1 MiB send/receive
+buffers; a carrier gets 256 KiB, which covers the 4×10 Mbit × 50 ms BDP and keeps the FBK
+from trailing the write by seconds. The default 16 KiB buffer is not the first thing the
+tunnel hits.
 
 **Why not receive-queue injection.** `docs/recvmsg-probe.md` measured that the
 application's descriptor is its *client* socket, a different object from the accepted
@@ -1448,9 +1502,11 @@ stops sending, capture drains nothing, the public socket's receive window closes
 
 The sizes are measured, not guessed:
 
-- `TBT_SQ_MAX` (64 KiB) is the session capture/TX queue. Reaching it pauses capture
-  (`struct tbt_stream.tx_paused`), closes the public socket's window and blocks the app;
-  it never kills. The `carrier <n> down`-style reset path is elsewhere.
+- `TBT_SQ_MAX` (64 KiB) is the capture backpressure line on the session TX queue; the hard
+  bound is `TBT_SQ_MAX + 4 × TBT_CHUNK_MAX` (about 96 KiB) so retransmit copies can enter a
+  full queue. Hitting the hard bound pauses capture (`struct tbt_stream.tx_paused`), closes
+  the public socket's window and blocks the app; it never kills. Capture resumes when the
+  queue falls to `TBT_SQ_MAX/2`. The `carrier <n> down`-style reset path is elsewhere.
 - `TBT_RX_RING_MAX` (64 MiB) is the ready-to-deliver queue. It must hold the echo a strict
   send-then-read application has not read: the application's own receive buffer does not
   autotune without reads, so this queue is the only place those bytes can wait. Probe I
@@ -1527,10 +1583,11 @@ item. It is never in an fd table.
 
 **No unexported symbol.** The module resolves nothing at load; see §8.8.
 
-### 8.6 Fallback capture (nf hook REDIRECT), and why it is not the default
+### 8.6 Fallback deployment (operator-side REDIRECT), and why it is not the default
 
 For deployments that must keep an application's own listening socket (e.g. an app that
-`bind()`s the port itself), an alternative exists:
+`bind()`s the port itself), an operator-side alternative exists. The module itself
+contains no `nf_hook_ops` code; it only listens on the port the rule names:
 
 - `iptables -t nat -A PREROUTING -p tcp --dport 9000 -j REDIRECT --to-ports <tbtun-internal>`
   so the SYN lands on our kernel listener, which then is the endpoint. This *still* gives
@@ -1558,8 +1615,16 @@ because it runs under `pump_lock`, and one carrier's rx work is the single
 writer of that carrier's `rx_frames/rx_bytes`. Per-carrier TX counters
 (`data_frames`, `tx_frames`, `tx_bytes`, `payload_bytes_sent`, `retx_data`) are
 written only by `tbt_carrier_xmit()` under `pump_lock`; cross-context readers
-use `READ_ONCE()`. The hole gate keeps comparing the same values with the same
-logic; only the access discipline is explicit.
+use `READ_ONCE()`. The split matters at the margins: `stall_paused_skips` is
+`atomic64_t` because every carrier's poll work writes it; `win_block`/`win_resume`
+are plain `u64` because only the pump writes them; `ctl_lost` is atomic because the
+pump and the RST retry path both write it, while `ctl_retry`/`ctl_requeue`/
+`ctl_obsolete` are pump-only; `retx_frames`, `retx_bytes`, `retx_hole`, `retx_slow`,
+`retx_pathloss`, `retx_other`, `data_tx`, `dup_tx` and `retain_drop` are pump-only;
+`dup_used` is atomic because several carriers' rx work can count a first arrival;
+`holes_declared`/`holes_repaired` are plain `u64` because every writer holds
+`tx_lock`. The hole gate keeps comparing the same values with the same logic; only
+the access discipline is explicit.
 
 The session aggregates are sums over every carrier that ever wrote, while
 `peers` lists only the live slots. A carrier that leaves `sess->car[]` (a
@@ -1578,22 +1643,42 @@ equals the sum of the `peers` `tx_bytes` column. `review/lint.sh` refuses a
 plain `u64` declaration or a bare access for the atomic set, so a counter
 cannot silently lose its atomicity again.
 
-The per-tunnel keys rendered today are: `capture_runs, actor_calls, submit_bytes, tx,
-wire, err, short, rx_work_runs,
-rx_drain_entries, rx_drain_bytes, rx_paused_skips, rx_adopt_events, rx_records,
-carrier_write_space_runs, poll_rescues, rx_ready_calls, rx_reads, rx_read_bytes,
-rx_read_zero, rx_resume, rx_resume_busy, rx_last_drained, rx_proto, rx_errs, rx_last_err,
-tx_submit_calls, rx_delivered, txwake, txwake_busy, txwork, ws_calls`. `poll_rescues`
-is the 50 ms liveness net's evidence counter. Two internal fields are not rendered under
-their own names: the debug injector's per-carrier drop count appears as the `peers` column
-`dropped`, and `recv_partial_discard` has no view.
+`stats` renders one block per tunnel, in this order. The keys are exactly the strings
+`tbt_procfs.c` prints:
 
-C3 adds per tunnel: `n, up, lost, replaced, spare_activated, alloc_fail, port_exhaust,
-port_alloc_fail, connect_fail, join_dup, join_bad, join_nonce_reject, join_src_reject,
-fbk_tx, fbk_rx, retx_frames, retx_bytes, retain_drop,
-reorder_overflow, reorder_max_depth, ooo_bytes, ooo_frames, retain_bytes, tx_ack, rx_ack,
-peer_paused, fb_delay_us, rto_us, una_stall_us`; the stream census line prints
-`streams_active, n_streams, n_pending`. `join_dup` counts a HELLO that named an index
+| Line | Keys |
+|---|---|
+| capture | `capture_runs actor_calls submit_bytes tx wire err short` |
+| rx work | `rx_work_runs rx_drain_entries rx_drain_bytes rx_paused_skips rx_adopt_events rx_records carrier_write_space_runs poll_rescues` |
+| rx ready | `rx_ready_calls rx_reads rx_read_bytes rx_read_zero rx_resume rx_resume_busy rx_last_drained rx_proto rx_errs rx_last_err tx_submit_calls rx_delivered` |
+| dbg | `dbg rcv_nxt copied after qlen allocf over copyf hiwat pdead prun pmoved p_nocar p_down p_stop p_empty p_qlen` |
+| live | `live rxq rxp txq txp pub_state pub_wmem pub_una pub_nxt car_wmem car_nxt car_copied car_rcvbuf car_state car_stop car_ud car_ready car_ws txw_pend txw_busy` |
+| tx wake | `txwake txwake_busy txwork` |
+| write space | `ws_calls` |
+| c3 | `c3 n up lost replaced spare_activated alloc_fail port_exhaust port_alloc_fail connect_fail join_dup join_bad join_nonce_reject join_src_reject fbk_tx fbk_rx retx_frames retx_bytes retain_drop retx_hole retx_slow retx_pathloss retx_other data_tx retx_data_ppm dup_bytes_ppm reorder_overflow reorder_max_depth ooo_bytes ooo_frames retain_bytes tx_ack rx_ack peer_paused fb_delay_us rto_us una_stall_us stall_paused_skips win_block win_resume` |
+| ctl | `ctl ctl_lost ctl_retry ctl_requeue ctl_obsolete ctl_queued` |
+| streams | `streams streams_active n_streams n_pending` |
+| c6 | `c6 holes_declared holes_repaired holes_unrecoverable rx_max_stall_us hole_checks gate_fail depth_fail time_fail` |
+| c8 | `c8 profile_mismatch http_parse_err http_status_err http_req http_resp pad_tx drip_tx` |
+| c5 | `c5 dup_tx dup_used dup_suppressed dup_same_path inflate_ppm dup_bytes` |
+| reconcile | `reconcile live_bytes live_data live_retx retired_bytes retired_data retired_retx` |
+
+`retx_data_ppm = retx_frames / (data_tx - retx_frames - dup_tx)`, capped at 1,000,000;
+`dup_bytes_ppm = retx_bytes / tx_submit_bytes`, capped at 1,000,000. `retx_frames` counts
+copies the carrier accepted, `data_tx` counts every DATA record accepted (copies
+included), and `dup_tx` counts duplicate copies; the two subtraction terms are why the
+ratio is over unique records. `retx_hole`/`retx_slow`/`retx_pathloss`/`retx_other` split
+those copies by the branch that queued them (§4.3). `stall_paused_skips` counts a carrier
+poll that deferred the stall decision for delivery backpressure; `win_block` counts a DATA
+admission refused by the peer-window gate and `win_resume` the transition back (§5.5).
+`peer_paused` is the FBK `rx_state=2` mirror, `fb_delay_us` the application-ack lag EWMA,
+`rto_us` the last RTO the timer used, and `una_stall_us` the oldest `snd_una` progress at
+the last retransmit pass. `poll_rescues` is the 50 ms liveness net's evidence counter.
+Two internal fields are not rendered under their own names: the debug injector's
+per-carrier drop count appears as the `peers` column `dropped`, and
+`recv_partial_discard` has no view.
+
+`join_dup` counts a HELLO that named an index
 already occupied by a live carrier (the duplicate is closed, not the session);
 `join_src_reject` counts a far-side HELLO from an address other than the session anchor;
 `port_exhaust` counts a carrier that found every port in the global block in use, and
@@ -1606,8 +1691,9 @@ by a configured `tx_retain_bytes` cap; `tx_ack`/`rx_ack` are the two directions'
 contiguous byte offsets. `peers` additionally exposes per carrier `recv_cnt`,
 `rx_lag_ppm`, `minrtt_us`, `tx_frames`, `tx_bytes`, `dropped` and `retx_ppm`;
 `rx_lag_ppm` counts frames the receiver has not yet accounted for below the sender's
-write high-water (in-flight included, not packet loss), and `retx_ppm` is retransmitted
-frames over frames written. The `reconcile` line prints `live_bytes, live_data,
+write high-water (in-flight included, not packet loss), and `retx_ppm` is that carrier's
+DATA copies over its unique DATA records (`data_frames - retx_data`). The `reconcile`
+line prints `live_bytes, live_data,
 live_retx, retired_bytes, retired_data, retired_retx`; the retired half is the
 contribution of carriers that have left `sess->car[]`, so the session aggregates stay
 auditable against the live `peers` rows after a replacement.
@@ -1615,13 +1701,15 @@ auditable against the live `peers` rows after a replacement.
 Review 22 adds the control-frame lifetime line: `ctl_lost, ctl_retry, ctl_requeue,
 ctl_obsolete, ctl_queued`. A pinned HELLO/OPEN/RETIRE/FIN/RST frame is never freed on
 `-EAGAIN`, `-ENOMEM` or `-EIO`; it is requeued (`ctl_retry`/`ctl_requeue`) and retried
-2 ms apart, up to `TBT_CTL_MAX_RETRIES`. A dead carrier slot waits at the replacement
-cadence instead, because a dial is already in flight. FIN/RST re-pin to the replacement's
+2 ms apart, or 100 ms when the frame's carrier slot is dead and a dial is already in
+flight, up to `TBT_CTL_MAX_RETRIES` (4). `ctl_lost` is `atomic64_t` because the pump and
+the RST retry path both write it; `ctl_retry`/`ctl_requeue`/`ctl_obsolete` are pump-only
+`u64`. FIN/RST re-pin to the replacement's
 generation; HELLO/OPEN/RETIRE of a replaced generation are obsolete and counted in
 `ctl_obsolete`. Only a frame that exhausts the bound is abandoned, as `ctl_lost`; a FIN
 with no written copy then kills the stream rather than leaving the peer half-open.
-`ctl_queued` is the live control-queue depth against `TBT_CTL_QUEUE_MAX`; a producer that
-reaches it gets `-ENOSPC` and retries after the pump drains.
+`ctl_queued` is the live control-queue depth against `TBT_CTL_QUEUE_MAX` (256); a producer
+that reaches it gets `-ENOSPC` and retries after the pump drains.
 
 The write-space contract of §5.5 keeps `pump_hw_armed, pump_hw_disarmed, pump_hw_fired`
 as plain fields (not rendered); the rendered key is `ws_calls` (every `sk_write_space`
@@ -1664,7 +1752,6 @@ Symbols the module needs and why they are safe:
 | `tcp_prot` | `EXPORT_SYMBOL` | the `sk_prot` copy carriers use |
 | `sock_create_kern`, `sock_release`, `kernel_bind`, `kernel_connect`, `kernel_listen`, `kernel_accept`, `kernel_sock_shutdown` | `EXPORT_SYMBOL` | listener, carriers, target |
 | `proc_mkdir`, `proc_create`, `proc_create_data`, `remove_proc_entry` | `EXPORT_SYMBOL` / `_GPL` | `/proc/net/tbtun/*` |
-| `nf_register_net_hook` | `EXPORT_SYMBOL` | REDIRECT fallback (§8.6) |
 | `skb_copy_bits`, `iov_iter_kvec`, `queue_work_on` | `EXPORT_SYMBOL` | data-path plumbing |
 
 **The module resolves no unexported symbol and has no load-time symbol failure.** The
@@ -1718,12 +1805,14 @@ For each of `N + M`:
 
 ```
 sock_create_kern(net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &s)
-tcp_setsockopt(TCP_NODELAY=1)
-tcp_setsockopt(TCP_KEEPIDLE=20, KEEPINTVL=5, KEEPCNT=3)
 sock_set_reuseaddr(s->sk)                 /* §7.2: replacement may reuse a TIME_WAIT port */
-bind(s, src_addr, port_from_bitmap)
+kernel_bind(s, src_addr:port_from_bitmap)
+s->sk->sk_sndtimeo = 1000 ms              /* TBT_CONNECT_TIMEOUT_MS */
 kernel_connect(s, peer, peer_port, 0)     /* blocking in the accept worker / config ctx */
+tcp_sk(s->sk)->nonagle = TCP_NAGLE_OFF
 tbt_carrier_install_proto(s->sk)          /* sk->sk_prot = &tbt_tcp_prot (§9.2) */
+SO_SNDBUF = SO_RCVBUF = 256 KiB
+sk_user_data = c; sk_data_ready/sk_write_space/sk_state_change = tbt_car_*
 ```
 
 `kernel_connect` blocks; it runs in the work item that handles `config` writes and in the
@@ -1857,10 +1946,19 @@ clear error pointing at `raw`-inside-WireGuard.
 
 ### 9.6 Replay ring sizing
 
-`replay_bytes = clamp(2 × BDP_estimate, 2 MiB, max_replay_bytes)`, default 8 MiB
-(= 64 ms at 1 Gbps; document that 10 Gbps needs ≥ 100 MiB), `replay_ms` = 1000. Ring entries
-hold `skb` references (from the public socket) rather than copies; the ring is a
-`u64`-indexed array of `struct tbt_ring_slot { struct sk_buff *skb; u16 off, len; u64 seq; }`.
+`replay` is a per-tunnel byte budget, default 8 MiB (8 MiB = 64 ms at 1 Gbps; a 10 Gbps
+path needs it raised). A retained frame is kept until every copy is acknowledged and at
+least 1 s has passed (`TBT_REPLAY_MS`), or until the byte budget forces the oldest acked
+frames out; unacked frames are never evicted. `tx_retain_bytes` is a separate per-stream
+cap (0 = unlimited) that trims the oldest frames and counts `retain_drop`. There is no
+BDP-derived size and no `replay_ms` key.
+
+Ring entries hold **copies** of the record payload, not `sk_buff` references: capture does
+`skb_copy_bits()` into `r->data` and the pump does `memcpy()` into the frame, so each byte
+is copied twice. A `struct tbt_retain` is `seq`, `len`, the per-path masks and marks,
+`struct tbt_hdr`, and a flexible `u8 data[]`; the ring is a per-stream list, not an
+`sk_buff` array. The two copies are the measured cost of keeping the public socket's skb
+lifetime out of the retransmit path.
 
 ### 9.7 Dead-carrier replacement loop (all kernel)
 
@@ -1889,9 +1987,13 @@ Implemented in C3, per session:
    first), so the replacement's `HELLO(gen+1)` joins instead of returning `EALREADY`. A
    `join_dup` is not retried in a tight loop: the near waits 50 ms per round, caps the
    rounds, then fails the stream cleanly. `replaced` counts the swap.
-4. Retained frames are the recovery source. C3 has no §4.3 hole detector and no
-   second-chance merge; the retransmit timer of §5.5 and the path-loss marking above are
-   what fill a hole. C5 replaces both.
+4. Retained frames are the recovery source. Three mechanisms fill a hole in the final
+   tree: the geometric detector of §4.3 (FBK-driven, declares and injects), the
+   retransmit timer of §5.5 (slow path with the 3×RTO grace and the `snd_una` mark), and
+   the path-loss marking above (immediate re-send of everything the dead path last
+   carried). The stall-pause gate keeps backpressure from being read as loss, and the
+   peer-window gate keeps DATA out of zero-window persist. None of them invents bytes; a
+   hole that none can fill ends in the receiver's bounded reset (§4.6).
 
 ---
 
@@ -1932,9 +2034,9 @@ important change from the previous draft: the test proves the data path needs no
 | T6 | Permanent hole | 100 % loss on one sport after 1 s | app sees `ECONNRESET` at `hole_budget_ms` ± 20 %; no hang, no wrong bytes |
 | T7 | ISP cap speedup | per-sport htb 10 Mbit, N=4 | app goodput ≥ 3.5 × 10 Mbit |
 | T8 | Memory | 2 GiB at max rate | `retain_bytes` ≤ configured caps |
-| T9 | Port block | 200 tunnels × 8 carriers, 64-port block | `alloc_fail=0`, explicit error when exhausted |
+| T9 | Port block | fill the 64-port block with carriers (16 per tunnel) | every live carrier gets a port; the next allocation reports `port_exhaust`, logs once per retry, and the carrier keeps retrying |
 | T10 | Unload | `rmmod tbtun` mid-transfer | all streams RST, `lsmod` clean, no leaks (`kmemleak` if enabled) |
-| T11 | Prediction correctness | netem reorder 2 %, loss 1 % | `holes_repaired/holes_declared ≥ 0.99`; `holes_unrecoverable=0` at 500 ms |
+| T11 | Hole repair | netem reorder 2 %, loss 1 % | `holes_repaired/holes_declared ≥ 0.99`; `holes_unrecoverable=0` at 500 ms |
 | T12 | No collapse | 5 % loss, dup=3 | carrier retransmits (`ss -i`) do not grow monotonically; `max_inflate` respected |
 | T13 | **Classification conformance** | capture a carrier with `tcpdump -w`, run a strict HTTP/1.1 parser (`hyper-h2`'s `h11`, mitmproxy's parser, or python `httptools`) in userspace **offline** | parses as one request/response pair per segment; header casing/order as §3.2; chunk sizes in range; no unknown headers |
 | T14 | Keep-alive warmth | idle 60 s, `http-kal` and `http-kal-drip` | PAD/drip chunks observed at ≤ `keepalive_ms` / `drip_ms`; carrier still `ESTAB`; offline parser does not close |
@@ -1957,18 +2059,17 @@ makes this design different from a generic L4 tunnel.
 | `example/client.py`, `example/server.py` | **delete** |
 | `Makefile` | **rewrite** (`obj-m += tbtun.o`, `tbtun-objs := tbt_*.o`, `-I$(src)/tbtun`) |
 | `scripts/mkdkmsconf.sh`, `scripts/install_dkms.sh` | **edit**: module `tbtun` only; the installer must **not** install anything under `/usr/bin` (it did for `brutalctl`) |
-| `scripts/_redirects`, `.github/workflows/{release,format,scripts}.yml` | **rewrite** |
+| `scripts/_redirects`, `.github/workflows/{release,format}.yml` | **rewrite** |
 | `README.md`, `README.zh.md`, `flake.nix` | **rewrite** |
 | `DESIGN.md` | this file |
 | `tbtun/tbt_*.c`, `tbtun/tbtun.h`, `tbtun/tbt_uapi.h` | **new** |
 | `scripts/tbtunctl` | **never created** — no userspace program ships in any form |
 | `tests/*.sh` | **new** |
 
-Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the current tree reports `0.0.1`
-(release candidate; final regression still pending). The wire revision `TBT_CONV=0x0005`
-bumps independently. HELLO `body[0]` carries `TBT_WIRE_VERSION=1`, not the module
-version, so the module version and the wire version are now decoupled. The cutover is
-recorded in `review/analysis/p3-contract.md` §16.5.
+Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the current tree reports `0.0.1`.
+The wire revision `TBT_CONV=0x0005` bumps independently. HELLO `body[0]` carries
+`TBT_WIRE_VERSION=1`, not the module version, so the module version and the wire version
+are decoupled.
 
 **Packaging.** `tbtun/tbt_uapi.h` is the single version authority: the
 `TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/0/1`). `scripts/mkdkmsconf.sh`
@@ -1978,6 +2079,12 @@ failure is fatal and never falls back to an old value. `dkms.conf` is a generate
 current generated value is `PACKAGE_VERSION="0.0.1"`. `scripts/install_dkms.sh` reads
 the same value through `mkdkmsconf.sh --version`. A development suffix
 `.r<commits>.<sha>` is opt-in with `TBT_DKMS_GIT_SUFFIX=1`; it is not the default.
+
+**Real-machine DKMS install is not validated.** On this host `sudo` needs a password and
+neither `dkms` nor the matching kernel headers is installed, so no real-machine
+`dkms install` / `modprobe` / `rmmod` was run. The equivalent `/tmp` build and load
+validation passed; that is not the same claim. The install script's dry-run and staged-tree
+paths are exercised (§11), and `make` still requires `linux72-headers` (§8.8).
 
 ---
 
@@ -2002,21 +2109,21 @@ covers; no known leak remains but a long-soak kref/RCU audit is still worthwhile
 |---|---|---|
 | R1 | **Duplex backpressure deadlock**: a single-threaded application sends a full volume before reading, while the echo's return path fills | Capture and transmit use opposite queues; the queue caps pause a direction instead of dropping; the strict 4 MiB send-then-read case is the acceptance test (T2). The sender's window is the peer's *received* offset, never its delivered offset: a delivered window was measured deadlocking this case in C3 (§15). The strict volume must still fit the application's own socket buffers; 4 MiB does. |
 | R2 | Byte exactness vs hole repair | Reset beats corruption (§4.6 B); `holes_unrecoverable` monitored. |
-| R3 | Ring under-protects fast links | Refuse `replay_bytes < 2×BDP_est`; document 8 MiB default for ≤ 1 Gbps; T8. |
-| R4 | Port starvation | Reserved block + per-netns bitmap + retry; T9. |
+| R3 | Ring under-protects fast links | `replay` is a configured byte budget (8 MiB default, 64 ms at 1 Gbps); a faster path must raise it. There is no automatic BDP check; T8 measures the held bytes. |
+| R4 | Port starvation | Reserved block + one global bitmap + 200 ms retry; `port_exhaust`/`port_alloc_fail` make the reason visible; T9. |
 | R5 | sid collision | Random prefix + monotonic per session; the allocator skips a live/tombstone sid, and a repeated OPEN for a live stream is idempotent. |
 | R6 | **QoS classifier degrades us** if framing looks abnormal | Binary body framing, canonical headers, 5000 ms cadence, drip spares, T13/T14. Recovering from a *wrong* classification is impossible; this is the top deployment risk, not a correctness risk — and §17 exists to find out cheaply (§16). |
 | R6b | **The QoS premise is false** (SNI-based, or no priority at all) | `raw` profile; per-5-tuple spreading still delivers §16.1. §17 distinguishes the cases in ten minutes. |
 | R7 | ISP/middlebox rewrites or buffers the request body | Response 200 arrives immediately; far side is our own kernel peer using stock TCP; if a middlebox coalesces chunks, the parser is byte-stream, not chunk-aligned. |
 | R8 | TLS ULP on carriers | Unsupported; rejected at config (§9.4). |
 | R9 | GSO/TSO splitting | Chunk data ≤ 8228 B (`TBT_CHUNK_MAX`); parser is byte-stream; no chunk==segment assumption (§3.5). |
-| R10 | Congestion collapse from duplicates | Stock CC, `max_inflate`, spec cap (§5). |
+| R10 | Congestion collapse from duplicates | Stock CC, `max_inflate` cap (§5.4). |
 | R11 | **Kernel-only listener surprises the app** (no fd visible) | Documented: apps must connect to the tunnel port, not bind it. Apps that bind the port need REDIRECT (§8.6). |
 | R12 | No DNS | Config is literal only; the operator resolves names out-of-band (e.g. `dig +short`) and writes the address. |
 | R13 | `sk_prot` override + BPF sockops interactions | Refuse bind if `sock_flag(SOCK_BPF_ATTACHED)`; carriers are module-created so no foreign BPF. No repair mode is ever set. |
 | R14 | `CONFIG_DEBUG_INFO_BTF_MODULES=y` requires pahole | Document in build; DKMS `MAKE` already inherits kernel config. |
 | R15 | Manjaro headers package name | Build doc: `sudo pacman -S linux72-headers` (or matching `linux-*-headers`), then `make`. |
-| R16 | Memory at 10 Gbps | Caps + T8; `max_replay_bytes` 256 MiB. |
+| R16 | Memory at 10 Gbps | `replay` and `tx_retain_bytes` bound the retention; the 64 MiB delivery ring is the largest fixed cost and costs about 2× its payload in physical memory. T8 measures the peak. |
 | R17 | Jitter adds RTT | The reorder tree is consulted only past a gap; the in-order path adds zero delay (T1 asserts). |
 | R18 | `inet_csk_reset_xmit_timer` etc. drift | Not used; stock timers only. |
 
@@ -2111,7 +2218,7 @@ Each commit leaves a testable system.
    spare at no new dial (`spare_activated`), and only a dead spare or an exhausted pool is
    re-dialled. Test: probe E.
 5. **C5 — duplication and the replay ring**: the retention list becomes a replay ring
-   (acked frames kept for `replay_ms` or `replay_bytes`), `dup_degree` copies on distinct
+   (acked frames kept for the 1 s grace or the `replay` byte budget), `dup_degree` copies on distinct
    paths, the `max_inflate` cap, and the counters. Test: probe F.
 
    **C2 state, recorded because it changes the failure mode:** C2 ships without the replay
@@ -2224,32 +2331,29 @@ Each commit leaves a testable system.
    **Thesis probe I (buildenv harness, 40 MiB each way, n=4, each carrier htb-shaped to
    10 Mbit with netem 20 ms ± 10 ms, `rx_reorder_bytes=2097152`, `hole_budget_ms=5000`):**
    both phases complete: the strict 40 MiB is byte-exact and the interleaved coverage phase
-   passes. One measured run: the n=1 control 6.3 Mbit/s, the n=4 main 13.7 Mbit/s, ratio
-   2.17× (the harness's `I_RATIO_MIN=1.8`), interleaved=1. The write-space fix (§5.5) raised
-   the control from the earlier 2.7–3.2 Mbit/s to 5.5–6.5 Mbit/s, so the harness's absolute
-   control ceiling of 4 Mbit/s is stale; the ratio, which is the harness's stated claim,
-   still holds. The temporary init used for the acceptance sets `I_MBIT_MIN=11` (the
-   user's target, stricter than the harness default 6) and the control ceiling 10 (the
-   shaped class rate); the shared init is untouched. At the shipped thresholds
-   (`I_MBIT_MIN=6`, `I_RATIO_MIN=1.5`, control ceiling 10) five consecutive runs passed
-   5/5: n=4 12.2/10.9/11.2/14.3/11.2 Mbit/s, ratios 2.07/1.60/1.81/2.38/1.70, all
-   byte-exact and interleaved. The per-carrier `rx_lag_ppm` is 0–10,230 ppm (receiver lag,
-   in-flight included, not packet loss); the separate `retx_ppm` is 9–20% (89,000–200,000
-   ppm), above the 1% target because the retransmit timer still starts at the handoff into
-   the 1 MiB carrier buffer. **BDP-sized send buffer (attempted, reverted):** SO_SNDBUF was
+   passes. The final 40 MiB rows are in `benches/results/`: n=4 delivered 11.37 and
+   8.38 Mbit/s against controls of 2.85 and 2.68 (ratios 4.07 and 3.17), and n=1 delivered
+   3.14 against 2.54 (1.26); every row is `rc=0 strict=1`. The spread is run-to-run
+   variance on the same build and topology, so report the control with the absolute number.
+   The per-carrier `rx_lag_ppm` is 0–10,230 ppm (receiver lag, in-flight included, not
+   packet loss); `retx_ppm` is 1,164/1,842 on the two n=4 rows and 0 on n=1, with
+   `retx_hole` 4/10 and `retx_slow` 8/9. **BDP-sized send buffer (attempted, reverted):**
+   SO_SNDBUF was
    sized to clamp(2 × BDP, 64 KiB, 1 MiB) at dial/accept and re-applied on >25% RTT
    movement, using tunnel_rate × RTT (or the carrier TCP's cwnd × mss when the tunnel rate
    is 0). Probe I's control strict phase failed immediately (rc=2) with the initial 64 KiB
-   buffer, before any rate could raise it; reverted to the 1 MiB buffer. The retx_ppm target
-   therefore remains open. No kernel warnings or "blocked for more than" appeared.
+   buffer, before any rate could raise it. The final carrier buffer is 256 KiB: 1 MiB at
+   10 Mbit held the uack 2–4 s behind the write, past the RTO, while 256 KiB bounds the
+   delay to 200–400 ms. No kernel warnings or "blocked for more than" appeared.
 
    **Probe J (1% loss + 2% reorder on every carrier):** 4 MiB completes byte-exact in both
    phases with `holes_repaired=65` and no warnings, once the probe has a target on
    `TARGET_PORT3`. The shared probe J starts no `nc` and relies on probe I's; running J
    alone returns rc=2 by construction, not from a module stall.
 
-   **The 64 KiB figure in the report is `TBT_SQ_MAX`, on `struct tbt_session.tx_queued`
-   (the session capture/TX queue).** `tbt_tx_submit()` pauses capture
+   **The 64 KiB figure in the report is `TBT_SQ_MAX`, the capture line on
+   `struct tbt_session.tx_queued`; the hard bound is `TBT_SQ_MAX + 4 × TBT_CHUNK_MAX`.**
+   `tbt_tx_submit()` pauses capture
    (`struct tbt_stream.tx_paused`), closes the public socket's window and returns a short
    count; it never kills. The reset came from `tbt_tx_stall_check()` (no `tx_ack` progress
    for `hole_budget_ms`), which could not read the peer's feedback while the stream was
@@ -2453,9 +2557,8 @@ belief is wrong or the classifier is SNI-based, and the design must be told (§1
    REDIRECT`), and if so, is `nft`'s `redirect to :port` equally acceptable? Deciding this
    decides whether REDIRECT is a first-class deployment mode or an operator workaround;
    the module contains no `nf_hook_ops` code today (§8.6).
-2. **`hole_budget_ms` and `replay_ms` defaults** (500 ms / 1000 ms) are guesses against a
-   loss profile we have not measured. Need a real loss-burst distribution from the user's
-   ISP.
+2. **`hole_budget_ms` (500 ms) and the 1 s replay grace** are guesses against a loss
+   profile we have not measured. Need a real loss-burst distribution from the user's ISP.
 3. **What does the ISP's classifier actually key on?** §16 lists the plausible dimensions;
    §17 tells the user which apply to their line. Until that runs, `http-kal`'s value is a
    hypothesis, and T13 only proves *parsability*, not the ISP's acceptance criterion. This
@@ -2469,18 +2572,22 @@ belief is wrong or the classifier is SNI-based, and the design must be told (§1
    it is not in C1/C2 and must not be half-done.
 5b. **`keepalive_ms` default (5 s) and `drip_ms` (1 s)**: assumptions about classifier idle
    timers (§16.4). If §17 shows carriers being reaped, lower both; the cost is PAD volume.
-6. **Session pooling**: multiple public TCP streams over one carrier set (sid already
-   supports it) would remove a handshake per short-lived connection — a large win for HTTP
-   clients. v0 = 1 stream per public connection; candidate for v0.1.
-7. **Retransmit accounting (`retx_ppm` 9–20% on shaped carriers).** The snd_una-gated
-   rule was implemented twice and reverted both times: with the false retransmits gone,
-   probe I exposed the carrier-stall/`join_dup` replacement loop (near snd_una stuck at
-   7,999,768 with 9 MB written, 191 replacements, 15 far `join_dup`, 32 s receiver hole).
-   The stall rule (backpressure vs dead path) and the `TBT_F_RETIRE` handshake are now
-   fixed, but the gate re-attempt still failed probe I's control strict phase (near
-   carrier 0 retx_ppm 885,106 with the far's recv_cnt 0), so the handoff-based timer is
-   the shipped one and the retx target stays open. This is a correctness-adjacent waste of
-   the ISP per-flow budget, not a hang.
+6. **Session pooling is implemented; per-stream cost remains.** One session carries up to
+   `TBT_STREAMS_MAX` (128) concurrent public streams over its carrier set, and the near
+   side allocates one sid per accepted connection; the `pub.concurrent` 100/100 run is the
+   evidence. What is still per stream is cost, not capability: each stream sends its own
+   OPEN on every carrier, and the far side dials one target connection per stream. A future
+   revision could reuse a target connection for short-lived streams; v0 does not.
+7. **Retransmit accounting (resolved).** `retx_ppm` is DATA copies / unique DATA records,
+   counted where the carrier accepts the write. The final n=4 rows read 1,164 and
+   1,842 ppm (0.12–0.18%), with `retx_hole` 10/4 and `retx_slow` 9/8; n=1 read 0. The
+   3×RTO slow-path grace and the per-copy `snd_una` mark (`first_sent_seq[]` /
+   `una_observed_ns[]`) are in the tree; the hole branch still starts at the handoff
+   because the frame at the received ack is the one case a write clock cannot see. The
+   earlier 191-replacement / 15-`join_dup` / 32 s-hole episode is why the stall rule
+   distinguishes backpressure from a dead path and why RETIRE exists; it is history, not
+   current behaviour. Remaining: the rate varies with shaping and peer drain (1,164 vs
+   1,842 ppm on the same topology), and the copies cost 0.15–0.8% of application bytes.
 8. **http-kal probe D's receiver deadline (known limitation, deliberate).** Scenario: a
    carrier is replaced or a hole is retransmitted while the receiver's tree head is
    blocked; the head does not advance for `hole_budget_ms` (500 ms) and the receiver
