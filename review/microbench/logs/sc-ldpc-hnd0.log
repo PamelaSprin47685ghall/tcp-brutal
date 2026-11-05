@@ -1,0 +1,29 @@
+# HND0 SC-LDPC prototype root@45.11.1.62  2026-11-06T06:40:58+08:00
+## before
+ 22:41:00 up 1 day, 15:29,  1 user,  load average: 1.32, 1.09, 0.71
+               total        used        free      shared  buff/cache   available
+Mem:             955         396         194           1         511         559
+model name	: QEMU Virtual CPU version 2.5+
+2
+## build
+BUILD_OK
+## --block 256 --L 8 --rate 0.50 --p 0.30
+block,L,rate,p,trials,recovery,ci99,iter_mean,enc_mbps,dec_mbps,latency_ms,mem_bytes
+256,8,0.50,0.30,500,0.000000,0.006548,10.10,5.125,1.558,0.524288,91312
+point: block=256 L=8 rate=0.50 p=0.30 model=symmetric term=causal n=2048 data=1024 chk=1024 edges=7680 rate_actual=0.50000 mem=91312 enc=5.125MB/s(7296) dec=1.558MB/s(1474)
+## --block 256 --L 8 --rate 0.40 --p 0.40
+point: block=256 L=8 rate=0.40 p=0.40 model=symmetric term=causal n=2560 data=1024 chk=1536 edges=10112 rate_actual=0.40000 mem=122544 enc=3.555MB/s(3518) dec=1.022MB/s(1315)
+block,L,rate,p,trials,recovery,ci99,iter_mean,enc_mbps,dec_mbps,latency_ms,mem_bytes
+256,8,0.40,0.40,500,0.000000,0.006548,11.49,3.555,1.022,0.524288,122544
+## --block 512 --L 16 --rate 0.35 --p 0.50
+point: block=512 L=16 rate=0.35 p=0.50 model=symmetric term=causal n=11703 data=4096 chk=7607 edges=54710 rate_actual=0.35000 mem=637393 enc=2.862MB/s(680) dec=0.402MB/s(145)
+block,L,rate,p,trials,recovery,ci99,iter_mean,enc_mbps,dec_mbps,latency_ms,mem_bytes
+512,16,0.35,0.50,500,0.000000,0.006548,22.93,2.862,0.402,1.048576,637393
+## --block 256 --L 32 --rate 0.35 --p 0.50
+point: block=256 L=32 rate=0.35 p=0.50 model=symmetric term=causal n=11703 data=4096 chk=7607 edges=58367 rate_actual=0.35000 mem=666649 enc=4.085MB/s(1686) dec=0.638MB/s(228)
+block,L,rate,p,trials,recovery,ci99,iter_mean,enc_mbps,dec_mbps,latency_ms,mem_bytes
+256,32,0.35,0.50,500,0.000000,0.006548,33.71,4.085,0.638,2.097152,666649
+## after
+ 22:41:18 up 1 day, 15:30,  1 user,  load average: 1.03, 1.03, 0.70
+               total        used        free      shared  buff/cache   available
+Mem:             955         402         187           1         512         553

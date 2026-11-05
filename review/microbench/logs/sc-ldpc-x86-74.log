@@ -1,0 +1,75 @@
+# x86-74 SC-LDPC prototype root@192.168.123.74  2026-11-06T06:41:47+08:00
+# source: /home/kunweiz/tbtun-worktrees/fec/review/fec-prototype/sc_ldpc (fec-core2, w-fec head c84c8dc)
+# build : cc -O2 -std=c99 -Wall -Wextra -Werror sc_ldpc.c sc_ldpc_bench.c -lm -o sc_ldpc_bench
+# runs  : nice -n 19 taskset -c 0 timeout 15 ./sc_ldpc_bench <point> --trials 500 --model symmetric
+# note  : recovery 0.000000 is the expected prototype failure, not a benchmark failure.
+
+## before
+ssh -o BatchMode=yes root@192.168.123.74 'uptime; grep -m1 "model name" /proc/cpuinfo; nproc; free -m'
+ 06:41:27 up 3 days, 23:04,  5 users,  load average: 1.17, 1.16, 1.13
+model name	: AMD Athlon(tm) X4 760K Quad Core Processor
+4
+               total        used        free      shared  buff/cache   available
+Mem:           19939        1856         229           4       18232       18082
+Swap:          21934        1022       20912
+
+## transfer
+scp -o BatchMode=yes -r /home/kunweiz/tbtun-worktrees/fec/review/fec-prototype/sc_ldpc root@192.168.123.74:/tmp/sc_ldpc
+ls -la /tmp/sc_ldpc
+total 312
+drwxr-xr-x    2 root root   3488 Nov  6 06:41 .
+drwxrwxrwt 2303 root root 512000 Nov  6 06:41 ..
+-rwxr-xr-x    1 root root    379 Nov  6 06:41 build.sh
+-rw-r--r--    1 root root  20586 Nov  6 06:41 sc_ldpc.c
+-rw-r--r--    1 root root   4360 Nov  6 06:41 sc_ldpc.h
+-rw-r--r--    1 root root  25122 Nov  6 06:41 sc_ldpc_bench.c
+
+## build
+cd /tmp/sc_ldpc && cc -O2 -std=c99 -Wall -Wextra -Werror sc_ldpc.c sc_ldpc_bench.c -lm -o sc_ldpc_bench
+BUILD_OK
+-rwxr-xr-x 1 root root 34016 Nov  6 06:41 sc_ldpc_bench
+(no warnings, no errors)
+
+## --block 256 --L 8 --rate 0.50 --p 0.30
+nice -n 19 taskset -c 0 timeout 15 ./sc_ldpc_bench --block 256 --L 8 --rate 0.50 --p 0.30 --trials 500 --model symmetric
+point: block=256 L=8 rate=0.50 p=0.30 model=symmetric term=causal n=2048 data=1024 chk=1024 edges=7680 rate_actual=0.50000 mem=91312 enc=5.436MB/s(8288) dec=1.364MB/s(2010)
+block,L,rate,p,trials,recovery,ci99,iter_mean,enc_mbps,dec_mbps,latency_ms,mem_bytes
+256,8,0.50,0.30,500,0.000000,0.006548,10.10,5.436,1.364,0.524288,91312
+exit=0
+
+## --block 256 --L 8 --rate 0.40 --p 0.40
+nice -n 19 taskset -c 0 timeout 15 ./sc_ldpc_bench --block 256 --L 8 --rate 0.40 --p 0.40 --trials 500 --model symmetric
+point: block=256 L=8 rate=0.40 p=0.40 model=symmetric term=causal n=2560 data=1024 chk=1536 edges=10112 rate_actual=0.40000 mem=122544 enc=3.895MB/s(5793) dec=0.833MB/s(1259)
+block,L,rate,p,trials,recovery,ci99,iter_mean,enc_mbps,dec_mbps,latency_ms,mem_bytes
+256,8,0.40,0.40,500,0.000000,0.006548,11.49,3.895,0.833,0.524288,122544
+exit=0
+
+## --block 512 --L 16 --rate 0.35 --p 0.50
+nice -n 19 taskset -c 0 timeout 15 ./sc_ldpc_bench --block 512 --L 16 --rate 0.35 --p 0.50 --trials 500 --model symmetric
+point: block=512 L=16 rate=0.35 p=0.50 model=symmetric term=causal n=11703 data=4096 chk=7607 edges=54710 rate_actual=0.35000 mem=637393 enc=2.989MB/s(1079) dec=0.514MB/s(187)
+block,L,rate,p,trials,recovery,ci99,iter_mean,enc_mbps,dec_mbps,latency_ms,mem_bytes
+512,16,0.35,0.50,500,0.000000,0.006548,22.93,2.989,0.514,1.048576,637393
+exit=0
+
+## --block 256 --L 32 --rate 0.35 --p 0.50
+nice -n 19 taskset -c 0 timeout 15 ./sc_ldpc_bench --block 256 --L 32 --rate 0.35 --p 0.50 --trials 500 --model symmetric
+point: block=256 L=32 rate=0.35 p=0.50 model=symmetric term=causal n=11703 data=4096 chk=7607 edges=58367 rate_actual=0.35000 mem=666649 enc=2.850MB/s(1062) dec=0.490MB/s(181)
+block,L,rate,p,trials,recovery,ci99,iter_mean,enc_mbps,dec_mbps,latency_ms,mem_bytes
+256,32,0.35,0.50,500,0.000000,0.006548,33.71,2.850,0.490,2.097152,666649
+exit=0
+
+## after
+ssh -o BatchMode=yes root@192.168.123.74 'uptime'                    # 06:41:41
+ 06:41:41 up 3 days, 23:04,  5 users,  load average: 1.22, 1.17, 1.14
+ssh -o BatchMode=yes root@192.168.123.74 'date -Iseconds; free -m'    # 06:41:47
+2026-11-06T06:41:47+08:00
+               total        used        free      shared  buff/cache   available
+Mem:           19939        1856         229           4       18232       18082
+Swap:          21934        1022       20912
+
+## cleanup
+rm -rf /tmp/sc_ldpc
+RM_DONE
+ls -d /tmp/sc_ldpc 2>&1 || echo TMP_CLEAN
+ls: cannot access '/tmp/sc_ldpc': No such file or directory
+TMP_CLEAN
