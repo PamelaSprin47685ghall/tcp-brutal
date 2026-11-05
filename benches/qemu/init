@@ -68,7 +68,7 @@ X_N=0 X_M=0 X_PROFILE=none X_MIB=0 X_RC=99 X_STRICT=0
 X_MBIT=0 X_APP_MBIT=0 X_WALL=0 X_WIRE=0 X_APP=0 X_WPA=0
 X_FRAMES=0 X_WPS=0 X_CSYS=0 X_CSOFT=0 X_CTOT=0 X_KW=0
 X_RETX=0 X_DUP=0 X_INFL=0 X_HD=0 X_HR=0 X_HU=0
-X_STALL=0 X_DEPTH=0 X_TXQ=0 X_RXQ=0 X_OOO=0 X_RET=0 X_SPEC=0
+X_STALL=0 X_DEPTH=0 X_TXQ=0 X_RXQ=0 X_OOO=0 X_RET=0
 X_UP=0 X_NTOT=0
 C_T0=0 C_BUSY0=0 C_SYS0=0 C_SOFT0=0 KW0=0 T_START=0
 ctrl_seq=0
@@ -240,12 +240,11 @@ q_sample()
                 else if (k == "rxq" && v > rxq) rxq = v
                 else if (k == "ooo_bytes" && v > ooo) ooo = v
                 else if (k == "retain_bytes" && v > ret) ret = v
-                else if (k == "spec_bytes_max" && v > spec) spec = v
                 else if (k == "pub_wmem" && v > pw) pw = v
                 else if (k == "car_wmem" && v > cw) cw = v
             }
         }
-        END { printf "%d %d %d %d %d %d %d %d\n", infl, txq, rxq, ooo, ret, spec, pw, cw }
+        END { printf "%d %d %d %d %d %d %d\n", infl, txq, rxq, ooo, ret, pw, cw }
     ' "$PEERS" /proc/net/tbtun/stats
 }
 sampler_start()
@@ -362,7 +361,7 @@ xfer()
     X_RC=99 X_STRICT=0 X_MBIT=0 X_APP_MBIT=0 X_WALL=0
     X_WIRE=0 X_APP=0 X_WPA=0 X_FRAMES=0 X_WPS=0
     X_RETX=0 X_DUP=0 X_INFL=0 X_HD=0 X_HR=0 X_HU=0 X_STALL=0 X_DEPTH=0
-    X_TXQ=0 X_RXQ=0 X_OOO=0 X_RET=0 X_SPEC=0 X_UP=0 X_NTOT=0
+    X_TXQ=0 X_RXQ=0 X_OOO=0 X_RET=0 X_UP=0 X_NTOT=0
 
     flush_and_wait
     if ! configure "$X_N" "$X_M" "$X_PROFILE" "$X_DUP" "$_extra"; then
@@ -475,7 +474,6 @@ xfer()
     X_RXQ=$(q_max 4)
     X_OOO=$(q_max 5)
     X_RET=$(q_max 6)
-    X_SPEC=$(q_max 7)
 
     # Per-carrier evidence, near side (the shaped direction).
     awk -v row="$_row" '$1 == 2 {
@@ -502,7 +500,7 @@ emit_xfer_row()
         holes_declared="$X_HD" holes_repaired="$X_HR" holes_unrecoverable="$X_HU" \
         rx_max_stall_us="$X_STALL" reorder_max_depth="$X_DEPTH" \
         carriers_up="$X_UP/$X_NTOT" txq_max="$X_TXQ" rxq_max="$X_RXQ" \
-        ooo_bytes_max="$X_OOO" retain_bytes_max="$X_RET" spec_bytes_max="$X_SPEC" \
+        ooo_bytes_max="$X_OOO" retain_bytes_max="$X_RET" \
         rc="$X_RC" strict="$X_STRICT" "$@"
 }
 

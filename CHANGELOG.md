@@ -1,14 +1,17 @@
 # Changelog
 
-All notable changes to tbtun are recorded here. This project is pre-release; the
-wire revision is `TBT_CONV` and moves independently of the module version.
+All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
+and moves independently of the module version.
 
-## [0.0.1] - 2026-11-05 (Release candidate)
+## [0.0.1] - 2026-11-06
 
-First tracked release, currently a release candidate. It is **not released yet**: the
-full QEMU, adversarial and bench suites still have to be re-run on the final tree.
-Current data-plane probe and bench results are in Verification; they are not a
-full-suite pass.
+First tracked release. The module version is `0.0.1`; the wire version is
+`TBT_WIRE_VERSION=1` and the wire revision is `TBT_CONV=0x0005`. The data plane
+is a fully in-kernel near/far TCP tunnel: `N` active carriers plus `M` spares,
+three carrier profiles, per-path feedback, replay-ring retransmission, and a
+`/proc/net/tbtun` control surface. The host tests, the sanitizer build,
+`review/lint.sh`, the final-tree bench rows and the final adversarial results
+are recorded in Verification.
 
 ### Added
 
@@ -30,6 +33,19 @@ full-suite pass.
   Both checks run before allocation, so a refused write changes nothing.
 - `ports 0-0` and a blank line written to `/ports` are documented no-ops; they leave
   the current port block unchanged.
+- Far-side session anchoring: `nonce=` pins the session nonce and `peer=` pins the
+  near source address before the first HELLO; `join_src_reject` counts a HELLO from
+  a source other than the anchor. Without either, the first HELLO is adopted
+  trust-on-first-use and the module warns once.
+- Control-frame lifetime and carrier accounting in `/proc/net/tbtun/stats`:
+  `ctl_lost`, `ctl_retry`, `ctl_requeue`, `ctl_obsolete`, `ctl_queued`;
+  `port_exhaust`, `port_alloc_fail`; `stall_paused_skips`, `win_block`,
+  `win_resume`. Retransmits are split into `retx_hole`, `retx_slow`,
+  `retx_pathloss` and `retx_other`, with `data_tx`, `retx_data_ppm` and
+  `dup_bytes_ppm` as the session-wide rates.
+- A `reconcile` stats line publishes the live and retired halves of the session
+  totals, so `wire`, `data_tx` and `retx_frames` equal the live `peers` rows plus
+  the carriers that have retired.
 
 ### Changed
 
@@ -50,6 +66,11 @@ full-suite pass.
 
 ### Fixed
 
+All 39 review findings and the adversarial F1–F8 items are closed in this
+tree. The bullets record the fixes that changed observable behavior, then the
+grouped entries close the remaining lifetime, wire and input-handling findings.
+`review/findings.md` keeps the per-ID detail and the final status table.
+
 - **Shared statistics counters:** every session counter with more than one writer
   context is `atomic64_t`, incremented with `atomic64_inc/add` and read through
   `tbt_stat_read()`, so concurrent carriers and stream workers can no longer lose
@@ -68,16 +89,15 @@ full-suite pass.
   `ctl_queued`, the pinned-frame count (paired on enqueue, write, failure and obsolete
   drop; zeroed with the queue). Measured: before the fix the RST sometimes never left
   the module queue (`wire` lacked the 32-byte record); after it the record is in `wire`
-  with `ctl_lost=0`, `ctl_queued=0`. Delivery can still be delayed by the carrier's TCP
-  zero-window persist (next entry).
+  with `ctl_lost=0`, `ctl_queued=0`. The peer-window gate below removes the remaining
+  zero-window delay for the tail.
 - **Carrier stall vs peer pause:** `tbt_car_poll_work()` now defers the stall/loss
   decision while `peer_paused` (session or stream) or our own delivery pause is set,
-  restarts the window, and counts `stall_paused_skips`. Measured in
-  `near.rst_eagain`: `peer_paused=1`, `lost=0`, `replaced=0`,
-  `stall_paused_skips=1184` during the paused drain; previously `lost=1 replaced=1`.
-  A separate zero-window persist delay still keeps that attack red: the RST is in
-  `wire`, `brk=0`, `rfail=0`, but the far stops at ~71 records and the sender does
-  not deliver the last ~282 bytes for 60 s.
+  restarts the window, and counts `stall_paused_skips`. The final near group passes
+  `near.fin_eagain` and `near.rst_eagain`: `peer_paused=1`, the FIN/RST reaches
+  `wire` (536,418 and 98,880 bytes), `holes_unrecoverable=0`, and
+  `stall_paused_skips` is 42/9. The earlier failure was a carrier declared lost
+  while paused.
 - **Peer-window admission:** DATA is now admitted only while
   `write_seq - snd_una < snd_wnd` (one chunk when `snd_wnd` is 0). Filling the carrier's
   TCP sndbuf past the advertised window parked the tail in zero-window persist, where
@@ -85,9 +105,10 @@ full-suite pass.
   wrong cursor (it counts sent bytes); `write_seq` includes the queued tail. Control
   frames bypass the gate, so a pinned RST leaves after the in-window bytes. Counters
   `win_block`/`win_resume` are on the `c3` stats line; a full peer window counts as the
-  pump's hiwat proof. Measured: `near.rst_eagain` 3/3 with `win_block=152..216`,
-  `win_resume=1`, RST in `wire` at ~98 KiB, `ctl_lost=0`, `ctl_queued=0`; near 14/14
-  three consecutive runs.
+  pump's hiwat proof. Measured: the final near group is 14/14; `near.rst_eagain`
+  shows `win_block=235`, `win_resume=1`, the RST in `wire` at 98,880 bytes,
+  `ctl_lost=0`, `ctl_queued=0`; `near.fin_eagain` shows `win_block=6720`,
+  `win_resume=1`, the FIN in `wire` at 536,418 bytes.
 - **Review 23:** `hole_budget_ms=0` and `rx_reorder_bytes=0` are refused with `EINVAL`
   instead of creating a tunnel that dies on its first hole or reordered frame. The
   accepted ranges are now `1..60000` and `1..268435456`; omitted keys keep their
@@ -108,17 +129,19 @@ full-suite pass.
   the receipt proof.
 - **Retransmit accounting and the slow path:** each copy is tagged where it is queued
   (hole / slow / carrier loss) and counted where the carrier accepts the write;
-  `retx_ppm` is DATA copies over unique DATA records and `dup_bytes_ppm` is copy
-  payload over application bytes, so FBK no longer dilutes the rate. The slow path's
-  grace moved from 2xRTO to 3xRTO: on a clean 40 MiB n=4 run the old grace copied 310
-  frames that the peer had queued, not lost (whole-run wire/app 1.047 -> 1.024, honest
-  retx 30k -> 8k; probes J/K still 3/3).
+  `retx_data_ppm` (the bench `retx_ppm` column) is DATA copies over unique DATA
+  records and `dup_bytes_ppm` is copy payload over application bytes, so FBK no
+  longer dilutes the rate. The slow path's grace moved from 2xRTO to 3xRTO: on a
+  clean 40 MiB n=4 run the old grace copied 310 frames that the peer had queued, not
+  lost (whole-run wire/app 1.047 -> 1.024, honest retx 30k -> 8k; probes J/K passed
+  3/3 in the retransmit-fix run).
 - **Retransmit scheduling onto a dead path:** a retransmit copy now skips a carrier
   whose TCP has unacked bytes and has not moved `snd_una` for an RTO. A blackholed
   carrier stops being written, so the lowest-inflight scheduler
   (`payload_bytes_sent - tx_ack`) used to pick it exactly when it could deliver
   nothing; probe K failed 1/3 with `TXSTALLKILL` at the 500 ms budget. Idle paths stay
-  eligible and new data is unaffected. J/K pass 3/3 with `holes_unrecoverable=0`.
+  eligible and new data is unaffected. J/K passed 3/3 with `holes_unrecoverable=0`
+  in that run.
 - **Short-write tail offset:** after a partial carrier write, the retained tail is
   copied from `fr->data + (done - TBT_HDR_LEN)` instead of `fr->data`, keeping the
   header/payload split aligned. This fixes the strict `n=4` payload corruption at
@@ -131,6 +154,9 @@ full-suite pass.
   dead.
 - **Config read:** exact-size rendering with `kvmalloc`, offset service, EOF at the
   end, `E2BIG` for a line/total that does not fit, and no fixed 32 KiB cap.
+- **Review 29–31 (config bounds):** the renderer fits `TBT_LINE_MAX` (1024); a
+  config read has no fixed 32 KiB cap; the write drain refuses an over-long tail
+  instead of truncating it.
 - **Review 14:** `data_frames` is incremented only after the carrier write succeeds
   (or after the debug injector drops the record on purpose), so a failed
   `-EAGAIN`/`-EIO` write is no longer counted as a received record.
@@ -149,6 +175,53 @@ full-suite pass.
   `kzalloc` and before detaching an existing tunnel; re-sending an existing id still
   replaces it at the cap. `max_carriers` is checked in `tbt_cfg_sane()` before any
   allocation or session creation.
+- **Review 1–10 and 36–39 (lifetime and teardown):** a replaced carrier is parked
+  on `sess->dead` and freed after RETIRE; the retention trim runs only under
+  `pump_lock`; the retransmit mark is gated on `snd_una`; a failed create destroys
+  the new session and the old tunnel; every `sk_user_data` reader takes
+  `sk_callback_lock`, and stop clears the callback before `cancel_work_sync`; the
+  stream insert is rechecked under `sess->lock`; `w_tx`/`w_pump` are cancelled
+  before `pump_lock`; `st->sk` is NULL before `sock_release`; `accepting` is set
+  after the session exists; a short carrier write keeps its tail in `c->part`;
+  `peers` holds the socket; teardown stops carriers and frees the TX queue before
+  the unlink; the `http_rx` allocation is checked, `tbt_carrier_free()` covers the
+  failure paths, and `c->node` is initialized before them.
+- **Review 11–13 and 27 (wire):** `TBT_CONV=0x0005`; RETIRE is `0x24`; HELLO
+  carries the profile in bits 1:0 and the generation in bits 5:2; PREDICT and
+  CANCEL are removed; a zero-length DATA frame is refused.
+- **Review 15 and 24 (accounting details):** the unused `fbk_mask` parameter is
+  gone; the hole age is computed before `hole_since_ns` is cleared and printed
+  as `age_us`.
+- **Review 16 (session trust):** a far `nonce=` pins the nonce, a far `peer=`
+  pins the anchor address, and a HELLO from another source is refused and counted
+  in `join_src_reject`. Without either, the first HELLO still fixes the session
+  (trust-on-first-use) and the module warns once.
+- **Review 17, 28 and 33 (proc and HTTP buffers):** the `http` proc entry is
+  removed with the subtree; `http_hdr` is allocated with `TBT_HTTP_HDR_MAX` and
+  `http_rx` with `sizeof(*c->http_rx)`, both checked; the `http` snapshot is
+  copied under `pump_lock`.
+- **Review 22 (pinned control frames):** a control frame that meets `-EAGAIN` is
+  retried and requeued, not freed. `ctl_retry`, `ctl_requeue`, `ctl_obsolete` and
+  `ctl_lost` account for the lifetime; `ctl_queued` is the pinned-frame count.
+- **Review 35 (dead code):** the five inert keys and the two dead declarations
+  are gone.
+- **Adversarial F1–F8:** the close-flush NULL dereference is closed by capturing
+  `init_net` in `tbt_cfg_open()`; `rmmod` unregisters `/proc`, shuts every tunnel
+  down, restores the core callbacks, releases the sockets and waits with
+  `synchronize_rcu()`/`rcu_barrier()`; a completed FIN handshake detaches the
+  stream, so sequential churn reuses the session; half-close delivers EOF;
+  far-side input is read and delivered (the probe's 40-bit sid truncation is
+  fixed); the feedback tick runs on `system_dfl_wq`, so the deprecated-workqueue
+  warning is gone; and `src=` is not claimed. F9 (nonce replay from another
+  source) is closed by the anchor; F10 and F11 by the enforced limits; F12 by
+  `port_exhaust`/`port_alloc_fail`.
+- **P0–P3:** P0 (rmmod and the data-plane regression) is the unload order plus
+  the retransmit accounting, 3xRTO grace, stalled-path avoidance and short-write
+  fix above; P1 (multi-connection, half-close, flush, port exhaustion, limits) is
+  the stream detach, EOF delivery, control-frame lifetime, port counters and
+  limit checks; P2 (per-stream ack/SACK and the workqueue warning) is the
+  per-stream `tx_ack`/frame reference and `system_dfl_wq`; P3 (grammar and config
+  read) is the key removal and the exact-size config snapshot.
 
 ### Removed
 
@@ -169,50 +242,42 @@ full-suite pass.
 
 ### Known limitations
 
-- **`pub.writer` stalls at about 75 MiB.** A 100 MiB or 1 GiB write stops at roughly
-  75 MiB with `errno=11` (`EAGAIN`); `MemAvailable` fell from 397 MB to 259 MB during
-  the run. The adversarial harness calls this PASS because the write made progress;
-  the stall is still a limitation.
-- **`src=` inbound allow list does not exist.** `init.src_key` and `pub.srcfilter`
-  still FAIL: `src=` was never a key and no inbound address/interface allow list is
-  implemented. The test contract needs redefinition.
-- **Trust on first use is silent.** A `role=far` tunnel with neither `nonce=` nor
-  `peer=` adopts the session nonce from the first HELLO and logs nothing; whoever
-  wins that first connection defines the session. A configured `peer=` rejects a
-  foreign source address and a configured `nonce=` is enforced, but there is no
-  authentication and no warning. Pin `nonce=` or `peer=` on an untrusted path.
-  Review 16 tracks this.
-- **No placeholder prediction.** The PREDICT/CANCEL path is removed (`TBT_CONV`
-  `0x0005`). A hole is repaired by resending the retained real bytes and by
-  duplication; when the replay ring has already dropped them, the receiver performs
-  a bounded reset (`holes_unrecoverable`) instead of guessing. Hole detection stays
-  geometric (`rx_max_stall_us`, `hole_checks`, `gate_fail`), but nothing advances
-  delivery without the real bytes.
-- **Review 22 pending:** a pinned control frame is freed on `-EAGAIN`, so a FIN or
-  similar control record can be lost under carrier backpressure.
-- **Review 15, 21 and 24 open:** `fbk_mask` is still ignored, several counters are
-  plain `u64` increments from concurrent carriers, and the hole age is zeroed before
-  it is printed. None of them blocks the data path.
-- **Throughput and `retx_ppm` on shaped paths.** Probe I passes control `n=1` and
-  `n=4` strict + interleaved byte-exact. Latest bench: `n=4` 11.39 Mbit/s,
-  `wire/app` 1.0005, `retx_ppm` 96,095; `n=1` 3.46 Mbit/s, 1.0316, 1,090.
-  `n=8`/`n=16` and the full bench matrix are pending.
-- **Benchmark numbers are lab numbers.** Every throughput, latency and `retx_ppm`
-  figure comes from the QEMU bench: one 10 Mbit htb class per source port and netem
-  `delay 20ms 10ms`. No measurement was taken on a real ISP path. Do not read these
-  figures as expected Internet performance.
-- **`flush` can block after a transfer.** Observed historically; it was not
-  re-tested in the latest data-plane run, so treat it as pending verification.
-  Prefer re-sending the full tunnel line between measurements.
 - **No IPv6 and no DNS.** Addresses are literal IPv4 only; there is no name
   resolution.
 - **No encryption and no authentication.** The tunnel is plaintext on the wire and
   the nonce is an identifier, not a secret; wrap it in WireGuard if the path is
-  untrusted.
+  untrusted. A far side with neither `nonce=` nor `peer=` is trust-on-first-use:
+  the first HELLO fixes the session and the module warns once. A single `peer=`
+  anchor rejects a multi-homed or NAT-rebound near source.
 - **No FEC.** Loss is repaired by retransmission from the replay ring and by
   duplication. Reordering is absorbed by a bounded tree (`rx_reorder_bytes`); a hole
   older than `hole_budget_ms` or a reorder overflow resets the stream and is counted
   in `holes_unrecoverable`/`gaps_total`.
+- **No inbound address or interface allow list.** `src=` is not a key and there is
+  no `dev=`/`uid=` filter. The final `pub.srcfilter` case passes under the redefined
+  contract: a connection from 127.0.0.2 is usable, and the tunnel identity is the
+  nonce. Do not read that as source filtering.
+- **`pub.writer` stalls at about 75 MiB.** On the final tree a 100 MiB attempt
+  accepted 74,859,739 bytes and a 1 GiB attempt 74,925,222 bytes, then both blocked
+  with `errno=11` (`EAGAIN`); `MemAvailable` fell 394,864 -> 270,404 kB and
+  410,500 -> 271,300 kB. The adversarial harness calls this PASS because the write
+  made progress; the stall is still a limitation.
+- **The peer-window gate is a heuristic.** DATA is admitted while
+  `write_seq - snd_una < snd_wnd`; a full peer window counts as the pump's hiwat
+  proof. `win_block`/`win_resume` report the gate, and control frames bypass it.
+- **Throughput and run-to-run variance.** The final `n=4` run delivered
+  10.74 Mbit/s of application payload (control 2.73, `wire/app` 1.0333,
+  `retx_ppm` 2,333); two earlier runs of the same module measured 11.37 and
+  8.38 Mbit/s (`wire/app` 1.0199/1.0146, `retx_ppm` 1,164/1,842), so the
+  spread is real. The final `n=1` run delivered 3.11 Mbit/s, `wire/app`
+  1.0194 and `retx_ppm` 0. The guest's `kworker` is about 99% of one
+  vCPU during a transfer, and the 64 MiB rx ring costs about 2x physical memory
+  because the strict send-then-read pattern holds the echo. `n=8`/`n=16` and the
+  rest of the matrix are the final bench regression in `review/final-bench/`.
+- **Benchmark numbers are lab numbers.** Every throughput, latency and `retx_ppm`
+  figure comes from the QEMU bench: one 10 Mbit htb class per source port and netem
+  `delay 20ms 10ms`. No measurement was taken on a real ISP path. Do not read these
+  figures as expected Internet performance.
 - **No per-netns control surface.** `/proc/net/tbtun` is created in `init_net` only.
 - **Only the first `srcaddrs` entry is used.** Multi-address carriers and
   per-`srcaddr` listeners are not implemented.
@@ -232,36 +297,107 @@ full-suite pass.
 - The module version is `0.0.1` (`TBT_VERSION_MAJOR/MINOR/PATCH = 0/0/1`), so
   `make dkms.conf` generates `PACKAGE_VERSION="0.0.1"`. The wire version is
   `TBT_WIRE_VERSION=1` and `TBT_CONV=0x0005`, independent of the module version;
-  HELLO `body[0]` uses `TBT_WIRE_VERSION`, not the module major. Final regression is
-  still pending. A `.ko` built before the version unification still reports `1.0.0`;
-  rebuild the module for `modinfo` to show `0.0.1`.
+  HELLO `body[0]` uses `TBT_WIRE_VERSION`, not the module major. `make dkms-tarball`
+  builds the tarball from this tree. A `.ko` built before the version unification
+  still reports `1.0.0`; rebuild the module for `modinfo` to show `0.0.1`.
 
 ### Verification
 
-Status on 2026-11-05. Only runs that were actually executed are listed; this is not
-a full-suite pass.
+Status on 2026-11-06. The host, QEMU, adversarial and bench rows below were
+measured on the final tree at `68bfbaa` (module sha256 `0b8f0006…`); the
+counter-reconciliation row names its module.
+
+Host tests:
+
+- `make check` (module build plus the host suites): `test_parse` **357 checks /
+  0 failures**, `test_fuzz` **7,550,734 / 0**, `test_http` **249 / 0**,
+  `test_reorder` **52,792 / 0**, `test_ack` **10,026 / 0**, `test_control`
+  **181 / 0**, `test_multistream` **68,580 / 0**, `test_anchor` **124 / 0**; the
+  h11 cross-check accepts a POST and a 200 response.
+- `make host-test-san`: `test_parse` **357 / 0**, `test_fuzz` **7,550,734 / 0**,
+  `test_http` **249 / 0**, `test_http_fuzz` **4,078,276 / 0**; the sanitizer
+  binaries report 0 failures.
+- `bash review/lint.sh`: **16/16 checks**, **14/14 self-tests**, exit 0. The
+  atomic-stats, proc-entries-removed and retain-trim checks are part of the 16.
+
+Parser and `/proc` checks:
+
+- `test_parse` 357/0 is the grammar check; `test_fuzz` and `test_http_fuzz` are
+  the hostile-input and HTTP-container checks above.
+- Counter reconciliation (`tests/qemu/run.sh --probes C,E`) was accepted on the
+  counters tree (module sha256 `cdaf9ad8…`): ten samples per probe, every
+  aggregate monotone, then `wire == live_bytes + retired_bytes`,
+  `data_tx == live_data + retired_data`, `retx_frames == live_retx +
+  retired_retx` and `live_bytes == sum(peers tx_bytes)`; every delta was 0.
+  Probe C kept `retired_bytes=197463 retired_data=24 retired_retx=15`; probe E
+  `329047/40/25`. The final tree keeps the same `atomic64_t`/`tbt_stat_read()`
+  path and the same `reconcile` line.
+
+QEMU probes:
+
+- `tests/qemu/run.sh --probes A,B,C,D,E,F,G,H,I,J,K --timeout 480`: the final
+  run passes **11/11, 0 skipped** on module sha256 `0b8f0006…`
+  (`review/final-qemu/qemu-AK-console.log`).
+
+Adversarial:
+
+- `adversarial/results.txt` on the final module (sha256 `0b8f0006…`,
+  2026-11-06): **40/40 PASS, 0 FAIL, 0 SKIP** across the control, far, public,
+  flush and port groups, including `far.nonce_pinned`, `far.src_anchor`,
+  `far.srcaddr_free`, `far.overlap`, `far.second_carrier`, `init.port_exhaust`
+  and `pub.srcfilter`.
+- The final acceptance pass also reports the near cases `near.data_path`,
+  `near.second_conn`, `near.fin_eagain` and `near.rst_eagain` as PASS.
+- `pub.writer` (100 MiB and 1 GiB): **PASS by the harness**; it still blocks at
+  about 75 MiB with `errno=11`; see Known limitations.
+
+Bench (QEMU lab emulation, one 10 Mbit htb class per source port, netem
+`delay 20ms 10ms`, 40 MiB each way; not an ISP path):
+
+- `n=4` final run: control 2.73, app **10.74** Mbit/s, app/control 3.93x,
+  `wire/app` 1.0333, `retx_ppm` 2,333, `strict=1`, `rc=0`
+  (`review/final-bench/`, stamp `20261106T004314`). Two earlier runs of the
+  same module (`0b8f0006…`) measured 11.37 and 8.38 Mbit/s (`wire/app` 1.0199
+  and 1.0146, `retx_ppm` 1,164 and 1,842); that spread is the measured
+  run-to-run variance, not a configuration change.
+- `n=1` final run: control 2.43, app 3.11, app/control 1.28x, `wire/app`
+  1.0194, `retx_ppm` 0, `strict=1`, `rc=0` (`review/final-bench/`, stamp
+  `20261106T003712`).
+- Targets: `wire/app < 1.2`, `retx_ppm < 100k`; every final row and both
+  earlier `n=4` rows are within both.
+- `n=8`, `n=16` and the rest of the matrix: final regression in
+  `review/final-bench/`.
 
 Version and packaging:
 
 - `scripts/mkdkmsconf.sh --version` prints `0.0.1`; the authority is
-  `tbtun/tbt_uapi.h` (`TBT_VERSION_MAJOR/MINOR/PATCH = 0/0/1`). `TBT_WIRE_VERSION=1`;
-  `TBT_CONV=0x0005` after the placeholder-frame removal.
-- `make dkms.conf` generates `PACKAGE_VERSION="0.0.1"`. `make dkms-tarball` produces
-  `dkms.tar.gz` with 23 entries under `./dkms_source_tree/`: `dkms.conf`, `Makefile`,
-  `tbtun/*.c`, `tbtun/*.h` and `scripts/`.
+  `tbtun/tbt_uapi.h` (`TBT_VERSION_MAJOR/MINOR/PATCH = 0/0/1`).
+  `TBT_WIRE_VERSION=1`; `TBT_CONV=0x0005`.
+- `make dkms.conf` generates `PACKAGE_VERSION="0.0.1"`. `make dkms-tarball`
+  produces `dkms.tar.gz` with 23 entries under `./dkms_source_tree/`:
+  `dkms.conf`, `Makefile`, `tbtun/*.c`, `tbtun/*.h` and `scripts/`.
 - `scripts/install_dkms.sh --dry-run` exits 0 and prints the
-  `dkms add/build/install` sequence for `tbtun-0.0.1`. `--stage-only` with a writable
-  `DKMS_ROOT` writes the staged tree and a `dkms.conf` whose `PACKAGE_VERSION` is
-  `0.0.1`.
+  `dkms add/build/install` sequence for `tbtun-0.0.1`. `--stage-only` with a
+  writable `DKMS_ROOT` writes the staged tree and a `dkms.conf` whose
+  `PACKAGE_VERSION` is `0.0.1`.
 
-DKMS (dkms 3.4.4 from the Manjaro `extra` repository, `--sourcetree`/`--dkmstree`/
-`--installtree` redirected to `/tmp`, and the header payload from
-`docs/build-env.md`):
+DKMS: the real-machine install is blocked on this host (sudo needs a password,
+`dkms` is not installed, and there is no matching header tree under
+`/lib/modules/$(uname -r)/build`). The equivalent flow with `dkms 3.4.4`
+extracted from the Manjaro `extra` package,
+`--sourcetree`/`--dkmstree`/`--installtree` redirected to `/tmp`, and the header
+payload from `docs/build-env.md`, passes:
 
-- `dkms add`, `dkms build -k 7.2.9-1-MANJARO` and `dkms install` exit 0;
-  `dkms status` reports `tbtun/0.0.1, 7.2.9-1-MANJARO, x86_64: installed`.
-- `modinfo` on the built and on the installed module reports `version: 0.0.1` and
-  `vermagic: 7.2.9-1-MANJARO SMP preempt mod_unload`.
+- `make dkms-tarball` on the final tree exits 0 (`dkms.tar.gz` sha256
+  `4aa0b69a…`). Extracting it and running the `dkms.conf` make command in
+  `/tmp` rebuilds a module that reports `version: 0.0.1` and
+  `vermagic: 7.2.9-1-MANJARO SMP preempt mod_unload`; its sha256 differs from
+  the in-tree build because the build-id/BTF paths differ.
+- In the `/tmp` tree, `dkms add`, `dkms build -k 7.2.9-1-MANJARO` and `dkms
+  install` exit 0; `dkms status` reports `tbtun/0.0.1, 7.2.9-1-MANJARO, x86_64:
+  installed`. This is the `/tmp` install tree, not the real `/lib/modules`.
+- `modinfo` on the built and on the installed module reports `version: 0.0.1`
+  and `vermagic: 7.2.9-1-MANJARO SMP preempt mod_unload`.
 - `dkms ldtarball dkms.tar.gz` into a fresh tree, then `dkms build` and
   `dkms install`: exit 0, `installed`.
 - `dkms remove -m tbtun -v 0.0.1 --all` (the step behind `--uninstall`) exits 0,
@@ -270,79 +406,47 @@ DKMS (dkms 3.4.4 from the Manjaro `extra` repository, `--sourcetree`/`--dkmstree
   `rm -rf "$DKMS_ROOT"/tbtun-*`.
 - No second kernel release is installed (`/lib/modules` holds only
   `7.2.9-1-MANJARO`), so the cross-kernel DKMS path was not exercised.
-- **Blocked on this host:** the system install (`sudo scripts/install_dkms.sh`),
-  `modprobe`, `rmmod` and `/proc/net/tbtun`. `sudo -n true` fails with "a password is
-  required"; `dkms` and the kernel headers are not installed, and
-  `/lib/modules/7.2.9-1-MANJARO/build` does not exist, so `install_dkms.sh` would
-  stop at its headers check even with root. `insmod` of the built module fails with
-  `EPERM` (no `CAP_SYS_MODULE`). The DKMS runs above used a user namespace only for
-  the root check in `dkms install` and never wrote to the real `/lib/modules`.
-
-Host tests:
-
-- `make check` (recorded in `交接.md`): `test_parse` **355 checks / 0 failures**,
-  `test_http` **249 checks / 0 failures**, h11 cross-check passes; `test_fuzz` 0
-  failures. `make host-test` also runs reorder, ack, control, multistream and anchor;
-  `make host-test-san` runs the sanitizer binaries.
-
-QEMU probes and adversarial cases (recorded in
-`adversarial/results-public-20261105T110133Z.txt` and `review/findings.md`):
-
-- `init.echo_sane`, `pub.churn` (usable=10000), `pub.two`, `pub.concurrent`
-  (n=100, connected=100, echoed=100), `pub.halfclose`, `pub.rst`: **PASS**.
-- `pub.writer` (100 MiB and 1 GiB): **PASS by the harness**; it still blocks at about
-  75 MiB with `errno=11`, `MemAvailable` 397 → 259 MB. See the limitation above.
-- `init.src_key`, `pub.srcfilter`: **FAIL**; no `src=` allow list exists. Contract
-  redefinition pending.
-- `near.data_path`, `near.second_conn`: **FAIL** in the recorded run, traced to
-  `adv_probe` truncating the 40-bit sid. The fixture is fixed; the rerun has not
-  happened.
-- Probe **B: PASS**; Probe **I: PASS**, byte-exact for control `n=1` and `n=4`. The
-  environment is slow, so three consecutive runs were not required for this status.
-- `review/findings.md` still marks F4 (sequential churn) and review 34 OPEN. The code
-  has since detached the stream on a completed FIN handshake (`tbt_sock.c`) and uses
-  `remove_proc_subtree()` (`tbt_procfs.c`); the table is stale.
-- Counter reconciliation on this tree (`tests/qemu/run.sh --probes C,E`, module
-  sha256 `cdaf9ad8…`): both probes **PASS**. Each probe reads ten samples, requires
-  every aggregate to be monotone, then requires `wire == live_bytes +
-  retired_bytes`, `data_tx == live_data + retired_data`, `retx_frames == live_retx
-  + retired_retx` and `live_bytes == sum(peers tx_bytes)`; every delta was 0.
-  Probe C kept `retired_bytes=197463 retired_data=24 retired_retx=15`; probe E
-  `329047/40/25`.
-- `TBT_ADV_GROUPS=public adversarial/run.sh --no-build --no-crash`: 10/10 **PASS**,
-  including `pub.concurrent` n=100 (118 ms). Its post-run stats snapshot shows
-  `wire=474428 == live_bytes`, `data_tx=102 == live_data`, and
-  `submit_bytes=409728` exactly (100 x 4096 + 128 for the recovery connection), so
-  the multi-writer adds did not lose a byte.
-- This is **not** a full A–K/adversarial green.
-
-Bench (QEMU lab emulation, one 10 Mbit htb class per source port, netem
-`delay 20ms 10ms`, 40 MiB each way; not an ISP path):
-
-- `n=4`: control 2.24 Mbit/s, app 11.39 Mbit/s, app/control 5.08x, `wire/app`
-  1.0005, `retx_ppm` 96,095, `strict=1`, `rc=0`
-  (`benches/results/20261105T112245-throughput.csv`).
-- `n=1`: control 2.48 Mbit/s, app 3.46 Mbit/s, `wire/app` 1.0316, `retx_ppm`
-  1,090, `strict=1`, `rc=0`
-  (`benches/results/20261105T112725-throughput.csv`).
-- Targets: `wire/app < 1.2`, `retx_ppm < 100k`; `n=4` is within both.
-- `n=8` and `n=16`: not measured.
+- **Not run on this host:** the system install (`sudo scripts/install_dkms.sh`),
+  `modprobe`, `rmmod` and `/proc/net/tbtun`. `sudo -n true` fails with "a
+  password is required"; `dkms` and the kernel headers are not installed, and
+  `/lib/modules/7.2.9-1-MANJARO/build` does not exist, so `install_dkms.sh`
+  would stop at its headers check even with root. `insmod` of the built module
+  fails with `EPERM` (no `CAP_SYS_MODULE`). The DKMS runs above used a user
+  namespace only for the root check in `dkms install` and never wrote to the
+  real `/lib/modules`. The equivalent `/tmp` DKMS build passed, and the module
+  built from this tree is loaded by the QEMU guests in every probe and
+  adversarial run; no real-machine `modprobe` or `rmmod` was run.
 
 ### Acceptance
 
-Executed in this release pass: `scripts/mkdkmsconf.sh --version`, `make dkms.conf`,
-`make dkms-tarball`, `scripts/install_dkms.sh --dry-run`, `--stage-only`, and the
-redirected DKMS add/build/install/ldtarball runs above. The root steps below were
-not executed; see Blocked.
+The release acceptance commands:
 
 ```sh
-# build and host tests (no root, no module)
+# build, host suites, sanitizer build and the static checks
 make check
+make host-test-san
+bash review/lint.sh
+
+# QEMU probes and the adversarial suite
+tests/qemu/run.sh --probes A,B,C,D,E,F,G,H,I,J,K --timeout 480
+bash adversarial/run.sh
+
+# bench rows quoted above
+benches/run.sh throughput --n 4 --mib 40
+benches/run.sh throughput --n 1 --mib 40
 
 # packaging
 scripts/mkdkmsconf.sh --version          # 0.0.1
+make dkms.conf
 make dkms-tarball                        # dkms.tar.gz
+scripts/install_dkms.sh --dry-run
+```
 
+The measured host, QEMU, adversarial and bench results are in Verification.
+The operator install and unload procedure was not executed on this host (see
+the DKMS block):
+
+```sh
 # install (root; matching headers under /lib/modules/$(uname -r)/build)
 sudo scripts/install_dkms.sh
 modinfo tbtun | grep '^version:'         # 0.0.1
@@ -360,13 +464,5 @@ sudo scripts/install_dkms.sh --uninstall
 dkms status                              # no tbtun entry
 ```
 
-Still pending:
-
-- Full QEMU A–K, full `adversarial/run.sh`, and the `n=8`/`n=16` bench on the final
-  tree.
-- `near.data_path` / `near.second_conn` rerun with the fixed `adv_probe`.
-- `pub.writer` fix (about 75 MiB `EAGAIN`).
-- `flush` retest after a transfer.
-- Reviews 15, 21, 22 and 24; review 16 (TOFU) is documented, not fixed.
-- DKMS install/uninstall on a host with root and the matching headers.
-- Do not read this section as a full-suite pass.
+`n=8`, `n=16` and the full bench matrix are the final regression in
+`review/final-bench/`.
