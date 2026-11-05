@@ -212,6 +212,12 @@ phase_public() {
     setup_raw
     timeout 120 /bin/adv_probe writer "$PUB" 1024 0
     flush_all
+
+    # The other half of writer standard 7: the same 100 MiB with a reader
+    # draining the echo must complete byte-exact, not merely block.
+    setup_raw
+    timeout 200 /bin/adv_probe writerdrain "$PUB" 100
+    flush_all
 }
 
 phase_control() {
@@ -233,6 +239,12 @@ phase_control() {
     [ "$_cfg_before" = "$_cfg_after" ] &&
         res init.cfg_unchanged PASS "over-long lines changed nothing" ||
         res init.cfg_unchanged FAIL "an over-long line changed the config"
+
+    # review 31: a valid line buffered without a newline, then a write that
+    # overflows the 1024-byte line buffer. The write must report -E2BIG and
+    # the release-time drain must discard the tail instead of applying its
+    # prefix as if the line had completed.
+    timeout 10 /bin/adv_probe overflow "$CFG"
 
     # The documented round-trip: read the canonical config, write every line
     # back.  No transfer here; the concurrent case is phase replay.
@@ -458,6 +470,200 @@ phase_halfclose() {
     echo "== pub.halfclose"
     setup_raw
     timeout 30 /bin/adv_probe halfclose "$PUB"
+    flush_all
+}
+
+# --- config larger than 32 KiB (review 19/30) ------------------------------
+
+# The canonical line is maximal in every scalar: 64 of them are 33,335 bytes,
+# past the old 32 KiB TBT_CFG_RENDER_MAX. `id` and the listen port are the
+# only per-tunnel values; every other field is at its parser maximum, and the
+# 8-entry srcaddrs list is exactly the 127-byte parse limit.
+bigcfg_lines() {
+    awk 'BEGIN {
+        for (i = 1; i <= 64; i++)
+            printf "tunnel %d role=far listen=127.0.0.1:%d target=255.255.255.255:65535 peer=255.255.255.255:65535 n=16 m=0 dup=3 profile=http-kal-drip keepalive=86400000 drip_ms=3600000 replay=268435456 tunnel_rate=4294967295 max_inflate=1000.000 hole_budget_ms=60000 rx_reorder_bytes=268435456 tx_retain_bytes=4294967295 carrier_stall_ms=3600000 portblock=0-0 nonce=00112233445566778899aabbccddeeff srcaddrs=255.255.255.255,255.255.255.255,255.255.255.255,255.255.255.255,255.255.255.255,255.255.255.255,255.255.255.255,255.255.255.255\n", i, 22000 + i
+    }'
+}
+
+phase_bigcfg() {
+    echo "== config larger than 32 KiB"
+    flush_all
+    bigcfg_lines > /tmp/big.lines
+    _want=$(wc -c < /tmp/big.lines | tr -d ' ')
+    cat /tmp/big.lines > "$CFG" 2> /tmp/big.err
+    RC=$?
+    _n=$(grep -vc '^#' /proc/net/tbtun/tunnels 2> /dev/null)
+    if [ "$RC" -eq 0 ] && [ "$_n" -eq 64 ]; then
+        res cfg.big_write PASS "wrote $_want bytes / 64 maximal tunnel lines, rc=0"
+    else
+        res cfg.big_write FAIL "write rc=$RC, $_n tunnels (want 64), $_want bytes: $(cat /tmp/big.err)"
+    fi
+    timeout 30 /bin/adv_probe cfgbig "$CFG" /tmp/big.lines
+    case $? in
+    124 | 143) res cfg.big_roundtrip TIMEOUT "adv_probe cfgbig did not finish in 30s" ;;
+    esac
+    # The documented backup/restore: read the render, flush, write it back.
+    cat "$CFG" > /tmp/big.save 2> /dev/null
+    flush_all
+    cat /tmp/big.save > "$CFG" 2> /tmp/big.replay.err
+    RC=$?
+    _n=$(grep -vc '^#' /proc/net/tbtun/tunnels 2> /dev/null)
+    _got=$(cat "$CFG" 2> /dev/null | wc -c | tr -d ' ')
+    if [ "$RC" -eq 0 ] && [ "$_n" -eq 64 ] && [ "$_got" -eq "$_want" ]; then
+        res cfg.big_replay PASS "cat render > config after flush: rc=0, 64 tunnels, $_got bytes re-rendered"
+    else
+        res cfg.big_replay FAIL "replay rc=$RC, $_n tunnels, $_got bytes (want 64, $_want): $(cat /tmp/big.replay.err)"
+    fi
+    flush_all
+    setup_raw
+    echo_check cfg.echo_after_big 1
+}
+
+# --- /proc/net/tbtun/http torn read (review 33) ----------------------------
+
+phase_httptorn() {
+    echo "== /proc/net/tbtun/http torn read"
+    flush_all
+    rmmod tbtun
+    insmod /tbtun.ko debug=2
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR target=127.0.0.1:$TGT n=1 m=0" \
+        > "$CFG" || res init.httptorn_setup FAIL "far tunnel rejected"
+    echo "tunnel 2 role=near profile=http-kal listen=127.0.0.1:$PUB peer=127.0.0.1:$CAR n=1 m=0" \
+        > "$CFG" || res init.httptorn_setup FAIL "near tunnel rejected"
+    sleep 1
+    timeout 60 /bin/adv_probe httptorn "$PUB" 100
+    case $? in
+    124 | 143) res cat.http_torn TIMEOUT "adv_probe httptorn did not finish in 60s" ;;
+    esac
+    flush_all
+    rmmod tbtun
+    insmod /tbtun.ko debug=1
+}
+
+# --- a real hole kill and its age (review 24) ------------------------------
+
+phase_hole() {
+    echo "== hole age"
+    flush_all
+    rmmod tbtun
+    insmod /tbtun.ko debug=2
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR target=127.0.0.1:$TGT n=1 m=0 hole_budget_ms=100" \
+        > "$CFG" || res init.hole_setup FAIL "far tunnel rejected"
+    sleep 1
+    dmesg -c > /dev/null 2>&1
+    timeout 30 /bin/adv_probe hole "$CAR" 1
+    case $? in
+    124 | 143) res hole.created TIMEOUT "adv_probe hole did not finish in 30s" ;;
+    esac
+    _n=$(dmesg 2> /dev/null | grep -c RXHOLEKILL)
+    _age=$(dmesg 2> /dev/null | sed -n 's/.*RXHOLEKILL .*age_us=\([0-9][0-9]*\).*/\1/p' | tail -1)
+    if [ "${_n:-0}" -ge 1 ] && [ -n "$_age" ] && [ "$_age" -lt 5000000 ] && [ "$_age" -ge 50000 ]; then
+        res hole.age PASS "RXHOLEKILL x$_n age_us=$_age with hole_budget_ms=100: the printed age is the measured hole, not the ktime epoch"
+    else
+        res hole.age FAIL "RXHOLEKILL x${_n:-0} age_us=${_age:-missing}: expected at least one log with 50000 <= age_us < 5000000"
+    fi
+    flush_all
+    rmmod tbtun
+    insmod /tbtun.ko debug=1
+}
+
+# --- tunnel creation failure on a held listen port (review 3) --------------
+
+phase_create() {
+    echo "== tunnel create failure on a held listen port"
+    flush_all
+    setup_raw
+    _out=$(timeout 60 /bin/adv_probe echo "$PUB" 1 0 2>&1)
+    case $_out in
+    ECHO_OK*) res create.baseline PASS "$_out" ;;
+    *) res create.baseline FAIL "$_out" ;;
+    esac
+
+    /bin/adv_probe target 19199 > /tmp/holder.out 2>&1 &
+    HOLD=$!
+    sleep 1
+    if ! grep -q TARGET_READY /tmp/holder.out; then
+        res create.failure FAIL "the holder did not bind 19199: $(cat /tmp/holder.out)"
+        kill "$HOLD" 2> /dev/null
+        return
+    fi
+
+    # (a) A new id on the held port: the create must fail visibly and leave
+    # the running tunnels untouched.
+    if echo "tunnel 9 role=far profile=raw listen=127.0.0.1:19199 target=127.0.0.1:$TGT n=1 m=0" \
+        > "$CFG" 2> /dev/null; then
+        _newfail=0
+    else
+        _newfail=1
+    fi
+    _has9=$(grep -c '^9 ' /proc/net/tbtun/tunnels 2> /dev/null)
+    _out=$(timeout 60 /bin/adv_probe echo "$PUB" 1 0 2>&1)
+    case $_out in
+    ECHO_OK*) _oldok=1 ;;
+    *) _oldok=0 ;;
+    esac
+
+    # (b) The replace path: the same id, a listen port held by a stranger.
+    # The undo path destroys the old tunnel (review 3's leak fix), so record
+    # whether it survived; either a live tunnel or a clean removal is
+    # acceptable, a row that exists but does not serve is not.
+    if echo "tunnel 1 role=far profile=raw listen=127.0.0.1:19199 target=127.0.0.1:$TGT n=1 m=0" \
+        > "$CFG" 2> /dev/null; then
+        _repfail=0
+    else
+        _repfail=1
+    fi
+    _has1=$(grep -c '^1 ' /proc/net/tbtun/tunnels 2> /dev/null)
+    _out=$(timeout 30 /bin/adv_probe echo "$PUB" 1 0 2>&1)
+    case $_out in
+    ECHO_OK*) _repok=1 ;;
+    *) _repok=0 ;;
+    esac
+
+    kill "$HOLD" 2> /dev/null
+    wait "$HOLD" 2> /dev/null
+    sleep 1
+    if echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR target=127.0.0.1:$TGT n=1 m=0" \
+        > "$CFG" 2> /dev/null; then
+        _retry=1
+    else
+        _retry=0
+    fi
+    sleep 1
+    _out=$(timeout 60 /bin/adv_probe echo "$PUB" 1 0 2>&1)
+    case $_out in
+    ECHO_OK*) _retryok=1 ;;
+    *) _retryok=0 ;;
+    esac
+
+    _klog=$(dmesg 2> /dev/null |
+        grep -cE 'WARNING:|BUG:|Oops|general protection fault|Call Trace:|refcount_t:|KASAN|UBSAN')
+    if [ "$_newfail" -eq 1 ] && [ "$_has9" -eq 0 ] && [ "$_oldok" -eq 1 ] &&
+        [ "$_retry" -eq 1 ] && [ "$_retryok" -eq 1 ] && [ "${_klog:-0}" -eq 0 ]; then
+        res create.failure PASS "held port: new-id create refused, no tunnel 9, tunnels 1/2 still echo, retry after release works (replace refused=$_repfail old_present=$_has1 old_usable=$_repok)"
+    else
+        res create.failure FAIL "new-id refused=$_newfail tunnel9=$_has9 old_echo=$_oldok retry_write=$_retry retry_echo=$_retryok klog=$_klog"
+    fi
+    if [ "$_repfail" -eq 1 ] &&
+        { { [ "$_has1" -eq 1 ] && [ "$_repok" -eq 1 ]; } ||
+        { [ "$_has1" -eq 0 ] && [ "$_repok" -eq 0 ]; }; }; then
+        res create.replace PASS "replace with a held port refused; old tunnel survived=$_has1 usable=$_repok (destroy-on-failure is the current contract; no row is left half-configured)"
+    else
+        res create.replace FAIL "replace refused=$_repfail old_present=$_has1 old_usable=$_repok: a refused replace must either keep the old tunnel serving or remove it cleanly"
+    fi
+    flush_all
+}
+
+# --- 100 MiB write with the application reading (writer standard 7) --------
+
+phase_writerdrain() {
+    echo "== pub.writer with a draining reader"
+    setup_raw
+    timeout 200 /bin/adv_probe writerdrain "$PUB" 100
+    case $? in
+    124 | 143) res pub.writer_drain TIMEOUT "adv_probe writerdrain did not finish in 200s" ;;
+    esac
     flush_all
 }
 
@@ -715,7 +921,7 @@ phase_stall() {
     # be wedged by the first one.
 }
 
-for _p in public srcfilter control resource slab final replay rmmod flush catconfig cfg_mix param port near nearx far farx stall writer halfclose; do
+for _p in public srcfilter control resource slab final replay rmmod flush catconfig bigcfg cfg_mix param port near nearx far farx stall writer writerdrain halfclose httptorn hole create; do
     want "$_p" || continue
     echo "PHASE_START $_p"
     "phase_$_p"

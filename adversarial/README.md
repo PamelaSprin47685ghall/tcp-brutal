@@ -41,11 +41,15 @@ results. A phase that starts but never ends is reported as
 `console.hang.<phase> FAIL`; a phase that never starts is
 `console.missing.<phase> FAIL`; kernel oops/warning lines found on the console
 add `console.klog.<group> FAIL`. The default groups are the individual phases
-(`public control resource slab final replay rmmod flush param port near far`)
-plus the isolated crash repro.
+(`public control resource slab final replay rmmod flush catconfig cfg_mix param
+port near far stall httptorn hole create`) plus the isolated crash repro. The
+`catconfig` group also runs `bigcfg`, the `writer` group also runs
+`writerdrain`, and `httptorn`/`hole` reload the module with `debug=2` because
+their evidence is the `/proc/net/tbtun/http` capture and the `RXHOLEKILL` log.
 
-Two groups run more than one phase: `public` also runs `srcfilter`, `near`
-also runs `nearx`, and `far` also runs `farx`. The extra phases are separate
+Several groups run more than one phase: `public` also runs `srcfilter`, `near`
+also runs `nearx`, `far` also runs `farx`, `catconfig` also runs `bigcfg`, and
+`writer` also runs `writerdrain`. The extra phases are separate
 `PHASE_START`/`PHASE_END` sections so a hang in one attack still leaves the
 others' verdicts on the console.
 
@@ -129,6 +133,7 @@ near's nonce, index and generation from its own HELLO.
 | `pub.srcfilter` | far+near pinned with `nonce=` and far `peer=`, then an application from 127.0.0.2 | the application is served (no `src=` allow list exists; identity is the nonce) and both keys render in the canonical config |
 | `pub.writer` (100 MiB) | app writes and never reads | the write must either finish (`sent==total`) or still be blocked in `write()` when the 10 s observation ends: the public socket is ordinary TCP, so a full queue stalls the application and never surfaces as `EAGAIN`. The forked writer is killed and reaped, the socket is closed, and a synchronous `flush` follows; `MemAvailable` must recover to within 50 MB (51200 kB) of the pre-write value, with no OOM/RST |
 | `pub.writer` (1024 MiB) | app attempts 1 GiB and never reads | the same verdict; the detail prints `sent/total/errno/eagain/blocked/child_state/mem_before/mem_during_min/mem_after_flush/flush_secs/oom` |
+| `pub.writer_drain` (100 MiB) | app writes 100 MiB while a second process drains the echo | the write finishes byte-exact: `sent==total`, `got==total`, `errno=0`, `eagain=0`, no RST/OOM, and `flush` returns `MemAvailable` to within 50 MB. This is the completion half of writer standard 7; the 1 GiB case above can only block because nothing reads |
 
 ### Control surface (`ctl.*`, `init.*`)
 
@@ -139,6 +144,7 @@ near's nonce, index and generation from its own HELLO.
 | `ctl.line1025`, `ctl.line1024nonl` | line at/over the current 1024-byte buffer | `-E2BIG`; nothing applied |
 | `ctl.line512nonl` | 512 bytes, no newline | buffered or refused; never applied |
 | `init.cfg_roundtrip` | read the canonical config, write every line back | all lines accepted |
+| `ctl.release_overflow` | a valid tunnel line buffered without a newline, then 1100 bytes that overflow the 1024-byte line buffer | write 2 reports `-E2BIG`; the close-time drain discards the tail and tunnel 77 never appears |
 | `init.cfg_replay` | line-by-line replay during an 8 MiB transfer | no deadlock; old stream closes cleanly |
 | `init.flush` | `flush` during an 8 MiB transfer | app sees EOF/reset, not a timeout |
 | `init.rmmod` | `rmmod tbtun` during an 8 MiB transfer | rmmod returns, app sees a clean error, guest survives |
@@ -152,6 +158,20 @@ near's nonce, index and generation from its own HELLO.
 | `init.scale` | 32 near/far pairs, 16 carriers each | carriers up; memory reported; no OOM |
 | `init.port_exhaust` | a 16-port block, then two 16-carrier tunnels | the third tunnel is refused (no `tunnels` row), or a dedicated `port_alloc_fail`/`port_exhaust`/`port_retry`/`degraded` counter or a `port block exhausted` log line names the reason; a bare `alloc_fail=16` with no visible error is a FAIL |
 | `init.max_carriers` | `n=8` with `max_carriers=4` | refused |
+
+### Config and proc surfaces at their limits (`cfg.*`, `cat.*`, `hole.*`, `create.*`)
+
+| Attack | What is sent | Safe result |
+| --- | --- | --- |
+| `cfg.big_write` | 64 canonical tunnel lines, every scalar at its parser maximum and 8 `srcaddrs` entries: 33,335 bytes | write rc=0 and 64 tunnels exist; each line is 519/520 bytes, below the 1024-byte line buffer |
+| `cfg.big_roundtrip` | the same config read once in 1000-byte `read()`s and once in one 64 KiB read | both reads are byte-identical to the 64 lines written, larger than 32768 bytes, with no truncation and no missing tunnel. The 1000-byte path exercises the offset-served snapshot (review 19); the size exercises the removed 32 KiB render buffer (review 30) |
+| `cfg.big_replay` | `cat config > save`, `flush`, `cat save > config` | rc=0, 64 tunnels recreated, and the re-render has the same byte count |
+| `cfg.echo_after_big` | a 1 MiB echo after the big config is replaced by the normal far+near pair | byte-exact |
+| `cat.http_torn` | 100 reads of `/proc/net/tbtun/http` while an application keeps a near stream busy | every read is empty or the complete `POST /api/v2/upload ...\r\n\r\n` block: one 26-character base32 `X-Request-Id`, CRLF line endings, no NUL, no half header. The capture is written once per carrier, so the test proves the served block's integrity; the copy under `pump_lock` is what makes a half-written block impossible |
+| `hole.age` | a far stream with `hole_budget_ms=100` receives `DATA seq=1 len=1`, leaving offset 0 missing | the 10 ms feedback tick kills the stream; `dmesg` holds one `RXHOLEKILL` with `50000 <= age_us < 5000000`, i.e. the measured hole (~100 ms), not the ktime epoch. Requires `debug=2` |
+| `create.baseline` | the normal far+near pair echoes 1 MiB | byte-exact |
+| `create.failure` | a stranger holds `127.0.0.1:19199`; a new tunnel id is written on that port | the write fails visibly, no tunnel row appears, the running tunnels still echo, and the retry after the port is released succeeds; no oops |
+| `create.replace` | the same stranger; a replacement line for the running tunnel id on the held port | the write fails and the old tunnel is not left half-configured: either it still serves or it is cleanly removed (`old_survived` prints which). The current undo path destroys the old tunnel; the detail records that instead of hiding it |
 
 ### Kernel-state sanity (`ADV_KLOG`, `init.dmesg`, `console.klog.*`)
 
@@ -201,6 +221,15 @@ the console log holds the evidence.
   hundred-MB drop. The 2 s churn echo timeout plus one retry absorbs scheduler
   jitter on a loaded host; it does not relax the per-connection usability
   requirement.
+- `pub.writer_drain` is the same 100 MiB with the application reading. That
+  case must finish (`sent==total` and `got==total`): the module's queues and
+  the target's echo keep moving, so the public socket never stays full. The
+  1 GiB case cannot finish under "the application never reads" for a
+  structural reason, not a slow one: the public socket's receive queue and
+  the module's delivery queue are bounded, the target's echo blocks once they
+  fill, and the application's `write()` then waits for a reader that never
+  comes. Its verdict is therefore "finishes or is still blocked", and the
+  drain case supplies the completion evidence that the blocked case cannot.
 - The fake far and the hostile carrier are both in the guest, so they can bind
   the ports the module dials. That is deliberate: the module's peer is
   untrusted by assumption.

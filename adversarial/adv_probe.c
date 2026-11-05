@@ -3745,6 +3745,622 @@ static int mode_cfgwrite(const char *path, const char *what)
     return 0;
 }
 
+/* ------------------------------------------------------------------ */
+/* Config read-back at the exact-size limit (review 19/30)             */
+
+/* Read a whole file. `chunk` is the per-read size, so the caller can force
+ * the offset-serving path with a buffer much smaller than the file. Returns
+ * the byte count, -1 on an error, or -2 when the file did not fit in cap. */
+static ssize_t read_whole(const char *path, char *buf, size_t cap, size_t chunk)
+{
+    int fd = open(path, O_RDONLY);
+    size_t off = 0;
+
+    if (fd < 0)
+        return -1;
+    while (off < cap)
+    {
+        ssize_t n = read(fd, buf + off, chunk);
+
+        if (n < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            close(fd);
+            return -1;
+        }
+        if (n == 0)
+        {
+            close(fd);
+            return (ssize_t)off;
+        }
+        off += (size_t)n;
+    }
+    close(fd);
+    return -2;
+}
+
+static int line_count(const char *b, size_t n)
+{
+    size_t i;
+    int lines = 0;
+
+    for (i = 0; i < n; i++)
+        if (b[i] == '\n')
+            lines++;
+    return lines;
+}
+
+static int line_of_offset(const char *b, size_t n, size_t off)
+{
+    size_t i;
+    int line = 1;
+
+    if (off > n)
+        off = n;
+    for (i = 0; i < off; i++)
+        if (b[i] == '\n')
+            line++;
+    return line;
+}
+
+static size_t first_difference(const char *a, const char *b, size_t n)
+{
+    size_t i;
+
+    for (i = 0; i < n; i++)
+        if (a[i] != b[i])
+            return i;
+    return n;
+}
+
+/* Compare the module's rendered config with the exact lines that were
+ * written, reading it once in 1000-byte chunks (the offset path that review
+ * 19 fixed) and once in one large read. A >32 KiB config proves the old
+ * TBT_CFG_RENDER_MAX truncation cannot return. */
+static int mode_cfgbig(const char *cfg, const char *expected)
+{
+    static char small[262144], big[262144], exp[262144];
+    ssize_t ns, nb, ne;
+    size_t diff = 0;
+    int ok, tunnels = 0;
+    size_t p;
+
+    ns = read_whole(cfg, small, sizeof(small), 1000);
+    nb = read_whole(cfg, big, sizeof(big), 65536);
+    ne = read_whole(expected, exp, sizeof(exp), 65536);
+    if (ns < 0 || nb < 0 || ne < 0)
+    {
+        result("cfg.big_roundtrip", 0,
+               "read failed: cfg/1000=%zd cfg/65536=%zd expected=%zd errno=%d",
+               ns, nb, ne, errno);
+        return 1;
+    }
+    p = 0;
+    while (p < (size_t)ne)
+    {
+        size_t q = p;
+
+        while (q < (size_t)ne && exp[q] != '\n')
+            q++;
+        if (q - p > 7 && !memcmp(exp + p, "tunnel ", 7))
+            tunnels++;
+        p = q + 1;
+    }
+    ok = ns == ne && nb == ns && (size_t)ne > 32768 &&
+         !memcmp(small, exp, (size_t)ne) && !memcmp(big, small, (size_t)ns);
+    if (!ok)
+    {
+        size_t m = (size_t)(ns < ne ? ns : ne);
+
+        diff = first_difference(small, exp, m);
+    }
+    if (ok)
+        result("cfg.big_roundtrip", 1,
+               "config served in 1000-byte reads: %zd bytes, %d lines (%d tunnel "
+               "directives); one-shot read %zd bytes; expected %zd bytes; "
+               "byte-identical and larger than 32768",
+               ns, line_count(exp, (size_t)ne), tunnels, nb, ne);
+    else
+        result("cfg.big_roundtrip", 0,
+               "config served in 1000-byte reads: %zd bytes, %d lines (%d tunnels); "
+               "one-shot %zd bytes; expected %zd bytes; first difference at "
+               "offset %zu (line %d)",
+               ns, line_count(exp, (size_t)ne), tunnels, nb, ne, diff,
+               line_of_offset(exp, (size_t)ne, diff));
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* /proc/net/tbtun/http: a torn request block (review 33)              */
+
+static const char http_reqid_key[] = "\r\nX-Request-Id: ";
+
+/* A block is either absent or the complete POST header block the near side
+ * emitted: the request line, CRLF line endings only, one 26-character base32
+ * request id, and the closing CRLFCRLF. */
+static int http_block_ok(const char *b, size_t n, char *why, size_t whylen)
+{
+    static const char req[] = "POST /api/v2/upload HTTP/1.1\r\n";
+    const char *id;
+    size_t i;
+
+    if (n < sizeof(req) - 1 + 4)
+    {
+        snprintf(why, whylen, "short block (%zu bytes)", n);
+        return 0;
+    }
+    if (memchr(b, '\0', n))
+    {
+        snprintf(why, whylen, "NUL inside %zu bytes", n);
+        return 0;
+    }
+    if (memcmp(b, req, sizeof(req) - 1))
+    {
+        snprintf(why, whylen, "prefix is not the POST request line");
+        return 0;
+    }
+    if (memcmp(b + n - 4, "\r\n\r\n", 4))
+    {
+        snprintf(why, whylen, "no CRLFCRLF at the end (%zu bytes)", n);
+        return 0;
+    }
+    for (i = 0; i < n; i++)
+        if (b[i] == '\n' && (i == 0 || b[i - 1] != '\r'))
+        {
+            snprintf(why, whylen, "bare LF at offset %zu", i);
+            return 0;
+        }
+    id = memmem(b, n, http_reqid_key, sizeof(http_reqid_key) - 1);
+    if (!id)
+    {
+        snprintf(why, whylen, "no X-Request-Id header");
+        return 0;
+    }
+    id += sizeof(http_reqid_key) - 1;
+    if ((size_t)(id - b) + 28 > n)
+    {
+        snprintf(why, whylen, "truncated X-Request-Id");
+        return 0;
+    }
+    for (i = 0; i < 26; i++)
+        if (!((id[i] >= 'a' && id[i] <= 'z') || (id[i] >= '2' && id[i] <= '7')))
+        {
+            snprintf(why, whylen, "bad X-Request-Id byte %zu", i);
+            return 0;
+        }
+    if (id[26] != '\r' || id[27] != '\n')
+    {
+        snprintf(why, whylen, "X-Request-Id is not terminated");
+        return 0;
+    }
+    if (memmem(id + 28, n - (size_t)(id + 28 - b), http_reqid_key,
+               sizeof(http_reqid_key) - 1))
+    {
+        snprintf(why, whylen, "two X-Request-Id headers");
+        return 0;
+    }
+    return 1;
+}
+
+/* Keep one application stream busy and read the debug surface 100 times.
+ * Every read must be empty or the whole block; a reader that copies the live
+ * buffer without pump_lock can catch the writer mid-memcpy. */
+static int mode_httptorn(int port, int reads)
+{
+    int fd = connect_to("127.0.0.1", port, NULL);
+    int complete = 0, empty = 0, partial = 0, first_bad = -1, i;
+    char why[128] = "none";
+    pid_t pid;
+
+    if (fd < 0)
+    {
+        result("cat.http_torn", 0, "cannot connect to the public port");
+        return 1;
+    }
+    pid = fork();
+    if (pid == 0)
+    {
+        char *b = malloc(4096);
+
+        if (!b)
+            _exit(1);
+        memset(b, 'H', 4096);
+        for (;;)
+        {
+            if (send_all(fd, b, 4096))
+                break;
+            msleep(1);
+        }
+        _exit(0);
+    }
+    /* Let the near's carrier 0 emit its first POST block before reading. */
+    msleep(300);
+    for (i = 0; i < reads; i++)
+    {
+        char buf[65536];
+        int cfd = open("/proc/net/tbtun/http", O_RDONLY);
+        ssize_t n;
+
+        if (cfd < 0)
+        {
+            partial++;
+            if (first_bad < 0)
+            {
+                first_bad = i;
+                snprintf(why, sizeof(why), "open errno=%d", errno);
+            }
+            msleep(2);
+            continue;
+        }
+        n = read(cfd, buf, sizeof(buf));
+        close(cfd);
+        if (n == 0)
+            empty++;
+        else if (n < 0)
+        {
+            partial++;
+            if (first_bad < 0)
+            {
+                first_bad = i;
+                snprintf(why, sizeof(why), "read errno=%d", errno);
+            }
+        }
+        else
+        {
+            char tmp[128];
+
+            if (http_block_ok(buf, (size_t)n, tmp, sizeof(tmp)))
+                complete++;
+            else
+            {
+                partial++;
+                if (first_bad < 0)
+                {
+                    first_bad = i;
+                    snprintf(why, sizeof(why), "%s", tmp);
+                }
+            }
+        }
+        msleep(2);
+    }
+    if (pid > 0)
+    {
+        kill(pid, SIGKILL);
+        waitpid(pid, NULL, 0);
+    }
+    close(fd);
+    result("cat.http_torn", partial == 0 && complete > 0 && complete + empty == reads,
+           "%d reads of /proc/net/tbtun/http during an active stream: complete=%d "
+           "empty=%d partial=%d first_bad=%d (%s)",
+           reads, complete, empty, partial, first_bad, why);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* A real hole kill and its age (review 24)                            */
+
+/* Join a far tunnel, open a stream, then send one byte at offset 1 so offset
+ * 0 stays missing. The tunnel is configured with hole_budget_ms=100, so the
+ * 10 ms feedback tick logs RXHOLEKILL about 100-110 ms later. The shell reads
+ * dmesg and checks age_us; this mode proves the kill happened at all. */
+static int mode_hole(int port, int tunnel)
+{
+    unsigned char nonce[16];
+    static struct rb r;
+    uint32_t sid = 0x686f6c65u; /* "hole" */
+    unsigned long long before, after;
+    int fd, gen = 0, i;
+
+    for (i = 0; i < 16; i++)
+        nonce[i] = (unsigned char)(0x40 + i);
+    before = stat_key(tunnel, "holes_unrecoverable");
+    fd = far_join_rb(port, nonce, 0, 1, &gen, NULL, &r);
+    if (fd < 0)
+    {
+        result("hole.created", 0, "carrier join failed");
+        return 1;
+    }
+    {
+        struct fr o = { .type = TBT_F_OPEN, .path = 0, .sid = sid,
+                        .conv = TBT_CONV };
+
+        if (send_frame(fd, &o, NULL, 0))
+        {
+            result("hole.created", 0, "OPEN send failed");
+            close(fd);
+            return 1;
+        }
+    }
+    msleep(300);
+    if (send_data(fd, 0, sid, 0, 1, "X", 1))
+    {
+        result("hole.created", 0, "DATA send failed");
+        close(fd);
+        return 1;
+    }
+    after = before;
+    for (i = 0; i < 30; i++)
+    {
+        msleep(100);
+        after = stat_key(tunnel, "holes_unrecoverable");
+        if (after > before)
+            break;
+    }
+    result("hole.created", after > before,
+           "DATA seq=1 len=1 leaves offset 0 missing: holes_unrecoverable "
+           "%llu -> %llu after %d00 ms (ooo_bytes=%llu ooo_frames=%llu "
+           "rx_max_stall_us=%llu)",
+           before, after, i, stat_key(tunnel, "ooo_bytes"),
+           stat_key(tunnel, "ooo_frames"), stat_key(tunnel, "rx_max_stall_us"));
+    close(fd);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* A 100 MiB write with a reader draining the echo                     */
+
+struct drain_state {
+    long sent;
+    long got;
+    int werr;
+    int rerr;
+};
+
+/* The blocked-writer case proves backpressure; this one proves the other half
+ * of the contract: with the application reading, the same 100 MiB must finish
+ * byte-exact, with no EAGAIN, no RST, and no memory left after flush. */
+static int mode_writerdrain(int port, int mib)
+{
+    int fd = connect_to("127.0.0.1", port, NULL);
+    long total = (long)mib * 1024 * 1024;
+    struct timeval zero = { 0, 0 };
+    struct drain_state *st;
+    char *buf = malloc(1024 * 1024);
+    unsigned long before, during_min, after_write, after_flush = 0;
+    int oom0, oom1, flushed = 0, legal, mem_ok, rst, eagain;
+    long flush_start, flush_ms = -1, deadline;
+    long sent, got;
+    int werr, rerr, writer_done = 0, reader_done = 0;
+    int wstatus = 0, rstatus = 0;
+    pid_t wp = -1, rp = -1;
+
+    if (fd < 0 || !buf)
+    {
+        result("pub.writer_drain", 0, "cannot connect or allocate");
+        free(buf);
+        return 1;
+    }
+    /* The public socket is ordinary TCP. A send/recv timeout would turn the
+     * module's backpressure into EAGAIN, which is the failure this test looks
+     * for; disable both and let the drain run to completion. */
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &zero, sizeof(zero));
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &zero, sizeof(zero));
+    st = mmap(NULL, sizeof(*st), PROT_READ | PROT_WRITE,
+              MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (st == MAP_FAILED)
+    {
+        result("pub.writer_drain", 0, "mmap of the drain state failed");
+        close(fd);
+        free(buf);
+        return 1;
+    }
+    memset(st, 0, sizeof(*st));
+    memset(buf, 'D', 1024 * 1024);
+    before = mem_available_kb();
+    during_min = before;
+    oom0 = oom_count();
+
+    rp = fork();
+    if (rp == 0)
+    {
+        char *rb = malloc(65536);
+        long got = 0;
+
+        if (!rb)
+            _exit(1);
+        for (;;)
+        {
+            ssize_t n = recv(fd, rb, 65536, 0);
+
+            if (n > 0)
+            {
+                got += n;
+                __atomic_store_n(&st->got, got, __ATOMIC_RELEASE);
+                continue;
+            }
+            if (n < 0 && errno == EINTR)
+                continue;
+            __atomic_store_n(&st->rerr, n < 0 ? errno : 0, __ATOMIC_RELEASE);
+            break;
+        }
+        free(rb);
+        _exit(0);
+    }
+    wp = fork();
+    if (wp == 0)
+    {
+        long sent = 0;
+
+        while (sent < total)
+        {
+            ssize_t n = send(fd, buf, 1024 * 1024, MSG_NOSIGNAL);
+
+            if (n <= 0)
+            {
+                __atomic_store_n(&st->werr, errno, __ATOMIC_RELEASE);
+                break;
+            }
+            sent += n;
+            __atomic_store_n(&st->sent, sent, __ATOMIC_RELEASE);
+        }
+        _exit(0);
+    }
+    if (rp < 0 || wp < 0)
+    {
+        if (rp > 0)
+        {
+            kill(rp, SIGKILL);
+            waitpid(rp, &rstatus, 0);
+        }
+        if (wp > 0)
+        {
+            kill(wp, SIGKILL);
+            waitpid(wp, &wstatus, 0);
+        }
+        result("pub.writer_drain", 0, "fork failed: errno=%d", errno);
+        munmap(st, sizeof(*st));
+        close(fd);
+        free(buf);
+        return 1;
+    }
+
+    /* The writer's deadline is generous: 100 MiB through one raw carrier on
+     * loopback, with the reader keeping the pipe moving. A timeout means the
+     * drain path is broken, not that the test is slow. */
+    deadline = now_ms() + 180000;
+    while (now_ms() < deadline)
+    {
+        unsigned long m = mem_available_kb();
+        pid_t r;
+
+        if (m && (!during_min || m < during_min))
+            during_min = m;
+        r = waitpid(wp, &wstatus, WNOHANG);
+        if (r == wp)
+        {
+            writer_done = 1;
+            break;
+        }
+        if (r < 0 && errno != EINTR)
+            break;
+        msleep(10);
+    }
+    if (!writer_done)
+    {
+        kill(wp, SIGKILL);
+        waitpid(wp, &wstatus, 0);
+    }
+    /* The application's write side is done; the target must see EOF so the
+     * reader can drain the last echo instead of waiting for a close. */
+    shutdown(fd, SHUT_WR);
+    deadline = now_ms() + 60000;
+    while (now_ms() < deadline)
+    {
+        pid_t r = waitpid(rp, &rstatus, WNOHANG);
+
+        if (r == rp)
+        {
+            reader_done = 1;
+            break;
+        }
+        if (r < 0 && errno != EINTR)
+            break;
+        msleep(10);
+    }
+    if (!reader_done)
+    {
+        kill(rp, SIGKILL);
+        waitpid(rp, &rstatus, 0);
+    }
+    sent = __atomic_load_n(&st->sent, __ATOMIC_ACQUIRE);
+    got = __atomic_load_n(&st->got, __ATOMIC_ACQUIRE);
+    werr = __atomic_load_n(&st->werr, __ATOMIC_ACQUIRE);
+    rerr = __atomic_load_n(&st->rerr, __ATOMIC_ACQUIRE);
+    after_write = mem_available_kb();
+    if (after_write && (!during_min || after_write < during_min))
+        during_min = after_write;
+    close(fd);
+
+    flush_start = now_ms();
+    if (config_flush() == 0)
+    {
+        flushed = 1;
+        for (;;)
+        {
+            after_flush = mem_available_kb();
+            if (before && after_flush && after_flush + 51200 >= before)
+                break;
+            if (now_ms() - flush_start >= 3000)
+                break;
+            msleep(20);
+        }
+        flush_ms = now_ms() - flush_start;
+    }
+    oom1 = oom_count();
+
+    legal = writer_done && werr == 0 && sent == total && reader_done &&
+            got == total && rerr == 0;
+    rst = werr == ECONNRESET || werr == EPIPE || rerr == ECONNRESET ||
+          rerr == EPIPE;
+    eagain = werr == EAGAIN || rerr == EAGAIN;
+    mem_ok = flushed && before > 0 && after_flush > 0 &&
+             after_flush + 51200 >= before;
+    result("pub.writer_drain", legal && !rst && !eagain && mem_ok && oom1 <= oom0,
+           "attempted %d MiB with a draining reader: sent=%ld/%ld got=%ld/%ld "
+           "errno=%d/%d eagain=%d blocked=%d mem_before=%lu mem_during_min=%lu "
+           "mem_after_flush=%lu flush_secs=%.2f oom=%d->%d",
+           mib, sent, total, got, total, werr, rerr, eagain, !writer_done,
+           before, during_min, after_flush,
+           flush_ms < 0 ? -1.0 : flush_ms / 1000.0, oom0, oom1);
+    munmap(st, sizeof(*st));
+    free(buf);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* An over-long unterminated line must not be applied at release        */
+
+static int tunnel_row_present(int id)
+{
+    FILE *p = fopen("/proc/net/tbtun/tunnels", "r");
+    char line[512], want[16];
+    int found = 0;
+
+    if (!p)
+        return 0;
+    snprintf(want, sizeof(want), "%d ", id);
+    while (fgets(line, sizeof(line), p))
+        if (!strncmp(line, want, strlen(want)))
+            found = 1;
+    fclose(p);
+    return found;
+}
+
+/* review 31: a valid line buffered without a newline, then enough bytes to
+ * overflow the 1024-byte line buffer. The write must report -E2BIG and the
+ * release-time drain must discard the tail instead of applying its prefix. */
+static int mode_overflow(const char *path)
+{
+    static const char line[] =
+        "tunnel 77 role=far profile=raw listen=127.0.0.1:22777 target=127.0.0.1:19070 n=1 m=0";
+    char junk[1100];
+    ssize_t n1, n2;
+    int fd, err, applied;
+
+    memset(junk, 'x', sizeof(junk));
+    fd = open(path, O_WRONLY);
+    if (fd < 0)
+    {
+        result("ctl.release_overflow", 0, "open %s: errno=%d", path, errno);
+        return 1;
+    }
+    errno = 0;
+    n1 = write(fd, line, sizeof(line) - 1);
+    errno = 0;
+    n2 = write(fd, junk, sizeof(junk));
+    err = errno;
+    close(fd);
+    applied = tunnel_row_present(77);
+    result("ctl.release_overflow",
+           n1 == (ssize_t)(sizeof(line) - 1) && n2 < 0 && err == E2BIG && !applied,
+           "valid %zu-byte tunnel line buffered without a newline, then %zu "
+           "bytes: write2=%zd errno=%d; tunnel 77 applied=%d (the release "
+           "drain must discard an overflowed tail)",
+           sizeof(line) - 1, sizeof(junk), n2, err, applied);
+    return 0;
+}
+
 /* Write an unterminated line and exit without closing the descriptor.  The
  * kernel's exit_files() releases it from task_work, after
  * exit_task_namespaces(); the module's release path then applies the line
@@ -3792,7 +4408,12 @@ static void usage(void)
             "       adv_probe target <port>\n"
             "       adv_probe partial <config_path> <line-without-newline>\n"
             "       adv_probe nonroot <path>\n"
-            "       adv_probe cfgwrite <path> 513|512|512nonl\n");
+            "       adv_probe cfgwrite <path> 513|512|512nonl\n"
+            "       adv_probe cfgbig <config_path> <expected_lines_file>\n"
+            "       adv_probe httptorn <pub_port> <reads>\n"
+            "       adv_probe hole <carrier_port> <tunnel_id>\n"
+            "       adv_probe writerdrain <pub_port> <mib>\n"
+            "       adv_probe overflow <config_path>\n");
 }
 
 int main(int argc, char **argv)
@@ -3848,6 +4469,16 @@ int main(int argc, char **argv)
         return mode_nonroot(argv[2]);
     if (!strcmp(argv[1], "cfgwrite") && argc == 4)
         return mode_cfgwrite(argv[2], argv[3]);
+    if (!strcmp(argv[1], "cfgbig") && argc == 4)
+        return mode_cfgbig(argv[2], argv[3]);
+    if (!strcmp(argv[1], "httptorn") && argc == 4)
+        return mode_httptorn(atoi(argv[2]), atoi(argv[3]));
+    if (!strcmp(argv[1], "hole") && argc == 4)
+        return mode_hole(atoi(argv[2]), atoi(argv[3]));
+    if (!strcmp(argv[1], "writerdrain") && argc == 4)
+        return mode_writerdrain(atoi(argv[2]), atoi(argv[3]));
+    if (!strcmp(argv[1], "overflow") && argc == 3)
+        return mode_overflow(argv[2]);
     usage();
     return 2;
 }
