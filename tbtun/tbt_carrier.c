@@ -581,12 +581,18 @@ static void tbt_car_rx_work(struct work_struct *w)
         tbt_carrier_lost(c->sess, c);
     }
     else if (READ_ONCE(c->sk) == sk &&
-             (READ_ONCE(tcp_sk(sk)->copied_seq) !=
-                  READ_ONCE(tcp_sk(sk)->rcv_nxt) ||
-              c->parser->have))
+             READ_ONCE(tcp_sk(sk)->copied_seq) !=
+                 READ_ONCE(tcp_sk(sk)->rcv_nxt))
     {
-        /* Bytes/records arrived after tcp_read_sock() stopped but before this
-         * work returned.  Re-arm; sk_data_ready may have been coalesced. */
+        /* Bytes arrived after tcp_read_sock() stopped but before this work
+         * returned. Re-arm; sk_data_ready may have been coalesced.
+         *
+         * Never re-arm for parser->have alone: those bytes were already
+         * copied out of the socket (copied_seq == rcv_nxt), so a re-run can
+         * copy nothing. It spins at 100% of a kworker until the rest of the
+         * record arrives, which is the normal case on a path whose segments
+         * are smaller than a record. The 50 ms poll already retries a held
+         * record, and sk_data_ready runs this work when the tail arrives. */
         schedule_work(&c->w_rx);
     }
 

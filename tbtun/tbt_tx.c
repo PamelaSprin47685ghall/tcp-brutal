@@ -2114,15 +2114,13 @@ int tbt_tx_pump(struct tbt_session *sess)
                     sess->win_block++;
                     if (c->sk->sk_socket)
                         set_bit(SOCK_NOSPACE, &c->sk->sk_socket->flags);
-                    /* schedule, not mod: every blocked frame in this pass
-                     * reaches here, and mod_delayed_work would reset the same
-                     * 2 ms timer once per frame (a timer-lock storm at a
-                     * large queue). One pending fallback is enough; the
-                     * peer's window update also calls sk_write_space. */
-                    schedule_delayed_work(&c->w_pump, msecs_to_jiffies(2));
-                    sess->pump_hw_armed++;
-                    /* The test's hiwat proof is "the pump met real
-                     * backpressure"; a full peer window is one. */
+                    /* No timer here. SOCK_NOSPACE makes tcp_check_space()
+                     * call sk_write_space when the peer's window opens, and
+                     * the 10 ms FBK tick pumps anyway. Arming the 2 ms
+                     * fallback once per blocked frame only to have the
+                     * pump's own disarm cancel it was 3-44k schedule/cancel
+                     * pairs per second (measured: pump_hw_armed 84380 in a
+                     * 1.9 s run, pump_hw_fired 0). */
                     sess->dbg_pump_hiwat++;
                     continue;
                 }
