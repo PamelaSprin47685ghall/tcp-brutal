@@ -1,0 +1,3 @@
+# Captured console logs and result dumps keep their bytes verbatim; trailing
+# spaces in machine output are not whitespace damage in source.
+review/final-bench/** -whitespace
