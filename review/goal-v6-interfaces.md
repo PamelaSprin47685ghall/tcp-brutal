@@ -734,6 +734,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **T5.2 smoke 失败（2026-11-06，blocked）**：integration `f32c03a`（crypto `0d11710`）；小 smoke `n=1/m=1/carriers=2/http-kal/crypto=on` 失败：near c3 `up=1 lost=27 replaced=27 connect_fail=41`，carrier 0 `connecting`、`failed to connect: -115`（EINPROGRESS）反复重拨；far `carrier ACCEPTED ... awaiting HELLO`，HELLO 未完成；near `http_req=28/http_resp=0`，far `http_req=0/http_resp=1`、`rx_proto=27/rx_errs=27 rx_last_err=-71`。**256 未跑；E hold**。已开 `t52-debug`（`w-t52-debug` from f32c03a）在 QEMU 复现/修。证据 `review/wan-experiment/t5.2-256-http-kal/`。T5.2 blocked。
 
+**T5.2 修复（`w-t52-debug 7b7965f`）**：两个根因：① crypto HELLO key ownership——far 采纳 near key 后仍把本地 key 当权威，后续 carrier `key_id=1` 被 `-EPROTO` 拒；加 `crypto_key_peer`，`resolve_key` 改 `local_key_wins`，采纳 key 与后续 HELLO 比较。② `kernel_connect` 超时返回 `-EINPROGRESS`(-115) 被当失败重拨；`tbt_connect_bounded()` 在 4s 内重入等待，`connect_retry` 计数。QEMU B,C,N,O PASS：probe N n=4/m=4 carriers=16 http-kal crypto=on `up=16`、`http_req=16/http_resp=16`、1MiB byte-exact；probe O smoke phases off/on/replace/slow 全 byte-exact、`connect_retry=2/connect_fail=0`；新增 c9 `fec_proto_fail`/`fec_hdr_crc_fail`/`fec_payload_crc_fail`。已合入 integration **`9f66fba`**，make check 绿。**T5.2 GO（新 master）**。
+
 ### G3 — T3 ChaCha8（C）
 
 | 项 | 内容 |
