@@ -1,0 +1,3 @@
+{"bytes": 8126464, "connects": 8, "cpu_cores": 0.0024, "cpu_s": 0.06, "direction": "up", "errors": 0, "mbps": 2.635, "mib": 7.75, "parent_wall_s": 24.6799, "partial_requests": 8, "payload_mib": 8, "procs_expected": 8, "procs_reported": 8, "requests": 0, "seconds": 10.0, "span_s": 24.671}
+{"bytes": 6553600, "connects": 8, "cpu_cores": 0.0025, "cpu_s": 0.05, "direction": "up", "errors": 0, "mbps": 2.622, "mib": 6.25, "parent_wall_s": 20.0052, "partial_requests": 8, "payload_mib": 8, "procs_expected": 8, "procs_reported": 8, "requests": 0, "seconds": 10.0, "span_s": 19.9961}
+{"event": "done", "exit_code": 0, "runs": 2}

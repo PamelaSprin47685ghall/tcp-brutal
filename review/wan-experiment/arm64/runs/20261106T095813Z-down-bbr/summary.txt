@@ -1,0 +1,13 @@
+config: {"direction": "down", "host": "45.11.1.62", "mib": 8, "port": 10000, "procs": 8, "python": "3.14.4", "runs": 2, "seconds": 10.0, "timeout_s": 30.0}
+client exit: 0
+
+| run | dir | procs | MiB | Mbit/s | reqs | partial | errs | cpu_s | cpu_cores |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | down | 8/8 | 25.25 | 11.48 | 0 | 8 | 0 | 0.15 | 0.01 |
+| 2 | down | 8/8 | 37.25 | 29.02 | 2 | 8 | 0 | 0.14 | 0.01 |
+
+near eth0: rx 79.71 MiB, tx 2.23 MiB
+far eth0: rx 2.59 MiB, tx 94.06 MiB
+cpu busy %: near 2.8, far 9.86
+far server counters: requests=6 uploads=0 downloads=6 rx=0 tx=94371840 client_aborts=12 errors=0
+down cross-check: client body bytes 65536000 vs server tx 94371840 (69.44%)

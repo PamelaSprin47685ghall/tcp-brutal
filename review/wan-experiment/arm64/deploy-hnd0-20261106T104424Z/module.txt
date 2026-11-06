@@ -1,0 +1,9 @@
+host=root@45.11.1.62
+utc=2026-11-06T10:51:20Z
+ref=b41b259
+sha=b41b25970b188ebccace0ee2dc05e6c9b5ff50b6
+stage=/home/tbtun-t52-arm64
+vermagic=7.0.0-42-generic
+srcversion=B37EB422A38B581B37889D7
+sha256=681bc57ebcf90121de46593ac991b985fe901bed7d83559c2c1deb60b019a3bc
+load1=0.08

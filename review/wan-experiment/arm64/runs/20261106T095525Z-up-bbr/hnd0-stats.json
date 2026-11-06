@@ -1,0 +1,14 @@
+{
+ "client_aborts": 16,
+ "conns_active": 0,
+ "conns_opened": 17,
+ "downloads": 0,
+ "errors": 0,
+ "event": "signal:SIGTERM",
+ "health": 1,
+ "requests": 0,
+ "rx_bytes": 73400320,
+ "tx_bytes": 0,
+ "uploads": 0,
+ "uptime_s": 85.055
+}

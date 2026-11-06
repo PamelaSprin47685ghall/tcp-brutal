@@ -1,0 +1,386 @@
+
+===uname===
+Linux hnd0.kw92.cyou 7.0.0-42-generic #42-Ubuntu SMP PREEMPT_DYNAMIC Thu Oct 15 08:06:44 UTC 2026 x86_64 GNU/Linux
+[rc=0]
+
+===date===
+2026-11-06T10:27:33Z
+[rc=0]
+
+===loadavg===
+0.24 0.21 0.27 1/208 47018
+[rc=0]
+
+===nproc===
+2
+[rc=0]
+
+===lsmod===
+tbtun                 266240  0
+[rc=0]
+
+===proc_ls===
+total 0
+-rw------- 1 root root 0 Nov  6 10:27 config
+-r-------- 1 root root 0 Nov  6 10:27 http
+-rw------- 1 root root 0 Nov  6 10:27 peers
+-rw------- 1 root root 0 Nov  6 10:27 ports
+-rw------- 1 root root 0 Nov  6 10:27 stats
+-rw------- 1 root root 0 Nov  6 10:27 tunnels
+[rc=0]
+
+===config===
+tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5202 n=4 m=4 fec=on mode=grouped w=8 carriers=256 crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=31000-31511 nonce=00112233445566778899aabbccddeeff
+[rc=0]
+
+===ports===
+# block 31000-31511 (512 ports)
+# configured
+ports 31000-31511
+[rc=0]
+
+===tunnels===
+# id role state listen peer target n m streams
+1 far listening 0.0.0.0:9000 0.0.0.0:0 127.0.0.1:5202 4 4 0
+[rc=0]
+
+===peers===
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+[lines] 1
+[rc=0]
+
+===stats===
+debug_loss=0
+gaps_total=0
+streams_total=0
+tunnel 1 capture_runs=0 actor_calls=0 submit_bytes=0 tx=0 wire=0 err=0 short=0
+tunnel 1 rx_work_runs=0 rx_drain_entries=0 rx_drain_bytes=0 rx_paused_skips=0 rx_adopt_events=0 rx_records=0 carrier_write_space_runs=0 poll_rescues=0
+tunnel 1 rx_ready_calls=0 rx_reads=0 rx_read_bytes=0 rx_read_zero=0 rx_resume=0 rx_resume_busy=0 rx_last_drained=0 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=0 rx_delivered=0
+tunnel 1 dbg rcv_nxt=0 copied=0 after=0 qlen=0 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=0 pmoved=0 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=0 car_nxt=0 car_copied=0 car_rcvbuf=0 car_sndbuf=0 car_state=0 car_stop=0 car_ud=0 car_ready=0 car_ws=0 txw_pend=0 txw_busy=0
+tunnel 1 txwake=0 txwake_busy=0 txwork=0
+tunnel 1 ws_calls=0
+tunnel 1 c3 n=256 up=0 lost=0 replaced=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=0 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=0 una_stall_us=0 stall_paused_skips=0 stall_idle_skips=0 stall_declared=0 tx_window=1048576 bdp_bytes=0 k_x100=0 rtt_mean_us=0 rttvar_us=0 rtt_max_us=0 txq_max=1114400 win_block=0 win_resume=0 pump_hw_armed=0 pump_hw_fired=0 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0 prov_now=0 prov_peak=0 prov_reject=0 dead_now=0 dead_peak=0
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0 pinned_bad_path=0 close_timeouts=0 close_detaches=0
+tunnel 1 streams streams_active=0 n_streams=0 n_pending=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c9 fec_proto_fail=0 fec_hdr_crc_fail=0 fec_payload_crc_fail=0 fec_short_tx=0 fec_short_unknown=0 fec_stream_refused=0 fec_drop_window=0 fec_drop_crypto=0 fec_ack_tx=0 fec_ack_rx=0 fec_credit_wait=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=0 dup_bytes=0
+tunnel 1 reconcile live_bytes=0 live_data=0 live_retx=0 retired_bytes=0 retired_data=0 retired_retx=0
+[rc=0]
+
+===dmesg===
+[ 7605.217310] audit: type=1400 audit(1793957527.095:523): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=30803 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 7605.217360] audit: type=1400 audit(1793957527.095:524): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=30803 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 7605.218380] audit: type=1400 audit(1793957527.096:525): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=30803 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 7605.218449] audit: type=1400 audit(1793957527.096:526): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=30803 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 7632.491334] tbtun 0.0.1 loaded: 1 tunnels max, 256 carriers max
+[ 7646.426574] tbtun: unloaded
+[ 8290.901878] audit: type=1400 audit(1793958212.782:527): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=31155 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8290.901995] audit: type=1400 audit(1793958212.783:528): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=31155 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8290.902639] audit: type=1400 audit(1793958212.783:529): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=31155 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8290.902691] audit: type=1400 audit(1793958212.783:530): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=31155 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8392.718975] audit: type=1400 audit(1793958314.600:531): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=31374 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8392.719081] audit: type=1400 audit(1793958314.600:532): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=31374 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8392.719683] audit: type=1400 audit(1793958314.601:533): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=31374 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8392.719947] audit: type=1400 audit(1793958314.601:534): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=31374 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8538.634218] audit: type=1400 audit(1793958460.514:535): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=31696 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8538.635026] audit: type=1400 audit(1793958460.514:536): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=31696 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8538.635037] audit: type=1400 audit(1793958460.515:537): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=31696 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8538.635042] audit: type=1400 audit(1793958460.515:538): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=31696 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8607.102463] audit: type=1400 audit(1793958528.983:539): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=32368 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8607.102485] audit: type=1400 audit(1793958528.983:540): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=32368 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8607.103879] audit: type=1400 audit(1793958528.984:541): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=32368 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8607.103888] audit: type=1400 audit(1793958528.984:542): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=32368 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8679.054383] audit: type=1400 audit(1793958600.935:543): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=32756 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8679.054400] audit: type=1400 audit(1793958600.935:544): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=32756 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8679.054998] audit: type=1400 audit(1793958600.936:545): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=32756 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8679.055040] audit: type=1400 audit(1793958600.936:546): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=32756 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8740.488977] audit: type=1400 audit(1793958662.371:547): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=33361 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8740.488989] audit: type=1400 audit(1793958662.371:548): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=33361 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8740.489569] audit: type=1400 audit(1793958662.371:549): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=33361 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8740.490670] audit: type=1400 audit(1793958662.372:550): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=33361 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8802.416978] audit: type=1400 audit(1793958724.299:551): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=33779 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8802.417033] audit: type=1400 audit(1793958724.299:552): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=33779 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8802.418574] audit: type=1400 audit(1793958724.300:553): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=33779 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8802.418633] audit: type=1400 audit(1793958724.301:554): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=33779 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8901.852935] audit: type=1400 audit(1793958823.734:555): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=34264 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8901.853037] audit: type=1400 audit(1793958823.734:556): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=34264 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8901.855323] audit: type=1400 audit(1793958823.736:557): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=34264 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8901.855339] audit: type=1400 audit(1793958823.736:558): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=34264 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8964.538486] audit: type=1400 audit(1793958886.420:559): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=34697 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8964.538637] audit: type=1400 audit(1793958886.420:560): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=34697 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8964.539580] audit: type=1400 audit(1793958886.421:561): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=34697 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 8964.540201] audit: type=1400 audit(1793958886.422:562): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=34697 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9028.404647] audit: type=1400 audit(1793958950.286:563): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=35478 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9028.404745] audit: type=1400 audit(1793958950.286:564): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=35478 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9028.405231] audit: type=1400 audit(1793958950.287:565): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=35478 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9028.405272] audit: type=1400 audit(1793958950.287:566): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=35478 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9091.188991] audit: type=1400 audit(1793959013.072:567): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=36149 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9091.189235] audit: type=1400 audit(1793959013.072:568): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=36149 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9091.190123] audit: type=1400 audit(1793959013.073:569): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=36149 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9091.190212] audit: type=1400 audit(1793959013.073:570): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=36149 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9154.893022] audit: type=1400 audit(1793959076.775:571): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=36678 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9154.893039] audit: type=1400 audit(1793959076.775:572): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=36678 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9154.894592] audit: type=1400 audit(1793959076.777:573): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=36678 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9154.894619] audit: type=1400 audit(1793959076.777:574): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=36678 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9154.895108] audit: type=1400 audit(1793959076.777:575): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=36678 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9154.895118] audit: type=1400 audit(1793959076.777:576): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=36678 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9155.128833] audit: type=1400 audit(1793959077.011:577): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=36685 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9155.128906] audit: type=1400 audit(1793959077.011:578): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=36685 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9155.129344] audit: type=1400 audit(1793959077.011:579): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=36685 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9155.129392] audit: type=1400 audit(1793959077.011:580): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=36685 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9226.639151] kauditd_printk_skb: 2 callbacks suppressed
+[ 9226.639167] audit: type=1400 audit(1793959148.521:583): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=37262 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9226.639235] audit: type=1400 audit(1793959148.521:584): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=37262 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9226.640827] audit: type=1400 audit(1793959148.523:585): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=37262 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9226.640864] audit: type=1400 audit(1793959148.523:586): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=37262 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9226.641212] audit: type=1400 audit(1793959148.523:587): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=37262 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9226.641241] audit: type=1400 audit(1793959148.523:588): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=37262 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9227.108889] audit: type=1400 audit(1793959148.991:589): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=37301 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9227.108932] audit: type=1400 audit(1793959148.991:590): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=37301 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9227.109977] audit: type=1400 audit(1793959148.992:591): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=37301 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9227.110002] audit: type=1400 audit(1793959148.992:592): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=37301 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9229.282468] NOTICE: Automounting of tracing to debugfs is deprecated and will be removed in 2030
+[ 9299.403285] kauditd_printk_skb: 2 callbacks suppressed
+[ 9299.403309] audit: type=1400 audit(1793959221.286:595): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=37780 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9299.403320] audit: type=1400 audit(1793959221.286:596): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=37780 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9299.403707] audit: type=1400 audit(1793959221.286:597): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=37780 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9299.403716] audit: type=1400 audit(1793959221.286:598): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=37780 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9387.663882] audit: type=1400 audit(1793959309.548:599): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=38460 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9387.663915] audit: type=1400 audit(1793959309.548:600): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=38460 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9387.664471] audit: type=1400 audit(1793959309.548:601): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=38460 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9387.664606] audit: type=1400 audit(1793959309.548:602): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=38460 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9449.192600] audit: type=1400 audit(1793959371.076:603): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=39239 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9449.192617] audit: type=1400 audit(1793959371.076:604): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=39239 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9449.193005] audit: type=1400 audit(1793959371.077:605): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=39239 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9449.193051] audit: type=1400 audit(1793959371.077:606): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=39239 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9449.194103] audit: type=1400 audit(1793959371.078:607): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=39239 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9449.194153] audit: type=1400 audit(1793959371.078:608): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=39239 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9449.194770] audit: type=1400 audit(1793959371.079:609): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=39239 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9449.194879] audit: type=1400 audit(1793959371.079:610): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=39239 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9449.692372] audit: type=1400 audit(1793959371.576:611): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=39278 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9449.692428] audit: type=1400 audit(1793959371.576:612): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=39278 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9512.989382] kauditd_printk_skb: 6 callbacks suppressed
+[ 9512.989410] audit: type=1400 audit(1793959434.872:619): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=40109 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9512.989421] audit: type=1400 audit(1793959434.872:620): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=40109 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9512.990206] audit: type=1400 audit(1793959434.873:621): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=40109 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9512.990269] audit: type=1400 audit(1793959434.873:622): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=40109 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9512.993739] audit: type=1400 audit(1793959434.877:623): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=40109 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9512.993820] audit: type=1400 audit(1793959434.877:624): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=40109 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9512.996697] audit: type=1400 audit(1793959434.880:625): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=40109 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9512.996749] audit: type=1400 audit(1793959434.880:626): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=40109 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9513.199223] audit: type=1400 audit(1793959435.082:627): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=40120 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9513.199266] audit: type=1400 audit(1793959435.082:628): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=40120 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9536.007442] tbtun 0.0.1 loaded: 1 tunnels max, 256 carriers max
+[ 9581.388644] kauditd_printk_skb: 6 callbacks suppressed
+[ 9581.388662] audit: type=1400 audit(1793959503.272:635): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=40793 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9581.388768] audit: type=1400 audit(1793959503.272:636): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=40793 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9581.392216] audit: type=1400 audit(1793959503.274:637): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=40793 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9581.392233] audit: type=1400 audit(1793959503.274:638): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=40793 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9581.392241] audit: type=1400 audit(1793959503.274:639): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=40793 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9581.392248] audit: type=1400 audit(1793959503.274:640): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=40793 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9582.112231] tbtun: unloaded
+[ 9704.814729] audit: type=1400 audit(1793959626.699:641): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=41132 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9704.814753] audit: type=1400 audit(1793959626.700:642): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=41132 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9704.815418] audit: type=1400 audit(1793959626.700:643): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=41132 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9704.815429] audit: type=1400 audit(1793959626.700:644): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=41132 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9704.818281] audit: type=1400 audit(1793959626.702:645): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=41132 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9704.818293] audit: type=1400 audit(1793959626.702:646): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=41132 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9704.818297] audit: type=1400 audit(1793959626.702:647): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=41132 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9704.818301] audit: type=1400 audit(1793959626.703:648): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=41132 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9796.039611] audit: type=1400 audit(1793959717.924:649): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=41251 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9796.039746] audit: type=1400 audit(1793959717.924:650): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=41251 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9796.040204] audit: type=1400 audit(1793959717.924:651): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=41251 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9796.040244] audit: type=1400 audit(1793959717.924:652): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=41251 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9796.040926] audit: type=1400 audit(1793959717.925:653): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=41251 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9796.041143] audit: type=1400 audit(1793959717.925:654): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=41251 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9796.041913] audit: type=1400 audit(1793959717.926:655): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=41251 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9796.041956] audit: type=1400 audit(1793959717.926:656): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=41251 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9866.183074] audit: type=1400 audit(1793959788.067:657): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=41400 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9866.183089] audit: type=1400 audit(1793959788.067:658): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=41400 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9866.184493] audit: type=1400 audit(1793959788.069:659): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=41400 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9866.184501] audit: type=1400 audit(1793959788.069:660): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=41400 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9866.184893] audit: type=1400 audit(1793959788.069:661): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=41400 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9866.185712] audit: type=1400 audit(1793959788.070:662): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=41400 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9866.186842] audit: type=1400 audit(1793959788.071:663): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=41400 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9866.186851] audit: type=1400 audit(1793959788.071:664): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=41400 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9938.741094] audit: type=1400 audit(1793959860.626:665): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=41993 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9938.741236] audit: type=1400 audit(1793959860.626:666): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=41993 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9938.742234] audit: type=1400 audit(1793959860.627:667): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=41993 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9938.742245] audit: type=1400 audit(1793959860.627:668): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=41993 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9938.742639] audit: type=1400 audit(1793959860.627:669): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=41993 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9938.742665] audit: type=1400 audit(1793959860.627:670): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=41993 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9938.743679] audit: type=1400 audit(1793959860.628:671): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=41993 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[ 9938.743691] audit: type=1400 audit(1793959860.628:672): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=41993 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10005.009266] audit: type=1400 audit(1793959926.895:673): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=42694 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10005.009373] audit: type=1400 audit(1793959926.895:674): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=42694 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10005.010715] audit: type=1400 audit(1793959926.896:675): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=42694 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10005.010724] audit: type=1400 audit(1793959926.896:676): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=42694 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10005.010846] audit: type=1400 audit(1793959926.897:677): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=42694 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10005.010863] audit: type=1400 audit(1793959926.897:678): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=42694 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10070.596790] audit: type=1400 audit(1793959992.482:679): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=43400 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10070.596822] audit: type=1400 audit(1793959992.482:680): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=43400 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10070.597107] audit: type=1400 audit(1793959992.482:681): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=43400 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10070.597114] audit: type=1400 audit(1793959992.482:682): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=43400 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10070.597519] audit: type=1400 audit(1793959992.483:683): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=43400 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10070.597582] audit: type=1400 audit(1793959992.483:684): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=43400 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10133.354534] audit: type=1400 audit(1793960055.240:685): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=43598 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10133.354688] audit: type=1400 audit(1793960055.240:686): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=43598 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10133.358009] audit: type=1400 audit(1793960055.242:687): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=43598 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10133.358025] audit: type=1400 audit(1793960055.242:688): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=43598 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10133.358032] audit: type=1400 audit(1793960055.242:689): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=43598 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10133.358042] audit: type=1400 audit(1793960055.242:690): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=43598 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10197.441043] audit: type=1400 audit(1793960119.326:691): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=44317 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10197.441066] audit: type=1400 audit(1793960119.326:692): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=44317 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10197.441072] audit: type=1400 audit(1793960119.326:693): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=44317 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10197.441077] audit: type=1400 audit(1793960119.326:694): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=44317 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10197.441404] audit: type=1400 audit(1793960119.327:695): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=44317 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10197.441436] audit: type=1400 audit(1793960119.327:696): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=44317 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10212.292474] tbtun 0.0.1 loaded: 1 tunnels max, 256 carriers max
+[10263.169110] audit: type=1400 audit(1793960185.054:697): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=44850 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10263.169227] audit: type=1400 audit(1793960185.055:698): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=44850 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10263.169810] audit: type=1400 audit(1793960185.055:699): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=44850 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10263.169854] audit: type=1400 audit(1793960185.055:700): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=44850 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10263.174160] audit: type=1400 audit(1793960185.056:701): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=44850 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10263.174171] audit: type=1400 audit(1793960185.056:702): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=44850 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10330.484838] audit: type=1400 audit(1793960252.370:703): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=45203 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10330.484973] audit: type=1400 audit(1793960252.370:704): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=45203 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10330.485850] audit: type=1400 audit(1793960252.371:705): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=45203 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10330.485919] audit: type=1400 audit(1793960252.371:706): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=45203 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10393.063068] audit: type=1400 audit(1793960314.949:707): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=45631 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10393.063101] audit: type=1400 audit(1793960314.949:708): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=45631 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10393.065005] audit: type=1400 audit(1793960314.951:709): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=45631 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10393.065019] audit: type=1400 audit(1793960314.951:710): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=45631 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10393.066081] audit: type=1400 audit(1793960314.952:711): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=45631 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10393.066438] audit: type=1400 audit(1793960314.952:712): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=45631 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10468.086262] audit: type=1400 audit(1793960389.972:713): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=46027 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10468.086286] audit: type=1400 audit(1793960389.972:714): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=46027 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10468.086657] audit: type=1400 audit(1793960389.972:715): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=46027 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10468.086664] audit: type=1400 audit(1793960389.972:716): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=46027 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10468.088283] audit: type=1400 audit(1793960389.973:717): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=46027 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10468.088293] audit: type=1400 audit(1793960389.973:718): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=46027 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10803.781292] audit: type=1400 audit(1793960725.666:719): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=46324 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10803.781310] audit: type=1400 audit(1793960725.666:720): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=46324 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10803.781557] audit: type=1400 audit(1793960725.666:721): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=46324 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10803.781585] audit: type=1400 audit(1793960725.666:722): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=46324 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10803.782250] audit: type=1400 audit(1793960725.667:723): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=46324 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10803.782433] audit: type=1400 audit(1793960725.667:724): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=46324 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10871.062067] audit: type=1400 audit(1793960792.946:725): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=46555 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10871.062091] audit: type=1400 audit(1793960792.946:726): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=46555 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10871.062512] audit: type=1400 audit(1793960792.947:727): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=46555 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10871.062559] audit: type=1400 audit(1793960792.947:728): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=46555 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[rc=0]
+
+===dmesg_count===
+1838
+[rc=0]
+
+===procstat===
+cpu  103346 183695 54713 1799412 19223 0 4278 1442 0 0
+cpu0 50880 127336 26762 870864 8163 0 1539 436 0 0
+cpu1 52466 56358 27951 928547 11059 0 2739 1006 0 0
+intr 9785146 159 9 0 0 0 0 3 0 0 0 0 0 15 0 0 10818 0 0 0 0 0 0 0 0 0 127250 0 670820 366046 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ctxt 6848260
+btime 1793949921
+processes 47043
+procs_running 1
+procs_blocked 0
+softirq 3926348 1 588485 79501 989775 126918 0 61128 1324327 46222 709991
+[rc=0]
+
+===freem===
+               total        used        free      shared  buff/cache   available
+Mem:             955         394          71           5         645         561
+Swap:            511          60         451
+[rc=0]
+
+===netdev===
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 44982553    6068    0    0    0     0          0         0 44982553    6068    0    0    0     0       0          0
+  eth0: 393272123  786389    0 3642    0     0          0         0 263925279  480874    0    0    0     0       0          0
+   r64:    8732      96    0    0    0     0          0         0    38740     888    0    0    0     0       0          0
+  WARP: 20966192   40541    0    0    0     0          0         0  8085606   51586    0    0    0     0       0          0
+[rc=0]
+
+===ss_listen===
+State  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess                                                
+LISTEN 0      4096       127.0.0.1:44302      0.0.0.0:*    users:(("xray",pid=685,fd=10))                        
+LISTEN 0      4096       127.0.0.1:44301      0.0.0.0:*    users:(("xray",pid=685,fd=9))                         
+LISTEN 0      4096      127.0.0.54:53         0.0.0.0:*    users:(("systemd-resolve",pid=336,fd=19))             
+LISTEN 0      64           0.0.0.0:5202       0.0.0.0:*    users:(("tbt_echo",pid=45247,fd=3))                   
+LISTEN 0      4096         0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=693,fd=3),("systemd",pid=1,fd=217))
+LISTEN 0      4096       127.0.0.1:10809      0.0.0.0:*    users:(("xray",pid=685,fd=8))                         
+LISTEN 0      4096   127.0.0.53%lo:53         0.0.0.0:*    users:(("systemd-resolve",pid=336,fd=17))             
+LISTEN 0      128          0.0.0.0:9000       0.0.0.0:*                                                          
+LISTEN 0      4096               *:13022            *:*    users:(("frps",pid=667,fd=22))                        
+LISTEN 0      4096               *:8443             *:*    users:(("xray",pid=685,fd=4))                         
+LISTEN 0      4096               *:12022            *:*    users:(("frps",pid=667,fd=26))                        
+LISTEN 0      4096               *:19090            *:*    users:(("frps",pid=667,fd=14))                        
+LISTEN 0      4096               *:17578            *:*    users:(("frps",pid=667,fd=18))                        
+LISTEN 0      4096               *:15022            *:*    users:(("frps",pid=667,fd=30))                        
+LISTEN 0      4096               *:18080            *:*    users:(("frps",pid=667,fd=21))                        
+LISTEN 0      4096               *:80               *:*    users:(("caddy",pid=45786,fd=8))                      
+LISTEN 0      4096            [::]:22            [::]:*    users:(("sshd",pid=693,fd=4),("systemd",pid=1,fd=218))
+LISTEN 0      4096               *:18443            *:*    users:(("frps",pid=667,fd=32))                        
+LISTEN 0      4096               *:11676            *:*    users:(("frps",pid=667,fd=8))                         
+LISTEN 0      4096               *:12676            *:*    users:(("frps",pid=667,fd=25))                        
+LISTEN 0      4096               *:443              *:*    users:(("caddy",pid=45786,fd=4))                      
+LISTEN 0      4096               *:10676            *:*    users:(("frps",pid=667,fd=16))                        
+LISTEN 0      4096               *:7000             *:*    users:(("frps",pid=667,fd=4))                         
+LISTEN 0      4096               *:13676            *:*    users:(("frps",pid=667,fd=28))                        
+LISTEN 0      4096               *:13080            *:*    users:(("frps",pid=667,fd=27))                        
+LISTEN 0      4096               *:15120            *:*    users:(("frps",pid=667,fd=13))                        
+LISTEN 0      4096               *:15123            *:*    users:(("frps",pid=667,fd=15))                        
+LISTEN 0      4096               *:11022            *:*    users:(("frps",pid=667,fd=9))                         
+LISTEN 0      4096               *:15676            *:*    users:(("frps",pid=667,fd=20))                        
+LISTEN 0      4096               *:12080            *:*    users:(("frps",pid=667,fd=24))                        
+LISTEN 0      4096               *:12599            *:*    users:(("frps",pid=667,fd=23))                        
+LISTEN 0      4096               *:10022            *:*    users:(("frps",pid=667,fd=17))                        
+[rc=0]
+
+===ss_summary===
+Total: 294
+TCP:   83 (estab 33, closed 18, orphaned 0, timewait 18)
+
+Transport Total     IP        IPv6
+RAW	  1         0         1        
+UDP	  9         4         5        
+TCP	  65        13        52       
+INET	  75        17        58       
+FRAG	  0         0         0        
+
+[rc=0]
+
+===ss_tcpinfo===
+State Recv-Q Send-Q Local Address:Port Peer Address:Port
+[rc=0]
+
+===iprule===
+0:	from all lookup local
+10:	from all fwmark 0x100 lookup main
+15:	from 45.11.1.62 lookup main
+20:	from all to 1.1.1.1 lookup main
+21:	from all to 1.2.4.8 lookup main
+22:	from all to 8.8.8.8 lookup main
+23:	from all to 8.8.4.4 lookup main
+24:	from all to 103.200.30.77 lookup main
+25:	from all to 35.223.238.0/24 lookup main
+26:	from all to 76.76.21.21 lookup main
+100:	from all lookup main suppress_prefixlength 0
+101:	not from all fwmark 0xc350 lookup 50000
+32766:	from all lookup main
+32767:	from all lookup default
+[rc=0]
+
+===iproute===
+local 45.11.1.62 dev lo table local src 45.11.1.62 uid 0 
+    cache <local> 
+[rc=0]
+
+===sysctl===
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+[rc=0]

@@ -1,0 +1,20 @@
+{"chunk_bytes": 1048576, "event": "listening", "host": "0.0.0.0", "pid": 37343, "port": 10000, "python": "3.14.4", "time": "2026-11-06T09:59:10+0000"}
+{"client_aborts": 0, "conns_active": 0, "conns_opened": 0, "downloads": 0, "errors": 0, "event": "start", "health": 0, "requests": 0, "rx_bytes": 0, "tx_bytes": 0, "uploads": 0, "uptime_s": 0.002}
+{"client_aborts": 0, "conns_active": 0, "conns_opened": 1, "downloads": 0, "errors": 0, "event": "interval", "health": 1, "requests": 0, "rx_bytes": 0, "tx_bytes": 0, "uploads": 0, "uptime_s": 5.002}
+{"client_aborts": 0, "conns_active": 0, "conns_opened": 1, "downloads": 0, "errors": 0, "event": "interval", "health": 1, "requests": 0, "rx_bytes": 0, "tx_bytes": 0, "uploads": 0, "uptime_s": 10.006}
+{"client_aborts": 0, "conns_active": 0, "conns_opened": 1, "downloads": 0, "errors": 0, "event": "interval", "health": 1, "requests": 0, "rx_bytes": 0, "tx_bytes": 0, "uploads": 0, "uptime_s": 15.009}
+{"client_aborts": 0, "conns_active": 0, "conns_opened": 1, "downloads": 0, "errors": 0, "event": "interval", "health": 1, "requests": 0, "rx_bytes": 0, "tx_bytes": 0, "uploads": 0, "uptime_s": 20.01}
+{"client_aborts": 0, "conns_active": 0, "conns_opened": 1, "downloads": 0, "errors": 0, "event": "interval", "health": 1, "requests": 0, "rx_bytes": 0, "tx_bytes": 0, "uploads": 0, "uptime_s": 25.011}
+{"client_aborts": 0, "conns_active": 0, "conns_opened": 1, "downloads": 0, "errors": 0, "event": "interval", "health": 1, "requests": 0, "rx_bytes": 0, "tx_bytes": 0, "uploads": 0, "uptime_s": 30.013}
+{"client_aborts": 0, "conns_active": 0, "conns_opened": 1, "downloads": 0, "errors": 0, "event": "interval", "health": 1, "requests": 0, "rx_bytes": 0, "tx_bytes": 0, "uploads": 0, "uptime_s": 35.014}
+{"client_aborts": 0, "conns_active": 8, "conns_opened": 9, "downloads": 0, "errors": 0, "event": "interval", "health": 1, "requests": 0, "rx_bytes": 0, "tx_bytes": 0, "uploads": 0, "uptime_s": 40.016}
+{"client_aborts": 0, "conns_active": 8, "conns_opened": 9, "downloads": 0, "errors": 0, "event": "interval", "health": 1, "requests": 0, "rx_bytes": 0, "tx_bytes": 0, "uploads": 0, "uptime_s": 45.017}
+{"client_aborts": 3, "conns_active": 2, "conns_opened": 9, "downloads": 3, "errors": 0, "event": "interval", "health": 1, "requests": 3, "rx_bytes": 0, "tx_bytes": 35651584, "uploads": 0, "uptime_s": 50.019}
+{"client_aborts": 4, "conns_active": 1, "conns_opened": 9, "downloads": 3, "errors": 0, "event": "interval", "health": 1, "requests": 3, "rx_bytes": 0, "tx_bytes": 35651584, "uploads": 0, "uptime_s": 55.02}
+{"client_aborts": 5, "conns_active": 8, "conns_opened": 17, "downloads": 3, "errors": 0, "event": "interval", "health": 1, "requests": 3, "rx_bytes": 0, "tx_bytes": 35651584, "uploads": 0, "uptime_s": 60.021}
+{"client_aborts": 5, "conns_active": 8, "conns_opened": 17, "downloads": 6, "errors": 0, "event": "interval", "health": 1, "requests": 6, "rx_bytes": 0, "tx_bytes": 60817408, "uploads": 0, "uptime_s": 65.022}
+{"client_aborts": 12, "conns_active": 0, "conns_opened": 17, "downloads": 6, "errors": 0, "event": "interval", "health": 1, "requests": 6, "rx_bytes": 0, "tx_bytes": 94371840, "uploads": 0, "uptime_s": 70.025}
+{"client_aborts": 12, "conns_active": 0, "conns_opened": 17, "downloads": 6, "errors": 0, "event": "interval", "health": 1, "requests": 6, "rx_bytes": 0, "tx_bytes": 94371840, "uploads": 0, "uptime_s": 75.03}
+{"client_aborts": 12, "conns_active": 0, "conns_opened": 17, "downloads": 6, "errors": 0, "event": "interval", "health": 1, "requests": 6, "rx_bytes": 0, "tx_bytes": 94371840, "uploads": 0, "uptime_s": 80.032}
+{"client_aborts": 12, "conns_active": 0, "conns_opened": 17, "downloads": 6, "errors": 0, "event": "interval", "health": 1, "requests": 6, "rx_bytes": 0, "tx_bytes": 94371840, "uploads": 0, "uptime_s": 85.033}
+{"client_aborts": 12, "conns_active": 0, "conns_opened": 17, "downloads": 6, "errors": 0, "event": "signal:SIGTERM", "health": 1, "requests": 6, "rx_bytes": 0, "tx_bytes": 94371840, "uploads": 0, "uptime_s": 87.929}

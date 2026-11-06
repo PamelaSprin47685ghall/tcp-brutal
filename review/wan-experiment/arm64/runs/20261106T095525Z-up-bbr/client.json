@@ -1,0 +1,298 @@
+{
+ "config": {
+  "direction": "up",
+  "host": "45.11.1.62",
+  "mib": 8,
+  "port": 10000,
+  "procs": 8,
+  "python": "3.14.4",
+  "runs": 2,
+  "seconds": 10.0,
+  "timeout_s": 30.0
+ },
+ "exit_code": 0,
+ "finished": "2026-11-06T17:57:17+0800",
+ "runs": [
+  {
+   "phases": [
+    {
+     "aggregate": {
+      "bytes": 49020928,
+      "connects": 8,
+      "cpu_cores": 0.0079,
+      "cpu_s": 0.09,
+      "direction": "up",
+      "errors": 0,
+      "mbps": 34.492,
+      "mib": 46.75,
+      "parent_wall_s": 11.3781,
+      "partial_requests": 8,
+      "payload_mib": 8,
+      "procs_expected": 8,
+      "procs_reported": 8,
+      "requests": 0,
+      "seconds": 10.0,
+      "span_s": 11.3697
+     },
+     "procs": [
+      {
+       "active_s": 10.9306,
+       "bytes": 6553600,
+       "connects": 1,
+       "cpu_s": 0.01,
+       "direction": "up",
+       "end_epoch": 1793959018.4256,
+       "errors": 0,
+       "first_error": null,
+       "idx": 0,
+       "partial_requests": 1,
+       "requests": 0,
+       "start_epoch": 1793959007.495
+      },
+      {
+       "active_s": 11.2468,
+       "bytes": 7864320,
+       "connects": 1,
+       "cpu_s": 0.01,
+       "direction": "up",
+       "end_epoch": 1793959018.7416,
+       "errors": 0,
+       "first_error": null,
+       "idx": 1,
+       "partial_requests": 1,
+       "requests": 0,
+       "start_epoch": 1793959007.4948
+      },
+      {
+       "active_s": 11.063,
+       "bytes": 6553600,
+       "connects": 1,
+       "cpu_s": 0.02,
+       "direction": "up",
+       "end_epoch": 1793959018.562,
+       "errors": 0,
+       "first_error": null,
+       "idx": 2,
+       "partial_requests": 1,
+       "requests": 0,
+       "start_epoch": 1793959007.499
+      },
+      {
+       "active_s": 11.3662,
+       "bytes": 4980736,
+       "connects": 1,
+       "cpu_s": 0.01,
+       "direction": "up",
+       "end_epoch": 1793959018.8645,
+       "errors": 0,
+       "first_error": null,
+       "idx": 3,
+       "partial_requests": 1,
+       "requests": 0,
+       "start_epoch": 1793959007.4982
+      },
+      {
+       "active_s": 10.7427,
+       "bytes": 5767168,
+       "connects": 1,
+       "cpu_s": 0.01,
+       "direction": "up",
+       "end_epoch": 1793959018.2426,
+       "errors": 0,
+       "first_error": null,
+       "idx": 4,
+       "partial_requests": 1,
+       "requests": 0,
+       "start_epoch": 1793959007.4999
+      },
+      {
+       "active_s": 10.7457,
+       "bytes": 6815744,
+       "connects": 1,
+       "cpu_s": 0.01,
+       "direction": "up",
+       "end_epoch": 1793959018.2517,
+       "errors": 0,
+       "first_error": null,
+       "idx": 5,
+       "partial_requests": 1,
+       "requests": 0,
+       "start_epoch": 1793959007.506
+      },
+      {
+       "active_s": 10.9789,
+       "bytes": 5242880,
+       "connects": 1,
+       "cpu_s": 0.01,
+       "direction": "up",
+       "end_epoch": 1793959018.4857,
+       "errors": 0,
+       "first_error": null,
+       "idx": 6,
+       "partial_requests": 1,
+       "requests": 0,
+       "start_epoch": 1793959007.5068
+      },
+      {
+       "active_s": 11.124,
+       "bytes": 5242880,
+       "connects": 1,
+       "cpu_s": 0.01,
+       "direction": "up",
+       "end_epoch": 1793959018.6315,
+       "errors": 0,
+       "first_error": null,
+       "idx": 7,
+       "partial_requests": 1,
+       "requests": 0,
+       "start_epoch": 1793959007.5074
+      }
+     ]
+    }
+   ],
+   "run": 1
+  },
+  {
+   "phases": [
+    {
+     "aggregate": {
+      "bytes": 24379392,
+      "connects": 8,
+      "cpu_cores": 0.0027,
+      "cpu_s": 0.05,
+      "direction": "up",
+      "errors": 0,
+      "mbps": 10.698,
+      "mib": 23.25,
+      "parent_wall_s": 18.2368,
+      "partial_requests": 8,
+      "payload_mib": 8,
+      "procs_expected": 8,
+      "procs_reported": 8,
+      "requests": 0,
+      "seconds": 10.0,
+      "span_s": 18.2306
+     },
+     "procs": [
+      {
+       "active_s": 11.3699,
+       "bytes": 1572864,
+       "connects": 1,
+       "cpu_s": 0.0,
+       "direction": "up",
+       "end_epoch": 1793959030.2421,
+       "errors": 0,
+       "first_error": null,
+       "idx": 0,
+       "partial_requests": 1,
+       "requests": 0,
+       "start_epoch": 1793959018.8722
+      },
+      {
+       "active_s": 10.2585,
+       "bytes": 3932160,
+       "connects": 1,
+       "cpu_s": 0.01,
+       "direction": "up",
+       "end_epoch": 1793959029.1346,
+       "errors": 0,
+       "first_error": null,
+       "idx": 1,
+       "partial_requests": 1,
+       "requests": 0,
+       "start_epoch": 1793959018.8761
+      },
+      {
+       "active_s": 10.3406,
+       "bytes": 6029312,
+       "connects": 1,
+       "cpu_s": 0.01,
+       "direction": "up",
+       "end_epoch": 1793959029.2169,
+       "errors": 0,
+       "first_error": null,
+       "idx": 2,
+       "partial_requests": 1,
+       "requests": 0,
+       "start_epoch": 1793959018.8763
+      },
+      {
+       "active_s": 10.5616,
+       "bytes": 1310720,
+       "connects": 1,
+       "cpu_s": 0.0,
+       "direction": "up",
+       "end_epoch": 1793959029.4372,
+       "errors": 0,
+       "first_error": null,
+       "idx": 3,
+       "partial_requests": 1,
+       "requests": 0,
+       "start_epoch": 1793959018.8756
+      },
+      {
+       "active_s": 10.5619,
+       "bytes": 3145728,
+       "connects": 1,
+       "cpu_s": 0.02,
+       "direction": "up",
+       "end_epoch": 1793959029.4443,
+       "errors": 0,
+       "first_error": null,
+       "idx": 4,
+       "partial_requests": 1,
+       "requests": 0,
+       "start_epoch": 1793959018.8824
+      },
+      {
+       "active_s": 18.2142,
+       "bytes": 524288,
+       "connects": 1,
+       "cpu_s": 0.0,
+       "direction": "up",
+       "end_epoch": 1793959037.1028,
+       "errors": 0,
+       "first_error": null,
+       "idx": 5,
+       "partial_requests": 1,
+       "requests": 0,
+       "start_epoch": 1793959018.8886
+      },
+      {
+       "active_s": 10.2079,
+       "bytes": 5242880,
+       "connects": 1,
+       "cpu_s": 0.0,
+       "direction": "up",
+       "end_epoch": 1793959029.1009,
+       "errors": 0,
+       "first_error": null,
+       "idx": 6,
+       "partial_requests": 1,
+       "requests": 0,
+       "start_epoch": 1793959018.893
+      },
+      {
+       "active_s": 10.0126,
+       "bytes": 2621440,
+       "connects": 1,
+       "cpu_s": 0.01,
+       "direction": "up",
+       "end_epoch": 1793959028.8968,
+       "errors": 0,
+       "first_error": null,
+       "idx": 7,
+       "partial_requests": 1,
+       "requests": 0,
+       "start_epoch": 1793959018.8842
+      }
+     ]
+    }
+   ],
+   "run": 2
+  }
+ ],
+ "started": "2026-11-06T17:56:47+0800",
+ "tool": "http_client.py",
+ "version": 1
+}

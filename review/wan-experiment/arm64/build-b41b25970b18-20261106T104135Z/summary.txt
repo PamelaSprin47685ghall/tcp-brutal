@@ -1,0 +1,35 @@
+ref=b41b259
+sha=b41b25970b188ebccace0ee2dc05e6c9b5ff50b6
+short=b41b25970b18
+host=root@192.168.123.65
+stage=/root/tbtun-t52-arm64-b41b25970b18
+utc=2026-11-06T10:41:56Z
+archive_sha256=9e69bafdb565bb77530b3847db40461e258122abb2b36dc46ac2b99dad2cabcb
+load1=0.54
+
+== uname ==
+Linux lubancat 6.1.172 #1 SMP Sat Oct 17 15:47:17 CST 2026 aarch64 GNU/Linux
+
+== nproc ==
+8
+
+== cc ==
+cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+
+== make ==
+GNU Make 4.4.1
+
+== ko ==
+-rw-r--r-- 1 root root 237104 Nov  6 18:41 /root/tbtun-t52-arm64-b41b25970b18/tbtun.ko
+
+== file ==
+/root/tbtun-t52-arm64-b41b25970b18/tbtun.ko: ELF 64-bit LSB relocatable, ARM aarch64, version 1 (SYSV), BuildID[sha1]=6e17a4a20b237e3e623947311ba9c548ea1697aa, not stripped
+
+== vermagic ==
+6.1.172 SMP mod_unload modversions aarch64
+
+== srcversion ==
+8E699409CE153E765B2CCCA
+
+== sha256 ==
+8688db4e384b2a967767c74aced33c6807fe65ca15cedf673313ffb257822ff9  /root/tbtun-t52-arm64-b41b25970b18/tbtun.ko
