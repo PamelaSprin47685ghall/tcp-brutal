@@ -722,6 +722,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **T2 单组合入 integration（`1214ee9`）**：`w-fec-v6 fc5ac01` 已合入 master（merge commit `1214ee9`，parents `e89b7d5` + `fc5ac01`），merge 后 `make check` 绿（fec 1430、portmap 33999、http 257 等）。`space-clean` 释放约 1 GiB（/home avail 6.8→7.8G，metadata 90.48→87.45%）；`/tmp` 仍 100%（`cy-*` 外部工作线，不能删）。**TMPDIR 修复**：`export TMPDIR=/home/kunweiz/.cache/tmp` 后正常 `git add`/`commit` 恢复（docs `420f553`）；不要用 `/tmp` 作 TMPDIR。T2 parent 等 grouped。
 
+**T2 grouped 合入 / T2 完成（`0c90f0a`）**：`w-fec-grouped aec862e` 合入 master（merge `0c90f0a`），make check 绿（fec **1725**、portmap 33999、http 257）；grouped 32×8 数据面、`carrier→group/share` 映射、组窗口/RX 超块有序交付、全局 ACK、短末块；QEMU A–N **14/14 PASS**，probe N http-kal grouped `n=4/m=4 carriers=16`（2×8）1MiB×2 双向 byte-exact，L/M 单组仍过。**T2 parent 完成**（fixed grouped；dynamic M 作为 T5/T6 风险）。已知限制：无 NACK/FEC retx、`FEC_FBK` 不驱动 M 自适应、256 live 未跑（T5.2）。**T5.2 GO：fixed `n=4/m=4`、http-kal、crypto on、256 carriers。**
+
 ### G3 — T3 ChaCha8（C）
 
 | 项 | 内容 |
