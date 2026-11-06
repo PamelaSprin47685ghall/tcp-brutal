@@ -78,11 +78,12 @@ accel=tcg
 phase_list() {
     case $1 in
     stable) echo "public control resource slab final replay rmmod flush param" ;;
-    public) echo "public srcfilter" ;;
+    public) echo "public srcfilter closedrain closedrain_timeout" ;;
     near) echo "near nearx" ;;
     far) echo "far farx" ;;
     catconfig) echo "catconfig bigcfg" ;;
     writer) echo "writer writerdrain" ;;
+    closedrain) echo "closedrain closedrain_timeout" ;;
     *) echo "$1" ;;
     esac
 }

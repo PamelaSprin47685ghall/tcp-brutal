@@ -35,23 +35,6 @@ unsigned int max_carriers = TBT_MAX_CARRIERS_LIMIT;
 module_param(max_carriers, uint, 0444);
 MODULE_PARM_DESC(max_carriers, "Carrier sockets per session, 1..256 (default 256)");
 
-/* Per-carrier socket buffer, in KiB, applied as both SO_SNDBUF and SO_RCVBUF.
- * It bounds the queueing delay that sits between a write and its feedback,
- * because the uack and the FBK share the carrier's ordered TCP stream with the
- * data. The default keeps that delay short; a high-BDP path needs more.
- * Validated at load, read-only afterwards. */
-unsigned int carrier_sockbuf_kib = 64;
-module_param(carrier_sockbuf_kib, uint, 0444);
-MODULE_PARM_DESC(carrier_sockbuf_kib, "Per-carrier SO_SNDBUF/SO_RCVBUF in KiB, 16..256 (default 64)");
-
-/* Module-wide upper bound on carrier socket buffers. Each session reserves
- * (n + m) carriers x 4 buffers x carrier_sockbuf_kib KiB when it is created
- * and returns that reservation when it is destroyed; a session that would push
- * the module past this budget is refused with -ENOSPC. */
-unsigned int carrier_buffer_budget_mib = 128;
-module_param(carrier_buffer_budget_mib, uint, 0444);
-MODULE_PARM_DESC(carrier_buffer_budget_mib, "Carrier socket buffer budget in MiB, 1..1024 (default 128)");
-
 /* Debug-only loss injection gate. `carrier <n> drop_ppm <ppm>` is refused
  * unless the module was loaded with debug_loss=1, so a production module
  * cannot be talked into dropping frames through /proc. Read-only after load
@@ -124,16 +107,6 @@ static int __init tbtun_init(void)
         pr_err("tbtun: max_carriers must be 1..%d\n", TBT_MAX_CARRIERS_LIMIT);
         return -EINVAL;
     }
-    if (carrier_sockbuf_kib < 16 || carrier_sockbuf_kib > 256)
-    {
-        pr_err("tbtun: carrier_sockbuf_kib must be 16..256\n");
-        return -EINVAL;
-    }
-    if (!carrier_buffer_budget_mib || carrier_buffer_budget_mib > 1024)
-    {
-        pr_err("tbtun: carrier_buffer_budget_mib must be 1..1024\n");
-        return -EINVAL;
-    }
     if (!max_tunnels)
     {
         pr_err("tbtun: max_tunnels must be >= 1\n");
@@ -155,11 +128,9 @@ static int __init tbtun_init(void)
         tbt_procfs_exit();
         return err;
     }
-    pr_info("tbtun %u.%u.%u loaded: %u tunnels max, %u carriers max, "
-            "carrier buffers %u KiB in a %u MiB budget\n",
+    pr_info("tbtun %u.%u.%u loaded: %u tunnels max, %u carriers max\n",
             TBT_VERSION_MAJOR, TBT_VERSION_MINOR, TBT_VERSION_PATCH,
-            max_tunnels, max_carriers, carrier_sockbuf_kib,
-            carrier_buffer_budget_mib);
+            max_tunnels, max_carriers);
     return 0;
 }
 
@@ -178,7 +149,7 @@ static void __exit tbtun_exit(void)
      * started before the teardown, then for the module-text RCU callbacks.
      * flush_workqueue(system_wq) is not a barrier: it does not stop new
      * scheduling, does not flush delayed work, and does not cover
-     * system_dfl_wq (w_kill, w_fbk, w_pump). */
+     * TBT_WQ (w_kill, w_fbk, w_pump; system_dfl_wq on 6.5+, system_unbound_wq on 6.1). */
     synchronize_rcu();
     rcu_barrier();
     pr_info("tbtun: unloaded\n");

@@ -293,7 +293,8 @@ static inline bool tbt_body_bounds(u8 type, u16 *min, u16 *max)
  * change fails the build. */
 #define TBT_PEERS_COLUMNS \
     "id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm " \
-    "minrtt_us tx_frames tx_bytes dropped retx_ppm"
+    "minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes " \
+    "snd_wnd wscale rcv_wnd window_clamp rmem_alloc"
 
 /* /proc/net/tbtun/tunnels: one line per tunnel, columns in exactly this order.
  * A near tunnel prints "-" in the target column, so every row has 9 columns. */

@@ -31,6 +31,31 @@
 #include "tbtun.h"
 #include "tbt_rec.h"
 
+/* The receiver's hole budget. Explicit config wins; auto is k x SRTT with
+ * k's upper bound (5), floored at 2 s. The floor must cover the carrier TCP's
+ * own RTO backoff, not one RTO: a lost retransmit already waits 200 + 400 +
+ * 800 ms, and the tunnel's missing record can only be resent after the
+ * carrier recovers. A 1 s floor reset probe J's stream at 1.005 s while the
+ * carrier was still recovering (full A-K sequence, 1% loss + 2% reorder),
+ * although the sender's own stall budget is max(5 s, 5 x RTO) and would have
+ * repaired it. The receiver must not be tighter than the repair it waits for.
+ * rtt_mean_us is 0 until the pump has a sample, so a fresh session gets the
+ * floor. */
+#define TBT_RX_HOLE_FLOOR_US 2000000ULL
+
+static u64 tbt_rx_hole_budget_ns(struct tbt_session *sess)
+{
+    u32 ms = sess->tunnel->cfg.hole_budget_ms;
+    u64 us;
+
+    if (ms)
+        return (u64)ms * NSEC_PER_MSEC;
+    us = 5ULL * READ_ONCE(sess->rtt_mean_us);
+    if (us < TBT_RX_HOLE_FLOOR_US)
+        us = TBT_RX_HOLE_FLOOR_US;
+    return us * NSEC_PER_USEC;
+}
+
 /* Move every tree frame that continues the contiguous run into rx_q. Called
  * with rx_lock held. */
 static void tbt_rx_pull_locked(struct tbt_stream *st)
@@ -54,6 +79,7 @@ static void tbt_rx_pull_locked(struct tbt_stream *st)
             rb_erase_cached(&fr->rb, &st->rx_tree);
             st->rx_ooo_bytes -= fr->len;
             st->rx_ooo_frames--;
+            atomic64_sub(fr->len, &st->sess->rx_ooo_total);
             kfree(fr);
             continue;
         }
@@ -64,6 +90,7 @@ static void tbt_rx_pull_locked(struct tbt_stream *st)
             rb_erase_cached(&fr->rb, &st->rx_tree);
             st->rx_ooo_bytes -= fr->len;
             st->rx_ooo_frames--;
+            atomic64_sub(fr->len, &st->sess->rx_ooo_total);
             list_add_tail(&fr->list, &st->rx_q);
             st->rx_queued += fr->len;
             st->rx_next = fr->hdr.seq + fr->len;
@@ -78,6 +105,7 @@ static void tbt_rx_pull_locked(struct tbt_stream *st)
             rb_erase_cached(&fr->rb, &st->rx_tree);
             st->rx_ooo_bytes -= fr->len;
             st->rx_ooo_frames--;
+            atomic64_sub(fr->len, &st->sess->rx_ooo_total);
             fr->off += dup;
             fr->hdr.seq = st->rx_next;
             list_add_tail(&fr->list, &st->rx_q);
@@ -131,6 +159,7 @@ static bool tbt_rx_tree_insert_locked(struct tbt_stream *st, struct tbt_frame *f
     rb_insert_color_cached(&fr->rb, &st->rx_tree, leftmost);
     st->rx_ooo_bytes += fr->len;
     st->rx_ooo_frames++;
+    atomic64_add(fr->len, &st->sess->rx_ooo_total);
     if (st->rx_ooo_frames > st->rx_max_depth)
         st->rx_max_depth = st->rx_ooo_frames;
     return true;
@@ -247,7 +276,14 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
             st->hole_since_ns = ktime_get_ns();
         if (hdr->flags & TBT_FF_LOW_PRIO)
             atomic64_inc(&sess->dup_used);
-        if (st->rx_ooo_bytes > st->rx_limit)
+        /* Two bounds: one stream's tree, and the session's whole tree. The
+         * per-stream limit alone would let 128 streams hold 128 x the
+         * configured budget; the session total is what makes the memory
+         * bound explainable. A concurrent insert on another stream can
+         * overshoot by at most one frame before this check fires. */
+        if (st->rx_ooo_bytes > st->rx_limit ||
+            atomic64_read(&sess->rx_ooo_total) >
+                sess->tunnel->cfg.rx_reorder_bytes)
             kill = true;
     }
     /* The ack is the contiguous *received* offset: it bounds the sender's
@@ -916,8 +952,7 @@ void tbt_rx_check_hole(struct tbt_stream *st)
     budget_bytes = sess->tunnel->cfg.rx_reorder_bytes;
     if (budget_bytes < TBT_HOLE_BUDGET_BYTES)
         budget_bytes = TBT_HOLE_BUDGET_BYTES;
-    if (now - st->hole_since_ns >
-            (u64)sess->tunnel->cfg.hole_budget_ms * NSEC_PER_MSEC ||
+    if (now - st->hole_since_ns > tbt_rx_hole_budget_ns(sess) ||
         st->rx_ooo_bytes > budget_bytes)
     {
         age = now - st->hole_since_ns;
@@ -933,6 +968,59 @@ void tbt_rx_check_hole(struct tbt_stream *st)
                     st->rx_ooo_bytes, budget_bytes, st->rx_queued);
         atomic64_inc(&sess->holes_unrecoverable);
         tbt_stream_kill(st, TBT_ST_HOLE);
+    }
+}
+
+/* The peer has closed its write side (its FIN is in), so no more bytes will
+ * arrive; the ready queue can only shrink.  If it does not, the output socket
+ * has stopped accepting bytes -- the target or application stopped reading --
+ * and the FIN that ends the handshake can never be delivered.  The stream
+ * would then pin both ends and the output socket until the session dies.
+ *
+ * The test is progress, not queue depth: a slow reader that keeps consuming
+ * is never cut, and one large frame in flight is not a stall.  The check is
+ * gated on rx_fin_seen so ordinary backpressure before a close is never
+ * treated as a dead peer.  The FBK tick is the only caller, so the marks need
+ * no lock. */
+void tbt_rx_deliver_stall_check(struct tbt_stream *st)
+{
+    struct tbt_session *sess = st->sess;
+    u64 delivered = READ_ONCE(st->rx_delivered);
+    u64 now = ktime_get_ns();
+
+    if (READ_ONCE(st->state) == TBT_ST_DEAD ||
+        !READ_ONCE(st->rx_fin_seen) || READ_ONCE(st->rx_fin_done) ||
+        !READ_ONCE(st->rx_queued))
+    {
+        st->deliver_mark = delivered;
+        st->deliver_since_ns = 0;
+        return;
+    }
+    if (delivered != st->deliver_mark)
+    {
+        st->deliver_mark = delivered;
+        st->deliver_since_ns = 0;
+        return;
+    }
+    atomic64_inc(&sess->dbg_deliver_checks);
+    if (!st->deliver_since_ns)
+    {
+        st->deliver_since_ns = now;
+        /* Rule out a missed wake before calling the target dead. */
+        tbt_sock_kick(st);
+        return;
+    }
+    if (now > st->deliver_since_ns &&
+        now - st->deliver_since_ns > tbt_tx_wait_budget_ns(sess, st))
+    {
+        if (debug >= 2)
+            pr_info("tbtun: DELIVERTIMEOUT sid=%llu rxq=%u delivered=%llu age_us=%llu\n",
+                    (unsigned long long)st->sid, READ_ONCE(st->rx_queued),
+                    delivered,
+                    (now - st->deliver_since_ns) / NSEC_PER_USEC);
+        st->deliver_since_ns = 0;
+        atomic64_inc(&sess->deliver_timeouts);
+        tbt_stream_kill(st, TBT_ST_DEAD);
     }
 }
 
@@ -968,6 +1056,7 @@ void tbt_rx_free_queue(struct tbt_stream *st)
         rb_erase_cached(&fr->rb, &st->rx_tree);
         kfree(fr);
     }
+    atomic64_sub(st->rx_ooo_bytes, &st->sess->rx_ooo_total);
     st->rx_queued = 0;
     st->rx_ooo_bytes = 0;
     st->rx_ooo_frames = 0;

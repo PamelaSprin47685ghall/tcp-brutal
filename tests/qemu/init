@@ -674,6 +674,11 @@ probe_g() {
         unrec=$(stat_sum holes_unrecoverable)
         stall=$(stat_max rx_max_stall_us)
         budget_ms=$(awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^hole_budget_ms=/) { split($i, a, "="); print a[2] } }' "$CFG" | head -1)
+        # 0 = auto: the receiver derives max(2 s, 5 x SRTT). This probe does
+        # not read the session's SRTT, so use the documented 2 s floor as the
+        # limit; the old omitted-key default was 500 ms. The floor covers the
+        # carrier TCP's RTO backoff, not one RTO (probe J, full sequence).
+        [ "${budget_ms:-0}" -eq 0 ] && budget_ms=2000
         budget_ms=${budget_ms:-500}
         # One hole budget covers the wait for the missing bytes; the margin
         # covers a scheduling round trip on either side. Documented in
@@ -734,9 +739,11 @@ probe_h() {
     # application's timeout.
     flush_and_wait
     restart_echo
-    echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=4 m=0 dup=0 tunnel_rate=2000000" \
+    # Explicit 500 ms: the key now defaults to 0 = auto, which floors the
+    # sender's reset at 1 s; this phase asserts the configured bound.
+    echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=4 m=0 dup=0 tunnel_rate=2000000 hole_budget_ms=500" \
         > "$CFG" || fail "probe H: far tunnel (reset phase) rejected"
-    echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=4 m=0 dup=0 tunnel_rate=2000000" \
+    echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=4 m=0 dup=0 tunnel_rate=2000000 hole_budget_ms=500" \
         > "$CFG" || fail "probe H: near tunnel (reset phase) rejected"
     sleep 1
     for c in 0 1 2 3; do

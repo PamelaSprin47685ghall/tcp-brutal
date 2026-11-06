@@ -69,10 +69,11 @@ struct tbt_cfg
     u32 replay;
     u32 tunnel_rate;
     u32 max_inflate_milli; /* 2.000 renders as 2000 */
-    u32 hole_budget_ms;
-    u32 rx_reorder_bytes; /* C3 reorder window, default 262144 */
+    u32 hole_budget_ms;   /* hole timeout, 0 = auto (the default) */
+    u32 rx_reorder_bytes; /* C3 reorder window, default 8388608 */
+    u32 tx_window_bytes;  /* sender window, 0 = auto (the default) */
     u32 tx_retain_bytes;  /* C3 replay retention, 0 = unlimited */
-    u32 carrier_stall_ms; /* C3 stall detector, default 3000 */
+    u32 carrier_stall_ms; /* C3 stall detector, 0 = auto (the default) */
     __be32 srcaddrs[TBT_SRC_MAX];
 
     /* Tunnel nonce. 32 hex digits = the full 128-bit value; 16 hex digits =
