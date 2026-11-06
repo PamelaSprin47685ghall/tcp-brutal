@@ -35,6 +35,8 @@
 
 **1 carrier/37B smoke 观察（2026-11-06，未通过）**：near→far carrier 0 通、far `rx_delivered=37`，但 **far→near 无回包**、`streams_active=0`；`t52-arm64-3` 诊断 target/stream 生命周期超过 1h 无进展，已令其**收证据、清理 `.65`/HND0 后停**；`t52-debug` 在本地 QEMU 复现同一路径。**尚未通过，8/16 未跑**；不 256/8 并行、不 push。
 
+**t52-arm64-3 无响应（2026-11-06）**：smoke 失败后 wake 无输出；`.65`/HND0 清理状态待确认。HND0 由 `hnd0-verify` 只读清理（tbtun/echo）；`.65` 清理需用户授权。T5.2 HOLD；不 8/16/256、不 push。
+
 **冒烟前部署/分工（2026-11-06）**：HND0 clean；`b41b259` x86 far ko **尚未部署**。`t52-arm64-3` = HND0 far b41b259 构建/部署 + `.65` **1 carrier/37B smoke**；`arm64-build-3` = `.65` aarch64 ko only。HND0 far 用 **`tbt_echo` 5202（不用 iperf3）**；1 carrier/37B 通过后 **8/16 × 1MiB/5s**；不 256/8 并行、不合并/push。
 
 **HND0 清理确认（`hnd0-verify`，2026-11-06）**：10:56:45 UTC 无 tbtun、`/proc/net/tbtun` 不存在、9000/5202 无监听、无 echo/进程、无锁。sysctl 为**生产值**（rmem/wmem 16MiB、tcp 4MiB、fq/bbr），**不改成 64MiB**。10:51:39–10:56:03 窗口 UBSAN/WARN/BUG/OOM=0，未跑数据面；08:53–09:01 两轮 smoke 有 **16 UBSAN + 2 WARN**（`tbt_tx.c:2570`、array/shift OOB），已记录。**`t52-arm64` 在 HOLD 期间仍于 10:44/10:51/10:52 部署/加载/echo，agent kill 后留 PPID 1 残留**（已被并行清理）；需确认 HOLD 生效、不再部署。生产服务 active；不合并/push。
