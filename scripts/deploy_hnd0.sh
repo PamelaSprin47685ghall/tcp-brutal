@@ -12,6 +12,12 @@
 #   legacy        old ARQ keys (n/m/profile/nonce, optional tx_window_bytes),
 #                 n+m <= 16. Used for the A-side N=1/4/8 stepping stone.
 #
+# T5.2 profile: the 256/1G run must use profile=http-kal at least (raw stays
+# as a control). In the T2 build the FEC shares and control frames travel in
+# the HTTP chunked body, the request line/headers and Transfer-Encoding stay
+# plaintext, and ChaCha8 encrypts only the body. Use --http-kal (or
+# --profile http-kal); record overhead and throughput from the run.
+#
 # Invariants:
 #   - Dry-run is the default. Nothing is loaded and no service is touched
 #     unless --execute is given.
@@ -46,6 +52,8 @@
 #   --crypto on|off        v6 only (default on)
 #   --crypto-key HEX|-     64 hex or '-' (default -)
 #   --profile P            legacy profile (default raw)
+#   --http-kal             shortcut for --profile http-kal (T5.2 default)
+#   --raw                  shortcut for --profile raw (T5.2 control)
 #   --nonce HEX            32 hex digits (default fixed experiment nonce)
 #   --window-bytes W       legacy only: tx_window_bytes (default 0 = auto)
 #   --carrier-port P       far listen port (default 9000)
@@ -300,8 +308,8 @@ config_line() {
 print_plan() {
     printf 'mode=%s cmd=%s abi=%s\n' "$MODE" "$CMD" "$ABI"
     if [[ $ABI == v6 ]]; then
-        printf 'fec=%s mode=%s n=%s m=%s w=%s carriers=%s crypto=%s crypto_key=%s\n' \
-            "$FEC" "$FEC_MODE" "$N" "$M" "$W" "$CARRIERS" "$CRYPTO" "$CRYPTO_KEY"
+        printf 'fec=%s mode=%s n=%s m=%s w=%s carriers=%s crypto=%s crypto_key=%s profile=%s\n' \
+            "$FEC" "$FEC_MODE" "$N" "$M" "$W" "$CARRIERS" "$CRYPTO" "$CRYPTO_KEY" "$PROFILE"
     else
         printf 'n=%s m=%s profile=%s window_bytes=%s\n' "$N" "$M" "$PROFILE" "$WINDOW_BYTES"
     fi
@@ -475,6 +483,8 @@ while (($#)); do
         --crypto) CRYPTO=$2; shift 2 ;;
         --crypto-key) CRYPTO_KEY=$2; shift 2 ;;
         --profile) PROFILE=$2; shift 2 ;;
+        --http-kal) PROFILE=http-kal; shift ;;
+        --raw) PROFILE=raw; shift ;;
         --nonce) NONCE=$2; shift 2 ;;
         --window-bytes) WINDOW_BYTES=$2; shift 2 ;;
         --carrier-port) CARRIER_PORT=$2; shift 2 ;;
