@@ -565,6 +565,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **T2 grouped ownership（2026-11-06）**：`w-fec-v6` 保持 `fc5ac01` 单组不动；`w-fec-grouped` 从 `fc5ac01` 新建，独占 32×8 grouped 数据面（组重组/ACK/FBK/HTTP、host 32×8、QEMU 小 grouped）；合并顺序 `w-fec-v6 → w-fec-grouped → integration`。T5.2 等 T2 grouped。
 
+**Grouped WIP 交接**：B 已把未提交 grouped 改动导出为 `/home/kunweiz/tbtun-worktrees/fec-grouped-wip-fc5ac01.patch`（`git apply --check` OK；含 grouped TX/RX 重构、`n_car=cfg.carriers` 修复、probe N；**未验证、带调试打印**），由 `fec-grouped` 接手；`w-fec-v6` 保持 `fc5ac01` clean。`/tmp` 100% 满，fec-grouped 应使用 `/home` 下独立 `TBTUN_BUILD`，不要依赖 /tmp。
+
 **空间阻塞（2026-11-06）**：`/tmp` 100% 满（31G/32G），`/home` btrfs data 94%、metadata 2.71/3.00GiB；正常 `git add`/rename 报 `unable to write new index file`/ENOSPC。`space-clean` 只清我们自己的陈旧 /tmp/缓存（不删 `/tmp/cy-*`、active worktree/tracked 文件）；docs 暂用 `write-tree`+`commit-tree`+直接写 ref 保持；T2 merge 等空间恢复后再做。
 
 | 文件 | 冲突方 | 裁决 |
