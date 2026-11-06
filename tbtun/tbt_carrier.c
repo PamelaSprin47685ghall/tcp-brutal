@@ -1213,6 +1213,58 @@ static struct tbt_carrier *tbt_carrier_take_dead(struct tbt_session *sess)
     return NULL;
 }
 
+/* A brand-new object with no session binding. Safe without pump_lock: it is
+ * not visible to any other path yet. */
+static struct tbt_carrier *tbt_carrier_alloc_fresh(void)
+{
+    struct tbt_carrier *c = kzalloc(sizeof(*c), GFP_KERNEL);
+
+    if (!c)
+        return NULL;
+    /* Before the first allocation that can fail: the failure path frees
+     * through tbt_carrier_free(), which unlinks the node, and an all-zero
+     * node is not a valid list head. */
+    INIT_LIST_HEAD(&c->node);
+    INIT_LIST_HEAD(&c->release_node);
+    c->http_tx = kmalloc(TBT_HTTP_FRAME_MAX, GFP_KERNEL);
+    c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX, GFP_KERNEL);
+    c->part = kmalloc(TBT_CAR_PART_MAX, GFP_KERNEL);
+    c->parser = kmalloc(sizeof(*c->parser), GFP_KERNEL);
+    c->http_rx = kmalloc(sizeof(*c->http_rx), GFP_KERNEL);
+    if (!c->http_tx || !c->http_hdr || !c->part || !c->parser ||
+        !c->http_rx)
+    {
+        /* ctor-fail: never linked, so the helper's unlink is a no-op. */
+        tbt_carrier_free(c);
+        return NULL;
+    }
+    return c;
+}
+
+/* Bind a fresh or reused object to a session slot. */
+static struct tbt_carrier *tbt_carrier_bind(struct tbt_carrier *c,
+                                            struct tbt_session *sess, u8 index)
+{
+    c->sess = sess;
+    c->index = index;
+    c->gen = ++sess->carrier_gen;
+    /* 0xff is the provisional far-side index: not a spare, and the join sets
+     * the real role when HELLO names the slot. */
+    c->spare = index < sess->n_car && index >= sess->n_pri;
+    c->active = !c->spare;
+    c->profile = tbt_carrier_profile(sess, index, c->spare);
+    c->state = TBT_CAR_CONNECTING;
+    c->class = sess->tunnel ? sess->tunnel->cfg.profile : 1;
+    c->join_deadline_ns = ktime_get_ns() + (u64)TBT_JOIN_TIMEOUT_MS * NSEC_PER_MSEC;
+    c->last_una_move_ns = ktime_get_ns();
+    mutex_init(&c->http_lock);
+    INIT_WORK(&c->w_connect, tbt_car_connect_work);
+    INIT_WORK(&c->w_rx, tbt_car_rx_work);
+    INIT_WORK(&c->w_tx, tbt_car_tx_work);
+    INIT_DELAYED_WORK(&c->w_pump, tbt_pump_work);
+    return c;
+}
+
 /* The caller holds pump_lock. */
 static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
                                                   u8 index)
@@ -1247,45 +1299,11 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
     }
     else
     {
-        c = kzalloc(sizeof(*c), GFP_KERNEL);
+        c = tbt_carrier_alloc_fresh();
         if (!c)
             return NULL;
-        /* Before the first allocation that can fail: the failure path frees
-         * through tbt_carrier_free(), which unlinks the node, and an
-         * all-zero node is not a valid list head. */
-        INIT_LIST_HEAD(&c->node);
-        INIT_LIST_HEAD(&c->release_node);
-        c->http_tx = kmalloc(TBT_HTTP_FRAME_MAX, GFP_KERNEL);
-        c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX, GFP_KERNEL);
-        c->part = kmalloc(TBT_CAR_PART_MAX, GFP_KERNEL);
-        c->parser = kmalloc(sizeof(*c->parser), GFP_KERNEL);
-        c->http_rx = kmalloc(sizeof(*c->http_rx), GFP_KERNEL);
-        if (!c->http_tx || !c->http_hdr || !c->part || !c->parser ||
-            !c->http_rx)
-        {
-            /* ctor-fail: never linked, so the helper's unlink is a no-op. */
-            tbt_carrier_free(c);
-            return NULL;
-        }
     }
-    c->sess = sess;
-    c->index = index;
-    c->gen = ++sess->carrier_gen;
-    /* 0xff is the provisional far-side index: not a spare, and the join sets
-     * the real role when HELLO names the slot. */
-    c->spare = index < sess->n_car && index >= sess->n_pri;
-    c->active = !c->spare;
-    c->profile = tbt_carrier_profile(sess, index, c->spare);
-    c->state = TBT_CAR_CONNECTING;
-    c->class = sess->tunnel ? sess->tunnel->cfg.profile : 1;
-    c->join_deadline_ns = ktime_get_ns() + (u64)TBT_JOIN_TIMEOUT_MS * NSEC_PER_MSEC;
-    c->last_una_move_ns = ktime_get_ns();
-    mutex_init(&c->http_lock);
-    INIT_WORK(&c->w_connect, tbt_car_connect_work);
-    INIT_WORK(&c->w_rx, tbt_car_rx_work);
-    INIT_WORK(&c->w_tx, tbt_car_tx_work);
-    INIT_DELAYED_WORK(&c->w_pump, tbt_pump_work);
-    return c;
+    return tbt_carrier_bind(c, sess, index);
 }
 
 struct tbt_carrier *tbt_carrier_new(struct tbt_session *sess, u8 index)
@@ -1293,11 +1311,20 @@ struct tbt_carrier *tbt_carrier_new(struct tbt_session *sess, u8 index)
     struct tbt_carrier *c;
 
     /* Reuse reads the dead list and the poll counters; pump_lock keeps a
-     * running pump out of an object that is about to be reinitialised. */
-    mutex_lock(&sess->pump_lock);
-    c = tbt_carrier_new_locked(sess, index);
-    mutex_unlock(&sess->pump_lock);
-    return c;
+     * running pump out of an object that is about to be reinitialised. The
+     * accept path must not wait for a pump that is writing a burst: that
+     * delayed a replacement join and cost probe C its 64 KiB. Try once; if
+     * the pump is busy, allocate a fresh object instead of blocking. */
+    if (mutex_trylock(&sess->pump_lock))
+    {
+        c = tbt_carrier_new_locked(sess, index);
+        mutex_unlock(&sess->pump_lock);
+        return c;
+    }
+    c = tbt_carrier_alloc_fresh();
+    if (!c)
+        return NULL;
+    return tbt_carrier_bind(c, sess, index);
 }
 
 /* Mark a carrier unusable once, count it, and ask the replacement worker to
