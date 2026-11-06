@@ -34,6 +34,7 @@
  *   --payload-check               verify a real payload round trip (stderr)
  */
 
+#define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
 #include "sc_ldpc.h"
@@ -48,6 +49,8 @@
 /* ------------------------------------------------------------------ */
 /* helpers                                                             */
 /* ------------------------------------------------------------------ */
+
+static double g_bench_sec = 0.20;
 
 static double now_sec(void)
 {
@@ -246,7 +249,7 @@ static void measure_enc(sc_code *c, double *mbps, long *reps_out)
     dt = t1 - t0;
     if (dt < 1e-7)
         dt = 1e-7;
-    reps = (long)(0.20 / dt);
+    reps = (long)(g_bench_sec / dt);
     if (reps < 1)
         reps = 1;
     if (reps > 200000)
@@ -301,7 +304,7 @@ static void measure_dec(sc_code *c, int p_mil, double *mbps, long *reps_out)
     dt = t1 - t0;
     if (dt < 1e-7)
         dt = 1e-7;
-    reps = (long)(0.20 / dt);
+    reps = (long)(g_bench_sec / dt);
     if (reps < 1)
         reps = 1;
     if (reps > 200000)
@@ -331,6 +334,7 @@ typedef struct {
     long reps;
     double mbps;
     pthread_barrier_t *bar;
+    int cpu;
 } dec_worker_arg;
 
 static void *dec_worker(void *arg)
@@ -343,6 +347,12 @@ static void *dec_worker(void *arg)
     long r;
     int i;
 
+    if (a->cpu >= 0) {
+        cpu_set_t set;
+        CPU_ZERO(&set);
+        CPU_SET(a->cpu, &set);
+        (void)pthread_setaffinity_np(pthread_self(), sizeof(set), &set);
+    }
     sc_get_info(a->c, &in);
     code = calloc((size_t)in.n, 1);
     mask = calloc((size_t)in.n, 1);
@@ -429,7 +439,7 @@ static void measure_dec_mt(sc_code **codes, int ncodes, int threads, int p_mil,
         one = t1 - t0;
         if (one < 1e-7)
             one = 1e-7;
-        reps = (long)(0.20 / one);
+        reps = (long)(g_bench_sec / one);
         if (reps < 1)
             reps = 1;
         if (reps > 200000)
@@ -446,6 +456,7 @@ static void measure_dec_mt(sc_code **codes, int ncodes, int threads, int p_mil,
         arg[t].reps = reps;
         arg[t].mbps = 0.0;
         arg[t].bar = &bar;
+        arg[t].cpu = t;
         if (pthread_create(&tid[t], NULL, dec_worker, &arg[t]) == 0)
             started++;
     }
@@ -779,6 +790,7 @@ static void usage(void)
             "  --extra-dc N                  extra check payload degree (5)\n"
             "  --codes N                     code instances (4)\n"
             "  --threads N                   decoder worker threads (1)\n"
+            "  --bench-sec S                 measurement window in seconds (0.20)\n"
             "  --seed N                      seed (1)\n"
             "  --seg-bytes N                 payload bytes per coupling block "
             "for the latency model (8192)\n"
@@ -849,6 +861,10 @@ int main(int argc, char **argv)
             g.codes = (int)strtol(argv[++i], NULL, 10);
         } else if (!strcmp(a, "--threads") && i + 1 < argc) {
             g.threads = (int)strtol(argv[++i], NULL, 10);
+        } else if (!strcmp(a, "--bench-sec") && i + 1 < argc) {
+            g_bench_sec = strtod(argv[++i], NULL);
+            if (g_bench_sec < 0.01)
+                g_bench_sec = 0.01;
         } else if (!strcmp(a, "--extra-dc") && i + 1 < argc) {
             g.extra_dc = (int)strtol(argv[++i], NULL, 10);
         } else if (!strcmp(a, "--seed") && i + 1 < argc) {

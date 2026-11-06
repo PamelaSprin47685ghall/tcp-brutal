@@ -123,6 +123,16 @@ struct sc_code {
     int *cadj; /* edges */
     int *owned; /* n_chk: parity variable solved by this check, -1 if none */
 
+    /* Fast peeling layout: fixed-degree variable adjacency and fixed-stride
+     * check adjacency.  Only allocated when the indices fit in uint16. */
+    uint16_t *pay_adj; /* n_data * 5 check indices */
+    uint16_t *par_adj; /* n_par * 2 check indices */
+    uint8_t *par_deg;  /* n_par: 1 or 2 */
+    uint16_t *cadj_f;  /* n_chk * dcs variable indices */
+    uint8_t *cdeg_f;   /* n_chk: check degree */
+    int dcs;           /* check stride for cadj_f */
+    int fast;          /* 1 if the fast layout is valid */
+
     /* decoder scratch */
     uint8_t *known;
     int8_t *val;
@@ -159,6 +169,11 @@ void sc_free(sc_code *c)
     free(c->vadj);
     free(c->cadj);
     free(c->owned);
+    free(c->pay_adj);
+    free(c->par_adj);
+    free(c->par_deg);
+    free(c->cadj_f);
+    free(c->cdeg_f);
     free(c->known);
     free(c->val);
     free(c->cx);
@@ -196,7 +211,11 @@ int sc_systematic(const sc_code *c)
 
 const uint8_t *sc_known_bits(const sc_code *c)
 {
-    return c->known;
+    sc_code *cc = (sc_code *)c;
+    int v;
+    for (v = 0; v < cc->n; v++)
+        cc->known[v] = (uint8_t)(cc->val[v] >= 0);
+    return cc->known;
 }
 
 /*
@@ -602,6 +621,65 @@ sc_code *sc_build(const sc_params *p, char *err, size_t errlen)
         }
     }
 
+    /* ---- fast fixed-degree layout ------------------------------- */
+    {
+        int v2, dmax = 0;
+        for (i = 0; i < c->n_chk; i++) {
+            int d = c->coff[i + 1] - c->coff[i];
+            if (d > dmax)
+                dmax = d;
+        }
+        c->dcs = dmax;
+        c->fast = 1;
+        if (c->n >= 65536 || c->edges >= 65536 || c->dcs > 255) {
+            c->fast = 0;
+        } else {
+            c->pay_adj = zmalloc((size_t)c->n_data * SC_L, sizeof(uint16_t));
+            c->par_adj = zmalloc((size_t)c->n_par * 2, sizeof(uint16_t));
+            c->par_deg = zalloc((size_t)c->n_par, 1);
+            c->cadj_f = zmalloc((size_t)c->n_chk * (size_t)c->dcs,
+                                sizeof(uint16_t));
+            c->cdeg_f = zalloc((size_t)c->n_chk, 1);
+            if (!c->pay_adj || !c->par_adj || !c->par_deg || !c->cadj_f ||
+                !c->cdeg_f) {
+                snprintf(err, errlen, "out of memory");
+                goto fail;
+            }
+            for (v2 = 0; v2 < c->n_data && c->fast; v2++) {
+                int kk;
+                if (c->voff[v2 + 1] - c->voff[v2] != SC_L) {
+                    c->fast = 0;
+                    break;
+                }
+                for (kk = 0; kk < SC_L; kk++)
+                    c->pay_adj[(size_t)v2 * SC_L + kk] =
+                        (uint16_t)c->vadj[c->voff[v2] + kk];
+            }
+            for (v2 = c->n_data; v2 < c->n && c->fast; v2++) {
+                int d = c->voff[v2 + 1] - c->voff[v2];
+                int pa = v2 - c->n_data;
+                if (d < 1 || d > 2) {
+                    c->fast = 0;
+                    break;
+                }
+                c->par_deg[pa] = (uint8_t)d;
+                c->par_adj[(size_t)pa * 2] =
+                    (uint16_t)c->vadj[c->voff[v2]];
+                if (d == 2)
+                    c->par_adj[(size_t)pa * 2 + 1] =
+                        (uint16_t)c->vadj[c->voff[v2] + 1];
+            }
+            for (i = 0; i < c->n_chk && c->fast; i++) {
+                int d = c->coff[i + 1] - c->coff[i];
+                int kk;
+                c->cdeg_f[i] = (uint8_t)d;
+                for (kk = 0; kk < d; kk++)
+                    c->cadj_f[(size_t)i * c->dcs + kk] =
+                        (uint16_t)c->cadj[c->coff[i] + kk];
+            }
+        }
+    }
+
     /* ---- decoder scratch and statistics ------------------------- */
     c->known = zalloc((size_t)c->n, 1);
     c->val = zalloc((size_t)c->n, 1);
@@ -747,11 +825,146 @@ const char *sc_term_name(const sc_code *c)
 /* peeling decoder                                                     */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Fast peeling path: fixed-degree variable adjacency, fixed-stride check
+ * adjacency, early stop when the payload is complete, and a payload-only
+ * write-back.  Requires c->fast (all indices fit in uint16, payload degree
+ * exactly SC_L, parity degree 1 or 2).
+ */
+static sc_dec_stat sc_decode_fast(sc_code *c, const uint8_t *recv,
+                                  const uint8_t *erased, uint8_t *out,
+                                  int target_data_only)
+{
+    sc_dec_stat st;
+    int n = c->n, nchk = c->n_chk, n_data = c->n_data;
+    int8_t *val = c->val;
+    uint16_t *cx = c->cx;
+    int *queue = c->queue;
+    int qh = 0, qt = 0;
+    int v, ck;
+    int dcs = c->dcs;
+    long visits = 0;
+
+    /*
+     * Walk only the known variables and store the known count in the high
+     * byte; the unknown count is degree minus known count, filled in by the
+     * check sweep below.  Erased variables need no val[] store: one memset
+     * marks them all.
+     */
+    memset(val, 0xFF, (size_t)n);
+    memset(cx, 0, (size_t)nchk * sizeof(uint16_t));
+    for (v = 0; v < n; v++) {
+        uint8_t x;
+        if (erased[v])
+            continue;
+        x = (uint8_t)(recv[v] & 1u);
+        val[v] = (int8_t)x;
+        if (v < n_data) {
+            const uint16_t *a = c->pay_adj + (size_t)v * SC_L;
+            int e;
+            for (e = 0; e < SC_L; e++)
+                cx[a[e]] = (uint16_t)((cx[a[e]] + 0x100u) ^ x);
+        } else {
+            int pa = v - n_data;
+            const uint16_t *a = c->par_adj + (size_t)pa * 2;
+            cx[a[0]] = (uint16_t)((cx[a[0]] + 0x100u) ^ x);
+            if (c->par_deg[pa] == 2)
+                cx[a[1]] = (uint16_t)((cx[a[1]] + 0x100u) ^ x);
+        }
+    }
+    for (ck = 0; ck < nchk; ck++) {
+        int d = c->cdeg_f[ck];
+        int uc = d - (int)(cx[ck] >> 8);
+        cx[ck] = (uint16_t)(((unsigned)uc << 8) | (cx[ck] & 0xffu));
+        visits += d;
+        if (uc == 1)
+            queue[qt++] = ck;
+    }
+
+    st.rounds = 0;
+    while (qh < qt) {
+        int end = qt;
+        st.rounds++;
+        while (qh < end) {
+            int uv = -1, k;
+            uint8_t x;
+            ck = queue[qh++];
+            if ((cx[ck] >> 8) != 1)
+                continue;
+            {
+                const uint16_t *ca = c->cadj_f + (size_t)ck * dcs;
+                int d = c->cdeg_f[ck];
+                for (k = 0; k < d; k++) {
+                    int vv = ca[k];
+                    visits++;
+                    if (val[vv] < 0) {
+                        uv = vv;
+                        break;
+                    }
+                }
+            }
+            if (uv < 0) {
+                cx[ck] = 0;
+                continue;
+            }
+            x = (uint8_t)cx[ck];
+            val[uv] = (int8_t)x;
+            cx[ck] = 0;
+            if (uv < n_data) {
+                const uint16_t *a = c->pay_adj + (size_t)uv * SC_L;
+                for (k = 0; k < SC_L; k++) {
+                    int c2 = a[k];
+                    visits++;
+                    if (c2 == ck)
+                        continue;
+                    cx[c2] = (uint16_t)((cx[c2] - 0x100u) ^ x);
+                    if ((cx[c2] >> 8) == 1)
+                        queue[qt++] = c2;
+                }
+            } else {
+                int pa = uv - n_data;
+                const uint16_t *a = c->par_adj + (size_t)pa * 2;
+                int pd = c->par_deg[pa];
+                for (k = 0; k < pd; k++) {
+                    int c2 = a[k];
+                    visits++;
+                    if (c2 == ck)
+                        continue;
+                    cx[c2] = (uint16_t)((cx[c2] - 0x100u) ^ x);
+                    if ((cx[c2] >> 8) == 1)
+                        queue[qt++] = c2;
+                }
+            }
+        }
+    }
+
+    {
+        int limit = target_data_only ? n_data : n;
+        long tgt = target_data_only ? n_data : n;
+        long unres = 0;
+        for (v = 0; v < limit; v++) {
+            if (val[v] < 0) {
+                unres++;
+                out[v] = 0;
+            } else {
+                out[v] = (uint8_t)val[v];
+            }
+        }
+        st.unresolved = unres;
+        st.target = tgt;
+        st.resolved = tgt - unres;
+    }
+    st.edge_visits = visits;
+    return st;
+}
+
 sc_dec_stat sc_decode(sc_code *c, const uint8_t *recv, const uint8_t *erased,
                       uint8_t *out, int target_data_only)
 {
     sc_dec_stat st;
     int n = c->n, nchk = c->n_chk;
+    if (c->fast)
+        return sc_decode_fast(c, recv, erased, out, target_data_only);
     uint8_t *known = c->known;
     int8_t *val = c->val;
     uint16_t *cx = c->cx;

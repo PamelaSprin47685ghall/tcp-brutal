@@ -100,6 +100,12 @@ int sc_verify(const sc_code *c, const uint8_t *code);
  * decoded value of every variable (recovered values for erased ones).  The
  * statistic counts target variables: payload only for SC_MODEL_SYSTEMATIC,
  * all variables for SC_MODEL_SYMMETRIC.
+ *
+ * The fast path (all indices fit in uint16, payload degree exactly 5,
+ * parity degree 1 or 2) only writes out[0 .. n_data-1] when
+ * target_data_only != 0, and does not maintain known[] on the hot path;
+ * sc_known_bits() materialises known[] from the decoder state on demand.
+ * out[n_data .. n-1] is untouched in that mode.
  */
 sc_dec_stat sc_decode(sc_code *c, const uint8_t *recv, const uint8_t *erased,
                       uint8_t *out, int target_data_only);
