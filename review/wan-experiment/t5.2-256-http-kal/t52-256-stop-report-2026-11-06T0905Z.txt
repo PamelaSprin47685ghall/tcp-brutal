@@ -1,0 +1,34 @@
+T5.2 256 — STOP report (t52-256), 2026-11-06T09:05Z
+Status: STOPPED. No HND0 run since 09:01:58Z. HND0 and local self-cleaned; production services normal.
+
+1) Two HND0 windows — attribution
+- Window A 08:52:56–08:55:57Z: wan-deploy's T5.2 first run (16MiB tbt_burst). t52-256 issued no HND0 command in this window. Evidence: review/wan-experiment/t5.2-256-http-kal/256-burst-* (committed in e56809b by goal-integrator). I only observed it (read /proc, ps, ss) while checking HND0 exclusivity.
+- Window B 08:59:22–09:01:58Z: t52-256's run. Only a 37B tbt_ping smoke; NO 8MiB and NO 16MiB burst was started. Commands/config below.
+
+2) Window B commands (exact)
+- Build/verify: cc -O2 -o /tmp/{tbt_burst,tbt_ping,tbt_echo} from host/tbt_burst.c, host/tbt_ping.c, benches/src/tbt_echo.c at repo e56809b; local tbtun.ko sha256 053de915e15d4910005cfb8e3955dd3e2ae2f0133b601b5e6f336a82e5793e52, srcversion 9EBC61C0CAE6D46A36F17B4.
+- Socket-buffer shim: /tmp/tbt_sockbuf.so (wraps socket/accept/accept4 via syscall, sets SO_SNDBUF/SO_RCVBUF=64MiB; effective cap is the host sysctl).
+- HND0: scp tbt_echo + tbt_sockbuf.so to /home/tbtun-t52-9a1dacb/; systemd-run --unit=tbt-echo-5202 --setenv=LD_PRELOAD=... /home/tbtun-t52-9a1dacb/tbt_echo 5202 echo; insmod /home/tbtun-t52-9a1dacb/tbtun.ko max_carriers=256 max_tunnels=1 debug=0; /proc/net/tbtun/ports = "ports 31000-31511"; far config (w=0, rendered w=8):
+  tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5202 n=4 m=4 fec=on mode=grouped w=0 carriers=256 crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=1048576 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=31000-31511 nonce=00112233445566778899aabbccddeeff
+- Local: ip rule add to 45.11.1.62/32 lookup main pref 100; sysctl rmem_max/wmem_max 67108864 (temporary); insmod tbtun.ko max_carriers=256 max_tunnels=1 debug=0; /ports = "ports 30000-30511"; near config (w=0, rendered w=8):
+  tunnel 1 role=near listen=127.0.0.1:9001 peer=45.11.1.62:9000 n=4 m=4 fec=on mode=grouped w=0 carriers=256 crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=1048576 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=30000-30511 nonce=00112233445566778899aabbccddeeff
+- Gate check: far up=256 http_resp=256 http_parse_err=0 connect_fail=0 fec_drop_window=0 prov counters clean; near up=256 http_req=256 http_parse_err=0, connect_fail=1 connect_retry=43.
+- Smoke: LD_PRELOAD=/tmp/tbt_sockbuf.so timeout 20 /tmp/tbt_ping 127.0.0.1 9001 37 5 0 -> 0/37 bytes back after 5 s, rc=1 (wall 5.007 s). First attempt at 09:00:13 failed with rc=127 only because /usr/bin/time is absent; the actual ping is the 09:00:26 run.
+- After ping: near submit=37 tx_ack=37 rx_delivered=0; far submit=37 tx_ack=0 capture_runs=3; c9 short_tx=1 both, short_unknown=0, fec_drop_window=0, fec_stream_refused=0; c8 parse_err=0; up fell 256->255 (connect_fail=1); stream stayed active ~60 s after the app closed (closed by 09:01:33Z).
+- No 8MiB burst: gate up=256 failed (255) and the ping already showed recvd=0; per instruction not to rerun/burst under those conditions.
+- Cleanup 09:01:54Z: rmmod tbtun both ends; systemctl stop tbt-echo-5202; local ip rule deleted; local sysctl restored to 4194304; no listeners 9000/5202/9001; no tbtun/proc; HND0 production frps/caddy/xray active, hysteria inactive; HND0 load1 0.48, mem 371/955 MB used; sysctl 16MiB unchanged.
+
+3) Why the run happened despite HOLD
+- At 08:58Z the user message explicitly said "wan-deploy 已 standby，你独占 T5.2 ... 按你的计划只跑：37B ping smoke + 8MiB/10s 单连接 ... 先确认 up=256/parse_err=0 ... 若 8MiB 仍 recvd=0 或 fec_drop_window>0，立即停、清理". I treated that as the active instruction superseding the earlier no-rerun note, and ran only the 37B ping. The emergency HOLD arrived after the ping; I stopped immediately, did not start the 8MiB, and cleaned both ends.
+
+4) New root-cause finding (for t52-debug)
+- HND0 UBSAN (kernel 7.0.0-42, UBSAN enabled) reports invalid-load of a _Bool with values 10/14 in four work paths: tbt_tx.c:2695 (tbt_pump_work), tbt_sock.c:96 (tbt_pub_capture_work), tbt_fec_data.c:459 (tbt_fec_tx_work), tbt_procfs.c:618 and :892 (tbt_show_stats). Local kernel has no UBSAN (0 reports).
+- All five sites read struct tbt_stream.tx_paused / paused, and 10/14 equal carrier gen values. tbtun.h:387-388 still has `u16 announced_mask; u8 announced_gen[16];` while carrier indices now reach 255 (path_id fix). tbt_tx.c:2565 writes `announced_gen[c->index]` for index 0..255 -> out-of-bounds write over tx_paused, tx_start_ns, sched, retain, holes; tbt_tx.c:174-176 also reads announced_gen[c->index] and uses BIT(index) on a u16. This is also the tbt_tx.c:2570 WARN_ON_ONCE(!tbt_stream_announced) site: mask bits >=16 are truncated, so the announce check can never pass for carriers >=16.
+- This is not merely the pre-existing announce race: the array/bitmap are 16-wide while the carrier space is 256-wide. Suggested fix: announced_gen[256] + 256-bit mask (or a 256-bit bitmap), guard index < 256, and a host/QEMU test that OPENs carriers 16/200/255 under UBSAN/KASAN.
+
+5) Evidence paths (review/wan-experiment/t5.2-256-http-kal/)
+- t52-256-preflight-local.txt, t52-256-far-deploy.txt, t52-256-near-deploy.txt, t52-256-near-joined.txt
+- t52-256-ping-37B.txt, t52-256-near-after-ping.txt, t52-256-far-after-ping.txt, t52-256-near-after-ping-full.txt, t52-256-far-after-ping-full.txt, t52-256-after-ping-wait.txt
+- t52-256-hnd0-ubsan.txt, t52-256-hnd0-dmesg-run.txt, t52-256-local-dmesg-run.txt
+- t52-256-state-2026-11-06T0857Z.txt (pre-run clean state), this file.
+- Window A evidence (not mine): 256-burst-*.
