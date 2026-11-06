@@ -129,3 +129,13 @@ warning that the first A-P run showed 52 times is fixed by cancelling
 - The QEMU kernel cannot print the HND0 workqueue-hog line, so the local
   evidence is the pre-fix OOM/no-verdict and the post-fix counters, heartbeat
   count and probe verdict.
+
+## Combined-tree validation (e7d1c83 + this branch)
+
+`w-hnd0-hang-merge` at `cfe51ee` is `e7d1c83` (the 256-wide announce
+bookkeeping `dc4532a` and the FEC credit fix) plus the two commits above. It
+builds clean, probe Q passes (`prov_now=0 peak=320 reject=8652`, `dead now=8
+peak=8`, near recovers 256/256), and probes A-P pass 16/16 in 262 s with **no
+kernel warning**: `dc4532a` removes the probe N `!tbt_stream_announced` WARN.
+The merge keeps `dc4532a`'s `tbt_tx.c` untouched and only adds the session and
+carrier fields to `tbtun.h`.
