@@ -561,7 +561,7 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **合并列车（用户裁决）：`w-window` → `w-fec-v6` → `w-crypto` → `w-sclc` → `w-hnd0` → master（F/T7）。**
 每一步只在 master 上合并前一等的 head；不允许跨序合并。D 的当前 worktree 仍是 `w-fec`，合并前改名为 `w-sclc` 或由 F 记录等价映射；不得因此改变 D 的提交内容。
-**`w-window` 未过 G1（HND0 N=1 auto 根因已定位，待重跑），暂不进入合并列车**；A 的 `rx_reorder_bytes=1MiB` 重跑通过后再评估。
+**`w-window` 已合入 master `c508a10`（2026-11-06；tested 0888ce4，ko a6e459f6/srcversion 711422E4；merge 后 `make check` 绿）。下一步 B `w-fec-v6` merge `c508a10` 并接 FEC 数据面。**
 
 | 文件 | 冲突方 | 裁决 |
 |---|---|---|
@@ -674,6 +674,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 **线性历史确认（`window-verify`）**：`ddef988 → 4c58b0e → 8980c03 → 0888ce4 → 038d31d → 33db43d`；HEAD `33db43d` clean；`git diff --stat 0888ce4..33db43d -- tbtun tests Makefile scripts host adversarial` 为空（仅 `review/dkms-qemu/run.sh` + 两个 `review/wan-experiment/t1-0888ce4-local*`）；ko `a6e459f6…` / srcversion `711422E4` 仍有效，0888ce4 的计数对 33db43d 有效。`window-final`/`hnd0-5x` 拥有 QEMU slot。
 
 **0888ce4 HND0 sendclose 5x PASS（`hnd0-5x f5f97ec`）**：per-end ko near `0e4ae50c…`/far `95aefe35…`，srcversion `711422E4`；每轮 sink 16,777,216/EOF、sendclose 16MiB、`txq_after` 非 0（810,213/1,113,317/842,981/630,254/401,143）、far `rx_delivered` 每轮 +16,777,216、near `fin_seq=16777216 fin_w=1 rst_w=0`、far `fin_w=1 rxf=1/1`、live `txq=0`、lost/carrier_lost=0、holes=0、timeouts=0、`close_detaches=0`、无 `TXSTALLKILL`；CPU near 10.09–10.41%、far 25.59–27.00%。证据 `review/wan-experiment/t1-n1-auto-close-5x-0888ce4/`。shutdown-WR 5x 仍在 4c58b0e（0888ce4 只改 rx hole floor，close 路径未变）；本轮 HND0 门禁按用户指定的 sendclose。**T1 只等 `window-final` 独立复跑。**
+
+**T1/G1 完成（2026-11-06）**：T1 按 0888ce4 本地门禁（A–K 3x 11/11、J 5/5、near 15/15、full 93P/0F/0S、SAN）+ HND0 5x（sendclose 5/5、shutdown-WR 5/5）标完成；`window-final` 独立复跑是额外证据，不阻塞。`w-window 33db43d` 已合入 integration **`c508a10`**，merge 后 `make check` 绿；R11 独立 ticket。B 下一步 merge integration 接 FEC 数据面；T5.2 等 T2；T6 等用户 B/C。
 
 **5x 计划（`hnd0-n1b`）**：同一 A3 源码 per-end build、两端 srcversion 一致；5 轮独立 sink/sender；每轮 sink `bytes=16777216 eof=1`、far `rx_delivered=16777216`、near `fin_seq=16777216 fin_w=1`、`rst_w=0`、`deliver/close timeouts=0`、`close_detaches=0`、near/far `live txq=0`、无 `TXSTALLKILL`；证据 `review/wan-experiment/t1-n1-auto-rx1m-sink-5x/`，保留 b3b33b2 单次证据。失败也记录并继续，不掩盖。
 
