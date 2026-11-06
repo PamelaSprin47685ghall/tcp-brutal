@@ -91,6 +91,8 @@
 
 **requeue loop 根因/修复（`49b9419`）**：`42c1522` 在 pump 选择循环里对**仍挂在 `sess->tx_q`** 的 `fr` 调 `tbt_tx_enqueue(..., false)`；该函数用 `list_add_tail`（不 unlink）→ 覆盖邻居 `prev/next` → 同一帧反复出现/被重复发送 → 每次重复 kick FBK → far `fbk_tx 0→15780`、near `rx_read ~1MB`、hole depthfail/gatefail、真实 DATA/ACK 饿死、第二 stream OPEN 不完成。修复：`list_move_tail(&fr->list, &sess->tx_q)`（`tx_lock` 下），字节计数不动。A–P 15/15；`fbk_tx` 回到几十（6/7/46），不再上万。非本地复现驱动，由 `fbk_tx=15780` + 代码路径定位。下轮 smoke 判据：`fbk_tx/fbk_rx` 与 DATA 帧数同量级（几十~几百）、`rx_read` 不 >> 载荷；否则 grep `tbt_tx_enqueue(` 调用点查“对已链接节点 list_add”。`49b9419` 未合；T5.2 HOLD；不 push。
 
+**`49b9419` 合并预检（2026-11-06）**：`git merge-tree --write-tree master 49b9419` rc=0（无冲突），w-t52-debug clean at `49b9419`；等 Main 批准合入 → 两端重建 → 下一轮 bounded 1 carrier/37B ×2（fbk 判据）。T5.2 HOLD；不 push。
+
 **`t52-arm64-3` 清理/失败摘要（旧 `fbcd820`）**：`.65`/HND0 已 clean（rmmod、echo 停、锁/ip rule 清）；1 carrier/37B ping 全程 timeout；near→far carrier0 up、far `rx_delivered=37`（应用层收到 37B），但 far→near `rx_delivered=0`、`streams_active=0`；far carrier0 up RTT~291ms 但 `recv_cnt=0`，near carrier0 up RTT~345ms `tx_frames=41/tx_bytes=2071`；疑似 far target/回程或 spare 未激活。证据 `/tmp/near-evidence.txt`、`/tmp/far-evidence.txt`（临时，未入库）。等 `integrator-final` 的 3c75a80 bounded 结果。
 
 **冒烟前部署/分工（2026-11-06）**：HND0 clean；`b41b259` x86 far ko **尚未部署**。`t52-arm64-3` = HND0 far b41b259 构建/部署 + `.65` **1 carrier/37B smoke**；`arm64-build-3` = `.65` aarch64 ko only。HND0 far 用 **`tbt_echo` 5202（不用 iperf3）**；1 carrier/37B 通过后 **8/16 × 1MiB/5s**；不 256/8 并行、不合并/push。
