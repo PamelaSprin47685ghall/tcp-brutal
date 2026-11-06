@@ -1217,8 +1217,16 @@ probe_n() {
         sleep 0.5
         _settle=$((_settle + 1))
     done
+    [ "$(tunnel_stat 1 up)" = "$N_CARRIERS" ] &&
+        [ "$(tunnel_stat 2 up)" = "$N_CARRIERS" ] ||
+        fail "probe N: not all $N_CARRIERS carriers came up (far $(tunnel_stat 1 up), near $(tunnel_stat 2 up))"
     echo "   tunnels:"; cat /proc/net/tbtun/tunnels
     echo "   peers:"; cat "$PEERS"
+    # Earlier probes put workqueue-teardown warnings in the ring, and a
+    # wrapped ring can make the count fall (8 before, 7 after), which is not
+    # a new warning. Clear the ring so this probe judges only what the
+    # 256-carrier transfer adds.
+    dmesg -c > /dev/null 2>&1 || true
     _warn0=$(dmesg | grep -c "WARNING:\|UBSAN:" || true)
     # Rate and CPU for the transfer: a 256-carrier run is judged on both, and a
     # number without the guest's own load cannot tell a window limit from a
@@ -1234,12 +1242,21 @@ probe_n() {
     _i=0
     while [ "$_i" -lt 4000 ]; do
         _sent=$(tunnel_stat 2 submit_bytes)
-        [ "${_sent:-0}" -ge 65536 ] && break
+        [ "${_sent:-0}" -ge 1048576 ] && break
         kill -0 "$_bpid" 2> /dev/null || break
         _i=$((_i + 1))
     done
     if kill -0 "$_bpid" 2> /dev/null; then
         echo "   taking carrier 0 down after ${_sent:-0} submitted bytes"
+        # Drop every FEC record aimed at carrier 0 from here on. The debug
+        # injector covers FEC records, so this is the in-flight loss that used
+        # to leave a block with 3 DATA and 4 PARITY: the sender frees the
+        # record as sent, the wire never carries it, and only the codec can
+        # recover it. It is keyed by the share's scheduled carrier and lives
+        # on the session, so it keeps dropping that share after the carrier is
+        # replaced below.
+        echo 'carrier 0 drop_ppm 1000000' > "$PEERS" ||
+            fail "probe N: carrier 0 drop_ppm rejected"
         echo 'carrier 0 down' > "$PEERS" || fail "probe N: carrier 0 down rejected"
     fi
     _waited=0
@@ -1256,6 +1273,8 @@ probe_n() {
     fi
     wait "$_bpid"
     rc=$?
+    echo 'carrier 0 drop_ppm 0' > "$PEERS" ||
+        fail "probe N: carrier 0 drop_ppm reset rejected"
     _t1=$(cut -d' ' -f1 /proc/uptime)
     _cpu1=$(awk '/^cpu /{b = $2 + $3 + $4 + $7 + $8; i = $5 + $6; print b, i}' /proc/stat)
     _ms=$(awk -v a="$_t0" -v b="$_t1" 'BEGIN { printf "%.0f", (b - a) * 1000 }')
@@ -1294,6 +1313,27 @@ probe_n() {
         _lost=$(tunnel_stat "$_t" ctl_lost)
         [ "${_lost:-0}" = "0" ] ||
             fail "probe N: tunnel $_t lost $_lost pinned control frame(s) at 256 carriers"
+    done
+    # The transfer is only done when every super-block was delivered and the
+    # sender consumed the ACK. A stalled block leaves tx_ack at the last
+    # credit window even though the application bytes were submitted.
+    _total=$((N_MIB * 1048576))
+    sleep 1
+    _ack1=$(tunnel_stat 1 tx_ack)
+    _ack2=$(tunnel_stat 2 tx_ack)
+    echo "   tx_ack: far ${_ack1:-0}, near ${_ack2:-0}, want $_total"
+    [ "${_ack1:-0}" -ge "$_total" ] ||
+        fail "probe N: far tx_ack ${_ack1:-0} did not reach $_total"
+    [ "${_ack2:-0}" -ge "$_total" ] ||
+        fail "probe N: near tx_ack ${_ack2:-0} did not reach $_total"
+    for _id in 1 2; do
+        _bad=$(awk -v id="$_id" '$1 == "tunnel" && $2 == id && $3 == "c9" {
+            for (i = 4; i <= NF; i++) {
+                split($i, a, "=");
+                if (a[2] + 0 != 0) print a[1] "=" a[2]
+            }
+        }' /proc/net/tbtun/stats)
+        [ -z "$_bad" ] || fail "probe N: tunnel $_id c9 nonzero: $_bad"
     done
     # A 256-carrier session indexes per-carrier state by carrier: a mask or an
     # array narrower than the carrier count writes past itself and the kernel

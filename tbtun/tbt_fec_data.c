@@ -27,6 +27,7 @@
  * hole and the ACK frontier is a real global frontier, not a per-group guess.
  */
 #include <linux/ktime.h>
+#include <linux/random.h>
 #include <linux/skbuff.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
@@ -171,6 +172,24 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o)
     if (o->carrier >= sess->n_car)
         return -ENODEV;
     c = READ_ONCE(sess->car[o->carrier]);
+    /* Debug-only loss injection for a FEC share. It is keyed by the carrier
+     * the share was scheduled for, before the fallback below: dropping here
+     * models the share the sender handed to a carrier that then died, and it
+     * must not eat records that merely fell back to this carrier. The session
+     * copy outlives the carrier object, so the injector keeps dropping the
+     * same share after a replacement. The sender returns success and frees
+     * the record, so only the codec can recover it. */
+    {
+        u32 drop = READ_ONCE(sess->fec_drop_ppm[o->carrier]);
+
+        if (drop && get_random_u32() % TBT_DROP_PPM_MAX < drop)
+        {
+            pr_warn_once("tbtun: dropping FEC records: debug_loss=1 and drop_ppm=%u\n",
+                         drop);
+            sess->dropped_by_ppm++;
+            return 0;
+        }
+    }
     if (c && atomic_read(&c->up) && !atomic_read(&c->stopping))
         return tbt_carrier_send_fec(c, o->data, o->len);
     /* The share's own carrier is gone or not usable yet. Send it on a live one
@@ -1187,6 +1206,14 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
     if (h.type == TBT_FEC_DATA)
     {
         memcpy(b->data + (size_t)share * rx->s, payload, h.payload_len);
+        /* The sender zero-pads a short share before encoding parity. The
+         * decoder XORs the whole S-byte slot into the right-hand side, so the
+         * receiver must zero the same tail; otherwise stale bytes from the
+         * slot's previous block corrupt every share recovered from this one.
+         * The tail is never delivered: dlen names the real payload. */
+        if (h.payload_len < rx->s)
+            memset(b->data + (size_t)share * rx->s + h.payload_len, 0,
+                   rx->s - h.payload_len);
         b->dlen[share] = h.payload_len;
         b->dpresent[share] = 1;
         if (h.epoch)

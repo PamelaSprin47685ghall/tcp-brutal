@@ -531,6 +531,7 @@ struct tbt_fec_rlnc
     u16 w;
     size_t s;
     u16 d;
+    u16 band;
     u64 nonce;
 
     u32 L;
@@ -557,15 +558,6 @@ struct tbt_fec_rlnc
     u32 *idx;
 };
 
-static u64 tbt_splitmix64(u64 *state)
-{
-    u64 z = (*state += 0x9e3779b97f4a7c15ull);
-
-    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
-    z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
-    return z ^ (z >> 31);
-}
-
 static u32 tbt_group_count(u32 L, u16 k)
 {
     return L / k + (L % k != 0);
@@ -579,36 +571,137 @@ static void tbt_xor_into(u8 *dst, const u8 *src, size_t len)
         dst[i] ^= src[i];
 }
 
+/* Row r covers the own-data columns c with (c - r) mod m < band. The band
+ * is chosen once in tbt_fec_rlnc_new(): it is the widest one whose rows fit
+ * d and whose m x k matrix has rank min(m, k). Every column therefore sits
+ * in at least one row (band >= 1), so a single lost share is always covered
+ * by a parity row. This replaces the old splitmix selection, which could
+ * leave a column in no row at all: with n=4, m=4, w=8, d=4, four random
+ * rows missed a given share with probability 1/16, and a block with 3 DATA
+ * and all 4 parity stayed undecodable. */
+static bool tbt_fec_band_has(u16 m, u16 r, u16 c, u16 band)
+{
+    return (u16)((c + m - (r % m)) % m) < band;
+}
+
+static u32 tbt_fec_band_weight(u16 k, u16 m, u16 r, u16 band)
+{
+    u32 c;
+    u32 n = 0;
+
+    for (c = 0; c < k; c++)
+        if (tbt_fec_band_has(m, r, (u16)c, band))
+            n++;
+    return n;
+}
+
+/* Rank of the m x k band matrix over GF(2), capped at min(m, k). */
+static u32 tbt_fec_band_rank(u16 k, u16 m, u16 band)
+{
+    u32 words = ((u32)k + 63) / 64;
+    u64 *mat;
+    u32 rank = 0;
+    u32 col;
+
+    mat = tbt_fec_alloc((size_t)m * words * sizeof(*mat));
+    if (!mat)
+        return 0;
+    memset(mat, 0, (size_t)m * words * sizeof(*mat));
+    for (col = 0; col < m; col++)
+    {
+        u32 c;
+
+        for (c = 0; c < k; c++)
+            if (tbt_fec_band_has(m, (u16)col, (u16)c, band))
+                mat[(size_t)col * words + (c >> 6)] |= 1ull << (c & 63);
+    }
+    for (col = 0; col < k && rank < m; col++)
+    {
+        u32 word = col >> 6;
+        u64 bit = 1ull << (col & 63);
+        u32 p;
+        u32 r;
+
+        for (p = rank; p < m; p++)
+            if (mat[(size_t)p * words + word] & bit)
+                break;
+        if (p == m)
+            continue;
+        if (p != rank)
+        {
+            u32 w;
+
+            for (w = 0; w < words; w++)
+            {
+                u64 t = mat[(size_t)rank * words + w];
+
+                mat[(size_t)rank * words + w] = mat[(size_t)p * words + w];
+                mat[(size_t)p * words + w] = t;
+            }
+        }
+        for (r = 0; r < m; r++)
+        {
+            u32 w;
+
+            if (r == rank || !(mat[(size_t)r * words + word] & bit))
+                continue;
+            for (w = 0; w < words; w++)
+                mat[(size_t)r * words + w] ^= mat[(size_t)rank * words + w];
+        }
+        rank++;
+    }
+    tbt_fec_free(mat);
+    return rank;
+}
+
+/* Widest band that fits d terms per row and keeps rank min(m, k). b == 1 is
+ * the partition matrix (column c belongs to row c mod m), which always fits:
+ * its row weight is ceil(k/m), at most d in every configured shape. */
+static u16 tbt_fec_band_pick(u16 k, u16 m, u16 d)
+{
+    u32 target = m < k ? m : k;
+    u16 band;
+
+    for (band = (u16)(m > 1 ? m - 1 : 1); band > 1; band--)
+    {
+        u32 r;
+        u32 wmax = 0;
+
+        for (r = 0; r < m; r++)
+        {
+            u32 wt = tbt_fec_band_weight(k, m, (u16)r, band);
+
+            if (wt > wmax)
+                wmax = wt;
+        }
+        if (wmax > d)
+            continue;
+        if (tbt_fec_band_rank(k, m, band) == target)
+            return band;
+    }
+    return 1;
+}
+
 u32 tbt_fec_rlnc_coeffs(const struct tbt_fec_rlnc *ctx, u32 g, u32 r, u32 *idx, u32 max)
 {
-    u64 seed;
-    u32 i;
+    u32 half;
+    u32 c;
+    u32 n = 0;
 
     if (!ctx || !idx || max < ctx->d)
         return 0;
-    seed = ctx->nonce ^ ((u64)((u64)g * ctx->m + r) * 0x9e3779b97f4a7c15ull);
-    for (i = 0; i < ctx->d; i++)
-    {
-        u32 v;
-        u32 j;
-        int again;
-
-        do
-        {
-            v = (u32)(tbt_splitmix64(&seed) % ctx->w);
-            again = 0;
-            for (j = 0; j < i; j++)
-            {
-                if (idx[j] == v)
-                {
-                    again = 1;
-                    break;
-                }
-            }
-        } while (again);
-        idx[i] = v;
-    }
-    return ctx->d;
+    (void)g;
+    half = ctx->w - ctx->k;
+    for (c = 0; c < ctx->k && n < ctx->d; c++)
+        if (tbt_fec_band_has(ctx->m, (u16)r, (u16)c, ctx->band))
+            idx[n++] = half + c;
+    /* Fill the rest of the row with the window's leading positions. The data
+     * plane binds L == k, so those positions fall outside [0, L) and both
+     * sides skip them; keeping them means a row still names d positions and
+     * the wire format is unchanged. */
+    for (c = 0; c < half && n < ctx->d; c++)
+        idx[n++] = c;
+    return n;
 }
 
 struct tbt_fec_rlnc *tbt_fec_rlnc_new(u16 n, u16 m, u16 k, u16 w, size_t s, u16 d,
@@ -635,6 +728,7 @@ struct tbt_fec_rlnc *tbt_fec_rlnc_new(u16 n, u16 m, u16 k, u16 w, size_t s, u16 
     ctx->s = s;
     ctx->d = d;
     ctx->nonce = nonce;
+    ctx->band = tbt_fec_band_pick(k, m, d);
     ctx->idx = tbt_fec_alloc((size_t)w * sizeof(*ctx->idx));
     if (!ctx->idx)
     {
