@@ -15,6 +15,8 @@
 
 **STOP 执行（2026-11-06）**：`.65` `ping` 3/3 丢包、ARP `INCOMPLETE`、ssh `No route to host`；已 kill 所有 `.65` agents（`t52-arm64-2`/`sclc-arm64-2`/`arm64-build-2`/`node65-recon-2`），不再发任何流量。**HND0 256、8 并行、8–16MiB 全禁**；T5.2 HOLD；不合并/push。等用户恢复 `.65`/路由器并确认；之后只 **1 carrier/37B**，再 **8/16/32/64 × 1MiB/5s**。`hnd0-verify` 只读清理 HND0 旧 `cb23c64` tbtun/tbt-echo（若有），**不动 `.65`**。
 
+**HND0 清理状态（2026-11-06）**：t52-arm64 确认 HND0 已清理——tbtun rmmod、9000/5202 关闭、echo 停、无测试进程；`/tmp/tbtun-hnd0.lock` 仍被两个 worker（`deploy b41b259…`、`ladder smoke`）持有，未动；`.65` 不可达，锁在 `.65` 上暂无法清（恢复后清 tbtun/ip rule/sysctl/bbr）。T5.2 HOLD；不合并/push。
+
 | 项 | 冻结值 | 归属 |
 |---|---|---|
 | FEC wire 版本 | `TBT_FEC_CONV = 0x1001`；旧 ARQ 仍是 `TBT_CONV = 0x0005` | B |
