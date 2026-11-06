@@ -196,6 +196,13 @@ sc_pack64(planes, bytes, n_bits)     ←  接收到的 share 字节
 侧，编码器不需要；`payload-only` 写回与 `known` 按需生成同样是解码器
 自己的事。
 
+已做逐 check 的交叉验证：在 `345682d` 与本计划上分别构建
+block 256/L16、seed 7 的码，把每行邻接排序后比较，rate 0.50/0.60/0.70
+的 `dcs`、`cdeg` 和每行变量集合**逐 check 完全相同**（只有 owned 的
+行内位置不同）。rate 0.30 在 `345682d` 里 `fast=0`（payload 度不再是
+5，走 int32 CSR 回退），所以没有可共享的 fast 数组；编码器仍用固定
+stride，节点编号与 check 顺序一致，但合并时那一段只能共用 CSR。
+
 ### 5.2 线上映射（未定义，合并前必须钉死）
 
 app 的一个 8 KiB share（`S = 8192`）在 block 256/L16 下等于 **32 个
@@ -221,7 +228,8 @@ first」的字节，可以按 share 切 8192 B 装进现有 PARITY 记录；但
 单位 MB/s（payload），`--runs 5` 中位数，单线程。逐码字 `sc_encode`
 在同批次上只有 15–23 MB/s；位平面把它放大到 1.9–4.0 GB/s（内核），
 打包后仍有 0.44–0.74 GB/s。2 线程（`taskset -c 0,1 --threads 2`）聚合
-是 7874 / 5508 / 3701 MB/s，为单线程的 1.95–1.98 倍。
+是 7874 / 5508 / 3701 MB/s，为单线程的 1.95–1.98 倍。SSE2 一列是
+128 码字批的 payload 吞吐，和 `enc64` 比每码字要除以 2（约 1.8–1.9×）。
 
 瓶颈（Ryzen 9 7940HS，`perf_event_open`，block 256/L16，单线程、
 taskset 单核、每点约 2 s）：
@@ -253,12 +261,20 @@ L2 延迟与发射，不是共享缓存。
 打包是 e2e 的大头：8×8 转置约 3 条指令/字节，把 4.0 GB/s 的内核压到
 0.74 GB/s。因此 wire 口径必须用 `e2e_mbps`，不能用 `enc64_mbps`。
 
-HND0（QEMU qemu64，2 vCPU，只有 SSE2）：
+HND0（QEMU qemu64，2 vCPU，只有 SSE2，共享宿主）：
 
-编码器交给 sclc-bench 的同批次 A/B harness：同一二进制，`taskset 0`
-（双线程 `0,1`）、`nice -n 10`，`scalar_ref` 与 `enc64`/`e2e` 配对取
-中位。原始行在 `review/sc-ldpc-hnd0-enc64.csv`，结论按三个 rate 的
-整段范围看（HND0 单点可漂 ±40%）。
+- bit-exact：`sc_enc64_test` 在 HND0 上 `RESULT: PASS`，**3840/3840**。
+- 预跑（rate 0.50，1 线程，2 次 × 0.2 s，sclc-bench 同批编译）：
+  `scalar_ref` 9.405、`enc64` 1211.96、`e2e` 182.26、`sse2` 1967.95
+  MB/s。
+- smoke 全 rate：`e2e` **105–217 MB/s**；wire 需求 8.4–14.1 MB/s，
+  余量 7.5–25×。
+- 完整 5 轮 × 1/2 线程矩阵由 sclc-bench 的 A/B harness 补跑，
+  `taskset 0`/`0,1`、`nice -n 10`、逐次记录 load；原始行写进
+  `review/sc-ldpc-hnd0-enc64.csv`。
+
+结论：HND0 上编码不再是瓶颈。同一批 64 码字的 `e2e` 已比逐码字
+`sc_encode` 快一个数量级以上（预跑 182.26 vs 9.405），瓶颈转到解码。
 
 ## 7. 复现
 
