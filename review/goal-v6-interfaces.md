@@ -9,6 +9,8 @@
 
 ## 0. 冻结摘要
 
+**STOP / 冒烟优先（2026-11-06 紧急）**：本地路由器被压测打挂，拔 `.65` 重启；`.65` 当前 `ping` 3/3 丢包、ARP `INCOMPLETE`、ssh `No route to host`。**立即停止 T5.2/direct P8/256 所有压测**；T5.2 HOLD。**禁止 HND0 256、8 并行 baseline、8–16MiB 压测**；先 smoke（小流量、单连接、≤1MiB、限时），经用户批准才加压。任何测试前确认路由器/`.65`/HND0 健康与限速。最终 head **`b41b259`**；arm64 T5.2 两端必须都用 b41b259 重建 ko（旧+新 parity 互不可解，会 `fec super ... stuck`）；n4m4 band=3、single band=31。`t52-arm64`/`sclc-arm64`/`arm64-build`/`wan-deploy` 已 STOP；不合并/push。
+
 | 项 | 冻结值 | 归属 |
 |---|---|---|
 | FEC wire 版本 | `TBT_FEC_CONV = 0x1001`；旧 ARQ 仍是 `TBT_CONV = 0x0005` | B |
