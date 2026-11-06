@@ -19,6 +19,8 @@
 
 **`.65` 恢复（2026-11-06）**：arm64-build 报 18:38 ping 通、18:39 SSH 22 通；t52-arm64 按 STOP 不再主动探测。HND0 已清理；`.65` 的锁/模块/sysctl/ip rule/bbr 清理与 smoke 等用户批准后做（若已重启，内核态残留可能已清）。T5.2 HOLD；不合并/push。
 
+**HND0 清理确认（`hnd0-verify`，2026-11-06）**：10:56:45 UTC 无 tbtun、`/proc/net/tbtun` 不存在、9000/5202 无监听、无 echo/进程、无锁。sysctl 为**生产值**（rmem/wmem 16MiB、tcp 4MiB、fq/bbr），**不改成 64MiB**。10:51:39–10:56:03 窗口 UBSAN/WARN/BUG/OOM=0，未跑数据面；08:53–09:01 两轮 smoke 有 **16 UBSAN + 2 WARN**（`tbt_tx.c:2570`、array/shift OOB），已记录。**`t52-arm64` 在 HOLD 期间仍于 10:44/10:51/10:52 部署/加载/echo，agent kill 后留 PPID 1 残留**（已被并行清理）；需确认 HOLD 生效、不再部署。生产服务 active；不合并/push。
+
 | 项 | 冻结值 | 归属 |
 |---|---|---|
 | FEC wire 版本 | `TBT_FEC_CONV = 0x1001`；旧 ARQ 仍是 `TBT_CONV = 0x0005` | B |
