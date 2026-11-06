@@ -89,6 +89,18 @@ and moves independently of the module version.
   with connections that never send HELLO while taking carrier slots down in
   waves: the provisional peak stays at the cap, the list drains, userspace keeps
   running, and a legitimate replacement still joins.
+- A carrier that never completed its first connect was retried every 200 ms
+  per slot, outside the replacement pacing (up to 1280 attempts/s at 256
+  carriers). The retry now spends a token from the same `max(8, n/4)`-per-
+  second dial bucket; the first wave in `tbt_carriers_start()` is still
+  unpaced. Join-replaced carrier objects are now a bounded reuse pool: an
+  object is reused, buffers included, only after `tbt_carrier_release()` has
+  run, the 50 ms poll holds no reference (`pollers`), and `w_connect`/`w_rx`/
+  `w_tx`/`w_pump` are idle. `dead` is capped at `2 * n_car`; a join that would
+  exceed it is refused with `-ENOSPC` until a new carrier reuses an entry. The
+  poll takes its reference under `sess->lock`, the same lock the reuse path
+  takes, and the deferred-release drain cancels `w_tx`/`w_pump` first.
+  `dead_now`/`dead_peak` are in the c3 line, and probe Q asserts both caps.
 - A `fec=off` session warned `!work->func` on teardown: `w_fec_tx` is
   initialised only by `tbt_fec_data_init()`, and the unconditional
   `cancel_delayed_work_sync()` ran on a zeroed work. The cancel now follows

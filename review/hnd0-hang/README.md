@@ -55,18 +55,21 @@ tests/qemu/run.sh --ko "$PWD/tbtun.ko" --probes A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P 
 | --- | --- | --- | --- |
 | probe N, 256 legitimate carriers | `7de0efe` | PASS | `console-N-baseline.log` |
 | probe Q | `7de0efe` | OOM at 15.9 s, `slab_unreclaimable=101287` pages, no `TBT_PROBE_RESULT` | `console-Q-baseline.log` |
-| probe Q | fix | PASS: `prov_now=0 peak=320 reject=8780`, 200/200 heartbeats, near recovers 255/256 | `console-Q-fix.log` |
-| probes A-P | fix | 16 PASS / 0 FAIL / 0 SKIP, 280 s | `console-A-P-fix.log` |
+| probe Q | fix | PASS: `prov_now=0 peak=320 reject=8488`, `dead now=8 peak=8`, 200/200 heartbeats, near recovers 256/256 | `console-Q-fix.log` |
+| probes A-P | fix | 16 PASS / 0 FAIL / 0 SKIP, 268 s; one pre-existing announce `WARN_ON_ONCE` in probe N | `console-A-P-fix.log` |
 
 The baseline Q log is 1.3 MiB of console output in 19 s; the fixed log is 73 KiB
 for the whole 25 s probe.
 
 The A-P log contains one `!tbt_stream_announced(fr->st, c)` `WARN_ON_ONCE`
 during probe N. The same warning is in `console-N-baseline.log`, which was
-captured from the unmodified `7de0efe` module, so it is a pre-existing
-announce-bookkeeping race and not a result of this change. The `fec=off`
-`!work->func` teardown warning that the first A-P run showed 52 times is fixed
-by cancelling `w_fec_tx` only for a `fec=on` session.
+captured from the unmodified `7de0efe` module. The cause is the 16-entry
+announce table (`announced_mask` u16 + `announced_gen[16]`) used with carrier
+indices up to 255: the OPEN write goes out of bounds and the mask bit is
+truncated. That bug is owned by `t52-debug` and is not touched on this branch;
+the integrator must combine the two fixes. The `fec=off` `!work->func` teardown
+warning that the first A-P run showed 52 times is fixed by cancelling
+`w_fec_tx` only for a `fec=on` session.
 
 ## Fix
 
@@ -92,17 +95,47 @@ by cancelling `w_fec_tx` only for a `fec=on` session.
   the HTTP/raw hex dumps need `debug >= 3`.
 - `prov_now`, `prov_peak` and `prov_reject` are in the `c3` stats line.
 
+### Follow-up on the first fix
+
+- The poll's retry for a carrier that never completed its first connect now
+  spends a token from the same `max(8, n_car/4)`-per-second dial bucket. The
+  first wave in `tbt_carriers_start()` is still unpaced. Before this, 256
+  never-connected slots retried at 200 ms each (1280 attempts/s).
+- Retired carrier objects are a bounded reuse pool. An object is reused,
+  buffers included, only after `tbt_carrier_release()` has run, the 50 ms poll
+  holds no reference (`pollers`), and `w_connect`/`w_rx`/`w_tx`/`w_pump` are
+  idle. The poll takes its reference under `sess->lock`, the same lock the
+  reuse path takes; the deferred-release drain cancels `w_tx`/`w_pump` first.
+  `dead` is capped at `2 * n_car`; a join that would exceed it is refused with
+  `-ENOSPC` until a new carrier reuses an entry. `dead_now`/`dead_peak` are in
+  the `c3` line and probe Q asserts the cap.
+
 ## Remaining risk
 
-- The near side's retry for a carrier that never connected is still unpaced
-  (200 ms per slot, up to 1280 attempts/s at 256 carriers when the far is
-  unreachable). It did not hang the near side in this incident.
-- Join-replaced carriers are still retained on `dead` until session teardown
-  (~37 KiB each). The replacement pacing bounds the rate, not the lifetime; a
-  very long flapping run can still grow memory, far slower than the flood.
+- The retired-object pool keeps its objects and buffers alive (bounded by
+  `2 * n_car`, about 20 MiB at 256 carriers) rather than returning them to the
+  allocator. That is deliberate: a poll or a late work item may still hold the
+  pointer, and freeing it would be a use-after-free.
 - The cap is a hard admission limit. Under a sustained flood a legitimate new
   carrier is refused while the cap is full; recovery is bounded by the 5 s join
-  deadline (Q recovered 255/256).
+  deadline (Q recovered 256/256).
+- The A-P reconcile check reads the stats and peers files at two instants and
+  requires `live_bytes == peers_tx_bytes`; a carrier that sends a few bytes
+  between the two reads can fail it by a small delta. The harness now
+  re-samples (up to 10 times, 200 ms apart) until that cross-file term
+  settles; the exact equality is still required in the settled sample, and a
+  real mismatch does not settle. Probe C passed 3/3 in isolation before this
+  change, and A-P passed 16/16 after it.
 - The QEMU kernel cannot print the HND0 workqueue-hog line, so the local
   evidence is the pre-fix OOM/no-verdict and the post-fix counters, heartbeat
   count and probe verdict.
+
+## Combined-tree validation (e7d1c83 + this branch)
+
+`w-hnd0-hang-merge` at `cfe51ee` is `e7d1c83` (the 256-wide announce
+bookkeeping `dc4532a` and the FEC credit fix) plus the two commits above. It
+builds clean, probe Q passes (`prov_now=0 peak=320 reject=8652`, `dead now=8
+peak=8`, near recovers 256/256), and probes A-P pass 16/16 in 262 s with **no
+kernel warning**: `dc4532a` removes the probe N `!tbt_stream_announced` WARN.
+The merge keeps `dc4532a`'s `tbt_tx.c` untouched and only adds the session and
+carrier fields to `tbtun.h`.
