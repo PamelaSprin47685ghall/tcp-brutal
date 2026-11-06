@@ -37,6 +37,15 @@
 #      completes HELLO, with replacement waves. The far's provisional list must
 #      stay bounded and drain, userspace must keep running, and a legitimate
 #      replacement must still join after the flood.
+#   R. link-flap-then-replace: eth0 is taken down and back up mid-transfer,
+#      the .65 WAN shape. Every carrier TCP (near->far dials and the far's
+#      accepted sockets) stalls in both directions; both sides declare the
+#      carriers lost and the near redials a newer generation whose HELLO
+#      supersedes the far's slot. The burst must come back byte-exact: DATA
+#      the far wrote on the replaced carrier generation is re-sent on the
+#      new one, not dropped (the carrier_lost path never ran for a carrier
+#      removed by RETIRE/join-supersede, so its retain path bits stayed set
+#      and the retransmit was queued but never picked).
 # J and K are byte-exactness probes under carrier-TCP loss; they need no
 # placeholder frame, because the sender repairs holes from the replay ring.
 #
@@ -124,7 +133,7 @@ K_PORTS="41016-41023"
 
 # Parsed after /proc is mounted (below); the default selects every probe.
 CMDLINE=
-PROBES=A,B,C,D,E,I,J,K
+PROBES=A,B,C,D,E,I,J,K,R
 echo_pid=
 echo2_pid=
 echo3_pid=
@@ -1864,6 +1873,219 @@ probe_p_churn() {
     echo "   churn: passed"
 }
 
+# --- probe R: link flap, then a newer generation replaces the carrier -------
+# The WAN smoke's carrier-replacement race (30930fc + 42c1522): the near
+# abandons a carrier as soon as its own bytes stop being acknowledged, which
+# can be before the far has noticed anything wrong with that socket. Probe C
+# cannot show it -- `carrier down` runs tbt_carrier_lost() on both ends and the
+# near's RETIRE frame frees the far's slot before the replacement's HELLO
+# arrives, so join_dup never moves. Here the flap is real carrier-TCP loss in
+# one direction only:
+#
+#   every carrier's near->far egress is blackholed (netem loss 100% on each
+#   carrier's source port). The near's carrier poll sees TCP snd_una frozen
+#   with data in flight for carrier_stall_ms and declares the carriers lost.
+#   The far is given carrier_stall_ms=60000, the WAN asymmetry: at that moment
+#   it has noticed nothing and its accepted sockets are still live slots.
+#
+#   Both classes go dark because RETIRE travels near->far over a live carrier
+#   (tbt_carrier_lost picks the first one that is up). A RETIRE that lands
+#   first marks the far's slot stopping, and the replacement's HELLO then
+#   takes the dead-slot path -- that is what an earlier one-class version of
+#   this probe did, and it never touched the supersede branch. Dropping RETIRE
+#   is what leaves the far's slot alive. The replacement dials a fresh source
+#   port, whose class is still clean, so its HELLO arrives while the far's old
+#   socket is ESTABLISHED and must supersede the slot instead of being refused
+#   as a duplicate join.
+#
+# Assertions:
+#   - carrier_lost and carrier_replaced both move on the near side;
+#   - the far's carrier_replaced moves while its own carrier_lost stays 0, so
+#     the slot it replaced was live: only the supersede branch does that;
+#   - the far side's join_dup stays 0 (no duplicate join, no storm);
+#   - the burst comes back byte-exact, so DATA pinned to the replaced carrier
+#     generation was re-queued, not dropped (42c1522).
+R_PORTS="41024-41047"
+# /proc/net/tcp state 01 is TCP_ESTABLISHED. Columns are little-endian hex:
+# local_address is field 2, rem_address field 3, state field 4. The far-side
+# accepted carrier has local port CAR_PORT; slirp rewrites the near side's
+# source port, so the remote end cannot be matched to a carrier index -- only
+# the count of ESTABLISHED sockets on the listen port is meaningful.
+r_far_established() {
+    _lp=$(printf '%04X' "$CAR_PORT")
+    awk -v lp="$_lp" '
+        $4 == "01" {
+            split($2, la, ":")
+            if (la[2] == lp) n++
+        }
+        END { print n + 0 }' /proc/net/tcp
+}
+
+probe_r() {
+    echo "== probe R: link-flap-then-replace"
+    if ! net_ready; then
+        skip R "no eth0 with $GUEST_IP or no /bin/tc in the guest"
+        return 0
+    fi
+    raise_socket_buffers
+    echo "ports $R_PORTS" > "$PORTS" || fail "probe R: ports directive rejected"
+    PORTBLOCK_LO=41024
+    PORTBLOCK_PORTS=24
+    # The echo target must exist before the far's config names it: the far
+    # connects to $TARGET_PORT2, and restart_echo moves that port.
+    restart_echo
+    # One 0%-loss netem child per port: the flap is applied by `tc qdisc
+    # change` on the classes of the two carriers' current source ports. The
+    # replacement carriers dial ports whose classes stay clean.
+    tc_setup loss 0% || fail "probe R: tc setup failed"
+    # The far's stall timer is deliberately long: the race only exists while
+    # the far still believes the old carrier is fine.
+    echo "tunnel 1 role=far profile=raw listen=$GUEST_IP:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=2 m=0 carriers=2 carrier_stall_ms=60000" \
+        > "$CFG" || fail "probe R: far tunnel rejected"
+    echo "tunnel 2 role=near profile=raw listen=$GUEST_IP:$PUB_PORT peer=$GATEWAY:$HOSTFWD_PORT n=2 m=0 carriers=2 carrier_stall_ms=1000" \
+        > "$CFG" || fail "probe R: near tunnel rejected"
+    sleep 1
+
+    # Each carrier's real source port decides its class; the mapping from
+    # carrier index to portblock entry is the module's business.
+    sport0=$(peer_field 2 0 3); sport0=${sport0##*:}
+    sport1=$(peer_field 2 1 3); sport1=${sport1##*:}
+    cls0=$(tc_class_of_port "$sport0")
+    cls1=$(tc_class_of_port "$sport1")
+    [ -n "$cls0" ] || fail "probe R: carrier 0 sport '$sport0' is outside the portblock"
+    [ -n "$cls1" ] || fail "probe R: carrier 1 sport '$sport1' is outside the portblock"
+    # The flap only exercises the supersede path while the far's old socket is
+    # alive; prove both carrier sockets are ESTABLISHED before the burst.
+    _est=$(r_far_established)
+    echo "   carriers are sports $sport0/$sport1 (classes 1:$cls0/1:$cls1); far-side ESTABLISHED carriers: $_est"
+    [ "$_est" -ge 2 ] ||
+        fail "probe R: only $_est far-side carrier sockets ESTABLISHED, expected 2"
+    _fr0=$(tunnel_stat 1 replaced)
+    _fl0=$(tunnel_stat 1 lost)
+    echo "   far-side tcp rows:"; awk -v lp="$(printf '%04X' "$CAR_PORT")" \
+        '$4 == "01" { split($2, la, ":"); if (la[2] == lp) print "   ", $0 }' /proc/net/tcp
+
+    /bin/tbt_burst "$GUEST_IP" "$PUB_PORT" "$C_MIB" "${TBT_ENDPOINT_TIMEOUT:-120}" &
+    burst_pid=$!
+    i=0
+    while [ $i -lt 6000 ]; do
+        sent=$(tunnel_stat 2 submit_bytes)
+        [ "${sent:-0}" -ge 65536 ] && break
+        kill -0 "$burst_pid" 2> /dev/null || break
+        i=$((i + 1))
+    done
+    kill -0 "$burst_pid" 2> /dev/null ||
+        fail "probe R: transfer finished before carrier 0 could be flapped (sent=${sent:-0})"
+    # Both carriers' near->far egress goes dark. Carrier 1 must go too: the
+    # near sends RETIRE over a live carrier as soon as it declares one lost,
+    # and a RETIRE that lands first frees the far's slot, which turns the join
+    # into a dead-slot install. Dropping it is what leaves the far's slot
+    # alive for the newer HELLO.
+    echo "   blackholing carriers 0 and 1 near->far after ${sent:-0} captured bytes"
+    /bin/tc qdisc change dev eth0 parent "1:$cls0" handle "$((100 + cls0 - 10)):" \
+        netem loss 100% || fail "probe R: could not set 100% loss on class 1:$cls0"
+    /bin/tc qdisc change dev eth0 parent "1:$cls1" handle "$((100 + cls1 - 10)):" \
+        netem loss 100% || fail "probe R: could not set 100% loss on class 1:$cls1"
+
+    # The near must notice the dead path (carrier_stall_ms) and replace the
+    # carrier while the flap is still up; only then does the supersede race
+    # exist. Wait for carrier_lost and carrier_replaced on the near side.
+    _w=0
+    while [ "$_w" -lt 600 ]; do
+        lost=$(tunnel_stat 2 lost)
+        rep=$(tunnel_stat 2 replaced)
+        [ "${lost:-0}" -ge 1 ] && [ "${rep:-0}" -ge 1 ] && break
+        kill -0 "$burst_pid" 2> /dev/null || break
+        sleep 0.1
+        _w=$((_w + 1))
+    done
+    echo "   after ${_w}0 ms of flap: near carrier_lost(lost)=${lost:-0} carrier_replaced(replaced)=${rep:-0}"
+    [ "${lost:-0}" -ge 1 ] ||
+        fail "probe R: carrier_lost stayed ${lost:-0}; the flap did not reach the carrier poll"
+    [ "${rep:-0}" -ge 1 ] ||
+        fail "probe R: carrier_replaced stayed ${rep:-0}; no replacement was dialled during the flap"
+
+    # The far's carrier_replaced moves only when a HELLO installs a carrier
+    # over a slot that already names one. Its own carrier_lost must stay 0:
+    # no RETIRE landed (blackholed) and the far declared nothing lost, so the
+    # slot was live and not stopping when the newer HELLO arrived. That is the
+    # supersede branch; a dead-slot join would need the far to have marked the
+    # carrier lost itself.
+    _sup=0
+    _w=0
+    _n=0
+    _fr=${_fr0:-0}
+    _fl=${_fl0:-0}
+    while [ "$_w" -lt 100 ]; do
+        _fr=$(tunnel_stat 1 replaced)
+        _fl=$(tunnel_stat 1 lost)
+        _n=$(r_far_established)
+        [ "${_fr:-0}" -gt "${_fr0:-0}" ] && { _sup=1; break; }
+        kill -0 "$burst_pid" 2> /dev/null || break
+        sleep 0.1
+        _w=$((_w + 1))
+    done
+    _fd=$(tunnel_stat 1 join_dup)
+    echo "   supersede: far carrier_replaced=${_fr:-0} lost=${_fl:-0} join_dup=${_fd:-0}; far ESTABLISHED carriers now=${_n:-0}"
+    [ "$_sup" -eq 1 ] ||
+        fail "probe R: the replacement's HELLO never installed on the far side (carrier_replaced=${_fr:-0}, was ${_fr0:-0})"
+    [ "${_fl:-0}" -eq "${_fl0:-0}" ] ||
+        fail "probe R: far lost moved ${_fl0:-0} -> ${_fl:-0}; the far marked the slot lost itself, so the join says nothing about supersede"
+    [ "${_fd:-0}" -eq 0 ] ||
+        fail "probe R: far join_dup=${_fd:-0}; the newer generation was refused instead of superseding the slot"
+    sleep 1
+    /bin/tc qdisc change dev eth0 parent "1:$cls0" handle "$((100 + cls0 - 10)):" \
+        netem loss 0% || fail "probe R: could not restore class 1:$cls0"
+    /bin/tc qdisc change dev eth0 parent "1:$cls1" handle "$((100 + cls1 - 10)):" \
+        netem loss 0% || fail "probe R: could not restore class 1:$cls1"
+
+    _waited=0
+    while kill -0 "$burst_pid" 2> /dev/null && [ "$_waited" -lt 90 ]; do
+        sleep 1
+        _waited=$((_waited + 1))
+    done
+    if kill -0 "$burst_pid" 2> /dev/null; then
+        echo "   burst still running after ${_waited}s"
+        echo "   streams:"; cat /proc/net/tbtun/streams 2> /dev/null
+        echo "   peers:"; cat "$PEERS"
+        echo "   stats: $(cat /proc/net/tbtun/stats)"
+        kill "$burst_pid" 2> /dev/null
+        fail "probe R: the transfer stalled after the link flap"
+    fi
+    wait $burst_pid
+    rc=$?
+    case $rc in
+    0) ;;
+    2) fail "probe R: tunnel accepted but carried no data (rc=2)" ;;
+    3) fail "probe R: bytes came back wrong or short (rc=3)" ;;
+    *) fail "probe R: tbt_burst exited $rc" ;;
+    esac
+
+    lost=$(stat_sum lost)
+    replaced=$(stat_sum replaced)
+    dup=$(tunnel_stat 1 join_dup)
+    rxdel=$(tunnel_stat 1 rx_delivered)
+    rxread=$(tunnel_stat 2 rx_read)
+    echo "   far: lost=$lost replaced=$replaced join_dup=${dup:-0}"
+    echo "   near rx_read=$rxread far rx_delivered=${rxdel:-0}"
+    [ "${lost:-0}" -ge 1 ] || fail "probe R: carrier_lost is ${lost:-0}, expected >= 1"
+    [ "${replaced:-0}" -ge 1 ] || fail "probe R: carrier_replaced is ${replaced:-0}, expected >= 1"
+    # The WAN storm refused every newer-generation HELLO as a duplicate. A
+    # supersede is not a duplicate: join_dup must stay 0.
+    [ "${dup:-0}" -eq 0 ] ||
+        fail "probe R: far join_dup is ${dup:-0}; the newer generation was refused instead of superseding the slot"
+    # rx_read (bytes the near read off its carriers) must have caught up with
+    # what the far delivered: a stale-generation DATA copy dropped on the
+    # floor shows up here as rx_delivered < rx_read.
+    [ "${rxdel:-0}" -ge "${rxread:-0}" ] ||
+        fail "probe R: far rx_delivered=${rxdel:-0} < near rx_read=${rxread:-0}; a re-queued DATA copy never arrived"
+
+    echo "   dmesg carrier lines:"
+    dmesg 2> /dev/null | grep -E 'carrier (stall|ACCEPTED)|join' | tail -n 20 | sed 's/^/   /'
+    tc_clear
+    echo "== probe R: pass"
+}
+
 probe_p() {
     echo "== probe P: small message round trip, socket left open"
     _bad=0
@@ -1912,6 +2134,7 @@ want N && run_probe N
 want O && run_probe O
 want P && run_probe P
 want Q && run_probe Q
+want R && run_probe R
 
 echo 'flush' > "$CFG" 2> /dev/null || true
 for _p in "$echo_pid" "${echo2_pid:-}" "${echo3_pid:-}"; do
