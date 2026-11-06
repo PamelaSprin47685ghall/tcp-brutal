@@ -740,6 +740,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **T5.2 smoke phase crypto=off 失败（2026-11-06）**：integration `9f66fba`（含 `7b7965f`）；`n=1/m=1/carriers=2/http-kal/crypto=off`：carrier `up=2 lost=0 connect_fail=0`、`connect_retry=1`；c9 全 0；c8 near `http_req=2/http_resp=0`、far `http_req=0/http_resp=2`；far `rx_delivered=37`、`streams_active=0`；app 只传 37B，iperf3 180s timeout，far server `unable to receive cookie: Bad file descriptor`、无 Accepted。carrier HELLO/CRC 正常；问题在 **http-kal app 流/target 连接路径**，与 crypto 无关。E hold；`t52-debug` 继续诊断。证据 `review/wan-experiment/t5.2-256-http-kal/smoke-O-crypto-off-*`。
 
+**T5.2 blocked：8KiB 块等满（2026-11-06）**：smoke crypto=off 中 carrier `up=2`、c9=0，但 app 37B 未发出（near `submit=37`、far `rx_delivered=0`），far target 未 accept；疑似 FEC TX 等 8KiB packet 填满才发，小消息（iperf3 cookie/control）死锁；QEMU 1MiB 大消息掩盖。`t52-debug` 加 **short-block/partial flush + 小消息回归**；E hold，256 不跑。
+
 ### G3 — T3 ChaCha8（C）
 
 | 项 | 内容 |
