@@ -760,6 +760,9 @@ struct tbt_session
      * block window, or a DATA/PARITY share that arrived before the session key
      * was installed. Both leave the block to its parity, and a recovered share
      * has no payload_len. */
+    /* A public connection refused because the FEC data plane already carries
+     * a live stream: one stream per session is all the FEC record can name. */
+    atomic64_t fec_stream_refused;
     atomic64_t fec_drop_window;
     atomic64_t fec_drop_crypto;
     atomic64_t http_parse_err;   /* container framing/header protocol error */
@@ -1081,6 +1084,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open);
 void tbt_stream_put(struct tbt_stream *st);
 void tbt_stream_detach_from_session(struct tbt_stream *st);
 void tbt_stream_maybe_detach(struct tbt_stream *st);
+bool tbt_session_fec_stream_live(const struct tbt_session *sess);
 void tbt_stream_kill(struct tbt_stream *st, u8 reason);
 void tbt_stream_kill_by_sid(struct tbt_session *sess, u64 sid, u8 reason);
 void tbt_session_destroy(struct tbt_tunnel *t);

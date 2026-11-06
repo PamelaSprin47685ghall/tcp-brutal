@@ -307,6 +307,18 @@ frame. It rides the same carriers and the same HTTP container:
   HELLO conv one). A block that needs recovery, holds a short share and states
   no length -- a peer from before that field -- is refused
   (`fec_short_unknown`), and the sender's stall timer is the bound.
+- **One live stream per session.** A FEC record carries no stream id, and the
+  plane names its stream with `far_sid`, so a second live stream would have its
+  bytes delivered to whichever stream is current. A two-connection protocol --
+  iperf3 opens a control connection and a data connection, and keeps both open
+  for the whole test -- therefore cannot run over `fec=on`: the near's
+  `tbt_stream_start_now()` refuses the second connection (`-EOPNOTSUPP`,
+  `fec_stream_refused`), the public socket is reset, and the first connection
+  keeps its bytes. Measured on the WAN smoke: the control connection sent 167
+  bytes, the far acknowledged 37, iperf3's server failed its own cookie read,
+  and the client reported an idle timeout after 114 s. A load tool with one
+  connection per test (`tbt_ping`/`tbt_burst`) is unaffected; a multi-stream
+  FEC plane needs a stream tag in the record, which T0 does not have.
 - The FEC plane carries the session's packet sequence, not a stream's: a DATA
   record has no sid. The receiver therefore measures the delivery offset from
   the byte at which the current stream began (`stream_base`), so the next

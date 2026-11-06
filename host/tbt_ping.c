@@ -1,6 +1,6 @@
 /* tbt_ping.c - one small message through a tbtun public port, and back.
  *
- * Usage: tbt_ping HOST PORT [BYTES] [SECONDS]
+ * Usage: tbt_ping HOST PORT [BYTES] [SECONDS] [HOLD_MS]
  *
  * Connects, sends BYTES (default 37) in ONE write, then waits for exactly
  * BYTES back on the same connection. The socket stays open for the whole
@@ -17,6 +17,11 @@
  *
  * Exit codes:
  *   0  BYTES crossed in both directions, byte for byte
+ *
+ * HOLD_MS keeps the connection open after the reply, so a second connection can
+ * run while this one is live. That is the shape iperf3 has (a control
+ * connection that stays open while the data connection runs), and it is the one
+ * a single-stream data plane cannot carry.
  *   1  connect failed, or the reply did not arrive inside the timeout
  *   3  the reply was short or differed
  *   4  bad usage or allocation failure
@@ -55,16 +60,17 @@ int main(int argc, char **argv)
     uint8_t out[MAX_MSG], in[MAX_MSG];
     long deadline;
     size_t want, sent = 0, got = 0;
-    int fd, seconds, i;
+    int fd, seconds, hold_ms = 0, i;
 
-    if (argc < 3 || argc > 5)
+    if (argc < 3 || argc > 6)
     {
-        fprintf(stderr, "usage: tbt_ping HOST PORT [BYTES] [SECONDS]\n");
+        fprintf(stderr, "usage: tbt_ping HOST PORT [BYTES] [SECONDS] [HOLD_MS]\n");
         return 4;
     }
     want = argc > 3 ? (size_t)strtoul(argv[3], NULL, 10) : 37;
     seconds = argc > 4 ? atoi(argv[4]) : 5;
-    if (!want || want > MAX_MSG || seconds <= 0)
+    hold_ms = argc > 5 ? atoi(argv[5]) : 0;
+    if (!want || want > MAX_MSG || seconds <= 0 || hold_ms < 0)
     {
         fprintf(stderr, "tbt_ping: bytes must be 1..%d and seconds > 0\n", MAX_MSG);
         return 4;
@@ -135,6 +141,8 @@ int main(int argc, char **argv)
             break;
         got += (size_t)n;
     }
+    if (hold_ms)
+        usleep((useconds_t)hold_ms * 1000);
     close(fd);
 
     if (got != want)
