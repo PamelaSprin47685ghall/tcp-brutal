@@ -655,6 +655,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **5x sendclose PASS（`hnd0-n1b 1d35fb5`）**：源码 4c58b0e，srcversion `10C45DCB`；near ko `c14bafee…`、far ko `0da13480…`。同一 tunnel 连续 5 轮 `sendclose`（写满后 `close()`，sink 每轮重启）：每轮 sink `bytes=16777216 eof=1`、far `rx_delivered` 每轮 +16,777,216、near `fin_seq=16777216 fin_w=1`、far `fin_w=1 rxf=1/1`、`rst_w=0`、`deliver/close timeouts=0`、`close_detaches=0`、near/far live `txq=0`、holes/lost/carrier_lost=0、far `up=1 lost=0 join_bad=0`、无 `TXSTALLKILL`；CPU near 8.9–10.1%、far 30.3–33.2%。证据 `review/wan-experiment/t1-n1-auto-close-5x/close/`。**shutdown-WR 变体仍由 `hnd0-5x` 独立跑**（`.../shutdown-wr/`）；若 5x 门禁要求 shutdown-WR，等其结果再判。
 
+**5x shutdown-WR PASS（`hnd0-5x 08ed3b9`）**：源码 4c58b0e，srcversion `10C45DCB`；near ko `b82999b6…`、far ko `0da13480…`。模块一次加载，5 轮 sink 重启：每轮 sink 16,777,216 + EOF、sender 16MiB + `shutdown(SHUT_WR)` + EOF、far `rx_delivered` 每轮 +16,777,216、near `fin_seq=16777216 fin_w=1 rst_w=0`、far `fin_w=1 rxf=1/1`、live `txq=0`、lost/carrier_lost=0、holes=0、timeouts=0、close_detaches=0、无 `TXSTALLKILL`；CPU near 8.85–8.99%、far 27.08–31.75%。证据 `review/wan-experiment/t1-n1-auto-close-5x/shutdown-wr/`。**残余（非门禁）**：每轮重载模块变体 attempt-1 3/5、attempt-2 1/5，失败为 far `lost=1` + klog `carrier ACCEPTED ... rport=30000`（near HELLO 超时重拨）；主 spec 不重建 carrier，故 5/5 成立；该 carrier 重建窗口需另开 ticket（§8 R11）。
+
 **sink 测试就绪（`hnd0-n1b`）**：`sink.py`（accept 一次、读到 EOF、记录 bytes/expected/ok/secs）与 `send16m.py`（写满 16MiB、`shutdown(SHUT_WR)`、等 EOF）本地 loopback 验证 `16,777,216 B ok=1`；HND0 `/tmp/tbtun-sink/sink.py` `py_compile` 通过。下一轮证据目录 `review/wan-experiment/t1-n1-auto-rx1m-sink/`，保留 `a2a37ed` 的 iperf3 失败证据；等 `window-close`/A3 新 head。
 
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
@@ -768,6 +770,7 @@ trap 'flock -u 9' EXIT
 | R8 | **p>20% 的 single sparse RLNC 不可行** | p=30–50% 的 XOR 32–39 GB/s，超 HND0 7.8–9.1 GB/s | 中间码用 grouped；最终必须 SC-LDPC；不把 single 写成高 p 生产 |
 | R9 | **key 明文/无认证** | HELLO 明文下发 key；CRC 不是 MAC | 文档写明只混淆；需要安全用 WireGuard；不做强安全承诺 |
 | R10 | **多流** | v6 一隧道一 stream；第二 stream 无 FEC 状态 | 第二 stream RST/拒绝并计数；多流留 v7；不静默塞 `block_id` |
+| R11 | **carrier 重建/HELLO 重拨窗口** | 每轮重载模块变体 attempt-1 3/5、attempt-2 1/5；失败 far `lost=1` + klog `carrier ACCEPTED ... rport=30000`（near HELLO 超时重拨）；数据仍 16MiB/EOF | 主 5x spec 不重建 carrier，故 5/5 成立；单独 ticket 跟踪，不纳入 T1 门禁 |
 
 ---
 
