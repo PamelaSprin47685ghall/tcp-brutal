@@ -560,6 +560,11 @@ struct tbt_session
      * crypto_key= is configured on both ends. tx/rx contexts never mix. */
     bool crypto;
     bool crypto_have_key; /* crypto_key[] is valid */
+    /* crypto_key[] came from the peer's HELLO, not from this side. The peer
+     * therefore keeps announcing it with key_id=HELLO on every carrier, and
+     * every later HELLO must repeat the same key (T0 §2.3). A key this side
+     * generated or configured is the opposite: the peer must use key_id 0. */
+    bool crypto_key_peer;
     u8 crypto_key_id;     /* TBT_CRYPTO_KEY_ID_NONE or _HELLO in our HELLO */
     u8 crypto_key[TBT_CRYPTO_KEY_LEN];
     u8 crypto_tx_nonce[TBT_CRYPTO_NONCE_LEN];
@@ -696,9 +701,25 @@ struct tbt_session
     u64 recv_partial_discard;            /* carrier release, serialised */
     /* C3 counters (DESIGN.md §8.7). */
     atomic64_t carrier_lost, carrier_replaced, carrier_alloc_fail, connect_fail;
+    /* A dial that outlived one TBT_CONNECT_TIMEOUT_MS wait. Non-zero means the
+     * path's SYN round trip (or a SYN retransmission) is longer than one
+     * window; it is the difference between "the peer is down" and "the dial
+     * needed a second wait", and it is what a -EINPROGRESS return used to hide
+     * behind connect_fail. */
+    atomic64_t connect_retry;
     atomic64_t port_exhaust, port_alloc_fail; /* tbt_port_alloc() reasons */
     u64 spare_activated; /* idle spares promoted to DATA; w_replace only */
     atomic64_t profile_mismatch; /* HELLO carried a different profile */
+    /* FEC v6 receive failures (T0 §1.3): a share the receiver could not trust.
+     * The three are distinct on purpose. A proto/header-CRC failure means the
+     * framing itself is untrustworthy, so the carrier closes; a payload CRC
+     * failure means the framing is sound and only the body is damaged, so the
+     * share is dropped and the carrier stays. With crypto=on a wrong key looks
+     * exactly like a damaged body, and this counter is the only thing that
+     * separates "the key is wrong" from "the peer is silent". */
+    atomic64_t fec_proto_fail;      /* header unpack/field check failed */
+    atomic64_t fec_hdr_crc_fail;    /* 40-byte header CRC mismatch */
+    atomic64_t fec_payload_crc_fail; /* body CRC mismatch: share dropped */
     atomic64_t http_parse_err;   /* container framing/header protocol error */
     atomic64_t http_status_err;  /* non-200 or non-chunked/non-keepalive */
     u64 http_req, http_resp; /* header blocks emitted; pump only */

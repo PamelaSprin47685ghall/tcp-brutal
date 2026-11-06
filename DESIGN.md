@@ -1929,11 +1929,12 @@ cannot silently lose its atomicity again.
 | live | `live rxq rxp txq txp pub_state pub_wmem pub_una pub_nxt car_wmem car_nxt car_copied car_rcvbuf car_sndbuf car_state car_stop car_ud car_ready car_ws txw_pend txw_busy` |
 | tx wake | `txwake txwake_busy txwork` |
 | write space | `ws_calls` |
-| c3 | `c3 n up lost replaced spare_activated alloc_fail port_exhaust port_alloc_fail connect_fail join_dup join_bad join_nonce_reject join_src_reject fbk_tx fbk_rx retx_frames retx_bytes retain_drop retx_hole retx_slow retx_pathloss retx_other data_tx retx_data_ppm dup_bytes_ppm reorder_overflow reorder_max_depth ooo_bytes ooo_frames retain_bytes tx_ack rx_ack peer_paused fb_delay_us rto_us una_stall_us stall_paused_skips stall_idle_skips stall_declared tx_window rtt_mean_us rttvar_us rtt_max_us txq_max win_block win_resume pump_hw_armed pump_hw_fired` |
+| c3 | `c3 n up lost replaced spare_activated alloc_fail port_exhaust port_alloc_fail connect_fail connect_retry join_dup join_bad join_nonce_reject join_src_reject fbk_tx fbk_rx retx_frames retx_bytes retain_drop retx_hole retx_slow retx_pathloss retx_other data_tx retx_data_ppm dup_bytes_ppm reorder_overflow reorder_max_depth ooo_bytes ooo_frames retain_bytes tx_ack rx_ack peer_paused fb_delay_us rto_us una_stall_us stall_paused_skips stall_idle_skips stall_declared tx_window rtt_mean_us rttvar_us rtt_max_us txq_max win_block win_resume pump_hw_armed pump_hw_fired` |
 | ctl | `ctl ctl_lost ctl_retry ctl_requeue ctl_obsolete ctl_queued` |
 | streams | `streams streams_active n_streams n_pending` |
 | c6 | `c6 holes_declared holes_repaired holes_unrecoverable rx_max_stall_us hole_checks gate_fail depth_fail time_fail` |
 | c8 | `c8 profile_mismatch http_parse_err http_status_err http_req http_resp pad_tx drip_tx` |
+| c9 | `c9 fec_proto_fail fec_hdr_crc_fail fec_payload_crc_fail` |
 | c5 | `c5 dup_tx dup_used dup_suppressed dup_same_path inflate_ppm dup_bytes` |
 | reconcile | `reconcile live_bytes live_data live_retx retired_bytes retired_data retired_retx` |
 
@@ -2012,7 +2013,12 @@ and a frame already written on two paths is a copy hole (§4.3). `dropped` count
 `drop_ppm` injector; control records (HELLO, OPEN, FBK, FIN, RST) are exempt, so a loss
 probe cannot lose a handshake and turn into a carrier-replacement probe. C8 adds
 `profile_mismatch, http_parse_err, http_status_err, http_req, http_resp, pad_tx,
-drip_tx`.
+drip_tx`. C9 is the FEC v6 receive verdict (T0 §1.3): `fec_proto_fail` and
+`fec_hdr_crc_fail` mean the 40-byte header could not be trusted, so the carrier closes;
+`fec_payload_crc_fail` means the framing was sound and only the body was damaged, so the
+share is dropped and the carrier stays. With `crypto=on` a wrong key is a payload CRC
+failure on every share, which makes this counter the difference between "the key is
+wrong" and "the peer is silent".
 
 ### 8.8 Kernel version reality on this host, and symbol availability
 
@@ -2093,7 +2099,7 @@ sock_create_kern(net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &s)
 sock_set_reuseaddr(s->sk)                 /* §7.2: replacement may reuse a TIME_WAIT port */
 kernel_bind(s, src_addr:port_from_bitmap)
 s->sk->sk_sndtimeo = 1000 ms              /* TBT_CONNECT_TIMEOUT_MS */
-kernel_connect(s, peer, peer_port, 0)     /* blocking in the accept worker / config ctx */
+tbt_connect_bounded(s, peer, peer_port)   /* blocking; 4 s total, §9.1.1 */
 tcp_sk(s->sk)->nonagle = TCP_NAGLE_OFF
 tbt_carrier_install_proto(s->sk)          /* sk->sk_prot = &tbt_tcp_prot (§9.2) */
 SO_SNDBUF = SO_RCVBUF = tbt_car_sockbuf(sess)  /* share of the window (§5.4) */
@@ -2104,6 +2110,24 @@ sk_user_data = c; sk_data_ready/sk_write_space/sk_state_change = tbt_car_*
 `kernel_connect` blocks; it runs in the work item that handles `config` writes and in the
 carrier-replacement worker, never in softirq. The HTTP request header is not sent here:
 the pump builds and writes it on the first record (`c->http_started`).
+
+#### 9.1.1 `-EINPROGRESS` is not a failed connect
+
+`kernel_connect()` on a blocking socket does not report an expired `sk_sndtimeo` as
+`-ETIMEDOUT`. `__inet_stream_connect()` sets `err = -EINPROGRESS` before it waits, and the
+expiry path (`if (!timeo || !inet_wait_for_connect(...)) goto out;`) returns that value
+unchanged. The handshake is still running at that moment, so a dial that treats the return
+as fatal releases the socket (RST) and dials a new 5-tuple for a connection that was about
+to complete; the peer is left with an accepted socket waiting for a HELLO that can no
+longer arrive. `tbt_connect_bounded()` therefore waits again: a second call re-enters
+`SS_CONNECTING` and waits another window, `-EALREADY` is the same "still in progress"
+answer, and the loop stops after `TBT_CONNECT_BUDGET_MS` (4 s: the first two SYN
+retransmissions plus a WAN round trip, and under `TBT_JOIN_TIMEOUT_MS`, the far side's
+deadline for a carrier that has not presented its HELLO yet). Measured on the WAN smoke:
+`connect_fail=41` with `-EINPROGRESS`, one carrier replacing itself every second while the
+far logged `awaiting HELLO`. `connect_retry` counts the dials that outlived one window, so
+a path whose SYN round trip (or a retransmission) needs a second wait is visible without a
+failure.
 
 ### 9.2 The carrier `sk_prot` override
 

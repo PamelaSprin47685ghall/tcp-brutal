@@ -219,11 +219,17 @@ int tbt_crypto_hello_parse(const u8 *hello, size_t len, bool *enabled,
 
 /* Resolve the session key under the T0 §2.3 rules:
  *   - crypto off: out is zeroed, return 0;
- *   - a local `crypto_key=` is set: the peer must have key_id 0, out is the
- *     local key; a key_id of 1 means the peer generated one, which conflicts;
- *   - no local key: the peer must have key_id 1, out is the HELLO key.
+ *   - `local_key_wins`: this side owns the key -- either an operator
+ *     `crypto_key=`, or a key this side generated and announced in its own
+ *     HELLO with key_id 1. The peer learned it from us, so its HELLO must
+ *     carry key_id 0; key_id 1 means the peer generated a different key,
+ *     which conflicts. out is our key;
+ *   - otherwise: the key is the peer's. The peer must have key_id 1 and out
+ *     is the HELLO key. The caller adopts it on the first HELLO and checks
+ *     every later HELLO against it, so the flag stays false for the whole
+ *     session once a key was adopted -- an adopted key is not a local one.
  * Returns 0 or -EPROTO. */
-int tbt_crypto_resolve_key(bool local_key_set,
+int tbt_crypto_resolve_key(bool local_key_wins,
                            const u8 local_key[TBT_CRYPTO_KEY_LEN],
                            bool enabled, u8 key_id,
                            const u8 hello_key[TBT_CRYPTO_KEY_LEN],

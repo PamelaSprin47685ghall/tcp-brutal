@@ -34,14 +34,22 @@
 
 #include "tbtun.h"
 
-/* A connect that has not completed inside this window is retried by the
- * session poll.
+/* One blocking wait inside kernel_connect(). A connect that has not completed
+ * inside this window is retried by the session poll.
  * The kernel default is the full SYN retry schedule (~130 s), which a session
  * teardown would inherit: tbt_carriers_stop() cancels w_connect, and flush
  * must return in bounded time even when a carrier is dialling an unreachable
  * peer. 1 s is above any ordinary LAN/WAN SYN round trip and below the
  * operator-visible flush budget. */
 #define TBT_CONNECT_TIMEOUT_MS 1000
+
+/* Total budget for one dial, spent as several TBT_CONNECT_TIMEOUT_MS waits.
+ * A single window is not enough on a WAN: the kernel retransmits a lost SYN
+ * after 1 s, so one drop costs a full window plus the RTT and the dial is
+ * thrown away for a connection that was about to complete. 4 s covers the
+ * first two retransmissions and stays under TBT_JOIN_TIMEOUT_MS, the far
+ * side's deadline for a carrier that has not presented its HELLO yet. */
+#define TBT_CONNECT_BUDGET_MS 4000
 
 // A private copy of tcp_prot so carriers carry our sendmsg/recvmsg. Same shape
 // as the deleted brutal_sockopt.c used, for a different reason: there we wanted
@@ -1657,6 +1665,39 @@ void tbt_car_setsockbuf(struct socket *s, const struct tbt_cfg *cfg, u16 n_pri)
         sock_setsockopt(s, SOL_SOCKET, SO_RCVBUF, KERNEL_SOCKPTR(&v), sizeof(v));
 }
 
+/* Dial `addr` until the handshake finishes or TBT_CONNECT_BUDGET_MS is spent.
+ *
+ * kernel_connect() on a blocking socket does not report a timeout as
+ * -ETIMEDOUT: __inet_stream_connect() arms `err = -EINPROGRESS` before it
+ * waits, and the expiry path returns that value unchanged (net/ipv4/af_inet.c,
+ * `if (!timeo || !inet_wait_for_connect(...)) goto out;`). The socket is still
+ * connecting at that moment -- the SYN may be on its second transmission -- so
+ * treating the return as fatal released the socket (RST) and dialled a new
+ * 5-tuple, and the peer's accepted socket was left waiting for a HELLO that
+ * could never arrive. Measured on the WAN smoke: connect_fail=41 with
+ * -EINPROGRESS, one carrier replacing itself every second while the far
+ * logged `awaiting HELLO`. A second call re-enters SS_CONNECTING and waits
+ * another window; -EALREADY is the same "still in progress" answer. */
+static int tbt_connect_bounded(struct tbt_session *sess, struct socket *s,
+                               const struct sockaddr_in *addr)
+{
+    unsigned long deadline = jiffies + msecs_to_jiffies(TBT_CONNECT_BUDGET_MS);
+
+    for (;;)
+    {
+        int err = kernel_connect(s, (struct sockaddr_unsized *)addr,
+                                 sizeof(*addr), 0);
+
+        if (!err || err == -EISCONN)
+            return 0;
+        if (err != -EINPROGRESS && err != -EALREADY)
+            return err;
+        if (time_after_eq(jiffies, deadline))
+            return -ETIMEDOUT;
+        atomic64_inc(&sess->connect_retry);
+    }
+}
+
 static void tbt_car_connect_work(struct work_struct *w)
 {
     struct tbt_carrier *c = container_of(w, struct tbt_carrier, w_connect);
@@ -1710,7 +1751,7 @@ static void tbt_car_connect_work(struct work_struct *w)
      * socket's receive buffer. */
     tbt_car_setsockbuf(s, &t->cfg, sess->n_pri);
     s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
-    err = kernel_connect(s, (struct sockaddr_unsized *)&addr, sizeof(addr), 0);
+    err = tbt_connect_bounded(sess, s, &addr);
     if (err)
         goto release;
 
@@ -1932,7 +1973,7 @@ void tbt_target_work_fn(struct work_struct *w)
     /* Same bound as a carrier dial: session teardown cancels w_target, and
      * the default connect timeout is the full SYN retry schedule. */
     s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
-    err = kernel_connect(s, (struct sockaddr_unsized *)&addr, sizeof(addr), 0);
+    err = tbt_connect_bounded(sess, s, &addr);
     if (err)
     {
         sock_release(s);

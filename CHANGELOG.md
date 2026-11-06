@@ -22,6 +22,16 @@ and moves independently of the module version.
   encode/decode/reassembly run, including a short final super-block. QEMU probe
   N carries 1 MiB each way over two groups of eight carriers in the HTTP chunk
   container, byte-exact.
+- `c9 fec_proto_fail fec_hdr_crc_fail fec_payload_crc_fail` in
+  `/proc/net/tbtun/stats`, the receive verdict T0 §1.3 specifies. With
+  `crypto=on` a wrong key is a payload CRC failure on every share, so the
+  counter separates "the key is wrong" from "the peer is silent".
+- QEMU probe O: `profile=http-kal`, `n=1 m=1`, `carriers=2`, `fec=on`,
+  `mode=grouped`, with the T5.2 smoke's own knobs. It runs the same tunnel
+  with `crypto=off`, with `crypto=on`, with carrier 0 taken down mid-transfer,
+  and with a 700 ms loopback delay that forces a dial past one connect window.
+  Every phase asserts both carriers up, `rx_proto=0`, `http_parse_err=0` and
+  the FEC CRC counters at zero.
 
 ### Changed
 
@@ -31,6 +41,28 @@ and moves independently of the module version.
   real end of the stream and the FEC ACK can clamp to it.
 - `mode=sc-ldpc` with `fec=on` returns `-EOPNOTSUPP` instead of silently using
   the RLNC data plane.
+
+### Fixed
+
+- Every carrier after the first one was refused with `-EPROTO` when
+  `crypto=on` generated the session key. The far side adopted the key from the
+  near's HELLO and then passed "we have a key" to `tbt_crypto_resolve_key()`,
+  which read it as "we own the key" and demanded `key_id 0` from a peer that
+  keeps announcing `key_id 1`. A session therefore ran on one carrier while
+  the replacement loop burned the rest (measured: probe N, one carrier up and
+  315 HELLO rejections in 4 s; the WAN smoke showed the same as
+  `rx_proto=27` and one carrier up on each side). The session now records
+  where the key came from (`crypto_key_peer`) and only a key this side
+  configured or generated is treated as authoritative.
+- A carrier dial that outlived one `TBT_CONNECT_TIMEOUT_MS` window was treated
+  as a failure. A blocking `kernel_connect()` reports an expired
+  `sk_sndtimeo` as `-EINPROGRESS`, not `-ETIMEDOUT`, and the socket is still
+  handshaking; releasing it (RST) and dialling a new 5-tuple left the peer
+  with an accepted socket waiting for a HELLO that could never arrive
+  (measured: `connect_fail=41` with `-115`, one carrier replacing itself every
+  second while the far logged `awaiting HELLO`). `tbt_connect_bounded()` waits
+  again inside a 4 s budget and counts the dials that needed it
+  (`connect_retry`).
 
 ## [0.0.1] - 2026-11-06
 

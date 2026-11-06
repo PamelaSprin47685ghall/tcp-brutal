@@ -758,9 +758,15 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
     if (!rx || len < TBT_FEC_HDR_LEN)
         return -EPROTO;
     if (tbt_fec_hdr_unpack(rec, &h))
+    {
+        atomic64_inc(&sess->fec_proto_fail);
         return -EPROTO;
+    }
     if (tbt_fec_hdr_check(&h, TBT_FEC_S))
+    {
+        atomic64_inc(&sess->fec_proto_fail);
         return -EPROTO;
+    }
     {
         u8 hb[TBT_FEC_HDR_LEN];
         u32 want;
@@ -768,7 +774,10 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         tbt_fec_hdr_pack(&h, hb);
         want = tbt_fec_crc32c(0, hb, TBT_FEC_H_HDRCRC);
         if (want != h.header_crc32c)
+        {
+            atomic64_inc(&sess->fec_hdr_crc_fail);
             return -EPROTO;
+        }
         /* Header framing is trusted here; decrypt DATA/PARITY before the
          * payload CRC, which covers the clear bytes (T0 §1.3, §2.2). The rx
          * context is shared by carriers and body_xor is read-only. */
@@ -786,7 +795,11 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         }
         if (tbt_fec_crc32c(0, rec + TBT_FEC_HDR_LEN, h.payload_len) !=
             h.payload_crc32c)
-            return 0; /* payload CRC failure drops this record only */
+        {
+            /* The framing was sound, so only this share is lost. */
+            atomic64_inc(&sess->fec_payload_crc_fail);
+            return 0;
+        }
     }
     if (h.type == TBT_FEC_ACK)
     {
