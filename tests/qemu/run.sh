@@ -29,7 +29,7 @@ log=
 initrd=$cache/qemu/initramfs.cpio.gz
 timeout_s=120
 smp=${TBT_TEST_SMP:-2}
-probes=${TBT_PROBES:-A,B,C,D,E,F,G,H,I,J,K}
+probes=${TBT_PROBES:-A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R}
 net=1
 # Guest carrier port that the near side reaches through the qemu gateway.
 car_port=${TBT_CAR_PORT:-19101}
