@@ -8,10 +8,11 @@ TAR             ?= tar
 CLANG_FORMAT    ?= clang-format-18
 SRCS            := Makefile \
                    tbtun/tbtun.h tbtun/tbt_uapi.h tbtun/tbt_parse.h tbtun/tbt_proto.h \
-                   tbtun/tbt_rec.h tbtun/tbt_http.h \
+                   tbtun/tbt_rec.h tbtun/tbt_http.h tbtun/tbt_fec.h tbtun/tbt_portmap.h \
                    tbtun/tbt_core.c tbtun/tbt_session.c tbtun/tbt_procfs.c tbtun/tbt_listen.c \
                    tbtun/tbt_carrier.c tbtun/tbt_sock.c tbtun/tbt_tx.c tbtun/tbt_rx.c \
                    tbtun/tbt_parse.c tbtun/tbt_proto.c tbtun/tbt_rec.c tbtun/tbt_http.c \
+                   tbtun/tbt_fec.c tbtun/tbt_fec_data.c tbtun/tbt_portmap.c \
                    scripts/mkdkmsconf.sh scripts/install_dkms.sh \
                    .clang-format
 FORMAT_SRCS     := $(filter %.c %.h,$(SRCS))
@@ -44,13 +45,19 @@ HOST_MULTISTREAM := host/test_multistream
 HOST_MULTISTREAM_SRCS := host/test_multistream.c
 HOST_ANCHOR     := host/test_anchor
 HOST_ANCHOR_SRCS := host/test_anchor.c
+HOST_FEC        := host/test_fec
+HOST_FEC_SRCS   := host/test_fec.c tbtun/tbt_fec.c
+HOST_FEC_HDRS   := tbtun/tbt_fec.h tbtun/tbt_uapi.h
+HOST_PORTMAP    := host/test_portmap
+HOST_PORTMAP_SRCS := host/test_portmap.c tbtun/tbt_portmap.c tbtun/tbt_parse.c
+HOST_PORTMAP_HDRS := tbtun/tbt_portmap.h tbtun/tbt_parse.h tbtun/tbt_uapi.h
 SAN_CFLAGS      := -g -fsanitize=address,undefined -fno-omit-frame-pointer
 
 obj-m           += tbtun.o
 tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
                    tbtun/tbt_listen.o tbtun/tbt_proto.o tbtun/tbt_carrier.o \
                    tbtun/tbt_sock.o tbtun/tbt_tx.o tbtun/tbt_rx.o tbtun/tbt_rec.o \
-                   tbtun/tbt_parse.o tbtun/tbt_http.o
+                   tbtun/tbt_parse.o tbtun/tbt_http.o tbtun/tbt_portmap.o tbtun/tbt_fec.o tbtun/tbt_fec_data.o
 
 ccflags-y       := -std=gnu99 -I$(src)/tbtun
 
@@ -70,7 +77,7 @@ check:
 # root, no module and no kernel headers: the grammar test (tbt_parse.c), the
 # hostile-input test (tbt_rec.c + tbt_proto.c) and the HTTP container test
 # (tbt_http.c + tbt_proto.c).
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_MULTISTREAM) $(HOST_ANCHOR)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_PORTMAP)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
@@ -79,6 +86,8 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_REORDER) $(HOST_ACK) $(
 	@./$(HOST_CONTROL)
 	@./$(HOST_MULTISTREAM)
 	@./$(HOST_ANCHOR)
+	@./$(HOST_FEC)
+	@./$(HOST_PORTMAP)
 	@# Third-party cross-check: h11 is not a build dependency. uv with a cached
 	@# h11 runs it offline; anything else gets a clear skip, not a failure.
 	@if command -v uv >/dev/null 2>&1 && \
@@ -121,6 +130,12 @@ $(HOST_MULTISTREAM): $(HOST_MULTISTREAM_SRCS)
 $(HOST_ANCHOR): $(HOST_ANCHOR_SRCS)
 	$(HOSTCC) $(HOST_CFLAGS) -o $@ $(HOST_ANCHOR_SRCS)
 
+$(HOST_FEC): $(HOST_FEC_SRCS) $(HOST_FEC_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_FEC_SRCS)
+
+$(HOST_PORTMAP): $(HOST_PORTMAP_SRCS) $(HOST_PORTMAP_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_PORTMAP_SRCS)
+
 # The same tests with ASan and UBSan. A toolchain without the runtimes gets
 # a clear skip, not a build failure.
 host-test-san:
@@ -130,11 +145,13 @@ host-test-san:
 		echo "host-test-san: skipped, $(HOSTCC) cannot link -fsanitize=address,undefined"; \
 	fi
 
-host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san
+host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_fec_san host/test_portmap_san
 	@./host/test_parse_san
 	@./host/test_fuzz_san
 	@./host/test_http_san
 	@./host/test_http_fuzz_san
+	@./host/test_fec_san
+	@./host/test_portmap_san
 
 host/test_parse_san: $(HOST_TEST_SRCS) $(HOST_TEST_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_TEST_SRCS)
@@ -147,6 +164,12 @@ host/test_http_san: $(HOST_HTTP_SRCS) $(HOST_HTTP_HDRS)
 
 host/test_http_fuzz_san: $(HOST_HTTP_FUZZ_SRCS) $(HOST_HTTP_FUZZ_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_HTTP_FUZZ_SRCS)
+
+host/test_fec_san: $(HOST_FEC_SRCS) $(HOST_FEC_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_FEC_SRCS)
+
+host/test_portmap_san: $(HOST_PORTMAP_SRCS) $(HOST_PORTMAP_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_PORTMAP_SRCS)
 
 $(HOST_HTTP_LIVE): $(HOST_HTTP_LIVE_SRCS) $(HOST_HTTP_LIVE_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_HTTP_LIVE_SRCS)
@@ -167,7 +190,7 @@ host-test-live: $(HOST_HTTP_LIVE)
 	fi
 
 clean: clean-dkms.conf clean-dkms-tarball
-	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_MULTISTREAM) $(HOST_ANCHOR) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san
+	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_PORTMAP) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_fec_san host/test_portmap_san
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
 
 load:

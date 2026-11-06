@@ -25,6 +25,14 @@ theory that the ISP's classifier gives HTTP priority. That theory is measured,
 not assumed; see [QoS caveat](#qos-caveat). If it turns out false, `profile=raw`
 turns the wrapping off and the per-flow gain remains.
 
+FEC v6 (`fec=on`, `conv=0x1001`) is an optional data plane: the application
+byte stream is cut into 8 KiB DATA shares plus RLNC parity shares, one share per
+carrier, and the receiver recovers missing shares instead of waiting for a
+retransmit. It rides both `profile=raw` and the HTTP chunk container; in the
+HTTP profile one chunk body is exactly one 40-byte FEC record, while the request
+line, headers and chunk framing stay plaintext. The old ARQ path is unchanged
+when `fec=off`.
+
 This tree implements C1–C8 of [DESIGN.md](DESIGN.md): the `/proc` surface, the
 listener and the far side, spares and carrier replacement with the RETIRE
 handshake, duplication with the replay ring, hole repair from the retained
@@ -140,6 +148,22 @@ The near side now listens on `10.0.0.1:9000`. A client connecting there is
 carried to `127.0.0.1:5201` on the far host over four carriers. Test it with
 `iperf3 -c 10.0.0.1 -p 9000 -t 60 -P 1` against an `iperf3 -s` bound to the
 target port.
+
+For FEC v6 over the HTTP container, one group with six carriers (four data,
+two parity):
+
+```sh
+# near
+echo 'tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443 n=4 m=2 fec=on carriers=6' \
+     > /proc/net/tbtun/config
+# far
+echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=2 fec=on carriers=6 peer=10.0.0.1:9000' \
+     > /proc/net/tbtun/config
+```
+
+The default profile is `http-kal`, so each 40-byte FEC record is one HTTP chunk
+body while the request line, headers and chunk framing stay plaintext.
+`profile=raw` carries the same records without the HTTP wrapper.
 
 Both ends must agree on the tunnel id, `n`, `m`, and the profile family. The far
 side's `listen` is where carriers arrive; the near side's `peer` is where they
@@ -380,7 +404,11 @@ real line.
   The nonce is a session identifier, not a secret. Run it inside WireGuard on an
   untrusted path; the `raw` profile is then the only sensible choice, because an
   HTTP parser cannot see inside TLS.
-- **No FEC.** Loss is repaired by retransmission from the replay ring and by
+- **FEC is optional and single-group.** `fec=on` currently supports one group
+  (`carriers == n + m`, up to 256 shares) in both `raw` and `http-kal`
+  containers; the grouped 32x8 data plane is a later integration. The host
+  grouped codec and the 40-byte wire format are already present. When `fec=off`,
+  loss is repaired by retransmission from the replay ring and by
   duplication; there is no parity or erasure code. When the ring no longer holds
   the bytes, the receiver resets the stream (`holes_unrecoverable`) instead of
   guessing.
@@ -501,8 +529,9 @@ choice, because an HTTP parser cannot see inside TLS.
 ## Scope
 
 This is not a general-purpose VPN. It forwards TCP only, to one literal target
-per tunnel, with no routing, no NAT, no authentication, no encryption, no FEC,
-and no IPv6. It exists to multiply a per-flow rate limit and to test whether a
+per tunnel, with no routing, no NAT, no authentication, and no IPv6. FEC v6 is
+optional (`fec=on`) and single-group in this build; ChaCha8 body encryption is a
+separate integration. It exists to multiply a per-flow rate limit and to test whether a
 QoS profile helps. For anything else, use WireGuard.
 
 ---

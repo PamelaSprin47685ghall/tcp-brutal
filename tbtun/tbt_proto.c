@@ -66,6 +66,11 @@ void tbt_hdr_encode(u8 *p, const struct tbt_hdr *h)
 // path_id, path_ack_count, path_ack_mask, body_len, sid_hi, reserved2, and the
 // per-type body bounds. One type also has an exact length that depends on
 // another header field: FBK carries exactly path_ack_count 18-byte entries.
+//
+// The old ARQ record names carriers with a u8 path_id, a u16 mask and a u8
+// count, and its FBK/WINDOW bodies have 16 entries. The carrier layer grows to
+// 256 slots, but this wire format stays frozen at TBT_LEGACY_MAX_CARRIERS: a
+// session that needs more carriers uses the FEC record, not a wider old one.
 // Returns 0 or -EPROTO. Body *contents* are not interpreted here: OPEN and
 // HELLO carry fields their consumer reads later, and that consumer validates
 // them. This function makes the framing total, not the payloads.
@@ -77,11 +82,11 @@ int tbt_hdr_check(const struct tbt_hdr *h)
         return -EPROTO;
     if (h->flags & ~TBT_FF_MASK)
         return -EPROTO;
-    if (h->path_id >= TBT_MAX_CARRIERS_LIMIT)
+    if (h->path_id >= TBT_LEGACY_MAX_CARRIERS)
         return -EPROTO;
-    if (h->path_ack_count > TBT_MAX_CARRIERS_LIMIT)
+    if (h->path_ack_count > TBT_LEGACY_MAX_CARRIERS)
         return -EPROTO;
-    if (h->path_ack_mask & ~((1u << TBT_MAX_CARRIERS_LIMIT) - 1))
+    if (h->path_ack_mask & ~((1u << TBT_LEGACY_MAX_CARRIERS) - 1))
         return -EPROTO;
     if (h->body_len > TBT_PAYLOAD_MAX)
         return -EPROTO;

@@ -309,6 +309,60 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
  * delivered offset is what the sender's window and retention use; every path
  * carries the same value, so "every live path acked past" reduces to the
  * session-wide maximum, which is monotone. */
+/* FEC v6 delivery: the decoder has already put the block's packets in order.
+ * Reuse the stream's rx_q/rx_tree so the output socket and the FIN path see
+ * one byte space; `off` is the packet's byte offset (seq * S). */
+int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len)
+{
+    struct tbt_frame *fr;
+    bool queued = false;
+
+    if (!st || !len)
+        return 0;
+    if (off > U64_MAX - len)
+        return -EPROTO;
+    fr = kmalloc(struct_size(fr, data, len), GFP_ATOMIC);
+    if (!fr)
+        return -ENOMEM;
+    INIT_LIST_HEAD(&fr->list);
+    fr->len = len;
+    fr->off = 0;
+    memset(&fr->hdr, 0, sizeof(fr->hdr));
+    fr->hdr.seq = off;
+    fr->st = NULL;
+    memcpy(fr->data, data, len);
+
+    spin_lock_bh(&st->rx_lock);
+    if (off + len <= st->rx_next)
+    {
+        spin_unlock_bh(&st->rx_lock);
+        kfree(fr);
+        return 0;
+    }
+    if (off == st->rx_next)
+    {
+        list_add_tail(&fr->list, &st->rx_q);
+        st->rx_queued += len;
+        st->rx_next = off + len;
+        tbt_rx_pull_locked(st);
+        queued = true;
+    }
+    else if (!tbt_rx_tree_insert_locked(st, fr))
+    {
+        spin_unlock_bh(&st->rx_lock);
+        kfree(fr);
+        return 0;
+    }
+    else if (!st->hole_since_ns)
+    {
+        st->hole_since_ns = ktime_get_ns();
+    }
+    spin_unlock_bh(&st->rx_lock);
+    if (queued)
+        schedule_work(&st->w_drain);
+    return 0;
+}
+
 static int tbt_rx_fbk(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *body)
 {
     struct tbt_session *sess = c->sess;
@@ -703,8 +757,53 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
         {
             struct tbt_rec rec;
             int derr = 0;
-            size_t n = tbt_http_frame_decode(c->http_rx, p->buf, p->have, &rec, &derr);
+            size_t n;
 
+            if (sess->fec)
+            {
+                const u8 *frec = NULL;
+                size_t flen = 0;
+                int ferr = TBT_RX_NEED_MORE;
+
+                n = tbt_http_fec_frame_decode(c->http_rx, p->buf, p->have, &frec,
+                                              &flen, &ferr);
+                p->have -= n;
+                memmove(p->buf, p->buf + n, p->have);
+                if (ferr == TBT_RX_OK)
+                {
+                    int err;
+
+                    if (frec[0] >= TBT_FEC_DATA && frec[0] <= TBT_FEC_FBK)
+                        err = tbt_fec_rx_record(c, frec, flen);
+                    else
+                    {
+                        struct tbt_rec orec;
+                        int rerr = TBT_REC_PROTO;
+                        size_t used = tbt_rec_scan(frec, flen, &orec, &rerr);
+
+                        if (rerr != TBT_REC_OK || used != flen)
+                            return -EPROTO;
+                        err = tbt_http_record(c, &orec);
+                    }
+                    if (err)
+                        return err;
+                    continue;
+                }
+                if (ferr == TBT_RX_NEED_MORE)
+                {
+                    if (tbt_http_rx_done(c->http_rx))
+                    {
+                        tbt_http_rx_new_message(c->http_rx);
+                        c->http_hdr_done = false;
+                        c->http_have = 0;
+                    }
+                    break;
+                }
+                atomic64_inc(&sess->http_parse_err);
+                return -EPROTO;
+            }
+
+            n = tbt_http_frame_decode(c->http_rx, p->buf, p->have, &rec, &derr);
             p->have -= n;
             memmove(p->buf, p->buf + n, p->have);
             if (derr == TBT_RX_OK)
@@ -748,8 +847,32 @@ static int tbt_rx_parse_raw(struct tbt_carrier *c)
     {
         struct tbt_rec rec;
         int st = TBT_REC_NEED_MORE;
-        size_t used = tbt_rec_scan(p->buf, p->have, &rec, &st);
+        size_t used;
 
+        /* FEC v6 records start with 0x30..0x35; the old 32-byte header never
+         * does. Parse the 40-byte record here and leave the old scanner
+         * untouched, so a mixed carrier (HELLO/OPEN/FIN + FEC shares) works. */
+        if (p->have && tbt_fec_record_type(p->buf[0]))
+        {
+            size_t need = 0;
+            int fst = tbt_fec_record_len(p->buf, p->have, &need);
+            int ferr;
+
+            if (fst == TBT_REC_NEED_MORE)
+                break;
+            if (fst == TBT_REC_PROTO)
+                return -EPROTO;
+            if (!c->saw_hello)
+                return -EPROTO;
+            ferr = tbt_fec_rx_record(c, p->buf, need);
+            if (ferr)
+                return ferr;
+            p->have -= need;
+            memmove(p->buf, p->buf + need, p->have);
+            continue;
+        }
+
+        used = tbt_rec_scan(p->buf, p->have, &rec, &st);
         if (st == TBT_REC_NEED_MORE)
             break;
         if (st == TBT_REC_PROTO)

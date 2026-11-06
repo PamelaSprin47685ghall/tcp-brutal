@@ -45,6 +45,10 @@ struct tbt_cfg
     u64 id;
     u8 role;    /* TBT_ROLE_NEAR | TBT_ROLE_FAR */
     u8 profile; /* 1 http-kal, 2 http-kal-drip, 3 raw; never 0 after parsing */
+    u8 fec;     /* 0 off (old ARQ), 1 on; parsed and rendered, no data plane */
+    u8 mode;    /* 1 rlnc, 2 grouped, 3 sc-ldpc; never 0 after parsing */
+    u16 w;      /* effective window: 1..1024, or 2*n / 256 resolved from w=0 */
+    u16 carriers; /* effective slots: a multiple of n+m, or n+m resolved from 0 */
     __be32 listen_addr;
     __be16 listen_port;
     __be32 peer_addr;

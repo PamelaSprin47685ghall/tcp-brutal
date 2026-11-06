@@ -249,6 +249,25 @@ rather than in a new field so the HELLO body length is unchanged.
 | `http-kal-drip` | identical headers, identical framing | one **byte per `drip_ms`** when idle (a legal 1-byte chunk every `drip_ms`), volume `≈ 1 B/drip_ms` | the `M` spares: an idle flow that a classifier would reap or de-prioritise is kept alive with ~8 bit/s (1 B/s payload) instead of a burst every 5000 ms |
 | `raw` | one frame per record, no HTTP bytes at all | none needed | second hop / VPS-to-home leg, loopback tests, or any line where QoS does not apply. Also the only safe profile inside WireGuard when the classifier is SNI-based (§16.5) |
 
+### FEC v6 over the container (T0 0x1001)
+
+FEC v6 is an independent 40-byte record format (`conv=0x1001`), not a wider old
+frame. It rides the same carriers and the same HTTP container:
+
+- `profile=raw`: one 40-byte FEC record follows another with no wrapper.
+- `profile=http-kal` / `http-kal-drip`: one HTTP chunk body is exactly one FEC
+  record. The request line, headers, `Transfer-Encoding: chunked`, chunk-size
+  lines and CRLFs stay plaintext; only the FEC body may be encrypted by the
+  optional ChaCha8 layer. A middlebox therefore still sees ordinary HTTP/1.1.
+- Control records (ACK/NACK/FEC_CFG/FEC_FBK) use the same one-chunk-per-record
+  rule. They are written only at record boundaries; a partial record is never
+  interleaved with a control frame.
+- `fec=on` requires `carriers == n + m` in this cut (one group, one share per
+  carrier). `profile=raw` and `http-kal` are both supported. The grouped
+  data plane is a later integration; the host grouped codec is already present.
+- The old 16-carrier ARQ record and its `path_ack_mask` are unchanged and are
+  used only when `fec=off`.
+
 Properties:
 
 - **Same frame header** across profiles; only the container and cadence differ.
