@@ -708,7 +708,11 @@ struct tbt_session
      * the stream's copy; ctrl_sched serves FBK and streamless control. */
     u32 carrier_gen;  /* bumped for every carrier object; invalidates stale
                        * pinned frames when a slot is replaced */
-    unsigned long path_lost_mask; /* atomic lost-carrier bits, drained by pump */
+    /* Lost-carrier bits, indexed by carrier: 256 slots, so a plain
+     * `unsigned long` would take a `set_bit()` for carrier 64..255 32 bytes
+     * past itself and overwrite join_retries/ctrl_sched (and, on a debug
+     * kernel, show up as an invalid _Bool load of a neighbouring flag). */
+    DECLARE_BITMAP(path_lost_mask, TBT_MAX_CARRIERS_LIMIT);
     u8 join_retries;  /* consecutive join_dup retries, capped before failing */
     struct tbt_sched ctrl_sched;
 

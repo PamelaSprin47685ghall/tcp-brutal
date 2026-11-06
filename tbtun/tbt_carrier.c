@@ -2131,6 +2131,27 @@ void tbt_carrier_snapshot(struct tbt_session *sess)
 // Called once at load, from tbt_core.c, before any carrier exists.
 int tbt_carrier_init(void)
 {
+    /* Every per-carrier field must be at least as wide as the carrier limit.
+     * A 16-slot array or a single `unsigned long` here takes a write at index
+     * 16..255 past its own end and corrupts the struct around it (measured
+     * twice: `announced_gen[c->index]` overwrote tx_paused, and
+     * `path_lost_mask` overwrote the session's control scheduler). */
+    BUILD_BUG_ON(ARRAY_SIZE(((struct tbt_stream *)0)->announced_gen) <
+                 TBT_MAX_CARRIERS_LIMIT);
+    BUILD_BUG_ON(sizeof(((struct tbt_stream *)0)->announced_mask) * 8 <
+                 TBT_MAX_CARRIERS_LIMIT);
+    BUILD_BUG_ON(sizeof(((struct tbt_stream *)0)->tx_fin_mask) * 8 <
+                 TBT_MAX_CARRIERS_LIMIT);
+    BUILD_BUG_ON(sizeof(((struct tbt_stream *)0)->tx_fin_inflight) * 8 <
+                 TBT_MAX_CARRIERS_LIMIT);
+    BUILD_BUG_ON(sizeof(((struct tbt_stream *)0)->tx_rst_mask) * 8 <
+                 TBT_MAX_CARRIERS_LIMIT);
+    BUILD_BUG_ON(sizeof(((struct tbt_stream *)0)->tx_rst_inflight) * 8 <
+                 TBT_MAX_CARRIERS_LIMIT);
+    BUILD_BUG_ON(sizeof(((struct tbt_session *)0)->path_lost_mask) * 8 <
+                 TBT_MAX_CARRIERS_LIMIT);
+    BUILD_BUG_ON(ARRAY_SIZE(((struct tbt_stream *)0)->sched.order) <
+                 TBT_MAX_CARRIERS_LIMIT);
     tbt_tcp_prot = tcp_prot; // field-by-field copy of the live TCP proto
     return 0;
 }
