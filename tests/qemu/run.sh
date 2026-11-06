@@ -92,6 +92,19 @@ if [ "$net" -eq 1 ] && [ -x /usr/bin/tc ]; then
     bins="$bins --bin /usr/bin/tc"
 fi
 
+# The small-message helper: one write, one reply, socket still open. Probe P
+# needs it because tbt_burst cannot express "37 bytes and no more".
+if [ -f "$root/host/tbt_ping.c" ]; then
+    # Rebuild when the source is newer: a stale binary is a wrong-size message,
+    # not a tunnel failure (it reported "bad usage" once MAX_MSG grew).
+    if [ ! -x "$root/host/tbt_ping" ] || [ "$root/host/tbt_ping.c" -nt "$root/host/tbt_ping" ]; then
+        "${HOSTCC:-cc}" -std=gnu99 -O2 -Wall -Wextra -Werror \
+            -o "$root/host/tbt_ping" "$root/host/tbt_ping.c" ||
+            die "cannot build $root/host/tbt_ping"
+    fi
+    bins="$bins --bin $root/host/tbt_ping"
+fi
+
 # The probe list travels as a file in the image: /proc/cmdline is empty in this
 # guest (the kernel accepts tbt_probes= but does not publish it), and a file is
 # the same channel on every kernel.

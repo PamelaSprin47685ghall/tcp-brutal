@@ -482,6 +482,14 @@ struct tbt_fec_blk
     u8 *dpresent; /* n flags */
     u8 *ppresent; /* m flags */
     u16 *dlen;    /* n payload lengths */
+    /* Payload length of the block's last real share when it is short, from the
+     * parity record's epoch field. A recovered share has no payload_len of its
+     * own, so without this a receiver that decoded the block from parity would
+     * have to guess S and hand the application the block's zero padding. */
+    u16 short_len;
+    /* The block needed recovery and holds a short share whose length no record
+     * stated (a peer that does not carry it): refuse rather than guess. */
+    bool short_unknown;
 };
 
 /* One group's encoder state. The ring, packet buffer and record buffer are
@@ -490,6 +498,14 @@ struct tbt_fec_gtx
 {
     u8 *blk; /* n * s bytes: this group's current block */
     u8 *par; /* m * s bytes: this group's parity scratch */
+    /* Real DATA packets written into `blk` for the block being built. The
+     * packetizer closes a block early when the application goes quiet, so the
+     * block's real length is a counter, not "n" or "the last seq mod n". */
+    u16 nreal;
+    /* Payload length of the last real share written into `blk`, 0 when it is
+     * full. It travels in the parity record's epoch field so a receiver that
+     * recovers that share still knows how many bytes it carried. */
+    u16 last_len;
 };
 
 struct tbt_fec_tx
@@ -503,7 +519,11 @@ struct tbt_fec_tx
     u16 fill;
     u64 seq; /* next global packet seq */
     bool flush_req;
+    /* When the packetizer may emit the partial packet it holds. Set when the
+     * ring ran dry with bytes in `pkt`, cleared when it emits. 0 = not armed. */
+    u64 short_at_ns;
     u16 groups, n, m, s;
+    u64 cur_block; /* block being built, shared by every group */
     u8 *data_ptrs[TBT_FEC_MAX_SHARES];
     u8 *parity_ptrs[TBT_FEC_MAX_SHARES];
     struct tbt_fec_gtx *g; /* groups entries */
@@ -519,6 +539,17 @@ struct tbt_fec_rx
     u16 slots; /* block slots per group */
     u64 next_super;   /* next super-block to deliver */
     u64 next_deliver; /* global packets delivered */
+    /* Stream byte offset of the next delivered byte. Packets are not all S
+     * bytes long any more: the packetizer flushes a partial packet when the
+     * application goes quiet, so the delivered stream is the concatenation of
+     * the shares in sequence order and the offset cannot be `seq * s`. */
+    u64 deliver_bytes;
+    /* The FEC plane carries the session's packet sequence, not a stream's: a
+     * DATA record has no sid. `stream_base` is the session byte at which the
+     * current stream (stream_sid) began, so the next connection in the same
+     * session starts at stream byte 0 again. */
+    u64 stream_sid;
+    u64 stream_base;
     u64 ack_deliver;  /* last frontier sent in an ACK */
     u64 total_pkts;   /* stream packet count; valid when total_known */
     u64 total_bytes;  /* FIN's byte offset; 0 when only LAST named the end */
@@ -720,6 +751,17 @@ struct tbt_session
     atomic64_t fec_proto_fail;      /* header unpack/field check failed */
     atomic64_t fec_hdr_crc_fail;    /* 40-byte header CRC mismatch */
     atomic64_t fec_payload_crc_fail; /* body CRC mismatch: share dropped */
+    /* A partial packet the packetizer flushed because the application went
+     * quiet, and a block the receiver had to refuse because it held one of
+     * those and a recovered share whose length is therefore unknown. */
+    atomic64_t fec_short_tx;
+    atomic64_t fec_short_unknown;
+    /* Shares the receiver dropped before they reached a block: outside the
+     * block window, or a DATA/PARITY share that arrived before the session key
+     * was installed. Both leave the block to its parity, and a recovered share
+     * has no payload_len. */
+    atomic64_t fec_drop_window;
+    atomic64_t fec_drop_crypto;
     atomic64_t http_parse_err;   /* container framing/header protocol error */
     atomic64_t http_status_err;  /* non-200 or non-chunked/non-keepalive */
     u64 http_req, http_resp; /* header blocks emitted; pump only */

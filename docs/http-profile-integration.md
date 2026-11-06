@@ -301,7 +301,7 @@ ambiguous by construction.
 2. **Never put binary in the header block.** The request/response headers are
    ASCII, fixed order, no `tbtun`, no carrier index. The carrier index travels
    only in the HELLO frame body. The frame body is opaque binary inside
-   `application/octet-stream`; that is normal.
+   `application/gzip`; that is normal, and the body is not a gzip member.
 
 ## State ownership
 

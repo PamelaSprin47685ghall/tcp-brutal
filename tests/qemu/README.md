@@ -18,7 +18,7 @@ probes, all through the operator surface only (`echo` into `/proc/net/tbtun/*`):
 | Probe | What it establishes |
 | --- | --- |
 | A | control surface: `ports`, canonical read-back, rejected lines change nothing, `del`, the `debug_loss` gate |
-| B | data path on loopback carriers: 4 MiB each way, byte for byte |
+| B | data path on loopback carriers: 1 MiB each way, byte for byte |
 | C | carrier 0 taken down mid-transfer; a replacement is dialled and the stream still completes |
 | D | the deterministic loss injector (`drop_ppm`) and reorder accounting |
 | E | a warm spare takes over when an active carrier is taken down |
@@ -28,9 +28,10 @@ probes, all through the operator surface only (`echo` into `/proc/net/tbtun/*`):
 | I | **the thesis**: one shaped carrier (control) versus four on the same path; four must be at least 1.8x one |
 | J | 1% loss and 2% reorder on every carrier; byte-exactness |
 | K | one carrier's class forced to 100% loss mid-transfer, then restored; byte-exactness |
-| L | FEC v6 over the raw container: `n=4 m=2 carriers=6`, 1 MiB byte-exact |
-| M | FEC v6 over HTTP: `n=4 m=2 carriers=6`, 1 MiB byte-exact |
-| N | FEC v6 grouped over HTTP: `n=4 m=4 carriers=16`, 1 MiB byte-exact, all 16 carriers up |
+| L | FEC v6 over the raw container: `n=4 m=2 carriers=6`, 256 KiB byte-exact |
+| M | FEC v6 over HTTP: `n=4 m=2 carriers=6`, 256 KiB byte-exact |
+| N | FEC v6 grouped over HTTP: `n=4 m=4 carriers=16`, 1 MiB byte-exact (the one 1 MiB case), all 16 carriers up |
+| P | one small write and one reply with the socket still open (`host/tbt_ping`): 37, 8191, 8192, 8193, 65536 and 262144 bytes, the same 37-byte exchange with `crypto=on`, two connections in one session, and a real HTTP request/response handshake |
 | O | the T5.2 smoke's shape (`profile=http-kal`, `n=1 m=1`, `carriers=2`, `fec=on`, `mode=grouped`) with `crypto=off`, with `crypto=on`, with carrier 0 taken down mid-transfer, and with a 700 ms loopback delay that makes a dial outlive one `kernel_connect` wait window |
 
 G retries its whole window up to three times when the injector happened to drop

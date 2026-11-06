@@ -22,6 +22,16 @@
 #      3.0 x 10 Mbit. This is the only probe that measures the product claim.
 #   J. loss and reorder on every carrier class (1% loss, 2% reorder).
 #   K. one carrier's class forced to 100% loss mid-transfer, then restored.
+#   L. FEC v6 over the raw container, 256 KiB byte-exact.
+#   M. FEC v6 over the HTTP container, 256 KiB byte-exact.
+#   N. FEC v6 grouped over HTTP, 16 carriers, 1 MiB byte-exact (the one 1 MiB
+#      transfer in the suite).
+#   O. the T5.2 smoke's shape with crypto off, crypto on, a carrier taken down
+#      mid-transfer, and a loopback delay that makes a dial outlive one connect
+#      window.
+#   P. one small write and one reply with the socket still open: 37 B, the two
+#      packet boundaries, 64 KiB and 256 KiB, the same 37 B with crypto on, two
+#      connections in one session, and a real HTTP request/response handshake.
 # J and K are byte-exactness probes under carrier-TCP loss; they need no
 # placeholder frame, because the sender repairs holes from the replay ring.
 #
@@ -44,16 +54,16 @@ TARGET_PORT=${TBT_TARGET_PORT:-19070}
 TARGET_PORT2=${TBT_TARGET_PORT2:-19071}
 TARGET_PORT3=${TBT_TARGET_PORT3:-19072}
 TARGET_PORT4=${TBT_TARGET_PORT4:-19073}
-MIB=${TBT_ENDPOINT_MIB:-4}
-# C and D use the same 4 MiB volume probe B proves: the strict send-then-read
+MIB=${TBT_ENDPOINT_MIB:-1}
+# C and D use the same 1 MiB volume probe B proves: the strict send-then-read
 # phase is bounded by the application's socket buffers, and a larger volume
 # would deadlock the echo path before the injection could be judged. The
 # trigger for C is a captured-byte count, not a wall-clock sleep.
-C_MIB=${TBT_C_MIB:-4}
-L_MIB=${TBT_L_MIB:-1}
-M_MIB=${TBT_M_MIB:-1}
+C_MIB=${TBT_C_MIB:-1}
+L_BYTES=${TBT_L_BYTES:-262144}
+
 N_MIB=${TBT_N_MIB:-1}
-D_MIB=${TBT_D_MIB:-4}
+D_MIB=${TBT_D_MIB:-1}
 # I needs 40 MiB through four shaped carriers; the guest raises its socket
 # buffers first so the strict phase can buffer the echo it has not read yet.
 I_MIB=${TBT_I_MIB:-40}
@@ -397,6 +407,32 @@ probe_a() {
     *tunnel\ 1\ *) fail "tunnel 1 still configured after del: $final" ;;
     esac
     echo "== probe A: pass"
+}
+
+# Run one tbt_ping with a bounded wait: a stall must fail the probe with its
+# state, not hang the boot. $1 names the probe, $2 is the byte count, $3 the
+# seconds tbt_ping itself allows for the reply.
+probe_ping_bounded() {
+    _name=$1
+    _bytes=$2
+    _to=$3
+    /bin/tbt_ping 127.0.0.1 "$PUB_PORT" "$_bytes" "$_to" &
+    _pid=$!
+    _waited=0
+    while kill -0 "$_pid" 2> /dev/null && [ "$_waited" -lt $((_to + 40)) ]; do
+        sleep 1
+        _waited=$((_waited + 1))
+    done
+    if kill -0 "$_pid" 2> /dev/null; then
+        echo "   $_name: ping still running after ${_waited}s"
+        echo "   streams:"; cat /proc/net/tbtun/streams 2> /dev/null
+        echo "   peers:"; cat "$PEERS"
+        echo "   stats: $(cat /proc/net/tbtun/stats)"
+        kill "$_pid" 2> /dev/null
+        return 1
+    fi
+    wait "$_pid"
+    return $?
 }
 
 # --- probe B: data path (loopback carriers) ---------------------------------
@@ -1084,14 +1120,16 @@ probe_l() {
     sleep 1
     echo "   tunnels:"; cat /proc/net/tbtun/tunnels
     echo "   peers:"; cat "$PEERS"
-    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$L_MIB" "${TBT_ENDPOINT_TIMEOUT:-20}"
+    # 256 KiB: 32 packets over n=4, so the block machinery is exercised
+    # without a 1 MiB transfer per probe.
+    probe_ping_bounded "probe L" "$L_BYTES" "${TBT_ENDPOINT_TIMEOUT:-20}"
     rc=$?
     echo "   stats after: $(cat /proc/net/tbtun/stats)"
     case $rc in
     0) ;;
-    2) fail "probe L: tunnel accepted the connection but carried no data (rc=2)" ;;
+    1) fail "probe L: the transfer stalled (rc=1)" ;;
     3) fail "probe L: bytes came back wrong or short (rc=3)" ;;
-    *) fail "probe L: tbt_burst exited $rc" ;;
+    *) fail "probe L: tbt_ping exited $rc" ;;
     esac
     echo "== probe L: pass"
 }
@@ -1108,14 +1146,14 @@ probe_m() {
     sleep 1
     echo "   tunnels:"; cat /proc/net/tbtun/tunnels
     echo "   peers:"; cat "$PEERS"
-    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$M_MIB" "${TBT_ENDPOINT_TIMEOUT:-20}"
+    probe_ping_bounded "probe M" "$L_BYTES" "${TBT_ENDPOINT_TIMEOUT:-20}"
     rc=$?
     echo "   stats after: $(cat /proc/net/tbtun/stats)"
     case $rc in
     0) ;;
-    2) fail "probe M: tunnel accepted the connection but carried no data (rc=2)" ;;
+    1) fail "probe M: the transfer stalled (rc=1)" ;;
     3) fail "probe M: bytes came back wrong or short (rc=3)" ;;
-    *) fail "probe M: tbt_burst exited $rc" ;;
+    *) fail "probe M: tbt_ping exited $rc" ;;
     esac
     echo "== probe M: pass"
 }
@@ -1170,7 +1208,8 @@ probe_n() {
 #
 # Every phase also asserts rx_proto=0 on both ends: a refused HELLO or chunk is
 # exactly what the far counted 27 times in the smoke.
-O_MIB=${TBT_O_MIB:-1}
+O_BYTES=${TBT_O_BYTES:-65536}
+O_BYTES_REPLACE=${TBT_O_BYTES_REPLACE:-262144}
 O_CFG="n=1 m=1 fec=on mode=grouped carriers=2 w=0 rx_reorder_bytes=1048576 tx_window_bytes=0 hole_budget_ms=0 carrier_stall_ms=15000"
 
 probe_o_up() {
@@ -1217,16 +1256,33 @@ probe_o_judge() {
 
 probe_o_burst() {
     _name=$1
-    _mib=$2
+    _bytes=$2
     _to=$3
-    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$_mib" "$_to"
+    # A stall must fail the probe with its state, not hang the boot: the guest
+    # has no other way to show why the tunnel stopped moving.
+    /bin/tbt_ping 127.0.0.1 "$PUB_PORT" "$_bytes" "$_to" &
+    _bpid=$!
+    _waited=0
+    while kill -0 "$_bpid" 2> /dev/null && [ "$_waited" -lt $((_to + 40)) ]; do
+        sleep 1
+        _waited=$((_waited + 1))
+    done
+    if kill -0 "$_bpid" 2> /dev/null; then
+        echo "   $_name: burst still running after ${_waited}s"
+        echo "   streams:"; cat /proc/net/tbtun/streams 2> /dev/null
+        echo "   peers:"; cat "$PEERS"
+        echo "   stats: $(cat /proc/net/tbtun/stats)"
+        kill "$_bpid" 2> /dev/null
+        fail "probe O $_name: the transfer stalled"
+    fi
+    wait "$_bpid"
     _rc=$?
     echo "   stats after: $(cat /proc/net/tbtun/stats)"
     case $_rc in
     0) ;;
-    2) fail "probe O $_name: tunnel accepted the connection but carried no data (rc=2)" ;;
+    1) fail "probe O $_name: the transfer stalled (rc=1)" ;;
     3) fail "probe O $_name: bytes came back wrong or short (rc=3)" ;;
-    *) fail "probe O $_name: tbt_burst exited $_rc" ;;
+    *) fail "probe O $_name: tbt_ping exited $_rc" ;;
     esac
 }
 
@@ -1234,17 +1290,17 @@ probe_o() {
     echo "== probe O: FEC v6 grouped over HTTP with crypto"
 
     probe_o_up off
-    probe_o_burst "off" "$O_MIB" "${TBT_ENDPOINT_TIMEOUT:-20}"
+    probe_o_burst "off" "$O_BYTES" "${TBT_ENDPOINT_TIMEOUT:-20}"
     probe_o_judge "off"
 
     probe_o_up on
-    probe_o_burst "on" "$O_MIB" "${TBT_ENDPOINT_TIMEOUT:-20}"
+    probe_o_burst "on" "$O_BYTES" "${TBT_ENDPOINT_TIMEOUT:-20}"
     probe_o_judge "on"
 
     # The smoke's actual failure: a carrier dies and the replacement's HELLO
     # has to join a session whose key is already known.
     probe_o_up on
-    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$O_MIB" "${TBT_ENDPOINT_TIMEOUT:-20}" &
+    /bin/tbt_ping 127.0.0.1 "$PUB_PORT" "$O_BYTES_REPLACE" 40 &
     burst_pid=$!
     sent=0
     i=0
@@ -1258,13 +1314,27 @@ probe_o() {
         fail "probe O replace: transfer finished before carrier 0 could be taken down (sent=${sent:-0})"
     echo "   taking carrier 0 down after ${sent:-0} captured bytes"
     echo 'carrier 0 down' > "$PEERS" || fail "probe O replace: carrier 0 down rejected"
+    # A stall here must fail the probe with its state, not hang the boot.
+    _waited=0
+    while kill -0 "$burst_pid" 2> /dev/null && [ "$_waited" -lt 60 ]; do
+        sleep 1
+        _waited=$((_waited + 1))
+    done
+    if kill -0 "$burst_pid" 2> /dev/null; then
+        echo "   burst still running after ${_waited}s"
+        echo "   streams:"; cat /proc/net/tbtun/streams 2> /dev/null
+        echo "   peers:"; cat "$PEERS"
+        echo "   stats: $(cat /proc/net/tbtun/stats)"
+        kill "$burst_pid" 2> /dev/null
+        fail "probe O replace: the transfer stalled after carrier 0 was taken down"
+    fi
     wait $burst_pid
     rc=$?
     case $rc in
     0) ;;
-    2) fail "probe O replace: tunnel accepted but carried no data (rc=2)" ;;
+    1) fail "probe O replace: the transfer stalled (rc=1)" ;;
     3) fail "probe O replace: bytes came back wrong or short (rc=3)" ;;
-    *) fail "probe O replace: tbt_burst exited $rc" ;;
+    *) fail "probe O replace: tbt_ping exited $rc" ;;
     esac
     lost=$(stat_sum lost)
     replaced=$(stat_sum replaced)
@@ -1280,7 +1350,7 @@ probe_o() {
     /bin/tc qdisc add dev lo root netem delay 700ms ||
         fail "probe O slow: tc qdisc add lo netem failed"
     probe_o_up on
-    probe_o_burst "slow" "$O_MIB" 60
+    probe_o_burst "slow" "$O_BYTES" 60
     _cr=$(tunnel_stat 2 connect_retry)
     echo "   slow: near connect_retry=$_cr"
     [ "${_cr:-0}" -ge 1 ] ||
@@ -1288,6 +1358,127 @@ probe_o() {
     probe_o_judge "slow"
     /bin/tc qdisc del dev lo root 2> /dev/null
     echo "== probe O: pass"
+}
+
+# --- probe P: one small message, socket left open ----------------------------
+# T5.2's second blocker: the FEC v6 packetizer emitted a share only when its
+# 8192-byte packet was full, so an application that writes a small request and
+# then waits for the answer (an HTTP request, iperf3's control cookie) waited
+# forever: the bytes sat in the ring until the close path flushed them. A 1 MiB
+# burst never shows it.
+#
+# The FEC data plane carries one stream per session (`tbt_fec_stream()` names
+# it), so every size gets a fresh tunnel: the point here is the packetizer, not
+# multi-stream FEC. Each size is chosen to cross a packet boundary in one
+# direction or the other, and tbt_ping never closes before the reply, so no FIN
+# can do the flushing for the tunnel.
+P_COMMON="n=1 m=1 fec=on mode=grouped carriers=2 w=0 crypto_key=- rx_reorder_bytes=1048576 tx_window_bytes=0 hole_budget_ms=0 carrier_stall_ms=15000"
+P_CFG="$P_COMMON crypto=off"
+P_CFG_CRYPTO="$P_COMMON crypto=on"
+probe_p_one() {
+    _sz=$1
+    _cfg=${2:-$P_CFG}
+
+    flush_and_wait
+    restart_echo
+    echo 'ports 41088-41119' > "$PORTS" || fail "probe P: ports directive rejected"
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 $_cfg" \
+        > "$CFG" || fail "probe P: far tunnel rejected"
+    echo "tunnel 2 role=near profile=http-kal listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT $_cfg" \
+        > "$CFG" || fail "probe P: near tunnel rejected"
+    sleep 1
+    # 256 KiB over a freshly created tunnel needs more than 5 s on a guest that
+    # has already run fifteen probes; the timeout is about the harness, not the
+    # product, and a stall still fails with its state dumped.
+    if [ "$_sz" -ge 65536 ]; then _to=15; else _to=5; fi
+    probe_ping_bounded "probe P size=$_sz" "$_sz" "$_to"
+    _rc=$?
+    echo "   size=$_sz rc=$_rc short_tx=$(tunnel_stat 2 fec_short_tx) short_unknown=$(tunnel_stat 1 fec_short_unknown)"
+    echo "   far: $(awk '$1 == "tunnel" && $3 == "c9"' /proc/net/tbtun/stats)"
+    echo "   near: $(awk '$1 == "tunnel" && $3 == "c9"' /proc/net/tbtun/stats)"
+    return $_rc
+}
+# A real HTTP request/response handshake through the tunnel: busybox httpd is
+# the far target, and the client keeps its half of the connection open for 3 s
+# after writing the request, so no FIN can flush the request for the tunnel.
+# This is the shape of the T5.2 smoke's iperf3 control exchange and of any
+# request/response protocol over the tunnel.
+P_HTTPD_PORT=${TBT_P_HTTPD_PORT:-19280}
+probe_p_http() {
+    echo "   http: request/response with the client side still open"
+    echo "probe-p-ok" > /tmp/probe-p.txt
+    httpd -f -h /tmp -p "$P_HTTPD_PORT" &
+    httpd_pid=$!
+    _listen=0
+    for _i in 1 2 3 4 5 6 7 8 9 10; do
+        if printf '' | nc -w 1 127.0.0.1 "$P_HTTPD_PORT" > /dev/null 2>&1; then
+            _listen=1
+            break
+        fi
+        sleep 0.5
+    done
+    [ "$_listen" -eq 1 ] || fail "probe P: httpd is not listening on $P_HTTPD_PORT"
+    flush_and_wait
+    echo 'ports 41088-41119' > "$PORTS" || fail "probe P: ports directive rejected"
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$P_HTTPD_PORT $P_CFG" \
+        > "$CFG" || fail "probe P: far tunnel rejected (http)"
+    echo "tunnel 2 role=near profile=http-kal listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT $P_CFG" \
+        > "$CFG" || fail "probe P: near tunnel rejected (http)"
+    sleep 1
+    # The client keeps its half open for 3 s, so the request cannot be flushed
+    # by a FIN; -w bounds the wait after stdin closes so a stall fails in 8 s
+    # instead of hanging the run.
+    _resp=$({ printf 'GET /probe-p.txt HTTP/1.0\r\nHost: probe\r\n\r\n'; sleep 3; } |
+        nc -w 8 127.0.0.1 "$PUB_PORT" 2> /dev/null)
+    echo "   http: response $(printf '%s' "$_resp" | head -1)"
+    # The near's own request block, as it went on the wire (the procfs snapshot
+    # keeps the header and the first chunk).
+    echo "   http: request block:"; sed -n '1,12p' /proc/net/tbtun/http 2> /dev/null
+    case "$_resp" in
+    *probe-p-ok*) ;;
+    *)
+        echo "   http: streams:"; cat /proc/net/tbtun/streams 2> /dev/null
+        echo "   http: peers:"; cat "$PEERS"
+        fail "probe P: the HTTP response never arrived (request held in the packetizer)"
+        ;;
+    esac
+    kill "$httpd_pid" 2> /dev/null
+}
+
+# The smoke's real shape: iperf3 opens its control connection first (a 37-byte
+# cookie), gets the answer, and only then opens the data connection. That is a
+# second stream in the same session, which the FEC data plane has to place
+# after the first one.
+probe_p_two() {
+    echo "   two: a second connection in the same session"
+    flush_and_wait
+    restart_echo
+    echo 'ports 41088-41119' > "$PORTS" || fail "probe P: ports directive rejected"
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 $P_CFG" \
+        > "$CFG" || fail "probe P: far tunnel rejected (two)"
+    echo "tunnel 2 role=near profile=http-kal listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT $P_CFG" \
+        > "$CFG" || fail "probe P: near tunnel rejected (two)"
+    sleep 1
+    /bin/tbt_ping 127.0.0.1 "$PUB_PORT" 37 5 || fail "probe P two: the first connection (37 bytes) failed"
+    /bin/tbt_ping 127.0.0.1 "$PUB_PORT" 65536 10 || fail "probe P two: the second connection (64 KiB) failed"
+    echo "   two: both connections crossed"
+}
+
+probe_p() {
+    echo "== probe P: small message round trip, socket left open"
+    _bad=0
+    for _sz in 37 8191 8192 8193 65536 262144; do
+        probe_p_one "$_sz"
+        [ "$?" -eq 0 ] || _bad=$((_bad + 1))
+    done
+    [ "$_bad" -eq 0 ] || fail "probe P: $_bad of 6 sizes did not come back"
+    # The same 37-byte exchange with the session key generated and carried in
+    # HELLO, so the flush is exercised with crypto on.
+    probe_p_one 37 "$P_CFG_CRYPTO" ||
+        fail "probe P: 37 bytes did not come back with crypto=on"
+    probe_p_two
+    probe_p_http
+    echo "== probe P: pass"
 }
 
 # --- run the selected probes ------------------------------------------------
@@ -1314,6 +1505,7 @@ want L && run_probe L
 want M && run_probe M
 want N && run_probe N
 want O && run_probe O
+want P && run_probe P
 
 echo 'flush' > "$CFG" 2> /dev/null || true
 for _p in "$echo_pid" "${echo2_pid:-}" "${echo3_pid:-}"; do

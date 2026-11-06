@@ -516,7 +516,7 @@ static int send_request(int fd, int no_host, int big_header)
     off += (size_t)snprintf(buf + off, sizeof(buf) - off, "Accept: */*\r\n");
     off += (size_t)snprintf(buf + off, sizeof(buf) - off, "Accept-Encoding: identity\r\n");
     off += (size_t)snprintf(buf + off, sizeof(buf) - off,
-                            "Content-Type: application/octet-stream\r\n");
+                            "Content-Type: application/gzip\r\n");
     off += (size_t)snprintf(buf + off, sizeof(buf) - off, "Transfer-Encoding: chunked\r\n");
     off += (size_t)snprintf(buf + off, sizeof(buf) - off, "Connection: keep-alive\r\n");
     off += (size_t)snprintf(buf + off, sizeof(buf) - off, "X-Request-Id: %s\r\n", REQID);
@@ -538,7 +538,7 @@ static int send_response_header(int fd, int bad_kind)
     switch (bad_kind)
     {
     case 0: /* non-chunked, Content-Length */
-        h = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
+        h = "HTTP/1.1 200 OK\r\nContent-Type: application/gzip\r\n"
             "Content-Length: 10\r\nConnection: keep-alive\r\n\r\n0123456789";
         break;
     case 1: /* 500 */
@@ -549,7 +549,7 @@ static int send_response_header(int fd, int bad_kind)
     {
         static char big[10000];
         size_t off = (size_t)snprintf(big, sizeof(big),
-                                      "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream"
+                                      "HTTP/1.1 200 OK\r\nContent-Type: application/gzip"
                                       "\r\nTransfer-Encoding: chunked\r\nConnection: keep-alive"
                                       "\r\nX-Big: ");
         memset(big + off, 'b', 9000);
@@ -559,11 +559,11 @@ static int send_response_header(int fd, int bad_kind)
         return send_all(fd, big, off);
     }
     case 3: /* keep-alive refused */
-        h = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
+        h = "HTTP/1.1 200 OK\r\nContent-Type: application/gzip\r\n"
             "Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n";
         break;
     default: /* good */
-        h = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
+        h = "HTTP/1.1 200 OK\r\nContent-Type: application/gzip\r\n"
             "Transfer-Encoding: chunked\r\nConnection: keep-alive\r\nServer: nginx\r\n"
             "Date: Thu, 01 Jan 1970 00:00:00 GMT\r\n\r\n";
         break;

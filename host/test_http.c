@@ -1059,7 +1059,7 @@ static void test_request(void)
     };
     static const char *const values[] = {
         "203.0.113.9", ua_string, "*/*", "identity",
-        "application/octet-stream", "chunked", "keep-alive",
+        "application/gzip", "chunked", "keep-alive",
         "abcdefghijklmnopqrstuvwxyz",
     };
     size_t n, i, m;
@@ -1200,7 +1200,7 @@ static size_t make_req(char *buf, size_t cap, const char *host, const char *id, 
                      "User-Agent: %s\r\n"
                      "Accept: */*\r\n"
                      "Accept-Encoding: identity\r\n"
-                     "Content-Type: application/octet-stream\r\n"
+                     "Content-Type: application/gzip\r\n"
                      "Transfer-Encoding: chunked\r\n"
                      "Connection: keep-alive\r\n"
                      "X-Request-Id: %s\r\n"
@@ -1391,7 +1391,7 @@ static void test_req_parse(void)
              "Host: 203.0.113.9\r\n"
              "Accept: */*\r\n"
              "Accept-Encoding: identity\r\n"
-             "Content-Type: application/octet-stream\r\n"
+             "Content-Type: application/gzip\r\n"
              "Transfer-Encoding: chunked\r\n"
              "Connection: keep-alive\r\n"
              "X-Request-Id: abcd234567abcdefghijklmnop\r\n"
@@ -1608,7 +1608,7 @@ static void test_response(void)
 {
     static const char good[] =
         "HTTP/1.1 200 OK\r\n"
-        "Content-Type: application/octet-stream\r\n"
+        "Content-Type: application/gzip\r\n"
         "Transfer-Encoding: chunked\r\n"
         "Connection: keep-alive\r\n"
         "Server: nginx\r\n"
@@ -1765,7 +1765,7 @@ static void test_resp_header(void)
     struct tbt_http_resp_cfg cfg = { .unix_secs = 1700000000 };
     static const char want[] =
         "HTTP/1.1 200 OK\r\n"
-        "Content-Type: application/octet-stream\r\n"
+        "Content-Type: application/gzip\r\n"
         "Transfer-Encoding: chunked\r\n"
         "Connection: keep-alive\r\n"
         "Server: nginx\r\n"

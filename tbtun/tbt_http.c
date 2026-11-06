@@ -145,7 +145,7 @@ size_t tbt_http_req_header(char *buf, size_t cap, const struct tbt_http_cfg *cfg
     off = http_puts(buf, cap, off, "User-Agent: " TBT_HTTP_USER_AGENT "\r\n");
     off = http_puts(buf, cap, off, "Accept: */*\r\n");
     off = http_puts(buf, cap, off, "Accept-Encoding: identity\r\n");
-    off = http_puts(buf, cap, off, "Content-Type: application/octet-stream\r\n");
+    off = http_puts(buf, cap, off, "Content-Type: " TBT_HTTP_CONTENT_TYPE "\r\n");
     off = http_puts(buf, cap, off, "Transfer-Encoding: chunked\r\n");
     off = http_puts(buf, cap, off, "Connection: keep-alive\r\n");
     off = http_puts(buf, cap, off, "X-Request-Id: ");
@@ -233,7 +233,7 @@ size_t tbt_http_resp_header(char *buf, size_t cap, const struct tbt_http_resp_cf
         return 0;
 
     off = http_puts(buf, cap, off, "HTTP/1.1 200 OK\r\n");
-    off = http_puts(buf, cap, off, "Content-Type: application/octet-stream\r\n");
+    off = http_puts(buf, cap, off, "Content-Type: " TBT_HTTP_CONTENT_TYPE "\r\n");
     off = http_puts(buf, cap, off, "Transfer-Encoding: chunked\r\n");
     off = http_puts(buf, cap, off, "Connection: keep-alive\r\n");
     off = http_puts(buf, cap, off, "Server: nginx\r\n");
@@ -552,7 +552,7 @@ size_t tbt_http_req_parse(const char *buf, size_t len, struct tbt_http_req *out,
     };
     static const char *const values[8] = {
         NULL, TBT_HTTP_USER_AGENT, "*/*", "identity",
-        "application/octet-stream", "chunked", "keep-alive", NULL,
+        TBT_HTTP_CONTENT_TYPE, "chunked", "keep-alive", NULL,
     };
     struct tbt_http_req r = {};
     size_t pos, end, next;

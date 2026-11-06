@@ -233,11 +233,13 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
             return -EPROTO;
         if (!h->payload_len)
             return -EPROTO;
-        /* A short DATA packet is the last one; a short non-last packet would
-         * make the stream length ambiguous. */
-        if (h->type == TBT_FEC_DATA && h->payload_len < max_payload &&
-            !(h->flags & TBT_FEC_FF_LAST))
-            return -EPROTO;
+        /* A short DATA packet is legal anywhere. The packetizer emits one when
+         * the application goes quiet and the packet cannot fill, so an
+         * interactive request is not held behind 8192 bytes that never come.
+         * The receiver places a share by the sum of the payload lengths before
+         * it, not by the packet index times S, so a short share mid-stream is
+         * unambiguous; LAST alone marks the end of the stream. */
+
         if (h->seq >= (1ULL << 63))
             return -EPROTO;
         if (h->type == TBT_FEC_DATA)

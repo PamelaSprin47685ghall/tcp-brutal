@@ -28,13 +28,13 @@ EXPECTED_REQUEST_HEADERS = [
     ),
     (b"Accept", b"*/*"),
     (b"Accept-Encoding", b"identity"),
-    (b"Content-Type", b"application/octet-stream"),
+    (b"Content-Type", b"application/gzip"),
     (b"Transfer-Encoding", b"chunked"),
     (b"Connection", b"keep-alive"),
     (b"X-Request-Id", b"abcd234567abcdefghijklmnop"),
 ]
 EXPECTED_RESPONSE_HEADERS = [
-    (b"Content-Type", b"application/octet-stream"),
+    (b"Content-Type", b"application/gzip"),
     (b"Transfer-Encoding", b"chunked"),
     (b"Connection", b"keep-alive"),
     (b"Server", b"nginx"),

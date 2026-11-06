@@ -324,17 +324,18 @@ static void test_hdr_check(void)
     h.share_index = 7;
     ok_int(tbt_fec_hdr_check(&h, 64), 0, "PARITY share_index=n+m-1");
 
-    /* DATA payload may be short (last packet), but never zero or over S. */
+    /* DATA payload may be short anywhere (the packetizer flushes a partial
+     * packet when the application goes quiet), but never zero or over S. */
     h = data_hdr();
     h.flags = TBT_FEC_FF_LAST;
     h.payload_len = 1;
     ok_int(tbt_fec_hdr_check(&h, 64), 0, "DATA payload_len=1 with LAST");
     h = data_hdr();
     h.payload_len = 1;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "DATA payload_len=1 without LAST");
+    ok_int(tbt_fec_hdr_check(&h, 64), 0, "DATA payload_len=1 without LAST");
     h = data_hdr();
     h.payload_len = 63;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "DATA short payload without LAST");
+    ok_int(tbt_fec_hdr_check(&h, 64), 0, "DATA short payload without LAST");
     h = data_hdr();
     h.flags = TBT_FEC_FF_LAST;
     h.payload_len = 64;

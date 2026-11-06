@@ -37,6 +37,15 @@
 
 #define TBT_FEC_TX_RING (256 * 1024)
 #define TBT_FEC_S TBT_FEC_PAYLOAD_MAX
+
+/* How long a partial packet may wait for company. The packetizer emits a
+ * share only when its packet is full, so an application that writes a small
+ * request and then waits for the answer -- an HTTP request, iperf3's control
+ * cookie -- would wait for 8192 bytes that never come, and the tunnel would
+ * look connected and silent. 2 ms is above the gap between two writes of a
+ * saturating sender, so bulk traffic still fills its packets, and far below
+ * any round trip, so an interactive exchange pays one tick. */
+#define TBT_FEC_SHORT_MS 2
 #define TBT_FEC_NONCE_GOLDEN 0x9e3779b97f4a7c15ULL
 #define TBT_FEC_RX_BUDGET (16u * 1024 * 1024)
 
@@ -280,6 +289,7 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess, u16 group,
         h.seq = last_seq;
         h.win_len = win_len;
         h.payload_len = TBT_FEC_S;
+        h.epoch = (u16)(g->last_len && g->last_len < TBT_FEC_S ? g->last_len : 0);
         h.conv = TBT_FEC_CONV;
         if (tbt_fec_make_record(sess, &h, tx->parity_ptrs[i], tx->rec, &rec_len))
             continue;
@@ -289,31 +299,51 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess, u16 group,
     }
 }
 
+/* End the block under construction. Every group that wrote packets into it
+ * gets parity over its zero-filled tail with win_len = its real packet count,
+ * which is how the receiver learns the block is short; the parity also states
+ * the last real share's length in `epoch`, so a receiver that has to recover
+ * that share still knows how long it was.
+ *
+ * `advance` moves the packet numbering to the next block, for a block that was
+ * closed before it filled. The receiver derives everything from the block's
+ * first seq and `win_len`, so skipping the block's unused seq range is exact;
+ * a block is only ever closed early when every group has a real packet in it,
+ * which is what the super-block walk needs. */
+static void tbt_fec_tx_close_block(struct tbt_session *sess, bool advance)
+{
+    struct tbt_fec_tx *tx = sess->fec_tx;
+    u64 block_id = tx->cur_block;
+    u16 group;
+
+    for (group = 0; group < tx->groups; group++)
+    {
+        u16 len = tx->g[group].nreal;
+
+        if (!len || len >= tx->n)
+            continue;
+        memset(tx->g[group].blk + (size_t)len * TBT_FEC_S, 0,
+               (size_t)(tx->n - len) * TBT_FEC_S);
+        tbt_fec_tx_emit_parity(sess, group, block_id, len);
+        tx->g[group].nreal = 0;
+    }
+    if (advance)
+    {
+        tx->seq = (block_id + 1) * (u64)tx->n * tx->groups +
+                  (tx->seq % tx->groups);
+        tx->cur_block = block_id + 1;
+    }
+}
+
 /* Flush the stream: every group whose final block is short gets parity over
  * its zero-filled tail, so a lost real share is still recoverable and the
  * receiver learns the real length from win_len. Groups whose final block is
  * full already sent their parity when the block completed. */
 static void tbt_fec_tx_finish(struct tbt_session *sess)
 {
-    struct tbt_fec_tx *tx = sess->fec_tx;
-    u64 last;
-    u16 group;
-
-    if (!tx->seq)
+    if (!sess->fec_tx->seq)
         return;
-    last = tx->seq - 1;
-    for (group = 0; group < tx->groups && group <= last; group++)
-    {
-        u64 local = (last - group) / tx->groups;
-        u16 len = (u16)(local % tx->n) + 1;
-        u64 block_id = local / tx->n;
-
-        if (len == tx->n)
-            continue;
-        memset(tx->g[group].blk + (size_t)len * TBT_FEC_S, 0,
-               (size_t)(tx->n - len) * TBT_FEC_S);
-        tbt_fec_tx_emit_parity(sess, group, block_id, len);
-    }
+    tbt_fec_tx_close_block(sess, false);
 }
 
 static void tbt_fec_packetize(struct tbt_session *sess, bool last)
@@ -334,6 +364,9 @@ static void tbt_fec_packetize(struct tbt_session *sess, bool last)
     block_id = local / tx->n;
     carrier = (u16)(group * (tx->n + tx->m) + share);
 
+    tx->short_at_ns = 0;
+    if (len < TBT_FEC_S)
+        atomic64_inc(&sess->fec_short_tx);
     memset(&h, 0, sizeof(h));
     h.type = TBT_FEC_DATA;
     h.flags = last ? TBT_FEC_FF_LAST : 0;
@@ -344,6 +377,9 @@ static void tbt_fec_packetize(struct tbt_session *sess, bool last)
     h.seq = seq;
     h.win_len = 0;
     h.payload_len = len;
+    /* The block's last real share length, for the receiver's parity decode: a
+     * recovered share has no payload_len of its own (TBT_FEC_H_EPOCH). */
+    h.epoch = (u16)(len < TBT_FEC_S ? len : 0);
     h.conv = TBT_FEC_CONV;
     if (!tbt_fec_make_record(sess, &h, tx->pkt, rec, &rec_len))
         (void)tbt_fec_send_record(sess, carrier, rec, rec_len, false);
@@ -355,9 +391,15 @@ static void tbt_fec_packetize(struct tbt_session *sess, bool last)
         memset(tx->g[group].blk + (size_t)share * TBT_FEC_S + len, 0,
                TBT_FEC_S - len);
     tx->fill = 0;
+    tx->cur_block = block_id;
+    tx->g[group].nreal = (u16)(share + 1);
+    tx->g[group].last_len = len;
 
     if (share + 1 == tx->n)
-        tbt_fec_tx_emit_parity(sess, group, block_id, tx->n);
+    {
+        tbt_fec_tx_emit_parity(sess, group, block_id, tx->g[group].nreal);
+        tx->g[group].nreal = 0;
+    }
     if (last)
         tbt_fec_tx_finish(sess);
 }
@@ -385,6 +427,7 @@ void tbt_fec_tx_work(struct work_struct *w)
     struct tbt_fec_tx *tx = sess->fec_tx;
     struct tbt_stream *st;
     bool paused = false;
+    bool short_ready;
 
     if (!tx || READ_ONCE(sess->closing))
         return;
@@ -436,6 +479,67 @@ void tbt_fec_tx_work(struct work_struct *w)
             continue;
         }
         break;
+    }
+    spin_lock(&tx->lock);
+    short_ready = tx->fill && tx->head == tx->tail;
+    spin_unlock(&tx->lock);
+    if (short_ready && !READ_ONCE(tx->flush_req))
+    {
+        /* The ring is dry and the packet is short: emit it once the
+         * application has been quiet for TBT_FEC_SHORT_MS. The share carries
+         * its real payload_len and its block slot stays zero-padded, so parity
+         * still describes the truth, and the receiver places the next share
+         * right after it (the delivery offset is the sum of the payload
+         * lengths, not the packet index times S).
+         *
+         * A flushed share only helps if its block can be ended with it: the
+         * receiver delivers a block only when every real share is present or
+         * recoverable, so a share that leaves its block short would hold the
+         * whole stream until the application happened to write another
+         * packet. The block therefore ends here, either because this share is
+         * its last one or by closing it with win_len = its real count and
+         * moving to the next block. The second form needs a real packet in
+         * every group, or that group's block would be empty and the
+         * super-block walk would wait for shares that are not coming. */
+        u64 local = tx->seq / tx->groups;
+        u16 share = (u16)(local % tx->n);
+        bool completes = (u16)(share + 1) == tx->n;
+        bool flushable = completes;
+        u64 now = ktime_get_ns();
+        u16 g;
+
+        if (!flushable)
+        {
+            flushable = true;
+            for (g = 0; g < tx->groups; g++)
+            {
+                if (!tx->g[g].nreal)
+                {
+                    flushable = false;
+                    break;
+                }
+            }
+        }
+        if (!flushable)
+        {
+            tx->short_at_ns = 0;
+        }
+        else if (!tx->short_at_ns)
+        {
+            tx->short_at_ns = now + (u64)TBT_FEC_SHORT_MS * NSEC_PER_MSEC;
+            mod_delayed_work(system_wq, &sess->w_fec_tx,
+                             msecs_to_jiffies(TBT_FEC_SHORT_MS));
+        }
+        else if (now >= tx->short_at_ns)
+        {
+            tbt_fec_packetize(sess, false);
+            if (!completes)
+                tbt_fec_tx_close_block(sess, true);
+        }
+    }
+    else
+    {
+        tx->short_at_ns = 0;
     }
     if (paused)
     {
@@ -519,6 +623,8 @@ static void tbt_fec_blk_reset(struct tbt_fec_blk *b, u64 block_id)
     b->used = true;
     b->ready = false;
     b->nreal = 0;
+    b->short_len = 0;
+    b->short_unknown = false;
     b->block_id = block_id;
     memset(b->dpresent, 0, TBT_FEC_MAX_SHARES);
     memset(b->ppresent, 0, TBT_FEC_MAX_SHARES);
@@ -535,7 +641,11 @@ static u16 tbt_fec_blk_real_len(const struct tbt_fec_rx *rx, u16 group,
 {
     u16 len = b->nreal ? b->nreal : rx->n;
 
-    if (rx->total_known)
+    /* A block that was closed early has fewer real shares than n, and its
+     * parity says so. The stream-length formula below describes the standard
+     * layout, which a skipped seq range no longer matches, so it is only the
+     * fallback for a block whose parity was lost. */
+    if (!b->nreal && rx->total_known)
     {
         u64 final = tbt_fec_final_block_of_total(rx->total_pkts, rx->groups,
                                                  rx->n);
@@ -591,6 +701,28 @@ static int tbt_fec_blk_decode(struct tbt_session *sess, u16 group,
         return 0;
     if (!ctx || have_parity < missing)
         return -EAGAIN;
+    /* A recovered share has no payload_len of its own; its delivery length is
+     * the block's last-real-share length from the parity's epoch field, or S
+     * when that is zero. A block that holds a short share and states no length
+     * (a peer from before the epoch field carried it) would have to be guessed,
+     * and the guess would hand the application the block's zero padding.
+     * Refuse it instead: the sender's stall timer is the bound, and the counter
+     * says why the stream stopped. */
+    if (missing && !b->short_len)
+    {
+        for (i = 0; i < len; i++)
+        {
+            if (b->dpresent[i] && b->dlen[i] && b->dlen[i] < rx->s)
+            {
+                if (!b->short_unknown)
+                {
+                    b->short_unknown = true;
+                    atomic64_inc(&sess->fec_short_unknown);
+                }
+                return -EAGAIN;
+            }
+        }
+    }
     tbt_fec_rlnc_set_nonce(ctx, tbt_fec_group_nonce(tbt_fec_base_nonce(sess),
                                                     group, b->block_id));
     rc = tbt_fec_rlnc_decode(ctx, rx->data_ptrs, rx->parity_ptrs, b->dpresent,
@@ -666,10 +798,24 @@ static void tbt_fec_deliver_ready(struct tbt_session *sess)
     st = tbt_fec_stream(sess);
     if (!st)
         return;
+    /* A new connection in the same session: the session's packet and byte
+     * counters keep running, but the stream starts at byte 0 and its own LAST
+     * will name its own end. Without this the second stream of a session (the
+     * data connection after iperf3's control connection) was delivered at the
+     * first stream's offsets and never reached the application. */
+    if (rx->stream_sid != st->sid)
+    {
+        rx->stream_sid = st->sid;
+        rx->stream_base = rx->deliver_bytes;
+        rx->total_known = false;
+        rx->total_pkts = 0;
+        rx->total_bytes = 0;
+    }
     for (;;)
     {
         u64 s = rx->next_super;
         u64 base = s * (u64)rx->groups * rx->n;
+        u64 off = rx->deliver_bytes;
         u16 p, group;
 
         if (rx->total_known)
@@ -693,22 +839,38 @@ static void tbt_fec_deliver_ready(struct tbt_session *sess)
                 if (rx->total_known && seq >= rx->total_pkts)
                     continue;
                 b = tbt_fec_rx_blk(rx, group, s);
-                len = b->dlen[p] ? b->dlen[p] : rx->s;
+                /* A block that was closed early has fewer real shares than n;
+                 * the rest are the encoder's zero padding and carry no stream
+                 * bytes. */
+                {
+                    u16 real = tbt_fec_blk_real_len(rx, group, b);
+
+                    if (p >= real)
+                        continue;
+                    if (b->dlen[p])
+                        len = b->dlen[p];
+                    else if (b->short_len && p + 1 == real)
+                        len = b->short_len;
+                    else
+                        len = rx->s;
+                }
                 if (rx->total_known && rx->total_bytes &&
                     seq + 1 == rx->total_pkts)
                 {
-                    u64 tail = rx->total_bytes -
-                               (rx->total_pkts - 1) * (u64)rx->s;
+                    u64 done = off - rx->stream_base;
+                    u64 tail = rx->total_bytes - done;
 
                     if (tail > 0 && tail <= rx->s)
                         len = (u16)tail;
                 }
-                tbt_rx_fec_deliver(st, seq * rx->s,
+                tbt_rx_fec_deliver(st, off - rx->stream_base,
                                    b->data + (size_t)p * rx->s, len);
+                off += len;
                 delivered = true;
             }
         }
         rx->next_super++;
+        rx->deliver_bytes = off;
         rx->next_deliver = (s + 1) * (u64)rx->groups * rx->n;
         if (rx->total_known && rx->next_deliver > rx->total_pkts)
             rx->next_deliver = rx->total_pkts;
@@ -785,7 +947,10 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
             (h.type == TBT_FEC_DATA || h.type == TBT_FEC_PARITY))
         {
             if (!smp_load_acquire(&sess->crypto_ready))
+            {
+                atomic64_inc(&sess->fec_drop_crypto);
                 return 0;
+            }
             if (tbt_crypto_body_xor_share(&sess->crypto_ctx.rx, h.seq,
                                           h.type == TBT_FEC_PARITY,
                                           h.share_index,
@@ -811,6 +976,12 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         st = tbt_fec_stream(sess);
         if (st)
         {
+            /* The ACK names a packet frontier; the packetizer now emits
+             * shares shorter than S, so the byte offset this computes is an
+             * over-estimate. It never under-acks, so nothing that waits on
+             * tx_ack stalls: the FEC plane has no replay to trim (FBK/SACK and
+             * the retransmit ring are off for fec), and the FIN gate is
+             * already covered by tbt_fec_tx_idle(). */
             u64 acked = a.next_deliver * TBT_FEC_S;
 
             if (acked > READ_ONCE(st->tx_seq))
@@ -856,6 +1027,8 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
     if (h.block_id < rx->next_super ||
         h.block_id >= rx->next_super + rx->slots)
     {
+        if (h.block_id >= rx->next_super + rx->slots)
+            atomic64_inc(&sess->fec_drop_window);
         spin_unlock_bh(&rx->lock);
         return 0; /* already delivered, or too far ahead to buffer */
     }
@@ -869,6 +1042,8 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         memcpy(b->data + (size_t)share * rx->s, payload, h.payload_len);
         b->dlen[share] = h.payload_len;
         b->dpresent[share] = 1;
+        if (h.epoch)
+            b->short_len = h.epoch;
         if (h.flags & TBT_FEC_FF_LAST)
         {
             if (!rx->total_known)
@@ -885,6 +1060,8 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
 
         memcpy(b->parity + (size_t)idx * rx->s, payload, h.payload_len);
         b->ppresent[idx] = 1;
+        if (h.epoch)
+            b->short_len = h.epoch;
         if (h.win_len < rx->n &&
             (!b->nreal || h.win_len < b->nreal))
             b->nreal = h.win_len;
@@ -909,6 +1086,11 @@ void tbt_fec_rx_fin(struct tbt_session *sess, u64 total_bytes)
     spin_lock_bh(&rx->lock);
     if (!rx->total_known)
     {
+        /* LAST was lost: the byte count is the only statement of the stream's
+         * end. The packet count derived from it is an upper bound now that a
+         * share may be shorter than S, which is why LAST is the primary source
+         * (the packetizer writes it before the FIN, so this branch is the
+         * damaged case). */
         rx->total_bytes = total_bytes;
         rx->total_pkts = total_bytes ?
             (total_bytes + rx->s - 1) / rx->s : 0;
