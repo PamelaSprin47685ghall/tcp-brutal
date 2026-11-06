@@ -559,9 +559,11 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 ### 5.2 冲突文件与合并顺序
 
-**合并列车（用户裁决）：`w-window` → `w-fec-v6` → `w-crypto` → `w-sclc` → `w-hnd0` → master（F/T7）。**
+**合并列车（用户裁决，2026-11-06 更新）：`w-window` → `w-fec-v6`（单组 raw/http，fc5ac01）→ `w-fec-grouped`（32×8，从 fc5ac01）→ `w-crypto` → `w-sclc` → `w-hnd0` → master（F/T7）。**
 每一步只在 master 上合并前一等的 head；不允许跨序合并。D 的当前 worktree 仍是 `w-fec`，合并前改名为 `w-sclc` 或由 F 记录等价映射；不得因此改变 D 的提交内容。
-**`w-window` 已合入 master `c508a10`（2026-11-06；tested 0888ce4，ko a6e459f6/srcversion 711422E4；merge 后 `make check` 绿）。下一步 B `w-fec-v6` merge `c508a10` 并接 FEC 数据面。**
+**`w-window` 已合入 master `c508a10`（2026-11-06；tested 0888ce4，ko a6e459f6/srcversion 711422E4；merge 后 `make check` 绿）。`w-fec-v6` 已在 `fc5ac01`（单组 raw/http）；grouped 由 `w-fec-grouped` 从 fc5ac01 独占，避免同 worktree 冲突；T2 parent 等 grouped。**
+
+**T2 grouped ownership（2026-11-06）**：`w-fec-v6` 保持 `fc5ac01` 单组不动；`w-fec-grouped` 从 `fc5ac01` 新建，独占 32×8 grouped 数据面（组重组/ACK/FBK/HTTP、host 32×8、QEMU 小 grouped）；合并顺序 `w-fec-v6 → w-fec-grouped → integration`。T5.2 等 T2 grouped。
 
 | 文件 | 冲突方 | 裁决 |
 |---|---|---|
