@@ -1,0 +1,11 @@
+== clean ==
+rm -f dkms.conf
+rm -f dkms.tar.gz
+rm -f host/test_parse host/test_fuzz host/test_http host/test_http_live host/test_reorder host/test_control host/test_multistream host/test_anchor host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san
+make -C /home/kunweiz/.cache/tbtun-build/linux72-headers/usr/lib/modules/7.2.9-1-MANJARO/build M=/home/kunweiz/tbtun-worktrees/window  clean
+make[1]: Entering directory '/home/kunweiz/.cache/tbtun-build/linux72-headers/usr/lib/modules/7.2.9-1-MANJARO/build'
+make[2]: Entering directory '/home/kunweiz/tbtun-worktrees/window'
+  CLEAN   Module.symvers
+make[2]: Leaving directory '/home/kunweiz/tbtun-worktrees/window'
+make[1]: Leaving directory '/home/kunweiz/.cache/tbtun-build/linux72-headers/usr/lib/modules/7.2.9-1-MANJARO/build'
+clean rc=0

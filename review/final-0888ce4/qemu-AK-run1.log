@@ -1,0 +1,57 @@
+mkinitramfs: endpoint /home/kunweiz/tbtun-worktrees/window/host/tbt_burst
+mkinitramfs: /home/kunweiz/.cache/tbtun-build/qemu/initramfs.cpio.gz (5.7M)
+run.sh: qemu accel=kvm kernel=vmlinuz-7.2.9-1-MANJARO timeout=480s probes=A,B,C,D,E,F,G,H,I,J,K net=1
+run.sh: qemu exited 0; console tail (/home/kunweiz/.cache/tbtun-build/qemu/console.log):
+    [  191.001985] tbtun: hole depthfail seq=470881 g=1 mask=0x1
+    [  191.014266] tbtun: hole depthfail seq=470881 g=1 mask=0x1
+    [  191.041210] tbtun: hole depthfail seq=470881 g=1 mask=0x7
+    [  191.050215] tbtun: hole depthfail seq=495457 g=1 mask=0x9
+    [  191.052859] tbtun: hole depthfail seq=495457 g=1 mask=0xd
+    [  191.073974] tbtun: hole depthfail seq=626476 g=1 mask=0xf
+    [  192.792416] tbtun: carrier stall idx=0 gen=1 una=2419825977 nxt=2419835661 wmem=81021 snd_wnd=65535 rcv_wnd=1045313 state=1
+    [  192.834126] tbt_tx_retx: 40 callbacks suppressed
+    [  192.834129] tbtun: hole declare seq=2293601 timer age_us=508676 mask=0x0 sends=1 dup_pend=0
+    [  192.836275] tbtun: hole declare seq=2539043 timer age_us=309254 mask=0x0 sends=1 dup_pend=0
+    [  192.838956] tbtun: hole declare seq=2772515 timer age_us=126475 mask=0x0 sends=1 dup_pend=0
+    [  192.946495] tbt_tx_holes_repaired: 40 callbacks suppressed
+    [  192.946527] tbtun: hole repair seq=2293601 age_us=112404
+    [  192.948542] tbtun: hole repair seq=2539043 age_us=112268
+    [  192.949391] tbtun: hole repair seq=2772515 age_us=110459
+    burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+    [  194.106278] tbtun: retx wndshort seq=4308992 len=8192 total=8224 wnd=65535 inflight=61861 wnd_avail=3674 mem_avail=2031451
+    [  194.790609] tbt_tx_hole_check: 676 callbacks suppressed
+    [  194.790617] tbtun: hole gatefail seq=4685506 mask=0x2 ack=4685506
+    [  194.793927] tbtun: hole gatefail seq=4595447 mask=0x8 ack=4595447
+    [  194.794814] tbtun: hole gatefail seq=4595447 mask=0x8 ack=4595447
+    [  194.795701] tbtun: hole gatefail seq=4595447 mask=0x8 ack=4595447
+    [  194.796578] tbtun: hole gatefail seq=4595447 mask=0x8 ack=4595447
+    [  194.801534] tbtun: hole gatefail seq=4685506 mask=0x2 ack=4685506
+    [  194.812569] tbtun: hole gatefail seq=4685506 mask=0x2 ack=4685506
+    [  194.815630] tbtun: hole gatefail seq=4652791 mask=0x4 ack=4652791
+    [  194.816514] tbtun: hole gatefail seq=4652791 mask=0x4 ack=4652791
+    [  194.817497] tbtun: hole gatefail seq=4652791 mask=0x4 ack=4652791
+    burst: interleaved coverage phase passed
+    burst: 4 MiB crossed each way
+       holes_repaired=3 holes_unrecoverable=0 carrier_lost=0
+    punt!
+    == probe K: pass
+    TBT_PROBE_RESULT K PASS
+    cat: read error: Connection reset by peer
+    punt!
+    punt!
+    TBT_TEST_PASS
+    [  199.377903] ACPI: PM: Preparing to enter system sleep state S5
+    [  199.378859] reboot: Power down
+run.sh: probe summary
+  A   PASS
+  B   PASS
+  C   PASS
+  D   PASS
+  E   PASS
+  F   PASS
+  G   PASS
+  H   PASS
+  I   PASS
+  J   PASS
+  K   PASS
+run.sh: PASS: 11 probe(s) passed, 0 skipped
