@@ -71,6 +71,18 @@ and moves independently of the module version.
 
 ### Fixed
 
+- A session with more than 16 carriers could not bring them up. `tbt_hdr_check()`
+  capped the old header's `path_id` at `TBT_LEGACY_MAX_CARRIERS` (16), but
+  `path_id` is a carrier index and the carrier layer has 256 slots, so the
+  HELLO/OPEN/FIN/RST of carriers 16..255 failed their own encoding inside the
+  HTTP container. The sender counted `http_parse_err` and the carrier was
+  poisoned before a byte reached the wire, which looked exactly like a peer
+  whose HTTP response could not be parsed: measured with `carriers=256`, `up=16`
+  and `http_parse_err=240` (one per broken carrier, no HELLO rejection and no
+  wire error). The 16-carrier limit now applies only to the old ARQ's per-path
+  ack fields, whose mask really is 16 bits. Probe N runs the production shape
+  (256 carriers, `n=4 m=4`, 32 groups): `up=256` on both ends, `http_req=256`,
+  `http_resp=256`, `http_parse_err=0`, 1 MiB byte-exact.
 - A second live stream in a `fec=on` session is refused instead of corrupting
   the first. The FEC record carries no stream id and the plane names one stream
   (`far_sid`), so two live streams had their bytes delivered to whichever was
