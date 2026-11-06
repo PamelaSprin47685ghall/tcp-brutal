@@ -724,6 +724,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **T2 grouped 合入 / T2 完成（`0c90f0a`）**：`w-fec-grouped aec862e` 合入 master（merge `0c90f0a`），make check 绿（fec **1725**、portmap 33999、http 257）；grouped 32×8 数据面、`carrier→group/share` 映射、组窗口/RX 超块有序交付、全局 ACK、短末块；QEMU A–N **14/14 PASS**，probe N http-kal grouped `n=4/m=4 carriers=16`（2×8）1MiB×2 双向 byte-exact，L/M 单组仍过。**T2 parent 完成**（fixed grouped；dynamic M 作为 T5/T6 风险）。已知限制：无 NACK/FEC retx、`FEC_FBK` 不驱动 M 自适应、256 live 未跑（T5.2）。**T5.2 GO：fixed `n=4/m=4`、http-kal、crypto on、256 carriers。**
 
+**T5.2 起跑前置（2026-11-06）**：integration master `7045868` 尚无 w-crypto（`tbtun/tbt_crypto.*` 不存在），`crypto=on` 不会真正加密；**T5.2 暂停起跑**。C 需把 integration merge 进 `w-crypto`（33238ca 基于 0db5166），接 FEC TX/RX body 路径（TX `seal→body_xor`、RX `body_xor→verify`；控制帧跳过；per-direction nonce；HTTP 头明文），跑 make check/host/SAN/lint，报新 head；F 再合入 integration 并给 E 新 head。T5.2 等 crypto 合入。
+
 ### G3 — T3 ChaCha8（C）
 
 | 项 | 内容 |
