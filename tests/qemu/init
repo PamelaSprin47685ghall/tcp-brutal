@@ -1570,6 +1570,29 @@ probe_p_concurrent() {
     echo "   concurrent: the next connection was accepted"
 }
 
+# The smallest possible smoke: one carrier, no FEC (the old ARQ data plane),
+# one 37-byte round trip. This is the shape the aarch64/HND0 ladder starts from,
+# and it uses a different data plane from the rest of probe P.
+probe_p_single() {
+    echo "   single: 1 carrier, fec=off, 37 bytes"
+    flush_and_wait
+    restart_echo
+    echo 'ports 41088-41119' > "$PORTS" || fail "probe P: ports directive rejected"
+    # The smoke's own knobs, only scaled to one carrier: dup=1 duplicates the
+    # DATA frame on a second path, and with one carrier that copy has nowhere to
+    # go, so this also covers the duplicate path's one-carrier case.
+    _s1="n=1 m=0 carriers=1 fec=off crypto=off dup=1 keepalive=5000 replay=8388608 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=1048576 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000"
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 $_s1" \
+        > "$CFG" || fail "probe P: 1-carrier far tunnel rejected"
+    echo "tunnel 2 role=near profile=http-kal listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT $_s1" \
+        > "$CFG" || fail "probe P: 1-carrier near tunnel rejected"
+    sleep 1
+    echo "   peers:"; cat "$PEERS"
+    probe_ping_bounded "probe P single" 37 5 ||
+        fail "probe P single: the 37-byte round trip failed on one carrier without FEC"
+    echo "   streams after:"; awk '$1 == "tunnel" && ($3 == "streams" || $3 ~ /^stream$/)' /proc/net/tbtun/stats
+}
+
 probe_p() {
     echo "== probe P: small message round trip, socket left open"
     _bad=0
@@ -1582,6 +1605,7 @@ probe_p() {
     # HELLO, so the flush is exercised with crypto on.
     probe_p_one 37 "$P_CFG_CRYPTO" ||
         fail "probe P: 37 bytes did not come back with crypto=on"
+    probe_p_single
     probe_p_two
     probe_p_concurrent
     probe_p_http
