@@ -1,0 +1,17 @@
+source_commit=0888ce40e439ea9e4f947b8694dcfc6d0785e027 (w-window, parent 8980c03, base 4c58b0e)
+source_tarball_sha256=47d8652fe5b708609026c4b3c0079aa301786e0c638d047da9cdc938a2c98962
+source_tarball=git archive 0888ce4 | sha256sum
+change=rx: floor the auto hole budget at 2 s, not 1 s (TBT_RX_HOLE_FLOOR_US=2000000)
+build_near=make KERNEL_DIR=$KDIR PAHOLE=$PAHOLE -j2 (7.2.9-1-MANJARO)
+build_far=make -C /lib/modules/7.0.0-42-generic/build M=$PWD PAHOLE=false -j1 modules
+ko_near_sha256=0e4ae50c3529d8463eae746611e608fce2bf75845752229594a4414225801b7a
+ko_far_sha256=95aefe350373e927ee513e67accf735243990e9466d4c8513a896b9b52c77201
+srcversion_both=711422E4053E3F13B89BD4E
+vermagic_near=7.2.9-1-MANJARO SMP preempt mod_unload
+vermagic_far=7.0.0-42-generic SMP preempt mod_unload modversions
+adv_probe_near_sha256=c03ea90ad5e5e3ef6978dd39bcf00fab75111c1ccad3cad4de62024bc50ec8e9
+adv_probe_far_sha256=c4daa2794d4b56088c2908065d55b75b03132ef66df0a960f253136cebfe7256
+adv_probe_near_build=cc -D_GNU_SOURCE -std=gnu99 -O2 -Wall -Wextra -Werror -I tbtun -o adv_probe adversarial/adv_probe.c
+adv_probe_far_build=cc -D_GNU_SOURCE -std=gnu99 -O2 -Wall -Wextra -Werror -Wno-error=unused-result -I tbtun -o adv_probe adversarial/adv_probe.c
+invariant=same source 0888ce4 + per-end build + srcversion 711422E4; ko sha differs by build path/kernel
+note=task reference ko a6e459f6 was not found on this host; these are fresh per-end builds of the same 0888ce4 source, srcversion matches

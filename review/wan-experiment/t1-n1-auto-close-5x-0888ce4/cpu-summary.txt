@@ -1,0 +1,20 @@
+=== round 1
+near: busy_jiffies=3913 total_jiffies=38554 cpu_pct=10.15
+far:  busy_jiffies=1266 total_jiffies=4735 cpu_pct=26.74
+window: 1793928919.500511312..1793928934.689583959
+=== round 2
+near: busy_jiffies=3789 total_jiffies=36412 cpu_pct=10.41
+far:  busy_jiffies=1142 total_jiffies=4463 cpu_pct=25.59
+window: 1793928980.785411915..1793928993.020221188
+=== round 3
+near: busy_jiffies=3385 total_jiffies=33553 cpu_pct=10.09
+far:  busy_jiffies=1089 total_jiffies=4034 cpu_pct=27.00
+window: 1793929042.410891758..1793929053.634945555
+=== round 4
+near: busy_jiffies=11795 total_jiffies=116189 cpu_pct=10.15
+far:  busy_jiffies=3582 total_jiffies=13666 cpu_pct=26.21
+window: 1793929104.512441475..1793929162.812998126
+=== round 5
+near: busy_jiffies=8311 total_jiffies=81399 cpu_pct=10.21
+far:  busy_jiffies=2568 total_jiffies=9833 cpu_pct=26.12
+window: 1793929230.431004299..1793929270.856744498

@@ -1,0 +1,4 @@
+95aefe350373e927ee513e67accf735243990e9466d4c8513a896b9b52c77201  /tmp/tbtun-0888ce4-far-build/tbtun.ko
+c4daa2794d4b56088c2908065d55b75b03132ef66df0a960f253136cebfe7256  /tmp/tbtun-0888ce4-far-build/adv_probe
+srcversion:     711422E4053E3F13B89BD4E
+vermagic:       7.0.0-42-generic SMP preempt mod_unload modversions 

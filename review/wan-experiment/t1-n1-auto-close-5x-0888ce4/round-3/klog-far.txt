@@ -1,0 +1,1 @@
+/bin/sh: 0: cannot open /tmp/tbtun-0888ce4-far/klog.sh: No such file

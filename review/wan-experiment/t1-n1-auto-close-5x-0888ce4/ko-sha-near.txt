@@ -1,0 +1,4 @@
+0e4ae50c3529d8463eae746611e608fce2bf75845752229594a4414225801b7a  /tmp/tbtun-0888ce4/build-near/tbtun.ko
+c03ea90ad5e5e3ef6978dd39bcf00fab75111c1ccad3cad4de62024bc50ec8e9  /tmp/tbtun-0888ce4/build-near/adv_probe
+srcversion:     711422E4053E3F13B89BD4E
+vermagic:       7.2.9-1-MANJARO SMP preempt mod_unload 

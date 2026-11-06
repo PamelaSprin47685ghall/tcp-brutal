@@ -1,0 +1,3 @@
+path=0e4ae50c3529d8463eae746611e608fce2bf75845752229594a4414225801b7a
+srcversion:     711422E4053E3F13B89BD4E
+vermagic:       7.2.9-1-MANJARO SMP preempt mod_unload 
