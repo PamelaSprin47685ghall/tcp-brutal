@@ -60,6 +60,7 @@ static void tbt_car_connect_work(struct work_struct *w);
 int tbt_carrier_send_raw(struct tbt_carrier *c, const void *data, size_t len);
 static void tbt_pump_work(struct work_struct *w);
 static bool tbt_dial_take(struct tbt_session *sess);
+static u32 tbt_dial_rate(const struct tbt_session *sess);
 
 /* The effective container for a slot. The M spares of an http-kal tunnel use
  * the drip cadence: same container family, cheaper keep-alive. Both ends derive
@@ -312,7 +313,8 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
          * the session may have been created before the far listener was up.
          * The retry spends a dial token: 256 slots x 5 Hz was 1280 connect
          * attempts/s against a peer that could not complete them. The first
-         * wave in tbt_carriers_start() is not paced. */
+         * wave spends the same tokens: tbt_carriers_start() installs every
+         * carrier unconnected and lets this poll pace the dials. */
         if (sess->tunnel->cfg.role == TBT_ROLE_NEAR && now >= c->retry_at_ns)
         {
             if (tbt_dial_take(sess))
@@ -1493,14 +1495,45 @@ static void tbt_port_alloc_note(struct tbt_session *sess, u8 index,
     }
 }
 
+/* Dials per second: n_car/4, floored. Every dial — first wave, replacement,
+ * failed-connect retry — spends a token from this one bucket, so losing
+ * every carrier cannot turn into a connect storm. */
+#define TBT_DIAL_RATE_MIN 8
+/* Tokens the bucket starts with: enough for a small session's whole first
+ * wave, small enough that a 256-carrier session cannot burst. */
+#define TBT_DIAL_FIRST_BURST 16
+
+static u32 tbt_dial_rate(const struct tbt_session *sess)
+{
+    u32 rate = sess->n_car / 4;
+
+    return rate < TBT_DIAL_RATE_MIN ? TBT_DIAL_RATE_MIN : rate;
+}
+
 /* The near side dials n carriers. The far side dials none: its carriers are
- * accepted and join the session by HELLO. */
+ * accepted and join the session by HELLO.
+ *
+ * The first wave is paced, not fired: every carrier is installed unconnected
+ * and the 50 ms session poll drives the dials through the same token bucket
+ * replacements and failed-connect retries use (tbt_dial_take). A 256-carrier
+ * session therefore dials at max(8, n/4) per second instead of scheduling 256
+ * connects at once — the unpaced first wave was the connect storm that took
+ * the far listener down. The bucket is seeded with a small burst so a
+ * two-carrier session is not delayed by the refill rate; the refill cap
+ * still bounds the steady rate. */
 int tbt_carriers_start(struct tbt_tunnel *t, struct tbt_session *sess)
 {
     int i;
+    u32 rate;
 
     if (t->cfg.role != TBT_ROLE_NEAR)
         return 0;
+    rate = tbt_dial_rate(sess);
+    spin_lock(&sess->dial_lock);
+    sess->dial_refill_ns = ktime_get_ns();
+    sess->dial_tokens = rate < TBT_DIAL_FIRST_BURST ? rate
+                                                  : TBT_DIAL_FIRST_BURST;
+    spin_unlock(&sess->dial_lock);
     for (i = 0; i < sess->n_car; i++)
     {
         struct tbt_carrier *c = tbt_carrier_new(sess, (u8)i);
@@ -1511,7 +1544,6 @@ int tbt_carriers_start(struct tbt_tunnel *t, struct tbt_session *sess)
             return -ENOMEM;
         }
         sess->car[i] = c;
-        schedule_work(&c->w_connect);
     }
     return 0;
 }
@@ -1532,22 +1564,9 @@ int tbt_carriers_start(struct tbt_tunnel *t, struct tbt_session *sess)
 /* Deferred-pass delay: long enough for rx/tx work to run, short enough that a
  * legitimate replacement is not visibly late. */
 #define TBT_REPLACE_RETRY_MS 20
-/* Replacement dials per second: n_car/4, floored. The first wave in
- * tbt_carriers_start() is not paced, so a 256-carrier session still starts at
- * once; only replacements are paced, so losing every carrier cannot turn into
- * a connect storm. */
-#define TBT_DIAL_RATE_MIN 8
-
-static u32 tbt_dial_rate(const struct tbt_session *sess)
-{
-    u32 rate = sess->n_car / 4;
-
-    return rate < TBT_DIAL_RATE_MIN ? TBT_DIAL_RATE_MIN : rate;
-}
-
-/* Take one dial token. Shared by w_replace() and the poll's retry for a
- * carrier that never connected, so the bucket is locked. The first wave in
- * tbt_carriers_start() does not go through here and is not paced. */
+/* Take one dial token. Shared by w_replace(), the poll's retry for a
+ * carrier that never connected and the paced first wave in
+ * tbt_carriers_start(), so the bucket is locked. */
 static bool tbt_dial_take(struct tbt_session *sess)
 {
     u64 now = ktime_get_ns();

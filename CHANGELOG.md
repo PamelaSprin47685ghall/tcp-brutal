@@ -71,6 +71,13 @@ and moves independently of the module version.
 
 ### Fixed
 
+- The first carrier wave was a connect storm: `tbt_carriers_start()`
+  scheduled `w_connect` for all `n_car` slots at once, so a 256-carrier
+  session fired 256 dials in one instant at the far listener. Every carrier
+  is now installed unconnected and the 50 ms session poll drives the first
+  dials through the same `max(8, n/4)`-per-second token bucket that paces
+  replacements and failed-connect retries; the bucket starts with a
+  16-token burst so small sessions are not delayed.
 - A 256-carrier session plus a connect flood could starve the far host until it
   stopped answering (HND0: `tbt_accept_work` and `tbt_replace_work` hogged a
   CPU, 10138 accepted connections, journal stops, unclean reboot 62 min later).
@@ -83,7 +90,7 @@ and moves independently of the module version.
   `sess->lock` across its non-sleeping provisional branch so that free cannot
   race it, replacement passes retire at most 16 carriers and release at most
   16 join-replaced carriers before re-arming 20 ms later, replacement dials are
-  token-paced at `n/4` per second (the first wave is not paced), accepts are
+  token-paced at `n/4` per second, accepts are
   batched at 32, the poll's state-change wake is 10 ms instead of 0, and the
   per-connection/per-dial lines are ratelimited. QEMU probe Q floods the far
   with connections that never send HELLO while taking carrier slots down in
@@ -92,14 +99,14 @@ and moves independently of the module version.
 - A carrier that never completed its first connect was retried every 200 ms
   per slot, outside the replacement pacing (up to 1280 attempts/s at 256
   carriers). The retry now spends a token from the same `max(8, n/4)`-per-
-  second dial bucket; the first wave in `tbt_carriers_start()` is still
-  unpaced. Join-replaced carrier objects are now a bounded reuse pool: an
-  object is reused, buffers included, only after `tbt_carrier_release()` has
-  run, the 50 ms poll holds no reference (`pollers`), and `w_connect`/`w_rx`/
-  `w_tx`/`w_pump` are idle. `dead` is capped at `2 * n_car`; a join that would
-  exceed it is refused with `-ENOSPC` until a new carrier reuses an entry. The
-  poll takes its reference under `sess->lock`, the same lock the reuse path
-  takes, and the deferred-release drain cancels `w_tx`/`w_pump` first.
+  second dial bucket. Join-replaced carrier objects are now a bounded reuse
+  pool: an object is reused, buffers included, only after
+  `tbt_carrier_release()` has run, the 50 ms poll holds no reference
+  (`pollers`), and `w_connect`/`w_rx`/`w_tx`/`w_pump` are idle. `dead` is
+  capped at `2 * n_car`; a join that would exceed it is refused with
+  `-ENOSPC` until a new carrier reuses an entry. The poll takes its
+  reference under `sess->lock`, the same lock the reuse path takes, and the
+  deferred-release drain cancels `w_tx`/`w_pump` first.
   `dead_now`/`dead_peak` are in the c3 line, and probe Q asserts both caps.
 - A `fec=off` session warned `!work->func` on teardown: `w_fec_tx` is
   initialised only by `tbt_fec_data_init()`, and the unconditional
