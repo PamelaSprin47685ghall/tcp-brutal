@@ -1,0 +1,17 @@
+round 4: PASS
+sink_bytes_eof=True
+sender_bytes=True
+far_delivered_delta=True
+near_fin=True
+far_fin=True
+no_rst=True
+near_timeouts=True
+far_timeouts=True
+txq_zero=True
+holes_lost=True
+far_up=True
+far_rx_delivered=67108864
+cpu_near=8.97% cpu_far=32.58%
+sink=16777216/1 send=16777216 txq_after=1113052
+near_fin_last=1793924176.345 tunnel 1 stream sid=848591585283 state=1 kill=0 attached=0x1 rxq=0 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=0 tgt_err=0 fin_seq=16777216 fin_q=1 fin_w=1 rst_w=0 rxf=1/1 dage_ms=0
+far_fin_last=1793924176.182 tunnel 1 stream sid=848591585283 state=1 kill=0 attached=0x1 rxq=0 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=7 tgt_err=0 fin_seq=0 fin_q=1 fin_w=1 rst_w=0 rxf=1/1 dage_ms=0

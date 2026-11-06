@@ -1,0 +1,202 @@
+[?2004l
+[Fri Nov  6 07:59:19 2026] tbtun: retx wndshort seq=15765550 len=8192 total=8224 wnd=602272 inflight=602393 wnd_avail=0 mem_avail=1457319
+[Fri Nov  6 08:01:10 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 08:01:10 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 08:01:10 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 08:01:10 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 08:01:10 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 08:01:10 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 08:01:10 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 08:01:10 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 08:01:10 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 08:01:10 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 08:01:11 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 08:01:11 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 08:01:11 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 08:01:11 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 08:01:11 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 08:01:11 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 08:01:11 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 08:01:11 2026] tbtun: hole timefail seq=37 age_us=406613 rtt_us=313989
+[Fri Nov  6 08:01:11 2026] tbtun: hole timefail seq=37 age_us=406672 rtt_us=313989
+[Fri Nov  6 08:01:11 2026] tbtun: hole timefail seq=37 age_us=406682 rtt_us=313989
+[Fri Nov  6 08:01:11 2026] tbtun: hole timefail seq=37 age_us=406690 rtt_us=313989
+[Fri Nov  6 08:01:11 2026] tbtun: hole timefail seq=37 age_us=455787 rtt_us=314079
+[Fri Nov  6 08:01:11 2026] tbtun: hole timefail seq=37 age_us=455814 rtt_us=314079
+[Fri Nov  6 08:01:11 2026] tbtun: hole timefail seq=37 age_us=455824 rtt_us=314079
+[Fri Nov  6 08:01:11 2026] tbtun: hole timefail seq=37 age_us=455833 rtt_us=314079
+[Fri Nov  6 08:01:11 2026] tbtun: hole timefail seq=37 age_us=455842 rtt_us=314079
+[Fri Nov  6 08:01:11 2026] tbtun: hole timefail seq=37 age_us=455850 rtt_us=314079
+[Fri Nov  6 08:01:11 2026] tbtun: hole gatefail seq=65520 mask=0x1 ack=65520
+[Fri Nov  6 08:01:11 2026] tbtun: hole gatefail seq=131003 mask=0x1 ack=131003
+[Fri Nov  6 08:01:11 2026] tbtun: hole gatefail seq=131003 mask=0x1 ack=131003
+[Fri Nov  6 08:01:16 2026] tbtun: hole gatefail seq=9250372 mask=0x1 ack=9250372
+[Fri Nov  6 08:01:16 2026] tbtun: hole gatefail seq=9381179 mask=0x1 ack=9381179
+[Fri Nov  6 08:01:16 2026] tbtun: hole gatefail seq=9512251 mask=0x1 ack=9512251
+[Fri Nov  6 08:01:16 2026] tbtun: hole gatefail seq=9643058 mask=0x1 ack=9643058
+[Fri Nov  6 08:01:16 2026] tbtun: hole gatefail seq=9765938 mask=0x1 ack=9765938
+[Fri Nov  6 08:01:16 2026] tbtun: hole gatefail seq=9782322 mask=0x1 ack=9782322
+[Fri Nov  6 08:01:16 2026] tbtun: hole gatefail seq=9782322 mask=0x1 ack=9782322
+[Fri Nov  6 08:01:16 2026] tbtun: hole gatefail seq=9782322 mask=0x1 ack=9782322
+[Fri Nov  6 08:01:16 2026] tbtun: hole gatefail seq=9782322 mask=0x1 ack=9782322
+[Fri Nov  6 08:01:16 2026] tbtun: hole gatefail seq=9782322 mask=0x1 ack=9782322
+[Fri Nov  6 08:01:17 2026] tbtun: hole timefail seq=10158889 age_us=625308 rtt_us=320532
+[Fri Nov  6 08:01:17 2026] tbtun: hole timefail seq=10158889 age_us=625388 rtt_us=320532
+[Fri Nov  6 08:01:17 2026] tbtun: hole timefail seq=10158889 age_us=625400 rtt_us=320532
+[Fri Nov  6 08:01:17 2026] tbtun: hole timefail seq=10158889 age_us=625411 rtt_us=320532
+[Fri Nov  6 08:01:17 2026] tbtun: hole timefail seq=10158889 age_us=625423 rtt_us=320532
+[Fri Nov  6 08:01:17 2026] tbtun: hole timefail seq=10158889 age_us=625433 rtt_us=320532
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole timefail seq=11075598 age_us=946067 rtt_us=489825
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole timefail seq=11100174 age_us=891029 rtt_us=446300
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole timefail seq=11206670 age_us=590359 rtt_us=445927
+[Fri Nov  6 08:01:17 2026] tbtun: hole timefail seq=11206670 age_us=590368 rtt_us=412307
+[Fri Nov  6 08:01:54 2026] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[Fri Nov  6 08:01:55 2026] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[Fri Nov  6 08:01:55 2026] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[Fri Nov  6 08:01:56 2026] tbtun: unloaded
+[Fri Nov  6 08:02:26 2026] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[Fri Nov  6 08:02:27 2026] tbtun: tunnel 1 carrier 0 DIALED lport=30000 peer=45.11.1.62:9000
+[Fri Nov  6 08:02:45 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=58934 wnd_avail=4554 mem_avail=2030538
+[Fri Nov  6 08:02:45 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=68108 wnd_avail=0 mem_avail=2021364
+[Fri Nov  6 08:02:45 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=77232 wnd_avail=0 mem_avail=2011280
+[Fri Nov  6 08:02:46 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=86406 wnd_avail=0 mem_avail=2001146
+[Fri Nov  6 08:02:46 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=95530 wnd_avail=0 mem_avail=1991062
+[Fri Nov  6 08:02:46 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=104654 wnd_avail=0 mem_avail=1980978
+[Fri Nov  6 08:02:46 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=113828 wnd_avail=0 mem_avail=1970844
+[Fri Nov  6 08:02:46 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=123002 wnd_avail=0 mem_avail=1960710
+[Fri Nov  6 08:02:47 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=132176 wnd_avail=0 mem_avail=1950576
+[Fri Nov  6 08:02:47 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=141300 wnd_avail=0 mem_avail=1940492
+[Fri Nov  6 08:02:50 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=287734 wnd_avail=0 mem_avail=1780618
+[Fri Nov  6 08:02:50 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=296858 wnd_avail=0 mem_avail=1770534
+[Fri Nov  6 08:02:50 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=306032 wnd_avail=0 mem_avail=1760400
+[Fri Nov  6 08:02:51 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=315156 wnd_avail=0 mem_avail=1750316
+[Fri Nov  6 08:02:51 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=324330 wnd_avail=0 mem_avail=1740182
+[Fri Nov  6 08:02:51 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=333454 wnd_avail=0 mem_avail=1730098
+[Fri Nov  6 08:02:51 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=342628 wnd_avail=0 mem_avail=1719964
+[Fri Nov  6 08:02:52 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=351752 wnd_avail=0 mem_avail=1709880
+[Fri Nov  6 08:02:52 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=360926 wnd_avail=0 mem_avail=1700706
+[Fri Nov  6 08:02:52 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=370050 wnd_avail=0 mem_avail=1690622
+[Fri Nov  6 08:02:55 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=516384 wnd_avail=0 mem_avail=1528928
+[Fri Nov  6 08:02:55 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=525508 wnd_avail=0 mem_avail=1518844
+[Fri Nov  6 08:02:56 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=534682 wnd_avail=0 mem_avail=1508710
+[Fri Nov  6 08:02:56 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=543806 wnd_avail=0 mem_avail=1498626
+[Fri Nov  6 08:02:56 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=552980 wnd_avail=0 mem_avail=1489452
+[Fri Nov  6 08:02:56 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=562104 wnd_avail=0 mem_avail=1479368
+[Fri Nov  6 08:02:56 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=571278 wnd_avail=0 mem_avail=1469234
+[Fri Nov  6 08:02:57 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=580452 wnd_avail=0 mem_avail=1459100
+[Fri Nov  6 08:02:57 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=589526 wnd_avail=0 mem_avail=1449066
+[Fri Nov  6 08:02:57 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=63488 inflight=598650 wnd_avail=0 mem_avail=1438982
+[Fri Nov  6 08:03:00 2026] tbtun: TXSTALLKILL sid=454226345984 ack=0 txseq=1114059 age_us=15003346
+[Fri Nov  6 08:03:00 2026] tbtun: carrier stall idx=0 gen=1 una=4213657643 nxt=4213673139 wmem=798018 snd_wnd=63488 rcv_wnd=1048288 state=1
+[Fri Nov  6 08:03:00 2026] tbtun: tunnel 1 carrier 0 DIALED lport=30001 peer=45.11.1.62:9000
+[Fri Nov  6 08:03:01 2026] tbtun: unloaded
+[Fri Nov  6 08:13:27 2026] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[Fri Nov  6 08:13:37 2026] tbtun: tunnel 1 carrier 0 DIALED lport=30000 peer=45.11.1.62:9000
+[Fri Nov  6 08:14:38 2026] tbtun: hole depthfail seq=16384 g=2 mask=0x1
+[Fri Nov  6 08:14:38 2026] tbtun: hole timefail seq=16384 age_us=343927 rtt_us=566710
+[Fri Nov  6 08:14:38 2026] tbtun: hole timefail seq=16384 age_us=354469 rtt_us=526648
+[Fri Nov  6 08:14:38 2026] tbtun: hole timefail seq=16384 age_us=651115 rtt_us=491594
+[Fri Nov  6 08:14:38 2026] tbtun: hole timefail seq=16384 age_us=651127 rtt_us=460922
+[Fri Nov  6 08:14:38 2026] tbtun: hole timefail seq=16384 age_us=651128 rtt_us=434084
+[Fri Nov  6 08:14:38 2026] tbtun: hole timefail seq=16384 age_us=651130 rtt_us=410601
+[Fri Nov  6 08:14:38 2026] tbtun: hole timefail seq=16384 age_us=672142 rtt_us=390053
+[Fri Nov  6 08:14:38 2026] tbtun: hole timefail seq=16384 age_us=672156 rtt_us=372073
+[Fri Nov  6 08:14:38 2026] tbtun: hole timefail seq=16384 age_us=672158 rtt_us=356341
+[Fri Nov  6 08:14:38 2026] tbtun: hole timefail seq=16384 age_us=672159 rtt_us=342575
+[Fri Nov  6 08:14:38 2026] tbtun: hole gatefail seq=32768 mask=0x1 ack=32768
+[Fri Nov  6 08:14:38 2026] tbtun: hole gatefail seq=32768 mask=0x1 ack=32768
+[Fri Nov  6 08:14:38 2026] tbtun: hole gatefail seq=32768 mask=0x1 ack=32768
+[Fri Nov  6 08:14:38 2026] tbtun: hole gatefail seq=32768 mask=0x1 ack=32768
+[Fri Nov  6 08:14:38 2026] tbtun: hole gatefail seq=32768 mask=0x1 ack=32768
+[Fri Nov  6 08:14:38 2026] tbtun: hole gatefail seq=32768 mask=0x1 ack=32768
+[Fri Nov  6 08:14:38 2026] tbtun: hole gatefail seq=32768 mask=0x1 ack=32768
+[Fri Nov  6 08:14:38 2026] tbtun: hole gatefail seq=32768 mask=0x1 ack=32768
+[Fri Nov  6 08:14:38 2026] tbtun: hole gatefail seq=32768 mask=0x1 ack=32768
+[Fri Nov  6 08:14:38 2026] tbtun: hole gatefail seq=40960 mask=0x1 ack=40960
+[Fri Nov  6 08:14:43 2026] tbtun: hole timefail seq=6753578 age_us=589231 rtt_us=316175
+[Fri Nov  6 08:14:43 2026] tbtun: hole timefail seq=6753578 age_us=589323 rtt_us=316175
+[Fri Nov  6 08:14:43 2026] tbtun: hole timefail seq=6753578 age_us=611130 rtt_us=316296
+[Fri Nov  6 08:14:43 2026] tbtun: hole timefail seq=6753578 age_us=611205 rtt_us=316296
+[Fri Nov  6 08:14:43 2026] tbtun: hole timefail seq=6753578 age_us=611221 rtt_us=316296
+[Fri Nov  6 08:14:43 2026] tbtun: hole timefail seq=6753578 age_us=622154 rtt_us=313819
+[Fri Nov  6 08:14:43 2026] tbtun: hole timefail seq=6753578 age_us=622482 rtt_us=313819
+[Fri Nov  6 08:14:43 2026] tbtun: hole gatefail seq=6802730 mask=0x1 ack=6802730
+[Fri Nov  6 08:14:43 2026] tbtun: hole gatefail seq=6802730 mask=0x1 ack=6802730
+[Fri Nov  6 08:14:43 2026] tbtun: hole gatefail seq=6802730 mask=0x1 ack=6802730
+[Fri Nov  6 08:14:43 2026] tbtun: hole gatefail seq=6802730 mask=0x1 ack=6802730
+[Fri Nov  6 08:14:43 2026] tbtun: hole gatefail seq=6819114 mask=0x1 ack=6819114
+[Fri Nov  6 08:14:43 2026] tbtun: hole gatefail seq=6843690 mask=0x1 ack=6843690
+[Fri Nov  6 08:14:43 2026] tbtun: hole gatefail seq=6843690 mask=0x1 ack=6843690
+[Fri Nov  6 08:14:43 2026] tbtun: hole gatefail seq=6843690 mask=0x1 ack=6843690
+[Fri Nov  6 08:14:43 2026] tbtun: hole gatefail seq=6851882 mask=0x1 ack=6851882
+[Fri Nov  6 08:14:43 2026] tbtun: hole gatefail seq=6851882 mask=0x1 ack=6851882
+[Fri Nov  6 08:14:44 2026] tbtun: hole timefail seq=7801359 age_us=493611 rtt_us=326625
+[Fri Nov  6 08:14:44 2026] tbtun: hole timefail seq=7801359 age_us=493694 rtt_us=325766
+[Fri Nov  6 08:14:44 2026] tbtun: hole timefail seq=7801359 age_us=493740 rtt_us=324990
+[Fri Nov  6 08:14:44 2026] tbtun: retx wndshort seq=8848875 len=8192 total=8224 wnd=901120 inflight=898521 wnd_avail=2599 mem_avail=1161191
+[Fri Nov  6 08:14:47 2026] tbtun: retx wndshort seq=13424493 len=8192 total=8224 wnd=901120 inflight=898536 wnd_avail=2584 mem_avail=1074776
+[Fri Nov  6 08:14:47 2026] tbtun: retx wndshort seq=13424493 len=8192 total=8224 wnd=622080 inflight=628886 wnd_avail=0 mem_avail=1395306
+[Fri Nov  6 08:14:48 2026] tbtun: hole gatefail seq=16125733 mask=0x1 ack=16125733
+[Fri Nov  6 08:14:49 2026] tbtun: hole gatefail seq=16125733 mask=0x1 ack=16125733
+[Fri Nov  6 08:14:49 2026] tbtun: hole gatefail seq=16125733 mask=0x1 ack=16125733
+[Fri Nov  6 08:14:49 2026] tbtun: hole gatefail seq=16125733 mask=0x1 ack=16125733
+[Fri Nov  6 08:14:49 2026] tbtun: hole gatefail seq=16125733 mask=0x1 ack=16125733
+[Fri Nov  6 08:14:49 2026] tbtun: hole gatefail seq=16125733 mask=0x1 ack=16125733
+[Fri Nov  6 08:14:49 2026] tbtun: hole gatefail seq=16125733 mask=0x1 ack=16125733
+[Fri Nov  6 08:14:49 2026] tbtun: hole gatefail seq=16125733 mask=0x1 ack=16125733
+[Fri Nov  6 08:14:49 2026] tbtun: hole gatefail seq=16125733 mask=0x1 ack=16125733
+[Fri Nov  6 08:14:49 2026] tbtun: hole gatefail seq=16125733 mask=0x1 ack=16125733
+[Fri Nov  6 08:15:12 2026] tbtun: retx wndshort seq=0 len=8192 total=8224 wnd=899520 inflight=897116 wnd_avail=2404 mem_avail=1175076
+[Fri Nov  6 08:15:12 2026] tbtun: hole gatefail seq=131072 mask=0x1 ack=131072
+[Fri Nov  6 08:15:13 2026] tbtun: hole gatefail seq=204800 mask=0x1 ack=204800
+[Fri Nov  6 08:15:13 2026] tbtun: hole gatefail seq=327628 mask=0x1 ack=327628
+[Fri Nov  6 08:15:13 2026] tbtun: hole gatefail seq=417740 mask=0x1 ack=417740
+[Fri Nov  6 08:15:13 2026] tbtun: hole gatefail seq=516044 mask=0x1 ack=516044
+[Fri Nov  6 08:15:13 2026] tbtun: hole gatefail seq=614348 mask=0x1 ack=614348
+[Fri Nov  6 08:15:13 2026] tbtun: hole gatefail seq=769890 mask=0x1 ack=769890
+[Fri Nov  6 08:15:13 2026] tbtun: hole gatefail seq=835373 mask=0x1 ack=835373
+[Fri Nov  6 08:15:13 2026] tbtun: hole gatefail seq=892664 mask=0x1 ack=892664
+[Fri Nov  6 08:15:13 2026] tbtun: hole gatefail seq=892664 mask=0x1 ack=892664
+[Fri Nov  6 08:15:13 2026] tbtun: hole timefail seq=1179119 age_us=534670 rtt_us=305381
+[Fri Nov  6 08:15:13 2026] tbtun: hole timefail seq=1179119 age_us=534738 rtt_us=305381
+[Fri Nov  6 08:15:13 2026] tbtun: hole timefail seq=1179119 age_us=534749 rtt_us=305381
+[Fri Nov  6 08:15:13 2026] tbtun: hole timefail seq=1179119 age_us=534759 rtt_us=305381
+[Fri Nov  6 08:15:13 2026] tbtun: hole timefail seq=1179119 age_us=534768 rtt_us=305381
+[Fri Nov  6 08:15:13 2026] tbtun: hole timefail seq=1179119 age_us=534777 rtt_us=305381
+[Fri Nov  6 08:15:13 2026] tbtun: hole timefail seq=1179119 age_us=534787 rtt_us=305381
+[Fri Nov  6 08:15:13 2026] tbtun: hole timefail seq=1179119 age_us=534796 rtt_us=305381
+[Fri Nov  6 08:15:13 2026] tbtun: hole timefail seq=1179119 age_us=534805 rtt_us=305381
+[Fri Nov  6 08:15:14 2026] tbtun: hole timefail seq=2226900 age_us=575150 rtt_us=327336
+[Fri Nov  6 08:15:16 2026] tbtun: retx wndshort seq=6262376 len=8192 total=8224 wnd=899744 inflight=894031 wnd_avail=5713 mem_avail=1141681
+[Fri Nov  6 08:15:17 2026] tbtun: hole gatefail seq=8840736 mask=0x1 ack=8840736
+[Fri Nov  6 08:15:17 2026] tbtun: hole gatefail seq=8906272 mask=0x1 ack=8906272
+[Fri Nov  6 08:15:17 2026] tbtun: hole gatefail seq=8971808 mask=0x1 ack=8971808
+[Fri Nov  6 08:15:17 2026] tbtun: hole gatefail seq=8971808 mask=0x1 ack=8971808
+[Fri Nov  6 08:15:17 2026] tbtun: hole gatefail seq=8971808 mask=0x1 ack=8971808
+[Fri Nov  6 08:15:17 2026] tbtun: hole gatefail seq=8971808 mask=0x1 ack=8971808
+[Fri Nov  6 08:15:17 2026] tbtun: hole gatefail seq=8971808 mask=0x1 ack=8971808
+[Fri Nov  6 08:15:17 2026] tbtun: hole gatefail seq=8971808 mask=0x1 ack=8971808
+[Fri Nov  6 08:15:17 2026] tbtun: hole gatefail seq=8971808 mask=0x1 ack=8971808
+[Fri Nov  6 08:15:17 2026] tbtun: hole gatefail seq=8971808 mask=0x1 ack=8971808
+[Fri Nov  6 08:15:18 2026] tbtun: retx wndshort seq=9757445 len=8192 total=8224 wnd=901120 inflight=898371 wnd_avail=2749 mem_avail=1158461
+[Fri Nov  6 08:15:18 2026] tbtun: hole timefail seq=10576115 age_us=441256 rtt_us=313677
+[Fri Nov  6 08:15:18 2026] tbtun: hole timefail seq=10576115 age_us=441356 rtt_us=310246
+[Fri Nov  6 08:15:18 2026] tbtun: hole timefail seq=10576115 age_us=441373 rtt_us=307037
+[Fri Nov  6 08:15:18 2026] tbtun: hole timefail seq=10576115 age_us=441388 rtt_us=304036
+[Fri Nov  6 08:15:18 2026] tbtun: hole timefail seq=10576115 age_us=441402 rtt_us=301247
+[Fri Nov  6 08:15:18 2026] tbtun: hole timefail seq=10576115 age_us=441416 rtt_us=298665
+[Fri Nov  6 08:15:18 2026] tbtun: hole timefail seq=10576115 age_us=441431 rtt_us=296289
+[Fri Nov  6 08:15:18 2026] tbtun: hole timefail seq=10576115 age_us=441445 rtt_us=294044
+[Fri Nov  6 08:15:18 2026] tbtun: hole timefail seq=10576115 age_us=441459 rtt_us=292079
+[Fri Nov  6 08:15:18 2026] tbtun: hole timefail seq=10576115 age_us=441473 rtt_us=290352
+[?2004h[?2004l
