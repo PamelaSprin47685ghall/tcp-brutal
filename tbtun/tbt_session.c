@@ -551,6 +551,7 @@ out_unlock:
         else if (cmd->carrier_action == TBT_CARRIER_DROP_PPM)
         {
             WRITE_ONCE(c->drop_ppm, cmd->drop_ppm);
+            WRITE_ONCE(s->fec_drop_ppm[cmd->carrier], cmd->drop_ppm);
             err = 0;
         }
     }

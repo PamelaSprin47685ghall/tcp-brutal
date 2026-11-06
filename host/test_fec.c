@@ -855,8 +855,8 @@ static int fixture_exact(const struct rlnc_fixture *f)
 }
 
 /* Return a data index inside window g that at least one parity row in
- * [r0, r1) covers. The caller must not assume an arbitrary erasure is
- * recoverable: with d < w a data packet can miss every row. */
+ * [r0, r1) covers. The codec's band now covers every own-data column, but
+ * this helper still keeps the tests honest if that invariant regresses. */
 static int pick_covered(struct tbt_fec_rlnc *ctx, u32 g, u32 r0, u32 r1, u32 k, u32 w,
                         u32 L, u32 *idxbuf)
 {
@@ -957,6 +957,141 @@ static void rlnc_single_case(u16 n, u16 m, u16 k, u16 w, u16 d, size_t s, u64 no
     fixture_free(&f);
 }
 
+/* The production failure: one DATA share is lost, every parity row arrives.
+ * Every data index must be recoverable, not just the ones a random matrix
+ * happened to cover. */
+static void rlnc_every_single_loss(u16 n, u16 m, u16 k, u16 w, u16 d, size_t s,
+                                   const char *label)
+{
+    struct rlnc_fixture f;
+    u8 dp[TBT_FEC_MAX_SHARES];
+    u8 pp[TBT_FEC_MAX_SHARES];
+    u32 target;
+    int rc;
+
+    fixture_init(&f, n, m, k, w, d, s, k, 0);
+    ok(f.ctx != NULL, label, "rlnc_new");
+    if (!f.ctx)
+        return;
+    ok_int(tbt_fec_rlnc_encode(f.ctx, f.data, k, f.parity), (int)m, label);
+    for (target = 0; target < k; target++)
+    {
+        char detail[64];
+
+        fixture_reset(&f);
+        memset(dp, 1, k);
+        memset(pp, 1, m);
+        dp[target] = 0;
+        memset(f.data[target], 0xAA, s);
+        rc = tbt_fec_rlnc_decode(f.ctx, f.data, f.parity, dp, pp, k);
+        snprintf(detail, sizeof(detail), "lost share %u not recovered", target);
+        ok(rc == 1, label, detail);
+        ok(fixture_exact(&f), label, "single-loss bytes differ");
+        if (rc != 1 || !fixture_exact(&f))
+            break;
+    }
+    fixture_free(&f);
+}
+
+/* The n4m4 band is the complement of the identity, so any subset of up to
+ * four data erasures is recoverable when every parity row arrives. This is
+ * the 1/4 DATA + 4/4 PARITY case the QEMU gate can produce when a carrier
+ * dies during startup. */
+static void rlnc_erasure_case(u16 n, u16 m, u16 k, u16 w, u16 d, size_t s,
+                              u32 nerase, const char *label)
+{
+    struct rlnc_fixture f;
+    u8 dp[TBT_FEC_MAX_SHARES];
+    u8 pp[TBT_FEC_MAX_SHARES];
+    char detail[64];
+    u32 i;
+    int rc;
+
+    fixture_init(&f, n, m, k, w, d, s, k, 0);
+    ok(f.ctx != NULL, label, "rlnc_new");
+    if (!f.ctx)
+        return;
+    ok_int(tbt_fec_rlnc_encode(f.ctx, f.data, k, f.parity), (int)m, label);
+    memset(dp, 1, k);
+    memset(pp, 1, m);
+    for (i = 0; i < nerase && i < k; i++)
+    {
+        dp[i] = 0;
+        memset(f.data[i], 0xAA, s);
+    }
+    rc = tbt_fec_rlnc_decode(f.ctx, f.data, f.parity, dp, pp, k);
+    snprintf(detail, sizeof(detail), "%u erasures not recovered", nerase);
+    ok(rc == (int)nerase, label, detail);
+    ok(fixture_exact(&f), label, "erasure bytes differ");
+    fixture_free(&f);
+}
+
+/* Every own-data column appears in at least one parity row, and the rows span
+ * the whole data space. k is small enough for a u32 row mask. */
+static void rlnc_band_case(u16 n, u16 m, u16 k, u16 w, u16 d, size_t s,
+                           const char *label)
+{
+    struct rlnc_fixture f;
+    u32 rows[TBT_FEC_MAX_SHARES];
+    u32 idxbuf[TBT_FEC_MAX_D];
+    int ws = (int)k - (int)w;
+    u32 rank = 0;
+    u32 r;
+    u32 c;
+
+    fixture_init(&f, n, m, k, w, d, s, k, 0);
+    ok(f.ctx != NULL, label, "rlnc_new");
+    if (!f.ctx)
+        return;
+    memset(rows, 0, sizeof(rows));
+    for (r = 0; r < m; r++)
+    {
+        u32 nidx = tbt_fec_rlnc_coeffs(f.ctx, 0, r, idxbuf, TBT_FEC_MAX_D);
+        u32 i;
+
+        ok(nidx > 0, label, "empty parity row");
+        for (i = 0; i < nidx; i++)
+        {
+            int abs = ws + (int)idxbuf[i];
+
+            if (abs >= 0 && abs < (int)k)
+                rows[r] |= 1u << abs;
+        }
+    }
+    for (c = 0; c < k; c++)
+    {
+        int hit = 0;
+
+        for (r = 0; r < m; r++)
+            if ((rows[r] >> c) & 1u)
+                hit = 1;
+        ok(hit, label, "a data column is in no parity row");
+    }
+    for (c = 0; c < k; c++)
+    {
+        u32 bit = 1u << c;
+        u32 p;
+
+        for (p = rank; p < m; p++)
+            if (rows[p] & bit)
+                break;
+        if (p == m)
+            continue;
+        {
+            u32 t = rows[rank];
+
+            rows[rank] = rows[p];
+            rows[p] = t;
+        }
+        for (p = 0; p < m; p++)
+            if (p != rank && (rows[p] & bit))
+                rows[p] ^= rows[rank];
+        rank++;
+    }
+    ok_u32(rank, m < k ? m : k, label);
+    fixture_free(&f);
+}
+
 static void test_rlnc_single(void)
 {
     struct tbt_fec_rlnc *ctx;
@@ -965,9 +1100,24 @@ static void test_rlnc_single(void)
     rlnc_single_case(5, 3, 5, 10, 5, 64, 0x1234, "rlnc 5x3");
     rlnc_single_case(3, 5, 3, 6, 3, 64, 0x1234, "rlnc 3x5");
     rlnc_single_case(2, 6, 2, 4, 2, 64, 0x1234, "rlnc 2x6");
+    rlnc_band_case(4, 4, 4, 8, 4, 64, "rlnc 4x4 band");
+    rlnc_band_case(5, 3, 5, 10, 5, 64, "rlnc 5x3 band");
+    rlnc_band_case(3, 5, 3, 6, 3, 64, "rlnc 3x5 band");
+    rlnc_band_case(2, 6, 2, 4, 2, 64, "rlnc 2x6 band");
+    /* The grouped n4m4 shape: 3 DATA + 4 PARITY must decode for every one of
+     * the four possible lost shares. */
+    rlnc_every_single_loss(4, 4, 4, 8, 4, 64, "rlnc 4x4 single loss");
+    rlnc_erasure_case(4, 4, 4, 8, 4, 64, 1, "rlnc 4x4 erasures");
+    rlnc_erasure_case(4, 4, 4, 8, 4, 64, 2, "rlnc 4x4 erasures");
+    rlnc_erasure_case(4, 4, 4, 8, 4, 64, 3, "rlnc 4x4 erasures");
+    rlnc_erasure_case(4, 4, 4, 8, 4, 64, 4, "rlnc 4x4 erasures");
+    rlnc_every_single_loss(192, 64, 192, 384, 64, 16, "rlnc 192x64 single loss");
+    rlnc_every_single_loss(192, 64, 192, 192, 96, 16,
+                           "rlnc 192x64 w=n single loss");
 
     /* 192 data, 64 parity, S=16: erase 64 data and supply 64 parity rows.
-     * nonce 39 is chosen so the 64x64 coefficient matrix has full rank. */
+     * The band's first 64 columns are the full 64x64 circulant, so any nonce
+     * gives the same full-rank matrix. */
     {
         struct rlnc_fixture f;
         u8 dp[192];

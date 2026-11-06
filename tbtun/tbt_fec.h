@@ -167,9 +167,14 @@ int tbt_fec_fbk_unpack(const u8 in[TBT_FEC_FBK_LEN], struct tbt_fec_fbk *f);
  *
  * Data packets d_0..d_{L-1} stream in order. Group g covers
  *     [g*k + k - w, g*k + k - 1] clipped to [0, L).
- * Parity p(g, r) is the XOR of d selected positions in that window. The
- * selection is deterministic: seed = nonce ^ ((g*m + r) * golden), then
- * splitmix64 picks d distinct positions in [0, w). No coefficients travel.
+ * Parity p(g, r) is the XOR of positions selected by a deterministic band:
+ * own-data column c belongs to row r when (c - r) mod m < band. The band is
+ * the widest one that fits d terms per row and keeps the m x k matrix at
+ * rank min(m, k), so every column sits in at least one row and a single lost
+ * share is always covered. The leading w - k positions of the window (the
+ * previous packets) pad a row to d; a codec bound to L == k skips them.
+ * No coefficients travel. The nonce no longer selects coefficients; it
+ * remains in the API because the grouped codec keeps one seed per group.
  *
  * d == w is refused for w > 1: every row would be the all-ones row, rank 1,
  * and M would be ineffective. Production uses d = w/2.
@@ -197,14 +202,14 @@ void tbt_fec_rlnc_free(struct tbt_fec_rlnc *ctx);
 
 u32 tbt_fec_rlnc_parity_count(const struct tbt_fec_rlnc *ctx, u32 L);
 
-/* Change the PRNG nonce in place. The data plane derives one nonce per block
- * (base ^ block_id*golden) and reuses a preallocated context, so encode/decode
- * never allocates after bind. */
+/* Set the codec nonce. Coefficients are a fixed band now, so the value is
+ * informational; the data plane still derives one per block and reuses a
+ * preallocated context, so encode/decode never allocates after bind. */
 void tbt_fec_rlnc_set_nonce(struct tbt_fec_rlnc *ctx, u64 nonce);
 u64 tbt_fec_rlnc_nonce(const struct tbt_fec_rlnc *ctx);
 
-/* Fill idx[0..d-1] with distinct positions in [0, w). Returns d, or 0 on a
- * bad argument. */
+/* Fill idx with distinct positions in [0, w). Returns the count, at most d,
+ * or 0 on a bad argument. */
 u32 tbt_fec_rlnc_coeffs(const struct tbt_fec_rlnc *ctx, u32 g, u32 r, u32 *idx,
                         u32 max);
 

@@ -619,6 +619,10 @@ struct tbt_session
     struct delayed_work w_fec_tx; /* packetizer + record writer */
     struct list_head fec_out;    /* records waiting for a carrier */
     spinlock_t fec_out_lock;
+    /* Debug-only FEC share loss, indexed by the share's scheduled carrier.
+     * It lives on the session, not the carrier object, so the injector keeps
+     * dropping that share after its carrier dies and is replaced. */
+    u32 fec_drop_ppm[TBT_MAX_CARRIERS_LIMIT];
     bool closing; /* session teardown started: no new joins, no new work */
     struct list_head prov; /* accepted carriers waiting for HELLO */
     struct list_head dead; /* retired carriers, freed at session destroy */

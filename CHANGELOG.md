@@ -71,6 +71,32 @@ and moves independently of the module version.
 
 ### Fixed
 
+- The grouped RLNC coefficient schedule could leave a data share in no parity
+  row. `tbt_fec_rlnc_coeffs()` picked `d` of `w` positions with splitmix64;
+  for the production `n=4 m=4 w=8 d=4` shape a given share was absent from all
+  four rows in 1/16 of blocks, so a block that lost one DATA share in flight
+  (3/4 DATA + 4/4 PARITY) stayed undecodable, the super-block walk stopped at
+  0, and `tx_ack` froze at one credit window. Coefficients are now a
+  deterministic band: column `c` belongs to row `r` when
+  `(c - r) mod m < band`, with the widest band that fits `d` terms and keeps
+  rank `min(m, k)`. Every column is in at least one row; the `n4m4` matrix is
+  the complement of the identity, so any subset of up to four data erasures is
+  recoverable when all parity arrives, and a single lost share is covered by
+  three of the four parity rows. The nonce no longer selects coefficients; no
+  wire byte changed, but both ends must run this revision. QEMU probe N now
+  drops every FEC record scheduled for carrier 0 (debug `drop_ppm`) before
+  taking that carrier down, so the 16 MiB interleaved gate exercises the exact
+  3 DATA + 4 PARITY block: byte-exact, `tx_ack` reaches 16 MiB on both ends,
+  every c9 counter is zero, and the old codec stalls at
+  `fec super 0 stuck ... shares=3/4 parity=4`.
+- The same gate exposed a second loss path. A present short DATA share was
+  copied into its S-byte slot without zeroing the tail, while the sender
+  zero-pads that slot before encoding parity. The decoder XORs the whole slot
+  into the right-hand side, so stale bytes from the slot's previous block
+  corrupted every share recovered from a block that also held a short share;
+  the transfer completed but `tbt_burst` reported a byte mismatch. The
+  receiver now zero-pads the tail to S. The delivery length still comes from
+  `dlen`/`short_len`, so no padding reaches the application.
 - Per-carrier stream bookkeeping was 16 slots wide while a FEC v6 session has
   256 carriers, so every carrier from 16 up wrote past the end of its arrays:
   `announced_gen[c->index]` overwrote `tx_paused` with a carrier generation,
@@ -143,6 +169,17 @@ and moves independently of the module version.
   second while the far logged `awaiting HELLO`). `tbt_connect_bounded()` waits
   again inside a 4 s budget and counts the dials that needed it
   (`connect_retry`).
+
+### Known limitations
+
+- The FEC path still has no NACK or selective retransmit. The codec now
+  guarantees every single lost DATA share is covered (three of the four parity
+  rows for `n4m4`), and the `n4m4` band recovers any subset of up to four data
+  erasures when all parity arrives, but a block that loses a data share and
+  enough parity rows still stalls until the stream closes. The designed safety
+  net is a bounded NACK over the existing `TBT_FEC_NACK` body plus a
+  per-session replay ring holding the last two credit windows; it is not part
+  of this cut.
 
 ## [0.0.1] - 2026-11-06
 
