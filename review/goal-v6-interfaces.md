@@ -740,6 +740,10 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **T7 合并预检（2026-11-06）**：`w-hnd0`（`7d6139a`）vs master 的 `git merge-tree --write-tree` rc=0（无冲突）；457 files / 380K lines（`scripts/deploy_hnd0.sh` + T1/T5.2 证据）。T7 合入时按 docs/evidence 处理；HND0 恢复、T5.2、T6 完成后再合。
 
+**HND0 hang 修复（`w-hnd0-hang 430ba74`）**：根因不是锁死锁；`path_id` 16 卡口导致 240 carrier 反复失败 + far provisional 无上限/50ms 全表 + `replace_work` 全量墓碑 O(n²) + accept 无预算 + poll 0 延迟重排 + 日志未限流。修复：prov 硬上限 320、retire 直接释放、`replace` delayed 16/20ms、拨号令牌桶、accept 32/批、poll 10ms、日志 ratelimit、c3 prov 计数、`fec=off` 销毁警告。QEMU probe Q PASS（`prov_peak=320`/`reject=8780`/心跳 200/200/洪水后 near `up=255/256`），A–P 16/16，make check/lint 绿；baseline 15.9s OOM。已合入 integration **`4db804f`**，make check 绿。HND0 已恢复（无 tbtun，生产服务正常）。
+
+**T5.2 GO（HND0 恢复）**：integration 新 master（`4db804f` + docs）；E 先确认 HND0 无 tbtun/echo/sysctl 残留，再跑单连接 `tbt_burst`/`tbt_ping` **8–16MiB / 5–10s**、256 http-kal crypto on、port block **512**、等 `up==carriers`；`http_parse_err=0`、`fec_stream_refused=0`、`fec_short_unknown/drop=0`；不用 iperf3。
+
 **T5.2 256 判读（t52-debug）**：c9 `fec_short_tx` 应随小包非零；`fec_short_unknown`/`fec_drop_window`/`fec_drop_crypto` 必须为 0；`fec_short_unknown` 增长 = 对端不是本 revision（`epoch` 未带短包长度）。c8 `http_req == http_resp == carrier 数`；不等时 debug>=1 打 `http <stage>`/`HELLO rejected`。c3 `connect_retry` 可非 0，`connect_fail` 必须 0；`-110 ETIMEDOUT` 才是真不可达。n>1 时空闲流首包延迟下限一个 block（n×8KiB）；256 `n=4/m=4` 只影响空闲首包时延，不影响吞吐。`epoch` 借用短包长度，两端必须同 revision。
 
 **T5.2 retest 失败（`db575ea`/`8a3589d`，2026-11-06）**：37B cookie 可过（`fec_short_tx=3/19`），但 8MiB 数据流停：near `submit=207`、`tx_ack=37`、`data_tx=0`、`capture_runs=4/actor_calls=3`；far `rx_delivered=207`、`rx_ack=0`、`tx_ack=1`；near `CLOSETIMEOUT` 15s（`ack=37 txseq=167`；另一流 `ack=0 txseq=37`）；c9 proto/hdr/payload=0、short_unknown/drop=0；c8 near `req=2/resp=0`、far `resp=2/4`；c3 `up=2 lost=0/2 connect_fail=0`。短包 flush 生效；剩余在 **http-kal 数据块封装/发送路径**（cookie 后 app 数据未进隧道）。E hold；`t52-debug` 继续。证据 `smoke-8M-crypto-off-*`、`smoke-P-crypto-off*`。
