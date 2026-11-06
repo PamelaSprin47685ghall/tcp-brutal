@@ -1,0 +1,5 @@
+rerun 20261106T091206Z head 124c27ae12c5514ecac3c8d4de6fe46a4a0e73c3
+local ko 2b6f46baee6fd88f9e63c79c129daa69b961b341c09e4abe8c97b6e0c7cf94dc  tbtun.ko
+local srcversion 45CA11A5B8CA63534A2207E
+local sysctl rmem_max=4194304 wmem_max=4194304
+local modules tbtun=0

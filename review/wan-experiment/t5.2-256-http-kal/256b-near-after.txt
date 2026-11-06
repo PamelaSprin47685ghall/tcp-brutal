@@ -1,0 +1,31 @@
+Password: 
+debug_loss=0
+gaps_total=0
+streams_total=1
+tunnel 1 capture_runs=33 actor_calls=101 submit_bytes=8388608 tx=0 wire=17063469 err=0 short=0
+tunnel 1 rx_work_runs=7022 rx_drain_entries=7205 rx_drain_bytes=16973190 rx_paused_skips=0 rx_adopt_events=0 rx_records=0 carrier_write_space_runs=0 poll_rescues=379
+tunnel 1 rx_ready_calls=7044 rx_reads=7022 rx_read_bytes=16973190 rx_read_zero=296 rx_resume=0 rx_resume_busy=0 rx_last_drained=512 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=101 rx_delivered=8388608
+tunnel 1 dbg rcv_nxt=565883057 copied=565883056 after=565883057 qlen=1 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=32501 pmoved=1852 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=8 pub_wmem=0 pub_una=2692868269 pub_nxt=2692868269 car_wmem=0 car_nxt=2158350775 car_copied=2158350775 car_rcvbuf=524288 car_sndbuf=524288 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=480553 txwake_busy=449315 txwork=31238
+tunnel 1 ws_calls=0
+tunnel 1 c3 n=256 up=256 lost=39 replaced=39 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=56 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=8388608 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=500000 una_stall_us=6405994 stall_paused_skips=0 stall_idle_skips=109759 stall_declared=0 tx_window=8388608 bdp_bytes=2016156 k_x100=500 rtt_mean_us=352282 rttvar_us=1096962 rtt_max_us=490156 txq_max=8454432 win_block=0 win_resume=0 pump_hw_armed=0 pump_hw_fired=243 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0 prov_now=0 prov_peak=0 prov_reject=0
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0 close_timeouts=0 close_detaches=0
+tunnel 1 streams streams_active=1 n_streams=1 n_pending=0
+tunnel 1 stream sid=988429680640 state=1 kill=0 attached=0x9 rxq=0 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=0 tgt_err=0 fin_seq=0 fin_q=0 fin_w=0 rst_w=0 rxf=0/0 dage_ms=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c9 fec_proto_fail=0 fec_hdr_crc_fail=0 fec_payload_crc_fail=0 fec_short_tx=0 fec_short_unknown=0 fec_stream_refused=0 fec_drop_window=0 fec_drop_crypto=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=295 http_resp=0 pad_tx=1262 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0
+tunnel 1 reconcile live_bytes=17046465 live_data=0 live_retx=0 retired_bytes=17004 retired_data=0 retired_retx=0
+===PEERS_UP===
+256
+===DMESG===
+[426476.544078] tbtun: tunnel 1 carrier 170 DIALED lport=30188 peer=45.11.1.62:9000
+[426476.546867] tbtun: tunnel 1 carrier 21 DIALED lport=30039 peer=45.11.1.62:9000
+[426476.546896] tbtun: tunnel 1 carrier 2 DIALED lport=30003 peer=45.11.1.62:9000
+[426476.546911] tbtun: tunnel 1 carrier 22 DIALED lport=30040 peer=45.11.1.62:9000
+[426476.546926] tbtun: tunnel 1 carrier 56 DIALED lport=30074 peer=45.11.1.62:9000
+[426476.547958] tbtun: tunnel 1 carrier 1 DIALED lport=30001 peer=45.11.1.62:9000
+[426476.549608] tbtun: tunnel 1 carrier 190 DIALED lport=30208 peer=45.11.1.62:9000
+[426477.294834] tbtun: tunnel 1 carrier 134 DIALED lport=30070 peer=45.11.1.62:9000
