@@ -47,7 +47,11 @@
  * any round trip, so an interactive exchange pays one tick. */
 #define TBT_FEC_SHORT_MS 2
 #define TBT_FEC_NONCE_GOLDEN 0x9e3779b97f4a7c15ULL
+/* The RX arena keeps at most one window of 1024 packets, and the ACK grants
+ * exactly that: slots * groups * n reaches 1024 for every supported shape
+ * (the 16 MiB arena divided by (n + m) * S is 256 super-blocks). */
 #define TBT_FEC_RX_BUDGET (16u * 1024 * 1024)
+#define TBT_FEC_CREDIT_MAX 1024u
 
 /* Both ends derive the same coefficients from the configured parameters. The
  * session nonce is not available on the far side until HELLO, and FEC state is
@@ -131,14 +135,38 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o)
 
     if (o->control)
     {
+        /* ACKs are the only control records on this queue, and a cumulative
+         * ACK is safe on any carrier. Start after the carrier that last
+         * accepted one and try every up carrier: pinning the queue to the
+         * lowest up carrier lets one congested socket hold every ACK behind
+         * its data, and a late ACK is a stalled credit window. */
+        struct tbt_fec_tx *tx = sess->fec_tx;
+        u16 start = tx ? tx->ctl_rot : 0;
+        int rc = -ENODEV;
+        int err;
+
         for (i = 0; i < sess->n_car; i++)
         {
-            c = READ_ONCE(sess->car[i]);
+            u16 idx = (u16)((start + i) % sess->n_car);
+
+            c = READ_ONCE(sess->car[idx]);
             if (!c || !atomic_read(&c->up) || atomic_read(&c->stopping))
                 continue;
-            return tbt_carrier_send_fec(c, o->data, o->len);
+            err = tbt_carrier_send_fec(c, o->data, o->len);
+            if (!err)
+            {
+                if (tx)
+                    tx->ctl_rot = (u16)((idx + 1) % sess->n_car);
+                return 0;
+            }
+            /* A dead socket must not end the scan; a full one must not stop
+             * it either, because the next carrier may have room. A full
+             * carrier anywhere keeps the record queued even if every later
+             * one is dead: -EAGAIN wins over -ENODEV. */
+            if (err == -EAGAIN)
+                rc = -EAGAIN;
         }
-        return -ENODEV;
+        return rc;
     }
     if (o->carrier >= sess->n_car)
         return -ENODEV;
@@ -435,7 +463,16 @@ static bool tbt_fec_tx_credit_ok(const struct tbt_fec_tx *tx)
     u64 seq = READ_ONCE(tx->seq);
     u32 credit = READ_ONCE(tx->credit);
 
+    /* Zero credit is a closed window, not an open one. The receiver always
+     * grants at least one packet, so zero means no grant has arrived (or a
+     * bug); sending on it would overrun the receiver's block slots and the
+     * shares would come back as fec_drop_window. */
     if (!credit)
+        return false;
+    /* An ACK names packets the receiver has delivered, so it can never be
+     * ahead of what was sent. Clamp a nonsensical frontier instead of letting
+     * the unsigned subtraction wrap into a huge outstanding count. */
+    if (acked >= seq)
         return true;
     return seq - acked < (u64)credit;
 }
@@ -506,9 +543,19 @@ void tbt_fec_tx_work(struct work_struct *w)
             continue;
         }
         if (tx->fill == TBT_FEC_S)
+        {
+            atomic64_inc(&sess->fec_credit_wait);
             break; /* the peer's credit is exhausted: wait for its ACK */
+        }
         if (READ_ONCE(tx->flush_req) && tx->head == tx->tail)
         {
+            /* A partial tail still consumes one packet of the peer's window.
+             * Emitting it on an exhausted window would place it in a block
+             * the receiver has already dropped as too far ahead, and the
+             * stream could never end. Wait for the ACK that reopens the
+             * window; the flush request survives. */
+            if (tx->fill && !tbt_fec_tx_credit_ok(tx))
+                break;
             if (tx->fill)
                 tbt_fec_packetize(sess, true);
             else
@@ -784,7 +831,7 @@ static void tbt_fec_ack(struct tbt_session *sess, u64 next_deliver)
     a.credit_packets = (u32)min_t(u64,
                                   (u64)sess->fec_rx->slots * sess->fec_rx->groups *
                                       sess->fec_rx->n,
-                                  1024);
+                                  TBT_FEC_CREDIT_MAX);
     if (!a.credit_packets)
         a.credit_packets = 1;
     if (tbt_fec_ack_pack(&a, body))
@@ -796,7 +843,9 @@ static void tbt_fec_ack(struct tbt_session *sess, u64 next_deliver)
     h.conv = TBT_FEC_CONV;
     if (tbt_fec_make_record(sess, &h, body, rec, &len))
         return;
-    tbt_fec_send_record(sess, 0, rec, len, true);
+    if (tbt_fec_send_record(sess, 0, rec, len, true))
+        return;
+    atomic64_inc(&sess->fec_ack_tx);
 }
 
 static struct tbt_fec_blk *tbt_fec_rx_blk(struct tbt_fec_rx *rx, u16 group,
@@ -1042,6 +1091,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
 
         if (tbt_fec_ack_unpack(rec + TBT_FEC_HDR_LEN, &a))
             return 0;
+        atomic64_inc(&sess->fec_ack_rx);
         st = tbt_fec_stream(sess);
         if (st)
         {
@@ -1067,7 +1117,25 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
             /* Flow control: the peer has delivered up to this packet, and
              * grants the credit it sent. Wake the packetizer, which may have
              * stopped at the window. */
-            WRITE_ONCE(sess->fec_tx->peer_pkts, a.next_deliver);
+            /* ACKs now rotate over the carriers, so they can arrive out of
+             * order; the frontier is cumulative and must only move forward.
+             * A stale ACK that moved it back would shrink the sender's
+             * window and stall it until the next ACK caught up. */
+            {
+                struct tbt_fec_tx *tx = sess->fec_tx;
+                u64 cur = READ_ONCE(tx->peer_pkts);
+
+                /* Carriers process records concurrently, so two ACKs can
+                 * race here; a plain write would let the older one win. */
+                while (a.next_deliver > cur)
+                {
+                    u64 prev = cmpxchg(&tx->peer_pkts, cur, a.next_deliver);
+
+                    if (prev == cur)
+                        break;
+                    cur = prev;
+                }
+            }
             if (a.credit_packets)
                 WRITE_ONCE(sess->fec_tx->credit, a.credit_packets);
             schedule_work(&sess->w_fec_tx.work);
@@ -1309,8 +1377,10 @@ int tbt_fec_data_init(struct tbt_session *sess)
     tx->nonce = tbt_fec_base_nonce(sess);
     tx->groups = groups;
     /* Until the first ACK arrives the sender may run one window ahead; the
-     * receiver's first ACK replaces this with its own window size. */
-    tx->credit = 1024;
+     * receiver's first ACK replaces this with its own window size, which is
+     * the same slots * groups * n. Deriving it here keeps the two ends from
+     * drifting apart if the arena geometry changes. */
+    tx->credit = (u32)min_t(u64, (u64)slots * groups * n, TBT_FEC_CREDIT_MAX);
     tx->n = n;
     tx->m = m;
     tx->s = TBT_FEC_S;

@@ -546,6 +546,10 @@ struct tbt_fec_tx
      * a sender that stays inside the credit cannot outrun that buffer. */
     u64 peer_pkts;
     u32 credit;
+    /* Control records (ACKs) rotate over the up carriers: the index after the
+     * last carrier that accepted one. A single pinned carrier can hold every
+     * ACK behind its own data, and a late ACK is a stalled credit window. */
+    u16 ctl_rot;
     bool flush_req;
     /* When the packetizer may emit the partial packet it holds. Set when the
      * ring ran dry with bytes in `pkt`, cleared when it emits. 0 = not armed. */
@@ -819,6 +823,11 @@ struct tbt_session
     atomic64_t fec_stream_refused;
     atomic64_t fec_drop_window;
     atomic64_t fec_drop_crypto;
+    /* FEC flow-control observability: ACK records emitted and applied, and
+     * packetizer runs that found the peer's window closed. */
+    atomic64_t fec_ack_tx;
+    atomic64_t fec_ack_rx;
+    atomic64_t fec_credit_wait;
     atomic64_t http_parse_err;   /* container framing/header protocol error */
     atomic64_t http_status_err;  /* non-200 or non-chunked/non-keepalive */
     u64 http_req, http_resp; /* header blocks emitted; pump only */
