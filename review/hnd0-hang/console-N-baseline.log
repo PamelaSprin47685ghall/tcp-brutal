@@ -1,0 +1,1517 @@
+c[?7l[2J[0mSeaBIOS (version Arch Linux 1.17.0-2-2)
+Booting from ROM...
+Probing EDD (edd=off to disable)... oc[?7l[2J[    0.000000] Linux version 7.2.9-1-MANJARO (linux72@manjaro) (gcc (GCC) 16.2.1 20260810, GNU ld (GNU Binutils) 2.47) #1 SMP PREEMPT_DYNAMIC Sat, 03 Oct 2026 15:02:22 +0000
+[    0.000000] Command line: console=ttyS0 panic=-1 loglevel=7 tsc=unstable tbt_probes=N
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff]  System RAM
+[    0.000000] BIOS-e820: [mem 0x000000000009fc00-0x000000000009ffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000000a0000-0x00000000000effff]
+[    0.000000] BIOS-e820: [mem 0x00000000000f0000-0x00000000000fffff]  device reserved
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x000000001ffdffff]  System RAM
+[    0.000000] BIOS-e820: [mem 0x000000001ffe0000-0x000000001fffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x0000000020000000-0x00000000feffbfff]
+[    0.000000] BIOS-e820: [mem 0x00000000feffc000-0x00000000feffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000ff000000-0x00000000fffbffff]
+[    0.000000] BIOS-e820: [mem 0x00000000fffc0000-0x00000000ffffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x0000000100000000-0x000000fcffffffff]
+[    0.000000] BIOS-e820: [mem 0x000000fd00000000-0x000000ffffffffff]  device reserved
+[    0.000000] NX (Execute Disable) protection: active
+[    0.000000] APIC: Static calls initialized
+[    0.000000] DMI: SMBIOS 2.8 present.
+[    0.000000] DMI: QEMU Standard PC (i440FX + PIIX, 1996), BIOS Arch Linux 1.17.0-2-2 04/01/2014
+[    0.000000] DMI: Memory slots populated: 1/1
+[    0.000000] Hypervisor detected: KVM
+[    0.000000] last_pfn = 0x1ffe0 max_arch_pfn = 0x400000000
+[    0.000000] kvm-clock: Using msrs 4b564d01 and 4b564d00
+[    0.000000] kvm-clock: using sched offset of 126020179 cycles
+[    0.000001] clocksource: kvm-clock: mask: 0xffffffffffffffff max_cycles: 0x1cd42e4dffb, max_idle_ns: 881590591483 ns
+[    0.000004] tsc: Detected 3992.500 MHz processor
+[    0.000091] last_pfn = 0x1ffe0 max_arch_pfn = 0x400000000
+[    0.000120] MTRR map: 4 entries (3 fixed + 1 variable; max 19), built from 8 variable MTRRs
+[    0.000122] x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+[    0.001972] found SMP MP-table at [mem 0x000f66c0-0x000f66cf]
+[    0.001984] Using GB pages for direct mapping
+[    0.002041] RAMDISK: [mem 0x1fbda000-0x1ffdffff]
+[    0.002045] ACPI: Early table checksum verification disabled
+[    0.002047] ACPI: RSDP 0x00000000000F64F0 000014 (v00 BOCHS )
+[    0.002050] ACPI: RSDT 0x000000001FFE2355 000034 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002053] ACPI: FACP 0x000000001FFE2201 000074 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002056] ACPI: DSDT 0x000000001FFE0040 0021C1 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002058] ACPI: FACS 0x000000001FFE0000 000040
+[    0.002059] ACPI: APIC 0x000000001FFE2275 000080 (v03 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002060] ACPI: HPET 0x000000001FFE22F5 000038 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002061] ACPI: WAET 0x000000001FFE232D 000028 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002062] ACPI: Reserving FACP table memory at [mem 0x1ffe2201-0x1ffe2274]
+[    0.002063] ACPI: Reserving DSDT table memory at [mem 0x1ffe0040-0x1ffe2200]
+[    0.002063] ACPI: Reserving FACS table memory at [mem 0x1ffe0000-0x1ffe003f]
+[    0.002064] ACPI: Reserving APIC table memory at [mem 0x1ffe2275-0x1ffe22f4]
+[    0.002064] ACPI: Reserving HPET table memory at [mem 0x1ffe22f5-0x1ffe232c]
+[    0.002064] ACPI: Reserving WAET table memory at [mem 0x1ffe232d-0x1ffe2354]
+[    0.002389] No NUMA configuration found
+[    0.002390] Faking a node at [mem 0x0000000000000000-0x000000001ffdffff]
+[    0.002395] NODE_DATA(0) allocated [mem 0x1fbaef80-0x1fbd9fff]
+[    0.002882] ACPI: PM-Timer IO Port: 0x608
+[    0.002891] ACPI: LAPIC_NMI (acpi_id[0xff] dfl dfl lint[0x1])
+[    0.002910] IOAPIC[0]: apic_id 0, version 17, address 0xfec00000, GSI 0-23
+[    0.002911] ACPI: INT_SRC_OVR (bus 0 bus_irq 0 global_irq 2 dfl dfl)
+[    0.002912] ACPI: INT_SRC_OVR (bus 0 bus_irq 5 global_irq 5 high level)
+[    0.002913] ACPI: INT_SRC_OVR (bus 0 bus_irq 9 global_irq 9 high level)
+[    0.002914] ACPI: INT_SRC_OVR (bus 0 bus_irq 10 global_irq 10 high level)
+[    0.002914] ACPI: INT_SRC_OVR (bus 0 bus_irq 11 global_irq 11 high level)
+[    0.002916] ACPI: Using ACPI (MADT) for SMP configuration information
+[    0.002917] ACPI: HPET id: 0x8086a201 base: 0xfed00000
+[    0.002918] TSC deadline timer available
+[    0.002920] CPU topo: Max. logical packages:   1
+[    0.002920] CPU topo: Max. logical nodes:      1
+[    0.002921] CPU topo: Num. nodes per package:  1
+[    0.002922] CPU topo: Max. logical dies:       1
+[    0.002922] CPU topo: Max. dies per package:   1
+[    0.002925] CPU topo: Max. threads per core:   1
+[    0.002925] CPU topo: Num. cores per package:     2
+[    0.002925] CPU topo: Num. threads per package:   2
+[    0.002926] CPU topo: Allowing 2 present CPUs plus 0 hotplug CPUs
+[    0.002935] kvm-guest: APIC: eoi() replaced with kvm_guest_apic_eoi_write()
+[    0.002944] kvm-guest: KVM setup pv remote TLB flush
+[    0.002947] kvm-guest: setup PV sched yield
+[    0.002950] PM: hibernation: Registered nosave memory: [mem 0x00000000-0x00000fff]
+[    0.002951] PM: hibernation: Registered nosave memory: [mem 0x0009f000-0x000fffff]
+[    0.002952] [gap 0x20000000-0xfeffbfff] available for PCI devices
+[    0.002953] Booting paravirtualized kernel on KVM
+[    0.002954] clocksource: refined-jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1910969940391419 ns
+[    0.007038] Zone ranges:
+[    0.007039]   DMA      [mem 0x0000000000001000-0x0000000000ffffff]
+[    0.007040]   DMA32    [mem 0x0000000001000000-0x000000001ffdffff]
+[    0.007041]   Normal   empty
+[    0.007042]   Device   empty
+[    0.007042] Movable zone start for each node
+[    0.007043] Early memory node ranges
+[    0.007043]   node   0: [mem 0x0000000000001000-0x000000000009efff]
+[    0.007044]   node   0: [mem 0x0000000000100000-0x000000001ffdffff]
+[    0.007045] Initmem setup node 0 [mem 0x0000000000001000-0x000000001ffdffff]
+[    0.007128] On node 0, zone DMA: 1 pages in unavailable ranges
+[    0.007144] On node 0, zone DMA: 97 pages in unavailable ranges
+[    0.012124] On node 0, zone DMA32: 32 pages in unavailable ranges
+[    0.012145] setup_percpu: NR_CPUS:8192 nr_cpumask_bits:2 nr_cpu_ids:2 nr_node_ids:1
+[    0.016970] percpu: Embedded 63 pages/cpu s221184 r8192 d28672 u1048576
+[    0.017023] kvm-guest: PV spinlocks enabled
+[    0.017026] PV qspinlock hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.017031] Kernel command line: console=ttyS0 panic=-1 loglevel=7 tsc=unstable tbt_probes=N
+[    0.017099] tsc: Marking TSC unstable due to boot parameter
+[    0.017110] Unknown kernel command line parameters "tbt_probes=N", will be passed to user space.
+[    0.017446] random: crng init done
+[    0.017447] printk: log buffer data + meta data: 131072 + 557056 = 688128 bytes
+[    0.017583] Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.017602] Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.017665] Fallback order for Node 0: 0 
+[    0.017669] Built 1 zonelists, mobility grouping on.  Total pages: 130942
+[    0.017670] Policy zone: DMA32
+[    0.017873] mem auto-init: stack:all(zero), heap alloc:on, heap free:off
+[    0.018616] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=2, Nodes=1
+[    0.027381] ftrace: allocating 58866 entries in 232 pages
+[    0.027382] ftrace: allocated 232 pages with 4 groups
+[    0.027424] Dynamic Preempt: full
+[    0.027581] rcu: Preemptible hierarchical RCU implementation.
+[    0.027582] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=2.
+[    0.027583] rcu: 	RCU priority boosting: priority 1 delay 500 ms.
+[    0.027583] 	Trampoline variant of Tasks RCU enabled.
+[    0.027584] 	Rude variant of Tasks RCU enabled.
+[    0.027584] 	Tracing variant of Tasks RCU enabled.
+[    0.027585] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.027585] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=2
+[    0.027588] RCU Tasks: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=2.
+[    0.027589] RCU Tasks Rude: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=2.
+[    0.033350] NR_IRQS: 524544, nr_irqs: 440, preallocated irqs: 16
+[    0.033566] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.033583] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    0.033730] kfence: initialized - using 2097152 bytes for 255 objects at 0x(____ptrval____)-0x(____ptrval____)
+[    0.033844] Console: colour *CGA 80x25
+[    0.033889] printk: legacy console [ttyS0] enabled
+[    0.171859] ACPI: Core revision 20260408
+[    0.172715] clocksource: hpet: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604467 ns
+[    0.174433] APIC: Switch to symmetric I/O mode setup
+[    0.175453] x2apic enabled
+[    0.176159] APIC: Switched APIC routing to: physical x2apic
+[    0.177173] kvm-guest: APIC: send_IPI_mask() replaced with kvm_send_ipi_mask()
+[    0.178573] kvm-guest: APIC: send_IPI_mask_allbutself() replaced with kvm_send_ipi_mask_allbutself()
+[    0.180371] kvm-guest: setup PV IPIs
+[    0.182030] ..TIMER: vector=0x30 apic1=0 pin1=2 apic2=-1 pin2=-1
+[    0.183199] Calibrating delay loop (skipped) preset value.. 7985.00 BogoMIPS (lpj=3992500)
+[    0.184306] x86/cpu: User Mode Instruction Prevention (UMIP) activated
+[    0.185327] Last level iTLB entries: 4KB 512, 2MB 255, 4MB 127
+[    0.186199] Last level dTLB entries: 4KB 512, 2MB 255, 4MB 127, 1GB 0
+[    0.187206] mitigations: Enabled attack vectors: user_kernel, user_user, guest_host, guest_guest, SMT mitigations: auto
+[    0.189199] Speculative Store Bypass: Mitigation: Speculative Store Bypass disabled via prctl
+[    0.190199] Transient Scheduler Attacks: Mitigation: Clear CPU buffers
+[    0.191199] Spectre V2 : Mitigation: Enhanced / Automatic IBRS
+[    0.192199] Speculative Return Stack Overflow: Mitigation: Safe RET
+[    0.193199] Spectre V1 : Mitigation: usercopy/swapgs barriers and __user pointer sanitization
+[    0.194206] Spectre V2 : Enabling IBPB for BPF
+[    0.194986] Spectre V2 : mitigation: Enabling conditional Indirect Branch Prediction Barrier
+[    0.195200] active return thunk: srso_alias_return_thunk
+[    0.196221] x86/fpu: Supporting XSAVE feature 0x001: 'x87 floating point registers'
+[    0.197199] x86/fpu: Supporting XSAVE feature 0x002: 'SSE registers'
+[    0.198199] x86/fpu: Supporting XSAVE feature 0x004: 'AVX registers'
+[    0.199200] x86/fpu: Supporting XSAVE feature 0x020: 'AVX-512 opmask'
+[    0.200199] x86/fpu: Supporting XSAVE feature 0x040: 'AVX-512 Hi256'
+[    0.201200] x86/fpu: Supporting XSAVE feature 0x080: 'AVX-512 ZMM_Hi256'
+[    0.202200] x86/fpu: Supporting XSAVE feature 0x200: 'Protection Keys User registers'
+[    0.203199] x86/fpu: Supporting XSAVE feature 0x800: 'Control-flow User registers'
+[    0.204200] x86/fpu: Supporting XSAVE feature 0x1000: 'Control-flow Kernel registers (KVM only)'
+[    0.205200] x86/fpu: xstate_offset[2]:  576, xstate_sizes[2]:  256
+[    0.206199] x86/fpu: xstate_offset[5]:  832, xstate_sizes[5]:   64
+[    0.207199] x86/fpu: xstate_offset[6]:  896, xstate_sizes[6]:  512
+[    0.208199] x86/fpu: xstate_offset[7]: 1408, xstate_sizes[7]: 1024
+[    0.209199] x86/fpu: xstate_offset[9]: 2432, xstate_sizes[9]:    8
+[    0.210199] x86/fpu: xstate_offset[11]: 2440, xstate_sizes[11]:   16
+[    0.211199] x86/fpu: xstate_offset[12]: 2456, xstate_sizes[12]:   24
+[    0.212199] x86/fpu: Enabled xstate features 0x1ae7, context size is 2480 bytes, using 'compacted' format.
+[    0.236400] pid_max: default: 32768 minimum: 301
+[    0.237434] landlock: Up and running.
+[    0.238209] Yama: becoming mindful.
+[    0.239411] LSM support for eBPF active
+[    0.240203] Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.241208] Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.243226] VFS: Finished mounting rootfs on nullfs
+[    0.244642] smpboot: CPU0: AMD Ryzen 9 7940HS w/ Radeon 780M Graphics (family: 0x19, model: 0x74, stepping: 0x1)
+[    0.245596] Performance Events: Fam17h+ core perfctr, AMD PMU driver.
+[    0.246208] ... version:                   2
+[    0.246942] ... bit width:                 48
+[    0.247200] ... generic counters:          6
+[    0.247931] ... generic bitmap:            000000000000003f
+[    0.248200] ... fixed-purpose counters:    0
+[    0.248939] ... fixed-purpose bitmap:      0000000000000000
+[    0.249200] ... value mask:                0000ffffffffffff
+[    0.250155] ... max period:                00007fffffffffff
+[    0.250200] ... global_ctrl mask:          000000000000003f
+[    0.251223] signal: max sigframe size: 3376
+[    0.252019] rcu: Hierarchical SRCU implementation.
+[    0.252201] rcu: 	Max phase no-delay instances is 400.
+[    0.253223] Timer migration: 1 hierarchy levels; 8 children per group; 1 crossnode level
+[    0.258716] smp: Bringing up secondary CPUs ...
+[    0.259499] smpboot: x86: Booting SMP configuration:
+[    0.260209] .... node  #0, CPUs:      #1
+[    0.260312] smp: Brought up 1 node, 2 CPUs
+[    0.261924] smpboot: Total of 2 processors activated (15970.00 BogoMIPS)
+[    0.262431] Memory: 442476K/523768K available (22162K kernel code, 3079K rwdata, 17572K rodata, 4936K init, 5020K bss, 76252K reserved, 0K cma-reserved)
+[    0.263550] devtmpfs: initialized
+[    0.264015] x86/mm: Memory block size: 128MB
+[    0.265316] posixtimers hash table entries: 1024 (order: 2, 16384 bytes, linear)
+[    0.267241] futex hash table entries: 512 (32768 bytes on 1 NUMA nodes, total 32 KiB, linear).
+[    0.268339] xor: automatically using best checksumming function   avx       
+[    0.270397] PM: RTC time: 07:50:54, date: 2026-11-06
+[    0.272958] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.273370] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    0.275290] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    0.276206] audit: initializing netlink subsys (disabled)
+[    0.277257] audit: type=2000 audit(1793951454.459:1): state=initialized audit_enabled=0 res=1
+[    0.292976] thermal_sys: Registered thermal governor 'fair_share'
+[    0.292985] thermal_sys: Registered thermal governor 'bang_bang'
+[    0.294201] thermal_sys: Registered thermal governor 'step_wise'
+[    0.295201] thermal_sys: Registered thermal governor 'user_space'
+[    0.296201] thermal_sys: Registered thermal governor 'power_allocator'
+[    0.297217] cpuidle: using governor ladder
+[    0.299205] cpuidle: using governor menu
+[    0.301277] Freeing SMP alternatives memory: 60K
+[    0.302076] acpiphp: ACPI Hot Plug PCI Controller Driver version: 0.5
+[    0.303410] PCI: Using configuration type 1 for base access
+[    0.304200] PCI: Using configuration type 1 for extended access
+[    0.305246] virt/tdx: TDX not supported by the host platform
+[    0.306250] kprobes: kprobe jump-optimization is enabled. All kprobes are optimized if possible.
+[    0.314203] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    0.315201] HugeTLB: 16380 KiB vmemmap can be freed for a 1.00 GiB page
+[    0.316201] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.319201] HugeTLB: 28 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.330621] raid6: using avx512x2 recovery algorithm
+[    0.331201] raid6: skipped pq benchmark and selected avx512x4
+[    0.332396] ACPI: Added _OSI(Module Device)
+[    0.333113] ACPI: Added _OSI(Processor Device)
+[    0.334201] ACPI: Added _OSI(Processor Aggregator Device)
+[    0.336261] ACPI: 1 ACPI AML tables successfully acquired and loaded
+[    0.338326] ACPI: \_SB_: platform _OSC: OS support mask [006e7eff]
+[    0.339354] ACPI: Interpreter enabled
+[    0.340007] ACPI: PM: (supports S0 S3 S4 S5)
+[    0.340201] ACPI: Using IOAPIC for interrupt routing
+[    0.341186] PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+[    0.343201] PCI: Using E820 reservations for host bridge windows
+[    0.344308] ACPI: Enabled 2 GPEs in block 00 to 0F
+[    0.347884] ACPI: PCI Root Bridge [PCI0] (domain 0000 [bus 00-ff])
+[    0.349589] acpiphp: Slot [2] registered
+[    0.350232] acpiphp: Slot [3] registered
+[    0.350936] acpiphp: Slot [4] registered
+[    0.351235] acpiphp: Slot [5] registered
+[    0.351947] acpiphp: Slot [6] registered
+[    0.353241] acpiphp: Slot [7] registered
+[    0.353965] acpiphp: Slot [8] registered
+[    0.354221] acpiphp: Slot [9] registered
+[    0.354911] acpiphp: Slot [10] registered
+[    0.356231] acpiphp: Slot [11] registered
+[    0.357006] acpiphp: Slot [12] registered
+[    0.357223] acpiphp: Slot [13] registered
+[    0.357996] acpiphp: Slot [14] registered
+[    0.359225] acpiphp: Slot [15] registered
+[    0.360000] acpiphp: Slot [16] registered
+[    0.360223] acpiphp: Slot [17] registered
+[    0.360990] acpiphp: Slot [18] registered
+[    0.362225] acpiphp: Slot [19] registered
+[    0.363020] acpiphp: Slot [20] registered
+[    0.363221] acpiphp: Slot [21] registered
+[    0.363926] acpiphp: Slot [22] registered
+[    0.365221] acpiphp: Slot [23] registered
+[    0.365936] acpiphp: Slot [24] registered
+[    0.366220] acpiphp: Slot [25] registered
+[    0.366921] acpiphp: Slot [26] registered
+[    0.368221] acpiphp: Slot [27] registered
+[    0.368936] acpiphp: Slot [28] registered
+[    0.369221] acpiphp: Slot [29] registered
+[    0.369928] acpiphp: Slot [30] registered
+[    0.370221] acpiphp: Slot [31] registered
+[    0.370921] PCI host bridge to bus 0000:00
+[    0.372204] pci_bus 0000:00: root bus resource [io  0x0000-0x0cf7 window]
+[    0.373201] pci_bus 0000:00: root bus resource [io  0x0d00-0xffff window]
+[    0.374201] pci_bus 0000:00: root bus resource [mem 0x000a0000-0x000bffff window]
+[    0.375201] pci_bus 0000:00: root bus resource [mem 0x20000000-0xfebfffff window]
+[    0.377201] pci_bus 0000:00: root bus resource [mem 0x100000000-0x17fffffff window]
+[    0.378201] pci_bus 0000:00: root bus resource [bus 00-ff]
+[    0.379359] pci 0000:00:00.0: [8086:1237] type 00 class 0x060000 conventional PCI endpoint
+[    0.380814] pci 0000:00:01.0: [8086:7000] type 00 class 0x060100 conventional PCI endpoint
+[    0.382855] pci 0000:00:01.1: [8086:7010] type 00 class 0x010180 conventional PCI endpoint
+[    0.385053] pci 0000:00:01.1: BAR 4 [io  0xc000-0xc00f]
+[    0.386246] pci 0000:00:01.1: BAR 0 [io  0x01f0-0x01f7]: legacy IDE quirk
+[    0.388201] pci 0000:00:01.1: BAR 1 [io  0x03f6]: legacy IDE quirk
+[    0.389202] pci 0000:00:01.1: BAR 2 [io  0x0170-0x0177]: legacy IDE quirk
+[    0.390201] pci 0000:00:01.1: BAR 3 [io  0x0376]: legacy IDE quirk
+[    0.391511] pci 0000:00:01.3: [8086:7113] type 00 class 0x068000 conventional PCI endpoint
+[    0.393669] pci 0000:00:01.3: quirk: [io  0x0600-0x063f] claimed by PIIX4 ACPI
+[    0.395216] pci 0000:00:01.3: quirk: [io  0x0700-0x070f] claimed by PIIX4 SMB
+[    0.402811] ACPI: PCI: Interrupt link LNKA configured for IRQ 10
+[    0.403339] ACPI: PCI: Interrupt link LNKB configured for IRQ 10
+[    0.405325] ACPI: PCI: Interrupt link LNKC configured for IRQ 11
+[    0.406323] ACPI: PCI: Interrupt link LNKD configured for IRQ 11
+[    0.407267] ACPI: PCI: Interrupt link LNKS configured for IRQ 9
+[    0.408546] iommu: Default domain type: Translated
+[    0.409201] iommu: DMA domain TLB invalidation policy: lazy mode
+[    0.410403] SCSI subsystem initialized
+[    0.411247] ACPI: bus type USB registered
+[    0.412238] usbcore: registered new interface driver usbfs
+[    0.413192] usbcore: registered new interface driver hub
+[    0.414207] usbcore: registered new device driver usb
+[    0.415111] EDAC MC: Ver: 3.0.0
+[    0.416434] NetLabel: Initializing
+[    0.417028] NetLabel:  domain hash size = 128
+[    0.417028] NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO
+[    0.418232] NetLabel:  unlabeled traffic allowed by default
+[    0.419205] mctp: management component transport protocol core
+[    0.420201] NET: Registered PF_MCTP protocol family
+[    0.421127] PCI: Using ACPI for IRQ routing
+[    0.422295] e820: register RAM buffer resource [mem 0x0009fc00-0x0009ffff]
+[    0.423201] e820: register RAM buffer resource [mem 0x1ffe0000-0x1fffffff]
+[    0.425246] vgaarb: loaded
+[    0.425733] hpet0: at MMIO 0xfed00000, IRQs 2, 8, 0
+[    0.426202] hpet0: 3 comparators, 64-bit 100.000000 MHz counter
+[    0.430334] clocksource: Switched to clocksource kvm-clock
+[    0.432008] VFS: Disk quotas dquot_6.6.0
+[    0.432740] VFS: Dquot-cache hash table entries: 512 (4096 bytes)
+[    0.433972] pnp: PnP ACPI init
+[    0.434626] ACPI: IRQ 4 override to edge(!), high(!)
+[    0.435746] pnp: PnP ACPI: found 4 devices
+[    0.442411] clocksource: acpi_pm: mask: 0xffffff max_cycles: 0xffffff, max_idle_ns: 2085701024 ns
+[    0.443987] NET: Registered PF_INET protocol family
+[    0.445072] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    0.446500] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.448107] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.449460] TCP established hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    0.451003] TCP bind hash table entries: 4096 (order: 5, 131072 bytes, linear)
+[    0.452257] TCP: Hash tables configured (established 4096 bind 4096)
+[    0.453559] MPTCP token hash table entries: 512 (order: 2, 12288 bytes, linear)
+[    0.454962] UDP hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.456260] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.457353] NET: Registered PF_XDP protocol family
+[    0.458303] pci_bus 0000:00: resource 4 [io  0x0000-0x0cf7 window]
+[    0.459485] pci_bus 0000:00: resource 5 [io  0x0d00-0xffff window]
+[    0.460656] pci_bus 0000:00: resource 6 [mem 0x000a0000-0x000bffff window]
+[    0.461879] pci_bus 0000:00: resource 7 [mem 0x20000000-0xfebfffff window]
+[    0.463070] pci_bus 0000:00: resource 8 [mem 0x100000000-0x17fffffff window]
+[    0.464329] pci 0000:00:01.0: PIIX3: Enabling Passive Release
+[    0.465333] pci 0000:00:00.0: Limiting direct PCI/PCI transfers
+[    0.466390] PCI: CLS 0 bytes, default 64
+[    0.467257] Trying to unpack rootfs image as initramfs...
+[    0.469122] Initialise system trusted keyrings
+[    0.469920] Key type blacklist registered
+[    0.470710] workingset: timestamp_bits=36 (anon: 31) max_order=17 bucket_order=0 (anon: 0)
+[    0.472432] fuse: init (API version 7.45)
+[    0.473254] integrity: Platform Keyring initialized
+[    0.475831] integrity: Machine keyring initialized
+[    0.484159] Key type asymmetric registered
+[    0.484903] Asymmetric key parser 'x509' registered
+[    0.485998] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 245)
+[    0.488654] io scheduler mq-deadline registered
+[    0.489561] io scheduler kyber registered
+[    0.490421] io scheduler bfq registered
+[    0.491313] ledtrig-cpu: registered to indicate activity on CPUs
+[    0.492608] input: Power Button as /devices/platform/LNXPWRBN:00/input/input0
+[    0.493993] ACPI: button: Power Button [PWRF]
+[    0.496904] Serial: 8250/16550 driver, 32 ports, IRQ sharing enabled
+[    0.498442] 00:03: ttyS0 at I/O 0x3f8 (irq = 4, base_baud = 115200) is a 16550A
+[    0.504740] Non-volatile memory driver v1.3
+[    0.506039] ACPI: bus type drm_connector registered
+[    0.507168] Freeing initrd memory: 4120K
+[    0.507413] usbcore: registered new interface driver usbserial_generic
+[    0.508999] usbserial: USB Serial support registered for generic
+[    0.510093] i8042: PNP: PS/2 Controller [PNP0303:KBD,PNP0f13:MOU] at 0x60,0x64 irq 1,12
+[    0.512226] serio: i8042 KBD port at 0x60,0x64 irq 1
+[    0.513151] serio: i8042 AUX port at 0x60,0x64 irq 12
+[    0.514388] input: AT Translated Set 2 keyboard as /devices/platform/i8042/serio0/input/input1
+[    0.515914] rtc_cmos PNP0B00:00: RTC can wake from S4
+[    0.517403] rtc_cmos PNP0B00:00: registered as rtc0
+[    0.518490] rtc_cmos PNP0B00:00: setting system clock to 2026-11-06T07:50:54 UTC (1793951454)
+[    0.520912] rtc_cmos PNP0B00:00: alarms up to one day, y3k, 242 bytes nvram, hpet irqs
+[    0.523848] hid: raw HID events driver (C) Jiri Kosina
+[    0.524969] usbcore: registered new interface driver usbhid
+[    0.526094] usbhid: USB HID core driver
+[    0.527202] drop_monitor: Initializing network drop monitor service
+[    0.528541] NET: Registered PF_INET6 protocol family
+[    0.529998] Segment Routing with IPv6
+[    0.530760] RPL Segment Routing with IPv6
+[    0.531525] In-situ OAM (IOAM) with IPv6
+[    0.532283] NET: Registered PF_PACKET protocol family
+[    0.533575] IPI shorthand broadcast: enabled
+[    0.537278] sched_clock: Marking stable (393001824, 143614838)->(591049227, -54432565)
+[    0.538940] registered taskstats version 1
+[    0.540074] Loading compiled-in X.509 certificates
+[    0.542984] Loaded X.509 cert 'Build time autogenerated kernel key: c2a3f38db21da023dc040f7ad1b79c9e79964d7e'
+[    0.549664] zswap: loaded using pool zstd
+[    0.550491] Demotion targets for Node 0: null
+[    0.551676] Key type .fscrypt registered
+[    0.552363] Key type fscrypt-provisioning registered
+[    0.553816] Btrfs loaded, zoned=yes, fsverity=yes
+[    0.554774] Key type big_key registered
+[    0.556253] PM:   Magic number: 2:11:824
+[    0.557257] RAS: Correctable Errors collector initialized.
+[    0.558559] clk: Disabling unused clocks
+[    0.559314] PM: genpd: Disabling unused power domains
+[    0.561424] Freeing unused decrypted memory: 2028K
+[    0.562495] Freeing unused kernel image (initmem) memory: 4936K
+[    0.563285] Write protecting the kernel read-only data: 40960k
+[    0.564210] Freeing unused kernel image (text/rodata gap) memory: 364K
+[    0.565138] Freeing unused kernel image (rodata/data gap) memory: 860K
+[    0.596538] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.597382] rodata_test: all tests were successful
+[    0.598005] Run /init as init process
+== tbtun guest: 7.2.9-1-MANJARO probes=N
+== no eth0 (run.sh --no-net)
+== loading tbtun.ko
+[    0.614303] tbtun: loading out-of-tree module taints kernel.
+[    0.615075] tbtun: module verification failed: signature and/or required key missing - tainting kernel
+[    0.625907] tbtun 0.0.1 loaded: 64 tunnels max, 256 carriers max
+== tbtun loaded
+== probe N: FEC v6 grouped over HTTP
+[    2.631354] tbtun: tunnel 1 far side uses trust-on-first-use; configure nonce= or peer= to pin it
+[    2.647372] tbtun: tunnel 2 carrier 0 DIALED lport=41024 peer=127.0.0.1:19101
+[    2.649745] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41024, awaiting HELLO
+[    2.653666] tbtun: tunnel 2 carrier 1 DIALED lport=41025 peer=127.0.0.1:19101
+[    2.655211] tbtun: tunnel 2 carrier 2 DIALED lport=41026 peer=127.0.0.1:19101
+[    2.656642] tbtun: tunnel 2 carrier 42 DIALED lport=41027 peer=127.0.0.1:19101
+[    2.656777] tbtun: tunnel 2 carrier 3 DIALED lport=41028 peer=127.0.0.1:19101
+[    2.659518] tbtun: tunnel 2 carrier 43 DIALED lport=41029 peer=127.0.0.1:19101
+[    2.659567] tbtun: tunnel 2 carrier 4 DIALED lport=41030 peer=127.0.0.1:19101
+[    2.662430] tbtun: tunnel 2 carrier 44 DIALED lport=41031 peer=127.0.0.1:19101
+[    2.662569] tbtun: tunnel 2 carrier 5 DIALED lport=41032 peer=127.0.0.1:19101
+[    2.665405] tbtun: tunnel 2 carrier 45 DIALED lport=41033 peer=127.0.0.1:19101
+[    2.665425] tbtun: tunnel 2 carrier 46 DIALED lport=41034 peer=127.0.0.1:19101
+[    2.667025] tbtun: tunnel 2 carrier 6 DIALED lport=41035 peer=127.0.0.1:19101
+[    2.670223] tbtun: tunnel 2 carrier 7 DIALED lport=41036 peer=127.0.0.1:19101
+[    2.671698] tbtun: tunnel 2 carrier 8 DIALED lport=41037 peer=127.0.0.1:19101
+[    2.671714] tbtun: tunnel 2 carrier 47 DIALED lport=41038 peer=127.0.0.1:19101
+[    2.673190] tbtun: tunnel 2 carrier 9 DIALED lport=41039 peer=127.0.0.1:19101
+[    2.676095] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41025, awaiting HELLO
+[    2.677700] tbtun: tunnel 2 carrier 48 DIALED lport=41040 peer=127.0.0.1:19101
+[    2.677990] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41026, awaiting HELLO
+[    2.680665] tbtun: tunnel 2 carrier 49 DIALED lport=41041 peer=127.0.0.1:19101
+[    2.680959] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41027, awaiting HELLO
+[    2.683663] tbtun: tunnel 2 carrier 50 DIALED lport=41042 peer=127.0.0.1:19101
+[    2.683937] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41028, awaiting HELLO
+[    2.687081] tbtun: tunnel 2 carrier 10 DIALED lport=41043 peer=127.0.0.1:19101
+[    2.687692] tbtun: tunnel 2 carrier 51 DIALED lport=41044 peer=127.0.0.1:19101
+[    2.688627] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41029, awaiting HELLO
+[    2.691565] tbtun: tunnel 2 carrier 11 DIALED lport=41045 peer=127.0.0.1:19101
+[    2.691741] tbtun: tunnel 2 carrier 52 DIALED lport=41046 peer=127.0.0.1:19101
+[    2.693261] tbtun: tunnel 2 carrier 12 DIALED lport=41047 peer=127.0.0.1:19101
+[    2.695500] tbtun: tunnel 2 carrier 53 DIALED lport=41048 peer=127.0.0.1:19101
+[    2.696001] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41030, awaiting HELLO
+[    2.697427] tbtun: tunnel 2 carrier 54 DIALED lport=41049 peer=127.0.0.1:19101
+[    2.698996] tbtun: tunnel 2 carrier 13 DIALED lport=41050 peer=127.0.0.1:19101
+[    2.700432] tbtun: tunnel 2 carrier 55 DIALED lport=41051 peer=127.0.0.1:19101
+[    2.701942] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41031, awaiting HELLO
+[    2.703408] tbtun: tunnel 2 carrier 56 DIALED lport=41052 peer=127.0.0.1:19101
+[    2.704960] tbtun: tunnel 2 carrier 14 DIALED lport=41053 peer=127.0.0.1:19101
+[    2.706387] tbtun: tunnel 2 carrier 57 DIALED lport=41054 peer=127.0.0.1:19101
+[    2.707822] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41032, awaiting HELLO
+[    2.709206] tbtun: tunnel 2 carrier 58 DIALED lport=41055 peer=127.0.0.1:19101
+[    2.710730] tbtun: tunnel 2 carrier 15 DIALED lport=41056 peer=127.0.0.1:19101
+[    2.712193] tbtun: tunnel 2 carrier 59 DIALED lport=41057 peer=127.0.0.1:19101
+[    2.713594] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41033, awaiting HELLO
+[    2.715022] tbtun: tunnel 2 carrier 60 DIALED lport=41058 peer=127.0.0.1:19101
+[    2.716492] tbtun: tunnel 2 carrier 16 DIALED lport=41059 peer=127.0.0.1:19101
+[    2.717942] tbtun: tunnel 2 carrier 61 DIALED lport=41060 peer=127.0.0.1:19101
+[    2.719372] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41034, awaiting HELLO
+[    2.720753] tbtun: tunnel 2 carrier 62 DIALED lport=41061 peer=127.0.0.1:19101
+[    2.722273] tbtun: tunnel 2 carrier 17 DIALED lport=41062 peer=127.0.0.1:19101
+[    2.723690] tbtun: tunnel 2 carrier 63 DIALED lport=41063 peer=127.0.0.1:19101
+[    2.725079] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41035, awaiting HELLO
+[    2.726488] tbtun: tunnel 2 carrier 64 DIALED lport=41064 peer=127.0.0.1:19101
+[    2.727978] tbtun: tunnel 2 carrier 18 DIALED lport=41065 peer=127.0.0.1:19101
+[    2.729418] tbtun: tunnel 2 carrier 65 DIALED lport=41066 peer=127.0.0.1:19101
+[    2.730852] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41036, awaiting HELLO
+[    2.732293] tbtun: tunnel 2 carrier 66 DIALED lport=41067 peer=127.0.0.1:19101
+[    2.733795] tbtun: tunnel 2 carrier 19 DIALED lport=41068 peer=127.0.0.1:19101
+[    2.735313] tbtun: tunnel 2 carrier 67 DIALED lport=41069 peer=127.0.0.1:19101
+[    2.736737] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41037, awaiting HELLO
+[    2.738308] tbtun: tunnel 2 carrier 68 DIALED lport=41070 peer=127.0.0.1:19101
+[    2.739744] tbtun: tunnel 2 carrier 20 DIALED lport=41071 peer=127.0.0.1:19101
+[    2.741216] tbtun: tunnel 2 carrier 69 DIALED lport=41072 peer=127.0.0.1:19101
+[    2.742648] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41038, awaiting HELLO
+[    2.744042] tbtun: tunnel 2 carrier 70 DIALED lport=41073 peer=127.0.0.1:19101
+[    2.745517] tbtun: tunnel 2 carrier 21 DIALED lport=41074 peer=127.0.0.1:19101
+[    2.746988] tbtun: tunnel 2 carrier 71 DIALED lport=41075 peer=127.0.0.1:19101
+[    2.748489] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41039, awaiting HELLO
+[    2.749964] tbtun: tunnel 2 carrier 72 DIALED lport=41076 peer=127.0.0.1:19101
+[    2.751413] tbtun: tunnel 2 carrier 22 DIALED lport=41077 peer=127.0.0.1:19101
+[    2.752869] tbtun: tunnel 2 carrier 73 DIALED lport=41078 peer=127.0.0.1:19101
+[    2.754296] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41040, awaiting HELLO
+[    2.755685] tbtun: tunnel 2 carrier 74 DIALED lport=41079 peer=127.0.0.1:19101
+[    2.757209] tbtun: tunnel 2 carrier 23 DIALED lport=41080 peer=127.0.0.1:19101
+[    2.758630] tbtun: tunnel 2 carrier 75 DIALED lport=41081 peer=127.0.0.1:19101
+[    2.760021] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41041, awaiting HELLO
+[    2.761428] tbtun: tunnel 2 carrier 76 DIALED lport=41082 peer=127.0.0.1:19101
+[    2.762899] tbtun: tunnel 2 carrier 24 DIALED lport=41083 peer=127.0.0.1:19101
+[    2.764364] tbtun: tunnel 2 carrier 77 DIALED lport=41084 peer=127.0.0.1:19101
+[    2.765839] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41042, awaiting HELLO
+[    2.767266] tbtun: tunnel 2 carrier 78 DIALED lport=41085 peer=127.0.0.1:19101
+[    2.768768] tbtun: tunnel 2 carrier 25 DIALED lport=41086 peer=127.0.0.1:19101
+[    2.770262] tbtun: tunnel 2 carrier 79 DIALED lport=41087 peer=127.0.0.1:19101
+[    2.771708] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41043, awaiting HELLO
+[    2.773091] tbtun: tunnel 2 carrier 80 DIALED lport=41088 peer=127.0.0.1:19101
+[    2.774781] tbtun: tunnel 2 carrier 26 DIALED lport=41089 peer=127.0.0.1:19101
+[    2.776205] tbtun: tunnel 2 carrier 81 DIALED lport=41090 peer=127.0.0.1:19101
+[    2.777651] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41044, awaiting HELLO
+[    2.778884] tbtun: tunnel 2 carrier 82 DIALED lport=41091 peer=127.0.0.1:19101
+[    2.780343] tbtun: tunnel 2 carrier 27 DIALED lport=41092 peer=127.0.0.1:19101
+[    2.781608] tbtun: tunnel 2 carrier 83 DIALED lport=41093 peer=127.0.0.1:19101
+[    2.782917] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41045, awaiting HELLO
+[    2.784000] tbtun: tunnel 2 carrier 84 DIALED lport=41094 peer=127.0.0.1:19101
+[    2.785299] tbtun: tunnel 2 carrier 28 DIALED lport=41095 peer=127.0.0.1:19101
+[    2.786412] tbtun: tunnel 2 carrier 85 DIALED lport=41096 peer=127.0.0.1:19101
+[    2.787584] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41046, awaiting HELLO
+[    2.788623] tbtun: tunnel 2 carrier 86 DIALED lport=41097 peer=127.0.0.1:19101
+[    2.789841] tbtun: tunnel 2 carrier 29 DIALED lport=41098 peer=127.0.0.1:19101
+[    2.790832] tbtun: tunnel 2 carrier 87 DIALED lport=41099 peer=127.0.0.1:19101
+[    2.791921] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41047, awaiting HELLO
+[    2.792861] tbtun: tunnel 2 carrier 88 DIALED lport=41100 peer=127.0.0.1:19101
+[    2.793961] tbtun: tunnel 2 carrier 30 DIALED lport=41101 peer=127.0.0.1:19101
+[    2.794904] tbtun: tunnel 2 carrier 89 DIALED lport=41102 peer=127.0.0.1:19101
+[    2.795929] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41048, awaiting HELLO
+[    2.796851] tbtun: tunnel 2 carrier 90 DIALED lport=41103 peer=127.0.0.1:19101
+[    2.797899] tbtun: tunnel 2 carrier 31 DIALED lport=41104 peer=127.0.0.1:19101
+[    2.798865] tbtun: tunnel 2 carrier 91 DIALED lport=41105 peer=127.0.0.1:19101
+[    2.799783] tbtun: tunnel 2 carrier 32 DIALED lport=41106 peer=127.0.0.1:19101
+[    2.800768] tbtun: tunnel 2 carrier 92 DIALED lport=41107 peer=127.0.0.1:19101
+[    2.801643] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41049, awaiting HELLO
+[    2.802731] tbtun: tunnel 2 carrier 93 DIALED lport=41108 peer=127.0.0.1:19101
+[    2.803655] tbtun: tunnel 2 carrier 33 DIALED lport=41109 peer=127.0.0.1:19101
+[    2.804690] tbtun: tunnel 2 carrier 94 DIALED lport=41110 peer=127.0.0.1:19101
+[    2.805680] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41050, awaiting HELLO
+[    2.806628] tbtun: tunnel 2 carrier 95 DIALED lport=41111 peer=127.0.0.1:19101
+[    2.807650] tbtun: tunnel 2 carrier 34 DIALED lport=41112 peer=127.0.0.1:19101
+[    2.808730] tbtun: tunnel 2 carrier 96 DIALED lport=41113 peer=127.0.0.1:19101
+[    2.809878] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41051, awaiting HELLO
+[    2.810606] tbtun: tunnel 2 carrier 97 DIALED lport=41114 peer=127.0.0.1:19101
+[    2.811580] tbtun: tunnel 2 carrier 35 DIALED lport=41115 peer=127.0.0.1:19101
+[    2.812495] tbtun: tunnel 2 carrier 98 DIALED lport=41116 peer=127.0.0.1:19101
+[    2.813408] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41052, awaiting HELLO
+[    2.814355] tbtun: tunnel 2 carrier 99 DIALED lport=41117 peer=127.0.0.1:19101
+[    2.815328] tbtun: tunnel 2 carrier 36 DIALED lport=41118 peer=127.0.0.1:19101
+[    2.816293] tbtun: tunnel 2 carrier 100 DIALED lport=41119 peer=127.0.0.1:19101
+[    2.817228] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41053, awaiting HELLO
+[    2.818158] tbtun: tunnel 2 carrier 101 DIALED lport=41120 peer=127.0.0.1:19101
+[    2.819088] tbtun: tunnel 2 carrier 37 DIALED lport=41121 peer=127.0.0.1:19101
+[    2.820077] tbtun: tunnel 2 carrier 102 DIALED lport=41122 peer=127.0.0.1:19101
+[    2.820951] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41054, awaiting HELLO
+[    2.821858] tbtun: tunnel 2 carrier 103 DIALED lport=41123 peer=127.0.0.1:19101
+[    2.822814] tbtun: tunnel 2 carrier 38 DIALED lport=41124 peer=127.0.0.1:19101
+[    2.823764] tbtun: tunnel 2 carrier 104 DIALED lport=41125 peer=127.0.0.1:19101
+[    2.824668] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41055, awaiting HELLO
+[    2.825586] tbtun: tunnel 2 carrier 105 DIALED lport=41126 peer=127.0.0.1:19101
+[    2.826550] tbtun: tunnel 2 carrier 39 DIALED lport=41127 peer=127.0.0.1:19101
+[    2.827507] tbtun: tunnel 2 carrier 106 DIALED lport=41128 peer=127.0.0.1:19101
+[    2.828406] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41056, awaiting HELLO
+[    2.829323] tbtun: tunnel 2 carrier 107 DIALED lport=41129 peer=127.0.0.1:19101
+[    2.830351] tbtun: tunnel 2 carrier 40 DIALED lport=41130 peer=127.0.0.1:19101
+[    2.831332] tbtun: tunnel 2 carrier 108 DIALED lport=41131 peer=127.0.0.1:19101
+[    2.832236] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41057, awaiting HELLO
+[    2.833227] tbtun: tunnel 2 carrier 109 DIALED lport=41132 peer=127.0.0.1:19101
+[    2.834360] tbtun: tunnel 2 carrier 41 DIALED lport=41133 peer=127.0.0.1:19101
+[    2.835311] tbtun: tunnel 2 carrier 110 DIALED lport=41134 peer=127.0.0.1:19101
+[    2.836374] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41058, awaiting HELLO
+[    2.837319] tbtun: tunnel 2 carrier 111 DIALED lport=41135 peer=127.0.0.1:19101
+[    2.839427] tbtun: tunnel 2 carrier 112 DIALED lport=41136 peer=127.0.0.1:19101
+[    2.839542] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41059, awaiting HELLO
+[    2.840482] tbtun: tunnel 2 carrier 113 DIALED lport=41137 peer=127.0.0.1:19101
+[    2.841688] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41060, awaiting HELLO
+[    2.842588] tbtun: tunnel 2 carrier 114 DIALED lport=41138 peer=127.0.0.1:19101
+[    2.843736] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41061, awaiting HELLO
+[    2.844551] tbtun: tunnel 2 carrier 115 DIALED lport=41139 peer=127.0.0.1:19101
+[    2.845714] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41062, awaiting HELLO
+[    2.846499] tbtun: tunnel 2 carrier 116 DIALED lport=41140 peer=127.0.0.1:19101
+[    2.847695] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41063, awaiting HELLO
+[    2.848478] tbtun: tunnel 2 carrier 117 DIALED lport=41141 peer=127.0.0.1:19101
+[    2.849701] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41064, awaiting HELLO
+[    2.850483] tbtun: tunnel 2 carrier 118 DIALED lport=41142 peer=127.0.0.1:19101
+[    2.851687] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41065, awaiting HELLO
+[    2.852465] tbtun: tunnel 2 carrier 119 DIALED lport=41143 peer=127.0.0.1:19101
+[    2.853686] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41066, awaiting HELLO
+[    2.854493] tbtun: tunnel 2 carrier 120 DIALED lport=41144 peer=127.0.0.1:19101
+[    2.855690] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41067, awaiting HELLO
+[    2.856446] tbtun: tunnel 2 carrier 121 DIALED lport=41145 peer=127.0.0.1:19101
+[    2.857562] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41068, awaiting HELLO
+[    2.858375] tbtun: tunnel 2 carrier 122 DIALED lport=41146 peer=127.0.0.1:19101
+[    2.859492] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41069, awaiting HELLO
+[    2.860293] tbtun: tunnel 2 carrier 123 DIALED lport=41147 peer=127.0.0.1:19101
+[    2.861376] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41070, awaiting HELLO
+[    2.862185] tbtun: tunnel 2 carrier 124 DIALED lport=41148 peer=127.0.0.1:19101
+[    2.863278] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41071, awaiting HELLO
+[    2.864092] tbtun: tunnel 2 carrier 125 DIALED lport=41149 peer=127.0.0.1:19101
+[    2.865242] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41072, awaiting HELLO
+[    2.866209] tbtun: tunnel 2 carrier 126 DIALED lport=41150 peer=127.0.0.1:19101
+[    2.867202] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41073, awaiting HELLO
+[    2.868029] tbtun: tunnel 2 carrier 127 DIALED lport=41151 peer=127.0.0.1:19101
+[    2.869277] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41074, awaiting HELLO
+[    2.870102] tbtun: tunnel 2 carrier 128 DIALED lport=41152 peer=127.0.0.1:19101
+[    2.872216] tbtun: tunnel 2 carrier 129 DIALED lport=41153 peer=127.0.0.1:19101
+[    2.872409] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41075, awaiting HELLO
+[    2.873329] tbtun: tunnel 2 carrier 130 DIALED lport=41154 peer=127.0.0.1:19101
+[    2.874534] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41076, awaiting HELLO
+[    2.875387] tbtun: tunnel 2 carrier 131 DIALED lport=41155 peer=127.0.0.1:19101
+[    2.876638] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41077, awaiting HELLO
+[    2.877485] tbtun: tunnel 2 carrier 132 DIALED lport=41156 peer=127.0.0.1:19101
+[    2.878661] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41078, awaiting HELLO
+[    2.879466] tbtun: tunnel 2 carrier 133 DIALED lport=41157 peer=127.0.0.1:19101
+[    2.880581] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41079, awaiting HELLO
+[    2.881361] tbtun: tunnel 2 carrier 134 DIALED lport=41158 peer=127.0.0.1:19101
+[    2.882479] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41080, awaiting HELLO
+[    2.883255] tbtun: tunnel 2 carrier 135 DIALED lport=41159 peer=127.0.0.1:19101
+[    2.884390] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41081, awaiting HELLO
+[    2.885174] tbtun: tunnel 2 carrier 136 DIALED lport=41160 peer=127.0.0.1:19101
+[    2.886271] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41082, awaiting HELLO
+[    2.887063] tbtun: tunnel 2 carrier 137 DIALED lport=41161 peer=127.0.0.1:19101
+[    2.888216] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41083, awaiting HELLO
+[    2.888990] tbtun: tunnel 2 carrier 138 DIALED lport=41162 peer=127.0.0.1:19101
+[    2.890133] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41084, awaiting HELLO
+[    2.890863] tbtun: tunnel 2 carrier 139 DIALED lport=41163 peer=127.0.0.1:19101
+[    2.892036] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41085, awaiting HELLO
+[    2.892804] tbtun: tunnel 2 carrier 140 DIALED lport=41164 peer=127.0.0.1:19101
+[    2.893948] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41086, awaiting HELLO
+[    2.894686] tbtun: tunnel 2 carrier 141 DIALED lport=41165 peer=127.0.0.1:19101
+[    2.895901] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41087, awaiting HELLO
+[    2.896669] tbtun: tunnel 2 carrier 142 DIALED lport=41166 peer=127.0.0.1:19101
+[    2.897868] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41088, awaiting HELLO
+[    2.898601] tbtun: tunnel 2 carrier 143 DIALED lport=41167 peer=127.0.0.1:19101
+[    2.899801] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41089, awaiting HELLO
+[    2.900572] tbtun: tunnel 2 carrier 144 DIALED lport=41168 peer=127.0.0.1:19101
+[    2.901855] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41090, awaiting HELLO
+[    2.902631] tbtun: tunnel 2 carrier 145 DIALED lport=41169 peer=127.0.0.1:19101
+[    2.903936] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41091, awaiting HELLO
+[    2.904707] tbtun: tunnel 2 carrier 146 DIALED lport=41170 peer=127.0.0.1:19101
+[    2.906017] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41092, awaiting HELLO
+[    2.906809] tbtun: tunnel 2 carrier 147 DIALED lport=41171 peer=127.0.0.1:19101
+[    2.908156] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41093, awaiting HELLO
+[    2.908891] tbtun: tunnel 2 carrier 148 DIALED lport=41172 peer=127.0.0.1:19101
+[    2.910172] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41094, awaiting HELLO
+[    2.910902] tbtun: tunnel 2 carrier 149 DIALED lport=41173 peer=127.0.0.1:19101
+[    2.912091] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41095, awaiting HELLO
+[    2.912827] tbtun: tunnel 2 carrier 150 DIALED lport=41174 peer=127.0.0.1:19101
+[    2.914006] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41096, awaiting HELLO
+[    2.914681] tbtun: tunnel 2 carrier 151 DIALED lport=41175 peer=127.0.0.1:19101
+[    2.915897] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41097, awaiting HELLO
+[    2.916585] tbtun: tunnel 2 carrier 152 DIALED lport=41176 peer=127.0.0.1:19101
+[    2.917801] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41098, awaiting HELLO
+[    2.918480] tbtun: tunnel 2 carrier 153 DIALED lport=41177 peer=127.0.0.1:19101
+[    2.919700] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41099, awaiting HELLO
+[    2.920374] tbtun: tunnel 2 carrier 154 DIALED lport=41178 peer=127.0.0.1:19101
+[    2.921589] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41100, awaiting HELLO
+[    2.922288] tbtun: tunnel 2 carrier 155 DIALED lport=41179 peer=127.0.0.1:19101
+[    2.923584] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41101, awaiting HELLO
+[    2.924401] tbtun: tunnel 2 carrier 156 DIALED lport=41180 peer=127.0.0.1:19101
+[    2.925853] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41102, awaiting HELLO
+[    2.926632] tbtun: tunnel 2 carrier 157 DIALED lport=41181 peer=127.0.0.1:19101
+[    2.928409] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41103, awaiting HELLO
+[    2.928848] tbtun: tunnel 2 carrier 158 DIALED lport=41182 peer=127.0.0.1:19101
+[    2.930127] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41104, awaiting HELLO
+[    2.931104] tbtun: tunnel 2 carrier 159 DIALED lport=41183 peer=127.0.0.1:19101
+[    2.932448] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41105, awaiting HELLO
+[    2.933118] tbtun: tunnel 2 carrier 160 DIALED lport=41184 peer=127.0.0.1:19101
+[    2.934642] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41106, awaiting HELLO
+[    2.935345] tbtun: tunnel 2 carrier 161 DIALED lport=41185 peer=127.0.0.1:19101
+[    2.937001] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41107, awaiting HELLO
+[    2.937776] tbtun: tunnel 2 carrier 162 DIALED lport=41186 peer=127.0.0.1:19101
+[    2.939513] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41108, awaiting HELLO
+[    2.940143] tbtun: tunnel 2 carrier 163 DIALED lport=41187 peer=127.0.0.1:19101
+[    2.941915] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41109, awaiting HELLO
+[    2.942566] tbtun: tunnel 2 carrier 164 DIALED lport=41188 peer=127.0.0.1:19101
+[    2.943985] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41110, awaiting HELLO
+[    2.944699] tbtun: tunnel 2 carrier 165 DIALED lport=41189 peer=127.0.0.1:19101
+[    2.946217] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41111, awaiting HELLO
+[    2.946984] tbtun: tunnel 2 carrier 166 DIALED lport=41190 peer=127.0.0.1:19101
+[    2.948307] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41112, awaiting HELLO
+[    2.949019] tbtun: tunnel 2 carrier 167 DIALED lport=41191 peer=127.0.0.1:19101
+[    2.950886] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41113, awaiting HELLO
+[    2.951096] tbtun: tunnel 2 carrier 168 DIALED lport=41192 peer=127.0.0.1:19101
+[    2.952452] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41114, awaiting HELLO
+[    2.953188] tbtun: tunnel 2 carrier 169 DIALED lport=41193 peer=127.0.0.1:19101
+[    2.954620] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41115, awaiting HELLO
+[    2.955301] tbtun: tunnel 2 carrier 170 DIALED lport=41194 peer=127.0.0.1:19101
+[    2.956762] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41116, awaiting HELLO
+[    2.957452] tbtun: tunnel 2 carrier 171 DIALED lport=41195 peer=127.0.0.1:19101
+[    2.958782] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41117, awaiting HELLO
+[    2.959455] tbtun: tunnel 2 carrier 172 DIALED lport=41196 peer=127.0.0.1:19101
+[    2.961338] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41118, awaiting HELLO
+[    2.962013] tbtun: tunnel 2 carrier 173 DIALED lport=41197 peer=127.0.0.1:19101
+[    2.963313] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41119, awaiting HELLO
+[    2.964027] tbtun: tunnel 2 carrier 174 DIALED lport=41198 peer=127.0.0.1:19101
+[    2.965517] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41120, awaiting HELLO
+[    2.966114] tbtun: tunnel 2 carrier 175 DIALED lport=41199 peer=127.0.0.1:19101
+[    2.967715] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41121, awaiting HELLO
+[    2.968143] tbtun: tunnel 2 carrier 176 DIALED lport=41200 peer=127.0.0.1:19101
+[    2.969709] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41122, awaiting HELLO
+[    2.970142] tbtun: tunnel 2 carrier 177 DIALED lport=41201 peer=127.0.0.1:19101
+[    2.972112] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41123, awaiting HELLO
+[    2.972465] tbtun: tunnel 2 carrier 178 DIALED lport=41202 peer=127.0.0.1:19101
+[    2.973861] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41124, awaiting HELLO
+[    2.974386] tbtun: tunnel 2 carrier 179 DIALED lport=41203 peer=127.0.0.1:19101
+[    2.975786] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41125, awaiting HELLO
+[    2.976331] tbtun: tunnel 2 carrier 180 DIALED lport=41204 peer=127.0.0.1:19101
+[    2.978249] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41126, awaiting HELLO
+[    2.978744] tbtun: tunnel 2 carrier 181 DIALED lport=41205 peer=127.0.0.1:19101
+[    2.980143] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41127, awaiting HELLO
+[    2.980680] tbtun: tunnel 2 carrier 182 DIALED lport=41206 peer=127.0.0.1:19101
+[    2.982132] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41128, awaiting HELLO
+[    2.982597] tbtun: tunnel 2 carrier 183 DIALED lport=41207 peer=127.0.0.1:19101
+[    2.984039] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41129, awaiting HELLO
+[    2.984531] tbtun: tunnel 2 carrier 184 DIALED lport=41208 peer=127.0.0.1:19101
+[    2.985943] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41130, awaiting HELLO
+[    2.986424] tbtun: tunnel 2 carrier 185 DIALED lport=41209 peer=127.0.0.1:19101
+[    2.988277] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41131, awaiting HELLO
+[    2.988414] tbtun: tunnel 2 carrier 186 DIALED lport=41210 peer=127.0.0.1:19101
+[    2.989888] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41132, awaiting HELLO
+[    2.992781] tbtun: tunnel 2 carrier 187 DIALED lport=41211 peer=127.0.0.1:19101
+[    2.994403] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41133, awaiting HELLO
+[    2.994872] tbtun: tunnel 2 carrier 188 DIALED lport=41212 peer=127.0.0.1:19101
+[    2.996498] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41134, awaiting HELLO
+[    2.996988] tbtun: tunnel 2 carrier 189 DIALED lport=41213 peer=127.0.0.1:19101
+[    2.998552] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41135, awaiting HELLO
+[    2.999064] tbtun: tunnel 2 carrier 190 DIALED lport=41214 peer=127.0.0.1:19101
+[    3.000592] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41136, awaiting HELLO
+[    3.001087] tbtun: tunnel 2 carrier 191 DIALED lport=41215 peer=127.0.0.1:19101
+[    3.002660] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41137, awaiting HELLO
+[    3.003182] tbtun: tunnel 2 carrier 192 DIALED lport=41216 peer=127.0.0.1:19101
+[    3.004579] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41138, awaiting HELLO
+[    3.005030] tbtun: tunnel 2 carrier 193 DIALED lport=41217 peer=127.0.0.1:19101
+[    3.006511] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41139, awaiting HELLO
+[    3.006971] tbtun: tunnel 2 carrier 194 DIALED lport=41218 peer=127.0.0.1:19101
+[    3.008436] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41140, awaiting HELLO
+[    3.008862] tbtun: tunnel 2 carrier 195 DIALED lport=41219 peer=127.0.0.1:19101
+[    3.010393] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41141, awaiting HELLO
+[    3.010765] tbtun: tunnel 2 carrier 196 DIALED lport=41220 peer=127.0.0.1:19101
+[    3.012257] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41142, awaiting HELLO
+[    3.012654] tbtun: tunnel 2 carrier 197 DIALED lport=41221 peer=127.0.0.1:19101
+[    3.014153] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41143, awaiting HELLO
+[    3.014543] tbtun: tunnel 2 carrier 198 DIALED lport=41222 peer=127.0.0.1:19101
+[    3.016038] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41144, awaiting HELLO
+[    3.016455] tbtun: tunnel 2 carrier 199 DIALED lport=41223 peer=127.0.0.1:19101
+[    3.018364] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41145, awaiting HELLO
+[    3.018767] tbtun: tunnel 2 carrier 200 DIALED lport=41224 peer=127.0.0.1:19101
+[    3.020372] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41146, awaiting HELLO
+[    3.020758] tbtun: tunnel 2 carrier 201 DIALED lport=41225 peer=127.0.0.1:19101
+[    3.022430] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41147, awaiting HELLO
+[    3.022821] tbtun: tunnel 2 carrier 202 DIALED lport=41226 peer=127.0.0.1:19101
+[    3.024517] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41148, awaiting HELLO
+[    3.024890] tbtun: tunnel 2 carrier 203 DIALED lport=41227 peer=127.0.0.1:19101
+[    3.026574] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41149, awaiting HELLO
+[    3.026997] tbtun: tunnel 2 carrier 204 DIALED lport=41228 peer=127.0.0.1:19101
+[    3.028684] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41150, awaiting HELLO
+[    3.029014] tbtun: tunnel 2 carrier 205 DIALED lport=41229 peer=127.0.0.1:19101
+[    3.030567] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41151, awaiting HELLO
+[    3.030972] tbtun: tunnel 2 carrier 206 DIALED lport=41230 peer=127.0.0.1:19101
+[    3.032547] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41152, awaiting HELLO
+[    3.032840] tbtun: tunnel 2 carrier 207 DIALED lport=41231 peer=127.0.0.1:19101
+[    3.034412] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41153, awaiting HELLO
+[    3.034729] tbtun: tunnel 2 carrier 208 DIALED lport=41232 peer=127.0.0.1:19101
+[    3.036351] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41154, awaiting HELLO
+[    3.036705] tbtun: tunnel 2 carrier 209 DIALED lport=41233 peer=127.0.0.1:19101
+[    3.038450] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41155, awaiting HELLO
+[    3.038725] tbtun: tunnel 2 carrier 210 DIALED lport=41234 peer=127.0.0.1:19101
+[    3.040328] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41156, awaiting HELLO
+[    3.040597] tbtun: tunnel 2 carrier 211 DIALED lport=41235 peer=127.0.0.1:19101
+[    3.042497] tbtun: tunnel 2 carrier 212 DIALED lport=41236 peer=127.0.0.1:19101
+[    3.042665] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41157, awaiting HELLO
+[    3.043530] tbtun: tunnel 2 carrier 213 DIALED lport=41237 peer=127.0.0.1:19101
+[    3.045222] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41158, awaiting HELLO
+[    3.045393] tbtun: tunnel 2 carrier 214 DIALED lport=41238 peer=127.0.0.1:19101
+[    3.047026] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41159, awaiting HELLO
+[    3.047289] tbtun: tunnel 2 carrier 215 DIALED lport=41239 peer=127.0.0.1:19101
+[    3.048939] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41160, awaiting HELLO
+[    3.049286] tbtun: tunnel 2 carrier 216 DIALED lport=41240 peer=127.0.0.1:19101
+[    3.050898] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41161, awaiting HELLO
+[    3.051143] tbtun: tunnel 2 carrier 217 DIALED lport=41241 peer=127.0.0.1:19101
+[    3.052765] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41162, awaiting HELLO
+[    3.053007] tbtun: tunnel 2 carrier 218 DIALED lport=41242 peer=127.0.0.1:19101
+[    3.054676] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41163, awaiting HELLO
+[    3.054919] tbtun: tunnel 2 carrier 219 DIALED lport=41243 peer=127.0.0.1:19101
+[    3.056591] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41164, awaiting HELLO
+[    3.056871] tbtun: tunnel 2 carrier 220 DIALED lport=41244 peer=127.0.0.1:19101
+[    3.058549] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41165, awaiting HELLO
+[    3.058716] tbtun: tunnel 2 carrier 221 DIALED lport=41245 peer=127.0.0.1:19101
+[    3.060411] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41166, awaiting HELLO
+[    3.060626] tbtun: tunnel 2 carrier 222 DIALED lport=41246 peer=127.0.0.1:19101
+[    3.062320] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41167, awaiting HELLO
+[    3.062492] tbtun: tunnel 2 carrier 223 DIALED lport=41247 peer=127.0.0.1:19101
+[    3.064230] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41168, awaiting HELLO
+[    3.064376] tbtun: tunnel 2 carrier 224 DIALED lport=41248 peer=127.0.0.1:19101
+[    3.066084] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41169, awaiting HELLO
+[    3.066258] tbtun: tunnel 2 carrier 225 DIALED lport=41249 peer=127.0.0.1:19101
+[    3.068016] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41170, awaiting HELLO
+[    3.068156] tbtun: tunnel 2 carrier 226 DIALED lport=41250 peer=127.0.0.1:19101
+[    3.069896] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41171, awaiting HELLO
+[    3.070053] tbtun: tunnel 2 carrier 227 DIALED lport=41251 peer=127.0.0.1:19101
+[    3.071916] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41172, awaiting HELLO
+[    3.072026] tbtun: tunnel 2 carrier 228 DIALED lport=41252 peer=127.0.0.1:19101
+[    3.073759] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41173, awaiting HELLO
+[    3.073871] tbtun: tunnel 2 carrier 229 DIALED lport=41253 peer=127.0.0.1:19101
+[    3.075646] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41174, awaiting HELLO
+[    3.075763] tbtun: tunnel 2 carrier 230 DIALED lport=41254 peer=127.0.0.1:19101
+[    3.077536] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41175, awaiting HELLO
+[    3.077661] tbtun: tunnel 2 carrier 231 DIALED lport=41255 peer=127.0.0.1:19101
+[    3.079421] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41176, awaiting HELLO
+[    3.079518] tbtun: tunnel 2 carrier 232 DIALED lport=41256 peer=127.0.0.1:19101
+[    3.081306] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41177, awaiting HELLO
+[    3.081410] tbtun: tunnel 2 carrier 233 DIALED lport=41257 peer=127.0.0.1:19101
+[    3.083207] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41178, awaiting HELLO
+[    3.083320] tbtun: tunnel 2 carrier 234 DIALED lport=41258 peer=127.0.0.1:19101
+[    3.085066] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41179, awaiting HELLO
+[    3.085143] tbtun: tunnel 2 carrier 235 DIALED lport=41259 peer=127.0.0.1:19101
+[    3.086969] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41180, awaiting HELLO
+[    3.087893] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41181, awaiting HELLO
+[    3.087986] tbtun: tunnel 2 carrier 236 DIALED lport=41260 peer=127.0.0.1:19101
+[    3.089836] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41182, awaiting HELLO
+[    3.089855] tbtun: tunnel 2 carrier 237 DIALED lport=41261 peer=127.0.0.1:19101
+[    3.091732] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41183, awaiting HELLO
+[    3.091776] tbtun: tunnel 2 carrier 238 DIALED lport=41262 peer=127.0.0.1:19101
+[    3.093665] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41184, awaiting HELLO
+[    3.093698] tbtun: tunnel 2 carrier 239 DIALED lport=41263 peer=127.0.0.1:19101
+[    3.095629] tbtun: tunnel 2 carrier 240 DIALED lport=41264 peer=127.0.0.1:19101
+[    3.095826] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41185, awaiting HELLO
+[    3.096592] tbtun: tunnel 2 carrier 241 DIALED lport=41265 peer=127.0.0.1:19101
+[    3.098484] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41186, awaiting HELLO
+[    3.098489] tbtun: tunnel 2 carrier 242 DIALED lport=41266 peer=127.0.0.1:19101
+[    3.100423] tbtun: tunnel 2 carrier 243 DIALED lport=41267 peer=127.0.0.1:19101
+[    3.100436] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41187, awaiting HELLO
+[    3.101461] tbtun: tunnel 2 carrier 244 DIALED lport=41268 peer=127.0.0.1:19101
+[    3.103361] tbtun: tunnel 2 carrier 245 DIALED lport=41269 peer=127.0.0.1:19101
+[    3.103375] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41188, awaiting HELLO
+[    3.104368] tbtun: tunnel 2 carrier 246 DIALED lport=41270 peer=127.0.0.1:19101
+[    3.106266] tbtun: tunnel 2 carrier 247 DIALED lport=41271 peer=127.0.0.1:19101
+[    3.106298] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41189, awaiting HELLO
+[    3.107278] tbtun: tunnel 2 carrier 248 DIALED lport=41272 peer=127.0.0.1:19101
+[    3.109154] tbtun: tunnel 2 carrier 249 DIALED lport=41273 peer=127.0.0.1:19101
+[    3.109188] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41190, awaiting HELLO
+[    3.110128] tbtun: tunnel 2 carrier 250 DIALED lport=41274 peer=127.0.0.1:19101
+[    3.112090] tbtun: tunnel 2 carrier 251 DIALED lport=41275 peer=127.0.0.1:19101
+[    3.112099] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41191, awaiting HELLO
+[    3.113118] tbtun: tunnel 2 carrier 252 DIALED lport=41276 peer=127.0.0.1:19101
+[    3.115001] tbtun: tunnel 2 carrier 253 DIALED lport=41277 peer=127.0.0.1:19101
+[    3.115060] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41192, awaiting HELLO
+[    3.115988] tbtun: tunnel 2 carrier 254 DIALED lport=41278 peer=127.0.0.1:19101
+[    3.117894] tbtun: tunnel 2 carrier 255 DIALED lport=41279 peer=127.0.0.1:19101
+[    3.117948] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41193, awaiting HELLO
+[    3.120871] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41194, awaiting HELLO
+[    3.122967] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41195, awaiting HELLO
+[    3.125071] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41196, awaiting HELLO
+[    3.127166] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41197, awaiting HELLO
+[    3.129277] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41198, awaiting HELLO
+[    3.131401] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41199, awaiting HELLO
+[    3.133532] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41200, awaiting HELLO
+[    3.135670] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41201, awaiting HELLO
+[    3.137811] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41202, awaiting HELLO
+[    3.140037] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41203, awaiting HELLO
+[    3.142229] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41204, awaiting HELLO
+[    3.144530] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41205, awaiting HELLO
+[    3.146878] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41206, awaiting HELLO
+[    3.149163] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41207, awaiting HELLO
+[    3.151535] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41208, awaiting HELLO
+[    3.153792] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41209, awaiting HELLO
+[    3.156097] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41210, awaiting HELLO
+[    3.158344] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41211, awaiting HELLO
+[    3.160590] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41212, awaiting HELLO
+[    3.162880] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41213, awaiting HELLO
+[    3.165421] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41214, awaiting HELLO
+[    3.167728] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41215, awaiting HELLO
+[    3.170044] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41216, awaiting HELLO
+[    3.172358] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41217, awaiting HELLO
+[    3.174666] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41218, awaiting HELLO
+[    3.177012] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41219, awaiting HELLO
+[    3.179377] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41220, awaiting HELLO
+[    3.180510] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41221, awaiting HELLO
+[    3.184296] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41222, awaiting HELLO
+[    3.186715] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41223, awaiting HELLO
+[    3.189123] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41224, awaiting HELLO
+[    3.191587] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41225, awaiting HELLO
+[    3.192622] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41226, awaiting HELLO
+[    3.195218] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41227, awaiting HELLO
+[    3.196255] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41228, awaiting HELLO
+[    3.198912] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41229, awaiting HELLO
+[    3.201396] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41230, awaiting HELLO
+[    3.203854] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41231, awaiting HELLO
+[    3.204891] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41232, awaiting HELLO
+[    3.207598] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41233, awaiting HELLO
+[    3.211696] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41234, awaiting HELLO
+[    3.213670] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41235, awaiting HELLO
+[    3.214856] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41236, awaiting HELLO
+[    3.218068] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41237, awaiting HELLO
+[    3.220668] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41238, awaiting HELLO
+[    3.223538] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41239, awaiting HELLO
+[    3.224581] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41240, awaiting HELLO
+[    3.227369] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41241, awaiting HELLO
+[    3.229829] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41242, awaiting HELLO
+[    3.231670] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41243, awaiting HELLO
+[    3.232685] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41244, awaiting HELLO
+[    3.236458] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41245, awaiting HELLO
+[    3.237509] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41246, awaiting HELLO
+[    3.240364] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41247, awaiting HELLO
+[    3.241508] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41248, awaiting HELLO
+[    3.244543] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41249, awaiting HELLO
+[    3.247114] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41250, awaiting HELLO
+[    3.249658] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41251, awaiting HELLO
+[    3.250813] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41252, awaiting HELLO
+[    3.254871] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41253, awaiting HELLO
+[    3.257681] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41254, awaiting HELLO
+[    3.259848] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41255, awaiting HELLO
+[    3.260887] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41256, awaiting HELLO
+[    3.264611] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41257, awaiting HELLO
+[    3.265646] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41258, awaiting HELLO
+[    3.268575] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41259, awaiting HELLO
+[    3.269606] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41260, awaiting HELLO
+[    3.272632] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41261, awaiting HELLO
+[    3.275672] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41262, awaiting HELLO
+[    3.277841] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41263, awaiting HELLO
+[    3.280689] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41264, awaiting HELLO
+[    3.281851] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41265, awaiting HELLO
+[    3.285673] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41266, awaiting HELLO
+[    3.286721] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41267, awaiting HELLO
+[    3.291072] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41268, awaiting HELLO
+[    3.292115] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41269, awaiting HELLO
+[    3.295262] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41270, awaiting HELLO
+[    3.302526] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41271, awaiting HELLO
+[    3.305675] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41272, awaiting HELLO
+[    3.308909] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41273, awaiting HELLO
+[    3.311415] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41274, awaiting HELLO
+[    3.314631] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41275, awaiting HELLO
+[    3.315705] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41276, awaiting HELLO
+[    3.320156] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41277, awaiting HELLO
+[    3.321137] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41278, awaiting HELLO
+[    3.324295] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41279, awaiting HELLO
+   tunnels:
+# id role state listen peer target n m streams
+1 far listening 127.0.0.1:19101 0.0.0.0:0 127.0.0.1:19171 4 4 256
+2 near listening 127.0.0.1:19100 127.0.0.1:19101 - 4 4 0
+   peers:
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+1 0 19101 127.0.0.1:41024 0 20 0 up http-kal 0 0 0 1 259 0 0 2976500000 654830 261728 83 1047328 262144 0
+1 1 19101 127.0.0.1:41025 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 2 19101 127.0.0.1:41026 0 30 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 3 19101 127.0.0.1:41028 0 6 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 4 19101 127.0.0.1:41030 0 7 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 5 19101 127.0.0.1:41032 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 6 19101 127.0.0.1:41035 0 10 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 7 19101 127.0.0.1:41036 0 9 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 8 19101 127.0.0.1:41037 0 9 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 9 19101 127.0.0.1:41039 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 10 19101 127.0.0.1:41043 0 9 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 11 19101 127.0.0.1:41045 0 9 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 12 19101 127.0.0.1:41047 0 8 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 13 19101 127.0.0.1:41050 0 11 0 up http-kal 0 0 0 1 259 0 0 13096600000 654830 261728 83 1047328 262144 0
+1 14 19101 127.0.0.1:41053 0 9 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 15 19101 127.0.0.1:41056 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 16 19101 127.0.0.1:41059 0 9 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 17 19101 127.0.0.1:41062 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 18 19101 127.0.0.1:41065 0 9 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 19 19101 127.0.0.1:41068 0 10 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 20 19101 127.0.0.1:41071 0 9 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 21 19101 127.0.0.1:41074 0 9 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 22 19101 127.0.0.1:41077 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 23 19101 127.0.0.1:41080 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 24 19101 127.0.0.1:41083 0 9 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 25 19101 127.0.0.1:41086 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 26 19101 127.0.0.1:41089 0 12 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 27 19101 127.0.0.1:41092 0 9 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 28 19101 127.0.0.1:41095 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 29 19101 127.0.0.1:41098 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 30 19101 127.0.0.1:41101 0 7 0 up http-kal 0 0 0 1 259 0 0 13096600000 654830 261728 83 1047328 262144 0
+1 31 19101 127.0.0.1:41104 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 32 19101 127.0.0.1:41106 0 7 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 33 19101 127.0.0.1:41109 0 8 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 34 19101 127.0.0.1:41112 0 7 0 up http-kal 0 0 0 1 259 0 0 9354714285 654830 261728 83 1047328 262144 0
+1 35 19101 127.0.0.1:41115 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 36 19101 127.0.0.1:41118 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 37 19101 127.0.0.1:41121 0 6 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 38 19101 127.0.0.1:41124 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 39 19101 127.0.0.1:41127 0 6 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 40 19101 127.0.0.1:41130 0 8 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 41 19101 127.0.0.1:41133 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 42 19101 127.0.0.1:41027 0 13 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 43 19101 127.0.0.1:41029 0 8 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 44 19101 127.0.0.1:41031 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 45 19101 127.0.0.1:41033 0 8 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 46 19101 127.0.0.1:41034 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 47 19101 127.0.0.1:41038 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 48 19101 127.0.0.1:41040 0 9 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 49 19101 127.0.0.1:41041 0 9 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 50 19101 127.0.0.1:41042 0 8 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 51 19101 127.0.0.1:41044 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 52 19101 127.0.0.1:41046 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 53 19101 127.0.0.1:41048 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 54 19101 127.0.0.1:41049 0 7 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 55 19101 127.0.0.1:41051 0 7 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 56 19101 127.0.0.1:41052 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 57 19101 127.0.0.1:41054 0 7 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 58 19101 127.0.0.1:41055 0 7 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 59 19101 127.0.0.1:41057 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 60 19101 127.0.0.1:41058 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 61 19101 127.0.0.1:41060 0 7 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 62 19101 127.0.0.1:41061 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 63 19101 127.0.0.1:41063 0 8 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 64 19101 127.0.0.1:41064 0 7 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 65 19101 127.0.0.1:41066 0 7 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 66 19101 127.0.0.1:41067 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 67 19101 127.0.0.1:41069 0 9 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 68 19101 127.0.0.1:41070 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 69 19101 127.0.0.1:41072 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 70 19101 127.0.0.1:41073 0 7 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 71 19101 127.0.0.1:41075 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 72 19101 127.0.0.1:41076 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 73 19101 127.0.0.1:41078 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 74 19101 127.0.0.1:41079 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 75 19101 127.0.0.1:41081 0 14 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 76 19101 127.0.0.1:41082 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 77 19101 127.0.0.1:41084 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 78 19101 127.0.0.1:41085 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 79 19101 127.0.0.1:41087 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 80 19101 127.0.0.1:41088 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 81 19101 127.0.0.1:41090 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 82 19101 127.0.0.1:41091 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 83 19101 127.0.0.1:41093 0 6 0 up http-kal 0 0 0 1 259 0 0 13096600000 654830 261728 83 1047328 262144 0
+1 84 19101 127.0.0.1:41094 0 5 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 85 19101 127.0.0.1:41096 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 86 19101 127.0.0.1:41097 0 11 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 87 19101 127.0.0.1:41099 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 88 19101 127.0.0.1:41100 0 4 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 89 19101 127.0.0.1:41102 0 6 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 90 19101 127.0.0.1:41103 0 6 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 91 19101 127.0.0.1:41105 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 92 19101 127.0.0.1:41107 0 9 0 up http-kal 0 0 0 1 259 0 0 9354714285 654830 261728 83 1047328 262144 0
+1 93 19101 127.0.0.1:41108 0 9 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 94 19101 127.0.0.1:41110 0 7 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 95 19101 127.0.0.1:41111 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 96 19101 127.0.0.1:41113 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 97 19101 127.0.0.1:41114 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 98 19101 127.0.0.1:41116 0 4 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 99 19101 127.0.0.1:41117 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 100 19101 127.0.0.1:41119 0 5 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 101 19101 127.0.0.1:41120 0 8 0 up http-kal 0 0 0 1 259 0 0 6548300000 654830 261728 83 1047328 262144 0
+1 102 19101 127.0.0.1:41122 0 6 0 up http-kal 0 0 0 1 259 0 0 9354714285 654830 261728 83 1047328 262144 0
+1 103 19101 127.0.0.1:41123 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 104 19101 127.0.0.1:41125 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 105 19101 127.0.0.1:41126 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 106 19101 127.0.0.1:41128 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 107 19101 127.0.0.1:41129 0 5 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 108 19101 127.0.0.1:41131 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 109 19101 127.0.0.1:41132 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 110 19101 127.0.0.1:41134 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 111 19101 127.0.0.1:41135 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 112 19101 127.0.0.1:41136 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 113 19101 127.0.0.1:41137 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 114 19101 127.0.0.1:41138 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 115 19101 127.0.0.1:41139 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 116 19101 127.0.0.1:41140 0 5 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 117 19101 127.0.0.1:41141 0 5 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 118 19101 127.0.0.1:41142 0 5 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 119 19101 127.0.0.1:41143 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 120 19101 127.0.0.1:41144 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 121 19101 127.0.0.1:41145 0 5 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 122 19101 127.0.0.1:41146 0 5 0 up http-kal 0 0 0 1 259 0 0 13096600000 654830 261728 83 1047328 262144 0
+1 123 19101 127.0.0.1:41147 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 124 19101 127.0.0.1:41148 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 125 19101 127.0.0.1:41149 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 126 19101 127.0.0.1:41150 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 127 19101 127.0.0.1:41151 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 128 19101 127.0.0.1:41152 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 129 19101 127.0.0.1:41153 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 130 19101 127.0.0.1:41154 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 131 19101 127.0.0.1:41155 0 6 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 132 19101 127.0.0.1:41156 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 133 19101 127.0.0.1:41157 0 7 0 up http-kal 0 0 0 1 259 0 0 9354714285 654830 261728 83 1047328 262144 0
+1 134 19101 127.0.0.1:41158 0 4 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 135 19101 127.0.0.1:41159 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 136 19101 127.0.0.1:41160 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 137 19101 127.0.0.1:41161 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 138 19101 127.0.0.1:41162 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 139 19101 127.0.0.1:41163 0 4 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 140 19101 127.0.0.1:41164 0 10 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 141 19101 127.0.0.1:41165 0 4 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 142 19101 127.0.0.1:41166 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 143 19101 127.0.0.1:41167 0 4 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 144 19101 127.0.0.1:41168 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 145 19101 127.0.0.1:41169 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 146 19101 127.0.0.1:41170 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 147 19101 127.0.0.1:41171 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 148 19101 127.0.0.1:41172 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 149 19101 127.0.0.1:41173 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 150 19101 127.0.0.1:41174 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 151 19101 127.0.0.1:41175 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 152 19101 127.0.0.1:41176 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 153 19101 127.0.0.1:41177 0 4 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 154 19101 127.0.0.1:41178 0 4 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 155 19101 127.0.0.1:41179 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 156 19101 127.0.0.1:41180 0 8 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 157 19101 127.0.0.1:41181 0 18 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 158 19101 127.0.0.1:41182 0 9 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 159 19101 127.0.0.1:41183 0 10 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 160 19101 127.0.0.1:41184 0 7 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 161 19101 127.0.0.1:41185 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 162 19101 127.0.0.1:41186 0 13 0 up http-kal 0 0 0 1 259 0 0 10913833333 654830 261728 83 1047328 262144 0
+1 163 19101 127.0.0.1:41187 0 12 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 164 19101 127.0.0.1:41188 0 10 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 165 19101 127.0.0.1:41189 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 166 19101 127.0.0.1:41190 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 167 19101 127.0.0.1:41191 0 5 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 168 19101 127.0.0.1:41192 0 4 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 169 19101 127.0.0.1:41193 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 170 19101 127.0.0.1:41194 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 171 19101 127.0.0.1:41195 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 172 19101 127.0.0.1:41196 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 173 19101 127.0.0.1:41197 0 6 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 174 19101 127.0.0.1:41198 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 175 19101 127.0.0.1:41199 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 176 19101 127.0.0.1:41200 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 177 19101 127.0.0.1:41201 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 178 19101 127.0.0.1:41202 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 179 19101 127.0.0.1:41203 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 180 19101 127.0.0.1:41204 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 181 19101 127.0.0.1:41205 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 182 19101 127.0.0.1:41206 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 183 19101 127.0.0.1:41207 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 184 19101 127.0.0.1:41208 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 185 19101 127.0.0.1:41209 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 186 19101 127.0.0.1:41210 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 187 19101 127.0.0.1:41211 0 15 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 188 19101 127.0.0.1:41212 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 189 19101 127.0.0.1:41213 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 190 19101 127.0.0.1:41214 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 191 19101 127.0.0.1:41215 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 192 19101 127.0.0.1:41216 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 193 19101 127.0.0.1:41217 0 5 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 194 19101 127.0.0.1:41218 0 4 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 195 19101 127.0.0.1:41219 0 4 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 196 19101 127.0.0.1:41220 0 15 0 up http-kal 0 0 0 1 259 0 0 1870942857 654830 261728 83 1047328 262144 0
+1 197 19101 127.0.0.1:41221 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 198 19101 127.0.0.1:41222 0 5 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 199 19101 127.0.0.1:41223 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 200 19101 127.0.0.1:41224 0 8 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 201 19101 127.0.0.1:41225 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 202 19101 127.0.0.1:41226 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 203 19101 127.0.0.1:41227 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 204 19101 127.0.0.1:41228 0 5 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 205 19101 127.0.0.1:41229 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 206 19101 127.0.0.1:41230 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 207 19101 127.0.0.1:41231 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 208 19101 127.0.0.1:41232 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 209 19101 127.0.0.1:41233 0 17 0 up http-kal 0 0 0 1 259 0 0 1769810810 654830 261728 83 1047328 262144 0
+1 210 19101 127.0.0.1:41234 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 211 19101 127.0.0.1:41235 0 9 0 up http-kal 0 0 0 1 259 0 0 9354714285 654830 261728 83 1047328 262144 0
+1 212 19101 127.0.0.1:41236 0 6 0 up http-kal 0 0 0 1 259 0 0 13096600000 654830 261728 83 1047328 262144 0
+1 213 19101 127.0.0.1:41237 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 214 19101 127.0.0.1:41238 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 215 19101 127.0.0.1:41239 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 216 19101 127.0.0.1:41240 0 4 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 217 19101 127.0.0.1:41241 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 218 19101 127.0.0.1:41242 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 219 19101 127.0.0.1:41243 0 4 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 220 19101 127.0.0.1:41244 0 4 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 221 19101 127.0.0.1:41245 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 222 19101 127.0.0.1:41246 0 5 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 223 19101 127.0.0.1:41247 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 224 19101 127.0.0.1:41248 0 5 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 225 19101 127.0.0.1:41249 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 226 19101 127.0.0.1:41250 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 227 19101 127.0.0.1:41251 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 228 19101 127.0.0.1:41252 0 5 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 229 19101 127.0.0.1:41253 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 230 19101 127.0.0.1:41254 0 9 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 231 19101 127.0.0.1:41255 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 232 19101 127.0.0.1:41256 0 4 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 233 19101 127.0.0.1:41257 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 234 19101 127.0.0.1:41258 0 4 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 235 19101 127.0.0.1:41259 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 236 19101 127.0.0.1:41260 0 4 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 237 19101 127.0.0.1:41261 0 5 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 238 19101 127.0.0.1:41262 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 239 19101 127.0.0.1:41263 0 5 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 240 19101 127.0.0.1:41264 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 241 19101 127.0.0.1:41265 0 4 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 242 19101 127.0.0.1:41266 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 243 19101 127.0.0.1:41267 0 4 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 244 19101 127.0.0.1:41268 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 245 19101 127.0.0.1:41269 0 4 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 246 19101 127.0.0.1:41270 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 247 19101 127.0.0.1:41271 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 248 19101 127.0.0.1:41272 0 5 0 up http-kal 0 0 0 1 259 0 0 16370750000 654830 261728 83 1047328 262144 0
+1 249 19101 127.0.0.1:41273 0 7 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 250 19101 127.0.0.1:41274 0 6 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 251 19101 127.0.0.1:41275 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 252 19101 127.0.0.1:41276 0 5 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 253 19101 127.0.0.1:41277 0 5 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+1 254 19101 127.0.0.1:41278 0 4 0 up http-kal 0 0 0 1 259 0 0 32741500000 654830 261728 83 1047328 262144 0
+1 255 19101 127.0.0.1:41279 0 4 0 up http-kal 0 0 0 1 259 0 0 21827666666 654830 261728 83 1047328 262144 0
+2 0 41024 127.0.0.1:19101 0 30 0 up http-kal 0 0 0 1 436 0 0 7275888888 654830 1047328 53 261728 196661 0
+2 1 41025 127.0.0.1:19101 0 10 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 2 41026 127.0.0.1:19101 0 30 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 3 41028 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 4 41030 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 5 41032 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 6 41035 127.0.0.1:19101 0 13 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 7 41036 127.0.0.1:19101 0 9 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 8 41037 127.0.0.1:19101 0 10 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 9 41039 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 10 41043 127.0.0.1:19101 0 11 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 11 41045 127.0.0.1:19101 0 10 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 12 41047 127.0.0.1:19101 0 9 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 13 41050 127.0.0.1:19101 0 10 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 14 41053 127.0.0.1:19101 0 10 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 15 41056 127.0.0.1:19101 0 9 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 16 41059 127.0.0.1:19101 0 9 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 17 41062 127.0.0.1:19101 0 9 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 18 41065 127.0.0.1:19101 0 9 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 19 41068 127.0.0.1:19101 0 10 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 20 41071 127.0.0.1:19101 0 10 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 21 41074 127.0.0.1:19101 0 9 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 22 41077 127.0.0.1:19101 0 9 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 23 41080 127.0.0.1:19101 0 9 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 24 41083 127.0.0.1:19101 0 9 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 25 41086 127.0.0.1:19101 0 10 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 26 41089 127.0.0.1:19101 0 16 0 up http-kal 0 0 0 1 436 0 0 8185375000 654830 1047328 53 261728 196661 0
+2 27 41092 127.0.0.1:19101 0 9 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 28 41095 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 29 41098 127.0.0.1:19101 0 10 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 30 41101 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 31 41104 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 32 41106 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 33 41109 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 34 41112 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 35 41115 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 36 41118 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 37 41121 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 38 41124 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 39 41127 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 40 41130 127.0.0.1:19101 0 8 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 41 41133 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 42 41027 127.0.0.1:19101 0 23 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 43 41029 127.0.0.1:19101 0 9 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 44 41031 127.0.0.1:19101 0 11 0 up http-kal 0 0 0 1 436 0 0 4677357142 654830 1047328 53 261728 196661 0
+2 45 41033 127.0.0.1:19101 0 10 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 46 41034 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 47 41038 127.0.0.1:19101 0 8 0 up http-kal 0 0 0 1 436 0 0 10913833333 654830 1047328 53 261728 196661 0
+2 48 41040 127.0.0.1:19101 0 12 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 49 41041 127.0.0.1:19101 0 11 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 50 41042 127.0.0.1:19101 0 11 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 51 41044 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 52 41046 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 53 41048 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 54 41049 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 55 41051 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 56 41052 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 57 41054 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 58 41055 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 59 41057 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 60 41058 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 61 41060 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 62 41061 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 63 41063 127.0.0.1:19101 0 9 0 up http-kal 0 0 0 1 436 0 0 7275888888 654830 1047328 53 261728 196661 0
+2 64 41064 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 65 41066 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 66 41067 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 67 41069 127.0.0.1:19101 0 8 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 68 41070 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 69 41072 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 70 41073 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 71 41075 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 72 41076 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 73 41078 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 74 41079 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 75 41081 127.0.0.1:19101 0 13 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 76 41082 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 77 41084 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 78 41085 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 79 41087 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 80 41088 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 81 41090 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 82 41091 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 83 41093 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 84 41094 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 85 41096 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 86 41097 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 87 41099 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 88 41100 127.0.0.1:19101 0 3 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 89 41102 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 90 41103 127.0.0.1:19101 0 3 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 91 41105 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 92 41107 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 93 41108 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 94 41110 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 95 41111 127.0.0.1:19101 0 10 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 96 41113 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 97 41114 127.0.0.1:19101 0 3 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 98 41116 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 99 41117 127.0.0.1:19101 0 3 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 100 41119 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 10913833333 654830 1047328 53 261728 196661 0
+2 101 41120 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 102 41122 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 103 41123 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 104 41125 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 105 41126 127.0.0.1:19101 0 3 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 106 41128 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 107 41129 127.0.0.1:19101 0 3 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 108 41131 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 109 41132 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 110 41134 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 111 41135 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 112 41136 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 113 41137 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 114 41138 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 115 41139 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 116 41140 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 117 41141 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 118 41142 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 119 41143 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 120 41144 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 121 41145 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 122 41146 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 123 41147 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 124 41148 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 125 41149 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 126 41150 127.0.0.1:19101 0 16 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 127 41151 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 128 41152 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 129 41153 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 130 41154 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 131 41155 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 132 41156 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 133 41157 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 134 41158 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 135 41159 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 136 41160 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 137 41161 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 138 41162 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 139 41163 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 140 41164 127.0.0.1:19101 0 10 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 141 41165 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 142 41166 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 143 41167 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 144 41168 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 145 41169 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 146 41170 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 147 41171 127.0.0.1:19101 0 11 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 148 41172 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 149 41173 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 150 41174 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 151 41175 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 152 41176 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 153 41177 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 154 41178 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 155 41179 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 156 41180 127.0.0.1:19101 0 13 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 157 41181 127.0.0.1:19101 0 10 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 158 41182 127.0.0.1:19101 0 10 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 159 41183 127.0.0.1:19101 0 9 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 160 41184 127.0.0.1:19101 0 8 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 161 41185 127.0.0.1:19101 0 9 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 162 41186 127.0.0.1:19101 0 13 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 163 41187 127.0.0.1:19101 0 11 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 164 41188 127.0.0.1:19101 0 11 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 165 41189 127.0.0.1:19101 0 8 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 166 41190 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 167 41191 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 168 41192 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 169 41193 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 170 41194 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 171 41195 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 172 41196 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 173 41197 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 174 41198 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 16370750000 654830 1047328 53 261728 196661 0
+2 175 41199 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 176 41200 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 177 41201 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 178 41202 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 179 41203 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 180 41204 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 181 41205 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 182 41206 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 183 41207 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 184 41208 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 185 41209 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 186 41210 127.0.0.1:19101 0 15 0 up http-kal 0 0 0 1 436 0 0 2425296296 654830 1047328 53 261728 196661 0
+2 187 41211 127.0.0.1:19101 0 17 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 188 41212 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 13096600000 654830 1047328 53 261728 196661 0
+2 189 41213 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 190 41214 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 191 41215 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 192 41216 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 193 41217 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 194 41218 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 195 41219 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 196 41220 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 10913833333 654830 1047328 53 261728 196661 0
+2 197 41221 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 198 41222 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 199 41223 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 200 41224 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 201 41225 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 202 41226 127.0.0.1:19101 0 6 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 203 41227 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 204 41228 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 205 41229 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 206 41230 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 207 41231 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 208 41232 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 209 41233 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 210 41234 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 211 41235 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 212 41236 127.0.0.1:19101 0 7 0 up http-kal 0 0 0 1 436 0 0 10913833333 654830 1047328 53 261728 196661 0
+2 213 41237 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 214 41238 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 215 41239 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 216 41240 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 217 41241 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 218 41242 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 219 41243 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 220 41244 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 221 41245 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 222 41246 127.0.0.1:19101 0 10 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 223 41247 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 224 41248 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 225 41249 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 226 41250 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 227 41251 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 228 41252 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 229 41253 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 230 41254 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 231 41255 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 232 41256 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 233 41257 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 234 41258 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 235 41259 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 236 41260 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 237 41261 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 238 41262 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 239 41263 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 240 41264 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 241 41265 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 242 41266 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 243 41267 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 244 41268 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 245 41269 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 246 41270 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 247 41271 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 248 41272 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 249 41273 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 250 41274 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 251 41275 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 252 41276 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 253 41277 127.0.0.1:19101 0 5 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+2 254 41278 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 32741500000 654830 1047328 53 261728 196661 0
+2 255 41279 127.0.0.1:19101 0 4 0 up http-kal 0 0 0 1 436 0 0 21827666666 654830 1047328 53 261728 196661 0
+burst: connected to 127.0.0.1:19100, 1 MiB each way, strict send-then-read first
+[    4.407324] ------------[ cut here ]------------
+[    4.407972] !tbt_stream_announced(fr->st, c)
+[    4.407974] WARNING: tbtun/tbt_tx.c:2570 at tbt_tx_pump+0x146a/0x2510 [tbtun], CPU#1: kworker/u8:0/12
+[    4.409756] Modules linked in: tbtun(OE)
+[    4.410288] CPU: 1 UID: 0 PID: 12 Comm: kworker/u8:0 Tainted: G           OE       7.2.9-1-MANJARO #1 PREEMPT(full)  a672d45b14e33932fcd987828575bb40d09db72c
+[    4.412018] Tainted: [O]=OOT_MODULE, [E]=UNSIGNED_MODULE
+[    4.412690] Hardware name: QEMU Standard PC (i440FX + PIIX, 1996), BIOS Arch Linux 1.17.0-2-2 04/01/2014
+[    4.413883] Workqueue: events_unbound tbt_pump_work [tbtun]
+[    4.414586] RIP: 0010:tbt_tx_pump+0x146a/0x2510 [tbtun]
+[    4.415265] Code: 84 24 4c 02 00 00 0f b7 8a 8a 01 00 00 48 0f a3 c1 73 17 0f b6 94 02 8c 01 00 00 41 8b 84 24 50 02 00 00 83 e0 0f 39 c2 74 29 <0f> 0b 49 83 87 80 34 00 00 01 eb 1d 41 80 fe 22 75 48 41 c6 84 24
+[    4.417583] RSP: 0018:ffffd1c64006b948 EFLAGS: 00010286
+[    4.418253] RAX: 00000000000000ff RBX: ffff89fcc5a11680 RCX: 0000000000000000
+[    4.419161] RDX: ffff89fcc6aac000 RSI: 00000000000000ff RDI: ffffffff9a803040
+[    4.420052] RBP: ffff89fcc5a11700 R08: 00000000e6f5d78b R09: 0000000000000a40
+[    4.420956] R10: ffffd1c64006b948 R11: ffff89fcc1282600 R12: ffff89fcc6aac800
+[    4.421866] R13: ffff89fcc349b53c R14: 0000000000000013 R15: ffff89fcc3498000
+[    4.422761] FS:  0000000000000000(0000) GS:ffff89fd44c2e000(0000) knlGS:0000000000000000
+[    4.423783] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[    4.424510] CR2: 00007fc23eaed070 CR3: 000000000b222000 CR4: 0000000000f50ef0
+[    4.425415] PKRU: 55555554
+[    4.425770] Call Trace:
+[    4.426093]  <TASK>
+[    4.426399]  process_one_work+0x19f/0x370
+[    4.426926]  worker_thread+0x1b1/0x310
+[    4.427410]  ? __pfx_worker_thread+0x10/0x10
+[    4.427987]  kthread+0xe4/0x120
+[    4.428405]  ? __pfx_kthread+0x10/0x10
+[    4.428895]  ret_from_fork+0x2a7/0x330
+[    4.429385]  ? __pfx_kthread+0x10/0x10
+[    4.429873]  ret_from_fork_asm+0x1a/0x30
+[    4.430383]  </TASK>
+[    4.430681] ---[ end trace 0000000000000000 ]---
+[    4.456620] workqueue: work func tbt_fec_tx_work [tbtun] enqueued on deprecated workqueue. Use system_{percpu|dfl}_wq instead.
+burst: strict phase passed: 1048576 sent, 1048576 back, byte for byte
+burst: interleaved coverage phase passed
+burst: 1 MiB crossed each way
+   stats after: debug_loss=1
+gaps_total=0
+streams_total=257
+tunnel 1 capture_runs=13 actor_calls=24 submit_bytes=2097152 tx=0 wire=4295036 err=0 short=0
+tunnel 1 rx_work_runs=1026 rx_drain_entries=1026 rx_drain_bytes=4340348 rx_paused_skips=0 rx_adopt_events=256 rx_records=0 carrier_write_space_runs=256 poll_rescues=260
+tunnel 1 rx_ready_calls=771 rx_reads=1026 rx_read_bytes=4340348 rx_read_zero=0 rx_resume=0 rx_resume_busy=0 rx_last_drained=62 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=24 rx_delivered=2097152
+tunnel 1 dbg rcv_nxt=2050086231 copied=2049824087 after=2050086231 qlen=1 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=29110 pmoved=512 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=1 pub_wmem=0 pub_una=3750957890 pub_nxt=3750957890 car_wmem=0 car_nxt=842342590 car_copied=842342590 car_rcvbuf=524288 car_sndbuf=524288 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=131840 txwake_busy=102855 txwork=29171
+tunnel 1 ws_calls=256
+tunnel 1 c3 n=256 up=256 lost=0 replaced=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=2097152 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=200000 una_stall_us=38284 stall_paused_skips=0 stall_idle_skips=3687 stall_declared=0 tx_window=8388608 bdp_bytes=4294967295 k_x100=500 rtt_mean_us=1836 rttvar_us=22042 rtt_max_us=2761 txq_max=8454432 win_block=0 win_resume=0 pump_hw_armed=0 pump_hw_fired=74 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0 close_timeouts=0 close_detaches=0
+tunnel 1 streams streams_active=1 n_streams=1 n_pending=0
+tunnel 1 stream sid=976165535744 state=1 kill=0 attached=0x9 rxq=0 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=1 tgt_err=0 fin_seq=0 fin_q=0 fin_w=0 rst_w=0 rxf=0/0 dage_ms=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c9 fec_proto_fail=0 fec_hdr_crc_fail=0 fec_payload_crc_fail=0 fec_short_tx=0 fec_short_unknown=0 fec_stream_refused=0 fec_drop_window=0 fec_drop_crypto=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=256 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0
+tunnel 1 reconcile live_bytes=4295036 live_data=0 live_retx=0 retired_bytes=0 retired_data=0 retired_retx=0
+tunnel 2 capture_runs=16 actor_calls=34 submit_bytes=2097152 tx=0 wire=4340348 err=0 short=0
+tunnel 2 rx_work_runs=1156 rx_drain_entries=1026 rx_drain_bytes=4295036 rx_paused_skips=0 rx_adopt_events=0 rx_records=0 carrier_write_space_runs=0 poll_rescues=103
+tunnel 2 rx_ready_calls=1282 rx_reads=1156 rx_read_bytes=4295036 rx_read_zero=130 rx_resume=0 rx_resume_busy=0 rx_last_drained=8240 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=34 rx_delivered=2097152
+tunnel 2 dbg rcv_nxt=4008059954 copied=4008059953 after=4008059954 qlen=1 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=1335 pmoved=512 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 2 live rxq=0 rxp=0 txq=0 txp=0 pub_state=8 pub_wmem=0 pub_una=2191266331 pub_nxt=2191266331 car_wmem=1022 car_nxt=2662312718 car_copied=2662312718 car_rcvbuf=524288 car_sndbuf=524288 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 2 txwake=132304 txwake_busy=131226 txwork=1078
+tunnel 2 ws_calls=0
+tunnel 2 c3 n=256 up=256 lost=0 replaced=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=2097152 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=200000 una_stall_us=31716 stall_paused_skips=0 stall_idle_skips=3575 stall_declared=0 tx_window=8388608 bdp_bytes=4294967295 k_x100=500 rtt_mean_us=516 rttvar_us=19517 rtt_max_us=3013 txq_max=8454432 win_block=0 win_resume=0 pump_hw_armed=0 pump_hw_fired=253 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0
+tunnel 2 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0 close_timeouts=0 close_detaches=0
+tunnel 2 streams streams_active=1 n_streams=1 n_pending=0
+tunnel 2 stream sid=976165535744 state=1 kill=0 attached=0x9 rxq=0 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=0 tgt_err=0 fin_seq=0 fin_q=0 fin_w=0 rst_w=0 rxf=0/0 dage_ms=0
+tunnel 2 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 2 c9 fec_proto_fail=0 fec_hdr_crc_fail=0 fec_payload_crc_fail=0 fec_short_tx=0 fec_short_unknown=0 fec_stream_refused=0 fec_drop_window=0 fec_drop_crypto=0
+tunnel 2 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=256 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 2 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0
+tunnel 2 reconcile live_bytes=4340348 live_data=0 live_retx=0 retired_bytes=0 retired_data=0 retired_retx=0
+== probe N: pass
+TBT_PROBE_RESULT N PASS
+cat: read error: Connection reset by peer
+TBT_TEST_PASS
+punt!
+[    4.583421] ACPI: PM: Preparing to enter system sleep state S5
+[    4.584227] reboot: Power down

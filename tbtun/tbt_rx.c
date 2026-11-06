@@ -781,10 +781,13 @@ static int tbt_http_bad(struct tbt_carrier *c, const char *why, int err)
                             c->http_rx ? c->http_rx->chunk.state : -1,
                             c->http_rx ? c->http_rx->chunk_size : 0,
                             c->http_rx ? c->http_rx->rec_len : 0);
-        if (p && p->have)
+        /* The dump is per failing connection; a connect flood makes it a
+         * console flood of its own. Keep it behind the most verbose level and
+         * leave the one-line reason at `debug`. */
+        if (debug >= 3 && p && p->have)
             print_hex_dump(KERN_INFO, "tbtun http rx: ", DUMP_PREFIX_OFFSET,
                            16, 1, p->buf, min_t(size_t, p->have, 64), false);
-        else if (c->http_have)
+        else if (debug >= 3 && c->http_have)
             print_hex_dump(KERN_INFO, "tbtun http hdr: ", DUMP_PREFIX_OFFSET,
                            16, 1, c->http_hdr, min_t(size_t, c->http_have, 64),
                            false);
@@ -1046,8 +1049,10 @@ static int tbt_rx_parse_raw(struct tbt_carrier *c)
                                     bad.path_ack_count, bad.path_ack_mask,
                                     bad.body_len, bad.seq, bad.sid_hi,
                                     bad.sid_lo, bad.reserved2, bad.conv);
-                print_hex_dump(KERN_INFO, "tbtun rx: ", DUMP_PREFIX_OFFSET,
-                               16, 1, p->buf, min_t(size_t, p->have, 64), false);
+                if (debug >= 3)
+                    print_hex_dump(KERN_INFO, "tbtun rx: ", DUMP_PREFIX_OFFSET,
+                                   16, 1, p->buf,
+                                   min_t(size_t, p->have, 64), false);
             }
             atomic64_inc(&c->sess->rx_parse_proto);
             return -EPROTO;

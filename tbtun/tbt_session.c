@@ -1045,6 +1045,8 @@ int tbt_session_create(struct tbt_tunnel *t)
     INIT_LIST_HEAD(&s->tx_q);
     INIT_LIST_HEAD(&s->prov);
     INIT_LIST_HEAD(&s->dead);
+    INIT_LIST_HEAD(&s->dead_release);
+    atomic_set(&s->n_prov, 0);
     INIT_LIST_HEAD(&s->pending);
     s->n_pending = 0;
     /* FEC v6 maps one share to each carrier, so the session owns all
@@ -1058,7 +1060,7 @@ int tbt_session_create(struct tbt_tunnel *t)
     /* Every session-owned work item is initialised at birth. cancel_work_sync()
      * on a work_struct that was never INIT_WORK'd is a WARNING and, once the
      * memory is reused, a call through a stale function pointer. */
-    INIT_WORK(&s->w_replace, tbt_replace_work);
+    INIT_DELAYED_WORK(&s->w_replace, tbt_replace_work);
     INIT_DELAYED_WORK(&s->w_pending, tbt_pending_work);
     INIT_DELAYED_WORK(&s->w_fbk, tbt_fbk_work);
     INIT_DELAYED_WORK(&s->w_reap, tbt_reap_work);
@@ -1174,7 +1176,7 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     spin_unlock(&s->lock);
 
     cancel_delayed_work_sync(&s->w_fbk);
-    cancel_work_sync(&s->w_replace);
+    cancel_delayed_work_sync(&s->w_replace);
     cancel_delayed_work_sync(&s->w_pending);
     cancel_delayed_work_sync(&s->w_reap);
     /* Stop the poll before any carrier is retired: it reads sess->car[] and
@@ -1259,8 +1261,12 @@ void tbt_session_destroy(struct tbt_tunnel *t)
      * replacement after the first cancel; no work item can do that now, so a
      * second cancel is the barrier that makes freeing the session safe. */
     cancel_delayed_work_sync(&s->w_fbk);
-    cancel_work_sync(&s->w_replace);
-    cancel_delayed_work_sync(&s->w_fec_tx);
+    cancel_delayed_work_sync(&s->w_replace);
+    /* w_fec_tx is INIT_DELAYED_WORK'd by tbt_fec_data_init() only for a
+     * fec=on session; cancelling an uninitialised work is a !work->func
+     * warning on every fec=off teardown. Nothing arms it when fec is off. */
+    if (s->fec)
+        cancel_delayed_work_sync(&s->w_fec_tx);
     tbt_fec_data_free(s);
     tbt_crypto_pair_wipe(&s->crypto_ctx);
     put_net(s->net);
@@ -1301,6 +1307,14 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
         return -EINVAL;
     src = inet_sk(csk)->inet_daddr;
     spin_lock(&sess->lock);
+    /* w_replace() marks a provisional carrier stopping when it moves it to
+     * its victims list; a HELLO that arrives after that must not reinstall
+     * it, because the victim is released and freed outside the lock. */
+    if (atomic_read(&c->stopping))
+    {
+        spin_unlock(&sess->lock);
+        return -ENOTCONN;
+    }
     if (!sess->anchor_set || src != sess->anchor_addr)
     {
         /* tbt_rx_hello() is the only caller and already counted this
@@ -1326,7 +1340,13 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
     c->spare = index >= sess->n_pri;
     c->active = !c->spare;
     c->profile = tbt_carrier_profile(sess, index, c->spare);
-    c->provisional = false;
+    if (c->provisional)
+    {
+        /* Leaves the bounded provisional list; the cap in
+         * tbt_carrier_adopt() counts it until now. */
+        c->provisional = false;
+        atomic_dec(&sess->n_prov);
+    }
     list_del_init(&c->node);
     if (old && old != c)
     {
@@ -1336,6 +1356,11 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
          * graveyard so carriers_stop/w_replace retire its socket and port. */
         if (list_empty(&old->node))
             list_add_tail(&old->node, &sess->dead);
+        /* The socket release sleeps, and this runs under the carrier's
+         * socket lock, so it cannot happen here. w_replace drains this list
+         * in bounded batches instead of re-walking all of `dead` every pass. */
+        if (list_empty(&old->release_node))
+            list_add_tail(&old->release_node, &sess->dead_release);
     }
     spin_unlock(&sess->lock);
 
@@ -1346,7 +1371,7 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
          * pump_lock here would deadlock: this runs under the carrier socket
          * lock, and a pump holding pump_lock may wait for that same lock. */
         tbt_carrier_stats_retire(sess, old);
-        schedule_work(&sess->w_replace);
+        schedule_delayed_work(&sess->w_replace, 0);
     }
     /* Our HELLO is the first frame in this direction. */
     tbt_tx_hello(sess, index, GFP_ATOMIC);

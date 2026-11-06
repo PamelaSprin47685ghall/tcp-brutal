@@ -1,0 +1,954 @@
+c[?7l[2J[0mSeaBIOS (version Arch Linux 1.17.0-2-2)
+Booting from ROM...
+Probing EDD (edd=off to disable)... oc[?7l[2J[    0.000000] Linux version 7.2.9-1-MANJARO (linux72@manjaro) (gcc (GCC) 16.2.1 20260810, GNU ld (GNU Binutils) 2.47) #1 SMP PREEMPT_DYNAMIC Sat, 03 Oct 2026 15:02:22 +0000
+[    0.000000] Command line: console=ttyS0 panic=-1 loglevel=7 tsc=unstable tbt_probes=Q
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff]  System RAM
+[    0.000000] BIOS-e820: [mem 0x000000000009fc00-0x000000000009ffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000000a0000-0x00000000000effff]
+[    0.000000] BIOS-e820: [mem 0x00000000000f0000-0x00000000000fffff]  device reserved
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x000000001ffdffff]  System RAM
+[    0.000000] BIOS-e820: [mem 0x000000001ffe0000-0x000000001fffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x0000000020000000-0x00000000feffbfff]
+[    0.000000] BIOS-e820: [mem 0x00000000feffc000-0x00000000feffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000ff000000-0x00000000fffbffff]
+[    0.000000] BIOS-e820: [mem 0x00000000fffc0000-0x00000000ffffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x0000000100000000-0x000000fcffffffff]
+[    0.000000] BIOS-e820: [mem 0x000000fd00000000-0x000000ffffffffff]  device reserved
+[    0.000000] NX (Execute Disable) protection: active
+[    0.000000] APIC: Static calls initialized
+[    0.000000] DMI: SMBIOS 2.8 present.
+[    0.000000] DMI: QEMU Standard PC (i440FX + PIIX, 1996), BIOS Arch Linux 1.17.0-2-2 04/01/2014
+[    0.000000] DMI: Memory slots populated: 1/1
+[    0.000000] Hypervisor detected: KVM
+[    0.000000] last_pfn = 0x1ffe0 max_arch_pfn = 0x400000000
+[    0.000000] kvm-clock: Using msrs 4b564d01 and 4b564d00
+[    0.000000] kvm-clock: using sched offset of 114874269 cycles
+[    0.000001] clocksource: kvm-clock: mask: 0xffffffffffffffff max_cycles: 0x1cd42e4dffb, max_idle_ns: 881590591483 ns
+[    0.000003] tsc: Detected 3992.500 MHz processor
+[    0.000084] last_pfn = 0x1ffe0 max_arch_pfn = 0x400000000
+[    0.000113] MTRR map: 4 entries (3 fixed + 1 variable; max 19), built from 8 variable MTRRs
+[    0.000115] x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+[    0.001947] found SMP MP-table at [mem 0x000f66c0-0x000f66cf]
+[    0.001959] Using GB pages for direct mapping
+[    0.002054] RAMDISK: [mem 0x1fbd6000-0x1ffdffff]
+[    0.002058] ACPI: Early table checksum verification disabled
+[    0.002060] ACPI: RSDP 0x00000000000F64F0 000014 (v00 BOCHS )
+[    0.002063] ACPI: RSDT 0x000000001FFE2355 000034 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002066] ACPI: FACP 0x000000001FFE2201 000074 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002069] ACPI: DSDT 0x000000001FFE0040 0021C1 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002070] ACPI: FACS 0x000000001FFE0000 000040
+[    0.002071] ACPI: APIC 0x000000001FFE2275 000080 (v03 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002073] ACPI: HPET 0x000000001FFE22F5 000038 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002074] ACPI: WAET 0x000000001FFE232D 000028 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002075] ACPI: Reserving FACP table memory at [mem 0x1ffe2201-0x1ffe2274]
+[    0.002076] ACPI: Reserving DSDT table memory at [mem 0x1ffe0040-0x1ffe2200]
+[    0.002076] ACPI: Reserving FACS table memory at [mem 0x1ffe0000-0x1ffe003f]
+[    0.002076] ACPI: Reserving APIC table memory at [mem 0x1ffe2275-0x1ffe22f4]
+[    0.002077] ACPI: Reserving HPET table memory at [mem 0x1ffe22f5-0x1ffe232c]
+[    0.002077] ACPI: Reserving WAET table memory at [mem 0x1ffe232d-0x1ffe2354]
+[    0.002391] No NUMA configuration found
+[    0.002392] Faking a node at [mem 0x0000000000000000-0x000000001ffdffff]
+[    0.002397] NODE_DATA(0) allocated [mem 0x1fbaaf80-0x1fbd5fff]
+[    0.002887] ACPI: PM-Timer IO Port: 0x608
+[    0.002895] ACPI: LAPIC_NMI (acpi_id[0xff] dfl dfl lint[0x1])
+[    0.002914] IOAPIC[0]: apic_id 0, version 17, address 0xfec00000, GSI 0-23
+[    0.002915] ACPI: INT_SRC_OVR (bus 0 bus_irq 0 global_irq 2 dfl dfl)
+[    0.002916] ACPI: INT_SRC_OVR (bus 0 bus_irq 5 global_irq 5 high level)
+[    0.002917] ACPI: INT_SRC_OVR (bus 0 bus_irq 9 global_irq 9 high level)
+[    0.002918] ACPI: INT_SRC_OVR (bus 0 bus_irq 10 global_irq 10 high level)
+[    0.002918] ACPI: INT_SRC_OVR (bus 0 bus_irq 11 global_irq 11 high level)
+[    0.002920] ACPI: Using ACPI (MADT) for SMP configuration information
+[    0.002920] ACPI: HPET id: 0x8086a201 base: 0xfed00000
+[    0.002922] TSC deadline timer available
+[    0.002924] CPU topo: Max. logical packages:   1
+[    0.002924] CPU topo: Max. logical nodes:      1
+[    0.002924] CPU topo: Num. nodes per package:  1
+[    0.002926] CPU topo: Max. logical dies:       1
+[    0.002926] CPU topo: Max. dies per package:   1
+[    0.002929] CPU topo: Max. threads per core:   1
+[    0.002929] CPU topo: Num. cores per package:     2
+[    0.002929] CPU topo: Num. threads per package:   2
+[    0.002929] CPU topo: Allowing 2 present CPUs plus 0 hotplug CPUs
+[    0.002940] kvm-guest: APIC: eoi() replaced with kvm_guest_apic_eoi_write()
+[    0.002948] kvm-guest: KVM setup pv remote TLB flush
+[    0.002951] kvm-guest: setup PV sched yield
+[    0.002954] PM: hibernation: Registered nosave memory: [mem 0x00000000-0x00000fff]
+[    0.002955] PM: hibernation: Registered nosave memory: [mem 0x0009f000-0x000fffff]
+[    0.002956] [gap 0x20000000-0xfeffbfff] available for PCI devices
+[    0.002957] Booting paravirtualized kernel on KVM
+[    0.002958] clocksource: refined-jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1910969940391419 ns
+[    0.007032] Zone ranges:
+[    0.007032]   DMA      [mem 0x0000000000001000-0x0000000000ffffff]
+[    0.007034]   DMA32    [mem 0x0000000001000000-0x000000001ffdffff]
+[    0.007035]   Normal   empty
+[    0.007035]   Device   empty
+[    0.007035] Movable zone start for each node
+[    0.007036] Early memory node ranges
+[    0.007037]   node   0: [mem 0x0000000000001000-0x000000000009efff]
+[    0.007038]   node   0: [mem 0x0000000000100000-0x000000001ffdffff]
+[    0.007038] Initmem setup node 0 [mem 0x0000000000001000-0x000000001ffdffff]
+[    0.007107] On node 0, zone DMA: 1 pages in unavailable ranges
+[    0.007115] On node 0, zone DMA: 97 pages in unavailable ranges
+[    0.007556] On node 0, zone DMA32: 32 pages in unavailable ranges
+[    0.007560] setup_percpu: NR_CPUS:8192 nr_cpumask_bits:2 nr_cpu_ids:2 nr_node_ids:1
+[    0.007679] percpu: Embedded 63 pages/cpu s221184 r8192 d28672 u1048576
+[    0.007706] kvm-guest: PV spinlocks enabled
+[    0.007708] PV qspinlock hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.007710] Kernel command line: console=ttyS0 panic=-1 loglevel=7 tsc=unstable tbt_probes=Q
+[    0.007739] tsc: Marking TSC unstable due to boot parameter
+[    0.007747] Unknown kernel command line parameters "tbt_probes=Q", will be passed to user space.
+[    0.007949] random: crng init done
+[    0.007949] printk: log buffer data + meta data: 131072 + 557056 = 688128 bytes
+[    0.007967] Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.007976] Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.008001] Fallback order for Node 0: 0 
+[    0.008002] Built 1 zonelists, mobility grouping on.  Total pages: 130942
+[    0.008003] Policy zone: DMA32
+[    0.008080] mem auto-init: stack:all(zero), heap alloc:on, heap free:off
+[    0.008690] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=2, Nodes=1
+[    0.021552] ftrace: allocating 58866 entries in 232 pages
+[    0.021556] ftrace: allocated 232 pages with 4 groups
+[    0.021612] Dynamic Preempt: full
+[    0.021709] rcu: Preemptible hierarchical RCU implementation.
+[    0.021710] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=2.
+[    0.021711] rcu: 	RCU priority boosting: priority 1 delay 500 ms.
+[    0.021712] 	Trampoline variant of Tasks RCU enabled.
+[    0.021712] 	Rude variant of Tasks RCU enabled.
+[    0.021713] 	Tracing variant of Tasks RCU enabled.
+[    0.021713] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.021714] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=2
+[    0.021717] RCU Tasks: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=2.
+[    0.021719] RCU Tasks Rude: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=2.
+[    0.024980] NR_IRQS: 524544, nr_irqs: 440, preallocated irqs: 16
+[    0.025158] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.025165] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    0.025323] kfence: initialized - using 2097152 bytes for 255 objects at 0x(____ptrval____)-0x(____ptrval____)
+[    0.025428] Console: colour *CGA 80x25
+[    0.025474] printk: legacy console [ttyS0] enabled
+[    0.166374] ACPI: Core revision 20260408
+[    0.167202] clocksource: hpet: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604467 ns
+[    0.168912] APIC: Switch to symmetric I/O mode setup
+[    0.169903] x2apic enabled
+[    0.170617] APIC: Switched APIC routing to: physical x2apic
+[    0.171610] kvm-guest: APIC: send_IPI_mask() replaced with kvm_send_ipi_mask()
+[    0.172884] kvm-guest: APIC: send_IPI_mask_allbutself() replaced with kvm_send_ipi_mask_allbutself()
+[    0.174480] kvm-guest: setup PV IPIs
+[    0.175982] ..TIMER: vector=0x30 apic1=0 pin1=2 apic2=-1 pin2=-1
+[    0.177067] Calibrating delay loop (skipped) preset value.. 7985.00 BogoMIPS (lpj=3992500)
+[    0.178166] x86/cpu: User Mode Instruction Prevention (UMIP) activated
+[    0.179130] Last level iTLB entries: 4KB 512, 2MB 255, 4MB 127
+[    0.180067] Last level dTLB entries: 4KB 512, 2MB 255, 4MB 127, 1GB 0
+[    0.181074] mitigations: Enabled attack vectors: user_kernel, user_user, guest_host, guest_guest, SMT mitigations: auto
+[    0.182068] Speculative Store Bypass: Mitigation: Speculative Store Bypass disabled via prctl
+[    0.183068] Transient Scheduler Attacks: Mitigation: Clear CPU buffers
+[    0.184067] Spectre V2 : Mitigation: Enhanced / Automatic IBRS
+[    0.185068] Speculative Return Stack Overflow: Mitigation: Safe RET
+[    0.186068] Spectre V1 : Mitigation: usercopy/swapgs barriers and __user pointer sanitization
+[    0.187079] Spectre V2 : Enabling IBPB for BPF
+[    0.188071] Spectre V2 : mitigation: Enabling conditional Indirect Branch Prediction Barrier
+[    0.189068] active return thunk: srso_alias_return_thunk
+[    0.190091] x86/fpu: Supporting XSAVE feature 0x001: 'x87 floating point registers'
+[    0.191067] x86/fpu: Supporting XSAVE feature 0x002: 'SSE registers'
+[    0.192067] x86/fpu: Supporting XSAVE feature 0x004: 'AVX registers'
+[    0.193067] x86/fpu: Supporting XSAVE feature 0x020: 'AVX-512 opmask'
+[    0.194067] x86/fpu: Supporting XSAVE feature 0x040: 'AVX-512 Hi256'
+[    0.195067] x86/fpu: Supporting XSAVE feature 0x080: 'AVX-512 ZMM_Hi256'
+[    0.196067] x86/fpu: Supporting XSAVE feature 0x200: 'Protection Keys User registers'
+[    0.197067] x86/fpu: Supporting XSAVE feature 0x800: 'Control-flow User registers'
+[    0.198067] x86/fpu: Supporting XSAVE feature 0x1000: 'Control-flow Kernel registers (KVM only)'
+[    0.199068] x86/fpu: xstate_offset[2]:  576, xstate_sizes[2]:  256
+[    0.200067] x86/fpu: xstate_offset[5]:  832, xstate_sizes[5]:   64
+[    0.201067] x86/fpu: xstate_offset[6]:  896, xstate_sizes[6]:  512
+[    0.202067] x86/fpu: xstate_offset[7]: 1408, xstate_sizes[7]: 1024
+[    0.203067] x86/fpu: xstate_offset[9]: 2432, xstate_sizes[9]:    8
+[    0.204067] x86/fpu: xstate_offset[11]: 2440, xstate_sizes[11]:   16
+[    0.205067] x86/fpu: xstate_offset[12]: 2456, xstate_sizes[12]:   24
+[    0.206067] x86/fpu: Enabled xstate features 0x1ae7, context size is 2480 bytes, using 'compacted' format.
+[    0.234605] pid_max: default: 32768 minimum: 301
+[    0.235170] landlock: Up and running.
+[    0.236069] Yama: becoming mindful.
+[    0.236831] LSM support for eBPF active
+[    0.237088] Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.238068] Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.239129] VFS: Finished mounting rootfs on nullfs
+[    0.240339] smpboot: CPU0: AMD Ryzen 9 7940HS w/ Radeon 780M Graphics (family: 0x19, model: 0x74, stepping: 0x1)
+[    0.241248] Performance Events: Fam17h+ core perfctr, AMD PMU driver.
+[    0.242075] ... version:                   2
+[    0.242828] ... bit width:                 48
+[    0.243069] ... generic counters:          6
+[    0.243852] ... generic bitmap:            000000000000003f
+[    0.244069] ... fixed-purpose counters:    0
+[    0.244902] ... fixed-purpose bitmap:      0000000000000000
+[    0.245069] ... value mask:                0000ffffffffffff
+[    0.246069] ... max period:                00007fffffffffff
+[    0.247069] ... global_ctrl mask:          000000000000003f
+[    0.248145] signal: max sigframe size: 3376
+[    0.248950] rcu: Hierarchical SRCU implementation.
+[    0.249069] rcu: 	Max phase no-delay instances is 400.
+[    0.250010] Timer migration: 1 hierarchy levels; 8 children per group; 1 crossnode level
+[    0.254314] smp: Bringing up secondary CPUs ...
+[    0.255171] smpboot: x86: Booting SMP configuration:
+[    0.256075] .... node  #0, CPUs:      #1
+[    0.257073] smp: Brought up 1 node, 2 CPUs
+[    0.258779] smpboot: Total of 2 processors activated (15970.00 BogoMIPS)
+[    0.259358] Memory: 442460K/523768K available (22162K kernel code, 3079K rwdata, 17572K rodata, 4936K init, 5020K bss, 76268K reserved, 0K cma-reserved)
+[    0.260154] devtmpfs: initialized
+[    0.261112] x86/mm: Memory block size: 128MB
+[    0.262159] posixtimers hash table entries: 1024 (order: 2, 16384 bytes, linear)
+[    0.263072] futex hash table entries: 512 (32768 bytes on 1 NUMA nodes, total 32 KiB, linear).
+[    0.264156] xor: automatically using best checksumming function   avx       
+[    0.265271] PM: RTC time: 08:22:00, date: 2026-11-06
+[    0.266396] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.267346] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    0.268081] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    0.269075] audit: initializing netlink subsys (disabled)
+[    0.270110] audit: type=2000 audit(1793953320.420:1): state=initialized audit_enabled=0 res=1
+[    0.278250] thermal_sys: Registered thermal governor 'fair_share'
+[    0.278252] thermal_sys: Registered thermal governor 'bang_bang'
+[    0.280069] thermal_sys: Registered thermal governor 'step_wise'
+[    0.281069] thermal_sys: Registered thermal governor 'user_space'
+[    0.282069] thermal_sys: Registered thermal governor 'power_allocator'
+[    0.283080] cpuidle: using governor ladder
+[    0.285070] cpuidle: using governor menu
+[    0.286153] Freeing SMP alternatives memory: 60K
+[    0.287120] acpiphp: ACPI Hot Plug PCI Controller Driver version: 0.5
+[    0.288205] PCI: Using configuration type 1 for base access
+[    0.289069] PCI: Using configuration type 1 for extended access
+[    0.290126] virt/tdx: TDX not supported by the host platform
+[    0.291110] kprobes: kprobe jump-optimization is enabled. All kprobes are optimized if possible.
+[    0.300070] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    0.301069] HugeTLB: 16380 KiB vmemmap can be freed for a 1.00 GiB page
+[    0.302069] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.305070] HugeTLB: 28 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.314726] raid6: using avx512x2 recovery algorithm
+[    0.315069] raid6: skipped pq benchmark and selected avx512x4
+[    0.316266] ACPI: Added _OSI(Module Device)
+[    0.316988] ACPI: Added _OSI(Processor Device)
+[    0.317074] ACPI: Added _OSI(Processor Aggregator Device)
+[    0.318744] ACPI: 1 ACPI AML tables successfully acquired and loaded
+[    0.320281] ACPI: \_SB_: platform _OSC: OS support mask [006e7eff]
+[    0.321218] ACPI: Interpreter enabled
+[    0.321876] ACPI: PM: (supports S0 S3 S4 S5)
+[    0.323070] ACPI: Using IOAPIC for interrupt routing
+[    0.324076] PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+[    0.325072] PCI: Using E820 reservations for host bridge windows
+[    0.326230] ACPI: Enabled 2 GPEs in block 00 to 0F
+[    0.331239] ACPI: PCI Root Bridge [PCI0] (domain 0000 [bus 00-ff])
+[    0.332551] acpiphp: Slot [2] registered
+[    0.333092] acpiphp: Slot [3] registered
+[    0.333851] acpiphp: Slot [4] registered
+[    0.335091] acpiphp: Slot [5] registered
+[    0.335874] acpiphp: Slot [6] registered
+[    0.336089] acpiphp: Slot [7] registered
+[    0.336775] acpiphp: Slot [8] registered
+[    0.338089] acpiphp: Slot [9] registered
+[    0.338763] acpiphp: Slot [10] registered
+[    0.339088] acpiphp: Slot [11] registered
+[    0.339807] acpiphp: Slot [12] registered
+[    0.340089] acpiphp: Slot [13] registered
+[    0.340818] acpiphp: Slot [14] registered
+[    0.342088] acpiphp: Slot [15] registered
+[    0.342792] acpiphp: Slot [16] registered
+[    0.343088] acpiphp: Slot [17] registered
+[    0.343791] acpiphp: Slot [18] registered
+[    0.345089] acpiphp: Slot [19] registered
+[    0.345784] acpiphp: Slot [20] registered
+[    0.346090] acpiphp: Slot [21] registered
+[    0.346854] acpiphp: Slot [22] registered
+[    0.347090] acpiphp: Slot [23] registered
+[    0.347783] acpiphp: Slot [24] registered
+[    0.349090] acpiphp: Slot [25] registered
+[    0.349814] acpiphp: Slot [26] registered
+[    0.350088] acpiphp: Slot [27] registered
+[    0.350786] acpiphp: Slot [28] registered
+[    0.352089] acpiphp: Slot [29] registered
+[    0.352786] acpiphp: Slot [30] registered
+[    0.353088] acpiphp: Slot [31] registered
+[    0.353829] PCI host bridge to bus 0000:00
+[    0.355074] pci_bus 0000:00: root bus resource [io  0x0000-0x0cf7 window]
+[    0.356070] pci_bus 0000:00: root bus resource [io  0x0d00-0xffff window]
+[    0.357069] pci_bus 0000:00: root bus resource [mem 0x000a0000-0x000bffff window]
+[    0.358070] pci_bus 0000:00: root bus resource [mem 0x20000000-0xfebfffff window]
+[    0.360070] pci_bus 0000:00: root bus resource [mem 0x100000000-0x17fffffff window]
+[    0.361071] pci_bus 0000:00: root bus resource [bus 00-ff]
+[    0.362346] pci 0000:00:00.0: [8086:1237] type 00 class 0x060000 conventional PCI endpoint
+[    0.365018] pci 0000:00:01.0: [8086:7000] type 00 class 0x060100 conventional PCI endpoint
+[    0.366758] pci 0000:00:01.1: [8086:7010] type 00 class 0x010180 conventional PCI endpoint
+[    0.369695] pci 0000:00:01.1: BAR 4 [io  0xc000-0xc00f]
+[    0.370127] pci 0000:00:01.1: BAR 0 [io  0x01f0-0x01f7]: legacy IDE quirk
+[    0.371069] pci 0000:00:01.1: BAR 1 [io  0x03f6]: legacy IDE quirk
+[    0.372069] pci 0000:00:01.1: BAR 2 [io  0x0170-0x0177]: legacy IDE quirk
+[    0.374069] pci 0000:00:01.1: BAR 3 [io  0x0376]: legacy IDE quirk
+[    0.375268] pci 0000:00:01.3: [8086:7113] type 00 class 0x068000 conventional PCI endpoint
+[    0.376504] pci 0000:00:01.3: quirk: [io  0x0600-0x063f] claimed by PIIX4 ACPI
+[    0.378101] pci 0000:00:01.3: quirk: [io  0x0700-0x070f] claimed by PIIX4 SMB
+[    0.385757] ACPI: PCI: Interrupt link LNKA configured for IRQ 10
+[    0.387205] ACPI: PCI: Interrupt link LNKB configured for IRQ 10
+[    0.388224] ACPI: PCI: Interrupt link LNKC configured for IRQ 11
+[    0.389197] ACPI: PCI: Interrupt link LNKD configured for IRQ 11
+[    0.391181] ACPI: PCI: Interrupt link LNKS configured for IRQ 9
+[    0.392538] iommu: Default domain type: Translated
+[    0.393074] iommu: DMA domain TLB invalidation policy: lazy mode
+[    0.395289] SCSI subsystem initialized
+[    0.396096] ACPI: bus type USB registered
+[    0.396096] usbcore: registered new interface driver usbfs
+[    0.398090] usbcore: registered new interface driver hub
+[    0.399079] usbcore: registered new device driver usb
+[    0.400105] EDAC MC: Ver: 3.0.0
+[    0.401134] NetLabel: Initializing
+[    0.401792] NetLabel:  domain hash size = 128
+[    0.402069] NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO
+[    0.403061] NetLabel:  unlabeled traffic allowed by default
+[    0.404074] mctp: management component transport protocol core
+[    0.405069] NET: Registered PF_MCTP protocol family
+[    0.405924] PCI: Using ACPI for IRQ routing
+[    0.407168] e820: register RAM buffer resource [mem 0x0009fc00-0x0009ffff]
+[    0.408069] e820: register RAM buffer resource [mem 0x1ffe0000-0x1fffffff]
+[    0.409089] vgaarb: loaded
+[    0.410113] hpet0: at MMIO 0xfed00000, IRQs 2, 8, 0
+[    0.411080] hpet0: 3 comparators, 64-bit 100.000000 MHz counter
+[    0.415141] clocksource: Switched to clocksource kvm-clock
+[    0.416314] VFS: Disk quotas dquot_6.6.0
+[    0.417482] VFS: Dquot-cache hash table entries: 512 (4096 bytes)
+[    0.418653] pnp: PnP ACPI init
+[    0.419339] ACPI: IRQ 4 override to edge(!), high(!)
+[    0.420470] pnp: PnP ACPI: found 4 devices
+[    0.427274] clocksource: acpi_pm: mask: 0xffffff max_cycles: 0xffffff, max_idle_ns: 2085701024 ns
+[    0.429170] NET: Registered PF_INET protocol family
+[    0.430147] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    0.431655] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.433268] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.434715] TCP established hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    0.436162] TCP bind hash table entries: 4096 (order: 5, 131072 bytes, linear)
+[    0.437427] TCP: Hash tables configured (established 4096 bind 4096)
+[    0.438551] MPTCP token hash table entries: 512 (order: 2, 12288 bytes, linear)
+[    0.439867] UDP hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.441027] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.442011] NET: Registered PF_XDP protocol family
+[    0.442886] pci_bus 0000:00: resource 4 [io  0x0000-0x0cf7 window]
+[    0.443958] pci_bus 0000:00: resource 5 [io  0x0d00-0xffff window]
+[    0.445025] pci_bus 0000:00: resource 6 [mem 0x000a0000-0x000bffff window]
+[    0.446224] pci_bus 0000:00: resource 7 [mem 0x20000000-0xfebfffff window]
+[    0.447450] pci_bus 0000:00: resource 8 [mem 0x100000000-0x17fffffff window]
+[    0.448707] pci 0000:00:01.0: PIIX3: Enabling Passive Release
+[    0.449757] pci 0000:00:00.0: Limiting direct PCI/PCI transfers
+[    0.450862] PCI: CLS 0 bytes, default 64
+[    0.451674] Trying to unpack rootfs image as initramfs...
+[    0.454136] Initialise system trusted keyrings
+[    0.455042] Key type blacklist registered
+[    0.456516] workingset: timestamp_bits=36 (anon: 31) max_order=17 bucket_order=0 (anon: 0)
+[    0.458346] fuse: init (API version 7.45)
+[    0.459231] integrity: Platform Keyring initialized
+[    0.460468] integrity: Machine keyring initialized
+[    0.468327] Key type asymmetric registered
+[    0.469048] Asymmetric key parser 'x509' registered
+[    0.469924] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 245)
+[    0.471969] io scheduler mq-deadline registered
+[    0.472850] io scheduler kyber registered
+[    0.473559] io scheduler bfq registered
+[    0.475084] ledtrig-cpu: registered to indicate activity on CPUs
+[    0.476315] input: Power Button as /devices/platform/LNXPWRBN:00/input/input0
+[    0.477643] ACPI: button: Power Button [PWRF]
+[    0.479101] Serial: 8250/16550 driver, 32 ports, IRQ sharing enabled
+[    0.480616] 00:03: ttyS0 at I/O 0x3f8 (irq = 4, base_baud = 115200) is a 16550A
+[    0.485806] Freeing initrd memory: 4136K
+[    0.487010] Non-volatile memory driver v1.3
+[    0.487770] ACPI: bus type drm_connector registered
+[    0.489089] usbcore: registered new interface driver usbserial_generic
+[    0.490269] usbserial: USB Serial support registered for generic
+[    0.491472] i8042: PNP: PS/2 Controller [PNP0303:KBD,PNP0f13:MOU] at 0x60,0x64 irq 1,12
+[    0.493682] serio: i8042 KBD port at 0x60,0x64 irq 1
+[    0.494646] serio: i8042 AUX port at 0x60,0x64 irq 12
+[    0.495850] rtc_cmos PNP0B00:00: RTC can wake from S4
+[    0.498295] input: AT Translated Set 2 keyboard as /devices/platform/i8042/serio0/input/input1
+[    0.499990] rtc_cmos PNP0B00:00: registered as rtc0
+[    0.501446] rtc_cmos PNP0B00:00: setting system clock to 2026-11-06T08:22:00 UTC (1793953320)
+[    0.502979] rtc_cmos PNP0B00:00: alarms up to one day, y3k, 242 bytes nvram, hpet irqs
+[    0.504447] hid: raw HID events driver (C) Jiri Kosina
+[    0.505424] usbcore: registered new interface driver usbhid
+[    0.506446] usbhid: USB HID core driver
+[    0.507202] drop_monitor: Initializing network drop monitor service
+[    0.508382] NET: Registered PF_INET6 protocol family
+[    0.509448] Segment Routing with IPv6
+[    0.510104] RPL Segment Routing with IPv6
+[    0.510798] In-situ OAM (IOAM) with IPv6
+[    0.511500] NET: Registered PF_PACKET protocol family
+[    0.512720] IPI shorthand broadcast: enabled
+[    0.516243] sched_clock: Marking stable (370001994, 145900414)->(541968892, -26066484)
+[    0.517781] registered taskstats version 1
+[    0.518929] Loading compiled-in X.509 certificates
+[    0.522381] Loaded X.509 cert 'Build time autogenerated kernel key: c2a3f38db21da023dc040f7ad1b79c9e79964d7e'
+[    0.527132] zswap: loaded using pool zstd
+[    0.528554] Demotion targets for Node 0: null
+[    0.529702] Key type .fscrypt registered
+[    0.530481] Key type fscrypt-provisioning registered
+[    0.531756] Btrfs loaded, zoned=yes, fsverity=yes
+[    0.532700] Key type big_key registered
+[    0.533677] PM:   Magic number: 2:152:371
+[    0.534498] RAS: Correctable Errors collector initialized.
+[    0.535670] clk: Disabling unused clocks
+[    0.536364] PM: genpd: Disabling unused power domains
+[    0.538301] Freeing unused decrypted memory: 2028K
+[    0.539400] Freeing unused kernel image (initmem) memory: 4936K
+[    0.540191] Write protecting the kernel read-only data: 40960k
+[    0.541138] Freeing unused kernel image (text/rodata gap) memory: 364K
+[    0.542085] Freeing unused kernel image (rodata/data gap) memory: 860K
+[    0.573413] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.574252] rodata_test: all tests were successful
+[    0.574875] Run /init as init process
+== tbtun guest: 7.2.9-1-MANJARO probes=Q
+== no eth0 (run.sh --no-net)
+== loading tbtun.ko
+[    0.583862] tbtun: loading out-of-tree module taints kernel.
+[    0.584642] tbtun: module verification failed: signature and/or required key missing - tainting kernel
+[    0.591756] tbtun 0.0.1 loaded: 64 tunnels max, 256 carriers max
+== tbtun loaded
+== probe Q: 256-carrier accept/replace flood
+[    2.598740] tbtun: tunnel 1 far side uses trust-on-first-use; configure nonce= or peer= to pin it
+[    2.603315] tbtun: tunnel 2 carrier 0 DIALED lport=41024 peer=127.0.0.1:19101
+[    2.605974] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41024, awaiting HELLO
+[    2.608270] tbtun: tunnel 2 carrier 1 DIALED lport=41025 peer=127.0.0.1:19101
+[    2.609715] tbtun: tunnel 2 carrier 2 DIALED lport=41026 peer=127.0.0.1:19101
+[    2.611196] tbtun: tunnel 2 carrier 3 DIALED lport=41027 peer=127.0.0.1:19101
+[    2.612637] tbtun: tunnel 2 carrier 4 DIALED lport=41028 peer=127.0.0.1:19101
+[    2.614103] tbtun: tunnel 2 carrier 5 DIALED lport=41029 peer=127.0.0.1:19101
+[    2.615532] tbtun: tunnel 2 carrier 6 DIALED lport=41030 peer=127.0.0.1:19101
+[    2.616981] tbtun: tunnel 2 carrier 7 DIALED lport=41031 peer=127.0.0.1:19101
+[    2.618429] tbtun: tunnel 2 carrier 8 DIALED lport=41032 peer=127.0.0.1:19101
+[    2.619878] tbtun: tunnel 2 carrier 9 DIALED lport=41033 peer=127.0.0.1:19101
+[    2.621345] tbtun: tunnel 2 carrier 10 DIALED lport=41034 peer=127.0.0.1:19101
+[    2.624015] tbtun: tunnel 2 carrier 11 DIALED lport=41035 peer=127.0.0.1:19101
+[    2.625642] tbtun: tunnel 2 carrier 12 DIALED lport=41036 peer=127.0.0.1:19101
+[    2.627121] tbtun: tunnel 2 carrier 13 DIALED lport=41037 peer=127.0.0.1:19101
+[    2.628565] tbtun: tunnel 2 carrier 14 DIALED lport=41038 peer=127.0.0.1:19101
+[    2.630054] tbtun: tunnel 2 carrier 15 DIALED lport=41039 peer=127.0.0.1:19101
+[    2.631497] tbtun: tunnel 2 carrier 16 DIALED lport=41040 peer=127.0.0.1:19101
+[    2.632966] tbtun: tunnel 2 carrier 17 DIALED lport=41041 peer=127.0.0.1:19101
+[    2.634406] tbtun: tunnel 2 carrier 18 DIALED lport=41042 peer=127.0.0.1:19101
+[    2.635855] tbtun: tunnel 2 carrier 19 DIALED lport=41043 peer=127.0.0.1:19101
+[    2.637301] tbtun: tunnel 2 carrier 20 DIALED lport=41044 peer=127.0.0.1:19101
+[    2.640247] tbtun: tunnel 2 carrier 21 DIALED lport=41045 peer=127.0.0.1:19101
+[    2.641689] tbtun: tunnel 2 carrier 22 DIALED lport=41046 peer=127.0.0.1:19101
+[    2.643158] tbtun: tunnel 2 carrier 23 DIALED lport=41047 peer=127.0.0.1:19101
+[    2.644606] tbtun: tunnel 2 carrier 24 DIALED lport=41048 peer=127.0.0.1:19101
+[    2.646108] tbtun: tunnel 2 carrier 25 DIALED lport=41049 peer=127.0.0.1:19101
+[    2.647552] tbtun: tunnel 2 carrier 26 DIALED lport=41050 peer=127.0.0.1:19101
+[    2.649040] tbtun: tunnel 2 carrier 27 DIALED lport=41051 peer=127.0.0.1:19101
+[    2.650476] tbtun: tunnel 2 carrier 28 DIALED lport=41052 peer=127.0.0.1:19101
+[    2.651937] tbtun: tunnel 2 carrier 29 DIALED lport=41053 peer=127.0.0.1:19101
+[    2.653410] tbtun: tunnel 2 carrier 30 DIALED lport=41054 peer=127.0.0.1:19101
+[    2.654878] tbtun: tunnel 2 carrier 31 DIALED lport=41055 peer=127.0.0.1:19101
+[    2.656340] tbtun: tunnel 2 carrier 32 DIALED lport=41056 peer=127.0.0.1:19101
+[    2.658107] tbtun: tunnel 2 carrier 33 DIALED lport=41057 peer=127.0.0.1:19101
+[    2.659870] tbtun: tunnel 2 carrier 34 DIALED lport=41058 peer=127.0.0.1:19101
+[    2.661326] tbtun: tunnel 2 carrier 35 DIALED lport=41059 peer=127.0.0.1:19101
+[    2.662815] tbtun: tunnel 2 carrier 36 DIALED lport=41060 peer=127.0.0.1:19101
+[    2.664278] tbtun: tunnel 2 carrier 37 DIALED lport=41061 peer=127.0.0.1:19101
+[    2.665713] tbtun: tunnel 2 carrier 38 DIALED lport=41062 peer=127.0.0.1:19101
+[    2.667173] tbtun: tunnel 2 carrier 39 DIALED lport=41063 peer=127.0.0.1:19101
+[    2.668622] tbtun: tunnel 2 carrier 40 DIALED lport=41064 peer=127.0.0.1:19101
+[    2.670098] tbtun: tunnel 2 carrier 41 DIALED lport=41065 peer=127.0.0.1:19101
+[    2.671528] tbtun: tunnel 2 carrier 42 DIALED lport=41066 peer=127.0.0.1:19101
+[    2.672992] tbtun: tunnel 2 carrier 43 DIALED lport=41067 peer=127.0.0.1:19101
+[    2.674433] tbtun: tunnel 2 carrier 44 DIALED lport=41068 peer=127.0.0.1:19101
+[    2.675878] tbtun: tunnel 2 carrier 45 DIALED lport=41069 peer=127.0.0.1:19101
+[    2.677312] tbtun: tunnel 2 carrier 46 DIALED lport=41070 peer=127.0.0.1:19101
+[    2.678764] tbtun: tunnel 2 carrier 47 DIALED lport=41071 peer=127.0.0.1:19101
+[    2.680231] tbtun: tunnel 2 carrier 48 DIALED lport=41072 peer=127.0.0.1:19101
+[    2.681676] tbtun: tunnel 2 carrier 49 DIALED lport=41073 peer=127.0.0.1:19101
+[    2.683153] tbtun: tunnel 2 carrier 50 DIALED lport=41074 peer=127.0.0.1:19101
+[    2.684600] tbtun: tunnel 2 carrier 51 DIALED lport=41075 peer=127.0.0.1:19101
+[    2.686062] tbtun: tunnel 2 carrier 52 DIALED lport=41076 peer=127.0.0.1:19101
+[    2.687508] tbtun: tunnel 2 carrier 53 DIALED lport=41077 peer=127.0.0.1:19101
+[    2.689017] tbtun: tunnel 2 carrier 54 DIALED lport=41078 peer=127.0.0.1:19101
+[    2.690548] tbtun: tunnel 2 carrier 55 DIALED lport=41079 peer=127.0.0.1:19101
+[    2.692008] tbtun: tunnel 2 carrier 56 DIALED lport=41080 peer=127.0.0.1:19101
+[    2.693464] tbtun: tunnel 2 carrier 57 DIALED lport=41081 peer=127.0.0.1:19101
+[    2.694937] tbtun: tunnel 2 carrier 58 DIALED lport=41082 peer=127.0.0.1:19101
+[    2.696565] tbtun: tunnel 2 carrier 59 DIALED lport=41083 peer=127.0.0.1:19101
+[    2.698032] tbtun: tunnel 2 carrier 60 DIALED lport=41084 peer=127.0.0.1:19101
+[    2.699478] tbtun: tunnel 2 carrier 61 DIALED lport=41085 peer=127.0.0.1:19101
+[    2.700936] tbtun: tunnel 2 carrier 62 DIALED lport=41086 peer=127.0.0.1:19101
+[    2.702379] tbtun: tunnel 2 carrier 63 DIALED lport=41087 peer=127.0.0.1:19101
+[    2.703855] tbtun: tunnel 2 carrier 64 DIALED lport=41088 peer=127.0.0.1:19101
+[    2.705299] tbtun: tunnel 2 carrier 65 DIALED lport=41089 peer=127.0.0.1:19101
+[    2.706736] tbtun: tunnel 2 carrier 66 DIALED lport=41090 peer=127.0.0.1:19101
+[    2.708195] tbtun: tunnel 2 carrier 67 DIALED lport=41091 peer=127.0.0.1:19101
+[    2.709647] tbtun: tunnel 2 carrier 68 DIALED lport=41092 peer=127.0.0.1:19101
+[    2.711105] tbtun: tunnel 2 carrier 69 DIALED lport=41093 peer=127.0.0.1:19101
+[    2.712533] tbtun: tunnel 2 carrier 70 DIALED lport=41094 peer=127.0.0.1:19101
+[    2.713992] tbtun: tunnel 2 carrier 71 DIALED lport=41095 peer=127.0.0.1:19101
+[    2.715421] tbtun: tunnel 2 carrier 72 DIALED lport=41096 peer=127.0.0.1:19101
+[    2.716869] tbtun: tunnel 2 carrier 73 DIALED lport=41097 peer=127.0.0.1:19101
+[    2.718312] tbtun: tunnel 2 carrier 74 DIALED lport=41098 peer=127.0.0.1:19101
+[    2.719758] tbtun: tunnel 2 carrier 75 DIALED lport=41099 peer=127.0.0.1:19101
+[    2.721216] tbtun: tunnel 2 carrier 76 DIALED lport=41100 peer=127.0.0.1:19101
+[    2.722651] tbtun: tunnel 2 carrier 77 DIALED lport=41101 peer=127.0.0.1:19101
+[    2.724120] tbtun: tunnel 2 carrier 78 DIALED lport=41102 peer=127.0.0.1:19101
+[    2.725567] tbtun: tunnel 2 carrier 79 DIALED lport=41103 peer=127.0.0.1:19101
+[    2.727294] tbtun: tunnel 2 carrier 80 DIALED lport=41104 peer=127.0.0.1:19101
+[    2.728769] tbtun: tunnel 2 carrier 81 DIALED lport=41105 peer=127.0.0.1:19101
+[    2.730257] tbtun: tunnel 2 carrier 82 DIALED lport=41106 peer=127.0.0.1:19101
+[    2.731713] tbtun: tunnel 2 carrier 83 DIALED lport=41107 peer=127.0.0.1:19101
+[    2.733184] tbtun: tunnel 2 carrier 84 DIALED lport=41108 peer=127.0.0.1:19101
+[    2.734635] tbtun: tunnel 2 carrier 85 DIALED lport=41109 peer=127.0.0.1:19101
+[    2.736103] tbtun: tunnel 2 carrier 86 DIALED lport=41110 peer=127.0.0.1:19101
+[    2.737548] tbtun: tunnel 2 carrier 87 DIALED lport=41111 peer=127.0.0.1:19101
+[    2.738997] tbtun: tunnel 2 carrier 88 DIALED lport=41112 peer=127.0.0.1:19101
+[    2.740440] tbtun: tunnel 2 carrier 89 DIALED lport=41113 peer=127.0.0.1:19101
+[    2.741944] tbtun: tunnel 2 carrier 90 DIALED lport=41114 peer=127.0.0.1:19101
+[    2.743372] tbtun: tunnel 2 carrier 91 DIALED lport=41115 peer=127.0.0.1:19101
+[    2.744817] tbtun: tunnel 2 carrier 92 DIALED lport=41116 peer=127.0.0.1:19101
+[    2.746296] tbtun: tunnel 2 carrier 93 DIALED lport=41117 peer=127.0.0.1:19101
+[    2.747767] tbtun: tunnel 2 carrier 94 DIALED lport=41118 peer=127.0.0.1:19101
+[    2.749245] tbtun: tunnel 2 carrier 95 DIALED lport=41119 peer=127.0.0.1:19101
+[    2.750696] tbtun: tunnel 2 carrier 96 DIALED lport=41120 peer=127.0.0.1:19101
+[    2.752160] tbtun: tunnel 2 carrier 97 DIALED lport=41121 peer=127.0.0.1:19101
+[    2.753617] tbtun: tunnel 2 carrier 98 DIALED lport=41122 peer=127.0.0.1:19101
+[    2.755075] tbtun: tunnel 2 carrier 99 DIALED lport=41123 peer=127.0.0.1:19101
+[    2.756522] tbtun: tunnel 2 carrier 100 DIALED lport=41124 peer=127.0.0.1:19101
+[    2.758078] tbtun: tunnel 2 carrier 101 DIALED lport=41125 peer=127.0.0.1:19101
+[    2.759623] tbtun: tunnel 2 carrier 102 DIALED lport=41126 peer=127.0.0.1:19101
+[    2.761119] tbtun: tunnel 2 carrier 103 DIALED lport=41127 peer=127.0.0.1:19101
+[    2.762575] tbtun: tunnel 2 carrier 104 DIALED lport=41128 peer=127.0.0.1:19101
+[    2.764071] tbtun: tunnel 2 carrier 105 DIALED lport=41129 peer=127.0.0.1:19101
+[    2.765550] tbtun: tunnel 2 carrier 106 DIALED lport=41130 peer=127.0.0.1:19101
+[    2.767049] tbtun: tunnel 2 carrier 107 DIALED lport=41131 peer=127.0.0.1:19101
+[    2.768576] tbtun: tunnel 2 carrier 108 DIALED lport=41132 peer=127.0.0.1:19101
+[    2.770117] tbtun: tunnel 2 carrier 109 DIALED lport=41133 peer=127.0.0.1:19101
+[    2.771582] tbtun: tunnel 2 carrier 110 DIALED lport=41134 peer=127.0.0.1:19101
+[    2.773067] tbtun: tunnel 2 carrier 111 DIALED lport=41135 peer=127.0.0.1:19101
+[    2.774539] tbtun: tunnel 2 carrier 112 DIALED lport=41136 peer=127.0.0.1:19101
+[    2.776032] tbtun: tunnel 2 carrier 113 DIALED lport=41137 peer=127.0.0.1:19101
+[    2.777492] tbtun: tunnel 2 carrier 114 DIALED lport=41138 peer=127.0.0.1:19101
+[    2.778968] tbtun: tunnel 2 carrier 115 DIALED lport=41139 peer=127.0.0.1:19101
+[    2.780443] tbtun: tunnel 2 carrier 116 DIALED lport=41140 peer=127.0.0.1:19101
+[    2.781930] tbtun: tunnel 2 carrier 117 DIALED lport=41141 peer=127.0.0.1:19101
+[    2.783400] tbtun: tunnel 2 carrier 118 DIALED lport=41142 peer=127.0.0.1:19101
+[    2.784884] tbtun: tunnel 2 carrier 119 DIALED lport=41143 peer=127.0.0.1:19101
+[    2.786344] tbtun: tunnel 2 carrier 120 DIALED lport=41144 peer=127.0.0.1:19101
+[    2.787803] tbtun: tunnel 2 carrier 121 DIALED lport=41145 peer=127.0.0.1:19101
+[    2.789277] tbtun: tunnel 2 carrier 122 DIALED lport=41146 peer=127.0.0.1:19101
+[    2.790746] tbtun: tunnel 2 carrier 123 DIALED lport=41147 peer=127.0.0.1:19101
+[    2.792228] tbtun: tunnel 2 carrier 124 DIALED lport=41148 peer=127.0.0.1:19101
+[    2.793686] tbtun: tunnel 2 carrier 125 DIALED lport=41149 peer=127.0.0.1:19101
+[    2.795182] tbtun: tunnel 2 carrier 126 DIALED lport=41150 peer=127.0.0.1:19101
+[    2.796650] tbtun: tunnel 2 carrier 127 DIALED lport=41151 peer=127.0.0.1:19101
+[    2.798107] tbtun: tunnel 2 carrier 128 DIALED lport=41152 peer=127.0.0.1:19101
+[    2.799518] tbtun: tunnel 2 carrier 129 DIALED lport=41153 peer=127.0.0.1:19101
+[    2.805518] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41025, awaiting HELLO
+[    2.806822] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41026, awaiting HELLO
+[    2.808112] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41027, awaiting HELLO
+[    2.809353] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41028, awaiting HELLO
+[    2.810574] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41029, awaiting HELLO
+[    2.811724] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41030, awaiting HELLO
+[    2.812835] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41031, awaiting HELLO
+[    2.813916] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41032, awaiting HELLO
+[    2.814994] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=41033, awaiting HELLO
+[    2.816030] workqueue: work func tbt_fec_tx_work [tbtun] enqueued on deprecated workqueue. Use system_{percpu|dfl}_wq instead.
+[    3.853601] tbtun: tunnel 2 carrier 247 DIALED lport=41271 peer=127.0.0.1:19101
+[    3.855117] tbtun: tunnel 2 carrier 130 DIALED lport=41154 peer=127.0.0.1:19101
+[    3.856591] tbtun: tunnel 2 carrier 131 DIALED lport=41155 peer=127.0.0.1:19101
+[    3.858053] tbtun: tunnel 2 carrier 246 DIALED lport=41270 peer=127.0.0.1:19101
+[    3.859490] tbtun: tunnel 2 carrier 245 DIALED lport=41269 peer=127.0.0.1:19101
+[    3.860935] tbtun: tunnel 2 carrier 244 DIALED lport=41268 peer=127.0.0.1:19101
+[    3.862364] tbtun: tunnel 2 carrier 242 DIALED lport=41266 peer=127.0.0.1:19101
+[    3.863826] tbtun: tunnel 2 carrier 243 DIALED lport=41267 peer=127.0.0.1:19101
+[    3.865343] tbtun: tunnel 2 carrier 241 DIALED lport=41265 peer=127.0.0.1:19101
+[    3.866774] tbtun: tunnel 2 carrier 240 DIALED lport=41264 peer=127.0.0.1:19101
+[    3.868246] tbtun: tunnel 2 carrier 239 DIALED lport=41263 peer=127.0.0.1:19101
+[    3.869667] tbtun: tunnel 2 carrier 238 DIALED lport=41262 peer=127.0.0.1:19101
+[    3.871142] tbtun: tunnel 2 carrier 237 DIALED lport=41261 peer=127.0.0.1:19101
+[    3.872574] tbtun: tunnel 2 carrier 255 DIALED lport=41279 peer=127.0.0.1:19101
+[    3.874026] tbtun: tunnel 2 carrier 254 DIALED lport=41278 peer=127.0.0.1:19101
+[    3.875456] tbtun: tunnel 2 carrier 253 DIALED lport=41277 peer=127.0.0.1:19101
+[    3.876894] tbtun: tunnel 2 carrier 252 DIALED lport=41276 peer=127.0.0.1:19101
+[    3.878333] tbtun: tunnel 2 carrier 251 DIALED lport=41275 peer=127.0.0.1:19101
+[    3.879758] tbtun: tunnel 2 carrier 250 DIALED lport=41274 peer=127.0.0.1:19101
+[    3.881199] tbtun: tunnel 2 carrier 249 DIALED lport=41273 peer=127.0.0.1:19101
+[    3.882625] tbtun: tunnel 2 carrier 248 DIALED lport=41272 peer=127.0.0.1:19101
+[    3.884070] tbtun: tunnel 2 carrier 236 DIALED lport=41260 peer=127.0.0.1:19101
+[    3.885497] tbtun: tunnel 2 carrier 235 DIALED lport=41259 peer=127.0.0.1:19101
+[    3.886943] tbtun: tunnel 2 carrier 234 DIALED lport=41258 peer=127.0.0.1:19101
+[    3.888363] tbtun: tunnel 2 carrier 233 DIALED lport=41257 peer=127.0.0.1:19101
+[    3.889810] tbtun: tunnel 2 carrier 132 DIALED lport=41156 peer=127.0.0.1:19101
+[    3.891266] tbtun: tunnel 2 carrier 232 DIALED lport=41256 peer=127.0.0.1:19101
+[    3.892688] tbtun: tunnel 2 carrier 231 DIALED lport=41255 peer=127.0.0.1:19101
+[    3.894140] tbtun: tunnel 2 carrier 230 DIALED lport=41254 peer=127.0.0.1:19101
+[    3.895568] tbtun: tunnel 2 carrier 229 DIALED lport=41253 peer=127.0.0.1:19101
+[    3.897015] tbtun: tunnel 2 carrier 133 DIALED lport=41157 peer=127.0.0.1:19101
+[    3.898444] tbtun: tunnel 2 carrier 228 DIALED lport=41252 peer=127.0.0.1:19101
+[    3.899876] tbtun: tunnel 2 carrier 227 DIALED lport=41251 peer=127.0.0.1:19101
+[    3.901347] tbtun: tunnel 2 carrier 226 DIALED lport=41250 peer=127.0.0.1:19101
+[    3.902813] tbtun: tunnel 2 carrier 225 DIALED lport=41249 peer=127.0.0.1:19101
+[    3.904331] tbtun: tunnel 2 carrier 224 DIALED lport=41248 peer=127.0.0.1:19101
+[    3.905830] tbtun: tunnel 2 carrier 144 DIALED lport=41168 peer=127.0.0.1:19101
+[    3.907285] tbtun: tunnel 2 carrier 223 DIALED lport=41247 peer=127.0.0.1:19101
+[    3.908715] tbtun: tunnel 2 carrier 222 DIALED lport=41246 peer=127.0.0.1:19101
+[    3.910176] tbtun: tunnel 2 carrier 221 DIALED lport=41245 peer=127.0.0.1:19101
+[    3.911616] tbtun: tunnel 2 carrier 220 DIALED lport=41244 peer=127.0.0.1:19101
+[    3.913071] tbtun: tunnel 2 carrier 219 DIALED lport=41243 peer=127.0.0.1:19101
+[    3.914511] tbtun: tunnel 2 carrier 218 DIALED lport=41242 peer=127.0.0.1:19101
+[    3.915957] tbtun: tunnel 2 carrier 217 DIALED lport=41241 peer=127.0.0.1:19101
+[    3.917385] tbtun: tunnel 2 carrier 216 DIALED lport=41240 peer=127.0.0.1:19101
+[    3.918833] tbtun: tunnel 2 carrier 215 DIALED lport=41239 peer=127.0.0.1:19101
+[    3.920279] tbtun: tunnel 2 carrier 214 DIALED lport=41238 peer=127.0.0.1:19101
+[    3.921718] tbtun: tunnel 2 carrier 213 DIALED lport=41237 peer=127.0.0.1:19101
+[    3.923175] tbtun: tunnel 2 carrier 212 DIALED lport=41236 peer=127.0.0.1:19101
+[    3.924602] tbtun: tunnel 2 carrier 211 DIALED lport=41235 peer=127.0.0.1:19101
+[    3.926060] tbtun: tunnel 2 carrier 210 DIALED lport=41234 peer=127.0.0.1:19101
+[    3.927487] tbtun: tunnel 2 carrier 209 DIALED lport=41233 peer=127.0.0.1:19101
+[    3.928917] tbtun: tunnel 2 carrier 208 DIALED lport=41232 peer=127.0.0.1:19101
+[    3.930356] tbtun: tunnel 2 carrier 207 DIALED lport=41231 peer=127.0.0.1:19101
+[    3.931792] tbtun: tunnel 2 carrier 206 DIALED lport=41230 peer=127.0.0.1:19101
+[    3.933239] tbtun: tunnel 2 carrier 134 DIALED lport=41158 peer=127.0.0.1:19101
+[    3.934668] tbtun: tunnel 2 carrier 205 DIALED lport=41229 peer=127.0.0.1:19101
+[    3.936122] tbtun: tunnel 2 carrier 204 DIALED lport=41228 peer=127.0.0.1:19101
+[    3.937549] tbtun: tunnel 2 carrier 203 DIALED lport=41227 peer=127.0.0.1:19101
+[    3.938992] tbtun: tunnel 2 carrier 202 DIALED lport=41226 peer=127.0.0.1:19101
+[    3.940423] tbtun: tunnel 2 carrier 201 DIALED lport=41225 peer=127.0.0.1:19101
+[    3.941870] tbtun: tunnel 2 carrier 200 DIALED lport=41224 peer=127.0.0.1:19101
+[    3.943312] tbtun: tunnel 2 carrier 135 DIALED lport=41159 peer=127.0.0.1:19101
+[    3.944737] tbtun: tunnel 2 carrier 199 DIALED lport=41223 peer=127.0.0.1:19101
+[    3.946204] tbtun: tunnel 2 carrier 198 DIALED lport=41222 peer=127.0.0.1:19101
+[    3.947635] tbtun: tunnel 2 carrier 197 DIALED lport=41221 peer=127.0.0.1:19101
+[    3.949081] tbtun: tunnel 2 carrier 196 DIALED lport=41220 peer=127.0.0.1:19101
+[    3.950531] tbtun: tunnel 2 carrier 195 DIALED lport=41219 peer=127.0.0.1:19101
+[    3.951994] tbtun: tunnel 2 carrier 194 DIALED lport=41218 peer=127.0.0.1:19101
+[    3.953448] tbtun: tunnel 2 carrier 136 DIALED lport=41160 peer=127.0.0.1:19101
+[    3.955374] tbtun: tunnel 2 carrier 193 DIALED lport=41217 peer=127.0.0.1:19101
+[    3.956815] tbtun: tunnel 2 carrier 192 DIALED lport=41216 peer=127.0.0.1:19101
+[    3.958263] tbtun: tunnel 2 carrier 191 DIALED lport=41215 peer=127.0.0.1:19101
+[    3.959708] tbtun: tunnel 2 carrier 190 DIALED lport=41214 peer=127.0.0.1:19101
+[    3.961188] tbtun: tunnel 2 carrier 189 DIALED lport=41213 peer=127.0.0.1:19101
+[    3.962621] tbtun: tunnel 2 carrier 188 DIALED lport=41212 peer=127.0.0.1:19101
+[    3.964068] tbtun: tunnel 2 carrier 187 DIALED lport=41211 peer=127.0.0.1:19101
+[    3.965510] tbtun: tunnel 2 carrier 186 DIALED lport=41210 peer=127.0.0.1:19101
+[    3.966955] tbtun: tunnel 2 carrier 185 DIALED lport=41209 peer=127.0.0.1:19101
+[    3.968382] tbtun: tunnel 2 carrier 184 DIALED lport=41208 peer=127.0.0.1:19101
+[    3.969810] tbtun: tunnel 2 carrier 183 DIALED lport=41207 peer=127.0.0.1:19101
+[    3.971264] tbtun: tunnel 2 carrier 182 DIALED lport=41206 peer=127.0.0.1:19101
+[    3.972704] tbtun: tunnel 2 carrier 181 DIALED lport=41205 peer=127.0.0.1:19101
+[    3.974144] tbtun: tunnel 2 carrier 180 DIALED lport=41204 peer=127.0.0.1:19101
+[    3.975558] tbtun: tunnel 2 carrier 179 DIALED lport=41203 peer=127.0.0.1:19101
+[    3.977016] tbtun: tunnel 2 carrier 178 DIALED lport=41202 peer=127.0.0.1:19101
+[    3.978443] tbtun: tunnel 2 carrier 177 DIALED lport=41201 peer=127.0.0.1:19101
+[    3.979893] tbtun: tunnel 2 carrier 176 DIALED lport=41200 peer=127.0.0.1:19101
+[    3.981331] tbtun: tunnel 2 carrier 137 DIALED lport=41161 peer=127.0.0.1:19101
+[    3.982774] tbtun: tunnel 2 carrier 175 DIALED lport=41199 peer=127.0.0.1:19101
+[    3.984204] tbtun: tunnel 2 carrier 143 DIALED lport=41167 peer=127.0.0.1:19101
+[    3.985630] tbtun: tunnel 2 carrier 174 DIALED lport=41198 peer=127.0.0.1:19101
+[    3.987093] tbtun: tunnel 2 carrier 173 DIALED lport=41197 peer=127.0.0.1:19101
+[    3.988521] tbtun: tunnel 2 carrier 138 DIALED lport=41162 peer=127.0.0.1:19101
+[    3.990022] tbtun: tunnel 2 carrier 172 DIALED lport=41196 peer=127.0.0.1:19101
+[    3.991458] tbtun: tunnel 2 carrier 171 DIALED lport=41195 peer=127.0.0.1:19101
+[    3.992915] tbtun: tunnel 2 carrier 170 DIALED lport=41194 peer=127.0.0.1:19101
+[    3.994378] tbtun: tunnel 2 carrier 169 DIALED lport=41193 peer=127.0.0.1:19101
+[    3.995877] tbtun: tunnel 2 carrier 168 DIALED lport=41192 peer=127.0.0.1:19101
+[    3.997340] tbtun: tunnel 2 carrier 167 DIALED lport=41191 peer=127.0.0.1:19101
+[    3.998778] tbtun: tunnel 2 carrier 166 DIALED lport=41190 peer=127.0.0.1:19101
+[    4.000224] tbtun: tunnel 2 carrier 165 DIALED lport=41189 peer=127.0.0.1:19101
+[    4.001666] tbtun: tunnel 2 carrier 164 DIALED lport=41188 peer=127.0.0.1:19101
+[    4.003113] tbtun: tunnel 2 carrier 163 DIALED lport=41187 peer=127.0.0.1:19101
+[    4.004541] tbtun: tunnel 2 carrier 162 DIALED lport=41186 peer=127.0.0.1:19101
+[    4.005992] tbtun: tunnel 2 carrier 161 DIALED lport=41185 peer=127.0.0.1:19101
+[    4.007432] tbtun: tunnel 2 carrier 160 DIALED lport=41184 peer=127.0.0.1:19101
+[    4.008874] tbtun: tunnel 2 carrier 159 DIALED lport=41183 peer=127.0.0.1:19101
+[    4.010310] tbtun: tunnel 2 carrier 158 DIALED lport=41182 peer=127.0.0.1:19101
+[    4.011748] tbtun: tunnel 2 carrier 157 DIALED lport=41181 peer=127.0.0.1:19101
+[    4.013193] tbtun: tunnel 2 carrier 140 DIALED lport=41164 peer=127.0.0.1:19101
+[    4.014620] tbtun: tunnel 2 carrier 139 DIALED lport=41163 peer=127.0.0.1:19101
+[    4.016079] tbtun: tunnel 2 carrier 142 DIALED lport=41166 peer=127.0.0.1:19101
+[    4.017511] tbtun: tunnel 2 carrier 141 DIALED lport=41165 peer=127.0.0.1:19101
+[    4.018946] tbtun: tunnel 2 carrier 156 DIALED lport=41180 peer=127.0.0.1:19101
+[    4.020373] tbtun: tunnel 2 carrier 155 DIALED lport=41179 peer=127.0.0.1:19101
+[    4.021808] tbtun: tunnel 2 carrier 154 DIALED lport=41178 peer=127.0.0.1:19101
+[    4.023278] tbtun: tunnel 2 carrier 153 DIALED lport=41177 peer=127.0.0.1:19101
+[    4.024706] tbtun: tunnel 2 carrier 152 DIALED lport=41176 peer=127.0.0.1:19101
+[    4.026159] tbtun: tunnel 2 carrier 151 DIALED lport=41175 peer=127.0.0.1:19101
+[    4.027595] tbtun: tunnel 2 carrier 150 DIALED lport=41174 peer=127.0.0.1:19101
+[    4.029040] tbtun: tunnel 2 carrier 149 DIALED lport=41173 peer=127.0.0.1:19101
+[    4.030465] tbtun: tunnel 2 carrier 148 DIALED lport=41172 peer=127.0.0.1:19101
+[    4.031920] tbtun: tunnel 2 carrier 147 DIALED lport=41171 peer=127.0.0.1:19101
+[    4.033341] tbtun: tunnel 2 carrier 146 DIALED lport=41170 peer=127.0.0.1:19101
+[    4.034774] tbtun: tunnel 2 carrier 145 DIALED lport=41169 peer=127.0.0.1:19101
+[    4.135674] tbtun: tunnel 2 carrier 0 DIALED lport=41280 peer=127.0.0.1:19101
+[    4.137336] tbtun: tunnel 2 carrier 1 DIALED lport=41281 peer=127.0.0.1:19101
+[    4.138987] tbtun: tunnel 2 carrier 2 DIALED lport=41282 peer=127.0.0.1:19101
+[    4.140506] tbtun: tunnel 2 carrier 3 DIALED lport=41283 peer=127.0.0.1:19101
+[    4.142007] tbtun: tunnel 2 carrier 4 DIALED lport=41284 peer=127.0.0.1:19101
+[    4.143486] tbtun: tunnel 2 carrier 5 DIALED lport=41285 peer=127.0.0.1:19101
+[    4.144995] tbtun: tunnel 2 carrier 6 DIALED lport=41286 peer=127.0.0.1:19101
+[    4.146559] tbtun: tunnel 2 carrier 7 DIALED lport=41287 peer=127.0.0.1:19101
+[    4.150004] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    4.152551] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    4.155100] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    4.157650] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    4.160202] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    4.162754] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    4.165322] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    4.167838] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    4.170454] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    4.173041] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    4.755705] tbtun: tunnel 1 refused an incoming connection: -28
+[    4.757162] tbtun: tunnel 1 refused an incoming connection: -28
+[    4.758444] tbtun: tunnel 1 refused an incoming connection: -28
+[    4.759664] tbtun: tunnel 1 refused an incoming connection: -28
+[    4.760842] tbtun: tunnel 1 refused an incoming connection: -28
+[    4.762056] tbtun: tunnel 1 refused an incoming connection: -28
+[    4.763328] tbtun: tunnel 1 refused an incoming connection: -28
+[    4.764541] tbtun: tunnel 1 refused an incoming connection: -28
+[    4.765819] tbtun: tunnel 1 refused an incoming connection: -28
+[    4.772889] tbtun: tunnel 1 refused an incoming connection: -28
+[    5.132299] tbtun: tunnel 2 carrier 8 DIALED lport=41024 peer=127.0.0.1:19101
+[    5.133793] tbtun: tunnel 2 carrier 9 DIALED lport=41025 peer=127.0.0.1:19101
+[    5.135279] tbtun: tunnel 2 carrier 10 DIALED lport=41026 peer=127.0.0.1:19101
+[    5.136750] tbtun: tunnel 2 carrier 11 DIALED lport=41027 peer=127.0.0.1:19101
+[    5.138211] tbtun: tunnel 2 carrier 12 DIALED lport=41028 peer=127.0.0.1:19101
+[    5.139653] tbtun: tunnel 2 carrier 13 DIALED lport=41029 peer=127.0.0.1:19101
+[    5.141215] tbtun: tunnel 2 carrier 14 DIALED lport=41030 peer=127.0.0.1:19101
+[    5.142733] tbtun: tunnel 2 carrier 15 DIALED lport=41031 peer=127.0.0.1:19101
+[    5.155412] tbtun: tunnel 2 carrier 11 DIALED lport=41032 peer=127.0.0.1:19101
+[    5.156877] tbtun: tunnel 2 carrier 12 DIALED lport=41033 peer=127.0.0.1:19101
+[    5.158351] tbtun: tunnel 2 carrier 13 DIALED lport=41034 peer=127.0.0.1:19101
+[    5.159837] tbtun: tunnel 2 carrier 14 DIALED lport=41035 peer=127.0.0.1:19101
+[    5.161378] tbtun: tunnel 2 carrier 15 DIALED lport=41036 peer=127.0.0.1:19101
+[    6.131974] tbtun: tunnel 2 carrier 16 DIALED lport=41027 peer=127.0.0.1:19101
+[    6.133576] tbtun: tunnel 2 carrier 17 DIALED lport=41028 peer=127.0.0.1:19101
+[    6.135148] tbtun: tunnel 2 carrier 18 DIALED lport=41029 peer=127.0.0.1:19101
+[    6.136607] tbtun: tunnel 2 carrier 19 DIALED lport=41030 peer=127.0.0.1:19101
+[    6.138088] tbtun: tunnel 2 carrier 20 DIALED lport=41031 peer=127.0.0.1:19101
+[    6.139643] tbtun: tunnel 2 carrier 21 DIALED lport=41037 peer=127.0.0.1:19101
+[    6.141159] tbtun: tunnel 2 carrier 22 DIALED lport=41038 peer=127.0.0.1:19101
+[    6.142607] tbtun: tunnel 2 carrier 23 DIALED lport=41039 peer=127.0.0.1:19101
+[    6.154562] tbtun: tunnel 2 carrier 18 DIALED lport=41040 peer=127.0.0.1:19101
+[    6.156039] tbtun: tunnel 2 carrier 19 DIALED lport=41041 peer=127.0.0.1:19101
+[    6.157575] tbtun: tunnel 2 carrier 20 DIALED lport=41042 peer=127.0.0.1:19101
+[    6.159105] tbtun: tunnel 2 carrier 21 DIALED lport=41043 peer=127.0.0.1:19101
+[    6.160578] tbtun: tunnel 2 carrier 22 DIALED lport=41044 peer=127.0.0.1:19101
+[    6.162073] tbtun: tunnel 2 carrier 23 DIALED lport=41045 peer=127.0.0.1:19101
+[    6.174133] tbtun: tunnel 2 carrier 20 DIALED lport=41029 peer=127.0.0.1:19101
+[    6.175587] tbtun: tunnel 2 carrier 21 DIALED lport=41030 peer=127.0.0.1:19101
+[    6.177066] tbtun: tunnel 2 carrier 22 DIALED lport=41031 peer=127.0.0.1:19101
+[    6.178526] tbtun: tunnel 2 carrier 23 DIALED lport=41037 peer=127.0.0.1:19101
+[    7.132433] tbtun: tunnel 2 carrier 24 DIALED lport=41038 peer=127.0.0.1:19101
+[    7.133967] tbtun: tunnel 2 carrier 25 DIALED lport=41039 peer=127.0.0.1:19101
+[    7.135444] tbtun: tunnel 2 carrier 26 DIALED lport=41042 peer=127.0.0.1:19101
+[    7.136918] tbtun: tunnel 2 carrier 27 DIALED lport=41043 peer=127.0.0.1:19101
+[    7.138499] tbtun: tunnel 2 carrier 28 DIALED lport=41044 peer=127.0.0.1:19101
+[    7.140058] tbtun: tunnel 2 carrier 29 DIALED lport=41045 peer=127.0.0.1:19101
+[    7.141706] tbtun: tunnel 2 carrier 30 DIALED lport=41046 peer=127.0.0.1:19101
+[    7.143232] tbtun: tunnel 2 carrier 31 DIALED lport=41047 peer=127.0.0.1:19101
+[    7.155373] tbtun: tunnel 2 carrier 30 DIALED lport=41048 peer=127.0.0.1:19101
+[    7.156834] tbtun: tunnel 2 carrier 31 DIALED lport=41049 peer=127.0.0.1:19101
+[    7.610490] tbt_carrier_adopt: 3164 callbacks suppressed
+[    7.610496] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=52632, awaiting HELLO
+[    7.613602] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=52638, awaiting HELLO
+[    7.615258] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=52654, awaiting HELLO
+[    7.616832] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=52670, awaiting HELLO
+[    7.618410] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=52680, awaiting HELLO
+[    7.619952] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=52684, awaiting HELLO
+[    7.621685] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=52690, awaiting HELLO
+[    7.623334] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=52700, awaiting HELLO
+[    7.625206] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=52704, awaiting HELLO
+[    7.626751] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=52708, awaiting HELLO
+[    8.132972] tbtun: tunnel 2 carrier 32 DIALED lport=41046 peer=127.0.0.1:19101
+[    8.134550] tbtun: tunnel 2 carrier 33 DIALED lport=41047 peer=127.0.0.1:19101
+[    8.136079] tbtun: tunnel 2 carrier 34 DIALED lport=41050 peer=127.0.0.1:19101
+[    8.137565] tbtun: tunnel 2 carrier 35 DIALED lport=41051 peer=127.0.0.1:19101
+[    8.139044] tbtun: tunnel 2 carrier 36 DIALED lport=41052 peer=127.0.0.1:19101
+[    8.140528] tbtun: tunnel 2 carrier 37 DIALED lport=41053 peer=127.0.0.1:19101
+[    8.142116] tbtun: tunnel 2 carrier 38 DIALED lport=41054 peer=127.0.0.1:19101
+[    8.144028] tbtun: tunnel 2 carrier 39 DIALED lport=41055 peer=127.0.0.1:19101
+[    9.133622] tbtun: tunnel 2 carrier 40 DIALED lport=41056 peer=127.0.0.1:19101
+[    9.135324] tbtun: tunnel 2 carrier 41 DIALED lport=41057 peer=127.0.0.1:19101
+[    9.137005] tbtun: tunnel 2 carrier 42 DIALED lport=41058 peer=127.0.0.1:19101
+[    9.139320] tbtun: tunnel 2 carrier 43 DIALED lport=41059 peer=127.0.0.1:19101
+[    9.140929] tbtun: tunnel 2 carrier 44 DIALED lport=41060 peer=127.0.0.1:19101
+[    9.142546] tbtun: tunnel 2 carrier 45 DIALED lport=41061 peer=127.0.0.1:19101
+[    9.144046] tbtun: tunnel 2 carrier 46 DIALED lport=41062 peer=127.0.0.1:19101
+[    9.145580] tbtun: tunnel 2 carrier 47 DIALED lport=41063 peer=127.0.0.1:19101
+[    9.151002] tbt_http_bad: 4024 callbacks suppressed
+[    9.151005] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    9.151407] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    9.152027] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    9.155057] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    9.157572] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    9.160104] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    9.162675] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    9.165727] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    9.168003] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    9.176185] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[    9.186083] tbtun: tunnel 2 carrier 44 DIALED lport=41064 peer=127.0.0.1:19101
+[    9.187589] tbtun: tunnel 2 carrier 45 DIALED lport=41065 peer=127.0.0.1:19101
+[    9.189096] tbtun: tunnel 2 carrier 46 DIALED lport=41066 peer=127.0.0.1:19101
+[    9.190636] tbtun: tunnel 2 carrier 47 DIALED lport=41067 peer=127.0.0.1:19101
+[    9.755995] tbt_accept_one: 2332 callbacks suppressed
+[    9.756000] tbtun: tunnel 1 refused an incoming connection: -28
+[    9.758450] tbtun: tunnel 1 refused an incoming connection: -28
+[    9.759637] tbtun: tunnel 1 refused an incoming connection: -28
+[    9.760825] tbtun: tunnel 1 refused an incoming connection: -28
+[    9.770757] tbtun: tunnel 1 refused an incoming connection: -28
+[    9.772840] tbtun: tunnel 1 refused an incoming connection: -28
+[    9.776375] tbtun: tunnel 1 refused an incoming connection: -28
+[    9.777975] tbtun: tunnel 1 refused an incoming connection: -28
+[    9.779328] tbtun: tunnel 1 refused an incoming connection: -28
+[    9.780546] tbtun: tunnel 1 refused an incoming connection: -28
+[   10.135009] tbtun: tunnel 2 carrier 48 DIALED lport=41060 peer=127.0.0.1:19101
+[   10.136688] tbtun: tunnel 2 carrier 49 DIALED lport=41061 peer=127.0.0.1:19101
+[   10.139095] tbtun: tunnel 2 carrier 50 DIALED lport=41062 peer=127.0.0.1:19101
+[   10.140529] tbtun: tunnel 2 carrier 51 DIALED lport=41063 peer=127.0.0.1:19101
+[   10.142560] tbtun: tunnel 2 carrier 52 DIALED lport=41068 peer=127.0.0.1:19101
+[   10.144149] tbtun: tunnel 2 carrier 53 DIALED lport=41069 peer=127.0.0.1:19101
+[   10.145796] tbtun: tunnel 2 carrier 54 DIALED lport=41070 peer=127.0.0.1:19101
+[   10.147442] tbtun: tunnel 2 carrier 55 DIALED lport=41071 peer=127.0.0.1:19101
+[   10.161299] tbtun: tunnel 2 carrier 53 DIALED lport=41072 peer=127.0.0.1:19101
+[   10.162761] tbtun: tunnel 2 carrier 54 DIALED lport=41073 peer=127.0.0.1:19101
+[   10.164444] tbtun: tunnel 2 carrier 55 DIALED lport=41074 peer=127.0.0.1:19101
+[   11.134968] tbtun: tunnel 2 carrier 56 DIALED lport=41069 peer=127.0.0.1:19101
+[   11.136511] tbtun: tunnel 2 carrier 57 DIALED lport=41070 peer=127.0.0.1:19101
+[   11.138603] tbtun: tunnel 2 carrier 58 DIALED lport=41071 peer=127.0.0.1:19101
+[   11.140083] tbtun: tunnel 2 carrier 59 DIALED lport=41075 peer=127.0.0.1:19101
+[   11.141547] tbtun: tunnel 2 carrier 60 DIALED lport=41076 peer=127.0.0.1:19101
+[   11.142999] tbtun: tunnel 2 carrier 61 DIALED lport=41077 peer=127.0.0.1:19101
+[   11.144489] tbtun: tunnel 2 carrier 62 DIALED lport=41078 peer=127.0.0.1:19101
+[   11.145953] tbtun: tunnel 2 carrier 63 DIALED lport=41079 peer=127.0.0.1:19101
+[   11.159857] tbtun: tunnel 2 carrier 61 DIALED lport=41080 peer=127.0.0.1:19101
+[   11.161582] tbtun: tunnel 2 carrier 62 DIALED lport=41081 peer=127.0.0.1:19101
+[   11.163115] tbtun: tunnel 2 carrier 63 DIALED lport=41082 peer=127.0.0.1:19101
+[   12.135357] tbtun: tunnel 2 carrier 64 DIALED lport=41077 peer=127.0.0.1:19101
+[   12.136959] tbtun: tunnel 2 carrier 65 DIALED lport=41078 peer=127.0.0.1:19101
+[   12.138503] tbtun: tunnel 2 carrier 66 DIALED lport=41079 peer=127.0.0.1:19101
+[   12.140463] tbtun: tunnel 2 carrier 67 DIALED lport=41083 peer=127.0.0.1:19101
+[   12.142014] tbtun: tunnel 2 carrier 68 DIALED lport=41084 peer=127.0.0.1:19101
+[   12.143552] tbtun: tunnel 2 carrier 69 DIALED lport=41085 peer=127.0.0.1:19101
+[   12.145013] tbtun: tunnel 2 carrier 70 DIALED lport=41086 peer=127.0.0.1:19101
+[   12.146492] tbtun: tunnel 2 carrier 71 DIALED lport=41087 peer=127.0.0.1:19101
+[   12.615991] tbt_carrier_adopt: 3784 callbacks suppressed
+[   12.615996] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=51124, awaiting HELLO
+[   12.618720] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=51136, awaiting HELLO
+[   12.620295] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=51150, awaiting HELLO
+[   12.621896] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=51158, awaiting HELLO
+[   12.623492] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=51174, awaiting HELLO
+[   12.625046] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=51178, awaiting HELLO
+[   12.626724] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=51184, awaiting HELLO
+[   12.628303] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=51186, awaiting HELLO
+[   12.629818] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=51202, awaiting HELLO
+[   12.631390] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=51214, awaiting HELLO
+[   13.135740] tbtun: tunnel 2 carrier 72 DIALED lport=41088 peer=127.0.0.1:19101
+[   13.137280] tbtun: tunnel 2 carrier 73 DIALED lport=41089 peer=127.0.0.1:19101
+[   13.138747] tbtun: tunnel 2 carrier 74 DIALED lport=41090 peer=127.0.0.1:19101
+[   13.140462] tbtun: tunnel 2 carrier 75 DIALED lport=41091 peer=127.0.0.1:19101
+[   13.141985] tbtun: tunnel 2 carrier 76 DIALED lport=41092 peer=127.0.0.1:19101
+[   13.143468] tbtun: tunnel 2 carrier 77 DIALED lport=41093 peer=127.0.0.1:19101
+[   13.144932] tbtun: tunnel 2 carrier 78 DIALED lport=41094 peer=127.0.0.1:19101
+[   13.146498] tbtun: tunnel 2 carrier 79 DIALED lport=41095 peer=127.0.0.1:19101
+[   14.137676] tbtun: tunnel 2 carrier 80 DIALED lport=41096 peer=127.0.0.1:19101
+[   14.139298] tbtun: tunnel 2 carrier 81 DIALED lport=41097 peer=127.0.0.1:19101
+[   14.140749] tbtun: tunnel 2 carrier 82 DIALED lport=41098 peer=127.0.0.1:19101
+[   14.142217] tbtun: tunnel 2 carrier 83 DIALED lport=41099 peer=127.0.0.1:19101
+[   14.143682] tbtun: tunnel 2 carrier 84 DIALED lport=41100 peer=127.0.0.1:19101
+[   14.145138] tbtun: tunnel 2 carrier 85 DIALED lport=41101 peer=127.0.0.1:19101
+[   14.146619] tbtun: tunnel 2 carrier 86 DIALED lport=41102 peer=127.0.0.1:19101
+[   14.148111] tbtun: tunnel 2 carrier 87 DIALED lport=41103 peer=127.0.0.1:19101
+[   14.153070] tbt_http_bad: 3747 callbacks suppressed
+[   14.153073] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   14.155097] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   14.156693] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   14.161728] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   14.164444] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   14.167412] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   14.169952] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   14.172564] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   14.175277] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   14.177977] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   14.757083] tbt_accept_one: 2220 callbacks suppressed
+[   14.757088] tbtun: tunnel 1 refused an incoming connection: -28
+[   14.759559] tbtun: tunnel 1 refused an incoming connection: -28
+[   14.774353] tbtun: tunnel 1 refused an incoming connection: -28
+[   14.775585] tbtun: tunnel 1 refused an incoming connection: -28
+[   14.776794] tbtun: tunnel 1 refused an incoming connection: -28
+[   14.778003] tbtun: tunnel 1 refused an incoming connection: -28
+[   14.779308] tbtun: tunnel 1 refused an incoming connection: -28
+[   14.780507] tbtun: tunnel 1 refused an incoming connection: -28
+[   14.788962] tbtun: tunnel 1 refused an incoming connection: -28
+[   14.790139] tbtun: tunnel 1 refused an incoming connection: -28
+[   15.140553] tbtun: tunnel 2 carrier 88 DIALED lport=41104 peer=127.0.0.1:19101
+[   15.142138] tbtun: tunnel 2 carrier 89 DIALED lport=41105 peer=127.0.0.1:19101
+[   15.143618] tbtun: tunnel 2 carrier 90 DIALED lport=41106 peer=127.0.0.1:19101
+[   15.146019] tbtun: tunnel 2 carrier 91 DIALED lport=41107 peer=127.0.0.1:19101
+[   15.147521] tbtun: tunnel 2 carrier 92 DIALED lport=41108 peer=127.0.0.1:19101
+[   15.149046] tbtun: tunnel 2 carrier 93 DIALED lport=41109 peer=127.0.0.1:19101
+[   15.150521] tbtun: tunnel 2 carrier 94 DIALED lport=41110 peer=127.0.0.1:19101
+[   15.151979] tbtun: tunnel 2 carrier 95 DIALED lport=41111 peer=127.0.0.1:19101
+[   15.163616] tbtun: tunnel 2 carrier 88 DIALED lport=41112 peer=127.0.0.1:19101
+[   15.165144] tbtun: tunnel 2 carrier 89 DIALED lport=41113 peer=127.0.0.1:19101
+[   15.166646] tbtun: tunnel 2 carrier 90 DIALED lport=41114 peer=127.0.0.1:19101
+[   15.168112] tbtun: tunnel 2 carrier 91 DIALED lport=41115 peer=127.0.0.1:19101
+[   15.169592] tbtun: tunnel 2 carrier 92 DIALED lport=41116 peer=127.0.0.1:19101
+[   15.171038] tbtun: tunnel 2 carrier 93 DIALED lport=41117 peer=127.0.0.1:19101
+[   15.172512] tbtun: tunnel 2 carrier 94 DIALED lport=41118 peer=127.0.0.1:19101
+[   15.173968] tbtun: tunnel 2 carrier 95 DIALED lport=41119 peer=127.0.0.1:19101
+[   15.189153] tbtun: tunnel 2 carrier 92 DIALED lport=41104 peer=127.0.0.1:19101
+[   15.190664] tbtun: tunnel 2 carrier 93 DIALED lport=41105 peer=127.0.0.1:19101
+[   15.192169] tbtun: tunnel 2 carrier 94 DIALED lport=41106 peer=127.0.0.1:19101
+[   15.193834] tbtun: tunnel 2 carrier 95 DIALED lport=41107 peer=127.0.0.1:19101
+[   15.205370] tbtun: tunnel 2 carrier 93 DIALED lport=41108 peer=127.0.0.1:19101
+[   15.206842] tbtun: tunnel 2 carrier 94 DIALED lport=41109 peer=127.0.0.1:19101
+[   15.208322] tbtun: tunnel 2 carrier 95 DIALED lport=41110 peer=127.0.0.1:19101
+[   17.617329] tbt_carrier_adopt: 3762 callbacks suppressed
+[   17.617333] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=60966, awaiting HELLO
+[   17.620005] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=60970, awaiting HELLO
+[   17.621597] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=60972, awaiting HELLO
+[   17.623156] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=60988, awaiting HELLO
+[   17.624729] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=60994, awaiting HELLO
+[   17.626310] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=32772, awaiting HELLO
+[   17.627938] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=32786, awaiting HELLO
+[   17.629701] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=32790, awaiting HELLO
+[   17.631291] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=32806, awaiting HELLO
+[   17.633091] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=32818, awaiting HELLO
+[   19.154702] tbt_http_bad: 3747 callbacks suppressed
+[   19.154706] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   19.157909] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   19.159318] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   19.161946] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   19.165597] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   19.168011] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   19.170498] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   19.172917] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   19.176243] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   19.178595] tbtun: tunnel 1 carrier 255 http request header proto: hdr_have=63 hdr_done=0 req_done=0 have=0 chunk_state=0 chunk_size=0 rec_len=0
+[   19.758392] tbt_accept_one: 2271 callbacks suppressed
+[   19.758398] tbtun: tunnel 1 refused an incoming connection: -28
+[   19.761039] tbtun: tunnel 1 refused an incoming connection: -28
+[   19.762222] tbtun: tunnel 1 refused an incoming connection: -28
+[   19.763414] tbtun: tunnel 1 refused an incoming connection: -28
+[   19.764595] tbtun: tunnel 1 refused an incoming connection: -28
+[   19.765792] tbtun: tunnel 1 refused an incoming connection: -28
+[   19.766978] tbtun: tunnel 1 refused an incoming connection: -28
+[   19.768171] tbtun: tunnel 1 refused an incoming connection: -28
+[   19.776953] tbtun: tunnel 1 refused an incoming connection: -28
+[   19.778416] tbtun: tunnel 1 refused an incoming connection: -28
+[   22.618649] tbt_carrier_adopt: 3754 callbacks suppressed
+[   22.618653] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=58978, awaiting HELLO
+[   22.621273] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=58980, awaiting HELLO
+[   22.622821] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=58994, awaiting HELLO
+[   22.624350] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=59006, awaiting HELLO
+[   22.625885] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=59012, awaiting HELLO
+[   22.627414] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=59024, awaiting HELLO
+[   22.629166] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=59030, awaiting HELLO
+[   22.630996] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=59036, awaiting HELLO
+[   22.632686] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=59044, awaiting HELLO
+[   22.634338] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=59050, awaiting HELLO
+flood: 64 children, 64 joined, 20s
+   heartbeats: 200 (want >= 160)
+   prov: now=0 peak=320 reject=8780
+[   25.245366] tbtun: tunnel 2 carrier 0 DIALED lport=41105 peer=127.0.0.1:19101
+   near up after recovery: 255
+== probe Q: pass
+TBT_PROBE_RESULT Q PASS
+TBT_TEST_PASS
+punt!
+[   25.273426] ACPI: PM: Preparing to enter system sleep state S5
+[   25.274661] reboot: Power down

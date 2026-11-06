@@ -32,6 +32,10 @@
 #   P. one small write and one reply with the socket still open: 37 B, the two
 #      packet boundaries, 64 KiB and 256 KiB, the same 37 B with crypto on, two
 #      connections in one session, and a real HTTP request/response handshake.
+#   Q. the HND0 hang shape: 256 carriers plus a connect flood that never
+#      completes HELLO, with replacement waves. The far's provisional list must
+#      stay bounded and drain, userspace must keep running, and a legitimate
+#      replacement must still join after the flood.
 # J and K are byte-exactness probes under carrier-TCP loss; they need no
 # placeholder frame, because the sender repairs holes from the replay ring.
 #
@@ -1198,6 +1202,105 @@ probe_n() {
     echo "== probe N: pass"
 }
 
+# --- probe Q: 256-carrier accept/replace flood -------------------------------
+# The far side must survive a peer that opens connections and never completes
+# HELLO. HND0 accepted 10138 such carriers in 30 s; the provisional list had no
+# bound and tbt_replace_work re-walked the whole graveyard on every pass, so
+# each pass was slower than the last and the host stopped responding. This
+# probe floods the far listener while taking carrier slots down in waves, then
+# requires the provisional list to drain and a legitimate replacement to join.
+Q_CONNS=${TBT_Q_CONNS:-64}
+Q_SECS=${TBT_Q_SECS:-20}
+Q_WAVES=${TBT_Q_WAVES:-12}
+
+probe_q() {
+    echo "== probe Q: 256-carrier accept/replace flood"
+    flush_and_wait
+    restart_echo
+    echo 'ports 41024-41535' > "$PORTS" || fail "probe Q: ports directive rejected"
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=4 m=4 fec=on mode=grouped carriers=$N_CARRIERS" \
+        > "$CFG" || fail "probe Q: far tunnel rejected"
+    echo "tunnel 2 role=near profile=http-kal listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=4 m=4 fec=on mode=grouped carriers=$N_CARRIERS" \
+        > "$CFG" || fail "probe Q: near tunnel rejected"
+    _settle=0
+    while [ "$_settle" -lt 40 ]; do
+        if [ "$(tunnel_stat 1 up)" = "$N_CARRIERS" ] && [ "$(tunnel_stat 2 up)" = "$N_CARRIERS" ]; then
+            break
+        fi
+        sleep 0.5
+        _settle=$((_settle + 1))
+    done
+    [ "$(tunnel_stat 1 up)" = "$N_CARRIERS" ] || fail "probe Q: far carriers did not all come up"
+    [ "$(tunnel_stat 2 up)" = "$N_CARRIERS" ] || fail "probe Q: near carriers did not all come up"
+    dmesg -c > /dev/null 2>&1 || true
+    : > /tmp/hb
+    (
+        _h=0
+        while [ "$_h" -lt $((Q_SECS * 10)) ]; do
+            echo x >> /tmp/hb
+            usleep 100000
+            _h=$((_h + 1))
+        done
+    ) &
+    _hb=$!
+    /bin/tbt_flood 127.0.0.1 "$CAR_PORT" "$Q_CONNS" "$Q_SECS" &
+    _fp=$!
+    _w=0
+    while [ "$_w" -lt "$Q_WAVES" ]; do
+        _i=0
+        while [ "$_i" -lt 8 ]; do
+            echo "carrier $(( (_w * 8 + _i) % N_CARRIERS )) down" > "$PEERS" 2> /dev/null
+            _i=$((_i + 1))
+        done
+        sleep 1
+        _w=$((_w + 1))
+    done
+    wait "$_fp" || fail "probe Q: flood failed"
+    kill "$_hb" 2> /dev/null
+    _hb_n=$(wc -l < /tmp/hb)
+    _want_hb=$((Q_SECS * 8))
+    echo "   heartbeats: $_hb_n (want >= $_want_hb)"
+    [ "$_hb_n" -ge "$_want_hb" ] || fail "probe Q: userspace starved during the flood"
+    # Let the last provisional carriers expire, then require the list to
+    # drain. Poll instead of a fixed sleep: the last connections are accepted
+    # just before the flood stops and carry a fresh 5 s join deadline.
+    _d=0
+    while [ "$_d" -lt 15 ]; do
+        _prov=$(stat_max prov_now)
+        [ "${_prov:-0}" -le 16 ] && break
+        sleep 1
+        _d=$((_d + 1))
+    done
+    _prov=$(stat_max prov_now)
+    _peak=$(stat_max prov_peak)
+    _rej=$(stat_sum prov_reject)
+    _cap=$((N_CARRIERS + N_CARRIERS / 4))
+    echo "   prov: now=${_prov:-?} peak=${_peak:-?} reject=${_rej:-?}"
+    [ "${_peak:-0}" -le "$_cap" ] || fail "probe Q: provisional peak $_peak exceeded the cap $_cap"
+    [ "${_rej:-0}" -gt 0 ] || fail "probe Q: the flood never hit the provisional cap"
+    [ "${_prov:-0}" -le 16 ] || fail "probe Q: $_prov provisional carriers did not drain"
+    # A legitimate replacement must still join after the flood.
+    echo 'carrier 0 down' > "$PEERS" || fail "probe Q: carrier 0 down rejected"
+    _r=0
+    while [ "$_r" -lt 20 ]; do
+        if [ "$(tunnel_stat 2 up)" -ge $((N_CARRIERS - 16)) ]; then
+            break
+        fi
+        sleep 0.5
+        _r=$((_r + 1))
+    done
+    _up=$(tunnel_stat 2 up)
+    echo "   near up after recovery: ${_up:-?}"
+    [ "${_up:-0}" -ge $((N_CARRIERS - 16)) ] || fail "probe Q: near did not recover after the flood"
+    _bad=$(dmesg 2> /dev/null | grep -E 'BUG:|WARNING:|Call Trace|blocked for more|soft lockup|hard LOCKUP|RCU Stall|refcount_t|KASAN|UBSAN' | head -n 20)
+    if [ -n "$_bad" ]; then
+        printf '%s\n' "$_bad"
+        echo "   stats:"; cat /proc/net/tbtun/stats
+        fail "probe Q: kernel log after the flood"
+    fi
+    echo "== probe Q: pass"
+}
+
 
 # --- probe O: FEC v6 grouped over HTTP with crypto ---------------------------
 # T5.2: the WAN smoke (n=1 m=1 fec=on mode=grouped carriers=2 profile=http-kal
@@ -1555,6 +1658,7 @@ want M && run_probe M
 want N && run_probe N
 want O && run_probe O
 want P && run_probe P
+want Q && run_probe Q
 
 echo 'flush' > "$CFG" 2> /dev/null || true
 for _p in "$echo_pid" "${echo2_pid:-}" "${echo3_pid:-}"; do
