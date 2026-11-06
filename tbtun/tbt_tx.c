@@ -121,7 +121,7 @@ static struct tbt_retain *tbt_retain_alloc(u16 len, gfp_t gfp)
 {
     struct tbt_retain *r;
 
-    r = kmalloc(struct_size(r, data, len), gfp);
+    r = kzalloc(struct_size(r, data, len), gfp);
     if (!r)
         return NULL;
     INIT_LIST_HEAD(&r->list);
