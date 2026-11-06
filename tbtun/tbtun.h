@@ -674,12 +674,14 @@ struct tbt_session
     struct delayed_work w_replace; /* dials replacements for dead carriers;
                                     * delayed so a bounded pass can defer the
                                     * rest without spinning */
-    /* Replacement dial pacing. tbt_carriers_start() dials the first wave
-     * unpaced; only replacements spend these tokens, so losing every carrier
-     * cannot turn into a connect storm. w_replace is the only writer. */
+    /* Dial pacing for every connect: the first wave (the poll's retry of a
+     * never-connected carrier), replacements and failed-connect retries all
+     * spend these tokens, so neither a session start nor losing every carrier
+     * can turn into a connect storm. tbt_carriers_start() seeds the bucket;
+     * tbt_dial_take() is the only writer under dial_lock. */
     u32 dial_tokens;
     u64 dial_refill_ns;
-    spinlock_t dial_lock;  /* tbt_dial_take(): w_replace and the poll */
+    spinlock_t dial_lock;  /* tbt_dial_take(): w_replace, the poll, start */
     struct delayed_work w_fbk;    /* feedback tick and retransmit timer */
     struct delayed_work w_reap;   /* P1: tombstone sweeper */
     struct delayed_work w_pending; /* P1: starts one queued public socket */
