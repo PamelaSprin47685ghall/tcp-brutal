@@ -89,6 +89,9 @@ typedef struct {
     int n_data;
     int n_par;
     int n_chk;
+    int n_base;   /* base check supernodes, ACC termination */
+    int m;        /* lifting factor = block/q */
+    int n_extra;  /* extra check nodes at rate < 0.50 */
     long edges;
     int dc_max;
     const int *voff; /* n + 1 */

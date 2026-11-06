@@ -44,6 +44,7 @@ struct sc_bs {
     int batch;
     int groups;
     int planes;
+    int fixed_deg; /* var_range matches voff; false for rate < 0.50 */
     size_t stride;
 
     uint64_t *unk;     /* n * groups */
@@ -63,6 +64,8 @@ struct sc_bs {
     double t_init, t_wave, t_unres, t_out;
 #endif
 };
+
+static inline void var_range(const sc_graph *g, int v, int *k0, int *k1);
 
 /* ------------------------------------------------------------------ */
 /* bit-matrix transpose (Hacker's Delight, 64x64, in place)            */
@@ -179,6 +182,18 @@ sc_bs *sc_bs_new(sc_code *c, int batch, char *err, size_t errlen)
     }
     bs->c = c;
     bs->g = g;
+    {
+        int vv;
+        bs->fixed_deg = 1;
+        for (vv = 0; vv < g.n; vv++) {
+            int k0, k1;
+            var_range(&g, vv, &k0, &k1);
+            if (k0 != g.voff[vv] || k1 != g.voff[vv + 1]) {
+                bs->fixed_deg = 0;
+                break;
+            }
+        }
+    }
     bs->batch = batch;
     bs->groups = batch / BS_GROUP;
     bs->planes = g.dc_max <= 7 ? 3 : (g.dc_max <= 15 ? 4 : 5);
@@ -346,6 +361,31 @@ static void store_tail(uint8_t *dst, size_t stride, const uint64_t *src,
 /* ------------------------------------------------------------------ */
 
 /*
+ * ACC variable adjacency is fixed: 5 edges per payload variable, 2 per
+ * base parity variable (1 in the last coupling block), 1 per extra parity
+ * variable.  The construction lays the variable side out in exactly this
+ * order, so the range can be computed without voff[].  sc_bs_new validates
+ * it once; rate < 0.50 adds extra payload edges and falls back to voff.
+ */
+static inline void var_range(const sc_graph *g, int v, int *k0, int *k1)
+{
+    if (v < g->n_data) {
+        *k0 = v * 5;
+        *k1 = *k0 + 5;
+    } else {
+        int p = v - g->n_data;
+        int two = (g->n_base - 1) * g->m;
+        if (p < two) {
+            *k0 = g->n_data * 5 + p * 2;
+            *k1 = *k0 + 2;
+        } else {
+            *k0 = g->n_data * 5 + two * 2 + (p - two);
+            *k1 = *k0 + 1;
+        }
+    }
+}
+
+/*
  * One touched variable: publish its resolved bits, then decrement every
  * incident check and re-derive the "exactly one unknown" mask.  P fixes the
  * counter width so the carry chain is fully unrolled.
@@ -361,13 +401,19 @@ static void propagate_##P(sc_bs *bs, int v, const uint64_t *rv,              \
     uint64_t *xr = bs->xr;                                                   \
     uint64_t *act = bs->act;                                                 \
     uint64_t *cnt = bs->cnt;                                                 \
-    int k, gg;                                                               \
+    int k, k0, k1, gg;                                                       \
+    if (bs->fixed_deg)                                                       \
+        var_range(g, v, &k0, &k1);                                           \
+    else {                                                                   \
+        k0 = g->voff[v];                                                     \
+        k1 = g->voff[v + 1];                                                 \
+    }                                                                        \
     for (gg = 0; gg < groups; gg++) {                                        \
         val[(size_t)v * groups + gg] |= vb[gg];                              \
         unk[(size_t)v * groups + gg] &= ~rv[gg];                             \
     }                                                                        \
     bs->st.var_resolves++;                                                   \
-    for (k = g->voff[v]; k < g->voff[v + 1]; k++) {                          \
+    for (k = k0; k < k1; k++) {                                              \
         int c2 = g->vadj[k];                                                 \
         uint64_t *xp2 = &xr[(size_t)c2 * groups];                            \
         uint64_t *ap2 = &act[(size_t)c2 * groups];                           \
@@ -612,11 +658,14 @@ long sc_decode_bs(sc_bs *bs, const uint8_t *bits, const uint8_t *erased,
 #endif
 
     /* ---- output transpose --------------------------------------- */
-    memset(out, 0, (size_t)bs->batch * stride);
-    for (v0 = 0; v0 + BS_GROUP <= n; v0 += BS_GROUP)
-        store_block(out, stride, val, groups, v0, rows);
-    if (v0 < n)
-        store_tail(out, stride, val, groups, n, v0);
+    {
+        int out_n = target_data_only ? g->n_data : n;
+        memset(out, 0, (size_t)bs->batch * stride);
+        for (v0 = 0; v0 + BS_GROUP <= out_n; v0 += BS_GROUP)
+            store_block(out, stride, val, groups, v0, rows);
+        if (v0 < out_n)
+            store_tail(out, stride, val, groups, out_n, v0);
+    }
 
 #ifdef BS_TIMING
     bs->t_out += bs_now() - t0;

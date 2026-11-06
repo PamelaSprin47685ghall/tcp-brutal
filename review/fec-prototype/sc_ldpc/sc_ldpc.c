@@ -188,6 +188,9 @@ void sc_get_graph(const sc_code *c, sc_graph *out)
     out->n_data = c->n_data;
     out->n_par = c->n_par;
     out->n_chk = c->n_chk;
+    out->n_base = c->n_base;
+    out->m = c->m;
+    out->n_extra = c->n_extra;
     out->edges = c->edges;
     out->dc_max = c->dc_max;
     out->voff = c->voff;

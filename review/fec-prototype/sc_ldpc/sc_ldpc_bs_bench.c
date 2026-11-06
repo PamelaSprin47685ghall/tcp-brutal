@@ -260,6 +260,7 @@ static recov check_recovery(batch_ctx *b, sc_bs *bs, int batches)
     recov r;
     int bi, j, v;
     int n = b->in.n;
+    int lim = b->in.n_data; /* sc_decode_bs is called with target_data_only */
 
     memset(&r, 0, sizeof(r));
     for (bi = 0; bi < batches; bi++) {
@@ -279,7 +280,7 @@ static recov check_recovery(batch_ctx *b, sc_bs *bs, int batches)
                 r.full_scalar++;
             if (b->unres[j] == 0)
                 r.full_bs++;
-            for (v = 0; v < n; v++)
+            for (v = 0; v < lim; v++)
                 if (bit_of(pj, v) != b->out[v]) {
                     r.mismatch++;
                     break;

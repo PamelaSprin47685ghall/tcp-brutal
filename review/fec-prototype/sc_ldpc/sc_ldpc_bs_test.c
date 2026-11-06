@@ -46,7 +46,8 @@ static int bit_at(const uint8_t *p, int v)
 }
 
 static int run_case(int block, int L, int rate_pct, int p_mil, int model,
-                    int batch, int trials, uint64_t seed, int verbose)
+                    int batch, int trials, uint64_t seed, int full_out,
+                    int verbose)
 {
     sc_params par;
     sc_code *c;
@@ -129,7 +130,8 @@ static int run_case(int block, int L, int rate_pct, int p_mil, int model,
             break;
 
         recovered = sc_decode_bs(bs, pbits, pmask, pout,
-                                 model == SC_MODEL_SYSTEMATIC, unres_bs);
+                                 (model == SC_MODEL_SYSTEMATIC) && !full_out,
+                                 unres_bs);
         if (recovered < 0 || recovered > batch) {
             fprintf(stderr, "bad recovered count %ld\n", recovered);
             bad = 1;
@@ -144,7 +146,7 @@ static int run_case(int block, int L, int rate_pct, int p_mil, int model,
                 mask[v] = bit_at(pmask + (size_t)j * stride, v);
             }
             st = sc_decode(c, recv, mask, out_scalar,
-                           model == SC_MODEL_SYSTEMATIC);
+                           (model == SC_MODEL_SYSTEMATIC) && !full_out);
             if (st.unresolved != unres_bs[j]) {
                 fprintf(stderr,
                         "case b%d L%d r%d p%d m%d t%d cw%d: unresolved "
@@ -154,7 +156,11 @@ static int run_case(int block, int L, int rate_pct, int p_mil, int model,
                 bad = 1;
                 break;
             }
-            for (v = 0; v < in.n; v++) {
+            {
+                int lim = ((model == SC_MODEL_SYSTEMATIC) && !full_out)
+                              ? in.n_data
+                              : in.n;
+            for (v = 0; v < lim; v++) {
                 int got = bit_at(pj, v);
                 if (got != out_scalar[v]) {
                     fprintf(stderr,
@@ -165,6 +171,7 @@ static int run_case(int block, int L, int rate_pct, int p_mil, int model,
                     bad = 1;
                     break;
                 }
+            }
             }
         }
     }
@@ -201,37 +208,38 @@ int main(int argc, char **argv)
             verbose = 1;
 
     /* Small codes, both channel models, all-zero and random codewords. */
-    failures += run_case(16, 2, 50, 100, SC_MODEL_SYMMETRIC, 64, 200, 1, verbose);
-    failures += run_case(16, 4, 50, 300, SC_MODEL_SYMMETRIC, 64, 200, 2, verbose);
-    failures += run_case(32, 4, 50, 300, SC_MODEL_SYMMETRIC, 64, 200, 3, verbose);
-    failures += run_case(32, 4, 50, 300, SC_MODEL_SYSTEMATIC, 64, 200, 4, verbose);
-    failures += run_case(64, 8, 50, 300, SC_MODEL_SYMMETRIC, 64, 200, 5, verbose);
-    failures += run_case(64, 8, 50, 300, SC_MODEL_SYSTEMATIC, 64, 200, 6, verbose);
+    failures += run_case(16, 2, 50, 100, SC_MODEL_SYMMETRIC, 64, 200, 1, 0, verbose);
+    failures += run_case(16, 4, 50, 300, SC_MODEL_SYMMETRIC, 64, 200, 2, 0, verbose);
+    failures += run_case(32, 4, 50, 300, SC_MODEL_SYMMETRIC, 64, 200, 3, 0, verbose);
+    failures += run_case(32, 4, 50, 300, SC_MODEL_SYSTEMATIC, 64, 200, 4, 0, verbose);
+    failures += run_case(64, 8, 50, 300, SC_MODEL_SYMMETRIC, 64, 200, 5, 0, verbose);
+    failures += run_case(64, 8, 50, 300, SC_MODEL_SYSTEMATIC, 64, 200, 6, 0, verbose);
 
     /* Production sizes. */
-    failures += run_case(256, 8, 50, 300, SC_MODEL_SYMMETRIC, 64, 40, 7, verbose);
-    failures += run_case(256, 16, 50, 300, SC_MODEL_SYMMETRIC, 64, 40, 8, verbose);
-    failures += run_case(256, 16, 50, 300, SC_MODEL_SYSTEMATIC, 64, 40, 9, verbose);
-    failures += run_case(256, 16, 60, 300, SC_MODEL_SYMMETRIC, 64, 40, 10, verbose);
-    failures += run_case(256, 16, 70, 200, SC_MODEL_SYMMETRIC, 64, 40, 11, verbose);
-    failures += run_case(256, 16, 70, 300, SC_MODEL_SYMMETRIC, 64, 40, 12, verbose);
-    failures += run_case(512, 16, 50, 300, SC_MODEL_SYMMETRIC, 64, 20, 13, verbose);
-    failures += run_case(512, 16, 60, 300, SC_MODEL_SYMMETRIC, 64, 20, 14, verbose);
+    failures += run_case(256, 8, 50, 300, SC_MODEL_SYMMETRIC, 64, 40, 7, 0, verbose);
+    failures += run_case(256, 16, 50, 300, SC_MODEL_SYMMETRIC, 64, 40, 8, 0, verbose);
+    failures += run_case(256, 16, 50, 300, SC_MODEL_SYSTEMATIC, 64, 40, 9, 0, verbose);
+    failures += run_case(256, 16, 50, 300, SC_MODEL_SYSTEMATIC, 64, 40, 90, 1, verbose);
+    failures += run_case(256, 16, 60, 300, SC_MODEL_SYMMETRIC, 64, 40, 10, 0, verbose);
+    failures += run_case(256, 16, 70, 200, SC_MODEL_SYMMETRIC, 64, 40, 11, 0, verbose);
+    failures += run_case(256, 16, 70, 300, SC_MODEL_SYMMETRIC, 64, 40, 12, 0, verbose);
+    failures += run_case(512, 16, 50, 300, SC_MODEL_SYMMETRIC, 64, 20, 13, 0, verbose);
+    failures += run_case(512, 16, 60, 300, SC_MODEL_SYMMETRIC, 64, 20, 14, 0, verbose);
 
     /* Batch widths: 64, 128, 256, 512. */
-    failures += run_case(256, 16, 50, 300, SC_MODEL_SYMMETRIC, 128, 20, 15, verbose);
-    failures += run_case(256, 16, 50, 300, SC_MODEL_SYMMETRIC, 256, 10, 16, verbose);
-    failures += run_case(256, 16, 50, 300, SC_MODEL_SYMMETRIC, 512, 10, 17, verbose);
+    failures += run_case(256, 16, 50, 300, SC_MODEL_SYMMETRIC, 128, 20, 15, 0, verbose);
+    failures += run_case(256, 16, 50, 300, SC_MODEL_SYMMETRIC, 256, 10, 16, 0, verbose);
+    failures += run_case(256, 16, 50, 300, SC_MODEL_SYMMETRIC, 512, 10, 17, 0, verbose);
 
     /* Rates below 0.50 use extra check nodes. */
-    failures += run_case(256, 16, 40, 400, SC_MODEL_SYMMETRIC, 64, 40, 20, verbose);
-    failures += run_case(256, 16, 30, 500, SC_MODEL_SYMMETRIC, 64, 40, 21, verbose);
-    failures += run_case(256, 16, 25, 500, SC_MODEL_SYMMETRIC, 64, 40, 22, verbose);
-    failures += run_case(512, 16, 40, 400, SC_MODEL_SYMMETRIC, 64, 20, 23, verbose);
+    failures += run_case(256, 16, 40, 400, SC_MODEL_SYMMETRIC, 64, 40, 20, 0, verbose);
+    failures += run_case(256, 16, 30, 500, SC_MODEL_SYMMETRIC, 64, 40, 21, 0, verbose);
+    failures += run_case(256, 16, 25, 500, SC_MODEL_SYMMETRIC, 64, 40, 22, 0, verbose);
+    failures += run_case(512, 16, 40, 400, SC_MODEL_SYMMETRIC, 64, 20, 23, 0, verbose);
 
     /* Rate 0.70 with the smallest coupling, where the check degree is high. */
-    failures += run_case(256, 8, 70, 200, SC_MODEL_SYMMETRIC, 64, 40, 18, verbose);
-    failures += run_case(512, 8, 70, 200, SC_MODEL_SYMMETRIC, 64, 20, 19, verbose);
+    failures += run_case(256, 8, 70, 200, SC_MODEL_SYMMETRIC, 64, 40, 18, 0, verbose);
+    failures += run_case(512, 8, 70, 200, SC_MODEL_SYMMETRIC, 64, 20, 19, 0, verbose);
 
     if (failures)
         printf("RESULT: FAIL (%d cases)\n", failures);
