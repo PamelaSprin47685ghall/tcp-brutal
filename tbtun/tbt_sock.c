@@ -588,6 +588,21 @@ static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
         spin_unlock(&sess->lock);
         return -EBUSY;
     }
+    /* The FEC v6 data plane names one stream per session (`far_sid`) and a FEC
+     * record carries no stream id, so a second live stream has its bytes
+     * delivered to whichever stream is current. A two-connection protocol
+     * (iperf3's control connection plus its data connection) then reads the
+     * other connection's bytes and its handshake dies -- measured on the WAN
+     * smoke: the near's control connection sent 167 bytes, the far acknowledged
+     * 37, and iperf3 -s failed its own cookie read. Refuse the second stream
+     * instead of corrupting the first: the application sees a reset, and the
+     * counter says why. */
+    if (sess->fec && tbt_session_fec_stream_live(sess))
+    {
+        spin_unlock(&sess->lock);
+        atomic64_inc(&sess->fec_stream_refused);
+        return -EOPNOTSUPP;
+    }
     sid = ((u64)(sess->sid_prefix & 0xffff) << 24) |
           (sess->next_sid & 0xffffff);
     sess->next_sid++;
@@ -650,6 +665,21 @@ void tbt_pending_work(struct work_struct *w)
         }
 
         err = tbt_stream_start_now(sess, sock);
+        if (err == -EOPNOTSUPP)
+        {
+            /* The FEC data plane already carries a live stream and a FEC record
+             * cannot name a second one. Reset this connection now: queueing it
+             * until the first closes would hang a two-connection protocol
+             * (iperf3's data connection waiting for a control connection that
+             * waits for the test), and accepting it would deliver its bytes to
+             * the first stream. */
+            kfree(p);
+            if (sock->sk)
+                tbt_sk_ops_restore(sock->sk, &sess->def_ops);
+            tbt_sock_abort_on_close(sock);
+            sock_release(sock);
+            continue;
+        }
         if (err == -EBUSY)
         {
             /* The old stream's gate has not cleared yet; keep the accepted

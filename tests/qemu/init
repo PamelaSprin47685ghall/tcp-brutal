@@ -1464,6 +1464,42 @@ probe_p_two() {
     echo "   two: both connections crossed"
 }
 
+# Two live connections in one session: iperf3's shape (a control connection
+# that stays open while the data connection runs). The FEC v6 data plane names
+# one stream per session (`far_sid`), so this is the case it cannot carry; the
+# probe exists to make that visible in one run instead of on the WAN.
+probe_p_concurrent() {
+    echo "   concurrent: a second connection while the first is still open"
+    flush_and_wait
+    restart_echo
+    echo 'ports 41088-41119' > "$PORTS" || fail "probe P: ports directive rejected"
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 $P_CFG" \
+        > "$CFG" || fail "probe P: far tunnel rejected (concurrent)"
+    echo "tunnel 2 role=near profile=http-kal listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT $P_CFG" \
+        > "$CFG" || fail "probe P: near tunnel rejected (concurrent)"
+    sleep 1
+    /bin/tbt_ping 127.0.0.1 "$PUB_PORT" 37 5 6000 &
+    _hold=$!
+    sleep 2
+    # The second connection must be refused, not merged into the first: the
+    # application sees a reset and the counter says why. Anything else would
+    # deliver one connection's bytes to the other (iperf3's control connection
+    # reading its data connection).
+    probe_ping_bounded "probe P concurrent second" 65536 6
+    _rc2=$?
+    _ref=$(tunnel_stat 2 fec_stream_refused)
+    wait "$_hold"
+    _rc1=$?
+    echo "   concurrent: first rc=$_rc1 (held open) second rc=$_rc2 refused=$_ref"
+    [ "$_rc1" -eq 0 ] || fail "probe P concurrent: the held connection failed while the second was attempted"
+    [ "$_rc2" -ne 0 ] || fail "probe P concurrent: the second connection was accepted while the first was live (the FEC plane names one stream)"
+    [ "${_ref:-0}" -ge 1 ] || fail "probe P concurrent: fec_stream_refused is ${_ref:-0}, expected at least 1"
+    # After the held connection closes, the session must accept the next one.
+    probe_ping_bounded "probe P concurrent after" 65536 15 ||
+        fail "probe P concurrent: the session did not accept a new connection after the held one closed"
+    echo "   concurrent: the next connection was accepted"
+}
+
 probe_p() {
     echo "== probe P: small message round trip, socket left open"
     _bad=0
@@ -1477,6 +1513,7 @@ probe_p() {
     probe_p_one 37 "$P_CFG_CRYPTO" ||
         fail "probe P: 37 bytes did not come back with crypto=on"
     probe_p_two
+    probe_p_concurrent
     probe_p_http
     echo "== probe P: pass"
 }

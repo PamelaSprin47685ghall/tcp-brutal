@@ -71,6 +71,16 @@ and moves independently of the module version.
 
 ### Fixed
 
+- A second live stream in a `fec=on` session is refused instead of corrupting
+  the first. The FEC record carries no stream id and the plane names one stream
+  (`far_sid`), so two live streams had their bytes delivered to whichever was
+  current: on the WAN smoke the near's control connection sent 167 bytes, the
+  far acknowledged 37, iperf3's server failed its own cookie read with "Bad
+  file descriptor" and the client idled out after 114 s. The near now resets the
+  second connection (`fec_stream_refused`) and the first keeps its bytes. A
+  two-connection protocol (iperf3) therefore cannot run over `fec=on`; a
+  single-connection load tool is unaffected. A multi-stream FEC plane needs a
+  stream tag in the record, which the frozen header does not have.
 - The FEC v6 packetizer held a partial packet until 8192 bytes arrived, so an
   application that writes a small request and then waits for the answer waited
   forever: iperf3's 37-byte control cookie, an HTTP request, any

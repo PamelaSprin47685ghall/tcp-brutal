@@ -918,12 +918,14 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                 seq_printf(m, "tunnel %llu c9 fec_proto_fail=%llu "
                               "fec_hdr_crc_fail=%llu fec_payload_crc_fail=%llu "
                               "fec_short_tx=%llu fec_short_unknown=%llu "
+                              "fec_stream_refused=%llu "
                               "fec_drop_window=%llu fec_drop_crypto=%llu\n",
                            t->cfg.id, tbt_stat_read(&s->fec_proto_fail),
                            tbt_stat_read(&s->fec_hdr_crc_fail),
                            tbt_stat_read(&s->fec_payload_crc_fail),
                            tbt_stat_read(&s->fec_short_tx),
                            tbt_stat_read(&s->fec_short_unknown),
+                           tbt_stat_read(&s->fec_stream_refused),
                            tbt_stat_read(&s->fec_drop_window),
                            tbt_stat_read(&s->fec_drop_crypto));
                 seq_printf(m, "tunnel %llu c8 profile_mismatch=%llu http_parse_err=%llu "

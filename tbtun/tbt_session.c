@@ -771,6 +771,26 @@ static bool tbt_stream_is_closing(const struct tbt_stream *st)
     return false;
 }
 
+/* True while the stream the FEC data plane is bound to (`far_sid`) is still
+ * alive. The FEC record carries no stream id, so a second live stream would
+ * have its bytes delivered to whichever stream is current; the near side
+ * refuses to create one while this is true. Called with sess->lock held. */
+bool tbt_session_fec_stream_live(const struct tbt_session *sess)
+{
+    struct tbt_stream *st;
+    u64 sid = READ_ONCE(sess->far_sid);
+
+    if (!sid)
+        return false;
+    st = tbt_stream_find_locked((struct tbt_session *)sess, sid);
+    /* A stream whose application has closed is on its way out: its bytes are
+     * already in the ring and the next connection may start (a sequential
+     * client must not be refused). Only a stream that is still carrying an open
+     * application connection blocks the next one. */
+    return st && READ_ONCE(st->state) != TBT_ST_DEAD &&
+           !READ_ONCE(st->tx_fin_sent);
+}
+
 int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open)
 {
     bool adopt = false, drop = false;
