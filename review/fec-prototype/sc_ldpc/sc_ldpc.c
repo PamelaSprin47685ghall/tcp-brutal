@@ -189,6 +189,21 @@ int sc_data_var(const sc_code *c, int k)
     return k; /* payload variables occupy 0 .. n_data-1 */
 }
 
+void sc_get_graph(const sc_code *c, sc_graph *out)
+{
+    out->n = c->n;
+    out->n_data = c->n_data;
+    out->n_par = c->n_par;
+    out->n_chk = c->n_chk;
+    out->edges = c->edges;
+    out->dc_max = c->dc_max;
+    out->voff = c->voff;
+    out->coff = c->coff;
+    out->vadj = c->vadj;
+    out->cadj = c->cadj;
+    out->owned = c->owned;
+}
+
 int sc_systematic(const sc_code *c)
 {
     return c->par.term != SC_TERM_NATIVE;
