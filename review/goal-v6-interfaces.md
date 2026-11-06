@@ -742,6 +742,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **T5.2 blocked：8KiB 块等满（2026-11-06）**：smoke crypto=off 中 carrier `up=2`、c9=0，但 app 37B 未发出（near `submit=37`、far `rx_delivered=0`），far target 未 accept；疑似 FEC TX 等 8KiB packet 填满才发，小消息（iperf3 cookie/control）死锁；QEMU 1MiB 大消息掩盖。`t52-debug` 加 **short-block/partial flush + 小消息回归**；E hold，256 不跑。
 
+**HTTP MIME 伪装 + T5.2 数据量（2026-11-06 用户）**：HTTP 头改为 `Content-Type: application/gzip`；body 仍是 ChaCha8/FEC，**不真 gzip、不加 `Content-Encoding`**。`t52-debug` 实现。T5.2 最终 256 数据量降为 **8–16MiB / 5–10s**（不跑 1GiB）；QEMU/小消息优先。合并 `t52-debug` 新 head 后 T5.2 GO。
+
 ### G3 — T3 ChaCha8（C）
 
 | 项 | 内容 |
