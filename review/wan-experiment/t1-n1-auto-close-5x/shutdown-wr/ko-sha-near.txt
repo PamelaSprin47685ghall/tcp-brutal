@@ -1,0 +1,4 @@
+b82999b66607fd411b1ca4ea1a1177421a376bd6ea2c790c62e1cea94a2afc0a  /tmp/tbtun-t1-close5x-mine/near/tbtun-near.ko
+c03ea90ad5e5e3ef6978dd39bcf00fab75111c1ccad3cad4de62024bc50ec8e9  /tmp/tbtun-t1-close5x-mine/near/adv_probe
+srcversion:     10C45DCB900C5C78F725596
+vermagic:       7.2.9-1-MANJARO SMP preempt mod_unload 

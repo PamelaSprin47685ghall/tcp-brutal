@@ -1,0 +1,7 @@
+[149594.039198] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30000, awaiting HELLO
+[149795.711818] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=50972, awaiting HELLO
+[149795.758557] tbtun: carrier proto error: type=22 flags=3 path=1 ackc=0 ackm=379 len=0 seq=9602070932738999159 sid=156:831162970 r2=221 conv=35426
+[149795.758582] tbtun rx: 00000000: 16 03 01 00 7b 01 00 00 77 03 03 ae a3 68 41 85
+[149795.758589] tbtun rx: 00000010: 02 3d b9 94 e8 35 99 93 5a 8a 8a 31 9c dd 62 8a
+[149795.758592] tbtun rx: 00000020: 82 c4 cf c8 da c2 a0 93 d2 65 0c 00 00 1a c0 2f
+[149795.758596] tbtun rx: 00000030: c0 2b c0 11 c0 07 c0 13 c0 09 c0 14 c0 0a 00 05

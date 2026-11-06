@@ -1,0 +1,65 @@
+[395902.467995] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[395902.800219] tbtun: tunnel 1 carrier 0 DIALED lport=30000 peer=45.11.1.62:9000
+[395923.990049] tbtun: hole depthfail seq=16384 g=2 mask=0x1
+[395924.000136] tbtun: hole depthfail seq=16384 g=3 mask=0x1
+[395924.011254] tbtun: hole depthfail seq=16384 g=3 mask=0x1
+[395924.022130] tbtun: hole depthfail seq=16384 g=3 mask=0x1
+[395924.033274] tbtun: hole depthfail seq=16384 g=3 mask=0x1
+[395924.044496] tbtun: hole depthfail seq=16384 g=3 mask=0x1
+[395924.055643] tbtun: hole depthfail seq=16384 g=3 mask=0x1
+[395924.066325] tbtun: hole depthfail seq=16384 g=3 mask=0x1
+[395924.077301] tbtun: hole depthfail seq=16384 g=3 mask=0x1
+[395924.238302] tbtun: hole depthfail seq=16384 g=3 mask=0x1
+[395924.690610] tbtun: hole gatefail seq=24576 mask=0x1 ack=24576
+[395924.690614] tbtun: hole gatefail seq=24576 mask=0x1 ack=24576
+[395924.690616] tbtun: hole gatefail seq=24576 mask=0x1 ack=24576
+[395924.690617] tbtun: hole gatefail seq=24576 mask=0x1 ack=24576
+[395924.754926] tbtun: hole gatefail seq=24576 mask=0x1 ack=24576
+[395924.754936] tbtun: hole gatefail seq=24576 mask=0x1 ack=24576
+[395924.754940] tbtun: hole gatefail seq=24576 mask=0x1 ack=24576
+[395924.754943] tbtun: hole gatefail seq=24576 mask=0x1 ack=24576
+[395924.754946] tbtun: hole gatefail seq=24576 mask=0x1 ack=24576
+[395924.754949] tbtun: hole gatefail seq=24576 mask=0x1 ack=24576
+[395929.799251] tbtun: retx wndshort seq=3937723 len=8192 total=8224 wnd=1064736 inflight=1058355 wnd_avail=6381 mem_avail=984077
+[395930.082040] tbtun: hole gatefail seq=3945915 mask=0x1 ack=3945915
+[395930.082057] tbtun: hole gatefail seq=3945915 mask=0x1 ack=3945915
+[395930.113642] tbtun: hole gatefail seq=3945915 mask=0x1 ack=3945915
+[395930.113656] tbtun: hole gatefail seq=3945915 mask=0x1 ack=3945915
+[395930.113665] tbtun: hole gatefail seq=3945915 mask=0x1 ack=3945915
+[395930.113672] tbtun: hole gatefail seq=3945915 mask=0x1 ack=3945915
+[395930.113679] tbtun: hole gatefail seq=3945915 mask=0x1 ack=3945915
+[395930.113686] tbtun: hole gatefail seq=3945915 mask=0x1 ack=3945915
+[395930.113696] tbtun: hole gatefail seq=4167099 mask=0x1 ack=4167099
+[395930.113705] tbtun: hole gatefail seq=4289853 mask=0x1 ack=4289853
+[395933.286978] tbtun: hole timefail seq=8202661 age_us=675270 rtt_us=338912
+[395933.286992] tbtun: hole timefail seq=8202661 age_us=675307 rtt_us=337878
+[395933.808512] tbtun: hole timefail seq=9250177 age_us=520787 rtt_us=338349
+[395933.808615] tbtun: hole timefail seq=9250177 age_us=520952 rtt_us=334497
+[395933.808748] tbtun: hole timefail seq=9250177 age_us=521040 rtt_us=330943
+[395933.808831] tbtun: hole timefail seq=9250177 age_us=521168 rtt_us=327634
+[395933.808920] tbtun: hole timefail seq=9250177 age_us=521256 rtt_us=324525
+[395933.809002] tbtun: hole timefail seq=9250177 age_us=521343 rtt_us=321380
+[395933.809084] tbtun: hole timefail seq=9250177 age_us=521424 rtt_us=318420
+[395933.809162] tbtun: hole timefail seq=9250177 age_us=521504 rtt_us=315608
+[395934.514463] tbtun: retx wndshort seq=10297958 len=8192 total=8224 wnd=1064960 inflight=1063401 wnd_avail=1559 mem_avail=924311
+[395935.090298] tbtun: hole gatefail seq=11345739 mask=0x1 ack=11345739
+[395935.101501] tbtun: hole gatefail seq=11345739 mask=0x1 ack=11345739
+[395935.459864] tbtun: hole gatefail seq=11370315 mask=0x1 ack=11370315
+[395935.459882] tbtun: hole gatefail seq=11370315 mask=0x1 ack=11370315
+[395935.459896] tbtun: hole gatefail seq=11370315 mask=0x1 ack=11370315
+[395935.459910] tbtun: hole gatefail seq=11370315 mask=0x1 ack=11370315
+[395935.459923] tbtun: hole gatefail seq=11370315 mask=0x1 ack=11370315
+[395935.459936] tbtun: hole gatefail seq=11370315 mask=0x1 ack=11370315
+[395935.543990] tbtun: hole gatefail seq=11370315 mask=0x1 ack=11370315
+[395935.543998] tbtun: hole gatefail seq=11370315 mask=0x1 ack=11370315
+[395936.038509] tbtun: retx wndshort seq=12393520 len=8192 total=8224 wnd=1064736 inflight=1063451 wnd_avail=1285 mem_avail=973221
+[395938.349055] tbtun: hole timefail seq=15094760 age_us=638405 rtt_us=485498
+[395938.349067] tbtun: hole timefail seq=15094760 age_us=638457 rtt_us=460848
+[395938.349077] tbtun: hole timefail seq=15094760 age_us=638467 rtt_us=439031
+[395938.349086] tbtun: hole timefail seq=15094760 age_us=638476 rtt_us=419700
+[395938.349095] tbtun: hole timefail seq=15094760 age_us=638485 rtt_us=402546
+[395938.349104] tbtun: hole timefail seq=15094760 age_us=638494 rtt_us=387298
+[395938.349113] tbtun: hole timefail seq=15094760 age_us=638503 rtt_us=373728
+[395938.349122] tbtun: hole timefail seq=15094760 age_us=638512 rtt_us=361625
+[395938.349131] tbtun: hole timefail seq=15094760 age_us=638521 rtt_us=350796
+[395938.349140] tbtun: hole timefail seq=15094760 age_us=638531 rtt_us=341128

@@ -1,0 +1,13 @@
+[149594.039198] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30000, awaiting HELLO
+[149795.711818] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=50972, awaiting HELLO
+[149795.758557] tbtun: carrier proto error: type=22 flags=3 path=1 ackc=0 ackm=379 len=0 seq=9602070932738999159 sid=156:831162970 r2=221 conv=35426
+[149795.758582] tbtun rx: 00000000: 16 03 01 00 7b 01 00 00 77 03 03 ae a3 68 41 85
+[149795.758589] tbtun rx: 00000010: 02 3d b9 94 e8 35 99 93 5a 8a 8a 31 9c dd 62 8a
+[149795.758592] tbtun rx: 00000020: 82 c4 cf c8 da c2 a0 93 d2 65 0c 00 00 1a c0 2f
+[149795.758596] tbtun rx: 00000030: c0 2b c0 11 c0 07 c0 13 c0 09 c0 14 c0 0a 00 05
+[149839.248755] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=27598, awaiting HELLO
+[149840.059184] tbtun: carrier proto error: type=22 flags=3 path=1 ackc=0 ackm=494 len=0 seq=15914583767549936618 sid=18:1786405390 r2=212 conv=63228
+[149840.059223] tbtun rx: 00000000: 16 03 01 00 ee 01 00 00 ea 03 03 15 9e f5 db dc
+[149840.059230] tbtun rx: 00000010: 11 d4 5c 4c 0f 7f 54 f6 0e 62 7a 6a 12 d4 fc f6
+[149840.059236] tbtun rx: 00000020: 05 11 6c 40 be 97 ac 68 19 ca 8d 20 18 10 f2 38
+[149840.059242] tbtun rx: 00000030: db 3b e3 fc 23 8e 5f ff cf a9 51 85 f2 27 fd 8a
