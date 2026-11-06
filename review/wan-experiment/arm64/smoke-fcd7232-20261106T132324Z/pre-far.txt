@@ -1,0 +1,72 @@
+=== DATE 2026-11-06T21:23:39+08:00
+=== CONFIG
+=== PEERS
+=== TUNNELS
+=== STATS
+=== DMESG_COUNT
+1958
+=== DMESG_TBTUN
+[18024.631361] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=56914, awaiting HELLO
+[18025.288948] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=56924, awaiting HELLO
+[18025.993124] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=56934, awaiting HELLO
+[18026.620794] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=56950, awaiting HELLO
+[18027.278499] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=56954, awaiting HELLO
+[18032.935594] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=43712, awaiting HELLO
+[18033.610909] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=43722, awaiting HELLO
+[18034.278466] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=43734, awaiting HELLO
+[18034.930054] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=43750, awaiting HELLO
+[18045.821355] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=36790, awaiting HELLO
+[18045.841206] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=36782, awaiting HELLO
+[18099.465847] tbtun: unloaded
+[18684.139814] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[18684.142686] tbtun: tunnel 1 far side uses trust-on-first-use; configure nonce= or peer= to pin it
+[18735.232940] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40001, awaiting HELLO
+[18735.233090] tbtun: tunnel 1 carrier 255 HELLO rejected: session nonce
+[18735.240519] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40000, awaiting HELLO
+[18735.240551] tbtun: tunnel 1 carrier 255 HELLO rejected: session nonce
+[18735.878936] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=23766, awaiting HELLO
+[18735.878978] tbtun: tunnel 1 carrier 255 HELLO rejected: session nonce
+[18736.582649] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40001, awaiting HELLO
+[18736.930629] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40002, awaiting HELLO
+[18736.930679] tbtun: tunnel 1 carrier 255 HELLO rejected: session nonce
+[18737.602770] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=23768, awaiting HELLO
+[18737.602824] tbtun: tunnel 1 carrier 255 HELLO rejected: session nonce
+[18738.307689] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40002, awaiting HELLO
+[18738.307728] tbtun: tunnel 1 carrier 255 HELLO rejected: session nonce
+[18739.029268] tbtun: tunnel 1 carrier 255 HELLO rejected: session nonce
+[18739.738646] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40002, awaiting HELLO
+[18739.738710] tbtun: tunnel 1 carrier 255 HELLO rejected: session nonce
+[18740.828749] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=23770, awaiting HELLO
+[18740.828837] tbtun: tunnel 1 carrier 255 HELLO rejected: session nonce
+[18741.526951] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40002, awaiting HELLO
+[18741.526994] tbtun: tunnel 1 carrier 255 HELLO rejected: session nonce
+[18741.536088] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40001, awaiting HELLO
+[18741.536364] tbtun: tunnel 1 carrier 255 HELLO rejected: session nonce
+[18743.168715] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=23772, awaiting HELLO
+[18743.259084] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40002, awaiting HELLO
+[18743.259121] tbtun: tunnel 1 carrier 255 HELLO rejected: session nonce
+[18743.884754] tbtun: tunnel 1 carrier 255 HELLO rejected: session nonce
+[18744.589691] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40001, awaiting HELLO
+[18744.590329] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40002, awaiting HELLO
+[18744.590614] tbtun: tunnel 1 carrier 255 HELLO rejected: session nonce
+[18745.460725] tbtun: tunnel 1 carrier 255 HELLO rejected: session nonce
+[18890.710426] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=23779, awaiting HELLO
+[18890.757452] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40000, awaiting HELLO
+[18895.121071] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=23781, awaiting HELLO
+[18895.172698] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40002, awaiting HELLO
+[18922.136971] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[18936.903086] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[18940.217898] tbtun: carrier stall idx=0 gen=1 una=1092411398 nxt=1092411430 wmem=992 snd_wnd=65536 rcv_wnd=1047936 state=1
+[18941.441998] tbtun: carrier stall idx=1 gen=2 una=586461830 nxt=586461962 wmem=1092 snd_wnd=65536 rcv_wnd=1048064 state=1
+[19074.296839] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40003, awaiting HELLO
+[19074.348421] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40002, awaiting HELLO
+[19215.856940] tbtun: unloaded
+[20947.454264] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[20951.060615] tbtun: tunnel 1 far side uses trust-on-first-use; configure nonce= or peer= to pin it
+[20967.400690] tbtun: unloaded
+[21078.481990] tbtun 0.0.1 loaded: 1 tunnels max, 256 carriers max
+[21440.973966] tbtun: unloaded
+=== LINK
+eth0             UP             00:16:3c:3e:52:a9 <BROADCAST,MULTICAST,UP,LOWER_UP> 
+1
+up

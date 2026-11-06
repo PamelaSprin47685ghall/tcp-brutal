@@ -1,0 +1,108 @@
+=== DATE 2026-11-06T21:44:06+08:00
+=== CONFIG
+tunnel 1 role=near listen=0.0.0.0:9000 peer=45.11.1.62:40000 n=1 m=1 fec=off mode=rlnc w=2 carriers=2 crypto=off crypto_key=- dup=0 profile=raw keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0 portblock=0-0
+=== PEERS
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+1 0 40000 45.11.1.62:40000 0 342557 148 up raw 0 0 0 9 459 0 1000000 14338 14000 1048128 85 67680 1047128 1280
+1 1 40001 45.11.1.62:40000 0 1012699 0 spare raw 0 0 0 7 319 0 0 12150 9800 1048192 85 66624 1047128 1280
+=== TUNNELS
+# id role state listen peer target n m streams
+1 near listening 0.0.0.0:9000 45.11.1.62:40000 - 1 1 2
+=== STATS
+debug_loss=0
+gaps_total=0
+streams_total=2
+tunnel 1 capture_runs=2 actor_calls=2 submit_bytes=74 tx=148 wire=778 err=0 short=0
+tunnel 1 rx_work_runs=6 rx_drain_entries=4 rx_drain_bytes=174 rx_paused_skips=0 rx_adopt_events=0 rx_records=4 carrier_write_space_runs=0 poll_rescues=2
+tunnel 1 rx_ready_calls=4 rx_reads=6 rx_read_bytes=174 rx_read_zero=2 rx_resume=0 rx_resume_busy=0 rx_last_drained=32 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=2 rx_delivered=0
+tunnel 1 dbg rcv_nxt=1169515021 copied=1169514984 after=1169515021 qlen=1 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=25 pmoved=16 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=5322 car_nxt=4190233758 car_copied=4190233758 car_rcvbuf=2097152 car_sndbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=38 txwake_busy=23 txwork=15
+tunnel 1 ws_calls=0
+tunnel 1 c3 n=2 up=2 lost=0 replaced=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=1 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=2 fbk_rx=0 retx_frames=2 retx_bytes=74 retain_drop=0 retx_hole=2 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=4 retx_data_ppm=1000000 dup_bytes_ppm=1000000 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=37 tx_ack=0 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=200000 una_stall_us=94214 stall_paused_skips=0 stall_idle_skips=755 stall_declared=0 tx_window=87400 bdp_bytes=17480 k_x100=500 rtt_mean_us=649949 rttvar_us=2775080 rtt_max_us=1012699 txq_max=153224 win_block=0 win_resume=0 pump_hw_armed=0 pump_hw_fired=6 retx_evident=4 retx_cand=2 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=2 retx_eagain=0 retx_memshort=0 retx_wndshort=0 prov_now=0 prov_peak=0 prov_reject=0 dead_now=0 dead_peak=0
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0 pinned_bad_path=0 close_timeouts=0 close_detaches=0
+tunnel 1 streams streams_active=0 n_streams=2 n_pending=0
+tunnel 1 stream sid=1090468708353 state=5 kill=4 attached=0x2 rxq=0 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=0 tgt_err=0 fin_seq=0 fin_q=0 fin_w=0 rst_w=1 rxf=0/0 dage_ms=0
+tunnel 1 stream sid=1090468708352 state=5 kill=4 attached=0x2 rxq=0 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=0 tgt_err=0 fin_seq=0 fin_q=0 fin_w=0 rst_w=1 rxf=0/0 dage_ms=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=2 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c9 fec_proto_fail=0 fec_hdr_crc_fail=0 fec_payload_crc_fail=0 fec_short_tx=0 fec_short_unknown=0 fec_stream_refused=0 fec_drop_window=0 fec_drop_crypto=0 fec_ack_tx=0 fec_ack_rx=0 fec_credit_wait=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0
+tunnel 1 reconcile live_bytes=778 live_data=4 live_retx=2 retired_bytes=0 retired_data=0 retired_retx=0
+=== DMESG_COUNT
+2574
+=== DMESG_TBTUN
+[ 7413.897486] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:40000
+[ 7413.897529] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:40000
+[ 7416.360914] tbtun: tunnel 1 carrier 1 DIALED lport=40002 peer=45.11.1.62:40000
+[ 7419.287438] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:40000
+[ 7419.287484] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:40000
+[ 7422.790825] tbtun: tunnel 1 carrier 1 DIALED lport=40002 peer=45.11.1.62:40000
+[ 7427.857652] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:40000
+[ 7427.857768] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:40000
+[ 7432.870783] tbtun: tunnel 1 carrier 0 DIALED lport=40002 peer=45.11.1.62:40000
+[ 7432.870840] tbtun: tunnel 1 carrier 1 DIALED lport=40003 peer=45.11.1.62:40000
+[ 7437.884020] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:40000
+[ 7437.884082] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:40000
+[ 7442.897326] tbtun: tunnel 1 carrier 0 DIALED lport=40002 peer=45.11.1.62:40000
+[ 7442.897377] tbtun: tunnel 1 carrier 1 DIALED lport=40003 peer=45.11.1.62:40000
+[ 7447.910707] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:40000
+[ 7447.910773] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:40000
+[ 7452.924093] tbtun: tunnel 1 carrier 0 DIALED lport=40002 peer=45.11.1.62:40000
+[ 7452.924216] tbtun: tunnel 1 carrier 1 DIALED lport=40003 peer=45.11.1.62:40000
+[ 7457.937121] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:40000
+[ 7457.937197] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:40000
+[ 7463.258373] tbtun: tunnel 1 carrier 1 DIALED lport=40003 peer=45.11.1.62:40000
+[ 7463.286204] tbtun: tunnel 1 carrier 0 DIALED lport=40002 peer=45.11.1.62:40000
+[ 7595.681918] tbtun: unloaded
+[ 9517.951743] tbtun 0.0.1 loaded: 64 tunnels max, 256 carriers max
+[ 9518.337930] tbtun: unloaded
+[ 9964.798460] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[ 9967.421344] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:40000
+[ 9967.427195] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:40000
+[ 9967.427220] tbtun: carrier proto error: type=0 flags=0 path=0 ackc=0 ackm=0 len=0 seq=0 sid=0:0 r2=0 conv=0
+[ 9970.992622] tbtun: tunnel 1 carrier 1 DIALED lport=40002 peer=45.11.1.62:40000
+[ 9978.021704] tbtun: unloaded
+[10141.589303] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[10144.302446] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:40000
+[10144.307800] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:40000
+[10213.191861] tbtun: unloaded
+[10586.188321] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[10588.830282] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:40000
+[10589.839528] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:40000
+[10599.116931] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[10599.459113] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[10600.805433] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[10601.147548] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[10601.490027] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[10602.836686] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[10603.148446] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[10603.487964] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[10603.827708] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[10604.173214] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[10605.018635] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:40000
+[10605.499191] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:40000
+[10618.926639] tbtun: unloaded
+[11080.322280] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[11080.933746] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:40000
+[11081.940976] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:40000
+[11090.250701] tbtun: unloaded
+[11090.559790] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[11091.163851] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:40000
+[11092.175720] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:40000
+[11113.517052] tbtun: TXSTALLKILL sid=1090468708352 ack=0 txseq=37 age_us=11105153086
+[11113.973732] tbtun: TXSTALLKILL sid=1090468708353 ack=0 txseq=37 age_us=11105616588
+=== LINK
+[   20.701593] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Up - 1Gbps/Full - flow control rx/tx
+[   20.701626] IPv6: ADDRCONF(NETDEV_CHANGE): eth0: link becomes ready
+[ 6267.824583] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Down
+[ 6270.866199] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Up - 1Gbps/Full - flow control rx/tx
+[ 6282.011212] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Down
+[ 6289.105730] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Up - 1Gbps/Full - flow control rx/tx
+[ 7327.759231] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Down
+[ 7330.800578] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Up - 1Gbps/Full - flow control rx/tx
+[ 7340.932342] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Down
+[ 7348.027002] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Up - 1Gbps/Full - flow control rx/tx
+eth0             UP             02:51:22:e5:67:53 <BROADCAST,MULTICAST,UP,LOWER_UP> 
+1
+up
