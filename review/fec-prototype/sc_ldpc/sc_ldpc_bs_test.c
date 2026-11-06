@@ -223,6 +223,12 @@ int main(int argc, char **argv)
     failures += run_case(256, 16, 50, 300, SC_MODEL_SYMMETRIC, 256, 10, 16, verbose);
     failures += run_case(256, 16, 50, 300, SC_MODEL_SYMMETRIC, 512, 10, 17, verbose);
 
+    /* Rates below 0.50 use extra check nodes. */
+    failures += run_case(256, 16, 40, 400, SC_MODEL_SYMMETRIC, 64, 40, 20, verbose);
+    failures += run_case(256, 16, 30, 500, SC_MODEL_SYMMETRIC, 64, 40, 21, verbose);
+    failures += run_case(256, 16, 25, 500, SC_MODEL_SYMMETRIC, 64, 40, 22, verbose);
+    failures += run_case(512, 16, 40, 400, SC_MODEL_SYMMETRIC, 64, 20, 23, verbose);
+
     /* Rate 0.70 with the smallest coupling, where the check degree is high. */
     failures += run_case(256, 8, 70, 200, SC_MODEL_SYMMETRIC, 64, 40, 18, verbose);
     failures += run_case(512, 8, 70, 200, SC_MODEL_SYMMETRIC, 64, 20, 19, verbose);
