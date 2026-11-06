@@ -738,6 +738,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **T5.2 256 观测点（t52-debug）**：far c9 `fec_payload_crc_fail` 必须为 0（crypto=on 下区分 key 不一致/对端沉默；增长而 `rx_proto` 不动 = key 不一致，预共享 key 只配一端会走到这里）；c3 `connect_retry` 非 0 可接受（WAN SYN >1s），但必须 `connect_fail=0`；若 `connect_fail` 涨且错误是 `-110 ETIMEDOUT` 才是真不可达。c8 `http_req == http_resp == carrier 数（含 drip spare）`；不等时 debug>=1 打 `http <stage>`/`HELLO rejected: <check>`。`clang-format-18` 本机缺失，`make format-check` 未跑，合并前注意 CI。
 
+**T5.2 smoke phase crypto=off 失败（2026-11-06）**：integration `9f66fba`（含 `7b7965f`）；`n=1/m=1/carriers=2/http-kal/crypto=off`：carrier `up=2 lost=0 connect_fail=0`、`connect_retry=1`；c9 全 0；c8 near `http_req=2/http_resp=0`、far `http_req=0/http_resp=2`；far `rx_delivered=37`、`streams_active=0`；app 只传 37B，iperf3 180s timeout，far server `unable to receive cookie: Bad file descriptor`、无 Accepted。carrier HELLO/CRC 正常；问题在 **http-kal app 流/target 连接路径**，与 crypto 无关。E hold；`t52-debug` 继续诊断。证据 `review/wan-experiment/t5.2-256-http-kal/smoke-O-crypto-off-*`。
+
 ### G3 — T3 ChaCha8（C）
 
 | 项 | 内容 |
