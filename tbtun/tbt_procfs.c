@@ -782,7 +782,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "retx_txqdrop=%llu retx_nopick=%llu retx_stalled=%llu "
                               "retx_notup=%llu retx_notann=%llu retx_batch=%llu "
                               "retx_eagain=%llu retx_memshort=%llu retx_wndshort=%llu "
-                              "prov_now=%d prov_peak=%u prov_reject=%llu\n",
+                              "prov_now=%d prov_peak=%u prov_reject=%llu "
+                              "dead_now=%u dead_peak=%u\n",
                            t->cfg.id, n, up, tbt_stat_read(&s->carrier_lost),
                            tbt_stat_read(&s->carrier_replaced),
                            READ_ONCE(s->spare_activated),
@@ -831,7 +832,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            READ_ONCE(s->dbg_retx_memshort),
                            READ_ONCE(s->dbg_retx_wndshort),
                            atomic_read(&s->n_prov), READ_ONCE(s->prov_peak),
-                           READ_ONCE(s->prov_reject));
+                           READ_ONCE(s->prov_reject), READ_ONCE(s->n_dead),
+                           READ_ONCE(s->dead_peak));
                 /* Review 22: pinned control-frame lifetime. ctl_queued is the
                  * live control-queue depth; the other four are the retry,
                  * re-pin, obsolete-generation and explicit-loss record. */

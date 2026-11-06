@@ -618,6 +618,12 @@ struct tbt_session
     struct list_head dead_release;
     atomic_t n_prov;       /* carriers on `prov`, bounded by tbt_prov_cap() */
     u32 prov_peak;         /* high-water mark of n_prov, /proc only */
+    /* Retired carrier objects are reused as the allocation pool, not freed:
+     * a poll or a late work item may still hold the struct, so the memory
+     * must stay valid. `dead` is capped at 2 * n_car; a join that would
+     * exceed it is refused until a new carrier reuses an entry. */
+    u16 n_dead;
+    u16 dead_peak;         /* high-water mark of n_dead, /proc only */
 
     u8 nonce[16];      /* the session key carried in HELLO */
     bool nonce_set;    /* far side: adopted from the first HELLO */
@@ -637,6 +643,7 @@ struct tbt_session
      * cannot turn into a connect storm. w_replace is the only writer. */
     u32 dial_tokens;
     u64 dial_refill_ns;
+    spinlock_t dial_lock;  /* tbt_dial_take(): w_replace and the poll */
     struct delayed_work w_fbk;    /* feedback tick and retransmit timer */
     struct delayed_work w_reap;   /* P1: tombstone sweeper */
     struct delayed_work w_pending; /* P1: starts one queued public socket */
@@ -905,6 +912,11 @@ struct tbt_carrier
     atomic_t up;                  /* HELLO written; usable for scheduling */
     atomic_t stopping;
     atomic_t rx_again;            /* a wake was coalesced into a running rx */
+    atomic_t pollers;             /* the 50 ms poll is using this object;
+                                   * a retired object is not reused while
+                                   * this is non-zero */
+    bool released;                /* tbt_carrier_release() has run; eligible
+                                   * for reuse when no poll/work holds it */
     bool hello_sent;              /* our HELLO was written on this carrier */
     bool open_sent;               /* this carrier has written at least one OPEN */
     bool saw_hello;               /* the peer's first frame was a HELLO */
