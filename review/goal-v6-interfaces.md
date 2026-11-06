@@ -53,6 +53,10 @@
 
 **`30930fc` 风险/回退（t52-debug）**：改动仅 `tbt_session_join()` 重复判定约 12 行，**无 wire/状态/字段**；唯一行为差异是同 index 上更新 generation 的 HELLO 可接管旧 socket 仍 ESTABLISHED 的槽位，旧 carrier 走原有 retire（`stopping=1` + `carrier_replaced++` + dead + `w_replace`）。4-bit gen 半程比较：1..7 更新、0/8..15 重复/更旧。风险：恶意/错乱 far 可反复抢自己会话槽位，但需过 nonce/anchor/profile，非提权；当前行为在 WAN 必然 join_dup。回退：单 hunk `git revert 30930fc`。若要 WAN 复现，可在 `debug>=2` 下抑制 RETIRE 并加 probe 断言（未加，避免脚手架）。
 
+**join fix 合入（`6091bb0`）**：`30930fc` 已被合入 master（merge `6091bb0`；非我操作）。系统 7.2.9 headers 被清，make check 用 `KDIR=~/.cache/tbtun-build-t52/linux72-headers/usr/lib/modules/7.2.9-1-MANJARO/build`、`PAHOLE=~/.cache/tbtun-build-t52/pahole/usr/bin/pahole`、`LD_LIBRARY_PATH=~/.cache/tbtun-build-t52/pahole/usr/lib` 绿；merge 同时删除 `review/baseline/*` 旧日志（非我操作，未回滚）。最终 head `9de0f3b` + docs。
+
+**smoke-debug2（`smoke-debug2-20261106T1236Z`）**：debug=2 1 carrier/37B ×2 **均 0/37**；`.65` eth0 **7s link flap**（Up/Down/Up，ping#1 窗口）为环境触发；product 放大：near c3 `lost/replaced 2→62`、`spare_activated=16`、`connect_fail=9/connect_retry=26/stall_declared=2`；far 稳定 `lost=2`、`join_dup=0`（nonce 冲突修复后）；near `rx_read` 增长但 `rx_delivered=0`，far `rx_delivered=74/tx=74`；DATA 写在 near 已 RETIRE/replaced 的 generation 上。nonce 冲突（t52-smoke3 覆盖 far nonce）非产品结果；`tbt_echo` 5202 alive。结论：**near 侧 RETIRE/replacement churn（link flap 触发）是当前 blocker，join fix 不覆盖**；t52-debug 继续。T5.2 HOLD；不 8/16/256、不 push。
+
 **冒烟前部署/分工（2026-11-06）**：HND0 clean；`b41b259` x86 far ko **尚未部署**。`t52-arm64-3` = HND0 far b41b259 构建/部署 + `.65` **1 carrier/37B smoke**；`arm64-build-3` = `.65` aarch64 ko only。HND0 far 用 **`tbt_echo` 5202（不用 iperf3）**；1 carrier/37B 通过后 **8/16 × 1MiB/5s**；不 256/8 并行、不合并/push。
 
 **HND0 清理确认（`hnd0-verify`，2026-11-06）**：10:56:45 UTC 无 tbtun、`/proc/net/tbtun` 不存在、9000/5202 无监听、无 echo/进程、无锁。sysctl 为**生产值**（rmem/wmem 16MiB、tcp 4MiB、fq/bbr），**不改成 64MiB**。10:51:39–10:56:03 窗口 UBSAN/WARN/BUG/OOM=0，未跑数据面；08:53–09:01 两轮 smoke 有 **16 UBSAN + 2 WARN**（`tbt_tx.c:2570`、array/shift OOB），已记录。**`t52-arm64` 在 HOLD 期间仍于 10:44/10:51/10:52 部署/加载/echo，agent kill 后留 PPID 1 残留**（已被并行清理）；需确认 HOLD 生效、不再部署。生产服务 active；不合并/push。
