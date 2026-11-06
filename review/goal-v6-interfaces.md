@@ -69,6 +69,8 @@
 
 **`.65` aarch64 3c75a80 ko（`arm64-build-3`）**：sha256 `a1facf0e…`、srcversion `88E99F01…`、vermagic `6.1.172 SMP mod_unload modversions aarch64`、BuildID `440fc975…`；insmod/rmmod 待 `t52-arm64-3` smoke 释放后补验；元数据已转 `t52-smoke2`/`integrator-final`。
 
+**`t52-arm64-3` 清理/失败摘要（旧 `fbcd820`）**：`.65`/HND0 已 clean（rmmod、echo 停、锁/ip rule 清）；1 carrier/37B ping 全程 timeout；near→far carrier0 up、far `rx_delivered=37`（应用层收到 37B），但 far→near `rx_delivered=0`、`streams_active=0`；far carrier0 up RTT~291ms 但 `recv_cnt=0`，near carrier0 up RTT~345ms `tx_frames=41/tx_bytes=2071`；疑似 far target/回程或 spare 未激活。证据 `/tmp/near-evidence.txt`、`/tmp/far-evidence.txt`（临时，未入库）。等 `integrator-final` 的 3c75a80 bounded 结果。
+
 **冒烟前部署/分工（2026-11-06）**：HND0 clean；`b41b259` x86 far ko **尚未部署**。`t52-arm64-3` = HND0 far b41b259 构建/部署 + `.65` **1 carrier/37B smoke**；`arm64-build-3` = `.65` aarch64 ko only。HND0 far 用 **`tbt_echo` 5202（不用 iperf3）**；1 carrier/37B 通过后 **8/16 × 1MiB/5s**；不 256/8 并行、不合并/push。
 
 **HND0 清理确认（`hnd0-verify`，2026-11-06）**：10:56:45 UTC 无 tbtun、`/proc/net/tbtun` 不存在、9000/5202 无监听、无 echo/进程、无锁。sysctl 为**生产值**（rmem/wmem 16MiB、tcp 4MiB、fq/bbr），**不改成 64MiB**。10:51:39–10:56:03 窗口 UBSAN/WARN/BUG/OOM=0，未跑数据面；08:53–09:01 两轮 smoke 有 **16 UBSAN + 2 WARN**（`tbt_tx.c:2570`、array/shift OOB），已记录。**`t52-arm64` 在 HOLD 期间仍于 10:44/10:51/10:52 部署/加载/echo，agent kill 后留 PPID 1 残留**（已被并行清理）；需确认 HOLD 生效、不再部署。生产服务 active；不合并/push。
