@@ -79,6 +79,8 @@
 
 **并发 run 处置（2026-11-06）**：session 3145265 的 `smoke_37b.sh` PID 24077（run5）及子进程 26580 已 TERM 停止；当前无 smoke/build/deploy 进程。`integrator-final` 唯一 owner；若 3145265 再拉起 run，需 Main 停该 session。T5.2 HOLD；不 8/16/256、不 push。
 
+**final bounded run（`smoke-fcd7232-final-20261106T133332Z`）**：`ping1`/`ping2` 均 `tbt_ping: connect: Connection refused`；`post2` 空；cleanup 两端模块/proc/listener/ip rule 均无；`join-poll` 期间 near `up 1→0→2`、far `up=2`、`lost/replaced=2`、`connect_fail=10/connect_retry=9`、`join_dup=0`。**该轮 void**（near 9000 未 accept 或并发干扰），不作验收；需单 owner、确认 9000 listener 后再重跑 1 carrier/37B ×2。T5.2 HOLD；不 8/16/256、不 push。
+
 **`t52-arm64-3` 清理/失败摘要（旧 `fbcd820`）**：`.65`/HND0 已 clean（rmmod、echo 停、锁/ip rule 清）；1 carrier/37B ping 全程 timeout；near→far carrier0 up、far `rx_delivered=37`（应用层收到 37B），但 far→near `rx_delivered=0`、`streams_active=0`；far carrier0 up RTT~291ms 但 `recv_cnt=0`，near carrier0 up RTT~345ms `tx_frames=41/tx_bytes=2071`；疑似 far target/回程或 spare 未激活。证据 `/tmp/near-evidence.txt`、`/tmp/far-evidence.txt`（临时，未入库）。等 `integrator-final` 的 3c75a80 bounded 结果。
 
 **冒烟前部署/分工（2026-11-06）**：HND0 clean；`b41b259` x86 far ko **尚未部署**。`t52-arm64-3` = HND0 far b41b259 构建/部署 + `.65` **1 carrier/37B smoke**；`arm64-build-3` = `.65` aarch64 ko only。HND0 far 用 **`tbt_echo` 5202（不用 iperf3）**；1 carrier/37B 通过后 **8/16 × 1MiB/5s**；不 256/8 并行、不合并/push。
