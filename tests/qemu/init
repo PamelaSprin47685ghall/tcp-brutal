@@ -25,7 +25,8 @@
 #   L. FEC v6 over the raw container, 256 KiB byte-exact.
 #   M. FEC v6 over the HTTP container, 256 KiB byte-exact.
 #   N. FEC v6 grouped over HTTP in the production shape (256 carriers, 32
-#      groups), 1 MiB byte-exact (the one 1 MiB transfer in the suite).
+#      groups), 8 MiB interleaved byte-exact, and no new kernel warning: this is
+#      the case where a 16-slot per-carrier array corrupts the stream struct.
 #   O. the T5.2 smoke's shape with crypto off, crypto on, a carrier taken down
 #      mid-transfer, and a loopback delay that makes a dial outlive one connect
 #      window.
@@ -62,9 +63,14 @@ MIB=${TBT_ENDPOINT_MIB:-1}
 C_MIB=${TBT_C_MIB:-1}
 L_BYTES=${TBT_L_BYTES:-262144}
 
-N_MIB=${TBT_N_MIB:-1}
+N_MIB=${TBT_N_MIB:-8}
 # 16 by default; the production shape is 256 (32 groups of 8).
 N_CARRIERS=${TBT_N_CARRIERS:-256}
+# The transfer phase and the flow-control window, so the 256-carrier data path
+# can be exercised at the volume a WAN run uses without editing the probe.
+N_MODE=${TBT_N_MODE:-interleaved}
+N_REORDER=${TBT_N_REORDER:-8388608}
+N_TXW=${TBT_N_TXW:-0}
 D_MIB=${TBT_D_MIB:-1}
 # I needs 40 MiB through four shaped carriers; the guest raises its socket
 # buffers first so the strict phase can buffer the echo it has not read yet.
@@ -1169,9 +1175,9 @@ probe_n() {
     # ports. Give this probe its own block instead of inheriting one sized
     # for the single-group probes.
     echo 'ports 41024-41535' > "$PORTS" || fail "probe N: ports directive rejected"
-    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=4 m=4 fec=on mode=grouped carriers=$N_CARRIERS" \
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=4 m=4 fec=on mode=grouped carriers=$N_CARRIERS rx_reorder_bytes=$N_REORDER tx_window_bytes=$N_TXW" \
         > "$CFG" || fail "grouped FEC-HTTP far tunnel rejected"
-    echo "tunnel 2 role=near profile=http-kal listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=4 m=4 fec=on mode=grouped carriers=$N_CARRIERS" \
+    echo "tunnel 2 role=near profile=http-kal listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=4 m=4 fec=on mode=grouped carriers=$N_CARRIERS rx_reorder_bytes=$N_REORDER tx_window_bytes=$N_TXW" \
         > "$CFG" || fail "grouped FEC-HTTP near tunnel rejected"
     # 256 carriers take a few seconds to all dial and join; the transfer must
     # start only after the last one, or the super-block walk waits for a group
@@ -1186,7 +1192,8 @@ probe_n() {
     done
     echo "   tunnels:"; cat /proc/net/tbtun/tunnels
     echo "   peers:"; cat "$PEERS"
-    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$N_MIB" "${TBT_ENDPOINT_TIMEOUT:-60}"
+    _warn0=$(dmesg | grep -c "WARNING:\|UBSAN:" || true)
+    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$N_MIB" "${TBT_ENDPOINT_TIMEOUT:-60}" "$N_MODE"
     rc=$?
     echo "   stats after: $(cat /proc/net/tbtun/stats)"
     case $rc in
@@ -1195,6 +1202,14 @@ probe_n() {
     3) fail "probe N: bytes came back wrong or short (rc=3)" ;;
     *) fail "probe N: tbt_burst exited $rc" ;;
     esac
+    # A 256-carrier session indexes per-carrier state by carrier: a mask or an
+    # array narrower than the carrier count writes past itself and the kernel
+    # says so (WARN_ON, or UBSAN on a debug kernel). Any new warning during this
+    # probe is a failure, not noise.
+    _warn1=$(dmesg | grep -c "WARNING:\|UBSAN:" || true)
+    echo "   kernel warnings: ${_warn0:-0} before, ${_warn1:-0} after"
+    [ "${_warn1:-0}" -eq "${_warn0:-0}" ] ||
+        fail "probe N: the kernel reported $((_warn1 - _warn0)) new warning(s) during the 256-carrier transfer"
     echo "== probe N: pass"
 }
 

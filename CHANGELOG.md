@@ -71,6 +71,20 @@ and moves independently of the module version.
 
 ### Fixed
 
+- Per-carrier stream bookkeeping was 16 slots wide while a FEC v6 session has
+  256 carriers, so every carrier from 16 up wrote past the end of its arrays:
+  `announced_gen[c->index]` overwrote `tx_paused` with a carrier generation,
+  `tx_fin_mask`/`tx_rst_mask`/`*_inflight` were one `unsigned long` and
+  `set_bit()` on bit 16..255 wrote 30+ bytes past them, and `BIT(index)` on a
+  u16 mask was truncated so a carrier's OPEN could never be recorded. The
+  corruption showed up as an invalid `_Bool` load of `tx_paused` under UBSAN
+  (`tbt_tx.c:2695`, `tbt_sock.c:96`, `tbt_fec_data.c:459`,
+  `tbt_procfs.c:618/892`), the `WARN_ON_ONCE(!tbt_stream_announced())` at
+  `tbt_tx.c:2570` firing on every carrier from 16 up, a stream that never
+  delivered and a close that waited out its 60 s bound. All six are now
+  `DECLARE_BITMAP(..., TBT_MAX_CARRIERS_LIMIT)` plus `announced_gen[256]`, with
+  an index guard at each write and read. Probe N asserts that a 256-carrier
+  transfer adds no kernel warning.
 - A session with more than 16 carriers could not bring them up. `tbt_hdr_check()`
   capped the old header's `path_id` at `TBT_LEGACY_MAX_CARRIERS` (16), but
   `path_id` is a carrier index and the carrier layer has 256 slots, so the

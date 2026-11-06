@@ -169,9 +169,9 @@ static void tbt_tx_enqueue(struct tbt_session *sess, struct tbt_frame *fr, bool 
 static bool tbt_stream_announced(const struct tbt_stream *st,
                                  const struct tbt_carrier *c)
 {
-    if (!st || !c)
+    if (!st || !c || c->index >= TBT_MAX_CARRIERS_LIMIT)
         return false;
-    if (!(READ_ONCE(st->announced_mask) & BIT(c->index)))
+    if (!test_bit(c->index, st->announced_mask))
         return false;
     return READ_ONCE(st->announced_gen[c->index]) ==
            (READ_ONCE(c->gen) & 0xf);
@@ -319,18 +319,18 @@ int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
          * FIN anyway instead of dropping it silently. */
         if (!c || !READ_ONCE(c->hello_sent) || atomic_read(&c->stopping))
             continue;
-        if (test_and_set_bit(i, &st->tx_fin_mask))
+        if (test_and_set_bit(i, st->tx_fin_mask))
             continue;
         /* Set the in-flight bit before the frame can be seen by the pump: the
          * pump clears it on the write, and a stale bit would hide the loss of
          * the last copy. */
-        set_bit(i, &st->tx_fin_inflight);
+        set_bit(i, st->tx_fin_inflight);
         err = tbt_tx_control_pinned(sess, st, (u8)i, TBT_F_FIN, st->sid,
                                     seq, NULL, 0, false, gfp);
         if (err)
         {
-            clear_bit(i, &st->tx_fin_inflight);
-            clear_bit(i, &st->tx_fin_mask);
+            clear_bit(i, st->tx_fin_inflight);
+            clear_bit(i, st->tx_fin_mask);
             if (err == -ENOMEM)
                 atomic64_inc(&sess->dbg_alloc_fail);
             continue;
@@ -357,15 +357,15 @@ int tbt_tx_rst(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
 
         if (!c || !READ_ONCE(c->hello_sent) || atomic_read(&c->stopping))
             continue;
-        if (test_and_set_bit(i, &st->tx_rst_mask))
+        if (test_and_set_bit(i, st->tx_rst_mask))
             continue;
-        set_bit(i, &st->tx_rst_inflight);
+        set_bit(i, st->tx_rst_inflight);
         err = tbt_tx_control_pinned(sess, st, (u8)i, TBT_F_RST, st->sid, 0, NULL, 0,
                                     false, gfp);
         if (err)
         {
-            clear_bit(i, &st->tx_rst_inflight);
-            clear_bit(i, &st->tx_rst_mask);
+            clear_bit(i, st->tx_rst_inflight);
+            clear_bit(i, st->tx_rst_mask);
             if (err == -ENOMEM)
                 atomic64_inc(&sess->dbg_alloc_fail);
             continue;
@@ -1938,9 +1938,9 @@ static void tbt_tx_ctl_fail(struct tbt_session *sess, struct tbt_frame *fr)
         if (type == TBT_F_FIN)
         {
             if (fr->path < TBT_MAX_CARRIERS_LIMIT)
-                clear_bit(fr->path, &fr->st->tx_fin_inflight);
+                clear_bit(fr->path, fr->st->tx_fin_inflight);
             if (!READ_ONCE(fr->st->tx_fin_written) &&
-                !fr->st->tx_fin_inflight)
+                bitmap_empty(fr->st->tx_fin_inflight, TBT_MAX_CARRIERS_LIMIT))
             {
                 WRITE_ONCE(fr->st->tx_fin_queued, false);
                 tbt_stream_kill(fr->st, TBT_ST_DEAD);
@@ -1949,9 +1949,9 @@ static void tbt_tx_ctl_fail(struct tbt_session *sess, struct tbt_frame *fr)
         else if (type == TBT_F_RST)
         {
             if (fr->path < TBT_MAX_CARRIERS_LIMIT)
-                clear_bit(fr->path, &fr->st->tx_rst_inflight);
+                clear_bit(fr->path, fr->st->tx_rst_inflight);
             if (!READ_ONCE(fr->st->tx_rst_written) &&
-                !fr->st->tx_rst_inflight)
+                bitmap_empty(fr->st->tx_rst_inflight, TBT_MAX_CARRIERS_LIMIT))
                 tbt_stream_kill(fr->st, TBT_ST_DEAD);
         }
     }
@@ -1973,7 +1973,7 @@ static void tbt_tx_ctl_written(struct tbt_session *sess, struct tbt_frame *fr)
             if (!READ_ONCE(fr->st->close_fin_written_ns))
                 WRITE_ONCE(fr->st->close_fin_written_ns, tbt_now_ns());
             if (fr->path < TBT_MAX_CARRIERS_LIMIT)
-                clear_bit(fr->path, &fr->st->tx_fin_inflight);
+                clear_bit(fr->path, fr->st->tx_fin_inflight);
             /* Both halves may already be done: the peer's FIN can arrive
              * before ours reaches the wire.  This is the moment the stream
              * may leave the session. */
@@ -1983,7 +1983,7 @@ static void tbt_tx_ctl_written(struct tbt_session *sess, struct tbt_frame *fr)
         {
             WRITE_ONCE(fr->st->tx_rst_written, true);
             if (fr->path < TBT_MAX_CARRIERS_LIMIT)
-                clear_bit(fr->path, &fr->st->tx_rst_inflight);
+                clear_bit(fr->path, fr->st->tx_rst_inflight);
         }
     }
     tbt_tx_ctl_put(sess, fr);
@@ -2562,11 +2562,12 @@ ctl_fail:
                 {
                     u8 idx = c->index;
 
-                    WRITE_ONCE(fr->st->announced_gen[idx],
-                               (u8)(c->gen & 0xf));
-                    WRITE_ONCE(fr->st->announced_mask,
-                               (u16)(READ_ONCE(fr->st->announced_mask) |
-                                     BIT(idx)));
+                    if (idx < TBT_MAX_CARRIERS_LIMIT)
+                    {
+                        WRITE_ONCE(fr->st->announced_gen[idx],
+                                   (u8)(c->gen & 0xf));
+                        set_bit(idx, fr->st->announced_mask);
+                    }
                     if (WARN_ON_ONCE(!tbt_stream_announced(fr->st, c)))
                         sess->dbg_announce_mismatch++;
                 }

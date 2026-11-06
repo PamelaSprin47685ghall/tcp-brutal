@@ -24,7 +24,14 @@
  * payload. Every returned byte is compared in order; the first mismatch is
  * reported with its offset.
  *
- * Usage: tbt_burst HOST PORT [MIB] [SECONDS]
+ * Usage: tbt_burst HOST PORT [MIB] [SECONDS] [strict|interleaved]
+ *
+ * The third form names the only phase to run. `strict` (the default) writes
+ * everything and then reads, which needs the peer's echo buffered end to end;
+ * at 8 MiB and above over a WAN that deadlocks on the application's socket
+ * buffers unless both ends raise them. `interleaved` reads while it writes and
+ * has no such requirement, so it is the shape to use for a large transfer over
+ * a real path.
  *
  * Exit codes:
  *   0  MIB crossed in both directions in the strict case, byte for byte
@@ -305,21 +312,31 @@ static int interleaved_phase(int fd, long total, uint64_t base, int seconds, str
 int main(int argc, char **argv)
 {
     const char *host;
-    int port, mib, seconds;
+    int port, mib, seconds, only_interleaved = 0;
     long total;
     struct sockaddr_in sa;
     struct result r;
     int fd, rc;
 
-    if (argc < 3)
+    if (argc < 3 || argc > 6)
     {
-        fprintf(stderr, "usage: tbt_burst HOST PORT [MIB] [SECONDS]\n");
+        fprintf(stderr, "usage: tbt_burst HOST PORT [MIB] [SECONDS] [strict|interleaved]\n");
         return 4;
     }
     host = argv[1];
     port = atoi(argv[2]);
     mib = argc > 3 ? atoi(argv[3]) : 4;
     seconds = argc > 4 ? atoi(argv[4]) : 20;
+    if (argc > 5)
+    {
+        if (!strcmp(argv[5], "interleaved"))
+            only_interleaved = 1;
+        else if (strcmp(argv[5], "strict"))
+        {
+            fprintf(stderr, "tbt_burst: mode must be strict or interleaved\n");
+            return 4;
+        }
+    }
     if (port <= 0 || port > 65535 || mib <= 0 || seconds <= 0)
     {
         fprintf(stderr, "tbt_burst: bad arguments\n");
@@ -356,6 +373,24 @@ int main(int argc, char **argv)
 
     memset(&r, 0, sizeof(r));
     r.mismatch = -1;
+    if (only_interleaved)
+    {
+        if (interleaved_phase(fd, total, 0, seconds, &r))
+        {
+            report("interleaved", &r);
+            close(fd);
+            if (r.mismatch >= 0)
+                return 3;
+            if (r.recvd == 0 && r.sent > 0)
+                return 2;
+            return 1;
+        }
+        close(fd);
+        printf("burst: interleaved phase passed: %ld sent, %ld back, byte for byte\n",
+               r.sent, r.recvd);
+        printf("burst: %d MiB crossed each way (interleaved)\n", mib);
+        return 0;
+    }
     rc = strict_phase(fd, total, &r);
     if (rc)
     {
