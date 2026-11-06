@@ -657,6 +657,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **5x shutdown-WR PASS（`hnd0-5x 08ed3b9`）**：源码 4c58b0e，srcversion `10C45DCB`；near ko `b82999b6…`、far ko `0da13480…`。模块一次加载，5 轮 sink 重启：每轮 sink 16,777,216 + EOF、sender 16MiB + `shutdown(SHUT_WR)` + EOF、far `rx_delivered` 每轮 +16,777,216、near `fin_seq=16777216 fin_w=1 rst_w=0`、far `fin_w=1 rxf=1/1`、live `txq=0`、lost/carrier_lost=0、holes=0、timeouts=0、close_detaches=0、无 `TXSTALLKILL`；CPU near 8.85–8.99%、far 27.08–31.75%。证据 `review/wan-experiment/t1-n1-auto-close-5x/shutdown-wr/`。**残余（非门禁）**：每轮重载模块变体 attempt-1 3/5、attempt-2 1/5，失败为 far `lost=1` + klog `carrier ACCEPTED ... rport=30000`（near HELLO 超时重拨）；主 spec 不重建 carrier，故 5/5 成立；该 carrier 重建窗口需另开 ticket（§8 R11）。
 
+**T1 状态**：HND0 5x 两个变体（sendclose `1d35fb5`、shutdown-WR `08ed3b9`）均 **5/5 PASS**，source 4c58b0e、srcversion 10C45DCB；残余 carrier-rebuild race 记 R11 独立 ticket，不阻塞 loaded-once T1 gate。**G1 等 `window-verify` 的 4c58b0e A–K/near/full/SAN 全绿后完成。**
+
 **sink 测试就绪（`hnd0-n1b`）**：`sink.py`（accept 一次、读到 EOF、记录 bytes/expected/ok/secs）与 `send16m.py`（写满 16MiB、`shutdown(SHUT_WR)`、等 EOF）本地 loopback 验证 `16,777,216 B ok=1`；HND0 `/tmp/tbtun-sink/sink.py` `py_compile` 通过。下一轮证据目录 `review/wan-experiment/t1-n1-auto-rx1m-sink/`，保留 `a2a37ed` 的 iperf3 失败证据；等 `window-close`/A3 新 head。
 
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
