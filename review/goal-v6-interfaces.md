@@ -732,6 +732,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **T5.2 GO（新 master）**：crypto 已合入；E 先用小 `fec=on crypto=on` 隧道 smoke（HELLO 66B/ver2、key 交换、`fec_payload_crc_fail` 不增长），再跑 256 http-kal/1G；`crypto_key=` 两端不一致不会在 HELLO 报错，只会 payload CRC 丢 share。
 
+**T5.2 smoke 失败（2026-11-06，blocked）**：integration `f32c03a`（crypto `0d11710`）；小 smoke `n=1/m=1/carriers=2/http-kal/crypto=on` 失败：near c3 `up=1 lost=27 replaced=27 connect_fail=41`，carrier 0 `connecting`、`failed to connect: -115`（EINPROGRESS）反复重拨；far `carrier ACCEPTED ... awaiting HELLO`，HELLO 未完成；near `http_req=28/http_resp=0`，far `http_req=0/http_resp=1`、`rx_proto=27/rx_errs=27 rx_last_err=-71`。**256 未跑；E hold**。已开 `t52-debug`（`w-t52-debug` from f32c03a）在 QEMU 复现/修。证据 `review/wan-experiment/t5.2-256-http-kal/`。T5.2 blocked。
+
 ### G3 — T3 ChaCha8（C）
 
 | 项 | 内容 |
