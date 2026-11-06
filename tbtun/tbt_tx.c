@@ -1487,7 +1487,7 @@ u64 tbt_tx_wait_budget_ns(struct tbt_session *sess, struct tbt_stream *st)
     else
     {
         /* Auto must not fall back to one second. The receiver's own auto
-         * hole budget is max(1 s, 5*mean_srtt), and the sender has to add
+         * hole budget is max(2 s, 5*mean_srtt), and the sender has to add
          * its RTO plus one one-way on top; one second is shorter than
          * that, and it killed a 172-byte control stream whose last byte
          * waited behind a bulk window (measured: TXSTALLKILL ack=171

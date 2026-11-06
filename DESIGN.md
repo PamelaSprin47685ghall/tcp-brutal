@@ -762,6 +762,12 @@ the budget expires; with the 1 s replay grace a reset needs ~1 s of sustained to
 all carriers (§19 Q2). The receiver never advances past a gap: there is no placeholder
 frame, because a frame that invents no byte cannot advance delivery.
 
+With `hole_budget_ms=0` (auto) the receiver's floor is **2 s**, not 1 s: the carrier
+TCP's own RTO backoff (200 + 400 + 800 ms) must fit before the tunnel can resend the
+missing record, and the sender's stall budget is `max(5 s, 5 x RTO)`. A 1 s floor reset
+probe J at 1.005 s in a full A-K sequence while the carrier was still recovering. An
+explicit `hole_budget_ms` keeps its exact meaning (probe H asserts 500 ms).
+
 ### 4.7 Duplicate degree policy
 
 **Implemented in C5:** `dup` from the tunnel line (0..3; 0 = primary only, 1 = one
