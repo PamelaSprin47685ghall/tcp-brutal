@@ -754,6 +754,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **hnd0-hang 叠加修复（`f015a56`，待 T5.2 后合）**：near never-connected 重试并入拨号令牌桶、dead 2n 硬上限复用池、reconcile 重采样；QEMU Q PASS（`prov_peak=320`/`reject=8488`/`dead peak=8`/心跳 200/200/洪水后 `up=256/256`），A–P 16/16；未改 announce（t52-debug 主修）。**等 T5.2 结束再合；届时去重 announce 与 dead/dial 改动**。T5.2 当前用 `e7d1c83` 跑 8MiB interleaved；不 push。
 
+**hnd0-hang 最终验证（`bd7d308`，待 T5.2 后合）**：`e7d1c83` + `f015a56` + 证据；A–P **16/16**、probe Q PASS、**0 WARN**；未改 announce，保留 `dc4532a`。`path_lost_mask` 仍由 t52-debug 修。**排到 T5.2 之后合；现在不动 HND0/不合并/push**。T5.2 等 t52-debug path_lost 修复 + t52-perf 22M 分析。
+
 **T5.2 256 8MiB interleaved PASS（2026-11-06）**：integration `e7d1c83`/`124c27a`；`tbt_burst 8 30 interleaved`：**8,388,608 双向 byte-exact**；near `submit=8,388,608`、`tx_ack=8,388,608`、`up=256`、`lost=39/replaced=39`、`connect_fail=0`、`connect_retry=56`；far `submit=8,388,608`、`tx_ack=8,388,608`、`up=256`、`lost=0`；两端 c9 全 0（含 `fec_drop_window=0`）、`http_parse_err=0`；near `tx_window=8MiB`、`bdp=2,016,156`；far `http_resp=256`。证据 `256b-*`。待 E 报 CPU/wire/无新增 WARNING 后 T5.2 完成；然后合 `f015a56` 并去重 announce vs dead/dial。
 
 **T5.2 256 复跑结果（2026-11-06，未完成）**：数据路径 **8MiB 双向 byte-exact（6.11s）**，`fec_drop_window=0`/all c9=0/`http_parse_err=0`，wire/app near 17,063,469/8,388,608、far 16,999,600/8,388,608，CPU near 8.0%/far 12.2%。**但**：① 新增 UBSAN `_Bool value 14` at `tbt_fec_data.c:459`、`tbt_procfs.c:618/892`；疑似 `sess->path_lost_mask` 仍是 `unsigned long`（64 位），`set_bit(index)` 在 carrier 64..255 越界写，覆盖相邻 bool（`crypto`/`crypto_tx_ready`/`tx_paused`/`paused`）。② app 8MiB 双向/6.11s ≈22 Mbit/s 聚合（单向 11 Mbit/s），未达 33.72M 单向。T5.2 **未完成**；t52-debug 修 `path_lost_mask` 256 bitmap 后重跑；E hold；暂不合 `f015a56`。
