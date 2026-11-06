@@ -736,6 +736,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **T5.2 修复（`w-t52-debug 7b7965f`）**：两个根因：① crypto HELLO key ownership——far 采纳 near key 后仍把本地 key 当权威，后续 carrier `key_id=1` 被 `-EPROTO` 拒；加 `crypto_key_peer`，`resolve_key` 改 `local_key_wins`，采纳 key 与后续 HELLO 比较。② `kernel_connect` 超时返回 `-EINPROGRESS`(-115) 被当失败重拨；`tbt_connect_bounded()` 在 4s 内重入等待，`connect_retry` 计数。QEMU B,C,N,O PASS：probe N n=4/m=4 carriers=16 http-kal crypto=on `up=16`、`http_req=16/http_resp=16`、1MiB byte-exact；probe O smoke phases off/on/replace/slow 全 byte-exact、`connect_retry=2/connect_fail=0`；新增 c9 `fec_proto_fail`/`fec_hdr_crc_fail`/`fec_payload_crc_fail`。已合入 integration **`9f66fba`**，make check 绿。**T5.2 GO（新 master）**。
 
+**T5.2 256 观测点（t52-debug）**：far c9 `fec_payload_crc_fail` 必须为 0（crypto=on 下区分 key 不一致/对端沉默；增长而 `rx_proto` 不动 = key 不一致，预共享 key 只配一端会走到这里）；c3 `connect_retry` 非 0 可接受（WAN SYN >1s），但必须 `connect_fail=0`；若 `connect_fail` 涨且错误是 `-110 ETIMEDOUT` 才是真不可达。c8 `http_req == http_resp == carrier 数（含 drip spare）`；不等时 debug>=1 打 `http <stage>`/`HELLO rejected: <check>`。`clang-format-18` 本机缺失，`make format-check` 未跑，合并前注意 CI。
+
 ### G3 — T3 ChaCha8（C）
 
 | 项 | 内容 |
