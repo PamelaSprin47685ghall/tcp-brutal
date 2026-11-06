@@ -21,6 +21,8 @@
 
 **`.65` 网段变更（2026-11-06）**：新 **`192.168.31.65`**（网关 `192.168.31.1`），旧 `192.168.123.65` 失效；脚本里的 `123.65`/`123.254` 要改新网段。`t52-arm64-3` Level0：TCP/22 可建立但 sshd banner 前关闭（3 次），业务端口 `connect-ok/recv timeout` → **半活/僵死**；未取得 Level0 数据、未发业务流量。等用户 `.65` 控制台恢复；HND0 clean；T5.2 HOLD；smoke 仍 **1 carrier/37B → 8/16/32/64 × 1MiB/5s**；256 需 `t52-pace` 首波 pacing。不合并/push。
 
+**t52-pace WIP（2026-11-06）**：`t52-pace` 正在 **master 工作树**改 `tbt_carrier.c`（first-wave pacing：首波走同一拨号令牌桶、seed 16），**未提交**，且当前 diff 有重复 `static u32 tbt_dial_rate` 声明/重复宏；master 不干净，不能 merge。要求移到 `w-t52-pace` 分支、修重复声明、code-only；T5.2 HOLD；不 push。
+
 **HND0 清理确认（`hnd0-verify`，2026-11-06）**：10:56:45 UTC 无 tbtun、`/proc/net/tbtun` 不存在、9000/5202 无监听、无 echo/进程、无锁。sysctl 为**生产值**（rmem/wmem 16MiB、tcp 4MiB、fq/bbr），**不改成 64MiB**。10:51:39–10:56:03 窗口 UBSAN/WARN/BUG/OOM=0，未跑数据面；08:53–09:01 两轮 smoke 有 **16 UBSAN + 2 WARN**（`tbt_tx.c:2570`、array/shift OOB），已记录。**`t52-arm64` 在 HOLD 期间仍于 10:44/10:51/10:52 部署/加载/echo，agent kill 后留 PPID 1 残留**（已被并行清理）；需确认 HOLD 生效、不再部署。生产服务 active；不合并/push。
 
 **HND0 终态（`t52-arm64` 复查，2026-11-06）**：最后孤儿 `sleep 14400` PID 47739 已清；`lsmod` 无 tbtun、`/proc/net/tbtun` 不存在、9000/5202/10000 无监听、无 `tbt_echo`/`tbt_burst`/`flock`/`sleep`、无锁文件；HND0 **完全 clean**。`.65` 残留等 smoke 计划批准后清理；T5.2 HOLD；不合并/push。
