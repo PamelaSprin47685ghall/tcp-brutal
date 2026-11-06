@@ -44,6 +44,16 @@
 #define TBT_WQ system_unbound_wq
 #endif
 
+/* kernel_bind() and kernel_connect() took struct sockaddr * through 6.18.
+ * The "net: Introduce struct sockaddr_unsized" series (net-next-6.19) changed
+ * both to struct sockaddr_unsized *; the three call sites name the parameter
+ * type once here instead of carrying a guard each. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 19, 0)
+typedef struct sockaddr_unsized tbt_sockaddr;
+#else
+typedef struct sockaddr tbt_sockaddr;
+#endif
+
 /* Read a statistics counter (DESIGN.md §8.7) as the u64 the renderers print
  * with %llu. Every read of an atomic64_t counter goes through this or
  * atomic64_read(); the lint check in review/lint.sh refuses a bare field

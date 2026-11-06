@@ -160,7 +160,7 @@ int tbt_listen_start(struct tbt_tunnel *t)
      * application's connections, so it gets the whole budget. */
     tbt_car_setsockbuf(s, &t->cfg, t->cfg.role == TBT_ROLE_NEAR ? 1 : t->cfg.n);
 
-    err = kernel_bind(s, (struct sockaddr_unsized *)&addr, sizeof(addr));
+    err = kernel_bind(s, (tbt_sockaddr *)&addr, sizeof(addr));
     if (err)
         goto fail;
 

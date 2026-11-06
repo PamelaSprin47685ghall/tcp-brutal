@@ -2018,7 +2018,7 @@ static int tbt_connect_bounded(struct tbt_session *sess, struct socket *s,
 
     for (;;)
     {
-        int err = kernel_connect(s, (struct sockaddr_unsized *)addr,
+        int err = kernel_connect(s, (tbt_sockaddr *)addr,
                                  sizeof(*addr), 0);
 
         if (!err || err == -EISCONN)
@@ -2077,7 +2077,7 @@ static void tbt_car_connect_work(struct work_struct *w)
     /* The replacement carrier often reuses the port the dead one just freed,
      * which may still be in TIME_WAIT. */
     sock_set_reuseaddr(s->sk);
-    err = kernel_bind(s, (struct sockaddr_unsized *)&local, sizeof(local));
+    err = kernel_bind(s, (tbt_sockaddr *)&local, sizeof(local));
     if (err)
         goto release;
     /* Before the SYN: the handshake freezes the window scale from this
