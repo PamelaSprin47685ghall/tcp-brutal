@@ -790,6 +790,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **arm64 构建修复合入（`8cc568c`）**：6.1 `kernel_bind`/`kernel_connect` 的 `sockaddr` typedef（3 files +13/-3；`system_dfl_wq` shim 已有 `79dd27b`）；aarch64 ko 在 `.65` insmod/rmmod 2 次、proc 正常、0 WARN。已合入 master **`faf6280`**，make check 绿。等 `t52-credit` 后出最终 head；`arm64-build` rebase/rebuild；`t52-arm64` **先跑 direct P8 baseline**。不跑 HND0 256、不 push。
 
+**t52-credit 合入 / 最终 head（`2bcbc89`）**：`fec_ack_rot`、zero credit closed、c9 ACK/credit 计数合入 master（merge `2bcbc89`），make check 绿。最终 head 含 `51780c3 + c948e88 + 8cc568c + t52-credit`；`arm64-build` 跳过 `15284da` 预演，等 `.65` baseline 释放后直接对最终 head clean build/insmod；`t52-arm64` tunnel 用最终 ko。`t52-fec-loss` 仍为独立残留（block 缺 1 share+4 parity）。不跑 HND0 256、不 push。
+
 **T5.2 256 判读（t52-debug）**：c9 `fec_short_tx` 应随小包非零；`fec_short_unknown`/`fec_drop_window`/`fec_drop_crypto` 必须为 0；`fec_short_unknown` 增长 = 对端不是本 revision（`epoch` 未带短包长度）。c8 `http_req == http_resp == carrier 数`；不等时 debug>=1 打 `http <stage>`/`HELLO rejected`。c3 `connect_retry` 可非 0，`connect_fail` 必须 0；`-110 ETIMEDOUT` 才是真不可达。n>1 时空闲流首包延迟下限一个 block（n×8KiB）；256 `n=4/m=4` 只影响空闲首包时延，不影响吞吐。`epoch` 借用短包长度，两端必须同 revision。
 
 **T5.2 retest 失败（`db575ea`/`8a3589d`，2026-11-06）**：37B cookie 可过（`fec_short_tx=3/19`），但 8MiB 数据流停：near `submit=207`、`tx_ack=37`、`data_tx=0`、`capture_runs=4/actor_calls=3`；far `rx_delivered=207`、`rx_ack=0`、`tx_ack=1`；near `CLOSETIMEOUT` 15s（`ack=37 txseq=167`；另一流 `ack=0 txseq=37`）；c9 proto/hdr/payload=0、short_unknown/drop=0；c8 near `req=2/resp=0`、far `resp=2/4`；c3 `up=2 lost=0/2 connect_fail=0`。短包 flush 生效；剩余在 **http-kal 数据块封装/发送路径**（cookie 后 app 数据未进隧道）。E hold；`t52-debug` 继续。证据 `smoke-8M-crypto-off-*`、`smoke-P-crypto-off*`。
