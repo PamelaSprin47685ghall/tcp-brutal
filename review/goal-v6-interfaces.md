@@ -748,6 +748,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **T5.2 根因假设（2026-11-06）**：far `tx_window=1MiB` < `k×BDP` 2.26MB（`fec_drop_window=1527`≈2.3MB），加上 `tbt_burst` 先跑 strict send-then-read。`t52-256` 决定不重复 HND0 256；QEMU 复现/修由 `t52-debug` 负责；等其修复/参数（**4–8MiB W、interleaved**）再决定重跑。E hold，不跑 256。
 
+**announced_mask 16 槽根因（2026-11-06）**：`announced_mask` 仍是 `u16`、`announced_gen[16]` 仍是 16 槽；carrier >16 越界/截断，HND0 UBSAN，37B ping **0/37**。T5.2 256 在修复前**不可信**；`t52-debug` 正在改 **256-bit mask + gen[256] + guard**，QEMU OPEN 16/200/255。T5.2 HOLD，HND0 clean；**暂不合/不 push**；等 t52-debug head 后再 merge/重跑。4-bit GF(16) 仍本地；T6 等用户 1G/app 口径。
+
 **T5.2 256 判读（t52-debug）**：c9 `fec_short_tx` 应随小包非零；`fec_short_unknown`/`fec_drop_window`/`fec_drop_crypto` 必须为 0；`fec_short_unknown` 增长 = 对端不是本 revision（`epoch` 未带短包长度）。c8 `http_req == http_resp == carrier 数`；不等时 debug>=1 打 `http <stage>`/`HELLO rejected`。c3 `connect_retry` 可非 0，`connect_fail` 必须 0；`-110 ETIMEDOUT` 才是真不可达。n>1 时空闲流首包延迟下限一个 block（n×8KiB）；256 `n=4/m=4` 只影响空闲首包时延，不影响吞吐。`epoch` 借用短包长度，两端必须同 revision。
 
 **T5.2 retest 失败（`db575ea`/`8a3589d`，2026-11-06）**：37B cookie 可过（`fec_short_tx=3/19`），但 8MiB 数据流停：near `submit=207`、`tx_ack=37`、`data_tx=0`、`capture_runs=4/actor_calls=3`；far `rx_delivered=207`、`rx_ack=0`、`tx_ack=1`；near `CLOSETIMEOUT` 15s（`ack=37 txseq=167`；另一流 `ack=0 txseq=37`）；c9 proto/hdr/payload=0、short_unknown/drop=0；c8 near `req=2/resp=0`、far `resp=2/4`；c3 `up=2 lost=0/2 connect_fail=0`。短包 flush 生效；剩余在 **http-kal 数据块封装/发送路径**（cookie 后 app 数据未进隧道）。E hold；`t52-debug` 继续。证据 `smoke-8M-crypto-off-*`、`smoke-P-crypto-off*`。
