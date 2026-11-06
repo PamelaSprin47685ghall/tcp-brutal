@@ -79,6 +79,31 @@ typedef struct {
     long resolved;      /* target variables recovered by peeling */
 } sc_dec_stat;
 
+/*
+ * Read-only graph view for alternative codecs.  The pointers stay valid
+ * until sc_free().  vadj is variable-major (check ids), cadj is check-major
+ * (variable ids); both hold c->edges entries.  owned[ck] is the parity
+ * variable that check ck solves, or -1; it appears exactly once in the
+ * adjacency of check ck.  The check order is the construction order: base
+ * checks 0 .. n_base*m-1 grouped by coupling block, then the extra checks of
+ * a rate below 0.50.
+ */
+typedef struct {
+    int n;
+    int n_data;
+    int n_par;
+    int n_chk;
+    long edges;
+    int dc_max;
+    const int *voff;  /* n + 1 */
+    const int *coff;  /* n_chk + 1 */
+    const int *vadj;  /* edges */
+    const int *cadj;  /* edges */
+    const int *owned; /* n_chk */
+} sc_graph;
+
+void sc_get_graph(const sc_code *c, sc_graph *out);
+
 /* Build a code.  Returns NULL and fills err[] on invalid parameters. */
 sc_code *sc_build(const sc_params *p, char *err, size_t errlen);
 void sc_free(sc_code *c);

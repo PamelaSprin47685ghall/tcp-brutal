@@ -2,6 +2,8 @@
 
 日期 2026-11-06。代码：`review/fec-prototype/sc_ldpc/`
 （`sc_ldpc.c`、`sc_ldpc.h`、`sc_ldpc_bench.c`）。
+64 码字位平面编码器与解码器合并布局见 `review/sc-ldpc-bit64.md`
+（`sc_enc64.*`、`sc_enc64_pack.c`、`sc_enc64_sse2.c`）。
 构建：`review/fec-prototype/sc_ldpc/build.sh`，一行
 `cc -O3 -std=c99 -Wall -Wextra -Werror sc_ldpc.c sc_ldpc_bench.c -lm -o sc_ldpc_bench`。
 数据：`review/sc-ldpc-sim.csv`（106 行，含 `series` 与 `host` 列：54 个
