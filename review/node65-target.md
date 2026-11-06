@@ -264,3 +264,88 @@ tcp_sendmsg_locked -> EXPORT_SYMBOL_GPL; tcp_read_sock/tcp_prot/sock_create_kern
 ## 13. 本次明确未做的事
 
 未跑 benchmark、iperf/iperf3、FEC、任何发包/测速;未加载/卸载模块;未安装软件;未改路由、防火墙、sysctl、qdisc、IRQ affinity;未重启;未写入目标机任何文件。除 SSH 会话本身外未产生实验流量。
+
+---
+
+## 14. 当前状态快照(2026-11-06 17:43 CST,验收口径 = arm64 端)
+
+本次只做状态确认,未跑 benchmark、未做 256-carrier、未 push。额外产生的网络动作仅:3 个 ICMP 到 HND0、1 个 TCP/22 探测、1 次 DNS 解析。
+
+### 14.1 主机与登录
+
+| 项 | 值 |
+|---|---|
+| 地址 | `192.168.123.65`(私网,NAT 后;主表默认网关 `192.168.123.254`) |
+| SSH | `root@192.168.123.65`,公钥直连 OK(BatchMode) |
+| 当前登录 | `w` 仅 1 个 root 会话,来源 `192.168.123.69`(疑为主控机);`who` 为空 |
+| 主机名 | `lubancat`;设备 `Embedfire LubanCat-5 V2`(RK3588) |
+| uptime | 15 天 9 小时 |
+
+### 14.2 架构 / 内核 / 内存
+
+- `uname -m` = **aarch64**,`uname -r` = **6.1.172**
+- 8 核:`Cortex-A55 ×4`(≤1800 MHz)+ `Cortex-A76 ×4`(≤2304 MHz),`nproc=8`
+- 内存 7914 MiB total,**5404 MiB available**;swap 2047 MiB(已用 91 MiB)
+- 无 WiFi:`/sys/class/net` 只有 `eth0`、`eth1`、`usb0`、`Meta`、`lo`;`iw` 未安装,`nmcli` 显示 `eth0 ethernet connected`、`eth1 ethernet unavailable`。**没有 wlan 设备**。
+
+### 14.3 网络速率 / 双工
+
+| iface | 状态 | 速率 | 双工 |
+|---|---|---|---|
+| eth0 | UP,载波 | **1000 Mb/s** | **full** |
+| eth1 | DOWN,NO-CARRIER | -1(未知) | unknown |
+| usb0 | DOWN | — | — |
+| Meta | UP(mihomo TUN) | 10 Mb/s(虚拟) | full |
+
+### 14.4 负载 / 进程 / 其他 worker
+
+- load average:**0.00 / 0.02 / 0.00**(`1/331` 可运行/总任务),**当前空闲**
+- 无 `iperf` / `iperf3` / `tbtun` / `bench` / `fec` 进程;无相关 systemd unit
+- 常驻业务:`mediamtx`(CPU 3.8%)、`ffmpeg ×6`(各 0.3–0.4%,全部推 `rtsp://127.0.0.1:8554/camN`,本地回环,不占物理带宽)、`mihomo`、`frpc`、`rclone`、`atop`
+- **其他 worker 的痕迹(均已退出,当前无活动)**:
+  - `/tmp/tbtun-rk3588.lock`(root,0 字节,11-06 07:11)—— 说明曾有 rk3588/tbtun 任务在此机加锁运行
+  - `/root/.bash_history` 记录了 `uname -a`、`ip addr`、`cat /proc/cpuinfo`,以及向 `authorized_keys` 注入 `hatch` 的 ed25519 公钥
+  - `/root/.omp/natives/18.16.0`(11-06 06:09)
+  - `omp-renice.service` 是 10-22 起就常驻的优先级服务,不是活动实验
+- 结论:**没有正在跑的实验**;但有前人留下的锁文件与公钥,接手前应确认锁的语义(建议删除或确认无 flock 持有者;本次未删,只读)。
+
+### 14.5 构建工具链 / 模块
+
+| 项 | 值 |
+|---|---|
+| gcc | 15.2.0(Ubuntu 15.2.0-16ubuntu1) |
+| make | GNU Make 4.4.1 |
+| headers | `/lib/modules/6.1.172/build -> /usr/src/linux-headers-6.1.172`(存在) |
+| 已装 tbtun | **未加载**;`lsmod` 无 `tbtun`,`modinfo tbtun` = not found,`/lib/modules/6.1.172` 下无 `tbtun*.ko` |
+| 模块 arch | 该机没有任何 tbtun 模块产物;仓库里的 `tbtun.ko` 是 **x86-64**,不能用于本机 |
+| 内核可加载模块目录 | 标准 `kernel/net/ipv4/*.ko` 齐全(含 `tcp_bbr.ko` 等),无第三方模块 |
+
+编译阻断仍是 `system_dfl_wq`(§9.2):6.1.172 无此符号,源码 16 处引用。
+
+### 14.6 HND0 可达性
+
+| 检查 | 结果 |
+|---|---|
+| DNS `hnd0.kw92.cyou` | → `2a02:6ea0:d32f::f380:f495`(仅 IPv6 记录) |
+| TCP `45.11.1.62:22` | **OK**(timeout 5 s 内建连) |
+| ICMP `45.11.1.62` | 3 发 2 收,**33% 丢包**,RTT `302.4 / 308.9 / 315.3 ms` |
+| 路由 | `ip route get 45.11.1.62` → **`via 198.18.0.2 dev Meta table 2022`**,即**经 mihomo 代理**,不是物理 eth0 |
+| 主表 | `default via 192.168.123.254 dev eth0`(物理路径存在,但被 `ip rule 9002` 的策略路由覆盖) |
+| 旁证 | `mihomo` 有一条 ESTAB:`[2408:...]:52730 → [2a02:6ea0:d32f::f380:f495]:7000` —— **HND0 同时是 mihomo 的代理节点**,所以本机到 HND0 的流量天然被它接管 |
+
+### 14.7 判断:能否作为 near
+
+**可以,但有三个前置条件。**
+
+支持理由:
+- 验收口径要求 arm64 端,本机是当前唯一确认的 aarch64 目标;8 核 A76/A55、7.7 GiB 内存、1 GbE 全双工,规模匹配。
+- 当前 load 0.00,无实验进程;ffmpeg/mediamtx 走本地回环,对物理网卡吞吐影响小。
+- near 主动连接 far,位于 NAT 后不构成障碍(与 JYSZ 实验的 near 角色一致)。
+- HND0 的 TCP/22 可达。
+
+必须先解决:
+1. **构建补丁**:`system_dfl_wq` → `system_unbound_wq`(或版本兼容宏),否则 6.1.172 上编不过(§9.2)。
+2. **绕开 mihomo**:当前到 `45.11.1.62` 的路由是 `table 2022 via 198.18.0.2 dev Meta`。若直接跑,载体 TCP 会被本机 mihomo 代理,HND0 看到的源地址与路径都不是物理 WAN。需要为 far 地址加 `ip rule`/`ip route` 绕行(与 JYSZ 实验的 `ip rule 绕行` 做法一致),或临时停 mihomo。**这是写操作,本次未做。**
+3. **NAT 会话容量**:near 发起 N+M 条 TCP 连接。当前 16 carriers 无压力;若做 256,需评估出口 NAT 的会话表与端口映射上限(本次未测)。
+
+不建议直接用当前状态跑 benchmark 的原因:load 虽低,但 HND0 路径经代理、RTT 302–315 ms 且 33% ICMP 丢包,测出的数字不代表物理 WAN;且本机有前人留下的锁与业务进程,需先确认归属。
