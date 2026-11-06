@@ -770,7 +770,13 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **WARN 更正（2026-11-06）**：final-256 的两条 `tbt_tx.c:2570` 是 **stale**（425330/425673，早于 final load 427402.991/unload 427489.181）；42ed56f final **无新 WARN/UBSAN**，与 hnd0-hang Q/A–P 的 0 WARN 一致。**不要按 WARN 阻塞**；唯一异常 near `lost=1/replaced=1/connect_fail=1`（far 干净）。`t52-debug2` 不再追 WARN；`t52-perf` 查 22.8M 吞吐。T5.2 HOLD。
 
+**final-256 WARN 归因（`t52-debug2`）**：`f015a56` 的 2570 行是 `WARN_ON_ONCE(!tbt_stream_announced)`，其 `tbtun.h` 仍是 `u16 announced_mask` + `gen[16]`；256 carrier idx≥16 越界/`BIT(idx)` 未定义，WARN 必然。两条 WARN 425330/425673 早于 final-256 模块 load 427402.991，属旧模块；42ed56f（dc4532a 后）同一 WARN 在 2586 行，load 427402.991→unload 427489.181 **无 WARN/UBSAN**。near `lost=1/replaced=1/connect_fail=1` 是启动期一条 carrier 被判 lost + 同 index 替换 + 首次 connect 失败后 200ms 重试成功；`up=256` 后数据无影响，不是 announce race。dead 池复用审计：`take_dead` memset 只清 carrier 标量，announced 在 stream；gen 不同，OPEN 重发；pump/replace 同持 `pump_lock`，无 memset 窗口。**观察项（未改）**：pinned FIN/RST 的 `path=0xff` 在 `n_car=256` 时会落到 `sess->car[255]`；pump 注释称 never sees，但取 carrier 用 `sess->car[fr->path]` 直取；final-256 未观察到异常，另开 ticket。
+
+**256 边角：pinned FIN/RST `path=0xff`（2026-11-06）**：pinned FIN/RST 的 `path=0xff` 在 `n_car=256` 时会落到 `sess->car[255]`；`t52-debug2` 在修（guard/专用语义），修后合入再 final。T5.2 只剩 **22.8M<33.72**；`t52-perf` 查 `una_stall`/ACK/window。不合并/push。
+
 **T5.2 吞吐算术裁决（t52-perf）**：`p=m/(n+m)`；p30 最低 r=1.429、p40 r=1.667、p50 r=2.0。33.72M 单向需 wire **48.2/56.2/67.4M**。当前单向 wire 22.3M（tbtun=直连 P8 56.82M 的 39%）；22.3M 下所有 p–app 点 ≤22.3，降冗余不能到 33.72。p50 单向需 67.4M=直连 119% **不可达**；p40 需 99%；p30 需 85%。**关键裁决：验收是单向 33.72 还是双向同时每方向 33.72**；near 出口 `wlp4s0` 半双工，双向同时空口需 2×W，p30 需 96.4M>56.8，不可达。QEMU 350ms/50Mbit 矩阵待 t52-perf。
+
+**T5.2 验收口径待用户裁决（2026-11-06）**：① **单向 33.72M**：p30 wire 48.2M=85% 直连（可行）、p40 56.2=99%、p50 67.4=119% **不可达**；② **双向合计 33.72M**：每向 16.86M，p30 总 wire 48.2M **可行**；③ **双向同时每方向 33.72M**：p30 空口 96.4M>56.8 **不可达**。T5.2 HOLD，不静默降级；`t52-perf` 等口径后测单向/合计；`t52-debug2` 修 `path=0xff`；不跑 256、不 push。
 
 **T5.2 256 判读（t52-debug）**：c9 `fec_short_tx` 应随小包非零；`fec_short_unknown`/`fec_drop_window`/`fec_drop_crypto` 必须为 0；`fec_short_unknown` 增长 = 对端不是本 revision（`epoch` 未带短包长度）。c8 `http_req == http_resp == carrier 数`；不等时 debug>=1 打 `http <stage>`/`HELLO rejected`。c3 `connect_retry` 可非 0，`connect_fail` 必须 0；`-110 ETIMEDOUT` 才是真不可达。n>1 时空闲流首包延迟下限一个 block（n×8KiB）；256 `n=4/m=4` 只影响空闲首包时延，不影响吞吐。`epoch` 借用短包长度，两端必须同 revision。
 
