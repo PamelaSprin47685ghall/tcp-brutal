@@ -38,9 +38,10 @@ exactly. The extra ports 41016..41031 exist so the control flow and the direct
 latency flow can be shaped exactly like a carrier without ever being picked by
 the module.
 
-Only the near-to-far direction is shaped: the far listener's replies leave
-with port 19101, which falls into the unshaped default class. That isolates
-the per-5-tuple limit, as probe I does.
+Only the near-to-far direction is shaped in the probe-I scenarios: the far
+listener's replies leave with port 19101, which falls into the unshaped
+default class. That isolates the per-5-tuple limit, as probe I does. The
+`wan` scenario is the exception: it delays the return path too (section 8).
 
 ### Measurement points
 
@@ -128,8 +129,10 @@ defined without paying 130 s for another control.
 
 Useful options: `--mib N`, `--n N`, `--only PROFILE`, `--loss PPM`,
 `--iters N`, `--loss-iters N`, `--netem 'delay|5ms|2ms'`, `--window S`,
-`--tag NAME`, `--timeout S`. `--quick` sets 8 MiB, a 1 s window, and 2000
-latency iterations unless the option was given explicitly.
+`--wan-mbit M`, `--wan-delay D` (a bare number or `109ms`), `--rx-reorder N`,
+`--tx-window N`, `--hole-budget MS`, `--tag NAME`, `--timeout S`. `--quick`
+sets 8 MiB, a 1 s window, and 2000 latency iterations unless the option was
+given explicitly.
 
 Each invocation writes `benches/results/<stamp>-<scenario>[-<tag>].csv` and
 `...-carriers.csv`, prints a table, and leaves the console log in
@@ -140,7 +143,8 @@ already running, the run warns and records the count in
 
 Requirements: `qemu-system-x86_64`, `/dev/kvm` writable, the kernel image and
 busybox from `tests/qemu/README.md`'s cache, and `/usr/bin/tc` (the guest's
-busybox `tc` has no u32 filters). `make check` must have produced
+busybox `tc` has no u32 filters). The `wan` scenario also needs `/usr/bin/ip`:
+busybox `ip` cannot create an `ifb` device. `make check` must have produced
 `./tbtun.ko`.
 
 ## CSV columns
@@ -180,6 +184,22 @@ measures and leaves the rest empty.
 | `qemu_rss_peak_kb` | host-side peak RSS of the QEMU process |
 | `host_qemu_others` | foreign qemu processes at run start (contention signal) |
 | `rc`, `strict`, `notes` | transfer exit status, byte-exact strict phase passed, free-form note |
+| `wan_mbit`, `wan_delay_us`, `wan_ingress` | wan shaping: per-port class rate, one-way delay, and whether the ifb ingress delay was installed |
+| `rx_mbit`, `inflight_sum` | echo direction's rate into the burst socket; sampler's peak sum of near-carrier in-flight bytes |
+| `bdp_bytes`, `k_x100`, `tx_window`, `rx_reorder_bytes` | the module's auto window: B, k (x100), W, and the receiver reorder budget R the window is capped by |
+| `tx_ack`, `win_block`, `pump_hw_armed`, `pump_hw_fired` | tunnel ack offset, window-block count, hardware-pump state |
+| `car_delivery_mbps`, `car_srtt_ms`, `car_cwnd_kb`, `car_snd_wnd_kb` | row-end carrier aggregates (delivery rate, TCP SRTT, cwnd, advertised window) |
+| `car_sndbuf`, `car_rcvbuf` | the carrier socket's send and receive buffers, as the module set them |
+| `rtt_min_us`, `rtt_mean_us`, `rtt_max_us`, `rttvar_us`, `n_carriers` | module RTT gauges; `rtt_mean_us` is the delivery-weighted carrier TCP SRTT, the window's base |
+| `sum_delivery_mbps`, `mean_bdp_kb`, `coverage`, `k_eff`, `inflight_over_window` | delivery sum, mean BDP, peak window over that BDP, and the peak in-flight excess over W |
+| `hole_budget_ms`, `carrier_stall_ms` | receiver hole budget and carrier stall threshold |
+
+The per-carrier CSV (`...-carriers.csv`) has one row per near-side carrier
+per measurement: `bytes`, `frames`, `dropped`, `retx_ppm`, `inflight`,
+`delivery_rate_bps`, `cwnd_bytes`, `snd_wnd`, `rtt_us`, and the window-scale
+diagnostics `wscale` (`rcv<<4|snd`), `rcv_wnd`, `window_clamp`, `rmem_alloc`.
+`rmem_alloc=0` with a small `snd_wnd` is not a full receive queue; the four
+columns are what tell the two apart.
 
 `spec_bytes_max` is no longer sampled: `benches/qemu/init` dropped the
 speculative-bytes field, so new rows leave that column empty. The header in
@@ -394,6 +414,89 @@ Reading:
   `holes_unrecoverable=0 carrier_lost=0`; there is no RST storm.
 - The n=1 40 MiB row is byte-exact (`rc=0 strict=1`) with zero copies and a
   whole-run wire/app of 1.019, down from the recorded 1.98/`rc=3`.
+
+### 8. WAN path: 218 ms, 17 Mbit/s, one raw stream (2026-11-06)
+
+The `wan` scenario measures the two-parameter window on the path the design
+targets: one raw stream, one carrier, 17 Mbit/s, 218 ms. The topology is the
+same slirp one, but both directions of the carrier path are shaped. The
+egress root qdisc keeps the per-port htb class (17 Mbit/s) and its netem
+child at 109 ms; the return path arrives on eth0 ingress, so an ingress qdisc
+redirects every IPv4 packet to `ifb0`, whose root netem adds the same 109 ms.
+Each carrier TCP packet then pays 109 ms leaving the guest and 109 ms entering
+it, and the carrier TCP round trip is 218 ms. `wan_ingress=1` in the row says
+the redirect was installed; `rtt_mean_us` is the delivery-weighted carrier TCP
+SRTT, so it is the number to read, not the tunnel's own FBK estimate (which
+pays both slirp legs and is larger).
+
+`ip` comes from the host as a `--bin` asset: busybox `ip` cannot create an
+`ifb` device. The modules `ifb`, `act_mirred`, `act_gact` and `sch_ingress`
+are part of the guest's module set. `rp_filter` is disabled on `all`,
+`default`, `eth0` and `ifb0`; a packet re-injected from `ifb0` has no reverse
+route through it and strict filtering would drop it as a martian.
+
+The row prints the window inputs and the window itself: `bdp_bytes` (B),
+`k_x100` (k), `tx_window` (W), `rx_reorder_bytes` (R), `inflight_sum` (the
+sampler's peak in-flight sum over the near carriers), `ooo_bytes_max`,
+`reorder_max_depth`, `rxq_max`, `hole_budget_ms` and `rto_us`. Each carrier
+line adds the four window-scale diagnostics: `wscale` (`rcv<<4 | snd`),
+`rcv_wnd`, `window_clamp` and `rmem_alloc`. The startup `BENCHNOTE sysctl`
+records `tcp_window_scaling`, `rmem_max`, `wmem_max`, `tcp_rmem` and
+`tcp_wmem` for the boot.
+
+Two runs, both with `--n 1 --mib 16 --wan-mbit 17 --wan-delay 109ms`:
+
+| Run | rc | strict | rtt_mean_us | rx_mbit (2 s window) | wall_s | app Mbit/s (whole run) | wire/app (2 s window) | retx_ppm | holes_unrecoverable |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| acceptance (default window and hole budget) | 2 | 0 | 218143 | 0.16 | - | - | 1.0250 | 7692 | 0 (far TX stall: 1) |
+| `--hole-budget 6000` | 0 | 1 | 218155 | 0.16 | 123.4 | 2.17 | 1.0201 | 55705 | 0 |
+
+`rx_mbit` is the 2 s sampler window that starts once 256 KiB has been
+submitted, so on this path it lands in slow start (0.16 Mbit/s) and is not a
+steady rate; the whole-run column is the one to compare against the ceiling.
+
+The acceptance row fails in about 10 s: `tbt_burst` sent 8,489,857 bytes and
+got `EPIPE` (`strict send-then-read failed ... errno=32`). The far tunnel
+reports `holes_unrecoverable=1` and `tx_ack=0`; the near tunnel sent 233 FBK
+frames but the far parsed only 75. The cause is visible in the window
+columns: `snd_wnd=65535`, `wscale=0`, `rcv_wnd=3.97 MB`,
+`window_clamp=5.27 MB`, `rmem_alloc=0`, while the module's window is
+`tx_window=1048576` and the sampler sees 1.06 MB in flight. The 1 MiB window
+is 15.6 mean BDPs; at the carrier's actual 2.4 Mbit/s it takes about 3.4 s to
+drain, and the FBK frames share the carrier TCP stream behind that data. The
+far side's hole budget is 1.5 s, so it kills the stream before the feedback
+arrives.
+
+Raising the hole budget to 6 s makes the same volume complete byte-exact in
+123.4 s: 16 MiB each way, 2.17 Mbit/s of application bytes over the whole run
+and 2.35 Mbit/s of wire per direction (the whole-run ratio is 1.082; the
+row's 1.0201 is the 2 s window, before most retransmits). That is 98% of the
+carrier-window ceiling, not a tuning artifact.
+
+**The binding term is the peer's advertised window, and it cannot be widened
+from the guest.** The carrier's TCP peer is libslirp 4.9.5, which has no
+window-scale option (its `tcp_input.c` never parses `TCPOPT_WINDOW`), so its
+SYN-ACK advertises at most 65535 bytes. Linux then takes the RFC 7323 path:
+`tcp_input.c` clears `snd_wscale` and `rcv_wscale` and clamps `window_clamp`
+to 65535 when the SYN-ACK carries no scale option. The 8 MiB
+`SO_RCVBUFFORCE` on the carrier socket is therefore irrelevant to
+`snd_wnd`: `rmem_alloc=0` says the local receive queue is empty, and
+`rcv_wnd`/`window_clamp` grow to 5-6 MB, but with `rcv_wscale=0` the
+advertised window field is capped at 64 KiB. At 218.2 ms that is
+65535 x 8 / 0.2182 = **2.40 Mbit/s per direction**. A 13.7 Mbit/s receiver
+would need about 374 KB in flight, 5.7 times what the peer can advertise.
+`cwnd` (216 KB at the row end) is above the window, so it is not binding;
+B/k/W are not binding either (W = 1 MiB = 15.6 B); the app path is not
+binding (the clean run keeps `rxq_max` at 1.1 MB and `holes_unrecoverable=0`).
+Only a smaller RTT or more carriers raises this ceiling; the per-port class
+rate of 17 Mbit/s is never reached with one carrier on this topology.
+
+One harness bug surfaced while measuring this: `/tmp/q.log` starts each line
+with the uptime, so the sampler's field indices for `inflight_sum`,
+`tx_window`, `delivery_rate`, `cwnd`, `snd_wnd` and `inflight_over_window`
+were each one field early. The indices are fixed here; WAN rows recorded
+before 2026-11-06 04:58 have those six columns shifted by one and must not be
+compared against later rows.
 
 ## Reading the numbers
 

@@ -132,14 +132,9 @@ static void tbt_pub_capture_work(struct work_struct *w)
         if (queued > 0)
         {
             WRITE_ONCE(st->tx_fin_queued, true);
-            if (READ_ONCE(st->rx_fin_done))
-            {
-                /* Both directions have finished: our FIN is queued and the
-                 * peer's FIN has been delivered.  Leave the session now so
-                 * the next connection can start; a half-closed stream stays
-                 * attached so the peer's return traffic still reaches it. */
-                tbt_stream_detach_from_session(st);
-            }
+            /* Never detach on the queued copy: the pump still has to write it
+             * after tx_ack covers tx_seq.  maybe_detach() waits for both. */
+            tbt_stream_maybe_detach(st);
         }
         /* queued == 0: no carrier was usable.  tx_fin_sent stays set and the
          * FBK tick retries; never detach without a FIN in the queue. */
@@ -259,6 +254,16 @@ static void tbt_drain_work(struct work_struct *w)
          * is retried when the output socket's window opens (sk_write_space
          * schedules this work again). */
         done = tbt_sock_deliver(st, fr->data + fr->off, left);
+        if (done == -EPIPE || done == -ECONNRESET || done == -ESHUTDOWN)
+        {
+            /* The target is gone (EPIPE/ECONNRESET) with frames still queued:
+             * they can never be delivered. Abort the stream now so the peer
+             * resets its application, instead of holding the backlog until
+             * its own stall budget (measured: the far held 2.65 MB with
+             * tgt_state=7 while the near kept sending). */
+            tbt_stream_kill(st, TBT_ST_DEAD);
+            break;
+        }
         if (done <= 0)
             break;
 
@@ -316,11 +321,12 @@ static void tbt_drain_work(struct work_struct *w)
     if (eof)
     {
         tbt_sock_shutdown_wr(st);
-        /* The near side may have sent its FIN first; this EOF is the other
-         * half of the close.  detach() only takes sess->lock and stamps the
-         * tombstone, so it is safe inside w_drain. */
-        if (READ_ONCE(st->tx_fin_queued))
-            tbt_stream_detach_from_session(st);
+        /* The peer's FIN is delivered; this is one half of the close.  Leave
+         * the session only after our own FIN is written as well, so its order
+         * gate is not released while DATA is still unacknowledged.  detach()
+         * only takes sess->lock and stamps the tombstone, so it is safe
+         * inside w_drain. */
+        tbt_stream_maybe_detach(st);
     }
 }
 
@@ -363,6 +369,11 @@ static void tbt_ctrl_work(struct work_struct *w)
          * already be CLOSE after FIN_WAIT2 -> tcp_time_wait -> tcp_done.  The
          * capture work item emits the FIN once the preceding bytes are in. */
         schedule_work(&st->w_read);
+        /* A target that closed with our delivery queue non-empty cannot take
+         * those bytes any more; let w_drain discover the write error and
+         * abort the stream instead of leaving the queue parked. */
+        if (READ_ONCE(st->rx_queued))
+            schedule_work(&st->w_drain);
         return;
     }
     /* TCP_CLOSE without sk_err is a graceful or local close, not a reset.
@@ -409,10 +420,10 @@ static void tbt_kill_work(struct work_struct *w)
 
     if (!READ_ONCE(sess->closing))
     {
-        mod_delayed_work(system_dfl_wq, &sess->w_reap,
+        mod_delayed_work(TBT_WQ, &sess->w_reap,
                          msecs_to_jiffies(TBT_REAP_INTERVAL_MS));
         if (sess->tunnel && sess->tunnel->cfg.role == TBT_ROLE_NEAR)
-            queue_delayed_work(system_dfl_wq, &sess->w_pending, 0);
+            queue_delayed_work(TBT_WQ, &sess->w_pending, 0);
     }
 
     tbt_stream_put(st); /* the reference taken in tbt_stream_kill() */
@@ -647,7 +658,7 @@ void tbt_pending_work(struct work_struct *w)
             list_add(&p->node, &sess->pending);
             sess->n_pending++;
             spin_unlock(&sess->lock);
-            queue_delayed_work(system_dfl_wq, &sess->w_pending,
+            queue_delayed_work(TBT_WQ, &sess->w_pending,
                                msecs_to_jiffies(1));
             return;
         }
@@ -717,7 +728,7 @@ int tbt_stream_start(struct tbt_session *sess, struct socket *sock)
     sess->n_pending++;
     spin_unlock(&sess->lock);
 
-    queue_delayed_work(system_dfl_wq, &sess->w_pending, 0);
+    queue_delayed_work(TBT_WQ, &sess->w_pending, 0);
     return 0; /* ownership transferred; accept loop must not release */
 }
 

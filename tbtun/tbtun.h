@@ -28,6 +28,21 @@
 
 /* Wire constants, /proc names and the version live in the shared header. */
 #include "tbt_uapi.h"
+#include <linux/version.h>
+
+/* system_dfl_wq exists from 6.5. Its documented semantics are "unbound, not
+ * concurrency managed, all queued works run immediately while max_active
+ * allows". 6.1's system_unbound_wq is unbound and concurrency managed; the
+ * module's works are short and sleepable, so the difference does not change
+ * behavior. Keep one name so a 6.1 build needs no scattered guards. */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+#error "tbtun needs Linux 6.1 or newer (README, DESIGN §2)"
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+#define TBT_WQ system_dfl_wq
+#else
+#define TBT_WQ system_unbound_wq
+#endif
 
 /* Read a statistics counter (DESIGN.md §8.7) as the u64 the renderers print
  * with %llu. Every read of an atomic64_t counter goes through this or
@@ -150,7 +165,7 @@ void tbt_listen_stop(struct tbt_tunnel *t);
 #define TBT_PENDING_MAX 128
 #define TBT_STREAMS_MAX 128
 #define TBT_STREAM_SNAP_MAX 128
-#define TBT_SQ_MAX (64 * 1024)      /* per-stream frame queue cap, bytes  */
+#define TBT_SQ_MAX (64 * 1024)      /* minimum frame queue cap, bytes    */
 /* Ready-to-deliver queue cap. It must exceed the volume a strict
  * send-then-read application can echo back before it starts reading (4 MiB in
  * the harness), or the delivery pause stops the carrier read and with it the
@@ -185,23 +200,48 @@ void tbt_listen_stop(struct tbt_tunnel *t);
 #define TBT_CTL_QUEUE_MAX 256
 
 /* Retransmit timer: a retained frame whose last write is older than this and
- * that the peer has not delivered is re-sent on another path. The floor is
- * two feedback intervals, so ordinary ack latency never looks like loss, and
- * it must stay below the receiver's byte budget divided by the data rate or
- * the budget fires first (measured: probe D, 2% loss at 8 MB/s, 256 KiB
- * reorder budget, 40 ms floor: the near reset the stream one run in three). */
-#define TBT_RETX_MIN_US 20000
+ * that the peer has not delivered is re-sent on another path. The timeout is
+ * SRTT + 4 x RTTVAR (tbt_tx_rto_ns); the floor is TCP's 200 ms minimum, so a
+ * jittery path does not declare a frame lost while its ack is still inside
+ * the jitter band. It must stay below the receiver's hole budget: a 200 ms
+ * floor leaves room for a repair to arrive before the 500 ms default. */
+#define TBT_RETX_MIN_US 200000
 #define TBT_RETX_MAX_US 500000 /* must cover 2x the feedback delay */
 
 /* Replay ring: acked frames stay available for re-send for this long, or
  * until cfg.replay bytes are held, whichever comes first (DESIGN.md §9.6). */
 #define TBT_REPLAY_MS 1000
 
-/* The sender's window: how far it may run ahead of the peer's contiguous
- * received offset. It must cover the shaped path's BDP (40 Mbit x 50 ms
- * ~= 250 KiB), so it uses the whole reorder budget; the reorder tree cannot
- * exceed that budget without the overflow kill. */
-#define TBT_TX_WINDOW_DIV 2
+/* The sender's window (DESIGN.md §5.4): how far it may run ahead of the
+ * peer's contiguous received offset. `tx_window_bytes=0` (the default)
+ * derives it from the path:
+ *
+ *   auto = min(max(k x mean_BDP, 2 frames), rx_reorder_bytes)
+ *   k = (RTO + one_way + fb_delay) / mean_srtt
+ *
+ * The 1 MiB bootstrap value applies only while no carrier has a sample; it
+ * must not override k x B afterwards (measured: a 70 KB BDP at k=2 turned
+ * into a 1 MiB window, whose 3.4 s drain at 2.4 Mbit broke the 1.5 s hole
+ * budget).
+ *
+ * mean_BDP = mean_srtt x sum(delivery_rate), with the rate and SRTT from each
+ * carrier's own TCP BBR estimator (rate_delivered/rate_interval_us, srtt_us)
+ * and RTTVAR from mdev_us. The window covers one loss-repair interval, so
+ * the receiver's peak reorder occupancy is the whole window and the capacity
+ * identity is R >= W (DESIGN.md §5.4). A fixed 128 KiB (the old
+ * rx_reorder_bytes/2) capped a 218 ms, 17 Mbit path at ~4 Mbit; that path's
+ * BDP is ~465 KiB. The ceiling is the receiver's reorder budget, never a sum
+ * of carrier cwnd: carrier TCP frees cwnd on its own ACK while the bytes
+ * still sit in the receiver's tree. A frame beyond the budget is a stream
+ * kill, not a retransmit. */
+#define TBT_TX_WINDOW_AUTO_FLOOR (1024 * 1024)
+
+/* Total carrier socket-buffer budget, divided by the carrier count. At 256
+ * carriers this is 512 KiB each (the kernel doubles the setsockopt value),
+ * 128 MiB in total; at n=1 it is capped by the per-carrier 1 MiB setsockopt
+ * value (2 MiB effective), enough for the 1 MiB window. Without this bound,
+ * an 8 MiB per-carrier setting would allocate 2 GiB at 256 carriers. */
+#define TBT_CAR_SOCKBUF_TOTAL (128 * 1024 * 1024)
 
 /* A carrier that never presents a HELLO is retired after this long. */
 #define TBT_JOIN_TIMEOUT_MS 5000
@@ -333,6 +373,10 @@ struct tbt_stream
     bool tx_fin_written;      /* at least one FIN copy reached the wire */
     bool tx_fin_seq_set;      /* tx_fin_seq frozen at the first request */
     u64 tx_fin_seq;           /* byte offset every FIN copy names */
+    u64 close_since_ns;       /* first FIN request; the bounded close timer
+                               * runs from here and from the last ack, so a
+                               * slow but progressing drain is not cut short */
+    u64 close_fin_written_ns; /* our FIN reached the wire: the peer-FIN bound */
     unsigned long tx_fin_mask;     /* carriers that already have a FIN copy */
     unsigned long tx_fin_inflight; /* FIN copies queued, not yet written/dropped */
     bool tx_rst_written;      /* at least one RST copy reached the wire */
@@ -369,6 +413,8 @@ struct tbt_stream
     u64 rx_fin_seq;           /* byte offset the peer's FIN follows */
     bool rx_fin_seen;
     bool rx_fin_done;
+    u64 deliver_mark;         /* last rx_delivered the FBK tick saw */
+    u64 deliver_since_ns;     /* no delivery progress since this time */
     u8 rx_err;                /* pending socket error, 0 = none */
     bool paused;              /* rx_q full: stop reading carriers */
 
@@ -469,6 +515,21 @@ struct tbt_session
     bool peer_paused; /* the peer reports a full delivery queue */
     u64 last_ack_ns;      /* mirror: last stream ack, proc/control only */
 
+    /* Auto sender window (DESIGN.md §5.4). tx_window is the effective byte
+     * budget, recomputed by the pump from the carriers' own BBR rate samples
+     * (rate_delivered/rate_interval_us and srtt_us), not from a second
+     * congestion controller. rtt_max_us is the largest current carrier RTT.
+     * txq_max is the frame-queue bound derived from the window, so a larger
+     * window cannot be throttled by the old 64 KiB queue. */
+    u32 tx_window;
+    u32 txq_max;
+    u32 bdp_bytes;    /* aggregate BDP B = sum(rate_i x (srtt_i + fb)) */
+    u32 k_x100;       /* window multiplier k = RTO / mean_srtt, x100 */
+    u64 last_loss_ns; /* last retransmit queued: hold the window for 1 s */
+    u32 rtt_mean_us;  /* delivery-weighted mean SRTT: the window's base */
+    u32 rttvar_us;    /* largest carrier mdev_us: the window's jitter term */
+    u32 rtt_max_us;   /* largest carrier SRTT, a distribution fact */
+
     /* Scheduler: a striping window over the carriers, rebuilt on the lowest
      * inflight and at most every 10 ms. Only the pump touches it. DATA uses
      * the stream's copy; ctrl_sched serves FBK and streamless control. */
@@ -504,6 +565,8 @@ struct tbt_session
     /* Each carrier's poll work writes this for itself; several carriers run
      * concurrently, so it is atomic like the rx counters above. */
     atomic64_t stall_paused_skips;
+    atomic64_t stall_idle_skips; /* poll: no unacked bytes, clock reset */
+    atomic64_t stall_declared;   /* poll: stall timer killed a carrier */
     /* DATA admissions deferred by the peer window; tbt_tx_pump() only, and
      * the pump is serialised by sess->pump_lock, so a plain u64 is safe. */
     u64 win_block, win_resume;
@@ -534,9 +597,30 @@ struct tbt_session
     atomic64_t dup_used;        /* duplicate copies that filled a gap first */
     atomic64_t dup_suppressed;  /* duplicates skipped by max_inflate */
     u64 dup_same_path;   /* duplicates forced onto an already-used path */
+    atomic64_t dbg_retx_evident; /* hole at the ack was evident */
+    atomic64_t dbg_retx_cand;    /* retransmit candidates queued */
+    atomic64_t dbg_retx_nosends; /* skipped: never written */
+    /* Why a retransmit copy did not reach the wire. A copy that is created
+     * but never written is the failure that let the receiver's hole budget
+     * reset a stream with the bytes still in our own queue; each branch of
+     * the pump and of the carrier's all-or-nothing pre-check owns one
+     * counter, so /proc names the blocking gate. */
+    u64 dbg_retx_txqdrop;  /* dropped by the txq byte bound */
+    u64 dbg_retx_nopick;   /* no carrier after the avoid/stalled fallback */
+    u64 dbg_retx_stalled;  /* ... and the stalled-path mask was non-empty */
+    u64 dbg_retx_notup;    /* carrier not up */
+    u64 dbg_retx_notann;   /* stream not announced on that carrier */
+    u64 dbg_retx_batch;    /* entered the write batch */
+    u64 dbg_retx_eagain;   /* carrier returned -EAGAIN */
+    u64 dbg_retx_memshort; /* pre-check: sndbuf has no room for the record */
+    u64 dbg_retx_wndshort; /* pre-check: peer window short (copy still queued) */
     u64 holes_declared;  /* geometric test declared a lost frame; tx_lock */
     u64 holes_repaired;  /* a declared hole was filled; tx_lock */
     atomic64_t holes_unrecoverable; /* case B: the stream was reset */
+    atomic64_t close_timeouts;   /* a FIN wait exceeded its bound: reset */
+    atomic64_t close_detaches;   /* FIN written, peer FIN absent: detached */
+    atomic64_t deliver_timeouts; /* peer FIN seen, delivery made no progress */
+    atomic64_t dbg_deliver_checks; /* FBK: peer FIN seen, rxq non-empty */
     atomic64_t hole_checks;      /* diagnostic: hole test had a candidate */
     atomic64_t hole_gate_fail;   /* diagnostic: consistency gate refused */
     atomic64_t hole_depth_fail;  /* diagnostic: depth below k_max_hole */
@@ -564,6 +648,11 @@ struct tbt_session
     atomic64_t sack_rx;
     atomic64_t sack_unknown;
     atomic64_t rx_reorder_overflow;
+    /* Sum of every stream's out-of-order bytes, so the reorder budget is a
+     * session bound and not 128 x rx_reorder_bytes. Written under each
+     * stream's rx_lock; different streams' rx work runs concurrently, so the
+     * total is atomic. */
+    atomic64_t rx_ooo_total;
     atomic64_t rx_data_frames;
     atomic64_t rx_delivered_bytes;
     u64 sched_sorts;     /* pump only */
@@ -590,6 +679,7 @@ struct tbt_session
     u32 snap_rx_queued, snap_tx_queued;
     u32 snap_pub_wmem, snap_pub_snd_una, snap_pub_snd_nxt;
     u32 snap_car_wmem, snap_car_rcv_nxt, snap_car_copied, snap_car_rcvbuf;
+    u32 snap_car_sndbuf;
     u8 snap_pub_state, snap_rx_paused, snap_tx_paused;
     u8 snap_car_state, snap_car_stopping, snap_car_ud, snap_car_ready_ok;
     u8 snap_car_ws_ok;
@@ -620,6 +710,7 @@ struct tbt_carrier
     atomic_t connected;           /* socket installed, callbacks live */
     atomic_t up;                  /* HELLO written; usable for scheduling */
     atomic_t stopping;
+    atomic_t rx_again;            /* a wake was coalesced into a running rx */
     bool hello_sent;              /* our HELLO was written on this carrier */
     bool open_sent;               /* this carrier has written at least one OPEN */
     bool saw_hello;               /* the peer's first frame was a HELLO */
@@ -659,7 +750,8 @@ struct tbt_carrier
                                    * peer's high-water minus its recv_cnt */
     u64 last_una;                 /* last snd_una observed */
     u32 last_nxt;                 /* last snd_nxt observed (wire progress) */
-    u64 last_una_ns;              /* when snd_una last moved (or blocked) */
+    u64 last_una_ns;              /* carrier stall clock: start of the current
+                                   * unacked, no-progress interval */
     u64 last_una_move_ns;         /* when snd_una really moved: progress */
     u64 last_rx_ns;
     u64 last_tx_ns;
@@ -720,6 +812,7 @@ void tbt_pending_drain(struct tbt_session *sess);
 size_t tbt_tx_submit(struct tbt_stream *st, struct sk_buff *skb, unsigned int off, size_t len);
 int tbt_tx_pump(struct tbt_session *sess);
 void tbt_tx_wake(struct tbt_session *sess);
+void tbt_tx_window_init(struct tbt_session *sess);
 int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
                           u8 path, u8 type, u64 sid, u64 seq,
                           const u8 *body, u16 len, bool head, gfp_t gfp);
@@ -752,6 +845,8 @@ int tbt_rx_flush(struct tbt_stream *st);
 int tbt_target_attach(struct tbt_stream *st, struct socket *s);
 int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body);
 void tbt_rx_check_hole(struct tbt_stream *st);
+void tbt_rx_deliver_stall_check(struct tbt_stream *st);
+u64 tbt_tx_wait_budget_ns(struct tbt_session *sess, struct tbt_stream *st);
 void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st);
 
 /* tbt_carrier.c */
@@ -766,6 +861,7 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c);
 int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c,
                      struct tbt_frame *fr);
 int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock);
+void tbt_car_setsockbuf(struct socket *s, const struct tbt_cfg *cfg, u16 n_pri);
 int tbt_carrier_open_target(struct tbt_stream *st);
 void tbt_replace_work(struct work_struct *w);
 int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp);
@@ -788,6 +884,7 @@ enum tbt_bind_result
 int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open);
 void tbt_stream_put(struct tbt_stream *st);
 void tbt_stream_detach_from_session(struct tbt_stream *st);
+void tbt_stream_maybe_detach(struct tbt_stream *st);
 void tbt_stream_kill(struct tbt_stream *st, u8 reason);
 void tbt_stream_kill_by_sid(struct tbt_session *sess, u64 sid, u8 reason);
 void tbt_session_destroy(struct tbt_tunnel *t);

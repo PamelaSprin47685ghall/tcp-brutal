@@ -69,6 +69,18 @@ static void tbt_carrier_install_proto(struct sock *sk)
     sk->sk_prot = &tbt_tcp_prot;
 }
 
+/* Queue a receive run without losing a wake that coalesces into a run already
+ * pending or in progress.  schedule_work() returns false when the work item is
+ * already pending, and the byte that triggered this call would then wait for
+ * the next packet -- or forever when the peer is waiting for our reply (the
+ * far's HELLO reply after the near's HELLO).  The bit makes the running work
+ * re-arm itself before it returns. */
+static void tbt_car_schedule_rx(struct tbt_carrier *c)
+{
+    if (!schedule_work(&c->w_rx))
+        atomic_set(&c->rx_again, 1);
+}
+
 static void tbt_car_ready(struct sock *sk)
 {
     struct tbt_carrier *c;
@@ -81,7 +93,7 @@ static void tbt_car_ready(struct sock *sk)
         return;
     }
     atomic64_inc(&c->sess->rx_ready_calls);
-    schedule_work(&c->w_rx);
+    tbt_car_schedule_rx(c);
     read_unlock_bh(&sk->sk_callback_lock);
 }
 
@@ -269,7 +281,7 @@ static void tbt_car_poll_work(struct work_struct *w)
             (READ_ONCE(tcp_sk(psk)->copied_seq) !=
                  READ_ONCE(tcp_sk(psk)->rcv_nxt) ||
              c->parser->have))
-            schedule_work(&c->w_rx);
+            tbt_car_schedule_rx(c);
         schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
         return;
     }
@@ -301,49 +313,101 @@ static void tbt_car_poll_work(struct work_struct *w)
     {
         u32 una = READ_ONCE(tp->snd_una);
         u32 nxt = READ_ONCE(tp->snd_nxt);
+        u32 wnd = READ_ONCE(tp->snd_wnd);
         u32 wmem = READ_ONCE(sk->sk_wmem_queued);
-        /* A path is not dead because our own socket is full. If snd_nxt has
-         * not moved since the previous poll and bytes are still queued, the
-         * peer's window (or our write queue) is holding us: backpressure, not
-         * loss. Only "sent but never acked" (snd_una static while the wire
-         * moved) or a closed socket counts as a stall. */
-        bool blocked = nxt == c->last_nxt && wmem > 0;
+        bool progress = una != c->last_una;
         bool paused = tbt_car_paused(sess);
+        /* Explicit carrier_stall_ms wins; auto is 3 x this carrier's RTO
+         * (SRTT + 4 x RTTVAR, floored at 200 ms), itself floored at 3 s so a
+         * brief scheduling delay cannot retire a healthy carrier. */
+        u64 stall_ns;
+        {
+            u32 ms = sess->tunnel->cfg.carrier_stall_ms;
 
-        if (una != c->last_una)
+            if (ms)
+            {
+                stall_ns = (u64)ms * NSEC_PER_MSEC;
+            }
+            else
+            {
+                u32 srtt = READ_ONCE(tp->srtt_us) >> 3;
+                u32 mdev = READ_ONCE(tp->mdev_us);
+                u64 rto = max_t(u64, (u64)srtt + 4ULL * mdev, 200000ULL);
+
+                stall_ns = max_t(u64, 3 * rto * NSEC_PER_USEC,
+                                 3000ULL * NSEC_PER_MSEC);
+            }
+        }
+        /* Start of the current "unacked bytes, no progress, window open"
+         * interval; c->last_una_ns carries it between polls. */
+        u64 stall_since_ns = c->last_una_ns;
+
+        if (progress)
         {
             c->last_una = una;
-            c->last_una_ns = now;
-            /* Real progress, not the backpressure refresh below: this is the
-             * only evidence that a carrier is still delivering our bytes. */
+            /* Real progress, not a backpressure refresh: this is the only
+             * evidence that a carrier is still delivering our bytes, and
+             * tbt_tx reads it for retransmit pacing. */
             c->last_una_move_ns = now;
         }
         c->last_nxt = nxt;
-        if (paused)
+
+        /* Stall clock. An idle carrier cannot stall: with una == nxt nothing
+         * is on the wire. Refreshing the clock here is what the old code
+         * missed; without it the whole idle gap before the next burst counted
+         * as stall time, and the first DATA frame after the gap killed a
+         * healthy carrier (measured on the WAN: lost = n+m, replaced = n+m-1,
+         * holes_unrecoverable = 0; http-kal lost = 0).
+         *
+         * carrier_stall_ms must exceed several RTTs plus the feedback
+         * cadence: an ACK cannot arrive before one RTT, and the uack/FBK
+         * feedback shares the ordered stream with the data. The default 0
+         * derives 3 x this carrier's RTO (SRTT + 4 x RTTVAR, floored at
+         * 200 ms), itself floored at 3 s, so the timer follows the path
+         * instead of a constant.
+         *
+         * sk_wmem_queued cannot distinguish backpressure from loss: it counts
+         * data TCP still holds for retransmission, so it is positive for any
+         * carrier with unacked bytes, blackholed or merely flow-controlled.
+         * The old `nxt == last_nxt && wmem > 0` test was therefore true for
+         * every real stall and refreshed the clock forever, masking the loss
+         * it was meant to detect. Only a delivery pause or a closed peer
+         * window lets the poll tell backpressure from loss. */
+        if (una == nxt)
+        {
+            stall_since_ns = now;
+            atomic64_inc(&sess->stall_idle_skips);
+        }
+        else if (progress)
+        {
+            stall_since_ns = now;
+        }
+        else if (paused || !wnd)
         {
             /* Delivery backpressure, not loss: while the peer reports a full
              * queue (or our own delivery queue is full) no ack can move.
              * Restart the window so a resume gets a full carrier_stall_ms,
              * and count the deferred decision in stats. */
-            c->last_una_ns = now;
+            stall_since_ns = now;
             atomic64_inc(&sess->stall_paused_skips);
         }
-        else if (blocked)
+        else
         {
-            c->last_una_ns = now;
+            if (!stall_since_ns)
+                stall_since_ns = now;
+            else if (now - stall_since_ns > stall_ns)
+            {
+                atomic64_inc(&sess->stall_declared);
+                if (debug >= 2)
+                    pr_info_ratelimited("tbtun: carrier stall idx=%u gen=%u una=%u nxt=%u "
+                                        "wmem=%u snd_wnd=%u rcv_wnd=%u state=%u\n",
+                                        c->index, c->gen, una, nxt, wmem, wnd,
+                                        READ_ONCE(tp->rcv_wnd), READ_ONCE(sk->sk_state));
+                tbt_carrier_lost(sess, c);
+                return;
+            }
         }
-        else if (c->last_una_ns && una != nxt &&
-                 now - c->last_una_ns >
-                     (u64)sess->tunnel->cfg.carrier_stall_ms * NSEC_PER_MSEC)
-        {
-            if (debug >= 2)
-                pr_info_ratelimited("tbtun: carrier stall idx=%u gen=%u una=%u nxt=%u "
-                                    "wmem=%u rcv_wnd=%u state=%u\n",
-                                    c->index, c->gen, una, nxt, wmem,
-                                    READ_ONCE(tp->rcv_wnd), READ_ONCE(sk->sk_state));
-            tbt_carrier_lost(sess, c);
-            return;
-        }
+        c->last_una_ns = stall_since_ns;
     }
 
     /* Keep-alive cadence for the HTTP container. PAD is a real 38-byte chunk
@@ -375,7 +439,7 @@ static void tbt_car_poll_work(struct work_struct *w)
     }
     if (READ_ONCE(tp->copied_seq) != READ_ONCE(tp->rcv_nxt))
     {
-        schedule_work(&c->w_rx);
+        tbt_car_schedule_rx(c);
         rescued = true;
     }
     else if (c->parser->have)
@@ -389,7 +453,7 @@ static void tbt_car_poll_work(struct work_struct *w)
          * (measured: probe J, far fbk_rx=0, tx_ack=0, parser stuck at
          * 98,304, TXSTALLKILL after 5 s; debug=3 passes only because the
          * extra logging slows the sender enough to keep bytes arriving). */
-        schedule_work(&c->w_rx);
+        tbt_car_schedule_rx(c);
         rescued = true;
     }
     if (READ_ONCE(sess->tx_queued))
@@ -476,6 +540,9 @@ static void tbt_car_rx_work(struct work_struct *w)
     int i, drained;
 
     atomic64_inc(&c->sess->rx_work_runs);
+    /* This run reads everything queued at its start; a wake that arrives
+     * later re-sets the bit and is consumed at the end. */
+    atomic_set(&c->rx_again, 0);
     sk = READ_ONCE(c->sk);
     if (atomic_read(&c->stopping) || !sk)
     {
@@ -550,14 +617,26 @@ static void tbt_car_rx_work(struct work_struct *w)
         tbt_carrier_lost(c->sess, c);
     }
     else if (READ_ONCE(c->sk) == sk &&
-             (READ_ONCE(tcp_sk(sk)->copied_seq) !=
-                  READ_ONCE(tcp_sk(sk)->rcv_nxt) ||
-              c->parser->have))
+             READ_ONCE(tcp_sk(sk)->copied_seq) !=
+                 READ_ONCE(tcp_sk(sk)->rcv_nxt))
     {
-        /* Bytes/records arrived after tcp_read_sock() stopped but before this
-         * work returned.  Re-arm; sk_data_ready may have been coalesced. */
-        schedule_work(&c->w_rx);
+        /* Bytes arrived after tcp_read_sock() stopped but before this work
+         * returned. Re-arm; sk_data_ready may have been coalesced.
+         *
+         * Never re-arm for parser->have alone: those bytes were already
+         * copied out of the socket (copied_seq == rcv_nxt), so a re-run can
+         * copy nothing. It spins at 100% of a kworker until the rest of the
+         * record arrives, which is the normal case on a path whose segments
+         * are smaller than a record. The 50 ms poll already retries a held
+         * record, and sk_data_ready runs this work when the tail arrives. */
+        tbt_car_schedule_rx(c);
     }
+
+    /* A wake that coalesced into this run set the bit instead of queueing a
+     * second run.  Consume it here: the peer may be waiting for the reply to
+     * the record this run just parsed (the far's HELLO reply is the first). */
+    if (atomic_xchg(&c->rx_again, 0))
+        tbt_car_schedule_rx(c);
 
     /* Parsing may have enqueued a control frame (OPEN, FBK). The enqueue
      * already asked w_tx to drain it; never pump from this work item, because
@@ -781,6 +860,60 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
             c->part_off += err;
         }
         c->part_len = c->part_off = 0;
+    }
+    /* Record-level all-or-nothing for DATA. A short write leaves a partial
+     * record in the ordered stream; the peer's parser cannot skip it, so
+     * every control record written after it (FBK, SACK, FIN) waits behind an
+     * incomplete record. Measured on a 64 KiB carrier: the far parsed 0 of
+     * 253 FBKs, the near-to-far uack never advanced, and the strict phase
+     * ended in EOF. Check the socket's free send memory and the peer's
+     * remaining window for the whole record first; if it does not fit, let
+     * the pump requeue it and retry on write_space. The c->part path above
+     * stays as a safety net for a kernel-side short write. */
+    if (fr->hdr.type == TBT_F_DATA)
+    {
+        struct tcp_sock *tp = tcp_sk(c->sk);
+        u32 una = READ_ONCE(tp->snd_una);
+        u32 queued = READ_ONCE(tp->write_seq);
+        u32 wnd = READ_ONCE(tp->snd_wnd);
+        u32 wmem = READ_ONCE(c->sk->sk_wmem_queued);
+        u32 sndbuf = READ_ONCE(c->sk->sk_sndbuf);
+        u64 mem_avail = sndbuf > wmem ? sndbuf - wmem : 0;
+        u64 wnd_avail = wnd > (u32)(queued - una) ?
+                        wnd - (u32)(queued - una) : 0;
+
+        if (mem_avail < total)
+        {
+            if (fr->retx_copy)
+            {
+                sess->dbg_retx_memshort++;
+                if (debug >= 1)
+                    pr_info_ratelimited("tbtun: retx memshort seq=%llu len=%u total=%zu mem_avail=%llu sndbuf=%u wmem=%u wnd_avail=%llu\n",
+                                        fr->hdr.seq, fr->len, total, mem_avail,
+                                        sndbuf, wmem, wnd_avail);
+            }
+            return -EAGAIN;
+        }
+        /* A retransmit copy is admitted past the peer window.
+         * tcp_sendmsg_locked() queues into the socket's write memory
+         * regardless of the advertised window, and TCP sends the record when
+         * the window opens; the record stays atomic because it is one
+         * contiguous byte range in the write queue. Refusing here kept the
+         * copy out of the queue exactly while the window was closed, so the
+         * next window update had nothing to carry and the receiver's hole
+         * budget expired first (measured: retx_evident=255, retx_cand=6,
+         * retx_frames=0, far holes_unrecoverable=1). New data keeps the
+         * window test: it must not park its tail in zero-window persist. */
+        if (wnd_avail < total)
+        {
+            if (!fr->retx_copy)
+                return -EAGAIN;
+            sess->dbg_retx_wndshort++;
+            if (debug >= 1)
+                pr_info_ratelimited("tbtun: retx wndshort seq=%llu len=%u total=%zu wnd=%u inflight=%u wnd_avail=%llu mem_avail=%llu\n",
+                                    fr->hdr.seq, fr->len, total, wnd,
+                                    (u32)(queued - una), wnd_avail, mem_avail);
+        }
     }
     msg.msg_flags = MSG_DONTWAIT;
     lock_sock(c->sk);
@@ -1273,6 +1406,57 @@ bool tbt_carrier_dead(struct tbt_carrier *c)
     return READ_ONCE(sk->sk_state) != TCP_ESTABLISHED;
 }
 
+/* Socket buffer budget for one carrier. The kernel doubles SO_SNDBUF and
+ * SO_RCVBUF, so pass half of the byte budget: one carrier then holds its
+ * share of the sender window (tx_window_bytes, or rx_reorder_bytes while the
+ * window is auto) plus room for two maximum records.
+ *
+ * The buffer is not the queueing delay any more. The delay the peer sees is
+ * in-flight bytes divided by the rate, and the sender window bounds in-flight
+ * to tx_window_bytes; a buffer large enough to hold one carrier's share adds
+ * no delay. Before the window existed the pump could fill a 1 MiB buffer per
+ * carrier and push the uack/FBK feedback 2-4 s behind the write (measured:
+ * probe I interleaved, uack frozen at 46,142,674 for 4.5 s while the peer had
+ * already received 47,129,015). The old fixed 256 KiB reached the kernel as
+ * ~512 KiB of unacked bytes per carrier, which capped a 1-8 MiB window.
+ *
+ * The buffer must be set before the TCP handshake, not after: the SYN/SYN-ACK
+ * fixes the window scale and window_clamp from the socket's receive buffer,
+ * and raising sk_rcvbuf later cannot widen them. That is why the far listener
+ * (which answers every SYN-ACK) and the dialled socket before kernel_connect
+ * both call this. */
+void tbt_car_setsockbuf(struct socket *s, const struct tbt_cfg *cfg, u16 n_pri)
+{
+    u32 win = cfg->tx_window_bytes;
+    u32 n = n_pri ? n_pri : 1;
+    u32 share, budget, per;
+    int v;
+
+    if (!win)
+        win = cfg->rx_reorder_bytes;
+    /* Two bounds, both divided by the carrier count:
+     *   share  = this carrier's slice of the reorder/window budget + slack;
+     *   budget = the module's total carrier-buffer budget (64 MiB), so
+     *            128 carriers cannot turn an 8 MiB-per-carrier setting into
+     *            a 1 GiB allocation.
+     * The kernel doubles SO_*BUF, so pass half of the byte target. */
+    share = win / n + 2 * TBT_CHUNK_MAX;
+    budget = TBT_CAR_SOCKBUF_TOTAL / n;
+    per = max(share, budget);
+    v = clamp_t(u32, per / 2, 64 * 1024, 1024 * 1024);
+
+    /* The plain option is capped at net.core.wmem_max/rmem_max (208 KiB on a
+     * default boot), so a 256 KiB request reached the kernel as 208 KiB and
+     * 2 x 208 KiB was the most a carrier could hold -- less than one BDP on
+     * the 218 ms WAN. The FORCE option needs CAP_NET_ADMIN, which the
+     * module's workqueue has in the init namespace; a namespace that lacks it
+     * falls back to the capped option rather than failing the carrier. */
+    if (sock_setsockopt(s, SOL_SOCKET, SO_SNDBUFFORCE, KERNEL_SOCKPTR(&v), sizeof(v)))
+        sock_setsockopt(s, SOL_SOCKET, SO_SNDBUF, KERNEL_SOCKPTR(&v), sizeof(v));
+    if (sock_setsockopt(s, SOL_SOCKET, SO_RCVBUFFORCE, KERNEL_SOCKPTR(&v), sizeof(v)))
+        sock_setsockopt(s, SOL_SOCKET, SO_RCVBUF, KERNEL_SOCKPTR(&v), sizeof(v));
+}
+
 static void tbt_car_connect_work(struct work_struct *w)
 {
     struct tbt_carrier *c = container_of(w, struct tbt_carrier, w_connect);
@@ -1323,6 +1507,9 @@ static void tbt_car_connect_work(struct work_struct *w)
     err = kernel_bind(s, (struct sockaddr_unsized *)&local, sizeof(local));
     if (err)
         goto release;
+    /* Before the SYN: the handshake freezes the window scale from this
+     * socket's receive buffer. */
+    tbt_car_setsockbuf(s, &t->cfg, sess->n_pri);
     s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
     err = kernel_connect(s, (struct sockaddr_unsized *)&addr, sizeof(addr), 0);
     if (err)
@@ -1340,21 +1527,6 @@ static void tbt_car_connect_work(struct work_struct *w)
     s->sk->sk_state_change = tbt_car_state_change;
     write_unlock_bh(&s->sk->sk_callback_lock);
 
-    {
-        /* The buffer is the queueing delay, and the queueing delay is the
-         * feedback delay: the uack and the FBK travel in the same ordered TCP
-         * stream as the data. 1 MiB at 10 Mbit is ~840 ms per carrier, and
-         * four carriers in flight pushed the ack 2-4 s behind the write --
-         * past the RTO (88-250 ms) and close to hole_budget_ms (measured:
-         * probe I interleaved, uack frozen at 46,142,674 for 4.5 s while the
-         * peer had already received 47,129,015). 256 KiB covers the
-         * 4x10 Mbit x 50 ms BDP (~250 KB) and bounds the delay to 200-400 ms.
-         */
-        int v = 256 * 1024;
-
-        sock_setsockopt(s, SOL_SOCKET, SO_SNDBUF, KERNEL_SOCKPTR(&v), sizeof(v));
-        sock_setsockopt(s, SOL_SOCKET, SO_RCVBUF, KERNEL_SOCKPTR(&v), sizeof(v));
-    }
     atomic_set(&c->connected, 1);
     c->state = TBT_CAR_CONNECTING; /* up after the pump writes HELLO */
     c->last_una = tcp_sk(s->sk)->snd_una;
@@ -1366,7 +1538,7 @@ static void tbt_car_connect_work(struct work_struct *w)
      * work unconditionally, exactly as the accept side does, or the HELLO sits
      * in the receive queue and the carrier never comes up (measured: probe I,
      * the near dialled 73 carriers, every far accept waited for HELLO). */
-    schedule_work(&c->w_rx);
+    tbt_car_schedule_rx(c);
     schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
     pr_info("tbtun: tunnel %llu carrier %u DIALED lport=%u peer=%pI4:%u\n", t->cfg.id,
             c->index, ntohs(inet_sk(s->sk)->inet_sport), &t->cfg.peer_addr,
@@ -1428,17 +1600,13 @@ void tbt_carrier_resume(struct tbt_session *sess)
         c = READ_ONCE(sess->car[i]);
         if (c && READ_ONCE(c->sk) && !atomic_read(&c->stopping))
         {
-            if (!schedule_work(&c->w_rx))
-                atomic64_inc(&sess->rx_resume_busy);
+            tbt_car_schedule_rx(c);
         }
     }
     list_for_each_entry(c, &sess->prov, node)
     {
         if (READ_ONCE(c->sk) && !atomic_read(&c->stopping))
-        {
-            if (!schedule_work(&c->w_rx))
-                atomic64_inc(&sess->rx_resume_busy);
-        }
+            tbt_car_schedule_rx(c);
     }
     spin_unlock(&sess->lock);
 }
@@ -1475,6 +1643,7 @@ void tbt_carrier_snapshot(struct tbt_session *sess)
         sess->snap_car_rcv_nxt = READ_ONCE(tcp_sk(sk)->rcv_nxt);
         sess->snap_car_copied = READ_ONCE(tcp_sk(sk)->copied_seq);
         sess->snap_car_rcvbuf = READ_ONCE(sk->sk_rcvbuf);
+        sess->snap_car_sndbuf = READ_ONCE(sk->sk_sndbuf);
         sock_put(sk);
     }
 }
@@ -1517,15 +1686,9 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
     newsock->sk->sk_state_change = tbt_car_state_change;
     write_unlock_bh(&newsock->sk->sk_callback_lock);
 
-    {
-        /* Same bound on the accepted side; see the comment in the connect
-         * path. Both ends must agree or the larger one still holds the
-         * queue. */
-        int v = 256 * 1024;
-
-        sock_setsockopt(newsock, SOL_SOCKET, SO_SNDBUF, KERNEL_SOCKPTR(&v), sizeof(v));
-        sock_setsockopt(newsock, SOL_SOCKET, SO_RCVBUF, KERNEL_SOCKPTR(&v), sizeof(v));
-    }
+    /* The listener already fixed the window scale; this sizes the accepted
+     * socket's buffers to the same share. */
+    tbt_car_setsockbuf(newsock, &sess->tunnel->cfg, sess->n_pri);
     atomic_set(&c->connected, 1);
     spin_lock(&sess->lock);
     list_add_tail(&c->node, &sess->prov);
@@ -1536,7 +1699,7 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
     WARN_ON_ONCE(newsock->sk->sk_data_ready != tbt_car_ready);
     WARN_ON_ONCE(newsock->sk->sk_prot == &tcp_prot);
     schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
-    schedule_work(&c->w_rx);
+    tbt_car_schedule_rx(c);
     pr_info("tbtun: tunnel %llu carrier ACCEPTED lport=%u rport=%u, awaiting HELLO\n",
             t->cfg.id, ntohs(inet_sk(newsock->sk)->inet_sport),
             ntohs(inet_sk(newsock->sk)->inet_dport));
@@ -1610,7 +1773,7 @@ int tbt_carrier_open_target(struct tbt_stream *st)
     if (start)
     {
         refcount_inc(&st->refs);
-        if (!queue_work(system_dfl_wq, &st->w_target))
+        if (!queue_work(TBT_WQ, &st->w_target))
             tbt_stream_put(st);
     }
     return 0;

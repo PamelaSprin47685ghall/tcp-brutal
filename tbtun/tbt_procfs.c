@@ -684,6 +684,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
             seq_printf(m, "tunnel %llu live rxq=%u rxp=%u txq=%u txp=%u "
                           "pub_state=%u pub_wmem=%u pub_una=%u pub_nxt=%u "
                           "car_wmem=%u car_nxt=%u car_copied=%u car_rcvbuf=%u "
+                          "car_sndbuf=%u "
                           "car_state=%u car_stop=%u car_ud=%u car_ready=%u "
                           "car_ws=%u txw_pend=%u txw_busy=%u\n",
                        t->cfg.id, s->snap_rx_queued, s->snap_rx_paused,
@@ -692,6 +693,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                        s->snap_pub_snd_una, s->snap_pub_snd_nxt,
                        s->snap_car_wmem, s->snap_car_rcv_nxt,
                        s->snap_car_copied, s->snap_car_rcvbuf,
+                       s->snap_car_sndbuf,
                        s->snap_car_state, s->snap_car_stopping,
                        s->snap_car_ud, s->snap_car_ready_ok, s->snap_car_ws_ok,
                        s->snap_txw_pending, s->snap_txw_busy);
@@ -770,7 +772,15 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "reorder_overflow=%llu reorder_max_depth=%u ooo_bytes=%u "
                               "ooo_frames=%u retain_bytes=%u tx_ack=%llu rx_ack=%llu "
                               "peer_paused=%u fb_delay_us=%u rto_us=%u una_stall_us=%u "
-                              "stall_paused_skips=%llu win_block=%llu win_resume=%llu\n",
+                              "stall_paused_skips=%llu stall_idle_skips=%llu "
+                              "stall_declared=%llu tx_window=%u bdp_bytes=%u k_x100=%u "
+                              "rtt_mean_us=%u rttvar_us=%u "
+                              "rtt_max_us=%u txq_max=%u win_block=%llu win_resume=%llu "
+                              "pump_hw_armed=%llu pump_hw_fired=%llu "
+                              "retx_evident=%llu retx_cand=%llu retx_nosends=%llu "
+                              "retx_txqdrop=%llu retx_nopick=%llu retx_stalled=%llu "
+                              "retx_notup=%llu retx_notann=%llu retx_batch=%llu "
+                              "retx_eagain=%llu retx_memshort=%llu retx_wndshort=%llu\n",
                            t->cfg.id, n, up, tbt_stat_read(&s->carrier_lost),
                            tbt_stat_read(&s->carrier_replaced),
                            READ_ONCE(s->spare_activated),
@@ -796,16 +806,39 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            READ_ONCE(s->peer_paused), READ_ONCE(s->fb_delay_us),
                            READ_ONCE(s->rto_us), READ_ONCE(s->una_stall_us),
                            tbt_stat_read(&s->stall_paused_skips),
-                           READ_ONCE(s->win_block), READ_ONCE(s->win_resume));
+                           tbt_stat_read(&s->stall_idle_skips),
+                           tbt_stat_read(&s->stall_declared),
+                           READ_ONCE(s->tx_window), READ_ONCE(s->bdp_bytes),
+                           READ_ONCE(s->k_x100), READ_ONCE(s->rtt_mean_us),
+                           READ_ONCE(s->rttvar_us), READ_ONCE(s->rtt_max_us),
+                           READ_ONCE(s->txq_max),
+                           READ_ONCE(s->win_block), READ_ONCE(s->win_resume),
+                           READ_ONCE(s->pump_hw_armed),
+                           tbt_stat_read(&s->pump_hw_fired),
+                           tbt_stat_read(&s->dbg_retx_evident),
+                           tbt_stat_read(&s->dbg_retx_cand),
+                           tbt_stat_read(&s->dbg_retx_nosends),
+                           READ_ONCE(s->dbg_retx_txqdrop),
+                           READ_ONCE(s->dbg_retx_nopick),
+                           READ_ONCE(s->dbg_retx_stalled),
+                           READ_ONCE(s->dbg_retx_notup),
+                           READ_ONCE(s->dbg_retx_notann),
+                           READ_ONCE(s->dbg_retx_batch),
+                           READ_ONCE(s->dbg_retx_eagain),
+                           READ_ONCE(s->dbg_retx_memshort),
+                           READ_ONCE(s->dbg_retx_wndshort));
                 /* Review 22: pinned control-frame lifetime. ctl_queued is the
                  * live control-queue depth; the other four are the retry,
                  * re-pin, obsolete-generation and explicit-loss record. */
                 seq_printf(m, "tunnel %llu ctl ctl_lost=%llu ctl_retry=%llu "
-                              "ctl_requeue=%llu ctl_obsolete=%llu ctl_queued=%u\n",
+                              "ctl_requeue=%llu ctl_obsolete=%llu ctl_queued=%u "
+                              "close_timeouts=%llu close_detaches=%llu\n",
                            t->cfg.id, tbt_stat_read(&s->ctl_lost),
                            READ_ONCE(s->ctl_retry), READ_ONCE(s->ctl_requeue),
                            READ_ONCE(s->ctl_obsolete),
-                           READ_ONCE(s->ctl_queued));
+                           READ_ONCE(s->ctl_queued),
+                           tbt_stat_read(&s->close_timeouts),
+                           tbt_stat_read(&s->close_detaches));
                 /* Session stream census, next to the carrier block. n_active
                  * is the non-detached stream count (the concurrency bound),
                  * n_streams includes tombstones that reap has not yet
@@ -819,17 +852,67 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "n_pending=%u\n",
                            t->cfg.id, READ_ONCE(s->n_active),
                            READ_ONCE(s->n_streams), READ_ONCE(s->n_pending));
+                /* Per-stream terminal state. A reset whose reason is not a
+                 * hole/gap/reorder kill shows up here as state/kill and as
+                 * the socket error the app saw, so "who closed it" is a
+                 * reading, not a guess. */
+                rcu_read_lock();
+                {
+                    struct tbt_stream *st;
+                    int bi;
+
+                    for (bi = 0; bi < TBT_STREAM_HT; bi++)
+                        hlist_for_each_entry_rcu(st, &s->streams[bi], node)
+                        {
+                            struct sock *ps = READ_ONCE(st->sk);
+                            struct socket *tg = READ_ONCE(st->target);
+                            struct sock *ts = tg ? READ_ONCE(tg->sk) : NULL;
+                            u64 ds = READ_ONCE(st->deliver_since_ns);
+                            u64 dage = ds && ktime_get_ns() > ds
+                                           ? (ktime_get_ns() - ds) / NSEC_PER_MSEC
+                                           : 0;
+
+                            seq_printf(m, "tunnel %llu stream sid=%llu state=%u "
+                                          "kill=%u attached=%#lx rxq=%u rxp=%u "
+                                          "txp=%u peer_paused=%u skerr=%d "
+                                          "tgt_state=%u tgt_err=%d "
+                                          "fin_seq=%llu fin_q=%u fin_w=%u rst_w=%u "
+                                          "rxf=%u/%u dage_ms=%llu\n",
+                                       t->cfg.id, st->sid,
+                                       READ_ONCE(st->state),
+                                       READ_ONCE(st->kill_reason),
+                                       READ_ONCE(st->attached),
+                                       READ_ONCE(st->rx_queued),
+                                       READ_ONCE(st->paused),
+                                       READ_ONCE(st->tx_paused),
+                                       READ_ONCE(st->peer_paused),
+                                       ps ? READ_ONCE(ps->sk_err) : 0,
+                                       ts ? READ_ONCE(ts->sk_state) : 0,
+                                       ts ? READ_ONCE(ts->sk_err) : 0,
+                                       READ_ONCE(st->tx_fin_seq),
+                                       READ_ONCE(st->tx_fin_queued),
+                                       READ_ONCE(st->tx_fin_written),
+                                       READ_ONCE(st->tx_rst_written),
+                                       READ_ONCE(st->rx_fin_seen),
+                                       READ_ONCE(st->rx_fin_done),
+                                       dage);
+                        }
+                }
+                rcu_read_unlock();
                 seq_printf(m, "tunnel %llu c6 holes_declared=%llu holes_repaired=%llu "
                               "holes_unrecoverable=%llu rx_max_stall_us=%u "
                               "hole_checks=%llu gate_fail=%llu depth_fail=%llu "
-                              "time_fail=%llu\n",
+                              "time_fail=%llu deliver_timeouts=%llu "
+                              "deliver_checks=%llu\n",
                            t->cfg.id, READ_ONCE(s->holes_declared),
                            READ_ONCE(s->holes_repaired),
                            tbt_stat_read(&s->holes_unrecoverable), max_stall_us,
                            tbt_stat_read(&s->hole_checks),
                            tbt_stat_read(&s->hole_gate_fail),
                            tbt_stat_read(&s->hole_depth_fail),
-                           tbt_stat_read(&s->hole_time_fail));
+                           tbt_stat_read(&s->hole_time_fail),
+                           tbt_stat_read(&s->deliver_timeouts),
+                           tbt_stat_read(&s->dbg_deliver_checks));
                 seq_printf(m, "tunnel %llu c8 profile_mismatch=%llu http_parse_err=%llu "
                               "http_status_err=%llu http_req=%llu http_resp=%llu "
                               "pad_tx=%llu drip_tx=%llu\n",

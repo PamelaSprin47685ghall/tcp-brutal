@@ -129,6 +129,15 @@ int tbt_listen_start(struct tbt_tunnel *t)
      * the bind fails with EADDRINUSE for a minute (measured by probes C/D). */
     sock_set_reuseaddr(s->sk);
 
+    /* The listener answers every SYN-ACK, and the handshake freezes the
+     * connection's window scale and window_clamp from this socket's receive
+     * buffer. Sizing only the accepted socket afterwards leaves the receive
+     * window at 64 KiB (measured: SO_RCVBUF 4 MiB set after accept still
+     * advertises rcv_wnd 65483), below a 218 ms BDP. A far listener accepts
+     * carriers, so it gets one carrier's share; a near listener accepts the
+     * application's connections, so it gets the whole budget. */
+    tbt_car_setsockbuf(s, &t->cfg, t->cfg.role == TBT_ROLE_NEAR ? 1 : t->cfg.n);
+
     err = kernel_bind(s, (struct sockaddr_unsized *)&addr, sizeof(addr));
     if (err)
         goto fail;
