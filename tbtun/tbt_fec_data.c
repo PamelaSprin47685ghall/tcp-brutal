@@ -143,9 +143,27 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o)
     if (o->carrier >= sess->n_car)
         return -ENODEV;
     c = READ_ONCE(sess->car[o->carrier]);
-    if (!c || !atomic_read(&c->up) || atomic_read(&c->stopping))
-        return -ENODEV;
-    return tbt_carrier_send_fec(c, o->data, o->len);
+    if (c && atomic_read(&c->up) && !atomic_read(&c->stopping))
+        return tbt_carrier_send_fec(c, o->data, o->len);
+    /* The share's own carrier is gone or not usable yet. Send it on a live one
+     * instead of dropping it: the receiver places a share by its header, and a
+     * dropped share is a block the codec has to recover -- which it cannot
+     * always do (measured: 3 of 4 shares plus all 4 parity rows stayed
+     * undecodable, and the whole stream stopped behind that block). A carrier
+     * that has sent HELLO can carry bytes even before this stream's OPEN is
+     * written on it, because the OPEN precedes any DATA on that carrier only
+     * for frames the pump pins to it. */
+    for (i = 0; i < sess->n_car; i++)
+    {
+        if (i == o->carrier)
+            continue;
+        c = READ_ONCE(sess->car[i]);
+        if (!c || !READ_ONCE(c->hello_sent) || atomic_read(&c->stopping) ||
+            !atomic_read(&c->connected))
+            continue;
+        return tbt_carrier_send_fec(c, o->data, o->len);
+    }
+    return -ENODEV;
 }
 
 /* Write queued records. The session pump lock serialises these writes with
@@ -855,7 +873,30 @@ static void tbt_fec_deliver_ready(struct tbt_session *sess)
                 break;
         }
         if (!tbt_fec_super_ready(rx, s))
+        {
+            if (debug)
+            {
+                /* Name the group whose block holds the whole stream: without
+                 * it the frontier cannot move and the sender's credit is never
+                 * renewed. */
+                for (group = 0; group < rx->groups; group++)
+                {
+                    struct tbt_fec_blk *sb = tbt_fec_rx_blk(rx, group, s);
+                    u16 k, have = 0;
+
+                    if (sb->used && sb->ready && sb->block_id == s)
+                        continue;
+                    for (k = 0; k < rx->n; k++)
+                        have = (u16)(have + (sb->dpresent[k] ? 1 : 0));
+                    pr_info_ratelimited("tbtun: fec super %llu stuck: group %u/%u used=%d ready=%d id=%llu nreal=%u shares=%u/%u parity=%u\n",
+                                        s, group, rx->groups, sb->used, sb->ready,
+                                        sb->block_id, sb->nreal, have, rx->n,
+                                        (unsigned)rx->m);
+                    break;
+                }
+            }
             break;
+        }
         for (p = 0; p < rx->n; p++)
         {
             for (group = 0; group < rx->groups; group++)
@@ -1039,17 +1080,20 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
     if (h.type != TBT_FEC_DATA && h.type != TBT_FEC_PARITY)
         return 0; /* FBK/CFG are accepted and ignored by this cut. */
 
-    /* One share per carrier: the carrier names the group and the share, and
-     * the header must agree. A replaced carrier keeps its index, so this is
-     * also the guard against a record arriving on the wrong path. */
+    /* The header names the share; the carrier it arrived on only has to be
+     * one of this session's. A carrier that dies with a share still queued has
+     * that share re-sent on a live carrier (tbt_fec_out_try), and the block is
+     * placed by (seq, share_index) either way -- so a share is never lost just
+     * because its usual carrier was replaced, and the codec is not asked to
+     * recover a loss that could be avoided. */
     shares = (u16)(rx->n + rx->m);
-    group = (u16)(c->index / shares);
-    share = (u16)(c->index % shares);
-    if (!shares || group >= rx->groups || h.share_index != share)
+    if (!shares)
+        return -EPROTO;
+    group = (u16)(h.seq % rx->groups);
+    share = h.share_index;
+    if (group >= rx->groups || share >= shares)
         return -EPROTO;
     if (h.n != (u8)rx->n || h.m != (u8)rx->m)
-        return -EPROTO;
-    if ((u16)(h.seq % rx->groups) != group)
         return -EPROTO;
     if (h.block_id != (h.seq / rx->groups) / rx->n)
         return -EPROTO;

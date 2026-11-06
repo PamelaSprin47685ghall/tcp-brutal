@@ -1198,7 +1198,36 @@ probe_n() {
     # CPU limit.
     _t0=$(cut -d' ' -f1 /proc/uptime)
     _cpu0=$(awk '/^cpu /{b = $2 + $3 + $4 + $7 + $8; i = $5 + $6; print b, i}' /proc/stat)
-    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$N_MIB" "${TBT_ENDPOINT_TIMEOUT:-60}" "$N_MODE"
+    # The WAN run lost and replaced one carrier mid-transfer, and that is when
+    # the OPEN re-announce path runs: take carrier 0 down here too, or this
+    # probe never exercises it.
+    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$N_MIB" "${TBT_ENDPOINT_TIMEOUT:-60}" "$N_MODE" &
+    _bpid=$!
+    _sent=0
+    _i=0
+    while [ "$_i" -lt 4000 ]; do
+        _sent=$(tunnel_stat 2 submit_bytes)
+        [ "${_sent:-0}" -ge 65536 ] && break
+        kill -0 "$_bpid" 2> /dev/null || break
+        _i=$((_i + 1))
+    done
+    if kill -0 "$_bpid" 2> /dev/null; then
+        echo "   taking carrier 0 down after ${_sent:-0} submitted bytes"
+        echo 'carrier 0 down' > "$PEERS" || fail "probe N: carrier 0 down rejected"
+    fi
+    _waited=0
+    while kill -0 "$_bpid" 2> /dev/null && [ "$_waited" -lt $((60 + 40)) ]; do
+        sleep 1
+        _waited=$((_waited + 1))
+    done
+    if kill -0 "$_bpid" 2> /dev/null; then
+        echo "   burst still running after ${_waited}s"
+        echo "   peers:"; cat "$PEERS"
+        echo "   stats: $(cat /proc/net/tbtun/stats)"
+        kill "$_bpid" 2> /dev/null
+        fail "probe N: the transfer stalled after carrier 0 was taken down"
+    fi
+    wait "$_bpid"
     rc=$?
     _t1=$(cut -d' ' -f1 /proc/uptime)
     _cpu1=$(awk '/^cpu /{b = $2 + $3 + $4 + $7 + $8; i = $5 + $6; print b, i}' /proc/stat)
