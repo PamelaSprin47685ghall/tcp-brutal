@@ -1274,6 +1274,172 @@ static void test_group_mapping(void)
 }
 
 /* ------------------------------------------------------------------ *
+ * 9b. Grouped reassembly: 32 groups x (4 data + 4 parity), striped seq.
+ *
+ * This mirrors tbt_fec_data.c exactly: a block of every group covers one
+ * contiguous span of groups*n global packets, and the receiver may only hand
+ * that span to the stream once every group's block is decoded. The test
+ * erases one DATA share per block (all parity present), recovers it, and
+ * compares the reassembled stream byte for byte, including a short final
+ * super-block whose groups have different real lengths.
+ * ------------------------------------------------------------------ */
+
+static void test_group_reassembly(void)
+{
+    enum { G = 32, N = 4, M = 4, S = 64 };
+    const u64 base = 0x5a5a5a5a5a5a5a5aULL;
+    const u64 golden = 0x9e3779b97f4a7c15ULL;
+    const u64 total_pkts = 3 * G * N + 37; /* 421: short final super-block */
+    const u64 final_block = tbt_fec_final_block_of_total(total_pkts, G, N);
+    struct tbt_fec_grouped *codec;
+    u8 *stream, *out, *present;
+    u64 seq, block;
+    u32 idxbuf[TBT_FEC_MAX_D];
+    u16 sum = 0;
+    int ok_all = 1;
+
+    codec = tbt_fec_grouped_new(G, N, M, N, 2 * N, S, N, base);
+    ok(codec != NULL, "reassembly codec 32x8", NULL);
+    if (!codec)
+        return;
+    stream = xalloc(total_pkts * S);
+    out = xalloc(total_pkts * S);
+    present = xalloc(total_pkts);
+    fill_pattern(stream, total_pkts * S, 0x600d);
+
+    /* Tail arithmetic: the per-group lengths of the final super-block must
+     * add up to the packets that follow the last full super-block. */
+    for (seq = 0; seq < G; seq++)
+    {
+        u16 len = tbt_fec_group_tail_len(total_pkts, G, N, (u16)seq);
+
+        sum = (u16)(sum + len);
+        ok(len <= N, "tail length <= n", NULL);
+    }
+    ok_u32(sum, (u32)(total_pkts - final_block * G * N),
+           "tail lengths sum to the final super-block");
+    ok_u32(tbt_fec_group_tail_len(0, G, N, 0), 0, "tail length of an empty stream");
+    ok_u32(tbt_fec_group_tail_len(G * N, G, N, 0), N, "exact multiple is a full block");
+
+    /* seq -> (group, block, p) -> seq must round-trip for every packet. */
+    for (seq = 0; seq < total_pkts; seq++)
+    {
+        u16 g = tbt_fec_group_of_seq(seq, G);
+        u64 b = tbt_fec_block_of_seq(seq, G, N);
+        u16 p = (u16)((seq / G) % N);
+
+        if (tbt_fec_seq_of_block_pkt(b, g, p, G, N) != seq)
+        {
+            ok(0, "seq_of_block_pkt round-trip", "mapping is not an inverse");
+            break;
+        }
+    }
+    ok(seq == total_pkts, "seq_of_block_pkt round-trip", NULL);
+
+    for (block = 0; block <= final_block; block++)
+    {
+        u16 g;
+
+        for (g = 0; g < G; g++)
+        {
+            u16 len = block == final_block ?
+                tbt_fec_group_tail_len(total_pkts, G, N, g) : N;
+            struct tbt_fec_rlnc *ctx = tbt_fec_grouped_ctx(codec, g);
+            u8 *data[N], *orig[N], *parity[M];
+            u8 dp[N], pp[M];
+            u16 drop = 0, p;
+            int target, rc;
+
+            if (!len)
+                continue; /* this group has no packet in the final block */
+            for (p = 0; p < N; p++)
+            {
+                data[p] = xalloc(S);
+                orig[p] = xalloc(S);
+                if (p < M)
+                    parity[p] = xalloc(S);
+                if (p < len)
+                {
+                    u64 s = tbt_fec_seq_of_block_pkt(block, g, p, G, N);
+                    u16 plen = s + 1 == total_pkts ? 17 : S;
+
+                    memcpy(orig[p], stream + s * S, plen);
+                    memcpy(data[p], orig[p], plen);
+                }
+            }
+            tbt_fec_rlnc_set_nonce(ctx, base ^ ((u64)g << 32) ^
+                                            (block * golden));
+            ok_int(tbt_fec_rlnc_encode(ctx, data, N, parity), M,
+                   "grouped block encode");
+
+            /* Erase one DATA share that at least one parity row covers. A
+             * d < w code cannot recover an arbitrary erasure, so the test
+             * asks the coefficient set first, exactly as the data plane's
+             * feedback would. */
+            memset(dp, 1, sizeof(dp));
+            memset(pp, 1, sizeof(pp));
+            target = pick_covered(ctx, 0, 0, M, N, 2 * N, len, idxbuf);
+            if (target >= 0)
+            {
+                drop = (u16)target;
+                dp[drop] = 0;
+                memset(data[drop], 0xAA, S);
+            }
+            rc = tbt_fec_rlnc_decode(ctx, data, parity, dp, pp, N);
+            if (target >= 0)
+                ok_int(rc, 1, "grouped block decode one erasure");
+            else
+                ok_int(rc, 0, "grouped block with no covered erasure");
+            for (p = 0; p < len; p++)
+            {
+                if (memcmp(data[p], orig[p], S))
+                {
+                    ok(0, "grouped block recovered bytes", "a packet changed");
+                    ok_all = 0;
+                    break;
+                }
+            }
+            for (p = 0; p < len; p++)
+            {
+                u64 s = tbt_fec_seq_of_block_pkt(block, g, p, G, N);
+                u16 plen = s + 1 == total_pkts ? 17 : S;
+
+                memcpy(out + s * S, data[p], plen);
+                present[s] = 1;
+            }
+            for (p = 0; p < N; p++)
+            {
+                free(data[p]);
+                free(orig[p]);
+                if (p < M)
+                    free(parity[p]);
+            }
+        }
+    }
+    for (seq = 0; seq < total_pkts; seq++)
+    {
+        if (!present[seq])
+        {
+            ok(0, "grouped reassembly delivered every seq", "a seq is missing");
+            break;
+        }
+        if (memcmp(out + seq * S, stream + seq * S,
+                   seq + 1 == total_pkts ? 17 : S))
+        {
+            ok(0, "grouped reassembly is byte-exact", "bytes differ");
+            break;
+        }
+    }
+    ok(seq == total_pkts, "grouped reassembly is byte-exact", NULL);
+    ok(ok_all, "grouped blocks recovered byte-exact", NULL);
+
+    free(stream);
+    free(out);
+    free(present);
+    tbt_fec_grouped_free(codec);
+}
+
+/* ------------------------------------------------------------------ *
  * 10. Dynamic parameters.
  * ------------------------------------------------------------------ */
 
@@ -1630,6 +1796,7 @@ int main(void)
     test_rlnc_loss_reorder();
     test_grouped();
     test_group_mapping();
+    test_group_reassembly();
     test_params();
     test_ops();
     test_framing();

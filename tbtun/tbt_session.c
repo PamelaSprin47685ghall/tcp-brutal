@@ -1021,8 +1021,11 @@ int tbt_session_create(struct tbt_tunnel *t)
     INIT_LIST_HEAD(&s->dead);
     INIT_LIST_HEAD(&s->pending);
     s->n_pending = 0;
-    s->n_car = t->cfg.n + t->cfg.m;
-    s->n_pri = t->cfg.n;
+    /* FEC v6 maps one share to each carrier, so the session owns all
+     * `carriers` slots and none of them is a legacy spare. The old ARQ keeps
+     * its n DATA carriers plus m spares. */
+    s->n_car = t->cfg.fec ? t->cfg.carriers : (u16)(t->cfg.n + t->cfg.m);
+    s->n_pri = t->cfg.fec ? t->cfg.carriers : t->cfg.n;
     /* The sender window is a session property from birth: capture, the pump
      * and the carrier socket sizing all read it before the first ACK. */
     tbt_tx_window_init(s);

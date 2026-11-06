@@ -112,7 +112,7 @@ Module parameters, read-only after load:
 |---|---|---|
 | `debug` | `0` | Verbosity, `0..3` |
 | `max_tunnels` | `64` | Maximum configured tunnels; a new id over the cap fails with `ENOSPC` |
-| `max_carriers` | `16` | Carriers per session, `1..16`; `n + m` over the cap fails with `EINVAL` |
+| `max_carriers` | `256` | Carrier sockets per session, `1..256`; `carriers` over the cap fails with `EINVAL` |
 | `debug_loss` | `0` | Allow `drop_ppm` writes, the deterministic loss injector |
 
 The control surface is created in `init_net` only; there is no per-netns view.
@@ -161,11 +161,31 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=2 fec
      > /proc/net/tbtun/config
 ```
 
+A grouped session uses one share per carrier: `carriers = groups * (n + m)`,
+with `groups = carriers / (n + m)`. The production shape is 32 groups of
+`n=4, m=4` on 256 carriers:
+
+```sh
+# near
+echo 'tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443 n=4 m=4 fec=on mode=grouped carriers=256' \
+     > /proc/net/tbtun/config
+# far
+echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec=on mode=grouped carriers=256 peer=10.0.0.1:9000' \
+     > /proc/net/tbtun/config
+```
+
+The global packet sequence is striped over the groups (`group = seq % groups`).
+Each group has its own block window and parity, and the receiver delivers a
+global span only when every group's block in that span has decoded. Carrier
+`c` always carries group `c / (n + m)` share `c % (n + m)`; a replacement
+carrier keeps the same index.
+
 The default profile is `http-kal`, so each 40-byte FEC record is one HTTP chunk
 body while the request line, headers and chunk framing stay plaintext.
 `profile=raw` carries the same records without the HTTP wrapper.
 
-Both ends must agree on the tunnel id, `n`, `m`, and the profile family. The far
+Both ends must agree on the tunnel id, `n`, `m`, `w`, `mode`, `carriers`, and
+the profile family. The far
 side's `listen` is where carriers arrive; the near side's `peer` is where they
 are sent. The far side's `peer` is the anchor: only HELLOs from `10.0.0.1` may
 join, and the port in a far `peer=` is grammar filler. Add a shared
@@ -210,8 +230,8 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `listen` | — | `a.b.c.d:port`; near: public address; far: carrier address |
 | `peer` | — | near: where carriers are sent; far: the only near source address allowed to join (the anchor; the port is grammar filler) |
 | `target` | — | far only: literal address the payload is delivered to |
-| `n` | `4` | Active carriers, `1..16` |
-| `m` | `1` | Spares, `0..16`; `n + m <= 16` |
+| `n` | `4` | DATA shares per group, `1..255`; `n + m <= 256` |
+| `m` | `1` | Parity shares per group, `0..255`; `fec=on` needs `m >= 1`; `n + m <= 256` |
 | `dup` | `1` | Duplication degree, `0..3` |
 | `keepalive` | `5000` | Idle PAD interval, ms |
 | `drip_ms` | `1000` | `http-kal-drip` idle byte interval, ms |
@@ -224,6 +244,10 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `tx_retain_bytes` | `0` | Sender retention bytes, `0` = unlimited |
 | `carrier_stall_ms` | `3000` | Silence before a carrier is declared lost |
 | `profile` | `http-kal` | `http-kal`, `http-kal-drip`, or `raw` |
+| `fec` | `off` | `off` (old ARQ) or `on` (FEC v6 data plane) |
+| `mode` | `rlnc` | `rlnc` (one group), `grouped`, or `sc-ldpc` (reserved) |
+| `w` | `0` | RLNC window, `0..1024`; `0` resolves to `2*n` |
+| `carriers` | `0` | Carrier slots, `0..256`; `0` resolves to `n + m`; must be a multiple of `n + m` |
 | `portblock` | `0-0` | Per-tunnel source port block, recorded and rendered only (`0-0` = none); carriers use the global block set through `/ports` |
 | `srcaddrs` | — | Comma-separated local source addresses; only the first is used |
 | `nonce` | — | `16` or `32` hex digits: pin the session nonce; near uses it locally, far requires it from the near side |
@@ -404,10 +428,17 @@ real line.
   The nonce is a session identifier, not a secret. Run it inside WireGuard on an
   untrusted path; the `raw` profile is then the only sensible choice, because an
   HTTP parser cannot see inside TLS.
-- **FEC is optional and single-group.** `fec=on` currently supports one group
-  (`carriers == n + m`, up to 256 shares) in both `raw` and `http-kal`
-  containers; the grouped 32x8 data plane is a later integration. The host
-  grouped codec and the 40-byte wire format are already present. When `fec=off`,
+- **FEC is optional; grouped is the production shape.** `fec=on` supports one
+  group (`carriers == n + m`) and grouped sessions
+  (`carriers = groups * (n + m)`, up to 256 shares) in both `raw` and
+  `http-kal` containers. The sender emits one block of `n` DATA shares plus
+  `m` parity shares per group; the receiver decodes a block when its parity
+  makes the missing shares solvable, then delivers whole super-blocks in global
+  sequence order. There is no NACK and no retransmit in the FEC path: a block
+  that loses more shares than its parity can recover stalls the stream until
+  the close timer resets it. The final block of a stream is zero-padded and its
+  real length travels in the parity `win_len` (with the FIN offset as a second
+  source), so a short last packet is never delivered as padding. When `fec=off`,
   loss is repaired by retransmission from the replay ring and by
   duplication; there is no parity or erasure code. When the ring no longer holds
   the bytes, the receiver resets the stream (`holes_unrecoverable`) instead of

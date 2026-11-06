@@ -3,6 +3,35 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [Unreleased]
+
+### Added
+
+- FEC v6 grouped data plane. One share rides each carrier:
+  `carriers = groups * (n + m)`, `group(carrier) = carrier / (n + m)`,
+  `share(carrier) = carrier % (n + m)`. The production shape is 32 groups of
+  `n=4, m=4` on 256 carriers.
+- The global packet sequence is striped over the groups (`group = seq % groups`).
+  Each group has its own block window, codec context and parity. The receiver
+  delivers a super-block (one block from every group) in global sequence order,
+  so the stream has no hole and the ACK frontier is global.
+- A short final block is zero-padded and carries its real length in the parity
+  `win_len`. If every parity record of that block is lost, the FIN byte offset
+  gives the total packet count. Padding is never delivered.
+- Host coverage for the grouped mapping, the final-block length and a 32x8
+  encode/decode/reassembly run, including a short final super-block. QEMU probe
+  N carries 1 MiB each way over two groups of eight carriers in the HTTP chunk
+  container, byte-exact.
+
+### Changed
+
+- `fec=on` now owns `carriers` session slots and marks all of them active; the
+  old ARQ still uses `n` DATA carriers plus `m` spares.
+- `tbt_fec_tx_submit()` updates the stream byte offset, so the FIN names the
+  real end of the stream and the FEC ACK can clamp to it.
+- `mode=sc-ldpc` with `fec=on` returns `-EOPNOTSUPP` instead of silently using
+  the RLNC data plane.
+
 ## [0.0.1] - 2026-11-06
 
 First tracked release. The module version is `0.0.1`; the wire version is

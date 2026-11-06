@@ -426,7 +426,8 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
         u32 drip_ms = sess->tunnel->cfg.drip_ms;
         u32 ka_ms = sess->tunnel->cfg.keepalive_ms;
 
-        if (c->profile == 2 && tbt_http_need_drip(c->last_tx_ns, now, drip_ms))
+        if (!sess->fec && c->profile == 2 &&
+            tbt_http_need_drip(c->last_tx_ns, now, drip_ms))
         {
             char b[TBT_HTTP_DRIP_CHUNK_LEN];
             size_t n = tbt_http_drip_chunk(b, sizeof(b));
@@ -718,6 +719,78 @@ int tbt_carrier_send_raw(struct tbt_carrier *c, const void *data, size_t len)
     return 0;
 }
 
+/* Flush the carrier's pending byte tail. A record may never be interleaved,
+ * so every writer on this carrier calls this before a new record. The caller
+ * holds sess->pump_lock (or is the only writer). */
+static int tbt_carrier_part_flush(struct tbt_carrier *c)
+{
+    while (c->part_off < c->part_len)
+    {
+        struct msghdr msg = {};
+        struct kvec iov = {
+            .iov_base = c->part + c->part_off,
+            .iov_len = c->part_len - c->part_off,
+        };
+        int err;
+
+        iov_iter_kvec(&msg.msg_iter, ITER_SOURCE, &iov, 1, iov.iov_len);
+        msg.msg_flags = MSG_DONTWAIT;
+        lock_sock(c->sk);
+        err = tcp_sendmsg_locked(c->sk, &msg, iov.iov_len);
+        release_sock(c->sk);
+        if (err < 0)
+            return err == -EAGAIN ? -EAGAIN : err;
+        if (!err)
+            return -EAGAIN;
+        c->part_off += (u16)err;
+    }
+    c->part_len = c->part_off = 0;
+    return 0;
+}
+
+/* Write one whole record or HTTP frame. Flush an older tail first, then
+ * pre-check the socket's free send memory so ordinary backpressure is
+ * -EAGAIN, not a partial record. A kernel short write keeps the unwritten
+ * tail in c->part; the next writer on this carrier flushes it before any new
+ * bytes, so records stay in order and a control frame is never spliced into
+ * the middle of a DATA record. */
+static int tbt_carrier_send_whole(struct tbt_carrier *c, const void *data,
+                                  size_t len)
+{
+    struct msghdr msg = {};
+    struct kvec iov = { .iov_base = (void *)data, .iov_len = len };
+    u32 wmem, sndbuf;
+    u64 mem_avail;
+    int err;
+
+    if (!c->sk)
+        return -ENOTCONN;
+    if (len > TBT_CAR_PART_MAX)
+        return -EINVAL;
+    err = tbt_carrier_part_flush(c);
+    if (err)
+        return err;
+    wmem = READ_ONCE(c->sk->sk_wmem_queued);
+    sndbuf = READ_ONCE(c->sk->sk_sndbuf);
+    mem_avail = sndbuf > wmem ? sndbuf - wmem : 0;
+    if (mem_avail < len)
+        return -EAGAIN;
+    iov_iter_kvec(&msg.msg_iter, ITER_SOURCE, &iov, 1, len);
+    msg.msg_flags = MSG_DONTWAIT;
+    lock_sock(c->sk);
+    err = tcp_sendmsg_locked(c->sk, &msg, len);
+    release_sock(c->sk);
+    if (err < 0)
+        return err == -EAGAIN ? -EAGAIN : err;
+    if ((size_t)err < len)
+    {
+        memcpy(c->part, (const u8 *)data + err, len - (size_t)err);
+        c->part_len = (u16)(len - (size_t)err);
+        c->part_off = 0;
+    }
+    return 0;
+}
+
 /* The request/response header block for this carrier segment. The near side
  * emits the §3.2 POST block (Host is the peer literal it dialled, X-Request-Id
  * is fresh per segment); the far side emits the §3.2 200 block with a Date.
@@ -804,7 +877,7 @@ static int tbt_carrier_http_begin(struct tbt_carrier *c)
         memcpy(sess->http_cap_req, hdr, cap);
         WRITE_ONCE(sess->http_cap_req_len, (u16)cap);
     }
-    err = tbt_carrier_send_raw(c, hdr, hlen);
+    err = tbt_carrier_send_whole(c, hdr, hlen);
     kfree(hdr);
     if (err)
     {
@@ -839,7 +912,7 @@ int tbt_carrier_send_fec(struct tbt_carrier *c, const u8 *rec, size_t len)
     sess = c->sess;
     if (c->profile == 3)
     {
-        err = tbt_carrier_send_raw(c, rec, len);
+        err = tbt_carrier_send_whole(c, rec, len);
         if (!err)
         {
             c->tx_frames++;
@@ -862,7 +935,7 @@ int tbt_carrier_send_fec(struct tbt_carrier *c, const u8 *rec, size_t len)
         atomic64_inc(&sess->http_parse_err);
         return -EIO;
     }
-    err = tbt_carrier_send_raw(c, buf, n);
+    err = tbt_carrier_send_whole(c, buf, n);
     kfree(buf);
     if (err)
         return err;
@@ -941,7 +1014,7 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
         }
         if (sess->tunnel->cfg.role == TBT_ROLE_NEAR && c->index == 0)
             tbt_http_capture_chunk(sess, c->http_tx, n);
-        err = tbt_carrier_send_raw(c, c->http_tx, n);
+        err = tbt_carrier_send_whole(c, c->http_tx, n);
         if (err)
             return err;
         c->tx_frames++;
@@ -969,28 +1042,9 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
      * four carriers behind the slowest one. */
     /* A previous record's tail must reach the wire first: the peer parses a
      * byte stream, so a record may never be interleaved or reordered. */
-    if (c->part_len)
-    {
-        while (c->part_off < c->part_len)
-        {
-            struct msghdr pm = {};
-            struct kvec pkv;
-
-            pkv.iov_base = c->part + c->part_off;
-            pkv.iov_len = c->part_len - c->part_off;
-            iov_iter_kvec(&pm.msg_iter, ITER_SOURCE, &pkv, 1, pkv.iov_len);
-            pm.msg_flags = MSG_DONTWAIT;
-            lock_sock(c->sk);
-            err = tcp_sendmsg_locked(c->sk, &pm, pkv.iov_len);
-            release_sock(c->sk);
-            if (err < 0)
-                return err == -EAGAIN ? -EAGAIN : err;
-            if (!err)
-                return -EAGAIN;
-            c->part_off += err;
-        }
-        c->part_len = c->part_off = 0;
-    }
+    err = tbt_carrier_part_flush(c);
+    if (err)
+        return err;
     /* Record-level all-or-nothing for DATA. A short write leaves a partial
      * record in the ordered stream; the peer's parser cannot skip it, so
      * every control record written after it (FBK, SACK, FIN) waits behind an
@@ -1107,7 +1161,7 @@ struct tbt_carrier *tbt_carrier_new(struct tbt_session *sess, u8 index)
     INIT_LIST_HEAD(&c->node);
     c->http_tx = kmalloc(TBT_HTTP_FRAME_MAX, GFP_KERNEL);
     c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX, GFP_KERNEL);
-    c->part = kmalloc(TBT_REC_MAX, GFP_KERNEL);
+    c->part = kmalloc(TBT_CAR_PART_MAX, GFP_KERNEL);
     c->parser = kmalloc(sizeof(*c->parser), GFP_KERNEL);
     c->http_rx = kmalloc(sizeof(*c->http_rx), GFP_KERNEL);
     if (!c->http_tx || !c->http_hdr || !c->part || !c->parser || !c->http_rx)

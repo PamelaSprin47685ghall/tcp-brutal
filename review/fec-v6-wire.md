@@ -95,16 +95,17 @@ body 长度必须是 12 的倍数；最多 `TBT_FEC_PAYLOAD_MAX / 12` 项。
 - poll 合并：session 级 50 ms 一次遍历所有 carrier；不再每 carrier 一个 delayed work。保留 provisional join deadline、connect 重试、stall/lost 检测、queue re-arm 和 `poll_rescues` 计数。
 - procfs `peers` 每 carrier 一行，256 行由 seq_file 动态增长；不分配固定 16 行缓冲。
 
-## 4. FEC 数据面（T2 中间版）
+## 4. FEC 数据面（T2：单组 + grouped 32×8）
 
-`tbtun/tbt_fec_data.c` 把 host codec 接到载体层。当前范围是 **raw/http-kal、单组、256 share 上限**：
+`tbtun/tbt_fec_data.c` 把 host codec 接到载体层。范围是 **raw/http-kal、单组与 grouped、256 share 上限**：
 
-- 每 block 有 n 个 DATA share + m 个 PARITY share；DATA share i 走 carrier i，PARITY share n+r 走 carrier n+r。`carriers == n+m`，即 1 share/carrier。
-- TX：capture 只把字节复制进 256 KiB ring（softirq 安全），`w_fec_tx` 在进程上下文切包、编码、写记录。每 block 用 `nonce ^ block_id*golden` 复用预分配 codec。
-- RX：40 B 记录先校验 header CRC，再校验 payload CRC；payload CRC 失败只丢该记录，header/framing 失败关闭 carrier。完整 block 按 block 顺序交付，避免在字节流里制造空洞。
-- 控制帧：ACK 16 B；控制记录排在同一条 carrier 的 data 之前，但只在整记录边界发送；`tbt_carrier_send_raw()` 部分写返回 `-EIO`，调用方整记录重试/丢弃，不插队。
-- 内存：RX block 槽按 16 MiB 上限动态取 `slots`（小 n 多槽，256 share 8 槽）；TX ring 256 KiB + n×S block + m×S parity。
-- `fec=on` 在 `profile=raw` 和 `profile=http-kal` 下都会建会话；HTTP 容器中一个 chunk body 恰好是一条 40 B FEC 记录，请求行/头/chunked 分帧明文，ChaCha8 只加密 body。`carriers != n+m`（grouped 数据面）仍返回 `-EOPNOTSUPP`。
+- 1 share/carrier：`carriers = groups × (n+m)`；carrier `c` 固定承载 `group=c/(n+m)`、`share=c%(n+m)`；替换 carrier 保持索引，接收端校验 `share_index == share(c)` 与 `seq % groups == group(c)`。
+- TX：capture 只把字节复制进 256 KiB ring（softirq 安全），`w_fec_tx` 在进程上下文按全局 `seq` 条带切包：`group=seq%G`、`block_id=(seq/G)/n`、`share=(seq/G)%n`。每组的 n 个 DATA 到齐后编码 m 个 parity；非末块用 `win_len=n`，流末的短块补零后用 `win_len=L` 编码。每 block 的 nonce 为 `base ^ (group<<32) ^ (block_id×golden)`，收发独立推导。
+- RX：40 B 记录先校验 header CRC，再校验 payload CRC；payload CRC 失败只丢该记录，header/framing 失败关闭 carrier。每组的 block 独立解码；只有当一个 super-block（每组 block b，覆盖全局 `[b×G×n,(b+1)×G×n)`）的每组都已解码，才按全局 seq 交付，避免字节流空洞，ACK 的 `next_deliver` 因此是真正的全局前沿。
+- 末块：`win_len < n` 的 parity 告诉接收端该组真实包数；若该块 parity 全丢，FIN 的字节偏移换算 `P=ceil(bytes/S)` 作为第二来源。padding 位置标记为已知零，绝不交付。
+- 控制帧：ACK 16 B；控制记录排在同一条 carrier 的 data 之前，但只在整记录边界发送；`tbt_carrier_send_raw()` 部分写返回 `-EIO`，调用方整记录重试/丢弃，不插队。ACK 只在全局前沿前进时发送；FEC_FBK/FEC_CFG 接收但不驱动参数（T2 无自适应 M）。
+- 内存：RX block 槽按 16 MiB 上限动态取 `slots`（32×8 每组 8 槽，单组 256 槽）；TX ring 256 KiB + 每组 n×S block + m×S parity。
+- `fec=on` 在 `profile=raw` 和 `profile=http-kal` 下都会建会话；HTTP 容器中一个 chunk body 恰好是一条 40 B FEC 记录，请求行/头/chunked 分帧明文，ChaCha8 只加密 body。`mode=sc-ldpc` 仍返回 `-EOPNOTSUPP`（D 的 codec）。
 
 ## 5. Host RLNC / grouped codec
 

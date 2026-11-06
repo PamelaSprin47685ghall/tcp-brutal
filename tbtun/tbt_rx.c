@@ -456,6 +456,11 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
             st->rx_fin_seq = hdr->seq;
         }
         spin_unlock_bh(&st->rx_lock);
+        /* FEC delivers whole blocks; if the final block's parity and LAST
+         * flag were both lost, the FIN offset is the only remaining statement
+         * of how many packets the stream holds. */
+        if (sess->fec)
+            tbt_fec_rx_fin(sess, hdr->seq);
         WRITE_ONCE(st->sack_dirty, true);
         /* The drain shuts the write side once rx_next reaches the FIN's seq
          * and every earlier byte has been delivered. */
@@ -774,7 +779,11 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                     int err;
 
                     if (frec[0] >= TBT_FEC_DATA && frec[0] <= TBT_FEC_FBK)
+                    {
+                        if (!c->saw_hello)
+                            return -EPROTO;
                         err = tbt_fec_rx_record(c, frec, flen);
+                    }
                     else
                     {
                         struct tbt_rec orec;

@@ -262,9 +262,24 @@ frame. It rides the same carriers and the same HTTP container:
 - Control records (ACK/NACK/FEC_CFG/FEC_FBK) use the same one-chunk-per-record
   rule. They are written only at record boundaries; a partial record is never
   interleaved with a control frame.
-- `fec=on` requires `carriers == n + m` in this cut (one group, one share per
-  carrier). `profile=raw` and `http-kal` are both supported. The grouped
-  data plane is a later integration; the host grouped codec is already present.
+- `fec=on` maps one share to each carrier: `carriers = groups * (n + m)`,
+  `group(c) = c / (n + m)`, `share(c) = c % (n + m)`. `mode=rlnc` is one group
+  (`carriers == n + m`); `mode=grouped` is 32 groups of 8 in production
+  (`carriers=256`, `n=4`, `m=4`). `profile=raw` and `http-kal` are both
+  supported.
+- The global packet sequence is striped over the groups
+  (`group = seq % groups`). Each group owns its block window, codec state and
+  parity. A super-block is one block from every group; it covers the contiguous
+  global range `[b*groups*n, (b+1)*groups*n)`. The receiver delivers a
+  super-block only when every group's block `b` has decoded, so the application
+  byte stream never has a hole and the ACK frontier is a real global frontier.
+- The sender packetizes `n` DATA shares per group block, then `m` parity
+  shares. Parity rows are derived from a per-group, per-block nonce
+  (`base ^ (group << 32) ^ (block_id * golden)`), so sender and receiver agree
+  without a per-block seed on the wire. The final block of a stream is
+  zero-padded; its real length travels in the parity `win_len`, and the FIN
+  byte offset is the second source when every parity record of that block was
+  lost. Padding is never delivered.
 - The old 16-carrier ARQ record and its `path_ack_mask` are unchanged and are
   used only when `fec=off`.
 

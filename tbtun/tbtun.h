@@ -442,8 +442,10 @@ enum tbt_stream_state
 /* Per-carrier partial record state. Lives on the carrier, never global: two
  * tunnels (or, from C4, two carriers of one tunnel) must not share a buffer.
  * A record is TBT_REC_MAX (old ARQ) or TBT_FEC_REC_MAX (v6); the buffer must
- * hold the larger one. */
+ * hold the larger one. The write-side tail also holds a whole HTTP FEC frame
+ * (chunk header + record + CRLF), which is slightly larger. */
 #define TBT_PARSER_BUF (TBT_FEC_REC_MAX > TBT_REC_MAX ? TBT_FEC_REC_MAX : TBT_REC_MAX)
+#define TBT_CAR_PART_MAX (TBT_HTTP_FEC_FRAME_MAX > TBT_REC_MAX ? TBT_HTTP_FEC_FRAME_MAX : TBT_REC_MAX)
 struct tbt_parser
 {
     u8 buf[TBT_PARSER_BUF];
@@ -451,29 +453,43 @@ struct tbt_parser
 };
 
 /* ------------------------------------------------------------------ *
- * FEC v6 data plane (one group, one stream per session).
+ * FEC v6 data plane (grouped; one stream per session).
  *
- * The host codec is the authority for encode/decode; this state only holds
- * the packets that are still inside the current block. A block is n DATA
- * shares followed by m PARITY shares; the sender emits the parity records as
- * soon as the block's last DATA record is queued. The receiver decodes a block
- * when its data and parity shares make the n unknowns solvable.
+ * carriers = groups * (n + m), one share per carrier. Global packet seq is
+ * striped: group = seq % groups, block_id = (seq / groups) / n, and share =
+ * (seq / groups) % n. A block of every group therefore covers one contiguous
+ * span of groups * n global packets (the super-block), which is also the unit
+ * the receiver delivers: all groups' block b must be complete before global
+ * seq b*groups*n is handed to the stream, so the byte stream never has a hole.
+ *
+ * The host codec is the authority for encode/decode; this state only holds the
+ * packets that are still inside the current block. A block is n DATA shares
+ * followed by m PARITY shares; the sender emits the parity records as soon as
+ * the block's last DATA record is queued. The receiver decodes a block when
+ * its data and parity shares make the n unknowns solvable.
  * ------------------------------------------------------------------ */
 struct tbt_fec_rlnc;
+struct tbt_fec_grouped;
 
 struct tbt_fec_blk
 {
     u64 block_id;
     bool used;
     bool ready;
+    u16 nreal;    /* real DATA packets in this block; 0 = not yet known */
     u8 *data;     /* n * s bytes */
     u8 *parity;   /* m * s bytes */
     u8 *dpresent; /* n flags */
     u8 *ppresent; /* m flags */
     u16 *dlen;    /* n payload lengths */
-    u8 *data_ptrs[TBT_FEC_MAX_SHARES];
-    u8 *parity_ptrs[TBT_FEC_MAX_SHARES];
-    struct tbt_fec_rlnc *ctx;
+};
+
+/* One group's encoder state. The ring, packet buffer and record buffer are
+ * shared by all groups because the packetizer is one ordered stream. */
+struct tbt_fec_gtx
+{
+    u8 *blk; /* n * s bytes: this group's current block */
+    u8 *par; /* m * s bytes: this group's parity scratch */
 };
 
 struct tbt_fec_tx
@@ -483,15 +499,15 @@ struct tbt_fec_tx
     u32 ring_size;
     u32 head, tail;
     u8 *pkt; /* one packet under construction */
-    u8 *par; /* m * s bytes: parity scratch */
     u8 *rec; /* TBT_FEC_REC_MAX: one complete record */
     u16 fill;
-    u8 *blk; /* n * s bytes: the current block's data packets */
-    u64 seq;
+    u64 seq; /* next global packet seq */
     bool flush_req;
+    u16 groups, n, m, s;
     u8 *data_ptrs[TBT_FEC_MAX_SHARES];
     u8 *parity_ptrs[TBT_FEC_MAX_SHARES];
-    struct tbt_fec_rlnc *ctx;
+    struct tbt_fec_gtx *g; /* groups entries */
+    struct tbt_fec_grouped *codec;
     u64 nonce;
 };
 
@@ -499,10 +515,18 @@ struct tbt_fec_rx
 {
     spinlock_t lock; /* carrier rx works assemble blocks concurrently */
     u16 n, m, s;
-    u16 slots;
-    u64 next_block;
-    u64 next_deliver;
-    struct tbt_fec_blk *blk;
+    u16 groups;
+    u16 slots; /* block slots per group */
+    u64 next_super;   /* next super-block to deliver */
+    u64 next_deliver; /* global packets delivered */
+    u64 ack_deliver;  /* last frontier sent in an ACK */
+    u64 total_pkts;   /* stream packet count; valid when total_known */
+    u64 total_bytes;  /* FIN's byte offset; 0 when only LAST named the end */
+    bool total_known;
+    struct tbt_fec_blk *blk; /* groups * slots */
+    struct tbt_fec_grouped *codec;
+    u8 *data_ptrs[TBT_FEC_MAX_SHARES];   /* decode scratch */
+    u8 *parity_ptrs[TBT_FEC_MAX_SHARES]; /* decode scratch */
 };
 
 /* One queued FEC record waiting for a carrier. Control records may be sent on
@@ -851,7 +875,7 @@ struct tbt_carrier
     u8 state;                     /* TBT_CAR_* */
     u8 class;                     /* profile class, for the peers view */
     u16 local_port;
-    u8 *part;                     /* unwritten tail (TBT_REC_MAX) */
+    u8 *part;                     /* unwritten tail (TBT_CAR_PART_MAX) */
     u16 part_len, part_off;
     u8 index;
     u32 gen;                  /* session-unique; pinned frames carry it */
@@ -951,6 +975,9 @@ bool tbt_fec_tx_idle(struct tbt_stream *st);
 void tbt_fec_tx_work(struct work_struct *w);
 int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len);
 int tbt_fec_rx_record(struct tbt_carrier *c, const u8 *rec, size_t len);
+/* The old FIN record names the stream's total byte offset. The FEC receiver
+ * uses it to complete a final block whose parity and LAST flag were lost. */
+void tbt_fec_rx_fin(struct tbt_session *sess, u64 total_bytes);
 bool tbt_fec_record_type(u8 type);
 int tbt_fec_record_len(const u8 *buf, size_t have, size_t *need);
 /* tbt_carrier.c: write one whole record, no frame header. */
