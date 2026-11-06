@@ -51,9 +51,7 @@ struct sc_bs {
     uint64_t *cnt;     /* (n_chk * groups) * BS_PLANES */
     uint64_t *xr;      /* n_chk * groups */
     uint64_t *act;     /* n_chk * groups */
-    uint8_t *pending;  /* n_chk */
-    int *stack;        /* n_chk */
-    int *next;         /* n_chk */
+    int *stack;        /* n_chk, the active-check list */
     int *touched;      /* n */
     uint8_t *tflag;    /* n */
     uint64_t *resolve; /* n * groups */
@@ -195,16 +193,14 @@ sc_bs *sc_bs_new(sc_code *c, int batch, char *err, size_t errlen)
     bs->cnt = calloc(nchk * groups * BS_PLANES_MAX, sizeof(uint64_t));
     bs->xr = calloc(nchk * groups, sizeof(uint64_t));
     bs->act = calloc(nchk * groups, sizeof(uint64_t));
-    bs->pending = calloc(nchk, 1);
     bs->stack = calloc(nchk, sizeof(int));
-    bs->next = calloc(nchk, sizeof(int));
     bs->touched = calloc(n, sizeof(int));
     bs->tflag = calloc(n, 1);
     bs->resolve = calloc(n * groups, sizeof(uint64_t));
     bs->vbits = calloc(n * groups, sizeof(uint64_t));
     if (!bs->unk || !bs->val || !bs->cnt || !bs->xr || !bs->act ||
-        !bs->pending || !bs->stack || !bs->next || !bs->touched ||
-        !bs->tflag || !bs->resolve || !bs->vbits) {
+        !bs->stack || !bs->touched || !bs->tflag || !bs->resolve ||
+        !bs->vbits) {
         snprintf(err, errlen, "out of memory");
         sc_bs_free(bs);
         return NULL;
@@ -221,9 +217,7 @@ void sc_bs_free(sc_bs *bs)
     free(bs->cnt);
     free(bs->xr);
     free(bs->act);
-    free(bs->pending);
     free(bs->stack);
-    free(bs->next);
     free(bs->touched);
     free(bs->tflag);
     free(bs->resolve);
@@ -409,7 +403,6 @@ long sc_decode_bs(sc_bs *bs, const uint8_t *bits, const uint8_t *erased,
     uint64_t *cnt = bs->cnt;
     uint64_t *xr = bs->xr;
     uint64_t *act = bs->act;
-    uint8_t *pending = bs->pending;
     int *stack = bs->stack;
     uint64_t *rows = bs->rows;
     uint64_t res[BS_MAX_GROUPS];
@@ -441,7 +434,6 @@ long sc_decode_bs(sc_bs *bs, const uint8_t *bits, const uint8_t *erased,
     memset(cnt, 0, (size_t)nchk * (size_t)groups * (size_t)bs->planes * sizeof(uint64_t));
     memset(xr, 0, (size_t)nchk * (size_t)groups * sizeof(uint64_t));
     memset(act, 0, (size_t)nchk * (size_t)groups * sizeof(uint64_t));
-    memset(pending, 0, (size_t)nchk);
 
     for (v = 0; v < n; v++) {
         const uint64_t *uu = &unk[(size_t)v * groups];
@@ -467,10 +459,8 @@ long sc_decode_bs(sc_bs *bs, const uint8_t *bits, const uint8_t *erased,
             act[(size_t)c * groups + gg] = a;
             any |= (a != 0);
         }
-        if (any) {
-            pending[c] = 1;
+        if (any)
             stack[sp++] = c;
-        }
     }
 
 #ifdef BS_TIMING
