@@ -23,6 +23,8 @@
 
 **t52-pace（2026-11-06）**：改动只在 `w-t52-pace`（based `b41b259`），master 已还原干净；首波不再全量 `schedule_work`，`carriers_start` 只建 carrier + 16-token burst，50ms poll 用同一 `max(8,n/4)/s` 令牌桶驱动首拨；`tbtun.h`/CHANGELOG 已同步。允许 **本地 QEMU loopback** probe N 256/8MiB + A–P 作为 pacing 验证，**不碰 `.65`/HND0/WAN、不 8 并行**；T5.2 HOLD；head 待 QEMU 后提交；不 push。
 
+**t52-pace 完成（`21e8eb2`，base `b41b259`）**：首波不再全量 `schedule_work`，50ms poll 经同一 `max(8,n/4)/s` 令牌桶（16-token burst）驱动。QEMU probe N 256/8MiB：257 次拨号/5.22s ≈49/s（cap 64/s），`connect_fail=0 connect_retry=0`，byte-exact、`tx_ack` 满；A–H/I–M/O/P/Q PASS（I 与 N 并行时首轮 flake，单独 PASS）。唯一 FAIL：probe N c9 `fec_ack_tx=8/rx=8`，在未修改 `b41b259` 上复现，属 probe 全零断言 vs 新增 ACK 计数器的**基线测试问题**，与本改动无关。未合入；T5.2 HOLD；不 push。
+
 **冒烟前部署/分工（2026-11-06）**：HND0 clean；`b41b259` x86 far ko **尚未部署**。`t52-arm64-3` = HND0 far b41b259 构建/部署 + `.65` **1 carrier/37B smoke**；`arm64-build-3` = `.65` aarch64 ko only。HND0 far 用 **`tbt_echo` 5202（不用 iperf3）**；1 carrier/37B 通过后 **8/16 × 1MiB/5s**；不 256/8 并行、不合并/push。
 
 **HND0 清理确认（`hnd0-verify`，2026-11-06）**：10:56:45 UTC 无 tbtun、`/proc/net/tbtun` 不存在、9000/5202 无监听、无 echo/进程、无锁。sysctl 为**生产值**（rmem/wmem 16MiB、tcp 4MiB、fq/bbr），**不改成 64MiB**。10:51:39–10:56:03 窗口 UBSAN/WARN/BUG/OOM=0，未跑数据面；08:53–09:01 两轮 smoke 有 **16 UBSAN + 2 WARN**（`tbt_tx.c:2570`、array/shift OOB），已记录。**`t52-arm64` 在 HOLD 期间仍于 10:44/10:51/10:52 部署/加载/echo，agent kill 后留 PPID 1 残留**（已被并行清理）；需确认 HOLD 生效、不再部署。生产服务 active；不合并/push。
