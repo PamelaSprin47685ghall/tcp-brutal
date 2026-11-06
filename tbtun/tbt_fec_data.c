@@ -1,13 +1,15 @@
-/* tbt_fec_data.c - FEC v6 data plane: packetizer, block codec, record writer.
+/* tbt_fec_data.c - FEC v6 data plane: packetizer, grouped block codec,
+ * record writer, receiver reassembly.
  *
- * Scope (T2 intermediate):
- *   - one FEC group per session: carriers == n + m, one share per carrier;
- *   - DATA share i rides carrier i, PARITY share n+r rides carrier n+r;
+ * Scope (T2):
+ *   - carriers = groups * (n + m), one share per carrier;
+ *   - carrier c carries group c/(n+m) share c%(n+m);
+ *   - global packet seq is striped: group = seq % groups, block_id =
+ *     (seq / groups) / n, share = (seq / groups) % n;
  *   - a block is n DATA packets followed by m parity packets; the codec is the
- *     host-tested GF(2) RLNC in tbt_fec.c, reused with a per-block nonce;
- *   - raw profile only. The HTTP chunk container needs a 40-byte record path
- *     and is left to the integration that adds it; fec=on + http-kal is
- *     refused at session creation rather than half-supported.
+ *     host-tested GF(2) RLNC in tbt_fec.c, reused with a per-group, per-block
+ *     nonce;
+ *   - both containers: raw records, or one 40-byte record per HTTP chunk.
  *
  * The capture actor runs in softirq: tbt_fec_tx_submit only copies bytes into
  * a ring and schedules a work item. Packetization, encoding, and socket writes
@@ -18,6 +20,11 @@
  * copies shares into preallocated block buffers, decodes with preallocated
  * workspaces, and queues ACKs to the same work item; it never allocates a
  * codec or calls a socket from that path.
+ *
+ * Delivery is by super-block: block b of every group covers the contiguous
+ * global range [b*groups*n, (b+1)*groups*n). A super-block is handed to the
+ * stream only when every group's block b is decoded, so the byte stream has no
+ * hole and the ACK frontier is a real global frontier, not a per-group guess.
  */
 #include <linux/ktime.h>
 #include <linux/skbuff.h>
@@ -31,6 +38,7 @@
 #define TBT_FEC_TX_RING (256 * 1024)
 #define TBT_FEC_S TBT_FEC_PAYLOAD_MAX
 #define TBT_FEC_NONCE_GOLDEN 0x9e3779b97f4a7c15ULL
+#define TBT_FEC_RX_BUDGET (16u * 1024 * 1024)
 
 /* Both ends derive the same coefficients from the configured parameters. The
  * session nonce is not available on the far side until HELLO, and FEC state is
@@ -42,9 +50,12 @@ static u64 tbt_fec_base_nonce(const struct tbt_session *sess)
     return 0x5a5a5a5a5a5a5a5aULL;
 }
 
-static u64 tbt_fec_block_nonce(u64 base, u64 block_id)
+/* Group g uses seed_g = base ^ (g << 32); the block generation then mixes in
+ * the same golden ratio as the single-group cut, so two blocks never reuse a
+ * coefficient set. Sender and receiver derive this independently. */
+static u64 tbt_fec_group_nonce(u64 base, u16 group, u64 block_id)
 {
-    return base ^ (block_id * TBT_FEC_NONCE_GOLDEN);
+    return base ^ ((u64)group << 32) ^ (block_id * TBT_FEC_NONCE_GOLDEN);
 }
 
 static struct tbt_stream *tbt_fec_stream(struct tbt_session *sess)
@@ -128,8 +139,14 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o)
     return tbt_carrier_send_fec(c, o->data, o->len);
 }
 
+/* Write queued records. The session pump lock serialises these writes with
+ * the old control path (HELLO/OPEN/FIN/PAD), so a record is never spliced
+ * into another record's bytes on one carrier. */
 static int tbt_fec_out_flush(struct tbt_session *sess)
 {
+    int ret = 0;
+
+    mutex_lock(&sess->pump_lock);
     for (;;)
     {
         struct tbt_fec_out *o;
@@ -139,14 +156,19 @@ static int tbt_fec_out_flush(struct tbt_session *sess)
         o = list_first_entry_or_null(&sess->fec_out, struct tbt_fec_out, node);
         spin_unlock(&sess->fec_out_lock);
         if (!o)
-            return 0;
+            break;
         err = tbt_fec_out_try(sess, o);
         if (err == -EAGAIN)
-            return -EAGAIN;
+        {
+            ret = -EAGAIN;
+            break;
+        }
         spin_lock(&sess->fec_out_lock);
         tbt_fec_out_free(o);
         spin_unlock(&sess->fec_out_lock);
     }
+    mutex_unlock(&sess->pump_lock);
+    return ret;
 }
 
 /* Queue one complete record. Control records may ride any up carrier; data
@@ -209,82 +231,121 @@ static u32 tbt_fec_ring_get(struct tbt_fec_tx *tx, u8 *dst, u32 len)
     return take;
 }
 
-static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_stream *st,
-                              bool last)
+/* Encode and send the m parity shares of one group block. win_len is the
+ * number of real DATA packets in the block: n for a full block, less for the
+ * stream's final block. The unused positions are already zero-filled. */
+static void tbt_fec_tx_emit_parity(struct tbt_session *sess, u16 group,
+                                   u64 block_id, u16 win_len)
+{
+    struct tbt_fec_tx *tx = sess->fec_tx;
+    struct tbt_fec_gtx *g = &tx->g[group];
+    struct tbt_fec_rlnc *ctx = tbt_fec_grouped_ctx(tx->codec, group);
+    struct tbt_fec_hdr h;
+    u64 last_seq;
+    u16 rec_len, i;
+
+    if (!ctx || !win_len || win_len > tx->n)
+        return;
+    tbt_fec_rlnc_set_nonce(ctx, tbt_fec_group_nonce(tx->nonce, group, block_id));
+    for (i = 0; i < tx->n; i++)
+        tx->data_ptrs[i] = g->blk + (size_t)i * TBT_FEC_S;
+    for (i = 0; i < tx->m; i++)
+        tx->parity_ptrs[i] = g->par + (size_t)i * TBT_FEC_S;
+    if (tbt_fec_rlnc_encode(ctx, tx->data_ptrs, tx->n, tx->parity_ptrs) < 0)
+        return;
+    last_seq = tbt_fec_seq_of_block_pkt(block_id, group, (u16)(win_len - 1),
+                                        tx->groups, tx->n);
+    for (i = 0; i < tx->m; i++)
+    {
+        memset(&h, 0, sizeof(h));
+        h.type = TBT_FEC_PARITY;
+        h.share_index = (u16)(tx->n + i);
+        h.n = (u8)tx->n;
+        h.m = (u8)tx->m;
+        h.block_id = block_id;
+        h.seq = last_seq;
+        h.win_len = win_len;
+        h.payload_len = TBT_FEC_S;
+        h.conv = TBT_FEC_CONV;
+        if (tbt_fec_make_record(&h, tx->parity_ptrs[i], tx->rec, &rec_len))
+            continue;
+        tbt_fec_send_record(sess,
+                            (u16)(group * (tx->n + tx->m) + tx->n + i),
+                            tx->rec, rec_len, false);
+    }
+}
+
+/* Flush the stream: every group whose final block is short gets parity over
+ * its zero-filled tail, so a lost real share is still recoverable and the
+ * receiver learns the real length from win_len. Groups whose final block is
+ * full already sent their parity when the block completed. */
+static void tbt_fec_tx_finish(struct tbt_session *sess)
+{
+    struct tbt_fec_tx *tx = sess->fec_tx;
+    u64 last;
+    u16 group;
+
+    if (!tx->seq)
+        return;
+    last = tx->seq - 1;
+    for (group = 0; group < tx->groups && group <= last; group++)
+    {
+        u64 local = (last - group) / tx->groups;
+        u16 len = (u16)(local % tx->n) + 1;
+        u64 block_id = local / tx->n;
+
+        if (len == tx->n)
+            continue;
+        memset(tx->g[group].blk + (size_t)len * TBT_FEC_S, 0,
+               (size_t)(tx->n - len) * TBT_FEC_S);
+        tbt_fec_tx_emit_parity(sess, group, block_id, len);
+    }
+}
+
+static void tbt_fec_packetize(struct tbt_session *sess, bool last)
 {
     struct tbt_fec_tx *tx = sess->fec_tx;
     struct tbt_fec_hdr h;
-    u16 rec_len;
-    u64 seq, block_id;
-    u16 local, share, len;
+    u16 rec_len, group, share, len, carrier;
+    u64 seq, local, block_id;
     u8 *rec = tx->rec;
-    int err;
 
     if (!tx->fill && !last)
         return;
     len = tx->fill;
     seq = tx->seq++;
-    local = (u16)(seq % sess->fec_rx->n);
-    block_id = seq / sess->fec_rx->n;
+    group = (u16)(seq % tx->groups);
+    local = seq / tx->groups;
+    share = (u16)(local % tx->n);
+    block_id = local / tx->n;
+    carrier = (u16)(group * (tx->n + tx->m) + share);
 
-    /* DATA share: local index within the block, carrier = share. */
-    share = local;
     memset(&h, 0, sizeof(h));
     h.type = TBT_FEC_DATA;
     h.flags = last ? TBT_FEC_FF_LAST : 0;
     h.share_index = share;
-    h.n = (u8)sess->fec_rx->n;
-    h.m = (u8)sess->fec_rx->m;
+    h.n = (u8)tx->n;
+    h.m = (u8)tx->m;
     h.block_id = block_id;
     h.seq = seq;
     h.win_len = 0;
     h.payload_len = len;
     h.conv = TBT_FEC_CONV;
-    if (tbt_fec_make_record(&h, tx->pkt, rec, &rec_len))
-        return;
-    err = tbt_fec_send_record(sess, share, rec, rec_len, false);
-    if (err)
-        return;
-
-    memcpy(tx->blk + (size_t)local * TBT_FEC_S, tx->pkt, len);
+    if (!tbt_fec_make_record(&h, tx->pkt, rec, &rec_len))
+        (void)tbt_fec_send_record(sess, carrier, rec, rec_len, false);
+    /* The block buffer must hold the real byte even when the share did not
+     * reach its carrier: parity then describes the truth, and the receiver
+     * can recover the dropped share instead of decoding zeros. */
+    memcpy(tx->g[group].blk + (size_t)share * TBT_FEC_S, tx->pkt, len);
     if (len < TBT_FEC_S)
-        memset(tx->blk + (size_t)local * TBT_FEC_S + len, 0, TBT_FEC_S - len);
+        memset(tx->g[group].blk + (size_t)share * TBT_FEC_S + len, 0,
+               TBT_FEC_S - len);
     tx->fill = 0;
 
-    if (local + 1 != sess->fec_rx->n)
-        return;
-
-    /* Block complete: encode m parity rows over the n data packets. */
-    {
-        u16 i;
-
-        tbt_fec_rlnc_set_nonce(tx->ctx,
-                               tbt_fec_block_nonce(tx->nonce, block_id));
-        for (i = 0; i < sess->fec_rx->n; i++)
-            tx->data_ptrs[i] = tx->blk + (size_t)i * TBT_FEC_S;
-        for (i = 0; i < sess->fec_rx->m; i++)
-            tx->parity_ptrs[i] = tx->par + (size_t)i * TBT_FEC_S;
-        if (tbt_fec_rlnc_encode(tx->ctx, tx->data_ptrs, sess->fec_rx->n,
-                                tx->parity_ptrs) < 0)
-            return;
-        for (i = 0; i < sess->fec_rx->m; i++)
-        {
-            memset(&h, 0, sizeof(h));
-            h.type = TBT_FEC_PARITY;
-            h.share_index = (u16)(sess->fec_rx->n + i);
-            h.n = (u8)sess->fec_rx->n;
-            h.m = (u8)sess->fec_rx->m;
-            h.block_id = block_id;
-            h.seq = block_id * sess->fec_rx->n + sess->fec_rx->n - 1;
-            h.win_len = sess->fec_rx->n;
-            h.payload_len = TBT_FEC_S;
-            h.conv = TBT_FEC_CONV;
-            if (tbt_fec_make_record(&h, tx->parity_ptrs[i], rec, &rec_len))
-                continue;
-            tbt_fec_send_record(sess, (u16)(sess->fec_rx->n + i), rec, rec_len,
-                                false);
-        }
-    }
+    if (share + 1 == tx->n)
+        tbt_fec_tx_emit_parity(sess, group, block_id, tx->n);
+    if (last)
+        tbt_fec_tx_finish(sess);
 }
 
 static bool tbt_fec_tx_is_idle(struct tbt_session *sess)
@@ -335,18 +396,20 @@ void tbt_fec_tx_work(struct work_struct *w)
         if (got)
         {
             if (tx->fill == TBT_FEC_S)
-                tbt_fec_packetize(sess, st, false);
+                tbt_fec_packetize(sess, false);
             continue;
         }
         if (tx->fill == TBT_FEC_S)
         {
-            tbt_fec_packetize(sess, st, false);
+            tbt_fec_packetize(sess, false);
             continue;
         }
         if (READ_ONCE(tx->flush_req) && tx->head == tx->tail)
         {
             if (tx->fill)
-                tbt_fec_packetize(sess, st, true);
+                tbt_fec_packetize(sess, true);
+            else
+                tbt_fec_tx_finish(sess);
             WRITE_ONCE(tx->flush_req, false);
             continue;
         }
@@ -373,6 +436,13 @@ size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,
         return 0;
     spin_lock(&tx->lock);
     take = tbt_fec_ring_put(tx, skb, off, (u32)min_t(size_t, len, U32_MAX));
+    if (take)
+    {
+        /* The FIN path freezes tx_seq after the ring is drained; keeping the
+         * accepted byte count here is what makes that FIN name the real end
+         * of the stream and lets the ACK clamp stay exact. */
+        WRITE_ONCE(st->tx_seq, READ_ONCE(st->tx_seq) + take);
+    }
     if (take < len)
         WRITE_ONCE(st->tx_paused, true);
     spin_unlock(&tx->lock);
@@ -426,37 +496,82 @@ static void tbt_fec_blk_reset(struct tbt_fec_blk *b, u64 block_id)
 {
     b->used = true;
     b->ready = false;
+    b->nreal = 0;
     b->block_id = block_id;
     memset(b->dpresent, 0, TBT_FEC_MAX_SHARES);
     memset(b->ppresent, 0, TBT_FEC_MAX_SHARES);
     memset(b->dlen, 0, TBT_FEC_MAX_SHARES * sizeof(u16));
 }
 
-static int tbt_fec_blk_decode(struct tbt_session *sess, struct tbt_fec_blk *b)
+/* Real length of this block, or 0 when the group has no packet in it. The
+ * parity's win_len is authoritative for the block; the stream's total packet
+ * count is the second source, used when every parity record of this block was
+ * lost. A known value never grows: an inconsistent peer cannot turn padding
+ * back into data. */
+static u16 tbt_fec_blk_real_len(const struct tbt_fec_rx *rx, u16 group,
+                                const struct tbt_fec_blk *b)
+{
+    u16 len = b->nreal ? b->nreal : rx->n;
+
+    if (rx->total_known)
+    {
+        u64 final = tbt_fec_final_block_of_total(rx->total_pkts, rx->groups,
+                                                 rx->n);
+
+        if (b->block_id == final)
+        {
+            u16 tail = tbt_fec_group_tail_len(rx->total_pkts, rx->groups,
+                                              rx->n, group);
+
+            if (tail < len)
+                len = tail;
+        }
+    }
+    return len;
+}
+
+/* Decode one block in place. Padding positions (index >= the real length) are
+ * known zeros: the sender encoded them that way, and they are never delivered.
+ * Returns 0 when every real share is present, -EAGAIN otherwise. */
+static int tbt_fec_blk_decode(struct tbt_session *sess, u16 group,
+                              struct tbt_fec_blk *b)
 {
     struct tbt_fec_rx *rx = sess->fec_rx;
-    u16 i, missing = 0, have_parity = 0;
+    struct tbt_fec_rlnc *ctx = tbt_fec_grouped_ctx(rx->codec, group);
+    u16 len, missing = 0, have_parity = 0, i;
     int rc;
 
+    len = tbt_fec_blk_real_len(rx, group, b);
+    if (!len)
+        return -EAGAIN; /* this group has no packet in this block */
+    for (i = len; i < rx->n; i++)
+    {
+        if (!b->dpresent[i] || b->dlen[i])
+        {
+            memset(b->data + (size_t)i * rx->s, 0, rx->s);
+            b->dpresent[i] = 1;
+            b->dlen[i] = 0;
+        }
+    }
     for (i = 0; i < rx->n; i++)
     {
-        b->data_ptrs[i] = b->data + (size_t)i * rx->s;
+        rx->data_ptrs[i] = b->data + (size_t)i * rx->s;
         if (!b->dpresent[i])
             missing++;
     }
     for (i = 0; i < rx->m; i++)
     {
-        b->parity_ptrs[i] = b->parity + (size_t)i * rx->s;
+        rx->parity_ptrs[i] = b->parity + (size_t)i * rx->s;
         if (b->ppresent[i])
             have_parity++;
     }
     if (!missing)
         return 0;
-    if (have_parity < missing)
+    if (!ctx || have_parity < missing)
         return -EAGAIN;
-    tbt_fec_rlnc_set_nonce(b->ctx, tbt_fec_block_nonce(tbt_fec_base_nonce(sess),
-                                                       b->block_id));
-    rc = tbt_fec_rlnc_decode(b->ctx, b->data_ptrs, b->parity_ptrs, b->dpresent,
+    tbt_fec_rlnc_set_nonce(ctx, tbt_fec_group_nonce(tbt_fec_base_nonce(sess),
+                                                    group, b->block_id));
+    rc = tbt_fec_rlnc_decode(ctx, rx->data_ptrs, rx->parity_ptrs, b->dpresent,
                              b->ppresent, rx->n);
     return rc < 0 ? -EAGAIN : 0;
 }
@@ -484,45 +599,127 @@ static void tbt_fec_ack(struct tbt_session *sess, u64 next_deliver)
     tbt_fec_send_record(sess, 0, rec, len, true);
 }
 
-static void tbt_fec_deliver_one(struct tbt_session *sess, struct tbt_stream *st,
-                                struct tbt_fec_blk *b)
+static struct tbt_fec_blk *tbt_fec_rx_blk(struct tbt_fec_rx *rx, u16 group,
+                                          u64 block_id)
 {
-    struct tbt_fec_rx *rx = sess->fec_rx;
-    u16 i;
-
-    for (i = 0; i < rx->n; i++)
-    {
-        u64 seq = b->block_id * rx->n + i;
-        u16 len = b->dlen[i] ? b->dlen[i] : rx->s;
-
-        tbt_rx_fec_deliver(st, seq * rx->s, b->data + (size_t)i * rx->s, len);
-    }
-    b->used = false;
-    b->ready = false;
+    return &rx->blk[(size_t)group * rx->slots + (block_id % rx->slots)];
 }
 
-/* Deliver completed blocks strictly in block order. A block may finish before
- * an earlier one (carriers run independently); delivering it early would put
- * a hole in the stream's byte space and trip the old hole reset. */
+/* Every group must have decoded block s before any byte of it is delivered.
+ * In the final super-block a group with no packet is complete by definition. */
+static bool tbt_fec_super_ready(const struct tbt_fec_rx *rx, u64 s)
+{
+    u16 group;
+
+    for (group = 0; group < rx->groups; group++)
+    {
+        struct tbt_fec_blk *b;
+
+        if (rx->total_known)
+        {
+            u64 final = tbt_fec_final_block_of_total(rx->total_pkts,
+                                                     rx->groups, rx->n);
+
+            if (s == final &&
+                !tbt_fec_group_tail_len(rx->total_pkts, rx->groups, rx->n,
+                                        group))
+                continue;
+        }
+        b = tbt_fec_rx_blk((struct tbt_fec_rx *)rx, group, s);
+        if (!b->used || !b->ready || b->block_id != s)
+            return false;
+    }
+    return true;
+}
+
 static void tbt_fec_deliver_ready(struct tbt_session *sess)
 {
     struct tbt_fec_rx *rx = sess->fec_rx;
-    struct tbt_stream *st = tbt_fec_stream(sess);
+    struct tbt_stream *st;
+    bool delivered = false;
 
+    if (rx->total_known && !rx->total_pkts)
+        return;
+    st = tbt_fec_stream(sess);
     if (!st)
         return;
     for (;;)
     {
-        struct tbt_fec_blk *b = &rx->blk[rx->next_block % rx->slots];
+        u64 s = rx->next_super;
+        u64 base = s * (u64)rx->groups * rx->n;
+        u16 p, group;
 
-        if (!b->used || !b->ready || b->block_id != rx->next_block)
+        if (rx->total_known)
+        {
+            u64 final = tbt_fec_final_block_of_total(rx->total_pkts,
+                                                     rx->groups, rx->n);
+
+            if (s > final)
+                break;
+        }
+        if (!tbt_fec_super_ready(rx, s))
             break;
-        tbt_fec_deliver_one(sess, st, b);
-        rx->next_block++;
-        rx->next_deliver = rx->next_block * rx->n;
+        for (p = 0; p < rx->n; p++)
+        {
+            for (group = 0; group < rx->groups; group++)
+            {
+                struct tbt_fec_blk *b;
+                u64 seq = base + (u64)p * rx->groups + group;
+                u16 len;
+
+                if (rx->total_known && seq >= rx->total_pkts)
+                    continue;
+                b = tbt_fec_rx_blk(rx, group, s);
+                len = b->dlen[p] ? b->dlen[p] : rx->s;
+                if (rx->total_known && rx->total_bytes &&
+                    seq + 1 == rx->total_pkts)
+                {
+                    u64 tail = rx->total_bytes -
+                               (rx->total_pkts - 1) * (u64)rx->s;
+
+                    if (tail > 0 && tail <= rx->s)
+                        len = (u16)tail;
+                }
+                tbt_rx_fec_deliver(st, seq * rx->s,
+                                   b->data + (size_t)p * rx->s, len);
+                delivered = true;
+            }
+        }
+        rx->next_super++;
+        rx->next_deliver = (s + 1) * (u64)rx->groups * rx->n;
+        if (rx->total_known && rx->next_deliver > rx->total_pkts)
+            rx->next_deliver = rx->total_pkts;
     }
-    tbt_fec_ack(sess, rx->next_deliver);
+    if (delivered && rx->next_deliver > rx->ack_deliver)
+    {
+        rx->ack_deliver = rx->next_deliver;
+        tbt_fec_ack(sess, rx->next_deliver);
+    }
     tbt_stream_put(st);
+}
+
+/* Re-run decode over every pending block. Called when the stream's total
+ * length becomes known (LAST or FIN) or when the tail length of an existing
+ * block changes; the walk is bounded by groups * slots and runs once per
+ * stream end, not per record. */
+static void tbt_fec_rx_retry_all(struct tbt_session *sess)
+{
+    struct tbt_fec_rx *rx = sess->fec_rx;
+    u16 group, i;
+
+    for (group = 0; group < rx->groups; group++)
+    {
+        for (i = 0; i < rx->slots; i++)
+        {
+            struct tbt_fec_blk *b = &rx->blk[(size_t)group * rx->slots + i];
+
+            if (!b->used || b->ready)
+                continue;
+            if (tbt_fec_blk_decode(sess, group, b) == 0)
+                b->ready = true;
+        }
+    }
+    tbt_fec_deliver_ready(sess);
 }
 
 int tbt_fec_rx_record(struct tbt_carrier *c, const u8 *rec, size_t len)
@@ -532,7 +729,8 @@ int tbt_fec_rx_record(struct tbt_carrier *c, const u8 *rec, size_t len)
     struct tbt_fec_hdr h;
     struct tbt_fec_blk *b;
     const u8 *payload;
-    u16 slot;
+    u16 shares, group, share, slot;
+    bool new_total = false;
 
     if (!rx || len < TBT_FEC_HDR_LEN)
         return -EPROTO;
@@ -566,50 +764,111 @@ int tbt_fec_rx_record(struct tbt_carrier *c, const u8 *rec, size_t len)
 
             if (acked > READ_ONCE(st->tx_seq))
                 acked = READ_ONCE(st->tx_seq);
-            WRITE_ONCE(st->tx_ack, acked);
+            spin_lock(&sess->lock);
+            if (acked > READ_ONCE(st->tx_ack))
+            {
+                WRITE_ONCE(st->tx_ack, acked);
+                st->last_ack_ns = ktime_get_ns();
+                sess->tx_ack = acked;
+                sess->last_ack_ns = st->last_ack_ns;
+            }
+            spin_unlock(&sess->lock);
             tbt_stream_put(st);
+            /* The FIN pump holds the close until tx_ack covers tx_seq. */
+            tbt_tx_wake(sess);
         }
         return 0;
     }
     if (h.type != TBT_FEC_DATA && h.type != TBT_FEC_PARITY)
         return 0; /* FBK/CFG are accepted and ignored by this cut. */
+
+    /* One share per carrier: the carrier names the group and the share, and
+     * the header must agree. A replaced carrier keeps its index, so this is
+     * also the guard against a record arriving on the wrong path. */
+    shares = (u16)(rx->n + rx->m);
+    group = (u16)(c->index / shares);
+    share = (u16)(c->index % shares);
+    if (!shares || group >= rx->groups || h.share_index != share)
+        return -EPROTO;
+    if (h.n != (u8)rx->n || h.m != (u8)rx->m)
+        return -EPROTO;
+    if ((u16)(h.seq % rx->groups) != group)
+        return -EPROTO;
+    if (h.block_id != (h.seq / rx->groups) / rx->n)
+        return -EPROTO;
+    if (h.type == TBT_FEC_PARITY &&
+        (!h.win_len || h.win_len > rx->n))
+        return -EPROTO;
+
     payload = rec + TBT_FEC_HDR_LEN;
     spin_lock_bh(&rx->lock);
-    slot = (u16)(h.block_id % rx->slots);
+    if (h.block_id < rx->next_super ||
+        h.block_id >= rx->next_super + rx->slots)
+    {
+        spin_unlock_bh(&rx->lock);
+        return 0; /* already delivered, or too far ahead to buffer */
+    }
+    slot = (u16)((size_t)group * rx->slots + (h.block_id % rx->slots));
     b = &rx->blk[slot];
     if (!b->used || b->block_id != h.block_id)
         tbt_fec_blk_reset(b, h.block_id);
 
     if (h.type == TBT_FEC_DATA)
     {
-        if (h.share_index >= rx->n)
+        memcpy(b->data + (size_t)share * rx->s, payload, h.payload_len);
+        b->dlen[share] = h.payload_len;
+        b->dpresent[share] = 1;
+        if (h.flags & TBT_FEC_FF_LAST)
         {
-            spin_unlock_bh(&rx->lock);
-            return -EPROTO;
+            if (!rx->total_known)
+            {
+                rx->total_pkts = h.seq + 1;
+                rx->total_known = true;
+                new_total = true;
+            }
         }
-        memcpy(b->data + (size_t)h.share_index * rx->s, payload, h.payload_len);
-        b->dlen[h.share_index] = h.payload_len;
-        b->dpresent[h.share_index] = 1;
     }
     else
     {
         u16 idx = (u16)(h.share_index - rx->n);
 
-        if (h.share_index < rx->n || idx >= rx->m)
-        {
-            spin_unlock_bh(&rx->lock);
-            return -EPROTO;
-        }
         memcpy(b->parity + (size_t)idx * rx->s, payload, h.payload_len);
         b->ppresent[idx] = 1;
+        if (h.win_len < rx->n &&
+            (!b->nreal || h.win_len < b->nreal))
+            b->nreal = h.win_len;
     }
-    if (tbt_fec_blk_decode(sess, b) == 0)
+    if (new_total)
+        tbt_fec_rx_retry_all(sess);
+    else if (tbt_fec_blk_decode(sess, group, b) == 0)
     {
         b->ready = true;
         tbt_fec_deliver_ready(sess);
     }
     spin_unlock_bh(&rx->lock);
     return 0;
+}
+
+void tbt_fec_rx_fin(struct tbt_session *sess, u64 total_bytes)
+{
+    struct tbt_fec_rx *rx = sess->fec_rx;
+
+    if (!rx)
+        return;
+    spin_lock_bh(&rx->lock);
+    if (!rx->total_known)
+    {
+        rx->total_bytes = total_bytes;
+        rx->total_pkts = total_bytes ?
+            (total_bytes + rx->s - 1) / rx->s : 0;
+        rx->total_known = true;
+        tbt_fec_rx_retry_all(sess);
+    }
+    else if (!rx->total_bytes)
+    {
+        rx->total_bytes = total_bytes;
+    }
+    spin_unlock_bh(&rx->lock);
 }
 
 /* ------------------------------------------------------------------ *
@@ -619,19 +878,20 @@ int tbt_fec_rx_record(struct tbt_carrier *c, const u8 *rec, size_t len)
 static void tbt_fec_rx_free(struct tbt_session *sess)
 {
     struct tbt_fec_rx *rx = sess->fec_rx;
-    int i;
+    u32 total, i;
 
     if (!rx)
         return;
     if (!rx->blk)
     {
+        tbt_fec_grouped_free(rx->codec);
         kvfree(rx);
         sess->fec_rx = NULL;
         return;
     }
-    for (i = 0; i < rx->slots; i++)
+    total = (u32)rx->groups * rx->slots;
+    for (i = 0; i < total; i++)
     {
-        tbt_fec_rlnc_free(rx->blk[i].ctx);
         kvfree(rx->blk[i].data);
         kvfree(rx->blk[i].parity);
         kvfree(rx->blk[i].dpresent);
@@ -639,6 +899,7 @@ static void tbt_fec_rx_free(struct tbt_session *sess)
         kvfree(rx->blk[i].dlen);
     }
     kvfree(rx->blk);
+    tbt_fec_grouped_free(rx->codec);
     kvfree(rx);
     sess->fec_rx = NULL;
 }
@@ -646,15 +907,23 @@ static void tbt_fec_rx_free(struct tbt_session *sess)
 void tbt_fec_data_free(struct tbt_session *sess)
 {
     struct tbt_fec_tx *tx = sess->fec_tx;
+    u16 i;
 
     if (tx)
     {
-        tbt_fec_rlnc_free(tx->ctx);
+        if (tx->g)
+        {
+            for (i = 0; i < tx->groups; i++)
+            {
+                kvfree(tx->g[i].blk);
+                kvfree(tx->g[i].par);
+            }
+            kvfree(tx->g);
+        }
+        tbt_fec_grouped_free(tx->codec);
         kvfree(tx->ring);
         kvfree(tx->pkt);
-        kvfree(tx->par);
         kvfree(tx->rec);
-        kvfree(tx->blk);
         kvfree(tx);
         sess->fec_tx = NULL;
     }
@@ -666,26 +935,48 @@ int tbt_fec_data_init(struct tbt_session *sess)
     struct tbt_tunnel *t = sess->tunnel;
     struct tbt_fec_rx *rx;
     struct tbt_fec_tx *tx;
-    u16 n = t->cfg.n, m = t->cfg.m, d;
-    u32 per, slots;
-    int i;
+    u16 n = t->cfg.n, m = t->cfg.m, shares, groups, w, d;
+    u32 per, slots, total, i;
 
     if (!n || !m || (u16)n + (u16)m > TBT_FEC_MAX_SHARES)
         return -EINVAL;
-    if (t->cfg.carriers != (u16)(n + m))
-        return -EOPNOTSUPP; /* grouped data plane is not in this cut */
-    d = (u16)(n / 2);
+    if (t->cfg.mode == 3)
+        return -EOPNOTSUPP; /* SC-LDPC is D's codec, not a silent RLNC alias */
+    shares = (u16)(n + m);
+    if (!t->cfg.carriers || t->cfg.carriers % shares)
+        return -EINVAL;
+    groups = (u16)(t->cfg.carriers / shares);
+    if (!groups || groups > TBT_FEC_MAX_GROUPS)
+        return -EINVAL;
+    /* One group keeps the proven block code (w = n). A grouped session uses
+     * the configured window (2n by default): its wider coefficient space lets
+     * four parity rows reach rank 4, which the even-weight rows of w = n
+     * cannot do for n = 4. The window is a local codec parameter; win_len on
+     * the wire still names the n packets of one block. */
+    w = n;
+    if (groups > 1)
+    {
+        w = t->cfg.w ? t->cfg.w : (u16)(2 * n);
+        if (w < n)
+            w = n;
+    }
+    d = (u16)(w / 2);
     if (!d)
         d = 1;
-    if (d >= n && n > 1)
-        d = (u16)(n - 1);
+    if (w > 1 && d >= w)
+        d = (u16)(w - 1);
 
-    per = (u32)(n + m) * TBT_FEC_S;
-    slots = (16u * 1024 * 1024) / per;
-    if (slots < 8)
-        slots = 8;
+    /* One super-block across every group is groups*(n+m)*S bytes. Keep the
+     * whole RX arena at or below 16 MiB: 32x8 gets 8 slots, one group keeps
+     * the historical 256. */
+    per = (u32)groups * shares * TBT_FEC_S;
+    slots = TBT_FEC_RX_BUDGET / per;
+    if (slots < 4)
+        slots = 4;
     if (slots > 256)
         slots = 256;
+    total = (u32)groups * slots;
+
     rx = kzalloc(sizeof(*rx), GFP_KERNEL);
     tx = kzalloc(sizeof(*tx), GFP_KERNEL);
     if (!rx || !tx)
@@ -694,23 +985,38 @@ int tbt_fec_data_init(struct tbt_session *sess)
     rx->n = n;
     rx->m = m;
     rx->s = TBT_FEC_S;
+    rx->groups = groups;
     rx->slots = (u16)slots;
-    rx->blk = kvzalloc((size_t)slots * sizeof(*rx->blk), GFP_KERNEL);
-    if (!rx->blk)
+    rx->blk = kvzalloc((size_t)total * sizeof(*rx->blk), GFP_KERNEL);
+    rx->codec = tbt_fec_grouped_new(groups, n, m, n, w, TBT_FEC_S, d,
+                                    tbt_fec_base_nonce(sess));
+    if (!rx->blk || !rx->codec)
         goto fail;
+
     tx->ring_size = TBT_FEC_TX_RING;
     tx->nonce = tbt_fec_base_nonce(sess);
+    tx->groups = groups;
+    tx->n = n;
+    tx->m = m;
+    tx->s = TBT_FEC_S;
     spin_lock_init(&tx->lock);
     tx->ring = kvzalloc(tx->ring_size, GFP_KERNEL);
     tx->pkt = kvzalloc(TBT_FEC_S, GFP_KERNEL);
-    tx->par = kvzalloc((size_t)m * TBT_FEC_S, GFP_KERNEL);
     tx->rec = kvzalloc(TBT_FEC_REC_MAX, GFP_KERNEL);
-    tx->blk = kvzalloc((size_t)n * TBT_FEC_S, GFP_KERNEL);
-    tx->ctx = tbt_fec_rlnc_new(n, m, n, n, TBT_FEC_S, d, tx->nonce);
-    if (!tx->ring || !tx->pkt || !tx->par || !tx->rec || !tx->blk || !tx->ctx)
+    tx->g = kvzalloc((size_t)groups * sizeof(*tx->g), GFP_KERNEL);
+    tx->codec = tbt_fec_grouped_new(groups, n, m, n, w, TBT_FEC_S, d,
+                                    tx->nonce);
+    if (!tx->ring || !tx->pkt || !tx->rec || !tx->g || !tx->codec)
         goto fail;
 
-    for (i = 0; i < rx->slots; i++)
+    for (i = 0; i < groups; i++)
+    {
+        tx->g[i].blk = kvzalloc((size_t)n * TBT_FEC_S, GFP_KERNEL);
+        tx->g[i].par = kvzalloc((size_t)m * TBT_FEC_S, GFP_KERNEL);
+        if (!tx->g[i].blk || !tx->g[i].par)
+            goto fail;
+    }
+    for (i = 0; i < total; i++)
     {
         struct tbt_fec_blk *b = &rx->blk[i];
 
@@ -719,9 +1025,8 @@ int tbt_fec_data_init(struct tbt_session *sess)
         b->dpresent = kvzalloc(TBT_FEC_MAX_SHARES, GFP_KERNEL);
         b->ppresent = kvzalloc(TBT_FEC_MAX_SHARES, GFP_KERNEL);
         b->dlen = kvzalloc(TBT_FEC_MAX_SHARES * sizeof(u16), GFP_KERNEL);
-        b->ctx = tbt_fec_rlnc_new(n, m, n, n, TBT_FEC_S, d, tx->nonce);
         if (!b->data || !b->parity || !b->dpresent || !b->ppresent ||
-            !b->dlen || !b->ctx)
+            !b->dlen)
             goto fail;
     }
 

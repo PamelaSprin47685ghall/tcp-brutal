@@ -268,6 +268,45 @@ static inline u64 tbt_fec_block_of_seq(u64 seq, u16 groups, u16 k)
     return (groups && k) ? (seq / groups) / k : 0;
 }
 
+/* Global seq of packet p (0..n-1) of group `group` inside `block_id`. The
+ * stripe is group = seq % groups, so a block of every group covers one
+ * contiguous span of groups*n global packets: the "super-block". */
+static inline u64 tbt_fec_seq_of_block_pkt(u64 block_id, u16 group, u16 p,
+                                           u16 groups, u16 n)
+{
+    return ((block_id * n + p) * groups) + group;
+}
+
+/* Last super-block that holds at least one packet, given the stream's total
+ * packet count P. Undefined for P == 0; callers check that first. */
+static inline u64 tbt_fec_final_block_of_total(u64 total_pkts, u16 groups, u16 n)
+{
+    if (!total_pkts || !groups || !n)
+        return 0;
+    return (total_pkts - 1) / ((u64)groups * n);
+}
+
+/* Number of real DATA packets group `group` has in its final block when the
+ * stream holds `total_pkts` packets. 0 means the group has no packet in that
+ * super-block. The sender zero-fills the remaining positions before encoding
+ * parity; the receiver marks them known-zero and never delivers them. */
+static inline u16 tbt_fec_group_tail_len(u64 total_pkts, u16 groups, u16 n,
+                                         u16 group)
+{
+    u64 final_block;
+    u64 first;
+    u64 last_local;
+
+    if (!total_pkts || !groups || !n || group >= groups)
+        return 0;
+    final_block = tbt_fec_final_block_of_total(total_pkts, groups, n);
+    first = (u64)group + (u64)groups * final_block * n;
+    if (total_pkts <= first)
+        return 0;
+    last_local = (total_pkts - 1 - group) / groups;
+    return (u16)(last_local - final_block * n + 1);
+}
+
 /* ------------------------------------------------------------------ *
  * Dynamic parameters
  * ------------------------------------------------------------------ */

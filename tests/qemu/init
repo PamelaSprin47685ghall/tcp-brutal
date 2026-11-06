@@ -52,6 +52,7 @@ MIB=${TBT_ENDPOINT_MIB:-4}
 C_MIB=${TBT_C_MIB:-4}
 L_MIB=${TBT_L_MIB:-1}
 M_MIB=${TBT_M_MIB:-1}
+N_MIB=${TBT_N_MIB:-1}
 D_MIB=${TBT_D_MIB:-4}
 # I needs 40 MiB through four shaped carriers; the guest raises its socket
 # buffers first so the strict phase can buffer the echo it has not read yet.
@@ -1119,6 +1120,34 @@ probe_m() {
     echo "== probe M: pass"
 }
 
+# --- probe N: FEC v6 grouped over HTTP (two groups, one share/carrier) ------
+probe_n() {
+    echo "== probe N: FEC v6 grouped over HTTP"
+    flush_and_wait
+    restart_echo
+    # Probe K leaves an 8-port block; two groups of eight need 16 source
+    # ports. Give this probe its own block instead of inheriting one sized
+    # for the single-group probes.
+    echo 'ports 41024-41055' > "$PORTS" || fail "probe N: ports directive rejected"
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=4 m=4 fec=on mode=grouped carriers=16" \
+        > "$CFG" || fail "grouped FEC-HTTP far tunnel rejected"
+    echo "tunnel 2 role=near profile=http-kal listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=4 m=4 fec=on mode=grouped carriers=16" \
+        > "$CFG" || fail "grouped FEC-HTTP near tunnel rejected"
+    sleep 1
+    echo "   tunnels:"; cat /proc/net/tbtun/tunnels
+    echo "   peers:"; cat "$PEERS"
+    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$N_MIB" "${TBT_ENDPOINT_TIMEOUT:-20}"
+    rc=$?
+    echo "   stats after: $(cat /proc/net/tbtun/stats)"
+    case $rc in
+    0) ;;
+    2) fail "probe N: tunnel accepted the connection but carried no data (rc=2)" ;;
+    3) fail "probe N: bytes came back wrong or short (rc=3)" ;;
+    *) fail "probe N: tbt_burst exited $rc" ;;
+    esac
+    echo "== probe N: pass"
+}
+
 # --- run the selected probes ------------------------------------------------
 want A && run_probe A
 if want A; then
@@ -1141,6 +1170,7 @@ want J && run_probe J
 want K && run_probe K
 want L && run_probe L
 want M && run_probe M
+want N && run_probe N
 
 echo 'flush' > "$CFG" 2> /dev/null || true
 for _p in "$echo_pid" "${echo2_pid:-}" "${echo3_pid:-}"; do
