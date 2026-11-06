@@ -712,6 +712,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **T2 scope 裁决（2026-11-06，用户）**：**T2 必须支持 HTTP 容器，不能 raw-only**。FEC share/控制帧放进 HTTP chunked body；请求行/头/`Transfer-Encoding: chunked` 保持明文；ChaCha8 只加密 body。raw 仍支持，但 **T5.2 的 256/1G 至少跑 http-kal** 并记录 overhead/吞吐。`fec=on` 拒绝非 raw 的 `-EOPNOTSUPP` 必须在 T2 完成前去掉。host/QEMU 增加 **FEC-over-HTTP** 用例：单组 1MiB 双向 byte-exact、控制帧不排 partial DATA 后。更新 DESIGN/README；**T2 parent 完成条件含 HTTP**。
 
+**T2 单组数据面完成（`w-fec-v6 fc5ac01`）**：`fec=on` 在 raw/http-kal 建会话；单组 `carriers==n+m`（≤256）、1 share/carrier；FEC share/控制帧进 HTTP chunk body（一 chunk 一 40B 记录），请求行/头/chunked 明文，ChaCha8 只加密 body；ACK 更新 `tx_ack`；FEC RX 用 per-session 锁串行化多 carrier block 组装/交付；控制帧只在整记录边界。QEMU A–M **13 PASS / 0 skip**（213s），probe L raw 1MiB、probe M http-kal 1MiB 双向 byte-exact；`make check`（parse 440、fec 1430、portmap 33999、http 257）、host-test-san、lint 16/16+14/14；DESIGN/README/G2 更新。**grouped 数据面仍 `-EOPNOTSUPP`**（仅 `carriers==n+m` 单组）；T5.2 的 256/1G = 32×8 grouped，必须实现 grouped 数据面 + probe N 后才能跑。**T2 parent 未完成。**
+
 ### G3 — T3 ChaCha8（C）
 
 | 项 | 内容 |
