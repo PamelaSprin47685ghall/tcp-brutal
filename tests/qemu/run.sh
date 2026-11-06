@@ -105,6 +105,16 @@ if [ -f "$root/host/tbt_ping.c" ]; then
     bins="$bins --bin $root/host/tbt_ping"
 fi
 
+# Probe Q's connect flood: connections that never complete HELLO.
+if [ -f "$root/host/tbt_flood.c" ]; then
+    if [ ! -x "$root/host/tbt_flood" ] || [ "$root/host/tbt_flood.c" -nt "$root/host/tbt_flood" ]; then
+        "${HOSTCC:-cc}" -std=gnu99 -O2 -Wall -Wextra -Werror \
+            -o "$root/host/tbt_flood" "$root/host/tbt_flood.c" ||
+            die "cannot build $root/host/tbt_flood"
+    fi
+    bins="$bins --bin $root/host/tbt_flood"
+fi
+
 # The probe list travels as a file in the image: /proc/cmdline is empty in this
 # guest (the kernel accepts tbt_probes= but does not publish it), and a file is
 # the same channel on every kernel.

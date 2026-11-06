@@ -33,6 +33,7 @@ probes, all through the operator surface only (`echo` into `/proc/net/tbtun/*`):
 | N | FEC v6 grouped over HTTP, the production shape: `n=4 m=4 carriers=256` (32 groups), 1 MiB byte-exact (the one 1 MiB case), all 256 carriers up, `http_parse_err=0` |
 | P | one small write and one reply with the socket still open (`host/tbt_ping`): 37, 8191, 8192, 8193, 65536 and 262144 bytes, the same 37-byte exchange with `crypto=on`, two connections in one session, and a real HTTP request/response handshake |
 | O | the T5.2 smoke's shape (`profile=http-kal`, `n=1 m=1`, `carriers=2`, `fec=on`, `mode=grouped`) with `crypto=off`, with `crypto=on`, with carrier 0 taken down mid-transfer, and with a 700 ms loopback delay that makes a dial outlive one `kernel_connect` wait window |
+| Q | the HND0 hang shape: 256 carriers plus `host/tbt_flood` connections that never complete HELLO, with carrier-down waves. The far's provisional peak must stay at its cap (`n + n/4`), the list must drain, userspace must keep running, and a legitimate replacement must still join |
 
 G retries its whole window up to three times when the injector happened to drop
 nothing, and skips with `no loss observed in 3 windows` rather than failing for

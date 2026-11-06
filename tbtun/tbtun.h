@@ -611,6 +611,13 @@ struct tbt_session
     bool closing; /* session teardown started: no new joins, no new work */
     struct list_head prov; /* accepted carriers waiting for HELLO */
     struct list_head dead; /* retired carriers, freed at session destroy */
+    /* Join-replaced carriers whose socket release is deferred out of the
+     * carrier's socket lock. w_replace drains this in bounded batches; the
+     * old code walked all of `dead` on every pass, which made a replacement
+     * storm quadratic (HND0: 259 workqueue hogs in 15 s). */
+    struct list_head dead_release;
+    atomic_t n_prov;       /* carriers on `prov`, bounded by tbt_prov_cap() */
+    u32 prov_peak;         /* high-water mark of n_prov, /proc only */
 
     u8 nonce[16];      /* the session key carried in HELLO */
     bool nonce_set;    /* far side: adopted from the first HELLO */
@@ -622,7 +629,14 @@ struct tbt_session
     __be32 anchor_addr;
     bool anchor_set;
 
-    struct work_struct w_replace; /* dials replacements for dead carriers */
+    struct delayed_work w_replace; /* dials replacements for dead carriers;
+                                    * delayed so a bounded pass can defer the
+                                    * rest without spinning */
+    /* Replacement dial pacing. tbt_carriers_start() dials the first wave
+     * unpaced; only replacements spend these tokens, so losing every carrier
+     * cannot turn into a connect storm. w_replace is the only writer. */
+    u32 dial_tokens;
+    u64 dial_refill_ns;
     struct delayed_work w_fbk;    /* feedback tick and retransmit timer */
     struct delayed_work w_reap;   /* P1: tombstone sweeper */
     struct delayed_work w_pending; /* P1: starts one queued public socket */
@@ -708,6 +722,7 @@ struct tbt_session
     u32 rx_last_drained;  /* last value; carrier rx work */
     atomic64_t rx_errs;
     s32 rx_last_err;      /* last value; carrier rx work */
+    u64 prov_reject;      /* accepts refused by the provisional cap; listen */
     atomic64_t carrier_write_space_runs;
     atomic64_t poll_rescues;
     /* Each carrier's poll work writes this for itself; several carriers run
@@ -877,6 +892,8 @@ struct tbt_session
 struct tbt_carrier
 {
     struct list_head node;    /* sess->prov or sess->dead */
+    struct list_head release_node; /* sess->dead_release while a release is
+                                    * pending; self-linked otherwise */
     struct socket *sock;
     struct sock *sk;
     struct tbt_session *sess;

@@ -71,6 +71,28 @@ and moves independently of the module version.
 
 ### Fixed
 
+- A 256-carrier session plus a connect flood could starve the far host until it
+  stopped answering (HND0: `tbt_accept_work` and `tbt_replace_work` hogged a
+  CPU, 10138 accepted connections, journal stops, unclean reboot 62 min later).
+  The far's provisional list had no bound, `tbt_replace_work()` walked the
+  whole graveyard of every carrier it had ever replaced on every pass (O(n²)
+  total, and the graveyard was never freed before teardown), the accept loop
+  had no per-run budget, and every accepted connection and every failed dial
+  wrote an unratelimited console line. Provisional carriers are now capped at
+  `n + n/4`, freed as soon as they expire or are refused, the poll holds
+  `sess->lock` across its non-sleeping provisional branch so that free cannot
+  race it, replacement passes retire at most 16 carriers and release at most
+  16 join-replaced carriers before re-arming 20 ms later, replacement dials are
+  token-paced at `n/4` per second (the first wave is not paced), accepts are
+  batched at 32, the poll's state-change wake is 10 ms instead of 0, and the
+  per-connection/per-dial lines are ratelimited. QEMU probe Q floods the far
+  with connections that never send HELLO while taking carrier slots down in
+  waves: the provisional peak stays at the cap, the list drains, userspace keeps
+  running, and a legitimate replacement still joins.
+- A `fec=off` session warned `!work->func` on teardown: `w_fec_tx` is
+  initialised only by `tbt_fec_data_init()`, and the unconditional
+  `cancel_delayed_work_sync()` ran on a zeroed work. The cancel now follows
+  `s->fec`.
 - A session with more than 16 carriers could not bring them up. `tbt_hdr_check()`
   capped the old header's `path_id` at `TBT_LEGACY_MAX_CARRIERS` (16), but
   `path_id` is a carrier index and the carrier layer has 256 slots, so the

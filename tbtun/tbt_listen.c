@@ -45,9 +45,18 @@ static void tbt_ready(struct sock *sk)
     read_unlock_bh(&sk->sk_callback_lock);
 }
 
+/* One work item accepts at most this many connections, then re-queues. An
+ * unbounded loop kept the worker on one CPU for as long as a connect flood
+ * kept the backlog non-empty; the workqueue watchdog reported
+ * tbt_accept_work hogging a CPU (HND0: 19 times in 22 s). Re-queuing puts the
+ * item behind other work on the same pool, which is the fairness the loop
+ * was missing. */
+#define TBT_ACCEPT_BATCH 32
+
 static void tbt_accept_one(struct tbt_tunnel *t)
 {
     struct socket *newsock;
+    int budget = TBT_ACCEPT_BATCH;
     int err;
 
     for (;;)
@@ -81,10 +90,23 @@ static void tbt_accept_one(struct tbt_tunnel *t)
             tbt_sk_ops_restore(newsock->sk, &t->def_ops);
             tbt_sock_abort_on_close(newsock);
             sock_release(newsock);
+            /* -ENOSPC is the provisional cap: the refusal was cheap, and the
+             * backlog still has to be drained so a later accept can fire. */
+            if (--budget == 0)
+            {
+                schedule_work(&t->w_accept);
+                return;
+            }
             continue;
         }
         t->streams++;
         pr_debug("tbtun: tunnel %llu accepted a connection\n", t->cfg.id);
+        if (--budget == 0)
+        {
+            schedule_work(&t->w_accept);
+            return;
+        }
+        cond_resched();
     }
 }
 
