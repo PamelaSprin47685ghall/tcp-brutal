@@ -75,6 +75,8 @@
 
 **并发冲突澄清（2026-11-06）**：`t52-smoke2` 与 `t52-smoke3` 均否认拥有 `smoke_37b.sh`；PID 20196 已退出，仅 `run3` PID 20167（+同目录子进程 20779）存活，推断为 `integrator-final` 的 run。只要同一 run，不重复启动；T5.2 HOLD。
 
+**最终 bounded owner（2026-11-06）**：`integrator-final` 为唯一 owner；`run3` PID 20167 非它（已退出），其 20196 已 kill；当前无 smoke 进程、两端 clean。`integrator-final` 独占跑最终 bounded **1 carrier/37B ×2**；其他 agent 不再启动 run。T5.2 HOLD；不 8/16/256、不 push。
+
 **`t52-arm64-3` 清理/失败摘要（旧 `fbcd820`）**：`.65`/HND0 已 clean（rmmod、echo 停、锁/ip rule 清）；1 carrier/37B ping 全程 timeout；near→far carrier0 up、far `rx_delivered=37`（应用层收到 37B），但 far→near `rx_delivered=0`、`streams_active=0`；far carrier0 up RTT~291ms 但 `recv_cnt=0`，near carrier0 up RTT~345ms `tx_frames=41/tx_bytes=2071`；疑似 far target/回程或 spare 未激活。证据 `/tmp/near-evidence.txt`、`/tmp/far-evidence.txt`（临时，未入库）。等 `integrator-final` 的 3c75a80 bounded 结果。
 
 **冒烟前部署/分工（2026-11-06）**：HND0 clean；`b41b259` x86 far ko **尚未部署**。`t52-arm64-3` = HND0 far b41b259 构建/部署 + `.65` **1 carrier/37B smoke**；`arm64-build-3` = `.65` aarch64 ko only。HND0 far 用 **`tbt_echo` 5202（不用 iperf3）**；1 carrier/37B 通过后 **8/16 × 1MiB/5s**；不 256/8 并行、不合并/push。
