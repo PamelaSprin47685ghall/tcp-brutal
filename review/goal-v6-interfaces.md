@@ -645,6 +645,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **残余 accept wake race（`hnd0-sink` 独立复跑，ddef988）**：near HELLO 55B 写出、far 内核已收，但 far `rx_work_runs` 33s 不跑、sink 从未 accept；near `TXSTALLKILL ack=0 txseq=1114059 age=15.0s`、`fbk_rx=0`、`tx_ack=0`、`lost=1 replaced=1`；far `rx_read_bytes=55`、`c3 up=0 lost=2`、`fbk_tx=0`。同源 ddef988 的 hnd0-n1b 成功是**非必现**；符合 accept 侧 `sk_data_ready`/HELLO wake 竞态。A3 修 accept 侧唤醒；T1 需 **N=1 连续 5 次 5/5 sink 16MiB** 才算绿。
 
+**5x 计划（`hnd0-n1b`）**：同一 A3 源码 per-end build、两端 srcversion 一致；5 轮独立 sink/sender；每轮 sink `bytes=16777216 eof=1`、far `rx_delivered=16777216`、near `fin_seq=16777216 fin_w=1`、`rst_w=0`、`deliver/close timeouts=0`、`close_detaches=0`、near/far `live txq=0`、无 `TXSTALLKILL`；证据 `review/wan-experiment/t1-n1-auto-rx1m-sink-5x/`，保留 b3b33b2 单次证据。失败也记录并继续，不掩盖。
+
 **sink 测试就绪（`hnd0-n1b`）**：`sink.py`（accept 一次、读到 EOF、记录 bytes/expected/ok/secs）与 `send16m.py`（写满 16MiB、`shutdown(SHUT_WR)`、等 EOF）本地 loopback 验证 `16,777,216 B ok=1`；HND0 `/tmp/tbtun-sink/sink.py` `py_compile` 通过。下一轮证据目录 `review/wan-experiment/t1-n1-auto-rx1m-sink/`，保留 `a2a37ed` 的 iperf3 失败证据；等 `window-close`/A3 新 head。
 
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
