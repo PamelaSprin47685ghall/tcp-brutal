@@ -2108,6 +2108,75 @@ probe_p() {
     echo "== probe P: pass"
 }
 
+# --- probe S: 1 carrier pair, 37 B x2, FBK and hole convergence -------------
+# The WAN smoke's shape (n=1 m=1 carriers=2, fec=off, raw) with no carrier
+# churn. A 100 ms netem delay on lo widens the request/reply window so the
+# first reply DATA can be dropped deterministically: the near's request is
+# already written when drop_ppm is set, the far's reply is not. The far must
+# repair the seq=0 hole from its replay ring; the run asserts that FBK stays
+# in scale with DATA and that the hole diagnostics converge.
+probe_s() {
+    echo "== probe S: 1 carrier pair, 37 B x2, FBK and hole"
+    if [ ! -x /bin/tc ]; then
+        skip S "no /bin/tc in the guest; run without --no-net"
+        return 0
+    fi
+    flush_and_wait
+    restart_echo
+    echo 'ports 41088-41119' > "$PORTS" || fail "probe S: ports directive rejected"
+    _t="n=1 m=1 carriers=2 fec=off profile=raw crypto=off dup=0 keepalive=5000 replay=8388608 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=1048576 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000"
+    echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 $_t" \
+        > "$CFG" || fail "probe S: far tunnel rejected"
+    echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT $_t" \
+        > "$CFG" || fail "probe S: near tunnel rejected"
+    sleep 1
+    /bin/tc qdisc add dev lo root netem delay 300ms ||
+        fail "probe S: cannot delay lo"
+    _holes0=$(dmesg 2>/dev/null | grep -c 'tbtun: hole ')
+    _tsk0=$(dmesg 2>/dev/null | grep -c 'TXSTALLKILL')
+    /bin/tbt_ping 127.0.0.1 "$PUB_PORT" 37 10 3000 &
+    _p=$!
+    _i=0
+    while [ "$_i" -lt 200 ]; do
+        _sb=$(tunnel_stat 2 submit_bytes)
+        [ "${_sb:-0}" -ge 37 ] && break
+        sleep 0.02
+        _i=$((_i + 1))
+    done
+    [ "${_sb:-0}" -ge 37 ] || fail "probe S: the request was not captured (submit_bytes=${_sb:-0})"
+    echo 'carrier 0 drop_ppm 1000000' > "$PEERS" || fail "probe S: drop_ppm carrier 0 rejected"
+    sleep 0.5
+    echo 'carrier 0 drop_ppm 0' > "$PEERS" || fail "probe S: drop_ppm reset rejected"
+    wait "$_p" || fail "probe S: first 37-byte round trip failed"
+    /bin/tbt_ping 127.0.0.1 "$PUB_PORT" 37 10 3000 ||
+        fail "probe S: second 37-byte round trip failed"
+    /bin/tc qdisc del dev lo root 2> /dev/null
+    sleep 1
+    _n_fbk=$(tunnel_stat 2 fbk_tx); _n_rx=$(tunnel_stat 2 fbk_rx)
+    _n_data=$(tunnel_stat 2 data_tx); _n_retx=$(tunnel_stat 2 retx_hole)
+    _f_fbk=$(tunnel_stat 1 fbk_tx); _f_rx=$(tunnel_stat 1 fbk_rx)
+    _f_data=$(tunnel_stat 1 data_tx); _f_retx=$(tunnel_stat 1 retx_hole)
+    _holes=$(( $(dmesg 2>/dev/null | grep -c 'tbtun: hole ') - _holes0 ))
+    _tsk=$(( $(dmesg 2>/dev/null | grep -c 'TXSTALLKILL') - _tsk0 ))
+    echo "   near fbk_tx=$_n_fbk fbk_rx=$_n_rx data_tx=$_n_data retx_hole=$_n_retx"
+    echo "   far  fbk_tx=$_f_fbk fbk_rx=$_f_rx data_tx=$_f_data retx_hole=$_f_retx"
+    echo "   hole lines this probe=$_holes"
+    echo "   TXSTALLKILL=$_tsk"
+    echo "   c3 near: $(awk '$1 == "tunnel" && $2 == 2 && $3 == "c3"' /proc/net/tbtun/stats | sed 's/ retx_data_ppm.*//')"
+    echo "   c3 far:  $(awk '$1 == "tunnel" && $2 == 1 && $3 == "c3"' /proc/net/tbtun/stats | sed 's/ retx_data_ppm.*//')"
+    [ "${_n_fbk:-0}" -le $((_n_data * 20 + 100)) ] ||
+        fail "probe S: near fbk_tx=$_n_fbk out of scale with data_tx=$_n_data"
+    [ "${_f_fbk:-0}" -le $((_f_data * 20 + 100)) ] ||
+        fail "probe S: far fbk_tx=$_f_fbk out of scale with data_tx=$_f_data"
+    [ "${_holes:-0}" -le 8 ] ||
+        fail "probe S: $_holes hole lines, expected the seq=0 hole to converge"
+    [ "${_f_retx:-0}" -ge 1 ] ||
+        fail "probe S: far retx_hole=$_f_retx, the dropped reply was not repaired"
+    [ "${_tsk:-0}" -eq 0 ] ||
+        fail "probe S: $_tsk TXSTALLKILL line(s)"
+    echo "== probe S: pass"
+}
+
 # --- run the selected probes ------------------------------------------------
 want A && run_probe A
 if want A; then
@@ -2135,6 +2204,7 @@ want O && run_probe O
 want P && run_probe P
 want Q && run_probe Q
 want R && run_probe R
+want S && run_probe S
 
 echo 'flush' > "$CFG" 2> /dev/null || true
 for _p in "$echo_pid" "${echo2_pid:-}" "${echo3_pid:-}"; do

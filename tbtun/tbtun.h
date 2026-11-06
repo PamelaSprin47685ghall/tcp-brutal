@@ -200,6 +200,12 @@ void tbt_listen_stop(struct tbt_tunnel *t);
  * immediately after this many received DATA frames. */
 #define TBT_FBK_INTERVAL_MS 10
 #define TBT_FBK_FRAMES 32
+/* An idle stream still needs a keepalive, but not a feedback frame every
+ * TBT_FBK_INTERVAL_MS: the FBK carries per-path receive counters, so it is
+ * only new information when one of them (or the stream's rx state) changes.
+ * The 10 ms work tick stays: it drives the retransmit timer and the close
+ * and hole checks. */
+#define TBT_FBK_IDLE_MS 1000
 
 /* Pinned control-frame lifetime (review 22). A control frame is never freed
  * on a transient write error: it is retried this many times, 2 ms apart, and
@@ -384,6 +390,10 @@ struct tbt_stream
     u8 sack_state;            /* last SACK state sent */
     bool sack_dirty;          /* rx_next/state changed since last SACK */
     u32 fbk_frames;           /* DATA frames since this stream's last FBK */
+    u64 fbk_sig;              /* carrier rx signature at the last FBK sent */
+    u64 fbk_last_rx_next;     /* delivered offset carried by that FBK */
+    u8 fbk_last_state;        /* rx_state carried by the last FBK sent */
+    u64 fbk_last_ns;          /* when the last FBK was sent; 0 = never */
     bool tx_fin_sent;         /* FIN wanted: set by the producer before the
                                * first tbt_tx_fin(); the FBK tick retries while
                                * tx_fin_queued is false */

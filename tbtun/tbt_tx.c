@@ -1305,9 +1305,13 @@ void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st)
 
     if (!st)
         return;
-    ack = READ_ONCE(st->tx_ack);
     now = tbt_now_ns();
     spin_lock(&sess->tx_lock);
+    /* tx_ack moves under sess->lock, not tx_lock: reading it before the lock
+     * lets the hole walk use a stale value while tbt_retain_received() reads
+     * a newer one, which logged a depth failure for a hole that was already
+     * repaired. Take the snapshot inside the lock. */
+    ack = READ_ONCE(st->tx_ack);
     for (i = 0; i < sess->n_car; i++)
     {
         struct tbt_carrier *c = READ_ONCE(sess->car[i]);
@@ -1422,6 +1426,12 @@ void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st)
         if (g < 1)
             g = 1;
     }
+    /* The ack snapshot above can still be passed by a concurrent
+     * tbt_tx_ack() (it takes sess->lock, not tx_lock). If the hole has been
+     * repaired while this walk ran, do not log a stale gate/depth/time
+     * failure and do not inject another copy the peer already has. */
+    if (hole->seq + hole->len <= READ_ONCE(st->tx_ack))
+        goto unlock;
     if (!gate)
     {
         atomic64_inc(&sess->hole_gate_fail);
@@ -3119,7 +3129,46 @@ void tbt_fbk_work(struct work_struct *w)
 
         st->fbk_frames = 0;
         tbt_tx_close_check(sess, st);
-        tbt_tx_fbk(sess, st, GFP_KERNEL);
+        {
+            u64 sig = sess->n_car;
+            u64 now = tbt_now_ns();
+            int ci;
+
+            /* The FBK body is the per-path receive high-water and count plus
+             * the stream rx state. Re-sending it every 10 ms with none of
+             * those changed is pure overhead: a 37-byte ping measured 259 to
+             * 442 FBKs against 4 DATA frames, and every one of them ran the
+             * peer's geometric hole check. The signature includes the carrier
+             * set (index and generation), so a replacement or a new carrier
+             * also forces one. The 10 ms tick itself stays: the pump below
+             * still drives retransmission, close and hole timers. */
+            for (ci = 0; ci < sess->n_car; ci++)
+            {
+                struct tbt_carrier *fc = READ_ONCE(sess->car[ci]);
+
+                if (!fc || !atomic_read(&fc->up))
+                    continue;
+                sig = sig * 131 + (u64)ci;
+                sig = sig * 131 + READ_ONCE(fc->gen);
+                sig = sig * 131 + READ_ONCE(fc->rx_bytes);
+                sig = sig * 131 + READ_ONCE(fc->rx_frames);
+                sig = sig * 131 + READ_ONCE(fc->peer_gen);
+            }
+            if (READ_ONCE(st->rx_next) != st->fbk_last_rx_next ||
+                sig != st->fbk_sig || state != st->fbk_last_state ||
+                !st->fbk_last_ns ||
+                now - st->fbk_last_ns >=
+                    (u64)TBT_FBK_IDLE_MS * NSEC_PER_MSEC)
+            {
+                if (tbt_tx_fbk(sess, st, GFP_KERNEL) == 0)
+                {
+                    st->fbk_last_rx_next = READ_ONCE(st->rx_next);
+                    st->fbk_sig = sig;
+                    st->fbk_last_state = state;
+                    st->fbk_last_ns = now;
+                }
+            }
+        }
         one_alive = READ_ONCE(st->state) != TBT_ST_DEAD;
         if (READ_ONCE(st->sack_dirty) ||
             READ_ONCE(st->sack_next) != READ_ONCE(st->rx_next) ||
