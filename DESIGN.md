@@ -273,6 +273,46 @@ frame. It rides the same carriers and the same HTTP container:
   global range `[b*groups*n, (b+1)*groups*n)`. The receiver delivers a
   super-block only when every group's block `b` has decoded, so the application
   byte stream never has a hole and the ACK frontier is a real global frontier.
+- The packetizer emits a share as soon as its packet is full, and flushes a
+  **partial packet** after `TBT_FEC_SHORT_MS` (2 ms) of silence with a dry
+  ring. Without that, an application that writes a small request and waits for
+  the answer -- an HTTP request, iperf3's control cookie -- waits for 8192
+  bytes that never come, and the tunnel looks connected and silent; a 1 MiB
+  burst never shows it because the packet fills at once. The share carries its
+  real `payload_len` and its block slot is zero-padded, so parity still
+  describes the truth. A short DATA packet is therefore legal anywhere; only
+  `LAST` marks the end of the stream.
+- A flushed share is only useful if its **block can be ended with it**, because
+  a block is delivered only when every real share is present or recoverable. So
+  the flush also closes the block: every group that wrote packets into it gets
+  parity with `win_len` = its real packet count, the unused seq range of the
+  block is skipped, and the next packet starts the next block. The receiver
+  already treats `win_len` as the block's real length, so a non-final short
+  block is placed exactly. The flush is withheld when a group has no packet in
+  the block yet (it would leave that group's block empty and the super-block
+  would wait for shares that are not coming): with `groups = 1` -- every group
+  of the production 32-group shape, and the `n=1 m=1` smoke -- any pending
+  byte is flushable, and with more groups the floor is `groups` packets.
+- The delivered stream offset is the **sum of the payload lengths before the
+  share**, not the packet index times `S`: with short shares the two differ,
+  and the packet-index form would leave a hole after every flushed packet.
+  The receiver keeps that running offset (`deliver_bytes`) and the sender's
+  ACK frontier stays a packet count.
+- A recovered share has no `payload_len` of its own, and the parity that
+  recovers it can arrive before the share does (they ride different carriers),
+  so a guess of `S` would hand the application the block's zero padding. The
+  sender therefore states the block's last real share length in the header's
+  `epoch` field on DATA and PARITY records (0 = every real share is full, this
+  cut does not implement rate epochs; the deviation is recorded next to the
+  HELLO conv one). A block that needs recovery, holds a short share and states
+  no length -- a peer from before that field -- is refused
+  (`fec_short_unknown`), and the sender's stall timer is the bound.
+- The FEC plane carries the session's packet sequence, not a stream's: a DATA
+  record has no sid. The receiver therefore measures the delivery offset from
+  the byte at which the current stream began (`stream_base`), so the next
+  connection in the same session starts at stream byte 0 -- iperf3's data
+  connection after its control connection, and any request/response protocol
+  that reconnects.
 - The sender packetizes `n` DATA shares per group block, then `m` parity
   shares. Parity rows are derived from a per-group, per-block nonce
   (`base ^ (group << 32) ^ (block_id * golden)`), so sender and receiver agree
@@ -308,7 +348,7 @@ Only for `http-kal` / `http-kal-drip`. Per carrier 5-tuple, in order:
 > User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36
 > Accept: */*
 > Accept-Encoding: identity
-> Content-Type: application/octet-stream
+> Content-Type: application/gzip
 > Transfer-Encoding: chunked
 > Connection: keep-alive
 > X-Request-Id: <26 lowercase base32 chars>   ← one plausible correlation id, not "X-TBTUN-*"
@@ -320,7 +360,7 @@ Only for `http-kal` / `http-kal-drip`. Per carrier 5-tuple, in order:
 >                                           ← the chunked message stays open for the
 >                                             life of the carrier; no 0-chunk is sent
 < HTTP/1.1 200 OK\r\n
-< Content-Type: application/octet-stream\r\n
+< Content-Type: application/gzip\r\n
 < Transfer-Encoding: chunked\r\n
 < Connection: keep-alive\r\n
 < Server: nginx\r\n
@@ -344,7 +384,8 @@ Rules the implementation MUST follow (each exists because a real parser would no
    The `[0x800, 0x2020]` range is the typical bulk shape, not a floor the emitter can
    enforce: a small application write produces a small chunk. A PAD-only keep-alive chunk
    is `0x20` (32) and is the one exempt size (§3.3). Body content is opaque binary, which
-   is normal for `application/octet-stream` uploads.
+   is normal for an `application/gzip` upload, and the body is not a gzip
+   member: nothing is compressed and no `Content-Encoding` is sent.
 6. **Timing**: a carrier must never be idle for more than `keepalive_ms` (default 5000 ms)
    without *something* on the wire: a zero-length chunk is not legal mid-message, so we
    send a **PAD chunk** (one 32-byte `TBT_PAD` frame; 32 bytes of chunk data). There is no
@@ -1934,7 +1975,7 @@ cannot silently lose its atomicity again.
 | streams | `streams streams_active n_streams n_pending` |
 | c6 | `c6 holes_declared holes_repaired holes_unrecoverable rx_max_stall_us hole_checks gate_fail depth_fail time_fail` |
 | c8 | `c8 profile_mismatch http_parse_err http_status_err http_req http_resp pad_tx drip_tx` |
-| c9 | `c9 fec_proto_fail fec_hdr_crc_fail fec_payload_crc_fail` |
+| c9 | `c9 fec_proto_fail fec_hdr_crc_fail fec_payload_crc_fail fec_short_tx fec_short_unknown fec_drop_window fec_drop_crypto` |
 | c5 | `c5 dup_tx dup_used dup_suppressed dup_same_path inflate_ppm dup_bytes` |
 | reconcile | `reconcile live_bytes live_data live_retx retired_bytes retired_data retired_retx` |
 
@@ -2018,7 +2059,14 @@ drip_tx`. C9 is the FEC v6 receive verdict (T0 §1.3): `fec_proto_fail` and
 `fec_payload_crc_fail` means the framing was sound and only the body was damaged, so the
 share is dropped and the carrier stays. With `crypto=on` a wrong key is a payload CRC
 failure on every share, which makes this counter the difference between "the key is
-wrong" and "the peer is silent".
+wrong" and "the peer is silent". `fec_short_tx` counts the partial packets the packetizer
+flushed because the application went quiet (the interactive path is in use), and
+`fec_short_unknown` counts the blocks the receiver refused because they mixed a recovered
+share with a short one and stated no length for it (see §3.1). `fec_drop_window` counts
+shares that arrived more than a block window ahead of the delivery frontier, and
+`fec_drop_crypto` counts DATA/PARITY shares that arrived before the session key was
+installed; both leave the block to its parity, which is why the epoch field has to state
+the short length.
 
 ### 8.8 Kernel version reality on this host, and symbol availability
 
@@ -2206,7 +2254,7 @@ Host: 203.0.113.9\r\n
 User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36\r\n
 Accept: */*\r\n
 Accept-Encoding: identity\r\n
-Content-Type: application/octet-stream\r\n
+Content-Type: application/gzip\r\n
 Transfer-Encoding: chunked\r\n
 Connection: keep-alive\r\n
 X-Request-Id: cb2f7a1e9d4c0b8573a1e6f2cd\r\n

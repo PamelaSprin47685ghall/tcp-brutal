@@ -294,7 +294,7 @@ static void check_req_header(const u8 *buf, size_t len)
                   NULL);
             break;
         case 5:
-            check(line_is(line, line_len, "Content-Type: application/octet-stream"),
+            check(line_is(line, line_len, "Content-Type: application/gzip"),
                   "request Content-Type", NULL);
             break;
         case 6:
@@ -340,7 +340,7 @@ static void check_resp_header(const u8 *buf, size_t len)
         switch (idx)
         {
         case 1:
-            check(line_is(line, line_len, "Content-Type: application/octet-stream"),
+            check(line_is(line, line_len, "Content-Type: application/gzip"),
                   "response Content-Type", NULL);
             break;
         case 2:

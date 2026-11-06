@@ -38,6 +38,11 @@
  * on purpose: §16.2 lists them as classifier inputs, and a value that varies
  * per carrier would be a signature of its own. */
 #define TBT_HTTP_PATH "/api/v2/upload"
+/* The body is a tbtun FEC record, not a gzip member: the value only has to be
+ * a standard media type that a classifier expects to see on a long upload, and
+ * one that a middlebox will not try to decode. No Content-Encoding is sent and
+ * nothing is compressed. */
+#define TBT_HTTP_CONTENT_TYPE "application/gzip"
 #define TBT_HTTP_USER_AGENT                                                                    \
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 "     \
     "Safari/537.36"
@@ -174,7 +179,7 @@ struct tbt_http_req
  *   User-Agent: <TBT_HTTP_USER_AGENT>
  *   Accept: <the wildcard value of §3.2>
  *   Accept-Encoding: identity
- *   Content-Type: application/octet-stream
+ *   Content-Type: application/gzip
  *   Transfer-Encoding: chunked
  *   Connection: keep-alive
  *   X-Request-Id: <26 chars [a-z2-7]>
@@ -205,7 +210,7 @@ size_t tbt_http_http_date(char *buf, size_t cap, u64 unix_secs);
  * line:
  *
  *   HTTP/1.1 200 OK
- *   Content-Type: application/octet-stream
+ *   Content-Type: application/gzip
  *   Transfer-Encoding: chunked
  *   Connection: keep-alive
  *   Server: nginx

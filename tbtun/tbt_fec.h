@@ -45,7 +45,7 @@ struct tbt_fec_hdr
     u16 share_index;
     u8 n;
     u8 m;
-    u16 epoch;
+    u16 epoch; /* this cut: the block's last real share length, 0 = full */
     u64 block_id;
     u64 seq;
     u16 win_len;
@@ -69,8 +69,11 @@ int tbt_fec_hdr_unpack(const u8 in[TBT_FEC_HDR_LEN], struct tbt_fec_hdr *h);
  *
  * DATA/PARITY: n>=1, m>=1, n+m<=256, share_index < (u16)(n+m),
  *              DATA share_index < n, PARITY share_index >= n,
- *              DATA payload_len 1..max_payload (a short packet must carry
- *              LAST), PARITY payload_len == max_payload, win_len rules
+ *              DATA payload_len 1..max_payload (a short packet is legal
+ *              anywhere: the packetizer flushes a partial packet when the
+ *              application goes quiet, and the receiver places shares by the
+ *              sum of the payload lengths, so only LAST marks the end),
+ *              PARITY payload_len == max_payload, win_len rules
  *              (DATA 0; PARITY 1..TBT_FEC_MAX_W), seq < 2^63.
  * ACK/NACK/CFG/FBK/PAD: n==0, m==0, share_index==0, win_len==0, exact body
  *              lengths, payload_len <= max_payload.

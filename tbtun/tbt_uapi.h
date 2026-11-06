@@ -82,7 +82,14 @@ typedef uint64_t u64;
  *   +2  u16 share_index 0..n+m-1; u16 so n+m=256 is representable
  *   +4  u8  n           data shares in the block
  *   +5  u8  m           parity shares in the block
- *   +6  u16 epoch       rate epoch
+ *   +6  u16 epoch       rate epoch. This cut does not implement rate epochs
+ *                       and uses the field on DATA/PARITY records for the
+ *                       block's last real share length, 0 when every real
+ *                       share is full. A receiver that recovers that share
+ *                       from parity has no payload_len for it, and the guess
+ *                       "S" would deliver the block's zero padding. The
+ *                       deviation is recorded with the HELLO conv deviation:
+ *                       a future rate epoch needs a field of its own.
  *   +8  u64 block_id    block/window identity chosen by the sender
  *   +16 u64 seq         DATA: packet sequence; PARITY: window end
  *   +24 u16 win_len     PARITY: covered packets; DATA: 0

@@ -281,6 +281,7 @@ host/test_portmap
 host/test_portmap_san
 # guest traffic checker (tests/qemu/mkinitramfs.sh)
 host/tbt_burst
+host/tbt_ping
 tests/probe/*.o
 tests/probe/*.ko
 tests/probe/*.mod

@@ -235,7 +235,7 @@ int main(void)
 {
     static const char *const prefixes[] = {
         "POST /api/v2/upload HTTP/1.1\r\nHost: 203.0.113.9\r\n",
-        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
+        "HTTP/1.1 200 OK\r\nContent-Type: application/gzip\r\n"
         "Transfer-Encoding: chunked\r\n",
         "a\r\n0123456789\r\n",
     };

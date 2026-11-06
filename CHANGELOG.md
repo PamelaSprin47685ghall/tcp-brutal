@@ -26,6 +26,22 @@ and moves independently of the module version.
   `/proc/net/tbtun/stats`, the receive verdict T0 §1.3 specifies. With
   `crypto=on` a wrong key is a payload CRC failure on every share, so the
   counter separates "the key is wrong" from "the peer is silent".
+- `fec_short_tx`, `fec_short_unknown`, `fec_drop_window` and `fec_drop_crypto`
+  in the c9 line: partial packets the packetizer flushed, blocks the receiver
+  refused because they mixed a recovered share with a short one and stated no
+  length, shares that arrived more than a block window ahead, and shares that
+  arrived before the session key.
+- The parity record's `epoch` field carries the block's last real share length
+  (0 = every real share is full). A recovered share has no `payload_len` of its
+  own, and the parity that recovers it can arrive before the share does, so
+  without this a recovered short share would be delivered as S bytes and the
+  block's zero padding would reach the application. This cut does not implement
+  rate epochs; the deviation is recorded next to the HELLO conv one.
+- QEMU probe P and `host/tbt_ping`: one small write and one reply with the
+  socket still open, over the smoke's own tunnel shape. Sizes 37, 1, 8191,
+  8192, 8193, 20000 and 65536 bytes, two connections in one session, and a real
+  HTTP request/response handshake against busybox httpd. A 1 MiB burst cannot
+  see any of this.
 - QEMU probe O: `profile=http-kal`, `n=1 m=1`, `carriers=2`, `fec=on`,
   `mode=grouped`, with the T5.2 smoke's own knobs. It runs the same tunnel
   with `crypto=off`, with `crypto=on`, with carrier 0 taken down mid-transfer,
@@ -35,6 +51,17 @@ and moves independently of the module version.
 
 ### Changed
 
+- The HTTP container's `Content-Type` is `application/gzip` on both the request
+  and the response block. The body is still a tbtun FEC record (optionally
+  ChaCha8-obfuscated), not a gzip member: nothing is compressed and no
+  `Content-Encoding` is sent. The request parser accepts exactly this value, so
+  both ends must run this revision. `application/gzip` is the media type a
+  classifier expects on a long upload and one a middlebox will not try to
+  decode.
+- QEMU probe volumes: L/M carry 256 KiB and O 64 KiB (256 KiB for the
+  carrier-replacement phase) through `host/tbt_ping`; N keeps the single 1 MiB
+  transfer. Small messages are the case that regressed, so they are what the
+  suite exercises most.
 - `fec=on` now owns `carriers` session slots and marks all of them active; the
   old ARQ still uses `n` DATA carriers plus `m` spares.
 - `tbt_fec_tx_submit()` updates the stream byte offset, so the FIN names the
@@ -44,6 +71,23 @@ and moves independently of the module version.
 
 ### Fixed
 
+- The FEC v6 packetizer held a partial packet until 8192 bytes arrived, so an
+  application that writes a small request and then waits for the answer waited
+  forever: iperf3's 37-byte control cookie, an HTTP request, any
+  request/response protocol. The bytes sat in the ring until the application
+  closed the connection, and the close-time flush then delivered them to a
+  peer whose application had already given up (measured: the T5.2 smoke,
+  `submit_bytes=37`, far `rx_delivered=0`, target connected but silent, iperf3
+  timed out after 180 s). The packetizer now flushes a partial packet after
+  2 ms of silence with a dry ring, and closes its block with parity
+  `win_len` = the block's real packet count, so the receiver can place a
+  non-final short block instead of waiting for shares that are not coming. A
+  short DATA packet is legal anywhere and only `LAST` marks the end of the
+  stream. The receiver places shares by the sum of the payload lengths before
+  them instead of the packet index times S, so a flushed packet leaves no
+  hole, and it measures the offset from the byte at which the current stream
+  began, so a second connection in the same session (iperf3's data connection
+  after its control connection) starts at byte 0 again.
 - Every carrier after the first one was refused with `-EPROTO` when
   `crypto=on` generated the session key. The far side adopted the key from the
   near's HELLO and then passed "we have a key" to `tbt_crypto_resolve_key()`,

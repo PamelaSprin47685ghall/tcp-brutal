@@ -730,6 +730,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **HELLO conv 偏差（T0 记录）**：HELLO 仍是 **32B 头/`conv=0x0005` + 66B/ver2 body**；FEC record 仍 `0x1001`；不改 `tbt_hdr_check`。T0 §2.3 原写 HELLO `conv=0x1001`，现按实现记录为偏差（HELLO 用旧 conv，body 版本 2），两端同实现可用；若要严格 0x1001，需另开 ABI 变更。
 
+**FEC `epoch` 偏差（T0 记录，2026-11-06）**：T5.2 的第二个根因是 FEC TX 等 8KiB packet 填满才发，小消息死锁。修复引入短包（`payload_len < S` 可出现在任意位置，只有 `LAST` 表示流结束），交付偏移改为各 share 长度之和。短包一旦被 parity 恢复，其长度无法从记录头得知（parity 可能先于该 DATA share 到达），猜 `S` 会把块的零填充交给应用。因此**本 cut 在 DATA/PARITY 记录的 `epoch`（+6，u16）字段写「本块最后一个真实 share 的 payload_len，0 表示全满」**；T0 原定义 `epoch` 为 rate epoch，本 cut 未实现 rate epoch，字段借用已在此登记为偏差。接收端遇到「需要恢复 + 含短包 + 无长度声明」的块直接拒绝（`fec_short_unknown`），不猜长度。若日后实现 rate epoch，需另给短包长度一个独立字段。
+
 **T5.2 GO（新 master）**：crypto 已合入；E 先用小 `fec=on crypto=on` 隧道 smoke（HELLO 66B/ver2、key 交换、`fec_payload_crc_fail` 不增长），再跑 256 http-kal/1G；`crypto_key=` 两端不一致不会在 HELLO 报错，只会 payload CRC 丢 share。
 
 ### G3 — T3 ChaCha8（C）
