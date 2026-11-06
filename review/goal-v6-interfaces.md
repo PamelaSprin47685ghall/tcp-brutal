@@ -65,6 +65,10 @@
 
 **`42c1522` 合入（`fcd7232`）**：DATA 代次失效重投已合入 master（merge `fcd7232`；非我操作）；make check 用私有 `KDIR/PAHOLE/LD_LIBRARY_PATH` 绿。最终 head **`a5d84ef` + docs**；两端需按新 head 重建（`.65` aarch64 + HND0 far x86），先查 `.65` eth0/switch **7s flap**，再 bounded **1 carrier/37B ×2 + debug=2**；验收 `join_dup=0`、`rx_delivered` 跟 `rx_read`、无 `TXSTALLKILL`、`lost/replaced` 增长但收敛/`up=2`。不 8/16/256、不 push。
 
+**bounded 3c75a80（`integrator-final`，2026-11-06）**：`.65` link stable ~1500s since 7348s flap；`t52-smoke2` stand down，不再碰 `.65`/HND0；`integrator-final` 正按 `3c75a80` 跑 bounded 1 carrier/37B ×2（debug=2），验收同上。不 8/16/256、不 push。
+
+**`.65` aarch64 3c75a80 ko（`arm64-build-3`）**：sha256 `a1facf0e…`、srcversion `88E99F01…`、vermagic `6.1.172 SMP mod_unload modversions aarch64`、BuildID `440fc975…`；insmod/rmmod 待 `t52-arm64-3` smoke 释放后补验；元数据已转 `t52-smoke2`/`integrator-final`。
+
 **冒烟前部署/分工（2026-11-06）**：HND0 clean；`b41b259` x86 far ko **尚未部署**。`t52-arm64-3` = HND0 far b41b259 构建/部署 + `.65` **1 carrier/37B smoke**；`arm64-build-3` = `.65` aarch64 ko only。HND0 far 用 **`tbt_echo` 5202（不用 iperf3）**；1 carrier/37B 通过后 **8/16 × 1MiB/5s**；不 256/8 并行、不合并/push。
 
 **HND0 清理确认（`hnd0-verify`，2026-11-06）**：10:56:45 UTC 无 tbtun、`/proc/net/tbtun` 不存在、9000/5202 无监听、无 echo/进程、无锁。sysctl 为**生产值**（rmem/wmem 16MiB、tcp 4MiB、fq/bbr），**不改成 64MiB**。10:51:39–10:56:03 窗口 UBSAN/WARN/BUG/OOM=0，未跑数据面；08:53–09:01 两轮 smoke 有 **16 UBSAN + 2 WARN**（`tbt_tx.c:2570`、array/shift OOB），已记录。**`t52-arm64` 在 HOLD 期间仍于 10:44/10:51/10:52 部署/加载/echo，agent kill 后留 PPID 1 残留**（已被并行清理）；需确认 HOLD 生效、不再部署。生产服务 active；不合并/push。
