@@ -28,6 +28,10 @@ probes, all through the operator surface only (`echo` into `/proc/net/tbtun/*`):
 | I | **the thesis**: one shaped carrier (control) versus four on the same path; four must be at least 1.8x one |
 | J | 1% loss and 2% reorder on every carrier; byte-exactness |
 | K | one carrier's class forced to 100% loss mid-transfer, then restored; byte-exactness |
+| L | FEC v6 over the raw container: `n=4 m=2 carriers=6`, 1 MiB byte-exact |
+| M | FEC v6 over HTTP: `n=4 m=2 carriers=6`, 1 MiB byte-exact |
+| N | FEC v6 grouped over HTTP: `n=4 m=4 carriers=16`, 1 MiB byte-exact, all 16 carriers up |
+| O | the T5.2 smoke's shape (`profile=http-kal`, `n=1 m=1`, `carriers=2`, `fec=on`, `mode=grouped`) with `crypto=off`, with `crypto=on`, with carrier 0 taken down mid-transfer, and with a 700 ms loopback delay that makes a dial outlive one `kernel_connect` wait window |
 
 G retries its whole window up to three times when the injector happened to drop
 nothing, and skips with `no loss observed in 3 windows` rather than failing for

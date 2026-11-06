@@ -558,7 +558,7 @@ int tbt_crypto_hello_parse(const u8 *hello, size_t len, bool *enabled,
     return 0;
 }
 
-int tbt_crypto_resolve_key(bool local_key_set,
+int tbt_crypto_resolve_key(bool local_key_wins,
                            const u8 local_key[TBT_CRYPTO_KEY_LEN],
                            bool enabled, u8 key_id,
                            const u8 hello_key[TBT_CRYPTO_KEY_LEN],
@@ -573,17 +573,19 @@ int tbt_crypto_resolve_key(bool local_key_set,
         return 0;
     }
 
-    if (local_key_set)
+    if (local_key_wins)
     {
-        /* Both ends configured crypto_key=: the key never travels. A peer
-         * that generated one instead has a different key, so refuse. */
+        /* Our key is the session key: configured on both ends, or generated
+         * here and announced in our own HELLO. The peer learned it from us,
+         * so its HELLO names key_id 0; a peer that generated one instead has
+         * a different key, so refuse. */
         if (local_key == NULL || key_id != TBT_CRYPTO_KEY_ID_NONE)
             return -EPROTO;
         memcpy(out, local_key, TBT_CRYPTO_KEY_LEN);
         return 0;
     }
 
-    /* No local key: adopt the peer's HELLO key (TOFU). */
+    /* The key is the peer's: take the HELLO key (TOFU). */
     if (hello_key == NULL || key_id != TBT_CRYPTO_KEY_ID_HELLO)
         return -EPROTO;
     memcpy(out, hello_key, TBT_CRYPTO_KEY_LEN);

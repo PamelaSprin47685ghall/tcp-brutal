@@ -762,6 +762,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                 seq_printf(m, "tunnel %llu c3 n=%u up=%u lost=%llu replaced=%llu "
                               "spare_activated=%llu alloc_fail=%llu "
                               "port_exhaust=%llu port_alloc_fail=%llu connect_fail=%llu "
+                              "connect_retry=%llu "
                               "join_dup=%llu join_bad=%llu join_nonce_reject=%llu "
                               "join_src_reject=%llu "
                               "fbk_tx=%llu fbk_rx=%llu "
@@ -788,6 +789,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->port_exhaust),
                            tbt_stat_read(&s->port_alloc_fail),
                            tbt_stat_read(&s->connect_fail),
+                           tbt_stat_read(&s->connect_retry),
                            READ_ONCE(s->session_join_dup),
                            tbt_stat_read(&s->session_join_bad),
                            tbt_stat_read(&s->join_nonce_reject),
@@ -913,6 +915,11 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->hole_time_fail),
                            tbt_stat_read(&s->deliver_timeouts),
                            tbt_stat_read(&s->dbg_deliver_checks));
+                seq_printf(m, "tunnel %llu c9 fec_proto_fail=%llu "
+                              "fec_hdr_crc_fail=%llu fec_payload_crc_fail=%llu\n",
+                           t->cfg.id, tbt_stat_read(&s->fec_proto_fail),
+                           tbt_stat_read(&s->fec_hdr_crc_fail),
+                           tbt_stat_read(&s->fec_payload_crc_fail));
                 seq_printf(m, "tunnel %llu c8 profile_mismatch=%llu http_parse_err=%llu "
                               "http_status_err=%llu http_req=%llu http_resp=%llu "
                               "pad_tx=%llu drip_tx=%llu\n",

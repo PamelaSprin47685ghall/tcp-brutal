@@ -950,6 +950,40 @@ static void test_hello(void)
     {
         printf("PASS key: no key at all is rejected\n");
     }
+    /* The far side after it adopted the near's key: the key is in
+     * crypto_key[] but it is the peer's, so local_key_wins stays false and
+     * every later carrier's HELLO must resolve to the same HELLO key. Passing
+     * "we have a key" as "our key wins" refused every carrier after the first
+     * with -EPROTO (T5.2: one carrier up, 315 HELLO rejections in 4 s). */
+    fill(local, sizeof(local), 7);
+    if (tbt_crypto_resolve_key(false, local, true, TBT_CRYPTO_KEY_ID_HELLO, key,
+                               out) != 0 ||
+        memcmp(out, key, sizeof(out)) != 0)
+    {
+        printf("FAIL key: an adopted key rejected the peer's repeated HELLO\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS key: an adopted key accepts the peer's repeated HELLO\n");
+    }
+    /* A different HELLO key still resolves; the caller's memcmp against the
+     * adopted key is what refuses it, and that comparison must see the peer's
+     * bytes, not the adopted ones. */
+    fill(key, sizeof(key), 0x11);
+    fill(local, sizeof(local), 7);
+    if (tbt_crypto_resolve_key(false, local, true, TBT_CRYPTO_KEY_ID_HELLO, key,
+                               out) != 0 ||
+        memcmp(out, local, sizeof(out)) == 0)
+    {
+        printf("FAIL key: a changed HELLO key was masked by the adopted key\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS key: a changed HELLO key reaches the caller's check\n");
+    }
+    fill(key, sizeof(key), 0x22);
     memset(out, 0xa5, sizeof(out));
     if (tbt_crypto_resolve_key(false, NULL, false, TBT_CRYPTO_KEY_ID_NONE,
                                NULL, out) != 0)

@@ -520,9 +520,13 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
 /* Crypto fields of a FEC v6 HELLO. The session lock serializes the one-time
  * key adoption and rx-context init: several carriers may present HELLO at the
  * same time. body_xor() is read-only after init, so the data paths do not take
- * this lock. */
+ * this lock.
+ *
+ * `why` names the check that refused the HELLO. Every failure here is -EPROTO,
+ * and a wrong key rule is indistinguishable from a wrong key on the wire
+ * without it. */
 static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
-                               size_t len)
+                               size_t len, const char **why)
 {
     bool enabled = false;
     u8 key_id = TBT_CRYPTO_KEY_ID_NONE;
@@ -533,20 +537,31 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
 
     if (tbt_crypto_hello_parse(body, len, &enabled, &key_id, peer_nonce,
                                hello_key))
+    {
+        *why = "crypto hello parse";
         return -EPROTO;
+    }
 
     spin_lock(&sess->lock);
     if (enabled != sess->crypto)
     {
+        *why = "crypto enabled mismatch";
         err = -EPROTO;
         goto out;
     }
     if (!enabled)
         goto out;
 
-    if (tbt_crypto_resolve_key(sess->crypto_have_key, sess->crypto_key,
-                               enabled, key_id, hello_key, key))
+    /* A key this side owns (configured, or generated and announced in our own
+     * HELLO) must be the one the peer uses: key_id 0. A key we adopted from
+     * the peer keeps travelling with key_id 1, so it is not "local" here --
+     * passing crypto_have_key made every carrier after the first one fail
+     * resolve_key with -EPROTO and left the session with a single carrier
+     * (measured: probe N, 315 HELLO rejections in 4 s). */
+    if (tbt_crypto_resolve_key(sess->crypto_have_key && !sess->crypto_key_peer,
+                               sess->crypto_key, enabled, key_id, hello_key, key))
     {
+        *why = "crypto key resolve";
         err = -EPROTO;
         goto out;
     }
@@ -556,8 +571,10 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
          * exactly this. */
         memcpy(sess->crypto_key, key, sizeof(sess->crypto_key));
         sess->crypto_have_key = true;
+        sess->crypto_key_peer = true;
         if (tbt_crypto_init(&sess->crypto_ctx.tx, key, sess->crypto_tx_nonce, 0))
         {
+            *why = "crypto tx init";
             err = -EPROTO;
             goto out;
         }
@@ -565,6 +582,7 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
     }
     else if (memcmp(sess->crypto_key, key, sizeof(key)) != 0)
     {
+        *why = "crypto key changed";
         err = -EPROTO;
         goto out;
     }
@@ -573,13 +591,17 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
     {
         /* Every carrier of one session repeats the same TX nonce. */
         if (memcmp(sess->crypto_rx_nonce, peer_nonce, sizeof(peer_nonce)) != 0)
+        {
+            *why = "crypto nonce changed";
             err = -EPROTO;
+        }
         goto out;
     }
 
     memcpy(sess->crypto_rx_nonce, peer_nonce, sizeof(peer_nonce));
     if (tbt_crypto_init(&sess->crypto_ctx.rx, key, peer_nonce, 0))
     {
+        *why = "crypto rx init";
         err = -EPROTO;
         goto out;
     }
@@ -588,6 +610,18 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
 out:
     spin_unlock(&sess->lock);
     return err;
+}
+
+/* Why the peer's HELLO was refused. The container is opaque otherwise: a
+ * rejected HELLO and a rejected chunk both surface as -EPROTO, and the far's
+ * only other evidence is "awaiting HELLO" repeating every join window. */
+static int tbt_hello_bad(struct tbt_carrier *c, const char *why)
+{
+    if (debug)
+        pr_info_ratelimited("tbtun: tunnel %llu carrier %u HELLO rejected: %s\n",
+                            (unsigned long long)c->sess->tunnel->cfg.id, c->index,
+                            why);
+    return -EPROTO;
 }
 
 /* Validate HELLO, adopt or check the nonce, and join the far side's slot. */
@@ -601,7 +635,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
     if (h->body_len != (sess->fec ? TBT_HELLO_BODY_LEN_V6 : TBT_HELLO_BODY_LEN) ||
         body[0] != (sess->fec ? TBT_WIRE_VERSION_V6 : TBT_WIRE_VERSION) ||
         body[1] != want_role)
-        return -EPROTO;
+        return tbt_hello_bad(c, "length/version/role");
     /* The last HELLO byte names the container. Both ends derive the expected
      * value from the carrier index (spares of an http-kal tunnel drip), so a
      * restart with a different profile is refused here instead of being
@@ -615,19 +649,20 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
         if (prof != want)
         {
             atomic64_inc(&sess->profile_mismatch);
-            return -EPROTO;
+            return tbt_hello_bad(c, "profile");
         }
         c->peer_gen = gen;
     }
     if (tbt_le16(body + 18) != TBT_PAYLOAD_MAX || tbt_le16(body + 20) != TBT_CHUNK_MAX)
-        return -EPROTO;
+        return tbt_hello_bad(c, "payload/chunk ceiling");
 
     if (sess->fec)
     {
-        int cerr = tbt_rx_hello_crypto(sess, body, h->body_len);
+        const char *why = "crypto fields";
+        int cerr = tbt_rx_hello_crypto(sess, body, h->body_len, &why);
 
         if (cerr)
-            return cerr;
+            return tbt_hello_bad(c, why);
     }
 
     if (t->cfg.role == TBT_ROLE_FAR)
@@ -636,7 +671,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
         __be32 src;
 
         if (h->path_id >= sess->n_car || !csk)
-            return -EPROTO;
+            return tbt_hello_bad(c, "path id");
         src = inet_sk(csk)->inet_daddr;
         spin_lock(&sess->lock);
         /* An established anchor rejects every other source, free carrier
@@ -646,7 +681,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
         {
             atomic64_inc(&sess->join_src_reject);
             spin_unlock(&sess->lock);
-            return -EPROTO;
+            return tbt_hello_bad(c, "source address");
         }
         if (sess->nonce_pinned)
         {
@@ -654,7 +689,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
             {
                 atomic64_inc(&sess->session_join_bad);
                 spin_unlock(&sess->lock);
-                return -EPROTO;
+                return tbt_hello_bad(c, "session nonce");
             }
         }
         else if (!sess->nonce_set)
@@ -669,7 +704,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
             {
                 atomic64_inc(&sess->join_nonce_reject);
                 spin_unlock(&sess->lock);
-                return -EPROTO;
+                return tbt_hello_bad(c, "nonce authority");
             }
             memcpy(sess->nonce, body + 2, sizeof(sess->nonce));
             sess->nonce_set = true;
@@ -678,7 +713,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
         {
             atomic64_inc(&sess->session_join_bad);
             spin_unlock(&sess->lock);
-            return -EPROTO;
+            return tbt_hello_bad(c, "session nonce");
         }
         /* Only a HELLO that passed the nonce check may fix the anchor. */
         if (!sess->anchor_set)
@@ -694,9 +729,9 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
     else
     {
         if (memcmp(body + 2, sess->nonce, sizeof(sess->nonce)))
-            return -EPROTO;
+            return tbt_hello_bad(c, "session nonce");
         if (h->path_id != c->index)
-            return -EPROTO;
+            return tbt_hello_bad(c, "path id");
         WRITE_ONCE(c->peer_hello, true);
         /* The far joined this generation: the join_dup storm is over. */
         sess->join_retries = 0;
@@ -724,6 +759,37 @@ static int tbt_http_record(struct tbt_carrier *c, struct tbt_rec *rec)
         return 0;
     }
     return tbt_rx_frame(c, &rec->hdr, rec->body, rec->body_len);
+}
+
+/* The HTTP container refused the stream: say which stage and show the bytes.
+ * The raw profile dumps the record its scanner cannot accept; the HTTP profile
+ * needs the same evidence, and here the failure can be in a header block, a
+ * chunk size line, or a record inside a chunk, so the stage name and the
+ * per-carrier phase state are part of the message. */
+static int tbt_http_bad(struct tbt_carrier *c, const char *why, int err)
+{
+    struct tbt_parser *p = c->parser;
+
+    if (debug)
+    {
+        pr_info_ratelimited("tbtun: tunnel %llu carrier %u http %s: "
+                            "hdr_have=%u hdr_done=%d req_done=%d have=%zu "
+                            "chunk_state=%d chunk_size=%u rec_len=%u\n",
+                            (unsigned long long)c->sess->tunnel->cfg.id, c->index,
+                            why, c->http_have, c->http_hdr_done, c->http_req_done,
+                            p ? p->have : 0,
+                            c->http_rx ? c->http_rx->chunk.state : -1,
+                            c->http_rx ? c->http_rx->chunk_size : 0,
+                            c->http_rx ? c->http_rx->rec_len : 0);
+        if (p && p->have)
+            print_hex_dump(KERN_INFO, "tbtun http rx: ", DUMP_PREFIX_OFFSET,
+                           16, 1, p->buf, min_t(size_t, p->have, 64), false);
+        else if (c->http_have)
+            print_hex_dump(KERN_INFO, "tbtun http hdr: ", DUMP_PREFIX_OFFSET,
+                           16, 1, c->http_hdr, min_t(size_t, c->http_have, 64),
+                           false);
+    }
+    return err;
 }
 
 /* The HTTP container's receive state machine: header block (request on the far
@@ -762,7 +828,7 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
             if (!take)
             {
                 atomic64_inc(&sess->http_parse_err);
-                return -EPROTO;
+                return tbt_http_bad(c, "header full", -EPROTO);
             }
             memcpy(c->http_hdr + c->http_have, p->buf, take);
             c->http_have += take;
@@ -779,19 +845,19 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                     if (c->http_have == TBT_HTTP_HDR_MAX)
                     {
                         atomic64_inc(&sess->http_parse_err);
-                        return -EPROTO;
+                        return tbt_http_bad(c, "response header full", -EPROTO);
                     }
                     return 0;
                 }
                 if (perr == TBT_HTTP_PROTO)
                 {
                     atomic64_inc(&sess->http_parse_err);
-                    return -EPROTO;
+                    return tbt_http_bad(c, "response header proto", -EPROTO);
                 }
                 if (resp.status != 200 || !resp.chunked || !resp.keep_alive)
                 {
                     atomic64_inc(&sess->http_status_err);
-                    return -EPROTO;
+                    return tbt_http_bad(c, "response status", -EPROTO);
                 }
             }
             else
@@ -804,19 +870,19 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                     if (c->http_have == TBT_HTTP_HDR_MAX)
                     {
                         atomic64_inc(&sess->http_parse_err);
-                        return -EPROTO;
+                        return tbt_http_bad(c, "request header full", -EPROTO);
                     }
                     return 0;
                 }
                 if (perr == TBT_HTTP_PROTO)
                 {
                     atomic64_inc(&sess->http_parse_err);
-                    return -EPROTO;
+                    return tbt_http_bad(c, "request header proto", -EPROTO);
                 }
                 if (!req.chunked || !req.keep_alive)
                 {
                     atomic64_inc(&sess->http_parse_err);
-                    return -EPROTO;
+                    return tbt_http_bad(c, "request framing", -EPROTO);
                 }
                 c->http_req_done = true;
                 tbt_tx_wake(sess);
@@ -824,7 +890,7 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
             if (hlen > c->http_have)
             {
                 atomic64_inc(&sess->http_parse_err);
-                return -EPROTO;
+                return tbt_http_bad(c, "header length", -EPROTO);
             }
             {
                 size_t extra = c->http_have - hlen;
@@ -863,7 +929,7 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                     if (frec[0] >= TBT_FEC_DATA && frec[0] <= TBT_FEC_FBK)
                     {
                         if (!c->saw_hello)
-                            return -EPROTO;
+                            return tbt_http_bad(c, "fec before hello", -EPROTO);
                         err = tbt_fec_rx_record(c, (u8 *)frec, flen);
                     }
                     else
@@ -873,7 +939,7 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                         size_t used = tbt_rec_scan(frec, flen, &orec, &rerr);
 
                         if (rerr != TBT_REC_OK || used != flen)
-                            return -EPROTO;
+                            return tbt_http_bad(c, "record scan", -EPROTO);
                         err = tbt_http_record(c, &orec);
                     }
                     if (err)
@@ -891,7 +957,7 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                     break;
                 }
                 atomic64_inc(&sess->http_parse_err);
-                return -EPROTO;
+                return tbt_http_bad(c, "fec chunk", -EPROTO);
             }
 
             n = tbt_http_frame_decode(c->http_rx, p->buf, p->have, &rec, &derr);
@@ -923,7 +989,7 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                 break;
             }
             atomic64_inc(&sess->http_parse_err);
-            return -EPROTO;
+            return tbt_http_bad(c, "chunk", -EPROTO);
         }
         if (c->http_hdr_done)
             return 0;
