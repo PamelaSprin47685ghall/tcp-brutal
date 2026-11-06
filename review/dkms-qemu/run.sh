@@ -78,7 +78,11 @@ else
 fi
 "$here/mkinitramfs.sh" --out "$initrd"
 
-rm -rf "$artifacts"
+# Never remove this directory: every file in it is tracked evidence, so a run
+# that fails or is interrupted would leave tracked deletions in the worktree
+# (guest-tbtun.ko.sha256 kept reappearing deleted after a partial run).  Drop
+# only untracked leftovers; every tracked file below is overwritten.
+( cd "$here/../.." && git clean -fdxq -- "review/dkms-qemu/artifacts" ) 2> /dev/null || true
 mkdir -p "$artifacts"
 
 accel=tcg
