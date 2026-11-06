@@ -839,11 +839,13 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                  * re-pin, obsolete-generation and explicit-loss record. */
                 seq_printf(m, "tunnel %llu ctl ctl_lost=%llu ctl_retry=%llu "
                               "ctl_requeue=%llu ctl_obsolete=%llu ctl_queued=%u "
+                              "pinned_bad_path=%llu "
                               "close_timeouts=%llu close_detaches=%llu\n",
                            t->cfg.id, tbt_stat_read(&s->ctl_lost),
                            READ_ONCE(s->ctl_retry), READ_ONCE(s->ctl_requeue),
                            READ_ONCE(s->ctl_obsolete),
                            READ_ONCE(s->ctl_queued),
+                           READ_ONCE(s->dbg_pinned_bad_path),
                            tbt_stat_read(&s->close_timeouts),
                            tbt_stat_read(&s->close_detaches));
                 /* Session stream census, next to the carrier block. n_active
