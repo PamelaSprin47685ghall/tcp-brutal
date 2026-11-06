@@ -70,7 +70,20 @@
         "local_mbps_1t": 19.4,
         "hnd0_1t": null,
         "hnd0_2t": null,
-        "note": "recommended config; HND0 throughput pending T5.2"
+        "note": "recommended config; HND0 throughput pending T5.2",
+        "local_prevalidation_02ce1f7": {
+          "recovery_160k": 0.999244,
+          "wilson99": [
+            0.999045,
+            0.999401
+          ],
+          "local_mbps_1t": 9.703,
+          "local_mbps_2t": 18.549,
+          "speedup_1t": 7.65,
+          "speedup_2t": 6.74,
+          "build": "-march=x86-64",
+          "source": "sclc-bench bench/results/local-b512-p040"
+        }
       },
       "rate0.35_block256_L16": {
         "recovery": 0.998481,
