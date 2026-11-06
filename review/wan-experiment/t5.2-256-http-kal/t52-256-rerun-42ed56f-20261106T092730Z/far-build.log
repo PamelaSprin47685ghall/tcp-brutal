@@ -28,3 +28,15 @@ tbtun/tbt_tx.c:3084:1: warning: the frame size of 1088 bytes is larger than 1024
   CC [M]  tbtun/tbt_parse.o
   CC [M]  tbtun/tbt_http.o
   CC [M]  tbtun/tbt_crypto.o
+  CC [M]  tbtun/tbt_portmap.o
+  CC [M]  tbtun/tbt_fec.o
+  CC [M]  tbtun/tbt_fec_data.o
+  LD [M]  tbtun.o
+  MODPOST Module.symvers
+  CC [M]  tbtun.mod.o
+  CC [M]  .module-common.o
+  LD [M]  tbtun.ko
+  BTF [M] tbtun.ko
+make[1]: Leaving directory '/home/tbtun-t52-42ed56f'
+make: Leaving directory '/usr/src/linux-headers-7.0.0-42-generic'
+Skipping BTF generation for tbtun.ko due to unavailability of vmlinux

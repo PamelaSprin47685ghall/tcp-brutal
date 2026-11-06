@@ -1,0 +1,17 @@
+active
+LISTEN 0      64           0.0.0.0:5202       0.0.0.0:*   
+loaded srcversion 40C860C8DDB44A9CF2FDA3B
+
+tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5202 n=4 m=4 fec=on mode=grouped w=8 carriers=256 crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=31000-31511 nonce=00112233445566778899aabbccddeeff
+===TUN
+# id role state listen peer target n m streams
+1 far listening 0.0.0.0:9000 0.0.0.0:0 127.0.0.1:5202 4 4 0
+===DMESG-BASE
+1642
+===CPU0
+cpu  73684 183650 35979 1198625 17450 0 2998 922 0 0
+0.40 0.33 0.32 1/282 30970
+               total        used        free      shared  buff/cache   available
+Mem:             955         384         387           1         329         571
+===ECHO-PID
+30955 /home/tbtun-t52-42ed56f/tbt_echo 5202 echo

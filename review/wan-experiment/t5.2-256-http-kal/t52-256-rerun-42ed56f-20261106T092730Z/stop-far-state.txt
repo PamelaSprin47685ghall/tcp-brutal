@@ -1,0 +1,20 @@
+===MOD
+no-tbtun
+no-proc
+===LISTEN
+no-listen
+===PROD
+active
+active
+inactive
+active
+===NEWDMESG
+[ 7632.491334] tbtun 0.0.1 loaded: 1 tunnels max, 256 carriers max
+[ 7646.426574] tbtun: unloaded
+===TAIL
+[ 7632.491334] tbtun 0.0.1 loaded: 1 tunnels max, 256 carriers max
+[ 7646.426574] tbtun: unloaded
+===LOADMEM
+ 09:32:48 up  2:07,  1 user,  load average: 0.31, 0.32, 0.31
+               total        used        free      shared  buff/cache   available
+Mem:             955         360         410           1         331         595

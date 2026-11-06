@@ -1,0 +1,3 @@
+far ko cb04a9f9cc613f43115da35029550fc58cbdb55cb22e0703e81b391a310dc46a  /home/tbtun-t52-42ed56f/tbtun.ko
+far srcversion 40C860C8DDB44A9CF2FDA3B
+far vermagic 7.0.0-42-generic SMP preempt mod_unload modversions 
