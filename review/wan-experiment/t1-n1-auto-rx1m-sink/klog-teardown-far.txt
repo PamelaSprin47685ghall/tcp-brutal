@@ -1,0 +1,20 @@
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:24 2026] audit: type=1400 audit(1793923285.431:755): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=886617 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[Fri Nov  6 00:01:24 2026] audit: type=1400 audit(1793923285.431:756): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=886617 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[Fri Nov  6 00:01:24 2026] audit: type=1400 audit(1793923285.433:757): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=886617 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[Fri Nov  6 00:01:24 2026] audit: type=1400 audit(1793923285.433:758): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=886617 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[Fri Nov  6 00:01:24 2026] audit: type=1400 audit(1793923285.434:759): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=886617 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[Fri Nov  6 00:01:24 2026] audit: type=1400 audit(1793923285.434:760): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=886617 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[Fri Nov  6 00:01:39 2026] audit: type=1400 audit(1793923300.001:761): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=887059 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[Fri Nov  6 00:01:39 2026] audit: type=1400 audit(1793923300.001:762): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=887059 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[Fri Nov  6 00:01:39 2026] audit: type=1400 audit(1793923300.002:763): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=887059 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[Fri Nov  6 00:01:39 2026] audit: type=1400 audit(1793923300.003:764): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=887059 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[Fri Nov  6 00:01:39 2026] audit: type=1400 audit(1793923300.003:765): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=887059 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[Fri Nov  6 00:01:39 2026] audit: type=1400 audit(1793923300.003:766): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=887059 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0

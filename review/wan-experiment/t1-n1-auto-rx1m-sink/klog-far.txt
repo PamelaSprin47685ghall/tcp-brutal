@@ -1,0 +1,289 @@
+[Thu Nov  5 19:18:59 2026] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[Thu Nov  5 19:20:20 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=51380, awaiting HELLO
+[Thu Nov  5 19:20:20 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=51386, awaiting HELLO
+[Thu Nov  5 19:20:20 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=51414, awaiting HELLO
+[Thu Nov  5 19:20:20 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=51402, awaiting HELLO
+[Thu Nov  5 19:20:20 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=51400, awaiting HELLO
+[Thu Nov  5 19:21:25 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=36328, awaiting HELLO
+[Thu Nov  5 19:21:25 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=36340, awaiting HELLO
+[Thu Nov  5 19:21:25 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=36338, awaiting HELLO
+[Thu Nov  5 19:21:25 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=36356, awaiting HELLO
+[Thu Nov  5 19:22:28 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:22:28 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:22:29 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:22:29 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9345, awaiting HELLO
+[Thu Nov  5 19:22:29 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9343, awaiting HELLO
+[Thu Nov  5 19:22:29 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[Thu Nov  5 19:22:29 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9349, awaiting HELLO
+[Thu Nov  5 19:22:29 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:22:29 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9347, awaiting HELLO
+[Thu Nov  5 19:22:29 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9351, awaiting HELLO
+[Thu Nov  5 19:22:29 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:22:29 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40008, awaiting HELLO
+[Thu Nov  5 19:22:29 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:22:30 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[Thu Nov  5 19:22:30 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9353, awaiting HELLO
+[Thu Nov  5 19:22:30 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9355, awaiting HELLO
+[Thu Nov  5 19:22:30 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:22:30 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:22:30 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40008, awaiting HELLO
+[Thu Nov  5 19:22:30 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:22:30 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9357, awaiting HELLO
+[Thu Nov  5 19:22:31 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9359, awaiting HELLO
+[Thu Nov  5 19:22:31 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[Thu Nov  5 19:22:31 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:22:31 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:22:31 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9361, awaiting HELLO
+[Thu Nov  5 19:22:31 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9363, awaiting HELLO
+[Thu Nov  5 19:22:31 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:22:31 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40008, awaiting HELLO
+[Thu Nov  5 19:22:31 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[Thu Nov  5 19:22:31 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9365, awaiting HELLO
+[Thu Nov  5 19:22:31 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:22:31 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:22:32 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9367, awaiting HELLO
+[Thu Nov  5 19:22:32 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40008, awaiting HELLO
+[Thu Nov  5 19:22:32 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:22:32 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9369, awaiting HELLO
+[Thu Nov  5 19:22:32 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[Thu Nov  5 19:22:32 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:22:32 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:22:32 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9371, awaiting HELLO
+[Thu Nov  5 19:22:33 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9373, awaiting HELLO
+[Thu Nov  5 19:22:33 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9375, awaiting HELLO
+[Thu Nov  5 19:22:33 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40008, awaiting HELLO
+[Thu Nov  5 19:22:33 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:22:33 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:22:33 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:22:33 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9377, awaiting HELLO
+[Thu Nov  5 19:22:34 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[Thu Nov  5 19:22:34 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:22:34 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9381, awaiting HELLO
+[Thu Nov  5 19:22:34 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:22:34 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:22:35 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9381, awaiting HELLO
+[Thu Nov  5 19:22:35 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:22:35 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:22:59 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:22:59 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:22:59 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9393, awaiting HELLO
+[Thu Nov  5 19:23:06 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9395, awaiting HELLO
+[Thu Nov  5 19:23:06 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:23:06 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:23:06 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:23:06 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:23:34 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9397, awaiting HELLO
+[Thu Nov  5 19:23:34 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[Thu Nov  5 19:23:34 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40008, awaiting HELLO
+[Thu Nov  5 19:23:34 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:23:34 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9399, awaiting HELLO
+[Thu Nov  5 19:23:40 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:23:40 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:24:28 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:24:28 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:24:28 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:24:28 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9409, awaiting HELLO
+[Thu Nov  5 19:24:33 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:24:33 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:24:33 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:24:33 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9411, awaiting HELLO
+[Thu Nov  5 19:24:33 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:24:52 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[Thu Nov  5 19:24:52 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9413, awaiting HELLO
+[Thu Nov  5 19:24:52 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:24:52 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9415, awaiting HELLO
+[Thu Nov  5 19:24:52 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9417, awaiting HELLO
+[Thu Nov  5 19:25:03 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:25:03 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9420, awaiting HELLO
+[Thu Nov  5 19:25:46 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9429, awaiting HELLO
+[Thu Nov  5 19:25:46 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:25:46 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40003, awaiting HELLO
+[Thu Nov  5 19:25:46 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:25:52 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:25:52 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:25:52 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9433, awaiting HELLO
+[Thu Nov  5 19:25:52 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9435, awaiting HELLO
+[Thu Nov  5 19:25:52 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:26:20 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9437, awaiting HELLO
+[Thu Nov  5 19:26:21 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9439, awaiting HELLO
+[Thu Nov  5 19:26:54 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40003, awaiting HELLO
+[Thu Nov  5 19:26:54 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9443, awaiting HELLO
+[Thu Nov  5 19:26:54 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9441, awaiting HELLO
+[Thu Nov  5 19:26:54 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:27:53 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:27:53 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:27:53 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9447, awaiting HELLO
+[Thu Nov  5 19:27:54 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:27:54 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9449, awaiting HELLO
+[Thu Nov  5 19:27:54 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:27:54 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:27:54 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:29:04 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:29:04 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9462, awaiting HELLO
+[Thu Nov  5 19:29:04 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9461, awaiting HELLO
+[Thu Nov  5 19:29:04 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:29:05 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40003, awaiting HELLO
+[Thu Nov  5 19:29:05 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:29:05 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:29:05 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:29:05 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:29:36 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9464, awaiting HELLO
+[Thu Nov  5 19:29:36 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9467, awaiting HELLO
+[Thu Nov  5 19:39:12 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:39:30 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9497, awaiting HELLO
+[Thu Nov  5 19:40:10 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:40:28 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9531, awaiting HELLO
+[Thu Nov  5 19:41:06 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9561, awaiting HELLO
+[Thu Nov  5 19:41:06 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9563, awaiting HELLO
+[Thu Nov  5 19:41:06 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:41:06 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:41:07 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:41:24 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[Thu Nov  5 19:41:24 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9565, awaiting HELLO
+[Thu Nov  5 19:41:24 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:41:24 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9567, awaiting HELLO
+[Thu Nov  5 19:42:05 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:42:05 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:42:05 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:42:05 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9569, awaiting HELLO
+[Thu Nov  5 19:42:05 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:42:22 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[Thu Nov  5 19:42:24 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40003, awaiting HELLO
+[Thu Nov  5 19:42:24 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:42:24 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:42:24 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9576, awaiting HELLO
+[Thu Nov  5 19:43:02 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[Thu Nov  5 19:43:02 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9580, awaiting HELLO
+[Thu Nov  5 19:43:02 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40003, awaiting HELLO
+[Thu Nov  5 19:43:02 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40005, awaiting HELLO
+[Thu Nov  5 19:43:02 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:43:02 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:43:02 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40008, awaiting HELLO
+[Thu Nov  5 19:43:02 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9585, awaiting HELLO
+[Thu Nov  5 19:43:02 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9582, awaiting HELLO
+[Thu Nov  5 19:43:19 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9587, awaiting HELLO
+[Thu Nov  5 19:43:19 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9588, awaiting HELLO
+[Thu Nov  5 19:43:19 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[Thu Nov  5 19:43:19 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9591, awaiting HELLO
+[Thu Nov  5 19:43:19 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9593, awaiting HELLO
+[Thu Nov  5 19:43:19 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40010, awaiting HELLO
+[Thu Nov  5 19:43:19 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40012, awaiting HELLO
+[Thu Nov  5 19:43:20 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9594, awaiting HELLO
+[Thu Nov  5 19:43:57 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[Thu Nov  5 19:43:57 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40003, awaiting HELLO
+[Thu Nov  5 19:43:57 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9597, awaiting HELLO
+[Thu Nov  5 19:43:57 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9600, awaiting HELLO
+[Thu Nov  5 19:43:57 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9598, awaiting HELLO
+[Thu Nov  5 19:43:57 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40005, awaiting HELLO
+[Thu Nov  5 19:43:57 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9603, awaiting HELLO
+[Thu Nov  5 19:43:57 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:43:57 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40008, awaiting HELLO
+[Thu Nov  5 19:44:15 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9609, awaiting HELLO
+[Thu Nov  5 19:44:15 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9607, awaiting HELLO
+[Thu Nov  5 19:44:15 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9610, awaiting HELLO
+[Thu Nov  5 19:44:15 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40015, awaiting HELLO
+[Thu Nov  5 19:44:15 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40016, awaiting HELLO
+[Thu Nov  5 19:44:15 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9605, awaiting HELLO
+[Thu Nov  5 19:44:15 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40012, awaiting HELLO
+[Thu Nov  5 19:44:15 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40010, awaiting HELLO
+[Thu Nov  5 19:44:17 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:44:53 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:44:53 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:44:53 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:44:53 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:44:53 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9613, awaiting HELLO
+[Thu Nov  5 19:45:51 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9619, awaiting HELLO
+[Thu Nov  5 19:45:51 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:45:51 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:45:51 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:45:51 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9616, awaiting HELLO
+[Thu Nov  5 19:46:55 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:46:55 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:46:55 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:46:55 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:46:56 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9623, awaiting HELLO
+[Thu Nov  5 19:47:13 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[Thu Nov  5 19:47:13 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9627, awaiting HELLO
+[Thu Nov  5 19:47:13 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9631, awaiting HELLO
+[Thu Nov  5 19:47:13 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9629, awaiting HELLO
+[Thu Nov  5 19:47:13 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:47:29 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9632, awaiting HELLO
+[Thu Nov  5 19:47:29 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:47:55 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9635, awaiting HELLO
+[Thu Nov  5 19:47:55 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:47:55 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40002, awaiting HELLO
+[Thu Nov  5 19:47:55 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:47:55 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:48:10 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40006, awaiting HELLO
+[Thu Nov  5 19:48:11 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9641, awaiting HELLO
+[Thu Nov  5 19:48:11 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9637, awaiting HELLO
+[Thu Nov  5 19:48:11 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9639, awaiting HELLO
+[Thu Nov  5 19:48:11 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40008, awaiting HELLO
+[Thu Nov  5 19:48:26 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9646, awaiting HELLO
+[Thu Nov  5 19:50:38 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40003, awaiting HELLO
+[Thu Nov  5 19:50:38 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=9662, awaiting HELLO
+[Thu Nov  5 19:50:38 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40001, awaiting HELLO
+[Thu Nov  5 19:50:38 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 19:50:38 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40004, awaiting HELLO
+[Thu Nov  5 19:53:06 2026] tbtun: unloaded
+[Thu Nov  5 23:04:24 2026] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[Thu Nov  5 23:04:32 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 23:09:21 2026] tbtun: unloaded
+[Thu Nov  5 23:15:45 2026] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[Thu Nov  5 23:15:51 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=40000, awaiting HELLO
+[Thu Nov  5 23:16:20 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:16:20 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:16:20 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:16:20 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:16:20 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:16:20 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:16:20 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:16:21 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:16:21 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:16:21 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:16:21 2026] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[Thu Nov  5 23:16:21 2026] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[Thu Nov  5 23:16:21 2026] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[Thu Nov  5 23:16:21 2026] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[Thu Nov  5 23:16:21 2026] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[Thu Nov  5 23:16:21 2026] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[Thu Nov  5 23:16:21 2026] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[Thu Nov  5 23:16:21 2026] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[Thu Nov  5 23:16:21 2026] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[Thu Nov  5 23:16:21 2026] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[Thu Nov  5 23:17:15 2026] tbtun: unloaded
+[Thu Nov  5 23:30:33 2026] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[Thu Nov  5 23:30:46 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30000, awaiting HELLO
+[Thu Nov  5 23:31:10 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:31:10 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:31:10 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:31:10 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:31:10 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:31:10 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:31:10 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:31:10 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:31:10 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Thu Nov  5 23:31:10 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Thu Nov  5 23:31:10 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Thu Nov  5 23:31:10 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Thu Nov  5 23:31:10 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Thu Nov  5 23:31:10 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Thu Nov  5 23:31:10 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Thu Nov  5 23:31:10 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Thu Nov  5 23:31:10 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Thu Nov  5 23:31:10 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Thu Nov  5 23:31:10 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Thu Nov  5 23:31:10 2026] tbtun: hole gatefail seq=1 mask=0x1 ack=1
+[Thu Nov  5 23:31:15 2026] tbtun: hole gatefail seq=5 mask=0x1 ack=5
+[Thu Nov  5 23:31:15 2026] tbtun: hole gatefail seq=5 mask=0x1 ack=5
+[Thu Nov  5 23:31:15 2026] tbtun: hole gatefail seq=5 mask=0x1 ack=5
+[Thu Nov  5 23:31:15 2026] tbtun: hole gatefail seq=5 mask=0x1 ack=5
+[Thu Nov  5 23:31:15 2026] tbtun: hole gatefail seq=5 mask=0x1 ack=5
+[Thu Nov  5 23:31:15 2026] tbtun: hole gatefail seq=5 mask=0x1 ack=5
+[Thu Nov  5 23:31:15 2026] tbtun: hole gatefail seq=5 mask=0x1 ack=5
+[Thu Nov  5 23:31:15 2026] tbtun: hole gatefail seq=5 mask=0x1 ack=5
+[Thu Nov  5 23:31:15 2026] tbtun: hole gatefail seq=5 mask=0x1 ack=5
+[Thu Nov  5 23:31:15 2026] tbtun: hole gatefail seq=5 mask=0x1 ack=5
+[Thu Nov  5 23:33:52 2026] tbtun: unloaded
+[Thu Nov  5 23:58:10 2026] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[Thu Nov  5 23:58:24 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30000, awaiting HELLO

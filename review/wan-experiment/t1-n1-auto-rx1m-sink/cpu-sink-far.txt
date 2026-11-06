@@ -1,0 +1,5 @@
+window 1793923138.515..1793923151.117 first_stream=1793923138.688 last_stream=1793923150.735
+before_cpu=cpu  698020 59021 761702 27475847 11530 0 64594 16869 0 0
+after_cpu=cpu  698231 59021 762142 27477617 11530 0 64630 16872 0 0
+delta user nice sys idle iowait irq softirq steal guest guest_nice = [211, 0, 440, 1770, 0, 0, 36, 3, 0, 0]
+busy_jiffies=687 total_jiffies=2460 cpu_pct=27.93

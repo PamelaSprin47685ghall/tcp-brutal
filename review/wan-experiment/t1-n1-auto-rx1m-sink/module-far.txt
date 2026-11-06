@@ -1,0 +1,4 @@
+path=/tmp/tbtun-t1-close/tbtun.ko
+sha256=9b06f5c4eb2b1f32ccdf35c7fe296b788eff1cd157724930309487c11acb0b13
+srcversion=62E75E1CE05E5C4887C9AAA
+vermagic=7.0.0-42-generic SMP preempt mod_unload modversions

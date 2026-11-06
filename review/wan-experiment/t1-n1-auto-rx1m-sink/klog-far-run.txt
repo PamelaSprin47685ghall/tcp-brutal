@@ -1,0 +1,32 @@
+[Thu Nov  5 23:58:10 2026] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[Thu Nov  5 23:58:24 2026] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30000, awaiting HELLO
+[Fri Nov  6 00:00:57 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Fri Nov  6 00:00:57 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Fri Nov  6 00:00:57 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Fri Nov  6 00:00:57 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Fri Nov  6 00:00:57 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Fri Nov  6 00:00:57 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Fri Nov  6 00:00:58 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Fri Nov  6 00:00:58 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Fri Nov  6 00:00:58 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Fri Nov  6 00:00:58 2026] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[Fri Nov  6 00:00:58 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Fri Nov  6 00:00:58 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Fri Nov  6 00:00:58 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Fri Nov  6 00:00:58 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Fri Nov  6 00:00:58 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Fri Nov  6 00:00:58 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Fri Nov  6 00:00:58 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Fri Nov  6 00:00:58 2026] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[Fri Nov  6 00:00:58 2026] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[Fri Nov  6 00:00:58 2026] tbtun: hole depthfail seq=1 g=1 mask=0x1
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4
+[Fri Nov  6 00:01:05 2026] tbtun: hole gatefail seq=4 mask=0x1 ack=4

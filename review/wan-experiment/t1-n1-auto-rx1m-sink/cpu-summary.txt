@@ -1,0 +1,22 @@
+=== sink window
+window 1793923138.266..1793923151.150 first_stream=1793923138.377 last_stream=1793923150.931
+before_cpu=cpu  20285215 13780 4915263 603260746 121854 1429139 618758 0 2633386 0
+after_cpu=cpu  20286947 13780 4915603 603279276 121854 1429200 618814 0 2633553 0
+delta user nice sys idle iowait irq softirq steal guest guest_nice = [1732, 0, 340, 18530, 0, 61, 56, 0, 167, 0]
+busy_jiffies=2189 total_jiffies=20719 cpu_pct=10.57
+window 1793923138.515..1793923151.117 first_stream=1793923138.688 last_stream=1793923150.735
+before_cpu=cpu  698020 59021 761702 27475847 11530 0 64594 16869 0 0
+after_cpu=cpu  698231 59021 762142 27477617 11530 0 64630 16872 0 0
+delta user nice sys idle iowait irq softirq steal guest guest_nice = [211, 0, 440, 1770, 0, 0, 36, 3, 0, 0]
+busy_jiffies=687 total_jiffies=2460 cpu_pct=27.93
+=== iperf3 window
+window 1793923258.310..1793923266.299 (run 1793923258.256..1793923266.330)
+before_cpu=cpu  20303244 13780 4918007 603431882 121880 1429655 619147 0 2636511 0
+after_cpu=cpu  20304304 13780 4918188 603443410 121880 1429686 619180 0 2636535 0
+delta user nice sys idle iowait irq softirq steal guest guest_nice = [1060, 0, 181, 11528, 0, 31, 33, 0, 24, 0]
+busy_jiffies=1305 total_jiffies=12833 cpu_pct=10.17
+window 1793923258.191..1793923266.309 (run 1793923258.256..1793923266.330)
+before_cpu=cpu  701956 59021 766417 27490580 11559 0 64699 16889 0 0
+after_cpu=cpu  702766 59021 766787 27490975 11559 0 64729 16890 0 0
+delta user nice sys idle iowait irq softirq steal guest guest_nice = [810, 0, 370, 395, 0, 0, 30, 1, 0, 0]
+busy_jiffies=1210 total_jiffies=1606 cpu_pct=75.34
