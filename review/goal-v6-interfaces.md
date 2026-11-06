@@ -739,6 +739,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **T5.1 已接受 `c435ba9`**：全局 `/proc/net/tbtun/ports` 写入/verify、v6 行去 legacy 键、端口保留告警反转、dry-run 提交；T5.2 等 G5。
 
+**T5.2 http-kal 部署变体（`w-hnd0 7d6139a`）**：新增 `--http-kal`/`--raw`；v6 config 支持 `profile=http-kal`（`n=4 m=4 fec=on mode=grouped w=0 carriers=256 crypto=on crypto_key=- profile=http-kal`）；dry-run `bash -n` OK、http-kal/raw 行正确、256→groups=32、全局 ports 在 config 前、服务 active、verify rc=0；未加载/未跑负载。等 T2 完成后执行 T5.2；T5.1 保持 c435ba9；不合并/push。
+
 ### G6 — T6 SC-LDPC 最终 + HND0 256-flow（D+E）
 
 | 项 | 内容 |
