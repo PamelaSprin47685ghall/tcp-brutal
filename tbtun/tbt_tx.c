@@ -2617,7 +2617,15 @@ ctl_fail:
                         set_bit(idx, fr->st->announced_mask);
                     }
                     if (WARN_ON_ONCE(!tbt_stream_announced(fr->st, c)))
+                    {
                         sess->dbg_announce_mismatch++;
+                        pr_info_ratelimited("tbtun: announce mismatch idx=%u gen=%u stored=%u bit=%d path=%u st=%llu\n",
+                                            idx, (unsigned)(c->gen & 0xf),
+                                            fr->st->announced_gen[idx],
+                                            test_bit(idx, fr->st->announced_mask),
+                                            fr->path,
+                                            (unsigned long long)fr->st->sid);
+                    }
                 }
                 else
                 {
