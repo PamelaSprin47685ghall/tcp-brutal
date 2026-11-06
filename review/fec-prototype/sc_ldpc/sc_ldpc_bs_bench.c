@@ -216,7 +216,7 @@ static timing time_bs(batch_ctx *b, sc_bs *bs, int reps)
     return t;
 }
 
-static int calibrate(batch_ctx *b, sc_bs *bs, int use_bs, int target_ms)
+static int calibrate(batch_ctx *b, sc_bs *bs, int use_bs, double target_sec)
 {
     double t0, t1, dt;
     int reps;
@@ -234,7 +234,7 @@ static int calibrate(batch_ctx *b, sc_bs *bs, int use_bs, int target_ms)
     dt = t1 - t0;
     if (dt < 1e-7)
         dt = 1e-7;
-    reps = (int)((double)target_ms / 1000.0 / dt);
+    reps = (int)(target_sec / dt);
     if (reps < 1)
         reps = 1;
     if (reps > 200000)
@@ -369,7 +369,7 @@ typedef struct {
     int batch;
     int threads;
     int model;
-    int reps_ms;
+    double bench_sec;
     int corr; /* all codewords share one erasure mask */
     uint64_t seed;
 } opts;
@@ -416,7 +416,7 @@ int main(int argc, char **argv)
     o.batch = 64;
     o.threads = 1;
     o.model = SC_MODEL_SYMMETRIC;
-    o.reps_ms = 200;
+    o.bench_sec = 0.2;
     o.seed = 1;
 
     for (i = 1; i < argc; i++) {
@@ -437,6 +437,8 @@ int main(int argc, char **argv)
             o.threads = (int)strtol(argv[++i], NULL, 10);
         else if (!strcmp(a, "--corr"))
             o.corr = 1;
+        else if (!strcmp(a, "--bench-sec") && i + 1 < argc)
+            o.bench_sec = strtod(argv[++i], NULL);
         else if (!strcmp(a, "--seed") && i + 1 < argc)
             o.seed = (uint64_t)strtoull(argv[++i], NULL, 10);
         else if (!strcmp(a, "--model") && i + 1 < argc) {
@@ -453,7 +455,7 @@ int main(int argc, char **argv)
             fprintf(stderr,
                     "usage: %s [--block N] [--L N] [--rate R] [--p P] "
                     "[--trials N] [--batch 64|128|256|512] [--threads 1|2] "
-                    "[--model sym|sys] [--corr] [--seed N]\n",
+                    "[--model sym|sys] [--corr] [--bench-sec S] [--seed N]\n",
                     argv[0]);
             return 2;
         }
@@ -506,8 +508,8 @@ int main(int argc, char **argv)
 
     /* ---- throughput --------------------------------------------- */
     {
-        int reps_s = calibrate(&b0, bs0, 0, o.reps_ms);
-        int reps_b = calibrate(&b0, bs0, 1, o.reps_ms);
+        int reps_s = calibrate(&b0, bs0, 0, o.bench_sec);
+        int reps_b = calibrate(&b0, bs0, 1, o.bench_sec);
         ts = time_scalar(&b0, reps_s);
         tb = time_bs(&b0, bs0, reps_b);
         {
@@ -530,8 +532,8 @@ int main(int argc, char **argv)
         ts2.mbps = 0.0;
         tb2.mbps = 0.0;
         if (o.threads == 2) {
-            int reps_s2 = calibrate(&b1, bs1, 0, o.reps_ms);
-            int reps_b2 = calibrate(&b1, bs1, 1, o.reps_ms);
+            int reps_s2 = calibrate(&b1, bs1, 0, o.bench_sec);
+            int reps_b2 = calibrate(&b1, bs1, 1, o.bench_sec);
             ts2.mbps = time_two_threads(&b0, bs0, &b1, bs1, 0, reps_s2);
             tb2.mbps = time_two_threads(&b0, bs0, &b1, bs1, 1, reps_b2);
         }
