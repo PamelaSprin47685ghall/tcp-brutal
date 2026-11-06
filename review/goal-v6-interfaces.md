@@ -641,6 +641,10 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **window-verify 重建（ddef988）**：clean rebuild HEAD `ddef988f…`，ko `/home/kunweiz/tbtun-worktrees/window/tbtun.ko` sha256 `c476bd48…`，size 6,071,368，`srcversion=62E75E1CE05E5C4887C9AAA`，vermagic `7.2.9-1-MANJARO`。A–K 运行中（`bg_670`）；随后 near 15/15、full adversarial（期望 91/91）、`host-test-san`；`writer_1g` 超时隔离复跑并分别报告。不合并/push，不碰 HND0。
 
+**T1 sink 门禁 PASS（`hnd0-n1b b3b33b2`）**：`SINK_BULK bytes=16777216 eof=1`；sender `SENDCLOSE_OK bytes=16777216 txq_after=1113052`（close 时队列非空）；near `fin_seq=16777216 fin_w=1 rst_w=0 rxf=1/1`、live `txq=0`；far `rx_delivered=16777216`、`deliver_timeouts=0`、`close_timeouts=0`、`close_detaches=0`、live `txq=0`。FIN 时序：near `fin_q=1 fin_w=0 txq=1036242` → drain 到 `txq=0` → `fin_w=1` → `rxf=1/1` detach；全程无 RST。两端同源 ddef988、`srcversion=62E75E1C`；CPU near 10.57%、far 27.93%。iperf3 `rc=0`，receiver 11,796,480 B 是 TEST_END close，不作 byte-exact。**T1 sink 门禁 PASS；G1 仍等 `window-verify` 的 A–K/near/full adversarial/SAN 才能判绿。** `hnd0-sink` 不要重复跑/覆盖该证据目录。
+
+**残余 accept wake race（`hnd0-sink` 独立复跑，ddef988）**：near HELLO 55B 写出、far 内核已收，但 far `rx_work_runs` 33s 不跑、sink 从未 accept；near `TXSTALLKILL ack=0 txseq=1114059 age=15.0s`、`fbk_rx=0`、`tx_ack=0`、`lost=1 replaced=1`；far `rx_read_bytes=55`、`c3 up=0 lost=2`、`fbk_tx=0`。同源 ddef988 的 hnd0-n1b 成功是**非必现**；符合 accept 侧 `sk_data_ready`/HELLO wake 竞态。A3 修 accept 侧唤醒；T1 需 **N=1 连续 5 次 5/5 sink 16MiB** 才算绿。
+
 **sink 测试就绪（`hnd0-n1b`）**：`sink.py`（accept 一次、读到 EOF、记录 bytes/expected/ok/secs）与 `send16m.py`（写满 16MiB、`shutdown(SHUT_WR)`、等 EOF）本地 loopback 验证 `16,777,216 B ok=1`；HND0 `/tmp/tbtun-sink/sink.py` `py_compile` 通过。下一轮证据目录 `review/wan-experiment/t1-n1-auto-rx1m-sink/`，保留 `a2a37ed` 的 iperf3 失败证据；等 `window-close`/A3 新 head。
 
 ### G2 — T2 FEC v6 + 256 carriers + 中间码（B）
