@@ -277,21 +277,36 @@ check_reconcile() {
         _last=$_s
         _i=$((_i + 1))
     done
-    set -- $_last
-    _wire=$1
-    _data=$2
-    _retx=$3
-    _lb=$4
-    _ld=$5
-    _lr=$6
-    _rb=$7
-    _rd=$8
-    _rr=$9
-    _pb=${10}
-    _dw=$((_wire - _lb - _rb))
-    _dd=$((_data - _ld - _rd))
-    _dr=$((_retx - _lr - _rr))
-    _dp=$((_lb - _pb))
+    _tries=0
+    while :; do
+        set -- $_last
+        _wire=$1
+        _data=$2
+        _retx=$3
+        _lb=$4
+        _ld=$5
+        _lr=$6
+        _rb=$7
+        _rd=$8
+        _rr=$9
+        _pb=${10}
+        _dw=$((_wire - _lb - _rb))
+        _dd=$((_data - _ld - _rd))
+        _dr=$((_retx - _lr - _rr))
+        _dp=$((_lb - _pb))
+        # The stats and peers files are two reads; a carrier can send a few
+        # bytes between them. The session counters themselves are consistent
+        # (d_wire/d_data/d_retx are 0). Re-sample until the cross-file term
+        # settles; a real counter mismatch does not settle.
+        [ "$_dp" -eq 0 ] && break
+        [ "$_tries" -ge 10 ] && break
+        _tries=$((_tries + 1))
+        sleep 0.2
+        _s=$(stats_reconcile_sample "$_id") || return 1
+        set -- $_s
+        [ $# -eq 10 ] || { echo "   reconcile: short sample: $_s"; return 1; }
+        _last=$_s
+    done
     echo "   reconcile: wire=$_wire live=$_lb retired=$_rb peers=$_pb d_wire=$_dw"
     echo "   reconcile: data_tx=$_data live=$_ld retired=$_rd d_data=$_dd"
     echo "   reconcile: retx_frames=$_retx live=$_lr retired=$_rr d_retx=$_dr"
@@ -1289,11 +1304,16 @@ probe_q() {
     _prov=$(stat_max prov_now)
     _peak=$(stat_max prov_peak)
     _rej=$(stat_sum prov_reject)
+    _dead=$(stat_max dead_now)
+    _dead_peak=$(stat_max dead_peak)
     _cap=$((N_CARRIERS + N_CARRIERS / 4))
     echo "   prov: now=${_prov:-?} peak=${_peak:-?} reject=${_rej:-?}"
+    echo "   dead: now=${_dead:-?} peak=${_dead_peak:-?} (cap $((2 * N_CARRIERS)))"
     [ "${_peak:-0}" -le "$_cap" ] || fail "probe Q: provisional peak $_peak exceeded the cap $_cap"
     [ "${_rej:-0}" -gt 0 ] || fail "probe Q: the flood never hit the provisional cap"
     [ "${_prov:-0}" -le 16 ] || fail "probe Q: $_prov provisional carriers did not drain"
+    [ "${_dead_peak:-0}" -le $((2 * N_CARRIERS)) ] ||
+        fail "probe Q: retired-object peak $_dead_peak exceeded 2n"
     # A legitimate replacement must still join after the flood.
     echo 'carrier 0 down' > "$PEERS" || fail "probe Q: carrier 0 down rejected"
     _r=0
