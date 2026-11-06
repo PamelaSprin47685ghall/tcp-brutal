@@ -2193,6 +2193,24 @@ int tbt_tx_pump(struct tbt_session *sess)
                             continue;
                         }
                     }
+                    if (type == TBT_F_DATA)
+                    {
+                        /* A DATA frame is sequence-addressed, not
+                         * path-addressed: the receiver dedups by seq, so a copy
+                         * pinned to a replaced carrier can simply go out on
+                         * whatever path the scheduler picks now. Dropping it
+                         * instead is how a carrier replacement turned into a
+                         * hole that never filled -- the near read bytes off the
+                         * new carriers while rx_delivered stayed at zero
+                         * (measured on the WAN: 62 replacements, rx_read
+                         * growing, rx_delivered=0, holes_unrecoverable=2). */
+                        fr->path = 0xff;
+                        fr->gen = 0;
+                        fr->retry_at_ns = 0;
+                        sess->ctl_requeue++;
+                        tbt_tx_enqueue(sess, fr, false);
+                        continue;
+                    }
                     goto drop;
                 }
                 if (type == TBT_F_HELLO)
