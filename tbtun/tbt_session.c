@@ -1242,6 +1242,7 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     cancel_work_sync(&s->w_replace);
     cancel_delayed_work_sync(&s->w_fec_tx);
     tbt_fec_data_free(s);
+    tbt_crypto_pair_wipe(&s->crypto_ctx);
     put_net(s->net);
     kfree(s);
 }
