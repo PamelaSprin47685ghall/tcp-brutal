@@ -1041,6 +1041,7 @@ int tbt_session_create(struct tbt_tunnel *t)
     refcount_set(&s->refs, 1);
     spin_lock_init(&s->lock);
     spin_lock_init(&s->tx_lock);
+    spin_lock_init(&s->dial_lock);
     mutex_init(&s->pump_lock);
     INIT_LIST_HEAD(&s->tx_q);
     INIT_LIST_HEAD(&s->prov);
@@ -1335,6 +1336,16 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
         spin_unlock(&sess->lock);
         return -EALREADY;
     }
+    /* The retired-object pool is a hard cap. A new carrier reuses an entry,
+     * so in the normal replacement loop this never triggers; if it does, the
+     * join is refused and the peer retries after a reuse or the release
+     * drain has made room. -ENOSPC is a protocol error to the caller, not
+     * -EAGAIN, which tbt_car_rx_work would treat as a full delivery ring. */
+    if (old && old != c && sess->n_dead >= 2 * sess->n_car)
+    {
+        spin_unlock(&sess->lock);
+        return -ENOSPC;
+    }
     sess->car[index] = c;
     c->index = index;
     c->spare = index >= sess->n_pri;
@@ -1355,7 +1366,11 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
         /* The replaced carrier is on no list once joined; put it on the
          * graveyard so carriers_stop/w_replace retire its socket and port. */
         if (list_empty(&old->node))
+        {
             list_add_tail(&old->node, &sess->dead);
+            if (++sess->n_dead > sess->dead_peak)
+                sess->dead_peak = sess->n_dead;
+        }
         /* The socket release sleeps, and this runs under the carrier's
          * socket lock, so it cannot happen here. w_replace drains this list
          * in bounded batches instead of re-walking all of `dead` every pass. */
