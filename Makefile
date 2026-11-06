@@ -12,7 +12,7 @@ SRCS            := Makefile \
                    tbtun/tbt_core.c tbtun/tbt_session.c tbtun/tbt_procfs.c tbtun/tbt_listen.c \
                    tbtun/tbt_carrier.c tbtun/tbt_sock.c tbtun/tbt_tx.c tbtun/tbt_rx.c \
                    tbtun/tbt_parse.c tbtun/tbt_proto.c tbtun/tbt_rec.c tbtun/tbt_http.c \
-                   tbtun/tbt_fec.c tbtun/tbt_portmap.c \
+                   tbtun/tbt_fec.c tbtun/tbt_fec_data.c tbtun/tbt_portmap.c \
                    scripts/mkdkmsconf.sh scripts/install_dkms.sh \
                    .clang-format
 FORMAT_SRCS     := $(filter %.c %.h,$(SRCS))
@@ -57,7 +57,7 @@ obj-m           += tbtun.o
 tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
                    tbtun/tbt_listen.o tbtun/tbt_proto.o tbtun/tbt_carrier.o \
                    tbtun/tbt_sock.o tbtun/tbt_tx.o tbtun/tbt_rx.o tbtun/tbt_rec.o \
-                   tbtun/tbt_parse.o tbtun/tbt_http.o tbtun/tbt_portmap.o tbtun/tbt_fec.o
+                   tbtun/tbt_parse.o tbtun/tbt_http.o tbtun/tbt_portmap.o tbtun/tbt_fec.o tbtun/tbt_fec_data.o
 
 ccflags-y       := -std=gnu99 -I$(src)/tbtun
 

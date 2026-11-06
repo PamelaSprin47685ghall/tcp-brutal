@@ -95,7 +95,18 @@ body 长度必须是 12 的倍数；最多 `TBT_FEC_PAYLOAD_MAX / 12` 项。
 - poll 合并：session 级 50 ms 一次遍历所有 carrier；不再每 carrier 一个 delayed work。保留 provisional join deadline、connect 重试、stall/lost 检测、queue re-arm 和 `poll_rescues` 计数。
 - procfs `peers` 每 carrier 一行，256 行由 seq_file 动态增长；不分配固定 16 行缓冲。
 
-## 4. Host RLNC / grouped codec
+## 4. FEC 数据面（T2 中间版）
+
+`tbtun/tbt_fec_data.c` 把 host codec 接到载体层。当前范围是 **raw/http-kal、单组、256 share 上限**：
+
+- 每 block 有 n 个 DATA share + m 个 PARITY share；DATA share i 走 carrier i，PARITY share n+r 走 carrier n+r。`carriers == n+m`，即 1 share/carrier。
+- TX：capture 只把字节复制进 256 KiB ring（softirq 安全），`w_fec_tx` 在进程上下文切包、编码、写记录。每 block 用 `nonce ^ block_id*golden` 复用预分配 codec。
+- RX：40 B 记录先校验 header CRC，再校验 payload CRC；payload CRC 失败只丢该记录，header/framing 失败关闭 carrier。完整 block 按 block 顺序交付，避免在字节流里制造空洞。
+- 控制帧：ACK 16 B；控制记录排在同一条 carrier 的 data 之前，但只在整记录边界发送；`tbt_carrier_send_raw()` 部分写返回 `-EIO`，调用方整记录重试/丢弃，不插队。
+- 内存：RX block 槽按 16 MiB 上限动态取 `slots`（小 n 多槽，256 share 8 槽）；TX ring 256 KiB + n×S block + m×S parity。
+- `fec=on` 在 `profile=raw` 和 `profile=http-kal` 下都会建会话；HTTP 容器中一个 chunk body 恰好是一条 40 B FEC 记录，请求行/头/chunked 分帧明文，ChaCha8 只加密 body。`carriers != n+m`（grouped 数据面）仍返回 `-EOPNOTSUPP`。
+
+## 5. Host RLNC / grouped codec
 
 `tbtun/tbt_fec.c` 是 host/kernel 双编译的纯函数：
 
@@ -121,15 +132,15 @@ SC-LDPC：`TBT_FEC_CODEC_SC_LDPC` 是保留值；`tbt_fec_params_check()` 目前
 
 ChaCha8 密钥：按用户裁决走 **HELLO v6 body**（T0 §2.3），FEC_CFG 保持 32 B，不新增 0x36。B 不在 FEC 头/控制帧里携带 key；C 负责 HELLO body 扩展。
 
-## 5. 与 A/C/D 的交接
+## 6. 与 A/C/D 的交接
 
 - **A（w-window / tbt_tx.c、tbt_rx.c）**：本分支不改 `tbt_tx.c`/`tbt_rx.c`。载体层 poll 合并和 256 槽数组会改变 `tbtun.h` 的 `TBT_MAX_CARRIERS_LIMIT`，合并时以 A 的 N=1 修复为准；旧 ARQ 的 16 槽语义不变。
-- **C（载体/HTTP/控制面/crypto）**：新 FEC 记录走现有 `tbt_carrier_send()` 的整记录写入；部分写返回 `-EIO`，调用方必须整记录重试或丢弃，不能在中间插入控制帧。`tbt_parse.c` 新增 `fec=off|on`、`mode=`、`w=`、`carriers=`；`fec=on` 在 FEC 数据面落地前返回 `-EOPNOTSUPP`。
+- **C（载体/HTTP/控制面/crypto）**：FEC 记录走 `tbt_carrier_send_fec()`：raw 直接写 40 B 记录，http-kal 写一个 chunk body。部分写返回 `-EIO`，调用方整记录重试/丢弃，不在中间插入控制帧。`tbt_parse.c` 新增 `fec=off|on`、`mode=`、`w=`、`carriers=`。
 - **C 的 ChaCha8 钩子**：TX 用 `tbt_fec_hdr_seal(h, plaintext)` 后 `tbt_crypto_body_xor(ctx, h->seq, h->type==PARITY, payload, h->payload_len)`；RX 先 `body_xor` 再 `tbt_fec_hdr_verify`。只对 DATA/PARITY；控制帧跳过。key 走 HELLO v6 body（T0 §2.3），FEC_CFG/40B header 不携带 key。
 - **方向隔离**：每端为自己的 TX 生成独立 `crypto_nonce[8]`，填进自己的 HELLO v6 body +26；RX 用对端 HELLO 的 nonce。session 维护 tx/rx 两个 `tbt_crypto_ctx`：FEC 层用本地 nonce 初始化 tx ctx、用对端 nonce 初始化 rx ctx，绝不复用一个 ctx 同时 seal/open。B 不实现 HELLO 或 crypto ctx；B 的 `tbt_fec.c` 只接收 C 传入的两个 ctx，不改 wire/ABI。
 - **D（SC-LDPC）**：保留 `TBT_FEC_CODEC_SC_LDPC` 和 `tbt_fec_params` 的 codec 字段；D 提供 encode/decode 与参数选择，复用同一 40 B header 和控制帧。不要在 `FEC_CFG` 里加 key；ChaCha8 密钥属于 session/HELLO 层，需另行冻结。
 
-## 6. 验证
+## 7. 验证
 
 - `make host-test`：header/CRC/bitmap/控制帧/RLNC/grouped/动态参数/partial-DATA framing。
 - `make host-test-san`：ASan/UBSan。

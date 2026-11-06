@@ -194,6 +194,12 @@ void tbt_fec_rlnc_free(struct tbt_fec_rlnc *ctx);
 
 u32 tbt_fec_rlnc_parity_count(const struct tbt_fec_rlnc *ctx, u32 L);
 
+/* Change the PRNG nonce in place. The data plane derives one nonce per block
+ * (base ^ block_id*golden) and reuses a preallocated context, so encode/decode
+ * never allocates after bind. */
+void tbt_fec_rlnc_set_nonce(struct tbt_fec_rlnc *ctx, u64 nonce);
+u64 tbt_fec_rlnc_nonce(const struct tbt_fec_rlnc *ctx);
+
 /* Fill idx[0..d-1] with distinct positions in [0, w). Returns d, or 0 on a
  * bad argument. */
 u32 tbt_fec_rlnc_coeffs(const struct tbt_fec_rlnc *ctx, u32 g, u32 r, u32 *idx,

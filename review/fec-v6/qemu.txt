@@ -1,4 +1,4 @@
-$ TBT_HOSTFWD_PORT=29101 tests/qemu/run.sh --ko $PWD/tbtun.ko --timeout 180 --log /tmp/qemu-full.log
+$ TBTUN_BUILD=/tmp/tbtun-fec-cache TBT_HOSTFWD_PORT=29101 flock /tmp/tbtun-qemu.lock tests/qemu/run.sh --ko $PWD/tbtun.ko --probes A..M --timeout 400 --log /tmp/qemu-fec-final6.log
 TBT_PROBE_RESULT A PASS
 TBT_PROBE_RESULT B PASS
 TBT_PROBE_RESULT C PASS
@@ -10,8 +10,5 @@ TBT_PROBE_RESULT H PASS
 TBT_PROBE_RESULT I PASS
 TBT_PROBE_RESULT J PASS
 TBT_PROBE_RESULT K PASS
-
-$ TBT_HOSTFWD_PORT=29101 tests/qemu/run.sh --ko $PWD/tbtun.ko --probes A,B,C --timeout 120 --log /tmp/qemu-abc2.log
-TBT_PROBE_RESULT A PASS
-TBT_PROBE_RESULT B PASS
-TBT_PROBE_RESULT C PASS
+TBT_PROBE_RESULT L PASS
+TBT_PROBE_RESULT M PASS

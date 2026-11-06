@@ -49,7 +49,7 @@
 static struct proto tbt_tcp_prot __ro_after_init;
 
 static void tbt_car_connect_work(struct work_struct *w);
-static int tbt_carrier_send(struct tbt_carrier *c, const void *data, size_t len);
+int tbt_carrier_send_raw(struct tbt_carrier *c, const void *data, size_t len);
 static void tbt_pump_work(struct work_struct *w);
 
 /* The effective container for a slot. The M spares of an http-kal tunnel use
@@ -142,6 +142,8 @@ static void tbt_car_write_space(struct sock *sk)
         rcu_read_unlock();
     }
     schedule_work(&c->w_tx);
+    if (c->sess->fec)
+        schedule_work(&c->sess->w_fec_tx.work);
     read_unlock_bh(&sk->sk_callback_lock);
 }
 
@@ -429,7 +431,7 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
             char b[TBT_HTTP_DRIP_CHUNK_LEN];
             size_t n = tbt_http_drip_chunk(b, sizeof(b));
 
-            if (n && !tbt_carrier_send(c, b, n))
+            if (n && !tbt_carrier_send_raw(c, b, n))
             {
                 c->last_tx_ns = ktime_get_ns();
                 atomic64_inc(&sess->drip_tx);
@@ -478,6 +480,8 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
     rcu_read_unlock();
     if (rescued)
         atomic64_inc(&sess->poll_rescues);
+    if (sess->fec)
+        schedule_work(&sess->w_fec_tx.work);
 }
 
 /* The session's liveness pass: every carrier slot, then every provisional
@@ -696,7 +700,7 @@ static void tbt_car_rx_work(struct work_struct *w)
 
 /* One non-blocking write of a byte range on a carrier. -EAGAIN means the
  * carrier's TCP buffer is full and the caller must retry later. */
-static int tbt_carrier_send(struct tbt_carrier *c, const void *data, size_t len)
+int tbt_carrier_send_raw(struct tbt_carrier *c, const void *data, size_t len)
 {
     struct msghdr msg = {};
     struct kvec iov = { .iov_base = (void *)data, .iov_len = len };
@@ -754,6 +758,121 @@ static void tbt_http_capture_chunk(struct tbt_session *sess, const char *chunk, 
     WRITE_ONCE(sess->http_cap_chunk_len, (u16)cap);
 }
 
+/* Start the HTTP container for this carrier if it has not started yet. The
+ * near side writes the request block, the far side the response block; a far
+ * carrier waits until the request header has been parsed. Returns 0, -EAGAIN
+ * when the far side is not ready, or a negative write error. */
+static int tbt_carrier_http_begin(struct tbt_carrier *c)
+{
+    struct tbt_session *sess = c->sess;
+    char *hdr;
+    size_t hlen;
+    int err;
+
+    mutex_lock(&c->http_lock);
+    if (c->http_started)
+    {
+        mutex_unlock(&c->http_lock);
+        return 0;
+    }
+    /* 8 KiB on the stack trips -Wframe-larger-than; the caller is sleepable,
+     * so allocate. */
+    hdr = kmalloc(TBT_HTTP_REQ_MAX, GFP_KERNEL);
+    if (!hdr)
+    {
+        mutex_unlock(&c->http_lock);
+        return -ENOMEM;
+    }
+    if (sess->tunnel->cfg.role == TBT_ROLE_FAR && !c->http_req_done)
+    {
+        kfree(hdr);
+        mutex_unlock(&c->http_lock);
+        return -EAGAIN;
+    }
+    hlen = tbt_http_header_build(c, hdr, TBT_HTTP_REQ_MAX);
+    if (!hlen)
+    {
+        kfree(hdr);
+        mutex_unlock(&c->http_lock);
+        atomic64_inc(&sess->http_parse_err);
+        return -EIO;
+    }
+    if (sess->tunnel->cfg.role == TBT_ROLE_NEAR && c->index == 0)
+    {
+        size_t cap = min_t(size_t, hlen, sizeof(sess->http_cap_req));
+
+        memcpy(sess->http_cap_req, hdr, cap);
+        WRITE_ONCE(sess->http_cap_req_len, (u16)cap);
+    }
+    err = tbt_carrier_send_raw(c, hdr, hlen);
+    kfree(hdr);
+    if (err)
+    {
+        mutex_unlock(&c->http_lock);
+        return err;
+    }
+    c->http_started = true;
+    c->last_tx_ns = ktime_get_ns();
+    c->tx_bytes += hlen;
+    sess->carrier_bytes += hlen;
+    if (sess->tunnel->cfg.role == TBT_ROLE_NEAR)
+        sess->http_req++;
+    else
+        sess->http_resp++;
+    mutex_unlock(&c->http_lock);
+    return 0;
+}
+
+/* Write one FEC record. raw profile sends the 40-byte record directly; the
+ * HTTP profile wraps exactly this record in one chunk, so the request line,
+ * headers and chunk framing stay plaintext while the body is the FEC record
+ * (and may be encrypted by the crypto layer before it reaches here). */
+int tbt_carrier_send_fec(struct tbt_carrier *c, const u8 *rec, size_t len)
+{
+    struct tbt_session *sess;
+    char *buf;
+    size_t n;
+    int err;
+
+    if (!c || !c->sk)
+        return -ENOTCONN;
+    sess = c->sess;
+    if (c->profile == 3)
+    {
+        err = tbt_carrier_send_raw(c, rec, len);
+        if (!err)
+        {
+            c->tx_frames++;
+            c->tx_bytes += len;
+            c->last_tx_ns = ktime_get_ns();
+            sess->carrier_bytes += len;
+        }
+        return err;
+    }
+    err = tbt_carrier_http_begin(c);
+    if (err)
+        return err;
+    buf = kmalloc(TBT_HTTP_FEC_FRAME_MAX, GFP_KERNEL);
+    if (!buf)
+        return -ENOMEM;
+    n = tbt_http_fec_chunk_encode(buf, TBT_HTTP_FEC_FRAME_MAX, rec, len);
+    if (!n)
+    {
+        kfree(buf);
+        atomic64_inc(&sess->http_parse_err);
+        return -EIO;
+    }
+    err = tbt_carrier_send_raw(c, buf, n);
+    kfree(buf);
+    if (err)
+        return err;
+    c->tx_frames++;
+    c->tx_bytes += n;
+    c->last_tx_ns = ktime_get_ns();
+    sess->carrier_bytes += n;
+    return 0;
+}
+
 // Write one whole record. Backpressure is the caller's problem: tbt_tx only
 // calls this while sk_wmem_queued is below the high-water mark.
 int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt_frame *fr)
@@ -804,50 +923,11 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
         struct tbt_http_out out;
         size_t n;
 
-        if (!c->http_started)
-        {
-            /* 8 KiB on the stack trips -Wframe-larger-than; the pump is
-             * sleepable, so allocate. */
-            char *hdr = kmalloc(TBT_HTTP_REQ_MAX, GFP_KERNEL);
-            size_t hlen;
+        err = tbt_carrier_http_begin(c);
+        if (err)
+            return err;
 
-            if (!hdr)
-                return -ENOMEM;
-            if (sess->tunnel->cfg.role == TBT_ROLE_FAR && !c->http_req_done)
-            {
-                kfree(hdr);
-                return -EAGAIN;
-            }
-            hlen = tbt_http_header_build(c, hdr, TBT_HTTP_REQ_MAX);
-            if (!hlen)
-            {
-                kfree(hdr);
-                atomic64_inc(&sess->http_parse_err);
-                return -EIO;
-            }
-            /* /proc/net/tbtun/http keeps the near side's carrier 0 segment:
-             * one direction each, not a full duplex transcript. The length is
-             * published after the bytes so a reader that sees it has them. */
-            if (sess->tunnel->cfg.role == TBT_ROLE_NEAR && c->index == 0)
-            {
-                size_t cap = min_t(size_t, hlen, sizeof(sess->http_cap_req));
 
-                memcpy(sess->http_cap_req, hdr, cap);
-                WRITE_ONCE(sess->http_cap_req_len, (u16)cap);
-            }
-            err = tbt_carrier_send(c, hdr, hlen);
-            kfree(hdr);
-            if (err)
-                return err;
-            c->http_started = true;
-            c->last_tx_ns = ktime_get_ns();
-            c->tx_bytes += hlen;
-            sess->carrier_bytes += hlen;
-            if (sess->tunnel->cfg.role == TBT_ROLE_NEAR)
-                sess->http_req++;
-            else
-                sess->http_resp++;
-        }
         h.body_len = fr->len;
         out.hdr = &h;
         out.body = fr->len ? fr->data : NULL;
@@ -861,7 +941,7 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
         }
         if (sess->tunnel->cfg.role == TBT_ROLE_NEAR && c->index == 0)
             tbt_http_capture_chunk(sess, c->http_tx, n);
-        err = tbt_carrier_send(c, c->http_tx, n);
+        err = tbt_carrier_send_raw(c, c->http_tx, n);
         if (err)
             return err;
         c->tx_frames++;
@@ -1048,6 +1128,7 @@ struct tbt_carrier *tbt_carrier_new(struct tbt_session *sess, u8 index)
     c->class = sess->tunnel ? sess->tunnel->cfg.profile : 1;
     c->join_deadline_ns = ktime_get_ns() + (u64)TBT_JOIN_TIMEOUT_MS * NSEC_PER_MSEC;
     c->last_una_move_ns = ktime_get_ns();
+    mutex_init(&c->http_lock);
     INIT_WORK(&c->w_connect, tbt_car_connect_work);
     INIT_WORK(&c->w_rx, tbt_car_rx_work);
     INIT_WORK(&c->w_tx, tbt_car_tx_work);
@@ -1811,6 +1892,8 @@ void tbt_target_work_fn(struct work_struct *w)
     tbt_stream_put(st);
     return;
 fail:
+    pr_debug("tbtun: tunnel %llu target connect failed err=%d\n",
+             (unsigned long long)t->cfg.id, err);
     WRITE_ONCE(st->target_started, false);
 out:
     tbt_stream_put(st);

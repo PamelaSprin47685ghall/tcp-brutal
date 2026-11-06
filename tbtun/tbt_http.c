@@ -730,7 +730,7 @@ size_t tbt_http_chunk_hdr(char *buf, size_t cap, size_t body_len)
     char tmp[TBT_HTTP_CHUNK_HDR_MAX];
     size_t n = 0, i;
 
-    if (!buf || body_len > TBT_CHUNK_MAX)
+    if (!buf || body_len > TBT_FEC_REC_MAX)
         return 0;
 
     /* Lowercase hex, most significant digit first, no leading zeros. */
@@ -882,7 +882,7 @@ size_t tbt_http_chunk_feed(struct tbt_http_chunk_parser *p, const u8 *buf, size_
                 if (v < 0)
                     goto bad;
                 p->size = p->size * 16 + (u32)v;
-                if (p->size > TBT_CHUNK_MAX)
+                if (p->size > TBT_FEC_REC_MAX)
                     goto bad;
                 p->digits++;
                 i++;
@@ -1088,6 +1088,131 @@ size_t tbt_http_frame_encode(char *buf, size_t cap, const struct tbt_http_out *o
     if (!tbt_http_chunk_tail(buf + n + rec_len, cap - n - rec_len))
         return 0;
     return n + rec_len + 2;
+}
+
+size_t tbt_http_fec_chunk_encode(char *buf, size_t cap, const u8 *rec,
+                                 size_t rec_len)
+{
+    size_t n;
+
+    if (!buf || !rec || rec_len < TBT_FEC_HDR_LEN || rec_len > TBT_FEC_REC_MAX)
+        return 0;
+    n = tbt_http_chunk_hdr(buf, cap, rec_len);
+    if (!n || n + rec_len + 2 > cap)
+        return 0;
+    memcpy(buf + n, rec, rec_len);
+    if (!tbt_http_chunk_tail(buf + n + rec_len, cap - n - rec_len))
+        return 0;
+    return n + rec_len + 2;
+}
+
+/* FEC-over-HTTP receiver: one chunk body is one 40-byte record. The HTTP
+ * header block and chunk framing are parsed by the same chunk parser; the
+ * 32-byte record checks in tbt_http_frame_decode do not apply. */
+size_t tbt_http_fec_frame_decode(struct tbt_http_rx *rx, const u8 *buf, size_t len,
+                                 const u8 **rec, size_t *rec_len, int *err)
+{
+    size_t used = 0;
+
+    if (rec)
+        *rec = NULL;
+    if (rec_len)
+        *rec_len = 0;
+    if (err)
+        *err = TBT_RX_NEED_MORE;
+    if (!rx || !rec || !rec_len || !err || (!buf && len))
+    {
+        if (err)
+            *err = TBT_RX_PROTO;
+        return 0;
+    }
+    if (rx->chunk.state == TBT_HTTP_CHUNK_DONE)
+        return 0;
+
+    for (;;)
+    {
+        const u8 *body = NULL;
+        size_t blen = 0, n;
+        int cerr;
+
+        if (used >= len)
+            return used;
+        n = tbt_http_chunk_feed(&rx->chunk, buf + used, len - used, &body, &blen,
+                                &cerr);
+        if (cerr == TBT_HTTP_PROTO)
+        {
+            *err = TBT_RX_PROTO;
+            return 0;
+        }
+        if (cerr == TBT_HTTP_NEED_MORE)
+            return used + n;
+        if (rx->chunk.state == TBT_HTTP_CHUNK_DONE)
+            return used + n;
+        used += n;
+
+        if (!rx->chunk_started)
+        {
+            rx->chunk_started = true;
+            rx->chunk_size = rx->chunk.chunk_size;
+            rx->rec_len = 0;
+        }
+        if (blen)
+        {
+            if (rx->rec_len + blen > sizeof(rx->rec))
+            {
+                *err = TBT_RX_PROTO;
+                return 0;
+            }
+            memcpy(rx->rec + rx->rec_len, body, blen);
+            rx->rec_len += (u32)blen;
+        }
+        if (rx->chunk.state == TBT_HTTP_CHUNK_DATA_END)
+        {
+            if (rx->rec_len == rx->chunk_size)
+            {
+                bool ok = false;
+
+                if (rx->chunk_size >= TBT_FEC_HDR_LEN &&
+                    rx->rec[0] >= TBT_FEC_DATA && rx->rec[0] <= TBT_FEC_FBK)
+                {
+                    u16 plen = (u16)(rx->rec[TBT_FEC_H_PAYLEN] |
+                                     ((u16)rx->rec[TBT_FEC_H_PAYLEN + 1] << 8));
+
+                    ok = plen <= TBT_FEC_PAYLOAD_MAX &&
+                         TBT_FEC_HDR_LEN + (size_t)plen == rx->rec_len;
+                }
+                else if (rx->chunk_size >= TBT_HDR_LEN)
+                {
+                    /* HELLO/OPEN/FIN/RST and PAD keep the old 32-byte record
+                     * and share the container with FEC chunks. */
+                    struct tbt_hdr h;
+
+                    tbt_hdr_decode(rx->rec, &h);
+                    ok = !tbt_hdr_check(&h) &&
+                         TBT_HDR_LEN + (size_t)h.body_len == rx->rec_len;
+                }
+                if (ok)
+                {
+                    *rec = rx->rec;
+                    *rec_len = rx->rec_len;
+                    *err = TBT_RX_OK;
+                    rx->chunk_started = false;
+                    rx->rec_len = 0;
+                    return used;
+                }
+            }
+            /* Drip (1 byte) is skipped; a chunk that claims a record size
+             * but carries neither a valid FEC nor a valid old record is a
+             * framing error and closes the carrier. */
+            if (rx->chunk_size >= TBT_HDR_LEN)
+            {
+                *err = TBT_RX_PROTO;
+                return 0;
+            }
+            rx->chunk_started = false;
+            rx->rec_len = 0;
+        }
+    }
 }
 
 size_t tbt_http_frame_decode(struct tbt_http_rx *rx, const u8 *buf, size_t len,

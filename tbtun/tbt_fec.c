@@ -658,6 +658,17 @@ void tbt_fec_rlnc_free(struct tbt_fec_rlnc *ctx)
     tbt_fec_free(ctx);
 }
 
+void tbt_fec_rlnc_set_nonce(struct tbt_fec_rlnc *ctx, u64 nonce)
+{
+    if (ctx)
+        ctx->nonce = nonce;
+}
+
+u64 tbt_fec_rlnc_nonce(const struct tbt_fec_rlnc *ctx)
+{
+    return ctx ? ctx->nonce : 0;
+}
+
 u32 tbt_fec_rlnc_parity_count(const struct tbt_fec_rlnc *ctx, u32 L)
 {
     if (!ctx || !L)

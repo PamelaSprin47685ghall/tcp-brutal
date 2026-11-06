@@ -285,6 +285,15 @@ int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
     u64 seq;
     int i, queued = 0, err = 0;
 
+    /* FEC: put the last short packet on the wire before FIN names its end.
+     * If the packetizer or a carrier is not ready, ask the close path to
+     * retry instead of sending FIN ahead of the data. */
+    if (sess->fec)
+    {
+        tbt_fec_tx_flush(st);
+        if (!tbt_fec_tx_idle(st))
+            return 0;
+    }
     spin_lock(&sess->tx_lock);
     /* Freeze the offset once: a retry must name the same byte, even if a late
      * capture submitted more DATA after the first request. */
@@ -2714,6 +2723,8 @@ size_t tbt_tx_submit(struct tbt_stream *st, struct sk_buff *skb, unsigned int of
     size_t done = 0;
 
     atomic64_inc(&sess->tx_submit_calls);
+    if (sess->fec)
+        return tbt_fec_tx_submit(st, skb, off, len);
 
     while (done < len)
     {
@@ -2861,6 +2872,8 @@ static u8 tbt_rx_state(struct tbt_stream *st)
 
 int tbt_tx_fbk(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
 {
+    if (sess->fec)
+        return 0; /* FEC has its own ACK/FBK records */
     u8 body[TBT_FBK_MAX];
     u32 nr = 0;
     u16 mask = 0;
@@ -2966,6 +2979,8 @@ void tbt_fbk_kick(struct tbt_session *sess, bool now)
 
 int tbt_tx_sack(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
 {
+    if (sess->fec)
+        return 0;
     struct tbt_frame *fr;
     u8 state = tbt_rx_state(st);
 

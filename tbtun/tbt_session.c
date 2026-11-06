@@ -1006,18 +1006,6 @@ int tbt_session_create(struct tbt_tunnel *t)
     struct tbt_session *s;
     int err;
 
-    /* FEC is part of the grammar so an operator can write the line and read it
-     * back, but its data plane is not merged. Refuse the session before it
-     * allocates a carrier, and say why. A refusal is a failed tunnel line, not
-     * a half-created session: tbt_tunnel_add() undoes the listener and drops
-     * the tunnel. */
-    if (t->cfg.fec)
-    {
-        pr_info("tbtun: tunnel %llu requests fec=on; the FEC data plane is not merged\n",
-                (unsigned long long)t->cfg.id);
-        return -EOPNOTSUPP;
-    }
-
     s = kzalloc(sizeof(*s), GFP_KERNEL);
     if (!s)
         return -ENOMEM;
@@ -1080,6 +1068,18 @@ int tbt_session_create(struct tbt_tunnel *t)
                      (unsigned long long)t->cfg.id);
     s->sid_prefix = get_random_u32() & 0xffff; // 16 random bits (§3.6)
     s->next_sid = 0;                           // monotonic 24-bit counter
+    if (t->cfg.fec)
+    {
+        /* FEC v6 works in both containers: raw records, or one 40-byte record
+         * per HTTP chunk with the request/response headers plaintext. The
+         * data plane is one group in this cut; grouped remains -EOPNOTSUPP. */
+        err = tbt_fec_data_init(s);
+        if (err)
+        {
+            kfree(s);
+            return err;
+        }
+    }
     t->sess = s;
     err = tbt_carriers_start(t, s);
     if (err)
@@ -1203,6 +1203,8 @@ void tbt_session_destroy(struct tbt_tunnel *t)
      * second cancel is the barrier that makes freeing the session safe. */
     cancel_delayed_work_sync(&s->w_fbk);
     cancel_work_sync(&s->w_replace);
+    cancel_delayed_work_sync(&s->w_fec_tx);
+    tbt_fec_data_free(s);
     put_net(s->net);
     kfree(s);
 }

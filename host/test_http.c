@@ -1891,8 +1891,10 @@ static void test_chunk_encode(void)
     }
     ok(good, "every legal chunk size has one canonical spelling", NULL);
 
-    ok(tbt_http_chunk_hdr(buf, sizeof(buf), TBT_CHUNK_MAX + 1) == 0,
-       "chunk size above TBT_CHUNK_MAX is refused", NULL);
+    ok(tbt_http_chunk_hdr(buf, sizeof(buf), TBT_FEC_REC_MAX + 1) == 0,
+       "chunk size above the v6 FEC record ceiling is refused", NULL);
+    ok(tbt_http_chunk_hdr(buf, sizeof(buf), TBT_FEC_REC_MAX) > 0,
+       "v6 FEC record ceiling is accepted", NULL);
     ok(tbt_http_chunk_hdr(buf, sizeof(buf), (size_t)-1) == 0,
        "oversized chunk size cannot wrap into range", NULL);
     ok(tbt_http_chunk_hdr(buf, 3, 0x24) == 0, "short cap refuses the size line", NULL);
@@ -2001,7 +2003,7 @@ static void test_chunk_decode(void)
         {"", 0, "", TBT_HTTP_CHUNK_SIZE, TBT_HTTP_NEED_MORE},
         {"ffffffffffffffff\r\n", 0, "", TBT_HTTP_CHUNK_BAD, TBT_HTTP_PROTO},
         {"100000\r\n", 0, "", TBT_HTTP_CHUNK_BAD, TBT_HTTP_PROTO},
-        {"2025\r\n", 0, "", TBT_HTTP_CHUNK_BAD, TBT_HTTP_PROTO},
+        {"2029\r\n", 0, "", TBT_HTTP_CHUNK_BAD, TBT_HTTP_PROTO},
         {"8g\r\n", 0, "", TBT_HTTP_CHUNK_BAD, TBT_HTTP_PROTO},
         {" 8\r\n", 0, "", TBT_HTTP_CHUNK_BAD, TBT_HTTP_PROTO},
         {"8 \r\n", 0, "", TBT_HTTP_CHUNK_BAD, TBT_HTTP_PROTO},
@@ -3428,6 +3430,80 @@ static int emit_both_wire(void)
     return fflush(stdout) == 0 ? 0 : 1;
 }
 
+static void test_fec_http(void)
+{
+    struct tbt_http_rx rx;
+    u8 rec[TBT_FEC_HDR_LEN + 64];
+    u8 chunk[TBT_HTTP_FEC_FRAME_MAX];
+    u8 two[2 * TBT_HTTP_FEC_FRAME_MAX];
+    const u8 *out;
+    size_t out_len, n, m;
+    int err;
+    unsigned i;
+
+    memset(&rx, 0, sizeof(rx));
+    tbt_http_chunk_reset(&rx.chunk);
+    memset(rec, 0, sizeof(rec));
+    rec[0] = TBT_FEC_DATA;
+    rec[4] = 4;
+    rec[5] = 2;
+    rec[26] = 64;
+    rec[28] = 0x01;
+    rec[29] = 0x10;
+    for (i = 0; i < 64; i++)
+        rec[TBT_FEC_HDR_LEN + i] = (u8)(i * 7 + 3);
+
+    n = tbt_http_fec_chunk_encode((char *)chunk, sizeof(chunk), rec, sizeof(rec));
+    ok(n > 0, "fec chunk encodes", NULL);
+
+    /* Split the chunk: no record until the last body byte arrives. */
+    m = tbt_http_fec_frame_decode(&rx, chunk, n / 2, &out, &out_len, &err);
+    ok(m == n / 2 && err == TBT_RX_NEED_MORE, "fec chunk split waits", NULL);
+    m = tbt_http_fec_frame_decode(&rx, chunk + n / 2, n - n / 2, &out, &out_len, &err);
+    ok(err == TBT_RX_OK && out_len == sizeof(rec) && !memcmp(out, rec, sizeof(rec)),
+       "fec chunk round-trips", NULL);
+
+    /* Two complete chunks in one buffer. */
+    tbt_http_chunk_reset(&rx.chunk);
+    rx.chunk_started = false;
+    rx.rec_len = 0;
+    memcpy(two, chunk, n);
+    memcpy(two + n, chunk, n);
+    m = tbt_http_fec_frame_decode(&rx, two, 2 * n, &out, &out_len, &err);
+    ok(err == TBT_RX_OK && out_len == sizeof(rec), "first of two fec chunks", NULL);
+    m += tbt_http_fec_frame_decode(&rx, two + m, 2 * n - m, &out, &out_len, &err);
+    ok(err == TBT_RX_OK && out_len == sizeof(rec), "second of two fec chunks", NULL);
+
+    /* A drip chunk (1 byte) before the record is skipped. */
+    tbt_http_chunk_reset(&rx.chunk);
+    rx.chunk_started = false;
+    rx.rec_len = 0;
+    {
+        char drip[8];
+        size_t dn = tbt_http_drip_chunk(drip, sizeof(drip));
+
+        memcpy(two, drip, dn);
+        memcpy(two + dn, chunk, n);
+        m = tbt_http_fec_frame_decode(&rx, two, dn + n, &out, &out_len, &err);
+        ok(err == TBT_RX_OK && out_len == sizeof(rec), "drip before fec is skipped", NULL);
+    }
+
+    /* Control record (ACK, 16-byte body) uses the same chunk path. */
+    tbt_http_chunk_reset(&rx.chunk);
+    rx.chunk_started = false;
+    rx.rec_len = 0;
+    memset(rec, 0, sizeof(rec));
+    rec[0] = TBT_FEC_ACK;
+    rec[26] = 16;
+    rec[28] = 0x01;
+    rec[29] = 0x10;
+    n = tbt_http_fec_chunk_encode((char *)chunk, sizeof(chunk), rec,
+                                  TBT_FEC_HDR_LEN + 16);
+    m = tbt_http_fec_frame_decode(&rx, chunk, n, &out, &out_len, &err);
+    ok(err == TBT_RX_OK && out_len == TBT_FEC_HDR_LEN + 16 && out[0] == TBT_FEC_ACK,
+       "fec control frame in a chunk", NULL);
+}
+
 int main(int argc, char **argv)
 {
     const char *seed_arg = NULL;
@@ -3473,6 +3549,7 @@ int main(int argc, char **argv)
     test_chunk_big();
     test_pad_drip();
     test_frame_codec();
+    test_fec_http();
     test_frame_stream();
     test_cadence();
     test_roundtrip();

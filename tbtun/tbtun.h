@@ -441,12 +441,79 @@ enum tbt_stream_state
 
 /* Per-carrier partial record state. Lives on the carrier, never global: two
  * tunnels (or, from C4, two carriers of one tunnel) must not share a buffer.
- * One full record is TBT_REC_MAX; the buffer never needs more. */
-#define TBT_PARSER_BUF TBT_REC_MAX
+ * A record is TBT_REC_MAX (old ARQ) or TBT_FEC_REC_MAX (v6); the buffer must
+ * hold the larger one. */
+#define TBT_PARSER_BUF (TBT_FEC_REC_MAX > TBT_REC_MAX ? TBT_FEC_REC_MAX : TBT_REC_MAX)
 struct tbt_parser
 {
     u8 buf[TBT_PARSER_BUF];
     size_t have;
+};
+
+/* ------------------------------------------------------------------ *
+ * FEC v6 data plane (one group, one stream per session).
+ *
+ * The host codec is the authority for encode/decode; this state only holds
+ * the packets that are still inside the current block. A block is n DATA
+ * shares followed by m PARITY shares; the sender emits the parity records as
+ * soon as the block's last DATA record is queued. The receiver decodes a block
+ * when its data and parity shares make the n unknowns solvable.
+ * ------------------------------------------------------------------ */
+struct tbt_fec_rlnc;
+
+struct tbt_fec_blk
+{
+    u64 block_id;
+    bool used;
+    bool ready;
+    u8 *data;     /* n * s bytes */
+    u8 *parity;   /* m * s bytes */
+    u8 *dpresent; /* n flags */
+    u8 *ppresent; /* m flags */
+    u16 *dlen;    /* n payload lengths */
+    u8 *data_ptrs[TBT_FEC_MAX_SHARES];
+    u8 *parity_ptrs[TBT_FEC_MAX_SHARES];
+    struct tbt_fec_rlnc *ctx;
+};
+
+struct tbt_fec_tx
+{
+    spinlock_t lock; /* protects ring head/tail and the counters below */
+    u8 *ring;
+    u32 ring_size;
+    u32 head, tail;
+    u8 *pkt; /* one packet under construction */
+    u8 *par; /* m * s bytes: parity scratch */
+    u8 *rec; /* TBT_FEC_REC_MAX: one complete record */
+    u16 fill;
+    u8 *blk; /* n * s bytes: the current block's data packets */
+    u64 seq;
+    bool flush_req;
+    u8 *data_ptrs[TBT_FEC_MAX_SHARES];
+    u8 *parity_ptrs[TBT_FEC_MAX_SHARES];
+    struct tbt_fec_rlnc *ctx;
+    u64 nonce;
+};
+
+struct tbt_fec_rx
+{
+    spinlock_t lock; /* carrier rx works assemble blocks concurrently */
+    u16 n, m, s;
+    u16 slots;
+    u64 next_block;
+    u64 next_deliver;
+    struct tbt_fec_blk *blk;
+};
+
+/* One queued FEC record waiting for a carrier. Control records may be sent on
+ * any up carrier; data records are bound to their share's carrier. */
+struct tbt_fec_out
+{
+    struct list_head node;
+    u16 carrier;
+    u16 len;
+    u8 control;
+    u8 data[];
 };
 
 struct tbt_session
@@ -463,6 +530,12 @@ struct tbt_session
     struct tbt_carrier *car[TBT_MAX_CARRIERS_LIMIT]; /* indexed by path */
     u16 n_car;   /* cfg.n + cfg.m, 1..256: every dialled carrier */
     u16 n_pri;   /* cfg.n: carriers 0..n_pri-1 carry DATA by default */
+    bool fec;    /* v6 data plane: FEC records, one share per carrier */
+    struct tbt_fec_tx *fec_tx; /* owned here: one stream per session */
+    struct tbt_fec_rx *fec_rx;
+    struct delayed_work w_fec_tx; /* packetizer + record writer */
+    struct list_head fec_out;    /* records waiting for a carrier */
+    spinlock_t fec_out_lock;
     bool closing; /* session teardown started: no new joins, no new work */
     struct list_head prov; /* accepted carriers waiting for HELLO */
     struct list_head dead; /* retired carriers, freed at session destroy */
@@ -765,6 +838,7 @@ struct tbt_carrier
     u8 profile;                   /* effective container: 1 http-kal, 2 drip, 3 raw */
     u8 peer_gen;                  /* peer's generation for this path (HELLO) */
     bool http_started;            /* our request/response header block is on the wire */
+    struct mutex http_lock;       /* serialises the one-time header start */
     bool http_hdr_done;           /* peer header parsed; body stage */
     bool http_req_done;           /* far side: request header parsed (TX gate) */
     bool http_pending;            /* a decoded record awaits handling (-EAGAIN) */
@@ -867,6 +941,22 @@ void tbt_car_setsockbuf(struct socket *s, const struct tbt_cfg *cfg, u16 n_pri);
 int tbt_carrier_open_target(struct tbt_stream *st);
 void tbt_replace_work(struct work_struct *w);
 int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp);
+/* FEC v6 data plane (tbt_fec_data.c). */
+int tbt_fec_data_init(struct tbt_session *sess);
+void tbt_fec_data_free(struct tbt_session *sess);
+size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,
+                         unsigned int off, size_t len);
+void tbt_fec_tx_flush(struct tbt_stream *st);
+bool tbt_fec_tx_idle(struct tbt_stream *st);
+void tbt_fec_tx_work(struct work_struct *w);
+int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len);
+int tbt_fec_rx_record(struct tbt_carrier *c, const u8 *rec, size_t len);
+bool tbt_fec_record_type(u8 type);
+int tbt_fec_record_len(const u8 *buf, size_t have, size_t *need);
+/* tbt_carrier.c: write one whole record, no frame header. */
+int tbt_carrier_send_raw(struct tbt_carrier *c, const void *data, size_t len);
+/* Write one FEC record in the carrier's container (raw or HTTP chunk). */
+int tbt_carrier_send_fec(struct tbt_carrier *c, const u8 *rec, size_t len);
 /* Session-level 50 ms liveness poll (tbt_carrier.c), armed by tbt_session.c. */
 void tbt_session_poll_work(struct work_struct *w);
 
