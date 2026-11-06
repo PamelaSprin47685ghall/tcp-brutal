@@ -55,6 +55,7 @@ struct sc_bs {
     int *stack;        /* n_chk */
     int *next;         /* n_chk */
     int *touched;      /* n */
+    uint8_t *tflag;    /* n */
     uint64_t *resolve; /* n * groups */
     uint64_t *vbits;   /* n * groups */
 
@@ -198,11 +199,12 @@ sc_bs *sc_bs_new(sc_code *c, int batch, char *err, size_t errlen)
     bs->stack = calloc(nchk, sizeof(int));
     bs->next = calloc(nchk, sizeof(int));
     bs->touched = calloc(n, sizeof(int));
+    bs->tflag = calloc(n, 1);
     bs->resolve = calloc(n * groups, sizeof(uint64_t));
     bs->vbits = calloc(n * groups, sizeof(uint64_t));
     if (!bs->unk || !bs->val || !bs->cnt || !bs->xr || !bs->act ||
         !bs->pending || !bs->stack || !bs->next || !bs->touched ||
-        !bs->resolve || !bs->vbits) {
+        !bs->tflag || !bs->resolve || !bs->vbits) {
         snprintf(err, errlen, "out of memory");
         sc_bs_free(bs);
         return NULL;
@@ -223,6 +225,7 @@ void sc_bs_free(sc_bs *bs)
     free(bs->stack);
     free(bs->next);
     free(bs->touched);
+    free(bs->tflag);
     free(bs->resolve);
     free(bs->vbits);
     free(bs);
@@ -355,7 +358,7 @@ static void store_tail(uint8_t *dst, size_t stride, const uint64_t *src,
  */
 #define DEFINE_PROPAGATE(P)                                                  \
 static void propagate_##P(sc_bs *bs, int v, const uint64_t *rv,              \
-                          const uint64_t *vb, int *nnext)                    \
+                          const uint64_t *vb)                                \
 {                                                                            \
     const sc_graph *g = &bs->g;                                              \
     const int groups = bs->groups;                                           \
@@ -364,7 +367,6 @@ static void propagate_##P(sc_bs *bs, int v, const uint64_t *rv,              \
     uint64_t *xr = bs->xr;                                                   \
     uint64_t *act = bs->act;                                                 \
     uint64_t *cnt = bs->cnt;                                                 \
-    uint8_t *pending = bs->pending;                                          \
     int k, gg;                                                               \
     for (gg = 0; gg < groups; gg++) {                                        \
         val[(size_t)v * groups + gg] |= vb[gg];                              \
@@ -375,23 +377,14 @@ static void propagate_##P(sc_bs *bs, int v, const uint64_t *rv,              \
         int c2 = g->vadj[k];                                                 \
         uint64_t *xp2 = &xr[(size_t)c2 * groups];                            \
         uint64_t *ap2 = &act[(size_t)c2 * groups];                           \
-        int gain_any = 0;                                                    \
         for (gg = 0; gg < groups; gg++) {                                    \
             uint64_t m = rv[gg];                                             \
             uint64_t *cp = &cnt[((size_t)c2 * groups + gg) * P];             \
-            uint64_t na, gain;                                               \
             count_sub_##P(cp, m);                                            \
             xp2[gg] ^= vb[gg] & m;                                           \
-            na = count_one_##P(cp);                                          \
-            gain = na & ~ap2[gg];                                            \
-            ap2[gg] = na;                                                    \
-            gain_any |= (gain != 0);                                         \
+            ap2[gg] = count_one_##P(cp);                                     \
         }                                                                    \
         bs->st.edge_updates++;                                               \
-        if (gain_any && !pending[c2]) {                                      \
-            pending[c2] = 1;                                                 \
-            bs->next[(*nnext)++] = c2;                                       \
-        }                                                                    \
     }                                                                        \
 }
 DEFINE_PROPAGATE(3)
@@ -507,9 +500,6 @@ long sc_decode_bs(sc_bs *bs, const uint8_t *bits, const uint8_t *erased,
 
             bs->st.waves++;
 
-            for (li = 0; li < nlist; li++)
-                pending[list[li]] = 0;
-
             for (li = 0; li < nlist; li++) {
                 c = list[li];
                 for (e = g->coff[c]; e < g->coff[c + 1]; e++) {
@@ -522,12 +512,9 @@ long sc_decode_bs(sc_bs *bs, const uint8_t *bits, const uint8_t *erased,
                     }
                     if (!any2)
                         continue;
-                    if (bs->resolve[(size_t)v * groups] == 0) {
-                        int all = 0;
-                        for (gg = 1; gg < groups; gg++)
-                            all |= (bs->resolve[(size_t)v * groups + gg] != 0);
-                        if (!all)
-                            bs->touched[ntouch++] = v;
+                    if (!bs->tflag[v]) {
+                        bs->tflag[v] = 1;
+                        bs->touched[ntouch++] = v;
                     }
                     for (gg = 0; gg < groups; gg++) {
                         uint64_t m = res[gg];
@@ -547,26 +534,34 @@ long sc_decode_bs(sc_bs *bs, const uint8_t *bits, const uint8_t *erased,
                 case 3:
                     propagate_3(bs, v,
                                 &bs->resolve[(size_t)v * groups],
-                                &bs->vbits[(size_t)v * groups], &nnext);
+                                &bs->vbits[(size_t)v * groups]);
                     break;
                 case 4:
                     propagate_4(bs, v,
                                 &bs->resolve[(size_t)v * groups],
-                                &bs->vbits[(size_t)v * groups], &nnext);
+                                &bs->vbits[(size_t)v * groups]);
                     break;
                 default:
                     propagate_5(bs, v,
                                 &bs->resolve[(size_t)v * groups],
-                                &bs->vbits[(size_t)v * groups], &nnext);
+                                &bs->vbits[(size_t)v * groups]);
                     break;
                 }
                 for (gg = 0; gg < groups; gg++) {
                     bs->resolve[(size_t)v * groups + gg] = 0;
                     bs->vbits[(size_t)v * groups + gg] = 0;
                 }
+                bs->tflag[v] = 0;
             }
 
-            memcpy(list, bs->next, (size_t)nnext * sizeof(int));
+            nnext = 0;
+            for (c = 0; c < nchk; c++) {
+                int any = 0;
+                for (gg = 0; gg < groups; gg++)
+                    any |= (act[(size_t)c * groups + gg] != 0);
+                if (any)
+                    list[nnext++] = c;
+            }
             nlist = nnext;
         }
     }
