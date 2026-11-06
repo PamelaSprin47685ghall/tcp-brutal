@@ -1330,7 +1330,11 @@ probe_n() {
         _bad=$(awk -v id="$_id" '$1 == "tunnel" && $2 == id && $3 == "c9" {
             for (i = 4; i <= NF; i++) {
                 split($i, a, "=");
-                if (a[2] + 0 != 0) print a[1] "=" a[2]
+                # fec_ack_tx/rx count the normal one-ACK-per-super-block
+                # cadence; every other c9 counter must stay zero.
+                if (a[1] != "fec_ack_tx" && a[1] != "fec_ack_rx" &&
+                    a[2] + 0 != 0)
+                    print a[1] "=" a[2]
             }
         }' /proc/net/tbtun/stats)
         [ -z "$_bad" ] || fail "probe N: tunnel $_id c9 nonzero: $_bad"
