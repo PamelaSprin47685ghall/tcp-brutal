@@ -685,6 +685,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **T1 最终证据入库（master `5ab995e`）**：`review/final-0888ce4/` 59 文件 / 2.7 MiB（gate.txt + A–K 3x、J 5x、near、full run1/run2、隔离 writer/writerdrain、SAN 日志）；master 现含完整独立门禁证据，gate.txt 的引用路径有效。
 
+**dkms-qemu 自愈（`w-window bed07a1`）**：10:17 的 tracked 删除无法归因仓库脚本（无 dkms-qemu run、`git reflog` 09:35 后仅 commits、无 stash；唯一 scoped `git clean` 不删 tracked）；最可能是外部/手动 `rm` 或索引暂存删除。修复：`run.sh` 在 clean 前 `git checkout -- review/dkms-qemu/artifacts` 自愈，再 `git clean -fdxq` 只清 untracked。已合入 integration **`53a28e3`**，merge 后 `make check` 绿；ko 仍 `a6e459f6…`/srcversion `711422E4`。合并前仍验 `git status`。
+
 **B 接 FEC 数据面（`w-fec-v6`）**：已 merge integration（`ed81a11` ← c508a10、`ee244fd` ← e6afd0a）；A–L **12 PASS / 0 skip**（`/tmp/qemu-fec-final2.log`，213s），probe L 为 FEC raw 单组 1 MiB 双向 byte-exact；使用 `flock /tmp/tbtun-qemu.lock` + 独立 `TBTUN_BUILD=/tmp/tbtun-fec-cache` + hostfwd 29101。当前 `-EOPNOTSUPP` 仅剩 `fec=on` 非 raw profile（`fec=on needs profile=raw in this build`），generic gate 已去。下一步 ACK `tx_ack` 修复后持锁复跑 L + 全量 A–L 并提交；不 push。**待确认**：T2 是否允许 raw-only，还是必须支持 HTTP 容器（ChaCha8 保留 HTTP 头）。
 
 **5x 计划（`hnd0-n1b`）**：同一 A3 源码 per-end build、两端 srcversion 一致；5 轮独立 sink/sender；每轮 sink `bytes=16777216 eof=1`、far `rx_delivered=16777216`、near `fin_seq=16777216 fin_w=1`、`rst_w=0`、`deliver/close timeouts=0`、`close_detaches=0`、near/far `live txq=0`、无 `TXSTALLKILL`；证据 `review/wan-experiment/t1-n1-auto-rx1m-sink-5x/`，保留 b3b33b2 单次证据。失败也记录并继续，不掩盖。
