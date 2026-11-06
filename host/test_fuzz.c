@@ -41,7 +41,8 @@
 #define DOC_FBK_ENTRY 18u
 #define DOC_FBK_MAX_ENTRIES 16u
 #define DOC_WINDOW_LEN 138u /* 8 + 8*16 + 2 */
-#define DOC_HELLO_LEN 23u   /* 1 + 1 + 16 + 2 + 2 + 1 */
+#define DOC_HELLO_LEN 23u   /* old ARQ: 1 + 1 + 16 + 2 + 2 + 1 */
+#define DOC_HELLO_LEN_V6 66u /* FEC v6: legacy 23 + crypto fields */
 
 static u64 rng_state = 1;
 static unsigned long case_no;
@@ -178,7 +179,9 @@ static int doc_accepts(u8 type, u8 ackc, unsigned len)
     case TBT_F_WINDOW:
         return len == DOC_WINDOW_LEN;
     case TBT_F_HELLO:
-        return len == DOC_HELLO_LEN;
+        /* The framing layer accepts both the old 23-byte body and the FEC v6
+         * 66-byte body; tbt_rx_hello() enforces the session's exact length. */
+        return len >= DOC_HELLO_LEN && len <= DOC_HELLO_LEN_V6;
     default:
         return 0;
     }
@@ -203,7 +206,7 @@ static void test_bounds_table(void)
         { TBT_F_RST, 0, 0 },
         { TBT_F_FBK, 0, DOC_FBK_ENTRY * DOC_FBK_MAX_ENTRIES },
         { TBT_F_WINDOW, DOC_WINDOW_LEN, DOC_WINDOW_LEN },
-        { TBT_F_HELLO, DOC_HELLO_LEN, DOC_HELLO_LEN },
+        { TBT_F_HELLO, DOC_HELLO_LEN, DOC_HELLO_LEN_V6 },
         { TBT_F_PAD, 0, 0 },
         { TBT_F_RETIRE, 1, 1 },
         { TBT_F_SACK, 1, 1 },
@@ -491,7 +494,10 @@ static void test_adversarial(void)
     expect("HELLO one byte short", rec, n, TBT_REC_PROTO);
     n = rec_make(rec, TBT_F_HELLO, 0, 0, 1, 0, DOC_HELLO_LEN + 1);
     case_no++;
-    expect("HELLO one byte long", rec, n, TBT_REC_PROTO);
+    expect("HELLO v6 first byte past the legacy body", rec, n, TBT_REC_OK);
+    n = rec_make(rec, TBT_F_HELLO, 0, 0, 1, 0, DOC_HELLO_LEN_V6 + 1);
+    case_no++;
+    expect("HELLO one byte past the v6 body", rec, n, TBT_REC_PROTO);
 
     /* seq wrap: no rule depends on seq, and the value must survive. */
     n = rec_make(rec, TBT_F_DATA, 0, 0, 1, ~(u64)0, 1);

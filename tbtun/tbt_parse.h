@@ -27,6 +27,7 @@ typedef uint32_t __be32;
 #endif
 
 #include "tbt_uapi.h"
+#include "tbt_crypto.h"
 
 /* Line buffer size. A line of TBT_LINE_MAX - 1 bytes is the longest accepted;
  * TBT_LINE_MAX itself is refused, so the buffer always has room for the NUL. */
@@ -83,6 +84,15 @@ struct tbt_cfg
      * side instead of adopting the first HELLO (trust-on-first-use). */
     u8 nonce[16];
     bool nonce_set; /* nonce= was present on the tunnel line */
+
+    /* ChaCha8 body obfuscation (T0 §2.4, §4). `crypto` is 0 or 1; the
+     * default is 1 here and becomes `fec` once B's fec= field is merged
+     * (fec=off has no decrypt point, so it defaults off there).
+     * `crypto_key_set` pins the 256-bit key; otherwise the near side
+     * generates one per session and HELLO v6 carries it in clear text. */
+    u8 crypto;
+    bool crypto_key_set;
+    u8 crypto_key[TBT_CRYPTO_KEY_LEN];
 };
 
 enum tbt_cmd_kind

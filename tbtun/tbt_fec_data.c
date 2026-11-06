@@ -179,8 +179,8 @@ static int tbt_fec_send_record(struct tbt_session *sess, u16 carrier, u8 *buf,
     return tbt_fec_out_push(sess, carrier, buf, len, control);
 }
 
-static int tbt_fec_make_record(struct tbt_fec_hdr *h, const u8 *payload, u8 *out,
-                               u16 *out_len)
+static int tbt_fec_make_record(struct tbt_session *sess, struct tbt_fec_hdr *h,
+                               const u8 *payload, u8 *out, u16 *out_len)
 {
     if (tbt_fec_hdr_seal(h, payload))
         return -EINVAL;
@@ -188,6 +188,20 @@ static int tbt_fec_make_record(struct tbt_fec_hdr *h, const u8 *payload, u8 *out
         return -EINVAL;
     if (h->payload_len)
         memcpy(out + TBT_FEC_HDR_LEN, payload, h->payload_len);
+    /* The payload CRC above covers the clear bytes (T0 §2.2). Only DATA and
+     * PARITY are transformed; the 40-byte header stays clear. The TX work is
+     * serialized and only runs once the TX context is ready. */
+    if (sess->crypto &&
+        (h->type == TBT_FEC_DATA || h->type == TBT_FEC_PARITY))
+    {
+        if (!sess->crypto_ctx.tx.ready)
+            return -EINVAL;
+        if (tbt_crypto_body_xor_share(&sess->crypto_ctx.tx, h->seq,
+                                      h->type == TBT_FEC_PARITY,
+                                      h->share_index, out + TBT_FEC_HDR_LEN,
+                                      h->payload_len))
+            return -EINVAL;
+    }
     *out_len = (u16)(TBT_FEC_HDR_LEN + h->payload_len);
     return 0;
 }
@@ -267,7 +281,7 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess, u16 group,
         h.win_len = win_len;
         h.payload_len = TBT_FEC_S;
         h.conv = TBT_FEC_CONV;
-        if (tbt_fec_make_record(&h, tx->parity_ptrs[i], tx->rec, &rec_len))
+        if (tbt_fec_make_record(sess, &h, tx->parity_ptrs[i], tx->rec, &rec_len))
             continue;
         tbt_fec_send_record(sess,
                             (u16)(group * (tx->n + tx->m) + tx->n + i),
@@ -331,7 +345,7 @@ static void tbt_fec_packetize(struct tbt_session *sess, bool last)
     h.win_len = 0;
     h.payload_len = len;
     h.conv = TBT_FEC_CONV;
-    if (!tbt_fec_make_record(&h, tx->pkt, rec, &rec_len))
+    if (!tbt_fec_make_record(sess, &h, tx->pkt, rec, &rec_len))
         (void)tbt_fec_send_record(sess, carrier, rec, rec_len, false);
     /* The block buffer must hold the real byte even when the share did not
      * reach its carrier: parity then describes the truth, and the receiver
@@ -377,6 +391,14 @@ void tbt_fec_tx_work(struct work_struct *w)
     if (tbt_fec_out_flush(sess) == -EAGAIN)
     {
         mod_delayed_work(system_wq, &sess->w_fec_tx, msecs_to_jiffies(2));
+        return;
+    }
+
+    /* crypto=on: the far side cannot packetize until the near's HELLO has
+     * delivered the session key. The ring keeps the bytes; retry shortly. */
+    if (sess->crypto && !smp_load_acquire(&sess->crypto_tx_ready))
+    {
+        mod_delayed_work(system_wq, &sess->w_fec_tx, msecs_to_jiffies(10));
         return;
     }
 
@@ -594,7 +616,7 @@ static void tbt_fec_ack(struct tbt_session *sess, u64 next_deliver)
     h.seq = next_deliver;
     h.payload_len = TBT_FEC_ACK_LEN;
     h.conv = TBT_FEC_CONV;
-    if (tbt_fec_make_record(&h, body, rec, &len))
+    if (tbt_fec_make_record(sess, &h, body, rec, &len))
         return;
     tbt_fec_send_record(sess, 0, rec, len, true);
 }
@@ -640,6 +662,7 @@ static void tbt_fec_deliver_ready(struct tbt_session *sess)
 
     if (rx->total_known && !rx->total_pkts)
         return;
+
     st = tbt_fec_stream(sess);
     if (!st)
         return;
@@ -722,7 +745,7 @@ static void tbt_fec_rx_retry_all(struct tbt_session *sess)
     tbt_fec_deliver_ready(sess);
 }
 
-int tbt_fec_rx_record(struct tbt_carrier *c, const u8 *rec, size_t len)
+int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
 {
     struct tbt_session *sess = c->sess;
     struct tbt_fec_rx *rx = sess->fec_rx;
@@ -746,6 +769,21 @@ int tbt_fec_rx_record(struct tbt_carrier *c, const u8 *rec, size_t len)
         want = tbt_fec_crc32c(0, hb, TBT_FEC_H_HDRCRC);
         if (want != h.header_crc32c)
             return -EPROTO;
+        /* Header framing is trusted here; decrypt DATA/PARITY before the
+         * payload CRC, which covers the clear bytes (T0 §1.3, §2.2). The rx
+         * context is shared by carriers and body_xor is read-only. */
+        if (sess->crypto &&
+            (h.type == TBT_FEC_DATA || h.type == TBT_FEC_PARITY))
+        {
+            if (!smp_load_acquire(&sess->crypto_ready))
+                return 0;
+            if (tbt_crypto_body_xor_share(&sess->crypto_ctx.rx, h.seq,
+                                          h.type == TBT_FEC_PARITY,
+                                          h.share_index,
+                                          rec + TBT_FEC_HDR_LEN,
+                                          h.payload_len))
+                return 0; /* counter overflow: drop this share */
+        }
         if (tbt_fec_crc32c(0, rec + TBT_FEC_HDR_LEN, h.payload_len) !=
             h.payload_crc32c)
             return 0; /* payload CRC failure drops this record only */

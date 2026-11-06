@@ -1769,10 +1769,12 @@ fail:
  * header's path_id is the carrier index. */
 int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp)
 {
-    u8 body[TBT_HELLO_BODY_LEN];
+    u8 body[TBT_HELLO_BODY_LEN_V6];
     struct tbt_tunnel *t = sess->tunnel;
+    u16 blen = sess->fec ? TBT_HELLO_BODY_LEN_V6 : TBT_HELLO_BODY_LEN;
 
-    body[0] = TBT_WIRE_VERSION;
+    memset(body, 0, sizeof(body));
+    body[0] = sess->fec ? TBT_WIRE_VERSION_V6 : TBT_WIRE_VERSION;
     body[1] = t->cfg.role;
     memcpy(body + 2, sess->nonce, sizeof(sess->nonce));
     tbt_put_le16(body + 18, TBT_PAYLOAD_MAX);
@@ -1780,8 +1782,14 @@ int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp)
     body[22] = (sess->car[index] ? sess->car[index]->profile
                                  : sess->tunnel->cfg.profile) |
                (u8)(((sess->car[index] ? sess->car[index]->gen : 0) & 0xf) << 2);
+    if (sess->fec)
+        tbt_crypto_hello_fill(body, sess->crypto, sess->crypto_key_id,
+                              sess->crypto_tx_nonce,
+                              sess->crypto_key_id == TBT_CRYPTO_KEY_ID_HELLO
+                                  ? sess->crypto_key
+                                  : NULL);
     return tbt_tx_control_pinned(sess, NULL, index, TBT_F_HELLO, 0, 0, body,
-                                 sizeof(body), false, gfp);
+                                 blen, false, gfp);
 }
 
 void tbt_carrier_resume(struct tbt_session *sess)

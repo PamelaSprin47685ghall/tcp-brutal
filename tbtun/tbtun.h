@@ -555,6 +555,18 @@ struct tbt_session
     u16 n_car;   /* cfg.n + cfg.m, 1..256: every dialled carrier */
     u16 n_pri;   /* cfg.n: carriers 0..n_pri-1 carry DATA by default */
     bool fec;    /* v6 data plane: FEC records, one share per carrier */
+    /* ChaCha8 body-only obfuscation (T0 §2.3/§2.4). Each direction has its
+     * own 8-byte nonce; the near side owns the session key unless
+     * crypto_key= is configured on both ends. tx/rx contexts never mix. */
+    bool crypto;
+    bool crypto_have_key; /* crypto_key[] is valid */
+    u8 crypto_key_id;     /* TBT_CRYPTO_KEY_ID_NONE or _HELLO in our HELLO */
+    u8 crypto_key[TBT_CRYPTO_KEY_LEN];
+    u8 crypto_tx_nonce[TBT_CRYPTO_NONCE_LEN];
+    u8 crypto_rx_nonce[TBT_CRYPTO_NONCE_LEN];
+    struct tbt_crypto_pair crypto_ctx;
+    bool crypto_tx_ready; /* published after tx context init */
+    bool crypto_ready;    /* rx nonce learned; both contexts initialized */
     struct tbt_fec_tx *fec_tx; /* owned here: one stream per session */
     struct tbt_fec_rx *fec_rx;
     struct delayed_work w_fec_tx; /* packetizer + record writer */
@@ -974,7 +986,7 @@ void tbt_fec_tx_flush(struct tbt_stream *st);
 bool tbt_fec_tx_idle(struct tbt_stream *st);
 void tbt_fec_tx_work(struct work_struct *w);
 int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len);
-int tbt_fec_rx_record(struct tbt_carrier *c, const u8 *rec, size_t len);
+int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len);
 /* The old FIN record names the stream's total byte offset. The FEC receiver
  * uses it to complete a final block whose parity and LAST flag were lost. */
 void tbt_fec_rx_fin(struct tbt_session *sess, u64 total_bytes);

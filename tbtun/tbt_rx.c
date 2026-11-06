@@ -517,6 +517,79 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
     }
 }
 
+/* Crypto fields of a FEC v6 HELLO. The session lock serializes the one-time
+ * key adoption and rx-context init: several carriers may present HELLO at the
+ * same time. body_xor() is read-only after init, so the data paths do not take
+ * this lock. */
+static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
+                               size_t len)
+{
+    bool enabled = false;
+    u8 key_id = TBT_CRYPTO_KEY_ID_NONE;
+    u8 peer_nonce[TBT_CRYPTO_NONCE_LEN];
+    u8 hello_key[TBT_CRYPTO_KEY_LEN];
+    u8 key[TBT_CRYPTO_KEY_LEN];
+    int err = 0;
+
+    if (tbt_crypto_hello_parse(body, len, &enabled, &key_id, peer_nonce,
+                               hello_key))
+        return -EPROTO;
+
+    spin_lock(&sess->lock);
+    if (enabled != sess->crypto)
+    {
+        err = -EPROTO;
+        goto out;
+    }
+    if (!enabled)
+        goto out;
+
+    if (tbt_crypto_resolve_key(sess->crypto_have_key, sess->crypto_key,
+                               enabled, key_id, hello_key, key))
+    {
+        err = -EPROTO;
+        goto out;
+    }
+    if (!sess->crypto_have_key)
+    {
+        /* Far side: adopt the near's key. Its own TX context was waiting for
+         * exactly this. */
+        memcpy(sess->crypto_key, key, sizeof(sess->crypto_key));
+        sess->crypto_have_key = true;
+        if (tbt_crypto_init(&sess->crypto_ctx.tx, key, sess->crypto_tx_nonce, 0))
+        {
+            err = -EPROTO;
+            goto out;
+        }
+        smp_store_release(&sess->crypto_tx_ready, true);
+    }
+    else if (memcmp(sess->crypto_key, key, sizeof(key)) != 0)
+    {
+        err = -EPROTO;
+        goto out;
+    }
+
+    if (sess->crypto_ready)
+    {
+        /* Every carrier of one session repeats the same TX nonce. */
+        if (memcmp(sess->crypto_rx_nonce, peer_nonce, sizeof(peer_nonce)) != 0)
+            err = -EPROTO;
+        goto out;
+    }
+
+    memcpy(sess->crypto_rx_nonce, peer_nonce, sizeof(peer_nonce));
+    if (tbt_crypto_init(&sess->crypto_ctx.rx, key, peer_nonce, 0))
+    {
+        err = -EPROTO;
+        goto out;
+    }
+    smp_store_release(&sess->crypto_ready, true);
+
+out:
+    spin_unlock(&sess->lock);
+    return err;
+}
+
 /* Validate HELLO, adopt or check the nonce, and join the far side's slot. */
 int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
 {
@@ -525,7 +598,8 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
     u8 want_role = t->cfg.role == TBT_ROLE_NEAR ? TBT_ROLE_FAR : TBT_ROLE_NEAR;
     int err;
 
-    if (h->body_len != TBT_HELLO_BODY_LEN || body[0] != TBT_WIRE_VERSION ||
+    if (h->body_len != (sess->fec ? TBT_HELLO_BODY_LEN_V6 : TBT_HELLO_BODY_LEN) ||
+        body[0] != (sess->fec ? TBT_WIRE_VERSION_V6 : TBT_WIRE_VERSION) ||
         body[1] != want_role)
         return -EPROTO;
     /* The last HELLO byte names the container. Both ends derive the expected
@@ -547,6 +621,14 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
     }
     if (tbt_le16(body + 18) != TBT_PAYLOAD_MAX || tbt_le16(body + 20) != TBT_CHUNK_MAX)
         return -EPROTO;
+
+    if (sess->fec)
+    {
+        int cerr = tbt_rx_hello_crypto(sess, body, h->body_len);
+
+        if (cerr)
+            return cerr;
+    }
 
     if (t->cfg.role == TBT_ROLE_FAR)
     {
@@ -782,7 +864,7 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                     {
                         if (!c->saw_hello)
                             return -EPROTO;
-                        err = tbt_fec_rx_record(c, frec, flen);
+                        err = tbt_fec_rx_record(c, (u8 *)frec, flen);
                     }
                     else
                     {

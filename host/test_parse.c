@@ -206,8 +206,8 @@ static void test_tunnel_nonce(void)
         "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2";
     static const char *const canon_near =
         "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-        " n=4 m=1 dup=1 profile=http-kal fec=off mode=rlnc w=8 carriers=5"
-        " keepalive=5000 drip_ms=1000"
+        " n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
         " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
         " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
         " carrier_stall_ms=0"
@@ -224,8 +224,8 @@ static void test_tunnel_nonce(void)
     snprintf(text, sizeof(text), "%s nonce=0011223344556677", base_near);
     roundtrip("tunnel nonce 64-bit pin", text,
               "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-              " n=4 m=1 dup=1 profile=http-kal fec=off mode=rlnc w=8 carriers=5"
-              " keepalive=5000 drip_ms=1000"
+              " n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+              " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
               " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
               " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
               " carrier_stall_ms=0"
@@ -240,8 +240,8 @@ static void test_tunnel_nonce(void)
               "tunnel 2 role=far listen=10.0.0.1:1 target=10.0.0.2:2"
               " nonce=00112233445566778899aabbccddeeff",
               "tunnel 2 role=far listen=10.0.0.1:1 target=10.0.0.2:2"
-              " n=4 m=1 dup=1 profile=http-kal fec=off mode=rlnc w=8 carriers=5"
-              " keepalive=5000 drip_ms=1000"
+              " n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+              " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
               " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
               " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
               " carrier_stall_ms=0"
@@ -285,6 +285,122 @@ static void test_tunnel_nonce(void)
            "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
            " nonce=zz112233445566778899aabbccddeeff",
            TBT_PARSE_EINVAL, "nonce", "hex");
+}
+
+/* --- crypto= / crypto_key= (T0 §4): default, off, key round-trip, clear,
+ * and the refusals. The canonical position is right after m=. -------------- */
+static void test_crypto_cfg(void)
+{
+    static const char *const base =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2";
+    static const char *const base_on =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 fec=on";
+    static const char *const canon_off =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+        " n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+        " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+        " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+        " carrier_stall_ms=0 portblock=0-0\n";
+    static const char *const canon_on =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+        " n=4 m=1 fec=on mode=rlnc w=8 carriers=5 crypto=on crypto_key=-"
+        " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+        " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+        " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+        " carrier_stall_ms=0 portblock=0-0\n";
+    static const char *const canon_on_crypto_off =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+        " n=4 m=1 fec=on mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+        " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+        " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+        " carrier_stall_ms=0 portblock=0-0\n";
+    static const char *const key_hex =
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+    char text[TBT_LINE_MAX];
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+
+    /* fec=off defaults crypto off; fec=on defaults crypto on. */
+    roundtrip("crypto default off with fec=off", base, canon_off);
+    parse(base, &cmd, &perr);
+    ok(cmd.cfg.crypto == 0, "crypto defaults off when fec=off", NULL);
+    ok(!cmd.cfg.crypto_key_set, "crypto_key is unset by default", NULL);
+
+    roundtrip("crypto default on with fec=on", base_on, canon_on);
+    parse(base_on, &cmd, &perr);
+    ok(cmd.cfg.crypto == 1, "crypto defaults on when fec=on", NULL);
+
+    /* crypto=off with fec=on is explicit and round-trips. */
+    snprintf(text, sizeof(text), "%s crypto=off", base_on);
+    roundtrip("crypto off with fec=on", text, canon_on_crypto_off);
+
+    /* crypto=on with fec=off has no data plane to hook: reject. */
+    snprintf(text, sizeof(text), "%s crypto=on", base);
+    refuse("crypto on without fec", text, TBT_PARSE_EINVAL, "crypto", "fec=on");
+    snprintf(text, sizeof(text), "%s fec=off crypto=on", base);
+    refuse("crypto on with explicit fec=off", text, TBT_PARSE_EINVAL, "crypto",
+           "fec=on");
+
+    /* crypto_key= stores 64 hex digits and renders them. */
+    snprintf(text, sizeof(text), "%s crypto_key=%s", base_on, key_hex);
+    {
+        char want[TBT_LINE_MAX * 2];
+
+        snprintf(want, sizeof(want), "%s",
+                 "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                 " n=4 m=1 fec=on mode=rlnc w=8 carriers=5 crypto=on crypto_key=");
+        strncat(want, key_hex, sizeof(want) - strlen(want) - 1);
+        strncat(want,
+                " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+                " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+                " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+                " carrier_stall_ms=0 portblock=0-0\n",
+                sizeof(want) - strlen(want) - 1);
+        roundtrip("crypto_key set", text, want);
+    }
+    parse(text, &cmd, &perr);
+    ok(cmd.cfg.crypto_key_set, "crypto_key_set is true", NULL);
+    ok(cmd.cfg.crypto_key[0] == 0x00 && cmd.cfg.crypto_key[31] == 0x1f,
+       "crypto_key bytes are big-endian hex", NULL);
+
+    /* Uppercase hex is accepted and stored byte-identically. */
+    {
+        char upper[sizeof(text)];
+        char upper_key[64 + 1];
+        size_t i;
+
+        for (i = 0; key_hex[i]; i++)
+            upper_key[i] = (key_hex[i] >= 'a' && key_hex[i] <= 'f')
+                               ? (char)(key_hex[i] - 'a' + 'A')
+                               : key_hex[i];
+        upper_key[i] = '\0';
+        snprintf(upper, sizeof(upper), "%s crypto_key=%s", base_on, upper_key);
+        parse(upper, &cmd, &perr);
+        ok(cmd.cfg.crypto_key_set && cmd.cfg.crypto_key[0] == 0x00 &&
+               cmd.cfg.crypto_key[31] == 0x1f,
+           "crypto_key uppercase hex is accepted", perr.why);
+    }
+
+    /* crypto_key=- clears a previous key. */
+    snprintf(text, sizeof(text), "%s crypto_key=%s crypto_key=-", base_on,
+             key_hex);
+    roundtrip("crypto_key clear", text, canon_on);
+
+    /* Refusals. */
+    snprintf(text, sizeof(text), "%s crypto=maybe", base_on);
+    refuse("crypto value", text, TBT_PARSE_EINVAL, "crypto", "on or off");
+    snprintf(text, sizeof(text), "%s crypto=1", base_on);
+    refuse("crypto numeric", text, TBT_PARSE_EINVAL, "crypto", "on or off");
+    snprintf(text, sizeof(text), "%s crypto_key=0011", base_on);
+    refuse("crypto_key short", text, TBT_PARSE_EINVAL, "crypto_key", "64 hex");
+    snprintf(text, sizeof(text), "%s crypto_key=%s00", base_on, key_hex);
+    refuse("crypto_key long", text, TBT_PARSE_EINVAL, "crypto_key", "64 hex");
+    snprintf(text, sizeof(text), "%s crypto_key=zz%s", base_on, key_hex + 2);
+    refuse("crypto_key non-hex", text, TBT_PARSE_EINVAL, "crypto_key", "64 hex");
+    snprintf(text, sizeof(text), "%s crypto_key=", base_on);
+    refuse("crypto_key empty", text, TBT_PARSE_EINVAL, "crypto_key", "empty");
 }
 
 /* --- stats prefix: a key=value parser, so a stray space or a missing '='
@@ -904,16 +1020,16 @@ int main(void)
         "tunnel 1 role=near listen=10.123.0.1:9000 peer=10.123.0.2:443";
     static const char *const minimal_canon =
         "tunnel 1 role=near listen=10.123.0.1:9000 peer=10.123.0.2:443"
-        " n=4 m=1 dup=1 profile=http-kal fec=off mode=rlnc w=8 carriers=5"
-        " keepalive=5000"
+        " n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " dup=1 profile=http-kal keepalive=5000"
         " drip_ms=1000 replay=8388608 tunnel_rate=0"
         " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608"
         " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0"
         " portblock=0-0\n";
     static const char *const full_near =
         "tunnel 7 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443"
-        " n=4 m=1 dup=2 profile=http-kal-drip fec=off mode=rlnc w=8 carriers=5"
-        " keepalive=5000"
+        " n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " dup=2 profile=http-kal-drip keepalive=5000"
         " drip_ms=1000 replay=8388608 tunnel_rate=0"
         " max_inflate=2.000 hole_budget_ms=500 rx_reorder_bytes=8388608"
         " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=3000"
@@ -921,8 +1037,8 @@ int main(void)
         " srcaddrs=10.0.0.10,10.0.0.11\n";
     static const char *const full_far =
         "tunnel 9 role=far listen=203.0.113.9:443 peer=198.51.100.7:8443"
-        " target=127.0.0.1:7000 n=2 m=0 dup=0 profile=raw fec=off"
-        " mode=rlnc w=4 carriers=2 keepalive=1000"
+        " target=127.0.0.1:7000 n=2 m=0 fec=off mode=rlnc w=4 carriers=2"
+        " crypto=off crypto_key=- dup=0 profile=raw keepalive=1000"
         " drip_ms=250 replay=0 tunnel_rate=1048576"
         " max_inflate=1.500 hole_budget_ms=50 rx_reorder_bytes=8388608"
         " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=3000"
@@ -932,8 +1048,8 @@ int main(void)
     static const char *const full_far_canon =
         "tunnel 9 role=far listen=203.0.113.9:443 target=127.0.0.1:7000"
         " peer=198.51.100.7:8443"
-        " n=2 m=0 dup=0 profile=raw fec=off mode=rlnc w=4 carriers=2"
-        " keepalive=1000"
+        " n=2 m=0 fec=off mode=rlnc w=4 carriers=2 crypto=off crypto_key=-"
+        " dup=0 profile=raw keepalive=1000"
         " drip_ms=250 replay=0 tunnel_rate=1048576 max_inflate=1.500"
         " hole_budget_ms=50 rx_reorder_bytes=8388608 tx_window_bytes=0"
         " tx_retain_bytes=0 carrier_stall_ms=3000 portblock=0-0\n";
@@ -1124,9 +1240,9 @@ int main(void)
     parse("tunnel 8 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=224 m=32 fec=on",
           &cmd, &perr);
     tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
-    ok(strstr(buf, " profile=http-kal fec=on mode=rlnc w=448 carriers=256"
-                    " keepalive=") != NULL,
-       "fec=on renders after profile", buf);
+    ok(strstr(buf, " fec=on mode=rlnc w=448 carriers=256 crypto=on"
+                    " crypto_key=- dup=1 profile=http-kal keepalive=") != NULL,
+       "fec=on renders in canonical order", buf);
     {
         struct tbt_cmd again;
 
@@ -1145,8 +1261,8 @@ int main(void)
     roundtrip("portblock 40000-44095",
               "tunnel 5 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 portblock=40000-44095",
               "tunnel 5 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-              " n=4 m=1 dup=1 profile=http-kal fec=off mode=rlnc w=8 carriers=5"
-              " keepalive=5000"
+              " n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+              " dup=1 profile=http-kal keepalive=5000"
               " drip_ms=1000 replay=8388608 tunnel_rate=0"
               " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608"
               " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0"
@@ -1398,6 +1514,9 @@ int main(void)
 
     /* 24b. Tunnel-level nonce=: 128-bit, 64-bit pin, refusals, render. */
     test_tunnel_nonce();
+
+    /* 24c. crypto= / crypto_key=: default on, off, key, clear, refusals. */
+    test_crypto_cfg();
 
     /* 25. The frozen /proc/net/tbtun/http text contract. */
     test_http_contract();

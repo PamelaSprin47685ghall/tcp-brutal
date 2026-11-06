@@ -119,6 +119,12 @@ static bool tbt_cfg_sane(const struct tbt_cfg *c, int *err)
         *err = -EINVAL;
         return false;
     }
+    /* crypto=on has no decrypt point without the FEC data plane (T0 §2.4). */
+    if (c->crypto && !c->fec)
+    {
+        *err = -EINVAL;
+        return false;
+    }
     /* The old ARQ data plane is frozen at 16 carrier slots: its path_ack_mask
      * is u16 and its FBK/WINDOW bodies hold 16 entries. Only a session that
      * asked for FEC may claim more, and even that is capped by max_carriers.
@@ -1055,6 +1061,34 @@ int tbt_session_create(struct tbt_tunnel *t)
     {
         get_random_bytes(s->nonce, sizeof(s->nonce));
     }
+    /* ChaCha8 body obfuscation (T0 §2.3/§2.4). Each direction owns a random
+     * 8-byte nonce. A configured crypto_key= is shared by both ends and
+     * key_id stays 0; otherwise the near side generates the session key and
+     * advertises it with key_id=1. The far side learns it from the near's
+     * HELLO before its own TX context can be initialized. */
+    s->crypto = t->cfg.crypto;
+    if (t->cfg.crypto_key_set)
+    {
+        memcpy(s->crypto_key, t->cfg.crypto_key, sizeof(s->crypto_key));
+        s->crypto_have_key = true;
+        s->crypto_key_id = TBT_CRYPTO_KEY_ID_NONE;
+    }
+    if (s->crypto)
+    {
+        get_random_bytes(s->crypto_tx_nonce, sizeof(s->crypto_tx_nonce));
+        if (t->cfg.role == TBT_ROLE_NEAR && !s->crypto_have_key)
+        {
+            get_random_bytes(s->crypto_key, sizeof(s->crypto_key));
+            s->crypto_have_key = true;
+            s->crypto_key_id = TBT_CRYPTO_KEY_ID_HELLO;
+        }
+        if (s->crypto_have_key)
+        {
+            tbt_crypto_init(&s->crypto_ctx.tx, s->crypto_key,
+                            s->crypto_tx_nonce, 0);
+            smp_store_release(&s->crypto_tx_ready, true);
+        }
+    }
     /* A configured far `peer=` fixes the anchor before the first HELLO.  The
      * port is grammar filler: the far side compares the carrier's source
      * address only.  Without `peer=` or `nonce=` the first HELLO that passes
@@ -1208,6 +1242,7 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     cancel_work_sync(&s->w_replace);
     cancel_delayed_work_sync(&s->w_fec_tx);
     tbt_fec_data_free(s);
+    tbt_crypto_pair_wipe(&s->crypto_ctx);
     put_net(s->net);
     kfree(s);
 }

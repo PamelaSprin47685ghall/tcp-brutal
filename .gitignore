@@ -272,6 +272,9 @@ host/test_http_live
 host/test_parse_san
 host/test_fuzz_san
 host/test_http_san
+host/test_crypto
+host/test_crypto_san
+host/bench_crypto
 host/test_fec
 host/test_fec_san
 host/test_portmap

@@ -60,8 +60,11 @@ typedef uint64_t u64;
  * hole reset are unchanged. */
 #define TBT_CONV 0x0005u
 
-/* HELLO body[0]: wire-protocol version, independent of TBT_VERSION. */
+/* HELLO body[0]: wire-protocol version, independent of TBT_VERSION. The FEC
+ * v6 session uses version 2 and the extended body below; the old ARQ keeps
+ * version 1 and 23 bytes. */
 #define TBT_WIRE_VERSION 1
+#define TBT_WIRE_VERSION_V6 2
 
 /* ------------------------------------------------------------------ *
  * FEC wire v1: an independent record format, TBT_FEC_CONV 0x1001.
@@ -231,6 +234,10 @@ enum tbt_frame_type
  * zero flags byte; it now names the container, and a peer with a different
  * profile is refused rather than mis-parsed. The frame layout is unchanged. */
 #define TBT_HELLO_BODY_LEN (1 + 1 + 16 + 2 + 2 + 1)              /* 23 */
+/* FEC v6 HELLO: the 23 legacy bytes, then crypto (1), key_id (1),
+ * reserved (1), crypto_nonce[8], key[32] at +23..+65 (T0 §2.3). The old ARQ
+ * never sends this length. */
+#define TBT_HELLO_BODY_LEN_V6 (TBT_HELLO_BODY_LEN + 43)           /* 66 */
 
 /* Fill *min and *max with the body bounds of `type`. Returns false for a type
  * this revision does not define, so an unknown byte can never pass a bound
@@ -266,8 +273,11 @@ static inline bool tbt_body_bounds(u8 type, u16 *min, u16 *max)
         *max = TBT_WINDOW_BODY_LEN;
         return true;
     case TBT_F_HELLO:
+        /* Both the legacy 23-byte and the FEC v6 66-byte body are valid at
+         * the framing layer; tbt_rx_hello() enforces the exact length for the
+         * session's data plane. */
         *min = TBT_HELLO_BODY_LEN;
-        *max = TBT_HELLO_BODY_LEN;
+        *max = TBT_HELLO_BODY_LEN_V6;
         return true;
     default:
         return false;

@@ -387,12 +387,14 @@ static int tbt_parse_srcaddrs(const char *v, struct tbt_cfg *cfg, struct tbt_par
 /* Defined with the action parser below; the tunnel key uses the same
  * 128-bit/64-bit-pin rules as `session <id> nonce=`. */
 static int tbt_parse_nonce(const char *s, u8 out[16]);
+static int tbt_hexval(char c);
 
 static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_error *e)
 {
     char *tok;
     u64 id;
     int have_listen = 0, have_peer = 0, have_target = 0;
+    bool have_crypto = false;
 
     memset(cfg, 0, sizeof(*cfg));
     cfg->profile = 1; /* http-kal: the default is an effective value, not 0 */
@@ -413,6 +415,9 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     cfg->tx_window_bytes = 0; /* auto: the sender derives it from the BDP */
     cfg->tx_retain_bytes = 0; /* unlimited */
     cfg->carrier_stall_ms = 0; /* auto: derived from the measured RTO */
+    /* T0 §2.4: crypto follows fec unless crypto= is explicit. Resolved
+     * after the key loop, because fec= may appear before or after it. */
+    cfg->crypto = 0;
 
     tok = tbt_next_tok(&args);
     if (!tok || tbt_parse_u64(tok, &id) || !id)
@@ -577,11 +582,52 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
                 return tbt_fail(e, key, "nonce must be 16 or 32 hex digits");
             cfg->nonce_set = true;
         }
+        else if (!strcmp(key, "crypto"))
+        {
+            if (!strcmp(val, "on"))
+                cfg->crypto = 1;
+            else if (!strcmp(val, "off"))
+                cfg->crypto = 0;
+            else
+                return tbt_fail(e, key, "crypto must be on or off");
+            have_crypto = true;
+        }
+        else if (!strcmp(key, "crypto_key"))
+        {
+            size_t i;
+
+            /* T0 §4.1: 64 hex digits, or `-` to clear the override. */
+            if (!strcmp(val, "-"))
+            {
+                memset(cfg->crypto_key, 0, sizeof(cfg->crypto_key));
+                cfg->crypto_key_set = false;
+                continue;
+            }
+            if (strlen(val) != 2 * TBT_CRYPTO_KEY_LEN)
+                return tbt_fail(e, key, "crypto_key must be 64 hex digits or -");
+            for (i = 0; i < TBT_CRYPTO_KEY_LEN; i++)
+            {
+                int hi = tbt_hexval(val[2 * i]);
+                int lo = tbt_hexval(val[2 * i + 1]);
+
+                if (hi < 0 || lo < 0)
+                    return tbt_fail(e, key, "crypto_key must be 64 hex digits or -");
+                cfg->crypto_key[i] = (u8)((hi << 4) | lo);
+            }
+            cfg->crypto_key_set = true;
+        }
         else
         {
             return tbt_fail(e, key, "unknown key");
         }
     }
+
+    /* T0 §2.4: crypto defaults to fec; crypto=on with fec=off has no data
+     * plane to hook, so it is a configuration error. */
+    if (!have_crypto)
+        cfg->crypto = cfg->fec;
+    if (cfg->crypto && !cfg->fec)
+        return tbt_fail(e, "crypto", "crypto=on requires fec=on");
 
     if (!cfg->role)
         return tbt_fail(e, "role", "tunnel needs role=near or role=far");
@@ -935,21 +981,35 @@ int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
                 return rc;
         }
     }
-    rc = tbt_addf(buf, size, &off,
-                  " n=%u m=%u dup=%u profile=%s fec=%s mode=%s w=%u carriers=%u"
-                  " keepalive=%u"
-                  " drip_ms=%u replay=%u tunnel_rate=%u"
-                  " max_inflate=%u.%03u hole_budget_ms=%u rx_reorder_bytes=%u"
-                  " tx_window_bytes=%u tx_retain_bytes=%u carrier_stall_ms=%u"
-                  " portblock=%u-%u",
-                  c->n, c->m, c->dup, profiles[c->profile & 3],
-                  fec_modes[c->fec ? 1 : 0], modes[c->mode & 3],
-                  c->w, c->carriers, c->keepalive_ms,
-                  c->drip_ms, c->replay, c->tunnel_rate,
-                  c->max_inflate_milli / 1000, c->max_inflate_milli % 1000,
-                  c->hole_budget_ms, c->rx_reorder_bytes, c->tx_window_bytes,
-                  c->tx_retain_bytes, c->carrier_stall_ms, c->portblock_lo,
-                  c->portblock_hi);
+    {
+        char kb[2 * TBT_CRYPTO_KEY_LEN + 1];
+
+        if (c->crypto_key_set)
+            tbt_fmt_hex(c->crypto_key, sizeof(c->crypto_key), kb);
+        else
+        {
+            kb[0] = '-';
+            kb[1] = '\0';
+        }
+        /* T0 §4.2 order: n m fec mode w carriers crypto crypto_key dup
+         * profile keepalive ... */
+        rc = tbt_addf(buf, size, &off,
+                      " n=%u m=%u fec=%s mode=%s w=%u carriers=%u"
+                      " crypto=%s crypto_key=%s dup=%u profile=%s keepalive=%u"
+                      " drip_ms=%u replay=%u tunnel_rate=%u"
+                      " max_inflate=%u.%03u hole_budget_ms=%u rx_reorder_bytes=%u"
+                      " tx_window_bytes=%u tx_retain_bytes=%u carrier_stall_ms=%u"
+                      " portblock=%u-%u",
+                      c->n, c->m, fec_modes[c->fec ? 1 : 0],
+                      modes[c->mode & 3], c->w, c->carriers,
+                      c->crypto ? "on" : "off", kb, c->dup,
+                      profiles[c->profile & 3], c->keepalive_ms,
+                      c->drip_ms, c->replay, c->tunnel_rate,
+                      c->max_inflate_milli / 1000, c->max_inflate_milli % 1000,
+                      c->hole_budget_ms, c->rx_reorder_bytes, c->tx_window_bytes,
+                      c->tx_retain_bytes, c->carrier_stall_ms, c->portblock_lo,
+                      c->portblock_hi);
+    }
     if (rc)
         return rc;
     if (c->nonce_set)
