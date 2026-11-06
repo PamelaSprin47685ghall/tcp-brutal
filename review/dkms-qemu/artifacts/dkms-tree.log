@@ -1,9 +1,0 @@
-/var/lib/dkms
-/var/lib/dkms/tbtun
-/var/lib/dkms/tbtun/0.0.1
-/var/lib/dkms/tbtun/0.0.1/7.2.9-1-MANJARO
-/var/lib/dkms/tbtun/0.0.1/7.2.9-1-MANJARO/x86_64
-/var/lib/dkms/tbtun/0.0.1/source
-/var/lib/dkms/tbtun/kernel-7.2.9-1-MANJARO-x86_64
-total 4
-drwxr-xr-x 4 root root 4096 Nov  6 01:46 tbtun-0.0.1
