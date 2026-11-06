@@ -414,11 +414,35 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
             else if (now - stall_since_ns > stall_ns)
             {
                 atomic64_inc(&sess->stall_declared);
-                if (debug >= 2)
-                    pr_info_ratelimited("tbtun: carrier stall idx=%u gen=%u una=%u nxt=%u "
-                                        "wmem=%u snd_wnd=%u rcv_wnd=%u state=%u\n",
-                                        c->index, c->gen, una, nxt, wmem, wnd,
-                                        READ_ONCE(tp->rcv_wnd), READ_ONCE(sk->sk_state));
+                if (debug >= 2 && c->dbg_stall_dumped != (u8)(c->gen & 0xff))
+                {
+                    /* One dump per generation. A carrier that stops being
+                     * acknowledged is the WAN's remaining failure mode, and the
+                     * counters above cannot tell a peer that stopped reading
+                     * from a TCP that stopped sending: the queue, the window and
+                     * the retransmit state can. */
+                    c->dbg_stall_dumped = (u8)(c->gen & 0xff);
+                    pr_info("tbtun: carrier stall idx=%u gen=%u state=%u "
+                            "local=%pI4:%u peer=%pI4:%u "
+                            "una=%u nxt=%u write_seq=%u "
+                            "wmem=%u sndbuf=%u rcvbuf=%u "
+                            "snd_wnd=%u rcv_wnd=%u rcv_nxt=%u copied=%u "
+                            "packets_out=%u retrans=%u "
+                            "unacked_ms=%llu\n",
+                            c->index, c->gen, READ_ONCE(sk->sk_state),
+                            &inet_sk(sk)->inet_saddr,
+                            ntohs(inet_sk(sk)->inet_sport),
+                            &inet_sk(sk)->inet_daddr,
+                            ntohs(inet_sk(sk)->inet_dport), una, nxt,
+                            READ_ONCE(tp->write_seq), wmem,
+                            READ_ONCE(sk->sk_sndbuf), READ_ONCE(sk->sk_rcvbuf),
+                            wnd, READ_ONCE(tp->rcv_wnd),
+                            READ_ONCE(tp->rcv_nxt), READ_ONCE(tp->copied_seq),
+                            READ_ONCE(tp->packets_out),
+                            inet_csk(sk)->icsk_retransmits,
+                            (unsigned long long)((now - stall_since_ns) /
+                                                 NSEC_PER_MSEC));
+                }
                 tbt_carrier_lost(sess, c);
                 return;
             }

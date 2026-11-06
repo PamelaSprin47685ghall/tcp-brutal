@@ -954,6 +954,7 @@ struct tbt_carrier
     u8 rx_state;                  /* what our FBK reports for this path */
     u8 profile;                   /* effective container: 1 http-kal, 2 drip, 3 raw */
     u8 peer_gen;                  /* peer's generation for this path (HELLO) */
+    u8 dbg_stall_dumped;          /* debug>=2: the stall dump ran for this gen */
     bool http_started;            /* our request/response header block is on the wire */
     struct mutex http_lock;       /* serialises the one-time header start */
     bool http_hdr_done;           /* peer header parsed; body stage */
