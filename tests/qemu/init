@@ -1874,7 +1874,7 @@ probe_p_churn() {
 }
 
 # --- probe R: link flap, then a newer generation replaces the carrier -------
-# The WAN smoke's carrier-replacement race (30930fc + 42c1522): the near
+# The WAN smoke's carrier-replacement race (30930fc): the near
 # abandons a carrier as soon as its own bytes stop being acknowledged, which
 # can be before the far has noticed anything wrong with that socket. Probe C
 # cannot show it -- `carrier down` runs tbt_carrier_lost() on both ends and the
@@ -1903,8 +1903,9 @@ probe_p_churn() {
 #   - the far's carrier_replaced moves while its own carrier_lost stays 0, so
 #     the slot it replaced was live: only the supersede branch does that;
 #   - the far side's join_dup stays 0 (no duplicate join, no storm);
-#   - the burst comes back byte-exact, so DATA pinned to the replaced carrier
-#     generation was re-queued, not dropped (42c1522).
+#   - the burst comes back byte-exact: the newer generation supersedes the
+#     slot (30930fc), and DATA, which is never pinned, keeps flowing on the
+#     live path.
 R_PORTS="41024-41047"
 # /proc/net/tcp state 01 is TCP_ESTABLISHED. Columns are little-endian hex:
 # local_address is field 2, rem_address field 3, state field 4. The far-side

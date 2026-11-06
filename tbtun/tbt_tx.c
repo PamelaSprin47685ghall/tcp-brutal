@@ -2177,10 +2177,13 @@ int tbt_tx_pump(struct tbt_session *sess)
                     continue;
                 }
                 /* A pinned frame from a carrier that has since been replaced
-                 * must never be written on the replacement, with one exception:
-                 * FIN/RST are stream-level and re-pin to the new generation.
-                 * RETIRE names its victim in the body, so its sender may move
-                 * to another live carrier. */
+                 * must never be written on the replacement, with two
+                 * exceptions: FIN/RST are stream-level and re-pin to the new
+                 * generation, and RETIRE names its victim in the body, so its
+                 * sender may move to another live carrier. DATA never reaches
+                 * this branch: every DATA copy (capture, duplicate and
+                 * retransmit alike) is queued unpinned, and the scheduler
+                 * below picks its path. */
                 if (fr->gen && fr->gen != c->gen)
                 {
                     if (stream_ctl)
@@ -2202,36 +2205,6 @@ int tbt_tx_pump(struct tbt_session *sess)
                             sess->ctl_requeue++;
                             continue;
                         }
-                    }
-                    if (type == TBT_F_DATA)
-                    {
-                        /* A DATA frame is sequence-addressed, not
-                         * path-addressed: the receiver dedups by seq, so a copy
-                         * pinned to a replaced carrier can simply go out on
-                         * whatever path the scheduler picks now. Dropping it
-                         * instead is how a carrier replacement turned into a
-                         * hole that never filled -- the near read bytes off the
-                         * new carriers while rx_delivered stayed at zero
-                         * (measured on the WAN: 62 replacements, rx_read
-                         * growing, rx_delivered=0, holes_unrecoverable=2). */
-                        fr->path = 0xff;
-                        fr->gen = 0;
-                        fr->retry_at_ns = 0;
-                        sess->ctl_requeue++;
-                        /* Move, do not add: this frame is still linked in
-                         * sess->tx_q (the selection loop has not unlinked it
-                         * yet), so list_add_tail() would put one node on two
-                         * lists and corrupt the queue -- the frame then
-                         * reappeared and was written again and again, and every
-                         * copy kicked a feedback frame on the receiver (measured
-                         * on the WAN: fbk_tx 0->15780, the near reading 1 MB for
-                         * a 37-byte ping, real DATA starved). The byte counter
-                         * is untouched because the frame was counted when it was
-                         * first queued and has not been uncounted. */
-                        spin_lock(&sess->tx_lock);
-                        list_move_tail(&fr->list, &sess->tx_q);
-                        spin_unlock(&sess->tx_lock);
-                        continue;
                     }
                     goto drop;
                 }
