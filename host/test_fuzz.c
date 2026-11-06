@@ -276,17 +276,21 @@ static void test_header_ranges(void)
 
     n = rec_make(rec, TBT_F_PAD, 0, 0, 1, 0, 0);
 
-    /* path_id names a carrier: 0..TBT_LEGACY_MAX_CARRIERS-1. The old ARQ
-     * record stays at 16 even though the carrier layer grows to 256. */
+    /* path_id names a carrier, and the carrier layer has 256 slots: a FEC v6
+     * session with carriers=256 sends path_id 16..255. The 16-carrier limit
+     * belongs to the old ARQ's ack fields, not to the index. */
     rec[TBT_H_PATH] = TBT_LEGACY_MAX_CARRIERS - 1;
     case_no++;
-    expect("path_id at the limit", rec, n, TBT_REC_OK);
+    expect("path_id 15", rec, n, TBT_REC_OK);
     rec[TBT_H_PATH] = TBT_LEGACY_MAX_CARRIERS;
     case_no++;
-    expect("path_id over the limit", rec, n, TBT_REC_PROTO);
+    expect("path_id 16", rec, n, TBT_REC_OK);
+    rec[TBT_H_PATH] = 200;
+    case_no++;
+    expect("path_id 200", rec, n, TBT_REC_OK);
     rec[TBT_H_PATH] = 0xff;
     case_no++;
-    expect("path_id 0xff", rec, n, TBT_REC_PROTO);
+    expect("path_id 0xff", rec, n, TBT_REC_OK);
     rec[TBT_H_PATH] = 0;
 
     /* path_ack_count counts feedback entries: 0..TBT_LEGACY_MAX_CARRIERS. */

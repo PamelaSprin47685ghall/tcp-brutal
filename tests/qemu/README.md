@@ -30,7 +30,7 @@ probes, all through the operator surface only (`echo` into `/proc/net/tbtun/*`):
 | K | one carrier's class forced to 100% loss mid-transfer, then restored; byte-exactness |
 | L | FEC v6 over the raw container: `n=4 m=2 carriers=6`, 256 KiB byte-exact |
 | M | FEC v6 over HTTP: `n=4 m=2 carriers=6`, 256 KiB byte-exact |
-| N | FEC v6 grouped over HTTP: `n=4 m=4 carriers=16`, 1 MiB byte-exact (the one 1 MiB case), all 16 carriers up |
+| N | FEC v6 grouped over HTTP, the production shape: `n=4 m=4 carriers=256` (32 groups), 1 MiB byte-exact (the one 1 MiB case), all 256 carriers up, `http_parse_err=0` |
 | P | one small write and one reply with the socket still open (`host/tbt_ping`): 37, 8191, 8192, 8193, 65536 and 262144 bytes, the same 37-byte exchange with `crypto=on`, two connections in one session, and a real HTTP request/response handshake |
 | O | the T5.2 smoke's shape (`profile=http-kal`, `n=1 m=1`, `carriers=2`, `fec=on`, `mode=grouped`) with `crypto=off`, with `crypto=on`, with carrier 0 taken down mid-transfer, and with a 700 ms loopback delay that makes a dial outlive one `kernel_connect` wait window |
 

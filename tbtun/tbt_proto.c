@@ -82,8 +82,14 @@ int tbt_hdr_check(const struct tbt_hdr *h)
         return -EPROTO;
     if (h->flags & ~TBT_FF_MASK)
         return -EPROTO;
-    if (h->path_id >= TBT_LEGACY_MAX_CARRIERS)
-        return -EPROTO;
+    /* `path_id` is a carrier index and every u8 value fits the carrier layer's
+     * 256 slots, so it needs no range check: a FEC v6 session with carriers=256
+     * sends its HELLO/OPEN/FIN/RST with path_id 16..255. The 16-carrier limit
+     * belongs to the old ARQ's per-path ack fields only (`path_ack_mask` is a
+     * u16), so it stays on those. Capping path_id at 16 made every carrier from
+     * 16 up fail its own HELLO encoding: the sender counted http_parse_err and
+     * the carrier never came up (measured: 256 carriers, up=16,
+     * http_parse_err=240). */
     if (h->path_ack_count > TBT_LEGACY_MAX_CARRIERS)
         return -EPROTO;
     if (h->path_ack_mask & ~((1u << TBT_LEGACY_MAX_CARRIERS) - 1))

@@ -333,7 +333,12 @@ frame. It rides the same carriers and the same HTTP container:
   byte offset is the second source when every parity record of that block was
   lost. Padding is never delivered.
 - The old 16-carrier ARQ record and its `path_ack_mask` are unchanged and are
-  used only when `fec=off`.
+  used only when `fec=off`. Its `path_id` is a carrier index and is *not*
+  limited to 16: the carrier layer has 256 slots, and a FEC v6 session with
+  `carriers=256` sends HELLO/OPEN/FIN/RST with `path_id` 16..255. Only the
+  per-path ack fields keep the 16-carrier width. Capping the index at 16 made
+  every carrier from 16 up fail its own HELLO encoding, which surfaced as
+  `http_parse_err` on the sender and `up=16` on both ends.
 
 Properties:
 

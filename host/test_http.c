@@ -1482,6 +1482,31 @@ static void test_skip_header(void)
        "skip refuses a NULL buffer with bytes", NULL);
 }
 
+/* The far's response builder and the near's response parser are the two ends of
+ * one wire contract, and the media type is the part of it that only has to look
+ * like a real upload. This is the module-to-module case: no busybox, no socket,
+ * just the block the far emits read back by the parser the near runs. */
+static void test_far_response_to_near_parser(void)
+{
+    struct tbt_http_resp_cfg cfg = { .unix_secs = 1767225600 }; /* 2026-01-01 */
+    struct tbt_http_resp r = {};
+    char hdr[TBT_HTTP_RESP_MAX];
+    size_t h;
+    int err = -1;
+
+    h = tbt_http_resp_header(hdr, sizeof(hdr), &cfg);
+    ok(h > 0 && h <= sizeof(hdr), "far response builder emits a block", NULL);
+    ok(strstr(hdr, "Content-Type: " TBT_HTTP_CONTENT_TYPE "\r\n") != NULL,
+       "response block names the container media type", TBT_HTTP_CONTENT_TYPE);
+    ok(strstr(hdr, "Content-Encoding") == NULL,
+       "response block sends no Content-Encoding", NULL);
+    ok(tbt_http_resp_parse(hdr, h, &r, &err) == h && err == TBT_HTTP_OK,
+       "near parser accepts the far's response block", NULL);
+    ok(r.status == 200 && r.chunked && r.keep_alive,
+       "accepted response is 200, chunked and keep-alive", NULL);
+    ok(r.header_len == h, "accepted response consumes the whole block", NULL);
+}
+
 static size_t make_resp_msg(char *buf, size_t cap, u64 epoch, const char *body, size_t blen)
 {
     struct tbt_http_resp_cfg cfg = { .unix_secs = epoch };
@@ -3541,6 +3566,7 @@ int main(int argc, char **argv)
     test_req_parse();
     test_skip_header();
     test_msg_loop();
+    test_far_response_to_near_parser();
     test_response();
     test_resp_header();
     test_chunk_encode();

@@ -24,8 +24,8 @@
 #   K. one carrier's class forced to 100% loss mid-transfer, then restored.
 #   L. FEC v6 over the raw container, 256 KiB byte-exact.
 #   M. FEC v6 over the HTTP container, 256 KiB byte-exact.
-#   N. FEC v6 grouped over HTTP, 16 carriers, 1 MiB byte-exact (the one 1 MiB
-#      transfer in the suite).
+#   N. FEC v6 grouped over HTTP in the production shape (256 carriers, 32
+#      groups), 1 MiB byte-exact (the one 1 MiB transfer in the suite).
 #   O. the T5.2 smoke's shape with crypto off, crypto on, a carrier taken down
 #      mid-transfer, and a loopback delay that makes a dial outlive one connect
 #      window.
@@ -63,6 +63,8 @@ C_MIB=${TBT_C_MIB:-1}
 L_BYTES=${TBT_L_BYTES:-262144}
 
 N_MIB=${TBT_N_MIB:-1}
+# 16 by default; the production shape is 256 (32 groups of 8).
+N_CARRIERS=${TBT_N_CARRIERS:-256}
 D_MIB=${TBT_D_MIB:-1}
 # I needs 40 MiB through four shaped carriers; the guest raises its socket
 # buffers first so the strict phase can buffer the echo it has not read yet.
@@ -1166,15 +1168,25 @@ probe_n() {
     # Probe K leaves an 8-port block; two groups of eight need 16 source
     # ports. Give this probe its own block instead of inheriting one sized
     # for the single-group probes.
-    echo 'ports 41024-41055' > "$PORTS" || fail "probe N: ports directive rejected"
-    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=4 m=4 fec=on mode=grouped carriers=16" \
+    echo 'ports 41024-41535' > "$PORTS" || fail "probe N: ports directive rejected"
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=4 m=4 fec=on mode=grouped carriers=$N_CARRIERS" \
         > "$CFG" || fail "grouped FEC-HTTP far tunnel rejected"
-    echo "tunnel 2 role=near profile=http-kal listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=4 m=4 fec=on mode=grouped carriers=16" \
+    echo "tunnel 2 role=near profile=http-kal listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT n=4 m=4 fec=on mode=grouped carriers=$N_CARRIERS" \
         > "$CFG" || fail "grouped FEC-HTTP near tunnel rejected"
-    sleep 1
+    # 256 carriers take a few seconds to all dial and join; the transfer must
+    # start only after the last one, or the super-block walk waits for a group
+    # whose carriers are still connecting.
+    _settle=0
+    while [ "$_settle" -lt 40 ]; do
+        if [ "$(tunnel_stat 1 up)" = "$N_CARRIERS" ] && [ "$(tunnel_stat 2 up)" = "$N_CARRIERS" ]; then
+            break
+        fi
+        sleep 0.5
+        _settle=$((_settle + 1))
+    done
     echo "   tunnels:"; cat /proc/net/tbtun/tunnels
     echo "   peers:"; cat "$PEERS"
-    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$N_MIB" "${TBT_ENDPOINT_TIMEOUT:-20}"
+    /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$N_MIB" "${TBT_ENDPOINT_TIMEOUT:-60}"
     rc=$?
     echo "   stats after: $(cat /proc/net/tbtun/stats)"
     case $rc in
