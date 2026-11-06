@@ -120,10 +120,15 @@ fi
 # the same channel on every kernel.
 printf '%s\n' "$probes" > "$cache/qemu/probes.txt"
 printf '%s\n' "$hostfwd_port" > "$cache/qemu/hostfwd.txt"
+# The 256-carrier data volume is a host knob too, and the guest cannot inherit
+# the caller's environment: it travels as a file, like the probe list. Empty
+# means "leave the guest's own default".
+printf '%s\n' "${TBT_N_MIB:-}" > "$cache/qemu/n_mib.txt"
 
 # shellcheck disable=SC2086
 "$root/tests/qemu/mkinitramfs.sh" --ko "$ko" --out "$initrd" \
     --asset "$cache/qemu/probes.txt" --asset "$cache/qemu/hostfwd.txt" \
+    --asset "$cache/qemu/n_mib.txt" \
     ${init_src:+--init "$init_src"} $bins $assets $net_assets ||
     die "initramfs build failed"
 

@@ -354,6 +354,14 @@ if [ -r /hostfwd.txt ]; then
     _hp=$(tr -d ' \n' < /hostfwd.txt)
     [ -n "$_hp" ] && HOSTFWD_PORT=$_hp
 fi
+# The 256-carrier data volume: an empty or non-numeric file keeps the default.
+if [ -r /n_mib.txt ]; then
+    _nm=$(tr -d ' \n' < /n_mib.txt)
+    case $_nm in
+    '' | *[!0-9]*) ;;
+    *) N_MIB=$_nm ;;
+    esac
+fi
 echo "== tbtun guest: $(uname -r) probes=$PROBES"
 
 # Loopback must be up before anything binds or dials 127.0.0.1. Without it
