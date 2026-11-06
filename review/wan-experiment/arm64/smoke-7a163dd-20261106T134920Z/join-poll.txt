@@ -1,0 +1,1 @@
+--- poll 21:50:11 near_up=2 far_up=2

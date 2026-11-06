@@ -1,0 +1,68 @@
+=== DATE 2026-11-06T21:50:14+08:00
+=== CONFIG
+tunnel 1 role=far listen=0.0.0.0:40000 target=127.0.0.1:5202 n=1 m=1 fec=off mode=rlnc w=2 carriers=2 crypto=off crypto_key=- dup=0 profile=raw keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0 portblock=0-0
+=== PEERS
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+1 0 40000 171.120.34.226:40000 0 860507 0 up raw 0 0 860507 4 151 0 0 12022 19600 65536 85 1048160 1047128 0
+1 1 40000 171.120.34.226:23843 0 343690 0 spare raw 0 0 312936 4 151 0 0 12869 19600 65536 85 1087200 1171456 0
+=== STATS
+debug_loss=0
+gaps_total=0
+streams_total=2
+tunnel 1 capture_runs=3 actor_calls=0 submit_bytes=0 tx=0 wire=302 err=0 short=0
+tunnel 1 rx_work_runs=250 rx_drain_entries=256 rx_drain_bytes=87643 rx_paused_skips=0 rx_adopt_events=2 rx_records=1294 carrier_write_space_runs=2 poll_rescues=0
+tunnel 1 rx_ready_calls=255 rx_reads=250 rx_read_bytes=87643 rx_read_zero=0 rx_resume=0 rx_resume_busy=0 rx_last_drained=68 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=0 rx_delivered=0
+tunnel 1 dbg rcv_nxt=3506235509 copied=3506235508 after=3506235509 qlen=1 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=15 pmoved=8 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=1 pub_wmem=0 pub_una=3604546056 pub_nxt=3604546056 car_wmem=0 car_nxt=284621999 car_copied=284621999 car_rcvbuf=2097152 car_sndbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=21 txwake_busy=12 txwork=11
+tunnel 1 ws_calls=2
+tunnel 1 c3 n=2 up=2 lost=0 replaced=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=1283 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=0 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=200000 una_stall_us=1315348 stall_paused_skips=0 stall_idle_skips=612 stall_declared=0 tx_window=16384 bdp_bytes=1837 k_x100=500 rtt_mean_us=330736 rttvar_us=504052 rtt_max_us=336006 txq_max=82208 win_block=0 win_resume=0 pump_hw_armed=0 pump_hw_fired=0 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0 prov_now=0 prov_peak=1 prov_reject=0 dead_now=0 dead_peak=0
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0 pinned_bad_path=0 close_timeouts=0 close_detaches=0
+tunnel 1 streams streams_active=1 n_streams=1 n_pending=0
+tunnel 1 stream sid=590943879168 state=1 kill=0 attached=0x9 rxq=0 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=1 tgt_err=0 fin_seq=0 fin_q=0 fin_w=0 rst_w=0 rxf=1/1 dage_ms=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c9 fec_proto_fail=0 fec_hdr_crc_fail=0 fec_payload_crc_fail=0 fec_short_tx=0 fec_short_unknown=0 fec_stream_refused=0 fec_drop_window=0 fec_drop_crypto=0 fec_ack_tx=0 fec_ack_rx=0 fec_credit_wait=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=0 dup_bytes=0
+tunnel 1 reconcile live_bytes=302 live_data=0 live_retx=0 retired_bytes=0 retired_data=0 retired_retx=0
+=== DMESG_TBTUN
+[22177.386312] tbtun: tunnel 1 far side uses trust-on-first-use; configure nonce= or peer= to pin it
+[22199.921620] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40000, awaiting HELLO
+[22200.927142] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40001, awaiting HELLO
+[22209.541062] tbtun: unloaded
+[22209.890178] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[22215.693828] tbtun: tunnel 1 far side uses trust-on-first-use; configure nonce= or peer= to pin it
+[22216.106510] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40001, awaiting HELLO
+[22216.567034] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=23836, awaiting HELLO
+[22236.910974] tbtun: unloaded
+[22389.888801] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[22395.603604] tbtun: tunnel 1 far side uses trust-on-first-use; configure nonce= or peer= to pin it
+[22403.251251] tbtun: unloaded
+[22627.547761] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[22630.296977] tbtun: tunnel 1 far side uses trust-on-first-use; configure nonce= or peer= to pin it
+[22661.728532] tbtun: unloaded
+[22682.075783] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[22685.847762] tbtun: tunnel 1 far side uses trust-on-first-use; configure nonce= or peer= to pin it
+[22692.026416] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40001, awaiting HELLO
+[22693.037669] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40000, awaiting HELLO
+[22693.968422] tbtun: unloaded
+[22694.323699] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[22695.914043] tbtun: tunnel 1 far side uses trust-on-first-use; configure nonce= or peer= to pin it
+[22702.259255] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40000, awaiting HELLO
+[22703.268085] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=23841, awaiting HELLO
+[22724.609560] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[22734.475623] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[22734.475649] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[22734.475656] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[22734.475663] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[22734.475744] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[22734.475750] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[22734.475753] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[22734.475757] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[22734.475760] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[22734.475764] tbtun: hole depthfail seq=0 g=1 mask=0x1
+[22754.921228] tbtun: unloaded
+[23052.624853] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[23057.766676] tbtun: tunnel 1 far side uses trust-on-first-use; configure nonce= or peer= to pin it
+[23081.993452] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=23843, awaiting HELLO
+[23083.060977] tbtun: tunnel 1 carrier ACCEPTED lport=40000 rport=40000, awaiting HELLO
