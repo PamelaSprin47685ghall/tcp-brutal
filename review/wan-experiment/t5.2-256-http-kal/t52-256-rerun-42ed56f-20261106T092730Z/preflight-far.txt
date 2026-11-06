@@ -1,0 +1,10 @@
+prod: active active inactive active
+ 09:27:38 up  2:02,  2 users,  load average: 0.18, 0.19, 0.27
+               total        used        free      shared  buff/cache   available
+Mem:             955         367         296           1         438         588
+dmesg-lines 1601
+[ 7308.563386] audit: type=1400 audit(1793957230.437:504): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=29013 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+    PID %CPU COMMAND
+  29274  200 ps -eo pid,pcpu,args --sort=-pcpu
+  29083  4.2 /usr/lib/systemd/systemd --user
+  29256  4.1 bash -c lsmod | grep tbtun && exit 1; ls -d /proc/net/tbtun 2>/dev/null && exit 1; ss -lnt | grep -E ":9000|:5202" && exit 1; echo "prod: $(systemctl is-active frps) $(systemctl is-active caddy) $(systemctl is-active hysteria) $(systemctl is-active xray)"; uptime; free -m | head -2; echo "dmesg-lines $(dmesg | wc -l)"; dmesg | tail -1; ps -eo pid,pcpu,args --sort=-pcpu | head -4
