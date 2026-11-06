@@ -704,6 +704,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **G2 现状（T2.1–T2.4 完成，T2 parent 进行）**：B `w-fec-v6 a767b63` 落地 40B header/ABI、`tbt_fec`、256 carrier slots/portmap（4096；host test 30000–34095）、grouped RLNC host codec；`test_fec 1430/0`、`test_portmap 33999/0`、`parse 412/0`、host/SAN/lint、QEMU A–K 11/11。`fec=on` 仍是 parser/procfs，`tbt_session_create()` 返回 `-EOPNOTSUPP`；数据面等 A/G1 后接。T2.1–T2.4 完成，T2 parent 进行；不合并。
 
+**T2 scope 裁决（2026-11-06，用户）**：**T2 必须支持 HTTP 容器，不能 raw-only**。FEC share/控制帧放进 HTTP chunked body；请求行/头/`Transfer-Encoding: chunked` 保持明文；ChaCha8 只加密 body。raw 仍支持，但 **T5.2 的 256/1G 至少跑 http-kal** 并记录 overhead/吞吐。`fec=on` 拒绝非 raw 的 `-EOPNOTSUPP` 必须在 T2 完成前去掉。host/QEMU 增加 **FEC-over-HTTP** 用例：单组 1MiB 双向 byte-exact、控制帧不排 partial DATA 后。更新 DESIGN/README；**T2 parent 完成条件含 HTTP**。
+
 ### G3 — T3 ChaCha8（C）
 
 | 项 | 内容 |
