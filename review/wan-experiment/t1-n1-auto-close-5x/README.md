@@ -6,7 +6,10 @@ T1 close-drain 的 5 连跑，源码 `w-window 4c58b0e`（父 ddef988），两�
 | 子目录 | sender | 状态 | 说明 |
 |---|---|---|---|
 | `close/` | `adv_probe sendclose 9001 16 1`（16 MiB 后 `close()`） | **5/5 PASS** | 本轮；同一 tunnel 连续 5 轮，每轮 sink 重启 |
-| `shutdown-wr/` | 16 MiB 后 `shutdown(SHUT_WR)`，再读 EOF | 由 hnd0-5x 独立跑 | 与 close 变体互补；结果见该子目录 |
+| `shutdown-wr/` | 16 MiB 后 `shutdown(SHUT_WR)`，再读 EOF | **5/5 PASS** | 与 close 变体互补；commit 08ed3b9 |
+
+`shutdown-wr/` 由 hnd0-5x 独立完成（commit `08ed3b9`，在 `1d35fb5` 之上），
+5/5 PASS；只写 `shutdown-wr/`，未混入 `close/` 或本索引的数据。
 
 `close/` 的门禁：每轮 sink `bytes=16777216 eof=1`；far `rx_delivered`
 每轮 +16,777,216；near `fin_seq=16777216 fin_w=1`；far `fin_w=1 rxf=1/1`；
