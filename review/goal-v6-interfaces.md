@@ -17,6 +17,8 @@
 
 **HND0 清理状态（2026-11-06）**：t52-arm64 确认 HND0 已清理——tbtun rmmod、9000/5202 关闭、echo 停、无测试进程；`/tmp/tbtun-hnd0.lock` 仍被两个 worker（`deploy b41b259…`、`ladder smoke`）持有，未动；`.65` 不可达，锁在 `.65` 上暂无法清（恢复后清 tbtun/ip rule/sysctl/bbr）。T5.2 HOLD；不合并/push。
 
+**`.65` 恢复（2026-11-06）**：arm64-build 报 18:38 ping 通、18:39 SSH 22 通；t52-arm64 按 STOP 不再主动探测。HND0 已清理；`.65` 的锁/模块/sysctl/ip rule/bbr 清理与 smoke 等用户批准后做（若已重启，内核态残留可能已清）。T5.2 HOLD；不合并/push。
+
 | 项 | 冻结值 | 归属 |
 |---|---|---|
 | FEC wire 版本 | `TBT_FEC_CONV = 0x1001`；旧 ARQ 仍是 `TBT_CONV = 0x0005` | B |
