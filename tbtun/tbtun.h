@@ -710,6 +710,7 @@ struct tbt_carrier
     atomic_t connected;           /* socket installed, callbacks live */
     atomic_t up;                  /* HELLO written; usable for scheduling */
     atomic_t stopping;
+    atomic_t rx_again;            /* a wake was coalesced into a running rx */
     bool hello_sent;              /* our HELLO was written on this carrier */
     bool open_sent;               /* this carrier has written at least one OPEN */
     bool saw_hello;               /* the peer's first frame was a HELLO */

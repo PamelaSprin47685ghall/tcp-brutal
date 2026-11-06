@@ -69,6 +69,18 @@ static void tbt_carrier_install_proto(struct sock *sk)
     sk->sk_prot = &tbt_tcp_prot;
 }
 
+/* Queue a receive run without losing a wake that coalesces into a run already
+ * pending or in progress.  schedule_work() returns false when the work item is
+ * already pending, and the byte that triggered this call would then wait for
+ * the next packet -- or forever when the peer is waiting for our reply (the
+ * far's HELLO reply after the near's HELLO).  The bit makes the running work
+ * re-arm itself before it returns. */
+static void tbt_car_schedule_rx(struct tbt_carrier *c)
+{
+    if (!schedule_work(&c->w_rx))
+        atomic_set(&c->rx_again, 1);
+}
+
 static void tbt_car_ready(struct sock *sk)
 {
     struct tbt_carrier *c;
@@ -81,7 +93,7 @@ static void tbt_car_ready(struct sock *sk)
         return;
     }
     atomic64_inc(&c->sess->rx_ready_calls);
-    schedule_work(&c->w_rx);
+    tbt_car_schedule_rx(c);
     read_unlock_bh(&sk->sk_callback_lock);
 }
 
@@ -269,7 +281,7 @@ static void tbt_car_poll_work(struct work_struct *w)
             (READ_ONCE(tcp_sk(psk)->copied_seq) !=
                  READ_ONCE(tcp_sk(psk)->rcv_nxt) ||
              c->parser->have))
-            schedule_work(&c->w_rx);
+            tbt_car_schedule_rx(c);
         schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
         return;
     }
@@ -427,7 +439,7 @@ static void tbt_car_poll_work(struct work_struct *w)
     }
     if (READ_ONCE(tp->copied_seq) != READ_ONCE(tp->rcv_nxt))
     {
-        schedule_work(&c->w_rx);
+        tbt_car_schedule_rx(c);
         rescued = true;
     }
     else if (c->parser->have)
@@ -441,7 +453,7 @@ static void tbt_car_poll_work(struct work_struct *w)
          * (measured: probe J, far fbk_rx=0, tx_ack=0, parser stuck at
          * 98,304, TXSTALLKILL after 5 s; debug=3 passes only because the
          * extra logging slows the sender enough to keep bytes arriving). */
-        schedule_work(&c->w_rx);
+        tbt_car_schedule_rx(c);
         rescued = true;
     }
     if (READ_ONCE(sess->tx_queued))
@@ -528,6 +540,9 @@ static void tbt_car_rx_work(struct work_struct *w)
     int i, drained;
 
     atomic64_inc(&c->sess->rx_work_runs);
+    /* This run reads everything queued at its start; a wake that arrives
+     * later re-sets the bit and is consumed at the end. */
+    atomic_set(&c->rx_again, 0);
     sk = READ_ONCE(c->sk);
     if (atomic_read(&c->stopping) || !sk)
     {
@@ -614,8 +629,14 @@ static void tbt_car_rx_work(struct work_struct *w)
          * record arrives, which is the normal case on a path whose segments
          * are smaller than a record. The 50 ms poll already retries a held
          * record, and sk_data_ready runs this work when the tail arrives. */
-        schedule_work(&c->w_rx);
+        tbt_car_schedule_rx(c);
     }
+
+    /* A wake that coalesced into this run set the bit instead of queueing a
+     * second run.  Consume it here: the peer may be waiting for the reply to
+     * the record this run just parsed (the far's HELLO reply is the first). */
+    if (atomic_xchg(&c->rx_again, 0))
+        tbt_car_schedule_rx(c);
 
     /* Parsing may have enqueued a control frame (OPEN, FBK). The enqueue
      * already asked w_tx to drain it; never pump from this work item, because
@@ -1517,7 +1538,7 @@ static void tbt_car_connect_work(struct work_struct *w)
      * work unconditionally, exactly as the accept side does, or the HELLO sits
      * in the receive queue and the carrier never comes up (measured: probe I,
      * the near dialled 73 carriers, every far accept waited for HELLO). */
-    schedule_work(&c->w_rx);
+    tbt_car_schedule_rx(c);
     schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
     pr_info("tbtun: tunnel %llu carrier %u DIALED lport=%u peer=%pI4:%u\n", t->cfg.id,
             c->index, ntohs(inet_sk(s->sk)->inet_sport), &t->cfg.peer_addr,
@@ -1579,17 +1600,13 @@ void tbt_carrier_resume(struct tbt_session *sess)
         c = READ_ONCE(sess->car[i]);
         if (c && READ_ONCE(c->sk) && !atomic_read(&c->stopping))
         {
-            if (!schedule_work(&c->w_rx))
-                atomic64_inc(&sess->rx_resume_busy);
+            tbt_car_schedule_rx(c);
         }
     }
     list_for_each_entry(c, &sess->prov, node)
     {
         if (READ_ONCE(c->sk) && !atomic_read(&c->stopping))
-        {
-            if (!schedule_work(&c->w_rx))
-                atomic64_inc(&sess->rx_resume_busy);
-        }
+            tbt_car_schedule_rx(c);
     }
     spin_unlock(&sess->lock);
 }
@@ -1682,7 +1699,7 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
     WARN_ON_ONCE(newsock->sk->sk_data_ready != tbt_car_ready);
     WARN_ON_ONCE(newsock->sk->sk_prot == &tcp_prot);
     schedule_delayed_work(&c->w_poll, msecs_to_jiffies(50));
-    schedule_work(&c->w_rx);
+    tbt_car_schedule_rx(c);
     pr_info("tbtun: tunnel %llu carrier ACCEPTED lport=%u rport=%u, awaiting HELLO\n",
             t->cfg.id, ntohs(inet_sk(newsock->sk)->inet_sport),
             ntohs(inet_sk(newsock->sk)->inet_dport));
