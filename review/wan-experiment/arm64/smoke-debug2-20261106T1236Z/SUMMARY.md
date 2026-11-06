@@ -75,3 +75,26 @@ FAR (HND0):
   listeners; route to 45.11.1.62 back to Meta table 2022 (original state).
 - Evidence: pre1/mid1/post2 {near,far}.txt (config+peers+stats), dmesg-links-near.txt,
   dmesg-tbtun-far.txt, this SUMMARY.md. No 8/16/256, no push.
+
+## Stall / TXSTALLKILL logs (debug=2, near dmesg — requested by goal-integrator)
+
+```
+[ 7311.091959] tbtun: TXSTALLKILL sid=700180332544 ack=0 txseq=37 age_us=7302680175
+[ 7325.871787] tbtun: TXSTALLKILL sid=700180332545 ack=0 txseq=37 age_us=7317469391
+[ 7329.591702] tbtun: carrier stall idx=0 gen=4 una=2102924354 nxt=2102924386 wmem=1312 snd_wnd=1047968 rcv_wnd=65536 state=1
+[ 7332.738332] tbtun: carrier stall idx=1 gen=3 una=778678519 nxt=778678552 wmem=1313 snd_wnd=1048064 rcv_wnd=65536 state=1
+```
+
+Reading:
+- BOTH ping streams (sid …244 ping#1, …245 ping#2) were TXSTALLKILLed with `ack=0 txseq=37`:
+  near sent each 37 B request but never received a carrier-layer ACK from far, even though far's
+  app side received both requests (far rx_delivered=74) and echoed them (far submit_bytes=74).
+- carrier stall idx=0 **gen=4**, idx=1 **gen=3**: carriers had already been replaced 3–4 times;
+  `nxt-una=32` (only 32 B unacked), `wmem=1312` (send buffer nearly empty), `snd_wnd≈1 MiB`,
+  `rcv_wnd=65536`, `state=1` — NOT a window/buffer problem; the far side simply never ACKs/writes
+  back on these generations.
+- near rx_read_bytes still grew (220→762) with rx_proto=0/rx_errs=0: frames arrive at near's
+  carrier sockets but belong to retired generations / never complete a stream ACK, so they are
+  not delivered (rx_delivered=0) and not counted as errors.
+- This is the concrete RETIRE-vs-replacement signature: stream bound to carrier gen N, carrier
+  replaced to gen N+1, far→near DATA/ACK on gen N+1 never matches the stream's expected generation.
