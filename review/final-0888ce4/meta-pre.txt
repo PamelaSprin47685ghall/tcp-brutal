@@ -1,0 +1,12 @@
+2026-11-06T09:17:18+08:00
+head 0888ce40e439ea9e4f947b8694dcfc6d0785e027
+parent 8980c03a3886539afa877e9bcc94b05ab7e6c12d
+branch w-window
+## w-window
+ D review/dkms-qemu/artifacts/guest-tbtun.ko.sha256
+?? benches/results/20261106T042000-wan-carriers.csv
+--- ko (pre-rebuild) ---
+a6e459f6d8790e2cb85f8710aefaa861ea3d556ed9d9029cd841a0c78129eea5  tbtun.ko
+version:        0.0.1
+srcversion:     711422E4053E3F13B89BD4E
+vermagic:       7.2.9-1-MANJARO SMP preempt mod_unload 

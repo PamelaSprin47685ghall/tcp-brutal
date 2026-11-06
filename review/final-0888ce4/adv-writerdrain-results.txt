@@ -1,0 +1,3 @@
+ADV_RESULT pub.writer_drain PASS sha=a6e459f6d8790e2c attempted 100 MiB with a draining reader: sent=104857600/104857600 got=104857600/104857600 errno=0/0 eagain=0 blocked=0 secs=0.69 mbps=144.5 mem_before=384124 mem_during_min=290976 mem_after_flush=369016 flush_secs=0.01 oom=0->0
+ADV_RESULT pub.writer_drain_1g PASS sha=a6e459f6d8790e2c attempted 1024 MiB with a draining reader: sent=1073741824/1073741824 got=1073741824/1073741824 errno=0/0 eagain=0 blocked=0 secs=6.86 mbps=149.2 mem_before=402924 mem_during_min=243476 mem_after_flush=371488 flush_secs=0.01 oom=0->0
+ADV_RESULT ctl.close_flush PASS sha=a6e459f6d8790e2c the guest survived the close flush (console: /home/kunweiz/tbtun-worktrees/window/adversarial/crash-console.log)

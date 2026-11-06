@@ -328,7 +328,7 @@ check_carrier_buffers() {
     missing=""
     grep -q 'http_hdr = kmalloc(TBT_HTTP_HDR_MAX' "$f" || missing="$missing http_hdr"
     grep -q 'http_rx = kmalloc' "$f" || missing="$missing http_rx"
-    grep -q 'part = kmalloc(TBT_REC_MAX' "$f" || missing="$missing part"
+    grep -Eq 'part = kmalloc\((TBT_REC_MAX|TBT_CAR_PART_MAX)' "$f" || missing="$missing part"
     grep -q 'parser = kmalloc' "$f" || missing="$missing parser"
     grep -q '!c->http_rx' "$f" || missing="$missing http_rx-guard"
     [ -z "$missing" ] && return 0

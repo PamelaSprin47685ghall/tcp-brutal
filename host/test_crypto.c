@@ -1219,6 +1219,92 @@ static void test_pair(void)
     }
 }
 
+/* Parity shares of one block share (seq, parity) and differ only by
+ * share_index; the per-share variant must mix it into the nonce. */
+static void test_body_share(void)
+{
+    u8 key[32];
+    u8 nonce[8];
+    u8 payload[1024];
+    u8 a[1024];
+    u8 b[1024];
+    struct tbt_crypto_ctx ctx;
+    u64 seq = 77;
+
+    fill(key, sizeof(key), 0x81);
+    fill(nonce, sizeof(nonce), 0x82);
+    fill(payload, sizeof(payload), 0x83);
+
+    if (tbt_crypto_init(&ctx, key, nonce, 0) != 0)
+    {
+        printf("FAIL share: init error\n");
+        failures++;
+        return;
+    }
+
+    memcpy(a, payload, sizeof(a));
+    memcpy(b, payload, sizeof(b));
+    if (tbt_crypto_body_xor_share(&ctx, seq, true, 0, a, sizeof(a)) != 0 ||
+        tbt_crypto_body_xor_share(&ctx, seq, true, 1, b, sizeof(b)) != 0)
+    {
+        printf("FAIL share: xor error\n");
+        failures++;
+        return;
+    }
+    if (memcmp(a, b, sizeof(a)) == 0)
+    {
+        printf("FAIL share: parity shares reused the keystream\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS share: parity share_index separates the keystream\n");
+    }
+
+    if (tbt_crypto_body_xor_share(&ctx, seq, true, 0, a, sizeof(a)) != 0 ||
+        memcmp(a, payload, sizeof(a)) != 0 ||
+        tbt_crypto_body_xor_share(&ctx, seq, true, 1, b, sizeof(b)) != 0 ||
+        memcmp(b, payload, sizeof(b)) != 0)
+    {
+        printf("FAIL share: parity round trip failed\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS share: parity shares round trip\n");
+    }
+
+    /* DATA is unique by seq; the share argument must not change it. */
+    memcpy(a, payload, sizeof(a));
+    memcpy(b, payload, sizeof(b));
+    if (tbt_crypto_body_xor_share(&ctx, seq, false, 3, a, sizeof(a)) != 0 ||
+        tbt_crypto_body_xor(&ctx, seq, false, b, sizeof(b)) != 0 ||
+        memcmp(a, b, sizeof(a)) != 0)
+    {
+        printf("FAIL share: DATA path changed with share_index\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS share: DATA path is independent of share_index\n");
+    }
+
+    /* share_index 0 is the base parity stream. */
+    memcpy(a, payload, sizeof(a));
+    memcpy(b, payload, sizeof(b));
+    tbt_crypto_body_xor_share(&ctx, seq, true, 0, a, sizeof(a));
+    tbt_crypto_body_xor(&ctx, seq, true, b, sizeof(b));
+    if (memcmp(a, b, sizeof(a)) != 0)
+    {
+        printf("FAIL share: share 0 differs from the base parity stream\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS share: share 0 is the base parity stream\n");
+    }
+}
+
 /* The full key path the session will use: each side fills its own HELLO v6
  * with its own TX nonce, parses the peer's, and keeps tx/rx contexts. */
 static void test_session_path(void)
@@ -1369,6 +1455,7 @@ int main(void)
     test_invalid_args();
     test_wipe();
     test_body_xor();
+    test_body_share();
     test_hello();
     test_direction_nonce();
     test_pair();

@@ -1,0 +1,4 @@
+a6e459f6d8790e2cb85f8710aefaa861ea3d556ed9d9029cd841a0c78129eea5  tbtun.ko
+version:        0.0.1
+srcversion:     711422E4053E3F13B89BD4E
+vermagic:       7.2.9-1-MANJARO SMP preempt mod_unload 

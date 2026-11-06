@@ -275,6 +275,10 @@ host/test_http_san
 host/test_crypto
 host/test_crypto_san
 host/bench_crypto
+host/test_fec
+host/test_fec_san
+host/test_portmap
+host/test_portmap_san
 # guest traffic checker (tests/qemu/mkinitramfs.sh)
 host/tbt_burst
 tests/probe/*.o

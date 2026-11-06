@@ -60,8 +60,102 @@ typedef uint64_t u64;
  * hole reset are unchanged. */
 #define TBT_CONV 0x0005u
 
-/* HELLO body[0]: wire-protocol version, independent of TBT_VERSION. */
+/* HELLO body[0]: wire-protocol version, independent of TBT_VERSION. The FEC
+ * v6 session uses version 2 and the extended body below; the old ARQ keeps
+ * version 1 and 23 bytes. */
 #define TBT_WIRE_VERSION 1
+#define TBT_WIRE_VERSION_V6 2
+
+/* ------------------------------------------------------------------ *
+ * FEC wire v1: an independent record format, TBT_FEC_CONV 0x1001.
+ *
+ * The old ARQ record above is frozen at 16 carriers: its path_ack_mask is
+ * u16 and its FBK/WINDOW bodies have 16 entries. FEC never reuses those
+ * fields. A receiver tells the two formats apart by the first header byte:
+ * old records start with 0x10..0x25, FEC records with 0x30..0x35 or 0x23.
+ * The conv field is checked too, so a wrong-format byte stream fails closed.
+ *
+ * T0 frozen layout (little-endian, 40 bytes):
+ *   +0  u8  type        0x30 DATA, 0x31 PARITY, 0x32 ACK, 0x33 NACK,
+ *                       0x34 FEC_CFG, 0x35 FEC_FBK, 0x23 PAD
+ *   +1  u8  flags       bit0 LAST; every other bit must be zero
+ *   +2  u16 share_index 0..n+m-1; u16 so n+m=256 is representable
+ *   +4  u8  n           data shares in the block
+ *   +5  u8  m           parity shares in the block
+ *   +6  u16 epoch       rate epoch
+ *   +8  u64 block_id    block/window identity chosen by the sender
+ *   +16 u64 seq         DATA: packet sequence; PARITY: window end
+ *   +24 u16 win_len     PARITY: covered packets; DATA: 0
+ *   +26 u16 payload_len payload bytes following this header
+ *   +28 u16 conv        0x1001
+ *   +30 u16 reserved    must be 0
+ *   +32 u32 payload_crc32c  CRC32C over the payload only
+ *   +36 u32 header_crc32c   CRC32C over header bytes +0..+35
+ *
+ * A receiver checks conv, type and length first, then header_crc32c, then
+ * payload_crc32c. It never uses a field from a header that failed either CRC.
+ * Control frames are complete records of their own and must never be queued
+ * behind a partial DATA record (the carrier writer emits each record whole).
+ * ------------------------------------------------------------------ */
+#define TBT_FEC_CONV 0x1001u
+
+/* FEC record types. */
+#define TBT_FEC_DATA 0x30
+#define TBT_FEC_PARITY 0x31
+#define TBT_FEC_ACK 0x32
+#define TBT_FEC_NACK 0x33
+#define TBT_FEC_CFG 0x34
+#define TBT_FEC_FBK 0x35
+#define TBT_FEC_PAD 0x23
+
+/* FEC header flags: bit0 LAST, all others reserved and refused. */
+#define TBT_FEC_FF_LAST 0x01
+#define TBT_FEC_FF_MASK 0x01
+
+/* FEC header field offsets and size. */
+#define TBT_FEC_HDR_LEN 40
+#define TBT_FEC_H_TYPE 0
+#define TBT_FEC_H_FLAGS 1
+#define TBT_FEC_H_SHARE 2
+#define TBT_FEC_H_N 4
+#define TBT_FEC_H_M 5
+#define TBT_FEC_H_EPOCH 6
+#define TBT_FEC_H_BLOCK 8
+#define TBT_FEC_H_SEQ 16
+#define TBT_FEC_H_WINLEN 24
+#define TBT_FEC_H_PAYLEN 26
+#define TBT_FEC_H_CONV 28
+#define TBT_FEC_H_RESERVED 30
+#define TBT_FEC_H_PAYCRC 32
+#define TBT_FEC_H_HDRCRC 36
+
+/* FEC payload and record bounds. S is the configured packet size, at most
+ * TBT_FEC_PAYLOAD_MAX. A full record is header plus payload. */
+#define TBT_FEC_PAYLOAD_MAX 8192
+#define TBT_FEC_REC_MAX (TBT_FEC_HDR_LEN + TBT_FEC_PAYLOAD_MAX) /* 8232 */
+#define TBT_FEC_CHUNK_MAX (TBT_FEC_REC_MAX + 4) /* hex size line + CRLF slack */
+
+/* Share and carrier limits. shares = n + m <= 256; 1 share per carrier in
+ * the production shape, so the carrier bitmap has one bit per share. */
+#define TBT_FEC_MAX_SHARES 256
+#define TBT_FEC_MAX_CARRIERS 256
+#define TBT_FEC_BITMAP_BYTES (TBT_FEC_MAX_CARRIERS / 8) /* 32 */
+#define TBT_FEC_MAX_W 1024
+#define TBT_FEC_MAX_D 256
+#define TBT_FEC_MAX_GROUPS 256
+#define TBT_FEC_NACK_MAX_ITEMS 64
+
+/* Control-frame payload lengths. */
+#define TBT_FEC_ACK_LEN 16
+#define TBT_FEC_NACK_ENTRY_LEN 12
+#define TBT_FEC_NACK_MAX (TBT_FEC_PAYLOAD_MAX / TBT_FEC_NACK_ENTRY_LEN)
+#define TBT_FEC_CFG_LEN 32
+#define TBT_FEC_FBK_LEN 48
+
+/* Old ARQ keeps its 16-slot wire limit even though the carrier layer grows to
+ * 256 slots. Every old wire field that was sized by the carrier count uses
+ * this constant, never TBT_MAX_CARRIERS_LIMIT. */
+#define TBT_LEGACY_MAX_CARRIERS 16
 
 /* Frame types (DESIGN.md §3.3). */
 enum tbt_frame_type
@@ -110,7 +204,7 @@ enum tbt_frame_type
 #define TBT_PAYLOAD_MAX 8192
 #define TBT_REC_MAX (TBT_HDR_LEN + TBT_PAYLOAD_MAX) /* one record on the wire */
 #define TBT_CHUNK_MAX 8228 /* chunk-data ceiling; a full record is TBT_REC_MAX */
-#define TBT_MAX_CARRIERS_LIMIT 16 /* path_ack_mask is 16 bits */
+#define TBT_MAX_CARRIERS_LIMIT 256 /* carrier slots; old ARQ caps at 16 */
 
 /* Body length bounds per frame type (DESIGN.md §3.3, "Payload layouts").
  * tbt_hdr_check() accepts a type only if tbt_body_bounds() knows it and the
@@ -128,18 +222,22 @@ enum tbt_frame_type
  *   +14 u32 rtt_us
  */
 #define TBT_FBK_ENTRY_LEN 18
-#define TBT_FBK_MAX (TBT_FBK_ENTRY_LEN * TBT_MAX_CARRIERS_LIMIT) /* 288 */
+#define TBT_FBK_MAX (TBT_FBK_ENTRY_LEN * TBT_LEGACY_MAX_CARRIERS) /* 288 */
 #define TBT_FBK_PATH 0     /* offsets within one entry */
 #define TBT_FBK_RXSTATE 1
 #define TBT_FBK_UACK 2
 #define TBT_FBK_RECVCNT 10
 #define TBT_FBK_RTT 14
-#define TBT_WINDOW_BODY_LEN (8 + 8 * TBT_MAX_CARRIERS_LIMIT + 2) /* 138 */
+#define TBT_WINDOW_BODY_LEN (8 + 8 * TBT_LEGACY_MAX_CARRIERS + 2) /* 138 */
 /* HELLO body: u8 ver; u8 role; u8 nonce[16]; u16 payload_max; u16 chunk_max;
  * u8 profile (1 http-kal, 2 http-kal-drip, 3 raw). The last byte used to be a
  * zero flags byte; it now names the container, and a peer with a different
  * profile is refused rather than mis-parsed. The frame layout is unchanged. */
 #define TBT_HELLO_BODY_LEN (1 + 1 + 16 + 2 + 2 + 1)              /* 23 */
+/* FEC v6 HELLO: the 23 legacy bytes, then crypto (1), key_id (1),
+ * reserved (1), crypto_nonce[8], key[32] at +23..+65 (T0 §2.3). The old ARQ
+ * never sends this length. */
+#define TBT_HELLO_BODY_LEN_V6 (TBT_HELLO_BODY_LEN + 43)           /* 66 */
 
 /* Fill *min and *max with the body bounds of `type`. Returns false for a type
  * this revision does not define, so an unknown byte can never pass a bound
@@ -175,8 +273,11 @@ static inline bool tbt_body_bounds(u8 type, u16 *min, u16 *max)
         *max = TBT_WINDOW_BODY_LEN;
         return true;
     case TBT_F_HELLO:
+        /* Both the legacy 23-byte and the FEC v6 66-byte body are valid at
+         * the framing layer; tbt_rx_hello() enforces the exact length for the
+         * session's data plane. */
         *min = TBT_HELLO_BODY_LEN;
-        *max = TBT_HELLO_BODY_LEN;
+        *max = TBT_HELLO_BODY_LEN_V6;
         return true;
     default:
         return false;
@@ -202,7 +303,8 @@ static inline bool tbt_body_bounds(u8 type, u16 *min, u16 *max)
  * change fails the build. */
 #define TBT_PEERS_COLUMNS \
     "id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm " \
-    "minrtt_us tx_frames tx_bytes dropped retx_ppm"
+    "minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes " \
+    "snd_wnd wscale rcv_wnd window_clamp rmem_alloc"
 
 /* /proc/net/tbtun/tunnels: one line per tunnel, columns in exactly this order.
  * A near tunnel prints "-" in the target column, so every row has 9 columns. */

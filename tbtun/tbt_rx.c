@@ -31,6 +31,31 @@
 #include "tbtun.h"
 #include "tbt_rec.h"
 
+/* The receiver's hole budget. Explicit config wins; auto is k x SRTT with
+ * k's upper bound (5), floored at 2 s. The floor must cover the carrier TCP's
+ * own RTO backoff, not one RTO: a lost retransmit already waits 200 + 400 +
+ * 800 ms, and the tunnel's missing record can only be resent after the
+ * carrier recovers. A 1 s floor reset probe J's stream at 1.005 s while the
+ * carrier was still recovering (full A-K sequence, 1% loss + 2% reorder),
+ * although the sender's own stall budget is max(5 s, 5 x RTO) and would have
+ * repaired it. The receiver must not be tighter than the repair it waits for.
+ * rtt_mean_us is 0 until the pump has a sample, so a fresh session gets the
+ * floor. */
+#define TBT_RX_HOLE_FLOOR_US 2000000ULL
+
+static u64 tbt_rx_hole_budget_ns(struct tbt_session *sess)
+{
+    u32 ms = sess->tunnel->cfg.hole_budget_ms;
+    u64 us;
+
+    if (ms)
+        return (u64)ms * NSEC_PER_MSEC;
+    us = 5ULL * READ_ONCE(sess->rtt_mean_us);
+    if (us < TBT_RX_HOLE_FLOOR_US)
+        us = TBT_RX_HOLE_FLOOR_US;
+    return us * NSEC_PER_USEC;
+}
+
 /* Move every tree frame that continues the contiguous run into rx_q. Called
  * with rx_lock held. */
 static void tbt_rx_pull_locked(struct tbt_stream *st)
@@ -54,6 +79,7 @@ static void tbt_rx_pull_locked(struct tbt_stream *st)
             rb_erase_cached(&fr->rb, &st->rx_tree);
             st->rx_ooo_bytes -= fr->len;
             st->rx_ooo_frames--;
+            atomic64_sub(fr->len, &st->sess->rx_ooo_total);
             kfree(fr);
             continue;
         }
@@ -64,6 +90,7 @@ static void tbt_rx_pull_locked(struct tbt_stream *st)
             rb_erase_cached(&fr->rb, &st->rx_tree);
             st->rx_ooo_bytes -= fr->len;
             st->rx_ooo_frames--;
+            atomic64_sub(fr->len, &st->sess->rx_ooo_total);
             list_add_tail(&fr->list, &st->rx_q);
             st->rx_queued += fr->len;
             st->rx_next = fr->hdr.seq + fr->len;
@@ -78,6 +105,7 @@ static void tbt_rx_pull_locked(struct tbt_stream *st)
             rb_erase_cached(&fr->rb, &st->rx_tree);
             st->rx_ooo_bytes -= fr->len;
             st->rx_ooo_frames--;
+            atomic64_sub(fr->len, &st->sess->rx_ooo_total);
             fr->off += dup;
             fr->hdr.seq = st->rx_next;
             list_add_tail(&fr->list, &st->rx_q);
@@ -131,6 +159,7 @@ static bool tbt_rx_tree_insert_locked(struct tbt_stream *st, struct tbt_frame *f
     rb_insert_color_cached(&fr->rb, &st->rx_tree, leftmost);
     st->rx_ooo_bytes += fr->len;
     st->rx_ooo_frames++;
+    atomic64_add(fr->len, &st->sess->rx_ooo_total);
     if (st->rx_ooo_frames > st->rx_max_depth)
         st->rx_max_depth = st->rx_ooo_frames;
     return true;
@@ -247,7 +276,14 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
             st->hole_since_ns = ktime_get_ns();
         if (hdr->flags & TBT_FF_LOW_PRIO)
             atomic64_inc(&sess->dup_used);
-        if (st->rx_ooo_bytes > st->rx_limit)
+        /* Two bounds: one stream's tree, and the session's whole tree. The
+         * per-stream limit alone would let 128 streams hold 128 x the
+         * configured budget; the session total is what makes the memory
+         * bound explainable. A concurrent insert on another stream can
+         * overshoot by at most one frame before this check fires. */
+        if (st->rx_ooo_bytes > st->rx_limit ||
+            atomic64_read(&sess->rx_ooo_total) >
+                sess->tunnel->cfg.rx_reorder_bytes)
             kill = true;
     }
     /* The ack is the contiguous *received* offset: it bounds the sender's
@@ -273,6 +309,60 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
  * delivered offset is what the sender's window and retention use; every path
  * carries the same value, so "every live path acked past" reduces to the
  * session-wide maximum, which is monotone. */
+/* FEC v6 delivery: the decoder has already put the block's packets in order.
+ * Reuse the stream's rx_q/rx_tree so the output socket and the FIN path see
+ * one byte space; `off` is the packet's byte offset (seq * S). */
+int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len)
+{
+    struct tbt_frame *fr;
+    bool queued = false;
+
+    if (!st || !len)
+        return 0;
+    if (off > U64_MAX - len)
+        return -EPROTO;
+    fr = kmalloc(struct_size(fr, data, len), GFP_ATOMIC);
+    if (!fr)
+        return -ENOMEM;
+    INIT_LIST_HEAD(&fr->list);
+    fr->len = len;
+    fr->off = 0;
+    memset(&fr->hdr, 0, sizeof(fr->hdr));
+    fr->hdr.seq = off;
+    fr->st = NULL;
+    memcpy(fr->data, data, len);
+
+    spin_lock_bh(&st->rx_lock);
+    if (off + len <= st->rx_next)
+    {
+        spin_unlock_bh(&st->rx_lock);
+        kfree(fr);
+        return 0;
+    }
+    if (off == st->rx_next)
+    {
+        list_add_tail(&fr->list, &st->rx_q);
+        st->rx_queued += len;
+        st->rx_next = off + len;
+        tbt_rx_pull_locked(st);
+        queued = true;
+    }
+    else if (!tbt_rx_tree_insert_locked(st, fr))
+    {
+        spin_unlock_bh(&st->rx_lock);
+        kfree(fr);
+        return 0;
+    }
+    else if (!st->hole_since_ns)
+    {
+        st->hole_since_ns = ktime_get_ns();
+    }
+    spin_unlock_bh(&st->rx_lock);
+    if (queued)
+        schedule_work(&st->w_drain);
+    return 0;
+}
+
 static int tbt_rx_fbk(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *body)
 {
     struct tbt_session *sess = c->sess;
@@ -366,6 +456,11 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
             st->rx_fin_seq = hdr->seq;
         }
         spin_unlock_bh(&st->rx_lock);
+        /* FEC delivers whole blocks; if the final block's parity and LAST
+         * flag were both lost, the FIN offset is the only remaining statement
+         * of how many packets the stream holds. */
+        if (sess->fec)
+            tbt_fec_rx_fin(sess, hdr->seq);
         WRITE_ONCE(st->sack_dirty, true);
         /* The drain shuts the write side once rx_next reaches the FIN's seq
          * and every earlier byte has been delivered. */
@@ -422,6 +517,79 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
     }
 }
 
+/* Crypto fields of a FEC v6 HELLO. The session lock serializes the one-time
+ * key adoption and rx-context init: several carriers may present HELLO at the
+ * same time. body_xor() is read-only after init, so the data paths do not take
+ * this lock. */
+static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
+                               size_t len)
+{
+    bool enabled = false;
+    u8 key_id = TBT_CRYPTO_KEY_ID_NONE;
+    u8 peer_nonce[TBT_CRYPTO_NONCE_LEN];
+    u8 hello_key[TBT_CRYPTO_KEY_LEN];
+    u8 key[TBT_CRYPTO_KEY_LEN];
+    int err = 0;
+
+    if (tbt_crypto_hello_parse(body, len, &enabled, &key_id, peer_nonce,
+                               hello_key))
+        return -EPROTO;
+
+    spin_lock(&sess->lock);
+    if (enabled != sess->crypto)
+    {
+        err = -EPROTO;
+        goto out;
+    }
+    if (!enabled)
+        goto out;
+
+    if (tbt_crypto_resolve_key(sess->crypto_have_key, sess->crypto_key,
+                               enabled, key_id, hello_key, key))
+    {
+        err = -EPROTO;
+        goto out;
+    }
+    if (!sess->crypto_have_key)
+    {
+        /* Far side: adopt the near's key. Its own TX context was waiting for
+         * exactly this. */
+        memcpy(sess->crypto_key, key, sizeof(sess->crypto_key));
+        sess->crypto_have_key = true;
+        if (tbt_crypto_init(&sess->crypto_ctx.tx, key, sess->crypto_tx_nonce, 0))
+        {
+            err = -EPROTO;
+            goto out;
+        }
+        smp_store_release(&sess->crypto_tx_ready, true);
+    }
+    else if (memcmp(sess->crypto_key, key, sizeof(key)) != 0)
+    {
+        err = -EPROTO;
+        goto out;
+    }
+
+    if (sess->crypto_ready)
+    {
+        /* Every carrier of one session repeats the same TX nonce. */
+        if (memcmp(sess->crypto_rx_nonce, peer_nonce, sizeof(peer_nonce)) != 0)
+            err = -EPROTO;
+        goto out;
+    }
+
+    memcpy(sess->crypto_rx_nonce, peer_nonce, sizeof(peer_nonce));
+    if (tbt_crypto_init(&sess->crypto_ctx.rx, key, peer_nonce, 0))
+    {
+        err = -EPROTO;
+        goto out;
+    }
+    smp_store_release(&sess->crypto_ready, true);
+
+out:
+    spin_unlock(&sess->lock);
+    return err;
+}
+
 /* Validate HELLO, adopt or check the nonce, and join the far side's slot. */
 int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
 {
@@ -430,7 +598,8 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
     u8 want_role = t->cfg.role == TBT_ROLE_NEAR ? TBT_ROLE_FAR : TBT_ROLE_NEAR;
     int err;
 
-    if (h->body_len != TBT_HELLO_BODY_LEN || body[0] != TBT_WIRE_VERSION ||
+    if (h->body_len != (sess->fec ? TBT_HELLO_BODY_LEN_V6 : TBT_HELLO_BODY_LEN) ||
+        body[0] != (sess->fec ? TBT_WIRE_VERSION_V6 : TBT_WIRE_VERSION) ||
         body[1] != want_role)
         return -EPROTO;
     /* The last HELLO byte names the container. Both ends derive the expected
@@ -452,6 +621,14 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
     }
     if (tbt_le16(body + 18) != TBT_PAYLOAD_MAX || tbt_le16(body + 20) != TBT_CHUNK_MAX)
         return -EPROTO;
+
+    if (sess->fec)
+    {
+        int cerr = tbt_rx_hello_crypto(sess, body, h->body_len);
+
+        if (cerr)
+            return cerr;
+    }
 
     if (t->cfg.role == TBT_ROLE_FAR)
     {
@@ -667,8 +844,57 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
         {
             struct tbt_rec rec;
             int derr = 0;
-            size_t n = tbt_http_frame_decode(c->http_rx, p->buf, p->have, &rec, &derr);
+            size_t n;
 
+            if (sess->fec)
+            {
+                const u8 *frec = NULL;
+                size_t flen = 0;
+                int ferr = TBT_RX_NEED_MORE;
+
+                n = tbt_http_fec_frame_decode(c->http_rx, p->buf, p->have, &frec,
+                                              &flen, &ferr);
+                p->have -= n;
+                memmove(p->buf, p->buf + n, p->have);
+                if (ferr == TBT_RX_OK)
+                {
+                    int err;
+
+                    if (frec[0] >= TBT_FEC_DATA && frec[0] <= TBT_FEC_FBK)
+                    {
+                        if (!c->saw_hello)
+                            return -EPROTO;
+                        err = tbt_fec_rx_record(c, (u8 *)frec, flen);
+                    }
+                    else
+                    {
+                        struct tbt_rec orec;
+                        int rerr = TBT_REC_PROTO;
+                        size_t used = tbt_rec_scan(frec, flen, &orec, &rerr);
+
+                        if (rerr != TBT_REC_OK || used != flen)
+                            return -EPROTO;
+                        err = tbt_http_record(c, &orec);
+                    }
+                    if (err)
+                        return err;
+                    continue;
+                }
+                if (ferr == TBT_RX_NEED_MORE)
+                {
+                    if (tbt_http_rx_done(c->http_rx))
+                    {
+                        tbt_http_rx_new_message(c->http_rx);
+                        c->http_hdr_done = false;
+                        c->http_have = 0;
+                    }
+                    break;
+                }
+                atomic64_inc(&sess->http_parse_err);
+                return -EPROTO;
+            }
+
+            n = tbt_http_frame_decode(c->http_rx, p->buf, p->have, &rec, &derr);
             p->have -= n;
             memmove(p->buf, p->buf + n, p->have);
             if (derr == TBT_RX_OK)
@@ -712,8 +938,32 @@ static int tbt_rx_parse_raw(struct tbt_carrier *c)
     {
         struct tbt_rec rec;
         int st = TBT_REC_NEED_MORE;
-        size_t used = tbt_rec_scan(p->buf, p->have, &rec, &st);
+        size_t used;
 
+        /* FEC v6 records start with 0x30..0x35; the old 32-byte header never
+         * does. Parse the 40-byte record here and leave the old scanner
+         * untouched, so a mixed carrier (HELLO/OPEN/FIN + FEC shares) works. */
+        if (p->have && tbt_fec_record_type(p->buf[0]))
+        {
+            size_t need = 0;
+            int fst = tbt_fec_record_len(p->buf, p->have, &need);
+            int ferr;
+
+            if (fst == TBT_REC_NEED_MORE)
+                break;
+            if (fst == TBT_REC_PROTO)
+                return -EPROTO;
+            if (!c->saw_hello)
+                return -EPROTO;
+            ferr = tbt_fec_rx_record(c, p->buf, need);
+            if (ferr)
+                return ferr;
+            p->have -= need;
+            memmove(p->buf, p->buf + need, p->have);
+            continue;
+        }
+
+        used = tbt_rec_scan(p->buf, p->have, &rec, &st);
         if (st == TBT_REC_NEED_MORE)
             break;
         if (st == TBT_REC_PROTO)
@@ -916,8 +1166,7 @@ void tbt_rx_check_hole(struct tbt_stream *st)
     budget_bytes = sess->tunnel->cfg.rx_reorder_bytes;
     if (budget_bytes < TBT_HOLE_BUDGET_BYTES)
         budget_bytes = TBT_HOLE_BUDGET_BYTES;
-    if (now - st->hole_since_ns >
-            (u64)sess->tunnel->cfg.hole_budget_ms * NSEC_PER_MSEC ||
+    if (now - st->hole_since_ns > tbt_rx_hole_budget_ns(sess) ||
         st->rx_ooo_bytes > budget_bytes)
     {
         age = now - st->hole_since_ns;
@@ -933,6 +1182,59 @@ void tbt_rx_check_hole(struct tbt_stream *st)
                     st->rx_ooo_bytes, budget_bytes, st->rx_queued);
         atomic64_inc(&sess->holes_unrecoverable);
         tbt_stream_kill(st, TBT_ST_HOLE);
+    }
+}
+
+/* The peer has closed its write side (its FIN is in), so no more bytes will
+ * arrive; the ready queue can only shrink.  If it does not, the output socket
+ * has stopped accepting bytes -- the target or application stopped reading --
+ * and the FIN that ends the handshake can never be delivered.  The stream
+ * would then pin both ends and the output socket until the session dies.
+ *
+ * The test is progress, not queue depth: a slow reader that keeps consuming
+ * is never cut, and one large frame in flight is not a stall.  The check is
+ * gated on rx_fin_seen so ordinary backpressure before a close is never
+ * treated as a dead peer.  The FBK tick is the only caller, so the marks need
+ * no lock. */
+void tbt_rx_deliver_stall_check(struct tbt_stream *st)
+{
+    struct tbt_session *sess = st->sess;
+    u64 delivered = READ_ONCE(st->rx_delivered);
+    u64 now = ktime_get_ns();
+
+    if (READ_ONCE(st->state) == TBT_ST_DEAD ||
+        !READ_ONCE(st->rx_fin_seen) || READ_ONCE(st->rx_fin_done) ||
+        !READ_ONCE(st->rx_queued))
+    {
+        st->deliver_mark = delivered;
+        st->deliver_since_ns = 0;
+        return;
+    }
+    if (delivered != st->deliver_mark)
+    {
+        st->deliver_mark = delivered;
+        st->deliver_since_ns = 0;
+        return;
+    }
+    atomic64_inc(&sess->dbg_deliver_checks);
+    if (!st->deliver_since_ns)
+    {
+        st->deliver_since_ns = now;
+        /* Rule out a missed wake before calling the target dead. */
+        tbt_sock_kick(st);
+        return;
+    }
+    if (now > st->deliver_since_ns &&
+        now - st->deliver_since_ns > tbt_tx_wait_budget_ns(sess, st))
+    {
+        if (debug >= 2)
+            pr_info("tbtun: DELIVERTIMEOUT sid=%llu rxq=%u delivered=%llu age_us=%llu\n",
+                    (unsigned long long)st->sid, READ_ONCE(st->rx_queued),
+                    delivered,
+                    (now - st->deliver_since_ns) / NSEC_PER_USEC);
+        st->deliver_since_ns = 0;
+        atomic64_inc(&sess->deliver_timeouts);
+        tbt_stream_kill(st, TBT_ST_DEAD);
     }
 }
 
@@ -968,6 +1270,7 @@ void tbt_rx_free_queue(struct tbt_stream *st)
         rb_erase_cached(&fr->rb, &st->rx_tree);
         kfree(fr);
     }
+    atomic64_sub(st->rx_ooo_bytes, &st->sess->rx_ooo_total);
     st->rx_queued = 0;
     st->rx_ooo_bytes = 0;
     st->rx_ooo_frames = 0;

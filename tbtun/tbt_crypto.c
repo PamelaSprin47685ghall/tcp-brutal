@@ -429,9 +429,35 @@ int tbt_crypto_body_xor(struct tbt_crypto_ctx *c, u64 seq, bool parity,
         return -EINVAL;
 
     /* T0 §2.4: (seq << 8) | (parity << 7) | block. The block index is the
-     * low 7 bits and advances with the stream; len <= 8192 = 128 blocks. */
-    tbt_crypto_set_counter(c, (seq << 8) | (parity ? 0x80u : 0u));
-    return tbt_crypto_xor(c, payload, len);
+     * low 7 bits and advances with the stream; len <= 8192 = 128 blocks.
+     * Use xor_at, not set_counter+xor: several carriers parse RX records
+     * concurrently and share this context, so the call must not mutate the
+     * streaming counter or the buffered block. */
+    return tbt_crypto_xor_at(c, (seq << 8) | (parity ? 0x80u : 0u), payload,
+                             len);
+}
+
+int tbt_crypto_body_xor_share(struct tbt_crypto_ctx *c, u64 seq, bool parity,
+                              u16 share_index, u8 *payload, u16 len)
+{
+    struct tbt_crypto_ctx tmp;
+
+    if (c == NULL)
+        return -EINVAL;
+    if (!parity)
+        return tbt_crypto_body_xor(c, seq, false, payload, len);
+    if (!c->ready)
+        return 0;
+    if (len > TBT_CRYPTO_BODY_MAX || seq > TBT_CRYPTO_SEQ_MAX)
+        return -EINVAL;
+    if (len != 0 && payload == NULL)
+        return -EINVAL;
+
+    /* Copy the key schedule, fold share_index into the nonce word, and use
+     * the same counter space as body_xor. xor_at() does not touch c. */
+    tmp = *c;
+    tmp.state[15] ^= (u32)share_index;
+    return tbt_crypto_xor_at(&tmp, (seq << 8) | 0x80u, payload, len);
 }
 
 void tbt_crypto_wipe(struct tbt_crypto_ctx *c)

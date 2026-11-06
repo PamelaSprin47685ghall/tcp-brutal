@@ -1,0 +1,1780 @@
+c[?7l[2J[0mSeaBIOS (version Arch Linux 1.17.0-2-2)
+
+
+iPXE (http://ipxe.org) 00:02.0 C000 PCI2.10 PnP PMM+1EFD3E30+1EF33E30 C000
+Press Ctrl-B to configure iPXE (PCI 00:02.0)...                                                                               
+
+
+Booting from ROM...
+Probing EDD (edd=off to disable)... oc[?7l[2J[    0.000000] Linux version 7.2.9-1-MANJARO (linux72@manjaro) (gcc (GCC) 16.2.1 20260810, GNU ld (GNU Binutils) 2.47) #1 SMP PREEMPT_DYNAMIC Sat, 03 Oct 2026 15:02:22 +0000
+[    0.000000] Command line: console=ttyS0 panic=-1 loglevel=7 tsc=unstable tbt_probes=A,B,C,D,E,F,G,H,I,J,K
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009fbff]  System RAM
+[    0.000000] BIOS-e820: [mem 0x000000000009fc00-0x000000000009ffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000000a0000-0x00000000000effff]
+[    0.000000] BIOS-e820: [mem 0x00000000000f0000-0x00000000000fffff]  device reserved
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x000000001ffdffff]  System RAM
+[    0.000000] BIOS-e820: [mem 0x000000001ffe0000-0x000000001fffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x0000000020000000-0x00000000feffbfff]
+[    0.000000] BIOS-e820: [mem 0x00000000feffc000-0x00000000feffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x00000000ff000000-0x00000000fffbffff]
+[    0.000000] BIOS-e820: [mem 0x00000000fffc0000-0x00000000ffffffff]  device reserved
+[    0.000000] BIOS-e820: [gap 0x0000000100000000-0x000000fcffffffff]
+[    0.000000] BIOS-e820: [mem 0x000000fd00000000-0x000000ffffffffff]  device reserved
+[    0.000000] NX (Execute Disable) protection: active
+[    0.000000] APIC: Static calls initialized
+[    0.000000] DMI: SMBIOS 2.8 present.
+[    0.000000] DMI: QEMU Standard PC (i440FX + PIIX, 1996), BIOS Arch Linux 1.17.0-2-2 04/01/2014
+[    0.000000] DMI: Memory slots populated: 1/1
+[    0.000000] Hypervisor detected: KVM
+[    0.000000] last_pfn = 0x1ffe0 max_arch_pfn = 0x400000000
+[    0.000000] kvm-clock: Using msrs 4b564d01 and 4b564d00
+[    0.000000] kvm-clock: using sched offset of 133866933 cycles
+[    0.000002] clocksource: kvm-clock: mask: 0xffffffffffffffff max_cycles: 0x1cd42e4dffb, max_idle_ns: 881590591483 ns
+[    0.000005] tsc: Detected 3992.500 MHz processor
+[    0.000119] last_pfn = 0x1ffe0 max_arch_pfn = 0x400000000
+[    0.000158] MTRR map: 4 entries (3 fixed + 1 variable; max 19), built from 8 variable MTRRs
+[    0.000161] x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+[    0.002080] found SMP MP-table at [mem 0x000f66c0-0x000f66cf]
+[    0.002094] Using GB pages for direct mapping
+[    0.002171] RAMDISK: [mem 0x1fa44000-0x1ffdffff]
+[    0.002177] ACPI: Early table checksum verification disabled
+[    0.002179] ACPI: RSDP 0x00000000000F64F0 000014 (v00 BOCHS )
+[    0.002182] ACPI: RSDT 0x000000001FFE235B 000034 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002185] ACPI: FACP 0x000000001FFE2207 000074 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002188] ACPI: DSDT 0x000000001FFE0040 0021C7 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002190] ACPI: FACS 0x000000001FFE0000 000040
+[    0.002191] ACPI: APIC 0x000000001FFE227B 000080 (v03 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002193] ACPI: HPET 0x000000001FFE22FB 000038 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002194] ACPI: WAET 0x000000001FFE2333 000028 (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.002195] ACPI: Reserving FACP table memory at [mem 0x1ffe2207-0x1ffe227a]
+[    0.002196] ACPI: Reserving DSDT table memory at [mem 0x1ffe0040-0x1ffe2206]
+[    0.002196] ACPI: Reserving FACS table memory at [mem 0x1ffe0000-0x1ffe003f]
+[    0.002196] ACPI: Reserving APIC table memory at [mem 0x1ffe227b-0x1ffe22fa]
+[    0.002197] ACPI: Reserving HPET table memory at [mem 0x1ffe22fb-0x1ffe2332]
+[    0.002197] ACPI: Reserving WAET table memory at [mem 0x1ffe2333-0x1ffe235a]
+[    0.002526] No NUMA configuration found
+[    0.002527] Faking a node at [mem 0x0000000000000000-0x000000001ffdffff]
+[    0.002534] NODE_DATA(0) allocated [mem 0x1fa18f80-0x1fa43fff]
+[    0.003096] ACPI: PM-Timer IO Port: 0x608
+[    0.003109] ACPI: LAPIC_NMI (acpi_id[0xff] dfl dfl lint[0x1])
+[    0.003136] IOAPIC[0]: apic_id 0, version 17, address 0xfec00000, GSI 0-23
+[    0.003139] ACPI: INT_SRC_OVR (bus 0 bus_irq 0 global_irq 2 dfl dfl)
+[    0.003141] ACPI: INT_SRC_OVR (bus 0 bus_irq 5 global_irq 5 high level)
+[    0.003142] ACPI: INT_SRC_OVR (bus 0 bus_irq 9 global_irq 9 high level)
+[    0.003142] ACPI: INT_SRC_OVR (bus 0 bus_irq 10 global_irq 10 high level)
+[    0.003143] ACPI: INT_SRC_OVR (bus 0 bus_irq 11 global_irq 11 high level)
+[    0.003145] ACPI: Using ACPI (MADT) for SMP configuration information
+[    0.003146] ACPI: HPET id: 0x8086a201 base: 0xfed00000
+[    0.003149] TSC deadline timer available
+[    0.003152] CPU topo: Max. logical packages:   1
+[    0.003153] CPU topo: Max. logical nodes:      1
+[    0.003153] CPU topo: Num. nodes per package:  1
+[    0.003168] CPU topo: Max. logical dies:       1
+[    0.003169] CPU topo: Max. dies per package:   1
+[    0.003194] CPU topo: Max. threads per core:   1
+[    0.003195] CPU topo: Num. cores per package:     2
+[    0.003195] CPU topo: Num. threads per package:   2
+[    0.003196] CPU topo: Allowing 2 present CPUs plus 0 hotplug CPUs
+[    0.003212] kvm-guest: APIC: eoi() replaced with kvm_guest_apic_eoi_write()
+[    0.003236] kvm-guest: KVM setup pv remote TLB flush
+[    0.003240] kvm-guest: setup PV sched yield
+[    0.003249] PM: hibernation: Registered nosave memory: [mem 0x00000000-0x00000fff]
+[    0.003251] PM: hibernation: Registered nosave memory: [mem 0x0009f000-0x000fffff]
+[    0.003253] [gap 0x20000000-0xfeffbfff] available for PCI devices
+[    0.003255] Booting paravirtualized kernel on KVM
+[    0.003257] clocksource: refined-jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1910969940391419 ns
+[    0.008141] Zone ranges:
+[    0.008142]   DMA      [mem 0x0000000000001000-0x0000000000ffffff]
+[    0.008144]   DMA32    [mem 0x0000000001000000-0x000000001ffdffff]
+[    0.008145]   Normal   empty
+[    0.008145]   Device   empty
+[    0.008146] Movable zone start for each node
+[    0.008147] Early memory node ranges
+[    0.008147]   node   0: [mem 0x0000000000001000-0x000000000009efff]
+[    0.008148]   node   0: [mem 0x0000000000100000-0x000000001ffdffff]
+[    0.008149] Initmem setup node 0 [mem 0x0000000000001000-0x000000001ffdffff]
+[    0.008219] On node 0, zone DMA: 1 pages in unavailable ranges
+[    0.008229] On node 0, zone DMA: 97 pages in unavailable ranges
+[    0.008647] On node 0, zone DMA32: 32 pages in unavailable ranges
+[    0.008653] setup_percpu: NR_CPUS:8192 nr_cpumask_bits:2 nr_cpu_ids:2 nr_node_ids:1
+[    0.008783] percpu: Embedded 63 pages/cpu s221184 r8192 d28672 u1048576
+[    0.008818] kvm-guest: PV spinlocks enabled
+[    0.008820] PV qspinlock hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.008824] Kernel command line: console=ttyS0 panic=-1 loglevel=7 tsc=unstable tbt_probes=A,B,C,D,E,F,G,H,I,J,K
+[    0.008857] tsc: Marking TSC unstable due to boot parameter
+[    0.008866] Unknown kernel command line parameters "tbt_probes=A,B,C,D,E,F,G,H,I,J,K", will be passed to user space.
+[    0.009056] random: crng init done
+[    0.009057] printk: log buffer data + meta data: 131072 + 557056 = 688128 bytes
+[    0.009066] Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.009071] Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.009099] Fallback order for Node 0: 0 
+[    0.009101] Built 1 zonelists, mobility grouping on.  Total pages: 130942
+[    0.009101] Policy zone: DMA32
+[    0.009172] mem auto-init: stack:all(zero), heap alloc:on, heap free:off
+[    0.009813] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=2, Nodes=1
+[    0.018962] ftrace: allocating 58866 entries in 232 pages
+[    0.018966] ftrace: allocated 232 pages with 4 groups
+[    0.019027] Dynamic Preempt: full
+[    0.019131] rcu: Preemptible hierarchical RCU implementation.
+[    0.019132] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=2.
+[    0.019133] rcu: 	RCU priority boosting: priority 1 delay 500 ms.
+[    0.019134] 	Trampoline variant of Tasks RCU enabled.
+[    0.019134] 	Rude variant of Tasks RCU enabled.
+[    0.019134] 	Tracing variant of Tasks RCU enabled.
+[    0.019135] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.019136] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=2
+[    0.019140] RCU Tasks: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=2.
+[    0.019142] RCU Tasks Rude: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=2.
+[    0.024075] NR_IRQS: 524544, nr_irqs: 440, preallocated irqs: 16
+[    0.024264] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.024273] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    0.024423] kfence: initialized - using 2097152 bytes for 255 objects at 0x(____ptrval____)-0x(____ptrval____)
+[    0.024543] Console: colour *CGA 80x25
+[    0.024594] printk: legacy console [ttyS0] enabled
+[    0.179235] ACPI: Core revision 20260408
+[    0.180180] clocksource: hpet: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604467 ns
+[    0.182249] APIC: Switch to symmetric I/O mode setup
+[    0.183517] x2apic enabled
+[    0.184358] APIC: Switched APIC routing to: physical x2apic
+[    0.185524] kvm-guest: APIC: send_IPI_mask() replaced with kvm_send_ipi_mask()
+[    0.187056] kvm-guest: APIC: send_IPI_mask_allbutself() replaced with kvm_send_ipi_mask_allbutself()
+[    0.188947] kvm-guest: setup PV IPIs
+[    0.190503] ..TIMER: vector=0x30 apic1=0 pin1=2 apic2=-1 pin2=-1
+[    0.191676] Calibrating delay loop (skipped) preset value.. 7985.00 BogoMIPS (lpj=3992500)
+[    0.192776] x86/cpu: User Mode Instruction Prevention (UMIP) activated
+[    0.193744] Last level iTLB entries: 4KB 512, 2MB 255, 4MB 127
+[    0.194677] Last level dTLB entries: 4KB 512, 2MB 255, 4MB 127, 1GB 0
+[    0.195684] mitigations: Enabled attack vectors: user_kernel, user_user, guest_host, guest_guest, SMT mitigations: auto
+[    0.196677] Speculative Store Bypass: Mitigation: Speculative Store Bypass disabled via prctl
+[    0.197678] Transient Scheduler Attacks: Mitigation: Clear CPU buffers
+[    0.198678] Spectre V2 : Mitigation: Enhanced / Automatic IBRS
+[    0.199679] Speculative Return Stack Overflow: Mitigation: Safe RET
+[    0.200679] Spectre V1 : Mitigation: usercopy/swapgs barriers and __user pointer sanitization
+[    0.201700] Spectre V2 : Enabling IBPB for BPF
+[    0.202678] Spectre V2 : mitigation: Enabling conditional Indirect Branch Prediction Barrier
+[    0.203678] active return thunk: srso_alias_return_thunk
+[    0.204701] x86/fpu: Supporting XSAVE feature 0x001: 'x87 floating point registers'
+[    0.205680] x86/fpu: Supporting XSAVE feature 0x002: 'SSE registers'
+[    0.206679] x86/fpu: Supporting XSAVE feature 0x004: 'AVX registers'
+[    0.207681] x86/fpu: Supporting XSAVE feature 0x020: 'AVX-512 opmask'
+[    0.208681] x86/fpu: Supporting XSAVE feature 0x040: 'AVX-512 Hi256'
+[    0.209684] x86/fpu: Supporting XSAVE feature 0x080: 'AVX-512 ZMM_Hi256'
+[    0.210684] x86/fpu: Supporting XSAVE feature 0x200: 'Protection Keys User registers'
+[    0.211682] x86/fpu: Supporting XSAVE feature 0x800: 'Control-flow User registers'
+[    0.212682] x86/fpu: Supporting XSAVE feature 0x1000: 'Control-flow Kernel registers (KVM only)'
+[    0.213682] x86/fpu: xstate_offset[2]:  576, xstate_sizes[2]:  256
+[    0.214680] x86/fpu: xstate_offset[5]:  832, xstate_sizes[5]:   64
+[    0.215680] x86/fpu: xstate_offset[6]:  896, xstate_sizes[6]:  512
+[    0.216680] x86/fpu: xstate_offset[7]: 1408, xstate_sizes[7]: 1024
+[    0.217680] x86/fpu: xstate_offset[9]: 2432, xstate_sizes[9]:    8
+[    0.218679] x86/fpu: xstate_offset[11]: 2440, xstate_sizes[11]:   16
+[    0.219680] x86/fpu: xstate_offset[12]: 2456, xstate_sizes[12]:   24
+[    0.220688] x86/fpu: Enabled xstate features 0x1ae7, context size is 2480 bytes, using 'compacted' format.
+[    0.250259] pid_max: default: 32768 minimum: 301
+[    0.250787] landlock: Up and running.
+[    0.251679] Yama: becoming mindful.
+[    0.253141] LSM support for eBPF active
+[    0.253741] Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.254680] Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.255760] VFS: Finished mounting rootfs on nullfs
+[    0.256944] smpboot: CPU0: AMD Ryzen 9 7940HS w/ Radeon 780M Graphics (family: 0x19, model: 0x74, stepping: 0x1)
+[    0.257880] Performance Events: Fam17h+ core perfctr, AMD PMU driver.
+[    0.258687] ... version:                   2
+[    0.259561] ... bit width:                 48
+[    0.259679] ... generic counters:          6
+[    0.260683] ... generic bitmap:            000000000000003f
+[    0.261679] ... fixed-purpose counters:    0
+[    0.262520] ... fixed-purpose bitmap:      0000000000000000
+[    0.262683] ... value mask:                0000ffffffffffff
+[    0.263685] ... max period:                00007fffffffffff
+[    0.264679] ... global_ctrl mask:          000000000000003f
+[    0.265765] signal: max sigframe size: 3376
+[    0.266701] rcu: Hierarchical SRCU implementation.
+[    0.267679] rcu: 	Max phase no-delay instances is 400.
+[    0.268727] Timer migration: 1 hierarchy levels; 8 children per group; 1 crossnode level
+[    0.274626] smp: Bringing up secondary CPUs ...
+[    0.274804] smpboot: x86: Booting SMP configuration:
+[    0.275687] .... node  #0, CPUs:      #1
+[    0.275827] smp: Brought up 1 node, 2 CPUs
+[    0.277521] smpboot: Total of 2 processors activated (15970.00 BogoMIPS)
+[    0.277973] Memory: 440852K/523768K available (22162K kernel code, 3079K rwdata, 17572K rodata, 4936K init, 5020K bss, 77876K reserved, 0K cma-reserved)
+[    0.278909] devtmpfs: initialized
+[    0.279675] x86/mm: Memory block size: 128MB
+[    0.282074] posixtimers hash table entries: 1024 (order: 2, 16384 bytes, linear)
+[    0.283683] futex hash table entries: 512 (32768 bytes on 1 NUMA nodes, total 32 KiB, linear).
+[    0.285775] xor: automatically using best checksumming function   avx       
+[    0.286915] PM: RTC time: 01:43:52, date: 2026-11-06
+[    0.289038] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.289813] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    0.291694] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    0.292687] audit: initializing netlink subsys (disabled)
+[    0.293721] audit: type=2000 audit(1793929432.879:1): state=initialized audit_enabled=0 res=1
+[    0.305264] thermal_sys: Registered thermal governor 'fair_share'
+[    0.305267] thermal_sys: Registered thermal governor 'bang_bang'
+[    0.305680] thermal_sys: Registered thermal governor 'step_wise'
+[    0.306684] thermal_sys: Registered thermal governor 'user_space'
+[    0.307680] thermal_sys: Registered thermal governor 'power_allocator'
+[    0.308740] cpuidle: using governor ladder
+[    0.310530] cpuidle: using governor menu
+[    0.311709] Freeing SMP alternatives memory: 60K
+[    0.312779] acpiphp: ACPI Hot Plug PCI Controller Driver version: 0.5
+[    0.314010] PCI: Using configuration type 1 for base access
+[    0.314684] PCI: Using configuration type 1 for extended access
+[    0.315675] virt/tdx: TDX not supported by the host platform
+[    0.316724] kprobes: kprobe jump-optimization is enabled. All kprobes are optimized if possible.
+[    0.325687] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    0.326680] HugeTLB: 16380 KiB vmemmap can be freed for a 1.00 GiB page
+[    0.327681] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.333679] HugeTLB: 28 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.340196] raid6: using avx512x2 recovery algorithm
+[    0.341688] raid6: skipped pq benchmark and selected avx512x4
+[    0.342830] ACPI: Added _OSI(Module Device)
+[    0.343679] ACPI: Added _OSI(Processor Device)
+[    0.344536] ACPI: Added _OSI(Processor Aggregator Device)
+[    0.346835] ACPI: 1 ACPI AML tables successfully acquired and loaded
+[    0.347915] ACPI: \_SB_: platform _OSC: OS support mask [006e7eff]
+[    0.349827] ACPI: Interpreter enabled
+[    0.350549] ACPI: PM: (supports S0 S3 S4 S5)
+[    0.350679] ACPI: Using IOAPIC for interrupt routing
+[    0.351769] PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+[    0.353679] PCI: Using E820 reservations for host bridge windows
+[    0.354791] ACPI: Enabled 2 GPEs in block 00 to 0F
+[    0.358446] ACPI: PCI Root Bridge [PCI0] (domain 0000 [bus 00-ff])
+[    0.360075] acpiphp: Slot [2] registered
+[    0.360701] acpiphp: Slot [3] registered
+[    0.361469] acpiphp: Slot [4] registered
+[    0.362700] acpiphp: Slot [5] registered
+[    0.363462] acpiphp: Slot [6] registered
+[    0.363700] acpiphp: Slot [7] registered
+[    0.364471] acpiphp: Slot [8] registered
+[    0.365703] acpiphp: Slot [9] registered
+[    0.366473] acpiphp: Slot [10] registered
+[    0.366708] acpiphp: Slot [11] registered
+[    0.367522] acpiphp: Slot [12] registered
+[    0.368709] acpiphp: Slot [13] registered
+[    0.369513] acpiphp: Slot [14] registered
+[    0.370712] acpiphp: Slot [15] registered
+[    0.371577] acpiphp: Slot [16] registered
+[    0.371725] acpiphp: Slot [17] registered
+[    0.372574] acpiphp: Slot [18] registered
+[    0.373711] acpiphp: Slot [19] registered
+[    0.374556] acpiphp: Slot [20] registered
+[    0.375702] acpiphp: Slot [21] registered
+[    0.376513] acpiphp: Slot [22] registered
+[    0.376699] acpiphp: Slot [23] registered
+[    0.377493] acpiphp: Slot [24] registered
+[    0.378704] acpiphp: Slot [25] registered
+[    0.379527] acpiphp: Slot [26] registered
+[    0.379700] acpiphp: Slot [27] registered
+[    0.380472] acpiphp: Slot [28] registered
+[    0.381701] acpiphp: Slot [29] registered
+[    0.382480] acpiphp: Slot [30] registered
+[    0.383700] acpiphp: Slot [31] registered
+[    0.384492] PCI host bridge to bus 0000:00
+[    0.384686] pci_bus 0000:00: root bus resource [io  0x0000-0x0cf7 window]
+[    0.386684] pci_bus 0000:00: root bus resource [io  0x0d00-0xffff window]
+[    0.387681] pci_bus 0000:00: root bus resource [mem 0x000a0000-0x000bffff window]
+[    0.389681] pci_bus 0000:00: root bus resource [mem 0x20000000-0xfebfffff window]
+[    0.390679] pci_bus 0000:00: root bus resource [mem 0x100000000-0x17fffffff window]
+[    0.392707] pci_bus 0000:00: root bus resource [bus 00-ff]
+[    0.393906] pci 0000:00:00.0: [8086:1237] type 00 class 0x060000 conventional PCI endpoint
+[    0.396340] pci 0000:00:01.0: [8086:7000] type 00 class 0x060100 conventional PCI endpoint
+[    0.398290] pci 0000:00:01.1: [8086:7010] type 00 class 0x010180 conventional PCI endpoint
+[    0.400436] pci 0000:00:01.1: BAR 4 [io  0xc020-0xc02f]
+[    0.401730] pci 0000:00:01.1: BAR 0 [io  0x01f0-0x01f7]: legacy IDE quirk
+[    0.403680] pci 0000:00:01.1: BAR 1 [io  0x03f6]: legacy IDE quirk
+[    0.404680] pci 0000:00:01.1: BAR 2 [io  0x0170-0x0177]: legacy IDE quirk
+[    0.405679] pci 0000:00:01.1: BAR 3 [io  0x0376]: legacy IDE quirk
+[    0.407923] pci 0000:00:01.3: [8086:7113] type 00 class 0x068000 conventional PCI endpoint
+[    0.409112] pci 0000:00:01.3: quirk: [io  0x0600-0x063f] claimed by PIIX4 ACPI
+[    0.410689] pci 0000:00:01.3: quirk: [io  0x0700-0x070f] claimed by PIIX4 SMB
+[    0.412103] pci 0000:00:02.0: [1af4:1000] type 00 class 0x020000 conventional PCI endpoint
+[    0.414689] pci 0000:00:02.0: BAR 0 [io  0xc000-0xc01f]
+[    0.416689] pci 0000:00:02.0: BAR 1 [mem 0xfebc0000-0xfebc0fff]
+[    0.417715] pci 0000:00:02.0: BAR 4 [mem 0xfebfc000-0xfebfffff 64bit pref]
+[    0.418690] pci 0000:00:02.0: ROM [mem 0xfeb80000-0xfebbffff pref]
+[    0.427663] ACPI: PCI: Interrupt link LNKA configured for IRQ 10
+[    0.428815] ACPI: PCI: Interrupt link LNKB configured for IRQ 10
+[    0.430805] ACPI: PCI: Interrupt link LNKC configured for IRQ 11
+[    0.431820] ACPI: PCI: Interrupt link LNKD configured for IRQ 11
+[    0.432749] ACPI: PCI: Interrupt link LNKS configured for IRQ 9
+[    0.434693] iommu: Default domain type: Translated
+[    0.435681] iommu: DMA domain TLB invalidation policy: lazy mode
+[    0.436986] SCSI subsystem initialized
+[    0.437755] ACPI: bus type USB registered
+[    0.438744] usbcore: registered new interface driver usbfs
+[    0.439712] usbcore: registered new interface driver hub
+[    0.441686] usbcore: registered new device driver usb
+[    0.442714] EDAC MC: Ver: 3.0.0
+[    0.443801] NetLabel: Initializing
+[    0.444450] NetLabel:  domain hash size = 128
+[    0.444679] NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO
+[    0.445693] NetLabel:  unlabeled traffic allowed by default
+[    0.446684] mctp: management component transport protocol core
+[    0.447678] NET: Registered PF_MCTP protocol family
+[    0.448611] PCI: Using ACPI for IRQ routing
+[    0.449784] e820: register RAM buffer resource [mem 0x0009fc00-0x0009ffff]
+[    0.450679] e820: register RAM buffer resource [mem 0x1ffe0000-0x1fffffff]
+[    0.452706] vgaarb: loaded
+[    0.453238] hpet0: at MMIO 0xfed00000, IRQs 2, 8, 0
+[    0.453682] hpet0: 3 comparators, 64-bit 100.000000 MHz counter
+[    0.459782] clocksource: Switched to clocksource kvm-clock
+[    0.461084] VFS: Disk quotas dquot_6.6.0
+[    0.462423] VFS: Dquot-cache hash table entries: 512 (4096 bytes)
+[    0.464773] pnp: PnP ACPI init
+[    0.465654] ACPI: IRQ 4 override to edge(!), high(!)
+[    0.467276] pnp: PnP ACPI: found 4 devices
+[    0.474877] clocksource: acpi_pm: mask: 0xffffff max_cycles: 0xffffff, max_idle_ns: 2085701024 ns
+[    0.477347] NET: Registered PF_INET protocol family
+[    0.478958] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    0.480768] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.482514] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.484147] TCP established hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    0.485802] TCP bind hash table entries: 4096 (order: 5, 131072 bytes, linear)
+[    0.487299] TCP: Hash tables configured (established 4096 bind 4096)
+[    0.488671] MPTCP token hash table entries: 512 (order: 2, 12288 bytes, linear)
+[    0.490204] UDP hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.491494] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.492572] NET: Registered PF_XDP protocol family
+[    0.493487] pci_bus 0000:00: resource 4 [io  0x0000-0x0cf7 window]
+[    0.494651] pci_bus 0000:00: resource 5 [io  0x0d00-0xffff window]
+[    0.495812] pci_bus 0000:00: resource 6 [mem 0x000a0000-0x000bffff window]
+[    0.497129] pci_bus 0000:00: resource 7 [mem 0x20000000-0xfebfffff window]
+[    0.498435] pci_bus 0000:00: resource 8 [mem 0x100000000-0x17fffffff window]
+[    0.499867] pci 0000:00:01.0: PIIX3: Enabling Passive Release
+[    0.501076] pci 0000:00:00.0: Limiting direct PCI/PCI transfers
+[    0.502387] PCI: CLS 0 bytes, default 64
+[    0.503524] Trying to unpack rootfs image as initramfs...
+[    0.506157] Initialise system trusted keyrings
+[    0.507494] Key type blacklist registered
+[    0.508308] workingset: timestamp_bits=36 (anon: 31) max_order=17 bucket_order=0 (anon: 0)
+[    0.510123] fuse: init (API version 7.45)
+[    0.511112] integrity: Platform Keyring initialized
+[    0.512081] integrity: Machine keyring initialized
+[    0.519482] Key type asymmetric registered
+[    0.520287] Asymmetric key parser 'x509' registered
+[    0.521280] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 245)
+[    0.523449] io scheduler mq-deadline registered
+[    0.524328] io scheduler kyber registered
+[    0.525129] io scheduler bfq registered
+[    0.526049] ledtrig-cpu: registered to indicate activity on CPUs
+[    0.527358] input: Power Button as /devices/platform/LNXPWRBN:00/input/input0
+[    0.528776] ACPI: button: Power Button [PWRF]
+[    0.531426] ACPI: \_SB_.LNKB: Enabled at IRQ 10
+[    0.533670] Serial: 8250/16550 driver, 32 ports, IRQ sharing enabled
+[    0.535629] 00:03: ttyS0 at I/O 0x3f8 (irq = 4, base_baud = 115200) is a 16550A
+[    0.542500] Non-volatile memory driver v1.3
+[    0.543475] ACPI: bus type drm_connector registered
+[    0.544903] usbcore: registered new interface driver usbserial_generic
+[    0.546235] usbserial: USB Serial support registered for generic
+[    0.547532] i8042: PNP: PS/2 Controller [PNP0303:KBD,PNP0f13:MOU] at 0x60,0x64 irq 1,12
+[    0.550232] serio: i8042 KBD port at 0x60,0x64 irq 1
+[    0.550259] Freeing initrd memory: 5744K
+[    0.551297] serio: i8042 AUX port at 0x60,0x64 irq 12
+[    0.553808] input: AT Translated Set 2 keyboard as /devices/platform/i8042/serio0/input/input1
+[    0.555601] rtc_cmos PNP0B00:00: RTC can wake from S4
+[    0.557175] rtc_cmos PNP0B00:00: registered as rtc0
+[    0.558185] rtc_cmos PNP0B00:00: setting system clock to 2026-11-06T01:43:52 UTC (1793929432)
+[    0.559955] rtc_cmos PNP0B00:00: alarms up to one day, y3k, 242 bytes nvram, hpet irqs
+[    0.561776] hid: raw HID events driver (C) Jiri Kosina
+[    0.562789] usbcore: registered new interface driver usbhid
+[    0.563887] usbhid: USB HID core driver
+[    0.564798] drop_monitor: Initializing network drop monitor service
+[    0.566264] NET: Registered PF_INET6 protocol family
+[    0.567765] Segment Routing with IPv6
+[    0.568555] RPL Segment Routing with IPv6
+[    0.569395] In-situ OAM (IOAM) with IPv6
+[    0.570252] NET: Registered PF_PACKET protocol family
+[    0.571595] IPI shorthand broadcast: enabled
+[    0.575083] sched_clock: Marking stable (414002290, 160401738)->(608190067, -33786039)
+[    0.577309] registered taskstats version 1
+[    0.578398] Loading compiled-in X.509 certificates
+[    0.581179] Loaded X.509 cert 'Build time autogenerated kernel key: c2a3f38db21da023dc040f7ad1b79c9e79964d7e'
+[    0.585777] zswap: loaded using pool zstd
+[    0.586663] Demotion targets for Node 0: null
+[    0.587682] Key type .fscrypt registered
+[    0.588471] Key type fscrypt-provisioning registered
+[    0.589739] Btrfs loaded, zoned=yes, fsverity=yes
+[    0.590689] Key type big_key registered
+[    0.591639] PM:   Magic number: 2:269:710
+[    0.592534] RAS: Correctable Errors collector initialized.
+[    0.593813] clk: Disabling unused clocks
+[    0.594582] PM: genpd: Disabling unused power domains
+[    0.596589] Freeing unused decrypted memory: 2028K
+[    0.597755] Freeing unused kernel image (initmem) memory: 4936K
+[    0.598651] Write protecting the kernel read-only data: 40960k
+[    0.599738] Freeing unused kernel image (text/rodata gap) memory: 364K
+[    0.601066] Freeing unused kernel image (rodata/data gap) memory: 860K
+[    0.634074] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.635119] rodata_test: all tests were successful
+[    0.635890] Run /init as init process
+== tbtun guest: 7.2.9-1-MANJARO probes=A,B,C,D,E,F,G,H,I,J,K
+[    0.658936] u32 classifier
+[    0.659365]     Performance counters on
+[    0.659948]     input device check on
+[    0.660563]     Actions configured
+== eth0:
+   2: eth0: <NO-CARRIER,BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc fq_codel state DOWN qlen 1000
+       link/ether 52:54:00:12:34:56 brd ff:ff:ff:ff:ff:ff
+       inet 10.0.2.15/24 scope global eth0
+          valid_lft forever preferred_lft forever
+   default via 10.0.2.2 dev eth0 
+   10.0.2.0/24 dev eth0 scope link  src 10.0.2.15 
+== loading tbtun.ko
+[    0.675112] tbtun: loading out-of-tree module taints kernel.
+[    0.675982] tbtun: module verification failed: signature and/or required key missing - tainting kernel
+[    0.682039] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+== tbtun loaded
+== probe A: /proc grammar
+[    0.686107] tbtun: tunnel 1 carrier 0 failed to connect: -111
+   config: tunnel 1 role=near listen=127.0.0.1:19100 peer=127.0.0.1:19101 n=1 m=0 dup=0 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0 portblock=0-0
+[    0.691915] tbtun: drop_ppm refused: load the module with debug_loss=1 to enable loss injection
+== probe A: pass
+TBT_PROBE_RESULT A PASS
+== reloading tbtun with debug_loss=1
+[    0.716435] tbtun: unloaded
+[    0.740439] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+== probe B: data path
+[    1.743354] tbtun: tunnel 1 far side uses trust-on-first-use; configure nonce= or peer= to pin it
+[    1.745088] tbtun: tunnel 2 carrier 0 DIALED lport=40000 peer=127.0.0.1:19101
+[    1.746181] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40000, awaiting HELLO
+   tunnels:
+# id role state listen peer target n m streams
+1 far listening 127.0.0.1:19101 0.0.0.0:0 127.0.0.1:19070 1 0 1
+2 near listening 127.0.0.1:19100 127.0.0.1:19101 - 1 0 0
+   stats before: debug_loss=1
+gaps_total=0
+streams_total=1
+tunnel 1 capture_runs=0 actor_calls=0 submit_bytes=0 tx=0 wire=55 err=0 short=0
+tunnel 1 rx_work_runs=1 rx_drain_entries=1 rx_drain_bytes=55 rx_paused_skips=0 rx_adopt_events=1 rx_records=1 carrier_write_space_runs=1 poll_rescues=0
+tunnel 1 rx_ready_calls=1 rx_reads=1 rx_read_bytes=55 rx_read_zero=0 rx_resume=0 rx_resume_busy=0 rx_last_drained=55 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=0 rx_delivered=0
+tunnel 1 dbg rcv_nxt=0 copied=0 after=0 qlen=0 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=4 pmoved=1 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=0 car_nxt=408247992 car_copied=408247992 car_rcvbuf=2097152 car_sndbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=1 txwake_busy=0 txwork=2
+tunnel 1 ws_calls=1
+tunnel 1 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=0 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=0 una_stall_us=0 stall_paused_skips=0 stall_idle_skips=19 stall_declared=0 tx_window=8388608 bdp_bytes=29803694 k_x100=500 rtt_mean_us=13 rttvar_us=28 rtt_max_us=13 txq_max=8454432 win_block=0 win_resume=0 pump_hw_armed=0 pump_hw_fired=1 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0 close_timeouts=0 close_detaches=0
+tunnel 1 streams streams_active=0 n_streams=0 n_pending=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=0 dup_bytes=0
+tunnel 1 reconcile live_bytes=55 live_data=0 live_retx=0 retired_bytes=0 retired_data=0 retired_retx=0
+tunnel 2 capture_runs=0 actor_calls=0 submit_bytes=0 tx=0 wire=55 err=0 short=0
+tunnel 2 rx_work_runs=2 rx_drain_entries=1 rx_drain_bytes=55 rx_paused_skips=0 rx_adopt_events=0 rx_records=1 carrier_write_space_runs=0 poll_rescues=0
+tunnel 2 rx_ready_calls=1 rx_reads=2 rx_read_bytes=55 rx_read_zero=1 rx_resume=0 rx_resume_busy=0 rx_last_drained=55 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=0 rx_delivered=0
+tunnel 2 dbg rcv_nxt=0 copied=0 after=0 qlen=0 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=2 pmoved=1 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 2 live rxq=0 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=0 car_nxt=998161577 car_copied=998161577 car_rcvbuf=2097152 car_sndbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 2 txwake=2 txwake_busy=1 txwork=1
+tunnel 2 ws_calls=0
+tunnel 2 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=0 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=0 una_stall_us=0 stall_paused_skips=0 stall_idle_skips=19 stall_declared=0 tx_window=8388608 bdp_bytes=29845365 k_x100=500 rtt_mean_us=27 rttvar_us=48 rtt_max_us=27 txq_max=8454432 win_block=0 win_resume=0 pump_hw_armed=0 pump_hw_fired=1 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0
+tunnel 2 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0 close_timeouts=0 close_detaches=0
+tunnel 2 streams streams_active=0 n_streams=0 n_pending=0
+tunnel 2 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 2 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 2 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=0 dup_bytes=0
+tunnel 2 reconcile live_bytes=55 live_data=0 live_retx=0 retired_bytes=0 retired_data=0 retired_retx=0
+   listeners:
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode                                                     
+   0: 0100007F:4A9C 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 396 1 000000008f18ef63 100 0 0 10 0                       
+   1: 0100007F:4A9D 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 395 1 00000000262c2801 100 0 0 10 0                       
+burst: connected to 127.0.0.1:19100, 4 MiB each way, strict send-then-read first
+[    2.829713] tbtun: hole gatefail seq=196608 mask=0x1 ack=196608
+[    2.831054] tbtun: hole gatefail seq=794253 mask=0x1 ack=794253
+[    2.831994] tbtun: hole gatefail seq=794253 mask=0x1 ack=794253
+[    2.835263] tbtun: hole gatefail seq=1367640 mask=0x1 ack=1367640
+[    2.835586] tbtun: hole gatefail seq=151552 mask=0x1 ack=151552
+[    2.836281] tbtun: hole gatefail seq=1367640 mask=0x1 ack=1367640
+[    2.838135] tbtun: hole gatefail seq=2972106 mask=0x1 ack=2972106
+[    2.841410] tbtun: hole gatefail seq=3612566 mask=0x1 ack=3612566
+[    2.842668] tbtun: hole gatefail seq=3612566 mask=0x1 ack=3612566
+[    2.843490] tbtun: retx wndshort seq=3049930 len=8192 total=8224 wnd=372000 inflight=371260 wnd_avail=740 mem_avail=1682692
+[    2.845469] tbtun: hole timefail seq=3352981 age_us=220 rtt_us=2565
+[    2.846546] tbtun: hole gatefail seq=3352981 mask=0x1 ack=3352981
+burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+[    2.850797] tbtun: hole timefail seq=4800459 age_us=165 rtt_us=700
+[    2.858324] tbtun: retx wndshort seq=5177344 len=8192 total=8224 wnd=1875968 inflight=1874975 wnd_avail=993 mem_avail=128097
+[    2.860043] tbtun: retx wndshort seq=5169152 len=8192 total=8224 wnd=1875968 inflight=1883199 wnd_avail=0 mem_avail=119873
+[    2.861626] tbtun: retx wndshort seq=5160960 len=8192 total=8224 wnd=1875968 inflight=1891423 wnd_avail=0 mem_avail=111649
+[    2.863948] tbtun: retx wndshort seq=6995756 len=8192 total=8224 wnd=109120 inflight=106859 wnd_avail=2261 mem_avail=1977813
+[    2.876560] tbtun: hole timefail seq=5699968 age_us=2310 rtt_us=2755
+burst: interleaved coverage phase passed
+burst: 4 MiB crossed each way
+   established during transfer:
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode                                                     
+   2: 0100007F:9C40 0100007F:4A9D 01 00000000:00000000 00:00000000 00000000     0        0 398 3 00000000e694093b 20 4 1 86 68                       
+   3: 0100007F:4A9D 0100007F:9C40 01 00000020:00000000 01:00000014 00000000     0        0 400 3 000000004c23bd3d 20 4 1 39 38                       
+   stats after: debug_loss=1
+gaps_total=0
+streams_total=2
+tunnel 1 capture_runs=24 actor_calls=49 submit_bytes=8388608 tx=8991254 wire=9028866 err=0 short=0
+tunnel 1 rx_work_runs=71 rx_drain_entries=641 rx_drain_bytes=9056451 rx_paused_skips=0 rx_adopt_events=1 rx_records=1148 carrier_write_space_runs=1 poll_rescues=1
+tunnel 1 rx_ready_calls=808 rx_reads=71 rx_read_bytes=9056451 rx_read_zero=1 rx_resume=0 rx_resume_busy=0 rx_last_drained=32 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=49 rx_delivered=8388608
+tunnel 1 dbg rcv_nxt=372816755 copied=372816754 after=372816755 qlen=1 allocf=0 over=0 copyf=0 hiwat=530 pdead=0 prun=61 pmoved=1164 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=7 pub_wmem=0 pub_una=1715085476 pub_nxt=1715085476 car_wmem=992 car_nxt=417304388 car_copied=417304388 car_rcvbuf=2097152 car_sndbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=106 txwake_busy=68 txwork=39
+tunnel 1 ws_calls=1
+tunnel 1 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=18 fbk_rx=13 retx_frames=82 retx_bytes=602646 retain_drop=0 retx_hole=0 retx_slow=82 retx_pathloss=0 retx_other=0 data_tx=1126 retx_data_ppm=78544 dup_bytes_ppm=71841 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=8388608 tx_ack=8388608 rx_ack=8388608 peer_paused=0 fb_delay_us=2218 rto_us=200000 una_stall_us=4870 stall_paused_skips=0 stall_idle_skips=21 stall_declared=0 tx_window=8388608 bdp_bytes=47914846 k_x100=500 rtt_mean_us=244 rttvar_us=1163 rtt_max_us=244 txq_max=8454432 win_block=0 win_resume=0 pump_hw_armed=0 pump_hw_fired=2 retx_evident=4 retx_cand=82 retx_nosends=1045 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=82 retx_eagain=0 retx_memshort=0 retx_wndshort=1
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0 close_timeouts=0 close_detaches=0
+tunnel 1 streams streams_active=0 n_streams=1 n_pending=0
+tunnel 1 stream sid=303785050112 state=1 kill=0 attached=0x1 rxq=0 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=7 tgt_err=0 fin_seq=8388608 fin_q=1 fin_w=1 rst_w=0 rxf=1/1 dage_ms=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=7 gate_fail=5 depth_fail=0 time_fail=2 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0
+tunnel 1 reconcile live_bytes=9028866 live_data=1126 live_retx=82 retired_bytes=0 retired_data=0 retired_retx=0
+tunnel 2 capture_runs=33 actor_calls=93 submit_bytes=8388608 tx=9019445 wire=9056451 err=0 short=0
+tunnel 2 rx_work_runs=31 rx_drain_entries=474 rx_drain_bytes=9028866 rx_paused_skips=0 rx_adopt_events=0 rx_records=1164 carrier_write_space_runs=0 poll_rescues=1
+tunnel 2 rx_ready_calls=618 rx_reads=31 rx_read_bytes=9028866 rx_read_zero=1 rx_resume=0 rx_resume_busy=0 rx_last_drained=32 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=93 rx_delivered=8388608
+tunnel 2 dbg rcv_nxt=732968061 copied=732968061 after=732968061 qlen=0 allocf=0 over=0 copyf=0 hiwat=74 pdead=0 prun=57 pmoved=1148 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 2 live rxq=0 rxp=0 txq=0 txp=0 pub_state=7 pub_wmem=0 pub_una=124816610 pub_nxt=124816610 car_wmem=0 car_nxt=1007190388 car_copied=1007190388 car_rcvbuf=2097152 car_sndbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 2 txwake=149 txwake_busy=108 txwork=41
+tunnel 2 ws_calls=0
+tunnel 2 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=13 fbk_rx=18 retx_frames=80 retx_bytes=630837 retain_drop=0 retx_hole=0 retx_slow=80 retx_pathloss=0 retx_other=0 data_tx=1119 retx_data_ppm=76997 dup_bytes_ppm=75201 reorder_overflow=0 reorder_max_depth=1 ooo_bytes=0 ooo_frames=0 retain_bytes=8388608 tx_ack=8388608 rx_ack=8388608 peer_paused=0 fb_delay_us=295 rto_us=200000 una_stall_us=4719 stall_paused_skips=0 stall_idle_skips=22 stall_declared=0 tx_window=8388608 bdp_bytes=34116643 k_x100=500 rtt_mean_us=420 rttvar_us=2388 rtt_max_us=420 txq_max=8454432 win_block=0 win_resume=0 pump_hw_armed=0 pump_hw_fired=3 retx_evident=4 retx_cand=80 retx_nosends=664 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=80 retx_eagain=0 retx_memshort=0 retx_wndshort=4
+tunnel 2 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0 close_timeouts=0 close_detaches=0
+tunnel 2 streams streams_active=0 n_streams=1 n_pending=0
+tunnel 2 stream sid=303785050112 state=1 kill=0 attached=0x1 rxq=0 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=0 tgt_err=0 fin_seq=8388608 fin_q=1 fin_w=1 rst_w=0 rxf=1/1 dage_ms=0
+tunnel 2 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=2541 hole_checks=11 gate_fail=9 depth_fail=0 time_fail=1 deliver_timeouts=0 deliver_checks=0
+tunnel 2 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 2 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0
+tunnel 2 reconcile live_bytes=9056451 live_data=1119 live_retx=80 retired_bytes=0 retired_data=0 retired_retx=0
+== probe B: pass
+TBT_PROBE_RESULT B PASS
+== probe C: carrier loss and replacement
+[    4.993615] tbtun: tunnel 2 carrier 0 DIALED lport=40000 peer=127.0.0.1:19101
+[    4.994527] tbtun: tunnel 2 carrier 1 DIALED lport=40001 peer=127.0.0.1:19101
+[    4.994919] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40000, awaiting HELLO
+[    4.996005] tbtun: tunnel 2 carrier 2 DIALED lport=40002 peer=127.0.0.1:19101
+[    4.997759] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40001, awaiting HELLO
+[    4.998809] tbtun: tunnel 2 carrier 3 DIALED lport=40003 peer=127.0.0.1:19101
+[    4.999913] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40002, awaiting HELLO
+[    5.002104] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40003, awaiting HELLO
+   peers before:
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+1 0 19101 127.0.0.1:40000 0 18 0 up raw 0 0 0 1 55 0 0 7275888888 654830 1047904 85 1047744 1048576 0
+1 1 19101 127.0.0.1:40001 0 13 0 up raw 0 0 0 1 55 0 0 13096600000 654830 1047904 85 1047680 1048576 0
+1 2 19101 127.0.0.1:40002 0 6 0 up raw 0 0 0 1 55 0 0 21827666666 654830 1047904 85 1047680 1048576 0
+1 3 19101 127.0.0.1:40003 0 8 0 up raw 0 0 0 1 55 0 0 3637944444 654830 1047904 85 1047680 1048576 0
+2 0 40000 127.0.0.1:19101 0 24 0 up raw 0 0 0 1 55 0 0 4092687500 654830 1047744 85 1047904 983093 0
+2 1 40001 127.0.0.1:19101 0 14 0 up raw 0 0 0 1 55 0 0 9354714285 654830 1047680 85 1047904 983093 0
+2 2 40002 127.0.0.1:19101 0 7 0 up raw 0 0 0 1 55 0 0 7275888888 654830 1047680 85 1047904 983093 0
+2 3 40003 127.0.0.1:19101 0 6 0 up raw 0 0 0 1 55 0 0 10913833333 654830 1047680 85 1047904 983093 0
+burst: connected to 127.0.0.1:19100, 4 MiB each way, strict send-then-read first
+   taking carrier 0 down after 180224 captured b[    6.015542] tbtun: tunnel 2 carrier 0 DIALED lport=40004 peer=127.0.0.1:19101
+ytes
+[    6.016612] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40004, awaiting HELLO
+[    6.017826] tbtun: hole declare seq=237568 timer age_us=3108 mask=0x0 sends=1 dup_pend=0
+[    6.019646] tbtun: hole declare seq=368640 timer age_us=4885 mask=0x0 sends=1 dup_pend=0
+[    6.020794] tbtun: hole repair seq=237568 age_us=2970
+[    6.021785] tbtun: hole depthfail seq=270336 g=1 mask=0x4
+[    6.022586] tbtun: hole depthfail seq=270336 g=1 mask=0x4
+[    6.023395] tbtun: hole depthfail seq=270336 g=1 mask=0x4
+[    6.024275] tbtun: hole declare seq=565036 timer age_us=9492 mask=0x0 sends=1 dup_pend=0
+[    6.025596] tbtun: hole declare seq=826968 timer age_us=10775 mask=0x0 sends=1 dup_pend=0
+[    6.030020] tbtun: hole repair seq=368640 age_us=10376
+[    6.030907] tbtun: hole repair seq=565036 age_us=6633
+[    6.031726] tbtun: hole repair seq=826968 age_us=6140
+[    6.037556] tbtun: hole depthfail seq=731745 g=1 mask=0x1
+burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+[    6.044446] tbtun: hole depthfail seq=5275118 g=1 mask=0x2
+burst: interleaved coverage phase passed
+burst: 4 MiB crossed each way
+   peers after:
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+1 0 19101 127.0.0.1:40004 2067295 730 49099 up raw 255 0 48 274 2125550 0 0 95178779 2881252 2056192 85 2071712 2080768 0
+1 1 19101 127.0.0.1:40001 2159334 987 265 up raw 266 0 209 287 2169497 0 34883 21827666666 4583810 2063168 85 2063520 2072576 0
+1 2 19101 127.0.0.1:40002 2122868 708 0 up raw 262 0 168 279 2132294 0 27450 16370750000 4714776 2055360 85 2071712 2080768 0
+1 3 19101 127.0.0.1:40003 2141299 1140 0 up raw 264 0 203 281 2150736 0 23255 16370750000 4452844 2071680 85 2063520 2072576 0
+2 0 40004 127.0.0.1:19101 1853512 837 0 up raw 231 152709 5 245 1861741 0 35874 21827666666 2619320 2071712 85 2056192 2056192 0
+2 1 40001 127.0.0.1:19101 2432282 848 0 up raw 298 0 12 311 2442551 0 146153 9354714285 5238640 2063520 85 2063168 2064384 1064
+2 2 40002 127.0.0.1:19101 2269502 1095 0 up raw 278 0 6 290 2279169 0 73359 21827666666 7399579 2071712 85 2055360 2064384 0
+2 3 40003 127.0.0.1:19101 2283872 935 0 up raw 280 3937 7 293 2293707 0 64638 21827666666 7988926 2063520 85 2071680 2080768 0
+   carrier_lost=2 carrier_replaced=1 carrier0=up frames=245 bytes=1861845
+   reconcile: wire=9265160 live=8886769 retired=378391 peers=8886769 d_wire=0
+   reconcile: data_tx=1133 live=1087 retired=46 d_data=0
+   reconcile: retx_frames=101 live=82 retired=19 d_retx=0
+   reconcile: live_bytes-peers_tx_bytes=0
+== probe C: pass
+TBT_PROBE_RESULT C PASS
+== probe D: ppm loss and reorder
+punt!
+[    8.121884] tbtun: tunnel 2 carrier 0 DIALED lport=40000 peer=127.0.0.1:19101
+[    8.123126] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40000, awaiting HELLO
+[    8.123276] tbtun: tunnel 2 carrier 1 DIALED lport=40001 peer=127.0.0.1:19101
+[    8.124385] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40001, awaiting HELLO
+[    8.125533] tbtun: tunnel 2 carrier 2 DIALED lport=40002 peer=127.0.0.1:19101
+[    8.126853] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40002, awaiting HELLO
+[    8.128244] tbtun: tunnel 2 carrier 3 DIALED lport=40003 peer=127.0.0.1:19101
+[    8.129387] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40003, awaiting HELLO
+burst: connected to 127.0.0.1:19100, 4 MiB each way, strict send-then-read first
+[    9.127302] tbtun: dropping frames: debug_loss=1 and drop_ppm=20000
+[    9.131669] tbtun: hole depthfail seq=491308 g=1 mask=0x1
+[    9.133892] tbt_tx_hole_check: 25 callbacks suppressed
+[    9.133903] tbtun: hole gatefail seq=8192 mask=0x8 ack=8192
+[    9.136065] tbtun: hole depthfail seq=548599 g=2 mask=0x4
+[    9.138988] tbtun: hole gatefail seq=573175 mask=0x2 ack=573175
+[    9.140030] tbtun: hole gatefail seq=573175 mask=0x2 ack=573175
+[    9.141594] tbtun: hole gatefail seq=573175 mask=0x2 ack=573175
+[    9.142566] tbtun: hole gatefail seq=573175 mask=0x2 ack=573175
+[    9.143516] tbtun: hole depthfail seq=573175 g=1 mask=0x2
+[    9.144311] tbtun: hole gatefail seq=573175 mask=0x2 ack=573175
+[    9.145184] tbtun: hole depthfail seq=573175 g=1 mask=0x2
+[    9.146029] tbtun: hole depthfail seq=573175 g=1 mask=0x2
+[    9.146966] tbtun: hole gatefail seq=573175 mask=0x2 ack=573175
+[    9.152536] tbtun: hole gatefail seq=573175 mask=0x2 ack=573175
+[    9.163587] tbtun: hole gatefail seq=573175 mask=0x2 ack=573175
+[    9.174623] tbtun: hole gatefail seq=573175 mask=0x2 ack=573175
+[    9.347446] tbtun: hole declare seq=573175 timer age_us=219207 mask=0x2 sends=1 dup_pend=0
+[    9.350532] tbtun: hole repair seq=573175 age_us=3089
+[    9.560498] tbtun: hole declare seq=605943 timer age_us=209455 mask=0x4 sends=1 dup_pend=0
+[    9.571618] tbtun: hole repair seq=605943 age_us=11123
+[    9.605502] tbtun: hole declare seq=1031715 timer age_us=475936 mask=0x4 sends=1 dup_pend=0
+[    9.609786] tbtun: hole repair seq=1031715 age_us=4292
+[    9.742522] tbtun: hole declare seq=2392011 timer age_us=609705 mask=0x4 sends=1 dup_pend=0
+[    9.745263] tbtun: hole repair seq=2392011 age_us=2753
+[    9.746089] tbtun: hole declare seq=3055033 timer age_us=612989 mask=0x2 sends=1 dup_pend=0
+[    9.748323] tbtun: hole repair seq=3055033 age_us=2255
+[    9.749261] tbtun: hole declare seq=3308720 timer age_us=616055 mask=0x4 sends=1 dup_pend=0
+[    9.751744] tbtun: hole repair seq=3308720 age_us=2508
+burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+[   11.053483] tbt_tx_retx: 8 callbacks suppressed
+[   11.053493] tbtun: hole declare seq=6400511 timer age_us=213923 mask=0x4 sends=1 dup_pend=0
+[   11.061588] tbt_tx_holes_repaired: 8 callbacks suppressed
+[   11.061592] tbtun: hole repair seq=6400511 age_us=8118
+[   11.275475] tbtun: hole declare seq=6990229 timer age_us=435748 mask=0x2 sends=1 dup_pend=0
+[   11.283521] tbtun: hole repair seq=6990229 age_us=8052
+[   11.464454] tbtun: hole declare seq=7423875 timer age_us=624626 mask=0x4 sends=1 dup_pend=0
+[   11.471494] tbtun: hole repair seq=7423875 age_us=7044
+[   11.472756] tbtun: hole declare seq=7489358 timer age_us=632918 mask=0x4 sends=1 dup_pend=0
+burst: interleaved coverage phase passed
+[   11.475099] tbtun: hole repair seq=7489358 age_us=2344
+burst: 4 MiB crossed each way
+   peers after:
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+1 0 19101 127.0.0.1:40000 2471598 86045 8192 up raw 309 0 179 363 2494603 0 201550 10074307692 2291905 2075744 85 2071680 2080768 0
+1 1 19101 127.0.0.1:40001 2432361 82029 32768 up raw 301 0 374 418 2461449 3 173076 8185375000 1375143 2075744 85 2071680 2080768 0
+1 2 19101 127.0.0.1:40002 2185502 13335 49152 up raw 270 0 377 361 2202703 6 49429 21827666666 654830 2063552 85 2048000 2048000 0
+1 3 19101 127.0.0.1:40003 2259839 7181 8192 up raw 281 0 188 296 2277892 0 84615 32741500000 654830 2055520 85 2064384 2064384 0
+2 0 40000 127.0.0.1:19101 2328966 9720 0 up raw 289 0 55 323 2340705 0 124513 10913833333 654830 2071680 85 2075744 2080768 0
+2 1 40001 127.0.0.1:19101 2315898 9350 32503 up raw 283 0 9 351 2331052 4 121093 6548300000 654830 2071680 85 2075744 2080768 0
+2 2 40002 127.0.0.1:19101 2752406 11711 57344 up raw 338 0 6 445 2773802 7 332046 13096600000 2029973 2048000 85 2063552 2072576 0
+2 3 40003 127.0.0.1:19101 2318972 6894 0 up raw 285 0 10 354 2334507 0 104651 6892947368 654830 2064384 85 2055520 2064384 0
+   reorder_max_depth=440 retx_frames=308 dropped: carrier1=7 carrier2=13 (both tunnels)
+== probe D: pass
+TBT_PROBE_RESULT D PASS
+== probe E: spares
+punt!
+[   12.519711] tbtun: tunnel 2 carrier 0 DIALED lport=40000 peer=127.0.0.1:19101
+[   12.520822] tbtun: tunnel 2 carrier 1 DIALED lport=40001 peer=127.0.0.1:19101
+[   12.521869] tbtun: tunnel 2 carrier 2 DIALED lport=40002 peer=127.0.0.1:19101
+[   12.522923] tbtun: tunnel 2 carrier 3 DIALED lport=40003 peer=127.0.0.1:19101
+[   12.523974] tbtun: tunnel 2 carrier 4 DIALED lport=40004 peer=127.0.0.1:19101
+[   12.525047] tbtun: tunnel 2 carrier 5 DIALED lport=40005 peer=127.0.0.1:19101
+[   12.526100] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40000, awaiting HELLO
+[   12.527218] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40001, awaiting HELLO
+[   12.528356] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40002, awaiting HELLO
+[   12.529485] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40003, awaiting HELLO
+[   12.530612] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40004, awaiting HELLO
+[   12.531739] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40005, awaiting HELLO
+   spares warm:
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+1 0 19101 127.0.0.1:40000 0 11 0 up raw 0 0 0 1 55 0 0 8185375000 654830 1047904 85 1047680 1048576 0
+1 1 19101 127.0.0.1:40001 0 7 0 up raw 0 0 0 1 55 0 0 7275888888 654830 1047904 85 1047680 1048576 0
+1 2 19101 127.0.0.1:40002 0 5 0 up raw 0 0 0 1 55 0 0 21827666666 654830 1047904 85 1047680 1048576 0
+1 3 19101 127.0.0.1:40003 0 6 0 up raw 0 0 0 1 55 0 0 21827666666 654830 1047904 85 1047680 1048576 0
+1 4 19101 127.0.0.1:40004 0 6 0 spare raw 0 0 0 1 55 0 0 32741500000 654830 1047904 85 1047680 1048576 0
+1 5 19101 127.0.0.1:40005 0 6 0 spare raw 0 0 0 1 55 0 0 32741500000 654830 1047904 85 1047680 1048576 0
+2 0 40000 127.0.0.1:19101 0 23 0 up raw 0 0 0 1 55 0 0 4092687500 654830 1047680 85 1047904 983093 0
+2 1 40001 127.0.0.1:19101 0 8 0 up raw 0 0 0 1 55 0 0 4677357142 654830 1047680 85 1047904 983093 0
+2 2 40002 127.0.0.1:19101 0 7 0 up raw 0 0 0 1 55 0 0 4677357142 654830 1047680 85 1047904 983093 0
+2 3 40003 127.0.0.1:19101 0 8 0 up raw 0 0 0 1 55 0 0 4365533333 654830 1047680 85 1047904 983093 0
+2 4 40004 127.0.0.1:19101 0 7 0 spare raw 0 0 0 1 55 0 0 4677357142 654830 1047680 85 1047904 983093 0
+2 5 40005 127.0.0.1:19101 0 5 0 spare raw 0 0 0 1 55 0 0 16370750000 654830 1047680 85 1047904 983093 0
+burst: connected to 127.0.0.1:19100, 4 MiB each way, strict send-then-read first
+[   13.548726] tbt_tx_hole_check: 3 callbacks suppressed
+[   13.548729] tbtun: hole depthfail seq=40960 g=2 mask=0x2
+[   13.551436] tbtun: hole declare seq=49152 timer age_us=3481 mask=0x0 sends=1 dup_pend=0
+[   13.554178] tbtun: hole repair seq=49152 age_us=2742
+[   13.555155] tbtun: hole depthfail seq=81920 g=1 mask=0x8
+[   13.556783] tbtun: hole depthfail seq=212992 g=1 mask=0x1b
+[   13.558583] tbtun: hole declare seq=573175 timer age_us=10460 mask=0x0 sends=1 dup_pend=0
+[   13.560696] tbtun: hole repair seq=573175 age_us=2115
+[   13.561497] tbtun: hole depthfail seq=3039073 g=2 mask=0x8
+[   13.562361] tbtun: hole depthfail seq=3039073 g=2 mask=0x8
+[   13.563217] tbtun: hole depthfail seq=3047265 g=1 mask=0x1
+burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+burst: interleaved coverage phase passed
+burst: 4 MiB crossed each way
+   spare 4 took over: state=up bytes=2198624
+   spare_activated=1 replaced=0 lost=2
+   reconcile: wire=10053437 live=9741315 retired=312122 peers=9741315 d_wire=0
+   reconcile: data_tx=1244 live=1206 retired=38 d_data=0
+   reconcile: retx_frames=197 live=184 retired=13 d_retx=0
+   reconcile: live_bytes-peers_tx_bytes=0
+== probe E: pass
+TBT_PROBE_RESULT E PASS
+== probe F: duplication
+punt!
+[   15.709625] tbtun: tunnel 2 carrier 0 DIALED lport=40000 peer=127.0.0.1:19101
+[   15.710758] tbtun: tunnel 2 carrier 1 DIALED lport=40001 peer=127.0.0.1:19101
+[   15.711827] tbtun: tunnel 2 carrier 2 DIALED lport=40002 peer=127.0.0.1:19101
+[   15.712946] tbtun: tunnel 2 carrier 3 DIALED lport=40003 peer=127.0.0.1:19101
+[   15.714081] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40000, awaiting HELLO
+[   15.715284] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40001, awaiting HELLO
+[   15.716438] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40002, awaiting HELLO
+[   15.717592] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40003, awaiting HELLO
+burst: connected to 127.0.0.1:19100, 4 MiB each way, strict send-then-read first
+[   16.713594] tbtun: hole depthfail seq=90112 g=1 mask=0xc
+[   16.717004] tbtun: retx wndshort seq=294912 len=8192 total=8224 wnd=1830112 inflight=1825304 wnd_avail=4808 mem_avail=234408
+[   16.718644] tbtun: retx wndshort seq=360448 len=8192 total=8224 wnd=1830112 inflight=1833528 wnd_avail=0 mem_avail=225224
+[   16.720214] tbtun: retx wndshort seq=294912 len=8192 total=8224 wnd=1830112 inflight=1841752 wnd_avail=0 mem_avail=217000
+[   16.722550] tbtun: retx wndshort seq=360448 len=8192 total=8224 wnd=1830112 inflight=1850080 wnd_avail=0 mem_avail=208672
+[   16.726208] tbtun: hole depthfail seq=319488 g=3 mask=0x7
+[   16.727165] tbtun: hole depthfail seq=1187098 g=1 mask=0x9
+[   16.732261] tbtun: hole depthfail seq=73728 g=1 mask=0x3
+[   16.736568] tbt_tx_hole_check: 275 callbacks suppressed
+[   16.736575] tbtun: hole gatefail seq=1133334 mask=0x5 ack=1133334
+[   16.741584] tbtun: hole gatefail seq=1133590 mask=0xa ack=1133590
+[   16.742514] tbtun: hole gatefail seq=1133590 mask=0xa ack=1133590
+[   16.743590] tbtun: hole gatefail seq=1797031 mask=0x9 ack=1797031
+[   16.745179] tbtun: hole gatefail seq=1969063 mask=0xc ack=1969063
+[   16.747562] tbtun: hole gatefail seq=3860368 mask=0xc ack=3860368
+[   16.748843] tbtun: hole gatefail seq=4155280 mask=0xc ack=4155280
+burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+[   16.763143] tbtun: hole gatefail seq=5512209 mask=0x3 ack=5512209
+[   16.766058] tbtun: hole gatefail seq=4485120 mask=0xc ack=4485120
+[   16.772087] tbtun: hole gatefail seq=6019742 mask=0xc ack=6019742
+burst: interleaved coverage phase passed
+burst: 4 MiB crossed each way
+   dup_tx=1027 dup_used=928 dup_suppressed=2069 holes_declared=0 inflate_ppm=2000000 dup_same_path=0
+== probe F: pass
+TBT_PROBE_RESULT F PASS
+== probe G: hole repair under loss on one path
+punt!
+[   18.883749] tbtun: tunnel 2 carrier 0 DIALED lport=40000 peer=127.0.0.1:19101
+[   18.885395] tbtun: tunnel 2 carrier 1 DIALED lport=40001 peer=127.0.0.1:19101
+[   18.886459] tbtun: tunnel 2 carrier 2 DIALED lport=40002 peer=127.0.0.1:19101
+[   18.887588] tbtun: tunnel 2 carrier 3 DIALED lport=40003 peer=127.0.0.1:19101
+[   18.888736] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40000, awaiting HELLO
+[   18.889940] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40001, awaiting HELLO
+[   18.891137] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40002, awaiting HELLO
+[   18.892312] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40003, awaiting HELLO
+burst: connected to 127.0.0.1:19100, 4 MiB each way, strict send-then-read first
+[   19.892509] tbt_tx_hole_check: 11 callbacks suppressed
+[   19.892513] tbtun: hole depthfail seq=859683 g=2 mask=0x4
+[   19.894714] tbtun: hole depthfail seq=1007139 g=1 mask=0x2
+[   19.895818] tbtun: hole depthfail seq=1007139 g=1 mask=0x2
+[   19.897057] tbtun: hole depthfail seq=1007139 g=1 mask=0x2
+[   19.897944] tbtun: hole depthfail seq=1007139 g=1 mask=0x2
+[   19.898786] tbtun: hole depthfail seq=73728 g=1 mask=0x8
+[   19.899730] tbtun: hole depthfail seq=1007139 g=1 mask=0x2
+[   19.900580] tbtun: hole depthfail seq=1007139 g=1 mask=0x2
+[   19.901670] tbtun: hole depthfail seq=1007139 g=1 mask=0x2
+[   19.902682] tbtun: hole depthfail seq=1007139 g=1 mask=0x2
+[   20.102887] tbtun: hole declare seq=1007139 timer age_us=213077 mask=0x2 sends=1 dup_pend=0
+[   20.105355] tbtun: hole repair seq=1007139 age_us=2472
+[   20.141435] tbtun: hole declare seq=1003043 timer age_us=208914 mask=0x2 sends=1 dup_pend=0
+[   20.149602] tbtun: hole repair seq=1003043 age_us=8171
+[   20.325508] tbtun: hole declare seq=1293594 timer age_us=435593 mask=0x2 sends=1 dup_pend=0
+[   20.327622] tbtun: hole repair seq=1293594 age_us=2119
+[   20.351442] tbtun: hole declare seq=1048099 timer age_us=246257 mask=0x2 sends=1 dup_pend=0
+[   20.360552] tbtun: hole repair seq=1048099 age_us=9117
+[   20.561446] tbtun: hole declare seq=1146403 timer age_us=456218 mask=0x2 sends=1 dup_pend=0
+[   20.570530] tbtun: hole declare seq=1359130 timer age_us=680542 mask=0x2 sends=1 dup_pend=0
+[   20.572595] tbtun: hole repair seq=1146403 age_us=11152
+[   20.573789] tbtun: hole repair seq=1359130 age_us=3313
+[   20.574711] tbtun: hole declare seq=1391898 timer age_us=684763 mask=0x2 sends=1 dup_pend=0
+[   20.576605] tbtun: hole repair seq=1391898 age_us=1899
+[   20.577482] tbtun: hole declare seq=1522705 timer age_us=687480 mask=0x2 sends=1 dup_pend=0
+[   20.579484] tbtun: hole repair seq=1522705 age_us=2011
+[   20.580384] tbtun: hole declare seq=1719313 timer age_us=690339 mask=0x2 sends=1 dup_pend=0
+[   20.582948] tbtun: hole repair seq=1719313 age_us=2567
+[   20.583851] tbtun: hole declare seq=1850120 timer age_us=693786 mask=0x2 sends=1 dup_pend=0
+[   20.585780] tbtun: hole repair seq=1850120 age_us=1932
+burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+[   21.739597] tbt_tx_hole_check: 88 callbacks suppressed
+[   21.739603] tbtun: hole gatefail seq=5659983 mask=0x2 ack=5659983
+[   21.750615] tbtun: hole gatefail seq=5659983 mask=0x2 ack=5659983
+[   21.762629] tbtun: hole gatefail seq=5659983 mask=0x2 ack=5659983
+[   21.773621] tbtun: hole gatefail seq=5659983 mask=0x2 ack=5659983
+[   21.784807] tbtun: hole gatefail seq=5659983 mask=0x2 ack=5659983
+[   21.795592] tbtun: hole gatefail seq=5659983 mask=0x2 ack=5659983
+[   21.806564] tbtun: hole gatefail seq=5659983 mask=0x2 ack=5659983
+[   21.817681] tbtun: hole gatefail seq=5659983 mask=0x2 ack=5659983
+[   21.829635] tbtun: hole gatefail seq=5659983 mask=0x2 ack=5659983
+[   21.840657] tbtun: hole gatefail seq=5659983 mask=0x2 ack=5659983
+burst: interleaved coverage phase passed
+burst: 4 MiB crossed each way
+   dropped=35 holes_declared=50 holes_repaired=50 holes_unrecoverable=0 rx_max_stall_us=245917 limit=2000000
+== probe G: pass
+TBT_PROBE_RESULT G PASS
+== probe H: sustained loss, recovery, and the bounded reset
+punt!
+[   23.575724] tbtun: tunnel 2 carrier 0 DIALED lport=40000 peer=127.0.0.1:19101
+[   23.576771] tbtun: tunnel 2 carrier 1 DIALED lport=40001 peer=127.0.0.1:19101
+[   23.577807] tbtun: tunnel 2 carrier 2 DIALED lport=40002 peer=127.0.0.1:19101
+[   23.578839] tbtun: tunnel 2 carrier 3 DIALED lport=40003 peer=127.0.0.1:19101
+[   23.579877] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40000, awaiting HELLO
+[   23.580953] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40001, awaiting HELLO
+[   23.582036] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40002, awaiting HELLO
+[   23.583158] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40003, awaiting HELLO
+burst: connected to 127.0.0.1:19100, 4 MiB each way, strict send-then-read first
+[   24.897672] tbt_tx_hole_check: 330 callbacks suppressed
+[   24.897678] tbtun: hole depthfail seq=98304 g=1 mask=0x2
+[   24.910612] tbtun: hole depthfail seq=98304 g=1 mask=0x2
+[   24.921670] tbtun: hole depthfail seq=98304 g=1 mask=0x2
+[   24.932660] tbtun: hole depthfail seq=131072 g=1 mask=0x2
+[   24.934941] tbtun: hole depthfail seq=122880 g=1 mask=0x2
+[   24.943939] tbtun: hole depthfail seq=131072 g=1 mask=0x2
+[   24.946091] tbtun: hole depthfail seq=122880 g=1 mask=0x2
+[   24.954526] tbtun: hole depthfail seq=131072 g=1 mask=0x2
+[   24.956895] tbtun: hole depthfail seq=122880 g=1 mask=0x2
+[   24.965674] tbtun: hole depthfail seq=131072 g=1 mask=0x2
+[   26.749582] tbt_tx_hole_check: 16 callbacks suppressed
+[   26.749585] tbtun: hole gatefail seq=1650635 mask=0x2 ack=1650635
+[   26.760689] tbtun: hole gatefail seq=1740800 mask=0x2 ack=1740800
+[   26.771621] tbtun: hole gatefail seq=1740800 mask=0x2 ack=1740800
+[   26.782620] tbtun: hole gatefail seq=1740800 mask=0x2 ack=1740800
+[   26.793621] tbtun: hole gatefail seq=1740800 mask=0x2 ack=1740800
+[   26.804584] tbtun: hole gatefail seq=1740800 mask=0x2 ack=1740800
+[   26.815791] tbtun: hole gatefail seq=1740800 mask=0x2 ack=1740800
+[   26.826753] tbtun: hole gatefail seq=1740800 mask=0x2 ack=1740800
+[   26.837706] tbtun: hole gatefail seq=1740800 mask=0x2 ack=1740800
+[   26.848645] tbtun: hole gatefail seq=1838998 mask=0x2 ack=1838998
+burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+burst: interleaved coverage phase passed
+burst: 4 MiB crossed each way
+   phase 1: recovered after 2 s of total loss on one path, holes_unrecoverable=0
+punt!
+[   31.797738] tbtun: tunnel 2 carrier 0 DIALED lport=40000 peer=127.0.0.1:19101
+[   31.799033] tbtun: tunnel 2 carrier 1 DIALED lport=40001 peer=127.0.0.1:19101
+[   31.800096] tbtun: tunnel 2 carrier 2 DIALED lport=40002 peer=127.0.0.1:19101
+[   31.801119] tbtun: tunnel 2 carrier 3 DIALED lport=40003 peer=127.0.0.1:19101
+[   31.802177] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40000, awaiting HELLO
+[   31.803330] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40001, awaiting HELLO
+[   31.804521] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40002, awaiting HELLO
+[   31.805693] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=40003, awaiting HELLO
+burst: connected to 127.0.0.1:19100, 4 MiB each way, strict send-then-read first
+[   33.307612] tbtun: TXSTALLKILL sid=927092178944 ack=0 txseq=4194304 age_us=506703
+burst: strict send-then-read failed: sent=4194304 recvd=0 first_mismatch=-1 errno=0 (none)
+debug_loss=1
+gaps_total=0
+streams_total=5
+tunnel 1 capture_runs=1 actor_calls=0 submit_bytes=0 tx=0 wire=348 err=0 short=0
+tunnel 1 rx_work_runs=55 rx_drain_entries=55 rx_drain_bytes=5164 rx_paused_skips=0 rx_adopt_events=4 rx_records=55 carrier_write_space_runs=4 poll_rescues=0
+tunnel 1 rx_ready_calls=51 rx_reads=55 rx_read_bytes=5164 rx_read_zero=0 rx_resume=0 rx_resume_busy=0 rx_last_drained=32 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=0 rx_delivered=0
+tunnel 1 dbg rcv_nxt=297111909 copied=297111909 after=297111909 qlen=0 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=21 pmoved=8 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=4 pub_wmem=960 pub_una=3023385309 pub_nxt=3023385310 car_wmem=0 car_nxt=877821706 car_copied=877821706 car_rcvbuf=2097152 car_sndbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=30 txwake_busy=22 txwork=12
+tunnel 1 ws_calls=4
+tunnel 1 c3 n=4 up=4 lost=0 replaced=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=46 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=0 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=200000 una_stall_us=948537 stall_paused_skips=0 stall_idle_skips=116 stall_declared=0 tx_window=8388608 bdp_bytes=710037625 k_x100=500 rtt_mean_us=9 rttvar_us=44 rtt_max_us=18 txq_max=8454432 win_block=0 win_resume=0 pump_hw_armed=0 pump_hw_fired=7 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0 close_timeouts=0 close_detaches=0
+tunnel 1 streams streams_active=0 n_streams=1 n_pending=0
+tunnel 1 stream sid=927092178944 state=5 kill=5 attached=0x3 rxq=0 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=4 tgt_err=0 fin_seq=0 fin_q=0 fin_w=0 rst_w=0 rxf=0/0 dage_ms=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=0 dup_bytes=0
+tunnel 1 reconcile live_bytes=348 live_data=0 live_retx=0 retired_bytes=0 retired_data=0 retired_retx=0
+tunnel 2 capture_runs=8 actor_calls=34 submit_bytes=4194304 tx=1080648 wire=5164 err=0 short=0
+tunnel 2 rx_work_runs=12 rx_drain_entries=8 rx_drain_bytes=348 rx_paused_skips=0 rx_adopt_events=0 rx_records=8 carrier_write_space_runs=0 poll_rescues=40
+tunnel 2 rx_ready_calls=8 rx_reads=12 rx_read_bytes=348 rx_read_zero=4 rx_resume=0 rx_resume_busy=0 rx_last_drained=32 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=34 rx_delivered=0
+tunnel 2 dbg rcv_nxt=1077717335 copied=1077700209 after=1077717335 qlen=1 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=312 pmoved=211 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 2 live rxq=0 rxp=0 txq=0 txp=0 pub_state=4 pub_wmem=960 pub_una=2060315259 pub_nxt=2060315260 car_wmem=0 car_nxt=1467734014 car_copied=1467734014 car_rcvbuf=2097152 car_sndbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 2 txwake=364 txwake_busy=140 txwork=261
+tunnel 2 ws_calls=0
+tunnel 2 c3 n=4 up=4 lost=0 replaced=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=46 fbk_rx=0 retx_frames=33 retx_bytes=96601 retain_drop=0 retx_hole=2 retx_slow=31 retx_pathloss=0 retx_other=0 data_tx=156 retx_data_ppm=268292 dup_bytes_ppm=23031 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=4194304 tx_ack=0 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=200000 una_stall_us=33856 stall_paused_skips=0 stall_idle_skips=110 stall_declared=0 tx_window=8388608 bdp_bytes=371357069 k_x100=500 rtt_mean_us=2172 rttvar_us=21661 rtt_max_us=2890 txq_max=8454432 win_block=0 win_resume=0 pump_hw_armed=0 pump_hw_fired=5 retx_evident=293 retx_cand=33 retx_nosends=128987 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=33 retx_eagain=0 retx_memshort=0 retx_wndshort=0
+tunnel 2 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0 close_timeouts=0 close_detaches=0
+tunnel 2 streams streams_active=0 n_streams=1 n_pending=0
+tunnel 2 stream sid=927092178944 state=5 kill=4 attached=0x3 rxq=0 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=0 tgt_err=0 fin_seq=0 fin_q=0 fin_w=0 rst_w=1 rxf=0/0 dage_ms=0
+tunnel 2 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=1 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 2 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 2 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0
+tunnel 2 reconcile live_bytes=5164 live_data=156 live_retx=33 retired_bytes=0 retired_data=0 retired_retx=0
+   phase 2: reset in 0.60 s, holes_unrecoverable=1
+== probe H: pass
+TBT_PROBE_RESULT H PASS
+== probe I: per-5-tuple shaping on eth0
+Warning: sch_htb: quantum of class 10001 is big. Consider r2q change.
+Warning: sch_htb: quantum of class 10099 is big. Consider r2q change.
+   qdisc:
+   qdisc htb 1: root refcnt 2 r2q 10 default 0x99 direct_packets_stat 0 direct_qlen 1000
+   qdisc netem 120: parent 1:30 limit 1000 delay 20ms  10ms seed 4981844726673663147
+   qdisc netem 122: parent 1:32 limit 1000 delay 20ms  10ms seed 9136760933009935710
+   qdisc netem 113: parent 1:23 limit 1000 delay 20ms  10ms seed 16041917756320089193
+   qdisc netem 111: parent 1:21 limit 1000 delay 20ms  10ms seed 9993485649965928167
+   qdisc netem 115: parent 1:25 limit 1000 delay 20ms  10ms seed 15293161677497602613
+   qdisc netem 100: parent 1:10 limit 1000 delay 20ms  10ms seed 6597650505215838058
+   qdisc netem 117: parent 1:27 limit 1000 delay 20ms  10ms seed 16992717021212307942
+   qdisc netem 102: parent 1:12 limit 1000 delay 20ms  10ms seed 11913746560930715084
+   qdisc netem 119: parent 1:29 limit 1000 delay 20ms  10ms seed 14922112071211568761
+   qdisc netem 106: parent 1:16 limit 1000 delay 20ms  10ms seed 17964841037680131421
+   qdisc netem 104: parent 1:14 limit 1000 delay 20ms  10ms seed 13191235707803992897
+   qdisc netem 108: parent 1:18 limit 1000 delay 20ms  10ms seed 5721723255103800371
+   qdisc netem 121: parent 1:31 limit 1000 delay 20ms  10ms seed 16815041702445180898
+   qdisc netem 123: parent 1:33 limit 1000 delay 20ms  10ms seed 3844175878452846390
+   qdisc netem 110: parent 1:20 limit 1000 delay 20ms  10ms seed 13595343458383568670
+   qdisc netem 112: parent 1:22 limit 1000 delay 20ms  10ms seed 17734012730524571124
+   qdisc netem 114: parent 1:24 limit 1000 delay 20ms  10ms seed 17338298576623308240
+   qdisc netem 101: parent 1:11 limit 1000 delay 20ms  10ms seed 1607716539497878725
+   qdisc netem 118: parent 1:28 limit 1000 delay 20ms  10ms seed 7643046351867518285
+   qdisc netem 116: parent 1:26 limit 1000 delay 20ms  10ms seed 18412486672979008853
+   qdisc netem 103: parent 1:13 limit 1000 delay 20ms  10ms seed 14371768756343992876
+   qdisc netem 105: parent 1:15 limit 1000 delay 20ms  10ms seed 6728568827110017819
+   qdisc netem 109: parent 1:19 limit 1000 delay 20ms  10ms seed 10935024233618204752
+   qdisc netem 107: parent 1:17 limit 1000 delay 20ms  10ms seed 14807116045898197887
+   filter protocol ip pref 1 u32 chain 0 
+   filter protocol ip pref 1 u32 chain 0 fh 800: ht divisor 1 
+   filter protocol ip pref 1 u32 chain 0 fh 800::800 order 2048 key ht 800 bkt 0 flowid 1:10 not_in_hw 
+     match a0280000/ffff0000 at 20
+   filter protocol ip pref 1 u32 chain 0 fh 800::801 order 2049 key ht 800 bkt 0 flowid 1:11 not_in_hw 
+     match a0290000/ffff0000 at 20
+   filter protocol ip pref 1 u32 chain 0 fh 800::802 order 2050 key ht 800 bkt 0 flowid 1:12 not_in_hw 
+     match a02a0000/ffff0000 at 20
+   filter protocol ip pref 1 u32 chain 0 fh 800::803 order 2051 key ht 800 bkt 0 flowid 1:13 not_in_hw 
+     match a02b0000/ffff0000 at 20
+   filter protocol ip pref 1 u32 chain 0 fh 800::804 order 2052 key ht 800 bkt 0 flowid 1:14 not_in_hw 
+     match a02c0000/ffff0000 at 20
+[   35.533371] htb: netem qdisc 100: is non-work-conserving?
+[   35.538506] htb: too many events!
+[   35.554929] tbtun: tunnel 2 carrier 0 DIALED lport=41000 peer=10.0.2.2:19101
+[   35.556670] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=54480, awaiting HELLO
+   control n=1: n=1, 4 MiB, peers before:
+   # id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+   1 0 19101 10.0.2.2:54480 0 58 0 up raw 0 0 0 1 55 0 0 27037037 14600 65535 0 1048225 1048576 0
+   2 0 41000 10.0.2.2:19101 0 21684 0 up raw 0 0 0 1 55 0 0 68683 14600 65535 0 1048225 65535 0
+[   36.575610] tbt_tx_hole_check: 32 callbacks suppressed
+[   36.575615] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[   36.577263] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[   36.596164] tbtun: hole gatefail seq=16384 mask=0x1 ack=16384
+[   36.597046] tbtun: hole gatefail seq=16384 mask=0x1 ack=16384
+[   36.606488] tbtun: hole gatefail seq=24576 mask=0x1 ack=24576
+[   36.613508] tbtun: hole gatefail seq=24576 mask=0x1 ack=24576
+[   36.624573] tbtun: hole gatefail seq=32768 mask=0x1 ack=32768
+[   36.635522] tbtun: hole gatefail seq=32768 mask=0x1 ack=32768
+[   36.656664] tbtun: hole gatefail seq=49152 mask=0x1 ack=49152
+[   36.658510] tbtun: hole gatefail seq=49152 mask=0x1 ack=49152
+[   41.580515] tbt_tx_hole_check: 875 callbacks suppressed
+[   41.580519] tbtun: hole gatefail seq=1940656 mask=0x1 ack=1940656
+[   41.591619] tbtun: hole gatefail seq=1973424 mask=0x1 ack=1973424
+[   41.602510] tbtun: hole gatefail seq=1973424 mask=0x1 ack=1973424
+[   41.610921] tbtun: hole gatefail seq=1940656 mask=0x1 ack=1940656
+[   41.614564] tbtun: hole gatefail seq=1973424 mask=0x1 ack=1973424
+[   41.623099] tbtun: hole gatefail seq=1940656 mask=0x1 ack=1940656
+[   41.624265] tbtun: hole gatefail seq=1940656 mask=0x1 ack=1940656
+[   41.625509] tbtun: hole gatefail seq=1973424 mask=0x1 ack=1973424
+[   41.636505] tbtun: hole gatefail seq=1973424 mask=0x1 ack=1973424
+[   41.647614] tbtun: hole gatefail seq=1940656 mask=0x1 ack=1940656
+[   46.588586] tbt_tx_hole_check: 848 callbacks suppressed
+[   46.588617] tbtun: hole gatefail seq=3884964 mask=0x1 ack=3884964
+[   46.599547] tbtun: hole gatefail seq=3884964 mask=0x1 ack=3884964
+[   46.604323] tbtun: hole gatefail seq=3819428 mask=0x1 ack=3819428
+[   46.605514] tbtun: hole gatefail seq=3819428 mask=0x1 ack=3819428
+[   46.610606] tbtun: hole gatefail seq=3893156 mask=0x1 ack=3893156
+[   46.616360] tbtun: hole gatefail seq=3827620 mask=0x1 ack=3827620
+[   46.618055] tbtun: hole gatefail seq=3827620 mask=0x1 ack=3827620
+[   46.621545] tbtun: hole gatefail seq=3901348 mask=0x1 ack=3901348
+[   46.628128] tbtun: hole gatefail seq=3835812 mask=0x1 ack=3835812
+[   46.632569] tbtun: hole gatefail seq=3909540 mask=0x1 ack=3909540
+[   51.597585] tbt_tx_hole_check: 868 callbacks suppressed
+[   51.597605] tbtun: hole gatefail seq=5700625 mask=0x1 ack=5700625
+[   51.608645] tbtun: hole gatefail seq=5700625 mask=0x1 ack=5700625
+[   51.619503] tbtun: hole gatefail seq=5700625 mask=0x1 ack=5700625
+[   51.620549] tbtun: hole gatefail seq=5643281 mask=0x1 ack=5643281
+[   51.621522] tbtun: hole gatefail seq=5643281 mask=0x1 ack=5643281
+[   51.630778] tbtun: hole gatefail seq=5708817 mask=0x1 ack=5708817
+[   51.641545] tbtun: hole gatefail seq=5708817 mask=0x1 ack=5708817
+[   51.652605] tbtun: hole gatefail seq=5717009 mask=0x1 ack=5717009
+[   51.660813] tbtun: hole gatefail seq=5651473 mask=0x1 ack=5651473
+[   51.662347] tbtun: hole gatefail seq=5651473 mask=0x1 ack=5651473
+[   56.604710] tbt_tx_hole_check: 899 callbacks suppressed
+[   56.604732] tbtun: hole gatefail seq=7494567 mask=0x1 ack=7494567
+[   56.612151] tbtun: hole gatefail seq=7445415 mask=0x1 ack=7445415
+[   56.613597] tbtun: hole gatefail seq=7445415 mask=0x1 ack=7445415
+[   56.614453] tbtun: hole gatefail seq=7445415 mask=0x1 ack=7445415
+[   56.615637] tbtun: hole gatefail seq=7502759 mask=0x1 ack=7502759
+[   56.626515] tbtun: hole gatefail seq=7502759 mask=0x1 ack=7502759
+[   56.637574] tbtun: hole gatefail seq=7502759 mask=0x1 ack=7502759
+[   56.638891] tbtun: hole gatefail seq=7453607 mask=0x1 ack=7453607
+[   56.639792] tbtun: hole gatefail seq=7453607 mask=0x1 ack=7453607
+[   56.648542] tbtun: hole gatefail seq=7510951 mask=0x1 ack=7510951
+   control n=1: one-way 3.0 Mbit/s, rc=0 strict=1 interleaved=1
+   burst: connected to 10.0.2.15:19100, 4 MiB each way, strict send-then-read first
+   burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+   burst: interleaved coverage phase passed
+   burst: 4 MiB crossed each way
+cat: read error: Connection reset by peer
+[   60.048984] htb: netem qdisc 101: is non-work-conserving?
+[   60.050126] htb: netem qdisc 102: is non-work-conserving?
+[   60.051013] htb: netem qdisc 103: is non-work-conserving?
+[   60.061068] tbtun: tunnel 2 carrier 0 DIALED lport=41000 peer=10.0.2.2:19101
+[   60.063195] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=52602, awaiting HELLO
+[   60.064464] tbtun: tunnel 2 carrier 2 DIALED lport=41002 peer=10.0.2.2:19101
+[   60.065563] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=52604, awaiting HELLO
+[   60.069374] tbtun: tunnel 2 carrier 3 DIALED lport=41003 peer=10.0.2.2:19101
+[   60.070970] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=52606, awaiting HELLO
+[   60.073858] tbtun: tunnel 2 carrier 1 DIALED lport=41001 peer=10.0.2.2:19101
+[   60.075523] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=52622, awaiting HELLO
+   main n=4: n=4, 40 MiB, peers before:
+   # id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+   1 0 19101 10.0.2.2:52602 0 1856 0 up raw 0 0 0 1 55 0 0 50344827 14600 65535 0 1048225 1048576 0
+   1 1 19101 10.0.2.2:52622 0 1454 0 up raw 0 0 0 1 55 0 0 56153846 14600 65535 0 1048225 1048576 0
+   1 2 19101 10.0.2.2:52604 0 962 0 up raw 0 0 0 1 55 0 0 40555555 14600 65535 0 1048225 1048576 0
+   1 3 19101 10.0.2.2:52606 0 1382 0 up raw 0 0 0 1 55 0 0 28627450 14600 65535 0 1048225 1048576 0
+   2 0 41000 10.0.2.2:19101 0 12274 0 up raw 0 0 0 1 55 0 0 106865 14600 65535 0 1048225 65535 0
+   2 1 41001 10.0.2.2:19101 0 24795 0 up raw 0 0 0 1 55 0 0 59894 14600 65535 0 1048225 65535 0
+   2 2 41002 10.0.2.2:19101 0 14156 0 up raw 0 0 0 1 55 0 0 112161 14600 65535 0 1048225 65535 0
+   2 3 41003 10.0.2.2:19101 0 19346 0 up raw 0 0 0 1 55 0 0 54976 14600 65535 0 1048225 65535 0
+[   61.090595] tbtun: retx wndshort seq=57344 len=8192 total=8224 wnd=65535 inflight=62976 wnd_avail=2559 mem_avail=2025536
+[   61.092594] tbtun: retx wndshort seq=49152 len=8192 total=8224 wnd=65535 inflight=71200 wnd_avail=0 mem_avail=2017312
+[   61.094564] tbtun: retx wndshort seq=40960 len=8192 total=8224 wnd=65535 inflight=74120 wnd_avail=0 mem_avail=2012472
+[   61.096290] tbtun: retx wndshort seq=32768 len=8192 total=8224 wnd=65535 inflight=82344 wnd_avail=0 mem_avail=2003288
+[   61.098241] tbtun: retx wndshort seq=24576 len=8192 total=8224 wnd=65535 inflight=90568 wnd_avail=0 mem_avail=1993144
+[   61.099969] tbtun: retx wndshort seq=180224 len=8192 total=8224 wnd=65535 inflight=98792 wnd_avail=0 mem_avail=1984920
+[   61.101629] tbtun: retx wndshort seq=163840 len=8192 total=8224 wnd=65535 inflight=107016 wnd_avail=0 mem_avail=1976696
+[   61.103599] tbtun: retx wndshort seq=155648 len=8192 total=8224 wnd=65535 inflight=109400 wnd_avail=0 mem_avail=1972392
+[   61.105311] tbtun: retx wndshort seq=147456 len=8192 total=8224 wnd=65535 inflight=115240 wnd_avail=0 mem_avail=1965592
+[   61.107018] tbtun: retx wndshort seq=131072 len=8192 total=8224 wnd=65535 inflight=123464 wnd_avail=0 mem_avail=1956408
+[   61.153922] tbt_tx_hole_check: 345 callbacks suppressed
+[   61.153926] tbtun: hole depthfail seq=122880 g=2 mask=0x5
+[   61.453586] tbtun: hole depthfail seq=237568 g=1 mask=0x1
+[   61.454780] tbtun: hole depthfail seq=237568 g=1 mask=0x1
+[   61.606544] tbt_tx_hole_check: 497 callbacks suppressed
+[   61.606549] tbtun: hole gatefail seq=270336 mask=0x2 ack=270336
+[   61.617632] tbtun: hole gatefail seq=270336 mask=0x2 ack=270336
+[   61.620977] tbtun: hole depthfail seq=245760 g=3 mask=0x8
+[   61.622751] tbtun: hole depthfail seq=245760 g=3 mask=0x8
+[   61.623598] tbtun: hole depthfail seq=245760 g=3 mask=0x8
+[   61.624527] tbtun: hole depthfail seq=245760 g=3 mask=0x8
+[   61.625363] tbtun: hole gatefail seq=245760 mask=0x8 ack=245760
+[   61.626255] tbtun: hole gatefail seq=245760 mask=0x8 ack=245760
+[   61.627166] tbtun: hole gatefail seq=245760 mask=0x8 ack=245760
+[   61.629163] tbtun: hole gatefail seq=352256 mask=0x8 ack=352256
+[   61.630224] tbtun: hole gatefail seq=245760 mask=0x8 ack=245760
+[   61.631140] tbtun: hole gatefail seq=245760 mask=0x8 ack=245760
+[   61.637717] tbtun: hole gatefail seq=245760 mask=0x8 ack=245760
+[   61.639661] tbtun: hole gatefail seq=352256 mask=0x8 ack=352256
+[   61.668761] tbtun: hole timefail seq=270336 age_us=40231 rtt_us=24227
+[   64.028872] tbtun: hole depthfail seq=3000566 g=3 mask=0x4
+[   64.030040] tbtun: hole depthfail seq=3000566 g=3 mask=0x4
+[   64.074105] tbtun: hole depthfail seq=3025142 g=2 mask=0x1
+[   65.367707] tbtun: hole timefail seq=3909348 age_us=34412 rtt_us=24471
+[   65.368717] tbtun: hole timefail seq=3909348 age_us=35430 rtt_us=24255
+[   65.369737] tbtun: hole timefail seq=3909348 age_us=36450 rtt_us=24172
+[   65.370745] tbtun: hole timefail seq=3909348 age_us=37457 rtt_us=24193
+[   65.371931] tbtun: hole timefail seq=3909348 age_us=38641 rtt_us=23986
+[   65.372954] tbtun: hole timefail seq=3909348 age_us=39666 rtt_us=23665
+[   66.607563] tbt_tx_hole_check: 815 callbacks suppressed
+[   66.607570] tbtun: hole gatefail seq=4912871 mask=0x2 ack=4912871
+[   66.618603] tbtun: hole gatefail seq=4912871 mask=0x2 ack=4912871
+[   66.629558] tbtun: hole gatefail seq=4937447 mask=0x1 ack=4937447
+[   66.637198] tbtun: hole gatefail seq=4859623 mask=0x1 ack=4859623
+[   66.638160] tbtun: hole gatefail seq=4859623 mask=0x1 ack=4859623
+[   66.639082] tbtun: hole gatefail seq=4859623 mask=0x1 ack=4859623
+[   66.639972] tbtun: hole gatefail seq=4859623 mask=0x1 ack=4859623
+[   66.641014] tbtun: hole gatefail seq=4859623 mask=0x1 ack=4859623
+[   66.642224] tbtun: hole gatefail seq=4859623 mask=0x1 ack=4859623
+[   66.643128] tbtun: hole gatefail seq=4859623 mask=0x1 ack=4859623
+[   66.805202] tbt_tx_hole_check: 11 callbacks suppressed
+[   66.805214] tbtun: hole depthfail seq=4986599 g=1 mask=0x2
+[   66.807837] tbtun: hole depthfail seq=4986599 g=1 mask=0x2
+[   66.809203] tbtun: hole depthfail seq=4986599 g=1 mask=0x2
+[   66.810088] tbtun: hole depthfail seq=4986599 g=1 mask=0x2
+[   66.860118] tbtun: hole timefail seq=4990695 age_us=44366 rtt_us=23534
+[   66.861271] tbtun: hole timefail seq=4990695 age_us=45526 rtt_us=23592
+[   69.627534] tbtun: hole depthfail seq=6934558 g=1 mask=0x4
+[   69.629056] tbtun: hole depthfail seq=6934558 g=1 mask=0x4
+[   69.629930] tbtun: hole depthfail seq=6934558 g=1 mask=0x4
+[   69.677977] tbtun: hole timefail seq=6938654 age_us=47067 rtt_us=25085
+[   69.679792] tbtun: hole timefail seq=6938654 age_us=48951 rtt_us=24946
+[   70.389774] tbtun: hole depthfail seq=7523042 g=1 mask=0x8
+[   71.612594] tbt_tx_hole_check: 827 callbacks suppressed
+[   71.612599] tbtun: hole gatefail seq=8363408 mask=0x2 ack=8363408
+[   71.616438] tbtun: hole gatefail seq=8318352 mask=0x4 ack=8318352
+[   71.623530] tbtun: hole gatefail seq=8379792 mask=0x2 ack=8379792
+[   71.634573] tbtun: hole gatefail seq=8379792 mask=0x2 ack=8379792
+[   71.636191] tbtun: hole gatefail seq=8359312 mask=0x4 ack=8359312
+[   71.637109] tbtun: hole gatefail seq=8359312 mask=0x4 ack=8359312
+[   71.638107] tbtun: hole gatefail seq=8359312 mask=0x4 ack=8359312
+[   71.645541] tbtun: hole gatefail seq=8379792 mask=0x2 ack=8379792
+[   71.656690] tbtun: hole gatefail seq=8379792 mask=0x2 ack=8379792
+[   71.667556] tbtun: hole gatefail seq=8406588 mask=0x4 ack=8406588
+[   71.706094] tbtun: hole timefail seq=8392080 age_us=20949 rtt_us=22763
+[   71.707227] tbtun: hole timefail seq=8392080 age_us=22088 rtt_us=22699
+[   71.708250] tbtun: hole timefail seq=8392080 age_us=23110 rtt_us=22718
+[   71.727491] tbtun: hole timefail seq=8392080 age_us=42343 rtt_us=22735
+[   71.728485] tbtun: hole timefail seq=8392080 age_us=43344 rtt_us=22745
+[   71.738207] tbtun: hole timefail seq=8410684 age_us=33085 rtt_us=22754
+[   71.757580] tbtun: hole depthfail seq=8439356 g=2 mask=0x8
+[   71.759014] tbtun: hole depthfail seq=8439356 g=2 mask=0x8
+[   74.534455] tbt_tx_hole_check: 1 callbacks suppressed
+[   74.534461] tbtun: hole timefail seq=10428304 age_us=19923 rtt_us=25362
+[   74.536955] tbtun: hole timefail seq=10428304 age_us=22436 rtt_us=25066
+[   74.537972] tbtun: hole timefail seq=10428304 age_us=23455 rtt_us=24548
+[   74.557672] tbtun: hole timefail seq=10477456 age_us=18583 rtt_us=24132
+[   74.559311] tbtun: hole timefail seq=10477456 age_us=20267 rtt_us=23986
+[   74.560457] tbtun: hole timefail seq=10477456 age_us=21414 rtt_us=23788
+[   74.561503] tbtun: hole timefail seq=10477456 age_us=22460 rtt_us=23615
+[   74.562611] tbtun: hole timefail seq=10477456 age_us=23568 rtt_us=23464
+[   74.591499] tbt_tx_hole_check: 1 callbacks suppressed
+[   74.591509] tbtun: hole depthfail seq=10505916 g=2 mask=0x4
+[   74.593745] tbtun: hole depthfail seq=10505916 g=2 mask=0x4
+[   74.594615] tbtun: hole depthfail seq=10505916 g=2 mask=0x4
+[   74.619934] tbtun: hole depthfail seq=10518204 g=1 mask=0x1
+[   74.636087] tbtun: hole timefail seq=10518204 age_us=40453 rtt_us=24037
+[   74.637108] tbtun: hole timefail seq=10518204 age_us=41486 rtt_us=23997
+[   75.915285] tbtun: hole depthfail seq=11501855 g=1 mask=0x8
+[   75.916295] tbtun: hole depthfail seq=11501855 g=1 mask=0x8
+[   75.917280] tbtun: hole depthfail seq=11501855 g=1 mask=0x8
+[   75.918223] tbtun: hole depthfail seq=11501855 g=1 mask=0x8
+[   75.919120] tbtun: hole depthfail seq=11501855 g=1 mask=0x8
+[   75.919998] tbtun: hole depthfail seq=11501855 g=1 mask=0x8
+[   76.613641] tbt_tx_hole_check: 793 callbacks suppressed
+[   76.613651] tbtun: hole gatefail seq=12033230 mask=0x2 ack=12033230
+[   76.624588] tbtun: hole gatefail seq=12033230 mask=0x2 ack=12033230
+[   76.635517] tbtun: hole gatefail seq=12033230 mask=0x2 ack=12033230
+[   76.646585] tbtun: hole gatefail seq=12033230 mask=0x2 ack=12033230
+[   76.657565] tbtun: hole gatefail seq=12033230 mask=0x2 ack=12033230
+[   76.668526] tbtun: hole gatefail seq=12065998 mask=0x2 ack=12065998
+[   76.679631] tbtun: hole gatefail seq=12065998 mask=0x2 ack=12065998
+[   76.690627] tbtun: hole gatefail seq=12065998 mask=0x2 ack=12065998
+[   76.701804] tbtun: hole gatefail seq=12098766 mask=0x2 ack=12098766
+[   76.704575] tbtun: hole gatefail seq=12033230 mask=0x1 ack=12033230
+[   80.154344] tbt_tx_hole_check: 12 callbacks suppressed
+[   80.154348] tbtun: hole depthfail seq=14554458 g=2 mask=0x8
+[   80.155989] tbtun: hole depthfail seq=14554458 g=2 mask=0x8
+[   80.156907] tbtun: hole depthfail seq=14554458 g=2 mask=0x8
+[   81.615893] tbt_tx_hole_check: 845 callbacks suppressed
+[   81.615903] tbtun: hole gatefail seq=15475316 mask=0x2 ack=15475316
+[   81.618514] tbtun: hole gatefail seq=15475316 mask=0x2 ack=15475316
+[   81.619491] tbtun: hole gatefail seq=15475316 mask=0x2 ack=15475316
+[   81.624600] tbtun: hole gatefail seq=15602176 mask=0x1 ack=15602176
+[   81.635572] tbtun: hole gatefail seq=15602176 mask=0x1 ack=15602176
+[   81.646597] tbtun: hole gatefail seq=15602176 mask=0x1 ack=15602176
+[   81.657520] tbtun: hole gatefail seq=15602176 mask=0x1 ack=15602176
+[   81.668678] tbtun: hole gatefail seq=15602176 mask=0x1 ack=15602176
+[   81.672506] tbtun: hole gatefail seq=15573504 mask=0x1 ack=15573504
+[   81.673948] tbtun: hole gatefail seq=15573504 mask=0x1 ack=15573504
+[   82.294749] tbt_tx_hole_check: 7 callbacks suppressed
+[   82.294754] tbtun: hole timefail seq=16097751 age_us=22067 rtt_us=30205
+[   82.296760] tbtun: hole timefail seq=16097751 age_us=24095 rtt_us=29471
+[   82.297750] tbtun: hole timefail seq=16097751 age_us=25086 rtt_us=28825
+[   82.298752] tbtun: hole timefail seq=16097751 age_us=26088 rtt_us=27887
+[   82.299724] tbtun: hole timefail seq=16097751 age_us=27061 rtt_us=27220
+[   82.363113] tbtun: hole timefail seq=16155095 age_us=6547 rtt_us=25618
+[   82.364708] tbtun: hole timefail seq=16155095 age_us=8142 rtt_us=25353
+[   82.365714] tbtun: hole timefail seq=16155095 age_us=9148 rtt_us=25182
+[   82.366656] tbtun: hole timefail seq=16155095 age_us=10091 rtt_us=25032
+[   84.418066] tbtun: hole timefail seq=17606848 age_us=43084 rtt_us=24262
+[   86.545011] tbtun: hole depthfail seq=19281522 g=3 mask=0x2
+[   86.552786] tbtun: hole depthfail seq=19281522 g=3 mask=0x2
+[   86.584776] tbtun: hole depthfail seq=19293545 g=2 mask=0x4
+[   86.619564] tbt_tx_hole_check: 819 callbacks suppressed
+[   86.619571] tbtun: hole gatefail seq=19383657 mask=0x2 ack=19383657
+[   86.630613] tbtun: hole gatefail seq=19416425 mask=0x2 ack=19416425
+[   86.638770] tbtun: hole gatefail seq=19338601 mask=0x4 ack=19338601
+[   86.640105] tbtun: hole gatefail seq=19338601 mask=0x4 ack=19338601
+[   86.641559] tbtun: hole gatefail seq=19416425 mask=0x2 ack=19416425
+[   86.652652] tbtun: hole gatefail seq=19416425 mask=0x2 ack=19416425
+[   86.663840] tbtun: hole gatefail seq=19416425 mask=0x2 ack=19416425
+[   86.674540] tbtun: hole gatefail seq=19465577 mask=0x2 ack=19465577
+[   86.685598] tbtun: hole gatefail seq=19465577 mask=0x2 ack=19465577
+[   86.687081] tbtun: hole gatefail seq=19338601 mask=0x4 ack=19338601
+[   87.234939] tbtun: hole depthfail seq=19850336 g=1 mask=0x2
+[   87.236081] tbtun: hole depthfail seq=19850336 g=1 mask=0x2
+[   87.236869] tbtun: hole depthfail seq=19850336 g=1 mask=0x2
+[   90.155039] tbt_tx_hole_check: 14 callbacks suppressed
+[   90.155050] tbtun: hole timefail seq=22170860 age_us=3409 rtt_us=25938
+[   90.157849] tbtun: hole timefail seq=22170860 age_us=6269 rtt_us=25343
+[   90.158849] tbtun: hole timefail seq=22170860 age_us=7271 rtt_us=24830
+[   90.159782] tbtun: hole timefail seq=22170860 age_us=8204 rtt_us=24445
+[   90.202985] tbtun: hole depthfail seq=22203628 g=2 mask=0x8
+[   90.203890] tbtun: hole depthfail seq=22203628 g=2 mask=0x8
+[   90.204769] tbtun: hole depthfail seq=22203628 g=2 mask=0x8
+[   90.256037] tbtun: hole depthfail seq=22240492 g=3 mask=0x8
+[   91.629536] tbt_tx_hole_check: 812 callbacks suppressed
+[   91.629551] tbtun: hole gatefail seq=23230823 mask=0x1 ack=23230823
+[   91.640529] tbtun: hole gatefail seq=23230823 mask=0x1 ack=23230823
+[   91.651521] tbtun: hole gatefail seq=23263591 mask=0x1 ack=23263591
+[   91.662525] tbtun: hole gatefail seq=23263591 mask=0x1 ack=23263591
+[   91.673548] tbtun: hole gatefail seq=23263591 mask=0x1 ack=23263591
+[   91.681109] tbtun: hole gatefail seq=23234919 mask=0x8 ack=23234919
+[   91.682325] tbtun: hole gatefail seq=23234919 mask=0x8 ack=23234919
+[   91.683227] tbtun: hole gatefail seq=23234919 mask=0x8 ack=23234919
+[   91.684507] tbtun: hole gatefail seq=23296359 mask=0x1 ack=23296359
+[   91.695765] tbtun: hole gatefail seq=23296359 mask=0x1 ack=23296359
+[   92.911241] tbtun: hole timefail seq=24142497 age_us=8576 rtt_us=26754
+[   92.912525] tbtun: hole timefail seq=24142497 age_us=9864 rtt_us=26332
+[   92.953040] tbt_tx_hole_check: 3 callbacks suppressed
+[   92.953045] tbtun: hole depthfail seq=24171169 g=1 mask=0x4
+[   92.997206] tbtun: hole timefail seq=24175265 age_us=42152 rtt_us=28187
+[   92.998213] tbtun: hole timefail seq=24175265 age_us=43168 rtt_us=27737
+[   92.999212] tbtun: hole timefail seq=24175265 age_us=44167 rtt_us=27545
+[   93.000206] tbtun: hole timefail seq=24175265 age_us=45159 rtt_us=27338
+[   93.053983] tbtun: hole depthfail seq=24253089 g=2 mask=0x8
+[   93.055258] tbtun: hole depthfail seq=24253089 g=2 mask=0x8
+[   96.349539] tbtun: hole depthfail seq=26570593 g=1 mask=0x8
+[   96.635513] tbt_tx_hole_check: 819 callbacks suppressed
+[   96.635518] tbtun: hole gatefail seq=26816238 mask=0x4 ack=26816238
+[   96.646524] tbtun: hole gatefail seq=26816238 mask=0x4 ack=26816238
+[   96.657528] tbtun: hole gatefail seq=26816238 mask=0x4 ack=26816238
+[   96.660726] tbtun: hole gatefail seq=26730222 mask=0x1 ack=26730222
+[   96.668562] tbtun: hole gatefail seq=26832622 mask=0x8 ack=26832622
+[   96.679625] tbtun: hole gatefail seq=26832622 mask=0x8 ack=26832622
+[   96.681398] tbtun: hole gatefail seq=26779374 mask=0x8 ack=26779374
+[   96.682496] tbtun: hole gatefail seq=26779374 mask=0x8 ack=26779374
+[   96.683690] tbtun: hole gatefail seq=26779374 mask=0x8 ack=26779374
+[   96.690632] tbtun: hole gatefail seq=26849006 mask=0x4 ack=26849006
+[   97.194456] tbt_tx_hole_check: 9 callbacks suppressed
+[   97.194459] tbtun: hole timefail seq=27133221 age_us=42669 rtt_us=23465
+[   97.233546] tbtun: hole depthfail seq=27170085 g=3 mask=0x4
+[   99.261514] tbtun: hole depthfail seq=28543234 g=1 mask=0x4
+[   99.262493] tbtun: hole depthfail seq=28543234 g=1 mask=0x4
+[   99.324722] tbtun: hole timefail seq=28547330 age_us=43221 rtt_us=22455
+[   99.326482] tbtun: hole timefail seq=28547330 age_us=44985 rtt_us=22537
+[  101.645574] tbt_tx_hole_check: 844 callbacks suppressed
+[  101.645580] tbtun: hole gatefail seq=30507522 mask=0x2 ack=30507522
+[  101.656551] tbtun: hole gatefail seq=30507522 mask=0x2 ack=30507522
+[  101.667579] tbtun: hole gatefail seq=30507522 mask=0x2 ack=30507522
+[  101.677085] tbtun: hole gatefail seq=30427734 mask=0x1 ack=30427734
+[  101.678652] tbtun: hole gatefail seq=30427734 mask=0x1 ack=30427734
+[  101.679596] tbtun: hole gatefail seq=30427734 mask=0x1 ack=30427734
+[  101.680638] tbtun: hole gatefail seq=30532098 mask=0x2 ack=30532098
+[  101.691563] tbtun: hole gatefail seq=30532098 mask=0x2 ack=30532098
+[  101.702525] tbtun: hole gatefail seq=30540290 mask=0x8 ack=30540290
+[  101.713570] tbtun: hole gatefail seq=30556674 mask=0x2 ack=30556674
+[  103.410369] tbtun: hole depthfail seq=31953704 g=2 mask=0x4
+[  103.411658] tbtun: hole depthfail seq=31953704 g=2 mask=0x4
+[  103.412547] tbtun: hole depthfail seq=31953704 g=2 mask=0x4
+[  103.492167] tbtun: hole depthfail seq=31994664 g=1 mask=0x4
+[  103.493092] tbtun: hole depthfail seq=31994664 g=1 mask=0x4
+[  103.494093] tbtun: hole depthfail seq=31994664 g=1 mask=0x4
+[  103.495471] tbtun: hole depthfail seq=31994664 g=1 mask=0x4
+[  103.496313] tbtun: hole depthfail seq=31994664 g=1 mask=0x4
+[  104.874853] tbt_tx_hole_check: 5 callbacks suppressed
+[  104.874858] tbtun: hole depthfail seq=33127054 g=1 mask=0x1
+[  104.876605] tbtun: hole depthfail seq=33127054 g=1 mask=0x1
+[  104.877426] tbtun: hole depthfail seq=33127054 g=1 mask=0x1
+[  104.878370] tbtun: hole depthfail seq=33127054 g=1 mask=0x1
+[  104.899993] tbtun: hole timefail seq=33131150 age_us=20456 rtt_us=23636
+[  104.901681] tbtun: hole timefail seq=33131150 age_us=22145 rtt_us=23620
+[  104.902717] tbtun: hole timefail seq=33131150 age_us=23183 rtt_us=23606
+[  104.903680] tbtun: hole timefail seq=33131150 age_us=24153 rtt_us=23650
+[  104.904687] tbtun: hole timefail seq=33131150 age_us=25160 rtt_us=23688
+[  104.905672] tbtun: hole timefail seq=33131150 age_us=26146 rtt_us=23722
+[  104.906634] tbtun: hole timefail seq=33131150 age_us=27108 rtt_us=23892
+[  104.907658] tbtun: hole timefail seq=33131150 age_us=28132 rtt_us=24040
+[  104.908641] tbtun: hole timefail seq=33131150 age_us=29111 rtt_us=24196
+[  104.909616] tbtun: hole timefail seq=33131150 age_us=30088 rtt_us=24333
+[  106.647435] tbt_tx_hole_check: 775 callbacks suppressed
+[  106.647441] tbtun: hole gatefail seq=34321416 mask=0x1 ack=34321416
+[  106.649697] tbtun: hole gatefail seq=34374664 mask=0x2 ack=34374664
+[  106.660579] tbtun: hole gatefail seq=34374664 mask=0x2 ack=34374664
+[  106.671569] tbtun: hole gatefail seq=34374664 mask=0x2 ack=34374664
+[  106.682474] tbtun: hole gatefail seq=34407432 mask=0x2 ack=34407432
+[  106.693639] tbtun: hole gatefail seq=34407432 mask=0x2 ack=34407432
+[  106.704585] tbtun: hole gatefail seq=34407432 mask=0x2 ack=34407432
+[  106.715525] tbtun: hole gatefail seq=34407432 mask=0x2 ack=34407432
+[  106.726569] tbtun: hole gatefail seq=34407432 mask=0x2 ack=34407432
+[  106.737591] tbtun: hole gatefail seq=34436502 mask=0x2 ack=34436502
+[  109.046561] tbtun: hole depthfail seq=35946813 g=2 mask=0x1
+[  109.051890] tbtun: hole depthfail seq=35946813 g=2 mask=0x1
+[  109.052788] tbtun: hole depthfail seq=35946813 g=2 mask=0x1
+[  109.053610] tbtun: hole depthfail seq=35946813 g=2 mask=0x1
+[  109.054440] tbtun: hole depthfail seq=35946813 g=2 mask=0x1
+[  111.207131] tbt_tx_hole_check: 9 callbacks suppressed
+[  111.207136] tbtun: hole timefail seq=37452922 age_us=44799 rtt_us=22783
+[  111.209108] tbtun: hole timefail seq=37452922 age_us=46836 rtt_us=23593
+[  111.210065] tbtun: hole timefail seq=37452922 age_us=47793 rtt_us=23914
+[  111.654538] tbt_tx_hole_check: 807 callbacks suppressed
+[  111.654543] tbtun: hole gatefail seq=37809062 mask=0x8 ack=37809062
+[  111.665594] tbtun: hole gatefail seq=37809062 mask=0x8 ack=37809062
+[  111.676560] tbtun: hole gatefail seq=37866194 mask=0x8 ack=37866194
+[  111.685964] tbtun: hole gatefail seq=37780390 mask=0x1 ack=37780390
+[  111.687541] tbtun: hole gatefail seq=37866194 mask=0x8 ack=37866194
+[  111.694806] tbtun: hole gatefail seq=37780390 mask=0x1 ack=37780390
+[  111.698558] tbtun: hole gatefail seq=37866194 mask=0x8 ack=37866194
+[  111.709548] tbtun: hole gatefail seq=37866194 mask=0x8 ack=37866194
+[  111.720546] tbtun: hole gatefail seq=37866194 mask=0x8 ack=37866194
+[  111.731483] tbtun: hole gatefail seq=37874386 mask=0x8 ack=37874386
+[  113.332068] tbtun: hole depthfail seq=39028504 g=2 mask=0x1
+[  113.333576] tbtun: hole depthfail seq=39028504 g=2 mask=0x1
+[  113.375890] tbtun: hole timefail seq=39040792 age_us=8371 rtt_us=24723
+[  113.414838] tbtun: hole timefail seq=39073560 age_us=6796 rtt_us=24465
+[  116.655597] tbt_tx_hole_check: 838 callbacks suppressed
+[  116.655601] tbtun: hole gatefail seq=41590692 mask=0x4 ack=41590692
+[  116.666587] tbtun: hole gatefail seq=41590692 mask=0x4 ack=41590692
+[  116.676545] tbtun: hole gatefail seq=41455524 mask=0x1 ack=41455524
+[  116.678077] tbtun: hole gatefail seq=41455524 mask=0x1 ack=41455524
+[  116.679070] tbtun: hole gatefail seq=41455524 mask=0x1 ack=41455524
+[  116.680154] tbtun: hole gatefail seq=41631652 mask=0x4 ack=41631652
+[  116.690680] tbtun: hole gatefail seq=41631652 mask=0x4 ack=41631652
+[  116.701679] tbtun: hole gatefail seq=41631652 mask=0x4 ack=41631652
+[  116.712630] tbtun: hole gatefail seq=41631652 mask=0x4 ack=41631652
+[  116.723569] tbtun: hole gatefail seq=41631652 mask=0x4 ack=41631652
+[  116.916876] tbtun: hole timefail seq=41732911 age_us=351 rtt_us=23498
+[  116.918425] tbtun: hole timefail seq=41732911 age_us=1902 rtt_us=23405
+[  116.919618] tbtun: hole timefail seq=41732911 age_us=3097 rtt_us=23461
+[  116.920637] tbtun: hole timefail seq=41732911 age_us=4116 rtt_us=23518
+[  117.040144] tbtun: hole depthfail seq=41773871 g=3 mask=0x8
+[  117.041365] tbtun: hole depthfail seq=41773871 g=3 mask=0x8
+[  117.834632] tbtun: hole depthfail seq=42328064 g=2 mask=0x8
+[  121.662613] tbt_tx_hole_check: 816 callbacks suppressed
+[  121.662618] tbtun: hole gatefail seq=45291183 mask=0x1 ack=45291183
+[  121.667034] tbtun: hole gatefail seq=45225647 mask=0x1 ack=45225647
+[  121.668509] tbtun: hole gatefail seq=45225647 mask=0x1 ack=45225647
+[  121.669511] tbtun: hole gatefail seq=45225647 mask=0x1 ack=45225647
+[  121.670579] tbtun: hole gatefail seq=45225647 mask=0x1 ack=45225647
+[  121.671595] tbtun: hole gatefail seq=45225647 mask=0x1 ack=45225647
+[  121.672672] tbtun: hole gatefail seq=45225647 mask=0x1 ack=45225647
+[  121.674046] tbtun: hole gatefail seq=45323951 mask=0x1 ack=45323951
+[  121.684596] tbtun: hole gatefail seq=45323951 mask=0x1 ack=45323951
+[  121.695635] tbtun: hole gatefail seq=45323951 mask=0x1 ack=45323951
+[  123.254371] tbtun: hole timefail seq=46383967 age_us=12818 rtt_us=24891
+[  124.555854] tbtun: hole timefail seq=47298669 age_us=26354 rtt_us=23097
+[  124.557003] tbtun: hole timefail seq=47298669 age_us=27518 rtt_us=23342
+[  124.558146] tbtun: hole timefail seq=47298669 age_us=28660 rtt_us=23656
+[  124.559326] tbtun: hole timefail seq=47298669 age_us=29841 rtt_us=23931
+[  124.560346] tbtun: hole timefail seq=47298669 age_us=30863 rtt_us=24171
+[  124.561389] tbtun: hole timefail seq=47298669 age_us=31905 rtt_us=24381
+[  124.562553] tbtun: hole timefail seq=47298669 age_us=33068 rtt_us=24565
+[  124.563713] tbtun: hole timefail seq=47298669 age_us=34224 rtt_us=24404
+[  124.728835] tbtun: hole timefail seq=47437933 age_us=13301 rtt_us=21799
+[  126.666550] tbt_tx_hole_check: 834 callbacks suppressed
+[  126.666555] tbtun: hole gatefail seq=48734292 mask=0x4 ack=48734292
+[  126.677542] tbtun: hole gatefail seq=48734292 mask=0x4 ack=48734292
+[  126.687563] tbtun: hole gatefail seq=48722004 mask=0x8 ack=48722004
+[  126.688963] tbtun: hole gatefail seq=48734292 mask=0x4 ack=48734292
+[  126.699611] tbtun: hole gatefail seq=48734292 mask=0x4 ack=48734292
+[  126.710565] tbtun: hole gatefail seq=48761570 mask=0x4 ack=48761570
+[  126.713151] tbtun: hole gatefail seq=48722004 mask=0x8 ack=48722004
+[  126.721616] tbtun: hole gatefail seq=48761570 mask=0x4 ack=48761570
+[  126.732643] tbtun: hole gatefail seq=48761570 mask=0x4 ack=48761570
+[  126.741254] tbtun: hole gatefail seq=48722004 mask=0x8 ack=48722004
+[  128.872497] tbt_tx_hole_check: 10 callbacks suppressed
+[  128.872506] tbtun: hole timefail seq=50206345 age_us=30978 rtt_us=22948
+[  128.874464] tbtun: hole timefail seq=50206345 age_us=32950 rtt_us=23035
+[  128.875561] tbtun: hole timefail seq=50206345 age_us=34047 rtt_us=23216
+[  128.876572] tbtun: hole timefail seq=50206345 age_us=35058 rtt_us=23299
+[  128.877655] tbtun: hole timefail seq=50206345 age_us=36142 rtt_us=23372
+[  128.878861] tbtun: hole timefail seq=50206345 age_us=37335 rtt_us=23453
+[  128.880010] tbtun: hole timefail seq=50206345 age_us=38494 rtt_us=23508
+[  128.893500] tbtun: hole timefail seq=50230921 age_us=12096 rtt_us=23765
+[  128.894541] tbtun: hole timefail seq=50230921 age_us=13146 rtt_us=24001
+[  128.925432] tbtun: hole timefail seq=50230921 age_us=44030 rtt_us=23987
+[  128.972437] tbtun: hole depthfail seq=50345609 g=2 mask=0x4
+[  128.973737] tbtun: hole depthfail seq=50345609 g=2 mask=0x4
+[  128.974559] tbtun: hole depthfail seq=50345609 g=2 mask=0x4
+[  128.975412] tbtun: hole depthfail seq=50345609 g=2 mask=0x4
+[  128.976377] tbtun: hole depthfail seq=50345609 g=2 mask=0x4
+[  130.315327] tbtun: hole depthfail seq=51335993 g=3 mask=0x8
+[  130.316177] tbtun: hole depthfail seq=51335993 g=3 mask=0x8
+[  130.316988] tbtun: hole depthfail seq=51335993 g=3 mask=0x8
+[  130.346857] tbtun: hole depthfail seq=51360569 g=2 mask=0x4
+[  131.668552] tbt_tx_hole_check: 812 callbacks suppressed
+[  131.668558] tbtun: hole gatefail seq=52363294 mask=0x2 ack=52363294
+[  131.679568] tbtun: hole gatefail seq=52363294 mask=0x2 ack=52363294
+[  131.690163] tbtun: hole gatefail seq=52293662 mask=0x2 ack=52293662
+[  131.691168] tbtun: hole gatefail seq=52314142 mask=0x8 ack=52314142
+[  131.692061] tbtun: hole gatefail seq=52314142 mask=0x8 ack=52314142
+[  131.693463] tbtun: hole gatefail seq=52363294 mask=0x2 ack=52363294
+[  131.703556] tbtun: hole gatefail seq=52404254 mask=0x2 ack=52404254
+[  131.714554] tbtun: hole gatefail seq=52404254 mask=0x2 ack=52404254
+[  131.725667] tbtun: hole gatefail seq=52404254 mask=0x2 ack=52404254
+[  131.736980] tbtun: hole gatefail seq=52404254 mask=0x2 ack=52404254
+[  134.466078] tbt_tx_hole_check: 1 callbacks suppressed
+[  134.466084] tbtun: hole timefail seq=54225331 age_us=12545 rtt_us=23236
+[  134.468553] tbtun: hole timefail seq=54225331 age_us=15027 rtt_us=23135
+[  134.469518] tbtun: hole timefail seq=54225331 age_us=15994 rtt_us=23057
+[  134.470466] tbtun: hole timefail seq=54225331 age_us=16942 rtt_us=22728
+[  134.549347] tbtun: hole depthfail seq=54278579 g=2 mask=0x8
+[  134.550909] tbtun: hole depthfail seq=54278579 g=2 mask=0x8
+[  134.551793] tbtun: hole depthfail seq=54278579 g=2 mask=0x8
+[  134.552993] tbtun: hole depthfail seq=54278579 g=2 mask=0x8
+[  134.553867] tbtun: hole depthfail seq=54278579 g=2 mask=0x8
+[  134.554720] tbtun: hole depthfail seq=54278579 g=2 mask=0x8
+[  134.609005] tbtun: hole timefail seq=54290867 age_us=22472 rtt_us=22229
+[  134.610827] tbtun: hole timefail seq=54290867 age_us=24299 rtt_us=22225
+[  134.611902] tbtun: hole timefail seq=54290867 age_us=25373 rtt_us=22222
+[  134.612922] tbtun: hole timefail seq=54290867 age_us=26395 rtt_us=22294
+[  134.613943] tbtun: hole timefail seq=54290867 age_us=27417 rtt_us=22421
+[  134.615099] tbtun: hole timefail seq=54290867 age_us=28573 rtt_us=22532
+[  136.673571] tbt_tx_hole_check: 802 callbacks suppressed
+[  136.673576] tbtun: hole gatefail seq=55972945 mask=0x4 ack=55972945
+[  136.684566] tbtun: hole gatefail seq=55972945 mask=0x4 ack=55972945
+[  136.688715] tbtun: hole gatefail seq=55919697 mask=0x2 ack=55919697
+[  136.695561] tbtun: hole gatefail seq=55972945 mask=0x4 ack=55972945
+[  136.706565] tbtun: hole gatefail seq=55972945 mask=0x4 ack=55972945
+[  136.717572] tbtun: hole gatefail seq=56005713 mask=0x4 ack=56005713
+[  136.724287] tbtun: hole gatefail seq=55919697 mask=0x2 ack=55919697
+[  136.726155] tbtun: hole gatefail seq=55919697 mask=0x2 ack=55919697
+[  136.727358] tbtun: hole gatefail seq=55919697 mask=0x2 ack=55919697
+[  136.728435] tbtun: hole gatefail seq=55919697 mask=0x2 ack=55919697
+[  137.274677] tbtun: hole depthfail seq=56369992 g=3 mask=0x4
+[  139.368915] tbtun: hole depthfail seq=57695983 g=2 mask=0x2
+[  139.370272] tbtun: hole depthfail seq=57695983 g=2 mask=0x2
+[  139.371167] tbtun: hole depthfail seq=57695983 g=2 mask=0x2
+[  139.520057] tbt_tx_hole_check: 13 callbacks suppressed
+[  139.520063] tbtun: hole timefail seq=57745135 age_us=39518 rtt_us=24373
+[  139.564947] tbt_tx_hole_check: 2 callbacks suppressed
+[  139.564952] tbtun: hole depthfail seq=57794287 g=2 mask=0x4
+[  139.566961] tbtun: hole depthfail seq=57794287 g=2 mask=0x4
+[  139.567748] tbtun: hole depthfail seq=57794287 g=2 mask=0x4
+[  139.568547] tbtun: hole depthfail seq=57794287 g=2 mask=0x4
+[  139.569422] tbtun: hole depthfail seq=57794287 g=2 mask=0x4
+[  139.570243] tbtun: hole depthfail seq=57794287 g=2 mask=0x4
+[  140.892515] tbtun: hole timefail seq=58702804 age_us=9015 rtt_us=22234
+[  140.893705] tbtun: hole timefail seq=58702804 age_us=10206 rtt_us=22054
+[  140.894826] tbtun: hole timefail seq=58702804 age_us=11329 rtt_us=21856
+[  140.895876] tbtun: hole timefail seq=58702804 age_us=12379 rtt_us=21688
+[  140.985206] tbtun: hole timefail seq=58760148 age_us=28840 rtt_us=22513
+[  141.028717] tbtun: hole timefail seq=58784724 age_us=32172 rtt_us=22957
+[  141.029805] tbtun: hole timefail seq=58784724 age_us=33262 rtt_us=23076
+[  141.684565] tbt_tx_hole_check: 807 callbacks suppressed
+[  141.684570] tbtun: hole gatefail seq=59345293 mask=0x1 ack=59345293
+[  141.694685] tbtun: hole gatefail seq=59261684 mask=0x1 ack=59261684
+[  141.696219] tbtun: hole gatefail seq=59261684 mask=0x1 ack=59261684
+[  141.697358] tbtun: hole gatefail seq=59345293 mask=0x1 ack=59345293
+[  141.698464] tbtun: hole gatefail seq=59261684 mask=0x1 ack=59261684
+[  141.699435] tbtun: hole gatefail seq=59261684 mask=0x1 ack=59261684
+[  141.700454] tbtun: hole gatefail seq=59261684 mask=0x1 ack=59261684
+[  141.701525] tbtun: hole gatefail seq=59261684 mask=0x1 ack=59261684
+[  141.702624] tbtun: hole gatefail seq=59261684 mask=0x1 ack=59261684
+[  141.703565] tbtun: hole gatefail seq=59261684 mask=0x1 ack=59261684
+[  142.243788] tbtun: hole timefail seq=59664516 age_us=11630 rtt_us=24446
+[  142.245408] tbtun: hole timefail seq=59664516 age_us=13250 rtt_us=24232
+[  142.287666] tbtun: hole depthfail seq=59705476 g=2 mask=0x1
+[  142.288601] tbtun: hole depthfail seq=59705476 g=2 mask=0x1
+[  142.289523] tbtun: hole depthfail seq=59705476 g=2 mask=0x1
+[  142.290317] tbtun: hole depthfail seq=59705476 g=2 mask=0x1
+[  146.436624] tbt_tx_hole_check: 17 callbacks suppressed
+[  146.436630] tbtun: hole depthfail seq=62672638 g=1 mask=0x2
+[  146.516141] tbtun: hole depthfail seq=62680830 g=3 mask=0x2
+[  146.551522] tbt_tx_hole_check: 8 callbacks suppressed
+[  146.551532] tbtun: hole timefail seq=62697214 age_us=33897 rtt_us=22726
+[  146.553973] tbtun: hole timefail seq=62697214 age_us=36360 rtt_us=23013
+[  146.554923] tbtun: hole timefail seq=62697214 age_us=37311 rtt_us=23064
+[  146.555924] tbtun: hole timefail seq=62697214 age_us=38312 rtt_us=23021
+[  146.556929] tbtun: hole timefail seq=62697214 age_us=39317 rtt_us=23010
+[  146.584049] tbtun: hole timefail seq=62738174 age_us=26103 rtt_us=21801
+[  146.585202] tbtun: hole timefail seq=62738174 age_us=27283 rtt_us=21990
+[  146.586251] tbtun: hole timefail seq=62738174 age_us=28332 rtt_us=22235
+[  146.594688] tbtun: hole timefail seq=62738174 age_us=36764 rtt_us=22449
+[  146.596350] tbtun: hole timefail seq=62738174 age_us=38432 rtt_us=22477
+[  146.686565] tbt_tx_hole_check: 816 callbacks suppressed
+[  146.686571] tbtun: hole gatefail seq=62873342 mask=0x1 ack=62873342
+[  146.697613] tbtun: hole gatefail seq=62873342 mask=0x1 ack=62873342
+[  146.708556] tbtun: hole gatefail seq=62906110 mask=0x1 ack=62906110
+[  146.710871] tbtun: hole gatefail seq=62844670 mask=0x8 ack=62844670
+[  146.711831] tbtun: hole gatefail seq=62844670 mask=0x8 ack=62844670
+[  146.719564] tbtun: hole gatefail seq=62906110 mask=0x1 ack=62906110
+[  146.726910] tbtun: hole gatefail seq=62844670 mask=0x8 ack=62844670
+[  146.730525] tbtun: hole gatefail seq=62906110 mask=0x1 ack=62906110
+[  146.741602] tbtun: hole gatefail seq=62906110 mask=0x1 ack=62906110
+[  146.752557] tbtun: hole gatefail seq=62906110 mask=0x1 ack=62906110
+[  151.696580] tbt_tx_hole_check: 805 callbacks suppressed
+[  151.696585] tbtun: hole gatefail seq=66409265 mask=0x1 ack=66409265
+[  151.700545] tbtun: hole gatefail seq=66315322 mask=0x1 ack=66315322
+[  151.701824] tbtun: hole gatefail seq=66315322 mask=0x1 ack=66315322
+[  151.702714] tbtun: hole gatefail seq=66315322 mask=0x1 ack=66315322
+[  151.703770] tbtun: hole gatefail seq=66315322 mask=0x1 ack=66315322
+[  151.704675] tbtun: hole gatefail seq=66315322 mask=0x1 ack=66315322
+[  151.705640] tbtun: hole gatefail seq=66315322 mask=0x1 ack=66315322
+[  151.706637] tbtun: hole gatefail seq=66315322 mask=0x1 ack=66315322
+[  151.707689] tbtun: hole gatefail seq=66315322 mask=0x1 ack=66315322
+[  151.708860] tbtun: hole gatefail seq=66315322 mask=0x1 ack=66315322
+[  152.117689] tbt_tx_hole_check: 14 callbacks suppressed
+[  152.117693] tbtun: hole timefail seq=66585393 age_us=24172 rtt_us=24303
+[  152.143719] tbtun: hole depthfail seq=66618161 g=2 mask=0x4
+[  152.144687] tbtun: hole depthfail seq=66618161 g=2 mask=0x4
+[  152.207626] tbtun: hole timefail seq=66634545 age_us=21122 rtt_us=24364
+[  152.209026] tbtun: hole timefail seq=66634545 age_us=22529 rtt_us=24342
+[  152.210093] tbtun: hole timefail seq=66634545 age_us=23598 rtt_us=24334
+[  152.291470] tbtun: hole timefail seq=66667313 age_us=43270 rtt_us=24387
+[  152.292874] tbtun: hole timefail seq=66667313 age_us=44686 rtt_us=24222
+[  154.165309] tbtun: hole timefail seq=67964632 age_us=2082 rtt_us=24393
+[  154.166282] tbtun: hole timefail seq=67964632 age_us=3057 rtt_us=24422
+[  154.167321] tbtun: hole timefail seq=67964632 age_us=4090 rtt_us=24521
+[  154.168244] tbtun: hole timefail seq=67964632 age_us=5018 rtt_us=24478
+[  154.303391] tbtun: hole depthfail seq=68058840 g=2 mask=0x8
+[  154.304707] tbtun: hole depthfail seq=68058840 g=2 mask=0x8
+[  154.305528] tbtun: hole depthfail seq=68058840 g=2 mask=0x8
+[  154.306313] tbtun: hole depthfail seq=68058840 g=2 mask=0x8
+[  154.307242] tbtun: hole depthfail seq=68058840 g=2 mask=0x8
+[  154.308052] tbtun: hole depthfail seq=68058840 g=2 mask=0x8
+[  154.308862] tbtun: hole depthfail seq=68058840 g=2 mask=0x8
+[  155.697168] tbtun: hole depthfail seq=69024701 g=3 mask=0x4
+[  156.699549] tbt_tx_hole_check: 792 callbacks suppressed
+[  156.699554] tbtun: hole gatefail seq=69863533 mask=0x8 ack=69863533
+[  156.710593] tbtun: hole gatefail seq=69871725 mask=0x1 ack=69871725
+[  156.721656] tbtun: hole gatefail seq=69879917 mask=0x2 ack=69879917
+[  156.727243] tbtun: hole gatefail seq=69826669 mask=0x8 ack=69826669
+[  156.728746] tbtun: hole gatefail seq=69826669 mask=0x8 ack=69826669
+[  156.729702] tbtun: hole gatefail seq=69826669 mask=0x8 ack=69826669
+[  156.730611] tbtun: hole gatefail seq=69826669 mask=0x8 ack=69826669
+[  156.731564] tbtun: hole gatefail seq=69826669 mask=0x8 ack=69826669
+[  156.732488] tbtun: hole gatefail seq=69826669 mask=0x8 ack=69826669
+[  156.733465] tbtun: hole gatefail seq=69826669 mask=0x8 ack=69826669
+[  157.765835] tbtun: hole depthfail seq=70674011 g=1 mask=0x2
+[  157.767056] tbtun: hole depthfail seq=70674011 g=1 mask=0x2
+[  157.768122] tbtun: hole depthfail seq=70674011 g=1 mask=0x2
+[  157.769077] tbtun: hole depthfail seq=70674011 g=1 mask=0x2
+[  157.815099] tbt_tx_hole_check: 9 callbacks suppressed
+[  157.815104] tbtun: hole timefail seq=70686299 age_us=4365 rtt_us=23554
+[  157.817546] tbtun: hole timefail seq=70686299 age_us=6842 rtt_us=23490
+[  157.818490] tbtun: hole timefail seq=70686299 age_us=7787 rtt_us=23236
+[  160.753706] tbtun: hole timefail seq=73051879 age_us=42594 rtt_us=24108
+[  161.310639] tbtun: hole timefail seq=73477545 age_us=5112 rtt_us=23635
+[  161.312278] tbtun: hole timefail seq=73477545 age_us=6774 rtt_us=23783
+[  161.313326] tbtun: hole timefail seq=73477545 age_us=7826 rtt_us=23908
+[  161.314453] tbtun: hole timefail seq=73477545 age_us=8949 rtt_us=24018
+[  161.371142] tbtun: hole depthfail seq=73510313 g=3 mask=0x8
+[  161.412689] tbtun: hole depthfail seq=73534624 g=1 mask=0x1
+[  161.414030] tbtun: hole depthfail seq=73534624 g=1 mask=0x1
+[  161.414888] tbtun: hole depthfail seq=73534624 g=1 mask=0x1
+[  161.415769] tbtun: hole depthfail seq=73534624 g=1 mask=0x1
+[  161.416669] tbtun: hole depthfail seq=73534624 g=1 mask=0x1
+[  161.443106] tbtun: hole timefail seq=73538720 age_us=25161 rtt_us=23481
+[  161.444360] tbtun: hole timefail seq=73538720 age_us=26431 rtt_us=23508
+[  161.701301] tbt_tx_hole_check: 834 callbacks suppressed
+[  161.701306] tbtun: hole gatefail seq=73768096 mask=0x8 ack=73768096
+[  161.703839] tbtun: hole gatefail seq=73800864 mask=0x8 ack=73800864
+[  161.714804] tbtun: hole gatefail seq=73800864 mask=0x8 ack=73800864
+[  161.725698] tbtun: hole gatefail seq=73800864 mask=0x8 ack=73800864
+[  161.733517] tbtun: hole gatefail seq=73772192 mask=0x8 ack=73772192
+[  161.736595] tbtun: hole gatefail seq=73800864 mask=0x8 ack=73800864
+[  161.747594] tbtun: hole gatefail seq=73817248 mask=0x8 ack=73817248
+[  161.749159] tbtun: hole gatefail seq=73772192 mask=0x8 ack=73772192
+[  161.758585] tbtun: hole gatefail seq=73817248 mask=0x8 ack=73817248
+[  161.769570] tbtun: hole gatefail seq=73817248 mask=0x8 ack=73817248
+[  166.204841] tbt_tx_hole_check: 6 callbacks suppressed
+[  166.204844] tbtun: hole timefail seq=77152785 age_us=10361 rtt_us=23105
+[  166.207220] tbtun: hole timefail seq=77152785 age_us=12741 rtt_us=22960
+[  166.208316] tbtun: hole timefail seq=77152785 age_us=13838 rtt_us=23052
+[  166.252649] tbt_tx_hole_check: 1 callbacks suppressed
+[  166.252654] tbtun: hole depthfail seq=77193480 g=1 mask=0x8
+[  166.334239] tbtun: hole timefail seq=77209864 age_us=18244 rtt_us=22870
+[  166.335585] tbtun: hole timefail seq=77209864 age_us=19598 rtt_us=22697
+[  166.712561] tbt_tx_hole_check: 819 callbacks suppressed
+[  166.712566] tbtun: hole gatefail seq=77557759 mask=0x1 ack=77557759
+[  166.717051] tbtun: hole gatefail seq=77463816 mask=0x8 ack=77463816
+[  166.723508] tbtun: hole gatefail seq=77557759 mask=0x1 ack=77557759
+[  166.734662] tbtun: hole gatefail seq=77557759 mask=0x1 ack=77557759
+[  166.742495] tbtun: hole gatefail seq=77529087 mask=0x8 ack=77529087
+[  166.744124] tbtun: hole gatefail seq=77529087 mask=0x8 ack=77529087
+[  166.745493] tbtun: hole gatefail seq=77557759 mask=0x1 ack=77557759
+[  166.756567] tbtun: hole gatefail seq=77590527 mask=0x1 ack=77590527
+[  166.763601] tbtun: hole gatefail seq=77549567 mask=0x2 ack=77549567
+[  166.765268] tbtun: hole gatefail seq=77549567 mask=0x2 ack=77549567
+[  167.673814] tbtun: hole timefail seq=78249400 age_us=339 rtt_us=24347
+[  167.675358] tbtun: hole timefail seq=78249400 age_us=1888 rtt_us=24035
+[  167.676317] tbtun: hole timefail seq=78249400 age_us=2846 rtt_us=23762
+[  167.695024] tbtun: hole depthfail seq=78257592 g=1 mask=0x1
+[  167.695894] tbtun: hole depthfail seq=78257592 g=1 mask=0x1
+[  167.696826] tbtun: hole depthfail seq=78257592 g=1 mask=0x1
+[  167.697776] tbtun: hole depthfail seq=78257592 g=1 mask=0x1
+[  167.698660] tbtun: hole depthfail seq=78257592 g=1 mask=0x1
+[  167.749588] tbtun: hole depthfail seq=78294456 g=3 mask=0x8
+[  169.034134] tbtun: hole timefail seq=79076262 age_us=11559 rtt_us=23510
+[  169.113545] tbtun: hole depthfail seq=79158182 g=2 mask=0x1
+[  169.114375] tbtun: hole depthfail seq=79158182 g=2 mask=0x1
+[  171.722618] tbt_tx_hole_check: 810 callbacks suppressed
+[  171.722624] tbtun: hole gatefail seq=81147195 mask=0x4 ack=81147195
+[  171.724791] tbtun: hole gatefail seq=81241403 mask=0x4 ack=81241403
+[  171.735639] tbtun: hole gatefail seq=81241403 mask=0x4 ack=81241403
+[  171.746587] tbtun: hole gatefail seq=81241403 mask=0x4 ack=81241403
+[  171.748325] tbtun: hole gatefail seq=81208635 mask=0x1 ack=81208635
+[  171.749294] tbtun: hole gatefail seq=81208635 mask=0x1 ack=81208635
+[  171.757565] tbtun: hole gatefail seq=81312859 mask=0x4 ack=81312859
+[  171.763758] tbtun: hole gatefail seq=81208635 mask=0x1 ack=81208635
+[  171.764829] tbtun: hole gatefail seq=81208635 mask=0x1 ack=81208635
+[  171.765926] tbtun: hole gatefail seq=81208635 mask=0x1 ack=81208635
+[  171.890659] tbtun: hole depthfail seq=81333339 g=3 mask=0x8
+[  171.891640] tbtun: hole depthfail seq=81333339 g=3 mask=0x8
+[  171.892582] tbtun: hole depthfail seq=81333339 g=3 mask=0x8
+[  171.893470] tbtun: hole depthfail seq=81333339 g=3 mask=0x8
+[  171.918388] tbtun: hole timefail seq=81333339 age_us=31867 rtt_us=22989
+[  171.919417] tbtun: hole timefail seq=81333339 age_us=32904 rtt_us=23005
+[  171.920358] tbtun: hole timefail seq=81333339 age_us=33845 rtt_us=23093
+[  171.921311] tbtun: hole timefail seq=81333339 age_us=34798 rtt_us=22921
+[  174.059489] tbtun: hole timefail seq=82784217 age_us=20978 rtt_us=22933
+[  174.065140] tbtun: hole timefail seq=82784217 age_us=26622 rtt_us=22866
+[  174.066382] tbtun: hole timefail seq=82784217 age_us=27830 rtt_us=22826
+[  174.067388] tbtun: hole timefail seq=82784217 age_us=28882 rtt_us=22961
+[  174.068433] tbtun: hole timefail seq=82784217 age_us=29928 rtt_us=23051
+[  174.103161] tbtun: hole depthfail seq=82821081 g=1 mask=0x2
+[  174.104595] tbtun: hole depthfail seq=82821081 g=1 mask=0x2
+[  174.105522] tbtun: hole depthfail seq=82821081 g=1 mask=0x2
+[  174.106325] tbtun: hole depthfail seq=82821081 g=1 mask=0x2
+[  174.127633] tbtun: hole depthfail seq=82825177 g=2 mask=0x2
+[  174.128539] tbtun: hole depthfail seq=82825177 g=2 mask=0x2
+[  174.152863] tbtun: hole timefail seq=82825177 age_us=45587 rtt_us=23203
+   main n=4: one-way 10.4 Mbit/s, rc=0 strict=1 interleaved=1
+   burst: connected to 10.0.2.15:19100, 40 MiB each way, strict send-then-read first
+   burst: strict phase passed: 41943040 sent, 41943040 back, byte for byte
+   burst: interleaved coverage phase passed
+   burst: 40 MiB crossed each way
+   probe I: n=1 3.0 Mbit/s, n=4 10.4 Mbit/s, ratio 3.47x (min 1.8), strict=pass interleaved=1
+punt!
+== probe I: pass
+TBT_PROBE_RESULT I PASS
+== probe J: 1% loss and 2% reorder on every carrier
+cat: read error: Connection reset by peer
+Warning: sch_htb: quantum of class 10001 is big. Consider r2q change.
+Warning: sch_htb: quantum of class 10099 is big. Consider r2q change.
+[  177.518482] htb: netem qdisc 108: is non-work-conserving?
+[  177.519733] htb: netem qdisc 109: is non-work-conserving?
+[  177.520543] htb: netem qdisc 110: is non-work-conserving?
+[  177.521337] htb: netem qdisc 111: is non-work-conserving?
+[  177.522221] htb: netem qdisc 112: is non-work-conserving?
+[  177.530770] tbtun: tunnel 2 carrier 0 DIALED lport=41008 peer=10.0.2.2:19101
+[  177.532130] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=57932, awaiting HELLO
+[  177.538183] tbtun: tunnel 2 carrier 2 DIALED lport=41010 peer=10.0.2.2:19101
+[  177.539831] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=57940, awaiting HELLO
+[  177.541062] tbtun: tunnel 2 carrier 1 DIALED lport=41009 peer=10.0.2.2:19101
+[  177.542141] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=57942, awaiting HELLO
+[  177.543442] tbtun: tunnel 2 carrier 3 DIALED lport=41011 peer=10.0.2.2:19101
+[  177.545255] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=57956, awaiting HELLO
+[  177.549655] tbtun: tunnel 2 carrier 4 DIALED lport=41012 peer=10.0.2.2:19101
+[  177.551049] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=57964, awaiting HELLO
+burst: connected to 10.0.2.15:19100, 4 MiB each way, strict send-then-read first
+[  178.521852] tbt_carrier_xmit: 13 callbacks suppressed
+[  178.521856] tbtun: retx wndshort seq=24576 len=8192 total=8224 wnd=65535 inflight=57600 wnd_avail=7935 mem_avail=2031872
+[  178.524313] tbtun: retx wndshort seq=16384 len=8192 total=8224 wnd=65535 inflight=57600 wnd_avail=7935 mem_avail=2031872
+[  178.526676] tbtun: retx wndshort seq=32768 len=8192 total=8224 wnd=65535 inflight=65824 wnd_avail=0 mem_avail=2023648
+[  178.528153] tbtun: retx wndshort seq=24576 len=8192 total=8224 wnd=65535 inflight=65824 wnd_avail=0 mem_avail=2023648
+[  178.529648] tbtun: retx wndshort seq=8192 len=8192 total=8224 wnd=65535 inflight=57600 wnd_avail=7935 mem_avail=2031872
+[  178.549593] tbtun: retx wndshort seq=303104 len=8192 total=8224 wnd=65535 inflight=62872 wnd_avail=2663 mem_avail=2021800
+[  178.551635] tbtun: retx wndshort seq=278528 len=8192 total=8224 wnd=65535 inflight=61412 wnd_avail=4123 mem_avail=2026140
+[  178.553372] tbtun: retx wndshort seq=270336 len=8192 total=8224 wnd=65535 inflight=59952 wnd_avail=5583 mem_avail=2022800
+[  178.555065] tbtun: retx wndshort seq=32768 len=8192 total=8224 wnd=65535 inflight=69636 wnd_avail=0 mem_avail=2016956
+[  178.557815] tbtun: retx wndshort seq=24576 len=8192 total=8224 wnd=65535 inflight=58492 wnd_avail=7043 mem_avail=2030980
+[  178.559638] tbt_tx_hole_check: 6 callbacks suppressed
+[  178.559640] tbtun: hole depthfail seq=0 g=3 mask=0x1
+[  178.561226] tbt_tx_hole_check: 1 callbacks suppressed
+[  178.561228] tbtun: hole timefail seq=16384 age_us=39447 rtt_us=26057
+[  178.565539] tbtun: hole timefail seq=24576 age_us=43710 rtt_us=26057
+[  178.567021] tbtun: hole timefail seq=0 age_us=17565 rtt_us=26464
+[  178.586946] tbtun: hole timefail seq=4096 age_us=37452 rtt_us=26484
+[  178.589692] tbtun: hole depthfail seq=8192 g=3 mask=0xf
+[  178.599243] tbtun: hole depthfail seq=8192 g=3 mask=0xf
+[  178.617453] tbtun: hole depthfail seq=16384 g=2 mask=0x4
+[  178.618396] tbtun: hole depthfail seq=16384 g=2 mask=0x4
+[  178.620514] tbtun: hole depthfail seq=32768 g=2 mask=0xf
+[  178.655003] tbtun: hole depthfail seq=16384 g=3 mask=0x4
+[  178.673001] tbt_tx_hole_check: 573 callbacks suppressed
+[  178.673007] tbtun: hole gatefail seq=16384 mask=0x4 ack=16384
+[  178.676355] tbtun: hole gatefail seq=16384 mask=0x4 ack=16384
+[  179.018730] tbtun: hole gatefail seq=40960 mask=0x4 ack=40960
+[  179.029546] tbtun: hole gatefail seq=40960 mask=0x4 ack=40960
+[  179.040631] tbtun: hole gatefail seq=40960 mask=0x4 ack=40960
+[  179.051542] tbtun: hole gatefail seq=40960 mask=0x4 ack=40960
+[  179.062647] tbtun: hole gatefail seq=40960 mask=0x4 ack=40960
+[  179.073552] tbtun: hole gatefail seq=40960 mask=0x4 ack=40960
+[  179.084583] tbtun: hole gatefail seq=40960 mask=0x4 ack=40960
+[  179.095784] tbtun: hole gatefail seq=40960 mask=0x4 ack=40960
+[  181.296605] tbtun: hole timefail seq=1588294 age_us=1361 rtt_us=25056
+[  181.304581] tbtun: hole timefail seq=1588294 age_us=9330 rtt_us=25183
+[  181.309059] tbtun: hole timefail seq=1588294 age_us=13810 rtt_us=25294
+[  181.310052] tbtun: hole depthfail seq=1711174 g=1 mask=0x2
+[  181.402151] tbtun: hole depthfail seq=1825862 g=1 mask=0x8
+[  181.403741] tbtun: hole depthfail seq=1883206 g=2 mask=0x2
+burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+[  183.677715] tbt_tx_hole_check: 573 callbacks suppressed
+[  183.677719] tbtun: hole gatefail seq=4816472 mask=0x8 ack=4816472
+[  183.684977] tbtun: hole gatefail seq=4791896 mask=0x2 ack=4791896
+[  183.688642] tbtun: hole gatefail seq=4816472 mask=0x8 ack=4816472
+[  183.699653] tbtun: hole gatefail seq=4816472 mask=0x8 ack=4816472
+[  183.701172] tbtun: hole gatefail seq=4800088 mask=0x4 ack=4800088
+[  183.710861] tbtun: hole gatefail seq=4816472 mask=0x8 ack=4816472
+[  183.717415] tbtun: hole gatefail seq=4808280 mask=0x4 ack=4808280
+[  183.721603] tbtun: hole gatefail seq=4816472 mask=0x8 ack=4816472
+[  183.726342] tbtun: hole gatefail seq=4808280 mask=0x4 ack=4808280
+[  183.728836] tbtun: hole gatefail seq=4808280 mask=0x4 ack=4808280
+burst: interleaved coverage phase passed
+burst: 4 MiB crossed each way
+   holes_repaired=0 holes_unrecoverable=0 carrier_lost=0
+punt!
+== probe J: pass
+TBT_PROBE_RESULT J PASS
+== probe K: one carrier dead mid-transfer, then restored
+cat: read error: Connection reset by peer
+Warning: sch_htb: quantum of class 10001 is big. Consider r2q change.
+Warning: sch_htb: quantum of class 10099 is big. Consider r2q change.
+[  188.745675] htb: netem qdisc 116: is non-work-conserving?
+[  188.747088] htb: netem qdisc 117: is non-work-conserving?
+[  188.747892] htb: netem qdisc 118: is non-work-conserving?
+[  188.748673] htb: netem qdisc 119: is non-work-conserving?
+[  188.749506] htb: netem qdisc 120: is non-work-conserving?
+[  188.757865] tbtun: tunnel 2 carrier 1 DIALED lport=41017 peer=10.0.2.2:19101
+[  188.757975] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=36052, awaiting HELLO
+[  188.760520] tbtun: tunnel 2 carrier 0 DIALED lport=41016 peer=10.0.2.2:19101
+[  188.761622] tbtun: tunnel 2 carrier 2 DIALED lport=41018 peer=10.0.2.2:19101
+[  188.762661] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=36058, awaiting HELLO
+[  188.763745] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=36066, awaiting HELLO
+[  188.773366] tbtun: tunnel 2 carrier 3 DIALED lport=41019 peer=10.0.2.2:19101
+[  188.773566] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=36072, awaiting HELLO
+[  188.776797] tbtun: tunnel 2 carrier 4 DIALED lport=41020 peer=10.0.2.2:19101
+[  188.777985] tbtun: tunnel 1 carrier ACCEPTED lport=19101 rport=36074, awaiting HELLO
+burst: connected to 10.0.2.15:19100, 4 MiB each way, strict send-then-read first
+   carrier 0 is sport 41016 (class 1:26); killing it after 114688 bytes
+[  189.769557] tbt_carrier_xmit: 216 callbacks suppressed
+[  189.769562] tbtun: retx wndshort seq=8192 len=8192 total=8224 wnd=65535 inflight=57568 wnd_avail=7967 mem_avail=2031904
+[  189.772362] tbtun: retx wndshort seq=65536 len=8192 total=8224 wnd=65535 inflight=57600 wnd_avail=7935 mem_avail=2028032
+[  189.774193] tbtun: retx wndshort seq=49152 len=8192 total=8224 wnd=65535 inflight=65824 wnd_avail=0 mem_avail=2019808
+[  189.776282] tbtun: retx wndshort seq=24576 len=8192 total=8224 wnd=65535 inflight=74048 wnd_avail=0 mem_avail=2009664
+[  189.778104] tbtun: retx wndshort seq=73728 len=8192 total=8224 wnd=65535 inflight=57568 wnd_avail=7967 mem_avail=2028064
+[  189.780678] tbt_tx_hole_check: 430 callbacks suppressed
+[  189.780681] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[  189.786567] tbtun: hole gatefail seq=32768 mask=0xf ack=32768
+[  189.797668] tbtun: hole gatefail seq=32768 mask=0xf ack=32768
+[  189.799335] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[  189.800201] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[  189.808512] tbtun: hole gatefail seq=32768 mask=0xf ack=32768
+[  189.809553] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[  189.817150] tbtun: hole gatefail seq=0 mask=0x1 ack=0
+[  189.819537] tbtun: hole gatefail seq=73728 mask=0x3 ack=73728
+[  189.830467] tbtun: hole gatefail seq=73728 mask=0x3 ack=73728
+[  190.973300] tbt_tx_hole_check: 4 callbacks suppressed
+[  190.973304] tbtun: hole depthfail seq=208896 g=1 mask=0xf
+[  190.985807] tbtun: hole depthfail seq=241664 g=1 mask=0xd
+[  190.996803] tbtun: hole depthfail seq=241664 g=1 mask=0xf
+[  190.998204] tbtun: hole depthfail seq=470881 g=1 mask=0x1
+[  191.001985] tbtun: hole depthfail seq=470881 g=1 mask=0x1
+[  191.014266] tbtun: hole depthfail seq=470881 g=1 mask=0x1
+[  191.041210] tbtun: hole depthfail seq=470881 g=1 mask=0x7
+[  191.050215] tbtun: hole depthfail seq=495457 g=1 mask=0x9
+[  191.052859] tbtun: hole depthfail seq=495457 g=1 mask=0xd
+[  191.073974] tbtun: hole depthfail seq=626476 g=1 mask=0xf
+[  192.792416] tbtun: carrier stall idx=0 gen=1 una=2419825977 nxt=2419835661 wmem=81021 snd_wnd=65535 rcv_wnd=1045313 state=1
+[  192.834126] tbt_tx_retx: 40 callbacks suppressed
+[  192.834129] tbtun: hole declare seq=2293601 timer age_us=508676 mask=0x0 sends=1 dup_pend=0
+[  192.836275] tbtun: hole declare seq=2539043 timer age_us=309254 mask=0x0 sends=1 dup_pend=0
+[  192.838956] tbtun: hole declare seq=2772515 timer age_us=126475 mask=0x0 sends=1 dup_pend=0
+[  192.946495] tbt_tx_holes_repaired: 40 callbacks suppressed
+[  192.946527] tbtun: hole repair seq=2293601 age_us=112404
+[  192.948542] tbtun: hole repair seq=2539043 age_us=112268
+[  192.949391] tbtun: hole repair seq=2772515 age_us=110459
+burst: strict phase passed: 4194304 sent, 4194304 back, byte for byte
+[  194.106278] tbtun: retx wndshort seq=4308992 len=8192 total=8224 wnd=65535 inflight=61861 wnd_avail=3674 mem_avail=2031451
+[  194.790609] tbt_tx_hole_check: 676 callbacks suppressed
+[  194.790617] tbtun: hole gatefail seq=4685506 mask=0x2 ack=4685506
+[  194.793927] tbtun: hole gatefail seq=4595447 mask=0x8 ack=4595447
+[  194.794814] tbtun: hole gatefail seq=4595447 mask=0x8 ack=4595447
+[  194.795701] tbtun: hole gatefail seq=4595447 mask=0x8 ack=4595447
+[  194.796578] tbtun: hole gatefail seq=4595447 mask=0x8 ack=4595447
+[  194.801534] tbtun: hole gatefail seq=4685506 mask=0x2 ack=4685506
+[  194.812569] tbtun: hole gatefail seq=4685506 mask=0x2 ack=4685506
+[  194.815630] tbtun: hole gatefail seq=4652791 mask=0x4 ack=4652791
+[  194.816514] tbtun: hole gatefail seq=4652791 mask=0x4 ack=4652791
+[  194.817497] tbtun: hole gatefail seq=4652791 mask=0x4 ack=4652791
+burst: interleaved coverage phase passed
+burst: 4 MiB crossed each way
+   holes_repaired=3 holes_unrecoverable=0 carrier_lost=0
+punt!
+== probe K: pass
+TBT_PROBE_RESULT K PASS
+cat: read error: Connection reset by peer
+punt!
+punt!
+TBT_TEST_PASS
+[  199.377903] ACPI: PM: Preparing to enter system sleep state S5
+[  199.378859] reboot: Power down

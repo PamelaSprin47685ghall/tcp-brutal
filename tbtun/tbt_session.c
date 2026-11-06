@@ -28,11 +28,12 @@
 #include <net/sock.h>
 
 #include "tbtun.h"
+#include "tbt_portmap.h"
 
 struct tbt_portmap tbt_ports = {
     .lock = __MUTEX_INITIALIZER(tbt_ports.lock),
     .lo = 40000,
-    .hi = 40063,
+    .hi = 44095,
 };
 
 static const char *tbt_role_name(u8 role)
@@ -61,11 +62,11 @@ static const char *tbt_state_name(const struct tbt_tunnel *t)
 int tbt_portmap_set(u16 lo, u16 hi)
 {
     unsigned long *used;
-    size_t n;
+    unsigned int n;
 
-    if (!lo || lo > hi)
+    n = tbt_portmap_words(lo, hi);
+    if (!n)
         return -EINVAL;
-    n = BITS_TO_LONGS(hi - lo + 1);
     used = kcalloc(n, sizeof(*used), GFP_KERNEL);
     if (!used)
         return -ENOMEM;
@@ -106,6 +107,8 @@ void tbt_portmap_show(struct seq_file *m)
 
 static bool tbt_cfg_sane(const struct tbt_cfg *c, int *err)
 {
+    unsigned int limit;
+
     if (!c->id)
     {
         *err = -EINVAL;
@@ -116,11 +119,24 @@ static bool tbt_cfg_sane(const struct tbt_cfg *c, int *err)
         *err = -EINVAL;
         return false;
     }
-    /* max_carriers is a module_param (kernel-only). The host parser cannot
-     * see it, so the bound is enforced here, before any allocation or session
+    /* crypto=on has no decrypt point without the FEC data plane (T0 §2.4). */
+    if (c->crypto && !c->fec)
+    {
+        *err = -EINVAL;
+        return false;
+    }
+    /* The old ARQ data plane is frozen at 16 carrier slots: its path_ack_mask
+     * is u16 and its FBK/WINDOW bodies hold 16 entries. Only a session that
+     * asked for FEC may claim more, and even that is capped by max_carriers.
+     * max_carriers is a module_param (kernel-only); the host parser cannot see
+     * it, so the bound is enforced here, before any allocation or session
      * creation. The compile-time limit still applies. */
-    if (!c->n || c->n + c->m > TBT_MAX_CARRIERS_LIMIT ||
-        c->n + c->m > READ_ONCE(max_carriers))
+    limit = READ_ONCE(max_carriers);
+    if (!c->fec && limit > TBT_LEGACY_MAX_CARRIERS)
+        limit = TBT_LEGACY_MAX_CARRIERS;
+    if (limit > TBT_MAX_CARRIERS_LIMIT)
+        limit = TBT_MAX_CARRIERS_LIMIT;
+    if (!c->n || c->n + c->m > limit)
     {
         *err = -EINVAL;
         return false;
@@ -369,7 +385,9 @@ void tbt_peers_show(struct seq_file *m)
             __be16 port = t->cfg.peer_port;
             u16 sport;
             u32 inflight, rx_lag_ppm = 0, retx_ppm = 0, rtt;
-            u64 uack, frames, bytes, dropped;
+            u32 cwnd_bytes = 0, snd_wnd = 0;
+            u32 wscale = 0, rcv_wnd = 0, window_clamp = 0, rmem_alloc = 0;
+            u64 uack, frames, bytes, dropped, delivery_bps = 0;
 
             if (!c)
                 continue;
@@ -397,13 +415,37 @@ void tbt_peers_show(struct seq_file *m)
 
                 if (sk)
                 {
-                    u32 srtt;
+                    struct tcp_sock *tp;
+                    u32 srtt, delivered, interval, mss;
 
                     sock_hold(sk);
-                    srtt = READ_ONCE(tcp_sk(sk)->srtt_us) >> 3;
+                    tp = tcp_sk(sk);
+                    srtt = READ_ONCE(tp->srtt_us) >> 3;
+                    delivered = READ_ONCE(tp->rate_delivered);
+                    interval = READ_ONCE(tp->rate_interval_us);
+                    mss = READ_ONCE(tp->mss_cache);
+                    cwnd_bytes = READ_ONCE(tp->snd_cwnd) * mss;
+                    snd_wnd = READ_ONCE(tp->snd_wnd);
+                    /* Window-scale diagnostics: the handshake freezes
+                     * rcv_wscale/window_clamp, and a receive queue that is
+                     * full shows up as a small rcv_wnd with a large
+                     * rmem_alloc. Both look like a small snd_wnd from the
+                     * sender, so the four fields tell them apart. */
+                    /* Bit-fields: no READ_ONCE (it cannot take their
+                     * address); a diagnostic read of a 4-bit field is fine. */
+                    wscale = ((u32)tp->rx_opt.rcv_wscale << 4) |
+                             (tp->rx_opt.snd_wscale & 0xf);
+                    rcv_wnd = READ_ONCE(tp->rcv_wnd);
+                    window_clamp = READ_ONCE(tp->window_clamp);
+                    rmem_alloc = atomic_read(&sk->sk_rmem_alloc);
                     sock_put(sk);
                     if (srtt > READ_ONCE(c->rtt_us))
                         rtt = srtt;
+                    /* The BBR rate sample the auto window is built from, so a
+                     * regression can show the input next to the window. */
+                    if (delivered && interval && mss)
+                        delivery_bps = (u64)delivered * mss * 1000000ULL /
+                                       interval;
                 }
             }
             frames = READ_ONCE(c->tx_frames);
@@ -427,12 +469,13 @@ void tbt_peers_show(struct seq_file *m)
                 retx_ppm = unique ? (u32)min_t(u64, copies * 1000000 / unique,
                                                1000000) : 0;
             }
-            seq_printf(m, "%llu %u %u %pI4:%u %llu %u %u %s %s %u %u %u %llu %llu %llu %u\n",
+            seq_printf(m, "%llu %u %u %pI4:%u %llu %u %u %s %s %u %u %u %llu %llu %llu %u %llu %u %u %u %u %u %u\n",
                        t->cfg.id, i, sport, &peer, ntohs(port), uack,
                        rtt, inflight, tbt_car_state_name(c->state),
                        tbt_profile_name(c->profile), READ_ONCE(c->recv_cnt),
                        rx_lag_ppm, READ_ONCE(c->rtt_min_us), frames, bytes,
-                       dropped, retx_ppm);
+                       dropped, retx_ppm, delivery_bps, cwnd_bytes, snd_wnd,
+                       wscale, rcv_wnd, window_clamp, rmem_alloc);
         }
     }
     mutex_unlock(&tbt_lock);
@@ -525,35 +568,32 @@ out_unlock:
 u16 tbt_port_alloc(enum tbt_port_alloc_err *err)
 {
     enum tbt_port_alloc_err why = TBT_PORT_ALLOC_OK;
-    unsigned long n;
     u16 port = 0;
+    int rc;
 
     mutex_lock(&tbt_ports.lock);
-    /* The block has a usable default (40000-40063, DESIGN.md §7.3): a tunnel
-     * must work without the operator writing `ports` first. Allocate the
-     * bitmap on first use. */
+    /* The block has a usable default (40000-44095, 4096 ports): a tunnel must
+     * work without the operator writing `ports` first, and a session may dial
+     * up to 256 carriers. Allocate the bitmap on first use. */
     if (!tbt_ports.used)
     {
-        n = tbt_ports.hi - tbt_ports.lo + 1;
-        tbt_ports.used = bitmap_zalloc(n, GFP_KERNEL);
+        unsigned int words = tbt_portmap_words(tbt_ports.lo, tbt_ports.hi);
+
+        tbt_ports.used = words ?
+            bitmap_zalloc(words * BITS_PER_LONG, GFP_KERNEL) : NULL;
         if (!tbt_ports.used)
         {
             why = TBT_PORT_ALLOC_NOMEM;
             goto out;
         }
     }
-    n = tbt_ports.hi - tbt_ports.lo + 1;
-    {
-        unsigned long bit = find_next_zero_bit(tbt_ports.used, n, 0);
-
-        if (bit >= n)
-        {
-            why = TBT_PORT_ALLOC_EXHAUSTED;
-            goto out;
-        }
-        __set_bit(bit, tbt_ports.used);
-        port = tbt_ports.lo + bit;
-    }
+    /* The bit arithmetic lives in tbt_portmap.c so the host test exercises
+     * the same allocator over the same 4096-port block. */
+    rc = tbt_portmap_alloc(tbt_ports.used, tbt_ports.lo, tbt_ports.hi, &port);
+    if (rc == -ENOSPC)
+        why = TBT_PORT_ALLOC_EXHAUSTED;
+    else if (rc)
+        why = TBT_PORT_ALLOC_NOMEM; /* -EINVAL: the block is unusable */
 out:
     mutex_unlock(&tbt_ports.lock);
     if (err)
@@ -564,8 +604,7 @@ out:
 void tbt_port_free(u16 port)
 {
     mutex_lock(&tbt_ports.lock);
-    if (tbt_ports.used && port >= tbt_ports.lo && port <= tbt_ports.hi)
-        __clear_bit(port - tbt_ports.lo, tbt_ports.used);
+    tbt_portmap_free(tbt_ports.used, tbt_ports.lo, tbt_ports.hi, port);
     mutex_unlock(&tbt_ports.lock);
 }
 
@@ -815,8 +854,24 @@ void tbt_stream_detach_from_session(struct tbt_stream *st)
      * would never run and the tombstone (and its socket) would stay forever.
      * The tombstone deadline still decides when the stream may be unlinked. */
     if (detached && !READ_ONCE(sess->closing))
-        mod_delayed_work(system_dfl_wq, &sess->w_reap,
+        mod_delayed_work(TBT_WQ, &sess->w_reap,
                          msecs_to_jiffies(TBT_REAP_INTERVAL_MS));
+}
+
+/* A graceful stream leaves the session only after both halves are complete:
+ * the peer's FIN has been delivered to the output socket, and our own FIN has
+ * reached the wire.  A written FIN also means every DATA byte before it was
+ * acknowledged: the pump holds the FIN while tx_ack is short of tx_seq.
+ * Detaching on the queued FIN instead would clear ACTIVE, release the pump's
+ * order gate, and let the FIN run past DATA that is still unacknowledged.
+ * A kill never needs this: tbt_stream_kill() detaches unconditionally. */
+void tbt_stream_maybe_detach(struct tbt_stream *st)
+{
+    if (!READ_ONCE(st->tx_fin_written) || !READ_ONCE(st->rx_fin_done))
+        return;
+    if (!test_bit(TBT_STREAM_F_ACTIVE, &st->attached))
+        return;
+    tbt_stream_detach_from_session(st);
 }
 
 /* Drop queued payload for a dead sid.  Control frames stay: the far side
@@ -874,7 +929,7 @@ void tbt_stream_kill(struct tbt_stream *st, u8 reason)
 
     /* w_kill can outlive the hash reference; it owns this reference. */
     refcount_inc(&st->refs);
-    if (!queue_work(system_dfl_wq, &st->w_kill))
+    if (!queue_work(TBT_WQ, &st->w_kill))
         tbt_stream_put(st);
 }
 
@@ -945,7 +1000,7 @@ out:
     }
 
     if (again && !READ_ONCE(sess->closing))
-        mod_delayed_work(system_dfl_wq, &sess->w_reap,
+        mod_delayed_work(TBT_WQ, &sess->w_reap,
                          msecs_to_jiffies(TBT_REAP_INTERVAL_MS));
 }
 
@@ -955,6 +1010,7 @@ out:
 int tbt_session_create(struct tbt_tunnel *t)
 {
     struct tbt_session *s;
+    int err;
 
     s = kzalloc(sizeof(*s), GFP_KERNEL);
     if (!s)
@@ -971,8 +1027,14 @@ int tbt_session_create(struct tbt_tunnel *t)
     INIT_LIST_HEAD(&s->dead);
     INIT_LIST_HEAD(&s->pending);
     s->n_pending = 0;
-    s->n_car = t->cfg.n + t->cfg.m;
-    s->n_pri = t->cfg.n;
+    /* FEC v6 maps one share to each carrier, so the session owns all
+     * `carriers` slots and none of them is a legacy spare. The old ARQ keeps
+     * its n DATA carriers plus m spares. */
+    s->n_car = t->cfg.fec ? t->cfg.carriers : (u16)(t->cfg.n + t->cfg.m);
+    s->n_pri = t->cfg.fec ? t->cfg.carriers : t->cfg.n;
+    /* The sender window is a session property from birth: capture, the pump
+     * and the carrier socket sizing all read it before the first ACK. */
+    tbt_tx_window_init(s);
     /* Every session-owned work item is initialised at birth. cancel_work_sync()
      * on a work_struct that was never INIT_WORK'd is a WARNING and, once the
      * memory is reused, a call through a stale function pointer. */
@@ -980,6 +1042,7 @@ int tbt_session_create(struct tbt_tunnel *t)
     INIT_DELAYED_WORK(&s->w_pending, tbt_pending_work);
     INIT_DELAYED_WORK(&s->w_fbk, tbt_fbk_work);
     INIT_DELAYED_WORK(&s->w_reap, tbt_reap_work);
+    INIT_DELAYED_WORK(&s->w_poll, tbt_session_poll_work);
     for (int i = 0; i < TBT_STREAM_HT; i++)
         INIT_HLIST_HEAD(&s->streams[i]);
     /* A tunnel `nonce=` turns a far side's trust-on-first-use into a
@@ -998,6 +1061,34 @@ int tbt_session_create(struct tbt_tunnel *t)
     {
         get_random_bytes(s->nonce, sizeof(s->nonce));
     }
+    /* ChaCha8 body obfuscation (T0 §2.3/§2.4). Each direction owns a random
+     * 8-byte nonce. A configured crypto_key= is shared by both ends and
+     * key_id stays 0; otherwise the near side generates the session key and
+     * advertises it with key_id=1. The far side learns it from the near's
+     * HELLO before its own TX context can be initialized. */
+    s->crypto = t->cfg.crypto;
+    if (t->cfg.crypto_key_set)
+    {
+        memcpy(s->crypto_key, t->cfg.crypto_key, sizeof(s->crypto_key));
+        s->crypto_have_key = true;
+        s->crypto_key_id = TBT_CRYPTO_KEY_ID_NONE;
+    }
+    if (s->crypto)
+    {
+        get_random_bytes(s->crypto_tx_nonce, sizeof(s->crypto_tx_nonce));
+        if (t->cfg.role == TBT_ROLE_NEAR && !s->crypto_have_key)
+        {
+            get_random_bytes(s->crypto_key, sizeof(s->crypto_key));
+            s->crypto_have_key = true;
+            s->crypto_key_id = TBT_CRYPTO_KEY_ID_HELLO;
+        }
+        if (s->crypto_have_key)
+        {
+            tbt_crypto_init(&s->crypto_ctx.tx, s->crypto_key,
+                            s->crypto_tx_nonce, 0);
+            smp_store_release(&s->crypto_tx_ready, true);
+        }
+    }
     /* A configured far `peer=` fixes the anchor before the first HELLO.  The
      * port is grammar filler: the far side compares the carrier's source
      * address only.  Without `peer=` or `nonce=` the first HELLO that passes
@@ -1014,8 +1105,27 @@ int tbt_session_create(struct tbt_tunnel *t)
                      (unsigned long long)t->cfg.id);
     s->sid_prefix = get_random_u32() & 0xffff; // 16 random bits (§3.6)
     s->next_sid = 0;                           // monotonic 24-bit counter
+    if (t->cfg.fec)
+    {
+        /* FEC v6 works in both containers: raw records, or one 40-byte record
+         * per HTTP chunk with the request/response headers plaintext. The
+         * data plane is one group in this cut; grouped remains -EOPNOTSUPP. */
+        err = tbt_fec_data_init(s);
+        if (err)
+        {
+            kfree(s);
+            return err;
+        }
+    }
     t->sess = s;
-    return tbt_carriers_start(t, s);
+    err = tbt_carriers_start(t, s);
+    if (err)
+        return err;
+    /* One session-wide liveness timer drives every carrier slot and every
+     * provisional carrier; a per-carrier timer would cost one wakeup per
+     * carrier per 50 ms at 256 carriers. */
+    schedule_delayed_work(&s->w_poll, msecs_to_jiffies(50));
+    return 0;
 }
 
 // Tear a session down in the only order that is safe for module unload:
@@ -1047,6 +1157,9 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     cancel_work_sync(&s->w_replace);
     cancel_delayed_work_sync(&s->w_pending);
     cancel_delayed_work_sync(&s->w_reap);
+    /* Stop the poll before any carrier is retired: it reads sess->car[] and
+     * sess->prov, and it can ask for a replacement. */
+    cancel_delayed_work_sync(&s->w_poll);
 
     /* Stop every pump before any stream goes away. A pump takes the stream's
      * retention list and its frames after dropping tx_lock, so a stream freed
@@ -1054,6 +1167,10 @@ void tbt_session_destroy(struct tbt_tunnel *t)
      * carriers_stop cancels w_tx and w_pump for every carrier, and the queue
      * is dropped while no pump can run. */
     tbt_carriers_stop(s); // cancels work items, releases sockets, frees structs
+    /* Barrier: a socket callback could have re-armed the poll between the
+     * cancel above and the callback restore inside carriers_stop. No callback
+     * can run after that restore, so this cancel makes the free below safe. */
+    cancel_delayed_work_sync(&s->w_poll);
 
     /* First pass: stop every producer that can enqueue into tx_q.  The hash
      * is stable here: carriers are stopped, closing is set, and w_reap /
@@ -1123,6 +1240,8 @@ void tbt_session_destroy(struct tbt_tunnel *t)
      * second cancel is the barrier that makes freeing the session safe. */
     cancel_delayed_work_sync(&s->w_fbk);
     cancel_work_sync(&s->w_replace);
+    cancel_delayed_work_sync(&s->w_fec_tx);
+    tbt_fec_data_free(s);
     put_net(s->net);
     kfree(s);
 }

@@ -10,6 +10,7 @@
 #   latency     1 KB echo, direct vs tunnel, p50/p95/p99 and the tail
 #   memory      guest memory, slab and queue peaks around a 40 MiB transfer
 #   scale       n=8 and n=16 against the 16-port block
+#   wan         the measured 218 ms / 17 Mbit path, one raw stream
 #   all         every scenario above, one boot each
 #
 # Options
@@ -22,6 +23,15 @@
 #   --netem SPEC     netem arguments, '|' for spaces (default delay|20ms|10ms,
 #                    latency defaults to delay|1ms|500us; 'none' disables)
 #   --window S       rate window in seconds
+#   --wan-mbit M     carrier rate for wan (default 17)
+#   --wan-delay D    one-way delay in ms for wan, bare or with "ms" (default
+#                    109; the carrier round trip is two of them)
+#   --rx-reorder N   receiver reorder budget in bytes (default 8 MiB for wan,
+#                    2 MiB elsewhere); the old module derives its sender
+#                    window from this
+#   --tx-window N    pin tx_window_bytes for wan (default 0 = auto)
+#   --hole-budget MS receiver hole budget, and the sender's stall bound
+#                    (default 1500 for wan, 5000 elsewhere)
 #   --tag NAME       extra tag in the result file names
 #   --timeout S      wall-clock cap for the guest
 #   --allow-tcg      run without KVM (numbers are then not comparable)
@@ -57,11 +67,16 @@ allow_tcg=0
 only=
 no_control=0
 control_mbit=
+wan_mbit=
+wan_delay=
+rx_reorder=
+tx_window=
+hole_budget=
 mib_set=0 n_set=0 iters_set=0 loss_iters_set=0 loss_set=0 netem_set=0 window_set=0 timeout_set=0
 
 usage()
 {
-    sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,43p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 die()
@@ -86,6 +101,11 @@ while [ $# -gt 0 ]; do
     --only) only=$2; shift 2 ;;
     --no-control) no_control=1; shift ;;
     --control-mbit) control_mbit=$2; shift 2 ;;
+    --wan-mbit) wan_mbit=$2; shift 2 ;;
+    --wan-delay) wan_delay=$2; shift 2 ;;
+    --rx-reorder) rx_reorder=$2; shift 2 ;;
+    --tx-window) tx_window=$2; shift 2 ;;
+    --hole-budget) hole_budget=$2; shift 2 ;;
     -h | --help) usage; exit 0 ;;
     -*) echo "benches/run.sh: unknown option $1" >&2; exit 2 ;;
     *)
@@ -98,7 +118,7 @@ done
 [ -n "$scenario" ] || { usage; exit 2; }
 
 case $scenario in
-throughput | profile | loss | latency | memory | scale | flush-hang | second-connection | hole-cost) ;;
+throughput | profile | loss | latency | memory | scale | wan | flush-hang | second-connection | hole-cost) ;;
 all) ;;
 *) die "unknown scenario $scenario" ;;
 esac
@@ -155,6 +175,13 @@ scale)
     [ -n "$window" ] || window=2
     [ -n "$timeout_s" ] || timeout_s=360
     ;;
+wan)
+    [ -n "$mib" ] || mib=16
+    [ -n "$nlist" ] || nlist=1
+    [ -n "$netem" ] || netem=none
+    [ -n "$window" ] || window=2
+    [ -n "$timeout_s" ] || timeout_s=420
+    ;;
 flush-hang)
     [ -n "$mib" ] || mib=8
     [ -n "$netem" ] || netem='delay|20ms|10ms'
@@ -173,7 +200,7 @@ hole-cost)
 esac
 if [ "$quick" -eq 1 ]; then
     case $scenario in
-    throughput | profile | loss | memory | scale)
+    throughput | profile | loss | memory | scale | wan)
         # A quick run is still a real measurement, just a smaller volume and
         # a shorter rate window. An explicit --mib/--window wins.
         [ "$mib_set" -eq 1 ] || mib=8
@@ -190,6 +217,17 @@ fi
 [ -n "$loss_iters" ] || loss_iters=2000
 [ -n "$losslist" ] || losslist=0,10000,50000,100000
 [ -n "$nlist" ] || nlist=1,2,4,8
+[ -n "$wan_mbit" ] || wan_mbit=17
+[ -n "$wan_delay" ] || wan_delay=109
+# --wan-delay accepts the unit the row prints ("109ms") as well as a bare
+# number; everything downstream does integer arithmetic on it.
+case $wan_delay in
+*ms) wan_delay=${wan_delay%ms} ;;
+esac
+case $wan_delay in
+'' | *[!0-9]*) die "--wan-delay needs milliseconds: 109 or 109ms" ;;
+esac
+[ -n "$tx_window" ] || tx_window=0
 
 stamp=$(date +%Y%m%dT%H%M%S)
 mkdir -p "$here/bin" "$here/results" "$bench_cache"
@@ -225,7 +263,13 @@ free_port_triple()
 }
 
 csv_header='stamp,scenario,row,git_rev,git_dirty,ko_sha256,src_sha256,src_status,kernel,qemu_sha256,n,m,profile,mib,drop_ppm,iters,bytes,control_mbit,tunnel_mbit,ratio,goodput_mbit,app_mbit,wall_s,wire_bytes,app_bytes,wire_per_app,frames,frames_s,cpu_sys_pct,cpu_softirq_pct,cpu_total_pct,kworker_pct,retx_ppm,retx_hole,retx_slow,retx_pathloss,dup_bytes_ppm,fb_delay_us,rto_us,fbk_tx,dup_tx,inflate_ppm,holes_declared,holes_repaired,holes_unrecoverable,rx_max_stall_us,reorder_max_depth,carriers_up,txq_max,rxq_max,ooo_bytes_max,retain_bytes_max,spec_bytes_max,mem_before_kb,mem_peak_kb,mem_after_kb,proc_rss_before_kb,proc_rss_peak_kb,slab_before_kb,slab_peak_kb,slab_after_kb,slab_top,lat_min_us,lat_p50_us,lat_p90_us,lat_p95_us,lat_p99_us,lat_p999_us,lat_max_us,lat_mean_us,lat_complete,lat_over5ms,lat_over20ms,lat_hist,lat_outliers,lat_tail_n,lat_tail_min_us,lat_tail_p50_us,lat_tail_p90_us,lat_tail_p99_us,lat_tail_max_us,dropped_by_ppm,connect_fail,alloc_fail,carrier_lost,carrier_replaced,qemu_rss_peak_kb,host_qemu_others,config,verdict,flush_s,hung,wchan,stack,while_active,errno_active,ms_active,after_close,errno_after,ms_after,rc,strict,notes'
-carrier_header='stamp,scenario,row,carrier,sport,state,profile,bytes,frames,dropped,retx_ppm,inflight'
+# WAN fields, appended so the columns above keep their positions for the
+# result files already on disk. `tx_window`, the car_* aggregates, the
+# pump/buffer keys and rtt_mean_us/rttvar_us stay empty when the module does
+# not print them; rtt_min_us and n_carriers come from the row-end peers
+# snapshot, which every module prints.
+csv_header="$csv_header"',wan_mbit,wan_delay_us,rx_mbit,inflight_sum,tx_window,tx_ack,car_delivery_mbps,car_srtt_ms,car_cwnd_kb,car_snd_wnd_kb,win_block,pump_hw_armed,pump_hw_fired,car_sndbuf,car_rcvbuf,rtt_min_us,rtt_mean_us,rtt_max_us,rttvar_us,n_carriers,sum_delivery_mbps,mean_bdp_kb,coverage,k_eff,inflight_over_window,hole_budget_ms,carrier_stall_ms,wan_ingress,bdp_bytes,k_x100,rx_reorder_bytes'
+carrier_header='stamp,scenario,row,carrier,sport,state,profile,bytes,frames,dropped,retx_ppm,inflight,delivery_rate_bps,cwnd_bytes,snd_wnd,rtt_us,wscale,rcv_wnd,window_clamp,rmem_alloc'
 
 build_bins()
 {
@@ -239,7 +283,8 @@ build_bins()
 net_assets()
 {
     mkdir -p "$bench_cache/net"
-    for m in failover net_failover virtio_net sch_htb sch_netem cls_u32 sch_tbf; do
+    for m in failover net_failover virtio_net sch_htb sch_netem cls_u32 sch_tbf \
+        act_gact act_mirred ifb sch_ingress; do
         src=$(find "/usr/lib/modules/$rel/kernel" -name "$m.ko.zst" 2> /dev/null | head -1)
         [ -n "$src" ] || die "no $m module for $rel under /usr/lib/modules"
         dst=$bench_cache/net/$m.ko
@@ -292,7 +337,12 @@ run_one()
         "$_scen" "$_mib" "$_nlist" > "$bench_cache/bench.txt"
     printf 'iters=%s\nloss_iters=%s\nhole_iters=%s\nloss=%s\nbytes=1024\nnetem=%s\n' \
         "$_iters" "$_lossiters" "$_iters" "$_losslist" "$_netem" >> "$bench_cache/bench.txt"
-    printf 'rx_reorder=2097152\nhole_budget=5000\nwindow=%s\n' "$_window" >> "$bench_cache/bench.txt"
+    case $_scen in
+    wan) _rx=${rx_reorder:-8388608}; _hb=${hole_budget:-1500} ;;
+    *) _rx=${rx_reorder:-2097152}; _hb=${hole_budget:-5000} ;;
+    esac
+    printf 'rx_reorder=%s\nhole_budget=%s\nwindow=%s\nwan_mbit=%s\nwan_delay=%s\ntx_window=%s\n' \
+        "$_rx" "$_hb" "$_window" "$wan_mbit" "$wan_delay" "$tx_window" >> "$bench_cache/bench.txt"
     printf 'profiles=%s\ncontrol=%s\ncontrol_mbit=%s\n' "${only:-raw,http-kal,http-kal-drip}" \
         "$((1 - no_control))" "${control_mbit:-0}" >> "$bench_cache/bench.txt"
 
@@ -306,11 +356,19 @@ run_one()
     initrd=$bench_cache/initramfs.cpio.gz
     tc_arg=
     [ -n "$tc_bin" ] && tc_arg="--bin $tc_bin"
+    # The wan scenario needs the host iproute2: busybox ip cannot create an
+    # ifb device. It is copied to /bin/ip, replacing the busybox applet link.
+    ip_arg=
+    case $_scen in
+    wan)
+        [ -n "$ip_bin" ] && ip_arg="--bin $ip_bin"
+        ;;
+    esac
     # shellcheck disable=SC2046,SC2086
     "$here/qemu/mkinitramfs.sh" --ko "$root/tbtun.ko" --out "$initrd" \
         --init "$here/qemu/init" --endpoint "$here/bin/tbt_burst" \
         --bin "$here/bin/tbt_lat" --bin "$here/bin/tbt_echo" --bin "$here/bin/tbt_conn" \
-        $tc_arg \
+        $tc_arg $ip_arg \
         --asset "$bench_cache/bench.txt" --asset "$bench_cache/hostfwd.txt" \
         $(net_assets) > /dev/null || die "initramfs build failed"
 
@@ -321,7 +379,14 @@ run_one()
     accel=kvm
     [ -w /dev/kvm ] || accel=tcg
 
-    echo "benches/run.sh: scenario=$_scen mib=$_mib n=$_nlist netem=$_netem window=${_window}s accel=$accel"
+    case $_scen in
+    wan)
+        echo "benches/run.sh: scenario=$_scen mib=$_mib n=$_nlist wan=${wan_mbit}mbit/${wan_delay}ms window=${_window}s accel=$accel"
+        ;;
+    *)
+        echo "benches/run.sh: scenario=$_scen mib=$_mib n=$_nlist netem=$_netem window=${_window}s accel=$accel"
+        ;;
+    esac
     set -- qemu-system-x86_64 \
         -accel "$accel" -cpu max -smp "${TBT_BENCH_SMP:-2}" -m 512 \
         -kernel "$kernel" -initrd "$initrd" \
@@ -415,9 +480,11 @@ run_one()
             /^BENCHCAR / {
                 delete v
                 for (i = 2; i <= NF; i++) { split($i, a, "="); v[a[1]] = a[2] }
-                printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n", stamp, scen,
+                printf "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n", stamp, scen,
                        v["row"], v["carrier"], v["sport"], v["state"], v["profile"],
-                       v["bytes"], v["frames"], v["dropped"], v["retx_ppm"], v["inflight"]
+                       v["bytes"], v["frames"], v["dropped"], v["retx_ppm"], v["inflight"],
+                       v["delivery_rate_bps"], v["cwnd_bytes"], v["snd_wnd"], v["rtt_us"],
+                       v["wscale"], v["rcv_wnd"], v["window_clamp"], v["rmem_alloc"]
             }' "$console"
     } > "$cars"
 
@@ -442,6 +509,9 @@ run_one()
         ;;
     scale)
         print_table "$out" row goodput_mbit carriers_up connect_fail alloc_fail carrier_lost carrier_replaced rc strict
+        ;;
+    wan)
+        print_table "$out" row rx_mbit goodput_mbit rtt_mean_us car_snd_wnd_kb bdp_bytes k_x100 tx_window rx_reorder_bytes inflight_sum wire_per_app ooo_bytes_max reorder_max_depth txq_max rxq_max tx_ack retx_ppm carrier_lost holes_unrecoverable coverage inflight_over_window wan_ingress rc strict
         ;;
     flush-hang)
         print_table "$out" row hung flush_s verdict wchan stack
@@ -493,9 +563,16 @@ kernel_name=$(basename "$kernel")
 tc_bin=
 [ -x /usr/bin/tc ] && tc_bin=/usr/bin/tc
 [ -n "$tc_bin" ] || die "no /usr/bin/tc (the guest's busybox tc has no u32 filters)"
+ip_bin=
+[ -x /usr/bin/ip ] && ip_bin=/usr/bin/ip
+case $scenario in
+wan | all)
+    [ -n "$ip_bin" ] || die "no /usr/bin/ip (the guest's busybox ip cannot create an ifb device)"
+    ;;
+esac
 
 if [ "$scenario" = all ]; then
-    set -- throughput profile loss latency memory scale
+    set -- throughput profile loss latency memory scale wan
     for s in "$@"; do
         run_one "$s" "$mib" "$nlist" "$iters" "$loss_iters" "$losslist" "$netem" "$window" "$timeout_s" "$tag"
         echo

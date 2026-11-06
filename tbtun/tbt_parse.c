@@ -25,6 +25,7 @@
 #define TBT_U64_MAX (~(u64)0)
 #define TBT_REPLAY_MAX 268435456u /* max_replay_bytes, §8.4.2 */
 #define TBT_REORDER_MAX 268435456u /* rx_reorder_bytes, same ceiling as replay */
+#define TBT_WINDOW_MAX 268435456u  /* tx_window_bytes, same ceiling as replay */
 #define TBT_STALL_MAX 3600000u     /* carrier_stall_ms, one hour */
 #define TBT_INFLATE_MAX 1000000u  /* 1000.000 */
 
@@ -273,6 +274,38 @@ static int tbt_parse_role(const char *v, u8 *out, struct tbt_parse_error *e)
     return 0;
 }
 
+/* `fec=off|on`. The key is part of the canonical grammar now, so the value is
+ * parsed and rendered exactly like the other keys; whether the session may
+ * actually use FEC is decided later, in tbt_session_create(). */
+static int tbt_parse_fec(const char *key, const char *v, u8 *out,
+                         struct tbt_parse_error *e)
+{
+    if (!strcmp(v, "off"))
+        *out = 0;
+    else if (!strcmp(v, "on"))
+        *out = 1;
+    else
+        return tbt_fail(e, key, "fec must be off or on");
+    return 0;
+}
+
+/* `mode=rlnc|grouped|sc-ldpc`. The mode is always rendered, even with
+ * fec=off, so the canonical line states the rate shape the data plane would
+ * use; only a fec=on session would read it. */
+static int tbt_parse_mode(const char *key, const char *v, u8 *out,
+                          struct tbt_parse_error *e)
+{
+    if (!strcmp(v, "rlnc"))
+        *out = 1;
+    else if (!strcmp(v, "grouped"))
+        *out = 2;
+    else if (!strcmp(v, "sc-ldpc"))
+        *out = 3;
+    else
+        return tbt_fail(e, key, "mode must be rlnc, grouped or sc-ldpc");
+    return 0;
+}
+
 /* "2", "2.0", "2.000" -> milli. Bounded by TBT_INFLATE_MAX. */
 static int tbt_parse_inflate(const char *s, u32 *out, struct tbt_parse_error *e)
 {
@@ -361,9 +394,14 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     char *tok;
     u64 id;
     int have_listen = 0, have_peer = 0, have_target = 0;
+    bool have_crypto = false;
 
     memset(cfg, 0, sizeof(*cfg));
     cfg->profile = 1; /* http-kal: the default is an effective value, not 0 */
+    cfg->fec = 0;     /* old ARQ: the default is an effective value, not 0 */
+    cfg->mode = 1;    /* rlnc */
+    cfg->w = 0;       /* auto: resolved below once n and mode are known */
+    cfg->carriers = 0; /* auto: resolved to n + m */
     cfg->n = 4;
     cfg->m = 1;
     cfg->dup = 1;
@@ -372,13 +410,14 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     cfg->replay = 8388608;
     cfg->tunnel_rate = 0;
     cfg->max_inflate_milli = 2000;
-    cfg->hole_budget_ms = 500;
-    cfg->rx_reorder_bytes = 262144;
+    cfg->hole_budget_ms = 0; /* auto: the receiver derives it from the RTT */
+    cfg->rx_reorder_bytes = 8388608;
+    cfg->tx_window_bytes = 0; /* auto: the sender derives it from the BDP */
     cfg->tx_retain_bytes = 0; /* unlimited */
-    cfg->carrier_stall_ms = 3000;
-    /* T0 §2.4: crypto follows fec; the baseline has no fec= yet, and the v6
-     * target defaults it on. At the w-fec-v6 rebase this becomes cfg->fec. */
-    cfg->crypto = 1;
+    cfg->carrier_stall_ms = 0; /* auto: derived from the measured RTO */
+    /* T0 §2.4: crypto follows fec unless crypto= is explicit. Resolved
+     * after the key loop, because fec= may appear before or after it. */
+    cfg->crypto = 0;
 
     tok = tbt_next_tok(&args);
     if (!tok || tbt_parse_u64(tok, &id) || !id)
@@ -431,12 +470,12 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         else if (!strcmp(key, "n"))
         {
             if (tbt_parse_u16(val, &cfg->n) || !cfg->n || cfg->n > TBT_MAX_CARRIERS_LIMIT)
-                return tbt_fail(e, key, "n must be 1..16");
+                return tbt_fail(e, key, "n must be 1..256");
         }
         else if (!strcmp(key, "m"))
         {
             if (tbt_parse_u16(val, &cfg->m) || cfg->m > TBT_MAX_CARRIERS_LIMIT)
-                return tbt_fail(e, key, "m must be 0..16");
+                return tbt_fail(e, key, "m must be 0..256");
         }
         else if (!strcmp(key, "dup"))
         {
@@ -475,15 +514,21 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         }
         else if (!strcmp(key, "hole_budget_ms"))
         {
-            if (tbt_parse_u32(val, &cfg->hole_budget_ms) || !cfg->hole_budget_ms ||
-                cfg->hole_budget_ms > 60000u)
-                return tbt_fail(e, key, "hole_budget_ms must be 1..60000");
+            if (tbt_parse_u32(val, &cfg->hole_budget_ms) || cfg->hole_budget_ms > 60000u)
+                return tbt_fail(e, key, "hole_budget_ms must be 0..60000 ms (0 = auto)");
         }
         else if (!strcmp(key, "rx_reorder_bytes"))
         {
             if (tbt_parse_u32(val, &cfg->rx_reorder_bytes) || !cfg->rx_reorder_bytes ||
                 cfg->rx_reorder_bytes > TBT_REORDER_MAX)
                 return tbt_fail(e, key, "rx_reorder_bytes must be 1..268435456 bytes");
+        }
+        else if (!strcmp(key, "tx_window_bytes"))
+        {
+            if (tbt_parse_u32(val, &cfg->tx_window_bytes) ||
+                cfg->tx_window_bytes > TBT_WINDOW_MAX)
+                return tbt_fail(e, key, "tx_window_bytes must be 0..268435456 bytes"
+                                           " and no more than rx_reorder_bytes");
         }
         else if (!strcmp(key, "tx_retain_bytes"))
         {
@@ -493,12 +538,33 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         else if (!strcmp(key, "carrier_stall_ms"))
         {
             if (tbt_parse_u32(val, &cfg->carrier_stall_ms) || cfg->carrier_stall_ms > TBT_STALL_MAX)
-                return tbt_fail(e, key, "carrier_stall_ms must be 0..3600000 ms");
+                return tbt_fail(e, key, "carrier_stall_ms must be 0..3600000 ms (0 = auto)");
         }
         else if (!strcmp(key, "profile"))
         {
             if (tbt_parse_profile(val, &cfg->profile, e))
                 return TBT_PARSE_EINVAL;
+        }
+        else if (!strcmp(key, "fec"))
+        {
+            if (tbt_parse_fec(key, val, &cfg->fec, e))
+                return TBT_PARSE_EINVAL;
+        }
+        else if (!strcmp(key, "mode"))
+        {
+            if (tbt_parse_mode(key, val, &cfg->mode, e))
+                return TBT_PARSE_EINVAL;
+        }
+        else if (!strcmp(key, "w"))
+        {
+            if (tbt_parse_u16(val, &cfg->w) || cfg->w > TBT_FEC_MAX_W)
+                return tbt_fail(e, key, "w must be 0..1024");
+        }
+        else if (!strcmp(key, "carriers"))
+        {
+            if (tbt_parse_u16(val, &cfg->carriers) ||
+                cfg->carriers > TBT_MAX_CARRIERS_LIMIT)
+                return tbt_fail(e, key, "carriers must be 0..256");
         }
         else if (!strcmp(key, "portblock"))
         {
@@ -524,6 +590,7 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
                 cfg->crypto = 0;
             else
                 return tbt_fail(e, key, "crypto must be on or off");
+            have_crypto = true;
         }
         else if (!strcmp(key, "crypto_key"))
         {
@@ -555,6 +622,13 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         }
     }
 
+    /* T0 §2.4: crypto defaults to fec; crypto=on with fec=off has no data
+     * plane to hook, so it is a configuration error. */
+    if (!have_crypto)
+        cfg->crypto = cfg->fec;
+    if (cfg->crypto && !cfg->fec)
+        return tbt_fail(e, "crypto", "crypto=on requires fec=on");
+
     if (!cfg->role)
         return tbt_fail(e, "role", "tunnel needs role=near or role=far");
     if (!have_listen)
@@ -564,7 +638,40 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     if (cfg->role == TBT_ROLE_FAR && !have_target)
         return tbt_fail(e, "target", "role=far needs target=addr:port");
     if (cfg->n + cfg->m > TBT_MAX_CARRIERS_LIMIT)
-        return tbt_fail(e, "n", "n + m exceeds the 16-carrier limit");
+        return tbt_fail(e, "n", "n + m exceeds the 256-carrier limit");
+    /* w=0 and carriers=0 mean "auto". Resolve them before validating, so the
+     * struct holds the effective value and the canonical render is stable:
+     * a written 0 reads back as the value it stands for. */
+    if (cfg->mode == 3 && cfg->w && cfg->w != 256 && cfg->w != 512)
+        return tbt_fail(e, "w", "sc-ldpc w must be 256 or 512");
+    if (!cfg->w)
+        cfg->w = cfg->mode == 3 ? 256 : (u16)(2 * cfg->n);
+    if (cfg->w < cfg->n)
+        return tbt_fail(e, "w", "w must be 0 or at least n");
+    if (!cfg->carriers)
+        cfg->carriers = cfg->n + cfg->m;
+    if (cfg->carriers % (cfg->n + cfg->m))
+        return tbt_fail(e, "carriers", "carriers must be a multiple of n + m");
+    /* mode=rlnc is one group: carriers == n+m. Grouped/sc-ldpc may use more
+     * carriers as long as the multiple holds. */
+    if (cfg->fec && cfg->mode == 1 && cfg->carriers != cfg->n + cfg->m)
+        return tbt_fail(e, "carriers", "mode=rlnc needs carriers = n + m");
+    if (cfg->fec && cfg->m < 1)
+        return tbt_fail(e, "m", "fec=on needs m>=1");
+    if (cfg->fec && cfg->carriers < cfg->n + cfg->m)
+        return tbt_fail(e, "carriers", "fec=on needs carriers >= n + m");
+    /* The old ARQ record names at most 16 carriers (path_ack_mask is u16 and
+     * its FBK/WINDOW bodies hold 16 entries). A larger session is only
+     * meaningful with FEC. */
+    if (!cfg->fec && cfg->n + cfg->m > TBT_LEGACY_MAX_CARRIERS)
+        return tbt_fail(e, "fec",
+                        "legacy ARQ supports n+m<=16; set fec=on for 256 carriers");
+    /* A sender window above the peer's reorder budget kills the stream on the
+     * first frame past that budget, so the two keys are checked together once
+     * both are known; the line may name them in either order. */
+    if (cfg->tx_window_bytes > cfg->rx_reorder_bytes)
+        return tbt_fail(e, "tx_window_bytes", "tx_window_bytes must be 0..268435456 bytes"
+                                                " and no more than rx_reorder_bytes");
     return 0;
 }
 
@@ -615,7 +722,7 @@ static int tbt_parse_carrier(char *args, struct tbt_cmd *out, struct tbt_parse_e
     char *act;
 
     if (!tok || tbt_parse_u16(tok, &out->carrier) || out->carrier >= TBT_MAX_CARRIERS_LIMIT)
-        return tbt_fail(e, "index", "carrier index must be 0..15");
+        return tbt_fail(e, "index", "carrier index must be 0..255");
 
     act = tbt_next_tok(&args);
     if (!act)
@@ -836,6 +943,8 @@ static void tbt_fmt_hex(const u8 *in, size_t n, char *out);
 int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
 {
     static const char *const profiles[] = { "http-kal", "http-kal", "http-kal-drip", "raw" };
+    static const char *const fec_modes[] = { "off", "on" };
+    static const char *const modes[] = { "rlnc", "rlnc", "grouped", "sc-ldpc" };
     char la[16], pa[16], ta[16];
     size_t off = 0;
     int i, rc;
@@ -882,17 +991,24 @@ int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
             kb[0] = '-';
             kb[1] = '\0';
         }
+        /* T0 §4.2 order: n m fec mode w carriers crypto crypto_key dup
+         * profile keepalive ... */
         rc = tbt_addf(buf, size, &off,
-                      " n=%u m=%u crypto=%s crypto_key=%s dup=%u profile=%s keepalive=%u"
+                      " n=%u m=%u fec=%s mode=%s w=%u carriers=%u"
+                      " crypto=%s crypto_key=%s dup=%u profile=%s keepalive=%u"
                       " drip_ms=%u replay=%u tunnel_rate=%u"
                       " max_inflate=%u.%03u hole_budget_ms=%u rx_reorder_bytes=%u"
-                      " tx_retain_bytes=%u carrier_stall_ms=%u portblock=%u-%u",
-                      c->n, c->m, c->crypto ? "on" : "off", kb, c->dup,
+                      " tx_window_bytes=%u tx_retain_bytes=%u carrier_stall_ms=%u"
+                      " portblock=%u-%u",
+                      c->n, c->m, fec_modes[c->fec ? 1 : 0],
+                      modes[c->mode & 3], c->w, c->carriers,
+                      c->crypto ? "on" : "off", kb, c->dup,
                       profiles[c->profile & 3], c->keepalive_ms,
                       c->drip_ms, c->replay, c->tunnel_rate,
                       c->max_inflate_milli / 1000, c->max_inflate_milli % 1000,
-                      c->hole_budget_ms, c->rx_reorder_bytes, c->tx_retain_bytes,
-                      c->carrier_stall_ms, c->portblock_lo, c->portblock_hi);
+                      c->hole_budget_ms, c->rx_reorder_bytes, c->tx_window_bytes,
+                      c->tx_retain_bytes, c->carrier_stall_ms, c->portblock_lo,
+                      c->portblock_hi);
     }
     if (rc)
         return rc;

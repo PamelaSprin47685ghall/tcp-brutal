@@ -25,6 +25,14 @@ theory that the ISP's classifier gives HTTP priority. That theory is measured,
 not assumed; see [QoS caveat](#qos-caveat). If it turns out false, `profile=raw`
 turns the wrapping off and the per-flow gain remains.
 
+FEC v6 (`fec=on`, `conv=0x1001`) is an optional data plane: the application
+byte stream is cut into 8 KiB DATA shares plus RLNC parity shares, one share per
+carrier, and the receiver recovers missing shares instead of waiting for a
+retransmit. It rides both `profile=raw` and the HTTP chunk container; in the
+HTTP profile one chunk body is exactly one 40-byte FEC record, while the request
+line, headers and chunk framing stay plaintext. The old ARQ path is unchanged
+when `fec=off`.
+
 This tree implements C1–C8 of [DESIGN.md](DESIGN.md): the `/proc` surface, the
 listener and the far side, spares and carrier replacement with the RETIRE
 handshake, duplication with the replay ring, hole repair from the retained
@@ -35,14 +43,17 @@ overran `rx_reorder_bytes`; `gaps_total` counts reorder overflows. Either one
 resets the stream.
 
 Backpressure is not loss. A carrier is declared lost only after
-`carrier_stall_ms` without ack progress, and that timer is suppressed while
-either side is paused (`stall_paused_skips`). DATA admission stops at the peer's
-advertised window, so at most one window sits in the carrier's TCP send buffer
+`carrier_stall_ms` of unacked bytes with no ack progress; an idle carrier, a
+delivery pause and a closed peer window restart that clock (`stall_idle_skips`,
+`stall_paused_skips`). DATA admission stops at the peer's advertised window, so
+at most one window sits in the carrier's TCP send buffer
 (`win_block`/`win_resume`); control frames bypass that gate. The window check
 reads `snd_wnd`, so it is a heuristic, and an unknown window admits one chunk.
-Pinned control frames are retried and requeued instead of being dropped at the
-first `-EAGAIN`, and the pump wakes on `ctl_queued` even when no payload bytes
-are queued.
+The tunnel's own sender window auto-sizes from the carriers' BBR rate samples,
+with a 1 MiB floor and `rx_reorder_bytes` as the ceiling; `tx_window_bytes=`
+pins it. Pinned control frames are retried and requeued instead of being
+dropped at the first `-EAGAIN`, and the pump wakes on `ctl_queued` even when no
+payload bytes are queued.
 
 ## Requirements
 
@@ -101,7 +112,7 @@ Module parameters, read-only after load:
 |---|---|---|
 | `debug` | `0` | Verbosity, `0..3` |
 | `max_tunnels` | `64` | Maximum configured tunnels; a new id over the cap fails with `ENOSPC` |
-| `max_carriers` | `16` | Carriers per session, `1..16`; `n + m` over the cap fails with `EINVAL` |
+| `max_carriers` | `256` | Carrier sockets per session, `1..256`; `carriers` over the cap fails with `EINVAL` |
 | `debug_loss` | `0` | Allow `drop_ppm` writes, the deterministic loss injector |
 
 The control surface is created in `init_net` only; there is no per-netns view.
@@ -138,7 +149,43 @@ carried to `127.0.0.1:5201` on the far host over four carriers. Test it with
 `iperf3 -c 10.0.0.1 -p 9000 -t 60 -P 1` against an `iperf3 -s` bound to the
 target port.
 
-Both ends must agree on the tunnel id, `n`, `m`, and the profile family. The far
+For FEC v6 over the HTTP container, one group with six carriers (four data,
+two parity):
+
+```sh
+# near
+echo 'tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443 n=4 m=2 fec=on carriers=6' \
+     > /proc/net/tbtun/config
+# far
+echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=2 fec=on carriers=6 peer=10.0.0.1:9000' \
+     > /proc/net/tbtun/config
+```
+
+A grouped session uses one share per carrier: `carriers = groups * (n + m)`,
+with `groups = carriers / (n + m)`. The production shape is 32 groups of
+`n=4, m=4` on 256 carriers:
+
+```sh
+# near
+echo 'tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443 n=4 m=4 fec=on mode=grouped carriers=256' \
+     > /proc/net/tbtun/config
+# far
+echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec=on mode=grouped carriers=256 peer=10.0.0.1:9000' \
+     > /proc/net/tbtun/config
+```
+
+The global packet sequence is striped over the groups (`group = seq % groups`).
+Each group has its own block window and parity, and the receiver delivers a
+global span only when every group's block in that span has decoded. Carrier
+`c` always carries group `c / (n + m)` share `c % (n + m)`; a replacement
+carrier keeps the same index.
+
+The default profile is `http-kal`, so each 40-byte FEC record is one HTTP chunk
+body while the request line, headers and chunk framing stay plaintext.
+`profile=raw` carries the same records without the HTTP wrapper.
+
+Both ends must agree on the tunnel id, `n`, `m`, `w`, `mode`, `carriers`, and
+the profile family. The far
 side's `listen` is where carriers arrive; the near side's `peer` is where they
 are sent. The far side's `peer` is the anchor: only HELLOs from `10.0.0.1` may
 join, and the port in a far `peer=` is grammar filler. Add a shared
@@ -158,7 +205,7 @@ program, and `echo`/`cat` are the whole interface.
 | --- | --- |
 | `config` | the canonical configuration; write tunnel lines, `del`, `flush`, `carrier ...`, and `session ...` actions here |
 | `tunnels` | one line per tunnel: role, state, listen/peer/target, n, m, streams |
-| `peers` | one line per carrier slot, 16 columns (below) |
+| `peers` | one line per carrier slot, 19 columns (below) |
 | `ports` | the global source port block and whether it is configured |
 | `stats` | `debug_loss=<0\|1>`, gap and stream totals, then one counter block per tunnel (below) |
 | `http` | debug only (`debug>=2`): the last **emitted** HTTP request header block from the near side's carrier 0 (headers only), for checking the container against a parser; not a received request, a response, or a live stream |
@@ -183,8 +230,8 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `listen` | — | `a.b.c.d:port`; near: public address; far: carrier address |
 | `peer` | — | near: where carriers are sent; far: the only near source address allowed to join (the anchor; the port is grammar filler) |
 | `target` | — | far only: literal address the payload is delivered to |
-| `n` | `4` | Active carriers, `1..16` |
-| `m` | `1` | Spares, `0..16`; `n + m <= 16` |
+| `n` | `4` | DATA shares per group, `1..255`; `n + m <= 256` |
+| `m` | `1` | Parity shares per group, `0..255`; `fec=on` needs `m >= 1`; `n + m <= 256` |
 | `dup` | `1` | Duplication degree, `0..3` |
 | `keepalive` | `5000` | Idle PAD interval, ms |
 | `drip_ms` | `1000` | `http-kal-drip` idle byte interval, ms |
@@ -192,10 +239,15 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `tunnel_rate` | `0` | Bytes/s ceiling, `0` = unset |
 | `max_inflate` | `2.000` | Duplication inflation ceiling |
 | `hole_budget_ms` | `500` | How long a hole may stay open, `1..60000` ms; `0` is refused |
-| `rx_reorder_bytes` | `262144` | Receiver reorder buffer bytes, `1..268435456`; `0` is refused |
+| `rx_reorder_bytes` | `8388608` | Receiver reorder budget, bytes, `1..268435456`; bounds each stream's reorder tree and the session-wide sum; `0` is refused |
+| `tx_window_bytes` | `0` | Sender window bytes; `0` = auto from the carriers' BBR samples; an explicit value must not exceed `rx_reorder_bytes` |
 | `tx_retain_bytes` | `0` | Sender retention bytes, `0` = unlimited |
 | `carrier_stall_ms` | `3000` | Silence before a carrier is declared lost |
 | `profile` | `http-kal` | `http-kal`, `http-kal-drip`, or `raw` |
+| `fec` | `off` | `off` (old ARQ) or `on` (FEC v6 data plane) |
+| `mode` | `rlnc` | `rlnc` (one group), `grouped`, or `sc-ldpc` (reserved) |
+| `w` | `0` | RLNC window, `0..1024`; `0` resolves to `2*n` |
+| `carriers` | `0` | Carrier slots, `0..256`; `0` resolves to `n + m`; must be a multiple of `n + m` |
 | `portblock` | `0-0` | Per-tunnel source port block, recorded and rendered only (`0-0` = none); carriers use the global block set through `/ports` |
 | `srcaddrs` | — | Comma-separated local source addresses; only the first is used |
 | `nonce` | — | `16` or `32` hex digits: pin the session nonce; near uses it locally, far requires it from the near side |
@@ -237,7 +289,7 @@ returned even when it is large; the snapshot is rebuilt after each write.
 
 ### `peers` (read/write)
 
-One line per carrier slot, sixteen columns:
+One line per carrier slot, nineteen columns:
 
 | Column | Meaning |
 | --- | --- |
@@ -257,6 +309,9 @@ One line per carrier slot, sixteen columns:
 | `tx_bytes` | carrier bytes written, headers included |
 | `dropped` | records dropped by the `drop_ppm` injector (debug only) |
 | `retx_ppm` | retransmitted DATA copies per million unique DATA records; this is the loss proxy |
+| `delivery_rate_bps` | the carrier's BBR rate sample, bytes/s (the auto window's input) |
+| `cwnd_bytes` | the carrier TCP's `snd_cwnd` in bytes (a cross-check, not an input) |
+| `snd_wnd` | the peer's advertised window, bytes |
 
 Writing `carrier <index> down|up|drop_ppm <n>` acts on every running tunnel
 that has that carrier index.
@@ -283,6 +338,7 @@ snapshot, `txwake`, `c3` (carriers, joins, retransmission, reorder, gates),
 | `join_src_reject`, `join_nonce_reject`, `join_bad`, `join_dup` | HELLO refused by the anchor, by the first-HELLO source, by the nonce, or by an occupied slot |
 | `ctl_lost`, `ctl_retry`, `ctl_requeue`, `ctl_obsolete`, `ctl_queued` | pinned control frames: explicit loss after the retry bound, retries, requeues, obsolete generation, live depth |
 | `stall_paused_skips`, `win_block`, `win_resume` | stall decision deferred while paused / DATA held at the peer-window gate / released |
+| `stall_idle_skips`, `stall_declared`, `tx_window`, `rtt_mean_us`, `rttvar_us`, `rtt_max_us`, `txq_max` | stall clock restarted because nothing was unacked / stall clock killed a carrier / effective sender window and its inputs / frame-queue bound |
 | `holes_declared`, `holes_repaired`, `holes_unrecoverable`, `rx_max_stall_us` | hole accounting |
 | `dup_tx`, `dup_used`, `dup_suppressed`, `inflate_ppm` | duplication |
 | `reconcile live_*`/`retired_*` | live + retired equals the session total, for bytes, DATA and retransmits |
@@ -372,7 +428,18 @@ real line.
   The nonce is a session identifier, not a secret. Run it inside WireGuard on an
   untrusted path; the `raw` profile is then the only sensible choice, because an
   HTTP parser cannot see inside TLS.
-- **No FEC.** Loss is repaired by retransmission from the replay ring and by
+- **FEC is optional; grouped is the production shape.** `fec=on` supports one
+  group (`carriers == n + m`) and grouped sessions
+  (`carriers = groups * (n + m)`, up to 256 shares) in both `raw` and
+  `http-kal` containers. The sender emits one block of `n` DATA shares plus
+  `m` parity shares per group; the receiver decodes a block when its parity
+  makes the missing shares solvable, then delivers whole super-blocks in global
+  sequence order. There is no NACK and no retransmit in the FEC path: a block
+  that loses more shares than its parity can recover stalls the stream until
+  the close timer resets it. The final block of a stream is zero-padded and its
+  real length travels in the parity `win_len` (with the FIN offset as a second
+  source), so a short last packet is never delivered as padding. When `fec=off`,
+  loss is repaired by retransmission from the replay ring and by
   duplication; there is no parity or erasure code. When the ring no longer holds
   the bytes, the receiver resets the stream (`holes_unrecoverable`) instead of
   guessing.
@@ -388,6 +455,22 @@ real line.
   module measured 8.38 Mbit/s (`retx_ppm` 1,842, `wire/app` 1.0146) and another
   11.37 Mbit/s. The final `n=1`/`n=8`/`n=16` rows are 3.11/22.36/32.75 Mbit/s;
   the full matrix is in `review/final-bench/`.
+- **The sender window is capped by the reorder budget.** `tx_window_bytes=0`
+  derives the window from the carriers' BBR samples, but it never exceeds
+  `rx_reorder_bytes`; a configured `rx_reorder_bytes` below the path's BDP
+  (RTT × bandwidth) still caps throughput. The derived value is a target, not a
+  guarantee: it is `k × mean BDP`, with `k = (RTO + one-way + feedback delay) /
+  mean SRTT` (about 2–5 on measured paths), not a max-RTT product or a sum of
+  per-carrier BDPs. The reorder budget must be at least that `k × mean BDP`,
+  because the peak tree occupancy is the whole window. Both ends should use the
+  same `rx_reorder_bytes`, because the receiver's budget is not on the wire: the
+  sender caps itself with its own configured value. A future WINDOW credit would
+  remove that configuration contract.
+- **The reorder tree and the ready queue are different costs.** A frame that
+  arrives out of order waits in the tunnel's reorder tree (`rx_reorder_bytes`,
+  8 MiB default, shared by the session); bytes that arrived in order but that
+  the application has not read wait in the 64 MiB ready queue. Only the first
+  is what the sender window must fit; the second is ordinary backpressure.
 - **Guest CPU is the bottleneck.** In the latest QEMU runs `kworker` used about
   99% of one vCPU. The absolute Mbit/s above are a floor set by this guest, not
   a property of the line.
@@ -477,8 +560,9 @@ choice, because an HTTP parser cannot see inside TLS.
 ## Scope
 
 This is not a general-purpose VPN. It forwards TCP only, to one literal target
-per tunnel, with no routing, no NAT, no authentication, no encryption, no FEC,
-and no IPv6. It exists to multiply a per-flow rate limit and to test whether a
+per tunnel, with no routing, no NAT, no authentication, and no IPv6. FEC v6 is
+optional (`fec=on`) and single-group in this build; ChaCha8 body encryption is a
+separate integration. It exists to multiply a per-flow rate limit and to test whether a
 QoS profile helps. For anything else, use WireGuard.
 
 ---

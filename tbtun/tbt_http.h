@@ -67,6 +67,8 @@
 #define TBT_HTTP_CHUNK_LINE_MAX 1024
 /* Worst-case encoded chunk: size line + one full record + CRLF. */
 #define TBT_HTTP_FRAME_MAX (TBT_HTTP_CHUNK_HDR_MAX + TBT_REC_MAX + 2) /* 8244 */
+/* Same bound for a 40-byte FEC record. */
+#define TBT_HTTP_FEC_FRAME_MAX (TBT_HTTP_CHUNK_HDR_MAX + TBT_FEC_REC_MAX + 2)
 
 /* /proc/net/tbtun/http keeps the first chunk's size line and this many bytes
  * of its record: enough to prove the framing without dumping payload
@@ -396,6 +398,12 @@ struct tbt_http_out
 
 size_t tbt_http_frame_encode(char *buf, size_t cap, const struct tbt_http_out *out);
 
+/* One chunk whose body is a complete 40-byte FEC record (T0 0x1001). The
+ * HTTP request/response headers and the chunk framing stay plaintext; only the
+ * FEC body may be encrypted by the caller. Returns the chunk length or 0. */
+size_t tbt_http_fec_chunk_encode(char *buf, size_t cap, const u8 *rec,
+                                 size_t rec_len);
+
 /* Receive status. TBT_RX_OK means one record was produced, NEED_MORE means the
  * input ended before a record (or the message ended), PROTO is permanent. */
 enum tbt_http_rx_status
@@ -430,7 +438,7 @@ enum tbt_http_rx_kind
 struct tbt_http_rx
 {
     struct tbt_http_chunk_parser chunk;
-    u8 rec[TBT_REC_MAX];
+    u8 rec[TBT_FEC_REC_MAX];
     u32 rec_len;     /* bytes assembled for the current record */
     u32 rec_need;    /* TBT_HDR_LEN + body_len once the header is known */
     u32 chunk_size;  /* announced size of the current chunk */
@@ -453,6 +461,12 @@ struct tbt_http_rx
  * trailing CRLF is consumed on the next call. */
 size_t tbt_http_frame_decode(struct tbt_http_rx *rx, const u8 *buf, size_t len,
                              struct tbt_rec *out, int *err);
+
+/* FEC variant: one chunk == one 40-byte record. Drip (1 byte) and the old PAD
+ * chunk (32 bytes) are skipped. On TBT_RX_OK, *rec points into rx->rec and
+ * *rec_len is the record length; valid until the next call. */
+size_t tbt_http_fec_frame_decode(struct tbt_http_rx *rx, const u8 *buf, size_t len,
+                                 const u8 **rec, size_t *rec_len, int *err);
 
 /* Reset for the next message after the terminator and the next request header.
  * Equivalent to zeroing the struct and initializing the chunk parser. */

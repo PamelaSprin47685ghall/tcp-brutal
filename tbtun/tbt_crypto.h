@@ -143,13 +143,24 @@ int tbt_crypto_xor(struct tbt_crypto_ctx *c, u8 *data, size_t len);
 int tbt_crypto_xor_at(struct tbt_crypto_ctx *c, u64 counter, u8 *data, size_t len);
 
 /* The body-only hook. For a DATA or PARITY share with global sequence `seq`,
- * set counter = (seq << 8) | (parity << 7) and XOR the payload. The caller
+ * use counter = (seq << 8) | (parity << 7) and XOR the payload. The caller
  * passes the clear payload on TX and the ciphertext on RX; the operation is
- * its own inverse. `len` must be <= TBT_CRYPTO_BODY_MAX and `seq` <=
- * TBT_CRYPTO_SEQ_MAX. Returns 0 when crypto is off (no-op), -EINVAL when the
- * arguments would overflow the counter space. */
+ * its own inverse. It is implemented with tbt_crypto_xor_at(), so it does not
+ * change c->counter or the buffered block: several carriers may call it
+ * concurrently on the same rx context. `len` must be <= TBT_CRYPTO_BODY_MAX
+ * and `seq` <= TBT_CRYPTO_SEQ_MAX. Returns 0 when crypto is off (no-op),
+ * -EINVAL when the arguments would overflow the counter space. */
 int tbt_crypto_body_xor(struct tbt_crypto_ctx *c, u64 seq, bool parity,
                         u8 *payload, u16 len);
+
+/* Per-share variant for the FEC data plane. DATA shares are unique by seq, so
+ * this is exactly tbt_crypto_body_xor(). PARITY shares of one block share the
+ * same (seq, parity) pair and differ only in share_index, so mixing
+ * share_index into the nonce is required to avoid reusing one keystream for
+ * every parity share. Both ends know share_index from the clear 40-byte
+ * header; the counter formula and the wire are unchanged. */
+int tbt_crypto_body_xor_share(struct tbt_crypto_ctx *c, u64 seq, bool parity,
+                              u16 share_index, u8 *payload, u16 len);
 
 /* Erase the schedule, keystream and key material with volatile stores. */
 void tbt_crypto_wipe(struct tbt_crypto_ctx *c);

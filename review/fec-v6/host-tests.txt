@@ -1,0 +1,31 @@
+$ make check
+make -C /home/kunweiz/.cache/tbtun-build/linux72-headers/usr/lib/modules/7.2.9-1-MANJARO/build M=/home/kunweiz/tbtun-worktrees/fec-v6 PAHOLE=/home/kunweiz/.cache/tbtun-build/pahole/usr/bin/pahole modules
+make[1]: Entering directory '/home/kunweiz/.cache/tbtun-build/linux72-headers/usr/lib/modules/7.2.9-1-MANJARO/build'
+make[2]: Entering directory '/home/kunweiz/tbtun-worktrees/fec-v6'
+make[2]: Leaving directory '/home/kunweiz/tbtun-worktrees/fec-v6'
+make[1]: Leaving directory '/home/kunweiz/.cache/tbtun-build/linux72-headers/usr/lib/modules/7.2.9-1-MANJARO/build'
+440 checks, 0 failures
+test_fuzz: seed=1 checks=7550734 failures=0 buffers=200000 bodies=200000
+test_http: seed=0x9e3779b97f4a7c15 checks=257 failures=0
+test_reorder: 52792 checks, 0 failures
+test_ack: 10026 checks, 0 failures
+test_control: 181 checks, 0 failures
+test_multistream: 68580 checks, 0 failures
+124 checks, 0 failures
+1430 checks, 0 failures
+33999 checks, 0 failures
+h11: accepted POST /api/v2/upload HTTP/1.1 and HTTP/1.1 200 OK; 4 chunks and 112 body bytes each, headers in order
+
+$ make host-test-san
+440 checks, 0 failures
+test_fuzz: seed=1 checks=7550734 failures=0 buffers=200000 bodies=200000
+test_http: seed=0x9e3779b97f4a7c15 checks=257 failures=0
+test_http_fuzz: seed=0x0000000000000001 checks=4078276 failures=0 buffers=200000
+1430 checks, 0 failures
+33999 checks, 0 failures
+
+$ ./review/lint.sh
+SELFTEST PASS  atomic-stats-wrapped-access
+
+16/16 checks passed, 0 failed
+14/14 self-tests passed, 0 failed

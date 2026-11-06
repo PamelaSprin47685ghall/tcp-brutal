@@ -33,7 +33,7 @@ MODULE_PARM_DESC(max_tunnels, "Maximum configured tunnels (default 64)");
 
 unsigned int max_carriers = TBT_MAX_CARRIERS_LIMIT;
 module_param(max_carriers, uint, 0444);
-MODULE_PARM_DESC(max_carriers, "Carrier sockets per session, 1..16 (default 16)");
+MODULE_PARM_DESC(max_carriers, "Carrier sockets per session, 1..256 (default 256)");
 
 /* Debug-only loss injection gate. `carrier <n> drop_ppm <ppm>` is refused
  * unless the module was loaded with debug_loss=1, so a production module
@@ -79,7 +79,7 @@ static void tbt_wire_layout_check(void)
     BUILD_BUG_ON(offsetof(struct tbt_hdr, reserved2) != TBT_H_RES2);
     BUILD_BUG_ON(offsetof(struct tbt_hdr, conv) != TBT_H_CONV);
     BUILD_BUG_ON(sizeof(struct tbt_hdr) != TBT_HDR_LEN);
-    BUILD_BUG_ON(TBT_MAX_CARRIERS_LIMIT > 16); // path_ack_mask is u16
+    BUILD_BUG_ON(TBT_LEGACY_MAX_CARRIERS > 16); // path_ack_mask is u16
     BUILD_BUG_ON(TBT_LINE_MAX < 256);          // room for the longest documented line
 }
 
@@ -149,7 +149,7 @@ static void __exit tbtun_exit(void)
      * started before the teardown, then for the module-text RCU callbacks.
      * flush_workqueue(system_wq) is not a barrier: it does not stop new
      * scheduling, does not flush delayed work, and does not cover
-     * system_dfl_wq (w_kill, w_fbk, w_pump). */
+     * TBT_WQ (w_kill, w_fbk, w_pump; system_dfl_wq on 6.5+, system_unbound_wq on 6.1). */
     synchronize_rcu();
     rcu_barrier();
     pr_info("tbtun: unloaded\n");
