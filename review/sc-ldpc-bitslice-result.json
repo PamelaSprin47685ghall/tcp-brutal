@@ -1,6 +1,6 @@
 {
   "branch": "w-sclc-simd",
-  "head": "b79734b",
+  "head": "5276044",
   "decoder_commit": "02ce1f7",
   "base": "w-fec ef5f956",
   "decoder": "review/fec-prototype/sc_ldpc/sc_ldpc_bs.c",
@@ -204,5 +204,27 @@
     "review/fec-prototype/sc_ldpc/baseline-targets.csv",
     "bench/results/rec-8c64ccf/rec-summary-rec-8c64ccf.csv (sclc-bench)",
     "bench/results/enc-ab-27765f1/enc-ratios-enc-ab-27765f1.csv (sclc-bench)"
-  ]
+  ],
+  "pending_hnd0_run": {
+    "when": "after T5.2 fixes the announce mask and the parent gives GO",
+    "first": {
+      "block": 512,
+      "L": 16,
+      "rate": 0.4,
+      "p": 0.4,
+      "batch": 512,
+      "threads": 2,
+      "rounds": 5,
+      "trials": 2048
+    },
+    "base_cmd": "sc_ldpc_bench --block 512 --L 16 --rate 0.40 --p 0.40 --trials 2048 --codes 4 --threads 2 --model symmetric --term causal --no-header",
+    "cand_cmd": "sc_ldpc_bs_bench --block 512 --L 16 --rate 0.40 --p 0.40 --trials 2048 --batch 512 --threads 2",
+    "affinity": "taskset -c 0,1 nice -n 10",
+    "then": [
+      "p0.30/r0.50 block256 L16 2t 5 rounds",
+      "p0.50/r0.30 block256 L16 2t 5 rounds",
+      "optional p0.50/r0.25"
+    ],
+    "owner": "sclc-bench (HND0 single runner)"
+  }
 }
