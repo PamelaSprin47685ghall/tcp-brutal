@@ -182,6 +182,20 @@ void sc_get_info(const sc_code *c, sc_info *out)
     out->mem_bytes = c->mem_bytes;
 }
 
+void sc_get_graph(const sc_code *c, sc_graph *out)
+{
+    out->n = c->n;
+    out->n_data = c->n_data;
+    out->n_par = c->n_par;
+    out->n_chk = c->n_chk;
+    out->edges = c->edges;
+    out->dc_max = c->dc_max;
+    out->voff = c->voff;
+    out->coff = c->coff;
+    out->vadj = c->vadj;
+    out->cadj = c->cadj;
+}
+
 int sc_data_var(const sc_code *c, int k)
 {
     if (k < 0 || k >= c->n_data)

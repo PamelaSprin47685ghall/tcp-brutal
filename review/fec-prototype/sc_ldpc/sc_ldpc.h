@@ -79,6 +79,26 @@ typedef struct {
     long resolved;      /* target variables recovered by peeling */
 } sc_dec_stat;
 
+/*
+ * Read-only graph view for alternative decoders.  The pointers stay valid
+ * until sc_free().  vadj is variable-major (check ids), cadj is check-major
+ * (variable ids); both hold c->edges entries.
+ */
+typedef struct {
+    int n;
+    int n_data;
+    int n_par;
+    int n_chk;
+    long edges;
+    int dc_max;
+    const int *voff; /* n + 1 */
+    const int *coff; /* n_chk + 1 */
+    const int *vadj; /* edges */
+    const int *cadj; /* edges */
+} sc_graph;
+
+void sc_get_graph(const sc_code *c, sc_graph *out);
+
 /* Build a code.  Returns NULL and fills err[] on invalid parameters. */
 sc_code *sc_build(const sc_params *p, char *err, size_t errlen);
 void sc_free(sc_code *c);
