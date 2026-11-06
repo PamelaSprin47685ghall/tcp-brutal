@@ -262,6 +262,13 @@ enum tbt_retx_src {
     TBT_RETX_PATHLOSS, /* carrier_lost marked it retx_now */
 };
 
+/* A frame that has no carrier yet. Carrier indices are 0..255, so 0xff is a
+ * real index in a 256-carrier session and cannot double as a sentinel: a
+ * direct sess->car[fr->path] would send a poisoned frame to carrier 255.
+ * Every path lookup therefore compares against sess->n_car, which rejects
+ * TBT_PATH_NONE for every carrier count. */
+#define TBT_PATH_NONE 0xffffu
+
 struct tbt_frame
 {
     struct list_head list;
@@ -274,7 +281,7 @@ struct tbt_frame
     bool retx_copy;      /* a timer/injection copy: counted when written */
     u8 retx_src;         /* enum tbt_retx_src: which branch queued it */
     bool dropped;        /* drop_ppm discarded it: a real hole, not a queue */
-    u8 path;             /* pinned path, or 0xff until the pump picks one */
+    u16 path;            /* carrier index, or TBT_PATH_NONE before selection */
     u32 gen;             /* pinned frames: carrier generation they belong to */
     u8 retries;          /* transient control failures (review 22) */
     u64 retry_at_ns;     /* earliest next attempt; 0 = now */
@@ -876,6 +883,8 @@ struct tbt_session
     atomic64_t tx_submit_calls, tx_submit_bytes;
     atomic64_t dbg_alloc_fail, dbg_over_qmax, dbg_copy_fail, dbg_empty_len;
     u64 dbg_announce_mismatch; /* pump only */
+    u64 dbg_pinned_bad_path;   /* pump only: pinned frame with no live path */
+    bool dbg_path_selftest_done; /* pump only: sentinel lookup checked once */
     u64 dbg_snap_overflow;     /* stream snapshot, under sess->lock */
     u64 dbg_pump_hiwat, dbg_pump_dead, dbg_pump_moved; /* pump only */
     atomic64_t dbg_pump_runs, dbg_pump_nocar; /* counted before pump_lock */
@@ -1036,7 +1045,7 @@ int tbt_tx_pump(struct tbt_session *sess);
 void tbt_tx_wake(struct tbt_session *sess);
 void tbt_tx_window_init(struct tbt_session *sess);
 int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
-                          u8 path, u8 type, u64 sid, u64 seq,
+                          u16 path, u8 type, u64 sid, u64 seq,
                           const u8 *body, u16 len, bool head, gfp_t gfp);
 /* One OPEN per live carrier, so a carrier that dies before the first copy
  * still cannot strand the stream (DESIGN.md §3.6, C3). */

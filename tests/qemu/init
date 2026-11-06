@@ -1235,6 +1235,29 @@ probe_n() {
     3) fail "probe N: bytes came back wrong or short (rc=3)" ;;
     *) fail "probe N: tbt_burst exited $rc" ;;
     esac
+    # The close path pins one FIN per carrier (and RST when the peer has
+    # gone). At 256 carriers index 255 is a real slot, so a frame without a
+    # path must be refused by the bounded lookup instead of being written to
+    # carrier 255. Wait for both streams to detach, then require that no
+    # pinned frame was refused for a bad path and none was lost; the warning
+    # check below also covers the one-shot sentinel self-test in the pump.
+    _close=0
+    while [ "$_close" -lt 40 ]; do
+        if [ "$(tunnel_stat 1 streams_active)" = "0" ] &&
+            [ "$(tunnel_stat 2 streams_active)" = "0" ]; then
+            break
+        fi
+        sleep 0.1
+        _close=$((_close + 1))
+    done
+    for _t in 1 2; do
+        _bad=$(tunnel_stat "$_t" pinned_bad_path)
+        [ "${_bad:-0}" = "0" ] ||
+            fail "probe N: tunnel $_t refused $_bad pinned frame(s) with no live path"
+        _lost=$(tunnel_stat "$_t" ctl_lost)
+        [ "${_lost:-0}" = "0" ] ||
+            fail "probe N: tunnel $_t lost $_lost pinned control frame(s) at 256 carriers"
+    done
     # A 256-carrier session indexes per-carrier state by carrier: a mask or an
     # array narrower than the carrier count writes past itself and the kernel
     # says so (WARN_ON, or UBSAN on a debug kernel). Any new warning during this

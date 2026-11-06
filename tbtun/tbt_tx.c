@@ -107,7 +107,7 @@ static struct tbt_frame *tbt_frame_alloc(u16 len, gfp_t gfp)
     fr->dup_copy = false;
     fr->retx_copy = false;
     fr->retx_src = TBT_RETX_NONE;
-    fr->path = 0xff;
+    fr->path = TBT_PATH_NONE;
     fr->avoid_mask = 0;
     fr->ret = NULL;
     fr->st = NULL;
@@ -163,6 +163,18 @@ static void tbt_tx_enqueue(struct tbt_session *sess, struct tbt_frame *fr, bool 
     spin_unlock(&sess->tx_lock);
 }
 
+/* The one way a frame names a carrier. A frame without a path (or with a
+ * stale index past the configured count) resolves to NULL; it is never
+ * allowed to index sess->car[] with a value that could be TBT_PATH_NONE or a
+ * number the session does not own. */
+static struct tbt_carrier *tbt_frame_carrier(struct tbt_session *sess,
+                                             const struct tbt_frame *fr)
+{
+    if (!sess || fr->path >= sess->n_car)
+        return NULL;
+    return READ_ONCE(sess->car[fr->path]);
+}
+
 /* True when this stream's OPEN was written on this exact carrier
  * (index, generation). OPEN announce, the pump's OPEN duplicate check and the
  * DATA gate use it; the scheduler still uses c->open_sent until S4. */
@@ -188,12 +200,13 @@ static struct tbt_hole *tbt_stream_holes_get_locked(struct tbt_stream *st)
 }
 
 /* Queue a frame pinned to one carrier. Used for HELLO, OPEN and the per-path
- * copies of FIN/RST. The path must be a valid index, or 0xff to mean "the
- * carrier that is being replaced", which the pump never sees. `st` is the
- * owning stream for OPEN/FIN/RST/SACK/FBK, or NULL for session-level HELLO,
- * PAD and RETIRE frames. */
+ * copies of FIN/RST. `path` is a carrier index below sess->n_car, or
+ * TBT_PATH_NONE for a frame the pump must refuse rather than misroute; the
+ * pump resolves it through tbt_frame_carrier(). `st` is the owning stream for
+ * OPEN/FIN/RST/SACK/FBK, or NULL for session-level HELLO, PAD and RETIRE
+ * frames. */
 int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
-                          u8 path, u8 type, u64 sid, u64 seq,
+                          u16 path, u8 type, u64 sid, u64 seq,
                           const u8 *body, u16 len, bool head, gfp_t gfp)
 {
     struct tbt_frame *fr = tbt_frame_alloc(len, gfp);
@@ -213,7 +226,7 @@ int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
         .sid_lo = (u32)sid,
         .seq = seq,
         .conv = TBT_CONV,
-        .path_id = path,
+        .path_id = (u8)path,
     };
     fr->hdr.sid_hi = (u8)(sid >> 32);
     if (len && body)
@@ -1928,8 +1941,7 @@ static bool tbt_tx_ctl_retry(struct tbt_session *sess, struct tbt_frame *fr,
     sess->ctl_retry++;
     sess->ctl_requeue++;
     fr->retry_at_ns = tbt_now_ns() + (u64)ms * NSEC_PER_MSEC;
-    if (fr->path < sess->n_car)
-        c = READ_ONCE(sess->car[fr->path]);
+    c = tbt_frame_carrier(sess, fr);
     tbt_tx_enqueue(sess, fr, true);
     tbt_tx_ctl_arm(sess, c, ms);
     sess->dbg_pump_hiwat++;
@@ -2003,7 +2015,7 @@ static void tbt_tx_ctl_written(struct tbt_session *sess, struct tbt_frame *fr)
 /* A RETIRE names its victim (index, generation) in the body; the carrier that
  * sends the notice is incidental. After that sender is replaced, move the
  * notice to another live carrier instead of dropping it. */
-static int tbt_tx_retire_alt(struct tbt_session *sess, u8 path)
+static int tbt_tx_retire_alt(struct tbt_session *sess, u16 path)
 {
     int i;
 
@@ -2041,6 +2053,24 @@ int tbt_tx_pump(struct tbt_session *sess)
     {
         mutex_unlock(&sess->pump_lock);
         return 0;
+    }
+    if (debug >= 1 && sess->n_car > 0xff && !sess->dbg_path_selftest_done)
+    {
+        struct tbt_frame probe = { .path = TBT_PATH_NONE };
+
+        /* At 256 slots 0xff names a real carrier. The sentinel must resolve
+         * to none, while 255 must still resolve to its own slot and the
+         * first out-of-range index to none: this is the exact bound every
+         * pinned FIN/RST copy relies on. Probe N treats any new warning as a
+         * failure, so a regression is visible instead of silently misrouting
+         * a frame to carrier 255. */
+        sess->dbg_path_selftest_done = true;
+        WARN_ON_ONCE(tbt_frame_carrier(sess, &probe) != NULL);
+        probe.path = 0xff;
+        WARN_ON_ONCE(tbt_frame_carrier(sess, &probe) !=
+                     READ_ONCE(sess->car[0xff]));
+        probe.path = sess->n_car;
+        WARN_ON_ONCE(tbt_frame_carrier(sess, &probe) != NULL);
     }
 
     {
@@ -2101,8 +2131,11 @@ int tbt_tx_pump(struct tbt_session *sess)
                 u64 now = tbt_now_ns();
 
                 if (fr->path >= sess->n_car)
+                {
+                    sess->dbg_pinned_bad_path++;
                     goto drop;
-                c = READ_ONCE(sess->car[fr->path]);
+                }
+                c = tbt_frame_carrier(sess, fr);
                 /* A replacement may be ready before the retry timer fires.
                  * Re-pin FIN/RST immediately: the generation change is the
                  * event that matters, not the timer. */
@@ -2153,7 +2186,7 @@ int tbt_tx_pump(struct tbt_session *sess)
 
                         if (alt >= 0)
                         {
-                            fr->path = (u8)alt;
+                            fr->path = (u16)alt;
                             fr->gen = READ_ONCE(sess->car[alt])->gen;
                             fr->retry_at_ns = 0;
                             sess->ctl_requeue++;
@@ -2186,7 +2219,7 @@ int tbt_tx_pump(struct tbt_session *sess)
 
                     if (alt >= 0)
                     {
-                        fr->path = (u8)alt;
+                        fr->path = (u16)alt;
                         fr->gen = READ_ONCE(sess->car[alt])->gen;
                         fr->retry_at_ns = 0;
                         sess->ctl_requeue++;
@@ -2440,7 +2473,7 @@ ctl_fail:
 
         list_for_each_entry_safe(fr, tmp, &batch, list)
         {
-            struct tbt_carrier *c = READ_ONCE(sess->car[fr->path]);
+            struct tbt_carrier *c = tbt_frame_carrier(sess, fr);
             u8 type = fr->hdr.type;
             int err;
 
@@ -2504,7 +2537,7 @@ ctl_fail:
                         tbt_tx_ctl_fail(sess, fr);
                         continue;
                     }
-                    fr->path = 0xff;
+                    fr->path = TBT_PATH_NONE;
                     fr->avoid_mask = BIT(c->index);
                     sess->dbg_pump_hiwat++;
                     if (fr->retx_copy)
@@ -2544,7 +2577,7 @@ ctl_fail:
                  * partial record on the dead carrier, which is harmless because
                  * that carrier is closed; the receiver gets the whole frame
                  * from the new path. */
-                fr->path = 0xff;
+                fr->path = TBT_PATH_NONE;
                 fr->avoid_mask = BIT(c->index);
                 tbt_tx_enqueue(sess, fr, false);
                 continue;
@@ -2954,7 +2987,7 @@ int tbt_tx_fbk(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
             !atomic_read(&sp->stopping))
         {
             fr->pinned = true;
-            fr->path = (u8)i;
+            fr->path = (u16)i;
             fr->gen = sp->gen;
             break;
         }
