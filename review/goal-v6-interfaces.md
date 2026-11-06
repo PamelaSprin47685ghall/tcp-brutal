@@ -818,6 +818,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **arm64 final ko（`cb23c64`）**：aarch64 6.1.172 clean build（0 warning/0 error，compiler-differs 提示除外）；ko `/root/tbtun-worktrees/arm64-build/tbtun.ko` sha256 `089f74f3…`、srcversion `E1096721…`、vermagic `6.1.172 SMP mod_unload modversions aarch64`；insmod/rmmod rc=0、`/proc/net/tbtun` 6 项出现/消失、load→unload 0 WARN/BUG/Oops；未建 tunnel/benchmark/HND0。`.65` 交 `t52-arm64` 跑 T5.2 256。
 
+**`.65` aarch64 b41b259 ko（`arm64-build-3`）**：ko `/root/tbtun-arm64-build-3/src/tbtun.ko` sha256 `3582ff9c…`、srcversion `8E699409…`、vermagic `6.1.172 SMP mod_unload modversions aarch64`；insmod/rmmod rc=0、0 WARN/UBSAN；`.65` 释放给 `t52-arm64-3`。HND0 far x86 b41b259 由 `t52-arm64-3` 部署。
+
 **fec-loss 修复合入（`849519b` → `0be41c0`）**：根因 `n4m4` parity 矩阵不是 covering code；splitmix64 每行选 4/8，某 DATA 被 4 行全漏概率 1/16，rank4 仅 35.7%；一个 DATA 丢失 + 4 parity 仍 rank0，block 卡住、`tx_ack` 停在 8MiB。修复：确定性 band（列 `c` 在行 `r` 当 `(c-r) mod m < band`，n4m4 band=3 补 identity；任意 ≤4 DATA erasure 可恢复，每 share 在 3 行），short tail zero-pad；**wire 不变，两端必须同 revision**。QEMU 256/16MiB/carrier0 down：byte-exact、`tx_ack` 满、c9 全 0、A–P 16/16；host 2563 checks/0。merge `0be41c0`（CHANGELOG/`tests/qemu/init` 冲突已解，`sh -n` + make check 绿）。最终 head 见下；arm64-build 重建，t52-arm64 用新 ko 跑最终 T5.2；`cb23c64` 的 T5.2 只是 preliminary。
 
 **T5.2 256 判读（t52-debug）**：c9 `fec_short_tx` 应随小包非零；`fec_short_unknown`/`fec_drop_window`/`fec_drop_crypto` 必须为 0；`fec_short_unknown` 增长 = 对端不是本 revision（`epoch` 未带短包长度）。c8 `http_req == http_resp == carrier 数`；不等时 debug>=1 打 `http <stage>`/`HELLO rejected`。c3 `connect_retry` 可非 0，`connect_fail` 必须 0；`-110 ETIMEDOUT` 才是真不可达。n>1 时空闲流首包延迟下限一个 block（n×8KiB）；256 `n=4/m=4` 只影响空闲首包时延，不影响吞吐。`epoch` 借用短包长度，两端必须同 revision。
