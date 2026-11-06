@@ -1333,9 +1333,25 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
     old = sess->car[index];
     if (old && old != c && !tbt_carrier_dead(old))
     {
-        sess->session_join_dup++;
-        spin_unlock(&sess->lock);
-        return -EALREADY;
+        /* A HELLO from a *newer* generation supersedes the slot. The near
+         * replaces a carrier as soon as its own bytes stop being acknowledged,
+         * which is often before this side has noticed anything wrong with the
+         * old socket: the old connection is still ESTABLISHED here while the
+         * near has already abandoned it and dialled the replacement. Refusing
+         * the newer generation made the near retry forever -- one ACCEPTED
+         * "awaiting HELLO" per second, join_dup climbing, and the replacement
+         * never usable (measured on the WAN: lost=18 replaced=19 join_dup=13
+         * in one short smoke). The generation is four bits and wraps, so
+         * "newer" is the usual half-range comparison; the same or an older
+         * generation is still a duplicate. */
+        u8 diff = (u8)((c->peer_gen - old->peer_gen) & 0xf);
+
+        if (!diff || diff >= 8)
+        {
+            sess->session_join_dup++;
+            spin_unlock(&sess->lock);
+            return -EALREADY;
+        }
     }
     /* The retired-object pool is a hard cap. A new carrier reuses an entry,
      * so in the normal replacement loop this never triggers; if it does, the

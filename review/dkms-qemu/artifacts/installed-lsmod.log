@@ -1,6 +1,0 @@
-tbtun 172032 0 - Live 0xffffffffc0431000 (OE)
-Module                  Size  Used by
-tbtun                 172032  0
-9p                     90112  2
-9pnet_virtio           24576  2
-9pnet                 110592  2 9p,9pnet_virtio

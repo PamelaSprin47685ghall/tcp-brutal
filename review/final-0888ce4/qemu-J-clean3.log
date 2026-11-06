@@ -1,3 +1,0 @@
-mkinitramfs: endpoint /home/kunweiz/tbtun-worktrees/window/host/tbt_burst
-mkinitramfs: busybox has no 'sh' applet; the guest cannot boot
-run.sh: initramfs build failed

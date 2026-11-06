@@ -1768,6 +1768,102 @@ probe_p_concurrent() {
     echo "   concurrent: the next connection was accepted"
 }
 
+# Two sequential 37-byte round trips on the default n=1 m=1 (2 carriers)
+# session: the second connection is the one the ladder's smoke loses. `$1` is
+# "off" or "on" for fec.
+probe_p_two37() {
+    _fec=$1
+    echo "   two37: two sequential 37-byte round trips, n=1 m=1 carriers=2 fec=$_fec"
+    flush_and_wait
+    restart_echo
+    echo 'ports 41088-41119' > "$PORTS" || fail "probe P: ports directive rejected"
+    _t="n=1 m=1 carriers=2 fec=$_fec profile=http-kal crypto=off dup=1 keepalive=5000 replay=8388608 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=1048576 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000"
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 $_t" \
+        > "$CFG" || fail "probe P: two37 far tunnel rejected"
+    echo "tunnel 2 role=near profile=http-kal listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT $_t" \
+        > "$CFG" || fail "probe P: two37 near tunnel rejected"
+    sleep 1
+    echo "   peers before:"; cat "$PEERS"
+    probe_ping_bounded "probe P two37 #1" 37 8 ||
+        fail "probe P two37 ($_fec): the first 37-byte round trip failed"
+    echo "   after #1:"; awk '$1 == "tunnel" && ($3 == "streams" || $3 ~ /^stream$/)' /proc/net/tbtun/stats
+    probe_ping_bounded "probe P two37 #2" 37 8 ||
+        fail "probe P two37 ($_fec): the second 37-byte round trip failed"
+    echo "   after #2:"; awk '$1 == "tunnel" && ($3 == "streams" || $3 ~ /^stream$/)' /proc/net/tbtun/stats
+    echo "   peers after:"; cat "$PEERS"
+    echo "   c6:"; awk '$1 == "tunnel" && $3 == "c6"' /proc/net/tbtun/stats
+    echo "   c3:"; awk '$1 == "tunnel" && $3 == "c3"' /proc/net/tbtun/stats | sed 's/ retx_data_ppm.*//'
+    echo "   two37 ($_fec): passed"
+}
+
+# The smallest possible smoke: one carrier, no FEC (the old ARQ data plane),
+# one 37-byte round trip. This is the shape the aarch64/HND0 ladder starts from,
+# and it uses a different data plane from the rest of probe P.
+probe_p_single() {
+    echo "   single: 1 carrier, fec=off, 37 bytes"
+    flush_and_wait
+    restart_echo
+    echo 'ports 41088-41119' > "$PORTS" || fail "probe P: ports directive rejected"
+    # The smoke's own knobs, only scaled to one carrier: dup=1 duplicates the
+    # DATA frame on a second path, and with one carrier that copy has nowhere to
+    # go, so this also covers the duplicate path's one-carrier case.
+    _s1="n=1 m=0 carriers=1 fec=off crypto=off dup=1 keepalive=5000 replay=8388608 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=1048576 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000"
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 $_s1" \
+        > "$CFG" || fail "probe P: 1-carrier far tunnel rejected"
+    echo "tunnel 2 role=near profile=http-kal listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT $_s1" \
+        > "$CFG" || fail "probe P: 1-carrier near tunnel rejected"
+    sleep 1
+    echo "   peers:"; cat "$PEERS"
+    probe_ping_bounded "probe P single" 37 5 ||
+        fail "probe P single: the 37-byte round trip failed on one carrier without FEC"
+    echo "   streams after:"; awk '$1 == "tunnel" && ($3 == "streams" || $3 ~ /^stream$/)' /proc/net/tbtun/stats
+}
+
+# The WAN's carrier-replacement storm: the near abandons a carrier as soon as
+# its own bytes stop being acknowledged, which can be before the far has
+# noticed anything wrong with that socket. Repeat the condition in a burst --
+# take carrier 0 down several times, faster than a WAN round trip -- and require
+# the session to keep working: the newer generation's HELLO must supersede the
+# slot instead of being refused as a duplicate join.
+probe_p_churn() {
+    echo "   churn: repeated carrier replacement during round trips"
+    flush_and_wait
+    restart_echo
+    echo 'ports 41088-41119' > "$PORTS" || fail "probe P: ports directive rejected"
+    # Two primary carriers and no spare: every down must *dial* a replacement,
+    # which is the case where the far still holds the old slot and the newer
+    # generation's HELLO has to supersede it.
+    _t="n=2 m=0 carriers=2 fec=off profile=http-kal crypto=off dup=1 keepalive=5000 replay=8388608 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=1048576 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000"
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 $_t" \
+        > "$CFG" || fail "probe P: churn far tunnel rejected"
+    echo "tunnel 2 role=near profile=http-kal listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT $_t" \
+        > "$CFG" || fail "probe P: churn near tunnel rejected"
+    sleep 1
+    probe_ping_bounded "probe P churn warmup" 37 8 ||
+        fail "probe P churn: the warmup round trip failed"
+    _dup0=$(tunnel_stat 1 join_dup)
+    _n=0
+    while [ "$_n" -lt 6 ]; do
+        # The slot is briefly NULL while a replacement is installed; a refused
+        # action is part of the churn, not a probe failure.
+        echo 'carrier 0 down' > "$PEERS" 2> /dev/null || true
+        sleep 0.2
+        _n=$((_n + 1))
+    done
+    sleep 2
+    probe_ping_bounded "probe P churn after" 37 10 ||
+        fail "probe P churn: the round trip failed after the replacement burst"
+    _dup1=$(tunnel_stat 1 join_dup)
+    echo "   churn: far join_dup ${_dup0:-0} -> ${_dup1:-0}"
+    echo "   churn: near c3 $(awk '$1 == "tunnel" && $3 == "c3"' /proc/net/tbtun/stats | sed 's/ retx_data_ppm.*//')"
+    echo "   churn: far  c3 $(awk '$1 == "tunnel" && $3 == "c3"' /proc/net/tbtun/stats | sed 's/ retx_data_ppm.*//')"
+    # Six replacements inside one WAN round trip: the far may refuse a couple as
+    # duplicates, but it must not refuse them all -- that is the storm.
+    [ "${_dup1:-0}" -le 4 ] ||
+        fail "probe P churn: far join_dup reached ${_dup1:-0}; newer generations were refused instead of superseding the slot"
+    echo "   churn: passed"
+}
+
 probe_p() {
     echo "== probe P: small message round trip, socket left open"
     _bad=0
@@ -1780,6 +1876,10 @@ probe_p() {
     # HELLO, so the flush is exercised with crypto on.
     probe_p_one 37 "$P_CFG_CRYPTO" ||
         fail "probe P: 37 bytes did not come back with crypto=on"
+    probe_p_single
+    probe_p_two37 off
+    probe_p_two37 on
+    probe_p_churn
     probe_p_two
     probe_p_concurrent
     probe_p_http
