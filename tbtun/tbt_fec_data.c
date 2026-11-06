@@ -404,6 +404,24 @@ static void tbt_fec_packetize(struct tbt_session *sess, bool last)
         tbt_fec_tx_finish(sess);
 }
 
+/* The peer's ACK grants `credit` packets beyond the frontier it has delivered.
+ * The receiver buffers `slots * groups * n` packets ahead of delivery, and the
+ * credit is the same number, so a sender that respects it can never outrun the
+ * buffer. Before this was enforced the packetizer ran as far ahead as the
+ * carriers would carry it, the receiver dropped 1527 shares as "too far ahead"
+ * (fec_drop_window), and the blocks they belonged to could never complete: the
+ * stream stalled with the application's bytes still in the ring. */
+static bool tbt_fec_tx_credit_ok(const struct tbt_fec_tx *tx)
+{
+    u64 acked = READ_ONCE(tx->peer_pkts);
+    u64 seq = READ_ONCE(tx->seq);
+    u32 credit = READ_ONCE(tx->credit);
+
+    if (!credit)
+        return true;
+    return seq - acked < (u64)credit;
+}
+
 static bool tbt_fec_tx_is_idle(struct tbt_session *sess)
 {
     struct tbt_fec_tx *tx = sess->fec_tx;
@@ -460,15 +478,17 @@ void tbt_fec_tx_work(struct work_struct *w)
         spin_unlock(&tx->lock);
         if (got)
         {
-            if (tx->fill == TBT_FEC_S)
+            if (tx->fill == TBT_FEC_S && tbt_fec_tx_credit_ok(tx))
                 tbt_fec_packetize(sess, false);
             continue;
         }
-        if (tx->fill == TBT_FEC_S)
+        if (tx->fill == TBT_FEC_S && tbt_fec_tx_credit_ok(tx))
         {
             tbt_fec_packetize(sess, false);
             continue;
         }
+        if (tx->fill == TBT_FEC_S)
+            break; /* the peer's credit is exhausted: wait for its ACK */
         if (READ_ONCE(tx->flush_req) && tx->head == tx->tail)
         {
             if (tx->fill)
@@ -530,7 +550,7 @@ void tbt_fec_tx_work(struct work_struct *w)
             mod_delayed_work(system_wq, &sess->w_fec_tx,
                              msecs_to_jiffies(TBT_FEC_SHORT_MS));
         }
-        else if (now >= tx->short_at_ns)
+        else if (now >= tx->short_at_ns && tbt_fec_tx_credit_ok(tx))
         {
             tbt_fec_packetize(sess, false);
             if (!completes)
@@ -740,7 +760,15 @@ static void tbt_fec_ack(struct tbt_session *sess, u64 next_deliver)
 
     memset(&a, 0, sizeof(a));
     a.next_deliver = next_deliver;
-    a.credit_packets = 1024;
+    /* The receiver buffers `slots` super-blocks; the credit must not exceed
+     * that window, or the sender would overrun it and its shares would be
+     * dropped as "too far ahead". */
+    a.credit_packets = (u32)min_t(u64,
+                                  (u64)sess->fec_rx->slots * sess->fec_rx->groups *
+                                      sess->fec_rx->n,
+                                  1024);
+    if (!a.credit_packets)
+        a.credit_packets = 1;
     if (tbt_fec_ack_pack(&a, body))
         return;
     memset(&h, 0, sizeof(h));
@@ -995,6 +1023,13 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                 sess->last_ack_ns = st->last_ack_ns;
             }
             spin_unlock(&sess->lock);
+            /* Flow control: the peer has delivered up to this packet, and
+             * grants the credit it sent. Wake the packetizer, which may have
+             * stopped at the window. */
+            WRITE_ONCE(sess->fec_tx->peer_pkts, a.next_deliver);
+            if (a.credit_packets)
+                WRITE_ONCE(sess->fec_tx->credit, a.credit_packets);
+            schedule_work(&sess->w_fec_tx.work);
             tbt_stream_put(st);
             /* The FIN pump holds the close until tx_ack covers tx_seq. */
             tbt_tx_wake(sess);
@@ -1229,6 +1264,9 @@ int tbt_fec_data_init(struct tbt_session *sess)
     tx->ring_size = TBT_FEC_TX_RING;
     tx->nonce = tbt_fec_base_nonce(sess);
     tx->groups = groups;
+    /* Until the first ACK arrives the sender may run one window ahead; the
+     * receiver's first ACK replaces this with its own window size. */
+    tx->credit = 1024;
     tx->n = n;
     tx->m = m;
     tx->s = TBT_FEC_S;

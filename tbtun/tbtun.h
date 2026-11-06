@@ -378,14 +378,20 @@ struct tbt_stream
                                * runs from here and from the last ack, so a
                                * slow but progressing drain is not cut short */
     u64 close_fin_written_ns; /* our FIN reached the wire: the peer-FIN bound */
-    unsigned long tx_fin_mask;     /* carriers that already have a FIN copy */
-    unsigned long tx_fin_inflight; /* FIN copies queued, not yet written/dropped */
+    /* These are indexed by carrier, and a FEC v6 session has up to 256
+     * carriers: one `unsigned long` or a `[16]` array would write past itself
+     * at index 16..255 and corrupt whatever follows in the struct (measured:
+     * `announced_gen[c->index]` overwrote tx_paused with a carrier generation,
+     * so every `READ_ONCE(st->tx_paused)` load read an invalid _Bool, the
+     * announce check failed forever, and the stream never delivered). */
+    DECLARE_BITMAP(tx_fin_mask, TBT_MAX_CARRIERS_LIMIT);
+    DECLARE_BITMAP(tx_fin_inflight, TBT_MAX_CARRIERS_LIMIT);
     bool tx_rst_written;      /* at least one RST copy reached the wire */
-    unsigned long tx_rst_mask;     /* carriers that already have an RST copy */
-    unsigned long tx_rst_inflight; /* RST copies queued, not yet written/dropped */
+    DECLARE_BITMAP(tx_rst_mask, TBT_MAX_CARRIERS_LIMIT);
+    DECLARE_BITMAP(tx_rst_inflight, TBT_MAX_CARRIERS_LIMIT);
     bool tx_open_sent;        /* tbt_tx_announce() ran before capture attached */
-    u16 announced_mask;       /* carriers whose OPEN for this stream was written */
-    u8 announced_gen[16];     /* generation of each announced carrier */
+    DECLARE_BITMAP(announced_mask, TBT_MAX_CARRIERS_LIMIT);
+    u8 announced_gen[TBT_MAX_CARRIERS_LIMIT]; /* generation per announced carrier */
     bool tx_paused;           /* session queue full: stop draining this socket */
     u64 tx_start_ns;          /* first frame queued for this stream */
     struct tbt_sched sched;   /* DATA/stream-control path selection */
@@ -518,6 +524,11 @@ struct tbt_fec_tx
     u8 *rec; /* TBT_FEC_REC_MAX: one complete record */
     u16 fill;
     u64 seq; /* next global packet seq */
+    /* Flow control, from the peer's ACK: the delivered packet frontier and the
+     * credit it grants beyond it. The receiver buffers `slots` super-blocks, so
+     * a sender that stays inside the credit cannot outrun that buffer. */
+    u64 peer_pkts;
+    u32 credit;
     bool flush_req;
     /* When the packetizer may emit the partial packet it holds. Set when the
      * ring ran dry with bytes in `pkt`, cleared when it emits. 0 = not armed. */
