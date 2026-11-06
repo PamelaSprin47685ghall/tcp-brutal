@@ -386,7 +386,7 @@ FEC payload（DATA/PARITY）      加密
 
 **已裁决（§9.1）**：目标合同写「FEC_CFG 明文下发 key」；B 的冻结基线把 key 放 HELLO 层，FEC_CFG 固定 32B，不新增 `0x36`。Main 维持 B 方案，记录为等价偏差（每会话明文 key、只混淆不认证）；B/C 不改 ABI。
 
-HELLO v6 body（`type=0x22`，`conv=0x1001`，固定 66 B）：
+HELLO v6 body（`type=0x22`；**实现用旧 32B 头 `conv=0x0005` + 66B/ver2 body**；T0 原写 `conv=0x1001`，见 §9 偏差记录；固定 66 B）：
 
 | 偏移 | 大小 | 字段 |
 |---:|---:|---|
@@ -725,6 +725,12 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 **T2 grouped 合入 / T2 完成（`0c90f0a`）**：`w-fec-grouped aec862e` 合入 master（merge `0c90f0a`），make check 绿（fec **1725**、portmap 33999、http 257）；grouped 32×8 数据面、`carrier→group/share` 映射、组窗口/RX 超块有序交付、全局 ACK、短末块；QEMU A–N **14/14 PASS**，probe N http-kal grouped `n=4/m=4 carriers=16`（2×8）1MiB×2 双向 byte-exact，L/M 单组仍过。**T2 parent 完成**（fixed grouped；dynamic M 作为 T5/T6 风险）。已知限制：无 NACK/FEC retx、`FEC_FBK` 不驱动 M 自适应、256 live 未跑（T5.2）。**T5.2 GO：fixed `n=4/m=4`、http-kal、crypto on、256 carriers。**
 
 **T5.2 起跑前置（2026-11-06）**：integration master `7045868` 尚无 w-crypto（`tbtun/tbt_crypto.*` 不存在），`crypto=on` 不会真正加密；**T5.2 暂停起跑**。C 需把 integration merge 进 `w-crypto`（33238ca 基于 0db5166），接 FEC TX/RX body 路径（TX `seal→body_xor`、RX `body_xor→verify`；控制帧跳过；per-direction nonce；HTTP 头明文），跑 make check/host/SAN/lint，报新 head；F 再合入 integration 并给 E 新 head。T5.2 等 crypto 合入。
+
+**T3 crypto 合入 integration（`0d11710`）**：`w-crypto 63c0a83` 合入 master（merge `0d11710`），make check 绿（`test_crypto` 59 PASS、fec 1725、portmap 33999、http 257、SAN/lint 绿）；ChaCha8 进 FEC v6 data plane；`crypto=on` + `fec=off` → `-EINVAL`；HELLO body 66B/ver2、key_id/nonce/key；per-direction nonce；PARITY 的 `share_index` 混入 nonce；TX `seal→body_xor`、RX `body_xor→verify`；会话销毁 wipe。
+
+**HELLO conv 偏差（T0 记录）**：HELLO 仍是 **32B 头/`conv=0x0005` + 66B/ver2 body**；FEC record 仍 `0x1001`；不改 `tbt_hdr_check`。T0 §2.3 原写 HELLO `conv=0x1001`，现按实现记录为偏差（HELLO 用旧 conv，body 版本 2），两端同实现可用；若要严格 0x1001，需另开 ABI 变更。
+
+**T5.2 GO（新 master）**：crypto 已合入；E 先用小 `fec=on crypto=on` 隧道 smoke（HELLO 66B/ver2、key 交换、`fec_payload_crc_fail` 不增长），再跑 256 http-kal/1G；`crypto_key=` 两端不一致不会在 HELLO 报错，只会 payload CRC 丢 share。
 
 ### G3 — T3 ChaCha8（C）
 
