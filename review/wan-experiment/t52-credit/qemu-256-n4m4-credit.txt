@@ -67,3 +67,22 @@ Baseline note: unmodified 42ed56f also crossed 16 MiB in this QEMU shape
 wrong (zero credit read as open, ACK pinned to the lowest carrier, frontier
 allowed to move backwards, tail flushed past the window) and makes ACK cadence
 and window stalls observable; it does not claim a QEMU throughput change.
+
+Merge rehearsal (f356d78 + 1a33e6e, patch applied 3-way, not committed)
+=======================================================================
+`git merge-tree --write-tree 22ae6a4 f356d78` -> rc=0, tree 0d6f9e32, no
+conflicts. The merge of c948e88 (FEC share reroute on carrier loss) and this
+branch was then materialised in a throwaway worktree from f356d78, the same
+diff applied with `git apply -3`, and the module built there
+(srcversion F28316AA3944AD9CF4A0E44):
+
+  16 MiB: 16777216 sent, 16777216 back, byte for byte, 370 ms,
+          43.2 MiB/s each way, cpu 73%, ack_tx/ack_rx=16, credit_wait=0,
+          c9 all other 0, 0 new warnings.
+  8 MiB:  8388608 sent, 8388608 back, byte for byte, 180 ms,
+          44.4 MiB/s each way, cpu 84%, ack_tx/ack_rx=8, credit_wait=0,
+          c9 all other 0, 0 new warnings.
+
+c948e88 changes the DATA branch of tbt_fec_out_try and the RX share check; the
+ACK branch added here is disjoint and both ends still place shares by header.
+The throwaway worktree was removed; no merge was made on w-t52-credit.
