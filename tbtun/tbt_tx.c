@@ -748,7 +748,7 @@ static u64 tbt_tx_rto_ns(struct tbt_session *sess, struct tbt_stream *st)
  * take sess->lock or call back into the carrier. */
 static void tbt_tx_path_lost_stream(struct tbt_session *sess,
                                     struct tbt_stream *st,
-                                    unsigned long mask)
+                                    const unsigned long *mask)
 {
     struct tbt_retain *r;
 
@@ -762,9 +762,12 @@ static void tbt_tx_path_lost_stream(struct tbt_session *sess,
          * so drop the bit; otherwise tbt_retain_received() skips exactly the
          * frames that must be re-sent (measured: probe C's receiver hole
          * waited out its 500 ms budget after carrier 0 was replaced). */
-        r->path_mask &= ~(u16)mask;
-        r->reserve_mask &= ~(u16)mask;
-        if (r->last_path < 16 && (mask & BIT(r->last_path)) && r->sends &&
+        /* The retention masks are 16 bits wide and only the old ARQ uses
+         * them; the parser refuses `fec=off` above 16 carriers, so a lost path
+         * index is always inside them. */
+        r->path_mask &= ~(u16)(mask[0] & 0xffff);
+        r->reserve_mask &= ~(u16)(mask[0] & 0xffff);
+        if (r->last_path < 16 && test_bit(r->last_path, mask) && r->sends &&
             r->seq + r->len > READ_ONCE(st->tx_ack))
             r->retx_now = true;
     }
@@ -776,9 +779,9 @@ static void tbt_tx_path_lost_stream(struct tbt_session *sess,
  * walked later, outside the atomic context. */
 void tbt_tx_path_lost(struct tbt_session *sess, u8 index)
 {
-    if (index >= sess->n_car)
+    if (index >= sess->n_car || index >= TBT_MAX_CARRIERS_LIMIT)
         return;
-    set_bit(index, &sess->path_lost_mask);
+    set_bit(index, sess->path_lost_mask);
     tbt_fbk_kick(sess, true);
 }
 
@@ -787,10 +790,18 @@ void tbt_tx_path_lost(struct tbt_session *sess, u8 index)
 static void tbt_tx_path_lost_drain(struct tbt_session *sess,
                                    struct tbt_stream **snap, int n)
 {
-    unsigned long mask = xchg(&sess->path_lost_mask, 0);
+    DECLARE_BITMAP(mask, TBT_MAX_CARRIERS_LIMIT);
+    unsigned long flags;
     int i;
 
-    if (!mask)
+    /* Snapshot and clear in one critical section: `set_bit` in the loss path is
+     * atomic, so a bit that lands between the copy and the clear would be
+     * lost, and the frames it protects would wait for the next FBK tick. */
+    spin_lock_irqsave(&sess->tx_lock, flags);
+    bitmap_copy(mask, sess->path_lost_mask, TBT_MAX_CARRIERS_LIMIT);
+    bitmap_zero(sess->path_lost_mask, TBT_MAX_CARRIERS_LIMIT);
+    spin_unlock_irqrestore(&sess->tx_lock, flags);
+    if (bitmap_empty(mask, TBT_MAX_CARRIERS_LIMIT))
         return;
     for (i = 0; i < n; i++)
         tbt_tx_path_lost_stream(sess, snap[i], mask);
@@ -2369,9 +2380,13 @@ int tbt_tx_pump(struct tbt_session *sess)
             {
                 struct tbt_retain *r = fr->ret;
 
-                if (fr->dup_copy && ((r->path_mask | r->reserve_mask) & BIT(c->index)))
-                    sess->dup_same_path++;
-                r->reserve_mask |= BIT(c->index);
+                if (c->index < 16)
+                {
+                    if (fr->dup_copy &&
+                        ((r->path_mask | r->reserve_mask) & BIT(c->index)))
+                        sess->dup_same_path++;
+                    r->reserve_mask |= BIT(c->index);
+                }
             }
             fr->path = c->index;
             if (fr->retx_copy)
@@ -2599,9 +2614,17 @@ ctl_fail:
                     /* Every DATA record the carrier accepted, copies
                      * included: the honest retransmit denominator. */
                     sess->data_tx++;
-                    r->path_mask |= BIT(c->index);
-                    r->reserve_mask &= ~BIT(c->index);
-                    r->path_gen[c->index] = c->gen & 0xf;
+                    /* The retention bookkeeping is 16 slots wide and only the
+                     * old ARQ fills it (the parser refuses fec=off above 16
+                     * carriers). Guard the index anyway: a FEC v6 frame that
+                     * ever reached this path with carrier 16..255 would write
+                     * past path_gen[] into the neighbouring fields. */
+                    if (c->index < 16)
+                    {
+                        r->path_mask |= BIT(c->index);
+                        r->reserve_mask &= ~BIT(c->index);
+                        r->path_gen[c->index] = c->gen & 0xf;
+                    }
                     /* The mark is the byte just past this record. A short
                      * write left its tail in c->part, and xmit still reported
                      * success, so those bytes are not in TCP yet: count them,
@@ -2609,9 +2632,10 @@ ctl_fail:
                      * handed over and the RTO fires on a frame still in our
                      * own buffer. The injector wrote nothing, so its mark is
                      * where snd_nxt stood when it dropped the frame. */
-                    r->first_sent_seq[c->index] = fr->dropped
-                        ? c->drop_snd_nxt
-                        : READ_ONCE(tcp_sk(c->sk)->write_seq) + c->part_len;
+                    if (c->index < 16)
+                        r->first_sent_seq[c->index] = fr->dropped
+                            ? c->drop_snd_nxt
+                            : READ_ONCE(tcp_sk(c->sk)->write_seq) + c->part_len;
                     r->una_observed_ns[c->index] = 0;
                     if (fr->retx_copy)
                     {

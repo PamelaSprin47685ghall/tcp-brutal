@@ -63,7 +63,7 @@ MIB=${TBT_ENDPOINT_MIB:-1}
 C_MIB=${TBT_C_MIB:-1}
 L_BYTES=${TBT_L_BYTES:-262144}
 
-N_MIB=${TBT_N_MIB:-8}
+N_MIB=${TBT_N_MIB:-16}
 # 16 by default; the production shape is 256 (32 groups of 8).
 N_CARRIERS=${TBT_N_CARRIERS:-256}
 # The transfer phase and the flow-control window, so the 256-carrier data path
@@ -1193,8 +1193,22 @@ probe_n() {
     echo "   tunnels:"; cat /proc/net/tbtun/tunnels
     echo "   peers:"; cat "$PEERS"
     _warn0=$(dmesg | grep -c "WARNING:\|UBSAN:" || true)
+    # Rate and CPU for the transfer: a 256-carrier run is judged on both, and a
+    # number without the guest's own load cannot tell a window limit from a
+    # CPU limit.
+    _t0=$(cut -d' ' -f1 /proc/uptime)
+    _cpu0=$(awk '/^cpu /{b = $2 + $3 + $4 + $7 + $8; i = $5 + $6; print b, i}' /proc/stat)
     /bin/tbt_burst 127.0.0.1 "$PUB_PORT" "$N_MIB" "${TBT_ENDPOINT_TIMEOUT:-60}" "$N_MODE"
     rc=$?
+    _t1=$(cut -d' ' -f1 /proc/uptime)
+    _cpu1=$(awk '/^cpu /{b = $2 + $3 + $4 + $7 + $8; i = $5 + $6; print b, i}' /proc/stat)
+    _ms=$(awk -v a="$_t0" -v b="$_t1" 'BEGIN { printf "%.0f", (b - a) * 1000 }')
+    _rate=$(awk -v m="$_ms" -v mib="$N_MIB" 'BEGIN { printf "%.1f", (m > 0 ? mib * 1000 / m : 0) }')
+    _cpu=$(awk -v a="$_cpu0" -v b="$_cpu1" 'BEGIN {
+        split(a, x, " "); split(b, y, " ");
+        busy = y[1] - x[1]; idle = y[2] - x[2];
+        printf "%.0f", ((busy + idle) > 0 ? busy * 100 / (busy + idle) : 0) }')
+    echo "   rate: ${_ms} ms, ${_rate} MiB/s each way, guest cpu ${_cpu}%"
     echo "   stats after: $(cat /proc/net/tbtun/stats)"
     case $rc in
     0) ;;
