@@ -1,0 +1,7 @@
+t52-256 preflight 2026-11-06T08:58:45Z
+repo HEAD e56809baae9fe1136d8763fa033b75208a0ea93c
+local ko 053de915e15d4910005cfb8e3955dd3e2ae2f0133b601b5e6f336a82e5793e52  /home/kunweiz/Desktop/vibe/tcp-brutal/tbtun.ko
+local srcversion 9EBC61C0CAE6D46A36F17B4
+local sysctl rmem_max=4194304 wmem_max=4194304
+local modules: 0
+local listeners 9001: 0

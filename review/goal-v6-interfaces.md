@@ -746,6 +746,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **T5.2 256 首跑（2026-11-06）**：integration `9a1dacb`/product `4db804f`；256 carriers `up=256`、`http_parse_err=0`、`connect_fail=0`、`port_exhaust=0`；但 `tbt_burst` 16MiB/10s **rc=2、recvd=0 EAGAIN**；near `submit=16MiB`、`tx_ack=5,242,880`、`wire=33.8MB`、c3 `up=254 lost=18 replaced=18 connect_retry=57 stall_declared=13`；far `submit=5,242,880`、`tx_ack=2,097,152`、c3 `up=256 lost=15 join_dup=2`、**`fec_drop_window=1527`**；c8 near `req=274/resp=0`、far `resp=273`；CPU near 8.5%/far 11.8%；dmesg `tbt_tx.c:2570` WARN_ON（pre-existing OPEN announce race，baseline 也有）。失败在 **FEC window/数据路径**（`fec_drop_window`），不是 carrier 建立/HTTP parser。E hold；`t52-256` 诊断。证据 `256-burst-*`。
 
+**T5.2 根因假设（2026-11-06）**：far `tx_window=1MiB` < `k×BDP` 2.26MB（`fec_drop_window=1527`≈2.3MB），加上 `tbt_burst` 先跑 strict send-then-read。`t52-256` 决定不重复 HND0 256；QEMU 复现/修由 `t52-debug` 负责；等其修复/参数（**4–8MiB W、interleaved**）再决定重跑。E hold，不跑 256。
+
 **T5.2 256 判读（t52-debug）**：c9 `fec_short_tx` 应随小包非零；`fec_short_unknown`/`fec_drop_window`/`fec_drop_crypto` 必须为 0；`fec_short_unknown` 增长 = 对端不是本 revision（`epoch` 未带短包长度）。c8 `http_req == http_resp == carrier 数`；不等时 debug>=1 打 `http <stage>`/`HELLO rejected`。c3 `connect_retry` 可非 0，`connect_fail` 必须 0；`-110 ETIMEDOUT` 才是真不可达。n>1 时空闲流首包延迟下限一个 block（n×8KiB）；256 `n=4/m=4` 只影响空闲首包时延，不影响吞吐。`epoch` 借用短包长度，两端必须同 revision。
 
 **T5.2 retest 失败（`db575ea`/`8a3589d`，2026-11-06）**：37B cookie 可过（`fec_short_tx=3/19`），但 8MiB 数据流停：near `submit=207`、`tx_ack=37`、`data_tx=0`、`capture_runs=4/actor_calls=3`；far `rx_delivered=207`、`rx_ack=0`、`tx_ack=1`；near `CLOSETIMEOUT` 15s（`ack=37 txseq=167`；另一流 `ack=0 txseq=37`）；c9 proto/hdr/payload=0、short_unknown/drop=0；c8 near `req=2/resp=0`、far `resp=2/4`；c3 `up=2 lost=0/2 connect_fail=0`。短包 flush 生效；剩余在 **http-kal 数据块封装/发送路径**（cookie 后 app 数据未进隧道）。E hold；`t52-debug` 继续。证据 `smoke-8M-crypto-off-*`、`smoke-P-crypto-off*`。
@@ -820,7 +822,7 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 | 通过 | G4 全绿；G5 全绿；app ≥33.72M；无 RLNC/grouped 兜底；服务恢复；最终门 |
 | 失败 | 任何中间码回退、G4 未过、HND0 不达标 |
 
-**T6 状态：阻塞。** HND0 SC-LDPC decode 0.32–1.99 MB/s < app 4.215、encode 2.65–9.54 < wire 8.4–14.1；G4 不修订，等用户 B/C 裁决，不合并 SC-LDPC。
+**T6 状态：等待用户口径。** HND0 SC-LDPC decode 0.32–1.99 MB/s < app 4.215、encode 2.65–9.54 < wire 8.4–14.1；G4 不修订。**2026-11-06 新指令**：上行允许 **grouped SC-LDPC 4-bit 码**，本地原型 `w-sclc-gf16`（worktree `sclc-gf16`）；`w-sclc-*` 暂不合。T6 等用户确认目标是 **1G/125 MB/s** 还是 **app 33.72M**，再决定 B/C；不合并 SC-LDPC。
 
 ### G7 — T7 文档/0.0.2/合并 push（F）
 
