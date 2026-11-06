@@ -744,6 +744,8 @@ rx_reorder_bytes tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
 
 **Single-stream limit（S1，2026-11-06）**：FEC v6 数据面**一 tunnel 一 app stream**（S1；256 flows = carrier）。FEC 头无 sid；两条并发 live app stream 会把字节混给同一 far stream。修复 `4e46578`：第二条 live stream 立即 reset + `fec_stream_refused`；已 close 的流不阻挡下一条（顺序连接可）。**iperf3 固定 control+data 两条并发连接，超出 v6 范围，T5.2 不用**；改用单连接 `tbt_burst`（8–16MiB）与 `tbt_ping`（小消息）。多流 stream tag 记 T5.3 设计项。
 
+**T5.2 256 失败 + HND0 失联（2026-11-06）**：integration `b4894ef`/product `85f2011`；第一次 256（near ports 40000-44095）peers 256 行但 c3 `up=16 lost=8864 replaced=8851 connect_fail=22 connect_retry=2440`；c8 `http_req=8880 http_resp=0 http_parse_err=8864`；c9=0。第二次（near ports 30000-34095）256 carriers 全 `-110 ETIMEDOUT`；c3 `up=0 connect_fail=1536 connect_retry=4608`；c9=0。随后 HND0 不可达：ping 100% loss；SSH 从 timeout 变 `Connection closed by 45.11.1.62 port 22`（22 有 TCP 响应但立即关闭，疑似重启/sshd/云 RST）；本机网络正常（1.1.1.1 通，出口 IP `171.120.34.226`→`38.59.230.115`）。本机已清理；HND0 上 tbtun/tbt-echo/64MiB sysctl 未清理（重启则 sysctl 自动恢复）。**T5.2 256 暂停，等云控制台确认 HND0；不直接重试；建议限制拨号速率/分批建立。** 证据 `256-attempt-near-fail.txt`。
+
 **T5.2 smoke 失败（2026-11-06，blocked）**：integration `f32c03a`（crypto `0d11710`）；小 smoke `n=1/m=1/carriers=2/http-kal/crypto=on` 失败：near c3 `up=1 lost=27 replaced=27 connect_fail=41`，carrier 0 `connecting`、`failed to connect: -115`（EINPROGRESS）反复重拨；far `carrier ACCEPTED ... awaiting HELLO`，HELLO 未完成；near `http_req=28/http_resp=0`，far `http_req=0/http_resp=1`、`rx_proto=27/rx_errs=27 rx_last_err=-71`。**256 未跑；E hold**。已开 `t52-debug`（`w-t52-debug` from f32c03a）在 QEMU 复现/修。证据 `review/wan-experiment/t5.2-256-http-kal/`。T5.2 blocked。
 
 **T5.2 修复（`w-t52-debug 7b7965f`）**：两个根因：① crypto HELLO key ownership——far 采纳 near key 后仍把本地 key 当权威，后续 carrier `key_id=1` 被 `-EPROTO` 拒；加 `crypto_key_peer`，`resolve_key` 改 `local_key_wins`，采纳 key 与后续 HELLO 比较。② `kernel_connect` 超时返回 `-EINPROGRESS`(-115) 被当失败重拨；`tbt_connect_bounded()` 在 4s 内重入等待，`connect_retry` 计数。QEMU B,C,N,O PASS：probe N n=4/m=4 carriers=16 http-kal crypto=on `up=16`、`http_req=16/http_resp=16`、1MiB byte-exact；probe O smoke phases off/on/replace/slow 全 byte-exact、`connect_retry=2/connect_fail=0`；新增 c9 `fec_proto_fail`/`fec_hdr_crc_fail`/`fec_payload_crc_fail`。已合入 integration **`9f66fba`**，make check 绿。**T5.2 GO（新 master）**。
@@ -859,6 +861,7 @@ trap 'flock -u 9' EXIT
 | R9 | **key 明文/无认证** | HELLO 明文下发 key；CRC 不是 MAC | 文档写明只混淆；需要安全用 WireGuard；不做强安全承诺 |
 | R10 | **多流** | v6 一隧道一 stream；第二 stream 无 FEC 状态 | 第二 stream RST/拒绝并计数；多流留 v7；不静默塞 `block_id` |
 | R11 | **carrier 重建/HELLO 重拨窗口** | 每轮重载模块变体 attempt-1 3/5、attempt-2 1/5；失败 far `lost=1` + klog `carrier ACCEPTED ... rport=30000`（near HELLO 超时重拨）；数据仍 16MiB/EOF | 主 5x spec 不重建 carrier，故 5/5 成立；单独 ticket 跟踪，不纳入 T1 门禁 |
+| R12 | **256 并发拨号压垮 HND0/被封** | 第一次 up=16/256、http_parse_err=8864；第二次全 `-110`；随后 HND0 ping 100% loss/SSH closed；本机网络正常、出口 IP 变化 | 暂停 256；云控制台确认/恢复；限制拨号速率、分批建立、保留回滚；未确认前不重试 |
 
 ---
 
