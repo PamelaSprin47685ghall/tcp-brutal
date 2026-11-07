@@ -879,6 +879,8 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess, u16 group,
     struct tbt_fec_hdr h;
     u64 last_seq;
     u16 rec_len, i;
+    int st;
+    int err;
 
     if (!ctx || !win_len || win_len > tx->n)
         return;
@@ -908,16 +910,26 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess, u16 group,
             continue;
         WRITE_ONCE(tx->last_group, group);
         WRITE_ONCE(tx->last_share, (u16)(tx->n + i));
+        st = -EINVAL;
         if (tx->replay)
         {
             spin_lock_bh(&tx->replay_lock);
-            tbt_fec_replay_store(tx->replay, block_id, group,
-                                 (u16)(tx->n + i), tx->rec, rec_len);
+            st = tbt_fec_replay_store(tx->replay, block_id, group,
+                                      (u16)(tx->n + i), tx->rec, rec_len);
             spin_unlock_bh(&tx->replay_lock);
         }
-        tbt_fec_send_record(sess,
-                            (u16)(group * (tx->n + tx->m) + tx->n + i),
-                            tx->rec, rec_len, false, false);
+        err = tbt_fec_send_record(sess,
+                                  (u16)(group * (tx->n + tx->m) + tx->n + i),
+                                  tx->rec, rec_len, false, false);
+        if (debug >= 2)
+            pr_info("tbtun: fec parity tx block=%llu group=%u parity=%u win_len=%u epoch=%u store=%d send=%d\n",
+                    block_id, group, i, win_len, h.epoch, st, err);
+        if (err)
+        {
+            /* The ring keeps the parity; the peer's NACK probe can replay it.
+             * Re-arm so a transient queue failure is not silent. */
+            tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
+        }
     }
 }
 
@@ -1005,6 +1017,11 @@ static void tbt_fec_tx_close_block(struct tbt_session *sess, bool advance)
         struct tbt_fec_gtx *g = &tx->g[group];
         u16 len = g->nreal;
 
+        if (debug >= 2)
+            pr_info("tbtun: fec close block=%llu group=%u gblk=%llu nreal=%u path=%s\n",
+                    block_id, group, g->blk_id, len,
+                    g->blk_id != block_id ? "empty" :
+                    (len && len < tx->n ? "parity" : "skip"));
         if (g->blk_id != block_id)
         {
             tbt_fec_tx_emit_empty(sess, group, block_id);

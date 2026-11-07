@@ -73,6 +73,13 @@ and moves independently of the module version.
 
 ### Fixed
 
+- FEC parity send at block close: `tbt_fec_tx_emit_parity()` discarded
+  `tbt_fec_send_record()`'s return, so a failed parity send was silent and the
+  receiver waited for a shape it never got. It now logs
+  block/group/parity/win_len/epoch/store/send at debug>=2 and re-arms the TX
+  work on failure; the replay ring keeps the parity for the peer's NACK probe.
+  The close path also logs each group's `g->blk_id`/`nreal` and whether it
+  took the parity, empty-marker or skip branch.
 - FEC empty-marker delivery: `tbt_fec_tx_emit_empty()` sent the marker on the
   parity-0 carrier and discarded `tbt_fec_send_record()`'s error, so a stalled
   or full carrier silently lost it. The marker is now a control record (any up
