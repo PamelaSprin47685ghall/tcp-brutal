@@ -212,6 +212,8 @@ void tbt_listen_stop(struct tbt_tunnel *t);
 #define TBT_PENDING_MAX 128
 #define TBT_STREAMS_MAX 128
 #define TBT_STREAM_SNAP_MAX 128
+/* Discrete RTO grid for the stall survival estimate (0.5/1/2/4/8/16 s). */
+#define TBT_STALL_GRID 6
 #define TBT_SQ_MAX (64 * 1024)      /* minimum frame queue cap, bytes    */
 /* Ready-to-deliver queue cap. It must exceed the volume a strict
  * send-then-read application can echo back before it starts reading (4 MiB in
@@ -931,10 +933,50 @@ struct tbt_session
                                   * ARQ adopts pause semantics */
     atomic64_t stall_dead;       /* poll: a paused carrier outlived its bound
                                   * and was declared lost after all */
+    atomic64_t stall_replaced;   /* poll: a long stall replaced its carrier */
+    /* Economic stall decision (poll). The discrete RTO grid estimates the
+     * recovery survival function online; risk[i] counts stalls that were
+     * still running at grid[i], events[i] those that recovered in
+     * (grid[i-1], grid[i]], censored[i] those that were replaced or died
+     * there. Both outcomes enter the estimate; using only recoveries would
+     * bias it toward optimism. */
+    u32 stall_grid_risk[TBT_STALL_GRID];
+    u32 stall_grid_events[TBT_STALL_GRID];
+    u32 stall_grid_censored[TBT_STALL_GRID];
+    u64 stall_recover_samples;   /* poll: finished stalls observed */
+    u64 stall_recover_ns_ewma;   /* poll: EWMA of observed recovery times */
+    u64 stall_wait_loss_bytes;   /* poll: L_wait of the last decision */
+    u64 replace_cost_bytes;      /* poll: C_r of the last decision */
+    u64 replace_cost_ewma;       /* poll: EWMA of C_r */
+    u64 last_stall_replace_ns;   /* poll: last replacement, for the T_r wait */
+    u64 last_carrier_add_ns;     /* poll: last growth, paced like a dial */
+    u32 stall_survival_bucket;   /* poll: grid bucket of the last decision */
+    u8 stall_replace_reason;     /* poll: enum tbt_stall_replace_reason */
+    atomic64_t stall_replace_econ;    /* poll: replaced, economics said so */
+    atomic64_t stall_replace_retrans; /* poll: replaced, retrans exhausted */
+    atomic64_t stall_replace_dead;    /* poll: replaced, stall_dead backstop */
+    /* Connect latency samples for the replacement cost. Every dialling
+     * carrier's work writes them, so both halves are atomic. */
+    atomic64_t connect_ns_sum, connect_ns_count;
+    atomic64_t carrier_add;      /* poll: a carrier grew the stripe */
+    atomic64_t carrier_add_fail; /* poll: a growth attempt found no room */
+    atomic64_t backpressure_enter; /* poll: no carrier left and no room to add */
+    bool backpressure;           /* poll: edge state for the counter above */
     /* DATA admissions deferred by the peer window; tbt_tx_pump() only, and
      * the pump is serialised by sess->pump_lock, so a plain u64 is safe. */
     u64 win_block, win_resume;
     atomic64_t tx_wake_calls, tx_wake_busy, tx_work_runs;
+    /* TX scheduling when no carrier can take a frame (tbt_tx.c). The pump is
+     * the only writer of the two plain fields; the capture work reads
+     * tx_wait_since_ns to decide when the wait became a user-visible
+     * backpressure. tx_backpressure has several writers (pump and capture). */
+    u64 tx_wait_carrier;         /* pump: pumps that found no usable carrier */
+    u64 tx_wait_since_ns;        /* pump: start of the current carrier wait */
+    u64 tx_wait_carrier_bytes;   /* pump: tx_queued of the last wait event */
+    u64 tx_wait_carrier_ns;      /* pump: elapsed wait of the last event */
+    atomic64_t tx_backpressure;  /* capture: entered user-side backpressure */
+    atomic64_t tx_backpressure_bytes; /* capture: tx_queued at entry */
+    atomic64_t tx_backpressure_ns;    /* capture: wait before backpressure */
     /* Reconciliation totals for carriers that left sess->car[] (a
      * replacement or a joining generation). The aggregates below count every
      * carrier that ever wrote; /proc/net/tbtun/peers lists only live slots,
@@ -1251,6 +1293,15 @@ enum tbt_carrier_state
     TBT_CAR_UP,
     TBT_CAR_SPARE, /* connected, HELLO'd, kept warm, no DATA */
     TBT_CAR_STALLED,
+};
+
+/* Why the poll replaced a stalled carrier (c3 stall_replace_reason). */
+enum tbt_stall_replace_reason
+{
+    TBT_STALL_REPLACE_NONE = 0,
+    TBT_STALL_REPLACE_ECONOMIC, /* waiting costs more than a new carrier */
+    TBT_STALL_REPLACE_RETRANS,  /* TCP retransmissions are exhausted */
+    TBT_STALL_REPLACE_DEAD,     /* stall_dead backstop */
 };
 
 /* tbt_sock.c */

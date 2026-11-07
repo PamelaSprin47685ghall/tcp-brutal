@@ -767,6 +767,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                           1000000) : 0;
                 seq_printf(m, "tunnel %llu c3 n=%u up=%u lost=%llu replaced=%llu "
                               "stream_reset_tcp_failed=%llu stream_reset_user=%llu "
+                              "carrier_add=%llu carrier_add_fail=%llu "
+                              "backpressure_enter=%llu "
                               "spare_activated=%llu alloc_fail=%llu "
                               "port_exhaust=%llu port_alloc_fail=%llu connect_fail=%llu "
                               "connect_retry=%llu "
@@ -782,10 +784,18 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "peer_paused=%u fb_delay_us=%u rto_us=%u una_stall_us=%u "
                               "stall_paused_skips=%llu stall_idle_skips=%llu "
                               "stall_declared=%llu stall_recovered=%llu "
-                              "stall_drop=%llu stall_dead=%llu "
+                              "stall_drop=%llu stall_dead=%llu stall_replaced=%llu "
+                              "stall_survival_bucket=%u "
+                              "stall_wait_loss_bytes=%llu replace_cost_bytes=%llu "
+                              "replace_cost_ewma=%llu "
+                              "stall_replace_econ=%llu stall_replace_retrans=%llu "
+                              "stall_replace_dead=%llu "
                               "tx_window=%u bdp_bytes=%u k_x100=%u "
                               "rtt_mean_us=%u rttvar_us=%u "
                               "rtt_max_us=%u txq_max=%u win_block=%llu win_resume=%llu "
+                              "tx_wait_carrier=%llu tx_backpressure=%llu "
+                              "tx_wait_carrier_bytes=%llu tx_wait_carrier_ns=%llu "
+                              "tx_backpressure_bytes=%llu tx_backpressure_ns=%llu "
                               "pump_hw_armed=%llu pump_hw_fired=%llu "
                               "retx_evident=%llu retx_cand=%llu retx_nosends=%llu "
                               "retx_txqdrop=%llu retx_nopick=%llu retx_stalled=%llu "
@@ -797,6 +807,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->carrier_replaced),
                            tbt_stat_read(&s->stream_reset_tcp_failed),
                            tbt_stat_read(&s->stream_reset_user),
+                           tbt_stat_read(&s->carrier_add),
+                           tbt_stat_read(&s->carrier_add_fail),
+                           tbt_stat_read(&s->backpressure_enter),
                            READ_ONCE(s->spare_activated),
                            tbt_stat_read(&s->carrier_alloc_fail),
                            tbt_stat_read(&s->port_exhaust),
@@ -826,11 +839,25 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->stall_recovered),
                            READ_ONCE(s->stall_drop),
                            tbt_stat_read(&s->stall_dead),
+                           tbt_stat_read(&s->stall_replaced),
+                           READ_ONCE(s->stall_survival_bucket),
+                           READ_ONCE(s->stall_wait_loss_bytes),
+                           READ_ONCE(s->replace_cost_bytes),
+                           READ_ONCE(s->replace_cost_ewma),
+                           tbt_stat_read(&s->stall_replace_econ),
+                           tbt_stat_read(&s->stall_replace_retrans),
+                           tbt_stat_read(&s->stall_replace_dead),
                            READ_ONCE(s->tx_window), READ_ONCE(s->bdp_bytes),
                            READ_ONCE(s->k_x100), READ_ONCE(s->rtt_mean_us),
                            READ_ONCE(s->rttvar_us), READ_ONCE(s->rtt_max_us),
                            READ_ONCE(s->txq_max),
                            READ_ONCE(s->win_block), READ_ONCE(s->win_resume),
+                           READ_ONCE(s->tx_wait_carrier),
+                           tbt_stat_read(&s->tx_backpressure),
+                           READ_ONCE(s->tx_wait_carrier_bytes),
+                           READ_ONCE(s->tx_wait_carrier_ns),
+                           tbt_stat_read(&s->tx_backpressure_bytes),
+                           tbt_stat_read(&s->tx_backpressure_ns),
                            READ_ONCE(s->pump_hw_armed),
                            tbt_stat_read(&s->pump_hw_fired),
                            tbt_stat_read(&s->dbg_retx_evident),

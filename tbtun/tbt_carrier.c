@@ -61,19 +61,21 @@
 #define TBT_STALL_MIN_NS (1ULL * NSEC_PER_SEC)
 #define TBT_STALL_MAX_NS (60ULL * NSEC_PER_SEC)
 
-/* A paused carrier may not stay paused forever. A half-open path never moves
- * snd_una and never reports an error, so the poll declares the path dead after
- * this bound: two stall windows, capped at 300 s. Keepalive is the first line
- * of defence; this bound covers a path that black-holes without the socket
- * ever seeing a close. */
+/* Final backstop: a carrier that stayed paused through every economic
+ * decision and shows no wire life either is dead even if the replacement
+ * could not run (allocation failure, a closing session). Four stall windows,
+ * capped at 300 s, so the economic rule always gets the first word. */
 #define TBT_STALL_DEAD_MAX_NS (300ULL * NSEC_PER_SEC)
 /* tcp_retries2 defaults to 15; at that count TCP itself is about to give up,
  * so a wire that has not moved either way is dead. */
 #define TBT_STALL_RETX_MAX 15
+/* Growth is paced like a dial: one new carrier per second at most, so a peer
+ * that refuses the new index cannot turn growth into a connect storm. */
+#define TBT_CARRIER_ADD_COOLDOWN_MS 1000
 
 static u64 tbt_stall_dead_ns(u64 stall_ns)
 {
-    return min_t(u64, 2 * stall_ns, TBT_STALL_DEAD_MAX_NS);
+    return min_t(u64, 4 * stall_ns, TBT_STALL_DEAD_MAX_NS);
 }
 
 // A private copy of tcp_prot so carriers carry our sendmsg/recvmsg. Same shape
@@ -87,6 +89,12 @@ static void tbt_pump_work(struct work_struct *w);
 static bool tbt_carrier_arm_connect(struct tbt_carrier *c);
 static bool tbt_dial_take(struct tbt_session *sess);
 static u32 tbt_dial_rate(const struct tbt_session *sess);
+static bool tbt_stall_should_replace(struct tbt_carrier *c, u64 now);
+static void tbt_stall_grid_note(struct tbt_session *sess, u64 t_ns,
+                                bool recovered);
+static int tbt_carrier_add(struct tbt_session *sess);
+static bool tbt_carriers_all_dead(struct tbt_session *sess);
+static void tbt_carrier_capacity_check(struct tbt_session *sess);
 
 /* The effective container for a slot. The M spares of an http-kal tunnel use
  * the drip cadence: same container family, cheaper keep-alive. Both ends derive
@@ -471,11 +479,15 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
 
     if (!sk)
     {
+        if (READ_ONCE(c->stalled))
+            tbt_stall_grid_note(sess, now - c->stall_since_ns, false);
         tbt_carrier_lost(sess, c);
         return;
     }
     if (READ_ONCE(sk->sk_state) != TCP_ESTABLISHED)
     {
+        if (READ_ONCE(c->stalled))
+            tbt_stall_grid_note(sess, now - c->stall_since_ns, false);
         tbt_carrier_sk_put(sk);
         tbt_carrier_lost(sess, c);
         return;
@@ -507,6 +519,41 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
          * interval; c->last_una_ns carries it between polls. */
         u64 stall_since_ns = c->last_una_ns;
 
+        /* Long stall: restore capacity before the user can feel it. Grow the
+         * stripe when a slot is free; otherwise replace this carrier at its
+         * own index. The decision is the optimal-stopping rule above, not a
+         * fixed timer, and backpressure is never taken here. */
+        if (READ_ONCE(c->stalled) && !paused && wnd &&
+            tbt_stall_should_replace(c, now))
+        {
+            int aerr = tbt_carrier_add(sess);
+
+            if (!aerr)
+            {
+                /* Capacity is back; leave the paused path to recover, and
+                 * give the new carrier the same window before judging it. */
+                c->stall_since_ns = now;
+                WRITE_ONCE(sess->stall_replace_reason,
+                           TBT_STALL_REPLACE_NONE);
+            }
+            else
+            {
+                if (aerr != -EOPNOTSUPP)
+                    atomic64_inc(&sess->carrier_add_fail);
+                atomic64_inc(&sess->stall_replaced);
+                if (READ_ONCE(sess->stall_replace_reason) ==
+                    TBT_STALL_REPLACE_RETRANS)
+                    atomic64_inc(&sess->stall_replace_retrans);
+                else
+                    atomic64_inc(&sess->stall_replace_econ);
+                tbt_stall_grid_note(sess, now - c->stall_since_ns, false);
+                sess->last_stall_replace_ns = now;
+                tbt_carrier_sk_put(sk);
+                tbt_carrier_lost(sess, c);
+                return;
+            }
+        }
+
         /* Bound on a paused carrier. Keepalive normally closes a half-open
          * socket first, but a path can black-hole without the socket ever
          * seeing an error. When the pause outlives the bound and the wire
@@ -523,6 +570,10 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
              READ_ONCE(inet_csk(sk)->icsk_retransmits) >= TBT_STALL_RETX_MAX))
         {
             atomic64_inc(&sess->stall_dead);
+            atomic64_inc(&sess->stall_replace_dead);
+            WRITE_ONCE(sess->stall_replace_reason, TBT_STALL_REPLACE_DEAD);
+            tbt_stall_grid_note(sess, now - c->stall_since_ns, false);
+            sess->last_stall_replace_ns = now;
             tbt_carrier_sk_put(sk);
             tbt_carrier_lost(sess, c);
             return;
@@ -539,10 +590,17 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
              * avoided is delivering again, so put it back in the stripe. */
             if (READ_ONCE(c->stalled))
             {
+                u64 recover_ns = now - c->stall_since_ns;
+
                 WRITE_ONCE(c->stalled, false);
                 atomic64_inc(&sess->stall_recovered);
-                pr_info_ratelimited("tbtun: carrier %u recovered: snd_una moved, back in the stripe\n",
-                                    c->index);
+                /* Feed the survival estimate: a path that came back tells
+                 * the next decision how long this kind of dip lasts. */
+                tbt_stall_grid_note(sess, recover_ns, true);
+                pr_info_ratelimited("tbtun: carrier %u recovered after %llu ms: back in the stripe\n",
+                                    c->index,
+                                    (unsigned long long)(recover_ns /
+                                                         NSEC_PER_MSEC));
             }
         }
         c->last_nxt = nxt;
@@ -780,6 +838,10 @@ static void tbt_session_poll_body(struct tbt_session *sess)
         tbt_car_poll_one(c);
         tbt_carrier_put(c);
     }
+    /* Backpressure is the last resort: only a session with no usable carrier
+     * and no room to grow reaches it. The check also grows the stripe when
+     * it can, so the next pass has capacity without touching the user. */
+    tbt_carrier_capacity_check(sess);
     if (!READ_ONCE(sess->closing))
         tbt_session_arm(sess, TBT_SW_POLL, msecs_to_jiffies(50));
 }
@@ -1602,6 +1664,192 @@ void tbt_carrier_stall(struct tbt_session *sess, struct tbt_carrier *c)
                         c->index);
 }
 
+/* Discrete RTO grid for the survival estimate. A stall that recovered or was
+ * replaced at t_ns has survived every grid point below t_ns. */
+static const u64 tbt_stall_grid_ns[TBT_STALL_GRID] = {
+    500ULL * NSEC_PER_MSEC, 1ULL * NSEC_PER_SEC, 2ULL * NSEC_PER_SEC,
+    4ULL * NSEC_PER_SEC, 8ULL * NSEC_PER_SEC, 16ULL * NSEC_PER_SEC,
+};
+
+/* Session send rate in bytes per second: the current window divided by the
+ * mean RTT. Zero means the session has no estimate yet, and the economic
+ * decision then falls back to the retransmission proxy alone. */
+static u64 tbt_session_rate_bps(struct tbt_session *sess)
+{
+    u32 win = READ_ONCE(sess->tx_window);
+    u32 rtt = READ_ONCE(sess->rtt_mean_us);
+
+    if (!win || !rtt)
+        return 0;
+    return (u64)win * 1000000ULL / rtt;
+}
+
+/* Record one finished stall in the survival grid. recovered == false is a
+ * censored observation (replaced or declared dead): it counts in the risk set
+ * at every grid point it reached, but not as an event, so a replacement never
+ * looks like a recovery. */
+static void tbt_stall_grid_note(struct tbt_session *sess, u64 t_ns,
+                                bool recovered)
+{
+    int i, bucket = TBT_STALL_GRID - 1;
+
+    for (i = 0; i < TBT_STALL_GRID; i++)
+    {
+        if (t_ns > tbt_stall_grid_ns[i])
+            sess->stall_grid_risk[i]++;
+        else
+        {
+            bucket = i;
+            break;
+        }
+    }
+    if (recovered)
+        sess->stall_grid_events[bucket]++;
+    else
+        sess->stall_grid_censored[bucket]++;
+    sess->stall_recover_samples++;
+    if (recovered)
+        sess->stall_recover_ns_ewma =
+            sess->stall_recover_samples > 1 ?
+            (7 * sess->stall_recover_ns_ewma + t_ns) / 8 : t_ns;
+}
+
+/* P(recovery time > t_ns). Prior: RTO backoff, a Pareto-like tail T/(T+t)
+ * with T = 2 RTO, which makes the conditional survival rise with t (the
+ * longer the silence, the longer the remaining wait is likely to be). Once
+ * enough finished stalls exist, the Kaplan-Meier product over the grid
+ * replaces the prior. */
+static u32 tbt_stall_survival_ppm(struct tbt_session *sess, u64 t_ns,
+                                  u64 rto_ns, u32 *bucket)
+{
+    u64 t0 = 2 * (rto_ns ? rto_ns : NSEC_PER_SEC);
+    u64 s = 1000000;
+    int i, b = TBT_STALL_GRID - 1;
+
+    for (i = 0; i < TBT_STALL_GRID; i++)
+    {
+        if (t_ns <= tbt_stall_grid_ns[i])
+        {
+            b = i;
+            break;
+        }
+    }
+    if (bucket)
+        *bucket = (u32)b;
+    if (sess->stall_recover_samples < TBT_STALL_GRID + 2)
+        return (u32)(1000000ULL * t0 / (t0 + t_ns));
+    for (i = 0; i <= b; i++)
+    {
+        u32 n = sess->stall_grid_risk[i];
+        u32 d = sess->stall_grid_events[i];
+
+        if (n && d)
+            s = s * (n - min(d, n)) / n;
+    }
+    return (u32)min_t(u64, s, 1000000);
+}
+
+/* Bytes a replacement costs: the new carrier's handshake plus its slow-start
+ * ramp at the carrier's share of the rate, plus the bytes already in flight
+ * that the loss must repeat (ARQ retain copies, FEC NACK shares). The last
+ * computed value is smoothed into replace_cost_ewma. */
+static u64 tbt_stall_replace_cost(struct tbt_session *sess,
+                                  struct tcp_sock *tp, u64 r_c)
+{
+    u64 count = atomic64_read(&sess->connect_ns_count);
+    u64 connect_ns = 100ULL * NSEC_PER_MSEC; /* default before samples */
+    u64 slow_ns;
+    u64 inflight;
+    u64 cost;
+
+    if (count)
+        connect_ns = atomic64_read(&sess->connect_ns_sum) / count;
+    /* Slow start back to the current rate: about three RTTs of ramp. */
+    slow_ns = 3ULL * (u64)(READ_ONCE(tp->srtt_us) >> 3) * NSEC_PER_USEC;
+    inflight = (u64)READ_ONCE(tp->packets_out) * READ_ONCE(tp->mss_cache);
+    cost = r_c * (connect_ns + slow_ns) / NSEC_PER_SEC + inflight;
+    sess->replace_cost_ewma = sess->replace_cost_ewma ?
+        (7 * sess->replace_cost_ewma + cost) / 8 : cost;
+    return cost;
+}
+
+/* Optimal-stopping rule. Waiting one decision window (one RTO) costs
+ *   L_wait(t) = R_c * integral_0^dt S(y|t) dy + P(Y > dt | t) * V(t+dt)
+ * and replacing costs
+ *   L_replace = C_r + R_c * T_r.
+ * V(t+dt) is L_replace itself: a path that stays silent ends in a
+ * replacement anyway, only later. The integral is the trapezoid over the
+ * conditional survival. Replace only when L_wait exceeds L_replace by the
+ * hysteresis margin, and only after one RTO of silence and one T_r since the
+ * last replacement. TCP retransmission exhaustion skips the economics. */
+#define TBT_STALL_EPS_PCT 15
+static bool tbt_stall_should_replace(struct tbt_carrier *c, u64 now)
+{
+    struct tbt_session *sess = c->sess;
+    struct sock *sk;
+    struct tcp_sock *tp;
+    u64 t_ns, rto_ns, dt, t_r, r_c, rate, c_r, l_replace, l_wait;
+    u64 s_t, s_next, p_wait, mean_ns;
+    u32 retrans, bucket;
+    u8 reason;
+
+    sk = tbt_carrier_sk_get(c);
+    if (!sk)
+        return true; /* no socket: nothing left to wait for */
+    tp = tcp_sk(sk);
+    rto_ns = max_t(u64, (u64)(READ_ONCE(tp->srtt_us) >> 3) +
+                        4ULL * READ_ONCE(tp->mdev_us),
+                   200000ULL) * NSEC_PER_USEC;
+    t_ns = now - c->stall_since_ns;
+    retrans = READ_ONCE(inet_csk(sk)->icsk_retransmits);
+    /* Debounce: never judge before one RTO, and give a replacement T_r to
+     * ramp before replacing again. */
+    dt = rto_ns;
+    {
+        u64 count = atomic64_read(&sess->connect_ns_count);
+
+        t_r = (count ? atomic64_read(&sess->connect_ns_sum) / count :
+                       100ULL * NSEC_PER_MSEC) +
+              3ULL * (u64)(READ_ONCE(tp->srtt_us) >> 3) * NSEC_PER_USEC;
+    }
+    if (retrans < TBT_STALL_RETX_MAX &&
+        (t_ns < dt ||
+         (sess->last_stall_replace_ns &&
+          now - sess->last_stall_replace_ns < t_r)))
+    {
+        WRITE_ONCE(sess->stall_replace_reason, TBT_STALL_REPLACE_NONE);
+        tbt_carrier_sk_put(sk);
+        return false;
+    }
+    rate = tbt_session_rate_bps(sess);
+    /* The carrier's share of the session rate. */
+    {
+        u16 ncar = READ_ONCE(sess->n_car);
+
+        r_c = rate / (ncar ? ncar : 1);
+    }
+    s_t = tbt_stall_survival_ppm(sess, t_ns, rto_ns, &bucket);
+    s_next = tbt_stall_survival_ppm(sess, t_ns + dt, rto_ns, NULL);
+    p_wait = s_t ? min_t(u64, s_next * 1000000 / s_t, 1000000) : 0;
+    mean_ns = dt * (1000000 + p_wait) / 2000000;
+    c_r = tbt_stall_replace_cost(sess, tp, r_c);
+    l_replace = c_r + r_c * t_r / NSEC_PER_SEC;
+    l_wait = r_c * mean_ns / NSEC_PER_SEC +
+             p_wait * l_replace / 1000000;
+    if (retrans >= TBT_STALL_RETX_MAX)
+        reason = TBT_STALL_REPLACE_RETRANS;
+    else if (rate && l_wait * 100 > l_replace * (100 + TBT_STALL_EPS_PCT))
+        reason = TBT_STALL_REPLACE_ECONOMIC;
+    else
+        reason = TBT_STALL_REPLACE_NONE;
+    sess->stall_survival_bucket = bucket;
+    sess->stall_wait_loss_bytes = l_wait;
+    sess->replace_cost_bytes = c_r;
+    WRITE_ONCE(sess->stall_replace_reason, reason);
+    tbt_carrier_sk_put(sk);
+    return reason != TBT_STALL_REPLACE_NONE;
+}
+
 /* True when no slot can still carry bytes: every carrier in sess->car[] has
  * been marked stopping. This is the only carrier-side state that may reset a
  * stream. One dead path is a repath, and a slot whose replacement is still
@@ -1612,7 +1860,7 @@ static bool tbt_carriers_all_dead(struct tbt_session *sess)
 {
     int i;
 
-    for (i = 0; i < sess->n_car; i++)
+    for (i = 0; i < READ_ONCE(sess->n_car); i++)
     {
         struct tbt_carrier *c = tbt_carrier_get(sess, (u8)i);
 
@@ -1626,6 +1874,87 @@ static bool tbt_carriers_all_dead(struct tbt_session *sess)
         tbt_carrier_put(c);
     }
     return true;
+}
+
+/* Grow an ARQ stripe by one carrier at the next free index. FEC never grows:
+ * its share mapping is fixed at cfg.carriers, so a new index would renumber
+ * the blocks already in flight; it replaces the stalled carrier instead.
+ * Returns 0, -EOPNOTSUPP (not an ARQ near session), -ENOSPC (module limit),
+ * -EBUSY, or -ENOMEM. Runs from the poll work, so it may sleep. */
+static int tbt_carrier_add(struct tbt_session *sess)
+{
+    struct tbt_carrier *c;
+    u16 idx;
+
+    if (!sess || READ_ONCE(sess->closing) || sess->fec)
+        return -EOPNOTSUPP;
+    if (!sess->tunnel || sess->tunnel->cfg.role != TBT_ROLE_NEAR)
+        return -EOPNOTSUPP;
+    idx = READ_ONCE(sess->n_car);
+    if (idx >= TBT_MAX_CARRIERS_LIMIT || idx >= READ_ONCE(max_carriers))
+        return -ENOSPC;
+    if (READ_ONCE(sess->car[idx]))
+        return -EBUSY;
+    if (sess->last_carrier_add_ns &&
+        ktime_get_ns() - sess->last_carrier_add_ns <
+            (u64)TBT_CARRIER_ADD_COOLDOWN_MS * NSEC_PER_MSEC)
+        return -EAGAIN;
+    mutex_lock(&sess->pump_lock);
+    if (READ_ONCE(sess->n_car) != idx || READ_ONCE(sess->car[idx]))
+    {
+        mutex_unlock(&sess->pump_lock);
+        return -EBUSY;
+    }
+    c = tbt_carrier_new_locked(sess, (u8)idx);
+    if (!c)
+    {
+        mutex_unlock(&sess->pump_lock);
+        return -ENOMEM;
+    }
+    /* New capacity is primary: index == n_car, so new_locked() derived
+     * spare = false and the full profile. */
+    rcu_assign_pointer(sess->car[idx], c);
+    WRITE_ONCE(sess->n_car, (u16)(idx + 1));
+    mutex_unlock(&sess->pump_lock);
+    sess->last_carrier_add_ns = ktime_get_ns();
+    atomic64_inc(&sess->carrier_add);
+    TBT_DIAG("tunnel=%llu carrier=%u gen=%u added n_car=%u",
+             (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+             c->index, c->gen, READ_ONCE(sess->n_car));
+    return 0;
+}
+
+/* Backpressure is the last resort. When no carrier can carry and the stripe
+ * cannot grow (FEC's fixed mapping, the far side, the module limit, or an
+ * allocation failure), count the edge once; the user socket's own window does
+ * the actual stopping, and this layer never drops a frame or resets a stream
+ * for it. */
+static void tbt_carrier_capacity_check(struct tbt_session *sess)
+{
+    int err;
+
+    if (!sess || !sess->tunnel || READ_ONCE(sess->closing))
+        return;
+    if (!tbt_carriers_all_dead(sess))
+    {
+        WRITE_ONCE(sess->backpressure, false);
+        return;
+    }
+    err = tbt_carrier_add(sess);
+    /* A paced retry (-EAGAIN) and a busy slot are not exhaustion: the stripe
+     * can still grow, so they never move the user into backpressure. */
+    if (!err || err == -EAGAIN || err == -EBUSY)
+    {
+        WRITE_ONCE(sess->backpressure, false);
+        return;
+    }
+    if (!READ_ONCE(sess->backpressure))
+    {
+        WRITE_ONCE(sess->backpressure, true);
+        atomic64_inc(&sess->backpressure_enter);
+        pr_info_ratelimited("tbtun: tunnel %llu no carrier can carry and the stripe cannot grow (%d): user side backpressured\n",
+                            (unsigned long long)sess->tunnel->cfg.id, err);
+    }
 }
 
 /* Mark a carrier unusable once, count it, and ask the replacement worker to
@@ -2651,12 +2980,21 @@ static void tbt_car_connect_work(struct work_struct *w)
     s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
     {
         u64 t0 = ktime_get_ns();
+        u64 elapsed;
 
         err = tbt_connect_bounded(sess, s, &addr);
+        elapsed = ktime_get_ns() - t0;
         TBT_DIAG("tunnel=%llu carrier=%u gen=%u connect ret=%d elapsed_ms=%llu sk_state=%u",
                  (unsigned long long)t->cfg.id, c->index, c->gen, err,
-                 (ktime_get_ns() - t0) / NSEC_PER_MSEC,
+                 elapsed / NSEC_PER_MSEC,
                  READ_ONCE(s->sk->sk_state));
+        /* The economic stall rule charges a replacement its handshake: keep
+         * the observed cost of successful dials. */
+        if (!err)
+        {
+            atomic64_add(elapsed, &sess->connect_ns_sum);
+            atomic64_inc(&sess->connect_ns_count);
+        }
     }
     if (err)
         goto release;
