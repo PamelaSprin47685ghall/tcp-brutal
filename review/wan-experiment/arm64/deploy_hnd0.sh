@@ -24,11 +24,13 @@
 #   3. stages the tree at /home/tbtun-t52-arm64/ and the module there
 #   4. builds tbt_echo, tbt_burst, tbt_ping with HND0's own cc
 #   5. insmod tbtun.ko max_carriers=256 max_tunnels=1 debug=0
-#   6. writes /proc/net/tbtun/ports = ports 31000-31511
-#   7. writes the far config line (w=0; the kernel renders w=8 for n=4) and
+#   6. requires /sys/module/tbtun/srcversion to equal the srcversion read from
+#      the staged ko; on mismatch it rmmods tbtun and fails with EX_GATE
+#   7. writes /proc/net/tbtun/ports = ports 31000-31511
+#   8. writes the far config line (w=0; the kernel renders w=8 for n=4) and
 #      checks the rendered config token by token
-#   8. starts the echo target as transient unit tbt-echo-5202 on 127.0.0.1:5202
-#   9. optionally waits for up=256 (--wait-up SECS; needs the near side joining)
+#   9. starts the echo target as transient unit tbt-echo-5202 on 127.0.0.1:5202
+#  10. optionally waits for up=256 (--wait-up SECS; needs the near side joining)
 #
 # On success the far side stays up for run_t52_65.sh, which tears both ends
 # down. On any failure, and on INT/TERM, the trap removes the module and stops
@@ -47,6 +49,11 @@
 #   LOAD_LIMIT    load1 ceiling (default 4)
 #   LOAD_SETTLE   seconds to wait for load to fall before refusing (default 0)
 #   EVIDENCE_DIR  evidence root (default <repo>/review/wan-experiment/arm64)
+#   EXPECT_SRCVERSION
+#                 if set, the staged ko's srcversion must equal this value
+#                 before insmod; this refuses a known-bad build outright.
+#                 The value changes with every rebuild; read it from the
+#                 staged ko: modinfo -F srcversion /home/tbtun-t52-arm64/tbtun.ko
 #
 # Evidence: $EVIDENCE_DIR/deploy-hnd0-<UTC>/
 #   services-before.txt, services-after.txt, far-build.log, host-tools.log,
@@ -60,7 +67,8 @@
 #   5 lock timeout
 #   6 module build failed
 #   7 insmod, ports, config, or echo unit failed
-#   8 up=256 gate failed (--wait-up only)
+#   8 post-insmod srcversion gate failed (module unloaded), or up=256 gate
+#     failed (--wait-up only)
 
 set -euo pipefail
 
@@ -73,6 +81,7 @@ LOCK_HOLD_SECS=${LOCK_HOLD_SECS:-14400}
 LOAD_LIMIT=${LOAD_LIMIT:-4}
 LOAD_SETTLE=${LOAD_SETTLE:-0}
 EVIDENCE_ROOT=${EVIDENCE_DIR:-}
+EXPECT_SRCVERSION=${EXPECT_SRCVERSION:-}
 
 CARRIERS=256
 LISTEN_PORT=9000
@@ -248,7 +257,7 @@ cleanup() {
 do_deploy() {
     [[ $# -eq 2 ]] || usage "$EX_USAGE"
     local ref=$1 ko_arg=$2
-    local sha short stage stamp ev krel vm got expected missing s
+    local sha short stage stamp ev krel vm want_sv got_sv got expected missing s
 
     sha=$(git -C "$REPO" rev-parse --verify --quiet "$ref^{commit}") || die "$EX_USAGE" "not a commit: $ref"
     short=$(git -C "$REPO" rev-parse --short=12 "$sha")
@@ -312,15 +321,28 @@ do_deploy() {
     [[ -n $vm ]] || vm=$(rrun "modinfo '$stage/tbtun.ko' | sed -n 's/^vermagic:[[:space:]]*//p'")
     vm=${vm%% *}
     [[ $vm == "$krel" ]] || die "$EX_PRECOND" "module vermagic '$vm' does not match $FAR_HOST kernel '$krel'"
+    want_sv=$(rrun "modinfo -F srcversion '$stage/tbtun.ko' 2>/dev/null || true")
+    [[ -n $want_sv ]] || die "$EX_PRECOND" "cannot read srcversion from $stage/tbtun.ko on $FAR_HOST"
+    if [[ -n $EXPECT_SRCVERSION && $want_sv != "$EXPECT_SRCVERSION" ]]; then
+        die "$EX_PRECOND" "staged ko srcversion '$want_sv' != EXPECT_SRCVERSION '$EXPECT_SRCVERSION'; refusing to insmod"
+    fi
     {
         printf 'host=%s\nutc=%s\nref=%s\nsha=%s\nstage=%s\n' "$FAR_HOST" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$ref" "$sha" "$stage"
-        printf 'vermagic=%s\nsrcversion=%s\n' "$vm" "$(rrun "modinfo -F srcversion '$stage/tbtun.ko' 2>/dev/null || true")"
+        printf 'vermagic=%s\nsrcversion=%s\n' "$vm" "$want_sv"
+        printf 'expect_srcversion=%s\n' "${EXPECT_SRCVERSION:-any}"
         printf 'sha256=%s\n' "$(rrun "sha256sum '$stage/tbtun.ko'" | awk '{print $1}')"
         printf 'load1=%s\n' "$load1v"
     } >"$ev/module.txt" 2>&1 || note "module record incomplete"
 
     rrun "insmod '$stage/tbtun.ko' max_carriers=$CARRIERS max_tunnels=1 debug=0" || die "$EX_SETUP" "insmod failed on $FAR_HOST"
     FAR_TOUCHED=1
+    got_sv=$(rrun 'cat /sys/module/tbtun/srcversion 2>/dev/null || true')
+    if [[ $got_sv != "$want_sv" ]]; then
+        rrun 'rmmod tbtun' >/dev/null 2>&1 || true
+        FAR_TOUCHED=0
+        die "$EX_GATE" "loaded srcversion '$got_sv' != staged '$want_sv'; tbtun unloaded"
+    fi
+    note "module: srcversion $got_sv matches the staged ko"
     rrun 'test -d /proc/net/tbtun' || die "$EX_SETUP" "insmod succeeded but /proc/net/tbtun is absent"
     note "module: loaded (max_carriers=$CARRIERS max_tunnels=1 debug=0)"
 

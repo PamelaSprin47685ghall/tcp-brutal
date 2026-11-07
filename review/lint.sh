@@ -327,9 +327,15 @@ check_carrier_buffers() {
     f="$1/tbtun/tbt_carrier.c"
     missing=""
     grep -q 'http_hdr = kmalloc(TBT_HTTP_HDR_MAX' "$f" || missing="$missing http_hdr"
-    grep -q 'http_rx = kmalloc' "$f" || missing="$missing http_rx"
     grep -Eq 'part = kmalloc\((TBT_REC_MAX|TBT_CAR_PART_MAX)' "$f" || missing="$missing part"
-    grep -q 'parser = kmalloc' "$f" || missing="$missing parser"
+    # parser and http_rx must be born zeroed. Both carry a byte count (`have`,
+    # `http_have`) that the parsers use as a length, so a kmalloc()ed object
+    # with a dirty slab behind it walks off its buffer.
+    grep -q 'parser = kzalloc(sizeof(\*c->parser)' "$f" || missing="$missing parser"
+    grep -q 'http_rx = kzalloc(sizeof(\*c->http_rx)' "$f" || missing="$missing http_rx"
+    # The reuse path keeps the objects; it must reset both, not only `have`.
+    grep -q 'memset(parser, 0, sizeof(\*parser))' "$f" || missing="$missing parser-reset"
+    grep -q 'tbt_http_rx_new_message(http_rx)' "$f" || missing="$missing http_rx-reset"
     grep -q '!c->http_rx' "$f" || missing="$missing http_rx-guard"
     [ -z "$missing" ] && return 0
     printf 'carrier buffer allocation/guard missing:%s' "$missing"
