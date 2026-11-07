@@ -958,9 +958,10 @@ struct tbt_session
     /* Connect latency samples for the replacement cost. Every dialling
      * carrier's work writes them, so both halves are atomic. */
     atomic64_t connect_ns_sum, connect_ns_count;
-    atomic64_t carrier_add;      /* poll: a carrier grew the stripe */
-    atomic64_t carrier_add_fail; /* poll: a growth attempt found no room */
-    atomic64_t backpressure_enter; /* poll: no carrier left and no room to add */
+    atomic64_t carrier_add;      /* poll: a carrier grew the stripe; 0 until
+                                  * the far side can extend n_car */
+    atomic64_t carrier_add_fail; /* poll: a growth attempt found no room; 0 */
+    atomic64_t backpressure_enter; /* poll: no carrier can carry any more */
     bool backpressure;           /* poll: edge state for the counter above */
     /* DATA admissions deferred by the peer window; tbt_tx_pump() only, and
      * the pump is serialised by sess->pump_lock, so a plain u64 is safe. */

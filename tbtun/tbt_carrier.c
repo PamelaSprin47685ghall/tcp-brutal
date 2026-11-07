@@ -92,7 +92,6 @@ static u32 tbt_dial_rate(const struct tbt_session *sess);
 static bool tbt_stall_should_replace(struct tbt_carrier *c, u64 now);
 static void tbt_stall_grid_note(struct tbt_session *sess, u64 t_ns,
                                 bool recovered);
-static int tbt_carrier_add(struct tbt_session *sess);
 static bool tbt_carriers_all_dead(struct tbt_session *sess);
 static void tbt_carrier_capacity_check(struct tbt_session *sess);
 
@@ -519,39 +518,26 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
          * interval; c->last_una_ns carries it between polls. */
         u64 stall_since_ns = c->last_una_ns;
 
-        /* Long stall: restore capacity before the user can feel it. Grow the
-         * stripe when a slot is free; otherwise replace this carrier at its
-         * own index. The decision is the optimal-stopping rule above, not a
-         * fixed timer, and backpressure is never taken here. */
+        /* Long stall: replace this carrier at its own index. Growing the
+         * stripe (tbt_carrier_add) stays disabled until the far side extends
+         * its n_car on join; until then a new index would only be refused by
+         * the peer, so no dial is spent on it. The decision is the
+         * optimal-stopping rule above, not a fixed timer, and backpressure is
+         * never taken here. */
         if (READ_ONCE(c->stalled) && !paused && wnd &&
             tbt_stall_should_replace(c, now))
         {
-            int aerr = tbt_carrier_add(sess);
-
-            if (!aerr)
-            {
-                /* Capacity is back; leave the paused path to recover, and
-                 * give the new carrier the same window before judging it. */
-                c->stall_since_ns = now;
-                WRITE_ONCE(sess->stall_replace_reason,
-                           TBT_STALL_REPLACE_NONE);
-            }
+            atomic64_inc(&sess->stall_replaced);
+            if (READ_ONCE(sess->stall_replace_reason) ==
+                TBT_STALL_REPLACE_RETRANS)
+                atomic64_inc(&sess->stall_replace_retrans);
             else
-            {
-                if (aerr != -EOPNOTSUPP)
-                    atomic64_inc(&sess->carrier_add_fail);
-                atomic64_inc(&sess->stall_replaced);
-                if (READ_ONCE(sess->stall_replace_reason) ==
-                    TBT_STALL_REPLACE_RETRANS)
-                    atomic64_inc(&sess->stall_replace_retrans);
-                else
-                    atomic64_inc(&sess->stall_replace_econ);
-                tbt_stall_grid_note(sess, now - c->stall_since_ns, false);
-                sess->last_stall_replace_ns = now;
-                tbt_carrier_sk_put(sk);
-                tbt_carrier_lost(sess, c);
-                return;
-            }
+                atomic64_inc(&sess->stall_replace_econ);
+            tbt_stall_grid_note(sess, now - c->stall_since_ns, false);
+            sess->last_stall_replace_ns = now;
+            tbt_carrier_sk_put(sk);
+            tbt_carrier_lost(sess, c);
+            return;
         }
 
         /* Bound on a paused carrier. Keepalive normally closes a half-open
@@ -1880,8 +1866,13 @@ static bool tbt_carriers_all_dead(struct tbt_session *sess)
  * its share mapping is fixed at cfg.carriers, so a new index would renumber
  * the blocks already in flight; it replaces the stalled carrier instead.
  * Returns 0, -EOPNOTSUPP (not an ARQ near session), -ENOSPC (module limit),
- * -EBUSY, or -ENOMEM. Runs from the poll work, so it may sleep. */
-static int tbt_carrier_add(struct tbt_session *sess)
+ * -EBUSY, or -ENOMEM. Runs from the poll work, so it may sleep.
+ *
+ * Reserved until the far side can extend its own n_car on join: today
+ * tbt_session_join() refuses an index >= sess->n_car, so a grown stripe would
+ * spend dials on carriers the peer rejects. No caller; carrier_add and
+ * carrier_add_fail therefore stay 0. */
+static int __maybe_unused tbt_carrier_add(struct tbt_session *sess)
 {
     struct tbt_carrier *c;
     u16 idx;
@@ -1924,26 +1915,16 @@ static int tbt_carrier_add(struct tbt_session *sess)
     return 0;
 }
 
-/* Backpressure is the last resort. When no carrier can carry and the stripe
- * cannot grow (FEC's fixed mapping, the far side, the module limit, or an
- * allocation failure), count the edge once; the user socket's own window does
- * the actual stopping, and this layer never drops a frame or resets a stream
- * for it. */
+/* Backpressure is the last resort. Growth is disabled until the far side can
+ * extend n_car, so "no carrier can carry" is the whole condition: every slot
+ * is stopping and the replacement worker has not produced a live one yet.
+ * Count the edge once; the user socket's own window does the actual stopping,
+ * and this layer never drops a frame or resets a stream for it. */
 static void tbt_carrier_capacity_check(struct tbt_session *sess)
 {
-    int err;
-
     if (!sess || !sess->tunnel || READ_ONCE(sess->closing))
         return;
     if (!tbt_carriers_all_dead(sess))
-    {
-        WRITE_ONCE(sess->backpressure, false);
-        return;
-    }
-    err = tbt_carrier_add(sess);
-    /* A paced retry (-EAGAIN) and a busy slot are not exhaustion: the stripe
-     * can still grow, so they never move the user into backpressure. */
-    if (!err || err == -EAGAIN || err == -EBUSY)
     {
         WRITE_ONCE(sess->backpressure, false);
         return;
@@ -1952,8 +1933,8 @@ static void tbt_carrier_capacity_check(struct tbt_session *sess)
     {
         WRITE_ONCE(sess->backpressure, true);
         atomic64_inc(&sess->backpressure_enter);
-        pr_info_ratelimited("tbtun: tunnel %llu no carrier can carry and the stripe cannot grow (%d): user side backpressured\n",
-                            (unsigned long long)sess->tunnel->cfg.id, err);
+        pr_info_ratelimited("tbtun: tunnel %llu no carrier can carry: user side backpressured\n",
+                            (unsigned long long)sess->tunnel->cfg.id);
     }
 }
 
