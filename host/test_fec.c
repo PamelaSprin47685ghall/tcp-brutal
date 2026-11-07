@@ -353,6 +353,18 @@ static void test_hdr_check(void)
     h.payload_len = 8192;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "DATA payload_len over configured S");
 
+    /* epoch is the block's last real share length: 0 (full) or 1..S. The
+     * receiver turns it into a delivery length, so S+1 must be refused. */
+    h = data_hdr();
+    h.epoch = 64;
+    ok_int(tbt_fec_hdr_check(&h, 64), 0, "DATA epoch=S");
+    h = data_hdr();
+    h.epoch = 65;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "DATA epoch=S+1");
+    h = parity_hdr();
+    h.epoch = 65;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "PARITY epoch=S+1");
+
     h = data_hdr();
     h.win_len = 1;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "DATA win_len != 0");

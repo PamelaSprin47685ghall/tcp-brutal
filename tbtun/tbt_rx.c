@@ -535,12 +535,21 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
     u8 key[TBT_CRYPTO_KEY_LEN];
     int err = 0;
 
+    TBT_DIAG("hello crypto parse tunnel=%llu body_len=%zu",
+             (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+             len);
     if (tbt_crypto_hello_parse(body, len, &enabled, &key_id, peer_nonce,
                                hello_key))
     {
         *why = "crypto hello parse";
+        pr_warn_ratelimited("tbtun: tunnel %llu: HELLO crypto parse failed: -EPROTO\n",
+                            (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0));
         return -EPROTO;
     }
+    TBT_DIAG("hello crypto parsed tunnel=%llu enabled=%d key_id=%u have_key=%d key_peer=%d",
+             (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+             enabled, key_id, READ_ONCE(sess->crypto_have_key),
+             READ_ONCE(sess->crypto_key_peer));
 
     spin_lock(&sess->lock);
     if (enabled != sess->crypto)
@@ -609,6 +618,16 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
 
 out:
     spin_unlock(&sess->lock);
+    if (err)
+        pr_warn_ratelimited("tbtun: tunnel %llu: HELLO crypto resolve failed: %s (%d)\n",
+                            (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+                            *why, err);
+    else
+        TBT_DIAG("hello crypto ready tunnel=%llu key_peer=%d tx_ready=%d rx_ready=%d",
+                 (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+                 READ_ONCE(sess->crypto_key_peer),
+                 READ_ONCE(sess->crypto_tx_ready),
+                 READ_ONCE(sess->crypto_ready));
     return err;
 }
 
@@ -805,6 +824,29 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
     struct tbt_parser *p = c->parser;
     struct tbt_session *sess = c->sess;
     bool near = sess->tunnel->cfg.role == TBT_ROLE_NEAR;
+
+    /* Before the peer's HELLO is accepted, print the exact parser state the
+     * container is about to consume. `have` is a byte count used as a memmove
+     * length below; a dirty value here is the difference between a clean
+     * HELLO parse and an out-of-bounds copy. Bounded by saw_hello: after the
+     * handshake this line disappears. */
+    if (!READ_ONCE(c->saw_hello))
+        TBT_DIAG("http rx parse tunnel=%llu carrier=%u gen=%u have=%zu http_have=%u hdr_done=%d req_done=%d chunk_state=%d",
+                 (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+                 c->index, c->gen, p ? p->have : 0, c->http_have,
+                 c->http_hdr_done, c->http_req_done,
+                 c->http_rx ? c->http_rx->chunk.state : -1);
+
+    /* `have` is a byte count that the memmove() below uses as a length. The
+     * parser buffer is kmalloc()ed, so a carrier whose initialization was
+     * missed would carry a dirty value here and turn that copy into an
+     * unbounded overwrite of kernel memory. Refuse the carrier instead. */
+    if (!p || !c->http_rx || p->have > sizeof(p->buf) ||
+        c->http_have > TBT_HTTP_HDR_MAX)
+    {
+        atomic64_inc(&sess->http_parse_err);
+        return tbt_http_bad(c, "parser state", -EPROTO);
+    }
 
     for (;;)
     {
@@ -1108,6 +1150,11 @@ static int tbt_rx_parse(struct tbt_carrier *c)
  * the same single writer that runs the actor. */
 int tbt_rx_parse_pending(struct tbt_carrier *c)
 {
+    /* The parser buffer is kmalloc()ed and the carrier reuse path keeps it.
+     * A missed initialization leaves `have` dirty, and both parsers use it
+     * as a length; refuse the carrier instead of walking that many bytes. */
+    if (!c->parser || c->parser->have > sizeof(c->parser->buf))
+        return -EPROTO;
     if (!c->parser->have)
         return 0;
     return tbt_rx_parse(c);
@@ -1124,6 +1171,12 @@ int tbt_rx_skb(struct tbt_carrier *c, struct sk_buff *skb, unsigned int offset,
 {
     struct tbt_parser *p = c->parser;
     size_t done = 0;
+
+    /* The same upper bound tbt_rx_parse_pending() applies. `have` is a length
+     * in both parsers; a dirty value larger than the buffer would make the
+     * room computation below underflow to a huge `take`. */
+    if (!p || p->have > sizeof(p->buf))
+        return -EPROTO;
 
     while (done < len)
     {

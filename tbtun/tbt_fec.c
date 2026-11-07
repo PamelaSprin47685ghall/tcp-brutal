@@ -229,6 +229,12 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
         }
         if (!max_payload || h->payload_len > max_payload)
             return -EPROTO;
+        /* epoch is this block's last real share length, never a byte count
+         * larger than S. The receiver stores it in short_len and uses it as a
+         * delivery length; an unbounded value would read past the block slot.
+         * 0 means "every real share is full". */
+        if (h->epoch > max_payload)
+            return -EPROTO;
         if (h->type == TBT_FEC_PARITY && h->payload_len != max_payload)
             return -EPROTO;
         if (!h->payload_len)

@@ -280,6 +280,19 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
 
     if (!sess || !sess->tunnel || READ_ONCE(sess->closing))
         return;
+    if (sess->diag_poll_round <= 2)
+    {
+        struct sock *dsk = READ_ONCE(c->sk);
+
+        TBT_DIAG("poll r=%u tunnel=%llu carrier=%u gen=%u connected=%d sock=%d sk_state=%d hello_sent=%d up=%d stopping=%d prov=%d retry_in_ms=%lld state=%u",
+                 sess->diag_poll_round,
+                 (unsigned long long)sess->tunnel->cfg.id, c->index, c->gen,
+                 atomic_read(&c->connected), !!dsk,
+                 dsk ? READ_ONCE(dsk->sk_state) : -1,
+                 READ_ONCE(c->hello_sent), atomic_read(&c->up),
+                 atomic_read(&c->stopping), c->provisional,
+                 (long long)(c->retry_at_ns - now) / NSEC_PER_MSEC, c->state);
+    }
     if (atomic_read(&c->stopping))
     {
         schedule_delayed_work(&sess->w_replace, 0);
@@ -320,6 +333,9 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
             if (tbt_dial_take(sess))
             {
                 c->retry_at_ns = now + 200 * NSEC_PER_MSEC;
+                TBT_DIAG("poll dial tunnel=%llu carrier=%u gen=%u r=%u",
+                         (unsigned long long)sess->tunnel->cfg.id, c->index,
+                         c->gen, sess->diag_poll_round);
                 schedule_work(&c->w_connect);
             }
             else
@@ -555,6 +571,9 @@ void tbt_session_poll_work(struct work_struct *w)
 
     if (!sess->tunnel || READ_ONCE(sess->closing))
         return;
+    /* Single writer: one delayed work owns this pass. The per-carrier poll
+     * reads it only to bound its first-pass snapshots. */
+    sess->diag_poll_round++;
     for (i = 0; i < sess->n_car; i++)
     {
         spin_lock(&sess->lock);
@@ -670,6 +689,17 @@ static void tbt_car_rx_work(struct work_struct *w)
         atomic64_inc(&c->sess->rx_work_early);
         return;
     }
+    /* First window only: before the peer's HELLO has been parsed. This is the
+     * run that hands the first bytes to the container parser; if the process
+     * dies inside that parse, this line is the last evidence of the state it
+     * started from. */
+    if (!READ_ONCE(c->saw_hello))
+        TBT_DIAG("rx work tunnel=%llu carrier=%u gen=%u sk_state=%u copied=%u rcv_nxt=%u have=%zu http_have=%u",
+                 (unsigned long long)c->sess->tunnel->cfg.id, c->index, c->gen,
+                 READ_ONCE(sk->sk_state),
+                 READ_ONCE(tcp_sk(sk)->copied_seq),
+                 READ_ONCE(tcp_sk(sk)->rcv_nxt), c->parser->have,
+                 c->http_have);
 
     /* Pause rule (tbt_rx.c): if the app-facing queue is full, stop reading the
      * carrier. TCP then advertises a closed window and the far side slows
@@ -914,11 +944,17 @@ static int tbt_carrier_http_begin(struct tbt_carrier *c)
         mutex_unlock(&c->http_lock);
         return 0;
     }
+    TBT_DIAG("http begin tunnel=%llu carrier=%u gen=%u role=%u req_done=%d profile=%u",
+             (unsigned long long)sess->tunnel->cfg.id, c->index, c->gen,
+             sess->tunnel->cfg.role, c->http_req_done, c->profile);
     /* 8 KiB on the stack trips -Wframe-larger-than; the caller is sleepable,
      * so allocate. */
     hdr = kmalloc(TBT_HTTP_REQ_MAX, GFP_KERNEL);
     if (!hdr)
     {
+        pr_warn_ratelimited("tbtun: tunnel %llu carrier %u gen %u: HTTP header alloc failed: -ENOMEM\n",
+                            (unsigned long long)sess->tunnel->cfg.id,
+                            c->index, c->gen);
         mutex_unlock(&c->http_lock);
         return -ENOMEM;
     }
@@ -934,6 +970,9 @@ static int tbt_carrier_http_begin(struct tbt_carrier *c)
         kfree(hdr);
         mutex_unlock(&c->http_lock);
         atomic64_inc(&sess->http_parse_err);
+        pr_warn_ratelimited("tbtun: tunnel %llu carrier %u gen %u: HTTP header build failed: -EIO\n",
+                            (unsigned long long)sess->tunnel->cfg.id,
+                            c->index, c->gen);
         return -EIO;
     }
     if (sess->tunnel->cfg.role == TBT_ROLE_NEAR && c->index == 0)
@@ -944,6 +983,9 @@ static int tbt_carrier_http_begin(struct tbt_carrier *c)
         WRITE_ONCE(sess->http_cap_req_len, (u16)cap);
     }
     err = tbt_carrier_send_whole(c, hdr, hlen);
+    TBT_DIAG("http header write tunnel=%llu carrier=%u gen=%u ret=%d hlen=%zu",
+             (unsigned long long)sess->tunnel->cfg.id, c->index, c->gen, err,
+             hlen);
     kfree(hdr);
     if (err)
     {
@@ -1081,6 +1123,14 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
         if (sess->tunnel->cfg.role == TBT_ROLE_NEAR && c->index == 0)
             tbt_http_capture_chunk(sess, c->http_tx, n);
         err = tbt_carrier_send_whole(c, c->http_tx, n);
+        if (fr->hdr.type == TBT_F_HELLO && err != -EAGAIN)
+            TBT_DIAG("HELLO chunk write tunnel=%llu carrier=%u gen=%u ret=%d len=%zu write_seq=%u snd_una=%u sndbuf=%u wmem=%u",
+                     (unsigned long long)sess->tunnel->cfg.id, c->index,
+                     c->gen, err, n,
+                     READ_ONCE(tcp_sk(c->sk)->write_seq),
+                     READ_ONCE(tcp_sk(c->sk)->snd_una),
+                     READ_ONCE(c->sk->sk_sndbuf),
+                     READ_ONCE(c->sk->sk_wmem_queued));
         if (err)
             return err;
         c->tx_frames++;
@@ -1174,6 +1224,10 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
     if (err < 0)
     {
         sess->carrier_err++;
+        if (fr->hdr.type == TBT_F_HELLO)
+            pr_warn_ratelimited("tbtun: tunnel %llu carrier %u gen %u: HELLO write failed: %d total=%zu\n",
+                                (unsigned long long)sess->tunnel->cfg.id,
+                                c->index, c->gen, err, total);
         return err;
     }
     if ((size_t)err != total)
@@ -1202,6 +1256,12 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
         c->part_len = (u16)(tail_h + tail_d);
         c->part_off = 0;
     }
+    if (fr->hdr.type == TBT_F_HELLO)
+        TBT_DIAG("HELLO raw write tunnel=%llu carrier=%u gen=%u ret=%d total=%zu short=%d write_seq=%u snd_una=%u",
+                 (unsigned long long)sess->tunnel->cfg.id, c->index, c->gen,
+                 err, total, (size_t)err != total,
+                 READ_ONCE(tcp_sk(c->sk)->write_seq),
+                 READ_ONCE(tcp_sk(c->sk)->snd_una));
     c->tx_frames++;
     c->tx_bytes += total;
     if (fr->hdr.type == TBT_F_DATA)
@@ -1247,13 +1307,13 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
     char *http_tx, *http_hdr, *part;
     struct tbt_parser *parser;
     struct tbt_http_rx *http_rx;
+    bool reused;
 
     c = tbt_carrier_take_dead(sess);
+    reused = c != NULL;
     if (c)
     {
-        /* Reset every scalar but keep the buffers. parser->have was cleared
-         * by tbt_carrier_release(); the HTTP assembler is reset by
-         * tbt_http_rx_new_message() when the first chunk is parsed. */
+        /* Reset every scalar but keep the buffers. */
         http_tx = c->http_tx;
         http_hdr = c->http_hdr;
         part = c->part;
@@ -1269,7 +1329,12 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
          * and tbt_carrier_retire()/free() call list_del_init() on it. */
         INIT_LIST_HEAD(&c->node);
         INIT_LIST_HEAD(&c->release_node);
-        parser->have = 0;
+        /* A reused object must not resume the retired stream: clear the
+         * parser's byte count and the assembler's chunk state, not only
+         * parser->have. A dirty `have` is used as a memmove() length by
+         * tbt_http_rx_parse(). */
+        memset(parser, 0, sizeof(*parser));
+        tbt_http_rx_new_message(http_rx);
     }
     else
     {
@@ -1284,8 +1349,12 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
         c->http_tx = kmalloc(TBT_HTTP_FRAME_MAX, GFP_KERNEL);
         c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX, GFP_KERNEL);
         c->part = kmalloc(TBT_CAR_PART_MAX, GFP_KERNEL);
-        c->parser = kmalloc(sizeof(*c->parser), GFP_KERNEL);
-        c->http_rx = kmalloc(sizeof(*c->http_rx), GFP_KERNEL);
+        /* Zeroed is the defined initial state: have == 0 for the parser and
+         * a SIZE-state chunk parser for the assembler. kmalloc() would hand
+         * the carrier whatever the previous slab user left there; a dirty
+         * `have` then drives an unbounded memmove() in tbt_http_rx_parse(). */
+        c->parser = kzalloc(sizeof(*c->parser), GFP_KERNEL);
+        c->http_rx = kzalloc(sizeof(*c->http_rx), GFP_KERNEL);
         if (!c->http_tx || !c->http_hdr || !c->part || !c->parser ||
             !c->http_rx)
         {
@@ -1306,6 +1375,12 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
     c->class = sess->tunnel ? sess->tunnel->cfg.profile : 1;
     c->join_deadline_ns = ktime_get_ns() + (u64)TBT_JOIN_TIMEOUT_MS * NSEC_PER_MSEC;
     c->last_una_move_ns = ktime_get_ns();
+    TBT_DIAG("tunnel=%llu carrier=%u gen=%u %s spare=%d profile=%u state=%u join_deadline_ms=%u parser_have=%zu http_chunk_state=%d",
+             (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+             index, c->gen, reused ? "reused" : "allocated", c->spare,
+             c->profile, c->state, TBT_JOIN_TIMEOUT_MS,
+             c->parser ? c->parser->have : 0,
+             c->http_rx ? c->http_rx->chunk.state : -1);
     mutex_init(&c->http_lock);
     INIT_WORK(&c->w_connect, tbt_car_connect_work);
     INIT_WORK(&c->w_rx, tbt_car_rx_work);
@@ -1339,6 +1414,15 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c)
     {
         c->lost_counted = true;
         atomic64_inc(&sess->carrier_lost);
+        /* Presence only. tbt_carrier_release() frees the socket and only then
+         * clears c->sk, so a dereference here could touch a freed object;
+         * the socket state is in the debug snapshot and in /proc instead. */
+        pr_warn_ratelimited("tbtun: tunnel %llu carrier %u gen %u lost: sock=%d connected=%d hello_sent=%d up=%d\n",
+                            (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+                            c->index, c->gen,
+                            !!READ_ONCE(c->sk),
+                            atomic_read(&c->connected),
+                            READ_ONCE(c->hello_sent), atomic_read(&c->up));
     }
     /* Tell the far to free this (index, gen) before the replacement dials.
      * Without it the replacement's HELLO hits join_dup and the two sides
@@ -1429,6 +1513,9 @@ static void tbt_carrier_release(struct tbt_session *sess, struct tbt_carrier *c)
     if (c->parser->have)
         sess->recv_partial_discard++;
     c->parser->have = 0;
+    /* The assembler holds chunk state and a partial record too; a carrier
+     * reused later must not resume the retired stream's message. */
+    tbt_http_rx_new_message(c->http_rx);
     if (c->local_port)
     {
         tbt_port_free(c->local_port);
@@ -1553,6 +1640,10 @@ int tbt_carriers_start(struct tbt_tunnel *t, struct tbt_session *sess)
     if (t->cfg.role != TBT_ROLE_NEAR)
         return 0;
     rate = tbt_dial_rate(sess);
+    TBT_DIAG("tunnel=%llu carriers_start enter n_car=%u n_pri=%u n=%u m=%u carriers=%u fec=%d crypto=%d profile=%u dial_rate=%u burst=%u",
+             (unsigned long long)t->cfg.id, sess->n_car, sess->n_pri,
+             t->cfg.n, t->cfg.m, t->cfg.carriers, sess->fec, sess->crypto,
+             t->cfg.profile, rate, TBT_DIAL_FIRST_BURST);
     spin_lock(&sess->dial_lock);
     sess->dial_refill_ns = ktime_get_ns();
     sess->dial_tokens = rate < TBT_DIAL_FIRST_BURST ? rate
@@ -1565,10 +1656,17 @@ int tbt_carriers_start(struct tbt_tunnel *t, struct tbt_session *sess)
         if (!c)
         {
             atomic64_inc(&sess->carrier_alloc_fail);
+            pr_warn_ratelimited("tbtun: tunnel %llu: carrier %d alloc failed: -ENOMEM\n",
+                                (unsigned long long)t->cfg.id, i);
             return -ENOMEM;
         }
         sess->car[i] = c;
+        TBT_DIAG("tunnel=%llu carrier=%d gen=%u spare=%d profile=%u state=%u installed",
+                 (unsigned long long)t->cfg.id, i, c->gen, c->spare,
+                 c->profile, c->state);
     }
+    TBT_DIAG("tunnel=%llu carriers_start done n_car=%u",
+             (unsigned long long)t->cfg.id, sess->n_car);
     return 0;
 }
 
@@ -2096,8 +2194,17 @@ static void tbt_car_connect_work(struct work_struct *w)
 
     if (t->cfg.role == TBT_ROLE_FAR)
         return;
+    TBT_DIAG("tunnel=%llu carrier=%u gen=%u enter stopping=%d sock=%d lport=%u retry_at=%lld",
+             (unsigned long long)t->cfg.id, c->index, c->gen,
+             atomic_read(&c->stopping), !!READ_ONCE(c->sock), c->local_port,
+             (long long)(c->retry_at_ns - ktime_get_ns()) / NSEC_PER_MSEC);
     if (atomic_read(&c->stopping) || READ_ONCE(c->sock))
+    {
+        TBT_DIAG("tunnel=%llu carrier=%u gen=%u skip stopping=%d sock=%d",
+                 (unsigned long long)t->cfg.id, c->index, c->gen,
+                 atomic_read(&c->stopping), !!READ_ONCE(c->sock));
         return;
+    }
 
     if (!c->local_port)
     {
@@ -2117,17 +2224,31 @@ static void tbt_car_connect_work(struct work_struct *w)
     err = sock_create_kern(sess->net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &s);
     if (err)
         goto fail;
+    TBT_DIAG("tunnel=%llu carrier=%u gen=%u sock_create ok",
+             (unsigned long long)t->cfg.id, c->index, c->gen);
     /* The replacement carrier often reuses the port the dead one just freed,
      * which may still be in TIME_WAIT. */
     sock_set_reuseaddr(s->sk);
     err = kernel_bind(s, (tbt_sockaddr *)&local, sizeof(local));
     if (err)
         goto release;
+    TBT_DIAG("tunnel=%llu carrier=%u gen=%u bind ok local=%pI4:%u peer=%pI4:%u",
+             (unsigned long long)t->cfg.id, c->index, c->gen,
+             &local.sin_addr, ntohs(local.sin_port), &addr.sin_addr,
+             ntohs(addr.sin_port));
     /* Before the SYN: the handshake freezes the window scale from this
      * socket's receive buffer. */
     tbt_car_setsockbuf(s, &t->cfg, sess->n_pri);
     s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
-    err = tbt_connect_bounded(sess, s, &addr);
+    {
+        u64 t0 = ktime_get_ns();
+
+        err = tbt_connect_bounded(sess, s, &addr);
+        TBT_DIAG("tunnel=%llu carrier=%u gen=%u connect ret=%d elapsed_ms=%llu sk_state=%u",
+                 (unsigned long long)t->cfg.id, c->index, c->gen, err,
+                 (ktime_get_ns() - t0) / NSEC_PER_MSEC,
+                 READ_ONCE(s->sk->sk_state));
+    }
     if (err)
         goto release;
 
@@ -2142,6 +2263,9 @@ static void tbt_car_connect_work(struct work_struct *w)
     s->sk->sk_write_space = tbt_car_write_space;
     s->sk->sk_state_change = tbt_car_state_change;
     write_unlock_bh(&s->sk->sk_callback_lock);
+    TBT_DIAG("tunnel=%llu carrier=%u gen=%u callbacks installed lport=%u",
+             (unsigned long long)t->cfg.id, c->index, c->gen,
+             ntohs(inet_sk(s->sk)->inet_sport));
 
 
     atomic_set(&c->connected, 1);
@@ -2149,6 +2273,10 @@ static void tbt_car_connect_work(struct work_struct *w)
     c->last_una = tcp_sk(s->sk)->snd_una;
     c->last_una_ns = ktime_get_ns();
     c->last_una_move_ns = ktime_get_ns();
+    TBT_DIAG("tunnel=%llu carrier=%u gen=%u connected=1 state=%u snd_una=%llu tx_ready=%d key_id=%u",
+             (unsigned long long)t->cfg.id, c->index, c->gen, c->state,
+             (unsigned long long)c->last_una, READ_ONCE(sess->crypto_tx_ready),
+             sess->crypto_key_id);
     /* The peer may have written its HELLO before our sk_data_ready was
      * installed (the callback goes in after kernel_connect returns, and the
      * stock callback already fired for the queued data). Schedule the read
@@ -2156,11 +2284,24 @@ static void tbt_car_connect_work(struct work_struct *w)
      * in the receive queue and the carrier never comes up (measured: probe I,
      * the near dialled 73 carriers, every far accept waited for HELLO). */
     tbt_car_schedule_rx(c);
-    pr_info("tbtun: tunnel %llu carrier %u DIALED lport=%u peer=%pI4:%u\n", t->cfg.id,
-            c->index, ntohs(inet_sk(s->sk)->inet_sport), &t->cfg.peer_addr,
-            ntohs(t->cfg.peer_port));
-    tbt_tx_hello(sess, c->index, GFP_KERNEL);
+    TBT_DIAG("tunnel=%llu carrier=%u gen=%u rx scheduled",
+             (unsigned long long)t->cfg.id, c->index, c->gen);
+    /* One line per dial: 256 of them at a 256-carrier start, so it follows the
+     * same debug>=1 gate as the rest of the bring-up trace. */
+    TBT_DIAG("tunnel=%llu carrier=%u gen=%u dialed lport=%u peer=%pI4:%u",
+             (unsigned long long)t->cfg.id, c->index, c->gen,
+             ntohs(inet_sk(s->sk)->inet_sport), &t->cfg.peer_addr,
+             ntohs(t->cfg.peer_port));
+    {
+        int herr = tbt_tx_hello(sess, c->index, GFP_KERNEL);
+
+        TBT_DIAG("tunnel=%llu carrier=%u gen=%u hello enqueued ret=%d ctl_queued=%u tx_queued=%u",
+                 (unsigned long long)t->cfg.id, c->index, c->gen, herr,
+                 READ_ONCE(sess->ctl_queued), READ_ONCE(sess->tx_queued));
+    }
     tbt_tx_wake(sess);
+    TBT_DIAG("tunnel=%llu carrier=%u gen=%u connect work done",
+             (unsigned long long)t->cfg.id, c->index, c->gen);
     return;
 
 release:
@@ -2193,6 +2334,13 @@ int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp)
     u8 body[TBT_HELLO_BODY_LEN_V6];
     struct tbt_tunnel *t = sess->tunnel;
     u16 blen = sess->fec ? TBT_HELLO_BODY_LEN_V6 : TBT_HELLO_BODY_LEN;
+    struct tbt_carrier *hc = index < sess->n_car ? READ_ONCE(sess->car[index])
+                                                 : NULL;
+
+    TBT_DIAG("HELLO build tunnel=%llu carrier=%u gen=%u fec=%d profile=%u blen=%u key_id=%u have_key=%d tx_ready=%d",
+             (unsigned long long)t->cfg.id, index, hc ? hc->gen : 0, sess->fec,
+             hc ? hc->profile : t->cfg.profile, blen, sess->crypto_key_id,
+             sess->crypto_have_key, READ_ONCE(sess->crypto_tx_ready));
 
     memset(body, 0, sizeof(body));
     body[0] = sess->fec ? TBT_WIRE_VERSION_V6 : TBT_WIRE_VERSION;
@@ -2209,6 +2357,8 @@ int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp)
                               sess->crypto_key_id == TBT_CRYPTO_KEY_ID_HELLO
                                   ? sess->crypto_key
                                   : NULL);
+    TBT_DIAG("HELLO body filled tunnel=%llu carrier=%u gen=%u profile_gen_byte=%u",
+             (unsigned long long)t->cfg.id, index, hc ? hc->gen : 0, body[22]);
     return tbt_tx_control_pinned(sess, NULL, index, TBT_F_HELLO, 0, 0, body,
                                  blen, false, gfp);
 }

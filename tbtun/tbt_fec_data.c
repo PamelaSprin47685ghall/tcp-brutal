@@ -1000,6 +1000,11 @@ static void tbt_fec_deliver_ready(struct tbt_session *sess)
                     if (tail > 0 && tail <= rx->s)
                         len = (u16)tail;
                 }
+                /* Defence in depth: hdr_check() already refuses an epoch
+                 * larger than S, but a delivery length that named more than
+                 * one slot would read past this block's buffer. */
+                if (len > rx->s)
+                    len = rx->s;
                 tbt_rx_fec_deliver(st, off - rx->stream_base,
                                    b->data + (size_t)p * rx->s, len);
                 off += len;
@@ -1346,15 +1351,34 @@ int tbt_fec_data_init(struct tbt_session *sess)
     u32 per, slots, total, i;
 
     if (!n || !m || (u16)n + (u16)m > TBT_FEC_MAX_SHARES)
+    {
+        pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: n=%u m=%u exceeds %u shares\n",
+                            (unsigned long long)t->cfg.id, n, m,
+                            TBT_FEC_MAX_SHARES);
         return -EINVAL;
+    }
     if (t->cfg.mode == 3)
+    {
+        pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: mode=3 is SC-LDPC\n",
+                            (unsigned long long)t->cfg.id);
         return -EOPNOTSUPP; /* SC-LDPC is D's codec, not a silent RLNC alias */
+    }
     shares = (u16)(n + m);
     if (!t->cfg.carriers || t->cfg.carriers % shares)
+    {
+        pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: carriers=%u is not a multiple of n+m=%u\n",
+                            (unsigned long long)t->cfg.id, t->cfg.carriers,
+                            shares);
         return -EINVAL;
+    }
     groups = (u16)(t->cfg.carriers / shares);
     if (!groups || groups > TBT_FEC_MAX_GROUPS)
+    {
+        pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: groups=%u outside 1..%u\n",
+                            (unsigned long long)t->cfg.id, groups,
+                            TBT_FEC_MAX_GROUPS);
         return -EINVAL;
+    }
     /* One group keeps the proven block code (w = n). A grouped session uses
      * the configured window (2n by default): its wider coefficient space lets
      * four parity rows reach rank 4, which the even-weight rows of w = n
@@ -1383,6 +1407,11 @@ int tbt_fec_data_init(struct tbt_session *sess)
     if (slots > 256)
         slots = 256;
     total = (u32)groups * slots;
+    TBT_DIAG("fec init start tunnel=%llu n=%u m=%u carriers=%u mode=%u groups=%u w=%u d=%u slots=%u total_blk=%u arena_kb=%u",
+             (unsigned long long)t->cfg.id, n, m, t->cfg.carriers,
+             t->cfg.mode, groups, w, d, slots, total,
+             /* Data plus parity for every block, not the descriptor array. */
+             (u32)(((size_t)total * shares * TBT_FEC_S) >> 10));
 
     rx = kzalloc(sizeof(*rx), GFP_KERNEL);
     tx = kzalloc(sizeof(*tx), GFP_KERNEL);
@@ -1395,10 +1424,20 @@ int tbt_fec_data_init(struct tbt_session *sess)
     rx->groups = groups;
     rx->slots = (u16)slots;
     rx->blk = kvzalloc((size_t)total * sizeof(*rx->blk), GFP_KERNEL);
+    TBT_DIAG("fec grouped rx codec start tunnel=%llu groups=%u n=%u m=%u w=%u d=%u",
+             (unsigned long long)t->cfg.id, groups, n, m, w, d);
     rx->codec = tbt_fec_grouped_new(groups, n, m, n, w, TBT_FEC_S, d,
                                     tbt_fec_base_nonce(sess));
+    TBT_DIAG("fec grouped rx codec %s tunnel=%llu groups=%u blk=%d",
+             rx->codec ? "ok" : "FAILED", (unsigned long long)t->cfg.id,
+             groups, !!rx->blk);
     if (!rx->blk || !rx->codec)
+    {
+        pr_warn_ratelimited("tbtun: tunnel %llu: fec rx arena/codec failed: blk=%d codec=%d\n",
+                            (unsigned long long)t->cfg.id, !!rx->blk,
+                            !!rx->codec);
         goto fail;
+    }
 
     tx->ring_size = TBT_FEC_TX_RING;
     tx->nonce = tbt_fec_base_nonce(sess);
@@ -1416,17 +1455,32 @@ int tbt_fec_data_init(struct tbt_session *sess)
     tx->pkt = kvzalloc(TBT_FEC_S, GFP_KERNEL);
     tx->rec = kvzalloc(TBT_FEC_REC_MAX, GFP_KERNEL);
     tx->g = kvzalloc((size_t)groups * sizeof(*tx->g), GFP_KERNEL);
+    TBT_DIAG("fec grouped tx codec start tunnel=%llu groups=%u n=%u m=%u w=%u d=%u",
+             (unsigned long long)t->cfg.id, groups, n, m, w, d);
     tx->codec = tbt_fec_grouped_new(groups, n, m, n, w, TBT_FEC_S, d,
                                     tx->nonce);
+    TBT_DIAG("fec grouped tx codec %s tunnel=%llu groups=%u ring=%d pkt=%d rec=%d g=%d",
+             tx->codec ? "ok" : "FAILED", (unsigned long long)t->cfg.id,
+             groups, !!tx->ring, !!tx->pkt, !!tx->rec, !!tx->g);
     if (!tx->ring || !tx->pkt || !tx->rec || !tx->g || !tx->codec)
+    {
+        pr_warn_ratelimited("tbtun: tunnel %llu: fec tx arena/codec failed: ring=%d pkt=%d rec=%d g=%d codec=%d\n",
+                            (unsigned long long)t->cfg.id, !!tx->ring,
+                            !!tx->pkt, !!tx->rec, !!tx->g, !!tx->codec);
         goto fail;
+    }
 
     for (i = 0; i < groups; i++)
     {
         tx->g[i].blk = kvzalloc((size_t)n * TBT_FEC_S, GFP_KERNEL);
         tx->g[i].par = kvzalloc((size_t)m * TBT_FEC_S, GFP_KERNEL);
         if (!tx->g[i].blk || !tx->g[i].par)
+        {
+            pr_warn_ratelimited("tbtun: tunnel %llu: fec tx group alloc failed: group=%u blk=%d par=%d\n",
+                                (unsigned long long)t->cfg.id, i,
+                                !!tx->g[i].blk, !!tx->g[i].par);
             goto fail;
+        }
     }
     for (i = 0; i < total; i++)
     {
@@ -1439,7 +1493,13 @@ int tbt_fec_data_init(struct tbt_session *sess)
         b->dlen = kvzalloc(TBT_FEC_MAX_SHARES * sizeof(u16), GFP_KERNEL);
         if (!b->data || !b->parity || !b->dpresent || !b->ppresent ||
             !b->dlen)
+        {
+            pr_warn_ratelimited("tbtun: tunnel %llu: fec rx block alloc failed: block=%u of %u data=%d parity=%d dpresent=%d ppresent=%d dlen=%d\n",
+                                (unsigned long long)t->cfg.id, i, total,
+                                !!b->data, !!b->parity, !!b->dpresent,
+                                !!b->ppresent, !!b->dlen);
             goto fail;
+        }
     }
 
     sess->fec_rx = rx;
@@ -1448,9 +1508,14 @@ int tbt_fec_data_init(struct tbt_session *sess)
     spin_lock_init(&sess->fec_out_lock);
     INIT_DELAYED_WORK(&sess->w_fec_tx, tbt_fec_tx_work);
     sess->fec = true;
+    TBT_DIAG("fec init done tunnel=%llu groups=%u slots=%u credit=%u tx_ring=%u",
+             (unsigned long long)t->cfg.id, groups, slots, tx->credit,
+             tx->ring_size);
     return 0;
 
 fail:
+    pr_warn_ratelimited("tbtun: tunnel %llu: fec init failed\n",
+                        (unsigned long long)t->cfg.id);
     sess->fec_rx = rx;
     sess->fec_tx = tx;
     tbt_fec_data_free(sess);

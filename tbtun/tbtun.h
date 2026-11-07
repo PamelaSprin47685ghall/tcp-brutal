@@ -21,7 +21,9 @@
 #include <linux/net.h>
 #include <linux/refcount.h>
 #include <linux/rbtree.h>
+#include <linux/sched.h>
 #include <linux/spinlock.h>
+#include <linux/smp.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
 #include <net/net_namespace.h>
@@ -43,6 +45,38 @@
 #else
 #define TBT_WQ system_unbound_wq
 #endif
+
+/* Bring-up tracing for the carrier window between a completed TCP handshake
+ * and the HELLO reaching the wire, plus the one-shot session and FEC setup
+ * lines. Both macros are silent at the production default `debug=0`, so a
+ * 256-carrier session prints nothing per poll pass, per carrier or per share;
+ * the arguments are not even evaluated. At `debug>=1` they use pr_info/pr_warn,
+ * never pr_debug, because the field hosts do not enable dynamic debug and the
+ * value of these lines is that the last one on the console is the last step
+ * that ran before a hang or a panic. The unique prefix lets a capture filter
+ * them out of the module's ordinary output; function, CPU and pid are on every
+ * line because a step that never logs is the step that did not return. Keep
+ * the call sites one-shot or rate-bounded: logging must not move the timing it
+ * measures.
+ *
+ * A failure an operator must see with `debug=0` does not belong here: use
+ * pr_warn_ratelimited()/pr_err() at the call site. TBT_DIAG_WARN is for a
+ * diagnostic that happens to describe a transient condition. */
+#define TBT_DIAG(fmt, ...)                                            \
+    do {                                                              \
+        if (debug >= 1)                                               \
+            pr_info("tbtun-diag: %s cpu=%u pid=%d " fmt "\n",         \
+                    __func__, raw_smp_processor_id(),                 \
+                    task_pid_nr(current), ##__VA_ARGS__);             \
+    } while (0)
+
+#define TBT_DIAG_WARN(fmt, ...)                                       \
+    do {                                                              \
+        if (debug >= 1)                                               \
+            pr_warn("tbtun-diag: %s cpu=%u pid=%d " fmt "\n",         \
+                    __func__, raw_smp_processor_id(),                 \
+                    task_pid_nr(current), ##__VA_ARGS__);             \
+    } while (0)
 
 /* kernel_bind() and kernel_connect() took struct sockaddr * through 6.18.
  * The "net: Introduce struct sockaddr_unsized" series (net-next-6.19) changed
@@ -784,6 +818,11 @@ struct tbt_session
     u64 prov_reject;      /* accepts refused by the provisional cap; listen */
     atomic64_t carrier_write_space_runs;
     atomic64_t poll_rescues;
+    /* Diagnostic only: 50 ms poll passes since session creation.
+     * tbt_session_poll_work() is the only writer (a single delayed work), and
+     * the per-carrier poll reads it to print the first passes of a carrier's
+     * life. It gates logging, never behavior. */
+    u32 diag_poll_round;
     /* Each carrier's poll work writes this for itself; several carriers run
      * concurrently, so it is atomic like the rx counters above. */
     atomic64_t stall_paused_skips;

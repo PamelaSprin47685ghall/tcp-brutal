@@ -1033,6 +1033,10 @@ int tbt_session_create(struct tbt_tunnel *t)
     struct tbt_session *s;
     int err;
 
+    TBT_DIAG("session create tunnel=%llu role=%u n=%u m=%u carriers=%u fec=%d crypto=%d profile=%u mode=%u w=%u",
+             (unsigned long long)t->cfg.id, t->cfg.role, t->cfg.n, t->cfg.m,
+             t->cfg.carriers, t->cfg.fec, t->cfg.crypto, t->cfg.profile,
+             t->cfg.mode, t->cfg.w);
     s = kzalloc(sizeof(*s), GFP_KERNEL);
     if (!s)
         return -ENOMEM;
@@ -1099,6 +1103,9 @@ int tbt_session_create(struct tbt_tunnel *t)
     }
     if (s->crypto)
     {
+        TBT_DIAG("crypto setup start tunnel=%llu role=%u key_set=%d",
+                 (unsigned long long)t->cfg.id, t->cfg.role,
+                 t->cfg.crypto_key_set);
         get_random_bytes(s->crypto_tx_nonce, sizeof(s->crypto_tx_nonce));
         if (t->cfg.role == TBT_ROLE_NEAR && !s->crypto_have_key)
         {
@@ -1108,10 +1115,18 @@ int tbt_session_create(struct tbt_tunnel *t)
         }
         if (s->crypto_have_key)
         {
-            tbt_crypto_init(&s->crypto_ctx.tx, s->crypto_key,
-                            s->crypto_tx_nonce, 0);
+            int rc = tbt_crypto_init(&s->crypto_ctx.tx, s->crypto_key,
+                                     s->crypto_tx_nonce, 0);
+
             smp_store_release(&s->crypto_tx_ready, true);
+            TBT_DIAG("crypto tx init tunnel=%llu key_id=%u source=%s rc=%d nonce=%*phN",
+                     (unsigned long long)t->cfg.id, s->crypto_key_id,
+                     t->cfg.crypto_key_set ? "configured" : "generated", rc,
+                     TBT_CRYPTO_NONCE_LEN, s->crypto_tx_nonce);
         }
+        else
+            TBT_DIAG("crypto tx init tunnel=%llu waits for the peer key",
+                     (unsigned long long)t->cfg.id);
     }
     /* A configured far `peer=` fixes the anchor before the first HELLO.  The
      * port is grammar filler: the far side compares the carrier's source
@@ -1134,7 +1149,12 @@ int tbt_session_create(struct tbt_tunnel *t)
         /* FEC v6 works in both containers: raw records, or one 40-byte record
          * per HTTP chunk with the request/response headers plaintext. The
          * data plane is one group in this cut; grouped remains -EOPNOTSUPP. */
+        TBT_DIAG("fec data init tunnel=%llu n=%u m=%u carriers=%u mode=%u w=%u",
+                 (unsigned long long)t->cfg.id, t->cfg.n, t->cfg.m,
+                 t->cfg.carriers, t->cfg.mode, t->cfg.w);
         err = tbt_fec_data_init(s);
+        TBT_DIAG("fec data init tunnel=%llu ret=%d fec=%d",
+                 (unsigned long long)t->cfg.id, err, s->fec);
         if (err)
         {
             kfree(s);
@@ -1143,12 +1163,16 @@ int tbt_session_create(struct tbt_tunnel *t)
     }
     t->sess = s;
     err = tbt_carriers_start(t, s);
+    TBT_DIAG("carriers_start tunnel=%llu ret=%d n_car=%u n_pri=%u",
+             (unsigned long long)t->cfg.id, err, s->n_car, s->n_pri);
     if (err)
         return err;
     /* One session-wide liveness timer drives every carrier slot and every
      * provisional carrier; a per-carrier timer would cost one wakeup per
      * carrier per 50 ms at 256 carriers. */
     schedule_delayed_work(&s->w_poll, msecs_to_jiffies(50));
+    TBT_DIAG("session create done tunnel=%llu n_car=%u poll_ms=50",
+             (unsigned long long)t->cfg.id, s->n_car);
     return 0;
 }
 

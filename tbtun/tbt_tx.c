@@ -106,6 +106,9 @@ static struct tbt_frame *tbt_frame_alloc(u16 len, gfp_t gfp)
     fr->pinned = false;
     fr->dup_copy = false;
     fr->retx_copy = false;
+    /* The pump reads this on the write path to pick first_sent_seq; a
+     * kmalloc()ed frame must not inherit the previous slab occupant's value. */
+    fr->dropped = false;
     fr->retx_src = TBT_RETX_NONE;
     fr->path = TBT_PATH_NONE;
     fr->avoid_mask = 0;
@@ -212,7 +215,12 @@ int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
     struct tbt_frame *fr = tbt_frame_alloc(len, gfp);
 
     if (!fr)
+    {
+        pr_warn_ratelimited("tbtun: tunnel %llu: control frame alloc failed: path=%u type=%u len=%u (-ENOMEM)\n",
+                            (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+                            path, type, len);
         return -ENOMEM;
+    }
     fr->st = st;
     if (st)
         refcount_inc(&st->refs);
@@ -238,6 +246,9 @@ int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
     {
         spin_unlock(&sess->tx_lock);
         tbt_frame_free(fr);
+        TBT_DIAG_WARN("ctl queue full tunnel=%llu path=%u type=%u len=%u ctl_queued=%u: -ENOSPC",
+                      (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+                      path, type, len, READ_ONCE(sess->ctl_queued));
         return -ENOSPC;
     }
     if (head)
@@ -247,6 +258,11 @@ int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
     sess->tx_queued += fr->len;
     sess->ctl_queued++;
     spin_unlock(&sess->tx_lock);
+    if (type == TBT_F_HELLO)
+        TBT_DIAG("HELLO queued tunnel=%llu carrier=%u gen=%u len=%u ctl_queued=%u tx_queued=%u",
+                 (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+                 path, fr->gen, len, READ_ONCE(sess->ctl_queued),
+                 READ_ONCE(sess->tx_queued));
     tbt_tx_wake(sess);
     /* schedule_work(&c->w_tx) is lost when that work is already running and
      * has passed the queue scan. A control frame that is the last thing a
@@ -1062,13 +1078,19 @@ retx_queued:
          * data, so it was never written before the receiver's budget expired
          * (measured: retx_evident=255, retx_cand=6, retx_frames=0, far
          * holes_unrecoverable=1). */
+        /* Before the frame is visible to the pump, which reads retx_copy to
+         * pick the stalled-path mask and to account the copy. Today the pump
+         * is the only consumer and this runs inside it under pump_lock, so
+         * the old store-after-enqueue window was not reachable; the frame was
+         * still published with its state incomplete, and a second consumer
+         * would have read it as new data. */
+        fr->retx_copy = true;
         tbt_tx_enqueue(sess, fr, true);
         /* Counted when the carrier accepts the write, not here: a copy the
          * pump drops because the ack passed never reaches the wire, and
          * counting it made retx_ppm read 25% while wire/app was 1.01. The
          * enqueue is kept as a separate diagnostic. */
         atomic64_inc(&sess->retx_queued);
-        fr->retx_copy = true;
     }
 }
 
@@ -1966,6 +1988,10 @@ static void tbt_tx_ctl_fail(struct tbt_session *sess, struct tbt_frame *fr)
     u8 type = fr->hdr.type;
 
     atomic64_inc(&sess->ctl_lost);
+    if (type == TBT_F_HELLO)
+        pr_warn_ratelimited("tbtun: tunnel %llu: HELLO abandoned: carrier=%u gen=%u retries=%u (retry bound reached)\n",
+                            (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+                            fr->path, fr->gen, fr->retries);
     if (fr->st)
     {
         if (type == TBT_F_FIN)
@@ -2206,12 +2232,21 @@ int tbt_tx_pump(struct tbt_session *sess)
                             continue;
                         }
                     }
+                    if (type == TBT_F_HELLO)
+                        TBT_DIAG("HELLO dropped tunnel=%llu carrier=%u frame_gen=%u cur_gen=%u: generation changed",
+                                 (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+                                 fr->path, fr->gen, c->gen);
                     goto drop;
                 }
                 if (type == TBT_F_HELLO)
                 {
                     if (READ_ONCE(c->hello_sent))
+                    {
+                        TBT_DIAG("HELLO dropped tunnel=%llu carrier=%u gen=%u: hello already sent",
+                                 (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+                                 c->index, c->gen);
                         goto drop;
+                    }
                     if (!atomic_read(&c->connected))
                         continue;
                 }
@@ -2525,6 +2560,12 @@ ctl_fail:
             err = tbt_carrier_xmit(sess, c, fr);
             if (err)
             {
+                if (type == TBT_F_HELLO && err != -EAGAIN)
+                    pr_warn_ratelimited("tbtun: tunnel %llu: HELLO write failed: carrier=%u gen=%u ret=%d retries=%u ctl_queued=%u tx_queued=%u\n",
+                                        (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+                                        c->index, c->gen, err, fr->retries,
+                                        READ_ONCE(sess->ctl_queued),
+                                        READ_ONCE(sess->tx_queued));
                 /* -ENOMEM is a transient allocation failure (the HTTP header
                  * kmalloc), not a dead path. Treat it like backpressure:
                  * retry the frame on another path and leave the carrier
@@ -2601,6 +2642,10 @@ ctl_fail:
             {
             case TBT_F_HELLO:
                 WRITE_ONCE(c->hello_sent, true);
+                TBT_DIAG("HELLO written tunnel=%llu carrier=%u gen=%u up=%d spare=%d state=%u",
+                         (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+                         c->index, c->gen, atomic_read(&c->up), c->spare,
+                         c->state);
                 if (nsnap)
                 {
                     /* The OPEN goes in front of every queued DATA frame, and
@@ -2963,13 +3008,17 @@ int tbt_tx_fbk(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
     for (i = 0; i < sess->n_car && nr < TBT_MAX_CARRIERS_LIMIT; i++)
     {
         struct tbt_carrier *c = READ_ONCE(sess->car[i]);
+        struct sock *sk;
         u8 *e;
         u32 rtt = 0;
 
         if (!c || !atomic_read(&c->up))
             continue;
-        if (c->sk)
-            rtt = READ_ONCE(tcp_sk(c->sk)->srtt_us) >> 3;
+        /* One snapshot: tbt_carrier_release() clears c->sk with a plain
+         * store, so a second read after the check can be NULL. */
+        sk = READ_ONCE(c->sk);
+        if (sk)
+            rtt = READ_ONCE(tcp_sk(sk)->srtt_us) >> 3;
         WRITE_ONCE(c->rx_state, state);
         e = body + nr * TBT_FBK_ENTRY_LEN;
         /* The generation in feedback is the *peer's* generation for this path

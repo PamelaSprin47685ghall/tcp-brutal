@@ -73,6 +73,7 @@ int tbt_fec_hdr_unpack(const u8 in[TBT_FEC_HDR_LEN], struct tbt_fec_hdr *h);
  *              anywhere: the packetizer flushes a partial packet when the
  *              application goes quiet, and the receiver places shares by the
  *              sum of the payload lengths, so only LAST marks the end),
+ *              epoch <= max_payload (it is the last real share's length),
  *              PARITY payload_len == max_payload, win_len rules
  *              (DATA 0; PARITY 1..TBT_FEC_MAX_W), seq < 2^63.
  * ACK/NACK/CFG/FBK/PAD: n==0, m==0, share_index==0, win_len==0, exact body
