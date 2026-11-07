@@ -994,7 +994,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "fec_deliver_bad=%llu "
                               "fec_dup_share=%llu fec_late_share=%llu "
                               "fec_late_data=%llu "
-                              "fec_pad_share=%llu fec_epoch_conflict=%llu "
+                              "fec_pad_share=%llu fec_dup_marker=%llu "
+                              "fec_marker_conflict=%llu "
+                              "fec_epoch_conflict=%llu "
                               "fec_slot_past_cut=%llu fec_fin_bad=%llu "
                               "fec_ack_bad=%llu fec_tx_share_gap=%llu "
                               "fec_empty_block=%llu\n",
@@ -1010,6 +1012,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_late_share),
                            tbt_stat_read(&s->fec_late_data),
                            tbt_stat_read(&s->fec_pad_share),
+                           tbt_stat_read(&s->fec_dup_marker),
+                           tbt_stat_read(&s->fec_marker_conflict),
                            tbt_stat_read(&s->fec_epoch_conflict),
                            tbt_stat_read(&s->fec_slot_past_cut),
                            tbt_stat_read(&s->fec_fin_bad),

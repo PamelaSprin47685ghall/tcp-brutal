@@ -1183,6 +1183,8 @@ struct tbt_session
     atomic64_t fec_late_share;        /* share for a block already ready */
     atomic64_t fec_late_data;         /* late DATA whose slot is still absent */
     atomic64_t fec_pad_share;         /* empty-block marker received */
+    atomic64_t fec_dup_marker;        /* replayed marker for a settled block */
+    atomic64_t fec_marker_conflict;   /* marker and real shares disagree */
     atomic64_t fec_epoch_conflict;    /* PARITY shape disagrees with block */
     /* A share sits in a slot the block's stated cut says holds no stream
      * byte: the sender's win_len and its own DATA records disagree. Skipping

@@ -944,7 +944,6 @@ static void tbt_fec_tx_emit_empty(struct tbt_session *sess, u16 group,
     struct tbt_fec_tx *tx = sess->fec_tx;
     struct tbt_fec_hdr h;
     u16 rec_len;
-    int st = -EINVAL;
     int err;
 
     memset(&h, 0, sizeof(h));
@@ -962,16 +961,14 @@ static void tbt_fec_tx_emit_empty(struct tbt_session *sess, u16 group,
         return;
     WRITE_ONCE(tx->last_group, group);
     WRITE_ONCE(tx->last_share, tx->n);
-    if (tx->replay)
-    {
-        spin_lock_bh(&tx->replay_lock);
-        st = tbt_fec_replay_store(tx->replay, block_id, group, tx->n,
-                                  tx->rec, rec_len);
-        spin_unlock_bh(&tx->replay_lock);
-    }
+    /* A marker is not stored in the replay ring: it is a statement about a
+     * block, not a share of it, and replaying an old marker for a block the
+     * receiver has already settled was one source of the duplicate-marker
+     * protocol errors. A NACK for share n gets a fresh marker from
+     * tbt_fec_send_empty_marker() instead. */
     if (debug >= 2)
-        pr_info("tbtun: fec empty tx block=%llu group=%u share=%u store=%d\n",
-                block_id, group, tx->n, st);
+        pr_info("tbtun: fec empty tx block=%llu group=%u share=%u\n",
+                block_id, group, tx->n);
     /* A marker is control-like: it must ride any up carrier. The parity-0
      * carrier may be stalled or full, and the data path would drop the
      * marker as a stalled share. */
@@ -1686,29 +1683,12 @@ static int tbt_fec_send_empty_marker(struct tbt_session *sess, u16 group,
     h.conv = TBT_FEC_CONV;
     if (tbt_fec_make_record(sess, &h, NULL, rec, &len))
         return -EINVAL;
-    {
-        int st = -EINVAL;
-        u64 cur = READ_ONCE(tx->cur_block);
-        u16 rk = tbt_fec_replay_k(tx->replay);
-
-        /* The reply itself must go out, but its ring copy must not reclaim a
-         * live slot: the ring holds K block ids, so block `block_id` shares
-         * its slot with `block_id + K`. Re-storing a block the ring has
-         * already wrapped past would evict that newer block -- one the
-         * receiver may still be waiting for. Keep the copy only while the
-         * block is inside the window; the receiver gets the marker either
-         * way. */
-        if (tx->replay && cur >= block_id && cur - block_id < rk)
-        {
-            spin_lock_bh(&tx->replay_lock);
-            st = tbt_fec_replay_store(tx->replay, block_id, group, tx->n,
-                                      rec, len);
-            spin_unlock_bh(&tx->replay_lock);
-        }
-        if (debug >= 2)
-            pr_info("tbtun: fec empty reply tx block=%llu group=%u share=%u cur=%llu k=%u store=%d\n",
-                    block_id, group, tx->n, cur, rk, st);
-    }
+    /* The reply is built fresh every time and is never stored: a marker for
+     * an old block id shares its ring slot with block_id + K, so storing it
+     * would reclaim a block the receiver may still be waiting for. */
+    if (debug >= 2)
+        pr_info("tbtun: fec empty reply tx block=%llu group=%u share=%u cur=%llu\n",
+                block_id, group, tx->n, READ_ONCE(tx->cur_block));
     return tbt_fec_send_record(sess, 0, rec, len, true, false);
 }
 
@@ -3120,24 +3100,17 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         pr_info("tbtun: fec marker rx block=%llu next=%llu used=%d ready=%d empty=%d type=%u win_len=%u\n",
                 h.block_id, READ_ONCE(rx->next_super), b->used, b->ready,
                 b->empty, h.type, h.win_len);
-    if (b->empty)
+    /* A settled block is immutable. Classify the record before anything
+     * mutates it: a replayed empty marker, a duplicate marker for an empty
+     * block, and a real share that lost the race are all normal on a NACK
+     * path, not protocol errors. Returning -EPROTO here made the carrier
+     * parser kill the carrier that carried the record, which dropped every
+     * share in flight on it (field: rx_proto=93, 102 replacements). */
+    switch (tbt_fec_arrival_kind(b->ready, b->empty, h.type, h.win_len,
+                                 b->ndata || b->nparity || b->win_len_set ||
+                                     b->count_real != 0xffff))
     {
-        /* A marker fixed this block as empty. Any later DATA or PARITY for it
-         * means the sender mixed two block shapes; the block is immutable. */
-        spin_unlock_bh(&rx->lock);
-        return -EPROTO;
-    }
-    /* A marker that arrives after any real share is a mixed-source error even
-     * when the block is already complete; the ready check below would
-     * otherwise file it as a harmless late share. */
-    if (h.type == TBT_FEC_PARITY && h.win_len == 0 &&
-        (b->ndata || b->nparity || b->win_len_set || b->count_real != 0xffff))
-    {
-        spin_unlock_bh(&rx->lock);
-        return -EPROTO;
-    }
-    if (b->ready)
-    {
+    case TBT_FEC_ARR_LATE:
         /* The block is immutable once ready: a duplicate or late share must
          * not change a byte that may already be on its way to the stream. */
         atomic64_inc(&sess->fec_late_share);
@@ -3151,6 +3124,23 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
             atomic64_inc(&sess->fec_late_data);
         spin_unlock_bh(&rx->lock);
         return 0;
+    case TBT_FEC_ARR_DUP_MARKER:
+        /* A replayed marker for a block that is already empty. It carries no
+         * payload, so placing it again changes nothing; a NACK retry can
+         * deliver it several times. */
+        atomic64_inc(&sess->fec_late_share);
+        atomic64_inc(&sess->fec_dup_marker);
+        spin_unlock_bh(&rx->lock);
+        return 0;
+    case TBT_FEC_ARR_CONFLICT:
+        /* Marker and real shares disagree. The block is settled, so the
+         * record is ignored and named; killing the carrier would punish every
+         * share in flight on it for one shape disagreement. */
+        atomic64_inc(&sess->fec_marker_conflict);
+        spin_unlock_bh(&rx->lock);
+        return 0;
+    case TBT_FEC_ARR_PLACE:
+        break;
     }
 
     if (h.type == TBT_FEC_DATA)

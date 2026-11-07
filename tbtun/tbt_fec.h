@@ -523,6 +523,53 @@ static inline bool tbt_fec_share_past_cut(bool win_len_set, u16 nreal,
     return win_len_set && share >= nreal;
 }
 
+/* What to do with a record that arrives for a block that is already settled.
+ *
+ * A ready block is immutable: a duplicate or late record must not change a
+ * byte that may already be on its way to the stream. Treating those records
+ * as protocol errors killed the carrier that carried them -- one replayed
+ * empty marker per NACK became rx_proto=93 and 102 carrier replacements on
+ * the 1 GiB run -- so the arrival is classified here and the caller only
+ * counts it.
+ *
+ * `ready` and `empty` describe the resident block; `has_real` says it already
+ * holds a DATA or PARITY share (the marker-after-data test). */
+enum tbt_fec_arrival
+{
+    TBT_FEC_ARR_PLACE = 0, /* the record may still be placed */
+    TBT_FEC_ARR_LATE,      /* ready block: a late or duplicate share */
+    TBT_FEC_ARR_DUP_MARKER,/* an empty marker for a block already empty */
+    TBT_FEC_ARR_CONFLICT,  /* marker and real shares disagree: ignore */
+};
+
+/* A PARITY record with win_len 0 says "this group has no packet in this
+ * block". It carries no payload, so receiving it again is idempotent. */
+static inline bool tbt_fec_is_marker(u8 type, u16 win_len)
+{
+    return type == TBT_FEC_PARITY && win_len == 0;
+}
+
+static inline enum tbt_fec_arrival
+tbt_fec_arrival_kind(bool ready, bool empty, u8 type, u16 win_len,
+                     bool has_real)
+{
+    bool marker = tbt_fec_is_marker(type, win_len);
+
+    if (ready)
+    {
+        if (marker)
+            return TBT_FEC_ARR_DUP_MARKER;
+        /* A real share for a block the sender marked empty: the two shapes
+         * disagree. The block is already delivered, so ignore the share. */
+        return empty ? TBT_FEC_ARR_CONFLICT : TBT_FEC_ARR_LATE;
+    }
+    if (empty)
+        return marker ? TBT_FEC_ARR_DUP_MARKER : TBT_FEC_ARR_CONFLICT;
+    if (marker && has_real)
+        return TBT_FEC_ARR_CONFLICT;
+    return TBT_FEC_ARR_PLACE;
+}
+
 /* One delivery step against the stream socket's accepted frontier.
  * `off` is stream-relative (already minus stream_base), `rx_next` is what
  * that stream has accepted. Returns:

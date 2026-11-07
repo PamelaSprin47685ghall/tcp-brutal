@@ -1272,6 +1272,47 @@ static void test_replay_window(void)
     tbt_fec_replay_free(r);
 }
 
+/* A record that arrives for a settled block is classified, never refused.
+ * A replayed empty marker used to return -EPROTO, and the carrier parser
+ * kills the carrier that carried a -EPROTO record: one NACK retry became
+ * rx_proto=93 and 102 carrier replacements on the 1 GiB run. */
+static void test_arrival_kind(void)
+{
+    /* A marker is a PARITY record with win_len 0, whatever its payload. */
+    ok(tbt_fec_is_marker(TBT_FEC_PARITY, 0), "win_len 0 parity is a marker");
+    ok(!tbt_fec_is_marker(TBT_FEC_PARITY, 1), "a parity row is not a marker");
+    ok(!tbt_fec_is_marker(TBT_FEC_DATA, 0), "DATA is never a marker");
+
+    /* Ready block: every arrival is late or idempotent, none is an error. */
+    ok_int(tbt_fec_arrival_kind(true, false, TBT_FEC_DATA, 0, true),
+           TBT_FEC_ARR_LATE, "late DATA for a ready block");
+    ok_int(tbt_fec_arrival_kind(true, false, TBT_FEC_PARITY, 4, true),
+           TBT_FEC_ARR_LATE, "late parity for a ready block");
+    ok_int(tbt_fec_arrival_kind(true, true, TBT_FEC_PARITY, 0, false),
+           TBT_FEC_ARR_DUP_MARKER, "replayed marker for an empty block");
+    ok_int(tbt_fec_arrival_kind(true, false, TBT_FEC_PARITY, 0, true),
+           TBT_FEC_ARR_DUP_MARKER, "replayed marker for a data block");
+    ok_int(tbt_fec_arrival_kind(true, true, TBT_FEC_DATA, 0, true),
+           TBT_FEC_ARR_CONFLICT, "DATA for a block marked empty");
+
+    /* Not ready: a marker after real shares is a shape conflict, a second
+     * marker for an empty block is idempotent. */
+    ok_int(tbt_fec_arrival_kind(false, false, TBT_FEC_PARITY, 0, true),
+           TBT_FEC_ARR_CONFLICT, "marker after real shares");
+    ok_int(tbt_fec_arrival_kind(false, true, TBT_FEC_PARITY, 0, false),
+           TBT_FEC_ARR_DUP_MARKER, "second marker before ready");
+    ok_int(tbt_fec_arrival_kind(false, true, TBT_FEC_DATA, 0, true),
+           TBT_FEC_ARR_CONFLICT, "DATA for an empty, unready block");
+
+    /* Everything else may be placed. */
+    ok_int(tbt_fec_arrival_kind(false, false, TBT_FEC_PARITY, 0, false),
+           TBT_FEC_ARR_PLACE, "first marker is placed");
+    ok_int(tbt_fec_arrival_kind(false, false, TBT_FEC_DATA, 0, false),
+           TBT_FEC_ARR_PLACE, "first DATA share is placed");
+    ok_int(tbt_fec_arrival_kind(false, false, TBT_FEC_PARITY, 4, false),
+           TBT_FEC_ARR_PLACE, "first parity row is placed");
+}
+
 static void test_rx_poll(void)
 {
     /* tbt_session_arm() never retimes a pending item, so the delay this walk
@@ -1318,6 +1359,7 @@ int main(void)
     test_ack_split();
     test_rx_poll();
     test_replay_window();
+    test_arrival_kind();
 
     printf("test_fec_rx: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
