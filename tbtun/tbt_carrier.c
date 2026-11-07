@@ -625,9 +625,11 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
                 if (sess->fec)
                 {
                     /* FEC: a stalled carrier loses shares, not its life. Pause
-                     * it, drop what it owed, and let parity recover the block;
-                     * killing it here would discard shares the block can still
-                     * rebuild. stall_dead bounds how long it may stay paused. */
+                     * it; the FEC data plane treats the shares already in
+                     * flight as lost and parity rebuilds the block. Killing
+                     * the carrier here would discard shares the block can
+                     * still rebuild. stall_dead bounds how long it may stay
+                     * paused. */
                     tbt_carrier_stall(sess, c);
                 }
                 else
@@ -1558,14 +1560,16 @@ struct tbt_carrier *tbt_carrier_new(struct tbt_session *sess, u8 index)
 }
 
 /* Pause a live carrier whose snd_una stopped moving. This is the soft half of
- * a loss: the path is not delivering now, so the frames it already owes are
- * dropped and the pump stops giving it new ones, but nothing about the carrier
- * dies. No RETIRE, no replacement, no socket teardown, and the slot keeps its
- * generation; the poll clears c->stalled and counts stall_recovered when
- * snd_una moves again. Only the FEC container calls this: under ARQ the same
- * stall keeps the kill-and-repath behaviour of tbt_carrier_lost(). It runs from
- * the session poll work (process context) and may sleep on sess->pump_lock
- * inside tbt_tx_path_stalled(), so the caller must not hold pump_lock. */
+ * a loss: the pump stops giving the path new frames, but nothing about the
+ * carrier dies. No RETIRE, no replacement, no socket teardown, and the slot
+ * keeps its generation; the poll clears c->stalled and counts stall_recovered
+ * when snd_una moves again. Only the FEC container calls this: under ARQ the
+ * same stall keeps the kill-and-repath behaviour of tbt_carrier_lost().
+ *
+ * The shares already in flight belong to the FEC data plane: it treats them as
+ * lost and parity rebuilds them (or its 30 s bound resets the block). This
+ * function deliberately drops nothing itself, so it never takes pump_lock and
+ * never sleeps. */
 void tbt_carrier_stall(struct tbt_session *sess, struct tbt_carrier *c)
 {
     struct sock *sk;
@@ -1590,7 +1594,6 @@ void tbt_carrier_stall(struct tbt_session *sess, struct tbt_carrier *c)
         c->stall_packets_out = READ_ONCE(tcp_sk(sk)->packets_out);
         tbt_carrier_sk_put(sk);
     }
-    tbt_tx_path_stalled(sess, c->index);
     /* Restart the window, so the 50 ms poll does not re-declare the same
      * stall on its next pass. */
     c->last_una_ns = c->stall_since_ns;

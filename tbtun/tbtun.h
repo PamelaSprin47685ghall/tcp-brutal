@@ -925,9 +925,10 @@ struct tbt_session
     atomic64_t stall_idle_skips; /* poll: no unacked bytes, clock reset */
     atomic64_t stall_declared;   /* poll: a stall paused a FEC carrier */
     atomic64_t stall_recovered;  /* poll: snd_una moved again after a pause */
-    u64 stall_drop;              /* frames dropped when a stall paused the
-                                  * carrier; the session poll work is the only
-                                  * writer, so a plain u64 is enough */
+    u64 stall_drop;              /* frames dropped by tbt_tx_path_stalled();
+                                  * that helper has no caller today (ARQ kills,
+                                  * FEC has no retain), so this stays 0 until
+                                  * ARQ adopts pause semantics */
     atomic64_t stall_dead;       /* poll: a paused carrier outlived its bound
                                   * and was declared lost after all */
     /* DATA admissions deferred by the peer window; tbt_tx_pump() only, and
@@ -1165,11 +1166,11 @@ struct tbt_carrier
     /* snd_una has not moved for k RTOs: this path is not delivering right now,
      * but it is not dead. Only the FEC container pauses a carrier; ARQ kills
      * and repaths it instead. The socket, the slot and the generation all stay,
-     * the pump stops giving it new frames and tbt_tx_path_stalled() drops what
-     * it already owed, so parity can rebuild those shares. Cleared when snd_una
-     * moves again; stall_dead kills the carrier if it never does. Only the
-     * 50 ms poll writes it, the pump and /proc read it, so WRITE_ONCE/READ_ONCE
-     * is enough: one writer, no atomic. */
+     * and the pump stops giving it new frames. The shares already in flight are
+     * the FEC data plane's loss to handle (parity rebuild); this layer drops
+     * nothing. Cleared when snd_una moves again; stall_dead kills the carrier
+     * if it never does. Only the 50 ms poll writes it, the pump and /proc read
+     * it, so WRITE_ONCE/READ_ONCE is enough: one writer, no atomic. */
     bool stalled;
     bool spare;                   /* index >= n_pri: idle unless activated */
     bool active;                  /* spare that now carries DATA */
@@ -1289,9 +1290,10 @@ void tbt_fbk_kick(struct tbt_session *sess, bool now);
 void tbt_tx_ack(struct tbt_session *sess, struct tbt_carrier *c,
                 u64 uack, u64 sid);
 void tbt_tx_path_lost(struct tbt_session *sess, u8 index);
-/* The path stalled: drop its unacknowledged frames and stop picking it. Unlike
- * tbt_tx_path_lost() it does not mark the carrier dead; the poll clears
- * c->stalled when snd_una moves again. */
+/* Drop a stalled path's unacknowledged ARQ frames without repathing them.
+ * Reserved for an ARQ pause semantics: today ARQ kills and repaths a stalled
+ * carrier (tbt_carrier_lost()), and FEC has no retain entries to drop, so
+ * nothing calls this yet. */
 void tbt_tx_path_stalled(struct tbt_session *sess, u8 index);
 void tbt_tx_free_stream(struct tbt_stream *st);
 void tbt_tx_free_queue(struct tbt_session *sess);
