@@ -884,13 +884,18 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                 seq_printf(m, "tunnel %llu ctl ctl_lost=%llu ctl_retry=%llu "
                               "ctl_requeue=%llu ctl_obsolete=%llu ctl_queued=%u "
                               "pinned_bad_path=%llu "
-                              "close_timeouts=%llu close_detaches=%llu\n",
+                              "close_timeouts=%llu fin_starved=%llu "
+                              "fin_written=%llu close_hold_fec=%llu "
+                              "close_detaches=%llu\n",
                            t->cfg.id, tbt_stat_read(&s->ctl_lost),
                            READ_ONCE(s->ctl_retry), READ_ONCE(s->ctl_requeue),
                            READ_ONCE(s->ctl_obsolete),
                            READ_ONCE(s->ctl_queued),
                            READ_ONCE(s->dbg_pinned_bad_path),
                            tbt_stat_read(&s->close_timeouts),
+                           tbt_stat_read(&s->fin_starved),
+                           tbt_stat_read(&s->fin_written),
+                           tbt_stat_read(&s->close_hold_fec),
                            tbt_stat_read(&s->close_detaches));
                 /* Session stream census, next to the carrier block. n_active
                  * is the non-detached stream count (the concurrency bound),
@@ -1081,6 +1086,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "fec_replay_dedup=%llu "
                               "fec_nack_req_shares=%llu "
                               "fec_nack_backpressure=%llu "
+                              "fec_replay_stale=%llu "
+                              "fec_fin_wait_replay=%llu "
                               "fec_replay_drain_bps=%llu "
                               "fec_replay_queue_high=%llu "
                               "fec_reset_hole=%llu "
@@ -1131,6 +1138,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_replay_dedup),
                            tbt_stat_read(&s->fec_nack_req_shares),
                            tbt_stat_read(&s->fec_nack_backpressure),
+                           tbt_stat_read(&s->fec_replay_stale),
+                           tbt_stat_read(&s->fec_fin_wait_replay),
                            tbt_stat_read(&s->fec_replay_drain_bps),
                            tbt_stat_read(&s->fec_replay_queue_high),
                            tbt_stat_read(&s->fec_reset_hole),

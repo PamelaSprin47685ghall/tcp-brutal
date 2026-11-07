@@ -779,6 +779,10 @@ struct tbt_fec_out
     u16 len;
     u8 control;
     u8 replay; /* queued from the replay ring: charged to the byte budget */
+    /* Replay only: the super-block this record belongs to. The flush frees
+     * it without a write once the peer's delivered frontier passes that
+     * block, so an acked repair never sits ahead of the tail. */
+    u64 block_id;
     /* NACK receipt time for a replay record; the flush charges NACK->wire
      * latency when the carrier accepts it. Zero for every other record. */
     u64 stamp_ns;
@@ -816,11 +820,15 @@ struct tbt_fec_outq
  * into a source-frame drop. */
 #define TBT_FEC_REPLAY_BYTES_MAX (8u * 1024 * 1024)
 /* Replay records one flush pass may write before the bound data queues get
- * their turn. 32 records of one 8 KiB share is 256 KiB: replay keeps its
- * priority, but a NACK burst cannot hold every carrier's data queue behind
- * it for the whole 2 MiB burst. The TX work is re-armed immediately while
- * records remain. */
-#define TBT_FEC_REPLAY_PASS_MAX 32u
+ * their turn. 8 records of one 8 KiB share is 64 KiB: replay keeps its
+ * priority, but a NACK burst cannot hold the close path's FIN behind it for
+ * the whole 2 MiB burst. The TX work is re-armed immediately while records
+ * remain. */
+#define TBT_FEC_REPLAY_PASS_MAX 8u
+/* Bound data records one flush pass may write before the next pass. This is
+ * the FEC-side counterpart of the TX pump's close quota; it keeps a carrier
+ * from being held by a data burst while a FIN is queued. */
+#define TBT_FEC_DATA_PASS_MAX 32u
 
 /* The seven session work items whose reference is owned by the bit in
  * tbt_session.sched (review/s2-merged-design.md §1.3/§5.1). The order is the
@@ -1200,12 +1208,18 @@ struct tbt_session
     atomic64_t fec_replay_dedup;           /* share reply already in flight */
     atomic64_t fec_nack_req_shares;        /* shares named in received NACKs */
     atomic64_t fec_nack_backpressure;      /* replay queue full: NACK stopped */
+    atomic64_t fec_replay_stale;           /* queued replay freed: block delivered */
+    atomic64_t fec_fin_wait_replay;        /* FIN released while replay queued */
     /* Replay drain: bytes/s over the last sampling window (an EWMA gauge),
      * the high-water of queued replay bytes, and the window accumulator. */
     atomic64_t fec_replay_drain_bps;
     atomic64_t fec_replay_queue_high;
     u64 fec_replay_drain_bytes; /* written since the last sample; flush only */
     u64 fec_replay_drain_ns;    /* last sample time; flush only */
+    /* The one stream is closing: the replay admission cap drops to
+     * TBT_FEC_REPLAY_CLOSE_BYTES_MAX so the tail repair fits the close
+     * budget. Written by the FEC TX work, read by the NACK handler. */
+    bool fec_closing;
     atomic64_t fec_reset_tcp_failed; /* FEC reset: no carrier TCP alive */
     atomic64_t fec_reset_user;       /* user/peer/application teardown */
     /* A FEC-owned TBT_ST_HOLE kill (ordered-walk hole or an unrecoverable
@@ -1280,6 +1294,9 @@ struct tbt_session
     u64 holes_repaired;  /* a declared hole was filled; tx_lock */
     atomic64_t holes_unrecoverable; /* case B: the stream was reset */
     atomic64_t close_timeouts;   /* a FIN wait exceeded its bound: reset */
+    atomic64_t fin_starved;      /* FIN copies requeued under the close timer */
+    atomic64_t fin_written;      /* FIN copies that reached the wire */
+    atomic64_t close_hold_fec;   /* close timer held for FEC repair/credit */
     atomic64_t close_detaches;   /* FIN written, peer FIN absent: detached */
     atomic64_t deliver_timeouts; /* peer FIN seen, delivery made no progress */
     atomic64_t dbg_deliver_checks; /* FBK: peer FIN seen, rxq non-empty */

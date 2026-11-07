@@ -1979,10 +1979,12 @@ static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
      * stays closed with no repair traffic is still bounded: after the same
      * 30 s hard cap the close timer fires. */
     if (sess->fec &&
-        (tbt_fec_repair_active(sess, now, budget) ||
-         (now - start <= TBT_FEC_REPAIR_MAX_NS &&
-          tbt_fec_credit_waiting(sess))))
+        tbt_tx_close_hold_fec(true,
+                              tbt_fec_repair_active(sess, now, budget),
+                              tbt_fec_credit_waiting(sess),
+                              now - start, TBT_FEC_REPAIR_MAX_NS))
     {
+        atomic64_inc(&sess->close_hold_fec);
         if (debug >= 2)
             pr_info_ratelimited("tbtun: CLOSEWAITFEC sid=%llu ack=%llu txseq=%llu age_us=%llu\n",
                                 (unsigned long long)st->sid,
@@ -2373,7 +2375,11 @@ static bool tbt_tx_ctl_retry(struct tbt_session *sess, struct tbt_frame *fr,
     unsigned int ms = path_wait ? TBT_CTL_PATH_RETRY_MS : TBT_CTL_RETRY_MS;
     struct tbt_carrier *c = NULL;
 
-    if (fr->retries >= TBT_CTL_MAX_RETRIES)
+    /* A FIN's deadline is the close timer, not this per-frame bound: a
+     * replay/data burst may reject the same copy many times while the tail
+     * is repaired. Other pinned frames keep the bound. */
+    if (fr->hdr.type != TBT_F_FIN &&
+        fr->retries >= TBT_CTL_MAX_RETRIES)
         return false;
     fr->retries++;
     sess->ctl_retry++;
@@ -2402,13 +2408,32 @@ static void tbt_tx_ctl_fail(struct tbt_session *sess, struct tbt_frame *fr)
     {
         if (type == TBT_F_FIN)
         {
+            struct tbt_stream *st = fr->st;
+            u64 since = READ_ONCE(st->close_since_ns);
+            u64 budget = tbt_tx_wait_budget_ns(sess, st);
+
             if (fr->path < TBT_MAX_CARRIERS_LIMIT)
-                clear_bit(fr->path, fr->st->tx_fin_inflight);
-            if (!READ_ONCE(fr->st->tx_fin_written) &&
-                bitmap_empty(fr->st->tx_fin_inflight, TBT_MAX_CARRIERS_LIMIT))
             {
-                WRITE_ONCE(fr->st->tx_fin_queued, false);
-                tbt_stream_kill(fr->st, TBT_ST_DEAD);
+                clear_bit(fr->path, st->tx_fin_inflight);
+                /* Let tbt_tx_fin() queue a fresh copy on this or another
+                 * hello_sent carrier; the mask would otherwise suppress it. */
+                clear_bit(fr->path, st->tx_fin_mask);
+            }
+            if (!READ_ONCE(st->tx_fin_written) &&
+                bitmap_empty(st->tx_fin_inflight, TBT_MAX_CARRIERS_LIMIT))
+            {
+                WRITE_ONCE(st->tx_fin_queued, false);
+                if (tbt_tx_fin_retry_allowed(tbt_now_ns(), since, budget))
+                {
+                    /* The FIN was starved, not lost: requeue it under the
+                     * close timer and count the starvation. */
+                    atomic64_inc(&sess->fin_starved);
+                    tbt_tx_fin(sess, st, GFP_ATOMIC);
+                }
+                else
+                {
+                    tbt_stream_kill(st, TBT_ST_DEAD);
+                }
             }
         }
         else if (type == TBT_F_RST)
@@ -2435,6 +2460,7 @@ static void tbt_tx_ctl_written(struct tbt_session *sess, struct tbt_frame *fr)
         if (type == TBT_F_FIN)
         {
             WRITE_ONCE(fr->st->tx_fin_written, true);
+            atomic64_inc(&sess->fin_written);
             if (!READ_ONCE(fr->st->close_fin_written_ns))
                 WRITE_ONCE(fr->st->close_fin_written_ns, tbt_now_ns());
             if (fr->path < TBT_MAX_CARRIERS_LIMIT)
@@ -2483,6 +2509,7 @@ int tbt_tx_pump(struct tbt_session *sess)
     int nsnap, i;
     int pass, moved = 0;
     bool wait_carrier = false;
+    bool close_priority = false;
 
     might_sleep();
     atomic64_inc(&sess->dbg_pump_runs);
@@ -2539,6 +2566,15 @@ int tbt_tx_pump(struct tbt_session *sess)
     }
     tbt_tx_window_update(sess);
     nsnap = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
+    for (i = 0; i < nsnap; i++)
+    {
+        if (READ_ONCE(snap[i]->close_since_ns) ||
+            READ_ONCE(snap[i]->tx_fin_queued))
+        {
+            close_priority = true;
+            break;
+        }
+    }
     tbt_tx_path_lost_drain(sess, snap, nsnap);
     for (i = 0; i < nsnap; i++)
     {
@@ -2558,9 +2594,19 @@ int tbt_tx_pump(struct tbt_session *sess)
          * silently truncated. */
         DECLARE_BITMAP(blocked, TBT_MAX_CARRIERS_LIMIT);
         bool progress = false;
+        u32 close_data = 0, close_ctl = 0;
 
         memset(blocked, 0, sizeof(blocked));
         spin_lock(&sess->tx_lock);
+        if (close_priority)
+        {
+            /* A closing stream's FIN is the last record the peer needs. Move
+             * every queued FIN ahead of the FIFO so replay/data copies cannot
+             * starve it; the per-pass quotas below bound the rest. */
+            list_for_each_entry_safe(fr, tmp, &sess->tx_q, list)
+                if (fr->hdr.type == TBT_F_FIN)
+                    list_move(&fr->list, &sess->tx_q);
+        }
         {
         unsigned long guard = 0;
         list_for_each_entry_safe(fr, tmp, &sess->tx_q, list)
@@ -2572,6 +2618,9 @@ int tbt_tx_pump(struct tbt_session *sess)
             struct tbt_carrier *c = NULL;
             u8 type = fr->hdr.type;
 
+            if (!tbt_tx_close_frame_allowed(close_priority, type,
+                                            &close_data, &close_ctl))
+                continue;
             if (fr->pinned)
             {
                 bool stream_ctl = (type == TBT_F_FIN || type == TBT_F_RST);
