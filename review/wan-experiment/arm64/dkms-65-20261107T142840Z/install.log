@@ -1,0 +1,14 @@
+Installing tbtun 0.2.0 for kernel 6.1.172
+  source: /root/tbtun-0.2.0-fix27-20261107T133636Z
+  stage:  /usr/src/tbtun-0.2.0
+Creating symlink /var/lib/dkms/tbtun/0.2.0/source -> /usr/src/tbtun-0.2.0
+The kernel is built without module signing facility, modules won't be signed
+
+Building module(s)..... done.
+Installing /lib/modules/6.1.172/updates/dkms/tbtun.ko
+Running depmod... done.
+
+Installed. The control surface is /proc/net/tbtun:
+  echo 'tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443' \
+       > /proc/net/tbtun/config
+  cat /proc/net/tbtun/tunnels

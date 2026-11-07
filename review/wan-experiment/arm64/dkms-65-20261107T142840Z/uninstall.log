@@ -1,0 +1,10 @@
+Removing tbtun
+Module tbtun/0.2.0 for kernel 6.1.172 (aarch64):
+Before uninstall, this module version was ACTIVE on this kernel.
+Deleting /lib/modules/6.1.172/updates/dkms/tbtun.ko
+Running depmod... done.
+
+Deleting module tbtun/0.2.0 completely from the DKMS tree.
+Removing staged sources under /usr/src
+Removing installed module files
+Done.

@@ -1,0 +1,496 @@
+
+=== date ===
+2026-11-07T02:40:36Z
+
+=== boot_id ===
+0a91d2eb-3122-41eb-913c-024a4e1fe724
+
+=== uptime ===
+13275.47 104846.53
+
+=== uname ===
+Linux lubancat 6.1.172 #1 SMP Sat Oct 17 15:47:17 CST 2026 aarch64 GNU/Linux
+
+=== loadavg ===
+1.54 0.98 0.46 1/732 55626
+
+=== module ===
+tbtun                 188416  0
+
+=== modinfo ===
+
+=== max_carriers ===
+256
+
+=== config ===
+tunnel 1 role=near listen=127.0.0.1:9001 peer=45.11.1.62:9000 n=4 m=4 fec=on mode=grouped w=8 carriers=256 crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=30000-30511 nonce=00112233445566778899aabbccddeeff
+
+=== ports ===
+# block 30000-30511 (512 ports)
+# configured
+ports 30000-30511
+
+=== tunnels ===
+# id role state listen peer target n m streams
+1 near listening 127.0.0.1:9001 45.11.1.62:9000 - 4 4 0
+
+=== stats ===
+debug_loss=0
+gaps_total=0
+streams_total=0
+tunnel 1 capture_runs=0 actor_calls=0 submit_bytes=0 tx=0 wire=6433674 err=0 short=0
+tunnel 1 rx_work_runs=26196 rx_drain_entries=0 rx_drain_bytes=0 rx_paused_skips=0 rx_adopt_events=0 rx_records=0 carrier_write_space_runs=0 poll_rescues=41295
+tunnel 1 rx_ready_calls=12700 rx_reads=26159 rx_read_bytes=0 rx_read_zero=26159 rx_resume=0 rx_resume_busy=0 rx_last_drained=0 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=0 rx_delivered=0
+tunnel 1 dbg rcv_nxt=0 copied=0 after=0 qlen=0 allocf=0 over=0 copyf=0 hiwat=376 pdead=376 prun=2342256 pmoved=26852 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=0 car_nxt=3874775980 car_copied=3874775980 car_rcvbuf=524288 car_sndbuf=524288 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=11124642 txwake_busy=8802798 txwork=2331206
+tunnel 1 ws_calls=0
+tunnel 1 c3 n=256 up=256 lost=13312 replaced=13312 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=0 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=0 una_stall_us=0 stall_paused_skips=0 stall_idle_skips=1240599 stall_declared=0 tx_window=8388608 bdp_bytes=630812271 k_x100=500 rtt_mean_us=497 rttvar_us=20070 rtt_max_us=44224 txq_max=8454432 win_block=0 win_resume=0 pump_hw_armed=0 pump_hw_fired=12977 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0 prov_now=0 prov_peak=0 prov_reject=0 dead_release=0 carrier_retired=13312
+tunnel 1 ctl ctl_lost=0 ctl_retry=376 ctl_requeue=751 ctl_obsolete=80 ctl_queued=0 pinned_bad_path=0 close_timeouts=0 close_detaches=0
+tunnel 1 streams streams_active=0 n_streams=0 n_pending=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c9 fec_proto_fail=0 fec_hdr_crc_fail=0 fec_payload_crc_fail=0 fec_short_tx=0 fec_short_unknown=0 fec_stream_refused=0 fec_drop_window=0 fec_drop_crypto=0 fec_ack_tx=0 fec_ack_rx=0 fec_credit_wait=0
+tunnel 1 c10 fec_decode_blocks=0 fec_decode_recovered=0 fec_decode_nomem=0 fec_deliver_nomem=0 fec_deliver_dup=0 fec_deliver_ooo=0 fec_deliver_bad=0 fec_dup_share=0 fec_late_share=0 fec_late_data=0 fec_pad_share=0 fec_epoch_conflict=0 fec_slot_past_cut=0 fec_fin_bad=0 fec_ack_bad=0 fec_tx_share_gap=0 fec_empty_block=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=13568 http_resp=0 pad_tx=52 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=0 dup_bytes=0
+tunnel 1 reconcile live_bytes=121093 live_data=0 live_retx=0 retired_bytes=6312581 retired_data=0 retired_retx=0
+
+=== ss ===
+State  Recv-Q Send-Q       Local Address:Port  Peer Address:PortProcess                                                 
+LISTEN 0      128              127.0.0.1:9001       0.0.0.0:*                                                           
+LISTEN 0      4096            198.18.0.1:36147      0.0.0.0:*    users:(("mihomo",pid=1505,fd=15))                      
+LISTEN 0      4096             127.0.0.1:13022      0.0.0.0:*    users:(("frpc",pid=1639,fd=10))                        
+LISTEN 0      4096             127.0.0.1:10022      0.0.0.0:*    users:(("frpc",pid=1639,fd=7))                         
+LISTEN 0      4096             127.0.0.1:14022      0.0.0.0:*    users:(("frpc",pid=1639,fd=11))                        
+LISTEN 0      4096         127.0.0.53%lo:53         0.0.0.0:*    users:(("systemd-resolve",pid=559,fd=17))              
+LISTEN 0      4096            127.0.0.54:53         0.0.0.0:*    users:(("systemd-resolve",pid=559,fd=19))              
+LISTEN 0      4096             127.0.0.1:11022      0.0.0.0:*    users:(("frpc",pid=1639,fd=8))                         
+LISTEN 0      512              127.0.0.1:7676       0.0.0.0:*    users:(("bun",pid=2438,fd=6))                          
+LISTEN 0      4096               0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=1716,fd=3),("systemd",pid=1,fd=169))
+LISTEN 0      4096             127.0.0.1:7890       0.0.0.0:*    users:(("mihomo",pid=1505,fd=3))                       
+LISTEN 0      4096             127.0.0.1:12022      0.0.0.0:*    users:(("frpc",pid=1639,fd=9))                         
+LISTEN 0      4096   [fdfe:dcba:9876::1]:44187         [::]:*    users:(("mihomo",pid=1505,fd=17))                      
+LISTEN 0      4096                  [::]:22            [::]:*    users:(("sshd",pid=1716,fd=4),("systemd",pid=1,fd=170))
+
+=== meminfo ===
+MemTotal:        8104768 kB
+MemFree:         6251924 kB
+MemAvailable:    7532688 kB
+
+=== slab ===
+
+=== dmesg ===
+[13098.455111] tbtun: tunnel 1 carrier 0 gen 3841 lost: sock=1 connected=1 hello_sent=1 up=1
+[13098.455210] tbtun: tunnel 1 carrier 1 gen 3842 lost: sock=1 connected=1 hello_sent=1 up=1
+[13098.455345] tbtun: tunnel 1 carrier 8 gen 3849 lost: sock=1 connected=1 hello_sent=1 up=1
+[13098.455516] tbtun: tunnel 1 carrier 9 gen 3850 lost: sock=1 connected=1 hello_sent=1 up=1
+[13103.498586] tbt_carrier_lost: 246 callbacks suppressed
+[13103.498605] tbtun: tunnel 1 carrier 5 gen 4102 lost: sock=1 connected=1 hello_sent=1 up=1
+[13103.498672] tbtun: tunnel 1 carrier 4 gen 4101 lost: sock=1 connected=1 hello_sent=1 up=1
+[13103.498679] tbtun: tunnel 1 carrier 0 gen 4097 lost: sock=1 connected=1 hello_sent=1 up=1
+[13103.498716] tbtun: tunnel 1 carrier 11 gen 4108 lost: sock=1 connected=1 hello_sent=1 up=1
+[13103.498759] tbtun: tunnel 1 carrier 8 gen 4105 lost: sock=1 connected=1 hello_sent=1 up=1
+[13103.498801] tbtun: tunnel 1 carrier 10 gen 4107 lost: sock=1 connected=1 hello_sent=1 up=1
+[13103.498844] tbtun: tunnel 1 carrier 15 gen 4112 lost: sock=1 connected=1 hello_sent=1 up=1
+[13103.498886] tbtun: tunnel 1 carrier 9 gen 4106 lost: sock=1 connected=1 hello_sent=1 up=1
+[13103.498895] tbtun: tunnel 1 carrier 1 gen 4098 lost: sock=1 connected=1 hello_sent=1 up=1
+[13103.498930] tbtun: tunnel 1 carrier 12 gen 4109 lost: sock=1 connected=1 hello_sent=1 up=1
+[13108.522546] tbt_carrier_lost: 246 callbacks suppressed
+[13108.522555] tbtun: tunnel 1 carrier 15 gen 4368 lost: sock=1 connected=1 hello_sent=1 up=1
+[13108.522594] tbtun: tunnel 1 carrier 12 gen 4365 lost: sock=1 connected=1 hello_sent=1 up=1
+[13108.522647] tbtun: tunnel 1 carrier 2 gen 4355 lost: sock=1 connected=1 hello_sent=1 up=1
+[13108.522670] tbtun: tunnel 1 carrier 11 gen 4364 lost: sock=1 connected=1 hello_sent=1 up=1
+[13108.522692] tbtun: tunnel 1 carrier 9 gen 4362 lost: sock=1 connected=1 hello_sent=1 up=1
+[13108.523021] tbtun: tunnel 1 carrier 6 gen 4359 lost: sock=1 connected=1 hello_sent=1 up=1
+[13108.523073] tbtun: tunnel 1 carrier 8 gen 4361 lost: sock=1 connected=1 hello_sent=1 up=1
+[13108.523141] tbtun: tunnel 1 carrier 7 gen 4360 lost: sock=1 connected=1 hello_sent=1 up=1
+[13108.523183] tbtun: tunnel 1 carrier 4 gen 4357 lost: sock=1 connected=1 hello_sent=1 up=1
+[13108.523221] tbtun: tunnel 1 carrier 0 gen 4353 lost: sock=1 connected=1 hello_sent=1 up=1
+[13113.539609] tbt_carrier_lost: 246 callbacks suppressed
+[13113.539621] tbtun: tunnel 1 carrier 14 gen 4623 lost: sock=1 connected=1 hello_sent=1 up=1
+[13113.539689] tbtun: tunnel 1 carrier 3 gen 4612 lost: sock=1 connected=1 hello_sent=1 up=1
+[13113.539726] tbtun: tunnel 1 carrier 9 gen 4618 lost: sock=1 connected=1 hello_sent=1 up=1
+[13113.539726] tbtun: tunnel 1 carrier 7 gen 4616 lost: sock=1 connected=1 hello_sent=1 up=1
+[13113.539763] tbtun: tunnel 1 carrier 15 gen 4624 lost: sock=1 connected=1 hello_sent=1 up=1
+[13113.539779] tbtun: tunnel 1 carrier 11 gen 4620 lost: sock=1 connected=1 hello_sent=1 up=1
+[13113.539786] tbtun: tunnel 1 carrier 6 gen 4615 lost: sock=1 connected=1 hello_sent=1 up=1
+[13113.539813] tbtun: tunnel 1 carrier 12 gen 4621 lost: sock=1 connected=1 hello_sent=1 up=1
+[13113.540619] tbtun: tunnel 1 carrier 10 gen 4619 lost: sock=1 connected=1 hello_sent=1 up=1
+[13113.540661] tbtun: tunnel 1 carrier 0 gen 4609 lost: sock=1 connected=1 hello_sent=1 up=1
+[13118.577359] tbt_carrier_lost: 246 callbacks suppressed
+[13118.577374] tbtun: tunnel 1 carrier 13 gen 4878 lost: sock=1 connected=1 hello_sent=1 up=1
+[13118.579172] tbtun: tunnel 1 carrier 14 gen 4879 lost: sock=1 connected=1 hello_sent=1 up=1
+[13118.579204] tbtun: tunnel 1 carrier 15 gen 4880 lost: sock=1 connected=1 hello_sent=1 up=1
+[13118.631666] tbtun: tunnel 1 carrier 27 gen 4887 lost: sock=1 connected=1 hello_sent=1 up=1
+[13118.631700] tbtun: tunnel 1 carrier 18 gen 4881 lost: sock=1 connected=1 hello_sent=1 up=1
+[13118.631736] tbtun: tunnel 1 carrier 19 gen 4882 lost: sock=1 connected=1 hello_sent=1 up=1
+[13118.631796] tbtun: tunnel 1 carrier 0 gen 4865 lost: sock=1 connected=1 hello_sent=1 up=1
+[13118.631987] tbtun: tunnel 1 carrier 1 gen 4866 lost: sock=1 connected=1 hello_sent=1 up=1
+[13118.632179] tbtun: tunnel 1 carrier 2 gen 4867 lost: sock=1 connected=1 hello_sent=1 up=1
+[13118.632278] tbtun: tunnel 1 carrier 3 gen 4868 lost: sock=1 connected=1 hello_sent=1 up=1
+[13123.582530] tbt_carrier_lost: 246 callbacks suppressed
+[13123.582545] tbtun: tunnel 1 carrier 14 gen 5122 lost: sock=1 connected=1 hello_sent=1 up=1
+[13123.583374] tbtun: tunnel 1 carrier 15 gen 5123 lost: sock=1 connected=1 hello_sent=1 up=1
+[13123.606711] tbtun: tunnel 1 carrier 13 gen 5121 lost: sock=1 connected=1 hello_sent=1 up=1
+[13123.636510] tbtun: tunnel 1 carrier 2 gen 5126 lost: sock=1 connected=1 hello_sent=1 up=1
+[13123.636651] tbtun: tunnel 1 carrier 0 gen 5124 lost: sock=1 connected=1 hello_sent=1 up=1
+[13123.636791] tbtun: tunnel 1 carrier 1 gen 5125 lost: sock=1 connected=1 hello_sent=1 up=1
+[13123.637158] tbtun: tunnel 1 carrier 3 gen 5127 lost: sock=1 connected=1 hello_sent=1 up=1
+[13123.637513] tbtun: tunnel 1 carrier 12 gen 5136 lost: sock=1 connected=1 hello_sent=1 up=1
+[13123.637541] tbtun: tunnel 1 carrier 20 gen 5139 lost: sock=1 connected=1 hello_sent=1 up=1
+[13123.637669] tbtun: tunnel 1 carrier 19 gen 5138 lost: sock=1 connected=1 hello_sent=1 up=1
+[13128.608869] tbt_carrier_lost: 246 callbacks suppressed
+[13128.608887] tbtun: tunnel 1 carrier 15 gen 5379 lost: sock=1 connected=1 hello_sent=1 up=1
+[13128.608897] tbtun: tunnel 1 carrier 14 gen 5378 lost: sock=1 connected=1 hello_sent=1 up=1
+[13128.653198] tbtun: tunnel 1 carrier 13 gen 5377 lost: sock=1 connected=1 hello_sent=1 up=1
+[13128.668779] tbtun: tunnel 1 carrier 7 gen 5387 lost: sock=1 connected=1 hello_sent=1 up=1
+[13128.673060] tbtun: tunnel 1 carrier 6 gen 5386 lost: sock=1 connected=1 hello_sent=1 up=1
+[13128.673297] tbtun: tunnel 1 carrier 0 gen 5380 lost: sock=1 connected=1 hello_sent=1 up=1
+[13128.673903] tbtun: tunnel 1 carrier 3 gen 5383 lost: sock=1 connected=1 hello_sent=1 up=1
+[13128.673931] tbtun: tunnel 1 carrier 5 gen 5385 lost: sock=1 connected=1 hello_sent=1 up=1
+[13128.673953] tbtun: tunnel 1 carrier 2 gen 5382 lost: sock=1 connected=1 hello_sent=1 up=1
+[13128.673975] tbtun: tunnel 1 carrier 4 gen 5384 lost: sock=1 connected=1 hello_sent=1 up=1
+[13133.656464] tbt_carrier_lost: 246 callbacks suppressed
+[13133.656471] tbtun: tunnel 1 carrier 15 gen 5635 lost: sock=1 connected=1 hello_sent=1 up=1
+[13133.661961] tbtun: tunnel 1 carrier 14 gen 5634 lost: sock=1 connected=1 hello_sent=1 up=1
+[13133.679891] tbtun: tunnel 1 carrier 13 gen 5633 lost: sock=1 connected=1 hello_sent=1 up=1
+[13133.726003] tbtun: tunnel 1 carrier 20 gen 5651 lost: sock=1 connected=1 hello_sent=1 up=1
+[13133.726155] tbtun: tunnel 1 carrier 2 gen 5638 lost: sock=1 connected=1 hello_sent=1 up=1
+[13133.726183] tbtun: tunnel 1 carrier 3 gen 5639 lost: sock=1 connected=1 hello_sent=1 up=1
+[13133.726232] tbtun: tunnel 1 carrier 7 gen 5643 lost: sock=1 connected=1 hello_sent=1 up=1
+[13133.726762] tbtun: tunnel 1 carrier 12 gen 5648 lost: sock=1 connected=1 hello_sent=1 up=1
+[13133.726794] tbtun: tunnel 1 carrier 11 gen 5647 lost: sock=1 connected=1 hello_sent=1 up=1
+[13133.726826] tbtun: tunnel 1 carrier 9 gen 5645 lost: sock=1 connected=1 hello_sent=1 up=1
+[13138.682801] tbt_carrier_lost: 246 callbacks suppressed
+[13138.682816] tbtun: tunnel 1 carrier 14 gen 5890 lost: sock=1 connected=1 hello_sent=1 up=1
+[13138.683025] tbtun: tunnel 1 carrier 15 gen 5891 lost: sock=1 connected=1 hello_sent=1 up=1
+[13138.713071] tbtun: tunnel 1 carrier 13 gen 5889 lost: sock=1 connected=1 hello_sent=1 up=1
+[13138.738885] tbtun: tunnel 1 carrier 10 gen 5902 lost: sock=1 connected=1 hello_sent=1 up=1
+[13138.739587] tbtun: tunnel 1 carrier 7 gen 5899 lost: sock=1 connected=1 hello_sent=1 up=1
+[13138.739976] tbtun: tunnel 1 carrier 1 gen 5893 lost: sock=1 connected=1 hello_sent=1 up=1
+[13138.740523] tbtun: tunnel 1 carrier 8 gen 5900 lost: sock=1 connected=1 hello_sent=1 up=1
+[13138.741058] tbtun: tunnel 1 carrier 2 gen 5894 lost: sock=1 connected=1 hello_sent=1 up=1
+[13138.741587] tbtun: tunnel 1 carrier 11 gen 5903 lost: sock=1 connected=1 hello_sent=1 up=1
+[13138.742117] tbtun: tunnel 1 carrier 6 gen 5898 lost: sock=1 connected=1 hello_sent=1 up=1
+[13143.715521] tbt_carrier_lost: 246 callbacks suppressed
+[13143.715536] tbtun: tunnel 1 carrier 14 gen 6146 lost: sock=1 connected=1 hello_sent=1 up=1
+[13143.715728] tbtun: tunnel 1 carrier 15 gen 6147 lost: sock=1 connected=1 hello_sent=1 up=1
+[13143.766348] tbtun: tunnel 1 carrier 13 gen 6145 lost: sock=1 connected=1 hello_sent=1 up=1
+[13143.787273] tbtun: tunnel 1 carrier 5 gen 6153 lost: sock=1 connected=1 hello_sent=1 up=1
+[13143.787368] tbtun: tunnel 1 carrier 12 gen 6160 lost: sock=1 connected=1 hello_sent=1 up=1
+[13143.787978] tbtun: tunnel 1 carrier 4 gen 6152 lost: sock=1 connected=1 hello_sent=1 up=1
+[13143.788930] tbtun: tunnel 1 carrier 9 gen 6157 lost: sock=1 connected=1 hello_sent=1 up=1
+[13143.790104] tbtun: tunnel 1 carrier 11 gen 6159 lost: sock=1 connected=1 hello_sent=1 up=1
+[13143.790134] tbtun: tunnel 1 carrier 7 gen 6155 lost: sock=1 connected=1 hello_sent=1 up=1
+[13143.790156] tbtun: tunnel 1 carrier 6 gen 6154 lost: sock=1 connected=1 hello_sent=1 up=1
+[13148.769174] tbt_carrier_lost: 246 callbacks suppressed
+[13148.769189] tbtun: tunnel 1 carrier 14 gen 6402 lost: sock=1 connected=1 hello_sent=1 up=1
+[13148.812944] tbtun: tunnel 1 carrier 13 gen 6401 lost: sock=1 connected=1 hello_sent=1 up=1
+[13148.813004] tbtun: tunnel 1 carrier 15 gen 6403 lost: sock=1 connected=1 hello_sent=1 up=1
+[13148.846750] tbtun: tunnel 1 carrier 2 gen 6406 lost: sock=1 connected=1 hello_sent=1 up=1
+[13148.846824] tbtun: tunnel 1 carrier 19 gen 6418 lost: sock=1 connected=1 hello_sent=1 up=1
+[13148.846893] tbtun: tunnel 1 carrier 0 gen 6404 lost: sock=1 connected=1 hello_sent=1 up=1
+[13148.847050] tbtun: tunnel 1 carrier 1 gen 6405 lost: sock=1 connected=1 hello_sent=1 up=1
+[13148.847518] tbtun: tunnel 1 carrier 3 gen 6407 lost: sock=1 connected=1 hello_sent=1 up=1
+[13148.847545] tbtun: tunnel 1 carrier 9 gen 6413 lost: sock=1 connected=1 hello_sent=1 up=1
+[13148.847567] tbtun: tunnel 1 carrier 8 gen 6412 lost: sock=1 connected=1 hello_sent=1 up=1
+[13153.814826] tbt_carrier_lost: 246 callbacks suppressed
+[13153.814833] tbtun: tunnel 1 carrier 14 gen 6658 lost: sock=1 connected=1 hello_sent=1 up=1
+[13153.846305] tbtun: tunnel 1 carrier 13 gen 6657 lost: sock=1 connected=1 hello_sent=1 up=1
+[13153.846484] tbtun: tunnel 1 carrier 15 gen 6659 lost: sock=1 connected=1 hello_sent=1 up=1
+[13153.874713] tbtun: tunnel 1 carrier 2 gen 6662 lost: sock=1 connected=1 hello_sent=1 up=1
+[13153.874775] tbtun: tunnel 1 carrier 19 gen 6674 lost: sock=1 connected=1 hello_sent=1 up=1
+[13153.874777] tbtun: tunnel 1 carrier 18 gen 6673 lost: sock=1 connected=1 hello_sent=1 up=1
+[13153.874810] tbtun: tunnel 1 carrier 12 gen 6672 lost: sock=1 connected=1 hello_sent=1 up=1
+[13153.874833] tbtun: tunnel 1 carrier 10 gen 6670 lost: sock=1 connected=1 hello_sent=1 up=1
+[13153.874856] tbtun: tunnel 1 carrier 4 gen 6664 lost: sock=1 connected=1 hello_sent=1 up=1
+[13153.875491] tbtun: tunnel 1 carrier 20 gen 6675 lost: sock=1 connected=1 hello_sent=1 up=1
+[13158.848453] tbt_carrier_lost: 246 callbacks suppressed
+[13158.848461] tbtun: tunnel 1 carrier 15 gen 6915 lost: sock=1 connected=1 hello_sent=1 up=1
+[13158.848563] tbtun: tunnel 1 carrier 14 gen 6914 lost: sock=1 connected=1 hello_sent=1 up=1
+[13158.862964] tbtun: tunnel 1 carrier 13 gen 6913 lost: sock=1 connected=1 hello_sent=1 up=1
+[13158.902682] tbtun: tunnel 1 carrier 6 gen 6922 lost: sock=1 connected=1 hello_sent=1 up=1
+[13158.902710] tbtun: tunnel 1 carrier 19 gen 6930 lost: sock=1 connected=1 hello_sent=1 up=1
+[13158.902728] tbtun: tunnel 1 carrier 4 gen 6920 lost: sock=1 connected=1 hello_sent=1 up=1
+[13158.902886] tbtun: tunnel 1 carrier 18 gen 6929 lost: sock=1 connected=1 hello_sent=1 up=1
+[13158.902913] tbtun: tunnel 1 carrier 7 gen 6923 lost: sock=1 connected=1 hello_sent=1 up=1
+[13158.902932] tbtun: tunnel 1 carrier 5 gen 6921 lost: sock=1 connected=1 hello_sent=1 up=1
+[13158.902962] tbtun: tunnel 1 carrier 9 gen 6925 lost: sock=1 connected=1 hello_sent=1 up=1
+[13163.864631] tbt_carrier_lost: 245 callbacks suppressed
+[13163.864648] tbtun: tunnel 1 carrier 15 gen 7171 lost: sock=1 connected=1 hello_sent=1 up=1
+[13163.864815] tbtun: tunnel 1 carrier 14 gen 7170 lost: sock=1 connected=1 hello_sent=1 up=1
+[13163.889517] tbtun: tunnel 1 carrier 13 gen 7169 lost: sock=1 connected=1 hello_sent=1 up=1
+[13163.931444] tbtun: tunnel 1 carrier 8 gen 7180 lost: sock=1 connected=1 hello_sent=1 up=1
+[13163.931576] tbtun: tunnel 1 carrier 0 gen 7172 lost: sock=1 connected=1 hello_sent=1 up=1
+[13163.931626] tbtun: tunnel 1 carrier 9 gen 7181 lost: sock=1 connected=1 hello_sent=1 up=1
+[13163.946104] tbtun: tunnel 1 carrier 1 gen 7173 lost: sock=1 connected=1 hello_sent=1 up=1
+[13163.946170] tbtun: tunnel 1 carrier 2 gen 7174 lost: sock=1 connected=1 hello_sent=1 up=1
+[13163.946192] tbtun: tunnel 1 carrier 3 gen 7175 lost: sock=1 connected=1 hello_sent=1 up=1
+[13163.946213] tbtun: tunnel 1 carrier 4 gen 7176 lost: sock=1 connected=1 hello_sent=1 up=1
+[13168.891320] tbt_carrier_lost: 246 callbacks suppressed
+[13168.891326] tbtun: tunnel 1 carrier 14 gen 7426 lost: sock=1 connected=1 hello_sent=1 up=1
+[13168.891486] tbtun: tunnel 1 carrier 15 gen 7427 lost: sock=1 connected=1 hello_sent=1 up=1
+[13168.912841] tbtun: tunnel 1 carrier 13 gen 7425 lost: sock=1 connected=1 hello_sent=1 up=1
+[13168.948280] tbtun: tunnel 1 carrier 2 gen 7432 lost: sock=1 connected=1 hello_sent=1 up=1
+[13168.948338] tbtun: tunnel 1 carrier 3 gen 7433 lost: sock=1 connected=1 hello_sent=1 up=1
+[13168.948612] tbtun: tunnel 1 carrier 4 gen 7434 lost: sock=1 connected=1 hello_sent=1 up=1
+[13168.948694] tbtun: tunnel 1 carrier 5 gen 7435 lost: sock=1 connected=1 hello_sent=1 up=1
+[13168.949219] tbtun: tunnel 1 carrier 6 gen 7436 lost: sock=1 connected=1 hello_sent=1 up=1
+[13168.949248] tbtun: tunnel 1 carrier 7 gen 7437 lost: sock=1 connected=1 hello_sent=1 up=1
+[13168.949253] tbtun: tunnel 1 carrier 0 gen 7428 lost: sock=1 connected=1 hello_sent=1 up=1
+[13173.916054] tbt_carrier_lost: 246 callbacks suppressed
+[13173.916067] tbtun: tunnel 1 carrier 14 gen 7682 lost: sock=1 connected=1 hello_sent=1 up=1
+[13173.917714] tbtun: tunnel 1 carrier 13 gen 7681 lost: sock=1 connected=1 hello_sent=1 up=1
+[13173.917742] tbtun: tunnel 1 carrier 15 gen 7683 lost: sock=1 connected=1 hello_sent=1 up=1
+[13173.992636] tbtun: tunnel 1 carrier 0 gen 7684 lost: sock=1 connected=1 hello_sent=1 up=1
+[13173.996442] tbtun: tunnel 1 carrier 12 gen 7694 lost: sock=1 connected=1 hello_sent=1 up=1
+[13173.996493] tbtun: tunnel 1 carrier 3 gen 7687 lost: sock=1 connected=1 hello_sent=1 up=1
+[13173.996547] tbtun: tunnel 1 carrier 4 gen 7688 lost: sock=1 connected=1 hello_sent=1 up=1
+[13173.996595] tbtun: tunnel 1 carrier 5 gen 7689 lost: sock=1 connected=1 hello_sent=1 up=1
+[13173.997416] tbtun: tunnel 1 carrier 10 gen 7692 lost: sock=1 connected=1 hello_sent=1 up=1
+[13173.997447] tbtun: tunnel 1 carrier 7 gen 7691 lost: sock=1 connected=1 hello_sent=1 up=1
+[13178.940880] tbt_carrier_lost: 246 callbacks suppressed
+[13178.940886] tbtun: tunnel 1 carrier 15 gen 7939 lost: sock=1 connected=1 hello_sent=1 up=1
+[13178.941044] tbtun: tunnel 1 carrier 14 gen 7938 lost: sock=1 connected=1 hello_sent=1 up=1
+[13178.942660] tbtun: tunnel 1 carrier 13 gen 7937 lost: sock=1 connected=1 hello_sent=1 up=1
+[13179.072729] tbtun: tunnel 1 carrier 18 gen 7953 lost: sock=1 connected=1 hello_sent=1 up=1
+[13179.073563] tbtun: tunnel 1 carrier 7 gen 7947 lost: sock=1 connected=1 hello_sent=1 up=1
+[13179.073595] tbtun: tunnel 1 carrier 2 gen 7942 lost: sock=1 connected=1 hello_sent=1 up=1
+[13179.073599] tbtun: tunnel 1 carrier 0 gen 7940 lost: sock=1 connected=1 hello_sent=1 up=1
+[13179.073628] tbtun: tunnel 1 carrier 19 gen 7954 lost: sock=1 connected=1 hello_sent=1 up=1
+[13179.073651] tbtun: tunnel 1 carrier 5 gen 7945 lost: sock=1 connected=1 hello_sent=1 up=1
+[13179.073673] tbtun: tunnel 1 carrier 8 gen 7948 lost: sock=1 connected=1 hello_sent=1 up=1
+[13183.945063] tbt_carrier_lost: 246 callbacks suppressed
+[13183.945069] tbtun: tunnel 1 carrier 14 gen 8194 lost: sock=1 connected=1 hello_sent=1 up=1
+[13183.945192] tbtun: tunnel 1 carrier 15 gen 8195 lost: sock=1 connected=1 hello_sent=1 up=1
+[13183.982530] tbtun: tunnel 1 carrier 13 gen 8193 lost: sock=1 connected=1 hello_sent=1 up=1
+[13184.108766] tbtun: tunnel 1 carrier 19 gen 8210 lost: sock=1 connected=1 hello_sent=1 up=1
+[13184.108810] tbtun: tunnel 1 carrier 5 gen 8201 lost: sock=1 connected=1 hello_sent=1 up=1
+[13184.108810] tbtun: tunnel 1 carrier 10 gen 8206 lost: sock=1 connected=1 hello_sent=1 up=1
+[13184.108870] tbtun: tunnel 1 carrier 4 gen 8200 lost: sock=1 connected=1 hello_sent=1 up=1
+[13184.108871] tbtun: tunnel 1 carrier 3 gen 8199 lost: sock=1 connected=1 hello_sent=1 up=1
+[13184.108907] tbtun: tunnel 1 carrier 11 gen 8207 lost: sock=1 connected=1 hello_sent=1 up=1
+[13184.108929] tbtun: tunnel 1 carrier 8 gen 8204 lost: sock=1 connected=1 hello_sent=1 up=1
+[13188.985158] tbt_carrier_lost: 246 callbacks suppressed
+[13188.985166] tbtun: tunnel 1 carrier 14 gen 8450 lost: sock=1 connected=1 hello_sent=1 up=1
+[13188.985253] tbtun: tunnel 1 carrier 15 gen 8451 lost: sock=1 connected=1 hello_sent=1 up=1
+[13189.032614] tbtun: tunnel 1 carrier 13 gen 8449 lost: sock=1 connected=1 hello_sent=1 up=1
+[13189.168960] tbtun: tunnel 1 carrier 11 gen 8463 lost: sock=1 connected=1 hello_sent=1 up=1
+[13189.169759] tbtun: tunnel 1 carrier 7 gen 8459 lost: sock=1 connected=1 hello_sent=1 up=1
+[13189.169885] tbtun: tunnel 1 carrier 12 gen 8464 lost: sock=1 connected=1 hello_sent=1 up=1
+[13189.169974] tbtun: tunnel 1 carrier 20 gen 8467 lost: sock=1 connected=1 hello_sent=1 up=1
+[13189.170095] tbtun: tunnel 1 carrier 3 gen 8455 lost: sock=1 connected=1 hello_sent=1 up=1
+[13189.170258] tbtun: tunnel 1 carrier 5 gen 8457 lost: sock=1 connected=1 hello_sent=1 up=1
+[13189.170350] tbtun: tunnel 1 carrier 2 gen 8454 lost: sock=1 connected=1 hello_sent=1 up=1
+[13194.035291] tbt_carrier_lost: 246 callbacks suppressed
+[13194.035299] tbtun: tunnel 1 carrier 15 gen 8707 lost: sock=1 connected=1 hello_sent=1 up=1
+[13194.035432] tbtun: tunnel 1 carrier 14 gen 8706 lost: sock=1 connected=1 hello_sent=1 up=1
+[13194.079162] tbtun: tunnel 1 carrier 13 gen 8705 lost: sock=1 connected=1 hello_sent=1 up=1
+[13194.198570] tbtun: tunnel 1 carrier 5 gen 8713 lost: sock=1 connected=1 hello_sent=1 up=1
+[13194.198651] tbtun: tunnel 1 carrier 3 gen 8711 lost: sock=1 connected=1 hello_sent=1 up=1
+[13194.198677] tbtun: tunnel 1 carrier 2 gen 8710 lost: sock=1 connected=1 hello_sent=1 up=1
+[13194.198683] tbtun: tunnel 1 carrier 20 gen 8723 lost: sock=1 connected=1 hello_sent=1 up=1
+[13194.198744] tbtun: tunnel 1 carrier 0 gen 8708 lost: sock=1 connected=1 hello_sent=1 up=1
+[13194.198831] tbtun: tunnel 1 carrier 11 gen 8719 lost: sock=1 connected=1 hello_sent=1 up=1
+[13194.198884] tbtun: tunnel 1 carrier 9 gen 8717 lost: sock=1 connected=1 hello_sent=1 up=1
+[13199.081485] tbt_carrier_lost: 246 callbacks suppressed
+[13199.081492] tbtun: tunnel 1 carrier 14 gen 8962 lost: sock=1 connected=1 hello_sent=1 up=1
+[13199.081535] tbtun: tunnel 1 carrier 15 gen 8963 lost: sock=1 connected=1 hello_sent=1 up=1
+[13199.115775] tbtun: tunnel 1 carrier 13 gen 8961 lost: sock=1 connected=1 hello_sent=1 up=1
+[13199.258760] tbtun: tunnel 1 carrier 20 gen 8979 lost: sock=1 connected=1 hello_sent=1 up=1
+[13199.258803] tbtun: tunnel 1 carrier 9 gen 8973 lost: sock=1 connected=1 hello_sent=1 up=1
+[13199.258845] tbtun: tunnel 1 carrier 10 gen 8974 lost: sock=1 connected=1 hello_sent=1 up=1
+[13199.258856] tbtun: tunnel 1 carrier 8 gen 8972 lost: sock=1 connected=1 hello_sent=1 up=1
+[13199.259544] tbtun: tunnel 1 carrier 2 gen 8966 lost: sock=1 connected=1 hello_sent=1 up=1
+[13199.259608] tbtun: tunnel 1 carrier 7 gen 8971 lost: sock=1 connected=1 hello_sent=1 up=1
+[13199.259651] tbtun: tunnel 1 carrier 3 gen 8967 lost: sock=1 connected=1 hello_sent=1 up=1
+[13204.117901] tbt_carrier_lost: 245 callbacks suppressed
+[13204.117914] tbtun: tunnel 1 carrier 14 gen 9218 lost: sock=1 connected=1 hello_sent=1 up=1
+[13204.135626] tbtun: tunnel 1 carrier 13 gen 9217 lost: sock=1 connected=1 hello_sent=1 up=1
+[13204.135676] tbtun: tunnel 1 carrier 15 gen 9219 lost: sock=1 connected=1 hello_sent=1 up=1
+[13204.281021] tbtun: tunnel 1 carrier 8 gen 9228 lost: sock=1 connected=1 hello_sent=1 up=1
+[13204.281276] tbtun: tunnel 1 carrier 5 gen 9225 lost: sock=1 connected=1 hello_sent=1 up=1
+[13204.281318] tbtun: tunnel 1 carrier 6 gen 9226 lost: sock=1 connected=1 hello_sent=1 up=1
+[13204.281344] tbtun: tunnel 1 carrier 10 gen 9230 lost: sock=1 connected=1 hello_sent=1 up=1
+[13204.281379] tbtun: tunnel 1 carrier 12 gen 9232 lost: sock=1 connected=1 hello_sent=1 up=1
+[13204.281426] tbtun: tunnel 1 carrier 20 gen 9235 lost: sock=1 connected=1 hello_sent=1 up=1
+[13204.281461] tbtun: tunnel 1 carrier 18 gen 9233 lost: sock=1 connected=1 hello_sent=1 up=1
+[13209.137542] tbt_carrier_lost: 246 callbacks suppressed
+[13209.137549] tbtun: tunnel 1 carrier 14 gen 9474 lost: sock=1 connected=1 hello_sent=1 up=1
+[13209.138126] tbtun: tunnel 1 carrier 15 gen 9475 lost: sock=1 connected=1 hello_sent=1 up=1
+[13209.159011] tbtun: tunnel 1 carrier 13 gen 9473 lost: sock=1 connected=1 hello_sent=1 up=1
+[13209.302125] tbtun: tunnel 1 carrier 5 gen 9481 lost: sock=1 connected=1 hello_sent=1 up=1
+[13209.304452] tbtun: tunnel 1 carrier 19 gen 9490 lost: sock=1 connected=1 hello_sent=1 up=1
+[13209.304488] tbtun: tunnel 1 carrier 12 gen 9488 lost: sock=1 connected=1 hello_sent=1 up=1
+[13209.304497] tbtun: tunnel 1 carrier 0 gen 9476 lost: sock=1 connected=1 hello_sent=1 up=1
+[13209.304511] tbtun: tunnel 1 carrier 8 gen 9484 lost: sock=1 connected=1 hello_sent=1 up=1
+[13209.304542] tbtun: tunnel 1 carrier 9 gen 9485 lost: sock=1 connected=1 hello_sent=1 up=1
+[13209.304564] tbtun: tunnel 1 carrier 11 gen 9487 lost: sock=1 connected=1 hello_sent=1 up=1
+[13214.161329] tbt_carrier_lost: 246 callbacks suppressed
+[13214.161345] tbtun: tunnel 1 carrier 14 gen 9730 lost: sock=1 connected=1 hello_sent=1 up=1
+[13214.178922] tbtun: tunnel 1 carrier 13 gen 9729 lost: sock=1 connected=1 hello_sent=1 up=1
+[13214.179042] tbtun: tunnel 1 carrier 15 gen 9731 lost: sock=1 connected=1 hello_sent=1 up=1
+[13214.332909] tbtun: tunnel 1 carrier 4 gen 9736 lost: sock=1 connected=1 hello_sent=1 up=1
+[13214.332956] tbtun: tunnel 1 carrier 19 gen 9746 lost: sock=1 connected=1 hello_sent=1 up=1
+[13214.333032] tbtun: tunnel 1 carrier 5 gen 9737 lost: sock=1 connected=1 hello_sent=1 up=1
+[13214.333032] tbtun: tunnel 1 carrier 7 gen 9739 lost: sock=1 connected=1 hello_sent=1 up=1
+[13214.333069] tbtun: tunnel 1 carrier 3 gen 9735 lost: sock=1 connected=1 hello_sent=1 up=1
+[13214.333132] tbtun: tunnel 1 carrier 10 gen 9742 lost: sock=1 connected=1 hello_sent=1 up=1
+[13214.333199] tbtun: tunnel 1 carrier 6 gen 9738 lost: sock=1 connected=1 hello_sent=1 up=1
+[13219.205578] tbt_carrier_lost: 246 callbacks suppressed
+[13219.205592] tbtun: tunnel 1 carrier 13 gen 9985 lost: sock=1 connected=1 hello_sent=1 up=1
+[13219.205833] tbtun: tunnel 1 carrier 14 gen 9986 lost: sock=1 connected=1 hello_sent=1 up=1
+[13219.205881] tbtun: tunnel 1 carrier 15 gen 9987 lost: sock=1 connected=1 hello_sent=1 up=1
+[13219.344089] tbtun: tunnel 1 carrier 20 gen 10003 lost: sock=1 connected=1 hello_sent=1 up=1
+[13219.344250] tbtun: tunnel 1 carrier 8 gen 9996 lost: sock=1 connected=1 hello_sent=1 up=1
+[13219.344338] tbtun: tunnel 1 carrier 19 gen 10002 lost: sock=1 connected=1 hello_sent=1 up=1
+[13219.344344] tbtun: tunnel 1 carrier 0 gen 9988 lost: sock=1 connected=1 hello_sent=1 up=1
+[13219.344472] tbtun: tunnel 1 carrier 10 gen 9998 lost: sock=1 connected=1 hello_sent=1 up=1
+[13219.344531] tbtun: tunnel 1 carrier 9 gen 9997 lost: sock=1 connected=1 hello_sent=1 up=1
+[13219.344624] tbtun: tunnel 1 carrier 1 gen 9989 lost: sock=1 connected=1 hello_sent=1 up=1
+[13224.260453] tbt_carrier_lost: 245 callbacks suppressed
+[13224.260460] tbtun: tunnel 1 carrier 14 gen 10242 lost: sock=1 connected=1 hello_sent=1 up=1
+[13224.260553] tbtun: tunnel 1 carrier 15 gen 10243 lost: sock=1 connected=1 hello_sent=1 up=1
+[13224.288726] tbtun: tunnel 1 carrier 13 gen 10241 lost: sock=1 connected=1 hello_sent=1 up=1
+[13224.371253] tbtun: tunnel 1 carrier 2 gen 10246 lost: sock=1 connected=1 hello_sent=1 up=1
+[13224.372273] tbtun: tunnel 1 carrier 3 gen 10247 lost: sock=1 connected=1 hello_sent=1 up=1
+[13224.372316] tbtun: tunnel 1 carrier 4 gen 10248 lost: sock=1 connected=1 hello_sent=1 up=1
+[13224.372338] tbtun: tunnel 1 carrier 12 gen 10256 lost: sock=1 connected=1 hello_sent=1 up=1
+[13224.372359] tbtun: tunnel 1 carrier 11 gen 10255 lost: sock=1 connected=1 hello_sent=1 up=1
+[13224.372369] tbtun: tunnel 1 carrier 0 gen 10244 lost: sock=1 connected=1 hello_sent=1 up=1
+[13224.372384] tbtun: tunnel 1 carrier 9 gen 10253 lost: sock=1 connected=1 hello_sent=1 up=1
+[13229.290880] tbt_carrier_lost: 246 callbacks suppressed
+[13229.290888] tbtun: tunnel 1 carrier 15 gen 10499 lost: sock=1 connected=1 hello_sent=1 up=1
+[13229.290967] tbtun: tunnel 1 carrier 14 gen 10498 lost: sock=1 connected=1 hello_sent=1 up=1
+[13229.311999] tbtun: tunnel 1 carrier 13 gen 10497 lost: sock=1 connected=1 hello_sent=1 up=1
+[13229.418183] tbtun: tunnel 1 carrier 6 gen 10506 lost: sock=1 connected=1 hello_sent=1 up=1
+[13229.418223] tbtun: tunnel 1 carrier 4 gen 10504 lost: sock=1 connected=1 hello_sent=1 up=1
+[13229.418300] tbtun: tunnel 1 carrier 5 gen 10505 lost: sock=1 connected=1 hello_sent=1 up=1
+[13229.418311] tbtun: tunnel 1 carrier 8 gen 10508 lost: sock=1 connected=1 hello_sent=1 up=1
+[13229.418716] tbtun: tunnel 1 carrier 3 gen 10503 lost: sock=1 connected=1 hello_sent=1 up=1
+[13229.418745] tbtun: tunnel 1 carrier 9 gen 10509 lost: sock=1 connected=1 hello_sent=1 up=1
+[13229.418778] tbtun: tunnel 1 carrier 18 gen 10513 lost: sock=1 connected=1 hello_sent=1 up=1
+[13234.313391] tbt_carrier_lost: 246 callbacks suppressed
+[13234.313397] tbtun: tunnel 1 carrier 14 gen 10754 lost: sock=1 connected=1 hello_sent=1 up=1
+[13234.335406] tbtun: tunnel 1 carrier 13 gen 10753 lost: sock=1 connected=1 hello_sent=1 up=1
+[13234.335586] tbtun: tunnel 1 carrier 15 gen 10755 lost: sock=1 connected=1 hello_sent=1 up=1
+[13234.421983] tbtun: tunnel 1 carrier 18 gen 10762 lost: sock=1 connected=1 hello_sent=1 up=1
+[13234.422099] tbtun: tunnel 1 carrier 8 gen 10760 lost: sock=1 connected=1 hello_sent=1 up=1
+[13234.422183] tbtun: tunnel 1 carrier 6 gen 10759 lost: sock=1 connected=1 hello_sent=1 up=1
+[13234.422366] tbtun: tunnel 1 carrier 9 gen 10761 lost: sock=1 connected=1 hello_sent=1 up=1
+[13234.422440] tbtun: tunnel 1 carrier 19 gen 10763 lost: sock=1 connected=1 hello_sent=1 up=1
+[13234.422570] tbtun: tunnel 1 carrier 4 gen 10757 lost: sock=1 connected=1 hello_sent=1 up=1
+[13234.436223] tbtun: tunnel 1 carrier 10 gen 10768 lost: sock=1 connected=1 hello_sent=1 up=1
+[13239.337784] tbt_carrier_lost: 245 callbacks suppressed
+[13239.337792] tbtun: tunnel 1 carrier 15 gen 11011 lost: sock=1 connected=1 hello_sent=1 up=1
+[13239.337818] tbtun: tunnel 1 carrier 14 gen 11010 lost: sock=1 connected=1 hello_sent=1 up=1
+[13239.351921] tbtun: tunnel 1 carrier 13 gen 11009 lost: sock=1 connected=1 hello_sent=1 up=1
+[13239.453618] tbtun: tunnel 1 carrier 2 gen 11014 lost: sock=1 connected=1 hello_sent=1 up=1
+[13239.453661] tbtun: tunnel 1 carrier 20 gen 11027 lost: sock=1 connected=1 hello_sent=1 up=1
+[13239.453769] tbtun: tunnel 1 carrier 6 gen 11018 lost: sock=1 connected=1 hello_sent=1 up=1
+[13239.453790] tbtun: tunnel 1 carrier 0 gen 11012 lost: sock=1 connected=1 hello_sent=1 up=1
+[13239.453871] tbtun: tunnel 1 carrier 9 gen 11021 lost: sock=1 connected=1 hello_sent=1 up=1
+[13239.453957] tbtun: tunnel 1 carrier 7 gen 11019 lost: sock=1 connected=1 hello_sent=1 up=1
+[13239.453985] tbtun: tunnel 1 carrier 1 gen 11013 lost: sock=1 connected=1 hello_sent=1 up=1
+[13244.354262] tbt_carrier_lost: 246 callbacks suppressed
+[13244.354279] tbtun: tunnel 1 carrier 14 gen 11266 lost: sock=1 connected=1 hello_sent=1 up=1
+[13244.375153] tbtun: tunnel 1 carrier 13 gen 11265 lost: sock=1 connected=1 hello_sent=1 up=1
+[13244.375204] tbtun: tunnel 1 carrier 15 gen 11267 lost: sock=1 connected=1 hello_sent=1 up=1
+[13244.471972] tbtun: tunnel 1 carrier 6 gen 11274 lost: sock=1 connected=1 hello_sent=1 up=1
+[13244.472064] tbtun: tunnel 1 carrier 9 gen 11277 lost: sock=1 connected=1 hello_sent=1 up=1
+[13244.472098] tbtun: tunnel 1 carrier 2 gen 11270 lost: sock=1 connected=1 hello_sent=1 up=1
+[13244.472225] tbtun: tunnel 1 carrier 20 gen 11283 lost: sock=1 connected=1 hello_sent=1 up=1
+[13244.472413] tbtun: tunnel 1 carrier 7 gen 11275 lost: sock=1 connected=1 hello_sent=1 up=1
+[13244.472439] tbtun: tunnel 1 carrier 11 gen 11279 lost: sock=1 connected=1 hello_sent=1 up=1
+[13244.472651] tbtun: tunnel 1 carrier 8 gen 11276 lost: sock=1 connected=1 hello_sent=1 up=1
+[13249.377391] tbt_carrier_lost: 246 callbacks suppressed
+[13249.377408] tbtun: tunnel 1 carrier 14 gen 11522 lost: sock=1 connected=1 hello_sent=1 up=1
+[13249.378224] tbtun: tunnel 1 carrier 15 gen 11523 lost: sock=1 connected=1 hello_sent=1 up=1
+[13249.398525] tbtun: tunnel 1 carrier 13 gen 11521 lost: sock=1 connected=1 hello_sent=1 up=1
+[13249.509256] tbtun: tunnel 1 carrier 8 gen 11532 lost: sock=1 connected=1 hello_sent=1 up=1
+[13249.509851] tbtun: tunnel 1 carrier 6 gen 11530 lost: sock=1 connected=1 hello_sent=1 up=1
+[13249.510423] tbtun: tunnel 1 carrier 12 gen 11536 lost: sock=1 connected=1 hello_sent=1 up=1
+[13249.511298] tbtun: tunnel 1 carrier 19 gen 11538 lost: sock=1 connected=1 hello_sent=1 up=1
+[13249.512559] tbtun: tunnel 1 carrier 7 gen 11531 lost: sock=1 connected=1 hello_sent=1 up=1
+[13249.512603] tbtun: tunnel 1 carrier 0 gen 11524 lost: sock=1 connected=1 hello_sent=1 up=1
+[13249.515113] tbtun: tunnel 1 carrier 4 gen 11528 lost: sock=1 connected=1 hello_sent=1 up=1
+[13254.428368] tbt_carrier_lost: 246 callbacks suppressed
+[13254.428374] tbtun: tunnel 1 carrier 13 gen 11777 lost: sock=1 connected=1 hello_sent=1 up=1
+[13254.428481] tbtun: tunnel 1 carrier 14 gen 11778 lost: sock=1 connected=1 hello_sent=1 up=1
+[13254.428502] tbtun: tunnel 1 carrier 15 gen 11779 lost: sock=1 connected=1 hello_sent=1 up=1
+[13254.586823] tbtun: tunnel 1 carrier 10 gen 11790 lost: sock=1 connected=1 hello_sent=1 up=1
+[13254.586907] tbtun: tunnel 1 carrier 2 gen 11782 lost: sock=1 connected=1 hello_sent=1 up=1
+[13254.586971] tbtun: tunnel 1 carrier 8 gen 11788 lost: sock=1 connected=1 hello_sent=1 up=1
+[13254.586977] tbtun: tunnel 1 carrier 0 gen 11780 lost: sock=1 connected=1 hello_sent=1 up=1
+[13254.587590] tbtun: tunnel 1 carrier 6 gen 11786 lost: sock=1 connected=1 hello_sent=1 up=1
+[13254.587593] tbtun: tunnel 1 carrier 20 gen 11795 lost: sock=1 connected=1 hello_sent=1 up=1
+[13254.587624] tbtun: tunnel 1 carrier 18 gen 11793 lost: sock=1 connected=1 hello_sent=1 up=1
+[13259.487575] tbt_carrier_lost: 246 callbacks suppressed
+[13259.487584] tbtun: tunnel 1 carrier 14 gen 12034 lost: sock=1 connected=1 hello_sent=1 up=1
+[13259.487751] tbtun: tunnel 1 carrier 15 gen 12035 lost: sock=1 connected=1 hello_sent=1 up=1
+[13259.511737] tbtun: tunnel 1 carrier 13 gen 12033 lost: sock=1 connected=1 hello_sent=1 up=1
+[13259.605952] tbtun: tunnel 1 carrier 3 gen 12039 lost: sock=1 connected=1 hello_sent=1 up=1
+[13259.605994] tbtun: tunnel 1 carrier 8 gen 12044 lost: sock=1 connected=1 hello_sent=1 up=1
+[13259.606048] tbtun: tunnel 1 carrier 9 gen 12045 lost: sock=1 connected=1 hello_sent=1 up=1
+[13259.606075] tbtun: tunnel 1 carrier 4 gen 12040 lost: sock=1 connected=1 hello_sent=1 up=1
+[13259.606370] tbtun: tunnel 1 carrier 11 gen 12047 lost: sock=1 connected=1 hello_sent=1 up=1
+[13259.606423] tbtun: tunnel 1 carrier 6 gen 12042 lost: sock=1 connected=1 hello_sent=1 up=1
+[13259.606470] tbtun: tunnel 1 carrier 18 gen 12049 lost: sock=1 connected=1 hello_sent=1 up=1
+[13264.514324] tbt_carrier_lost: 246 callbacks suppressed
+[13264.514339] tbtun: tunnel 1 carrier 15 gen 12291 lost: sock=1 connected=1 hello_sent=1 up=1
+[13264.515134] tbtun: tunnel 1 carrier 14 gen 12290 lost: sock=1 connected=1 hello_sent=1 up=1
+[13264.554991] tbtun: tunnel 1 carrier 13 gen 12289 lost: sock=1 connected=1 hello_sent=1 up=1
+[13264.628472] tbtun: tunnel 1 carrier 3 gen 12295 lost: sock=1 connected=1 hello_sent=1 up=1
+[13264.628582] tbtun: tunnel 1 carrier 8 gen 12300 lost: sock=1 connected=1 hello_sent=1 up=1
+[13264.628725] tbtun: tunnel 1 carrier 9 gen 12301 lost: sock=1 connected=1 hello_sent=1 up=1
+[13264.629011] tbtun: tunnel 1 carrier 6 gen 12298 lost: sock=1 connected=1 hello_sent=1 up=1
+[13264.629219] tbtun: tunnel 1 carrier 7 gen 12299 lost: sock=1 connected=1 hello_sent=1 up=1
+[13264.629274] tbtun: tunnel 1 carrier 2 gen 12294 lost: sock=1 connected=1 hello_sent=1 up=1
+[13264.629325] tbtun: tunnel 1 carrier 19 gen 12306 lost: sock=1 connected=1 hello_sent=1 up=1
+[13269.557441] tbt_carrier_lost: 246 callbacks suppressed
+[13269.557448] tbtun: tunnel 1 carrier 14 gen 12546 lost: sock=1 connected=1 hello_sent=1 up=1
+[13269.557521] tbtun: tunnel 1 carrier 15 gen 12547 lost: sock=1 connected=1 hello_sent=1 up=1
+[13269.574934] tbtun: tunnel 1 carrier 13 gen 12545 lost: sock=1 connected=1 hello_sent=1 up=1
+[13269.686144] tbtun: tunnel 1 carrier 5 gen 12553 lost: sock=1 connected=1 hello_sent=1 up=1
+[13269.686747] tbtun: tunnel 1 carrier 3 gen 12551 lost: sock=1 connected=1 hello_sent=1 up=1
+[13269.686783] tbtun: tunnel 1 carrier 2 gen 12550 lost: sock=1 connected=1 hello_sent=1 up=1
+[13269.686787] tbtun: tunnel 1 carrier 9 gen 12557 lost: sock=1 connected=1 hello_sent=1 up=1
+[13269.686796] tbtun: tunnel 1 carrier 0 gen 12548 lost: sock=1 connected=1 hello_sent=1 up=1
+[13269.686814] tbtun: tunnel 1 carrier 10 gen 12558 lost: sock=1 connected=1 hello_sent=1 up=1
+[13269.686856] tbtun: tunnel 1 carrier 11 gen 12559 lost: sock=1 connected=1 hello_sent=1 up=1
+[13274.578082] tbt_carrier_lost: 246 callbacks suppressed
+[13274.578089] tbtun: tunnel 1 carrier 15 gen 12803 lost: sock=1 connected=1 hello_sent=1 up=1
+[13274.578177] tbtun: tunnel 1 carrier 14 gen 12802 lost: sock=1 connected=1 hello_sent=1 up=1
+[13274.601546] tbtun: tunnel 1 carrier 13 gen 12801 lost: sock=1 connected=1 hello_sent=1 up=1
+[13274.762179] tbtun: tunnel 1 carrier 11 gen 12815 lost: sock=1 connected=1 hello_sent=1 up=1
+[13274.762307] tbtun: tunnel 1 carrier 19 gen 12818 lost: sock=1 connected=1 hello_sent=1 up=1
+[13274.763298] tbtun: tunnel 1 carrier 7 gen 12811 lost: sock=1 connected=1 hello_sent=1 up=1
+[13274.763321] tbtun: tunnel 1 carrier 0 gen 12804 lost: sock=1 connected=1 hello_sent=1 up=1
+[13274.763362] tbtun: tunnel 1 carrier 6 gen 12810 lost: sock=1 connected=1 hello_sent=1 up=1
+[13274.763462] tbtun: tunnel 1 carrier 4 gen 12808 lost: sock=1 connected=1 hello_sent=1 up=1
+[13274.763478] tbtun: tunnel 1 carrier 1 gen 12805 lost: sock=1 connected=1 hello_sent=1 up=1
+[13279.604233] tbt_carrier_lost: 246 callbacks suppressed
+[13279.604241] tbtun: tunnel 1 carrier 14 gen 13058 lost: sock=1 connected=1 hello_sent=1 up=1
+[13279.604338] tbtun: tunnel 1 carrier 15 gen 13059 lost: sock=1 connected=1 hello_sent=1 up=1
+[13279.618081] tbtun: tunnel 1 carrier 13 gen 13057 lost: sock=1 connected=1 hello_sent=1 up=1
+[13279.768878] tbtun: tunnel 1 carrier 2 gen 13062 lost: sock=1 connected=1 hello_sent=1 up=1
+[13279.768955] tbtun: tunnel 1 carrier 6 gen 13066 lost: sock=1 connected=1 hello_sent=1 up=1
+[13279.769165] tbtun: tunnel 1 carrier 11 gen 13071 lost: sock=1 connected=1 hello_sent=1 up=1
+[13279.769392] tbtun: tunnel 1 carrier 10 gen 13070 lost: sock=1 connected=1 hello_sent=1 up=1
+[13279.769529] tbtun: tunnel 1 carrier 4 gen 13064 lost: sock=1 connected=1 hello_sent=1 up=1
+[13279.769661] tbtun: tunnel 1 carrier 20 gen 13075 lost: sock=1 connected=1 hello_sent=1 up=1
+[13279.769767] tbtun: tunnel 1 carrier 7 gen 13067 lost: sock=1 connected=1 hello_sent=1 up=1
+
+=== pstore ===
+total 0
+drwxr-x---  2 root root 0 Nov  7 06:59 .
+drwxr-xr-x 10 root root 0 Nov  7 07:02 ..
+
+=== netwatch ===
+inactive
+
+=== netwatch_unit ===
+Restart=no
+MainPID=0
+
+=== netwatch_log ===

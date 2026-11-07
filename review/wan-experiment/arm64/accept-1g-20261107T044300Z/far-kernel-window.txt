@@ -1,0 +1,877 @@
+KW_SOURCE=journalctl
+Nov 07 04:44:10 hnd0.kw92.cyou kernel: tbtun: carrier 58 recovered after 1592 ms: back in the stripe
+Nov 07 04:44:10 hnd0.kw92.cyou kernel: tbtun: carrier 59 recovered after 1644 ms: back in the stripe
+Nov 07 04:44:11 hnd0.kw92.cyou kernel: tbtun: carrier 214 stalled: repath paused, new frames avoid it
+Nov 07 04:44:11 hnd0.kw92.cyou kernel: tbtun: carrier 214 recovered after 564 ms: back in the stripe
+Nov 07 04:44:13 hnd0.kw92.cyou kernel: workqueue: tbt_car_rx_work [tbtun] hogged CPU for >10000us 4 times, consider switching to WQ_UNBOUND
+Nov 07 04:44:13 hnd0.kw92.cyou kernel: tbtun: carrier 214 stalled: repath paused, new frames avoid it
+Nov 07 04:44:13 hnd0.kw92.cyou kernel: workqueue: tbt_car_rx_work [tbtun] hogged CPU for >10000us 5 times, consider switching to WQ_UNBOUND
+Nov 07 04:44:13 hnd0.kw92.cyou kernel: workqueue: tbt_car_rx_work [tbtun] hogged CPU for >10000us 7 times, consider switching to WQ_UNBOUND
+Nov 07 04:44:13 hnd0.kw92.cyou kernel: tbtun: carrier 214 recovered after 103 ms: back in the stripe
+Nov 07 04:44:13 hnd0.kw92.cyou kernel: workqueue: tbt_car_rx_work [tbtun] hogged CPU for >10000us 11 times, consider switching to WQ_UNBOUND
+Nov 07 04:44:14 hnd0.kw92.cyou kernel: tbtun: carrier 83 stalled: repath paused, new frames avoid it
+Nov 07 04:44:14 hnd0.kw92.cyou kernel: tbtun: carrier 51 stalled: repath paused, new frames avoid it
+Nov 07 04:44:14 hnd0.kw92.cyou kernel: tbtun: carrier 191 stalled: repath paused, new frames avoid it
+Nov 07 04:44:14 hnd0.kw92.cyou kernel: tbtun: carrier 83 recovered after 464 ms: back in the stripe
+Nov 07 04:44:14 hnd0.kw92.cyou kernel: tbtun: carrier 191 recovered after 362 ms: back in the stripe
+Nov 07 04:44:14 hnd0.kw92.cyou kernel: tbtun: carrier 51 recovered after 724 ms: back in the stripe
+Nov 07 04:44:14 hnd0.kw92.cyou kernel: tbtun: carrier 241 stalled: repath paused, new frames avoid it
+Nov 07 04:44:15 hnd0.kw92.cyou kernel: tbtun: carrier 73 stalled: repath paused, new frames avoid it
+Nov 07 04:44:15 hnd0.kw92.cyou kernel: tbtun: carrier 234 stalled: repath paused, new frames avoid it
+Nov 07 04:44:15 hnd0.kw92.cyou kernel: tbtun: carrier 237 stalled: repath paused, new frames avoid it
+Nov 07 04:44:16 hnd0.kw92.cyou kernel: tbtun: carrier 213 stalled: repath paused, new frames avoid it
+Nov 07 04:44:16 hnd0.kw92.cyou kernel: tbtun: carrier 234 recovered after 510 ms: back in the stripe
+Nov 07 04:44:16 hnd0.kw92.cyou kernel: tbtun: carrier 212 stalled: repath paused, new frames avoid it
+Nov 07 04:44:16 hnd0.kw92.cyou kernel: tbtun: carrier 73 recovered after 1226 ms: back in the stripe
+Nov 07 04:44:16 hnd0.kw92.cyou kernel: tbtun: carrier 152 stalled: repath paused, new frames avoid it
+Nov 07 04:44:16 hnd0.kw92.cyou kernel: tbtun: carrier 63 recovered after 305 ms: back in the stripe
+Nov 07 04:44:17 hnd0.kw92.cyou kernel: tbtun: carrier 213 recovered after 816 ms: back in the stripe
+Nov 07 04:44:17 hnd0.kw92.cyou kernel: tbtun: carrier 152 recovered after 612 ms: back in the stripe
+Nov 07 04:44:17 hnd0.kw92.cyou kernel: tbtun: carrier 48 recovered after 203 ms: back in the stripe
+Nov 07 04:44:17 hnd0.kw92.cyou kernel: tbtun: carrier 205 recovered after 560 ms: back in the stripe
+Nov 07 04:44:17 hnd0.kw92.cyou kernel: tbtun: carrier 237 recovered after 1326 ms: back in the stripe
+Nov 07 04:44:17 hnd0.kw92.cyou kernel: tbtun: carrier 104 recovered after 459 ms: back in the stripe
+Nov 07 04:44:17 hnd0.kw92.cyou kernel: tbtun: carrier 93 recovered after 409 ms: back in the stripe
+Nov 07 04:44:19 hnd0.kw92.cyou kernel: tbt_carrier_stall: 23 callbacks suppressed
+Nov 07 04:44:19 hnd0.kw92.cyou kernel: tbtun: carrier 72 stalled: repath paused, new frames avoid it
+Nov 07 04:44:21 hnd0.kw92.cyou kernel: tbtun: carrier 159 stalled: repath paused, new frames avoid it
+Nov 07 04:44:21 hnd0.kw92.cyou kernel: tbtun: carrier 20 stalled: repath paused, new frames avoid it
+Nov 07 04:44:21 hnd0.kw92.cyou kernel: tbtun: carrier 26 stalled: repath paused, new frames avoid it
+Nov 07 04:44:21 hnd0.kw92.cyou kernel: tbtun: carrier 50 stalled: repath paused, new frames avoid it
+Nov 07 04:44:21 hnd0.kw92.cyou kernel: tbtun: carrier 142 stalled: repath paused, new frames avoid it
+Nov 07 04:44:21 hnd0.kw92.cyou kernel: tbtun: carrier 185 stalled: repath paused, new frames avoid it
+Nov 07 04:44:21 hnd0.kw92.cyou kernel: tbt_car_poll_one: 21 callbacks suppressed
+Nov 07 04:44:21 hnd0.kw92.cyou kernel: tbtun: carrier 159 recovered after 358 ms: back in the stripe
+Nov 07 04:44:21 hnd0.kw92.cyou kernel: tbtun: carrier 142 recovered after 306 ms: back in the stripe
+Nov 07 04:44:21 hnd0.kw92.cyou kernel: tbtun: carrier 165 stalled: repath paused, new frames avoid it
+Nov 07 04:44:22 hnd0.kw92.cyou kernel: tbtun: carrier 185 recovered after 1126 ms: back in the stripe
+Nov 07 04:44:22 hnd0.kw92.cyou kernel: tbtun: carrier 15 stalled: repath paused, new frames avoid it
+Nov 07 04:44:22 hnd0.kw92.cyou kernel: tbtun: carrier 26 recovered after 1690 ms: back in the stripe
+Nov 07 04:44:22 hnd0.kw92.cyou kernel: tbtun: carrier 50 recovered after 1691 ms: back in the stripe
+Nov 07 04:44:23 hnd0.kw92.cyou kernel: tbtun: carrier 72 stalled: repath paused, new frames avoid it
+Nov 07 04:44:24 hnd0.kw92.cyou kernel: tbtun: carrier 15 recovered after 1686 ms: back in the stripe
+Nov 07 04:44:25 hnd0.kw92.cyou kernel: tbtun: carrier 72 recovered after 2581 ms: back in the stripe
+Nov 07 04:44:26 hnd0.kw92.cyou kernel: tbtun: carrier 157 stalled: repath paused, new frames avoid it
+Nov 07 04:44:26 hnd0.kw92.cyou kernel: tbtun: carrier 157 recovered after 407 ms: back in the stripe
+Nov 07 04:44:27 hnd0.kw92.cyou kernel: tbtun: tunnel 1 carrier 20 gen 18 lost: sock=1 connected=1 hello_sent=1 up=1
+Nov 07 04:44:29 hnd0.kw92.cyou kernel: tbtun: carrier 165 recovered after 7820 ms: back in the stripe
+Nov 07 04:44:29 hnd0.kw92.cyou kernel: tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30256, awaiting HELLO
+Nov 07 04:44:32 hnd0.kw92.cyou kernel: tbtun: carrier 200 stalled: repath paused, new frames avoid it
+Nov 07 04:44:32 hnd0.kw92.cyou kernel: tbtun: carrier 200 recovered after 153 ms: back in the stripe
+Nov 07 04:44:36 hnd0.kw92.cyou kernel: tbtun: carrier 145 stalled: repath paused, new frames avoid it
+Nov 07 04:44:36 hnd0.kw92.cyou kernel: tbtun: carrier 139 stalled: repath paused, new frames avoid it
+Nov 07 04:44:36 hnd0.kw92.cyou kernel: tbtun: carrier 96 stalled: repath paused, new frames avoid it
+Nov 07 04:44:36 hnd0.kw92.cyou kernel: tbtun: carrier 99 stalled: repath paused, new frames avoid it
+Nov 07 04:44:36 hnd0.kw92.cyou kernel: tbtun: carrier 138 stalled: repath paused, new frames avoid it
+Nov 07 04:44:36 hnd0.kw92.cyou kernel: tbtun: carrier 127 stalled: repath paused, new frames avoid it
+Nov 07 04:44:36 hnd0.kw92.cyou kernel: tbtun: carrier 102 stalled: repath paused, new frames avoid it
+Nov 07 04:44:36 hnd0.kw92.cyou kernel: tbtun: carrier 96 recovered after 254 ms: back in the stripe
+Nov 07 04:44:36 hnd0.kw92.cyou kernel: tbtun: carrier 99 recovered after 357 ms: back in the stripe
+Nov 07 04:44:37 hnd0.kw92.cyou kernel: tbtun: carrier 129 stalled: repath paused, new frames avoid it
+Nov 07 04:44:37 hnd0.kw92.cyou kernel: tbtun: carrier 127 recovered after 766 ms: back in the stripe
+Nov 07 04:44:37 hnd0.kw92.cyou kernel: tbtun: carrier 145 recovered after 920 ms: back in the stripe
+Nov 07 04:44:37 hnd0.kw92.cyou kernel: tbtun: carrier 102 recovered after 817 ms: back in the stripe
+Nov 07 04:44:37 hnd0.kw92.cyou kernel: tbtun: carrier 139 recovered after 971 ms: back in the stripe
+Nov 07 04:44:37 hnd0.kw92.cyou kernel: tbtun: carrier 138 recovered after 1124 ms: back in the stripe
+Nov 07 04:44:39 hnd0.kw92.cyou kernel: tbtun: carrier 129 recovered after 2401 ms: back in the stripe
+Nov 07 04:44:48 hnd0.kw92.cyou kernel: tbtun: carrier 183 stalled: repath paused, new frames avoid it
+Nov 07 04:44:48 hnd0.kw92.cyou kernel: tbtun: carrier 198 stalled: repath paused, new frames avoid it
+Nov 07 04:44:49 hnd0.kw92.cyou kernel: tbtun: carrier 198 recovered after 408 ms: back in the stripe
+Nov 07 04:44:49 hnd0.kw92.cyou kernel: tbtun: carrier 166 stalled: repath paused, new frames avoid it
+Nov 07 04:44:50 hnd0.kw92.cyou kernel: tbtun: carrier 183 recovered after 2215 ms: back in the stripe
+Nov 07 04:44:50 hnd0.kw92.cyou kernel: tbtun: carrier 166 recovered after 1500 ms: back in the stripe
+Nov 07 04:44:51 hnd0.kw92.cyou kernel: tbtun: carrier 110 stalled: repath paused, new frames avoid it
+Nov 07 04:44:53 hnd0.kw92.cyou kernel: tbtun: carrier 128 stalled: repath paused, new frames avoid it
+Nov 07 04:44:53 hnd0.kw92.cyou kernel: tbtun: carrier 128 recovered after 356 ms: back in the stripe
+Nov 07 04:44:54 hnd0.kw92.cyou kernel: tbtun: carrier 110 recovered after 2507 ms: back in the stripe
+Nov 07 04:44:57 hnd0.kw92.cyou kernel: tbtun: carrier 50 stalled: repath paused, new frames avoid it
+Nov 07 04:44:58 hnd0.kw92.cyou kernel: tbtun: carrier 50 recovered after 561 ms: back in the stripe
+Nov 07 04:44:58 hnd0.kw92.cyou kernel: tbtun: carrier 190 stalled: repath paused, new frames avoid it
+Nov 07 04:44:58 hnd0.kw92.cyou kernel: tbtun: carrier 190 recovered after 51 ms: back in the stripe
+Nov 07 04:44:58 hnd0.kw92.cyou kernel: tbtun: carrier 162 stalled: repath paused, new frames avoid it
+Nov 07 04:45:02 hnd0.kw92.cyou kernel: tbtun: carrier 47 stalled: repath paused, new frames avoid it
+Nov 07 04:45:03 hnd0.kw92.cyou kernel: tbtun: carrier 226 stalled: repath paused, new frames avoid it
+Nov 07 04:45:03 hnd0.kw92.cyou kernel: tbtun: carrier 226 recovered after 51 ms: back in the stripe
+Nov 07 04:45:04 hnd0.kw92.cyou kernel: tbtun: carrier 162 recovered after 5511 ms: back in the stripe
+Nov 07 04:45:05 hnd0.kw92.cyou kernel: tbtun: carrier 47 recovered after 2968 ms: back in the stripe
+Nov 07 04:45:07 hnd0.kw92.cyou kernel: tbtun: carrier 181 stalled: repath paused, new frames avoid it
+Nov 07 04:45:10 hnd0.kw92.cyou kernel: tbtun: carrier 181 recovered after 2508 ms: back in the stripe
+Nov 07 04:45:12 hnd0.kw92.cyou kernel: tbtun: carrier 38 stalled: repath paused, new frames avoid it
+Nov 07 04:45:13 hnd0.kw92.cyou kernel: tbtun: carrier 38 recovered after 511 ms: back in the stripe
+Nov 07 04:45:13 hnd0.kw92.cyou kernel: tbtun: carrier 64 stalled: repath paused, new frames avoid it
+Nov 07 04:45:13 hnd0.kw92.cyou kernel: tbtun: carrier 91 stalled: repath paused, new frames avoid it
+Nov 07 04:45:13 hnd0.kw92.cyou kernel: tbtun: carrier 144 stalled: repath paused, new frames avoid it
+Nov 07 04:45:14 hnd0.kw92.cyou kernel: tbtun: carrier 91 recovered after 817 ms: back in the stripe
+Nov 07 04:45:15 hnd0.kw92.cyou kernel: tbtun: carrier 64 recovered after 2044 ms: back in the stripe
+Nov 07 04:45:15 hnd0.kw92.cyou kernel: tbtun: carrier 144 recovered after 1943 ms: back in the stripe
+Nov 07 04:45:17 hnd0.kw92.cyou kernel: tbtun: carrier 237 stalled: repath paused, new frames avoid it
+Nov 07 04:45:17 hnd0.kw92.cyou kernel: tbtun: carrier 230 stalled: repath paused, new frames avoid it
+Nov 07 04:45:17 hnd0.kw92.cyou kernel: tbtun: carrier 230 recovered after 51 ms: back in the stripe
+Nov 07 04:45:18 hnd0.kw92.cyou kernel: tbtun: carrier 205 stalled: repath paused, new frames avoid it
+Nov 07 04:45:18 hnd0.kw92.cyou kernel: tbtun: carrier 205 recovered after 357 ms: back in the stripe
+Nov 07 04:45:18 hnd0.kw92.cyou kernel: tbtun: carrier 206 stalled: repath paused, new frames avoid it
+Nov 07 04:45:18 hnd0.kw92.cyou kernel: tbtun: carrier 54 stalled: repath paused, new frames avoid it
+Nov 07 04:45:18 hnd0.kw92.cyou kernel: tbtun: carrier 5 stalled: repath paused, new frames avoid it
+Nov 07 04:45:19 hnd0.kw92.cyou kernel: tbtun: carrier 92 stalled: repath paused, new frames avoid it
+Nov 07 04:45:19 hnd0.kw92.cyou kernel: tbtun: carrier 2 stalled: repath paused, new frames avoid it
+Nov 07 04:45:19 hnd0.kw92.cyou kernel: tbtun: carrier 20 stalled: repath paused, new frames avoid it
+Nov 07 04:45:19 hnd0.kw92.cyou kernel: tbtun: carrier 92 recovered after 101 ms: back in the stripe
+Nov 07 04:45:19 hnd0.kw92.cyou kernel: tbtun: carrier 255 stalled: repath paused, new frames avoid it
+Nov 07 04:45:19 hnd0.kw92.cyou kernel: tbtun: carrier 54 recovered after 307 ms: back in the stripe
+Nov 07 04:45:19 hnd0.kw92.cyou kernel: tbtun: carrier 20 recovered after 204 ms: back in the stripe
+Nov 07 04:45:19 hnd0.kw92.cyou kernel: tbtun: carrier 157 stalled: repath paused, new frames avoid it
+Nov 07 04:45:19 hnd0.kw92.cyou kernel: tbtun: carrier 206 recovered after 513 ms: back in the stripe
+Nov 07 04:45:19 hnd0.kw92.cyou kernel: tbtun: carrier 255 recovered after 204 ms: back in the stripe
+Nov 07 04:45:19 hnd0.kw92.cyou kernel: tbtun: carrier 5 recovered after 461 ms: back in the stripe
+Nov 07 04:45:19 hnd0.kw92.cyou kernel: tbtun: carrier 2 recovered after 306 ms: back in the stripe
+Nov 07 04:45:19 hnd0.kw92.cyou kernel: tbtun: carrier 157 recovered after 101 ms: back in the stripe
+Nov 07 04:45:23 hnd0.kw92.cyou kernel: tbt_carrier_stall: 10 callbacks suppressed
+Nov 07 04:45:23 hnd0.kw92.cyou kernel: tbtun: carrier 234 stalled: repath paused, new frames avoid it
+Nov 07 04:45:23 hnd0.kw92.cyou kernel: tbtun: carrier 121 stalled: repath paused, new frames avoid it
+Nov 07 04:45:23 hnd0.kw92.cyou kernel: tbtun: carrier 4 stalled: repath paused, new frames avoid it
+Nov 07 04:45:24 hnd0.kw92.cyou kernel: tbtun: carrier 28 stalled: repath paused, new frames avoid it
+Nov 07 04:45:24 hnd0.kw92.cyou kernel: tbtun: carrier 128 stalled: repath paused, new frames avoid it
+Nov 07 04:45:24 hnd0.kw92.cyou kernel: tbt_car_poll_one: 10 callbacks suppressed
+Nov 07 04:45:24 hnd0.kw92.cyou kernel: tbtun: carrier 234 recovered after 767 ms: back in the stripe
+Nov 07 04:45:24 hnd0.kw92.cyou kernel: tbtun: carrier 28 recovered after 357 ms: back in the stripe
+Nov 07 04:45:24 hnd0.kw92.cyou kernel: tbtun: carrier 121 recovered after 819 ms: back in the stripe
+Nov 07 04:45:24 hnd0.kw92.cyou kernel: tbtun: carrier 128 recovered after 410 ms: back in the stripe
+Nov 07 04:45:26 hnd0.kw92.cyou kernel: tbtun: carrier 4 recovered after 2715 ms: back in the stripe
+Nov 07 04:45:28 hnd0.kw92.cyou kernel: tbtun: carrier 129 stalled: repath paused, new frames avoid it
+Nov 07 04:45:28 hnd0.kw92.cyou kernel: tbtun: carrier 140 recovered after 9506 ms: back in the stripe
+Nov 07 04:45:29 hnd0.kw92.cyou kernel: tbtun: carrier 128 stalled: repath paused, new frames avoid it
+Nov 07 04:45:30 hnd0.kw92.cyou kernel: tbtun: carrier 136 stalled: repath paused, new frames avoid it
+Nov 07 04:45:30 hnd0.kw92.cyou kernel: tbtun: carrier 140 stalled: repath paused, new frames avoid it
+Nov 07 04:45:31 hnd0.kw92.cyou kernel: tbtun: carrier 140 recovered after 461 ms: back in the stripe
+Nov 07 04:45:31 hnd0.kw92.cyou kernel: tbtun: carrier 129 recovered after 2765 ms: back in the stripe
+Nov 07 04:45:31 hnd0.kw92.cyou kernel: tbtun: carrier 136 recovered after 1588 ms: back in the stripe
+Nov 07 04:45:31 hnd0.kw92.cyou kernel: tbtun: carrier 128 recovered after 2713 ms: back in the stripe
+Nov 07 04:45:33 hnd0.kw92.cyou kernel: tbtun: carrier 198 stalled: repath paused, new frames avoid it
+Nov 07 04:45:33 hnd0.kw92.cyou kernel: tbtun: carrier 51 stalled: repath paused, new frames avoid it
+Nov 07 04:45:33 hnd0.kw92.cyou kernel: tbtun: carrier 197 stalled: repath paused, new frames avoid it
+Nov 07 04:45:33 hnd0.kw92.cyou kernel: tbtun: carrier 197 recovered after 50 ms: back in the stripe
+Nov 07 04:45:34 hnd0.kw92.cyou kernel: tbtun: carrier 198 recovered after 409 ms: back in the stripe
+Nov 07 04:45:34 hnd0.kw92.cyou kernel: tbtun: carrier 51 recovered after 766 ms: back in the stripe
+Nov 07 04:45:38 hnd0.kw92.cyou kernel: tbtun: carrier 76 stalled: repath paused, new frames avoid it
+Nov 07 04:45:38 hnd0.kw92.cyou kernel: tbtun: carrier 180 stalled: repath paused, new frames avoid it
+Nov 07 04:45:38 hnd0.kw92.cyou kernel: tbtun: carrier 76 recovered after 154 ms: back in the stripe
+Nov 07 04:45:39 hnd0.kw92.cyou kernel: tbtun: carrier 180 recovered after 768 ms: back in the stripe
+Nov 07 04:45:43 hnd0.kw92.cyou kernel: tbtun: carrier 47 stalled: repath paused, new frames avoid it
+Nov 07 04:45:43 hnd0.kw92.cyou kernel: tbtun: carrier 14 stalled: repath paused, new frames avoid it
+Nov 07 04:45:44 hnd0.kw92.cyou kernel: tbtun: carrier 47 recovered after 358 ms: back in the stripe
+Nov 07 04:45:44 hnd0.kw92.cyou kernel: tbtun: carrier 14 recovered after 206 ms: back in the stripe
+Nov 07 04:45:44 hnd0.kw92.cyou kernel: tbtun: carrier 128 stalled: repath paused, new frames avoid it
+Nov 07 04:45:44 hnd0.kw92.cyou kernel: tbtun: carrier 128 recovered after 50 ms: back in the stripe
+Nov 07 04:45:48 hnd0.kw92.cyou kernel: tbtun: carrier 149 stalled: repath paused, new frames avoid it
+Nov 07 04:45:48 hnd0.kw92.cyou kernel: tbtun: carrier 13 stalled: repath paused, new frames avoid it
+Nov 07 04:45:49 hnd0.kw92.cyou kernel: tbtun: carrier 198 stalled: repath paused, new frames avoid it
+Nov 07 04:45:49 hnd0.kw92.cyou kernel: tbtun: carrier 13 recovered after 717 ms: back in the stripe
+Nov 07 04:45:49 hnd0.kw92.cyou kernel: tbtun: carrier 198 recovered after 410 ms: back in the stripe
+Nov 07 04:45:49 hnd0.kw92.cyou kernel: tbtun: carrier 204 stalled: repath paused, new frames avoid it
+Nov 07 04:45:49 hnd0.kw92.cyou kernel: tbtun: carrier 109 stalled: repath paused, new frames avoid it
+Nov 07 04:45:49 hnd0.kw92.cyou kernel: tbtun: carrier 140 stalled: repath paused, new frames avoid it
+Nov 07 04:45:49 hnd0.kw92.cyou kernel: tbtun: carrier 249 stalled: repath paused, new frames avoid it
+Nov 07 04:45:49 hnd0.kw92.cyou kernel: tbtun: carrier 112 stalled: repath paused, new frames avoid it
+Nov 07 04:45:49 hnd0.kw92.cyou kernel: tbtun: carrier 232 stalled: repath paused, new frames avoid it
+Nov 07 04:45:50 hnd0.kw92.cyou kernel: tbtun: carrier 166 stalled: repath paused, new frames avoid it
+Nov 07 04:45:50 hnd0.kw92.cyou kernel: tbtun: carrier 232 recovered after 255 ms: back in the stripe
+Nov 07 04:45:50 hnd0.kw92.cyou kernel: tbtun: carrier 112 recovered after 357 ms: back in the stripe
+Nov 07 04:45:50 hnd0.kw92.cyou kernel: tbtun: carrier 92 stalled: repath paused, new frames avoid it
+Nov 07 04:45:50 hnd0.kw92.cyou kernel: tbtun: carrier 253 stalled: repath paused, new frames avoid it
+Nov 07 04:45:50 hnd0.kw92.cyou kernel: tbtun: carrier 92 recovered after 152 ms: back in the stripe
+Nov 07 04:45:50 hnd0.kw92.cyou kernel: tbtun: carrier 253 recovered after 152 ms: back in the stripe
+Nov 07 04:45:50 hnd0.kw92.cyou kernel: tbtun: carrier 140 recovered after 766 ms: back in the stripe
+Nov 07 04:45:50 hnd0.kw92.cyou kernel: tbtun: carrier 184 recovered after 255 ms: back in the stripe
+Nov 07 04:45:50 hnd0.kw92.cyou kernel: tbtun: carrier 170 recovered after 256 ms: back in the stripe
+Nov 07 04:45:51 hnd0.kw92.cyou kernel: tbtun: carrier 164 recovered after 511 ms: back in the stripe
+Nov 07 04:45:55 hnd0.kw92.cyou kernel: tbt_carrier_stall: 6 callbacks suppressed
+Nov 07 04:45:55 hnd0.kw92.cyou kernel: tbtun: carrier 109 stalled: repath paused, new frames avoid it
+Nov 07 04:45:56 hnd0.kw92.cyou kernel: tbt_car_poll_one: 5 callbacks suppressed
+Nov 07 04:45:56 hnd0.kw92.cyou kernel: tbtun: carrier 204 recovered after 6982 ms: back in the stripe
+Nov 07 04:45:56 hnd0.kw92.cyou kernel: tbtun: carrier 1 recovered after 3178 ms: back in the stripe
+Nov 07 04:45:56 hnd0.kw92.cyou kernel: tbtun: carrier 109 recovered after 978 ms: back in the stripe
+Nov 07 04:45:57 hnd0.kw92.cyou kernel: tbtun: carrier 210 recovered after 6144 ms: back in the stripe
+Nov 07 04:45:58 hnd0.kw92.cyou kernel: tbtun: carrier 83 stalled: repath paused, new frames avoid it
+Nov 07 04:45:58 hnd0.kw92.cyou kernel: tbtun: carrier 46 stalled: repath paused, new frames avoid it
+Nov 07 04:45:58 hnd0.kw92.cyou kernel: tbtun: carrier 83 recovered after 153 ms: back in the stripe
+Nov 07 04:45:59 hnd0.kw92.cyou kernel: tbtun: carrier 5 stalled: repath paused, new frames avoid it
+Nov 07 04:45:59 hnd0.kw92.cyou kernel: tbtun: carrier 78 stalled: repath paused, new frames avoid it
+Nov 07 04:45:59 hnd0.kw92.cyou kernel: tbtun: carrier 46 recovered after 1020 ms: back in the stripe
+Nov 07 04:46:01 hnd0.kw92.cyou kernel: tbtun: carrier 5 recovered after 1839 ms: back in the stripe
+Nov 07 04:46:01 hnd0.kw92.cyou kernel: tbtun: carrier 78 recovered after 1890 ms: back in the stripe
+Nov 07 04:46:03 hnd0.kw92.cyou kernel: tbtun: carrier 16 stalled: repath paused, new frames avoid it
+Nov 07 04:46:04 hnd0.kw92.cyou kernel: tbtun: carrier 100 stalled: repath paused, new frames avoid it
+Nov 07 04:46:04 hnd0.kw92.cyou kernel: tbtun: carrier 252 stalled: repath paused, new frames avoid it
+Nov 07 04:46:04 hnd0.kw92.cyou kernel: tbtun: carrier 100 recovered after 562 ms: back in the stripe
+Nov 07 04:46:05 hnd0.kw92.cyou kernel: tbtun: carrier 252 recovered after 663 ms: back in the stripe
+Nov 07 04:46:05 hnd0.kw92.cyou kernel: tbtun: carrier 16 recovered after 1583 ms: back in the stripe
+Nov 07 04:46:13 hnd0.kw92.cyou kernel: tbtun: carrier 114 stalled: repath paused, new frames avoid it
+Nov 07 04:46:13 hnd0.kw92.cyou kernel: tbtun: carrier 176 stalled: repath paused, new frames avoid it
+Nov 07 04:46:13 hnd0.kw92.cyou kernel: tbtun: carrier 114 recovered after 102 ms: back in the stripe
+Nov 07 04:46:14 hnd0.kw92.cyou kernel: tbtun: carrier 176 recovered after 152 ms: back in the stripe
+Nov 07 04:46:14 hnd0.kw92.cyou kernel: tbtun: carrier 231 stalled: repath paused, new frames avoid it
+Nov 07 04:46:14 hnd0.kw92.cyou kernel: tbtun: carrier 235 stalled: repath paused, new frames avoid it
+Nov 07 04:46:14 hnd0.kw92.cyou kernel: tbtun: carrier 231 recovered after 511 ms: back in the stripe
+Nov 07 04:46:14 hnd0.kw92.cyou kernel: tbtun: carrier 235 recovered after 461 ms: back in the stripe
+Nov 07 04:46:18 hnd0.kw92.cyou kernel: tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=27550, awaiting HELLO
+Nov 07 04:46:19 hnd0.kw92.cyou kernel: tbtun: carrier 145 stalled: repath paused, new frames avoid it
+Nov 07 04:46:19 hnd0.kw92.cyou kernel: tbtun: carrier 145 recovered after 154 ms: back in the stripe
+Nov 07 04:46:19 hnd0.kw92.cyou kernel: tbtun: carrier 17 stalled: repath paused, new frames avoid it
+Nov 07 04:46:19 hnd0.kw92.cyou kernel: tbtun: carrier 17 recovered after 357 ms: back in the stripe
+Nov 07 04:46:20 hnd0.kw92.cyou kernel: tbtun: carrier 237 stalled: repath paused, new frames avoid it
+Nov 07 04:46:20 hnd0.kw92.cyou kernel: tbtun: carrier 111 stalled: repath paused, new frames avoid it
+Nov 07 04:46:20 hnd0.kw92.cyou kernel: tbtun: carrier 67 stalled: repath paused, new frames avoid it
+Nov 07 04:46:20 hnd0.kw92.cyou kernel: tbtun: carrier 126 stalled: repath paused, new frames avoid it
+Nov 07 04:46:20 hnd0.kw92.cyou kernel: tbtun: carrier 67 recovered after 204 ms: back in the stripe
+Nov 07 04:46:20 hnd0.kw92.cyou kernel: tbtun: carrier 126 recovered after 103 ms: back in the stripe
+Nov 07 04:46:20 hnd0.kw92.cyou kernel: tbtun: carrier 236 stalled: repath paused, new frames avoid it
+Nov 07 04:46:20 hnd0.kw92.cyou kernel: tbtun: carrier 142 stalled: repath paused, new frames avoid it
+Nov 07 04:46:21 hnd0.kw92.cyou kernel: tbtun: carrier 70 stalled: repath paused, new frames avoid it
+Nov 07 04:46:21 hnd0.kw92.cyou kernel: tbtun: carrier 236 recovered after 612 ms: back in the stripe
+Nov 07 04:46:21 hnd0.kw92.cyou kernel: tbtun: carrier 119 stalled: repath paused, new frames avoid it
+Nov 07 04:46:21 hnd0.kw92.cyou kernel: tbtun: carrier 70 recovered after 510 ms: back in the stripe
+Nov 07 04:46:21 hnd0.kw92.cyou kernel: tbtun: carrier 142 recovered after 919 ms: back in the stripe
+Nov 07 04:46:22 hnd0.kw92.cyou kernel: tbtun: carrier 30 recovered after 255 ms: back in the stripe
+Nov 07 04:46:22 hnd0.kw92.cyou kernel: tbtun: carrier 237 recovered after 1894 ms: back in the stripe
+Nov 07 04:46:22 hnd0.kw92.cyou kernel: tbtun: carrier 119 recovered after 1552 ms: back in the stripe
+Nov 07 04:46:24 hnd0.kw92.cyou kernel: tbt_carrier_stall: 8 callbacks suppressed
+Nov 07 04:46:24 hnd0.kw92.cyou kernel: tbtun: carrier 251 stalled: repath paused, new frames avoid it
+Nov 07 04:46:24 hnd0.kw92.cyou kernel: tbt_car_poll_one: 5 callbacks suppressed
+Nov 07 04:46:24 hnd0.kw92.cyou kernel: tbtun: carrier 165 recovered after 1021 ms: back in the stripe
+Nov 07 04:46:24 hnd0.kw92.cyou kernel: tbtun: carrier 250 stalled: repath paused, new frames avoid it
+Nov 07 04:46:24 hnd0.kw92.cyou kernel: tbtun: carrier 111 recovered after 4618 ms: back in the stripe
+Nov 07 04:46:25 hnd0.kw92.cyou kernel: tbtun: carrier 250 recovered after 512 ms: back in the stripe
+Nov 07 04:46:25 hnd0.kw92.cyou kernel: tbtun: carrier 251 recovered after 716 ms: back in the stripe
+Nov 07 04:46:29 hnd0.kw92.cyou kernel: tbtun: carrier 173 stalled: repath paused, new frames avoid it
+Nov 07 04:46:29 hnd0.kw92.cyou kernel: tbtun: carrier 113 recovered after 7364 ms: back in the stripe
+Nov 07 04:46:29 hnd0.kw92.cyou kernel: tbtun: carrier 131 stalled: repath paused, new frames avoid it
+Nov 07 04:46:30 hnd0.kw92.cyou kernel: tbtun: carrier 173 recovered after 715 ms: back in the stripe
+Nov 07 04:46:31 hnd0.kw92.cyou kernel: tbtun: carrier 131 recovered after 1282 ms: back in the stripe
+Nov 07 04:46:33 hnd0.kw92.cyou kernel: tbtun: carrier 113 stalled: repath paused, new frames avoid it
+Nov 07 04:46:34 hnd0.kw92.cyou kernel: tbtun: carrier 113 recovered after 153 ms: back in the stripe
+Nov 07 04:46:34 hnd0.kw92.cyou kernel: tbtun: carrier 153 stalled: repath paused, new frames avoid it
+Nov 07 04:46:34 hnd0.kw92.cyou kernel: tbtun: carrier 153 recovered after 50 ms: back in the stripe
+Nov 07 04:46:34 hnd0.kw92.cyou kernel: tbtun: carrier 13 stalled: repath paused, new frames avoid it
+Nov 07 04:46:34 hnd0.kw92.cyou kernel: tbtun: carrier 238 stalled: repath paused, new frames avoid it
+Nov 07 04:46:34 hnd0.kw92.cyou kernel: tbtun: carrier 238 recovered after 51 ms: back in the stripe
+Nov 07 04:46:34 hnd0.kw92.cyou kernel: tbtun: carrier 13 recovered after 203 ms: back in the stripe
+Nov 07 04:46:39 hnd0.kw92.cyou kernel: tbtun: carrier 127 stalled: repath paused, new frames avoid it
+Nov 07 04:46:40 hnd0.kw92.cyou kernel: tbtun: carrier 127 recovered after 715 ms: back in the stripe
+Nov 07 04:46:44 hnd0.kw92.cyou kernel: tbtun: carrier 90 stalled: repath paused, new frames avoid it
+Nov 07 04:46:44 hnd0.kw92.cyou kernel: tbtun: carrier 90 recovered after 52 ms: back in the stripe
+Nov 07 04:46:50 hnd0.kw92.cyou kernel: tbtun: carrier 30 stalled: repath paused, new frames avoid it
+Nov 07 04:46:50 hnd0.kw92.cyou kernel: tbtun: carrier 39 stalled: repath paused, new frames avoid it
+Nov 07 04:46:50 hnd0.kw92.cyou kernel: tbtun: carrier 30 recovered after 103 ms: back in the stripe
+Nov 07 04:46:50 hnd0.kw92.cyou kernel: tbtun: carrier 105 stalled: repath paused, new frames avoid it
+Nov 07 04:46:50 hnd0.kw92.cyou kernel: tbtun: carrier 39 recovered after 205 ms: back in the stripe
+Nov 07 04:46:51 hnd0.kw92.cyou kernel: tbtun: carrier 76 stalled: repath paused, new frames avoid it
+Nov 07 04:46:51 hnd0.kw92.cyou kernel: tbtun: carrier 59 stalled: repath paused, new frames avoid it
+Nov 07 04:46:51 hnd0.kw92.cyou kernel: tbtun: carrier 76 recovered after 101 ms: back in the stripe
+Nov 07 04:46:51 hnd0.kw92.cyou kernel: tbtun: carrier 105 recovered after 307 ms: back in the stripe
+Nov 07 04:46:51 hnd0.kw92.cyou kernel: tbtun: carrier 59 recovered after 101 ms: back in the stripe
+Nov 07 04:46:51 hnd0.kw92.cyou kernel: tbtun: carrier 166 stalled: repath paused, new frames avoid it
+Nov 07 04:46:51 hnd0.kw92.cyou kernel: tbtun: carrier 111 stalled: repath paused, new frames avoid it
+Nov 07 04:46:51 hnd0.kw92.cyou kernel: tbtun: carrier 29 stalled: repath paused, new frames avoid it
+Nov 07 04:46:51 hnd0.kw92.cyou kernel: tbtun: carrier 78 stalled: repath paused, new frames avoid it
+Nov 07 04:46:51 hnd0.kw92.cyou kernel: tbtun: carrier 78 recovered after 50 ms: back in the stripe
+Nov 07 04:46:51 hnd0.kw92.cyou kernel: tbtun: carrier 141 stalled: repath paused, new frames avoid it
+Nov 07 04:46:51 hnd0.kw92.cyou kernel: tbtun: carrier 194 recovered after 51 ms: back in the stripe
+Nov 07 04:46:52 hnd0.kw92.cyou kernel: tbtun: carrier 166 recovered after 765 ms: back in the stripe
+Nov 07 04:46:52 hnd0.kw92.cyou kernel: tbtun: carrier 141 recovered after 817 ms: back in the stripe
+Nov 07 04:46:52 hnd0.kw92.cyou kernel: tbtun: carrier 111 recovered after 1482 ms: back in the stripe
+Nov 07 04:46:55 hnd0.kw92.cyou kernel: tbt_carrier_stall: 7 callbacks suppressed
+Nov 07 04:46:55 hnd0.kw92.cyou kernel: tbtun: carrier 8 stalled: repath paused, new frames avoid it
+Nov 07 04:46:55 hnd0.kw92.cyou kernel: tbtun: carrier 32 stalled: repath paused, new frames avoid it
+Nov 07 04:46:55 hnd0.kw92.cyou kernel: tbt_car_poll_one: 5 callbacks suppressed
+Nov 07 04:46:55 hnd0.kw92.cyou kernel: tbtun: carrier 8 recovered after 256 ms: back in the stripe
+Nov 07 04:46:56 hnd0.kw92.cyou kernel: tbtun: carrier 211 recovered after 867 ms: back in the stripe
+Nov 07 04:46:57 hnd0.kw92.cyou kernel: tbtun: carrier 74 recovered after 5916 ms: back in the stripe
+Nov 07 04:46:58 hnd0.kw92.cyou kernel: tbtun: carrier 32 recovered after 2454 ms: back in the stripe
+Nov 07 04:47:05 hnd0.kw92.cyou kernel: tbtun: carrier 8 stalled: repath paused, new frames avoid it
+Nov 07 04:47:06 hnd0.kw92.cyou kernel: tbtun: carrier 8 recovered after 205 ms: back in the stripe
+Nov 07 04:47:06 hnd0.kw92.cyou kernel: tbtun: carrier 185 stalled: repath paused, new frames avoid it
+Nov 07 04:47:08 hnd0.kw92.cyou kernel: tbtun: carrier 185 recovered after 1839 ms: back in the stripe
+Nov 07 04:47:10 hnd0.kw92.cyou kernel: tbtun: carrier 2 stalled: repath paused, new frames avoid it
+Nov 07 04:47:10 hnd0.kw92.cyou kernel: tbtun: carrier 203 stalled: repath paused, new frames avoid it
+Nov 07 04:47:10 hnd0.kw92.cyou kernel: tbtun: carrier 170 stalled: repath paused, new frames avoid it
+Nov 07 04:47:10 hnd0.kw92.cyou kernel: tbtun: carrier 12 stalled: repath paused, new frames avoid it
+Nov 07 04:47:10 hnd0.kw92.cyou kernel: tbtun: carrier 149 stalled: repath paused, new frames avoid it
+Nov 07 04:47:10 hnd0.kw92.cyou kernel: tbtun: carrier 38 stalled: repath paused, new frames avoid it
+Nov 07 04:47:10 hnd0.kw92.cyou kernel: tbtun: carrier 146 stalled: repath paused, new frames avoid it
+Nov 07 04:47:11 hnd0.kw92.cyou kernel: tbtun: carrier 3 stalled: repath paused, new frames avoid it
+Nov 07 04:47:11 hnd0.kw92.cyou kernel: tbtun: carrier 12 recovered after 306 ms: back in the stripe
+Nov 07 04:47:11 hnd0.kw92.cyou kernel: tbtun: carrier 146 recovered after 204 ms: back in the stripe
+Nov 07 04:47:11 hnd0.kw92.cyou kernel: tbtun: carrier 149 recovered after 306 ms: back in the stripe
+Nov 07 04:47:11 hnd0.kw92.cyou kernel: tbtun: carrier 170 recovered after 512 ms: back in the stripe
+Nov 07 04:47:11 hnd0.kw92.cyou kernel: tbtun: carrier 203 recovered after 766 ms: back in the stripe
+Nov 07 04:47:11 hnd0.kw92.cyou kernel: tbtun: carrier 2 recovered after 869 ms: back in the stripe
+Nov 07 04:47:11 hnd0.kw92.cyou kernel: tbtun: carrier 3 recovered after 562 ms: back in the stripe
+Nov 07 04:47:11 hnd0.kw92.cyou kernel: tbtun: carrier 38 recovered after 767 ms: back in the stripe
+Nov 07 04:47:15 hnd0.kw92.cyou kernel: tbtun: carrier 45 stalled: repath paused, new frames avoid it
+Nov 07 04:47:15 hnd0.kw92.cyou kernel: tbtun: carrier 23 stalled: repath paused, new frames avoid it
+Nov 07 04:47:15 hnd0.kw92.cyou kernel: tbtun: carrier 234 stalled: repath paused, new frames avoid it
+Nov 07 04:47:16 hnd0.kw92.cyou kernel: tbtun: carrier 234 recovered after 154 ms: back in the stripe
+Nov 07 04:47:16 hnd0.kw92.cyou kernel: tbtun: carrier 45 recovered after 512 ms: back in the stripe
+Nov 07 04:47:18 hnd0.kw92.cyou kernel: tbtun: carrier 23 recovered after 3139 ms: back in the stripe
+Nov 07 04:47:20 hnd0.kw92.cyou kernel: tbtun: carrier 16 stalled: repath paused, new frames avoid it
+Nov 07 04:47:20 hnd0.kw92.cyou kernel: tbtun: carrier 16 recovered after 50 ms: back in the stripe
+Nov 07 04:47:20 hnd0.kw92.cyou kernel: tbtun: carrier 166 stalled: repath paused, new frames avoid it
+Nov 07 04:47:20 hnd0.kw92.cyou kernel: tbtun: carrier 250 stalled: repath paused, new frames avoid it
+Nov 07 04:47:20 hnd0.kw92.cyou kernel: tbtun: carrier 105 stalled: repath paused, new frames avoid it
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 242 stalled: repath paused, new frames avoid it
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 250 recovered after 512 ms: back in the stripe
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 40 stalled: repath paused, new frames avoid it
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 167 stalled: repath paused, new frames avoid it
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 189 stalled: repath paused, new frames avoid it
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 168 stalled: repath paused, new frames avoid it
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 167 recovered after 204 ms: back in the stripe
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 179 stalled: repath paused, new frames avoid it
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 129 stalled: repath paused, new frames avoid it
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 125 stalled: repath paused, new frames avoid it
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 129 recovered after 50 ms: back in the stripe
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 13 stalled: repath paused, new frames avoid it
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 125 recovered after 153 ms: back in the stripe
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 105 recovered after 868 ms: back in the stripe
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 166 recovered after 1227 ms: back in the stripe
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 168 recovered after 407 ms: back in the stripe
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 251 stalled: repath paused, new frames avoid it
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 251 recovered after 51 ms: back in the stripe
+Nov 07 04:47:21 hnd0.kw92.cyou kernel: tbtun: carrier 189 recovered after 613 ms: back in the stripe
+Nov 07 04:47:22 hnd0.kw92.cyou kernel: tbtun: carrier 13 recovered after 358 ms: back in the stripe
+Nov 07 04:47:22 hnd0.kw92.cyou kernel: tbtun: carrier 65 recovered after 102 ms: back in the stripe
+Nov 07 04:47:26 hnd0.kw92.cyou kernel: tbt_carrier_stall: 15 callbacks suppressed
+Nov 07 04:47:26 hnd0.kw92.cyou kernel: tbtun: carrier 245 stalled: repath paused, new frames avoid it
+Nov 07 04:47:26 hnd0.kw92.cyou kernel: tbtun: carrier 229 stalled: repath paused, new frames avoid it
+Nov 07 04:47:26 hnd0.kw92.cyou kernel: tbtun: carrier 36 stalled: repath paused, new frames avoid it
+Nov 07 04:47:26 hnd0.kw92.cyou kernel: tbt_car_poll_one: 16 callbacks suppressed
+Nov 07 04:47:26 hnd0.kw92.cyou kernel: tbtun: carrier 229 recovered after 717 ms: back in the stripe
+Nov 07 04:47:26 hnd0.kw92.cyou kernel: tbtun: carrier 36 recovered after 254 ms: back in the stripe
+Nov 07 04:47:29 hnd0.kw92.cyou kernel: tbtun: carrier 255 recovered after 3120 ms: back in the stripe
+Nov 07 04:47:30 hnd0.kw92.cyou kernel: tbtun: carrier 189 stalled: repath paused, new frames avoid it
+Nov 07 04:47:30 hnd0.kw92.cyou kernel: tbtun: carrier 189 recovered after 663 ms: back in the stripe
+Nov 07 04:47:30 hnd0.kw92.cyou kernel: tbtun: carrier 162 stalled: repath paused, new frames avoid it
+Nov 07 04:47:30 hnd0.kw92.cyou kernel: tbtun: carrier 163 stalled: repath paused, new frames avoid it
+Nov 07 04:47:31 hnd0.kw92.cyou kernel: tbtun: carrier 162 recovered after 305 ms: back in the stripe
+Nov 07 04:47:31 hnd0.kw92.cyou kernel: tbtun: carrier 163 recovered after 255 ms: back in the stripe
+Nov 07 04:47:31 hnd0.kw92.cyou kernel: tbtun: carrier 171 stalled: repath paused, new frames avoid it
+Nov 07 04:47:31 hnd0.kw92.cyou kernel: tbtun: carrier 171 recovered after 563 ms: back in the stripe
+Nov 07 04:47:33 hnd0.kw92.cyou kernel: tbtun: tunnel 1 carrier 245 gen 253 lost: sock=1 connected=1 hello_sent=1 up=1
+Nov 07 04:47:33 hnd0.kw92.cyou kernel: tbtun: carrier 189 stalled: repath paused, new frames avoid it
+Nov 07 04:47:33 hnd0.kw92.cyou kernel: tbtun: carrier 189 recovered after 257 ms: back in the stripe
+Nov 07 04:47:33 hnd0.kw92.cyou kernel: tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30020, awaiting HELLO
+Nov 07 04:47:35 hnd0.kw92.cyou kernel: tbtun: carrier 166 stalled: repath paused, new frames avoid it
+Nov 07 04:47:35 hnd0.kw92.cyou kernel: tbtun: carrier 205 stalled: repath paused, new frames avoid it
+Nov 07 04:47:36 hnd0.kw92.cyou kernel: tbtun: carrier 166 recovered after 154 ms: back in the stripe
+Nov 07 04:47:36 hnd0.kw92.cyou kernel: tbtun: carrier 206 stalled: repath paused, new frames avoid it
+Nov 07 04:47:38 hnd0.kw92.cyou kernel: tbtun: carrier 205 recovered after 3023 ms: back in the stripe
+Nov 07 04:47:38 hnd0.kw92.cyou kernel: tbtun: carrier 206 recovered after 2765 ms: back in the stripe
+Nov 07 04:47:41 hnd0.kw92.cyou kernel: tbtun: carrier 90 stalled: repath paused, new frames avoid it
+Nov 07 04:47:42 hnd0.kw92.cyou kernel: tbtun: carrier 90 recovered after 867 ms: back in the stripe
+Nov 07 04:47:46 hnd0.kw92.cyou kernel: tbtun: carrier 217 stalled: repath paused, new frames avoid it
+Nov 07 04:47:46 hnd0.kw92.cyou kernel: tbtun: carrier 81 stalled: repath paused, new frames avoid it
+Nov 07 04:47:46 hnd0.kw92.cyou kernel: tbtun: carrier 244 stalled: repath paused, new frames avoid it
+Nov 07 04:47:46 hnd0.kw92.cyou kernel: tbtun: carrier 185 stalled: repath paused, new frames avoid it
+Nov 07 04:47:46 hnd0.kw92.cyou kernel: tbtun: carrier 244 recovered after 204 ms: back in the stripe
+Nov 07 04:47:46 hnd0.kw92.cyou kernel: tbtun: carrier 217 recovered after 307 ms: back in the stripe
+Nov 07 04:47:46 hnd0.kw92.cyou kernel: tbtun: carrier 91 stalled: repath paused, new frames avoid it
+Nov 07 04:47:46 hnd0.kw92.cyou kernel: tbtun: carrier 185 recovered after 665 ms: back in the stripe
+Nov 07 04:47:46 hnd0.kw92.cyou kernel: tbtun: carrier 81 recovered after 869 ms: back in the stripe
+Nov 07 04:47:47 hnd0.kw92.cyou kernel: tbtun: carrier 189 stalled: repath paused, new frames avoid it
+Nov 07 04:47:47 hnd0.kw92.cyou kernel: tbtun: carrier 189 recovered after 254 ms: back in the stripe
+Nov 07 04:47:48 hnd0.kw92.cyou kernel: tbtun: carrier 91 recovered after 1842 ms: back in the stripe
+Nov 07 04:47:51 hnd0.kw92.cyou kernel: tbtun: carrier 134 stalled: repath paused, new frames avoid it
+Nov 07 04:47:51 hnd0.kw92.cyou kernel: tbtun: carrier 41 stalled: repath paused, new frames avoid it
+Nov 07 04:47:51 hnd0.kw92.cyou kernel: tbtun: carrier 144 stalled: repath paused, new frames avoid it
+Nov 07 04:47:51 hnd0.kw92.cyou kernel: tbtun: carrier 25 stalled: repath paused, new frames avoid it
+Nov 07 04:47:51 hnd0.kw92.cyou kernel: tbtun: carrier 25 recovered after 154 ms: back in the stripe
+Nov 07 04:47:51 hnd0.kw92.cyou kernel: tbtun: carrier 134 recovered after 513 ms: back in the stripe
+Nov 07 04:47:51 hnd0.kw92.cyou kernel: tbtun: carrier 144 recovered after 716 ms: back in the stripe
+Nov 07 04:47:52 hnd0.kw92.cyou kernel: tbtun: carrier 41 recovered after 1024 ms: back in the stripe
+Nov 07 04:47:52 hnd0.kw92.cyou kernel: tbtun: carrier 43 stalled: repath paused, new frames avoid it
+Nov 07 04:47:52 hnd0.kw92.cyou kernel: tbtun: carrier 113 stalled: repath paused, new frames avoid it
+Nov 07 04:47:52 hnd0.kw92.cyou kernel: tbtun: carrier 204 stalled: repath paused, new frames avoid it
+Nov 07 04:47:52 hnd0.kw92.cyou kernel: tbtun: carrier 204 recovered after 50 ms: back in the stripe
+Nov 07 04:47:52 hnd0.kw92.cyou kernel: tbtun: carrier 114 stalled: repath paused, new frames avoid it
+Nov 07 04:47:52 hnd0.kw92.cyou kernel: tbtun: carrier 118 stalled: repath paused, new frames avoid it
+Nov 07 04:47:52 hnd0.kw92.cyou kernel: tbtun: carrier 17 stalled: repath paused, new frames avoid it
+Nov 07 04:47:52 hnd0.kw92.cyou kernel: tbtun: carrier 17 recovered after 153 ms: back in the stripe
+Nov 07 04:47:52 hnd0.kw92.cyou kernel: tbtun: carrier 203 stalled: repath paused, new frames avoid it
+Nov 07 04:47:52 hnd0.kw92.cyou kernel: tbtun: carrier 234 stalled: repath paused, new frames avoid it
+Nov 07 04:47:53 hnd0.kw92.cyou kernel: tbtun: carrier 236 stalled: repath paused, new frames avoid it
+Nov 07 04:47:53 hnd0.kw92.cyou kernel: tbtun: carrier 234 recovered after 306 ms: back in the stripe
+Nov 07 04:47:53 hnd0.kw92.cyou kernel: tbtun: carrier 254 stalled: repath paused, new frames avoid it
+Nov 07 04:47:53 hnd0.kw92.cyou kernel: tbtun: carrier 113 recovered after 1174 ms: back in the stripe
+Nov 07 04:47:53 hnd0.kw92.cyou kernel: tbtun: carrier 236 recovered after 203 ms: back in the stripe
+Nov 07 04:47:53 hnd0.kw92.cyou kernel: tbtun: carrier 203 recovered after 817 ms: back in the stripe
+Nov 07 04:47:57 hnd0.kw92.cyou kernel: tbt_car_poll_one: 5 callbacks suppressed
+Nov 07 04:47:57 hnd0.kw92.cyou kernel: tbtun: carrier 202 recovered after 1377 ms: back in the stripe
+Nov 07 04:47:57 hnd0.kw92.cyou kernel: tbtun: carrier 169 recovered after 305 ms: back in the stripe
+Nov 07 04:47:57 hnd0.kw92.cyou kernel: tbtun: carrier 185 recovered after 3969 ms: back in the stripe
+Nov 07 04:47:59 hnd0.kw92.cyou kernel: tbtun: carrier 89 recovered after 2560 ms: back in the stripe
+Nov 07 04:47:59 hnd0.kw92.cyou kernel: tbtun: carrier 255 recovered after 5574 ms: back in the stripe
+Nov 07 04:48:01 hnd0.kw92.cyou kernel: tbt_carrier_stall: 6 callbacks suppressed
+Nov 07 04:48:01 hnd0.kw92.cyou kernel: tbtun: carrier 194 stalled: repath paused, new frames avoid it
+Nov 07 04:48:01 hnd0.kw92.cyou kernel: tbtun: carrier 140 stalled: repath paused, new frames avoid it
+Nov 07 04:48:01 hnd0.kw92.cyou kernel: tbtun: carrier 144 stalled: repath paused, new frames avoid it
+Nov 07 04:48:01 hnd0.kw92.cyou kernel: tbtun: carrier 211 stalled: repath paused, new frames avoid it
+Nov 07 04:48:01 hnd0.kw92.cyou kernel: tbtun: carrier 144 recovered after 204 ms: back in the stripe
+Nov 07 04:48:01 hnd0.kw92.cyou kernel: tbtun: carrier 194 recovered after 458 ms: back in the stripe
+Nov 07 04:48:01 hnd0.kw92.cyou kernel: tbtun: carrier 118 stalled: repath paused, new frames avoid it
+Nov 07 04:48:02 hnd0.kw92.cyou kernel: tbtun: carrier 116 stalled: repath paused, new frames avoid it
+Nov 07 04:48:02 hnd0.kw92.cyou kernel: tbtun: carrier 138 stalled: repath paused, new frames avoid it
+Nov 07 04:48:02 hnd0.kw92.cyou kernel: tbtun: carrier 211 recovered after 665 ms: back in the stripe
+Nov 07 04:48:02 hnd0.kw92.cyou kernel: tbtun: carrier 116 recovered after 359 ms: back in the stripe
+Nov 07 04:48:02 hnd0.kw92.cyou kernel: tbtun: carrier 107 stalled: repath paused, new frames avoid it
+Nov 07 04:48:02 hnd0.kw92.cyou kernel: tbtun: carrier 76 stalled: repath paused, new frames avoid it
+Nov 07 04:48:02 hnd0.kw92.cyou kernel: tbtun: carrier 107 recovered after 154 ms: back in the stripe
+Nov 07 04:48:03 hnd0.kw92.cyou kernel: tbtun: carrier 138 recovered after 1636 ms: back in the stripe
+Nov 07 04:48:03 hnd0.kw92.cyou kernel: tbtun: carrier 140 recovered after 2507 ms: back in the stripe
+Nov 07 04:48:04 hnd0.kw92.cyou kernel: tbtun: carrier 76 recovered after 2316 ms: back in the stripe
+Nov 07 04:48:04 hnd0.kw92.cyou kernel: tbtun: carrier 118 recovered after 2883 ms: back in the stripe
+Nov 07 04:48:06 hnd0.kw92.cyou kernel: tbtun: carrier 140 stalled: repath paused, new frames avoid it
+Nov 07 04:48:06 hnd0.kw92.cyou kernel: tbtun: carrier 144 stalled: repath paused, new frames avoid it
+Nov 07 04:48:06 hnd0.kw92.cyou kernel: tbtun: carrier 224 stalled: repath paused, new frames avoid it
+Nov 07 04:48:07 hnd0.kw92.cyou kernel: tbtun: carrier 3 stalled: repath paused, new frames avoid it
+Nov 07 04:48:07 hnd0.kw92.cyou kernel: tbtun: carrier 144 recovered after 716 ms: back in the stripe
+Nov 07 04:48:07 hnd0.kw92.cyou kernel: tbtun: carrier 224 recovered after 359 ms: back in the stripe
+Nov 07 04:48:07 hnd0.kw92.cyou kernel: tbtun: carrier 140 recovered after 870 ms: back in the stripe
+Nov 07 04:48:07 hnd0.kw92.cyou kernel: tbtun: carrier 3 recovered after 204 ms: back in the stripe
+Nov 07 04:48:10 hnd0.kw92.cyou kernel: tbtun: carrier 217 stalled: repath paused, new frames avoid it
+Nov 07 04:48:11 hnd0.kw92.cyou kernel: tbtun: carrier 176 stalled: repath paused, new frames avoid it
+Nov 07 04:48:11 hnd0.kw92.cyou kernel: tbtun: carrier 249 stalled: repath paused, new frames avoid it
+Nov 07 04:48:11 hnd0.kw92.cyou kernel: tbtun: carrier 249 recovered after 102 ms: back in the stripe
+Nov 07 04:48:12 hnd0.kw92.cyou kernel: tbtun: carrier 8 stalled: repath paused, new frames avoid it
+Nov 07 04:48:12 hnd0.kw92.cyou kernel: tbtun: carrier 27 stalled: repath paused, new frames avoid it
+Nov 07 04:48:13 hnd0.kw92.cyou kernel: tbtun: carrier 217 recovered after 3429 ms: back in the stripe
+Nov 07 04:48:13 hnd0.kw92.cyou kernel: tbtun: carrier 8 recovered after 1844 ms: back in the stripe
+Nov 07 04:48:13 hnd0.kw92.cyou kernel: tbtun: carrier 27 recovered after 1690 ms: back in the stripe
+Nov 07 04:48:14 hnd0.kw92.cyou kernel: tbtun: carrier 176 recovered after 2353 ms: back in the stripe
+Nov 07 04:48:16 hnd0.kw92.cyou kernel: tbtun: carrier 7 stalled: repath paused, new frames avoid it
+Nov 07 04:48:17 hnd0.kw92.cyou kernel: tbtun: carrier 159 stalled: repath paused, new frames avoid it
+Nov 07 04:48:17 hnd0.kw92.cyou kernel: tbtun: carrier 160 stalled: repath paused, new frames avoid it
+Nov 07 04:48:17 hnd0.kw92.cyou kernel: tbtun: carrier 7 recovered after 918 ms: back in the stripe
+Nov 07 04:48:18 hnd0.kw92.cyou kernel: tbtun: carrier 159 recovered after 1738 ms: back in the stripe
+Nov 07 04:48:19 hnd0.kw92.cyou kernel: tbtun: carrier 160 recovered after 2404 ms: back in the stripe
+Nov 07 04:48:22 hnd0.kw92.cyou kernel: tbtun: carrier 185 stalled: repath paused, new frames avoid it
+Nov 07 04:48:23 hnd0.kw92.cyou kernel: tbtun: carrier 13 stalled: repath paused, new frames avoid it
+Nov 07 04:48:23 hnd0.kw92.cyou kernel: tbtun: carrier 115 stalled: repath paused, new frames avoid it
+Nov 07 04:48:23 hnd0.kw92.cyou kernel: tbtun: carrier 4 stalled: repath paused, new frames avoid it
+Nov 07 04:48:23 hnd0.kw92.cyou kernel: tbtun: carrier 223 stalled: repath paused, new frames avoid it
+Nov 07 04:48:23 hnd0.kw92.cyou kernel: tbtun: carrier 127 stalled: repath paused, new frames avoid it
+Nov 07 04:48:23 hnd0.kw92.cyou kernel: tbtun: carrier 154 stalled: repath paused, new frames avoid it
+Nov 07 04:48:23 hnd0.kw92.cyou kernel: tbtun: carrier 4 recovered after 308 ms: back in the stripe
+Nov 07 04:48:23 hnd0.kw92.cyou kernel: tbtun: carrier 172 stalled: repath paused, new frames avoid it
+Nov 07 04:48:23 hnd0.kw92.cyou kernel: tbtun: carrier 185 recovered after 919 ms: back in the stripe
+Nov 07 04:48:23 hnd0.kw92.cyou kernel: tbtun: carrier 250 stalled: repath paused, new frames avoid it
+Nov 07 04:48:23 hnd0.kw92.cyou kernel: tbtun: carrier 223 recovered after 614 ms: back in the stripe
+Nov 07 04:48:23 hnd0.kw92.cyou kernel: tbtun: carrier 72 stalled: repath paused, new frames avoid it
+Nov 07 04:48:24 hnd0.kw92.cyou kernel: tbtun: carrier 172 recovered after 358 ms: back in the stripe
+Nov 07 04:48:24 hnd0.kw92.cyou kernel: tbtun: carrier 13 recovered after 1330 ms: back in the stripe
+Nov 07 04:48:24 hnd0.kw92.cyou kernel: tbtun: carrier 127 recovered after 922 ms: back in the stripe
+Nov 07 04:48:24 hnd0.kw92.cyou kernel: tbtun: carrier 11 recovered after 357 ms: back in the stripe
+Nov 07 04:48:24 hnd0.kw92.cyou kernel: tbtun: carrier 144 recovered after 306 ms: back in the stripe
+Nov 07 04:48:24 hnd0.kw92.cyou kernel: tbtun: carrier 179 recovered after 102 ms: back in the stripe
+Nov 07 04:48:24 hnd0.kw92.cyou kernel: tbtun: carrier 250 recovered after 919 ms: back in the stripe
+Nov 07 04:48:24 hnd0.kw92.cyou kernel: tbtun: carrier 72 recovered after 1020 ms: back in the stripe
+Nov 07 04:48:25 hnd0.kw92.cyou kernel: tbtun: carrier 113 recovered after 256 ms: back in the stripe
+Nov 07 04:48:25 hnd0.kw92.cyou kernel: tbtun: carrier 115 recovered after 2102 ms: back in the stripe
+Nov 07 04:48:25 hnd0.kw92.cyou kernel: tbtun: carrier 43 recovered after 586 ms: back in the stripe
+Nov 07 04:48:26 hnd0.kw92.cyou kernel: tbtun: carrier 185 recovered after 409 ms: back in the stripe
+Nov 07 04:48:26 hnd0.kw92.cyou kernel: tbtun: carrier 154 recovered after 3296 ms: back in the stripe
+Nov 07 04:48:26 hnd0.kw92.cyou kernel: tbtun: carrier 202 recovered after 1813 ms: back in the stripe
+Nov 07 04:48:26 hnd0.kw92.cyou kernel: tbtun: carrier 108 recovered after 2272 ms: back in the stripe
+Nov 07 04:48:29 hnd0.kw92.cyou kernel: tbt_carrier_stall: 8 callbacks suppressed
+Nov 07 04:48:29 hnd0.kw92.cyou kernel: tbtun: carrier 129 stalled: repath paused, new frames avoid it
+Nov 07 04:48:30 hnd0.kw92.cyou kernel: tbtun: carrier 129 recovered after 974 ms: back in the stripe
+Nov 07 04:48:32 hnd0.kw92.cyou kernel: tbtun: carrier 200 stalled: repath paused, new frames avoid it
+Nov 07 04:48:32 hnd0.kw92.cyou kernel: tbtun: carrier 126 stalled: repath paused, new frames avoid it
+Nov 07 04:48:32 hnd0.kw92.cyou kernel: tbtun: carrier 200 recovered after 410 ms: back in the stripe
+Nov 07 04:48:32 hnd0.kw92.cyou kernel: tbtun: carrier 126 recovered after 102 ms: back in the stripe
+Nov 07 04:48:32 hnd0.kw92.cyou kernel: tbtun: carrier 191 stalled: repath paused, new frames avoid it
+Nov 07 04:48:32 hnd0.kw92.cyou kernel: tbtun: carrier 38 stalled: repath paused, new frames avoid it
+Nov 07 04:48:32 hnd0.kw92.cyou kernel: tbtun: carrier 190 stalled: repath paused, new frames avoid it
+Nov 07 04:48:32 hnd0.kw92.cyou kernel: tbtun: carrier 191 recovered after 512 ms: back in the stripe
+Nov 07 04:48:33 hnd0.kw92.cyou kernel: tbtun: carrier 190 recovered after 407 ms: back in the stripe
+Nov 07 04:48:35 hnd0.kw92.cyou kernel: tbtun: carrier 38 recovered after 2815 ms: back in the stripe
+Nov 07 04:48:37 hnd0.kw92.cyou kernel: tbtun: carrier 169 stalled: repath paused, new frames avoid it
+Nov 07 04:48:37 hnd0.kw92.cyou kernel: tbtun: carrier 169 recovered after 50 ms: back in the stripe
+Nov 07 04:48:37 hnd0.kw92.cyou kernel: tbtun: carrier 193 stalled: repath paused, new frames avoid it
+Nov 07 04:48:37 hnd0.kw92.cyou kernel: tbtun: carrier 203 stalled: repath paused, new frames avoid it
+Nov 07 04:48:37 hnd0.kw92.cyou kernel: tbtun: carrier 38 stalled: repath paused, new frames avoid it
+Nov 07 04:48:38 hnd0.kw92.cyou kernel: tbtun: carrier 203 recovered after 511 ms: back in the stripe
+Nov 07 04:48:38 hnd0.kw92.cyou kernel: tbtun: carrier 112 stalled: repath paused, new frames avoid it
+Nov 07 04:48:38 hnd0.kw92.cyou kernel: tbtun: carrier 38 recovered after 765 ms: back in the stripe
+Nov 07 04:48:39 hnd0.kw92.cyou kernel: tbtun: carrier 193 recovered after 1583 ms: back in the stripe
+Nov 07 04:48:40 hnd0.kw92.cyou kernel: tbtun: carrier 112 recovered after 2573 ms: back in the stripe
+Nov 07 04:48:47 hnd0.kw92.cyou kernel: tbtun: carrier 61 stalled: repath paused, new frames avoid it
+Nov 07 04:48:47 hnd0.kw92.cyou kernel: tbtun: carrier 9 stalled: repath paused, new frames avoid it
+Nov 07 04:48:47 hnd0.kw92.cyou kernel: tbtun: carrier 246 stalled: repath paused, new frames avoid it
+Nov 07 04:48:48 hnd0.kw92.cyou kernel: tbtun: carrier 9 recovered after 618 ms: back in the stripe
+Nov 07 04:48:48 hnd0.kw92.cyou kernel: tbtun: carrier 61 recovered after 822 ms: back in the stripe
+Nov 07 04:48:48 hnd0.kw92.cyou kernel: tbtun: carrier 246 recovered after 617 ms: back in the stripe
+Nov 07 04:48:53 hnd0.kw92.cyou kernel: tbtun: carrier 141 stalled: repath paused, new frames avoid it
+Nov 07 04:48:53 hnd0.kw92.cyou kernel: tbtun: carrier 119 stalled: repath paused, new frames avoid it
+Nov 07 04:48:53 hnd0.kw92.cyou kernel: tbtun: carrier 144 stalled: repath paused, new frames avoid it
+Nov 07 04:48:53 hnd0.kw92.cyou kernel: tbtun: carrier 144 recovered after 51 ms: back in the stripe
+Nov 07 04:48:53 hnd0.kw92.cyou kernel: tbtun: carrier 76 stalled: repath paused, new frames avoid it
+Nov 07 04:48:53 hnd0.kw92.cyou kernel: tbtun: carrier 141 recovered after 459 ms: back in the stripe
+Nov 07 04:48:53 hnd0.kw92.cyou kernel: tbtun: carrier 73 stalled: repath paused, new frames avoid it
+Nov 07 04:48:53 hnd0.kw92.cyou kernel: tbtun: carrier 167 stalled: repath paused, new frames avoid it
+Nov 07 04:48:53 hnd0.kw92.cyou kernel: tbtun: carrier 119 recovered after 561 ms: back in the stripe
+Nov 07 04:48:54 hnd0.kw92.cyou kernel: tbtun: carrier 73 recovered after 510 ms: back in the stripe
+Nov 07 04:48:54 hnd0.kw92.cyou kernel: tbtun: carrier 76 recovered after 663 ms: back in the stripe
+Nov 07 04:48:54 hnd0.kw92.cyou kernel: tbtun: carrier 4 stalled: repath paused, new frames avoid it
+Nov 07 04:48:54 hnd0.kw92.cyou kernel: tbtun: carrier 200 stalled: repath paused, new frames avoid it
+Nov 07 04:48:54 hnd0.kw92.cyou kernel: tbtun: carrier 127 stalled: repath paused, new frames avoid it
+Nov 07 04:48:55 hnd0.kw92.cyou kernel: tbtun: carrier 4 recovered after 305 ms: back in the stripe
+Nov 07 04:48:55 hnd0.kw92.cyou kernel: tbtun: carrier 235 stalled: repath paused, new frames avoid it
+Nov 07 04:48:55 hnd0.kw92.cyou kernel: tbtun: carrier 91 recovered after 102 ms: back in the stripe
+Nov 07 04:48:55 hnd0.kw92.cyou kernel: tbtun: carrier 206 recovered after 102 ms: back in the stripe
+Nov 07 04:48:55 hnd0.kw92.cyou kernel: tbtun: carrier 134 recovered after 50 ms: back in the stripe
+Nov 07 04:48:55 hnd0.kw92.cyou kernel: tbtun: carrier 167 recovered after 1993 ms: back in the stripe
+Nov 07 04:48:58 hnd0.kw92.cyou kernel: tbt_carrier_stall: 4 callbacks suppressed
+Nov 07 04:48:58 hnd0.kw92.cyou kernel: tbtun: carrier 207 stalled: repath paused, new frames avoid it
+Nov 07 04:48:58 hnd0.kw92.cyou kernel: tbtun: carrier 250 stalled: repath paused, new frames avoid it
+Nov 07 04:48:58 hnd0.kw92.cyou kernel: tbtun: carrier 41 stalled: repath paused, new frames avoid it
+Nov 07 04:48:59 hnd0.kw92.cyou kernel: tbtun: carrier 121 stalled: repath paused, new frames avoid it
+Nov 07 04:48:59 hnd0.kw92.cyou kernel: tbt_car_poll_one: 2 callbacks suppressed
+Nov 07 04:48:59 hnd0.kw92.cyou kernel: tbtun: carrier 200 recovered after 4273 ms: back in the stripe
+Nov 07 04:48:59 hnd0.kw92.cyou kernel: tbtun: carrier 121 recovered after 51 ms: back in the stripe
+Nov 07 04:48:59 hnd0.kw92.cyou kernel: tbtun: carrier 41 recovered after 459 ms: back in the stripe
+Nov 07 04:48:59 hnd0.kw92.cyou kernel: tbtun: carrier 207 recovered after 716 ms: back in the stripe
+Nov 07 04:48:59 hnd0.kw92.cyou kernel: tbtun: carrier 84 stalled: repath paused, new frames avoid it
+Nov 07 04:49:00 hnd0.kw92.cyou kernel: tbtun: carrier 84 recovered after 614 ms: back in the stripe
+Nov 07 04:49:01 hnd0.kw92.cyou kernel: tbtun: carrier 235 recovered after 6319 ms: back in the stripe
+Nov 07 04:49:04 hnd0.kw92.cyou kernel: tbtun: carrier 10 stalled: repath paused, new frames avoid it
+Nov 07 04:49:04 hnd0.kw92.cyou kernel: tbtun: carrier 10 recovered after 358 ms: back in the stripe
+Nov 07 04:49:06 hnd0.kw92.cyou kernel: tbtun: carrier 250 recovered after 7291 ms: back in the stripe
+Nov 07 04:49:14 hnd0.kw92.cyou kernel: tbtun: carrier 16 stalled: repath paused, new frames avoid it
+Nov 07 04:49:14 hnd0.kw92.cyou kernel: tbtun: carrier 16 recovered after 205 ms: back in the stripe
+Nov 07 04:49:18 hnd0.kw92.cyou kernel: tbtun: carrier 98 stalled: repath paused, new frames avoid it
+Nov 07 04:49:18 hnd0.kw92.cyou kernel: tbtun: carrier 84 stalled: repath paused, new frames avoid it
+Nov 07 04:49:18 hnd0.kw92.cyou kernel: tbtun: carrier 166 stalled: repath paused, new frames avoid it
+Nov 07 04:49:19 hnd0.kw92.cyou kernel: tbtun: carrier 166 recovered after 769 ms: back in the stripe
+Nov 07 04:49:19 hnd0.kw92.cyou kernel: tbtun: carrier 84 recovered after 923 ms: back in the stripe
+Nov 07 04:49:20 hnd0.kw92.cyou kernel: tbtun: carrier 98 recovered after 2355 ms: back in the stripe
+Nov 07 04:49:23 hnd0.kw92.cyou kernel: tbtun: carrier 175 stalled: repath paused, new frames avoid it
+Nov 07 04:49:23 hnd0.kw92.cyou kernel: tbtun: carrier 175 recovered after 102 ms: back in the stripe
+Nov 07 04:49:23 hnd0.kw92.cyou kernel: tbtun: carrier 160 stalled: repath paused, new frames avoid it
+Nov 07 04:49:23 hnd0.kw92.cyou kernel: tbtun: carrier 244 stalled: repath paused, new frames avoid it
+Nov 07 04:49:24 hnd0.kw92.cyou kernel: tbtun: carrier 160 recovered after 101 ms: back in the stripe
+Nov 07 04:49:24 hnd0.kw92.cyou kernel: tbtun: carrier 212 stalled: repath paused, new frames avoid it
+Nov 07 04:49:24 hnd0.kw92.cyou kernel: tbtun: carrier 244 recovered after 713 ms: back in the stripe
+Nov 07 04:49:24 hnd0.kw92.cyou kernel: tbtun: carrier 98 stalled: repath paused, new frames avoid it
+Nov 07 04:49:24 hnd0.kw92.cyou kernel: tbtun: carrier 103 stalled: repath paused, new frames avoid it
+Nov 07 04:49:24 hnd0.kw92.cyou kernel: tbtun: carrier 212 recovered after 510 ms: back in the stripe
+Nov 07 04:49:25 hnd0.kw92.cyou kernel: tbtun: carrier 236 stalled: repath paused, new frames avoid it
+Nov 07 04:49:25 hnd0.kw92.cyou kernel: tbtun: carrier 103 recovered after 204 ms: back in the stripe
+Nov 07 04:49:25 hnd0.kw92.cyou kernel: tbtun: carrier 245 stalled: repath paused, new frames avoid it
+Nov 07 04:49:26 hnd0.kw92.cyou kernel: tbtun: carrier 185 stalled: repath paused, new frames avoid it
+Nov 07 04:49:26 hnd0.kw92.cyou kernel: tbtun: carrier 113 stalled: repath paused, new frames avoid it
+Nov 07 04:49:26 hnd0.kw92.cyou kernel: tbtun: carrier 113 recovered after 369 ms: back in the stripe
+Nov 07 04:49:27 hnd0.kw92.cyou kernel: tbtun: carrier 245 recovered after 1545 ms: back in the stripe
+Nov 07 04:49:27 hnd0.kw92.cyou kernel: tbtun: carrier 236 recovered after 2362 ms: back in the stripe
+Nov 07 04:49:27 hnd0.kw92.cyou kernel: tbtun: carrier 185 recovered after 1801 ms: back in the stripe
+Nov 07 04:49:29 hnd0.kw92.cyou kernel: tbt_carrier_stall: 1 callbacks suppressed
+Nov 07 04:49:29 hnd0.kw92.cyou kernel: tbtun: carrier 230 stalled: repath paused, new frames avoid it
+Nov 07 04:49:29 hnd0.kw92.cyou kernel: tbtun: carrier 98 recovered after 4407 ms: back in the stripe
+Nov 07 04:49:30 hnd0.kw92.cyou kernel: tbtun: carrier 30 stalled: repath paused, new frames avoid it
+Nov 07 04:49:31 hnd0.kw92.cyou kernel: tbtun: carrier 29 recovered after 3019 ms: back in the stripe
+Nov 07 04:49:31 hnd0.kw92.cyou kernel: tbtun: carrier 30 recovered after 1334 ms: back in the stripe
+Nov 07 04:49:31 hnd0.kw92.cyou kernel: tbtun: carrier 230 recovered after 2558 ms: back in the stripe
+Nov 07 04:49:34 hnd0.kw92.cyou kernel: tbtun: carrier 120 stalled: repath paused, new frames avoid it
+Nov 07 04:49:34 hnd0.kw92.cyou kernel: tbtun: carrier 252 stalled: repath paused, new frames avoid it
+Nov 07 04:49:34 hnd0.kw92.cyou kernel: tbtun: carrier 96 stalled: repath paused, new frames avoid it
+Nov 07 04:49:34 hnd0.kw92.cyou kernel: tbtun: carrier 94 stalled: repath paused, new frames avoid it
+Nov 07 04:49:34 hnd0.kw92.cyou kernel: tbtun: carrier 96 recovered after 203 ms: back in the stripe
+Nov 07 04:49:34 hnd0.kw92.cyou kernel: tbtun: carrier 120 recovered after 357 ms: back in the stripe
+Nov 07 04:49:35 hnd0.kw92.cyou kernel: tbtun: carrier 252 recovered after 1330 ms: back in the stripe
+Nov 07 04:49:36 hnd0.kw92.cyou kernel: tbtun: carrier 94 recovered after 2247 ms: back in the stripe
+Nov 07 04:49:38 hnd0.kw92.cyou kernel: tbtun: carrier 166 stalled: repath paused, new frames avoid it
+Nov 07 04:49:39 hnd0.kw92.cyou kernel: tbtun: carrier 152 stalled: repath paused, new frames avoid it
+Nov 07 04:49:39 hnd0.kw92.cyou kernel: tbtun: carrier 152 recovered after 254 ms: back in the stripe
+Nov 07 04:49:43 hnd0.kw92.cyou kernel: tbtun: carrier 25 stalled: repath paused, new frames avoid it
+Nov 07 04:49:44 hnd0.kw92.cyou kernel: tbtun: carrier 252 stalled: repath paused, new frames avoid it
+Nov 07 04:49:44 hnd0.kw92.cyou kernel: tbtun: carrier 25 recovered after 510 ms: back in the stripe
+Nov 07 04:49:44 hnd0.kw92.cyou kernel: tbtun: carrier 166 recovered after 5795 ms: back in the stripe
+Nov 07 04:49:44 hnd0.kw92.cyou kernel: tbtun: carrier 252 recovered after 765 ms: back in the stripe
+Nov 07 04:49:48 hnd0.kw92.cyou kernel: tbtun: carrier 134 stalled: repath paused, new frames avoid it
+Nov 07 04:49:48 hnd0.kw92.cyou kernel: tbtun: carrier 134 recovered after 306 ms: back in the stripe
+Nov 07 04:49:49 hnd0.kw92.cyou kernel: tbtun: carrier 116 stalled: repath paused, new frames avoid it
+Nov 07 04:49:49 hnd0.kw92.cyou kernel: tbtun: carrier 116 recovered after 255 ms: back in the stripe
+Nov 07 04:49:53 hnd0.kw92.cyou kernel: tbtun: carrier 43 stalled: repath paused, new frames avoid it
+Nov 07 04:49:53 hnd0.kw92.cyou kernel: tbtun: carrier 183 stalled: repath paused, new frames avoid it
+Nov 07 04:49:53 hnd0.kw92.cyou kernel: tbtun: carrier 166 stalled: repath paused, new frames avoid it
+Nov 07 04:49:53 hnd0.kw92.cyou kernel: tbtun: carrier 43 recovered after 101 ms: back in the stripe
+Nov 07 04:49:53 hnd0.kw92.cyou kernel: tbtun: carrier 183 recovered after 101 ms: back in the stripe
+Nov 07 04:49:54 hnd0.kw92.cyou kernel: tbtun: carrier 154 stalled: repath paused, new frames avoid it
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 13 stalled: repath paused, new frames avoid it
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 78 stalled: repath paused, new frames avoid it
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 172 stalled: repath paused, new frames avoid it
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 114 stalled: repath paused, new frames avoid it
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 154 recovered after 102 ms: back in the stripe
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 78 recovered after 102 ms: back in the stripe
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 157 stalled: repath paused, new frames avoid it
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 64 stalled: repath paused, new frames avoid it
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 71 stalled: repath paused, new frames avoid it
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 157 recovered after 152 ms: back in the stripe
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 195 stalled: repath paused, new frames avoid it
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 172 recovered after 306 ms: back in the stripe
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 190 stalled: repath paused, new frames avoid it
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 195 recovered after 51 ms: back in the stripe
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 13 recovered after 407 ms: back in the stripe
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 71 recovered after 259 ms: back in the stripe
+Nov 07 04:49:55 hnd0.kw92.cyou kernel: tbtun: carrier 114 recovered after 462 ms: back in the stripe
+Nov 07 04:49:58 hnd0.kw92.cyou kernel: tbt_car_poll_one: 9 callbacks suppressed
+Nov 07 04:49:58 hnd0.kw92.cyou kernel: tbtun: carrier 234 recovered after 2533 ms: back in the stripe
+Nov 07 04:49:59 hnd0.kw92.cyou kernel: tbtun: carrier 64 recovered after 102 ms: back in the stripe
+Nov 07 04:50:00 hnd0.kw92.cyou kernel: tbtun: carrier 63 recovered after 356 ms: back in the stripe
+Nov 07 04:50:00 hnd0.kw92.cyou kernel: tbtun: carrier 70 recovered after 407 ms: back in the stripe
+Nov 07 04:50:00 hnd0.kw92.cyou kernel: tbtun: carrier 86 recovered after 560 ms: back in the stripe
+Nov 07 04:50:00 hnd0.kw92.cyou kernel: tbtun: carrier 251 recovered after 662 ms: back in the stripe
+Nov 07 04:50:00 hnd0.kw92.cyou kernel: tbtun: carrier 71 recovered after 764 ms: back in the stripe
+Nov 07 04:50:00 hnd0.kw92.cyou kernel: tbtun: carrier 81 recovered after 867 ms: back in the stripe
+Nov 07 04:50:00 hnd0.kw92.cyou kernel: tbtun: carrier 244 recovered after 2357 ms: back in the stripe
+Nov 07 04:50:04 hnd0.kw92.cyou kernel: tbt_carrier_stall: 15 callbacks suppressed
+Nov 07 04:50:04 hnd0.kw92.cyou kernel: tbtun: carrier 218 stalled: repath paused, new frames avoid it
+Nov 07 04:50:05 hnd0.kw92.cyou kernel: tbtun: carrier 218 recovered after 716 ms: back in the stripe
+Nov 07 04:50:09 hnd0.kw92.cyou kernel: tbtun: carrier 162 stalled: repath paused, new frames avoid it
+Nov 07 04:50:09 hnd0.kw92.cyou kernel: tbtun: carrier 161 stalled: repath paused, new frames avoid it
+Nov 07 04:50:09 hnd0.kw92.cyou kernel: tbtun: carrier 161 recovered after 313 ms: back in the stripe
+Nov 07 04:50:09 hnd0.kw92.cyou kernel: tbtun: carrier 162 recovered after 415 ms: back in the stripe
+Nov 07 04:50:14 hnd0.kw92.cyou kernel: tbtun: carrier 23 stalled: repath paused, new frames avoid it
+Nov 07 04:50:14 hnd0.kw92.cyou kernel: tbtun: carrier 11 stalled: repath paused, new frames avoid it
+Nov 07 04:50:14 hnd0.kw92.cyou kernel: tbtun: carrier 89 stalled: repath paused, new frames avoid it
+Nov 07 04:50:14 hnd0.kw92.cyou kernel: tbtun: carrier 90 stalled: repath paused, new frames avoid it
+Nov 07 04:50:14 hnd0.kw92.cyou kernel: tbtun: carrier 201 stalled: repath paused, new frames avoid it
+Nov 07 04:50:14 hnd0.kw92.cyou kernel: tbtun: carrier 235 stalled: repath paused, new frames avoid it
+Nov 07 04:50:14 hnd0.kw92.cyou kernel: tbtun: carrier 71 stalled: repath paused, new frames avoid it
+Nov 07 04:50:14 hnd0.kw92.cyou kernel: tbtun: carrier 201 recovered after 254 ms: back in the stripe
+Nov 07 04:50:14 hnd0.kw92.cyou kernel: tbtun: carrier 235 recovered after 203 ms: back in the stripe
+Nov 07 04:50:15 hnd0.kw92.cyou kernel: tbtun: carrier 11 recovered after 356 ms: back in the stripe
+Nov 07 04:50:15 hnd0.kw92.cyou kernel: tbtun: carrier 89 recovered after 356 ms: back in the stripe
+Nov 07 04:50:15 hnd0.kw92.cyou kernel: tbtun: carrier 90 recovered after 764 ms: back in the stripe
+Nov 07 04:50:15 hnd0.kw92.cyou kernel: tbtun: carrier 71 recovered after 866 ms: back in the stripe
+Nov 07 04:50:17 hnd0.kw92.cyou kernel: tbtun: carrier 23 recovered after 3016 ms: back in the stripe
+Nov 07 04:50:19 hnd0.kw92.cyou kernel: tbtun: carrier 31 stalled: repath paused, new frames avoid it
+Nov 07 04:50:19 hnd0.kw92.cyou kernel: tbtun: carrier 115 stalled: repath paused, new frames avoid it
+Nov 07 04:50:19 hnd0.kw92.cyou kernel: tbtun: carrier 136 stalled: repath paused, new frames avoid it
+Nov 07 04:50:19 hnd0.kw92.cyou kernel: tbt_carrier_stall: 3 callbacks suppressed
+Nov 07 04:50:19 hnd0.kw92.cyou kernel: tbtun: carrier 133 stalled: repath paused, new frames avoid it
+Nov 07 04:50:19 hnd0.kw92.cyou kernel: tbtun: carrier 137 stalled: repath paused, new frames avoid it
+Nov 07 04:50:19 hnd0.kw92.cyou kernel: tbtun: carrier 144 recovered after 52 ms: back in the stripe
+Nov 07 04:50:19 hnd0.kw92.cyou kernel: tbtun: carrier 149 stalled: repath paused, new frames avoid it
+Nov 07 04:50:19 hnd0.kw92.cyou kernel: tbtun: carrier 9 stalled: repath paused, new frames avoid it
+Nov 07 04:50:19 hnd0.kw92.cyou kernel: tbtun: carrier 136 recovered after 255 ms: back in the stripe
+Nov 07 04:50:20 hnd0.kw92.cyou kernel: tbtun: carrier 31 recovered after 511 ms: back in the stripe
+Nov 07 04:50:20 hnd0.kw92.cyou kernel: tbtun: carrier 149 recovered after 867 ms: back in the stripe
+Nov 07 04:50:21 hnd0.kw92.cyou kernel: tbtun: carrier 115 recovered after 2045 ms: back in the stripe
+Nov 07 04:50:22 hnd0.kw92.cyou kernel: tbtun: carrier 9 recovered after 2913 ms: back in the stripe
+Nov 07 04:50:22 hnd0.kw92.cyou kernel: tbtun: carrier 44 recovered after 3016 ms: back in the stripe
+Nov 07 04:50:22 hnd0.kw92.cyou kernel: tbtun: carrier 59 recovered after 3016 ms: back in the stripe
+Nov 07 04:50:24 hnd0.kw92.cyou kernel: tbtun: carrier 44 stalled: repath paused, new frames avoid it
+Nov 07 04:50:24 hnd0.kw92.cyou kernel: tbtun: carrier 130 stalled: repath paused, new frames avoid it
+Nov 07 04:50:24 hnd0.kw92.cyou kernel: tbtun: carrier 44 recovered after 409 ms: back in the stripe
+Nov 07 04:50:25 hnd0.kw92.cyou kernel: tbtun: carrier 114 stalled: repath paused, new frames avoid it
+Nov 07 04:50:25 hnd0.kw92.cyou kernel: tbtun: carrier 130 recovered after 153 ms: back in the stripe
+Nov 07 04:50:25 hnd0.kw92.cyou kernel: tbtun: carrier 114 recovered after 204 ms: back in the stripe
+Nov 07 04:50:25 hnd0.kw92.cyou kernel: tbtun: carrier 102 stalled: repath paused, new frames avoid it
+Nov 07 04:50:25 hnd0.kw92.cyou kernel: tbtun: carrier 7 stalled: repath paused, new frames avoid it
+Nov 07 04:50:25 hnd0.kw92.cyou kernel: tbtun: carrier 7 recovered after 51 ms: back in the stripe
+Nov 07 04:50:25 hnd0.kw92.cyou kernel: tbtun: carrier 102 recovered after 459 ms: back in the stripe
+Nov 07 04:50:25 hnd0.kw92.cyou kernel: tbtun: carrier 196 stalled: repath paused, new frames avoid it
+Nov 07 04:50:26 hnd0.kw92.cyou kernel: tbtun: carrier 128 stalled: repath paused, new frames avoid it
+Nov 07 04:50:26 hnd0.kw92.cyou kernel: tbtun: carrier 196 recovered after 207 ms: back in the stripe
+Nov 07 04:50:26 hnd0.kw92.cyou kernel: tbtun: carrier 75 stalled: repath paused, new frames avoid it
+Nov 07 04:50:26 hnd0.kw92.cyou kernel: tbtun: carrier 71 stalled: repath paused, new frames avoid it
+Nov 07 04:50:26 hnd0.kw92.cyou kernel: tbtun: carrier 124 stalled: repath paused, new frames avoid it
+Nov 07 04:50:26 hnd0.kw92.cyou kernel: tbtun: carrier 128 recovered after 155 ms: back in the stripe
+Nov 07 04:50:26 hnd0.kw92.cyou kernel: tbtun: carrier 75 recovered after 102 ms: back in the stripe
+Nov 07 04:50:26 hnd0.kw92.cyou kernel: tbtun: tunnel 1 carrier 133 gen 130 lost: sock=1 connected=1 hello_sent=1 up=1
+Nov 07 04:50:26 hnd0.kw92.cyou kernel: tbtun: tunnel 1 carrier 137 gen 133 lost: sock=1 connected=1 hello_sent=1 up=1
+Nov 07 04:50:26 hnd0.kw92.cyou kernel: tbtun: carrier 229 stalled: repath paused, new frames avoid it
+Nov 07 04:50:26 hnd0.kw92.cyou kernel: tbtun: carrier 124 recovered after 408 ms: back in the stripe
+Nov 07 04:50:26 hnd0.kw92.cyou kernel: tbtun: carrier 229 recovered after 254 ms: back in the stripe
+Nov 07 04:50:26 hnd0.kw92.cyou kernel: tbtun: carrier 253 recovered after 205 ms: back in the stripe
+Nov 07 04:50:27 hnd0.kw92.cyou kernel: tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=31839, awaiting HELLO
+Nov 07 04:50:30 hnd0.kw92.cyou kernel: tbt_carrier_stall: 5 callbacks suppressed
+Nov 07 04:50:30 hnd0.kw92.cyou kernel: tbtun: carrier 63 stalled: repath paused, new frames avoid it
+Nov 07 04:50:30 hnd0.kw92.cyou kernel: tbtun: carrier 255 stalled: repath paused, new frames avoid it
+Nov 07 04:50:30 hnd0.kw92.cyou kernel: tbtun: carrier 146 stalled: repath paused, new frames avoid it
+Nov 07 04:50:30 hnd0.kw92.cyou kernel: tbtun: carrier 115 stalled: repath paused, new frames avoid it
+Nov 07 04:50:30 hnd0.kw92.cyou kernel: tbt_car_poll_one: 5 callbacks suppressed
+Nov 07 04:50:30 hnd0.kw92.cyou kernel: tbtun: carrier 255 recovered after 204 ms: back in the stripe
+Nov 07 04:50:30 hnd0.kw92.cyou kernel: tbtun: carrier 146 recovered after 256 ms: back in the stripe
+Nov 07 04:50:31 hnd0.kw92.cyou kernel: tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=31737, awaiting HELLO
+Nov 07 04:50:32 hnd0.kw92.cyou kernel: tbtun: carrier 115 recovered after 1943 ms: back in the stripe
+Nov 07 04:50:32 hnd0.kw92.cyou kernel: tbtun: carrier 182 stalled: repath paused, new frames avoid it
+Nov 07 04:50:32 hnd0.kw92.cyou kernel: tbtun: carrier 182 recovered after 102 ms: back in the stripe
+Nov 07 04:50:34 hnd0.kw92.cyou kernel: tbtun: carrier 63 recovered after 4372 ms: back in the stripe
+Nov 07 04:50:35 hnd0.kw92.cyou kernel: tbtun: carrier 116 stalled: repath paused, new frames avoid it
+Nov 07 04:50:35 hnd0.kw92.cyou kernel: tbtun: carrier 129 stalled: repath paused, new frames avoid it
+Nov 07 04:50:35 hnd0.kw92.cyou kernel: tbtun: carrier 145 stalled: repath paused, new frames avoid it
+Nov 07 04:50:35 hnd0.kw92.cyou kernel: tbtun: carrier 232 stalled: repath paused, new frames avoid it
+Nov 07 04:50:35 hnd0.kw92.cyou kernel: tbtun: carrier 116 recovered after 817 ms: back in the stripe
+Nov 07 04:50:36 hnd0.kw92.cyou kernel: tbtun: carrier 145 recovered after 766 ms: back in the stripe
+Nov 07 04:50:36 hnd0.kw92.cyou kernel: tbtun: carrier 129 recovered after 1331 ms: back in the stripe
+Nov 07 04:50:38 hnd0.kw92.cyou kernel: tbtun: carrier 232 recovered after 2404 ms: back in the stripe
+Nov 07 04:50:38 hnd0.kw92.cyou kernel: tbtun: carrier 45 stalled: repath paused, new frames avoid it
+Nov 07 04:50:38 hnd0.kw92.cyou kernel: tbtun: carrier 45 recovered after 204 ms: back in the stripe
+Nov 07 04:50:40 hnd0.kw92.cyou kernel: tbtun: carrier 6 stalled: repath paused, new frames avoid it
+Nov 07 04:50:40 hnd0.kw92.cyou kernel: tbtun: carrier 114 stalled: repath paused, new frames avoid it
+Nov 07 04:50:40 hnd0.kw92.cyou kernel: tbtun: carrier 96 stalled: repath paused, new frames avoid it
+Nov 07 04:50:40 hnd0.kw92.cyou kernel: tbtun: carrier 198 stalled: repath paused, new frames avoid it
+Nov 07 04:50:40 hnd0.kw92.cyou kernel: tbtun: carrier 89 stalled: repath paused, new frames avoid it
+Nov 07 04:50:41 hnd0.kw92.cyou kernel: tbtun: carrier 96 recovered after 715 ms: back in the stripe
+Nov 07 04:50:41 hnd0.kw92.cyou kernel: tbtun: carrier 89 recovered after 408 ms: back in the stripe
+Nov 07 04:50:41 hnd0.kw92.cyou kernel: tbtun: carrier 114 recovered after 1432 ms: back in the stripe
+Nov 07 04:50:42 hnd0.kw92.cyou kernel: tbtun: carrier 6 recovered after 2456 ms: back in the stripe
+Nov 07 04:50:42 hnd0.kw92.cyou kernel: tbtun: carrier 198 recovered after 2404 ms: back in the stripe
+Nov 07 04:50:42 hnd0.kw92.cyou kernel: tbtun: carrier 189 stalled: repath paused, new frames avoid it
+Nov 07 04:50:43 hnd0.kw92.cyou kernel: tbtun: carrier 189 recovered after 359 ms: back in the stripe
+Nov 07 04:50:45 hnd0.kw92.cyou kernel: tbtun: carrier 162 stalled: repath paused, new frames avoid it
+Nov 07 04:50:45 hnd0.kw92.cyou kernel: tbtun: carrier 159 stalled: repath paused, new frames avoid it
+Nov 07 04:50:45 hnd0.kw92.cyou kernel: tbtun: carrier 78 stalled: repath paused, new frames avoid it
+Nov 07 04:50:45 hnd0.kw92.cyou kernel: tbtun: carrier 104 stalled: repath paused, new frames avoid it
+Nov 07 04:50:45 hnd0.kw92.cyou kernel: tbtun: carrier 71 stalled: repath paused, new frames avoid it
+Nov 07 04:50:45 hnd0.kw92.cyou kernel: tbtun: carrier 71 recovered after 308 ms: back in the stripe
+Nov 07 04:50:46 hnd0.kw92.cyou kernel: tbtun: carrier 78 recovered after 666 ms: back in the stripe
+Nov 07 04:50:46 hnd0.kw92.cyou kernel: tbtun: carrier 104 recovered after 717 ms: back in the stripe
+Nov 07 04:50:46 hnd0.kw92.cyou kernel: tbtun: carrier 159 recovered after 869 ms: back in the stripe
+Nov 07 04:50:46 hnd0.kw92.cyou kernel: tbtun: carrier 162 recovered after 920 ms: back in the stripe
+Nov 07 04:50:46 hnd0.kw92.cyou kernel: tbtun: carrier 189 stalled: repath paused, new frames avoid it
+Nov 07 04:50:46 hnd0.kw92.cyou kernel: tbtun: carrier 189 recovered after 565 ms: back in the stripe
+Nov 07 04:50:50 hnd0.kw92.cyou kernel: tbtun: carrier 74 stalled: repath paused, new frames avoid it
+Nov 07 04:50:50 hnd0.kw92.cyou kernel: tbtun: carrier 160 stalled: repath paused, new frames avoid it
+Nov 07 04:50:50 hnd0.kw92.cyou kernel: tbtun: carrier 255 stalled: repath paused, new frames avoid it
+Nov 07 04:50:50 hnd0.kw92.cyou kernel: tbtun: carrier 153 stalled: repath paused, new frames avoid it
+Nov 07 04:50:50 hnd0.kw92.cyou kernel: tbtun: carrier 153 recovered after 50 ms: back in the stripe
+Nov 07 04:50:50 hnd0.kw92.cyou kernel: tbtun: carrier 160 recovered after 357 ms: back in the stripe
+Nov 07 04:50:50 hnd0.kw92.cyou kernel: tbtun: carrier 74 recovered after 714 ms: back in the stripe
+Nov 07 04:50:51 hnd0.kw92.cyou kernel: tbtun: carrier 255 recovered after 1227 ms: back in the stripe
+Nov 07 04:50:55 hnd0.kw92.cyou kernel: tbtun: carrier 0 stalled: repath paused, new frames avoid it
+Nov 07 04:50:56 hnd0.kw92.cyou kernel: tbtun: carrier 218 stalled: repath paused, new frames avoid it
+Nov 07 04:50:56 hnd0.kw92.cyou kernel: tbtun: carrier 241 stalled: repath paused, new frames avoid it
+Nov 07 04:50:56 hnd0.kw92.cyou kernel: tbtun: carrier 0 recovered after 767 ms: back in the stripe
+Nov 07 04:50:56 hnd0.kw92.cyou kernel: tbtun: carrier 12 stalled: repath paused, new frames avoid it
+Nov 07 04:50:56 hnd0.kw92.cyou kernel: tbtun: carrier 97 stalled: repath paused, new frames avoid it
+Nov 07 04:50:56 hnd0.kw92.cyou kernel: tbtun: carrier 206 stalled: repath paused, new frames avoid it
+Nov 07 04:50:56 hnd0.kw92.cyou kernel: tbtun: carrier 45 stalled: repath paused, new frames avoid it
+Nov 07 04:50:56 hnd0.kw92.cyou kernel: tbtun: carrier 12 recovered after 101 ms: back in the stripe
+Nov 07 04:50:56 hnd0.kw92.cyou kernel: tbtun: carrier 45 recovered after 50 ms: back in the stripe
+Nov 07 04:50:56 hnd0.kw92.cyou kernel: tbtun: carrier 206 recovered after 101 ms: back in the stripe
+Nov 07 04:50:56 hnd0.kw92.cyou kernel: tbtun: carrier 218 recovered after 562 ms: back in the stripe
+Nov 07 04:50:56 hnd0.kw92.cyou kernel: tbtun: carrier 241 recovered after 306 ms: back in the stripe
+Nov 07 04:50:56 hnd0.kw92.cyou kernel: tbtun: carrier 216 stalled: repath paused, new frames avoid it
+Nov 07 04:50:57 hnd0.kw92.cyou kernel: tbtun: carrier 97 recovered after 407 ms: back in the stripe
+Nov 07 04:50:57 hnd0.kw92.cyou kernel: tbtun: carrier 179 stalled: repath paused, new frames avoid it
+Nov 07 04:50:57 hnd0.kw92.cyou kernel: tbtun: carrier 216 recovered after 50 ms: back in the stripe
+Nov 07 04:50:57 hnd0.kw92.cyou kernel: tbtun: carrier 179 recovered after 50 ms: back in the stripe
+Nov 07 04:50:57 hnd0.kw92.cyou kernel: tbtun: carrier 74 stalled: repath paused, new frames avoid it
+Nov 07 04:50:58 hnd0.kw92.cyou kernel: tbtun: carrier 203 recovered after 50 ms: back in the stripe
+Nov 07 04:50:58 hnd0.kw92.cyou kernel: tbtun: carrier 170 recovered after 203 ms: back in the stripe
+Nov 07 04:51:01 hnd0.kw92.cyou kernel: tbt_carrier_stall: 8 callbacks suppressed
+Nov 07 04:51:01 hnd0.kw92.cyou kernel: tbtun: carrier 178 stalled: repath paused, new frames avoid it
+Nov 07 04:51:01 hnd0.kw92.cyou kernel: tbtun: carrier 87 stalled: repath paused, new frames avoid it
+Nov 07 04:51:03 hnd0.kw92.cyou kernel: tbt_car_poll_one: 7 callbacks suppressed
+Nov 07 04:51:03 hnd0.kw92.cyou kernel: tbtun: carrier 178 recovered after 2249 ms: back in the stripe
+Nov 07 04:51:04 hnd0.kw92.cyou kernel: tbtun: carrier 87 recovered after 2861 ms: back in the stripe
+Nov 07 04:51:06 hnd0.kw92.cyou kernel: tbtun: carrier 243 stalled: repath paused, new frames avoid it
+Nov 07 04:51:07 hnd0.kw92.cyou kernel: tbtun: carrier 156 stalled: repath paused, new frames avoid it
+Nov 07 04:51:07 hnd0.kw92.cyou kernel: tbtun: carrier 156 recovered after 460 ms: back in the stripe
+Nov 07 04:51:08 hnd0.kw92.cyou kernel: tbtun: carrier 243 recovered after 2046 ms: back in the stripe
+Nov 07 04:51:11 hnd0.kw92.cyou kernel: tbtun: carrier 242 stalled: repath paused, new frames avoid it
+Nov 07 04:51:12 hnd0.kw92.cyou kernel: tbtun: carrier 146 stalled: repath paused, new frames avoid it
+Nov 07 04:51:12 hnd0.kw92.cyou kernel: tbtun: carrier 146 recovered after 102 ms: back in the stripe
+Nov 07 04:51:15 hnd0.kw92.cyou kernel: tbtun: carrier 242 recovered after 3963 ms: back in the stripe
+Nov 07 04:51:16 hnd0.kw92.cyou kernel: tbtun: carrier 154 stalled: repath paused, new frames avoid it
+Nov 07 04:51:16 hnd0.kw92.cyou kernel: tbtun: carrier 78 stalled: repath paused, new frames avoid it
+Nov 07 04:51:16 hnd0.kw92.cyou kernel: tbtun: carrier 104 stalled: repath paused, new frames avoid it
+Nov 07 04:51:16 hnd0.kw92.cyou kernel: tbtun: carrier 232 stalled: repath paused, new frames avoid it
+Nov 07 04:51:16 hnd0.kw92.cyou kernel: tbtun: carrier 78 recovered after 459 ms: back in the stripe
+Nov 07 04:51:16 hnd0.kw92.cyou kernel: tbtun: carrier 232 recovered after 101 ms: back in the stripe
+Nov 07 04:51:16 hnd0.kw92.cyou kernel: tbtun: carrier 104 recovered after 611 ms: back in the stripe
+Nov 07 04:51:20 hnd0.kw92.cyou kernel: tbtun: carrier 154 recovered after 3965 ms: back in the stripe
+Nov 07 04:51:21 hnd0.kw92.cyou kernel: tbtun: carrier 99 stalled: repath paused, new frames avoid it
+Nov 07 04:51:21 hnd0.kw92.cyou kernel: tbtun: carrier 99 recovered after 102 ms: back in the stripe
+Nov 07 04:51:22 hnd0.kw92.cyou kernel: tbtun: carrier 193 stalled: repath paused, new frames avoid it
+Nov 07 04:51:25 hnd0.kw92.cyou kernel: tbtun: carrier 193 recovered after 2366 ms: back in the stripe
+Nov 07 04:51:26 hnd0.kw92.cyou kernel: tbtun: carrier 19 stalled: repath paused, new frames avoid it
+Nov 07 04:51:26 hnd0.kw92.cyou kernel: tbtun: carrier 106 stalled: repath paused, new frames avoid it
+Nov 07 04:51:26 hnd0.kw92.cyou kernel: tbtun: carrier 232 stalled: repath paused, new frames avoid it
+Nov 07 04:51:26 hnd0.kw92.cyou kernel: tbtun: carrier 232 recovered after 51 ms: back in the stripe
+Nov 07 04:51:26 hnd0.kw92.cyou kernel: tbtun: carrier 106 recovered after 254 ms: back in the stripe
+Nov 07 04:51:26 hnd0.kw92.cyou kernel: tbtun: carrier 19 recovered after 612 ms: back in the stripe
+Nov 07 04:51:26 hnd0.kw92.cyou kernel: tbtun: carrier 41 stalled: repath paused, new frames avoid it
+Nov 07 04:51:27 hnd0.kw92.cyou kernel: tbtun: carrier 13 stalled: repath paused, new frames avoid it
+Nov 07 04:51:27 hnd0.kw92.cyou kernel: tbtun: carrier 9 stalled: repath paused, new frames avoid it
+Nov 07 04:51:27 hnd0.kw92.cyou kernel: tbtun: carrier 41 recovered after 359 ms: back in the stripe
+Nov 07 04:51:27 hnd0.kw92.cyou kernel: tbtun: carrier 13 recovered after 153 ms: back in the stripe
+Nov 07 04:51:27 hnd0.kw92.cyou kernel: tbtun: carrier 220 stalled: repath paused, new frames avoid it
+Nov 07 04:51:27 hnd0.kw92.cyou kernel: tbtun: carrier 9 recovered after 255 ms: back in the stripe
+Nov 07 04:51:27 hnd0.kw92.cyou kernel: tbtun: carrier 25 stalled: repath paused, new frames avoid it
+Nov 07 04:51:27 hnd0.kw92.cyou kernel: tbtun: carrier 201 stalled: repath paused, new frames avoid it
+Nov 07 04:51:27 hnd0.kw92.cyou kernel: tbtun: carrier 25 recovered after 204 ms: back in the stripe
+Nov 07 04:51:27 hnd0.kw92.cyou kernel: tbtun: carrier 201 recovered after 203 ms: back in the stripe
+Nov 07 04:51:27 hnd0.kw92.cyou kernel: tbtun: carrier 220 recovered after 358 ms: back in the stripe
+Nov 07 04:51:27 hnd0.kw92.cyou kernel: tbtun: carrier 154 stalled: repath paused, new frames avoid it
+Nov 07 04:51:28 hnd0.kw92.cyou kernel: tbtun: carrier 69 stalled: repath paused, new frames avoid it
+Nov 07 04:51:28 hnd0.kw92.cyou kernel: tbtun: carrier 69 recovered after 307 ms: back in the stripe
+Nov 07 04:51:31 hnd0.kw92.cyou kernel: tbt_carrier_stall: 7 callbacks suppressed
+Nov 07 04:51:31 hnd0.kw92.cyou kernel: tbtun: carrier 237 stalled: repath paused, new frames avoid it
+Nov 07 04:51:31 hnd0.kw92.cyou kernel: tbtun: carrier 174 stalled: repath paused, new frames avoid it
+Nov 07 04:51:31 hnd0.kw92.cyou kernel: tbt_car_poll_one: 7 callbacks suppressed
+Nov 07 04:51:31 hnd0.kw92.cyou kernel: tbtun: carrier 237 recovered after 50 ms: back in the stripe
+Nov 07 04:51:31 hnd0.kw92.cyou kernel: tbtun: carrier 146 stalled: repath paused, new frames avoid it
+Nov 07 04:51:31 hnd0.kw92.cyou kernel: tbtun: carrier 102 recovered after 2928 ms: back in the stripe
+Nov 07 04:51:31 hnd0.kw92.cyou kernel: tbtun: carrier 146 recovered after 154 ms: back in the stripe
+Nov 07 04:51:32 hnd0.kw92.cyou kernel: tbtun: carrier 174 recovered after 767 ms: back in the stripe
+Nov 07 04:51:36 hnd0.kw92.cyou kernel: tbtun: carrier 161 stalled: repath paused, new frames avoid it
+Nov 07 04:51:36 hnd0.kw92.cyou kernel: tbtun: carrier 161 recovered after 102 ms: back in the stripe
+Nov 07 04:51:36 hnd0.kw92.cyou kernel: tbtun: carrier 196 stalled: repath paused, new frames avoid it
+Nov 07 04:51:36 hnd0.kw92.cyou kernel: tbtun: carrier 210 stalled: repath paused, new frames avoid it
+Nov 07 04:51:36 hnd0.kw92.cyou kernel: tbtun: carrier 49 stalled: repath paused, new frames avoid it
+Nov 07 04:51:36 hnd0.kw92.cyou kernel: tbtun: carrier 210 recovered after 153 ms: back in the stripe
+Nov 07 04:51:37 hnd0.kw92.cyou kernel: tbtun: carrier 195 stalled: repath paused, new frames avoid it
+Nov 07 04:51:37 hnd0.kw92.cyou kernel: tbtun: carrier 223 stalled: repath paused, new frames avoid it
+Nov 07 04:51:37 hnd0.kw92.cyou kernel: tbtun: carrier 196 recovered after 611 ms: back in the stripe
+Nov 07 04:51:37 hnd0.kw92.cyou kernel: tbtun: carrier 223 recovered after 254 ms: back in the stripe
+Nov 07 04:51:39 hnd0.kw92.cyou kernel: tbtun: carrier 195 recovered after 1895 ms: back in the stripe
+Nov 07 04:51:41 hnd0.kw92.cyou kernel: tbtun: carrier 216 stalled: repath paused, new frames avoid it
+Nov 07 04:51:41 hnd0.kw92.cyou kernel: tbtun: carrier 237 stalled: repath paused, new frames avoid it
+Nov 07 04:51:41 hnd0.kw92.cyou kernel: tbtun: carrier 160 stalled: repath paused, new frames avoid it
+Nov 07 04:51:41 hnd0.kw92.cyou kernel: tbtun: carrier 160 recovered after 257 ms: back in the stripe
+Nov 07 04:51:42 hnd0.kw92.cyou kernel: tbtun: carrier 216 recovered after 1127 ms: back in the stripe
+Nov 07 04:51:42 hnd0.kw92.cyou kernel: tbtun: carrier 237 recovered after 1179 ms: back in the stripe
+Nov 07 04:51:45 hnd0.kw92.cyou kernel: tbtun: carrier 49 recovered after 8323 ms: back in the stripe
+Nov 07 04:51:46 hnd0.kw92.cyou kernel: tbtun: carrier 112 stalled: repath paused, new frames avoid it
+Nov 07 04:51:46 hnd0.kw92.cyou kernel: tbtun: carrier 104 stalled: repath paused, new frames avoid it
+Nov 07 04:51:46 hnd0.kw92.cyou kernel: tbtun: carrier 54 stalled: repath paused, new frames avoid it
+Nov 07 04:51:47 hnd0.kw92.cyou kernel: tbtun: carrier 112 recovered after 717 ms: back in the stripe
+Nov 07 04:51:47 hnd0.kw92.cyou kernel: tbtun: carrier 104 recovered after 613 ms: back in the stripe
+Nov 07 04:51:47 hnd0.kw92.cyou kernel: tbtun: carrier 54 recovered after 714 ms: back in the stripe
+Nov 07 04:51:51 hnd0.kw92.cyou kernel: tbtun: carrier 224 stalled: repath paused, new frames avoid it
+Nov 07 04:51:51 hnd0.kw92.cyou kernel: tbtun: carrier 2 stalled: repath paused, new frames avoid it
+Nov 07 04:51:51 hnd0.kw92.cyou kernel: tbtun: carrier 2 recovered after 152 ms: back in the stripe
+Nov 07 04:51:57 hnd0.kw92.cyou kernel: tbtun: carrier 43 stalled: repath paused, new frames avoid it
+Nov 07 04:51:57 hnd0.kw92.cyou kernel: tbtun: carrier 43 recovered after 51 ms: back in the stripe
+Nov 07 04:51:57 hnd0.kw92.cyou kernel: tbtun: carrier 19 stalled: repath paused, new frames avoid it
+Nov 07 04:51:57 hnd0.kw92.cyou kernel: tbtun: carrier 160 stalled: repath paused, new frames avoid it
+Nov 07 04:51:57 hnd0.kw92.cyou kernel: tbtun: carrier 19 recovered after 306 ms: back in the stripe
+Nov 07 04:51:57 hnd0.kw92.cyou kernel: tbtun: carrier 214 stalled: repath paused, new frames avoid it
+Nov 07 04:51:57 hnd0.kw92.cyou kernel: tbtun: carrier 25 stalled: repath paused, new frames avoid it
+Nov 07 04:51:57 hnd0.kw92.cyou kernel: tbtun: carrier 25 recovered after 51 ms: back in the stripe
+Nov 07 04:51:57 hnd0.kw92.cyou kernel: tbtun: carrier 214 recovered after 102 ms: back in the stripe
+Nov 07 04:51:58 hnd0.kw92.cyou kernel: tbtun: carrier 63 stalled: repath paused, new frames avoid it
+Nov 07 04:51:58 hnd0.kw92.cyou kernel: tbtun: carrier 147 stalled: repath paused, new frames avoid it
+Nov 07 04:51:58 hnd0.kw92.cyou kernel: tbtun: carrier 125 stalled: repath paused, new frames avoid it
+Nov 07 04:51:58 hnd0.kw92.cyou kernel: tbtun: carrier 76 stalled: repath paused, new frames avoid it
+Nov 07 04:51:58 hnd0.kw92.cyou kernel: tbtun: carrier 147 recovered after 205 ms: back in the stripe
+Nov 07 04:51:58 hnd0.kw92.cyou kernel: tbtun: tunnel 1 carrier 224 gen 218 lost: sock=1 connected=1 hello_sent=1 up=1
+Nov 07 04:51:58 hnd0.kw92.cyou kernel: tbtun: carrier 76 recovered after 204 ms: back in the stripe
+Nov 07 04:51:58 hnd0.kw92.cyou kernel: tbtun: carrier 243 stalled: repath paused, new frames avoid it
+Nov 07 04:51:59 hnd0.kw92.cyou kernel: tbtun: carrier 63 recovered after 920 ms: back in the stripe
+Nov 07 04:51:59 hnd0.kw92.cyou kernel: tbtun: carrier 160 recovered after 2351 ms: back in the stripe
+Nov 07 04:51:59 hnd0.kw92.cyou kernel: tbtun: carrier 16 recovered after 459 ms: back in the stripe
+Nov 07 04:52:00 hnd0.kw92.cyou kernel: tbtun: carrier 45 recovered after 819 ms: back in the stripe
+Nov 07 04:52:00 hnd0.kw92.cyou kernel: tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=31843, awaiting HELLO

@@ -1,0 +1,800 @@
+[13289.661295] tbtun: tunnel 1 carrier 13 gen 13569 lost: sock=1 connected=1 hello_sent=1 up=1
+[13289.661356] tbtun: tunnel 1 carrier 14 gen 13570 lost: sock=1 connected=1 hello_sent=1 up=1
+[13289.831666] tbtun: tunnel 1 carrier 5 gen 13577 lost: sock=1 connected=1 hello_sent=1 up=1
+[13289.832619] tbtun: tunnel 1 carrier 8 gen 13580 lost: sock=1 connected=1 hello_sent=1 up=1
+[13289.833088] tbtun: tunnel 1 carrier 6 gen 13578 lost: sock=1 connected=1 hello_sent=1 up=1
+[13289.833396] tbtun: tunnel 1 carrier 2 gen 13574 lost: sock=1 connected=1 hello_sent=1 up=1
+[13289.833772] tbtun: tunnel 1 carrier 11 gen 13583 lost: sock=1 connected=1 hello_sent=1 up=1
+[13289.834148] tbtun: tunnel 1 carrier 4 gen 13576 lost: sock=1 connected=1 hello_sent=1 up=1
+[13289.834192] tbtun: tunnel 1 carrier 0 gen 13572 lost: sock=1 connected=1 hello_sent=1 up=1
+[13294.663725] tbt_carrier_lost: 246 callbacks suppressed
+[13294.663740] tbtun: tunnel 1 carrier 15 gen 13827 lost: sock=1 connected=1 hello_sent=1 up=1
+[13294.664323] tbtun: tunnel 1 carrier 14 gen 13826 lost: sock=1 connected=1 hello_sent=1 up=1
+[13294.704641] tbtun: tunnel 1 carrier 13 gen 13825 lost: sock=1 connected=1 hello_sent=1 up=1
+[13294.878905] tbtun: tunnel 1 carrier 8 gen 13836 lost: sock=1 connected=1 hello_sent=1 up=1
+[13294.878945] tbtun: tunnel 1 carrier 10 gen 13838 lost: sock=1 connected=1 hello_sent=1 up=1
+[13294.878968] tbtun: tunnel 1 carrier 7 gen 13835 lost: sock=1 connected=1 hello_sent=1 up=1
+[13294.880163] tbtun: tunnel 1 carrier 9 gen 13837 lost: sock=1 connected=1 hello_sent=1 up=1
+[13294.880191] tbtun: tunnel 1 carrier 5 gen 13833 lost: sock=1 connected=1 hello_sent=1 up=1
+[13294.880201] tbtun: tunnel 1 carrier 0 gen 13828 lost: sock=1 connected=1 hello_sent=1 up=1
+[13294.880217] tbtun: tunnel 1 carrier 11 gen 13839 lost: sock=1 connected=1 hello_sent=1 up=1
+[13299.706786] tbt_carrier_lost: 246 callbacks suppressed
+[13299.706801] tbtun: tunnel 1 carrier 15 gen 14083 lost: sock=1 connected=1 hello_sent=1 up=1
+[13299.707353] tbtun: tunnel 1 carrier 14 gen 14082 lost: sock=1 connected=1 hello_sent=1 up=1
+[13299.721167] tbtun: tunnel 1 carrier 13 gen 14081 lost: sock=1 connected=1 hello_sent=1 up=1
+[13299.949614] tbtun: tunnel 1 carrier 6 gen 14090 lost: sock=1 connected=1 hello_sent=1 up=1
+[13299.949790] tbtun: tunnel 1 carrier 2 gen 14086 lost: sock=1 connected=1 hello_sent=1 up=1
+[13299.949884] tbtun: tunnel 1 carrier 8 gen 14092 lost: sock=1 connected=1 hello_sent=1 up=1
+[13299.949997] tbtun: tunnel 1 carrier 3 gen 14087 lost: sock=1 connected=1 hello_sent=1 up=1
+[13299.950015] tbtun: tunnel 1 carrier 0 gen 14084 lost: sock=1 connected=1 hello_sent=1 up=1
+[13299.950109] tbtun: tunnel 1 carrier 18 gen 14097 lost: sock=1 connected=1 hello_sent=1 up=1
+[13299.950197] tbtun: tunnel 1 carrier 4 gen 14088 lost: sock=1 connected=1 hello_sent=1 up=1
+[13304.722973] tbt_carrier_lost: 246 callbacks suppressed
+[13304.722990] tbtun: tunnel 1 carrier 15 gen 14339 lost: sock=1 connected=1 hello_sent=1 up=1
+[13304.723156] tbtun: tunnel 1 carrier 14 gen 14338 lost: sock=1 connected=1 hello_sent=1 up=1
+[13304.747799] tbtun: tunnel 1 carrier 13 gen 14337 lost: sock=1 connected=1 hello_sent=1 up=1
+[13304.993580] tbtun: tunnel 1 carrier 4 gen 14344 lost: sock=1 connected=1 hello_sent=1 up=1
+[13304.993640] tbtun: tunnel 1 carrier 9 gen 14349 lost: sock=1 connected=1 hello_sent=1 up=1
+[13304.993756] tbtun: tunnel 1 carrier 8 gen 14348 lost: sock=1 connected=1 hello_sent=1 up=1
+[13304.993805] tbtun: tunnel 1 carrier 3 gen 14343 lost: sock=1 connected=1 hello_sent=1 up=1
+[13304.993847] tbtun: tunnel 1 carrier 17 gen 14354 lost: sock=1 connected=1 hello_sent=1 up=1
+[13304.993891] tbtun: tunnel 1 carrier 6 gen 14346 lost: sock=1 connected=1 hello_sent=1 up=1
+[13304.993897] tbtun: tunnel 1 carrier 0 gen 14340 lost: sock=1 connected=1 hello_sent=1 up=1
+[13309.750309] tbt_carrier_lost: 246 callbacks suppressed
+[13309.750316] tbtun: tunnel 1 carrier 14 gen 14594 lost: sock=1 connected=1 hello_sent=1 up=1
+[13309.751124] tbtun: tunnel 1 carrier 15 gen 14595 lost: sock=1 connected=1 hello_sent=1 up=1
+[13309.764472] tbtun: tunnel 1 carrier 13 gen 14593 lost: sock=1 connected=1 hello_sent=1 up=1
+[13310.030078] tbtun: tunnel 1 carrier 11 gen 14607 lost: sock=1 connected=1 hello_sent=1 up=1
+[13310.030749] tbtun: tunnel 1 carrier 5 gen 14601 lost: sock=1 connected=1 hello_sent=1 up=1
+[13310.030813] tbtun: tunnel 1 carrier 18 gen 14611 lost: sock=1 connected=1 hello_sent=1 up=1
+[13310.030852] tbtun: tunnel 1 carrier 12 gen 14608 lost: sock=1 connected=1 hello_sent=1 up=1
+[13310.030889] tbtun: tunnel 1 carrier 6 gen 14602 lost: sock=1 connected=1 hello_sent=1 up=1
+[13310.030925] tbtun: tunnel 1 carrier 10 gen 14606 lost: sock=1 connected=1 hello_sent=1 up=1
+[13310.030960] tbtun: tunnel 1 carrier 7 gen 14603 lost: sock=1 connected=1 hello_sent=1 up=1
+[13314.766229] tbt_carrier_lost: 246 callbacks suppressed
+[13314.766241] tbtun: tunnel 1 carrier 14 gen 14850 lost: sock=1 connected=1 hello_sent=1 up=1
+[13314.784326] tbtun: tunnel 1 carrier 13 gen 14849 lost: sock=1 connected=1 hello_sent=1 up=1
+[13314.784374] tbtun: tunnel 1 carrier 15 gen 14851 lost: sock=1 connected=1 hello_sent=1 up=1
+[13315.034609] tbtun: tunnel 1 carrier 10 gen 14862 lost: sock=1 connected=1 hello_sent=1 up=1
+[13315.035326] tbtun: tunnel 1 carrier 4 gen 14856 lost: sock=1 connected=1 hello_sent=1 up=1
+[13315.035366] tbtun: tunnel 1 carrier 11 gen 14863 lost: sock=1 connected=1 hello_sent=1 up=1
+[13315.035388] tbtun: tunnel 1 carrier 17 gen 14866 lost: sock=1 connected=1 hello_sent=1 up=1
+[13315.035411] tbtun: tunnel 1 carrier 12 gen 14864 lost: sock=1 connected=1 hello_sent=1 up=1
+[13315.035434] tbtun: tunnel 1 carrier 3 gen 14855 lost: sock=1 connected=1 hello_sent=1 up=1
+[13315.035456] tbtun: tunnel 1 carrier 7 gen 14859 lost: sock=1 connected=1 hello_sent=1 up=1
+[13319.786236] tbt_carrier_lost: 246 callbacks suppressed
+[13319.786243] tbtun: tunnel 1 carrier 15 gen 15107 lost: sock=1 connected=1 hello_sent=1 up=1
+[13319.787870] tbtun: tunnel 1 carrier 14 gen 15106 lost: sock=1 connected=1 hello_sent=1 up=1
+[13319.807630] tbtun: tunnel 1 carrier 13 gen 15105 lost: sock=1 connected=1 hello_sent=1 up=1
+[13320.061221] tbtun: tunnel 1 carrier 2 gen 15110 lost: sock=1 connected=1 hello_sent=1 up=1
+[13320.061373] tbtun: tunnel 1 carrier 6 gen 15114 lost: sock=1 connected=1 hello_sent=1 up=1
+[13320.061374] tbtun: tunnel 1 carrier 3 gen 15111 lost: sock=1 connected=1 hello_sent=1 up=1
+[13320.061399] tbtun: tunnel 1 carrier 0 gen 15108 lost: sock=1 connected=1 hello_sent=1 up=1
+[13320.061430] tbtun: tunnel 1 carrier 12 gen 15120 lost: sock=1 connected=1 hello_sent=1 up=1
+[13320.061584] tbtun: tunnel 1 carrier 5 gen 15113 lost: sock=1 connected=1 hello_sent=1 up=1
+[13320.061684] tbtun: tunnel 1 carrier 11 gen 15119 lost: sock=1 connected=1 hello_sent=1 up=1
+[13324.809358] tbt_carrier_lost: 246 callbacks suppressed
+[13324.809372] tbtun: tunnel 1 carrier 14 gen 15362 lost: sock=1 connected=1 hello_sent=1 up=1
+[13324.809577] tbtun: tunnel 1 carrier 15 gen 15363 lost: sock=1 connected=1 hello_sent=1 up=1
+[13324.834271] tbtun: tunnel 1 carrier 13 gen 15361 lost: sock=1 connected=1 hello_sent=1 up=1
+[13325.077167] tbtun: tunnel 1 carrier 5 gen 15369 lost: sock=1 connected=1 hello_sent=1 up=1
+[13325.077367] tbtun: tunnel 1 carrier 10 gen 15374 lost: sock=1 connected=1 hello_sent=1 up=1
+[13325.077420] tbtun: tunnel 1 carrier 9 gen 15373 lost: sock=1 connected=1 hello_sent=1 up=1
+[13325.077460] tbtun: tunnel 1 carrier 0 gen 15364 lost: sock=1 connected=1 hello_sent=1 up=1
+[13325.077462] tbtun: tunnel 1 carrier 12 gen 15376 lost: sock=1 connected=1 hello_sent=1 up=1
+[13325.077514] tbtun: tunnel 1 carrier 11 gen 15375 lost: sock=1 connected=1 hello_sent=1 up=1
+[13325.077789] tbtun: tunnel 1 carrier 1 gen 15365 lost: sock=1 connected=1 hello_sent=1 up=1
+[13326.417596] tbtun: unloaded
+[13356.411238] audit: type=1400 audit(1794019309.097:296): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=56391 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13356.411252] audit: type=1400 audit(1794019309.097:297): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=56391 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13356.411384] audit: type=1400 audit(1794019309.097:298): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=56391 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13356.411392] audit: type=1400 audit(1794019309.097:299): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=56391 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13356.411507] audit: type=1400 audit(1794019309.097:300): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=56391 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13356.411515] audit: type=1400 audit(1794019309.097:301): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=56391 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13356.411626] audit: type=1400 audit(1794019309.097:302): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=56391 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13356.411633] audit: type=1400 audit(1794019309.097:303): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=56391 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13587.314146] audit: type=1400 audit(1794019540.000:304): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=57898 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13587.314167] audit: type=1400 audit(1794019540.000:305): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=57898 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13587.314298] audit: type=1400 audit(1794019540.000:306): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=57898 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13587.314306] audit: type=1400 audit(1794019540.000:307): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=57898 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13587.314415] audit: type=1400 audit(1794019540.000:308): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=57898 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13587.314423] audit: type=1400 audit(1794019540.000:309): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=57898 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13587.314563] audit: type=1400 audit(1794019540.003:310): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=57898 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13587.314576] audit: type=1400 audit(1794019540.003:311): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=57898 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13587.314675] audit: type=1400 audit(1794019540.003:312): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=57898 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13587.314684] audit: type=1400 audit(1794019540.003:313): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=57898 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13675.267012] tbtun 0.2.0 loaded: 64 tunnels max, 256 carriers max
+[13680.329879] tbtun: tunnel 1 carrier 3 gen 4 lost: sock=1 connected=1 hello_sent=1 up=1
+[13680.330425] tbtun: tunnel 1 carrier 2 gen 3 lost: sock=1 connected=1 hello_sent=1 up=1
+[13680.330507] tbtun: tunnel 1 carrier 0 gen 1 lost: sock=1 connected=1 hello_sent=1 up=1
+[13680.331039] tbtun: tunnel 1 carrier 13 gen 14 lost: sock=1 connected=1 hello_sent=1 up=1
+[13680.331069] tbtun: tunnel 1 carrier 1 gen 2 lost: sock=1 connected=1 hello_sent=1 up=1
+[13680.331085] tbtun: tunnel 1 carrier 6 gen 7 lost: sock=1 connected=1 hello_sent=1 up=1
+[13680.331113] tbtun: tunnel 1 carrier 18 gen 19 lost: sock=1 connected=1 hello_sent=1 up=1
+[13680.331144] tbtun: tunnel 1 carrier 4 gen 5 lost: sock=1 connected=1 hello_sent=1 up=1
+[13680.331165] tbtun: tunnel 1 carrier 14 gen 15 lost: sock=1 connected=1 hello_sent=1 up=1
+[13680.331211] tbtun: tunnel 1 carrier 10 gen 11 lost: sock=1 connected=1 hello_sent=1 up=1
+[13685.333894] tbt_carrier_lost: 246 callbacks suppressed
+[13685.333901] tbtun: tunnel 1 carrier 2 gen 259 lost: sock=1 connected=1 hello_sent=1 up=1
+[13685.336991] tbtun: tunnel 1 carrier 8 gen 265 lost: sock=1 connected=1 hello_sent=1 up=1
+[13685.337044] tbtun: tunnel 1 carrier 0 gen 258 lost: sock=1 connected=1 hello_sent=1 up=1
+[13685.345030] tbtun: tunnel 1 carrier 7 gen 264 lost: sock=1 connected=1 hello_sent=1 up=1
+[13685.345059] tbtun: tunnel 1 carrier 1 gen 260 lost: sock=1 connected=1 hello_sent=1 up=1
+[13685.345074] tbtun: tunnel 1 carrier 10 gen 267 lost: sock=1 connected=1 hello_sent=1 up=1
+[13685.345100] tbtun: tunnel 1 carrier 12 gen 269 lost: sock=1 connected=1 hello_sent=1 up=1
+[13685.345122] tbtun: tunnel 1 carrier 11 gen 268 lost: sock=1 connected=1 hello_sent=1 up=1
+[13685.345135] tbtun: tunnel 1 carrier 3 gen 257 lost: sock=1 connected=1 hello_sent=1 up=1
+[13685.345150] tbtun: tunnel 1 carrier 6 gen 263 lost: sock=1 connected=1 hello_sent=1 up=1
+[13690.353319] tbt_carrier_lost: 246 callbacks suppressed
+[13690.353327] tbtun: tunnel 1 carrier 11 gen 524 lost: sock=1 connected=1 hello_sent=1 up=1
+[13690.353383] tbtun: tunnel 1 carrier 2 gen 515 lost: sock=1 connected=1 hello_sent=1 up=1
+[13690.353476] tbtun: tunnel 1 carrier 14 gen 527 lost: sock=1 connected=1 hello_sent=1 up=1
+[13690.353806] tbtun: tunnel 1 carrier 3 gen 516 lost: sock=1 connected=1 hello_sent=1 up=1
+[13690.353917] tbtun: tunnel 1 carrier 0 gen 513 lost: sock=1 connected=1 hello_sent=1 up=1
+[13690.354016] tbtun: tunnel 1 carrier 1 gen 514 lost: sock=1 connected=1 hello_sent=1 up=1
+[13690.354145] tbtun: tunnel 1 carrier 4 gen 517 lost: sock=1 connected=1 hello_sent=1 up=1
+[13690.354309] tbtun: tunnel 1 carrier 5 gen 518 lost: sock=1 connected=1 hello_sent=1 up=1
+[13690.354435] tbtun: tunnel 1 carrier 6 gen 519 lost: sock=1 connected=1 hello_sent=1 up=1
+[13690.354596] tbtun: tunnel 1 carrier 7 gen 520 lost: sock=1 connected=1 hello_sent=1 up=1
+[13695.396832] tbt_carrier_lost: 246 callbacks suppressed
+[13695.396840] tbtun: tunnel 1 carrier 4 gen 773 lost: sock=1 connected=1 hello_sent=1 up=1
+[13695.396935] tbtun: tunnel 1 carrier 5 gen 774 lost: sock=1 connected=1 hello_sent=1 up=1
+[13695.397024] tbtun: tunnel 1 carrier 15 gen 784 lost: sock=1 connected=1 hello_sent=1 up=1
+[13695.397078] tbtun: tunnel 1 carrier 7 gen 776 lost: sock=1 connected=1 hello_sent=1 up=1
+[13695.397129] tbtun: tunnel 1 carrier 10 gen 779 lost: sock=1 connected=1 hello_sent=1 up=1
+[13695.397180] tbtun: tunnel 1 carrier 14 gen 783 lost: sock=1 connected=1 hello_sent=1 up=1
+[13695.397231] tbtun: tunnel 1 carrier 6 gen 775 lost: sock=1 connected=1 hello_sent=1 up=1
+[13695.397281] tbtun: tunnel 1 carrier 3 gen 772 lost: sock=1 connected=1 hello_sent=1 up=1
+[13695.397330] tbtun: tunnel 1 carrier 9 gen 778 lost: sock=1 connected=1 hello_sent=1 up=1
+[13695.398572] tbtun: tunnel 1 carrier 11 gen 780 lost: sock=1 connected=1 hello_sent=1 up=1
+[13700.428362] tbt_carrier_lost: 246 callbacks suppressed
+[13700.428375] tbtun: tunnel 1 carrier 14 gen 1039 lost: sock=1 connected=1 hello_sent=1 up=1
+[13700.428524] tbtun: tunnel 1 carrier 9 gen 1034 lost: sock=1 connected=1 hello_sent=1 up=1
+[13700.428573] tbtun: tunnel 1 carrier 5 gen 1030 lost: sock=1 connected=1 hello_sent=1 up=1
+[13700.428576] tbtun: tunnel 1 carrier 13 gen 1038 lost: sock=1 connected=1 hello_sent=1 up=1
+[13700.428741] tbtun: tunnel 1 carrier 6 gen 1031 lost: sock=1 connected=1 hello_sent=1 up=1
+[13700.429029] tbtun: tunnel 1 carrier 7 gen 1032 lost: sock=1 connected=1 hello_sent=1 up=1
+[13700.429178] tbtun: tunnel 1 carrier 0 gen 1025 lost: sock=1 connected=1 hello_sent=1 up=1
+[13700.429193] tbtun: tunnel 1 carrier 3 gen 1028 lost: sock=1 connected=1 hello_sent=1 up=1
+[13700.429353] tbtun: tunnel 1 carrier 4 gen 1029 lost: sock=1 connected=1 hello_sent=1 up=1
+[13700.429389] tbtun: tunnel 1 carrier 1 gen 1026 lost: sock=1 connected=1 hello_sent=1 up=1
+[13705.437669] tbt_carrier_lost: 246 callbacks suppressed
+[13705.437677] tbtun: tunnel 1 carrier 3 gen 1284 lost: sock=1 connected=1 hello_sent=1 up=1
+[13705.437801] tbtun: tunnel 1 carrier 2 gen 1283 lost: sock=1 connected=1 hello_sent=1 up=1
+[13705.437843] tbtun: tunnel 1 carrier 0 gen 1281 lost: sock=1 connected=1 hello_sent=1 up=1
+[13705.438044] tbtun: tunnel 1 carrier 1 gen 1282 lost: sock=1 connected=1 hello_sent=1 up=1
+[13705.439850] tbtun: tunnel 1 carrier 11 gen 1292 lost: sock=1 connected=1 hello_sent=1 up=1
+[13705.439887] tbtun: tunnel 1 carrier 14 gen 1295 lost: sock=1 connected=1 hello_sent=1 up=1
+[13705.444512] tbtun: tunnel 1 carrier 10 gen 1291 lost: sock=1 connected=1 hello_sent=1 up=1
+[13705.444529] tbtun: tunnel 1 carrier 4 gen 1285 lost: sock=1 connected=1 hello_sent=1 up=1
+[13705.444675] tbtun: tunnel 1 carrier 6 gen 1287 lost: sock=1 connected=1 hello_sent=1 up=1
+[13705.444749] tbtun: tunnel 1 carrier 5 gen 1286 lost: sock=1 connected=1 hello_sent=1 up=1
+[13710.495657] tbt_carrier_lost: 246 callbacks suppressed
+[13710.495667] tbtun: tunnel 1 carrier 2 gen 1539 lost: sock=1 connected=1 hello_sent=1 up=1
+[13710.495750] tbtun: tunnel 1 carrier 5 gen 1542 lost: sock=1 connected=1 hello_sent=1 up=1
+[13710.495765] tbtun: tunnel 1 carrier 15 gen 1552 lost: sock=1 connected=1 hello_sent=1 up=1
+[13710.495813] tbtun: tunnel 1 carrier 6 gen 1543 lost: sock=1 connected=1 hello_sent=1 up=1
+[13710.495824] tbtun: tunnel 1 carrier 12 gen 1549 lost: sock=1 connected=1 hello_sent=1 up=1
+[13710.495861] tbtun: tunnel 1 carrier 8 gen 1545 lost: sock=1 connected=1 hello_sent=1 up=1
+[13710.495903] tbtun: tunnel 1 carrier 11 gen 1548 lost: sock=1 connected=1 hello_sent=1 up=1
+[13710.495944] tbtun: tunnel 1 carrier 10 gen 1547 lost: sock=1 connected=1 hello_sent=1 up=1
+[13710.499724] tbtun: tunnel 1 carrier 19 gen 1553 lost: sock=1 connected=1 hello_sent=1 up=1
+[13710.499787] tbtun: tunnel 1 carrier 0 gen 1537 lost: sock=1 connected=1 hello_sent=1 up=1
+[13715.499652] tbt_carrier_lost: 246 callbacks suppressed
+[13715.499660] tbtun: tunnel 1 carrier 6 gen 1795 lost: sock=1 connected=1 hello_sent=1 up=1
+[13715.499760] tbtun: tunnel 1 carrier 5 gen 1794 lost: sock=1 connected=1 hello_sent=1 up=1
+[13715.499796] tbtun: tunnel 1 carrier 11 gen 1798 lost: sock=1 connected=1 hello_sent=1 up=1
+[13715.499955] tbtun: tunnel 1 carrier 8 gen 1796 lost: sock=1 connected=1 hello_sent=1 up=1
+[13715.499986] tbtun: tunnel 1 carrier 15 gen 1800 lost: sock=1 connected=1 hello_sent=1 up=1
+[13715.506439] tbtun: tunnel 1 carrier 2 gen 1793 lost: sock=1 connected=1 hello_sent=1 up=1
+[13715.506562] tbtun: tunnel 1 carrier 10 gen 1797 lost: sock=1 connected=1 hello_sent=1 up=1
+[13715.506603] tbtun: tunnel 1 carrier 12 gen 1799 lost: sock=1 connected=1 hello_sent=1 up=1
+[13715.552415] tbtun: tunnel 1 carrier 7 gen 1805 lost: sock=1 connected=1 hello_sent=1 up=1
+[13715.552476] tbtun: tunnel 1 carrier 9 gen 1806 lost: sock=1 connected=1 hello_sent=1 up=1
+[13718.999948] tbtun: tunnel 1 carrier 209 failed to connect: -98
+[13719.053176] tbtun: tunnel 1 carrier 212 failed to connect: -98
+[13720.508463] tbt_carrier_lost: 246 callbacks suppressed
+[13720.508470] tbtun: tunnel 1 carrier 8 gen 2052 lost: sock=1 connected=1 hello_sent=1 up=1
+[13720.508545] tbtun: tunnel 1 carrier 15 gen 2056 lost: sock=1 connected=1 hello_sent=1 up=1
+[13720.508841] tbtun: tunnel 1 carrier 11 gen 2054 lost: sock=1 connected=1 hello_sent=1 up=1
+[13720.508897] tbtun: tunnel 1 carrier 10 gen 2053 lost: sock=1 connected=1 hello_sent=1 up=1
+[13720.508941] tbtun: tunnel 1 carrier 6 gen 2051 lost: sock=1 connected=1 hello_sent=1 up=1
+[13720.508984] tbtun: tunnel 1 carrier 5 gen 2050 lost: sock=1 connected=1 hello_sent=1 up=1
+[13720.509026] tbtun: tunnel 1 carrier 12 gen 2055 lost: sock=1 connected=1 hello_sent=1 up=1
+[13720.546341] tbtun: tunnel 1 carrier 2 gen 2049 lost: sock=1 connected=1 hello_sent=1 up=1
+[13720.570122] tbtun: tunnel 1 carrier 3 gen 2059 lost: sock=1 connected=1 hello_sent=1 up=1
+[13720.570176] tbtun: tunnel 1 carrier 9 gen 2062 lost: sock=1 connected=1 hello_sent=1 up=1
+[13725.550729] tbt_carrier_lost: 246 callbacks suppressed
+[13725.550746] tbtun: tunnel 1 carrier 6 gen 2307 lost: sock=1 connected=1 hello_sent=1 up=1
+[13725.553009] tbtun: tunnel 1 carrier 12 gen 2311 lost: sock=1 connected=1 hello_sent=1 up=1
+[13725.553041] tbtun: tunnel 1 carrier 11 gen 2310 lost: sock=1 connected=1 hello_sent=1 up=1
+[13725.553063] tbtun: tunnel 1 carrier 8 gen 2308 lost: sock=1 connected=1 hello_sent=1 up=1
+[13725.553086] tbtun: tunnel 1 carrier 5 gen 2306 lost: sock=1 connected=1 hello_sent=1 up=1
+[13725.553109] tbtun: tunnel 1 carrier 15 gen 2312 lost: sock=1 connected=1 hello_sent=1 up=1
+[13725.553132] tbtun: tunnel 1 carrier 10 gen 2309 lost: sock=1 connected=1 hello_sent=1 up=1
+[13725.586164] tbtun: tunnel 1 carrier 2 gen 2305 lost: sock=1 connected=1 hello_sent=1 up=1
+[13725.624912] tbtun: tunnel 1 carrier 3 gen 2315 lost: sock=1 connected=1 hello_sent=1 up=1
+[13725.624994] tbtun: tunnel 1 carrier 7 gen 2317 lost: sock=1 connected=1 hello_sent=1 up=1
+[13729.529459] tbtun: unloaded
+[14200.225709] audit: type=1400 audit(1794020152.920:314): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=59704 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14200.225734] audit: type=1400 audit(1794020152.920:315): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=59704 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14200.225837] audit: type=1400 audit(1794020152.920:316): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=59704 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14200.225849] audit: type=1400 audit(1794020152.920:317): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=59704 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14200.225952] audit: type=1400 audit(1794020152.920:318): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=59704 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14200.225963] audit: type=1400 audit(1794020152.920:319): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=59704 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14200.226017] audit: type=1400 audit(1794020152.920:320): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=59704 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14200.226026] audit: type=1400 audit(1794020152.920:321): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=59704 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14202.901373] audit: type=1400 audit(1794020155.597:322): apparmor="DENIED" operation="capable" profile="fusermount3" pid=59767 comm="fusermount3" capability=1  capname="dac_override"
+[14202.901400] audit: type=1400 audit(1794020155.597:323): apparmor="DENIED" operation="capable" profile="fusermount3" pid=59767 comm="fusermount3" capability=7  capname="setuid"
+[14309.548029] kauditd_printk_skb: 2 callbacks suppressed
+[14309.548035] audit: type=1400 audit(1794020262.245:326): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=62412 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14309.548080] audit: type=1400 audit(1794020262.245:327): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=62412 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14309.548508] audit: type=1400 audit(1794020262.245:328): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=62412 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14309.548537] audit: type=1400 audit(1794020262.245:329): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=62412 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14309.548935] audit: type=1400 audit(1794020262.245:330): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=62412 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14309.548964] audit: type=1400 audit(1794020262.245:331): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=62412 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14309.549368] audit: type=1400 audit(1794020262.248:332): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=62412 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14309.549395] audit: type=1400 audit(1794020262.248:333): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=62412 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14372.316135] audit: type=1400 audit(1794020325.012:334): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=63938 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14372.316148] audit: type=1400 audit(1794020325.012:335): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=63938 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14372.316285] audit: type=1400 audit(1794020325.012:336): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=63938 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14372.316293] audit: type=1400 audit(1794020325.012:337): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=63938 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14372.316404] audit: type=1400 audit(1794020325.012:338): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=63938 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14372.316412] audit: type=1400 audit(1794020325.012:339): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=63938 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14372.316523] audit: type=1400 audit(1794020325.012:340): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=63938 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14372.316531] audit: type=1400 audit(1794020325.012:341): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=63938 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14372.316638] audit: type=1400 audit(1794020325.012:342): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=63938 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14372.316645] audit: type=1400 audit(1794020325.012:343): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=63938 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14605.146358] tbtun 0.2.0 loaded: 1 tunnels max, 256 carriers max
+[14608.601371] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[14608.603080] tbtun: tunnel 1 carrier 16 failed to connect: -111
+[14608.606182] tbtun: tunnel 1 carrier 9 failed to connect: -111
+[14608.606417] tbtun: tunnel 1 carrier 11 failed to connect: -111
+[14608.606718] tbtun: tunnel 1 carrier 14 failed to connect: -111
+[14611.776463] tbtun: tunnel 1 carrier 15 failed to connect: -111
+[14612.375986] tbtun: tunnel 1 carrier 18 failed to connect: -110
+[14612.376044] tbtun: tunnel 1 carrier 17 failed to connect: -110
+[14612.376085] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14612.376275] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14613.701558] tbt_car_connect_work: 22 callbacks suppressed
+[14613.701570] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[14615.034774] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[14615.842535] tbtun: tunnel 1 carrier 15 failed to connect: -110
+[14616.429245] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14616.429413] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14616.429493] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14616.429571] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14616.429648] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14616.429724] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14616.429800] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14619.002376] tbt_car_connect_work: 13 callbacks suppressed
+[14619.002390] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[14619.095866] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14619.882418] tbtun: tunnel 1 carrier 17 failed to connect: -111
+[14619.895802] tbtun: tunnel 1 carrier 15 failed to connect: -110
+[14620.482522] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14620.482674] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14620.482715] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14620.482794] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14620.482872] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14620.482948] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14624.535788] tbt_car_connect_work: 14 callbacks suppressed
+[14624.535800] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14624.535963] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14624.536042] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14624.536119] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14624.536195] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14624.589019] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14624.695756] tbtun: tunnel 1 carrier 17 failed to connect: -110
+[14624.802410] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14624.802527] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14624.847945] tbtun: tunnel 1 carrier 6 failed to connect: -111
+[14629.895715] tbt_car_connect_work: 19 callbacks suppressed
+[14629.895728] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14629.895884] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14629.912203] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[14631.175700] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14631.220655] tbtun: tunnel 1 carrier 8 failed to connect: -111
+[14631.255661] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14632.040827] tbtun: tunnel 1 carrier 9 failed to connect: -111
+[14632.055658] tbtun: tunnel 1 carrier 15 failed to connect: -110
+[14632.642382] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14632.642544] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14635.228981] tbt_car_connect_work: 10 callbacks suppressed
+[14635.228995] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14635.278343] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[14635.282271] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14635.308934] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14635.605372] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[14636.082189] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14636.108937] tbtun: tunnel 1 carrier 15 failed to connect: -110
+[14636.608393] tbtun: tunnel 1 carrier 8 failed to connect: -111
+[14636.695604] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14636.748927] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14640.668968] tbt_car_connect_work: 13 callbacks suppressed
+[14640.668980] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14640.748892] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14640.802209] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14640.908924] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14641.015551] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14641.015644] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14641.068888] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14641.122218] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14641.282116] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14641.994606] tbtun: tunnel 1 carrier 8 failed to connect: -111
+[14645.934009] tbt_car_connect_work: 16 callbacks suppressed
+[14645.934015] tbtun: tunnel 1 carrier 7 failed to connect: -111
+[14646.055503] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14646.135539] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14646.135681] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14646.748859] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14647.061352] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[14647.762171] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14648.055471] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14648.078545] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[14648.242040] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14651.125471] tbt_car_connect_work: 13 callbacks suppressed
+[14651.125485] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14651.319895] tbtun: tunnel 1 carrier 7 failed to connect: -111
+[14651.646287] tbtun: tunnel 1 carrier 7 failed to connect: -111
+[14652.108769] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14652.135502] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14652.295327] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14652.734897] tbtun: tunnel 1 carrier 14 failed to connect: -111
+[14652.962092] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14653.175412] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14653.175512] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14656.162044] tbt_car_connect_work: 11 callbacks suppressed
+[14656.162058] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14656.188729] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14656.775448] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14656.793991] tbtun: tunnel 1 carrier 15 failed to connect: -111
+[14657.015371] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14657.228692] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14657.228791] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14657.282028] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14657.620595] tbtun: tunnel 1 carrier 8 failed to connect: -111
+[14657.655353] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14661.281971] tbt_car_connect_work: 12 callbacks suppressed
+[14661.281984] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14661.335316] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14661.645143] tbtun: tunnel 1 carrier 6 failed to connect: -111
+[14661.682041] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14661.708681] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14662.348658] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14662.667697] tbtun: tunnel 1 carrier 10 failed to connect: -111
+[14662.695338] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14663.281995] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14663.625186] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[14666.722034] tbt_car_connect_work: 13 callbacks suppressed
+[14666.722047] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14666.748584] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14666.797698] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[14667.681985] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14667.735294] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14667.868480] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14667.895140] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14668.668590] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14668.695313] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14668.936986] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14671.735224] tbt_car_connect_work: 10 callbacks suppressed
+[14671.735238] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14671.788608] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14671.921763] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14671.948422] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14672.051024] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[14672.748551] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14673.038295] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[14673.041838] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14673.228505] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14673.841899] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14677.095160] tbt_car_connect_work: 14 callbacks suppressed
+[14677.095175] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14677.095308] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14677.921813] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14677.965764] tbtun: tunnel 1 carrier 11 failed to connect: -111
+[14678.028505] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14678.881888] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14678.908443] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14678.961773] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14678.961803] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14679.148450] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14682.291204] tbt_car_connect_work: 11 callbacks suppressed
+[14682.291217] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[14682.600983] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[14682.935088] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14682.961783] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14683.015055] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14683.015088] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14683.201716] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14683.255091] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14683.923315] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[14684.081629] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14687.308380] tbt_car_connect_work: 13 callbacks suppressed
+[14687.308393] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14687.622081] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[14688.134914] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14688.161572] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14688.188374] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14688.781589] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[14689.255022] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14689.255182] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14689.618729] tbtun: tunnel 1 carrier 14 failed to connect: -111
+[14690.134999] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14692.627780] tbt_car_connect_work: 12 callbacks suppressed
+[14692.627794] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[14692.828282] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14693.308330] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14693.620573] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[14694.188386] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14694.245040] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14694.775056] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14694.828388] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14694.925731] audit: type=1400 audit(1794020647.626:344): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=67479 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14694.925782] audit: type=1400 audit(1794020647.626:345): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=67479 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14694.926219] audit: type=1400 audit(1794020647.626:346): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=67479 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14694.926249] audit: type=1400 audit(1794020647.626:347): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=67479 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14694.926641] audit: type=1400 audit(1794020647.626:348): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=67479 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14694.926669] audit: type=1400 audit(1794020647.626:349): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=67479 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14694.927055] audit: type=1400 audit(1794020647.626:350): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=67479 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14694.927084] audit: type=1400 audit(1794020647.626:351): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=67479 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14694.927462] audit: type=1400 audit(1794020647.626:352): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=67479 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14694.927490] audit: type=1400 audit(1794020647.626:353): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=67479 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14694.953994] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[14695.095081] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14697.754676] tbt_car_connect_work: 10 callbacks suppressed
+[14697.754690] tbtun: tunnel 1 carrier 12 failed to connect: -111
+[14698.241575] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14698.605767] tbtun: tunnel 1 carrier 14 failed to connect: -111
+[14698.828235] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14698.881543] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14699.014872] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14699.148232] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14699.174870] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14699.228198] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14699.647294] tbtun: tunnel 1 carrier 9 failed to connect: -111
+[14702.881509] tbt_car_connect_work: 9 callbacks suppressed
+[14702.881522] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14702.934832] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14703.068163] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14703.201520] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14703.228160] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14703.281485] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14703.708071] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14703.708072] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14704.161495] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14704.606823] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[14708.214796] tbt_car_connect_work: 13 callbacks suppressed
+[14708.214809] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14708.609254] tbtun: tunnel 1 carrier 13 failed to connect: -111
+[14708.671478] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14708.828102] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14709.041436] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14709.681477] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14709.921427] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14709.940697] tbtun: tunnel 1 carrier 13 failed to connect: -111
+[14710.084809] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14710.769692] tbtun: tunnel 1 carrier 10 failed to connect: -111
+[14713.734739] tbt_car_connect_work: 10 callbacks suppressed
+[14713.734752] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14713.974743] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14714.001350] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14714.045386] tbtun: tunnel 1 carrier 11 failed to connect: -111
+[14714.134698] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14714.603526] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[14714.828027] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14715.041367] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14715.098003] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14715.867929] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14718.881336] tbt_car_connect_work: 12 callbacks suppressed
+[14718.881349] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14719.094591] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14719.148016] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14719.198560] tbtun: tunnel 1 carrier 10 failed to connect: -111
+[14719.921221] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14719.921221] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14719.974633] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14720.213777] tbtun: tunnel 1 carrier 7 failed to connect: -111
+[14720.988010] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14721.067948] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14724.027937] tbt_car_connect_work: 11 callbacks suppressed
+[14724.027951] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14724.267825] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14724.322946] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[14724.635039] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[14725.041262] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14725.121299] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14725.254560] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14725.307801] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14725.618040] tbtun: tunnel 1 carrier 9 failed to connect: -111
+[14726.134508] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14729.094540] tbt_car_connect_work: 12 callbacks suppressed
+[14729.094553] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14729.174544] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14729.307848] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14729.610322] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[14729.681088] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14730.187844] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14730.214495] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14730.267842] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14730.267935] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14730.374444] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14734.241118] tbt_car_connect_work: 13 callbacks suppressed
+[14734.241131] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14734.267780] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14734.321063] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14734.427826] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14734.631428] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[14734.667813] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14734.721114] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14735.414470] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14735.707780] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14735.745250] tbtun: tunnel 1 carrier 10 failed to connect: -111
+[14739.646162] tbt_car_connect_work: 15 callbacks suppressed
+[14739.646176] tbtun: tunnel 1 carrier 13 failed to connect: -111
+[14739.761071] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14739.787763] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14740.774305] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14740.854387] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14740.980345] tbtun: tunnel 1 carrier 13 failed to connect: -111
+[14741.254409] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14741.654423] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14741.761041] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14741.840946] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14744.673066] tbt_car_connect_work: 10 callbacks suppressed
+[14744.673080] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[14744.827584] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14744.907667] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14745.041003] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14745.814405] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14745.894234] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14745.947651] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14745.974319] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14745.975732] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[14746.827759] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14749.947531] tbt_car_connect_work: 12 callbacks suppressed
+[14749.947537] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14750.000999] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14750.027591] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14750.027642] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14750.204199] tbtun: tunnel 1 carrier 7 failed to connect: -111
+[14750.934322] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14750.960919] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14751.067601] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14751.174311] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14751.748449] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[14754.987606] tbt_car_connect_work: 13 callbacks suppressed
+[14754.987619] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14755.014217] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14755.120926] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14756.000898] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14756.047658] tbtun: tunnel 1 carrier 6 failed to connect: -111
+[14756.240869] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14756.623530] tbtun: tunnel 1 carrier 13 failed to connect: -111
+[14757.067623] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14757.174262] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14757.280853] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14760.054219] tbt_car_connect_work: 11 callbacks suppressed
+[14760.054232] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14760.107499] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14760.667521] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14761.120916] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14761.227568] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14761.334134] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14761.650508] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[14762.107397] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14762.160798] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14762.187465] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14765.174130] tbt_car_connect_work: 13 callbacks suppressed
+[14765.174144] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14765.611746] tbtun: tunnel 1 carrier 9 failed to connect: -111
+[14765.707481] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14766.214113] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14766.240756] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14766.240780] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14766.320649] tbtun: tunnel 1 carrier 15 failed to connect: -110
+[14766.622758] tbtun: tunnel 1 carrier 12 failed to connect: -111
+[14767.067322] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14767.147451] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14770.267369] tbt_car_connect_work: 11 callbacks suppressed
+[14770.267384] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14770.294043] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14770.667395] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14770.946913] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[14771.120607] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14771.200691] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14771.654088] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14772.214034] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14772.267251] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14772.267341] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14776.267330] tbt_car_connect_work: 13 callbacks suppressed
+[14776.267343] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14776.320643] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14776.634126] tbtun: tunnel 1 carrier 6 failed to connect: -111
+[14776.880655] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14776.907309] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14777.040622] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14777.333971] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14777.635556] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[14777.653860] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14777.763858] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14781.680653] tbt_car_connect_work: 15 callbacks suppressed
+[14781.680667] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14781.707149] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14781.813802] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14781.920562] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14782.454053] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14782.657034] tbtun: tunnel 1 carrier 7 failed to connect: -111
+[14782.827224] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14783.040571] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14783.093940] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14783.680584] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14786.720420] tbt_car_connect_work: 13 callbacks suppressed
+[14786.720427] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14786.880531] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14787.093855] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14787.147227] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14787.733793] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14788.651495] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[14788.800428] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14789.040492] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14789.067085] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14789.227075] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14791.790411] tbt_car_connect_work: 10 callbacks suppressed
+[14791.790426] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14791.988173] tbtun: tunnel 1 carrier 10 failed to connect: -111
+[14792.652610] tbtun: tunnel 1 carrier 14 failed to connect: -111
+[14792.853799] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14793.093802] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14793.120440] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14793.867021] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14793.973674] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14794.027100] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14794.080413] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14796.907118] tbt_car_connect_work: 8 callbacks suppressed
+[14796.907132] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14797.147081] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14797.173692] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14797.611627] tbtun: tunnel 1 carrier 14 failed to connect: -111
+[14797.920310] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14798.026946] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14798.080378] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14798.133702] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14798.213617] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14798.213705] tbtun: tunnel 1 carrier 15 failed to connect: -110
+[14801.973589] tbt_car_connect_work: 11 callbacks suppressed
+[14801.973595] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14802.080250] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14802.133671] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14802.186986] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14802.240374] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14802.266899] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14802.266986] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14802.713082] tbtun: tunnel 1 carrier 11 failed to connect: -111
+[14803.093694] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14804.160231] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14807.146972] tbt_car_connect_work: 15 callbacks suppressed
+[14807.146991] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14807.625226] tbtun: tunnel 1 carrier 7 failed to connect: -111
+[14808.152164] kauditd_printk_skb: 2 callbacks suppressed
+[14808.152170] audit: type=1400 audit(1794020760.854:356): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=68448 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14808.152218] audit: type=1400 audit(1794020760.854:357): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=68448 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14808.152651] audit: type=1400 audit(1794020760.854:358): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=68448 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14808.152680] audit: type=1400 audit(1794020760.854:359): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=68448 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14808.153075] audit: type=1400 audit(1794020760.854:360): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=68448 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14808.153104] audit: type=1400 audit(1794020760.854:361): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=68448 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14808.153514] audit: type=1400 audit(1794020760.857:362): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=68448 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14808.153540] audit: type=1400 audit(1794020760.857:363): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=68448 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14808.153918] audit: type=1400 audit(1794020760.857:364): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=68448 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14808.153946] audit: type=1400 audit(1794020760.857:365): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=68448 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14808.216886] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14808.320401] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14808.666981] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14809.013638] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14809.066933] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14809.638408] tbtun: tunnel 1 carrier 8 failed to connect: -111
+[14809.680291] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14810.080161] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14812.266809] tbt_car_connect_work: 10 callbacks suppressed
+[14812.266815] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14812.720229] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14812.956426] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[14813.066925] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14813.120208] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14813.611413] tbtun: tunnel 1 carrier 9 failed to connect: -111
+[14813.680278] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14813.733480] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14814.133465] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14814.293467] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14817.646021] tbt_car_connect_work: 13 callbacks suppressed
+[14817.646028] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[14817.733496] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14817.786865] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14818.720165] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14818.800152] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14818.933484] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14818.979337] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[14818.986700] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14819.680126] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14819.786705] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14822.773457] tbt_car_connect_work: 10 callbacks suppressed
+[14822.773469] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14822.853408] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14822.986757] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14823.040000] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14823.040049] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14823.084008] tbtun: tunnel 1 carrier 12 failed to connect: -111
+[14823.840000] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14824.053416] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14824.064304] tbtun: tunnel 1 carrier 10 failed to connect: -111
+[14824.668220] tbtun: tunnel 1 carrier 6 failed to connect: -111
+[14827.896616] tbt_car_connect_work: 12 callbacks suppressed
+[14827.896623] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14828.106646] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14828.106687] tbtun: tunnel 1 carrier 0 failed to connect: -110
+[14828.206810] tbtun: tunnel 1 carrier 7 failed to connect: -111
+[14828.933367] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14829.173418] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14829.373039] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[14829.678775] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[14829.893356] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14829.946688] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14832.986712] tbt_car_connect_work: 10 callbacks suppressed
+[14832.986727] tbtun: tunnel 1 carrier 13 failed to connect: -110
+[14833.226709] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14833.733325] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14833.946646] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14834.000034] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14834.038722] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[14834.079970] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14834.693330] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14834.719967] tbtun: tunnel 1 carrier 14 failed to connect: -110
+[14835.013366] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14837.999944] tbt_car_connect_work: 9 callbacks suppressed
+[14837.999957] tbtun: tunnel 1 carrier 8 failed to connect: -110
+[14838.053308] tbtun: tunnel 1 carrier 1 failed to connect: -110
+[14838.079901] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[14838.124153] tbtun: tunnel 1 carrier 14 failed to connect: -111
+[14838.133237] tbtun: tunnel 1 carrier 6 failed to connect: -110
+[14838.605436] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[14839.066613] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14839.199914] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14839.253153] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14839.253207] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14843.119877] tbt_car_connect_work: 15 callbacks suppressed
+[14843.119889] tbtun: tunnel 1 carrier 3 failed to connect: -110
+[14843.253190] tbtun: tunnel 1 carrier 11 failed to connect: -110
+[14843.306433] tbtun: tunnel 1 carrier 4 failed to connect: -110
+[14843.306482] tbtun: tunnel 1 carrier 9 failed to connect: -110
+[14843.618929] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[14843.946560] tbtun: tunnel 1 carrier 5 failed to connect: -110
+[14844.133220] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14844.319770] tbtun: tunnel 1 carrier 10 failed to connect: -110
+[14844.650396] tbtun: tunnel 1 carrier 9 failed to connect: -111
+[14845.119750] tbtun: tunnel 1 carrier 7 failed to connect: -110
+[14848.186476] tbt_car_connect_work: 15 callbacks suppressed
+[14848.186490] tbtun: tunnel 1 carrier 12 failed to connect: -110
+[14850.239777] tbtun: tunnel 1 carrier 2 failed to connect: -110
+[15093.863778] audit: type=1400 audit(1794021046.571:366): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=70303 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15093.863832] audit: type=1400 audit(1794021046.571:367): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=70303 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15093.864264] audit: type=1400 audit(1794021046.571:368): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=70303 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15093.864293] audit: type=1400 audit(1794021046.571:369): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=70303 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15093.864689] audit: type=1400 audit(1794021046.571:370): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=70303 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15093.864720] audit: type=1400 audit(1794021046.571:371): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=70303 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15093.865100] audit: type=1400 audit(1794021046.571:372): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=70303 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15093.865127] audit: type=1400 audit(1794021046.571:373): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=70303 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15173.889208] tbtun: unloaded
+[15306.923011] audit: type=1400 audit(1794021259.630:374): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=71457 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15306.923025] audit: type=1400 audit(1794021259.630:375): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=71457 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15306.923155] audit: type=1400 audit(1794021259.630:376): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=71457 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15306.923163] audit: type=1400 audit(1794021259.630:377): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=71457 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15306.923275] audit: type=1400 audit(1794021259.630:378): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=71457 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15306.923282] audit: type=1400 audit(1794021259.630:379): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=71457 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15815.320768] tbtun 0.2.0 loaded: 1 tunnels max, 256 carriers max
+[15826.618646] tbtun: tunnel 1 carrier 13 gen 14 lost: sock=1 connected=1 hello_sent=1 up=1
+[15827.130298] tbtun: tunnel 1 carrier 41 gen 42 lost: sock=1 connected=1 hello_sent=1 up=1
+[16007.726316] tbtun: tunnel 1 carrier 101 gen 102 lost: sock=1 connected=1 hello_sent=1 up=1
+[16161.884449] tbtun: tunnel 1 carrier 45 gen 46 lost: sock=1 connected=1 hello_sent=1 up=1
+[16175.761154] tbtun: tunnel 1 carrier 191 gen 192 lost: sock=1 connected=1 hello_sent=1 up=1
+[16378.748642] tbtun: tunnel 1 carrier 88 gen 89 lost: sock=1 connected=1 hello_sent=1 up=1
+[16410.948175] tbtun: tunnel 1 carrier 189 gen 190 lost: sock=1 connected=1 hello_sent=1 up=1

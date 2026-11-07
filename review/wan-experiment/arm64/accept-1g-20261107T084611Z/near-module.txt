@@ -1,0 +1,5 @@
+ko=/root/tbtun-0.2.0-fix20-20261107T084234Z/tbtun.ko
+0.2.0
+9D5B8A616A565FE62DEA315
+6.1.172 SMP mod_unload modversions aarch64
+loaded_srcversion=9D5B8A616A565FE62DEA315

@@ -1,0 +1,197 @@
+
+=== date ===
+2026-11-07T10:19:06Z
+
+=== boot_id ===
+746ecb8d-28fa-4769-85ee-f3dcde062d4c
+
+=== uname ===
+Linux hnd0.kw92.cyou 7.0.0-42-generic #42-Ubuntu SMP PREEMPT_DYNAMIC Thu Oct 15 08:06:44 UTC 2026 x86_64 GNU/Linux
+
+=== module ===
+tbtun                 356352  0
+
+=== modinfo ===
+
+=== max_carriers ===
+256
+
+=== config ===
+tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5210 n=4 m=4 fec=on mode=grouped w=8 carriers=256 crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0 portblock=31000-31511 nonce=00112233445566778899aabbccddeeff
+
+=== ports ===
+# block 31000-31511 (512 ports)
+# configured
+ports 31000-31511
+
+=== tunnels ===
+# id role state listen peer target n m streams
+1 far listening 0.0.0.0:9000 0.0.0.0:0 127.0.0.1:5210 4 4 259
+
+=== stats ===
+debug_loss=0
+gaps_total=0
+streams_total=259
+tunnel 1 capture_runs=842 actor_calls=1278 submit_bytes=22028394 tx=0 wire=108660714 err=0 short=0
+tunnel 1 rx_work_runs=2102 rx_drain_entries=2058 rx_drain_bytes=247301 rx_paused_skips=0 rx_adopt_events=259 rx_records=0 carrier_write_space_runs=259 poll_rescues=449
+tunnel 1 rx_ready_calls=1946 rx_reads=2102 rx_read_bytes=247301 rx_read_zero=44 rx_resume=0 rx_resume_busy=0 rx_last_drained=38 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=1278 rx_delivered=91
+tunnel 1 dbg rcv_nxt=2549436078 copied=2547372393 after=2548420969 qlen=7 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=94713 pmoved=1099 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=1 pub_state=1 pub_wmem=0 pub_una=2670059976 pub_nxt=2670059976 car_wmem=449064 car_nxt=1980624030 car_copied=1980624030 car_rcvbuf=524288 car_sndbuf=524288 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=263948 txwake_busy=169988 txwork=94220
+tunnel 1 ws_calls=259
+tunnel 1 c3 n=256 up=256 lost=3 replaced=0 stream_reset_tcp_failed=0 stream_reset_user=0 carrier_add=0 carrier_add_fail=0 backpressure_enter=1 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=15728746 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=500000 una_stall_us=4044286 stall_paused_skips=0 stall_idle_skips=69865 stall_declared=12 stall_recovered=8 stall_drop=0 stall_dead=0 stall_replaced=0 stall_survival_bucket=0 stall_wait_loss_bytes=0 replace_cost_bytes=0 replace_cost_ewma=0 stall_replace_econ=0 stall_replace_retrans=0 stall_replace_dead=0 tx_window=8388608 bdp_bytes=4244505 k_x100=500 rtt_mean_us=313589 rttvar_us=624587 rtt_max_us=395061 txq_max=8454432 win_block=0 win_resume=0 tx_wait_carrier=0 tx_backpressure=0 tx_wait_carrier_bytes=0 tx_wait_carrier_ns=0 tx_backpressure_bytes=0 tx_backpressure_ns=0 pump_hw_armed=0 pump_hw_fired=276 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0 prov_now=0 prov_peak=5 prov_reject=0 dead_release=0 carrier_retired=3
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0 pinned_bad_path=0 close_timeouts=0 fin_starved=0 fin_written=0 close_hold_fec=0 close_detaches=0
+tunnel 1 streams streams_active=1 n_streams=1 n_pending=0
+tunnel 1 stream sid=502410510336 state=1 kill=0 attached=0x9 rxq=0 rxp=0 txp=1 peer_paused=0 skerr=0 tgt_state=1 tgt_err=0 fin_seq=0 fin_q=0 fin_w=0 rst_w=0 rxf=0/0 dage_ms=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c9 fec_proto_fail=0 fec_hdr_crc_fail=0 fec_payload_crc_fail=0 fec_short_tx=1 fec_short_unknown=0 fec_stream_refused=0 fec_drop_window=0 fec_drop_crypto=0 fec_ack_tx=1 fec_ack_rx=13 fec_credit_wait=809
+tunnel 1 c10 fec_decode_blocks=0 fec_decode_recovered=0 fec_decode_nomem=0 fec_deliver_nomem=0 fec_deliver_dup=0 fec_deliver_ooo=0 fec_deliver_bad=0 fec_dup_share=59 fec_late_share=125 fec_late_data=0 fec_pad_share=31 fec_dup_marker=0 fec_marker_conflict=0 fec_epoch_conflict=0 fec_slot_past_cut=0 fec_fin_bad=0 fec_ack_bad=0 fec_tx_share_gap=0 fec_empty_block=31
+tunnel 1 c11 fec_nack_tx=38 fec_nack_rx=385 fec_nack_retx=8076 fec_nack_drop=0 fec_nack_enomem=0 fec_nack_einval=0 fec_nack_enospc=0 fec_nack_eother=0 fec_nack_bad=0 fec_replay_hit=8076 fec_replay_miss=63 fec_replay_miss_no_ring=0 fec_replay_miss_alloc=0 fec_replay_miss_enospc=0 fec_replay_miss_get=63 fec_replay_miss_evicted=0 fec_replay_miss_never_stored=63 fec_nack_sparse_probe=1056 fec_nack_empty_reply=63 fec_nack_parity_reply=0 fec_replay_drop=0 fec_nack_retx_bytes=66481632 fec_replace_retx_bytes=0 fec_nack_lat_ns=189359157403 fec_nack_lat_max_ns=190844461 fec_nack_repair_ns=380827383 fec_nack_repair_max_ns=380827383 fec_reset_tcp_failed=0 fec_reset_user=0 fec_wait_carrier=0 fec_backpressure=0 fec_flush_skip=19061 fec_flush_pass=13307 fec_hol_wait=32082 fec_outq_drop=0 fec_outq_depth=2 fec_outq_max=1 fec_outq_bytes=16464 fec_outq_ctl=1 fec_out_ctl_bytes=104 fec_replay_queued=0 fec_replay_bytes=0 fec_replay_skip=0 fec_nack_filtered_ready=0 fec_nack_filtered_inflight=545 fec_nack_filtered_dup=3 fec_nack_filtered_young=0 fec_replay_dedup=1601 fec_nack_req_shares=2403 fec_nack_backpressure=0 fec_replay_stale=0 fec_fin_wait_replay=0 fec_replay_drain_bps=5708892 fec_replay_queue_high=3235176 fec_reset_hole=0 tx_stall_suppressed_fec=0 fec_repair_last_ns=96824442188642
+tunnel 1 c12 fec_outq 6:1/8232 13:1/8232
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=256 pad_tx=587 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0
+tunnel 1 reconcile live_bytes=108660824 live_data=0 live_retx=0 retired_bytes=0 retired_data=0 retired_retx=0
+
+=== ss ===
+State  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess                                                
+LISTEN 0      4096       127.0.0.1:44302      0.0.0.0:*    users:(("xray",pid=685,fd=10))                        
+LISTEN 0      4096       127.0.0.1:44301      0.0.0.0:*    users:(("xray",pid=685,fd=9))                         
+LISTEN 0      4096      127.0.0.54:53         0.0.0.0:*    users:(("systemd-resolve",pid=336,fd=19))             
+LISTEN 0      4096         0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=693,fd=3),("systemd",pid=1,fd=170))
+LISTEN 0      4096       127.0.0.1:10809      0.0.0.0:*    users:(("xray",pid=685,fd=8))                         
+LISTEN 0      4096   127.0.0.53%lo:53         0.0.0.0:*    users:(("systemd-resolve",pid=336,fd=17))             
+LISTEN 0      8          127.0.0.1:5210       0.0.0.0:*    users:(("python3",pid=143680,fd=3))                   
+LISTEN 0      128          0.0.0.0:9000       0.0.0.0:*                                                          
+LISTEN 0      4096               *:13022            *:*    users:(("frps",pid=667,fd=19))                        
+LISTEN 0      4096               *:14022            *:*    users:(("frps",pid=667,fd=12))                        
+LISTEN 0      4096               *:8443             *:*    users:(("xray",pid=685,fd=4))                         
+LISTEN 0      4096               *:12022            *:*    users:(("frps",pid=667,fd=21))                        
+LISTEN 0      4096               *:19090            *:*    users:(("frps",pid=667,fd=28))                        
+LISTEN 0      4096               *:17578            *:*    users:(("frps",pid=667,fd=36))                        
+LISTEN 0      4096               *:15022            *:*    users:(("frps",pid=667,fd=24))                        
+LISTEN 0      4096               *:18080            *:*    users:(("frps",pid=667,fd=32))                        
+LISTEN 0      4096               *:80               *:*    users:(("caddy",pid=120561,fd=8))                     
+LISTEN 0      4096            [::]:22            [::]:*    users:(("sshd",pid=693,fd=4),("systemd",pid=1,fd=176))
+LISTEN 0      4096               *:18443            *:*    users:(("frps",pid=667,fd=30))                        
+LISTEN 0      4096               *:11676            *:*    users:(("frps",pid=667,fd=10))                        
+LISTEN 0      4096               *:12676            *:*    users:(("frps",pid=667,fd=20))                        
+LISTEN 0      4096               *:443              *:*    users:(("caddy",pid=120561,fd=4))                     
+LISTEN 0      4096               *:10676            *:*    users:(("frps",pid=667,fd=31))                        
+LISTEN 0      4096               *:7000             *:*    users:(("frps",pid=667,fd=4))                         
+LISTEN 0      4096               *:14676            *:*    users:(("frps",pid=667,fd=8))                         
+LISTEN 0      4096               *:13676            *:*    users:(("frps",pid=667,fd=14))                        
+LISTEN 0      4096               *:13080            *:*    users:(("frps",pid=667,fd=23))                        
+LISTEN 0      4096               *:15120            *:*    users:(("frps",pid=667,fd=27))                        
+LISTEN 0      4096               *:15123            *:*    users:(("frps",pid=667,fd=29))                        
+LISTEN 0      4096               *:11022            *:*    users:(("frps",pid=667,fd=13))                        
+LISTEN 0      4096               *:15676            *:*    users:(("frps",pid=667,fd=22))                        
+LISTEN 0      4096               *:12080            *:*    users:(("frps",pid=667,fd=16))                        
+LISTEN 0      4096               *:12599            *:*    users:(("frps",pid=667,fd=18))                        
+LISTEN 0      4096               *:10022            *:*    users:(("frps",pid=667,fd=33))                        
+
+=== meminfo ===
+MemTotal:         978880 kB
+MemFree:          110548 kB
+MemAvailable:     534888 kB
+
+=== slab ===
+
+=== dmesg ===
+[96600.898620] tbtun 0.2.0 loaded: 1 tunnels max, 256 carriers max
+[96604.134875] tbtun: tunnel 1 no carrier can carry: user side backpressured
+[96780.226546] tbtun: tunnel 1 no carrier can carry: user side backpressured
+[96780.822958] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30016, awaiting HELLO
+[96780.823216] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33693, awaiting HELLO
+[96780.823438] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33691, awaiting HELLO
+[96780.830410] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30014, awaiting HELLO
+[96780.830913] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30018, awaiting HELLO
+[96780.833467] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30004, awaiting HELLO
+[96780.833515] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30008, awaiting HELLO
+[96780.833596] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30012, awaiting HELLO
+[96780.833828] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30006, awaiting HELLO
+[96780.836023] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33683, awaiting HELLO
+[96786.009495] tbt_carrier_adopt: 104 callbacks suppressed
+[96786.009504] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33775, awaiting HELLO
+[96786.071245] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30120, awaiting HELLO
+[96786.112292] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30121, awaiting HELLO
+[96786.113519] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30122, awaiting HELLO
+[96786.130432] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30123, awaiting HELLO
+[96786.164259] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30124, awaiting HELLO
+[96786.202343] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33777, awaiting HELLO
+[96786.456530] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33779, awaiting HELLO
+[96786.481255] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30108, awaiting HELLO
+[96786.489893] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30128, awaiting HELLO
+[96788.848169] tbtun: tunnel 1 no carrier can carry: user side backpressured
+[96791.235317] tbtun: tunnel 1 carrier 255 gen 2 lost: sock=1 connected=1 hello_sent=0 up=0
+[96791.235355] tbtun: tunnel 1 carrier 255 gen 1 lost: sock=1 connected=1 hello_sent=0 up=0
+[96791.235814] tbt_carrier_adopt: 35 callbacks suppressed
+[96791.235850] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30152, awaiting HELLO
+[96791.239412] tbtun: tunnel 1 carrier 255 gen 3 lost: sock=1 connected=1 hello_sent=0 up=0
+[96791.579458] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30000, awaiting HELLO
+[96791.579908] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30002, awaiting HELLO
+[96791.593736] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30004, awaiting HELLO
+[96791.594560] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33805, awaiting HELLO
+[96791.629349] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33803, awaiting HELLO
+[96791.678307] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33685, awaiting HELLO
+[96791.689732] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33807, awaiting HELLO
+[96791.917154] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30001, awaiting HELLO
+[96791.940315] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30012, awaiting HELLO
+[96796.287443] tbt_carrier_adopt: 56 callbacks suppressed
+[96796.287455] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33843, awaiting HELLO
+[96796.318751] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30074, awaiting HELLO
+[96796.410927] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30060, awaiting HELLO
+[96796.467581] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30076, awaiting HELLO
+[96796.591934] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30062, awaiting HELLO
+[96796.703074] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30066, awaiting HELLO
+[96796.706645] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33855, awaiting HELLO
+[96796.717397] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30065, awaiting HELLO
+[96796.750891] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33849, awaiting HELLO
+[96796.757628] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30078, awaiting HELLO
+[96801.379818] tbt_carrier_adopt: 73 callbacks suppressed
+[96801.379837] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33885, awaiting HELLO
+[96801.396407] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30153, awaiting HELLO
+[96801.436183] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33916, awaiting HELLO
+[96801.489445] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30135, awaiting HELLO
+[96801.500364] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30155, awaiting HELLO
+[96801.539752] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33918, awaiting HELLO
+[96801.748678] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33921, awaiting HELLO
+[96801.862260] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30160, awaiting HELLO
+[96801.892259] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33923, awaiting HELLO
+[96801.896155] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30162, awaiting HELLO
+[96806.417382] tbt_carrier_adopt: 74 callbacks suppressed
+[96806.417394] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30238, awaiting HELLO
+[96806.505563] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33989, awaiting HELLO
+[96806.563024] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30221, awaiting HELLO
+[96806.590689] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30240, awaiting HELLO
+[96806.715088] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30224, awaiting HELLO
+[96806.752513] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33993, awaiting HELLO
+[96806.802371] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30242, awaiting HELLO
+[96806.852380] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33995, awaiting HELLO
+[96806.905119] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30246, awaiting HELLO
+[96806.952463] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33977, awaiting HELLO
+[96818.274280] tbtun: carrier 167 stalled: repath paused, new frames avoid it
+[96818.377423] tbtun: carrier 208 stalled: repath paused, new frames avoid it
+[96818.785220] tbtun: carrier 51 stalled: repath paused, new frames avoid it
+[96818.889340] tbtun: carrier 167 recovered after 615 ms: back in the stripe
+[96818.991077] tbtun: carrier 51 recovered after 205 ms: back in the stripe
+[96818.991358] tbtun: carrier 235 stalled: repath paused, new frames avoid it
+[96819.093225] tbtun: carrier 208 recovered after 715 ms: back in the stripe
+[96820.990695] tbtun: carrier 108 stalled: repath paused, new frames avoid it
+[96821.872755] tbtun: carrier 235 recovered after 2881 ms: back in the stripe
+[96822.488201] tbtun: carrier 78 stalled: repath paused, new frames avoid it
+[96822.693085] tbtun: carrier 78 recovered after 204 ms: back in the stripe
+[96823.257036] tbtun: carrier 21 stalled: repath paused, new frames avoid it
+[96823.359039] tbtun: carrier 21 recovered after 102 ms: back in the stripe
+[96823.410228] tbtun: carrier 108 recovered after 2419 ms: back in the stripe
+[96823.719683] tbtun: carrier 195 stalled: repath paused, new frames avoid it
+[96823.822337] tbtun: carrier 153 stalled: repath paused, new frames avoid it
+[96823.924390] tbtun: carrier 203 stalled: repath paused, new frames avoid it
+[96824.026766] tbtun: carrier 136 stalled: repath paused, new frames avoid it
+[96824.026822] tbtun: carrier 153 recovered after 204 ms: back in the stripe
+[96824.080559] tbtun: carrier 115 stalled: repath paused, new frames avoid it
+
+=== httpd ===
+LISTEN 0      8      127.0.0.1:5210 0.0.0.0:*
+
+=== httpd_head ===
+curl: (28) Operation timed out after 5001 milliseconds with 0 bytes received

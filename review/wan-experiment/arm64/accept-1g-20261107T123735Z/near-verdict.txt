@@ -1,0 +1,14 @@
+curl_rc=0
+http=200
+size_download=206066329
+file_size=206066329
+sha256=d2d61a8dfce5d0b4956afd4fcf8c104b61e761d061c54a81781dd99091e11bb5
+far_hash=c6a256153f71328c987129abfd68d610d0da04834259b66c3addffbba7a79a93
+elapsed_s=962.062063
+speed_bytes_s=214192
+near_dev=eth0
+bypass_dev=eth0
+bypass_rule=added
+kernel_window_source=journalctl
+kernel_window_empty=no
+failed_checks=4

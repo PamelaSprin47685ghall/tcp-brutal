@@ -1,0 +1,15 @@
+State  Recv-Q Send-Q       Local Address:Port  Peer Address:PortProcess                                                 
+LISTEN 0      128              127.0.0.1:9001       0.0.0.0:*                                                           
+LISTEN 0      4096            198.18.0.1:36147      0.0.0.0:*    users:(("mihomo",pid=1505,fd=15))                      
+LISTEN 0      4096             127.0.0.1:13022      0.0.0.0:*    users:(("frpc",pid=1639,fd=10))                        
+LISTEN 0      4096             127.0.0.1:10022      0.0.0.0:*    users:(("frpc",pid=1639,fd=4))                         
+LISTEN 0      4096             127.0.0.1:14022      0.0.0.0:*    users:(("frpc",pid=1639,fd=11))                        
+LISTEN 0      4096         127.0.0.53%lo:53         0.0.0.0:*    users:(("systemd-resolve",pid=559,fd=17))              
+LISTEN 0      4096            127.0.0.54:53         0.0.0.0:*    users:(("systemd-resolve",pid=559,fd=19))              
+LISTEN 0      4096             127.0.0.1:11022      0.0.0.0:*    users:(("frpc",pid=1639,fd=8))                         
+LISTEN 0      512              127.0.0.1:7676       0.0.0.0:*    users:(("bun",pid=2438,fd=6))                          
+LISTEN 0      4096               0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=1716,fd=3),("systemd",pid=1,fd=169))
+LISTEN 0      4096             127.0.0.1:7890       0.0.0.0:*    users:(("mihomo",pid=1505,fd=3))                       
+LISTEN 0      4096             127.0.0.1:12022      0.0.0.0:*    users:(("frpc",pid=1639,fd=9))                         
+LISTEN 0      4096   [fdfe:dcba:9876::1]:44187         [::]:*    users:(("mihomo",pid=1505,fd=17))                      
+LISTEN 0      4096                  [::]:22            [::]:*    users:(("sshd",pid=1716,fd=4),("systemd",pid=1,fd=170))

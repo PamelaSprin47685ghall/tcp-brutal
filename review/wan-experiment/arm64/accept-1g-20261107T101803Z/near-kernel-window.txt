@@ -1,0 +1,2 @@
+KW_SOURCE=dmesg
+[40772.851081] tbtun: tunnel 1 carrier 72 failed to connect: -110

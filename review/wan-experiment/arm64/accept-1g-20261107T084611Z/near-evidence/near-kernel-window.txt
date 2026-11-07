@@ -1,0 +1,188 @@
+11月 07 16:50:38 lubancat kernel: tbtun: tunnel 1 carrier 236 gen 237 lost: sock=1 connected=1 hello_sent=1 up=1
+11月 07 16:50:48 lubancat kernel: tbtun: carrier 182 stalled: repath paused, new frames avoid it
+11月 07 16:50:48 lubancat kernel: tbtun: carrier 182 recovered after 266 ms: back in the stripe
+11月 07 16:54:19 lubancat kernel: tbtun: tunnel 1 carrier 17 gen 18 lost: sock=1 connected=1 hello_sent=1 up=1
+11月 07 16:54:45 lubancat kernel: tbtun: carrier 181 stalled: repath paused, new frames avoid it
+11月 07 16:54:46 lubancat kernel: tbtun: carrier 181 recovered after 426 ms: back in the stripe
+11月 07 16:55:52 lubancat kernel: audit: type=1400 audit(1794041752.642:616): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=173283 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:55:52 lubancat kernel: audit: type=1400 audit(1794041752.642:617): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=173283 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:55:52 lubancat kernel: audit: type=1400 audit(1794041752.642:618): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=173283 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:55:52 lubancat kernel: audit: type=1400 audit(1794041752.642:619): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=173283 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:55:52 lubancat kernel: audit: type=1400 audit(1794041752.642:620): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=173283 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:55:52 lubancat kernel: audit: type=1400 audit(1794041752.642:621): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=173283 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:55:52 lubancat kernel: audit: type=1400 audit(1794041752.642:622): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=173283 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:55:52 lubancat kernel: audit: type=1400 audit(1794041752.642:623): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=173283 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:56:44 lubancat kernel: tbtun: carrier 228 stalled: repath paused, new frames avoid it
+11月 07 16:56:46 lubancat kernel: tbtun: carrier 228 recovered after 2037 ms: back in the stripe
+11月 07 16:57:18 lubancat kernel: audit: type=1400 audit(1794041838.123:624): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=173874 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:57:18 lubancat kernel: audit: type=1400 audit(1794041838.123:625): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=173874 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:57:18 lubancat kernel: audit: type=1400 audit(1794041838.123:626): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=173874 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:57:18 lubancat kernel: audit: type=1400 audit(1794041838.123:627): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=173874 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:57:18 lubancat kernel: audit: type=1400 audit(1794041838.123:628): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=173874 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:57:18 lubancat kernel: audit: type=1400 audit(1794041838.123:629): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=173874 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:57:18 lubancat kernel: audit: type=1400 audit(1794041838.123:630): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=173874 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:57:18 lubancat kernel: audit: type=1400 audit(1794041838.123:631): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=173874 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:57:23 lubancat kernel: audit: type=1400 audit(1794041843.270:632): apparmor="DENIED" operation="mount" info="failed mntpnt match" error=-13 profile="fusermount3" name="/" pid=174285 comm="fusermount3" flags="rw, rprivate"
+11月 07 16:57:24 lubancat kernel: audit: type=1400 audit(1794041844.557:633): apparmor="DENIED" operation="mount" info="failed mntpnt match" error=-13 profile="fusermount3" name="/" pid=174297 comm="fusermount3" flags="rw, rprivate"
+11月 07 16:57:26 lubancat kernel: tbtun: carrier 122 stalled: repath paused, new frames avoid it
+11月 07 16:57:26 lubancat kernel: tbtun: carrier 122 recovered after 213 ms: back in the stripe
+11月 07 16:58:08 lubancat kernel: tbtun: tunnel 1 carrier 51 gen 52 lost: sock=1 connected=1 hello_sent=1 up=1
+11月 07 16:59:36 lubancat kernel: audit: type=1400 audit(1794041975.995:634): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=177990 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:59:36 lubancat kernel: audit: type=1400 audit(1794041975.995:635): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=177990 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:59:36 lubancat kernel: audit: type=1400 audit(1794041975.995:636): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=177990 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:59:36 lubancat kernel: audit: type=1400 audit(1794041975.995:637): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=177990 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:59:36 lubancat kernel: audit: type=1400 audit(1794041975.995:638): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=177990 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:59:36 lubancat kernel: audit: type=1400 audit(1794041975.995:639): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=177990 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:59:36 lubancat kernel: audit: type=1400 audit(1794041975.995:640): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=177990 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 16:59:36 lubancat kernel: audit: type=1400 audit(1794041975.995:641): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=177990 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:00:49 lubancat kernel: audit: type=1400 audit(1794042049.089:642): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=179236 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:00:49 lubancat kernel: audit: type=1400 audit(1794042049.089:643): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=179236 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:00:49 lubancat kernel: audit: type=1400 audit(1794042049.089:644): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=179236 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:00:49 lubancat kernel: audit: type=1400 audit(1794042049.089:645): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=179236 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:00:49 lubancat kernel: audit: type=1400 audit(1794042049.089:646): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=179236 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:00:49 lubancat kernel: audit: type=1400 audit(1794042049.089:647): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=179236 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:00:49 lubancat kernel: audit: type=1400 audit(1794042049.089:648): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=179236 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:00:49 lubancat kernel: audit: type=1400 audit(1794042049.089:649): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=179236 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:00:54 lubancat kernel: tbtun: carrier 79 stalled: repath paused, new frames avoid it
+11月 07 17:00:54 lubancat kernel: tbtun: carrier 79 recovered after 639 ms: back in the stripe
+11月 07 17:02:00 lubancat kernel: audit: type=1400 audit(1794042120.500:650): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=183311 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:02:00 lubancat kernel: audit: type=1400 audit(1794042120.503:651): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=183311 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:02:00 lubancat kernel: audit: type=1400 audit(1794042120.503:652): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=183311 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:02:00 lubancat kernel: audit: type=1400 audit(1794042120.503:653): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=183311 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:02:00 lubancat kernel: audit: type=1400 audit(1794042120.503:654): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=183311 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:02:00 lubancat kernel: audit: type=1400 audit(1794042120.503:655): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=183311 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:02:00 lubancat kernel: audit: type=1400 audit(1794042120.503:656): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=183311 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:02:00 lubancat kernel: audit: type=1400 audit(1794042120.503:657): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=183311 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:03:01 lubancat kernel: audit: type=1400 audit(1794042181.704:658): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=185611 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:03:01 lubancat kernel: audit: type=1400 audit(1794042181.704:659): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=185611 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:03:01 lubancat kernel: audit: type=1400 audit(1794042181.704:660): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=185611 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:03:01 lubancat kernel: audit: type=1400 audit(1794042181.704:661): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=185611 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:03:01 lubancat kernel: audit: type=1400 audit(1794042181.704:662): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=185611 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:03:01 lubancat kernel: audit: type=1400 audit(1794042181.704:663): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=185611 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:03:01 lubancat kernel: audit: type=1400 audit(1794042181.704:664): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=185611 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:03:01 lubancat kernel: audit: type=1400 audit(1794042181.704:665): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=185611 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:04:08 lubancat kernel: audit: type=1400 audit(1794042248.555:666): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=186923 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:04:08 lubancat kernel: audit: type=1400 audit(1794042248.555:667): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=186923 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:04:08 lubancat kernel: audit: type=1400 audit(1794042248.555:668): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=186923 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:04:08 lubancat kernel: audit: type=1400 audit(1794042248.555:669): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=186923 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:04:08 lubancat kernel: audit: type=1400 audit(1794042248.555:670): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=186923 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:04:08 lubancat kernel: audit: type=1400 audit(1794042248.555:671): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=186923 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:04:08 lubancat kernel: audit: type=1400 audit(1794042248.555:672): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=186923 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:04:08 lubancat kernel: audit: type=1400 audit(1794042248.555:673): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=186923 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:05:01 lubancat kernel: tbtun: carrier 55 stalled: repath paused, new frames avoid it
+11月 07 17:05:01 lubancat kernel: tbtun: carrier 55 recovered after 159 ms: back in the stripe
+11月 07 17:05:07 lubancat kernel: tbtun: carrier 209 stalled: repath paused, new frames avoid it
+11月 07 17:05:07 lubancat kernel: tbtun: carrier 209 recovered after 106 ms: back in the stripe
+11月 07 17:05:19 lubancat kernel: audit: type=1400 audit(1794042319.639:674): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=188145 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:05:19 lubancat kernel: audit: type=1400 audit(1794042319.639:675): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=188145 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:05:19 lubancat kernel: audit: type=1400 audit(1794042319.639:676): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=188145 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:05:19 lubancat kernel: audit: type=1400 audit(1794042319.639:677): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=188145 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:05:19 lubancat kernel: audit: type=1400 audit(1794042319.639:678): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=188145 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:05:19 lubancat kernel: audit: type=1400 audit(1794042319.639:679): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=188145 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:05:19 lubancat kernel: audit: type=1400 audit(1794042319.639:680): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=188145 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:05:19 lubancat kernel: audit: type=1400 audit(1794042319.639:681): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=188145 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:06:29 lubancat kernel: audit: type=1400 audit(1794042389.413:682): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=189838 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:06:29 lubancat kernel: audit: type=1400 audit(1794042389.413:683): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=189838 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:06:29 lubancat kernel: audit: type=1400 audit(1794042389.413:684): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=189838 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:06:29 lubancat kernel: audit: type=1400 audit(1794042389.413:685): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=189838 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:06:29 lubancat kernel: audit: type=1400 audit(1794042389.413:686): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=189838 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:06:29 lubancat kernel: audit: type=1400 audit(1794042389.413:687): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=189838 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:06:29 lubancat kernel: audit: type=1400 audit(1794042389.413:688): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=189838 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:06:29 lubancat kernel: audit: type=1400 audit(1794042389.413:689): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=189838 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:06:47 lubancat kernel: tbtun: tunnel 1 carrier 88 gen 89 lost: sock=1 connected=1 hello_sent=1 up=1
+11月 07 17:06:57 lubancat kernel: tbtun: carrier 138 stalled: repath paused, new frames avoid it
+11月 07 17:06:57 lubancat kernel: tbtun: tunnel 1 carrier 90 gen 91 lost: sock=1 connected=1 hello_sent=1 up=1
+11月 07 17:06:58 lubancat kernel: tbtun: carrier 138 recovered after 1026 ms: back in the stripe
+11月 07 17:07:26 lubancat kernel: tbtun: tunnel 1 carrier 141 gen 142 lost: sock=1 connected=1 hello_sent=1 up=1
+11月 07 17:07:39 lubancat kernel: audit: type=1400 audit(1794042459.234:690): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=191135 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:07:39 lubancat kernel: audit: type=1400 audit(1794042459.234:691): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=191135 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:07:39 lubancat kernel: audit: type=1400 audit(1794042459.238:692): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=191135 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:07:39 lubancat kernel: audit: type=1400 audit(1794042459.238:693): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=191135 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:07:39 lubancat kernel: audit: type=1400 audit(1794042459.238:694): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=191135 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:07:39 lubancat kernel: audit: type=1400 audit(1794042459.238:695): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=191135 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:07:39 lubancat kernel: audit: type=1400 audit(1794042459.238:696): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=191135 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:07:39 lubancat kernel: audit: type=1400 audit(1794042459.238:697): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=191135 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:08:53 lubancat kernel: audit: type=1400 audit(1794042533.372:698): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=192031 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:08:53 lubancat kernel: audit: type=1400 audit(1794042533.372:699): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=192031 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:08:53 lubancat kernel: audit: type=1400 audit(1794042533.372:700): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=192031 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:08:53 lubancat kernel: audit: type=1400 audit(1794042533.372:701): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=192031 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:08:53 lubancat kernel: audit: type=1400 audit(1794042533.372:702): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=192031 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:08:53 lubancat kernel: audit: type=1400 audit(1794042533.372:703): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=192031 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:08:53 lubancat kernel: audit: type=1400 audit(1794042533.375:704): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=192031 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:08:53 lubancat kernel: audit: type=1400 audit(1794042533.375:705): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=192031 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:10:04 lubancat kernel: audit: type=1400 audit(1794042604.350:706): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=192924 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:10:04 lubancat kernel: audit: type=1400 audit(1794042604.350:707): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=192924 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:10:04 lubancat kernel: audit: type=1400 audit(1794042604.353:708): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=192924 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:10:04 lubancat kernel: audit: type=1400 audit(1794042604.353:709): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=192924 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:10:04 lubancat kernel: audit: type=1400 audit(1794042604.353:710): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=192924 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:10:04 lubancat kernel: audit: type=1400 audit(1794042604.353:711): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=192924 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:10:04 lubancat kernel: audit: type=1400 audit(1794042604.353:712): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=192924 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:10:04 lubancat kernel: audit: type=1400 audit(1794042604.353:713): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=192924 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:11:20 lubancat kernel: audit: type=1400 audit(1794042680.521:714): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=193820 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:11:20 lubancat kernel: audit: type=1400 audit(1794042680.521:715): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=193820 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:11:20 lubancat kernel: audit: type=1400 audit(1794042680.521:716): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=193820 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:11:20 lubancat kernel: audit: type=1400 audit(1794042680.521:717): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=193820 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:11:20 lubancat kernel: audit: type=1400 audit(1794042680.521:718): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=193820 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:11:20 lubancat kernel: audit: type=1400 audit(1794042680.521:719): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=193820 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:11:20 lubancat kernel: audit: type=1400 audit(1794042680.521:720): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=193820 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:11:20 lubancat kernel: audit: type=1400 audit(1794042680.521:721): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=193820 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:11:53 lubancat kernel: tbtun: carrier 243 stalled: repath paused, new frames avoid it
+11月 07 17:12:00 lubancat kernel: tbtun: carrier 243 recovered after 7309 ms: back in the stripe
+11月 07 17:12:30 lubancat kernel: audit: type=1400 audit(1794042750.785:722): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=194711 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:12:30 lubancat kernel: audit: type=1400 audit(1794042750.785:723): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=194711 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:12:30 lubancat kernel: audit: type=1400 audit(1794042750.788:724): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=194711 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:12:30 lubancat kernel: audit: type=1400 audit(1794042750.788:725): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=194711 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:12:30 lubancat kernel: audit: type=1400 audit(1794042750.788:726): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=194711 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:12:30 lubancat kernel: audit: type=1400 audit(1794042750.788:727): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=194711 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:12:30 lubancat kernel: audit: type=1400 audit(1794042750.788:728): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=194711 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:12:30 lubancat kernel: audit: type=1400 audit(1794042750.788:729): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=194711 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:13:40 lubancat kernel: audit: type=1400 audit(1794042820.392:730): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=195596 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:13:40 lubancat kernel: audit: type=1400 audit(1794042820.392:731): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=195596 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:13:40 lubancat kernel: audit: type=1400 audit(1794042820.392:732): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=195596 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:13:40 lubancat kernel: audit: type=1400 audit(1794042820.392:733): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=195596 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:13:40 lubancat kernel: audit: type=1400 audit(1794042820.392:734): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=195596 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:13:40 lubancat kernel: audit: type=1400 audit(1794042820.392:735): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=195596 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:13:40 lubancat kernel: audit: type=1400 audit(1794042820.392:736): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=195596 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:13:40 lubancat kernel: audit: type=1400 audit(1794042820.392:737): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=195596 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:19:14 lubancat kernel: tbtun: carrier 240 stalled: repath paused, new frames avoid it
+11月 07 17:19:14 lubancat kernel: tbtun: carrier 240 recovered after 159 ms: back in the stripe
+11月 07 17:24:19 lubancat kernel: tbtun: carrier 228 stalled: repath paused, new frames avoid it
+11月 07 17:24:23 lubancat kernel: tbtun: carrier 228 recovered after 3896 ms: back in the stripe
+11月 07 17:26:22 lubancat kernel: tbtun: carrier 94 stalled: repath paused, new frames avoid it
+11月 07 17:26:23 lubancat kernel: tbtun: carrier 94 recovered after 963 ms: back in the stripe
+11月 07 17:28:24 lubancat kernel: tbtun: carrier 162 stalled: repath paused, new frames avoid it
+11月 07 17:28:24 lubancat kernel: tbtun: carrier 162 recovered after 373 ms: back in the stripe
+11月 07 17:28:41 lubancat kernel: tbtun: carrier 205 stalled: repath paused, new frames avoid it
+11月 07 17:28:41 lubancat kernel: tbtun: carrier 205 recovered after 320 ms: back in the stripe
+11月 07 17:28:42 lubancat kernel: tbtun: carrier 22 stalled: repath paused, new frames avoid it
+11月 07 17:28:42 lubancat kernel: tbtun: carrier 22 recovered after 586 ms: back in the stripe
+11月 07 17:31:33 lubancat kernel: tbtun: carrier 167 stalled: repath paused, new frames avoid it
+11月 07 17:31:34 lubancat kernel: tbtun: carrier 167 recovered after 160 ms: back in the stripe
+11月 07 17:31:44 lubancat kernel: tbtun: carrier 63 stalled: repath paused, new frames avoid it
+11月 07 17:31:44 lubancat kernel: tbtun: carrier 63 recovered after 959 ms: back in the stripe
+11月 07 17:34:11 lubancat kernel: tbtun: carrier 252 stalled: repath paused, new frames avoid it
+11月 07 17:34:11 lubancat kernel: tbtun: carrier 252 recovered after 53 ms: back in the stripe
+11月 07 17:35:27 lubancat kernel: tbtun: carrier 124 stalled: repath paused, new frames avoid it
+11月 07 17:35:28 lubancat kernel: tbtun: carrier 124 recovered after 1069 ms: back in the stripe
+11月 07 17:36:01 lubancat kernel: tbtun: carrier 122 stalled: repath paused, new frames avoid it
+11月 07 17:36:01 lubancat kernel: tbtun: carrier 122 recovered after 106 ms: back in the stripe
+11月 07 17:36:33 lubancat kernel: tbtun: carrier 187 stalled: repath paused, new frames avoid it
+11月 07 17:36:33 lubancat kernel: tbtun: carrier 187 recovered after 52 ms: back in the stripe
+11月 07 17:38:20 lubancat kernel: tbtun: tunnel 1 carrier 15 gen 16 lost: sock=1 connected=1 hello_sent=1 up=1
+11月 07 17:40:23 lubancat kernel: tbtun: carrier 115 stalled: repath paused, new frames avoid it
+11月 07 17:40:25 lubancat kernel: tbtun: carrier 115 recovered after 1496 ms: back in the stripe
+11月 07 17:42:36 lubancat kernel: audit: type=1400 audit(1794044556.194:738): apparmor="DENIED" operation="mount" info="failed mntpnt match" error=-13 profile="fusermount3" name="/" pid=199686 comm="fusermount3" flags="rw, rprivate"
+11月 07 17:50:13 lubancat kernel: audit: type=1400 audit(1794045013.436:739): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=201130 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:50:13 lubancat kernel: audit: type=1400 audit(1794045013.436:740): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=201130 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:50:13 lubancat kernel: audit: type=1400 audit(1794045013.436:741): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=201130 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:50:13 lubancat kernel: audit: type=1400 audit(1794045013.436:742): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=201130 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:50:13 lubancat kernel: audit: type=1400 audit(1794045013.436:743): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=201130 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:50:13 lubancat kernel: audit: type=1400 audit(1794045013.436:744): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=201130 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:51:26 lubancat kernel: tbtun: carrier 209 stalled: repath paused, new frames avoid it
+11月 07 17:51:28 lubancat kernel: tbtun: carrier 209 recovered after 1659 ms: back in the stripe
+11月 07 17:51:41 lubancat kernel: audit: type=1400 audit(1794045101.651:745): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=202031 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:51:41 lubancat kernel: audit: type=1400 audit(1794045101.651:746): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=202031 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:51:41 lubancat kernel: audit: type=1400 audit(1794045101.654:747): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=202031 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:51:41 lubancat kernel: audit: type=1400 audit(1794045101.654:748): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=202031 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:51:41 lubancat kernel: audit: type=1400 audit(1794045101.654:749): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=202031 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+11月 07 17:51:41 lubancat kernel: audit: type=1400 audit(1794045101.654:750): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=202031 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0

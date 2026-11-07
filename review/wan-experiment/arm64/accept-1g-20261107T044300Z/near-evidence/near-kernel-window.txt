@@ -1,0 +1,223 @@
+11月 07 12:44:29 lubancat kernel: tbtun: tunnel 1 carrier 20 gen 21 lost: sock=1 connected=1 hello_sent=1 up=1
+11月 07 12:44:40 lubancat kernel: tbtun: carrier 155 stalled: repath paused, new frames avoid it
+11月 07 12:44:40 lubancat kernel: tbtun: carrier 155 recovered after 800 ms: back in the stripe
+11月 07 12:44:44 lubancat kernel: tbtun: carrier 149 stalled: repath paused, new frames avoid it
+11月 07 12:44:44 lubancat kernel: tbtun: carrier 149 recovered after 53 ms: back in the stripe
+11月 07 12:44:54 lubancat kernel: tbtun: carrier 239 stalled: repath paused, new frames avoid it
+11月 07 12:44:54 lubancat kernel: tbtun: carrier 239 recovered after 53 ms: back in the stripe
+11月 07 12:44:59 lubancat kernel: tbtun: carrier 137 stalled: repath paused, new frames avoid it
+11月 07 12:44:59 lubancat kernel: tbtun: carrier 137 recovered after 319 ms: back in the stripe
+11月 07 12:45:04 lubancat kernel: tbtun: carrier 200 stalled: repath paused, new frames avoid it
+11月 07 12:45:04 lubancat kernel: tbtun: carrier 200 recovered after 106 ms: back in the stripe
+11月 07 12:45:09 lubancat kernel: tbtun: carrier 224 stalled: repath paused, new frames avoid it
+11月 07 12:45:10 lubancat kernel: tbtun: carrier 224 recovered after 910 ms: back in the stripe
+11月 07 12:45:14 lubancat kernel: tbtun: carrier 254 stalled: repath paused, new frames avoid it
+11月 07 12:45:15 lubancat kernel: tbtun: carrier 254 recovered after 373 ms: back in the stripe
+11月 07 12:45:30 lubancat kernel: tbtun: carrier 52 stalled: repath paused, new frames avoid it
+11月 07 12:45:30 lubancat kernel: tbtun: carrier 52 recovered after 320 ms: back in the stripe
+11月 07 12:45:31 lubancat kernel: tbtun: carrier 73 stalled: repath paused, new frames avoid it
+11月 07 12:45:31 lubancat kernel: tbtun: carrier 73 recovered after 53 ms: back in the stripe
+11月 07 12:45:39 lubancat kernel: tbtun: carrier 162 stalled: repath paused, new frames avoid it
+11月 07 12:45:39 lubancat kernel: tbtun: carrier 166 stalled: repath paused, new frames avoid it
+11月 07 12:45:40 lubancat kernel: tbtun: carrier 162 recovered after 586 ms: back in the stripe
+11月 07 12:45:40 lubancat kernel: tbtun: carrier 166 recovered after 586 ms: back in the stripe
+11月 07 12:45:44 lubancat kernel: tbtun: carrier 48 stalled: repath paused, new frames avoid it
+11月 07 12:45:45 lubancat kernel: tbtun: carrier 48 recovered after 639 ms: back in the stripe
+11月 07 12:45:49 lubancat kernel: tbtun: carrier 183 stalled: repath paused, new frames avoid it
+11月 07 12:45:50 lubancat kernel: tbtun: carrier 81 stalled: repath paused, new frames avoid it
+11月 07 12:45:50 lubancat kernel: tbtun: carrier 81 recovered after 166 ms: back in the stripe
+11月 07 12:45:52 lubancat kernel: tbtun: carrier 183 recovered after 2736 ms: back in the stripe
+11月 07 12:45:55 lubancat kernel: tbtun: carrier 47 stalled: repath paused, new frames avoid it
+11月 07 12:45:56 lubancat kernel: tbtun: carrier 129 stalled: repath paused, new frames avoid it
+11月 07 12:45:57 lubancat kernel: tbtun: carrier 129 recovered after 266 ms: back in the stripe
+11月 07 12:45:57 lubancat kernel: tbtun: carrier 47 recovered after 2613 ms: back in the stripe
+11月 07 12:45:59 lubancat kernel: tbtun: carrier 174 stalled: repath paused, new frames avoid it
+11月 07 12:46:00 lubancat kernel: tbtun: carrier 174 recovered after 586 ms: back in the stripe
+11月 07 12:46:06 lubancat kernel: tbtun: carrier 111 stalled: repath paused, new frames avoid it
+11月 07 12:46:07 lubancat kernel: tbtun: carrier 111 recovered after 746 ms: back in the stripe
+11月 07 12:46:10 lubancat kernel: tbtun: carrier 57 stalled: repath paused, new frames avoid it
+11月 07 12:46:10 lubancat kernel: tbtun: carrier 57 recovered after 746 ms: back in the stripe
+11月 07 12:46:14 lubancat kernel: tbtun: carrier 175 stalled: repath paused, new frames avoid it
+11月 07 12:46:15 lubancat kernel: tbtun: carrier 175 recovered after 643 ms: back in the stripe
+11月 07 12:46:24 lubancat kernel: tbtun: carrier 174 stalled: repath paused, new frames avoid it
+11月 07 12:46:27 lubancat kernel: tbtun: carrier 174 recovered after 3338 ms: back in the stripe
+11月 07 12:46:29 lubancat kernel: tbtun: carrier 158 stalled: repath paused, new frames avoid it
+11月 07 12:46:30 lubancat kernel: tbtun: carrier 158 recovered after 799 ms: back in the stripe
+11月 07 12:46:34 lubancat kernel: tbtun: carrier 222 stalled: repath paused, new frames avoid it
+11月 07 12:46:35 lubancat kernel: tbtun: carrier 9 stalled: repath paused, new frames avoid it
+11月 07 12:46:35 lubancat kernel: tbtun: carrier 2 stalled: repath paused, new frames avoid it
+11月 07 12:46:35 lubancat kernel: tbtun: carrier 222 recovered after 800 ms: back in the stripe
+11月 07 12:46:35 lubancat kernel: tbtun: carrier 9 recovered after 746 ms: back in the stripe
+11月 07 12:46:35 lubancat kernel: tbtun: carrier 2 recovered after 800 ms: back in the stripe
+11月 07 12:46:36 lubancat kernel: tbtun: carrier 89 stalled: repath paused, new frames avoid it
+11月 07 12:46:36 lubancat kernel: tbtun: carrier 232 stalled: repath paused, new frames avoid it
+11月 07 12:46:37 lubancat kernel: tbtun: carrier 89 recovered after 1876 ms: back in the stripe
+11月 07 12:46:37 lubancat kernel: tbtun: carrier 232 recovered after 1280 ms: back in the stripe
+11月 07 12:46:42 lubancat kernel: tbtun: carrier 105 stalled: repath paused, new frames avoid it
+11月 07 12:46:43 lubancat kernel: tbtun: carrier 105 recovered after 913 ms: back in the stripe
+11月 07 12:46:47 lubancat kernel: tbtun: carrier 160 stalled: repath paused, new frames avoid it
+11月 07 12:46:47 lubancat kernel: tbtun: carrier 160 recovered after 533 ms: back in the stripe
+11月 07 12:46:55 lubancat kernel: tbtun: carrier 9 stalled: repath paused, new frames avoid it
+11月 07 12:46:55 lubancat kernel: tbtun: carrier 9 recovered after 479 ms: back in the stripe
+11月 07 12:47:00 lubancat kernel: tbtun: carrier 13 stalled: repath paused, new frames avoid it
+11月 07 12:47:03 lubancat kernel: tbtun: carrier 13 recovered after 2479 ms: back in the stripe
+11月 07 12:47:10 lubancat kernel: tbtun: carrier 52 stalled: repath paused, new frames avoid it
+11月 07 12:47:11 lubancat kernel: tbtun: carrier 19 stalled: repath paused, new frames avoid it
+11月 07 12:47:11 lubancat kernel: tbtun: carrier 52 recovered after 803 ms: back in the stripe
+11月 07 12:47:12 lubancat kernel: tbtun: carrier 19 recovered after 1713 ms: back in the stripe
+11月 07 12:47:16 lubancat kernel: tbtun: carrier 110 stalled: repath paused, new frames avoid it
+11月 07 12:47:17 lubancat kernel: tbtun: carrier 110 recovered after 106 ms: back in the stripe
+11月 07 12:47:17 lubancat kernel: tbtun: carrier 61 stalled: repath paused, new frames avoid it
+11月 07 12:47:18 lubancat kernel: tbtun: carrier 61 recovered after 1670 ms: back in the stripe
+11月 07 12:47:21 lubancat kernel: tbtun: carrier 86 stalled: repath paused, new frames avoid it
+11月 07 12:47:24 lubancat kernel: tbtun: carrier 86 recovered after 2669 ms: back in the stripe
+11月 07 12:47:33 lubancat kernel: tbtun: tunnel 1 carrier 245 gen 246 lost: sock=1 connected=1 hello_sent=1 up=1
+11月 07 12:47:38 lubancat kernel: tbtun: carrier 130 stalled: repath paused, new frames avoid it
+11月 07 12:47:38 lubancat kernel: tbtun: carrier 130 recovered after 106 ms: back in the stripe
+11月 07 12:47:56 lubancat kernel: tbtun: carrier 111 stalled: repath paused, new frames avoid it
+11月 07 12:47:56 lubancat kernel: tbtun: carrier 106 stalled: repath paused, new frames avoid it
+11月 07 12:47:57 lubancat kernel: tbtun: carrier 106 recovered after 159 ms: back in the stripe
+11月 07 12:47:57 lubancat kernel: tbtun: carrier 123 stalled: repath paused, new frames avoid it
+11月 07 12:47:57 lubancat kernel: tbtun: carrier 111 recovered after 856 ms: back in the stripe
+11月 07 12:48:00 lubancat kernel: tbtun: carrier 123 recovered after 2783 ms: back in the stripe
+11月 07 12:48:11 lubancat kernel: tbtun: carrier 84 stalled: repath paused, new frames avoid it
+11月 07 12:48:12 lubancat kernel: tbtun: carrier 84 recovered after 539 ms: back in the stripe
+11月 07 12:48:30 lubancat kernel: tbtun: carrier 134 stalled: repath paused, new frames avoid it
+11月 07 12:48:30 lubancat kernel: tbtun: carrier 134 recovered after 266 ms: back in the stripe
+11月 07 12:48:45 lubancat kernel: tbtun: carrier 197 stalled: repath paused, new frames avoid it
+11月 07 12:48:45 lubancat kernel: tbtun: carrier 197 recovered after 159 ms: back in the stripe
+11月 07 12:49:05 lubancat kernel: tbtun: carrier 185 stalled: repath paused, new frames avoid it
+11月 07 12:49:05 lubancat kernel: tbtun: carrier 201 stalled: repath paused, new frames avoid it
+11月 07 12:49:06 lubancat kernel: tbtun: carrier 185 recovered after 749 ms: back in the stripe
+11月 07 12:49:06 lubancat kernel: tbtun: carrier 201 recovered after 749 ms: back in the stripe
+11月 07 12:49:11 lubancat kernel: tbtun: carrier 16 stalled: repath paused, new frames avoid it
+11月 07 12:49:11 lubancat kernel: tbtun: carrier 16 recovered after 693 ms: back in the stripe
+11月 07 12:49:15 lubancat kernel: tbtun: carrier 208 stalled: repath paused, new frames avoid it
+11月 07 12:49:15 lubancat kernel: tbtun: carrier 168 stalled: repath paused, new frames avoid it
+11月 07 12:49:16 lubancat kernel: tbtun: carrier 168 recovered after 639 ms: back in the stripe
+11月 07 12:49:16 lubancat kernel: tbtun: carrier 208 recovered after 1333 ms: back in the stripe
+11月 07 12:49:17 lubancat kernel: tbtun: carrier 35 stalled: repath paused, new frames avoid it
+11月 07 12:49:17 lubancat kernel: tbtun: carrier 35 recovered after 533 ms: back in the stripe
+11月 07 12:49:21 lubancat kernel: tbtun: carrier 54 stalled: repath paused, new frames avoid it
+11月 07 12:49:21 lubancat kernel: tbtun: carrier 54 recovered after 373 ms: back in the stripe
+11月 07 12:49:25 lubancat kernel: tbtun: carrier 218 stalled: repath paused, new frames avoid it
+11月 07 12:49:26 lubancat kernel: tbtun: carrier 218 recovered after 533 ms: back in the stripe
+11月 07 12:49:27 lubancat kernel: tbtun: carrier 99 stalled: repath paused, new frames avoid it
+11月 07 12:49:28 lubancat kernel: tbtun: carrier 99 recovered after 373 ms: back in the stripe
+11月 07 12:49:30 lubancat kernel: tbtun: carrier 168 stalled: repath paused, new frames avoid it
+11月 07 12:49:31 lubancat kernel: tbtun: carrier 168 recovered after 700 ms: back in the stripe
+11月 07 12:49:35 lubancat kernel: tbtun: carrier 152 stalled: repath paused, new frames avoid it
+11月 07 12:49:36 lubancat kernel: tbtun: carrier 152 recovered after 749 ms: back in the stripe
+11月 07 12:49:40 lubancat kernel: tbtun: carrier 219 stalled: repath paused, new frames avoid it
+11月 07 12:49:41 lubancat kernel: tbtun: carrier 219 recovered after 803 ms: back in the stripe
+11月 07 12:49:46 lubancat kernel: tbtun: carrier 232 stalled: repath paused, new frames avoid it
+11月 07 12:49:46 lubancat kernel: tbtun: carrier 215 stalled: repath paused, new frames avoid it
+11月 07 12:49:47 lubancat kernel: tbtun: carrier 215 recovered after 376 ms: back in the stripe
+11月 07 12:49:47 lubancat kernel: tbtun: carrier 232 recovered after 803 ms: back in the stripe
+11月 07 12:49:51 lubancat kernel: tbtun: carrier 2 stalled: repath paused, new frames avoid it
+11月 07 12:49:52 lubancat kernel: tbtun: carrier 2 recovered after 480 ms: back in the stripe
+11月 07 12:50:02 lubancat kernel: tbtun: carrier 9 stalled: repath paused, new frames avoid it
+11月 07 12:50:02 lubancat kernel: tbtun: carrier 9 recovered after 693 ms: back in the stripe
+11月 07 12:50:06 lubancat kernel: tbtun: carrier 255 stalled: repath paused, new frames avoid it
+11月 07 12:50:06 lubancat kernel: tbtun: carrier 69 stalled: repath paused, new frames avoid it
+11月 07 12:50:06 lubancat kernel: tbtun: carrier 255 recovered after 699 ms: back in the stripe
+11月 07 12:50:07 lubancat kernel: tbtun: carrier 69 recovered after 809 ms: back in the stripe
+11月 07 12:50:07 lubancat kernel: tbtun: carrier 16 stalled: repath paused, new frames avoid it
+11月 07 12:50:07 lubancat kernel: tbtun: carrier 16 recovered after 320 ms: back in the stripe
+11月 07 12:50:15 lubancat kernel: tbtun: carrier 162 stalled: repath paused, new frames avoid it
+11月 07 12:50:16 lubancat kernel: tbtun: carrier 143 stalled: repath paused, new frames avoid it
+11月 07 12:50:16 lubancat kernel: tbtun: carrier 162 recovered after 319 ms: back in the stripe
+11月 07 12:50:16 lubancat kernel: tbtun: carrier 143 recovered after 643 ms: back in the stripe
+11月 07 12:50:17 lubancat kernel: tbtun: carrier 99 stalled: repath paused, new frames avoid it
+11月 07 12:50:18 lubancat kernel: tbtun: carrier 99 recovered after 266 ms: back in the stripe
+11月 07 12:50:21 lubancat kernel: tbtun: carrier 212 stalled: repath paused, new frames avoid it
+11月 07 12:50:21 lubancat kernel: tbtun: carrier 204 stalled: repath paused, new frames avoid it
+11月 07 12:50:21 lubancat kernel: tbtun: carrier 4 stalled: repath paused, new frames avoid it
+11月 07 12:50:21 lubancat kernel: tbtun: carrier 4 recovered after 213 ms: back in the stripe
+11月 07 12:50:21 lubancat kernel: tbtun: carrier 204 recovered after 799 ms: back in the stripe
+11月 07 12:50:23 lubancat kernel: tbtun: carrier 212 recovered after 1980 ms: back in the stripe
+11月 07 12:50:26 lubancat kernel: tbtun: carrier 224 stalled: repath paused, new frames avoid it
+11月 07 12:50:26 lubancat kernel: tbtun: tunnel 1 carrier 137 gen 138 lost: sock=1 connected=1 hello_sent=1 up=1
+11月 07 12:50:26 lubancat kernel: tbtun: carrier 224 recovered after 746 ms: back in the stripe
+11月 07 12:50:28 lubancat kernel: tbtun: tunnel 1 carrier 133 gen 134 lost: sock=1 connected=1 hello_sent=1 up=1
+11月 07 12:50:31 lubancat kernel: tbtun: carrier 196 stalled: repath paused, new frames avoid it
+11月 07 12:50:31 lubancat kernel: tbtun: carrier 180 stalled: repath paused, new frames avoid it
+11月 07 12:50:31 lubancat kernel: tbtun: carrier 243 stalled: repath paused, new frames avoid it
+11月 07 12:50:31 lubancat kernel: tbtun: carrier 147 stalled: repath paused, new frames avoid it
+11月 07 12:50:31 lubancat kernel: tbtun: carrier 180 recovered after 159 ms: back in the stripe
+11月 07 12:50:31 lubancat kernel: tbtun: carrier 243 recovered after 159 ms: back in the stripe
+11月 07 12:50:31 lubancat kernel: tbtun: carrier 196 recovered after 799 ms: back in the stripe
+11月 07 12:50:33 lubancat kernel: tbtun: carrier 100 stalled: repath paused, new frames avoid it
+11月 07 12:50:33 lubancat kernel: tbtun: carrier 100 recovered after 319 ms: back in the stripe
+11月 07 12:50:33 lubancat kernel: tbtun: carrier 215 stalled: repath paused, new frames avoid it
+11月 07 12:50:33 lubancat kernel: tbtun: carrier 147 recovered after 2359 ms: back in the stripe
+11月 07 12:50:33 lubancat kernel: tbtun: carrier 215 recovered after 53 ms: back in the stripe
+11月 07 12:50:36 lubancat kernel: tbtun: carrier 185 stalled: repath paused, new frames avoid it
+11月 07 12:50:36 lubancat kernel: tbtun: carrier 222 stalled: repath paused, new frames avoid it
+11月 07 12:50:36 lubancat kernel: tbtun: carrier 51 stalled: repath paused, new frames avoid it
+11月 07 12:50:37 lubancat kernel: tbtun: carrier 185 recovered after 799 ms: back in the stripe
+11月 07 12:50:37 lubancat kernel: tbtun: carrier 222 recovered after 479 ms: back in the stripe
+11月 07 12:50:37 lubancat kernel: tbtun: carrier 10 stalled: repath paused, new frames avoid it
+11月 07 12:50:37 lubancat kernel: tbtun: carrier 10 recovered after 160 ms: back in the stripe
+11月 07 12:50:37 lubancat kernel: tbtun: carrier 94 stalled: repath paused, new frames avoid it
+11月 07 12:50:38 lubancat kernel: tbtun: carrier 51 recovered after 1713 ms: back in the stripe
+11月 07 12:50:38 lubancat kernel: tbtun: carrier 94 recovered after 750 ms: back in the stripe
+11月 07 12:50:41 lubancat kernel: tbtun: carrier 214 stalled: repath paused, new frames avoid it
+11月 07 12:50:41 lubancat kernel: tbtun: carrier 214 recovered after 483 ms: back in the stripe
+11月 07 12:50:46 lubancat kernel: tbtun: carrier 55 stalled: repath paused, new frames avoid it
+11月 07 12:50:47 lubancat kernel: tbtun: carrier 55 recovered after 799 ms: back in the stripe
+11月 07 12:50:51 lubancat kernel: tbtun: carrier 185 stalled: repath paused, new frames avoid it
+11月 07 12:50:51 lubancat kernel: tbtun: carrier 214 stalled: repath paused, new frames avoid it
+11月 07 12:50:51 lubancat kernel: tbtun: carrier 214 recovered after 53 ms: back in the stripe
+11月 07 12:50:53 lubancat kernel: tbtun: carrier 185 recovered after 2403 ms: back in the stripe
+11月 07 12:51:01 lubancat kernel: tbtun: carrier 14 stalled: repath paused, new frames avoid it
+11月 07 12:51:02 lubancat kernel: tbtun: carrier 14 recovered after 800 ms: back in the stripe
+11月 07 12:51:05 lubancat kernel: tbtun: carrier 142 stalled: repath paused, new frames avoid it
+11月 07 12:51:05 lubancat kernel: tbtun: carrier 142 recovered after 320 ms: back in the stripe
+11月 07 12:51:06 lubancat kernel: tbtun: carrier 201 stalled: repath paused, new frames avoid it
+11月 07 12:51:06 lubancat kernel: tbtun: carrier 11 stalled: repath paused, new frames avoid it
+11月 07 12:51:07 lubancat kernel: tbtun: carrier 201 recovered after 859 ms: back in the stripe
+11月 07 12:51:09 lubancat kernel: tbtun: carrier 11 recovered after 2676 ms: back in the stripe
+11月 07 12:51:11 lubancat kernel: tbtun: carrier 153 stalled: repath paused, new frames avoid it
+11月 07 12:51:11 lubancat kernel: tbtun: carrier 220 stalled: repath paused, new frames avoid it
+11月 07 12:51:11 lubancat kernel: tbtun: carrier 228 stalled: repath paused, new frames avoid it
+11月 07 12:51:12 lubancat kernel: tbtun: carrier 220 recovered after 799 ms: back in the stripe
+11月 07 12:51:13 lubancat kernel: tbtun: carrier 115 stalled: repath paused, new frames avoid it
+11月 07 12:51:13 lubancat kernel: tbtun: carrier 34 stalled: repath paused, new frames avoid it
+11月 07 12:51:14 lubancat kernel: tbtun: carrier 115 recovered after 746 ms: back in the stripe
+11月 07 12:51:14 lubancat kernel: tbtun: carrier 153 recovered after 2996 ms: back in the stripe
+11月 07 12:51:14 lubancat kernel: tbtun: carrier 34 recovered after 533 ms: back in the stripe
+11月 07 12:51:14 lubancat kernel: tbtun: carrier 228 recovered after 2996 ms: back in the stripe
+11月 07 12:51:16 lubancat kernel: tbtun: carrier 201 stalled: repath paused, new frames avoid it
+11月 07 12:51:16 lubancat kernel: tbtun: carrier 25 stalled: repath paused, new frames avoid it
+11月 07 12:51:16 lubancat kernel: tbtun: carrier 216 stalled: repath paused, new frames avoid it
+11月 07 12:51:17 lubancat kernel: tbtun: carrier 205 stalled: repath paused, new frames avoid it
+11月 07 12:51:17 lubancat kernel: tbtun: carrier 216 recovered after 213 ms: back in the stripe
+11月 07 12:51:17 lubancat kernel: tbtun: carrier 205 recovered after 213 ms: back in the stripe
+11月 07 12:51:17 lubancat kernel: tbtun: carrier 201 recovered after 852 ms: back in the stripe
+11月 07 12:51:17 lubancat kernel: tbtun: carrier 97 stalled: repath paused, new frames avoid it
+11月 07 12:51:18 lubancat kernel: tbtun: carrier 97 recovered after 856 ms: back in the stripe
+11月 07 12:51:19 lubancat kernel: tbtun: carrier 25 recovered after 2890 ms: back in the stripe
+11月 07 12:51:21 lubancat kernel: tbtun: carrier 152 stalled: repath paused, new frames avoid it
+11月 07 12:51:21 lubancat kernel: tbtun: carrier 197 stalled: repath paused, new frames avoid it
+11月 07 12:51:22 lubancat kernel: tbtun: carrier 197 recovered after 532 ms: back in the stripe
+11月 07 12:51:22 lubancat kernel: tbtun: carrier 152 recovered after 856 ms: back in the stripe
+11月 07 12:51:26 lubancat kernel: tbtun: carrier 55 stalled: repath paused, new frames avoid it
+11月 07 12:51:29 lubancat kernel: tbtun: carrier 55 recovered after 3000 ms: back in the stripe
+11月 07 12:51:31 lubancat kernel: tbtun: carrier 28 stalled: repath paused, new frames avoid it
+11月 07 12:51:33 lubancat kernel: tbtun: carrier 253 stalled: repath paused, new frames avoid it
+11月 07 12:51:34 lubancat kernel: tbtun: carrier 253 recovered after 159 ms: back in the stripe
+11月 07 12:51:34 lubancat kernel: tbtun: carrier 28 recovered after 2940 ms: back in the stripe
+11月 07 12:51:42 lubancat kernel: tbtun: carrier 3 stalled: repath paused, new frames avoid it
+11月 07 12:51:42 lubancat kernel: tbtun: carrier 136 stalled: repath paused, new frames avoid it
+11月 07 12:51:42 lubancat kernel: tbtun: carrier 3 recovered after 693 ms: back in the stripe
+11月 07 12:51:42 lubancat kernel: tbtun: carrier 136 recovered after 693 ms: back in the stripe
+11月 07 12:51:48 lubancat kernel: tbtun: carrier 235 stalled: repath paused, new frames avoid it
+11月 07 12:51:50 lubancat kernel: tbtun: carrier 235 recovered after 1613 ms: back in the stripe
+11月 07 12:51:51 lubancat kernel: tbtun: carrier 17 stalled: repath paused, new frames avoid it
+11月 07 12:51:52 lubancat kernel: tbtun: carrier 14 stalled: repath paused, new frames avoid it
+11月 07 12:51:52 lubancat kernel: tbtun: carrier 157 stalled: repath paused, new frames avoid it
+11月 07 12:51:52 lubancat kernel: tbtun: carrier 157 recovered after 53 ms: back in the stripe
+11月 07 12:51:52 lubancat kernel: tbtun: carrier 17 recovered after 799 ms: back in the stripe
+11月 07 12:51:55 lubancat kernel: tbtun: carrier 14 recovered after 3153 ms: back in the stripe
+11月 07 12:51:59 lubancat kernel: tbtun: carrier 126 stalled: repath paused, new frames avoid it

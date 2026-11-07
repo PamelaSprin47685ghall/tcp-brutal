@@ -1,0 +1,9 @@
+c9.fec_proto_fail.pre=0 post=0 delta=0
+c9.fec_hdr_crc_fail.pre=0 post=0 delta=0
+c9.fec_payload_crc_fail.pre=0 post=0 delta=0
+rx_errs.pre=0 post=0 delta=0
+connect_fail.pre=1 post=1 delta=0
+alloc_fail.pre=0 post=0 delta=0
+join_bad.pre=0 post=0 delta=0
+gaps_total.pre=0 post=0 delta=0
+dead_now=

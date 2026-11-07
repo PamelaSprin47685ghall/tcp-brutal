@@ -1,0 +1,400 @@
+[44814.444208] tbtun: carrier 210 stalled: repath paused, new frames avoid it
+[44814.608239] tbtun: tunnel 1 carrier 232 gen 233 lost: sock=1 connected=1 hello_sent=1 up=1
+[44815.147424] tbtun: carrier 210 recovered after 703 ms: back in the stripe
+[44818.093878] tbtun: carrier 160 stalled: repath paused, new frames avoid it
+[44818.147421] tbtun: carrier 160 recovered after 53 ms: back in the stripe
+[44821.567270] tbtun: carrier 182 stalled: repath paused, new frames avoid it
+[44821.940541] tbtun: carrier 182 recovered after 373 ms: back in the stripe
+[44826.737097] audit: type=1400 audit(1794050779.807:1056): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=470417 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[44826.737150] audit: type=1400 audit(1794050779.807:1057): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=470417 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[44826.737591] audit: type=1400 audit(1794050779.807:1058): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=470417 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[44826.737622] audit: type=1400 audit(1794050779.807:1059): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=470417 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[44826.738010] audit: type=1400 audit(1794050779.807:1060): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=470417 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[44826.738039] audit: type=1400 audit(1794050779.807:1061): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=470417 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[44832.690593] tbtun: carrier 235 stalled: repath paused, new frames avoid it
+[44833.277142] tbtun: carrier 235 recovered after 586 ms: back in the stripe
+[44839.753917] tbtun: carrier 245 stalled: repath paused, new frames avoid it
+[44839.970716] tbtun: carrier 245 recovered after 216 ms: back in the stripe
+[44854.304129] tbtun: carrier 236 stalled: repath paused, new frames avoid it
+[44854.464067] tbtun: carrier 236 recovered after 159 ms: back in the stripe
+[44859.163518] tbtun: carrier 170 stalled: repath paused, new frames avoid it
+[44860.987148] tbtun: carrier 170 recovered after 1823 ms: back in the stripe
+[44862.483463] tbtun: carrier 151 stalled: repath paused, new frames avoid it
+[44864.677122] tbtun: carrier 151 recovered after 2193 ms: back in the stripe
+[44866.436734] tbtun: carrier 18 stalled: repath paused, new frames avoid it
+[44866.816603] tbtun: carrier 18 recovered after 379 ms: back in the stripe
+[44879.356625] tbtun: carrier 184 stalled: repath paused, new frames avoid it
+[44879.839804] tbtun: carrier 53 stalled: repath paused, new frames avoid it
+[44879.946465] tbtun: carrier 37 stalled: repath paused, new frames avoid it
+[44880.436592] tbtun: carrier 37 recovered after 490 ms: back in the stripe
+[44880.490000] tbtun: carrier 184 recovered after 1133 ms: back in the stripe
+[44881.469804] tbtun: carrier 53 recovered after 1630 ms: back in the stripe
+[44886.659957] tbtun: carrier 88 stalled: repath paused, new frames avoid it
+[44887.086522] tbtun: carrier 88 recovered after 426 ms: back in the stripe
+[44888.099983] tbtun: carrier 204 stalled: repath paused, new frames avoid it
+[44888.313245] tbtun: carrier 143 stalled: repath paused, new frames avoid it
+[44888.740220] tbtun: carrier 204 recovered after 640 ms: back in the stripe
+[44890.659950] tbtun: carrier 143 recovered after 2346 ms: back in the stripe
+[44895.266845] audit: type=1400 audit(1794050848.338:1062): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=476625 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[44895.266895] audit: type=1400 audit(1794050848.338:1063): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=476625 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[44895.267326] audit: type=1400 audit(1794050848.338:1064): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=476625 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[44895.267356] audit: type=1400 audit(1794050848.338:1065): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=476625 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[44921.722774] tbtun: tunnel 1 carrier 108 gen 258 lost: sock=1 connected=1 hello_sent=1 up=1
+[44954.122272] tbtun: carrier 69 stalled: repath paused, new frames avoid it
+[44954.495735] tbtun: carrier 69 recovered after 373 ms: back in the stripe
+[44959.743635] audit: type=1400 audit(1794050912.816:1066): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=488178 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[44959.743688] audit: type=1400 audit(1794050912.816:1067): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=488178 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[44959.744132] audit: type=1400 audit(1794050912.816:1068): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=488178 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[44959.744161] audit: type=1400 audit(1794050912.816:1069): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=488178 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[44961.226250] tbtun: tunnel 1 carrier 221 gen 222 lost: sock=1 connected=1 hello_sent=1 up=1
+[44961.279081] tbtun: tunnel 1 carrier 223 gen 261 lost: sock=1 connected=1 hello_sent=1 up=1
+[44979.658632] tbtun: carrier 44 stalled: repath paused, new frames avoid it
+[44980.565317] tbtun: tunnel 1 carrier 107 gen 108 lost: sock=1 connected=1 hello_sent=1 up=1
+[44981.371946] tbtun: carrier 44 recovered after 1713 ms: back in the stripe
+[44982.015306] tbtun: tunnel 1 carrier 18 gen 19 lost: sock=1 connected=1 hello_sent=1 up=1
+[45013.944925] tbtun: carrier 69 stalled: repath paused, new frames avoid it
+[45014.744976] tbtun: carrier 69 recovered after 800 ms: back in the stripe
+[45029.045021] tbtun: carrier 69 stalled: repath paused, new frames avoid it
+[45029.848619] audit: type=1400 audit(1794050982.920:1070): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=494210 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45029.848638] audit: type=1400 audit(1794050982.920:1071): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=494210 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45029.848771] audit: type=1400 audit(1794050982.920:1072): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=494210 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45029.848780] audit: type=1400 audit(1794050982.920:1073): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=494210 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45031.922317] tbtun: carrier 69 recovered after 2877 ms: back in the stripe
+[45035.891409] tbtun: tunnel 1 carrier 210 gen 211 lost: sock=1 connected=1 hello_sent=1 up=1
+[45050.504664] tbtun: carrier 71 stalled: repath paused, new frames avoid it
+[45052.641329] tbtun: carrier 71 recovered after 2136 ms: back in the stripe
+[45054.241426] tbtun: carrier 192 stalled: repath paused, new frames avoid it
+[45054.614515] tbtun: carrier 192 recovered after 373 ms: back in the stripe
+[45064.164331] tbtun: unloaded
+[45110.033430] audit: type=1400 audit(1794051063.104:1074): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=498069 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45110.033482] audit: type=1400 audit(1794051063.104:1075): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=498069 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45110.033931] audit: type=1400 audit(1794051063.107:1076): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=498069 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45110.033946] audit: type=1400 audit(1794051063.107:1077): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=498069 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45569.435072] audit: type=1400 audit(1794051522.509:1078): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=499762 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45569.435124] audit: type=1400 audit(1794051522.509:1079): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=499762 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45569.435646] audit: type=1400 audit(1794051522.512:1080): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=499762 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45569.435702] audit: type=1400 audit(1794051522.512:1081): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=499762 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45731.676916] audit: type=1400 audit(1794051684.758:1082): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=501414 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45731.676942] audit: type=1400 audit(1794051684.758:1083): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=501414 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45731.677057] audit: type=1400 audit(1794051684.758:1084): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=501414 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45731.677070] audit: type=1400 audit(1794051684.758:1085): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=501414 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45731.677171] audit: type=1400 audit(1794051684.758:1086): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=501414 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45731.677184] audit: type=1400 audit(1794051684.758:1087): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=501414 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45799.127637] audit: type=1400 audit(1794051752.208:1088): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=510530 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45799.127663] audit: type=1400 audit(1794051752.208:1089): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=510530 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45799.128071] audit: type=1400 audit(1794051752.208:1090): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=510530 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45799.128099] audit: type=1400 audit(1794051752.208:1091): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=510530 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45799.128485] audit: type=1400 audit(1794051752.208:1092): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=510530 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45799.128512] audit: type=1400 audit(1794051752.208:1093): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=510530 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45849.343920] tbtun 0.2.0 loaded: 1 tunnels max, 256 carriers max
+[45860.179860] audit: type=1400 audit(1794051813.259:1094): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=516445 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45860.179878] audit: type=1400 audit(1794051813.259:1095): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=516445 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45860.180317] audit: type=1400 audit(1794051813.259:1096): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=516445 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45860.180333] audit: type=1400 audit(1794051813.259:1097): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=516445 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45860.180684] audit: type=1400 audit(1794051813.259:1098): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=516445 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45860.180713] audit: type=1400 audit(1794051813.259:1099): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=516445 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45860.181084] audit: type=1400 audit(1794051813.259:1100): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=516445 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45860.181111] audit: type=1400 audit(1794051813.259:1101): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=516445 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45876.685136] tbtun: tunnel 1 carrier 39 failed to connect: -110
+[45882.111239] tbtun: tunnel 1 carrier 80 gen 81 lost: sock=1 connected=1 hello_sent=1 up=1
+[45913.031793] tbtun: carrier 246 stalled: repath paused, new frames avoid it
+[45913.458262] tbtun: carrier 246 recovered after 426 ms: back in the stripe
+[45923.072229] audit: type=1400 audit(1794051876.153:1102): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=524903 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45923.072257] audit: type=1400 audit(1794051876.153:1103): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=524903 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45923.072446] audit: type=1400 audit(1794051876.153:1104): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=524903 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45923.072456] audit: type=1400 audit(1794051876.153:1105): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=524903 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45923.072485] audit: type=1400 audit(1794051876.153:1106): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=524903 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45923.072493] audit: type=1400 audit(1794051876.153:1107): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=524903 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45923.072599] audit: type=1400 audit(1794051876.153:1108): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=524903 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45923.072607] audit: type=1400 audit(1794051876.153:1109): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=524903 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45985.892767] audit: type=1400 audit(1794051938.974:1110): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=528733 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45985.892818] audit: type=1400 audit(1794051938.974:1111): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=528733 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45985.893254] audit: type=1400 audit(1794051938.974:1112): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=528733 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45985.893284] audit: type=1400 audit(1794051938.974:1113): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=528733 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45985.893673] audit: type=1400 audit(1794051938.974:1114): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=528733 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45985.893703] audit: type=1400 audit(1794051938.974:1115): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=528733 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45985.894109] audit: type=1400 audit(1794051938.977:1116): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=528733 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[45985.894133] audit: type=1400 audit(1794051938.977:1117): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=528733 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46048.952236] audit: type=1400 audit(1794052002.034:1118): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=532224 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46048.952288] audit: type=1400 audit(1794052002.034:1119): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=532224 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46048.952705] audit: type=1400 audit(1794052002.034:1120): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=532224 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46048.952733] audit: type=1400 audit(1794052002.034:1121): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=532224 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46048.953115] audit: type=1400 audit(1794052002.034:1122): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=532224 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46048.953144] audit: type=1400 audit(1794052002.034:1123): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=532224 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46048.953541] audit: type=1400 audit(1794052002.038:1124): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=532224 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46048.953567] audit: type=1400 audit(1794052002.038:1125): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=532224 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46111.655045] audit: type=1400 audit(1794052064.738:1126): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=535717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46111.655098] audit: type=1400 audit(1794052064.738:1127): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=535717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46111.655518] audit: type=1400 audit(1794052064.738:1128): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=535717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46111.655546] audit: type=1400 audit(1794052064.738:1129): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=535717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46111.656030] audit: type=1400 audit(1794052064.742:1130): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=535717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46111.656043] audit: type=1400 audit(1794052064.742:1131): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=535717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46111.656420] audit: type=1400 audit(1794052064.742:1132): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=535717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46111.656432] audit: type=1400 audit(1794052064.742:1133): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=535717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46158.318621] tbtun: carrier 1 stalled: repath paused, new frames avoid it
+[46165.065208] tbtun: carrier 1 recovered after 6746 ms: back in the stripe
+[46174.638951] audit: type=1400 audit(1794052127.722:1134): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=539208 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46174.638999] audit: type=1400 audit(1794052127.722:1135): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=539208 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46174.639423] audit: type=1400 audit(1794052127.722:1136): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=539208 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46174.639451] audit: type=1400 audit(1794052127.722:1137): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=539208 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46174.639837] audit: type=1400 audit(1794052127.722:1138): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=539208 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46174.639865] audit: type=1400 audit(1794052127.722:1139): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=539208 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46174.640242] audit: type=1400 audit(1794052127.722:1140): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=539208 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46174.640269] audit: type=1400 audit(1794052127.722:1141): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=539208 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46211.398852] tbtun: tunnel 1 carrier 138 gen 139 lost: sock=1 connected=1 hello_sent=1 up=1
+[46218.475007] tbtun: carrier 226 stalled: repath paused, new frames avoid it
+[46218.581907] tbtun: carrier 226 recovered after 106 ms: back in the stripe
+[46237.457553] audit: type=1400 audit(1794052190.540:1142): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=542702 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46237.457606] audit: type=1400 audit(1794052190.540:1143): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=542702 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46237.458147] audit: type=1400 audit(1794052190.543:1144): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=542702 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46237.458163] audit: type=1400 audit(1794052190.543:1145): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=542702 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46237.458575] audit: type=1400 audit(1794052190.543:1146): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=542702 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46237.458589] audit: type=1400 audit(1794052190.543:1147): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=542702 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46237.458985] audit: type=1400 audit(1794052190.543:1148): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=542702 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46237.458999] audit: type=1400 audit(1794052190.543:1149): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=542702 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46254.791130] tbtun: carrier 249 stalled: repath paused, new frames avoid it
+[46254.950994] tbtun: carrier 249 recovered after 159 ms: back in the stripe
+[46300.600875] audit: type=1400 audit(1794052253.687:1150): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=546536 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46300.600902] audit: type=1400 audit(1794052253.687:1151): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=546536 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46300.601337] audit: type=1400 audit(1794052253.687:1152): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=546536 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46300.601352] audit: type=1400 audit(1794052253.687:1153): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=546536 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46300.601698] audit: type=1400 audit(1794052253.687:1154): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=546536 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46300.601725] audit: type=1400 audit(1794052253.687:1155): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=546536 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46363.613862] audit: type=1400 audit(1794052316.701:1156): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=550026 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46363.613889] audit: type=1400 audit(1794052316.701:1157): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=550026 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46363.613984] audit: type=1400 audit(1794052316.701:1158): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=550026 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46363.613996] audit: type=1400 audit(1794052316.701:1159): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=550026 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46363.614095] audit: type=1400 audit(1794052316.701:1160): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=550026 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46363.614107] audit: type=1400 audit(1794052316.701:1161): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=550026 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46426.366021] audit: type=1400 audit(1794052379.455:1162): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=553523 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46426.366049] audit: type=1400 audit(1794052379.455:1163): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=553523 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46426.366477] audit: type=1400 audit(1794052379.455:1164): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=553523 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46426.366491] audit: type=1400 audit(1794052379.455:1165): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=553523 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46426.366885] audit: type=1400 audit(1794052379.455:1166): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=553523 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46426.366899] audit: type=1400 audit(1794052379.455:1167): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=553523 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46489.255363] audit: type=1400 audit(1794052442.343:1168): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=557019 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46489.255390] audit: type=1400 audit(1794052442.343:1169): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=557019 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46489.255807] audit: type=1400 audit(1794052442.343:1170): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=557019 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46489.255822] audit: type=1400 audit(1794052442.343:1171): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=557019 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46489.256226] audit: type=1400 audit(1794052442.343:1172): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=557019 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46489.256240] audit: type=1400 audit(1794052442.343:1173): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=557019 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46499.018376] tbtun: carrier 215 stalled: repath paused, new frames avoid it
+[46499.231944] tbtun: carrier 215 recovered after 213 ms: back in the stripe
+[46513.452195] tbtun: tunnel 1 carrier 222 gen 223 lost: sock=1 connected=1 hello_sent=1 up=1
+[46552.182706] audit: type=1400 audit(1794052505.270:1174): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=560510 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46552.182761] audit: type=1400 audit(1794052505.270:1175): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=560510 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46552.183197] audit: type=1400 audit(1794052505.270:1176): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=560510 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46552.183228] audit: type=1400 audit(1794052505.270:1177): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=560510 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46552.183625] audit: type=1400 audit(1794052505.270:1178): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=560510 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46552.183654] audit: type=1400 audit(1794052505.270:1179): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=560510 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46615.069719] audit: type=1400 audit(1794052568.157:1180): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=564340 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46615.069773] audit: type=1400 audit(1794052568.157:1181): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=564340 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46615.070257] audit: type=1400 audit(1794052568.161:1182): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=564340 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46615.070287] audit: type=1400 audit(1794052568.161:1183): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=564340 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46615.070681] audit: type=1400 audit(1794052568.161:1184): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=564340 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46615.070710] audit: type=1400 audit(1794052568.161:1185): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=564340 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46637.263459] tbtun: carrier 180 stalled: repath paused, new frames avoid it
+[46637.640088] tbtun: carrier 180 recovered after 376 ms: back in the stripe
+[46677.336619] tbtun: carrier 114 stalled: repath paused, new frames avoid it
+[46677.669677] tbtun: carrier 114 recovered after 333 ms: back in the stripe
+[46677.887405] audit: type=1400 audit(1794052630.978:1186): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=567834 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46677.887420] audit: type=1400 audit(1794052630.978:1187): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=567834 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46677.887542] audit: type=1400 audit(1794052630.978:1188): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=567834 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46677.887550] audit: type=1400 audit(1794052630.978:1189): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=567834 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46677.887658] audit: type=1400 audit(1794052630.978:1190): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=567834 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46677.887667] audit: type=1400 audit(1794052630.978:1191): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=567834 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46740.602949] audit: type=1400 audit(1794052693.692:1192): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=571322 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46740.602964] audit: type=1400 audit(1794052693.692:1193): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=571322 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46740.603089] audit: type=1400 audit(1794052693.692:1194): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=571322 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46740.603098] audit: type=1400 audit(1794052693.692:1195): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=571322 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46740.603207] audit: type=1400 audit(1794052693.692:1196): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=571322 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46740.603215] audit: type=1400 audit(1794052693.692:1197): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=571322 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46748.435603] tbtun: carrier 182 stalled: repath paused, new frames avoid it
+[46748.755848] tbtun: carrier 182 recovered after 320 ms: back in the stripe
+[46762.529092] tbtun: carrier 183 stalled: repath paused, new frames avoid it
+[46763.915804] tbtun: carrier 183 recovered after 1386 ms: back in the stripe
+[46788.635468] tbtun: carrier 208 stalled: repath paused, new frames avoid it
+[46789.598712] tbtun: carrier 208 recovered after 963 ms: back in the stripe
+[46803.353775] audit: type=1400 audit(1794052756.443:1198): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=574814 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46803.353828] audit: type=1400 audit(1794052756.443:1199): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=574814 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46803.354272] audit: type=1400 audit(1794052756.443:1200): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=574814 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46803.354302] audit: type=1400 audit(1794052756.443:1201): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=574814 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46803.354695] audit: type=1400 audit(1794052756.443:1202): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=574814 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46803.354823] audit: type=1400 audit(1794052756.446:1203): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=574814 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46807.035228] tbtun: carrier 239 stalled: repath paused, new frames avoid it
+[46807.248256] tbtun: carrier 239 recovered after 213 ms: back in the stripe
+[46833.297954] tbtun: carrier 155 stalled: repath paused, new frames avoid it
+[46833.404523] tbtun: carrier 155 recovered after 106 ms: back in the stripe
+[46854.867768] tbtun: carrier 155 stalled: repath paused, new frames avoid it
+[46855.891281] tbtun: carrier 155 recovered after 1023 ms: back in the stripe
+[46866.256414] audit: type=1400 audit(1794052819.347:1204): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=578312 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46866.256440] audit: type=1400 audit(1794052819.347:1205): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=578312 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46866.256500] audit: type=1400 audit(1794052819.347:1206): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=578312 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46866.256510] audit: type=1400 audit(1794052819.347:1207): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=578312 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46866.256620] audit: type=1400 audit(1794052819.347:1208): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=578312 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46866.256629] audit: type=1400 audit(1794052819.347:1209): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=578312 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46899.213800] tbtun: carrier 210 stalled: repath paused, new frames avoid it
+[46899.267483] tbtun: carrier 210 recovered after 53 ms: back in the stripe
+[46919.230617] tbtun: carrier 210 stalled: repath paused, new frames avoid it
+[46919.336926] tbtun: carrier 210 recovered after 106 ms: back in the stripe
+[46928.899325] audit: type=1400 audit(1794052881.991:1210): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=582144 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46928.899353] audit: type=1400 audit(1794052881.991:1211): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=582144 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46928.899385] audit: type=1400 audit(1794052881.991:1212): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=582144 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46928.899395] audit: type=1400 audit(1794052881.991:1213): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=582144 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46928.899508] audit: type=1400 audit(1794052881.991:1214): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=582144 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46928.899517] audit: type=1400 audit(1794052881.991:1215): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=582144 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46939.053562] tbtun: carrier 229 stalled: repath paused, new frames avoid it
+[46939.533716] tbtun: carrier 229 recovered after 480 ms: back in the stripe
+[46954.243446] tbtun: carrier 249 stalled: repath paused, new frames avoid it
+[46954.296590] tbtun: carrier 162 stalled: repath paused, new frames avoid it
+[46955.106578] tbtun: carrier 162 recovered after 809 ms: back in the stripe
+[46956.349869] tbtun: carrier 249 recovered after 2106 ms: back in the stripe
+[46959.606703] tbtun: carrier 211 stalled: repath paused, new frames avoid it
+[46959.980273] tbtun: carrier 211 recovered after 373 ms: back in the stripe
+[46967.404054] tbtun: carrier 241 stalled: repath paused, new frames avoid it
+[46967.892996] tbtun: carrier 245 stalled: repath paused, new frames avoid it
+[46969.606477] tbtun: carrier 241 recovered after 2202 ms: back in the stripe
+[46970.033417] tbtun: carrier 245 recovered after 2140 ms: back in the stripe
+[46977.296331] tbtun: carrier 242 stalled: repath paused, new frames avoid it
+[46977.669743] tbtun: carrier 242 recovered after 373 ms: back in the stripe
+[46980.219599] tbtun: carrier 232 stalled: repath paused, new frames avoid it
+[46982.459926] tbtun: carrier 232 recovered after 2240 ms: back in the stripe
+[46989.146111] tbtun: carrier 49 stalled: repath paused, new frames avoid it
+[46989.786146] tbtun: carrier 49 recovered after 640 ms: back in the stripe
+[46991.458803] audit: type=1400 audit(1794052944.552:1216): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=585640 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46991.458831] audit: type=1400 audit(1794052944.552:1217): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=585640 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46991.458883] audit: type=1400 audit(1794052944.552:1218): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=585640 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46991.458893] audit: type=1400 audit(1794052944.552:1219): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=585640 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46991.458999] audit: type=1400 audit(1794052944.552:1220): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=585640 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[46991.459008] audit: type=1400 audit(1794052944.552:1221): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=585640 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47006.346366] tbtun: carrier 252 stalled: repath paused, new frames avoid it
+[47006.719702] tbtun: carrier 252 recovered after 373 ms: back in the stripe
+[47013.665852] tbtun: carrier 187 stalled: repath paused, new frames avoid it
+[47014.252559] tbtun: carrier 187 recovered after 586 ms: back in the stripe
+[47014.585827] tbtun: tunnel 1 carrier 87 gen 88 lost: sock=1 connected=1 hello_sent=1 up=1
+[47045.249250] tbtun: carrier 213 stalled: repath paused, new frames avoid it
+[47045.998878] tbtun: carrier 213 recovered after 749 ms: back in the stripe
+[47053.055556] tbtun: carrier 81 stalled: repath paused, new frames avoid it
+[47053.278861] tbtun: carrier 81 recovered after 223 ms: back in the stripe
+[47054.165902] audit: type=1400 audit(1794053007.259:1222): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=589135 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47054.165955] audit: type=1400 audit(1794053007.259:1223): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=589135 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47054.166402] audit: type=1400 audit(1794053007.259:1224): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=589135 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47054.166432] audit: type=1400 audit(1794053007.259:1225): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=589135 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47054.166827] audit: type=1400 audit(1794053007.259:1226): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=589135 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47054.166856] audit: type=1400 audit(1794053007.259:1227): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=589135 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47067.338528] tbtun: carrier 56 stalled: repath paused, new frames avoid it
+[47067.948481] tbtun: carrier 56 recovered after 609 ms: back in the stripe
+[47068.161876] tbtun: carrier 234 stalled: repath paused, new frames avoid it
+[47070.098498] tbtun: carrier 234 recovered after 1936 ms: back in the stripe
+[47079.125617] tbtun: carrier 181 stalled: repath paused, new frames avoid it
+[47080.328941] tbtun: carrier 181 recovered after 1203 ms: back in the stripe
+[47092.875064] tbtun: carrier 35 stalled: repath paused, new frames avoid it
+[47093.095655] tbtun: carrier 223 stalled: repath paused, new frames avoid it
+[47093.315123] tbtun: carrier 223 recovered after 219 ms: back in the stripe
+[47095.501537] tbtun: carrier 35 recovered after 2626 ms: back in the stripe
+[47099.721545] tbtun: tunnel 1 carrier 190 gen 191 lost: sock=1 connected=1 hello_sent=1 up=1
+[47100.578124] tbtun: carrier 164 stalled: repath paused, new frames avoid it
+[47101.278190] tbtun: carrier 164 recovered after 700 ms: back in the stripe
+[47103.011560] tbtun: carrier 129 stalled: repath paused, new frames avoid it
+[47103.234942] tbtun: carrier 129 recovered after 223 ms: back in the stripe
+[47116.180268] audit: type=1400 audit(1794053069.273:1228): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=597491 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47116.180283] audit: type=1400 audit(1794053069.273:1229): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=597491 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47116.180422] audit: type=1400 audit(1794053069.273:1230): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=597491 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47116.180430] audit: type=1400 audit(1794053069.273:1231): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=597491 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47133.344376] tbtun: carrier 49 stalled: repath paused, new frames avoid it
+[47135.324466] tbtun: carrier 49 recovered after 1980 ms: back in the stripe
+[47166.447641] tbtun: tunnel 1 carrier 227 gen 228 lost: sock=1 connected=1 hello_sent=1 up=1
+[47174.484089] tbtun: carrier 96 stalled: repath paused, new frames avoid it
+[47177.600748] tbtun: carrier 96 recovered after 3116 ms: back in the stripe
+[47178.260101] audit: type=1400 audit(1794053131.354:1232): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=604175 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47178.260152] audit: type=1400 audit(1794053131.354:1233): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=604175 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47178.260710] audit: type=1400 audit(1794053131.357:1234): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=604175 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47178.260723] audit: type=1400 audit(1794053131.357:1235): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=604175 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47197.200470] tbtun: unloaded
+[47408.800842] audit: type=1400 audit(1794053361.896:1236): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=606724 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47408.800868] audit: type=1400 audit(1794053361.896:1237): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=606724 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47408.801236] audit: type=1400 audit(1794053361.896:1238): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=606724 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47408.801264] audit: type=1400 audit(1794053361.896:1239): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=606724 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47575.861368] audit: type=1400 audit(1794053528.961:1240): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=608386 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47575.861394] audit: type=1400 audit(1794053528.961:1241): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=608386 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47575.861772] audit: type=1400 audit(1794053528.961:1242): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=608386 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47575.861800] audit: type=1400 audit(1794053528.961:1243): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=608386 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47575.862189] audit: type=1400 audit(1794053528.961:1244): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=608386 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47575.862217] audit: type=1400 audit(1794053528.961:1245): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=608386 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47640.216797] audit: type=1400 audit(1794053593.315:1246): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=617476 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47640.216824] audit: type=1400 audit(1794053593.315:1247): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=617476 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47640.216921] audit: type=1400 audit(1794053593.315:1248): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=617476 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47640.216933] audit: type=1400 audit(1794053593.315:1249): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=617476 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47640.217047] audit: type=1400 audit(1794053593.315:1250): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=617476 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47640.217059] audit: type=1400 audit(1794053593.315:1251): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=617476 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47702.230130] audit: type=1400 audit(1794053655.329:1252): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=622020 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47702.230156] audit: type=1400 audit(1794053655.329:1253): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=622020 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47702.230589] audit: type=1400 audit(1794053655.329:1254): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=622020 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47702.230604] audit: type=1400 audit(1794053655.329:1255): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=622020 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47702.230949] audit: type=1400 audit(1794053655.329:1256): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=622020 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47702.230977] audit: type=1400 audit(1794053655.329:1257): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=622020 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47707.458082] tbtun 0.2.0 loaded: 1 tunnels max, 256 carriers max
+[47762.767567] audit: type=1400 audit(1794053715.870:1258): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=629937 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47762.767593] audit: type=1400 audit(1794053715.870:1259): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=629937 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47762.768041] audit: type=1400 audit(1794053715.870:1260): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=629937 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47762.768058] audit: type=1400 audit(1794053715.870:1261): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=629937 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47762.768451] audit: type=1400 audit(1794053715.870:1262): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=629937 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47762.768464] audit: type=1400 audit(1794053715.870:1263): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=629937 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47788.913711] tbtun: tunnel 1 carrier 6 gen 7 lost: sock=1 connected=1 hello_sent=1 up=1
+[47790.223717] tbtun: tunnel 1 carrier 9 gen 10 lost: sock=1 connected=1 hello_sent=1 up=1
+[47793.940626] tbtun: carrier 145 stalled: repath paused, new frames avoid it
+[47794.313906] tbtun: carrier 145 recovered after 373 ms: back in the stripe
+[47826.917217] audit: type=1400 audit(1794053780.021:1264): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=636047 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47826.917266] audit: type=1400 audit(1794053780.021:1265): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=636047 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47826.917691] audit: type=1400 audit(1794053780.021:1266): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=636047 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47826.917719] audit: type=1400 audit(1794053780.021:1267): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=636047 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47826.918104] audit: type=1400 audit(1794053780.021:1268): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=636047 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47826.918132] audit: type=1400 audit(1794053780.021:1269): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=636047 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47826.918512] audit: type=1400 audit(1794053780.021:1270): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=636047 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47826.918541] audit: type=1400 audit(1794053780.021:1271): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=636047 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47889.625712] audit: type=1400 audit(1794053842.728:1272): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=639541 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47889.625740] audit: type=1400 audit(1794053842.728:1273): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=639541 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47889.625777] audit: type=1400 audit(1794053842.728:1274): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=639541 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47889.625786] audit: type=1400 audit(1794053842.728:1275): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=639541 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47889.625938] audit: type=1400 audit(1794053842.728:1276): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=639541 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47889.625948] audit: type=1400 audit(1794053842.731:1277): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=639541 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47889.626080] audit: type=1400 audit(1794053842.731:1278): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=639541 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47889.626093] audit: type=1400 audit(1794053842.731:1279): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=639541 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47913.396001] tbtun: carrier 120 stalled: repath paused, new frames avoid it
+[47914.946121] tbtun: carrier 120 recovered after 1550 ms: back in the stripe
+[47952.275522] audit: type=1400 audit(1794053905.379:1280): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=643030 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47952.275550] audit: type=1400 audit(1794053905.379:1281): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=643030 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47952.275962] audit: type=1400 audit(1794053905.379:1282): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=643030 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47952.275978] audit: type=1400 audit(1794053905.379:1283): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=643030 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47952.276374] audit: type=1400 audit(1794053905.379:1284): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=643030 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47952.276388] audit: type=1400 audit(1794053905.379:1285): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=643030 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47952.276784] audit: type=1400 audit(1794053905.379:1286): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=643030 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[47952.276798] audit: type=1400 audit(1794053905.379:1287): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=643030 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48015.264081] audit: type=1400 audit(1794053968.366:1288): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=646518 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48015.264099] audit: type=1400 audit(1794053968.366:1289): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=646518 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48015.264469] audit: type=1400 audit(1794053968.366:1290): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=646518 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48015.264522] audit: type=1400 audit(1794053968.366:1291): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=646518 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48015.264898] audit: type=1400 audit(1794053968.370:1292): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=646518 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48015.264924] audit: type=1400 audit(1794053968.370:1293): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=646518 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48015.265295] audit: type=1400 audit(1794053968.370:1294): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=646518 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48015.265322] audit: type=1400 audit(1794053968.370:1295): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=646518 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48077.959570] audit: type=1400 audit(1794054031.064:1296): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=650017 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48077.959622] audit: type=1400 audit(1794054031.064:1297): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=650017 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48077.960036] audit: type=1400 audit(1794054031.064:1298): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=650017 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48077.960064] audit: type=1400 audit(1794054031.064:1299): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=650017 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48077.960448] audit: type=1400 audit(1794054031.064:1300): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=650017 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48077.960495] audit: type=1400 audit(1794054031.067:1301): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=650017 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48077.960871] audit: type=1400 audit(1794054031.067:1302): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=650017 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48077.960898] audit: type=1400 audit(1794054031.067:1303): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=650017 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48140.537612] audit: type=1400 audit(1794054093.644:1304): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=653850 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48140.537632] audit: type=1400 audit(1794054093.644:1305): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=653850 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48140.537767] audit: type=1400 audit(1794054093.644:1306): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=653850 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48140.537776] audit: type=1400 audit(1794054093.644:1307): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=653850 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48140.537885] audit: type=1400 audit(1794054093.644:1308): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=653850 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48140.537893] audit: type=1400 audit(1794054093.644:1309): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=653850 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48203.714152] audit: type=1400 audit(1794054156.822:1310): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=657341 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48203.714205] audit: type=1400 audit(1794054156.822:1311): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=657341 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48203.714651] audit: type=1400 audit(1794054156.822:1312): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=657341 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48203.714681] audit: type=1400 audit(1794054156.822:1313): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=657341 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48203.715082] audit: type=1400 audit(1794054156.822:1314): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=657341 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[48203.715110] audit: type=1400 audit(1794054156.822:1315): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=657341 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0

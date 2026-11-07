@@ -1,0 +1,800 @@
+[54202.072171] tbtun: fec super 896 stuck: next=896 total_known=0 total_pkts=0 next_deliver=114688 deliver_bytes=938475626 group=0/32 used=1 ready=0 id=896 nreal=4 shares=2/4 parity=4 gap_us=2180010
+[54202.088834] tbtun: fec super 896 stuck: next=896 total_known=0 total_pkts=0 next_deliver=114688 deliver_bytes=938475626 group=0/32 used=1 ready=0 id=896 nreal=4 shares=2/4 parity=4 gap_us=2196673
+[54206.949056] tbt_fec_deliver_ready: 401 callbacks suppressed
+[54206.949072] tbtun: fec super 898 stuck: next=898 total_known=0 total_pkts=0 next_deliver=114944 deliver_bytes=940572778 group=0/32 used=1 ready=0 id=898 nreal=4 shares=2/4 parity=4 gap_us=1376814
+[54206.962455] tbtun: fec super 898 stuck: next=898 total_known=0 total_pkts=0 next_deliver=114944 deliver_bytes=940572778 group=0/32 used=1 ready=0 id=898 nreal=4 shares=2/4 parity=4 gap_us=1390213
+[54206.975697] tbtun: fec super 898 stuck: next=898 total_known=0 total_pkts=0 next_deliver=114944 deliver_bytes=940572778 group=0/32 used=1 ready=0 id=898 nreal=4 shares=2/4 parity=4 gap_us=1403454
+[54206.989011] tbtun: fec super 898 stuck: next=898 total_known=0 total_pkts=0 next_deliver=114944 deliver_bytes=940572778 group=0/32 used=1 ready=0 id=898 nreal=4 shares=2/4 parity=4 gap_us=1416768
+[54207.002830] tbtun: fec super 898 stuck: next=898 total_known=0 total_pkts=0 next_deliver=114944 deliver_bytes=940572778 group=0/32 used=1 ready=0 id=898 nreal=4 shares=2/4 parity=4 gap_us=1430589
+[54207.003233] tbtun: fec super 898 stuck: next=898 total_known=0 total_pkts=0 next_deliver=114944 deliver_bytes=940572778 group=0/32 used=1 ready=0 id=898 nreal=4 shares=2/4 parity=4 gap_us=1430992
+[54207.015641] tbtun: fec super 898 stuck: next=898 total_known=0 total_pkts=0 next_deliver=114944 deliver_bytes=940572778 group=0/32 used=1 ready=0 id=898 nreal=4 shares=2/4 parity=4 gap_us=1443400
+[54207.029169] tbtun: fec super 898 stuck: next=898 total_known=0 total_pkts=0 next_deliver=114944 deliver_bytes=940572778 group=0/32 used=1 ready=0 id=898 nreal=4 shares=2/4 parity=4 gap_us=1456929
+[54207.029498] tbtun: fec super 898 stuck: next=898 total_known=0 total_pkts=0 next_deliver=114944 deliver_bytes=940572778 group=0/32 used=1 ready=0 id=898 nreal=4 shares=2/4 parity=4 gap_us=1457258
+[54207.042327] tbtun: fec super 898 stuck: next=898 total_known=0 total_pkts=0 next_deliver=114944 deliver_bytes=940572778 group=0/32 used=1 ready=0 id=898 nreal=4 shares=2/4 parity=4 gap_us=1470086
+[54211.958656] tbt_fec_deliver_ready: 420 callbacks suppressed
+[54211.958663] tbtun: fec super 900 stuck: next=900 total_known=0 total_pkts=0 next_deliver=115200 deliver_bytes=942669930 group=22/32 used=1 ready=0 id=900 nreal=4 shares=2/4 parity=4 gap_us=1946494
+[54211.975396] tbtun: fec super 900 stuck: next=900 total_known=0 total_pkts=0 next_deliver=115200 deliver_bytes=942669930 group=22/32 used=1 ready=0 id=900 nreal=4 shares=2/4 parity=4 gap_us=1963233
+[54211.988786] tbtun: fec super 900 stuck: next=900 total_known=0 total_pkts=0 next_deliver=115200 deliver_bytes=942669930 group=22/32 used=1 ready=0 id=900 nreal=4 shares=2/4 parity=4 gap_us=1976624
+[54212.002059] tbtun: fec super 900 stuck: next=900 total_known=0 total_pkts=0 next_deliver=115200 deliver_bytes=942669930 group=22/32 used=1 ready=0 id=900 nreal=4 shares=2/4 parity=4 gap_us=1989898
+[54212.002101] tbtun: fec super 900 stuck: next=900 total_known=0 total_pkts=0 next_deliver=115200 deliver_bytes=942669930 group=22/32 used=1 ready=0 id=900 nreal=4 shares=2/4 parity=4 gap_us=1989941
+[54212.015247] tbtun: fec super 900 stuck: next=900 total_known=0 total_pkts=0 next_deliver=115200 deliver_bytes=942669930 group=22/32 used=1 ready=0 id=900 nreal=4 shares=2/4 parity=4 gap_us=2003086
+[54212.031911] tbtun: fec super 900 stuck: next=900 total_known=0 total_pkts=0 next_deliver=115200 deliver_bytes=942669930 group=22/32 used=1 ready=0 id=900 nreal=4 shares=2/4 parity=4 gap_us=2019750
+[54212.045289] tbtun: fec super 900 stuck: next=900 total_known=0 total_pkts=0 next_deliver=115200 deliver_bytes=942669930 group=31/32 used=1 ready=0 id=900 nreal=4 shares=3/4 parity=4 gap_us=2033129
+[54212.045328] tbtun: fec super 900 stuck: next=900 total_known=0 total_pkts=0 next_deliver=115200 deliver_bytes=942669930 group=31/32 used=1 ready=0 id=900 nreal=4 shares=3/4 parity=4 gap_us=2033168
+[54212.061914] tbtun: fec super 900 stuck: next=900 total_known=0 total_pkts=0 next_deliver=115200 deliver_bytes=942669930 group=31/32 used=1 ready=0 id=900 nreal=4 shares=3/4 parity=4 gap_us=2049753
+[54215.160509] audit: type=1400 audit(1794060168.335:1790): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=990724 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54215.160562] audit: type=1400 audit(1794060168.335:1791): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=990724 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54215.161008] audit: type=1400 audit(1794060168.335:1792): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=990724 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54215.161041] audit: type=1400 audit(1794060168.335:1793): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=990724 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54215.161439] audit: type=1400 audit(1794060168.335:1794): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=990724 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54215.161467] audit: type=1400 audit(1794060168.335:1795): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=990724 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54216.968533] tbt_fec_deliver_ready: 362 callbacks suppressed
+[54216.968540] tbtun: fec super 902 stuck: next=902 total_known=0 total_pkts=0 next_deliver=115456 deliver_bytes=944767082 group=0/32 used=1 ready=0 id=902 nreal=4 shares=2/4 parity=4 gap_us=1356626
+[54216.985173] tbtun: fec super 902 stuck: next=902 total_known=0 total_pkts=0 next_deliver=115456 deliver_bytes=944767082 group=0/32 used=1 ready=0 id=902 nreal=4 shares=2/4 parity=4 gap_us=1373266
+[54216.998507] tbtun: fec super 902 stuck: next=902 total_known=0 total_pkts=0 next_deliver=115456 deliver_bytes=944767082 group=0/32 used=1 ready=0 id=902 nreal=4 shares=2/4 parity=4 gap_us=1386600
+[54217.011833] tbtun: fec super 902 stuck: next=902 total_known=0 total_pkts=0 next_deliver=115456 deliver_bytes=944767082 group=0/32 used=1 ready=0 id=902 nreal=4 shares=2/4 parity=4 gap_us=1399927
+[54217.025177] tbtun: fec super 902 stuck: next=902 total_known=0 total_pkts=0 next_deliver=115456 deliver_bytes=944767082 group=0/32 used=1 ready=0 id=902 nreal=4 shares=2/4 parity=4 gap_us=1413271
+[54217.038506] tbtun: fec super 902 stuck: next=902 total_known=0 total_pkts=0 next_deliver=115456 deliver_bytes=944767082 group=0/32 used=1 ready=0 id=902 nreal=4 shares=2/4 parity=4 gap_us=1426600
+[54217.051841] tbtun: fec super 902 stuck: next=902 total_known=0 total_pkts=0 next_deliver=115456 deliver_bytes=944767082 group=0/32 used=1 ready=0 id=902 nreal=4 shares=2/4 parity=4 gap_us=1439935
+[54217.065171] tbtun: fec super 902 stuck: next=902 total_known=0 total_pkts=0 next_deliver=115456 deliver_bytes=944767082 group=0/32 used=1 ready=0 id=902 nreal=4 shares=2/4 parity=4 gap_us=1453266
+[54217.078533] tbtun: fec super 902 stuck: next=902 total_known=0 total_pkts=0 next_deliver=115456 deliver_bytes=944767082 group=0/32 used=1 ready=0 id=902 nreal=4 shares=2/4 parity=4 gap_us=1466628
+[54217.091836] tbtun: fec super 902 stuck: next=902 total_known=0 total_pkts=0 next_deliver=115456 deliver_bytes=944767082 group=0/32 used=1 ready=0 id=902 nreal=4 shares=2/4 parity=4 gap_us=1479931
+[54221.978618] tbt_fec_deliver_ready: 408 callbacks suppressed
+[54221.978637] tbtun: fec super 904 stuck: next=904 total_known=0 total_pkts=0 next_deliver=115712 deliver_bytes=946864234 group=0/32 used=1 ready=0 id=904 nreal=4 shares=2/4 parity=4 gap_us=120090
+[54221.978694] tbtun: fec super 904 stuck: next=904 total_known=0 total_pkts=0 next_deliver=115712 deliver_bytes=946864234 group=0/32 used=1 ready=0 id=904 nreal=4 shares=2/4 parity=4 gap_us=120167
+[54221.991894] tbtun: fec super 904 stuck: next=904 total_known=0 total_pkts=0 next_deliver=115712 deliver_bytes=946864234 group=0/32 used=1 ready=0 id=904 nreal=4 shares=2/4 parity=4 gap_us=133366
+[54222.005213] tbtun: fec super 904 stuck: next=904 total_known=0 total_pkts=0 next_deliver=115712 deliver_bytes=946864234 group=0/32 used=1 ready=0 id=904 nreal=4 shares=2/4 parity=4 gap_us=146684
+[54222.018527] tbtun: fec super 904 stuck: next=904 total_known=0 total_pkts=0 next_deliver=115712 deliver_bytes=946864234 group=0/32 used=1 ready=0 id=904 nreal=4 shares=2/4 parity=4 gap_us=159999
+[54222.031817] tbtun: fec super 904 stuck: next=904 total_known=0 total_pkts=0 next_deliver=115712 deliver_bytes=946864234 group=0/32 used=1 ready=0 id=904 nreal=4 shares=2/4 parity=4 gap_us=173289
+[54222.045220] tbtun: fec super 904 stuck: next=904 total_known=0 total_pkts=0 next_deliver=115712 deliver_bytes=946864234 group=0/32 used=1 ready=0 id=904 nreal=4 shares=2/4 parity=4 gap_us=186692
+[54222.058533] tbtun: fec super 904 stuck: next=904 total_known=0 total_pkts=0 next_deliver=115712 deliver_bytes=946864234 group=0/32 used=1 ready=0 id=904 nreal=4 shares=2/4 parity=4 gap_us=200006
+[54222.071932] tbtun: fec super 904 stuck: next=904 total_known=0 total_pkts=0 next_deliver=115712 deliver_bytes=946864234 group=0/32 used=1 ready=0 id=904 nreal=4 shares=2/4 parity=4 gap_us=213404
+[54222.085269] tbtun: fec super 904 stuck: next=904 total_known=0 total_pkts=0 next_deliver=115712 deliver_bytes=946864234 group=0/32 used=1 ready=0 id=904 nreal=4 shares=2/4 parity=4 gap_us=226742
+[54226.985049] tbt_fec_deliver_ready: 411 callbacks suppressed
+[54226.985057] tbtun: fec super 906 stuck: next=906 total_known=0 total_pkts=0 next_deliver=115968 deliver_bytes=948961386 group=0/32 used=1 ready=0 id=906 nreal=4 shares=2/4 parity=4 gap_us=423230
+[54227.005161] tbtun: fec super 906 stuck: next=906 total_known=0 total_pkts=0 next_deliver=115968 deliver_bytes=948961386 group=0/32 used=1 ready=0 id=906 nreal=4 shares=2/4 parity=4 gap_us=443342
+[54227.021721] tbtun: fec super 906 stuck: next=906 total_known=0 total_pkts=0 next_deliver=115968 deliver_bytes=948961386 group=0/32 used=1 ready=0 id=906 nreal=4 shares=2/4 parity=4 gap_us=459901
+[54227.038432] tbtun: fec super 906 stuck: next=906 total_known=0 total_pkts=0 next_deliver=115968 deliver_bytes=948961386 group=0/32 used=1 ready=0 id=906 nreal=4 shares=2/4 parity=4 gap_us=476613
+[54227.051723] tbtun: fec super 906 stuck: next=906 total_known=0 total_pkts=0 next_deliver=115968 deliver_bytes=948961386 group=0/32 used=1 ready=0 id=906 nreal=4 shares=2/4 parity=4 gap_us=489904
+[54227.068388] tbtun: fec super 906 stuck: next=906 total_known=0 total_pkts=0 next_deliver=115968 deliver_bytes=948961386 group=0/32 used=1 ready=0 id=906 nreal=4 shares=2/4 parity=4 gap_us=506569
+[54227.081724] tbtun: fec super 906 stuck: next=906 total_known=0 total_pkts=0 next_deliver=115968 deliver_bytes=948961386 group=0/32 used=1 ready=0 id=906 nreal=4 shares=2/4 parity=4 gap_us=519905
+[54227.098384] tbtun: fec super 906 stuck: next=906 total_known=0 total_pkts=0 next_deliver=115968 deliver_bytes=948961386 group=0/32 used=1 ready=0 id=906 nreal=4 shares=2/4 parity=4 gap_us=536565
+[54227.108444] tbtun: fec super 906 stuck: next=906 total_known=0 total_pkts=0 next_deliver=115968 deliver_bytes=948961386 group=0/32 used=1 ready=0 id=906 nreal=4 shares=2/4 parity=4 gap_us=546626
+[54227.121775] tbtun: fec super 906 stuck: next=906 total_known=0 total_pkts=0 next_deliver=115968 deliver_bytes=948961386 group=0/32 used=1 ready=0 id=906 nreal=4 shares=2/4 parity=4 gap_us=559957
+[54231.991654] tbt_fec_deliver_ready: 364 callbacks suppressed
+[54231.991662] tbtun: fec super 907 stuck: next=907 total_known=0 total_pkts=0 next_deliver=116096 deliver_bytes=950009962 group=0/32 used=1 ready=0 id=907 nreal=4 shares=2/4 parity=4 gap_us=1189910
+[54232.008327] tbtun: fec super 907 stuck: next=907 total_known=0 total_pkts=0 next_deliver=116096 deliver_bytes=950009962 group=0/32 used=1 ready=0 id=907 nreal=4 shares=2/4 parity=4 gap_us=1206583
+[54232.021762] tbtun: fec super 907 stuck: next=907 total_known=0 total_pkts=0 next_deliver=116096 deliver_bytes=950009962 group=0/32 used=1 ready=0 id=907 nreal=4 shares=2/4 parity=4 gap_us=1220017
+[54232.035118] tbtun: fec super 907 stuck: next=907 total_known=0 total_pkts=0 next_deliver=116096 deliver_bytes=950009962 group=0/32 used=1 ready=0 id=907 nreal=4 shares=2/4 parity=4 gap_us=1233373
+[54232.048425] tbtun: fec super 907 stuck: next=907 total_known=0 total_pkts=0 next_deliver=116096 deliver_bytes=950009962 group=0/32 used=1 ready=0 id=907 nreal=4 shares=2/4 parity=4 gap_us=1246681
+[54232.061774] tbtun: fec super 907 stuck: next=907 total_known=0 total_pkts=0 next_deliver=116096 deliver_bytes=950009962 group=0/32 used=1 ready=0 id=907 nreal=4 shares=2/4 parity=4 gap_us=1260031
+[54232.075048] tbtun: fec super 907 stuck: next=907 total_known=0 total_pkts=0 next_deliver=116096 deliver_bytes=950009962 group=0/32 used=1 ready=0 id=907 nreal=4 shares=2/4 parity=4 gap_us=1273304
+[54232.088450] tbtun: fec super 907 stuck: next=907 total_known=0 total_pkts=0 next_deliver=116096 deliver_bytes=950009962 group=0/32 used=1 ready=0 id=907 nreal=4 shares=2/4 parity=4 gap_us=1286706
+[54232.101848] tbtun: fec super 907 stuck: next=907 total_known=0 total_pkts=0 next_deliver=116096 deliver_bytes=950009962 group=0/32 used=1 ready=0 id=907 nreal=4 shares=2/4 parity=4 gap_us=1300105
+[54232.101905] tbtun: fec super 907 stuck: next=907 total_known=0 total_pkts=0 next_deliver=116096 deliver_bytes=950009962 group=0/32 used=1 ready=0 id=907 nreal=4 shares=2/4 parity=4 gap_us=1300163
+[54237.005656] tbt_fec_deliver_ready: 421 callbacks suppressed
+[54237.005669] tbtun: fec super 909 stuck: next=909 total_known=0 total_pkts=0 next_deliver=116352 deliver_bytes=952107114 group=0/32 used=1 ready=0 id=909 nreal=4 shares=2/4 parity=4 gap_us=0
+[54237.005709] tbtun: fec super 909 stuck: next=909 total_known=0 total_pkts=0 next_deliver=116352 deliver_bytes=952107114 group=0/32 used=1 ready=0 id=909 nreal=4 shares=2/4 parity=4 gap_us=0
+[54237.021726] tbtun: fec super 909 stuck: next=909 total_known=0 total_pkts=0 next_deliver=116352 deliver_bytes=952107114 group=0/32 used=1 ready=0 id=909 nreal=4 shares=2/4 parity=4 gap_us=44
+[54237.035030] tbtun: fec super 909 stuck: next=909 total_known=0 total_pkts=0 next_deliver=116352 deliver_bytes=952107114 group=0/32 used=1 ready=0 id=909 nreal=4 shares=2/4 parity=4 gap_us=13349
+[54237.048372] tbtun: fec super 909 stuck: next=909 total_known=0 total_pkts=0 next_deliver=116352 deliver_bytes=952107114 group=0/32 used=1 ready=0 id=909 nreal=4 shares=2/4 parity=4 gap_us=26692
+[54237.061760] tbtun: fec super 909 stuck: next=909 total_known=0 total_pkts=0 next_deliver=116352 deliver_bytes=952107114 group=0/32 used=1 ready=0 id=909 nreal=4 shares=2/4 parity=4 gap_us=40080
+[54237.075048] tbtun: fec super 909 stuck: next=909 total_known=0 total_pkts=0 next_deliver=116352 deliver_bytes=952107114 group=0/32 used=1 ready=0 id=909 nreal=4 shares=2/4 parity=4 gap_us=53368
+[54237.088362] tbtun: fec super 909 stuck: next=909 total_known=0 total_pkts=0 next_deliver=116352 deliver_bytes=952107114 group=0/32 used=1 ready=0 id=909 nreal=4 shares=2/4 parity=4 gap_us=66682
+[54237.101700] tbtun: fec super 909 stuck: next=909 total_known=0 total_pkts=0 next_deliver=116352 deliver_bytes=952107114 group=0/32 used=1 ready=0 id=909 nreal=4 shares=2/4 parity=4 gap_us=80020
+[54237.115033] tbtun: fec super 909 stuck: next=909 total_known=0 total_pkts=0 next_deliver=116352 deliver_bytes=952107114 group=0/32 used=1 ready=0 id=909 nreal=4 shares=2/4 parity=4 gap_us=93353
+[54242.014990] tbt_fec_deliver_ready: 393 callbacks suppressed
+[54242.014998] tbtun: fec super 911 stuck: next=911 total_known=0 total_pkts=0 next_deliver=116608 deliver_bytes=954204266 group=0/32 used=1 ready=0 id=911 nreal=4 shares=2/4 parity=4 gap_us=1166788
+[54242.015019] tbtun: fec super 911 stuck: next=911 total_known=0 total_pkts=0 next_deliver=116608 deliver_bytes=954204266 group=0/32 used=1 ready=0 id=911 nreal=4 shares=2/4 parity=4 gap_us=1166818
+[54242.028299] tbtun: fec super 911 stuck: next=911 total_known=0 total_pkts=0 next_deliver=116608 deliver_bytes=954204266 group=0/32 used=1 ready=0 id=911 nreal=4 shares=2/4 parity=4 gap_us=1180097
+[54242.044882] tbtun: fec super 911 stuck: next=911 total_known=0 total_pkts=0 next_deliver=116608 deliver_bytes=954204266 group=0/32 used=1 ready=0 id=911 nreal=4 shares=2/4 parity=4 gap_us=1196680
+[54242.058384] tbtun: fec super 911 stuck: next=911 total_known=0 total_pkts=0 next_deliver=116608 deliver_bytes=954204266 group=0/32 used=1 ready=0 id=911 nreal=4 shares=2/4 parity=4 gap_us=1210182
+[54242.058408] tbtun: fec super 911 stuck: next=911 total_known=0 total_pkts=0 next_deliver=116608 deliver_bytes=954204266 group=0/32 used=1 ready=0 id=911 nreal=4 shares=2/4 parity=4 gap_us=1210207
+[54242.075026] tbtun: fec super 911 stuck: next=911 total_known=0 total_pkts=0 next_deliver=116608 deliver_bytes=954204266 group=0/32 used=1 ready=0 id=911 nreal=4 shares=2/4 parity=4 gap_us=1226825
+[54242.091731] tbtun: fec super 911 stuck: next=911 total_known=0 total_pkts=0 next_deliver=116608 deliver_bytes=954204266 group=0/32 used=1 ready=0 id=911 nreal=4 shares=2/4 parity=4 gap_us=1243530
+[54242.091777] tbtun: fec super 911 stuck: next=911 total_known=0 total_pkts=0 next_deliver=116608 deliver_bytes=954204266 group=0/32 used=1 ready=0 id=911 nreal=4 shares=2/4 parity=4 gap_us=1243577
+[54242.105076] tbtun: fec super 911 stuck: next=911 total_known=0 total_pkts=0 next_deliver=116608 deliver_bytes=954204266 group=0/32 used=1 ready=0 id=911 nreal=4 shares=2/4 parity=4 gap_us=1256874
+[54247.021908] tbt_fec_deliver_ready: 417 callbacks suppressed
+[54247.021926] tbtun: fec super 913 stuck: next=913 total_known=0 total_pkts=0 next_deliver=116864 deliver_bytes=956301418 group=0/32 used=1 ready=0 id=913 nreal=4 shares=2/4 parity=4 gap_us=1667082
+[54247.035104] tbtun: fec super 913 stuck: next=913 total_known=0 total_pkts=0 next_deliver=116864 deliver_bytes=956301418 group=0/32 used=1 ready=0 id=913 nreal=4 shares=2/4 parity=4 gap_us=1680278
+[54247.035344] tbtun: fec super 913 stuck: next=913 total_known=0 total_pkts=0 next_deliver=116864 deliver_bytes=956301418 group=0/32 used=1 ready=0 id=913 nreal=4 shares=2/4 parity=4 gap_us=1680519
+[54247.051771] tbtun: fec super 913 stuck: next=913 total_known=0 total_pkts=0 next_deliver=116864 deliver_bytes=956301418 group=0/32 used=1 ready=0 id=913 nreal=4 shares=2/4 parity=4 gap_us=1696945
+[54247.065110] tbtun: fec super 913 stuck: next=913 total_known=0 total_pkts=0 next_deliver=116864 deliver_bytes=956301418 group=0/32 used=1 ready=0 id=913 nreal=4 shares=2/4 parity=4 gap_us=1710285
+[54247.078581] tbtun: fec super 913 stuck: next=913 total_known=0 total_pkts=0 next_deliver=116864 deliver_bytes=956301418 group=0/32 used=1 ready=0 id=913 nreal=4 shares=2/4 parity=4 gap_us=1723756
+[54247.078816] tbtun: fec super 913 stuck: next=913 total_known=0 total_pkts=0 next_deliver=116864 deliver_bytes=956301418 group=0/32 used=1 ready=0 id=913 nreal=4 shares=2/4 parity=4 gap_us=1723992
+[54247.091775] tbtun: fec super 913 stuck: next=913 total_known=0 total_pkts=0 next_deliver=116864 deliver_bytes=956301418 group=0/32 used=1 ready=0 id=913 nreal=4 shares=2/4 parity=4 gap_us=1736950
+[54247.105102] tbtun: fec super 913 stuck: next=913 total_known=0 total_pkts=0 next_deliver=116864 deliver_bytes=956301418 group=0/32 used=1 ready=0 id=913 nreal=4 shares=2/4 parity=4 gap_us=1750277
+[54247.118469] tbtun: fec super 913 stuck: next=913 total_known=0 total_pkts=0 next_deliver=116864 deliver_bytes=956301418 group=0/32 used=1 ready=0 id=913 nreal=4 shares=2/4 parity=4 gap_us=1763644
+[54252.024930] tbt_fec_deliver_ready: 390 callbacks suppressed
+[54252.024950] tbtun: fec super 914 stuck: next=914 total_known=0 total_pkts=0 next_deliver=116992 deliver_bytes=957349994 group=22/32 used=1 ready=0 id=914 nreal=4 shares=3/4 parity=4 gap_us=3716843
+[54252.038119] tbtun: fec super 914 stuck: next=914 total_known=0 total_pkts=0 next_deliver=116992 deliver_bytes=957349994 group=22/32 used=1 ready=0 id=914 nreal=4 shares=3/4 parity=4 gap_us=3730034
+[54252.054779] tbtun: fec super 914 stuck: next=914 total_known=0 total_pkts=0 next_deliver=116992 deliver_bytes=957349994 group=22/32 used=1 ready=0 id=914 nreal=4 shares=3/4 parity=4 gap_us=3746694
+[54252.068229] tbtun: fec super 914 stuck: next=914 total_known=0 total_pkts=0 next_deliver=116992 deliver_bytes=957349994 group=22/32 used=1 ready=0 id=914 nreal=4 shares=3/4 parity=4 gap_us=3760144
+[54252.081538] tbtun: fec super 914 stuck: next=914 total_known=0 total_pkts=0 next_deliver=116992 deliver_bytes=957349994 group=22/32 used=1 ready=0 id=914 nreal=4 shares=3/4 parity=4 gap_us=3773453
+[54252.094947] tbtun: fec super 914 stuck: next=914 total_known=0 total_pkts=0 next_deliver=116992 deliver_bytes=957349994 group=22/32 used=1 ready=0 id=914 nreal=4 shares=3/4 parity=4 gap_us=3786861
+[54252.108197] tbtun: fec super 914 stuck: next=914 total_known=0 total_pkts=0 next_deliver=116992 deliver_bytes=957349994 group=22/32 used=1 ready=0 id=914 nreal=4 shares=3/4 parity=4 gap_us=3800113
+[54252.121611] tbtun: fec super 914 stuck: next=914 total_known=0 total_pkts=0 next_deliver=116992 deliver_bytes=957349994 group=22/32 used=1 ready=0 id=914 nreal=4 shares=3/4 parity=4 gap_us=3813526
+[54252.134947] tbtun: fec super 914 stuck: next=914 total_known=0 total_pkts=0 next_deliver=116992 deliver_bytes=957349994 group=22/32 used=1 ready=0 id=914 nreal=4 shares=3/4 parity=4 gap_us=3826863
+[54252.148140] tbtun: fec super 914 stuck: next=914 total_known=0 total_pkts=0 next_deliver=116992 deliver_bytes=957349994 group=22/32 used=1 ready=0 id=914 nreal=4 shares=3/4 parity=4 gap_us=3840055
+[54257.031493] tbt_fec_deliver_ready: 378 callbacks suppressed
+[54257.031501] tbtun: fec super 915 stuck: next=915 total_known=0 total_pkts=0 next_deliver=117120 deliver_bytes=958398570 group=22/32 used=1 ready=0 id=915 nreal=4 shares=3/4 parity=4 gap_us=4156762
+[54257.044782] tbtun: fec super 915 stuck: next=915 total_known=0 total_pkts=0 next_deliver=117120 deliver_bytes=958398570 group=22/32 used=1 ready=0 id=915 nreal=4 shares=3/4 parity=4 gap_us=4170052
+[54257.061403] tbtun: fec super 915 stuck: next=915 total_known=0 total_pkts=0 next_deliver=117120 deliver_bytes=958398570 group=22/32 used=1 ready=0 id=915 nreal=4 shares=3/4 parity=4 gap_us=4186672
+[54257.078046] tbtun: fec super 915 stuck: next=915 total_known=0 total_pkts=0 next_deliver=117120 deliver_bytes=958398570 group=22/32 used=1 ready=0 id=915 nreal=4 shares=3/4 parity=4 gap_us=4203317
+[54257.094880] tbtun: fec super 915 stuck: next=915 total_known=0 total_pkts=0 next_deliver=117120 deliver_bytes=958398570 group=22/32 used=1 ready=0 id=915 nreal=4 shares=3/4 parity=4 gap_us=4220149
+[54257.108232] tbtun: fec super 915 stuck: next=915 total_known=0 total_pkts=0 next_deliver=117120 deliver_bytes=958398570 group=22/32 used=1 ready=0 id=915 nreal=4 shares=3/4 parity=4 gap_us=4233502
+[54257.121562] tbtun: fec super 915 stuck: next=915 total_known=0 total_pkts=0 next_deliver=117120 deliver_bytes=958398570 group=22/32 used=1 ready=0 id=915 nreal=4 shares=3/4 parity=4 gap_us=4246831
+[54257.134939] tbtun: fec super 915 stuck: next=915 total_known=0 total_pkts=0 next_deliver=117120 deliver_bytes=958398570 group=22/32 used=1 ready=0 id=915 nreal=4 shares=3/4 parity=4 gap_us=4260208
+[54257.148170] tbtun: fec super 915 stuck: next=915 total_known=0 total_pkts=0 next_deliver=117120 deliver_bytes=958398570 group=22/32 used=1 ready=0 id=915 nreal=4 shares=3/4 parity=4 gap_us=4273441
+[54257.161586] tbtun: fec super 915 stuck: next=915 total_known=0 total_pkts=0 next_deliver=117120 deliver_bytes=958398570 group=22/32 used=1 ready=0 id=915 nreal=4 shares=3/4 parity=4 gap_us=4286856
+[54262.044738] tbt_fec_deliver_ready: 383 callbacks suppressed
+[54262.044757] tbtun: fec super 916 stuck: next=916 total_known=0 total_pkts=0 next_deliver=117248 deliver_bytes=959447146 group=22/32 used=1 ready=0 id=916 nreal=4 shares=1/4 parity=4 gap_us=4330010
+[54262.058050] tbtun: fec super 916 stuck: next=916 total_known=0 total_pkts=0 next_deliver=117248 deliver_bytes=959447146 group=22/32 used=1 ready=0 id=916 nreal=4 shares=1/4 parity=4 gap_us=4343322
+[54262.058194] tbtun: tunnel 1 carrier 81 gen 82 lost: sock=1 connected=1 hello_sent=1 up=1
+[54262.071406] tbtun: fec super 916 stuck: next=916 total_known=0 total_pkts=0 next_deliver=117248 deliver_bytes=959447146 group=22/32 used=1 ready=0 id=916 nreal=4 shares=1/4 parity=4 gap_us=4356677
+[54262.084742] tbtun: fec super 916 stuck: next=916 total_known=0 total_pkts=0 next_deliver=117248 deliver_bytes=959447146 group=22/32 used=1 ready=0 id=916 nreal=4 shares=1/4 parity=4 gap_us=4370014
+[54262.098074] tbtun: fec super 916 stuck: next=916 total_known=0 total_pkts=0 next_deliver=117248 deliver_bytes=959447146 group=22/32 used=1 ready=0 id=916 nreal=4 shares=1/4 parity=4 gap_us=4383346
+[54262.111421] tbtun: fec super 916 stuck: next=916 total_known=0 total_pkts=0 next_deliver=117248 deliver_bytes=959447146 group=22/32 used=1 ready=0 id=916 nreal=4 shares=1/4 parity=4 gap_us=4396693
+[54262.124802] tbtun: fec super 916 stuck: next=916 total_known=0 total_pkts=0 next_deliver=117248 deliver_bytes=959447146 group=22/32 used=1 ready=0 id=916 nreal=4 shares=1/4 parity=4 gap_us=4410074
+[54262.138070] tbtun: fec super 916 stuck: next=916 total_known=0 total_pkts=0 next_deliver=117248 deliver_bytes=959447146 group=22/32 used=1 ready=0 id=916 nreal=4 shares=1/4 parity=4 gap_us=4423342
+[54262.151457] tbtun: fec super 916 stuck: next=916 total_known=0 total_pkts=0 next_deliver=117248 deliver_bytes=959447146 group=22/32 used=1 ready=0 id=916 nreal=4 shares=1/4 parity=4 gap_us=4436728
+[54262.164748] tbtun: fec super 916 stuck: next=916 total_known=0 total_pkts=0 next_deliver=117248 deliver_bytes=959447146 group=22/32 used=1 ready=0 id=916 nreal=4 shares=1/4 parity=4 gap_us=4450020
+[54267.047907] tbt_fec_deliver_ready: 377 callbacks suppressed
+[54267.047918] tbtun: fec super 918 stuck: next=918 total_known=0 total_pkts=0 next_deliver=117504 deliver_bytes=961544298 group=22/32 used=1 ready=0 id=918 nreal=4 shares=1/4 parity=4 gap_us=1119990
+[54267.064672] tbtun: fec super 918 stuck: next=918 total_known=0 total_pkts=0 next_deliver=117504 deliver_bytes=961544298 group=22/32 used=1 ready=0 id=918 nreal=4 shares=1/4 parity=4 gap_us=1136753
+[54267.078042] tbtun: fec super 918 stuck: next=918 total_known=0 total_pkts=0 next_deliver=117504 deliver_bytes=961544298 group=22/32 used=1 ready=0 id=918 nreal=4 shares=1/4 parity=4 gap_us=1150125
+[54267.094627] tbtun: fec super 918 stuck: next=918 total_known=0 total_pkts=0 next_deliver=117504 deliver_bytes=961544298 group=22/32 used=1 ready=0 id=918 nreal=4 shares=1/4 parity=4 gap_us=1166710
+[54267.111427] tbtun: fec super 918 stuck: next=918 total_known=0 total_pkts=0 next_deliver=117504 deliver_bytes=961544298 group=22/32 used=1 ready=0 id=918 nreal=4 shares=1/4 parity=4 gap_us=1183509
+[54267.124690] tbtun: fec super 918 stuck: next=918 total_known=0 total_pkts=0 next_deliver=117504 deliver_bytes=961544298 group=22/32 used=1 ready=0 id=918 nreal=4 shares=1/4 parity=4 gap_us=1196773
+[54267.141329] tbtun: fec super 918 stuck: next=918 total_known=0 total_pkts=0 next_deliver=117504 deliver_bytes=961544298 group=22/32 used=1 ready=0 id=918 nreal=4 shares=1/4 parity=4 gap_us=1213411
+[54267.154723] tbtun: fec super 918 stuck: next=918 total_known=0 total_pkts=0 next_deliver=117504 deliver_bytes=961544298 group=22/32 used=1 ready=0 id=918 nreal=4 shares=1/4 parity=4 gap_us=1226805
+[54267.171342] tbtun: fec super 918 stuck: next=918 total_known=0 total_pkts=0 next_deliver=117504 deliver_bytes=961544298 group=22/32 used=1 ready=0 id=918 nreal=4 shares=1/4 parity=4 gap_us=1243425
+[54267.187966] tbtun: fec super 918 stuck: next=918 total_known=0 total_pkts=0 next_deliver=117504 deliver_bytes=961544298 group=22/32 used=1 ready=0 id=918 nreal=4 shares=1/4 parity=4 gap_us=1260049
+[54272.057854] tbt_fec_deliver_ready: 432 callbacks suppressed
+[54272.057862] tbtun: fec super 921 stuck: next=921 total_known=0 total_pkts=0 next_deliver=117888 deliver_bytes=964690026 group=0/32 used=1 ready=0 id=921 nreal=4 shares=1/4 parity=4 gap_us=201918
+[54272.071289] tbtun: fec super 921 stuck: next=921 total_known=0 total_pkts=0 next_deliver=117888 deliver_bytes=964690026 group=0/32 used=1 ready=0 id=921 nreal=4 shares=1/4 parity=4 gap_us=215353
+[54272.084611] tbtun: fec super 921 stuck: next=921 total_known=0 total_pkts=0 next_deliver=117888 deliver_bytes=964690026 group=0/32 used=1 ready=0 id=921 nreal=4 shares=1/4 parity=4 gap_us=228675
+[54272.097929] tbtun: fec super 921 stuck: next=921 total_known=0 total_pkts=0 next_deliver=117888 deliver_bytes=964690026 group=0/32 used=1 ready=0 id=921 nreal=4 shares=1/4 parity=4 gap_us=241994
+[54272.111299] tbtun: fec super 921 stuck: next=921 total_known=0 total_pkts=0 next_deliver=117888 deliver_bytes=964690026 group=0/32 used=1 ready=0 id=921 nreal=4 shares=1/4 parity=4 gap_us=255364
+[54272.124666] tbtun: fec super 921 stuck: next=921 total_known=0 total_pkts=0 next_deliver=117888 deliver_bytes=964690026 group=0/32 used=1 ready=0 id=921 nreal=4 shares=1/4 parity=4 gap_us=268731
+[54272.138004] tbtun: fec super 921 stuck: next=921 total_known=0 total_pkts=0 next_deliver=117888 deliver_bytes=964690026 group=0/32 used=1 ready=0 id=921 nreal=4 shares=1/4 parity=4 gap_us=282069
+[54272.151279] tbtun: fec super 921 stuck: next=921 total_known=0 total_pkts=0 next_deliver=117888 deliver_bytes=964690026 group=0/32 used=1 ready=0 id=921 nreal=4 shares=1/4 parity=4 gap_us=295345
+[54272.167978] tbtun: fec super 921 stuck: next=921 total_known=0 total_pkts=0 next_deliver=117888 deliver_bytes=964690026 group=0/32 used=1 ready=0 id=921 nreal=4 shares=1/4 parity=4 gap_us=312044
+[54272.181303] tbtun: fec super 921 stuck: next=921 total_known=0 total_pkts=0 next_deliver=117888 deliver_bytes=964690026 group=0/32 used=1 ready=0 id=921 nreal=4 shares=1/4 parity=4 gap_us=325368
+[54277.071116] tbt_fec_deliver_ready: 405 callbacks suppressed
+[54277.071125] tbtun: fec super 922 stuck: next=922 total_known=0 total_pkts=0 next_deliver=118016 deliver_bytes=965738602 group=22/32 used=1 ready=0 id=922 nreal=4 shares=1/4 parity=4 gap_us=2639957
+[54277.084552] tbtun: fec super 922 stuck: next=922 total_known=0 total_pkts=0 next_deliver=118016 deliver_bytes=965738602 group=22/32 used=1 ready=0 id=922 nreal=4 shares=1/4 parity=4 gap_us=2653390
+[54277.097886] tbtun: fec super 922 stuck: next=922 total_known=0 total_pkts=0 next_deliver=118016 deliver_bytes=965738602 group=22/32 used=1 ready=0 id=922 nreal=4 shares=1/4 parity=4 gap_us=2666725
+[54277.111284] tbtun: fec super 922 stuck: next=922 total_known=0 total_pkts=0 next_deliver=118016 deliver_bytes=965738602 group=22/32 used=1 ready=0 id=922 nreal=4 shares=1/4 parity=4 gap_us=2680123
+[54277.127801] tbtun: fec super 922 stuck: next=922 total_known=0 total_pkts=0 next_deliver=118016 deliver_bytes=965738602 group=22/32 used=1 ready=0 id=922 nreal=4 shares=1/4 parity=4 gap_us=2696642
+[54277.141120] tbtun: fec super 922 stuck: next=922 total_known=0 total_pkts=0 next_deliver=118016 deliver_bytes=965738602 group=22/32 used=1 ready=0 id=922 nreal=4 shares=1/4 parity=4 gap_us=2709961
+[54277.154462] tbtun: fec super 922 stuck: next=922 total_known=0 total_pkts=0 next_deliver=118016 deliver_bytes=965738602 group=22/32 used=1 ready=0 id=922 nreal=4 shares=1/4 parity=4 gap_us=2723303
+[54277.167833] tbtun: fec super 922 stuck: next=922 total_known=0 total_pkts=0 next_deliver=118016 deliver_bytes=965738602 group=22/32 used=1 ready=0 id=922 nreal=4 shares=1/4 parity=4 gap_us=2736672
+[54277.181165] tbtun: fec super 922 stuck: next=922 total_known=0 total_pkts=0 next_deliver=118016 deliver_bytes=965738602 group=22/32 used=1 ready=0 id=922 nreal=4 shares=1/4 parity=4 gap_us=2750006
+[54277.194613] tbtun: fec super 922 stuck: next=922 total_known=0 total_pkts=0 next_deliver=118016 deliver_bytes=965738602 group=22/32 used=1 ready=0 id=922 nreal=4 shares=1/4 parity=4 gap_us=2763453
+[54278.876979] audit: type=1400 audit(1794060232.052:1796): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=994567 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54278.877032] audit: type=1400 audit(1794060232.052:1797): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=994567 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54278.877473] audit: type=1400 audit(1794060232.052:1798): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=994567 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54278.877506] audit: type=1400 audit(1794060232.052:1799): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=994567 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54278.877955] audit: type=1400 audit(1794060232.056:1800): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=994567 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54278.878015] audit: type=1400 audit(1794060232.056:1801): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=994567 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54282.084605] tbt_fec_deliver_ready: 385 callbacks suppressed
+[54282.084617] tbtun: fec super 925 stuck: next=925 total_known=0 total_pkts=0 next_deliver=118400 deliver_bytes=968884330 group=22/32 used=1 ready=0 id=925 nreal=4 shares=1/4 parity=4 gap_us=196550
+[54282.097889] tbtun: fec super 925 stuck: next=925 total_known=0 total_pkts=0 next_deliver=118400 deliver_bytes=968884330 group=22/32 used=1 ready=0 id=925 nreal=4 shares=1/4 parity=4 gap_us=209834
+[54282.111146] tbtun: fec super 925 stuck: next=925 total_known=0 total_pkts=0 next_deliver=118400 deliver_bytes=968884330 group=22/32 used=1 ready=0 id=925 nreal=4 shares=1/4 parity=4 gap_us=223091
+[54282.127793] tbtun: fec super 925 stuck: next=925 total_known=0 total_pkts=0 next_deliver=118400 deliver_bytes=968884330 group=22/32 used=1 ready=0 id=925 nreal=4 shares=1/4 parity=4 gap_us=239739
+[54282.141168] tbtun: fec super 925 stuck: next=925 total_known=0 total_pkts=0 next_deliver=118400 deliver_bytes=968884330 group=22/32 used=1 ready=0 id=925 nreal=4 shares=1/4 parity=4 gap_us=253114
+[54282.154502] tbtun: fec super 925 stuck: next=925 total_known=0 total_pkts=0 next_deliver=118400 deliver_bytes=968884330 group=22/32 used=1 ready=0 id=925 nreal=4 shares=1/4 parity=4 gap_us=266448
+[54282.167774] tbtun: fec super 925 stuck: next=925 total_known=0 total_pkts=0 next_deliver=118400 deliver_bytes=968884330 group=22/32 used=1 ready=0 id=925 nreal=4 shares=1/4 parity=4 gap_us=279721
+[54282.184426] tbtun: fec super 925 stuck: next=925 total_known=0 total_pkts=0 next_deliver=118400 deliver_bytes=968884330 group=22/32 used=1 ready=0 id=925 nreal=4 shares=1/4 parity=4 gap_us=296373
+[54282.198045] tbtun: fec super 925 stuck: next=925 total_known=0 total_pkts=0 next_deliver=118400 deliver_bytes=968884330 group=22/32 used=1 ready=0 id=925 nreal=4 shares=1/4 parity=4 gap_us=309993
+[54282.198065] tbtun: fec super 925 stuck: next=925 total_known=0 total_pkts=0 next_deliver=118400 deliver_bytes=968884330 group=22/32 used=1 ready=0 id=925 nreal=4 shares=1/4 parity=4 gap_us=310012
+[54287.091000] tbt_fec_deliver_ready: 389 callbacks suppressed
+[54287.091008] tbtun: fec super 927 stuck: next=927 total_known=0 total_pkts=0 next_deliver=118656 deliver_bytes=970981482 group=22/32 used=1 ready=0 id=927 nreal=4 shares=1/4 parity=4 gap_us=1303189
+[54287.107700] tbtun: fec super 927 stuck: next=927 total_known=0 total_pkts=0 next_deliver=118656 deliver_bytes=970981482 group=22/32 used=1 ready=0 id=927 nreal=4 shares=1/4 parity=4 gap_us=1319889
+[54287.124385] tbtun: fec super 927 stuck: next=927 total_known=0 total_pkts=0 next_deliver=118656 deliver_bytes=970981482 group=22/32 used=1 ready=0 id=927 nreal=4 shares=1/4 parity=4 gap_us=1336573
+[54287.141051] tbtun: fec super 927 stuck: next=927 total_known=0 total_pkts=0 next_deliver=118656 deliver_bytes=970981482 group=22/32 used=1 ready=0 id=927 nreal=4 shares=1/4 parity=4 gap_us=1353238
+[54287.157682] tbtun: fec super 927 stuck: next=927 total_known=0 total_pkts=0 next_deliver=118656 deliver_bytes=970981482 group=22/32 used=1 ready=0 id=927 nreal=4 shares=1/4 parity=4 gap_us=1369871
+[54287.171005] tbtun: fec super 927 stuck: next=927 total_known=0 total_pkts=0 next_deliver=118656 deliver_bytes=970981482 group=22/32 used=1 ready=0 id=927 nreal=4 shares=1/4 parity=4 gap_us=1383195
+[54287.187671] tbtun: fec super 927 stuck: next=927 total_known=0 total_pkts=0 next_deliver=118656 deliver_bytes=970981482 group=22/32 used=1 ready=0 id=927 nreal=4 shares=1/4 parity=4 gap_us=1399861
+[54287.201000] tbtun: fec super 927 stuck: next=927 total_known=0 total_pkts=0 next_deliver=118656 deliver_bytes=970981482 group=22/32 used=1 ready=0 id=927 nreal=4 shares=1/4 parity=4 gap_us=1413190
+[54287.214364] tbtun: fec super 927 stuck: next=927 total_known=0 total_pkts=0 next_deliver=118656 deliver_bytes=970981482 group=22/32 used=1 ready=0 id=927 nreal=4 shares=1/4 parity=4 gap_us=1426553
+[54287.227742] tbtun: fec super 927 stuck: next=927 total_known=0 total_pkts=0 next_deliver=118656 deliver_bytes=970981482 group=22/32 used=1 ready=0 id=927 nreal=4 shares=1/4 parity=4 gap_us=1439931
+[54292.101061] tbt_fec_deliver_ready: 400 callbacks suppressed
+[54292.101084] tbtun: fec super 929 stuck: next=929 total_known=0 total_pkts=0 next_deliver=118912 deliver_bytes=973078634 group=22/32 used=1 ready=0 id=929 nreal=4 shares=1/4 parity=4 gap_us=973339
+[54292.117685] tbtun: fec super 929 stuck: next=929 total_known=0 total_pkts=0 next_deliver=118912 deliver_bytes=973078634 group=22/32 used=1 ready=0 id=929 nreal=4 shares=1/4 parity=4 gap_us=989962
+[54292.134322] tbtun: fec super 929 stuck: next=929 total_known=0 total_pkts=0 next_deliver=118912 deliver_bytes=973078634 group=22/32 used=1 ready=0 id=929 nreal=4 shares=1/4 parity=4 gap_us=1006601
+[54292.151018] tbtun: fec super 929 stuck: next=929 total_known=0 total_pkts=0 next_deliver=118912 deliver_bytes=973078634 group=22/32 used=1 ready=0 id=929 nreal=4 shares=1/4 parity=4 gap_us=1023296
+[54292.167700] tbtun: fec super 929 stuck: next=929 total_known=0 total_pkts=0 next_deliver=118912 deliver_bytes=973078634 group=22/32 used=1 ready=0 id=929 nreal=4 shares=1/4 parity=4 gap_us=1039980
+[54292.184392] tbtun: fec super 929 stuck: next=929 total_known=0 total_pkts=0 next_deliver=118912 deliver_bytes=973078634 group=22/32 used=1 ready=0 id=929 nreal=4 shares=1/4 parity=4 gap_us=1056670
+[54292.200997] tbtun: fec super 929 stuck: next=929 total_known=0 total_pkts=0 next_deliver=118912 deliver_bytes=973078634 group=22/32 used=1 ready=0 id=929 nreal=4 shares=1/4 parity=4 gap_us=1073277
+[54292.214358] tbtun: fec super 929 stuck: next=929 total_known=0 total_pkts=0 next_deliver=118912 deliver_bytes=973078634 group=22/32 used=1 ready=0 id=929 nreal=4 shares=1/4 parity=4 gap_us=1086637
+[54292.227645] tbtun: fec super 929 stuck: next=929 total_known=0 total_pkts=0 next_deliver=118912 deliver_bytes=973078634 group=22/32 used=1 ready=0 id=929 nreal=4 shares=1/4 parity=4 gap_us=1099924
+[54292.244314] tbtun: fec super 929 stuck: next=929 total_known=0 total_pkts=0 next_deliver=118912 deliver_bytes=973078634 group=22/32 used=1 ready=0 id=929 nreal=4 shares=1/4 parity=4 gap_us=1116594
+[54297.111040] tbt_fec_deliver_ready: 391 callbacks suppressed
+[54297.111060] tbtun: fec super 931 stuck: next=931 total_known=0 total_pkts=0 next_deliver=119168 deliver_bytes=975175786 group=22/32 used=1 ready=0 id=931 nreal=4 shares=1/4 parity=4 gap_us=733496
+[54297.124229] tbtun: fec super 931 stuck: next=931 total_known=0 total_pkts=0 next_deliver=119168 deliver_bytes=975175786 group=22/32 used=1 ready=0 id=931 nreal=4 shares=1/4 parity=4 gap_us=746685
+[54297.137591] tbtun: fec super 931 stuck: next=931 total_known=0 total_pkts=0 next_deliver=119168 deliver_bytes=975175786 group=22/32 used=1 ready=0 id=931 nreal=4 shares=1/4 parity=4 gap_us=760047
+[54297.151012] tbtun: fec super 931 stuck: next=931 total_known=0 total_pkts=0 next_deliver=119168 deliver_bytes=975175786 group=22/32 used=1 ready=0 id=931 nreal=4 shares=1/4 parity=4 gap_us=773468
+[54297.164340] tbtun: fec super 931 stuck: next=931 total_known=0 total_pkts=0 next_deliver=119168 deliver_bytes=975175786 group=22/32 used=1 ready=0 id=931 nreal=4 shares=1/4 parity=4 gap_us=786796
+[54297.177676] tbtun: fec super 931 stuck: next=931 total_known=0 total_pkts=0 next_deliver=119168 deliver_bytes=975175786 group=22/32 used=1 ready=0 id=931 nreal=4 shares=1/4 parity=4 gap_us=800132
+[54297.190994] tbtun: fec super 931 stuck: next=931 total_known=0 total_pkts=0 next_deliver=119168 deliver_bytes=975175786 group=22/32 used=1 ready=0 id=931 nreal=4 shares=1/4 parity=4 gap_us=813450
+[54297.204346] tbtun: fec super 931 stuck: next=931 total_known=0 total_pkts=0 next_deliver=119168 deliver_bytes=975175786 group=22/32 used=1 ready=0 id=931 nreal=4 shares=1/4 parity=4 gap_us=826802
+[54297.217798] tbtun: fec super 931 stuck: next=931 total_known=0 total_pkts=0 next_deliver=119168 deliver_bytes=975175786 group=22/32 used=1 ready=0 id=931 nreal=4 shares=1/4 parity=4 gap_us=840255
+[54297.217941] tbtun: fec super 931 stuck: next=931 total_known=0 total_pkts=0 next_deliver=119168 deliver_bytes=975175786 group=22/32 used=1 ready=0 id=931 nreal=4 shares=1/4 parity=4 gap_us=840399
+[54302.114160] tbt_fec_deliver_ready: 412 callbacks suppressed
+[54302.114169] tbtun: fec super 933 stuck: next=933 total_known=0 total_pkts=0 next_deliver=119424 deliver_bytes=977272938 group=22/32 used=1 ready=0 id=933 nreal=4 shares=1/4 parity=4 gap_us=1059852
+[54302.130822] tbtun: fec super 933 stuck: next=933 total_known=0 total_pkts=0 next_deliver=119424 deliver_bytes=977272938 group=22/32 used=1 ready=0 id=933 nreal=4 shares=1/4 parity=4 gap_us=1076514
+[54302.147485] tbtun: fec super 933 stuck: next=933 total_known=0 total_pkts=0 next_deliver=119424 deliver_bytes=977272938 group=22/32 used=1 ready=0 id=933 nreal=4 shares=1/4 parity=4 gap_us=1093178
+[54302.160821] tbtun: fec super 933 stuck: next=933 total_known=0 total_pkts=0 next_deliver=119424 deliver_bytes=977272938 group=22/32 used=1 ready=0 id=933 nreal=4 shares=1/4 parity=4 gap_us=1106514
+[54302.177519] tbtun: fec super 933 stuck: next=933 total_known=0 total_pkts=0 next_deliver=119424 deliver_bytes=977272938 group=22/32 used=1 ready=0 id=933 nreal=4 shares=1/4 parity=4 gap_us=1123212
+[54302.194156] tbtun: fec super 933 stuck: next=933 total_known=0 total_pkts=0 next_deliver=119424 deliver_bytes=977272938 group=22/32 used=1 ready=0 id=933 nreal=4 shares=1/4 parity=4 gap_us=1139849
+[54302.210821] tbtun: fec super 933 stuck: next=933 total_known=0 total_pkts=0 next_deliver=119424 deliver_bytes=977272938 group=22/32 used=1 ready=0 id=933 nreal=4 shares=1/4 parity=4 gap_us=1156515
+[54302.227486] tbtun: fec super 933 stuck: next=933 total_known=0 total_pkts=0 next_deliver=119424 deliver_bytes=977272938 group=22/32 used=1 ready=0 id=933 nreal=4 shares=1/4 parity=4 gap_us=1173179
+[54302.240820] tbtun: fec super 933 stuck: next=933 total_known=0 total_pkts=0 next_deliver=119424 deliver_bytes=977272938 group=22/32 used=1 ready=0 id=933 nreal=4 shares=1/4 parity=4 gap_us=1186515
+[54302.250838] tbtun: fec super 933 stuck: next=933 total_known=0 total_pkts=0 next_deliver=119424 deliver_bytes=977272938 group=22/32 used=1 ready=0 id=933 nreal=4 shares=1/4 parity=4 gap_us=1196531
+[54307.120794] tbt_fec_deliver_ready: 408 callbacks suppressed
+[54307.120802] tbtun: fec super 936 stuck: next=936 total_known=0 total_pkts=0 next_deliver=119808 deliver_bytes=980418666 group=22/32 used=1 ready=0 id=936 nreal=4 shares=1/4 parity=4 gap_us=312930
+[54307.134189] tbtun: fec super 936 stuck: next=936 total_known=0 total_pkts=0 next_deliver=119808 deliver_bytes=980418666 group=22/32 used=1 ready=0 id=936 nreal=4 shares=1/4 parity=4 gap_us=326325
+[54307.147541] tbtun: fec super 936 stuck: next=936 total_known=0 total_pkts=0 next_deliver=119808 deliver_bytes=980418666 group=22/32 used=1 ready=0 id=936 nreal=4 shares=1/4 parity=4 gap_us=339676
+[54307.160864] tbtun: fec super 936 stuck: next=936 total_known=0 total_pkts=0 next_deliver=119808 deliver_bytes=980418666 group=22/32 used=1 ready=0 id=936 nreal=4 shares=1/4 parity=4 gap_us=353000
+[54307.174199] tbtun: fec super 936 stuck: next=936 total_known=0 total_pkts=0 next_deliver=119808 deliver_bytes=980418666 group=22/32 used=1 ready=0 id=936 nreal=4 shares=1/4 parity=4 gap_us=366336
+[54307.187529] tbtun: fec super 936 stuck: next=936 total_known=0 total_pkts=0 next_deliver=119808 deliver_bytes=980418666 group=22/32 used=1 ready=0 id=936 nreal=4 shares=1/4 parity=4 gap_us=379665
+[54307.200839] tbtun: fec super 936 stuck: next=936 total_known=0 total_pkts=0 next_deliver=119808 deliver_bytes=980418666 group=22/32 used=1 ready=0 id=936 nreal=4 shares=1/4 parity=4 gap_us=392977
+[54307.214151] tbtun: fec super 936 stuck: next=936 total_known=0 total_pkts=0 next_deliver=119808 deliver_bytes=980418666 group=22/32 used=1 ready=0 id=936 nreal=4 shares=1/4 parity=4 gap_us=406289
+[54307.227525] tbtun: fec super 936 stuck: next=936 total_known=0 total_pkts=0 next_deliver=119808 deliver_bytes=980418666 group=22/32 used=1 ready=0 id=936 nreal=4 shares=1/4 parity=4 gap_us=419662
+[54307.240840] tbtun: fec super 936 stuck: next=936 total_known=0 total_pkts=0 next_deliver=119808 deliver_bytes=980418666 group=22/32 used=1 ready=0 id=936 nreal=4 shares=1/4 parity=4 gap_us=432978
+[54312.134136] tbt_fec_deliver_ready: 421 callbacks suppressed
+[54312.134145] tbtun: fec super 938 stuck: next=938 total_known=0 total_pkts=0 next_deliver=120064 deliver_bytes=982515818 group=22/32 used=1 ready=0 id=938 nreal=4 shares=1/4 parity=4 gap_us=1700064
+[54312.134214] tbtun: fec super 938 stuck: next=938 total_known=0 total_pkts=0 next_deliver=120064 deliver_bytes=982515818 group=22/32 used=1 ready=0 id=938 nreal=4 shares=1/4 parity=4 gap_us=1700143
+[54312.150856] tbtun: fec super 938 stuck: next=938 total_known=0 total_pkts=0 next_deliver=120064 deliver_bytes=982515818 group=22/32 used=1 ready=0 id=938 nreal=4 shares=1/4 parity=4 gap_us=1716783
+[54312.150880] tbtun: fec super 938 stuck: next=938 total_known=0 total_pkts=0 next_deliver=120064 deliver_bytes=982515818 group=22/32 used=1 ready=0 id=938 nreal=4 shares=1/4 parity=4 gap_us=1716809
+[54312.167385] tbtun: fec super 938 stuck: next=938 total_known=0 total_pkts=0 next_deliver=120064 deliver_bytes=982515818 group=22/32 used=1 ready=0 id=938 nreal=4 shares=1/4 parity=4 gap_us=1733313
+[54312.180708] tbtun: fec super 938 stuck: next=938 total_known=0 total_pkts=0 next_deliver=120064 deliver_bytes=982515818 group=22/32 used=1 ready=0 id=938 nreal=4 shares=1/4 parity=4 gap_us=1746637
+[54312.194085] tbtun: fec super 938 stuck: next=938 total_known=0 total_pkts=0 next_deliver=120064 deliver_bytes=982515818 group=22/32 used=1 ready=0 id=938 nreal=4 shares=1/4 parity=4 gap_us=1760013
+[54312.207915] tbtun: fec super 938 stuck: next=938 total_known=0 total_pkts=0 next_deliver=120064 deliver_bytes=982515818 group=22/32 used=1 ready=0 id=938 nreal=4 shares=1/4 parity=4 gap_us=1773843
+[54312.208228] tbtun: fec super 938 stuck: next=938 total_known=0 total_pkts=0 next_deliver=120064 deliver_bytes=982515818 group=22/32 used=1 ready=0 id=938 nreal=4 shares=1/4 parity=4 gap_us=1774156
+[54312.220877] tbtun: fec super 938 stuck: next=938 total_known=0 total_pkts=0 next_deliver=120064 deliver_bytes=982515818 group=22/32 used=1 ready=0 id=938 nreal=4 shares=1/4 parity=4 gap_us=1786806
+[54317.144054] tbt_fec_deliver_ready: 415 callbacks suppressed
+[54317.144073] tbtun: fec super 941 stuck: next=941 total_known=0 total_pkts=0 next_deliver=120448 deliver_bytes=985661546 group=22/32 used=1 ready=0 id=941 nreal=4 shares=1/4 parity=4 gap_us=1473410
+[54317.160707] tbtun: fec super 941 stuck: next=941 total_known=0 total_pkts=0 next_deliver=120448 deliver_bytes=985661546 group=22/32 used=1 ready=0 id=941 nreal=4 shares=1/4 parity=4 gap_us=1490063
+[54317.177361] tbtun: fec super 941 stuck: next=941 total_known=0 total_pkts=0 next_deliver=120448 deliver_bytes=985661546 group=22/32 used=1 ready=0 id=941 nreal=4 shares=1/4 parity=4 gap_us=1506718
+[54317.194005] tbtun: fec super 941 stuck: next=941 total_known=0 total_pkts=0 next_deliver=120448 deliver_bytes=985661546 group=22/32 used=1 ready=0 id=941 nreal=4 shares=1/4 parity=4 gap_us=1523362
+[54317.207355] tbtun: fec super 941 stuck: next=941 total_known=0 total_pkts=0 next_deliver=120448 deliver_bytes=985661546 group=22/32 used=1 ready=0 id=941 nreal=4 shares=1/4 parity=4 gap_us=1536713
+[54317.221998] tbtun: fec super 942 stuck: next=942 total_known=0 total_pkts=0 next_deliver=120576 deliver_bytes=986710122 group=22/32 used=1 ready=0 id=942 nreal=4 shares=1/4 parity=4 gap_us=0
+[54317.222119] tbtun: fec super 942 stuck: next=942 total_known=0 total_pkts=0 next_deliver=120576 deliver_bytes=986710122 group=22/32 used=1 ready=0 id=942 nreal=4 shares=1/4 parity=4 gap_us=0
+[54317.234196] tbtun: fec super 942 stuck: next=942 total_known=0 total_pkts=0 next_deliver=120576 deliver_bytes=986710122 group=22/32 used=1 ready=0 id=942 nreal=4 shares=1/4 parity=4 gap_us=13
+[54317.247382] tbtun: fec super 942 stuck: next=942 total_known=0 total_pkts=0 next_deliver=120576 deliver_bytes=986710122 group=22/32 used=1 ready=0 id=942 nreal=4 shares=1/4 parity=4 gap_us=13200
+[54317.263995] tbtun: fec super 942 stuck: next=942 total_known=0 total_pkts=0 next_deliver=120576 deliver_bytes=986710122 group=22/32 used=1 ready=0 id=942 nreal=4 shares=1/4 parity=4 gap_us=29813
+[54322.153921] tbt_fec_deliver_ready: 418 callbacks suppressed
+[54322.153930] tbtun: fec super 944 stuck: next=944 total_known=0 total_pkts=0 next_deliver=120832 deliver_bytes=988807274 group=22/32 used=1 ready=0 id=944 nreal=4 shares=1/4 parity=4 gap_us=13337
+[54322.167275] tbtun: fec super 944 stuck: next=944 total_known=0 total_pkts=0 next_deliver=120832 deliver_bytes=988807274 group=22/32 used=1 ready=0 id=944 nreal=4 shares=1/4 parity=4 gap_us=26692
+[54322.180586] tbtun: fec super 944 stuck: next=944 total_known=0 total_pkts=0 next_deliver=120832 deliver_bytes=988807274 group=22/32 used=1 ready=0 id=944 nreal=4 shares=1/4 parity=4 gap_us=40003
+[54322.193916] tbtun: fec super 944 stuck: next=944 total_known=0 total_pkts=0 next_deliver=120832 deliver_bytes=988807274 group=22/32 used=1 ready=0 id=944 nreal=4 shares=1/4 parity=4 gap_us=53333
+[54322.207250] tbtun: fec super 944 stuck: next=944 total_known=0 total_pkts=0 next_deliver=120832 deliver_bytes=988807274 group=22/32 used=1 ready=0 id=944 nreal=4 shares=1/4 parity=4 gap_us=66667
+[54322.220583] tbtun: fec super 944 stuck: next=944 total_known=0 total_pkts=0 next_deliver=120832 deliver_bytes=988807274 group=22/32 used=1 ready=0 id=944 nreal=4 shares=1/4 parity=4 gap_us=80000
+[54322.233912] tbtun: fec super 944 stuck: next=944 total_known=0 total_pkts=0 next_deliver=120832 deliver_bytes=988807274 group=22/32 used=1 ready=0 id=944 nreal=4 shares=1/4 parity=4 gap_us=93330
+[54322.250578] tbtun: fec super 944 stuck: next=944 total_known=0 total_pkts=0 next_deliver=120832 deliver_bytes=988807274 group=22/32 used=1 ready=0 id=944 nreal=4 shares=1/4 parity=4 gap_us=109996
+[54322.267445] tbtun: fec super 944 stuck: next=944 total_known=0 total_pkts=0 next_deliver=120832 deliver_bytes=988807274 group=22/32 used=1 ready=0 id=944 nreal=4 shares=1/4 parity=4 gap_us=126861
+[54322.280724] tbtun: fec super 944 stuck: next=944 total_known=0 total_pkts=0 next_deliver=120832 deliver_bytes=988807274 group=22/32 used=1 ready=0 id=944 nreal=4 shares=1/4 parity=4 gap_us=140141
+[54327.160537] tbt_fec_deliver_ready: 408 callbacks suppressed
+[54327.160545] tbtun: fec super 946 stuck: next=946 total_known=0 total_pkts=0 next_deliver=121088 deliver_bytes=990904426 group=22/32 used=1 ready=0 id=946 nreal=4 shares=1/4 parity=4 gap_us=1029707
+[54327.173876] tbtun: fec super 946 stuck: next=946 total_known=0 total_pkts=0 next_deliver=121088 deliver_bytes=990904426 group=22/32 used=1 ready=0 id=946 nreal=4 shares=1/4 parity=4 gap_us=1043046
+[54327.187209] tbtun: fec super 946 stuck: next=946 total_known=0 total_pkts=0 next_deliver=121088 deliver_bytes=990904426 group=22/32 used=1 ready=0 id=946 nreal=4 shares=1/4 parity=4 gap_us=1056379
+[54327.200635] tbtun: fec super 946 stuck: next=946 total_known=0 total_pkts=0 next_deliver=121088 deliver_bytes=990904426 group=22/32 used=1 ready=0 id=946 nreal=4 shares=1/4 parity=4 gap_us=1069805
+[54327.213956] tbtun: fec super 946 stuck: next=946 total_known=0 total_pkts=0 next_deliver=121088 deliver_bytes=990904426 group=22/32 used=1 ready=0 id=946 nreal=4 shares=1/4 parity=4 gap_us=1083127
+[54327.230533] tbtun: fec super 946 stuck: next=946 total_known=0 total_pkts=0 next_deliver=121088 deliver_bytes=990904426 group=22/32 used=1 ready=0 id=946 nreal=4 shares=1/4 parity=4 gap_us=1099704
+[54327.243872] tbtun: fec super 946 stuck: next=946 total_known=0 total_pkts=0 next_deliver=121088 deliver_bytes=990904426 group=22/32 used=1 ready=0 id=946 nreal=4 shares=1/4 parity=4 gap_us=1113042
+[54327.260533] tbtun: fec super 946 stuck: next=946 total_known=0 total_pkts=0 next_deliver=121088 deliver_bytes=990904426 group=22/32 used=1 ready=0 id=946 nreal=4 shares=1/4 parity=4 gap_us=1129704
+[54327.277192] tbtun: fec super 946 stuck: next=946 total_known=0 total_pkts=0 next_deliver=121088 deliver_bytes=990904426 group=22/32 used=1 ready=0 id=946 nreal=4 shares=1/4 parity=4 gap_us=1146363
+[54327.293866] tbtun: fec super 946 stuck: next=946 total_known=0 total_pkts=0 next_deliver=121088 deliver_bytes=990904426 group=22/32 used=1 ready=0 id=946 nreal=4 shares=1/4 parity=4 gap_us=1163037
+[54332.164004] tbt_fec_deliver_ready: 401 callbacks suppressed
+[54332.164025] tbtun: fec super 948 stuck: next=948 total_known=0 total_pkts=0 next_deliver=121344 deliver_bytes=993001578 group=22/32 used=1 ready=0 id=948 nreal=4 shares=1/4 parity=4 gap_us=916588
+[54332.177433] tbtun: fec super 948 stuck: next=948 total_known=0 total_pkts=0 next_deliver=121344 deliver_bytes=993001578 group=22/32 used=1 ready=0 id=948 nreal=4 shares=1/4 parity=4 gap_us=930017
+[54332.190755] tbtun: fec super 948 stuck: next=948 total_known=0 total_pkts=0 next_deliver=121344 deliver_bytes=993001578 group=22/32 used=1 ready=0 id=948 nreal=4 shares=1/4 parity=4 gap_us=943339
+[54332.204098] tbtun: fec super 948 stuck: next=948 total_known=0 total_pkts=0 next_deliver=121344 deliver_bytes=993001578 group=22/32 used=1 ready=0 id=948 nreal=4 shares=1/4 parity=4 gap_us=956683
+[54332.217348] tbtun: fec super 948 stuck: next=948 total_known=0 total_pkts=0 next_deliver=121344 deliver_bytes=993001578 group=22/32 used=1 ready=0 id=948 nreal=4 shares=1/4 parity=4 gap_us=969933
+[54332.230687] tbtun: fec super 948 stuck: next=948 total_known=0 total_pkts=0 next_deliver=121344 deliver_bytes=993001578 group=22/32 used=1 ready=0 id=948 nreal=4 shares=1/4 parity=4 gap_us=983272
+[54332.244023] tbtun: fec super 948 stuck: next=948 total_known=0 total_pkts=0 next_deliver=121344 deliver_bytes=993001578 group=22/32 used=1 ready=0 id=948 nreal=4 shares=1/4 parity=4 gap_us=996608
+[54332.257381] tbtun: fec super 948 stuck: next=948 total_known=0 total_pkts=0 next_deliver=121344 deliver_bytes=993001578 group=22/32 used=1 ready=0 id=948 nreal=4 shares=1/4 parity=4 gap_us=1009965
+[54332.270770] tbtun: fec super 948 stuck: next=948 total_known=0 total_pkts=0 next_deliver=121344 deliver_bytes=993001578 group=22/32 used=1 ready=0 id=948 nreal=4 shares=1/4 parity=4 gap_us=1023355
+[54332.284052] tbtun: fec super 948 stuck: next=948 total_known=0 total_pkts=0 next_deliver=121344 deliver_bytes=993001578 group=22/32 used=1 ready=0 id=948 nreal=4 shares=1/4 parity=4 gap_us=1036637
+[54337.167201] tbt_fec_deliver_ready: 413 callbacks suppressed
+[54337.167223] tbtun: fec super 950 stuck: next=950 total_known=0 total_pkts=0 next_deliver=121600 deliver_bytes=995098730 group=22/32 used=1 ready=0 id=950 nreal=4 shares=1/4 parity=4 gap_us=1883383
+[54337.180686] tbtun: fec super 950 stuck: next=950 total_known=0 total_pkts=0 next_deliver=121600 deliver_bytes=995098730 group=22/32 used=1 ready=0 id=950 nreal=4 shares=1/4 parity=4 gap_us=1896867
+[54337.193879] tbtun: fec super 950 stuck: next=950 total_known=0 total_pkts=0 next_deliver=121600 deliver_bytes=995098730 group=22/32 used=1 ready=0 id=950 nreal=4 shares=1/4 parity=4 gap_us=1910060
+[54337.207162] tbtun: fec super 950 stuck: next=950 total_known=0 total_pkts=0 next_deliver=121600 deliver_bytes=995098730 group=22/32 used=1 ready=0 id=950 nreal=4 shares=1/4 parity=4 gap_us=1923345
+[54337.230669] tbtun: fec super 950 stuck: next=950 total_known=0 total_pkts=0 next_deliver=121600 deliver_bytes=995098730 group=22/32 used=1 ready=0 id=950 nreal=4 shares=1/4 parity=4 gap_us=1946851
+[54337.230823] tbtun: fec super 950 stuck: next=950 total_known=0 total_pkts=0 next_deliver=121600 deliver_bytes=995098730 group=22/32 used=1 ready=0 id=950 nreal=4 shares=1/4 parity=4 gap_us=1947006
+[54337.243877] tbtun: fec super 950 stuck: next=950 total_known=0 total_pkts=0 next_deliver=121600 deliver_bytes=995098730 group=22/32 used=1 ready=0 id=950 nreal=4 shares=1/4 parity=4 gap_us=1960061
+[54337.257461] tbtun: fec super 950 stuck: next=950 total_known=0 total_pkts=0 next_deliver=121600 deliver_bytes=995098730 group=22/32 used=1 ready=0 id=950 nreal=4 shares=1/4 parity=4 gap_us=1973643
+[54337.257608] tbtun: fec super 950 stuck: next=950 total_known=0 total_pkts=0 next_deliver=121600 deliver_bytes=995098730 group=22/32 used=1 ready=0 id=950 nreal=4 shares=1/4 parity=4 gap_us=1973791
+[54337.270799] tbtun: fec super 950 stuck: next=950 total_known=0 total_pkts=0 next_deliver=121600 deliver_bytes=995098730 group=22/32 used=1 ready=0 id=950 nreal=4 shares=1/4 parity=4 gap_us=1986982
+[54342.042015] audit: type=1400 audit(1794060295.220:1802): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1000193 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54342.042029] audit: type=1400 audit(1794060295.220:1803): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1000193 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54342.042155] audit: type=1400 audit(1794060295.220:1804): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1000193 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54342.042163] audit: type=1400 audit(1794060295.220:1805): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1000193 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54342.042274] audit: type=1400 audit(1794060295.220:1806): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1000193 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54342.042282] audit: type=1400 audit(1794060295.220:1807): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1000193 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54342.170377] tbt_fec_deliver_ready: 430 callbacks suppressed
+[54342.170382] tbtun: fec super 953 stuck: next=953 total_known=0 total_pkts=0 next_deliver=121984 deliver_bytes=998244458 group=22/32 used=1 ready=0 id=953 nreal=4 shares=1/4 parity=4 gap_us=382969
+[54342.187068] tbtun: fec super 953 stuck: next=953 total_known=0 total_pkts=0 next_deliver=121984 deliver_bytes=998244458 group=22/32 used=1 ready=0 id=953 nreal=4 shares=1/4 parity=4 gap_us=399660
+[54342.200548] tbtun: fec super 953 stuck: next=953 total_known=0 total_pkts=0 next_deliver=121984 deliver_bytes=998244458 group=22/32 used=1 ready=0 id=953 nreal=4 shares=1/4 parity=4 gap_us=413139
+[54342.213829] tbtun: fec super 953 stuck: next=953 total_known=0 total_pkts=0 next_deliver=121984 deliver_bytes=998244458 group=22/32 used=1 ready=0 id=953 nreal=4 shares=1/4 parity=4 gap_us=426421
+[54342.227156] tbtun: fec super 953 stuck: next=953 total_known=0 total_pkts=0 next_deliver=121984 deliver_bytes=998244458 group=22/32 used=1 ready=0 id=953 nreal=4 shares=1/4 parity=4 gap_us=439748
+[54342.240566] tbtun: fec super 953 stuck: next=953 total_known=0 total_pkts=0 next_deliver=121984 deliver_bytes=998244458 group=22/32 used=1 ready=0 id=953 nreal=4 shares=1/4 parity=4 gap_us=453158
+[54342.253930] tbtun: fec super 953 stuck: next=953 total_known=0 total_pkts=0 next_deliver=121984 deliver_bytes=998244458 group=22/32 used=1 ready=0 id=953 nreal=4 shares=1/4 parity=4 gap_us=466522
+[54342.267086] tbtun: fec super 953 stuck: next=953 total_known=0 total_pkts=0 next_deliver=121984 deliver_bytes=998244458 group=22/32 used=1 ready=0 id=953 nreal=4 shares=1/4 parity=4 gap_us=479679
+[54342.283858] tbtun: fec super 953 stuck: next=953 total_known=0 total_pkts=0 next_deliver=121984 deliver_bytes=998244458 group=22/32 used=1 ready=0 id=953 nreal=4 shares=1/4 parity=4 gap_us=496450
+[54342.297229] tbtun: fec super 953 stuck: next=953 total_known=0 total_pkts=0 next_deliver=121984 deliver_bytes=998244458 group=22/32 used=1 ready=0 id=953 nreal=4 shares=1/4 parity=4 gap_us=509821
+[54347.177062] tbt_fec_deliver_ready: 400 callbacks suppressed
+[54347.177084] tbtun: fec super 955 stuck: next=955 total_known=0 total_pkts=0 next_deliver=122240 deliver_bytes=1000341610 group=22/32 used=1 ready=0 id=955 nreal=4 shares=1/4 parity=4 gap_us=83331
+[54347.190405] tbtun: fec super 955 stuck: next=955 total_known=0 total_pkts=0 next_deliver=122240 deliver_bytes=1000341610 group=22/32 used=1 ready=0 id=955 nreal=4 shares=1/4 parity=4 gap_us=96673
+[54347.207034] tbtun: fec super 955 stuck: next=955 total_known=0 total_pkts=0 next_deliver=122240 deliver_bytes=1000341610 group=22/32 used=1 ready=0 id=955 nreal=4 shares=1/4 parity=4 gap_us=113304
+[54347.220430] tbtun: fec super 955 stuck: next=955 total_known=0 total_pkts=0 next_deliver=122240 deliver_bytes=1000341610 group=22/32 used=1 ready=0 id=955 nreal=4 shares=1/4 parity=4 gap_us=126700
+[54347.233708] tbtun: fec super 955 stuck: next=955 total_known=0 total_pkts=0 next_deliver=122240 deliver_bytes=1000341610 group=22/32 used=1 ready=0 id=955 nreal=4 shares=1/4 parity=4 gap_us=139979
+[54347.247064] tbtun: fec super 955 stuck: next=955 total_known=0 total_pkts=0 next_deliver=122240 deliver_bytes=1000341610 group=22/32 used=1 ready=0 id=955 nreal=4 shares=1/4 parity=4 gap_us=153334
+[54347.260482] tbtun: fec super 955 stuck: next=955 total_known=0 total_pkts=0 next_deliver=122240 deliver_bytes=1000341610 group=22/32 used=1 ready=0 id=955 nreal=4 shares=1/4 parity=4 gap_us=166751
+[54347.273825] tbtun: fec super 955 stuck: next=955 total_known=0 total_pkts=0 next_deliver=122240 deliver_bytes=1000341610 group=22/32 used=1 ready=0 id=955 nreal=4 shares=1/4 parity=4 gap_us=180094
+[54347.287138] tbtun: fec super 955 stuck: next=955 total_known=0 total_pkts=0 next_deliver=122240 deliver_bytes=1000341610 group=22/32 used=1 ready=0 id=955 nreal=4 shares=1/4 parity=4 gap_us=193407
+[54347.300360] tbtun: fec super 955 stuck: next=955 total_known=0 total_pkts=0 next_deliver=122240 deliver_bytes=1000341610 group=22/32 used=1 ready=0 id=955 nreal=4 shares=1/4 parity=4 gap_us=206631
+[54352.193608] tbt_fec_deliver_ready: 398 callbacks suppressed
+[54352.193617] tbtun: fec super 956 stuck: next=956 total_known=0 total_pkts=0 next_deliver=122368 deliver_bytes=1001390186 group=22/32 used=1 ready=0 id=956 nreal=4 shares=2/4 parity=4 gap_us=2463029
+[54352.207047] tbtun: fec super 956 stuck: next=956 total_known=0 total_pkts=0 next_deliver=122368 deliver_bytes=1001390186 group=22/32 used=1 ready=0 id=956 nreal=4 shares=2/4 parity=4 gap_us=2476469
+[54352.207070] tbtun: fec super 956 stuck: next=956 total_known=0 total_pkts=0 next_deliver=122368 deliver_bytes=1001390186 group=22/32 used=1 ready=0 id=956 nreal=4 shares=2/4 parity=4 gap_us=2476491
+[54352.220339] tbtun: fec super 956 stuck: next=956 total_known=0 total_pkts=0 next_deliver=122368 deliver_bytes=1001390186 group=22/32 used=1 ready=0 id=956 nreal=4 shares=2/4 parity=4 gap_us=2489759
+[54352.233682] tbtun: fec super 956 stuck: next=956 total_known=0 total_pkts=0 next_deliver=122368 deliver_bytes=1001390186 group=22/32 used=1 ready=0 id=956 nreal=4 shares=2/4 parity=4 gap_us=2503102
+[54352.247008] tbtun: fec super 956 stuck: next=956 total_known=0 total_pkts=0 next_deliver=122368 deliver_bytes=1001390186 group=22/32 used=1 ready=0 id=956 nreal=4 shares=2/4 parity=4 gap_us=2516429
+[54352.260255] tbtun: fec super 956 stuck: next=956 total_known=0 total_pkts=0 next_deliver=122368 deliver_bytes=1001390186 group=22/32 used=1 ready=0 id=956 nreal=4 shares=2/4 parity=4 gap_us=2529677
+[54352.273590] tbtun: fec super 956 stuck: next=956 total_known=0 total_pkts=0 next_deliver=122368 deliver_bytes=1001390186 group=22/32 used=1 ready=0 id=956 nreal=4 shares=2/4 parity=4 gap_us=2543011
+[54352.286994] tbtun: fec super 956 stuck: next=956 total_known=0 total_pkts=0 next_deliver=122368 deliver_bytes=1001390186 group=22/32 used=1 ready=0 id=956 nreal=4 shares=3/4 parity=4 gap_us=2556416
+[54352.287063] tbtun: fec super 956 stuck: next=956 total_known=0 total_pkts=0 next_deliver=122368 deliver_bytes=1001390186 group=22/32 used=1 ready=0 id=956 nreal=4 shares=3/4 parity=4 gap_us=2556485
+[54357.200330] tbt_fec_deliver_ready: 387 callbacks suppressed
+[54357.200336] tbtun: fec super 958 stuck: next=958 total_known=0 total_pkts=0 next_deliver=122624 deliver_bytes=1003487338 group=22/32 used=1 ready=0 id=958 nreal=4 shares=1/4 parity=4 gap_us=1869779
+[54357.213602] tbtun: fec super 958 stuck: next=958 total_known=0 total_pkts=0 next_deliver=122624 deliver_bytes=1003487338 group=22/32 used=1 ready=0 id=958 nreal=4 shares=2/4 parity=4 gap_us=1883051
+[54357.227393] tbtun: fec super 958 stuck: next=958 total_known=0 total_pkts=0 next_deliver=122624 deliver_bytes=1003487338 group=22/32 used=1 ready=0 id=958 nreal=4 shares=2/4 parity=4 gap_us=1896840
+[54357.227653] tbtun: fec super 958 stuck: next=958 total_known=0 total_pkts=0 next_deliver=122624 deliver_bytes=1003487338 group=22/32 used=1 ready=0 id=958 nreal=4 shares=2/4 parity=4 gap_us=1897102
+[54357.240500] tbtun: fec super 958 stuck: next=958 total_known=0 total_pkts=0 next_deliver=122624 deliver_bytes=1003487338 group=22/32 used=1 ready=0 id=958 nreal=4 shares=2/4 parity=4 gap_us=1909948
+[54357.254111] tbtun: fec super 958 stuck: next=958 total_known=0 total_pkts=0 next_deliver=122624 deliver_bytes=1003487338 group=22/32 used=1 ready=0 id=958 nreal=4 shares=2/4 parity=4 gap_us=1923559
+[54357.254350] tbtun: fec super 958 stuck: next=958 total_known=0 total_pkts=0 next_deliver=122624 deliver_bytes=1003487338 group=22/32 used=1 ready=0 id=958 nreal=4 shares=2/4 parity=4 gap_us=1923799
+[54357.267332] tbtun: fec super 958 stuck: next=958 total_known=0 total_pkts=0 next_deliver=122624 deliver_bytes=1003487338 group=22/32 used=1 ready=0 id=958 nreal=4 shares=2/4 parity=4 gap_us=1936780
+[54357.267593] tbtun: fec super 958 stuck: next=958 total_known=0 total_pkts=0 next_deliver=122624 deliver_bytes=1003487338 group=22/32 used=1 ready=0 id=958 nreal=4 shares=2/4 parity=4 gap_us=1937043
+[54357.280406] tbtun: fec super 958 stuck: next=958 total_known=0 total_pkts=0 next_deliver=122624 deliver_bytes=1003487338 group=22/32 used=1 ready=0 id=958 nreal=4 shares=2/4 parity=4 gap_us=1949855
+[54362.210713] tbt_fec_deliver_ready: 429 callbacks suppressed
+[54362.210729] tbtun: fec super 961 stuck: next=961 total_known=0 total_pkts=0 next_deliver=123008 deliver_bytes=1006633066 group=22/32 used=1 ready=0 id=961 nreal=4 shares=1/4 parity=4 gap_us=236922
+[54362.224031] tbtun: fec super 961 stuck: next=961 total_known=0 total_pkts=0 next_deliver=123008 deliver_bytes=1006633066 group=22/32 used=1 ready=0 id=961 nreal=4 shares=1/4 parity=4 gap_us=250240
+[54362.237372] tbtun: fec super 961 stuck: next=961 total_known=0 total_pkts=0 next_deliver=123008 deliver_bytes=1006633066 group=22/32 used=1 ready=0 id=961 nreal=4 shares=1/4 parity=4 gap_us=263581
+[54362.250715] tbtun: fec super 961 stuck: next=961 total_known=0 total_pkts=0 next_deliver=123008 deliver_bytes=1006633066 group=22/32 used=1 ready=0 id=961 nreal=4 shares=1/4 parity=4 gap_us=276924
+[54362.264071] tbtun: fec super 961 stuck: next=961 total_known=0 total_pkts=0 next_deliver=123008 deliver_bytes=1006633066 group=22/32 used=1 ready=0 id=961 nreal=4 shares=1/4 parity=4 gap_us=290281
+[54362.277496] tbtun: fec super 961 stuck: next=961 total_known=0 total_pkts=0 next_deliver=123008 deliver_bytes=1006633066 group=22/32 used=1 ready=0 id=961 nreal=4 shares=1/4 parity=4 gap_us=303706
+[54362.290790] tbtun: fec super 961 stuck: next=961 total_known=0 total_pkts=0 next_deliver=123008 deliver_bytes=1006633066 group=22/32 used=1 ready=0 id=961 nreal=4 shares=1/4 parity=4 gap_us=316999
+[54362.303671] tbtun: fec super 961 stuck: next=961 total_known=0 total_pkts=0 next_deliver=123008 deliver_bytes=1006633066 group=22/32 used=1 ready=0 id=961 nreal=4 shares=1/4 parity=4 gap_us=329882
+[54362.316975] tbtun: fec super 961 stuck: next=961 total_known=0 total_pkts=0 next_deliver=123008 deliver_bytes=1006633066 group=22/32 used=1 ready=0 id=961 nreal=4 shares=1/4 parity=4 gap_us=343186
+[54362.330292] tbtun: fec super 961 stuck: next=961 total_known=0 total_pkts=0 next_deliver=123008 deliver_bytes=1006633066 group=22/32 used=1 ready=0 id=961 nreal=4 shares=1/4 parity=4 gap_us=356503
+[54367.217015] tbt_fec_deliver_ready: 417 callbacks suppressed
+[54367.217036] tbtun: fec super 963 stuck: next=963 total_known=0 total_pkts=0 next_deliver=123264 deliver_bytes=1008730218 group=0/32 used=1 ready=0 id=963 nreal=4 shares=2/4 parity=4 gap_us=1242280
+[54367.230430] tbtun: fec super 963 stuck: next=963 total_known=0 total_pkts=0 next_deliver=123264 deliver_bytes=1008730218 group=0/32 used=1 ready=0 id=963 nreal=4 shares=2/4 parity=4 gap_us=1255694
+[54367.243859] tbtun: fec super 963 stuck: next=963 total_known=0 total_pkts=0 next_deliver=123264 deliver_bytes=1008730218 group=0/32 used=1 ready=0 id=963 nreal=4 shares=2/4 parity=4 gap_us=1269124
+[54367.244015] tbtun: fec super 963 stuck: next=963 total_known=0 total_pkts=0 next_deliver=123264 deliver_bytes=1008730218 group=0/32 used=1 ready=0 id=963 nreal=4 shares=2/4 parity=4 gap_us=1269281
+[54367.244157] tbtun: fec super 963 stuck: next=963 total_known=0 total_pkts=0 next_deliver=123264 deliver_bytes=1008730218 group=0/32 used=1 ready=0 id=963 nreal=4 shares=2/4 parity=4 gap_us=1269424
+[54367.260177] tbtun: fec super 963 stuck: next=963 total_known=0 total_pkts=0 next_deliver=123264 deliver_bytes=1008730218 group=0/32 used=1 ready=0 id=963 nreal=4 shares=2/4 parity=4 gap_us=1285442
+[54367.276801] tbtun: fec super 963 stuck: next=963 total_known=0 total_pkts=0 next_deliver=123264 deliver_bytes=1008730218 group=0/32 used=1 ready=0 id=963 nreal=4 shares=2/4 parity=4 gap_us=1302068
+[54367.293619] tbtun: fec super 963 stuck: next=963 total_known=0 total_pkts=0 next_deliver=123264 deliver_bytes=1008730218 group=0/32 used=1 ready=0 id=963 nreal=4 shares=2/4 parity=4 gap_us=1318883
+[54367.306849] tbtun: fec super 963 stuck: next=963 total_known=0 total_pkts=0 next_deliver=123264 deliver_bytes=1008730218 group=0/32 used=1 ready=0 id=963 nreal=4 shares=2/4 parity=4 gap_us=1332115
+[54367.306897] tbtun: fec super 963 stuck: next=963 total_known=0 total_pkts=0 next_deliver=123264 deliver_bytes=1008730218 group=0/32 used=1 ready=0 id=963 nreal=4 shares=2/4 parity=4 gap_us=1332164
+[54372.223581] tbt_fec_deliver_ready: 432 callbacks suppressed
+[54372.223601] tbtun: fec super 965 stuck: next=965 total_known=0 total_pkts=0 next_deliver=123520 deliver_bytes=1010827370 group=22/32 used=1 ready=0 id=965 nreal=4 shares=1/4 parity=4 gap_us=1663356
+[54372.238212] tbtun: fec super 966 stuck: next=966 total_known=0 total_pkts=0 next_deliver=123648 deliver_bytes=1011875946 group=22/32 used=1 ready=0 id=966 nreal=4 shares=1/4 parity=4 gap_us=0
+[54372.238517] tbtun: fec super 966 stuck: next=966 total_known=0 total_pkts=0 next_deliver=123648 deliver_bytes=1011875946 group=22/32 used=1 ready=0 id=966 nreal=4 shares=1/4 parity=4 gap_us=0
+[54372.250209] tbtun: fec super 966 stuck: next=966 total_known=0 total_pkts=0 next_deliver=123648 deliver_bytes=1011875946 group=22/32 used=1 ready=0 id=966 nreal=4 shares=1/4 parity=4 gap_us=11
+[54372.263680] tbtun: fec super 966 stuck: next=966 total_known=0 total_pkts=0 next_deliver=123648 deliver_bytes=1011875946 group=22/32 used=1 ready=0 id=966 nreal=4 shares=1/4 parity=4 gap_us=13483
+[54372.263825] tbtun: fec super 966 stuck: next=966 total_known=0 total_pkts=0 next_deliver=123648 deliver_bytes=1011875946 group=22/32 used=1 ready=0 id=966 nreal=4 shares=1/4 parity=4 gap_us=13630
+[54372.276708] tbtun: fec super 966 stuck: next=966 total_known=0 total_pkts=0 next_deliver=123648 deliver_bytes=1011875946 group=22/32 used=1 ready=0 id=966 nreal=4 shares=1/4 parity=4 gap_us=26512
+[54372.293362] tbtun: fec super 966 stuck: next=966 total_known=0 total_pkts=0 next_deliver=123648 deliver_bytes=1011875946 group=22/32 used=1 ready=0 id=966 nreal=4 shares=1/4 parity=4 gap_us=43166
+[54372.306698] tbtun: fec super 966 stuck: next=966 total_known=0 total_pkts=0 next_deliver=123648 deliver_bytes=1011875946 group=22/32 used=1 ready=0 id=966 nreal=4 shares=1/4 parity=4 gap_us=56503
+[54372.323401] tbtun: fec super 966 stuck: next=966 total_known=0 total_pkts=0 next_deliver=123648 deliver_bytes=1011875946 group=22/32 used=1 ready=0 id=966 nreal=4 shares=1/4 parity=4 gap_us=73206
+[54377.226861] tbt_fec_deliver_ready: 410 callbacks suppressed
+[54377.226869] tbtun: fec super 968 stuck: next=968 total_known=0 total_pkts=0 next_deliver=123904 deliver_bytes=1013973098 group=22/32 used=1 ready=0 id=968 nreal=4 shares=1/4 parity=4 gap_us=1560201
+[54377.226940] tbtun: fec super 968 stuck: next=968 total_known=0 total_pkts=0 next_deliver=123904 deliver_bytes=1013973098 group=22/32 used=1 ready=0 id=968 nreal=4 shares=1/4 parity=4 gap_us=1560282
+[54377.240040] tbtun: fec super 968 stuck: next=968 total_known=0 total_pkts=0 next_deliver=123904 deliver_bytes=1013973098 group=22/32 used=1 ready=0 id=968 nreal=4 shares=1/4 parity=4 gap_us=1573382
+[54377.240082] tbtun: fec super 968 stuck: next=968 total_known=0 total_pkts=0 next_deliver=123904 deliver_bytes=1013973098 group=22/32 used=1 ready=0 id=968 nreal=4 shares=1/4 parity=4 gap_us=1573424
+[54377.253350] tbtun: fec super 968 stuck: next=968 total_known=0 total_pkts=0 next_deliver=123904 deliver_bytes=1013973098 group=22/32 used=1 ready=0 id=968 nreal=4 shares=1/4 parity=4 gap_us=1586692
+[54377.253393] tbtun: fec super 968 stuck: next=968 total_known=0 total_pkts=0 next_deliver=123904 deliver_bytes=1013973098 group=22/32 used=1 ready=0 id=968 nreal=4 shares=1/4 parity=4 gap_us=1586735
+[54377.266684] tbtun: fec super 968 stuck: next=968 total_known=0 total_pkts=0 next_deliver=123904 deliver_bytes=1013973098 group=22/32 used=1 ready=0 id=968 nreal=4 shares=1/4 parity=4 gap_us=1600026
+[54377.266726] tbtun: fec super 968 stuck: next=968 total_known=0 total_pkts=0 next_deliver=123904 deliver_bytes=1013973098 group=22/32 used=1 ready=0 id=968 nreal=4 shares=1/4 parity=4 gap_us=1600068
+[54377.283328] tbtun: fec super 968 stuck: next=968 total_known=0 total_pkts=0 next_deliver=123904 deliver_bytes=1013973098 group=22/32 used=1 ready=0 id=968 nreal=4 shares=1/4 parity=4 gap_us=1616670
+[54377.299977] tbtun: fec super 968 stuck: next=968 total_known=0 total_pkts=0 next_deliver=123904 deliver_bytes=1013973098 group=22/32 used=1 ready=0 id=968 nreal=4 shares=1/4 parity=4 gap_us=1633319
+[54382.233353] tbt_fec_deliver_ready: 426 callbacks suppressed
+[54382.233362] tbtun: fec super 971 stuck: next=971 total_known=0 total_pkts=0 next_deliver=124288 deliver_bytes=1017118826 group=22/32 used=1 ready=0 id=971 nreal=4 shares=1/4 parity=4 gap_us=1196428
+[54382.233457] tbtun: fec super 971 stuck: next=971 total_known=0 total_pkts=0 next_deliver=124288 deliver_bytes=1017118826 group=22/32 used=1 ready=0 id=971 nreal=4 shares=1/4 parity=4 gap_us=1196532
+[54382.249989] tbtun: fec super 971 stuck: next=971 total_known=0 total_pkts=0 next_deliver=124288 deliver_bytes=1017118826 group=22/32 used=1 ready=0 id=971 nreal=4 shares=1/4 parity=4 gap_us=1213064
+[54382.250057] tbtun: fec super 971 stuck: next=971 total_known=0 total_pkts=0 next_deliver=124288 deliver_bytes=1017118826 group=22/32 used=1 ready=0 id=971 nreal=4 shares=1/4 parity=4 gap_us=1213133
+[54382.263389] tbtun: fec super 971 stuck: next=971 total_known=0 total_pkts=0 next_deliver=124288 deliver_bytes=1017118826 group=22/32 used=1 ready=0 id=971 nreal=4 shares=2/4 parity=4 gap_us=1226464
+[54382.263454] tbtun: fec super 971 stuck: next=971 total_known=0 total_pkts=0 next_deliver=124288 deliver_bytes=1017118826 group=22/32 used=1 ready=0 id=971 nreal=4 shares=2/4 parity=4 gap_us=1226530
+[54382.279959] tbtun: fec super 971 stuck: next=971 total_known=0 total_pkts=0 next_deliver=124288 deliver_bytes=1017118826 group=22/32 used=1 ready=0 id=971 nreal=4 shares=2/4 parity=4 gap_us=1243035
+[54382.280025] tbtun: fec super 971 stuck: next=971 total_known=0 total_pkts=0 next_deliver=124288 deliver_bytes=1017118826 group=22/32 used=1 ready=0 id=971 nreal=4 shares=2/4 parity=4 gap_us=1243101
+[54382.296638] tbtun: fec super 971 stuck: next=971 total_known=0 total_pkts=0 next_deliver=124288 deliver_bytes=1017118826 group=22/32 used=1 ready=0 id=971 nreal=4 shares=2/4 parity=4 gap_us=1259713
+[54382.296729] tbtun: fec super 971 stuck: next=971 total_known=0 total_pkts=0 next_deliver=124288 deliver_bytes=1017118826 group=22/32 used=1 ready=0 id=971 nreal=4 shares=2/4 parity=4 gap_us=1259805
+[54387.239846] tbt_fec_deliver_ready: 434 callbacks suppressed
+[54387.239855] tbtun: fec super 974 stuck: next=974 total_known=0 total_pkts=0 next_deliver=124672 deliver_bytes=1020264554 group=22/32 used=1 ready=0 id=974 nreal=4 shares=1/4 parity=4 gap_us=1196390
+[54387.256516] tbtun: fec super 974 stuck: next=974 total_known=0 total_pkts=0 next_deliver=124672 deliver_bytes=1020264554 group=22/32 used=1 ready=0 id=974 nreal=4 shares=1/4 parity=4 gap_us=1213059
+[54387.273208] tbtun: fec super 974 stuck: next=974 total_known=0 total_pkts=0 next_deliver=124672 deliver_bytes=1020264554 group=22/32 used=1 ready=0 id=974 nreal=4 shares=1/4 parity=4 gap_us=1229752
+[54387.289857] tbtun: fec super 974 stuck: next=974 total_known=0 total_pkts=0 next_deliver=124672 deliver_bytes=1020264554 group=22/32 used=1 ready=0 id=974 nreal=4 shares=1/4 parity=4 gap_us=1246401
+[54387.306524] tbtun: fec super 974 stuck: next=974 total_known=0 total_pkts=0 next_deliver=124672 deliver_bytes=1020264554 group=22/32 used=1 ready=0 id=974 nreal=4 shares=1/4 parity=4 gap_us=1263068
+[54387.323182] tbtun: fec super 974 stuck: next=974 total_known=0 total_pkts=0 next_deliver=124672 deliver_bytes=1020264554 group=22/32 used=1 ready=0 id=974 nreal=4 shares=1/4 parity=4 gap_us=1279727
+[54387.336527] tbtun: fec super 974 stuck: next=974 total_known=0 total_pkts=0 next_deliver=124672 deliver_bytes=1020264554 group=22/32 used=1 ready=0 id=974 nreal=4 shares=1/4 parity=4 gap_us=1293072
+[54387.349891] tbtun: fec super 974 stuck: next=974 total_known=0 total_pkts=0 next_deliver=124672 deliver_bytes=1020264554 group=22/32 used=1 ready=0 id=974 nreal=4 shares=1/4 parity=4 gap_us=1306435
+[54387.363186] tbtun: fec super 974 stuck: next=974 total_known=0 total_pkts=0 next_deliver=124672 deliver_bytes=1020264554 group=22/32 used=1 ready=0 id=974 nreal=4 shares=1/4 parity=4 gap_us=1319731
+[54387.376526] tbtun: fec super 974 stuck: next=974 total_known=0 total_pkts=0 next_deliver=124672 deliver_bytes=1020264554 group=22/32 used=1 ready=0 id=974 nreal=4 shares=1/4 parity=4 gap_us=1333071
+[54392.243111] tbt_fec_deliver_ready: 431 callbacks suppressed
+[54392.243120] tbtun: fec super 978 stuck: next=978 total_known=0 total_pkts=0 next_deliver=125184 deliver_bytes=1024458858 group=22/32 used=1 ready=0 id=978 nreal=4 shares=1/4 parity=4 gap_us=53177
+[54392.256486] tbtun: fec super 978 stuck: next=978 total_known=0 total_pkts=0 next_deliver=125184 deliver_bytes=1024458858 group=22/32 used=1 ready=0 id=978 nreal=4 shares=1/4 parity=4 gap_us=66552
+[54392.269797] tbtun: fec super 978 stuck: next=978 total_known=0 total_pkts=0 next_deliver=125184 deliver_bytes=1024458858 group=22/32 used=1 ready=0 id=978 nreal=4 shares=1/4 parity=4 gap_us=79863
+[54392.283136] tbtun: fec super 978 stuck: next=978 total_known=0 total_pkts=0 next_deliver=125184 deliver_bytes=1024458858 group=22/32 used=1 ready=0 id=978 nreal=4 shares=1/4 parity=4 gap_us=93203
+[54392.296503] tbtun: fec super 978 stuck: next=978 total_known=0 total_pkts=0 next_deliver=125184 deliver_bytes=1024458858 group=22/32 used=1 ready=0 id=978 nreal=4 shares=1/4 parity=4 gap_us=106570
+[54392.309795] tbtun: fec super 978 stuck: next=978 total_known=0 total_pkts=0 next_deliver=125184 deliver_bytes=1024458858 group=22/32 used=1 ready=0 id=978 nreal=4 shares=1/4 parity=4 gap_us=119863
+[54392.323131] tbtun: fec super 978 stuck: next=978 total_known=0 total_pkts=0 next_deliver=125184 deliver_bytes=1024458858 group=22/32 used=1 ready=0 id=978 nreal=4 shares=1/4 parity=4 gap_us=133198
+[54392.336502] tbtun: fec super 978 stuck: next=978 total_known=0 total_pkts=0 next_deliver=125184 deliver_bytes=1024458858 group=22/32 used=1 ready=0 id=978 nreal=4 shares=1/4 parity=4 gap_us=146570
+[54392.336531] tbtun: fec super 978 stuck: next=978 total_known=0 total_pkts=0 next_deliver=125184 deliver_bytes=1024458858 group=22/32 used=1 ready=0 id=978 nreal=4 shares=1/4 parity=4 gap_us=146600
+[54392.353140] tbtun: fec super 978 stuck: next=978 total_known=0 total_pkts=0 next_deliver=125184 deliver_bytes=1024458858 group=22/32 used=1 ready=0 id=978 nreal=4 shares=1/4 parity=4 gap_us=163206
+[54397.253075] tbt_fec_deliver_ready: 454 callbacks suppressed
+[54397.253084] tbtun: fec super 981 stuck: next=981 total_known=0 total_pkts=0 next_deliver=125568 deliver_bytes=1027604586 group=22/32 used=1 ready=0 id=981 nreal=4 shares=1/4 parity=4 gap_us=856696
+[54397.266427] tbtun: fec super 981 stuck: next=981 total_known=0 total_pkts=0 next_deliver=125568 deliver_bytes=1027604586 group=22/32 used=1 ready=0 id=981 nreal=4 shares=1/4 parity=4 gap_us=870048
+[54397.266492] tbtun: fec super 981 stuck: next=981 total_known=0 total_pkts=0 next_deliver=125568 deliver_bytes=1027604586 group=22/32 used=1 ready=0 id=981 nreal=4 shares=1/4 parity=4 gap_us=870114
+[54397.279787] tbtun: fec super 981 stuck: next=981 total_known=0 total_pkts=0 next_deliver=125568 deliver_bytes=1027604586 group=22/32 used=1 ready=0 id=981 nreal=4 shares=1/4 parity=4 gap_us=883409
+[54397.279854] tbtun: fec super 981 stuck: next=981 total_known=0 total_pkts=0 next_deliver=125568 deliver_bytes=1027604586 group=22/32 used=1 ready=0 id=981 nreal=4 shares=1/4 parity=4 gap_us=883476
+[54397.293104] tbtun: fec super 981 stuck: next=981 total_known=0 total_pkts=0 next_deliver=125568 deliver_bytes=1027604586 group=22/32 used=1 ready=0 id=981 nreal=4 shares=1/4 parity=4 gap_us=896725
+[54397.306421] tbtun: fec super 981 stuck: next=981 total_known=0 total_pkts=0 next_deliver=125568 deliver_bytes=1027604586 group=22/32 used=1 ready=0 id=981 nreal=4 shares=1/4 parity=4 gap_us=910043
+[54397.323169] tbtun: fec super 981 stuck: next=981 total_known=0 total_pkts=0 next_deliver=125568 deliver_bytes=1027604586 group=22/32 used=1 ready=0 id=981 nreal=4 shares=1/4 parity=4 gap_us=926791
+[54397.323240] tbtun: fec super 981 stuck: next=981 total_known=0 total_pkts=0 next_deliver=125568 deliver_bytes=1027604586 group=22/32 used=1 ready=0 id=981 nreal=4 shares=1/4 parity=4 gap_us=926863
+[54397.336435] tbtun: fec super 981 stuck: next=981 total_known=0 total_pkts=0 next_deliver=125568 deliver_bytes=1027604586 group=22/32 used=1 ready=0 id=981 nreal=4 shares=1/4 parity=4 gap_us=940057
+[54402.269713] tbt_fec_deliver_ready: 421 callbacks suppressed
+[54402.269721] tbtun: fec super 984 stuck: next=984 total_known=0 total_pkts=0 next_deliver=125952 deliver_bytes=1030750314 group=22/32 used=1 ready=0 id=984 nreal=4 shares=1/4 parity=4 gap_us=30014
+[54402.269742] tbtun: fec super 984 stuck: next=984 total_known=0 total_pkts=0 next_deliver=125952 deliver_bytes=1030750314 group=22/32 used=1 ready=0 id=984 nreal=4 shares=1/4 parity=4 gap_us=30044
+[54402.286360] tbtun: fec super 984 stuck: next=984 total_known=0 total_pkts=0 next_deliver=125952 deliver_bytes=1030750314 group=22/32 used=1 ready=0 id=984 nreal=4 shares=1/4 parity=4 gap_us=46660
+[54402.302994] tbtun: fec super 984 stuck: next=984 total_known=0 total_pkts=0 next_deliver=125952 deliver_bytes=1030750314 group=22/32 used=1 ready=0 id=984 nreal=4 shares=1/4 parity=4 gap_us=63295
+[54402.316334] tbtun: fec super 984 stuck: next=984 total_known=0 total_pkts=0 next_deliver=125952 deliver_bytes=1030750314 group=22/32 used=1 ready=0 id=984 nreal=4 shares=1/4 parity=4 gap_us=76636
+[54402.333029] tbtun: fec super 984 stuck: next=984 total_known=0 total_pkts=0 next_deliver=125952 deliver_bytes=1030750314 group=22/32 used=1 ready=0 id=984 nreal=4 shares=1/4 parity=4 gap_us=93330
+[54402.346413] tbtun: fec super 984 stuck: next=984 total_known=0 total_pkts=0 next_deliver=125952 deliver_bytes=1030750314 group=22/32 used=1 ready=0 id=984 nreal=4 shares=1/4 parity=4 gap_us=106715
+[54402.359648] tbtun: fec super 984 stuck: next=984 total_known=0 total_pkts=0 next_deliver=125952 deliver_bytes=1030750314 group=22/32 used=1 ready=0 id=984 nreal=4 shares=1/4 parity=4 gap_us=119950
+[54402.373099] tbtun: fec super 984 stuck: next=984 total_known=0 total_pkts=0 next_deliver=125952 deliver_bytes=1030750314 group=22/32 used=1 ready=0 id=984 nreal=4 shares=1/4 parity=4 gap_us=133400
+[54402.386640] tbtun: fec super 984 stuck: next=984 total_known=0 total_pkts=0 next_deliver=125952 deliver_bytes=1030750314 group=22/32 used=1 ready=0 id=984 nreal=4 shares=1/4 parity=4 gap_us=146941
+[54405.815783] audit: type=1400 audit(1794060358.994:1808): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1004108 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54405.815832] audit: type=1400 audit(1794060358.994:1809): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1004108 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54405.816714] audit: type=1400 audit(1794060358.994:1810): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1004108 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54405.816729] audit: type=1400 audit(1794060358.997:1811): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1004108 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54405.816738] audit: type=1400 audit(1794060358.997:1812): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1004108 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54405.816817] audit: type=1400 audit(1794060358.997:1813): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1004108 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54407.283028] tbt_fec_deliver_ready: 425 callbacks suppressed
+[54407.283036] tbtun: fec super 987 stuck: next=987 total_known=0 total_pkts=0 next_deliver=126336 deliver_bytes=1033896042 group=22/32 used=1 ready=0 id=987 nreal=4 shares=1/4 parity=4 gap_us=26718
+[54407.283083] tbtun: fec super 987 stuck: next=987 total_known=0 total_pkts=0 next_deliver=126336 deliver_bytes=1033896042 group=22/32 used=1 ready=0 id=987 nreal=4 shares=1/4 parity=4 gap_us=26775
+[54407.296301] tbtun: fec super 987 stuck: next=987 total_known=0 total_pkts=0 next_deliver=126336 deliver_bytes=1033896042 group=22/32 used=1 ready=0 id=987 nreal=4 shares=1/4 parity=4 gap_us=39992
+[54407.309662] tbtun: fec super 987 stuck: next=987 total_known=0 total_pkts=0 next_deliver=126336 deliver_bytes=1033896042 group=22/32 used=1 ready=0 id=987 nreal=4 shares=1/4 parity=4 gap_us=53353
+[54407.322994] tbtun: fec super 987 stuck: next=987 total_known=0 total_pkts=0 next_deliver=126336 deliver_bytes=1033896042 group=22/32 used=1 ready=0 id=987 nreal=4 shares=1/4 parity=4 gap_us=66685
+[54407.336312] tbtun: fec super 987 stuck: next=987 total_known=0 total_pkts=0 next_deliver=126336 deliver_bytes=1033896042 group=22/32 used=1 ready=0 id=987 nreal=4 shares=1/4 parity=4 gap_us=80004
+[54407.353189] tbtun: fec super 987 stuck: next=987 total_known=0 total_pkts=0 next_deliver=126336 deliver_bytes=1033896042 group=22/32 used=1 ready=0 id=987 nreal=4 shares=1/4 parity=4 gap_us=96879
+[54407.366356] tbtun: fec super 987 stuck: next=987 total_known=0 total_pkts=0 next_deliver=126336 deliver_bytes=1033896042 group=22/32 used=1 ready=0 id=987 nreal=4 shares=1/4 parity=4 gap_us=110047
+[54407.382961] tbtun: fec super 987 stuck: next=987 total_known=0 total_pkts=0 next_deliver=126336 deliver_bytes=1033896042 group=22/32 used=1 ready=0 id=987 nreal=4 shares=1/4 parity=4 gap_us=126653
+[54407.396634] tbtun: fec super 987 stuck: next=987 total_known=0 total_pkts=0 next_deliver=126336 deliver_bytes=1033896042 group=22/32 used=1 ready=0 id=987 nreal=4 shares=1/4 parity=4 gap_us=140325
+[54412.289582] tbt_fec_deliver_ready: 458 callbacks suppressed
+[54412.289591] tbtun: fec super 990 stuck: next=990 total_known=0 total_pkts=0 next_deliver=126720 deliver_bytes=1037041770 group=22/32 used=1 ready=0 id=990 nreal=4 shares=1/4 parity=4 gap_us=366690
+[54412.302926] tbtun: fec super 990 stuck: next=990 total_known=0 total_pkts=0 next_deliver=126720 deliver_bytes=1037041770 group=22/32 used=1 ready=0 id=990 nreal=4 shares=1/4 parity=4 gap_us=380034
+[54412.316328] tbtun: fec super 990 stuck: next=990 total_known=0 total_pkts=0 next_deliver=126720 deliver_bytes=1037041770 group=22/32 used=1 ready=0 id=990 nreal=4 shares=1/4 parity=4 gap_us=393436
+[54412.316419] tbtun: fec super 990 stuck: next=990 total_known=0 total_pkts=0 next_deliver=126720 deliver_bytes=1037041770 group=22/32 used=1 ready=0 id=990 nreal=4 shares=1/4 parity=4 gap_us=393528
+[54412.330104] tbtun: fec super 990 stuck: next=990 total_known=0 total_pkts=0 next_deliver=126720 deliver_bytes=1037041770 group=22/32 used=1 ready=0 id=990 nreal=4 shares=1/4 parity=4 gap_us=407212
+[54412.330522] tbtun: fec super 990 stuck: next=990 total_known=0 total_pkts=0 next_deliver=126720 deliver_bytes=1037041770 group=22/32 used=1 ready=0 id=990 nreal=4 shares=1/4 parity=4 gap_us=407630
+[54412.343536] tbtun: fec super 990 stuck: next=990 total_known=0 total_pkts=0 next_deliver=126720 deliver_bytes=1037041770 group=22/32 used=1 ready=0 id=990 nreal=4 shares=1/4 parity=4 gap_us=420643
+[54412.343958] tbtun: fec super 990 stuck: next=990 total_known=0 total_pkts=0 next_deliver=126720 deliver_bytes=1037041770 group=22/32 used=1 ready=0 id=990 nreal=4 shares=1/4 parity=4 gap_us=421067
+[54412.356644] tbtun: fec super 990 stuck: next=990 total_known=0 total_pkts=0 next_deliver=126720 deliver_bytes=1037041770 group=22/32 used=1 ready=0 id=990 nreal=4 shares=1/4 parity=4 gap_us=433751
+[54412.370141] tbtun: fec super 990 stuck: next=990 total_known=0 total_pkts=0 next_deliver=126720 deliver_bytes=1037041770 group=22/32 used=1 ready=0 id=990 nreal=4 shares=1/4 parity=4 gap_us=447249
+[54417.296810] tbt_fec_deliver_ready: 468 callbacks suppressed
+[54417.296826] tbtun: fec super 994 stuck: next=994 total_known=0 total_pkts=0 next_deliver=127232 deliver_bytes=1041236074 group=22/32 used=1 ready=0 id=994 nreal=4 shares=1/4 parity=4 gap_us=350622
+[54417.297069] tbtun: fec super 994 stuck: next=994 total_known=0 total_pkts=0 next_deliver=127232 deliver_bytes=1041236074 group=22/32 used=1 ready=0 id=994 nreal=4 shares=1/4 parity=4 gap_us=350882
+[54417.312883] tbtun: fec super 994 stuck: next=994 total_known=0 total_pkts=0 next_deliver=127232 deliver_bytes=1041236074 group=22/32 used=1 ready=0 id=994 nreal=4 shares=1/4 parity=4 gap_us=366696
+[54417.329716] tbtun: fec super 994 stuck: next=994 total_known=0 total_pkts=0 next_deliver=127232 deliver_bytes=1041236074 group=22/32 used=1 ready=0 id=994 nreal=4 shares=1/4 parity=4 gap_us=383528
+[54417.342900] tbtun: fec super 994 stuck: next=994 total_known=0 total_pkts=0 next_deliver=127232 deliver_bytes=1041236074 group=22/32 used=1 ready=0 id=994 nreal=4 shares=1/4 parity=4 gap_us=396713
+[54417.356345] tbtun: fec super 994 stuck: next=994 total_known=0 total_pkts=0 next_deliver=127232 deliver_bytes=1041236074 group=22/32 used=1 ready=0 id=994 nreal=4 shares=1/4 parity=4 gap_us=410158
+[54417.356436] tbtun: fec super 994 stuck: next=994 total_known=0 total_pkts=0 next_deliver=127232 deliver_bytes=1041236074 group=22/32 used=1 ready=0 id=994 nreal=4 shares=1/4 parity=4 gap_us=410250
+[54417.372879] tbtun: fec super 994 stuck: next=994 total_known=0 total_pkts=0 next_deliver=127232 deliver_bytes=1041236074 group=22/32 used=1 ready=0 id=994 nreal=4 shares=1/4 parity=4 gap_us=426692
+[54417.386620] tbtun: fec super 994 stuck: next=994 total_known=0 total_pkts=0 next_deliver=127232 deliver_bytes=1041236074 group=22/32 used=1 ready=0 id=994 nreal=4 shares=1/4 parity=4 gap_us=440433
+[54417.386943] tbtun: fec super 994 stuck: next=994 total_known=0 total_pkts=0 next_deliver=127232 deliver_bytes=1041236074 group=22/32 used=1 ready=0 id=994 nreal=4 shares=1/4 parity=4 gap_us=440757
+[54422.302780] tbt_fec_deliver_ready: 441 callbacks suppressed
+[54422.302788] tbtun: fec super 997 stuck: next=997 total_known=0 total_pkts=0 next_deliver=127616 deliver_bytes=1044381802 group=22/32 used=1 ready=0 id=997 nreal=4 shares=1/4 parity=4 gap_us=1256565
+[54422.319472] tbtun: fec super 997 stuck: next=997 total_known=0 total_pkts=0 next_deliver=127616 deliver_bytes=1044381802 group=22/32 used=1 ready=0 id=997 nreal=4 shares=1/4 parity=4 gap_us=1273258
+[54422.336146] tbtun: fec super 997 stuck: next=997 total_known=0 total_pkts=0 next_deliver=127616 deliver_bytes=1044381802 group=22/32 used=1 ready=0 id=997 nreal=4 shares=1/4 parity=4 gap_us=1289932
+[54422.349472] tbtun: fec super 997 stuck: next=997 total_known=0 total_pkts=0 next_deliver=127616 deliver_bytes=1044381802 group=22/32 used=1 ready=0 id=997 nreal=4 shares=1/4 parity=4 gap_us=1303259
+[54422.366315] tbtun: fec super 997 stuck: next=997 total_known=0 total_pkts=0 next_deliver=127616 deliver_bytes=1044381802 group=22/32 used=1 ready=0 id=997 nreal=4 shares=1/4 parity=4 gap_us=1320101
+[54422.382812] tbtun: fec super 997 stuck: next=997 total_known=0 total_pkts=0 next_deliver=127616 deliver_bytes=1044381802 group=22/32 used=1 ready=0 id=997 nreal=4 shares=1/4 parity=4 gap_us=1336599
+[54422.392805] tbtun: fec super 997 stuck: next=997 total_known=0 total_pkts=0 next_deliver=127616 deliver_bytes=1044381802 group=22/32 used=1 ready=0 id=997 nreal=4 shares=1/4 parity=4 gap_us=1346592
+[54422.409456] tbtun: fec super 997 stuck: next=997 total_known=0 total_pkts=0 next_deliver=127616 deliver_bytes=1044381802 group=22/32 used=1 ready=0 id=997 nreal=4 shares=1/4 parity=4 gap_us=1363244
+[54422.422785] tbtun: fec super 997 stuck: next=997 total_known=0 total_pkts=0 next_deliver=127616 deliver_bytes=1044381802 group=22/32 used=1 ready=0 id=997 nreal=4 shares=1/4 parity=4 gap_us=1376572
+[54422.436116] tbtun: fec super 997 stuck: next=997 total_known=0 total_pkts=0 next_deliver=127616 deliver_bytes=1044381802 group=22/32 used=1 ready=0 id=997 nreal=4 shares=1/4 parity=4 gap_us=1389904
+[54426.132971] tbtun: carrier 151 stalled: repath paused, new frames avoid it
+[54426.999562] tbtun: carrier 151 recovered after 866 ms: back in the stripe
+[54427.312805] tbt_fec_deliver_ready: 440 callbacks suppressed
+[54427.312816] tbtun: fec super 1000 stuck: next=1000 total_known=0 total_pkts=0 next_deliver=128000 deliver_bytes=1047527530 group=22/32 used=1 ready=0 id=1000 nreal=4 shares=1/4 parity=4 gap_us=1476680
+[54427.329699] tbtun: fec super 1000 stuck: next=1000 total_known=0 total_pkts=0 next_deliver=128000 deliver_bytes=1047527530 group=22/32 used=1 ready=0 id=1000 nreal=4 shares=1/4 parity=4 gap_us=1493574
+[54427.329767] tbtun: fec super 1000 stuck: next=1000 total_known=0 total_pkts=0 next_deliver=128000 deliver_bytes=1047527530 group=22/32 used=1 ready=0 id=1000 nreal=4 shares=1/4 parity=4 gap_us=1493643
+[54427.346119] tbtun: fec super 1000 stuck: next=1000 total_known=0 total_pkts=0 next_deliver=128000 deliver_bytes=1047527530 group=22/32 used=1 ready=0 id=1000 nreal=4 shares=1/4 parity=4 gap_us=1509996
+[54427.346141] tbtun: fec super 1000 stuck: next=1000 total_known=0 total_pkts=0 next_deliver=128000 deliver_bytes=1047527530 group=22/32 used=1 ready=0 id=1000 nreal=4 shares=1/4 parity=4 gap_us=1510019
+[54427.359395] tbtun: fec super 1000 stuck: next=1000 total_known=0 total_pkts=0 next_deliver=128000 deliver_bytes=1047527530 group=22/32 used=1 ready=0 id=1000 nreal=4 shares=1/4 parity=4 gap_us=1523271
+[54427.376304] tbtun: fec super 1000 stuck: next=1000 total_known=0 total_pkts=0 next_deliver=128000 deliver_bytes=1047527530 group=22/32 used=1 ready=0 id=1000 nreal=4 shares=1/4 parity=4 gap_us=1540181
+[54427.376325] tbtun: fec super 1000 stuck: next=1000 total_known=0 total_pkts=0 next_deliver=128000 deliver_bytes=1047527530 group=22/32 used=1 ready=0 id=1000 nreal=4 shares=1/4 parity=4 gap_us=1540202
+[54427.392742] tbtun: fec super 1000 stuck: next=1000 total_known=0 total_pkts=0 next_deliver=128000 deliver_bytes=1047527530 group=22/32 used=1 ready=0 id=1000 nreal=4 shares=1/4 parity=4 gap_us=1556619
+[54427.392810] tbtun: fec super 1000 stuck: next=1000 total_known=0 total_pkts=0 next_deliver=128000 deliver_bytes=1047527530 group=22/32 used=1 ready=0 id=1000 nreal=4 shares=1/4 parity=4 gap_us=1556688
+[54432.316084] tbt_fec_deliver_ready: 429 callbacks suppressed
+[54432.316090] tbtun: fec super 1003 stuck: next=1003 total_known=0 total_pkts=0 next_deliver=128384 deliver_bytes=1050673258 group=22/32 used=1 ready=0 id=1003 nreal=4 shares=1/4 parity=4 gap_us=1496704
+[54432.332753] tbtun: fec super 1003 stuck: next=1003 total_known=0 total_pkts=0 next_deliver=128384 deliver_bytes=1050673258 group=22/32 used=1 ready=0 id=1003 nreal=4 shares=1/4 parity=4 gap_us=1513374
+[54432.349659] tbtun: fec super 1003 stuck: next=1003 total_known=0 total_pkts=0 next_deliver=128384 deliver_bytes=1050673258 group=22/32 used=1 ready=0 id=1003 nreal=4 shares=1/4 parity=4 gap_us=1530279
+[54432.362930] tbtun: fec super 1003 stuck: next=1003 total_known=0 total_pkts=0 next_deliver=128384 deliver_bytes=1050673258 group=22/32 used=1 ready=0 id=1003 nreal=4 shares=1/4 parity=4 gap_us=1543550
+[54432.363031] tbtun: fec super 1003 stuck: next=1003 total_known=0 total_pkts=0 next_deliver=128384 deliver_bytes=1050673258 group=22/32 used=1 ready=0 id=1003 nreal=4 shares=1/4 parity=4 gap_us=1543652
+[54432.379794] tbtun: fec super 1003 stuck: next=1003 total_known=0 total_pkts=0 next_deliver=128384 deliver_bytes=1050673258 group=22/32 used=1 ready=0 id=1003 nreal=4 shares=1/4 parity=4 gap_us=1560414
+[54432.392900] tbtun: fec super 1003 stuck: next=1003 total_known=0 total_pkts=0 next_deliver=128384 deliver_bytes=1050673258 group=22/32 used=1 ready=0 id=1003 nreal=4 shares=1/4 parity=4 gap_us=1573521
+[54432.392999] tbtun: fec super 1003 stuck: next=1003 total_known=0 total_pkts=0 next_deliver=128384 deliver_bytes=1050673258 group=22/32 used=1 ready=0 id=1003 nreal=4 shares=1/4 parity=4 gap_us=1573621
+[54432.409859] tbtun: fec super 1003 stuck: next=1003 total_known=0 total_pkts=0 next_deliver=128384 deliver_bytes=1050673258 group=22/32 used=1 ready=0 id=1003 nreal=4 shares=1/4 parity=4 gap_us=1590479
+[54432.410200] tbtun: fec super 1003 stuck: next=1003 total_known=0 total_pkts=0 next_deliver=128384 deliver_bytes=1050673258 group=22/32 used=1 ready=0 id=1003 nreal=4 shares=1/4 parity=4 gap_us=1590820
+[54437.322819] tbt_fec_deliver_ready: 415 callbacks suppressed
+[54437.322832] tbtun: fec super 1006 stuck: next=1006 total_known=0 total_pkts=0 next_deliver=128768 deliver_bytes=1053818986 group=22/32 used=1 ready=0 id=1006 nreal=4 shares=1/4 parity=4 gap_us=520000
+[54437.336110] tbtun: fec super 1006 stuck: next=1006 total_known=0 total_pkts=0 next_deliver=128768 deliver_bytes=1053818986 group=22/32 used=1 ready=0 id=1006 nreal=4 shares=1/4 parity=4 gap_us=533291
+[54437.349513] tbtun: fec super 1006 stuck: next=1006 total_known=0 total_pkts=0 next_deliver=128768 deliver_bytes=1053818986 group=22/32 used=1 ready=0 id=1006 nreal=4 shares=1/4 parity=4 gap_us=546693
+[54437.362623] tbtun: fec super 1006 stuck: next=1006 total_known=0 total_pkts=0 next_deliver=128768 deliver_bytes=1053818986 group=22/32 used=1 ready=0 id=1006 nreal=4 shares=1/4 parity=4 gap_us=559805
+[54437.375924] tbtun: fec super 1006 stuck: next=1006 total_known=0 total_pkts=0 next_deliver=128768 deliver_bytes=1053818986 group=22/32 used=1 ready=0 id=1006 nreal=4 shares=1/4 parity=4 gap_us=573106
+[54437.392755] tbtun: fec super 1006 stuck: next=1006 total_known=0 total_pkts=0 next_deliver=128768 deliver_bytes=1053818986 group=22/32 used=1 ready=0 id=1006 nreal=4 shares=1/4 parity=4 gap_us=589937
+[54437.406105] tbtun: fec super 1006 stuck: next=1006 total_known=0 total_pkts=0 next_deliver=128768 deliver_bytes=1053818986 group=22/32 used=1 ready=0 id=1006 nreal=4 shares=1/4 parity=4 gap_us=603287
+[54437.419425] tbtun: fec super 1006 stuck: next=1006 total_known=0 total_pkts=0 next_deliver=128768 deliver_bytes=1053818986 group=22/32 used=1 ready=0 id=1006 nreal=4 shares=1/4 parity=4 gap_us=616607
+[54437.432754] tbtun: fec super 1006 stuck: next=1006 total_known=0 total_pkts=0 next_deliver=128768 deliver_bytes=1053818986 group=22/32 used=1 ready=0 id=1006 nreal=4 shares=1/4 parity=4 gap_us=629936
+[54437.445939] tbtun: fec super 1006 stuck: next=1006 total_known=0 total_pkts=0 next_deliver=128768 deliver_bytes=1053818986 group=22/32 used=1 ready=0 id=1006 nreal=4 shares=1/4 parity=4 gap_us=643122
+[54442.325865] tbt_fec_deliver_ready: 437 callbacks suppressed
+[54442.325871] tbtun: fec super 1009 stuck: next=1009 total_known=0 total_pkts=0 next_deliver=129152 deliver_bytes=1056964714 group=19/32 used=1 ready=0 id=1009 nreal=4 shares=2/4 parity=4 gap_us=1048821
+[54442.339254] tbtun: fec super 1009 stuck: next=1009 total_known=0 total_pkts=0 next_deliver=129152 deliver_bytes=1056964714 group=19/32 used=1 ready=0 id=1009 nreal=4 shares=2/4 parity=4 gap_us=1062210
+[54442.339325] tbtun: fec super 1009 stuck: next=1009 total_known=0 total_pkts=0 next_deliver=129152 deliver_bytes=1056964714 group=19/32 used=1 ready=0 id=1009 nreal=4 shares=2/4 parity=4 gap_us=1062282
+[54442.355905] tbtun: fec super 1009 stuck: next=1009 total_known=0 total_pkts=0 next_deliver=129152 deliver_bytes=1056964714 group=19/32 used=1 ready=0 id=1009 nreal=4 shares=2/4 parity=4 gap_us=1078861
+[54442.372602] tbtun: fec super 1009 stuck: next=1009 total_known=0 total_pkts=0 next_deliver=129152 deliver_bytes=1056964714 group=19/32 used=1 ready=0 id=1009 nreal=4 shares=2/4 parity=4 gap_us=1095558
+[54442.389231] tbtun: fec super 1009 stuck: next=1009 total_known=0 total_pkts=0 next_deliver=129152 deliver_bytes=1056964714 group=19/32 used=1 ready=0 id=1009 nreal=4 shares=2/4 parity=4 gap_us=1112187
+[54442.402576] tbtun: fec super 1009 stuck: next=1009 total_known=0 total_pkts=0 next_deliver=129152 deliver_bytes=1056964714 group=19/32 used=1 ready=0 id=1009 nreal=4 shares=2/4 parity=4 gap_us=1125533
+[54442.416131] tbtun: fec super 1009 stuck: next=1009 total_known=0 total_pkts=0 next_deliver=129152 deliver_bytes=1056964714 group=19/32 used=1 ready=0 id=1009 nreal=4 shares=2/4 parity=4 gap_us=1139087
+[54442.429251] tbtun: fec super 1009 stuck: next=1009 total_known=0 total_pkts=0 next_deliver=129152 deliver_bytes=1056964714 group=19/32 used=1 ready=0 id=1009 nreal=4 shares=2/4 parity=4 gap_us=1152208
+[54442.442733] tbtun: fec super 1009 stuck: next=1009 total_known=0 total_pkts=0 next_deliver=129152 deliver_bytes=1056964714 group=19/32 used=1 ready=0 id=1009 nreal=4 shares=2/4 parity=4 gap_us=1165690
+[54447.329145] tbt_fec_deliver_ready: 437 callbacks suppressed
+[54447.329151] tbtun: fec super 1012 stuck: next=1012 total_known=0 total_pkts=0 next_deliver=129536 deliver_bytes=1060110442 group=19/32 used=1 ready=0 id=1012 nreal=4 shares=2/4 parity=4 gap_us=1566573
+[54447.345813] tbtun: fec super 1012 stuck: next=1012 total_known=0 total_pkts=0 next_deliver=129536 deliver_bytes=1060110442 group=19/32 used=1 ready=0 id=1012 nreal=4 shares=2/4 parity=4 gap_us=1583242
+[54447.362520] tbtun: fec super 1012 stuck: next=1012 total_known=0 total_pkts=0 next_deliver=129536 deliver_bytes=1060110442 group=19/32 used=1 ready=0 id=1012 nreal=4 shares=2/4 parity=4 gap_us=1599950
+[54447.375898] tbtun: fec super 1012 stuck: next=1012 total_known=0 total_pkts=0 next_deliver=129536 deliver_bytes=1060110442 group=19/32 used=1 ready=0 id=1012 nreal=4 shares=2/4 parity=4 gap_us=1613328
+[54447.375969] tbtun: fec super 1012 stuck: next=1012 total_known=0 total_pkts=0 next_deliver=129536 deliver_bytes=1060110442 group=19/32 used=1 ready=0 id=1012 nreal=4 shares=2/4 parity=4 gap_us=1613399
+[54447.389244] tbtun: fec super 1012 stuck: next=1012 total_known=0 total_pkts=0 next_deliver=129536 deliver_bytes=1060110442 group=19/32 used=1 ready=0 id=1012 nreal=4 shares=2/4 parity=4 gap_us=1626674
+[54447.389316] tbtun: fec super 1012 stuck: next=1012 total_known=0 total_pkts=0 next_deliver=129536 deliver_bytes=1060110442 group=19/32 used=1 ready=0 id=1012 nreal=4 shares=2/4 parity=4 gap_us=1626746
+[54447.402515] tbtun: fec super 1012 stuck: next=1012 total_known=0 total_pkts=0 next_deliver=129536 deliver_bytes=1060110442 group=19/32 used=1 ready=0 id=1012 nreal=4 shares=2/4 parity=4 gap_us=1639944
+[54447.415843] tbtun: fec super 1012 stuck: next=1012 total_known=0 total_pkts=0 next_deliver=129536 deliver_bytes=1060110442 group=19/32 used=1 ready=0 id=1012 nreal=4 shares=2/4 parity=4 gap_us=1653273
+[54447.429172] tbtun: fec super 1012 stuck: next=1012 total_known=0 total_pkts=0 next_deliver=129536 deliver_bytes=1060110442 group=19/32 used=1 ready=0 id=1012 nreal=4 shares=2/4 parity=4 gap_us=1666602
+[54452.339598] tbt_fec_deliver_ready: 420 callbacks suppressed
+[54452.339613] tbtun: fec super 1017 stuck: next=1017 total_known=0 total_pkts=0 next_deliver=130176 deliver_bytes=1065353322 group=19/32 used=1 ready=0 id=1017 nreal=4 shares=2/4 parity=4 gap_us=1397131
+[54452.353023] tbtun: fec super 1017 stuck: next=1017 total_known=0 total_pkts=0 next_deliver=130176 deliver_bytes=1065353322 group=19/32 used=1 ready=0 id=1017 nreal=4 shares=2/4 parity=4 gap_us=1410555
+[54452.353265] tbtun: fec super 1017 stuck: next=1017 total_known=0 total_pkts=0 next_deliver=130176 deliver_bytes=1065353322 group=19/32 used=1 ready=0 id=1017 nreal=4 shares=2/4 parity=4 gap_us=1410798
+[54452.366048] tbtun: fec super 1017 stuck: next=1017 total_known=0 total_pkts=0 next_deliver=130176 deliver_bytes=1065353322 group=19/32 used=1 ready=0 id=1017 nreal=4 shares=2/4 parity=4 gap_us=1423581
+[54452.379390] tbtun: fec super 1017 stuck: next=1017 total_known=0 total_pkts=0 next_deliver=130176 deliver_bytes=1065353322 group=19/32 used=1 ready=0 id=1017 nreal=4 shares=2/4 parity=4 gap_us=1436922
+[54452.379631] tbtun: fec super 1017 stuck: next=1017 total_known=0 total_pkts=0 next_deliver=130176 deliver_bytes=1065353322 group=19/32 used=1 ready=0 id=1017 nreal=4 shares=2/4 parity=4 gap_us=1437165
+[54452.392692] tbtun: fec super 1017 stuck: next=1017 total_known=0 total_pkts=0 next_deliver=130176 deliver_bytes=1065353322 group=19/32 used=1 ready=0 id=1017 nreal=4 shares=2/4 parity=4 gap_us=1450225
+[54452.405896] tbtun: fec super 1017 stuck: next=1017 total_known=0 total_pkts=0 next_deliver=130176 deliver_bytes=1065353322 group=19/32 used=1 ready=0 id=1017 nreal=4 shares=2/4 parity=4 gap_us=1463430
+[54452.405944] tbtun: fec super 1017 stuck: next=1017 total_known=0 total_pkts=0 next_deliver=130176 deliver_bytes=1065353322 group=19/32 used=1 ready=0 id=1017 nreal=4 shares=2/4 parity=4 gap_us=1463479
+[54452.419097] tbtun: fec super 1017 stuck: next=1017 total_known=0 total_pkts=0 next_deliver=130176 deliver_bytes=1065353322 group=19/32 used=1 ready=0 id=1017 nreal=4 shares=2/4 parity=4 gap_us=1476631
+[54457.342764] tbt_fec_deliver_ready: 490 callbacks suppressed
+[54457.342777] tbtun: fec super 1021 stuck: next=1021 total_known=0 total_pkts=0 next_deliver=130688 deliver_bytes=1069547626 group=22/32 used=1 ready=0 id=1021 nreal=4 shares=2/4 parity=4 gap_us=1026960
+[54457.342922] tbtun: fec super 1021 stuck: next=1021 total_known=0 total_pkts=0 next_deliver=130688 deliver_bytes=1069547626 group=22/32 used=1 ready=0 id=1021 nreal=4 shares=2/4 parity=4 gap_us=1027120
+[54457.355916] tbtun: fec super 1021 stuck: next=1021 total_known=0 total_pkts=0 next_deliver=130688 deliver_bytes=1069547626 group=22/32 used=1 ready=0 id=1021 nreal=4 shares=2/4 parity=4 gap_us=1040112
+[54457.369066] tbtun: fec super 1021 stuck: next=1021 total_known=0 total_pkts=0 next_deliver=130688 deliver_bytes=1069547626 group=22/32 used=1 ready=0 id=1021 nreal=4 shares=2/4 parity=4 gap_us=1053264
+[54457.382555] tbtun: fec super 1021 stuck: next=1021 total_known=0 total_pkts=0 next_deliver=130688 deliver_bytes=1069547626 group=22/32 used=1 ready=0 id=1021 nreal=4 shares=2/4 parity=4 gap_us=1066752
+[54457.396032] tbtun: fec super 1021 stuck: next=1021 total_known=0 total_pkts=0 next_deliver=130688 deliver_bytes=1069547626 group=22/32 used=1 ready=0 id=1021 nreal=4 shares=2/4 parity=4 gap_us=1080229
+[54457.396196] tbtun: fec super 1021 stuck: next=1021 total_known=0 total_pkts=0 next_deliver=130688 deliver_bytes=1069547626 group=22/32 used=1 ready=0 id=1021 nreal=4 shares=2/4 parity=4 gap_us=1080393
+[54457.412497] tbtun: fec super 1021 stuck: next=1021 total_known=0 total_pkts=0 next_deliver=130688 deliver_bytes=1069547626 group=22/32 used=1 ready=0 id=1021 nreal=4 shares=2/4 parity=4 gap_us=1096694
+[54457.412547] tbtun: fec super 1021 stuck: next=1021 total_known=0 total_pkts=0 next_deliver=130688 deliver_bytes=1069547626 group=22/32 used=1 ready=0 id=1021 nreal=4 shares=2/4 parity=4 gap_us=1096746
+[54457.425925] tbtun: fec super 1021 stuck: next=1021 total_known=0 total_pkts=0 next_deliver=130688 deliver_bytes=1069547626 group=22/32 used=1 ready=0 id=1021 nreal=4 shares=2/4 parity=4 gap_us=1110122
+[54462.458972] tbt_fec_deliver_ready: 258 callbacks suppressed
+[54462.458980] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54462.566094] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54462.669042] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54462.781410] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54462.888668] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54462.993819] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54463.104868] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54463.214902] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54463.324104] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54463.437267] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54467.565393] tbt_fec_deliver_ready: 37 callbacks suppressed
+[54467.565402] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54467.672321] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54467.778634] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54467.884030] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54467.992362] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54468.097963] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54468.203116] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54468.313388] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54468.423672] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54468.537542] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54469.987262] audit: type=1400 audit(1794060423.168:1814): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1008269 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54469.987288] audit: type=1400 audit(1794060423.168:1815): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1008269 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54469.987683] audit: type=1400 audit(1794060423.168:1816): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1008269 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54469.987712] audit: type=1400 audit(1794060423.168:1817): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1008269 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54472.588743] tbt_fec_deliver_ready: 36 callbacks suppressed
+[54472.588753] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54472.695485] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54472.803947] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54472.911603] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54473.018829] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54473.124417] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54473.231392] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54473.338536] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54473.445544] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54473.551443] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54477.628446] tbt_fec_deliver_ready: 37 callbacks suppressed
+[54477.628467] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54477.734384] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54477.841073] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54477.948151] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54478.055382] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54478.161050] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54478.265436] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54478.379891] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54478.488744] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54478.595451] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54482.662249] tbt_fec_deliver_ready: 37 callbacks suppressed
+[54482.662263] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54482.776459] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54482.883487] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54482.993728] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54483.103448] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54483.209718] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54483.316840] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54483.422619] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54483.541875] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54483.653353] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54487.703858] tbt_fec_deliver_ready: 36 callbacks suppressed
+[54487.703866] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54487.810975] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54487.916208] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54488.023664] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54488.134885] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54488.241338] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54488.344529] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54488.457059] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54488.567843] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54488.674310] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54492.760988] tbt_fec_deliver_ready: 67 callbacks suppressed
+[54492.760996] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54492.867634] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54492.971978] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54493.084905] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54493.192068] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54493.298864] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54493.407649] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54493.514990] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54493.625109] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54493.731938] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54497.840735] tbt_fec_deliver_ready: 37 callbacks suppressed
+[54497.840753] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54497.948538] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54498.060627] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54498.162815] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54498.271378] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54498.376793] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54498.481686] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54498.593571] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54498.702842] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54498.810743] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54502.938293] tbt_fec_deliver_ready: 37 callbacks suppressed
+[54502.938301] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54503.043415] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54503.150571] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54503.261504] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54503.368081] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54503.480964] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54503.591853] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54503.705776] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54503.814428] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54503.923009] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54507.969051] tbt_fec_deliver_ready: 36 callbacks suppressed
+[54507.969060] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54508.080309] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54508.183477] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54508.292986] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54508.403683] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54508.516531] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54508.625362] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54508.735286] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54508.847469] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54508.957672] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54511.418775] tbtun: tunnel 1 carrier 83 gen 84 lost: sock=1 connected=1 hello_sent=1 up=1
+[54513.015107] tbt_fec_deliver_ready: 36 callbacks suppressed
+[54513.015116] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54513.127028] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54513.148507] tbtun: tunnel 1 carrier 85 gen 86 lost: sock=1 connected=1 hello_sent=1 up=1
+[54513.238167] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54513.344833] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54513.462583] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54513.578199] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54513.688217] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54513.798528] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54513.910620] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54514.023292] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54518.088239] tbt_fec_deliver_ready: 36 callbacks suppressed
+[54518.088248] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54518.194971] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54518.302555] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54518.419793] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54518.529387] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54518.641725] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54518.749118] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54518.859486] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54518.969305] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54519.079905] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54523.100129] tbt_fec_deliver_ready: 65 callbacks suppressed
+[54523.100136] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54523.208163] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54523.315532] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54523.421647] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54523.532147] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54523.635009] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54523.742022] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54523.852183] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54523.956155] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54524.068254] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54526.305037] tbtun: tunnel 1 carrier 93 gen 94 lost: sock=1 connected=1 hello_sent=1 up=1
+[54528.165453] tbt_fec_deliver_ready: 36 callbacks suppressed
+[54528.165462] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54528.275240] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54528.385023] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54528.492335] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54528.595927] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54528.707211] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54528.817144] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54528.924357] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54529.033753] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54529.141397] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54533.210571] tbt_fec_deliver_ready: 37 callbacks suppressed
+[54533.210591] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54533.317711] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54533.423747] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54533.530975] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54533.637718] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54533.746277] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54533.858174] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54533.967654] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54534.073259] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54534.181782] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54536.640279] audit: type=1400 audit(1794060489.819:1818): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1015445 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54536.640303] audit: type=1400 audit(1794060489.819:1819): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1015445 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54536.640674] audit: type=1400 audit(1794060489.819:1820): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1015445 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54536.640704] audit: type=1400 audit(1794060489.819:1821): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1015445 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[54538.285952] tbt_fec_deliver_ready: 37 callbacks suppressed
+[54538.285961] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54538.391406] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54538.505945] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54538.616849] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54538.728275] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54538.845503] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54538.955179] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54539.064419] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54539.172478] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54539.283899] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54543.303333] tbt_fec_deliver_ready: 36 callbacks suppressed
+[54543.303342] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54543.412796] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54543.519259] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54543.627157] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54543.734222] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54543.840939] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54543.947169] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54544.053507] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54544.162087] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54544.266928] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54548.365564] tbt_fec_deliver_ready: 37 callbacks suppressed
+[54548.365572] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54548.471409] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54548.580450] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54548.686691] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54548.794655] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54548.900247] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54549.007501] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54549.113922] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54549.221531] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54549.327351] tbtun: fec super 1025 stuck: next=1025 total_known=0 total_pkts=0 next_deliver=131200 deliver_bytes=1073741930 group=0/32 used=1 ready=1 id=1017 nreal=4 shares=4/4 parity=4 gap_us=0
+[54556.664639] tbtun: tunnel 1 carrier 37 gen 38 lost: sock=1 connected=1 hello_sent=1 up=1

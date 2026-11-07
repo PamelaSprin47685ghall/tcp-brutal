@@ -1,0 +1,25 @@
+# far busybox httpd write-timeout probe (diagnostic only)
+
+Host: far 45.11.1.62, busybox 1.37.0 (Ubuntu 1:1.37.0-7ubuntu1)
+Target: 127.0.0.1:5210, GET /accept-1g.bin
+
+Question: does the source httpd close a stalled body write after 60 s
+(SO_SNDTIMEO = DATA_WRITE_TIMEOUT in recent busybox httpd)?
+
+Probe 1 (2026-11-07T09:57Z, 65 s no reads, then recv(1)):
+    first_recv=198
+    after_65s=data
+Inconclusive: the client receive buffer still held body bytes.
+
+Probe 2 (2026-11-07T09:59Z, 65 s no reads, then drain to EOF):
+    first_recv=4096
+    after_65s=EOF_after_drain total=1073737926
+The client received 4096 + 1,073,737,926 = 1,073,742,022 bytes after the
+pause (1,073,741,824 body + 198 header bytes), then EOF. The httpd stayed
+alive through the 65 s no-progress window and sent the complete file.
+
+Conclusion: the 60 s DATA_WRITE_TIMEOUT hypothesis for the fix20 run's
+early target EOF is NOT supported by this probe. The httpd did not close a
+stalled response. The far target EOF at 1,069,764,415 B has another cause;
+the per-stream `tgt_state`/`tgt_err`/kill reason on the far was gone by the
+post-run snapshot. Capture that state at teardown next time.

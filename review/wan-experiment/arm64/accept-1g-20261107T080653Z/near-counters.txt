@@ -1,0 +1,22 @@
+c9.fec_proto_fail.pre=0 post=0 delta=0
+c9.fec_hdr_crc_fail.pre=0 post=0 delta=0
+c9.fec_payload_crc_fail.pre=0 post=0 delta=0
+rx_errs.pre=0 post=93 delta=93
+connect_fail.pre=1 post=2 delta=1
+alloc_fail.pre=0 post=0 delta=0
+join_bad.pre=0 post=0 delta=0
+c11.fec_nack_tx.pre=0 post=16409 delta=16409
+c11.fec_nack_rx.pre=0 post=6330 delta=6330
+c11.fec_nack_retx.pre=0 post=21 delta=21
+c11.fec_nack_drop.pre=0 post=0 delta=0
+c11.fec_replay_hit.pre=0 post=21 delta=21
+c11.fec_replay_miss.pre=0 post=202464 delta=202464
+c11.fec_replay_miss_no_ring.pre=0 post=0 delta=0
+c11.fec_replay_miss_alloc.pre=0 post=0 delta=0
+c11.fec_replay_miss_get.pre=0 post=202464 delta=202464
+c11.fec_nack_repair_ns.pre=0 post=160919504375 delta=160919504375
+c11.fec_reset_tcp_failed.pre=0 post=0 delta=0
+c11.fec_reset_user.pre=0 post=0 delta=0
+c11.fec_nack_repair_max_ns.post=16599911071
+gaps_total.pre=0 post=0 delta=0
+dead_now=

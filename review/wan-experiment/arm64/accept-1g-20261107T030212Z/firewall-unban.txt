@@ -1,0 +1,46 @@
+# Why direct eth0 could not reach far:9000 (round 4 join failure)
+
+Root cause: far's fail2ban (nftables `inet f2b-table`, chain `f2b-chain`,
+priority filter - 1) had near's direct egress IP in `addr-set-sshd`:
+
+    meta l4proto tcp ip saddr @addr-set-sshd reject with icmp port-unreachable
+
+So ICMP (ping) worked (2/3 replies, 287 ms) but every TCP connect from near was
+rejected: bash /dev/tcp reported `Connection refused` (the ICMP unreachable),
+curl reported `Connection timed out`.
+
+Ban record (far, /var/log/fail2ban.log):
+
+    2026-11-07 02:26:13,265 fail2ban.filter [665]: INFO [sshd] Found 171.120.34.226
+    2026-11-07 02:26:15,580 ... Found 171.120.34.226
+    2026-11-07 02:26:20,327 ... Found 171.120.34.226
+    2026-11-07 02:26:24,077 ... Found 171.120.34.226
+    2026-11-07 02:26:27,788 ... Found 171.120.34.226
+    2026-11-07 02:26:27,922 fail2ban.actions [665]: NOTICE [sshd] Ban 171.120.34.226
+
+Trigger (far journal, ssh.service):
+
+    02:26:13 sshd-session: Invalid user kunweiz from 171.120.34.226 port 33718
+    02:26:15 sshd-session: Invalid user kunweiz from 171.120.34.226 port 33728
+    02:26:20 sshd-session: Invalid user kunweiz from 171.120.34.226 port 33740
+    02:26:23 sshd-session: Invalid user kunweiz from 171.120.34.226 port 39386
+    02:26:27 sshd-session: Invalid user kunweiz from 171.120.34.226 port 39400
+
+i.e. five `ssh 45.11.1.62` attempts that defaulted to the local user name
+`kunweiz` (far only has root). fail2ban's sshd jail banned the home egress IP,
+which also blocked every tbtun carrier for 40 minutes, and explained round 3's
+"far accepted nothing" as well.
+
+Fix applied (2026-11-07T03:06:2xZ):
+
+    fail2ban-client set sshd unbanip 171.120.34.226
+
+Verified after the unban, from near with the pref-100 main-table rule:
+
+    TCP 45.11.1.62:9000 -> TCP9000_OK
+    TCP 45.11.1.62:22   -> TCP22_OK
+    ip route get 45.11.1.62 -> via 192.168.123.254 dev eth0 src 192.168.123.65
+
+Durable fix (not applied; needs a decision): add the home egress to
+`ignoreip` in far's /etc/fail2ban/jail.local, otherwise any `ssh 45.11.1.62`
+without `-l root` re-bans it after five tries.

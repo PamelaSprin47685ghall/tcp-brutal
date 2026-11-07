@@ -1,0 +1,81 @@
+CHECK near_ssh PASS (root@192.168.123.65)
+CHECK far_ssh PASS (root@45.11.1.62)
+CHECK near_feeder PASS (pid=23184(python3) holds /dev/watchdog0)
+CHECK near_tools PASS (curl sha256sum awk ss stat)
+CHECK far_tools PASS (busybox dd sha256sum curl ss awk)
+CHECK far_httpd PASS (busybox httpd)
+CHECK far_disk PASS (11676896KiB free under /root)
+CHECK far_port PASS (5210 already in use (reuse or stop the old server))
+CHECK near_loaded PASS (not loaded; will insmod /root/tbtun-0.2.0-fix2-20261107T020420Z/tbtun.ko)
+CHECK far_loaded PASS (already loaded)
+CHECK far_serve PASS (size=1073741824 sha=c6a256153f71328c...)
+CHECK far_size PASS (FAR_SIZE=1073741824)
+CHECK near_srcversion PASS (loaded=86A8FDA3185B4E25E81D441 ko=86A8FDA3185B4E25E81D441)
+CHECK near_max_carriers PASS (max_carriers=256)
+CHECK far_srcversion PASS (loaded=D23D3E58CFC8C12B3B72AB7 ko=D23D3E58CFC8C12B3B72AB7)
+CHECK far_max_carriers PASS (max_carriers=256)
+CHECK far_cfg_carriers PASS (carriers=256)
+CHECK far_cfg_n PASS (n=4)
+CHECK far_cfg_m PASS (m=4)
+CHECK far_cfg_w PASS (w=8)
+CHECK far_cfg_fec PASS (fec=on)
+CHECK far_cfg_mode PASS (mode=grouped)
+CHECK far_cfg_crypto PASS (crypto=on)
+CHECK far_cfg_profile PASS (profile=http-kal)
+CHECK near_cfg_carriers PASS (carriers=256)
+CHECK near_cfg_n PASS (n=4)
+CHECK near_cfg_m PASS (m=4)
+CHECK near_cfg_w PASS (w=8)
+CHECK near_cfg_fec PASS (fec=on)
+CHECK near_cfg_mode PASS (mode=grouped)
+CHECK near_cfg_crypto PASS (crypto=on)
+CHECK near_cfg_profile PASS (profile=http-kal)
+CHECK near_join PASS (up=256 after 2s)
+CHECK far_join PASS (up=256 after 2s)
+CHECK near_kernel_source PASS (source=journalctl)
+CHECK far_kernel_source PASS (source=journalctl)
+CHECK http PASS (http=200)
+CHECK size_download FAIL (size_download=66060090 expected=1073741824)
+CHECK near_fetch_rc FAIL (rc=2)
+CHECK file_size FAIL (file=66060090 expected=1073741824)
+CHECK sha256 FAIL (near=bd5ad5d6b2460938... far=c6a256153f71328c...)
+CHECK near_fec_proto_fail.0 PASS (delta=0)
+CHECK near_fec_hdr_crc_fail.0 PASS (delta=0)
+CHECK near_fec_payload_crc_fail.16 FAIL (delta=16)
+CHECK near_rx_errs PASS (delta=0)
+CHECK near_connect_fail PASS (delta=0)
+CHECK near_alloc_fail PASS (delta=0)
+CHECK near_join_bad PASS (delta=0)
+CHECK near_gaps_total PASS (delta=0)
+CHECK far_fec_proto_fail.0 PASS (delta=0)
+CHECK far_fec_hdr_crc_fail.0 PASS (delta=0)
+CHECK far_fec_payload_crc_fail.0 PASS (delta=0)
+CHECK far_rx_errs PASS (delta=0)
+CHECK far_connect_fail PASS (delta=0)
+CHECK far_alloc_fail PASS (delta=0)
+CHECK far_join_bad PASS (delta=0)
+CHECK far_gaps_total PASS (delta=0)
+CHECK dead_now_bound FAIL (near dead_now=? max=64)
+CHECK sess_refs SKIP (not exported by this build)
+CHECK near_kernel SKIP (empty window 2026-11-07T02:09:13Z..2026-11-07T02:14:33Z (source=journalctl); dmesg tail is still judged)
+CHECK far_kernel PASS (window 2026-11-07T02:09:13Z..2026-11-07T02:14:33Z source=journalctl)
+CHECK near_dmesg_tail PASS (no BUG/Oops/GPF in last 800 lines)
+CHECK far_dmesg_tail PASS (no BUG/Oops/GPF in last 800 lines)
+CHECK near_no_restart PASS (boot_id 0a91d2eb.. -> 0a91d2eb..)
+CHECK feeder_alive PASS (pid=23184(python3))
+bytes=1073741824
+elapsed_s=317.797092
+speed_bytes_s=207868
+throughput_mbit_s=1.66
+near_cpu_busy_pct=1.2
+far_cpu_busy_pct=3.9
+near_loadavg=0.32 0.45 0.26 1/306 42760
+near_meminfo=MemTotal:        8104768 kB;MemFree:         6278024 kB;MemAvailable:    7579104 kB;;
+near_slab=;
+near_replaced=1
+near_data_tx=0
+near_retx_bytes=0
+near_dup_bytes_ppm=0
+02:15:00Z cleanup complete
+02:15:00Z verdict FAIL (6 failed checks)
+02:15:00Z evidence kept in /home/kunweiz/Desktop/vibe/tcp-brutal/review/wan-experiment/arm64/accept-1g-20261107T020829Z

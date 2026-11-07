@@ -1,0 +1,16 @@
+2026-11-07T10:02:02Z
+== module ==
+tbtun                 356352  0
+B39C75B094C277E6177450C
+256
+== config ==
+1
+== listen ==
+2
+== source ==
+1073741824 /root/accept-1g/accept-1g.bin
+c6a256153f71328c987129abfd68d610d0da04834259b66c3addffbba7a79a93  /root/accept-1g/accept-1g.bin
+== c3 ==
+n=256 up=0 lost=268 replaced=0 
+== procs ==
+none

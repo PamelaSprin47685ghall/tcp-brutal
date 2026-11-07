@@ -1,0 +1,2 @@
+KW_SOURCE=journalctl
+Nov 07 02:14:33 hnd0.kw92.cyou kernel: tbtun: tunnel 1 carrier 250 gen 247 lost: sock=1 connected=1 hello_sent=1 up=1

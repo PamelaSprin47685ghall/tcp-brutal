@@ -1,0 +1,29 @@
+=== cleanup start ===
+2026-11-07T10:01:51Z
+=== del tunnel ===
+=== rmmod ===
+=== ip rule before ===
+100:	from all to 45.11.1.62 lookup main
+=== ip rule del ===
+=== sysctl ===
+0
+0
+10000
+0
+0
+=== lsmod ===
+no tbtun
+=== procfs ===
+ABSENT
+=== 9001 ===
+=== ip rule after ===
+no pref 100
+=== boot ===
+0a91d2eb-3122-41eb-913c-024a4e1fe724
+=== feeder ===
+pid=23184(python3)
+=== evidence kept ===
+1069764217 /root/dl-1g/accept-1g.bin
+accept-1g.bin counters.txt curl.err curl.txt evidence near-stats-post.txt near-stats-pre.txt near-verdict.txt perf.txt sha256.err sha256.txt size.txt 
+=== cleanup end ===
+2026-11-07T10:01:55Z

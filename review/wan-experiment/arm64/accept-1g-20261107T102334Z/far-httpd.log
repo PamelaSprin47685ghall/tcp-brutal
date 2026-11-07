@@ -1,0 +1,19 @@
+2026-11-07T10:14:14Z listen 127.0.0.1:5210 file=/root/accept-1g/accept-1g.bin size=1073741824 pid=143680
+2026-11-07T10:14:14Z HEAD /accept-1g.bin HTTP/1.1 sent=0 elapsed=0.001
+2026-11-07T10:14:14Z HEAD /accept-1g.bin HTTP/1.1 sent=0 elapsed=0.006
+2026-11-07T10:14:21Z HEAD /accept-1g.bin HTTP/1.1 sent=0 elapsed=0.001
+2026-11-07T10:14:22Z HEAD /accept-1g.bin HTTP/1.1 sent=0 elapsed=0.002
+2026-11-07T10:15:36Z HEAD /accept-1g.bin HTTP/1.1 sent=0 elapsed=0.002
+2026-11-07T10:16:15Z HEAD /accept-1g.bin HTTP/1.1 sent=0 elapsed=0.001
+2026-11-07T10:16:15Z HEAD /accept-1g.bin HTTP/1.1 sent=0 elapsed=0.000
+2026-11-07T10:17:14Z GET /accept-1g.bin HTTP/1.1 sent=1073741824 elapsed=2.549
+2026-11-07T10:18:15Z HEAD /accept-1g.bin HTTP/1.1 sent=0 elapsed=0.002
+2026-11-07T10:18:15Z HEAD /accept-1g.bin HTTP/1.1 sent=0 elapsed=0.001
+2026-11-07T10:18:18Z HEAD /accept-1g.bin HTTP/1.1 sent=0 elapsed=0.000
+2026-11-07T10:18:26Z HEAD /accept-1g.bin HTTP/1.1 sent=0 elapsed=0.001
+2026-11-07T10:18:26Z HEAD /accept-1g.bin HTTP/1.1 sent=0 elapsed=0.001
+2026-11-07T10:18:28Z HEAD /accept-1g.bin HTTP/1.1 sent=0 elapsed=0.001
+2026-11-07T10:23:13Z GET /accept-1g.bin HTTP/1.1 client gone after sent=126877696 elapsed=257.234: [Errno 32] Broken pipe
+2026-11-07T10:23:13Z HEAD /accept-1g.bin HTTP/1.1 error after sent=0: [Errno 107] Transport endpoint is not connected
+2026-11-07T10:23:56Z HEAD /accept-1g.bin HTTP/1.1 sent=0 elapsed=0.003
+2026-11-07T10:23:56Z HEAD /accept-1g.bin HTTP/1.1 sent=0 elapsed=0.001

@@ -1,0 +1,5 @@
+KW_SOURCE=journalctl
+11月 07 11:26:00 lubancat kernel: tbtun: tunnel 1 carrier 101 gen 102 lost: sock=1 connected=1 hello_sent=1 up=1
+11月 07 11:28:34 lubancat kernel: tbtun: tunnel 1 carrier 45 gen 46 lost: sock=1 connected=1 hello_sent=1 up=1
+11月 07 11:28:48 lubancat kernel: tbtun: tunnel 1 carrier 191 gen 192 lost: sock=1 connected=1 hello_sent=1 up=1
+11月 07 11:32:11 lubancat kernel: tbtun: tunnel 1 carrier 88 gen 89 lost: sock=1 connected=1 hello_sent=1 up=1

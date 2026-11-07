@@ -1,0 +1,13 @@
+bytes=1073741824
+elapsed_s=468.045947
+speed_bytes_s=273319
+throughput_mbit_s=2.19
+near_cpu_busy_pct=3.4
+far_cpu_busy_pct=10.0
+near_loadavg=0.26 0.30 0.24 1/346 99102
+near_meminfo=MemTotal:        8104768 kB;MemFree:         6070288 kB;MemAvailable:    7541872 kB;;
+near_slab=;
+near_replaced=5
+near_data_tx=0
+near_retx_bytes=0
+near_dup_bytes_ppm=0

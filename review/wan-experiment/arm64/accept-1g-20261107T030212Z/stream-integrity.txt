@@ -1,0 +1,32 @@
+# Delivered stream vs source (round 4, fix4, direct eth0)
+
+near file: 1,048,378 B (curl body), sha256 699f730ac315176e6226758a2958fe51cd1b5215803a051bf6bb93bb6f75bea1
+far source first 1,048,378 B, sha256 6fcd31fa5c8afd648f66fccd12bb304bfbe48f8db0a90e04f4366149e27b7ca6
+=> NOT a prefix.
+
+Byte-level alignment (64-byte probes, random data, unique matches):
+
+    near offset 909114  shift 0 -> 8192      (8 KiB of source skipped)
+    near offset 941882  shift 8192 -> 0      (the stream falls back to the correct
+                                              alignment: the skipped region was
+                                              delivered out of place, i.e. the
+                                              8 KiB appears twice and another
+                                              8 KiB is missing)
+    near offset 950074  shift 0 -> 16384
+    near offset 974650  shift 16384 -> 24576
+    near offset 991034  shift 24576 -> 32768
+    near offset 1023802 no match at shift 32768
+
+So the byte stream curl received is not the source with a hole: it duplicates one
+8 KiB region and drops another, then accumulates 16/24/32 KiB of missing data.
+near `rx_delivered=1048576` (exactly 1 MiB of stream: 198 B of HTTP headers plus
+1,048,378 B of body), so the corruption is inside the first 1 MiB.
+
+Counters at the same moment (both ends):
+- near c9 `fec_payload_crc_fail=179` (the only error counter that moved)
+- near c10 `fec_decode_blocks=75`, `fec_decode_recovered=69` (92% of blocks needed
+  parity recovery), `fec_late_share=220`, `fec_dup_share=17`, `fec_empty_block=63`
+- near c10 guards all 0: `fec_deliver_ooo`, `fec_deliver_dup`, `fec_slot_past_cut`,
+  `fec_deliver_bad`, `fec_epoch_conflict`, `fec_fin_bad`, `fec_ack_bad`
+- far `fec_credit_wait=4331`, `fec_tx_share_gap=2`, `fec_late_share=2`, `fec_pad_share=63`
+- far c3 `lost=1`, near c3 `lost=0 replaced=0`; `connect_fail` delta 0 during the transfer

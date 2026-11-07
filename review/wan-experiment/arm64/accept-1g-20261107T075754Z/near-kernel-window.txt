@@ -1,0 +1,2 @@
+KW_SOURCE=dmesg
+[32394.887210] tbtun: unloaded

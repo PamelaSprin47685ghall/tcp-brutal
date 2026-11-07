@@ -1,0 +1,11 @@
+2026-11-07T10:24:04Z near_up=33 far_up=34
+2026-11-07T10:24:06Z near_up=54 far_up=54
+2026-11-07T10:24:07Z near_up=71 far_up=73
+2026-11-07T10:24:09Z near_up=99 far_up=99
+2026-11-07T10:24:10Z near_up=124 far_up=123
+2026-11-07T10:24:11Z near_up=147 far_up=145
+2026-11-07T10:24:13Z near_up=165 far_up=163
+2026-11-07T10:24:15Z near_up=192 far_up=189
+2026-11-07T10:24:17Z near_up=249 far_up=247
+2026-11-07T10:24:19Z near_up=254 far_up=255
+2026-11-07T10:24:20Z near_up=256 far_up=256

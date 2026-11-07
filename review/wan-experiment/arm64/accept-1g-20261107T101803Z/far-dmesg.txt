@@ -1,0 +1,132 @@
+[96600.898620] tbtun 0.2.0 loaded: 1 tunnels max, 256 carriers max
+[96604.134875] tbtun: tunnel 1 no carrier can carry: user side backpressured
+[96780.226546] tbtun: tunnel 1 no carrier can carry: user side backpressured
+[96780.822958] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30016, awaiting HELLO
+[96780.823216] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33693, awaiting HELLO
+[96780.823438] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33691, awaiting HELLO
+[96780.830410] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30014, awaiting HELLO
+[96780.830913] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30018, awaiting HELLO
+[96780.833467] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30004, awaiting HELLO
+[96780.833515] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30008, awaiting HELLO
+[96780.833596] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30012, awaiting HELLO
+[96780.833828] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30006, awaiting HELLO
+[96780.836023] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33683, awaiting HELLO
+[96786.009495] tbt_carrier_adopt: 104 callbacks suppressed
+[96786.009504] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33775, awaiting HELLO
+[96786.071245] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30120, awaiting HELLO
+[96786.112292] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30121, awaiting HELLO
+[96786.113519] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30122, awaiting HELLO
+[96786.130432] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30123, awaiting HELLO
+[96786.164259] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30124, awaiting HELLO
+[96786.202343] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33777, awaiting HELLO
+[96786.456530] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33779, awaiting HELLO
+[96786.481255] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30108, awaiting HELLO
+[96786.489893] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30128, awaiting HELLO
+[96788.848169] tbtun: tunnel 1 no carrier can carry: user side backpressured
+[96791.235317] tbtun: tunnel 1 carrier 255 gen 2 lost: sock=1 connected=1 hello_sent=0 up=0
+[96791.235355] tbtun: tunnel 1 carrier 255 gen 1 lost: sock=1 connected=1 hello_sent=0 up=0
+[96791.235814] tbt_carrier_adopt: 35 callbacks suppressed
+[96791.235850] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30152, awaiting HELLO
+[96791.239412] tbtun: tunnel 1 carrier 255 gen 3 lost: sock=1 connected=1 hello_sent=0 up=0
+[96791.579458] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30000, awaiting HELLO
+[96791.579908] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30002, awaiting HELLO
+[96791.593736] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30004, awaiting HELLO
+[96791.594560] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33805, awaiting HELLO
+[96791.629349] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33803, awaiting HELLO
+[96791.678307] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33685, awaiting HELLO
+[96791.689732] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33807, awaiting HELLO
+[96791.917154] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30001, awaiting HELLO
+[96791.940315] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30012, awaiting HELLO
+[96796.287443] tbt_carrier_adopt: 56 callbacks suppressed
+[96796.287455] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33843, awaiting HELLO
+[96796.318751] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30074, awaiting HELLO
+[96796.410927] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30060, awaiting HELLO
+[96796.467581] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30076, awaiting HELLO
+[96796.591934] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30062, awaiting HELLO
+[96796.703074] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30066, awaiting HELLO
+[96796.706645] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33855, awaiting HELLO
+[96796.717397] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30065, awaiting HELLO
+[96796.750891] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33849, awaiting HELLO
+[96796.757628] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30078, awaiting HELLO
+[96801.379818] tbt_carrier_adopt: 73 callbacks suppressed
+[96801.379837] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33885, awaiting HELLO
+[96801.396407] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30153, awaiting HELLO
+[96801.436183] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33916, awaiting HELLO
+[96801.489445] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30135, awaiting HELLO
+[96801.500364] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30155, awaiting HELLO
+[96801.539752] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33918, awaiting HELLO
+[96801.748678] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33921, awaiting HELLO
+[96801.862260] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30160, awaiting HELLO
+[96801.892259] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33923, awaiting HELLO
+[96801.896155] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30162, awaiting HELLO
+[96806.417382] tbt_carrier_adopt: 74 callbacks suppressed
+[96806.417394] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30238, awaiting HELLO
+[96806.505563] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33989, awaiting HELLO
+[96806.563024] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30221, awaiting HELLO
+[96806.590689] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30240, awaiting HELLO
+[96806.715088] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30224, awaiting HELLO
+[96806.752513] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33993, awaiting HELLO
+[96806.802371] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30242, awaiting HELLO
+[96806.852380] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33995, awaiting HELLO
+[96806.905119] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30246, awaiting HELLO
+[96806.952463] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=33977, awaiting HELLO
+[96818.274280] tbtun: carrier 167 stalled: repath paused, new frames avoid it
+[96818.377423] tbtun: carrier 208 stalled: repath paused, new frames avoid it
+[96818.785220] tbtun: carrier 51 stalled: repath paused, new frames avoid it
+[96818.889340] tbtun: carrier 167 recovered after 615 ms: back in the stripe
+[96818.991077] tbtun: carrier 51 recovered after 205 ms: back in the stripe
+[96818.991358] tbtun: carrier 235 stalled: repath paused, new frames avoid it
+[96819.093225] tbtun: carrier 208 recovered after 715 ms: back in the stripe
+[96820.990695] tbtun: carrier 108 stalled: repath paused, new frames avoid it
+[96821.872755] tbtun: carrier 235 recovered after 2881 ms: back in the stripe
+[96822.488201] tbtun: carrier 78 stalled: repath paused, new frames avoid it
+[96822.693085] tbtun: carrier 78 recovered after 204 ms: back in the stripe
+[96823.257036] tbtun: carrier 21 stalled: repath paused, new frames avoid it
+[96823.359039] tbtun: carrier 21 recovered after 102 ms: back in the stripe
+[96823.410228] tbtun: carrier 108 recovered after 2419 ms: back in the stripe
+[96823.719683] tbtun: carrier 195 stalled: repath paused, new frames avoid it
+[96823.822337] tbtun: carrier 153 stalled: repath paused, new frames avoid it
+[96823.924390] tbtun: carrier 203 stalled: repath paused, new frames avoid it
+[96824.026766] tbtun: carrier 136 stalled: repath paused, new frames avoid it
+[96824.026822] tbtun: carrier 153 recovered after 204 ms: back in the stripe
+[96824.080559] tbtun: carrier 115 stalled: repath paused, new frames avoid it
+[96824.233311] tbtun: carrier 93 stalled: repath paused, new frames avoid it
+[96824.233789] tbtun: carrier 239 stalled: repath paused, new frames avoid it
+[96824.284174] tbtun: carrier 93 recovered after 50 ms: back in the stripe
+[96824.335153] tbtun: carrier 115 recovered after 254 ms: back in the stripe
+[96824.335201] tbtun: carrier 136 recovered after 308 ms: back in the stripe
+[96824.386234] tbtun: carrier 102 stalled: repath paused, new frames avoid it
+[96824.386425] tbtun: carrier 195 recovered after 666 ms: back in the stripe
+[96824.386553] tbtun: carrier 239 recovered after 152 ms: back in the stripe
+[96824.590439] tbtun: carrier 203 recovered after 666 ms: back in the stripe
+[96824.949122] tbtun: carrier 172 stalled: repath paused, new frames avoid it
+[96825.255988] tbtun: carrier 43 stalled: repath paused, new frames avoid it
+[96825.409436] tbtun: carrier 172 recovered after 460 ms: back in the stripe
+[96825.460047] tbtun: carrier 43 recovered after 204 ms: back in the stripe
+[96825.978374] tbtun: carrier 126 recovered after 568 ms: back in the stripe
+[96828.754728] tbt_carrier_stall: 12 callbacks suppressed
+[96828.754744] tbtun: carrier 212 stalled: repath paused, new frames avoid it
+[96828.961302] tbtun: carrier 149 stalled: repath paused, new frames avoid it
+[96829.065303] tbt_car_poll_one: 9 callbacks suppressed
+[96829.065390] tbtun: carrier 149 recovered after 104 ms: back in the stripe
+[96829.171462] tbtun: carrier 184 stalled: repath paused, new frames avoid it
+[96830.308979] tbtun: carrier 136 stalled: repath paused, new frames avoid it
+[96830.361223] tbtun: carrier 209 recovered after 2071 ms: back in the stripe
+[96830.413418] tbtun: carrier 230 recovered after 1761 ms: back in the stripe
+[96830.465799] tbtun: carrier 231 recovered after 1763 ms: back in the stripe
+[96830.622560] tbtun: carrier 235 stalled: repath paused, new frames avoid it
+[96830.934635] tbtun: carrier 235 recovered after 312 ms: back in the stripe
+[96831.038487] tbtun: carrier 136 recovered after 729 ms: back in the stripe
+[96831.299208] tbtun: carrier 233 recovered after 3778 ms: back in the stripe
+[96832.226060] workqueue: tbt_car_rx_work [tbtun] hogged CPU for >10000us 4 times, consider switching to WQ_UNBOUND
+[96832.852283] tbtun: carrier 146 stalled: repath paused, new frames avoid it
+[96833.370071] tbtun: carrier 15 stalled: repath paused, new frames avoid it
+[96833.632525] tbtun: carrier 175 stalled: repath paused, new frames avoid it
+[96833.685416] tbtun: carrier 175 recovered after 52 ms: back in the stripe
+[96833.736332] tbtun: carrier 146 recovered after 884 ms: back in the stripe
+[96834.044844] tbtun: carrier 204 stalled: repath paused, new frames avoid it
+[96834.099864] tbtun: carrier 15 recovered after 729 ms: back in the stripe
+[96834.184901] workqueue: tbt_car_rx_work [tbtun] hogged CPU for >10000us 5 times, consider switching to WQ_UNBOUND
+[96834.248905] workqueue: tbt_car_rx_work [tbtun] hogged CPU for >10000us 7 times, consider switching to WQ_UNBOUND
+[96834.565241] tbtun: carrier 137 stalled: repath paused, new frames avoid it
+[96835.762513] tbtun: carrier 222 stalled: repath paused, new frames avoid it

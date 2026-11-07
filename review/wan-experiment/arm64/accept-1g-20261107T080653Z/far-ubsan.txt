@@ -1,0 +1,23 @@
+778:Nov 07 08:11:50 hnd0.kw92.cyou kernel: UBSAN: shift-out-of-bounds in tbtun/tbt_tx.c:2818:32
+779-Nov 07 08:11:50 hnd0.kw92.cyou kernel: shift exponent 163 is too large for 64-bit type 'long unsigned int'
+780-Nov 07 08:11:50 hnd0.kw92.cyou kernel: CPU: 1 UID: 0 PID: 139568 Comm: kworker/u10:52 Tainted: G        W  OE       7.0.0-42-generic #42-Ubuntu PREEMPT(lazy) 
+781-Nov 07 08:11:50 hnd0.kw92.cyou kernel: Tainted: [W]=WARN, [O]=OOT_MODULE, [E]=UNSIGNED_MODULE
+782-Nov 07 08:11:50 hnd0.kw92.cyou kernel: Hardware name: Red Hat KVM, BIOS 1.15.0-2.module_el8.6.0+2880+7d9e3703 04/01/2014
+783-Nov 07 08:11:50 hnd0.kw92.cyou kernel: Workqueue: events_unbound tbt_pump_work [tbtun]
+784-Nov 07 08:11:50 hnd0.kw92.cyou kernel: Call Trace:
+785-Nov 07 08:11:50 hnd0.kw92.cyou kernel:  <TASK>
+786-Nov 07 08:11:50 hnd0.kw92.cyou kernel:  show_stack+0x49/0x60
+787-Nov 07 08:11:50 hnd0.kw92.cyou kernel:  dump_stack_lvl+0x5f/0x90
+788-Nov 07 08:11:50 hnd0.kw92.cyou kernel:  dump_stack+0x10/0x18
+789-Nov 07 08:11:50 hnd0.kw92.cyou kernel:  ubsan_epilogue+0x9/0x39
+790-Nov 07 08:11:50 hnd0.kw92.cyou kernel:  __ubsan_handle_shift_out_of_bounds.cold+0xd7/0x1ab
+791-Nov 07 08:11:50 hnd0.kw92.cyou kernel:  tbt_tx_pump.cold+0x301/0xa17 [tbtun]
+792-Nov 07 08:11:50 hnd0.kw92.cyou kernel:  ? pick_eevdf+0x150/0x1a0
+793-Nov 07 08:11:50 hnd0.kw92.cyou kernel:  tbt_pump_work+0x60/0x80 [tbtun]
+794-Nov 07 08:11:50 hnd0.kw92.cyou kernel:  ? _raw_spin_unlock_irq+0xe/0x50
+795-Nov 07 08:11:50 hnd0.kw92.cyou kernel:  process_one_work+0x1ac/0x3d0
+796-Nov 07 08:11:50 hnd0.kw92.cyou kernel:  worker_thread+0x1b8/0x360
+797-Nov 07 08:11:50 hnd0.kw92.cyou kernel:  ? __pfx_worker_thread+0x10/0x10
+798-Nov 07 08:11:50 hnd0.kw92.cyou kernel:  kthread+0xf7/0x130
+799-Nov 07 08:11:50 hnd0.kw92.cyou kernel:  ? __pfx_kthread+0x10/0x10
+800-Nov 07 08:11:50 hnd0.kw92.cyou kernel:  ret_from_fork+0x195/0x2a0

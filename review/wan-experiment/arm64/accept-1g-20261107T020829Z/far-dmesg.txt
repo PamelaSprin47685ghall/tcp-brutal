@@ -1,0 +1,17 @@
+[67245.536635] tbtun: unloaded
+[67246.652554] tbtun 0.2.0 loaded: 1 tunnels max, 256 carriers max
+[67423.163513] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=44784, awaiting HELLO
+[67423.171795] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=44752, awaiting HELLO
+[67423.171972] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=44810, awaiting HELLO
+[67423.173393] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=44834, awaiting HELLO
+[67423.177121] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=44712, awaiting HELLO
+[67423.177305] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=44870, awaiting HELLO
+[67423.177986] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=44882, awaiting HELLO
+[67423.178200] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=44868, awaiting HELLO
+[67423.179360] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=44850, awaiting HELLO
+[67423.182264] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=44762, awaiting HELLO
+[67428.327960] tbt_carrier_adopt: 244 callbacks suppressed
+[67428.327997] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=46924, awaiting HELLO
+[67428.389499] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=46404, awaiting HELLO
+[67751.369639] tbtun: tunnel 1 carrier 250 gen 247 lost: sock=1 connected=1 hello_sent=1 up=1
+[67752.347871] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=38530, awaiting HELLO

@@ -1,0 +1,149 @@
+== preflight
+host: Linux lubancat 6.1.172 #1 SMP Sat Oct 17 15:47:17 CST 2026 aarch64 GNU/Linux
+release=6.1.172 arch=aarch64
+DKMS_CHECK root PASS
+DKMS_CHECK dkms_version PASS (dkms 3.2.2)
+DKMS_CHECK dkms_pkg_version PASS (3.2.2-1ubuntu1)
+DKMS_CHECK dpkg_ii PASS (dkms package state ii)
+DKMS_CHECK kernel_headers PASS (present: /lib/modules/6.1.172/build)
+DKMS_CHECK kernel_symvers PASS (present: /lib/modules/6.1.172/build/Module.symvers)
+DKMS_CHECK toolchain PASS (15 / make)
+DKMS_CHECK kmod_modprobe PASS (modprobe)
+DKMS_CHECK kmod_insmod PASS (insmod)
+DKMS_CHECK kmod_rmmod PASS (rmmod)
+DKMS_CHECK kmod_depmod PASS (depmod)
+DKMS_CHECK kmod_modinfo PASS (modinfo)
+== watchdog feeder (must stay up; this script never stops it)
+DKMS_CHECK watchdog_feeder PASS (pid=23184(python3) holds /dev/watchdog0)
+   RuntimeWatchdogUSec=0
+== step 1: source
+
+=== STEP source ===
+$ test -d /root/tbtun-0.2.0-fix27-20261107T133636Z 
+DKMS_STEP source rc=0 secs=0
+DKMS_CHECK source_tree PASS (present: /root/tbtun-0.2.0-fix27-20261107T133636Z)
+DKMS_CHECK install_script PASS (present: /root/tbtun-0.2.0-fix27-20261107T133636Z/scripts/install_dkms.sh)
+DKMS_CHECK uapi PASS (present: /root/tbtun-0.2.0-fix27-20261107T133636Z/tbtun/tbt_uapi.h)
+DKMS_CHECK install_script_exec PASS
+DKMS_CHECK source_version PASS (0.2.0)
+== step 2: clean state
+
+=== STEP clean ===
+$ true 
+DKMS_STEP clean rc=0 secs=0
+DKMS_CHECK clean_no_module PASS (no tbtun in lsmod)
+DKMS_CHECK clean_procfs PASS (absent: /proc/net/tbtun)
+DKMS_CHECK clean_dkms_empty PASS (dkms status empty)
+DKMS_CHECK clean_src PASS (no /usr/src/tbtun-*)
+DKMS_CHECK clean_ko PASS (no updates/dkms ko)
+== step 3: install
+
+=== STEP install ===
+$ /root/tbtun-0.2.0-fix27-20261107T133636Z/scripts/install_dkms.sh --kernel 6.1.172 
+Installing tbtun 0.2.0 for kernel 6.1.172
+  source: /root/tbtun-0.2.0-fix27-20261107T133636Z
+  stage:  /usr/src/tbtun-0.2.0
+Creating symlink /var/lib/dkms/tbtun/0.2.0/source -> /usr/src/tbtun-0.2.0
+The kernel is built without module signing facility, modules won't be signed
+
+Building module(s)..... done.
+Installing /lib/modules/6.1.172/updates/dkms/tbtun.ko
+Running depmod... done.
+
+Installed. The control surface is /proc/net/tbtun:
+  echo 'tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443' \
+       > /proc/net/tbtun/config
+  cat /proc/net/tbtun/tunnels
+DKMS_STEP install rc=0 secs=9
+DKMS_CHECK dkms_status PASS (tbtun/0.2.0, 6.1.172, aarch64: installed)
+DKMS_CHECK modinfo_version PASS (0.2.0)
+DKMS_CHECK modinfo_vermagic PASS (6.1.172)
+DKMS_CHECK installed_ko PASS (/lib/modules/6.1.172/updates/dkms/tbtun.ko)
+DKMS_CHECK sysfs_version PASS (0.2.0)
+DKMS_CHECK dmesg_loaded PASS (tbtun 0.2.0 loaded)
+DKMS_CHECK procfs_config PASS (present: /proc/net/tbtun/config)
+DKMS_CHECK procfs_tunnels PASS (present: /proc/net/tbtun/tunnels)
+DKMS_CHECK procfs_ports PASS (present: /proc/net/tbtun/ports)
+DKMS_CHECK procfs_stats PASS (present: /proc/net/tbtun/stats)
+DKMS_CHECK procfs_peers PASS (present: /proc/net/tbtun/peers)
+DKMS_CHECK procfs_http PASS (present: /proc/net/tbtun/http)
+DKMS_CHECK make_log PASS (exit code 0 (/var/lib/dkms/tbtun/kernel-6.1.172-aarch64/log/make.log))
+== step 4: config read-back
+
+=== STEP config ===
+$ sh -c printf\ \'tunnel\ 1\ role=near\ listen=127.0.0.1:19000\ peer=203.0.113.9:443\\n\'\ \>\ /proc/net/tbtun/config 
+DKMS_STEP config rc=0 secs=0
+   config: tunnel 1 role=near listen=127.0.0.1:19000 peer=203.0.113.9:443 n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0 portblock=0-0
+DKMS_CHECK config_n PASS (n=4)
+DKMS_CHECK config_m PASS (m=1)
+DKMS_CHECK config_dup PASS (dup=1)
+DKMS_CHECK config_profile PASS (profile=http-kal)
+DKMS_CHECK config_keepalive PASS (keepalive=5000)
+DKMS_CHECK tunnels_line PASS (# id role state listen peer target n m streams)
+DKMS_CHECK tunnels_peer PASS (203.0.113.9:443)
+DKMS_CHECK listen_19000 PASS (ss shows 127.0.0.1:19000)
+
+=== STEP config-del ===
+$ sh -c printf\ \'del\ 1\\n\'\ \>\ /proc/net/tbtun/config 
+DKMS_STEP config-del rc=0 secs=0
+DKMS_CHECK config_empty PASS (config empty after del)
+DKMS_CHECK listen_gone PASS (19000 free)
+== step 5: rmmod
+
+=== STEP rmmod ===
+$ rmmod tbtun 
+DKMS_STEP rmmod rc=0 secs=0
+DKMS_CHECK rmmod_lsmod PASS (module unloaded)
+DKMS_CHECK rmmod_procfs PASS (absent: /proc/net/tbtun)
+DKMS_CHECK dmesg_unloaded PASS (unloaded line present)
+DKMS_CHECK rmmod_kernel PASS (clean)
+== step 6: modprobe
+
+=== STEP modprobe ===
+$ modprobe tbtun 
+DKMS_STEP modprobe rc=0 secs=0
+DKMS_CHECK reload_version PASS (0.2.0)
+DKMS_CHECK reload_filename PASS (/lib/modules/6.1.172/updates/dkms/tbtun.ko)
+
+=== STEP config2 ===
+$ sh -c printf\ \'tunnel\ 1\ role=near\ listen=127.0.0.1:19000\ peer=203.0.113.9:443\\n\'\ \>\ /proc/net/tbtun/config 
+DKMS_STEP config2 rc=0 secs=0
+   config: tunnel 1 role=near listen=127.0.0.1:19000 peer=203.0.113.9:443 n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0 portblock=0-0
+DKMS_CHECK reload_cfg_n PASS (n=4)
+DKMS_CHECK reload_cfg_m PASS (m=1)
+DKMS_CHECK reload_cfg_dup PASS (dup=1)
+DKMS_CHECK reload_cfg_profile PASS (profile=http-kal)
+DKMS_CHECK reload_cfg_keepalive PASS (keepalive=5000)
+DKMS_CHECK reload_listen PASS (listening)
+
+=== STEP config2-del ===
+$ sh -c printf\ \'del\ 1\\n\'\ \>\ /proc/net/tbtun/config 
+DKMS_STEP config2-del rc=0 secs=0
+DKMS_CHECK reload_listen_gone PASS (free)
+== step 7: uninstall
+
+=== STEP uninstall ===
+$ /root/tbtun-0.2.0-fix27-20261107T133636Z/scripts/install_dkms.sh --uninstall 
+Removing tbtun
+Module tbtun/0.2.0 for kernel 6.1.172 (aarch64):
+Before uninstall, this module version was ACTIVE on this kernel.
+Deleting /lib/modules/6.1.172/updates/dkms/tbtun.ko
+Running depmod... done.
+
+Deleting module tbtun/0.2.0 completely from the DKMS tree.
+Removing staged sources under /usr/src
+Removing installed module files
+Done.
+DKMS_STEP uninstall rc=0 secs=2
+DKMS_CHECK uninstall_dkms_empty PASS (dkms status empty)
+DKMS_CHECK uninstall_src PASS (no /usr/src/tbtun-*)
+DKMS_CHECK uninstall_ko_updates_dkms PASS (none under updates/dkms)
+DKMS_CHECK uninstall_ko_updates PASS (none under updates)
+DKMS_CHECK uninstall_ko_extra PASS (none under extra)
+DKMS_CHECK uninstall_modinfo PASS (modinfo resolves nothing)
+DKMS_CHECK uninstall_modules_dep PASS (modules.dep clean)
+DKMS_CHECK uninstall_procfs PASS (absent: /proc/net/tbtun)
+DKMS_CHECK uninstall_lsmod PASS (module unloaded)
+DKMS_CHECK uninstall_state_dir PASS (no /var/lib/dkms/tbtun*)
+DKMS_RESULT PASS (checks_failed=0 rollback=0)
+evidence: /root/dkms-65-20261107T142840Z

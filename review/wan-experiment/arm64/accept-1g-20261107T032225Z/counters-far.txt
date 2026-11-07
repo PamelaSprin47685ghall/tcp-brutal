@@ -1,0 +1,17 @@
+fec_proto_fail.0=0
+fec_hdr_crc_fail.0=0
+fec_payload_crc_fail.0=0
+rx_errs=1
+connect_fail=0
+alloc_fail=0
+join_bad=0
+gaps_total=0
+dead_now=
+up_post=256
+n_post=256
+replaced_post=0
+lost_post=4
+sess_refs=
+data_tx=0
+retx_bytes=0
+dup_bytes_ppm=0

@@ -1,0 +1,27 @@
+== 1. tools
+NEAR_CHECK tool_curl PASS (curl)
+NEAR_CHECK tool_sha256sum PASS (sha256sum)
+NEAR_CHECK tool_awk PASS (awk)
+NEAR_CHECK tool_stat PASS (stat)
+NEAR_CHECK tool_ss PASS (ss)
+NEAR_CHECK tool_timeout PASS (timeout)
+== 2. module and config
+NEAR_CHECK procfs PASS (/proc/net/tbtun/config)
+   config: tunnel 1 role=near listen=127.0.0.1:9001 peer=45.11.1.62:9000 n=4 m=4 fec=on mode=grouped w=8 carriers=256 crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=30000-30511 nonce=00112233445566778899aabbccddeeff
+NEAR_CHECK cfg_carriers PASS (carriers=256)
+NEAR_CHECK cfg_n PASS (n=4)
+NEAR_CHECK cfg_m PASS (m=4)
+NEAR_CHECK cfg_fec PASS (fec=on)
+NEAR_CHECK cfg_mode PASS (mode=grouped)
+NEAR_CHECK cfg_w PASS (w=8)
+NEAR_CHECK cfg_crypto PASS (crypto=on)
+NEAR_CHECK cfg_profile PASS (profile=http-kal)
+NEAR_CHECK cfg_portblock PASS (portblock=30000-30511)
+== 3. listen 127.0.0.1:9001
+NEAR_CHECK listen PASS (127.0.0.1:9001)
+== 4. watchdog feeder (must stay up; stopping it resets the board)
+NEAR_CHECK feeder PASS (pid=23184(python3) holds /dev/watchdog0)
+== 5. join gate (near side only; run-1g.sh checks far)
+NEAR_CHECK join_up PASS (up=256 expected=256 after 0s)
+NEAR_CHECK join_n PASS (n=256 expected=256)
+== 6. download

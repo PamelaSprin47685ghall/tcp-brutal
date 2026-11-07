@@ -1,0 +1,19 @@
+== 1. tools
+NEAR_CHECK tool_curl PASS (curl)
+NEAR_CHECK tool_sha256sum PASS (sha256sum)
+NEAR_CHECK tool_awk PASS (awk)
+NEAR_CHECK tool_stat PASS (stat)
+NEAR_CHECK tool_ss PASS (ss)
+NEAR_CHECK tool_ip PASS (ip)
+== 2. near bypass (mihomo isolation; pref 100 to 45.11.1.62/32 lookup main)
+NEAR_CHECK bypass_route PASS (dev=eth0 rule=added to=45.11.1.62/32 pref=100)
+== 3. module and config
+NEAR_CHECK procfs FAIL (/proc/net/tbtun/config missing (module not configured))
+== 4. listen 127.0.0.1:9001
+NEAR_CHECK listen FAIL (127.0.0.1:9001 not listening)
+== 5. watchdog feeder (must stay up; stopping it resets the board)
+NEAR_CHECK feeder PASS (pid=23184(python3) holds /dev/watchdog0)
+== 6. join gate (near side only; run-1g.sh checks far)
+NEAR_CHECK join_up FAIL (up=? expected=256 after 180s)
+NEAR_CHECK join_n FAIL (n=? expected=256)
+NEAR_RESULT FAIL
