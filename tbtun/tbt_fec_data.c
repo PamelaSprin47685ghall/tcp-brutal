@@ -1852,6 +1852,7 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
     bool delivered = false;
     bool is_new = false;
     bool blocked = false;
+    const char *blocked_why = "?";
 
     if (READ_ONCE(rx->total_known) && !READ_ONCE(rx->total_pkts) &&
         !rx->deliver_partial)
@@ -1932,6 +1933,9 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
                                     s, group, rx->groups, sb->used, sb->ready,
                                     sb->block_id, sb->nreal, have, rx->n,
                                     (unsigned)rx->m);
+                pr_info_ratelimited("tbtun: fec super not ready: s=%llu g=%u used=%d ready=%d id=%llu expect=%llu\n",
+                                    s, group, sb->used, sb->ready,
+                                    sb->block_id, s);
                 break;
             }
         }
@@ -1978,7 +1982,8 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
                 left_ms = (budget - (now - rx->progress_ns)) / NSEC_PER_MSEC + 1;
             }
             tbt_session_arm(sess, TBT_SW_FEC_RX,
-                            msecs_to_jiffies(left_ms));
+                            msecs_to_jiffies(tbt_fec_rx_poll_ms(
+                                left_ms, now - rx->progress_ns)));
             break;
         }
 
@@ -2013,6 +2018,7 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
                     {
                         atomic64_inc(&sess->fec_slot_past_cut);
                         blocked = true;
+                        blocked_why = "cut";
                         break;
                     }
                     continue;
@@ -2025,6 +2031,7 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
                     {
                         atomic64_inc(&sess->fec_slot_past_cut);
                         blocked = true;
+                        blocked_why = "past_end";
                         break;
                     }
                     continue;
@@ -2038,6 +2045,7 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
                      * hand the application the block's zero padding. */
                     atomic64_inc(&sess->fec_short_unknown);
                     blocked = true;
+                    blocked_why = "short";
                     break;
                 }
                 if (known && rx->total_bytes &&
@@ -2138,10 +2146,19 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
                 rx->deliver_g = group;
                 rx->deliver_partial = true;
                 spin_unlock_bh(&rx->lock);
+                if (debug >= 2)
+                    pr_info("tbtun: fec deliver partial: s=%llu p=%u g=%u off=%llu blocked=%s next_deliver=%llu ack=%llu\n",
+                            s, p, group, off - rx->stream_base, blocked_why,
+                            rx->next_deliver, rx->ack_deliver);
                 break;
             }
             start_g = 0;
         }
+        /* A blocked walk did not deliver this super-block. Advancing here
+         * would clear the cursor the commit above just saved and move the
+         * frontier past bytes the application never received. */
+        if (blocked)
+            break;
         rx->deliver_partial = false;
         rx->deliver_p = 0;
         rx->deliver_g = 0;
@@ -2150,6 +2167,9 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
         rx->next_deliver = (s + 1) * (u64)rx->groups * rx->n;
         if (known && rx->next_deliver > total_pkts)
             rx->next_deliver = total_pkts;
+        if (debug >= 2)
+            pr_info("tbtun: fec deliver super: s=%llu next=%llu next_deliver=%llu ack=%llu\n",
+                    s, rx->next_super, rx->next_deliver, rx->ack_deliver);
     }
     if (delivered && rx->next_deliver > rx->ack_deliver)
     {
@@ -2163,6 +2183,26 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
          * interchangeable: a block closed early, or a share whose payload is
          * shorter than S, leaves the frontier ahead of the bytes. */
         tbt_fec_ack(sess, rx->next_deliver, stream_bytes);
+    }
+    if (blocked)
+    {
+        u64 stream_off = rx->deliver_bytes > rx->stream_base ?
+                         rx->deliver_bytes - rx->stream_base : 0;
+
+        /* A ready block cannot change, so a share at or past its cut, a
+         * share past the stream end, or a recovered share with no stated
+         * length can never be reconciled. Retrying the same cursor would
+         * spin forever while the ACK stayed behind it. Fail the stream
+         * instead of stalling silently. */
+        spin_lock_bh(&rx->lock);
+        rx->stopping = true;
+        spin_unlock_bh(&rx->lock);
+        atomic64_inc(&sess->fec_reset_hole);
+        atomic64_inc(&sess->holes_unrecoverable);
+        pr_info_ratelimited("tbtun: fec deliver conflict: super %llu p=%u group=%u reason=%s off=%llu; stream reset\n",
+                            rx->next_super, rx->deliver_p, rx->deliver_g,
+                            blocked_why, stream_off);
+        tbt_stream_kill(st, TBT_ST_HOLE);
     }
     tbt_stream_put(st);
     return 0;
@@ -2181,6 +2221,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
     u64 s, hi;
     u16 g, i;
     bool found = false;
+    bool probe_only = false; /* the request being sent is only a shape probe */
 
     if (!rx || !rx->nack || READ_ONCE(rx->stopping) ||
         READ_ONCE(sess->closing))
@@ -2233,9 +2274,13 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
         {
             struct tbt_fec_blk *db = tbt_fec_rx_blk(rx, g, rx->next_super);
 
-            pr_info("tbtun: fec super %llu group %u used=%d ready=%d id=%llu empty=%d nparity=%u ndata=%u\n",
-                    rx->next_super, g, db->used, db->ready, db->block_id,
-                    db->empty, db->nparity, db->ndata);
+            /* Rate-limited: the walk now polls at the NACK cadence while a
+             * super-block is not ready, and four unthrottled lines per poll
+             * would evict the delivery trace from the kernel ring buffer. */
+            pr_info_ratelimited("tbtun: fec super %llu group %u used=%d ready=%d id=%llu empty=%d nparity=%u ndata=%u\n",
+                                rx->next_super, g, db->used, db->ready,
+                                db->block_id, db->empty, db->nparity,
+                                db->ndata);
         }
         spin_unlock_bh(&rx->lock);
     }
@@ -2246,6 +2291,16 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
         bool missing = false;
         bool started = false;
 
+        probe_only = true; /* every request so far is a shape probe */
+
+        /* The stream ends in `final`: a super-block past it holds no packet
+         * of this stream, so requesting it would send a NACK every retry
+         * interval until the connection closed. The delivery walk already
+         * refuses to deliver past the end; stop asking here too. */
+        if (READ_ONCE(rx->total_known) &&
+            s > tbt_fec_final_block_of_total(READ_ONCE(rx->total_pkts),
+                                             rx->groups, rx->n))
+            break;
         for (g = 0; g < rx->groups; g++)
         {
             struct tbt_fec_blk *b = tbt_fec_rx_blk(rx, g, s);
@@ -2277,6 +2332,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
                                              s, b->ndata, b->ready))
                 {
                     missing = true;
+                    probe_only = false;
                     tbt_fec_bitmap_set(n.group_mask, g);
                     for (i = 0; i < rx->n; i++)
                         tbt_fec_bitmap_set(n.share_mask, i);
@@ -2299,6 +2355,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
                      * block: a wholly missing block is a real loss. Request
                      * its range; the ring returns only what it has. */
                     missing = true;
+                    probe_only = false;
                     tbt_fec_bitmap_set(n.group_mask, g);
                     for (i = 0; i < (u16)(rx->n + rx->m); i++)
                         tbt_fec_bitmap_set(n.share_mask, i);
@@ -2327,6 +2384,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
             if (b->ndata && b->nparity >= (u16)(real - b->ndata))
                 continue; /* the next pass can decode it */
             missing = true;
+            probe_only = false;
             tbt_fec_bitmap_set(n.group_mask, g);
             for (i = 0; i < real; i++)
                 if (!b->dpresent[i])
@@ -2407,6 +2465,17 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
         }
         tbt_session_arm(sess, TBT_SW_FEC_RX,
                         msecs_to_jiffies(TBT_FEC_NACK_MIN_MS));
+        return;
+    }
+    if (probe_only && rx->nack->valid &&
+        now - rx->nack->last_ns < (u64)TBT_FEC_NACK_PROBE_MS * 1000000ULL)
+    {
+        /* The sender may not have sent this super-block at all: an idle
+         * connection would put a probe on the wire every retry interval for
+         * as long as it stays open. Pace it; a real repair keeps the retry
+         * cadence. */
+        tbt_session_arm(sess, TBT_SW_FEC_RX,
+                        msecs_to_jiffies(TBT_FEC_RX_POLL_SLOW_MS));
         return;
     }
     if (tbt_fec_nack_due(rx->nack, now, s, &n))

@@ -243,6 +243,10 @@ bool tbt_fec_replay_has(const struct tbt_fec_replay *r, u64 block_id,
  * repair continues, and only the replay window bounds it. */
 #define TBT_FEC_NACK_MIN_MS 10
 #define TBT_FEC_NACK_RETRY_MS 20
+/* A shape probe asks the sender to describe a super-block it may not have
+ * sent yet; repeating it at the repair cadence puts a NACK on the wire for
+ * every retry interval of an idle connection. Pace it instead. */
+#define TBT_FEC_NACK_PROBE_MS 100
 
 struct tbt_fec_nack_state
 {
@@ -547,6 +551,33 @@ static inline bool tbt_fec_blk_deliverable(bool used, bool ready,
                                            u64 block_id, u64 s)
 {
     return used && ready && block_id == s;
+}
+
+/* A blocked walk still has to notice a share that arrives later. The slow
+ * cadence keeps an idle connection from waking the workqueue 100 times a
+ * second; a share that arrives after it costs at most that delay, far below
+ * the sender's stall timer. */
+#define TBT_FEC_RX_POLL_SLOW_MS 100
+
+/* Delay w_fec_rx arms itself with while the next super-block is not ready.
+ *
+ * tbt_session_arm() never retimes an item that is already pending: it keeps
+ * the reference accounting sound, so whatever delay this walk arms is the
+ * maximum latency before an arriving share or marker is noticed. The stall
+ * budget is 30 s, and the field stall was exactly that: the next
+ * super-block's shares and markers all arrived and became ready, but the
+ * pending pass was still 30 s away, so the bytes were never delivered and
+ * the ACK never moved. Poll at the NACK cadence while the repair is young,
+ * then back off; progress_ns still bounds the stall decision, so the reset
+ * check keeps its deadline. */
+static inline unsigned long tbt_fec_rx_poll_ms(u64 left_ms, u64 waited_ns)
+{
+    u64 cadence = waited_ns < 1000000000ULL ? (u64)TBT_FEC_NACK_MIN_MS
+                                            : (u64)TBT_FEC_RX_POLL_SLOW_MS;
+
+    if (left_ms < cadence)
+        cadence = left_ms;
+    return (unsigned long)cadence;
 }
 
 /* ------------------------------------------------------------------ *

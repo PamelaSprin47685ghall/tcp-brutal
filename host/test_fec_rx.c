@@ -74,6 +74,8 @@ struct blk
     u16 nreal;     /* win_len from PARITY; 0 = not stated */
     u16 short_len; /* epoch: length of share nreal-1, 0 = full */
     bool empty;
+    bool ready;    /* tbt_fec_blk.ready: set once the block is immutable */
+    u64 block_id;  /* tbt_fec_blk.block_id: names the super-block it holds */
 };
 
 static void src_init(void)
@@ -1023,6 +1025,237 @@ static void test_marker_retry(void)
     tbt_fec_replay_free(r);
 }
 
+/* ------------------------------------------------------------------ *
+ * 10. The super-block cursor: readiness, the blocked exit, the wake delay.
+ * ------------------------------------------------------------------ */
+
+#define G 4 /* groups per super-block in this model */
+
+struct sup
+{
+    struct blk b[G];
+    u64 id;
+};
+
+static void sup_markers(struct sup *sp, u64 id)
+{
+    int g;
+
+    memset(sp, 0, sizeof(*sp));
+    sp->id = id;
+    for (g = 0; g < G; g++)
+    {
+        sp->b[g].block_id = id;
+        sp->b[g].ready = true;
+        sp->b[g].empty = true;
+    }
+}
+
+/* tbt_fec_super_ready_locked(): every group must be ready and carry this
+ * super-block's id. A marker placed for another id (slot reuse) must keep
+ * the super-block unready, or its group's bytes would be skipped. */
+static bool sup_ready(const struct sup *sp, u64 s)
+{
+    int g;
+
+    for (g = 0; g < G; g++)
+        if (sp->b[g].block_id != s || !sp->b[g].ready)
+            return false;
+    return true;
+}
+
+/* One pass of tbt_fec_deliver_ready() over one super-block. Returns the
+ * bytes appended. On a refused share it keeps (p, g) and leaves the cursor
+ * (next_super) alone: the kernel walk must not clear the saved cursor or
+ * advance the frontier past bytes the application never received. */
+static size_t sup_deliver(const struct sup *sp, u64 *next_super,
+                          u16 *cur_p, u16 *cur_g, u8 *out, size_t cap,
+                          int *blocked)
+{
+    u64 s = *next_super;
+    size_t off = 0;
+    u16 p, g;
+
+    *blocked = 0;
+    if (!sup_ready(sp, s))
+        return 0;
+    for (p = *cur_p; p < N; p++)
+    {
+        for (g = *cur_g; g < G; g++)
+        {
+            const struct blk *b = &sp->b[g];
+            u16 real = b->nreal ? b->nreal : N;
+            u16 len;
+
+            if (b->empty)
+                continue;
+            if (p >= real)
+            {
+                if (b->dpresent[p])
+                {
+                    *blocked = 1;
+                    *cur_p = p;
+                    *cur_g = g;
+                    return off;
+                }
+                continue;
+            }
+            len = tbt_fec_rx_share_len(b->dlen[p], b->short_len, p, real, S);
+            if (!len)
+            {
+                *blocked = 1;
+                *cur_p = p;
+                *cur_g = g;
+                return off;
+            }
+            if (off + len > cap)
+            {
+                *blocked = 1;
+                *cur_p = p;
+                *cur_g = g;
+                return off;
+            }
+            memcpy(out + off, b->data[p], len);
+            off += len;
+        }
+        *cur_g = 0;
+    }
+    *cur_p = 0;
+    *cur_g = 0;
+    (*next_super)++;
+    return off;
+}
+
+static void test_super_cursor(void)
+{
+    static const u16 full[N] = {S, S, S, S};
+    struct sup sp;
+    u64 next_super = 0;
+    u16 p = 0, g = 0;
+    u8 out[N * S];
+    int blocked;
+    size_t n;
+
+    /* Super 0: group 0 has four real shares, groups 1..3 are markers. */
+    sup_markers(&sp, 0);
+    blk_init(&sp.b[0], 0, full);
+    blk_encode(&sp.b[0]);
+    sp.b[0].block_id = 0;
+    sp.b[0].ready = true;
+    sp.b[0].nreal = N;
+    ok(sup_ready(&sp, 0), "super 0 is ready when every group matches the id");
+
+    /* A block left over from another super-block (a stale slot) must keep
+     * the super unready even when it is ready itself. */
+    sp.b[2].block_id = 1;
+    ok(!sup_ready(&sp, 0), "a group whose block_id is not s keeps it unready");
+    sp.b[2].block_id = 0;
+
+    /* Cut conflict: win_len says two real shares, share 2 arrived. The walk
+     * delivers the prefix, refuses the super, and keeps the cursor. */
+    sp.b[0].nreal = 2;
+    n = sup_deliver(&sp, &next_super, &p, &g, out, sizeof(out), &blocked);
+    ok(blocked, "cut conflict blocks the super");
+    ok_size(n, 2 * S, "cut conflict delivers only the shares below it");
+    ok_prefix(out, n, "cut conflict prefix");
+    ok(next_super == 0, "blocked super does not advance next_super");
+    ok(p == 2 && g == 0, "blocked cursor names the refused share");
+
+    /* Removing the stray shares makes the same cut ordinary padding; the
+     * walk resumes at the saved cursor, finishes the super and advances. */
+    sp.b[0].dpresent[2] = 0;
+    sp.b[0].dpresent[3] = 0;
+    p = 2;
+    g = 0;
+    n = sup_deliver(&sp, &next_super, &p, &g, out, sizeof(out), &blocked);
+    ok(!blocked, "padding below the cut does not block");
+    ok_size(n, 0, "resume from the cursor skips the padding and the markers");
+    ok(next_super == 1, "a complete super advances next_super");
+}
+
+/* The iperf3 control handshake shape: a short cookie, a 1 B reply, then a
+ * length and a body that the tunnel coalesces into one short packet. Each
+ * short packet closes its block, so the two packets live in super-blocks 0
+ * and 1, one share each, with empty markers in the other groups. The stream
+ * ends at the block-aligned packet count, and every byte must be delivered
+ * by its own super-block. */
+static void test_ack_split(void)
+{
+    static const u16 cookie[N] = {37, 0, 0, 0};
+    static const u16 body[N] = {27, 0, 0, 0};
+    struct sup sp[2];
+    struct tbt_fec_ack a;
+    u64 next_super = 0;
+    u16 p = 0, g = 0;
+    u8 out[2 * S];
+    int i, blocked;
+    size_t n, off = 0;
+
+    sup_markers(&sp[0], 0);
+    blk_init(&sp[0].b[0], 0, cookie);
+    sp[0].b[0].dpresent[1] = sp[0].b[0].dpresent[2] = 0;
+    sp[0].b[0].dpresent[3] = 0;
+    blk_encode(&sp[0].b[0]);
+    sp[0].b[0].block_id = 0;
+    sp[0].b[0].ready = true;
+    sp[0].b[0].nreal = 1;
+    sp[0].b[0].short_len = 37;
+
+    sup_markers(&sp[1], 1);
+    blk_init(&sp[1].b[0], 37, body);
+    sp[1].b[0].dpresent[1] = sp[1].b[0].dpresent[2] = 0;
+    sp[1].b[0].dpresent[3] = 0;
+    blk_encode(&sp[1].b[0]);
+    sp[1].b[0].block_id = 1;
+    sp[1].b[0].ready = true;
+    sp[1].b[0].nreal = 1;
+    sp[1].b[0].short_len = 27;
+
+    for (i = 0; i < 2; i++)
+    {
+        n = sup_deliver(&sp[i], &next_super, &p, &g, out + off,
+                        sizeof(out) - off, &blocked);
+        ok(!blocked, "ack split: every super delivers");
+        off += n;
+        ok(next_super == (u64)i + 1, "ack split: the cursor advances");
+    }
+    ok_size(off, 37 + 27, "ack split: the sink receives every byte");
+    ok_prefix(out, off, "ack split prefix");
+
+    /* The ACK names the block-aligned frontier and the byte count the
+     * application received; the two are not interchangeable. */
+    memset(&a, 0, sizeof(a));
+    a.next_deliver = 2 * (u64)G * N;
+    a.deliver_bytes = off;
+    ok(a.next_deliver == 32, "ack split: frontier is the block-aligned end");
+    ok_size((size_t)a.deliver_bytes, 37 + 27,
+            "ack split: the ACK carries the delivered byte count");
+}
+
+static void test_rx_poll(void)
+{
+    /* tbt_session_arm() never retimes a pending item, so the delay this walk
+     * arms is the worst-case latency before an arriving share is noticed.
+     * The stall budget must never become that latency. */
+    ok_int((int)tbt_fec_rx_poll_ms(30000, 0), TBT_FEC_NACK_MIN_MS,
+           "a blocked walk polls at the NACK cadence, not the stall budget");
+    ok_int((int)tbt_fec_rx_poll_ms(30000, 500000000ULL), TBT_FEC_NACK_MIN_MS,
+           "the fast cadence holds while the repair is young");
+    ok_int((int)tbt_fec_rx_poll_ms(30000, 2000000000ULL),
+           TBT_FEC_RX_POLL_SLOW_MS,
+           "an old stall backs off instead of waking at 100 Hz forever");
+    ok_int((int)tbt_fec_rx_poll_ms(4, 0), 4,
+           "a shorter remaining budget keeps its own deadline");
+    ok_int((int)tbt_fec_rx_poll_ms(50, 2000000000ULL), 50,
+           "the slow cadence never extends the remaining budget");
+    ok_int((int)tbt_fec_rx_poll_ms(0, 2000000000ULL), 0,
+           "an expired budget arms immediately");
+    /* A shape probe asks the sender to describe a block it may not have sent
+     * yet; it must never run at the repair retry cadence. */
+    ok(TBT_FEC_NACK_PROBE_MS > TBT_FEC_NACK_RETRY_MS,
+       "a shape probe is paced slower than a repair retry");
+}
+
 int main(void)
 {
     src_init();
@@ -1041,6 +1274,9 @@ int main(void)
     test_two_short_writes();
     test_parity_rotation();
     test_marker_retry();
+    test_super_cursor();
+    test_ack_split();
+    test_rx_poll();
 
     printf("test_fec_rx: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
