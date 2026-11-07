@@ -1582,30 +1582,34 @@ static void test_probe_and_absent(void)
 }
 
 /* fix22: the far's replay queue reached 8 MiB and the download made no
- * progress for 120 s. The normal cap is now 4 MiB, and above 75% of it a
- * flush pass writes one replay record so the bound new-DATA queues get a
- * turn. Replay still drains (nothing is dropped), the FIN still does not
- * wait for it, and the tail share is still in the ring. */
+ * progress for 120 s. fix23 then capped it at 4 MiB with a one-record
+ * high-water throttle: flush skips rose 116x and the ordered walk's HOL
+ * wait 1278x, so the drain fell behind. The cap is 8 MiB again and the
+ * throttle keeps four records per pass: new DATA still gets a turn every
+ * pass, replay keeps enough drain bandwidth, nothing is dropped, and the
+ * FIN still does not wait for it. */
 static void test_replay_high_water(void)
 {
-    u32 cap = 4u * 1024 * 1024;
+    u32 cap = 8u * 1024 * 1024;
     u32 high = tbt_fec_replay_high_water(cap);
     const u32 rec = 8192;
     u32 queued = cap;
     int passes = 0, over_passes = 0, under_passes = 0;
     bool bad = false;
 
-    ok_size((size_t)high, 3u * 1024 * 1024, "high water: 75% of 4 MiB");
+    ok_size((size_t)high, 6u * 1024 * 1024, "high water: 75% of 8 MiB");
     ok_size((size_t)tbt_fec_replay_high_water(TBT_FEC_REPLAY_CLOSE_BYTES_MAX),
             TBT_FEC_REPLAY_CLOSE_BYTES_MAX -
                 TBT_FEC_REPLAY_CLOSE_BYTES_MAX / 4,
             "high water: the close cap scales with it");
     ok_int(tbt_fec_replay_pass_limit(false, 8), 8,
            "throttle: below the mark the pass keeps its limit");
-    ok_int(tbt_fec_replay_pass_limit(true, 8), 1,
-           "throttle: above the mark one replay per pass");
-    ok_int(tbt_fec_replay_pass_limit(true, 1), 1,
+    ok_int(tbt_fec_replay_pass_limit(true, 8), 4,
+           "throttle: above the mark four replay records per pass");
+    ok_int(tbt_fec_replay_pass_limit(true, 2), 2,
            "throttle: never raises a lower limit");
+    ok(tbt_fec_replay_pass_limit(true, 8) >= 4,
+       "throttle: the drain bandwidth is not cut to one record");
 
     while (queued && passes < 2000)
     {
@@ -1617,23 +1621,23 @@ static void test_replay_high_water(void)
         {
             queued -= rec;
             n++;
-}
+        }
         if (over)
         {
-            if (n != 1)
+            if (n != TBT_FEC_REPLAY_PASS_THROTTLED)
                 bad = true;
             over_passes++;
-}
+        }
         else
         {
             under_passes++;
-}
+        }
         passes++;
-}
+    }
     ok_size((size_t)queued, 0, "throttle: every replay record drains");
     ok(over_passes > 0 && under_passes > 0,
        "throttle: both regimes are exercised");
-    ok(!bad, "throttle: an over-water pass writes exactly one record");
+    ok(!bad, "throttle: an over-water pass writes four records");
     ok(tbt_fec_fin_ready(true, 0),
        "throttle: the FIN does not wait for the replay queue");
 }

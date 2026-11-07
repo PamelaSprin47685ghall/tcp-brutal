@@ -388,18 +388,23 @@ static inline u32 tbt_fec_replay_cap(bool closing, u32 normal_max)
 
 /* The queue is above this mark: replay is throttled so a repair burst
  * cannot own every carrier while new DATA waits (fix22: an 8 MiB queue and
- * 4.6M flush skips left the download with no progress for 120 s). */
+ * 4.6M flush skips left the download with no progress for 120 s). The
+ * throttle still leaves enough drain bandwidth: one record per pass made
+ * fix23 worse (flush skips x116, HOL wait x1278). */
+#define TBT_FEC_REPLAY_PASS_THROTTLED 4u
+
 static inline u32 tbt_fec_replay_high_water(u32 cap)
 {
     return cap - cap / 4; /* 75% */
 }
 
-/* One replay record per flush pass above the mark, then the bound data
- * queues get their turn. Below it the pass keeps its normal limit. */
+/* Above the mark four replay records per flush pass, then the bound data
+ * queues get their turn; below it the pass keeps its normal limit. The
+ * throttle never raises a smaller limit. */
 static inline u32 tbt_fec_replay_pass_limit(bool over_high, u32 normal_limit)
 {
-    if (over_high && normal_limit > 1)
-        return 1;
+    if (over_high && normal_limit > TBT_FEC_REPLAY_PASS_THROTTLED)
+        return TBT_FEC_REPLAY_PASS_THROTTLED;
     return normal_limit;
 }
 

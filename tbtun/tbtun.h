@@ -820,13 +820,15 @@ struct tbt_fec_outq
 #define TBT_FEC_NACK_REQ_MAX 256u
 
 /* Replay records in flight across every carrier queue: a byte budget, not a
- * record count. One NACK names at most 64 shares (512 KiB), so 4 MiB holds
- * eight bursts; a slow carrier must not consume it, and the records spread
- * over the carriers by their queue bytes. A miss is retried by the
- * receiver's NACK, not turned into a source-frame drop. The old 8 MiB bound
- * let a repair burst own the carriers for ~30 s at the fix22 throughput and
- * the download made no progress for 120 s. */
-#define TBT_FEC_REPLAY_BYTES_MAX (4u * 1024 * 1024)
+ * record count. One NACK names at most 64 shares (512 KiB), so 8 MiB holds
+ * sixteen bursts; a slow carrier must not consume it, and the records
+ * spread over the carriers by their queue bytes. A miss is retried by the
+ * receiver's NACK, not turned into a source-frame drop. fix23 measured a
+ * 4 MiB cap with a one-record high-water throttle: the repair drain fell
+ * behind, flush skips rose 116x and the ordered walk's HOL wait 1278x. The
+ * bound is 8 MiB again; the high-water throttle keeps four records per
+ * pass, not one. */
+#define TBT_FEC_REPLAY_BYTES_MAX (8u * 1024 * 1024)
 /* Replay records one flush pass may write before the bound data queues get
  * their turn. 8 records of one 8 KiB share is 64 KiB: replay keeps its
  * priority, but a NACK burst cannot hold the close path's FIN behind it for
