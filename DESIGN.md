@@ -377,7 +377,12 @@ container:
   be requested whole. If a probed share was never stored and the block is
   closed with no packet in that group, the sender answers with the empty
   marker and stores it in the ring, so the receiver marks the group empty
-  instead of waiting. A closed short block (`win_len < n`) has no records for
+  instead of waiting. A super-block whose every share was lost is probed at
+  the delivery frontier even when no share of it was seen: the receiver asks
+  parity 0 for each group, and the sender's ring states the shape. A stale
+  final-block tail of 0 with a present DATA share is not treated as empty;
+  the share is kept and parity/NACK states the real cut. A closed short block
+  (`win_len < n`) has no records for
   its padding DATA shares; a NACK for one of those is answered with a parity
   row whose header carries the real `win_len`/`epoch`, so the receiver learns
   the cut instead of waiting for a share that will never exist. A block

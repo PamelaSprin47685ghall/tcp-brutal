@@ -2112,6 +2112,23 @@ static void test_replay(void)
     ok_u32(tbt_fec_replay_k(NULL), 0, "replay K of NULL");
 }
 
+static void test_tail_guard(void)
+{
+    /* total_pkts=2, groups=4, n=4: final block 0; groups 0/1 have one packet,
+     * groups 2/3 are empty. A tail of 0 with a present DATA share is a stale
+     * stream end and must not mark the block empty. */
+    ok_u32(tbt_fec_blk_real_len_from_tail(0, 4, true, 2, 4, 0, 0, true), 1,
+           "final tail 1 for a group with a packet");
+    ok_u32(tbt_fec_blk_real_len_from_tail(0, 4, true, 2, 4, 0, 2, false), 0,
+           "final empty group has length 0");
+    ok_u32(tbt_fec_blk_real_len_from_tail(0, 4, true, 2, 4, 0, 2, true), 4,
+           "stale tail 0 with a present DATA share keeps n");
+    ok_u32(tbt_fec_blk_real_len_from_tail(1, 4, true, 2, 4, 0, 2, true), 1,
+           "parity win_len wins over the tail");
+    ok_u32(tbt_fec_blk_real_len_from_tail(0, 4, false, 0, 4, 0, 2, true), 4,
+           "unknown total keeps n");
+}
+
 static void test_nack_pacing(void)
 {
     struct tbt_fec_nack_state st;
@@ -2170,6 +2187,7 @@ int main(void)
     test_ops();
     test_framing();
     test_replay();
+    test_tail_guard();
     test_nack_pacing();
 
     printf("%d checks, %d failures\n", checks, failures);

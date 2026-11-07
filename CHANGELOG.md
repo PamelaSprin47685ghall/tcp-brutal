@@ -73,6 +73,13 @@ and moves independently of the module version.
 
 ### Fixed
 
+- FEC whole-block loss at the delivery frontier: the receiver only NACKed up
+  to `highest_block`, so a super-block whose every share was lost was
+  invisible and the sender's TX stall fired. The scan now probes the next
+  super-block (parity 0 per group) even when no share of it was seen; the
+  sender's replay ring states the shape. A stale final-block tail of 0 with a
+  present DATA share no longer marks the block empty: the share is kept and
+  parity/NACK states the real cut.
 - FEC sparse-block NACK storm: a started super-block's unstarted groups were
   requested for their whole `n+m` range before the stream end was known. A
   100-byte short stream on 32 carriers produced full-range NACKs for shares

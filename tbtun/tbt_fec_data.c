@@ -1436,33 +1436,22 @@ static void tbt_fec_blk_reset(struct tbt_fec_blk *b, u64 block_id)
 static u16 tbt_fec_blk_real_len(const struct tbt_fec_rx *rx, u16 group,
                                 const struct tbt_fec_blk *b)
 {
-    u16 len;
+    bool has_data = false;
+    u16 i;
 
     /* A marker says the group has no packet in this block; nothing in it is
      * ever delivered, whatever the stream-length fallback would say. */
     if (b->empty)
         return 0;
-    len = b->nreal ? b->nreal : rx->n;
-
-    /* A block that was closed early has fewer real shares than n, and its
-     * parity says so. The stream-length formula below describes the standard
-     * layout, which a skipped seq range no longer matches, so it is only the
-     * fallback for a block whose parity was lost. */
-    if (!b->nreal && rx->total_known)
-    {
-        u64 final = tbt_fec_final_block_of_total(rx->total_pkts, rx->groups,
-                                                 rx->n);
-
-        if (b->block_id == final)
+    for (i = 0; i < rx->n; i++)
+        if (b->dpresent[i])
         {
-            u16 tail = tbt_fec_group_tail_len(rx->total_pkts, rx->groups,
-                                              rx->n, group);
-
-            if (tail < len)
-                len = tail;
+            has_data = true;
+            break;
         }
-    }
-    return len;
+    return tbt_fec_blk_real_len_from_tail(b->nreal, rx->n, rx->total_known,
+                                          rx->total_pkts, rx->groups,
+                                          b->block_id, group, has_data);
 }
 
 /* Lazy recount: ndata is the number of present shares in [0, real). It only
@@ -2182,8 +2171,13 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
     }
 
     hi = READ_ONCE(rx->highest_block);
+    /* The delivery frontier may be ahead of the highest block seen: every
+     * share of the next super-block was lost. Probe it anyway (parity 0 for
+     * each group) so the sender's replay ring can state its shape; otherwise
+     * the receiver waits for a share that never arrives and the sender's TX
+     * stall fires. */
     if (hi < rx->next_super)
-        return;
+        hi = rx->next_super;
     /* The ring covers [highest - K + 1, highest]. An older block is outside
      * the window: do not NACK it, and do not reset it early. The sender's
      * credit is capped to K-2 super-blocks, so this window always covers the
@@ -2207,9 +2201,11 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
                 break;
             }
         }
-        /* A super-block with no block at all has not started: its shares may
-         * simply not be sent yet. Do not request them. */
-        if (!started)
+        /* A super-block ahead of the delivery frontier with no block at all
+         * has not started: its shares may simply not be sent yet. Do not
+         * request them. The delivery frontier itself is probed even when no
+         * share of it arrived: a whole-block loss is invisible to `hi`. */
+        if (!started && s != rx->next_super)
             continue;
         memset(&n, 0, sizeof(n));
         for (g = 0; g < rx->groups; g++)

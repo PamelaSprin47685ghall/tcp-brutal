@@ -820,6 +820,68 @@ static void test_short_block_reply(void)
     tbt_fec_replay_free(r);
 }
 
+/* Two short writes: 4 B then 200 B, each its own win_len=1 block. The
+ * second block's data share is lost. The next-block probe asks parity 0,
+ * learns win_len=1, replays the data share, and delivers 204 B. */
+static void test_two_short_writes(void)
+{
+    static const u16 four[N] = {4, 0, 0, 0};
+    static const u16 forty[N] = {40, 0, 0, 0};
+    struct tbt_fec_replay *r;
+    struct blk b0, b1;
+    u8 buf[S];
+    u8 out[2 * S];
+    int i, refused;
+    size_t off0, off1;
+
+    r = tbt_fec_replay_new(1, N, M, S);
+    ok(r != NULL, "two-write replay ring");
+    blk_init(&b0, 0, four);
+    b0.dpresent[1] = b0.dpresent[2] = b0.dpresent[3] = 0;
+    blk_encode(&b0);
+    b0.nreal = 1;
+    b0.short_len = 4;
+    blk_init(&b1, 4, forty);
+    b1.dpresent[1] = b1.dpresent[2] = b1.dpresent[3] = 0;
+    blk_encode(&b1);
+    b1.nreal = 1;
+    b1.short_len = 40;
+
+    ok_int(tbt_fec_replay_store(r, 0, 0, 0, b0.data[0], S), 0,
+           "4 B block stores its data share");
+    ok_int(tbt_fec_replay_store(r, 1, 0, 0, b1.data[0], S), 0,
+           "200 B block stores its data share");
+    for (i = 0; i < M; i++)
+    {
+        ok_int(tbt_fec_replay_store(r, 0, 0, (u16)(N + i), b0.parity[i], S),
+               0, "4 B block stores parity");
+        ok_int(tbt_fec_replay_store(r, 1, 0, (u16)(N + i), b1.parity[i], S),
+               0, "200 B block stores parity");
+    }
+
+    /* The second block's data share is lost. The receiver's next-block probe
+     * asks parity 0; the ring has it; the sender replays the data share. */
+    b1.dpresent[0] = 0;
+    ok_int(tbt_fec_replay_get(r, 1, 0, N, buf, S), S,
+           "next block parity 0 is in the ring");
+    memcpy(b1.parity[0], buf, S);
+    b1.ppresent[0] = 1;
+    ok_int(tbt_fec_replay_get(r, 1, 0, 0, buf, S), S,
+           "next block data share is in the ring");
+    memcpy(b1.data[0], buf, S);
+    b1.dpresent[0] = 1;
+    b1.dlen[0] = 40;
+
+    off0 = blk_deliver(&b0, out, sizeof(out), &refused);
+    ok(!refused, "4 B block delivers");
+    ok_size(off0, 4, "4 B block length");
+    off1 = blk_deliver(&b1, out + off0, sizeof(out) - off0, &refused);
+    ok(!refused, "200 B block delivers");
+    ok_size(off1, 40, "40 B block length");
+    ok_prefix(out, off0 + off1, "two short writes prefix");
+    tbt_fec_replay_free(r);
+}
+
 int main(void)
 {
     src_init();
@@ -835,6 +897,7 @@ int main(void)
     test_super_prefix();
     test_nack_replay();
     test_short_block_reply();
+    test_two_short_writes();
 
     printf("test_fec_rx: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

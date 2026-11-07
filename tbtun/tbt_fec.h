@@ -420,6 +420,31 @@ static inline u16 tbt_fec_group_tail_len(u64 total_pkts, u16 groups, u16 n,
     return (u16)(last_local - final_block * n + 1);
 }
 
+/* Real share count for a block. The parity's win_len is authoritative; the
+ * final-block tail formula is only the fallback when every parity row was
+ * lost. A tail of 0 with a present DATA share is a stale stream end (FIN
+ * froze pkt_end before that share was packetized): do not treat the share as
+ * padding; keep n and let parity/NACK state the real cut. */
+static inline u16 tbt_fec_blk_real_len_from_tail(u16 nreal, u16 n,
+                                                 bool total_known,
+                                                 u64 total_pkts, u16 groups,
+                                                 u64 block_id, u16 group,
+                                                 bool has_data)
+{
+    u16 len = nreal ? nreal : n;
+
+    if (nreal || !total_known)
+        return len;
+    if (block_id == tbt_fec_final_block_of_total(total_pkts, groups, n))
+    {
+        u16 tail = tbt_fec_group_tail_len(total_pkts, groups, n, group);
+
+        if (tail < len && !(tail == 0 && has_data))
+            len = tail;
+    }
+    return len;
+}
+
 /* A group with no block at all in a started super-block. Before the stream
  * end is known, the group may be legitimately empty (a short or sparse
  * block): the parity's win_len, the empty marker or FIN will state the real
