@@ -7,6 +7,15 @@ and moves independently of the module version.
 
 ### Added
 
+- FEC NACK repair (`TBT_FEC_CONV` 0x1004): a NACK names its super-block in
+  the record header and carries a 32-byte group bitmap plus a 32-byte share
+  bitmap. The sender keeps the last `K = 4` super-blocks of DATA+PARITY
+  records in a replay ring capped at 8 MiB and re-queues the requested shares
+  on any up, non-stalled carrier. The c11 line exports `fec_nack_tx/rx/retx`,
+  `fec_nack_drop`, `fec_nack_bad`, `fec_nack_retx_bytes`,
+  `fec_replace_retx_bytes`, `fec_replay_hit/miss`, `fec_nack_lat_ns`,
+  `fec_nack_repair_ns`, `fec_reset_tcp_failed`, `fec_reset_user`,
+  `fec_wait_carrier` and `fec_backpressure`.
 - `dev=<ifname>` on a tunnel line binds the near side's dialling carrier
   sockets to one interface with `SO_BINDTODEVICE` before `bind`/`connect`, so
   a TUN or proxy policy route cannot capture the dial. The name is 1..15
@@ -23,6 +32,13 @@ and moves independently of the module version.
 
 ### Changed
 
+- The 30 s FEC hole timer no longer resets a stream by itself. It resets only
+  when no carrier TCP is ESTABLISHED below the default `tcp_retries2`, or on a
+  user/peer teardown; while a carrier TCP is alive the receiver keeps NACKing
+  and replaying, and out-of-window bytes stay in the carrier's TCP send queue.
+  Under the documented assumptions this gives `E_tunnel ⊆ E_direct` and
+  `P(user stall) ≤ P(direct stall)`; it is not a promise that the tunnel never
+  stalls.
 - `carrier_stall_ms` is now a cap, not the threshold. The threshold is
   `5 × RTO` (`RTO = SRTT + 4×RTTVAR`, floored at 200 ms), clamped to 1..60 s;
   an explicit `carrier_stall_ms=` can only lower it. Under FEC a stall pauses

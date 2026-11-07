@@ -254,9 +254,9 @@ rather than in a new field so the HELLO body length is unchanged.
 | `http-kal-drip` | identical headers, identical framing | one **byte per `drip_ms`** when idle (a legal 1-byte chunk every `drip_ms`), volume `≈ 1 B/drip_ms` | the `M` spares: an idle flow that a classifier would reap or de-prioritise is kept alive with ~8 bit/s (1 B/s payload) instead of a burst every 5000 ms |
 | `raw` | one frame per record, no HTTP bytes at all | none needed | second hop / VPS-to-home leg, loopback tests, or any line where QoS does not apply. Also the only safe profile inside WireGuard when the classifier is SNI-based (§16.5) |
 
-### FEC v6 over the container (T0 0x1003)
+### FEC v6 over the container (T0 0x1004)
 
-FEC v6 is an independent 40-byte record format (`conv=0x1003`; 0.1.0 used
+FEC v6 is an independent 40-byte record format (`conv=0x1004`; 0.1.0 used
 `0x1001`), not a wider old frame. It rides the same carriers and the same HTTP
 container:
 
@@ -268,17 +268,17 @@ container:
 - Control records (ACK/NACK/FEC_CFG/FEC_FBK) use the same one-chunk-per-record
   rule. They are written only at record boundaries; a partial record is never
   interleaved with a control frame.
-- **PARITY block marker (`TBT_FEC_CONV` 0x1002, unchanged in 0x1003).** There is no
+- **PARITY block marker (`TBT_FEC_CONV` 0x1004).** There is no
   4-byte marker and no magic number. A marker is a set of values inside the
   40-byte `struct tbt_fec_hdr`: `type = TBT_FEC_PARITY` (0x31), `flags = 0`,
   `share_index = n` (parity 0), `epoch = 0`, `win_len = 0`, `payload_len = 0`,
-  `conv = 0x1003`, `payload_crc32c = 0` (the CRC32C of an empty payload).
+  `conv = 0x1004`, `payload_crc32c = 0` (the CRC32C of an empty payload).
   `header_crc32c` still covers +0..+35 and must match. The receiver accepts
   `win_len == 0` only with `payload_len == 0 && epoch == 0`, rejects a marker
   for a block that already holds DATA/parity or `win_len_set`, and rejects DATA
   for a block after its marker. 0.1.0 required PARITY
   `payload_len == max_payload` and `win_len != 0`, so the marker and that
-  relaxation shipped together with 0x1002.
+  relaxation shipped together with 0x1002 and stays in 0x1004.
 - `fec=on` maps one share to each carrier: `carriers = groups * (n + m)`,
   `group(c) = c / (n + m)`, `share(c) = c % (n + m)`. `mode=rlnc` is one group
   (`carriers == n + m`); `mode=grouped` is 32 groups of 8 in production
@@ -363,13 +363,58 @@ container:
   state, and the owner re-arms once when its body ends. This is what removed
   the field's header-CRC-valid/payload-CRC-bad records and the duplicated/
   skipped 8 KiB slot.
-- **The stall is bounded.** This wire has no NACK and no retransmission: a
-  share that never arrived is never fetched. A super-block that is still not
-  ready after `TBT_FEC_STALL_MS` (30 s) with the stream's end known is
-  therefore permanent, and the stream is killed (`TBT_ST_HOLE`,
-  `holes_unrecoverable`) so the application sees a reset instead of a silent
-  wait. Before the end is known the same budget only re-times, because an idle
-  peer looks identical to a lost share.
+- **NACK and a bounded replay ring repair a lost share.** `TBT_FEC_CONV`
+  0x1004 gives NACK a 64-byte body: a 32-byte group bitmap followed by a
+  32-byte share bitmap. The record header's `block_id` names the super-block;
+  the header's `seq` is zero. The receiver sends one NACK for the oldest
+  started super-block in `[next_super, min(next_super + K - 1,
+  highest_block)]` that is missing shares. A group with no block at all in a
+  started super-block is asked for its whole share range, which also repairs a
+  lost empty marker. A block outside that window is not NACKed: its bytes are
+  still in the carrier TCP send queue, and that TCP owns the retransmission.
+  The sender keeps the last `K = 4` super-blocks of encoded DATA+PARITY
+  records in a replay ring and re-queues the requested records on any up,
+  non-stalled carrier. The share index stays the same; the carrier does not.
+- **The replay buffers are constant.** The ring is `K * groups * (n + m)`
+  slots of `TBT_FEC_HDR_LEN + S` bytes plus 10 bytes of metadata, capped at
+  `TBT_FEC_REPLAY_BUDGET` (8 MiB). The effective K shrinks until the shape
+  fits; a shape that cannot hold one super-block gets no ring and falls back
+  to parity and TCP. The receive window is the ACK credit
+  (`slots * groups * n` packets, at most 1024) over the same `groups * (n+m) *
+  S` arena. Neither grows with the stream length. The replay queue itself is
+  capped at `TBT_FEC_REPLAY_QUEUE_MAX` (256 records); a full queue is a repair
+  miss that the next NACK retries, never a source-frame drop.
+- **NACK is retried, not timed out.** The first NACK for a block goes out
+  immediately (global minimum `TBT_FEC_NACK_MIN_MS` = 10 ms between NACKs);
+  an identical NACK is retried every `TBT_FEC_NACK_RETRY_MS` = 20 ms. There is
+  no total attempt cap: while a carrier TCP is alive the repair continues.
+  `fec_nack_tx/rx/retx`, `fec_nack_retx_bytes`, `fec_nack_lat_ns`,
+  `fec_nack_repair_ns`, `fec_replay_hit/miss` and
+  `fec_replace_retx_bytes` expose the cost `C_r` to the carrier economics.
+- **The only FEC reset is a dead transport.** A super-block that stays
+  unready for `TBT_FEC_STALL_MS` (30 s) is killed (`TBT_ST_HOLE`) only when
+  `tbt_fec_any_tcp_alive()` is false: no carrier has an ESTABLISHED socket
+  below the default `tcp_retries2` (15). If any carrier TCP is alive, the
+  stream keeps waiting, NACKing and replaying; the 30 s budget only re-times.
+  `fec_reset_tcp_failed` counts the first case, `fec_reset_user` counts a
+  user/peer/application teardown (any kill reason other than `TBT_ST_HOLE`).
+  A source share is never dropped to bound a buffer: the credit window and the
+  source ring backpressure the producer (`fec_wait_carrier`,
+  `fec_backpressure`), and a carrier replacement is requested through the
+  existing `w_replace` path.
+- **The mathematical claim.** Let `E_direct` be the event that a single direct
+  TCP stream to the same peer stalls visibly, and `E_tunnel` the same event
+  for the tunnel. The FEC layer adds no reset that direct TCP does not have:
+  it resets only after every carrier TCP has failed, and otherwise keeps
+  retransmitting (NACK/replay or TCP). Under the assumptions that (a) the
+  near-side local path and the TUN/socket plumbing add no failure of their
+  own, (b) the user-side TCP and application behave normally, and (c) a
+  carrier replacement does not create a new failure, every tunnel stall
+  implies a direct-TCP stall: `E_tunnel ⊆ E_direct`, hence
+  `P(user stall) ≤ P(direct stall)`. A loss outside the replay window is not
+  repaired by NACK; it is still held by TCP, and it becomes visible only when
+  that TCP fails, exactly as a direct stream would. The inequality is not a
+  promise that the tunnel never stalls.
 - **One live stream per session.** A FEC record carries no stream id, and the
   plane names its stream with `far_sid`, so a second live stream would have its
   bytes delivered to whichever stream is current. A two-connection protocol --

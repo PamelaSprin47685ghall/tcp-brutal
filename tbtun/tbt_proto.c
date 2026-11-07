@@ -62,7 +62,7 @@ void tbt_hdr_encode(u8 *p, const struct tbt_hdr *h)
     tbt_put_le16(p + TBT_H_CONV, h->conv);
 }
 
-/* 0.2.0 wire (TBT_CONV 0x0006, TBT_FEC_CONV 0x1002). This function enforces
+/* 0.2.0 wire (TBT_CONV 0x0006, TBT_FEC_CONV 0x1004). This function enforces
  * the old-record half: the conv check and the FIN body bounds.
  *
  * FIN body, exactly TBT_FIN_BODY_LEN (16) bytes, little-endian:
@@ -79,7 +79,7 @@ void tbt_hdr_encode(u8 *p, const struct tbt_hdr *h)
  * PARITY marker: no 4-byte marker and no magic number exists. A marker is a
  * set of values inside the 40-byte tbt_fec_hdr: type TBT_FEC_PARITY (0x31),
  * flags 0, share_index n (parity 0), epoch 0, win_len 0, payload_len 0,
- * conv 0x1002, payload_crc32c 0 (CRC32C of an empty payload).
+ * conv 0x1004, payload_crc32c 0 (CRC32C of an empty payload).
  * tbt_fec_hdr_check() accepts the marker and requires DATA epoch == 0,
  * PARITY win_len <= n, and one (win_len, epoch) per block.
  *

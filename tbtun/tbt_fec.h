@@ -1,4 +1,4 @@
-/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x1002), control frames, and the
+/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x1004), control frames, and the
  * GF(2) sliding-window RLNC codec.
  *
  * This file and tbt_fec.c compile twice: into the module and into the host
@@ -145,11 +145,13 @@ struct tbt_fec_ack
     u64 deliver_bytes;
 };
 
-struct tbt_fec_nack_item
+/* NACK body: block_id lives in the record header; these two bitmaps name
+ * the groups and shares that are still missing in that super-block. A bit
+ * is meaningful only below the session's groups and n+m. */
+struct tbt_fec_nack
 {
-    u64 missing_seq;
-    u16 count;
-    u16 reserved;
+    u8 group_mask[TBT_FEC_BITMAP_BYTES];
+    u8 share_mask[TBT_FEC_BITMAP_BYTES];
 };
 
 struct tbt_fec_cfg
@@ -181,11 +183,72 @@ struct tbt_fec_fbk
 int tbt_fec_ack_pack(const struct tbt_fec_ack *a, u8 out[TBT_FEC_ACK_LEN]);
 int tbt_fec_ack_unpack(const u8 in[TBT_FEC_ACK_LEN], struct tbt_fec_ack *a);
 
-/* NACK pack returns the body length (nr * 12) or -EINVAL/-ENOSPC. Unpack
- * returns the body length and fills up to max items, or -EPROTO for a
- * non-multiple length / nonzero reserved field / zero count. */
-int tbt_fec_nack_pack(const struct tbt_fec_nack_item *e, u16 nr, u8 *out, size_t cap);
-int tbt_fec_nack_unpack(const u8 *in, size_t len, struct tbt_fec_nack_item *e, u16 max);
+/* NACK pack returns TBT_FEC_NACK_LEN or -EINVAL. Unpack returns 0 or
+ * -EPROTO for a NULL argument. */
+int tbt_fec_nack_pack(const struct tbt_fec_nack *n, u8 out[TBT_FEC_NACK_LEN]);
+int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
+
+/* ------------------------------------------------------------------ *
+ * Bounded replay ring and NACK pacing
+ *
+ * The sender keeps the last K super-blocks of encoded DATA+PARITY records.
+ * The receiver may ask for any missing share in that window with a NACK.
+ * Both buffers are constant-size: the ring is K * groups * (n+m) records,
+ * capped by TBT_FEC_REPLAY_BUDGET, and the receive window is bounded by the
+ * credit the ACK grants. No buffer grows with the stream length.
+ *
+ * The ring is storage only. The caller serialises store/get: the data plane
+ * uses one spinlock per TX direction. The host test calls it single-threaded.
+ * ------------------------------------------------------------------ */
+
+#define TBT_FEC_REPLAY_K 4
+#define TBT_FEC_REPLAY_BUDGET (8u * 1024 * 1024)
+
+struct tbt_fec_replay;
+
+/* Returns NULL when the shape needs more than TBT_FEC_REPLAY_BUDGET even for
+ * K = 1, or when an allocation fails. The effective K is then 0 and the data
+ * plane falls back to parity and the TCP retransmission. */
+struct tbt_fec_replay *tbt_fec_replay_new(u16 groups, u16 n, u16 m, u16 s);
+void tbt_fec_replay_free(struct tbt_fec_replay *r);
+u16 tbt_fec_replay_k(const struct tbt_fec_replay *r);
+size_t tbt_fec_replay_bytes(u16 groups, u16 n, u16 m, u16 s, u16 k);
+
+/* Store one complete encoded record (header included). A share outside
+ * [0, n+m) or a record longer than header+S is refused. */
+int tbt_fec_replay_store(struct tbt_fec_replay *r, u64 block_id, u16 group,
+                         u16 share, const u8 *rec, u16 len);
+/* Copy a stored record into out. Returns its length, -ENOENT when the block
+ * is no longer in the ring or that share was never stored, or -ENOSPC when
+ * out is too small. */
+int tbt_fec_replay_get(const struct tbt_fec_replay *r, u64 block_id,
+                       u16 group, u16 share, u8 *out, u16 cap);
+bool tbt_fec_replay_has(const struct tbt_fec_replay *r, u64 block_id,
+                        u16 group, u16 share);
+
+/* NACK pacing. The first NACK for a block goes out at once, subject to a
+ * global minimum interval; an identical NACK is retried after the longer
+ * interval. There is no total attempt cap: while a carrier TCP is alive the
+ * repair continues, and only the replay window bounds it. */
+#define TBT_FEC_NACK_MIN_MS 10
+#define TBT_FEC_NACK_RETRY_MS 20
+
+struct tbt_fec_nack_state
+{
+    u64 first_ns; /* first NACK for this block/mask */
+    u64 last_ns;  /* last NACK sent, any block/mask */
+    u64 block_id;
+    u32 tries;
+    bool valid;
+    u8 group_mask[TBT_FEC_BITMAP_BYTES];
+    u8 share_mask[TBT_FEC_BITMAP_BYTES];
+};
+
+/* Returns true when the caller should send this NACK now and updates the
+ * state. `now_ns` is monotonic. */
+bool tbt_fec_nack_due(struct tbt_fec_nack_state *st, u64 now_ns,
+                      u64 block_id, const struct tbt_fec_nack *n);
+void tbt_fec_nack_reset(struct tbt_fec_nack_state *st);
 
 int tbt_fec_cfg_pack(const struct tbt_fec_cfg *c, u8 out[TBT_FEC_CFG_LEN]);
 int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], struct tbt_fec_cfg *c);

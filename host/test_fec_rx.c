@@ -49,6 +49,15 @@ static void ok_size(size_t got, size_t want, const char *what)
     printf("FAIL %s: got %zu, want %zu\n", what, got, want);
 }
 
+static void ok_int(int got, int want, const char *what)
+{
+    checks++;
+    if (got == want)
+        return;
+    failures++;
+    printf("FAIL %s: got %d, want %d\n", what, got, want);
+}
+
 /* ------------------------------------------------------------------ *
  * The source stream and one block's wire state.
  * ------------------------------------------------------------------ */
@@ -641,6 +650,129 @@ static void test_super_prefix(void)
     ok_prefix(out, off, "super");
 }
 
+/* The NACK + replay path, reduced to one block. The ring stores every
+ * encoded share; a loss pattern that the parity cannot solve is repaired by
+ * reading exactly the missing shares back and decoding again. The wire
+ * round-trip is exercised too: the masks are packed and unpacked before they
+ * drive the replay. */
+static int replay_missing(struct tbt_fec_replay *r, u64 block_id, struct blk *b,
+                          const struct tbt_fec_nack *n)
+{
+    u8 buf[S];
+    int i, got = 0;
+
+    for (i = 0; i < N; i++)
+    {
+        if (!tbt_fec_bitmap_test(n->share_mask, (u16)i))
+            continue;
+        if (tbt_fec_replay_get(r, block_id, 0, (u16)i, buf, S) != S)
+            return -ENOENT;
+        memcpy(b->data[i], buf, S);
+        b->dpresent[i] = 1;
+        b->dlen[i] = S;
+        got++;
+    }
+    for (i = 0; i < M; i++)
+    {
+        if (!tbt_fec_bitmap_test(n->share_mask, (u16)(N + i)))
+            continue;
+        if (tbt_fec_replay_get(r, block_id, 0, (u16)(N + i), buf, S) != S)
+            return -ENOENT;
+        memcpy(b->parity[i], buf, S);
+        b->ppresent[i] = 1;
+        got++;
+    }
+    return got;
+}
+
+static void test_nack_replay(void)
+{
+    static const u16 full[N] = {S, S, S, S};
+    struct tbt_fec_replay *r;
+    u64 block = 0;
+    int pattern;
+
+    r = tbt_fec_replay_new(1, N, M, S);
+    ok(r != NULL, "replay ring for the block model");
+
+    for (pattern = 1; pattern <= 3; pattern++)
+    {
+        struct tbt_fec_nack n, n2;
+        struct blk b;
+        u8 body[TBT_FEC_NACK_LEN];
+        u8 out[N * S];
+        int i, refused;
+        size_t off;
+
+        blk_init(&b, 0, full);
+        blk_encode(&b);
+        b.nreal = N;
+        for (i = 0; i < N; i++)
+            ok_int(tbt_fec_replay_store(r, block, 0, (u16)i, b.data[i], S),
+                   0, "store data share");
+        for (i = 0; i < M; i++)
+            ok_int(tbt_fec_replay_store(r, block, 0, (u16)(N + i),
+                                        b.parity[i], S), 0,
+                   "store parity share");
+
+        memset(&n, 0, sizeof(n));
+        tbt_fec_bitmap_set(n.group_mask, 0);
+        /* Drop `pattern` DATA shares and enough parity that the block cannot
+         * be solved without the replay. */
+        for (i = 0; i < pattern; i++)
+        {
+            b.dpresent[i] = 0;
+            tbt_fec_bitmap_set(n.share_mask, (u16)i);
+        }
+        for (i = 0; i < M - pattern + 1; i++)
+        {
+            b.ppresent[i] = 0;
+            tbt_fec_bitmap_set(n.share_mask, (u16)(N + i));
+        }
+        ok_int(blk_recover(&b), -EAGAIN, "loss pattern needs the replay");
+
+        ok_int(tbt_fec_nack_pack(&n, body), TBT_FEC_NACK_LEN, "NACK pack");
+        memset(&n2, 0, sizeof(n2));
+        ok_int(tbt_fec_nack_unpack(body, &n2), 0, "NACK unpack");
+        ok(!memcmp(&n, &n2, sizeof(n)), "NACK masks round-trip");
+        ok_int(replay_missing(r, block, &b, &n2), pattern + (M - pattern + 1),
+               "replay supplies every missing share");
+        ok(blk_recover(&b) == 0, "replayed block decodes");
+        off = blk_deliver(&b, out, sizeof(out), &refused);
+        ok(!refused, "replayed block delivers");
+        ok_size(off, N * S, "replayed block length");
+        ok_prefix(out, off, "replayed block prefix");
+    }
+
+    /* Evict the block: a NACK for it can no longer be served. The model then
+     * stays undecodable, which is the bounded-reset/backoff case. */
+    {
+        struct tbt_fec_nack n;
+        struct blk b;
+        u8 full_share[S];
+        int i;
+
+        memset(full_share, 0x5a, sizeof(full_share));
+        for (i = 0; i < N + M; i++)
+            ok_int(tbt_fec_replay_store(r, block + TBT_FEC_REPLAY_K, 0,
+                                        (u16)i, full_share, S), 0,
+                   "store evicting block");
+        blk_init(&b, 0, full);
+        blk_encode(&b);
+        b.nreal = N;
+        b.dpresent[1] = 0;
+        for (i = 0; i < M; i++)
+            b.ppresent[i] = 0;
+        memset(&n, 0, sizeof(n));
+        tbt_fec_bitmap_set(n.group_mask, 0);
+        tbt_fec_bitmap_set(n.share_mask, 1);
+        ok_int(replay_missing(r, block, &b, &n), -ENOENT,
+               "evicted block misses the replay ring");
+        ok_int(blk_recover(&b), -EAGAIN, "evicted block stays undecodable");
+    }
+    tbt_fec_replay_free(r);
+}
+
 int main(void)
 {
     src_init();
@@ -654,6 +786,7 @@ int main(void)
     test_slot_past_cut();
     test_ack_bytes();
     test_super_prefix();
+    test_nack_replay();
 
     printf("test_fec_rx: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

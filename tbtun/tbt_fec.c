@@ -284,11 +284,13 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
         return -EPROTO;
     if (h->n || h->m || h->share_index || h->win_len)
         return -EPROTO;
-    if (h->block_id)
+    /* The NACK names its super-block in the header. Every other control
+     * record leaves block_id zero. */
+    if (h->block_id && h->type != TBT_FEC_NACK)
         return -EPROTO;
-    /* ACK and NACK carry their first sequence in header.seq; the others must
-     * leave it zero. */
-    if ((h->type == TBT_FEC_CFG || h->type == TBT_FEC_FBK) && h->seq)
+    /* ACK carries its frontier in header.seq; the others must leave it zero. */
+    if ((h->type == TBT_FEC_CFG || h->type == TBT_FEC_FBK ||
+         h->type == TBT_FEC_NACK) && h->seq)
         return -EPROTO;
 
     switch (h->type)
@@ -296,11 +298,7 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
     case TBT_FEC_ACK:
         return h->payload_len == TBT_FEC_ACK_LEN ? 0 : -EPROTO;
     case TBT_FEC_NACK:
-        if (h->payload_len < TBT_FEC_NACK_ENTRY_LEN ||
-            h->payload_len % TBT_FEC_NACK_ENTRY_LEN ||
-            h->payload_len > TBT_FEC_NACK_MAX_ITEMS * TBT_FEC_NACK_ENTRY_LEN)
-            return -EPROTO;
-        return 0;
+        return h->payload_len == TBT_FEC_NACK_LEN ? 0 : -EPROTO;
     case TBT_FEC_CFG:
         return h->payload_len == TBT_FEC_CFG_LEN ? 0 : -EPROTO;
     case TBT_FEC_FBK:
@@ -434,51 +432,213 @@ int tbt_fec_ack_unpack(const u8 in[TBT_FEC_ACK_LEN], struct tbt_fec_ack *a)
     return 0;
 }
 
-int tbt_fec_nack_pack(const struct tbt_fec_nack_item *e, u16 nr, u8 *out, size_t cap)
+int tbt_fec_nack_pack(const struct tbt_fec_nack *n, u8 out[TBT_FEC_NACK_LEN])
 {
-    size_t len;
-    u16 i;
-
-    if (!e || !out || !nr || nr > TBT_FEC_NACK_MAX_ITEMS)
+    if (!n || !out)
         return -EINVAL;
-    len = (size_t)nr * TBT_FEC_NACK_ENTRY_LEN;
-    if (len > cap || len > TBT_FEC_PAYLOAD_MAX)
-        return -ENOSPC;
-    for (i = 0; i < nr; i++)
-    {
-        u8 *p = out + (size_t)i * TBT_FEC_NACK_ENTRY_LEN;
-
-        tbt_put_u64(p + 0, e[i].missing_seq);
-        tbt_put_u16(p + 8, e[i].count);
-        tbt_put_u16(p + 10, 0);
-    }
-    return (int)len;
+    memcpy(out, n->group_mask, TBT_FEC_BITMAP_BYTES);
+    memcpy(out + TBT_FEC_BITMAP_BYTES, n->share_mask, TBT_FEC_BITMAP_BYTES);
+    return TBT_FEC_NACK_LEN;
 }
 
-int tbt_fec_nack_unpack(const u8 *in, size_t len, struct tbt_fec_nack_item *e, u16 max)
+int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n)
 {
-    size_t n;
-    size_t i;
-
-    if (!in || !e || len % TBT_FEC_NACK_ENTRY_LEN || len > TBT_FEC_PAYLOAD_MAX)
+    if (!in || !n)
         return -EPROTO;
-    n = len / TBT_FEC_NACK_ENTRY_LEN;
-    if (!n || n > max || n > TBT_FEC_NACK_MAX_ITEMS)
-        return -ENOSPC;
-    for (i = 0; i < n; i++)
-    {
-        const u8 *p = in + i * TBT_FEC_NACK_ENTRY_LEN;
-        u16 reserved = tbt_get_u16(p + 10);
+    memcpy(n->group_mask, in, TBT_FEC_BITMAP_BYTES);
+    memcpy(n->share_mask, in + TBT_FEC_BITMAP_BYTES, TBT_FEC_BITMAP_BYTES);
+    return 0;
+}
 
-        if (reserved)
-            return -EPROTO;
-        e[i].missing_seq = tbt_get_u64(p + 0);
-        e[i].count = tbt_get_u16(p + 8);
-        e[i].reserved = reserved;
-        if (!e[i].count)
-            return -EPROTO;
+/* ------------------------------------------------------------------ *
+ * Bounded replay ring
+ * ------------------------------------------------------------------ */
+
+struct tbt_fec_replay
+{
+    u16 groups, n, m, s, k;
+    u16 stride; /* TBT_FEC_HDR_LEN + s */
+    u32 slots;  /* k * groups * (n + m) */
+    u64 *block_id;
+    u16 *len;
+    u8 *rec;
+};
+
+u16 tbt_fec_replay_k(const struct tbt_fec_replay *r)
+{
+    return r ? r->k : 0;
+}
+
+size_t tbt_fec_replay_bytes(u16 groups, u16 n, u16 m, u16 s, u16 k)
+{
+    size_t shares = (size_t)n + m;
+    size_t stride = TBT_FEC_HDR_LEN + s;
+    size_t per = stride + sizeof(u64) + sizeof(u16);
+
+    if (!groups || !shares || !k || !s)
+        return 0;
+    return sizeof(struct tbt_fec_replay) +
+           (size_t)k * groups * shares * per;
+}
+
+struct tbt_fec_replay *tbt_fec_replay_new(u16 groups, u16 n, u16 m, u16 s)
+{
+    struct tbt_fec_replay *r;
+    size_t shares = (size_t)n + m;
+    size_t stride, slots;
+    u16 k = TBT_FEC_REPLAY_K;
+    u32 i;
+
+    if (!groups || !shares || !s || s > TBT_FEC_PAYLOAD_MAX)
+        return NULL;
+    stride = TBT_FEC_HDR_LEN + s;
+    /* Shrink K until the ring fits the budget. A shape that cannot hold one
+     * super-block gets no ring; the data plane then relies on parity and the
+     * carrier TCP retransmission. */
+    while (k > 0 && tbt_fec_replay_bytes(groups, n, m, s, k) >
+                        TBT_FEC_REPLAY_BUDGET)
+        k--;
+    if (!k)
+        return NULL;
+    slots = (size_t)k * groups * shares;
+    if (slots > 0xffffffffu)
+        return NULL;
+    r = tbt_fec_alloc(sizeof(*r));
+    if (!r)
+        return NULL;
+    r->groups = groups;
+    r->n = n;
+    r->m = m;
+    r->s = s;
+    r->k = k;
+    r->stride = (u16)stride;
+    r->slots = (u32)slots;
+    r->block_id = tbt_fec_alloc(slots * sizeof(*r->block_id));
+    r->len = tbt_fec_alloc(slots * sizeof(*r->len));
+    r->rec = tbt_fec_alloc(slots * stride);
+    if (!r->block_id || !r->len || !r->rec)
+    {
+        tbt_fec_replay_free(r);
+        return NULL;
     }
-    return (int)len;
+    for (i = 0; i < r->slots; i++)
+        r->block_id[i] = ~0ULL;
+    return r;
+}
+
+void tbt_fec_replay_free(struct tbt_fec_replay *r)
+{
+    if (!r)
+        return;
+    tbt_fec_free(r->block_id);
+    tbt_fec_free(r->len);
+    tbt_fec_free(r->rec);
+    tbt_fec_free(r);
+}
+
+static u32 tbt_fec_replay_slot(const struct tbt_fec_replay *r, u64 block_id,
+                               u16 group, u16 share)
+{
+    u64 b = block_id % r->k;
+    u16 shares = (u16)(r->n + r->m);
+
+    return (u32)((b * r->groups + group) * shares + share);
+}
+
+int tbt_fec_replay_store(struct tbt_fec_replay *r, u64 block_id, u16 group,
+                         u16 share, const u8 *rec, u16 len)
+{
+    u32 slot;
+
+    if (!r || !rec || group >= r->groups || share >= (u16)(r->n + r->m) ||
+        len > r->stride)
+        return -EINVAL;
+    slot = tbt_fec_replay_slot(r, block_id, group, share);
+    memcpy(r->rec + (size_t)slot * r->stride, rec, len);
+    r->block_id[slot] = block_id;
+    r->len[slot] = len;
+    return 0;
+}
+
+int tbt_fec_replay_get(const struct tbt_fec_replay *r, u64 block_id,
+                       u16 group, u16 share, u8 *out, u16 cap)
+{
+    u32 slot;
+    u16 len;
+
+    if (!r || !out || group >= r->groups || share >= (u16)(r->n + r->m))
+        return -EINVAL;
+    slot = tbt_fec_replay_slot(r, block_id, group, share);
+    if (r->block_id[slot] != block_id)
+        return -ENOENT;
+    len = r->len[slot];
+    if (!len)
+        return -ENOENT;
+    if (cap < len)
+        return -ENOSPC;
+    memcpy(out, r->rec + (size_t)slot * r->stride, len);
+    return len;
+}
+
+bool tbt_fec_replay_has(const struct tbt_fec_replay *r, u64 block_id,
+                        u16 group, u16 share)
+{
+    u32 slot;
+
+    if (!r || group >= r->groups || share >= (u16)(r->n + r->m))
+        return false;
+    slot = tbt_fec_replay_slot(r, block_id, group, share);
+    return r->block_id[slot] == block_id && r->len[slot] != 0;
+}
+
+/* ------------------------------------------------------------------ *
+ * NACK pacing
+ * ------------------------------------------------------------------ */
+
+static bool tbt_fec_nack_same(const struct tbt_fec_nack_state *st,
+                              u64 block_id, const struct tbt_fec_nack *n)
+{
+    return st->valid && st->block_id == block_id &&
+           !memcmp(st->group_mask, n->group_mask, TBT_FEC_BITMAP_BYTES) &&
+           !memcmp(st->share_mask, n->share_mask, TBT_FEC_BITMAP_BYTES);
+}
+
+bool tbt_fec_nack_due(struct tbt_fec_nack_state *st, u64 now_ns,
+                      u64 block_id, const struct tbt_fec_nack *n)
+{
+    u64 interval;
+
+    if (!st || !n)
+        return false;
+    if (!tbt_fec_nack_same(st, block_id, n))
+    {
+        interval = (u64)TBT_FEC_NACK_MIN_MS * 1000000ULL;
+        if (st->valid && now_ns - st->last_ns < interval)
+            return false;
+        st->block_id = block_id;
+        memcpy(st->group_mask, n->group_mask, TBT_FEC_BITMAP_BYTES);
+        memcpy(st->share_mask, n->share_mask, TBT_FEC_BITMAP_BYTES);
+        st->first_ns = now_ns;
+        st->last_ns = now_ns;
+        st->tries = 1;
+        st->valid = true;
+        return true;
+    }
+    /* An identical NACK is a retry: the previous one may have been lost.
+     * There is no total cap; the replay window and the carrier TCP lifetime
+     * bound the repair, and the caller keeps the rate. */
+    interval = (u64)TBT_FEC_NACK_RETRY_MS * 1000000ULL;
+    if (now_ns - st->last_ns < interval)
+        return false;
+    st->last_ns = now_ns;
+    st->tries++;
+    return true;
+}
+
+void tbt_fec_nack_reset(struct tbt_fec_nack_state *st)
+{
+    if (st)
+        memset(st, 0, sizeof(*st));
 }
 
 int tbt_fec_cfg_pack(const struct tbt_fec_cfg *c, u8 out[TBT_FEC_CFG_LEN])

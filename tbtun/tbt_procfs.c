@@ -1013,6 +1013,40 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_ack_bad),
                            tbt_stat_read(&s->fec_tx_share_gap),
                            tbt_stat_read(&s->fec_empty_block));
+                /* NACK/replay repair, reset causes, and the carrier wait
+                 * that precedes backpressure. A user-visible stall can be
+                 * checked against these: fec_reset_tcp_failed is the only
+                 * FEC-owned reset, and it requires every carrier TCP to be
+                 * gone. */
+                seq_printf(m, "tunnel %llu c11 fec_nack_tx=%llu "
+                              "fec_nack_rx=%llu fec_nack_retx=%llu "
+                              "fec_nack_drop=%llu fec_nack_bad=%llu "
+                              "fec_replay_hit=%llu fec_replay_miss=%llu "
+                              "fec_nack_retx_bytes=%llu "
+                              "fec_replace_retx_bytes=%llu "
+                              "fec_nack_lat_ns=%llu fec_nack_lat_max_ns=%llu "
+                              "fec_nack_repair_ns=%llu "
+                              "fec_nack_repair_max_ns=%llu "
+                              "fec_reset_tcp_failed=%llu fec_reset_user=%llu "
+                              "fec_wait_carrier=%llu fec_backpressure=%llu\n",
+                           t->cfg.id,
+                           tbt_stat_read(&s->fec_nack_tx),
+                           tbt_stat_read(&s->fec_nack_rx),
+                           tbt_stat_read(&s->fec_nack_retx),
+                           tbt_stat_read(&s->fec_nack_drop),
+                           tbt_stat_read(&s->fec_nack_bad),
+                           tbt_stat_read(&s->fec_replay_hit),
+                           tbt_stat_read(&s->fec_replay_miss),
+                           tbt_stat_read(&s->fec_nack_retx_bytes),
+                           tbt_stat_read(&s->fec_replace_retx_bytes),
+                           tbt_stat_read(&s->fec_nack_lat_ns),
+                           tbt_stat_read(&s->fec_nack_lat_max_ns),
+                           tbt_stat_read(&s->fec_nack_repair_ns),
+                           tbt_stat_read(&s->fec_nack_repair_max_ns),
+                           tbt_stat_read(&s->fec_reset_tcp_failed),
+                           tbt_stat_read(&s->fec_reset_user),
+                           tbt_stat_read(&s->fec_wait_carrier),
+                           tbt_stat_read(&s->fec_backpressure));
                 seq_printf(m, "tunnel %llu c8 profile_mismatch=%llu http_parse_err=%llu "
                               "http_status_err=%llu http_req=%llu http_resp=%llu "
                               "pad_tx=%llu drip_tx=%llu\n",

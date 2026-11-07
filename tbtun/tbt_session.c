@@ -932,6 +932,11 @@ void tbt_stream_kill(struct tbt_stream *st, u8 reason)
     if (test_and_set_bit(TBT_STREAM_F_DYING, &st->attached))
         return;
     st->kill_reason = reason;
+    /* A FEC stream torn down by the user, the peer or the application (not
+     * by the FEC TCP-failed reset) is the external-reset half of the
+     * E_tunnel subset-of E_direct argument. Keep the two causes separate. */
+    if (st->sess && READ_ONCE(st->sess->fec) && reason != TBT_ST_HOLE)
+        atomic64_inc(&st->sess->fec_reset_user);
     WRITE_ONCE(st->state, TBT_ST_DEAD);
 
     /* Detach the sid from the session now: this is the gate that lets the

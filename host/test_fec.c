@@ -213,7 +213,7 @@ static void test_header_roundtrip(void)
            TBT_FEC_H_RESERVED == 30 && TBT_FEC_H_PAYCRC == 32 && TBT_FEC_H_HDRCRC == 36,
        "header offsets", NULL);
     /* 0x1003 grows the ACK body to 24 bytes and adds deliver_bytes. */
-    ok(TBT_FEC_CONV == 0x1003u, "TBT_FEC_CONV", NULL);
+    ok(TBT_FEC_CONV == 0x1004u, "TBT_FEC_CONV", NULL);
 
     /* NULL arguments are refused, not dereferenced. */
     ok_int(tbt_fec_hdr_pack(NULL, wire), -EINVAL, "pack NULL header");
@@ -484,27 +484,21 @@ static void test_hdr_check(void)
     h = ctl_hdr(TBT_FEC_ACK, TBT_FEC_ACK_LEN + 1);
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ACK long body");
 
-    h = ctl_hdr(TBT_FEC_NACK, TBT_FEC_NACK_ENTRY_LEN);
-    ok_int(tbt_fec_hdr_check(&h, 64), 0, "NACK 12");
-    h = ctl_hdr(TBT_FEC_NACK, 24);
-    ok_int(tbt_fec_hdr_check(&h, 64), 0, "NACK 24");
-    h = ctl_hdr(TBT_FEC_NACK, 36);
-    ok_int(tbt_fec_hdr_check(&h, 64), 0, "NACK 36");
-    h = ctl_hdr(TBT_FEC_NACK, TBT_FEC_NACK_MAX_ITEMS * TBT_FEC_NACK_ENTRY_LEN);
-    ok_int(tbt_fec_hdr_check(&h, 64), 0, "NACK 64 items");
-    h = ctl_hdr(TBT_FEC_NACK, TBT_FEC_NACK_MAX_ITEMS * TBT_FEC_NACK_ENTRY_LEN + 12);
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "NACK 65 items");
-    h = ctl_hdr(TBT_FEC_NACK, 11);
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "NACK 11");
-    h = ctl_hdr(TBT_FEC_NACK, 24);
+    h = ctl_hdr(TBT_FEC_NACK, TBT_FEC_NACK_LEN);
+    ok_int(tbt_fec_hdr_check(&h, 64), 0, "NACK 64");
+    h = ctl_hdr(TBT_FEC_NACK, TBT_FEC_NACK_LEN - 1);
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "NACK 63");
+    h = ctl_hdr(TBT_FEC_NACK, TBT_FEC_NACK_LEN + 1);
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "NACK 65");
+    h = ctl_hdr(TBT_FEC_NACK, TBT_FEC_NACK_LEN);
     h.reserved = 1;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "NACK with header reserved != 0");
-    h = ctl_hdr(TBT_FEC_NACK, 24);
+    h = ctl_hdr(TBT_FEC_NACK, TBT_FEC_NACK_LEN);
     h.seq = 42;
-    ok_int(tbt_fec_hdr_check(&h, 64), 0, "NACK seq is first missing");
-    h = ctl_hdr(TBT_FEC_NACK, 24);
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "NACK seq must be 0");
+    h = ctl_hdr(TBT_FEC_NACK, TBT_FEC_NACK_LEN);
     h.block_id = 1;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "NACK block_id != 0");
+    ok_int(tbt_fec_hdr_check(&h, 64), 0, "NACK names its block in block_id");
 
     h = ctl_hdr(TBT_FEC_CFG, TBT_FEC_CFG_LEN);
     ok_int(tbt_fec_hdr_check(&h, 64), 0, "CFG 32");
@@ -692,13 +686,12 @@ static void cfg_fix_crc(u8 *buf)
 static void test_control(void)
 {
     struct tbt_fec_ack a, a2;
-    struct tbt_fec_nack_item it[3], it2[3];
+    struct tbt_fec_nack nk, nk2;
     struct tbt_fec_cfg c, c2;
     struct tbt_fec_fbk f, f2;
     u8 buf[64];
     u8 cbuf[TBT_FEC_CFG_LEN];
     u8 fbuf[TBT_FEC_FBK_LEN];
-    int n;
 
     /* ACK: 24 bytes, little-endian. The first 16 keep their 0x1002 offsets;
      * deliver_bytes sits at +16 so a reader of the frontier still parses. */
@@ -721,44 +714,26 @@ static void test_control(void)
     ok_int(tbt_fec_ack_pack(NULL, buf), -EINVAL, "ACK pack NULL");
     ok_int(tbt_fec_ack_unpack(NULL, &a2), -EINVAL, "ACK unpack NULL");
 
-    /* NACK: 12 bytes per item, pack returns the body length. */
-    memset(it, 0, sizeof(it));
-    it[0].missing_seq = 0x0102030405060708ULL;
-    it[0].count = 1;
-    it[1].missing_seq = 42;
-    it[1].count = 2;
-    it[2].missing_seq = ~(u64)0;
-    it[2].count = 0xffff;
+    /* NACK: two 32-byte bitmaps; block_id lives in the record header. */
+    memset(&nk, 0, sizeof(nk));
+    tbt_fec_bitmap_set(nk.group_mask, 0);
+    tbt_fec_bitmap_set(nk.group_mask, 255);
+    tbt_fec_bitmap_set(nk.share_mask, 1);
+    tbt_fec_bitmap_set(nk.share_mask, 254);
     memset(buf, 0, sizeof(buf));
-    n = tbt_fec_nack_pack(it, 3, buf, sizeof(buf));
-    ok_int(n, 36, "NACK pack length");
-    ok_u64le(buf + 0, it[0].missing_seq, "NACK item 0 seq");
-    ok_u16le(buf + 8, it[0].count, "NACK item 0 count");
-    ok_u16le(buf + 10, 0, "NACK item 0 reserved");
-    ok_u64le(buf + 12, it[1].missing_seq, "NACK item 1 seq");
-    ok_u64le(buf + 24, it[2].missing_seq, "NACK item 2 seq");
-    memset(it2, 0, sizeof(it2));
-    n = tbt_fec_nack_unpack(buf, 36, it2, 3);
-    ok_int(n, 36, "NACK unpack length");
-    ok(it2[0].missing_seq == it[0].missing_seq && it2[0].count == it[0].count &&
-           it2[1].missing_seq == it[1].missing_seq && it2[1].count == it[1].count &&
-           it2[2].missing_seq == it[2].missing_seq && it2[2].count == it[2].count,
-       "NACK round-trip", NULL);
-
-    ok_int(tbt_fec_nack_pack(it, 0, buf, sizeof(buf)), -EINVAL, "NACK zero items");
-    ok_int(tbt_fec_nack_pack(it, TBT_FEC_NACK_MAX_ITEMS + 1, buf, sizeof(buf)), -EINVAL,
-           "NACK over 64 items");
-    ok_int(tbt_fec_nack_unpack(buf, 13, it2, 3), -EPROTO, "NACK non-multiple length");
-    ok_int(tbt_fec_nack_unpack(buf, 0, it2, 3), -ENOSPC, "NACK empty body");
-    ok_int(tbt_fec_nack_unpack(buf, 36, it2, 2), -ENOSPC, "NACK more items than max");
-
-    tbt_fec_nack_pack(it, 3, buf, sizeof(buf));
-    buf[10] = 1;
-    ok_int(tbt_fec_nack_unpack(buf, 36, it2, 3), -EPROTO, "NACK item reserved != 0");
-    tbt_fec_nack_pack(it, 3, buf, sizeof(buf));
-    buf[8] = 0;
-    buf[9] = 0;
-    ok_int(tbt_fec_nack_unpack(buf, 36, it2, 3), -EPROTO, "NACK item count=0");
+    ok_int(tbt_fec_nack_pack(&nk, buf), TBT_FEC_NACK_LEN, "NACK pack length");
+    ok(TBT_FEC_NACK_LEN == 64, "NACK body is 64 bytes", NULL);
+    ok(tbt_fec_bitmap_test(buf, 0), "NACK group 0 at +0", NULL);
+    ok(tbt_fec_bitmap_test(buf, 255), "NACK group 255 at +31", NULL);
+    ok(tbt_fec_bitmap_test(buf + TBT_FEC_BITMAP_BYTES, 1),
+       "NACK share 1 at +32", NULL);
+    ok(tbt_fec_bitmap_test(buf + TBT_FEC_BITMAP_BYTES, 254),
+       "NACK share 254 at +63", NULL);
+    memset(&nk2, 0, sizeof(nk2));
+    ok_int(tbt_fec_nack_unpack(buf, &nk2), 0, "NACK unpack");
+    ok(!memcmp(&nk, &nk2, sizeof(nk)), "NACK round-trip", NULL);
+    ok_int(tbt_fec_nack_pack(NULL, buf), -EINVAL, "NACK pack NULL");
+    ok_int(tbt_fec_nack_unpack(NULL, &nk2), -EPROTO, "NACK unpack NULL");
 
     /* FEC_CFG: 32 bytes, internal CRC over +0..+23. */
     memset(&c, 0, sizeof(c));
@@ -2021,6 +1996,94 @@ static void test_framing(void)
     ok(ev[0].payload_len == 1, "one-byte payload boundary", NULL);
 }
 
+static void test_replay(void)
+{
+    struct tbt_fec_replay *r;
+    u8 rec[96], out[96];
+    u16 len = 80;
+    int i;
+
+    r = tbt_fec_replay_new(2, 4, 2, 64);
+    ok(r != NULL, "replay ring allocated", NULL);
+    ok_u32(tbt_fec_replay_k(r), TBT_FEC_REPLAY_K, "replay K");
+    ok(tbt_fec_replay_bytes(2, 4, 2, 64, TBT_FEC_REPLAY_K) <=
+           TBT_FEC_REPLAY_BUDGET,
+       "replay fits the budget", NULL);
+    for (i = 0; i < (int)len; i++)
+        rec[i] = (u8)(i * 7 + 3);
+    ok_int(tbt_fec_replay_store(r, 7, 1, 5, rec, len), 0, "replay store");
+    ok(tbt_fec_replay_has(r, 7, 1, 5), "replay has", NULL);
+    memset(out, 0, sizeof(out));
+    ok_int(tbt_fec_replay_get(r, 7, 1, 5, out, sizeof(out)), len,
+           "replay get length");
+    ok(!memcmp(out, rec, len), "replay get bytes", NULL);
+    ok_int(tbt_fec_replay_get(r, 7, 1, 4, out, sizeof(out)), -ENOENT,
+           "replay absent share");
+    ok_int(tbt_fec_replay_get(r, 6, 1, 5, out, sizeof(out)), -ENOENT,
+           "replay wrong block");
+    ok_int(tbt_fec_replay_get(r, 7, 1, 5, out, 1), -ENOSPC,
+           "replay short buffer");
+    ok_int(tbt_fec_replay_store(r, 7, 2, 0, rec, len), -EINVAL,
+           "replay group out of range");
+    ok_int(tbt_fec_replay_store(r, 7, 0, 6, rec, len), -EINVAL,
+           "replay share out of range");
+    ok_int(tbt_fec_replay_store(r, 7, 0, 0, rec, 105), -EINVAL,
+           "replay record too long");
+    /* A block K later reuses the slot: the old block is gone. */
+    ok_int(tbt_fec_replay_store(r, 7 + TBT_FEC_REPLAY_K, 1, 5, rec, len), 0,
+           "replay evicting store");
+    ok(!tbt_fec_replay_has(r, 7, 1, 5), "replay evicted", NULL);
+    ok(tbt_fec_replay_has(r, 7 + TBT_FEC_REPLAY_K, 1, 5), "replay new block",
+       NULL);
+    tbt_fec_replay_free(r);
+
+    /* A shape that cannot hold one super-block in the budget gets no ring. */
+    r = tbt_fec_replay_new(256, 128, 128, 8192);
+    ok(r == NULL, "replay refuses a shape over budget", NULL);
+    tbt_fec_replay_free(r);
+    ok_u32(tbt_fec_replay_k(NULL), 0, "replay K of NULL");
+}
+
+static void test_nack_pacing(void)
+{
+    struct tbt_fec_nack_state st;
+    struct tbt_fec_nack n, n2;
+    u64 t = 1000000000ULL;
+    u32 i;
+
+    memset(&st, 0, sizeof(st));
+    memset(&n, 0, sizeof(n));
+    memset(&n2, 0, sizeof(n2));
+    tbt_fec_bitmap_set(n.group_mask, 0);
+    tbt_fec_bitmap_set(n.share_mask, 2);
+    tbt_fec_bitmap_set(n2.group_mask, 1);
+    tbt_fec_bitmap_set(n2.share_mask, 3);
+
+    ok(tbt_fec_nack_due(&st, t, 7, &n), "first NACK due", NULL);
+    ok(st.tries == 1 && st.block_id == 7 && st.valid, "first NACK state", NULL);
+    ok(!tbt_fec_nack_due(&st, t + 5 * 1000000ULL, 7, &n),
+       "same NACK rate limited", NULL);
+    ok(tbt_fec_nack_due(&st, t + TBT_FEC_NACK_RETRY_MS * 1000000ULL, 7, &n),
+       "same NACK retried", NULL);
+    ok(st.tries == 2, "retry count", NULL);
+    /* No total cap: a hundred retries later it is still due. */
+    t += TBT_FEC_NACK_RETRY_MS * 1000000ULL;
+    for (i = 0; i < 100; i++)
+    {
+        t += TBT_FEC_NACK_RETRY_MS * 1000000ULL;
+        ok(tbt_fec_nack_due(&st, t, 7, &n), "retry has no total cap", NULL);
+    }
+    /* A different block is a new request, subject to the global minimum. */
+    ok(!tbt_fec_nack_due(&st, t + 1 * 1000000ULL, 8, &n2),
+       "new block waits for the global minimum", NULL);
+    ok(tbt_fec_nack_due(&st, t + TBT_FEC_NACK_MIN_MS * 1000000ULL, 8, &n2),
+       "new block after the global minimum", NULL);
+    ok(st.block_id == 8 && st.tries == 1, "new block resets the retry count",
+       NULL);
+    tbt_fec_nack_reset(&st);
+    ok(!st.valid && st.tries == 0, "NACK state reset", NULL);
+}
+
 int main(void)
 {
     test_header_roundtrip();
@@ -2038,6 +2101,8 @@ int main(void)
     test_params();
     test_ops();
     test_framing();
+    test_replay();
+    test_nack_pacing();
 
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

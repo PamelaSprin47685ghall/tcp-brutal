@@ -73,7 +73,7 @@ typedef uint64_t u64;
 #define TBT_WIRE_VERSION_V6 2
 
 /* ------------------------------------------------------------------ *
- * FEC wire: an independent record format, TBT_FEC_CONV 0x1002.
+ * FEC wire: an independent record format, TBT_FEC_CONV 0x1004.
  *
  * The old ARQ record above is frozen at 16 carriers: its path_ack_mask is
  * u16 and its FBK/WINDOW bodies have 16 entries. FEC never reuses those
@@ -99,7 +99,7 @@ typedef uint64_t u64;
  *   +16 u64 seq         DATA: packet sequence; PARITY: window end
  *   +24 u16 win_len     PARITY: covered packets; DATA: 0
  *   +26 u16 payload_len payload bytes following this header
- *   +28 u16 conv        0x1002
+ *   +28 u16 conv        0x1004
  *   +30 u16 reserved    must be 0
  *   +32 u32 payload_crc32c  CRC32C over the payload only
  *   +36 u32 header_crc32c   CRC32C over header bytes +0..+35
@@ -109,7 +109,7 @@ typedef uint64_t u64;
  * Control frames are complete records of their own and must never be queued
  * behind a partial DATA record (the carrier writer emits each record whole).
  * ------------------------------------------------------------------ */
-#define TBT_FEC_CONV 0x1003u
+#define TBT_FEC_CONV 0x1004u
 /* 0.2.0 (M2) raises TBT_FEC_CONV from 0x1001 to 0x1002. The core change is
  * that a PARITY record may be a block marker: win_len == 0 && payload_len ==
  * 0 && epoch == 0. The two convs share one carrier (32-byte control records
@@ -123,10 +123,15 @@ typedef uint64_t u64;
  * full: a short share or a block closed early makes the packet frontier name
  * bytes that were never delivered, and tx_ack then runs past them.
  *
+ * 0.2.2 raises it to 0x1004: NACK becomes a repair request. Its body is a
+ * group bitmap followed by a share bitmap (TBT_FEC_NACK_LEN = 64 bytes), and
+ * the record header's block_id names the super-block. The old 0x1003 NACK
+ * body was a list of missing sequence ranges and had no caller.
+ *
  * There is no 4-byte marker and no magic number on this wire. A marker is a
  * set of values inside the 40-byte tbt_fec_hdr: type TBT_FEC_PARITY (0x31),
  * flags 0, share_index n (parity 0), epoch 0, win_len 0, payload_len 0,
- * conv 0x1003, payload_crc32c 0 (CRC32C of an empty payload). */
+ * conv 0x1004, payload_crc32c 0 (CRC32C of an empty payload). */
 
 /* FEC record types. */
 #define TBT_FEC_DATA 0x30
@@ -171,15 +176,17 @@ typedef uint64_t u64;
 #define TBT_FEC_MAX_W 1024
 #define TBT_FEC_MAX_D 256
 #define TBT_FEC_MAX_GROUPS 256
-#define TBT_FEC_NACK_MAX_ITEMS 64
 
 /* Control-frame payload lengths. */
 /* next_deliver (u64) + credit_packets (u32) + rtt_us (u32) + deliver_bytes
  * (u64). The first 16 bytes keep their 0x1002 offsets so a reader that only
  * needs the frontier can still parse them. */
 #define TBT_FEC_ACK_LEN 24
-#define TBT_FEC_NACK_ENTRY_LEN 12
-#define TBT_FEC_NACK_MAX (TBT_FEC_PAYLOAD_MAX / TBT_FEC_NACK_ENTRY_LEN)
+/* NACK body: group_mask[TBT_FEC_BITMAP_BYTES] then
+ * share_mask[TBT_FEC_BITMAP_BYTES]. The record header's block_id names the
+ * super-block. A sender replays every selected share for every selected
+ * group; a share that is already present is a harmless duplicate. */
+#define TBT_FEC_NACK_LEN (2 * TBT_FEC_BITMAP_BYTES)
 #define TBT_FEC_CFG_LEN 32
 #define TBT_FEC_FBK_LEN 48
 
