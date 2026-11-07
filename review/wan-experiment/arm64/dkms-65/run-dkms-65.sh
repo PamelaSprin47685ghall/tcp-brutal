@@ -11,10 +11,12 @@
 #   7 uninstall  --uninstall, every artifact gone
 #
 # Preflight checks the one system prerequisite: dkms 3.2.2 is installed. This
-# script does NOT install packages. If dkms is missing, run exactly:
-#   apt-get update && apt-get install -y --no-install-recommends dkms
-# (without --no-install-recommends apt pulls linux-headers for the wrong
-# kernel and changes the system state).
+# script does NOT install packages. If dkms is missing, the only allowed
+# command is:
+#   apt-get install -y --no-install-recommends dkms
+# Ubuntu 22.04 ships 3.2.2-1ubuntu1 for it (dkms --version 3.2.2). Do not add
+# --install-recommends: apt would pull linux-headers for the wrong kernel and
+# change the system state.
 #
 # The hardware watchdog feeder must already be running. This script only
 # reads that fact; rmmod/modprobe must never be preceded by stopping it.
@@ -26,10 +28,12 @@
 #   DKMS_RESULT PASS|FAIL
 #
 # Environment:
-#   REPO=/root/tbtun-0.2.0      source tree (must contain scripts/install_dkms.sh)
+#   REPO=/root/tbtun-0.2.0-fix-20261107T013251Z
+#                               source tree (must contain scripts/install_dkms.sh)
 #   VER=0.2.0                   expected package version
 #   EXPECT_HEAD=                optional git commit the tree must be at
 #   EXPECT_DKMS=3.2.2           expected dkms version
+#   EXPECT_DKMS_PKG=3.2.2-1ubuntu1  expected dpkg version of dkms
 #   OUT=/root/dkms-65-<UTC>     evidence directory
 #   KEEP=0                      1: do not auto-rollback on failure (forensics)
 #
@@ -38,10 +42,11 @@ set -u
 set -o pipefail
 
 MODE=run
-REPO=${REPO:-/root/tbtun-0.2.0}
+REPO=${REPO:-/root/tbtun-0.2.0-fix-20261107T013251Z}
 VER=${VER:-0.2.0}
 EXPECT_HEAD=${EXPECT_HEAD:-}
 EXPECT_DKMS=${EXPECT_DKMS:-3.2.2}
+EXPECT_DKMS_PKG=${EXPECT_DKMS_PKG:-3.2.2-1ubuntu1}
 KEEP=${KEEP:-0}
 OUT=${OUT:-/root/dkms-65-$(date -u +%Y%m%dT%H%M%SZ)}
 REL=$(uname -r)
@@ -176,17 +181,31 @@ say "release=$REL arch=$ARCH"
 
 if [ "$(id -u)" -eq 0 ]; then ok root; else bad root "must run as root"; finish; fi
 
+got_dkms=""
 if command -v dkms >/dev/null 2>&1; then
     got_dkms=$(dkms --version 2>/dev/null | grep -oE '[0-9]+(\.[0-9]+)+' | head -n 1)
     if [ "$got_dkms" = "$EXPECT_DKMS" ]; then
         ok dkms_version "dkms $got_dkms"
     else
-        bad dkms_version "dkms=$got_dkms expected=$EXPECT_DKMS"
-        say "   install exactly: apt-get install -y --no-install-recommends dkms"
+        bad dkms_version "dkms=${got_dkms:-?} expected=$EXPECT_DKMS"
     fi
 else
     bad dkms_installed "dkms not found"
-    say "   install exactly: apt-get update && apt-get install -y --no-install-recommends dkms"
+fi
+if [ "$got_dkms" != "$EXPECT_DKMS" ]; then
+    # This script never installs packages: give the one allowed command.
+    say "   the only allowed install command (run it yourself, then rerun):"
+    say "     apt-get install -y --no-install-recommends dkms"
+    say "   expected package: dkms $EXPECT_DKMS_PKG (dkms --version $EXPECT_DKMS)"
+    say "   never add --install-recommends: it pulls linux-headers for the wrong kernel"
+fi
+if command -v dkms >/dev/null 2>&1 && command -v dpkg-query >/dev/null 2>&1; then
+    got_dkms_pkg=$(dpkg-query -W -f '${Version}' dkms 2>/dev/null || true)
+    if [ "$got_dkms_pkg" = "$EXPECT_DKMS_PKG" ]; then
+        ok dkms_pkg_version "$got_dkms_pkg"
+    else
+        bad dkms_pkg_version "got=${got_dkms_pkg:-none} expected=$EXPECT_DKMS_PKG"
+    fi
 fi
 if command -v dpkg >/dev/null 2>&1; then
     check_true dpkg_ii "dpkg -l dkms 2>/dev/null | grep -q '^ii'" "dkms package state ii"
@@ -317,9 +336,20 @@ fi
 for f in config tunnels ports stats peers http; do
     check_present "procfs_$f" "/proc/net/tbtun/$f"
 done
-if [ -f "/var/lib/dkms/$MODULE/$VER/build/make.log" ] &&
-    grep -qF '# exit code: 0' "/var/lib/dkms/$MODULE/$VER/build/make.log"; then
-    ok make_log "exit code 0"
+# DKMS 3.2.2 moves the build log from <module>/<ver>/build/make.log to
+# <module>/kernel-<rel>-<arch>/log/make.log; accept either layout so the
+# check does not fail on a successful build.
+mklog=
+for p in "/var/lib/dkms/$MODULE/$VER/build/make.log" \
+    "/var/lib/dkms/$MODULE/kernel-$REL-$ARCH/log/make.log" \
+    "/var/lib/dkms/$MODULE/$VER/$REL/$ARCH/log/make.log"; do
+    if [ -f "$p" ]; then
+        mklog=$p
+        break
+    fi
+done
+if [ -n "$mklog" ] && grep -qF '# exit code: 0' "$mklog"; then
+    ok make_log "exit code 0 ($mklog)"
 else
     bad make_log "make.log missing or non-zero exit"
 fi
@@ -386,7 +416,7 @@ else
     bad dmesg_unloaded "no 'unloaded' line in kernel log"
 fi
 if tail -n 50 "$OUT/dmesg-after-rmmod.txt" |
-    grep -qE 'BUG:|Oops|WARNING:|general protection fault'; then
+    grep -qE 'BUG:|Oops|WARNING:|UBSAN:|general protection fault'; then
     bad rmmod_kernel "splat in the last 50 kernel lines"
 else
     ok rmmod_kernel "clean"

@@ -165,6 +165,20 @@ c11_field() {
                 if (index($i, f) == 1) { print substr($i, length(f) + 1); exit }
         }' "$1" 2>/dev/null
 }
+c6_field() {
+    awk -v f="$2=" -v t="$TUNNEL" '
+        $1 == "tunnel" && $2 == t && $3 == "c6" {
+            for (i = 1; i <= NF; i++)
+                if (index($i, f) == 1) { print substr($i, length(f) + 1); exit }
+        }' "$1" 2>/dev/null
+}
+ctl_field() {
+    awk -v f="$2=" -v t="$TUNNEL" '
+        $1 == "tunnel" && $2 == t && $3 == "ctl" {
+            for (i = 1; i <= NF; i++)
+                if (index($i, f) == 1) { print substr($i, length(f) + 1); exit }
+        }' "$1" 2>/dev/null
+}
 rx_field() {
     awk -v f="$2=" '
         / rx_ready_calls=/ {
@@ -430,7 +444,7 @@ say "== 10. counters (increments across the download)"
 pre=$DL_DIR/near-stats-pre.txt
 post=$DL_DIR/near-stats-post.txt
 {
-    for f in fec_proto_fail fec_hdr_crc_fail fec_payload_crc_fail; do
+    for f in fec_proto_fail fec_hdr_crc_fail fec_payload_crc_fail fec_stream_refused; do
         a=$(c9_field "$pre" "$f")
         b=$(c9_field "$post" "$f")
         printf 'c9.%s.pre=%s post=%s delta=%s\n' "$f" "${a:-?}" "${b:-?}" \
@@ -451,10 +465,26 @@ post=$DL_DIR/near-stats-post.txt
     for f in fec_nack_tx fec_nack_rx fec_nack_retx fec_nack_drop \
         fec_replay_hit fec_replay_miss \
         fec_replay_miss_no_ring fec_replay_miss_alloc fec_replay_miss_get \
-        fec_nack_repair_ns fec_reset_tcp_failed fec_reset_user; do
+        fec_replay_miss_enospc fec_replay_miss_evicted \
+        fec_replay_miss_never_stored fec_nack_backpressure \
+        fec_replay_stale \
+        fec_nack_repair_ns fec_reset_tcp_failed fec_reset_user \
+        fec_reset_hole; do
         a=$(c11_field "$pre" "$f")
         b=$(c11_field "$post" "$f")
         printf 'c11.%s.pre=%s post=%s delta=%s\n' "$f" "${a:-?}" "${b:-?}" \
+            "$(if [ -n "$a" ] && [ -n "$b" ]; then inc "$b" "$a"; else echo '?'; fi)"
+    done
+    for f in holes_unrecoverable holes_declared holes_repaired; do
+        a=$(c6_field "$pre" "$f")
+        b=$(c6_field "$post" "$f")
+        printf 'c6.%s.pre=%s post=%s delta=%s\n' "$f" "${a:-?}" "${b:-?}" \
+            "$(if [ -n "$a" ] && [ -n "$b" ]; then inc "$b" "$a"; else echo '?'; fi)"
+    done
+    for f in close_timeouts; do
+        a=$(ctl_field "$pre" "$f")
+        b=$(ctl_field "$post" "$f")
+        printf 'ctl.%s.pre=%s post=%s delta=%s\n' "$f" "${a:-?}" "${b:-?}" \
             "$(if [ -n "$a" ] && [ -n "$b" ]; then inc "$b" "$a"; else echo '?'; fi)"
     done
     printf 'c11.fec_nack_repair_max_ns.post=%s\n' \
@@ -482,7 +512,8 @@ delta_zero() {
 for c in fec_proto_fail fec_hdr_crc_fail fec_payload_crc_fail rx_errs \
     connect_fail alloc_fail join_bad gaps_total \
     fec_nack_drop fec_replay_miss_no_ring fec_replay_miss_alloc \
-    fec_replay_miss_get fec_reset_tcp_failed fec_reset_user; do
+    fec_replay_miss_enospc fec_replay_miss_evicted fec_reset_tcp_failed \
+    fec_reset_hole holes_unrecoverable fec_stream_refused close_timeouts; do
     delta_zero "$c"
 done
 
@@ -558,10 +589,10 @@ fi
 check kernel_window_source "$([ "$kw_src" != none ]; echo $?)" "source=$kw_src"
 if [ -z "$kw_body" ]; then
     skip kernel_clean "empty window ${start_utc}..${end_utc} (source=$kw_src); see near-dmesg.txt"
-elif grep -qE 'BUG:|Oops|WARNING:|general protection fault' \
+elif grep -qE 'BUG:|Oops|WARNING:|UBSAN:|general protection fault' \
     "$EVIDENCE/near-kernel-window.txt" 2>/dev/null; then
     check kernel_clean 1 \
-        "$(grep -cE 'BUG:|Oops|WARNING:|general protection fault' "$EVIDENCE/near-kernel-window.txt") matching lines"
+        "$(grep -cE 'BUG:|Oops|WARNING:|UBSAN:|general protection fault' "$EVIDENCE/near-kernel-window.txt") matching lines"
 else
     check kernel_clean 0 "window ${start_utc}..${end_utc} source=$kw_src"
 fi

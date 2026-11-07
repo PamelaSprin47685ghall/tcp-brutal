@@ -3,15 +3,17 @@
 #
 # Runs on the far host (45.11.1.62). Creates a 1 GiB random file under /root
 # (never /tmp: far's /tmp is a 478 M tmpfs and would hit ENOSPC), publishes
-# its sha256, and serves it from a loopback-only busybox httpd.
+# its sha256, and serves it from far-raw-serve.py: a loopback-only HTTP
+# sender with no application-level write timeout. Busybox httpd's write path
+# is not used; the 1 GiB body must never be cut by a server timeout.
 #
 # The tunnel does not reach this server directly: tbtun's far side is
 # configured with target=127.0.0.1:5210, so the HTTP request crosses the
 # tunnel and is re-originated here by the far side.
 #
 # Modes
-#   --start    create/verify the file, hash it, start httpd, prove readiness
-#   --stop     stop httpd and free the port
+#   --start    create/verify the file, hash it, start the raw sender, prove readiness
+#   --stop     stop the raw sender and free the port
 #   --status   read-only report
 #   --hash     print the sha256 only
 #
@@ -34,6 +36,8 @@ PATH_FILE=$FAR_DIR/$FILE
 SHA_FILE=$PATH_FILE.sha256
 PID_FILE=$FAR_DIR/httpd.pid
 HTTP_LOG=$FAR_DIR/httpd.log
+RAW_PY=${RAW_PY:-/root/far-raw-serve.py}
+RAW_ERR=$FAR_DIR/raw-serve.err
 
 FAILED=0
 
@@ -90,6 +94,10 @@ httpd_pid() {
             return 0
         fi
     fi
+    pgrep -f "far-raw-serve.py" 2>/dev/null | head -n 1
+}
+
+legacy_httpd_pid() {
     pgrep -f "busybox httpd -f -p $BIND:$PORT" 2>/dev/null | head -n 1
 }
 
@@ -135,8 +143,8 @@ status)
     exit 0
     ;;
 stop)
-    pid=$(httpd_pid || true)
-    if [ -n "${pid:-}" ]; then
+    for pid in $(httpd_pid || true) $(legacy_httpd_pid || true); do
+        [ -n "$pid" ] || continue
         kill "$pid" 2>/dev/null || true
         i=0
         while [ "$i" -lt 5 ] && kill -0 "$pid" 2>/dev/null; do
@@ -144,25 +152,21 @@ stop)
             i=$((i + 1))
         done
         kill -9 "$pid" 2>/dev/null || true
-    fi
+    done
     rm -f "$PID_FILE"
     if port_listening; then
         say "FAR_STOP FAIL (port $BIND:$PORT still listening)"
         exit 1
     fi
-    say "FAR_STOP PASS (httpd stopped, port free)"
+    say "FAR_STOP PASS (raw sender stopped, port free)"
     exit 0
     ;;
 start) ;;
 esac
 
 say "== 1. tools"
-if have busybox && busybox --list 2>/dev/null | grep -qx httpd; then
-    rc_busybox=0
-else
-    rc_busybox=1
-fi
-check tools_busybox "$rc_busybox" "busybox httpd"
+if have python3; then rc_python=0; else rc_python=1; fi
+check tools_python3 "$rc_python" "python3 raw sender"
 if have dd; then rc_dd=0; else rc_dd=1; fi
 check tools_dd "$rc_dd" "dd"
 if have sha256sum; then rc_sha=0; else rc_sha=1; fi
@@ -206,21 +210,32 @@ hash=$(file_hash)
 hash_head=$(printf '%s' "$hash" | cut -c1-16)
 check sha256 "$([ -n "$hash" ]; echo $?)" "sha256=$hash_head..."
 
-say "== 4. httpd"
+say "== 4. raw sender (no write timeout)"
+legacy=$(legacy_httpd_pid || true)
+if [ -n "${legacy:-}" ]; then
+    say "   stopping legacy busybox httpd pid=$legacy"
+    kill "$legacy" 2>/dev/null || true
+    i=0
+    while [ "$i" -lt 5 ] && kill -0 "$legacy" 2>/dev/null; do
+        sleep 1
+        i=$((i + 1))
+    done
+    kill -9 "$legacy" 2>/dev/null || true
+fi
 pid=$(httpd_pid || true)
 if [ -n "${pid:-}" ] && port_listening; then
     say "   already running pid=$pid"
 else
-    ( cd "$FAR_DIR" && setsid busybox httpd -f -p "$BIND:$PORT" -h "$FAR_DIR" \
-        >>"$HTTP_LOG" 2>&1 & )
+    ( cd "$FAR_DIR" && setsid python3 "$RAW_PY" --file "$PATH_FILE" \
+        --bind "$BIND" --port "$PORT" --log "$HTTP_LOG" \
+        --pidfile "$PID_FILE" >>"$RAW_ERR" 2>&1 & )
     sleep 1
     pid=$(httpd_pid || true)
     if [ -z "${pid:-}" ]; then
-        check httpd_start 1 "no process matched 'busybox httpd -f -p $BIND:$PORT'"
+        check httpd_start 1 "no far-raw-serve.py pid"
         say "FAR_RESULT FAIL"
         exit 3
     fi
-    printf '%s\n' "$pid" >"$PID_FILE"
 fi
 
 say "== 5. readiness"

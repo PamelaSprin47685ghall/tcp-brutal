@@ -29,7 +29,7 @@
 #   3. both ends: deltas of fec_proto_fail, fec_hdr_crc_fail,
 #      fec_payload_crc_fail, gaps_total, rx_errs, connect_fail, alloc_fail,
 #      join_bad are all zero
-#   4. no BUG:/Oops/WARNING:/general protection fault in either kernel window
+#   4. no BUG:/Oops/WARNING:/UBSAN:/general protection fault in either kernel window
 #      (journalctl -k -b 0 @epoch, then dmesg by monotonic seconds; an empty
 #      window is SKIP, never PASS: journalctl exits 0 while printing
 #      "-- No entries --", which the old --since check misread as clean)
@@ -172,6 +172,20 @@ c11_field() {
                 if (index($i, f) == 1) { print substr($i, length(f) + 1); exit }
         }' "$1" 2>/dev/null
 }
+c6_field() {
+    awk -v f="$2=" -v t="$TUNNEL" '
+        $1 == "tunnel" && $2 == t && $3 == "c6" {
+            for (i = 1; i <= NF; i++)
+                if (index($i, f) == 1) { print substr($i, length(f) + 1); exit }
+        }' "$1" 2>/dev/null
+}
+ctl_field() {
+    awk -v f="$2=" -v t="$TUNNEL" '
+        $1 == "tunnel" && $2 == t && $3 == "ctl" {
+            for (i = 1; i <= NF; i++)
+                if (index($i, f) == 1) { print substr($i, length(f) + 1); exit }
+        }' "$1" 2>/dev/null
+}
 rx_field() {
     awk -v f="$2=" '
         / rx_ready_calls=/ {
@@ -223,7 +237,7 @@ if ((DRY)); then
     say "  1. preflight: ssh both, feeder alive, tools, disk, ports"
     say "     near bypass: ip rule add to $FAR_IP/32 lookup main pref $BYPASS_PREF (idempotent)"
     say "     assert ip route get $FAR_IP -> dev eth0, not Meta/tun*/utun*/wg*/tailscale*"
-    say "  2. far: upload far-serve.sh, --start (1 GiB, sha256, httpd 5210)"
+    say "  2. far: upload far-serve.sh + far-raw-serve.py + far-stream-watch.sh, --start (1 GiB, sha256, raw 5210)"
     say "  3. modules: insmod $NEAR_KO / $FAR_KO, srcversion, ports, config"
     say "     near dev= binding (primary): ${NEAR_DEV:-disabled}"
     say "  4. join gate: both ends c3 up=$CARRIERS within ${JOIN_TIMEOUT}s"
@@ -504,6 +518,8 @@ cleanup_all() {
         ssh_far "printf 'del 1\n' > /proc/net/tbtun/config 2>/dev/null || true
                  rmmod tbtun 2>/dev/null || true
                  if [ -f '$FAR_DIR/httpd.pid' ]; then kill \$(cat '$FAR_DIR/httpd.pid') 2>/dev/null || true; fi
+                 pkill -f 'far-raw-serve.py' 2>/dev/null || true
+                 pkill -f 'far-stream-watch.sh' 2>/dev/null || true
                  pkill -f 'busybox httpd -f -p 127.0.0.1:5210' 2>/dev/null || true
                  rm -rf '$FAR_DIR' 2>/dev/null || true
                  lsmod | grep -E '^tbtun ' || echo 'far: module unloaded'
@@ -511,7 +527,7 @@ cleanup_all() {
                  ss -ltnH 'sport = :5210' | grep -q . && echo 'far: 5210 busy' || echo 'far: 5210 free'" 2>&1 || true
         if [[ $KEEP_SRC -eq 0 ]]; then
             ssh_near "rm -f /root/far-serve.sh /root/near-fetch.sh" 2>/dev/null || true
-            ssh_far "rm -f /root/far-serve.sh /root/near-fetch.sh" 2>/dev/null || true
+            ssh_far "rm -f /root/far-serve.sh /root/far-raw-serve.py /root/far-stream-watch.sh /root/near-fetch.sh" 2>/dev/null || true
         fi
     } | tee -a "$EV/cleanup.txt" >&2
     if grep -qE '(still present|busy)' "$EV/cleanup.txt" 2>/dev/null; then
@@ -574,12 +590,12 @@ else
 fi
 
 say "== 4. far tools, disk and port"
-far_tools=$(ssh_far 'for t in busybox dd sha256sum curl ss awk; do command -v $t >/dev/null || echo missing:$t; done' || true)
-if [[ -z $far_tools ]]; then check far_tools 0 "busybox dd sha256sum curl ss awk"; else check far_tools 1 "$far_tools"; fi
-if ssh_far 'busybox --list 2>/dev/null | grep -qx httpd'; then
-    check far_httpd 0 "busybox httpd"
+far_tools=$(ssh_far 'for t in python3 dd sha256sum curl ss awk; do command -v $t >/dev/null || echo missing:$t; done' || true)
+if [[ -z $far_tools ]]; then check far_tools 0 "python3 dd sha256sum curl ss awk"; else check far_tools 1 "$far_tools"; fi
+if ssh_far 'command -v python3 >/dev/null 2>&1'; then
+    check far_source 0 "python3 raw sender"
 else
-    check far_httpd 1 "busybox httpd missing"
+    check far_source 1 "python3 missing"
 fi
 avail=$(ssh_far "df -P -k /root | awk 'NR==2{print \$4}'" 2>/dev/null || echo 0)
 if [[ ${avail:-0} -ge 1572864 ]]; then
@@ -629,6 +645,14 @@ fi
 say "== 6. far HTTP source"
 if ! scp_far "$(dirname -- "$0")/far-serve.sh" "$FAR_HOST:/root/far-serve.sh"; then
     check far_upload 1 "scp far-serve.sh failed"
+    exit 4
+fi
+if ! scp_far "$(dirname -- "$0")/far-raw-serve.py" "$FAR_HOST:/root/far-raw-serve.py"; then
+    check far_upload 1 "scp far-raw-serve.py failed"
+    exit 4
+fi
+if ! scp_far "$(dirname -- "$0")/far-stream-watch.sh" "$FAR_HOST:/root/far-stream-watch.sh"; then
+    check far_upload 1 "scp far-stream-watch.sh failed"
     exit 4
 fi
 far_out=$(ssh_far "sh /root/far-serve.sh --start" 2>&1) || true
@@ -803,6 +827,8 @@ NEAR_T0=$(ssh_near 'date +%s' 2>/dev/null || true)
 FAR_T0=$(ssh_far 'date +%s' 2>/dev/null || true)
 case $NEAR_T0 in '' | *[!0-9]*) NEAR_T0=$START_EPOCH ;; esac
 case $FAR_T0 in '' | *[!0-9]*) FAR_T0=$START_EPOCH ;; esac
+say "== 10b. far stream teardown watcher"
+ssh_far "rm -f '$FAR_DIR/.far-stream-watch.stop' '$FAR_DIR/far-stream-watch.txt' '$FAR_DIR/far-stream-watch.last' '$FAR_DIR/far-stream-watch.fields'; OUT='$FAR_DIR/far-stream-watch.txt' LAST='$FAR_DIR/far-stream-watch.last' FIELDS='$FAR_DIR/far-stream-watch.fields' STOP='$FAR_DIR/.far-stream-watch.stop' setsid sh /root/far-stream-watch.sh >/dev/null 2>&1 &" || true
 near_rc=0
 ssh_near_transfer "FAR_HASH='$FAR_HASH' FAR_IP='$FAR_IP' NEAR_DEV='$NEAR_DEV' REQUIRE_SESS_REFS='$REQUIRE_SESS_REFS' MAX_TIME='$TRANSFER_MAX_TIME' sh /root/near-fetch.sh --run" 2>&1 |
     tee "$EV/near-fetch.log" >&2 || near_rc=$?
@@ -818,6 +844,11 @@ FAR_T1=$(ssh_far 'date +%s' 2>/dev/null || true)
 case $NEAR_T1 in '' | *[!0-9]*) NEAR_T1=$END_EPOCH ;; esac
 case $FAR_T1 in '' | *[!0-9]*) FAR_T1=$END_EPOCH ;; esac
 mark transfer-end "rc=$near_rc"
+ssh_far "touch '$FAR_DIR/.far-stream-watch.stop'" 2>/dev/null || true
+sleep 1
+scp_far "$FAR_HOST:$FAR_DIR/far-stream-watch.txt" "$EV/far-stream-watch.txt" 2>/dev/null || true
+scp_far "$FAR_HOST:$FAR_DIR/far-stream-watch.last" "$EV/far-stream-watch.last" 2>/dev/null || true
+scp_far "$FAR_HOST:$FAR_DIR/far-stream-watch.fields" "$EV/far-stream-watch.fields" 2>/dev/null || true
 
 ssh_far 'cat /proc/net/tbtun/stats' >"$EV/far-stats-post.txt" 2>/dev/null || true
 ssh_near 'cat /proc/net/tbtun/stats' >"$EV/near-stats-post.txt" 2>/dev/null || true
@@ -867,7 +898,7 @@ if [[ $KEEP_SRC -eq 0 ]]; then
     mkdir -p "$EV/near-evidence"
 scp_near -r "$NEAR_HOST:$DL_DIR/evidence/." "$EV/near-evidence/" 2>/dev/null || true
 ssh_near 'rm -f /root/near-fetch.sh' 2>/dev/null || true
-    ssh_far 'rm -f /root/far-serve.sh' 2>/dev/null || true
+    ssh_far 'rm -f /root/far-serve.sh /root/far-raw-serve.py /root/far-stream-watch.sh' 2>/dev/null || true
 fi
 
 # ---------------------------------------------------------------------------
@@ -911,7 +942,7 @@ counter_report() {
     local end=$1 out=$2
     local pre=$EV/$end-stats-pre.txt post=$EV/$end-stats-post.txt
     {
-        for f in fec_proto_fail fec_hdr_crc_fail fec_payload_crc_fail; do
+        for f in fec_proto_fail fec_hdr_crc_fail fec_payload_crc_fail fec_stream_refused; do
             a=$(c9_field "$pre" "$f"); b=$(c9_field "$post" "$f")
             printf '%s.%s=%s\n' "$f" "${b:-?}" "$(if [[ -n $a && -n $b ]]; then echo $((b - a)); else echo '?'; fi)"
         done
@@ -926,8 +957,20 @@ counter_report() {
         for f in fec_nack_tx fec_nack_rx fec_nack_retx fec_nack_drop \
             fec_replay_hit fec_replay_miss \
             fec_replay_miss_no_ring fec_replay_miss_alloc fec_replay_miss_get \
-            fec_nack_repair_ns fec_reset_tcp_failed fec_reset_user; do
+            fec_replay_miss_enospc fec_replay_miss_evicted \
+            fec_replay_miss_never_stored fec_nack_backpressure \
+            fec_replay_stale \
+            fec_nack_repair_ns fec_reset_tcp_failed fec_reset_user \
+            fec_reset_hole; do
             a=$(c11_field "$pre" "$f"); b=$(c11_field "$post" "$f")
+            printf '%s=%s\n' "$f" "$(if [[ -n $a && -n $b ]]; then echo $((b - a)); else echo '?'; fi)"
+        done
+        for f in holes_unrecoverable holes_declared holes_repaired; do
+            a=$(c6_field "$pre" "$f"); b=$(c6_field "$post" "$f")
+            printf '%s=%s\n' "$f" "$(if [[ -n $a && -n $b ]]; then echo $((b - a)); else echo '?'; fi)"
+        done
+        for f in close_timeouts; do
+            a=$(ctl_field "$pre" "$f"); b=$(ctl_field "$post" "$f")
             printf '%s=%s\n' "$f" "$(if [[ -n $a && -n $b ]]; then echo $((b - a)); else echo '?'; fi)"
         done
         printf 'fec_nack_repair_max_ns_post=%s\n' "$(c11_field "$post" fec_nack_repair_max_ns)"
@@ -952,6 +995,10 @@ for end in near far; do
               $k == lost_post || $k == sess_refs || $k == data_tx || $k == retx_bytes || \
               $k == dup_bytes_ppm || $k == fec_nack_tx || $k == fec_nack_rx || \
               $k == fec_nack_retx || $k == fec_replay_hit || $k == fec_replay_miss || \
+              $k == fec_replay_miss_get || $k == fec_replay_miss_never_stored || \
+              $k == fec_reset_user || $k == fec_nack_backpressure || \
+              $k == fec_replay_stale || \
+              $k == holes_declared || $k == holes_repaired || \
               $k == fec_nack_repair_ns || $k == fec_nack_repair_max_ns_post ]]; then
             continue
         fi
@@ -977,7 +1024,11 @@ for end in near far; do
 done
 
 dead=$(sed -n 's/^dead_now=//p' "$EV/counters-near.txt")
-check dead_now_bound "$([ -n "$dead" ] && [ "$dead" -le 64 ]; echo $?)" "near dead_now=${dead:-?} max=64"
+if [[ -n $dead ]]; then
+    check dead_now_bound "$([ "$dead" -le 64 ]; echo $?)" "near dead_now=$dead max=64"
+else
+    skip dead_now_bound "c3 dead_now not exported by this build"
+fi
 
 refs=$(sed -n 's/^sess_refs=//p' "$EV/counters-near.txt")
 if [[ -n $refs ]]; then
@@ -1000,7 +1051,7 @@ kw_state() {
     body=$(kw_body "$1")
     if [[ -z ${body//[[:space:]]/} ]]; then
         printf 'SKIP'
-    elif grep -qE 'BUG:|Oops|WARNING:|general protection fault' <<<"$body"; then
+    elif grep -qE 'BUG:|Oops|WARNING:|UBSAN:|general protection fault' <<<"$body"; then
         printf 'FAIL'
     else
         printf 'PASS'
@@ -1021,12 +1072,12 @@ for end in near far; do
     case $(kw_state "$end") in
         SKIP) skip "${end}_kernel" "empty window ${START_UTC}..${END_UTC} (source=${kwsrc:-none}); dmesg tail is still judged" ;;
         FAIL) check "${end}_kernel" 1 \
-            "$(grep -cE 'BUG:|Oops|WARNING:|general protection fault' <<<"$kwbody") matching lines (source=${kwsrc:-?})" ;;
+            "$(grep -cE 'BUG:|Oops|WARNING:|UBSAN:|general protection fault' <<<"$kwbody") matching lines (source=${kwsrc:-?})" ;;
         *) check "${end}_kernel" 0 "window ${START_UTC}..${END_UTC} source=${kwsrc:-?}" ;;
     esac
 done
 for end in near far; do
-    if grep -qE 'BUG:|Oops|general protection fault' "$EV/$end-dmesg.txt" 2>/dev/null; then
+    if grep -qE 'BUG:|Oops|UBSAN:|general protection fault' "$EV/$end-dmesg.txt" 2>/dev/null; then
         check "${end}_dmesg_tail" 1 "matching line in last 800 lines"
     else
         check "${end}_dmesg_tail" 0 "no BUG/Oops/GPF in last 800 lines"

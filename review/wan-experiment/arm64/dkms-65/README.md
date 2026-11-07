@@ -72,7 +72,7 @@ review/wan-experiment/arm64/dkms-65/judge-dkms-log.sh \
 | 2 | `clean` | 无模块、无 `/proc/net/tbtun`、`dkms status` 空、无 `/usr/src/tbtun-*`、无 `updates/dkms/tbtun.ko*` |
 | 3 | `install` | `install_dkms.sh --kernel $REL`；`dkms status` 含 `tbtun/0.2.0, 6.1.172, aarch64: installed`；`modinfo` 版本/vermagic；`updates/dkms` 下的 ko；`/sys/module/tbtun/version`；dmesg `tbtun 0.2.0 loaded`；六个 procfs 文件；`make.log` 的 `# exit code: 0` |
 | 4 | `config` | 写 tunnel 1（`127.0.0.1:19000`），读回含 `n=4 m=1 dup=1 profile=http-kal keepalive=5000`；`tunnels` 含 `1 near listening 127.0.0.1:19000` 与 peer；`ss` 有监听；`del 1` 后 config 空、监听消失 |
-| 5 | `rmmod` | `rmmod` rc=0；`lsmod` 无；`/proc/net/tbtun` 消失；dmesg 有 `unloaded`；最后 50 行无 `BUG:/Oops/WARNING:/general protection fault` |
+| 5 | `rmmod` | `rmmod` rc=0；`lsmod` 无；`/proc/net/tbtun` 消失；dmesg 有 `unloaded`；最后 50 行无 `BUG:/Oops/WARNING:/UBSAN:/general protection fault` |
 | 6 | `modprobe` | 版本仍 0.2.0；`modinfo -F filename` 指向 `updates/dkms/tbtun.ko*`；配置往返一致；监听出现后消失 |
 | 7 | `uninstall` | `--uninstall` rc=0；`dkms status` 空；无 `/usr/src/tbtun-*`；`updates/dkms`/`updates`/`extra` 无 ko；`modinfo` 无解析；`modules.dep` 不提 tbtun；`/proc/net/tbtun` 消失；`lsmod` 无；`/var/lib/dkms` 无残留 |
 
