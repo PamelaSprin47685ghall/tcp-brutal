@@ -3527,6 +3527,61 @@ static void test_fec_http(void)
     m = tbt_http_fec_frame_decode(&rx, chunk, n, &out, &out_len, &err);
     ok(err == TBT_RX_OK && out_len == TBT_FEC_HDR_LEN + 16 && out[0] == TBT_FEC_ACK,
        "fec control frame in a chunk", NULL);
+
+    /* Batch layout: eight records concatenated into one HTTP write. The
+     * carrier batch path encodes each record back-to-back; one decoder pass
+     * must recover all eight in order. */
+    {
+        u8 recs[8][TBT_FEC_HDR_LEN + 64];
+        u16 lens[8];
+        u8 batch[8 * TBT_HTTP_FEC_FRAME_MAX];
+        size_t off = 0, pos = 0;
+        unsigned b;
+
+        for (b = 0; b < 8; b++)
+        {
+            u16 plen = (u16)(8 + b * 7);
+
+            memset(recs[b], 0, sizeof(recs[b]));
+            recs[b][0] = TBT_FEC_DATA;
+            recs[b][26] = (u8)plen;
+            recs[b][27] = 0;
+            recs[b][28] = 0x01;
+            recs[b][29] = 0x10;
+            for (i = 0; i < plen; i++)
+                recs[b][TBT_FEC_HDR_LEN + i] = (u8)(b * 31 + i);
+            lens[b] = (u16)(TBT_FEC_HDR_LEN + plen);
+        }
+        for (b = 0; b < 8; b++)
+        {
+            size_t bn = tbt_http_fec_chunk_encode((char *)batch + off,
+                                                  sizeof(batch) - off,
+                                                  recs[b], lens[b]);
+
+            ok(bn > 0, "fec batch chunk encodes", NULL);
+            off += bn;
+        }
+        ok(off <= sizeof(batch), "fec batch fits the per-carrier cap", NULL);
+
+        tbt_http_chunk_reset(&rx.chunk);
+        rx.chunk_started = false;
+        rx.rec_len = 0;
+        for (b = 0; b < 8; b++)
+        {
+            size_t used = tbt_http_fec_frame_decode(&rx, batch + pos,
+                                                    off - pos, &out, &out_len,
+                                                    &err);
+
+            ok(err == TBT_RX_OK && out_len == lens[b] &&
+               !memcmp(out, recs[b], lens[b]),
+               "fec batch record round-trips", NULL);
+            pos += used;
+        }
+        /* The last OK returns at DATA_END; consume its trailing CRLF too. */
+        pos += tbt_http_fec_frame_decode(&rx, batch + pos, off - pos,
+                                         &out, &out_len, &err);
+        ok(pos == off, "fec batch consumes the whole write", NULL);
+    }
 }
 
 int main(int argc, char **argv)

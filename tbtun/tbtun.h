@@ -1430,6 +1430,10 @@ struct tbt_carrier
     struct work_struct w_rx;      /* drains carrier input -> tbt_rx */
     struct work_struct w_tx;      /* write-space wake -> tbt_tx_pump */
     struct delayed_work w_pump;   /* correctness wake while a carrier is full */
+    /* Serialises every byte write on this carrier: the pump's ARQ/control
+     * record and the FEC drain's batched frame. Replacing pump_lock with this
+     * per-carrier lock is what lets 256 carrier drains run in parallel. */
+    struct mutex tx_lock;
     atomic_t connected;           /* socket installed, callbacks live */
     atomic_t up;                  /* HELLO written; usable for scheduling */
     atomic_t stopping;
@@ -1514,6 +1518,7 @@ struct tbt_carrier
     u16 http_pending_len;
     char *http_tx;                /* one encoded chunk (TBT_HTTP_FRAME_MAX) */
     char *http_hdr;               /* peer header block (TBT_HTTP_HDR_MAX) */
+    char *fec_frame;              /* one FEC chunk frame (TBT_HTTP_FEC_FRAME_MAX) */
     u32 http_have;
     struct tbt_http_rx *http_rx;  /* RX record assembler (8 KiB) */
     u8 state;                     /* TBT_CAR_* */
@@ -1676,6 +1681,14 @@ int tbt_fec_record_len(const u8 *buf, size_t have, size_t *need);
 int tbt_carrier_send_raw(struct tbt_carrier *c, const void *data, size_t len);
 /* Write one FEC record in the carrier's container (raw or HTTP chunk). */
 int tbt_carrier_send_fec(struct tbt_carrier *c, const u8 *rec, size_t len);
+#define TBT_FEC_BATCH_MAX 8
+/* Write up to TBT_FEC_BATCH_MAX FEC records with one HTTP header and one socket write.
+ * Holds only c->tx_lock, not sess->pump_lock. Returns 0 and sets *sent=count
+ * when the whole batch is committed to the carrier's ordered byte stream;
+ * -EAGAIN leaves the batch for the caller to retry. */
+int tbt_carrier_send_fec_batch(struct tbt_carrier *c,
+                               const u8 *const *recs, const u16 *lens,
+                               u16 count, u16 *sent);
 /* Session-level 50 ms liveness poll (tbt_carrier.c), armed by tbt_session.c. */
 void tbt_session_poll_work(struct work_struct *w);
 

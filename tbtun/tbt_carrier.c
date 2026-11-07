@@ -272,9 +272,13 @@ static void tbt_car_write_space(struct sock *sk)
     }
     schedule_work(&c->w_tx);
     if (c->sess->fec)
-        /* The FEC packetizer entry point is not reference-counted yet; the
-         * FEC track owns that migration. Keep the direct wake until it lands. */
+    {
+        /* Wake this carrier's own FEC drain now that the socket has room.
+         * The packetizer still runs on the session work; the drain is the
+         * per-carrier writer that can use the freed send memory immediately. */
+        tbt_fec_out_kick(c->sess, c->index);
         schedule_work(&c->sess->w_fec_tx.work);
+    }
     read_unlock_bh(&sk->sk_callback_lock);
 }
 
@@ -1053,11 +1057,18 @@ int tbt_carrier_send_raw(struct tbt_carrier *c, const void *data, size_t len)
                                    lockdep_is_held(&c->sess->pump_lock));
     if (!sk)
         return -ENOTCONN;
+    mutex_lock(&c->tx_lock);
+    if (!tbt_carrier_sk_present(c))
+    {
+        mutex_unlock(&c->tx_lock);
+        return -ENOTCONN;
+    }
     iov_iter_kvec(&msg.msg_iter, ITER_SOURCE, &iov, 1, len);
     msg.msg_flags = MSG_DONTWAIT;
     lock_sock(sk);
     err = tcp_sendmsg_locked(sk, &msg, len);
     release_sock(sk);
+    mutex_unlock(&c->tx_lock);
     if (err < 0)
         return err;
     if ((size_t)err != len)
@@ -1070,6 +1081,7 @@ int tbt_carrier_send_raw(struct tbt_carrier *c, const void *data, size_t len)
  * holds sess->pump_lock (or is the only writer). */
 static int tbt_carrier_part_flush(struct tbt_carrier *c, struct sock *sk)
 {
+    lockdep_assert_held(&c->tx_lock);
     while (c->part_off < c->part_len)
     {
         struct msghdr msg = {};
@@ -1109,10 +1121,13 @@ static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
     u64 mem_avail;
     int err;
 
-    lockdep_assert_held(&c->sess->pump_lock);
+    lockdep_assert_held(&c->tx_lock);
     if (!sk)
         return -ENOTCONN;
-    if (len > TBT_CAR_PART_MAX)
+    /* Normal records fit one part buffer; a FEC batch may be up to eight
+     * concatenated frames. A short write still stores its tail in c->part,
+     * but the tail must fit that buffer (checked below). */
+    if (len > (size_t)TBT_HTTP_FEC_FRAME_MAX * TBT_FEC_BATCH_MAX)
         return -EINVAL;
     err = tbt_carrier_part_flush(c, sk);
     if (err)
@@ -1185,6 +1200,7 @@ static void tbt_http_capture_chunk(struct tbt_session *sess, const char *chunk, 
 static int tbt_carrier_http_begin(struct tbt_carrier *c, struct sock *sk)
 {
     struct tbt_session *sess = c->sess;
+    lockdep_assert_held(&c->tx_lock);
     char *hdr;
     size_t hlen;
     int err;
@@ -1256,79 +1272,136 @@ static int tbt_carrier_http_begin(struct tbt_carrier *c, struct sock *sk)
 }
 
 /* Write one FEC record. raw profile sends the 40-byte record directly; the
- * HTTP profile wraps exactly this record in one chunk, so the request line,
- * headers and chunk framing stay plaintext while the body is the FEC record
- * (and may be encrypted by the crypto layer before it reaches here). */
+ * HTTP profile wraps exactly this record in one chunk. Kept as a wrapper over
+ * the batch path so both use the same per-carrier lock and tail handling. */
 int tbt_carrier_send_fec(struct tbt_carrier *c, const u8 *rec, size_t len)
+{
+    u16 l;
+
+    if (!c || !rec || len > U16_MAX)
+        return -EINVAL;
+    l = (u16)len;
+    return tbt_carrier_send_fec_batch(c, &rec, &l, 1, NULL);
+}
+
+
+/* Write up to eight FEC records with one HTTP header and one socket write.
+ * Only c->tx_lock is held; sess->pump_lock is not required, so each carrier's
+ * drain work can run on its own CPU. The pump's ARQ/control writes take the
+ * same c->tx_lock, which keeps one carrier's byte stream ordered without
+ * serialising all 256 carriers. */
+int tbt_carrier_send_fec_batch(struct tbt_carrier *c,
+                               const u8 *const *recs, const u16 *lens,
+                               u16 count, u16 *sent)
 {
     struct tbt_session *sess;
     struct sock *sk;
-    char *buf;
-    size_t n;
-    int err;
+    char *buf = NULL;
+    size_t cap, off = 0;
+    u16 i;
+    int err = 0;
 
-    if (!c)
-        return -ENOTCONN;
+    if (sent)
+        *sent = 0;
+    if (!c || !recs || !lens || !count || count > TBT_FEC_BATCH_MAX)
+        return -EINVAL;
     sess = c->sess;
-    lockdep_assert_held(&sess->pump_lock);
-    sk = rcu_dereference_protected(c->sk,
-                                   lockdep_is_held(&sess->pump_lock));
+    sk = tbt_carrier_sk_get(c);
     if (!sk)
         return -ENOTCONN;
+
+    mutex_lock(&c->tx_lock);
+    if (atomic_read(&c->stopping) || !tbt_carrier_sk_present(c))
+    {
+        err = -ENOTCONN;
+        goto out;
+    }
+
     if (c->profile == 3)
     {
-        err = tbt_carrier_send_whole(c, sk, rec, len);
-        if (!err)
+        cap = (size_t)count * TBT_HTTP_FEC_FRAME_MAX;
+        buf = count == 1 ? c->fec_frame
+                         : kmalloc_array(count, TBT_HTTP_FEC_FRAME_MAX,
+                                         GFP_KERNEL);
+        if (!buf)
         {
-            c->tx_frames++;
-            c->tx_bytes += len;
-            c->last_tx_ns = ktime_get_ns();
-            sess->carrier_bytes += len;
+            err = -ENOMEM;
+            goto out;
         }
-        return err;
+        for (i = 0; i < count; i++)
+        {
+            if (off + lens[i] > cap)
+            {
+                err = -EINVAL;
+                goto out_free;
+            }
+            memcpy(buf + off, recs[i], lens[i]);
+            off += lens[i];
+        }
     }
-    err = tbt_carrier_http_begin(c, sk);
-    if (err)
-        return err;
-    buf = kmalloc(TBT_HTTP_FEC_FRAME_MAX, GFP_KERNEL);
-    if (!buf)
-        return -ENOMEM;
-    n = tbt_http_fec_chunk_encode(buf, TBT_HTTP_FEC_FRAME_MAX, rec, len);
-    if (!n)
+    else
     {
-        kfree(buf);
-        atomic64_inc(&sess->http_parse_err);
-        return -EIO;
+        /* The header block is part of this carrier's byte stream: write it
+         * once before the concatenated chunks. */
+        err = tbt_carrier_http_begin(c, sk);
+        if (err)
+            goto out;
+        cap = (size_t)count * TBT_HTTP_FEC_FRAME_MAX;
+        buf = count == 1 ? c->fec_frame
+                         : kmalloc_array(count, TBT_HTTP_FEC_FRAME_MAX,
+                                         GFP_KERNEL);
+        if (!buf)
+        {
+            err = -ENOMEM;
+            goto out;
+        }
+        for (i = 0; i < count; i++)
+        {
+            size_t n = tbt_http_fec_chunk_encode(buf + off, cap - off,
+                                                 recs[i], lens[i]);
+
+            if (!n)
+            {
+                atomic64_inc(&sess->http_parse_err);
+                err = -EIO;
+                goto out_free;
+            }
+            off += n;
+        }
     }
-    err = tbt_carrier_send_whole(c, sk, buf, n);
-    kfree(buf);
-    if (err)
-        return err;
-    c->tx_frames++;
-    c->tx_bytes += n;
-    c->last_tx_ns = ktime_get_ns();
-    sess->carrier_bytes += n;
-    return 0;
+
+    err = tbt_carrier_send_whole(c, sk, buf, off);
+    if (!err)
+    {
+        c->tx_frames += count;
+        c->tx_bytes += off;
+        c->last_tx_ns = ktime_get_ns();
+        sess->carrier_bytes += off;
+        if (sent)
+            *sent = count;
+    }
+
+out_free:
+    if (buf && buf != c->fec_frame)
+        kfree(buf);
+out:
+    mutex_unlock(&c->tx_lock);
+    tbt_carrier_sk_put(sk);
+    return err;
 }
 
-// Write one whole record. Backpressure is the caller's problem: tbt_tx only
-// calls this while sk_wmem_queued is below the high-water mark.
-int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt_frame *fr)
+// Write one whole record while c->tx_lock is held. Backpressure is the
+// caller's problem: tbt_tx only calls this while sk_wmem_queued is below the
+// high-water mark.
+static int tbt_carrier_xmit_locked(struct tbt_session *sess,
+                                   struct tbt_carrier *c,
+                                   struct tbt_frame *fr, struct sock *sk)
 {
-    struct sock *sk;
     struct msghdr msg = {};
     struct kvec iov[2];
     u8 hdrbuf[TBT_HDR_LEN];
     size_t total;
     int err;
-
-    if (!c)
-        return -ENOTCONN;
-    lockdep_assert_held(&sess->pump_lock);
-    sk = rcu_dereference_protected(c->sk,
-                                   lockdep_is_held(&sess->pump_lock));
-    if (!sk)
-        return -ENOTCONN;
     /* Debug-only deterministic loss (DESIGN 8.3 `carrier <n> drop_ppm`). Drop
      * the whole DATA record before it reaches the socket; a partial record
      * would desynchronise the peer's parser, so this is deliberately
@@ -1504,8 +1577,10 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
         size_t tail_d = total - done - tail_h;
 
         sess->carrier_short++;
-        if (tail_h > TBT_REC_MAX || tail_d > TBT_REC_MAX - tail_h)
-            return -EIO; /* impossible: total <= TBT_REC_MAX */
+        /* total may be a multi-frame batch; c->part is one frame. A tail
+         * larger than that cannot be replayed without another buffer. */
+        if (tail_h + tail_d > TBT_CAR_PART_MAX)
+            return -EIO;
         if (tail_h)
             memcpy(c->part, hdrbuf + h, tail_h);
         /* The payload tail starts where the write stopped, not at fr->data:
@@ -1534,6 +1609,31 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
     return 0;
 }
 
+int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c,
+                     struct tbt_frame *fr)
+{
+    struct sock *sk;
+    int err;
+
+    if (!c)
+        return -ENOTCONN;
+    lockdep_assert_held(&sess->pump_lock);
+    sk = rcu_dereference_protected(c->sk,
+                                   lockdep_is_held(&sess->pump_lock));
+    if (!sk)
+        return -ENOTCONN;
+    /* The pump and a carrier's FEC drain share this byte stream. The pump
+     * holds pump_lock; the drain holds only this carrier's tx_lock. Both take
+     * tx_lock around one complete record, so records never interleave. */
+    mutex_lock(&c->tx_lock);
+    if (atomic_read(&c->stopping) || !tbt_carrier_sk_present(c))
+        err = -ENOTCONN;
+    else
+        err = tbt_carrier_xmit_locked(sess, c, fr, sk);
+    mutex_unlock(&c->tx_lock);
+    return err;
+}
+
 // ---------------------------------------------------------------------------
 // Carrier lifecycle
 
@@ -1558,6 +1658,7 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
     c->sess = sess;
     c->http_tx = kmalloc(TBT_HTTP_FRAME_MAX, GFP_KERNEL);
     c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX, GFP_KERNEL);
+    c->fec_frame = kmalloc(TBT_HTTP_FEC_FRAME_MAX, GFP_KERNEL);
     c->part = kmalloc(TBT_CAR_PART_MAX, GFP_KERNEL);
     /* Zeroed is the defined initial state: have == 0 for the parser and a
      * SIZE-state chunk parser for the assembler. kmalloc() would hand the
@@ -1565,8 +1666,8 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
      * then drives an unbounded memmove() in tbt_http_rx_parse(). */
     c->parser = kzalloc(sizeof(*c->parser), GFP_KERNEL);
     c->http_rx = kzalloc(sizeof(*c->http_rx), GFP_KERNEL);
-    if (!c->http_tx || !c->http_hdr || !c->part || !c->parser ||
-        !c->http_rx)
+    if (!c->http_tx || !c->http_hdr || !c->fec_frame || !c->part ||
+        !c->parser || !c->http_rx)
     {
         /* ctor-fail: never linked, so the helper's unlink is a no-op. */
         tbt_carrier_free(c);
@@ -1588,6 +1689,7 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
              index, c->gen, c->spare, c->profile, c->state,
              TBT_JOIN_TIMEOUT_MS, c->parser->have, c->http_rx->chunk.state);
     mutex_init(&c->http_lock);
+    mutex_init(&c->tx_lock);
     INIT_WORK(&c->w_connect, tbt_car_connect_work);
     INIT_WORK(&c->w_rx, tbt_car_rx_work);
     INIT_WORK(&c->w_tx, tbt_car_tx_work);
@@ -2087,19 +2189,26 @@ static void tbt_carrier_unpublish(struct tbt_session *sess,
 
     if (!c)
         return;
+    /* Take the per-carrier write lock before unpublishing. A FEC batch that
+     * already obtained a socket reference either finishes before this section
+     * or sees sk_present()==false after it and drops the batch. */
+    mutex_lock(&c->tx_lock);
     if (s && s->sk)
     {
         /* write_lock_bh() inside restore waits for every in-flight callback;
          * after it returns no new w_tx/w_rx can be queued from sk_user_data. */
         tbt_sk_ops_restore(s->sk, &sess->def_ops);
         sock_replace_proto(s->sk, &tcp_prot);
-        cancel_work_sync(&c->w_rx);
-        /* A callback that ran before the restore may have queued w_tx/w_pump
-         * after quiesce() cancelled them; this is the post-restore barrier. */
-        cancel_work_sync(&c->w_tx);
-        cancel_delayed_work_sync(&c->w_pump);
     }
     rcu_assign_pointer(c->sk, NULL);
+    mutex_unlock(&c->tx_lock);
+
+    /* A callback that ran before the restore may have queued w_rx/w_tx/w_pump
+     * after quiesce() cancelled them. They all check sk_present()/stopping
+     * and return without touching the socket. */
+    cancel_work_sync(&c->w_rx);
+    cancel_work_sync(&c->w_tx);
+    cancel_delayed_work_sync(&c->w_pump);
 }
 
 /* Stage 2 of release: close the socket and drop the carrier's runtime state.
@@ -2211,6 +2320,7 @@ void tbt_carrier_free(struct tbt_carrier *c)
     list_del_init(&c->release_node);
     kfree(c->http_tx);
     kfree(c->http_hdr);
+    kfree(c->fec_frame);
     kfree(c->part);
     kfree(c->parser);
     kfree(c->http_rx);
