@@ -159,6 +159,7 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o)
         struct tbt_fec_tx *tx = sess->fec_tx;
         u16 start = tx ? tx->ctl_rot : 0;
         int rc = -ENODEV;
+        bool saw_stalled = false;
         int err;
 
         for (i = 0; i < sess->n_car; i++)
@@ -170,6 +171,15 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o)
                 continue;
             if (!atomic_read(&c->up) || atomic_read(&c->stopping))
             {
+                tbt_carrier_put(c);
+                continue;
+            }
+            if (READ_ONCE(c->stalled))
+            {
+                /* A stalled carrier sends no new record, ACKs included.
+                 * Remember it: if every usable carrier is stalled, the ACK
+                 * must stay queued (see below). */
+                saw_stalled = true;
                 tbt_carrier_put(c);
                 continue;
             }
@@ -188,6 +198,14 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o)
             if (err == -EAGAIN)
                 rc = -EAGAIN;
         }
+        /* Every usable carrier was stalled. Keep the ACK queued instead of
+         * dropping it: the receiver sends an ACK only when delivery advances,
+         * and delivery cannot advance again until this ACK reopens the
+         * sender's credit window. The flush re-arms in 2 ms, so the record
+         * goes out when a carrier recovers. A record that found only dead
+         * carriers keeps the old -ENODEV drop. */
+        if (rc == -ENODEV && saw_stalled)
+            rc = -EAGAIN;
         return rc;
     }
     if (o->carrier >= sess->n_car)
@@ -212,6 +230,18 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o)
                 tbt_carrier_put(c);
             return 0;
         }
+    }
+    if (c && READ_ONCE(c->stalled))
+    {
+        /* A stalled carrier is paused, not dead: it sends no new record until
+         * snd_una moves again. Treat this share as lost. Do not retry it (the
+         * queue head would hold every later share behind it) and do not move
+         * it to another carrier (a stall is not a repath, and the share keeps
+         * its carrier). The block buffer already holds the real payload, so
+         * the parity rows recover the share. A block that the parity cannot
+         * recover ends at the receiver's bounded stall reset. */
+        tbt_carrier_put(c);
+        return 0;
     }
     if (c && atomic_read(&c->up) && !atomic_read(&c->stopping))
     {
@@ -240,7 +270,7 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o)
         if (!c)
             continue;
         if (!READ_ONCE(c->hello_sent) || atomic_read(&c->stopping) ||
-            !atomic_read(&c->connected))
+            READ_ONCE(c->stalled) || !atomic_read(&c->connected))
         {
             tbt_carrier_put(c);
             continue;
