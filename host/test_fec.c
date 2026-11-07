@@ -2129,6 +2129,23 @@ static void test_tail_guard(void)
            "unknown total keeps n");
 }
 
+static void test_parity_only(void)
+{
+    /* The fix15 state: a block whose parity rows arrived but whose used bit
+     * is still 0. It is parity-only, not unstarted; its DATA shares are the
+     * missing ones. */
+    ok(tbt_fec_nack_parity_only(false, 4, 0, 0, 0, false),
+       "stale-used parity-only block is requested", NULL);
+    ok(!tbt_fec_nack_parity_only(false, 0, 0, 0, 0, false),
+       "no parity is not parity-only", NULL);
+    ok(!tbt_fec_nack_parity_only(false, 4, 1, 0, 0, false),
+       "another block is not parity-only", NULL);
+    ok(!tbt_fec_nack_parity_only(true, 4, 0, 0, 1, false),
+       "a block with DATA is not parity-only", NULL);
+    ok(!tbt_fec_nack_parity_only(true, 4, 0, 0, 0, true),
+       "a ready block is not parity-only", NULL);
+}
+
 static void test_nack_pacing(void)
 {
     struct tbt_fec_nack_state st;
@@ -2188,6 +2205,7 @@ int main(void)
     test_framing();
     test_replay();
     test_tail_guard();
+    test_parity_only();
     test_nack_pacing();
 
     printf("%d checks, %d failures\n", checks, failures);

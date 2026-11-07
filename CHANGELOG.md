@@ -73,6 +73,13 @@ and moves independently of the module version.
 
 ### Fixed
 
+- FEC empty-marker delivery: `tbt_fec_tx_emit_empty()` sent the marker on the
+  parity-0 carrier and discarded `tbt_fec_send_record()`'s error, so a stalled
+  or full carrier silently lost it. The marker is now a control record (any up
+  carrier), its store/send result is logged, a failed send re-arms the TX
+  work, and the replay ring keeps it for the peer's NACK probe. The NACK scan
+  probes every empty group of the blocked super-block, not only the frontier
+  group, so the markers are requested.
 - FEC whole-block loss at the delivery frontier: the receiver only NACKed up
   to `highest_block`, so a super-block whose every share was lost was
   invisible and the sender's TX stall fired. The scan now probes the next

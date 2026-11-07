@@ -388,8 +388,11 @@ container:
   (`win_len < n`) has no records for
   its padding DATA shares; a NACK for one of those is answered with a parity
   row whose header carries the real `win_len`/`epoch`, so the receiver learns
-  the cut instead of waiting for a share that will never exist. A block
-  outside the NACK window is not NACKed: its bytes are
+  the cut instead of waiting for a share that will never exist. The empty
+  marker is a control record: it rides any up carrier, is stored in the replay
+  ring, and a failed send is logged and re-armed; the NACK scan probes every
+  empty group of the blocked super-block, not only the frontier group. A
+  block outside the NACK window is not NACKed: its bytes are
   still in the carrier TCP send queue, and that TCP owns the retransmission.
   The sender keeps up to the last `K = 7` super-blocks of encoded DATA+PARITY
   records in a replay ring (the effective K shrinks until the 15 MiB cap fits)

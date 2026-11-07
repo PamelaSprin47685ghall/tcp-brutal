@@ -932,6 +932,8 @@ static void tbt_fec_tx_emit_empty(struct tbt_session *sess, u16 group,
     struct tbt_fec_tx *tx = sess->fec_tx;
     struct tbt_fec_hdr h;
     u16 rec_len;
+    int st = -EINVAL;
+    int err;
 
     memset(&h, 0, sizeof(h));
     h.type = TBT_FEC_PARITY;
@@ -951,13 +953,27 @@ static void tbt_fec_tx_emit_empty(struct tbt_session *sess, u16 group,
     if (tx->replay)
     {
         spin_lock_bh(&tx->replay_lock);
-        tbt_fec_replay_store(tx->replay, block_id, group, tx->n,
-                             tx->rec, rec_len);
+        st = tbt_fec_replay_store(tx->replay, block_id, group, tx->n,
+                                  tx->rec, rec_len);
         spin_unlock_bh(&tx->replay_lock);
     }
-    tbt_fec_send_record(sess,
-                        (u16)(group * (tx->n + tx->m) + tx->n),
-                        tx->rec, rec_len, false, false);
+    if (debug >= 2)
+        pr_info("tbtun: fec empty tx block=%llu group=%u share=%u store=%d\n",
+                block_id, group, tx->n, st);
+    /* A marker is control-like: it must ride any up carrier. The parity-0
+     * carrier may be stalled or full, and the data path would drop the
+     * marker as a stalled share. */
+    err = tbt_fec_send_record(sess, 0, tx->rec, rec_len, true, false);
+    if (err)
+    {
+        if (debug >= 2)
+            pr_info("tbtun: fec empty tx block=%llu group=%u send=%d; retry\n",
+                    block_id, group, err);
+        /* The ring keeps the marker; the peer's NACK probe can replay it.
+         * Re-arm the TX work so a transient queue failure gets another
+         * pass instead of staying silent. */
+        tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
+    }
     atomic64_inc(&sess->fec_empty_block);
 }
 
@@ -1653,11 +1669,19 @@ static int tbt_fec_send_empty_marker(struct tbt_session *sess, u16 group,
     h.conv = TBT_FEC_CONV;
     if (tbt_fec_make_record(sess, &h, NULL, rec, &len))
         return -EINVAL;
-    if (tx->replay)
     {
-        spin_lock_bh(&tx->replay_lock);
-        tbt_fec_replay_store(tx->replay, block_id, group, tx->n, rec, len);
-        spin_unlock_bh(&tx->replay_lock);
+        int st = -EINVAL;
+
+        if (tx->replay)
+        {
+            spin_lock_bh(&tx->replay_lock);
+            st = tbt_fec_replay_store(tx->replay, block_id, group, tx->n,
+                                      rec, len);
+            spin_unlock_bh(&tx->replay_lock);
+        }
+        if (debug >= 2)
+            pr_info("tbtun: fec empty reply tx block=%llu group=%u share=%u store=%d\n",
+                    block_id, group, tx->n, st);
     }
     return tbt_fec_send_record(sess, 0, rec, len, true, false);
 }
@@ -2185,6 +2209,20 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
     if (hi - rx->next_super >= rx->replay_k)
         return;
 
+    if (debug >= 2)
+    {
+        spin_lock_bh(&rx->lock);
+        for (g = 0; g < rx->groups; g++)
+        {
+            struct tbt_fec_blk *db = tbt_fec_rx_blk(rx, g, rx->next_super);
+
+            pr_info("tbtun: fec super %llu group %u used=%d ready=%d id=%llu empty=%d nparity=%u ndata=%u\n",
+                    rx->next_super, g, db->used, db->ready, db->block_id,
+                    db->empty, db->nparity, db->ndata);
+        }
+        spin_unlock_bh(&rx->lock);
+    }
+
     spin_lock_bh(&rx->lock);
     for (s = rx->next_super; s <= hi; s++)
     {
@@ -2215,6 +2253,21 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
 
             if (!b->used || b->block_id != s)
             {
+                /* A block that holds only parity is not "unstarted": its
+                 * DATA shares are the missing ones. Request them instead of
+                 * probing parity 0 again (which is already present). */
+                if (tbt_fec_nack_parity_only(b->used, b->nparity, b->block_id,
+                                             s, b->ndata, b->ready))
+                {
+                    missing = true;
+                    tbt_fec_bitmap_set(n.group_mask, g);
+                    for (i = 0; i < rx->n; i++)
+                        tbt_fec_bitmap_set(n.share_mask, i);
+                    for (i = 0; i < rx->m; i++)
+                        if (!b->ppresent[i])
+                            tbt_fec_bitmap_set(n.share_mask, rx->n + i);
+                    continue;
+                }
                 /* Before the stream end is known, a group with no block may
                  * be legitimately empty: a short/sparse block. Wait for the
                  * parity win_len, the empty marker or FIN to state the real
@@ -2251,7 +2304,10 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
             real = tbt_fec_blk_real_len(rx, g, b);
             if (!real)
                 continue;
-            if (b->nparity >= (u16)(real - b->ndata))
+            /* A parity-only block (ndata == 0) is requested even when the
+             * parity count looks sufficient: the decode may be waiting for a
+             * DATA share whose band row is not present. */
+            if (b->ndata && b->nparity >= (u16)(real - b->ndata))
                 continue; /* the next pass can decode it */
             missing = true;
             tbt_fec_bitmap_set(n.group_mask, g);
@@ -2933,8 +2989,16 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
     b = &rx->blk[slot];
     if (!b->used || b->block_id != h.block_id)
         tbt_fec_blk_reset(b, h.block_id);
+    /* Defensive: a parity record is a share of this block. A path that
+     * placed parity without the reset must still make the block visible to
+     * the decode/NACK walk. */
+    b->used = true;
     if (h.block_id > rx->highest_block)
         rx->highest_block = h.block_id;
+    if (debug >= 2)
+        pr_info("tbtun: fec marker rx block=%llu next=%llu used=%d ready=%d empty=%d type=%u win_len=%u\n",
+                h.block_id, READ_ONCE(rx->next_super), b->used, b->ready,
+                b->empty, h.type, h.win_len);
     if (b->empty)
     {
         /* A marker fixed this block as empty. Any later DATA or PARITY for it
@@ -3030,6 +3094,10 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         b->ready = true;
         atomic64_inc(&sess->fec_pad_share);
         rx->work_pending = true;
+        if (debug >= 2)
+            pr_info("tbtun: fec marker placed block=%llu group=%u next=%llu empty=%d ready=%d\n",
+                    h.block_id, group, READ_ONCE(rx->next_super), b->empty,
+                    b->ready);
     }
     else
     {

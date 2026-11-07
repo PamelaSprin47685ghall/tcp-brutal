@@ -143,7 +143,7 @@ static int blk_recover(struct blk *b)
             return -EAGAIN;
 
     for (i = 0; i < N; i++)
-        dp[i] = b->dpresent[i];
+        dp[i] = (i < real) ? b->dpresent[i] : 1; /* padding is known zero */
     for (i = 0; i < M; i++)
         pp[i] = b->ppresent[i];
 
@@ -159,7 +159,7 @@ static int blk_recover(struct blk *b)
     tbt_fec_rlnc_free(ctx);
     if (rc < 0)
         return -EAGAIN;
-    for (i = 0, k = 0; i < N; i++)
+    for (i = 0, k = 0; i < real; i++)
     {
         if (dp[i])
             continue;
@@ -859,18 +859,19 @@ static void test_two_short_writes(void)
                0, "200 B block stores parity");
     }
 
-    /* The second block's data share is lost. The receiver's next-block probe
-     * asks parity 0; the ring has it; the sender replays the data share. */
+    /* The second block's DATA share is missing, but all parity rows are
+     * present: a parity-only block. The NACK requests the DATA shares (the
+     * parity is already there); the parity rows recover the missing share.
+     * The sender's ring still holds the DATA share for the replay path. */
     b1.dpresent[0] = 0;
-    ok_int(tbt_fec_replay_get(r, 1, 0, N, buf, S), S,
-           "next block parity 0 is in the ring");
-    memcpy(b1.parity[0], buf, S);
-    b1.ppresent[0] = 1;
     ok_int(tbt_fec_replay_get(r, 1, 0, 0, buf, S), S,
            "next block data share is in the ring");
-    memcpy(b1.data[0], buf, S);
-    b1.dpresent[0] = 1;
-    b1.dlen[0] = 40;
+    ok_int(tbt_fec_replay_get(r, 1, 0, N, buf, S), S,
+           "next block parity 0 is in the ring");
+    ok_int(blk_recover(&b1), 0,
+           "parity-only block recovers the missing DATA share");
+    ok(b1.dpresent[0] && b1.dlen[0] == 0,
+       "recovered DATA share has no own length");
 
     off0 = blk_deliver(&b0, out, sizeof(out), &refused);
     ok(!refused, "4 B block delivers");
@@ -940,6 +941,88 @@ static void test_parity_rotation(void)
     }
 }
 
+/* A sparse super-block: group 0 has the second short write, groups 1..3 are
+ * empty and their markers' first send failed. The markers are in the replay
+ * ring; the receiver's NACK probe fetches them; the super-block is ready and
+ * the sink gets 4 + 40 bytes (the production 4 + 200 scaled to S=64). */
+static void test_marker_retry(void)
+{
+    static const u16 four[N] = {4, 0, 0, 0};
+    static const u16 forty[N] = {40, 0, 0, 0};
+    struct tbt_fec_replay *r;
+    struct blk b0[4], b1[4];
+    struct tbt_fec_hdr mh;
+    u8 mrec[TBT_FEC_HDR_LEN];
+    u8 buf[TBT_FEC_HDR_LEN];
+    u8 out[2 * S];
+    int g, refused;
+    size_t off0, off1;
+
+    r = tbt_fec_replay_new(4, N, M, S);
+    ok(r != NULL, "sparse super replay ring");
+
+    for (g = 0; g < 4; g++)
+    {
+        memset(&b0[g], 0, sizeof(b0[g]));
+        memset(&b1[g], 0, sizeof(b1[g]));
+        if (g == 0)
+        {
+            blk_init(&b0[g], 0, four);
+            b0[g].dpresent[1] = b0[g].dpresent[2] = b0[g].dpresent[3] = 0;
+            blk_encode(&b0[g]);
+            b0[g].nreal = 1;
+            b0[g].short_len = 4;
+            blk_init(&b1[g], 4, forty);
+            b1[g].dpresent[1] = b1[g].dpresent[2] = b1[g].dpresent[3] = 0;
+            blk_encode(&b1[g]);
+            b1[g].nreal = 1;
+            b1[g].short_len = 40;
+        }
+        else
+        {
+            b0[g].empty = true;
+            b1[g].empty = true;
+        }
+    }
+
+    /* The first marker send failed; the markers are only in the ring. */
+    for (g = 1; g < 4; g++)
+    {
+        memset(&mh, 0, sizeof(mh));
+        mh.type = TBT_FEC_PARITY;
+        mh.share_index = N;
+        mh.n = N;
+        mh.m = M;
+        mh.block_id = 1;
+        mh.seq = tbt_fec_seq_of_block_pkt(1, (u16)g, 0, 4, N);
+        mh.win_len = 0;
+        mh.payload_len = 0;
+        mh.conv = TBT_FEC_CONV;
+        ok_int(tbt_fec_hdr_seal(&mh, NULL), 0, "marker seal");
+        ok_int(tbt_fec_hdr_pack(&mh, mrec), 0, "marker pack");
+        ok_int(tbt_fec_hdr_check(&mh, S), 0, "marker header check");
+        ok_int(tbt_fec_replay_store(r, 1, (u16)g, N, mrec,
+                                    TBT_FEC_HDR_LEN), 0,
+               "marker stored in the replay ring");
+        ok_int(tbt_fec_replay_get(r, 1, (u16)g, N, buf, sizeof(buf)),
+               TBT_FEC_HDR_LEN, "marker fetched after the failed send");
+    }
+
+    /* Group 0 has the data; groups 1..3 are empty and ready from the
+     * markers. The super-block can deliver. */
+    ok(b1[0].nreal == 1 && b1[0].dpresent[0], "block 1 group 0 data");
+    for (g = 1; g < 4; g++)
+        ok(b1[g].empty, "block 1 empty group marker");
+    off0 = blk_deliver(&b0[0], out, sizeof(out), &refused);
+    ok(!refused, "4 B block delivers");
+    ok_size(off0, 4, "4 B block length");
+    off1 = blk_deliver(&b1[0], out + off0, sizeof(out) - off0, &refused);
+    ok(!refused, "200 B block group 0 delivers");
+    ok_size(off1, 40, "200 B block length");
+    ok_prefix(out, off0 + off1, "sparse super prefix");
+    tbt_fec_replay_free(r);
+}
+
 int main(void)
 {
     src_init();
@@ -957,6 +1040,7 @@ int main(void)
     test_short_block_reply();
     test_two_short_writes();
     test_parity_rotation();
+    test_marker_retry();
 
     printf("test_fec_rx: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

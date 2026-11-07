@@ -448,6 +448,18 @@ static inline u16 tbt_fec_blk_real_len_from_tail(u16 nreal, u16 n,
     return len;
 }
 
+/* A block that holds only parity: its DATA shares are the missing ones. The
+ * NACK scan must request them, not probe parity 0 again. `used` may be stale
+ * false on a path that placed parity without the block reset; `nparity` is
+ * the authoritative evidence. A block with any DATA share present is not
+ * parity-only. */
+static inline bool tbt_fec_nack_parity_only(bool used, u16 nparity,
+                                            u64 block_id, u64 block,
+                                            u16 ndata, bool ready)
+{
+    return block_id == block && nparity && !ready && (!used || ndata == 0);
+}
+
 /* A group with no block at all in a started super-block. Before the stream
  * end is known, the group may be legitimately empty (a short or sparse
  * block): the parity's win_len, the empty marker or FIN will state the real
