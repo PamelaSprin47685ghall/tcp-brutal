@@ -1074,6 +1074,15 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "fec_out_ctl_bytes=%u "
                               "fec_replay_queued=%u fec_replay_bytes=%u "
                               "fec_replay_skip=%llu "
+                              "fec_nack_filtered_ready=%llu "
+                              "fec_nack_filtered_inflight=%llu "
+                              "fec_nack_filtered_dup=%llu "
+                              "fec_nack_filtered_young=%llu "
+                              "fec_replay_dedup=%llu "
+                              "fec_nack_req_shares=%llu "
+                              "fec_nack_backpressure=%llu "
+                              "fec_replay_drain_bps=%llu "
+                              "fec_replay_queue_high=%llu "
                               "fec_reset_hole=%llu "
                               "tx_stall_suppressed_fec=%llu "
                               "fec_repair_last_ns=%llu\n",
@@ -1115,6 +1124,15 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_outq_drop),
                            qdepth, qmax, qbytes, qctl, qctl_bytes, rq, rb,
                            tbt_stat_read(&s->fec_replay_skip),
+                           tbt_stat_read(&s->fec_nack_filtered_ready),
+                           tbt_stat_read(&s->fec_nack_filtered_inflight),
+                           tbt_stat_read(&s->fec_nack_filtered_dup),
+                           tbt_stat_read(&s->fec_nack_filtered_young),
+                           tbt_stat_read(&s->fec_replay_dedup),
+                           tbt_stat_read(&s->fec_nack_req_shares),
+                           tbt_stat_read(&s->fec_nack_backpressure),
+                           tbt_stat_read(&s->fec_replay_drain_bps),
+                           tbt_stat_read(&s->fec_replay_queue_high),
                            tbt_stat_read(&s->fec_reset_hole),
                            tbt_stat_read(&s->tx_stall_suppressed_fec),
                            READ_ONCE(s->fec_repair_last_ns));

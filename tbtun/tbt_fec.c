@@ -462,6 +462,10 @@ struct tbt_fec_replay
     u32 bslots; /* k * groups: one resident-block id per (slot, group) */
     u64 *block_id;
     u64 *block_gen; /* block id of the resident block, or ~0 */
+    /* When a share was last queued as a replay. The NACK handler stamps it
+     * and skips a share whose reply is still in flight; storage and this
+     * stamp are both protected by the caller's TX replay lock. */
+    u64 *sent_ns;
     u16 *len;
     u8 *rec;
 };
@@ -475,7 +479,7 @@ size_t tbt_fec_replay_bytes(u16 groups, u16 n, u16 m, u16 s, u16 k)
 {
     size_t shares = (size_t)n + m;
     size_t stride = TBT_FEC_HDR_LEN + s;
-    size_t per = stride + sizeof(u64) + sizeof(u16);
+    size_t per = stride + 2 * sizeof(u64) + sizeof(u16);
 
     if (!groups || !shares || !k || !s)
         return 0;
@@ -529,9 +533,10 @@ struct tbt_fec_replay *tbt_fec_replay_new(u16 groups, u16 n, u16 m, u16 s)
     r->bslots = (u32)((size_t)k * groups);
     r->block_id = tbt_fec_alloc(slots * sizeof(*r->block_id));
     r->block_gen = tbt_fec_alloc((size_t)r->bslots * sizeof(*r->block_gen));
+    r->sent_ns = tbt_fec_alloc(slots * sizeof(*r->sent_ns));
     r->len = tbt_fec_alloc(slots * sizeof(*r->len));
     r->rec = tbt_fec_alloc(slots * stride);
-    if (!r->block_id || !r->block_gen || !r->len || !r->rec)
+    if (!r->block_id || !r->block_gen || !r->sent_ns || !r->len || !r->rec)
     {
         tbt_fec_replay_free(r);
         return NULL;
@@ -549,6 +554,7 @@ void tbt_fec_replay_free(struct tbt_fec_replay *r)
         return;
     tbt_fec_free(r->block_id);
     tbt_fec_free(r->block_gen);
+    tbt_fec_free(r->sent_ns);
     tbt_fec_free(r->len);
     tbt_fec_free(r->rec);
     tbt_fec_free(r);
@@ -581,6 +587,7 @@ int tbt_fec_replay_store(struct tbt_fec_replay *r, u64 block_id, u16 group,
     memcpy(r->rec + (size_t)slot * r->stride, rec, len);
     r->block_id[slot] = block_id;
     r->block_gen[tbt_fec_replay_bslot(r, block_id, group)] = block_id;
+    r->sent_ns[slot] = 0; /* a fresh share has no replay in flight */
     r->len[slot] = len;
     return 0;
 }
@@ -619,6 +626,34 @@ bool tbt_fec_replay_has(const struct tbt_fec_replay *r, u64 block_id,
            r->block_id[slot] == block_id && r->len[slot] != 0;
 }
 
+u64 tbt_fec_replay_sent_ns(const struct tbt_fec_replay *r, u64 block_id,
+                           u16 group, u16 share)
+{
+    u32 slot;
+
+    if (!r || group >= r->groups || share >= (u16)(r->n + r->m))
+        return 0;
+    slot = tbt_fec_replay_slot(r, block_id, group, share);
+    if (r->block_gen[tbt_fec_replay_bslot(r, block_id, group)] != block_id ||
+        r->block_id[slot] != block_id)
+        return 0;
+    return r->sent_ns[slot];
+}
+
+void tbt_fec_replay_mark_sent(struct tbt_fec_replay *r, u64 block_id,
+                              u16 group, u16 share, u64 now_ns)
+{
+    u32 slot;
+
+    if (!r || group >= r->groups || share >= (u16)(r->n + r->m))
+        return;
+    slot = tbt_fec_replay_slot(r, block_id, group, share);
+    if (r->block_gen[tbt_fec_replay_bslot(r, block_id, group)] != block_id ||
+        r->block_id[slot] != block_id || !r->len[slot])
+        return;
+    r->sent_ns[slot] = now_ns;
+}
+
 /* ------------------------------------------------------------------ *
  * NACK pacing
  * ------------------------------------------------------------------ */
@@ -631,8 +666,9 @@ static bool tbt_fec_nack_same(const struct tbt_fec_nack_state *st,
            !memcmp(st->share_mask, n->share_mask, TBT_FEC_BITMAP_BYTES);
 }
 
-bool tbt_fec_nack_due(struct tbt_fec_nack_state *st, u64 now_ns,
-                      u64 block_id, const struct tbt_fec_nack *n)
+bool tbt_fec_nack_due_at(struct tbt_fec_nack_state *st, u64 now_ns,
+                         u64 block_id, const struct tbt_fec_nack *n,
+                         u32 retry_ms)
 {
     u64 interval;
 
@@ -655,7 +691,9 @@ bool tbt_fec_nack_due(struct tbt_fec_nack_state *st, u64 now_ns,
     /* An identical NACK is a retry: the previous one may have been lost.
      * There is no total cap; the replay window and the carrier TCP lifetime
      * bound the repair, and the caller keeps the rate. */
-    interval = (u64)TBT_FEC_NACK_RETRY_MS * 1000000ULL;
+    if (retry_ms < TBT_FEC_NACK_RETRY_MS)
+        retry_ms = TBT_FEC_NACK_RETRY_MS;
+    interval = (u64)retry_ms * 1000000ULL;
     if (now_ns - st->last_ns < interval)
         return false;
     st->last_ns = now_ns;

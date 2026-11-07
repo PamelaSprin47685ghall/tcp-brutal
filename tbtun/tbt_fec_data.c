@@ -264,6 +264,10 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier, const u8 *buf
     {
         sess->fec_replay_queued++;
         sess->fec_replay_bytes += len;
+        if (sess->fec_replay_bytes >
+            atomic64_read(&sess->fec_replay_queue_high))
+            atomic64_set(&sess->fec_replay_queue_high,
+                         sess->fec_replay_bytes);
     }
     if (control)
     {
@@ -573,6 +577,35 @@ fallback:
     return rc;
 }
 
+/* Record the replay bytes one flush pass wrote and publish a decaying
+ * bytes/s gauge. The flush runs under pump_lock, so the accumulators have a
+ * single writer; /proc reads them with READ_ONCE. */
+static void tbt_fec_replay_rate_sample(struct tbt_session *sess, u64 bytes)
+{
+    u64 now = ktime_get_ns();
+    u64 dt;
+
+    sess->fec_replay_drain_bytes += bytes;
+    if (!sess->fec_replay_drain_ns)
+    {
+        sess->fec_replay_drain_ns = now;
+        return;
+    }
+    dt = now - sess->fec_replay_drain_ns;
+    if (dt < 100000000ULL) /* one sample per 100 ms */
+        return;
+    {
+        u64 rate = sess->fec_replay_drain_bytes * 1000000000ULL / dt;
+        u64 old = atomic64_read(&sess->fec_replay_drain_bps);
+
+        /* EWMA: a stopped drain decays instead of showing the last burst. */
+        atomic64_set(&sess->fec_replay_drain_bps,
+                     old ? (old * 7 + rate) / 8 : rate);
+    }
+    sess->fec_replay_drain_bytes = 0;
+    sess->fec_replay_drain_ns = now;
+}
+
 /* Write every queue that can make progress. The session pump lock serialises
  * these writes with the old control path (HELLO/OPEN/FIN/PAD), so a record is
  * never spliced into another record's bytes on one carrier.
@@ -587,6 +620,9 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
 {
     int ret = 0;
     u32 pass = 0;
+    u32 replay_sent = 0;
+    u64 replay_bytes = 0;
+    bool replay_more = false;
     u16 i;
 
     if (written)
@@ -638,6 +674,7 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
             u32 depth = 0;
             bool sent = false;
             u64 stamp_ns = 0;
+            u16 olen = 0;
             int err;
 
             spin_lock(&sess->fec_out_lock);
@@ -646,6 +683,7 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
             if (o)
                 depth = sess->fec_replay_queued;
             stamp_ns = o ? o->stamp_ns : 0;
+            olen = o ? o->len : 0;
             spin_unlock(&sess->fec_out_lock);
             if (!o)
                 break;
@@ -664,6 +702,7 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
             spin_unlock(&sess->fec_out_lock);
             if (sent)
             {
+                replay_bytes += olen;
                 /* Charge NACK->wire, not NACK->enqueue: the repair is
                  * complete only when a carrier accepted the record. */
                 u64 now = ktime_get_ns();
@@ -672,6 +711,13 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
                 atomic64_add(dt, &sess->fec_nack_lat_ns);
                 tbt_fec_stat_max(&sess->fec_nack_lat_max_ns, dt);
                 pass++;
+                if (++replay_sent >= TBT_FEC_REPLAY_PASS_MAX)
+                {
+                    /* Give the bound data queues a turn; the TX work is
+                     * re-armed below while replay records remain. */
+                    replay_more = true;
+                    break;
+                }
             }
             else
             {
@@ -679,6 +725,7 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
             }
         }
     }
+    tbt_fec_replay_rate_sample(sess, replay_bytes);
     /* Pass 3: bound data queues, one carrier at a time. */
     if (READ_ONCE(sess->fec_outq_queued))
     {
@@ -720,6 +767,8 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
         }
     }
     mutex_unlock(&sess->pump_lock);
+    if (replay_more && READ_ONCE(sess->fec_replay_queued))
+        tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
     if (pass)
         atomic64_add(pass, &sess->fec_flush_pass);
     if (written)
@@ -799,6 +848,22 @@ static int tbt_fec_replay_enqueue(struct tbt_session *sess, const u8 *buf,
     if (!err)
         WRITE_ONCE(sess->fec_repair_last_ns, ktime_get_ns());
     return err;
+}
+
+/* Replay bytes the 8 MiB queue can still take. The NACK handler checks this
+ * before queueing a record, so a full queue stops the reply at a clean point
+ * instead of letting tbt_fec_out_push() refuse it with -ENOSPC: the receiver
+ * retries after its hold, and no share is counted as an allocation failure. */
+static u32 tbt_fec_replay_space(struct tbt_session *sess)
+{
+    u32 space;
+
+    spin_lock(&sess->fec_out_lock);
+    space = sess->fec_replay_bytes < TBT_FEC_REPLAY_BYTES_MAX
+                ? TBT_FEC_REPLAY_BYTES_MAX - sess->fec_replay_bytes
+                : 0;
+    spin_unlock(&sess->fec_out_lock);
+    return space;
 }
 
 static int tbt_fec_make_record(struct tbt_session *sess, struct tbt_fec_hdr *h,
@@ -1452,6 +1517,7 @@ static void tbt_fec_blk_reset(struct tbt_fec_blk *b, u64 block_id)
     b->win_len_set = false;
     b->short_len = 0;
     b->short_unknown = false;
+    b->first_gap_ns = 0;
     b->block_id = block_id;
     memset(b->dpresent, 0, TBT_FEC_MAX_SHARES);
     memset(b->ppresent, 0, TBT_FEC_MAX_SHARES);
@@ -1602,6 +1668,10 @@ static void tbt_fec_ack(struct tbt_session *sess, u64 next_deliver,
         a.credit_packets = (u32)min_t(u64,
                                       (u64)rx->slots * rx->groups * rx->n,
                                       (u64)blocks * rx->groups * rx->n);
+        /* The peer uses this as the replay round trip: a share asked again
+         * before it can arrive would only duplicate the repair. The sample
+         * is the NACK scan's carrier RTT gauge, 0 before the first one. */
+        a.rtt_us = READ_ONCE(rx->rtt_us);
     }
     a.credit_packets = min(a.credit_packets, TBT_FEC_CREDIT_MAX);
     if (!a.credit_packets)
@@ -2201,19 +2271,124 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
     return 0;
 }
 
+/* Refresh rx->rtt_us from the carriers' own RTT estimators, at most every
+ * 100 ms. A replay may ride any up carrier, so the largest RTT is the bound
+ * a re-request must respect. */
+static void tbt_fec_rx_sample_rtt(struct tbt_session *sess, u64 now)
+{
+    struct tbt_fec_rx *rx = sess->fec_rx;
+    u32 max_rtt = 0;
+    u16 i;
+
+    if (now - rx->rtt_sample_ns < 100000000ULL)
+        return;
+    rx->rtt_sample_ns = now;
+    for (i = 0; i < sess->n_car; i++)
+    {
+        struct tbt_carrier *c = tbt_carrier_get(sess, (u8)i);
+
+        if (!c)
+            continue;
+        if (READ_ONCE(c->rtt_us) > max_rtt)
+            max_rtt = READ_ONCE(c->rtt_us);
+        tbt_carrier_put(c);
+    }
+    if (max_rtt)
+        rx->rtt_us = max_rtt;
+}
+
+/* Last NACK request time for one share, 0 when the slice belongs to another
+ * block or the share was never asked. The caller holds rx->lock. */
+static u64 tbt_fec_req_ns(const struct tbt_fec_rx *rx, u16 group, u64 block_id,
+                          u16 share)
+{
+    size_t bs = (size_t)group * rx->slots + (size_t)(block_id % rx->slots);
+
+    if (rx->req_block[bs] != block_id)
+        return 0;
+    return rx->req_ns[bs * (size_t)(rx->n + rx->m) + share];
+}
+
+/* Add one missing share unless its replay is still inside the hold window.
+ * Returns 1 when the bit was set. The caller holds rx->lock. */
+static u16 tbt_fec_nack_add(struct tbt_session *sess, struct tbt_fec_rx *rx,
+                            struct tbt_fec_nack *n, u16 group, u64 block_id,
+                            u16 share, u64 now, u64 hold, u16 *count)
+{
+    if (tbt_fec_nack_share_skip(false, now,
+                                tbt_fec_req_ns(rx, group, block_id, share),
+                                hold) == TBT_FEC_NACK_SKIP_INFLIGHT)
+    {
+        atomic64_inc(&sess->fec_nack_filtered_inflight);
+        return 0;
+    }
+    if (*count >= TBT_FEC_NACK_SHARES_MAX)
+        return 0;
+    tbt_fec_bitmap_set(n->group_mask, group);
+    tbt_fec_bitmap_set(n->share_mask, share);
+    (*count)++;
+    return 1;
+}
+
+/* Stamp every share a NACK named, so the next scan leaves it alone for one
+ * round trip, and advance the shape-probe pacing when this NACK was only a
+ * probe. */
+static void tbt_fec_nack_stamp(struct tbt_fec_rx *rx, u64 block_id,
+                               const struct tbt_fec_nack *n, u64 now,
+                               bool probed)
+{
+    u16 g, i, shares = (u16)(rx->n + rx->m);
+
+    spin_lock_bh(&rx->lock);
+    for (g = 0; g < rx->groups; g++)
+    {
+        size_t bs;
+        size_t base;
+
+        if (!tbt_fec_bitmap_test(n->group_mask, g))
+            continue;
+        bs = (size_t)g * rx->slots + (size_t)(block_id % rx->slots);
+        base = bs * shares;
+        if (rx->req_block[bs] != block_id)
+        {
+            memset(&rx->req_ns[base], 0, shares * sizeof(u64));
+            rx->req_block[bs] = block_id;
+        }
+        for (i = 0; i < shares; i++)
+            if (tbt_fec_bitmap_test(n->share_mask, i))
+                rx->req_ns[base + i] = now;
+    }
+    spin_unlock_bh(&rx->lock);
+    if (probed)
+        rx->probe_last_ns = now;
+}
+
 /* Ask the peer for the shares missing from the oldest super-block that is
  * still inside the replay window. One NACK per pass, rate-limited and
  * retried without a total cap: a live carrier TCP keeps the repair going.
  * A block outside the window is left to that TCP's own retransmission; the
- * stream is reset only when every carrier TCP has failed. */
+ * stream is reset only when every carrier TCP has failed.
+ *
+ * Three filters keep the request rate below what the sender can serve:
+ *   - the first NACK waits one round trip from the block's first gap (the
+ *     carrier TCP and the parity may still repair it);
+ *   - a share is not named again inside max(RTT, 2 x cadence), so a reply
+ *     that is still in flight is not duplicated;
+ *   - one NACK names at most TBT_FEC_NACK_SHARES_MAX shares, so a burst
+ *     loss cannot fill the sender's 8 MiB replay queue with one request.
+ * A shape probe for an unbuilt block runs at TBT_FEC_NACK_PROBE_MS, not at
+ * the repair cadence, and probes only shares whose hold has expired. */
 static void tbt_fec_nack_scan(struct tbt_session *sess)
 {
     struct tbt_fec_rx *rx = sess->fec_rx;
     struct tbt_fec_nack n;
     u64 now = ktime_get_ns();
+    u64 hold;
     u64 s, hi;
     u16 g, i;
     bool found = false;
+    bool young = false;
+    bool any_probe = false; /* the NACK being built names probe shares */
     bool probe_only = false; /* the request being sent is only a shape probe */
 
     if (!rx || !rx->nack || READ_ONCE(rx->stopping) ||
@@ -2224,6 +2399,8 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
      * sender counts fec_replay_miss_no_ring if its own allocation failed. */
     if (!rx->replay_k)
         return;
+
+    tbt_fec_rx_sample_rtt(sess, now);
 
     /* A previous NACK's block is now ready or delivered: that interval is
      * the repair latency the sender's cost model needs. */
@@ -2237,13 +2414,26 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
         spin_unlock_bh(&rx->lock);
         if (repaired)
         {
-            u64 dt = now - rx->nack->first_ns;
+            u64 dt = now - (rx->repair_first_ns &&
+                                    rx->repair_block == rx->nack->block_id
+                                ? rx->repair_first_ns
+                                : rx->nack->first_ns);
 
             atomic64_add(dt, &sess->fec_nack_repair_ns);
             tbt_fec_stat_max(&sess->fec_nack_repair_max_ns, dt);
+            /* A slow repair means the sender's replay queue is behind;
+             * asking faster only adds duplicates. */
+            rx->nack_cadence_ms =
+                tbt_fec_nack_cadence_ms(rx->nack_cadence_ms, dt);
+            rx->repair_first_ns = 0;
             tbt_fec_nack_reset(rx->nack);
         }
     }
+
+    /* How long a requested share is left alone: one round trip, never less
+     * than two repair intervals. Computed after the cadence update so this
+     * pass uses the latency the last repair taught. */
+    hold = tbt_fec_nack_hold_ns(rx->rtt_us, rx->nack_cadence_ms);
 
     hi = READ_ONCE(rx->highest_block);
     /* The delivery frontier may be ahead of the highest block seen: every
@@ -2283,8 +2473,11 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
     {
         bool missing = false;
         bool started = false;
+        u64 first_gap = 0;
+        u16 nmissing = 0;
 
         probe_only = true; /* every request so far is a shape probe */
+        any_probe = false;
 
         /* The stream ends in `final`: a super-block past it holds no packet
          * of this stream, so requesting it would send a NACK every retry
@@ -2326,12 +2519,18 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
                 {
                     missing = true;
                     probe_only = false;
-                    tbt_fec_bitmap_set(n.group_mask, g);
+                    if (!b->first_gap_ns)
+                        b->first_gap_ns = now;
+                    if (!first_gap || b->first_gap_ns < first_gap)
+                        first_gap = b->first_gap_ns;
                     for (i = 0; i < rx->n; i++)
-                        tbt_fec_bitmap_set(n.share_mask, i);
+                        tbt_fec_nack_add(sess, rx, &n, g, s, i, now, hold,
+                                         &nmissing);
                     for (i = 0; i < rx->m; i++)
                         if (!b->ppresent[i])
-                            tbt_fec_bitmap_set(n.share_mask, rx->n + i);
+                            tbt_fec_nack_add(sess, rx, &n, g, s,
+                                             (u16)(rx->n + i), now, hold,
+                                             &nmissing);
                     continue;
                 }
                 /* Before the stream end is known, a group with no block may
@@ -2349,19 +2548,29 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
                      * its range; the ring returns only what it has. */
                     missing = true;
                     probe_only = false;
-                    tbt_fec_bitmap_set(n.group_mask, g);
+                    if (rx->gap_block != s)
+                    {
+                        rx->gap_block = s;
+                        rx->gap_ns = now;
+                    }
+                    if (!first_gap || rx->gap_ns < first_gap)
+                        first_gap = rx->gap_ns;
                     for (i = 0; i < (u16)(rx->n + rx->m); i++)
-                        tbt_fec_bitmap_set(n.share_mask, i);
+                        tbt_fec_nack_add(sess, rx, &n, g, s, i, now, hold,
+                                         &nmissing);
                     continue;
                 }
-                /* Before total is known, probe only parity 0. The empty
-                 * marker or the parity's win_len then states the real shape;
-                 * a full-range request here was the sparse-block NACK storm. */
-                if (!READ_ONCE(rx->total_known))
+                /* Before total is known, probe only parity 0 of one group
+                 * per probe interval. The empty marker or the parity's
+                 * win_len then states the real shape; probing every group at
+                 * the repair cadence was the sparse-block NACK storm. */
+                if (!READ_ONCE(rx->total_known) &&
+                    tbt_fec_nack_probe_due(now, rx->probe_last_ns) &&
+                    tbt_fec_nack_add(sess, rx, &n, g, s, rx->n, now, hold,
+                                     &nmissing))
                 {
                     missing = true;
-                    tbt_fec_bitmap_set(n.group_mask, g);
-                    tbt_fec_bitmap_set(n.share_mask, rx->n);
+                    any_probe = true;
                     atomic64_inc(&sess->fec_nack_sparse_probe);
                 }
                 continue;
@@ -2378,19 +2587,36 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
                 continue; /* the next pass can decode it */
             missing = true;
             probe_only = false;
-            tbt_fec_bitmap_set(n.group_mask, g);
+            if (!b->first_gap_ns)
+                b->first_gap_ns = now;
+            if (!first_gap || b->first_gap_ns < first_gap)
+                first_gap = b->first_gap_ns;
             for (i = 0; i < real; i++)
                 if (!b->dpresent[i])
-                    tbt_fec_bitmap_set(n.share_mask, i);
+                    tbt_fec_nack_add(sess, rx, &n, g, s, i, now, hold,
+                                     &nmissing);
             for (i = 0; i < rx->m; i++)
                 if (!b->ppresent[i])
-                    tbt_fec_bitmap_set(n.share_mask, rx->n + i);
+                    tbt_fec_nack_add(sess, rx, &n, g, s, (u16)(rx->n + i),
+                                     now, hold, &nmissing);
         }
-        if (missing && tbt_fec_bitmap_count(n.share_mask))
+        if (!(missing && tbt_fec_bitmap_count(n.share_mask)))
+            continue;
+        /* A real request waits one round trip from the first gap: the
+         * carrier TCP still holds the share and the block's parity may still
+         * decode it. A NACK sent before that returns a replay that is almost
+         * always late (field: 338k late shares, 853 ms mean repair). A shape
+         * probe has its own pacing and never waits here. */
+        if (!probe_only && first_gap &&
+            !tbt_fec_nack_first_due(now, first_gap, hold))
         {
-            found = true;
-            break;
+            atomic64_add(tbt_fec_bitmap_count(n.share_mask),
+                         &sess->fec_nack_filtered_young);
+            young = true;
+            break; /* later blocks are younger: nothing to send this pass */
         }
+        found = true;
+        break;
     }
     spin_unlock_bh(&rx->lock);
 
@@ -2400,12 +2626,24 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
         bool started = false;
         bool blocked;
         u64 last_block;
+        u16 nmissing = 0;
 
         if (!rx->nack->valid)
+        {
+            /* A young block has nothing to ask yet; wake when its hold may
+             * have expired instead of waiting for the next share. */
+            if (young)
+                tbt_session_arm(sess, TBT_SW_FEC_RX,
+                                msecs_to_jiffies(TBT_FEC_NACK_MIN_MS));
             return;
+        }
         last_block = rx->nack->block_id;
         if (last_block < rx->next_super)
         {
+            /* The block was delivered while its NACK was in flight: nothing
+             * in that bitmap needs a replay. */
+            atomic64_add(tbt_fec_bitmap_count(rx->nack->share_mask),
+                         &sess->fec_nack_filtered_ready);
             tbt_fec_nack_reset(rx->nack);
             return;
         }
@@ -2430,19 +2668,67 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
         }
         blocked = started &&
                   !tbt_fec_super_ready_locked(rx, rx->next_super);
-        spin_unlock_bh(&rx->lock);
         if (!blocked)
         {
+            spin_unlock_bh(&rx->lock);
             tbt_fec_nack_reset(rx->nack);
             return;
         }
-        /* The scan found no new missing set, but the blocked super-block is
-         * still not ready. Resend the last NACK: a replayed share or a parity
-         * reply may still be in flight, and a never-generated padding share
-         * may need the parity reply the previous NACK triggered. */
-        memcpy(last.group_mask, rx->nack->group_mask, TBT_FEC_BITMAP_BYTES);
-        memcpy(last.share_mask, rx->nack->share_mask, TBT_FEC_BITMAP_BYTES);
-        if (tbt_fec_nack_due(rx->nack, now, last_block, &last))
+        /* The scan found no fresh missing set, but the blocked super-block
+         * is still not ready. Rebuild the previous bitmap from the block's
+         * current state: shares that arrived are dropped, and a share whose
+         * replay is still inside its round trip is not asked again. */
+        memset(&last, 0, sizeof(last));
+        for (g = 0; g < rx->groups; g++)
+        {
+            struct tbt_fec_blk *b;
+            bool have;
+            u16 shares = (u16)(rx->n + rx->m);
+
+            if (!tbt_fec_bitmap_test(rx->nack->group_mask, g))
+                continue;
+            b = tbt_fec_rx_blk(rx, g, last_block);
+            have = b->used && b->block_id == last_block;
+            for (i = 0; i < shares; i++)
+            {
+                bool present;
+                enum tbt_fec_nack_skip skip;
+
+                if (!tbt_fec_bitmap_test(rx->nack->share_mask, i))
+                    continue;
+                present = have &&
+                          (i < rx->n ? b->dpresent[i] :
+                                       b->ppresent[i - rx->n]);
+                skip = tbt_fec_nack_share_skip(
+                    present, now,
+                    tbt_fec_req_ns(rx, g, last_block, i), hold);
+                if (skip != TBT_FEC_NACK_KEEP)
+                {
+                    if (skip == TBT_FEC_NACK_SKIP_PRESENT)
+                        atomic64_inc(&sess->fec_nack_filtered_dup);
+                    else
+                        atomic64_inc(&sess->fec_nack_filtered_inflight);
+                    continue;
+                }
+                if (nmissing >= TBT_FEC_NACK_SHARES_MAX)
+                    continue;
+                tbt_fec_bitmap_set(last.group_mask, g);
+                tbt_fec_bitmap_set(last.share_mask, i);
+                nmissing++;
+            }
+        }
+        spin_unlock_bh(&rx->lock);
+        if (!tbt_fec_bitmap_count(last.share_mask))
+        {
+            /* Every share arrived or its reply is still in flight. Nothing
+             * to put on the wire; the next pass decodes the block or the
+             * hold expires. */
+            tbt_session_arm(sess, TBT_SW_FEC_RX,
+                            msecs_to_jiffies(TBT_FEC_NACK_MIN_MS));
+            return;
+        }
+        if (tbt_fec_nack_due_at(rx->nack, now, last_block, &last,
+                                rx->nack_cadence_ms))
         {
             int err = tbt_fec_send_nack(sess, last_block, &last);
 
@@ -2452,7 +2738,16 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
                         last.group_mask, TBT_FEC_BITMAP_BYTES,
                         last.share_mask);
             if (!err)
+            {
                 atomic64_inc(&sess->fec_nack_tx);
+                tbt_fec_nack_stamp(rx, last_block, &last, now, false);
+                if (!rx->repair_first_ns ||
+                    rx->repair_block != last_block)
+                {
+                    rx->repair_block = last_block;
+                    rx->repair_first_ns = now;
+                }
+            }
             else
                 tbt_fec_nack_drop(sess, err, last_block, &last);
         }
@@ -2471,7 +2766,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
                         msecs_to_jiffies(TBT_FEC_RX_POLL_SLOW_MS));
         return;
     }
-    if (tbt_fec_nack_due(rx->nack, now, s, &n))
+    if (tbt_fec_nack_due_at(rx->nack, now, s, &n, rx->nack_cadence_ms))
     {
         int err;
 
@@ -2481,7 +2776,15 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
                     n.group_mask, TBT_FEC_BITMAP_BYTES, n.share_mask);
         err = tbt_fec_send_nack(sess, s, &n);
         if (!err)
+        {
             atomic64_inc(&sess->fec_nack_tx);
+            tbt_fec_nack_stamp(rx, s, &n, now, any_probe);
+            if (!rx->repair_first_ns || rx->repair_block != s)
+            {
+                rx->repair_block = s;
+                rx->repair_first_ns = now;
+            }
+        }
         else
             tbt_fec_nack_drop(sess, err, s, &n);
     }
@@ -2840,6 +3143,11 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                            min_t(u32, a.credit_packets,
                                  min_t(u32, cap, TBT_FEC_CREDIT_MAX)));
             }
+            /* The peer's measured RTT is how long a replay needs to come
+             * back; the NACK reply deduplicates inside it. A zero sample is
+             * "not measured yet", not a zero-latency path. */
+            if (a.rtt_us)
+                WRITE_ONCE(tx->rtt_us, a.rtt_us);
             tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
             /* The FIN pump holds the close until tx_ack covers tx_seq. */
             tbt_tx_wake(sess);
@@ -2853,9 +3161,12 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         struct tbt_fec_nack n;
         struct tbt_fec_tx *tx = sess->fec_tx;
         u64 t0 = ktime_get_ns();
+        u64 hold;
         u8 *buf;
+        u8 marker_done[TBT_FEC_BITMAP_BYTES];
         u16 g, s, shares;
         u32 requested = 0;
+        bool full = false;
 
         if (tbt_fec_nack_unpack(rec + TBT_FEC_HDR_LEN, &n))
             return -EPROTO;
@@ -2873,10 +3184,27 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
             return -EPROTO;
         }
         atomic64_inc(&sess->fec_nack_rx);
+        atomic64_add(tbt_fec_bitmap_count(n.share_mask),
+                     &sess->fec_nack_req_shares);
         /* Repair is active from this point: the sender is about to build and
          * queue replay records, and the TX stall check must not kill the
          * stream while that work is in flight. */
         WRITE_ONCE(sess->fec_repair_last_ns, t0);
+        /* The block is already delivered: a replay cannot help, and every
+         * share of it would be a duplicate on the wire. This races a NACK
+         * sent before the ACK reached the peer. */
+        if (tbt_fec_block_delivered(h.block_id, READ_ONCE(tx->peer_pkts),
+                                    tx->groups, tx->n))
+        {
+            atomic64_add(tbt_fec_bitmap_count(n.share_mask),
+                         &sess->fec_replay_dedup);
+            return 0;
+        }
+        /* A replayed share needs one round trip to arrive. Naming it again
+         * inside that window only puts a duplicate record ahead of the
+         * repair already queued. */
+        hold = tbt_fec_nack_hold_ns(READ_ONCE(tx->rtt_us),
+                                    TBT_FEC_NACK_RETRY_MS);
         buf = kmalloc(TBT_FEC_REC_MAX, GFP_ATOMIC);
         if (!buf)
         {
@@ -2884,7 +3212,8 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
             atomic64_inc(&sess->fec_replay_miss);
             return -ENOMEM;
         }
-        for (g = 0; g < tx->groups; g++)
+        memset(marker_done, 0, sizeof(marker_done));
+        for (g = 0; g < tx->groups && !full; g++)
         {
             if (!tbt_fec_bitmap_test(n.group_mask, g))
                 continue;
@@ -2907,6 +3236,31 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                 len = tbt_fec_replay_get(tx->replay, h.block_id, g, s, buf,
                                          TBT_FEC_REC_MAX);
                 spin_unlock_bh(&tx->replay_lock);
+                if (len > 0)
+                {
+                    u64 last;
+                    bool dup;
+
+                    spin_lock_bh(&tx->replay_lock);
+                    last = tbt_fec_replay_sent_ns(tx->replay, h.block_id,
+                                                  g, s);
+                    dup = tbt_fec_replay_dup(t0, last, hold);
+                    if (!dup)
+                        tbt_fec_replay_mark_sent(tx->replay, h.block_id, g,
+                                                 s, t0);
+                    spin_unlock_bh(&tx->replay_lock);
+                    if (dup)
+                    {
+                        atomic64_inc(&sess->fec_replay_dedup);
+                        continue;
+                    }
+                    if (tbt_fec_replay_space(sess) < (u32)len)
+                    {
+                        atomic64_inc(&sess->fec_nack_backpressure);
+                        full = true;
+                        break;
+                    }
+                }
                 if (len == -ENODATA)
                 {
                     bool replied = false;
@@ -2939,6 +3293,8 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                     for (ri = 0; ri < tx->m && !replied; ri++)
                     {
                         u16 r = (u16)((first + ri) % tx->m);
+                        u64 last;
+                        bool dup;
                         int plen;
 
                         if (s < tx->n && band &&
@@ -2951,6 +3307,29 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                         spin_unlock_bh(&tx->replay_lock);
                         if (plen <= 0)
                             continue;
+                        spin_lock_bh(&tx->replay_lock);
+                        last = tbt_fec_replay_sent_ns(
+                            tx->replay, h.block_id, g, (u16)(tx->n + r));
+                        dup = tbt_fec_replay_dup(t0, last, hold);
+                        if (!dup)
+                            tbt_fec_replay_mark_sent(tx->replay, h.block_id,
+                                                     g, (u16)(tx->n + r),
+                                                     t0);
+                        spin_unlock_bh(&tx->replay_lock);
+                        if (dup)
+                        {
+                            /* This row is already on its way; it answers the
+                             * request, so no empty marker is needed. */
+                            atomic64_inc(&sess->fec_replay_dedup);
+                            replied = true;
+                            break;
+                        }
+                        if (tbt_fec_replay_space(sess) < (u32)plen)
+                        {
+                            atomic64_inc(&sess->fec_nack_backpressure);
+                            full = true;
+                            break;
+                        }
                         if (tbt_fec_replay_enqueue(sess, buf, (u16)plen, t0))
                             continue;
                         atomic64_inc(&sess->fec_nack_retx);
@@ -2969,9 +3348,14 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                     }
                     /* A group with no packet in the block has no parity
                      * row either: its empty marker is the truth. */
-                    if (!replied &&
-                        READ_ONCE(tx->g[g].blk_id) != h.block_id)
+                    if (!replied && !full &&
+                        READ_ONCE(tx->g[g].blk_id) != h.block_id &&
+                        !tbt_fec_bitmap_test(marker_done, g))
                     {
+                        /* One marker per group per NACK: the marker says the
+                         * whole group is empty, so the other requested shares
+                         * of that group need no separate answer. */
+                        tbt_fec_bitmap_set(marker_done, g);
                         if (!tbt_fec_send_empty_marker(sess, g, h.block_id))
                             atomic64_inc(&sess->fec_nack_empty_reply);
                     }
@@ -3004,6 +3388,20 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                     }
                     atomic64_inc(&sess->fec_replay_miss_get);
                     atomic64_inc(&sess->fec_replay_miss);
+                    /* The block is closed, still inside the ring, and no
+                     * record of it exists for this group: the group is empty
+                     * in that block. Markers are not stored, so this is the
+                     * only path that answers such a NACK. */
+                    if (tbt_fec_nack_empty_group(
+                            cur > h.block_id,
+                            cur >= h.block_id && cur - h.block_id < rk,
+                            READ_ONCE(tx->g[g].blk_id), h.block_id) &&
+                        !tbt_fec_bitmap_test(marker_done, g))
+                    {
+                        tbt_fec_bitmap_set(marker_done, g);
+                        if (!tbt_fec_send_empty_marker(sess, g, h.block_id))
+                            atomic64_inc(&sess->fec_nack_empty_reply);
+                    }
                     continue;
                 }
                 if (len <= 0)
@@ -3358,6 +3756,8 @@ static void tbt_fec_rx_free(struct tbt_session *sess)
         kvfree(rx->rec);
         kvfree(rx->zero);
         kvfree(rx->nack);
+        kvfree(rx->req_ns);
+        kvfree(rx->req_block);
         kvfree(rx);
         sess->fec_rx = NULL;
         return;
@@ -3375,6 +3775,8 @@ static void tbt_fec_rx_free(struct tbt_session *sess)
     kvfree(rx->rec);
     kvfree(rx->zero);
     kvfree(rx->nack);
+    kvfree(rx->req_ns);
+    kvfree(rx->req_block);
     tbt_fec_grouped_free(rx->codec);
     kvfree(rx);
     sess->fec_rx = NULL;
@@ -3539,6 +3941,14 @@ int tbt_fec_data_init(struct tbt_session *sess)
      * on parity and the carrier TCP retransmission. */
     rx->nack = kvzalloc(sizeof(*rx->nack), GFP_KERNEL);
     rx->blk = kvzalloc((size_t)total * sizeof(*rx->blk), GFP_KERNEL);
+    /* One request timestamp per buffered share: a re-request inside its
+     * round trip would only duplicate a replay. req_block names the block id
+     * each slice belongs to, because a slot is reused by later blocks. */
+    rx->req_ns = kvzalloc((size_t)total * shares * sizeof(*rx->req_ns),
+                          GFP_KERNEL);
+    rx->req_block = kvzalloc((size_t)total * sizeof(*rx->req_block),
+                             GFP_KERNEL);
+    rx->nack_cadence_ms = TBT_FEC_NACK_RETRY_MS;
     /* Decode scratch: one recovered slot per parity row, and one zero slot
      * for padding and absent parity. Both are written outside rx->lock. */
     rx->rec = kvzalloc((size_t)m * TBT_FEC_S, GFP_KERNEL);
@@ -3550,11 +3960,13 @@ int tbt_fec_data_init(struct tbt_session *sess)
     TBT_DIAG("fec grouped rx codec %s tunnel=%llu groups=%u blk=%d",
              rx->codec ? "ok" : "FAILED", (unsigned long long)t->cfg.id,
              groups, !!rx->blk);
-    if (!rx->blk || !rx->codec || !rx->rec || !rx->zero)
+    if (!rx->blk || !rx->req_ns || !rx->req_block || !rx->codec ||
+        !rx->rec || !rx->zero)
     {
-        pr_warn_ratelimited("tbtun: tunnel %llu: fec rx arena/codec failed: blk=%d codec=%d rec=%d zero=%d\n",
+        pr_warn_ratelimited("tbtun: tunnel %llu: fec rx arena/codec failed: blk=%d req=%d reqblk=%d codec=%d rec=%d zero=%d\n",
                             (unsigned long long)t->cfg.id, !!rx->blk,
-                            !!rx->codec, !!rx->rec, !!rx->zero);
+                            !!rx->req_ns, !!rx->req_block, !!rx->codec,
+                            !!rx->rec, !!rx->zero);
         goto fail;
     }
 

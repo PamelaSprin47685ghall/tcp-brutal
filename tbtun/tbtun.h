@@ -588,6 +588,11 @@ struct tbt_fec_blk
     /* The block needed recovery and holds a short share whose length no record
      * stated (a peer that does not carry it): refuse rather than guess. */
     bool short_unknown;
+    /* When this block first showed a gap. The first NACK waits one round trip
+     * from here: the carrier TCP and the block's own parity may still repair
+     * it, and a NACK sent earlier only produces a late duplicate. Cleared
+     * with the rest of the block when the slot takes a new block id. */
+    u64 first_gap_ns;
 };
 
 /* One group's encoder state. The ring, packet buffer and record buffer are
@@ -662,6 +667,9 @@ struct tbt_fec_tx
      * packetizer writes it. One lock, held only for a record copy. */
     struct tbt_fec_replay *replay;
     spinlock_t replay_lock;
+    /* Peer RTT from the ACK body: how long a replayed share needs to come
+     * back. The NACK reply deduplicates inside this window. */
+    u32 rtt_us;
     /* No usable carrier: the first wait start and the request state. A
      * replacement is requested through the existing w_replace path; the
      * wait is retried every 2 ms and never drops a source share. */
@@ -738,6 +746,28 @@ struct tbt_fec_rx
     u16 replay_k;
     /* NACK pacing and retry state, allocated with the rx arena. */
     struct tbt_fec_nack_state *nack;
+    /* Last time each share was named in a NACK, indexed like blk:
+     * (group * slots + block_id % slots) * (n + m) + share. A share is not
+     * requested again until one round trip could have answered it. */
+    u64 *req_ns;
+    /* The block id each req_ns slice belongs to. A slot is reused by a later
+     * block; without this stamp the old timestamps would suppress requests
+     * for shares the new block never asked for. */
+    u64 *req_block;
+    u64 probe_last_ns;   /* last frontier shape probe */
+    /* First time the frontier super-block was seen incomplete when no group
+     * of it had started (a whole-block loss): the first NACK waits one round
+     * trip from here, like a started block's first_gap_ns. */
+    u64 gap_block;
+    u64 gap_ns;
+    /* First NACK that named the block being repaired, kept across bitmap
+     * changes (shares arriving shrink the request): the repair latency is
+     * measured from here, not from the last differing NACK. */
+    u64 repair_block;
+    u64 repair_first_ns;
+    u64 rtt_sample_ns;   /* last carrier RTT sample */
+    u32 rtt_us;          /* largest carrier RTT: the replay path's bound */
+    u32 nack_cadence_ms; /* adaptive retry interval, 20..500 ms */
 };
 
 /* One queued FEC record waiting for a carrier. Control records may be sent on
@@ -785,6 +815,12 @@ struct tbt_fec_outq
  * their queue bytes. A miss is retried by the receiver's NACK, not turned
  * into a source-frame drop. */
 #define TBT_FEC_REPLAY_BYTES_MAX (8u * 1024 * 1024)
+/* Replay records one flush pass may write before the bound data queues get
+ * their turn. 32 records of one 8 KiB share is 256 KiB: replay keeps its
+ * priority, but a NACK burst cannot hold every carrier's data queue behind
+ * it for the whole 2 MiB burst. The TX work is re-armed immediately while
+ * records remain. */
+#define TBT_FEC_REPLAY_PASS_MAX 32u
 
 /* The seven session work items whose reference is owned by the bit in
  * tbt_session.sched (review/s2-merged-design.md §1.3/§5.1). The order is the
@@ -1152,6 +1188,24 @@ struct tbt_session
     atomic64_t fec_nack_empty_reply;    /* empty marker sent for an absent share */
     atomic64_t fec_nack_parity_reply;   /* parity/cut sent for a short block */
     atomic64_t fec_replay_drop;         /* queued replay freed without a write */
+    /* NACK filtering and replay deduplication. A request is dropped when the
+     * share already arrived, when an earlier request is still inside its
+     * round trip, or when the block is still young enough for the carrier
+     * TCP and the parity to repair it. Each drop is one fewer replay record
+     * on the sender's 8 MiB queue. */
+    atomic64_t fec_nack_filtered_ready;    /* block became ready/delivered */
+    atomic64_t fec_nack_filtered_inflight; /* share asked within its hold */
+    atomic64_t fec_nack_filtered_dup;      /* share already present */
+    atomic64_t fec_nack_filtered_young;    /* block gap younger than one RTT */
+    atomic64_t fec_replay_dedup;           /* share reply already in flight */
+    atomic64_t fec_nack_req_shares;        /* shares named in received NACKs */
+    atomic64_t fec_nack_backpressure;      /* replay queue full: NACK stopped */
+    /* Replay drain: bytes/s over the last sampling window (an EWMA gauge),
+     * the high-water of queued replay bytes, and the window accumulator. */
+    atomic64_t fec_replay_drain_bps;
+    atomic64_t fec_replay_queue_high;
+    u64 fec_replay_drain_bytes; /* written since the last sample; flush only */
+    u64 fec_replay_drain_ns;    /* last sample time; flush only */
     atomic64_t fec_reset_tcp_failed; /* FEC reset: no carrier TCP alive */
     atomic64_t fec_reset_user;       /* user/peer/application teardown */
     /* A FEC-owned TBT_ST_HOLE kill (ordered-walk hole or an unrecoverable

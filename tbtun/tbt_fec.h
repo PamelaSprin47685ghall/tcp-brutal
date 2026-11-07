@@ -236,17 +236,134 @@ int tbt_fec_replay_get(const struct tbt_fec_replay *r, u64 block_id,
                        u16 group, u16 share, u8 *out, u16 cap);
 bool tbt_fec_replay_has(const struct tbt_fec_replay *r, u64 block_id,
                         u16 group, u16 share);
+/* When this share was last queued for replay, 0 when never. The caller holds
+ * the TX replay lock (the ring is storage only). */
+u64 tbt_fec_replay_sent_ns(const struct tbt_fec_replay *r, u64 block_id,
+                           u16 group, u16 share);
+/* Stamp a share that was just queued for replay. A share the ring does not
+ * hold is ignored: there is nothing in flight to deduplicate. */
+void tbt_fec_replay_mark_sent(struct tbt_fec_replay *r, u64 block_id,
+                              u16 group, u16 share, u64 now_ns);
 
-/* NACK pacing. The first NACK for a block goes out at once, subject to a
- * global minimum interval; an identical NACK is retried after the longer
- * interval. There is no total attempt cap: while a carrier TCP is alive the
- * repair continues, and only the replay window bounds it. */
+/* NACK pacing. The first NACK for a block goes out once the gap has been
+ * visible for one round trip (the carrier TCP still holds the share and the
+ * block's parity may still decode it); an identical NACK is retried after
+ * the longer interval. There is no total attempt cap: while a carrier TCP is
+ * alive the repair continues, and only the replay window bounds it. */
 #define TBT_FEC_NACK_MIN_MS 10
 #define TBT_FEC_NACK_RETRY_MS 20
+/* The retry interval grows with the observed repair latency, up to this cap.
+ * A sender whose replay queue is behind cannot serve a faster stream of
+ * NACKs; asking faster only adds duplicate work ahead of the shares already
+ * queued. */
+#define TBT_FEC_NACK_RETRY_MAX_MS 500
 /* A shape probe asks the sender to describe a super-block it may not have
  * sent yet; repeating it at the repair cadence puts a NACK on the wire for
- * every retry interval of an idle connection. Pace it instead. */
-#define TBT_FEC_NACK_PROBE_MS 100
+ * every retry interval of an idle connection. Pace it instead, and probe one
+ * group per pass. */
+#define TBT_FEC_NACK_PROBE_MS 250
+/* One NACK names at most this many shares: 64 slots of one 8 KiB share is
+ * 512 KiB, one sixteenth of the 8 MiB replay queue, so a burst loss cannot
+ * fill the queue with a single request. The receiver names the rest in its
+ * next NACK. */
+#define TBT_FEC_NACK_SHARES_MAX 64
+
+/* How long a share that was just requested is left alone: one carrier round
+ * trip, and never less than two retry intervals. Re-asking inside it only
+ * duplicates a replay that is still in flight. */
+static inline u64 tbt_fec_nack_hold_ns(u32 rtt_us, u32 cadence_ms)
+{
+    u64 rtt = (u64)rtt_us * 1000ULL;
+    u64 floor = 2ULL * (u64)cadence_ms * 1000000ULL;
+
+    return rtt > floor ? rtt : floor;
+}
+
+/* The first NACK for a block waits for one round trip after its gap was
+ * first seen: the carrier TCP still holds the share, and the block's parity
+ * may still decode it. A NACK sent before that returns a replay that is
+ * almost always late (field: 338k late shares, 853 ms mean repair). */
+static inline bool tbt_fec_nack_first_due(u64 now_ns, u64 first_gap_ns,
+                                          u64 hold_ns)
+{
+    return first_gap_ns && now_ns - first_gap_ns >= hold_ns;
+}
+
+/* A shape probe for an unbuilt super-block: one interval, one group. */
+static inline bool tbt_fec_nack_probe_due(u64 now_ns, u64 last_probe_ns)
+{
+    return !last_probe_ns ||
+           now_ns - last_probe_ns >=
+               (u64)TBT_FEC_NACK_PROBE_MS * 1000000ULL;
+}
+
+/* The retry cadence follows the observed repair latency: a quarter of it,
+ * clamped to [retry, max]. Back off at once, recover one eighth at a time so
+ * one fast repair does not collapse the window. */
+static inline u32 tbt_fec_nack_cadence_ms(u32 prev_ms, u64 repair_ns)
+{
+    u64 want = repair_ns / 4000000ULL;
+    u32 next;
+
+    if (want < TBT_FEC_NACK_RETRY_MS)
+        want = TBT_FEC_NACK_RETRY_MS;
+    if (want > TBT_FEC_NACK_RETRY_MAX_MS)
+        want = TBT_FEC_NACK_RETRY_MAX_MS;
+    next = (u32)want;
+    if (prev_ms < TBT_FEC_NACK_RETRY_MS)
+        prev_ms = TBT_FEC_NACK_RETRY_MS;
+    if (next >= prev_ms)
+        return next;
+    return (prev_ms * 7 + next) / 8;
+}
+
+/* Why one share is left out of a NACK bitmap. */
+enum tbt_fec_nack_skip
+{
+    TBT_FEC_NACK_KEEP = 0,
+    TBT_FEC_NACK_SKIP_PRESENT,  /* already in the block: nothing to ask */
+    TBT_FEC_NACK_SKIP_INFLIGHT, /* asked within the hold window */
+};
+
+static inline enum tbt_fec_nack_skip
+tbt_fec_nack_share_skip(bool present, u64 now_ns, u64 last_req_ns,
+                        u64 hold_ns)
+{
+    if (present)
+        return TBT_FEC_NACK_SKIP_PRESENT;
+    if (last_req_ns && now_ns - last_req_ns < hold_ns)
+        return TBT_FEC_NACK_SKIP_INFLIGHT;
+    return TBT_FEC_NACK_KEEP;
+}
+
+/* A replay for this share is already queued or on the wire. */
+static inline bool tbt_fec_replay_dup(u64 now_ns, u64 last_sent_ns,
+                                      u64 hold_ns)
+{
+    return last_sent_ns && now_ns - last_sent_ns < hold_ns;
+}
+
+/* The whole block lies below the peer's delivered packet frontier. */
+static inline bool tbt_fec_block_delivered(u64 block_id, u64 peer_pkts,
+                                           u16 groups, u16 n)
+{
+    u64 span = (u64)groups * n;
+
+    return span && peer_pkts / span > block_id;
+}
+
+/* A NACK named share n of a group that never wrote into the block. No record
+ * is resident, so the replay ring cannot answer; the empty marker is the
+ * truth. The block must be closed (its shape is final) and still inside the
+ * ring: a block the ring has wrapped past is not empty, its shares existed
+ * and are gone. `group_blk_id` is the block the group is building now, so it
+ * differs from `block_id` for every closed block; the ring test is what
+ * separates "never built for this group" from "evicted". */
+static inline bool tbt_fec_nack_empty_group(bool closed, bool in_window,
+                                            u64 group_blk_id, u64 block_id)
+{
+    return closed && in_window && group_blk_id != block_id;
+}
 
 struct tbt_fec_nack_state
 {
@@ -260,9 +377,20 @@ struct tbt_fec_nack_state
 };
 
 /* Returns true when the caller should send this NACK now and updates the
- * state. `now_ns` is monotonic. */
-bool tbt_fec_nack_due(struct tbt_fec_nack_state *st, u64 now_ns,
-                      u64 block_id, const struct tbt_fec_nack *n);
+ * state. `now_ns` is monotonic; `retry_ms` is the adaptive retry interval
+ * (tbt_fec_nack_cadence_ms), never below TBT_FEC_NACK_RETRY_MS. */
+bool tbt_fec_nack_due_at(struct tbt_fec_nack_state *st, u64 now_ns,
+                         u64 block_id, const struct tbt_fec_nack *n,
+                         u32 retry_ms);
+
+/* The fixed-cadence form, kept for callers that do not track the repair
+ * latency (and for the host codec tests). */
+static inline bool tbt_fec_nack_due(struct tbt_fec_nack_state *st, u64 now_ns,
+                                    u64 block_id, const struct tbt_fec_nack *n)
+{
+    return tbt_fec_nack_due_at(st, now_ns, block_id, n,
+                               TBT_FEC_NACK_RETRY_MS);
+}
 void tbt_fec_nack_reset(struct tbt_fec_nack_state *st);
 
 int tbt_fec_cfg_pack(const struct tbt_fec_cfg *c, u8 out[TBT_FEC_CFG_LEN]);

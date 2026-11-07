@@ -944,9 +944,12 @@ static void test_parity_rotation(void)
 }
 
 /* A sparse super-block: group 0 has the second short write, groups 1..3 are
- * empty and their markers' first send failed. The markers are in the replay
- * ring; the receiver's NACK probe fetches them; the super-block is ready and
- * the sink gets 4 + 40 bytes (the production 4 + 200 scaled to S=64). */
+ * empty and their markers' first send failed. A marker is never stored in the
+ * replay ring: it states a block is empty, and a stored copy for an old block
+ * id would reclaim the slot of block_id + K -- one the receiver may still be
+ * waiting for. A NACK for share N therefore finds nothing (-ENODATA) and the
+ * sender builds a fresh marker. The super-block still becomes ready, and the
+ * sink gets 4 + 40 bytes (the production 4 + 200 scaled to S=64). */
 static void test_marker_retry(void)
 {
     static const u16 four[N] = {4, 0, 0, 0};
@@ -954,6 +957,7 @@ static void test_marker_retry(void)
     struct tbt_fec_replay *r;
     struct blk b0[4], b1[4];
     struct tbt_fec_hdr mh;
+    struct tbt_fec_hdr rh;
     u8 mrec[TBT_FEC_HDR_LEN];
     u8 buf[TBT_FEC_HDR_LEN];
     u8 out[2 * S];
@@ -987,7 +991,7 @@ static void test_marker_retry(void)
         }
     }
 
-    /* The first marker send failed; the markers are only in the ring. */
+    /* The first marker send failed; no marker is in the ring. */
     for (g = 1; g < 4; g++)
     {
         memset(&mh, 0, sizeof(mh));
@@ -1003,11 +1007,22 @@ static void test_marker_retry(void)
         ok_int(tbt_fec_hdr_seal(&mh, NULL), 0, "marker seal");
         ok_int(tbt_fec_hdr_pack(&mh, mrec), 0, "marker pack");
         ok_int(tbt_fec_hdr_check(&mh, S), 0, "marker header check");
-        ok_int(tbt_fec_replay_store(r, 1, (u16)g, N, mrec,
-                                    TBT_FEC_HDR_LEN), 0,
-               "marker stored in the replay ring");
         ok_int(tbt_fec_replay_get(r, 1, (u16)g, N, buf, sizeof(buf)),
-               TBT_FEC_HDR_LEN, "marker fetched after the failed send");
+               -ESTALE, "no record is resident for an empty group");
+        /* A closed, in-window block with no record for this group is an
+         * empty group, and the marker is its answer. */
+        ok(tbt_fec_nack_empty_group(true, true, 2, 1),
+           "empty group: a closed in-window block answers with a marker");
+        ok(!tbt_fec_nack_empty_group(false, true, 2, 1),
+           "empty group: a block still being built waits");
+        ok(!tbt_fec_nack_empty_group(true, false, 2, 1),
+           "empty group: an evicted block is not called empty");
+        ok(!tbt_fec_nack_empty_group(true, true, 1, 1),
+           "empty group: the group that wrote the block is not empty");
+        /* The reply is rebuilt from the block shape, not replayed. */
+        ok_int(tbt_fec_hdr_unpack(mrec, &rh), 0, "fresh marker unpacks");
+        ok_int(tbt_fec_arrival_kind(false, false, rh.type, rh.win_len, false),
+               TBT_FEC_ARR_PLACE, "fresh marker is placed by the receiver");
     }
 
     /* Group 0 has the data; groups 1..3 are empty and ready from the
@@ -1272,6 +1287,197 @@ static void test_replay_window(void)
     tbt_fec_replay_free(r);
 }
 
+/* ------------------------------------------------------------------ *
+ * 11. NACK filtering and replay deduplication.
+ *
+ * The 1 GiB field run sent 16,691 NACKs, produced 1.1M replay-ring
+ * lookups, and found the 8 MiB replay queue full 872k times. Each NACK
+ * re-named shares whose replay was still in flight, and the first one
+ * left 10 ms after the gap -- hundreds of milliseconds before a replay
+ * could arrive (mean 853 ms). The policy below bounds the wire volume:
+ *   - the first NACK waits one round trip from the first gap;
+ *   - a share is not named again inside max(RTT, 2 x cadence);
+ *   - one NACK names at most TBT_FEC_NACK_SHARES_MAX shares;
+ *   - the sender queues no second replay for a share in flight, and
+ *     never replays a block the peer has already delivered.
+ * ------------------------------------------------------------------ */
+
+#define STORM_SHARES 64
+#define STORM_SLOT 8192u
+#define STORM_QUEUE_MAX (8u * 1024 * 1024)
+
+static void test_nack_filter(void)
+{
+    u64 hold = tbt_fec_nack_hold_ns(300000, TBT_FEC_NACK_RETRY_MS);
+
+    ok_size((size_t)hold, 300000000,
+            "hold: one round trip dominates a short cadence");
+    ok_size((size_t)tbt_fec_nack_hold_ns(0, TBT_FEC_NACK_RETRY_MS),
+            40000000, "hold: the floor is two retry intervals");
+    ok_size((size_t)tbt_fec_nack_hold_ns(50000, 100), 200000000,
+            "hold: two cadences dominate a short RTT");
+
+    ok(!tbt_fec_nack_first_due(1000 + hold - 1, 1000, hold),
+       "first NACK: not due before one round trip");
+    ok(tbt_fec_nack_first_due(1000 + hold, 1000, hold),
+       "first NACK: due after one round trip");
+    ok(!tbt_fec_nack_first_due(1000 + hold, 0, hold),
+       "first NACK: a block with no gap stamp is not due");
+
+    ok_int(tbt_fec_nack_share_skip(true, 100, 0, hold),
+           TBT_FEC_NACK_SKIP_PRESENT, "present share is not requested");
+    ok_int(tbt_fec_nack_share_skip(false, 100, 0, hold),
+           TBT_FEC_NACK_KEEP, "never-requested share is requested");
+    ok_int(tbt_fec_nack_share_skip(false, 100 + hold - 1, 100, hold),
+           TBT_FEC_NACK_SKIP_INFLIGHT, "in-flight share is left alone");
+    ok_int(tbt_fec_nack_share_skip(false, 100 + hold, 100, hold),
+           TBT_FEC_NACK_KEEP, "hold expiry re-allows the request");
+
+    ok(!tbt_fec_replay_dup(100, 0, hold), "replay: no stamp is not a dup");
+    ok(tbt_fec_replay_dup(100 + hold - 1, 100, hold),
+       "replay: a share in flight is a dup");
+    ok(!tbt_fec_replay_dup(100 + hold, 100, hold),
+       "replay: after the hold a share may be queued again");
+
+    ok(tbt_fec_block_delivered(0, 2 * G * N, G, N),
+       "delivered: block 0 is below the frontier");
+    ok(tbt_fec_block_delivered(1, 2 * G * N, G, N),
+       "delivered: block 1 ends at the frontier");
+    ok(!tbt_fec_block_delivered(2, 2 * G * N, G, N),
+       "delivered: block 2 is not delivered");
+    ok(!tbt_fec_block_delivered(0, 0, G, N),
+       "delivered: a zero frontier delivers nothing");
+
+    ok(!tbt_fec_nack_probe_due(1000, 1000), "probe: one per interval");
+    ok(!tbt_fec_nack_probe_due(1000 + TBT_FEC_NACK_PROBE_MS * 1000000ULL - 1,
+                               1000),
+       "probe: not before the interval");
+    ok(tbt_fec_nack_probe_due(1000 + TBT_FEC_NACK_PROBE_MS * 1000000ULL,
+                              1000),
+       "probe: due at the interval");
+    ok(tbt_fec_nack_probe_due(1000, 0), "probe: the first one is due");
+
+    /* Repair latency sets the cadence: back off at once, recover slowly. */
+    ok_int(tbt_fec_nack_cadence_ms(TBT_FEC_NACK_RETRY_MS, 853000000ULL),
+           213, "cadence: an 853 ms repair sets 213 ms");
+    ok_int(tbt_fec_nack_cadence_ms(213, 40000000ULL),
+           (213 * 7 + 20) / 8, "cadence: a fast repair recovers slowly");
+    ok_int(tbt_fec_nack_cadence_ms(TBT_FEC_NACK_RETRY_MS, 16000000000ULL),
+           TBT_FEC_NACK_RETRY_MAX_MS, "cadence: capped at the maximum");
+}
+
+/* Two seconds of a 300 ms path with 64 missing shares of one block. The
+ * receiver scans every 10 ms; one replayed share is 8 KiB and the queue
+ * drains at the field's 2.8 MB/s. Without the filter every scan re-named
+ * every share (64 x 8 KiB per 10 ms = 100 MiB through an 8 MiB queue).
+ * The filtered policy must keep the queue below its bound, ask each share
+ * once per round trip, and still re-ask a share that never arrives. */
+static void test_nack_storm(void)
+{
+    u64 hold = tbt_fec_nack_hold_ns(300000, TBT_FEC_NACK_RETRY_MS);
+    u64 req_ns[STORM_SHARES];
+    const u64 first_gap = 1000;
+    u32 queued = 0, queue_high = 0, queued_total = 0;
+    u16 requests[STORM_SHARES];
+    u16 asked = 0;
+    u64 t;
+    int i;
+
+    memset(req_ns, 0, sizeof(req_ns));
+    memset(requests, 0, sizeof(requests));
+
+    for (t = first_gap; t <= 2000000000ULL; t += 10000000ULL)
+    {
+        u16 count = 0;
+        bool due = tbt_fec_nack_first_due(t, first_gap, hold);
+
+        for (i = 0; i < STORM_SHARES && due; i++)
+        {
+            if (tbt_fec_nack_share_skip(false, t, req_ns[i], hold) !=
+                TBT_FEC_NACK_KEEP)
+                continue;
+            if (count >= TBT_FEC_NACK_SHARES_MAX)
+                break;
+            req_ns[i] = t;
+            requests[i]++;
+            count++;
+            queued += STORM_SLOT;
+            queued_total += STORM_SLOT;
+            if (queued > queue_high)
+                queue_high = queued;
+            asked++;
+        }
+        /* 2.8 MB/s, one 10 ms scan tick. */
+        queued = queued > 28000u ? queued - 28000u : 0;
+    }
+
+    ok(asked > 0, "storm: the first NACK is eventually sent");
+    ok(queue_high <= STORM_QUEUE_MAX,
+       "storm: repeated NACKs never fill the 8 MiB replay queue");
+    ok(queued_total < 16u * 1024 * 1024,
+       "storm: two seconds request a few rounds, not 100 MiB");
+    ok(asked <= (u16)(2000000000ULL / hold + 1) * STORM_SHARES,
+       "storm: total requests are bounded by the hold");
+    for (i = 0; i < STORM_SHARES; i++)
+        ok(requests[i] >= 1, "storm: every missing share is asked");
+    ok(requests[0] >= 2, "storm: a lost share is asked again after the hold");
+    ok(requests[0] <= (u16)(2000000000ULL / hold + 1),
+       "storm: one share is asked once per round trip");
+}
+
+/* The sender side of the same storm: a NACK arrives every 20 ms naming the
+ * same shares. Without dedup that is every share every 20 ms; with the
+ * round-trip stamp it is every share per round trip. The stamp belongs to
+ * the block in the ring slot, so an evicted block cannot inherit it. */
+static void test_replay_dedup_model(void)
+{
+    struct tbt_fec_replay *r = tbt_fec_replay_new(1, N, M, S);
+    u64 hold = tbt_fec_nack_hold_ns(300000, TBT_FEC_NACK_RETRY_MS);
+    u8 rec[S];
+    u64 t;
+    u32 queued = 0;
+    int i;
+
+    ok(r != NULL, "dedup: replay ring");
+    memset(rec, 0x33, sizeof(rec));
+    for (i = 0; i < N + M; i++)
+        ok_int(tbt_fec_replay_store(r, 0, 0, (u16)i, rec, S), 0,
+               "dedup: store share");
+
+    for (t = 1000; t <= 2000000000ULL; t += 20000000ULL)
+    {
+        for (i = 0; i < N + M; i++)
+        {
+            u64 last;
+
+            if (!tbt_fec_replay_has(r, 0, 0, (u16)i))
+                continue;
+            last = tbt_fec_replay_sent_ns(r, 0, 0, (u16)i);
+            if (tbt_fec_replay_dup(t, last, hold))
+                continue;
+            tbt_fec_replay_mark_sent(r, 0, 0, (u16)i, t);
+            queued++;
+        }
+    }
+    /* 2 s / 300 ms = 6.67 -> at most 7 rounds of (N + M) shares. */
+    ok(queued <= (u32)(2000000000ULL / hold + 1) * (N + M),
+       "dedup: one replay per share per round trip");
+    ok(queued >= (u32)(N + M),
+       "dedup: the first NACK is served at once");
+
+    /* A block the peer has delivered is never replayed. */
+    ok(tbt_fec_block_delivered(0, (u64)G * N, 1, N),
+       "dedup: a delivered block is not replayed");
+
+    /* The stamp names the block, not the slot: evicting block 0 leaves
+     * block K's stamp, and block 0 reads zero. */
+    ok_int(tbt_fec_replay_store(r, TBT_FEC_REPLAY_K, 0, 0, rec, S), 0,
+           "dedup: evicting store");
+    ok_size((size_t)tbt_fec_replay_sent_ns(r, 0, 0, 0), 0,
+            "dedup: an evicted block has no send stamp");
+    tbt_fec_replay_free(r);
+}
+
 /* A record that arrives for a settled block is classified, never refused.
  * A replayed empty marker used to return -EPROTO, and the carrier parser
  * kills the carrier that carried a -EPROTO record: one NACK retry became
@@ -1359,6 +1565,9 @@ int main(void)
     test_ack_split();
     test_rx_poll();
     test_replay_window();
+    test_nack_filter();
+    test_nack_storm();
+    test_replay_dedup_model();
     test_arrival_kind();
 
     printf("test_fec_rx: %d checks, %d failures\n", checks, failures);
