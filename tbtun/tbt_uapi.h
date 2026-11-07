@@ -110,20 +110,20 @@ typedef uint64_t u64;
  * behind a partial DATA record (the carrier writer emits each record whole).
  * ------------------------------------------------------------------ */
 #define TBT_FEC_CONV 0x1004u
-/* 0.2.0 (M2) raises TBT_FEC_CONV from 0x1001 to 0x1002. The core change is
- * that a PARITY record may be a block marker: win_len == 0 && payload_len ==
- * 0 && epoch == 0. The two convs share one carrier (32-byte control records
- * use TBT_CONV, 40-byte FEC records use TBT_FEC_CONV), so both are upgraded
- * in the same version.
+/* 0.2.0 raises TBT_FEC_CONV from 0x1001 to 0x1004 in three wire steps.
+ * M2 (0x1002): a PARITY record may be a block marker: win_len == 0 &&
+ * payload_len == 0 && epoch == 0. The two convs share one carrier (32-byte
+ * control records use TBT_CONV, 40-byte FEC records use TBT_FEC_CONV), so
+ * both are upgraded in the same version.
  *
- * 0.2.1 raises it to 0x1003: the ACK body grows from 16 to 24 bytes and
+ * M3 (0x1003): the ACK body grows from 16 to 24 bytes and
  * carries deliver_bytes, the stream-relative byte count the receiver has
  * actually handed to its output socket. The old body let the sender derive
  * that number as next_deliver * S, which is exact only while every block is
  * full: a short share or a block closed early makes the packet frontier name
  * bytes that were never delivered, and tx_ack then runs past them.
  *
- * 0.2.2 raises it to 0x1004: NACK becomes a repair request. Its body is a
+ * M4 (0x1004): NACK becomes a repair request. Its body is a
  * group bitmap followed by a share bitmap (TBT_FEC_NACK_LEN = 64 bytes), and
  * the record header's block_id names the super-block. The old 0x1003 NACK
  * body was a list of missing sequence ranges and had no caller.

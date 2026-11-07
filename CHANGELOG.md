@@ -3,10 +3,33 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
-## [Unreleased]
+## [0.3.0] - planned
+
+### Deferred from 0.2.0
+
+- Two fix29 performance experiments stay out of 0.2.0 and are the first
+  bisection targets: word-wise XOR in the FEC encoder (751715b) and the
+  per-carrier FEC frame buffer (28e3de2). Both are reverted; 0.2.0 ships the
+  fix28 code (acba55d). At 256 carriers fix29 showed a 20-35% higher median
+  retx/replay/NACK count and a 5.6% lower median app rate with overlapping
+  ranges, so the cause is still open. The fix29 measurements stay under
+  `benches/results/` and `benches/baseline/remote-fix29.csv` as 0.3.0
+  reference, not as 0.2.0 behavior (`benches/MICROBENCH.md`, "真机基线").
+
+## [0.2.0] - 2026-11-08
 
 ### Added
 
+- A host microbenchmark base (`host/bench_micro`, `make bench`/`bench-full`,
+  `scripts/microbench.sh run|baseline|compare`) that links the same
+  `tbt_fec.c`/`tbt_crypto.c` objects and `tbt_tx_acct.h` the module uses and
+  mirrors the kernel-only scheduler and NACK scan loops. It writes a stable
+  five-column CSV (`name,iterations,ns_per_op,mb_per_s,checksum`), targets
+  <= 2 s with `--quick` and <= 10 s with `--full`, and stores every run under
+  `benches/results/<UTC stamp>/`. `benches/short.sh` is the matching real-host
+  short sweep (32/64/256 carriers, fec/profile/crypto toggles, 5 s single
+  stream); `benches/MICROBENCH.md` records the first host baseline and the
+  noise rules. No kernel source changed.
 - FEC NACK repair (`TBT_FEC_CONV` 0x1004): a NACK names its super-block in
   the record header and carries a 32-byte group bitmap plus a 32-byte share
   bitmap. The sender keeps up to the last `K = 7` super-blocks of DATA+PARITY
@@ -39,8 +62,9 @@ and moves independently of the module version.
 
 ### Changed
 
-- The 30 s FEC hole timer no longer resets a stream by itself. It resets only
-  when no carrier TCP is ESTABLISHED below the default `tcp_retries2`, or on a
+- The 30 s FEC hole timer no longer resets a stream by itself. A super-block
+  that is still not ready after `TBT_FEC_STALL_MS` (30 s) resets only when no
+  carrier TCP is ESTABLISHED below the default `tcp_retries2`, or on a
   user/peer teardown; while a carrier TCP is alive the receiver keeps NACKing
   and replaying, and out-of-window bytes stay in the carrier's TCP send queue.
   Under the documented assumptions this gives `E_tunnel ⊆ E_direct` and
@@ -61,15 +85,27 @@ and moves independently of the module version.
   carrier is stalled, an ACK stays queued and the flush returns `-EAGAIN`
   instead of dropping it, so a recovered carrier can reopen the credit window
   instead of deadlocking on an ACK that was never sent.
-- FEC wire: `TBT_FEC_CONV` moves from `0x1002` to `0x1004`. `0x1003` grows the
-  ACK body from 16 to 24 bytes and carries `deliver_bytes`, the stream-relative
-  byte count the receiver actually handed to its output socket. The first 16
-  bytes keep their `0x1002` offsets. The sender's `tx_ack` is now that value
-  instead of `next_deliver * S`: a short share or a block closed early makes
-  the packet frontier name bytes that were never delivered, and the
-  multiplication acknowledged them, so retention and the transmit window
-  treated undelivered bytes as delivered. `0x1004` makes NACK a 64-byte bitmap
-  repair request (Added above). 0.2.0 and this revision do not interoperate.
+- Carrier lifetime: carriers are no longer reused from a dead pool.
+  `tbt_carrier_get/put/gen` with a refcount and `kfree_rcu` replace
+  `take_dead`, and `tbt_carrier_unpublish/close` release `c->sk` before the
+  pointer is cleared (`review/s2-merged-design.md` §3).
+- Session and stream lifetime: `tbt_session_get/put/arm/cancel` with
+  the `drained` completion replace the dead `refs` field, and stream work
+  holds one of five bits and is cancelled through `tbt_stream_schedule/cancel`
+  (`review/s2-merged-design.md` §1, §5).
+- Wire revision: `TBT_CONV` is `0x0006` and `TBT_FEC_CONV` is `0x1004`
+  (0.1.0 used `0x0005`/`0x1001`). FIN carries an exactly 16-byte body
+  (`pkt_end`, `pkt_base`); a 0.1.0 peer is refused at the first HELLO by the
+  conv check (`review/s2-merged-design.md` §6). On the FEC wire, `0x1002`
+  made a PARITY record usable as an empty-block marker (`win_len=0`,
+  `payload_len=0`, `epoch=0`); `0x1003` grew the ACK body from 16 to 24 bytes
+  and added `deliver_bytes`, the stream-relative byte count the receiver
+  actually handed to its output socket (the first 16 bytes keep their
+  `0x1002` offsets; the sender's `tx_ack` is that value instead of
+  `next_deliver * S`, so a short share or an early-closed block no longer
+  acknowledges bytes that were never delivered); `0x1004` makes NACK a
+  64-byte bitmap repair request (see Added). 0.1.0 and 0.2.0 do not
+  interoperate.
 
 ### Fixed
 
@@ -143,11 +179,6 @@ and moves independently of the module version.
   exported in a new `/proc` line `c10`. The 1 GiB acceptance run reported
   "every error counter is zero" while the stream lost three 8192-byte slots,
   because the counters that name those losses were not exported.
-- FEC receive, bounded reset: the 30 s FEC timer no longer kills a stream by
-  itself. A super-block that is still not ready after `TBT_FEC_STALL_MS`
-  (30 s) resets only when every carrier TCP has failed; while a carrier TCP
-  is alive the receiver keeps NACKing/replaying and the stream waits (see
-  Changed above).
 - FEC receive, recovered length: `tbt_fec_rx_share_len()` is now the one
   place that decides a slot's delivery length, and it lives in `tbt_fec.h` so
   the host tests exercise it. A recovered share uses the parity epoch only at
@@ -177,28 +208,6 @@ and moves independently of the module version.
   delivered as stream bytes. `fec_late_data` names a late DATA share whose
   real slot is still absent (the ready rule makes it impossible; the counter
   exists so a field run can prove it).
-
-## [0.2.0] - 2026-11-07
-
-### Changed
-
-- 0.2.0 has flipped `TBT_CONV` to `0x0006` and `TBT_FEC_CONV` to `0x1002`
-  (from 0x0005/0x1001 in 0.1.0). FIN carries an exactly 16-byte body
-  (`pkt_end`, `pkt_base`); a PARITY record may be an empty-block marker
-  (`win_len=0`, `payload_len=0`, `epoch=0`). 0.1.0 and 0.2.0 do not
-  interoperate: the first HELLO is rejected by the conv check
-  (`review/s2-merged-design.md` §6).
-- Carrier lifetime: carriers are no longer reused from a dead pool.
-  `tbt_carrier_get/put/gen` with a refcount and `kfree_rcu` replace
-  `take_dead`, and `tbt_carrier_unpublish/close` release `c->sk` before the
-  pointer is cleared (`review/s2-merged-design.md` §3).
-- Session and stream lifetime: `tbt_session_get/put/arm/cancel` with
-  the `drained` completion replace the dead `refs` field, and stream work
-  holds one of five bits and is cancelled through `tbt_stream_schedule/cancel`
-  (`review/s2-merged-design.md` §1, §5).
-
-### Fixed
-
 - TX: a duplicate frame is fully built before publication, and the
   retention index is bounded so a 16-slot overflow cannot write past the array
   (`review/s2-merged-design.md` §9.1).
