@@ -372,9 +372,10 @@ container:
   started super-block is asked for its whole share range, which also repairs a
   lost empty marker. A block outside that window is not NACKed: its bytes are
   still in the carrier TCP send queue, and that TCP owns the retransmission.
-  The sender keeps the last `K = 4` super-blocks of encoded DATA+PARITY
-  records in a replay ring and re-queues the requested records on any up,
-  non-stalled carrier. The share index stays the same; the carrier does not.
+  The sender keeps up to the last `K = 4` super-blocks of encoded DATA+PARITY
+  records in a replay ring (the effective K shrinks until the 9 MiB cap fits)
+  and re-queues the requested records on any up, non-stalled carrier. The
+  share index stays the same; the carrier does not.
 - **The replay buffers are constant.** The ring is `K * groups * (n + m)`
   slots of `TBT_FEC_HDR_LEN + S` bytes plus 10 bytes of metadata, capped at
   `TBT_FEC_REPLAY_BUDGET` (9 MiB; the production 32-group shape uses
@@ -382,17 +383,18 @@ container:
   fits; a shape that cannot hold one super-block gets no ring and falls back
   to parity and TCP. The receive window is the ACK credit
   (`slots * groups * n` packets, at most 1024) over the same `groups * (n+m) *
-  S` arena. Neither grows with the stream length. The replay queue itself is
+  S` arena (16 MiB). Neither grows with the stream length. The replay queue itself is
   capped at `TBT_FEC_REPLAY_QUEUE_MAX` (256 records); a full queue is a repair
   miss that the next NACK retries, never a source-frame drop.
 - **NACK is retried, not timed out.** The first NACK for a block goes out
   immediately (global minimum `TBT_FEC_NACK_MIN_MS` = 10 ms between NACKs);
   an identical NACK is retried every `TBT_FEC_NACK_RETRY_MS` = 20 ms. There is
   no total attempt cap: while a carrier TCP is alive the repair continues.
-  `fec_nack_tx/rx/retx`, `fec_nack_retx_bytes`, `fec_nack_lat_ns`,
-  `fec_nack_repair_ns`, `fec_replay_hit/miss` and
-  `fec_replace_retx_bytes` expose the cost `C_r` to the carrier economics.
-- **The only FEC reset is a dead transport.** A super-block that stays
+  The c11 line (§8.7) exports the full repair cost: `fec_nack_tx/rx/retx`,
+  `fec_nack_drop/bad`, `fec_nack_retx_bytes`, `fec_replace_retx_bytes`,
+  `fec_replay_hit/miss`, the latency/repair counters and the reset/wait
+  counters. Together they expose the cost `C_r` to the carrier economics.
+- **The only FEC loss-recovery reset is a dead transport.** A super-block that stays
   unready for `TBT_FEC_STALL_MS` (30 s) is killed (`TBT_ST_HOLE`) only when
   `tbt_fec_any_tcp_alive()` is false: no carrier has an ESTABLISHED socket
   below the default `tcp_retries2` (15). If any carrier TCP is alive, the
@@ -2173,6 +2175,8 @@ cannot silently lose its atomicity again.
 | c6 | `c6 holes_declared holes_repaired holes_unrecoverable rx_max_stall_us hole_checks gate_fail depth_fail time_fail` |
 | c8 | `c8 profile_mismatch http_parse_err http_status_err http_req http_resp pad_tx drip_tx` |
 | c9 | `c9 fec_proto_fail fec_hdr_crc_fail fec_payload_crc_fail fec_short_tx fec_short_unknown fec_drop_window fec_drop_crypto` |
+| c10 | `c10 fec_decode_blocks fec_decode_recovered fec_decode_nomem fec_deliver_nomem fec_deliver_dup fec_deliver_ooo fec_deliver_bad fec_dup_share fec_late_share fec_late_data fec_pad_share fec_epoch_conflict fec_slot_past_cut fec_fin_bad fec_ack_bad fec_tx_share_gap fec_empty_block` |
+| c11 | `c11 fec_nack_tx fec_nack_rx fec_nack_retx fec_nack_drop fec_nack_bad fec_replay_hit fec_replay_miss fec_nack_retx_bytes fec_replace_retx_bytes fec_nack_lat_ns fec_nack_lat_max_ns fec_nack_repair_ns fec_nack_repair_max_ns fec_reset_tcp_failed fec_reset_user fec_wait_carrier fec_backpressure` |
 | c5 | `c5 dup_tx dup_used dup_suppressed dup_same_path inflate_ppm dup_bytes` |
 | reconcile | `reconcile live_bytes live_data live_retx retired_bytes retired_data retired_retx` |
 
@@ -2267,6 +2271,25 @@ shares that arrived more than a block window ahead of the delivery frontier, and
 `fec_drop_crypto` counts DATA/PARITY shares that arrived before the session key was
 installed; both leave the block to its parity, which is why the epoch field has to state
 the short length.
+
+C10 names each way a share or a block can be lost: decode/delivery failures
+(`fec_decode_nomem`, `fec_deliver_nomem/bad`), duplicate, late or padded shares,
+epoch conflicts, a slot past the block's stated cut, a bad FIN or ACK, a sender
+share gap and an empty block. A stream that stalls with every counter at zero
+means the loss is outside these paths, not that no loss occurred.
+
+C11 is the NACK/replay repair line. `fec_nack_tx`/`fec_nack_rx` count NACK records
+queued and valid NACKs received; `fec_nack_retx` and `fec_nack_retx_bytes` count
+shares/bytes queued from the replay ring; `fec_replay_hit`/`fec_replay_miss` separate a
+requested share found in the ring from one evicted or absent (a miss is retried by the
+next NACK). `fec_nack_drop` is a failed NACK send retried on the next pass,
+`fec_nack_bad` a NACK whose bitmap or field is outside the shape. `fec_nack_lat_ns` and
+its `_max_ns` measure NACK receipt to replay queued; `fec_nack_repair_ns` and its
+`_max_ns` measure first NACK to block repaired. `fec_replace_retx_bytes` is replay
+traffic caused by a carrier replacement. `fec_reset_tcp_failed` is the only FEC-owned
+reset and requires every carrier TCP to be gone; `fec_reset_user` counts a user/peer
+teardown. `fec_wait_carrier`/`fec_backpressure` count a producer waiting for a usable
+carrier or the source ring being full.
 
 ### 8.8 Kernel version reality on this host, and symbol availability
 
@@ -2637,11 +2660,12 @@ makes this design different from a generic L4 tunnel.
 
 Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the released tree reports
 `0.2.0`. The wire revision `TBT_CONV=0x0006`
-and the FEC record revision `TBT_FEC_CONV=0x1003` bump independently of it. HELLO
+and the FEC record revision `TBT_FEC_CONV=0x1004` bump independently of it. HELLO
 `body[0]` carries `TBT_WIRE_VERSION=1`, not the module version, so the module
 version and the wire version are decoupled. 0.2.0 has flipped `TBT_CONV` to
 0x0006 (FIN carries a 16-byte body); the unreleased tree raises `TBT_FEC_CONV`
-to 0x1003 (the ACK body is 24 bytes and carries `deliver_bytes`). Peers of
+through 0x1003 (the ACK body is 24 bytes and carries `deliver_bytes`) to
+0x1004 (NACK becomes a 64-byte bitmap repair request). Peers of
 different wire revisions do not interoperate, because the first HELLO is
 rejected by the conv check.
 
@@ -2703,7 +2727,7 @@ covers; no known leak remains but a long-soak kref/RCU audit is still worthwhile
 | R16 | Memory at 10 Gbps | `tx_window_bytes` bounds retention and the frame queue (`txq_max = tx_window + 8 chunks`) and sizes the carrier buffers from the same number; `rx_reorder_bytes` bounds the reorder tree per stream and per session; the 64 MiB delivery ring is the largest fixed cost and costs about 2× its payload in physical memory. Per session the bound is about 3× window + `rx_reorder_bytes` + 64 MiB per stream (§5.4). T8 measures the peak. |
 | R17 | Jitter adds RTT | The reorder tree is consulted only past a gap; the in-order path adds zero delay (T1 asserts). |
 | R18 | `inet_csk_reset_xmit_timer` etc. drift | Not used; stock timers only. |
-| R19 | 0.1.0 and 0.2.0 peers mixed | Both wire revisions are hard-rejected: the first HELLO fails `tbt_hdr_check()` (0x0005 vs 0x0006), and a FEC record fails `tbt_fec_hdr_check()` (0x1001/0x1002 vs 0x1003). `rx_parse_proto`/`fec_proto_fail` make it visible. Upgrade both ends together; rollback is the 0.1.0 binary. |
+| R19 | Mixed wire revisions | Both wire revisions are hard-rejected: the first HELLO fails `tbt_hdr_check()` (0x0005 vs 0x0006), and a FEC record fails `tbt_fec_hdr_check()` (any older conv vs the current 0x1004). `rx_parse_proto`/`fec_proto_fail` make it visible. Upgrade both ends together; rollback is the previous binary. |
 
 ---
 

@@ -9,14 +9,17 @@ and moves independently of the module version.
 
 - FEC NACK repair (`TBT_FEC_CONV` 0x1004): a NACK names its super-block in
   the record header and carries a 32-byte group bitmap plus a 32-byte share
-  bitmap. The sender keeps the last `K = 4` super-blocks of DATA+PARITY
+  bitmap. The sender keeps up to the last `K = 4` super-blocks of DATA+PARITY
   records in a replay ring capped at 9 MiB (about 8.05 MiB for the
-  production 32-group shape) and re-queues the requested shares
-  on any up, non-stalled carrier. The c11 line exports `fec_nack_tx/rx/retx`,
+  production 32-group shape; the effective K shrinks until the cap fits) and
+  re-queues the requested shares on any up, non-stalled carrier. The ring and
+  the 16 MiB RX arena are constant; neither grows with the stream. The c11
+  line exports `fec_nack_tx/rx/retx`,
   `fec_nack_drop`, `fec_nack_bad`, `fec_nack_retx_bytes`,
   `fec_replace_retx_bytes`, `fec_replay_hit/miss`, `fec_nack_lat_ns`,
-  `fec_nack_repair_ns`, `fec_reset_tcp_failed`, `fec_reset_user`,
-  `fec_wait_carrier` and `fec_backpressure`.
+  `fec_nack_lat_max_ns`, `fec_nack_repair_ns`, `fec_nack_repair_max_ns`,
+  `fec_reset_tcp_failed`, `fec_reset_user`, `fec_wait_carrier` and
+  `fec_backpressure`.
 - `dev=<ifname>` on a tunnel line binds the near side's dialling carrier
   sockets to one interface with `SO_BINDTODEVICE` before `bind`/`connect`, so
   a TUN or proxy policy route cannot capture the dial. The name is 1..15
@@ -55,15 +58,15 @@ and moves independently of the module version.
   carrier is stalled, an ACK stays queued and the flush returns `-EAGAIN`
   instead of dropping it, so a recovered carrier can reopen the credit window
   instead of deadlocking on an ACK that was never sent.
-- FEC wire: `TBT_FEC_CONV` moves from `0x1002` to `0x1003`. The ACK body
-  grows from 16 to 24 bytes and carries `deliver_bytes`, the stream-relative
+- FEC wire: `TBT_FEC_CONV` moves from `0x1002` to `0x1004`. `0x1003` grows the
+  ACK body from 16 to 24 bytes and carries `deliver_bytes`, the stream-relative
   byte count the receiver actually handed to its output socket. The first 16
   bytes keep their `0x1002` offsets. The sender's `tx_ack` is now that value
   instead of `next_deliver * S`: a short share or a block closed early makes
   the packet frontier name bytes that were never delivered, and the
   multiplication acknowledged them, so retention and the transmit window
-  treated undelivered bytes as delivered. 0.2.0 and this revision do not
-  interoperate.
+  treated undelivered bytes as delivered. `0x1004` makes NACK a 64-byte bitmap
+  repair request (Added above). 0.2.0 and this revision do not interoperate.
 
 ### Fixed
 
@@ -93,11 +96,11 @@ and moves independently of the module version.
   exported in a new `/proc` line `c10`. The 1 GiB acceptance run reported
   "every error counter is zero" while the stream lost three 8192-byte slots,
   because the counters that name those losses were not exported.
-- FEC receive, bounded reset: a super-block that is still not ready after
-  `TBT_FEC_STALL_MS` (30 s) with the stream's end known cannot become ready --
-  this wire has no NACK and no retransmission -- so the stream is killed
-  (`TBT_ST_HOLE`, `holes_unrecoverable`) instead of leaving the application
-  waiting forever.
+- FEC receive, bounded reset: the 30 s FEC timer no longer kills a stream by
+  itself. A super-block that is still not ready after `TBT_FEC_STALL_MS`
+  (30 s) resets only when every carrier TCP has failed; while a carrier TCP
+  is alive the receiver keeps NACKing/replaying and the stream waits (see
+  Changed above).
 - FEC receive, recovered length: `tbt_fec_rx_share_len()` is now the one
   place that decides a slot's delivery length, and it lives in `tbt_fec.h` so
   the host tests exercise it. A recovered share uses the parity epoch only at

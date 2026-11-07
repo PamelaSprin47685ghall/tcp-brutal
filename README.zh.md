@@ -20,9 +20,12 @@
 按流分散带来的收益仍然存在。
 
 FEC v6（`fec=on`）是可选的第二数据面：应用的字节流被切成 8 KiB 的 DATA share
-和 RLNC 校验 share，每条载体承载一个 share；接收端用同一块内的校验 share
-恢复丢失的 share，而不是等重传。它同时支持 `profile=raw` 和 HTTP chunk 容器：
-HTTP 档位下一个 chunk body 恰好是一条 40 字节 FEC 记录，请求行、头部和
+和 RLNC 校验 share，每条载体承载一个 share；接收端先用同一块内的校验 share
+恢复丢失的 share。最近 `K = 4` 个 super-block 内仍缺的 share 由 NACK 请求、
+发送端从重放环重发；更老的丢失留在载体的 TCP 发送队列里，由 TCP 重传。
+它同时支持 `profile=raw` 和 HTTP chunk 容器：
+HTTP 档位下一个 chunk body 恰好是一条 40 字节 FEC 记录（`TBT_FEC_CONV=0x1004`；
+0.1.0 为 `0x1001`），请求行、头部和
 chunk 分帧保持明文。`mode=grouped` 把载体分成 `groups` 组，每组 `n` 个 DATA
 加 `m` 个校验，`carriers = groups * (n + m)`，最多 256 条；生产形状是
 32 组 `n=4, m=4`。`crypto=on`（`fec=on` 时的默认值）只对 DATA/PARITY 的
@@ -83,13 +86,14 @@ make check
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
 `TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.2.0`）。
 线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x0006` 与 FEC 记录的
-`TBT_FEC_CONV=0x1002`，三者都与模块版本独立。
+`TBT_FEC_CONV=0x1004`，三者都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
 失败，其载体关闭；0x0004 的对端在第一个头部就会因为 conv 不匹配而被拒绝。
-0.2.0 已把 `TBT_CONV` 翻转到 `0x0006`、`TBT_FEC_CONV` 翻转到 `0x1002`：
-FIN 携带 16 字节 body（`pkt_end`/`pkt_base`），PARITY 记录可以用
-`win_len=0, payload_len=0, epoch=0` 表示空块 marker。`0.1.0` 与 `0.2.0`
-不互操作，首个 HELLO 即硬拒绝。
+当前 FEC wire 是 `0x1004`：`0x1002` 增加 FIN 的 16 字节 body
+（`pkt_end`/`pkt_base`）与 PARITY 空块 marker（`win_len=0`、
+`payload_len=0`、`epoch=0`）；`0x1003` 把 ACK 扩到 24 字节并加入
+`deliver_bytes`；`0x1004` 把 NACK 变成 64 字节位图修复请求。`0.1.0` 与
+当前 wire 不互操作，首个 HELLO 即硬拒绝。
 `scripts/mkdkmsconf.sh` 派生
 `PACKAGE_VERSION="<major>.<minor>.<patch>"`；`dkms.conf` 是生成物，由
 `make dkms.conf` / `make dkms-tarball` 写出，不要手改。
@@ -351,7 +355,8 @@ HELLO 的源地址会成为会话锚：之后来自其他地址的 HELLO 在检�
 只有一个写者的计数器是普通 `u64`，并以写者命名。块按所属的设计步骤分组：
 最前面是捕获与 RX 工作，然后是 `dbg` 行和 `live` 快照、`txwake`、`c3`
 （载体、加入、重传、重排、门限）、`ctl`（被钉住的控制帧）、`streams`（流普查）、
-`c6`（空洞）、`c8`（HTTP）、`c9`（FEC 接收判定）、`c5`（重复），最后是
+`c6`（空洞）、`c8`（HTTP）、`c9`（FEC 接收判定）、`c10`（FEC 丢失原因）、
+`c11`（NACK/重放修复）、`c5`（重复），最后是
 `reconcile`。
 
 | 键 | 含义 |
@@ -369,6 +374,8 @@ HELLO 的源地址会成为会话锚：之后来自其他地址的 HELLO 在检�
 | `holes_declared`、`holes_repaired`、`holes_unrecoverable`、`rx_max_stall_us` | 空洞统计 |
 | `dup_tx`、`dup_used`、`dup_suppressed`、`inflate_ppm` | 重复发送 |
 | `c9` 行（`fec_proto_fail`、`fec_hdr_crc_fail`、`fec_payload_crc_fail`、`fec_short_tx`、`fec_short_unknown`、`fec_drop_window`、`fec_drop_crypto`） | FEC 接收判定：头/CRC 失败关闭载体，payload CRC 失败只丢该 share；`fec_drop_crypto` 统计密钥就绪前到达的 share |
+| `c10` 行（`fec_decode_blocks`、`fec_decode_recovered`、`fec_decode_nomem`、`fec_deliver_nomem`、`fec_deliver_dup`、`fec_deliver_ooo`、`fec_deliver_bad`、`fec_dup_share`、`fec_late_share`、`fec_late_data`、`fec_pad_share`、`fec_epoch_conflict`、`fec_slot_past_cut`、`fec_fin_bad`、`fec_ack_bad`、`fec_tx_share_gap`、`fec_empty_block`） | FEC share/块丢失的每种原因：解码/投递失败、重复/迟到/填充 share、epoch 冲突、越过块切口的槽、坏 FIN/ACK、发送端 share 缺口、空块。若流停住而它们全为 0，说明丢失不在这几条路径上 |
+| `c11` 行（`fec_nack_tx`、`fec_nack_rx`、`fec_nack_retx`、`fec_nack_drop`、`fec_nack_bad`、`fec_replay_hit`、`fec_replay_miss`、`fec_nack_retx_bytes`、`fec_replace_retx_bytes`、`fec_nack_lat_ns`、`fec_nack_lat_max_ns`、`fec_nack_repair_ns`、`fec_nack_repair_max_ns`、`fec_reset_tcp_failed`、`fec_reset_user`、`fec_wait_carrier`、`fec_backpressure`） | NACK/重放修复：NACK 收发、重放 share 数、重放命中/未命中、重放字节、修复时延与 reset 原因。`fec_reset_tcp_failed` 是唯一由 FEC 触发的 reset，要求所有 carrier TCP 都已失败；`fec_wait_carrier`/`fec_backpressure` 表示生产者在等可用载体或源环已满 |
 | `reconcile live_*`/`retired_*` | 活跃 + 已退休等于会话总数（字节、DATA、重传） |
 
 `reconcile` 行用来确认载体替换没有让字节凭空消失：
@@ -455,8 +462,16 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   （`carriers == n + m`）和 grouped（`carriers = groups * (n + m)`，最多
   256 条载体），`raw` 与 `http-kal` 容器都支持。发送端每组每块发 `n` 个
   DATA share 加 `m` 个校验 share；接收端在块的校验足以解出缺失 share 时
-  解码，然后按全局序号投递整个 super-block。FEC 路径没有 NACK，也没有重传：
-  丢失超过校验能力的块会停住，直到关闭计时器重置流。流的最后一块用零填充，
+  解码，然后按全局序号投递整个 super-block。修复有界：接收端用 NACK
+  （记录类型 `0x33`）只为最近
+  `K = 4` 个 super-block 内最老的未完成块发 NACK，发送端从 9 MiB 重放环
+  在任意 up 且非 stalled 的载体重发。窗口内是 RTT 级修复（一次 NACK 往返
+  加重放写入），不是 30 s 计时器。窗口外的丢失不发 NACK，留在载体 TCP
+  发送队列里由 TCP 重传。就丢失恢复而言，只有所有 carrier TCP 都失败
+  （没有 ESTABLISHED socket 且低于 `tcp_retries2=15`）或用户/对端关闭时才
+  重置流；30 s FEC 计时器只重新计时。协议违规（乱序投递、坏头）仍然
+  fail-closed。每个 FEC 会话的重放环与 RX arena 是常数（9 MiB + 16 MiB），
+  不随流长度增长。流的最后一块用零填充，
   真实长度放在校验的 `win_len`（FIN 偏移是第二来源），所以最后一段短包不会
   被当作填充投递。`fec=off` 时丢包靠重放环重传与重复发送修复，没有校验块或
   纠删码；环里不再保留这些字节时，接收端重置流（`holes_unrecoverable`），
