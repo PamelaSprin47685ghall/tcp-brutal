@@ -948,6 +948,10 @@ struct tbt_session
     u64 recv_partial_discard;            /* carrier release, serialised */
     /* C3 counters (DESIGN.md §8.7). */
     atomic64_t carrier_lost, carrier_replaced, carrier_retired;
+    /* Stream resets, split by cause so the containment rule is measurable:
+     * stream_reset_tcp_failed may only grow when every carrier has failed,
+     * stream_reset_user when the application closes. */
+    atomic64_t stream_reset_tcp_failed, stream_reset_user;
     atomic64_t carrier_alloc_fail, connect_fail;
     /* A dial that outlived one TBT_CONNECT_TIMEOUT_MS wait. Non-zero means the
      * path's SYN round trip (or a SYN retransmission) is longer than one

@@ -766,6 +766,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                     min_t(u64, READ_ONCE(s->retx_bytes) * 1000000 / app_bytes,
                           1000000) : 0;
                 seq_printf(m, "tunnel %llu c3 n=%u up=%u lost=%llu replaced=%llu "
+                              "stream_reset_tcp_failed=%llu stream_reset_user=%llu "
                               "spare_activated=%llu alloc_fail=%llu "
                               "port_exhaust=%llu port_alloc_fail=%llu connect_fail=%llu "
                               "connect_retry=%llu "
@@ -794,6 +795,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "dead_release=%u carrier_retired=%llu\n",
                            t->cfg.id, n, up, tbt_stat_read(&s->carrier_lost),
                            tbt_stat_read(&s->carrier_replaced),
+                           tbt_stat_read(&s->stream_reset_tcp_failed),
+                           tbt_stat_read(&s->stream_reset_user),
                            READ_ONCE(s->spare_activated),
                            tbt_stat_read(&s->carrier_alloc_fail),
                            tbt_stat_read(&s->port_exhaust),

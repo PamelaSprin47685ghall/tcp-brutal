@@ -1602,6 +1602,32 @@ void tbt_carrier_stall(struct tbt_session *sess, struct tbt_carrier *c)
                         c->index);
 }
 
+/* True when no slot can still carry bytes: every carrier in sess->car[] has
+ * been marked stopping. This is the only carrier-side state that may reset a
+ * stream. One dead path is a repath, and a slot whose replacement is still
+ * dialling holds a fresh, non-stopping object, so neither counts as a failure
+ * of the transport. Called from tbt_carrier_lost(), which may run in softirq,
+ * so it uses only RCU and refcounts. */
+static bool tbt_carriers_all_dead(struct tbt_session *sess)
+{
+    int i;
+
+    for (i = 0; i < sess->n_car; i++)
+    {
+        struct tbt_carrier *c = tbt_carrier_get(sess, (u8)i);
+
+        if (!c)
+            continue;
+        if (!atomic_read(&c->stopping))
+        {
+            tbt_carrier_put(c);
+            return false;
+        }
+        tbt_carrier_put(c);
+    }
+    return true;
+}
+
 /* Mark a carrier unusable once, count it, and ask the replacement worker to
  * put a new one at the same index. Safe from work, softirq and /proc context;
  * it never sleeps. */
@@ -1658,11 +1684,16 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c)
      * fail the stream cleanly after a bounded number of rounds. */
     if (sess->join_retries < U8_MAX)
         sess->join_retries++;
-    if (sess->join_retries > 20)
+    /* Containment: a tunnel reset must be a subset of a TCP failure. One dead
+     * path is a repath, so it never resets a stream while any other carrier
+     * can still carry bytes. Only a session whose every carrier has failed
+     * may reset its streams here. */
+    if (sess->join_retries > 20 && tbt_carriers_all_dead(sess))
     {
         struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
         int n, i;
 
+        atomic64_inc(&sess->stream_reset_tcp_failed);
         n = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
         for (i = 0; i < n; i++)
         {
