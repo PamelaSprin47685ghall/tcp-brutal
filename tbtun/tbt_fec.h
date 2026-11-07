@@ -407,6 +407,16 @@ static inline int tbt_fec_deliver_step(u64 off, u16 len, u64 rx_next)
     return 0;
 }
 
+/* A block contributes stream bytes only when it belongs to the super-block
+ * being delivered and is ready. A group with no packet in the final
+ * super-block has no block at all (used == false); the delivery walk must
+ * skip it, not read its stale buffer. */
+static inline bool tbt_fec_blk_deliverable(bool used, bool ready,
+                                           u64 block_id, u64 s)
+{
+    return used && ready && block_id == s;
+}
+
 /* ------------------------------------------------------------------ *
  * Dynamic parameters
  * ------------------------------------------------------------------ */

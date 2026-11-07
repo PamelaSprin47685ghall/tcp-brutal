@@ -979,9 +979,11 @@ struct tbt_session
     atomic64_t fec_decode_nomem;      /* codec workspace allocation failed */
     atomic64_t fec_deliver_nomem;     /* delivery allocation failed: retry */
     atomic64_t fec_deliver_dup;       /* share already in the stream: realign */
+    atomic64_t fec_deliver_ooo;       /* ordered walk found a hole: stop */
     atomic64_t fec_deliver_bad;       /* delivery offset overflow */
     atomic64_t fec_dup_share;         /* share for a slot already present */
     atomic64_t fec_late_share;        /* share for a block already ready */
+    atomic64_t fec_late_data;         /* late DATA whose slot is still absent */
     atomic64_t fec_pad_share;         /* empty-block marker received */
     atomic64_t fec_epoch_conflict;    /* PARITY shape disagrees with block */
     /* A share sits in a slot the block's stated cut says holds no stream

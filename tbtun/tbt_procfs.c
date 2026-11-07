@@ -952,8 +952,10 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                 seq_printf(m, "tunnel %llu c10 fec_decode_blocks=%llu "
                               "fec_decode_recovered=%llu fec_decode_nomem=%llu "
                               "fec_deliver_nomem=%llu fec_deliver_dup=%llu "
+                              "fec_deliver_ooo=%llu "
                               "fec_deliver_bad=%llu "
                               "fec_dup_share=%llu fec_late_share=%llu "
+                              "fec_late_data=%llu "
                               "fec_pad_share=%llu fec_epoch_conflict=%llu "
                               "fec_slot_past_cut=%llu fec_fin_bad=%llu "
                               "fec_ack_bad=%llu fec_tx_share_gap=%llu "
@@ -964,9 +966,11 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_decode_nomem),
                            tbt_stat_read(&s->fec_deliver_nomem),
                            tbt_stat_read(&s->fec_deliver_dup),
+                           tbt_stat_read(&s->fec_deliver_ooo),
                            tbt_stat_read(&s->fec_deliver_bad),
                            tbt_stat_read(&s->fec_dup_share),
                            tbt_stat_read(&s->fec_late_share),
+                           tbt_stat_read(&s->fec_late_data),
                            tbt_stat_read(&s->fec_pad_share),
                            tbt_stat_read(&s->fec_epoch_conflict),
                            tbt_stat_read(&s->fec_slot_past_cut),

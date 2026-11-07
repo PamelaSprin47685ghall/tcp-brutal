@@ -52,6 +52,21 @@ and moves independently of the module version.
   dropped the share and still added `len`, so `deliver_bytes` (and the ACK)
   could name bytes the application never received. The branch is defensive:
   the ordered walk only reaches it when the cursor and the socket disagree.
+- FEC receive, unordered delivery: `tbt_rx_fec_deliver()` no longer inserts a
+  share into the reorder tree when the ordered walk's offset is past
+  `rx_next`. That path delivered bytes out of order, so the first divergence
+  corrupted the rest of the stream. A hole now returns `2`, the walk counts
+  `fec_deliver_ooo`, stops the FEC receiver and resets the stream; a partial
+  overlap returns `1` and is treated as a duplicate. The tree was the last
+  way for an FEC stream to deliver a byte that was not the next source byte.
+- FEC receive, empty final group: the final super-block may leave a group with
+  no packet. `tbt_fec_super_ready_locked()` skips such a group only when no
+  block exists for it; a block that does exist must still be ready. The
+  delivery walk now checks `tbt_fec_blk_deliverable()` (used && ready &&
+  block_id == s) before reading a slot, so a stale buffer can never be
+  delivered as stream bytes. `fec_late_data` names a late DATA share whose
+  real slot is still absent (the ready rule makes it impossible; the counter
+  exists so a field run can prove it).
 
 ## [0.2.0] - 2026-11-07
 

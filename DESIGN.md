@@ -342,6 +342,19 @@ container:
   the length a second time; otherwise the ACK named bytes the application never
   received. In the ordered walk this branch is defensive: only a cursor that
   lost sync can reach it.
+- **The walk never delivers out of order.** `tbt_rx_fec_deliver()` used to
+  insert a share into the stream's reorder tree when the walk's offset was
+  past `rx_next`. That made one bad length or cursor jump corrupt every later
+  byte. The FEC path is ordered: a hole returns `2`, the walk counts
+  `fec_deliver_ooo`, stops the FEC receiver and resets the stream; a partial
+  overlap returns `1` and is a duplicate. The reorder tree remains for the
+  old ARQ, never for FEC.
+- **An absent final group contributes nothing; a present one must be ready.**
+  The final super-block may leave a group with no packet. The readiness check
+  skips that group only when no block exists for it; a block that exists must
+  still be ready. The delivery walk additionally requires
+  `used && ready && block_id == s` before reading a slot, so a stale block
+  buffer can never be handed to the application as stream bytes.
 - **The stall is bounded.** This wire has no NACK and no retransmission: a
   share that never arrived is never fetched. A super-block that is still not
   ready after `TBT_FEC_STALL_MS` (30 s) with the stream's end known is

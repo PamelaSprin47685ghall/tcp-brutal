@@ -1076,6 +1076,7 @@ static bool tbt_fec_super_ready_locked(const struct tbt_fec_rx *rx, u64 s)
     {
         struct tbt_fec_blk *b;
 
+        b = tbt_fec_rx_blk((struct tbt_fec_rx *)rx, group, s);
         if (rx->total_known)
         {
             u64 final = tbt_fec_final_block_of_total(rx->total_pkts,
@@ -1084,9 +1085,15 @@ static bool tbt_fec_super_ready_locked(const struct tbt_fec_rx *rx, u64 s)
             if (s == final &&
                 !tbt_fec_group_tail_len(rx->total_pkts, rx->groups, rx->n,
                                         group))
-                continue;
+            {
+                /* The final super-block may leave a group with no packet.
+                 * Skip it only when no block was ever placed for it; a block
+                 * that does exist must still be ready, or its bytes would be
+                 * skipped while the frontier advanced. */
+                if (!b->used || b->block_id != s)
+                    continue;
+            }
         }
-        b = tbt_fec_rx_blk((struct tbt_fec_rx *)rx, group, s);
         if (!b->used || !b->ready || b->block_id != s)
             return false;
     }
@@ -1247,6 +1254,9 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
                 int err;
 
                 b = tbt_fec_rx_blk(rx, group, s);
+                if (!tbt_fec_blk_deliverable(b->used, b->ready, b->block_id,
+                                             s))
+                    continue;
                 /* A block that was closed early has fewer real shares than n;
                  * the rest are the encoder's zero padding and carry no stream
                  * bytes. A marker block has no real share at all. */
@@ -1342,6 +1352,30 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
                     spin_unlock_bh(&rx->lock);
                     delivered = true; /* the ACK may now name the real bytes */
                     continue;
+                }
+                if (err == 2)
+                {
+                    /* The ordered walk found a hole: the caller's cursor ran
+                     * ahead of the stream socket. Queueing that share in the
+                     * reorder tree would deliver bytes out of order, which is
+                     * the silent corruption this walk exists to prevent.
+                     * Stop the FEC receiver and reset the stream instead. */
+                    u64 frontier;
+
+                    spin_lock_bh(&st->rx_lock);
+                    frontier = READ_ONCE(st->rx_next);
+                    spin_unlock_bh(&st->rx_lock);
+                    atomic64_inc(&sess->fec_deliver_ooo);
+                    pr_info_ratelimited("tbtun: fec ordered walk hole: super %llu p=%u group=%u off=%llu frontier=%llu\n",
+                                        s, p, group,
+                                        off - rx->stream_base, frontier);
+                    spin_lock_bh(&rx->lock);
+                    rx->stopping = true;
+                    spin_unlock_bh(&rx->lock);
+                    atomic64_inc(&sess->holes_unrecoverable);
+                    tbt_stream_kill(st, TBT_ST_HOLE);
+                    tbt_stream_put(st);
+                    return 0;
                 }
                 if (err == -EPROTO)
                     atomic64_inc(&sess->fec_deliver_bad);
@@ -1711,6 +1745,14 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         /* The block is immutable once ready: a duplicate or late share must
          * not change a byte that may already be on its way to the stream. */
         atomic64_inc(&sess->fec_late_share);
+        /* A DATA share for a real slot that is still absent would mean the
+         * block became ready without it. The ready rule (ndata >= real) makes
+         * this impossible; count it separately so a field run can tell it
+         * from the normal parity-after-complete case. */
+        if (h.type == TBT_FEC_DATA &&
+            share < tbt_fec_blk_real_len(rx, group, b) &&
+            !b->dpresent[share])
+            atomic64_inc(&sess->fec_late_data);
         spin_unlock_bh(&rx->lock);
         return 0;
     }
@@ -1747,11 +1789,10 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                        rx->s - h.payload_len);
             b->dlen[share] = h.payload_len;
             b->dpresent[share] = 1;
-            /* ndata is a cached count; a new present share inside the real
-             * range advances it without rescanning the block. A share outside
-             * the cached real length is padding for a shape the block no
-             * longer has, and the next counts pass will drop it. */
-            if (share < b->count_real)
+            /* ndata counts present shares inside the block's current real
+             * range. A share outside it is padding for a shape the block no
+             * longer has, and the next counts pass drops it. */
+            if (share < tbt_fec_blk_real_len(rx, group, b))
                 b->ndata++;
             if (h.flags & TBT_FEC_FF_LAST)
             {

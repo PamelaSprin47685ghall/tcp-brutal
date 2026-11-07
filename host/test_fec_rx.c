@@ -21,6 +21,7 @@
 #include <string.h>
 
 #include "tbt_fec.h"
+#include "tbt_crypto.h"
 
 #define S 64      /* slot size: the model uses a short slot, the code is size-agnostic */
 #define N 4       /* data shares per block */
@@ -283,6 +284,85 @@ static void test_deliver_step(void)
     ok(memcmp(out + off, src + off, S) == 0,
        "step: realigned share is the source prefix");
     ok_size(off + S, 2 * S, "step: real bytes after a duplicate are kept");
+    ok(tbt_fec_deliver_step(0, S, N * S) == 1,
+       "step: late share after a complete block");
+    ok(tbt_fec_deliver_step(N * S, S, N * S) == 0,
+       "step: next real share after a complete block");
+}
+
+/* ------------------------------------------------------------------ *
+ * 1c. Empty block positions: an absent group contributes no bytes.
+ * ------------------------------------------------------------------ */
+
+static void test_empty_block_position(void)
+{
+    ok(!tbt_fec_blk_deliverable(false, false, 0, 0), "empty: absent block");
+    ok(!tbt_fec_blk_deliverable(false, true, 0, 0), "empty: absent but flagged");
+    ok(!tbt_fec_blk_deliverable(true, false, 0, 0),
+       "empty: present but not ready");
+    ok(!tbt_fec_blk_deliverable(true, true, 1, 0), "empty: wrong block id");
+    ok(tbt_fec_blk_deliverable(true, true, 0, 0), "empty: ready block delivers");
+}
+
+/* ------------------------------------------------------------------ *
+ * 1d. The recovered share survives the crypto layer unchanged.
+ * ------------------------------------------------------------------ */
+
+static void test_crypto_roundtrip(void)
+{
+    /* Only the last real share may be short: the walk concatenates shares,
+     * so a short share in the middle would make the model's S-aligned source
+     * layout disagree with the delivered stream (the packetizer never emits
+     * one either). */
+    static const u16 len[N] = {S, S, S, 21};
+    struct tbt_crypto_ctx ctx;
+    struct blk b;
+    u8 key[TBT_CRYPTO_KEY_LEN];
+    u8 nonce[TBT_CRYPTO_NONCE_LEN];
+    u8 out[N * S];
+    u64 last_seq = 3 * 32 + 1; /* group 1, last real share */
+    int i, refused;
+    size_t n;
+
+    for (i = 0; i < (int)sizeof(key); i++)
+        key[i] = (u8)(0x40 + i);
+    for (i = 0; i < (int)sizeof(nonce); i++)
+        nonce[i] = (u8)(0xa0 + i);
+    ok(tbt_crypto_init(&ctx, key, nonce, 0) == 0, "crypto init");
+
+    blk_init(&b, 0, len);
+    blk_encode(&b);
+    b.nreal = N;
+    b.short_len = 21;
+
+    /* Encrypt exactly as tbt_fec_make_record(): DATA uses its own seq,
+     * PARITY the block's last real seq and share_index n+i. */
+    for (i = 0; i < N; i++)
+        ok(tbt_crypto_body_xor_share(&ctx, (u64)i, false, (u16)i,
+                                     b.data[i], len[i]) == 0,
+           "crypto encrypt DATA");
+    for (i = 0; i < M; i++)
+        ok(tbt_crypto_body_xor_share(&ctx, last_seq, true, (u16)(N + i),
+                                     b.parity[i], S) == 0,
+           "crypto encrypt PARITY");
+
+    /* The receiver decrypts with the same header fields. */
+    for (i = 0; i < N; i++)
+        ok(tbt_crypto_body_xor_share(&ctx, (u64)i, false, (u16)i,
+                                     b.data[i], len[i]) == 0,
+           "crypto decrypt DATA");
+    for (i = 0; i < M; i++)
+        ok(tbt_crypto_body_xor_share(&ctx, last_seq, true, (u16)(N + i),
+                                     b.parity[i], S) == 0,
+           "crypto decrypt PARITY");
+
+    /* One lost DATA share: recovery must reproduce the source byte for byte. */
+    b.dpresent[1] = 0;
+    ok(blk_recover(&b) == 0, "crypto: lost share recovers");
+    n = blk_deliver(&b, out, sizeof(out), &refused);
+    ok(!refused, "crypto: recovered block delivers");
+    ok_size(n, 3 * S + 21, "crypto: recovered length");
+    ok_prefix(out, n, "crypto: recovered bytes are the source prefix");
 }
 
 /* ------------------------------------------------------------------ *
@@ -515,6 +595,8 @@ int main(void)
     src_init();
     test_share_len();
     test_deliver_step();
+    test_empty_block_position();
+    test_crypto_roundtrip();
     test_full_block();
     test_short_shares();
     test_slot_past_cut();

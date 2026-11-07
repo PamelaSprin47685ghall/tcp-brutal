@@ -352,15 +352,18 @@ int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len)
         tbt_rx_pull_locked(st);
         queued = true;
     }
-    else if (!tbt_rx_tree_insert_locked(st, fr))
+    else
     {
+        /* The FEC walk is ordered: the next share starts exactly at rx_next.
+         * A partial overlap is a duplicate prefix (return 1); a hole means
+         * the caller's cursor ran ahead of the socket (return 2). Neither may
+         * be queued in the reorder tree: that would deliver out of order and
+         * silently corrupt the stream. */
+        int step = off < st->rx_next ? 1 : 2;
+
         spin_unlock_bh(&st->rx_lock);
         kfree(fr);
-        return 0;
-    }
-    else if (!st->hole_since_ns)
-    {
-        st->hole_since_ns = ktime_get_ns();
+        return step;
     }
     spin_unlock_bh(&st->rx_lock);
     if (queued)
