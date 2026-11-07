@@ -135,9 +135,14 @@ u16 tbt_fec_bitmap_count(const u8 bm[TBT_FEC_BITMAP_BYTES]);
 
 struct tbt_fec_ack
 {
-    u64 next_deliver;
+    u64 next_deliver;   /* packet frontier: the sender's credit window */
     u32 credit_packets;
     u32 rtt_us;
+    /* Stream-relative bytes the receiver has handed to its output socket.
+     * The sender's tx_ack is this value, not next_deliver * S: a short share
+     * or a block closed early makes the packet frontier name bytes that were
+     * never delivered, and the multiplication would acknowledge them. */
+    u64 deliver_bytes;
 };
 
 struct tbt_fec_nack_item
@@ -339,6 +344,67 @@ static inline u16 tbt_fec_group_tail_len(u64 total_pkts, u16 groups, u16 n,
         return 0;
     last_local = (total_pkts - 1 - group) / groups;
     return (u16)(last_local - final_block * n + 1);
+}
+
+/* Delivery length of share p in a block whose real share count is `real`.
+ *
+ * A share that arrived carries its own payload_len (dlen); a share recovered
+ * from parity has none. Only the block's last real position may be shorter
+ * than S, and the parity's epoch names that length (short_len). A recovered
+ * share before that position is S bytes.
+ *
+ * Returns 0 when the slot holds no stream byte. The caller must not deliver
+ * such a slot, and must refuse the block outright when the slot holds a
+ * present share (the cut and the shares disagree).
+ *
+ * The one shape this cannot name is a short share written mid-block and then
+ * recovered: its length never reached the wire. tbt_fec_blk_decode() refuses
+ * that block while the short share is still visible; once it is the missing
+ * one, no record states its length. The packetizer never writes such a share
+ * -- it closes the block after every short packet -- so the case is a hostile
+ * or foreign peer, and the block-level refusal is the bound. */
+static inline u16 tbt_fec_rx_share_len(u16 dlen, u16 short_len, u16 p,
+                                       u16 real, u16 s)
+{
+    if (p >= real)
+        return 0; /* padding: no stream byte lives here */
+    if (dlen)
+        return dlen;
+    if (p + 1 == real && short_len)
+        return short_len;
+    return s;
+}
+
+/* True when a PARITY record has already fixed the block's cut and `share`
+ * sits at or past it. Placing such a share would make it invisible to the
+ * delivery walk, which skips every slot at or past the cut, while the packet
+ * frontier and the ACK ran past it -- a silent 8192-byte deletion. The
+ * receiver refuses the share instead. Before the cut is fixed any share is
+ * legal, because win_len is not yet known. */
+static inline bool tbt_fec_share_past_cut(bool win_len_set, u16 nreal,
+                                          u16 share)
+{
+    return win_len_set && share >= nreal;
+}
+
+/* One delivery step against the stream socket's accepted frontier.
+ * `off` is stream-relative (already minus stream_base), `rx_next` is what
+ * that stream has accepted. Returns:
+ *   0        deliver this share and advance the cursor by len
+ *   1        duplicate/expired: its bytes are already in the stream; do not
+ *            advance the caller's cursor, realign it to rx_next instead
+ *  -EPROTO   offset overflow
+ *
+ * The FEC walk is ordered, so a duplicate here means the cursor and the
+ * socket disagree. Treating it as delivered would advance deliver_bytes a
+ * second time and the ACK would name bytes the application never received. */
+static inline int tbt_fec_deliver_step(u64 off, u16 len, u64 rx_next)
+{
+    if (off > ~(u64)0 - len)
+        return -EPROTO;
+    if (off + len <= rx_next)
+        return 1;
+    return 0;
 }
 
 /* ------------------------------------------------------------------ *

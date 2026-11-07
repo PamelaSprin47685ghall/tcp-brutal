@@ -310,6 +310,12 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
     }
 }
 
+/* Fallback only. A 0x1003 ACK carries deliver_bytes, which is the byte count
+ * the receiver actually delivered; this multiplication is kept for a caller
+ * that holds no such field and for the host contract tests. It is exact only
+ * while every block is full and no block was closed early, because
+ * next_deliver is a packet index and a short share or an empty slot leaves a
+ * gap between that index and the byte count. */
 u64 tbt_fec_ack_bytes(u64 next_deliver, u64 pkt_base, u64 tx_seq)
 {
     u64 rel;
@@ -413,6 +419,7 @@ int tbt_fec_ack_pack(const struct tbt_fec_ack *a, u8 out[TBT_FEC_ACK_LEN])
     tbt_put_u64(out + 0, a->next_deliver);
     tbt_put_u32(out + 8, a->credit_packets);
     tbt_put_u32(out + 12, a->rtt_us);
+    tbt_put_u64(out + 16, a->deliver_bytes);
     return 0;
 }
 
@@ -423,6 +430,7 @@ int tbt_fec_ack_unpack(const u8 in[TBT_FEC_ACK_LEN], struct tbt_fec_ack *a)
     a->next_deliver = tbt_get_u64(in + 0);
     a->credit_packets = tbt_get_u32(in + 8);
     a->rtt_us = tbt_get_u32(in + 12);
+    a->deliver_bytes = tbt_get_u64(in + 16);
     return 0;
 }
 

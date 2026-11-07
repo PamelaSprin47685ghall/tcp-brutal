@@ -676,6 +676,13 @@ struct tbt_fec_rx
     bool deliver_partial;   /* resume the walk at (deliver_p, deliver_g) */
     u16 deliver_p;          /* packet index inside next_super */
     u16 deliver_g;          /* group index inside that packet */
+    /* A super-block that cannot become ready is permanent on this wire: no
+     * NACK and no retransmission exists, so the shares that would complete it
+     * never arrive. progress_super/progress_ns time that state; a stream that
+     * stays there past TBT_FEC_STALL_MS is killed so the application sees an
+     * error instead of a silent stall. */
+    u64 progress_super;
+    u64 progress_ns;
     u8 *rec;                /* m * s: recovered-slot scratch */
     u8 *zero;               /* s zero bytes: padding and absent parity */
     u8 dpresent_snap[TBT_FEC_MAX_SHARES];
@@ -971,11 +978,17 @@ struct tbt_session
     atomic64_t fec_decode_recovered;  /* shares recovered from parity */
     atomic64_t fec_decode_nomem;      /* codec workspace allocation failed */
     atomic64_t fec_deliver_nomem;     /* delivery allocation failed: retry */
+    atomic64_t fec_deliver_dup;       /* share already in the stream: realign */
     atomic64_t fec_deliver_bad;       /* delivery offset overflow */
     atomic64_t fec_dup_share;         /* share for a slot already present */
     atomic64_t fec_late_share;        /* share for a block already ready */
     atomic64_t fec_pad_share;         /* empty-block marker received */
     atomic64_t fec_epoch_conflict;    /* PARITY shape disagrees with block */
+    /* A share sits in a slot the block's stated cut says holds no stream
+     * byte: the sender's win_len and its own DATA records disagree. Skipping
+     * the slot would delete its payload while the ACK ran past it, so the
+     * block is refused and this counter names the reason. */
+    atomic64_t fec_slot_past_cut;
     atomic64_t fec_fin_bad;           /* FIN pkt_end/pkt_base invalid */
     atomic64_t fec_ack_bad;           /* ACK frontier/credit clamped */
     atomic64_t fec_tx_share_gap;      /* sender share sequence skipped */

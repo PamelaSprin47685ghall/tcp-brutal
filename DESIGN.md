@@ -254,9 +254,9 @@ rather than in a new field so the HELLO body length is unchanged.
 | `http-kal-drip` | identical headers, identical framing | one **byte per `drip_ms`** when idle (a legal 1-byte chunk every `drip_ms`), volume `≈ 1 B/drip_ms` | the `M` spares: an idle flow that a classifier would reap or de-prioritise is kept alive with ~8 bit/s (1 B/s payload) instead of a burst every 5000 ms |
 | `raw` | one frame per record, no HTTP bytes at all | none needed | second hop / VPS-to-home leg, loopback tests, or any line where QoS does not apply. Also the only safe profile inside WireGuard when the classifier is SNI-based (§16.5) |
 
-### FEC v6 over the container (T0 0x1002)
+### FEC v6 over the container (T0 0x1003)
 
-FEC v6 is an independent 40-byte record format (`conv=0x1002`; 0.1.0 used
+FEC v6 is an independent 40-byte record format (`conv=0x1003`; 0.1.0 used
 `0x1001`), not a wider old frame. It rides the same carriers and the same HTTP
 container:
 
@@ -268,11 +268,11 @@ container:
 - Control records (ACK/NACK/FEC_CFG/FEC_FBK) use the same one-chunk-per-record
   rule. They are written only at record boundaries; a partial record is never
   interleaved with a control frame.
-- **PARITY block marker (`TBT_FEC_CONV` 0x1002).** There is no
+- **PARITY block marker (`TBT_FEC_CONV` 0x1002, unchanged in 0x1003).** There is no
   4-byte marker and no magic number. A marker is a set of values inside the
   40-byte `struct tbt_fec_hdr`: `type = TBT_FEC_PARITY` (0x31), `flags = 0`,
   `share_index = n` (parity 0), `epoch = 0`, `win_len = 0`, `payload_len = 0`,
-  `conv = 0x1002`, `payload_crc32c = 0` (the CRC32C of an empty payload).
+  `conv = 0x1003`, `payload_crc32c = 0` (the CRC32C of an empty payload).
   `header_crc32c` still covers +0..+35 and must match. The receiver accepts
   `win_len == 0` only with `payload_len == 0 && epoch == 0`, rejects a marker
   for a block that already holds DATA/parity or `win_len_set`, and rejects DATA
@@ -314,7 +314,11 @@ container:
   share**, not the packet index times `S`: with short shares the two differ,
   and the packet-index form would leave a hole after every flushed packet.
   The receiver keeps that running offset (`deliver_bytes`) and the sender's
-  ACK frontier stays a packet count.
+  ACK frontier stays a packet count. Since 0x1003 the ACK carries both: the
+  frontier drives the credit window, and `deliver_bytes` is the sender's
+  `tx_ack`. Deriving `tx_ack` from the frontier (`next_deliver * S`) is exact
+  only while every block is full; a short share or a block closed early made it
+  acknowledge bytes that were never delivered, so retention dropped them.
 - A recovered share has no `payload_len` of its own, and the parity that
   recovers it can arrive before the share does (they ride different carriers),
   so a guess of `S` would hand the application the block's zero padding. The
@@ -324,6 +328,27 @@ container:
   HELLO conv one). A block that needs recovery, holds a short share and states
   no length -- a peer from before that field -- is refused
   (`fec_short_unknown`), and the sender's stall timer is the bound.
+- **A slot past the block's stated cut is a conflict, not padding.** `win_len`
+  names the block's real share count, so a slot at or past it carries no
+  stream byte and is skipped. A share that is actually present there means the
+  cut and the sender's own DATA records disagree; skipping it would delete its
+  payload while the packet frontier and the ACK ran past it. The block is
+  refused and `fec_slot_past_cut` names the reason. The same rule applies to a
+  slot past the stream's last packet.
+- **A duplicate share does not advance the byte cursor.** The stream socket
+  reports a share whose bytes it already accepted as a duplicate
+  (`tbt_rx_fec_deliver()` returns 1). The walk counts `fec_deliver_dup`,
+  realigns `deliver_bytes` to the socket's accepted frontier, and does not add
+  the length a second time; otherwise the ACK named bytes the application never
+  received. In the ordered walk this branch is defensive: only a cursor that
+  lost sync can reach it.
+- **The stall is bounded.** This wire has no NACK and no retransmission: a
+  share that never arrived is never fetched. A super-block that is still not
+  ready after `TBT_FEC_STALL_MS` (30 s) with the stream's end known is
+  therefore permanent, and the stream is killed (`TBT_ST_HOLE`,
+  `holes_unrecoverable`) so the application sees a reset instead of a silent
+  wait. Before the end is known the same budget only re-times, because an idle
+  peer looks identical to a lost share.
 - **One live stream per session.** A FEC record carries no stream id, and the
   plane names its stream with `far_sid`, so a second live stream would have its
   bytes delivered to whichever stream is current. A two-connection protocol --
@@ -2494,12 +2519,13 @@ makes this design different from a generic L4 tunnel.
 
 Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the released tree reports
 `0.2.0`. The wire revision `TBT_CONV=0x0006`
-and the FEC record revision `TBT_FEC_CONV=0x1002` bump independently of it. HELLO
+and the FEC record revision `TBT_FEC_CONV=0x1003` bump independently of it. HELLO
 `body[0]` carries `TBT_WIRE_VERSION=1`, not the module version, so the module
 version and the wire version are decoupled. 0.2.0 has flipped `TBT_CONV` to
-0x0006 (FIN carries a 16-byte body) and `TBT_FEC_CONV` to 0x1002 (PARITY may be
-an empty-block marker); 0.1.0 and 0.2.0 do not interoperate, because the first
-HELLO is rejected by the conv check.
+0x0006 (FIN carries a 16-byte body); the unreleased tree raises `TBT_FEC_CONV`
+to 0x1003 (the ACK body is 24 bytes and carries `deliver_bytes`). Peers of
+different wire revisions do not interoperate, because the first HELLO is
+rejected by the conv check.
 
 **Packaging.** `tbtun/tbt_uapi.h` is the single version authority: the
 `TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/2/0`). `scripts/mkdkmsconf.sh`
@@ -2559,7 +2585,7 @@ covers; no known leak remains but a long-soak kref/RCU audit is still worthwhile
 | R16 | Memory at 10 Gbps | `tx_window_bytes` bounds retention and the frame queue (`txq_max = tx_window + 8 chunks`) and sizes the carrier buffers from the same number; `rx_reorder_bytes` bounds the reorder tree per stream and per session; the 64 MiB delivery ring is the largest fixed cost and costs about 2× its payload in physical memory. Per session the bound is about 3× window + `rx_reorder_bytes` + 64 MiB per stream (§5.4). T8 measures the peak. |
 | R17 | Jitter adds RTT | The reorder tree is consulted only past a gap; the in-order path adds zero delay (T1 asserts). |
 | R18 | `inet_csk_reset_xmit_timer` etc. drift | Not used; stock timers only. |
-| R19 | 0.1.0 and 0.2.0 peers mixed | Both wire revisions are hard-rejected: the first HELLO fails `tbt_hdr_check()` (0x0005 vs 0x0006), and a FEC record fails `tbt_fec_hdr_check()` (0x1001 vs 0x1002). `rx_parse_proto`/`fec_proto_fail` make it visible. Upgrade both ends together; rollback is the 0.1.0 binary. |
+| R19 | 0.1.0 and 0.2.0 peers mixed | Both wire revisions are hard-rejected: the first HELLO fails `tbt_hdr_check()` (0x0005 vs 0x0006), and a FEC record fails `tbt_fec_hdr_check()` (0x1001/0x1002 vs 0x1003). `rx_parse_proto`/`fec_proto_fail` make it visible. Upgrade both ends together; rollback is the 0.1.0 binary. |
 
 ---
 

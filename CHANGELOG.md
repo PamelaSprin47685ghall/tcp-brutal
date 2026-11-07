@@ -5,6 +5,54 @@ and moves independently of the module version.
 
 ## [Unreleased]
 
+### Changed
+
+- FEC wire: `TBT_FEC_CONV` moves from `0x1002` to `0x1003`. The ACK body
+  grows from 16 to 24 bytes and carries `deliver_bytes`, the stream-relative
+  byte count the receiver actually handed to its output socket. The first 16
+  bytes keep their `0x1002` offsets. The sender's `tx_ack` is now that value
+  instead of `next_deliver * S`: a short share or a block closed early makes
+  the packet frontier name bytes that were never delivered, and the
+  multiplication acknowledged them, so retention and the transmit window
+  treated undelivered bytes as delivered. 0.2.0 and this revision do not
+  interoperate.
+
+### Fixed
+
+- FEC receive, silent slot loss: the delivery walk skipped a slot whose index
+  was past the block's stated cut (`p >= real`) and, separately, a slot past
+  the stream's last packet (`seq >= total_pkts`) without a counter, while the
+  packet frontier still advanced by `groups * n` and the ACK followed it. A
+  present share in such a slot means the sender's cut and its own DATA records
+  disagree; the block is now refused and `fec_slot_past_cut` names it, so the
+  frontier cannot run past a payload that was never delivered.
+- FEC receive, undiagnosable stall: `fec_decode_blocks`, `fec_decode_recovered`,
+  `fec_decode_nomem`, `fec_deliver_nomem`, `fec_deliver_bad`, `fec_dup_share`,
+  `fec_late_share`, `fec_pad_share`, `fec_epoch_conflict`, `fec_slot_past_cut`,
+  `fec_fin_bad`, `fec_ack_bad`, `fec_tx_share_gap` and `fec_empty_block` are
+  exported in a new `/proc` line `c10`. The 1 GiB acceptance run reported
+  "every error counter is zero" while the stream lost three 8192-byte slots,
+  because the counters that name those losses were not exported.
+- FEC receive, bounded reset: a super-block that is still not ready after
+  `TBT_FEC_STALL_MS` (30 s) with the stream's end known cannot become ready --
+  this wire has no NACK and no retransmission -- so the stream is killed
+  (`TBT_ST_HOLE`, `holes_unrecoverable`) instead of leaving the application
+  waiting forever.
+- FEC receive, recovered length: `tbt_fec_rx_share_len()` is now the one
+  place that decides a slot's delivery length, and it lives in `tbt_fec.h` so
+  the host tests exercise it. A recovered share uses the parity epoch only at
+  the block's last real position; every earlier position is `S`.
+  `tbt_fec_blk_decode()` refuses a block whose short share sits anywhere but
+  that position, or whose epoch disagrees with the share it describes, rather
+  than delivering zero padding as data.
+- FEC receive, duplicate share: `tbt_rx_fec_deliver()` now reports a share
+  whose bytes the stream socket already accepted as `1` instead of `0`. The
+  delivery walk counts `fec_deliver_dup`, realigns `deliver_bytes` to
+  `rx_next`, and does not advance the cursor a second time. The old path
+  dropped the share and still added `len`, so `deliver_bytes` (and the ACK)
+  could name bytes the application never received. The branch is defensive:
+  the ordered walk only reaches it when the cursor and the socket disagree.
+
 ## [0.2.0] - 2026-11-07
 
 ### Changed

@@ -946,6 +946,34 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_ack_tx),
                            tbt_stat_read(&s->fec_ack_rx),
                            tbt_stat_read(&s->fec_credit_wait));
+                /* Every way a share or a block can be lost. Without these a
+                 * stalled FEC stream reports zero errors: the counters that
+                 * name the loss were simply not exported. */
+                seq_printf(m, "tunnel %llu c10 fec_decode_blocks=%llu "
+                              "fec_decode_recovered=%llu fec_decode_nomem=%llu "
+                              "fec_deliver_nomem=%llu fec_deliver_dup=%llu "
+                              "fec_deliver_bad=%llu "
+                              "fec_dup_share=%llu fec_late_share=%llu "
+                              "fec_pad_share=%llu fec_epoch_conflict=%llu "
+                              "fec_slot_past_cut=%llu fec_fin_bad=%llu "
+                              "fec_ack_bad=%llu fec_tx_share_gap=%llu "
+                              "fec_empty_block=%llu\n",
+                           t->cfg.id,
+                           tbt_stat_read(&s->fec_decode_blocks),
+                           tbt_stat_read(&s->fec_decode_recovered),
+                           tbt_stat_read(&s->fec_decode_nomem),
+                           tbt_stat_read(&s->fec_deliver_nomem),
+                           tbt_stat_read(&s->fec_deliver_dup),
+                           tbt_stat_read(&s->fec_deliver_bad),
+                           tbt_stat_read(&s->fec_dup_share),
+                           tbt_stat_read(&s->fec_late_share),
+                           tbt_stat_read(&s->fec_pad_share),
+                           tbt_stat_read(&s->fec_epoch_conflict),
+                           tbt_stat_read(&s->fec_slot_past_cut),
+                           tbt_stat_read(&s->fec_fin_bad),
+                           tbt_stat_read(&s->fec_ack_bad),
+                           tbt_stat_read(&s->fec_tx_share_gap),
+                           tbt_stat_read(&s->fec_empty_block));
                 seq_printf(m, "tunnel %llu c8 profile_mismatch=%llu http_parse_err=%llu "
                               "http_status_err=%llu http_req=%llu http_resp=%llu "
                               "pad_tx=%llu drip_tx=%llu\n",

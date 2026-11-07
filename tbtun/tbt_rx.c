@@ -29,6 +29,7 @@
 #include <net/inet_sock.h>
 
 #include "tbtun.h"
+#include "tbt_fec.h"
 #include "tbt_rec.h"
 
 /* The receiver's hole budget. Explicit config wins; auto is k x SRTT with
@@ -333,11 +334,15 @@ int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len)
     memcpy(fr->data, data, len);
 
     spin_lock_bh(&st->rx_lock);
-    if (off + len <= st->rx_next)
     {
-        spin_unlock_bh(&st->rx_lock);
-        kfree(fr);
-        return 0;
+        int step = tbt_fec_deliver_step(off, len, st->rx_next);
+
+        if (step)
+        {
+            spin_unlock_bh(&st->rx_lock);
+            kfree(fr);
+            return step;
+        }
     }
     if (off == st->rx_next)
     {

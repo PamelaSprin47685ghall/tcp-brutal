@@ -212,7 +212,8 @@ static void test_header_roundtrip(void)
            TBT_FEC_H_WINLEN == 24 && TBT_FEC_H_PAYLEN == 26 && TBT_FEC_H_CONV == 28 &&
            TBT_FEC_H_RESERVED == 30 && TBT_FEC_H_PAYCRC == 32 && TBT_FEC_H_HDRCRC == 36,
        "header offsets", NULL);
-    ok(TBT_FEC_CONV == 0x1002u, "TBT_FEC_CONV", NULL);
+    /* 0x1003 grows the ACK body to 24 bytes and adds deliver_bytes. */
+    ok(TBT_FEC_CONV == 0x1003u, "TBT_FEC_CONV", NULL);
 
     /* NULL arguments are refused, not dereferenced. */
     ok_int(tbt_fec_hdr_pack(NULL, wire), -EINVAL, "pack NULL header");
@@ -699,19 +700,23 @@ static void test_control(void)
     u8 fbuf[TBT_FEC_FBK_LEN];
     int n;
 
-    /* ACK: 16 bytes, little-endian. */
+    /* ACK: 24 bytes, little-endian. The first 16 keep their 0x1002 offsets;
+     * deliver_bytes sits at +16 so a reader of the frontier still parses. */
     memset(&a, 0, sizeof(a));
     a.next_deliver = 0x1122334455667788ULL;
     a.credit_packets = 0xdeadbeefu;
     a.rtt_us = 123456;
+    a.deliver_bytes = 0x0102030405060708ULL;
     ok_int(tbt_fec_ack_pack(&a, buf), 0, "ACK pack");
     ok_u64le(buf + 0, a.next_deliver, "ACK next_deliver at +0");
     ok_u32le(buf + 8, a.credit_packets, "ACK credit at +8");
     ok_u32le(buf + 12, a.rtt_us, "ACK rtt at +12");
+    ok_u64le(buf + 16, a.deliver_bytes, "ACK deliver_bytes at +16");
+    ok(TBT_FEC_ACK_LEN == 24, "ACK body is 24 bytes", NULL);
     memset(&a2, 0, sizeof(a2));
     ok_int(tbt_fec_ack_unpack(buf, &a2), 0, "ACK unpack");
     ok(a2.next_deliver == a.next_deliver && a2.credit_packets == a.credit_packets &&
-           a2.rtt_us == a.rtt_us,
+           a2.rtt_us == a.rtt_us && a2.deliver_bytes == a.deliver_bytes,
        "ACK round-trip", NULL);
     ok_int(tbt_fec_ack_pack(NULL, buf), -EINVAL, "ACK pack NULL");
     ok_int(tbt_fec_ack_unpack(NULL, &a2), -EINVAL, "ACK unpack NULL");

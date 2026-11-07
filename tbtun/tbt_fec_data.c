@@ -46,6 +46,13 @@
  * saturating sender, so bulk traffic still fills its packets, and far below
  * any round trip, so an interactive exchange pays one tick. */
 #define TBT_FEC_SHORT_MS 2
+/* A super-block that has not become ready for this long cannot become ready:
+ * this wire has no NACK and no retransmission, so a share that never arrived
+ * is never fetched. The bound is well above any recovery the parity can do
+ * (all shares of one block arrive within one carrier burst) and below curl's
+ * 120 s no-progress limit, so the application sees a reset instead of a
+ * silent stall. */
+#define TBT_FEC_STALL_MS 30000
 #define TBT_FEC_NONCE_GOLDEN 0x9e3779b97f4a7c15ULL
 /* The RX arena keeps at most one window of 1024 packets, and the ACK grants
  * exactly that: slots * groups * n reaches 1024 for every supported shape
@@ -914,26 +921,27 @@ static int tbt_fec_blk_decode(struct tbt_session *sess, u16 group,
         return 0;
     if (!ctx || have_parity < missing)
         return -EAGAIN;
-    /* A recovered share has no payload_len of its own; its delivery length is
-     * the block's last-real-share length from the parity's epoch field, or S
-     * when that is zero. A block that holds a short share and states no length
-     * (a peer from before the epoch field carried it) would have to be guessed,
-     * and the guess would hand the application the block's zero padding.
-     * Refuse it instead: the sender's stall timer is the bound, and the counter
-     * says why the stream stopped. */
-    if (!b->short_len)
+    /* A recovered share has no payload_len of its own, so the block's shape
+     * must name every length the delivery walk will use. Only the last real
+     * position may be shorter than S, and the parity's epoch must state that
+     * same length; every earlier position is S. A short share anywhere else,
+     * or an epoch that disagrees with the share it describes, leaves a
+     * recovered slot without a length, and a guess would hand the application
+     * the block's zero padding. Refuse the block instead of guessing. */
+    for (i = 0; i < real; i++)
     {
-        for (i = 0; i < real; i++)
+        u16 dl = b->dlen[i];
+
+        if (!rx->dpresent_snap[i] || !dl || dl >= rx->s)
+            continue;
+        if (i + 1 != real || b->short_len != dl)
         {
-            if (rx->dpresent_snap[i] && b->dlen[i] && b->dlen[i] < rx->s)
+            if (!b->short_unknown)
             {
-                if (!b->short_unknown)
-                {
-                    b->short_unknown = true;
-                    atomic64_inc(&sess->fec_short_unknown);
-                }
-                return -EAGAIN;
+                b->short_unknown = true;
+                atomic64_inc(&sess->fec_short_unknown);
             }
+            return -EAGAIN;
         }
     }
     for (i = 0, k = 0; i < real; i++)
@@ -958,7 +966,12 @@ static int tbt_fec_blk_decode(struct tbt_session *sess, u16 group,
     return rc < 0 ? -EAGAIN : 0;
 }
 
-static void tbt_fec_ack(struct tbt_session *sess, u64 next_deliver)
+/* next_deliver is the packet frontier the sender's credit window uses.
+ * deliver_bytes is the stream-relative byte count this receiver has actually
+ * handed over; it is the only value the sender may use as tx_ack, because a
+ * packet frontier can name bytes that no delivered share carried. */
+static void tbt_fec_ack(struct tbt_session *sess, u64 next_deliver,
+                        u64 deliver_bytes)
 {
     struct tbt_fec_hdr h;
     struct tbt_fec_ack a;
@@ -968,6 +981,7 @@ static void tbt_fec_ack(struct tbt_session *sess, u64 next_deliver)
 
     memset(&a, 0, sizeof(a));
     a.next_deliver = next_deliver;
+    a.deliver_bytes = deliver_bytes;
     /* The receiver buffers `slots` super-blocks; the credit must not exceed
      * that window, or the sender would overrun it and its shares would be
      * dropped as "too far ahead". */
@@ -1094,6 +1108,7 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
     struct tbt_stream *st;
     bool delivered = false;
     bool is_new = false;
+    bool blocked = false;
 
     if (READ_ONCE(rx->total_known) && !READ_ONCE(rx->total_pkts) &&
         !rx->deliver_partial)
@@ -1141,6 +1156,7 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
         bool known = READ_ONCE(rx->total_known);
         u64 total_pkts = READ_ONCE(rx->total_pkts);
 
+        blocked = false;
         /* Teardown: stop handing bytes to a stream that is being destroyed.
          * The ACK below still covers what was delivered before the flag. */
         if (READ_ONCE(rx->stopping))
@@ -1178,7 +1194,46 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
         }
         spin_unlock_bh(&rx->lock);
         if (!ready)
+        {
+            /* The walk stopped at a super-block that is not ready. Nothing on
+             * this wire repairs it: there is no NACK and no retransmission, so
+             * a share that never arrived is never fetched. Time the stall and
+             * arm the re-check; past the budget the block can never become
+             * ready, and leaving the application to wait forever is the
+             * silent failure this bound exists to end. */
+            u64 now = ktime_get_ns();
+            u64 budget = (u64)TBT_FEC_STALL_MS * NSEC_PER_MSEC;
+            u64 left_ms;
+
+            if (!rx->progress_ns)
+                rx->progress_ns = now;
+            if (now - rx->progress_ns >= budget && READ_ONCE(rx->total_known))
+            {
+                spin_lock_bh(&rx->lock);
+                rx->stopping = true;
+                spin_unlock_bh(&rx->lock);
+                pr_info_ratelimited("tbtun: fec stall: super %llu never became ready (total_pkts=%llu)\n",
+                                    s, READ_ONCE(rx->total_pkts));
+                atomic64_inc(&sess->holes_unrecoverable);
+                tbt_stream_kill(st, TBT_ST_HOLE);
+                break;
+            }
+            if (now - rx->progress_ns >= budget)
+            {
+                /* The stream's end is not known yet, so "not ready" may be an
+                 * idle peer rather than a lost share. Re-time instead of
+                 * killing, and re-check on the same budget. */
+                rx->progress_ns = now;
+                left_ms = TBT_FEC_STALL_MS;
+            }
+            else
+            {
+                left_ms = (budget - (now - rx->progress_ns)) / NSEC_PER_MSEC + 1;
+            }
+            tbt_session_arm(sess, TBT_SW_FEC_RX,
+                            msecs_to_jiffies(left_ms));
             break;
+        }
 
         start_p = rx->deliver_partial ? rx->deliver_p : 0;
         start_g = rx->deliver_partial ? rx->deliver_g : 0;
@@ -1191,21 +1246,50 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
                 u16 len, real;
                 int err;
 
-                if (known && seq >= total_pkts)
-                    continue;
                 b = tbt_fec_rx_blk(rx, group, s);
                 /* A block that was closed early has fewer real shares than n;
                  * the rest are the encoder's zero padding and carry no stream
                  * bytes. A marker block has no real share at all. */
                 real = tbt_fec_blk_real_len(rx, group, b);
                 if (p >= real)
+                {
+                    /* Padding carries no stream byte, so skipping it is
+                     * correct -- unless a share is actually present here. Then
+                     * the sender's cut and its DATA records disagree, and the
+                     * skip would delete that share's payload while the packet
+                     * frontier and the ACK ran past it. Refuse the block and
+                     * name the reason instead. */
+                    if (b->dpresent[p])
+                    {
+                        atomic64_inc(&sess->fec_slot_past_cut);
+                        blocked = true;
+                        break;
+                    }
                     continue;
-                if (b->dlen[p])
-                    len = b->dlen[p];
-                else if (b->short_len && p + 1 == real)
-                    len = b->short_len;
-                else
-                    len = rx->s;
+                }
+                if (known && seq >= total_pkts)
+                {
+                    /* Past the stream's last packet: no byte exists here.
+                     * A present share would mean the stream end is wrong. */
+                    if (b->dpresent[p])
+                    {
+                        atomic64_inc(&sess->fec_slot_past_cut);
+                        blocked = true;
+                        break;
+                    }
+                    continue;
+                }
+                len = tbt_fec_rx_share_len(b->dlen[p], b->short_len, p, real,
+                                           rx->s);
+                if (!len)
+                {
+                    /* A recovered share whose length no record stated, in a
+                     * block that also holds a short share. Guessing S would
+                     * hand the application the block's zero padding. */
+                    atomic64_inc(&sess->fec_short_unknown);
+                    blocked = true;
+                    break;
+                }
                 if (known && rx->total_bytes &&
                     seq + 1 == total_pkts)
                 {
@@ -1238,6 +1322,27 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
                     tbt_stream_put(st);
                     return -ENOMEM;
                 }
+                if (err == 1)
+                {
+                    /* The share's bytes are already in the stream (a duplicate
+                     * or an expired retry). Advancing off here would count
+                     * them twice and the ACK would acknowledge bytes the
+                     * application never received. Realign the cursor to what
+                     * the stream socket has actually accepted, then continue
+                     * with the next share. */
+                    u64 frontier;
+
+                    spin_lock_bh(&st->rx_lock);
+                    frontier = READ_ONCE(st->rx_next);
+                    spin_unlock_bh(&st->rx_lock);
+                    atomic64_inc(&sess->fec_deliver_dup);
+                    off = rx->stream_base + frontier;
+                    spin_lock_bh(&rx->lock);
+                    rx->deliver_bytes = off;
+                    spin_unlock_bh(&rx->lock);
+                    delivered = true; /* the ACK may now name the real bytes */
+                    continue;
+                }
                 if (err == -EPROTO)
                     atomic64_inc(&sess->fec_deliver_bad);
                 off += len;
@@ -1246,20 +1351,43 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
                 spin_unlock_bh(&rx->lock);
                 delivered = true;
             }
+            if (blocked)
+            {
+                /* Commit the successful prefix and keep the cursor: a retry
+                 * resumes at the same share. next_super and next_deliver do
+                 * not move, so the ACK cannot name a byte that was never
+                 * delivered. */
+                spin_lock_bh(&rx->lock);
+                rx->deliver_bytes = off;
+                rx->deliver_p = p;
+                rx->deliver_g = group;
+                rx->deliver_partial = true;
+                spin_unlock_bh(&rx->lock);
+                break;
+            }
             start_g = 0;
         }
         rx->deliver_partial = false;
         rx->deliver_p = 0;
         rx->deliver_g = 0;
         rx->next_super++;
+        rx->progress_ns = 0; /* progress: the stall budget restarts */
         rx->next_deliver = (s + 1) * (u64)rx->groups * rx->n;
         if (known && rx->next_deliver > total_pkts)
             rx->next_deliver = total_pkts;
     }
     if (delivered && rx->next_deliver > rx->ack_deliver)
     {
+        u64 stream_bytes = rx->deliver_bytes > rx->stream_base ?
+                           rx->deliver_bytes - rx->stream_base : 0;
+
         rx->ack_deliver = rx->next_deliver;
-        tbt_fec_ack(sess, rx->next_deliver);
+        /* The ACK names the frontier and the bytes. The frontier keeps the
+         * sender's credit window in packet units; the byte count is what
+         * tx_ack and every retention decision use. They are not
+         * interchangeable: a block closed early, or a share whose payload is
+         * shorter than S, leaves the frontier ahead of the bytes. */
+        tbt_fec_ack(sess, rx->next_deliver, stream_bytes);
     }
     tbt_stream_put(st);
     return 0;
@@ -1449,20 +1577,27 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
             /* A peer-controlled u64 must never become a byte count by a bare
              * multiply: next_deliver * S wraps, and a frontier past tx->seq
              * would acknowledge bytes this side never sent. Clamp the packet
-             * frontier first, then convert it stream-relative with the same
-             * saturation tbt_fec_ack_bytes() applies. */
+             * frontier first; it only gates credit. The byte count comes from
+             * the body's deliver_bytes, which names what the receiver really
+             * handed over. Deriving it from the frontier acknowledged bytes a
+             * short share or an early-closed block never delivered. */
             u64 sent = READ_ONCE(tx->seq);
-            u64 base, acked;
+            u64 acked;
 
             if (a.next_deliver > sent)
             {
                 a.next_deliver = sent;
                 atomic64_inc(&sess->fec_ack_bad);
             }
-            base = smp_load_acquire(&st->fec_pkt_base_set) ?
-                   READ_ONCE(st->fec_pkt_base) : 0;
-            acked = tbt_fec_ack_bytes(a.next_deliver, base,
-                                      READ_ONCE(st->tx_seq));
+            acked = a.deliver_bytes;
+            if (acked > READ_ONCE(st->tx_seq))
+            {
+                /* The ACK belongs to another stream of this session, or its
+                 * byte count is hostile. Never acknowledge more than this
+                 * stream submitted. */
+                acked = READ_ONCE(st->tx_seq);
+                atomic64_inc(&sess->fec_ack_bad);
+            }
             spin_lock(&sess->lock);
             if (acked > READ_ONCE(st->tx_ack))
             {
@@ -1582,6 +1717,18 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
 
     if (h.type == TBT_FEC_DATA)
     {
+        /* A PARITY record may have fixed this block's cut before this share
+         * arrived. If the cut says this slot holds no stream byte, placing the
+         * share would make it invisible to the delivery walk (which skips
+         * every slot at or past the cut) while the packet frontier and the
+         * ACK ran past it: the exact silent 8192-byte deletion this check
+         * exists to refuse. */
+        if (tbt_fec_share_past_cut(b->win_len_set, b->nreal, share))
+        {
+            atomic64_inc(&sess->fec_slot_past_cut);
+            spin_unlock_bh(&rx->lock);
+            return -EPROTO;
+        }
         if (b->dpresent[share])
         {
             atomic64_inc(&sess->fec_dup_share);

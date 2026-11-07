@@ -109,17 +109,24 @@ typedef uint64_t u64;
  * Control frames are complete records of their own and must never be queued
  * behind a partial DATA record (the carrier writer emits each record whole).
  * ------------------------------------------------------------------ */
-#define TBT_FEC_CONV 0x1002u
+#define TBT_FEC_CONV 0x1003u
 /* 0.2.0 (M2) raises TBT_FEC_CONV from 0x1001 to 0x1002. The core change is
  * that a PARITY record may be a block marker: win_len == 0 && payload_len ==
  * 0 && epoch == 0. The two convs share one carrier (32-byte control records
  * use TBT_CONV, 40-byte FEC records use TBT_FEC_CONV), so both are upgraded
  * in the same version.
  *
+ * 0.2.1 raises it to 0x1003: the ACK body grows from 16 to 24 bytes and
+ * carries deliver_bytes, the stream-relative byte count the receiver has
+ * actually handed to its output socket. The old body let the sender derive
+ * that number as next_deliver * S, which is exact only while every block is
+ * full: a short share or a block closed early makes the packet frontier name
+ * bytes that were never delivered, and tx_ack then runs past them.
+ *
  * There is no 4-byte marker and no magic number on this wire. A marker is a
  * set of values inside the 40-byte tbt_fec_hdr: type TBT_FEC_PARITY (0x31),
  * flags 0, share_index n (parity 0), epoch 0, win_len 0, payload_len 0,
- * conv 0x1002, payload_crc32c 0 (CRC32C of an empty payload). */
+ * conv 0x1003, payload_crc32c 0 (CRC32C of an empty payload). */
 
 /* FEC record types. */
 #define TBT_FEC_DATA 0x30
@@ -167,7 +174,10 @@ typedef uint64_t u64;
 #define TBT_FEC_NACK_MAX_ITEMS 64
 
 /* Control-frame payload lengths. */
-#define TBT_FEC_ACK_LEN 16
+/* next_deliver (u64) + credit_packets (u32) + rtt_us (u32) + deliver_bytes
+ * (u64). The first 16 bytes keep their 0x1002 offsets so a reader that only
+ * needs the frontier can still parse them. */
+#define TBT_FEC_ACK_LEN 24
 #define TBT_FEC_NACK_ENTRY_LEN 12
 #define TBT_FEC_NACK_MAX (TBT_FEC_PAYLOAD_MAX / TBT_FEC_NACK_ENTRY_LEN)
 #define TBT_FEC_CFG_LEN 32
