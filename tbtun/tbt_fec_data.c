@@ -1627,6 +1627,43 @@ static int tbt_fec_send_nack(struct tbt_session *sess, u64 block_id,
     }
 }
 
+/* A closed block has no packet in `group`: its empty marker is the truth.
+ * Answer a NACK for a share that was never stored with that marker, so the
+ * receiver can mark the group empty instead of waiting for a share that will
+ * never exist. The marker is also stored in the replay ring, so a later NACK
+ * for share n hits it. */
+static int tbt_fec_send_empty_marker(struct tbt_session *sess, u16 group,
+                                     u64 block_id)
+{
+    struct tbt_fec_tx *tx = sess->fec_tx;
+    struct tbt_fec_hdr h;
+    u8 rec[TBT_FEC_HDR_LEN];
+    u16 len;
+
+    if (!tx || !tx->n || !tx->m)
+        return -EINVAL;
+    memset(&h, 0, sizeof(h));
+    h.type = TBT_FEC_PARITY;
+    h.share_index = tx->n;
+    h.n = (u8)tx->n;
+    h.m = (u8)tx->m;
+    h.block_id = block_id;
+    h.seq = tbt_fec_seq_of_block_pkt(block_id, group, 0, tx->groups, tx->n);
+    h.win_len = 0;
+    h.payload_len = 0;
+    h.epoch = 0;
+    h.conv = TBT_FEC_CONV;
+    if (tbt_fec_make_record(sess, &h, NULL, rec, &len))
+        return -EINVAL;
+    if (tx->replay)
+    {
+        spin_lock_bh(&tx->replay_lock);
+        tbt_fec_replay_store(tx->replay, block_id, group, tx->n, rec, len);
+        spin_unlock_bh(&tx->replay_lock);
+    }
+    return tbt_fec_send_record(sess, 0, rec, len, true, false);
+}
+
 /* One failed NACK, split by error code. The masks are logged once per rate
  * window so a field run can tell a bad shape from an allocation failure. */
 static void tbt_fec_nack_drop(struct tbt_session *sess, int err, u64 block_id,
@@ -2173,13 +2210,35 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
 
             if (!b->used || b->block_id != s)
             {
-                /* The super-block has started, so this group's shares (or
-                 * its empty marker) may be lost. Request the whole range;
-                 * the replay ring returns only the records it has. */
-                missing = true;
-                tbt_fec_bitmap_set(n.group_mask, g);
-                for (i = 0; i < (u16)(rx->n + rx->m); i++)
-                    tbt_fec_bitmap_set(n.share_mask, i);
+                /* Before the stream end is known, a group with no block may
+                 * be legitimately empty: a short/sparse block. Wait for the
+                 * parity win_len, the empty marker or FIN to state the real
+                 * share count. Requesting the whole range here produced a
+                 * NACK storm the sender could not serve and left the block
+                 * unready until the reset. */
+                if (tbt_fec_nack_unstarted_group(READ_ONCE(rx->total_pkts),
+                                                 rx->groups, rx->n, s, g,
+                                                 READ_ONCE(rx->total_known)))
+                {
+                    /* Total is known and this group has packets in the
+                     * block: a wholly missing block is a real loss. Request
+                     * its range; the ring returns only what it has. */
+                    missing = true;
+                    tbt_fec_bitmap_set(n.group_mask, g);
+                    for (i = 0; i < (u16)(rx->n + rx->m); i++)
+                        tbt_fec_bitmap_set(n.share_mask, i);
+                    continue;
+                }
+                /* Before total is known, probe only parity 0. The empty
+                 * marker or the parity's win_len then states the real shape;
+                 * a full-range request here was the sparse-block NACK storm. */
+                if (!READ_ONCE(rx->total_known))
+                {
+                    missing = true;
+                    tbt_fec_bitmap_set(n.group_mask, g);
+                    tbt_fec_bitmap_set(n.share_mask, rx->n);
+                    atomic64_inc(&sess->fec_nack_sparse_probe);
+                }
                 continue;
             }
             if (b->ready)
@@ -2638,6 +2697,30 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                 len = tbt_fec_replay_get(tx->replay, h.block_id, g, s, buf,
                                          TBT_FEC_REC_MAX);
                 spin_unlock_bh(&tx->replay_lock);
+                if (len == -ENODATA)
+                {
+                    atomic64_inc(&sess->fec_replay_miss_never_stored);
+                    atomic64_inc(&sess->fec_replay_miss_get);
+                    atomic64_inc(&sess->fec_replay_miss);
+                    /* A closed block with no packet in this group is empty.
+                     * Send its marker so the receiver can mark the group
+                     * empty instead of waiting for a share that will never
+                     * exist. */
+                    if (h.block_id < READ_ONCE(tx->cur_block) &&
+                        READ_ONCE(tx->g[g].blk_id) != h.block_id)
+                    {
+                        if (!tbt_fec_send_empty_marker(sess, g, h.block_id))
+                            atomic64_inc(&sess->fec_nack_empty_reply);
+                    }
+                    continue;
+                }
+                if (len == -ESTALE)
+                {
+                    atomic64_inc(&sess->fec_replay_miss_evicted);
+                    atomic64_inc(&sess->fec_replay_miss_get);
+                    atomic64_inc(&sess->fec_replay_miss);
+                    continue;
+                }
                 if (len <= 0)
                 {
                     atomic64_inc(&sess->fec_replay_miss_get);

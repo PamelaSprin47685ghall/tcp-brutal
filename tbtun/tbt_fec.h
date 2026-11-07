@@ -420,6 +420,24 @@ static inline u16 tbt_fec_group_tail_len(u64 total_pkts, u16 groups, u16 n,
     return (u16)(last_local - final_block * n + 1);
 }
 
+/* A group with no block at all in a started super-block. Before the stream
+ * end is known, the group may be legitimately empty (a short or sparse
+ * block): the parity's win_len, the empty marker or FIN will state the real
+ * share count, so do not NACK the whole range. Once total_pkts is known, a
+ * final-block group with no packet is known empty; a group that has packets
+ * in a non-final block is a real whole-block loss and may be requested. */
+static inline bool tbt_fec_nack_unstarted_group(u64 total_pkts, u16 groups,
+                                                u16 n, u64 block, u16 group,
+                                                bool total_known)
+{
+    if (!total_known)
+        return false;
+    if (block == tbt_fec_final_block_of_total(total_pkts, groups, n) &&
+        !tbt_fec_group_tail_len(total_pkts, groups, n, group))
+        return false;
+    return true;
+}
+
 /* Delivery length of share p in a block whose real share count is `real`.
  *
  * A share that arrived carries its own payload_len (dlen); a share recovered

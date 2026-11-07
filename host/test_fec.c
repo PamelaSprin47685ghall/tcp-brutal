@@ -2030,10 +2030,10 @@ static void test_replay(void)
     ok_int(tbt_fec_replay_get(r, 7, 1, 5, out, sizeof(out)), len,
            "replay get length");
     ok(!memcmp(out, rec, len), "replay get bytes", NULL);
-    ok_int(tbt_fec_replay_get(r, 7, 1, 4, out, sizeof(out)), -ENOENT,
-           "replay absent share");
-    ok_int(tbt_fec_replay_get(r, 6, 1, 5, out, sizeof(out)), -ENOENT,
-           "replay wrong block");
+    ok_int(tbt_fec_replay_get(r, 7, 1, 4, out, sizeof(out)), -ENODATA,
+           "replay never stored");
+    ok_int(tbt_fec_replay_get(r, 6, 1, 5, out, sizeof(out)), -ESTALE,
+           "replay evicted block");
     ok_int(tbt_fec_replay_get(r, 7, 1, 5, out, 1), -ENOSPC,
            "replay short buffer");
     ok_int(tbt_fec_replay_store(r, 7, 2, 0, rec, len), -EINVAL,
@@ -2060,10 +2060,31 @@ static void test_replay(void)
     for (i = 0; i < TBT_FEC_REPLAY_K; i++)
         ok(tbt_fec_replay_has(r, (u64)i, 0, 0), "window block resident",
            NULL);
+    ok_int(tbt_fec_replay_get(r, 0, 0, 1, out, sizeof(out)), -ENODATA,
+           "resident block with an unstored share is -ENODATA");
     ok_int(tbt_fec_replay_store(r, TBT_FEC_REPLAY_K, 0, 0, rec, len), 0,
            "store one past the window");
     ok(!tbt_fec_replay_has(r, 0, 0, 0), "oldest window block evicted", NULL);
+    ok_int(tbt_fec_replay_get(r, 0, 0, 0, out, sizeof(out)), -ESTALE,
+           "evicted block is not reported as never stored");
+    ok_int(tbt_fec_replay_get(r, 0, 0, 1, out, sizeof(out)), -ESTALE,
+           "evicted block's unstored share is -ESTALE");
     tbt_fec_replay_free(r);
+
+    /* A 100-byte short stream is one packet in group 0 of a 32-group,
+     * n=4 shape. Before the stream end is known, an unstarted group may be
+     * legitimately empty: it must not be NACKed. After FIN, only the groups
+     * that really have packets may be requested. */
+    ok(!tbt_fec_nack_unstarted_group(1, 32, 4, 0, 0, false),
+       "sparse: no NACK before total_known (group 0)", NULL);
+    ok(!tbt_fec_nack_unstarted_group(1, 32, 4, 0, 1, false),
+       "sparse: no NACK before total_known (empty group)", NULL);
+    ok(tbt_fec_nack_unstarted_group(1, 32, 4, 0, 0, true),
+       "sparse: group 0 has the packet", NULL);
+    ok(!tbt_fec_nack_unstarted_group(1, 32, 4, 0, 1, true),
+       "sparse: final empty group is not NACKed", NULL);
+    ok(tbt_fec_nack_unstarted_group(1024, 32, 4, 0, 1, true),
+       "non-final missing block may be requested after total_known", NULL);
 
     /* The production 32-group shape (256 carriers, n=4, m=4) keeps K=7
      * inside the 15 MiB budget; credit is capped to K-2 super-blocks. */

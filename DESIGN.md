@@ -369,8 +369,15 @@ container:
   the header's `seq` is zero. The receiver sends one NACK for the oldest
   started super-block in `[next_super, min(next_super + K - 1,
   highest_block)]` that is missing shares. A group with no block at all in a
-  started super-block is asked for its whole share range, which also repairs a
-  lost empty marker. A block outside that window is not NACKed: its bytes are
+  started super-block is not asked for its whole share range before the
+  stream end is known: that produced a NACK storm on short/sparse blocks. The
+  receiver probes only parity 0 for such a group; the empty marker or the
+  parity's `win_len` then states the real shape. After FIN, a final-block
+  group with no packet is known empty, and a non-final group with packets may
+  be requested whole. If a probed share was never stored and the block is
+  closed with no packet in that group, the sender answers with the empty
+  marker and stores it in the ring, so the receiver marks the group empty
+  instead of waiting. A block outside the NACK window is not NACKed: its bytes are
   still in the carrier TCP send queue, and that TCP owns the retransmission.
   The sender keeps up to the last `K = 7` super-blocks of encoded DATA+PARITY
   records in a replay ring (the effective K shrinks until the 15 MiB cap fits)

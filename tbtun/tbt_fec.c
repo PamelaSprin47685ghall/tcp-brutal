@@ -459,7 +459,9 @@ struct tbt_fec_replay
     u16 groups, n, m, s, k;
     u16 stride; /* TBT_FEC_HDR_LEN + s */
     u32 slots;  /* k * groups * (n + m) */
+    u32 bslots; /* k * groups: one resident-block id per (slot, group) */
     u64 *block_id;
+    u64 *block_gen; /* block id of the resident block, or ~0 */
     u16 *len;
     u8 *rec;
 };
@@ -478,7 +480,8 @@ size_t tbt_fec_replay_bytes(u16 groups, u16 n, u16 m, u16 s, u16 k)
     if (!groups || !shares || !k || !s)
         return 0;
     return sizeof(struct tbt_fec_replay) +
-           (size_t)k * groups * shares * per;
+           (size_t)k * groups * shares * per +
+           (size_t)k * groups * sizeof(u64);
 }
 
 u16 tbt_fec_replay_k_for(u16 groups, u16 n, u16 m, u16 s)
@@ -523,16 +526,20 @@ struct tbt_fec_replay *tbt_fec_replay_new(u16 groups, u16 n, u16 m, u16 s)
     r->k = k;
     r->stride = (u16)stride;
     r->slots = (u32)slots;
+    r->bslots = (u32)((size_t)k * groups);
     r->block_id = tbt_fec_alloc(slots * sizeof(*r->block_id));
+    r->block_gen = tbt_fec_alloc((size_t)r->bslots * sizeof(*r->block_gen));
     r->len = tbt_fec_alloc(slots * sizeof(*r->len));
     r->rec = tbt_fec_alloc(slots * stride);
-    if (!r->block_id || !r->len || !r->rec)
+    if (!r->block_id || !r->block_gen || !r->len || !r->rec)
     {
         tbt_fec_replay_free(r);
         return NULL;
     }
     for (i = 0; i < r->slots; i++)
         r->block_id[i] = ~0ULL;
+    for (i = 0; i < r->bslots; i++)
+        r->block_gen[i] = ~0ULL;
     return r;
 }
 
@@ -541,6 +548,7 @@ void tbt_fec_replay_free(struct tbt_fec_replay *r)
     if (!r)
         return;
     tbt_fec_free(r->block_id);
+    tbt_fec_free(r->block_gen);
     tbt_fec_free(r->len);
     tbt_fec_free(r->rec);
     tbt_fec_free(r);
@@ -555,6 +563,12 @@ static u32 tbt_fec_replay_slot(const struct tbt_fec_replay *r, u64 block_id,
     return (u32)((b * r->groups + group) * shares + share);
 }
 
+static u32 tbt_fec_replay_bslot(const struct tbt_fec_replay *r, u64 block_id,
+                                u16 group)
+{
+    return (u32)((block_id % r->k) * r->groups + group);
+}
+
 int tbt_fec_replay_store(struct tbt_fec_replay *r, u64 block_id, u16 group,
                          u16 share, const u8 *rec, u16 len)
 {
@@ -566,6 +580,7 @@ int tbt_fec_replay_store(struct tbt_fec_replay *r, u64 block_id, u16 group,
     slot = tbt_fec_replay_slot(r, block_id, group, share);
     memcpy(r->rec + (size_t)slot * r->stride, rec, len);
     r->block_id[slot] = block_id;
+    r->block_gen[tbt_fec_replay_bslot(r, block_id, group)] = block_id;
     r->len[slot] = len;
     return 0;
 }
@@ -579,11 +594,13 @@ int tbt_fec_replay_get(const struct tbt_fec_replay *r, u64 block_id,
     if (!r || !out || group >= r->groups || share >= (u16)(r->n + r->m))
         return -EINVAL;
     slot = tbt_fec_replay_slot(r, block_id, group, share);
+    if (r->block_gen[tbt_fec_replay_bslot(r, block_id, group)] != block_id)
+        return -ESTALE; /* the block was evicted: the slot holds another */
     if (r->block_id[slot] != block_id)
-        return -ENOENT;
+        return -ENODATA; /* the block is resident, this share never stored */
     len = r->len[slot];
     if (!len)
-        return -ENOENT;
+        return -ENODATA; /* the block is resident, this share never stored */
     if (cap < len)
         return -ENOSPC;
     memcpy(out, r->rec + (size_t)slot * r->stride, len);
@@ -598,7 +615,8 @@ bool tbt_fec_replay_has(const struct tbt_fec_replay *r, u64 block_id,
     if (!r || group >= r->groups || share >= (u16)(r->n + r->m))
         return false;
     slot = tbt_fec_replay_slot(r, block_id, group, share);
-    return r->block_id[slot] == block_id && r->len[slot] != 0;
+    return r->block_gen[tbt_fec_replay_bslot(r, block_id, group)] == block_id &&
+           r->block_id[slot] == block_id && r->len[slot] != 0;
 }
 
 /* ------------------------------------------------------------------ *

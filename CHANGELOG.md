@@ -73,6 +73,17 @@ and moves independently of the module version.
 
 ### Fixed
 
+- FEC sparse-block NACK storm: a started super-block's unstarted groups were
+  requested for their whole `n+m` range before the stream end was known. A
+  100-byte short stream on 32 carriers produced full-range NACKs for shares
+  the sender never generated, the block never became ready, and the stream
+  was reset. The receiver now probes only parity 0 for an unstarted group
+  until `total_pkts` is known; the empty marker, the parity's `win_len` or FIN
+  gives the real shape. The sender answers a never-stored share in a closed
+  empty group with its empty marker and stores it in the ring.
+  `fec_replay_miss_get` is split into `fec_replay_miss_evicted` and
+  `fec_replay_miss_never_stored`; `fec_nack_sparse_probe` and
+  `fec_nack_empty_reply` count the new paths.
 - FEC NACK never reached the wire: `tbt_fec_send_nack()` tested the positive
   64-byte body length from `tbt_fec_nack_pack()` as a boolean and returned
   `-EINVAL`, so every repair request was dropped (`fec_nack_tx=0`,
