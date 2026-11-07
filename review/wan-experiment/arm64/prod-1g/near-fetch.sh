@@ -10,8 +10,18 @@
 # The hardware watchdog feeder must already be running: stopping it starts a
 # 44 s reset countdown (MAGICCLOSE=0). This script only reads that state.
 #
+# The download is one curl and --max-time is its only deadline. There is no
+# outer timeout wrapper: a harness timeout must never truncate the transfer
+# and pass its own exit code off as the near-side verdict.
+#
+# Carrier path: the primary fix is the tunnel's dev= key (SO_BINDTODEVICE on
+# the near carriers). NEAR_DEV defaults to eth0; this script requires
+# dev=$NEAR_DEV in the live config (set NEAR_DEV= to disable). The pref-100
+# ip rule below is second insurance, not the primary fix: it keeps
+# `ip route get <far>` on eth0 while mihomo owns the default path.
+#
 # Modes
-#   --preflight   read-only: tools, config shape, listen, feeder, join gate
+#   --preflight   checks: tools, bypass rule, config, listen, feeder, join gate
 #   --run         preflight, one curl, local checks, evidence, verdict
 #
 # Output markers (machine-judged by run-1g.sh):
@@ -31,6 +41,10 @@ DL_DIR=${DL_DIR:-/root/dl-1g}
 FILE=${FILE:-accept-1g.bin}
 EXPECT_BYTES=${EXPECT_BYTES:-1073741824}
 FAR_HASH=${FAR_HASH:-}
+FAR_IP=${FAR_IP:-45.11.1.62}
+NEAR_DEV=${NEAR_DEV:-eth0}
+BYPASS_PREF=${BYPASS_PREF:-100}
+BYPASS_MARK=${BYPASS_MARK:-/root/.tbtun-bypass-pref100}
 TUNNEL=${TUNNEL:-1}
 CARRIERS=${CARRIERS:-256}
 JOIN_TIMEOUT=${JOIN_TIMEOUT:-180}
@@ -46,8 +60,11 @@ FAILED=0
 say() { printf '%s\n' "$*"; }
 check() {
     name=$1
-    rc=$2
+    rc=${2:-1}
     detail=${3:-}
+    # A failed command substitution under `set -e` can arrive empty; an empty
+    # or non-numeric rc is a FAIL, never a PASS.
+    case $rc in '' | *[!0-9]*) rc=1 ;; esac
     if [ "$rc" -eq 0 ]; then
         say "NEAR_CHECK $name PASS${detail:+ ($detail)}"
     else
@@ -59,12 +76,58 @@ skip() { say "NEAR_CHECK $1 SKIP${2:+ ($2)}"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 inc() { echo $(( $1 - $2 )); }
 
+# mihomo bypass (second insurance). The rule is added only when absent; the
+# marker records that this harness added it, so cleanup never deletes a
+# pre-existing (mihomo) rule.
+bypass_rule_exists() {
+    ip rule show 2>/dev/null | awk -v p="$BYPASS_PREF:" -v ip="$FAR_IP" '
+        $1 == p {
+            for (i = 2; i < NF; i++)
+                if ($i == "to" && ($(i + 1) == ip || $(i + 1) == ip "/32")) found = 1
+        }
+        END { exit(found ? 0 : 1) }'
+}
+bypass_ensure() {
+    if bypass_rule_exists; then
+        return 0
+    fi
+    ip rule add to "$FAR_IP/32" lookup main pref "$BYPASS_PREF" 2>/dev/null || return 1
+    printf 'pref=%s to=%s/32 lookup=main\n' "$BYPASS_PREF" "$FAR_IP" >"$BYPASS_MARK" 2>/dev/null || true
+    return 0
+}
+bypass_owned() {
+    [ -f "$BYPASS_MARK" ] && grep -qF "to=$FAR_IP/32" "$BYPASS_MARK" 2>/dev/null
+}
+bypass_dev() {
+    ip route get "$FAR_IP" 2>/dev/null | awk '
+        { for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }'
+}
+bypass_dev_ok() {
+    ddev=${1:-}
+    if [ -z "$ddev" ] || [ "$ddev" = none ]; then return 1; fi
+    case $ddev in
+        Meta | tun* | utun* | wg* | tailscale*) return 1 ;;
+    esac
+    [ "$ddev" = eth0 ]
+}
+bypass_record() {
+    btag=$1
+    {
+        printf '=== tag ===\n%s\n' "$btag"
+        printf '=== ip rule show ===\n'
+        ip rule show 2>&1 || true
+        printf '=== ip route get %s ===\n' "$FAR_IP"
+        ip route get "$FAR_IP" 2>&1 || true
+        printf '=== dev ===\n%s\n' "$(bypass_dev)"
+    } >"$EVIDENCE/near-ip-rule-$btag.txt"
+}
+
 for arg in "$@"; do
     case "$arg" in
         --preflight) MODE=preflight ;;
         --run) MODE=run ;;
         -h | --help)
-            sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -159,11 +222,29 @@ snapshot() {
 # preflight
 
 say "== 1. tools"
-for t in curl sha256sum awk stat ss timeout; do
+for t in curl sha256sum awk stat ss ip; do
     if have "$t"; then check "tool_$t" 0 "$t"; else check "tool_$t" 1 "$t missing"; fi
 done
 
-say "== 2. module and config"
+say "== 2. near bypass (mihomo isolation; pref $BYPASS_PREF to $FAR_IP/32 lookup main)"
+mkdir -p "$DL_DIR" "$EVIDENCE"
+bypass_ensure || true
+bypass_record preflight
+bdev=$(bypass_dev)
+if bypass_rule_exists; then
+    if bypass_owned; then brule=added; else brule=preexisting; fi
+else
+    brule=missing
+fi
+if bypass_dev_ok "$bdev"; then
+    check bypass_route 0 "dev=$bdev rule=$brule to=$FAR_IP/32 pref=$BYPASS_PREF"
+else
+    check bypass_route 1 "dev=${bdev:-none} rule=$brule; need eth0, not Meta/tun*/utun*/wg*/tailscale*"
+    say "NEAR_RESULT FAIL"
+    if [ "$MODE" = run ]; then exit 4; else exit 3; fi
+fi
+
+say "== 3. module and config"
 if [ -e /proc/net/tbtun/config ]; then
     check procfs 0 "/proc/net/tbtun/config"
     cfg=$(cat /proc/net/tbtun/config)
@@ -176,26 +257,34 @@ if [ -e /proc/net/tbtun/config ]; then
             *) check "cfg_${tok%%=*}" 1 "missing token $tok" ;;
         esac
     done
+    if [ -n "$NEAR_DEV" ]; then
+        case " $cfg " in
+            *" dev=$NEAR_DEV "*) check cfg_dev 0 "dev=$NEAR_DEV" ;;
+            *) check cfg_dev 1 "missing dev=$NEAR_DEV" ;;
+        esac
+    else
+        skip cfg_dev "NEAR_DEV unset; dev= not in the config (tbtun key pending)"
+    fi
 else
     check procfs 1 "/proc/net/tbtun/config missing (module not configured)"
     cfg=""
 fi
 
-say "== 3. listen 127.0.0.1:9001"
+say "== 4. listen 127.0.0.1:9001"
 if ss -ltnH 2>/dev/null | grep -qF '127.0.0.1:9001'; then
     check listen 0 "127.0.0.1:9001"
 else
     check listen 1 "127.0.0.1:9001 not listening"
 fi
 
-say "== 4. watchdog feeder (must stay up; stopping it resets the board)"
+say "== 5. watchdog feeder (must stay up; stopping it resets the board)"
 if holder=$(feeder_state); then
     check feeder 0 "$holder holds /dev/watchdog0"
 else
     check feeder 1 "no process holds /dev/watchdog0"
 fi
 
-say "== 5. join gate (near side only; run-1g.sh checks far)"
+say "== 6. join gate (near side only; run-1g.sh checks far)"
 i=0
 up=?; n=?
 while [ "$i" -lt "$JOIN_TIMEOUT" ]; do
@@ -225,21 +314,45 @@ if [ "$MODE" = preflight ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# second insurance, re-asserted immediately before the transfer
+
+say "== 7. near bypass re-assert (before transfer)"
+bypass_ensure || true
+bypass_record pretransfer
+bdev=$(bypass_dev)
+if bypass_rule_exists; then
+    if bypass_owned; then brule=added; else brule=preexisting; fi
+else
+    brule=missing
+fi
+if bypass_dev_ok "$bdev"; then
+    check bypass_route_pretransfer 0 "dev=$bdev rule=$brule"
+else
+    check bypass_route_pretransfer 1 "dev=${bdev:-none} rule=$brule; refusing transfer"
+    say "NEAR_RESULT FAIL"
+    exit 4
+fi
+
+# ---------------------------------------------------------------------------
 # one download, no retry
 
-say "== 6. download"
+say "== 8. download"
 mkdir -p "$DL_DIR" "$EVIDENCE"
 rm -f "$DL_DIR/$FILE"
 snapshot "$DL_DIR/near-stats-pre.txt"
 dmesg_before=$(dmesg 2>/dev/null | wc -l || echo 0)
 boot_before=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)
 start_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+start_epoch=$(date +%s)
 set -- $(cpu_busy)
 cpu_busy_before=$1
 cpu_idle_before=$2
 
 rc=0
-timeout $((MAX_TIME + 120)) curl -sS --fail \
+# curl's --max-time is the single transfer authority. No outer timeout wrapper:
+# a harness timeout would kill curl early and hide its verdict (run-1g.sh used
+# to kill the ssh client at 20 s while this script kept running).
+curl -sS --fail \
     --max-time "$MAX_TIME" \
     --speed-limit "$SPEED_LIMIT" --speed-time "$SPEED_TIME" \
     -o "$DL_DIR/$FILE" \
@@ -247,6 +360,7 @@ timeout $((MAX_TIME + 120)) curl -sS --fail \
     "$URL" >"$DL_DIR/curl.txt" 2>"$DL_DIR/curl.err" || rc=$?
 
 end_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+end_epoch=$(date +%s)
 set -- $(cpu_busy)
 cpu_busy_after=$1
 cpu_idle_after=$2
@@ -274,27 +388,32 @@ check http "$([ "${http:-000}" = "200" ]; echo $?)" "http=${http:-000}"
 check size_download "$([ "${size_dl:-0}" = "$EXPECT_BYTES" ]; echo $?)" \
     "size_download=${size_dl:-0} expected=$EXPECT_BYTES"
 
-say "== 7. local file"
+say "== 9. local file"
 fsize=$(stat -c '%s' "$DL_DIR/$FILE" 2>/dev/null || echo 0)
 stat -c '%s' "$DL_DIR/$FILE" >"$DL_DIR/size.txt" 2>/dev/null || true
 check file_size "$([ "$fsize" = "$EXPECT_BYTES" ]; echo $?)" \
     "file=$fsize expected=$EXPECT_BYTES"
 
 if have sha256sum && [ "$fsize" -gt 0 ]; then
-    sha256sum "$DL_DIR/$FILE" >"$DL_DIR/sha256.txt"
-    got_hash=$(awk 'NR==1{print $1}' "$DL_DIR/sha256.txt")
+    # A hashing failure must not abort the script: counters, kernel window and
+    # the verdict are still first-hand evidence.
+    if sha256sum "$DL_DIR/$FILE" >"$DL_DIR/sha256.txt" 2>"$DL_DIR/sha256.err"; then
+        got_hash=$(awk 'NR==1{print $1}' "$DL_DIR/sha256.txt")
+    else
+        got_hash=""
+    fi
 else
     got_hash=""
 fi
 say "NEAR_SHA256=${got_hash:-unavailable}"
 if [ -n "$FAR_HASH" ] && [ -n "$got_hash" ]; then
     check sha256 "$([ "$got_hash" = "$FAR_HASH" ]; echo $?)" \
-        "near=${got_hash:0:16}... far=${FAR_HASH:0:16}..."
+        "near=$(printf '%.16s' "$got_hash")... far=$(printf '%.16s' "$FAR_HASH")..."
 else
     skip sha256 "FAR_HASH not provided or sha256sum unavailable"
 fi
 
-say "== 8. counters (increments across the download)"
+say "== 10. counters (increments across the download)"
 pre=$DL_DIR/near-stats-pre.txt
 post=$DL_DIR/near-stats-post.txt
 {
@@ -358,36 +477,57 @@ else
     skip dead_now "c3 dead_now missing"
 fi
 
-say "== 9. kernel window and restart"
-if have journalctl; then
-    journalctl -k --since "$start_utc" --no-pager >"$EVIDENCE/near-kernel-window.txt" 2>/dev/null || true
+say "== 11. kernel window and restart"
+# `journalctl -k --since <ISO with Z>` printed "-- No entries --" here and still
+# exited 0, so the old window passed vacuously. Use the current boot with an
+# @epoch window (timezone-free), then dmesg by line count. kw_src names the
+# source that is readable; an empty body means the window held no messages and
+# kernel_clean is SKIP, never PASS.
+kw_src=none
+kw_body=
+jr=0
+if have journalctl &&
+    journalctl -k -b 0 -n 1 --no-pager 2>/dev/null | grep -qv '^-- No entries --$'; then
+    jr=1
+fi
+if [ "$jr" -eq 1 ]; then
+    kw_src=journalctl
+    kw_raw=$(journalctl -k -b 0 --no-pager --since "@$start_epoch" --until "@$end_epoch" 2>/dev/null || true)
+    case $kw_raw in
+        '' | *'-- No entries --'*) kw_raw= ;;
+    esac
+    kw_body=$(printf '%s\n' "$kw_raw" | grep -v '^-- Logs begin' || true)
+fi
+if [ -z "$kw_body" ]; then
+    if dmesg >/dev/null 2>&1; then
+        if [ "$kw_src" = none ]; then kw_src=dmesg; fi
+        dbody=$(dmesg 2>/dev/null | tail -n "+$((dmesg_before + 1))" || true)
+        if [ -n "$dbody" ]; then
+            kw_body=$dbody
+            kw_src=dmesg
+        fi
+    fi
+fi
+if [ -n "$kw_body" ]; then
+    printf '%s\n' "$kw_body" >"$EVIDENCE/near-kernel-window.txt"
 else
     : >"$EVIDENCE/near-kernel-window.txt"
 fi
-if [ ! -s "$EVIDENCE/near-kernel-window.txt" ]; then
-    dmesg 2>/dev/null | tail -n "+$((dmesg_before + 1))" \
-        >"$EVIDENCE/near-kernel-window.txt" || true
-fi
-kernel_source=none
-if have journalctl && journalctl -k -n 1 --no-pager >/dev/null 2>&1; then
-    kernel_source=journalctl
-elif dmesg >/dev/null 2>&1; then
-    kernel_source=dmesg
-fi
-check kernel_window_source "$([ "$kernel_source" != none ]; echo $?)" \
-    "source=$kernel_source (empty window is valid only with a working source)"
-if grep -qE 'BUG:|Oops|WARNING:|general protection fault' \
+check kernel_window_source "$([ "$kw_src" != none ]; echo $?)" "source=$kw_src"
+if [ -z "$kw_body" ]; then
+    skip kernel_clean "empty window ${start_utc}..${end_utc} (source=$kw_src); see near-dmesg.txt"
+elif grep -qE 'BUG:|Oops|WARNING:|general protection fault' \
     "$EVIDENCE/near-kernel-window.txt" 2>/dev/null; then
     check kernel_clean 1 \
         "$(grep -cE 'BUG:|Oops|WARNING:|general protection fault' "$EVIDENCE/near-kernel-window.txt") matching lines"
 else
-    check kernel_clean 0 "window ${start_utc}..${end_utc}"
+    check kernel_clean 0 "window ${start_utc}..${end_utc} source=$kw_src"
 fi
 
 check no_restart "$([ -n "$boot_before" ] && [ "$boot_before" = "$boot_after" ]; echo $?)" \
-    "boot_id ${boot_before:0:8}.. -> ${boot_after:0:8}.."
+    "boot_id $(printf '%.8s' "$boot_before").. -> $(printf '%.8s' "$boot_after").."
 
-say "== 10. performance"
+say "== 12. performance"
 busy_delta=$((cpu_busy_after - cpu_busy_before))
 idle_delta=$((cpu_idle_after - cpu_idle_before))
 total_delta=$((busy_delta + idle_delta))
@@ -413,7 +553,7 @@ cat "$DL_DIR/perf.txt"
 
 # Failure forensics: cheap, local, and always collected on a failed run.
 if [ "$FAILED" -ne 0 ]; then
-    say "== 11. forensics"
+    say "== 13. forensics"
     {
         dmesg 2>/dev/null | tail -n 400
     } >"$EVIDENCE/near-dmesg.txt" 2>/dev/null || true
@@ -436,6 +576,11 @@ fi
     printf 'far_hash=%s\n' "${FAR_HASH:-unset}"
     printf 'elapsed_s=%s\n' "${elapsed:-0}"
     printf 'speed_bytes_s=%s\n' "${speed:-0}"
+    printf 'near_dev=%s\n' "${NEAR_DEV:-unset}"
+    printf 'bypass_dev=%s\n' "${bdev:-none}"
+    printf 'bypass_rule=%s\n' "${brule:-unknown}"
+    printf 'kernel_window_source=%s\n' "$kw_src"
+    printf 'kernel_window_empty=%s\n' "$([ -z "$kw_body" ] && echo yes || echo no)"
     printf 'failed_checks=%s\n' "$FAILED"
 } >"$DL_DIR/near-verdict.txt"
 

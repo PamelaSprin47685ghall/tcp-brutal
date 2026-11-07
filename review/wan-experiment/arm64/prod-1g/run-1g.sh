@@ -10,6 +10,19 @@
 #   profile=http-kal, nonce=00112233445566778899aabbccddeeff
 #   near listen 127.0.0.1:9001, far listen 0.0.0.0:9000, target 127.0.0.1:5210
 #
+# Carrier path. The primary fix is the tunnel's dev= key: the near carriers
+# bind to the NIC (SO_BINDTODEVICE). NEAR_DEV defaults to eth0; the harness
+# writes `dev=eth0` into the near config and checks the read-back. Set
+# NEAR_DEV= to disable the token for a tbtun build without dev= support.
+#
+# mihomo isolation is the second layer, not the primary fix. mihomo owns the
+# far IP through its Meta device. Preflight adds
+# `ip rule add to <FAR_IP>/32 lookup main pref 100` on near when absent, then
+# asserts `ip route get <FAR_IP>` uses dev eth0 (never
+# Meta/tun*/utun*/wg*/tailscale*). The assertion runs again immediately before
+# the transfer. Cleanup removes only the rule this harness added (marker file
+# /root/.tbtun-bypass-pref100); mihomo's own rules are never touched.
+#
 # Judgment (all must hold):
 #   1. curl rc=0, http=200, size_download=1073741824
 #   2. local file size = 1073741824 and sha256 equals far's
@@ -17,16 +30,25 @@
 #      fec_payload_crc_fail, gaps_total, rx_errs, connect_fail, alloc_fail,
 #      join_bad are all zero
 #   4. no BUG:/Oops/WARNING:/general protection fault in either kernel window
+#      (journalctl -k -b 0 @epoch, then dmesg by monotonic seconds; an empty
+#      window is SKIP, never PASS: journalctl exits 0 while printing
+#      "-- No entries --", which the old --since check misread as clean)
 #   5. near boot_id unchanged (no restart)
 #   6. the hardware watchdog feeder is still running at the end
 #   7. dead_now is bounded; sess_refs=0 when the build exports it
 #
 # Modes
-#   --preflight   read-only checks on both ends; changes nothing
+#   --preflight   checks on both ends; adds only the idempotent near ip rule
 #   --run         full run (default), single shot, no retry
-#   --cleanup     remove module/config/files on both ends, then verify
-#   --keep        keep module, config and files after the run (forensics)
+#   --cleanup     remove module/config/files on both ends, then verify;
+#                 the only explicit deletion path after a FAIL
+#   --keep        keep module, config and files after the run (forensics);
+#                 implied by a FAIL
 #   --dry-run     print the plan; no ssh, no writes
+#
+# A FAIL keeps first-hand evidence automatically (near /root/dl-1g with the
+# partial file, far source, both ends' stats and dmesg). It is never deleted
+# implicitly; run --cleanup when you decide to remove it.
 #
 # Exit codes
 #   0 PASS   2 usage   3 preflight   4 setup/join   5 transfer
@@ -36,11 +58,15 @@ set -euo pipefail
 PROG=${0##*/}
 MODE=run
 KEEP=0
+KEEP_AUTO=0
 DRY=0
 EVIDENCE_ROOT=${EVIDENCE_ROOT:-$(cd -- "$(dirname -- "$0")/.." && pwd)}
 NEAR_HOST=${NEAR_HOST:-root@192.168.123.65}
 FAR_HOST=${FAR_HOST:-root@45.11.1.62}
 FAR_IP=${FAR_IP:-45.11.1.62}
+NEAR_DEV=${NEAR_DEV:-eth0}
+BYPASS_PREF=${BYPASS_PREF:-100}
+BYPASS_MARK=${BYPASS_MARK:-/root/.tbtun-bypass-pref100}
 NEAR_KO=${NEAR_KO:-/root/tbtun-0.2.0/tbtun.ko}
 FAR_KO=${FAR_KO:-/root/tbtun-0.2.0/tbtun.ko}
 NEAR_SRCVERSION=${NEAR_SRCVERSION:-}
@@ -49,6 +75,8 @@ MODULES_LOADED=${MODULES_LOADED:-0}
 CARRIERS=${CARRIERS:-256}
 JOIN_TIMEOUT=${JOIN_TIMEOUT:-180}
 SSH_TMO=${SSH_TMO:-20}
+TRANSFER_MAX_TIME=${TRANSFER_MAX_TIME:-1800}
+TRANSFER_TMO=${TRANSFER_TMO:-$((TRANSFER_MAX_TIME + 300))}
 KEEP_SRC=${KEEP_SRC:-0}
 REQUIRE_SESS_REFS=${REQUIRE_SESS_REFS:-0}
 FAR_DIR=${FAR_DIR:-/root/accept-1g}
@@ -59,6 +87,12 @@ NONCE=00112233445566778899aabbccddeeff
 
 EV=
 FAILED=0
+NEAR_BYPASS_PRE_DEV=
+NEAR_BYPASS_PRE_RULE=
+NEAR_BYPASS_PRE_OK=0
+NEAR_BYPASS_XFER_DEV=
+NEAR_BYPASS_XFER_RULE=
+NEAR_BYPASS_XFER_OK=0
 
 usage() {
     cat <<EOF
@@ -71,13 +105,18 @@ Environment:
   NEAR_SRCVERSION= FAR_SRCVERSION=   empty: read from the ko
   MODULES_LOADED=0                 1: do not insmod, only verify
   CARRIERS=256 JOIN_TIMEOUT=180 SSH_TMO=20
+  TRANSFER_MAX_TIME=1800           curl --max-time on the near side
+  TRANSFER_TMO=2100                ssh wrapper timeout for the transfer step only
+  NEAR_DEV=eth0                    dev= for near carriers; set empty to disable
   EVIDENCE_ROOT=<repo>/review/wan-experiment/arm64
   KEEP_SRC=0                       1: keep the uploaded scripts on the hosts
   REQUIRE_SESS_REFS=0              1: fail when the build does not export sess_refs
+  FAIL keeps evidence automatically; run --cleanup to remove it
 
 Example:
   review/wan-experiment/arm64/prod-1g/run-1g.sh --preflight
   review/wan-experiment/arm64/prod-1g/run-1g.sh --run
+  NEAR_DEV= review/wan-experiment/arm64/prod-1g/run-1g.sh --run   # older tbtun without dev=
 EOF
 }
 
@@ -103,6 +142,9 @@ mark() {
 
 ssh_near() { timeout "$SSH_TMO" ssh -o BatchMode=yes "$NEAR_HOST" "$@"; }
 ssh_far() { timeout "$SSH_TMO" ssh -o BatchMode=yes "$FAR_HOST" "$@"; }
+# The 1 GiB step must not inherit the 20 s control timeout: the near-side
+# curl owns the deadline (--max-time). This wrapper only catches a dead ssh.
+ssh_near_transfer() { timeout "$TRANSFER_TMO" ssh -o BatchMode=yes "$NEAR_HOST" "$@"; }
 scp_near() { timeout "$SSH_TMO" scp -q "$@"; }
 scp_far() { timeout "$SSH_TMO" scp -q "$@"; }
 
@@ -142,7 +184,9 @@ sess_refs_field() {
 }
 
 check() {
-    local name=$1 rc=$2 detail=${3:-} line
+    local name=$1 rc=${2:-1} detail=${3:-} line
+    # An empty or non-numeric rc (failed command substitution) is a FAIL.
+    case $rc in '' | *[!0-9]*) rc=1 ;; esac
     if ((rc == 0)); then
         line="CHECK $name PASS${detail:+ ($detail)}"
     else
@@ -170,12 +214,18 @@ skip() {
 if ((DRY)); then
     say "dry-run plan:"
     say "  1. preflight: ssh both, feeder alive, tools, disk, ports"
+    say "     near bypass: ip rule add to $FAR_IP/32 lookup main pref $BYPASS_PREF (idempotent)"
+    say "     assert ip route get $FAR_IP -> dev eth0, not Meta/tun*/utun*/wg*/tailscale*"
     say "  2. far: upload far-serve.sh, --start (1 GiB, sha256, httpd 5210)"
     say "  3. modules: insmod $NEAR_KO / $FAR_KO, srcversion, ports, config"
+    say "     near dev= binding (primary): ${NEAR_DEV:-disabled}"
     say "  4. join gate: both ends c3 up=$CARRIERS within ${JOIN_TIMEOUT}s"
-    say "  5. near: upload near-fetch.sh, one curl (max 1800 s, stall 120 s <64 KiB/s)"
+    say "  5. near: upload near-fetch.sh, one curl (--max-time ${TRANSFER_MAX_TIME}s, stall 120 s <64 KiB/s)"
+    say "     transfer ssh wrapper ${TRANSFER_TMO}s; never the ${SSH_TMO}s control timeout"
+    say "     bypass re-assert immediately before the curl; any non-eth0 dev aborts"
     say "  6. collect evidence, judge size/sha/counters/kernel/restart/feeder"
-    say "  7. cleanup unless --keep"
+    say "     kernel window: journalctl -k -b 0 @epoch, dmesg monotonic fallback, empty = SKIP"
+    say "  7. PASS: cleanup unless --keep; FAIL: keep evidence, only --cleanup removes"
     exit 0
 fi
 
@@ -206,6 +256,127 @@ for fddir in /proc/[0-9]*/fd; do
 done
 exit 1
 EOS
+}
+
+# mihomo bypass. The rule is added only when absent; the marker records that
+# this harness added it, so cleanup never deletes a pre-existing (mihomo) rule.
+bypass_dev_ok() {
+    local dev=${1:-}
+    [[ -n $dev && $dev != none ]] || return 1
+    case $dev in
+        Meta | tun* | utun* | wg* | tailscale*) return 1 ;;
+    esac
+    [[ $dev == eth0 ]]
+}
+
+bypass_rule_label() {
+    case ${1:-} in
+        1 | added) printf 'added' ;;
+        0 | preexisting) printf 'preexisting' ;;
+        *) printf 'unknown' ;;
+    esac
+}
+
+bypass_summary_note() {
+    local dev=${1:-none} rule=${2:-unknown} ok=${3:-0}
+    if ((ok == 1)); then
+        printf 'PASS (dev=%s, rule=%s)' "$dev" "$rule"
+    else
+        printf 'FAIL (dev=%s, rule=%s; need eth0, not Meta/tun*/utun*/wg*/tailscale*)' "$dev" "$rule"
+    fi
+}
+
+# Idempotent add on near; prints the rule and route evidence plus machine lines
+# BYPASS_RULE_ADDED (0/1) and BYPASS_DEV.
+near_bypass_ensure() {
+    ssh_near "FAR_IP='$FAR_IP' BYPASS_PREF='$BYPASS_PREF' BYPASS_MARK='$BYPASS_MARK' bash -s" <<'EOS'
+set -u
+ip=$FAR_IP
+mark=$BYPASS_MARK
+p=$BYPASS_PREF
+owned=0
+exists=0
+if [ -f "$mark" ] && grep -qF "to=$ip/32" "$mark" 2>/dev/null; then
+    owned=1
+fi
+ip rule show 2>/dev/null | awk -v p="$p:" -v ip="$ip" '
+    $1 == p {
+        for (i = 2; i < NF; i++)
+            if ($i == "to" && ($(i + 1) == ip || $(i + 1) == ip "/32")) found = 1
+    }
+    END { exit(found ? 0 : 1) }' && exists=1
+if [ "$exists" -eq 0 ]; then
+    if ip rule add to "$ip/32" lookup main pref "$p" 2>/dev/null; then
+        printf 'pref=%s to=%s/32 lookup=main\n' "$p" "$ip" >"$mark" 2>/dev/null || true
+        owned=1
+    fi
+fi
+dev=$(ip route get "$ip" 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }')
+printf 'BYPASS_RULE_ADDED=%s\n' "$owned"
+printf 'BYPASS_DEV=%s\n' "${dev:-none}"
+printf '=== ip rule show ===\n'
+ip rule show 2>&1 || true
+printf '=== ip route get %s ===\n' "$ip"
+ip route get "$ip" 2>&1 || true
+EOS
+}
+
+near_bypass_cleanup() {
+    ssh_near "FAR_IP='$FAR_IP' BYPASS_PREF='$BYPASS_PREF' BYPASS_MARK='$BYPASS_MARK' bash -s" <<'EOS' 2>&1 || true
+set -u
+ip=$FAR_IP
+mark=$BYPASS_MARK
+p=$BYPASS_PREF
+if [ ! -f "$mark" ]; then
+    echo "near bypass: no pref $p rule added by this harness; nothing removed"
+    exit 0
+fi
+if ! grep -qF "to=$ip/32" "$mark" 2>/dev/null; then
+    echo "near bypass: marker is for another target; leaving pref $p alone"
+    exit 0
+fi
+if ip rule show 2>/dev/null | awk -v p="$p:" -v ip="$ip" '
+    $1 == p {
+        for (i = 2; i < NF; i++)
+            if ($i == "to" && ($(i + 1) == ip || $(i + 1) == ip "/32")) found = 1
+    }
+    END { exit(found ? 0 : 1) }'; then
+    ip rule del pref "$p" to "$ip/32" lookup main 2>/dev/null ||
+        ip rule del pref "$p" to "$ip/32" 2>/dev/null || true
+    echo "near bypass: removed pref $p to $ip/32 lookup main (added by this harness)"
+else
+    echo "near bypass: marker present but the rule is already gone"
+fi
+rm -f "$mark"
+exit 0
+EOS
+}
+
+# Explicit FAIL summary when the bypass aborts the run before the normal one.
+write_bypass_fail_summary() {
+    local stage=$1 dev=$2 rule=$3 file=$4 why
+    case $stage in
+        preflight) why="no module was loaded and no transfer was attempted" ;;
+        *) why="the transfer was refused; the module and config stay loaded for forensics" ;;
+    esac
+    {
+        printf '# 1 GiB acceptance run - near bypass FAIL (%s)\n\n' "$stage"
+        printf -- '- start: %s\n' "${START_UTC:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+        printf -- '- near: `%s`\n' "$NEAR_HOST"
+        printf -- '- far: `%s`\n' "$FAR_HOST"
+        printf -- '- evidence: `%s`\n\n' "$EV"
+        printf '## Verdict\n\n**FAIL (near bypass, %s)**\n\n' "$stage"
+        printf '| check | value |\n|---|---|\n'
+        printf '| required rule | `to %s/32 lookup main pref %s` |\n' "$FAR_IP" "$BYPASS_PREF"
+        printf '| ip route get dev | %s |\n' "${dev:-none}"
+        printf '| rule state | %s |\n\n' "${rule:-unknown}"
+        printf '`ip route get %s` must use `dev eth0`. A `Meta`/`tun*`/`utun*`/`wg*`/`tailscale*` device means mihomo still owns the path; %s.\n\n' \
+            "$FAR_IP" "$why"
+        printf '## Evidence\n\n```\n'
+        cat "$file" 2>/dev/null || true
+        printf '```\n'
+    } >"$EV/SUMMARY.md"
+    note "near bypass FAIL ($stage); SUMMARY written to $EV/SUMMARY.md"
 }
 
 capture_common() {
@@ -259,13 +430,52 @@ EOS
     fi
 }
 
+# Kernel window. `journalctl -k --since <ISO with Z>` returned "-- No entries --"
+# on both hosts (journald may hold no kernel records at all; journalctl exits 0
+# and prints that marker), so the old check passed vacuously. Use the current
+# boot with an @epoch window (timezone-free), then fall back to dmesg filtered by
+# monotonic seconds. The first output line is KW_SOURCE (the source that is
+# actually readable); an empty body means the window held no kernel messages and
+# the caller must SKIP, never PASS.
 kernel_window() {
-    local host=$1 since=$2 out=$3
-    if [[ $host == near ]]; then
-        ssh_near "journalctl -k --since '$since' --no-pager 2>/dev/null || dmesg 2>/dev/null | tail -n 2000" >"$out" 2>/dev/null || true
-    else
-        ssh_far "journalctl -k --since '$since' --no-pager 2>/dev/null || dmesg 2>/dev/null | tail -n 2000" >"$out" 2>/dev/null || true
+    local host=$1 since_epoch=$2 until_epoch=$3 out=$4 fn=ssh_near
+    [[ $host == far ]] && fn=ssh_far
+    "$fn" "KW_SINCE=$since_epoch KW_UNTIL=$until_epoch bash -s" >"$out" 2>/dev/null <<'EOS' || true
+set -u
+src=none
+body=
+jr=0
+if command -v journalctl >/dev/null 2>&1 &&
+    journalctl -k -b 0 -n 1 --no-pager 2>/dev/null | grep -qv '^-- No entries --$'; then
+    jr=1
+fi
+if [ "$jr" -eq 1 ]; then
+    src=journalctl
+    raw=$(journalctl -k -b 0 --no-pager --since "@$KW_SINCE" --until "@$KW_UNTIL" 2>/dev/null || true)
+    case $raw in
+        '' | *'-- No entries --'*) raw= ;;
+    esac
+    body=$(printf '%s\n' "$raw" | grep -v '^-- Logs begin' || true)
+fi
+if [ -z "$body" ]; then
+    if dmesg >/dev/null 2>&1; then
+        if [ "$src" = none ]; then src=dmesg; fi
+        now=$(date +%s)
+        up=$(cut -d' ' -f1 /proc/uptime)
+        smono=$(awk -v n="$now" -v u="$up" -v s="$KW_SINCE" 'BEGIN{printf "%.6f", u - (n - s)}')
+        emono=$(awk -v n="$now" -v u="$up" -v e="$KW_UNTIL" 'BEGIN{printf "%.6f", u - (n - e)}')
+        dbody=$(dmesg 2>/dev/null | awk -v s="$smono" -v e="$emono" '
+            { line = $0; sub(/^\[ */, "", line)
+              if (line != $0) { t = line + 0; if (t >= s && t <= e) print } }' || true)
+        if [ -n "$dbody" ]; then
+            body=$dbody
+            src=dmesg
+        fi
     fi
+fi
+printf 'KW_SOURCE=%s\n' "$src"
+printf '%s\n' "$body"
+EOS
 }
 
 # ---------------------------------------------------------------------------
@@ -281,6 +491,8 @@ cleanup_all() {
                   lsmod | grep -E '^tbtun ' || echo 'near: module unloaded'
                   test -e /proc/net/tbtun && echo 'near: /proc/net/tbtun still present' || echo 'near: procfs gone'
                   ss -ltnH 'sport = :9001' | grep -q . && echo 'near: 9001 busy' || echo 'near: 9001 free'" 2>&1 || true
+        say "== near bypass"
+        near_bypass_cleanup
         say "== far"
         ssh_far "printf 'del 1\n' > /proc/net/tbtun/config 2>/dev/null || true
                  rmmod tbtun 2>/dev/null || true
@@ -332,8 +544,27 @@ say "   RuntimeWatchdogUSec: $(ssh_near 'systemctl show -p RuntimeWatchdogUSec -
 say "   uptime: $(near_uptime) s (grace 600 s)"
 
 say "== 3. near tools and shape"
-near_tools=$(ssh_near 'for t in curl sha256sum awk ss timeout stat; do command -v $t >/dev/null || echo missing:$t; done' || true)
-if [[ -z $near_tools ]]; then check near_tools 0 "curl sha256sum awk ss timeout stat"; else check near_tools 1 "$near_tools"; fi
+near_tools=$(ssh_near 'for t in curl sha256sum awk ss stat ip; do command -v $t >/dev/null || echo missing:$t; done' || true)
+if [[ -z $near_tools ]]; then check near_tools 0 "curl sha256sum awk ss stat ip"; else check near_tools 1 "$near_tools"; fi
+
+say "== 3b. near bypass (mihomo isolation; pref $BYPASS_PREF to $FAR_IP/32 lookup main)"
+NEAR_BYPASS_PRE_OK=0
+near_bypass_out=$(near_bypass_ensure 2>&1) || true
+printf '%s\n' "$near_bypass_out" >"$EV/near-ip-rule-pre.txt"
+NEAR_BYPASS_PRE_DEV=$(printf '%s\n' "$near_bypass_out" | sed -n 's/^BYPASS_DEV=//p' | tail -n 1)
+NEAR_BYPASS_PRE_RULE=$(bypass_rule_label \
+    "$(printf '%s\n' "$near_bypass_out" | sed -n 's/^BYPASS_RULE_ADDED=//p' | tail -n 1)")
+if bypass_dev_ok "${NEAR_BYPASS_PRE_DEV:-}"; then
+    NEAR_BYPASS_PRE_OK=1
+    check near_bypass 0 "dev=$NEAR_BYPASS_PRE_DEV rule=$NEAR_BYPASS_PRE_RULE to=$FAR_IP/32 pref=$BYPASS_PREF"
+else
+    check near_bypass 1 "dev=${NEAR_BYPASS_PRE_DEV:-none} rule=$NEAR_BYPASS_PRE_RULE; need eth0, not Meta/tun*/utun*/wg*/tailscale*"
+    write_bypass_fail_summary preflight "${NEAR_BYPASS_PRE_DEV:-none}" \
+        "$NEAR_BYPASS_PRE_RULE" "$EV/near-ip-rule-pre.txt"
+    capture_common near "$EV/near-pre.txt"
+    note "near bypass failed at preflight; no module load, no transfer"
+    exit 3
+fi
 
 say "== 4. far tools, disk and port"
 far_tools=$(ssh_far 'for t in busybox dd sha256sum curl ss awk; do command -v $t >/dev/null || echo missing:$t; done' || true)
@@ -456,10 +687,22 @@ ssh_near "printf 'ports 30000-30511\n' > /proc/net/tbtun/ports"
 ssh_far "printf 'ports 31000-31511\n' > /proc/net/tbtun/ports"
 
 say "== 8. config"
+NEAR_DEV_TOKEN=${NEAR_DEV:+ dev=$NEAR_DEV}
 FAR_CFG="tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5210 n=4 m=4 fec=on mode=grouped w=8 carriers=$CARRIERS crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=31000-31511 nonce=$NONCE"
-NEAR_CFG="tunnel 1 role=near listen=127.0.0.1:9001 peer=$FAR_IP:9000 n=4 m=4 fec=on mode=grouped w=8 carriers=$CARRIERS crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=30000-30511 nonce=$NONCE"
+NEAR_CFG="tunnel 1 role=near listen=127.0.0.1:9001 peer=$FAR_IP:9000 n=4 m=4 fec=on mode=grouped w=8 carriers=$CARRIERS crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=30000-30511$NEAR_DEV_TOKEN nonce=$NONCE"
 ssh_far "printf '%s\n' '$FAR_CFG' > /proc/net/tbtun/config"
-ssh_near "printf '%s\n' '$NEAR_CFG' > /proc/net/tbtun/config"
+if ssh_near "printf '%s\n' '$NEAR_CFG' > /proc/net/tbtun/config"; then
+    check near_config_write 0 "config accepted${NEAR_DEV:+ (dev=$NEAR_DEV)}"
+else
+    if [[ -n $NEAR_DEV ]]; then
+        check near_config_write 1 "config rejected; is dev=$NEAR_DEV supported by this tbtun?"
+    else
+        check near_config_write 1 "config rejected; see near-pre.txt"
+    fi
+    capture_common near "$EV/near-pre.txt"
+    note "near config write failed; no join gate"
+    exit 4
+fi
 ssh_far 'cat /proc/net/tbtun/config' >"$EV/far-config.txt" 2>/dev/null || true
 ssh_near 'cat /proc/net/tbtun/config' >"$EV/near-config.txt" 2>/dev/null || true
 ssh_far 'cat /proc/net/tbtun/tunnels' >"$EV/far-tunnels.txt" 2>/dev/null || true
@@ -469,6 +712,14 @@ for f in far near; do
     for tok in "carriers=$CARRIERS" "n=4" "m=4" "w=8" "fec=on" "mode=grouped" "crypto=on" "profile=http-kal"; do
         check "${f}_cfg_${tok%%=*}" "$(case " $cfg " in *" $tok "*) echo 0 ;; *) echo 1 ;; esac)" "$tok"
     done
+    if [[ $f == near ]]; then
+        if [[ -n $NEAR_DEV ]]; then
+            check near_cfg_dev \
+                "$(case " $cfg " in *" dev=$NEAR_DEV "*) echo 0 ;; *) echo 1 ;; esac)" "dev=$NEAR_DEV"
+        else
+            skip near_cfg_dev "NEAR_DEV unset; dev= not written (tbtun key pending)"
+        fi
+    fi
 done
 if ((FAILED)); then
     capture_common near "$EV/near-pre.txt"
@@ -498,6 +749,26 @@ if ((FAILED)); then
 fi
 mark join-done
 
+say "== 9b. near bypass re-assert (before transfer)"
+NEAR_BYPASS_XFER_OK=0
+near_bypass_out=$(near_bypass_ensure 2>&1) || true
+printf '%s\n' "$near_bypass_out" >"$EV/near-ip-rule-pretransfer.txt"
+NEAR_BYPASS_XFER_DEV=$(printf '%s\n' "$near_bypass_out" | sed -n 's/^BYPASS_DEV=//p' | tail -n 1)
+NEAR_BYPASS_XFER_RULE=$(bypass_rule_label \
+    "$(printf '%s\n' "$near_bypass_out" | sed -n 's/^BYPASS_RULE_ADDED=//p' | tail -n 1)")
+if bypass_dev_ok "${NEAR_BYPASS_XFER_DEV:-}"; then
+    NEAR_BYPASS_XFER_OK=1
+    check near_bypass_pretransfer 0 "dev=$NEAR_BYPASS_XFER_DEV rule=$NEAR_BYPASS_XFER_RULE"
+else
+    check near_bypass_pretransfer 1 "dev=${NEAR_BYPASS_XFER_DEV:-none} rule=$NEAR_BYPASS_XFER_RULE; need eth0, not Meta/tun*/utun*/wg*/tailscale*"
+    write_bypass_fail_summary pretransfer "${NEAR_BYPASS_XFER_DEV:-none}" \
+        "$NEAR_BYPASS_XFER_RULE" "$EV/near-ip-rule-pretransfer.txt"
+    capture_common near "$EV/near-pre.txt"
+    capture_common far "$EV/far-pre.txt"
+    note "near bypass changed after preflight; transfer refused"
+    exit 4
+fi
+
 # ---------------------------------------------------------------------------
 # one download
 
@@ -508,6 +779,7 @@ ssh_far 'cat /proc/stat' >"$EV/far-procstat-pre.txt" 2>/dev/null || true
 ssh_near 'cat /proc/stat' >"$EV/near-procstat-pre.txt" 2>/dev/null || true
 NEAR_BOOT_BEFORE=$(near_boot_id)
 START_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+START_EPOCH=$(date +%s)
 mark transfer-start "expect=$EXPECT_BYTES"
 
 if ! scp_near "$(dirname -- "$0")/near-fetch.sh" "$NEAR_HOST:/root/near-fetch.sh"; then
@@ -515,12 +787,24 @@ if ! scp_near "$(dirname -- "$0")/near-fetch.sh" "$NEAR_HOST:/root/near-fetch.sh
     note "upload failed; no transfer attempted"
     exit 4
 fi
+NEAR_T0=$(ssh_near 'date +%s' 2>/dev/null || true)
+FAR_T0=$(ssh_far 'date +%s' 2>/dev/null || true)
+case $NEAR_T0 in '' | *[!0-9]*) NEAR_T0=$START_EPOCH ;; esac
+case $FAR_T0 in '' | *[!0-9]*) FAR_T0=$START_EPOCH ;; esac
 near_rc=0
-ssh_near "FAR_HASH='$FAR_HASH' REQUIRE_SESS_REFS='$REQUIRE_SESS_REFS' sh /root/near-fetch.sh --run" 2>&1 |
+ssh_near_transfer "FAR_HASH='$FAR_HASH' FAR_IP='$FAR_IP' NEAR_DEV='$NEAR_DEV' REQUIRE_SESS_REFS='$REQUIRE_SESS_REFS' MAX_TIME='$TRANSFER_MAX_TIME' sh /root/near-fetch.sh --run" 2>&1 |
     tee "$EV/near-fetch.log" >&2 || near_rc=$?
 say "NEAR_FETCH_RC=$near_rc"
+if ((near_rc == 124)); then
+    note "near transport hit the ${TRANSFER_TMO}s ssh wrapper timeout; the near-side curl --max-time ${TRANSFER_MAX_TIME}s is the authority"
+fi
 
 END_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+END_EPOCH=$(date +%s)
+NEAR_T1=$(ssh_near 'date +%s' 2>/dev/null || true)
+FAR_T1=$(ssh_far 'date +%s' 2>/dev/null || true)
+case $NEAR_T1 in '' | *[!0-9]*) NEAR_T1=$END_EPOCH ;; esac
+case $FAR_T1 in '' | *[!0-9]*) FAR_T1=$END_EPOCH ;; esac
 mark transfer-end "rc=$near_rc"
 
 ssh_far 'cat /proc/net/tbtun/stats' >"$EV/far-stats-post.txt" 2>/dev/null || true
@@ -542,11 +826,11 @@ ssh_near "cat $DL_DIR/near-verdict.txt" >"$EV/near-verdict.txt" 2>/dev/null || t
 ssh_near "cat /proc/net/tbtun/stats" >"$EV/near-stats-post2.txt" 2>/dev/null || true
 capture_common near "$EV/near-post.txt"
 capture_common far "$EV/far-post.txt"
-kernel_window near "$START_UTC" "$EV/near-kernel-window.txt"
-kernel_window far "$START_UTC" "$EV/far-kernel-window.txt"
+kernel_window near "$NEAR_T0" "$NEAR_T1" "$EV/near-kernel-window.txt"
+kernel_window far "$FAR_T0" "$FAR_T1" "$EV/far-kernel-window.txt"
 for end in near far; do
-    src=$(ssh_"$end" 'command -v journalctl >/dev/null 2>&1 && journalctl -k -n 1 --no-pager >/dev/null 2>&1 && echo journalctl || { dmesg >/dev/null 2>&1 && echo dmesg || echo none; }' 2>/dev/null || echo none)
-    check "${end}_kernel_source" "$([ "$src" != none ]; echo $?)" "source=${src:-none}"
+    src=$(sed -n 's/^KW_SOURCE=//p' "$EV/$end-kernel-window.txt" 2>/dev/null | head -n 1 || true)
+    check "${end}_kernel_source" "$([ -n "$src" ] && [ "$src" != none ]; echo $?)" "source=${src:-none}"
 done
 ssh_near 'cat /proc/net/tbtun/config' >"$EV/near-config-post.txt" 2>/dev/null || true
 ssh_far 'cat /proc/net/tbtun/config' >"$EV/far-config-post.txt" 2>/dev/null || true
@@ -587,7 +871,11 @@ speed=$(awk '{for(i=1;i<=NF;i++) if($i ~ /^speed=/){sub("speed=","",$i); print $
 check http "$([ "${http:-000}" = "200" ]; echo $?)" "http=${http:-000}"
 check size_download "$([ "${size_dl:-0}" = "$EXPECT_BYTES" ]; echo $?)" \
     "size_download=${size_dl:-0} expected=$EXPECT_BYTES"
-check near_fetch_rc "$([ "$near_rc" -eq 0 ]; echo $?)" "rc=$near_rc"
+if ((near_rc == 124)); then
+    check near_fetch_rc 1 "rc=124 is the ${TRANSFER_TMO}s ssh wrapper, not the near verdict; see near-fetch.log"
+else
+    check near_fetch_rc "$([ "$near_rc" -eq 0 ]; echo $?)" "rc=$near_rc"
+fi
 
 fsize=$(tr -d '[:space:]' <"$EV/near-size.txt" 2>/dev/null || true)
 check file_size "$([ "${fsize:-0}" = "$EXPECT_BYTES" ]; echo $?)" \
@@ -659,13 +947,44 @@ else
     skip sess_refs "not exported by this build"
 fi
 
-for end in near far; do
-    if grep -qE 'BUG:|Oops|WARNING:|general protection fault' "$EV/$end-kernel-window.txt" 2>/dev/null; then
-        check "${end}_kernel" 1 \
-            "$(grep -cE 'BUG:|Oops|WARNING:|general protection fault' "$EV/$end-kernel-window.txt") matching lines"
+# Kernel-window status, shared by the verdict loop and SUMMARY. KW_SOURCE names
+# the readable source; an empty body means no in-window records, which is SKIP
+# and explicitly annotated in SUMMARY (it is not a clean result).
+kw_source() {
+    sed -n 's/^KW_SOURCE=//p' "$EV/$1-kernel-window.txt" 2>/dev/null | head -n 1 || true
+}
+kw_body() {
+    sed '1d' "$EV/$1-kernel-window.txt" 2>/dev/null || true
+}
+kw_state() {
+    local body
+    body=$(kw_body "$1")
+    if [[ -z ${body//[[:space:]]/} ]]; then
+        printf 'SKIP'
+    elif grep -qE 'BUG:|Oops|WARNING:|general protection fault' <<<"$body"; then
+        printf 'FAIL'
     else
-        check "${end}_kernel" 0 "window ${START_UTC}..${END_UTC}"
+        printf 'PASS'
     fi
+}
+kw_detail() {
+    local state src body lines
+    state=$(kw_state "$1")
+    src=$(kw_source "$1")
+    body=$(kw_body "$1")
+    lines=$(printf '%s\n' "$body" | grep -c . || true)
+    printf '%s (source=%s, lines=%s)' "$state" "${src:-none}" "${lines:-0}"
+}
+
+for end in near far; do
+    kwbody=$(kw_body "$end")
+    kwsrc=$(kw_source "$end")
+    case $(kw_state "$end") in
+        SKIP) skip "${end}_kernel" "empty window ${START_UTC}..${END_UTC} (source=${kwsrc:-none}); dmesg tail is still judged" ;;
+        FAIL) check "${end}_kernel" 1 \
+            "$(grep -cE 'BUG:|Oops|WARNING:|general protection fault' <<<"$kwbody") matching lines (source=${kwsrc:-?})" ;;
+        *) check "${end}_kernel" 0 "window ${START_UTC}..${END_UTC} source=${kwsrc:-?}" ;;
+    esac
 done
 for end in near far; do
     if grep -qE 'BUG:|Oops|general protection fault' "$EV/$end-dmesg.txt" 2>/dev/null; then
@@ -684,12 +1003,19 @@ check feeder_alive "$([ -n "$feeder_after" ]; echo $?)" "${feeder_after:-no hold
 # performance
 
 near_busy() {
-    awk 'NR==1{printf "%s %s", $2+$3+$4+$7+$8+$9, $5+$6}' "$1" 2>/dev/null || echo "0 0"
+    # The trailing newline matters: `read` returns 1 at EOF without it and
+    # `set -e` aborted this script before perf/SUMMARY/cleanup.
+    awk '
+        NR == 1 {
+            printf "%s %s\n", $2 + $3 + $4 + $7 + $8 + $9, $5 + $6
+            seen = 1
+        }
+        END { if (!seen) printf "0 0\n" }' "$1" 2>/dev/null || printf '0 0\n'
 }
-read -r nb ni < <(near_busy "$EV/near-procstat-pre.txt")
-read -r nb2 ni2 < <(near_busy "$EV/near-procstat-post.txt")
-read -r fb fi < <(near_busy "$EV/far-procstat-pre.txt")
-read -r fb2 fi2 < <(near_busy "$EV/far-procstat-post.txt")
+read -r nb ni < <(near_busy "$EV/near-procstat-pre.txt") || true
+read -r nb2 ni2 < <(near_busy "$EV/near-procstat-post.txt") || true
+read -r fb fi < <(near_busy "$EV/far-procstat-pre.txt") || true
+read -r fb2 fi2 < <(near_busy "$EV/far-procstat-post.txt") || true
 cpu_pct() {
     awk -v b1="$1" -v i1="$2" -v b2="$3" -v i2="$4" 'BEGIN{
         b=b2-b1; i=i2-i1; t=b+i
@@ -721,6 +1047,14 @@ cat "$EV/perf.txt" | tee -a "$EV/run.log" >&2
 
 verdict=PASS
 if ((FAILED > 0)); then verdict=FAIL; fi
+# A failed run is first-hand evidence: never delete it implicitly. The near
+# partial file, the far source and both ends' stats/dmesg stay until an
+# explicit --cleanup.
+if ((FAILED > 0)) && ((KEEP == 0)); then
+    KEEP=1
+    KEEP_AUTO=1
+    note "verdict FAIL: KEEP=1 forced; evidence stays (near $DL_DIR, far $FAR_DIR); run --cleanup to remove"
+fi
 {
     printf '# 1 GiB acceptance run\n\n'
     printf -- '- start: %s\n- end: %s\n' "$START_UTC" "$END_UTC"
@@ -740,7 +1074,31 @@ if ((FAILED > 0)); then verdict=FAIL; fi
     printf '| near CPU busy | %s%% |\n' "$near_cpu"
     printf '| far CPU busy | %s%% |\n' "$far_cpu"
     printf '| near boot_id stable | %s |\n' "$([ "$NEAR_BOOT_BEFORE" = "$NEAR_BOOT_AFTER" ] && echo yes || echo no)"
-    printf '| feeder after run | %s |\n\n' "${feeder_after:-none}"
+    printf '| feeder after run | %s |\n' "${feeder_after:-none}"
+    printf '| near kernel window | %s |\n' "$(kw_detail near)"
+    printf '| far kernel window | %s |\n' "$(kw_detail far)"
+    printf '| near bypass preflight | %s |\n' \
+        "$(bypass_summary_note "$NEAR_BYPASS_PRE_DEV" "$NEAR_BYPASS_PRE_RULE" "$NEAR_BYPASS_PRE_OK")"
+    printf '| near bypass pre-transfer | %s |\n\n' \
+        "$(bypass_summary_note "$NEAR_BYPASS_XFER_DEV" "$NEAR_BYPASS_XFER_RULE" "$NEAR_BYPASS_XFER_OK")"
+    if [[ $(kw_state near) == SKIP || $(kw_state far) == SKIP ]]; then
+        printf '> Kernel window SKIP: `journalctl -k -b 0` held no records inside the window and dmesg had no in-window lines. SKIP is not a clean result; see `near-dmesg.txt` / `far-dmesg.txt`.\n\n'
+    fi
+    printf '## Near path (dev= primary, ip rule insurance)\n\n'
+    printf -- '- near dev= (primary): %s\n' "${NEAR_DEV:-disabled}"
+    printf -- '- ip rule (insurance): `ip rule add to %s/32 lookup main pref %s`\n' "$FAR_IP" "$BYPASS_PREF"
+    printf -- '- run-1g preflight: %s\n' \
+        "$(bypass_summary_note "$NEAR_BYPASS_PRE_DEV" "$NEAR_BYPASS_PRE_RULE" "$NEAR_BYPASS_PRE_OK")"
+    printf -- '- run-1g pre-transfer: %s\n\n' \
+        "$(bypass_summary_note "$NEAR_BYPASS_XFER_DEV" "$NEAR_BYPASS_XFER_RULE" "$NEAR_BYPASS_XFER_OK")"
+    printf '```\n'
+    for f in "$EV/near-ip-rule-pre.txt" "$EV/near-ip-rule-pretransfer.txt" \
+        "$EV/near-evidence/near-ip-rule-pre.txt" "$EV/near-evidence/near-ip-rule-pretransfer.txt"; do
+        [[ -f $f ]] || continue
+        printf '=== %s ===\n' "${f#"$EV"/}"
+        cat "$f"
+    done
+    printf '```\n\n'
     printf '## Counter increments\n\n'
     printf '```\nnear:\n'; cat "$EV/counters-near.txt"
     printf 'far:\n'; cat "$EV/counters-far.txt"; printf '```\n\n'
@@ -748,7 +1106,10 @@ if ((FAILED > 0)); then verdict=FAIL; fi
     grep -E '^(CHECK|NEAR_CHECK) ' "$EV/run.log" "$EV/near-fetch.log" 2>/dev/null || true
     printf '```\n\n'
     printf '## Cleanup\n\n'
-    if [[ $KEEP -eq 1 ]]; then
+    if ((KEEP_AUTO == 1)); then
+        printf 'skipped: FAIL keeps first-hand evidence automatically (near `%s`, far `%s`); run `--cleanup` to remove it\n' \
+            "$DL_DIR" "$FAR_DIR"
+    elif [[ $KEEP -eq 1 ]]; then
         printf 'skipped (--keep); module, config and files stay for forensics\n'
     else
         printf 'see `cleanup.txt`\n'
@@ -763,6 +1124,8 @@ if ((KEEP == 0)); then
     if ! cleanup_all; then
         cleanup_rc=9
     fi
+elif ((KEEP_AUTO == 1)); then
+    note "FAIL: evidence kept automatically; cleanup skipped (--cleanup removes)"
 else
     note "keep requested; cleanup skipped"
 fi
