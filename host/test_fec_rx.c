@@ -1581,6 +1581,63 @@ static void test_probe_and_absent(void)
        "probe: the cap removes the never-stored storm");
 }
 
+/* fix22: the far's replay queue reached 8 MiB and the download made no
+ * progress for 120 s. The normal cap is now 4 MiB, and above 75% of it a
+ * flush pass writes one replay record so the bound new-DATA queues get a
+ * turn. Replay still drains (nothing is dropped), the FIN still does not
+ * wait for it, and the tail share is still in the ring. */
+static void test_replay_high_water(void)
+{
+    u32 cap = 4u * 1024 * 1024;
+    u32 high = tbt_fec_replay_high_water(cap);
+    const u32 rec = 8192;
+    u32 queued = cap;
+    int passes = 0, over_passes = 0, under_passes = 0;
+    bool bad = false;
+
+    ok_size((size_t)high, 3u * 1024 * 1024, "high water: 75% of 4 MiB");
+    ok_size((size_t)tbt_fec_replay_high_water(TBT_FEC_REPLAY_CLOSE_BYTES_MAX),
+            TBT_FEC_REPLAY_CLOSE_BYTES_MAX -
+                TBT_FEC_REPLAY_CLOSE_BYTES_MAX / 4,
+            "high water: the close cap scales with it");
+    ok_int(tbt_fec_replay_pass_limit(false, 8), 8,
+           "throttle: below the mark the pass keeps its limit");
+    ok_int(tbt_fec_replay_pass_limit(true, 8), 1,
+           "throttle: above the mark one replay per pass");
+    ok_int(tbt_fec_replay_pass_limit(true, 1), 1,
+           "throttle: never raises a lower limit");
+
+    while (queued && passes < 2000)
+    {
+        bool over = queued > high;
+        u32 limit = tbt_fec_replay_pass_limit(over, 8);
+        u32 n = 0;
+
+        while (queued && n < limit)
+        {
+            queued -= rec;
+            n++;
+}
+        if (over)
+        {
+            if (n != 1)
+                bad = true;
+            over_passes++;
+}
+        else
+        {
+            under_passes++;
+}
+        passes++;
+}
+    ok_size((size_t)queued, 0, "throttle: every replay record drains");
+    ok(over_passes > 0 && under_passes > 0,
+       "throttle: both regimes are exercised");
+    ok(!bad, "throttle: an over-water pass writes exactly one record");
+    ok(tbt_fec_fin_ready(true, 0),
+       "throttle: the FIN does not wait for the replay queue");
+}
+
 /* A record that arrives for a settled block is classified, never refused.
  * A replayed empty marker used to return -EPROTO, and the carrier parser
  * kills the carrier that carried a -EPROTO record: one NACK retry became
@@ -1673,6 +1730,7 @@ int main(void)
     test_replay_dedup_model();
     test_fin_and_stale_replay();
     test_probe_and_absent();
+    test_replay_high_water();
     test_arrival_kind();
 
     printf("test_fec_rx: %d checks, %d failures\n", checks, failures);

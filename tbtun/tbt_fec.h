@@ -386,6 +386,23 @@ static inline u32 tbt_fec_replay_cap(bool closing, u32 normal_max)
     return normal_max;
 }
 
+/* The queue is above this mark: replay is throttled so a repair burst
+ * cannot own every carrier while new DATA waits (fix22: an 8 MiB queue and
+ * 4.6M flush skips left the download with no progress for 120 s). */
+static inline u32 tbt_fec_replay_high_water(u32 cap)
+{
+    return cap - cap / 4; /* 75% */
+}
+
+/* One replay record per flush pass above the mark, then the bound data
+ * queues get their turn. Below it the pass keeps its normal limit. */
+static inline u32 tbt_fec_replay_pass_limit(bool over_high, u32 normal_limit)
+{
+    if (over_high && normal_limit > 1)
+        return 1;
+    return normal_limit;
+}
+
 /* A NACK named share n of a group that never wrote into the block. No record
  * is resident, so the replay ring cannot answer; the empty marker is the
  * truth. The block must be closed (its shape is final) and still inside the

@@ -677,11 +677,29 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
         u8 usable[TBT_MAX_CARRIERS_LIMIT];
         u32 pace[TBT_MAX_CARRIERS_LIMIT];
         u16 ncand = tbt_fec_replay_usable(sess, usable);
+        u32 cap = tbt_fec_replay_cap(READ_ONCE(sess->fec_closing),
+                                     TBT_FEC_REPLAY_BYTES_MAX);
+        u32 high = tbt_fec_replay_high_water(cap);
+        u32 bytes, limit;
+        bool over;
 
         spin_lock(&sess->fec_out_lock);
         for (i = 0; i < sess->n_car; i++)
             pace[i] = sess->fec_outq[i].bytes;
+        bytes = sess->fec_replay_bytes;
         spin_unlock(&sess->fec_out_lock);
+        over = bytes > high;
+        if (over != READ_ONCE(sess->fec_replay_over_high))
+        {
+            WRITE_ONCE(sess->fec_replay_over_high, over);
+            if (over)
+                atomic64_inc(&sess->fec_replay_high_water);
+        }
+        /* Above the mark one replay record per pass keeps new DATA moving;
+         * replay still drains, and the TX work is re-armed immediately. */
+        limit = tbt_fec_replay_pass_limit(over, TBT_FEC_REPLAY_PASS_MAX);
+        if (over)
+            atomic64_inc(&sess->fec_replay_pass_throttled);
         for (;;)
         {
             struct tbt_fec_out *o;
@@ -741,7 +759,7 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
                 atomic64_add(dt, &sess->fec_nack_lat_ns);
                 tbt_fec_stat_max(&sess->fec_nack_lat_max_ns, dt);
                 pass++;
-                if (++replay_sent >= TBT_FEC_REPLAY_PASS_MAX)
+                if (++replay_sent >= limit)
                 {
                     /* Give the bound data queues a turn; the TX work is
                      * re-armed below while replay records remain. */
@@ -754,6 +772,11 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
                 atomic64_inc(&sess->fec_replay_drop);
             }
         }
+    }
+    else if (READ_ONCE(sess->fec_replay_over_high))
+    {
+        /* The queue emptied: the next burst counts as a new episode. */
+        WRITE_ONCE(sess->fec_replay_over_high, false);
     }
     tbt_fec_replay_rate_sample(sess, replay_bytes);
     /* Pass 3: bound data queues, one carrier at a time. */

@@ -820,11 +820,13 @@ struct tbt_fec_outq
 #define TBT_FEC_NACK_REQ_MAX 256u
 
 /* Replay records in flight across every carrier queue: a byte budget, not a
- * record count. One NACK's 256 shares (about 2 MiB) must not fill it, and a
- * slow carrier must not consume it: the records spread over the carriers by
- * their queue bytes. A miss is retried by the receiver's NACK, not turned
- * into a source-frame drop. */
-#define TBT_FEC_REPLAY_BYTES_MAX (8u * 1024 * 1024)
+ * record count. One NACK names at most 64 shares (512 KiB), so 4 MiB holds
+ * eight bursts; a slow carrier must not consume it, and the records spread
+ * over the carriers by their queue bytes. A miss is retried by the
+ * receiver's NACK, not turned into a source-frame drop. The old 8 MiB bound
+ * let a repair burst own the carriers for ~30 s at the fix22 throughput and
+ * the download made no progress for 120 s. */
+#define TBT_FEC_REPLAY_BYTES_MAX (4u * 1024 * 1024)
 /* Replay records one flush pass may write before the bound data queues get
  * their turn. 8 records of one 8 KiB share is 64 KiB: replay keeps its
  * priority, but a NACK burst cannot hold the close path's FIN behind it for
@@ -1224,12 +1226,18 @@ struct tbt_session
     atomic64_t fec_nack_never_stored;
     atomic64_t fec_nack_absent_reply;
     atomic64_t fec_nack_req_invalid;
+    /* Replay high-water: episodes where the queue crossed 75% of its cap,
+     * and flush passes that were held to one replay record so new DATA got
+     * a turn. */
+    atomic64_t fec_replay_high_water;
+    atomic64_t fec_replay_pass_throttled;
     /* Replay drain: bytes/s over the last sampling window (an EWMA gauge),
      * the high-water of queued replay bytes, and the window accumulator. */
     atomic64_t fec_replay_drain_bps;
     atomic64_t fec_replay_queue_high;
     u64 fec_replay_drain_bytes; /* written since the last sample; flush only */
     u64 fec_replay_drain_ns;    /* last sample time; flush only */
+    bool fec_replay_over_high;  /* queue above 75% at the last flush pass */
     /* The one stream is closing: the replay admission cap drops to
      * TBT_FEC_REPLAY_CLOSE_BYTES_MAX so the tail repair fits the close
      * budget. Written by the FEC TX work, read by the NACK handler. */

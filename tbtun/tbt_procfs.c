@@ -1091,6 +1091,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "fec_nack_never_stored=%llu "
                               "fec_nack_absent_reply=%llu "
                               "fec_nack_req_invalid=%llu "
+                              "fec_replay_high_water=%llu "
+                              "fec_replay_pass_throttled=%llu "
                               "fec_replay_drain_bps=%llu "
                               "fec_replay_queue_high=%llu "
                               "fec_reset_hole=%llu "
@@ -1146,6 +1148,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_nack_never_stored),
                            tbt_stat_read(&s->fec_nack_absent_reply),
                            tbt_stat_read(&s->fec_nack_req_invalid),
+                           tbt_stat_read(&s->fec_replay_high_water),
+                           tbt_stat_read(&s->fec_replay_pass_throttled),
                            tbt_stat_read(&s->fec_replay_drain_bps),
                            tbt_stat_read(&s->fec_replay_queue_high),
                            tbt_stat_read(&s->fec_reset_hole),
