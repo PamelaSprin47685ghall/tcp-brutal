@@ -257,6 +257,11 @@ if [ -e /proc/net/tbtun/config ]; then
             *) check "cfg_${tok%%=*}" 1 "missing token $tok" ;;
         esac
     done
+    case " $cfg " in
+        *" carrier_stall_ms=0 "*) check cfg_carrier_stall 0 "carrier_stall_ms=0 (auto)" ;;
+        *" carrier_stall_ms="*) check cfg_carrier_stall 1 "carrier_stall_ms must be 0 or absent for auto" ;;
+        *) check cfg_carrier_stall 0 "carrier_stall_ms absent (auto)" ;;
+    esac
     if [ -n "$NEAR_DEV" ]; then
         case " $cfg " in
             *" dev=$NEAR_DEV "*) check cfg_dev 0 "dev=$NEAR_DEV" ;;

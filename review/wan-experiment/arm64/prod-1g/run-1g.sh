@@ -688,8 +688,8 @@ ssh_far "printf 'ports 31000-31511\n' > /proc/net/tbtun/ports"
 
 say "== 8. config"
 NEAR_DEV_TOKEN=${NEAR_DEV:+ dev=$NEAR_DEV}
-FAR_CFG="tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5210 n=4 m=4 fec=on mode=grouped w=8 carriers=$CARRIERS crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=31000-31511 nonce=$NONCE"
-NEAR_CFG="tunnel 1 role=near listen=127.0.0.1:9001 peer=$FAR_IP:9000 n=4 m=4 fec=on mode=grouped w=8 carriers=$CARRIERS crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=30000-30511$NEAR_DEV_TOKEN nonce=$NONCE"
+FAR_CFG="tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5210 n=4 m=4 fec=on mode=grouped w=8 carriers=$CARRIERS crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 portblock=31000-31511 nonce=$NONCE"
+NEAR_CFG="tunnel 1 role=near listen=127.0.0.1:9001 peer=$FAR_IP:9000 n=4 m=4 fec=on mode=grouped w=8 carriers=$CARRIERS crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 portblock=30000-30511$NEAR_DEV_TOKEN nonce=$NONCE"
 ssh_far "printf '%s\n' '$FAR_CFG' > /proc/net/tbtun/config"
 if ssh_near "printf '%s\n' '$NEAR_CFG' > /proc/net/tbtun/config"; then
     check near_config_write 0 "config accepted${NEAR_DEV:+ (dev=$NEAR_DEV)}"
@@ -712,6 +712,11 @@ for f in far near; do
     for tok in "carriers=$CARRIERS" "n=4" "m=4" "w=8" "fec=on" "mode=grouped" "crypto=on" "profile=http-kal"; do
         check "${f}_cfg_${tok%%=*}" "$(case " $cfg " in *" $tok "*) echo 0 ;; *) echo 1 ;; esac)" "$tok"
     done
+    case " $cfg " in
+        *" carrier_stall_ms=0 "*) check "${f}_cfg_carrier_stall" 0 "carrier_stall_ms=0 (auto)" ;;
+        *" carrier_stall_ms="*) check "${f}_cfg_carrier_stall" 1 "carrier_stall_ms must be 0 or absent for auto" ;;
+        *) check "${f}_cfg_carrier_stall" 0 "carrier_stall_ms absent (auto)" ;;
+    esac
     if [[ $f == near ]]; then
         if [[ -n $NEAR_DEV ]]; then
             check near_cfg_dev \
