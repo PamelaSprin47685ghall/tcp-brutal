@@ -1006,6 +1006,12 @@ struct tbt_session
     u32 rtt_mean_us;  /* delivery-weighted mean SRTT: the window's base */
     u32 rttvar_us;    /* largest carrier mdev_us: the window's jitter term */
     u32 rtt_max_us;   /* largest carrier SRTT, a distribution fact */
+    /* BDP estimator coverage: how many live carriers contributed and how much
+     * rate/window the aggregate actually saw. */
+    u64 bdp_sum_rate; /* aggregate delivery rate used for BDP (bytes/s) */
+    u64 bdp_agg_wnd;  /* sum of live carriers' snd_wnd (bytes) */
+    u32 bdp_n_live;   /* carriers with a socket */
+    u32 bdp_coverage; /* carriers that contributed a rate sample */
 
     /* Scheduler: a striping window over the carriers, rebuilt on the lowest
      * inflight and at most every 10 ms. Only the pump touches it. DATA uses

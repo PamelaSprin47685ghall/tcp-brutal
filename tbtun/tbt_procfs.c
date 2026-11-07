@@ -828,7 +828,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "stall_replace_dead=%llu "
                               "tx_window=%u bdp_bytes=%u k_x100=%u "
                               "rtt_mean_us=%u rttvar_us=%u "
-                              "rtt_max_us=%u txq_max=%u win_block=%llu win_resume=%llu "
+                              "rtt_max_us=%u bdp_sum_rate=%llu "
+                              "bdp_agg_wnd=%llu bdp_n_live=%u bdp_coverage=%u "
+                              "txq_max=%u win_block=%llu win_resume=%llu "
                               "tx_wait_carrier=%llu tx_backpressure=%llu "
                               "tx_wait_carrier_bytes=%llu tx_wait_carrier_ns=%llu "
                               "tx_backpressure_bytes=%llu tx_backpressure_ns=%llu "
@@ -886,6 +888,10 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            READ_ONCE(s->tx_window), READ_ONCE(s->bdp_bytes),
                            READ_ONCE(s->k_x100), READ_ONCE(s->rtt_mean_us),
                            READ_ONCE(s->rttvar_us), READ_ONCE(s->rtt_max_us),
+                           READ_ONCE(s->bdp_sum_rate),
+                           READ_ONCE(s->bdp_agg_wnd),
+                           READ_ONCE(s->bdp_n_live),
+                           READ_ONCE(s->bdp_coverage),
                            READ_ONCE(s->txq_max),
                            READ_ONCE(s->win_block), READ_ONCE(s->win_resume),
                            READ_ONCE(s->tx_wait_carrier),

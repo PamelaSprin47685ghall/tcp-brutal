@@ -189,6 +189,24 @@ static inline u64 tbt_tx_window_auto(u64 k_bdp, u64 sum_wnd,
     return win ? win : 1;
 }
 
+/* One carrier's rate sample. BBR's delivery rate is preferred; a carrier that
+ * has not filled that sample yet is still live, so fall back to the window it
+ * advertises divided by its SRTT. Without this, a 32-carrier aggregate is
+ * estimated from the few carriers that happened to produce a sample and the
+ * BDP collapses to a single-flow value. */
+static inline u64 tbt_tx_car_rate(u64 delivery_bps, u32 srtt_us,
+                                  u32 snd_wnd, u32 snd_cwnd)
+{
+    u64 wnd;
+
+    if (delivery_bps)
+        return delivery_bps;
+    wnd = snd_wnd > snd_cwnd ? snd_wnd : snd_cwnd;
+    if (!wnd || !srtt_us)
+        return 0;
+    return wnd * 1000000ULL / srtt_us;
+}
+
 /* Pure path bound: idx must name a slot the session owns and fit the 16-slot
  * retain arrays. No warning here; FEC sessions legally walk 256 slots. */
 static inline bool tbt_tx_path_in_range(unsigned int idx, unsigned int n_car)

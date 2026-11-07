@@ -141,6 +141,25 @@ static void case_aggregate_window(void)
     ok(win == 1 << 20, "window: single-carrier floor");
 }
 
+static void case_car_rate(void)
+{
+    ok(tbt_tx_car_rate(5000000, 100000, 0, 0) == 5000000,
+       "rate: BBR delivery sample wins");
+    ok(tbt_tx_car_rate(0, 166727, 136000, 200000) ==
+           200000ULL * 1000000 / 166727,
+       "rate: cwnd/srtt fallback");
+    ok(tbt_tx_car_rate(0, 166727, 0, 200000) ==
+           200000ULL * 1000000 / 166727,
+       "rate: cwnd fallback without snd_wnd");
+    ok(tbt_tx_car_rate(0, 166727, 136000, 0) ==
+           136000ULL * 1000000 / 166727,
+       "rate: snd_wnd fallback without cwnd");
+    ok(tbt_tx_car_rate(0, 0, 136000, 200000) == 0,
+       "rate: no RTT means no fallback");
+    ok(tbt_tx_car_rate(0, 166727, 0, 0) == 0,
+       "rate: no window means no fallback");
+}
+
 struct frame
 {
     u8 type;
@@ -219,6 +238,7 @@ int main(void)
     case_close_hold();
     case_repair_bound();
     case_aggregate_window();
+    case_car_rate();
     case_fin_not_starved();
     case_no_close();
 

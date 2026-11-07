@@ -648,6 +648,7 @@ static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
     u64 sum_rate = 0, sum_rtt_rate = 0, sum_wnd = 0;
     u32 rtt_max = 0, var_max = 0;
     u32 n_live = 0;
+    u32 n_rate = 0;
     int i;
 
     for (i = 0; i < sess->n_car; i++)
@@ -656,7 +657,7 @@ static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
         struct sock *sk;
         u32 srtt = 0, mdev = 0;
         u64 rate = 0;
-        u64 wnd = 0;
+        u32 wnd = 0, cwnd = 0;
 
         if (!c)
             continue;
@@ -669,15 +670,20 @@ static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
             mdev = READ_ONCE(tp->mdev_us);
             rate = tbt_car_delivery_bps(tp);
             wnd = READ_ONCE(tp->snd_wnd);
+            cwnd = READ_ONCE(tp->snd_cwnd);
             tbt_carrier_sk_put(sk);
             n_live++;
         }
         sum_wnd += wnd;
         if (!srtt)
             srtt = READ_ONCE(c->rtt_us);
+        /* A carrier without a BBR sample still advertises a window; use it as
+         * the rate floor instead of dropping the carrier from the aggregate. */
+        rate = tbt_tx_car_rate(rate, srtt, wnd, cwnd);
         tbt_carrier_put(c);
         if (!srtt || !rate)
             continue;
+        n_rate++;
         sum_rate += rate;
         sum_rtt_rate += (u64)srtt * rate;
         if (srtt > rtt_max)
@@ -695,6 +701,10 @@ static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
         *agg_out = sum_wnd;
     if (n_live_out)
         *n_live_out = n_live;
+    sess->bdp_sum_rate = sum_rate;
+    sess->bdp_agg_wnd = sum_wnd;
+    sess->bdp_n_live = n_live;
+    sess->bdp_coverage = n_rate;
     if (!sum_rate)
         return 0;
     {
