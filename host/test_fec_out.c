@@ -5,9 +5,11 @@
  *   tbt_fec_data.c, not a link against the kernel file (that file needs
  *   sk_buff, workqueues and the carrier locks):
  *
- *     - tbt_fec_out_flush(): control first, then the session replay queue,
- *       then every carrier's bound data queue. -EAGAIN leaves that queue's
- *       head and moves on; only an empty pass means the pipeline is blocked.
+ *     - tbt_fec_out_flush(): control first, then the session replay queue.
+ *       The bound data queues are drained by one work per carrier
+ *       (tbt_fec_out_flush_carrier()): -EAGAIN leaves that carrier's head
+ *       and re-arms only its own work; it never gates the other carriers or
+ *       the packetizer.
  *     - tbt_fec_out_push(): data bound to its share's carrier with per-carrier
  *       depth/byte caps; replay on a session queue with a session byte
  *       budget; control on its own queue.
@@ -391,7 +393,61 @@ static int out_try_data(struct sched *s, struct rec *r, bool *sent)
     return rc == -ENODEV ? -EAGAIN : rc;
 }
 
-/* Mirrors tbt_fec_out_flush(). */
+/* Mirrors tbt_fec_out_flush_carrier(): one carrier's bound queue. -EAGAIN
+ * keeps that carrier's head and reports `again`; no other queue is touched. */
+static uint32_t flush_carrier(struct sched *s, int idx, bool *again)
+{
+    struct outq *q = &s->q[idx];
+    uint32_t wrote = 0;
+
+    *again = false;
+    for (;;)
+    {
+        struct rec *r = q->head;
+        uint32_t depth = q->depth;
+        bool sent = false;
+        int err;
+
+        if (!r)
+            break;
+        err = out_try_data(s, r, &sent);
+        if (err == -EAGAIN)
+        {
+            s->flush_skip++;
+            s->hol_wait += depth;
+            *again = true;
+            break;
+        }
+        q_pop_head(q);
+        rec_free(s, q, r);
+        if (sent)
+            wrote++;
+    }
+    s->flush_pass += wrote;
+    return wrote;
+}
+
+/* The per-carrier works: every carrier gets its own attempt; a full one does
+ * not stop the others. */
+static uint32_t drain_all(struct sched *s, bool *again_any)
+{
+    uint32_t wrote = 0;
+    int i;
+
+    *again_any = false;
+    for (i = 0; i < NCAR; i++)
+    {
+        bool again = false;
+
+        wrote += flush_carrier(s, i, &again);
+        if (again)
+            *again_any = true;
+    }
+    return wrote;
+}
+
+/* Mirrors tbt_fec_out_flush(): control and replay only. The bound data
+ * queues are the per-carrier works' responsibility. */
 static int flush(struct sched *s, uint32_t *written)
 {
     int ret = 0;
@@ -465,33 +521,6 @@ static int flush(struct sched *s, uint32_t *written)
             }
         }
     }
-    for (i = 0; i < NCAR; i++)
-    {
-        struct outq *q = &s->q[i];
-
-        for (;;)
-        {
-            struct rec *r = q->head;
-            uint32_t depth = q->depth;
-            bool sent = false;
-            int err;
-
-            if (!r)
-                break;
-            err = out_try_data(s, r, &sent);
-            if (err == -EAGAIN)
-            {
-                s->flush_skip++;
-                s->hol_wait += depth;
-                ret = -EAGAIN;
-                break;
-            }
-            q_pop_head(q);
-            rec_free(s, q, r);
-            if (sent)
-                pass++;
-        }
-    }
     if (pass)
         s->flush_pass += pass;
     *written = pass;
@@ -508,6 +537,7 @@ static void case_eagain_isolated(void)
 {
     struct sched s;
     uint32_t wrote;
+    bool again;
     int i;
 
     sched_init(&s);
@@ -515,7 +545,8 @@ static void case_eagain_isolated(void)
     for (i = 0; i < NCAR; i++)
         push(&s, (uint16_t)i, false, false, 0, i);
 
-    ok(flush(&s, &wrote) == -EAGAIN, "isolated EAGAIN returns -EAGAIN", NULL);
+    wrote = drain_all(&s, &again);
+    ok(again, "isolated EAGAIN reports its carrier", NULL);
     ok_u32(wrote, NCAR - 1, "every other carrier wrote");
     ok_u32(s.writes[0], 0, "full carrier wrote nothing");
     ok_u32(s.q[0].depth, 1, "full carrier kept its head");
@@ -525,7 +556,8 @@ static void case_eagain_isolated(void)
     ok_u32((uint32_t)s.hol_wait, 1, "one record waits behind the head");
 
     s.full[0] = false;
-    ok(flush(&s, &wrote) == 0, "retry drains the last carrier", NULL);
+    wrote = drain_all(&s, &again);
+    ok(!again, "retry clears the flag", NULL);
     ok_u32(wrote, 1, "retry wrote the head");
     ok_u32(s.queued, 0, "no record left");
     sched_free(&s);
@@ -536,14 +568,14 @@ static void case_control_not_blocked(void)
 {
     struct sched s;
     uint32_t wrote;
+    bool again;
 
     sched_init(&s);
     s.full[0] = true;
     push(&s, 0, false, false, 0, 1); /* data head on carrier 0 */
     push(&s, 0, true, false, 0, 2);  /* ACK */
 
-    ok(flush(&s, &wrote) == -EAGAIN, "flush still reports the data queue",
-       NULL);
+    ok(flush(&s, &wrote) == 0, "session flush ignores the data queue", NULL);
     ok_u32(wrote, 1, "control record written");
     ok(s.ctl == NULL, "control queue empty", NULL);
     ok_u32(s.q[0].depth, 1, "data head still queued");
@@ -551,6 +583,9 @@ static void case_control_not_blocked(void)
     ok_u32(s.writes[0], 0, "full carrier took no record");
     ok_u32(s.ctl_depth, 0, "control depth released");
     ok_u32(s.ctl_bytes, 0, "control bytes released");
+    wrote = flush_carrier(&s, 0, &again);
+    ok(again, "the data carrier reports its own backpressure", NULL);
+    ok_u32(wrote, 0, "the full carrier wrote nothing");
     sched_free(&s);
 }
 
@@ -559,6 +594,7 @@ static void case_cap_is_per_carrier(void)
 {
     struct sched s;
     uint32_t wrote;
+    bool again;
     int i;
 
     sched_init(&s);
@@ -572,7 +608,8 @@ static void case_cap_is_per_carrier(void)
 
     ok(push(&s, 1, false, false, 0, 100) == 0,
        "carrier 1 accepts while carrier 0 is full", NULL);
-    ok(flush(&s, &wrote) == -EAGAIN, "flush skips the capped carrier", NULL);
+    wrote = drain_all(&s, &again);
+    ok(again, "the capped carrier reports backpressure", NULL);
     ok_u32(wrote, 1, "carrier 1 wrote");
     ok_u32(s.q[1].depth, 0, "carrier 1 drained");
     sched_free(&s);
@@ -583,6 +620,7 @@ static void case_sweep_visits_all(void)
 {
     struct sched s;
     uint32_t wrote;
+    bool again;
     int i;
 
     sched_init(&s);
@@ -590,7 +628,8 @@ static void case_sweep_visits_all(void)
     for (i = 0; i < NCAR; i++)
         push(&s, (uint16_t)i, false, false, 0, i);
 
-    ok(flush(&s, &wrote) == -EAGAIN, "sweep leaves one carrier", NULL);
+    wrote = drain_all(&s, &again);
+    ok(again, "sweep leaves one carrier", NULL);
     ok_u32(wrote, NCAR - 1, "sweep wrote every other carrier");
     ok_u32((uint32_t)s.flush_skip, 1, "exactly one skip");
     ok_u32(s.writes[7], 1, "carrier after the full one was visited");
@@ -658,24 +697,59 @@ static void case_replay_priority_and_isolation(void)
 {
     struct sched s;
     uint32_t wrote;
+    bool again;
     int i;
 
     sched_init(&s);
     for (i = 0; i < (int)REPLAY_BYTES_MAX / (int)REC_LEN; i++)
         push(&s, 0, false, true, 0, 100 + i);
     push(&s, 3, false, false, 0, 1); /* data behind the replay pass */
-    ok(flush(&s, &wrote) == 0, "replay and data drain", NULL);
+    ok(flush(&s, &wrote) == 0, "replay drains first", NULL);
+    ok_u32(wrote, REPLAY_BYTES_MAX / REC_LEN, "replay written");
+    wrote = drain_all(&s, &again);
+    ok(!again, "data drains after replay", NULL);
+    ok_u32(wrote, 1, "data written after replay");
     ok(s.write_seq[0] >= 100, "a replay was written first", NULL);
     ok(s.write_seq[s.nwrite - 1] == 1, "data was written after replay", NULL);
-    ok_u32(wrote, REPLAY_BYTES_MAX / REC_LEN + 1, "all records written");
 
     /* The budget is full again: data must still queue and flush. */
     for (i = 0; i < (int)REPLAY_BYTES_MAX / (int)REC_LEN; i++)
         push(&s, 0, false, true, 0, 200 + i);
     ok(push(&s, 4, false, false, 0, 2) == 0,
        "data accepted while the replay budget is full", NULL);
-    ok(flush(&s, &wrote) == 0, "data drains even if replay cannot", NULL);
-    ok_u32(wrote, REPLAY_BYTES_MAX / REC_LEN + 1, "replay then data written");
+    ok(flush(&s, &wrote) == 0, "replay drains while data waits", NULL);
+    ok_u32(wrote, REPLAY_BYTES_MAX / REC_LEN, "replay written");
+    wrote = drain_all(&s, &again);
+    ok(!again, "data drains even if replay cannot", NULL);
+    ok_u32(wrote, 1, "data written after the replay burst");
+    sched_free(&s);
+}
+
+/* A full carrier's retry belongs to that carrier alone: it does not block a
+ * ready carrier, and the session flush never touches the data queues. */
+static void case_per_carrier_retry(void)
+{
+    struct sched s;
+    uint32_t wrote;
+    bool again0, again1;
+
+    sched_init(&s);
+    s.full[0] = true;
+    push(&s, 0, false, false, 0, 1);
+    push(&s, 1, false, false, 0, 2);
+
+    ok(flush(&s, &wrote) == 0, "session flush leaves data alone", NULL);
+    ok_u32(wrote, 0, "session flush wrote no data");
+    wrote = flush_carrier(&s, 0, &again0);
+    ok(again0 && wrote == 0, "the full carrier keeps its head", NULL);
+    wrote = flush_carrier(&s, 1, &again1);
+    ok(!again1 && wrote == 1, "the ready carrier drains independently", NULL);
+    ok_u32(s.writes[0], 0, "full carrier wrote nothing");
+    ok_u32(s.writes[1], 1, "ready carrier wrote its record");
+
+    s.full[0] = false;
+    wrote = flush_carrier(&s, 0, &again0);
+    ok(!again0 && wrote == 1, "only the blocked carrier retries", NULL);
     sched_free(&s);
 }
 
@@ -706,6 +780,7 @@ int main(void)
     case_replay_fallback();
     case_replay_priority_and_isolation();
     case_replay_identity();
+    case_per_carrier_retry();
 
     printf("%s: %d checks, %d failures\n",
            failures ? "FAIL" : "PASS", checks, failures);

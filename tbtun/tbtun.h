@@ -676,6 +676,12 @@ struct tbt_fec_tx
     u64 carrier_wait_since_ns;
     bool carrier_wait;
     bool backpressure_counted;
+    /* One delayed work per carrier drains that carrier's bound data queue.
+     * The packetizer queues a record and wakes only its carrier's work; a
+     * full socket re-arms only its own work, so it delays neither the other
+     * carriers nor the packetizer. Allocated in tbt_fec_data_init(). */
+    struct tbt_fec_drain *drain;
+    u16 ndrain;
 };
 
 struct tbt_fec_rx
@@ -829,16 +835,11 @@ struct tbt_fec_outq
  * bound is 8 MiB again; the high-water throttle keeps four records per
  * pass, not one. */
 #define TBT_FEC_REPLAY_BYTES_MAX (8u * 1024 * 1024)
-/* Replay records one flush pass may write before the bound data queues get
- * their turn. 8 records of one 8 KiB share is 64 KiB: replay keeps its
- * priority, but a NACK burst cannot hold the close path's FIN behind it for
- * the whole 2 MiB burst. The TX work is re-armed immediately while records
- * remain. */
+/* Replay records one session flush pass may write before the packetizer gets
+ * a turn. 8 records of one 8 KiB share is 64 KiB: replay keeps its priority,
+ * but a NACK burst cannot hold the close path's FIN behind it for the whole
+ * 2 MiB burst. The TX work is re-armed immediately while records remain. */
 #define TBT_FEC_REPLAY_PASS_MAX 8u
-/* Bound data records one flush pass may write before the next pass. This is
- * the FEC-side counterpart of the TX pump's close quota; it keeps a carrier
- * from being held by a data burst while a FIN is queued. */
-#define TBT_FEC_DATA_PASS_MAX 32u
 
 /* The seven session work items whose reference is owned by the bit in
  * tbt_session.sched (review/s2-merged-design.md §1.3/§5.1). The order is the
@@ -900,7 +901,7 @@ struct tbt_session
     bool crypto_ready;    /* rx nonce learned; both contexts initialized */
     struct tbt_fec_tx *fec_tx; /* owned here: one stream per session */
     struct tbt_fec_rx *fec_rx;
-    struct delayed_work w_fec_tx; /* packetizer + record writer */
+    struct delayed_work w_fec_tx; /* packetizer + control/replay writer */
     /* 0.2.0: FEC receive work (decode outside rx->lock, then deliver).
      * Declared only in this cut: M4/M8 initialise it, and nothing arms it
      * yet. See review/s2-merged-design.md §1.3 and §2.3. */
@@ -1658,6 +1659,9 @@ size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,
 int tbt_fec_tx_flush(struct tbt_stream *st);
 bool tbt_fec_tx_idle(struct tbt_stream *st);
 void tbt_fec_tx_work(struct work_struct *w);
+/* Wake the per-carrier FEC data-queue drain. The packetizer calls it when a
+ * bound queue turns non-empty; the carrier write-space path may call it too. */
+void tbt_fec_out_kick(struct tbt_session *sess, u16 carrier);
 /* Decode outside rx->lock, then deliver ready super-blocks in order. */
 void tbt_fec_rx_work(struct work_struct *w);
 int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len);

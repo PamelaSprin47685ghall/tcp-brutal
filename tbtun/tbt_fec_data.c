@@ -207,11 +207,32 @@ static void tbt_fec_out_free(struct tbt_session *sess, struct tbt_fec_outq *q,
     kfree(o);
 }
 
+/* One carrier's bound data queue drains in its own delayed work. A full
+ * socket re-arms only this work; the packetizer and every other carrier keep
+ * moving. The array is allocated with the session's FEC TX state. */
+struct tbt_fec_drain
+{
+    struct delayed_work work;
+    struct tbt_session *sess;
+    u16 idx;
+};
+
+void tbt_fec_out_kick(struct tbt_session *sess, u16 carrier)
+{
+    struct tbt_fec_tx *tx = READ_ONCE(sess->fec_tx);
+
+    if (!tx || READ_ONCE(tx->stopping) || !tx->drain ||
+        carrier >= tx->ndrain)
+        return;
+    mod_delayed_work(TBT_WQ, &tx->drain[carrier].work, 0);
+}
+
 static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier, const u8 *buf,
                             u16 len, bool control, bool replay, u64 stamp_ns)
 {
     struct tbt_fec_out *o;
     struct tbt_fec_outq *q = NULL;
+    bool first = false;
 
     if (control)
     {
@@ -311,6 +332,7 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier, const u8 *buf
     }
     else
     {
+        first = q->depth == 0;
         list_add_tail(&o->node, &q->queue);
         q->depth++;
         q->bytes += len;
@@ -320,7 +342,19 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier, const u8 *buf
     }
     sess->fec_out_queued++;
     spin_unlock(&sess->fec_out_lock);
-    tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+    if (!control && !replay)
+    {
+        /* Data drains in its carrier's own work. Wake it only when the queue
+         * turned non-empty: a queue that is already draining or backing off
+         * has its own schedule and must not be re-timed by every new share. */
+        if (first)
+            tbt_fec_out_kick(sess, carrier);
+    }
+    else
+    {
+        /* Control and replay are session-wide: the TX work picks a carrier. */
+        tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+    }
     return 0;
 }
 
@@ -635,16 +669,79 @@ static void tbt_fec_replay_rate_sample(struct tbt_session *sess, u64 bytes)
     sess->fec_replay_drain_ns = now;
 }
 
-/* Write every queue that can make progress. The session pump lock serialises
- * these writes with the old control path (HELLO/OPEN/FIN/PAD), so a record is
- * never spliced into another record's bytes on one carrier.
- *
- * Three independent passes run in priority order: control (ACK/NACK, any up
- * carrier), replay (any up carrier, paced by queue bytes), then the bound
- * data queues. A congested data queue therefore never holds an ACK, a NACK,
- * or a repair behind it. Within the data pass a carrier whose socket returns
- * -EAGAIN keeps its head and the sweep moves to the next carrier: only an
- * empty pass means the pipeline itself is backpressured. */
+/* Drain one carrier's bound data queue. A record the socket refuses stays at
+ * the head and sets *again; the carrier's own work re-arms, so the packetizer
+ * and every other carrier keep moving. The caller holds pump_lock. */
+static u32 tbt_fec_out_flush_carrier(struct tbt_session *sess, u16 idx,
+                                     bool *again)
+{
+    struct tbt_fec_outq *q;
+    u32 wrote = 0;
+
+    *again = false;
+    if (idx >= sess->n_car || !sess->fec_outq)
+        return 0;
+    q = &sess->fec_outq[idx];
+    for (;;)
+    {
+        struct tbt_fec_out *o;
+        u32 depth = 0;
+        bool sent = false;
+        int err;
+
+        spin_lock(&sess->fec_out_lock);
+        o = list_first_entry_or_null(&q->queue, struct tbt_fec_out, node);
+        if (o)
+            depth = q->depth;
+        spin_unlock(&sess->fec_out_lock);
+        if (!o)
+            break;
+        err = tbt_fec_out_try(sess, o, &sent, NULL, 0, NULL);
+        if (err == -EAGAIN)
+        {
+            /* This carrier's socket is full. Only its own work retries. */
+            atomic64_inc(&sess->fec_flush_skip);
+            atomic64_add(depth, &sess->fec_hol_wait);
+            *again = true;
+            break;
+        }
+        spin_lock(&sess->fec_out_lock);
+        tbt_fec_out_free(sess, q, o);
+        spin_unlock(&sess->fec_out_lock);
+        if (sent)
+            wrote++;
+    }
+    if (wrote)
+        atomic64_add(wrote, &sess->fec_flush_pass);
+    return wrote;
+}
+
+/* Per-carrier drain work: one queue, one socket, one retry timer. */
+static void tbt_fec_out_drain_work(struct work_struct *w)
+{
+    struct tbt_fec_drain *d = container_of(to_delayed_work(w),
+                                           struct tbt_fec_drain, work);
+    struct tbt_session *sess = d->sess;
+    struct tbt_fec_tx *tx = READ_ONCE(sess->fec_tx);
+    bool again = false;
+
+    if (!tx || READ_ONCE(tx->stopping))
+        return;
+    mutex_lock(&sess->pump_lock);
+    if (!READ_ONCE(tx->stopping))
+        tbt_fec_out_flush_carrier(sess, d->idx, &again);
+    mutex_unlock(&sess->pump_lock);
+    if (again && !READ_ONCE(tx->stopping))
+        mod_delayed_work(TBT_WQ, &d->work, msecs_to_jiffies(2));
+}
+
+/* Write the session-wide queues that can make progress: control (ACK/NACK,
+ * any up carrier) and replay (any up carrier, paced by queue bytes). The
+ * bound data queues drain in their per-carrier works, so a full socket here
+ * never holds an ACK, a NACK, a repair, or the packetizer. The session pump
+ * lock still serialises these writes with the old control path
+ * (HELLO/OPEN/FIN/PAD), so a record is never spliced into another record's
+ * bytes on one carrier. */
 static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
 {
     struct tbt_fec_tx *tx = sess->fec_tx;
@@ -777,8 +874,8 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
                 pass++;
                 if (++replay_sent >= limit)
                 {
-                    /* Give the bound data queues a turn; the TX work is
-                     * re-armed below while replay records remain. */
+                    /* Give the packetizer a turn; the TX work is re-armed
+                     * below while replay records remain. */
                     replay_more = true;
                     break;
                 }
@@ -795,46 +892,6 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
         WRITE_ONCE(sess->fec_replay_over_high, false);
     }
     tbt_fec_replay_rate_sample(sess, replay_bytes);
-    /* Pass 3: bound data queues, one carrier at a time. */
-    if (READ_ONCE(sess->fec_outq_queued))
-    {
-        for (i = 0; i < sess->n_car; i++)
-        {
-            struct tbt_fec_outq *q = &sess->fec_outq[i];
-
-            for (;;)
-            {
-                struct tbt_fec_out *o;
-                u32 depth = 0;
-                bool sent = false;
-                int err;
-
-                spin_lock(&sess->fec_out_lock);
-                o = list_first_entry_or_null(&q->queue, struct tbt_fec_out,
-                                             node);
-                if (o)
-                    depth = q->depth;
-                spin_unlock(&sess->fec_out_lock);
-                if (!o)
-                    break;
-                err = tbt_fec_out_try(sess, o, &sent, NULL, 0, NULL);
-                if (err == -EAGAIN)
-                {
-                    /* This carrier's head cannot be written now. Its records
-                     * wait, but every later carrier still gets its turn. */
-                    atomic64_inc(&sess->fec_flush_skip);
-                    atomic64_add(depth, &sess->fec_hol_wait);
-                    ret = -EAGAIN;
-                    break;
-                }
-                spin_lock(&sess->fec_out_lock);
-                tbt_fec_out_free(sess, q, o);
-                spin_unlock(&sess->fec_out_lock);
-                if (sent)
-                    pass++;
-            }
-        }
-    }
     mutex_unlock(&sess->pump_lock);
     if (replay_more && READ_ONCE(sess->fec_replay_queued))
         tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
@@ -1388,19 +1445,10 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
 
     if (!tx || READ_ONCE(sess->closing) || READ_ONCE(tx->stopping))
         return;
-    {
-        u32 wrote = 0;
-
-        /* Drain first, but do not let one backpressured carrier stop the
-         * packetizer: continue while any carrier in the pass accepted a
-         * record. Only a pass that wrote nothing at all means every carrier
-         * is blocked, and then a 2 ms retry is the correct response. */
-        if (tbt_fec_out_flush(sess, &wrote) == -EAGAIN && !wrote)
-        {
-            tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
-            return;
-        }
-    }
+    /* Control and replay are session-wide and flush here; the bound data
+     * queues drain in their per-carrier works, so a full socket never stops
+     * the packetizer. */
+    (void)tbt_fec_out_flush(sess, NULL);
 
     /* crypto=on: the far side cannot packetize until the near's HELLO has
      * delivered the session key. The ring keeps the bytes; retry shortly. */
@@ -4008,6 +4056,15 @@ void tbt_fec_data_free(struct tbt_session *sess)
     struct tbt_fec_out *o, *tmp;
     u16 i;
 
+    /* The session-owned w_fec_tx is cancelled by tbt_session_destroy(); the
+     * per-carrier drain works are owned here. Stopping is already set, and
+     * cancel waits for a running drain before its queue is freed. */
+    if (tx && tx->drain)
+    {
+        for (i = 0; i < tx->ndrain; i++)
+            cancel_delayed_work_sync(&tx->drain[i].work);
+    }
+
     /* The work items are cancelled before this point, but records already
      * queued for a carrier are not owned by them. Drain every queue here or
      * every teardown with a stalled carrier leaks its pending shares. The
@@ -4046,6 +4103,8 @@ void tbt_fec_data_free(struct tbt_session *sess)
         kvfree(tx->ring);
         kvfree(tx->pkt);
         kvfree(tx->rec);
+        kvfree(tx->drain);
+        tx->drain = NULL;
         kvfree(tx);
         sess->fec_tx = NULL;
     }
@@ -4204,6 +4263,19 @@ int tbt_fec_data_init(struct tbt_session *sess)
         pr_warn_ratelimited("tbtun: tunnel %llu: no FEC replay ring; NACK repair disabled\n",
                             (unsigned long long)t->cfg.id);
     tx->groups = groups;
+    /* One drain work per carrier: the packetizer wakes the queue's own work,
+     * and a full socket re-arms only that work. */
+    tx->ndrain = sess->n_car;
+    tx->drain = kvzalloc((size_t)tx->ndrain * sizeof(*tx->drain),
+                         GFP_KERNEL);
+    if (!tx->drain)
+        goto fail;
+    for (i = 0; i < tx->ndrain; i++)
+    {
+        INIT_DELAYED_WORK(&tx->drain[i].work, tbt_fec_out_drain_work);
+        tx->drain[i].sess = sess;
+        tx->drain[i].idx = (u16)i;
+    }
     /* The first flight uses the same K-2 super-block window the receiver
      * grants, so the replay ring covers it before the first ACK arrives. */
     {
