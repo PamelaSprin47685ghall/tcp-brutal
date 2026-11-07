@@ -160,6 +160,35 @@ static inline bool tbt_tx_fec_repair_holds(bool fec, bool repair_active,
     return fec && repair_active && age <= max_ns;
 }
 
+/* Auto TX window: k x BDP alone is a single-flow estimate and can lock a
+ * multi-carrier tunnel into a feedback loop (small window -> low rate -> small
+ * BDP sample). The aggregate the carriers actually advertise is the floor:
+ * sum(snd_wnd), or n_car x the per-carrier BDP when no window sample exists.
+ * `floor` is the per-carrier bootstrap minimum scaled by the carrier count;
+ * `cap` is the receiver's reorder budget and always wins. */
+static inline u64 tbt_tx_window_auto(u64 k_bdp, u64 sum_wnd,
+                                     u64 per_car_bdp, unsigned int n_car,
+                                     unsigned int n_live, u64 floor,
+                                     u64 cap)
+{
+    u64 agg = sum_wnd;
+    u64 win;
+
+    if (n_live && per_car_bdp)
+    {
+        u64 scaled = per_car_bdp * n_car;
+
+        if (scaled > agg)
+            agg = scaled;
+    }
+    win = k_bdp > agg ? k_bdp : agg;
+    if (win < floor)
+        win = floor;
+    if (cap && win > cap)
+        win = cap;
+    return win ? win : 1;
+}
+
 /* Pure path bound: idx must name a slot the session owns and fit the 16-slot
  * retain arrays. No warning here; FEC sessions legally walk 256 slots. */
 static inline bool tbt_tx_path_in_range(unsigned int idx, unsigned int n_car)

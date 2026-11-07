@@ -642,10 +642,12 @@ static u64 tbt_car_delivery_bps(const struct tcp_sock *tp)
  * last BDP is still in flight and arrives before the repair). A configuration
  * with R < k x B must lower k or raise R; the sender never exceeds R. */
 static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
-                             u32 *var_out, u32 *max_out)
+                             u32 *var_out, u32 *max_out, u64 *agg_out,
+                             u32 *n_live_out)
 {
-    u64 sum_rate = 0, sum_rtt_rate = 0;
+    u64 sum_rate = 0, sum_rtt_rate = 0, sum_wnd = 0;
     u32 rtt_max = 0, var_max = 0;
+    u32 n_live = 0;
     int i;
 
     for (i = 0; i < sess->n_car; i++)
@@ -654,6 +656,7 @@ static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
         struct sock *sk;
         u32 srtt = 0, mdev = 0;
         u64 rate = 0;
+        u64 wnd = 0;
 
         if (!c)
             continue;
@@ -665,8 +668,11 @@ static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
             srtt = READ_ONCE(tp->srtt_us) >> 3;
             mdev = READ_ONCE(tp->mdev_us);
             rate = tbt_car_delivery_bps(tp);
+            wnd = READ_ONCE(tp->snd_wnd);
             tbt_carrier_sk_put(sk);
+            n_live++;
         }
+        sum_wnd += wnd;
         if (!srtt)
             srtt = READ_ONCE(c->rtt_us);
         tbt_carrier_put(c);
@@ -685,6 +691,10 @@ static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
         *var_out = var_max;
     if (max_out)
         *max_out = rtt_max;
+    if (agg_out)
+        *agg_out = sum_wnd;
+    if (n_live_out)
+        *n_live_out = n_live;
     if (!sum_rate)
         return 0;
     {
@@ -719,21 +729,31 @@ static u32 tbt_tx_window(struct tbt_session *sess)
     const struct tbt_cfg *cfg = &sess->tunnel->cfg;
     u64 cap = cfg->rx_reorder_bytes;
     u32 mean = 0, var = 0, max = 0;
+    u64 agg = 0, floor;
+    u32 n_live = 0;
     u64 win;
 
     /* Always refresh the RTT gauges, so /proc shows the estimator inputs even
      * when the window is configured explicitly. */
-    win = tbt_tx_bdp_window(sess, &mean, &var, &max);
+    win = tbt_tx_bdp_window(sess, &mean, &var, &max, &agg, &n_live);
     sess->rtt_mean_us = mean;
     sess->rttvar_us = var;
     if (max)
         sess->rtt_max_us = max;
+    /* The per-carrier bootstrap floor scales with the carrier count: one
+     * 1 MiB window is right for one path, not for 32 paths that can each
+     * carry a BDP. */
+    floor = max_t(u64, TBT_TX_WINDOW_AUTO_FLOOR,
+                  (u64)sess->n_car * 8 * TBT_PAYLOAD_MAX);
     if (cfg->tx_window_bytes)
         win = cfg->tx_window_bytes;
-    else if (!win)
-        /* Bootstrap only: no carrier has a rate/RTT sample yet, so k x B is
-         * undefined. 1 MiB lets the first frames establish the samples. */
-        win = TBT_TX_WINDOW_AUTO_FLOOR;
+    else
+        /* k x B is the single-flow target; the carriers' aggregate window (or
+         * n_car x per-carrier BDP) is the floor that breaks the small-window
+         * feedback loop. The reorder budget still caps the result. */
+        win = tbt_tx_window_auto(win, agg,
+                                 n_live ? win / n_live : 0,
+                                 sess->n_car, n_live, floor, cap);
     /* Liveness: two maximum frames must fit, or no frame can ever pass and
      * the stream deadlocks. This is a frame-granularity floor, not a 1 MiB
      * one: once samples exist, W = k x B and the floor must not override it

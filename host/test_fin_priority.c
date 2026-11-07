@@ -111,6 +111,36 @@ static void case_repair_bound(void)
        "repair: non-FEC behaviour unchanged");
 }
 
+static void case_aggregate_window(void)
+{
+    u64 floor = 32ULL * 8 * TBT_PAYLOAD_MAX; /* 2 MiB */
+    u64 cap = 8ULL * 1024 * 1024;
+    u64 win;
+
+    /* 32 carriers, k x BDP = 386,814, per-carrier 12,088, sum(snd_wnd) =
+     * 4,349,800: the aggregate must dominate the old 378 KB window. */
+    win = tbt_tx_window_auto(386814, 4349800, 12088, 32, 32, floor, cap);
+    ok(win == 4349800, "window: sum(snd_wnd) dominates k x BDP");
+    ok(win > 378 * 1024, "window: 32 carriers well above the old 378 KB");
+
+    /* No snd_wnd sample: n_car x per-carrier BDP. */
+    win = tbt_tx_window_auto(0, 0, 100000, 32, 32, floor, cap);
+    ok(win == 3200000, "window: n_car x per-carrier BDP");
+
+    /* The reorder budget caps an over-large aggregate. */
+    win = tbt_tx_window_auto(0, 0, 1000000, 32, 32, floor, cap);
+    ok(win == cap, "window: reorder budget caps");
+
+    /* Bootstrap floor scales with the carrier count. */
+    win = tbt_tx_window_auto(1000, 0, 0, 32, 0, floor, cap);
+    ok(win == floor, "window: 32-carrier bootstrap floor");
+    ok(win == 32ULL * 8 * TBT_PAYLOAD_MAX, "window: floor is 2 MiB");
+
+    /* One carrier keeps the 1 MiB floor. */
+    win = tbt_tx_window_auto(1000, 0, 0, 1, 0, 1 << 20, cap);
+    ok(win == 1 << 20, "window: single-carrier floor");
+}
+
 struct frame
 {
     u8 type;
@@ -188,6 +218,7 @@ int main(void)
     case_fin_retry();
     case_close_hold();
     case_repair_bound();
+    case_aggregate_window();
     case_fin_not_starved();
     case_no_close();
 
