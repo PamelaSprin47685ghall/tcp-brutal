@@ -1,0 +1,92 @@
+/* test_tx_index.c - host test for the TX-6 16-slot path bounds.
+ *
+ * WHAT THIS IS
+ *   The exact bound rules tbt_tx.c uses, compiled from tbtun/tbt_tx_acct.h:
+ *
+ *     - tbt_tx_path_in_range() is the pure test behind tbt_arq_path_ok():
+ *       it accepts slots 0..15 that the session owns and refuses 16..255,
+ *       even when a FEC session has 256 carriers;
+ *     - tbt_tx_retain_path_in_range() is the test behind
+ *       tbt_retain_path_ok(): idx >= 16 is a code error and sets `warned`
+ *       (the kernel wrapper turns that into WARN_ON_ONCE), while a legal
+ *       0..15 slot never warns, even when it is above the current n_car and
+ *       therefore simply not present.
+ *
+ *   The host cannot execute WARN_ON_ONCE; asserting the explicit `warned`
+ *   signal is the same decision the kernel wrapper makes.
+ */
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+
+#include "tbt_tx_acct.h"
+
+static int checks;
+static int failures;
+
+static void ok(bool cond, const char *what)
+{
+    checks++;
+    if (cond)
+        return;
+    failures++;
+    printf("FAIL %s\n", what);
+}
+
+static void case_arq_bounds(void)
+{
+    unsigned int idx;
+
+    for (idx = 0; idx <= 15; idx++)
+        ok(tbt_tx_path_in_range(idx, 16), "arq: 0..15 accepted");
+
+    ok(!tbt_tx_path_in_range(16, 16), "arq: 16 refused at n_car=16");
+    ok(!tbt_tx_path_in_range(255, 256), "arq: 255 refused at n_car=256");
+    ok(tbt_tx_path_in_range(15, 256),
+       "arq: 15 accepted even when the session has 256 slots");
+    ok(!tbt_tx_path_in_range(4, 4), "arq: idx == n_car refused");
+    ok(!tbt_tx_path_in_range(0, 0), "arq: empty session refuses 0");
+}
+
+static void case_retain_bounds(void)
+{
+    unsigned int idx;
+    bool warned;
+
+    for (idx = 0; idx <= 15; idx++)
+    {
+        warned = false;
+        ok(tbt_tx_retain_path_in_range(idx, 16, &warned),
+           "retain: 0..15 accepted");
+        ok(!warned, "retain: legal slot does not warn");
+    }
+
+    warned = false;
+    ok(!tbt_tx_retain_path_in_range(16, 256, &warned),
+       "retain: 16 refused at n_car=256");
+    ok(warned, "retain: 16 warns");
+
+    warned = false;
+    ok(!tbt_tx_retain_path_in_range(255, 256, &warned),
+       "retain: 255 refused at n_car=256");
+    ok(warned, "retain: 255 warns");
+
+    warned = false;
+    ok(!tbt_tx_retain_path_in_range(4, 4, &warned),
+       "retain: missing slot refused");
+    ok(!warned, "retain: missing slot is not a code error");
+
+    warned = false;
+    ok(!tbt_tx_retain_path_in_range(0, 0, &warned),
+       "retain: empty session refuses 0");
+    ok(!warned, "retain: empty session is not a code error");
+}
+
+int main(void)
+{
+    case_arq_bounds();
+    case_retain_bounds();
+
+    printf("test_tx_index: %d checks, %d failures\n", checks, failures);
+    return failures ? 1 : 0;
+}

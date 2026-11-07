@@ -59,6 +59,7 @@ static struct proto tbt_tcp_prot __ro_after_init;
 static void tbt_car_connect_work(struct work_struct *w);
 int tbt_carrier_send_raw(struct tbt_carrier *c, const void *data, size_t len);
 static void tbt_pump_work(struct work_struct *w);
+static bool tbt_carrier_arm_connect(struct tbt_carrier *c);
 static bool tbt_dial_take(struct tbt_session *sess);
 static u32 tbt_dial_rate(const struct tbt_session *sess);
 
@@ -78,6 +79,76 @@ u8 tbt_carrier_profile(const struct tbt_session *sess, u8 index, bool spare)
 static void tbt_carrier_install_proto(struct sock *sk)
 {
     sk->sk_prot = &tbt_tcp_prot;
+}
+
+/* Take one reference on the published socket. The RCU read section covers
+ * only "read the pointer + take a reference"; the caller may sleep, take the
+ * socket lock and send until tbt_carrier_sk_put(). NULL means the carrier has
+ * no usable socket: never published, being released, or already unpublishable.
+ * refcount_inc_not_zero() rather than sock_hold(): the pointer is found by
+ * RCU, not by a locked hash lookup, so the last sock_put() may already have
+ * run. */
+struct sock *tbt_carrier_sk_get(struct tbt_carrier *c)
+{
+    struct sock *sk;
+
+    if (!c)
+        return NULL;
+    rcu_read_lock();
+    sk = rcu_dereference(c->sk);
+    if (sk && !refcount_inc_not_zero(&sk->sk_refcnt))
+        sk = NULL;
+    rcu_read_unlock();
+    return sk;
+}
+
+void tbt_carrier_sk_put(struct sock *sk)
+{
+    if (sk)
+        sock_put(sk);
+}
+
+/* Take one object reference from sess->car[]. The container read and the
+ * refcount increment are one RCU-protected step: retire removes the slot with
+ * rcu_assign_pointer() and only then drops the installer reference, so a
+ * reader either increments before the last put or sees a zero count. */
+struct tbt_carrier *tbt_carrier_get(struct tbt_session *sess, u8 index)
+{
+    struct tbt_carrier *c;
+
+    if (!sess || index >= sess->n_car)
+        return NULL;
+    rcu_read_lock();
+    c = rcu_dereference(sess->car[index]);
+    if (c && !refcount_inc_not_zero(&c->refs))
+        c = NULL;
+    rcu_read_unlock();
+    return c;
+}
+
+static void tbt_carrier_free_rcu(struct rcu_head *head)
+{
+    struct tbt_carrier *c = container_of(head, struct tbt_carrier, rcu);
+
+    tbt_carrier_free(c);
+}
+
+void tbt_carrier_put(struct tbt_carrier *c)
+{
+    if (c && refcount_dec_and_test(&c->refs))
+        call_rcu(&c->rcu, tbt_carrier_free_rcu);
+}
+
+u32 tbt_carrier_gen(struct tbt_session *sess, u8 index)
+{
+    struct tbt_carrier *c = tbt_carrier_get(sess, index);
+    u32 gen;
+
+    if (!c)
+        return 0;
+    gen = READ_ONCE(c->gen);
+    tbt_carrier_put(c);
+    return gen;
 }
 
 /* Queue a receive run without losing a wake that coalesces into a run already
@@ -153,6 +224,8 @@ static void tbt_car_write_space(struct sock *sk)
     }
     schedule_work(&c->w_tx);
     if (c->sess->fec)
+        /* The FEC packetizer entry point is not reference-counted yet; the
+         * FEC track owns that migration. Keep the direct wake until it lands. */
         schedule_work(&c->sess->w_fec_tx.work);
     read_unlock_bh(&sk->sk_callback_lock);
 }
@@ -172,13 +245,13 @@ static void tbt_car_state_change(struct sock *sk)
         return;
     }
     /* The session poll is the only path that notices a closed socket while no
-     * data is moving. Shorten a pending 50 ms wait, but never to zero: under
-     * a connect flood every accepted socket changes state, and a 0-delay
-     * re-arm turned the 50 ms liveness pass into a continuous loop over every
-     * carrier and every provisional. 10 ms still notices a close promptly. */
+     * data is moving. Arm it at 10 ms, never at zero: under a connect flood
+     * every accepted socket changes state, and a 0-delay re-arm turned the
+     * 50 ms liveness pass into a continuous loop over every carrier and every
+     * provisional. If a pass is already queued, tbt_session_arm() keeps its
+     * schedule; a close is then noticed by that pass. */
     if (c->sess && !READ_ONCE(c->sess->closing))
-        mod_delayed_work(system_wq, &c->sess->w_poll,
-                         msecs_to_jiffies(10));
+        tbt_session_arm(c->sess, TBT_SW_POLL, msecs_to_jiffies(10));
     read_unlock_bh(&sk->sk_callback_lock);
 }
 
@@ -273,39 +346,41 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
     struct tbt_session *sess = c->sess;
     struct tbt_stream *st;
     struct tcp_sock *tp;
-    struct sock *sk;
+    struct sock *sk = NULL;
     u64 now = ktime_get_ns();
     bool rescued = false;
     int i;
 
     if (!sess || !sess->tunnel || READ_ONCE(sess->closing))
         return;
+    /* The caller holds one carrier reference for the whole pass, so `c` stays
+     * valid; the socket needs its own reference because release clears c->sk
+     * and closes the socket concurrently. */
+    sk = tbt_carrier_sk_get(c);
     if (sess->diag_poll_round <= 2)
     {
-        struct sock *dsk = READ_ONCE(c->sk);
-
         TBT_DIAG("poll r=%u tunnel=%llu carrier=%u gen=%u connected=%d sock=%d sk_state=%d hello_sent=%d up=%d stopping=%d prov=%d retry_in_ms=%lld state=%u",
                  sess->diag_poll_round,
                  (unsigned long long)sess->tunnel->cfg.id, c->index, c->gen,
-                 atomic_read(&c->connected), !!dsk,
-                 dsk ? READ_ONCE(dsk->sk_state) : -1,
+                 atomic_read(&c->connected), !!sk,
+                 sk ? READ_ONCE(sk->sk_state) : -1,
                  READ_ONCE(c->hello_sent), atomic_read(&c->up),
                  atomic_read(&c->stopping), c->provisional,
                  (long long)(c->retry_at_ns - now) / NSEC_PER_MSEC, c->state);
     }
     if (atomic_read(&c->stopping))
     {
-        schedule_delayed_work(&sess->w_replace, 0);
+        tbt_carrier_sk_put(sk);
+        tbt_session_arm(sess, TBT_SW_REPLACE, 0);
         return;
     }
     if (c->provisional)
     {
-        struct sock *psk = READ_ONCE(c->sk);
-
         if (now > c->join_deadline_ns)
         {
             atomic_set(&c->stopping, 1);
-            schedule_delayed_work(&sess->w_replace, 0);
+            tbt_carrier_sk_put(sk);
+            tbt_session_arm(sess, TBT_SW_REPLACE, 0);
             return;
         }
         /* The one-shot w_rx may have run before HELLO was queued.  The poll
@@ -313,11 +388,12 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
          * check a lost wake leaves HELLO unread until the join deadline.
          * parser->have covers a HELLO whose bytes were copied out but whose
          * record could not be parsed yet (copied_seq == rcv_nxt). */
-        if (psk && READ_ONCE(psk->sk_state) == TCP_ESTABLISHED &&
-            (READ_ONCE(tcp_sk(psk)->copied_seq) !=
-                 READ_ONCE(tcp_sk(psk)->rcv_nxt) ||
+        if (sk && READ_ONCE(sk->sk_state) == TCP_ESTABLISHED &&
+            (READ_ONCE(tcp_sk(sk)->copied_seq) !=
+                 READ_ONCE(tcp_sk(sk)->rcv_nxt) ||
              c->parser->have))
             tbt_car_schedule_rx(c);
+        tbt_carrier_sk_put(sk);
         return;
     }
     if (!atomic_read(&c->connected))
@@ -336,7 +412,7 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
                 TBT_DIAG("poll dial tunnel=%llu carrier=%u gen=%u r=%u",
                          (unsigned long long)sess->tunnel->cfg.id, c->index,
                          c->gen, sess->diag_poll_round);
-                schedule_work(&c->w_connect);
+                tbt_carrier_arm_connect(c);
             }
             else
             {
@@ -344,10 +420,10 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
                 c->retry_at_ns = now + 20 * NSEC_PER_MSEC;
             }
         }
+        tbt_carrier_sk_put(sk);
         return;
     }
 
-    sk = READ_ONCE(c->sk);
     if (!sk)
     {
         tbt_carrier_lost(sess, c);
@@ -355,6 +431,7 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
     }
     if (READ_ONCE(sk->sk_state) != TCP_ESTABLISHED)
     {
+        tbt_carrier_sk_put(sk);
         tbt_carrier_lost(sess, c);
         return;
     }
@@ -476,6 +553,7 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
                             (unsigned long long)((now - stall_since_ns) /
                                                  NSEC_PER_MSEC));
                 }
+                tbt_carrier_sk_put(sk);
                 tbt_carrier_lost(sess, c);
                 return;
             }
@@ -497,11 +575,19 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
             char b[TBT_HTTP_DRIP_CHUNK_LEN];
             size_t n = tbt_http_drip_chunk(b, sizeof(b));
 
-            if (n && !tbt_carrier_send_raw(c, b, n))
+            if (n && mutex_trylock(&sess->pump_lock))
             {
-                c->last_tx_ns = ktime_get_ns();
-                atomic64_inc(&sess->drip_tx);
+                int err = tbt_carrier_send_raw(c, b, n);
+
+                mutex_unlock(&sess->pump_lock);
+                if (!err)
+                {
+                    c->last_tx_ns = ktime_get_ns();
+                    atomic64_inc(&sess->drip_tx);
+                }
             }
+            /* trylock failed: the pump owns this byte stream right now; the
+             * next 50 ms pass drips instead. */
         }
         else if (tbt_http_need_pad(c->last_tx_ns, now, ka_ms) &&
                  !READ_ONCE(sess->tx_queued))
@@ -513,8 +599,8 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
     }
     if (READ_ONCE(tp->copied_seq) != READ_ONCE(tp->rcv_nxt))
     {
-        tbt_car_schedule_rx(c);
-        rescued = true;
+        if (tbt_carrier_arm_rx(c))
+            rescued = true;
     }
     else if (c->parser->have)
     {
@@ -527,44 +613,43 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
          * (measured: probe J, far fbk_rx=0, tx_ack=0, parser stuck at
          * 98,304, TXSTALLKILL after 5 s; debug=3 passes only because the
          * extra logging slows the sender enough to keep bytes arriving). */
-        tbt_car_schedule_rx(c);
-        rescued = true;
+        if (tbt_carrier_arm_rx(c))
+            rescued = true;
     }
     if (READ_ONCE(sess->tx_queued))
     {
-        schedule_work(&c->w_tx);
-        rescued = true;
+        if (tbt_carrier_arm_tx(c))
+            rescued = true;
     }
     rcu_read_lock();
     for (i = 0; i < TBT_STREAM_HT; i++)
         hlist_for_each_entry_rcu(st, &sess->streams[i], node)
             if (!list_empty(&st->rx_q))
             {
-                schedule_work(&st->w_drain);
-                rescued = true;
+                if (tbt_stream_schedule(st, &st->w_drain,
+                                        TBT_STREAM_F_SCHED_DRAIN))
+                    rescued = true;
             }
     rcu_read_unlock();
     if (rescued)
         atomic64_inc(&sess->poll_rescues);
     if (sess->fec)
         schedule_work(&sess->w_fec_tx.work);
+    tbt_carrier_sk_put(sk);
 }
 
 /* The session's liveness pass: every carrier slot, then every provisional
- * carrier, once per 50 ms. A carrier object is never freed before
- * tbt_carriers_stop() cancels this work, so a pointer read from sess->car[] or
- * from sess->prov stays valid across the poll.
+ * carrier, once per 50 ms. Each slot is held with a carrier reference, so a
+ * replacement can remove and put its object while this pass runs.
  *
  * The provisional list is walked by rotating its head to the tail: each
  * element is moved under sess->lock. A provisional carrier's branch never
  * sleeps, so it is polled with the lock held: w_replace() cannot move it to
  * its victims list and free it while this pass still holds the pointer. A
- * joined carrier takes socket locks, so it is polled with the lock dropped;
- * joined carriers are kept on sess->dead until teardown and stay valid. */
-void tbt_session_poll_work(struct work_struct *w)
+ * joined carrier (which the new adopt order never puts on prov) takes socket
+ * locks, so it is polled with the lock dropped and a reference held. */
+static void tbt_session_poll_body(struct tbt_session *sess)
 {
-    struct tbt_session *sess =
-        container_of(to_delayed_work(w), struct tbt_session, w_poll);
     struct tbt_carrier *c;
     unsigned int nprov = 0;
     int i;
@@ -576,17 +661,11 @@ void tbt_session_poll_work(struct work_struct *w)
     sess->diag_poll_round++;
     for (i = 0; i < sess->n_car; i++)
     {
-        spin_lock(&sess->lock);
-        c = sess->car[i];
-        if (c)
-            atomic_inc(&c->pollers);
-        spin_unlock(&sess->lock);
+        c = tbt_carrier_get(sess, (u8)i);
         if (c)
         {
             tbt_car_poll_one(c);
-            /* tbt_carrier_take_dead() checks this before reusing the object;
-             * the poll may have slept in a socket lock above. */
-            atomic_dec(&c->pollers);
+            tbt_carrier_put(c);
         }
     }
     spin_lock(&sess->lock);
@@ -609,10 +688,28 @@ void tbt_session_poll_work(struct work_struct *w)
             spin_unlock(&sess->lock);
             continue;
         }
+        if (!refcount_inc_not_zero(&c->refs))
+        {
+            spin_unlock(&sess->lock);
+            continue;
+        }
         spin_unlock(&sess->lock);
         tbt_car_poll_one(c);
+        tbt_carrier_put(c);
     }
-    schedule_delayed_work(&sess->w_poll, msecs_to_jiffies(50));
+    if (!READ_ONCE(sess->closing))
+        tbt_session_arm(sess, TBT_SW_POLL, msecs_to_jiffies(50));
+}
+
+void tbt_session_poll_work(struct work_struct *w)
+{
+    struct tbt_session *sess =
+        container_of(to_delayed_work(w), struct tbt_session, w_poll);
+    bool owned = test_and_clear_bit(TBT_SW_POLL, &sess->sched);
+
+    tbt_session_poll_body(sess);
+    if (owned)
+        tbt_session_put(sess);
 }
 
 /* One non-EAGAIN receive error: count it and stop this carrier. Shared by the
@@ -683,10 +780,11 @@ static void tbt_car_rx_work(struct work_struct *w)
     /* This run reads everything queued at its start; a wake that arrives
      * later re-sets the bit and is consumed at the end. */
     atomic_set(&c->rx_again, 0);
-    sk = READ_ONCE(c->sk);
+    sk = tbt_carrier_sk_get(c);
     if (atomic_read(&c->stopping) || !sk)
     {
         atomic64_inc(&c->sess->rx_work_early);
+        tbt_carrier_sk_put(sk);
         return;
     }
     /* First window only: before the peer's HELLO has been parsed. This is the
@@ -719,6 +817,7 @@ static void tbt_car_rx_work(struct work_struct *w)
                 {
                     atomic64_inc(&c->sess->rx_paused_skips);
                     rcu_read_unlock();
+                    tbt_carrier_sk_put(sk);
                     return;
                 }
             }
@@ -742,12 +841,14 @@ static void tbt_car_rx_work(struct work_struct *w)
         if (perr == -EAGAIN)
         {
             release_sock(sk);
+            tbt_carrier_sk_put(sk);
             return;
         }
         if (perr)
         {
             release_sock(sk);
             tbt_car_rx_error(c, perr);
+            tbt_carrier_sk_put(sk);
             return;
         }
     }
@@ -767,7 +868,7 @@ static void tbt_car_rx_work(struct work_struct *w)
     {
         tbt_carrier_lost(c->sess, c);
     }
-    else if (READ_ONCE(c->sk) == sk &&
+    else if (tbt_carrier_sk_present(c) &&
              READ_ONCE(tcp_sk(sk)->copied_seq) !=
                  READ_ONCE(tcp_sk(sk)->rcv_nxt))
     {
@@ -780,14 +881,15 @@ static void tbt_car_rx_work(struct work_struct *w)
          * record arrives, which is the normal case on a path whose segments
          * are smaller than a record. The 50 ms poll already retries a held
          * record, and sk_data_ready runs this work when the tail arrives. */
-        tbt_car_schedule_rx(c);
+        tbt_carrier_arm_rx(c);
     }
 
     /* A wake that coalesced into this run set the bit instead of queueing a
      * second run.  Consume it here: the peer may be waiting for the reply to
      * the record this run just parsed (the far's HELLO reply is the first). */
     if (atomic_xchg(&c->rx_again, 0))
-        tbt_car_schedule_rx(c);
+        tbt_carrier_arm_rx(c);
+    tbt_carrier_sk_put(sk);
 
     /* Parsing may have enqueued a control frame (OPEN, FBK). The enqueue
      * already asked w_tx to drain it; never pump from this work item, because
@@ -799,15 +901,23 @@ static void tbt_car_rx_work(struct work_struct *w)
  * carrier's TCP buffer is full and the caller must retry later. */
 int tbt_carrier_send_raw(struct tbt_carrier *c, const void *data, size_t len)
 {
+    struct sock *sk;
     struct msghdr msg = {};
     struct kvec iov = { .iov_base = (void *)data, .iov_len = len };
     int err;
 
+    if (!c)
+        return -ENOTCONN;
+    lockdep_assert_held(&c->sess->pump_lock);
+    sk = rcu_dereference_protected(c->sk,
+                                   lockdep_is_held(&c->sess->pump_lock));
+    if (!sk)
+        return -ENOTCONN;
     iov_iter_kvec(&msg.msg_iter, ITER_SOURCE, &iov, 1, len);
     msg.msg_flags = MSG_DONTWAIT;
-    lock_sock(c->sk);
-    err = tcp_sendmsg_locked(c->sk, &msg, len);
-    release_sock(c->sk);
+    lock_sock(sk);
+    err = tcp_sendmsg_locked(sk, &msg, len);
+    release_sock(sk);
     if (err < 0)
         return err;
     if ((size_t)err != len)
@@ -818,7 +928,7 @@ int tbt_carrier_send_raw(struct tbt_carrier *c, const void *data, size_t len)
 /* Flush the carrier's pending byte tail. A record may never be interleaved,
  * so every writer on this carrier calls this before a new record. The caller
  * holds sess->pump_lock (or is the only writer). */
-static int tbt_carrier_part_flush(struct tbt_carrier *c)
+static int tbt_carrier_part_flush(struct tbt_carrier *c, struct sock *sk)
 {
     while (c->part_off < c->part_len)
     {
@@ -831,9 +941,9 @@ static int tbt_carrier_part_flush(struct tbt_carrier *c)
 
         iov_iter_kvec(&msg.msg_iter, ITER_SOURCE, &iov, 1, iov.iov_len);
         msg.msg_flags = MSG_DONTWAIT;
-        lock_sock(c->sk);
-        err = tcp_sendmsg_locked(c->sk, &msg, iov.iov_len);
-        release_sock(c->sk);
+        lock_sock(sk);
+        err = tcp_sendmsg_locked(sk, &msg, iov.iov_len);
+        release_sock(sk);
         if (err < 0)
             return err == -EAGAIN ? -EAGAIN : err;
         if (!err)
@@ -850,8 +960,8 @@ static int tbt_carrier_part_flush(struct tbt_carrier *c)
  * tail in c->part; the next writer on this carrier flushes it before any new
  * bytes, so records stay in order and a control frame is never spliced into
  * the middle of a DATA record. */
-static int tbt_carrier_send_whole(struct tbt_carrier *c, const void *data,
-                                  size_t len)
+static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
+                                  const void *data, size_t len)
 {
     struct msghdr msg = {};
     struct kvec iov = { .iov_base = (void *)data, .iov_len = len };
@@ -859,23 +969,24 @@ static int tbt_carrier_send_whole(struct tbt_carrier *c, const void *data,
     u64 mem_avail;
     int err;
 
-    if (!c->sk)
+    lockdep_assert_held(&c->sess->pump_lock);
+    if (!sk)
         return -ENOTCONN;
     if (len > TBT_CAR_PART_MAX)
         return -EINVAL;
-    err = tbt_carrier_part_flush(c);
+    err = tbt_carrier_part_flush(c, sk);
     if (err)
         return err;
-    wmem = READ_ONCE(c->sk->sk_wmem_queued);
-    sndbuf = READ_ONCE(c->sk->sk_sndbuf);
+    wmem = READ_ONCE(sk->sk_wmem_queued);
+    sndbuf = READ_ONCE(sk->sk_sndbuf);
     mem_avail = sndbuf > wmem ? sndbuf - wmem : 0;
     if (mem_avail < len)
         return -EAGAIN;
     iov_iter_kvec(&msg.msg_iter, ITER_SOURCE, &iov, 1, len);
     msg.msg_flags = MSG_DONTWAIT;
-    lock_sock(c->sk);
-    err = tcp_sendmsg_locked(c->sk, &msg, len);
-    release_sock(c->sk);
+    lock_sock(sk);
+    err = tcp_sendmsg_locked(sk, &msg, len);
+    release_sock(sk);
     if (err < 0)
         return err == -EAGAIN ? -EAGAIN : err;
     if ((size_t)err < len)
@@ -931,7 +1042,7 @@ static void tbt_http_capture_chunk(struct tbt_session *sess, const char *chunk, 
  * near side writes the request block, the far side the response block; a far
  * carrier waits until the request header has been parsed. Returns 0, -EAGAIN
  * when the far side is not ready, or a negative write error. */
-static int tbt_carrier_http_begin(struct tbt_carrier *c)
+static int tbt_carrier_http_begin(struct tbt_carrier *c, struct sock *sk)
 {
     struct tbt_session *sess = c->sess;
     char *hdr;
@@ -982,7 +1093,7 @@ static int tbt_carrier_http_begin(struct tbt_carrier *c)
         memcpy(sess->http_cap_req, hdr, cap);
         WRITE_ONCE(sess->http_cap_req_len, (u16)cap);
     }
-    err = tbt_carrier_send_whole(c, hdr, hlen);
+    err = tbt_carrier_send_whole(c, sk, hdr, hlen);
     TBT_DIAG("http header write tunnel=%llu carrier=%u gen=%u ret=%d hlen=%zu",
              (unsigned long long)sess->tunnel->cfg.id, c->index, c->gen, err,
              hlen);
@@ -1011,16 +1122,22 @@ static int tbt_carrier_http_begin(struct tbt_carrier *c)
 int tbt_carrier_send_fec(struct tbt_carrier *c, const u8 *rec, size_t len)
 {
     struct tbt_session *sess;
+    struct sock *sk;
     char *buf;
     size_t n;
     int err;
 
-    if (!c || !c->sk)
+    if (!c)
         return -ENOTCONN;
     sess = c->sess;
+    lockdep_assert_held(&sess->pump_lock);
+    sk = rcu_dereference_protected(c->sk,
+                                   lockdep_is_held(&sess->pump_lock));
+    if (!sk)
+        return -ENOTCONN;
     if (c->profile == 3)
     {
-        err = tbt_carrier_send_whole(c, rec, len);
+        err = tbt_carrier_send_whole(c, sk, rec, len);
         if (!err)
         {
             c->tx_frames++;
@@ -1030,7 +1147,7 @@ int tbt_carrier_send_fec(struct tbt_carrier *c, const u8 *rec, size_t len)
         }
         return err;
     }
-    err = tbt_carrier_http_begin(c);
+    err = tbt_carrier_http_begin(c, sk);
     if (err)
         return err;
     buf = kmalloc(TBT_HTTP_FEC_FRAME_MAX, GFP_KERNEL);
@@ -1043,7 +1160,7 @@ int tbt_carrier_send_fec(struct tbt_carrier *c, const u8 *rec, size_t len)
         atomic64_inc(&sess->http_parse_err);
         return -EIO;
     }
-    err = tbt_carrier_send_whole(c, buf, n);
+    err = tbt_carrier_send_whole(c, sk, buf, n);
     kfree(buf);
     if (err)
         return err;
@@ -1058,13 +1175,19 @@ int tbt_carrier_send_fec(struct tbt_carrier *c, const u8 *rec, size_t len)
 // calls this while sk_wmem_queued is below the high-water mark.
 int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt_frame *fr)
 {
+    struct sock *sk;
     struct msghdr msg = {};
     struct kvec iov[2];
     u8 hdrbuf[TBT_HDR_LEN];
     size_t total;
     int err;
 
-    if (!c || !c->sk)
+    if (!c)
+        return -ENOTCONN;
+    lockdep_assert_held(&sess->pump_lock);
+    sk = rcu_dereference_protected(c->sk,
+                                   lockdep_is_held(&sess->pump_lock));
+    if (!sk)
         return -ENOTCONN;
     /* Debug-only deterministic loss (DESIGN 8.3 `carrier <n> drop_ppm`). Drop
      * the whole DATA record before it reaches the socket; a partial record
@@ -1079,7 +1202,7 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
         c->dropped_by_ppm++;
         sess->dropped_by_ppm++;
         fr->dropped = true;
-        c->drop_snd_nxt = READ_ONCE(tcp_sk(c->sk)->snd_nxt);
+        c->drop_snd_nxt = READ_ONCE(tcp_sk(sk)->snd_nxt);
         /* The injector's drop is a real record loss and must stay in the hole
          * gate's evidence (sent_below - recv_cnt). Only *failed writes* are
          * excluded now; counting the attempt at the entry made every -EAGAIN
@@ -1104,7 +1227,7 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
         struct tbt_http_out out;
         size_t n;
 
-        err = tbt_carrier_http_begin(c);
+        err = tbt_carrier_http_begin(c, sk);
         if (err)
             return err;
 
@@ -1122,15 +1245,15 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
         }
         if (sess->tunnel->cfg.role == TBT_ROLE_NEAR && c->index == 0)
             tbt_http_capture_chunk(sess, c->http_tx, n);
-        err = tbt_carrier_send_whole(c, c->http_tx, n);
+        err = tbt_carrier_send_whole(c, sk, c->http_tx, n);
         if (fr->hdr.type == TBT_F_HELLO && err != -EAGAIN)
             TBT_DIAG("HELLO chunk write tunnel=%llu carrier=%u gen=%u ret=%d len=%zu write_seq=%u snd_una=%u sndbuf=%u wmem=%u",
                      (unsigned long long)sess->tunnel->cfg.id, c->index,
                      c->gen, err, n,
-                     READ_ONCE(tcp_sk(c->sk)->write_seq),
-                     READ_ONCE(tcp_sk(c->sk)->snd_una),
-                     READ_ONCE(c->sk->sk_sndbuf),
-                     READ_ONCE(c->sk->sk_wmem_queued));
+                     READ_ONCE(tcp_sk(sk)->write_seq),
+                     READ_ONCE(tcp_sk(sk)->snd_una),
+                     READ_ONCE(sk->sk_sndbuf),
+                     READ_ONCE(sk->sk_wmem_queued));
         if (err)
             return err;
         c->tx_frames++;
@@ -1158,7 +1281,7 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
      * four carriers behind the slowest one. */
     /* A previous record's tail must reach the wire first: the peer parses a
      * byte stream, so a record may never be interleaved or reordered. */
-    err = tbt_carrier_part_flush(c);
+    err = tbt_carrier_part_flush(c, sk);
     if (err)
         return err;
     /* Record-level all-or-nothing for DATA. A short write leaves a partial
@@ -1172,12 +1295,12 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
      * stays as a safety net for a kernel-side short write. */
     if (fr->hdr.type == TBT_F_DATA)
     {
-        struct tcp_sock *tp = tcp_sk(c->sk);
+        struct tcp_sock *tp = tcp_sk(sk);
         u32 una = READ_ONCE(tp->snd_una);
         u32 queued = READ_ONCE(tp->write_seq);
         u32 wnd = READ_ONCE(tp->snd_wnd);
-        u32 wmem = READ_ONCE(c->sk->sk_wmem_queued);
-        u32 sndbuf = READ_ONCE(c->sk->sk_sndbuf);
+        u32 wmem = READ_ONCE(sk->sk_wmem_queued);
+        u32 sndbuf = READ_ONCE(sk->sk_sndbuf);
         u64 mem_avail = sndbuf > wmem ? sndbuf - wmem : 0;
         u64 wnd_avail = wnd > (u32)(queued - una) ?
                         wnd - (u32)(queued - una) : 0;
@@ -1216,9 +1339,9 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
         }
     }
     msg.msg_flags = MSG_DONTWAIT;
-    lock_sock(c->sk);
-    err = tcp_sendmsg_locked(c->sk, &msg, total);
-    release_sock(c->sk);
+    lock_sock(sk);
+    err = tcp_sendmsg_locked(sk, &msg, total);
+    release_sock(sk);
     if (err == -EAGAIN)
         return -EAGAIN;
     if (err < 0)
@@ -1260,8 +1383,8 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
         TBT_DIAG("HELLO raw write tunnel=%llu carrier=%u gen=%u ret=%d total=%zu short=%d write_seq=%u snd_una=%u",
                  (unsigned long long)sess->tunnel->cfg.id, c->index, c->gen,
                  err, total, (size_t)err != total,
-                 READ_ONCE(tcp_sk(c->sk)->write_seq),
-                 READ_ONCE(tcp_sk(c->sk)->snd_una));
+                 READ_ONCE(tcp_sk(sk)->write_seq),
+                 READ_ONCE(tcp_sk(sk)->snd_una));
     c->tx_frames++;
     c->tx_bytes += total;
     if (fr->hdr.type == TBT_F_DATA)
@@ -1274,96 +1397,41 @@ int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c, struct tbt
 // ---------------------------------------------------------------------------
 // Carrier lifecycle
 
-/* Take the oldest retired object that nothing can still be using. Called with
- * pump_lock held, so no pump is inside a carrier; sess->lock guards the list
- * and the poll counter. The object is reused, never freed: a poll or a late
- * work item may still hold the pointer, so its memory must stay valid. */
-static struct tbt_carrier *tbt_carrier_take_dead(struct tbt_session *sess)
-{
-    struct tbt_carrier *c, *tmp;
-
-    spin_lock(&sess->lock);
-    list_for_each_entry_safe(c, tmp, &sess->dead, node)
-    {
-        if (!c->released || atomic_read(&c->pollers) ||
-            work_busy(&c->w_connect) || work_busy(&c->w_rx) ||
-            work_busy(&c->w_tx) || work_busy(&c->w_pump.work))
-            continue;
-        list_del_init(&c->node);
-        if (sess->n_dead)
-            sess->n_dead--;
-        spin_unlock(&sess->lock);
-        return c;
-    }
-    spin_unlock(&sess->lock);
-    return NULL;
-}
-
-/* The caller holds pump_lock. */
+/* The caller holds pump_lock. Every carrier is a fresh allocation: object
+ * identity never changes, so a reader that obtained a pointer from car[],
+ * prov, /proc or a work item keeps a stable object until its own put. */
 static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
                                                   u8 index)
 {
     struct tbt_carrier *c;
-    char *http_tx, *http_hdr, *part;
-    struct tbt_parser *parser;
-    struct tbt_http_rx *http_rx;
-    bool reused;
 
-    c = tbt_carrier_take_dead(sess);
-    reused = c != NULL;
-    if (c)
-    {
-        /* Reset every scalar but keep the buffers. */
-        http_tx = c->http_tx;
-        http_hdr = c->http_hdr;
-        part = c->part;
-        parser = c->parser;
-        http_rx = c->http_rx;
-        memset(c, 0, sizeof(*c));
-        c->http_tx = http_tx;
-        c->http_hdr = http_hdr;
-        c->part = part;
-        c->parser = parser;
-        c->http_rx = http_rx;
-        /* memset() zeroed the list nodes; a carrier in car[] is on no list,
-         * and tbt_carrier_retire()/free() call list_del_init() on it. */
-        INIT_LIST_HEAD(&c->node);
-        INIT_LIST_HEAD(&c->release_node);
-        /* A reused object must not resume the retired stream: clear the
-         * parser's byte count and the assembler's chunk state, not only
-         * parser->have. A dirty `have` is used as a memmove() length by
-         * tbt_http_rx_parse(). */
-        memset(parser, 0, sizeof(*parser));
-        tbt_http_rx_new_message(http_rx);
-    }
-    else
-    {
-        c = kzalloc(sizeof(*c), GFP_KERNEL);
-        if (!c)
-            return NULL;
-        /* Before the first allocation that can fail: the failure path frees
-         * through tbt_carrier_free(), which unlinks the node, and an
-         * all-zero node is not a valid list head. */
-        INIT_LIST_HEAD(&c->node);
-        INIT_LIST_HEAD(&c->release_node);
-        c->http_tx = kmalloc(TBT_HTTP_FRAME_MAX, GFP_KERNEL);
-        c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX, GFP_KERNEL);
-        c->part = kmalloc(TBT_CAR_PART_MAX, GFP_KERNEL);
-        /* Zeroed is the defined initial state: have == 0 for the parser and
-         * a SIZE-state chunk parser for the assembler. kmalloc() would hand
-         * the carrier whatever the previous slab user left there; a dirty
-         * `have` then drives an unbounded memmove() in tbt_http_rx_parse(). */
-        c->parser = kzalloc(sizeof(*c->parser), GFP_KERNEL);
-        c->http_rx = kzalloc(sizeof(*c->http_rx), GFP_KERNEL);
-        if (!c->http_tx || !c->http_hdr || !c->part || !c->parser ||
-            !c->http_rx)
-        {
-            /* ctor-fail: never linked, so the helper's unlink is a no-op. */
-            tbt_carrier_free(c);
-            return NULL;
-        }
-    }
+    c = kzalloc(sizeof(*c), GFP_KERNEL);
+    if (!c)
+        return NULL;
+    /* Before the first allocation that can fail: the failure path frees
+     * through tbt_carrier_free(), which unlinks the nodes and returns the
+     * session reference, and an all-zero node is not a valid list head. */
+    INIT_LIST_HEAD(&c->node);
+    INIT_LIST_HEAD(&c->release_node);
+    refcount_set(&c->refs, 1);
+    refcount_inc(&sess->refs);
     c->sess = sess;
+    c->http_tx = kmalloc(TBT_HTTP_FRAME_MAX, GFP_KERNEL);
+    c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX, GFP_KERNEL);
+    c->part = kmalloc(TBT_CAR_PART_MAX, GFP_KERNEL);
+    /* Zeroed is the defined initial state: have == 0 for the parser and a
+     * SIZE-state chunk parser for the assembler. kmalloc() would hand the
+     * carrier whatever the previous slab user left there; a dirty `have`
+     * then drives an unbounded memmove() in tbt_http_rx_parse(). */
+    c->parser = kzalloc(sizeof(*c->parser), GFP_KERNEL);
+    c->http_rx = kzalloc(sizeof(*c->http_rx), GFP_KERNEL);
+    if (!c->http_tx || !c->http_hdr || !c->part || !c->parser ||
+        !c->http_rx)
+    {
+        /* ctor-fail: never linked, so the helper's unlink is a no-op. */
+        tbt_carrier_free(c);
+        return NULL;
+    }
     c->index = index;
     c->gen = ++sess->carrier_gen;
     /* 0xff is the provisional far-side index: not a spare, and the join sets
@@ -1375,12 +1443,10 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
     c->class = sess->tunnel ? sess->tunnel->cfg.profile : 1;
     c->join_deadline_ns = ktime_get_ns() + (u64)TBT_JOIN_TIMEOUT_MS * NSEC_PER_MSEC;
     c->last_una_move_ns = ktime_get_ns();
-    TBT_DIAG("tunnel=%llu carrier=%u gen=%u %s spare=%d profile=%u state=%u join_deadline_ms=%u parser_have=%zu http_chunk_state=%d",
+    TBT_DIAG("tunnel=%llu carrier=%u gen=%u allocated spare=%d profile=%u state=%u join_deadline_ms=%u parser_have=%zu http_chunk_state=%d",
              (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
-             index, c->gen, reused ? "reused" : "allocated", c->spare,
-             c->profile, c->state, TBT_JOIN_TIMEOUT_MS,
-             c->parser ? c->parser->have : 0,
-             c->http_rx ? c->http_rx->chunk.state : -1);
+             index, c->gen, c->spare, c->profile, c->state,
+             TBT_JOIN_TIMEOUT_MS, c->parser->have, c->http_rx->chunk.state);
     mutex_init(&c->http_lock);
     INIT_WORK(&c->w_connect, tbt_car_connect_work);
     INIT_WORK(&c->w_rx, tbt_car_rx_work);
@@ -1393,8 +1459,8 @@ struct tbt_carrier *tbt_carrier_new(struct tbt_session *sess, u8 index)
 {
     struct tbt_carrier *c;
 
-    /* Reuse reads the dead list and the poll counters; pump_lock keeps a
-     * running pump out of an object that is about to be reinitialised. */
+    /* pump_lock serialises the birth with a running pump and with the slot
+     * swap in w_replace. */
     mutex_lock(&sess->pump_lock);
     c = tbt_carrier_new_locked(sess, index);
     mutex_unlock(&sess->pump_lock);
@@ -1414,13 +1480,12 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c)
     {
         c->lost_counted = true;
         atomic64_inc(&sess->carrier_lost);
-        /* Presence only. tbt_carrier_release() frees the socket and only then
-         * clears c->sk, so a dereference here could touch a freed object;
-         * the socket state is in the debug snapshot and in /proc instead. */
+        /* Presence only; the socket state is in the debug snapshot and in
+         * /proc instead. */
         pr_warn_ratelimited("tbtun: tunnel %llu carrier %u gen %u lost: sock=%d connected=%d hello_sent=%d up=%d\n",
                             (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
                             c->index, c->gen,
-                            !!READ_ONCE(c->sk),
+                            tbt_carrier_sk_present(c),
                             atomic_read(&c->connected),
                             READ_ONCE(c->hello_sent), atomic_read(&c->up));
     }
@@ -1433,15 +1498,21 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c)
 
         for (j = 0; j < sess->n_car; j++)
         {
-            struct tbt_carrier *live = READ_ONCE(sess->car[j]);
+            struct tbt_carrier *live = tbt_carrier_get(sess, (u8)j);
             u8 idx = c->index;
 
-            if (!live || live == c || !atomic_read(&live->up) ||
-                atomic_read(&live->stopping))
+            if (!live)
                 continue;
+            if (live == c || !atomic_read(&live->up) ||
+                atomic_read(&live->stopping))
+            {
+                tbt_carrier_put(live);
+                continue;
+            }
             tbt_tx_control_pinned(sess, NULL, (u8)j, TBT_F_RETIRE, 0,
                                   (u64)(c->gen & 0xf), &idx, 1, true,
                                   GFP_ATOMIC);
+            tbt_carrier_put(live);
             break;
         }
     }
@@ -1466,117 +1537,251 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c)
         return;
     }
     c->retry_at_ns = ktime_get_ns() + 50 * NSEC_PER_MSEC;
-    schedule_delayed_work(&sess->w_replace, 0);
+    tbt_session_arm(sess, TBT_SW_REPLACE, 0);
 }
 
-/* Release everything a carrier owns: its socket, its port and its parser
- * state. The struct stays where the caller put it, and c->node is untouched,
- * so a caller may walk a list and call this for every element. Idempotent.
- * Called with no lock held; it cancels work and therefore sleeps. */
-static void tbt_carrier_release(struct tbt_session *sess, struct tbt_carrier *c)
+/* Stop every work item that can still touch this carrier. Sets stopping under
+ * sess->lock, so tbt_carrier_arm_*() and this function cannot interleave; the
+ * cancels run outside the lock because w_tx/w_pump take pump_lock and
+ * cancel_work_sync() sleeps. The caller must not hold pump_lock or tx_lock. */
+void tbt_carrier_quiesce(struct tbt_carrier *c)
 {
-    struct socket *s;
+    struct tbt_session *sess;
 
     if (!c)
         return;
+    sess = c->sess;
+    spin_lock(&sess->lock);
     atomic_set(&c->stopping, 1);
+    spin_unlock(&sess->lock);
     cancel_work_sync(&c->w_connect);
     cancel_work_sync(&c->w_rx);
-    /* w_tx and w_pump take pump_lock; callers of retire may hold it
-     * (carriers_start/carriers_stop). Those callers cancel both before the
-     * lock. */
+    cancel_work_sync(&c->w_tx);
+    cancel_delayed_work_sync(&c->w_pump);
+}
 
-    s = c->sock;
+/* Stage 1 of release: make c->sk unreachable and stop the callbacks. No
+ * socket is closed here; the caller runs one synchronize_rcu() for the whole
+ * batch, then tbt_carrier_close() on each object. */
+static void tbt_carrier_unpublish(struct tbt_session *sess,
+                                  struct tbt_carrier *c)
+{
+    struct socket *s = c->sock;
+
+    if (!c)
+        return;
+    if (s && s->sk)
+    {
+        /* write_lock_bh() inside restore waits for every in-flight callback;
+         * after it returns no new w_tx/w_rx can be queued from sk_user_data. */
+        tbt_sk_ops_restore(s->sk, &sess->def_ops);
+        sock_replace_proto(s->sk, &tcp_prot);
+        cancel_work_sync(&c->w_rx);
+        /* A callback that ran before the restore may have queued w_tx/w_pump
+         * after quiesce() cancelled them; this is the post-restore barrier. */
+        cancel_work_sync(&c->w_tx);
+        cancel_delayed_work_sync(&c->w_pump);
+    }
+    rcu_assign_pointer(c->sk, NULL);
+}
+
+/* Stage 2 of release: close the socket and drop the carrier's runtime state.
+ * Called only after synchronize_rcu(), so no reader can still obtain the
+ * socket pointer. Idempotent. */
+static void tbt_carrier_close(struct tbt_carrier *c)
+{
+    struct tbt_session *sess = c->sess;
+    struct socket *s = c->sock;
+
+    if (!c)
+        return;
     if (s)
     {
-        if (s->sk)
-        {
-            /* Restore the core callbacks.  An accepted carrier inherited
-             * tbt_ready(); a dialled one was replaced in w_connect.  Use the
-             * session snapshot, never an accepted socket's inherited
-             * pointer. */
-            tbt_sk_ops_restore(s->sk, &sess->def_ops);
-            /* tbt_tcp_prot lives in module data.  A socket left in FIN_WAIT
-             * would call sk->sk_prot->destroy() after unload. */
-            sock_replace_proto(s->sk, &tcp_prot);
-            /* A callback may have queued w_rx before the restore. */
-            cancel_work_sync(&c->w_rx);
-        }
         tbt_sock_abort_on_close(s);
         kernel_sock_shutdown(s, SHUT_RDWR);
         sock_release(s);
         c->sock = NULL;
-        c->sk = NULL;
     }
     atomic_set(&c->connected, 0);
     atomic_set(&c->up, 0);
     if (c->parser->have)
         sess->recv_partial_discard++;
     c->parser->have = 0;
-    /* The assembler holds chunk state and a partial record too; a carrier
-     * reused later must not resume the retired stream's message. */
     tbt_http_rx_new_message(c->http_rx);
+    if (c->part_len || c->part_off)
+        sess->recv_partial_discard++;
+    c->part_len = c->part_off = 0;
     if (c->local_port)
     {
         tbt_port_free(c->local_port);
         c->local_port = 0;
     }
-    /* Eligible for reuse once the poll and every work item are done with it;
-     * tbt_carrier_take_dead() checks all four. */
-    c->released = true;
+    WRITE_ONCE(c->released, true);
+}
+
+/* Single-carrier release: quiesce, unpublish, one grace period, close. Only
+ * for callers that cannot batch; the replacement and teardown paths use
+ * tbt_carrier_batch_release() so one grace period covers the whole batch. */
+static void tbt_carrier_release(struct tbt_session *sess, struct tbt_carrier *c)
+{
+    if (!c)
+        return;
+    tbt_carrier_quiesce(c);
+    tbt_carrier_unpublish(sess, c);
+    synchronize_rcu();
+    tbt_carrier_close(c);
 }
 
 /* Move a carrier's cumulative counters into the session's retired totals,
  * once. A retired slot leaves sess->car[], so /proc/net/tbtun/peers stops
  * listing it; without this the session aggregate could no longer be
  * reconciled with the live rows. The caller serialises with the pump (retire
- * runs under pump_lock or after the pump that owned the slot finished), so
- * the values are final when this reads them. */
+ * runs after the slot was swapped out), so the values are final here. */
 void tbt_carrier_stats_retire(struct tbt_session *sess, struct tbt_carrier *c)
 {
     if (!sess || !c)
         return;
     if (test_and_set_bit(0, &c->stats_retired))
         return;
+    atomic64_inc(&sess->carrier_retired);
     atomic64_add(READ_ONCE(c->tx_bytes), &sess->retired_tx_bytes);
     atomic64_add(READ_ONCE(c->data_frames), &sess->retired_data_frames);
     atomic64_add(READ_ONCE(c->retx_data), &sess->retired_retx_data);
 }
 
-/* Release the carrier and park the struct on sess->dead until teardown: a
- * work item scheduled just before `stopping` was set may still run, and it
- * must find valid memory (it checks stopping and returns). Called with no
- * lock held; it cancels work and releases sockets. */
+/* Retire one carrier that is already off every container list and whose
+ * installer reference is being handed over to this function. */
 void tbt_carrier_retire(struct tbt_session *sess, struct tbt_carrier *c)
 {
     if (!c)
         return;
     tbt_carrier_stats_retire(sess, c);
     tbt_carrier_release(sess, c);
-    spin_lock(&sess->lock);
-    list_del_init(&c->node);
-    list_add_tail(&c->node, &sess->dead);
-    if (++sess->n_dead > sess->dead_peak)
-        sess->dead_peak = sess->n_dead;
-    spin_unlock(&sess->lock);
+    tbt_carrier_put(c);
+}
+
+/* Release a batch with one grace period for all of it. Every member is
+ * already off sess->car/sess->prov; the list itself is caller-owned. */
+static void tbt_carrier_batch_release(struct tbt_session *sess,
+                                      struct list_head *batch)
+{
+    struct tbt_carrier *c, *tmp;
+
+    list_for_each_entry(c, batch, node)
+        tbt_carrier_quiesce(c);
+    list_for_each_entry(c, batch, node)
+        tbt_carrier_unpublish(sess, c);
+    synchronize_rcu();
+    list_for_each_entry_safe(c, tmp, batch, node)
+    {
+        list_del_init(&c->node);
+        tbt_carrier_stats_retire(sess, c);
+        tbt_carrier_close(c);
+        tbt_carrier_put(c);
+    }
 }
 
 /* Free a carrier that is on no session list and unreachable from every work
- * item. The node is unlinked first (a carrier that was never installed is
+ * item. The nodes are unlinked first (a carrier that was never installed is
  * self-linked, which is also a valid no-op), so the caller cannot leave a
- * freed node on a list. */
+ * freed node on a list. The session reference taken at birth is returned
+ * here; the object itself is freed by the last tbt_carrier_put(). */
 void tbt_carrier_free(struct tbt_carrier *c)
 {
     if (!c)
         return;
     list_del_init(&c->node);
+    list_del_init(&c->release_node);
     kfree(c->http_tx);
     kfree(c->http_hdr);
     kfree(c->part);
     kfree(c->parser);
     kfree(c->http_rx);
-    /* retire-drain */
+    if (c->sess)
+        tbt_session_put(c->sess);
+    /* refcount-zero: last put's RCU callback, or a never-published discard */
     kfree(c);
+}
+
+/* Arm a carrier work item. The sess->lock section is the handshake with
+ * tbt_carrier_quiesce(): either this queues before stopping is visible, and
+ * quiesce's cancel_work_sync() removes it, or it sees stopping and refuses.
+ * Any context, including softirq; never sleeps. */
+bool tbt_carrier_arm_tx(struct tbt_carrier *c)
+{
+    struct tbt_session *sess;
+
+    if (!c)
+        return false;
+    sess = c->sess;
+    spin_lock(&sess->lock);
+    if (atomic_read(&c->stopping) || READ_ONCE(c->released))
+    {
+        spin_unlock(&sess->lock);
+        return false;
+    }
+    /* false means an instance is already pending; that instance holds no
+     * reference of its own, but the carrier object itself is owned by the
+     * container, so the wake is not lost. */
+    queue_work(TBT_WQ, &c->w_tx);
+    spin_unlock(&sess->lock);
+    return true;
+}
+
+/* Dial work: same stopping/released handshake as the other carrier arms. */
+static bool tbt_carrier_arm_connect(struct tbt_carrier *c)
+{
+    struct tbt_session *sess;
+
+    if (!c)
+        return false;
+    sess = c->sess;
+    spin_lock(&sess->lock);
+    if (atomic_read(&c->stopping) || READ_ONCE(c->released))
+    {
+        spin_unlock(&sess->lock);
+        return false;
+    }
+    schedule_work(&c->w_connect);
+    spin_unlock(&sess->lock);
+    return true;
+}
+
+bool tbt_carrier_arm_pump(struct tbt_carrier *c, unsigned int ms)
+{
+    struct tbt_session *sess;
+
+    if (!c)
+        return false;
+    sess = c->sess;
+    spin_lock(&sess->lock);
+    if (atomic_read(&c->stopping) || READ_ONCE(c->released))
+    {
+        spin_unlock(&sess->lock);
+        return false;
+    }
+    mod_delayed_work(TBT_WQ, &c->w_pump, msecs_to_jiffies(ms));
+    spin_unlock(&sess->lock);
+    return true;
+}
+
+bool tbt_carrier_arm_rx(struct tbt_carrier *c)
+{
+    struct tbt_session *sess;
+
+    if (!c)
+        return false;
+    sess = c->sess;
+    spin_lock(&sess->lock);
+    if (atomic_read(&c->stopping) || READ_ONCE(c->released))
+    {
+        spin_unlock(&sess->lock);
+        return false;
+    }
+    if (!schedule_work(&c->w_rx))
+        atomic_set(&c->rx_again, 1);
+    spin_unlock(&sess->lock);
+    return true;
 }
 
 /* Turn a port-allocation failure into an operator-visible reason.  The
@@ -1660,7 +1865,7 @@ int tbt_carriers_start(struct tbt_tunnel *t, struct tbt_session *sess)
                                 (unsigned long long)t->cfg.id, i);
             return -ENOMEM;
         }
-        sess->car[i] = c;
+        rcu_assign_pointer(sess->car[i], c);
         TBT_DIAG("tunnel=%llu carrier=%d gen=%u spare=%d profile=%u state=%u installed",
                  (unsigned long long)t->cfg.id, i, c->gen, c->spare,
                  c->profile, c->state);
@@ -1745,14 +1950,13 @@ static void tbt_carrier_discard(struct tbt_carrier *c)
     tbt_carrier_free(c);
 }
 
-void tbt_replace_work(struct work_struct *w)
+static void tbt_replace_body(struct tbt_session *sess)
 {
-    struct tbt_session *sess =
-        container_of(to_delayed_work(w), struct tbt_session, w_replace);
     struct tbt_carrier **start;
     struct tbt_carrier *c, *tmp;
     LIST_HEAD(dead_now);
     LIST_HEAD(victims);
+    LIST_HEAD(batch);
     u64 now = ktime_get_ns();
     bool near, more = false, retry_slow = false;
     int nstart = 0, retired = 0, nvictims = 0, i;
@@ -1766,8 +1970,7 @@ void tbt_replace_work(struct work_struct *w)
     start = kcalloc((size_t)sess->n_car, sizeof(*start), GFP_KERNEL);
     if (!start)
     {
-        mod_delayed_work(system_wq, &sess->w_replace,
-                         msecs_to_jiffies(50));
+        tbt_session_arm(sess, TBT_SW_REPLACE, msecs_to_jiffies(50));
         return;
     }
     mutex_lock(&sess->pump_lock);
@@ -1813,8 +2016,11 @@ void tbt_replace_work(struct work_struct *w)
             spin_lock(&sess->lock);
             if (!sess->car[i])
             {
-                sess->car[i] = nc;
+                rcu_assign_pointer(sess->car[i], nc);
                 atomic64_inc(&sess->carrier_replaced);
+                /* Keep the object alive across the unlock below; join() may
+                 * replace this slot before the dial is scheduled. */
+                refcount_inc(&nc->refs);
                 start[nstart++] = nc;
                 nc = NULL;
             }
@@ -1845,7 +2051,7 @@ void tbt_replace_work(struct work_struct *w)
                 sp->active = true;
                 sp->state = TBT_CAR_UP;
                 sess->spare_activated++;
-                sess->car[i] = NULL;
+                rcu_assign_pointer(sess->car[i], NULL);
                 list_add_tail(&c->node, &dead_now);
                 retired++;
                 c = NULL;
@@ -1883,12 +2089,14 @@ void tbt_replace_work(struct work_struct *w)
             spin_lock(&sess->lock);
             if (sess->car[i] == c)
             {
-                sess->car[i] = nc; /* NULL: the next pass dials it */
+                /* NULL: the next pass dials it. */
+                rcu_assign_pointer(sess->car[i], nc);
                 list_add_tail(&c->node, &dead_now);
                 retired++;
                 if (nc)
                 {
                     atomic64_inc(&sess->carrier_replaced);
+                    refcount_inc(&nc->refs);
                     start[nstart++] = nc;
                 }
             }
@@ -1909,7 +2117,7 @@ void tbt_replace_work(struct work_struct *w)
             {
                 /* The far side never dials; the near side's replacement
                  * joins. */
-                sess->car[i] = NULL;
+                rcu_assign_pointer(sess->car[i], NULL);
                 list_add_tail(&c->node, &dead_now);
                 retired++;
             }
@@ -1921,6 +2129,16 @@ void tbt_replace_work(struct work_struct *w)
     spin_lock(&sess->lock);
     list_for_each_entry_safe(c, tmp, &sess->prov, node)
     {
+        if (c->joined)
+        {
+            /* join() installed it in car[]; it is not a provisional victim.
+             * The new adopt order makes this unreachable. */
+            WARN_ON_ONCE(1);
+            list_del_init(&c->node);
+            if (atomic_read(&sess->n_prov) > 0)
+                atomic_dec(&sess->n_prov);
+            continue;
+        }
         if (atomic_read(&c->stopping) || now > c->join_deadline_ns)
         {
             /* Stopping is what tbt_session_join() checks under this same
@@ -1939,34 +2157,11 @@ void tbt_replace_work(struct work_struct *w)
     spin_unlock(&sess->lock);
     mutex_unlock(&sess->pump_lock);
 
-    /* Both lists are bounded by TBT_REPLACE_BATCH, so they are drained
-     * completely; a leftover would leave its node on a stack list head. */
-    while (!list_empty(&dead_now))
-    {
-        struct tbt_carrier *r =
-            list_first_entry(&dead_now, struct tbt_carrier, node);
-
-        list_del_init(&r->node);
-        cancel_work_sync(&r->w_tx);
-        cancel_delayed_work_sync(&r->w_pump);
-        tbt_carrier_retire(sess, r);
-    }
-    /* A provisional carrier never joined, so no reader may keep it: the poll
-     * holds sess->lock across its provisional branch, and the move above
-     * marked it stopping under that lock. Free it now instead of parking it
-     * on sess->dead; an unauthenticated connect flood would otherwise grow
-     * that graveyard until the host OOMs (QEMU: 11k carriers, 400 MiB, 20 s). */
-    list_for_each_entry_safe(c, tmp, &victims, node)
-    {
-        list_del_init(&c->node);
-        cancel_work_sync(&c->w_tx);
-        cancel_delayed_work_sync(&c->w_pump);
-        tbt_carrier_release(sess, c);
-        tbt_carrier_free(c);
-    }
-    /* Carriers the join path replaced: release only what is queued, in a
-     * bounded batch. The old pass walked all of `dead` every time, so its
-     * cost grew with the number of past replacements (O(n^2) total). */
+    /* Retired slots and provisional victims are already off every container
+     * list. Carriers the join path replaced are queued on dead_release; move
+     * them into the same batch so one grace period covers every object. */
+    list_splice_tail_init(&dead_now, &batch);
+    list_splice_tail_init(&victims, &batch);
     i = 0;
     while (i < TBT_REPLACE_BATCH)
     {
@@ -1981,93 +2176,89 @@ void tbt_replace_work(struct work_struct *w)
         r = list_first_entry(&sess->dead_release, struct tbt_carrier,
                              release_node);
         list_del_init(&r->release_node);
+        list_add_tail(&r->node, &batch);
         spin_unlock(&sess->lock);
-        /* w_tx/w_pump are not cancelled by tbt_carrier_release(); cancel
-         * them before the object can be reused, or a late pump would run
-         * against a reinitialised carrier. */
-        cancel_work_sync(&r->w_tx);
-        cancel_delayed_work_sync(&r->w_pump);
-        tbt_carrier_release(sess, r);
         i++;
     }
     spin_lock(&sess->lock);
     more |= !list_empty(&sess->dead_release);
     spin_unlock(&sess->lock);
+    tbt_carrier_batch_release(sess, &batch);
     /* Dial only after every old socket (and its port) is gone. */
     for (i = 0; i < nstart; i++)
-        schedule_work(&start[i]->w_connect);
+    {
+        tbt_carrier_arm_connect(start[i]);
+        tbt_carrier_put(start[i]);
+    }
     if (retired)
         tbt_tx_wake(sess);
     kfree(start);
     if (more && !READ_ONCE(sess->closing))
-        mod_delayed_work(system_wq, &sess->w_replace,
-                         msecs_to_jiffies(retry_slow ? 200
-                                                     : TBT_REPLACE_RETRY_MS));
+        tbt_session_arm(sess, TBT_SW_REPLACE,
+                        msecs_to_jiffies(retry_slow ? 200
+                                                    : TBT_REPLACE_RETRY_MS));
+}
+
+void tbt_replace_work(struct work_struct *w)
+{
+    struct tbt_session *sess =
+        container_of(to_delayed_work(w), struct tbt_session, w_replace);
+    bool owned = test_and_clear_bit(TBT_SW_REPLACE, &sess->sched);
+
+    tbt_replace_body(sess);
+    if (owned)
+        tbt_session_put(sess);
 }
 
 void tbt_carriers_stop(struct tbt_session *sess)
 {
     struct tbt_carrier *c, *tmp;
+    LIST_HEAD(batch);
     int i;
 
     /* Stop the session poll first: it reads sess->car[] and sess->prov and can
      * ask for a replacement, so it must not run while the arrays are drained. */
-    cancel_delayed_work_sync(&sess->w_poll);
+    tbt_session_cancel(sess, TBT_SW_POLL);
 
-    /* Stop every writer before any socket goes away: a pump runs outside its
-     * own carrier's work item, so retiring one carrier while another's w_tx is
-     * writing to it would use a released socket. cancelling w_tx cannot be
-     * done while holding pump_lock (the work waits on it), so do it first. */
-    for (i = 0; i < TBT_MAX_CARRIERS_LIMIT; i++)
-    {
-        c = sess->car[i];
-        if (!c)
-            continue;
-        atomic_set(&c->stopping, 1);
-        cancel_work_sync(&c->w_tx);
-        cancel_delayed_work_sync(&c->w_pump);
-    }
-    list_for_each_entry(c, &sess->prov, node)
-    {
-        atomic_set(&c->stopping, 1);
-        cancel_work_sync(&c->w_tx);
-        cancel_delayed_work_sync(&c->w_pump);
-    }
-
+    /* Swap every container under pump_lock, so no pump can still hold a
+     * carrier after this section. The cancels and the socket release happen
+     * outside it: w_tx/w_pump take pump_lock, and cancel_work_sync() sleeps. */
     mutex_lock(&sess->pump_lock);
+    spin_lock(&sess->lock);
     for (i = 0; i < TBT_MAX_CARRIERS_LIMIT; i++)
     {
         if (sess->car[i])
         {
             c = sess->car[i];
-            sess->car[i] = NULL;
-            tbt_carrier_retire(sess, c);
+            rcu_assign_pointer(sess->car[i], NULL);
+            atomic_set(&c->stopping, 1);
+            list_add_tail(&c->node, &batch);
         }
     }
     list_for_each_entry_safe(c, tmp, &sess->prov, node)
     {
+        if (c->joined)
+        {
+            WARN_ON_ONCE(1);
+            list_del_init(&c->node);
+            if (atomic_read(&sess->n_prov) > 0)
+                atomic_dec(&sess->n_prov);
+            continue;
+        }
         list_del_init(&c->node);
-        tbt_carrier_retire(sess, c);
+        atomic_set(&c->stopping, 1);
+        list_add_tail(&c->node, &batch);
     }
     atomic_set(&sess->n_prov, 0);
+    list_for_each_entry_safe(c, tmp, &sess->dead_release, release_node)
+    {
+        list_del_init(&c->release_node);
+        list_add_tail(&c->node, &batch);
+    }
+    spin_unlock(&sess->lock);
     mutex_unlock(&sess->pump_lock);
 
-    list_for_each_entry_safe(c, tmp, &sess->dead, node)
-    {
-        /* retire() re-links the node onto sess->dead; the free helper unlinks
-         * it again, so the list never keeps a freed node. */
-        tbt_carrier_retire(sess, c);
-        /* A write-space callback that ran before tbt_carrier_release()
-         * restored the core callbacks can queue w_tx after the pre-lock
-         * cancel. Nothing can queue it once the callbacks are restored;
-         * cancel before free. */
-        cancel_work_sync(&c->w_tx);
-        cancel_delayed_work_sync(&c->w_pump);
-        tbt_carrier_free(c);
-    }
-    /* Callbacks installed on sockets may still be called from softirq paths
-     * that took their reference before sk_user_data was cleared. */
-    synchronize_rcu();
+    tbt_carrier_batch_release(sess, &batch);
 }
 
 /* A slot is usable for a joining carrier when it is empty or its current
@@ -2082,10 +2273,15 @@ bool tbt_carrier_dead(struct tbt_carrier *c)
         return true;
     if (atomic_read(&c->stopping))
         return true;
-    sk = READ_ONCE(c->sk);
+    sk = tbt_carrier_sk_get(c);
     if (!sk)
         return true;
-    return READ_ONCE(sk->sk_state) != TCP_ESTABLISHED;
+    {
+        bool dead = READ_ONCE(sk->sk_state) != TCP_ESTABLISHED;
+
+        tbt_carrier_sk_put(sk);
+        return dead;
+    }
 }
 
 /* Socket buffer budget for one carrier. The kernel doubles SO_SNDBUF and
@@ -2196,13 +2392,13 @@ static void tbt_car_connect_work(struct work_struct *w)
         return;
     TBT_DIAG("tunnel=%llu carrier=%u gen=%u enter stopping=%d sock=%d lport=%u retry_at=%lld",
              (unsigned long long)t->cfg.id, c->index, c->gen,
-             atomic_read(&c->stopping), !!READ_ONCE(c->sock), c->local_port,
+             atomic_read(&c->stopping), tbt_carrier_sk_present(c), c->local_port,
              (long long)(c->retry_at_ns - ktime_get_ns()) / NSEC_PER_MSEC);
-    if (atomic_read(&c->stopping) || READ_ONCE(c->sock))
+    if (atomic_read(&c->stopping) || tbt_carrier_sk_present(c))
     {
         TBT_DIAG("tunnel=%llu carrier=%u gen=%u skip stopping=%d sock=%d",
                  (unsigned long long)t->cfg.id, c->index, c->gen,
-                 atomic_read(&c->stopping), !!READ_ONCE(c->sock));
+                 atomic_read(&c->stopping), tbt_carrier_sk_present(c));
         return;
     }
 
@@ -2255,7 +2451,7 @@ static void tbt_car_connect_work(struct work_struct *w)
     tcp_sk(s->sk)->nonagle = TCP_NAGLE_OFF;
     tbt_carrier_install_proto(s->sk);
     c->sock = s;
-    c->sk = s->sk;
+    rcu_assign_pointer(c->sk, s->sk);
 
     write_lock_bh(&s->sk->sk_callback_lock);
     s->sk->sk_user_data = c;
@@ -2283,7 +2479,7 @@ static void tbt_car_connect_work(struct work_struct *w)
      * work unconditionally, exactly as the accept side does, or the HELLO sits
      * in the receive queue and the carrier never comes up (measured: probe I,
      * the near dialled 73 carriers, every far accept waited for HELLO). */
-    tbt_car_schedule_rx(c);
+    tbt_carrier_arm_rx(c);
     TBT_DIAG("tunnel=%llu carrier=%u gen=%u rx scheduled",
              (unsigned long long)t->cfg.id, c->index, c->gen);
     /* One line per dial: 256 of them at a 256-carrier start, so it follows the
@@ -2334,8 +2530,8 @@ int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp)
     u8 body[TBT_HELLO_BODY_LEN_V6];
     struct tbt_tunnel *t = sess->tunnel;
     u16 blen = sess->fec ? TBT_HELLO_BODY_LEN_V6 : TBT_HELLO_BODY_LEN;
-    struct tbt_carrier *hc = index < sess->n_car ? READ_ONCE(sess->car[index])
-                                                 : NULL;
+    struct tbt_carrier *hc = tbt_carrier_get(sess, index);
+    int rc;
 
     TBT_DIAG("HELLO build tunnel=%llu carrier=%u gen=%u fec=%d profile=%u blen=%u key_id=%u have_key=%d tx_ready=%d",
              (unsigned long long)t->cfg.id, index, hc ? hc->gen : 0, sess->fec,
@@ -2348,9 +2544,8 @@ int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp)
     memcpy(body + 2, sess->nonce, sizeof(sess->nonce));
     tbt_put_le16(body + 18, TBT_PAYLOAD_MAX);
     tbt_put_le16(body + 20, TBT_CHUNK_MAX);
-    body[22] = (sess->car[index] ? sess->car[index]->profile
-                                 : sess->tunnel->cfg.profile) |
-               (u8)(((sess->car[index] ? sess->car[index]->gen : 0) & 0xf) << 2);
+    body[22] = (hc ? hc->profile : t->cfg.profile) |
+               (u8)(((hc ? hc->gen : 0) & 0xf) << 2);
     if (sess->fec)
         tbt_crypto_hello_fill(body, sess->crypto, sess->crypto_key_id,
                               sess->crypto_tx_nonce,
@@ -2359,8 +2554,10 @@ int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp)
                                   : NULL);
     TBT_DIAG("HELLO body filled tunnel=%llu carrier=%u gen=%u profile_gen_byte=%u",
              (unsigned long long)t->cfg.id, index, hc ? hc->gen : 0, body[22]);
-    return tbt_tx_control_pinned(sess, NULL, index, TBT_F_HELLO, 0, 0, body,
-                                 blen, false, gfp);
+    rc = tbt_tx_control_pinned(sess, NULL, index, TBT_F_HELLO, 0, 0, body,
+                               blen, false, gfp);
+    tbt_carrier_put(hc);
+    return rc;
 }
 
 void tbt_carrier_resume(struct tbt_session *sess)
@@ -2374,15 +2571,16 @@ void tbt_carrier_resume(struct tbt_session *sess)
     spin_lock(&sess->lock);
     for (i = 0; i < sess->n_car; i++)
     {
-        c = READ_ONCE(sess->car[i]);
-        if (c && READ_ONCE(c->sk) && !atomic_read(&c->stopping))
+        c = rcu_dereference_protected(sess->car[i],
+                                      lockdep_is_held(&sess->lock));
+        if (c && tbt_carrier_sk_present(c) && !atomic_read(&c->stopping))
         {
             tbt_car_schedule_rx(c);
         }
     }
     list_for_each_entry(c, &sess->prov, node)
     {
-        if (READ_ONCE(c->sk) && !atomic_read(&c->stopping))
+        if (tbt_carrier_sk_present(c) && !atomic_read(&c->stopping))
             tbt_car_schedule_rx(c);
     }
     spin_unlock(&sess->lock);
@@ -2394,35 +2592,56 @@ void tbt_carrier_resume(struct tbt_session *sess)
 void tbt_carrier_snapshot(struct tbt_session *sess)
 {
     struct tbt_carrier *c = NULL;
-    struct tcp_sock *tp;
+    struct sock *sk;
     int i;
 
     for (i = 0; i < sess->n_car && !c; i++)
-        c = READ_ONCE(sess->car[i]);
+        c = tbt_carrier_get(sess, (u8)i);
     if (!c)
         return;
-    if (!c->sk)
+    sk = tbt_carrier_sk_get(c);
+    if (!sk)
+    {
+        tbt_carrier_put(c);
         return;
-    tp = tcp_sk(c->sk);
-    sess->snap_car_state = READ_ONCE(c->sk->sk_state);
+    }
+    sess->snap_car_state = READ_ONCE(sk->sk_state);
     sess->snap_car_stopping = atomic_read(&c->stopping);
-    sess->snap_car_ud = READ_ONCE(c->sk->sk_user_data) != NULL;
-    sess->snap_car_ready_ok = READ_ONCE(c->sk->sk_data_ready) == tbt_car_ready;
-    sess->snap_car_ws_ok = READ_ONCE(c->sk->sk_write_space) == tbt_car_write_space;
+    sess->snap_car_ud = READ_ONCE(sk->sk_user_data) != NULL;
+    sess->snap_car_ready_ok = READ_ONCE(sk->sk_data_ready) == tbt_car_ready;
+    sess->snap_car_ws_ok = READ_ONCE(sk->sk_write_space) == tbt_car_write_space;
     sess->snap_txw_pending = work_pending(&c->w_tx);
     sess->snap_txw_busy = work_busy(&c->w_tx);
-    if (READ_ONCE(c->sk))
-    {
-        struct sock *sk = READ_ONCE(c->sk);
+    sess->snap_car_wmem = READ_ONCE(sk->sk_wmem_queued);
+    sess->snap_car_rcv_nxt = READ_ONCE(tcp_sk(sk)->rcv_nxt);
+    sess->snap_car_copied = READ_ONCE(tcp_sk(sk)->copied_seq);
+    sess->snap_car_rcvbuf = READ_ONCE(sk->sk_rcvbuf);
+    sess->snap_car_sndbuf = READ_ONCE(sk->sk_sndbuf);
+    tbt_carrier_sk_put(sk);
+    tbt_carrier_put(c);
+}
 
-        sock_hold(sk);
-        sess->snap_car_wmem = READ_ONCE(sk->sk_wmem_queued);
-        sess->snap_car_rcv_nxt = READ_ONCE(tcp_sk(sk)->rcv_nxt);
-        sess->snap_car_copied = READ_ONCE(tcp_sk(sk)->copied_seq);
-        sess->snap_car_rcvbuf = READ_ONCE(sk->sk_rcvbuf);
-        sess->snap_car_sndbuf = READ_ONCE(sk->sk_sndbuf);
-        sock_put(sk);
-    }
+/* The five buffers are pointers, not inline arrays. If someone turns one of
+ * them into an array, kzalloc() still zeroes the whole struct and the buffer
+ * storage, and the "birth is all zero" invariant silently changes meaning.
+ * Reject that at compile time, and pin the buffer sizes to the largest record
+ * each one must hold. */
+static void tbt_carrier_birth_checks(void)
+{
+    BUILD_BUG_ON(!__builtin_types_compatible_p(
+        typeof(((struct tbt_carrier *)0)->part), u8 *));
+    BUILD_BUG_ON(!__builtin_types_compatible_p(
+        typeof(((struct tbt_carrier *)0)->parser), struct tbt_parser *));
+    BUILD_BUG_ON(!__builtin_types_compatible_p(
+        typeof(((struct tbt_carrier *)0)->http_rx), struct tbt_http_rx *));
+    BUILD_BUG_ON(!__builtin_types_compatible_p(
+        typeof(((struct tbt_carrier *)0)->http_tx), char *));
+    BUILD_BUG_ON(!__builtin_types_compatible_p(
+        typeof(((struct tbt_carrier *)0)->http_hdr), char *));
+    BUILD_BUG_ON(TBT_CAR_PART_MAX < TBT_REC_MAX);
+    BUILD_BUG_ON(TBT_CAR_PART_MAX < TBT_HTTP_FEC_FRAME_MAX);
+    BUILD_BUG_ON(TBT_PARSER_BUF < TBT_REC_MAX);
+    BUILD_BUG_ON(TBT_PARSER_BUF < TBT_FEC_REC_MAX);
 }
 
 // Called once at load, from tbt_core.c, before any carrier exists.
@@ -2449,6 +2668,8 @@ int tbt_carrier_init(void)
                  TBT_MAX_CARRIERS_LIMIT);
     BUILD_BUG_ON(ARRAY_SIZE(((struct tbt_stream *)0)->sched.order) <
                  TBT_MAX_CARRIERS_LIMIT);
+    BUILD_BUG_ON(TBT_STREAM_F_SCHED_TARGET >= BITS_PER_LONG);
+    tbt_carrier_birth_checks();
     tbt_tcp_prot = tcp_prot; // field-by-field copy of the live TCP proto
     return 0;
 }
@@ -2483,7 +2704,34 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
     tcp_sk(newsock->sk)->nonagle = TCP_NAGLE_OFF;
     tbt_carrier_install_proto(newsock->sk);
     c->sock = newsock;
-    c->sk = newsock->sk;
+
+    /* Publish the object on prov before any callback can find it. A softirq
+     * that arrives in the window below still runs the listener's inherited
+     * tbt_ready() and never touches c. */
+    spin_lock(&sess->lock);
+    if (READ_ONCE(sess->closing) ||
+        atomic_read(&sess->n_prov) >= (int)tbt_prov_cap(sess))
+    {
+        spin_unlock(&sess->lock);
+        sess->prov_reject++;
+        /* Nothing has seen c->sk yet. Restore the inherited callbacks and
+         * drop the carrier object, but leave the socket to the accept loop:
+         * it closes every socket for which adopt returned an error. */
+        tbt_carrier_unpublish(sess, c);
+        tbt_carrier_free(c);
+        return -ENOSPC;
+    }
+    {
+        int n = atomic_inc_return(&sess->n_prov);
+
+        if ((u32)n > sess->prov_peak)
+            sess->prov_peak = (u32)n;
+    }
+    list_add_tail(&c->node, &sess->prov);
+    spin_unlock(&sess->lock);
+
+    /* Only now may a softirq find c through sk_user_data. */
+    rcu_assign_pointer(c->sk, newsock->sk);
 
     write_lock_bh(&newsock->sk->sk_callback_lock);
     newsock->sk->sk_user_data = c;
@@ -2496,21 +2744,12 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
      * socket's buffers to the same share. */
     tbt_car_setsockbuf(newsock, &sess->tunnel->cfg, sess->n_pri);
     atomic_set(&c->connected, 1);
-    spin_lock(&sess->lock);
-    {
-        int n = atomic_inc_return(&sess->n_prov);
-
-        if ((u32)n > sess->prov_peak)
-            sess->prov_peak = (u32)n;
-    }
-    list_add_tail(&c->node, &sess->prov);
-    spin_unlock(&sess->lock);
     sess->rx_adopt_events++;
     /* Assert the wiring we just installed. A carrier that is connected but never
      * given our callbacks/proto looks exactly like a silent peer. */
     WARN_ON_ONCE(newsock->sk->sk_data_ready != tbt_car_ready);
     WARN_ON_ONCE(newsock->sk->sk_prot == &tcp_prot);
-    tbt_car_schedule_rx(c);
+    tbt_carrier_arm_rx(c);
     /* One line per connection is a console flood under a connect storm (HND0
      * logged 330 accepts/s). Keep the event visible but bounded. */
     pr_info_ratelimited("tbtun: tunnel %llu carrier ACCEPTED lport=%u rport=%u, awaiting HELLO\n",
@@ -2519,9 +2758,8 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
     return 0;
 }
 
-void tbt_target_work_fn(struct work_struct *w)
+static void tbt_target_body(struct tbt_stream *st)
 {
-    struct tbt_stream *st = container_of(w, struct tbt_stream, w_target);
     struct tbt_session *sess = st->sess;
     struct tbt_tunnel *t = sess->tunnel;
     struct sockaddr_in addr = {
@@ -2533,7 +2771,7 @@ void tbt_target_work_fn(struct work_struct *w)
     int err;
 
     if (READ_ONCE(st->state) == TBT_ST_DEAD)
-        goto out;
+        return;
     err = sock_create_kern(t->net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &s);
     if (err)
         goto fail;
@@ -2559,14 +2797,22 @@ void tbt_target_work_fn(struct work_struct *w)
     if (err)
         pr_debug("tbtun: far tunnel %llu target waiting for OPEN\n", t->cfg.id);
     tbt_tx_pump(sess);
-    tbt_stream_put(st);
     return;
 fail:
     pr_debug("tbtun: tunnel %llu target connect failed err=%d\n",
              (unsigned long long)t->cfg.id, err);
     WRITE_ONCE(st->target_started, false);
-out:
-    tbt_stream_put(st);
+}
+
+void tbt_target_work_fn(struct work_struct *w)
+{
+    struct tbt_stream *st = container_of(w, struct tbt_stream, w_target);
+    bool owned = test_and_clear_bit(TBT_STREAM_F_SCHED_TARGET,
+                                    &st->attached);
+
+    tbt_target_body(st);
+    if (owned)
+        tbt_stream_put(st);
 }
 
 int tbt_carrier_open_target(struct tbt_stream *st)
@@ -2587,9 +2833,16 @@ int tbt_carrier_open_target(struct tbt_stream *st)
     spin_unlock(&sess->lock);
     if (start)
     {
-        refcount_inc(&st->refs);
-        if (!queue_work(TBT_WQ, &st->w_target))
-            tbt_stream_put(st);
+        if (!tbt_stream_schedule(st, &st->w_target,
+                                 TBT_STREAM_F_SCHED_TARGET))
+        {
+            /* The stream is already leaving; let a later OPEN retry if it
+             * still can. */
+            spin_lock(&sess->lock);
+            if (!st->target && st->target_started)
+                st->target_started = false;
+            spin_unlock(&sess->lock);
+        }
     }
     return 0;
 }

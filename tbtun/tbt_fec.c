@@ -188,7 +188,7 @@ static bool tbt_fec_is_share_type(u8 type)
 static bool tbt_fec_is_control_type(u8 type)
 {
     return type == TBT_FEC_ACK || type == TBT_FEC_NACK || type == TBT_FEC_CFG ||
-           type == TBT_FEC_FBK || type == TBT_FEC_PAD;
+           type == TBT_FEC_FBK;
 }
 
 int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
@@ -229,34 +229,53 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
         }
         if (!max_payload || h->payload_len > max_payload)
             return -EPROTO;
-        /* epoch is this block's last real share length, never a byte count
-         * larger than S. The receiver stores it in short_len and uses it as a
-         * delivery length; an unbounded value would read past the block slot.
-         * 0 means "every real share is full". */
-        if (h->epoch > max_payload)
-            return -EPROTO;
-        if (h->type == TBT_FEC_PARITY && h->payload_len != max_payload)
-            return -EPROTO;
-        if (!h->payload_len)
-            return -EPROTO;
-        /* A short DATA packet is legal anywhere. The packetizer emits one when
-         * the application goes quiet and the packet cannot fill, so an
-         * interactive request is not held behind 8192 bytes that never come.
-         * The receiver places a share by the sum of the payload lengths before
-         * it, not by the packet index times S, so a short share mid-stream is
-         * unambiguous; LAST alone marks the end of the stream. */
-
         if (h->seq >= (1ULL << 63))
             return -EPROTO;
         if (h->type == TBT_FEC_DATA)
         {
+            /* A short DATA packet is legal anywhere. The packetizer emits one
+             * when the application goes quiet and the packet cannot fill, so
+             * an interactive request is not held behind 8192 bytes that never
+             * come. The receiver places a share by the sum of the payload
+             * lengths before it, not by the packet index times S, so a short
+             * share mid-stream is unambiguous; LAST alone marks the end of
+             * the stream. */
+            if (!h->payload_len || h->payload_len > max_payload)
+                return -EPROTO;
             if (h->win_len != 0)
+                return -EPROTO;
+            /* epoch is block-level and belongs to PARITY only. A DATA record
+             * that carried it let a mid-block short share overwrite the
+             * block's last-share length, and a share recovered from parity
+             * was then delivered with the wrong cut. */
+            if (h->epoch != 0)
                 return -EPROTO;
         }
         else
         {
-            if (!h->win_len || h->win_len > TBT_FEC_MAX_W)
-                return -EPROTO;
+            if (h->win_len == 0)
+            {
+                /* Empty-block marker: no payload, no epoch, parity 0, and no
+                 * flags. It is the only way a group says "I have no packet in
+                 * this super-block", so the receiver can stop waiting for a
+                 * block that will never arrive. */
+                if (h->share_index != h->n || h->flags != 0 ||
+                    h->payload_len != 0 || h->epoch != 0)
+                    return -EPROTO;
+            }
+            else
+            {
+                if (h->win_len > h->n)
+                    return -EPROTO;
+                if (h->payload_len != max_payload)
+                    return -EPROTO;
+                /* epoch is the length of share win_len-1, never more than S.
+                 * The receiver stores it in short_len and uses it as a
+                 * delivery length; an unbounded value would read past the
+                 * block slot. 0 means that share is full. */
+                if (h->epoch > max_payload)
+                    return -EPROTO;
+            }
         }
         return 0;
     }
@@ -269,8 +288,7 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
         return -EPROTO;
     /* ACK and NACK carry their first sequence in header.seq; the others must
      * leave it zero. */
-    if ((h->type == TBT_FEC_CFG || h->type == TBT_FEC_FBK || h->type == TBT_FEC_PAD) &&
-        h->seq)
+    if ((h->type == TBT_FEC_CFG || h->type == TBT_FEC_FBK) && h->seq)
         return -EPROTO;
 
     switch (h->type)
@@ -287,11 +305,23 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
         return h->payload_len == TBT_FEC_CFG_LEN ? 0 : -EPROTO;
     case TBT_FEC_FBK:
         return h->payload_len == TBT_FEC_FBK_LEN ? 0 : -EPROTO;
-    case TBT_FEC_PAD:
-        return h->payload_len == 0 ? 0 : -EPROTO;
     default:
         return -EPROTO;
     }
+}
+
+u64 tbt_fec_ack_bytes(u64 next_deliver, u64 pkt_base, u64 tx_seq)
+{
+    u64 rel;
+
+    /* Packets before the stream's first one are not this stream's bytes. */
+    rel = next_deliver > pkt_base ? next_deliver - pkt_base : 0;
+    /* Saturate before multiplying: rel * S would wrap for a hostile frontier
+     * even when rel is only one past tx_seq / S. */
+    if (rel > tx_seq / TBT_FEC_S)
+        return tx_seq;
+    rel *= TBT_FEC_S;
+    return rel > tx_seq ? tx_seq : rel;
 }
 
 int tbt_fec_hdr_seal(struct tbt_fec_hdr *h, const u8 *payload)

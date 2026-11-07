@@ -359,7 +359,7 @@ int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len)
     }
     spin_unlock_bh(&st->rx_lock);
     if (queued)
-        schedule_work(&st->w_drain);
+        tbt_stream_schedule(st, &st->w_drain, TBT_STREAM_F_SCHED_DRAIN);
     return 0;
 }
 
@@ -384,11 +384,15 @@ static int tbt_rx_fbk(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *body
 
         if (path >= sess->n_car)
             continue;
-        pc = READ_ONCE(sess->car[path]);
+        pc = tbt_carrier_get(sess, path);
         /* A replacement carrier is a new path with an empty sequence space;
          * feedback about the old generation must not touch it. */
         if (!pc || (pc->gen & 0xf) != gen)
+        {
+            if (pc)
+                tbt_carrier_put(pc);
             continue;
+        }
         if (uack > READ_ONCE(pc->uack))
         {
             WRITE_ONCE(pc->uack, uack);
@@ -407,6 +411,7 @@ static int tbt_rx_fbk(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *body
         }
         if (state == 2)
             paused = true;
+        tbt_carrier_put(pc);
     }
     atomic64_inc(&sess->fbk_rx);
     st = tbt_stream_get(sess, tbt_hdr_sid(hdr), false, false);
@@ -446,6 +451,19 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
         if (tbt_rx_bind_stream(c, hdr, false))
             return -EPROTO;
         c->rx_bytes += len;
+        /* 0.2.0 FIN body: absolute packet range, little-endian. A peer that
+         * names an end before its base is refused before any stream state is
+         * touched. */
+        {
+            u64 pkt_end = tbt_le64(payload);
+            u64 pkt_base = tbt_le64(payload + 8);
+
+            if (pkt_end < pkt_base)
+            {
+                atomic64_inc(&sess->fec_fin_bad);
+                return -EPROTO;
+            }
+        }
         st = tbt_stream_get(sess, tbt_hdr_sid(hdr), false, false);
         if (!st)
             return 0;
@@ -460,7 +478,8 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
          * flag were both lost, the FIN offset is the only remaining statement
          * of how many packets the stream holds. */
         if (sess->fec)
-            tbt_fec_rx_fin(sess, hdr->seq);
+            tbt_fec_rx_fin(sess, st, hdr->seq, tbt_le64(payload),
+                           tbt_le64(payload + 8));
         WRITE_ONCE(st->sack_dirty, true);
         /* The drain shuts the write side once rx_next reaches the FIN's seq
          * and every earlier byte has been delivered. */
@@ -686,11 +705,15 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
 
     if (t->cfg.role == TBT_ROLE_FAR)
     {
-        struct sock *csk = READ_ONCE(c->sk);
+        struct sock *csk = tbt_carrier_sk_get(c);
         __be32 src;
 
         if (h->path_id >= sess->n_car || !csk)
+        {
+            if (csk)
+                tbt_carrier_sk_put(csk);
             return tbt_hello_bad(c, "path id");
+        }
         src = inet_sk(csk)->inet_daddr;
         spin_lock(&sess->lock);
         /* An established anchor rejects every other source, free carrier
@@ -700,6 +723,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
         {
             atomic64_inc(&sess->join_src_reject);
             spin_unlock(&sess->lock);
+            tbt_carrier_sk_put(csk);
             return tbt_hello_bad(c, "source address");
         }
         if (sess->nonce_pinned)
@@ -708,6 +732,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
             {
                 atomic64_inc(&sess->session_join_bad);
                 spin_unlock(&sess->lock);
+                tbt_carrier_sk_put(csk);
                 return tbt_hello_bad(c, "session nonce");
             }
         }
@@ -718,11 +743,12 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
              * session without the secret. A far tunnel has no configured
              * peer (0), so the first HELLO defines it and every later one
              * must match; a configured peer must match its source address. */
-            if (!c->sk || (t->cfg.peer_addr &&
-                           inet_sk(c->sk)->inet_daddr != t->cfg.peer_addr))
+            if (!csk || (t->cfg.peer_addr &&
+                         inet_sk(csk)->inet_daddr != t->cfg.peer_addr))
             {
                 atomic64_inc(&sess->join_nonce_reject);
                 spin_unlock(&sess->lock);
+                tbt_carrier_sk_put(csk);
                 return tbt_hello_bad(c, "nonce authority");
             }
             memcpy(sess->nonce, body + 2, sizeof(sess->nonce));
@@ -732,6 +758,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
         {
             atomic64_inc(&sess->session_join_bad);
             spin_unlock(&sess->lock);
+            tbt_carrier_sk_put(csk);
             return tbt_hello_bad(c, "session nonce");
         }
         /* Only a HELLO that passed the nonce check may fix the anchor. */
@@ -741,6 +768,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
             sess->anchor_set = true;
         }
         spin_unlock(&sess->lock);
+        tbt_carrier_sk_put(csk);
         err = tbt_session_join(sess, c, h->path_id);
         if (err)
             return err;

@@ -1,12 +1,13 @@
 /* tbt_tx.c - public bytes -> frames -> carriers, and the feedback that makes
  * the scheduler and the retention window work.
  *
- * C3 scope: one stream per session, up to 16 carriers, no duplication and no
- * prediction (C5/C6). Every DATA frame is assigned a path when the pump is
- * about to write it, using the lowest per-path inflight with a 64-frame
- * striping window; the frame is kept in a per-stream retention list until the
- * peer's delivered byte offset has passed it, so a lost carrier or a
- * ppm-dropped record can be re-sent on another path.
+ * C3 scope: one stream per session, up to 16 carriers for the legacy ARQ,
+ * duplication up to TBT_DUP_MAX copies, and no prediction (C5/C6). Every DATA
+ * frame is assigned a path when the pump is about to write it, using the
+ * lowest per-path inflight with a 64-frame striping window; the frame is kept
+ * in a per-stream retention list until the peer's delivered byte offset has
+ * passed it, so a lost carrier or a ppm-dropped record can be re-sent on
+ * another path.
  *
  * Owns:
  *   - byte-offset sequence assignment (seq is the stream byte offset, not a
@@ -33,10 +34,34 @@
 #include <net/tcp.h>
 
 #include "tbtun.h"
+#include "tbt_tx_acct.h"
 
 /* A frame's payload length travels as u16 and is bounded by TBT_PAYLOAD_MAX;
  * the two must not drift apart. */
 static_assert(TBT_PAYLOAD_MAX <= U16_MAX, "payload length must fit u16");
+
+/* Pure bound test, no warning: a caller may legally walk a FEC session's 256
+ * slots. */
+static inline bool tbt_arq_path_ok(const struct tbt_session *sess,
+                                   unsigned int idx)
+{
+    return tbt_tx_path_in_range(idx, READ_ONCE(sess->n_car));
+}
+
+/* Index into the 16-slot retain arrays. Any out-of-range index is a code
+ * error: warn once and refuse the write. The warning lives here, not at each
+ * write site, so a FEC path with 256 slots never trips it. */
+static inline bool tbt_retain_path_ok(struct tbt_session *sess,
+                                      unsigned int idx)
+{
+    bool warned = false;
+    bool ok = tbt_tx_retain_path_in_range(idx, READ_ONCE(sess->n_car),
+                                          &warned);
+
+    if (warned)
+        WARN_ON_ONCE(1);
+    return ok;
+}
 
 /* The send queue's bound is derived from the sender window (sess->txq_max):
  * the queue only has to hold the frames the window admits while the carriers
@@ -64,6 +89,10 @@ static bool tbt_retain_paths_stalled(struct tbt_session *sess, struct tbt_retain
 static bool tbt_hole_copy_inflight(struct tbt_session *sess, struct tbt_retain *r);
 static void tbt_tx_ctl_arm(struct tbt_session *sess, struct tbt_carrier *pref,
                            unsigned int ms);
+
+/* Defined below; tbt_session.c also calls it from the purge path, so it is
+ * not static and carries the same contract there. */
+void tbt_tx_frame_drop_account(struct tbt_session *sess, struct tbt_frame *fr);
 
 /* A stream with at most two records outstanding is control-like: its next
  * bytes are what the peer's application needs to make progress, not bulk.
@@ -312,27 +341,45 @@ void tbt_tx_announce(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
 int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
 {
     u64 seq;
+    u8 body[TBT_FIN_BODY_LEN] = {0};
     int i, queued = 0, err = 0;
 
-    /* FEC: put the last short packet on the wire before FIN names its end.
-     * If the packetizer or a carrier is not ready, ask the close path to
-     * retry instead of sending FIN ahead of the data. */
+    /* FEC: the packetizer must finish the stream's last block before FIN
+     * names its end. The first call only requests the flush and returns 0;
+     * the close path retries. Once finish has run, pkt_end is frozen and the
+     * body can name it. */
     if (sess->fec)
     {
-        tbt_fec_tx_flush(st);
+        if (!smp_load_acquire(&st->fec_finished))
+        {
+            tbt_fec_tx_flush(st);
+            return 0;
+        }
         if (!tbt_fec_tx_idle(st))
             return 0;
     }
     spin_lock(&sess->tx_lock);
     /* Freeze the offset once: a retry must name the same byte, even if a late
-     * capture submitted more DATA after the first request. */
+     * capture submitted more DATA after the first request. The FEC packet
+     * bounds are frozen with it: pkt_end is the packet after the last DATA
+     * packet, pkt_base the stream's first packet (or pkt_end when the stream
+     * sent no DATA). */
     if (!st->tx_fin_seq_set)
     {
         st->tx_fin_seq = st->tx_seq;
+        if (sess->fec)
+        {
+            st->tx_fin_pkts = READ_ONCE(st->fec_pkt_end);
+            st->tx_fin_pkt_base = st->fec_pkt_base_set
+                                      ? READ_ONCE(st->fec_pkt_base)
+                                      : READ_ONCE(st->fec_pkt_end);
+        }
         st->tx_fin_seq_set = true;
     }
     seq = st->tx_fin_seq;
     spin_unlock(&sess->tx_lock);
+    tbt_put_le64(body, st->tx_fin_pkts);
+    tbt_put_le64(body + 8, st->tx_fin_pkt_base);
     /* The close timer starts at the first request, not at the write: a FIN
      * that never gets a carrier, or whose preceding DATA the peer never
      * acknowledges, must end in a bounded reset instead of a pinned stream. */
@@ -355,7 +402,7 @@ int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
          * the last copy. */
         set_bit(i, st->tx_fin_inflight);
         err = tbt_tx_control_pinned(sess, st, (u8)i, TBT_F_FIN, st->sid,
-                                    seq, NULL, 0, false, gfp);
+                                    seq, body, sizeof(body), false, gfp);
         if (err)
         {
             clear_bit(i, st->tx_fin_inflight);
@@ -422,7 +469,7 @@ static bool tbt_retain_all_received(struct tbt_session *sess, struct tbt_retain 
 {
     int i;
 
-    for (i = 0; i < sess->n_car; i++)
+    for (i = 0; i < sess->n_car && i < TBT_ARQ_MAX_PATHS; i++)
     {
         struct tbt_carrier *c = READ_ONCE(sess->car[i]);
 
@@ -491,7 +538,12 @@ static void tbt_tx_retain_gc(struct tbt_session *sess, struct tbt_stream *st)
  * This runs in the pump, under pump_lock, and nowhere else. The pump is the
  * only owner of frames outside sess->tx_q (its local batch and its retransmit
  * candidates hold fr->ret across a dropped tx_lock), so freeing an entry
- * anywhere else would let one of them dereference it after the free. */
+ * anywhere else would let one of them dereference it after the free.
+ *
+ * Contract with tbt_tx_submit(): a DATA frame's retain entry is published
+ * under tx_lock together with the frame and every duplicate, and submit never
+ * touches r after publish returns. That is why clearing fr->ret here is
+ * enough; no capture-side reference survives the publish. */
 static void tbt_tx_retain_trim(struct tbt_session *sess, struct tbt_stream *st)
 {
     struct tbt_retain *r, *tmp;
@@ -535,9 +587,14 @@ static u32 tbt_path_rtt_us(struct tbt_carrier *c)
 {
     u32 rtt = READ_ONCE(c->rtt_us);
     u32 srtt = 0;
+    struct sock *sk;
 
-    if (c->sk)
-        srtt = READ_ONCE(tcp_sk(c->sk)->srtt_us) >> 3;
+    sk = tbt_carrier_sk_get(c);
+    if (sk)
+    {
+        srtt = READ_ONCE(tcp_sk(sk)->srtt_us) >> 3;
+        tbt_carrier_sk_put(sk);
+    }
     return srtt > rtt ? srtt : rtt;
 }
 
@@ -593,19 +650,26 @@ static u64 tbt_tx_bdp_window(struct tbt_session *sess, u32 *mean_out,
 
     for (i = 0; i < sess->n_car; i++)
     {
-        struct tbt_carrier *c = READ_ONCE(sess->car[i]);
-        struct tcp_sock *tp;
-        u32 srtt, mdev;
-        u64 rate;
+        struct tbt_carrier *c = tbt_carrier_get(sess, (u8)i);
+        struct sock *sk;
+        u32 srtt = 0, mdev = 0;
+        u64 rate = 0;
 
-        if (!c || !c->sk)
+        if (!c)
             continue;
-        tp = tcp_sk(c->sk);
-        srtt = READ_ONCE(tp->srtt_us) >> 3;
-        mdev = READ_ONCE(tp->mdev_us);
+        sk = tbt_carrier_sk_get(c);
+        if (sk)
+        {
+            struct tcp_sock *tp = tcp_sk(sk);
+
+            srtt = READ_ONCE(tp->srtt_us) >> 3;
+            mdev = READ_ONCE(tp->mdev_us);
+            rate = tbt_car_delivery_bps(tp);
+            tbt_carrier_sk_put(sk);
+        }
         if (!srtt)
             srtt = READ_ONCE(c->rtt_us);
-        rate = tbt_car_delivery_bps(tp);
+        tbt_carrier_put(c);
         if (!srtt || !rate)
             continue;
         sum_rate += rate;
@@ -731,18 +795,25 @@ static u64 tbt_tx_rto_ns(struct tbt_session *sess, struct tbt_stream *st)
 
     for (i = 0; i < sess->n_car; i++)
     {
-        struct tbt_carrier *c = READ_ONCE(sess->car[i]);
-        u32 srtt, mdev, r;
+        struct tbt_carrier *c = tbt_carrier_get(sess, (u8)i);
+        struct sock *sk;
+        u32 srtt = 0, mdev = 0, r;
 
-        if (!c || !c->sk)
+        if (!c)
             continue;
-        srtt = READ_ONCE(tcp_sk(c->sk)->srtt_us) >> 3;
-        mdev = READ_ONCE(tcp_sk(c->sk)->mdev_us);
+        sk = tbt_carrier_sk_get(c);
+        if (sk)
+        {
+            srtt = READ_ONCE(tcp_sk(sk)->srtt_us) >> 3;
+            mdev = READ_ONCE(tcp_sk(sk)->mdev_us);
+            tbt_carrier_sk_put(sk);
+        }
         if (!srtt)
         {
-            srtt = tbt_path_rtt_us(c);
+            srtt = READ_ONCE(c->rtt_us);
             mdev = 0;
         }
+        tbt_carrier_put(c);
         r = srtt + 4 * mdev;
         if (r > rto_us)
             rto_us = r;
@@ -1124,7 +1195,7 @@ static bool tbt_retain_received(struct tbt_session *sess, struct tbt_stream *st,
      * tx_ack costs one duplicate the receiver drops. */
     if (r->seq == ack)
         return false;
-    for (i = 0; i < sess->n_car; i++)
+    for (i = 0; i < sess->n_car && i < TBT_ARQ_MAX_PATHS; i++)
     {
         struct tbt_carrier *c = READ_ONCE(sess->car[i]);
 
@@ -1160,23 +1231,38 @@ static bool tbt_retain_tcp_done(struct tbt_session *sess, struct tbt_retain *r,
     int i;
 
     *earliest = 0;
-    for (i = 0; i < sess->n_car; i++)
+    for (i = 0; i < sess->n_car && i < TBT_ARQ_MAX_PATHS; i++)
     {
-        struct tbt_carrier *c = READ_ONCE(sess->car[i]);
+        struct tbt_carrier *c = tbt_carrier_get(sess, (u8)i);
+        struct sock *sk;
 
-        if (!c || !(r->path_mask & BIT(i)))
+        if (!c)
             continue;
-        if ((c->gen & 0xf) != r->path_gen[i])
+        if (!(r->path_mask & BIT(i)) || (c->gen & 0xf) != r->path_gen[i] ||
+            !tbt_retain_path_ok(sess, i))
+        {
+            tbt_carrier_put(c);
             continue;
-        if (!c->sk)
+        }
+        sk = tbt_carrier_sk_get(c);
+        if (!sk)
+        {
+            tbt_carrier_put(c);
             return false;
-        if ((s32)(READ_ONCE(tcp_sk(c->sk)->snd_una) - r->first_sent_seq[i]) < 0)
+        }
+        if ((s32)(READ_ONCE(tcp_sk(sk)->snd_una) - r->first_sent_seq[i]) < 0)
+        {
+            tbt_carrier_sk_put(sk);
+            tbt_carrier_put(c);
             return false;
+        }
+        tbt_carrier_sk_put(sk);
         if (!r->una_observed_ns[i])
             r->una_observed_ns[i] = now;
         any = true;
         if (!*earliest || r->una_observed_ns[i] < *earliest)
             *earliest = r->una_observed_ns[i];
+        tbt_carrier_put(c);
     }
     return any;
 }
@@ -1192,7 +1278,7 @@ static bool tbt_retain_paths_stalled(struct tbt_session *sess, struct tbt_retain
 {
     int i;
 
-    for (i = 0; i < sess->n_car; i++)
+    for (i = 0; i < sess->n_car && i < TBT_ARQ_MAX_PATHS; i++)
     {
         struct tbt_carrier *c = READ_ONCE(sess->car[i]);
 
@@ -1222,7 +1308,7 @@ static bool tbt_hole_copy_inflight(struct tbt_session *sess, struct tbt_retain *
 
     if (r->dup_pending)
         return true;
-    for (i = 0; i < sess->n_car; i++)
+    for (i = 0; i < sess->n_car && i < TBT_ARQ_MAX_PATHS; i++)
     {
         struct tbt_carrier *c = READ_ONCE(sess->car[i]);
 
@@ -1334,7 +1420,7 @@ void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st)
      * a newer one, which logged a depth failure for a hole that was already
      * repaired. Take the snapshot inside the lock. */
     ack = READ_ONCE(st->tx_ack);
-    for (i = 0; i < sess->n_car; i++)
+    for (i = 0; i < sess->n_car && i < TBT_ARQ_MAX_PATHS; i++)
     {
         struct tbt_carrier *c = READ_ONCE(sess->car[i]);
 
@@ -1370,7 +1456,7 @@ void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st)
     {
         bool lost = false;
 
-        for (i = 0; i < sess->n_car; i++)
+        for (i = 0; i < sess->n_car && i < TBT_ARQ_MAX_PATHS; i++)
         {
             struct tbt_carrier *c = READ_ONCE(sess->car[i]);
             struct tbt_retain *q;
@@ -1496,7 +1582,7 @@ void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st)
         {
             u64 idle = 0;
 
-            for (i = 0; i < sess->n_car; i++)
+            for (i = 0; i < sess->n_car && i < TBT_ARQ_MAX_PATHS; i++)
             {
                 struct tbt_carrier *pc = READ_ONCE(sess->car[i]);
                 u64 d;
@@ -1741,10 +1827,12 @@ void tbt_tx_ack(struct tbt_session *sess, struct tbt_carrier *c,
             {
                 int i = -1;
 
-                if (c && (r->path_mask & BIT(c->index)) &&
+                if (c && tbt_retain_path_ok(sess, c->index) &&
+                    (r->path_mask & BIT(c->index)) &&
                     (c->gen & 0xf) == r->path_gen[c->index])
                     i = c->index;
-                else if (r->last_path < sess->n_car)
+                else if (r->last_path < TBT_ARQ_MAX_PATHS &&
+                         r->last_path < sess->n_car)
                     i = r->last_path;
                 if (i >= 0 && r->una_observed_ns[i])
                 {
@@ -1814,19 +1902,28 @@ static u16 tbt_path_stalled_mask(struct tbt_session *sess)
 
     if (!rto)
         return 0;
-    for (i = 0; i < sess->n_car; i++)
+    for (i = 0; i < sess->n_car && i < TBT_ARQ_MAX_PATHS; i++)
     {
-        struct tbt_carrier *c = READ_ONCE(sess->car[i]);
+        struct tbt_carrier *c = tbt_carrier_get(sess, (u8)i);
         struct sock *sk;
 
-        if (!c || !c->last_una_move_ns ||
-            now - c->last_una_move_ns < rto)
+        if (!c)
             continue;
-        sk = READ_ONCE(c->sk);
+        if (!c->last_una_move_ns || now - c->last_una_move_ns < rto)
+        {
+            tbt_carrier_put(c);
+            continue;
+        }
+        sk = tbt_carrier_sk_get(c);
         if (!sk)
+        {
+            tbt_carrier_put(c);
             continue;
+        }
         if (READ_ONCE(tcp_sk(sk)->snd_una) != READ_ONCE(tcp_sk(sk)->snd_nxt))
             mask |= BIT(i);
+        tbt_carrier_sk_put(sk);
+        tbt_carrier_put(c);
     }
     return mask;
 }
@@ -2382,25 +2479,28 @@ int tbt_tx_pump(struct tbt_session *sess)
              * window update send it. Gating it behind the 64 KiB window left
              * the hole unfilled while the receiver's budget expired
              * (measured: far holes_unrecoverable=1, near retx_hole=0). */
-            if (type == TBT_F_DATA && c->sk && !fr->retx_copy)
+            if (type == TBT_F_DATA && !fr->retx_copy)
             {
-                struct tcp_sock *tp = tcp_sk(c->sk);
-                u32 una = READ_ONCE(tp->snd_una);
-                u32 queued = READ_ONCE(tp->write_seq);
-                u32 wnd = READ_ONCE(tp->snd_wnd);
-                u32 limit = wnd ? wnd : TBT_CHUNK_MAX;
+                struct sock *sk = tbt_carrier_sk_get(c);
 
-                /* Per-stream order is kept: the queue is FIFO and the small
-                 * stream's earlier frames are already ahead, so exempting it
-                 * here cannot reorder its bytes. */
+                if (sk)
                 {
+                    struct tcp_sock *tp = tcp_sk(sk);
+                    u32 una = READ_ONCE(tp->snd_una);
+                    u32 queued = READ_ONCE(tp->write_seq);
+                    u32 wnd = READ_ONCE(tp->snd_wnd);
+                    u32 limit = wnd ? wnd : TBT_CHUNK_MAX;
+
+                    /* Per-stream order is kept: the queue is FIFO and the
+                     * small stream's earlier frames are already ahead, so
+                     * exempting it here cannot reorder its bytes. */
                     if ((u32)(queued - una) >= limit &&
                         !tbt_stream_small_backlog(fr->st))
                     {
                         c->win_paused = true;
                         sess->win_block++;
-                        if (c->sk->sk_socket)
-                            set_bit(SOCK_NOSPACE, &c->sk->sk_socket->flags);
+                        if (sk->sk_socket)
+                            set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
                         /* No timer here. SOCK_NOSPACE makes tcp_check_space()
                          * call sk_write_space when the peer's window opens,
                          * and the 10 ms FBK tick pumps anyway. Arming the
@@ -2409,6 +2509,7 @@ int tbt_tx_pump(struct tbt_session *sess)
                          * schedule/cancel pairs per second (measured:
                          * pump_hw_armed 84380 in a 1.9 s run, fired 0). */
                         sess->dbg_pump_hiwat++;
+                        tbt_carrier_sk_put(sk);
                         continue;
                     }
                     if (c->win_paused)
@@ -2416,6 +2517,7 @@ int tbt_tx_pump(struct tbt_session *sess)
                         c->win_paused = false;
                         sess->win_resume++;
                     }
+                    tbt_carrier_sk_put(sk);
                 }
             }
             /* The real admission test tcp_sendmsg_locked() uses: the
@@ -2431,17 +2533,23 @@ int tbt_tx_pump(struct tbt_session *sess)
              * fbk_rx=0, tx_ack=0, both directions stuck at 64 KB). An FBK is
              * a few dozen bytes and tcp_sendmsg_locked still accepts it at
              * the line; a failure just re-queues it as -EAGAIN. */
-            if (c->sk && type != TBT_F_FBK &&
-                !(type == TBT_F_DATA && tbt_stream_small_backlog(fr->st)) &&
-                !sk_stream_memory_free(c->sk))
+            if (type != TBT_F_FBK &&
+                !(type == TBT_F_DATA && tbt_stream_small_backlog(fr->st)))
             {
-                blocked |= BIT(c->index);
-                if (c->sk->sk_socket)
-                    set_bit(SOCK_NOSPACE, &c->sk->sk_socket->flags);
-                schedule_delayed_work(&c->w_pump, msecs_to_jiffies(2));
-                sess->pump_hw_armed++;
-                sess->dbg_pump_hiwat++;
-                continue;
+                struct sock *sk = tbt_carrier_sk_get(c);
+
+                if (sk && !sk_stream_memory_free(sk))
+                {
+                    blocked |= BIT(c->index);
+                    if (sk->sk_socket)
+                        set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
+                    schedule_delayed_work(&c->w_pump, msecs_to_jiffies(2));
+                    sess->pump_hw_armed++;
+                    sess->dbg_pump_hiwat++;
+                    tbt_carrier_sk_put(sk);
+                    continue;
+                }
+                tbt_carrier_sk_put(sk);
             }
             if (type == TBT_F_DATA)
             {
@@ -2486,15 +2594,9 @@ drop:
                 sess->ctl_obsolete++;
             list_del(&fr->list);
             sess->tx_queued -= fr->len;
-            if (fr->dup_copy)
-            {
-                /* Only this pump subtracts (under pump_lock); captures only
-                 * add, so the guard cannot underflow between read and sub. */
-                if (tbt_stat_read(&sess->dup_bytes) >= fr->len)
-                    atomic64_sub(fr->len, &sess->dup_bytes);
-                if (fr->ret && fr->ret->dup_pending)
-                    fr->ret->dup_pending--;
-            }
+            /* Only this pump subtracts (under pump_lock); captures only add,
+             * so the guard cannot underflow between read and sub. */
+            tbt_tx_frame_drop_account(sess, fr);
             list_add_tail(&fr->list, &drop);
             progress = true;
             continue;
@@ -2538,6 +2640,12 @@ ctl_fail:
                     tbt_tx_ctl_fail(sess, fr);
                     continue;
                 }
+                /* The slot vanished between selection and write: the frame
+                 * was already taken out of tx_queued, so only the dup
+                 * accounting is still outstanding. */
+                spin_lock(&sess->tx_lock);
+                tbt_tx_frame_drop_account(sess, fr);
+                spin_unlock(&sess->tx_lock);
                 tbt_frame_free(fr);
                 continue;
             }
@@ -2699,8 +2807,8 @@ ctl_fail:
                  * far side a moment to process it before the next stream's
                  * OPEN (which is inserted at the queue head) can race it. */
                 if (!READ_ONCE(sess->far_sid) && READ_ONCE(sess->n_pending))
-                    queue_delayed_work(TBT_WQ, &sess->w_pending,
-                                       msecs_to_jiffies(1));
+                    tbt_session_arm(sess, TBT_SW_PENDING,
+                                    msecs_to_jiffies(1));
                 break;
             case TBT_F_DATA:
             {
@@ -2709,6 +2817,8 @@ ctl_fail:
 
                 if (r)
                 {
+                    bool path_ok;
+
                     spin_lock(&sess->tx_lock);
                     /* Every DATA record the carrier accepted, copies
                      * included: the honest retransmit denominator. */
@@ -2718,7 +2828,10 @@ ctl_fail:
                      * carriers). Guard the index anyway: a FEC v6 frame that
                      * ever reached this path with carrier 16..255 would write
                      * past path_gen[] into the neighbouring fields. */
-                    if (c->index < 16)
+                    path_ok = tbt_arq_path_ok(sess, c->index);
+                    if (WARN_ON_ONCE(!path_ok))
+                        path_ok = false;
+                    if (path_ok)
                     {
                         r->path_mask |= BIT(c->index);
                         r->reserve_mask &= ~BIT(c->index);
@@ -2731,11 +2844,17 @@ ctl_fail:
                      * handed over and the RTO fires on a frame still in our
                      * own buffer. The injector wrote nothing, so its mark is
                      * where snd_nxt stood when it dropped the frame. */
-                    if (c->index < 16)
-                        r->first_sent_seq[c->index] = fr->dropped
+                    if (path_ok)
+                    {
+                        struct sock *sk = tbt_carrier_sk_get(c);
+
+                        r->first_sent_seq[c->index] = fr->dropped || !sk
                             ? c->drop_snd_nxt
-                            : READ_ONCE(tcp_sk(c->sk)->write_seq) + c->part_len;
-                    r->una_observed_ns[c->index] = 0;
+                            : READ_ONCE(tcp_sk(sk)->write_seq) + c->part_len;
+                        tbt_carrier_sk_put(sk);
+                    }
+                    if (path_ok)
+                        r->una_observed_ns[c->index] = 0;
                     if (fr->retx_copy)
                     {
                         sess->retx_frames++;
@@ -2773,7 +2892,15 @@ ctl_fail:
                     sess->dup_tx++;
                 c->payload_bytes_sent += fr->len;
                 if (r)
-                    r->path_end[c->index] = c->payload_bytes_sent;
+                {
+                    /* Same lock as the path_mask update above: a reader in
+                     * tbt_retain_all_received() must see the end offset and
+                     * the mask bit together. */
+                    spin_lock(&sess->tx_lock);
+                    if (tbt_retain_path_ok(sess, c->index))
+                        r->path_end[c->index] = c->payload_bytes_sent;
+                    spin_unlock(&sess->tx_lock);
+                }
                 sess->stats_tx += fr->len;
                 break;
             }
@@ -2794,17 +2921,24 @@ ctl_fail:
      * once no carrier is full. */
     for (int i = 0; i < sess->n_car; i++)
     {
-        struct tbt_carrier *c = READ_ONCE(sess->car[i]);
+        struct tbt_carrier *c = tbt_carrier_get(sess, (u8)i);
+        struct sock *sk;
 
         if (!c)
             continue;
-        if (c->sk && sk_stream_memory_free(c->sk))
+        sk = tbt_carrier_sk_get(c);
+        if (sk)
         {
-            if (c->sk->sk_socket)
-                clear_bit(SOCK_NOSPACE, &c->sk->sk_socket->flags);
-            if (cancel_delayed_work(&c->w_pump))
-                sess->pump_hw_disarmed++;
+            if (sk_stream_memory_free(sk))
+            {
+                if (sk->sk_socket)
+                    clear_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
+                if (cancel_delayed_work(&c->w_pump))
+                    sess->pump_hw_disarmed++;
+            }
+            tbt_carrier_sk_put(sk);
         }
+        tbt_carrier_put(c);
     }
     if (READ_ONCE(sess->tx_queued) <= sess->txq_max / 2)
     {
@@ -2819,7 +2953,8 @@ ctl_fail:
                 if (!READ_ONCE(it->tx_paused))
                     continue;
                 WRITE_ONCE(it->tx_paused, false);
-                schedule_work(&it->w_read);
+                tbt_stream_schedule(it, &it->w_read,
+                                    TBT_STREAM_F_SCHED_READ);
             }
         }
         rcu_read_unlock();
@@ -2833,6 +2968,132 @@ ctl_fail:
 
 // ---------------------------------------------------------------------------
 // Capture
+
+/* Build the duplicate copies of one DATA frame. Everything this reads is
+ * private to the caller: `hdr` is a stack copy and `r` is not yet in the
+ * retain list, so no lock is needed and no concurrent trim/gc can free it.
+ * Returns how many copies were built (0..TBT_DUP_MAX); a failure only lowers
+ * the count and never publishes a partial frame. */
+static unsigned int tbt_tx_build_dups(struct tbt_session *sess,
+                                      struct tbt_retain *r,
+                                      const struct tbt_hdr *hdr,
+                                      u16 chunk,
+                                      struct tbt_frame *dup[TBT_DUP_MAX])
+{
+    unsigned int n = 0;
+
+    for (u32 k = 0; k < sess->tunnel->cfg.dup && n < TBT_DUP_MAX; k++)
+    {
+        u64 goodput = tbt_stat_read(&sess->tx_submit_bytes) + chunk;
+        u64 dup_after = tbt_stat_read(&sess->dup_bytes) + chunk;
+        struct tbt_frame *d;
+
+        /* Projected ratio, so the measured inflation cannot exceed the cap.
+         * Headers and retransmits are not duplication and stay excluded. */
+        if ((goodput + dup_after) * 1000 >
+            goodput * sess->tunnel->cfg.max_inflate_milli)
+        {
+            atomic64_inc(&sess->dup_suppressed);
+            break;
+        }
+        d = tbt_frame_alloc(chunk, GFP_ATOMIC);
+        if (!d)
+        {
+            atomic64_inc(&sess->dbg_alloc_fail);
+            break;
+        }
+        d->hdr = *hdr;
+        d->hdr.flags |= TBT_FF_LOW_PRIO;
+        d->dup_copy = true;
+        d->ret = r;
+        memcpy(d->data, r->data, chunk);
+        dup[n++] = d;
+    }
+    return n;
+}
+
+/* Publish the primary frame, its retain entry and every duplicate in one
+ * tx_lock critical section. Returns false when the queue cannot hold the
+ * whole set; the caller still owns fr, r and dup[] then. On success the
+ * ownership of all three moves to tx_q / st->retain, and the caller must not
+ * touch them again. */
+static bool tbt_tx_publish_data(struct tbt_session *sess,
+                                struct tbt_stream *st,
+                                struct tbt_frame *fr,
+                                struct tbt_frame *const dup[],
+                                unsigned int ndup,
+                                struct tbt_retain *r,
+                                u16 chunk,
+                                const struct tbt_hdr *hdr)
+{
+    u64 seq;
+    struct tbt_tx_acct acct;
+
+    if (WARN_ON_ONCE(ndup > U8_MAX))
+        return false;
+
+    spin_lock(&sess->tx_lock);
+    if (!tbt_tx_acct_fits(sess->tx_queued, sess->txq_max, chunk, ndup))
+    {
+        spin_unlock(&sess->tx_lock);
+        return false;
+    }
+
+    if (!st->tx_start_ns)
+        st->tx_start_ns = tbt_now_ns();
+    seq = st->tx_seq;
+    st->tx_seq = seq + chunk;
+
+    r->seq = seq;
+    r->hdr = *hdr;
+    r->hdr.seq = seq;
+
+    fr->hdr = *hdr;
+    fr->hdr.seq = seq;
+    fr->open_pending = st->near && !READ_ONCE(st->tx_open_sent);
+    fr->ret = r;
+    fr->st = st;
+    refcount_inc(&st->refs);
+
+    for (unsigned int k = 0; k < ndup; k++)
+    {
+        dup[k]->hdr.seq = seq;
+        dup[k]->st = st;
+        refcount_inc(&st->refs);
+    }
+
+    acct.tx_queued = sess->tx_queued;
+    acct.dup_bytes = 0;
+    acct.retain_bytes = st->retain_bytes;
+    tbt_tx_acct_publish(&acct, chunk, ndup, &r->dup_pending);
+    sess->tx_queued = acct.tx_queued;
+    atomic64_add(acct.dup_bytes, &sess->dup_bytes);
+    st->retain_bytes = acct.retain_bytes;
+
+    list_add_tail(&fr->list, &sess->tx_q);
+    list_add_tail(&r->list, &st->retain);
+    for (unsigned int k = 0; k < ndup; k++)
+        list_add_tail(&dup[k]->list, &sess->tx_q);
+
+    spin_unlock(&sess->tx_lock);
+    return true;
+}
+
+/* Give back the accounting of a duplicate DATA frame removed from tx_q
+ * without being written. Every path that frees such a frame calls this under
+ * sess->tx_lock; the caller subtracts tx_queued itself. A non-dup frame (the
+ * primary copy, control) owns no dup accounting and returns untouched. */
+void tbt_tx_frame_drop_account(struct tbt_session *sess, struct tbt_frame *fr)
+{
+    u64 sub;
+
+    if (!tbt_tx_acct_is_dup(fr->hdr.type, fr->dup_copy))
+        return;
+    sub = tbt_tx_acct_drop(tbt_stat_read(&sess->dup_bytes), fr->len,
+                           fr->ret ? &fr->ret->dup_pending : NULL);
+    if (sub)
+        atomic64_sub(sub, &sess->dup_bytes);
+}
 
 // Take `len` bytes at `off` in `skb` and queue them for the carrier.
 //
@@ -2855,21 +3116,11 @@ size_t tbt_tx_submit(struct tbt_stream *st, struct sk_buff *skb, unsigned int of
         u16 chunk = min_t(size_t, len - done, (size_t)TBT_PAYLOAD_MAX);
         struct tbt_retain *r;
         struct tbt_frame *fr;
-        u64 seq;
+        struct tbt_frame *dup[TBT_DUP_MAX];
+        struct tbt_hdr hdr;
+        unsigned int ndup;
 
-        spin_lock(&sess->tx_lock);
-        if (sess->tx_queued + chunk > sess->txq_max)
-        {
-            spin_unlock(&sess->tx_lock);
-            /* Backpressure, not a loss: the bytes stay in the public socket's
-             * receive queue, its window closes, and the application's send()
-             * blocks. */
-            WRITE_ONCE(st->tx_paused, true);
-            atomic64_inc(&sess->dbg_over_qmax);
-            break;
-        }
-        spin_unlock(&sess->tx_lock);
-
+        /* ---- A. Outside tx_lock: only this call's private objects. ---- */
         r = tbt_retain_alloc(chunk, GFP_ATOMIC);
         fr = tbt_frame_alloc(chunk, GFP_ATOMIC);
         if (!r || !fr)
@@ -2887,86 +3138,36 @@ size_t tbt_tx_submit(struct tbt_stream *st, struct sk_buff *skb, unsigned int of
             break;
         }
         memcpy(fr->data, r->data, chunk);
-        r->hdr = (struct tbt_hdr){
+
+        /* The header is a stack copy: seq is filled in under tx_lock, every
+         * other field is already final. dup[] reads only this copy and
+         * r->data; r is not yet reachable by the pump or by trim/gc. */
+        hdr = (struct tbt_hdr){
             .type = TBT_F_DATA,
             .body_len = chunk,
             .sid_lo = (u32)st->sid,
             .conv = TBT_CONV,
         };
-        r->hdr.sid_hi = (u8)(st->sid >> 32);
+        hdr.sid_hi = (u8)(st->sid >> 32);
+        ndup = tbt_tx_build_dups(sess, r, &hdr, chunk, dup);
 
-        spin_lock(&sess->tx_lock);
-        if (sess->tx_queued + chunk > sess->txq_max)
+        /* ---- B. One tx_lock: publish or roll back everything. ---- */
+        if (!tbt_tx_publish_data(sess, st, fr, dup, ndup, r, chunk, &hdr))
         {
-            spin_unlock(&sess->tx_lock);
-            kfree(r);
+            /* publish failed, so fr, r and dup[] are still ours. */
+            for (u32 k = 0; k < ndup; k++)
+                kfree(dup[k]);
             kfree(fr);
+            kfree(r);
+            /* Backpressure, not a loss: the bytes stay in the public socket's
+             * receive queue, its window closes, and the application's send()
+             * blocks. seq did not move. */
             WRITE_ONCE(st->tx_paused, true);
             atomic64_inc(&sess->dbg_over_qmax);
             break;
         }
-        if (!st->tx_start_ns)
-            st->tx_start_ns = tbt_now_ns();
-        seq = st->tx_seq;
-        st->tx_seq = seq + chunk;
-        r->seq = seq;
-        r->hdr.seq = seq;
-        fr->hdr = r->hdr;
-        fr->hdr.seq = seq;
-        fr->open_pending = st->near && !READ_ONCE(st->tx_open_sent);
-        fr->ret = r;
-        fr->st = st;
-        refcount_inc(&st->refs);
-        sess->tx_queued += chunk;
-        list_add_tail(&fr->list, &sess->tx_q);
-        list_add_tail(&r->list, &st->retain);
-        st->retain_bytes += chunk;
-        spin_unlock(&sess->tx_lock);
 
-        /* Duplicates go on paths the primary has not used. The inflation cap
-         * is checked against the *projected* ratio, so the measured value
-         * cannot exceed max_inflate (headers and retransmits excluded: they
-         * are not duplication). */
-        for (u32 k = 0; k < sess->tunnel->cfg.dup; k++)
-        {
-            u64 goodput = tbt_stat_read(&sess->tx_submit_bytes) + chunk;
-            u64 dup_after = tbt_stat_read(&sess->dup_bytes) + chunk;
-            struct tbt_frame *dup;
-
-            if ((goodput + dup_after) * 1000 >
-                goodput * sess->tunnel->cfg.max_inflate_milli)
-            {
-                atomic64_inc(&sess->dup_suppressed);
-                break;
-            }
-            dup = tbt_frame_alloc(chunk, GFP_ATOMIC);
-            if (!dup)
-            {
-                atomic64_inc(&sess->dbg_alloc_fail);
-                break;
-            }
-            dup->hdr = fr->hdr;
-            dup->hdr.flags |= TBT_FF_LOW_PRIO;
-            dup->dup_copy = true;
-            dup->ret = r;
-            memcpy(dup->data, r->data, chunk);
-            spin_lock(&sess->tx_lock);
-            if (sess->tx_queued + chunk > sess->txq_max)
-            {
-                spin_unlock(&sess->tx_lock);
-                kfree(dup);
-                break;
-            }
-            sess->tx_queued += chunk;
-            atomic64_add(chunk, &sess->dup_bytes);
-            if (r->dup_pending < U8_MAX)
-                r->dup_pending++;
-            dup->st = st;
-            refcount_inc(&st->refs);
-            list_add_tail(&dup->list, &sess->tx_q);
-            spin_unlock(&sess->tx_lock);
-        }
-
+        /* Published: fr, dup[] and r belong to tx_q / st->retain now. */
         done += chunk;
         atomic64_add(chunk, &sess->tx_submit_bytes);
     }
@@ -2998,6 +3199,11 @@ int tbt_tx_fbk(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
 {
     if (sess->fec)
         return 0; /* FEC has its own ACK/FBK records */
+    /* The FBK body has exactly TBT_LEGACY_MAX_CARRIERS entries. A non-FEC
+     * session with more carriers is a configuration-chain failure; refuse it
+     * rather than write past the stack body. */
+    if (WARN_ON_ONCE(sess->n_car > TBT_LEGACY_MAX_CARRIERS))
+        return -EINVAL;
     u8 body[TBT_FBK_MAX];
     u32 nr = 0;
     u16 mask = 0;
@@ -3005,26 +3211,35 @@ int tbt_tx_fbk(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
     struct tbt_frame *fr;
     int i;
 
-    for (i = 0; i < sess->n_car && nr < TBT_MAX_CARRIERS_LIMIT; i++)
+    for (i = 0; i < sess->n_car && i < TBT_LEGACY_MAX_CARRIERS &&
+                nr < TBT_LEGACY_MAX_CARRIERS; i++)
     {
-        struct tbt_carrier *c = READ_ONCE(sess->car[i]);
+        struct tbt_carrier *c = tbt_carrier_get(sess, (u8)i);
         struct sock *sk;
         u8 *e;
         u32 rtt = 0;
 
-        if (!c || !atomic_read(&c->up))
+        if (!c)
             continue;
-        /* One snapshot: tbt_carrier_release() clears c->sk with a plain
-         * store, so a second read after the check can be NULL. */
-        sk = READ_ONCE(c->sk);
+        if (!atomic_read(&c->up))
+        {
+            tbt_carrier_put(c);
+            continue;
+        }
+        /* The reference makes the socket safe outside the RCU section; the
+         * read is a short scalar snapshot, not a lock_sock. */
+        sk = tbt_carrier_sk_get(c);
         if (sk)
+        {
             rtt = READ_ONCE(tcp_sk(sk)->srtt_us) >> 3;
+            tbt_carrier_sk_put(sk);
+        }
         WRITE_ONCE(c->rx_state, state);
         e = body + nr * TBT_FBK_ENTRY_LEN;
         /* The generation in feedback is the *peer's* generation for this path
          * (learned from its HELLO), because the entry describes the frames the
          * peer sent on it. The peer compares it to its own carrier gen. */
-        e[TBT_FBK_PATH] = (u8)i | ((c->peer_gen & 0xf) << 4);
+        e[TBT_FBK_PATH] = (u8)i | ((READ_ONCE(c->peer_gen) & 0xf) << 4);
         e[TBT_FBK_RXSTATE] = state;
         /* Per-path cumulative high water: a later byte on this carrier proves
          * every earlier frame on it arrived (TCP is ordered per path). The
@@ -3035,9 +3250,12 @@ int tbt_tx_fbk(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
         tbt_put_le32(e + TBT_FBK_RTT, rtt);
         mask |= BIT(i);
         nr++;
+        tbt_carrier_put(c);
     }
     if (!nr)
         return 0;
+    if (WARN_ON_ONCE(nr > U8_MAX))
+        return -EINVAL;
     fr = tbt_frame_alloc(nr * TBT_FBK_ENTRY_LEN, gfp);
     if (!fr)
         return -ENOMEM;
@@ -3051,16 +3269,19 @@ int tbt_tx_fbk(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
      * no spare is usable. */
     for (i = 0; i < sess->n_car; i++)
     {
-        struct tbt_carrier *sp = READ_ONCE(sess->car[i]);
+        struct tbt_carrier *sp = tbt_carrier_get(sess, (u8)i);
+        bool pin = sp && sp->spare && atomic_read(&sp->up) &&
+                   !atomic_read(&sp->stopping);
 
-        if (sp && sp->spare && atomic_read(&sp->up) &&
-            !atomic_read(&sp->stopping))
+        if (pin)
         {
             fr->pinned = true;
             fr->path = (u16)i;
             fr->gen = sp->gen;
+            tbt_carrier_put(sp);
             break;
         }
+        tbt_carrier_put(sp);
     }
     fr->hdr = (struct tbt_hdr){
         .type = TBT_F_FBK,
@@ -3099,10 +3320,10 @@ void tbt_fbk_kick(struct tbt_session *sess, bool now)
      * with the data-path works let it slip hundreds of milliseconds under
      * load, which starves the retransmit timer's view of the ack. */
     if (now)
-        mod_delayed_work(TBT_WQ, &sess->w_fbk, 0);
-    else if (!work_pending(&sess->w_fbk.work))
-        queue_delayed_work(TBT_WQ, &sess->w_fbk,
-                           msecs_to_jiffies(TBT_FBK_INTERVAL_MS));
+        tbt_session_arm(sess, TBT_SW_FBK, 0);
+    else
+        tbt_session_arm(sess, TBT_SW_FBK,
+                        msecs_to_jiffies(TBT_FBK_INTERVAL_MS));
 }
 
 int tbt_tx_sack(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
@@ -3136,11 +3357,16 @@ void tbt_fbk_work(struct work_struct *w)
 {
     struct tbt_session *sess = container_of(to_delayed_work(w), struct tbt_session, w_fbk);
     struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
+    bool owned = test_and_clear_bit(TBT_SW_FBK, &sess->sched);
     bool alive = false;
     int nsnap, i;
 
     if (!sess->tunnel)
+    {
+        if (owned)
+            tbt_session_put(sess);
         return;
+    }
     nsnap = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
     tbt_tx_path_lost_drain(sess, snap, nsnap);
     for (i = 0; i < nsnap; i++)
@@ -3221,8 +3447,10 @@ void tbt_fbk_work(struct work_struct *w)
         tbt_stream_put(snap[i]);
     tbt_tx_pump(sess);
     if (alive && !READ_ONCE(sess->closing))
-        queue_delayed_work(TBT_WQ, &sess->w_fbk,
-                           msecs_to_jiffies(TBT_FBK_INTERVAL_MS));
+        tbt_session_arm(sess, TBT_SW_FBK,
+                        msecs_to_jiffies(TBT_FBK_INTERVAL_MS));
+    if (owned)
+        tbt_session_put(sess);
 }
 
 void tbt_tx_frame_free(struct tbt_frame *fr)
@@ -3239,6 +3467,10 @@ void tbt_tx_free_queue(struct tbt_session *sess)
     list_for_each_entry_safe(fr, tmp, &sess->tx_q, list)
     {
         list_del(&fr->list);
+        /* Session teardown: keep dup_bytes/dup_pending consistent with the
+         * frames that are about to be freed, even though the session is
+         * dying. */
+        tbt_tx_frame_drop_account(sess, fr);
         list_add_tail(&fr->list, &free);
     }
     sess->tx_queued = 0;
@@ -3260,6 +3492,9 @@ void tbt_tx_free_stream(struct tbt_stream *st)
      * this walks the list without the session lock. */
     list_for_each_entry_safe(r, tmp, &st->retain, list)
     {
+        /* Contract: tbt_tx_free_queue() has already dropped every queued
+         * copy, so no retain entry can still owe a duplicate. */
+        WARN_ON_ONCE(r->dup_pending);
         list_del(&r->list);
         kfree(r);
     }

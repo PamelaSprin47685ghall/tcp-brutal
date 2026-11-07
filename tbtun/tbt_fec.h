@@ -1,4 +1,4 @@
-/* tbt_fec.h - FEC wire v1 (TBT_FEC_CONV 0x1001), control frames, and the
+/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x1002), control frames, and the
  * GF(2) sliding-window RLNC codec.
  *
  * This file and tbt_fec.c compile twice: into the module and into the host
@@ -34,18 +34,22 @@
 #include <errno.h>
 #endif
 
+/* S: one packet slot on the wire, the only packet size this cut encodes.
+ * tbt_fec_data.c and tbt_fec_ack_bytes() must agree on it. */
+#define TBT_FEC_S TBT_FEC_PAYLOAD_MAX
+
 /* ------------------------------------------------------------------ *
  * 40-byte share header
  * ------------------------------------------------------------------ */
 
 struct tbt_fec_hdr
 {
-    u8 type;    /* TBT_FEC_DATA .. TBT_FEC_FBK, TBT_FEC_PAD */
+    u8 type;    /* TBT_FEC_DATA .. TBT_FEC_FBK */
     u8 flags;   /* TBT_FEC_FF_LAST only */
     u16 share_index;
     u8 n;
     u8 m;
-    u16 epoch; /* this cut: the block's last real share length, 0 = full */
+    u16 epoch; /* PARITY only: length of share win_len-1, 0 = full (S) */
     u64 block_id;
     u64 seq;
     u16 win_len;
@@ -67,21 +71,42 @@ int tbt_fec_hdr_unpack(const u8 in[TBT_FEC_HDR_LEN], struct tbt_fec_hdr *h);
 /* Structural check, in this order: conv, type, flags, reserved, lengths,
  * share bounds. `max_payload` is the configured S. Returns 0 or -EPROTO.
  *
- * DATA/PARITY: n>=1, m>=1, n+m<=256, share_index < (u16)(n+m),
- *              DATA share_index < n, PARITY share_index >= n,
- *              DATA payload_len 1..max_payload (a short packet is legal
- *              anywhere: the packetizer flushes a partial packet when the
- *              application goes quiet, and the receiver places shares by the
- *              sum of the payload lengths, so only LAST marks the end),
- *              epoch <= max_payload (it is the last real share's length),
- *              PARITY payload_len == max_payload, win_len rules
- *              (DATA 0; PARITY 1..TBT_FEC_MAX_W), seq < 2^63.
- * ACK/NACK/CFG/FBK/PAD: n==0, m==0, share_index==0, win_len==0, exact body
+ * DATA: n>=1, m>=1, n+m<=256, share_index < n, payload_len 1..max_payload
+ *       (a short packet is legal anywhere: the packetizer flushes a partial
+ *       packet when the application goes quiet, and the receiver places
+ *       shares by the sum of the payload lengths, so only LAST marks the
+ *       end), win_len == 0, epoch == 0.
+ * PARITY: share_index >= n, seq < 2^63.
+ *       win_len == 0 is the empty-block marker: share_index == n (parity 0),
+ *       flags == 0, payload_len == 0, epoch == 0.
+ *       win_len > 0: win_len <= n, payload_len == max_payload,
+ *       epoch <= max_payload. The first PARITY of a block fixes
+ *       (win_len, epoch); the receiver refuses a later PARITY that disagrees.
+ * ACK/NACK/CFG/FBK: n==0, m==0, share_index==0, win_len==0, exact body
  *              lengths, payload_len <= max_payload.
  *
  * The caller must check header_crc32c before trusting any field; this
  * function is the second gate, not the first. */
 int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload);
+
+/* Packet frontier -> stream byte offset acknowledged, for one ACK.
+ * `pkt_base` is the stream's first global FEC packet seq, `tx_seq` the byte
+ * offset this side has submitted. The result never exceeds tx_seq and never
+ * wraps, whatever a hostile peer puts in next_deliver. */
+u64 tbt_fec_ack_bytes(u64 next_deliver, u64 pkt_base, u64 tx_seq);
+
+/* FIN range check: pkt_end is the packet after the stream's last DATA packet,
+ * pkt_base the first one, and both are absolute session packet seqs. The end
+ * may not precede the base, and a non-zero span (groups*n) requires the base
+ * to start a super-block. */
+static inline bool tbt_fec_fin_valid(u64 pkt_end, u64 pkt_base, u64 span)
+{
+    if (pkt_end < pkt_base)
+        return false;
+    if (span && pkt_base % span)
+        return false;
+    return true;
+}
 
 /* Standard CRC32C (Castagnoli), reflected, init ~0, final xor. A fresh CRC
  * uses seed 0; chaining uses the previous return value as the next seed. */

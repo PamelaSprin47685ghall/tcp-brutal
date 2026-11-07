@@ -166,10 +166,12 @@ static int doc_accepts(u8 type, u8 ackc, unsigned len)
     case TBT_F_DATA:
         return len >= 1;
     case TBT_F_OPEN:
-    case TBT_F_FIN:
     case TBT_F_RST:
     case TBT_F_PAD:
         return len == 0;
+    case TBT_F_FIN:
+        /* 0.2.0: pkt_end at +0, pkt_base at +8, exactly 16 bytes. */
+        return len == TBT_FIN_BODY_LEN;
     case TBT_F_RETIRE:
         return len == 1; /* u8 carrier index; seq is the generation */
     case TBT_F_SACK:
@@ -202,7 +204,7 @@ static void test_bounds_table(void)
     } want[] = {
         { TBT_F_DATA, 1, DOC_DATA_MAX },
         { TBT_F_OPEN, 0, 0 },
-        { TBT_F_FIN, 0, 0 },
+        { TBT_F_FIN, TBT_FIN_BODY_LEN, TBT_FIN_BODY_LEN },
         { TBT_F_RST, 0, 0 },
         { TBT_F_FBK, 0, DOC_FBK_ENTRY * DOC_FBK_MAX_ENTRIES },
         { TBT_F_WINDOW, DOC_WINDOW_LEN, DOC_WINDOW_LEN },
@@ -216,7 +218,7 @@ static void test_bounds_table(void)
     char d[64];
 
     case_no++;
-    check(TBT_HDR_LEN == 32 && TBT_CHUNK_MAX == 8228 && TBT_REC_MAX == 8224 && TBT_CONV == 0x0005,
+    check(TBT_HDR_LEN == 32 && TBT_CHUNK_MAX == 8228 && TBT_REC_MAX == 8224 && TBT_CONV == 0x0006,
           "design constants", NULL);
     for (i = 0; i < sizeof(want) / sizeof(want[0]); i++)
     {
@@ -464,6 +466,15 @@ static void test_adversarial(void)
     n = rec_make(rec, TBT_F_FIN, 0, 0, 1, 0, 1);
     case_no++;
     expect("FIN with a body", rec, n, TBT_REC_PROTO);
+    n = rec_make(rec, TBT_F_FIN, 0, 0, 1, 0, TBT_FIN_BODY_LEN);
+    case_no++;
+    expect("FIN with the 16-byte body", rec, n, TBT_REC_OK);
+    n = rec_make(rec, TBT_F_FIN, 0, 0, 1, 0, TBT_FIN_BODY_LEN - 1);
+    case_no++;
+    expect("FIN one byte short", rec, n, TBT_REC_PROTO);
+    n = rec_make(rec, TBT_F_FIN, 0, 0, 1, 0, TBT_FIN_BODY_LEN + 1);
+    case_no++;
+    expect("FIN one byte long", rec, n, TBT_REC_PROTO);
     n = rec_make(rec, TBT_F_RST, 0, 0, 1, 0, 1);
     case_no++;
     expect("RST with a body", rec, n, TBT_REC_PROTO);

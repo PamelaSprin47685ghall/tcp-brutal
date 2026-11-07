@@ -437,6 +437,14 @@ struct tbt_stream
     bool tx_fin_written;      /* at least one FIN copy reached the wire */
     bool tx_fin_seq_set;      /* tx_fin_seq frozen at the first request */
     u64 tx_fin_seq;           /* byte offset every FIN copy names */
+    /* FEC FIN body (TBT_FIN_BODY_LEN): absolute session packet seqs, frozen
+     * with tx_fin_seq. Non-FEC streams leave them zero. */
+    u64 tx_fin_pkts;          /* pkt_end: after the last DATA packet */
+    u64 tx_fin_pkt_base;      /* pkt_base: first DATA packet, block-aligned */
+    u64 fec_pkt_base;         /* first global FEC packet seq of this stream */
+    bool fec_pkt_base_set;
+    u64 fec_pkt_end;          /* actual end, frozen by tbt_fec_tx_finish() */
+    bool fec_finished;        /* finish ran: block closed and seq advanced */
     u64 close_since_ns;       /* first FIN request; the bounded close timer
                                * runs from here and from the last ack, so a
                                * slow but progressing drain is not cut short */
@@ -556,6 +564,15 @@ struct tbt_fec_blk
     bool used;
     bool ready;
     u16 nreal;    /* real DATA packets in this block; 0 = not yet known */
+    /* Counts are derived from dpresent/ppresent and cached; count_real names
+     * the real length they were computed for, so a stale count is never used
+     * after the block's shape becomes known. */
+    u16 ndata;        /* present real DATA shares in [0, real) */
+    u16 nparity;      /* present PARITY shares */
+    u16 count_real;   /* real length ndata/nparity were computed for */
+    bool decoding;    /* w_fec_rx owns this block: no second decoder */
+    bool empty;       /* PARITY marker with win_len == 0 */
+    bool win_len_set; /* a PARITY record fixed win_len/short_len */
     u8 *data;     /* n * s bytes */
     u8 *parity;   /* m * s bytes */
     u8 *dpresent; /* n flags */
@@ -577,6 +594,11 @@ struct tbt_fec_gtx
 {
     u8 *blk; /* n * s bytes: this group's current block */
     u8 *par; /* m * s bytes: this group's parity scratch */
+    /* Block this group's nreal/last_len belong to. A block that already
+     * emitted its parity has nreal == 0, so nreal alone cannot tell "full and
+     * done" from "no packet in this block"; blk_id makes the difference
+     * explicit and lets close_block() emit a marker for an empty group. */
+    u64 blk_id;
     /* Real DATA packets written into `blk` for the block being built. The
      * packetizer closes a block early when the application goes quiet, so the
      * block's real length is a counter, not "n" or "the last seq mod n". */
@@ -607,6 +629,9 @@ struct tbt_fec_tx
      * ACK behind its own data, and a late ACK is a stalled credit window. */
     u16 ctl_rot;
     bool flush_req;
+    /* Session teardown: the packetizer, flush and every re-arm refuse new
+     * work. Set by tbt_session_destroy() before the cancel pass. */
+    bool stopping;
     /* When the packetizer may emit the partial packet it holds. Set when the
      * ring ran dry with bytes in `pkt`, cleared when it emits. 0 = not armed. */
     u64 short_at_ns;
@@ -642,6 +667,28 @@ struct tbt_fec_rx
     u64 total_pkts;   /* stream packet count; valid when total_known */
     u64 total_bytes;  /* FIN's byte offset; 0 when only LAST named the end */
     bool total_known;
+    /* w_fec_rx owns decode and ordered delivery; carriers only place shares.
+     * rx->lock is a leaf: it covers the window check, slot placement, counts
+     * and decode snapshots, never allocation, decode, delivery or another
+     * lock. */
+    bool work_pending;      /* a block may be decodable or deliverable */
+    bool stopping;          /* session teardown: w_fec_rx returns */
+    bool deliver_partial;   /* resume the walk at (deliver_p, deliver_g) */
+    u16 deliver_p;          /* packet index inside next_super */
+    u16 deliver_g;          /* group index inside that packet */
+    u8 *rec;                /* m * s: recovered-slot scratch */
+    u8 *zero;               /* s zero bytes: padding and absent parity */
+    u8 dpresent_snap[TBT_FEC_MAX_SHARES];
+    u8 ppresent_snap[TBT_FEC_MAX_SHARES];
+    u64 stream_pkt_base;    /* absolute seq of the bound stream's first packet */
+    /* A FIN for the next stream can arrive before its OPEN binds it; keep one
+     * slot and consume it on adoption instead of overwriting the current
+     * stream's total. */
+    u64 next_fin_sid;
+    u64 next_fin_end;
+    u64 next_fin_base;
+    u64 next_fin_bytes;
+    bool next_fin_valid;
     struct tbt_fec_blk *blk; /* groups * slots */
     struct tbt_fec_grouped *codec;
     u8 *data_ptrs[TBT_FEC_MAX_SHARES];   /* decode scratch */
@@ -690,7 +737,7 @@ struct tbt_session
      * {->lock -> tx_lock, fec_out_lock, c->http_lock}; socket lock -> ->lock.
      * ->lock is a leaf below pump_lock. A path may take at most one of
      * pump_lock, socket lock and ->lock as its outer lock. */
-    spinlock_t lock;          /* streams hash, car[], prov/dead lists, sched */
+    spinlock_t lock;          /* streams hash, car[], prov/dead_release, sched */
     struct mutex pump_lock;   /* serialises carrier writes and carrier swap;
                                * owns c->sk on every write path */
     struct tbt_sk_ops def_ops; /* copy of tunnel->def_ops; restore source */
@@ -732,20 +779,11 @@ struct tbt_session
     u32 fec_drop_ppm[TBT_MAX_CARRIERS_LIMIT];
     bool closing; /* session teardown started: no new joins, no new work */
     struct list_head prov; /* accepted carriers waiting for HELLO */
-    struct list_head dead; /* retired carriers, freed at session destroy */
     /* Join-replaced carriers whose socket release is deferred out of the
-     * carrier's socket lock. w_replace drains this in bounded batches; the
-     * old code walked all of `dead` on every pass, which made a replacement
-     * storm quadratic (HND0: 259 workqueue hogs in 15 s). */
+     * carrier's socket lock. w_replace drains this in bounded batches. */
     struct list_head dead_release;
     atomic_t n_prov;       /* carriers on `prov`, bounded by tbt_prov_cap() */
     u32 prov_peak;         /* high-water mark of n_prov, /proc only */
-    /* Retired carrier objects are reused as the allocation pool, not freed:
-     * a poll or a late work item may still hold the struct, so the memory
-     * must stay valid. `dead` is capped at 2 * n_car; a join that would
-     * exceed it is refused until a new carrier reuses an entry. */
-    u16 n_dead;
-    u16 dead_peak;         /* high-water mark of n_dead, /proc only */
 
     u8 nonce[16];      /* the session key carried in HELLO */
     bool nonce_set;    /* far side: adopted from the first HELLO */
@@ -886,7 +924,8 @@ struct tbt_session
     u64 dropped_by_ppm;                  /* pump only */
     u64 recv_partial_discard;            /* carrier release, serialised */
     /* C3 counters (DESIGN.md §8.7). */
-    atomic64_t carrier_lost, carrier_replaced, carrier_alloc_fail, connect_fail;
+    atomic64_t carrier_lost, carrier_replaced, carrier_retired;
+    atomic64_t carrier_alloc_fail, connect_fail;
     /* A dial that outlived one TBT_CONNECT_TIMEOUT_MS wait. Non-zero means the
      * path's SYN round trip (or a SYN retransmission) is longer than one
      * window; it is the difference between "the peer is down" and "the dial
@@ -925,6 +964,22 @@ struct tbt_session
     atomic64_t fec_ack_tx;
     atomic64_t fec_ack_rx;
     atomic64_t fec_credit_wait;
+    /* 0.2.0 FEC data plane: decode, delivery, placement and wire-shape
+     * failures. Each names one way a share or a stream can be lost, so a
+     * stalled stream is diagnosed from /proc instead of guesswork. */
+    atomic64_t fec_decode_blocks;     /* blocks handed to the codec */
+    atomic64_t fec_decode_recovered;  /* shares recovered from parity */
+    atomic64_t fec_decode_nomem;      /* codec workspace allocation failed */
+    atomic64_t fec_deliver_nomem;     /* delivery allocation failed: retry */
+    atomic64_t fec_deliver_bad;       /* delivery offset overflow */
+    atomic64_t fec_dup_share;         /* share for a slot already present */
+    atomic64_t fec_late_share;        /* share for a block already ready */
+    atomic64_t fec_pad_share;         /* empty-block marker received */
+    atomic64_t fec_epoch_conflict;    /* PARITY shape disagrees with block */
+    atomic64_t fec_fin_bad;           /* FIN pkt_end/pkt_base invalid */
+    atomic64_t fec_ack_bad;           /* ACK frontier/credit clamped */
+    atomic64_t fec_tx_share_gap;      /* sender share sequence skipped */
+    atomic64_t fec_empty_block;       /* markers emitted for empty groups */
     atomic64_t http_parse_err;   /* container framing/header protocol error */
     atomic64_t http_status_err;  /* non-200 or non-chunked/non-keepalive */
     u64 http_req, http_resp; /* header blocks emitted; pump only */
@@ -1038,7 +1093,7 @@ struct tbt_session
 
 struct tbt_carrier
 {
-    struct list_head node;    /* sess->prov or sess->dead */
+    struct list_head node;    /* sess->prov; self-linked otherwise */
     struct list_head release_node; /* sess->dead_release while a release is
                                     * pending; self-linked otherwise */
     struct socket *sock;      /* installer and tbt_carrier_close() only; never
@@ -1062,14 +1117,7 @@ struct tbt_carrier
     atomic_t up;                  /* HELLO written; usable for scheduling */
     atomic_t stopping;
     atomic_t rx_again;            /* a wake was coalesced into a running rx */
-    /* 0.2.0: retained for this cut only. M5 deletes it together with the dead
-     * pool; the poll then holds refs instead (review/s2-merged-design.md
-     * §3.4). Do not add new readers. */
-    atomic_t pollers;             /* the 50 ms poll is using this object;
-                                   * a retired object is not reused while
-                                   * this is non-zero */
-    bool released;                /* tbt_carrier_release() has run; eligible
-                                   * for reuse when no poll/work holds it */
+    bool released;                /* tbt_carrier_close() has run */
     /* join() has installed this carrier in sess->car[] (review/
      * s2-lifecycle-design.md §3.2.2): joined => in car[] and not on prov.
      * Protected by sess->lock. adopt() must skip a joined carrier instead of
@@ -1201,6 +1249,9 @@ void tbt_tx_path_lost(struct tbt_session *sess, u8 index);
 void tbt_tx_free_stream(struct tbt_stream *st);
 void tbt_tx_free_queue(struct tbt_session *sess);
 void tbt_tx_frame_free(struct tbt_frame *fr);
+/* Account a frame the pump could not write. The caller holds tx_lock; only a
+ * duplicate DATA copy changes the dup counters. */
+void tbt_tx_frame_drop_account(struct tbt_session *sess, struct tbt_frame *fr);
 
 /* tbt_rx.c */
 int tbt_rx_parse_pending(struct tbt_carrier *c);
@@ -1256,14 +1307,17 @@ int tbt_fec_data_init(struct tbt_session *sess);
 void tbt_fec_data_free(struct tbt_session *sess);
 size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,
                          unsigned int off, size_t len);
-void tbt_fec_tx_flush(struct tbt_stream *st);
+int tbt_fec_tx_flush(struct tbt_stream *st);
 bool tbt_fec_tx_idle(struct tbt_stream *st);
 void tbt_fec_tx_work(struct work_struct *w);
+/* Decode outside rx->lock, then deliver ready super-blocks in order. */
+void tbt_fec_rx_work(struct work_struct *w);
 int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len);
 int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len);
 /* The old FIN record names the stream's total byte offset. The FEC receiver
  * uses it to complete a final block whose parity and LAST flag were lost. */
-void tbt_fec_rx_fin(struct tbt_session *sess, u64 total_bytes);
+void tbt_fec_rx_fin(struct tbt_session *sess, struct tbt_stream *st,
+                    u64 total_bytes, u64 pkt_end, u64 pkt_base);
 bool tbt_fec_record_type(u8 type);
 int tbt_fec_record_len(const u8 *buf, size_t have, size_t *need);
 /* tbt_carrier.c: write one whole record, no frame header. */

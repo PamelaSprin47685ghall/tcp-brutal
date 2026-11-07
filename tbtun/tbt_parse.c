@@ -483,7 +483,7 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
 
             /* The old code stored a u16 through a u8 pointer; parse into a
              * wide temporary and range-check instead. */
-            if (tbt_parse_u32(val, &v) || v > 3)
+            if (tbt_parse_u32(val, &v) || v > TBT_DUP_MAX)
                 return tbt_fail(e, key, "dup must be 0..3");
             cfg->dup = (u8)v;
         }

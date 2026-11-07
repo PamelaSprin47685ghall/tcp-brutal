@@ -9,7 +9,7 @@ CLANG_FORMAT    ?= clang-format-18
 SRCS            := Makefile \
                    tbtun/tbtun.h tbtun/tbt_uapi.h tbtun/tbt_parse.h tbtun/tbt_proto.h \
                    tbtun/tbt_rec.h tbtun/tbt_http.h tbtun/tbt_crypto.h \
-                   tbtun/tbt_fec.h tbtun/tbt_portmap.h \
+                   tbtun/tbt_fec.h tbtun/tbt_portmap.h tbtun/tbt_tx_acct.h \
                    tbtun/tbt_core.c tbtun/tbt_session.c tbtun/tbt_procfs.c tbtun/tbt_listen.c \
                    tbtun/tbt_carrier.c tbtun/tbt_sock.c tbtun/tbt_tx.c tbtun/tbt_rx.c \
                    tbtun/tbt_parse.c tbtun/tbt_proto.c tbtun/tbt_rec.c tbtun/tbt_http.c \
@@ -48,6 +48,12 @@ HOST_ACK        := host/test_ack
 HOST_ACK_SRCS   := host/test_ack.c
 HOST_CONTROL    := host/test_control
 HOST_CONTROL_SRCS := host/test_control.c
+HOST_TX_PUBLISH := host/test_tx_publish
+HOST_TX_PUBLISH_SRCS := host/test_tx_publish.c
+HOST_TX_PUBLISH_HDRS := tbtun/tbt_tx_acct.h tbtun/tbt_uapi.h
+HOST_TX_INDEX   := host/test_tx_index
+HOST_TX_INDEX_SRCS := host/test_tx_index.c
+HOST_TX_INDEX_HDRS := tbtun/tbt_tx_acct.h tbtun/tbt_uapi.h
 HOST_MULTISTREAM := host/test_multistream
 HOST_MULTISTREAM_SRCS := host/test_multistream.c
 HOST_ANCHOR     := host/test_anchor
@@ -89,7 +95,7 @@ check:
 # root, no module and no kernel headers: the grammar test (tbt_parse.c), the
 # hostile-input test (tbt_rec.c + tbt_proto.c) and the HTTP container test
 # (tbt_http.c + tbt_proto.c).
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_PORTMAP)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_PORTMAP)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
@@ -97,6 +103,8 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_REORDER)
 	@./$(HOST_ACK)
 	@./$(HOST_CONTROL)
+	@./$(HOST_TX_PUBLISH)
+	@./$(HOST_TX_INDEX)
 	@./$(HOST_MULTISTREAM)
 	@./$(HOST_ANCHOR)
 	@./$(HOST_FEC)
@@ -147,6 +155,12 @@ $(HOST_ACK): $(HOST_ACK_SRCS)
 
 $(HOST_CONTROL): $(HOST_CONTROL_SRCS)
 	$(HOSTCC) $(HOST_CFLAGS) -o $@ $(HOST_CONTROL_SRCS)
+
+$(HOST_TX_PUBLISH): $(HOST_TX_PUBLISH_SRCS) $(HOST_TX_PUBLISH_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_TX_PUBLISH_SRCS)
+
+$(HOST_TX_INDEX): $(HOST_TX_INDEX_SRCS) $(HOST_TX_INDEX_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_TX_INDEX_SRCS)
 
 $(HOST_MULTISTREAM): $(HOST_MULTISTREAM_SRCS)
 	$(HOSTCC) $(HOST_CFLAGS) -o $@ $(HOST_MULTISTREAM_SRCS)
@@ -218,7 +232,7 @@ host-test-live: $(HOST_HTTP_LIVE)
 	fi
 
 clean: clean-dkms.conf clean-dkms-tarball
-	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_PORTMAP) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_portmap_san
+	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_PORTMAP) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_portmap_san
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
 
 load:

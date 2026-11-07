@@ -37,7 +37,6 @@
 #include "tbt_rec.h"
 
 #define TBT_FEC_TX_RING (256 * 1024)
-#define TBT_FEC_S TBT_FEC_PAYLOAD_MAX
 
 /* How long a partial packet may wait for company. The packetizer emits a
  * share only when its packet is full, so an application that writes a small
@@ -125,7 +124,7 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier, const u8 *buf
     else
         list_add_tail(&o->node, &sess->fec_out);
     spin_unlock(&sess->fec_out_lock);
-    schedule_work(&sess->w_fec_tx.work);
+    tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
     return 0;
 }
 
@@ -150,10 +149,16 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o)
         {
             u16 idx = (u16)((start + i) % sess->n_car);
 
-            c = READ_ONCE(sess->car[idx]);
-            if (!c || !atomic_read(&c->up) || atomic_read(&c->stopping))
+            c = tbt_carrier_get(sess, (u8)idx);
+            if (!c)
                 continue;
+            if (!atomic_read(&c->up) || atomic_read(&c->stopping))
+            {
+                tbt_carrier_put(c);
+                continue;
+            }
             err = tbt_carrier_send_fec(c, o->data, o->len);
+            tbt_carrier_put(c);
             if (!err)
             {
                 if (tx)
@@ -171,7 +176,7 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o)
     }
     if (o->carrier >= sess->n_car)
         return -ENODEV;
-    c = READ_ONCE(sess->car[o->carrier]);
+    c = tbt_carrier_get(sess, (u8)o->carrier);
     /* Debug-only loss injection for a FEC share. It is keyed by the carrier
      * the share was scheduled for, before the fallback below: dropping here
      * models the share the sender handed to a carrier that then died, and it
@@ -187,11 +192,20 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o)
             pr_warn_once("tbtun: dropping FEC records: debug_loss=1 and drop_ppm=%u\n",
                          drop);
             sess->dropped_by_ppm++;
+            if (c)
+                tbt_carrier_put(c);
             return 0;
         }
     }
     if (c && atomic_read(&c->up) && !atomic_read(&c->stopping))
-        return tbt_carrier_send_fec(c, o->data, o->len);
+    {
+        int err = tbt_carrier_send_fec(c, o->data, o->len);
+
+        tbt_carrier_put(c);
+        return err;
+    }
+    if (c)
+        tbt_carrier_put(c);
     /* The share's own carrier is gone or not usable yet. Send it on a live one
      * instead of dropping it: the receiver places a share by its header, and a
      * dropped share is a block the codec has to recover -- which it cannot
@@ -202,13 +216,22 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o)
      * for frames the pump pins to it. */
     for (i = 0; i < sess->n_car; i++)
     {
+        int err;
+
         if (i == o->carrier)
             continue;
-        c = READ_ONCE(sess->car[i]);
-        if (!c || !READ_ONCE(c->hello_sent) || atomic_read(&c->stopping) ||
-            !atomic_read(&c->connected))
+        c = tbt_carrier_get(sess, (u8)i);
+        if (!c)
             continue;
-        return tbt_carrier_send_fec(c, o->data, o->len);
+        if (!READ_ONCE(c->hello_sent) || atomic_read(&c->stopping) ||
+            !atomic_read(&c->connected))
+        {
+            tbt_carrier_put(c);
+            continue;
+        }
+        err = tbt_carrier_send_fec(c, o->data, o->len);
+        tbt_carrier_put(c);
+        return err;
     }
     return -ENODEV;
 }
@@ -364,17 +387,54 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess, u16 group,
     }
 }
 
+/* One PARITY record that says "this group has no packet in this block".
+ * Without it the receiver waits forever for a block that was never sent: a
+ * group with no real share emits no parity, and the super-block walk requires
+ * every group's block to be ready. The marker carries no payload, so crypto
+ * has nothing to transform and the record is header-only. */
+static void tbt_fec_tx_emit_empty(struct tbt_session *sess, u16 group,
+                                  u64 block_id)
+{
+    struct tbt_fec_tx *tx = sess->fec_tx;
+    struct tbt_fec_hdr h;
+    u16 rec_len;
+
+    memset(&h, 0, sizeof(h));
+    h.type = TBT_FEC_PARITY;
+    h.share_index = tx->n; /* parity 0 */
+    h.n = (u8)tx->n;
+    h.m = (u8)tx->m;
+    h.block_id = block_id;
+    h.seq = tbt_fec_seq_of_block_pkt(block_id, group, 0, tx->groups, tx->n);
+    h.win_len = 0;
+    h.payload_len = 0;
+    h.epoch = 0;
+    h.conv = TBT_FEC_CONV;
+    if (tbt_fec_make_record(sess, &h, NULL, tx->rec, &rec_len))
+        return;
+    tbt_fec_send_record(sess,
+                        (u16)(group * (tx->n + tx->m) + tx->n),
+                        tx->rec, rec_len, false);
+    atomic64_inc(&sess->fec_empty_block);
+}
+
 /* End the block under construction. Every group that wrote packets into it
  * gets parity over its zero-filled tail with win_len = its real packet count,
  * which is how the receiver learns the block is short; the parity also states
  * the last real share's length in `epoch`, so a receiver that has to recover
  * that share still knows how long it was.
  *
- * `advance` moves the packet numbering to the next block, for a block that was
- * closed before it filled. The receiver derives everything from the block's
- * first seq and `win_len`, so skipping the block's unused seq range is exact;
- * a block is only ever closed early when every group has a real packet in it,
- * which is what the super-block walk needs. */
+ * A group with no packet in this block emits an empty-block marker instead of
+ * silence, so the super-block walk can complete. A group whose block already
+ * filled emitted its parity when the last share was queued: nreal == 0 and
+ * blk_id == block_id is that state, not "empty".
+ *
+ * `advance` moves the packet numbering to the first packet of the next block,
+ * for a block closed before it filled. The jump is block-aligned: every group
+ * starts the next block at share 0, which keeps `nreal = share + 1` and the
+ * parity's last_seq valid. The old jump kept `seq % groups` and landed in the
+ * middle of a block, so a group before the landing point skipped share 0
+ * while packetize() still counted the skipped slots as real packets. */
 static void tbt_fec_tx_close_block(struct tbt_session *sess, bool advance)
 {
     struct tbt_fec_tx *tx = sess->fec_tx;
@@ -383,19 +443,24 @@ static void tbt_fec_tx_close_block(struct tbt_session *sess, bool advance)
 
     for (group = 0; group < tx->groups; group++)
     {
-        u16 len = tx->g[group].nreal;
+        struct tbt_fec_gtx *g = &tx->g[group];
+        u16 len = g->nreal;
 
-        if (!len || len >= tx->n)
+        if (g->blk_id != block_id)
+        {
+            tbt_fec_tx_emit_empty(sess, group, block_id);
             continue;
-        memset(tx->g[group].blk + (size_t)len * TBT_FEC_S, 0,
+        }
+        if (!len || len >= tx->n)
+            continue; /* full: parity already sent */
+        memset(g->blk + (size_t)len * TBT_FEC_S, 0,
                (size_t)(tx->n - len) * TBT_FEC_S);
         tbt_fec_tx_emit_parity(sess, group, block_id, len);
-        tx->g[group].nreal = 0;
+        g->nreal = 0;
     }
     if (advance)
     {
-        tx->seq = (block_id + 1) * (u64)tx->n * tx->groups +
-                  (tx->seq % tx->groups);
+        tx->seq = (block_id + 1) * (u64)tx->n * tx->groups;
         tx->cur_block = block_id + 1;
     }
 }
@@ -403,15 +468,26 @@ static void tbt_fec_tx_close_block(struct tbt_session *sess, bool advance)
 /* Flush the stream: every group whose final block is short gets parity over
  * its zero-filled tail, so a lost real share is still recoverable and the
  * receiver learns the real length from win_len. Groups whose final block is
- * full already sent their parity when the block completed. */
-static void tbt_fec_tx_finish(struct tbt_session *sess)
+ * full already sent their parity when the block completed; a group with no
+ * packet in the final block sends a marker.
+ *
+ * pkt_end is frozen before the jump: it names the packet after the stream's
+ * last DATA packet, and the FIN body carries it so a receiver whose LAST or
+ * parity was lost still knows where the stream ends. */
+static void tbt_fec_tx_finish(struct tbt_session *sess, struct tbt_stream *st)
 {
-    if (!sess->fec_tx->seq)
+    struct tbt_fec_tx *tx = sess->fec_tx;
+
+    if (READ_ONCE(st->fec_finished))
         return;
-    tbt_fec_tx_close_block(sess, false);
+    WRITE_ONCE(st->fec_pkt_end, tx->seq);
+    if (st->fec_pkt_base_set)
+        tbt_fec_tx_close_block(sess, true);
+    smp_store_release(&st->fec_finished, true);
 }
 
-static void tbt_fec_packetize(struct tbt_session *sess, bool last)
+static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_stream *st,
+                              bool last)
 {
     struct tbt_fec_tx *tx = sess->fec_tx;
     struct tbt_fec_hdr h;
@@ -429,6 +505,30 @@ static void tbt_fec_packetize(struct tbt_session *sess, bool last)
     block_id = local / tx->n;
     carrier = (u16)(group * (tx->n + tx->m) + share);
 
+    /* The first packet of a stream fixes its absolute base; the FIN body
+     * carries it so the peer can turn its global packet frontier into a
+     * stream-relative byte offset. */
+    if (!st->fec_pkt_base_set)
+    {
+        WRITE_ONCE(st->fec_pkt_base, seq);
+        /* Publish the value before the flag: the ACK path reads the flag with
+         * acquire and then the base, so it never sees a set flag with a stale
+         * zero base. */
+        smp_store_release(&st->fec_pkt_base_set, true);
+    }
+    /* A group's nreal/last_len belong to one block. Entering a new block
+     * resets them; a share that is not the next one means the sender skipped
+     * a slot (the early-close jump used to do exactly that), and the parity
+     * would then describe a hole. */
+    if (tx->g[group].blk_id != block_id)
+    {
+        tx->g[group].blk_id = block_id;
+        tx->g[group].nreal = 0;
+        tx->g[group].last_len = 0;
+    }
+    if (share != tx->g[group].nreal)
+        atomic64_inc(&sess->fec_tx_share_gap);
+
     tx->short_at_ns = 0;
     if (len < TBT_FEC_S)
         atomic64_inc(&sess->fec_short_tx);
@@ -442,9 +542,9 @@ static void tbt_fec_packetize(struct tbt_session *sess, bool last)
     h.seq = seq;
     h.win_len = 0;
     h.payload_len = len;
-    /* The block's last real share length, for the receiver's parity decode: a
-     * recovered share has no payload_len of its own (TBT_FEC_H_EPOCH). */
-    h.epoch = (u16)(len < TBT_FEC_S ? len : 0);
+    /* epoch is block-level and belongs to PARITY only: a mid-block short
+     * share that carried it overwrote the block's last-share length. */
+    h.epoch = 0;
     h.conv = TBT_FEC_CONV;
     if (!tbt_fec_make_record(sess, &h, tx->pkt, rec, &rec_len))
         (void)tbt_fec_send_record(sess, carrier, rec, rec_len, false);
@@ -466,7 +566,7 @@ static void tbt_fec_packetize(struct tbt_session *sess, bool last)
         tx->g[group].nreal = 0;
     }
     if (last)
-        tbt_fec_tx_finish(sess);
+        tbt_fec_tx_finish(sess, st);
 }
 
 /* The peer's ACK grants `credit` packets beyond the frontier it has delivered.
@@ -512,20 +612,18 @@ static bool tbt_fec_tx_is_idle(struct tbt_session *sess)
     return idle;
 }
 
-void tbt_fec_tx_work(struct work_struct *w)
+static void tbt_fec_tx_work_body(struct tbt_session *sess)
 {
-    struct tbt_session *sess =
-        container_of(to_delayed_work(w), struct tbt_session, w_fec_tx);
     struct tbt_fec_tx *tx = sess->fec_tx;
     struct tbt_stream *st;
     bool paused = false;
     bool short_ready;
 
-    if (!tx || READ_ONCE(sess->closing))
+    if (!tx || READ_ONCE(sess->closing) || READ_ONCE(tx->stopping))
         return;
     if (tbt_fec_out_flush(sess) == -EAGAIN)
     {
-        mod_delayed_work(system_wq, &sess->w_fec_tx, msecs_to_jiffies(2));
+        tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
         return;
     }
 
@@ -533,7 +631,7 @@ void tbt_fec_tx_work(struct work_struct *w)
      * delivered the session key. The ring keeps the bytes; retry shortly. */
     if (sess->crypto && !smp_load_acquire(&sess->crypto_tx_ready))
     {
-        mod_delayed_work(system_wq, &sess->w_fec_tx, msecs_to_jiffies(10));
+        tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(10));
         return;
     }
 
@@ -553,12 +651,12 @@ void tbt_fec_tx_work(struct work_struct *w)
         if (got)
         {
             if (tx->fill == TBT_FEC_S && tbt_fec_tx_credit_ok(tx))
-                tbt_fec_packetize(sess, false);
+                tbt_fec_packetize(sess, st, false);
             continue;
         }
         if (tx->fill == TBT_FEC_S && tbt_fec_tx_credit_ok(tx))
         {
-            tbt_fec_packetize(sess, false);
+            tbt_fec_packetize(sess, st, false);
             continue;
         }
         if (tx->fill == TBT_FEC_S)
@@ -576,9 +674,9 @@ void tbt_fec_tx_work(struct work_struct *w)
             if (tx->fill && !tbt_fec_tx_credit_ok(tx))
                 break;
             if (tx->fill)
-                tbt_fec_packetize(sess, true);
+                tbt_fec_packetize(sess, st, true);
             else
-                tbt_fec_tx_finish(sess);
+                tbt_fec_tx_finish(sess, st);
             WRITE_ONCE(tx->flush_req, false);
             continue;
         }
@@ -596,49 +694,24 @@ void tbt_fec_tx_work(struct work_struct *w)
          * right after it (the delivery offset is the sum of the payload
          * lengths, not the packet index times S).
          *
-         * A flushed share only helps if its block can be ended with it: the
-         * receiver delivers a block only when every real share is present or
-         * recoverable, so a share that leaves its block short would hold the
-         * whole stream until the application happened to write another
-         * packet. The block therefore ends here, either because this share is
-         * its last one or by closing it with win_len = its real count and
-         * moving to the next block. The second form needs a real packet in
-         * every group, or that group's block would be empty and the
-         * super-block walk would wait for shares that are not coming. */
-        u64 local = tx->seq / tx->groups;
-        u16 share = (u16)(local % tx->n);
-        bool completes = (u16)(share + 1) == tx->n;
-        bool flushable = completes;
+         * Closing the block is always safe now: every group that has no
+         * packet in it sends an empty-block marker, so the receiver's
+         * super-block walk never waits for a share that was never written.
+         * The old `flushable` scan could never tell "full and already
+         * emitted" from "empty", so a short write after a completed block
+         * waited forever. */
         u64 now = ktime_get_ns();
-        u16 g;
 
-        if (!flushable)
-        {
-            flushable = true;
-            for (g = 0; g < tx->groups; g++)
-            {
-                if (!tx->g[g].nreal)
-                {
-                    flushable = false;
-                    break;
-                }
-            }
-        }
-        if (!flushable)
-        {
-            tx->short_at_ns = 0;
-        }
-        else if (!tx->short_at_ns)
+        if (!tx->short_at_ns)
         {
             tx->short_at_ns = now + (u64)TBT_FEC_SHORT_MS * NSEC_PER_MSEC;
-            mod_delayed_work(system_wq, &sess->w_fec_tx,
-                             msecs_to_jiffies(TBT_FEC_SHORT_MS));
+            tbt_session_arm(sess, TBT_SW_FEC_TX,
+                            msecs_to_jiffies(TBT_FEC_SHORT_MS));
         }
         else if (now >= tx->short_at_ns && tbt_fec_tx_credit_ok(tx))
         {
-            tbt_fec_packetize(sess, false);
-            if (!completes)
-                tbt_fec_tx_close_block(sess, true);
+            tbt_fec_packetize(sess, st, false);
+            tbt_fec_tx_close_block(sess, true);
         }
     }
     else
@@ -648,11 +721,22 @@ void tbt_fec_tx_work(struct work_struct *w)
     if (paused)
     {
         WRITE_ONCE(st->tx_paused, false);
-        schedule_work(&st->w_read);
+        tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
     }
     tbt_stream_put(st);
     if (tbt_fec_out_flush(sess) == -EAGAIN)
-        mod_delayed_work(system_wq, &sess->w_fec_tx, msecs_to_jiffies(2));
+        tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
+}
+
+void tbt_fec_tx_work(struct work_struct *w)
+{
+    struct tbt_session *sess =
+        container_of(to_delayed_work(w), struct tbt_session, w_fec_tx);
+    bool owned = test_and_clear_bit(TBT_SW_FEC_TX, &sess->sched);
+
+    tbt_fec_tx_work_body(sess);
+    if (owned)
+        tbt_session_put(sess);
 }
 
 size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,
@@ -678,7 +762,7 @@ size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,
     spin_unlock(&tx->lock);
     if (take)
         atomic64_add(take, &sess->tx_submit_bytes);
-    schedule_work(&sess->w_fec_tx.work);
+    tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
     return take;
 }
 
@@ -687,17 +771,20 @@ bool tbt_fec_tx_idle(struct tbt_stream *st)
     return tbt_fec_tx_is_idle(st->sess);
 }
 
-void tbt_fec_tx_flush(struct tbt_stream *st)
+int tbt_fec_tx_flush(struct tbt_stream *st)
 {
     struct tbt_session *sess = st->sess;
     struct tbt_fec_tx *tx = sess->fec_tx;
 
     if (!tx)
-        return;
+        return -ENODEV;
+    if (READ_ONCE(tx->stopping))
+        return -ESHUTDOWN;
     /* The packetizer is owned by tbt_fec_tx_work; a flush from the stream
      * close path only raises a flag, so two CPUs never touch tx->pkt. */
     WRITE_ONCE(tx->flush_req, true);
-    mod_delayed_work(system_wq, &sess->w_fec_tx, 0);
+    tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+    return 0;
 }
 
 /* ------------------------------------------------------------------ *
@@ -719,6 +806,10 @@ int tbt_fec_record_len(const u8 *buf, size_t have, size_t *need)
     if (len > TBT_FEC_PAYLOAD_MAX)
         return TBT_REC_PROTO;
     *need = TBT_FEC_HDR_LEN + len;
+    /* Defence in depth: the parser buffer must hold the whole record, or it
+     * would fill up and never complete (p->have == sizeof(p->buf)). */
+    if (*need > TBT_PARSER_BUF)
+        return TBT_REC_PROTO;
     return have < *need ? TBT_REC_NEED_MORE : TBT_REC_OK;
 }
 
@@ -727,6 +818,12 @@ static void tbt_fec_blk_reset(struct tbt_fec_blk *b, u64 block_id)
     b->used = true;
     b->ready = false;
     b->nreal = 0;
+    b->ndata = 0;
+    b->nparity = 0;
+    b->count_real = 0xffff;
+    b->decoding = false;
+    b->empty = false;
+    b->win_len_set = false;
     b->short_len = 0;
     b->short_unknown = false;
     b->block_id = block_id;
@@ -743,7 +840,13 @@ static void tbt_fec_blk_reset(struct tbt_fec_blk *b, u64 block_id)
 static u16 tbt_fec_blk_real_len(const struct tbt_fec_rx *rx, u16 group,
                                 const struct tbt_fec_blk *b)
 {
-    u16 len = b->nreal ? b->nreal : rx->n;
+    u16 len;
+
+    /* A marker says the group has no packet in this block; nothing in it is
+     * ever delivered, whatever the stream-length fallback would say. */
+    if (b->empty)
+        return 0;
+    len = b->nreal ? b->nreal : rx->n;
 
     /* A block that was closed early has fewer real shares than n, and its
      * parity says so. The stream-length formula below describes the standard
@@ -766,41 +869,47 @@ static u16 tbt_fec_blk_real_len(const struct tbt_fec_rx *rx, u16 group,
     return len;
 }
 
-/* Decode one block in place. Padding positions (index >= the real length) are
- * known zeros: the sender encoded them that way, and they are never delivered.
- * Returns 0 when every real share is present, -EAGAIN otherwise. */
+/* Lazy recount: ndata is the number of present shares in [0, real). It only
+ * changes when the block's real length changes (the first PARITY, or a FIN
+ * that names the stream end), so the O(n) scan runs on those edges only. */
+static void tbt_fec_blk_counts(const struct tbt_fec_rx *rx, u16 group,
+                               struct tbt_fec_blk *b)
+{
+    u16 real = tbt_fec_blk_real_len(rx, group, b);
+    u16 i, nd = 0;
+
+    if (b->count_real == real)
+        return;
+    for (i = 0; i < real; i++)
+        nd = (u16)(nd + (b->dpresent[i] ? 1 : 0));
+    b->ndata = nd;
+    b->count_real = real;
+}
+
+/* Decode one claimed block outside rx->lock. Present slots point into
+ * b->data; missing slots point into rx->rec; padding points at rx->zero. The
+ * codec only writes the missing slots, so an arrived share is never
+ * overwritten. Returns 0 when ready, -EAGAIN when more shares are needed.
+ *
+ * The caller has snapshotted dpresent/ppresent and set b->decoding, so no
+ * carrier can place another share into this block while the codec runs. */
 static int tbt_fec_blk_decode(struct tbt_session *sess, u16 group,
                               struct tbt_fec_blk *b)
 {
     struct tbt_fec_rx *rx = sess->fec_rx;
     struct tbt_fec_rlnc *ctx = tbt_fec_grouped_ctx(rx->codec, group);
-    u16 len, missing = 0, have_parity = 0, i;
+    u16 real, i, k, missing = 0, have_parity = 0;
     int rc;
 
-    len = tbt_fec_blk_real_len(rx, group, b);
-    if (!len)
-        return -EAGAIN; /* this group has no packet in this block */
-    for (i = len; i < rx->n; i++)
-    {
-        if (!b->dpresent[i] || b->dlen[i])
-        {
-            memset(b->data + (size_t)i * rx->s, 0, rx->s);
-            b->dpresent[i] = 1;
-            b->dlen[i] = 0;
-        }
-    }
+    real = tbt_fec_blk_real_len(rx, group, b);
+    if (!real)
+        return 0; /* this group has no packet in this block */
     for (i = 0; i < rx->n; i++)
-    {
-        rx->data_ptrs[i] = b->data + (size_t)i * rx->s;
-        if (!b->dpresent[i])
+        if (!rx->dpresent_snap[i])
             missing++;
-    }
     for (i = 0; i < rx->m; i++)
-    {
-        rx->parity_ptrs[i] = b->parity + (size_t)i * rx->s;
-        if (b->ppresent[i])
+        if (rx->ppresent_snap[i])
             have_parity++;
-    }
     if (!missing)
         return 0;
     if (!ctx || have_parity < missing)
@@ -812,11 +921,11 @@ static int tbt_fec_blk_decode(struct tbt_session *sess, u16 group,
      * and the guess would hand the application the block's zero padding.
      * Refuse it instead: the sender's stall timer is the bound, and the counter
      * says why the stream stopped. */
-    if (missing && !b->short_len)
+    if (!b->short_len)
     {
-        for (i = 0; i < len; i++)
+        for (i = 0; i < real; i++)
         {
-            if (b->dpresent[i] && b->dlen[i] && b->dlen[i] < rx->s)
+            if (rx->dpresent_snap[i] && b->dlen[i] && b->dlen[i] < rx->s)
             {
                 if (!b->short_unknown)
                 {
@@ -827,10 +936,25 @@ static int tbt_fec_blk_decode(struct tbt_session *sess, u16 group,
             }
         }
     }
+    for (i = 0, k = 0; i < real; i++)
+        rx->data_ptrs[i] = rx->dpresent_snap[i] ?
+            b->data + (size_t)i * rx->s :
+            rx->rec + (size_t)(k++) * rx->s;
+    for (i = real; i < rx->n; i++)
+        rx->data_ptrs[i] = rx->zero; /* padding is known zero */
+    for (i = 0; i < rx->m; i++)
+        rx->parity_ptrs[i] = rx->ppresent_snap[i] ?
+            b->parity + (size_t)i * rx->s : rx->zero;
+
     tbt_fec_rlnc_set_nonce(ctx, tbt_fec_group_nonce(tbt_fec_base_nonce(sess),
                                                     group, b->block_id));
-    rc = tbt_fec_rlnc_decode(ctx, rx->data_ptrs, rx->parity_ptrs, b->dpresent,
-                             b->ppresent, rx->n);
+    atomic64_inc(&sess->fec_decode_blocks);
+    rc = tbt_fec_rlnc_decode(ctx, rx->data_ptrs, rx->parity_ptrs,
+                             rx->dpresent_snap, rx->ppresent_snap, rx->n);
+    if (rc == TBT_FEC_RLNC_ERR_NOMEM)
+        atomic64_inc(&sess->fec_decode_nomem);
+    if (rc > 0)
+        atomic64_add(rc, &sess->fec_decode_recovered);
     return rc < 0 ? -EAGAIN : 0;
 }
 
@@ -873,9 +997,64 @@ static struct tbt_fec_blk *tbt_fec_rx_blk(struct tbt_fec_rx *rx, u16 group,
     return &rx->blk[(size_t)group * rx->slots + (block_id % rx->slots)];
 }
 
+/* The stream this receiver delivers for. A bound stream sticks: a new OPEN in
+ * the same session must not steal the previous stream's tail block, so the
+ * lookup returns rx->stream_sid whenever that stream still exists. */
+static struct tbt_stream *tbt_fec_rx_stream(struct tbt_session *sess,
+                                            bool *is_new)
+{
+    struct tbt_fec_rx *rx = sess->fec_rx;
+    struct tbt_stream *st;
+    u64 far = READ_ONCE(sess->far_sid);
+
+    /* A new stream is already named by the session. Keep the old one only
+     * while its final super-block is still undelivered; otherwise the new
+     * stream's bytes would wait behind a stream object that has nothing left
+     * to deliver (the second connection of an HTTP keep-alive or iperf3
+     * control+data pair). */
+    if (rx->stream_sid && far && far != rx->stream_sid)
+    {
+        bool drained = true;
+
+        if (READ_ONCE(rx->total_known) && READ_ONCE(rx->total_pkts))
+        {
+            u64 final = tbt_fec_final_block_of_total(
+                READ_ONCE(rx->total_pkts), rx->groups, rx->n);
+
+            drained = rx->next_super > final;
+        }
+        if (!drained)
+        {
+            st = tbt_stream_get(sess, rx->stream_sid, false, false);
+            if (st)
+                return st;
+        }
+        st = tbt_stream_get(sess, far, false, false);
+        if (st)
+        {
+            *is_new = true;
+            return st;
+        }
+    }
+
+    if (rx->stream_sid)
+    {
+        st = tbt_stream_get(sess, rx->stream_sid, false, false);
+        if (st)
+            return st;
+    }
+    st = tbt_fec_stream(sess);
+    if (st && st->sid != rx->stream_sid)
+        *is_new = true;
+    return st;
+}
+
 /* Every group must have decoded block s before any byte of it is delivered.
- * In the final super-block a group with no packet is complete by definition. */
-static bool tbt_fec_super_ready(const struct tbt_fec_rx *rx, u64 s)
+ * In the final super-block a group with no packet is complete by definition.
+ * The caller holds rx->lock: block slots are reset by a carrier as soon as
+ * the window advances, and reading used/ready/block_id without the lock races
+ * that reset. */
+static bool tbt_fec_super_ready_locked(const struct tbt_fec_rx *rx, u64 s)
 {
     u16 group;
 
@@ -900,99 +1079,135 @@ static bool tbt_fec_super_ready(const struct tbt_fec_rx *rx, u64 s)
     return true;
 }
 
-static void tbt_fec_deliver_ready(struct tbt_session *sess)
+/* Deliver every ready super-block, in order, from the exact cursor the last
+ * attempt stopped at. Only w_fec_rx calls this, so it is the only writer of
+ * next_super / deliver_bytes / next_deliver / ack_deliver.
+ *
+ * -ENOMEM is a per-packet stop, not a lost packet: the successful prefix is
+ * committed, (deliver_p, deliver_g) names the first packet that failed, and
+ * next_super / next_deliver / ack_deliver do not move. The work item retries
+ * in 2 ms and resumes from the cursor; no byte is skipped and no ACK runs
+ * past a byte the application never received. */
+static int tbt_fec_deliver_ready(struct tbt_session *sess)
 {
     struct tbt_fec_rx *rx = sess->fec_rx;
     struct tbt_stream *st;
     bool delivered = false;
+    bool is_new = false;
 
-    if (rx->total_known && !rx->total_pkts)
-        return;
+    if (READ_ONCE(rx->total_known) && !READ_ONCE(rx->total_pkts) &&
+        !rx->deliver_partial)
+        return 0;
 
-    st = tbt_fec_stream(sess);
+    st = tbt_fec_rx_stream(sess, &is_new);
     if (!st)
-        return;
+        return 0;
     /* A new connection in the same session: the session's packet and byte
-     * counters keep running, but the stream starts at byte 0 and its own LAST
-     * will name its own end. Without this the second stream of a session (the
-     * data connection after iperf3's control connection) was delivered at the
-     * first stream's offsets and never reached the application. */
-    if (rx->stream_sid != st->sid)
+     * counters keep running, but the stream starts at byte 0 and its own FIN
+     * names its own end. A FIN that arrived before this adoption was parked
+     * in next_fin_*; consume it now, while the stream identity is settled. */
+    if (is_new)
     {
-        rx->stream_sid = st->sid;
-        rx->stream_base = rx->deliver_bytes;
-        rx->total_known = false;
-        rx->total_pkts = 0;
-        rx->total_bytes = 0;
+        spin_lock_bh(&rx->lock);
+        if (rx->stream_sid != st->sid)
+        {
+            rx->stream_sid = st->sid;
+            rx->stream_base = rx->deliver_bytes;
+            rx->stream_pkt_base = 0;
+            rx->total_known = false;
+            rx->total_pkts = 0;
+            rx->total_bytes = 0;
+            rx->deliver_partial = false;
+            rx->deliver_p = 0;
+            rx->deliver_g = 0;
+            if (rx->next_fin_valid && rx->next_fin_sid == st->sid)
+            {
+                rx->stream_pkt_base = rx->next_fin_base;
+                rx->total_pkts = rx->next_fin_end;
+                rx->total_bytes = rx->next_fin_bytes;
+                rx->total_known = true;
+                rx->next_fin_valid = false;
+            }
+        }
+        spin_unlock_bh(&rx->lock);
     }
     for (;;)
     {
         u64 s = rx->next_super;
         u64 base = s * (u64)rx->groups * rx->n;
         u64 off = rx->deliver_bytes;
-        u16 p, group;
+        u16 p, group, start_p, start_g;
+        bool ready;
+        bool known = READ_ONCE(rx->total_known);
+        u64 total_pkts = READ_ONCE(rx->total_pkts);
 
-        if (rx->total_known)
+        /* Teardown: stop handing bytes to a stream that is being destroyed.
+         * The ACK below still covers what was delivered before the flag. */
+        if (READ_ONCE(rx->stopping))
+            break;
+        if (known)
         {
-            u64 final = tbt_fec_final_block_of_total(rx->total_pkts,
+            u64 final = tbt_fec_final_block_of_total(total_pkts,
                                                      rx->groups, rx->n);
 
             if (s > final)
                 break;
         }
-        if (!tbt_fec_super_ready(rx, s))
+        spin_lock_bh(&rx->lock);
+        ready = tbt_fec_super_ready_locked(rx, s);
+        if (!ready && debug)
         {
-            if (debug)
-            {
-                /* Name the group whose block holds the whole stream: without
-                 * it the frontier cannot move and the sender's credit is never
-                 * renewed. */
-                for (group = 0; group < rx->groups; group++)
-                {
-                    struct tbt_fec_blk *sb = tbt_fec_rx_blk(rx, group, s);
-                    u16 k, have = 0;
-
-                    if (sb->used && sb->ready && sb->block_id == s)
-                        continue;
-                    for (k = 0; k < rx->n; k++)
-                        have = (u16)(have + (sb->dpresent[k] ? 1 : 0));
-                    pr_info_ratelimited("tbtun: fec super %llu stuck: group %u/%u used=%d ready=%d id=%llu nreal=%u shares=%u/%u parity=%u\n",
-                                        s, group, rx->groups, sb->used, sb->ready,
-                                        sb->block_id, sb->nreal, have, rx->n,
-                                        (unsigned)rx->m);
-                    break;
-                }
-            }
-            break;
-        }
-        for (p = 0; p < rx->n; p++)
-        {
+            /* Name the group whose block holds the whole stream: without it
+             * the frontier cannot move and the sender's credit is never
+             * renewed. */
             for (group = 0; group < rx->groups; group++)
+            {
+                struct tbt_fec_blk *sb = tbt_fec_rx_blk(rx, group, s);
+                u16 k, have = 0;
+
+                if (sb->used && sb->ready && sb->block_id == s)
+                    continue;
+                for (k = 0; k < rx->n; k++)
+                    have = (u16)(have + (sb->dpresent[k] ? 1 : 0));
+                pr_info_ratelimited("tbtun: fec super %llu stuck: group %u/%u used=%d ready=%d id=%llu nreal=%u shares=%u/%u parity=%u\n",
+                                    s, group, rx->groups, sb->used, sb->ready,
+                                    sb->block_id, sb->nreal, have, rx->n,
+                                    (unsigned)rx->m);
+                break;
+            }
+        }
+        spin_unlock_bh(&rx->lock);
+        if (!ready)
+            break;
+
+        start_p = rx->deliver_partial ? rx->deliver_p : 0;
+        start_g = rx->deliver_partial ? rx->deliver_g : 0;
+        for (p = start_p; p < rx->n; p++)
+        {
+            for (group = start_g; group < rx->groups; group++)
             {
                 struct tbt_fec_blk *b;
                 u64 seq = base + (u64)p * rx->groups + group;
-                u16 len;
+                u16 len, real;
+                int err;
 
-                if (rx->total_known && seq >= rx->total_pkts)
+                if (known && seq >= total_pkts)
                     continue;
                 b = tbt_fec_rx_blk(rx, group, s);
                 /* A block that was closed early has fewer real shares than n;
                  * the rest are the encoder's zero padding and carry no stream
-                 * bytes. */
-                {
-                    u16 real = tbt_fec_blk_real_len(rx, group, b);
-
-                    if (p >= real)
-                        continue;
-                    if (b->dlen[p])
-                        len = b->dlen[p];
-                    else if (b->short_len && p + 1 == real)
-                        len = b->short_len;
-                    else
-                        len = rx->s;
-                }
-                if (rx->total_known && rx->total_bytes &&
-                    seq + 1 == rx->total_pkts)
+                 * bytes. A marker block has no real share at all. */
+                real = tbt_fec_blk_real_len(rx, group, b);
+                if (p >= real)
+                    continue;
+                if (b->dlen[p])
+                    len = b->dlen[p];
+                else if (b->short_len && p + 1 == real)
+                    len = b->short_len;
+                else
+                    len = rx->s;
+                if (known && rx->total_bytes &&
+                    seq + 1 == total_pkts)
                 {
                     u64 done = off - rx->stream_base;
                     u64 tail = rx->total_bytes - done;
@@ -1005,17 +1220,41 @@ static void tbt_fec_deliver_ready(struct tbt_session *sess)
                  * one slot would read past this block's buffer. */
                 if (len > rx->s)
                     len = rx->s;
-                tbt_rx_fec_deliver(st, off - rx->stream_base,
-                                   b->data + (size_t)p * rx->s, len);
+                err = tbt_rx_fec_deliver(st, off - rx->stream_base,
+                                         b->data + (size_t)p * rx->s, len);
+                if (err == -ENOMEM)
+                {
+                    /* Commit only the successful prefix and keep the cursor.
+                     * next_super, next_deliver and ack_deliver stay put. */
+                    spin_lock_bh(&rx->lock);
+                    rx->deliver_bytes = off;
+                    rx->deliver_p = p;
+                    rx->deliver_g = group;
+                    rx->deliver_partial = true;
+                    spin_unlock_bh(&rx->lock);
+                    atomic64_inc(&sess->fec_deliver_nomem);
+                    tbt_session_arm(sess, TBT_SW_FEC_RX,
+                                    msecs_to_jiffies(2));
+                    tbt_stream_put(st);
+                    return -ENOMEM;
+                }
+                if (err == -EPROTO)
+                    atomic64_inc(&sess->fec_deliver_bad);
                 off += len;
+                spin_lock_bh(&rx->lock);
+                rx->deliver_bytes = off; /* per-packet commit */
+                spin_unlock_bh(&rx->lock);
                 delivered = true;
             }
+            start_g = 0;
         }
+        rx->deliver_partial = false;
+        rx->deliver_p = 0;
+        rx->deliver_g = 0;
         rx->next_super++;
-        rx->deliver_bytes = off;
         rx->next_deliver = (s + 1) * (u64)rx->groups * rx->n;
-        if (rx->total_known && rx->next_deliver > rx->total_pkts)
-            rx->next_deliver = rx->total_pkts;
+        if (known && rx->next_deliver > total_pkts)
+            rx->next_deliver = total_pkts;
     }
     if (delivered && rx->next_deliver > rx->ack_deliver)
     {
@@ -1023,30 +1262,116 @@ static void tbt_fec_deliver_ready(struct tbt_session *sess)
         tbt_fec_ack(sess, rx->next_deliver);
     }
     tbt_stream_put(st);
+    return 0;
 }
 
-/* Re-run decode over every pending block. Called when the stream's total
- * length becomes known (LAST or FIN) or when the tail length of an existing
- * block changes; the walk is bounded by groups * slots and runs once per
- * stream end, not per record. */
-static void tbt_fec_rx_retry_all(struct tbt_session *sess)
+/* Claim one block under rx->lock, decode it outside, commit under the lock.
+ * The snapshot is what the codec sees; a share that arrives during the decode
+ * is placed into b->data as usual, and the commit only writes slots that are
+ * still missing. */
+static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
+                                  u16 slot)
 {
     struct tbt_fec_rx *rx = sess->fec_rx;
-    u16 group, i;
+    struct tbt_fec_blk *b = &rx->blk[(size_t)group * rx->slots + slot];
+    u16 real = 0, i, k;
+    bool claimed = false;
+    int rc;
 
-    for (group = 0; group < rx->groups; group++)
+    spin_lock_bh(&rx->lock);
+    if (b->used && !b->ready && !b->decoding)
     {
-        for (i = 0; i < rx->slots; i++)
+        real = tbt_fec_blk_real_len(rx, group, b);
+        tbt_fec_blk_counts(rx, group, b);
+        if (b->empty || b->ndata >= real)
         {
-            struct tbt_fec_blk *b = &rx->blk[(size_t)group * rx->slots + i];
-
-            if (!b->used || b->ready)
-                continue;
-            if (tbt_fec_blk_decode(sess, group, b) == 0)
-                b->ready = true;
+            b->ready = true; /* complete without the codec */
+        }
+        else if (b->nparity >= (u16)(real - b->ndata))
+        {
+            memcpy(rx->dpresent_snap, b->dpresent, rx->n);
+            memcpy(rx->ppresent_snap, b->ppresent, rx->m);
+            for (i = real; i < rx->n; i++)
+                rx->dpresent_snap[i] = 1; /* padding is known zero */
+            b->decoding = true;
+            claimed = true;
         }
     }
-    tbt_fec_deliver_ready(sess);
+    spin_unlock_bh(&rx->lock);
+    if (!claimed)
+        return false;
+
+    rc = tbt_fec_blk_decode(sess, group, b);
+    spin_lock_bh(&rx->lock);
+    if (rc == 0)
+    {
+        for (i = 0, k = 0; i < real; i++)
+        {
+            if (rx->dpresent_snap[i])
+                continue;
+            if (!b->dpresent[i])
+            {
+                memcpy(b->data + (size_t)i * rx->s,
+                       rx->rec + (size_t)k * rx->s, rx->s);
+                b->dpresent[i] = 1;
+                b->dlen[i] = 0; /* a recovered share has no own length */
+                b->ndata++;
+            }
+            k++;
+        }
+        b->ready = true;
+    }
+    b->decoding = false;
+    spin_unlock_bh(&rx->lock);
+    return rc == 0;
+}
+
+/* One pass over groups*slots. Called only by w_fec_rx. */
+static void tbt_fec_rx_pass(struct tbt_session *sess)
+{
+    struct tbt_fec_rx *rx = sess->fec_rx;
+    u16 group, slot;
+
+    for (group = 0; group < rx->groups; group++)
+        for (slot = 0; slot < rx->slots; slot++)
+            (void)tbt_fec_rx_decode_one(sess, group, slot);
+}
+
+static void tbt_fec_rx_work_body(struct tbt_session *sess)
+{
+    struct tbt_fec_rx *rx = sess->fec_rx;
+    bool again;
+    int rounds = 0;
+
+    if (!rx || READ_ONCE(sess->closing) || READ_ONCE(rx->stopping))
+        return;
+    do
+    {
+        again = false;
+        tbt_fec_rx_pass(sess);
+        if (tbt_fec_deliver_ready(sess) == -ENOMEM)
+            return; /* the 2 ms retry is already armed */
+        spin_lock_bh(&rx->lock);
+        if (rx->work_pending)
+        {
+            rx->work_pending = false;
+            again = true;
+        }
+        spin_unlock_bh(&rx->lock);
+    } while (again && ++rounds < 4);
+    if (again)
+        tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
+}
+
+void tbt_fec_rx_work(struct work_struct *w)
+{
+    struct tbt_session *sess =
+        container_of(to_delayed_work(w), struct tbt_session, w_fec_rx);
+    bool owned = test_and_clear_bit(TBT_SW_FEC_RX, &sess->sched);
+
+    tbt_fec_rx_work_body(sess);
+    if (owned)
+        tbt_session_put(sess);
 }
 
 int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
@@ -1057,7 +1382,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
     struct tbt_fec_blk *b;
     const u8 *payload;
     u16 shares, group, share, slot;
-    bool new_total = false;
+    bool wake = false;
 
     if (!rx || len < TBT_FEC_HDR_LEN)
         return -EPROTO;
@@ -1112,23 +1437,32 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
     {
         struct tbt_fec_ack a;
         struct tbt_stream *st;
+        struct tbt_fec_tx *tx;
 
         if (tbt_fec_ack_unpack(rec + TBT_FEC_HDR_LEN, &a))
             return 0;
         atomic64_inc(&sess->fec_ack_rx);
+        tx = sess->fec_tx;
         st = tbt_fec_stream(sess);
-        if (st)
+        if (st && tx)
         {
-            /* The ACK names a packet frontier; the packetizer now emits
-             * shares shorter than S, so the byte offset this computes is an
-             * over-estimate. It never under-acks, so nothing that waits on
-             * tx_ack stalls: the FEC plane has no replay to trim (FBK/SACK and
-             * the retransmit ring are off for fec), and the FIN gate is
-             * already covered by tbt_fec_tx_idle(). */
-            u64 acked = a.next_deliver * TBT_FEC_S;
+            /* A peer-controlled u64 must never become a byte count by a bare
+             * multiply: next_deliver * S wraps, and a frontier past tx->seq
+             * would acknowledge bytes this side never sent. Clamp the packet
+             * frontier first, then convert it stream-relative with the same
+             * saturation tbt_fec_ack_bytes() applies. */
+            u64 sent = READ_ONCE(tx->seq);
+            u64 base, acked;
 
-            if (acked > READ_ONCE(st->tx_seq))
-                acked = READ_ONCE(st->tx_seq);
+            if (a.next_deliver > sent)
+            {
+                a.next_deliver = sent;
+                atomic64_inc(&sess->fec_ack_bad);
+            }
+            base = smp_load_acquire(&st->fec_pkt_base_set) ?
+                   READ_ONCE(st->fec_pkt_base) : 0;
+            acked = tbt_fec_ack_bytes(a.next_deliver, base,
+                                      READ_ONCE(st->tx_seq));
             spin_lock(&sess->lock);
             if (acked > READ_ONCE(st->tx_ack))
             {
@@ -1146,7 +1480,6 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
              * A stale ACK that moved it back would shrink the sender's
              * window and stall it until the next ACK caught up. */
             {
-                struct tbt_fec_tx *tx = sess->fec_tx;
                 u64 cur = READ_ONCE(tx->peer_pkts);
 
                 /* Carriers process records concurrently, so two ACKs can
@@ -1160,13 +1493,22 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                     cur = prev;
                 }
             }
-            if (a.credit_packets)
-                WRITE_ONCE(sess->fec_tx->credit, a.credit_packets);
-            schedule_work(&sess->w_fec_tx.work);
-            tbt_stream_put(st);
+            /* Zero credit is not "unlimited": it would stop the packetizer
+             * forever if it replaced a real window, and accepting it as a
+             * grant would overrun the receiver's arena. Ignore it and keep
+             * the last good credit. A peer cannot widen the window past what
+             * the receiver can buffer. */
+            if (!a.credit_packets)
+                atomic64_inc(&sess->fec_ack_bad);
+            else
+                WRITE_ONCE(tx->credit,
+                           min_t(u32, a.credit_packets, TBT_FEC_CREDIT_MAX));
+            tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
             /* The FIN pump holds the close until tx_ack covers tx_seq. */
             tbt_tx_wake(sess);
         }
+        if (st)
+            tbt_stream_put(st);
         return 0;
     }
     if (h.type != TBT_FEC_DATA && h.type != TBT_FEC_PARITY)
@@ -1189,98 +1531,236 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         return -EPROTO;
     if (h.block_id != (h.seq / rx->groups) / rx->n)
         return -EPROTO;
-    if (h.type == TBT_FEC_PARITY &&
-        (!h.win_len || h.win_len > rx->n))
-        return -EPROTO;
 
     payload = rec + TBT_FEC_HDR_LEN;
     spin_lock_bh(&rx->lock);
-    if (h.block_id < rx->next_super ||
-        h.block_id >= rx->next_super + rx->slots)
+    if (READ_ONCE(rx->stopping))
     {
-        if (h.block_id >= rx->next_super + rx->slots)
-            atomic64_inc(&sess->fec_drop_window);
         spin_unlock_bh(&rx->lock);
-        return 0; /* already delivered, or too far ahead to buffer */
+        return -ESHUTDOWN;
+    }
+    if (h.block_id < rx->next_super)
+    {
+        atomic64_inc(&sess->fec_late_share);
+        spin_unlock_bh(&rx->lock);
+        return 0; /* already delivered */
+    }
+    if (h.block_id >= rx->next_super + rx->slots)
+    {
+        atomic64_inc(&sess->fec_drop_window);
+        spin_unlock_bh(&rx->lock);
+        return 0; /* too far ahead to buffer */
     }
     slot = (u16)((size_t)group * rx->slots + (h.block_id % rx->slots));
     b = &rx->blk[slot];
     if (!b->used || b->block_id != h.block_id)
         tbt_fec_blk_reset(b, h.block_id);
+    if (b->empty)
+    {
+        /* A marker fixed this block as empty. Any later DATA or PARITY for it
+         * means the sender mixed two block shapes; the block is immutable. */
+        spin_unlock_bh(&rx->lock);
+        return -EPROTO;
+    }
+    /* A marker that arrives after any real share is a mixed-source error even
+     * when the block is already complete; the ready check below would
+     * otherwise file it as a harmless late share. */
+    if (h.type == TBT_FEC_PARITY && h.win_len == 0 &&
+        (b->ndata || b->nparity || b->win_len_set || b->count_real != 0xffff))
+    {
+        spin_unlock_bh(&rx->lock);
+        return -EPROTO;
+    }
+    if (b->ready)
+    {
+        /* The block is immutable once ready: a duplicate or late share must
+         * not change a byte that may already be on its way to the stream. */
+        atomic64_inc(&sess->fec_late_share);
+        spin_unlock_bh(&rx->lock);
+        return 0;
+    }
 
     if (h.type == TBT_FEC_DATA)
     {
-        memcpy(b->data + (size_t)share * rx->s, payload, h.payload_len);
-        /* The sender zero-pads a short share before encoding parity. The
-         * decoder XORs the whole S-byte slot into the right-hand side, so the
-         * receiver must zero the same tail; otherwise stale bytes from the
-         * slot's previous block corrupt every share recovered from this one.
-         * The tail is never delivered: dlen names the real payload. */
-        if (h.payload_len < rx->s)
-            memset(b->data + (size_t)share * rx->s + h.payload_len, 0,
-                   rx->s - h.payload_len);
-        b->dlen[share] = h.payload_len;
-        b->dpresent[share] = 1;
-        if (h.epoch)
-            b->short_len = h.epoch;
-        if (h.flags & TBT_FEC_FF_LAST)
+        if (b->dpresent[share])
         {
-            if (!rx->total_known)
+            atomic64_inc(&sess->fec_dup_share);
+        }
+        else
+        {
+            memcpy(b->data + (size_t)share * rx->s, payload, h.payload_len);
+            /* The sender zero-pads a short share before encoding parity. The
+             * decoder XORs the whole S-byte slot into the right-hand side, so
+             * the receiver must zero the same tail; otherwise stale bytes
+             * from the slot's previous block corrupt every share recovered
+             * from this one. The tail is never delivered: dlen names the real
+             * payload. */
+            if (h.payload_len < rx->s)
+                memset(b->data + (size_t)share * rx->s + h.payload_len, 0,
+                       rx->s - h.payload_len);
+            b->dlen[share] = h.payload_len;
+            b->dpresent[share] = 1;
+            /* ndata is a cached count; a new present share inside the real
+             * range advances it without rescanning the block. A share outside
+             * the cached real length is padding for a shape the block no
+             * longer has, and the next counts pass will drop it. */
+            if (share < b->count_real)
+                b->ndata++;
+            if (h.flags & TBT_FEC_FF_LAST)
             {
-                rx->total_pkts = h.seq + 1;
-                rx->total_known = true;
-                new_total = true;
+                if (!rx->total_known)
+                {
+                    rx->total_pkts = h.seq + 1;
+                    rx->total_known = true;
+                }
             }
         }
+    }
+    else if (h.win_len == 0)
+    {
+        /* Empty-block marker. It fixes the block as having no real share, so
+         * a later DATA or PARITY for it is a mixed-source protocol error. */
+        if (b->ndata || b->nparity || b->win_len_set ||
+            b->count_real != 0xffff)
+        {
+            spin_unlock_bh(&rx->lock);
+            return -EPROTO;
+        }
+        b->empty = true;
+        b->win_len_set = true;
+        b->ready = true;
+        atomic64_inc(&sess->fec_pad_share);
+        rx->work_pending = true;
     }
     else
     {
         u16 idx = (u16)(h.share_index - rx->n);
 
-        memcpy(b->parity + (size_t)idx * rx->s, payload, h.payload_len);
-        b->ppresent[idx] = 1;
-        if (h.epoch)
-            b->short_len = h.epoch;
-        if (h.win_len < rx->n &&
-            (!b->nreal || h.win_len < b->nreal))
+        if (b->ppresent[idx])
+        {
+            atomic64_inc(&sess->fec_dup_share);
+        }
+        else
+        {
+            memcpy(b->parity + (size_t)idx * rx->s, payload, h.payload_len);
+            b->ppresent[idx] = 1;
+            b->nparity++;
+        }
+        if (!b->win_len_set)
+        {
+            u16 i;
+
+            /* The first PARITY fixes the block's cut. A DATA share at or past
+             * win_len means the peer used a different block shape for the
+             * same block; recovering it would deliver padding as data. */
+            for (i = h.win_len; i < rx->n; i++)
+            {
+                if (b->dpresent[i])
+                {
+                    atomic64_inc(&sess->fec_epoch_conflict);
+                    spin_unlock_bh(&rx->lock);
+                    return -EPROTO;
+                }
+            }
             b->nreal = h.win_len;
+            b->short_len = h.epoch;
+            b->win_len_set = true;
+        }
+        else if (b->nreal != h.win_len || b->short_len != h.epoch)
+        {
+            atomic64_inc(&sess->fec_epoch_conflict);
+            spin_unlock_bh(&rx->lock);
+            return -EPROTO;
+        }
     }
-    if (new_total)
-        tbt_fec_rx_retry_all(sess);
-    else if (tbt_fec_blk_decode(sess, group, b) == 0)
+    tbt_fec_blk_counts(rx, group, b);
+    if (b->empty || b->ndata >= tbt_fec_blk_real_len(rx, group, b))
     {
         b->ready = true;
-        tbt_fec_deliver_ready(sess);
+        rx->work_pending = true; /* deliver_ready() has a block to hand over */
     }
+    else if (b->nparity >=
+             (u16)(tbt_fec_blk_real_len(rx, group, b) - b->ndata))
+        rx->work_pending = true;
+    wake = rx->work_pending;
     spin_unlock_bh(&rx->lock);
+    if (wake)
+        tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
     return 0;
 }
 
-void tbt_fec_rx_fin(struct tbt_session *sess, u64 total_bytes)
+/* FIN names the stream's absolute packet range: pkt_end is the packet after
+ * its last DATA packet, pkt_base the block-aligned packet of its first one.
+ * The packet count is therefore pkt_end itself, not ceil(bytes / S): a short
+ * share makes the byte count an upper bound on the packet count, and the
+ * second stream's pkt_end must not be compared with the first stream's
+ * next_super base.
+ *
+ * A FIN that arrives before its stream is adopted is parked in next_fin_*;
+ * deliver_ready() consumes it when the stream identity settles. */
+void tbt_fec_rx_fin(struct tbt_session *sess, struct tbt_stream *st,
+                    u64 total_bytes, u64 pkt_end, u64 pkt_base)
 {
     struct tbt_fec_rx *rx = sess->fec_rx;
+    u64 span;
+    bool wake = false;
 
-    if (!rx)
+    if (!rx || !st)
         return;
     spin_lock_bh(&rx->lock);
+    if (READ_ONCE(rx->stopping))
+    {
+        spin_unlock_bh(&rx->lock);
+        return;
+    }
+    span = (u64)rx->groups * rx->n;
+    if (!tbt_fec_fin_valid(pkt_end, pkt_base, span))
+    {
+        atomic64_inc(&sess->fec_fin_bad);
+        spin_unlock_bh(&rx->lock);
+        return;
+    }
+    if (rx->stream_sid && st->sid != rx->stream_sid)
+    {
+        rx->next_fin_sid = st->sid;
+        rx->next_fin_end = pkt_end;
+        rx->next_fin_base = pkt_base;
+        rx->next_fin_bytes = total_bytes;
+        rx->next_fin_valid = true;
+        rx->work_pending = true;
+        wake = true;
+        spin_unlock_bh(&rx->lock);
+        if (wake)
+            tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
+        return;
+    }
+    if (!rx->stream_sid)
+    {
+        rx->stream_sid = st->sid;
+        rx->stream_base = rx->deliver_bytes;
+        rx->stream_pkt_base = pkt_base;
+    }
     if (!rx->total_known)
     {
-        /* LAST was lost: the byte count is the only statement of the stream's
-         * end. The packet count derived from it is an upper bound now that a
-         * share may be shorter than S, which is why LAST is the primary source
-         * (the packetizer writes it before the FIN, so this branch is the
-         * damaged case). */
+        /* LAST was lost: the FIN's absolute end is the only statement of the
+         * stream's extent. total_bytes is kept for the last-packet length
+         * correction, not for deriving the packet count. */
         rx->total_bytes = total_bytes;
-        rx->total_pkts = total_bytes ?
-            (total_bytes + rx->s - 1) / rx->s : 0;
+        rx->total_pkts = pkt_end;
         rx->total_known = true;
-        tbt_fec_rx_retry_all(sess);
     }
-    else if (!rx->total_bytes)
+    else
     {
-        rx->total_bytes = total_bytes;
+        if (pkt_end != rx->total_pkts)
+            atomic64_inc(&sess->fec_fin_bad); /* keep LAST's value */
+        if (!rx->total_bytes)
+            rx->total_bytes = total_bytes;
     }
+    rx->work_pending = true;
+    wake = true;
     spin_unlock_bh(&rx->lock);
+    if (wake)
+        tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
 }
 
 /* ------------------------------------------------------------------ *
@@ -1297,6 +1777,8 @@ static void tbt_fec_rx_free(struct tbt_session *sess)
     if (!rx->blk)
     {
         tbt_fec_grouped_free(rx->codec);
+        kvfree(rx->rec);
+        kvfree(rx->zero);
         kvfree(rx);
         sess->fec_rx = NULL;
         return;
@@ -1311,6 +1793,8 @@ static void tbt_fec_rx_free(struct tbt_session *sess)
         kvfree(rx->blk[i].dlen);
     }
     kvfree(rx->blk);
+    kvfree(rx->rec);
+    kvfree(rx->zero);
     tbt_fec_grouped_free(rx->codec);
     kvfree(rx);
     sess->fec_rx = NULL;
@@ -1319,8 +1803,20 @@ static void tbt_fec_rx_free(struct tbt_session *sess)
 void tbt_fec_data_free(struct tbt_session *sess)
 {
     struct tbt_fec_tx *tx = sess->fec_tx;
+    struct tbt_fec_out *o, *tmp;
     u16 i;
 
+    /* The work items are cancelled before this point, but records already
+     * queued for a carrier are not owned by them. Drain the queue here or
+     * every teardown with a stalled carrier leaks its pending shares. The
+     * list and lock exist only after a successful init (sess->fec). */
+    if (sess->fec)
+    {
+        spin_lock(&sess->fec_out_lock);
+        list_for_each_entry_safe(o, tmp, &sess->fec_out, node)
+            tbt_fec_out_free(o);
+        spin_unlock(&sess->fec_out_lock);
+    }
     if (tx)
     {
         if (tx->g)
@@ -1349,6 +1845,16 @@ int tbt_fec_data_init(struct tbt_session *sess)
     struct tbt_fec_tx *tx;
     u16 n = t->cfg.n, m = t->cfg.m, shares, groups, w, d;
     u32 per, slots, total, i;
+
+    /* Every record the parsers accept must fit the buffer that assembles it.
+     * Without these, raising TBT_FEC_PAYLOAD_MAX would make a full record
+     * impossible to complete and the parser would stick at p->have ==
+     * sizeof(p->buf) with no error path. */
+    BUILD_BUG_ON(TBT_PARSER_BUF < TBT_FEC_REC_MAX);
+    BUILD_BUG_ON(TBT_FEC_REC_MAX != TBT_FEC_HDR_LEN + TBT_FEC_PAYLOAD_MAX);
+    BUILD_BUG_ON(TBT_PARSER_BUF < TBT_REC_MAX);
+    BUILD_BUG_ON(TBT_CAR_PART_MAX < TBT_FEC_REC_MAX);
+    BUILD_BUG_ON(sizeof(((struct tbt_http_rx *)0)->rec) != TBT_FEC_REC_MAX);
 
     if (!n || !m || (u16)n + (u16)m > TBT_FEC_MAX_SHARES)
     {
@@ -1424,6 +1930,10 @@ int tbt_fec_data_init(struct tbt_session *sess)
     rx->groups = groups;
     rx->slots = (u16)slots;
     rx->blk = kvzalloc((size_t)total * sizeof(*rx->blk), GFP_KERNEL);
+    /* Decode scratch: one recovered slot per parity row, and one zero slot
+     * for padding and absent parity. Both are written outside rx->lock. */
+    rx->rec = kvzalloc((size_t)m * TBT_FEC_S, GFP_KERNEL);
+    rx->zero = kvzalloc(TBT_FEC_S, GFP_KERNEL);
     TBT_DIAG("fec grouped rx codec start tunnel=%llu groups=%u n=%u m=%u w=%u d=%u",
              (unsigned long long)t->cfg.id, groups, n, m, w, d);
     rx->codec = tbt_fec_grouped_new(groups, n, m, n, w, TBT_FEC_S, d,
@@ -1431,11 +1941,11 @@ int tbt_fec_data_init(struct tbt_session *sess)
     TBT_DIAG("fec grouped rx codec %s tunnel=%llu groups=%u blk=%d",
              rx->codec ? "ok" : "FAILED", (unsigned long long)t->cfg.id,
              groups, !!rx->blk);
-    if (!rx->blk || !rx->codec)
+    if (!rx->blk || !rx->codec || !rx->rec || !rx->zero)
     {
-        pr_warn_ratelimited("tbtun: tunnel %llu: fec rx arena/codec failed: blk=%d codec=%d\n",
+        pr_warn_ratelimited("tbtun: tunnel %llu: fec rx arena/codec failed: blk=%d codec=%d rec=%d zero=%d\n",
                             (unsigned long long)t->cfg.id, !!rx->blk,
-                            !!rx->codec);
+                            !!rx->codec, !!rx->rec, !!rx->zero);
         goto fail;
     }
 
@@ -1474,6 +1984,10 @@ int tbt_fec_data_init(struct tbt_session *sess)
     {
         tx->g[i].blk = kvzalloc((size_t)n * TBT_FEC_S, GFP_KERNEL);
         tx->g[i].par = kvzalloc((size_t)m * TBT_FEC_S, GFP_KERNEL);
+        /* No group belongs to block 0 until it writes a packet into it. The
+         * sentinel is what lets close_block() tell "empty group" from "full
+         * block whose nreal was already cleared". */
+        tx->g[i].blk_id = ~0ULL;
         if (!tx->g[i].blk || !tx->g[i].par)
         {
             pr_warn_ratelimited("tbtun: tunnel %llu: fec tx group alloc failed: group=%u blk=%d par=%d\n",
@@ -1507,6 +2021,7 @@ int tbt_fec_data_init(struct tbt_session *sess)
     INIT_LIST_HEAD(&sess->fec_out);
     spin_lock_init(&sess->fec_out_lock);
     INIT_DELAYED_WORK(&sess->w_fec_tx, tbt_fec_tx_work);
+    INIT_DELAYED_WORK(&sess->w_fec_rx, tbt_fec_rx_work);
     sess->fec = true;
     TBT_DIAG("fec init done tunnel=%llu groups=%u slots=%u credit=%u tx_ring=%u",
              (unsigned long long)t->cfg.id, groups, slots, tx->credit,

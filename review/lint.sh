@@ -51,7 +51,7 @@ func_body() {
 
 # Print one line per kfree of `varpat` that has no valid marker proof.
 kfree_marker_violations() {
-    awk -v varpat="$2" '
+    awk -v varpat="$2" -v refzero="${3:-0}" '
         function analyze(   i, j, prev, line, var, rmidx, ok, cb) {
             if (fn == "")
                 return
@@ -70,6 +70,9 @@ kfree_marker_violations() {
                 ok = 0
                 if (index(prev, "/* ctor-fail") &&
                     fn ~ /(_new|_alloc)/ && !has_cancel)
+                    ok = 1
+                if (refzero && fn == "tbt_carrier_free" &&
+                    index(prev, "/* refcount-zero"))
                     ok = 1
                 if (index(prev, "/* retire-drain")) {
                     rmidx = 0
@@ -330,12 +333,17 @@ check_carrier_buffers() {
     grep -Eq 'part = kmalloc\((TBT_REC_MAX|TBT_CAR_PART_MAX)' "$f" || missing="$missing part"
     # parser and http_rx must be born zeroed. Both carry a byte count (`have`,
     # `http_have`) that the parsers use as a length, so a kmalloc()ed object
-    # with a dirty slab behind it walks off its buffer.
+    # with a dirty slab behind it walks off its buffer. 0.2.0 never reuses a
+    # carrier, so kzalloc() at birth is the reset; the close path must still
+    # zero `have` and re-arm the chunk assembler for the next object.
     grep -q 'parser = kzalloc(sizeof(\*c->parser)' "$f" || missing="$missing parser"
     grep -q 'http_rx = kzalloc(sizeof(\*c->http_rx)' "$f" || missing="$missing http_rx"
-    # The reuse path keeps the objects; it must reset both, not only `have`.
-    grep -q 'memset(parser, 0, sizeof(\*parser))' "$f" || missing="$missing parser-reset"
-    grep -q 'tbt_http_rx_new_message(http_rx)' "$f" || missing="$missing http_rx-reset"
+    # The length must be cleared before the object can be reused/freed, and
+    # the chunk state must not resume a retired stream's message.
+    grep -Eq 'parser->have = 0|memset\(parser, 0, sizeof\(\*parser\)\)' "$f" ||
+        missing="$missing parser-reset"
+    grep -Eq 'tbt_http_rx_new_message\((c->)?http_rx\)' "$f" ||
+        missing="$missing http_rx-reset"
     grep -q '!c->http_rx' "$f" || missing="$missing http_rx-guard"
     [ -z "$missing" ] && return 0
     printf 'carrier buffer allocation/guard missing:%s' "$missing"
@@ -407,15 +415,38 @@ check_retain_trim() {
 }
 
 check_kfree_markers() {
-    v=$(kfree_marker_violations "$1/tbtun/tbt_carrier.c" 'c')
+    # 0.2.0 proof: tbt_carrier_free() is reachable only from the last
+    # tbt_carrier_put() (refcount_dec_and_test -> call_rcu) or from the
+    # never-published discard path. The marker is accepted only while all
+    # three links exist, so removing the refcount turns the check red.
+    refzero=0
+    if grep -q 'refcount_dec_and_test(&c->refs)' "$1/tbtun/tbt_carrier.c" &&
+        grep -q 'call_rcu(&c->rcu, tbt_carrier_free_rcu)' "$1/tbtun/tbt_carrier.c" &&
+        func_body "$1/tbtun/tbt_carrier.c" tbt_carrier_free_rcu |
+            grep -q 'tbt_carrier_free(c)' &&
+        func_body "$1/tbtun/tbt_carrier.c" tbt_carrier_free |
+            grep -q 'tbt_session_put(c->sess)'; then
+        refzero=1
+    fi
+    v=$(kfree_marker_violations "$1/tbtun/tbt_carrier.c" 'c' "$refzero")
     join=$(func_body "$1/tbtun/tbt_session.c" tbt_session_join)
-    grave=$(printf '%s\n' "$join" | grep -c 'list_add_tail(&old->node, &sess->dead)')
+    # A replaced carrier leaves car[] under sess->lock, keeps a reference for
+    # the stats pass, and is queued on dead_release. It must never go back to
+    # the deleted dead pool.
+    rel=$(printf '%s\n' "$join" |
+        grep -c 'list_add_tail(&old->release_node, &sess->dead_release)')
+    held=$(printf '%s\n' "$join" | grep -c 'refcount_inc(&old->refs)')
+    grave=$(printf '%s\n' "$join" | grep -c '&sess->dead)')
     ctor=$(carrier_ctor_order_violation "$1/tbtun/tbt_carrier.c")
-    if [ -z "$v" ] && [ "$grave" -ge 1 ] && [ -z "$ctor" ]; then
+    if [ -z "$v" ] && [ "$refzero" -eq 1 ] && [ "$rel" -ge 1 ] &&
+        [ "$held" -ge 1 ] && [ "$grave" -eq 0 ] && [ -z "$ctor" ]; then
         return 0
     fi
     [ -n "$v" ] && printf '%s;' "$(printf '%s' "$v" | tr '\n' ';')"
-    [ "$grave" -lt 1 ] && printf 'join does not put old on sess->dead;'
+    [ "$refzero" -eq 0 ] && printf 'carrier free is not proven refcount-zero;'
+    [ "$rel" -lt 1 ] && printf 'join does not queue old on sess->dead_release;'
+    [ "$held" -lt 1 ] && printf 'join does not hold old across the unlock;'
+    [ "$grave" -gt 0 ] && printf 'join still uses the deleted sess->dead pool;'
     [ -n "$ctor" ] && printf '%s;' "$ctor"
     return 1
 }

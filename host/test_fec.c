@@ -212,7 +212,7 @@ static void test_header_roundtrip(void)
            TBT_FEC_H_WINLEN == 24 && TBT_FEC_H_PAYLEN == 26 && TBT_FEC_H_CONV == 28 &&
            TBT_FEC_H_RESERVED == 30 && TBT_FEC_H_PAYCRC == 32 && TBT_FEC_H_HDRCRC == 36,
        "header offsets", NULL);
-    ok(TBT_FEC_CONV == 0x1001u, "TBT_FEC_CONV", NULL);
+    ok(TBT_FEC_CONV == 0x1002u, "TBT_FEC_CONV", NULL);
 
     /* NULL arguments are refused, not dereferenced. */
     ok_int(tbt_fec_hdr_pack(NULL, wire), -EINVAL, "pack NULL header");
@@ -232,7 +232,7 @@ static struct tbt_fec_hdr data_hdr(void)
     h.type = TBT_FEC_DATA;
     h.n = 4;
     h.m = 4;
-    h.epoch = 1;
+    h.epoch = 0; /* DATA never carries the block epoch */
     h.block_id = 1;
     h.seq = 1;
     h.payload_len = 64;
@@ -246,7 +246,7 @@ static struct tbt_fec_hdr parity_hdr(void)
 
     h.type = TBT_FEC_PARITY;
     h.share_index = h.n; /* first parity share */
-    h.win_len = 8;
+    h.win_len = h.n;
     h.seq = 7;
     return h;
 }
@@ -353,14 +353,17 @@ static void test_hdr_check(void)
     h.payload_len = 8192;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "DATA payload_len over configured S");
 
-    /* epoch is the block's last real share length: 0 (full) or 1..S. The
-     * receiver turns it into a delivery length, so S+1 must be refused. */
+    /* epoch is block-level and PARITY only: a DATA record that carries it
+     * could overwrite the block's last-share length mid-block. */
+    h = data_hdr();
+    h.epoch = 1;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "DATA epoch=1 refused");
     h = data_hdr();
     h.epoch = 64;
-    ok_int(tbt_fec_hdr_check(&h, 64), 0, "DATA epoch=S");
-    h = data_hdr();
-    h.epoch = 65;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "DATA epoch=S+1");
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "DATA epoch=S refused");
+    h = parity_hdr();
+    h.epoch = 64;
+    ok_int(tbt_fec_hdr_check(&h, 64), 0, "PARITY epoch=S");
     h = parity_hdr();
     h.epoch = 65;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "PARITY epoch=S+1");
@@ -378,6 +381,9 @@ static void test_hdr_check(void)
     h = data_hdr();
     h.conv = 0x1000;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "bad conv");
+    h = data_hdr();
+    h.conv = 0x1001;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "0.1.0 FEC conv refused");
     h = data_hdr();
     h.flags = 0x02;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "flags bit1");
@@ -399,21 +405,48 @@ static void test_hdr_check(void)
     ok_int(tbt_fec_hdr_check(&h, 8193), -EPROTO, "S over TBT_FEC_PAYLOAD_MAX");
     ok_int(tbt_fec_hdr_check(NULL, 64), -EPROTO, "NULL header");
 
-    /* PARITY: payload always S, win_len 1..TBT_FEC_MAX_W. */
+    /* PARITY: payload S for a real share; win_len 0 is the empty marker. */
     h = parity_hdr();
     ok_int(tbt_fec_hdr_check(&h, 64), 0, "PARITY baseline");
     h = parity_hdr();
     h.win_len = 0;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "PARITY win_len=0");
+    h.payload_len = 0;
+    h.epoch = 0;
+    ok_int(tbt_fec_hdr_check(&h, 64), 0, "PARITY marker win_len=0");
+    h = parity_hdr();
+    h.win_len = 0;
+    h.payload_len = 0;
+    h.epoch = 1;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "marker with epoch != 0");
+    h = parity_hdr();
+    h.win_len = 0;
+    h.payload_len = 1;
+    h.epoch = 0;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "marker with payload");
+    h = parity_hdr();
+    h.win_len = 0;
+    h.payload_len = 0;
+    h.epoch = 0;
+    h.share_index = (u16)(h.n + 1);
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "marker is parity 0");
+    h = parity_hdr();
+    h.win_len = 0;
+    h.payload_len = 0;
+    h.epoch = 0;
+    h.flags = TBT_FEC_FF_LAST;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "marker with flags");
     h = parity_hdr();
     h.win_len = 1;
     ok_int(tbt_fec_hdr_check(&h, 64), 0, "PARITY win_len=1");
     h = parity_hdr();
-    h.win_len = TBT_FEC_MAX_W;
-    ok_int(tbt_fec_hdr_check(&h, 64), 0, "PARITY win_len=TBT_FEC_MAX_W");
+    h.win_len = h.n;
+    ok_int(tbt_fec_hdr_check(&h, 64), 0, "PARITY win_len=n");
     h = parity_hdr();
-    h.win_len = TBT_FEC_MAX_W + 1;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "PARITY win_len=1025");
+    h.win_len = (u16)(h.n + 1);
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "PARITY win_len=n+1");
+    h = parity_hdr();
+    h.win_len = TBT_FEC_MAX_W;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "PARITY win_len=TBT_FEC_MAX_W > n");
     h = parity_hdr();
     h.payload_len = 63;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "PARITY payload_len != S");
@@ -492,16 +525,51 @@ static void test_hdr_check(void)
     h.seq = 1;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "FBK seq != 0");
 
-    h = ctl_hdr(TBT_FEC_PAD, 0);
-    ok_int(tbt_fec_hdr_check(&h, 64), 0, "PAD 0");
-    h = ctl_hdr(TBT_FEC_PAD, 1);
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "PAD payload != 0");
-    h = ctl_hdr(TBT_FEC_PAD, 0);
-    h.seq = 1;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "PAD seq != 0");
-    h = ctl_hdr(TBT_FEC_PAD, 0);
-    h.block_id = 1;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "PAD block_id != 0");
+    /* TBT_FEC_PAD (0x23) is gone: the 40-byte FEC parser no longer accepts
+     * the type, and 0x23 belongs to the old 32-byte container only. */
+    h = ctl_hdr(0x23, 0);
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "FEC PAD 0x23 refused");
+}
+
+/* ------------------------------------------------------------------ *
+ * 2b. ACK frontier -> byte offset: hostile u64 must clamp, never wrap.
+ * ------------------------------------------------------------------ */
+
+static void test_ack_bytes(void)
+{
+    ok_u64(tbt_fec_ack_bytes(0, 0, 0), 0, "ack 0/0/0");
+    ok_u64(tbt_fec_ack_bytes(0, 100, 1000), 0, "frontier before pkt_base");
+    ok_u64(tbt_fec_ack_bytes(100, 100, 0), 0, "frontier == base, tx_seq 0");
+    ok_u64(tbt_fec_ack_bytes(1, 0, 8192), 8192, "one full packet");
+    ok_u64(tbt_fec_ack_bytes(2, 0, 8192), 8192, "frontier past tx_seq clamps");
+    ok_u64(tbt_fec_ack_bytes(UINT64_MAX, 0, 1000), 1000, "U64_MAX frontier");
+    ok_u64(tbt_fec_ack_bytes(UINT64_MAX, 100, 1000), 1000, "U64_MAX with base");
+    ok_u64(tbt_fec_ack_bytes(UINT64_MAX, UINT64_MAX, 1000), 0,
+           "U64_MAX frontier and base");
+    ok_u64(tbt_fec_ack_bytes(9, 0, 81920), 73728, "rel below tx_seq");
+    ok_u64(tbt_fec_ack_bytes(10, 0, 81920), 81920, "rel at tx_seq");
+    ok_u64(tbt_fec_ack_bytes(11, 0, 81920), 81920, "rel past tx_seq");
+    ok_u64(tbt_fec_ack_bytes(3, 0, 16384), 16384, "saturate one past limit");
+    ok_u64(tbt_fec_ack_bytes(2, 0, 16384), 16384, "rel at tx_seq/S");
+    ok_u64(tbt_fec_ack_bytes(UINT64_MAX / 2, 0, UINT64_MAX / 2),
+           UINT64_MAX / 2, "huge frontier saturates to tx_seq");
+    ok_u64(tbt_fec_ack_bytes(105, 100, 5 * 8192), 5 * 8192,
+           "stream-relative base");
+    ok_u64(tbt_fec_ack_bytes(106, 100, 5 * 8192), 5 * 8192,
+           "stream-relative overrun clamps");
+}
+
+static void test_fin_valid(void)
+{
+    ok(tbt_fec_fin_valid(0, 0, 0), "FIN 0/0 span 0", NULL);
+    ok(tbt_fec_fin_valid(8, 0, 32), "FIN base 0 aligned", NULL);
+    ok(tbt_fec_fin_valid(64, 32, 32), "FIN base 32 aligned", NULL);
+    ok(!tbt_fec_fin_valid(31, 32, 32), "FIN end before base", NULL);
+    ok(tbt_fec_fin_valid(32, 32, 32), "FIN empty range", NULL);
+    ok(!tbt_fec_fin_valid(64, 33, 32), "FIN base not block-aligned", NULL);
+    ok(tbt_fec_fin_valid(64, 33, 0), "FIN base unaligned without span", NULL);
+    ok(!tbt_fec_fin_valid(0, UINT64_MAX, 0), "FIN U64_MAX base", NULL);
+    ok(tbt_fec_fin_valid(UINT64_MAX, 0, 0), "FIN U64_MAX end", NULL);
 }
 
 /* ------------------------------------------------------------------ *
@@ -1952,6 +2020,8 @@ int main(void)
 {
     test_header_roundtrip();
     test_hdr_check();
+    test_ack_bytes();
+    test_fin_valid();
     test_crc();
     test_bitmap();
     test_control();

@@ -53,6 +53,49 @@
 
 #include "tbtun.h"
 
+/* One bit per stream work item; bit 1 means an instance is queued or running
+ * and owns exactly one stream reference (review/s2-merged-design.md §1.4).
+ * The entry point clears the bit first and puts the reference last, so a wake
+ * that arrives while the work runs takes a second reference and is served by
+ * a second run. */
+bool tbt_stream_schedule(struct tbt_stream *st, struct work_struct *w,
+                         unsigned long bit)
+{
+    if (!st)
+        return false;
+    if (test_and_set_bit(bit, &st->attached))
+        return true;
+    if (!refcount_inc_not_zero(&st->refs))
+    {
+        clear_bit(bit, &st->attached);
+        return false;
+    }
+    if (likely(queue_work(TBT_WQ, w)))
+        return true;
+    /* The bit was clear while the work was already pending: a queue point
+     * bypassed this helper. Drop the extra reference. */
+    WARN_ON_ONCE(1);
+    clear_bit(bit, &st->attached);
+    tbt_stream_put(st);
+    return false;
+}
+
+/* Cancel a queued instance and return its reference. Only a pending instance
+ * is owned by the canceller; a running one returns its own reference at the
+ * end of its entry wrapper, and cancel_work_sync() waits for that. */
+bool tbt_stream_cancel(struct tbt_stream *st, struct work_struct *w,
+                       unsigned long bit)
+{
+    bool canceled;
+
+    if (!st)
+        return false;
+    canceled = cancel_work_sync(w);
+    if (canceled && test_and_clear_bit(bit, &st->attached))
+        tbt_stream_put(st);
+    return canceled;
+}
+
 // ---------------------------------------------------------------------------
 // Capture: bytes the peer delivered into sk_receive_queue -> the tunnel.
 //
@@ -76,9 +119,8 @@ static int tbt_pub_actor(read_descriptor_t *desc, struct sk_buff *skb,
     return taken;
 }
 
-static void tbt_pub_capture_work(struct work_struct *w)
+static void tbt_pub_capture_body(struct tbt_stream *st)
 {
-    struct tbt_stream *st = container_of(w, struct tbt_stream, w_read);
     struct sock *sk = READ_ONCE(st->sk);
     read_descriptor_t desc = {};
     bool fin = false;
@@ -141,6 +183,17 @@ static void tbt_pub_capture_work(struct work_struct *w)
     }
 }
 
+static void tbt_pub_capture_work(struct work_struct *w)
+{
+    struct tbt_stream *st = container_of(w, struct tbt_stream, w_read);
+    bool owned = test_and_clear_bit(TBT_STREAM_F_SCHED_READ,
+                                    &st->attached);
+
+    tbt_pub_capture_body(st);
+    if (owned)
+        tbt_stream_put(st);
+}
+
 // ---------------------------------------------------------------------------
 // Delivery: tunnel -> app, by ordinary transmit
 
@@ -151,7 +204,11 @@ static void tbt_pub_ready(struct sock *sk)
 {
     read_lock(&sk->sk_callback_lock);
     if (sk->sk_user_data)
-        schedule_work(&((struct tbt_stream *)sk->sk_user_data)->w_read);
+    {
+        struct tbt_stream *st = sk->sk_user_data;
+
+        tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
+    }
     read_unlock(&sk->sk_callback_lock);
     // These bytes are ours to take, not the app's to read. The app is woken by
     // its own socket when our transmit reaches it.
@@ -162,7 +219,11 @@ static void tbt_pub_write_space(struct sock *sk)
 {
     read_lock(&sk->sk_callback_lock);
     if (sk->sk_user_data)
-        schedule_work(&((struct tbt_stream *)sk->sk_user_data)->w_drain);
+    {
+        struct tbt_stream *st = sk->sk_user_data;
+
+        tbt_stream_schedule(st, &st->w_drain, TBT_STREAM_F_SCHED_DRAIN);
+    }
     read_unlock(&sk->sk_callback_lock);
 }
 
@@ -170,7 +231,11 @@ static void tbt_pub_state_change(struct sock *sk)
 {
     read_lock(&sk->sk_callback_lock);
     if (sk->sk_user_data)
-        schedule_work(&((struct tbt_stream *)sk->sk_user_data)->w_ctrl);
+    {
+        struct tbt_stream *st = sk->sk_user_data;
+
+        tbt_stream_schedule(st, &st->w_ctrl, TBT_STREAM_F_SCHED_CTRL);
+    }
     read_unlock(&sk->sk_callback_lock);
 }
 
@@ -211,7 +276,7 @@ int tbt_sock_deliver(struct tbt_stream *st, const u8 *data, size_t len)
 void tbt_sock_kick(struct tbt_stream *st)
 {
     if (st)
-        schedule_work(&st->w_drain);
+        tbt_stream_schedule(st, &st->w_drain, TBT_STREAM_F_SCHED_DRAIN);
 }
 
 // Peer sent FIN: after the queue drains, half-close the write side so the app
@@ -226,9 +291,8 @@ void tbt_sock_shutdown_wr(struct tbt_stream *st)
     kernel_sock_shutdown(sock, SHUT_WR);
 }
 
-static void tbt_drain_work(struct work_struct *w)
+static void tbt_drain_body(struct tbt_stream *st)
 {
-    struct tbt_stream *st = container_of(w, struct tbt_stream, w_drain);
     struct tbt_frame *fr;
     bool eof = false;
 
@@ -330,6 +394,17 @@ static void tbt_drain_work(struct work_struct *w)
     }
 }
 
+static void tbt_drain_work(struct work_struct *w)
+{
+    struct tbt_stream *st = container_of(w, struct tbt_stream, w_drain);
+    bool owned = test_and_clear_bit(TBT_STREAM_F_SCHED_DRAIN,
+                                    &st->attached);
+
+    tbt_drain_body(st);
+    if (owned)
+        tbt_stream_put(st);
+}
+
 /* RST is the last control frame the stream will ever send. A full control
  * queue or a transient allocation failure must not turn it into a silent
  * loss: retry after the pump drains, bounded, then count the loss. */
@@ -347,9 +422,8 @@ static void tbt_tx_rst_retry(struct tbt_session *sess, struct tbt_stream *st)
     atomic64_inc(&sess->ctl_lost);
 }
 
-static void tbt_ctrl_work(struct work_struct *w)
+static void tbt_ctrl_body(struct tbt_stream *st)
 {
-    struct tbt_stream *st = container_of(w, struct tbt_stream, w_ctrl);
     struct sock *sk = READ_ONCE(st->sk);
 
     might_sleep();
@@ -368,17 +442,29 @@ static void tbt_ctrl_work(struct work_struct *w)
         /* The peer's FIN is graceful, whatever the TCP state name is: it may
          * already be CLOSE after FIN_WAIT2 -> tcp_time_wait -> tcp_done.  The
          * capture work item emits the FIN once the preceding bytes are in. */
-        schedule_work(&st->w_read);
+        tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
         /* A target that closed with our delivery queue non-empty cannot take
          * those bytes any more; let w_drain discover the write error and
          * abort the stream instead of leaving the queue parked. */
         if (READ_ONCE(st->rx_queued))
-            schedule_work(&st->w_drain);
+            tbt_stream_schedule(st, &st->w_drain,
+                                TBT_STREAM_F_SCHED_DRAIN);
         return;
     }
     /* TCP_CLOSE without sk_err is a graceful or local close, not a reset.
      * A local abort is owned by tbt_stream_kill(); never turn it into a
      * tunnel RST here. */
+}
+
+static void tbt_ctrl_work(struct work_struct *w)
+{
+    struct tbt_stream *st = container_of(w, struct tbt_stream, w_ctrl);
+    bool owned = test_and_clear_bit(TBT_STREAM_F_SCHED_CTRL,
+                                    &st->attached);
+
+    tbt_ctrl_body(st);
+    if (owned)
+        tbt_stream_put(st);
 }
 
 // ---------------------------------------------------------------------------
@@ -406,27 +492,35 @@ void tbt_stream_init_work(struct tbt_stream *st)
  * probe H took 41 s instead of 0.5 s). Detach first (clears callbacks and
  * cancels the other work items), then close with SO_LINGER=0, which is the
  * exported way to make tcp_close send RST. */
-static void tbt_kill_work(struct work_struct *w)
+static void tbt_kill_body(struct tbt_stream *st)
 {
-    struct tbt_stream *st = container_of(w, struct tbt_stream, w_kill);
     struct tbt_session *sess = st->sess;
 
     might_sleep();
     tbt_tx_rst_retry(sess, st);
-    cancel_work_sync(&st->w_target);
+    tbt_stream_cancel(st, &st->w_target, TBT_STREAM_F_SCHED_TARGET);
 
     /* No self cancel: this is the w_kill work item. */
     tbt_stream_release_socket_now(st);
 
     if (!READ_ONCE(sess->closing))
     {
-        mod_delayed_work(TBT_WQ, &sess->w_reap,
-                         msecs_to_jiffies(TBT_REAP_INTERVAL_MS));
+        tbt_session_arm(sess, TBT_SW_REAP,
+                        msecs_to_jiffies(TBT_REAP_INTERVAL_MS));
         if (sess->tunnel && sess->tunnel->cfg.role == TBT_ROLE_NEAR)
-            queue_delayed_work(TBT_WQ, &sess->w_pending, 0);
+            tbt_session_arm(sess, TBT_SW_PENDING, 0);
     }
+}
 
-    tbt_stream_put(st); /* the reference taken in tbt_stream_kill() */
+static void tbt_kill_work(struct work_struct *w)
+{
+    struct tbt_stream *st = container_of(w, struct tbt_stream, w_kill);
+    bool owned = test_and_clear_bit(TBT_STREAM_F_SCHED_KILL,
+                                    &st->attached);
+
+    tbt_kill_body(st);
+    if (owned)
+        tbt_stream_put(st);
 }
 
 void tbt_sock_attach(struct tbt_stream *st)
@@ -459,8 +553,9 @@ void tbt_sock_attach(struct tbt_stream *st)
     sk->sk_state_change = tbt_pub_state_change;
     write_unlock_bh(&sk->sk_callback_lock);
 
-    schedule_work(&st->w_read);  // a FIN/data may predate this socket
-    schedule_work(&st->w_drain); // frames may predate this socket
+    /* A FIN/data or a queued frame may predate this socket. */
+    tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
+    tbt_stream_schedule(st, &st->w_drain, TBT_STREAM_F_SCHED_DRAIN);
 }
 
 void tbt_sock_detach(struct tbt_stream *st)
@@ -475,9 +570,11 @@ void tbt_sock_detach(struct tbt_stream *st)
      * module text on a socket that can outlive the module (F2). */
     tbt_sk_ops_restore(sk, &st->sess->def_ops);
 
-    cancel_work_sync(&st->w_read);
-    cancel_work_sync(&st->w_drain);
-    cancel_work_sync(&st->w_ctrl);
+    /* Order matters: ctrl can requeue read/drain; read can emit FIN; drain
+     * can queue w_kill (already cancelled by the caller). */
+    tbt_stream_cancel(st, &st->w_ctrl, TBT_STREAM_F_SCHED_CTRL);
+    tbt_stream_cancel(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
+    tbt_stream_cancel(st, &st->w_drain, TBT_STREAM_F_SCHED_DRAIN);
 }
 
 /* Save the core callbacks before this module replaces them.  Call this only
@@ -563,7 +660,7 @@ static void tbt_stream_release_socket_now(struct tbt_stream *st)
  * w_kill itself must use the _now variant. */
 void tbt_stream_release_socket(struct tbt_stream *st)
 {
-    cancel_work_sync(&st->w_kill);
+    tbt_stream_cancel(st, &st->w_kill, TBT_STREAM_F_SCHED_KILL);
     tbt_stream_release_socket_now(st);
 }
 
@@ -624,16 +721,14 @@ static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
     tbt_sock_attach(st);
     /* Data may already be queued from before the accept completed; take it now
      * rather than waiting for the next packet to arrive. */
-    schedule_work(&st->w_read);
+    tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
     tbt_fbk_kick(sess, false);
     tbt_stream_put(st);
     return 0;
 }
 
-void tbt_pending_work(struct work_struct *w)
+static void tbt_pending_body(struct tbt_session *sess)
 {
-    struct tbt_session *sess =
-        container_of(to_delayed_work(w), struct tbt_session, w_pending);
 
     for (;;)
     {
@@ -688,8 +783,7 @@ void tbt_pending_work(struct work_struct *w)
             list_add(&p->node, &sess->pending);
             sess->n_pending++;
             spin_unlock(&sess->lock);
-            queue_delayed_work(TBT_WQ, &sess->w_pending,
-                               msecs_to_jiffies(1));
+            tbt_session_arm(sess, TBT_SW_PENDING, msecs_to_jiffies(1));
             return;
         }
         kfree(p);
@@ -703,6 +797,17 @@ void tbt_pending_work(struct work_struct *w)
         }
         /* More accepted sockets may be queued behind this one. */
     }
+}
+
+void tbt_pending_work(struct work_struct *w)
+{
+    struct tbt_session *sess =
+        container_of(to_delayed_work(w), struct tbt_session, w_pending);
+    bool owned = test_and_clear_bit(TBT_SW_PENDING, &sess->sched);
+
+    tbt_pending_body(sess);
+    if (owned)
+        tbt_session_put(sess);
 }
 
 void tbt_pending_drain(struct tbt_session *sess)
@@ -758,7 +863,7 @@ int tbt_stream_start(struct tbt_session *sess, struct socket *sock)
     sess->n_pending++;
     spin_unlock(&sess->lock);
 
-    queue_delayed_work(TBT_WQ, &sess->w_pending, 0);
+    tbt_session_arm(sess, TBT_SW_PENDING, 0);
     return 0; /* ownership transferred; accept loop must not release */
 }
 
