@@ -1171,6 +1171,10 @@ struct tbt_session
     /* A public connection refused because the FEC data plane already carries
      * a live stream: one stream per session is all the FEC record can name. */
     atomic64_t fec_stream_refused;
+    /* Far side: a DATA/FIN/RST dropped because no stream existed yet. A FEC
+     * share sent before its stream's OPEN is consumed by the sender and can
+     * never be NACKed; this counter proves that path. */
+    atomic64_t bind_drop_no_stream;
     atomic64_t fec_drop_window;
     atomic64_t fec_drop_crypto;
     /* FEC flow-control observability: ACK records emitted and applied, and

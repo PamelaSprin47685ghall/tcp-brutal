@@ -591,14 +591,17 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o,
     if (c)
         tbt_carrier_put(c);
 fallback:
-    /* The share's own carrier is gone or not usable yet. Send it on a live one
-     * instead of dropping it: the receiver places a share by its header, and a
-     * dropped share is a block the codec has to recover -- which it cannot
-     * always do (measured: 3 of 4 shares plus all 4 parity rows stayed
-     * undecodable, and the whole stream stopped behind that block). A carrier
-     * that has sent HELLO can carry bytes even before this stream's OPEN is
-     * written on it, because the OPEN precedes any DATA on that carrier only
-     * for frames the pump pins to it. */
+    /* The share's own carrier is gone or not usable yet. Send it on another
+     * carrier instead of dropping it: the receiver places a share by its
+     * header, and a dropped share is a block the codec has to recover -- which
+     * it cannot always do (measured: 3 of 4 shares plus all 4 parity rows
+     * stayed undecodable, and the whole stream stopped behind that block).
+     *
+     * `up` is the only proof this stream's OPEN is already on that carrier:
+     * the ARQ pump writes OPEN, not this FEC drain, and tbt_tx_announce_carrier
+     * keeps `up` clear until that write completes. The far drops DATA that
+     * arrives before its stream exists (tbt_session_bind_sid), and a share
+     * dropped there is consumed here and never NACKed: it must wait. */
     rc = -ENODEV;
 
     for (i = 0; i < sess->n_car; i++)
@@ -610,8 +613,9 @@ fallback:
         c = tbt_carrier_get(sess, (u8)i);
         if (!c)
             continue;
-        if (!READ_ONCE(c->hello_sent) || atomic_read(&c->stopping) ||
-            READ_ONCE(c->stalled) || !atomic_read(&c->connected))
+        if (!READ_ONCE(c->hello_sent) || !atomic_read(&c->up) ||
+            atomic_read(&c->stopping) || READ_ONCE(c->stalled) ||
+            !atomic_read(&c->connected))
         {
             tbt_carrier_put(c);
             continue;
@@ -1600,7 +1604,19 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
 
     st = tbt_fec_stream(sess);
     if (!st)
+    {
+        bool pending;
+
+        /* The stream may not be published yet (the far creates it when the
+         * OPEN arrives). If the source ring already holds bytes, retry: the
+         * first connection's request must not sleep until an unrelated wake. */
+        spin_lock(&tx->lock);
+        pending = tx->head != tx->tail || tx->fill;
+        spin_unlock(&tx->lock);
+        if (pending && !READ_ONCE(tx->stopping))
+            tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
         return;
+    }
     /* A closing stream caps replay admission at
      * TBT_FEC_REPLAY_CLOSE_BYTES_MAX: the last block's repair must fit the
      * close budget, so an older backlog must not refill the queue. */

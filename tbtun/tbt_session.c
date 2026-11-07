@@ -874,7 +874,10 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open)
                     st->tombstone_until_ns))
             drop = true; /* late frame for a tombstone */
         else if (!st && !open)
+        {
             drop = true; /* DATA/FIN/RST cannot create a stream */
+            atomic64_inc(&sess->bind_drop_no_stream);
+        }
         else if (st && open && tbt_stream_is_closing(st))
             drop = true; /* late OPEN for a closing stream */
         else if (!st)

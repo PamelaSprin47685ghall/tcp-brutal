@@ -869,6 +869,42 @@ static void case_batch_drain(void)
     sched_free(&s);
 }
 
+/* A share may not ride a carrier whose OPEN for this stream is not on the
+ * wire yet: it waits in its own queue, and only an up carrier may carry it
+ * (or serve as the fallback). */
+static void case_open_gate(void)
+{
+    struct sched s;
+    uint32_t wrote;
+    bool again;
+    int i;
+
+    sched_init(&s);
+    s.up[0] = false;
+    for (i = 1; i < NCAR; i++)
+        s.up[i] = false; /* no carrier has announced this stream yet */
+    push(&s, 0, false, false, 0, 1);
+    wrote = flush_carrier(&s, 0, &again);
+    ok(again && wrote == 0, "DATA waits while no OPEN is on the wire", NULL);
+    ok_u32(s.q[0].depth, 1, "the share stays queued");
+    ok_u32(s.writes[0], 0, "the unannounced carrier wrote nothing");
+
+    s.up[0] = true; /* the OPEN is written */
+    wrote = flush_carrier(&s, 0, &again);
+    ok(!again && wrote == 1, "the share goes after the OPEN", NULL);
+    ok_u32(s.q[0].depth, 0, "the share left the queue");
+    ok_u32(s.writes[0], 1, "the announced carrier wrote it");
+
+    /* A different carrier that already has its OPEN is a valid fallback. */
+    s.up[0] = false;
+    s.up[1] = true;
+    push(&s, 0, false, false, 0, 2);
+    wrote = flush_carrier(&s, 0, &again);
+    ok(!again && wrote == 1, "an announced fallback carries the share", NULL);
+    ok_u32(s.writes[1], 1, "the announced fallback wrote it");
+    sched_free(&s);
+}
+
 /* The replay ring is indexed by block/group/share, not by carrier: moving a
  * replay to another carrier must not change the record it carries. */
 static void case_replay_identity(void)
@@ -898,6 +934,7 @@ int main(void)
     case_replay_identity();
     case_per_carrier_retry();
     case_batch_drain();
+    case_open_gate();
 
     printf("%s: %d checks, %d failures\n",
            failures ? "FAIL" : "PASS", checks, failures);
