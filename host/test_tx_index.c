@@ -18,6 +18,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "tbt_tx_acct.h"
 
@@ -82,10 +83,57 @@ static void case_retain_bounds(void)
     ok(!warned, "retain: empty session is not a code error");
 }
 
+/* The scheduler mask is 256 bits, not the legacy u16: every carrier index the
+ * session can own must have its own bit. */
+static void case_blocked_mask(void)
+{
+    DECLARE_BITMAP(b, TBT_MAX_CARRIERS_LIMIT);
+    unsigned int idx;
+
+    memset(b, 0, sizeof(b));
+    for (idx = 0; idx < TBT_MAX_CARRIERS_LIMIT; idx++)
+        ok(!test_bit(idx, b), "blocked: starts clear");
+
+    set_bit(0, b);
+    set_bit(15, b);
+    set_bit(16, b);
+    set_bit(63, b);
+    set_bit(64, b);
+    set_bit(255, b);
+    ok(test_bit(0, b), "blocked: index 0");
+    ok(test_bit(15, b), "blocked: index 15");
+    ok(test_bit(16, b), "blocked: index 16");
+    ok(test_bit(63, b), "blocked: index 63");
+    ok(test_bit(64, b), "blocked: index 64");
+    ok(test_bit(255, b), "blocked: index 255");
+    ok(!test_bit(1, b) && !test_bit(17, b) && !test_bit(62, b) &&
+           !test_bit(65, b) && !test_bit(254, b),
+       "blocked: neighbours stay clear");
+
+    /* A bit just past the legacy 16-slot boundary must not alias back into
+     * the low word. */
+    memset(b, 0, sizeof(b));
+    set_bit(16, b);
+    ok(test_bit(16, b) && !test_bit(0, b) && !test_bit(15, b) &&
+           !test_bit(17, b),
+       "blocked: index 16 is independent");
+
+    memset(b, 0, sizeof(b));
+    set_bit(64, b);
+    ok(test_bit(64, b) && !test_bit(63, b) && !test_bit(65, b),
+       "blocked: index 64 is independent");
+
+    memset(b, 0, sizeof(b));
+    set_bit(255, b);
+    ok(test_bit(255, b) && !test_bit(254, b) && !test_bit(0, b),
+       "blocked: index 255 is independent");
+}
+
 int main(void)
 {
     case_arq_bounds();
     case_retain_bounds();
+    case_blocked_mask();
 
     printf("test_tx_index: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

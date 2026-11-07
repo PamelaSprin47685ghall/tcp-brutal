@@ -2138,19 +2138,32 @@ static u16 tbt_path_stalled_mask(struct tbt_session *sess)
  * come before the receiver's hole budget. This is the scheduler-side mask;
  * tbt_path_stalled_mask() above stays the retransmit-side clock test, which
  * deliberately keeps its own (snd_una based) meaning. */
-static u16 tbt_path_stall_now_mask(struct tbt_session *sess)
+static void tbt_path_stall_now_mask(struct tbt_session *sess,
+                                    unsigned long *mask)
 {
-    u16 mask = 0;
     int i;
 
-    for (i = 0; i < sess->n_car && i < TBT_ARQ_MAX_PATHS; i++)
+    /* A FEC session has up to 256 carriers; the scheduler mask must cover
+     * every slot, not just the 16 legacy retain slots. */
+    for (i = 0; i < sess->n_car; i++)
     {
         struct tbt_carrier *c = READ_ONCE(sess->car[i]);
 
         if (c && READ_ONCE(c->stalled))
-            mask |= BIT(i);
+            set_bit(i, mask);
     }
-    return mask;
+}
+
+/* Fold the legacy 16-bit avoid/stalled masks into the 256-bit scheduler
+ * mask. Those two are properties of a retained DATA copy, and only the
+ * legacy ARQ creates one, so their width is correct. */
+static void tbt_blocked_add_u16(unsigned long *mask, u16 bits)
+{
+    int i;
+
+    for (i = 0; i < TBT_ARQ_MAX_PATHS; i++)
+        if (bits & BIT(i))
+            set_bit(i, mask);
 }
 
 static bool tbt_sched_better(struct tbt_session *sess, struct tbt_stream *st,
@@ -2216,16 +2229,22 @@ static void tbt_sched_rebuild(struct tbt_session *sess, struct tbt_stream *st,
 }
 
 static struct tbt_carrier *tbt_sched_pick(struct tbt_session *sess,
-                                          struct tbt_stream *st, u16 blocked,
+                                          struct tbt_stream *st,
+                                          const unsigned long *blocked,
+                                          u16 avoid, u16 stalled,
                                           bool need_open)
 {
     struct tbt_sched *s = st ? &st->sched : &sess->ctrl_sched;
+    DECLARE_BITMAP(mask, TBT_MAX_CARRIERS_LIMIT);
     u64 now = tbt_now_ns();
     int tries;
 
+    memcpy(mask, blocked, sizeof(mask));
+    tbt_blocked_add_u16(mask, avoid);
+    tbt_blocked_add_u16(mask, stalled);
     /* The order may predate the stall (it is rebuilt at most every 10 ms);
      * skip the paused slots even then. */
-    blocked |= tbt_path_stall_now_mask(sess);
+    tbt_path_stall_now_mask(sess, mask);
     if (!s->n || s->need_open != need_open ||
         now - s->sort_ns > TBT_FBK_INTERVAL_MS * NSEC_PER_MSEC)
         tbt_sched_rebuild(sess, st, need_open);
@@ -2240,7 +2259,7 @@ static struct tbt_carrier *tbt_sched_pick(struct tbt_session *sess,
         }
         idx = s->order[s->win % (s->n ? s->n : 1)];
         s->win++;
-        if (blocked & BIT(idx))
+        if (test_bit(idx, mask))
             continue;
         return READ_ONCE(sess->car[idx]);
     }
@@ -2513,9 +2532,13 @@ int tbt_tx_pump(struct tbt_session *sess)
         LIST_HEAD(drop);
         LIST_HEAD(fail);
         struct tbt_frame *fr, *tmp;
-        u16 blocked = 0;
+        /* 256 bits: c->index ranges over TBT_MAX_CARRIERS_LIMIT, and a u16
+         * shift at index >= 64 is undefined (UBSAN) while index >= 16 was
+         * silently truncated. */
+        DECLARE_BITMAP(blocked, TBT_MAX_CARRIERS_LIMIT);
         bool progress = false;
 
+        memset(blocked, 0, sizeof(blocked));
         spin_lock(&sess->tx_lock);
         {
         unsigned long guard = 0;
@@ -2679,7 +2702,7 @@ int tbt_tx_pump(struct tbt_session *sess)
                  * probe). */
                 if (type == TBT_F_DATA && fr->ret)
                     avoid |= fr->ret->path_mask | fr->ret->reserve_mask;
-                c = tbt_sched_pick(sess, sst, blocked | avoid | stalled,
+                c = tbt_sched_pick(sess, sst, blocked, avoid, stalled,
                                    type == TBT_F_DATA);
                 if (!c && avoid && fr->dup_copy)
                 {
@@ -2690,7 +2713,7 @@ int tbt_tx_pump(struct tbt_session *sess)
                     goto drop;
                 }
                 if (!c && avoid)
-                    c = tbt_sched_pick(sess, sst, blocked | stalled,
+                    c = tbt_sched_pick(sess, sst, blocked, 0, stalled,
                                        type == TBT_F_DATA);
                 /* A stalled path is one whose snd_una has not moved for an
                  * RTO with bytes still unacked: the copy is better sent
@@ -2702,10 +2725,10 @@ int tbt_tx_pump(struct tbt_session *sess)
                  * stalled path is no worse than no copy: the path may be
                  * slow, but the record is what the receiver is waiting for. */
                 if (!c && stalled)
-                    c = tbt_sched_pick(sess, sst, blocked | avoid,
+                    c = tbt_sched_pick(sess, sst, blocked, avoid, 0,
                                        type == TBT_F_DATA);
                 if (!c && stalled)
-                    c = tbt_sched_pick(sess, sst, blocked,
+                    c = tbt_sched_pick(sess, sst, blocked, 0, 0,
                                        type == TBT_F_DATA);
                 if (!c)
                 {
@@ -2815,7 +2838,7 @@ int tbt_tx_pump(struct tbt_session *sess)
 
                 if (sk && !sk_stream_memory_free(sk))
                 {
-                    blocked |= BIT(c->index);
+                    set_bit(c->index, blocked);
                     if (sk->sk_socket)
                         set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
                     schedule_delayed_work(&c->w_pump, msecs_to_jiffies(2));

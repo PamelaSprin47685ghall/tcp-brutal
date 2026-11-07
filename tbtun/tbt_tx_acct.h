@@ -17,6 +17,24 @@
 
 #include "tbt_uapi.h"
 
+/* Kernel bitmaps are a plain unsigned-long array; the host build needs the
+ * same three primitives the TX scheduler uses so the tests exercise the real
+ * index arithmetic (0..255), not a narrower copy. */
+#ifndef __KERNEL__
+#define DECLARE_BITMAP(name, bits) unsigned long name[((bits) + 63) / 64]
+static inline void tbt_host_bitmap_set(unsigned int nr, unsigned long *b)
+{
+    b[nr / 64] |= 1ul << (nr % 64);
+}
+static inline int tbt_host_bitmap_test(unsigned int nr,
+                                       const unsigned long *b)
+{
+    return (int)((b[nr / 64] >> (nr % 64)) & 1ul);
+}
+#define set_bit(nr, addr) tbt_host_bitmap_set((nr), (addr))
+#define test_bit(nr, addr) tbt_host_bitmap_test((nr), (addr))
+#endif
+
 /* The legacy retain entry has 16 slots per path (path_gen/path_end/
  * first_sent_seq/una_observed_ns). FEC sessions have up to 256 carriers and
  * never create these entries. */
