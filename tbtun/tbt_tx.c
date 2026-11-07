@@ -1787,9 +1787,10 @@ static bool tbt_fec_credit_waiting(const struct tbt_session *sess)
 
 /* A FEC repair is still in progress: replay records are queued, or the FEC
  * data plane touched the repair clock inside the grace window. The grace is
- * two wait budgets (clamped to 5 s..30 s), so a NACK/replay burst is covered
- * without hiding a dead ACK path forever. */
-#define TBT_FEC_REPAIR_MAX_NS (30ULL * NSEC_PER_SEC)
+ * two wait budgets (clamped to 5 s..90 s), so a NACK/replay burst is covered
+ * without hiding a dead ACK path forever. 90 s covers the measured frontier
+ * replay (6.13 s) plus backpressure at 2.55 Mbit/s over 256 carriers. */
+#define TBT_FEC_REPAIR_MAX_NS TBT_TX_FEC_REPAIR_MAX_NS
 
 static bool tbt_fec_repair_active(struct tbt_session *sess, u64 now,
                                   u64 wait_budget_ns)
@@ -1877,9 +1878,12 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
          * receiver is asking for and receiving replay shares. Hold the kill,
          * but only inside the hard no-progress cap; a repair that never
          * completes must still end the stream. */
-        if (sess->fec && would_kill &&
-            now - start <= TBT_FEC_REPAIR_MAX_NS &&
-            tbt_fec_repair_active(sess, now, budget))
+        bool repair_active = sess->fec &&
+                             tbt_fec_repair_active(sess, now, budget);
+
+        if (would_kill &&
+            tbt_tx_fec_repair_holds(sess->fec, repair_active,
+                                    now - start, TBT_FEC_REPAIR_MAX_NS))
         {
             atomic64_inc(&sess->tx_stall_suppressed_fec);
             start = now;

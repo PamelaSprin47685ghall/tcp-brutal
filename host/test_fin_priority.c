@@ -93,6 +93,24 @@ static void case_close_hold(void)
        "hold: no repair and no credit fires");
 }
 
+static void case_repair_bound(void)
+{
+    u64 max = TBT_TX_FEC_REPAIR_MAX_NS;
+
+    ok(tbt_tx_fec_repair_holds(true, true, 30ULL * 1000000000ULL, max),
+       "repair: 30 s still holds");
+    ok(tbt_tx_fec_repair_holds(true, true, 60ULL * 1000000000ULL, max),
+       "repair: 60 s still holds");
+    ok(tbt_tx_fec_repair_holds(true, true, max, max),
+       "repair: exactly 90 s still holds");
+    ok(!tbt_tx_fec_repair_holds(true, true, max + 1, max),
+       "repair: past 90 s kills");
+    ok(!tbt_tx_fec_repair_holds(true, false, 10, max),
+       "repair: inactive repair does not hold");
+    ok(!tbt_tx_fec_repair_holds(false, true, 10, max),
+       "repair: non-FEC behaviour unchanged");
+}
+
 struct frame
 {
     u8 type;
@@ -169,6 +187,7 @@ int main(void)
     case_quota();
     case_fin_retry();
     case_close_hold();
+    case_repair_bound();
     case_fin_not_starved();
     case_no_close();
 

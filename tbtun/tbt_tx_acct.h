@@ -137,6 +137,8 @@ static inline bool tbt_tx_fin_retry_allowed(u64 now, u64 close_since,
  * RST: the FIN gate is waiting for those last bytes. Repair activity holds
  * without a cap (it refreshes fec_repair_last_ns); a credit wait is held only
  * inside the same hard cap the stall path uses. */
+#define TBT_TX_FEC_REPAIR_MAX_NS (90ULL * 1000000000ULL)
+
 static inline bool tbt_tx_close_hold_fec(bool fec, bool repair_active,
                                          bool credit_waiting, u64 age,
                                          u64 max_ns)
@@ -146,6 +148,16 @@ static inline bool tbt_tx_close_hold_fec(bool fec, bool repair_active,
     if (repair_active)
         return true;
     return credit_waiting && age <= max_ns;
+}
+
+/* The sender stall reset holds while FEC repair is active, but only inside the
+ * hard no-progress cap. Beyond it the stream is dead even if the repair clock
+ * moved: a repair that never completes must still end. Non-FEC streams never
+ * take this branch. */
+static inline bool tbt_tx_fec_repair_holds(bool fec, bool repair_active,
+                                           u64 age, u64 max_ns)
+{
+    return fec && repair_active && age <= max_ns;
 }
 
 /* Pure path bound: idx must name a slot the session owns and fit the 16-slot
