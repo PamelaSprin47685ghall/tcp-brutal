@@ -2446,6 +2446,22 @@ static void tbt_car_connect_work(struct work_struct *w)
         goto fail;
     TBT_DIAG("tunnel=%llu carrier=%u gen=%u sock_create ok",
              (unsigned long long)t->cfg.id, c->index, c->gen);
+    /* Keep the dialling socket on the configured interface. A policy route
+     * (TUN/proxy) can otherwise capture the connect and answer it locally,
+     * leaving the peer with no SYN to accept. */
+    if (t->cfg.dev_set)
+    {
+        err = sock_setsockopt(s, SOL_SOCKET, SO_BINDTODEVICE,
+                              KERNEL_SOCKPTR(t->cfg.dev),
+                              strlen(t->cfg.dev) + 1);
+        if (err)
+        {
+            TBT_DIAG("tunnel=%llu carrier=%u gen=%u SO_BINDTODEVICE dev=%s ret=%d",
+                     (unsigned long long)t->cfg.id, c->index, c->gen,
+                     t->cfg.dev, err);
+            goto release;
+        }
+    }
     /* The replacement carrier often reuses the port the dead one just freed,
      * which may still be in TIME_WAIT. */
     sock_set_reuseaddr(s->sk);

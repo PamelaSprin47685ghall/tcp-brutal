@@ -16,9 +16,11 @@
 
 #ifdef __KERNEL__
 #include <linux/errno.h>
+#include <linux/if.h>
 #include <linux/types.h>
 #else
 #include <errno.h>
+#include <net/if.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -76,6 +78,11 @@ struct tbt_cfg
     u32 tx_retain_bytes;  /* C3 replay retention, 0 = unlimited */
     u32 carrier_stall_ms; /* C3 stall detector, 0 = auto (the default) */
     __be32 srcaddrs[TBT_SRC_MAX];
+    /* Near carriers bind their dialling socket to this interface
+     * (SO_BINDTODEVICE) before connect, so a TUN policy route cannot capture
+     * them. Empty unless dev= was present. */
+    char dev[IFNAMSIZ];
+    bool dev_set;
 
     /* Tunnel nonce. 32 hex digits = the full 128-bit value; 16 hex digits =
      * the low 64 bits, left-padded with zeros (the same rule as the runtime

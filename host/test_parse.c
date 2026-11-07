@@ -483,6 +483,49 @@ static size_t count_lines(const char *s)
     return n;
 }
 
+/* 24d. dev=: the near carrier bind interface. Canonical order is after
+ * portblock and before nonce/srcaddrs. */
+static void test_dev_cfg(void)
+{
+    static const char *const base =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2";
+    static const char *const base_canon =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+        " n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " dup=1 profile=http-kal keepalive=5000"
+        " drip_ms=1000 replay=8388608 tunnel_rate=0"
+        " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608"
+        " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0"
+        " portblock=0-0";
+    char text[TBT_LINE_MAX], want[TBT_LINE_MAX];
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+
+    snprintf(text, sizeof(text), "%s dev=eth0", base);
+    snprintf(want, sizeof(want), "%s dev=eth0\n", base_canon);
+    roundtrip("dev round-trip", text, want);
+
+    /* 15 bytes is the longest name IFNAMSIZ can carry with its NUL. */
+    snprintf(text, sizeof(text), "%s dev=abcdefghijklmno", base);
+    ok(!parse(text, &cmd, &perr), "dev 15 bytes accepted", NULL);
+    ok(cmd.cfg.dev_set && !strcmp(cmd.cfg.dev, "abcdefghijklmno"),
+       "dev 15 bytes stored", cmd.cfg.dev);
+
+    snprintf(text, sizeof(text), "%s dev=abcdefghijklmnop", base);
+    refuse("dev 16 bytes refused", text, TBT_PARSE_EINVAL, "dev",
+           "interface name");
+    snprintf(text, sizeof(text), "%s dev=", base);
+    refuse("dev empty refused", text, TBT_PARSE_EINVAL, "dev", "empty value");
+    snprintf(text, sizeof(text), "%s dev=eth 0", base);
+    refuse("dev with space refused", text, TBT_PARSE_EINVAL, NULL, NULL);
+    snprintf(text, sizeof(text), "%s dev=eth\0010", base);
+    refuse("dev with control refused", text, TBT_PARSE_EINVAL, "dev",
+           "interface name");
+    snprintf(text, sizeof(text), "%s dev=eth/0", base);
+    refuse("dev with slash refused", text, TBT_PARSE_EINVAL, "dev",
+           "interface name");
+}
+
 static void test_stats_prefix(void)
 {
     static const char *const want[] = { "debug_loss", "gaps_total", "streams_total" };
@@ -1110,9 +1153,6 @@ int main(void)
     refuse("uid removed",
            "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 uid=1000",
            TBT_PARSE_EINVAL, "uid", "unknown key");
-    refuse("dev removed",
-           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 dev=eth0",
-           TBT_PARSE_EINVAL, "dev", "unknown key");
     refuse("src is not a key",
            "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 src=10.0.0.0/8",
            TBT_PARSE_EINVAL, "src", "unknown key");
@@ -1517,6 +1557,9 @@ int main(void)
 
     /* 24c. crypto= / crypto_key=: default on, off, key, clear, refusals. */
     test_crypto_cfg();
+
+    /* 24d. dev= interface bind. */
+    test_dev_cfg();
 
     /* 25. The frozen /proc/net/tbtun/http text contract. */
     test_http_contract();

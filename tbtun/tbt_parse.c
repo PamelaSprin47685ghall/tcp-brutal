@@ -389,6 +389,8 @@ static int tbt_parse_srcaddrs(const char *v, struct tbt_cfg *cfg, struct tbt_par
 static int tbt_parse_nonce(const char *s, u8 out[16]);
 static int tbt_hexval(char c);
 
+static int tbt_parse_dev(const char *s, char out[IFNAMSIZ]);
+
 static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_error *e)
 {
     char *tok;
@@ -576,6 +578,13 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
             if (tbt_parse_srcaddrs(val, cfg, e))
                 return TBT_PARSE_EINVAL;
         }
+        else if (!strcmp(key, "dev"))
+        {
+            if (tbt_parse_dev(val, cfg->dev))
+                return tbt_fail(e, key,
+                                "dev must be a 1..15 byte interface name with no whitespace");
+            cfg->dev_set = true;
+        }
         else if (!strcmp(key, TBT_ACT_NONCE))
         {
             if (tbt_parse_nonce(val, cfg->nonce))
@@ -710,6 +719,30 @@ static int tbt_parse_nonce(const char *s, u8 out[16])
             return -EINVAL;
         out[start + i] = (u8)((hi << 4) | lo);
     }
+    return 0;
+}
+
+/* Interface name for SO_BINDTODEVICE: 1..IFNAMSIZ-1 bytes, no whitespace,
+ * control characters or '/'. The kernel's dev_valid_name() has the same
+ * shape; keeping the check here makes the canonical line portable. */
+static int tbt_parse_dev(const char *s, char out[IFNAMSIZ])
+{
+    size_t len, i;
+
+    if (!s)
+        return -EINVAL;
+    len = strlen(s);
+    if (!len || len >= IFNAMSIZ)
+        return -EINVAL;
+    for (i = 0; i < len; i++)
+    {
+        unsigned char c = (unsigned char)s[i];
+
+        if (c <= ' ' || c == 0x7f || c == '/')
+            return -EINVAL;
+    }
+    memcpy(out, s, len);
+    out[len] = '\0';
     return 0;
 }
 
@@ -1012,6 +1045,12 @@ int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
     }
     if (rc)
         return rc;
+    if (c->dev_set)
+    {
+        rc = tbt_addf(buf, size, &off, " dev=%s", c->dev);
+        if (rc)
+            return rc;
+    }
     if (c->nonce_set)
     {
         char nb[2 * sizeof(c->nonce) + 1];
