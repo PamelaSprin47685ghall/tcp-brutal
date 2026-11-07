@@ -1232,6 +1232,46 @@ static void test_ack_split(void)
             "ack split: the ACK carries the delivered byte count");
 }
 
+/* The replay ring is sized in super-block ids, and the credit cap keeps the
+ * sender inside it: the sender may run at most K-2 super-blocks past the
+ * delivered frontier, so a block the receiver can still NACK is never
+ * evicted. A short block advances the id by one per quiet gap (2 ms), so the
+ * ring covers only K * 2 ms of a sparse stream -- the guarantee is the credit
+ * cap, not the elapsed time. This models a 300 ms NACK round trip: the delay
+ * changes nothing because the sender is stopped at the cap. */
+static void test_replay_window(void)
+{
+    struct tbt_fec_replay *r;
+    u16 k;
+    u64 b;
+    u8 buf[S];
+
+    r = tbt_fec_replay_new(G, N, M, S);
+    ok(r != NULL, "replay window: ring");
+    k = tbt_fec_replay_k(r);
+    ok_int(k, TBT_FEC_REPLAY_K, "replay window: the ring holds K super-blocks");
+
+    /* The receiver delivered up to block 3 and stalls on block 4. The sender
+     * closes blocks 4..(3 + K - 2): the credit cap, one short share each. */
+    for (b = 0; b <= 3 + (u64)(k - 2); b++)
+        ok_int(tbt_fec_replay_store(r, b, 0, 0, src, S), 0,
+               "replay window: short block stored");
+
+    /* The NACK for the stalled block arrives 300 ms later: the cap stopped
+     * the sender, so nothing touched the block. */
+    ok_int(tbt_fec_replay_get(r, 4, 0, 0, buf, S), S,
+           "replay window: the stalled block replays after the NACK delay");
+
+    /* The bound is exact: block 4 + K shares block 4's slot. The data plane
+     * never lets the sender get there; this is what the cap prevents, and
+     * what a NACK reply must not do to a live slot either. */
+    ok_int(tbt_fec_replay_store(r, 4 + k, 0, 0, src, S), 0,
+           "replay window: one block past the cap is storable");
+    ok_int(tbt_fec_replay_get(r, 4, 0, 0, buf, S), -ESTALE,
+           "replay window: past the cap the stalled block is evicted");
+    tbt_fec_replay_free(r);
+}
+
 static void test_rx_poll(void)
 {
     /* tbt_session_arm() never retimes a pending item, so the delay this walk
@@ -1277,6 +1317,7 @@ int main(void)
     test_super_cursor();
     test_ack_split();
     test_rx_poll();
+    test_replay_window();
 
     printf("test_fec_rx: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

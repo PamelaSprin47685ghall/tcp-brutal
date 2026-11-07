@@ -1688,8 +1688,17 @@ static int tbt_fec_send_empty_marker(struct tbt_session *sess, u16 group,
         return -EINVAL;
     {
         int st = -EINVAL;
+        u64 cur = READ_ONCE(tx->cur_block);
+        u16 rk = tbt_fec_replay_k(tx->replay);
 
-        if (tx->replay)
+        /* The reply itself must go out, but its ring copy must not reclaim a
+         * live slot: the ring holds K block ids, so block `block_id` shares
+         * its slot with `block_id + K`. Re-storing a block the ring has
+         * already wrapped past would evict that newer block -- one the
+         * receiver may still be waiting for. Keep the copy only while the
+         * block is inside the window; the receiver gets the marker either
+         * way. */
+        if (tx->replay && cur >= block_id && cur - block_id < rk)
         {
             spin_lock_bh(&tx->replay_lock);
             st = tbt_fec_replay_store(tx->replay, block_id, group, tx->n,
@@ -1697,8 +1706,8 @@ static int tbt_fec_send_empty_marker(struct tbt_session *sess, u16 group,
             spin_unlock_bh(&tx->replay_lock);
         }
         if (debug >= 2)
-            pr_info("tbtun: fec empty reply tx block=%llu group=%u share=%u store=%d\n",
-                    block_id, group, tx->n, st);
+            pr_info("tbtun: fec empty reply tx block=%llu group=%u share=%u cur=%llu k=%u store=%d\n",
+                    block_id, group, tx->n, cur, rk, st);
     }
     return tbt_fec_send_record(sess, 0, rec, len, true, false);
 }
@@ -1870,6 +1879,10 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
         spin_lock_bh(&rx->lock);
         if (rx->stream_sid != st->sid)
         {
+            if (debug >= 2)
+                pr_info("tbtun: fec stream adopt sid=%llu old=%llu base=%llu deliver=%llu next_super=%llu\n",
+                        st->sid, rx->stream_sid, rx->deliver_bytes,
+                        rx->deliver_bytes, rx->next_super);
             rx->stream_sid = st->sid;
             rx->stream_base = rx->deliver_bytes;
             rx->stream_pkt_base = 0;
@@ -2986,7 +2999,29 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                 }
                 if (len == -ESTALE)
                 {
-                    atomic64_inc(&sess->fec_replay_miss_evicted);
+                    u64 cur = READ_ONCE(tx->cur_block);
+                    u16 rk = tbt_fec_replay_k(tx->replay);
+
+                    /* -ESTALE means "this block is not resident". A block
+                     * the sender never built reads the same as one the ring
+                     * has wrapped past; counting both as evictions makes a
+                     * probe for a block that does not exist yet look like a
+                     * ring that is too shallow. Only a block the ring has
+                     * moved at least K ids past is really evicted. */
+                    if (cur >= h.block_id && cur - h.block_id >= rk)
+                    {
+                        atomic64_inc(&sess->fec_replay_miss_evicted);
+                        if (debug >= 2)
+                            pr_info("tbtun: fec NACK evicted block=%llu group=%u share=%u cur=%llu k=%u\n",
+                                    h.block_id, g, s, cur, rk);
+                    }
+                    else
+                    {
+                        atomic64_inc(&sess->fec_replay_miss_never_stored);
+                        if (debug >= 2)
+                            pr_info("tbtun: fec NACK unbuilt block=%llu group=%u share=%u cur=%llu k=%u\n",
+                                    h.block_id, g, s, cur, rk);
+                    }
                     atomic64_inc(&sess->fec_replay_miss_get);
                     atomic64_inc(&sess->fec_replay_miss);
                     continue;
