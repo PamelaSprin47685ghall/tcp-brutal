@@ -1,0 +1,61 @@
+make: Entering directory '/usr/src/linux-headers-7.0.0-42-generic'
+make[1]: Entering directory '/root/tbtun-prod-20261106T235114Z'
+warning: the compiler differs from the one used to build the kernel
+  The kernel was built by: x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+  You are using:           gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+warning: pahole version differs from the one used to build the kernel
+  The kernel was built with: 131
+  You are using:             0
+  CC [M]  tbtun/tbt_core.o
+  CC [M]  tbtun/tbt_session.o
+  CC [M]  tbtun/tbt_procfs.o
+tbtun/tbt_session.c: In function ‘tbt_session_join’:
+tbtun/tbt_session.c:1445:1: warning: the frame size of 1072 bytes is larger than 1024 bytes [-Wframe-larger-than=]
+ 1445 | }
+      | ^
+  CC [M]  tbtun/tbt_listen.o
+tbtun/tbt_procfs.c: In function ‘tbt_peers_write’:
+tbtun/tbt_procfs.c:456:1: warning: the frame size of 1272 bytes is larger than 1024 bytes [-Wframe-larger-than=]
+  456 | }
+      | ^
+tbtun/tbt_procfs.c: In function ‘tbt_config_snapshot’:
+tbtun/tbt_procfs.c:322:1: warning: the frame size of 1048 bytes is larger than 1024 bytes [-Wframe-larger-than=]
+  322 | }
+      | ^
+tbtun/tbt_procfs.c: In function ‘tbt_cfg_write’:
+tbtun/tbt_procfs.c:222:1: warning: the frame size of 1056 bytes is larger than 1024 bytes [-Wframe-larger-than=]
+  222 | }
+      | ^
+  CC [M]  tbtun/tbt_proto.o
+  CC [M]  tbtun/tbt_carrier.o
+  CC [M]  tbtun/tbt_sock.o
+tbtun/tbt_carrier.c: In function ‘tbt_carrier_lost.part.0’:
+tbtun/tbt_carrier.c:1470:1: warning: the frame size of 1048 bytes is larger than 1024 bytes [-Wframe-larger-than=]
+ 1470 | }
+      | ^
+  CC [M]  tbtun/tbt_tx.o
+  CC [M]  tbtun/tbt_rx.o
+  CC [M]  tbtun/tbt_rec.o
+  CC [M]  tbtun/tbt_parse.o
+tbtun/tbt_tx.c: In function ‘tbt_tx_pump’:
+tbtun/tbt_tx.c:2832:1: warning: the frame size of 1288 bytes is larger than 1024 bytes [-Wframe-larger-than=]
+ 2832 | }
+      | ^
+  CC [M]  tbtun/tbt_http.o
+tbtun/tbt_tx.c: In function ‘tbt_fbk_work’:
+tbtun/tbt_tx.c:3226:1: warning: the frame size of 1088 bytes is larger than 1024 bytes [-Wframe-larger-than=]
+ 3226 | }
+      | ^
+  CC [M]  tbtun/tbt_crypto.o
+  CC [M]  tbtun/tbt_portmap.o
+  CC [M]  tbtun/tbt_fec.o
+  CC [M]  tbtun/tbt_fec_data.o
+  LD [M]  tbtun.o
+  MODPOST Module.symvers
+  CC [M]  tbtun.mod.o
+  CC [M]  .module-common.o
+  LD [M]  tbtun.ko
+  BTF [M] tbtun.ko
+Skipping BTF generation for tbtun.ko due to unavailability of vmlinux
+make[1]: Leaving directory '/root/tbtun-prod-20261106T235114Z'
+make: Leaving directory '/usr/src/linux-headers-7.0.0-42-generic'

@@ -1,0 +1,155 @@
+kind=dirty-worktree-build (NOT a git archive; tree state = HEAD + uncommitted diff)
+ref=HEAD
+sha=2a8d509f37a3ad2cbae4cbfc01a3b345426b951a
+short=2a8d509f37a3
+dirty=yes
+dirty_files=tbtun/tbt_carrier.c tbtun/tbt_rx.c tbtun/tbtun.h tbtun/tbt_fec_data.c tbtun/tbt_session.c tbtun/tbt_tx.c CHANGELOG.md review/dkms-qemu/artifacts/guest-tbtun.ko.sha256(deleted)
+host=root@192.168.123.65
+stage=/root/tbtun-fixed-20261106T231212Z
+utc=2026-11-06T23:12:51Z
+archive_sha256=4d4f33cff0e71e90b46a503a7f68d3d880077745c0409d5c631f3d4fffd7e947
+worktree_src=worktree-src.tar (byte-identical copy of the tar sent to .65; sha256 above)
+tar_excludes=.git openvpn mptcpd *.o *.ko *.cmd modules.order Module.symvers review/ benches/results
+staged_files=128 (after deleting stale tbtun.mod/tbtun.mod.c carried by the worktree)
+
+== local diffstat (git diff --stat) ==
+ CHANGELOG.md                                     |  10 ++
+ review/dkms-qemu/artifacts/guest-tbtun.ko.sha256 |   1 -
+ tbtun/tbt_carrier.c                              | 160 +++++++++++++++++++++--
+ tbtun/tbt_fec_data.c                             |  58 ++++++++
+ tbtun/tbt_rx.c                                   |  47 +++++++
+ tbtun/tbt_session.c                              |  28 +++-
+ tbtun/tbt_tx.c                                   |  36 +++++
+ tbtun/tbtun.h                                    |  25 ++++
+ 8 files changed, 354 insertions(+), 11 deletions(-)
+
+== sync integrity (local vs /root/tbtun-fixed-20261106T231212Z) ==
+identical 9971b83aa3fce457d838d3f146dfb9d5b878b8f7bdb49190017d8201ffa22533 tbtun/tbt_carrier.c
+identical dad2b821df3295a2f6471c88fb73acf83018a1c772ac63131b22f2d861ce54f6 tbtun/tbt_rx.c
+identical 83b289503791656a32d8a060122933fcd42eb0166d8ffc2e21aa1418fbe78511 tbtun/tbtun.h
+identical ce9eaab35e9337483b7d652dd5e58e5a9356ff9f19872271d5ec75895ddbc2bc tbtun/tbt_fec_data.c
+identical b0f5c9a3e7e8b1216821aeb73892021b9232cf6c4d4fb5223226a71c5d1ee7d8 tbtun/tbt_session.c
+identical bba67b56b33e355fbc6bc002673dd872803c5967a854b5836db6a089477402bd tbtun/tbt_tx.c
+identical 95f79baa1638bc1fa6eec89f47b13fa21de7e6e2617b31dac14f279ef7ecad50 CHANGELOG.md
+
+== fix markers on staged tree ==
+1356:        c->parser = kzalloc(sizeof(*c->parser), GFP_KERNEL);
+844:    if (!p || !c->http_rx || p->have > sizeof(p->buf) ||
+57:#define TBT_DIAG(fmt, ...)                                            \
+62:#define TBT_DIAG_WARN(fmt, ...)                                       \
+
+== uname ==
+Linux lubancat 6.1.172 #1 SMP Sat Oct 17 15:47:17 CST 2026 aarch64 GNU/Linux
+
+== nproc ==
+8
+
+== cc ==
+cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+
+== make ==
+GNU Make 4.4.1
+
+== ko ==
+-rw-r--r-- 1 root root 258936 2026-11-07 07:12:28.800683628 +0800 /root/tbtun-fixed-20261106T231212Z/tbtun.ko
+
+== file ==
+/root/tbtun-fixed-20261106T231212Z/tbtun.ko: ELF 64-bit LSB relocatable, ARM aarch64, version 1 (SYSV), BuildID[sha1]=a19f1a1c5bb22dfcf091ee4522f6682400045459, not stripped
+
+== vermagic ==
+6.1.172 SMP mod_unload modversions aarch64
+
+== srcversion ==
+72168C1CE3E3378A758DAFF
+
+== sha256 ==
+1637ca0fd3d6371595102f34e187242ef44c0d73d717a7d77e039c793ba2ab92  /root/tbtun-fixed-20261106T231212Z/tbtun.ko
+
+== local copy ==
+1637ca0fd3d6371595102f34e187242ef44c0d73d717a7d77e039c793ba2ab92  review/wan-experiment/arm64/build-fixed-2a8d509f37a3-20261106T231212Z/tbtun.ko
+
+== pre-load symbol version check (read-only, no insmod) ==
+modprobe --dump-modversions tbtun.ko lists 107 imported symbols; all 107 CRC values match
+/lib/modules/6.1.172/build/Module.symvers (MATCHED=107, 0 missing, 0 mismatched), including
+module_layout 0xdaf94c42. So a load would not fail with "disagrees about version of symbol".
+headers tree /lib/modules/6.1.172/build -> /usr/src/linux-headers-6.1.172 (mtime Oct 17 15:15,
+kernel build stamp Sat Oct 17 15:47:17 CST 2026).
+
+== wrong-file hazard on .65 ==
+12 files named tbtun.ko exist under /root; every one has a distinct sha256, so the identity below
+is unique and checkable before any insmod:
+  load THIS:  /root/tbtun-fixed-20261106T231212Z/tbtun.ko   1637ca0fd3d6371595102f34e187242ef44c0d73d717a7d77e039c793ba2ab92  258936 B  2026-11-07 07:12
+  do NOT use: /root/tbtun-t52-arm64-2a8d509f37a3/tbtun.ko   5ea1f1235cdb1136ea5b88fe7aecc8841155f02c694ce98035975b0cc5821f73  237480 B  (same HEAD, pre-fix tree: the crash build)
+  srcversion of THIS module 72168C1CE3E3378A758DAFF vs 279034E1436393623E17D27 for the pre-fix one.
+
+== modinfo ==
+filename:       /root/tbtun-fixed-20261106T231212Z/tbtun.ko
+author:         tbtun contributors
+version:        0.0.1
+description:    tbtun: TCP tunnel over N+M HTTP/1.1-ish carrier connections
+license:        GPL
+srcversion:     72168C1CE3E3378A758DAFF
+depends:        
+name:           tbtun
+vermagic:       6.1.172 SMP mod_unload modversions aarch64
+parm:           debug:Debug verbosity (0..3) (uint)
+parm:           max_tunnels:Maximum configured tunnels (default 64) (uint)
+parm:           max_carriers:Carrier sockets per session, 1..256 (default 256) (uint)
+parm:           debug_loss:Allow carrier drop_ppm (frame loss injection) writes; 0 refuses them (bool)
+
+== build log (full) ==
+warning: the compiler differs from the one used to build the kernel
+  The kernel was built by: aarch64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+  You are using:           gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun/tbt_core.o
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun/tbt_session.o
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun/tbt_procfs.o
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun/tbt_listen.o
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun/tbt_proto.o
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun/tbt_carrier.o
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun/tbt_sock.o
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun/tbt_tx.o
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun/tbt_rx.o
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun/tbt_rec.o
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun/tbt_parse.o
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun/tbt_http.o
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun/tbt_crypto.o
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun/tbt_portmap.o
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun/tbt_fec.o
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun/tbt_fec_data.o
+  LD [M]  /root/tbtun-fixed-20261106T231212Z/tbtun.o
+  MODPOST /root/tbtun-fixed-20261106T231212Z/Module.symvers
+  CC [M]  /root/tbtun-fixed-20261106T231212Z/tbtun.mod.o
+  LD [M]  /root/tbtun-fixed-20261106T231212Z/tbtun.ko
+
+== notes ==
+build warning: kernel built by aarch64-linux-gnu-gcc 15.2.0-16ubuntu1, module by gcc 15.2.0-16ubuntu1 (same version, different driver name) - benign, modversions/vermagic match.
+task grep pattern "kzalloc(sizeof(*c->parser))" does not match literally; the code is "c->parser = kzalloc(sizeof(*c->parser), GFP_KERNEL);" (tbt_carrier.c:1356).
+contrast: clean-commit build of the same HEAD (build-2a8d509f37a3-20261106T165145Z) had sha256 5ea1f1235cdb1136ea5b88fe7aecc8841155f02c694ce98035975b0cc5821f73 / srcversion 279034E1436393623E17D27; this dirty build differs -> the uncommitted fix is in the binary.
+state on .65 at build time: no tbtun module loaded (lsmod: NO_TBTUN_LOADED).
+nothing was loaded, unloaded, or written to /proc/net/tbtun; no tbt_burst/tbt_ping executed.
+
+== source verification (read-only, local tree) ==
+tbt_carrier.c:1356-1357  c->parser / c->http_rx both kzalloc'd in tbt_carrier_new_locked(); :1358-1362 frees the object when any of the five sub-objects is NULL, so a half-built carrier never reaches sess->car[].
+tbt_carrier.c:1320-1337  reuse path keeps the same pair and re-zeros parser (memset) before tbt_http_rx_new_message().
+tbt_rx.c:844             guard !p || !c->http_rx || p->have > sizeof(p->buf) (TBT_PARSER_BUF = 8192, `>` correct); second guard at tbt_rx.c:1156 in tbt_rx_parse_pending().
+tbtun.h:57-65            TBT_DIAG / TBT_DIAG_WARN are unconditional pr_info/pr_warn, no #ifdef, no config switch.
+unprotected c->parser derefs remain at tbt_carrier.c:319/519/701/1510 and tbt_rx.c:1046/1172, but they only run on installed carriers; not a reachable NULL path.
+side finding (not fixed here): review/lint.sh:330/332 still greps "http_rx = kmalloc" / "parser = kmalloc"; the code now uses kzalloc, so that lint check reports a false "missing: http_rx parser".
+
+== handoff (nothing below was executed) ==
+insmod candidate: ssh root@192.168.123.65 "sha256sum /root/tbtun-fixed-20261106T231212Z/tbtun.ko"  # must print 1637ca0f...
+evidence dir (local): review/wan-experiment/arm64/build-fixed-2a8d509f37a3-20261106T231212Z
+  build.log  identity.txt  summary.txt  src.tar.sha256  tbtun.ko  worktree-src.tar
+
+== binary verification of the pulled tbtun.ko (local aarch64-linux-gnu-objdump 2.47, read-only) ==
+symbol: tbt_carrier_new_locked = 0x69fc, size 0x3ec (local symbol `t`, static; called only from tbt_carrier_new@0x6de8)
+0x6ac0  bl kmalloc_large   x0=0x2030 (8240 = sizeof(struct tbt_parser)), w1=0xdc0   -> c->parser = kzalloc(...)
+0x6ad0  bl kmalloc_large   x0=0x2058 (8280 = sizeof(struct tbt_http_rx)), w1=0xdc0  -> c->http_rx = kzalloc(...)
+0x6a64  bl kmalloc_trace  x2=0x298 (664 = sizeof(struct tbt_carrier)), w1=0xdc0
+0x6bc0  bl memset         x2=0x298, w1=0 -> memset(c, 0, sizeof(*c))
+0x6bf8  bl memset         x2=0x2030, w1=0 -> memset(parser, 0, sizeof(*parser))   (reuse path, tbt_carrier.c:1336)
+gfp 0xdc0 = GFP_KERNEL 0xcc0 | __GFP_ZERO 0x100: kzalloc is a static inline, so there is no `kzalloc` symbol;
+the zeroing flag in the call is the binary proof that both parser and http_rx are zero-initialised.
+entry points present: init_module@.init.text(19), cleanup_module@.exit.text(21); init calls tbt_procfs_init -> tbt_carrier_init@0x8330.
+readelf -p .modinfo: srcversion=72168C1CE3E3378A758DAFF, vermagic=6.1.172 SMP mod_unload modversions aarch64, depends= (empty), name=tbtun.

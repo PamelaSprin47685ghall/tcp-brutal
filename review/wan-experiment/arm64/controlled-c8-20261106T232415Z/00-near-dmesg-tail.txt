@@ -1,0 +1,16 @@
+utc=2026-11-06T23:24:21Z
+dmesg_lines=1409
+[  552.396607] audit: type=1400 audit(1794006504.938:200): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=5070 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  552.397017] audit: type=1400 audit(1794006504.938:201): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=5070 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  552.397045] audit: type=1400 audit(1794006504.938:202): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=5070 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  557.285399] systemd-journald[493]: Received SIGTERM from PID 1 (systemd).
+[  557.285432] systemd[1]: Stopping systemd-journald.service - Journal Service...
+[  557.296419] systemd[1]: systemd-journald.service: Deactivated successfully.
+[  557.296760] systemd[1]: Stopped systemd-journald.service - Journal Service.
+[  557.302430] systemd[1]: Starting systemd-journald.service - Journal Service...
+[  557.340747] systemd-journald[5081]: Collecting audit messages is disabled.
+[  557.346544] systemd[1]: Started systemd-journald.service - Journal Service.
+[  558.407925] tbtun-visibility-probe3 journald-sync-1794006510949055272
+[  639.131902] tbtun-probe3 1794006591676601041
+--- sampler log ---
+-rw-r--r-- 1 root root 1064602 Nov  7 07:24 /var/log/tbtun-last.log

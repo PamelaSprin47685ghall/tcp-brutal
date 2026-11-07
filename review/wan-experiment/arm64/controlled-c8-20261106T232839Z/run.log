@@ -1,0 +1,9 @@
+23:28:39Z evidence: /home/kunweiz/Desktop/vibe/tcp-brutal/review/wan-experiment/arm64/controlled-c8-20261106T232839Z
+23:28:40Z lock: /tmp/tbtun-rk3588.lock 已持有
+23:28:41Z lock: /tmp/tbtun-hnd0.lock 已持有
+23:28:42Z visibility: relay=active sampler=active rx=active-user sampler_lines=20917
+23:28:50Z warn: far 已加载 srcversion=332759AF31AB0DD875E0EE7 != /home/tbtun-t52-arm64/tbtun.ko srcversion=846D47A623A8198946CBA64（记录，不阻塞）
+23:28:51Z snapshot: pre
+23:29:04Z evidence: netconsole（burst 后第一份快照）
+23:29:04Z evidence: far
+23:29:13Z evidence: near

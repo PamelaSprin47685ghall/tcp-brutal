@@ -1,0 +1,134 @@
+===== KERN.LOG 06:43-06:45 =====
+===== KERN.LOG last 60 lines =====
+2026-11-07T06:00:02.675939+08:00 lubancat kernel: usb0: HOST MAC 6e:c2:66:54:56:85
+2026-11-07T06:00:02.675983+08:00 lubancat kernel: usb0: MAC 86:3a:3d:45:a2:98
+2026-11-07T06:00:02.679260+08:00 lubancat kernel: rk-pcie fe170000.pcie: PCIe Link Fail, LTSSM is 0x3, hw_retries=1
+2026-11-07T06:00:02.705931+08:00 lubancat kernel: rk-pcie fe190000.pcie: failed to initialize host
+2026-11-07T06:00:02.775923+08:00 lubancat kernel: NET: Registered PF_QIPCRTR protocol family
+2026-11-07T06:00:02.785919+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet eth0: Register MEM_TYPE_PAGE_POOL RxQ-0
+2026-11-07T06:00:02.785939+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet eth0: PHY [stmmac-1:00] driver [JL2xxx Gigabit Ethernet 1.2.9] (irq=POLL)
+2026-11-07T06:00:02.805919+08:00 lubancat kernel: android_work: did not send uevent (0 0 0000000000000000)
+2026-11-07T06:00:02.919289+08:00 lubancat kernel: loop0: detected capacity change from 0 to 8
+2026-11-07T06:00:02.929286+08:00 lubancat kernel: squashfs: version 4.0 (2009/01/31) Phillip Lougher
+2026-11-07T06:00:03.692655+08:00 lubancat kernel: rk-pcie fe170000.pcie: failed to initialize host
+2026-11-07T06:00:04.306258+08:00 lubancat kernel: dwmac4: Master AXI performs any burst length
+2026-11-07T06:00:04.306299+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet eth0: No Safety Features support found
+2026-11-07T06:00:04.306301+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet eth0: IEEE 1588-2008 Advanced Timestamp supported
+2026-11-07T06:00:04.306303+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet eth0: registered PTP clock
+2026-11-07T06:00:04.306304+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet eth0: FPE workqueue start
+2026-11-07T06:00:04.306305+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet eth0: configuring for phy/rgmii-rxid link mode
+2026-11-07T06:00:04.306307+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Up - Unknown/Unknown - flow control off
+2026-11-07T06:00:04.306309+08:00 lubancat kernel: IPv6: ADDRCONF(NETDEV_CHANGE): eth0: link becomes ready
+2026-11-07T06:00:04.312627+08:00 lubancat kernel: rk_gmac-dwmac fe1b0000.ethernet eth1: Register MEM_TYPE_PAGE_POOL RxQ-0
+2026-11-07T06:00:04.312673+08:00 lubancat kernel: rk_gmac-dwmac fe1b0000.ethernet eth1: PHY [stmmac-0:00] driver [JL2xxx Gigabit Ethernet 1.2.9] (irq=POLL)
+2026-11-07T06:00:05.319263+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Down
+2026-11-07T06:00:05.825931+08:00 lubancat kernel: dwmac4: Master AXI performs any burst length
+2026-11-07T06:00:05.825966+08:00 lubancat kernel: rk_gmac-dwmac fe1b0000.ethernet eth1: No Safety Features support found
+2026-11-07T06:00:05.825969+08:00 lubancat kernel: rk_gmac-dwmac fe1b0000.ethernet eth1: IEEE 1588-2008 Advanced Timestamp supported
+2026-11-07T06:00:05.825970+08:00 lubancat kernel: rk_gmac-dwmac fe1b0000.ethernet eth1: registered PTP clock
+2026-11-07T06:00:05.825972+08:00 lubancat kernel: rk_gmac-dwmac fe1b0000.ethernet eth1: FPE workqueue start
+2026-11-07T06:00:05.825973+08:00 lubancat kernel: rk_gmac-dwmac fe1b0000.ethernet eth1: configuring for phy/rgmii-rxid link mode
+2026-11-07T06:00:07.345923+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet: Detected PHY ID: 0x937c4032
+2026-11-07T06:00:07.345940+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet: JL2XXX TX delay(0x8).
+2026-11-07T06:00:07.345942+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet: JL2XXX RX delay(0xffffffff).
+2026-11-07T06:00:07.345944+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Up - 1Gbps/Full - flow control rx/tx
+2026-11-07T06:00:09.766005+08:00 lubancat kernel: tun: Universal TUN/TAP device driver, 1.6
+2026-11-07T06:00:12.862666+08:00 lubancat kernel: icmp: detected local route for 198.18.0.1 during ICMP sending, src 223.5.5.5
+2026-11-07T06:00:12.862739+08:00 lubancat kernel: message repeated 4 times: [ icmp: detected local route for 198.18.0.1 during ICMP sending, src 223.5.5.5]
+2026-11-07T06:00:12.865899+08:00 lubancat kernel: platform mtd_vendor_storage: deferred probe pending
+2026-11-07T06:00:16.089270+08:00 lubancat kernel: kauditd_printk_skb: 172 callbacks suppressed
+2026-11-07T06:00:16.089301+08:00 lubancat kernel: audit: type=1400 audit(1794002416.083:184): apparmor="DENIED" operation="capable" profile="fusermount3" pid=1650 comm="fusermount" capability=1  capname="dac_override"
+2026-11-07T06:00:16.089305+08:00 lubancat kernel: audit: type=1400 audit(1794002416.083:185): apparmor="DENIED" operation="capable" profile="fusermount3" pid=1650 comm="fusermount" capability=7  capname="setuid"
+2026-11-07T06:00:16.089307+08:00 lubancat kernel: audit: type=1400 audit(1794002416.083:186): apparmor="DENIED" operation="capable" profile="fusermount3" pid=1651 comm="fusermount" capability=7  capname="setuid"
+2026-11-07T07:01:44.017255+08:00 lubancat kernel: audit: type=1400 audit(1794006104.010:187): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=2037 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+2026-11-07T07:01:44.017303+08:00 lubancat kernel: audit: type=1400 audit(1794006104.013:188): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=2037 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+2026-11-07T07:01:44.017308+08:00 lubancat kernel: audit: type=1400 audit(1794006104.013:189): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=2037 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+2026-11-07T07:01:44.017310+08:00 lubancat kernel: audit: type=1400 audit(1794006104.013:190): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=2037 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+2026-11-07T07:02:34.497254+08:00 lubancat kernel: audit: type=1400 audit(1794006154.492:191): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=3121 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+2026-11-07T07:02:34.497298+08:00 lubancat kernel: audit: type=1400 audit(1794006154.492:192): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=3121 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+2026-11-07T07:02:34.497303+08:00 lubancat kernel: audit: type=1400 audit(1794006154.492:193): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=3121 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+2026-11-07T07:02:34.497305+08:00 lubancat kernel: audit: type=1400 audit(1794006154.492:194): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=3121 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+2026-11-07T07:05:09.183920+08:00 lubancat kernel: audit: type=1400 audit(1794006309.177:195): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=3929 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+2026-11-07T07:05:09.183955+08:00 lubancat kernel: audit: type=1400 audit(1794006309.177:196): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=3929 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+2026-11-07T07:05:09.183957+08:00 lubancat kernel: audit: type=1400 audit(1794006309.177:197): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=3929 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+2026-11-07T07:05:09.183958+08:00 lubancat kernel: audit: type=1400 audit(1794006309.177:198): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=3929 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+2026-11-07T07:05:21.727297+08:00 lubancat kernel: netpoll: netconsole: local port 6666
+2026-11-07T07:05:21.727372+08:00 lubancat kernel: netpoll: netconsole: local IPv4 address 192.168.123.65
+2026-11-07T07:05:21.727382+08:00 lubancat kernel: netpoll: netconsole: interface 'eth0'
+2026-11-07T07:05:21.727386+08:00 lubancat kernel: netpoll: netconsole: remote port 6666
+2026-11-07T07:05:21.727391+08:00 lubancat kernel: netpoll: netconsole: remote IPv4 address 192.168.123.80
+2026-11-07T07:05:21.727394+08:00 lubancat kernel: netpoll: netconsole: remote ethernet address ff:ff:ff:ff:ff:ff
+2026-11-07T07:05:21.727398+08:00 lubancat kernel: printk: console [netcon0] enabled
+2026-11-07T07:05:21.727402+08:00 lubancat kernel: netconsole: network logging started
+===== SYSLOG 06:43-06:45 (non-kernel) =====
+===== SYSLOG tail 30 =====
+2026-11-07T07:04:13.366447+08:00 lubancat systemd[1]: Configuration file /usr/lib/systemd/system/rkaiq_3A.service is marked world-writable. Please remove world writability permission bits. Proceeding anyway.
+2026-11-07T07:04:13.631611+08:00 lubancat systemd[1]: Configuration file /usr/lib/systemd/system/rkisp_3A.service is marked world-writable. Please remove world writability permission bits. Proceeding anyway.
+2026-11-07T07:04:18.374233+08:00 lubancat mihomo[1505]: time="2026-11-07T07:04:18.372907879+08:00" level=info msg="[UDP] 198.18.0.1:34314 --> ntp-bootstrap.ubuntu.com:123 match Match using WORLD[HND2UDP6]"
+2026-11-07T07:04:28.536088+08:00 lubancat systemd[1]: Starting update-notifier-download.service - Download data for packages that failed at package install time...
+2026-11-07T07:04:28.546296+08:00 lubancat systemd[1]: systemd-timedated.service: Deactivated successfully.
+2026-11-07T07:04:28.706891+08:00 lubancat systemd[1]: update-notifier-download.service: Deactivated successfully.
+2026-11-07T07:04:28.707179+08:00 lubancat systemd[1]: Finished update-notifier-download.service - Download data for packages that failed at package install time.
+2026-11-07T07:05:01.104957+08:00 lubancat CRON[3867]: (kunweiz) CMD (/home/kunweiz/.local/bin/compile-guard)
+2026-11-07T07:05:09.183920+08:00 lubancat kernel: audit: type=1400 audit(1794006309.177:195): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=3929 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+2026-11-07T07:05:09.183955+08:00 lubancat kernel: audit: type=1400 audit(1794006309.177:196): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=3929 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+2026-11-07T07:05:09.183957+08:00 lubancat kernel: audit: type=1400 audit(1794006309.177:197): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=3929 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+2026-11-07T07:05:09.183958+08:00 lubancat kernel: audit: type=1400 audit(1794006309.177:198): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=3929 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+2026-11-07T07:05:13.615785+08:00 lubancat mihomo[1505]: time="2026-11-07T07:05:13.614549843+08:00" level=info msg="[UDP] 198.18.0.1:53267 --> 2.ntp.ubuntu.com:123 match Match using WORLD[HND2UDP6]"
+2026-11-07T07:05:13.809792+08:00 lubancat mihomo[1505]: time="2026-11-07T07:05:13.809519952+08:00" level=info msg="[UDP] 198.18.0.1:39801 --> 1.ntp.ubuntu.com:123 match Match using WORLD[HND2UDP6]"
+2026-11-07T07:05:15.331284+08:00 lubancat mihomo[1505]: time="2026-11-07T07:05:15.329974523+08:00" level=info msg="[UDP] 198.18.0.1:42790 --> 3.ntp.ubuntu.com:123 match Match using WORLD[HND2UDP6]"
+2026-11-07T07:05:15.530561+08:00 lubancat mihomo[1505]: time="2026-11-07T07:05:15.530330191+08:00" level=info msg="[UDP] 198.18.0.1:37276 --> 4.ntp.ubuntu.com:123 match Match using WORLD[HND2UDP6]"
+2026-11-07T07:05:21.727297+08:00 lubancat kernel: netpoll: netconsole: local port 6666
+2026-11-07T07:05:21.727372+08:00 lubancat kernel: netpoll: netconsole: local IPv4 address 192.168.123.65
+2026-11-07T07:05:21.727382+08:00 lubancat kernel: netpoll: netconsole: interface 'eth0'
+2026-11-07T07:05:21.727386+08:00 lubancat kernel: netpoll: netconsole: remote port 6666
+2026-11-07T07:05:21.727391+08:00 lubancat kernel: netpoll: netconsole: remote IPv4 address 192.168.123.80
+2026-11-07T07:05:21.727394+08:00 lubancat kernel: netpoll: netconsole: remote ethernet address ff:ff:ff:ff:ff:ff
+2026-11-07T07:05:21.727398+08:00 lubancat kernel: printk: console [netcon0] enabled
+2026-11-07T07:05:21.727402+08:00 lubancat kernel: netconsole: network logging started
+2026-11-07T07:05:22.787331+08:00 lubancat kernel: tbtun-visibility-probe-1794006322 netconsole path check
+2026-11-07T07:05:22.909836+08:00 lubancat mihomo[1505]: time="2026-11-07T07:05:22.908621558+08:00" level=info msg="[UDP] 198.18.0.1:42368 --> ntp-bootstrap.ubuntu.com:123 match Match using WORLD[HND2UDP6]"
+2026-11-07T07:05:24.022318+08:00 lubancat dbus-daemon[1047]: [system] Activating via systemd: service name='org.freedesktop.timedate1' unit='dbus-org.freedesktop.timedate1.service' requested by ':1.50' (uid=0 pid=4032 comm="timedatectl")
+2026-11-07T07:05:24.028311+08:00 lubancat systemd[1]: Starting systemd-timedated.service - Time & Date Service...
+2026-11-07T07:05:24.075460+08:00 lubancat systemd[1]: Started systemd-timedated.service - Time & Date Service.
+2026-11-07T07:05:24.076425+08:00 lubancat dbus-daemon[1047]: [system] Successfully activated service 'org.freedesktop.timedate1'
+===== /var/log/dmesg head =====
+[    5.532220] kernel: Booting Linux on physical CPU 0x0000000000 [0x412fd050]
+[    5.532257] kernel: Linux version 6.1.172 (root@lubancat) (aarch64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46) #1 SMP Sat Oct 17 15:47:17 CST 2026
+[    5.532277] kernel: Machine model: Embedfire LubanCat-5 V2
+[    5.532290] kernel: earlycon: uart8250 at MMIO32 0x00000000feb50000 (options '')
+[    5.532303] kernel: printk: bootconsole [uart8250] enabled
+---
+[   10.508273] kernel: rk_gmac-dwmac fe1b0000.ethernet eth1: configuring for phy/rgmii-rxid link mode
+[   12.026981] kernel: rk_gmac-dwmac fe1c0000.ethernet: Detected PHY ID: 0x937c4032
+[   12.027404] kernel: rk_gmac-dwmac fe1c0000.ethernet: JL2XXX TX delay(0x8).
+[   12.027724] kernel: rk_gmac-dwmac fe1c0000.ethernet: JL2XXX RX delay(0xffffffff).
+[   12.027985] kernel: rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Up - 1Gbps/Full - flow control rx/tx
+===== /var/log/dmesg.0 head/tail =====
+[    5.623816] kernel: Booting Linux on physical CPU 0x0000000000 [0x412fd050]
+[    5.623851] kernel: Linux version 6.1.172 (root@lubancat) (aarch64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46) #1 SMP Sat Oct 17 15:47:17 CST 2026
+[    5.623870] kernel: Machine model: Embedfire LubanCat-5 V2
+[    5.623883] kernel: earlycon: uart8250 at MMIO32 0x00000000feb50000 (options '')
+[    5.623896] kernel: printk: bootconsole [uart8250] enabled
+---
+[   12.214752] kernel: rk_gmac-dwmac fe1c0000.ethernet: Detected PHY ID: 0x937c4032
+[   12.216108] kernel: rk_gmac-dwmac fe1c0000.ethernet: JL2XXX TX delay(0x8).
+[   12.217275] kernel: rk_gmac-dwmac fe1c0000.ethernet: JL2XXX RX delay(0xffffffff).
+[   12.218435] kernel: rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Up - 1Gbps/Full - flow control rx/tx
+[   12.220312] kernel: IPv6: ADDRCONF(NETDEV_CHANGE): eth0: link becomes ready
+===== ATOP FILES =====
+-rw-r--r--  1 root root    2553729 Oct 25 00:00 atop_20261024
+-rw-r--r--  1 root root    2521922 Oct 26 00:00 atop_20261025
+-rw-r--r--  1 root root    2441157 Oct 27 00:00 atop_20261026
+-rw-r--r--  1 root root    2329797 Oct 28 00:00 atop_20261027
+-rw-r--r--  1 root root    2768064 Oct 29 00:00 atop_20261028
+-rw-r--r--  1 root root    2701784 Oct 30 00:00 atop_20261029
+-rw-r--r--  1 root root    2316488 Oct 31 00:00 atop_20261030
+-rw-r--r--  1 root root    2808745 Nov  1 00:00 atop_20261031
+-rw-r--r--  1 root root    2432743 Nov  2 00:00 atop_20261101
+-rw-r--r--  1 root root    2443493 Nov  3 00:00 atop_20261102
+-rw-r--r--  1 root root    3031780 Nov  4 00:00 atop_20261103
+-rw-r--r--  1 root root    2568909 Nov  5 00:00 atop_20261104
+-rw-r--r--  1 root root    2500573 Nov  6 00:00 atop_20261105
+-rw-r--r--  1 root root   17675904 Nov  7 00:00 atop_20261106
+-rw-r--r--  1 root root     870848 Nov  7 06:00 atop_20261107

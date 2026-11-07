@@ -1,0 +1,260 @@
+2026-11-07T07:28:42+08:00 lubancat unknown: tbt-c8-once-probe-1794007722-30156
+2026-11-07T07:28:57+08:00 lubancat mihomo[1505]: time="2026-11-07T07:28:57.909635796+08:00" level=info msg="[UDP] 198.18.0.1:54550 --> 3.ntp.ubuntu.com:123 match Match using WORLD[HND2UDP6]"
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun: loading out-of-tree module taints kernel.
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun 0.0.1 loaded: 1 tunnels max, 256 carriers max
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_session_create cpu=2 pid=10848 session create tunnel=1 role=2 n=4 m=4 carriers=8 fec=1 crypto=1 profile=1 mode=2 w=8
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_session_create cpu=2 pid=10848 crypto setup start tunnel=1 role=2 key_set=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_session_create cpu=2 pid=10848 crypto tx init tunnel=1 key_id=1 source=generated rc=0 nonce=416086e955fa785d
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_session_create cpu=2 pid=10848 fec data init tunnel=1 n=4 m=4 carriers=8 mode=2 w=8
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_fec_data_init cpu=2 pid=10848 fec init start tunnel=1 n=4 m=4 carriers=8 mode=2 groups=1 w=4 d=2 slots=256 total_blk=256 arena_kb=16
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_fec_data_init cpu=2 pid=10848 fec grouped rx codec start tunnel=1 groups=1 n=4 m=4 w=4 d=2
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_fec_data_init cpu=2 pid=10848 fec grouped rx codec ok tunnel=1 groups=1 blk=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_fec_data_init cpu=2 pid=10848 fec grouped tx codec start tunnel=1 groups=1 n=4 m=4 w=4 d=2
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_fec_data_init cpu=2 pid=10848 fec grouped tx codec ok tunnel=1 groups=1 ring=1 pkt=1 rec=1 g=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_fec_data_init cpu=2 pid=10848 fec init done tunnel=1 groups=1 slots=256 credit=1024 tx_ring=262144
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_session_create cpu=2 pid=10848 fec data init tunnel=1 ret=0 fec=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carriers_start enter n_car=8 n_pri=8 n=4 m=4 carriers=8 fec=1 crypto=1 profile=1 dial_rate=8 burst=16
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_new_locked cpu=2 pid=10848 tunnel=1 carrier=0 gen=1 allocated spare=0 profile=1 state=1 join_deadline_ms=5000 parser_have=0 http_chunk_state=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carrier=0 gen=1 spare=0 profile=1 state=1 installed
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_new_locked cpu=2 pid=10848 tunnel=1 carrier=1 gen=2 allocated spare=0 profile=1 state=1 join_deadline_ms=5000 parser_have=0 http_chunk_state=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carrier=1 gen=2 spare=0 profile=1 state=1 installed
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_new_locked cpu=2 pid=10848 tunnel=1 carrier=2 gen=3 allocated spare=0 profile=1 state=1 join_deadline_ms=5000 parser_have=0 http_chunk_state=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carrier=2 gen=3 spare=0 profile=1 state=1 installed
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_new_locked cpu=2 pid=10848 tunnel=1 carrier=3 gen=4 allocated spare=0 profile=1 state=1 join_deadline_ms=5000 parser_have=0 http_chunk_state=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carrier=3 gen=4 spare=0 profile=1 state=1 installed
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_new_locked cpu=2 pid=10848 tunnel=1 carrier=4 gen=5 allocated spare=0 profile=1 state=1 join_deadline_ms=5000 parser_have=0 http_chunk_state=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carrier=4 gen=5 spare=0 profile=1 state=1 installed
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_new_locked cpu=2 pid=10848 tunnel=1 carrier=5 gen=6 allocated spare=0 profile=1 state=1 join_deadline_ms=5000 parser_have=0 http_chunk_state=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carrier=5 gen=6 spare=0 profile=1 state=1 installed
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_new_locked cpu=2 pid=10848 tunnel=1 carrier=6 gen=7 allocated spare=0 profile=1 state=1 join_deadline_ms=5000 parser_have=0 http_chunk_state=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carrier=6 gen=7 spare=0 profile=1 state=1 installed
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_new_locked cpu=2 pid=10848 tunnel=1 carrier=7 gen=8 allocated spare=0 profile=1 state=1 join_deadline_ms=5000 parser_have=0 http_chunk_state=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carrier=7 gen=8 spare=0 profile=1 state=1 installed
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carriers_start done n_car=8
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_session_create cpu=2 pid=10848 carriers_start tunnel=1 ret=0 n_car=8 n_pri=8
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_session_create cpu=2 pid=10848 session create done tunnel=1 n_car=8 poll_ms=50
+2026-11-07T07:28:58+08:00 lubancat mihomo[1505]: time="2026-11-07T07:28:58.560973632+08:00" level=info msg="[UDP] 198.18.0.1:37008 --> 1.ntp.ubuntu.com:123 match Match using WORLD[HND2UDP6]"
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll r=1 tunnel=1 carrier=0 gen=1 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=-1777576 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll dial tunnel=1 carrier=0 gen=1 r=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll r=1 tunnel=1 carrier=1 gen=2 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=-1777576 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll dial tunnel=1 carrier=1 gen=2 r=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll r=1 tunnel=1 carrier=2 gen=3 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=-1777576 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll dial tunnel=1 carrier=2 gen=3 r=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll r=1 tunnel=1 carrier=3 gen=4 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=-1777576 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll dial tunnel=1 carrier=3 gen=4 r=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll r=1 tunnel=1 carrier=4 gen=5 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=-1777576 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll dial tunnel=1 carrier=4 gen=5 r=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll r=1 tunnel=1 carrier=5 gen=6 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=-1777576 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll dial tunnel=1 carrier=5 gen=6 r=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll r=1 tunnel=1 carrier=6 gen=7 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=-1777576 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll dial tunnel=1 carrier=6 gen=7 r=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll r=1 tunnel=1 carrier=7 gen=8 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=-1777576 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll dial tunnel=1 carrier=7 gen=8 r=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 enter stopping=0 sock=0 lport=0 retry_at=199
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 sock_create ok
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 bind ok local=0.0.0.0:30000 peer=45.11.1.62:9000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 enter stopping=0 sock=0 lport=0 retry_at=199
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 sock_create ok
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 bind ok local=0.0.0.0:30001 peer=45.11.1.62:9000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 enter stopping=0 sock=0 lport=0 retry_at=199
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 sock_create ok
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 bind ok local=0.0.0.0:30002 peer=45.11.1.62:9000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 enter stopping=0 sock=0 lport=0 retry_at=199
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 sock_create ok
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 bind ok local=0.0.0.0:30003 peer=45.11.1.62:9000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 enter stopping=0 sock=0 lport=0 retry_at=198
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 sock_create ok
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 bind ok local=0.0.0.0:30004 peer=45.11.1.62:9000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 enter stopping=0 sock=0 lport=0 retry_at=198
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 sock_create ok
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 bind ok local=0.0.0.0:30005 peer=45.11.1.62:9000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 enter stopping=0 sock=0 lport=0 retry_at=198
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 sock_create ok
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 bind ok local=0.0.0.0:30006 peer=45.11.1.62:9000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 enter stopping=0 sock=0 lport=0 retry_at=198
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 sock_create ok
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 bind ok local=0.0.0.0:30007 peer=45.11.1.62:9000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=10856 poll r=2 tunnel=1 carrier=0 gen=1 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=146 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=10856 poll r=2 tunnel=1 carrier=1 gen=2 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=146 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=10856 poll r=2 tunnel=1 carrier=2 gen=3 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=146 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=10856 poll r=2 tunnel=1 carrier=3 gen=4 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=146 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=10856 poll r=2 tunnel=1 carrier=4 gen=5 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=146 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=10856 poll r=2 tunnel=1 carrier=5 gen=6 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=146 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=10856 poll r=2 tunnel=1 carrier=6 gen=7 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=146 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_poll_one cpu=2 pid=10856 poll r=2 tunnel=1 carrier=7 gen=8 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=146 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 connect ret=0 elapsed_ms=172 sk_state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 callbacks installed lport=30007
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 connected=1 state=1 snd_una=2931555640 tx_ready=1 key_id=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 rx scheduled
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun: tunnel 1 carrier 7 DIALED lport=30007 peer=45.11.1.62:9000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_hello cpu=2 pid=10855 HELLO build tunnel=1 carrier=7 gen=8 fec=1 profile=1 blen=66 key_id=1 have_key=1 tx_ready=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_hello cpu=2 pid=10855 HELLO body filled tunnel=1 carrier=7 gen=8 profile_gen_byte=33
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_control_pinned cpu=2 pid=10855 HELLO queued tunnel=1 carrier=7 gen=8 len=66 ctl_queued=1 tx_queued=66
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 hello enqueued ret=0 ctl_queued=1 tx_queued=66
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 connect work done
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=2 pid=10855 rx work tunnel=1 carrier=7 gen=8 sk_state=1 copied=2486817143 rcv_nxt=2486817143 have=0 http_have=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_http_begin cpu=2 pid=10855 http begin tunnel=1 carrier=7 gen=8 role=2 req_done=0 profile=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_http_begin cpu=2 pid=10855 http header write tunnel=1 carrier=7 gen=8 ret=0 hlen=332
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_xmit cpu=2 pid=10855 HELLO chunk write tunnel=1 carrier=7 gen=8 ret=0 len=104 write_seq=2931556076 snd_una=2931555640 sndbuf=2097152 wmem=2996
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_pump cpu=2 pid=10855 HELLO written tunnel=1 carrier=7 gen=8 up=0 spare=0 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 connect ret=0 elapsed_ms=174 sk_state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 callbacks installed lport=30001
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 connected=1 state=1 snd_una=3245969968 tx_ready=1 key_id=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 rx scheduled
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun: tunnel 1 carrier 1 DIALED lport=30001 peer=45.11.1.62:9000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_hello cpu=2 pid=1659 HELLO build tunnel=1 carrier=1 gen=2 fec=1 profile=1 blen=66 key_id=1 have_key=1 tx_ready=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_hello cpu=2 pid=1659 HELLO body filled tunnel=1 carrier=1 gen=2 profile_gen_byte=9
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_control_pinned cpu=2 pid=1659 HELLO queued tunnel=1 carrier=1 gen=2 len=66 ctl_queued=1 tx_queued=66
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 hello enqueued ret=0 ctl_queued=1 tx_queued=66
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 connect work done
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=2 pid=1659 rx work tunnel=1 carrier=1 gen=2 sk_state=1 copied=3487698628 rcv_nxt=3487698628 have=0 http_have=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_http_begin cpu=2 pid=1659 http begin tunnel=1 carrier=1 gen=2 role=2 req_done=0 profile=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_http_begin cpu=2 pid=1659 http header write tunnel=1 carrier=1 gen=2 ret=0 hlen=332
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_xmit cpu=2 pid=1659 HELLO chunk write tunnel=1 carrier=1 gen=2 ret=0 len=104 write_seq=3245970404 snd_una=3245969968 sndbuf=2097152 wmem=2996
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_pump cpu=2 pid=1659 HELLO written tunnel=1 carrier=1 gen=2 up=0 spare=0 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 connect ret=0 elapsed_ms=174 sk_state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 callbacks installed lport=30004
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 connected=1 state=1 snd_una=3659681660 tx_ready=1 key_id=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 rx scheduled
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun: tunnel 1 carrier 4 DIALED lport=30004 peer=45.11.1.62:9000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_hello cpu=2 pid=10852 HELLO build tunnel=1 carrier=4 gen=5 fec=1 profile=1 blen=66 key_id=1 have_key=1 tx_ready=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_hello cpu=2 pid=10852 HELLO body filled tunnel=1 carrier=4 gen=5 profile_gen_byte=21
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_control_pinned cpu=2 pid=10852 HELLO queued tunnel=1 carrier=4 gen=5 len=66 ctl_queued=1 tx_queued=66
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 hello enqueued ret=0 ctl_queued=1 tx_queued=66
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 connect work done
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_http_begin cpu=1 pid=124 http begin tunnel=1 carrier=4 gen=5 role=2 req_done=0 profile=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=2 pid=10852 rx work tunnel=1 carrier=4 gen=5 sk_state=1 copied=1867350778 rcv_nxt=1867350778 have=0 http_have=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_http_begin cpu=1 pid=124 http header write tunnel=1 carrier=4 gen=5 ret=0 hlen=332
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_xmit cpu=1 pid=124 HELLO chunk write tunnel=1 carrier=4 gen=5 ret=0 len=104 write_seq=3659682096 snd_una=3659681660 sndbuf=2097152 wmem=2996
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_pump cpu=1 pid=124 HELLO written tunnel=1 carrier=4 gen=5 up=0 spare=0 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 connect ret=0 elapsed_ms=174 sk_state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 callbacks installed lport=30005
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 connected=1 state=1 snd_una=2355897356 tx_ready=1 key_id=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 rx scheduled
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun: tunnel 1 carrier 5 DIALED lport=30005 peer=45.11.1.62:9000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_hello cpu=2 pid=10853 HELLO build tunnel=1 carrier=5 gen=6 fec=1 profile=1 blen=66 key_id=1 have_key=1 tx_ready=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_hello cpu=2 pid=10853 HELLO body filled tunnel=1 carrier=5 gen=6 profile_gen_byte=25
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_control_pinned cpu=2 pid=10853 HELLO queued tunnel=1 carrier=5 gen=6 len=66 ctl_queued=1 tx_queued=66
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 hello enqueued ret=0 ctl_queued=1 tx_queued=66
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 connect work done
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_http_begin cpu=1 pid=124 http begin tunnel=1 carrier=5 gen=6 role=2 req_done=0 profile=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=2 pid=10853 rx work tunnel=1 carrier=5 gen=6 sk_state=1 copied=3875555421 rcv_nxt=3875555421 have=0 http_have=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_http_begin cpu=1 pid=124 http header write tunnel=1 carrier=5 gen=6 ret=0 hlen=332
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_xmit cpu=1 pid=124 HELLO chunk write tunnel=1 carrier=5 gen=6 ret=0 len=104 write_seq=2355897792 snd_una=2355897356 sndbuf=2097152 wmem=2996
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_pump cpu=1 pid=124 HELLO written tunnel=1 carrier=5 gen=6 up=0 spare=0 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 connect ret=0 elapsed_ms=175 sk_state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 callbacks installed lport=30006
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 connected=1 state=1 snd_una=2886004253 tx_ready=1 key_id=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 rx scheduled
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun: tunnel 1 carrier 6 DIALED lport=30006 peer=45.11.1.62:9000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_hello cpu=2 pid=10854 HELLO build tunnel=1 carrier=6 gen=7 fec=1 profile=1 blen=66 key_id=1 have_key=1 tx_ready=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_hello cpu=2 pid=10854 HELLO body filled tunnel=1 carrier=6 gen=7 profile_gen_byte=29
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_control_pinned cpu=2 pid=10854 HELLO queued tunnel=1 carrier=6 gen=7 len=66 ctl_queued=1 tx_queued=66
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 hello enqueued ret=0 ctl_queued=1 tx_queued=66
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 connect work done
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=2 pid=10854 rx work tunnel=1 carrier=6 gen=7 sk_state=1 copied=942021005 rcv_nxt=942021005 have=0 http_have=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_http_begin cpu=2 pid=10854 http begin tunnel=1 carrier=6 gen=7 role=2 req_done=0 profile=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_http_begin cpu=2 pid=10854 http header write tunnel=1 carrier=6 gen=7 ret=0 hlen=332
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_xmit cpu=2 pid=10854 HELLO chunk write tunnel=1 carrier=6 gen=7 ret=0 len=104 write_seq=2886004689 snd_una=2886004253 sndbuf=2097152 wmem=2996
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_pump cpu=2 pid=10854 HELLO written tunnel=1 carrier=6 gen=7 up=0 spare=0 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 connect ret=0 elapsed_ms=194 sk_state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 callbacks installed lport=30000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 connected=1 state=1 snd_una=2737906660 tx_ready=1 key_id=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 rx scheduled
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun: tunnel 1 carrier 0 DIALED lport=30000 peer=45.11.1.62:9000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_hello cpu=2 pid=24 HELLO build tunnel=1 carrier=0 gen=1 fec=1 profile=1 blen=66 key_id=1 have_key=1 tx_ready=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_hello cpu=2 pid=24 HELLO body filled tunnel=1 carrier=0 gen=1 profile_gen_byte=5
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_control_pinned cpu=2 pid=24 HELLO queued tunnel=1 carrier=0 gen=1 len=66 ctl_queued=1 tx_queued=66
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 hello enqueued ret=0 ctl_queued=1 tx_queued=66
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 connect work done
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=2 pid=24 rx work tunnel=1 carrier=0 gen=1 sk_state=1 copied=1947175872 rcv_nxt=1947175872 have=0 http_have=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_http_begin cpu=2 pid=24 http begin tunnel=1 carrier=0 gen=1 role=2 req_done=0 profile=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_http_begin cpu=2 pid=24 http header write tunnel=1 carrier=0 gen=1 ret=0 hlen=332
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_xmit cpu=2 pid=24 HELLO chunk write tunnel=1 carrier=0 gen=1 ret=0 len=104 write_seq=2737907096 snd_una=2737906660 sndbuf=2097152 wmem=2996
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_pump cpu=2 pid=24 HELLO written tunnel=1 carrier=0 gen=1 up=0 spare=0 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 connect ret=0 elapsed_ms=195 sk_state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 callbacks installed lport=30003
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 connected=1 state=1 snd_una=1309432238 tx_ready=1 key_id=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 rx scheduled
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun: tunnel 1 carrier 3 DIALED lport=30003 peer=45.11.1.62:9000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_hello cpu=2 pid=10851 HELLO build tunnel=1 carrier=3 gen=4 fec=1 profile=1 blen=66 key_id=1 have_key=1 tx_ready=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_hello cpu=2 pid=10851 HELLO body filled tunnel=1 carrier=3 gen=4 profile_gen_byte=17
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_control_pinned cpu=2 pid=10851 HELLO queued tunnel=1 carrier=3 gen=4 len=66 ctl_queued=1 tx_queued=66
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 hello enqueued ret=0 ctl_queued=1 tx_queued=66
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 connect work done
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=2 pid=10851 rx work tunnel=1 carrier=3 gen=4 sk_state=1 copied=1092081424 rcv_nxt=1092081424 have=0 http_have=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_http_begin cpu=2 pid=10851 http begin tunnel=1 carrier=3 gen=4 role=2 req_done=0 profile=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_http_begin cpu=2 pid=10851 http header write tunnel=1 carrier=3 gen=4 ret=0 hlen=332
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_xmit cpu=2 pid=10851 HELLO chunk write tunnel=1 carrier=3 gen=4 ret=0 len=104 write_seq=1309432674 snd_una=1309432238 sndbuf=2097152 wmem=2996
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_pump cpu=2 pid=10851 HELLO written tunnel=1 carrier=3 gen=4 up=0 spare=0 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 connect ret=0 elapsed_ms=195 sk_state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 callbacks installed lport=30002
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 connected=1 state=1 snd_una=3900843420 tx_ready=1 key_id=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 rx scheduled
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun: tunnel 1 carrier 2 DIALED lport=30002 peer=45.11.1.62:9000
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_hello cpu=2 pid=10850 HELLO build tunnel=1 carrier=2 gen=3 fec=1 profile=1 blen=66 key_id=1 have_key=1 tx_ready=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_hello cpu=2 pid=10850 HELLO body filled tunnel=1 carrier=2 gen=3 profile_gen_byte=13
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_control_pinned cpu=2 pid=10850 HELLO queued tunnel=1 carrier=2 gen=3 len=66 ctl_queued=1 tx_queued=66
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 hello enqueued ret=0 ctl_queued=1 tx_queued=66
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_http_begin cpu=4 pid=124 http begin tunnel=1 carrier=2 gen=3 role=2 req_done=0 profile=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 connect work done
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=2 pid=10850 rx work tunnel=1 carrier=2 gen=3 sk_state=1 copied=1777040500 rcv_nxt=1777040500 have=0 http_have=0
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_http_begin cpu=4 pid=124 http header write tunnel=1 carrier=2 gen=3 ret=0 hlen=332
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_carrier_xmit cpu=4 pid=124 HELLO chunk write tunnel=1 carrier=2 gen=3 ret=0 len=104 write_seq=3900843856 snd_una=3900843420 sndbuf=2097152 wmem=2996
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_tx_pump cpu=4 pid=124 HELLO written tunnel=1 carrier=2 gen=3 up=0 spare=0 state=1
+2026-11-07T07:28:58+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=7 gen=8 sk_state=1 copied=2486817143 rcv_nxt=2486817298 have=0 http_have=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=7 gen=8 have=155 http_have=0 hdr_done=0 req_done=0 chunk_state=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=7 gen=8 sk_state=1 copied=2486817298 rcv_nxt=2486817402 have=0 http_have=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=7 gen=8 have=104 http_have=0 hdr_done=1 req_done=0 chunk_state=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parse tunnel=1 body_len=66
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parsed tunnel=1 enabled=1 key_id=0 have_key=1 key_peer=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto ready tunnel=1 key_peer=0 tx_ready=1 rx_ready=1
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=4 gen=5 sk_state=1 copied=1867350778 rcv_nxt=1867350933 have=0 http_have=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=4 gen=5 have=155 http_have=0 hdr_done=0 req_done=0 chunk_state=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=4 gen=5 sk_state=1 copied=1867350933 rcv_nxt=1867351037 have=0 http_have=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=4 gen=5 have=104 http_have=0 hdr_done=1 req_done=0 chunk_state=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parse tunnel=1 body_len=66
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parsed tunnel=1 enabled=1 key_id=0 have_key=1 key_peer=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto ready tunnel=1 key_peer=0 tx_ready=1 rx_ready=1
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=1 gen=2 sk_state=1 copied=3487698628 rcv_nxt=3487698783 have=0 http_have=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=1 gen=2 have=155 http_have=0 hdr_done=0 req_done=0 chunk_state=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=5 gen=6 sk_state=1 copied=3875555421 rcv_nxt=3875555576 have=0 http_have=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=5 gen=6 have=155 http_have=0 hdr_done=0 req_done=0 chunk_state=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=5 gen=6 sk_state=1 copied=3875555576 rcv_nxt=3875555680 have=0 http_have=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=5 gen=6 have=104 http_have=0 hdr_done=1 req_done=0 chunk_state=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parse tunnel=1 body_len=66
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parsed tunnel=1 enabled=1 key_id=0 have_key=1 key_peer=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto ready tunnel=1 key_peer=0 tx_ready=1 rx_ready=1
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=1 gen=2 sk_state=1 copied=3487698783 rcv_nxt=3487698887 have=0 http_have=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=1 gen=2 have=104 http_have=0 hdr_done=1 req_done=0 chunk_state=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parse tunnel=1 body_len=66
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parsed tunnel=1 enabled=1 key_id=0 have_key=1 key_peer=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto ready tunnel=1 key_peer=0 tx_ready=1 rx_ready=1
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=6 gen=7 sk_state=1 copied=942021005 rcv_nxt=942021264 have=0 http_have=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=6 gen=7 have=259 http_have=0 hdr_done=0 req_done=0 chunk_state=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parse tunnel=1 body_len=66
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parsed tunnel=1 enabled=1 key_id=0 have_key=1 key_peer=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto ready tunnel=1 key_peer=0 tx_ready=1 rx_ready=1
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=0 gen=1 sk_state=1 copied=1947175872 rcv_nxt=1947176027 have=0 http_have=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=0 gen=1 have=155 http_have=0 hdr_done=0 req_done=0 chunk_state=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=0 gen=1 sk_state=1 copied=1947176027 rcv_nxt=1947176131 have=0 http_have=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=0 gen=1 have=104 http_have=0 hdr_done=1 req_done=0 chunk_state=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parse tunnel=1 body_len=66
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parsed tunnel=1 enabled=1 key_id=0 have_key=1 key_peer=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto ready tunnel=1 key_peer=0 tx_ready=1 rx_ready=1
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=3 gen=4 sk_state=1 copied=1092081424 rcv_nxt=1092081683 have=0 http_have=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=3 gen=4 have=259 http_have=0 hdr_done=0 req_done=0 chunk_state=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parse tunnel=1 body_len=66
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parsed tunnel=1 enabled=1 key_id=0 have_key=1 key_peer=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto ready tunnel=1 key_peer=0 tx_ready=1 rx_ready=1
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=2 gen=3 sk_state=1 copied=1777040500 rcv_nxt=1777040759 have=0 http_have=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=2 gen=3 have=259 http_have=0 hdr_done=0 req_done=0 chunk_state=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parse tunnel=1 body_len=66
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parsed tunnel=1 enabled=1 key_id=0 have_key=1 key_peer=0
+2026-11-07T07:28:59+08:00 lubancat kernel: tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto ready tunnel=1 key_peer=0 tx_ready=1 rx_ready=1
+2026-11-07T07:28:59+08:00 lubancat mihomo[1505]: time="2026-11-07T07:28:59.398056238+08:00" level=info msg="[UDP] 198.18.0.1:54063 --> 2.ntp.ubuntu.com:123 match Match using WORLD[HND2UDP6]"
+2026-11-07T07:29:01+08:00 lubancat CRON[10867]: pam_unix(cron:session): session opened for user kunweiz(uid=1001) by kunweiz(uid=0)
+2026-11-07T07:29:01+08:00 lubancat CRON[10869]: (kunweiz) CMD (/home/kunweiz/.local/bin/compile-guard)
+2026-11-07T07:29:01+08:00 lubancat CRON[10867]: pam_unix(cron:session): session closed for user kunweiz
+2026-11-07T07:29:03+08:00 lubancat unknown: tbt-c8-once-probe-1794007743-17778
+2026-11-07T07:29:07+08:00 lubancat mihomo[1505]: time="2026-11-07T07:29:07.573132066+08:00" level=info msg="[UDP] 198.18.0.1:52660 --> ntp-bootstrap.ubuntu.com:123 match Match using WORLD[HND2UDP6]"

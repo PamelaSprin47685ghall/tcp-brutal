@@ -1,0 +1,241 @@
+From 13150c55f4c97956e1b90f08712084a48e4052f4 Mon Sep 17 00:00:00 2001
+From: Kunwei Zhang <kunweiz92@gmail.com>
+Date: Sat, 7 Nov 2026 00:39:30 +0800
+Subject: [PATCH] tx: send feedback only when its information changed
+
+tbt_fbk_work() called tbt_tx_fbk() unconditionally every
+TBT_FBK_INTERVAL_MS (10 ms) for every live stream. The FBK body is the
+per-path receive high-water and record count plus the stream rx state;
+when none of those changed the frame carried no new information, but the
+peer still ran tbt_tx_hole_check() on every one. The WAN 1-carrier/37-byte
+smoke measured 259/219 near and 442/442 far FBKs against 4 DATA frames;
+the far logged 18 `hole gatefail/depthfail seq=0` lines before the RTO
+retransmit (retx_hole=2) repaired the first reply. QEMU with the same
+shape and a deterministic first-reply drop reproduced it: 1343/1262 FBKs
+against 6 DATA, 40 hole lines, both pings byte-exact.
+
+Send an FBK only when the stream's delivered offset, the per-carrier
+receive signature (index, generation, rx_bytes, rx_frames, peer_gen), or
+the rx state changes, with a one-second idle keepalive. The 10 ms work
+tick remains: it still runs the pump (retransmit timer), the close checks
+and the receiver's hole/delivery timers.
+
+tbt_tx_hole_check() also read tx_ack before taking tx_lock while
+tbt_tx_ack() updates it under sess->lock; the depth walk could see a newer
+ack than the local snapshot and log `depthfail seq=0 g=1` for a hole that
+was already repaired. Take the ack inside the lock and skip logging and
+injection once the ack has passed the hole.
+
+Add QEMU probe S: the WAN's n=1 m=1/carriers=2 raw shape, a 300 ms lo
+delay, and a deterministic drop of the first reply DATA. It asserts FBK in
+scale with DATA, hole lines converging, the reply repaired by retx_hole,
+and no TXSTALLKILL.
+
+QEMU (cbd880d base): probe S failed with 1343/1262 FBK, 40 hole lines.
+With this change: 21/18 FBK, 0 hole lines, retx_hole=4, both pings
+byte-exact. Full A-P/R suite passes; host-test and review/lint.sh pass.
+---
+ tbtun/tbt_tx.c  | 53 +++++++++++++++++++++++++++++++++++--
+ tbtun/tbtun.h   | 10 +++++++
+ tests/qemu/init | 70 +++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 131 insertions(+), 2 deletions(-)
+
+diff --git a/tbtun/tbt_tx.c b/tbtun/tbt_tx.c
+index b5e59f9..1f065c4 100644
+--- a/tbtun/tbt_tx.c
++++ b/tbtun/tbt_tx.c
+@@ -1305,9 +1305,13 @@ void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st)
+ 
+     if (!st)
+         return;
+-    ack = READ_ONCE(st->tx_ack);
+     now = tbt_now_ns();
+     spin_lock(&sess->tx_lock);
++    /* tx_ack moves under sess->lock, not tx_lock: reading it before the lock
++     * lets the hole walk use a stale value while tbt_retain_received() reads
++     * a newer one, which logged a depth failure for a hole that was already
++     * repaired. Take the snapshot inside the lock. */
++    ack = READ_ONCE(st->tx_ack);
+     for (i = 0; i < sess->n_car; i++)
+     {
+         struct tbt_carrier *c = READ_ONCE(sess->car[i]);
+@@ -1422,6 +1426,12 @@ void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st)
+         if (g < 1)
+             g = 1;
+     }
++    /* The ack snapshot above can still be passed by a concurrent
++     * tbt_tx_ack() (it takes sess->lock, not tx_lock). If the hole has been
++     * repaired while this walk ran, do not log a stale gate/depth/time
++     * failure and do not inject another copy the peer already has. */
++    if (hole->seq + hole->len <= READ_ONCE(st->tx_ack))
++        goto unlock;
+     if (!gate)
+     {
+         atomic64_inc(&sess->hole_gate_fail);
+@@ -3119,7 +3129,46 @@ void tbt_fbk_work(struct work_struct *w)
+ 
+         st->fbk_frames = 0;
+         tbt_tx_close_check(sess, st);
+-        tbt_tx_fbk(sess, st, GFP_KERNEL);
++        {
++            u64 sig = sess->n_car;
++            u64 now = tbt_now_ns();
++            int ci;
++
++            /* The FBK body is the per-path receive high-water and count plus
++             * the stream rx state. Re-sending it every 10 ms with none of
++             * those changed is pure overhead: a 37-byte ping measured 259 to
++             * 442 FBKs against 4 DATA frames, and every one of them ran the
++             * peer's geometric hole check. The signature includes the carrier
++             * set (index and generation), so a replacement or a new carrier
++             * also forces one. The 10 ms tick itself stays: the pump below
++             * still drives retransmission, close and hole timers. */
++            for (ci = 0; ci < sess->n_car; ci++)
++            {
++                struct tbt_carrier *fc = READ_ONCE(sess->car[ci]);
++
++                if (!fc || !atomic_read(&fc->up))
++                    continue;
++                sig = sig * 131 + (u64)ci;
++                sig = sig * 131 + READ_ONCE(fc->gen);
++                sig = sig * 131 + READ_ONCE(fc->rx_bytes);
++                sig = sig * 131 + READ_ONCE(fc->rx_frames);
++                sig = sig * 131 + READ_ONCE(fc->peer_gen);
++            }
++            if (READ_ONCE(st->rx_next) != st->fbk_last_rx_next ||
++                sig != st->fbk_sig || state != st->fbk_last_state ||
++                !st->fbk_last_ns ||
++                now - st->fbk_last_ns >=
++                    (u64)TBT_FBK_IDLE_MS * NSEC_PER_MSEC)
++            {
++                if (tbt_tx_fbk(sess, st, GFP_KERNEL) == 0)
++                {
++                    st->fbk_last_rx_next = READ_ONCE(st->rx_next);
++                    st->fbk_sig = sig;
++                    st->fbk_last_state = state;
++                    st->fbk_last_ns = now;
++                }
++            }
++        }
+         one_alive = READ_ONCE(st->state) != TBT_ST_DEAD;
+         if (READ_ONCE(st->sack_dirty) ||
+             READ_ONCE(st->sack_next) != READ_ONCE(st->rx_next) ||
+diff --git a/tbtun/tbtun.h b/tbtun/tbtun.h
+index 00558d8..05d2b7f 100644
+--- a/tbtun/tbtun.h
++++ b/tbtun/tbtun.h
+@@ -200,6 +200,12 @@ void tbt_listen_stop(struct tbt_tunnel *t);
+  * immediately after this many received DATA frames. */
+ #define TBT_FBK_INTERVAL_MS 10
+ #define TBT_FBK_FRAMES 32
++/* An idle stream still needs a keepalive, but not a feedback frame every
++ * TBT_FBK_INTERVAL_MS: the FBK carries per-path receive counters, so it is
++ * only new information when one of them (or the stream's rx state) changes.
++ * The 10 ms work tick stays: it drives the retransmit timer and the close
++ * and hole checks. */
++#define TBT_FBK_IDLE_MS 1000
+ 
+ /* Pinned control-frame lifetime (review 22). A control frame is never freed
+  * on a transient write error: it is retried this many times, 2 ms apart, and
+@@ -384,6 +390,10 @@ struct tbt_stream
+     u8 sack_state;            /* last SACK state sent */
+     bool sack_dirty;          /* rx_next/state changed since last SACK */
+     u32 fbk_frames;           /* DATA frames since this stream's last FBK */
++    u64 fbk_sig;              /* carrier rx signature at the last FBK sent */
++    u64 fbk_last_rx_next;     /* delivered offset carried by that FBK */
++    u8 fbk_last_state;        /* rx_state carried by the last FBK sent */
++    u64 fbk_last_ns;          /* when the last FBK was sent; 0 = never */
+     bool tx_fin_sent;         /* FIN wanted: set by the producer before the
+                                * first tbt_tx_fin(); the FBK tick retries while
+                                * tx_fin_queued is false */
+diff --git a/tests/qemu/init b/tests/qemu/init
+index f3e6214..1f7d39f 100755
+--- a/tests/qemu/init
++++ b/tests/qemu/init
+@@ -2108,6 +2108,75 @@ probe_p() {
+     echo "== probe P: pass"
+ }
+ 
++# --- probe S: 1 carrier pair, 37 B x2, FBK and hole convergence -------------
++# The WAN smoke's shape (n=1 m=1 carriers=2, fec=off, raw) with no carrier
++# churn. A 100 ms netem delay on lo widens the request/reply window so the
++# first reply DATA can be dropped deterministically: the near's request is
++# already written when drop_ppm is set, the far's reply is not. The far must
++# repair the seq=0 hole from its replay ring; the run asserts that FBK stays
++# in scale with DATA and that the hole diagnostics converge.
++probe_s() {
++    echo "== probe S: 1 carrier pair, 37 B x2, FBK and hole"
++    if [ ! -x /bin/tc ]; then
++        skip S "no /bin/tc in the guest; run without --no-net"
++        return 0
++    fi
++    flush_and_wait
++    restart_echo
++    echo 'ports 41088-41119' > "$PORTS" || fail "probe S: ports directive rejected"
++    _t="n=1 m=1 carriers=2 fec=off profile=raw crypto=off dup=0 keepalive=5000 replay=8388608 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=1048576 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000"
++    echo "tunnel 1 role=far profile=raw listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 $_t" \
++        > "$CFG" || fail "probe S: far tunnel rejected"
++    echo "tunnel 2 role=near profile=raw listen=127.0.0.1:$PUB_PORT peer=127.0.0.1:$CAR_PORT $_t" \
++        > "$CFG" || fail "probe S: near tunnel rejected"
++    sleep 1
++    /bin/tc qdisc add dev lo root netem delay 300ms ||
++        fail "probe S: cannot delay lo"
++    _holes0=$(dmesg 2>/dev/null | grep -c 'tbtun: hole ')
++    _tsk0=$(dmesg 2>/dev/null | grep -c 'TXSTALLKILL')
++    /bin/tbt_ping 127.0.0.1 "$PUB_PORT" 37 10 3000 &
++    _p=$!
++    _i=0
++    while [ "$_i" -lt 200 ]; do
++        _sb=$(tunnel_stat 2 submit_bytes)
++        [ "${_sb:-0}" -ge 37 ] && break
++        sleep 0.02
++        _i=$((_i + 1))
++    done
++    [ "${_sb:-0}" -ge 37 ] || fail "probe S: the request was not captured (submit_bytes=${_sb:-0})"
++    echo 'carrier 0 drop_ppm 1000000' > "$PEERS" || fail "probe S: drop_ppm carrier 0 rejected"
++    sleep 0.5
++    echo 'carrier 0 drop_ppm 0' > "$PEERS" || fail "probe S: drop_ppm reset rejected"
++    wait "$_p" || fail "probe S: first 37-byte round trip failed"
++    /bin/tbt_ping 127.0.0.1 "$PUB_PORT" 37 10 3000 ||
++        fail "probe S: second 37-byte round trip failed"
++    /bin/tc qdisc del dev lo root 2> /dev/null
++    sleep 1
++    _n_fbk=$(tunnel_stat 2 fbk_tx); _n_rx=$(tunnel_stat 2 fbk_rx)
++    _n_data=$(tunnel_stat 2 data_tx); _n_retx=$(tunnel_stat 2 retx_hole)
++    _f_fbk=$(tunnel_stat 1 fbk_tx); _f_rx=$(tunnel_stat 1 fbk_rx)
++    _f_data=$(tunnel_stat 1 data_tx); _f_retx=$(tunnel_stat 1 retx_hole)
++    _holes=$(( $(dmesg 2>/dev/null | grep -c 'tbtun: hole ') - _holes0 ))
++    _tsk=$(( $(dmesg 2>/dev/null | grep -c 'TXSTALLKILL') - _tsk0 ))
++    echo "   near fbk_tx=$_n_fbk fbk_rx=$_n_rx data_tx=$_n_data retx_hole=$_n_retx"
++    echo "   far  fbk_tx=$_f_fbk fbk_rx=$_f_rx data_tx=$_f_data retx_hole=$_f_retx"
++    echo "   hole lines this probe=$_holes"
++    echo "   TXSTALLKILL=$_tsk"
++    echo "   c3 near: $(awk '$1 == "tunnel" && $2 == 2 && $3 == "c3"' /proc/net/tbtun/stats | sed 's/ retx_data_ppm.*//')"
++    echo "   c3 far:  $(awk '$1 == "tunnel" && $2 == 1 && $3 == "c3"' /proc/net/tbtun/stats | sed 's/ retx_data_ppm.*//')"
++    [ "${_n_fbk:-0}" -le $((_n_data * 20 + 100)) ] ||
++        fail "probe S: near fbk_tx=$_n_fbk out of scale with data_tx=$_n_data"
++    [ "${_f_fbk:-0}" -le $((_f_data * 20 + 100)) ] ||
++        fail "probe S: far fbk_tx=$_f_fbk out of scale with data_tx=$_f_data"
++    [ "${_holes:-0}" -le 8 ] ||
++        fail "probe S: $_holes hole lines, expected the seq=0 hole to converge"
++    [ "${_f_retx:-0}" -ge 1 ] ||
++        fail "probe S: far retx_hole=$_f_retx, the dropped reply was not repaired"
++    [ "${_tsk:-0}" -eq 0 ] ||
++        fail "probe S: $_tsk TXSTALLKILL line(s)"
++    echo "== probe S: pass"
++}
++
+ # --- run the selected probes ------------------------------------------------
+ want A && run_probe A
+ if want A; then
+@@ -2135,6 +2204,7 @@ want O && run_probe O
+ want P && run_probe P
+ want Q && run_probe Q
+ want R && run_probe R
++want S && run_probe S
+ 
+ echo 'flush' > "$CFG" 2> /dev/null || true
+ for _p in "$echo_pid" "${echo2_pid:-}" "${echo3_pid:-}"; do
+-- 
+2.56.0
+

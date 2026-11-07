@@ -1,0 +1,114 @@
+===== ATOP 20261107: last sample time =====
+
+
+ATOP - lubancat 2026/11/07 00:00:01         -----------------7   5h21m0s elapsed
+PRC | sys   57.57s | user  85.33s | #proc    227 | #tidle    99 | #exit      0 |
+CPU | sys       4% | user      3% | irq       0% | idle    793% | wait      0% |
+--- begin/end ---
+
+
+ATOP - lubancat  2026/11/07 06:40:01          -----------------7   10m0s elapsed
+PRC | sys    0.90s | user   2.01s | #proc    215 | #tidle    93 | #exit    449 |
+CPU | sys       0% | user      0% | irq       0% | idle    799% | wait      0% |
+cpu | sys       0% | user      0% | irq       0% | idle    100% | cpu000 w  0% |
+cpu | sys       0% | user      0% | irq       0% | idle    100% | cpu003 w  0% |
+cpu | sys       0% | user      0% | irq       0% | idle    100% | cpu001 w  0% |
+cpu | sys       0% | user      0% | irq       0% | idle    100% | cpu002 w  0% |
+cpu | sys       0% | user      0% | irq       0% | idle    100% | cpu004 w  0% |
+cpu | sys       0% | user      0% | irq       0% | idle    100% | cpu006 w  0% |
+cpu | sys       0% | user      0% | irq       0% | idle    100% | cpu005 w  0% |
+cpu | sys       0% | user      0% | irq       0% | idle    100% | cpu007 w  0% |
+CPL | numcpu     8 | avg1    0.00 | avg5    0.00 | csw   154487 | intr  122540 |
+MEM | tot     7.7G | free    6.0G | avail   7.3G | cache 988.1M | slab  309.1M |
+MEM | numnode    0 | shmem   4.8M | shrss   0.0M | shswp   0.0M | pgtab   4.7M |
+SWP | tot     2.0G | free    2.0G | swcac   0.0M | vmcom   1.1G | vmlim   5.9G |
+PAG | migrate    0 | pgin       0 | pgout   1198 | swout      0 | oomkill    0 |
+DSK |      mmcblk0 | busy      0% | read       0 | write    885 | avio 0.27 ms |
+NET | transport    | tcpi     632 | tcpo     695 | udpi     503 | udpo     470 |
+NET | network      | ipi     1295 | ipo     1218 | ipfrw      0 | deliv   1236 |
+NET | eth0      0% | pcki    1038 | pcko     894 | si    4 Kbps | so    2 Kbps |
+NET | Meta    ---- | pcki     363 | pcko     363 | si    1 Kbps | so    1 Kbps |
+
+    PID SYSCPU USRCPU BDELAY  VGROW  RGROW  RDDSK  WRDSK  CPU CMD            
+   1519  0.10s  0.58s  0.00s     0B  -0.2M     0B     0B   0% mihomo         
+ 271660  0.04s  0.48s      -     0K     0K      -      -   0% <landscape-sy> 
+ 271373  0.09s  0.08s  0.00s  23.4M  12.1M     0B     0B   0% systemd        
+ 247909  0.03s  0.11s  0.00s     0B     0B     0B     0B   0% bun            
+   1525  0.07s  0.06s  0.00s     0B     0B     0B     0B   0% rclone         
+   1078  0.07s  0.05s  0.00s     0B     0B     0B     0B   0% python3        
+   1636  0.05s  0.06s  0.00s     0B     0B     0B     0B   0% frpc           
+ 270656  0.07s  0.01s  0.00s     0B     0B     0B     0B   0% kworker/u16:1- 
+      1  0.02s  0.04s  0.00s     0B     0B     0B     0B   0% systemd        
+ 251309  0.04s  0.01s  0.00s     0B     0B     0B  20.0K   0% atop           
+ 269200  0.04s  0.00s  0.00s     0B     0B     0B     0B   0% kworker/u16:0- 
+ 269777  0.02s  0.02s  0.00s     0B     0B     0B     0B   0% kworker/u16:5- 
+    492  0.01s  0.02s  0.00s     0B  56.0K     0B   3.2M   0% systemd-journa 
+   1057  0.00s  0.03s  0.00s     0B     0B     0B     0B   0% dbus-daemon    
+ 271301  0.00s  0.03s  0.00s     0B     0B     0B     0B   0% kworker/5:1-ev 
+ 271224  0.00s  0.03s      -     0K     0K      -      -   0% <bash>         
+ 271264  0.00s  0.03s      -     0K     0K      -      -   0% <bash>         
+ 271286  0.00s  0.03s      -     0K     0K      -      -   0% <bash>         
+ 271307  0.00s  0.03s      -     0K     0K      -      -   0% <bash>         
+ 271327  0.00s  0.03s      -     0K     0K      -      -   0% <bash>         
+ 271347  0.00s  0.03s      -     0K     0K      -      -   0% <bash>         
+ 271367  0.00s  0.03s      -     0K     0K      -      -   0% <bash>         
+ 271774  0.00s  0.03s      -     0K     0K      -      -   0% <bash>         
+ 271794  0.00s  0.03s      -     0K     0K      -      -   0% <bash>         
+ 271368  0.01s  0.01s  0.00s  20.6M  10.5M     0B   4.0K   0% sshd-session   
+   1084  0.02s  0.00s  0.00s     0B     0B     0B     0B   0% polkitd        
+   1220  0.01s  0.01s  0.00s     0B     0B     0B  96.0K   0% rsyslogd       
+   1165  0.02s  0.00s  0.00s     0B     0B     0B     0B   0% atopacctd      
+     13  0.02s  0.00s  0.00s     0B     0B     0B     0B   0% rcu_sched      
+ 264607  0.00s  0.02s  0.00s     0B     0B     0B     0B   0% kworker/0:1-ev 
+ 270559  0.00s  0.02s  0.00s     0B     0B     0B     0B   0% kworker/3:1-ev 
+ 271273  0.00s  0.02s  0.00s     0B     0B     0B     0B   0% kworker/u16:3- 
+ 271306  0.02s  0.00s      -     0K     0K      -      -   0% <ps>           
+ 271326  0.02s  0.00s      -     0K     0K      -      -   0% <ps>           
+ 271371  0.02s  0.00s      -     0K     0K      -      -   0% <systemd-user> 
+   1660  0.00s  0.01s  0.00s     0B     0B     0B     0B   0% fwupd          
+    538  0.00s  0.01s  0.00s     0B     0B     0B     0B   0% multipathd     
+   1271  0.00s  0.01s  0.00s     0B     0B     0B     0B   0% NetworkManager 
+   1272  0.00s  0.01s  0.00s     0B     0B     0B     0B   0% wpa_supplicant 
+   1031  0.01s  0.00s  0.00s     0B     0B     0B     0B   0% avahi-daemon   
+   1522  0.01s  0.00s  0.00s     0B     0B     0B     0B   0% cron           
+      8  0.01s  0.00s  0.00s     0B     0B     0B     0B   0% kworker/0:0H-k 
+ 261606  0.01s  0.00s  0.00s     0B     0B     0B     0B   0% kworker/1:2-ev 
+ 265009  0.00s  0.01s  0.00s     0B     0B     0B     0B   0% kworker/4:0-ev 
+ 268255  0.00s  0.01s  0.00s     0B     0B     0B     0B   0% kworker/6:2-ev 
+ 269330  0.00s  0.01s  0.00s     0B     0B     0B     0B   0% kworker/7:4-ev 
+ 271243  0.01s  0.00s      -     0K     0K      -      -   0% <ps>           
+ 271244  0.00s  0.01s      -     0K     0K      -      -   0% <bash>         
+ 271263  0.01s  0.00s      -     0K     0K      -      -   0% <ps>           
+ 271366  0.01s  0.00s      -     0K     0K      -      -   0% <ps>           
+ 271385  0.01s  0.00s      -     0K     0K      -      -   0% <systemctl>    
+ 271384  0.01s  0.00s      -     0K     0K      -      -   0% <systemctl>    
+ 271773  0.01s  0.00s      -     0K     0K      -      -   0% <ps>           
+ 271793  0.01s  0.00s      -     0K     0K      -      -   0% <ps>           
+   1469  0.00s  0.00s  0.00s     0B     0B     0B     0B   0% Xvfb           
+===== ATOP 20261106 tail sample =====
+ 251271  0.00s  0.00s      -     0K     0K      -      -   0% <date>         
+ 251273  0.00s  0.00s      -     0K     0K      -      -   0% <cmp>          
+ 251275  0.00s  0.00s      -     0K     0K      -      -   0% <touch>        
+ 251274  0.00s  0.00s      -     0K     0K      -      -   0% <date>         
+ 251277  0.00s  0.00s      -     0K     0K      -      -   0% <(sd-close)>   
+===== SYSLOG ISO 06:4x =====
+2026-11-07T06:40:01.833898+08:00 lubancat CRON[271827]: (kunweiz) CMD (/home/kunweiz/.local/bin/compile-guard)
+2026-11-07T06:41:01.932382+08:00 lubancat CRON[271856]: (kunweiz) CMD (/home/kunweiz/.local/bin/compile-guard)
+2026-11-07T06:41:50.804526+08:00 lubancat mihomo[1519]: time="2026-11-07T06:41:50.803916308+08:00" level=info msg="[UDP] 198.18.0.1:39077 --> 3.ntp.ubuntu.com:123 match Match using WORLD[HND2UDP6]"
+2026-11-07T06:42:01.031075+08:00 lubancat CRON[271876]: (kunweiz) CMD (/home/kunweiz/.local/bin/compile-guard)
+2026-11-07T06:42:43.930215+08:00 lubancat systemd[271373]: launchpadlib-cache-clean.service - Clean up old files in the Launchpadlib cache skipped, unmet condition check ConditionPathExists=/root/.launchpadlib/api.launchpad.net/cache
+2026-11-07T06:43:01.130713+08:00 lubancat CRON[271896]: (kunweiz) CMD (/home/kunweiz/.local/bin/compile-guard)
+2026-11-07T06:43:06.318509+08:00 lubancat mihomo[1519]: time="2026-11-07T06:43:06.317880526+08:00" level=info msg="[UDP] 198.18.0.1:47693 --> ntp-bootstrap.ubuntu.com:123 match Match using WORLD[HND2UDP6]"
+count: 7
+===== KERN.LOG ISO 06:4x =====
+count: 0
+===== RSYSLOG STATUS NOW =====
+active
+ActiveEnterTimestamp=Sat 2026-11-07 06:00:02 CST
+NRestarts=0
+===== RSYSLOG CONFIG imklog =====
+/etc/rsyslog.conf:module(load="imuxsock") # provides support for local system logging
+/etc/rsyslog.conf:#module(load="immark")  # provides --MARK-- message capability
+/etc/rsyslog.conf:#module(load="imudp")
+/etc/rsyslog.conf:#module(load="imtcp")
+/etc/rsyslog.conf:module(load="imklog" permitnonkernelfacility="on")

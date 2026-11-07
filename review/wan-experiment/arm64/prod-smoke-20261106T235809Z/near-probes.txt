@@ -1,0 +1,2 @@
+2026-11-06T23:58:51Z ping_rc=0 ssh_rc=0 neigh=192.168.123.65 dev wlp4s0 lladdr 02:51:22:e5:67:53 REACHABLE ;
+2026-11-06T23:58:55Z ping_rc=0 ssh_rc=0 neigh=192.168.123.65 dev wlp4s0 lladdr 02:51:22:e5:67:53 REACHABLE ;

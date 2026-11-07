@@ -1,0 +1,30 @@
+1687:2026-11-06T18:00:03+08:00 lubancat snapd[1096]: autorepair.go:320: WARNING: the system booted with an old initrd without unlocked status reporting
+13447:2026-11-06T20:23:20+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Down
+13515:2026-11-06T20:23:34+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Down
+19951:2026-11-06T20:41:00+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Down
+20040:2026-11-06T20:41:13+08:00 lubancat kernel: rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Down
+58708:2026-11-07T06:44:10+08:00 lubancat kernel: Unable to handle kernel paging request at virtual address 000000020047fffc
+58736:2026-11-07T06:44:11+08:00 lubancat kernel: Internal error: Oops: 0000000096000004 [#1] SMP
+58737:2026-11-07T06:44:11+08:00 lubancat kernel: Modules linked in: tbtun(O) udp_diag tcp_diag inet_diag bnep tun squashfs qrtr binfmt_misc pwm_fan sch_fq_codel dm_multipath dm_mod fuse ipv6 raid10 raid456 async_raid6_recov async_memcpy async_pq async_xor async_tx raid1 raid0 multipath linear md_mod adc_keys uio_pdrv_genirq uio [last unloaded: tbtun(O)]
+58754:2026-11-07T06:44:11+08:00 lubancat kernel: Call trace:
+58924:2026-11-07T06:44:11+08:00 lubancat kernel: Unable to handle kernel paging request at virtual address ffff000200000000
+59352:2026-11-07T06:44:11+08:00 lubancat kernel: Internal error: Oops: 0000000096000005 [#2] SMP
+59354:2026-11-07T06:44:11+08:00 lubancat kernel: Modules linked in: tbtun(O) udp_diag tcp_diag inet_diag bnep tun squashfs qrtr binfmt_misc pwm_fan sch_fq_codel dm_multipath dm_mod fuse ipv6 raid10 raid456 async_raid6_recov async_memcpy async_pq async_xor async_tx raid1 raid0 multipath linear md_mod adc_keys uio_pdrv_genirq uio [last unloaded: tbtun(O)]
+59374:2026-11-07T06:44:11+08:00 lubancat kernel: Call trace:
+59767:2026-11-07T06:44:11+08:00 lubancat kernel: Unable to handle kernel paging request at virtual address 000000020047fffc
+59779:2026-11-07T06:44:12+08:00 lubancat kernel: Internal error: Oops: 0000000096000005 [#3] SMP
+59780:2026-11-07T06:44:12+08:00 lubancat kernel: Modules linked in: tbtun(O) udp_diag tcp_diag inet_diag bnep tun squashfs qrtr binfmt_misc pwm_fan sch_fq_codel dm_multipath dm_mod fuse ipv6 raid10 raid456 async_raid6_recov async_memcpy async_pq async_xor async_tx raid1 raid0 multipath linear md_mod adc_keys uio_pdrv_genirq uio [last unloaded: tbtun(O)]
+59797:2026-11-07T06:44:12+08:00 lubancat kernel: Call trace:
+60325:2026-11-07T06:44:12+08:00 lubancat kernel: Unable to handle kernel NULL pointer dereference at virtual address 0000000000000019
+60353:2026-11-07T06:44:13+08:00 lubancat kernel: Internal error: Oops: 0000000096000006 [#4] SMP
+60354:2026-11-07T06:44:13+08:00 lubancat kernel: Modules linked in: tbtun(O) udp_diag tcp_diag inet_diag bnep tun squashfs qrtr binfmt_misc pwm_fan sch_fq_codel dm_multipath dm_mod fuse ipv6 raid10 raid456 async_raid6_recov async_memcpy async_pq async_xor async_tx raid1 raid0 multipath linear md_mod adc_keys uio_pdrv_genirq uio [last unloaded: tbtun(O)]
+60371:2026-11-07T06:44:13+08:00 lubancat kernel: Call trace:
+60397:2026-11-07T06:44:13+08:00 lubancat kernel: Unable to handle kernel paging request at virtual address 000000000594a585
+60959:2026-11-07T06:44:13+08:00 lubancat kernel: Internal error: Oops: 0000000096000044 [#5] SMP
+60960:2026-11-07T06:44:13+08:00 lubancat kernel: Modules linked in: tbtun(O) udp_diag tcp_diag inet_diag bnep tun squashfs qrtr binfmt_misc pwm_fan sch_fq_codel dm_multipath dm_mod fuse ipv6 raid10 raid456 async_raid6_recov async_memcpy async_pq async_xor async_tx raid1 raid0 multipath linear md_mod adc_keys uio_pdrv_genirq uio [last unloaded: tbtun(O)]
+60978:2026-11-07T06:44:13+08:00 lubancat kernel: Call trace:
+61501:2026-11-07T06:44:13+08:00 lubancat kernel: WARNING: CPU: 0 PID: 272003 at kernel/exit.c:817 do_exit+0x90/0x900
+61502:2026-11-07T06:44:13+08:00 lubancat kernel: Modules linked in: tbtun(O) udp_diag tcp_diag inet_diag bnep tun squashfs qrtr binfmt_misc pwm_fan sch_fq_codel dm_multipath dm_mod fuse ipv6 raid10 raid456 async_raid6_recov async_memcpy async_pq async_xor async_tx raid1 raid0 multipath linear md_mod adc_keys uio_pdrv_genirq uio [last unloaded: tbtun(O)]
+61520:2026-11-07T06:44:13+08:00 lubancat kernel: Call trace:
+62091:2026-11-07T06:44:16+08:00 lubancat kernel: Unable to handle kernel paging request at virtual address 0000000200480058
+62103:2026-11-07T06:44:16+08:00 lubancat kernel: Internal error: Oops: 0000000096000004 [#6] SMP

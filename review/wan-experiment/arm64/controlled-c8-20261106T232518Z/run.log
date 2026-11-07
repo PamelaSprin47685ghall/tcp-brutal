@@ -1,0 +1,4 @@
+23:25:18Z evidence: /home/kunweiz/Desktop/vibe/tcp-brutal/review/wan-experiment/arm64/controlled-c8-20261106T232518Z
+23:25:19Z lock: /tmp/tbtun-rk3588.lock 已持有
+23:25:20Z lock: /tmp/tbtun-hnd0.lock 已持有
+23:25:22Z visibility: relay=active sampler=active rx=active-user sampler_lines=17906

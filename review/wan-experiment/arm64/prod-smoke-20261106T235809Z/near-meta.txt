@@ -1,0 +1,23 @@
+=== date ===
+2026年 11月 06日 星期五 23:58:55 UTC
+=== uptime ===
+ 07:58:55 up 59 min,  2 users,  load average: 0.21, 0.09, 0.06
+=== boot_id ===
+0a91d2eb-3122-41eb-913c-024a4e1fe724
+=== panic ===
+1
+10
+2
+1
+1
+=== cmdline ===
+rootfstype=ext4 rootwait rw console=ttyFIQ0 console=tty1 console=ttyFIQ0 cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory swapaccount=1 systemd.unified_cgroup_hierarchy=0  root=LABEL=writable earlycon=uart8250,mmio32,0xfeb50000 irqchip.gicv3_pseudo_nmi=0 rcupdate.rcu_expedited=1 rcu_nocbs=all androidboot.fwver=ddr-v1.18-9fa84341ce,bl31-v1.53,bl32-v1.20,uboot-evb_rk3588-10/17/2026
+=== max_carriers ===
+256
+=== boots ===
+IDX BOOT ID                          FIRST ENTRY                 LAST ENTRY
+ -4 2ca853ff21ae4a9283df8b3477ee4515 Tue 2026-07-28 04:44:03 CST Thu 2026-10-22 07:47:57 CST
+ -3 3a958aeb07334e0f8ff904eefdcdc826 Thu 2026-10-22 07:48:12 CST Thu 2026-10-22 07:51:40 CST
+ -2 ad6af6b47c1a4860b585c7bd1d506b77 Wed 2026-09-16 22:55:32 CST Fri 2026-11-06 18:27:37 CST
+ -1 303d3d10ef704eb5936ad0c162cda792 Fri 2026-11-06 18:39:06 CST Sat 2026-11-07 06:44:16 CST
+  0 0a91d2eb312241eb913c024a4e1fe724 Sat 2026-11-07 06:59:26 CST Sat 2026-11-07 07:58:42 CST

@@ -1,0 +1,5 @@
+[57835.732478] tbtun-diag: tbt_carrier_lost cpu=1 pid=96746 tunnel=1 carrier=0 gen=6 lost sk_state=7 sock=1 connected=1 hello_sent=1 up=1
+[57835.732971] tbtun-diag: tbt_carrier_lost cpu=1 pid=96746 tunnel=1 carrier=2 gen=8 lost sk_state=7 sock=1 connected=1 hello_sent=1 up=1
+[57835.733182] tbtun-diag: tbt_carrier_lost cpu=1 pid=96746 tunnel=1 carrier=3 gen=7 lost sk_state=7 sock=1 connected=1 hello_sent=1 up=1
+[57838.088467] tbtun: unloaded
+[59271.249172] tbtun 0.0.1 loaded: 1 tunnels max, 256 carriers max

@@ -1,0 +1,5 @@
+2026-11-06T23:58:29Z near_up=0 near_n=256 far_up=16 far_n=256
+2026-11-06T23:58:32Z near_up=65 near_n=256 far_up=86 far_n=256
+2026-11-06T23:58:35Z near_up=141 near_n=256 far_up=151 far_n=256
+2026-11-06T23:58:37Z near_up=212 near_n=256 far_up=221 far_n=256
+2026-11-06T23:58:40Z near_up=256 near_n=256 far_up=256 far_n=256

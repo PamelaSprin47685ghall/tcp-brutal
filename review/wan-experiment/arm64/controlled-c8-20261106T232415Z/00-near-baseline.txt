@@ -1,0 +1,29 @@
+utc=2026-11-06T23:24:15Z
+ 07:24:15 up 24 min,  1 user,  load average: 0.05, 0.13, 0.17
+--- lsmod ---
+NO_TBTUN_LOADED
+--- procfs ---
+NO_PROC_TBTUN
+--- pstore ---
+--- services ---
+active
+active
+--- sysctl ---
+kernel.panic_on_oops = 1
+kernel.panic = 10
+--- dmesg lines ---
+1409
+--- ip rule ---
+0:	from all lookup local
+9000:	from all to 198.18.0.0/30 lookup 2022
+9001:	not from all dport 53 lookup main suppress_prefixlength 0
+9001:	from all iif Meta goto 9010
+9002:	not from all iif lo lookup 2022
+9002:	from 0.0.0.0 iif lo lookup 2022
+9002:	from 198.18.0.0/30 iif lo lookup 2022
+9010:	from all nop
+32766:	from all lookup main
+32767:	from all lookup default
+--- ip addr ---
+2: eth0    inet 192.168.123.65/24 brd 192.168.123.255 scope global dynamic noprefixroute eth0\       valid_lft 257720sec preferred_lft 257720sec
+5: Meta    inet 198.18.0.1/30 brd 198.18.0.3 scope global Meta\       valid_lft forever preferred_lft forever

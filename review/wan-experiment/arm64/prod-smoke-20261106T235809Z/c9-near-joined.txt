@@ -1,0 +1,7 @@
+c9_line=tunnel 1 c9 fec_proto_fail=0 fec_hdr_crc_fail=0 fec_payload_crc_fail=0 fec_short_tx=0 fec_short_unknown=0 fec_stream_refused=0 fec_drop_window=0 fec_drop_crypto=0 fec_ack_tx=0 fec_ack_rx=0 fec_credit_wait=0
+c9_present=yes
+c9_info.fec_ack_tx=0
+c9_info.fec_ack_rx=0
+c9_info.fec_credit_wait=0
+c9_all_error_zero=yes
+c9_error_nonzero=none

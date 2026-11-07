@@ -1,0 +1,8 @@
+=== cleanup 2026-11-06T23:58:57Z ===
+near_reachable=yes near_rebooted=0 far_reachable=yes
+near_rmmod=ok
+near_rule=deleted
+near_sysctl=restored
+far_echo=stopped
+far_rmmod=ok
+locks_released=yes

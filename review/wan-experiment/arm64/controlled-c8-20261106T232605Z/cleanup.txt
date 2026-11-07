@@ -1,0 +1,4 @@
+=== cleanup 2026-11-06T23:28:07Z ===
+near_reachable=yes near_rebooted=0 far_reachable=yes
+near_rmmod=skipped(not_loaded)
+locks_released=yes

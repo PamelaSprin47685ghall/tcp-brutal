@@ -1,0 +1,25 @@
+2026-11-06T23:28:39Z	1794007719	start | single-shot c8; evidence=/home/kunweiz/Desktop/vibe/tcp-brutal/review/wan-experiment/arm64/controlled-c8-20261106T232839Z
+2026-11-06T23:28:40Z	1794007720	precheck_ssh | near=aarch64/6.1.172 far=7.0.0-42-generic boot_id=0a91d2eb-3122-41eb-913c-024a4e1fe724
+2026-11-06T23:28:41Z	1794007721	load | near=0.15 far=0.29 limit=4
+2026-11-06T23:28:41Z	1794007721	precheck_visibility | panic_on_oops=1 panic=10 oops_limit=2 panic_on_rcu_stall=1 oops_all_cpu_backtrace=1 pstore_empty=yes ramoops=yes
+2026-11-06T23:28:42Z	1794007722	precheck_far_early | srcversion=332759AF31AB0DD875E0EE7 expected=332759AF31AB0DD875E0EE7
+2026-11-06T23:28:42Z	1794007722	precheck_receiver | pid=599898 log=/home/kunweiz/tbtun-forensics/netconsole-6666.log lines=5520 relay=active sampler=active rx=active-user
+2026-11-06T23:28:50Z	1794007730	precheck_far | srcversion=332759AF31AB0DD875E0EE7 expected=332759AF31AB0DD875E0EE7 ko_sha=49d632d37a34660e906d9f5b8919d9f7895c4912a8af9f36a7b55873ddfbc0f4 ko_mtime=1794004781
+2026-11-06T23:28:51Z	1794007731	precheck_module | dir=/root/tbtun-fixed-20261106T231212Z srcversion=72168C1CE3E3378A758DAFF sha=1637ca0fd3d6371595102f34e187242ef44c0d73d717a7d77e039c793ba2ab92 identity=match
+2026-11-06T23:28:51Z	1794007731	visibility_ready | pid=599898 log=/home/kunweiz/tbtun-forensics/netconsole-6666.log lines=5520 relay=active sampler=active rx=active-user
+2026-11-06T23:28:53Z	1794007733	precheck_done | burst_sha=afa13883aa79f587e7bd667cddd8637e6eb7dab1747ccdb66fbd7d707d49a740
+2026-11-06T23:28:53Z	1794007733	far_config_start
+2026-11-06T23:28:58Z	1794007738	far_config_done | ports=31000-31015 config=exact echo=5202
+2026-11-06T23:28:58Z	1794007738	near_config_start
+2026-11-06T23:28:58Z	1794007738	route | dev=eth0
+2026-11-06T23:28:58Z	1794007738	near_config_done | ports=30000-30015 config=exact
+2026-11-06T23:28:58Z	1794007738	join_start | timeout=60s target=up=8
+2026-11-06T23:29:01Z	1794007741	join_ok | near_up=8 far_up=8
+2026-11-06T23:29:03Z	1794007743	burst_start | tbt_burst 127.0.0.1 9001 1 5 interleaved timeout=120s
+2026-11-06T23:29:04Z	1794007744	burst_end | ssh_rc=0 burst_rc=0 wall_ms=1498 at=2026-11-06T23:29:04Z
+2026-11-06T23:29:04Z	1794007744	netconsole_snapshot | start=451213 end=500530
+2026-11-06T23:29:11Z	1794007751	far_evidence_done
+2026-11-06T23:29:17Z	1794007757	evidence_done | near_lost=0 rebooted=0
+2026-11-06T23:29:17Z	1794007757	end | final_rc=0
+2026-11-06T23:29:17Z	1794007757	cleanup_start | exit_rc=0
+2026-11-06T23:29:20Z	1794007760	cleanup_done | clean_fail=0

@@ -1,0 +1,5 @@
+/proc/599898/fd/0 -> /dev/null
+/proc/599898/fd/1 -> socket:[16201405]
+/proc/599898/fd/2 -> socket:[16201405]
+/proc/599898/fd/3 -> socket:[16201408]
+/proc/599898/fd/4 -> /home/kunweiz/tbtun-forensics/netconsole-6666.log

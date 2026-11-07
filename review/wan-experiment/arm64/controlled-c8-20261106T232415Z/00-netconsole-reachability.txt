@@ -1,0 +1,26 @@
+utc=2026-11-06T23:24:25Z
+--- local ssh config hosts ---
+Host ai-xtcp
+    HostName 127.0.0.1
+Host 45.11.1.62
+Host 45.11.1.62 192.168.123.65
+--- ping .80 from ws ---
+PING 192.168.123.80 (192.168.123.80) 56(84) bytes of data.
+64 bytes from 192.168.123.80: icmp_seq=1 ttl=64 time=0.019 ms
+64 bytes from 192.168.123.80: icmp_seq=2 ttl=64 time=0.041 ms
+
+--- 192.168.123.80 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 1017ms
+rtt min/avg/max/mdev = 0.019/0.030/0.041/0.011 ms
+--- ping .80 from .65 ---
+PING 192.168.123.80 (192.168.123.80) 56(84) bytes of data.
+64 bytes from 192.168.123.80: icmp_seq=1 ttl=64 time=2.26 ms
+64 bytes from 192.168.123.80: icmp_seq=2 ttl=64 time=2.34 ms
+
+--- 192.168.123.80 ping statistics ---
+2 packets transmitted, 2 received, 0% packet loss, time 1002ms
+rtt min/avg/max/mdev = 2.262/2.300/2.338/0.038 ms
+--- netconsole params ---
+NO_NETCONSOLE_PARAM
+--- netconsole module ---
+NETCONSOLE_NOT_LOADED

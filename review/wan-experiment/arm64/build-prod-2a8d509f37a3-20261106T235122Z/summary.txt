@@ -1,0 +1,86 @@
+kind=dirty-worktree-build (HEAD + uncommitted diff; tar of the worktree, not git archive)
+sha=2a8d509f37a3ad2cbae4cbfc01a3b345426b951a
+short=2a8d509f37a3
+host=root@192.168.123.65  kernel=6.1.172 aarch64  nproc=8
+stage=/root/tbtun-prod-20261106T235122Z
+utc=2026-11-06T23:51:48Z
+archive_sha256=c15808112f7de3867c1c930dc39fef9e15993e6e03d72ab1a1c09ede5b48ad72
+worktree_src=worktree-src.tar
+tar_excludes=.git openvpn mptcpd *.o *.ko *.cmd modules.order Module.symvers review/ benches/results
+staged_files=128 (stale tbtun.mod/tbtun.mod.c from the worktree removed before the build)
+
+== local diffstat ==
+ CHANGELOG.md                                     |  47 +++++++
+ README.md                                        |  75 ++++++++++
+ README.zh.md                                     |  60 ++++++++
+ host/test_fec.c                                  |  12 ++
+ review/dkms-qemu/artifacts/guest-tbtun.ko.sha256 |   1 -
+ review/lint.sh                                   |  10 +-
+ review/wan-experiment/arm64/deploy_hnd0.sh       |  35 ++++-
+ tbtun/tbt_carrier.c                              | 172 +++++++++++++++++++++--
+ tbtun/tbt_fec.c                                  |   6 +
+ tbtun/tbt_fec.h                                  |   1 +
+ tbtun/tbt_fec_data.c                             |  65 +++++++++
+ tbtun/tbt_rx.c                                   |  53 +++++++
+ tbtun/tbt_session.c                              |  28 +++-
+ tbtun/tbt_tx.c                                   |  55 +++++++-
+ tbtun/tbtun.h                                    |  39 +++++
+ "\344\272\244\346\216\245.md"                    |  22 +++
+ 16 files changed, 655 insertions(+), 26 deletions(-)
+
+== required source markers (verified on the staged tree) ==
+tbtun/tbt_carrier.c:1356  c->parser = kzalloc(sizeof(*c->parser), GFP_KERNEL);
+tbtun/tbt_carrier.c:1357  c->http_rx = kzalloc(sizeof(*c->http_rx), GFP_KERNEL);
+tbtun/tbt_rx.c:844        if (!p || !c->http_rx || p->have > sizeof(p->buf) || c->http_have > TBT_HTTP_HDR_MAX)
+tbtun/tbt_rx.c:1178       if (!p || p->have > sizeof(p->buf))  (tbt_rx_parse_raw)
+tbtun/tbtun.h:65-79       TBT_DIAG / TBT_DIAG_WARN are gated: do { if (debug >= 1) pr_info/pr_warn(...); } while (0)
+tbtun/tbtun.h:155         extern unsigned int debug;  (defined in tbt_core.c:26)
+
+== module identity ==
+sha256=9e028e1dd66a14a5202316b41f140a3bfa424ed4fa7bc4d4550b4170ca5d0ba2
+srcversion=EAA11C59413AA48F66150DD
+vermagic=6.1.172 SMP mod_unload modversions aarch64
+size_bytes=267592
+buildid=sha1:a6686f95a834347ea131ece2141d97bb67e1d9dd
+modinfo_name=tbtun version=0.0.1 license=GPL depends=(empty)
+params=max_carriers (default 256), max_tunnels (default 64), debug, debug_loss
+
+== build ==
+warning: the compiler differs from the one used to build the kernel
+  The kernel was built by: aarch64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+  You are using:           gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun/tbt_core.o
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun/tbt_session.o
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun/tbt_procfs.o
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun/tbt_listen.o
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun/tbt_proto.o
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun/tbt_carrier.o
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun/tbt_sock.o
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun/tbt_tx.o
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun/tbt_rx.o
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun/tbt_rec.o
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun/tbt_parse.o
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun/tbt_http.o
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun/tbt_crypto.o
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun/tbt_portmap.o
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun/tbt_fec.o
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun/tbt_fec_data.o
+  LD [M]  /root/tbtun-prod-20261106T235122Z/tbtun.o
+  MODPOST /root/tbtun-prod-20261106T235122Z/Module.symvers
+  CC [M]  /root/tbtun-prod-20261106T235122Z/tbtun.mod.o
+  LD [M]  /root/tbtun-prod-20261106T235122Z/tbtun.ko
+
+== pre-load symbol version check ==
+modprobe --dump-modversions tbtun.ko: 107 imported symbols, all 107 CRC values match
+/lib/modules/6.1.172/build/Module.symvers (MATCHED=107, 0 missing, 0 mismatched).
+
+== identity change vs the verified single-shot module ==
+tested in controlled-c8-20261106T232839Z: sha256 1637ca0f... srcversion 72168C1C...  (258936 B)
+this prod build:                          sha256 9e028e1d... srcversion EAA11C59...  (267592 B)
+Different artifact: the 256-carrier acceptance is a new module, not a rerun of the verified one.
+
+== state on .65 at build time ==
+no tbtun loaded, /proc/net/tbtun absent, load1 ~0.1, /root 42G free. Nothing loaded, unloaded or written.
+
+== local copy ==
+9e028e1dd66a14a5202316b41f140a3bfa424ed4fa7bc4d4550b4170ca5d0ba2  review/wan-experiment/arm64/build-prod-2a8d509f37a3-20261106T235122Z/tbtun.ko

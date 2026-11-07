@@ -1,0 +1,1663 @@
+[    7.918820] Booting Linux on physical CPU 0x0000000000 [0x412fd050]
+[    7.918848] Linux version 6.1.172 (root@lubancat) (aarch64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46) #1 SMP Sat Oct 17 15:47:17 CST 2026
+[    7.931635] Machine model: Embedfire LubanCat-5 V2
+[    7.931760] earlycon: uart8250 at MMIO32 0x00000000feb50000 (options '')
+[    7.934871] printk: bootconsole [uart8250] enabled
+[    7.939354] efi: UEFI not found.
+[    7.943694] OF: fdt: Reserved memory: failed to reserve memory for node 'drm-logo@0': base 0x0000000000000000, size 0 MiB
+[    7.944712] OF: fdt: Reserved memory: failed to reserve memory for node 'drm-cubic-lut@0': base 0x0000000000000000, size 0 MiB
+[    7.945846] Reserved memory: created CMA memory pool at 0x0000000010000000, size 256 MiB
+[    7.946590] OF: reserved mem: initialized node cma, compatible id shared-dma-pool
+[    8.105052] Zone ranges:
+[    8.105294]   DMA      [mem 0x0000000000200000-0x00000000ffffffff]
+[    8.105869]   DMA32    empty
+[    8.106138]   Normal   [mem 0x0000000100000000-0x00000002ffffffff]
+[    8.106710] Movable zone start for each node
+[    8.107102] Early memory node ranges
+[    8.107431]   node   0: [mem 0x0000000000200000-0x00000000083fffff]
+[    8.108010]   node   0: [mem 0x0000000009400000-0x00000000efffffff]
+[    8.108589]   node   0: [mem 0x0000000100000000-0x00000001ffffffff]
+[    8.109167]   node   0: [mem 0x00000002f0000000-0x00000002ffffffff]
+[    8.109745] Initmem setup node 0 [mem 0x0000000000200000-0x00000002ffffffff]
+[    8.111256] On node 0, zone DMA: 512 pages in unavailable ranges
+[    8.134948] On node 0, zone DMA: 4096 pages in unavailable ranges
+[    8.163527] psci: probing for conduit method from DT.
+[    8.164559] psci: PSCIv1.1 detected in firmware.
+[    8.164986] psci: Using standard PSCI v0.2 function IDs
+[    8.165469] psci: Trusted OS migration not required
+[    8.165958] psci: SMC Calling Convention v1.2
+[    8.166761] percpu: Embedded 30 pages/cpu s83256 r8192 d31432 u122880
+[    8.167398] pcpu-alloc: s83256 r8192 d31432 u122880 alloc=30*4096
+[    8.167412] pcpu-alloc: [0] 0 [0] 1 [0] 2 [0] 3 [0] 4 [0] 5 [0] 6 [0] 7 
+[    8.167555] Detected VIPT I-cache on CPU0
+[    8.167971] CPU features: detected: GIC system register CPU interface
+[    8.168564] CPU features: detected: Virtualization Host Extensions
+[    8.169140] CPU features: detected: Broken broadcast TLBI completion
+[    8.169724] CPU features: detected: ARM errata 1165522, 1319367, or 1530923
+[    8.170365] alternatives: applying boot alternatives
+[    8.171291] Built 1 zonelists, mobility grouping on.  Total pages: 2059848
+[    8.171932] Kernel command line: rootfstype=ext4 rootwait rw console=ttyFIQ0 console=tty1 console=ttyFIQ0 cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory swapaccount=1 systemd.unified_cgroup_hierarchy=0  root=LABEL=writable earlycon=uart8250,mmio32,0xfeb50000 irqchip.gicv3_pseudo_nmi=0 rcupdate.rcu_expedited=1 rcu_nocbs=all androidboot.fwver=ddr-v1.18-9fa84341ce,bl31-v1.53,bl32-v1.20,uboot-evb_rk3588-10/17/2026
+[    8.175883] Unknown kernel command line parameters "cgroup_enable=memory cgroup_memory=1 rcu_nocbs=all", will be passed to user space.
+[    8.177749] Dentry cache hash table entries: 1048576 (order: 11, 8388608 bytes, linear)
+[    8.178864] Inode-cache hash table entries: 524288 (order: 10, 4194304 bytes, linear)
+[    8.179589] mem auto-init: stack:off, heap alloc:off, heap free:off
+[    8.180167] software IO TLB: area num 8.
+[    8.192468] software IO TLB: mapped [mem 0x00000000ec000000-0x00000000f0000000] (64MB)
+[    8.261047] Memory: 7815028K/8370176K available (18112K kernel code, 3822K rwdata, 13484K rodata, 5760K init, 713K bss, 293004K reserved, 262144K cma-reserved)
+[    8.262512] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=8, Nodes=1
+[    8.263232] trace event string verifier disabled
+[    8.263859] rcu: Hierarchical RCU implementation.
+[    8.264295] rcu: 	RCU event tracing is enabled.
+[    8.264713] 	All grace periods are expedited (rcu_expedited).
+[    8.265241] 	Tracing variant of Tasks RCU enabled.
+[    8.265682] rcu: RCU calculated value of scheduler-enlistment delay is 30 jiffies.
+[    8.284813] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    8.289327] GICv3: GIC: Using split EOI/Deactivate mode
+[    8.289812] GICv3: 480 SPIs implemented
+[    8.290167] GICv3: 0 Extended SPIs implemented
+[    8.290605] Root IRQ handler: gic_handle_irq
+[    8.291014] GICv3: GICv3 features: 16 PPIs
+[    8.291432] GICv3: CPU0: found redistributor 0 region 0:0x00000000fe680000
+[    8.292515] ITS [mem 0xfe640000-0xfe65ffff]
+[    8.292954] ITS@0x00000000fe640000: allocated 8192 Devices @100120000 (indirect, esz 8, psz 64K, shr 0)
+[    8.293841] ITS@0x00000000fe640000: allocated 32768 Interrupt Collections @100130000 (flat, esz 2, psz 64K, shr 0)
+[    8.294800] ITS: using cache flushing for cmd queue
+[    8.295287] ITS [mem 0xfe660000-0xfe67ffff]
+[    8.295714] ITS@0x00000000fe660000: allocated 8192 Devices @100150000 (indirect, esz 8, psz 64K, shr 0)
+[    8.296600] ITS@0x00000000fe660000: allocated 32768 Interrupt Collections @100160000 (flat, esz 2, psz 64K, shr 0)
+[    8.297559] ITS: using cache flushing for cmd queue
+[    8.298299] GICv3: using LPI property table @0x0000000100170000
+[    8.298978] GIC: using cache flushing for LPI property table
+[    8.299503] GICv3: CPU0: using allocated LPI pending table @0x0000000100180000
+[    8.300225] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    8.480945] arch_timer: cp15 timer(s) running at 24.00MHz (phys).
+[    8.481509] clocksource: arch_sys_counter: mask: 0xffffffffffffff max_cycles: 0x588fe9dc0, max_idle_ns: 440795202592 ns
+[    8.482492] sched_clock: 56 bits at 24MHz, resolution 41ns, wraps every 4398046511097ns
+[    8.484963] Console: colour dummy device 80x25
+[    8.486002] printk: console [tty1] enabled
+[    8.486413] Calibrating delay loop (skipped), value calculated using timer frequency.. 48.00 BogoMIPS (lpj=80000)
+[    8.487361] pid_max: default: 32768 minimum: 301
+[    8.487851] LSM: Security Framework initializing
+[    8.488387] AppArmor: AppArmor initialized
+[    8.488848] Mount-cache hash table entries: 16384 (order: 5, 131072 bytes, linear)
+[    8.489565] Mountpoint-cache hash table entries: 16384 (order: 5, 131072 bytes, linear)
+[    8.491540] Early cacheinfo failed, ret = -22
+[    8.492748] cblist_init_generic: Setting adjustable number of callback queues.
+[    8.493419] cblist_init_generic: Setting shift to 3 and lim to 1.
+[    8.494193] rcu: Hierarchical SRCU implementation.
+[    8.494640] rcu: 	Max phase no-delay instances is 1000.
+[    8.496167] Platform MSI: msi-controller@fe640000 domain created
+[    8.496742] Platform MSI: msi-controller@fe660000 domain created
+[    8.497825] PCI/MSI: /interrupt-controller@fe600000/msi-controller@fe640000 domain created
+[    8.498611] PCI/MSI: /interrupt-controller@fe600000/msi-controller@fe660000 domain created
+[    8.499648] EFI services will not be available.
+[    8.500480] smp: Bringing up secondary CPUs ...
+[    8.502213] Detected VIPT I-cache on CPU1
+[    8.502310] GICv3: CPU1: found redistributor 100 region 0:0x00000000fe6a0000
+[    8.502333] GICv3: CPU1: using allocated LPI pending table @0x0000000100190000
+[    8.502377] CPU1: Booted secondary processor 0x0000000100 [0x412fd050]
+[    8.503763] Detected VIPT I-cache on CPU2
+[    8.503852] GICv3: CPU2: found redistributor 200 region 0:0x00000000fe6c0000
+[    8.503873] GICv3: CPU2: using allocated LPI pending table @0x00000001001a0000
+[    8.503909] CPU2: Booted secondary processor 0x0000000200 [0x412fd050]
+[    8.505233] Detected VIPT I-cache on CPU3
+[    8.505325] GICv3: CPU3: found redistributor 300 region 0:0x00000000fe6e0000
+[    8.505345] GICv3: CPU3: using allocated LPI pending table @0x00000001001b0000
+[    8.505379] CPU3: Booted secondary processor 0x0000000300 [0x412fd050]
+[    8.506679] CPU features: detected: Spectre-v4
+[    8.506683] CPU features: detected: Spectre-BHB
+[    8.506687] CPU features: detected: SSBS not fully self-synchronizing
+[    8.506689] Detected PIPT I-cache on CPU4
+[    8.506740] GICv3: CPU4: found redistributor 400 region 0:0x00000000fe700000
+[    8.506751] GICv3: CPU4: using allocated LPI pending table @0x00000001001c0000
+[    8.506773] CPU4: Booted secondary processor 0x0000000400 [0x414fd0b0]
+[    8.508057] Detected PIPT I-cache on CPU5
+[    8.508115] GICv3: CPU5: found redistributor 500 region 0:0x00000000fe720000
+[    8.508126] GICv3: CPU5: using allocated LPI pending table @0x00000001001d0000
+[    8.508149] CPU5: Booted secondary processor 0x0000000500 [0x414fd0b0]
+[    8.509449] Detected PIPT I-cache on CPU6
+[    8.509506] GICv3: CPU6: found redistributor 600 region 0:0x00000000fe740000
+[    8.509517] GICv3: CPU6: using allocated LPI pending table @0x00000001001e0000
+[    8.509540] CPU6: Booted secondary processor 0x0000000600 [0x414fd0b0]
+[    8.510810] Detected PIPT I-cache on CPU7
+[    8.510868] GICv3: CPU7: found redistributor 700 region 0:0x00000000fe760000
+[    8.510880] GICv3: CPU7: using allocated LPI pending table @0x00000001001f0000
+[    8.510902] CPU7: Booted secondary processor 0x0000000700 [0x414fd0b0]
+[    8.510964] smp: Brought up 1 node, 8 CPUs
+[    8.528679] SMP: Total of 8 processors activated.
+[    8.529116] CPU features: detected: 32-bit EL0 Support
+[    8.529591] CPU features: detected: Data cache clean to the PoU not required for I/D coherence
+[    8.530382] CPU features: detected: Common not Private translations
+[    8.530958] CPU features: detected: CRC32 instructions
+[    8.531434] CPU features: detected: RCpc load-acquire (LDAPR)
+[    8.531972] CPU features: detected: LSE atomic instructions
+[    8.532487] CPU features: detected: Privileged Access Never
+[    8.533001] CPU features: detected: RAS Extension Support
+[    8.533501] CPU features: detected: Speculative Store Bypassing Safe (SSBS)
+[    8.534226] CPU: All CPU(s) started at EL2
+[    8.534608] alternatives: applying system-wide alternatives
+[    8.539721] devtmpfs: initialized
+[    8.559514] Registered cp15_barrier emulation handler
+[    8.559983] Registered setend emulation handler
+[    8.560475] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 6370867519511994 ns
+[    8.561377] futex hash table entries: 2048 (order: 5, 131072 bytes, linear)
+[    8.563833] pinctrl core: initialized pinctrl subsystem
+[    8.564425] regulator-dummy: no parameters, enabled
+[    8.564539] DMI not present or invalid.
+[    8.565204] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    8.566390] DMA: preallocated 1024 KiB GFP_KERNEL pool for atomic allocations
+[    8.567224] DMA: preallocated 1024 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    8.568084] DMA: preallocated 1024 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    8.568838] audit: initializing netlink subsys (disabled)
+[    8.569427] audit: type=2000 audit(0.079:1): state=initialized audit_enabled=0 res=1
+[    8.570161] Registered FIQ tty driver
+[    8.570644] thermal_sys: Registered thermal governor 'fair_share'
+[    8.570647] thermal_sys: Registered thermal governor 'step_wise'
+[    8.571202] thermal_sys: Registered thermal governor 'user_space'
+[    8.571749] thermal_sys: Registered thermal governor 'power_allocator'
+[    8.572330] cpuidle: using governor menu
+[    8.573489] hw-breakpoint: found 6 breakpoint and 4 watchpoint registers.
+[    8.574223] ASID allocator initialised with 65536 entries
+[    8.577092] ramoops: dmesg-0	0x18000@0x0000000000110000
+[    8.577572] ramoops: dmesg-1	0x18000@0x0000000000128000
+[    8.578060] ramoops: console	0x80000@0x0000000000140000
+[    8.578542] ramoops: pmsg	0x30000@0x00000000001c0000
+[    8.579276] printk: console [ramoops-1] enabled
+[    8.579692] pstore: Registered ramoops as persistent store backend
+[    8.580255] ramoops: using 0xe0000@0x110000, ecc: 0
+[    8.620835] /vop@fdd90000: Fixed dependency cycle(s) with /dp@fde50000
+[    8.621464] /dp@fde50000: Fixed dependency cycle(s) with /vop@fdd90000
+[    8.622446] /vop@fdd90000: Fixed dependency cycle(s) with /hdmi@fde80000
+[    8.623089] /hdmi@fde80000: Fixed dependency cycle(s) with /vop@fdd90000
+[    8.629906] /i2c@fea90000/fusb302@22: Fixed dependency cycle(s) with /usbdrd3_0/usb@fc000000
+[    8.632778] /i2c@fea90000/fusb302@22/connector: Fixed dependency cycle(s) with /phy@fed80000
+[    8.633576] /phy@fed80000: Fixed dependency cycle(s) with /i2c@fea90000/fusb302@22/connector
+[    8.641564] rockchip-gpio fd8a0000.gpio: probed /pinctrl/gpio@fd8a0000
+[    8.642485] rockchip-gpio fec20000.gpio: probed /pinctrl/gpio@fec20000
+[    8.643325] rockchip-gpio fec30000.gpio: probed /pinctrl/gpio@fec30000
+[    8.644197] rockchip-gpio fec40000.gpio: probed /pinctrl/gpio@fec40000
+[    8.645030] rockchip-gpio fec50000.gpio: probed /pinctrl/gpio@fec50000
+[    8.645677] rockchip-pinctrl pinctrl: probed pinctrl
+[    8.647677] /vop@fdd90000: Fixed dependency cycle(s) with /hdmi@fdea0000
+[    8.648323] /hdmi@fdea0000: Fixed dependency cycle(s) with /vop@fdd90000
+[    8.653101] KASLR disabled due to lack of seed
+[    8.658591] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    8.659215] HugeTLB: 0 KiB vmemmap can be freed for a 1.00 GiB page
+[    8.659796] HugeTLB: registered 32.0 MiB page size, pre-allocated 0 pages
+[    8.660416] HugeTLB: 0 KiB vmemmap can be freed for a 32.0 MiB page
+[    8.660990] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    8.661610] HugeTLB: 0 KiB vmemmap can be freed for a 2.00 MiB page
+[    8.662183] HugeTLB: registered 64.0 KiB page size, pre-allocated 0 pages
+[    8.662802] HugeTLB: 0 KiB vmemmap can be freed for a 64.0 KiB page
+[    8.717554] raid6: neonx8   gen()  6520 MB/s
+[    8.774304] raid6: neonx4   gen()  6525 MB/s
+[    8.831048] raid6: neonx2   gen()  5850 MB/s
+[    8.887797] raid6: neonx1   gen()  4298 MB/s
+[    8.944543] raid6: int64x8  gen()  1614 MB/s
+[    9.001294] raid6: int64x4  gen()  2162 MB/s
+[    9.058042] raid6: int64x2  gen()  2525 MB/s
+[    9.114785] raid6: int64x1  gen()  2047 MB/s
+[    9.115176] raid6: using algorithm neonx4 gen() 6525 MB/s
+[    9.171528] raid6: .... xor() 4962 MB/s, rmw enabled
+[    9.171983] raid6: using neon recovery algorithm
+[    9.173089] fiq_debugger fiq_debugger.0: error -ENXIO: IRQ fiq not found
+[    9.173717] fiq_debugger fiq_debugger.0: error -ENXIO: IRQ wakeup not found
+[    9.174355] fiq_debugger_probe: could not install nmi irq handler
+[    9.174954] printk: console [ttyFIQ0] enabled
+[    9.175732] printk: bootconsole [uart8250] disabled
+[    9.176280] Registered fiq debugger ttyFIQ0
+[    9.176583] vdd_cam_5v: 3300 mV, enabled
+[    9.176664] reg-fixed-voltage vdd-cam-5v-regulator: vdd_cam_5v supplying 3300000uV
+[    9.176720] reg-fixed-voltage cam-dovdd: Looking up vin-supply from device tree
+[    9.176727] cam_dovdd: supplied by vdd_cam_5v
+[    9.176731] vdd_cam_5v: could not add device link regulator.2: -ENOENT
+[    9.176747] cam_dovdd: 1800 mV, enabled
+[    9.176809] reg-fixed-voltage cam-dovdd: cam_dovdd supplying 1800000uV
+[    9.176858] reg-fixed-voltage cam-avdd: Looking up vin-supply from device tree
+[    9.176864] cam_avdd: supplied by vdd_cam_5v
+[    9.176867] vdd_cam_5v: could not add device link regulator.3: -ENOENT
+[    9.176882] cam_avdd: 2800 mV, enabled
+[    9.176937] reg-fixed-voltage cam-avdd: cam_avdd supplying 2800000uV
+[    9.176985] reg-fixed-voltage cam-dvdd: Looking up vin-supply from device tree
+[    9.176990] cam_dvdd: supplied by vdd_cam_5v
+[    9.176994] vdd_cam_5v: could not add device link regulator.4: -ENOENT
+[    9.177012] cam_dvdd: 1200 mV, enabled
+[    9.177097] reg-fixed-voltage cam-dvdd: cam_dvdd supplying 1200000uV
+[    9.177153] vcc12v_dcin: 12000 mV, enabled
+[    9.177217] reg-fixed-voltage vcc12v-dcin: vcc12v_dcin supplying 12000000uV
+[    9.177268] reg-fixed-voltage vcc5v0-sys: Looking up vin-supply from device tree
+[    9.177274] vcc5v0_sys: supplied by vcc12v_dcin
+[    9.177277] vcc12v_dcin: could not add device link regulator.6: -ENOENT
+[    9.177292] vcc5v0_sys: 5000 mV, enabled
+[    9.177349] reg-fixed-voltage vcc5v0-sys: vcc5v0_sys supplying 5000000uV
+[    9.177404] reg-fixed-voltage vcc3v3-sys: Looking up vin-supply from device tree
+[    9.177410] vcc3v3_sys: supplied by vcc12v_dcin
+[    9.177413] vcc12v_dcin: could not add device link regulator.7: -ENOENT
+[    9.177427] vcc3v3_sys: 3300 mV, enabled
+[    9.177482] reg-fixed-voltage vcc3v3-sys: vcc3v3_sys supplying 3300000uV
+[    9.177529] reg-fixed-voltage vcc-5v0: Looking up vin-supply from device tree
+[    9.177535] vcc_5v0: supplied by vcc5v0_sys
+[    9.177539] vcc5v0_sys: could not add device link regulator.8: -ENOENT
+[    9.177557] vcc_5v0: 5000 mV, enabled
+[    9.177614] reg-fixed-voltage vcc-5v0: vcc_5v0 supplying 5000000uV
+[    9.177663] reg-fixed-voltage vcc5v0-usb: Looking up vin-supply from device tree
+[    9.177669] vcc_5v0: supplied by vcc5v0_sys
+[    9.177672] vcc5v0_sys: could not add device link regulator.9: -ENOENT
+[    9.177687] vcc_5v0: 5000 mV, enabled
+[    9.177720] debugfs: Directory 'vcc_5v0' with parent 'regulator' already present!
+[    9.177732] vcc_5v0: Failed to create debugfs directory
+[    9.177737] debugfs: Directory 'vcc_5v0' with parent 'vcc_5v0' already present!
+[    9.177746] vcc_5v0: Failed to create debugfs directory
+[    9.177751] reg-fixed-voltage vcc5v0-usb: vcc_5v0 supplying 5000000uV
+[    9.177809] reg-fixed-voltage vcc-1v1-nldo-s3: Looking up vin-supply from device tree
+[    9.177815] vcc_1v1_nldo_s3: supplied by vcc5v0_sys
+[    9.177818] vcc5v0_sys: could not add device link regulator.10: -ENOENT
+[    9.177837] vcc_1v1_nldo_s3: 1100 mV, enabled
+[    9.177894] reg-fixed-voltage vcc-1v1-nldo-s3: vcc_1v1_nldo_s3 supplying 1100000uV
+[    9.178013] vbus_typec: 5000 mV, disabled
+[    9.178062] reg-fixed-voltage vbus-typec: Looking up vin-supply from device tree
+[    9.178069] vbus_typec: supplied by vcc_5v0
+[    9.178074] vcc_5v0: Failed to create debugfs directory
+[    9.178094] reg-fixed-voltage vbus-typec: vbus_typec supplying 5000000uV
+[    9.178157] mipi_dsi0_power: no parameters, enabled
+[    9.178216] reg-fixed-voltage mipi-dsi0-power-regulator: mipi_dsi0_power supplying 0uV
+[    9.178272] mipi_dsi1_power: no parameters, enabled
+[    9.178333] reg-fixed-voltage mipi-dsi1-power-regulator: mipi_dsi1_power supplying 0uV
+[    9.178393] mipi_dp1_power: no parameters, enabled
+[    9.178454] reg-fixed-voltage mipi-edp-power-regulator: mipi_dp1_power supplying 0uV
+[    9.178789] iommu: Default domain type: Translated 
+[    9.178799] iommu: DMA domain TLB invalidation policy: strict mode 
+[    9.178967] SCSI subsystem initialized
+[    9.179067] libata version 3.00 loaded.
+[    9.179134] usbcore: registered new interface driver usbfs
+[    9.179154] usbcore: registered new interface driver hub
+[    9.179172] usbcore: registered new device driver usb
+[    9.179225] mc: Linux media interface: v0.10
+[    9.179244] videodev: Linux video capture interface: v2.00
+[    9.179281] pps_core: LinuxPPS API ver. 1 registered
+[    9.179288] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    9.179301] PTP clock support registered
+[    9.179562] arm-scmi firmware:scmi: Enabled polling mode TX channel - prot_id:16
+[    9.179623] arm-scmi firmware:scmi: SCMI Notifications - Core Enabled.
+[    9.179656] arm-scmi firmware:scmi: SCMI Protocol v2.0 'rockchip:' Firmware version 0x0
+[    9.181186] Advanced Linux Sound Architecture Driver Initialized.
+[    9.181447] Bluetooth: Core ver 2.22
+[    9.181468] NET: Registered PF_BLUETOOTH protocol family
+[    9.181475] Bluetooth: HCI device and connection manager initialized
+[    9.181486] Bluetooth: HCI socket layer initialized
+[    9.181494] Bluetooth: L2CAP socket layer initialized
+[    9.181505] Bluetooth: SCO socket layer initialized
+[    9.181553] NetLabel: Initializing
+[    9.181559] NetLabel:  domain hash size = 128
+[    9.181565] NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO
+[    9.181595] NetLabel:  unlabeled traffic allowed by default
+[    9.182947] rockchip-cpuinfo cpuinfo: SoC		: 35881000
+[    9.182959] rockchip-cpuinfo cpuinfo: Serial		: c55013404cfdd113
+[    9.183430] clocksource: Switched to clocksource arch_sys_counter
+[    9.183556] VFS: Disk quotas dquot_6.6.0
+[    9.183582] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[    9.183847] AppArmor: AppArmor Filesystem Enabled
+[    9.189182] NET: Registered PF_INET protocol family
+[    9.189309] IP idents hash table entries: 131072 (order: 8, 1048576 bytes, linear)
+[    9.192751] tcp_listen_portaddr_hash hash table entries: 4096 (order: 5, 131072 bytes, linear)
+[    9.192813] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    9.192841] TCP established hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    9.193176] TCP bind hash table entries: 65536 (order: 10, 4194304 bytes, linear)
+[    9.196053] TCP: Hash tables configured (established 65536 bind 65536)
+[    9.196214] MPTCP token hash table entries: 8192 (order: 7, 393216 bytes, linear)
+[    9.196327] UDP hash table entries: 4096 (order: 7, 393216 bytes, linear)
+[    9.196481] UDP-Lite hash table entries: 4096 (order: 7, 393216 bytes, linear)
+[    9.196702] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    9.196987] RPC: Registered named UNIX socket transport module.
+[    9.196997] RPC: Registered udp transport module.
+[    9.197003] RPC: Registered tcp transport module.
+[    9.197009] RPC: Registered tcp NFSv4.1 backchannel transport module.
+[    9.197451] PCI: CLS 0 bytes, default 64
+[    9.197916] Trying to unpack rootfs image as initramfs...
+[    9.198508] rockchip-thermal fec00000.tsadc: Missing rockchip,grf property
+[    9.199489] rockchip-thermal fec00000.tsadc: tsadc is probed successfully!
+[    9.204204] hw perfevents: enabled with armv8_pmuv3 PMU driver, 7 counters available
+[    9.204870] kvm [1]: IPA Size Limit: 40 bits
+[    9.204889] kvm [1]: GICv3: no GICV resource entry
+[    9.204897] kvm [1]: disabling GICv2 emulation
+[    9.204903] kvm [1]: GIC system register CPU interface enabled
+[    9.205258] kvm [1]: vgic interrupt IRQ9
+[    9.205406] kvm [1]: VHE mode initialized successfully
+[    9.206142] Initialise system trusted keyrings
+[    9.206264] workingset: timestamp_bits=46 max_order=21 bucket_order=0
+[    9.209358] NFS: Registering the id_resolver key type
+[    9.209392] Key type id_resolver registered
+[    9.209399] Key type id_legacy registered
+[    9.209435] nfs4filelayout_init: NFSv4 File Layout Driver Registering...
+[    9.209444] nfs4flexfilelayout_init: NFSv4 Flexfile Layout Driver Registering...
+[    9.229508] NET: Registered PF_ALG protocol family
+[    9.229522] xor: measuring software checksum speed
+[    9.229864]    8regs           :  9790 MB/sec
+[    9.230230]    32regs          :  9152 MB/sec
+[    9.230562]    arm64_neon      : 10124 MB/sec
+[    9.230569] xor: using function: arm64_neon (10124 MB/sec)
+[    9.230579] Key type asymmetric registered
+[    9.230586] Asymmetric key parser 'x509' registered
+[    9.230612] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 242)
+[    9.230736] io scheduler mq-deadline registered
+[    9.230744] io scheduler kyber registered
+[    9.232226] rockchip-csi2-dphy-hw fedc0000.csi2-dphy0-hw: csi2 dphy hw probe successfully!
+[    9.232327] rockchip-csi2-dphy-hw fedc8000.csi2-dphy1-hw: csi2 dphy hw probe successfully!
+[    9.233981] phy phy-fd5d0000.syscon:usb2-phy@0.0: Looking up phy-supply from device tree
+[    9.233987] phy phy-fd5d0000.syscon:usb2-phy@0.0: Looking up phy-supply property in node /syscon@fd5d0000/usb2-phy@0/otg-port failed
+[    9.234040] phy phy-fd5d0000.syscon:usb2-phy@0.0: Looking up vbus-supply from device tree
+[    9.234045] phy phy-fd5d0000.syscon:usb2-phy@0.0: Looking up vbus-supply property in node /syscon@fd5d0000/usb2-phy@0/otg-port failed
+[    9.235296] phy phy-fd5d8000.syscon:usb2-phy@8000.1: Looking up phy-supply from device tree
+[    9.235309] vcc_5v0: could not add device link phy-fd5d8000.syscon:usb2-phy@8000.1: -ENOENT
+[    9.235314] vcc_5v0: Failed to create debugfs directory
+[    9.236301] phy phy-fd5dc000.syscon:usb2-phy@c000.2: Looking up phy-supply from device tree
+[    9.236310] vcc_5v0: could not add device link phy-fd5dc000.syscon:usb2-phy@c000.2: -ENOENT
+[    9.236314] vcc_5v0: Failed to create debugfs directory
+[    9.237745] phy phy-fd5d4000.syscon:usb2-phy@4000.3: Looking up phy-supply from device tree
+[    9.237751] phy phy-fd5d4000.syscon:usb2-phy@4000.3: Looking up phy-supply property in node /syscon@fd5d4000/usb2-phy@4000/otg-port failed
+[    9.237800] phy phy-fd5d4000.syscon:usb2-phy@4000.3: Looking up vbus-supply from device tree
+[    9.237805] phy phy-fd5d4000.syscon:usb2-phy@4000.3: Looking up vbus-supply property in node /syscon@fd5d4000/usb2-phy@4000/otg-port failed
+[    9.239949] phy phy-fee00000.phy.4: Looking up phy-supply from device tree
+[    9.239956] phy phy-fee00000.phy.4: Looking up phy-supply property in node /phy@fee00000 failed
+[    9.240213] phy phy-fee20000.phy.5: Looking up phy-supply from device tree
+[    9.240219] phy phy-fee20000.phy.5: Looking up phy-supply property in node /phy@fee20000 failed
+[    9.240547] phy phy-fee10000.phy.6: Looking up phy-supply from device tree
+[    9.240553] phy phy-fee10000.phy.6: Looking up phy-supply property in node /phy@fee10000 failed
+[    9.241114] phy phy-feda0000.phy.7: Looking up phy-supply from device tree
+[    9.241120] phy phy-feda0000.phy.7: Looking up phy-supply property in node /phy@feda0000 failed
+[    9.241255] phy phy-fedb0000.phy.8: Looking up phy-supply from device tree
+[    9.241260] phy phy-fedb0000.phy.8: Looking up phy-supply property in node /phy@fedb0000 failed
+[    9.241567] phy phy-fed60000.phy.9: Looking up phy-supply from device tree
+[    9.241572] phy phy-fed60000.phy.9: Looking up phy-supply property in node /phy@fed60000 failed
+[    9.242414] phy phy-fed70000.phy.10: Looking up phy-supply from device tree
+[    9.242420] phy phy-fed70000.phy.10: Looking up phy-supply property in node /phy@fed70000 failed
+[    9.243391] phy phy-fee80000.phy.11: Looking up phy-supply from device tree
+[    9.243397] phy phy-fee80000.phy.11: Looking up phy-supply property in node /phy@fee80000 failed
+[    9.244260] phy phy-fed80000.phy.12: Looking up phy-supply from device tree
+[    9.244266] phy phy-fed80000.phy.12: Looking up phy-supply property in node /phy@fed80000/dp-port failed
+[    9.244300] phy phy-fed80000.phy.13: Looking up phy-supply from device tree
+[    9.244305] phy phy-fed80000.phy.13: Looking up phy-supply property in node /phy@fed80000/u3-port failed
+[    9.244680] phy phy-fed90000.phy.14: Looking up phy-supply from device tree
+[    9.244686] phy phy-fed90000.phy.14: Looking up phy-supply property in node /phy@fed90000/u3-port failed
+[    9.245821] dw-pcie fe190000.pcie: invalid resource
+[    9.245840] dw-pcie fe190000.pcie: Failed to initialize host
+[    9.245847] dw-pcie: probe of fe190000.pcie failed with error -22
+[    9.245978] dw-pcie fe150000.pcie: invalid resource
+[    9.245987] dw-pcie fe150000.pcie: Failed to initialize host
+[    9.246006] dw-pcie: probe of fe150000.pcie failed with error -22
+[    9.246024] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up pcie-supply from device tree
+[    9.246046] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up pcie-supply property in node /power-management@fd8d8000/power-controller failed
+[    9.246601] rk-pcie fe190000.pcie: invalid prsnt-gpios property in node
+[    9.246699] rk-pcie fe190000.pcie: Looking up vpcie3v3-supply from device tree
+[    9.246717] rk-pcie fe190000.pcie: Looking up vpcie3v3-supply property in node /pcie@fe190000 failed
+[    9.246743] rk-pcie fe190000.pcie: no vpcie3v3 regulator found
+[    9.246958] rk-pcie fe150000.pcie: invalid prsnt-gpios property in node
+[    9.247105] rk-pcie fe150000.pcie: Looking up vpcie3v3-supply from device tree
+[    9.247181] iep: Module initialized.
+[    9.247244] mpp_service mpp-srv: 
+[    9.247252] mpp_service mpp-srv: probe start
+[    9.247404] rk-pcie fe190000.pcie: host bridge /pcie@fe190000 ranges:
+[    9.247457] rk-pcie fe190000.pcie:       IO 0x00f4100000..0x00f41fffff -> 0x00f4100000
+[    9.247497] rk-pcie fe190000.pcie:      MEM 0x00f4200000..0x00f4ffffff -> 0x00f4200000
+[    9.247529] rk-pcie fe190000.pcie:      MEM 0x0a00000000..0x0a3fffffff -> 0x0a00000000
+[    9.247600] rk-pcie fe190000.pcie: iATU unroll: enabled
+[    9.247621] rk-pcie fe190000.pcie: iATU regions: 8 ob, 8 ib, align 64K, limit 8G
+[    9.258426] rk-pcie fe150000.pcie: can't get current limit.
+[    9.258782] rk-pcie fe150000.pcie: host bridge /pcie@fe150000 ranges:
+[    9.258843] rk-pcie fe150000.pcie:       IO 0x00f0100000..0x00f01fffff -> 0x00f0100000
+[    9.258888] rk-pcie fe150000.pcie:      MEM 0x00f0200000..0x00f0ffffff -> 0x00f0200000
+[    9.258923] rk-pcie fe150000.pcie:      MEM 0x0900000000..0x093fffffff -> 0x0900000000
+[    9.258993] rk-pcie fe150000.pcie: iATU unroll: enabled
+[    9.259014] rk-pcie fe150000.pcie: iATU regions: 8 ob, 8 ib, align 64K, limit 8G
+[    9.259480] mpp_vepu2 jpege-ccu: probing start
+[    9.259494] mpp_vepu2 jpege-ccu: probing finish
+[    9.260555] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up vdpu-supply from device tree
+[    9.260572] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up vdpu-supply property in node /power-management@fd8d8000/power-controller failed
+[    9.260616] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up rkvdec0-supply from device tree
+[    9.260631] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up rkvdec0-supply property in node /power-management@fd8d8000/power-controller failed
+[    9.260661] mpp_rkvdec2 fdc30000.rkvdec-ccu: rkvdec-ccu, probing start
+[    9.260730] mpp_rkvdec2 fdc30000.rkvdec-ccu: ccu-mode: 1
+[    9.260739] mpp_rkvdec2 fdc30000.rkvdec-ccu: probing finish
+[    9.260771] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up vcodec-supply from device tree
+[    9.260786] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up vcodec-supply property in node /power-management@fd8d8000/power-controller failed
+[    9.261149] mpp_rkvenc2 rkvenc-ccu: probing start
+[    9.261159] mpp_rkvenc2 rkvenc-ccu: probing finish
+[    9.261670] mpp_service mpp-srv: probe success
+[    9.268466] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up audio-supply from device tree
+[    9.268487] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up audio-supply property in node /power-management@fd8d8000/power-controller failed
+[    9.273396] dma-pl330 fea10000.dma-controller: Loaded driver for PL330 DMAC-241330
+[    9.273417] dma-pl330 fea10000.dma-controller: 	DBUFF-128x8bytes Num_Chans-8 Num_Peri-32 Num_Events-16
+[    9.274350] dma-pl330 fea30000.dma-controller: Loaded driver for PL330 DMAC-241330
+[    9.274365] dma-pl330 fea30000.dma-controller: 	DBUFF-128x8bytes Num_Chans-8 Num_Peri-32 Num_Events-16
+[    9.275281] dma-pl330 fed10000.dma-controller: Loaded driver for PL330 DMAC-241330
+[    9.275296] dma-pl330 fed10000.dma-controller: 	DBUFF-128x8bytes Num_Chans-8 Num_Peri-32 Num_Events-16
+[    9.276030] rockchip-system-monitor rockchip-system-monitor: system monitor probe
+[    9.277094] Serial: 8250/16550 driver, 10 ports, IRQ sharing disabled
+[    9.278694] random: crng init done
+[    9.279937] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up rga30-supply from device tree
+[    9.279961] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up rga30-supply property in node /power-management@fd8d8000/power-controller failed
+[    9.280375] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up rga31-supply from device tree
+[    9.280395] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up rga31-supply property in node /power-management@fd8d8000/power-controller failed
+[    9.283139] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up venc0-supply from device tree
+[    9.283159] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up venc0-supply property in node /power-management@fd8d8000/power-controller failed
+[    9.283602] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up venc1-supply from device tree
+[    9.283622] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up venc1-supply property in node /power-management@fd8d8000/power-controller failed
+[    9.284549] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up rkvdec1-supply from device tree
+[    9.284570] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up rkvdec1-supply property in node /power-management@fd8d8000/power-controller failed
+[    9.285027] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up av1-supply from device tree
+[    9.285047] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up av1-supply property in node /power-management@fd8d8000/power-controller failed
+[    9.285084] rk_iommu fdca0000.iommu: av1d iommu enabled
+[    9.299740] brd: module loaded
+[    9.302833] loop: module loaded
+[    9.303091] rbd: loaded (major 254)
+[    9.303264] lkdtm: No crash points registered, enable through debugfs
+[    9.303402] system_heap: orders[0] = 6
+[    9.303412] system_heap: orders[1] = 4
+[    9.303420] system_heap: orders[2] = 0
+[    9.305904] rockchip-spi feb20000.spi: no high_speed pinctrl state
+[    9.306309] /spi@feb20000/rk806single@0: Fixed dependency cycle(s) with /spi@feb20000/rk806single@0/regulators/DCDC_REG7
+[    9.306361] /spi@feb20000/rk806single@0: Fixed dependency cycle(s) with /spi@feb20000/rk806single@0/pinctrl_rk806/rk806_dvs1_pwrdn
+[    9.306384] /spi@feb20000/rk806single@0: Fixed dependency cycle(s) with /spi@feb20000/rk806single@0/pinctrl_rk806/rk806_dvs3_null
+[    9.306406] /spi@feb20000/rk806single@0: Fixed dependency cycle(s) with /spi@feb20000/rk806single@0/pinctrl_rk806/rk806_dvs2_null
+[    9.306428] /spi@feb20000/rk806single@0: Fixed dependency cycle(s) with /spi@feb20000/rk806single@0/pinctrl_rk806/rk806_dvs1_null
+[    9.307034] rk806 spi2.0: chip id: RK806,ver:0x2, 0x1
+[    9.307171] rk806 spi2.0: ON: 0x40 OFF:0x0
+[    9.307299] rk806 spi2.0: shutown_by_pwrctrln missing!
+[    9.307310] rk806 spi2.0: shutdown-sequence missing!
+[    9.307321] rk806 spi2.0: vb-shutdown-sequence missing!
+[    9.307331] rk806 spi2.0: dvs-suspend-control-by missing!
+[    9.308698] rk806-regulator rk806-regulator.2.auto: Looking up vcc1-supply from device tree
+[    9.308711] vdd_gpu_s0: supplied by vcc5v0_sys
+[    9.308716] vcc5v0_sys: could not add device link regulator.15: -ENOENT
+[    9.309781] vdd_gpu_s0: 550 <--> 950 mV at 750 mV at 6500 mA, enabled
+[    9.309929] rk806-regulator rk806-regulator.2.auto: Looking up vcc2-supply from device tree
+[    9.309937] vdd_cpu_lit_s0: supplied by vcc5v0_sys
+[    9.309942] vcc5v0_sys: could not add device link regulator.16: -ENOENT
+[    9.310369] vdd_cpu_lit_s0: 550 <--> 950 mV at 750 mV at 5000 mA, enabled
+[    9.310567] rk806-regulator rk806-regulator.2.auto: Looking up vcc3-supply from device tree
+[    9.310576] vdd_log_s0: supplied by vcc5v0_sys
+[    9.310580] vcc5v0_sys: could not add device link regulator.17: -ENOENT
+[    9.311058] vdd_log_s0: 675 <--> 800 mV at 750 mV at 5000 mA, enabled
+[    9.311251] rk806-regulator rk806-regulator.2.auto: Looking up vcc4-supply from device tree
+[    9.311259] vdd_vdenc_s0: supplied by vcc5v0_sys
+[    9.311263] vcc5v0_sys: could not add device link regulator.18: -ENOENT
+[    9.311680] vdd_vdenc_s0: 550 <--> 950 mV at 750 mV at 5000 mA, enabled
+[    9.311873] rk806-regulator rk806-regulator.2.auto: Looking up vcc5-supply from device tree
+[    9.311881] vdd_ddr_s0: supplied by vcc5v0_sys
+[    9.311886] vcc5v0_sys: could not add device link regulator.19: -ENOENT
+[    9.312360] vdd_ddr_s0: 675 <--> 900 mV at 850 mV at 3000 mA, enabled
+[    9.312551] rk806-regulator rk806-regulator.2.auto: Looking up vcc6-supply from device tree
+[    9.312559] vdd2_ddr_s3: supplied by vcc5v0_sys
+[    9.312563] vcc5v0_sys: could not add device link regulator.20: -ENOENT
+[    9.312814] vdd2_ddr_s3: at 500 mV at 3000 mA, enabled
+[    9.313004] rk806-regulator rk806-regulator.2.auto: Looking up vcc7-supply from device tree
+[    9.313013] vdd_2v0_pldo_s3: supplied by vcc5v0_sys
+[    9.313019] vcc5v0_sys: could not add device link regulator.21: -ENOENT
+[    9.313337] vdd_2v0_pldo_s3: 2000 mV at 3000 mA, enabled
+[    9.313533] rk806-regulator rk806-regulator.2.auto: Looking up vcc8-supply from device tree
+[    9.313541] vcc_3v3_s3: supplied by vcc5v0_sys
+[    9.313546] vcc5v0_sys: could not add device link regulator.22: -ENOENT
+[    9.313865] vcc_3v3_s3: 3300 mV at 3000 mA, enabled
+[    9.314051] rk806-regulator rk806-regulator.2.auto: Looking up vcc9-supply from device tree
+[    9.314059] vddq_ddr_s0: supplied by vcc5v0_sys
+[    9.314064] vcc5v0_sys: could not add device link regulator.23: -ENOENT
+[    9.314428] vddq_ddr_s0: at 500 mV at 3000 mA, enabled
+[    9.314616] rk806-regulator rk806-regulator.2.auto: Looking up vcc10-supply from device tree
+[    9.314624] vcc_1v8_s3: supplied by vcc5v0_sys
+[    9.314629] vcc5v0_sys: could not add device link regulator.24: -ENOENT
+[    9.314952] vcc_1v8_s3: 1800 mV at 3000 mA, enabled
+[    9.315146] rk806-regulator rk806-regulator.2.auto: Looking up vcc13-supply from device tree
+[    9.315275] vdd_0v75_s3: supplied by vcc_1v1_nldo_s3
+[    9.315280] vcc_1v1_nldo_s3: could not add device link regulator.25: -ENOENT
+[    9.315611] vdd_0v75_s3: 750 mV at 300 mA, enabled
+[    9.315818] rk806-regulator rk806-regulator.2.auto: Looking up vcc13-supply from device tree
+[    9.315827] avdd_ddr_pll_s0: supplied by vcc_1v1_nldo_s3
+[    9.315831] vcc_1v1_nldo_s3: could not add device link regulator.26: -ENOENT
+[    9.316198] avdd_ddr_pll_s0: 850 mV at 300 mA, enabled
+[    9.316394] rk806-regulator rk806-regulator.2.auto: Looking up vcc13-supply from device tree
+[    9.316403] avdd_0v75_s0: supplied by vcc_1v1_nldo_s3
+[    9.316407] vcc_1v1_nldo_s3: could not add device link regulator.27: -ENOENT
+[    9.316485] avdd_0v75_s0: Bringing 750000uV into 837500-837500uV
+[    9.316844] avdd_0v75_s0: 837 mV at 500 mA, enabled
+[    9.317045] rk806-regulator rk806-regulator.2.auto: Looking up vcc14-supply from device tree
+[    9.317054] avdd_0v85_s0: supplied by vcc_1v1_nldo_s3
+[    9.317059] vcc_1v1_nldo_s3: could not add device link regulator.28: -ENOENT
+[    9.317364] avdd_0v85_s0: 850 mV at 500 mA, enabled
+[    9.317558] rk806-regulator rk806-regulator.2.auto: Looking up vcc14-supply from device tree
+[    9.317567] vdd_0v75_s0: supplied by vcc_1v1_nldo_s3
+[    9.317571] vcc_1v1_nldo_s3: could not add device link regulator.29: -ENOENT
+[    9.317876] vdd_0v75_s0: 750 mV at 300 mA, enabled
+[    9.318065] rk806-regulator rk806-regulator.2.auto: Looking up vcc11-supply from device tree
+[    9.318122] avcc_1v8_s0: supplied by vdd_2v0_pldo_s3
+[    9.318127] vdd_2v0_pldo_s3: could not add device link regulator.30: -ENOENT
+[    9.318569] avcc_1v8_s0: 1800 mV at 500 mA, enabled
+[    9.318770] rk806-regulator rk806-regulator.2.auto: Looking up vcc11-supply from device tree
+[    9.318780] vcc_1v8_s0: supplied by vdd_2v0_pldo_s3
+[    9.318785] vdd_2v0_pldo_s3: could not add device link regulator.31: -ENOENT
+[    9.319151] vcc_1v8_s0: 1800 mV at 300 mA, enabled
+[    9.319339] rk806-regulator rk806-regulator.2.auto: Looking up vcc11-supply from device tree
+[    9.319349] avdd_1v2_s0: supplied by vdd_2v0_pldo_s3
+[    9.319353] vdd_2v0_pldo_s3: could not add device link regulator.32: -ENOENT
+[    9.319725] avdd_1v2_s0: 1200 mV at 300 mA, enabled
+[    9.319911] rk806-regulator rk806-regulator.2.auto: Looking up vcc12-supply from device tree
+[    9.319919] avcc_3v3_s0: supplied by vcc5v0_sys
+[    9.319924] vcc5v0_sys: could not add device link regulator.33: -ENOENT
+[    9.320235] avcc_3v3_s0: 3300 mV at 500 mA, enabled
+[    9.320428] rk806-regulator rk806-regulator.2.auto: Looking up vcc12-supply from device tree
+[    9.320436] vccio_sd_s0: supplied by vcc5v0_sys
+[    9.320441] vcc5v0_sys: could not add device link regulator.34: -ENOENT
+[    9.320746] vccio_sd_s0: 1800 <--> 3300 mV at 3300 mV at 300 mA, enabled
+[    9.320940] rk806-regulator rk806-regulator.2.auto: Looking up vcca-supply from device tree
+[    9.320948] pldo6_s3: supplied by vcc5v0_sys
+[    9.320953] vcc5v0_sys: could not add device link regulator.35: -ENOENT
+[    9.321100] pldo6_s3: 1800 mV at 300 mA, enabled
+[    9.321217] rk806 spi2.0: no power-off pinctrl state
+[    9.321232] rk806 spi2.0: no sleep-setting state
+[    9.321241] rk806 spi2.0: no reset-setting pinctrl state
+[    9.321250] rk806 spi2.0: no dvs-setting pinctrl state
+[    9.322038] rockchip-spi feb20000.spi: register misc device rkspi-dev2
+[    9.322052] rockchip-spi feb20000.spi: probed, poll=0, rsd=0, cs-inactive=0, ready=0
+[    9.323469] CAN device driver interface
+[    9.325019] rk_gmac-dwmac fe1c0000.ethernet: Looking up phy-supply from device tree
+[    9.325031] rk_gmac-dwmac fe1c0000.ethernet: Looking up phy-supply property in node /ethernet@fe1c0000 failed
+[    9.325050] rk_gmac-dwmac fe1c0000.ethernet: supply phy not found, using dummy regulator
+[    9.325119] rk_gmac-dwmac fe1c0000.ethernet: clock input or output? (output).
+[    9.325132] rk_gmac-dwmac fe1c0000.ethernet: TX delay(0x20).
+[    9.325143] rk_gmac-dwmac fe1c0000.ethernet: Can not read property: rx_delay.
+[    9.325152] rk_gmac-dwmac fe1c0000.ethernet: set rx_delay to 0xffffffff
+[    9.325167] rk_gmac-dwmac fe1c0000.ethernet: integrated PHY? (no).
+[    9.325179] rk_gmac-dwmac fe1c0000.ethernet: cannot get clock mac_clk_rx
+[    9.325190] rk_gmac-dwmac fe1c0000.ethernet: cannot get clock mac_clk_tx
+[    9.325211] rk_gmac-dwmac fe1c0000.ethernet: cannot get clock clk_mac_speed
+[    9.325436] rk_gmac-dwmac fe1c0000.ethernet: init for RGMII_RXID
+[    9.325592] rk_gmac-dwmac fe1c0000.ethernet: User ID: 0x30, Synopsys ID: 0x51
+[    9.325606] rk_gmac-dwmac fe1c0000.ethernet: 	DWMAC4/5
+[    9.325616] rk_gmac-dwmac fe1c0000.ethernet: DMA HW capability register supported
+[    9.325627] rk_gmac-dwmac fe1c0000.ethernet: RX Checksum Offload Engine supported
+[    9.325637] rk_gmac-dwmac fe1c0000.ethernet: TX Checksum insertion supported
+[    9.325647] rk_gmac-dwmac fe1c0000.ethernet: Wake-Up On Lan supported
+[    9.325683] rk_gmac-dwmac fe1c0000.ethernet: TSO supported
+[    9.325692] rk_gmac-dwmac fe1c0000.ethernet: Enable RX Mitigation via HW Watchdog Timer
+[    9.325704] rk_gmac-dwmac fe1c0000.ethernet: Enabled L3L4 Flow TC (entries=2)
+[    9.325714] rk_gmac-dwmac fe1c0000.ethernet: Enabled RFS Flow TC (entries=10)
+[    9.325724] rk_gmac-dwmac fe1c0000.ethernet: TSO feature enabled
+[    9.325734] rk_gmac-dwmac fe1c0000.ethernet: Using 32/32 bits DMA host/device width
+[    9.449824] rk-pcie fe190000.pcie: PCIe Linking... LTSSM is 0x3
+[    9.461229] rk-pcie fe150000.pcie: PCIe Linking... LTSSM is 0x0
+[    9.470889] rk-pcie fe190000.pcie: PCIe Linking... LTSSM is 0x3
+[    9.482285] rk-pcie fe150000.pcie: PCIe Linking... LTSSM is 0x0
+[    9.491943] rk-pcie fe190000.pcie: PCIe Linking... LTSSM is 0x3
+[    9.503338] rk-pcie fe150000.pcie: PCIe Linking... LTSSM is 0x0
+[    9.512997] rk-pcie fe190000.pcie: PCIe Linking... LTSSM is 0x3
+[    9.524391] rk-pcie fe150000.pcie: PCIe Linking... LTSSM is 0x0
+[    9.534052] rk-pcie fe190000.pcie: PCIe Linking... LTSSM is 0x3
+[    9.545444] rk-pcie fe150000.pcie: PCIe Linking... LTSSM is 0x0
+[    9.882507] Freeing initrd memory: 21836K
+[    9.893559] rk_gmac-dwmac fe1b0000.ethernet: Looking up phy-supply from device tree
+[    9.893573] rk_gmac-dwmac fe1b0000.ethernet: Looking up phy-supply property in node /ethernet@fe1b0000 failed
+[    9.893601] rk_gmac-dwmac fe1b0000.ethernet: supply phy not found, using dummy regulator
+[    9.893683] rk_gmac-dwmac fe1b0000.ethernet: clock input or output? (output).
+[    9.893695] rk_gmac-dwmac fe1b0000.ethernet: TX delay(0x20).
+[    9.893706] rk_gmac-dwmac fe1b0000.ethernet: Can not read property: rx_delay.
+[    9.893716] rk_gmac-dwmac fe1b0000.ethernet: set rx_delay to 0xffffffff
+[    9.893730] rk_gmac-dwmac fe1b0000.ethernet: integrated PHY? (no).
+[    9.893742] rk_gmac-dwmac fe1b0000.ethernet: cannot get clock mac_clk_rx
+[    9.893753] rk_gmac-dwmac fe1b0000.ethernet: cannot get clock mac_clk_tx
+[    9.893777] rk_gmac-dwmac fe1b0000.ethernet: cannot get clock clk_mac_speed
+[    9.894002] rk_gmac-dwmac fe1b0000.ethernet: init for RGMII_RXID
+[    9.894103] rk_gmac-dwmac fe1b0000.ethernet: User ID: 0x30, Synopsys ID: 0x51
+[    9.894116] rk_gmac-dwmac fe1b0000.ethernet: 	DWMAC4/5
+[    9.894127] rk_gmac-dwmac fe1b0000.ethernet: DMA HW capability register supported
+[    9.894137] rk_gmac-dwmac fe1b0000.ethernet: RX Checksum Offload Engine supported
+[    9.894148] rk_gmac-dwmac fe1b0000.ethernet: TX Checksum insertion supported
+[    9.894157] rk_gmac-dwmac fe1b0000.ethernet: Wake-Up On Lan supported
+[    9.894194] rk_gmac-dwmac fe1b0000.ethernet: TSO supported
+[    9.894203] rk_gmac-dwmac fe1b0000.ethernet: Enable RX Mitigation via HW Watchdog Timer
+[    9.894215] rk_gmac-dwmac fe1b0000.ethernet: Enabled L3L4 Flow TC (entries=2)
+[    9.894225] rk_gmac-dwmac fe1b0000.ethernet: Enabled RFS Flow TC (entries=10)
+[    9.894235] rk_gmac-dwmac fe1b0000.ethernet: TSO feature enabled
+[    9.894245] rk_gmac-dwmac fe1b0000.ethernet: Using 32/32 bits DMA host/device width
+[   10.036480] usbcore: registered new interface driver rndis_wlan
+[   10.036512] usbcore: registered new interface driver asix
+[   10.036533] usbcore: registered new interface driver cdc_ether
+[   10.036556] usbcore: registered new interface driver rndis_host
+[   10.036581] usbcore: registered new interface driver cdc_ncm
+[   10.036937] VFIO - User Level meta-driver version: 0.3
+[   10.037443] /i2c@fea90000/fusb302@22: Fixed dependency cycle(s) with /usbdrd3_0/usb@fc000000
+[   10.037546] /usbdrd3_0/usb@fc000000: Fixed dependency cycle(s) with /i2c@fea90000/fusb302@22
+[   10.052477] xhci-hcd xhci-hcd.3.auto: xHCI Host Controller
+[   10.052502] xhci-hcd xhci-hcd.3.auto: new USB bus registered, assigned bus number 1
+[   10.052581] xhci-hcd xhci-hcd.3.auto: hcc params 0x0220fe64 hci version 0x110 quirks 0x0004008002010010
+[   10.052619] xhci-hcd xhci-hcd.3.auto: irq 75, io mem 0xfcd00000
+[   10.052707] xhci-hcd xhci-hcd.3.auto: xHCI Host Controller
+[   10.052720] xhci-hcd xhci-hcd.3.auto: new USB bus registered, assigned bus number 2
+[   10.052736] xhci-hcd xhci-hcd.3.auto: Host supports USB 3.0 SuperSpeed
+[   10.052828] usb usb1: New USB device found, idVendor=1d6b, idProduct=0002, bcdDevice= 6.01
+[   10.052843] usb usb1: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[   10.052855] usb usb1: Product: xHCI Host Controller
+[   10.052865] usb usb1: Manufacturer: Linux 6.1.172 xhci-hcd
+[   10.052875] usb usb1: SerialNumber: xhci-hcd.3.auto
+[   10.053177] hub 1-0:1.0: USB hub found
+[   10.053204] hub 1-0:1.0: 1 port detected
+[   10.053388] usb usb2: We don't know the algorithms for LPM for this host, disabling LPM.
+[   10.053440] ehci-platform fc800000.usb: EHCI Host Controller
+[   10.053444] ehci-platform fc880000.usb: EHCI Host Controller
+[   10.053464] usb usb2: New USB device found, idVendor=1d6b, idProduct=0003, bcdDevice= 6.01
+[   10.053467] ohci-platform fc8c0000.usb: Generic Platform OHCI controller
+[   10.053480] usb usb2: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[   10.053484] usb usb2: Product: xHCI Host Controller
+[   10.053487] usb usb2: Manufacturer: Linux 6.1.172 xhci-hcd
+[   10.053516] usb usb2: SerialNumber: xhci-hcd.3.auto
+[   10.053533] ohci-platform fc840000.usb: Generic Platform OHCI controller
+[   10.053776] hub 2-0:1.0: USB hub found
+[   10.053800] hub 2-0:1.0: 1 port detected
+[   10.053960] ehci-platform fc800000.usb: new USB bus registered, assigned bus number 3
+[   10.053968] ehci-platform fc880000.usb: new USB bus registered, assigned bus number 4
+[   10.053989] ohci-platform fc8c0000.usb: new USB bus registered, assigned bus number 5
+[   10.054003] ohci-platform fc840000.usb: new USB bus registered, assigned bus number 6
+[   10.054047] ehci-platform fc800000.usb: irq 77, io mem 0xfc800000
+[   10.054049] phy phy-fd5d4000.syscon:usb2-phy@4000.3: illegal mode
+[   10.054054] xhci-hcd xhci-hcd.4.auto: xHCI Host Controller
+[   10.054058] ehci-platform fc880000.usb: irq 78, io mem 0xfc880000
+[   10.054062] xhci-hcd xhci-hcd.4.auto: new USB bus registered, assigned bus number 7
+[   10.054146] xhci-hcd xhci-hcd.4.auto: hcc params 0x0220fe64 hci version 0x110 quirks 0x0004008002010010
+[   10.054159] ohci-platform fc8c0000.usb: irq 80, io mem 0xfc8c0000
+[   10.054180] ohci-platform fc840000.usb: irq 79, io mem 0xfc840000
+[   10.054185] xhci-hcd xhci-hcd.4.auto: irq 76, io mem 0xfc400000
+[   10.054282] xhci-hcd xhci-hcd.4.auto: xHCI Host Controller
+[   10.054294] xhci-hcd xhci-hcd.4.auto: new USB bus registered, assigned bus number 8
+[   10.054309] xhci-hcd xhci-hcd.4.auto: Host supports USB 3.0 SuperSpeed
+[   10.054392] usb usb7: New USB device found, idVendor=1d6b, idProduct=0002, bcdDevice= 6.01
+[   10.054406] usb usb7: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[   10.054418] usb usb7: Product: xHCI Host Controller
+[   10.054427] usb usb7: Manufacturer: Linux 6.1.172 xhci-hcd
+[   10.054437] usb usb7: SerialNumber: xhci-hcd.4.auto
+[   10.054698] hub 7-0:1.0: USB hub found
+[   10.054722] hub 7-0:1.0: 1 port detected
+[   10.054899] usb usb8: We don't know the algorithms for LPM for this host, disabling LPM.
+[   10.054961] usb usb8: New USB device found, idVendor=1d6b, idProduct=0003, bcdDevice= 6.01
+[   10.054975] usb usb8: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[   10.054986] usb usb8: Product: xHCI Host Controller
+[   10.054995] usb usb8: Manufacturer: Linux 6.1.172 xhci-hcd
+[   10.055005] usb usb8: SerialNumber: xhci-hcd.4.auto
+[   10.055245] hub 8-0:1.0: USB hub found
+[   10.055270] hub 8-0:1.0: 1 port detected
+[   10.055467] usbcore: registered new interface driver cdc_acm
+[   10.055478] cdc_acm: USB Abstract Control Model driver for USB modems and ISDN adapters
+[   10.055568] usbcore: registered new interface driver uas
+[   10.055616] usbcore: registered new interface driver usb-storage
+[   10.055892] mousedev: PS/2 mouse device common for all mice
+[   10.055981] Error: Driver 'Goodix-TS' is already registered, aborting...
+[   10.056245] .. rk pwm remotectl v2.0 init
+[   10.056387] input: fd8b0030.pwm as /devices/platform/fd8b0030.pwm/input/input0
+[   10.056582] remotectl-pwm fd8b0030.pwm: Controller support pwrkey capture
+[   10.056877] rk805-pwrkey rk805-pwrkey.1.auto: Probing rk805-pwrkey -> rk805 pwrkey
+[   10.057606] input: rk805 pwrkey as /devices/platform/feb20000.spi/spi_master/spi2/spi2.0/rk805-pwrkey.1.auto/input/input1
+[   10.057905] i2c_dev: i2c /dev entries driver
+[   10.061468] rtc-hym8563 0-0051: rtc information is valid
+[   10.068772] rtc-hym8563 0-0051: registered as rtc0
+[   10.069782] rtc-hym8563 0-0051: setting system clock to 2026-11-06T22:59:22 UTC (1794005962)
+[   10.070105] ehci-platform fc800000.usb: USB 2.0 started, EHCI 1.00
+[   10.070391] usb usb3: New USB device found, idVendor=1d6b, idProduct=0002, bcdDevice= 6.01
+[   10.070445] usb usb3: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[   10.070456] rk860-regulator 0-0042: Looking up vin-supply from device tree
+[   10.070467] vdd_cpu_big0_s0: supplied by vcc5v0_sys
+[   10.070475] usb usb3: Product: EHCI Host Controller
+[   10.070477] vcc5v0_sys: could not add device link regulator.36: -ENOENT
+[   10.070483] usb usb3: Manufacturer: Linux 6.1.172 ehci_hcd
+[   10.070514] usb usb3: SerialNumber: fc800000.usb
+[   10.070975] hub 3-0:1.0: USB hub found
+[   10.071021] hub 3-0:1.0: 1 port detected
+[   10.075214] vdd_cpu_big0_s0: 550 <--> 1050 mV at 800 mV, enabled
+[   10.077311] rk860-regulator 0-0043: Looking up vin-supply from device tree
+[   10.077320] vdd_cpu_big1_s0: supplied by vcc5v0_sys
+[   10.077325] vcc5v0_sys: could not add device link regulator.37: -ENOENT
+[   10.082046] vdd_cpu_big1_s0: 550 <--> 1050 mV at 800 mV, enabled
+[   10.083437] ehci-platform fc880000.usb: USB 2.0 started, EHCI 1.00
+[   10.083612] usb usb4: New USB device found, idVendor=1d6b, idProduct=0002, bcdDevice= 6.01
+[   10.083633] usb usb4: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[   10.083645] usb usb4: Product: EHCI Host Controller
+[   10.083655] usb usb4: Manufacturer: Linux 6.1.172 ehci_hcd
+[   10.083665] usb usb4: SerialNumber: fc880000.usb
+[   10.083994] hub 4-0:1.0: USB hub found
+[   10.084029] hub 4-0:1.0: 1 port detected
+[   10.084932] rk860-regulator 1-0042: Looking up vin-supply from device tree
+[   10.084943] vdd_npu_s0: supplied by vcc5v0_sys
+[   10.084948] vcc5v0_sys: could not add device link regulator.38: -ENOENT
+[   10.089701] vdd_npu_s0: 550 <--> 950 mV at 800 mV, enabled
+[   10.091465] typec_fusb302 1-0022: Looking up vbus-supply from device tree
+[   10.098216] pca953x 5-0021: Looking up vcc-supply from device tree
+[   10.098224] pca953x 5-0021: Looking up vcc-supply property in node /i2c@fead0000/gpio-expander@21 failed
+[   10.098243] pca953x 5-0021: supply vcc not found, using dummy regulator
+[   10.098306] pca953x 5-0021: using no AI
+[   10.100504] pca953x 6-0021: Looking up vcc-supply from device tree
+[   10.100512] pca953x 6-0021: Looking up vcc-supply property in node /i2c@fec80000/gpio-expander@21 failed
+[   10.100530] pca953x 6-0021: supply vcc not found, using dummy regulator
+[   10.100603] pca953x 6-0021: using no AI
+[   10.104028] rockchip-mipi-csi2-hw fdd10000.mipi0-csi2-hw: enter mipi csi2 hw probe!
+[   10.104147] rockchip-mipi-csi2-hw fdd10000.mipi0-csi2-hw: probe success, v4l2_dev:mipi0-csi2-hw!
+[   10.104194] rockchip-mipi-csi2-hw fdd20000.mipi1-csi2-hw: enter mipi csi2 hw probe!
+[   10.104302] rockchip-mipi-csi2-hw fdd20000.mipi1-csi2-hw: probe success, v4l2_dev:mipi1-csi2-hw!
+[   10.104346] rockchip-mipi-csi2-hw fdd30000.mipi2-csi2-hw: enter mipi csi2 hw probe!
+[   10.104435] rockchip-mipi-csi2-hw fdd30000.mipi2-csi2-hw: probe success, v4l2_dev:mipi2-csi2-hw!
+[   10.104476] rockchip-mipi-csi2-hw fdd40000.mipi3-csi2-hw: enter mipi csi2 hw probe!
+[   10.104563] rockchip-mipi-csi2-hw fdd40000.mipi3-csi2-hw: probe success, v4l2_dev:mipi3-csi2-hw!
+[   10.104604] rockchip-mipi-csi2-hw fdd50000.mipi4-csi2-hw: enter mipi csi2 hw probe!
+[   10.104712] rockchip-mipi-csi2-hw fdd50000.mipi4-csi2-hw: probe success, v4l2_dev:mipi4-csi2-hw!
+[   10.104754] rockchip-mipi-csi2-hw fdd60000.mipi5-csi2-hw: enter mipi csi2 hw probe!
+[   10.104842] rockchip-mipi-csi2-hw fdd60000.mipi5-csi2-hw: probe success, v4l2_dev:mipi5-csi2-hw!
+[   10.107354] usbcore: registered new interface driver uvcvideo
+[   10.109498] sdhci: Secure Digital Host Controller Interface driver
+[   10.109511] sdhci: Copyright(c) Pierre Ossman
+[   10.109519] Synopsys Designware Multimedia Card Interface Driver
+[   10.109942] sdhci-pltfm: SDHCI platform and OF driver helper
+[   10.111111] sdhci-dwcmshc fe2e0000.mmc: Looking up vmmc-supply from device tree
+[   10.111119] sdhci-dwcmshc fe2e0000.mmc: Looking up vmmc-supply property in node /mmc@fe2e0000 failed
+[   10.111139] sdhci-dwcmshc fe2e0000.mmc: Looking up vqmmc-supply from device tree
+[   10.111145] sdhci-dwcmshc fe2e0000.mmc: Looking up vqmmc-supply property in node /mmc@fe2e0000 failed
+[   10.114208] usb usb5: New USB device found, idVendor=1d6b, idProduct=0001, bcdDevice= 6.01
+[   10.114227] usb usb5: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[   10.114240] usb usb5: Product: Generic Platform OHCI controller
+[   10.114249] usb usb5: Manufacturer: Linux 6.1.172 ohci_hcd
+[   10.114259] usb usb5: SerialNumber: fc8c0000.usb
+[   10.114398] mmc0: CQHCI version 5.10
+[   10.114524] hub 5-0:1.0: USB hub found
+[   10.114549] hub 5-0:1.0: 1 port detected
+[   10.114976] usb usb6: New USB device found, idVendor=1d6b, idProduct=0001, bcdDevice= 6.01
+[   10.115017] usb usb6: New USB device strings: Mfr=3, Product=2, SerialNumber=1
+[   10.115047] usb usb6: Product: Generic Platform OHCI controller
+[   10.115076] usb usb6: Manufacturer: Linux 6.1.172 ohci_hcd
+[   10.115101] usb usb6: SerialNumber: fc840000.usb
+[   10.115475] ledtrig-cpu: registered to indicate activity on CPUs
+[   10.115513] arm-scmi firmware:scmi: Failed. SCMI protocol 17 not active.
+[   10.115566] SMCCC: SOC_ID: ARCH_SOC_ID not implemented, skipping ....
+[   10.115807] hub 6-0:1.0: USB hub found
+[   10.115875] hub 6-0:1.0: 1 port detected
+[   10.116449] cryptodev: driver 1.12 loaded.
+[   10.116494] hid: raw HID events driver (C) Jiri Kosina
+[   10.116721] usbcore: registered new interface driver usbhid
+[   10.116737] usbhid: USB HID core driver
+[   10.119794] rockchip-saradc fec10000.saradc: Looking up vref-supply from device tree
+[   10.120846] SPI driver inv-icm42600-spi has no spi_device_id for invensense,icm42600
+[   10.120862] SPI driver inv-icm42600-spi has no spi_device_id for invensense,icm42602
+[   10.120873] SPI driver inv-icm42600-spi has no spi_device_id for invensense,icm42605
+[   10.120883] SPI driver inv-icm42600-spi has no spi_device_id for invensense,icm42622
+[   10.121251] optee: probing for conduit method.
+[   10.121271] optee: revision 3.13 (1e844e4c)
+[   10.121595] optee: dynamic shared memory is enabled
+[   10.121703] optee: initialized driver
+[   10.122328] usbcore: registered new interface driver snd-usb-audio
+[   10.124889] [Awinic] aw87xxx_pa_init:driver version: v2.2.0
+[   10.126000] rockchip-i2s-tdm fddf0000.i2s: CLK-ALWAYS-ON: mclk: 12288000, bclk: 3072000, fsync: 48000
+[   10.126871] rockchip-i2s-tdm fe470000.i2s: Register PCM for TRCM mode
+[   10.127319] rockchip-i2s-tdm fddf4000.i2s: CLK-ALWAYS-ON: mclk: 12288000, bclk: 3072000, fsync: 48000
+[   10.129871] input: headset-keys as /devices/platform/es8388-sound/input/input2
+[   10.146006] mmc0: SDHCI controller on fe2e0000.mmc [fe2e0000.mmc] using ADMA
+[   10.191711] input: rockchip-es8388 Headset as /devices/platform/es8388-sound/sound/card0/input3
+[   10.192677] Initializing XFRM netlink socket
+[   10.192707] NET: Registered PF_PACKET protocol family
+[   10.192716] can: controller area network core
+[   10.192823] NET: Registered PF_CAN protocol family
+[   10.192835] can: raw protocol
+[   10.192844] can: broadcast manager protocol
+[   10.192855] can: netlink gateway - max_hops=1
+[   10.193027] [BT_RFKILL]: Enter rfkill_rk_init
+[   10.193038] [WLAN_RFKILL]: Enter rfkill_wlan_init
+[   10.193359] Key type dns_resolver registered
+[   10.193377] Key type ceph registered
+[   10.193698] libceph: loaded (mon/osd proto 15/24)
+[   10.194913] registered taskstats version 1
+[   10.194938] Loading compiled-in X.509 certificates
+[   10.194994] Key type .fscrypt registered
+[   10.195004] Key type fscrypt-provisioning registered
+[   10.195651] Btrfs loaded, crc32c=crc32c-generic, zoned=no, fsverity=no
+[   10.196019] pstore: Using crash dump compression: deflate
+[   10.196314] AppArmor: AppArmor sha1 policy hashing enabled
+[   10.203016] rga3 fdb60000.rga: Adding to iommu group 2
+[   10.203492] rga3 fdb60000.rga: probe successfully, irq = 50, hw_version:3.0.76831
+[   10.203628] rga3 fdb70000.rga: Adding to iommu group 3
+[   10.203996] rga3 fdb70000.rga: probe successfully, irq = 51, hw_version:3.0.76831
+[   10.204910] rga2 fdb80000.rga: probe successfully, irq = 110, hw_version:3.2.63318
+[   10.205100] rga: IOMMU binding successfully, default mapping core[0x1]
+[   10.205253] rga: Module initialized. v1.3.13
+[   10.227644] reg-fixed-voltage combophy-avdd1v8: Looking up vin-supply from device tree
+[   10.227670] combophy_avdd1v8: supplied by avcc_1v8_s0
+[   10.227677] avcc_1v8_s0: could not add device link regulator.39: -ENOENT
+[   10.228008] combophy_avdd1v8: 1800 mV, enabled
+[   10.228150] reg-fixed-voltage combophy-avdd1v8: combophy_avdd1v8 supplying 1800000uV
+[   10.228261] reg-fixed-voltage vcc-3v3-s0: Looking up vin-supply from device tree
+[   10.228396] vcc_3v3_s0: supplied by vcc_3v3_s3
+[   10.228401] vcc_3v3_s3: could not add device link regulator.40: -ENOENT
+[   10.228692] vcc_3v3_s0: 3300 mV, enabled
+[   10.228817] reg-fixed-voltage vcc-3v3-s0: vcc_3v3_s0 supplying 3300000uV
+[   10.228916] reg-fixed-voltage vcc-3v3-sd-s3: Looking up vin-supply from device tree
+[   10.228928] vcc_3v3_sd_s3: supplied by vcc_3v3_s3
+[   10.228933] vcc_3v3_s3: could not add device link regulator.41: -ENOENT
+[   10.229129] vcc_3v3_sd_s3: 3300 mV, enabled
+[   10.229252] reg-fixed-voltage vcc-3v3-sd-s3: vcc_3v3_sd_s3 supplying 3300000uV
+[   10.229458] dw-pcie fe170000.pcie: invalid resource
+[   10.229482] dw-pcie fe170000.pcie: Failed to initialize host
+[   10.229491] dw-pcie: probe of fe170000.pcie failed with error -22
+[   10.230180] rk-pcie fe170000.pcie: invalid prsnt-gpios property in node
+[   10.230181] mpp_vdpu2 fdb50400.vdpu: Adding to iommu group 1
+[   10.230296] rk-pcie fe170000.pcie: Looking up vpcie3v3-supply from device tree
+[   10.230314] rk-pcie fe170000.pcie: Looking up vpcie3v3-supply property in node /pcie@fe170000 failed
+[   10.230358] rk-pcie fe170000.pcie: no vpcie3v3 regulator found
+[   10.230717] mpp_vdpu2 fdb50400.vdpu: probe device
+[   10.230922] mpp_vdpu2 fdb50400.vdpu: reset_group->rw_sem_on=0
+[   10.230938] mpp_vdpu2 fdb50400.vdpu: reset_group->rw_sem_on=0
+[   10.230974] mpp_vdpu2 fdb50400.vdpu: probing finish
+[   10.231140] mpp_vepu2 fdb50000.vepu: Adding to iommu group 1
+[   10.231184] mpp_vepu2 fdb50000.vepu: probing start
+[   10.231316] mpp_vepu2 fdb50000.vepu: reset_group->rw_sem_on=0
+[   10.231328] mpp_vepu2 fdb50000.vepu: reset_group->rw_sem_on=0
+[   10.231357] mpp_vepu2 fdb50000.vepu: probing finish
+[   10.231367] rk-pcie fe170000.pcie: host bridge /pcie@fe170000 ranges:
+[   10.231452] rk-pcie fe170000.pcie:       IO 0x00f2100000..0x00f21fffff -> 0x00f2100000
+[   10.231504] rk-pcie fe170000.pcie:      MEM 0x00f2200000..0x00f2ffffff -> 0x00f2200000
+[   10.231511] mpp_vepu2 fdba0000.jpege-core: Adding to iommu group 5
+[   10.231562] rk-pcie fe170000.pcie:      MEM 0x0980000000..0x09bfffffff -> 0x0980000000
+[   10.231584] mpp_vepu2 fdba0000.jpege-core: probing start
+[   10.231659] rk-pcie fe170000.pcie: iATU unroll: enabled
+[   10.231688] rk-pcie fe170000.pcie: iATU regions: 8 ob, 8 ib, align 64K, limit 8G
+[   10.231745] mpp_vepu2 fdba0000.jpege-core: attach ccu success
+[   10.231780] mpp_vepu2 fdba0000.jpege-core: probing finish
+[   10.231922] mpp_vepu2 fdba4000.jpege-core: Adding to iommu group 6
+[   10.231999] mpp_vepu2 fdba4000.jpege-core: probing start
+[   10.232135] mpp_vepu2 fdba4000.jpege-core: attach ccu success
+[   10.232166] mpp_vepu2 fdba4000.jpege-core: probing finish
+[   10.232306] mpp_vepu2 fdba8000.jpege-core: Adding to iommu group 7
+[   10.232384] mpp_vepu2 fdba8000.jpege-core: probing start
+[   10.232518] mpp_vepu2 fdba8000.jpege-core: attach ccu success
+[   10.232549] mpp_vepu2 fdba8000.jpege-core: probing finish
+[   10.232714] mpp_vepu2 fdbac000.jpege-core: Adding to iommu group 8
+[   10.232794] mpp_vepu2 fdbac000.jpege-core: probing start
+[   10.233000] mpp_vepu2 fdbac000.jpege-core: attach ccu success
+[   10.233034] mpp_vepu2 fdbac000.jpege-core: probing finish
+[   10.233196] mpp-iep2 fdbb0000.iep: Adding to iommu group 9
+[   10.233278] mpp-iep2 fdbb0000.iep: probe device
+[   10.233662] mpp-iep2 fdbb0000.iep: probing finish
+[   10.233849] mpp_jpgdec fdb90000.jpegd: Adding to iommu group 4
+[   10.234096] mpp_jpgdec fdb90000.jpegd: probe device
+[   10.234275] mpp_jpgdec fdb90000.jpegd: probing finish
+[   10.234451] mpp_rkvdec2 fdc38100.rkvdec-core: Adding to iommu group 12
+[   10.234750] mpp_rkvdec2 fdc38100.rkvdec-core: rkvdec-core, probing start
+[   10.234925] mpp_rkvdec2 fdc38100.rkvdec-core: shared_niu_a is not found!
+[   10.234937] rkvdec2_init:1301: No niu aclk reset resource define
+[   10.234948] mpp_rkvdec2 fdc38100.rkvdec-core: shared_niu_h is not found!
+[   10.234957] rkvdec2_init:1304: No niu hclk reset resource define
+[   10.234983] mpp_rkvdec2 fdc38100.rkvdec-core: Looking up vdec-supply from device tree
+[   10.234989] mpp_rkvdec2 fdc38100.rkvdec-core: Looking up vdec-supply property in node /rkvdec-core@fdc38000 failed
+[   10.235008] mpp_rkvdec2 fdc38100.rkvdec-core: no regulator, devfreq is disabled
+[   10.235088] mpp_rkvdec2 fdc38100.rkvdec-core: core_mask=00010001
+[   10.235099] mpp_rkvdec2 fdc38100.rkvdec-core: attach ccu as core 0
+[   10.235286] mpp_rkvdec2 fdc38100.rkvdec-core: sram_start 0x00000000ff001000
+[   10.235298] mpp_rkvdec2 fdc38100.rkvdec-core: rcb_iova 0x00000000fff00000
+[   10.235308] mpp_rkvdec2 fdc38100.rkvdec-core: sram_size 491520
+[   10.235318] mpp_rkvdec2 fdc38100.rkvdec-core: rcb_size 1048576
+[   10.235329] mpp_rkvdec2 fdc38100.rkvdec-core: min_width 512
+[   10.235340] mpp_rkvdec2 fdc38100.rkvdec-core: rcb_info_count 20
+[   10.235350] mpp_rkvdec2 fdc38100.rkvdec-core: [136, 24576]
+[   10.235360] mpp_rkvdec2 fdc38100.rkvdec-core: [137, 49152]
+[   10.235370] mpp_rkvdec2 fdc38100.rkvdec-core: [141, 90112]
+[   10.235380] mpp_rkvdec2 fdc38100.rkvdec-core: [140, 49152]
+[   10.235389] mpp_rkvdec2 fdc38100.rkvdec-core: [139, 180224]
+[   10.235399] mpp_rkvdec2 fdc38100.rkvdec-core: [133, 49152]
+[   10.235409] mpp_rkvdec2 fdc38100.rkvdec-core: [134, 8192]
+[   10.235418] mpp_rkvdec2 fdc38100.rkvdec-core: [135, 4352]
+[   10.235428] mpp_rkvdec2 fdc38100.rkvdec-core: [138, 13056]
+[   10.235437] mpp_rkvdec2 fdc38100.rkvdec-core: [142, 291584]
+[   10.235477] mpp_rkvdec2 fdc38100.rkvdec-core: probing finish
+[   10.235675] mpp_rkvdec2 fdc48100.rkvdec-core: Adding to iommu group 13
+[   10.235919] mpp_rkvdec2 fdc48100.rkvdec-core: rkvdec-core, probing start
+[   10.236085] mpp_rkvdec2 fdc48100.rkvdec-core: shared_niu_a is not found!
+[   10.236096] rkvdec2_init:1301: No niu aclk reset resource define
+[   10.236107] mpp_rkvdec2 fdc48100.rkvdec-core: shared_niu_h is not found!
+[   10.236116] rkvdec2_init:1304: No niu hclk reset resource define
+[   10.236140] mpp_rkvdec2 fdc48100.rkvdec-core: Looking up vdec-supply from device tree
+[   10.236146] mpp_rkvdec2 fdc48100.rkvdec-core: Looking up vdec-supply property in node /rkvdec-core@fdc48000 failed
+[   10.236164] mpp_rkvdec2 fdc48100.rkvdec-core: no regulator, devfreq is disabled
+[   10.236218] mpp_rkvdec2 fdc48100.rkvdec-core: core_mask=00020002
+[   10.236243] mpp_rkvdec2 fdc48100.rkvdec-core: attach ccu as core 1
+[   10.236474] mpp_rkvdec2 fdc48100.rkvdec-core: sram_start 0x00000000ff079000
+[   10.236486] mpp_rkvdec2 fdc48100.rkvdec-core: rcb_iova 0x00000000ffe00000
+[   10.236495] mpp_rkvdec2 fdc48100.rkvdec-core: sram_size 487424
+[   10.236505] mpp_rkvdec2 fdc48100.rkvdec-core: rcb_size 1048576
+[   10.236516] mpp_rkvdec2 fdc48100.rkvdec-core: min_width 512
+[   10.236527] mpp_rkvdec2 fdc48100.rkvdec-core: rcb_info_count 20
+[   10.236537] mpp_rkvdec2 fdc48100.rkvdec-core: [136, 24576]
+[   10.236547] mpp_rkvdec2 fdc48100.rkvdec-core: [137, 49152]
+[   10.236556] mpp_rkvdec2 fdc48100.rkvdec-core: [141, 90112]
+[   10.236566] mpp_rkvdec2 fdc48100.rkvdec-core: [140, 49152]
+[   10.236576] mpp_rkvdec2 fdc48100.rkvdec-core: [139, 180224]
+[   10.236585] mpp_rkvdec2 fdc48100.rkvdec-core: [133, 49152]
+[   10.236595] mpp_rkvdec2 fdc48100.rkvdec-core: [134, 8192]
+[   10.236605] mpp_rkvdec2 fdc48100.rkvdec-core: [135, 4352]
+[   10.236614] mpp_rkvdec2 fdc48100.rkvdec-core: [138, 13056]
+[   10.236623] mpp_rkvdec2 fdc48100.rkvdec-core: [142, 291584]
+[   10.236664] mpp_rkvdec2 fdc48100.rkvdec-core: probing finish
+[   10.236882] mpp_rkvenc2 fdbd0000.rkvenc-core: Adding to iommu group 10
+[   10.237049] mpp_rkvenc2 fdbd0000.rkvenc-core: probing start
+[   10.237244] mpp_rkvenc2 fdbd0000.rkvenc-core: Looking up venc-supply from device tree
+[   10.237251] mpp_rkvenc2 fdbd0000.rkvenc-core: Looking up venc-supply property in node /rkvenc-core@fdbd0000 failed
+[   10.237268] mpp_rkvenc2 fdbd0000.rkvenc-core: rockchip_init_read_margin: no regulator (venc) found: -19
+[   10.237284] mpp_rkvenc2 fdbd0000.rkvenc-core: bin=0
+[   10.237510] mpp_rkvenc2 fdbd0000.rkvenc-core: idc=19
+[   10.237523] mpp_rkvenc2 fdbd0000.rkvenc-core: idc-volt-sel=1
+[   10.237566] mpp_rkvenc2 fdbd0000.rkvenc-core: Looking up venc-supply from device tree
+[   10.237572] mpp_rkvenc2 fdbd0000.rkvenc-core: Looking up venc-supply property in node /rkvenc-core@fdbd0000 failed
+[   10.237587] mpp_rkvenc2 fdbd0000.rkvenc-core: error -ENODEV: _opp_set_regulators: no regulator (venc) found
+[   10.237617] mpp_rkvenc2 fdbd0000.rkvenc-core: failed to set opp config
+[   10.237627] mpp_rkvenc2 fdbd0000.rkvenc-core: failed to init opp info
+[   10.237636] mpp_rkvenc2 fdbd0000.rkvenc-core: failed to init_opp_table
+[   10.237645] rkvenc_init:2412: failed to add venc devfreq
+[   10.237691] mpp_rkvenc2 fdbd0000.rkvenc-core: attach ccu as core 0
+[   10.237727] mpp_rkvenc2 fdbd0000.rkvenc-core: probing finish
+[   10.237926] mpp_rkvenc2 fdbe0000.rkvenc-core: Adding to iommu group 11
+[   10.238093] mpp_rkvenc2 fdbe0000.rkvenc-core: probing start
+[   10.238259] mpp_rkvenc2 fdbe0000.rkvenc-core: Looking up venc-supply from device tree
+[   10.238266] mpp_rkvenc2 fdbe0000.rkvenc-core: Looking up venc-supply property in node /rkvenc-core@fdbe0000 failed
+[   10.238282] mpp_rkvenc2 fdbe0000.rkvenc-core: rockchip_init_read_margin: no regulator (venc) found: -19
+[   10.238298] mpp_rkvenc2 fdbe0000.rkvenc-core: bin=0
+[   10.238480] mpp_rkvenc2 fdbe0000.rkvenc-core: idc=19
+[   10.238493] mpp_rkvenc2 fdbe0000.rkvenc-core: idc-volt-sel=1
+[   10.238531] mpp_rkvenc2 fdbe0000.rkvenc-core: Looking up venc-supply from device tree
+[   10.238537] mpp_rkvenc2 fdbe0000.rkvenc-core: Looking up venc-supply property in node /rkvenc-core@fdbe0000 failed
+[   10.238550] mpp_rkvenc2 fdbe0000.rkvenc-core: error -ENODEV: _opp_set_regulators: no regulator (venc) found
+[   10.238577] mpp_rkvenc2 fdbe0000.rkvenc-core: failed to set opp config
+[   10.238587] mpp_rkvenc2 fdbe0000.rkvenc-core: failed to init opp info
+[   10.238597] mpp_rkvenc2 fdbe0000.rkvenc-core: failed to init_opp_table
+[   10.238605] rkvenc_init:2412: failed to add venc devfreq
+[   10.238664] mpp_rkvenc2 fdbe0000.rkvenc-core: attach ccu as core 1
+[   10.238700] mpp_rkvenc2 fdbe0000.rkvenc-core: probing finish
+[   10.238896] mpp_av1dec fdc70000.av1d: Adding to iommu group 14
+[   10.239143] mpp_av1dec fdc70000.av1d: probing start
+[   10.239299] sdhci-dwcmshc fe2e0000.mmc: Can't reduce the clock below 52MHz in HS200/HS400 mode
+[   10.239356] mpp_av1dec fdc70000.av1d: probing finish
+[   10.239566] rockchip-vop2 fdd90000.vop: Adding to iommu group 15
+[   10.239965] mmc0: Command Queue Engine enabled
+[   10.239988] mmc0: new HS400 Enhanced strobe MMC card at address 0001
+[   10.240814] mmcblk0: mmc0:0001 09S000 58.7 GiB 
+[   10.240896] rockchip-vop2 fdd90000.vop: [drm:vop2_bind] vp0 assign plane mask: Cluster0 | Esmart0[0x5], primary plane phy id: Esmart0[2]
+[   10.240939] rockchip-vop2 fdd90000.vop: [drm:vop2_bind] vp1 assign plane mask: Cluster1 | Esmart1[0xa], primary plane phy id: Esmart1[3]
+[   10.240958] rockchip-vop2 fdd90000.vop: [drm:vop2_bind] vp2 assign plane mask: Cluster2 | Esmart2[0x140], primary plane phy id: Esmart2[8]
+[   10.240977] rockchip-vop2 fdd90000.vop: [drm:vop2_bind] vp3 assign plane mask: Cluster3 | Esmart3[0x280], primary plane phy id: Esmart3[9]
+[   10.241335] [drm] failed to init overlay plane Cluster0-win1
+[   10.241379] [drm] failed to init overlay plane Cluster1-win1
+[   10.241418] [drm] failed to init overlay plane Cluster2-win1
+[   10.241428] [drm] Cluster3-win0(possible_vp_mask = 0x00000008) has no possible crtcs
+[   10.241470] [drm] Cluster3-win1(possible_vp_mask = 0x00000008) has no possible crtcs
+[   10.241482] [drm] failed to init overlay plane Cluster3-win1
+[   10.241491] [drm] Esmart3-win0(possible_vp_mask = 0x00000008) has no possible crtcs
+[   10.245501]  mmcblk0: p1 p2
+[   10.246498] mmcblk0boot0: mmc0:0001 09S000 4.00 MiB 
+[   10.248352] mmcblk0boot1: mmc0:0001 09S000 4.00 MiB 
+[   10.249715] mmcblk0rpmb: mmc0:0001 09S000 4.00 MiB, chardev (235:0)
+[   10.254754] rockchip-vop2 fdd90000.vop: bin=0
+[   10.254994] rockchip-vop2 fdd90000.vop: idc=49
+[   10.255010] rockchip-vop2 fdd90000.vop: idc-volt-sel=2
+[   10.255040] rockchip-vop2 fdd90000.vop: Looking up vop-supply from device tree
+[   10.255459] rockchip-vop2 fdd90000.vop: avs=0
+[   10.255542] rockchip-vop2 fdd90000.vop: l=-2147483648 h=2147483647 hyst=0 l_limit=0 h_limit=0 h_table=0
+[   10.255699] rockchip-vop2 fdd90000.vop: Supported VOP aclk dvfs, normal mode:500000000, reset mode:500000000, advanced mode:750000000
+[   10.255732] rockchip-drm display-subsystem: bound fdd90000.vop (ops vop2_component_ops)
+[   10.256811] dw_hdmi_qp-rockchip fde80000.hdmi: registered ddc I2C bus driver
+[   10.257982] rockchip-drm display-subsystem: bound fde80000.hdmi (ops dw_hdmi_rockchip_ops)
+[   10.258818] dw_hdmi_qp-rockchip fdea0000.hdmi: registered ddc I2C bus driver
+[   10.259496] rockchip-drm display-subsystem: bound fdea0000.hdmi (ops dw_hdmi_rockchip_ops)
+[   10.259784] rockchip-drm display-subsystem: bound fde50000.dp (ops dw_dp_component_ops)
+[   10.261345] dw-hdmi-qp-hdcp dw-hdmi-qp-hdcp.8.auto: dw_hdcp_qp_hdcp_probe success
+[   10.261819] dw-hdmi-qp-hdcp dw-hdmi-qp-hdcp.11.auto: dw_hdcp_qp_hdcp_probe success
+[   10.262188] [drm] Initialized rockchip 4.0.0 20140818 for display-subsystem on minor 0
+[   10.262306] rockchip-drm display-subsystem: [drm] Cannot find any crtc or sizes
+[   10.262391] rockchip-drm display-subsystem: [drm] Cannot find any crtc or sizes
+[   10.262431] rockchip-drm display-subsystem: [drm] Cannot find any crtc or sizes
+[   10.262652] rockchip-drm display-subsystem: [drm] run display error_event monitor
+[   10.263016] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up gpu-supply from device tree
+[   10.263037] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up gpu-supply property in node /power-management@fd8d8000/power-controller failed
+[   10.263135] panthor fb000000.gpu-panthor: [drm] clock rate = 200000000
+[   10.263185] panthor fb000000.gpu-panthor: Looking up mali-supply from device tree
+[   10.263751] panthor fb000000.gpu-panthor: Looking up sram-supply from device tree
+[   10.263764] panthor fb000000.gpu-panthor: Looking up sram-supply property in node /gpu-panthor@fb000000 failed
+[   10.264535] panthor fb000000.gpu-panthor: EM: OPP:400000 is inefficient
+[   10.264544] panthor fb000000.gpu-panthor: EM: OPP:300000 is inefficient
+[   10.264670] panthor fb000000.gpu-panthor: EM: created perf domain
+[   10.265179] panthor fb000000.gpu-panthor: [drm] mali-g610 id 0xa867 major 0x0 minor 0x0 status 0x5
+[   10.265196] panthor fb000000.gpu-panthor: [drm] Features: L2:0x7120306 Tiler:0x809 Mem:0x301 MMU:0x2830 AS:0xff
+[   10.265211] panthor fb000000.gpu-panthor: [drm] shader_present=0x50005 l2_present=0x1 tiler_present=0x1
+[   10.268340] panthor fb000000.gpu-panthor: [drm] Firmware protected mode entry not be supported, ignoring
+[   10.268450] panthor fb000000.gpu-panthor: [drm] Firmware git sha: 95a25d71030715381f33105394285e1dcc860a65 
+[   10.268686] panthor fb000000.gpu-panthor: [drm] CSF FW using interface v1.5.0, Features 0x0 Instrumentation features 0x71
+[   10.269113] [drm] Initialized panthor 1.5.0 20230801 for fb000000.gpu-panthor on minor 1
+[   10.270331] rockchip-dmc dmc: bin=0
+[   10.270514] rockchip-dmc dmc: idc=49
+[   10.270562] rockchip-dmc dmc: idc-volt-sel=2
+[   10.270576] rockchip-dmc dmc: soc version=0, speed=2
+[   10.270715] rockchip-dmc dmc: Looking up center-supply from device tree
+[   10.271060] rockchip-dmc dmc: Looking up mem-supply from device tree
+[   10.271637] dwmmc_rockchip fe2c0000.mmc: No normal pinctrl state
+[   10.271671] dwmmc_rockchip fe2c0000.mmc: No idle pinctrl state
+[   10.271770] dwmmc_rockchip fe2c0000.mmc: IDMAC supports 32-bit address mode.
+[   10.271836] dwmmc_rockchip fe2c0000.mmc: Using internal DMA controller.
+[   10.271866] dwmmc_rockchip fe2c0000.mmc: Version ID is 270a
+[   10.271947] dwmmc_rockchip fe2c0000.mmc: DW MMC controller at irq 138,32 bit host data width,256 deep fifo
+[   10.271969] rockchip-dmc dmc: avs=0
+[   10.271998] rockchip-dmc dmc: current ATF version 0x100
+[   10.272065] dwmmc_rockchip fe2c0000.mmc: Looking up vmmc-supply from device tree
+[   10.272252] rockchip-dmc dmc: normal_rate = 1560000000
+[   10.272264] rockchip-dmc dmc: reboot_rate = 1848000000
+[   10.272274] rockchip-dmc dmc: suspend_rate = 528000000
+[   10.272284] rockchip-dmc dmc: video_4k_rate = 1560000000
+[   10.272294] rockchip-dmc dmc: video_4k_10b_rate = 1560000000
+[   10.272304] rockchip-dmc dmc: video_svep_rate = 1560000000
+[   10.272314] rockchip-dmc dmc: boost_rate = 1848000000
+[   10.272324] rockchip-dmc dmc: fixed_rate(isp|cif0|cif1|dualview) = 1848000000
+[   10.272335] rockchip-dmc dmc: performance_rate = 1848000000
+[   10.272345] rockchip-dmc dmc: hdmirx_rate = 1848000000
+[   10.272355] rockchip-dmc dmc: deep_suspend_rate = 1848000000
+[   10.272369] rockchip-dmc dmc: failed to get vop bandwidth to dmc rate
+[   10.272379] rockchip-dmc dmc: failed to get vop pn to msch rl
+[   10.272425] dwmmc_rockchip fe2c0000.mmc: Looking up vqmmc-supply from device tree
+[   10.272968] rockchip-dmc dmc: l=15000 h=2147483647 hyst=5000 l_limit=0 h_limit=0 h_table=0
+[   10.275345] input: rockchip-hdmi1 rockchip-hdmi1 as /devices/platform/hdmi1-sound/sound/card1/input4
+[   10.276015] debugfs: File 'Capture' in directory 'dapm' already present!
+[   10.276637] input: rockchip-dp0 rockchip-dp0 as /devices/platform/dp0-sound/sound/card2/input5
+[   10.277852] input: rockchip-hdmi0 rockchip-hdmi0 as /devices/platform/hdmi0-sound/sound/card3/input6
+[   10.279908] cpu cpu0: Looking up cpu-supply from device tree
+[   10.280658] cpu cpu0: bin=0
+[   10.280848] cpu cpu0: idc=14
+[   10.280877] cpu cpu0: Looking up cpu-supply from device tree
+[   10.282512] cpu cpu0: pvtm=1471
+[   10.282653] cpu cpu0: pvtm-volt-sel=3
+[   10.282694] cpu cpu0: Looking up cpu-supply from device tree
+[   10.282833] cpu cpu0: Looking up mem-supply from device tree
+[   10.283040] cpu cpu4: Looking up cpu-supply from device tree
+[   10.283570] mmc_host mmc1: Bus speed (slot 0) = 400000Hz (slot req 400000Hz, actual 400000HZ div = 0)
+[   10.285083] cpu cpu4: bin=0
+[   10.285268] cpu cpu4: idc=11
+[   10.285291] cpu cpu4: Looking up cpu-supply from device tree
+[   10.292546] cpu cpu4: pvtm=1717
+[   10.296630] cpu cpu4: pvtm-volt-sel=5
+[   10.296674] cpu cpu4: Looking up cpu-supply from device tree
+[   10.297179] cpu cpu4: Looking up mem-supply from device tree
+[   10.297759] cpu cpu6: Looking up cpu-supply from device tree
+[   10.299873] cpu cpu6: bin=0
+[   10.300056] cpu cpu6: idc=12
+[   10.300079] cpu cpu6: Looking up cpu-supply from device tree
+[   10.307292] cpu cpu6: pvtm=1707
+[   10.311505] cpu cpu6: pvtm-volt-sel=4
+[   10.311540] cpu cpu6: Looking up cpu-supply from device tree
+[   10.312050] cpu cpu6: Looking up mem-supply from device tree
+[   10.312723] vendor storage:20190527 ret = 0
+[   10.313717] cpu cpu0: avs=0
+[   10.315175] cpu cpu4: avs=0
+[   10.316474] cpu cpu6: avs=0
+[   10.316597] cpu cpu0: l=15000 h=85000 hyst=5000 l_limit=0 h_limit=1608000000 h_table=0
+[   10.317120] cpu cpu0: EM: OPP:816000 is inefficient
+[   10.317250] cpu cpu0: EM: created perf domain
+[   10.318509] cpu cpu4: l=15000 h=85000 hyst=5000 l_limit=0 h_limit=2208000000 h_table=0
+[   10.327101] cpu cpu4: EM: OPP:1008000 is inefficient
+[   10.327107] cpu cpu4: EM: OPP:816000 is inefficient
+[   10.327260] cpu cpu4: EM: created perf domain
+[   10.335079] cpu cpu6: l=15000 h=85000 hyst=5000 l_limit=0 h_limit=2208000000 h_table=0
+[   10.336787] usb 4-1: new high-speed USB device number 2 using ehci-platform
+[   10.343391] cpu cpu6: EM: OPP:1008000 is inefficient
+[   10.343398] cpu cpu6: EM: OPP:816000 is inefficient
+[   10.343598] cpu cpu6: EM: created perf domain
+[   10.351434] RKNPU fdab0000.npu: Adding to iommu group 0
+[   10.351552] RKNPU fdab0000.npu: RKNPU: rknpu iommu is enabled, using iommu mode
+[   10.351631] RKNPU fdab0000.npu: Looking up rknpu-supply from device tree
+[   10.352127] RKNPU fdab0000.npu: Looking up mem-supply from device tree
+[   10.352597] RKNPU fdab0000.npu: can't request region for resource [mem 0xfdab0000-0xfdabffff]
+[   10.352617] RKNPU fdab0000.npu: can't request region for resource [mem 0xfdac0000-0xfdacffff]
+[   10.352627] RKNPU fdab0000.npu: can't request region for resource [mem 0xfdad0000-0xfdadffff]
+[   10.352935] [drm] Initialized rknpu 0.9.8 20240828 for fdab0000.npu on minor 2
+[   10.353144] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up nputop-supply from device tree
+[   10.353165] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up nputop-supply property in node /power-management@fd8d8000/power-controller failed
+[   10.353201] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up npu1-supply from device tree
+[   10.353209] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up npu1-supply property in node /power-management@fd8d8000/power-controller failed
+[   10.353234] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up npu2-supply from device tree
+[   10.353242] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up npu2-supply property in node /power-management@fd8d8000/power-controller failed
+[   10.353363] RKNPU fdab0000.npu: Looking up rknpu-supply from device tree
+[   10.353373] vdd_npu_s0: could not add device link fdab0000.npu: -EEXIST
+[   10.355116] RKNPU fdab0000.npu: RKNPU: bin=0
+[   10.355287] RKNPU fdab0000.npu: idc=11
+[   10.355299] RKNPU fdab0000.npu: Looking up rknpu-supply from device tree
+[   10.355308] debugfs: Directory 'fdab0000.npu-rknpu' with parent 'vdd_npu_s0' already present!
+[   10.355314] vdd_npu_s0: Failed to create debugfs directory
+[   10.362379] RKNPU fdab0000.npu: pvtm=895
+[   10.366827] RKNPU fdab0000.npu: pvtm-volt-sel=4
+[   10.366850] RKNPU fdab0000.npu: Looking up rknpu-supply from device tree
+[   10.366857] debugfs: Directory 'fdab0000.npu-rknpu' with parent 'vdd_npu_s0' already present!
+[   10.366863] vdd_npu_s0: Failed to create debugfs directory
+[   10.367359] RKNPU fdab0000.npu: Looking up mem-supply from device tree
+[   10.367366] vdd_npu_s0: could not add device link fdab0000.npu: -EEXIST
+[   10.368535] RKNPU fdab0000.npu: avs=0
+[   10.368599] RKNPU fdab0000.npu: l=15000 h=85000 hyst=5000 l_limit=0 h_limit=800000000 h_table=0
+[   10.376696] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up npu-supply from device tree
+[   10.376709] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up npu-supply property in node /power-management@fd8d8000/power-controller failed
+[   10.377079] cfg80211: Loading compiled-in X.509 certificates for regulatory database
+[   10.384910] cfg80211: Loaded X.509 cert 'sforshee: 00b28ddf47aef9cea7'
+[   10.385106] cfg80211: Loaded X.509 cert 'wens: 61c038651aabdcf94bd0ac7ff06c7248db18c600'
+[   10.385814] clk: Disabling unused clocks
+[   10.386679] rockchip-pm rockchip-suspend: not set pwm-regulator-config
+[   10.387124] rockchip-suspend not set sleep-mode-config for mem-lite
+[   10.387130] rockchip-suspend not set wakeup-config for mem-lite
+[   10.387135] rockchip-suspend not set sleep-mode-config for mem-ultra
+[   10.387140] rockchip-suspend not set wakeup-config for mem-ultra
+[   10.387692] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up sdio-supply from device tree
+[   10.387712] rockchip-pm-domain fd8d8000.power-management:power-controller: Looking up sdio-supply property in node /power-management@fd8d8000/power-controller failed
+[   10.387764] ALSA device list:
+[   10.387771]   #0: rockchip-es8388
+[   10.387776]   #1: rockchip-hdmi1
+[   10.387781]   #2: rockchip-dp0
+[   10.387785]   #3: rockchip-hdmi0
+[   10.389912] Freeing unused kernel memory: 5760K
+[   10.389962] Run /init as init process
+[   10.389969]   with arguments:
+[   10.389971]     /init
+[   10.389973]   with environment:
+[   10.389974]     HOME=/
+[   10.389976]     TERM=linux
+[   10.389977]     cgroup_enable=memory
+[   10.389979]     cgroup_memory=1
+[   10.389981]     rcu_nocbs=all
+[   10.484424] usb 4-1: New USB device found, idVendor=1a86, idProduct=8091, bcdDevice=13.20
+[   10.484484] usb 4-1: New USB device strings: Mfr=0, Product=2, SerialNumber=0
+[   10.484500] usb 4-1: Product: USB HUB
+[   10.485285] hub 4-1:1.0: USB hub found
+[   10.485492] hub 4-1:1.0: 4 ports detected
+[   10.933005] input: adc-rec-keys as /devices/platform/adc-rec-keys/input/input7
+[   11.547073] rk-pcie fe190000.pcie: PCIe Link Fail, LTSSM is 0x3, hw_retries=0
+[   11.557856] rk-pcie fe150000.pcie: PCIe Link Fail, LTSSM is 0x0, hw_retries=0
+[   11.557868] rk-pcie fe150000.pcie: failed to initialize host
+[   12.242270] async_tx: api initialized (async)
+[   12.530102] rk-pcie fe170000.pcie: PCIe Link Fail, LTSSM is 0x3, hw_retries=0
+[   12.617051] EXT4-fs (mmcblk0p2): mounted filesystem with ordered data mode. Quota mode: none.
+[   13.224179] NET: Registered PF_INET6 protocol family
+[   13.224716] Segment Routing with IPv6
+[   13.224736] In-situ OAM (IOAM) with IPv6
+[   13.585997] systemd[1]: systemd 259.9-0ubuntu0.1 running in system mode (+PAM +AUDIT +SELINUX +APPARMOR +IMA +IPE +SMACK +SECCOMP +GCRYPT -GNUTLS +OPENSSL +ACL +BLKID +CURL +ELFUTILS +FIDO2 +IDN2 -IDN +KMOD +LIBCRYPTSETUP +LIBCRYPTSETUP_PLUGINS +LIBFDISK +PCRE2 +PWQUALITY +P11KIT +QRENCODE +TPM2 +BZIP2 +LZ4 +XZ +ZLIB +ZSTD +BPF_FRAMEWORK +BTF -XKBCOMMON -UTMP +SYSVINIT +LIBARCHIVE)
+[   13.586044] systemd[1]: Detected architecture arm64.
+[   13.590037] systemd[1]: Hostname set to <lubancat>.
+[   13.650367] systemd[1]: bpf-restrict-fs: BPF LSM hook not enabled in the kernel, BPF LSM not supported.
+[   13.762665] systemd[1]: /usr/lib/systemd/system/system-xfs_scrub.slice:15: Support for option CPUAccounting= has been removed and it is ignored
+[   13.808772] systemd[1]: /usr/lib/systemd/system/xfs_scrub_all.service:26: Support for option CPUAccounting= has been removed and it is ignored
+[   13.904631] systemd[1]: Configuration file /usr/lib/systemd/system/rkaiq_3A.service is marked world-writable. Please remove world writability permission bits. Proceeding anyway.
+[   13.944270] systemd[1]: Condition check resulted in -.slice - Root Slice being skipped.
+[   13.944376] systemd[1]: Condition check resulted in system.slice - System Slice being skipped.
+[   13.946431] systemd[1]: Queued start job for default target multi-user.target.
+[   13.949984] systemd[1]: Created slice system-modprobe.slice - Slice /system/modprobe.
+[   13.950790] systemd[1]: Created slice system-serial\x2dgetty.slice - Slice /system/serial-getty.
+[   13.951417] systemd[1]: Created slice system-xfs_scrub.slice - xfs_scrub background service slice.
+[   13.951834] systemd[1]: Created slice user.slice - User and Session Slice.
+[   13.951982] systemd[1]: Started systemd-ask-password-wall.path - Forward Password Requests to Wall Directory Watch.
+[   13.952373] systemd[1]: Set up automount proc-sys-fs-binfmt_misc.automount - Arbitrary Executable File Formats File System Automount Point.
+[   13.952443] systemd[1]: Expecting device dev-disk-by\x2dlabel-system\x2dboot.device - /dev/disk/by-label/system-boot...
+[   13.952482] systemd[1]: Expecting device dev-ttyFIQ0.device - /dev/ttyFIQ0...
+[   13.952538] systemd[1]: Reached target imports.target - Image Downloads.
+[   13.952579] systemd[1]: Reached target integritysetup.target - Local Integrity Protected Volumes.
+[   13.952647] systemd[1]: Reached target slices.target - Slice Units.
+[   13.952691] systemd[1]: Reached target snapd.mounts-pre.target - Mounting snaps.
+[   13.952731] systemd[1]: Reached target snapd.mounts.target - Mounted snaps.
+[   13.952787] systemd[1]: Reached target time-set.target - System Time Set.
+[   13.952863] systemd[1]: Reached target veritysetup.target - Local Verity Protected Volumes.
+[   13.953000] systemd[1]: Listening on dm-event.socket - Device-mapper event daemon FIFOs.
+[   13.953144] systemd[1]: Listening on lvm2-lvmpolld.socket - LVM2 poll daemon socket.
+[   13.953284] systemd[1]: Listening on syslog.socket - Syslog Socket.
+[   13.954754] systemd[1]: Listening on systemd-ask-password.socket - Query the User Interactively for a Password.
+[   13.955815] systemd[1]: Listening on systemd-creds.socket - Credential Encryption/Decryption.
+[   13.957280] systemd[1]: Listening on systemd-factory-reset.socket - Factory Reset Management.
+[   13.957454] systemd[1]: Listening on systemd-journald-dev-log.socket - Journal Socket (/dev/log).
+[   13.957636] systemd[1]: Listening on systemd-journald.socket - Journal Sockets.
+[   13.959312] systemd[1]: Listening on systemd-mute-console.socket - Console Output Muting Service Socket.
+[   13.959387] systemd[1]: systemd-pcrextend.socket - TPM PCR Measurements skipped, unmet condition check ConditionSecurity=measured-uki
+[   13.959414] systemd[1]: systemd-pcrlock.socket - Make TPM PCR Policy skipped, unmet condition check ConditionSecurity=measured-uki
+[   13.959510] systemd[1]: Listening on systemd-resolved-monitor.socket - Resolve Monitor Varlink Socket.
+[   13.959635] systemd[1]: Listening on systemd-resolved-varlink.socket - Resolve Service Varlink Socket.
+[   13.959780] systemd[1]: Listening on systemd-udevd-control.socket - udev Control Socket.
+[   13.959890] systemd[1]: Listening on systemd-udevd-kernel.socket - udev Kernel Socket.
+[   13.960009] systemd[1]: Listening on systemd-udevd-varlink.socket - udev Varlink Socket.
+[   13.961837] systemd[1]: Mounting dev-hugepages.mount - Huge Pages File System...
+[   13.963003] systemd[1]: Mounting dev-mqueue.mount - POSIX Message Queue File System...
+[   13.964151] systemd[1]: Mounting sys-kernel-debug.mount - Kernel Debug File System...
+[   13.965241] systemd[1]: Mounting sys-kernel-tracing.mount - Kernel Trace File System...
+[   13.968021] systemd[1]: Starting systemd-journald.service - Journal Service...
+[   13.970523] systemd[1]: Starting fake-hwclock-load.service - Restore the current clock...
+[   13.973417] systemd[1]: Starting keyboard-setup.service - Set the console keyboard layout...
+[   13.977153] systemd[1]: Starting kmod-static-nodes.service - Create List of Static Device Nodes...
+[   13.979411] systemd[1]: Starting lvm2-monitor.service - Monitoring of LVM2 mirrors, snapshots etc. using dmeventd or progress polling...
+[   13.979567] systemd[1]: modprobe@configfs.service - Load Kernel Module configfs skipped, unmet condition check ConditionKernelModuleLoaded=!configfs
+[   13.980952] systemd[1]: Mounting sys-kernel-config.mount - Kernel Configuration File System...
+[   13.986545] systemd[1]: Starting modprobe@dm_multipath.service - Load Kernel Module dm_multipath...
+[   13.987082] systemd[1]: modprobe@drm.service - Load Kernel Module drm skipped, unmet condition check ConditionKernelModuleLoaded=!drm
+[   13.987353] systemd[1]: modprobe@efi_pstore.service - Load Kernel Module efi_pstore skipped, unmet condition check ConditionKernelModuleLoaded=!efi_pstore
+[   13.992915] systemd[1]: Starting modprobe@fuse.service - Load Kernel Module fuse...
+[   13.995240] systemd[1]: Starting rkaiq_3A.service - Enable Rockchip camera engine rkaiq...
+[   13.995633] systemd[1]: systemd-hibernate-clear.service - Clear Stale Hibernate Storage Info skipped, unmet condition check ConditionPathExists=/sys/firmware/efi/efivars/HibernateLocation-8cf2644b-4b0b-428f-9387-6d876050dc67
+[   14.002450] systemd[1]: Starting systemd-modules-load.service - Load Kernel Modules...
+[   14.002636] systemd[1]: systemd-pcrmachine.service - TPM PCR Machine ID Measurement skipped, unmet condition check ConditionSecurity=measured-uki
+[   14.002830] systemd[1]: systemd-tpm2-setup-early.service - Early TPM SRK Setup skipped, unmet condition check ConditionSecurity=measured-uki
+[   14.002862] systemd[1]: systemd-pcrnvdone.service - TPM PCR NvPCR Initialization Separator skipped, unmet condition check ConditionPathExists=/etc/initrd-release
+[   14.002890] systemd[1]: systemd-pcrproduct.service - TPM NvPCR Product ID Measurement skipped, unmet condition check ConditionSecurity=measured-uki
+[   14.004944] systemd[1]: Starting systemd-udev-load-credentials.service - Load udev Rules from Credentials...
+[   14.007493] systemd[1]: Starting systemd-udev-trigger.service - Coldplug All udev Devices...
+[   14.012614] systemd[1]: Mounted dev-hugepages.mount - Huge Pages File System.
+[   14.013022] systemd[1]: Mounted dev-mqueue.mount - POSIX Message Queue File System.
+[   14.013399] systemd[1]: Mounted sys-kernel-debug.mount - Kernel Debug File System.
+[   14.013739] systemd[1]: Mounted sys-kernel-tracing.mount - Kernel Trace File System.
+[   14.014260] device-mapper: ioctl: 4.47.0-ioctl (2022-07-28) initialised: dm-devel@redhat.com
+[   14.014337] systemd[1]: Finished kmod-static-nodes.service - Create List of Static Device Nodes.
+[   14.015262] systemd[1]: Mounted sys-kernel-config.mount - Kernel Configuration File System.
+[   14.017993] systemd[1]: Starting systemd-tmpfiles-setup-dev-early.service - Create Static Device Nodes in /dev gracefully...
+[   14.019039] systemd[1]: modprobe@dm_multipath.service: Deactivated successfully.
+[   14.019282] systemd[1]: Finished modprobe@dm_multipath.service - Load Kernel Module dm_multipath.
+[   14.019391] systemd-journald[493]: Collecting audit messages is disabled.
+[   14.028417] fuse: init (API version 7.38)
+[   14.029405] systemd[1]: modprobe@fuse.service: Deactivated successfully.
+[   14.029642] systemd[1]: Finished modprobe@fuse.service - Load Kernel Module fuse.
+[   14.031121] systemd[1]: Mounting sys-fs-fuse-connections.mount - FUSE Control File System...
+[   14.045355] systemd[1]: Finished systemd-modules-load.service - Load Kernel Modules.
+[   14.046910] systemd[1]: Starting systemd-sysctl.service - Apply Kernel Variables...
+[   14.048900] systemd[1]: Finished systemd-udev-load-credentials.service - Load udev Rules from Credentials.
+[   14.050423] systemd[1]: Mounted sys-fs-fuse-connections.mount - FUSE Control File System.
+[   14.087927] systemd[1]: Started rkaiq_3A.service - Enable Rockchip camera engine rkaiq.
+[   14.106487] systemd[1]: Finished keyboard-setup.service - Set the console keyboard layout.
+[   14.118161] systemd[1]: Finished systemd-sysctl.service - Apply Kernel Variables.
+[   14.133145] systemd[1]: Finished systemd-tmpfiles-setup-dev-early.service - Create Static Device Nodes in /dev gracefully.
+[   14.170966] systemd-journald[493]: Time jumped backwards, rotating.
+[   14.172349] systemd[1]: fake-hwclock-load.service: Deactivated successfully.
+[   14.172583] systemd[1]: Finished fake-hwclock-load.service - Restore the current clock.
+[   14.172819] systemd[1]: systemd-fsck-root.service - File System Check on Root Device skipped, unmet condition check ConditionPathExists=!/run/initramfs/fsck-root
+[   14.174105] systemd[1]: Starting systemd-remount-fs.service - Remount Root and Kernel File Systems...
+[   14.174405] systemd[1]: rkaiq_3A.service: Deactivated successfully.
+[   14.181332] systemd[1]: Started systemd-journald.service - Journal Service.
+[   14.200560] EXT4-fs (mmcblk0p2): re-mounted. Quota mode: none.
+[   14.219314] systemd-journald[493]: Received client request to flush runtime journal.
+[   14.221150] systemd-journald[493]: File /var/log/journal/848f2d86c00c444dbf2c5edb81d5b6a3/system.journal corrupted or uncleanly shut down, renaming and replacing.
+[   14.234426] EXT4-fs (mmcblk0p2): resizing filesystem from 15241211 to 15241211 blocks
+[   14.235623] Adding 2097148k swap on /swapfile.  Priority:-2 extents:7 across:6943152k SS
+[   14.256228] systemd-journald[493]: /var/log/journal/848f2d86c00c444dbf2c5edb81d5b6a3/system.journal: Realtime clock jumped backwards relative to last journal entry, rotating.
+[   14.256239] systemd-journald[493]: Rotating system journal.
+[   14.466657] rk_pcie_establish_link: 404 callbacks suppressed
+[   14.466668] rk-pcie fe190000.pcie: PCIe Linking... LTSSM is 0x3
+[   14.467519] rk-pcie fe170000.pcie: PCIe Linking... LTSSM is 0x3
+[   14.487790] rk-pcie fe190000.pcie: PCIe Linking... LTSSM is 0x3
+[   14.488608] rk-pcie fe170000.pcie: PCIe Linking... LTSSM is 0x3
+[   14.508905] rk-pcie fe190000.pcie: PCIe Linking... LTSSM is 0x3
+[   14.509645] rk-pcie fe170000.pcie: PCIe Linking... LTSSM is 0x3
+[   14.530005] rk-pcie fe190000.pcie: PCIe Linking... LTSSM is 0x3
+[   14.530117] rk-pcie fe170000.pcie: PCIe Linking... LTSSM is 0x3
+[   14.550262] rk-pcie fe190000.pcie: PCIe Linking... LTSSM is 0x3
+[   14.551154] rk-pcie fe170000.pcie: PCIe Linking... LTSSM is 0x3
+[   14.867851] rk-pcie fe190000.pcie: PCIe Link Fail, LTSSM is 0x3, hw_retries=1
+[   15.019692] pwm-fan pwm-fan: Looking up fan-supply from device tree
+[   15.019712] pwm-fan pwm-fan: Looking up fan-supply property in node /pwm-fan failed
+[   15.035279] EXT4-fs (mmcblk0p1): mounted filesystem with ordered data mode. Quota mode: none.
+[   15.126077] audit: type=1400 audit(1794002401.950:2): apparmor="STATUS" operation="profile_load" profile="unconfined" name="QtWebEngineProcess" pid=716 comm="apparmor_parser"
+[   15.126314] audit: type=1400 audit(1794002401.950:3): apparmor="STATUS" operation="profile_load" profile="unconfined" name="balena-etcher" pid=720 comm="apparmor_parser"
+[   15.126365] audit: type=1400 audit(1794002401.950:4): apparmor="STATUS" operation="profile_load" profile="unconfined" name="Discord" pid=714 comm="apparmor_parser"
+[   15.126730] audit: type=1400 audit(1794002401.950:5): apparmor="STATUS" operation="profile_load" profile="unconfined" name=4D6F6E676F444220436F6D70617373 pid=715 comm="apparmor_parser"
+[   15.127048] audit: type=1400 audit(1794002401.953:6): apparmor="STATUS" operation="profile_load" profile="unconfined" name="1password" pid=713 comm="apparmor_parser"
+[   15.130268] audit: type=1400 audit(1794002401.956:7): apparmor="STATUS" operation="profile_load" profile="unconfined" name="buildah" pid=728 comm="apparmor_parser"
+[   15.131975] audit: type=1400 audit(1794002401.956:8): apparmor="STATUS" operation="profile_load" profile="unconfined" name="brave" pid=727 comm="apparmor_parser"
+[   15.134811] audit: type=1400 audit(1794002401.960:9): apparmor="STATUS" operation="profile_load" profile="unconfined" name="cam" pid=730 comm="apparmor_parser"
+[   15.137383] audit: type=1400 audit(1794002401.963:10): apparmor="STATUS" operation="profile_load" profile="unconfined" name="bgpd" pid=726 comm="apparmor_parser"
+[   15.140904] audit: type=1400 audit(1794002401.966:11): apparmor="STATUS" operation="profile_load" profile="unconfined" name="bwrap" pid=729 comm="apparmor_parser"
+[   15.494961] Process accounting resumed
+[   15.809739] using random self ethernet address
+[   15.809754] using random host ethernet address
+[   15.846185] usb0: HOST MAC 6e:c2:66:54:56:85
+[   15.846192] usb0: MAC 86:3a:3d:45:a2:98
+[   15.847851] rk-pcie fe170000.pcie: PCIe Link Fail, LTSSM is 0x3, hw_retries=1
+[   15.873480] rk-pcie fe190000.pcie: failed to initialize host
+[   15.944322] NET: Registered PF_QIPCRTR protocol family
+[   15.953956] rk_gmac-dwmac fe1c0000.ethernet eth0: Register MEM_TYPE_PAGE_POOL RxQ-0
+[   15.954874] rk_gmac-dwmac fe1c0000.ethernet eth0: PHY [stmmac-1:00] driver [JL2xxx Gigabit Ethernet 1.2.9] (irq=POLL)
+[   15.975343] android_work: did not send uevent (0 0 0000000000000000)
+[   16.088235] loop0: detected capacity change from 0 to 8
+[   16.096876] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[   16.860219] rk-pcie fe170000.pcie: failed to initialize host
+[   17.473928] dwmac4: Master AXI performs any burst length
+[   17.473944] rk_gmac-dwmac fe1c0000.ethernet eth0: No Safety Features support found
+[   17.473955] rk_gmac-dwmac fe1c0000.ethernet eth0: IEEE 1588-2008 Advanced Timestamp supported
+[   17.474149] rk_gmac-dwmac fe1c0000.ethernet eth0: registered PTP clock
+[   17.474385] rk_gmac-dwmac fe1c0000.ethernet eth0: FPE workqueue start
+[   17.474390] rk_gmac-dwmac fe1c0000.ethernet eth0: configuring for phy/rgmii-rxid link mode
+[   17.476781] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Up - Unknown/Unknown - flow control off
+[   17.476815] IPv6: ADDRCONF(NETDEV_CHANGE): eth0: link becomes ready
+[   17.481345] rk_gmac-dwmac fe1b0000.ethernet eth1: Register MEM_TYPE_PAGE_POOL RxQ-0
+[   17.483142] rk_gmac-dwmac fe1b0000.ethernet eth1: PHY [stmmac-0:00] driver [JL2xxx Gigabit Ethernet 1.2.9] (irq=POLL)
+[   18.487721] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Down
+[   18.993910] dwmac4: Master AXI performs any burst length
+[   18.993922] rk_gmac-dwmac fe1b0000.ethernet eth1: No Safety Features support found
+[   18.993933] rk_gmac-dwmac fe1b0000.ethernet eth1: IEEE 1588-2008 Advanced Timestamp supported
+[   18.994162] rk_gmac-dwmac fe1b0000.ethernet eth1: registered PTP clock
+[   18.994374] rk_gmac-dwmac fe1b0000.ethernet eth1: FPE workqueue start
+[   18.994380] rk_gmac-dwmac fe1b0000.ethernet eth1: configuring for phy/rgmii-rxid link mode
+[   20.514601] rk_gmac-dwmac fe1c0000.ethernet: Detected PHY ID: 0x937c4032
+[   20.514619] rk_gmac-dwmac fe1c0000.ethernet: JL2XXX TX delay(0x8).
+[   20.514622] rk_gmac-dwmac fe1c0000.ethernet: JL2XXX RX delay(0xffffffff).
+[   20.515677] rk_gmac-dwmac fe1c0000.ethernet eth0: Link is Up - 1Gbps/Full - flow control rx/tx
+[   22.936361] tun: Universal TUN/TAP device driver, 1.6
+[   26.033339] icmp: detected local route for 198.18.0.1 during ICMP sending, src 223.5.5.5
+[   26.033402] icmp: detected local route for 198.18.0.1 during ICMP sending, src 223.5.5.5
+[   26.033416] icmp: detected local route for 198.18.0.1 during ICMP sending, src 223.5.5.5
+[   26.033430] icmp: detected local route for 198.18.0.1 during ICMP sending, src 223.5.5.5
+[   26.033442] icmp: detected local route for 198.18.0.1 during ICMP sending, src 223.5.5.5
+[   26.033931] platform mtd_vendor_storage: deferred probe pending
+[   29.258906] kauditd_printk_skb: 172 callbacks suppressed
+[   29.258912] audit: type=1400 audit(1794002416.083:184): apparmor="DENIED" operation="capable" profile="fusermount3" pid=1650 comm="fusermount" capability=1  capname="dac_override"
+[   29.258921] audit: type=1400 audit(1794002416.083:185): apparmor="DENIED" operation="capable" profile="fusermount3" pid=1650 comm="fusermount" capability=7  capname="setuid"
+[   29.259134] audit: type=1400 audit(1794002416.083:186): apparmor="DENIED" operation="capable" profile="fusermount3" pid=1651 comm="fusermount" capability=7  capname="setuid"
+[  151.472272] audit: type=1400 audit(1794006104.010:187): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=2037 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  151.472345] audit: type=1400 audit(1794006104.013:188): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=2037 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  151.472486] audit: type=1400 audit(1794006104.013:189): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=2037 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  151.472495] audit: type=1400 audit(1794006104.013:190): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=2037 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  201.950620] audit: type=1400 audit(1794006154.492:191): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=3121 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  201.950671] audit: type=1400 audit(1794006154.492:192): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=3121 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  201.951096] audit: type=1400 audit(1794006154.492:193): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=3121 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  201.951125] audit: type=1400 audit(1794006154.492:194): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=3121 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  356.635560] audit: type=1400 audit(1794006309.177:195): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=3929 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  356.635613] audit: type=1400 audit(1794006309.177:196): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=3929 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  356.636039] audit: type=1400 audit(1794006309.177:197): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=3929 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  356.636068] audit: type=1400 audit(1794006309.177:198): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=3929 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  369.179518] netpoll: netconsole: local port 6666
+[  369.179544] netpoll: netconsole: local IPv4 address 192.168.123.65
+[  369.179552] netpoll: netconsole: interface 'eth0'
+[  369.179555] netpoll: netconsole: remote port 6666
+[  369.179560] netpoll: netconsole: remote IPv4 address 192.168.123.80
+[  369.179565] netpoll: netconsole: remote ethernet address ff:ff:ff:ff:ff:ff
+[  369.179684] printk: console [netcon0] enabled
+[  369.179690] netconsole: network logging started
+[  370.238814] tbtun-visibility-probe-1794006322 netconsole path check
+[  383.556688] printk: console [netcon_ext0] disabled
+[  383.556699] printk: console [netcon0] disabled
+[  383.556837] netconsole: network logging stopped on interface eth0 as it unregistered
+[  383.561304] netpoll: netconsole: local port 6666
+[  383.561313] netpoll: netconsole: local IPv4 address 192.168.123.65
+[  383.561317] netpoll: netconsole: interface 'eth0'
+[  383.561318] netpoll: netconsole: remote port 6666
+[  383.561320] netpoll: netconsole: remote IPv4 address 192.168.123.80
+[  383.561322] netpoll: netconsole: remote ethernet address c8:8a:9a:b3:c7:ed
+[  383.561386] printk: console [netcon0] enabled
+[  383.561389] netconsole: network logging started
+[  384.606287] tbtun-visibility-probe2-1794006337 unicast check
+[  403.831001] tbtun-visibility-probe3-1794006356 tx-count-check
+[  428.844968] netconsole-probe4-1794006381387860978
+[  432.910478] netconsole-probe5-1794006385450353958
+[  455.273620] printk: console [netcon_ext0] disabled
+[  455.273632] printk: console [netcon0] disabled
+[  455.273821] netconsole: network logging stopped on interface eth0 as it unregistered
+[  456.642781] Bluetooth: BNEP (Ethernet Emulation) ver 1.3
+[  456.642793] Bluetooth: BNEP filters: protocol multicast
+[  456.642803] Bluetooth: BNEP socket layer initialized
+[  459.894276] tbtun-kmsg-relay-probe-1794006412 realtime-path-ok
+[  504.473442] tbtun-visibility-probe3 end-to-end-1794006457014080403
+[  552.396554] audit: type=1400 audit(1794006504.938:199): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=5070 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  552.396607] audit: type=1400 audit(1794006504.938:200): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=5070 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  552.397017] audit: type=1400 audit(1794006504.938:201): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=5070 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  552.397045] audit: type=1400 audit(1794006504.938:202): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=5070 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[  557.285399] systemd-journald[493]: Received SIGTERM from PID 1 (systemd).
+[  557.285432] systemd[1]: Stopping systemd-journald.service - Journal Service...
+[  557.296419] systemd[1]: systemd-journald.service: Deactivated successfully.
+[  557.296760] systemd[1]: Stopped systemd-journald.service - Journal Service.
+[  557.302430] systemd[1]: Starting systemd-journald.service - Journal Service...
+[  557.340747] systemd-journald[5081]: Collecting audit messages is disabled.
+[  557.346544] systemd[1]: Started systemd-journald.service - Journal Service.
+[  558.407925] tbtun-visibility-probe3 journald-sync-1794006510949055272
+[  639.131902] tbtun-probe3 1794006591676601041
+[ 1569.613028] tbt-c8-once-probe-1794007522-18972
+[ 1770.382318] tbt-c8-once-probe-1794007722-30156
+[ 1785.759997] tbtun: loading out-of-tree module taints kernel.
+[ 1785.765888] tbtun 0.0.1 loaded: 1 tunnels max, 256 carriers max
+[ 1785.991037] tbtun-diag: tbt_session_create cpu=2 pid=10848 session create tunnel=1 role=2 n=4 m=4 carriers=8 fec=1 crypto=1 profile=1 mode=2 w=8
+[ 1785.991086] tbtun-diag: tbt_session_create cpu=2 pid=10848 crypto setup start tunnel=1 role=2 key_set=0
+[ 1785.991096] tbtun-diag: tbt_session_create cpu=2 pid=10848 crypto tx init tunnel=1 key_id=1 source=generated rc=0 nonce=416086e955fa785d
+[ 1785.991107] tbtun-diag: tbt_session_create cpu=2 pid=10848 fec data init tunnel=1 n=4 m=4 carriers=8 mode=2 w=8
+[ 1785.991118] tbtun-diag: tbt_fec_data_init cpu=2 pid=10848 fec init start tunnel=1 n=4 m=4 carriers=8 mode=2 groups=1 w=4 d=2 slots=256 total_blk=256 arena_kb=16
+[ 1785.991134] tbtun-diag: tbt_fec_data_init cpu=2 pid=10848 fec grouped rx codec start tunnel=1 groups=1 n=4 m=4 w=4 d=2
+[ 1785.991148] tbtun-diag: tbt_fec_data_init cpu=2 pid=10848 fec grouped rx codec ok tunnel=1 groups=1 blk=1
+[ 1785.991193] tbtun-diag: tbt_fec_data_init cpu=2 pid=10848 fec grouped tx codec start tunnel=1 groups=1 n=4 m=4 w=4 d=2
+[ 1785.991205] tbtun-diag: tbt_fec_data_init cpu=2 pid=10848 fec grouped tx codec ok tunnel=1 groups=1 ring=1 pkt=1 rec=1 g=1
+[ 1785.994614] tbtun-diag: tbt_fec_data_init cpu=2 pid=10848 fec init done tunnel=1 groups=1 slots=256 credit=1024 tx_ring=262144
+[ 1785.994637] tbtun-diag: tbt_session_create cpu=2 pid=10848 fec data init tunnel=1 ret=0 fec=1
+[ 1785.994645] tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carriers_start enter n_car=8 n_pri=8 n=4 m=4 carriers=8 fec=1 crypto=1 profile=1 dial_rate=8 burst=16
+[ 1785.994675] tbtun-diag: tbt_carrier_new_locked cpu=2 pid=10848 tunnel=1 carrier=0 gen=1 allocated spare=0 profile=1 state=1 join_deadline_ms=5000 parser_have=0 http_chunk_state=0
+[ 1785.994686] tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carrier=0 gen=1 spare=0 profile=1 state=1 installed
+[ 1785.994708] tbtun-diag: tbt_carrier_new_locked cpu=2 pid=10848 tunnel=1 carrier=1 gen=2 allocated spare=0 profile=1 state=1 join_deadline_ms=5000 parser_have=0 http_chunk_state=0
+[ 1785.994717] tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carrier=1 gen=2 spare=0 profile=1 state=1 installed
+[ 1785.994733] tbtun-diag: tbt_carrier_new_locked cpu=2 pid=10848 tunnel=1 carrier=2 gen=3 allocated spare=0 profile=1 state=1 join_deadline_ms=5000 parser_have=0 http_chunk_state=0
+[ 1785.994742] tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carrier=2 gen=3 spare=0 profile=1 state=1 installed
+[ 1785.994756] tbtun-diag: tbt_carrier_new_locked cpu=2 pid=10848 tunnel=1 carrier=3 gen=4 allocated spare=0 profile=1 state=1 join_deadline_ms=5000 parser_have=0 http_chunk_state=0
+[ 1785.994765] tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carrier=3 gen=4 spare=0 profile=1 state=1 installed
+[ 1785.994781] tbtun-diag: tbt_carrier_new_locked cpu=2 pid=10848 tunnel=1 carrier=4 gen=5 allocated spare=0 profile=1 state=1 join_deadline_ms=5000 parser_have=0 http_chunk_state=0
+[ 1785.994790] tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carrier=4 gen=5 spare=0 profile=1 state=1 installed
+[ 1785.994807] tbtun-diag: tbt_carrier_new_locked cpu=2 pid=10848 tunnel=1 carrier=5 gen=6 allocated spare=0 profile=1 state=1 join_deadline_ms=5000 parser_have=0 http_chunk_state=0
+[ 1785.994817] tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carrier=5 gen=6 spare=0 profile=1 state=1 installed
+[ 1785.994835] tbtun-diag: tbt_carrier_new_locked cpu=2 pid=10848 tunnel=1 carrier=6 gen=7 allocated spare=0 profile=1 state=1 join_deadline_ms=5000 parser_have=0 http_chunk_state=0
+[ 1785.994844] tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carrier=6 gen=7 spare=0 profile=1 state=1 installed
+[ 1785.994858] tbtun-diag: tbt_carrier_new_locked cpu=2 pid=10848 tunnel=1 carrier=7 gen=8 allocated spare=0 profile=1 state=1 join_deadline_ms=5000 parser_have=0 http_chunk_state=0
+[ 1785.994867] tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carrier=7 gen=8 spare=0 profile=1 state=1 installed
+[ 1785.994874] tbtun-diag: tbt_carriers_start cpu=2 pid=10848 tunnel=1 carriers_start done n_car=8
+[ 1785.994880] tbtun-diag: tbt_session_create cpu=2 pid=10848 carriers_start tunnel=1 ret=0 n_car=8 n_pri=8
+[ 1785.994890] tbtun-diag: tbt_session_create cpu=2 pid=10848 session create done tunnel=1 n_car=8 poll_ms=50
+[ 1786.045804] tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll r=1 tunnel=1 carrier=0 gen=1 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=-1777576 state=1
+[ 1786.045834] tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll dial tunnel=1 carrier=0 gen=1 r=1
+[ 1786.045844] tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll r=1 tunnel=1 carrier=1 gen=2 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=-1777576 state=1
+[ 1786.045856] tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll dial tunnel=1 carrier=1 gen=2 r=1
+[ 1786.045865] tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll r=1 tunnel=1 carrier=2 gen=3 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=-1777576 state=1
+[ 1786.045875] tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll dial tunnel=1 carrier=2 gen=3 r=1
+[ 1786.045883] tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll r=1 tunnel=1 carrier=3 gen=4 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=-1777576 state=1
+[ 1786.045893] tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll dial tunnel=1 carrier=3 gen=4 r=1
+[ 1786.045902] tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll r=1 tunnel=1 carrier=4 gen=5 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=-1777576 state=1
+[ 1786.045912] tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll dial tunnel=1 carrier=4 gen=5 r=1
+[ 1786.045921] tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll r=1 tunnel=1 carrier=5 gen=6 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=-1777576 state=1
+[ 1786.045931] tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll dial tunnel=1 carrier=5 gen=6 r=1
+[ 1786.045939] tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll r=1 tunnel=1 carrier=6 gen=7 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=-1777576 state=1
+[ 1786.045949] tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll dial tunnel=1 carrier=6 gen=7 r=1
+[ 1786.045957] tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll r=1 tunnel=1 carrier=7 gen=8 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=-1777576 state=1
+[ 1786.045967] tbtun-diag: tbt_car_poll_one cpu=2 pid=24 poll dial tunnel=1 carrier=7 gen=8 r=1
+[ 1786.045978] tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 enter stopping=0 sock=0 lport=0 retry_at=199
+[ 1786.046008] tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 sock_create ok
+[ 1786.046032] tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 bind ok local=0.0.0.0:30000 peer=45.11.1.62:9000
+[ 1786.046315] tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 enter stopping=0 sock=0 lport=0 retry_at=199
+[ 1786.046334] tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 sock_create ok
+[ 1786.046345] tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 bind ok local=0.0.0.0:30001 peer=45.11.1.62:9000
+[ 1786.046530] tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 enter stopping=0 sock=0 lport=0 retry_at=199
+[ 1786.046546] tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 sock_create ok
+[ 1786.046558] tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 bind ok local=0.0.0.0:30002 peer=45.11.1.62:9000
+[ 1786.046730] tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 enter stopping=0 sock=0 lport=0 retry_at=199
+[ 1786.046746] tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 sock_create ok
+[ 1786.046757] tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 bind ok local=0.0.0.0:30003 peer=45.11.1.62:9000
+[ 1786.046989] tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 enter stopping=0 sock=0 lport=0 retry_at=198
+[ 1786.047006] tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 sock_create ok
+[ 1786.047016] tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 bind ok local=0.0.0.0:30004 peer=45.11.1.62:9000
+[ 1786.047189] tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 enter stopping=0 sock=0 lport=0 retry_at=198
+[ 1786.047206] tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 sock_create ok
+[ 1786.047216] tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 bind ok local=0.0.0.0:30005 peer=45.11.1.62:9000
+[ 1786.047331] tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 enter stopping=0 sock=0 lport=0 retry_at=198
+[ 1786.047347] tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 sock_create ok
+[ 1786.047358] tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 bind ok local=0.0.0.0:30006 peer=45.11.1.62:9000
+[ 1786.047524] tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 enter stopping=0 sock=0 lport=0 retry_at=198
+[ 1786.047540] tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 sock_create ok
+[ 1786.047550] tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 bind ok local=0.0.0.0:30007 peer=45.11.1.62:9000
+[ 1786.099446] tbtun-diag: tbt_car_poll_one cpu=2 pid=10856 poll r=2 tunnel=1 carrier=0 gen=1 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=146 state=1
+[ 1786.099475] tbtun-diag: tbt_car_poll_one cpu=2 pid=10856 poll r=2 tunnel=1 carrier=1 gen=2 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=146 state=1
+[ 1786.099488] tbtun-diag: tbt_car_poll_one cpu=2 pid=10856 poll r=2 tunnel=1 carrier=2 gen=3 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=146 state=1
+[ 1786.099499] tbtun-diag: tbt_car_poll_one cpu=2 pid=10856 poll r=2 tunnel=1 carrier=3 gen=4 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=146 state=1
+[ 1786.099512] tbtun-diag: tbt_car_poll_one cpu=2 pid=10856 poll r=2 tunnel=1 carrier=4 gen=5 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=146 state=1
+[ 1786.099525] tbtun-diag: tbt_car_poll_one cpu=2 pid=10856 poll r=2 tunnel=1 carrier=5 gen=6 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=146 state=1
+[ 1786.099537] tbtun-diag: tbt_car_poll_one cpu=2 pid=10856 poll r=2 tunnel=1 carrier=6 gen=7 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=146 state=1
+[ 1786.099549] tbtun-diag: tbt_car_poll_one cpu=2 pid=10856 poll r=2 tunnel=1 carrier=7 gen=8 connected=0 sock=0 sk_state=-1 hello_sent=0 up=0 stopping=0 prov=0 retry_in_ms=146 state=1
+[ 1786.220438] tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 connect ret=0 elapsed_ms=172 sk_state=1
+[ 1786.220453] tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 callbacks installed lport=30007
+[ 1786.220462] tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 connected=1 state=1 snd_una=2931555640 tx_ready=1 key_id=1
+[ 1786.220471] tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 rx scheduled
+[ 1786.220479] tbtun: tunnel 1 carrier 7 DIALED lport=30007 peer=45.11.1.62:9000
+[ 1786.220489] tbtun-diag: tbt_tx_hello cpu=2 pid=10855 HELLO build tunnel=1 carrier=7 gen=8 fec=1 profile=1 blen=66 key_id=1 have_key=1 tx_ready=1
+[ 1786.220501] tbtun-diag: tbt_tx_hello cpu=2 pid=10855 HELLO body filled tunnel=1 carrier=7 gen=8 profile_gen_byte=33
+[ 1786.220510] tbtun-diag: tbt_tx_control_pinned cpu=2 pid=10855 HELLO queued tunnel=1 carrier=7 gen=8 len=66 ctl_queued=1 tx_queued=66
+[ 1786.220525] tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 hello enqueued ret=0 ctl_queued=1 tx_queued=66
+[ 1786.220534] tbtun-diag: tbt_car_connect_work cpu=2 pid=10855 tunnel=1 carrier=7 gen=8 connect work done
+[ 1786.220546] tbtun-diag: tbt_car_rx_work cpu=2 pid=10855 rx work tunnel=1 carrier=7 gen=8 sk_state=1 copied=2486817143 rcv_nxt=2486817143 have=0 http_have=0
+[ 1786.220572] tbtun-diag: tbt_carrier_http_begin cpu=2 pid=10855 http begin tunnel=1 carrier=7 gen=8 role=2 req_done=0 profile=1
+[ 1786.220629] tbtun-diag: tbt_carrier_http_begin cpu=2 pid=10855 http header write tunnel=1 carrier=7 gen=8 ret=0 hlen=332
+[ 1786.220646] tbtun-diag: tbt_carrier_xmit cpu=2 pid=10855 HELLO chunk write tunnel=1 carrier=7 gen=8 ret=0 len=104 write_seq=2931556076 snd_una=2931555640 sndbuf=2097152 wmem=2996
+[ 1786.220659] tbtun-diag: tbt_tx_pump cpu=2 pid=10855 HELLO written tunnel=1 carrier=7 gen=8 up=0 spare=0 state=1
+[ 1786.221260] tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 connect ret=0 elapsed_ms=174 sk_state=1
+[ 1786.221269] tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 callbacks installed lport=30001
+[ 1786.221276] tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 connected=1 state=1 snd_una=3245969968 tx_ready=1 key_id=1
+[ 1786.221284] tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 rx scheduled
+[ 1786.221290] tbtun: tunnel 1 carrier 1 DIALED lport=30001 peer=45.11.1.62:9000
+[ 1786.221296] tbtun-diag: tbt_tx_hello cpu=2 pid=1659 HELLO build tunnel=1 carrier=1 gen=2 fec=1 profile=1 blen=66 key_id=1 have_key=1 tx_ready=1
+[ 1786.221305] tbtun-diag: tbt_tx_hello cpu=2 pid=1659 HELLO body filled tunnel=1 carrier=1 gen=2 profile_gen_byte=9
+[ 1786.221311] tbtun-diag: tbt_tx_control_pinned cpu=2 pid=1659 HELLO queued tunnel=1 carrier=1 gen=2 len=66 ctl_queued=1 tx_queued=66
+[ 1786.221323] tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 hello enqueued ret=0 ctl_queued=1 tx_queued=66
+[ 1786.221332] tbtun-diag: tbt_car_connect_work cpu=2 pid=1659 tunnel=1 carrier=1 gen=2 connect work done
+[ 1786.221342] tbtun-diag: tbt_car_rx_work cpu=2 pid=1659 rx work tunnel=1 carrier=1 gen=2 sk_state=1 copied=3487698628 rcv_nxt=3487698628 have=0 http_have=0
+[ 1786.221356] tbtun-diag: tbt_carrier_http_begin cpu=2 pid=1659 http begin tunnel=1 carrier=1 gen=2 role=2 req_done=0 profile=1
+[ 1786.221391] tbtun-diag: tbt_carrier_http_begin cpu=2 pid=1659 http header write tunnel=1 carrier=1 gen=2 ret=0 hlen=332
+[ 1786.221404] tbtun-diag: tbt_carrier_xmit cpu=2 pid=1659 HELLO chunk write tunnel=1 carrier=1 gen=2 ret=0 len=104 write_seq=3245970404 snd_una=3245969968 sndbuf=2097152 wmem=2996
+[ 1786.221414] tbtun-diag: tbt_tx_pump cpu=2 pid=1659 HELLO written tunnel=1 carrier=1 gen=2 up=0 spare=0 state=1
+[ 1786.221486] tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 connect ret=0 elapsed_ms=174 sk_state=1
+[ 1786.221495] tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 callbacks installed lport=30004
+[ 1786.221502] tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 connected=1 state=1 snd_una=3659681660 tx_ready=1 key_id=1
+[ 1786.221512] tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 rx scheduled
+[ 1786.221518] tbtun: tunnel 1 carrier 4 DIALED lport=30004 peer=45.11.1.62:9000
+[ 1786.221524] tbtun-diag: tbt_tx_hello cpu=2 pid=10852 HELLO build tunnel=1 carrier=4 gen=5 fec=1 profile=1 blen=66 key_id=1 have_key=1 tx_ready=1
+[ 1786.221533] tbtun-diag: tbt_tx_hello cpu=2 pid=10852 HELLO body filled tunnel=1 carrier=4 gen=5 profile_gen_byte=21
+[ 1786.221540] tbtun-diag: tbt_tx_control_pinned cpu=2 pid=10852 HELLO queued tunnel=1 carrier=4 gen=5 len=66 ctl_queued=1 tx_queued=66
+[ 1786.221552] tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 hello enqueued ret=0 ctl_queued=1 tx_queued=66
+[ 1786.221559] tbtun-diag: tbt_car_connect_work cpu=2 pid=10852 tunnel=1 carrier=4 gen=5 connect work done
+[ 1786.221563] tbtun-diag: tbt_carrier_http_begin cpu=1 pid=124 http begin tunnel=1 carrier=4 gen=5 role=2 req_done=0 profile=1
+[ 1786.221568] tbtun-diag: tbt_car_rx_work cpu=2 pid=10852 rx work tunnel=1 carrier=4 gen=5 sk_state=1 copied=1867350778 rcv_nxt=1867350778 have=0 http_have=0
+[ 1786.221613] tbtun-diag: tbt_carrier_http_begin cpu=1 pid=124 http header write tunnel=1 carrier=4 gen=5 ret=0 hlen=332
+[ 1786.221628] tbtun-diag: tbt_carrier_xmit cpu=1 pid=124 HELLO chunk write tunnel=1 carrier=4 gen=5 ret=0 len=104 write_seq=3659682096 snd_una=3659681660 sndbuf=2097152 wmem=2996
+[ 1786.221638] tbtun-diag: tbt_tx_pump cpu=1 pid=124 HELLO written tunnel=1 carrier=4 gen=5 up=0 spare=0 state=1
+[ 1786.222162] tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 connect ret=0 elapsed_ms=174 sk_state=1
+[ 1786.222171] tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 callbacks installed lport=30005
+[ 1786.222178] tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 connected=1 state=1 snd_una=2355897356 tx_ready=1 key_id=1
+[ 1786.222186] tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 rx scheduled
+[ 1786.222192] tbtun: tunnel 1 carrier 5 DIALED lport=30005 peer=45.11.1.62:9000
+[ 1786.222198] tbtun-diag: tbt_tx_hello cpu=2 pid=10853 HELLO build tunnel=1 carrier=5 gen=6 fec=1 profile=1 blen=66 key_id=1 have_key=1 tx_ready=1
+[ 1786.222207] tbtun-diag: tbt_tx_hello cpu=2 pid=10853 HELLO body filled tunnel=1 carrier=5 gen=6 profile_gen_byte=25
+[ 1786.222215] tbtun-diag: tbt_tx_control_pinned cpu=2 pid=10853 HELLO queued tunnel=1 carrier=5 gen=6 len=66 ctl_queued=1 tx_queued=66
+[ 1786.222226] tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 hello enqueued ret=0 ctl_queued=1 tx_queued=66
+[ 1786.222234] tbtun-diag: tbt_car_connect_work cpu=2 pid=10853 tunnel=1 carrier=5 gen=6 connect work done
+[ 1786.222237] tbtun-diag: tbt_carrier_http_begin cpu=1 pid=124 http begin tunnel=1 carrier=5 gen=6 role=2 req_done=0 profile=1
+[ 1786.222242] tbtun-diag: tbt_car_rx_work cpu=2 pid=10853 rx work tunnel=1 carrier=5 gen=6 sk_state=1 copied=3875555421 rcv_nxt=3875555421 have=0 http_have=0
+[ 1786.222273] tbtun-diag: tbt_carrier_http_begin cpu=1 pid=124 http header write tunnel=1 carrier=5 gen=6 ret=0 hlen=332
+[ 1786.222288] tbtun-diag: tbt_carrier_xmit cpu=1 pid=124 HELLO chunk write tunnel=1 carrier=5 gen=6 ret=0 len=104 write_seq=2355897792 snd_una=2355897356 sndbuf=2097152 wmem=2996
+[ 1786.222298] tbtun-diag: tbt_tx_pump cpu=1 pid=124 HELLO written tunnel=1 carrier=5 gen=6 up=0 spare=0 state=1
+[ 1786.223281] tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 connect ret=0 elapsed_ms=175 sk_state=1
+[ 1786.223292] tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 callbacks installed lport=30006
+[ 1786.223299] tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 connected=1 state=1 snd_una=2886004253 tx_ready=1 key_id=1
+[ 1786.223308] tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 rx scheduled
+[ 1786.223313] tbtun: tunnel 1 carrier 6 DIALED lport=30006 peer=45.11.1.62:9000
+[ 1786.223320] tbtun-diag: tbt_tx_hello cpu=2 pid=10854 HELLO build tunnel=1 carrier=6 gen=7 fec=1 profile=1 blen=66 key_id=1 have_key=1 tx_ready=1
+[ 1786.223328] tbtun-diag: tbt_tx_hello cpu=2 pid=10854 HELLO body filled tunnel=1 carrier=6 gen=7 profile_gen_byte=29
+[ 1786.223336] tbtun-diag: tbt_tx_control_pinned cpu=2 pid=10854 HELLO queued tunnel=1 carrier=6 gen=7 len=66 ctl_queued=1 tx_queued=66
+[ 1786.223348] tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 hello enqueued ret=0 ctl_queued=1 tx_queued=66
+[ 1786.223356] tbtun-diag: tbt_car_connect_work cpu=2 pid=10854 tunnel=1 carrier=6 gen=7 connect work done
+[ 1786.223364] tbtun-diag: tbt_car_rx_work cpu=2 pid=10854 rx work tunnel=1 carrier=6 gen=7 sk_state=1 copied=942021005 rcv_nxt=942021005 have=0 http_have=0
+[ 1786.223378] tbtun-diag: tbt_carrier_http_begin cpu=2 pid=10854 http begin tunnel=1 carrier=6 gen=7 role=2 req_done=0 profile=1
+[ 1786.223421] tbtun-diag: tbt_carrier_http_begin cpu=2 pid=10854 http header write tunnel=1 carrier=6 gen=7 ret=0 hlen=332
+[ 1786.223434] tbtun-diag: tbt_carrier_xmit cpu=2 pid=10854 HELLO chunk write tunnel=1 carrier=6 gen=7 ret=0 len=104 write_seq=2886004689 snd_una=2886004253 sndbuf=2097152 wmem=2996
+[ 1786.223444] tbtun-diag: tbt_tx_pump cpu=2 pid=10854 HELLO written tunnel=1 carrier=6 gen=7 up=0 spare=0 state=1
+[ 1786.240052] tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 connect ret=0 elapsed_ms=194 sk_state=1
+[ 1786.240063] tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 callbacks installed lport=30000
+[ 1786.240070] tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 connected=1 state=1 snd_una=2737906660 tx_ready=1 key_id=1
+[ 1786.240080] tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 rx scheduled
+[ 1786.240085] tbtun: tunnel 1 carrier 0 DIALED lport=30000 peer=45.11.1.62:9000
+[ 1786.240092] tbtun-diag: tbt_tx_hello cpu=2 pid=24 HELLO build tunnel=1 carrier=0 gen=1 fec=1 profile=1 blen=66 key_id=1 have_key=1 tx_ready=1
+[ 1786.240100] tbtun-diag: tbt_tx_hello cpu=2 pid=24 HELLO body filled tunnel=1 carrier=0 gen=1 profile_gen_byte=5
+[ 1786.240108] tbtun-diag: tbt_tx_control_pinned cpu=2 pid=24 HELLO queued tunnel=1 carrier=0 gen=1 len=66 ctl_queued=1 tx_queued=66
+[ 1786.240121] tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 hello enqueued ret=0 ctl_queued=1 tx_queued=66
+[ 1786.240129] tbtun-diag: tbt_car_connect_work cpu=2 pid=24 tunnel=1 carrier=0 gen=1 connect work done
+[ 1786.240140] tbtun-diag: tbt_car_rx_work cpu=2 pid=24 rx work tunnel=1 carrier=0 gen=1 sk_state=1 copied=1947175872 rcv_nxt=1947175872 have=0 http_have=0
+[ 1786.240153] tbtun-diag: tbt_carrier_http_begin cpu=2 pid=24 http begin tunnel=1 carrier=0 gen=1 role=2 req_done=0 profile=1
+[ 1786.240197] tbtun-diag: tbt_carrier_http_begin cpu=2 pid=24 http header write tunnel=1 carrier=0 gen=1 ret=0 hlen=332
+[ 1786.240212] tbtun-diag: tbt_carrier_xmit cpu=2 pid=24 HELLO chunk write tunnel=1 carrier=0 gen=1 ret=0 len=104 write_seq=2737907096 snd_una=2737906660 sndbuf=2097152 wmem=2996
+[ 1786.240222] tbtun-diag: tbt_tx_pump cpu=2 pid=24 HELLO written tunnel=1 carrier=0 gen=1 up=0 spare=0 state=1
+[ 1786.242127] tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 connect ret=0 elapsed_ms=195 sk_state=1
+[ 1786.242136] tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 callbacks installed lport=30003
+[ 1786.242143] tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 connected=1 state=1 snd_una=1309432238 tx_ready=1 key_id=1
+[ 1786.242152] tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 rx scheduled
+[ 1786.242157] tbtun: tunnel 1 carrier 3 DIALED lport=30003 peer=45.11.1.62:9000
+[ 1786.242164] tbtun-diag: tbt_tx_hello cpu=2 pid=10851 HELLO build tunnel=1 carrier=3 gen=4 fec=1 profile=1 blen=66 key_id=1 have_key=1 tx_ready=1
+[ 1786.242172] tbtun-diag: tbt_tx_hello cpu=2 pid=10851 HELLO body filled tunnel=1 carrier=3 gen=4 profile_gen_byte=17
+[ 1786.242180] tbtun-diag: tbt_tx_control_pinned cpu=2 pid=10851 HELLO queued tunnel=1 carrier=3 gen=4 len=66 ctl_queued=1 tx_queued=66
+[ 1786.242194] tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 hello enqueued ret=0 ctl_queued=1 tx_queued=66
+[ 1786.242203] tbtun-diag: tbt_car_connect_work cpu=2 pid=10851 tunnel=1 carrier=3 gen=4 connect work done
+[ 1786.242214] tbtun-diag: tbt_car_rx_work cpu=2 pid=10851 rx work tunnel=1 carrier=3 gen=4 sk_state=1 copied=1092081424 rcv_nxt=1092081424 have=0 http_have=0
+[ 1786.242229] tbtun-diag: tbt_carrier_http_begin cpu=2 pid=10851 http begin tunnel=1 carrier=3 gen=4 role=2 req_done=0 profile=1
+[ 1786.242271] tbtun-diag: tbt_carrier_http_begin cpu=2 pid=10851 http header write tunnel=1 carrier=3 gen=4 ret=0 hlen=332
+[ 1786.242285] tbtun-diag: tbt_carrier_xmit cpu=2 pid=10851 HELLO chunk write tunnel=1 carrier=3 gen=4 ret=0 len=104 write_seq=1309432674 snd_una=1309432238 sndbuf=2097152 wmem=2996
+[ 1786.242295] tbtun-diag: tbt_tx_pump cpu=2 pid=10851 HELLO written tunnel=1 carrier=3 gen=4 up=0 spare=0 state=1
+[ 1786.242410] tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 connect ret=0 elapsed_ms=195 sk_state=1
+[ 1786.242420] tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 callbacks installed lport=30002
+[ 1786.242427] tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 connected=1 state=1 snd_una=3900843420 tx_ready=1 key_id=1
+[ 1786.242435] tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 rx scheduled
+[ 1786.242441] tbtun: tunnel 1 carrier 2 DIALED lport=30002 peer=45.11.1.62:9000
+[ 1786.242447] tbtun-diag: tbt_tx_hello cpu=2 pid=10850 HELLO build tunnel=1 carrier=2 gen=3 fec=1 profile=1 blen=66 key_id=1 have_key=1 tx_ready=1
+[ 1786.242456] tbtun-diag: tbt_tx_hello cpu=2 pid=10850 HELLO body filled tunnel=1 carrier=2 gen=3 profile_gen_byte=13
+[ 1786.242463] tbtun-diag: tbt_tx_control_pinned cpu=2 pid=10850 HELLO queued tunnel=1 carrier=2 gen=3 len=66 ctl_queued=1 tx_queued=66
+[ 1786.242478] tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 hello enqueued ret=0 ctl_queued=1 tx_queued=66
+[ 1786.242483] tbtun-diag: tbt_carrier_http_begin cpu=4 pid=124 http begin tunnel=1 carrier=2 gen=3 role=2 req_done=0 profile=1
+[ 1786.242486] tbtun-diag: tbt_car_connect_work cpu=2 pid=10850 tunnel=1 carrier=2 gen=3 connect work done
+[ 1786.242495] tbtun-diag: tbt_car_rx_work cpu=2 pid=10850 rx work tunnel=1 carrier=2 gen=3 sk_state=1 copied=1777040500 rcv_nxt=1777040500 have=0 http_have=0
+[ 1786.242513] tbtun-diag: tbt_carrier_http_begin cpu=4 pid=124 http header write tunnel=1 carrier=2 gen=3 ret=0 hlen=332
+[ 1786.242519] tbtun-diag: tbt_carrier_xmit cpu=4 pid=124 HELLO chunk write tunnel=1 carrier=2 gen=3 ret=0 len=104 write_seq=3900843856 snd_una=3900843420 sndbuf=2097152 wmem=2996
+[ 1786.242523] tbtun-diag: tbt_tx_pump cpu=4 pid=124 HELLO written tunnel=1 carrier=2 gen=3 up=0 spare=0 state=1
+[ 1786.427248] tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=7 gen=8 sk_state=1 copied=2486817143 rcv_nxt=2486817298 have=0 http_have=0
+[ 1786.427268] tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=7 gen=8 have=155 http_have=0 hdr_done=0 req_done=0 chunk_state=0
+[ 1786.427378] tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=7 gen=8 sk_state=1 copied=2486817298 rcv_nxt=2486817402 have=0 http_have=0
+[ 1786.427391] tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=7 gen=8 have=104 http_have=0 hdr_done=1 req_done=0 chunk_state=0
+[ 1786.427407] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parse tunnel=1 body_len=66
+[ 1786.427414] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parsed tunnel=1 enabled=1 key_id=0 have_key=1 key_peer=0
+[ 1786.427425] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto ready tunnel=1 key_peer=0 tx_ready=1 rx_ready=1
+[ 1786.427436] tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=4 gen=5 sk_state=1 copied=1867350778 rcv_nxt=1867350933 have=0 http_have=0
+[ 1786.427447] tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=4 gen=5 have=155 http_have=0 hdr_done=0 req_done=0 chunk_state=0
+[ 1786.427547] tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=4 gen=5 sk_state=1 copied=1867350933 rcv_nxt=1867351037 have=0 http_have=0
+[ 1786.427559] tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=4 gen=5 have=104 http_have=0 hdr_done=1 req_done=0 chunk_state=0
+[ 1786.427568] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parse tunnel=1 body_len=66
+[ 1786.427574] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parsed tunnel=1 enabled=1 key_id=0 have_key=1 key_peer=0
+[ 1786.427581] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto ready tunnel=1 key_peer=0 tx_ready=1 rx_ready=1
+[ 1786.427812] tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=1 gen=2 sk_state=1 copied=3487698628 rcv_nxt=3487698783 have=0 http_have=0
+[ 1786.427826] tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=1 gen=2 have=155 http_have=0 hdr_done=0 req_done=0 chunk_state=0
+[ 1786.427842] tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=5 gen=6 sk_state=1 copied=3875555421 rcv_nxt=3875555576 have=0 http_have=0
+[ 1786.427853] tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=5 gen=6 have=155 http_have=0 hdr_done=0 req_done=0 chunk_state=0
+[ 1786.427947] tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=5 gen=6 sk_state=1 copied=3875555576 rcv_nxt=3875555680 have=0 http_have=0
+[ 1786.427960] tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=5 gen=6 have=104 http_have=0 hdr_done=1 req_done=0 chunk_state=0
+[ 1786.427972] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parse tunnel=1 body_len=66
+[ 1786.427978] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parsed tunnel=1 enabled=1 key_id=0 have_key=1 key_peer=0
+[ 1786.427986] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto ready tunnel=1 key_peer=0 tx_ready=1 rx_ready=1
+[ 1786.428148] tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=1 gen=2 sk_state=1 copied=3487698783 rcv_nxt=3487698887 have=0 http_have=0
+[ 1786.428161] tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=1 gen=2 have=104 http_have=0 hdr_done=1 req_done=0 chunk_state=0
+[ 1786.428170] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parse tunnel=1 body_len=66
+[ 1786.428188] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parsed tunnel=1 enabled=1 key_id=0 have_key=1 key_peer=0
+[ 1786.428196] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto ready tunnel=1 key_peer=0 tx_ready=1 rx_ready=1
+[ 1786.428208] tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=6 gen=7 sk_state=1 copied=942021005 rcv_nxt=942021264 have=0 http_have=0
+[ 1786.428219] tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=6 gen=7 have=259 http_have=0 hdr_done=0 req_done=0 chunk_state=0
+[ 1786.428232] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parse tunnel=1 body_len=66
+[ 1786.428238] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parsed tunnel=1 enabled=1 key_id=0 have_key=1 key_peer=0
+[ 1786.428245] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto ready tunnel=1 key_peer=0 tx_ready=1 rx_ready=1
+[ 1786.464951] tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=0 gen=1 sk_state=1 copied=1947175872 rcv_nxt=1947176027 have=0 http_have=0
+[ 1786.464976] tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=0 gen=1 have=155 http_have=0 hdr_done=0 req_done=0 chunk_state=0
+[ 1786.465165] tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=0 gen=1 sk_state=1 copied=1947176027 rcv_nxt=1947176131 have=0 http_have=0
+[ 1786.465180] tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=0 gen=1 have=104 http_have=0 hdr_done=1 req_done=0 chunk_state=0
+[ 1786.465214] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parse tunnel=1 body_len=66
+[ 1786.465223] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parsed tunnel=1 enabled=1 key_id=0 have_key=1 key_peer=0
+[ 1786.465231] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto ready tunnel=1 key_peer=0 tx_ready=1 rx_ready=1
+[ 1786.470263] tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=3 gen=4 sk_state=1 copied=1092081424 rcv_nxt=1092081683 have=0 http_have=0
+[ 1786.470279] tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=3 gen=4 have=259 http_have=0 hdr_done=0 req_done=0 chunk_state=0
+[ 1786.470298] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parse tunnel=1 body_len=66
+[ 1786.470304] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parsed tunnel=1 enabled=1 key_id=0 have_key=1 key_peer=0
+[ 1786.470312] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto ready tunnel=1 key_peer=0 tx_ready=1 rx_ready=1
+[ 1786.470912] tbtun-diag: tbt_car_rx_work cpu=0 pid=4804 rx work tunnel=1 carrier=2 gen=3 sk_state=1 copied=1777040500 rcv_nxt=1777040759 have=0 http_have=0
+[ 1786.470925] tbtun-diag: tbt_http_rx_parse cpu=0 pid=4804 http rx parse tunnel=1 carrier=2 gen=3 have=259 http_have=0 hdr_done=0 req_done=0 chunk_state=0
+[ 1786.470938] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parse tunnel=1 body_len=66
+[ 1786.470945] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto parsed tunnel=1 enabled=1 key_id=0 have_key=1 key_peer=0
+[ 1786.470953] tbtun-diag: tbt_rx_hello_crypto cpu=0 pid=4804 hello crypto ready tunnel=1 key_peer=0 tx_ready=1 rx_ready=1
+[ 1790.654728] tbt-c8-once-probe-1794007743-17778

@@ -1,0 +1,27 @@
+near.c3.up=8
+near.c3.data_tx=0
+near.c3.rx_ack=0
+near.c3.reorder_overflow=0
+near.c8.http_parse_err=0
+near.c8.http_req=8
+near.c8.http_resp=0
+near.c8.profile_mismatch=0
+near.c9.fec_drop_window=0
+near.c9.fec_drop_crypto=0
+near.c9.fec_short_unknown=0
+near.streams.streams_active=1
+near.streams.n_streams=1
+far.c3.up=8
+far.c3.data_tx=0
+far.c3.rx_ack=0
+far.c3.reorder_overflow=0
+far.c8.http_parse_err=0
+far.c8.http_req=0
+far.c8.http_resp=8
+far.c8.profile_mismatch=0
+far.c9.fec_drop_window=0
+far.c9.fec_drop_crypto=0
+far.c9.fec_short_unknown=0
+far.streams.streams_active=1
+far.streams.n_streams=1
+dmesg_delta_near=252 dmesg_delta_far=-174
