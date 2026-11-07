@@ -77,14 +77,12 @@
 /* One FEC drain run sends at most this many batches before yielding to the
  * packetizer and the other carriers. */
 #define TBT_FEC_DRAIN_PASS_MAX 8
-/* The carrier stores an unwritten tail in c->part (TBT_CAR_PART_MAX bytes)
- * and its length in a u16. Keep a batch's worst-case framed total inside
- * both, so a short socket write cannot overflow the tail or truncate its
- * length. Today c->part holds one full frame: a full 8 KiB record goes
- * alone, short records can batch, and the cap grows automatically once the
- * carrier sizes c->part for a whole batch. */
-#define TBT_FEC_DRAIN_BYTES_MAX \
-    (TBT_CAR_PART_MAX < 0xffffu ? TBT_CAR_PART_MAX : 0xffffu)
+/* The carrier's short-write tail holds a whole batch: TBT_CAR_PART_MAX is
+ * TBT_FEC_BATCH_MAX frames and part_len is wide enough for it. A batch's
+ * worst-case framed total is at most that (one full record is
+ * TBT_HTTP_FEC_FRAME_MAX), so one http_begin/lock_sock/tcp_sendmsg can carry
+ * up to TBT_FEC_BATCH_MAX full records without overflowing the tail. */
+#define TBT_FEC_DRAIN_BYTES_MAX TBT_CAR_PART_MAX
 
 /* No carrier TCP is left to deliver a share: a retransmit count at the
  * default tcp_retries2 (15) is the point where TCP itself gives up. */
@@ -806,9 +804,9 @@ static struct tbt_carrier *tbt_fec_out_carrier_ready(struct tbt_session *sess,
 /* Per-carrier drain work: one queue, one socket, one retry timer. It holds
  * no session lock: tbt_carrier_send_fec_batch() takes only the carrier's
  * tx_lock, so the 256 carriers can write at the same time. A batch is capped
- * by TBT_FEC_DRAIN_BYTES_MAX so a short write's tail always fits c->part;
- * with one frame of tail today a full record goes alone, and the cap grows
- * automatically when the carrier sizes c->part for a whole batch. */
+ * by TBT_FEC_DRAIN_BYTES_MAX, which is the carrier's whole short-write tail:
+ * up to TBT_FEC_BATCH_MAX full records share one HTTP header and one socket
+ * write, and a short write's tail still fits c->part. */
 static void tbt_fec_out_drain_work(struct work_struct *w)
 {
     struct tbt_fec_drain *d = container_of(to_delayed_work(w),

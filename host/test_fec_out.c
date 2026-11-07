@@ -41,10 +41,9 @@
 #define REC_LEN 64u
 #define NACK_REQ_MAX 256u
 #define BATCH_MAX 8
-/* The kernel caps a batch by the carrier's short-write tail. The model uses
- * four records so the batch arithmetic is visible; the byte cap, not the
- * count, is the rule under test. */
-#define BATCH_BYTES_MAX (4u * REC_LEN)
+/* The kernel caps a batch by the carrier's short-write tail, which holds
+ * BATCH_MAX frames. The model's cap matches that whole-part budget. */
+#define BATCH_BYTES_MAX (BATCH_MAX * REC_LEN)
 
 static int checks;
 static int failures;
@@ -843,10 +842,17 @@ static void case_batch_drain(void)
     ok(!again, "batch drain completes", NULL);
     ok_u32(wrote, 20, "batch drain wrote every record");
     ok_u32(s.q[0].depth, 0, "batch drain emptied the queue");
-    ok_u32(s.batches[0], 5, "20 records at 4 per batch take five writes");
+    ok_u32(s.batches[0], 3, "20 records at 8 per batch take three writes");
     ok_u32(s.writes[0], 20, "every record accepted");
     ok_u32(s.write_seq[0], 0, "the first batch keeps queue order");
     ok_u32(s.write_seq[19], 19, "the last batch keeps queue order");
+
+    /* Eight full records fit one batch: the whole part buffer is used. */
+    for (i = 0; i < BATCH_MAX; i++)
+        push(&s, 1, false, false, 0, 200 + i);
+    wrote = drain_batch(&s, 1, &again);
+    ok(!again && wrote == BATCH_MAX, "eight records fit one batch", NULL);
+    ok_u32(s.batches[1], 1, "one carrier write for eight records");
 
     s.full[0] = true;
     push(&s, 0, false, false, 0, 100);
@@ -854,12 +860,12 @@ static void case_batch_drain(void)
     wrote = drain_batch(&s, 0, &again);
     ok(again && wrote == 0, "EAGAIN keeps the whole batch", NULL);
     ok_u32(s.q[0].depth, 2, "both records stay queued");
-    ok_u32(s.batches[0], 5, "a refused batch did not count as a write");
+    ok_u32(s.batches[0], 3, "a refused batch did not count as a write");
 
     s.full[0] = false;
     wrote = drain_batch(&s, 0, &again);
     ok(!again && wrote == 2, "retry writes the kept batch", NULL);
-    ok_u32(s.batches[0], 6, "the retry is one batch");
+    ok_u32(s.batches[0], 4, "the retry is one batch");
     sched_free(&s);
 }
 
