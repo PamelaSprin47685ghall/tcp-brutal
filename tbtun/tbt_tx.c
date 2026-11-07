@@ -169,6 +169,12 @@ void tbt_tx_wake(struct tbt_session *sess)
     struct tbt_carrier *c;
     int i;
 
+    /* FEC data never enters the ARQ queue. Waking every carrier's w_tx for an
+     * empty queue only makes the pump contend for pump_lock with the FEC
+     * drain. A queued control frame (ctl_queued) still wakes it. */
+    if (tbt_tx_pump_idle(sess->fec, READ_ONCE(sess->tx_queued),
+                         READ_ONCE(sess->ctl_queued)))
+        return;
     for (i = 0; i < sess->n_car; i++)
     {
         c = READ_ONCE(sess->car[i]);
@@ -2572,6 +2578,11 @@ int tbt_tx_pump(struct tbt_session *sess)
         atomic64_inc(&sess->dbg_pump_nocar);
         return 0;
     }
+    /* FEC mode with an empty ARQ queue: nothing for the pump to write, and
+     * taking pump_lock here delays the per-carrier FEC drain. */
+    if (tbt_tx_pump_idle(sess->fec, READ_ONCE(sess->tx_queued),
+                         READ_ONCE(sess->ctl_queued)))
+        return 0;
     mutex_lock(&sess->pump_lock);
     if (!sess->tunnel)
     {

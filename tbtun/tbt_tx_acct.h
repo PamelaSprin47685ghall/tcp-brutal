@@ -225,6 +225,15 @@ static inline u64 tbt_tx_reorder_floor(unsigned int n_car)
     return need;
 }
 
+/* FEC data never enters the ARQ queue: it lives in the packetizer's ring and
+ * the FEC out queues. With an empty tx_q/ctl_q the TX pump has nothing to do,
+ * and running it only takes pump_lock away from the per-carrier FEC drain.
+ * Non-FEC sessions always need the pump for their ARQ queue and timers. */
+static inline bool tbt_tx_pump_idle(bool fec, u32 tx_queued, u32 ctl_queued)
+{
+    return fec && !tx_queued && !ctl_queued;
+}
+
 /* Pure path bound: idx must name a slot the session owns and fit the 16-slot
  * retain arrays. No warning here; FEC sessions legally walk 256 slots. */
 static inline bool tbt_tx_path_in_range(unsigned int idx, unsigned int n_car)

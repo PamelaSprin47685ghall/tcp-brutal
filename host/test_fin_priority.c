@@ -184,6 +184,15 @@ static void case_reorder_floor(void)
     }
 }
 
+static void case_pump_idle(void)
+{
+    ok(tbt_tx_pump_idle(true, 0, 0), "pump: FEC empty queue is idle");
+    ok(!tbt_tx_pump_idle(true, 0, 1),
+       "pump: a queued FEC control frame is not idle");
+    ok(!tbt_tx_pump_idle(true, 1, 0), "pump: queued FEC data is not idle");
+    ok(!tbt_tx_pump_idle(false, 0, 0), "pump: non-FEC is never idle");
+}
+
 struct frame
 {
     u8 type;
@@ -264,6 +273,7 @@ int main(void)
     case_aggregate_window();
     case_car_rate();
     case_reorder_floor();
+    case_pump_idle();
     case_fin_not_starved();
     case_no_close();
 
