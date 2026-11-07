@@ -290,8 +290,25 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier, const u8 *buf
     }
     else if (replay)
     {
-        /* Repairs are drained ahead of new shares, FIFO across NACKs. */
-        list_add_tail(&o->node, &sess->fec_out_replay);
+        struct tbt_fec_out *pos;
+        bool placed = false;
+
+        /* Frontier first: a later super-block's repair must not sit ahead
+         * of the block that holds the peer's ACK frontier. fix24's far had
+         * an 8 MiB replay queue and the frontier's repair waited 6.13 s, so
+         * the TX stall timer reset the stream. Within one block the NACK
+         * order is kept. */
+        list_for_each_entry(pos, &sess->fec_out_replay, node)
+        {
+            if (pos->block_id > o->block_id)
+            {
+                list_add_tail(&o->node, &pos->node);
+                placed = true;
+                break;
+            }
+        }
+        if (!placed)
+            list_add_tail(&o->node, &sess->fec_out_replay);
     }
     else
     {
@@ -1326,6 +1343,38 @@ static bool tbt_fec_tx_is_idle(struct tbt_session *sess)
     return tbt_fec_fin_ready(pkt_idle, queued);
 }
 
+/* The bounded TX reset in tbt_tx.c fires after 30 s without an ACK advance.
+ * Acceptance runs debug=0, so its TXSTALLKILL line is invisible; this
+ * ratelimited line names the same state from the FEC side before the reset:
+ * the ack/txseq gap, the frontier block, the replay backlog and the repair
+ * age. It returns without printing while the ack is inside its budget. */
+static void tbt_fec_tx_stall_diag(struct tbt_session *sess,
+                                  struct tbt_stream *st)
+{
+    struct tbt_fec_tx *tx = sess->fec_tx;
+    u64 now = ktime_get_ns();
+    u64 last = READ_ONCE(st->last_ack_ns);
+    u64 budget = tbt_tx_wait_budget_ns(sess, st);
+    u64 span = (u64)tx->groups * tx->n;
+    u64 frontier = span ? READ_ONCE(tx->peer_pkts) / span : 0;
+    u32 rq, rb;
+
+    if (!last || now <= last || now - last <= budget)
+        return;
+    spin_lock(&sess->fec_out_lock);
+    rq = sess->fec_replay_queued;
+    rb = sess->fec_replay_bytes;
+    spin_unlock(&sess->fec_out_lock);
+    pr_info_ratelimited("tbtun: fec TX stall diag ack=%llu txseq=%llu peer_pkts=%llu frontier=%llu cur=%llu g=%u s=%u replay_q=%u replay_bytes=%u high=%d throttled=%llu age_us=%llu\n",
+                        READ_ONCE(st->tx_ack), READ_ONCE(st->tx_seq),
+                        READ_ONCE(tx->peer_pkts), frontier,
+                        READ_ONCE(tx->cur_block),
+                        READ_ONCE(tx->last_group), READ_ONCE(tx->last_share),
+                        rq, rb, READ_ONCE(sess->fec_replay_over_high),
+                        atomic64_read(&sess->fec_replay_pass_throttled),
+                        (now - last) / NSEC_PER_USEC);
+}
+
 static void tbt_fec_tx_work_body(struct tbt_session *sess)
 {
     struct tbt_fec_tx *tx = sess->fec_tx;
@@ -1364,6 +1413,7 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
      * TBT_FEC_REPLAY_CLOSE_BYTES_MAX: the last block's repair must fit the
      * close budget, so an older backlog must not refill the queue. */
     WRITE_ONCE(sess->fec_closing, READ_ONCE(st->close_since_ns) != 0);
+    tbt_fec_tx_stall_diag(sess, st);
     for (;;)
     {
         u32 got;
@@ -1963,6 +2013,63 @@ static bool tbt_fec_super_ready_locked(const struct tbt_fec_rx *rx, u64 s)
     return true;
 }
 
+/* Missing shares in the frontier super-block, for the reset log. The block
+ * may not exist at all (a whole-block loss): every DATA share of every group
+ * is then missing. The caller must not hold rx->lock. */
+static u16 tbt_fec_frontier_missing(struct tbt_fec_rx *rx, u64 s)
+{
+    u16 g, i, missing = 0;
+
+    spin_lock_bh(&rx->lock);
+    for (g = 0; g < rx->groups; g++)
+    {
+        struct tbt_fec_blk *b = tbt_fec_rx_blk(rx, g, s);
+        u16 real;
+
+        if (!b->used || b->block_id != s)
+        {
+            missing = (u16)(missing + rx->n);
+            continue;
+        }
+        if (b->ready)
+            continue;
+        real = tbt_fec_blk_real_len(rx, g, b);
+        for (i = 0; i < real; i++)
+            if (!b->dpresent[i])
+                missing++;
+        for (i = 0; i < rx->m; i++)
+            if (!b->ppresent[i])
+                missing++;
+    }
+    spin_unlock_bh(&rx->lock);
+    return missing;
+}
+
+/* Name the state a FEC hole reset is about to throw away: the frontier, the
+ * stream's known end, the missing share count, how long the walk has made no
+ * progress, and the replay queue depth. The acceptance runs debug=0, so the
+ * per-block dumps are off; this line is unconditional (ratelimited). */
+static void tbt_fec_reset_diag(struct tbt_session *sess, u64 s,
+                               const char *why)
+{
+    struct tbt_fec_rx *rx = sess->fec_rx;
+    u64 now = ktime_get_ns();
+    u32 rq;
+
+    spin_lock(&sess->fec_out_lock);
+    rq = sess->fec_replay_queued;
+    spin_unlock(&sess->fec_out_lock);
+    pr_info_ratelimited("tbtun: fec reset diag why=%s super=%llu next=%llu total_known=%d total_pkts=%llu missing=%u repair_age_us=%llu replay_q=%u\n",
+                        why, s, READ_ONCE(rx->next_super),
+                        READ_ONCE(rx->total_known),
+                        READ_ONCE(rx->total_pkts),
+                        tbt_fec_frontier_missing(rx, s),
+                        rx->progress_ns && now > rx->progress_ns
+                            ? (now - rx->progress_ns) / NSEC_PER_USEC
+                            : 0,
+                        rq);
+}
+
 /* Deliver every ready super-block, in order, from the exact cursor the last
  * attempt stopped at. Only w_fec_rx calls this, so it is the only writer of
  * next_super / deliver_bytes / next_deliver / ack_deliver.
@@ -2093,6 +2200,7 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
                 spin_unlock_bh(&rx->lock);
                 pr_info_ratelimited("tbtun: fec reset: super %llu not ready and no carrier TCP alive (total_pkts=%llu)\n",
                                     s, READ_ONCE(rx->total_pkts));
+                tbt_fec_reset_diag(sess, s, "no tcp alive");
                 atomic64_inc(&sess->fec_reset_tcp_failed);
                 atomic64_inc(&sess->fec_reset_hole);
                 atomic64_inc(&sess->holes_unrecoverable);
@@ -2248,6 +2356,7 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
                     pr_info_ratelimited("tbtun: fec ordered walk hole: super %llu p=%u group=%u off=%llu frontier=%llu\n",
                                         s, p, group,
                                         off - rx->stream_base, frontier);
+                    tbt_fec_reset_diag(sess, s, "ordered walk hole");
                     spin_lock_bh(&rx->lock);
                     rx->stopping = true;
                     spin_unlock_bh(&rx->lock);
@@ -2333,6 +2442,7 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
         pr_info_ratelimited("tbtun: fec deliver conflict: super %llu p=%u group=%u reason=%s off=%llu; stream reset\n",
                             rx->next_super, rx->deliver_p, rx->deliver_g,
                             blocked_why, stream_off);
+        tbt_fec_reset_diag(sess, rx->next_super, blocked_why);
         tbt_stream_kill(st, TBT_ST_HOLE);
     }
     tbt_stream_put(st);

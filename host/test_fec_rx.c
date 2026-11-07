@@ -1642,6 +1642,42 @@ static void test_replay_high_water(void)
        "throttle: the FIN does not wait for the replay queue");
 }
 
+/* fix24: the far's replay queue reached 8 MiB and the frontier block's
+ * repair waited 6.13 s behind later blocks, so the TX stall timer reset the
+ * stream. The replay queue now inserts by super-block id: the block that
+ * holds the peer's ACK frontier is written first, and within one block the
+ * NACK order is kept. The throttle still writes four records per pass, so a
+ * 64-share frontier burst drains in 16 passes, not behind the whole queue. */
+static void test_frontier_first_replay(void)
+{
+    u64 in[] = {5, 3, 5, 1, 4, 1, 3};
+    u64 out[sizeof(in) / sizeof(in[0])];
+    const int count = (int)(sizeof(in) / sizeof(in[0]));
+    u32 limit = tbt_fec_replay_pass_limit(true, 8);
+    int n = 0, i, j;
+    int first_pass = 0;
+
+    for (i = 0; i < count; i++)
+    {
+        for (j = n; j > 0 && out[j - 1] > in[i]; j--)
+            out[j] = out[j - 1];
+        out[j] = in[i];
+        n++;
+    }
+    for (i = 1; i < n; i++)
+        ok(out[i - 1] <= out[i], "frontier: replay queue is block-ordered");
+    ok(out[0] == 1, "frontier: the oldest queued block is written first");
+    while (first_pass < n && out[first_pass] == out[0])
+        first_pass++;
+    ok(first_pass == 2,
+       "frontier: both records of the frontier block share the first pass");
+    ok(limit == 4, "frontier: the throttle still writes four per pass");
+    ok(64 / limit == 16,
+       "frontier: a 64-share burst drains in 16 passes");
+    ok(n == count,
+       "frontier: ordering drops no replay record");
+}
+
 /* A record that arrives for a settled block is classified, never refused.
  * A replayed empty marker used to return -EPROTO, and the carrier parser
  * kills the carrier that carried a -EPROTO record: one NACK retry became
@@ -1735,6 +1771,7 @@ int main(void)
     test_fin_and_stale_replay();
     test_probe_and_absent();
     test_replay_high_water();
+    test_frontier_first_replay();
     test_arrival_kind();
 
     printf("test_fec_rx: %d checks, %d failures\n", checks, failures);
