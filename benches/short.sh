@@ -61,6 +61,8 @@ far_port=9000
 target=127.0.0.1:5210
 near_block=30000-30511
 far_block=31000-31511
+rx_reorder=8388608
+tx_window=0
 nonce=00112233445566778899aabbccddeeff
 tag=
 baseline_flag=0
@@ -93,6 +95,8 @@ while [ $# -gt 0 ]; do
     --target) target=$2; shift 2 ;;
     --near-block) near_block=$2; shift 2 ;;
     --far-block) far_block=$2; shift 2 ;;
+    --rx-reorder) rx_reorder=$2; shift 2 ;;
+    --tx-window) tx_window=$2; shift 2 ;;
     --nonce) nonce=$2; shift 2 ;;
     --baseline) baseline_flag=1; shift ;;
     --compare) compare_flag=1; shift ;;
@@ -154,19 +158,19 @@ configure_far()
 {
     # fix28's far rejects peer= (EINVAL); it anchors by the first HELLO
     # (TOFU) as before. Do not add the key back without checking the parser.
-    remote_sh "$far" "$1" "$far_port" "$target" "$far_block" "$nonce" <<'EOS'
-N=$1; PORT=$2; TARGET=$3; BLOCK=$4; NONCE=$5
-printf 'tunnel 1 role=far listen=0.0.0.0:%s target=%s n=4 m=4 fec=on mode=grouped w=8 carriers=%s crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0 portblock=%s nonce=%s\n' \
-    "$PORT" "$TARGET" "$N" "$BLOCK" "$NONCE" > /proc/net/tbtun/config
+    remote_sh "$far" "$1" "$far_port" "$target" "$far_block" "$nonce" "$rx_reorder" "$tx_window" <<'EOS'
+N=$1; PORT=$2; TARGET=$3; BLOCK=$4; NONCE=$5; RX=$6; TW=$7
+printf 'tunnel 1 role=far listen=0.0.0.0:%s target=%s n=4 m=4 fec=on mode=grouped w=8 carriers=%s crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=%s tx_window_bytes=%s tx_retain_bytes=0 carrier_stall_ms=0 portblock=%s nonce=%s\n' \
+    "$PORT" "$TARGET" "$N" "$RX" "$TW" "$BLOCK" "$NONCE" > /proc/net/tbtun/config
 EOS
 }
 
 configure_near()
 {
-    remote_sh "$near" "$1" "$near_port" "$far_ip" "$far_port" "$near_block" "$nonce" "$dev" <<'EOS'
-N=$1; PORT=$2; PEER=$3; PEERPORT=$4; BLOCK=$5; NONCE=$6; DEV=$7
-printf 'tunnel 1 role=near listen=127.0.0.1:%s peer=%s:%s n=4 m=4 fec=on mode=grouped w=8 carriers=%s crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0 portblock=%s nonce=%s dev=%s\n' \
-    "$PORT" "$PEER" "$PEERPORT" "$N" "$BLOCK" "$NONCE" "$DEV" > /proc/net/tbtun/config
+    remote_sh "$near" "$1" "$near_port" "$far_ip" "$far_port" "$near_block" "$nonce" "$dev" "$rx_reorder" "$tx_window" <<'EOS'
+N=$1; PORT=$2; PEER=$3; PEERPORT=$4; BLOCK=$5; NONCE=$6; DEV=$7; RX=$8; TW=$9
+printf 'tunnel 1 role=near listen=127.0.0.1:%s peer=%s:%s n=4 m=4 fec=on mode=grouped w=8 carriers=%s crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=%s tx_window_bytes=%s tx_retain_bytes=0 carrier_stall_ms=0 portblock=%s nonce=%s dev=%s\n' \
+    "$PORT" "$PEER" "$PEERPORT" "$N" "$RX" "$TW" "$BLOCK" "$NONCE" "$DEV" > /proc/net/tbtun/config
 EOS
 }
 

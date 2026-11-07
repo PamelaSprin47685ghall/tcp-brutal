@@ -1,0 +1,5 @@
+path,carriers,app_bytes,elapsed_s,app_MB_s,app_Mbit_s,wire_bytes,wire_Mbit_s,wire_per_app,retx_pct,nack_tx,nack_rx,replay_hit,replay_miss,hol_us,hol_wait,flush_skip,stall,near_cpu_pct,far_cpu_pct,near_cores_per_Mbit,far_cores_per_Mbit,tx_window,txq_max,bdp_bytes,k_x100,rtt_mean_us,snd_wnd_sum,cwnd_sum
+direct-P32,32,140253800,5.004424,28.026,224.2,140253800,224.2,1.0000,0,0,0,0,0,0,0,0,0,76.1,132.5,0.00339,0.00591,,,,,,
+tunnel-32,32,67239936,5.000289,13.447,107.6,151560550,242.5,2.2540,1.9,19,20,158,3,0,0,0,0,82.0,152.2,0.00762,0.01414,,,,,,
+tunnel-64,64,73875350,5.000155,14.775,118.2,165645930,265.0,2.2422,3.8,22,23,345,0,0,0,0,0,90.4,159.0,0.00765,0.01345,,,,,,
+tunnel-256,256,60817302,5.000708,12.162,97.3,134884464,215.8,2.2179,4.9,22,22,363,0,0,0,0,0,90.6,146.6,0.00931,0.01507,16777216,16843040,861361,500,190968,28439600,24479216

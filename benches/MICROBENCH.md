@@ -246,7 +246,9 @@ CPU 列是**单核百分比**：`(busy_ticks 差值) / (elapsed × CLK_TCK) × 1
 
 ### 真机基线（32/64/256 carriers，5 s 单流下载）
 
-**0.2.0 的最终代码是 fix28，基线以 fix28 为准。** fix29 是 0.3.0 实验：
+**0.2.0 的最终代码是 fix28；它的基线保留在
+`benches/baseline/remote-fix28.csv`。当前基线已切到 fix31（见下文
+0.2.1 节）。** fix29 是 0.3.0 实验：
 32/64 有改善，但 256 的 retx/replay/NACK 中位一致偏高 20-35%，不进入
 0.2.0。fix29 的数据保留在 `benches/results/` 与
 `benches/baseline/remote-fix29.csv`，供 0.3.0 二分。
@@ -303,6 +305,83 @@ near 重启确认：boot_id `0a91d2eb-…` → `d6999c60-…`；重启后模块�
 `/proc/net/tbtun` 不存在、9001 空闲、`tbtun-wdt-hold` inactive（transient
 服务不自动恢复，硬件狗未武装，保持不武装）。DHCP 把地址从 .65 换到 .82；
 脚本用 `--near`/`--near-ip` 传入新地址。
+
+### 0.2.1（fix30）：直连 P32 对照（历史，已被 fix31 取代）
+
+fix30 把 auto window 的上限放开：32 carriers 的 `tx_window` 从 fix28 的
+378 KB 提升到 8 MB，wire 吞吐随之接近直连。near srcversion
+`AE36B83CF5304ECAB6A3CB2`，far `E4BE181A81D3825E7EA88AC`。原始数据
+`benches/results/20261107T223300Z-fix30-direct32-vs-tunnel/fix30-compare.csv`。
+
+对照方法：far 临时在 `0.0.0.0:5212` 用 Python 并发 HTTP sender 提供同一个
+1 GiB 源；near 用 32 条并发 curl 直连 5 s。隧道用 32 carriers 单流下载
+5 s。两者同一时段、同一源。
+
+| 路径 | app MB/s | app Mbit/s | wire Mbit/s | wire/app | near CPU | far CPU | near 核/Mbit | far 核/Mbit |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 直连 P32 | 28.637 | 229.1 | 229.1 | 1.000 | 76.4% | 147.6% | 0.00334 | 0.00644 |
+| 隧道 32 | 12.289 | 98.3 | 223.6 | 2.275 | 86.0% | 142.0% | 0.00875 | 0.01445 |
+| 隧道 64 | 11.953 | 95.6 | 215.8 | 2.256 | 81.4% | 141.0% | 0.00851 | 0.01475 |
+| 隧道 256 | 7.130 | 57.0 | 139.4 | 2.443 | 85.8% | 155.0% | 0.01505 | 0.02719 |
+
+32 carriers 的比值：wire 是直连的 **97.6%**，app 是直连的 42.9%（即
+直连/2 的 **85.8%**）；每 Mbit 的 near/far CPU 是直连的 2.62/2.24 倍。
+隧道 32 的 `tx_window=8,388,608 B`、`bdp=132,709 B`、`k=3`、
+`rtt_mean=176,468 us`；far 侧 32 carriers 的 `snd_wnd` 合计 25.6 MB。
+NACK 29/29、replay 148/0、retx 2.0%、HOL/flush/stall/proto 全 0。
+
+判定：
+
+- **32 达标**：wire 接近直连 P32（97.6%），app 达到直连/2 的 85.8%；
+  剩余的 14% 是 FEC parity 之外的 framing/CPU 成本，量级合理。
+- **64 达标**：app 95.6 Mbit/s，wire 215.8 Mbit/s（直连的 94.2%）；
+  与 32 持平，说明窗口 8 MB 已足够覆盖 64 carriers 的 BDP。
+- **256 不达标**：app 57.0 Mbit/s（直连/2 的 49.8%），wire 139.4
+  Mbit/s（直连的 60.8%），比 64 低 40%。`tx_window` 仍被 8 MB 上限卡住，
+  而 256 carriers 的 `snd_wnd` 合计 15.3 MB、`cwnd` 31.6 MB；retx 13.5%、
+  far CPU 155%、`txq_max` 8.45 MB（队列打满）。窗口上限与 256 的每
+  carrier 开销共同限制了扩展。
+- **0.2.1 结论**：32/64 达标；256 未达标。若 0.2.1 的验收包含 256，
+  需要继续放大 `tx_window`（至少覆盖 256 carriers 的 BDP）并降低
+  256 下的 retx；否则 256 只能按“可用但低于 32/64”记录。
+
+### 0.2.1（fix31）：batch/per-carrier 并行后的三档（当前基线）
+
+**当前基线文件 `benches/baseline/remote.csv` 与 `remote-detail.csv` 是
+fix31 的三行。** fix30 对照保留在 `benches/baseline/remote-fix30.csv`，
+fix28（0.2.0）在 `remote-fix28.csv`，fix29（0.3.0 实验）在
+`remote-fix29.csv`。
+
+fix31（near `B52199BAC7DF4D9A206AA5F`，far `8898C4C2C05DFABAD2D47C4`）
+在 256 上大幅改善。原始数据
+`benches/results/20261107T231300Z-fix31-compare/fix31-compare.csv`。
+
+| 路径 | app Mbit/s | wire Mbit/s | wire/app | retx% | near CPU | far CPU | near 核/Mbit | far 核/Mbit |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 直连 P32 | 224.2 | 224.2 | 1.000 | - | 76.1% | 132.5% | 0.00339 | 0.00591 |
+| 隧道 32 | 107.6 | 242.5 | 2.254 | 1.9% | 82.0% | 152.2% | 0.00762 | 0.01414 |
+| 隧道 64 | 118.2 | 265.0 | 2.242 | 3.8% | 90.4% | 159.0% | 0.00765 | 0.01345 |
+| 隧道 256 | 97.3 | 215.8 | 2.218 | 4.9% | 90.6% | 146.6% | 0.00931 | 0.01507 |
+
+对比 fix30：32 98.3→107.6（+9.5%），64 95.6→118.2（+23.6%），
+256 57.0→97.3（+70.7%）。相对直连/2（112.1 Mbit/s）：32 为 96.0%，
+64 为 105.4%，256 为 86.8%。256 的 wire/app 从 2.44 降到 2.22，retx 从
+13.5% 降到 4.9%；`tx_window=16 MB`、`txq_max=16.8 MB`（仍满）、
+`rtt_mean=190,968 us`、far `snd_wnd` 合计 27.1 MB。
+
+稳定性：32/64/256 跑完后无 D 状态进程、`refcnt=0`、`rmmod` 返回 0、
+重新 `insmod` 后 srcversion 不变。
+
+**0.2.1 判定**：32 达标（直连/2 的 96.0%），64 达标（105.4%），
+256 达到直连/2 的 86.8%，比 fix30 的 49.8% 大幅改善，可视为基本达标；
+若验收要求 ≥90%，256 还差 3.2 个百分点。
+
+**0.3.0 剩余（256）**：`txq_max=16.8 MB` 仍打满，说明发送侧写 carrier
+的速度仍是限制；far CPU 1.47 核（每 Mbit 0.0151 核，是直连的 2.5 倍）；
+FEC parity 让 wire/app 固定在 2.22-2.25。下一步优先查 TX 队列的
+batch/per-carrier 并行是否还能提高 drain 速率，其次才是 FEC/HTTP 的
+每字节成本。fix29 的 word-wise XOR 与 fec_frame 复用仍留 0.3.0 二分，
+不要在 256 直接叠加。
 
 ## 8. 已知限制
 
