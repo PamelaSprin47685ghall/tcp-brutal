@@ -381,7 +381,10 @@ container:
   the delivery frontier even when no share of it was seen: the receiver asks
   parity 0 for each group, and the sender's ring states the shape. A stale
   final-block tail of 0 with a present DATA share is not treated as empty;
-  the share is kept and parity/NACK states the real cut. A closed short block
+  the share is kept and parity/NACK states the real cut. The parity reply
+  starts at row `s % m`, which always covers DATA share `s` under the band
+  matrix, and falls back to the other covering rows; a fixed row 0 does not
+  cover shares with `s % m >= band`. A closed short block
   (`win_len < n`) has no records for
   its padding DATA shares; a NACK for one of those is answered with a parity
   row whose header carries the real `win_len`/`epoch`, so the receiver learns

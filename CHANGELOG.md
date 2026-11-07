@@ -79,7 +79,10 @@ and moves independently of the module version.
   super-block (parity 0 per group) even when no share of it was seen; the
   sender's replay ring states the shape. A stale final-block tail of 0 with a
   present DATA share no longer marks the block empty: the share is kept and
-  parity/NACK states the real cut.
+  parity/NACK states the real cut. The parity reply starts at row `s % m`
+  (which always covers DATA share `s` under the band matrix) and falls back
+  to the other covering rows; a fixed row 0 misses every share with
+  `s % m >= band` and repeats a duplicate that cannot decode the block.
 - FEC sparse-block NACK storm: a started super-block's unstarted groups were
   requested for their whole `n+m` range before the stream end was known. A
   100-byte short stream on 32 carriers produced full-range NACKs for shares

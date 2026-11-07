@@ -312,6 +312,9 @@ u32 tbt_fec_rlnc_parity_count(const struct tbt_fec_rlnc *ctx, u32 L);
  * preallocated context, so encode/decode never allocates after bind. */
 void tbt_fec_rlnc_set_nonce(struct tbt_fec_rlnc *ctx, u64 nonce);
 u64 tbt_fec_rlnc_nonce(const struct tbt_fec_rlnc *ctx);
+/* Band width of the parity matrix. Row r covers DATA column c when
+ * (c + m - (r % m)) % m < band; row c % m always covers column c. */
+u16 tbt_fec_rlnc_band(const struct tbt_fec_rlnc *ctx);
 
 /* Fill idx with distinct positions in [0, w). Returns the count, at most d,
  * or 0 on a bad argument. */

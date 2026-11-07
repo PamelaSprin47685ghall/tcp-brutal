@@ -992,6 +992,11 @@ void tbt_fec_rlnc_set_nonce(struct tbt_fec_rlnc *ctx, u64 nonce)
         ctx->nonce = nonce;
 }
 
+u16 tbt_fec_rlnc_band(const struct tbt_fec_rlnc *ctx)
+{
+    return ctx ? ctx->band : 0;
+}
+
 u64 tbt_fec_rlnc_nonce(const struct tbt_fec_rlnc *ctx)
 {
     return ctx ? ctx->nonce : 0;

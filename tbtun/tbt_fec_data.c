@@ -2775,7 +2775,10 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                 if (len == -ENODATA)
                 {
                     bool replied = false;
-                    u16 pi;
+                    u16 band = tbt_fec_rlnc_band(
+                        tbt_fec_grouped_ctx(tx->codec, g));
+                    u16 first;
+                    u16 ri;
 
                     if (debug >= 2)
                         pr_info("tbtun: fec NACK absent block=%llu group=%u share=%u cur=%llu gblk=%llu\n",
@@ -2790,16 +2793,25 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                      * generated. A short block (win_len < n) has padding
                      * shares that will never exist, but it does have parity
                      * rows whose header carries the real win_len/epoch.
-                     * Re-send one of those rows: the receiver learns the cut
-                     * and stops waiting for padding. This also repairs a
-                     * real lost share when the parity can recover it. */
-                    for (pi = 0; pi < tx->m && !replied; pi++)
+                     * Row r covers DATA share s when
+                     * (s + m - (r % m)) % m < band. r = s % m always covers
+                     * it (band >= 1); a fixed row 0 does not cover s with
+                     * s % m >= band, and repeating it cannot decode the
+                     * block. Start at r = s % m, then try the other covering
+                     * rows if that row is not in the ring. */
+                    first = s < tx->n ? (u16)(s % tx->m) :
+                                        (u16)(s - tx->n);
+                    for (ri = 0; ri < tx->m && !replied; ri++)
                     {
+                        u16 r = (u16)((first + ri) % tx->m);
                         int plen;
 
+                        if (s < tx->n && band &&
+                            (u16)((s + tx->m - (r % tx->m)) % tx->m) >= band)
+                            continue;
                         spin_lock_bh(&tx->replay_lock);
                         plen = tbt_fec_replay_get(tx->replay, h.block_id, g,
-                                                  (u16)(tx->n + pi), buf,
+                                                  (u16)(tx->n + r), buf,
                                                   TBT_FEC_REC_MAX);
                         spin_unlock_bh(&tx->replay_lock);
                         if (plen <= 0)
@@ -2815,7 +2827,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
 
                             if (!tbt_fec_hdr_unpack(buf, &ph))
                                 pr_info("tbtun: fec NACK parity reply block=%llu group=%u parity=%u win_len=%u epoch=%u\n",
-                                        h.block_id, g, pi, ph.win_len,
+                                        h.block_id, g, r, ph.win_len,
                                         ph.epoch);
                         }
                         replied = true;

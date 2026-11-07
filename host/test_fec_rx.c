@@ -882,6 +882,64 @@ static void test_two_short_writes(void)
     tbt_fec_replay_free(r);
 }
 
+/* The parity band: row r covers every DATA column except c == r (band=3 for
+ * n4m4). A reply that always sends row 0 cannot decode a missing share 3.
+ * The sender now sends the whole parity set; every missing position decodes. */
+static void test_parity_rotation(void)
+{
+    static const u16 full[N] = {S, S, S, S};
+    int c, i;
+
+    for (c = 0; c < N; c++)
+    {
+        struct blk b;
+        u8 out[N * S];
+        int refused, rc0;
+        size_t off;
+
+        /* The old reply: only parity row 0. Row 0 misses column c == 0? No:
+         * row 0 covers 0,1,2 and misses 3. */
+        blk_init(&b, 0, full);
+        blk_encode(&b);
+        b.nreal = N;
+        b.dpresent[c] = 0;
+        for (i = 0; i < M; i++)
+            b.ppresent[i] = 0;
+        b.ppresent[0] = 1;
+        rc0 = blk_recover(&b);
+        if (c == 3)
+            ok_int(rc0, -EAGAIN, "row 0 cannot recover DATA share 3");
+        else
+            ok_int(rc0, 0, "row 0 recovers DATA share 0..2");
+
+        /* The deterministic reply: row r0 = c % m covers c. */
+        blk_init(&b, 0, full);
+        blk_encode(&b);
+        b.nreal = N;
+        b.dpresent[c] = 0;
+        for (i = 0; i < M; i++)
+            b.ppresent[i] = 0;
+        b.ppresent[c % M] = 1;
+        ok_int(blk_recover(&b), 0,
+               "covering row r0 recovers the missing share");
+        off = blk_deliver(&b, out, sizeof(out), &refused);
+        ok(!refused, "covering-row block delivers");
+        ok_size(off, N * S, "covering-row block length");
+        ok_prefix(out, off, "covering-row block prefix");
+
+        /* The fixed reply: all M parity rows. */
+        blk_init(&b, 0, full);
+        blk_encode(&b);
+        b.nreal = N;
+        b.dpresent[c] = 0;
+        ok_int(blk_recover(&b), 0, "all parity rows recover the missing share");
+        off = blk_deliver(&b, out, sizeof(out), &refused);
+        ok(!refused, "rotated parity block delivers");
+        ok_size(off, N * S, "rotated parity block length");
+        ok_prefix(out, off, "rotated parity block prefix");
+    }
+}
+
 int main(void)
 {
     src_init();
@@ -898,6 +956,7 @@ int main(void)
     test_nack_replay();
     test_short_block_reply();
     test_two_short_writes();
+    test_parity_rotation();
 
     printf("test_fec_rx: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
