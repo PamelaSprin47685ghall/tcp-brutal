@@ -1529,6 +1529,58 @@ static void test_fin_and_stale_replay(void)
     tbt_fec_replay_free(r);
 }
 
+/* fix22: the far probed the idle uplink frontier for 2,756 s. Each probe
+ * named parity 0 of all 32 groups; the near had no such block and counted
+ * 274,389 never-stored lookups for 8,583 probes. A block the sender never
+ * built answers nothing, so the probe must be bounded. The same run also
+ * showed that a resident block is not an empty group: a marker for padding
+ * would falsely mark real data as absent. */
+static void test_probe_and_absent(void)
+{
+    u64 last = 0;
+    u8 tries = 0;
+    int probes = 0;
+    u64 t;
+
+    ok(tbt_fec_nack_probe_allowed(0), "probe: first try allowed");
+    ok(tbt_fec_nack_probe_allowed(TBT_FEC_NACK_PROBE_MAX - 1),
+       "probe: last try allowed");
+    ok(!tbt_fec_nack_probe_allowed(TBT_FEC_NACK_PROBE_MAX),
+       "probe: the cap stops the next one");
+    ok(TBT_FEC_NACK_PROBE_MAX >= 2 && TBT_FEC_NACK_PROBE_MAX <= 8,
+       "probe: the cap is small");
+
+    /* 10 s of 10 ms scans: the interval alone allows 40 probes, the cap 3. */
+    for (t = 1; t <= 10000000000ULL; t += 10000000ULL)
+    {
+        if (tbt_fec_nack_probe_due(t, last) &&
+            tbt_fec_nack_probe_allowed(tries))
+        {
+            probes++;
+            tries++;
+            last = t;
+        }
+    }
+    ok_int(probes, TBT_FEC_NACK_PROBE_MAX,
+           "probe: an idle frontier is probed a bounded number of times");
+    ok(probes < 40, "probe: not once per scan");
+
+    /* Absent-share answers: a resident block is not an empty group. */
+    ok_int(tbt_fec_absent_reply(false, false), TBT_FEC_ABSENT_MARKER,
+           "absent: a never-built group answers with a marker");
+    ok_int(tbt_fec_absent_reply(false, true), TBT_FEC_ABSENT_PARITY,
+           "absent: a covering parity row answers");
+    ok_int(tbt_fec_absent_reply(true, false), TBT_FEC_ABSENT_INVALID,
+           "absent: padding in a resident block has no answer");
+    ok_int(tbt_fec_absent_reply(true, true), TBT_FEC_ABSENT_PARITY,
+           "absent: parity wins over padding");
+
+    /* The field storm: 8,583 probes x 32 groups = 274k lookups; the bounded
+     * policy does 3 probes, i.e. 96 lookups. */
+    ok(3 * 32 < 274389 / 100,
+       "probe: the cap removes the never-stored storm");
+}
+
 /* A record that arrives for a settled block is classified, never refused.
  * A replayed empty marker used to return -EPROTO, and the carrier parser
  * kills the carrier that carried a -EPROTO record: one NACK retry became
@@ -1620,6 +1672,7 @@ int main(void)
     test_nack_storm();
     test_replay_dedup_model();
     test_fin_and_stale_replay();
+    test_probe_and_absent();
     test_arrival_kind();
 
     printf("test_fec_rx: %d checks, %d failures\n", checks, failures);

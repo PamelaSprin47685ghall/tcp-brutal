@@ -2405,7 +2405,11 @@ static void tbt_fec_nack_stamp(struct tbt_fec_rx *rx, u64 block_id,
     }
     spin_unlock_bh(&rx->lock);
     if (probed)
+    {
         rx->probe_last_ns = now;
+        if (rx->probe_tries < TBT_FEC_NACK_PROBE_MAX)
+            rx->probe_tries++;
+    }
 }
 
 /* Ask the peer for the shares missing from the oldest super-block that is
@@ -2605,12 +2609,20 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
                                          &nmissing);
                     continue;
                 }
-                /* Before total is known, probe only parity 0 of one group
-                 * per probe interval. The empty marker or the parity's
-                 * win_len then states the real shape; probing every group at
-                 * the repair cadence was the sparse-block NACK storm. */
+                /* Before total is known, probe only parity 0 of the groups.
+                 * A block the sender never built answers nothing; after
+                 * TBT_FEC_NACK_PROBE_MAX unanswered probes stop asking and
+                 * leave it to the stall timer. Probing an idle frontier
+                 * forever asked for the same absent shares 274k times on the
+                 * fix22 run. */
+                if (rx->probe_block != s)
+                {
+                    rx->probe_block = s;
+                    rx->probe_tries = 0;
+                }
                 if (!READ_ONCE(rx->total_known) &&
                     tbt_fec_nack_probe_due(now, rx->probe_last_ns) &&
+                    tbt_fec_nack_probe_allowed(rx->probe_tries) &&
                     tbt_fec_nack_add(sess, rx, &n, g, s, rx->n, now, hold,
                                      &nmissing))
                 {
@@ -3212,6 +3224,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         u16 g, s, shares;
         u32 requested = 0;
         bool full = false;
+        bool never = false; /* a requested share was not resident */
 
         if (tbt_fec_nack_unpack(rec + TBT_FEC_HDR_LEN, &n))
             return -EPROTO;
@@ -3380,6 +3393,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                         atomic64_inc(&sess->fec_nack_retx);
                         atomic64_add((u64)plen, &sess->fec_nack_retx_bytes);
                         atomic64_inc(&sess->fec_nack_parity_reply);
+                        atomic64_inc(&sess->fec_nack_absent_reply);
                         if (debug >= 2)
                         {
                             struct tbt_fec_hdr ph;
@@ -3391,19 +3405,14 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                         }
                         replied = true;
                     }
-                    /* A group with no packet in the block has no parity
-                     * row either: its empty marker is the truth. */
-                    if (!replied && !full &&
-                        READ_ONCE(tx->g[g].blk_id) != h.block_id &&
-                        !tbt_fec_bitmap_test(marker_done, g))
-                    {
-                        /* One marker per group per NACK: the marker says the
-                         * whole group is empty, so the other requested shares
-                         * of that group need no separate answer. */
-                        tbt_fec_bitmap_set(marker_done, g);
-                        if (!tbt_fec_send_empty_marker(sess, g, h.block_id))
-                            atomic64_inc(&sess->fec_nack_empty_reply);
-                    }
+                    /* The block is resident, so this group did write into
+                     * it: the group is not empty and a marker would falsely
+                     * mark real data as padding. The share can never exist
+                     * (padding beyond the block's cut, or a parity row that
+                     * was never stored); no answer exists, and asking again
+                     * cannot change that. */
+                    if (!replied && !full)
+                        atomic64_inc(&sess->fec_nack_req_invalid);
                     continue;
                 }
                 if (len == -ESTALE)
@@ -3427,6 +3436,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                     else
                     {
                         atomic64_inc(&sess->fec_replay_miss_never_stored);
+                        never = true;
                         if (debug >= 2)
                             pr_info("tbtun: fec NACK unbuilt block=%llu group=%u share=%u cur=%llu k=%u\n",
                                     h.block_id, g, s, cur, rk);
@@ -3445,7 +3455,10 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                     {
                         tbt_fec_bitmap_set(marker_done, g);
                         if (!tbt_fec_send_empty_marker(sess, g, h.block_id))
+                        {
                             atomic64_inc(&sess->fec_nack_empty_reply);
+                            atomic64_inc(&sess->fec_nack_absent_reply);
+                        }
                     }
                     continue;
                 }
@@ -3487,6 +3500,8 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
             }
         }
         kfree(buf);
+        if (never)
+            atomic64_inc(&sess->fec_nack_never_stored);
         return 0;
     }
     if (h.type != TBT_FEC_DATA && h.type != TBT_FEC_PARITY)

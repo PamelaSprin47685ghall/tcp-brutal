@@ -755,6 +755,12 @@ struct tbt_fec_rx
      * for shares the new block never asked for. */
     u64 *req_block;
     u64 probe_last_ns;   /* last frontier shape probe */
+    /* The frontier block the probes target and how many unanswered probes it
+     * has had. A block the sender never built answers nothing; after
+     * TBT_FEC_NACK_PROBE_MAX the scan stops asking and leaves it to the
+     * stall timer (fix22: an idle uplink frontier was probed 274k times). */
+    u64 probe_block;
+    u8 probe_tries;
     /* First time the frontier super-block was seen incomplete when no group
      * of it had started (a whole-block loss): the first NACK waits one round
      * trip from here, like a started block's first_gap_ns. */
@@ -1210,6 +1216,14 @@ struct tbt_session
     atomic64_t fec_nack_backpressure;      /* replay queue full: NACK stopped */
     atomic64_t fec_replay_stale;           /* queued replay freed: block delivered */
     atomic64_t fec_fin_wait_replay;        /* FIN released while replay queued */
+    /* Absent-share handling: a NACK named a share the sender never stored.
+     * fec_nack_never_stored counts NACK records with at least one such
+     * share; fec_nack_absent_reply counts the explicit answers (parity row
+     * or empty marker); fec_nack_req_invalid counts shares that can never
+     * exist (padding in a resident block). */
+    atomic64_t fec_nack_never_stored;
+    atomic64_t fec_nack_absent_reply;
+    atomic64_t fec_nack_req_invalid;
     /* Replay drain: bytes/s over the last sampling window (an EWMA gauge),
      * the high-water of queued replay bytes, and the window accumulator. */
     atomic64_t fec_replay_drain_bps;

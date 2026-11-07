@@ -262,6 +262,12 @@ void tbt_fec_replay_mark_sent(struct tbt_fec_replay *r, u64 block_id,
  * every retry interval of an idle connection. Pace it instead, and probe one
  * group per pass. */
 #define TBT_FEC_NACK_PROBE_MS 250
+/* How many probes one frontier block gets. The sender answers a block it has
+ * built (marker or parity); silence means the block was never sent. Probing
+ * an idle stream forever asked for the same absent shares 274k times on the
+ * fix22 run, all of them never stored. After this many unanswered probes the
+ * receiver stops and leaves the block to the stream's stall timer. */
+#define TBT_FEC_NACK_PROBE_MAX 3
 /* One NACK names at most this many shares: 64 slots of one 8 KiB share is
  * 512 KiB, one sixteenth of the 8 MiB replay queue, so a burst loss cannot
  * fill the queue with a single request. The receiver names the rest in its
@@ -295,6 +301,11 @@ static inline bool tbt_fec_nack_probe_due(u64 now_ns, u64 last_probe_ns)
     return !last_probe_ns ||
            now_ns - last_probe_ns >=
                (u64)TBT_FEC_NACK_PROBE_MS * 1000000ULL;
+}
+
+static inline bool tbt_fec_nack_probe_allowed(u8 tries)
+{
+    return tries < TBT_FEC_NACK_PROBE_MAX;
 }
 
 /* The retry cadence follows the observed repair latency: a quarter of it,
@@ -386,6 +397,28 @@ static inline bool tbt_fec_nack_empty_group(bool closed, bool in_window,
                                             u64 group_blk_id, u64 block_id)
 {
     return closed && in_window && group_blk_id != block_id;
+}
+
+/* What the sender can honestly answer when a NACK names a share it does not
+ * hold. A covering parity row answers a short block. A resident block proves
+ * this group wrote into it, so the group is not empty and a marker would be
+ * a lie: the share is padding that will never exist. Only a block the ring
+ * does not hold (never built and still inside the window) is an empty group. */
+enum tbt_fec_absent_reply
+{
+    TBT_FEC_ABSENT_PARITY = 0, /* a covering parity row answers the share */
+    TBT_FEC_ABSENT_MARKER,     /* the group is empty in this block */
+    TBT_FEC_ABSENT_INVALID,    /* padding/never stored: no answer exists */
+};
+
+static inline enum tbt_fec_absent_reply
+tbt_fec_absent_reply(bool block_resident, bool covering_parity)
+{
+    if (covering_parity)
+        return TBT_FEC_ABSENT_PARITY;
+    if (block_resident)
+        return TBT_FEC_ABSENT_INVALID;
+    return TBT_FEC_ABSENT_MARKER;
 }
 
 struct tbt_fec_nack_state
