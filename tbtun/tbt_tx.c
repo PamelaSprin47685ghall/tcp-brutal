@@ -1785,6 +1785,36 @@ static bool tbt_fec_credit_waiting(const struct tbt_session *sess)
     return seq - acked >= (u64)credit;
 }
 
+/* A FEC repair is still in progress: replay records are queued, or the FEC
+ * data plane touched the repair clock inside the grace window. The grace is
+ * two wait budgets (clamped to 5 s..30 s), so a NACK/replay burst is covered
+ * without hiding a dead ACK path forever. */
+#define TBT_FEC_REPAIR_MAX_NS (30ULL * NSEC_PER_SEC)
+
+static bool tbt_fec_repair_active(struct tbt_session *sess, u64 now,
+                                  u64 wait_budget_ns)
+{
+    u64 grace = clamp_t(u64, 2 * wait_budget_ns,
+                        5ULL * NSEC_PER_SEC, TBT_FEC_REPAIR_MAX_NS);
+    u64 last = READ_ONCE(sess->fec_repair_last_ns);
+
+    if (READ_ONCE(sess->fec_replay_queued))
+        return true;
+    return last && now > last && now - last < grace;
+}
+
+/* The FEC packetizer's source ring has data waiting; only then is waking the
+ * public-socket capture useful. `tx_queued` is the ARQ queue and stays near
+ * zero in FEC mode, so it cannot be the wake test. */
+static bool tbt_fec_ring_busy(struct tbt_session *sess)
+{
+    struct tbt_fec_tx *tx = READ_ONCE(sess->fec_tx);
+
+    if (!tx)
+        return false;
+    return READ_ONCE(tx->head) != READ_ONCE(tx->tail);
+}
+
 static void tbt_tx_stall_check(struct tbt_session *sess,
                                struct tbt_stream *st)
 {
@@ -1835,14 +1865,27 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
     }
     {
         u64 budget = tbt_tx_wait_budget_ns(sess, st);
+        bool would_kill;
 
         /* A timestamp stamped on another CPU can be a few nanoseconds ahead
          * of this CPU's ktime_get_ns(); the unsigned subtraction then looks
          * like a 584-year stall and kills a healthy stream (measured: probe G,
          * one run in three, age_us=18446744073709519). */
-        if (start && now > start && ack < READ_ONCE(st->tx_seq) &&
-            now - start > budget)
-            kill = true;
+        would_kill = start && now > start && ack < READ_ONCE(st->tx_seq) &&
+                     now - start > budget;
+        /* FEC repair is progress even when the tunnel ack has not moved: the
+         * receiver is asking for and receiving replay shares. Hold the kill,
+         * but only inside the hard no-progress cap; a repair that never
+         * completes must still end the stream. */
+        if (sess->fec && would_kill &&
+            now - start <= TBT_FEC_REPAIR_MAX_NS &&
+            tbt_fec_repair_active(sess, now, budget))
+        {
+            atomic64_inc(&sess->tx_stall_suppressed_fec);
+            start = now;
+            would_kill = false;
+        }
+        kill = would_kill;
     }
     if (kill)
     {
@@ -1851,6 +1894,8 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
                     (unsigned long long)st->sid, ack, READ_ONCE(st->tx_seq),
                     (now - start) / NSEC_PER_USEC);
         atomic64_inc(&sess->holes_unrecoverable);
+        if (sess->fec)
+            atomic64_inc(&sess->fec_reset_hole);
         tbt_stream_kill(st, TBT_ST_HOLE);
     }
 }
@@ -3177,7 +3222,13 @@ ctl_fail:
         if (sess->tx_wait_since_ns)
             wait_expired = tbt_now_ns() - sess->tx_wait_since_ns >=
                            (u64)TBT_TX_WAIT_CARRIER_MS * NSEC_PER_MSEC;
-        if (READ_ONCE(sess->tx_queued) <= sess->txq_max / 2)
+        /* In FEC mode tx_queued is the ARQ queue and stays near zero; waking
+         * capture on every pump because of that alone spun w_read at ~1849/s.
+         * Wake only when there is real work: an ARQ frame, a pinned control
+         * frame, or data in the FEC packetizer's source ring. */
+        if (READ_ONCE(sess->tx_queued) <= sess->txq_max / 2 &&
+            (!sess->fec || READ_ONCE(sess->tx_queued) ||
+             READ_ONCE(sess->ctl_queued) || tbt_fec_ring_busy(sess)))
         {
             struct tbt_stream *it;
             int i;
