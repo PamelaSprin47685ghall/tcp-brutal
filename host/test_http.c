@@ -3535,6 +3535,7 @@ static void test_fec_http(void)
         u8 recs[8][TBT_FEC_HDR_LEN + 64];
         u16 lens[8];
         u8 batch[8 * TBT_HTTP_FEC_FRAME_MAX];
+        size_t flen[8];
         size_t off = 0, pos = 0;
         unsigned b;
 
@@ -3559,6 +3560,7 @@ static void test_fec_http(void)
                                                   recs[b], lens[b]);
 
             ok(bn > 0, "fec batch chunk encodes", NULL);
+            flen[b] = bn;
             off += bn;
         }
         ok(off <= sizeof(batch), "fec batch fits the per-carrier cap", NULL);
@@ -3581,6 +3583,50 @@ static void test_fec_http(void)
         pos += tbt_http_fec_frame_decode(&rx, batch + pos, off - pos,
                                          &out, &out_len, &err);
         ok(pos == off, "fec batch consumes the whole write", NULL);
+
+        /* Short socket write: the kernel accepted `cut` bytes, the rest goes
+         * to c->part and is flushed before the next record. Cut at a frame
+         * boundary and inside a frame; the tail must fit the part buffer and
+         * the reconstructed byte stream must decode all eight records. */
+        {
+            size_t cuts[4];
+            u8 part[8 * TBT_HTTP_FEC_FRAME_MAX];
+            u8 joined[8 * TBT_HTTP_FEC_FRAME_MAX];
+            unsigned c;
+
+            cuts[0] = flen[0];
+            cuts[1] = flen[0] + flen[1] + 17;
+            cuts[2] = off - 1;
+            cuts[3] = off;
+            for (c = 0; c < 4; c++)
+            {
+                size_t cut = cuts[c], tail = off - cut;
+
+                ok(tail <= sizeof(part),
+                   "fec batch short-write tail fits part", NULL);
+                memcpy(part, batch + cut, tail);
+                memcpy(joined, batch, cut);
+                memcpy(joined + cut, part, tail);
+                ok(!memcmp(joined, batch, off),
+                   "fec batch short-write reconstructs the stream", NULL);
+
+                tbt_http_chunk_reset(&rx.chunk);
+                rx.chunk_started = false;
+                rx.rec_len = 0;
+                pos = 0;
+                for (b = 0; b < 8; b++)
+                {
+                    size_t used = tbt_http_fec_frame_decode(&rx, joined + pos,
+                                                            off - pos, &out,
+                                                            &out_len, &err);
+
+                    ok(err == TBT_RX_OK && out_len == lens[b] &&
+                       !memcmp(out, recs[b], lens[b]),
+                       "fec batch short-write record round-trips", NULL);
+                    pos += used;
+                }
+            }
+        }
     }
 }
 

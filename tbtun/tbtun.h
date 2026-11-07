@@ -531,10 +531,12 @@ enum tbt_stream_state
 /* Per-carrier partial record state. Lives on the carrier, never global: two
  * tunnels (or, from C4, two carriers of one tunnel) must not share a buffer.
  * A record is TBT_REC_MAX (old ARQ) or TBT_FEC_REC_MAX (v6); the buffer must
- * hold the larger one. The write-side tail also holds a whole HTTP FEC frame
- * (chunk header + record + CRLF), which is slightly larger. */
+ * hold the larger one. The write-side tail must hold a whole batched FEC
+ * write (TBT_FEC_BATCH_MAX concatenated HTTP frames), because
+ * tcp_sendmsg_locked() can short-write anywhere in that byte range. */
 #define TBT_PARSER_BUF (TBT_FEC_REC_MAX > TBT_REC_MAX ? TBT_FEC_REC_MAX : TBT_REC_MAX)
-#define TBT_CAR_PART_MAX (TBT_HTTP_FEC_FRAME_MAX > TBT_REC_MAX ? TBT_HTTP_FEC_FRAME_MAX : TBT_REC_MAX)
+#define TBT_FEC_BATCH_MAX 8
+#define TBT_CAR_PART_MAX (TBT_HTTP_FEC_FRAME_MAX * TBT_FEC_BATCH_MAX)
 struct tbt_parser
 {
     u8 buf[TBT_PARSER_BUF];
@@ -1525,7 +1527,7 @@ struct tbt_carrier
     u8 class;                     /* profile class, for the peers view */
     u16 local_port;
     u8 *part;                     /* unwritten tail (TBT_CAR_PART_MAX) */
-    u16 part_len, part_off;
+    u32 part_len, part_off;
     u8 index;
     u32 gen;                  /* session-unique; pinned frames carry it */
     struct tbt_parser *parser; /* this carrier's partial record (8 KiB) */
@@ -1681,7 +1683,6 @@ int tbt_fec_record_len(const u8 *buf, size_t have, size_t *need);
 int tbt_carrier_send_raw(struct tbt_carrier *c, const void *data, size_t len);
 /* Write one FEC record in the carrier's container (raw or HTTP chunk). */
 int tbt_carrier_send_fec(struct tbt_carrier *c, const u8 *rec, size_t len);
-#define TBT_FEC_BATCH_MAX 8
 /* Write up to TBT_FEC_BATCH_MAX FEC records with one HTTP header and one socket write.
  * Holds only c->tx_lock, not sess->pump_lock. Returns 0 and sets *sent=count
  * when the whole batch is committed to the carrier's ordered byte stream;

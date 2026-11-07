@@ -1100,7 +1100,7 @@ static int tbt_carrier_part_flush(struct tbt_carrier *c, struct sock *sk)
             return err == -EAGAIN ? -EAGAIN : err;
         if (!err)
             return -EAGAIN;
-        c->part_off += (u16)err;
+        c->part_off += (u32)err;
     }
     c->part_len = c->part_off = 0;
     return 0;
@@ -1127,7 +1127,7 @@ static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
     /* Normal records fit one part buffer; a FEC batch may be up to eight
      * concatenated frames. A short write still stores its tail in c->part,
      * but the tail must fit that buffer (checked below). */
-    if (len > (size_t)TBT_HTTP_FEC_FRAME_MAX * TBT_FEC_BATCH_MAX)
+    if (len > TBT_CAR_PART_MAX)
         return -EINVAL;
     err = tbt_carrier_part_flush(c, sk);
     if (err)
@@ -1147,7 +1147,7 @@ static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
     if ((size_t)err < len)
     {
         memcpy(c->part, (const u8 *)data + err, len - (size_t)err);
-        c->part_len = (u16)(len - (size_t)err);
+        c->part_len = (u32)(len - (size_t)err);
         c->part_off = 0;
     }
     return 0;
@@ -1591,7 +1591,7 @@ static int tbt_carrier_xmit_locked(struct tbt_session *sess,
          * times, the near none). */
         if (tail_d)
             memcpy(c->part + tail_h, fr->data + (done - h), tail_d);
-        c->part_len = (u16)(tail_h + tail_d);
+        c->part_len = (u32)(tail_h + tail_d);
         c->part_off = 0;
     }
     if (fr->hdr.type == TBT_F_HELLO)
