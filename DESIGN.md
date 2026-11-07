@@ -355,6 +355,14 @@ container:
   still be ready. The delivery walk additionally requires
   `used && ready && block_id == s` before reading a slot, so a stale block
   buffer can never be handed to the application as stream bytes.
+- **One FEC work body at a time.** `w_fec_tx` and `w_fec_rx` can be re-queued
+  while running; workqueue then runs the new instance on another worker. The
+  tx body owns `pkt`/`rec`/`ring`/block and the rx body owns
+  `next_super`/`deliver_bytes`/the block cuts, so each has an `atomic_t run`
+  word: a second entry raises `again` and returns without touching the shared
+  state, and the owner re-arms once when its body ends. This is what removed
+  the field's header-CRC-valid/payload-CRC-bad records and the duplicated/
+  skipped 8 KiB slot.
 - **The stall is bounded.** This wire has no NACK and no retransmission: a
   share that never arrived is never fetched. A super-block that is still not
   ready after `TBT_FEC_STALL_MS` (30 s) with the stream's end known is

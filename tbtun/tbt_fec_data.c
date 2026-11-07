@@ -38,6 +38,15 @@
 
 #define TBT_FEC_TX_RING (256 * 1024)
 
+/* tx->run / rx->run ownership bits. The sched bit in the session owns the
+ * reference; this word owns the shared buffers and cursors. A work entry that
+ * finds bit 0 set must only raise bit 1 and return: workqueue can run a
+ * re-queued work_struct concurrently with its previous instance, and two
+ * packetizers share tx->pkt/tx->rec, while two delivery walks share
+ * next_super/deliver_bytes. */
+#define TBT_FEC_RUN_BIT   0u
+#define TBT_FEC_AGAIN_BIT 1u
+
 /* How long a partial packet may wait for company. The packetizer emits a
  * share only when its packet is full, so an application that writes a small
  * request and then waits for the answer -- an HTTP request, iperf3's control
@@ -484,11 +493,19 @@ static void tbt_fec_tx_close_block(struct tbt_session *sess, bool advance)
 static void tbt_fec_tx_finish(struct tbt_session *sess, struct tbt_stream *st)
 {
     struct tbt_fec_tx *tx = sess->fec_tx;
+    u64 block_start;
 
     if (READ_ONCE(st->fec_finished))
         return;
     WRITE_ONCE(st->fec_pkt_end, tx->seq);
-    if (st->fec_pkt_base_set)
+    /* close_block() advances tx->seq to the next block even when the last
+     * block was already closed by the short-packet path. Calling it again on
+     * an empty next block would emit a full set of empty markers for a block
+     * that never carried a packet (field: fec_empty_block=63 for a 198-byte
+     * request, i.e. 31 group markers plus a second all-empty block). Only
+     * close a block that actually received a packet. */
+    block_start = tx->cur_block * (u64)tx->n * tx->groups;
+    if (st->fec_pkt_base_set && tx->seq > block_start)
         tbt_fec_tx_close_block(sess, true);
     smp_store_release(&st->fec_finished, true);
 }
@@ -739,9 +756,25 @@ void tbt_fec_tx_work(struct work_struct *w)
 {
     struct tbt_session *sess =
         container_of(to_delayed_work(w), struct tbt_session, w_fec_tx);
+    struct tbt_fec_tx *tx = sess->fec_tx;
     bool owned = test_and_clear_bit(TBT_SW_FEC_TX, &sess->sched);
 
+    if (!tx)
+        goto out;
+    if (atomic_fetch_or(1u << TBT_FEC_RUN_BIT, &tx->run) &
+        (1u << TBT_FEC_RUN_BIT))
+    {
+        /* Another instance owns the packetizer buffers. Record the wake; the
+         * owner re-arms once when it finishes. Never run the body here. */
+        atomic_fetch_or(1u << TBT_FEC_AGAIN_BIT, &tx->run);
+        goto out;
+    }
     tbt_fec_tx_work_body(sess);
+    atomic_fetch_and(~(1u << TBT_FEC_RUN_BIT), &tx->run);
+    if (atomic_fetch_and(~(1u << TBT_FEC_AGAIN_BIT), &tx->run) &
+        (1u << TBT_FEC_AGAIN_BIT))
+        tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+out:
     if (owned)
         tbt_session_put(sess);
 }
@@ -1529,9 +1562,23 @@ void tbt_fec_rx_work(struct work_struct *w)
 {
     struct tbt_session *sess =
         container_of(to_delayed_work(w), struct tbt_session, w_fec_rx);
+    struct tbt_fec_rx *rx = sess->fec_rx;
     bool owned = test_and_clear_bit(TBT_SW_FEC_RX, &sess->sched);
 
+    if (!rx)
+        goto out;
+    if (atomic_fetch_or(1u << TBT_FEC_RUN_BIT, &rx->run) &
+        (1u << TBT_FEC_RUN_BIT))
+    {
+        atomic_fetch_or(1u << TBT_FEC_AGAIN_BIT, &rx->run);
+        goto out;
+    }
     tbt_fec_rx_work_body(sess);
+    atomic_fetch_and(~(1u << TBT_FEC_RUN_BIT), &rx->run);
+    if (atomic_fetch_and(~(1u << TBT_FEC_AGAIN_BIT), &rx->run) &
+        (1u << TBT_FEC_AGAIN_BIT))
+        tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
+out:
     if (owned)
         tbt_session_put(sess);
 }
@@ -1569,6 +1616,68 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
             atomic64_inc(&sess->fec_hdr_crc_fail);
             return -EPROTO;
         }
+        /* Teardown may start between the carrier parse and this record. Stop
+         * before decryption so a non-zero return leaves the bytes untouched;
+         * the raw parser consumes the record on any return, so a retry can
+         * never decrypt the same buffer twice. */
+        if (READ_ONCE(rx->stopping))
+            return -ESHUTDOWN;
+        /* A duplicate record must be dropped before decryption. The record
+         * buffer is decrypted in place; a second pass XORs the plaintext and
+         * fails the payload CRC, which looks like wire corruption and hides
+         * the real duplicate. The header CRC above makes these names
+         * trustworthy. */
+        if (h.type == TBT_FEC_DATA || h.type == TBT_FEC_PARITY)
+        {
+            u16 cg = rx->groups ? (u16)(h.seq % rx->groups) : 0;
+            u16 csh = h.share_index;
+            u16 cshares = (u16)(rx->n + rx->m);
+            u64 next = READ_ONCE(rx->next_super);
+            bool dup = false, late = false;
+
+            if (rx->groups && cg < rx->groups && csh < cshares &&
+                h.block_id >= next && h.block_id < next + rx->slots)
+            {
+                spin_lock_bh(&rx->lock);
+                b = &rx->blk[(size_t)cg * rx->slots +
+                             (h.block_id % rx->slots)];
+                if (b->used && b->block_id == h.block_id)
+                {
+                    if (b->empty)
+                    {
+                        /* A repeated marker is a duplicate; a DATA or real
+                         * PARITY for an empty block stays -EPROTO below. */
+                        if (h.type == TBT_FEC_PARITY && h.win_len == 0)
+                            dup = true;
+                    }
+                    else if (b->ready)
+                    {
+                        late = true;
+                    }
+                    else if (h.type == TBT_FEC_DATA && b->dpresent[csh])
+                    {
+                        dup = true;
+                    }
+                    else if (h.type == TBT_FEC_PARITY && h.win_len &&
+                             csh >= rx->n &&
+                             b->ppresent[csh - rx->n])
+                    {
+                        dup = true;
+                    }
+                }
+                spin_unlock_bh(&rx->lock);
+            }
+            if (dup)
+            {
+                atomic64_inc(&sess->fec_dup_share);
+                return 0;
+            }
+            if (late)
+            {
+                atomic64_inc(&sess->fec_late_share);
+                return 0;
+            }
+        }
         /* Header framing is trusted here; decrypt DATA/PARITY before the
          * payload CRC, which covers the clear bytes (T0 §1.3, §2.2). The rx
          * context is shared by carriers and body_xor is read-only. */
@@ -1591,6 +1700,11 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
             h.payload_crc32c)
         {
             /* The framing was sound, so only this share is lost. */
+            if (debug)
+                pr_info_ratelimited("tbtun: fec payload crc fail: type=%u seq=%llu share=%u len=%u block=%llu hdr_crc=%08x\n",
+                                    h.type, h.seq, h.share_index,
+                                    h.payload_len, h.block_id,
+                                    h.header_crc32c);
             atomic64_inc(&sess->fec_payload_crc_fail);
             return 0;
         }
@@ -2112,6 +2226,7 @@ int tbt_fec_data_init(struct tbt_session *sess)
     if (!rx || !tx)
         goto fail;
     spin_lock_init(&rx->lock);
+    atomic_set(&rx->run, 0);
     rx->n = n;
     rx->m = m;
     rx->s = TBT_FEC_S;
@@ -2149,6 +2264,7 @@ int tbt_fec_data_init(struct tbt_session *sess)
     tx->m = m;
     tx->s = TBT_FEC_S;
     spin_lock_init(&tx->lock);
+    atomic_set(&tx->run, 0);
     tx->ring = kvzalloc(tx->ring_size, GFP_KERNEL);
     tx->pkt = kvzalloc(TBT_FEC_S, GFP_KERNEL);
     tx->rec = kvzalloc(TBT_FEC_REC_MAX, GFP_KERNEL);

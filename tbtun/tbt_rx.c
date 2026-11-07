@@ -1103,10 +1103,14 @@ static int tbt_rx_parse_raw(struct tbt_carrier *c)
             if (!c->saw_hello)
                 return -EPROTO;
             ferr = tbt_fec_rx_record(c, p->buf, need);
-            if (ferr)
-                return ferr;
+            /* The record was handed to the FEC layer, which may have
+             * decrypted it in place. Consume it even on error: retrying the
+             * same bytes would XOR the plaintext again and turn one real
+             * error into a stream of payload-CRC failures. */
             p->have -= need;
             memmove(p->buf, p->buf + need, p->have);
+            if (ferr)
+                return ferr;
             continue;
         }
 

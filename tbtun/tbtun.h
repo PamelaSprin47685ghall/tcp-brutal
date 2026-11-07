@@ -612,6 +612,11 @@ struct tbt_fec_gtx
 struct tbt_fec_tx
 {
     spinlock_t lock; /* protects ring head/tail and the counters below */
+    /* One FEC work body at a time: bit 0 running, bit 1 again. The sched bit
+     * owns the session reference; this word owns the shared packetizer
+     * buffers (pkt/rec/ring/block). A second entry while running must not
+     * touch them. */
+    atomic_t run;
     u8 *ring;
     u32 ring_size;
     u32 head, tail;
@@ -647,6 +652,10 @@ struct tbt_fec_tx
 struct tbt_fec_rx
 {
     spinlock_t lock; /* carrier rx works assemble blocks concurrently */
+    /* Bit 0 running, bit 1 again: the delivery cursors and block cuts are
+     * single-owner. Two bodies would duplicate one 8 KiB slot and skip
+     * another. */
+    atomic_t run;
     u16 n, m, s;
     u16 groups;
     u16 slots; /* block slots per group */

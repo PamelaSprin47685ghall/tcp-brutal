@@ -291,6 +291,57 @@ static void test_deliver_step(void)
 }
 
 /* ------------------------------------------------------------------ *
+ * 1b2. One work instance at a time: a second entry only sets again.
+ * ------------------------------------------------------------------ */
+
+static void test_work_serialisation(void)
+{
+    unsigned int run = 0, again = 0;
+    int bodies = 0, arms = 0;
+
+    /* Entry 1 owns the running bit and runs the body. */
+    if (!(run & 1u))
+    {
+        run |= 1u;
+        bodies++;
+    }
+    else
+    {
+        again = 1u;
+    }
+    /* Entry 2 arrives while entry 1 is inside the body. It must not run. */
+    if (!(run & 1u))
+    {
+        run |= 1u;
+        bodies++;
+    }
+    else
+    {
+        again = 1u;
+    }
+    ok(bodies == 1 && again == 1, "work: second entry only sets again");
+
+    /* Body end: clear running, consume again, arm exactly once. */
+    run &= ~1u;
+    if (again)
+    {
+        again = 0;
+        arms++;
+    }
+    ok(bodies == 1 && arms == 1 && run == 0 && again == 0,
+       "work: one body and one re-arm");
+
+    /* The re-armed entry runs only after the owner finished. */
+    if (!(run & 1u))
+    {
+        run |= 1u;
+        bodies++;
+    }
+    ok(bodies == 2, "work: the re-armed entry runs once");
+    run &= ~1u;
+}
+
+/* ------------------------------------------------------------------ *
  * 1c. Empty block positions: an absent group contributes no bytes.
  * ------------------------------------------------------------------ */
 
@@ -595,6 +646,7 @@ int main(void)
     src_init();
     test_share_len();
     test_deliver_step();
+    test_work_serialisation();
     test_empty_block_position();
     test_crypto_roundtrip();
     test_full_block();

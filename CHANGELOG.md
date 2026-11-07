@@ -29,6 +29,18 @@ and moves independently of the module version.
 
 ### Fixed
 
+- FEC work re-entrancy: `w_fec_tx` and `w_fec_rx` can be re-queued while
+  running, and workqueue then executes the new instance on another worker.
+  Two packetizers shared `tx->pkt`/`tx->rec` (a header CRC computed for one
+  record and a payload written by the other produced the field's
+  `fec_payload_crc_fail=179` with `fec_hdr_crc_fail=0`); two delivery walks
+  shared `next_super`/`deliver_bytes` (one 8 KiB slot duplicated and another
+  skipped). Each work now owns an `atomic_t run` word: a second entry only
+  raises the `again` bit and returns, and the owner re-arms once when its body
+  ends. The raw parser also consumes a FEC record on every return, because
+  `tbt_fec_rx_record()` may have decrypted it in place; a retry would XOR the
+  plaintext twice. The `stopping` check moved ahead of decryption for the same
+  reason.
 - FEC receive, silent slot loss: the delivery walk skipped a slot whose index
   was past the block's stated cut (`p >= real`) and, separately, a slot past
   the stream's last packet (`seq >= total_pkts`) without a counter, while the
