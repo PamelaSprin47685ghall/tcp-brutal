@@ -1970,6 +1970,27 @@ static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
     now = tbt_now_ns();
     if (now <= start || now - start <= budget)
         return;
+    /* FEC tail repair: the FIN gate waits for tx_ack == tx_seq, and the last
+     * bytes may still be moving through NACK/replay or a closed credit
+     * window. Killing here sends RST and truncates the response at the
+     * target (measured: fix20 1 GiB, far close_timeouts=1 with 3.98 MB left
+     * while repair was active). Let the repair path finish; the receiver's
+     * own bounded reset is the authority for giving up. A credit window that
+     * stays closed with no repair traffic is still bounded: after the same
+     * 30 s hard cap the close timer fires. */
+    if (sess->fec &&
+        (tbt_fec_repair_active(sess, now, budget) ||
+         (now - start <= TBT_FEC_REPAIR_MAX_NS &&
+          tbt_fec_credit_waiting(sess))))
+    {
+        if (debug >= 2)
+            pr_info_ratelimited("tbtun: CLOSEWAITFEC sid=%llu ack=%llu txseq=%llu age_us=%llu\n",
+                                (unsigned long long)st->sid,
+                                READ_ONCE(st->tx_ack),
+                                READ_ONCE(st->tx_seq),
+                                (now - start) / NSEC_PER_USEC);
+        return;
+    }
     if (debug >= 2)
         pr_info("tbtun: CLOSETIMEOUT sid=%llu ack=%llu txseq=%llu fin=%llu age_us=%llu\n",
                 (unsigned long long)st->sid, READ_ONCE(st->tx_ack),
