@@ -1717,6 +1717,47 @@ static void test_rank_deficient_frontier(void)
     ok_prefix(out, off, "rank: the completed block is a source prefix");
 }
 
+/* fix26: the scan skipped the frontier when its missing shares were all
+ * inside the per-share hold, then asked for the next block. The frontier
+ * was never asked again and the reorder window stopped (next=185 for s=186,
+ * 563 times). The scan must stop at the frontier and wait for the hold; a
+ * later block cannot be delivered before it. */
+static void test_frontier_not_skipped(void)
+{
+    ok(tbt_fec_nack_frontier_only(185, 185),
+       "frontier: the scan targets next_super");
+    ok(!tbt_fec_nack_frontier_only(186, 185),
+       "frontier: a later block is not the target");
+    ok(tbt_fec_nack_probe_open(true, TBT_FEC_NACK_PROBE_MAX),
+       "frontier: a closed frontier is probed past the cap");
+    ok(!tbt_fec_nack_probe_open(false, TBT_FEC_NACK_PROBE_MAX),
+       "frontier: an idle frontier still respects the cap");
+    ok(tbt_fec_nack_probe_open(false, 0),
+       "frontier: the first probe is allowed");
+
+    /* Model the loop: the frontier's bitmap is empty (all in hold), the next
+     * block has fresh shares. The policy stops at the frontier. */
+    {
+        u64 next_super = 185, hi = 186, s;
+        int visited_186 = 0;
+
+        for (s = next_super; s <= hi; s++)
+        {
+            bool bitmap_empty = (s == next_super);
+
+            if (bitmap_empty)
+            {
+                if (tbt_fec_nack_frontier_only(s, next_super))
+                    break;
+                continue;
+            }
+            if (s == 186)
+                visited_186 = 1;
+        }
+        ok(!visited_186, "frontier: the scan never reaches a later block");
+    }
+}
+
 /* A record that arrives for a settled block is classified, never refused.
  * A replayed empty marker used to return -EPROTO, and the carrier parser
  * kills the carrier that carried a -EPROTO record: one NACK retry became
@@ -1812,6 +1853,7 @@ int main(void)
     test_replay_high_water();
     test_frontier_first_replay();
     test_rank_deficient_frontier();
+    test_frontier_not_skipped();
     test_arrival_kind();
 
     printf("test_fec_rx: %d checks, %d failures\n", checks, failures);

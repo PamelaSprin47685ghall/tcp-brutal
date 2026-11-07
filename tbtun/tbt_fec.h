@@ -308,6 +308,26 @@ static inline bool tbt_fec_nack_probe_allowed(u8 tries)
     return tries < TBT_FEC_NACK_PROBE_MAX;
 }
 
+/* A frontier the sender has already moved past (a later block was seen) is
+ * closed: the sender built it and must answer, so the probe cap that stops
+ * an idle stream from storming does not apply. fix26: block 185 with
+ * hi=186 was skipped after three probes, and its missing shares were never
+ * asked for again. */
+static inline bool tbt_fec_nack_probe_open(bool sender_ahead, u8 tries)
+{
+    return sender_ahead || tbt_fec_nack_probe_allowed(tries);
+}
+
+/* The NACK scan targets only the frontier super-block. A later block cannot
+ * be delivered before it, so asking for its shares wastes the wire and
+ * starves the block that holds the peer's ACK. fix26 skipped next=185 for
+ * s=186 563 times: 185 was never asked again and the reorder window
+ * stopped. */
+static inline bool tbt_fec_nack_frontier_only(u64 s, u64 next_super)
+{
+    return s == next_super;
+}
+
 /* The retry cadence follows the observed repair latency: a quarter of it,
  * clamped to [retry, max]. Back off at once, recover one eighth at a time so
  * one fast repair does not collapse the window. */

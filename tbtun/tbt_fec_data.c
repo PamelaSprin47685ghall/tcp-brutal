@@ -2769,7 +2769,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
                 }
                 if (!READ_ONCE(rx->total_known) &&
                     tbt_fec_nack_probe_due(now, rx->probe_last_ns) &&
-                    tbt_fec_nack_probe_allowed(rx->probe_tries) &&
+                    tbt_fec_nack_probe_open(hi > s, rx->probe_tries) &&
                     tbt_fec_nack_add(sess, rx, &n, g, s, rx->n, now, hold,
                                      &nmissing))
                 {
@@ -2807,7 +2807,16 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
                                      now, hold, &nmissing);
         }
         if (!(missing && tbt_fec_bitmap_count(n.share_mask)))
+        {
+            /* Every missing share of the frontier is inside its hold (or
+             * already present). Never move on to a later block: it cannot be
+             * delivered before the frontier, and asking for it leaves the
+             * ACK stuck (fix26: next=185 was skipped for s=186 563 times).
+             * Arm and wait for the hold to expire. */
+            if (tbt_fec_nack_frontier_only(s, rx->next_super))
+                break;
             continue;
+        }
         /* A real request waits one round trip from the first gap: the
          * carrier TCP still holds the share and the block's parity may still
          * decode it. A NACK sent before that returns a replay that is almost
@@ -2847,6 +2856,13 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
             return;
         }
         last_block = rx->nack->block_id;
+        if (last_block > rx->next_super)
+        {
+            /* A NACK for a later block cannot move the ACK. Drop it and let
+             * the next scan target the frontier. */
+            tbt_fec_nack_reset(rx->nack);
+            return;
+        }
         if (last_block < rx->next_super)
         {
             /* The block was delivered while its NACK was in flight: nothing
