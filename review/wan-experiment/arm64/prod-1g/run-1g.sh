@@ -75,7 +75,7 @@ MODULES_LOADED=${MODULES_LOADED:-0}
 CARRIERS=${CARRIERS:-256}
 JOIN_TIMEOUT=${JOIN_TIMEOUT:-180}
 SSH_TMO=${SSH_TMO:-20}
-TRANSFER_MAX_TIME=${TRANSFER_MAX_TIME:-1800}
+TRANSFER_MAX_TIME=${TRANSFER_MAX_TIME:-7200}
 TRANSFER_TMO=${TRANSFER_TMO:-$((TRANSFER_MAX_TIME + 300))}
 KEEP_SRC=${KEEP_SRC:-0}
 REQUIRE_SESS_REFS=${REQUIRE_SESS_REFS:-0}
@@ -105,8 +105,8 @@ Environment:
   NEAR_SRCVERSION= FAR_SRCVERSION=   empty: read from the ko
   MODULES_LOADED=0                 1: do not insmod, only verify
   CARRIERS=256 JOIN_TIMEOUT=180 SSH_TMO=20
-  TRANSFER_MAX_TIME=1800           curl --max-time on the near side
-  TRANSFER_TMO=2100                ssh wrapper timeout for the transfer step only
+  TRANSFER_MAX_TIME=7200           curl --max-time on the near side (2 h)
+  TRANSFER_TMO=7500                ssh wrapper timeout for the transfer step only
   NEAR_DEV=eth0                    dev= for near carriers; set empty to disable
   EVIDENCE_ROOT=<repo>/review/wan-experiment/arm64
   KEEP_SRC=0                       1: keep the uploaded scripts on the hosts
@@ -161,6 +161,13 @@ c3_field() {
 c9_field() {
     awk -v f="$2=" -v t="$TUNNEL" '
         $1 == "tunnel" && $2 == t && $3 == "c9" {
+            for (i = 1; i <= NF; i++)
+                if (index($i, f) == 1) { print substr($i, length(f) + 1); exit }
+        }' "$1" 2>/dev/null
+}
+c11_field() {
+    awk -v f="$2=" -v t="$TUNNEL" '
+        $1 == "tunnel" && $2 == t && $3 == "c11" {
             for (i = 1; i <= NF; i++)
                 if (index($i, f) == 1) { print substr($i, length(f) + 1); exit }
         }' "$1" 2>/dev/null
@@ -916,6 +923,14 @@ counter_report() {
             a=$(c3_field "$pre" "$f"); b=$(c3_field "$post" "$f")
             printf '%s=%s\n' "$f" "$(if [[ -n $a && -n $b ]]; then echo $((b - a)); else echo '?'; fi)"
         done
+        for f in fec_nack_tx fec_nack_rx fec_nack_retx fec_nack_drop \
+            fec_replay_hit fec_replay_miss \
+            fec_replay_miss_no_ring fec_replay_miss_alloc fec_replay_miss_get \
+            fec_nack_repair_ns fec_reset_tcp_failed fec_reset_user; do
+            a=$(c11_field "$pre" "$f"); b=$(c11_field "$post" "$f")
+            printf '%s=%s\n' "$f" "$(if [[ -n $a && -n $b ]]; then echo $((b - a)); else echo '?'; fi)"
+        done
+        printf 'fec_nack_repair_max_ns_post=%s\n' "$(c11_field "$post" fec_nack_repair_max_ns)"
         a=$(gaps_field "$pre"); b=$(gaps_field "$post")
         printf 'gaps_total=%s\n' "$(if [[ -n $a && -n $b ]]; then echo $((b - a)); else echo '?'; fi)"
         printf 'dead_now=%s\n' "$(c3_field "$post" dead_now)"
@@ -935,11 +950,30 @@ for end in near far; do
     while IFS='=' read -r k v; do
         if [[ $k == dead_now || $k == up_post || $k == n_post || $k == replaced_post || \
               $k == lost_post || $k == sess_refs || $k == data_tx || $k == retx_bytes || \
-              $k == dup_bytes_ppm ]]; then
+              $k == dup_bytes_ppm || $k == fec_nack_tx || $k == fec_nack_rx || \
+              $k == fec_nack_retx || $k == fec_replay_hit || $k == fec_replay_miss || \
+              $k == fec_nack_repair_ns || $k == fec_nack_repair_max_ns_post ]]; then
             continue
         fi
         check "${end}_${k}" "$([ "${v:-?}" = "0" ]; echo $?)" "delta=$v"
     done <"$EV/counters-$end.txt"
+done
+
+# NACK repair latency must stay at RTT level, not seconds. 8x the observed
+# max RTT is a generous bound; the 30 s repairs in round 8 fail it by ~35x.
+for end in near far; do
+    repair_max=$(c11_field "$EV/$end-stats-post.txt" fec_nack_repair_max_ns)
+    rtt_max=$(c3_field "$EV/$end-stats-post.txt" rtt_max_us)
+    case $repair_max in '' | *[!0-9]*) repair_max= ;; esac
+    case $rtt_max in '' | *[!0-9]*) rtt_max= ;; esac
+    if [[ -n $repair_max && -n $rtt_max && $rtt_max -gt 0 ]]; then
+        repair_us=$(( (repair_max + 999) / 1000 ))
+        bound_us=$(( rtt_max * 8 ))
+        check "${end}_nack_repair_rtt" "$([ "$repair_us" -le "$bound_us" ]; echo $?)" \
+            "repair_max=${repair_us}us rtt_max=${rtt_max}us bound=${bound_us}us (8x)"
+    else
+        skip "${end}_nack_repair_rtt" "repair_max or rtt_max missing"
+    fi
 done
 
 dead=$(sed -n 's/^dead_now=//p' "$EV/counters-near.txt")

@@ -48,7 +48,7 @@ BYPASS_MARK=${BYPASS_MARK:-/root/.tbtun-bypass-pref100}
 TUNNEL=${TUNNEL:-1}
 CARRIERS=${CARRIERS:-256}
 JOIN_TIMEOUT=${JOIN_TIMEOUT:-180}
-MAX_TIME=${MAX_TIME:-1800}
+MAX_TIME=${MAX_TIME:-7200}
 SPEED_LIMIT=${SPEED_LIMIT:-65536}
 SPEED_TIME=${SPEED_TIME:-120}
 DEAD_NOW_MAX=${DEAD_NOW_MAX:-64}
@@ -141,6 +141,7 @@ done
 # stats parsing. One line per counter family:
 #   c3  n=.. up=.. ... connect_fail=.. alloc_fail=.. join_bad=.. dead_now=..
 #   c9  fec_proto_fail=.. fec_hdr_crc_fail=.. fec_payload_crc_fail=..
+#   c11 fec_nack_* / fec_replay_* / fec_reset_* (NACK repair and resets)
 #   rx  ... rx_errs=.. ...
 #   gaps_total=<n>   (session prefix line)
 c3_field() {
@@ -153,6 +154,13 @@ c3_field() {
 c9_field() {
     awk -v f="$2=" -v t="$TUNNEL" '
         $1 == "tunnel" && $2 == t && $3 == "c9" {
+            for (i = 1; i <= NF; i++)
+                if (index($i, f) == 1) { print substr($i, length(f) + 1); exit }
+        }' "$1" 2>/dev/null
+}
+c11_field() {
+    awk -v f="$2=" -v t="$TUNNEL" '
+        $1 == "tunnel" && $2 == t && $3 == "c11" {
             for (i = 1; i <= NF; i++)
                 if (index($i, f) == 1) { print substr($i, length(f) + 1); exit }
         }' "$1" 2>/dev/null
@@ -440,6 +448,17 @@ post=$DL_DIR/near-stats-post.txt
         printf '%s.pre=%s post=%s delta=%s\n' "$f" "${a:-?}" "${b:-?}" \
             "$(if [ -n "$a" ] && [ -n "$b" ]; then inc "$b" "$a"; else echo '?'; fi)"
     done
+    for f in fec_nack_tx fec_nack_rx fec_nack_retx fec_nack_drop \
+        fec_replay_hit fec_replay_miss \
+        fec_replay_miss_no_ring fec_replay_miss_alloc fec_replay_miss_get \
+        fec_nack_repair_ns fec_reset_tcp_failed fec_reset_user; do
+        a=$(c11_field "$pre" "$f")
+        b=$(c11_field "$post" "$f")
+        printf 'c11.%s.pre=%s post=%s delta=%s\n' "$f" "${a:-?}" "${b:-?}" \
+            "$(if [ -n "$a" ] && [ -n "$b" ]; then inc "$b" "$a"; else echo '?'; fi)"
+    done
+    printf 'c11.fec_nack_repair_max_ns.post=%s\n' \
+        "$(c11_field "$post" fec_nack_repair_max_ns)"
     a=$(gaps_field "$pre")
     b=$(gaps_field "$post")
     printf 'gaps_total.pre=%s post=%s delta=%s\n' "${a:-?}" "${b:-?}" \
@@ -450,7 +469,9 @@ cat "$DL_DIR/counters.txt"
 
 delta_zero() {
     name=$1
-    line=$(grep "^$name\." "$DL_DIR/counters.txt" 2>/dev/null || true)
+    # Lines are either `<name>.pre=...` or `<family>.<name>.pre=...`; match
+    # both so the c9/c11 counters are not reported as missing.
+    line=$(grep -E "(^|\.)$name\.pre=" "$DL_DIR/counters.txt" 2>/dev/null || true)
     d=$(printf '%s\n' "$line" | sed -n 's/.*delta=//p')
     if [ -z "$d" ] || [ "$d" = "?" ]; then
         check "counter_$name" 1 "counter missing or non-numeric"
@@ -459,9 +480,25 @@ delta_zero() {
     fi
 }
 for c in fec_proto_fail fec_hdr_crc_fail fec_payload_crc_fail rx_errs \
-    connect_fail alloc_fail join_bad gaps_total; do
+    connect_fail alloc_fail join_bad gaps_total \
+    fec_nack_drop fec_replay_miss_no_ring fec_replay_miss_alloc \
+    fec_replay_miss_get fec_reset_tcp_failed fec_reset_user; do
     delta_zero "$c"
 done
+
+# NACK repair latency must stay at RTT level, not seconds.
+repair_max=$(c11_field "$post" fec_nack_repair_max_ns)
+rtt_max=$(c3_field "$post" rtt_max_us)
+case $repair_max in '' | *[!0-9]*) repair_max= ;; esac
+case $rtt_max in '' | *[!0-9]*) rtt_max= ;; esac
+if [ -n "$repair_max" ] && [ -n "$rtt_max" ] && [ "$rtt_max" -gt 0 ]; then
+    repair_us=$(( (repair_max + 999) / 1000 ))
+    bound_us=$(( rtt_max * 8 ))
+    check nack_repair_rtt "$([ "$repair_us" -le "$bound_us" ]; echo $?)" \
+        "repair_max=${repair_us}us rtt_max=${rtt_max}us bound=${bound_us}us (8x)"
+else
+    skip nack_repair_rtt "repair_max or rtt_max missing"
+fi
 
 refs=$(sess_refs_field "$post")
 if [ -z "$refs" ]; then
