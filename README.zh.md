@@ -75,16 +75,15 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（已发布的 `0.1.0`；`0.2.0` 是目标版本）。
-线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x0005` 与 FEC 记录的
-`TBT_FEC_CONV=0x1001`，三者都与模块版本独立。
+`TBT_VERSION_MAJOR/MINOR/PATCH`（已发布的 `0.1.0`；`0.2.0` 是下一个发布版本）。
+线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x0006` 与 FEC 记录的
+`TBT_FEC_CONV=0x1002`，三者都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
 失败，其载体关闭；0x0004 的对端在第一个头部就会因为 conv 不匹配而被拒绝。
-0.2.0 目标（尚未上线）把 `TBT_CONV` 升到 `0x0006`、`TBT_FEC_CONV` 升到
-`0x1002`：FIN 携带 16 字节 body（`pkt_end`/`pkt_base`），PARITY 记录可以用
-`win_len=0, payload_len=0, epoch=0` 表示空块 marker。`tbt_uapi.h` 用
-`TBT_CONV_NEXT`/`TBT_FEC_CONV_NEXT` 命名这两个目标值；发布前模块仍发送
-0x0005/0x1001。两种 conv 都是硬拒绝，所以 0.1.0 与 0.2.0 不能互操作。
+0.2.0 已把 `TBT_CONV` 翻转到 `0x0006`、`TBT_FEC_CONV` 翻转到 `0x1002`：
+FIN 携带 16 字节 body（`pkt_end`/`pkt_base`），PARITY 记录可以用
+`win_len=0, payload_len=0, epoch=0` 表示空块 marker。`0.1.0` 与 `0.2.0`
+不互操作，首个 HELLO 即硬拒绝。
 `scripts/mkdkmsconf.sh` 派生
 `PACKAGE_VERSION="<major>.<minor>.<patch>"`；`dkms.conf` 是生成物，由
 `make dkms.conf` / `make dkms-tarball` 写出，不要手改。

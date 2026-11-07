@@ -7,12 +7,11 @@ and moves independently of the module version.
 
 ### Changed (0.2.0 target)
 
-- The 0.2.0 wire revision (target; not on the wire yet) moves `TBT_CONV` from
-  0x0005 to 0x0006 and `TBT_FEC_CONV` from 0x1001 to 0x1002. FIN carries an
-  exactly 16-byte body (`pkt_end`, `pkt_base`); a PARITY record may be an
-  empty-block marker (`win_len=0`, `payload_len=0`, `epoch=0`).
-  `tbt_uapi.h` names the target values `TBT_CONV_NEXT`/`TBT_FEC_CONV_NEXT`;
-  both convs are hard-rejected, so 0.1.0 and 0.2.0 do not interoperate
+- 0.2.0 has flipped `TBT_CONV` to `0x0006` and `TBT_FEC_CONV` to `0x1002`
+  (from 0x0005/0x1001 in 0.1.0). FIN carries an exactly 16-byte body
+  (`pkt_end`, `pkt_base`); a PARITY record may be an empty-block marker
+  (`win_len=0`, `payload_len=0`, `epoch=0`). 0.1.0 and 0.2.0 do not
+  interoperate: the first HELLO is rejected by the conv check
   (`review/s2-merged-design.md` §6).
 - Carrier lifetime (target): carriers are no longer reused from a dead pool.
   `tbt_carrier_get/put/gen` with a refcount and `kfree_rcu` replace

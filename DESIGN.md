@@ -254,10 +254,10 @@ rather than in a new field so the HELLO body length is unchanged.
 | `http-kal-drip` | identical headers, identical framing | one **byte per `drip_ms`** when idle (a legal 1-byte chunk every `drip_ms`), volume `≈ 1 B/drip_ms` | the `M` spares: an idle flow that a classifier would reap or de-prioritise is kept alive with ~8 bit/s (1 B/s payload) instead of a burst every 5000 ms |
 | `raw` | one frame per record, no HTTP bytes at all | none needed | second hop / VPS-to-home leg, loopback tests, or any line where QoS does not apply. Also the only safe profile inside WireGuard when the classifier is SNI-based (§16.5) |
 
-### FEC v6 over the container (T0 0x1001; 0.2.0 target 0x1002)
+### FEC v6 over the container (T0 0x1002)
 
-FEC v6 is an independent 40-byte record format (`conv=0x1001`; 0.2.0 target
-`0x1002`), not a wider old frame. It rides the same carriers and the same HTTP
+FEC v6 is an independent 40-byte record format (`conv=0x1002`; 0.1.0 used
+`0x1001`), not a wider old frame. It rides the same carriers and the same HTTP
 container:
 
 - `profile=raw`: one 40-byte FEC record follows another with no wrapper.
@@ -268,7 +268,7 @@ container:
 - Control records (ACK/NACK/FEC_CFG/FEC_FBK) use the same one-chunk-per-record
   rule. They are written only at record boundaries; a partial record is never
   interleaved with a control frame.
-- **PARITY block marker (0.2.0 target, `TBT_FEC_CONV` 0x1002).** There is no
+- **PARITY block marker (`TBT_FEC_CONV` 0x1002).** There is no
   4-byte marker and no magic number. A marker is a set of values inside the
   40-byte `struct tbt_fec_hdr`: `type = TBT_FEC_PARITY` (0x31), `flags = 0`,
   `share_index = n` (parity 0), `epoch = 0`, `win_len = 0`, `payload_len = 0`,
@@ -276,9 +276,9 @@ container:
   `header_crc32c` still covers +0..+35 and must match. The receiver accepts
   `win_len == 0` only with `payload_len == 0 && epoch == 0`, rejects a marker
   for a block that already holds DATA/parity or `win_len_set`, and rejects DATA
-  for a block after its marker. 0.1.0 requires PARITY
+  for a block after its marker. 0.1.0 required PARITY
   `payload_len == max_payload` and `win_len != 0`, so the marker and that
-  relaxation ship together with 0x1002.
+  relaxation shipped together with 0x1002.
 - `fec=on` maps one share to each carrier: `carriers = groups * (n + m)`,
   `group(c) = c / (n + m)`, `share(c) = c % (n + m)`. `mode=rlnc` is one group
   (`carriers == n + m`); `mode=grouped` is 32 groups of 8 in production
@@ -505,7 +505,7 @@ Frame header, exactly 32 bytes (offsets add up):
 +24 u32  sid_lo       low 32 bits of the 40-bit stream id
 +28 u8   sid_hi       high 8 bits of the 40-bit stream id (v4 uses them)
 +29 u8   reserved2 (0)
-+30 u16  conv         0x0005 (0.2.0 target 0x0006)
++30 u16  conv         0x0006 (0.1.0 used 0x0005)
 (total: 32 bytes)
 ```
 
@@ -524,14 +524,14 @@ Payload layouts:
 - **DATA**: payload = raw application bytes (1..8192); a zero-length DATA frame is
   refused on receive, because it wedges the receiver and the emitter never sends one.
 - **OPEN**: payload empty; the header's `sid_hi:sid_lo` names the stream.
-- **FIN**: payload empty in 0.1.0. 0.2.0 target (`TBT_CONV` 0x0006): exactly
-  `TBT_FIN_BODY_LEN` = 16 bytes, little-endian: `+0 u64 pkt_end` (the absolute
+- **FIN**: payload exactly `TBT_FIN_BODY_LEN` = 16 bytes, little-endian
+  (`TBT_CONV` 0x0006): `+0 u64 pkt_end` (the absolute
   session packet seq after this stream's last DATA packet) and `+8 u64 pkt_base`
   (the absolute session packet seq of this stream's first DATA packet, aligned
   to the super-block `groups*n`). `tbt_body_bounds()` sets `TBT_F_FIN` to
   `min = max = 16`; a non-FEC session sends the same 16 zero bytes, so one
-  length rule covers both. The 0.1.0 peer sends an empty FIN body and is
-  refused by the new bound.
+  length rule covers both. A 0.1.0 peer sends an empty FIN body and is refused
+  by the new bound.
 - **FBK**: payload = `nr × 18 B`, one entry per path, `nr = path_ack_count`:
   `u8 path_id; u8 rx_state; u64 uack; u32 recv_cnt; u32 rtt_us`. `path_id`'s low nibble is
   the carrier index and its high nibble is the *peer's* generation for that path (learned
@@ -592,10 +592,9 @@ than the emit rules, because it must accept a peer and a middlebox that only rel
   1) is filler and is discarded. PAD and drip may interleave between records. This is
   a security-relevant stance: it removes the ambiguous framing a hostile peer could
   use to smuggle bytes.
-- The frame layout is `TBT_CONV` 0x0005: `body_len` is the u16 at header offset +6 and
-  there is no 4-byte prefix. 0.2.0 targets `TBT_CONV` 0x0006 (FIN body 16
-  bytes); `tbt_uapi.h`/`tbt_proto.c` are authoritative for the current wire, and
-  `TBT_CONV_NEXT` names the target that must not be sent before the flip.
+- The frame layout is `TBT_CONV` 0x0006 (0.1.0 used 0x0005): `body_len` is the
+  u16 at header offset +6 and there is no 4-byte prefix. 0.2.0 adds the 16-byte
+  FIN body; `tbt_uapi.h`/`tbt_proto.c` are authoritative for the current wire.
 - The response parser requires status 200, accepts HTTP/1.0 and HTTP/1.1 status lines,
   requires `Transfer-Encoding` to be exactly `chunked` when present, and rejects a message
   carrying both `Transfer-Encoding` and `Content-Length` (RFC 9112 §6.3).
@@ -825,7 +824,7 @@ seq range ahead of the hole and cancelled it on arrival. The receiver never adva
 carried no application byte could not move the stream, and one that moved it without the
 bytes would break byte exactness. The working mechanism is the sender-side immediate
 retransmit above. The two frame types, their sender paths, the receiver bookkeeping and
-the `predict_*` counters were deleted; `TBT_CONV` is `0x0005`, and a 0x0004 peer that
+the `predict_*` counters were deleted; `TBT_CONV` was `0x0005` for that revision, and a 0x0004 peer that
 still sends `0x11` or `0x12` fails `tbt_hdr_check()` and its carrier closes. `rx_next`
 advances only on a contiguous real byte, and a hole the sender cannot fill ends in the
 bounded reset.
@@ -2494,13 +2493,13 @@ makes this design different from a generic L4 tunnel.
 | `tests/*.sh` | **new** |
 
 Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the released tree reports
-`0.1.0`, and `0.2.0` is the target. The wire revision `TBT_CONV=0x0005` and the
-FEC record revision `TBT_FEC_CONV=0x1001` bump independently of it. HELLO
+`0.1.0`, and `0.2.0` is the next release. The wire revision `TBT_CONV=0x0006`
+and the FEC record revision `TBT_FEC_CONV=0x1002` bump independently of it. HELLO
 `body[0]` carries `TBT_WIRE_VERSION=1`, not the module version, so the module
-version and the wire version are decoupled. 0.2.0 (target, not on the wire yet)
-raises them to `TBT_CONV=0x0006` (FIN carries a 16-byte body) and
-`TBT_FEC_CONV=0x1002` (PARITY may be an empty-block marker); `tbt_uapi.h` names
-those as `TBT_CONV_NEXT`/`TBT_FEC_CONV_NEXT` until the release flips them.
+version and the wire version are decoupled. 0.2.0 has flipped `TBT_CONV` to
+0x0006 (FIN carries a 16-byte body) and `TBT_FEC_CONV` to 0x1002 (PARITY may be
+an empty-block marker); 0.1.0 and 0.2.0 do not interoperate, because the first
+HELLO is rejected by the conv check.
 
 **Packaging.** `tbtun/tbt_uapi.h` is the single version authority: the
 `TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/1/0`). `scripts/mkdkmsconf.sh`
