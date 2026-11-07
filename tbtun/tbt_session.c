@@ -194,30 +194,39 @@ static unsigned int tbt_tunnel_count_locked(void)
     return n;
 }
 
-// Caller holds tbt_lock. Installs `cfg`, replacing an existing tunnel with the
-// same id (DESIGN.md §8.4.1 "re-applying the same line is idempotent").
-//
-// Lock invariant: tbt_config_apply() takes tbt_lock around this call, so this
-// function must never take it again. The count and the list insert are both
-// serialized by that lock; two concurrent writers cannot both pass the cap.
+/* Installs `cfg`, replacing an existing tunnel with the same id
+ * (DESIGN.md §8.4.1 "re-applying the same line is idempotent"). The list/cap
+ * section runs under tbt_lock; listener/session teardown runs
+ * outside it. A session destroy that waits for a work item must not pin the
+ * global lock: every /proc reader and every other config writer would queue
+ * behind it (fix21 64-carrier hang: stats + two config writers + rmmod all
+ * blocked behind one destroy). */
 int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net)
 {
     struct tbt_tunnel *old, *t;
     int err = 0;
+    bool listening = false;
 
     if (!tbt_cfg_sane(cfg, &err))
         return err;
 
+    mutex_lock(&tbt_lock);
     /* Replacing an existing id is always allowed; only a new id consumes a
      * slot. Check before kzalloc and before detaching `old`, so a refusal
      * leaves the running configuration untouched. */
     old = tbt_tunnel_find_locked(cfg->id);
     if (!old && tbt_tunnel_count_locked() >= READ_ONCE(max_tunnels))
+    {
+        mutex_unlock(&tbt_lock);
         return -ENOSPC;
+    }
 
     t = kzalloc(sizeof(*t), GFP_KERNEL);
     if (!t)
+    {
+        mutex_unlock(&tbt_lock);
         return -ENOMEM;
+    }
     /* The caller captured this at open time: config flushes run from
      * __fput task_work during process exit, where current->nsproxy is NULL. */
     t->net = get_net(net);
@@ -239,18 +248,27 @@ int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net)
     // carrier port (DESIGN.md §2.1, §9.5).
     err = tbt_listen_start(t);
     if (err)
+    {
+        list_del_rcu(&t->node);
+        mutex_unlock(&tbt_lock);
         goto undo;
+    }
+    listening = true;
     err = tbt_session_create(t);
     if (err)
     {
-        tbt_listen_stop(t);
-        tbt_session_destroy(t);
+        list_del_rcu(&t->node);
+        mutex_unlock(&tbt_lock);
         goto undo;
     }
     /* A connection accepted before the session exists would reach
      * tbt_stream_start(NULL, ...); enable accepting only now. */
     atomic_set(&t->accepting, 1);
     schedule_work(&t->w_accept);
+    mutex_unlock(&tbt_lock);
+
+    /* The old tunnel is off the list and its listener is stopped. Destroy its
+     * session outside the global lock. */
     if (old)
     {
         tbt_session_destroy(old);
@@ -259,7 +277,9 @@ int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net)
     return 0;
 
 undo:
-    list_del_rcu(&t->node);
+    if (listening)
+        tbt_listen_stop(t);
+    tbt_session_destroy(t);
     if (old)
     {
         /* We detached the previous tunnel before starting the new one; on a
@@ -274,22 +294,34 @@ undo:
 
 int tbt_tunnel_del(u64 id)
 {
-    struct tbt_tunnel *t = tbt_tunnel_find_locked(id);
+    struct tbt_tunnel *t;
 
+    mutex_lock(&tbt_lock);
+    t = tbt_tunnel_find_locked(id);
     if (!t)
+    {
+        mutex_unlock(&tbt_lock);
         return -ENOENT;
+    }
     list_del_rcu(&t->node);
+    mutex_unlock(&tbt_lock);
+
+    /* Teardown waits for session work; never hold tbt_lock across it. */
     tbt_listen_stop(t);
     tbt_session_destroy(t);
     tbt_tunnel_put(t);
     return 0;
 }
 
-// Caller holds tbt_lock. Marks the list empty; the caller frees.
+/* Marks the list empty and tears every tunnel down. The list detach runs
+ * under tbt_lock; listener/session teardown runs outside it, so a destroy that
+ * waits for work cannot pin every /proc reader. */
 void tbt_tunnel_shutdown(void)
 {
     struct tbt_tunnel *t, *tmp;
+    LIST_HEAD(victims);
 
+    mutex_lock(&tbt_lock);
     /* Mark every session closing before the first listener goes away: tearing
      * one tunnel down first makes the others' carriers retry a connect that
      * can only fail, and the retry log lands in the middle of a probe's own
@@ -306,6 +338,13 @@ void tbt_tunnel_shutdown(void)
     list_for_each_entry_safe(t, tmp, &tbt_tunnels, node)
     {
         list_del_rcu(&t->node);
+        list_add_tail(&t->node, &victims);
+    }
+    mutex_unlock(&tbt_lock);
+
+    list_for_each_entry_safe(t, tmp, &victims, node)
+    {
+        list_del_init(&t->node);
         tbt_listen_stop(t);
         tbt_session_destroy(t);
         tbt_tunnel_put(t);

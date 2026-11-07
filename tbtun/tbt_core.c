@@ -139,12 +139,10 @@ static void __exit tbtun_exit(void)
     /* Stop new /proc calls and wait for every in-flight fop.  remove_proc_entry()
      * waits for pde users and closes pde_openers, including tbt_cfg_release(). */
     tbt_procfs_exit();
-    mutex_lock(&tbt_lock);
-    /* Close listeners, cancel every work item, restore core callbacks on every
-     * socket, and release each socket with SO_LINGER=0.  Every module-owned
-     * socket then reaches TCP_CLOSE and is unhashed before this returns. */
+    /* tbt_tunnel_shutdown() detaches the list under tbt_lock and tears the
+     * sessions down outside it; a destroy that waits for work must not pin
+     * the global lock. */
     tbt_tunnel_shutdown();
-    mutex_unlock(&tbt_lock);
     /* No module callback or work item is reachable now.  Wait for readers that
      * started before the teardown, then for the module-text RCU callbacks.
      * flush_workqueue(system_wq) is not a barrier: it does not stop new

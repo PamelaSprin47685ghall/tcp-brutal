@@ -246,6 +246,21 @@ check_stream_insert() {
     return 1
 }
 
+check_stats_rcu_sleep() {
+    # seq_printf() grows the seq_file buffer with GFP_KERNEL and may sleep.
+    # Sleeping inside an RCU read section stalls synchronize_rcu() and can
+    # hang config teardown/rmmod (fix21 64-carrier procfs hang).
+    body=$(func_body "$1/tbtun/tbt_procfs.c" tbt_show_stats)
+    bad=$(printf '%s\n' "$body" | awk '
+        /rcu_read_lock/ { in_rcu = 1; next }
+        /rcu_read_unlock/ { in_rcu = 0; next }
+        in_rcu && /seq_printf/ { print NR ": " $0 }
+    ')
+    [ -z "$bad" ] && return 0
+    printf 'seq_printf inside RCU: %s' "$bad"
+    return 1
+}
+
 check_callback_locks() {
     v=$(callback_lock_violations "$1/tbtun/tbt_carrier.c")
     v="$v $(callback_lock_violations "$1/tbtun/tbt_listen.c")"
@@ -520,6 +535,7 @@ run_check no-pump-lock-work-cancel check_pump_lock
 run_check sk-cleared-before-release check_sk_release
 run_check stream-insert-rechecks check_stream_insert
 run_check callbacks-lock-user-data check_callback_locks
+run_check stats-rcu-no-sleep check_stats_rcu_sleep
 run_check listen-clear-before-cancel check_listen_order
 run_check proc-entries-removed check_proc_entries
 run_check frame-types-total check_frame_types
@@ -733,6 +749,6 @@ st atomic-stats-bare-access nonempty "$a1"
 st atomic-stats-wrapped-access empty "$a2"
 
 echo
-printf '%d/%d checks passed, %d failed\n' "$((16 - fails))" 16 "$fails"
+printf '%d/%d checks passed, %d failed\n' "$((17 - fails))" 17 "$fails"
 printf '%d/%d self-tests passed, %d failed\n' "$st_pass" "$((st_pass + st_fail))" "$st_fail"
 [ "$fails" -eq 0 ] && [ "$st_fail" -eq 0 ]
