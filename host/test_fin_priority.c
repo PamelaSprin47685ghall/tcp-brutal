@@ -160,6 +160,30 @@ static void case_car_rate(void)
        "rate: no window means no fallback");
 }
 
+static void case_reorder_floor(void)
+{
+    u64 cap256 = tbt_tx_reorder_floor(256);
+
+    ok(tbt_tx_reorder_floor(1) == 8ULL * 1024 * 1024,
+       "reorder: one carrier keeps 8 MiB");
+    ok(tbt_tx_reorder_floor(32) == 8ULL * 1024 * 1024,
+       "reorder: 32 carriers keep 8 MiB");
+    ok(tbt_tx_reorder_floor(256) == 16ULL * 1024 * 1024,
+       "reorder: 256 carriers grow to 16 MiB");
+    ok(tbt_tx_reorder_floor(8192) == TBT_TX_REORDER_MAX,
+       "reorder: capped at 256 MiB");
+
+    /* 256 carriers: the 15 MiB aggregate is no longer capped at 8 MiB. */
+    {
+        u64 win = tbt_tx_window_auto(0, 15ULL * 1024 * 1024, 0, 256, 256,
+                                     16ULL * 1024 * 1024, cap256);
+
+        ok(win == 16ULL * 1024 * 1024,
+           "window: 256 carriers reach the 16 MiB floor");
+        ok(win > 8ULL * 1024 * 1024, "window: above the old 8 MiB cap");
+    }
+}
+
 struct frame
 {
     u8 type;
@@ -239,6 +263,7 @@ int main(void)
     case_repair_bound();
     case_aggregate_window();
     case_car_rate();
+    case_reorder_floor();
     case_fin_not_starved();
     case_no_close();
 

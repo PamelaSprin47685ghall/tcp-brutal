@@ -207,6 +207,24 @@ static inline u64 tbt_tx_car_rate(u64 delivery_bps, u32 srtt_us,
     return wnd * 1000000ULL / srtt_us;
 }
 
+/* The receiver's reorder budget is also the sender window's auto cap. Eight
+ * MiB is one path's budget; 256 carriers advertise far more, so scale it with
+ * the carrier count (eight full frames each), bounded by the parser's 256 MiB
+ * ceiling. An explicit tx_window_bytes leaves the operator's value alone. */
+#define TBT_TX_REORDER_MIN (8ULL * 1024 * 1024)
+#define TBT_TX_REORDER_MAX (256ULL * 1024 * 1024)
+
+static inline u64 tbt_tx_reorder_floor(unsigned int n_car)
+{
+    u64 need = (u64)n_car * 8 * TBT_PAYLOAD_MAX;
+
+    if (need < TBT_TX_REORDER_MIN)
+        need = TBT_TX_REORDER_MIN;
+    if (need > TBT_TX_REORDER_MAX)
+        need = TBT_TX_REORDER_MAX;
+    return need;
+}
+
 /* Pure path bound: idx must name a slot the session owns and fit the 16-slot
  * retain arrays. No warning here; FEC sessions legally walk 256 slots. */
 static inline bool tbt_tx_path_in_range(unsigned int idx, unsigned int n_car)

@@ -740,6 +740,7 @@ static u32 tbt_tx_window(struct tbt_session *sess)
     u64 cap = cfg->rx_reorder_bytes;
     u32 mean = 0, var = 0, max = 0;
     u64 agg = 0, floor;
+    u64 reorder_floor;
     u32 n_live = 0;
     u64 win;
 
@@ -755,8 +756,18 @@ static u32 tbt_tx_window(struct tbt_session *sess)
      * carry a BDP. */
     floor = max_t(u64, TBT_TX_WINDOW_AUTO_FLOOR,
                   (u64)sess->n_car * 8 * TBT_PAYLOAD_MAX);
+    /* The reorder budget is also the auto window's cap. Eight MiB is one
+     * path's budget; a 256-carrier tunnel advertises more than that, so the
+     * cap scales with the carrier count. */
+    reorder_floor = tbt_tx_reorder_floor(sess->n_car);
+    cap = max_t(u64, cap, reorder_floor);
     if (cfg->tx_window_bytes)
+    {
         win = cfg->tx_window_bytes;
+        /* An explicit window is the operator's contract; the auto cap must
+         * not truncate it (the parser already bounds it). */
+        cap = max_t(u64, cap, win);
+    }
     else
         /* k x B is the single-flow target; the carriers' aggregate window (or
          * n_car x per-carrier BDP) is the floor that breaks the small-window
@@ -781,12 +792,21 @@ static u32 tbt_tx_window(struct tbt_session *sess)
  * that is already filling the path. */
 static void tbt_tx_window_update(struct tbt_session *sess)
 {
+    struct tbt_cfg *cfg = &sess->tunnel->cfg;
+    u64 need = tbt_tx_reorder_floor(sess->n_car);
     u32 old = sess->tx_window;
-    u32 win = tbt_tx_window(sess);
+    u32 win;
     u64 now = tbt_now_ns();
     bool recent_loss = sess->last_loss_ns &&
                        now - sess->last_loss_ns < NSEC_PER_SEC;
 
+    /* Auto mode: grow the receiver's reorder budget with the carrier count,
+     * or the sender stays capped at the single-flow 8 MiB while 256 carriers
+     * advertise far more. An explicit tx_window_bytes leaves the operator's
+     * rx_reorder_bytes untouched. */
+    if (!cfg->tx_window_bytes && cfg->rx_reorder_bytes < need)
+        WRITE_ONCE(cfg->rx_reorder_bytes, (u32)need);
+    win = tbt_tx_window(sess);
     /* Grow at once: the anti-self-lock rule is that a full window with no
      * loss for 1 s must reach k x B, and growing at once dominates the
      * 25%/s ramp. Shrink only after a 25% overshoot and only when no loss
