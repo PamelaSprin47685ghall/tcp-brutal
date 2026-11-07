@@ -99,6 +99,55 @@ static inline bool tbt_tx_acct_is_dup(u8 type, bool dup_copy)
     return type == TBT_F_DATA && dup_copy;
 }
 
+/* Close-path scheduling quotas: while a stream is closing, one pump pass
+ * writes at most 32 DATA frames and 8 other non-FIN frames before the next
+ * pass, so a queued FIN is never starved by a replay/data burst. FIN is
+ * always admitted. */
+#define TBT_TX_CLOSE_DATA_MAX 32u
+#define TBT_TX_CLOSE_CTL_MAX 8u
+
+static inline bool tbt_tx_close_frame_allowed(bool close_priority, u8 type,
+                                              u32 *data_used, u32 *ctl_used)
+{
+    if (!close_priority || type == TBT_F_FIN)
+        return true;
+    if (type == TBT_F_DATA)
+    {
+        if (*data_used >= TBT_TX_CLOSE_DATA_MAX)
+            return false;
+        (*data_used)++;
+        return true;
+    }
+    if (*ctl_used >= TBT_TX_CLOSE_CTL_MAX)
+        return false;
+    (*ctl_used)++;
+    return true;
+}
+
+/* FIN retries are owned by the close timer, not by TBT_CTL_MAX_RETRIES (that
+ * bound exists for FBK/PAD/HELLO copies). A FIN may be requeued on any
+ * hello_sent carrier while the close is inside its bound. */
+static inline bool tbt_tx_fin_retry_allowed(u64 now, u64 close_since,
+                                            u64 budget)
+{
+    return close_since && now >= close_since && now - close_since <= budget;
+}
+
+/* The close timer must not turn FEC tail repair or a peer credit wait into an
+ * RST: the FIN gate is waiting for those last bytes. Repair activity holds
+ * without a cap (it refreshes fec_repair_last_ns); a credit wait is held only
+ * inside the same hard cap the stall path uses. */
+static inline bool tbt_tx_close_hold_fec(bool fec, bool repair_active,
+                                         bool credit_waiting, u64 age,
+                                         u64 max_ns)
+{
+    if (!fec)
+        return false;
+    if (repair_active)
+        return true;
+    return credit_waiting && age <= max_ns;
+}
+
 /* Pure path bound: idx must name a slot the session owns and fit the 16-slot
  * retain arrays. No warning here; FEC sessions legally walk 256 slots. */
 static inline bool tbt_tx_path_in_range(unsigned int idx, unsigned int n_car)
