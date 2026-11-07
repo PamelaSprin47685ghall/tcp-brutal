@@ -151,16 +151,32 @@ u32 tbt_carrier_gen(struct tbt_session *sess, u8 index)
     return gen;
 }
 
-/* Queue a receive run without losing a wake that coalesces into a run already
- * pending or in progress.  schedule_work() returns false when the work item is
- * already pending, and the byte that triggered this call would then wait for
- * the next packet -- or forever when the peer is waiting for our reply (the
- * far's HELLO reply after the near's HELLO).  The bit makes the running work
- * re-arm itself before it returns. */
+/* rx_again is a two-bit state machine, not a boolean:
+ *   bit 0: a wake arrived that this carrier has not consumed yet;
+ *   bit 1: a w_rx instance is queued or running.
+ * schedule_work() does not serialise a work item against itself: queueing it
+ * while it runs puts a second instance on another worker. Two parsers then
+ * share c->parser and c->http_rx->rec, so one can overwrite the record buffer
+ * between decode and tbt_fec_rx_record() -- a payload that decrypts twice or
+ * a payload spliced from two chunks (header CRC valid, payload CRC bad).
+ * The running bit keeps at most one parser; a wake during a run is coalesced
+ * into bit 0 and the entry wrapper re-queues after the run. */
+#define TBT_RX_AGAIN_BIT   0
+#define TBT_RX_RUNNING_BIT 1
+
 static void tbt_car_schedule_rx(struct tbt_carrier *c)
 {
+    if (atomic_fetch_or((int)BIT(TBT_RX_RUNNING_BIT), &c->rx_again) &
+        (int)BIT(TBT_RX_RUNNING_BIT))
+    {
+        atomic_fetch_or((int)BIT(TBT_RX_AGAIN_BIT), &c->rx_again);
+        return;
+    }
     if (!schedule_work(&c->w_rx))
-        atomic_set(&c->rx_again, 1);
+    {
+        /* A queued instance already owns the running bit. */
+        atomic_fetch_or((int)BIT(TBT_RX_AGAIN_BIT), &c->rx_again);
+    }
 }
 
 static void tbt_car_ready(struct sock *sk)
@@ -768,18 +784,17 @@ static int tbt_car_rx_actor(read_descriptor_t *desc, struct sk_buff *skb, unsign
     return used;
 }
 
-static void tbt_car_rx_work(struct work_struct *w)
+static void tbt_car_rx_body(struct tbt_carrier *c)
 {
-    struct tbt_carrier *c = container_of(w, struct tbt_carrier, w_rx);
     read_descriptor_t desc = {};
     struct tbt_stream *st;
     struct sock *sk;
     int i, drained;
 
     atomic64_inc(&c->sess->rx_work_runs);
-    /* This run reads everything queued at its start; a wake that arrives
-     * later re-sets the bit and is consumed at the end. */
-    atomic_set(&c->rx_again, 0);
+    /* Consume the wake this run was queued for; the running bit stays set
+     * until the wrapper returns. */
+    atomic_fetch_and(~(int)BIT(TBT_RX_AGAIN_BIT), &c->rx_again);
     sk = tbt_carrier_sk_get(c);
     if (atomic_read(&c->stopping) || !sk)
     {
@@ -884,17 +899,27 @@ static void tbt_car_rx_work(struct work_struct *w)
         tbt_carrier_arm_rx(c);
     }
 
-    /* A wake that coalesced into this run set the bit instead of queueing a
-     * second run.  Consume it here: the peer may be waiting for the reply to
-     * the record this run just parsed (the far's HELLO reply is the first). */
-    if (atomic_xchg(&c->rx_again, 0))
-        tbt_carrier_arm_rx(c);
     tbt_carrier_sk_put(sk);
 
     /* Parsing may have enqueued a control frame (OPEN, FBK). The enqueue
      * already asked w_tx to drain it; never pump from this work item, because
      * pumping the carrier whose lock this work item holds deadlocks against
      * the peer window that only this work item's next read can open. */
+}
+
+static void tbt_car_rx_work(struct work_struct *w)
+{
+    struct tbt_carrier *c = container_of(w, struct tbt_carrier, w_rx);
+
+    tbt_car_rx_body(c);
+    /* Publish "not running" first: a wake after this point either queues a
+     * new instance directly or sets the again bit, which this thread then
+     * consumes. A wake that arrived during the run is coalesced here. */
+    atomic_fetch_and(~(int)BIT(TBT_RX_RUNNING_BIT), &c->rx_again);
+    if ((atomic_fetch_and(~(int)BIT(TBT_RX_AGAIN_BIT), &c->rx_again) &
+         (int)BIT(TBT_RX_AGAIN_BIT)) &&
+        !atomic_read(&c->stopping))
+        tbt_car_schedule_rx(c);
 }
 
 /* One non-blocking write of a byte range on a carrier. -EAGAIN means the
@@ -1778,8 +1803,7 @@ bool tbt_carrier_arm_rx(struct tbt_carrier *c)
         spin_unlock(&sess->lock);
         return false;
     }
-    if (!schedule_work(&c->w_rx))
-        atomic_set(&c->rx_again, 1);
+    tbt_car_schedule_rx(c);
     spin_unlock(&sess->lock);
     return true;
 }
