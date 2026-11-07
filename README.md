@@ -94,7 +94,7 @@ when it is present.
 ## Packaging
 
 The module version has one authority: `TBT_VERSION_MAJOR/MINOR/PATCH` in
-`tbtun/tbt_uapi.h` (released `0.1.0`; `0.2.0` is the next release). The wire
+`tbtun/tbt_uapi.h` (currently `0.2.0`). The wire
 version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x0006` for the 32-byte frames
 and `TBT_FEC_CONV=0x1002` for the 40-byte FEC records; all three are independent of
 the module version. `TBT_CONV 0x0005` removed the unused PREDICT/CANCEL
@@ -266,7 +266,7 @@ join, and the port in a far `peer=` is grammar filler. Add a shared
 `nonce=`, the far side adopts the nonce from the first HELLO; if `peer=` is also
 absent, that first HELLO fixes the anchor and the module logs one
 trust-on-first-use warning. Addresses are literal IPv4 only — no DNS, no IPv6
-in 0.1.0.
+in 0.2.0.
 
 ## What you can observe
 

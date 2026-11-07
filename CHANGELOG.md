@@ -5,7 +5,9 @@ and moves independently of the module version.
 
 ## [Unreleased]
 
-### Changed (0.2.0 target)
+## [0.2.0] - 2026-11-07
+
+### Changed
 
 - 0.2.0 has flipped `TBT_CONV` to `0x0006` and `TBT_FEC_CONV` to `0x1002`
   (from 0x0005/0x1001 in 0.1.0). FIN carries an exactly 16-byte body
@@ -13,26 +15,26 @@ and moves independently of the module version.
   (`win_len=0`, `payload_len=0`, `epoch=0`). 0.1.0 and 0.2.0 do not
   interoperate: the first HELLO is rejected by the conv check
   (`review/s2-merged-design.md` §6).
-- Carrier lifetime (target): carriers are no longer reused from a dead pool.
+- Carrier lifetime: carriers are no longer reused from a dead pool.
   `tbt_carrier_get/put/gen` with a refcount and `kfree_rcu` replace
   `take_dead`, and `tbt_carrier_unpublish/close` release `c->sk` before the
   pointer is cleared (`review/s2-merged-design.md` §3).
-- Session and stream lifetime (target): `tbt_session_get/put/arm/cancel` with
+- Session and stream lifetime: `tbt_session_get/put/arm/cancel` with
   the `drained` completion replace the dead `refs` field, and stream work
   holds one of five bits and is cancelled through `tbt_stream_schedule/cancel`
   (`review/s2-merged-design.md` §1, §5).
 
-### Fixed (0.2.0 target)
+### Fixed
 
-- TX (target): a duplicate frame is fully built before publication, and the
+- TX: a duplicate frame is fully built before publication, and the
   retention index is bounded so a 16-slot overflow cannot write past the array
   (`review/s2-merged-design.md` §9.1).
-- FEC receive (target): decoding moves out of `rx->lock` into `w_fec_rx`,
+- FEC receive: decoding moves out of `rx->lock` into `w_fec_rx`,
   delivery commits per packet with a cursor, FIN uses `pkt_end`/`pkt_base`,
   an empty group uses the block marker, the FEC ACK byte count is clamped, and
   `short_len` is fixed by the first PARITY record
   (`review/s2-merged-design.md` §9.1).
-- Adoption (target): the far side installs the stream callback only after the
+- Adoption: the far side installs the stream callback only after the
   provisional carrier is published, with `joined` and a `WARN_ON_ONCE` on the
   ordering (`review/s2-merged-design.md` §9.1).
 
