@@ -377,7 +377,8 @@ container:
   non-stalled carrier. The share index stays the same; the carrier does not.
 - **The replay buffers are constant.** The ring is `K * groups * (n + m)`
   slots of `TBT_FEC_HDR_LEN + S` bytes plus 10 bytes of metadata, capped at
-  `TBT_FEC_REPLAY_BUDGET` (8 MiB). The effective K shrinks until the shape
+  `TBT_FEC_REPLAY_BUDGET` (9 MiB; the production 32-group shape uses
+  about 8.05 MiB). The effective K shrinks until the shape
   fits; a shape that cannot hold one super-block gets no ring and falls back
   to parity and TCP. The receive window is the ACK credit
   (`slots * groups * n` packets, at most 1024) over the same `groups * (n+m) *

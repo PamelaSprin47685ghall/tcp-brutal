@@ -10,7 +10,8 @@ and moves independently of the module version.
 - FEC NACK repair (`TBT_FEC_CONV` 0x1004): a NACK names its super-block in
   the record header and carries a 32-byte group bitmap plus a 32-byte share
   bitmap. The sender keeps the last `K = 4` super-blocks of DATA+PARITY
-  records in a replay ring capped at 8 MiB and re-queues the requested shares
+  records in a replay ring capped at 9 MiB (about 8.05 MiB for the
+  production 32-group shape) and re-queues the requested shares
   on any up, non-stalled carrier. The c11 line exports `fec_nack_tx/rx/retx`,
   `fec_nack_drop`, `fec_nack_bad`, `fec_nack_retx_bytes`,
   `fec_replace_retx_bytes`, `fec_replay_hit/miss`, `fec_nack_lat_ns`,

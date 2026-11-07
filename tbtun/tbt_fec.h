@@ -202,7 +202,7 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
  * ------------------------------------------------------------------ */
 
 #define TBT_FEC_REPLAY_K 4
-#define TBT_FEC_REPLAY_BUDGET (8u * 1024 * 1024)
+#define TBT_FEC_REPLAY_BUDGET (9u * 1024 * 1024)
 
 struct tbt_fec_replay;
 

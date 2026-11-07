@@ -2037,6 +2037,16 @@ static void test_replay(void)
        NULL);
     tbt_fec_replay_free(r);
 
+    /* The production 32-group shape (256 carriers, n=4, m=4) must keep K=4
+     * inside the budget; that is the sizing the design promises. */
+    r = tbt_fec_replay_new(32, 4, 4, 8192);
+    ok(r != NULL, "production replay ring allocated", NULL);
+    ok_u32(tbt_fec_replay_k(r), TBT_FEC_REPLAY_K, "production replay K=4");
+    ok(tbt_fec_replay_bytes(32, 4, 4, 8192, TBT_FEC_REPLAY_K) <=
+           TBT_FEC_REPLAY_BUDGET,
+       "production replay fits the budget", NULL);
+    tbt_fec_replay_free(r);
+
     /* A shape that cannot hold one super-block in the budget gets no ring. */
     r = tbt_fec_replay_new(256, 128, 128, 8192);
     ok(r == NULL, "replay refuses a shape over budget", NULL);
