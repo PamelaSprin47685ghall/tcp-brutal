@@ -774,15 +774,19 @@ DKMS_RESULT PASS|FAIL
 - **硬件 watchdog**：`/dev/watchdog0`，固定 **44 s** 超时，`SETTIMEOUT=0`；
   `MAGICCLOSE=0` 保证关闭 fd 不停狗。`nowayout` 运行时不可设；
   `dw_wdt.nowayout=1` 只能在重启后通过内核命令行生效，当前方案不依赖它。
-- **唯一喂狗者**：当前是 `tbtun-wdt-hold.service`。在正式服务确认持有
-  `/dev/watchdog0` fd 之前，**不停止 hold、不重启 `.65`**。
+- **唯一喂狗者**：当前是 `tbtun-wdt-hold.service`。新服务必须先进入 `EBUSY`
+  重试，才允许停 hold；停 hold 后 20 s 内必须确认新 fd 与 `first feed ok`，
+  失败立即重启 hold。任何时刻都不允许出现“没有喂狗者且无人接管”的状态。
 - **正式服务**：`tbtun-netwatch.service`，`Type=simple`、`Restart=no`；
   脚本每 **5 s** 喂狗；**uptime < 600 s 时只喂狗、不探测、不累计失败**；
-  uptime ≥ 600 s 后每 **30 s** 探测路由器 80，连续 **3 次**失败停止喂狗并退出，
-  硬件在 44 s 内复位。进程被 kill 或 panic 同样复位。
+  uptime ≥ 600 s 后每 **30 s** 探测路由器 80，连续 **3 次**失败停止喂狗
+  （停止写 fd、保持 fd 打开、进程留在原地，不 close 不退出），硬件在 44 s 内
+  复位。进程被 kill 或 panic 同样复位。
 - **systemd 不喂狗**：`RuntimeWatchdogUSec=0`。
-- **切换**：启动新服务（EBUSY 重试）→ 读 `/proc/<pid>/fd` 确认指向
-  `/dev/watchdog0` → 停 hold → 观察 ≥10 s → 失败立即重启 hold。
+- **切换**：启动新服务（EBUSY 重试）→ 等日志出现 `open /dev/watchdog0: busy`
+  （证明新进程已进入重试）→ 停 hold → 20 s 内确认新 MainPID 持有 fd 且日志有
+  `first feed ok` → 失败立即重启 hold。设备单打开者，不存在“先确认新 fd 再停
+  hold”的顺序。
 - **回滚**：`MAGICCLOSE=0` 下无法优雅停止；唯一安全回滚是
   `sync; systemctl reboot`（60 s 未完成用 `reboot -f`；`CONFIG_MAGIC_SYSRQ`
   未编译，不用 sysrq）。**不要写“systemctl stop 即可”。**
@@ -805,8 +809,9 @@ DKMS_RESULT PASS|FAIL
 | 时间 | 行为 | 失败计数 | 复位 |
 |---|---|---|---|
 | uptime 0–600 s | 宽限期：每 5 s 喂狗，不探测 | 不累计 | 不触发 |
-| uptime 600 s | 第一次探测 | 0 | — |
-| uptime 600–690 s | 每 30 s 探测；连续失败累计 | 1 → 2 → 3 | — |
+| uptime 600 s | 宽限结束；等一个探测周期（对齐到开机时间） | 0 | — |
+| uptime 630 s | 第一次探测 | 0 → 1 | — |
+| uptime 630–690 s | 每 30 s 探测；连续失败累计 | 1 → 2 → 3 | — |
 | uptime 690 s | 第 3 次连续失败，停止喂狗 | 3 | 倒计时开始 |
 | uptime 734 s | 硬件 44 s 超时 | — | **复位** |
 
@@ -920,7 +925,7 @@ bash review/lint.sh                                 # 16/16 + 14/14
 | DKMS 3.2.2 与 QEMU 3.4.4 差异 | `.65` 真机 | 七步全流程；失败按 release §4.5 清理 | `--uninstall` + 手工清理 |
 | watchdog 误复位 | 路由器瞬时抖动、判据过严、开机网络未就绪 | 600 s 宽限期（只喂狗不探测）；5 s 喂狗、30 s 探测、连续 3 次才停喂；5 次/30 分钟 reset budget；先 dry-run；1 GiB/DKMS 期间不做故障注入 | 无法优雅停止；唯一回滚是 `sync; systemctl reboot`（`review/dot65-watchdog-design.md` §5） |
 | watchdog 判据猜错 | 未等实测就填状态码 | 实测结果回来前 `WATCHDOG_EXPECT_STATUS`/`WATCHDOG_EXPECT_BODY_REGEX` 留空；结果写入设计文档 §3.3 与证据目录 | 改 `/etc/tbtun-watchdog.conf`，不改脚本 |
-| 切换时 hold 与正式服务都 open 失败 | 先停 hold 再启动新服务 | 新服务先启动并 EBUSY 重试；确认 `/proc/<pid>/fd` 指向 `/dev/watchdog0` 后再停 hold；失败立即重启 hold | 重启 `.65` |
+| 切换时 hold 与正式服务都 open 失败 | 先停 hold 再启动新服务 | 新服务先启动并 EBUSY 重试；确认日志出现 `open /dev/watchdog0: busy`（已进入重试）后再停 hold；停后 20 s 内确认 fd 与 `first feed ok`；失败立即重启 hold | 重启 `.65` |
 
 ---
 

@@ -15,7 +15,7 @@
 | 约束 | 内容 |
 |---|---|
 | 唯一喂狗者 | 当前是 `tbtun-wdt-hold.service`。它是 `.65` 的生命线。 |
-| 禁止动作 | 在正式服务未确认持有 `/dev/watchdog0` fd 之前，停止 hold、重启 `.65`、或让任何进程短暂独占失败。 |
+| 禁止动作 | 新服务未进入 `EBUSY` 重试就停 hold；停 hold 后 20 s 内未确认新 fd 与 `first feed ok` 就收工；交接窗口内重启 `.65`；任何时刻出现没有喂狗者的空窗。 |
 | 超时 | **固定 44 s**。`SETTIMEOUT=0`，不尝试改。 |
 | 喂狗间隔 | **5 s**。必须 `< 44/3 ≈ 14.67 s`。 |
 | 宽限期 | **600 s**。开机后只喂狗，不探测、不累计失败。防止重启循环。 |
@@ -96,32 +96,37 @@ WantedBy=multi-user.target
 
 ```
 1. open("/dev/watchdog0", O_WRONLY)
-   - EBUSY → 每 2 s 重试（hold 还持有 fd）
-   - 其他错误 → 写日志，exit 2
-2. 读 WDIOC_GETBOOTSTATUS，写日志（上次是否 watchdog 复位）
-3. 主循环，0.5 s tick：
-   - 每 5 s：ioctl(fd, WDIOC_KEEPALIVE, 0)
-   - 开机后 600 s 内：只喂狗，不探测、不累计失败（宽限期）
-   - 600 s 后每 30 s：启动一次非阻塞探测（curl，超时 10 s）
-   - 探测结束后：解析状态码/正文，更新连续失败计数
+   - EBUSY → 每 2 s 重试，窗口 120 s（hold 还持有 fd）
+   - 其他错误 / 窗口耗尽 → 写日志，exit 1（不武装，机器无保护但不复位）
+2. 不读 WDIOC_GETBOOTSTATUS：wdctl 需要 open 设备，而 open 本身就是武装。
+   复位归因靠 /var/log/tbtun-watchdog.log、journal 与 boot-count。
+3. feeder 线程：0.5 s tick，每 5 s write(fd, "1")；首次成功后记
+   "first feed ok"，之后每 300 s 一条 "feed ok" 心跳。
+4. prober 线程：
+   - uptime < 600 s：只等待，不探测、不累计失败（宽限期）
+   - 600 s 宽限结束后先等一个周期，第一次探测在 ~630 s，之后每 30 s 一次
+     （curl，连接 3 s、总超时 5 s、外层 8 s）
    - 连续失败 >= 3：检查 reset budget（5 次 / 30 分钟）
-       - budget 未满：写日志 + sync + 写 last-trip；close(fd)；exit 3
+       - budget 未满：写日志 + sync + 写 pre-reset.log；停止写 fd，但保持
+         fd 打开（防止别的进程重新 open 后继续喂狗）；硬件在 44 s 内复位
        - budget 已满：写告警，继续喂狗，不再停止
-4. 退出即复位：MAGICCLOSE=0 保证 close 不停狗；硬件在 44 s 内复位。
+5. 停止喂狗即复位：不再写 fd；进程留在原地，不 close、不退出。
 ```
 
 关键点：
 
-- **喂狗与探测解耦**：探测用 `subprocess.Popen` 非阻塞启动，主循环每 0.5 s
-  检查一次；探测跑 10 s 也不会错过 5 s 喂狗。单线程、无锁、无共享状态。
+- **喂狗与探测解耦**：喂狗在独立线程，0.5 s tick、每 5 s 写一次；探测在另一
+  线程用阻塞 curl（`PROBE_TIMEOUT=5`，外层 8 s），慢探测不会错过喂狗。两个
+  线程只通过 `stop`/`give_up` 事件与一把 `fail_lock` 交互。
 - **宽限期**：开机后 600 s 内只喂狗。此时网络可能还没起来，探测必然失败；
   如果此时咬，就会形成“开机 → 探测失败 → 复位”的重启循环。宽限期内的
   任何失败都不累计、不进入 reset budget。
 - **HTTP 失败只计数**：单次失败不停止喂狗，只有连续 3 次才停止。
 - **reset budget**：30 分钟内第 5 次 watchdog 复位后，继续喂狗、不再停止，
   只写告警。硬件 watchdog 不能“半咬”，所以 budget 的实现是“不再停止喂狗”。
-- **停止喂狗 = 退出**：不调用 `systemctl reboot`，不写 sysrq。硬件复位是设计
-  目标。`close(fd)` 后 `MAGICCLOSE=0` 让驱动继续计时。
+- **停止喂狗 = 不再写 fd**：不调用 `systemctl reboot`，不写 sysrq，也不
+  `close(fd)`。保持 fd 打开是为了不让任何其他进程 open 后继续喂狗；进程被
+  kill 或 panic 时 fd 随进程消失，同样复位。
 - **panic/被 kill**：fd 随进程消失；没人喂；硬件复位。这是设计目标。
 
 **实现状态**：完整实现是 `review/wan-experiment/arm64/netwatch-65/`，包含
@@ -134,12 +139,15 @@ WantedBy=multi-user.target
 |---|---|---|---|
 | `WATCHDOG_PROBE_URL` | `http://192.168.123.254:80/` | 探测目标 | 是否监听 80、是否需要 `Host` 头 |
 | `WATCHDOG_METHOD` | `GET` | HTTP 方法 | `HEAD` 是否被接受 |
-| `WATCHDOG_PROBE_TIMEOUT_S` | `10` | 连接 + 读取超时 | 路由器正常响应时间 |
-| `WATCHDOG_EXPECT_STATUS` | 空 | 正常状态码集合（如 `200-399`）；空 = 任意 2xx/3xx | 实测状态码；401/403 是否也算“活着” |
+| `WATCHDOG_PROBE_TIMEOUT_S` | `5` | 连接 + 读取超时（连接 3 s） | 实测 1.6 ms，5 s 足够 |
+| `WATCHDOG_EXPECT_STATUS` | `100-499` | 正常状态码集合；**401 是健康答案** | 实测 5/5 返回 401，见 README §2 |
 | `WATCHDOG_EXPECT_BODY_REGEX` | 空 | 正文匹配；空 = 不检查正文 | 正文前 200 字节；是否返回重定向页 |
 | `WATCHDOG_GRACE_S` | `600` | 开机宽限期；只喂狗、不探测、不累计失败 | — |
 | `WATCHDOG_RESET_BUDGET` | `5` | 30 分钟窗口内允许的 watchdog 复位次数 | — |
 | `WATCHDOG_RESET_WINDOW_S` | `1800` | reset budget 的滑动窗口 | — |
+| `WATCHDOG_FEED_S` | `5` | 喂狗周期 | 44/3 ≈ 14.67 s 是上限 |
+| `WATCHDOG_FAIL_THRESHOLD` | `3` | 连续失败阈值 | 3 × 30 s = 90 s |
+| `WATCHDOG_OPEN_RETRY_S` | `120` | `EBUSY` 重试窗口 | 覆盖 hold 切换 |
 
 **判据语义**（三条同时成立才算“正常”）：
 
@@ -150,16 +158,30 @@ WantedBy=multi-user.target
 任一条不成立记一次失败。**不用 `curl -f`**：它把 4xx/5xx 一律当失败，而路由器
 返回 401/403 仍可能说明本机网络栈正常。必须显式解析状态码。
 
-**实测回填前不写死任何状态码或正文。** 实测结果写入
-`review/dot65-watchdog-probe.txt`，再把结论填进上表与
-`review/wan-experiment/arm64/netwatch-65/README.md` 的判据常量。
+实测已完成：401、约 1.6 ms、5/5 成功，原始输出在
+`review/wan-experiment/arm64/netwatch-65/README.md` §2。改判据时同时改脚本
+默认值、该 README 与本节，三处必须一致。
 
 ---
 
 ## 4. 切换顺序（hold → 正式服务）
 
-**前提**：hold 正在运行并持有 `/dev/watchdog0`。正式服务启动后会 `EBUSY` 重试，
-这是预期行为，不是失败。
+**前提**：hold 正在运行并持有 `/dev/watchdog0`。
+
+**设备事实决定顺序**：`/dev/watchdog0` 只允许一个打开者。hold 持有 fd 时，
+新进程 `open()` 返回 `EBUSY`；旧 fd 释放前，新进程不可能拿到 fd。因此
+“新服务 open 成功并确认 fd 之后再停 hold”在这块板子上**无法执行**——任何
+声称这样做的脚本，实际都在两个进程之间留了一个无人喂狗的空窗。
+
+设备允许的最强顺序是：
+
+```
+启动新服务（EBUSY 重试）
+  → 确认新服务已进入重试（open 路径已被执行过的唯一证据）
+  → 停 hold（fd 释放，44 s 窗口开始）
+  → 20 s 内确认新 MainPID 持有 fd 且已完成 first feed
+  → 任一步失败：立即重启 hold，确认 hold 拿到 fd
+```
 
 ```sh
 # 0. 记录当前 hold 的状态与 fd
@@ -167,39 +189,49 @@ systemctl status tbtun-wdt-hold --no-pager
 HOLD_PID=$(systemctl show -p MainPID --value tbtun-wdt-hold)
 ls -l /proc/$HOLD_PID/fd | grep watchdog
 
-# 1. 启动正式服务；它会 EBUSY 重试，不会抢走 hold 的 fd
+# 1. 启动正式服务；它每 2 s 重试 EBUSY，不会抢走 hold 的 fd
 systemctl start tbtun-netwatch
 
-# 2. 确认正式服务已持有 /dev/watchdog0 的 fd
+# 2. 确认新服务已进入 open 重试（不是确认它已持有 fd——那在 hold 停止前
+#    不可能发生）
 NEW_PID=$(systemctl show -p MainPID --value tbtun-netwatch)
 test -n "$NEW_PID" && test "$NEW_PID" != 0
-ls -l /proc/$NEW_PID/fd | grep -F '/dev/watchdog0'
-# 期望：一行指向 /dev/watchdog0；没有就停止，不要动 hold
+tail -n 40 /var/log/tbtun-watchdog.log | grep -F 'open /dev/watchdog0: busy'
+# 期望：出现 'busy ... retrying every 2 s for 120 s'；没有就停掉新服务，不要动 hold
 
-# 3. 确认新服务已经喂过一次狗（日志有 "feed" 且无 EBUSY）
-journalctl -u tbtun-netwatch -n 20 --no-pager
-
-# 4. 停 hold；此时 fd 释放，正式服务在下一次重试时 open 成功
+# 3. 停 hold；fd 释放后，正式服务的下一次重试（<=2 s）open 成功
 systemctl stop tbtun-wdt-hold
 
-# 5. 观察 ≥10 s，确认正式服务日志持续有 feed
-sleep 10
-journalctl -u tbtun-netwatch --since '-15s' --no-pager
+# 4. 20 s 内确认新服务持有 fd，并已完成第一次喂狗
+ls -l /proc/$NEW_PID/fd | grep -F '/dev/watchdog0'
+tail -n 20 /var/log/tbtun-watchdog.log | grep -F 'first feed ok'
+# 期望：两行都在。任一缺失就执行第 5 步。
 
-# 6. 失败则立即重启 hold（hold 会重新 open，继续续命）
+# 5. 失败则立即重启 hold（它重新 open，继续续命），再退出非零
 #    systemctl start tbtun-wdt-hold
+#    HOLD_PID=$(systemctl show -p MainPID --value tbtun-wdt-hold)
+#    ls -l /proc/$HOLD_PID/fd | grep watchdog
+
+# 6. 观察 >=10 s，确认服务仍 active、fd 仍在、日志无 VERDICT
+sleep 10
+systemctl is-active tbtun-netwatch
 ```
 
 **禁止**：先停 hold 再启动正式服务。两步之间最多 44 s，任何 open 失败都会复位。
+**同样禁止**：把“先确认新 fd、再停 hold”写进任何脚本或文档——它不可执行。
 
 **验证 fd 的替代方法**（不依赖 `/proc`）：
 
 ```sh
-# 正式服务日志应打印 "opened /dev/watchdog0, timeout=44s, magicclose=0"
+# 正式服务日志应打印 "opened /dev/watchdog0 (expected timeout=44s, magicclose=0)"
 journalctl -u tbtun-netwatch -n 5 --no-pager
 ```
 
 脚本在 open 成功后必须打印这一行；没有这一行就不算持有 fd。
+
+`install-65.sh` 实现了上述顺序：它要求先看到 `open /dev/watchdog0: busy` 的
+重试证据才停 hold，停 hold 后 20 s 内确认 fd 与 `first feed ok`，失败自动
+`systemctl start tbtun-wdt-hold` 并以非零退出。
 
 ---
 
@@ -210,10 +242,15 @@ journalctl -u tbtun-netwatch -n 5 --no-pager
 
 | 场景 | 动作 |
 |---|---|
-| 正式服务配置错误，但 hold 仍在 | 不要停正式服务；先修配置，再按 §4 重新切换。若必须停，先启动 hold（它会 EBUSY 重试），确认 hold 持有 fd 后再停正式服务。 |
-| 正式服务已接管，需要回到 hold | 先 `systemctl start tbtun-wdt-hold`（EBUSY 重试）→ 确认 hold 的 fd → 再停正式服务。两步之间不能超过 44 s。 |
+| 正式服务配置错误，但 hold 仍在 | 不要停正式服务；先修配置，再按 §4 重新切换。若必须停，按 `rollback-65.sh --to-hold` 的顺序：启动 hold（它会 EBUSY 重试）→ 停正式服务 → 15 s 内确认 hold 的 fd；确认失败立即重启正式服务。 |
+| 正式服务已接管，需要回到 hold | `rollback-65.sh --to-hold`：`systemctl start tbtun-wdt-hold`（EBUSY 重试）→ 停正式服务 → 15 s 内确认 hold 的 fd；失败立即重启正式服务并再确认。两步之间不能超过 44 s。 |
 | 需要彻底移除 watchdog | **唯一安全方式：`sync; systemctl reboot`**。重启后由 bootloader/内核处理；不要在重启前停喂狗者。 |
 | 重启 60 s 未完成 | `reboot -f`。**不要用 sysrq**（`CONFIG_MAGIC_SYSRQ` 未编译）。 |
+
+**不存在“先确认 hold 的 fd、再停正式服务”的顺序**：设备只允许一个打开者，
+正式服务持有 fd 时 hold 只能拿到 `EBUSY`。必须先让 hold 进入重试、再停正式
+服务，然后在 44 s 窗口内确认 hold 接管；确认失败就把正式服务重新拉起来。
+这与 §4 的切换方向对称，原因相同。
 
 **绝对不要**写“`systemctl stop tbtun-netwatch` 即可停用”。那是错的：它会启动
 44 s 复位倒计时。
@@ -229,8 +266,8 @@ journalctl -u tbtun-netwatch -n 5 --no-pager
 - 理由：开机后网络、路由、上游路由器都可能还没就绪；此时探测必然失败。
   如果立即咬，就会形成“开机 → 探测失败 → 复位 → 再开机”的循环。
 - 宽限期内的任何失败**不进入 reset budget**。
-- 宽限期结束后的第一次探测从 `t=600 s` 开始；连续 3 次失败最早在
-  `t=690 s` 停止喂狗，硬件在 `t≈734 s` 复位。
+- 宽限结束后先等一个探测周期（对齐到开机时间），第一次探测在 `t≈630 s`；
+  连续 3 次失败在 630/660/690 s，`t=690 s` 停止喂狗，硬件在 `t≈734 s` 复位。
 
 ### 6.2 reset budget（5 次 / 30 分钟）
 
@@ -306,8 +343,9 @@ journalctl -u tbtun-netwatch -n 5 --no-pager
 | 时间 | 行为 | 失败计数 | 复位 |
 |---|---|---|---|
 | 0–600 s | 宽限期：每 5 s 喂狗，不探测 | 不累计 | 不触发 |
-| 600 s | 第一次探测 | 0 | — |
-| 600–690 s | 每 30 s 探测；连续失败累计 | 1 → 2 → 3 | — |
+| 600 s | 宽限结束；等一个探测周期 | 0 | — |
+| 630 s | 第一次探测 | 0 → 1 | — |
+| 630–690 s | 每 30 s 探测；连续失败累计 | 1 → 2 → 3 | — |
 | 690 s | 第 3 次连续失败，停止喂狗 | 3 | 倒计时开始 |
 | 734 s | 硬件 44 s 超时 | — | **复位** |
 

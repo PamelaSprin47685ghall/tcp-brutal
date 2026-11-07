@@ -1,0 +1,36 @@
+[Unit]
+Description=tbtun netwatch: hardware watchdog feeder gated on gateway 192.168.123.254:80
+Documentation=file:/usr/local/share/doc/tbtun-netwatch.md
+After=local-fs.target
+# Do not wait for network-online: the watchdog must be armed early, and the
+# first 600 s of uptime are exempt from judging the gateway anyway (the script
+# reads /proc/uptime, so it does not matter how late we start).
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/tbtun-netwatch.py
+# Do not add WatchdogSec= (that is systemd's software watchdog and it would
+# restart this unit) and keep RuntimeWatchdogUSec=0 system-wide: if systemd
+# feeds /dev/watchdog0 too, a dead feeder is masked and the gateway gate is
+# worthless. install-65.sh refuses to run when RuntimeWatchdogUSec is not 0.
+# A dead feeder must stay dead: restarting it would resume feeding and hide
+# the very fault the watchdog exists to catch.
+Restart=no
+RestartSec=0
+TimeoutStopSec=5
+KillMode=control-group
+# Survive memory pressure; the feeder is the last thing that should be OOM-killed.
+OOMScoreAdjust=-1000
+Nice=-10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=0
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=tbtun-netwatch
+# The script needs /dev/watchdog0, /dev/kmsg, /var/log, /var/lib.
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
