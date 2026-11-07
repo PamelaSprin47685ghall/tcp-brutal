@@ -1890,9 +1890,30 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
     if (kill)
     {
         if (debug >= 2)
-            pr_info("tbtun: TXSTALLKILL sid=%llu ack=%llu txseq=%llu age_us=%llu\n",
-                    (unsigned long long)st->sid, ack, READ_ONCE(st->tx_seq),
-                    (now - start) / NSEC_PER_USEC);
+        {
+            struct tbt_fec_tx *tx =
+                sess->fec ? READ_ONCE(sess->fec_tx) : NULL;
+            u16 g = tx ? READ_ONCE(tx->last_group) : 0;
+
+            if (tx && tx->g && g < READ_ONCE(tx->groups))
+                pr_info("tbtun: TXSTALLKILL sid=%llu ack=%llu txseq=%llu age_us=%llu "
+                        "fec_block=%llu fec_group=%u fec_share=%u fec_nreal=%u "
+                        "fec_last_len=%u fec_seq=%llu fec_peer_pkts=%llu\n",
+                        (unsigned long long)st->sid, ack,
+                        READ_ONCE(st->tx_seq),
+                        (now - start) / NSEC_PER_USEC,
+                        (unsigned long long)READ_ONCE(tx->cur_block), g,
+                        (unsigned int)READ_ONCE(tx->last_share),
+                        (unsigned int)READ_ONCE(tx->g[g].nreal),
+                        (unsigned int)READ_ONCE(tx->g[g].last_len),
+                        (unsigned long long)READ_ONCE(tx->seq),
+                        (unsigned long long)READ_ONCE(tx->peer_pkts));
+            else
+                pr_info("tbtun: TXSTALLKILL sid=%llu ack=%llu txseq=%llu age_us=%llu\n",
+                        (unsigned long long)st->sid, ack,
+                        READ_ONCE(st->tx_seq),
+                        (now - start) / NSEC_PER_USEC);
+        }
         atomic64_inc(&sess->holes_unrecoverable);
         if (sess->fec)
             atomic64_inc(&sess->fec_reset_hole);
