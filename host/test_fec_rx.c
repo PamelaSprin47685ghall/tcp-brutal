@@ -1478,6 +1478,57 @@ static void test_replay_dedup_model(void)
     tbt_fec_replay_free(r);
 }
 
+/* The FIN must not wait for replay records. A replay is a duplicate of a
+ * share that was already encoded and sent once; it cannot extend the stream.
+ * fix20 held the FIN behind an 8 MiB replay backlog, the 5 s close budget
+ * expired, and a 99.63% transfer was reset with 3.98 MB left. The flush also
+ * drops a queued replay whose block the peer has already delivered, so the
+ * backlog shrinks to the shares the tail actually needs. */
+static void test_fin_and_stale_replay(void)
+{
+    struct tbt_fec_replay *r = tbt_fec_replay_new(1, N, M, S);
+    u64 frontier = 2 * (u64)G * N; /* blocks 0 and 1 are delivered */
+    u64 queued[5] = {0, 0, 1, 2, 3};
+    u64 kept[5];
+    u8 buf[S];
+    int i, nkept = 0;
+
+    /* FIN gating: only the packetizer and new DATA records matter. */
+    ok(tbt_fec_fin_ready(true, 0),
+       "FIN: ready while only replay records are queued");
+    ok(!tbt_fec_fin_ready(false, 0), "FIN: not while the packetizer runs");
+    ok(!tbt_fec_fin_ready(true, 1), "FIN: not while new DATA is queued");
+
+    /* A closing stream caps replay admission at 2 MiB. */
+    ok_size((size_t)tbt_fec_replay_cap(false, 8u * 1024 * 1024),
+            8u * 1024 * 1024, "replay cap: normal bound unchanged");
+    ok_size((size_t)tbt_fec_replay_cap(true, 8u * 1024 * 1024),
+            TBT_FEC_REPLAY_CLOSE_BYTES_MAX,
+            "replay cap: a closing stream drops to 2 MiB");
+    ok_size((size_t)tbt_fec_replay_cap(true, 1024 * 1024), 1024 * 1024,
+            "replay cap: never raises a lower bound");
+
+    /* Flush purge: records for delivered blocks are freed without a write;
+     * the frontier and later blocks stay queued. */
+    for (i = 0; i < 5; i++)
+        if (!tbt_fec_block_delivered(queued[i], frontier, G, N))
+            kept[nkept++] = queued[i];
+    ok_int(nkept, 2, "stale replay: only the undelivered blocks remain");
+    ok(kept[0] == 2 && kept[1] == 3,
+       "stale replay: the frontier and the tail block survive");
+
+    /* The tail share of the surviving block is still in the ring and can be
+     * replayed; the purge does not touch it. */
+    ok(r != NULL, "stale replay: ring");
+    ok_int(tbt_fec_replay_store(r, 3, 0, 0, src, S), 0,
+           "stale replay: tail share stored");
+    ok_int(tbt_fec_replay_get(r, 3, 0, 0, buf, S), S,
+           "stale replay: tail share still replays");
+    ok(!tbt_fec_block_delivered(3, frontier, G, N),
+       "stale replay: the tail block is not delivered");
+    tbt_fec_replay_free(r);
+}
+
 /* A record that arrives for a settled block is classified, never refused.
  * A replayed empty marker used to return -EPROTO, and the carrier parser
  * kills the carrier that carried a -EPROTO record: one NACK retry became
@@ -1568,6 +1619,7 @@ int main(void)
     test_nack_filter();
     test_nack_storm();
     test_replay_dedup_model();
+    test_fin_and_stale_replay();
     test_arrival_kind();
 
     printf("test_fec_rx: %d checks, %d failures\n", checks, failures);

@@ -238,11 +238,24 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier, const u8 *buf
     o->len = len;
     o->control = control ? 1 : 0;
     o->replay = replay ? 1 : 0;
+    o->block_id = 0;
+    if (replay)
+    {
+        struct tbt_fec_hdr h;
+
+        /* The record is complete here, header included; unpack is a plain
+         * byte copy. The block id lets the flush drop a repair the peer has
+         * already delivered. */
+        if (!tbt_fec_hdr_unpack(buf, &h))
+            o->block_id = h.block_id;
+    }
     o->stamp_ns = stamp_ns;
     memcpy(o->data, buf, len);
     spin_lock(&sess->fec_out_lock);
     if (replay &&
-        sess->fec_replay_bytes + len > TBT_FEC_REPLAY_BYTES_MAX)
+        sess->fec_replay_bytes + len >
+            tbt_fec_replay_cap(READ_ONCE(sess->fec_closing),
+                               TBT_FEC_REPLAY_BYTES_MAX))
     {
         spin_unlock(&sess->fec_out_lock);
         kfree(o);
@@ -618,6 +631,7 @@ static void tbt_fec_replay_rate_sample(struct tbt_session *sess, u64 bytes)
  * empty pass means the pipeline itself is backpressured. */
 static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
 {
+    struct tbt_fec_tx *tx = sess->fec_tx;
     int ret = 0;
     u32 pass = 0;
     u32 replay_sent = 0;
@@ -674,6 +688,7 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
             u32 depth = 0;
             bool sent = false;
             u64 stamp_ns = 0;
+            u64 block_id = 0;
             u16 olen = 0;
             int err;
 
@@ -683,10 +698,25 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
             if (o)
                 depth = sess->fec_replay_queued;
             stamp_ns = o ? o->stamp_ns : 0;
+            block_id = o ? o->block_id : 0;
             olen = o ? o->len : 0;
             spin_unlock(&sess->fec_out_lock);
             if (!o)
                 break;
+            if (tx && block_id &&
+                tbt_fec_block_delivered(block_id, READ_ONCE(tx->peer_pkts),
+                                        tx->groups, tx->n))
+            {
+                /* The delivered frontier passed this block while the repair
+                 * waited in the queue: every share in it is a duplicate of
+                 * data the peer already has. Free it instead of writing it,
+                 * so the tail repair and the FIN are not stuck behind it. */
+                spin_lock(&sess->fec_out_lock);
+                tbt_fec_out_free(sess, NULL, o);
+                spin_unlock(&sess->fec_out_lock);
+                atomic64_inc(&sess->fec_replay_stale);
+                continue;
+            }
             err = tbt_fec_out_try(sess, o, &sent, usable, ncand, pace);
             if (err == -EAGAIN)
             {
@@ -856,12 +886,12 @@ static int tbt_fec_replay_enqueue(struct tbt_session *sess, const u8 *buf,
  * retries after its hold, and no share is counted as an allocation failure. */
 static u32 tbt_fec_replay_space(struct tbt_session *sess)
 {
+    u32 cap = tbt_fec_replay_cap(READ_ONCE(sess->fec_closing),
+                                 TBT_FEC_REPLAY_BYTES_MAX);
     u32 space;
 
     spin_lock(&sess->fec_out_lock);
-    space = sess->fec_replay_bytes < TBT_FEC_REPLAY_BYTES_MAX
-                ? TBT_FEC_REPLAY_BYTES_MAX - sess->fec_replay_bytes
-                : 0;
+    space = sess->fec_replay_bytes < cap ? cap - sess->fec_replay_bytes : 0;
     spin_unlock(&sess->fec_out_lock);
     return space;
 }
@@ -1256,17 +1286,21 @@ static bool tbt_fec_tx_credit_ok(const struct tbt_fec_tx *tx)
 static bool tbt_fec_tx_is_idle(struct tbt_session *sess)
 {
     struct tbt_fec_tx *tx = sess->fec_tx;
-    bool idle;
+    bool pkt_idle;
+    u32 queued;
 
     spin_lock(&tx->lock);
-    idle = tx->head == tx->tail && tx->fill == 0 && !READ_ONCE(tx->flush_req);
+    pkt_idle = tx->head == tx->tail && tx->fill == 0 &&
+               !READ_ONCE(tx->flush_req);
     spin_unlock(&tx->lock);
-    if (!idle)
-        return false;
     spin_lock(&sess->fec_out_lock);
-    idle = !sess->fec_out_queued;
+    queued = sess->fec_outq_queued;
     spin_unlock(&sess->fec_out_lock);
-    return idle;
+    /* Only new DATA orders the FIN. Replay records are duplicates of shares
+     * already sent once and control records carry no stream bytes, so an
+     * 8 MiB replay backlog must not hold the close (fix20: close_timeouts=1
+     * with 3.98 MB left). */
+    return tbt_fec_fin_ready(pkt_idle, queued);
 }
 
 static void tbt_fec_tx_work_body(struct tbt_session *sess)
@@ -1303,6 +1337,10 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
     st = tbt_fec_stream(sess);
     if (!st)
         return;
+    /* A closing stream caps replay admission at
+     * TBT_FEC_REPLAY_CLOSE_BYTES_MAX: the last block's repair must fit the
+     * close budget, so an older backlog must not refill the queue. */
+    WRITE_ONCE(sess->fec_closing, READ_ONCE(st->close_since_ns) != 0);
     for (;;)
     {
         u32 got;
@@ -1459,7 +1497,14 @@ size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,
 
 bool tbt_fec_tx_idle(struct tbt_stream *st)
 {
-    return tbt_fec_tx_is_idle(st->sess);
+    struct tbt_session *sess = st->sess;
+    bool idle = tbt_fec_tx_is_idle(sess);
+
+    /* The FIN may proceed while replay records are still queued; count how
+     * often the old all-queues gate would have held it. */
+    if (idle && READ_ONCE(sess->fec_replay_queued))
+        atomic64_inc(&sess->fec_fin_wait_replay);
+    return idle;
 }
 
 int tbt_fec_tx_flush(struct tbt_stream *st)

@@ -352,6 +352,29 @@ static inline bool tbt_fec_block_delivered(u64 block_id, u64 peer_pkts,
     return span && peer_pkts / span > block_id;
 }
 
+/* The FIN may be queued once the packetizer and every new DATA record are
+ * out. Replay records are duplicates of shares already encoded and sent
+ * once; they cannot extend the stream, so a replay backlog must not hold
+ * the FIN. Waiting for it let an 8 MiB backlog outlive the 5 s close budget
+ * and reset a 99.63% transfer (fix20 1 GiB, close_timeouts=1). */
+static inline bool tbt_fec_fin_ready(bool pkt_idle, u32 new_data_queued)
+{
+    return pkt_idle && !new_data_queued;
+}
+
+/* While a stream is closing, the replay queue is capped lower so the last
+ * block's repair fits inside the close budget. The normal bound is passed in
+ * by the caller (TBT_FEC_REPLAY_BYTES_MAX), which keeps this header free of
+ * session state. */
+#define TBT_FEC_REPLAY_CLOSE_BYTES_MAX (2u * 1024 * 1024)
+
+static inline u32 tbt_fec_replay_cap(bool closing, u32 normal_max)
+{
+    if (closing && normal_max > TBT_FEC_REPLAY_CLOSE_BYTES_MAX)
+        return TBT_FEC_REPLAY_CLOSE_BYTES_MAX;
+    return normal_max;
+}
+
 /* A NACK named share n of a group that never wrote into the block. No record
  * is resident, so the replay ring cannot answer; the empty marker is the
  * truth. The block must be closed (its shape is final) and still inside the
