@@ -2181,6 +2181,43 @@ static struct tbt_carrier *tbt_sched_pick(struct tbt_session *sess,
     return NULL;
 }
 
+/* No schedulable carrier is not user backpressure yet: the replacement worker
+ * may be about to install one. Ask it now, and let the capture side wait this
+ * long before it is told to stop reading. A dial that fails or a peer that
+ * never answers simply outlives the window; that is the point where the queue
+ * stops being a short wait and becomes real backpressure. */
+#define TBT_TX_WAIT_CARRIER_MS 500
+
+static void tbt_tx_request_carrier(struct tbt_session *sess)
+{
+    if (READ_ONCE(sess->closing))
+        return;
+    if (!sess->tx_wait_since_ns)
+        sess->tx_wait_since_ns = tbt_now_ns();
+    /* Coalesced by tbt_session_arm(); 20 ms is one dial retry, not a poll
+     * storm. The replace work supplies empty slots and replaces stopping
+     * carriers; a stalled carrier is already out of the stripe. */
+    tbt_session_arm(sess, TBT_SW_REPLACE, msecs_to_jiffies(20));
+}
+
+/* Called from capture when the queue refused a chunk. If the refusal is a
+ * carrier wait, the caller must not stop reading yet; once the wait outlives
+ * the window (dial failed, max_carriers reached, peer unreachable), or the
+ * queue is full for another reason, the caller enters user backpressure. */
+static bool tbt_tx_should_backpressure(struct tbt_session *sess)
+{
+    u64 since = READ_ONCE(sess->tx_wait_since_ns);
+
+    if (READ_ONCE(sess->closing))
+        return true;
+    if (!READ_ONCE(sess->n_car))
+        return true;
+    if (!since)
+        return true;
+    return tbt_now_ns() - since >=
+           (u64)TBT_TX_WAIT_CARRIER_MS * NSEC_PER_MSEC;
+}
+
 // ---------------------------------------------------------------------------
 // The pump
 
@@ -2339,6 +2376,7 @@ int tbt_tx_pump(struct tbt_session *sess)
     struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
     int nsnap, i;
     int pass, moved = 0;
+    bool wait_carrier = false;
 
     might_sleep();
     atomic64_inc(&sess->dbg_pump_runs);
@@ -2611,6 +2649,11 @@ int tbt_tx_pump(struct tbt_session *sess)
                         if (stalled)
                             sess->dbg_retx_stalled++;
                     }
+                    /* No usable carrier is a wait, not backpressure: ask the
+                     * replacement worker for one and let capture keep the
+                     * bytes in the public socket until the wait expires. */
+                    tbt_tx_request_carrier(sess);
+                    wait_carrier = true;
                     continue;
                 }
                 if (!atomic_read(&c->up))
@@ -2742,6 +2785,16 @@ int tbt_tx_pump(struct tbt_session *sess)
                         sess->dup_same_path++;
                     r->reserve_mask |= BIT(c->index);
                 }
+            }
+            /* A carrier became usable: close the current wait event. Both
+             * L_wait gauges keep the last event's values (bytes queued and
+             * how long the wait ran), so R_c x wait can be read directly;
+             * tx_wait_carrier counts the events. */
+            if (sess->tx_wait_since_ns)
+            {
+                sess->tx_wait_carrier_ns =
+                    tbt_now_ns() - sess->tx_wait_since_ns;
+                sess->tx_wait_since_ns = 0;
             }
             fr->path = c->index;
             if (fr->retx_copy)
@@ -3106,24 +3159,68 @@ ctl_fail:
         }
         tbt_carrier_put(c);
     }
-    if (READ_ONCE(sess->tx_queued) <= sess->txq_max / 2)
+    /* L_wait inputs: the last wait event's queue depth and duration. These
+     * are gauges, not sums: tx_queued at the wait, and the elapsed wait. The
+     * event count is tx_wait_carrier; a sum would grow with the pump rate
+     * instead of measuring R_c x wait. */
+    if (wait_carrier)
     {
-        struct tbt_stream *it;
-        int i;
+        sess->tx_wait_carrier++;
+        sess->tx_wait_carrier_bytes = READ_ONCE(sess->tx_queued);
+        if (sess->tx_wait_since_ns)
+            sess->tx_wait_carrier_ns =
+                tbt_now_ns() - sess->tx_wait_since_ns;
+    }
+    {
+        bool wait_expired = false;
 
-        rcu_read_lock();
-        for (i = 0; i < TBT_STREAM_HT; i++)
+        if (sess->tx_wait_since_ns)
+            wait_expired = tbt_now_ns() - sess->tx_wait_since_ns >=
+                           (u64)TBT_TX_WAIT_CARRIER_MS * NSEC_PER_MSEC;
+        if (READ_ONCE(sess->tx_queued) <= sess->txq_max / 2)
         {
-            hlist_for_each_entry_rcu(it, &sess->streams[i], node)
+            struct tbt_stream *it;
+            int i;
+
+            rcu_read_lock();
+            for (i = 0; i < TBT_STREAM_HT; i++)
             {
-                if (!READ_ONCE(it->tx_paused))
-                    continue;
-                WRITE_ONCE(it->tx_paused, false);
-                tbt_stream_schedule(it, &it->w_read,
-                                    TBT_STREAM_F_SCHED_READ);
+                hlist_for_each_entry_rcu(it, &sess->streams[i], node)
+                {
+                    /* Wake every stream, not only a paused one: a capture
+                     * that returned short while waiting for a carrier left
+                     * bytes in the public socket without setting tx_paused,
+                     * and only this pump knows the queue is draining again. */
+                    if (READ_ONCE(it->tx_paused))
+                        WRITE_ONCE(it->tx_paused, false);
+                    tbt_stream_schedule(it, &it->w_read,
+                                        TBT_STREAM_F_SCHED_READ);
+                }
             }
+            rcu_read_unlock();
         }
-        rcu_read_unlock();
+        else if (wait_expired)
+        {
+            /* The wait outlived the dial window: wake capture once so its
+             * next submit sees tbt_tx_should_backpressure() and stops
+             * reading. A stream already in backpressure is skipped; arming
+             * it every 10 ms would only repeat the same failed submit. */
+            struct tbt_stream *it;
+            int i;
+
+            rcu_read_lock();
+            for (i = 0; i < TBT_STREAM_HT; i++)
+            {
+                hlist_for_each_entry_rcu(it, &sess->streams[i], node)
+                {
+                    if (READ_ONCE(it->tx_paused))
+                        continue;
+                    tbt_stream_schedule(it, &it->w_read,
+                                        TBT_STREAM_F_SCHED_READ);
+                }
+            }
+            rcu_read_unlock();
+        }
     }
     sess->dbg_pump_moved += moved;
     mutex_unlock(&sess->pump_lock);
@@ -3327,8 +3424,29 @@ size_t tbt_tx_submit(struct tbt_stream *st, struct sk_buff *skb, unsigned int of
             kfree(r);
             /* Backpressure, not a loss: the bytes stay in the public socket's
              * receive queue, its window closes, and the application's send()
-             * blocks. seq did not move. */
-            WRITE_ONCE(st->tx_paused, true);
+             * blocks. seq did not move. While a carrier wait is still inside
+             * its dial window, leave tx_paused alone: the pump wakes capture
+             * when the wait closes or expires. */
+            /* The pump may not have run since the last carrier died. Ask for
+             * one before the first refusal becomes user backpressure; the
+             * wait window starts here, not at the pump's next pass. */
+            if (!READ_ONCE(sess->tx_wait_since_ns))
+                tbt_tx_request_carrier(sess);
+            if (tbt_tx_should_backpressure(sess) &&
+                !READ_ONCE(st->tx_paused))
+            {
+                u64 since = READ_ONCE(sess->tx_wait_since_ns);
+                u64 now = tbt_now_ns();
+
+                WRITE_ONCE(st->tx_paused, true);
+                atomic64_inc(&sess->tx_backpressure);
+                /* L_wait evidence for the "last resort": how much was
+                 * queued, and how long the carrier wait had already run. */
+                atomic64_set(&sess->tx_backpressure_bytes,
+                             READ_ONCE(sess->tx_queued));
+                atomic64_set(&sess->tx_backpressure_ns,
+                             since ? now - since : 0);
+            }
             atomic64_inc(&sess->dbg_over_qmax);
             break;
         }
