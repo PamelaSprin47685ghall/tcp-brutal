@@ -70,14 +70,12 @@ bool tbt_stream_schedule(struct tbt_stream *st, struct work_struct *w,
         clear_bit(bit, &st->attached);
         return false;
     }
-    if (likely(queue_work(TBT_WQ, w)))
-        return true;
-    /* The bit was clear while the work was already pending: a queue point
-     * bypassed this helper. Drop the extra reference. */
-    WARN_ON_ONCE(1);
-    clear_bit(bit, &st->attached);
-    tbt_stream_put(st);
-    return false;
+    /* queue_work() returns %false when the work is already pending (for
+     * example a legacy raw schedule). That queued instance's entry sees the
+     * bit set by test_and_set_bit() above and returns this reference, so the
+     * reference must not be rolled back on %false. */
+    queue_work(TBT_WQ, w);
+    return true;
 }
 
 /* Cancel a queued instance and return its reference. Only a pending instance

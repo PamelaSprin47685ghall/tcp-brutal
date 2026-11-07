@@ -1110,16 +1110,11 @@ bool tbt_session_arm(struct tbt_session *s, enum tbt_sess_work w,
         clear_bit(w, &s->sched);
         return false;
     }
-    if (!mod_delayed_work(TBT_WQ, dw, delay))
-    {
-        /* The bit was clear while an instance was already pending: some
-         * queue point bypassed this helper. Drop the extra reference rather
-         * than leaking it. */
-        WARN_ON_ONCE(1);
-        clear_bit(w, &s->sched);
-        tbt_session_put(s);
-        return false;
-    }
+    /* mod_delayed_work() returns %true when the work was already pending and
+     * %false when this call queued it. Both outcomes leave exactly one
+     * instance that owns the reference just taken: the entry's
+     * test_and_clear_bit() consumes it. Never roll back on %true. */
+    mod_delayed_work(TBT_WQ, dw, delay);
     return true;
 }
 
