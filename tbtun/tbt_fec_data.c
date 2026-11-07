@@ -1642,6 +1642,9 @@ static int tbt_fec_send_empty_marker(struct tbt_session *sess, u16 group,
 
     if (!tx || !tx->n || !tx->m)
         return -EINVAL;
+    if (debug >= 2)
+        pr_info("tbtun: fec NACK empty reply block=%llu group=%u share=%u win_len=0\n",
+                block_id, group, tx->n);
     memset(&h, 0, sizeof(h));
     h.type = TBT_FEC_PARITY;
     h.share_index = tx->n;
@@ -2267,13 +2270,79 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
 
     if (!found)
     {
-        tbt_fec_nack_reset(rx->nack);
+        struct tbt_fec_nack last;
+        bool started = false;
+        bool blocked;
+        u64 last_block;
+
+        if (!rx->nack->valid)
+            return;
+        last_block = rx->nack->block_id;
+        if (last_block < rx->next_super)
+        {
+            tbt_fec_nack_reset(rx->nack);
+            return;
+        }
+        if (READ_ONCE(rx->total_known) &&
+            rx->next_super >
+                tbt_fec_final_block_of_total(rx->total_pkts, rx->groups,
+                                             rx->n))
+        {
+            tbt_fec_nack_reset(rx->nack);
+            return;
+        }
+        spin_lock_bh(&rx->lock);
+        for (g = 0; g < rx->groups; g++)
+        {
+            struct tbt_fec_blk *b = tbt_fec_rx_blk(rx, g, rx->next_super);
+
+            if (b->used && b->block_id == rx->next_super)
+            {
+                started = true;
+                break;
+            }
+        }
+        blocked = started &&
+                  !tbt_fec_super_ready_locked(rx, rx->next_super);
+        spin_unlock_bh(&rx->lock);
+        if (!blocked)
+        {
+            tbt_fec_nack_reset(rx->nack);
+            return;
+        }
+        /* The scan found no new missing set, but the blocked super-block is
+         * still not ready. Resend the last NACK: a replayed share or a parity
+         * reply may still be in flight, and a never-generated padding share
+         * may need the parity reply the previous NACK triggered. */
+        memcpy(last.group_mask, rx->nack->group_mask, TBT_FEC_BITMAP_BYTES);
+        memcpy(last.share_mask, rx->nack->share_mask, TBT_FEC_BITMAP_BYTES);
+        if (tbt_fec_nack_due(rx->nack, now, last_block, &last))
+        {
+            int err = tbt_fec_send_nack(sess, last_block, &last);
+
+            if (debug >= 2)
+                pr_info("tbtun: fec NACK retry block=%llu next=%llu group=%*phN share=%*phN\n",
+                        last_block, rx->next_super, TBT_FEC_BITMAP_BYTES,
+                        last.group_mask, TBT_FEC_BITMAP_BYTES,
+                        last.share_mask);
+            if (!err)
+                atomic64_inc(&sess->fec_nack_tx);
+            else
+                tbt_fec_nack_drop(sess, err, last_block, &last);
+        }
+        tbt_session_arm(sess, TBT_SW_FEC_RX,
+                        msecs_to_jiffies(TBT_FEC_NACK_MIN_MS));
         return;
     }
     if (tbt_fec_nack_due(rx->nack, now, s, &n))
     {
-        int err = tbt_fec_send_nack(sess, s, &n);
+        int err;
 
+        if (debug >= 2)
+            pr_info("tbtun: fec NACK tx block=%llu next=%llu hi=%llu group=%*phN share=%*phN\n",
+                    s, rx->next_super, hi, TBT_FEC_BITMAP_BYTES,
+                    n.group_mask, TBT_FEC_BITMAP_BYTES, n.share_mask);
+        err = tbt_fec_send_nack(sess, s, &n);
         if (!err)
             atomic64_inc(&sess->fec_nack_tx);
         else
@@ -2502,6 +2571,10 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                 }
                 spin_unlock_bh(&rx->lock);
             }
+            if (debug >= 2 && (dup || late))
+                pr_info("tbtun: fec %s share block=%llu group=%u share=%u type=%u win_len=%u epoch=%u next=%llu\n",
+                        late ? "late" : "dup", h.block_id, cg, csh, h.type,
+                        h.win_len, h.epoch, next);
             if (dup)
             {
                 atomic64_inc(&sess->fec_dup_share);
@@ -2702,6 +2775,10 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                     bool replied = false;
                     u16 pi;
 
+                    if (debug >= 2)
+                        pr_info("tbtun: fec NACK absent block=%llu group=%u share=%u cur=%llu gblk=%llu\n",
+                                h.block_id, g, s, READ_ONCE(tx->cur_block),
+                                READ_ONCE(tx->g[g].blk_id));
                     atomic64_inc(&sess->fec_replay_miss_never_stored);
                     atomic64_inc(&sess->fec_replay_miss_get);
                     atomic64_inc(&sess->fec_replay_miss);
@@ -2730,6 +2807,15 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                         atomic64_inc(&sess->fec_nack_retx);
                         atomic64_add((u64)plen, &sess->fec_nack_retx_bytes);
                         atomic64_inc(&sess->fec_nack_parity_reply);
+                        if (debug >= 2)
+                        {
+                            struct tbt_fec_hdr ph;
+
+                            if (!tbt_fec_hdr_unpack(buf, &ph))
+                                pr_info("tbtun: fec NACK parity reply block=%llu group=%u parity=%u win_len=%u epoch=%u\n",
+                                        h.block_id, g, pi, ph.win_len,
+                                        ph.epoch);
+                        }
                         replied = true;
                     }
                     /* A group with no packet in the block has no parity
