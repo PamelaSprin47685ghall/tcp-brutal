@@ -780,7 +780,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "ooo_frames=%u retain_bytes=%u tx_ack=%llu rx_ack=%llu "
                               "peer_paused=%u fb_delay_us=%u rto_us=%u una_stall_us=%u "
                               "stall_paused_skips=%llu stall_idle_skips=%llu "
-                              "stall_declared=%llu tx_window=%u bdp_bytes=%u k_x100=%u "
+                              "stall_declared=%llu stall_recovered=%llu "
+                              "stall_drop=%llu stall_dead=%llu "
+                              "tx_window=%u bdp_bytes=%u k_x100=%u "
                               "rtt_mean_us=%u rttvar_us=%u "
                               "rtt_max_us=%u txq_max=%u win_block=%llu win_resume=%llu "
                               "pump_hw_armed=%llu pump_hw_fired=%llu "
@@ -818,6 +820,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->stall_paused_skips),
                            tbt_stat_read(&s->stall_idle_skips),
                            tbt_stat_read(&s->stall_declared),
+                           tbt_stat_read(&s->stall_recovered),
+                           READ_ONCE(s->stall_drop),
+                           tbt_stat_read(&s->stall_dead),
                            READ_ONCE(s->tx_window), READ_ONCE(s->bdp_bytes),
                            READ_ONCE(s->k_x100), READ_ONCE(s->rtt_mean_us),
                            READ_ONCE(s->rttvar_us), READ_ONCE(s->rtt_max_us),

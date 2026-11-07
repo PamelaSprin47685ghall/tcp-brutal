@@ -202,8 +202,8 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o)
          * dropping it: the receiver sends an ACK only when delivery advances,
          * and delivery cannot advance again until this ACK reopens the
          * sender's credit window. The flush re-arms in 2 ms, so the record
-         * goes out when a carrier recovers. A record that found only dead
-         * carriers keeps the old -ENODEV drop. */
+         * goes out when a carrier recovers. A record that found no stalled
+         * carrier keeps the old -ENODEV drop. */
         if (rc == -ENODEV && saw_stalled)
             rc = -EAGAIN;
         return rc;

@@ -14,9 +14,10 @@
  *   - writing records with tcp_sendmsg_locked through a private struct proto,
  *     so a carrier never needs a kprobe and never exposes a userspace API.
  *   - draining carrier input with tcp_read_sock and feeding tbt_rx.
- *   - liveness: a 50 ms poll that re-arms queues and detects a dead or
- *     ACK-stalled carrier, then asks the session's replacement worker to dial
- *     a new one at the same index (DESIGN.md §9.7).
+ *   - liveness: a 50 ms poll that re-arms queues and asks the session's
+ *     replacement worker to dial a new carrier when one is dead. An
+ *     ACK-stalled carrier is killed under ARQ; under FEC it is only paused,
+ *     because parity can rebuild the shares it owed (DESIGN.md §9.7).
  *
  * Must never:
  *   - run kernel_connect or any sleeping call from sk_data_ready (softirq).
@@ -50,6 +51,30 @@
  * first two retransmissions and stays under TBT_JOIN_TIMEOUT_MS, the far
  * side's deadline for a carrier that has not presented its HELLO yet. */
 #define TBT_CONNECT_BUDGET_MS 4000
+
+/* Stall detection runs off this carrier's own RTO, not a fixed clock: k RTOs
+ * of silence with unacknowledged bytes and an open window pause the carrier.
+ * Five RTOs tolerate one lost ACK or a scheduling delay; 1 s keeps a very fast
+ * path from pausing on a single hiccup, and 60 s keeps a slow one from hiding a
+ * stall for minutes. A configured carrier_stall_ms can only lower the result. */
+#define TBT_STALL_K 5
+#define TBT_STALL_MIN_NS (1ULL * NSEC_PER_SEC)
+#define TBT_STALL_MAX_NS (60ULL * NSEC_PER_SEC)
+
+/* A paused carrier may not stay paused forever. A half-open path never moves
+ * snd_una and never reports an error, so the poll declares the path dead after
+ * this bound: two stall windows, capped at 300 s. Keepalive is the first line
+ * of defence; this bound covers a path that black-holes without the socket
+ * ever seeing a close. */
+#define TBT_STALL_DEAD_MAX_NS (300ULL * NSEC_PER_SEC)
+/* tcp_retries2 defaults to 15; at that count TCP itself is about to give up,
+ * so a wire that has not moved either way is dead. */
+#define TBT_STALL_RETX_MAX 15
+
+static u64 tbt_stall_dead_ns(u64 stall_ns)
+{
+    return min_t(u64, 2 * stall_ns, TBT_STALL_DEAD_MAX_NS);
+}
 
 // A private copy of tcp_prot so carriers carry our sendmsg/recvmsg. Same shape
 // as the deleted brutal_sockopt.c used, for a different reason: there we wanted
@@ -350,10 +375,14 @@ static bool tbt_car_paused(struct tbt_session *sess)
  * 50 ms and re-arm the work item that has something to do. It never copies
  * application bytes; the only socket lock it takes is the drip write.
  *
- * It is also the carrier's health check: a closed socket, or unacknowledged
- * data that has not moved for carrier_stall_ms, marks the carrier lost and
- * asks for a replacement. A provisional carrier that never presents a HELLO
- * is retired when its join deadline expires.
+ * It is also the carrier's health check. A closed socket marks the carrier
+ * lost and asks for a replacement. Unacknowledged data that has not moved for
+ * k RTOs is treated by container: ARQ kills the carrier and repaths its
+ * frames; FEC pauses it instead (no RETIRE, no replacement), because the
+ * shares it owed are rebuilt from parity and a dead carrier would throw them
+ * away. The same poll resumes a paused carrier when snd_una moves, and
+ * declares it dead after stall_dead when it never does. A provisional carrier
+ * that never presents a HELLO is retired when its join deadline expires.
  *
  * Deletion condition: remove the queue re-arm when probes B/C/D and T7 record
  * poll_rescues = 0; the health check has no other driver. */
@@ -459,30 +488,45 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
         u32 wmem = READ_ONCE(sk->sk_wmem_queued);
         bool progress = una != c->last_una;
         bool paused = tbt_car_paused(sess);
-        /* Explicit carrier_stall_ms wins; auto is 3 x this carrier's RTO
-         * (SRTT + 4 x RTTVAR, floored at 200 ms), itself floored at 3 s so a
-         * brief scheduling delay cannot retire a healthy carrier. */
+        /* Auto is k x this carrier's RTO (SRTT + 4 x RTTVAR, floored at
+         * 200 ms), clamped to [1 s, 60 s]. A configured carrier_stall_ms is a
+         * cap, never a replacement: it can lower the threshold, not raise it. */
         u64 stall_ns;
         {
             u32 ms = sess->tunnel->cfg.carrier_stall_ms;
+            u32 srtt = READ_ONCE(tp->srtt_us) >> 3;
+            u32 mdev = READ_ONCE(tp->mdev_us);
+            u64 rto = max_t(u64, (u64)srtt + 4ULL * mdev, 200000ULL);
 
+            stall_ns = clamp_t(u64, TBT_STALL_K * rto * NSEC_PER_USEC,
+                               TBT_STALL_MIN_NS, TBT_STALL_MAX_NS);
             if (ms)
-            {
-                stall_ns = (u64)ms * NSEC_PER_MSEC;
-            }
-            else
-            {
-                u32 srtt = READ_ONCE(tp->srtt_us) >> 3;
-                u32 mdev = READ_ONCE(tp->mdev_us);
-                u64 rto = max_t(u64, (u64)srtt + 4ULL * mdev, 200000ULL);
-
-                stall_ns = max_t(u64, 3 * rto * NSEC_PER_USEC,
-                                 3000ULL * NSEC_PER_MSEC);
-            }
+                stall_ns = min_t(u64, stall_ns, (u64)ms * NSEC_PER_MSEC);
         }
         /* Start of the current "unacked bytes, no progress, window open"
          * interval; c->last_una_ns carries it between polls. */
         u64 stall_since_ns = c->last_una_ns;
+
+        /* Bound on a paused carrier. Keepalive normally closes a half-open
+         * socket first, but a path can black-hole without the socket ever
+         * seeing an error. When the pause outlives the bound and the wire
+         * shows no life (snd_una frozen, packets_out unchanged or the RTO
+         * retransmit count at its limit), the stall was a death after all:
+         * count stall_dead and take the normal loss path. A zero peer window
+         * or our own delivery pause is evidence the peer is alive, so neither
+         * ever feeds the dead bound. */
+        if (READ_ONCE(c->stalled) &&
+            !paused && wnd &&
+            now - c->stall_since_ns > tbt_stall_dead_ns(stall_ns) &&
+            una == c->last_una &&
+            (READ_ONCE(tp->packets_out) == c->stall_packets_out ||
+             READ_ONCE(inet_csk(sk)->icsk_retransmits) >= TBT_STALL_RETX_MAX))
+        {
+            atomic64_inc(&sess->stall_dead);
+            tbt_carrier_sk_put(sk);
+            tbt_carrier_lost(sess, c);
+            return;
+        }
 
         if (progress)
         {
@@ -491,6 +535,15 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
              * evidence that a carrier is still delivering our bytes, and
              * tbt_tx reads it for retransmit pacing. */
             c->last_una_move_ns = now;
+            /* A stalled carrier is paused, not dead: the path that was
+             * avoided is delivering again, so put it back in the stripe. */
+            if (READ_ONCE(c->stalled))
+            {
+                WRITE_ONCE(c->stalled, false);
+                atomic64_inc(&sess->stall_recovered);
+                pr_info_ratelimited("tbtun: carrier %u recovered: snd_una moved, back in the stripe\n",
+                                    c->index);
+            }
         }
         c->last_nxt = nxt;
 
@@ -539,7 +592,6 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
                 stall_since_ns = now;
             else if (now - stall_since_ns > stall_ns)
             {
-                atomic64_inc(&sess->stall_declared);
                 if (debug >= 2 && c->dbg_stall_dumped != (u8)(c->gen & 0xff))
                 {
                     /* One dump per generation. A carrier that stops being
@@ -570,7 +622,20 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
                                                  NSEC_PER_MSEC));
                 }
                 tbt_carrier_sk_put(sk);
-                tbt_carrier_lost(sess, c);
+                if (sess->fec)
+                {
+                    /* FEC: a stalled carrier loses shares, not its life. Pause
+                     * it, drop what it owed, and let parity recover the block;
+                     * killing it here would discard shares the block can still
+                     * rebuild. stall_dead bounds how long it may stay paused. */
+                    tbt_carrier_stall(sess, c);
+                }
+                else
+                {
+                    /* ARQ has no parity to lean on, so an ACK-stalled path is a
+                     * dead one: kill it and repath its frames now. */
+                    tbt_carrier_lost(sess, c);
+                }
                 return;
             }
         }
@@ -1492,6 +1557,48 @@ struct tbt_carrier *tbt_carrier_new(struct tbt_session *sess, u8 index)
     return c;
 }
 
+/* Pause a live carrier whose snd_una stopped moving. This is the soft half of
+ * a loss: the path is not delivering now, so the frames it already owes are
+ * dropped and the pump stops giving it new ones, but nothing about the carrier
+ * dies. No RETIRE, no replacement, no socket teardown, and the slot keeps its
+ * generation; the poll clears c->stalled and counts stall_recovered when
+ * snd_una moves again. Only the FEC container calls this: under ARQ the same
+ * stall keeps the kill-and-repath behaviour of tbt_carrier_lost(). It runs from
+ * the session poll work (process context) and may sleep on sess->pump_lock
+ * inside tbt_tx_path_stalled(), so the caller must not hold pump_lock. */
+void tbt_carrier_stall(struct tbt_session *sess, struct tbt_carrier *c)
+{
+    struct sock *sk;
+
+    if (!sess || !c || READ_ONCE(sess->closing) || atomic_read(&c->stopping))
+        return;
+    if (READ_ONCE(c->stalled))
+    {
+        /* Already paused: refresh the stall clock only. The poll re-enters
+         * this branch every carrier_stall_ms while the path stays silent, and
+         * one stall must not be counted twice. */
+        c->last_una_ns = ktime_get_ns();
+        return;
+    }
+    WRITE_ONCE(c->stalled, true);
+    c->stall_since_ns = ktime_get_ns();
+    /* Baseline for the stall_dead test: a wire that still moves packets is
+     * alive even when no byte is acknowledged yet. */
+    sk = tbt_carrier_sk_get(c);
+    if (sk)
+    {
+        c->stall_packets_out = READ_ONCE(tcp_sk(sk)->packets_out);
+        tbt_carrier_sk_put(sk);
+    }
+    tbt_tx_path_stalled(sess, c->index);
+    /* Restart the window, so the 50 ms poll does not re-declare the same
+     * stall on its next pass. */
+    c->last_una_ns = c->stall_since_ns;
+    atomic64_inc(&sess->stall_declared);
+    pr_info_ratelimited("tbtun: carrier %u stalled: repath paused, new frames avoid it\n",
+                        c->index);
+}
+
 /* Mark a carrier unusable once, count it, and ask the replacement worker to
  * put a new one at the same index. Safe from work, softirq and /proc context;
  * it never sleeps. */
@@ -2327,6 +2434,37 @@ bool tbt_carrier_dead(struct tbt_carrier *c)
  * and raising sk_rcvbuf later cannot widen them. That is why the far listener
  * (which answers every SYN-ACK) and the dialled socket before kernel_connect
  * both call this. */
+/* TCP keepalive on every carrier: 30 s idle, 10 s between probes, 3 probes.
+ * A half-open path (peer gone, no FIN, no RST) otherwise leaves snd_una frozen
+ * and packets_out unchanged until the poll's stall_dead bound expires; the
+ * probes make the kernel close the socket, which the poll sees as a dead
+ * carrier. */
+#define TBT_KEEPIDLE_S 30
+#define TBT_KEEPINTVL_S 10
+#define TBT_KEEPCNT 3
+
+/* Turn keepalive on and set its cadence. A failure is recorded, never fatal:
+ * a carrier without keepalive still works, it just falls back to the poll's
+ * bound. Called after sock_create_kern() and before connect (dial), and right
+ * after an accepted socket is wired (adopt). */
+static void tbt_carrier_keepalive(struct socket *s)
+{
+    struct sock *sk;
+    int err;
+
+    if (!s || !s->sk)
+        return;
+    sk = s->sk;
+    sock_set_keepalive(sk);
+    err = tcp_sock_set_keepidle(sk, TBT_KEEPIDLE_S);
+    if (!err)
+        err = tcp_sock_set_keepintvl(sk, TBT_KEEPINTVL_S);
+    if (!err)
+        err = tcp_sock_set_keepcnt(sk, TBT_KEEPCNT);
+    if (err)
+        pr_info_ratelimited("tbtun: carrier keepalive setup failed: %d\n", err);
+}
+
 void tbt_car_setsockbuf(struct socket *s, const struct tbt_cfg *cfg, u16 n_pri)
 {
     u32 win = cfg->tx_window_bytes;
@@ -2475,6 +2613,7 @@ static void tbt_car_connect_work(struct work_struct *w)
     /* Before the SYN: the handshake freezes the window scale from this
      * socket's receive buffer. */
     tbt_car_setsockbuf(s, &t->cfg, sess->n_pri);
+    tbt_carrier_keepalive(s);
     s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
     {
         u64 t0 = ktime_get_ns();
@@ -2783,6 +2922,7 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
     /* The listener already fixed the window scale; this sizes the accepted
      * socket's buffers to the same share. */
     tbt_car_setsockbuf(newsock, &sess->tunnel->cfg, sess->n_pri);
+    tbt_carrier_keepalive(newsock);
     atomic_set(&c->connected, 1);
     sess->rx_adopt_events++;
     /* Assert the wiring we just installed. A carrier that is connected but never

@@ -923,7 +923,13 @@ struct tbt_session
      * concurrently, so it is atomic like the rx counters above. */
     atomic64_t stall_paused_skips;
     atomic64_t stall_idle_skips; /* poll: no unacked bytes, clock reset */
-    atomic64_t stall_declared;   /* poll: stall timer killed a carrier */
+    atomic64_t stall_declared;   /* poll: a stall paused a FEC carrier */
+    atomic64_t stall_recovered;  /* poll: snd_una moved again after a pause */
+    u64 stall_drop;              /* frames dropped when a stall paused the
+                                  * carrier; the session poll work is the only
+                                  * writer, so a plain u64 is enough */
+    atomic64_t stall_dead;       /* poll: a paused carrier outlived its bound
+                                  * and was declared lost after all */
     /* DATA admissions deferred by the peer window; tbt_tx_pump() only, and
      * the pump is serialised by sess->pump_lock, so a plain u64 is safe. */
     u64 win_block, win_resume;
@@ -1156,6 +1162,15 @@ struct tbt_carrier
     unsigned long stats_retired;  /* bit 0: counters moved to the session's
                                    * retired totals (one-shot) */
     bool win_paused;              /* DATA deferred at the peer's window */
+    /* snd_una has not moved for k RTOs: this path is not delivering right now,
+     * but it is not dead. Only the FEC container pauses a carrier; ARQ kills
+     * and repaths it instead. The socket, the slot and the generation all stay,
+     * the pump stops giving it new frames and tbt_tx_path_stalled() drops what
+     * it already owed, so parity can rebuild those shares. Cleared when snd_una
+     * moves again; stall_dead kills the carrier if it never does. Only the
+     * 50 ms poll writes it, the pump and /proc read it, so WRITE_ONCE/READ_ONCE
+     * is enough: one writer, no atomic. */
+    bool stalled;
     bool spare;                   /* index >= n_pri: idle unless activated */
     bool active;                  /* spare that now carries DATA */
     u32 drop_ppm;                 /* debug-only loss injection, 0..1e6 */
@@ -1188,6 +1203,10 @@ struct tbt_carrier
     u32 last_nxt;                 /* last snd_nxt observed (wire progress) */
     u64 last_una_ns;              /* carrier stall clock: start of the current
                                    * unacked, no-progress interval */
+    u64 stall_since_ns;           /* when the current stall was declared; the
+                                   * stall_dead bound counts from here */
+    u32 stall_packets_out;        /* packets_out at that moment; the bound
+                                   * needs a wire that never moved */
     u64 last_una_move_ns;         /* when snd_una really moved: progress */
     u64 last_rx_ns;
     u64 last_tx_ns;
@@ -1270,6 +1289,10 @@ void tbt_fbk_kick(struct tbt_session *sess, bool now);
 void tbt_tx_ack(struct tbt_session *sess, struct tbt_carrier *c,
                 u64 uack, u64 sid);
 void tbt_tx_path_lost(struct tbt_session *sess, u8 index);
+/* The path stalled: drop its unacknowledged frames and stop picking it. Unlike
+ * tbt_tx_path_lost() it does not mark the carrier dead; the poll clears
+ * c->stalled when snd_una moves again. */
+void tbt_tx_path_stalled(struct tbt_session *sess, u8 index);
 void tbt_tx_free_stream(struct tbt_stream *st);
 void tbt_tx_free_queue(struct tbt_session *sess);
 void tbt_tx_frame_free(struct tbt_frame *fr);
@@ -1319,6 +1342,11 @@ void tbt_carrier_retire(struct tbt_session *sess, struct tbt_carrier *c);
 void tbt_carrier_stats_retire(struct tbt_session *sess, struct tbt_carrier *c);
 void tbt_carrier_free(struct tbt_carrier *c);
 void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c);
+/* Pause a live carrier whose snd_una has not moved: no RETIRE, no
+ * replacement, no socket teardown, no path_lost. Its unacknowledged frames are
+ * dropped and the pump stops picking it; the poll clears c->stalled when
+ * snd_una moves again. */
+void tbt_carrier_stall(struct tbt_session *sess, struct tbt_carrier *c);
 int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c,
                      struct tbt_frame *fr);
 int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock);
