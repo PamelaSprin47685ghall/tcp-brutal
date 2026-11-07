@@ -743,14 +743,43 @@ struct tbt_fec_out
     u16 carrier;
     u16 len;
     u8 control;
-    u8 replay; /* queued from the replay ring: bounded by the cap below */
+    u8 replay; /* queued from the replay ring: charged to the byte budget */
+    /* NACK receipt time for a replay record; the flush charges NACK->wire
+     * latency when the carrier accepts it. Zero for every other record. */
+    u64 stamp_ns;
     u8 data[];
 };
 
-/* Replay records may be queued while the carriers are full. The cap keeps
- * that repair queue constant; a miss is retried by the receiver's NACK, not
- * turned into a source-frame drop. */
-#define TBT_FEC_REPLAY_QUEUE_MAX 256u
+/* One carrier's bound share queue. The flush walks every carrier and takes
+ * this queue's head; -EAGAIN leaves that head here and moves on, so a full
+ * socket never stops the other carriers. Control and replay records do not
+ * use these queues: an ACK, a NACK, or a repair must not wait behind a
+ * congested carrier's data. */
+struct tbt_fec_outq
+{
+    struct list_head queue;
+    u32 depth;
+    u32 bytes;
+};
+
+/* One carrier may hold at most this many records / bytes. The peer's credit
+ * window is the real bound; this keeps one congested carrier from growing
+ * without limit. A full credit window (TBT_FEC_CREDIT_MAX packets) gives one
+ * carrier at most 256 records even when the session has a single group, so
+ * the cap is reachable only by a socket that stopped draining. */
+#define TBT_FEC_OUTQ_DEPTH_MAX 256u
+#define TBT_FEC_OUTQ_BYTES_MAX (TBT_FEC_OUTQ_DEPTH_MAX * TBT_FEC_REC_MAX)
+
+/* One NACK may name at most this many shares; the receiver retries the rest.
+ * This bounds the work one NACK can create, not the storage it needs. */
+#define TBT_FEC_NACK_REQ_MAX 256u
+
+/* Replay records in flight across every carrier queue: a byte budget, not a
+ * record count. One NACK's 256 shares (about 2 MiB) must not fill it, and a
+ * slow carrier must not consume it: the records spread over the carriers by
+ * their queue bytes. A miss is retried by the receiver's NACK, not turned
+ * into a source-frame drop. */
+#define TBT_FEC_REPLAY_BYTES_MAX (8u * 1024 * 1024)
 
 /* The seven session work items whose reference is owned by the bit in
  * tbt_session.sched (review/s2-merged-design.md §1.3/§5.1). The order is the
@@ -817,7 +846,19 @@ struct tbt_session
      * Declared only in this cut: M4/M8 initialise it, and nothing arms it
      * yet. See review/s2-merged-design.md §1.3 and §2.3. */
     struct delayed_work w_fec_rx;
-    struct list_head fec_out;    /* records waiting for a carrier */
+    struct list_head fec_out_ctl;    /* ACK/NACK: any up, non-stalled carrier */
+    struct list_head fec_out_replay; /* NACK repairs: any up carrier, byte-budgeted */
+    struct tbt_fec_outq *fec_outq; /* n_car queues, indexed by the share's carrier */
+    u32 fec_out_queued;          /* records on every queue, control included */
+    u32 fec_outq_queued;         /* bound data records across carrier queues */
+    u32 fec_outq_depth_max;      /* high-water per-carrier depth */
+    u32 fec_out_ctl_depth;       /* control records queued */
+    u32 fec_out_ctl_bytes;       /* control bytes queued */
+    u32 fec_replay_bytes;        /* replay bytes queued across carriers */
+    /* Last repair activity: a NACK was received or sent, or a replay record
+     * was queued. tbt_tx.c reads this to hold off the TX stall kill while a
+     * repair is in progress; only this file writes it. */
+    u64 fec_repair_last_ns;
     spinlock_t fec_out_lock;
     /* Debug-only FEC share loss, indexed by the share's scheduled carrier.
      * It lives on the session, not the carrier object, so the injector keeps
@@ -1069,6 +1110,16 @@ struct tbt_session
     atomic64_t fec_ack_tx;
     atomic64_t fec_ack_rx;
     atomic64_t fec_credit_wait;
+    /* Per-carrier sender scheduling: a flush pass that skipped a carrier on
+     * -EAGAIN, the records it wrote, and the records left behind a skipped
+     * head. fec_outq_drop names shares refused because their own carrier's
+     * queue reached TBT_FEC_OUTQ_DEPTH_MAX/BYTES_MAX; the replay ring still
+     * holds them, so a NACK repairs the loss. */
+    atomic64_t fec_flush_skip;
+    atomic64_t fec_flush_pass;
+    atomic64_t fec_hol_wait;
+    atomic64_t fec_outq_drop;
+    atomic64_t fec_replay_skip; /* replay head found no carrier with room */
     /* NACK/replay repair, reset causes, and the carrier wait that precedes
      * backpressure. The reset counters prove the FEC layer only tears a
      * stream down when every carrier TCP is gone (or the user/peer closed
@@ -1087,17 +1138,27 @@ struct tbt_session
     atomic64_t fec_replay_hit;       /* requested share found in the ring */
     atomic64_t fec_replay_miss;      /* requested share not served */
     atomic64_t fec_replay_miss_no_ring; /* no local ring / shape over budget */
-    atomic64_t fec_replay_miss_alloc;   /* kmalloc or replay queue failed */
+    atomic64_t fec_replay_miss_alloc;   /* kmalloc failed */
+    atomic64_t fec_replay_miss_enospc;  /* replay byte budget or queue cap */
     atomic64_t fec_replay_miss_get;     /* block evicted or share absent */
+    atomic64_t fec_replay_drop;         /* queued replay freed without a write */
     atomic64_t fec_reset_tcp_failed; /* FEC reset: no carrier TCP alive */
     atomic64_t fec_reset_user;       /* user/peer/application teardown */
+    /* A FEC-owned TBT_ST_HOLE kill (ordered-walk hole or an unrecoverable
+     * super-block). fec_reset_user deliberately excludes TBT_ST_HOLE, so
+     * without this counter those resets were invisible. tbt_tx.c's
+     * TXSTALLKILL is also TBT_ST_HOLE; C increments this there. */
+    atomic64_t fec_reset_hole;
     atomic64_t fec_wait_carrier;     /* waits for a usable carrier */
     atomic64_t fec_backpressure;     /* last resort: source ring full */
-    atomic64_t fec_nack_lat_ns;      /* NACK receipt -> replay queued */
+    atomic64_t fec_nack_lat_ns;      /* NACK receipt -> carrier accepted */
     atomic64_t fec_nack_lat_max_ns;
     atomic64_t fec_nack_repair_ns;   /* first NACK -> block repaired */
     atomic64_t fec_nack_repair_max_ns;
-    u32 fec_replay_queued; /* replay records in fec_out; bounded */
+    u32 fec_replay_queued; /* replay records on the session replay queue */
+    /* TX stall checks held off while a FEC repair is in progress. C owns the
+     * tbt_tx.c side; this field is exported here so the count is visible. */
+    atomic64_t tx_stall_suppressed_fec;
     /* 0.2.0 FEC data plane: decode, delivery, placement and wire-shape
      * failures. Each names one way a share or a stream can be lost, so a
      * stalled stream is diagnosed from /proc instead of guesswork. */

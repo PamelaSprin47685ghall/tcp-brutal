@@ -600,7 +600,10 @@ static int tbt_show_stats(struct seq_file *m, void *v)
         {
             struct tbt_stream *st = NULL;
             struct tbt_session *s = t->sess;
-            int i;
+            u32 qdepth = 0, qbytes = 0, qmax = 0;
+            u32 qctl = 0, qctl_bytes = 0;
+            u32 rq = 0, rb = 0;
+            int i, ci;
 
             /* One live snapshot per tunnel, so a stalled direction is visible
              * without a rebuild: queue depths, pause flags, the public
@@ -1017,7 +1020,26 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                  * that precedes backpressure. A user-visible stall can be
                  * checked against these: fec_reset_tcp_failed is the only
                  * FEC-owned reset, and it requires every carrier TCP to be
-                 * gone. */
+                 * gone. fec_nack_lat_ns now measures NACK receipt to the
+                 * carrier write, not to enqueue. */
+                if (s->fec_outq)
+                {
+                    spin_lock(&s->fec_out_lock);
+                    for (ci = 0; ci < s->n_car; ci++)
+                    {
+                        u32 d = s->fec_outq[ci].depth;
+
+                        qdepth += d;
+                        qbytes += s->fec_outq[ci].bytes;
+                        if (d > qmax)
+                            qmax = d;
+                    }
+                    qctl = s->fec_out_ctl_depth;
+                    qctl_bytes = s->fec_out_ctl_bytes;
+                    rq = s->fec_replay_queued;
+                    rb = s->fec_replay_bytes;
+                    spin_unlock(&s->fec_out_lock);
+                }
                 seq_printf(m, "tunnel %llu c11 fec_nack_tx=%llu "
                               "fec_nack_rx=%llu fec_nack_retx=%llu "
                               "fec_nack_drop=%llu fec_nack_enomem=%llu "
@@ -1026,14 +1048,26 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "fec_replay_hit=%llu fec_replay_miss=%llu "
                               "fec_replay_miss_no_ring=%llu "
                               "fec_replay_miss_alloc=%llu "
+                              "fec_replay_miss_enospc=%llu "
                               "fec_replay_miss_get=%llu "
+                              "fec_replay_drop=%llu "
                               "fec_nack_retx_bytes=%llu "
                               "fec_replace_retx_bytes=%llu "
                               "fec_nack_lat_ns=%llu fec_nack_lat_max_ns=%llu "
                               "fec_nack_repair_ns=%llu "
                               "fec_nack_repair_max_ns=%llu "
                               "fec_reset_tcp_failed=%llu fec_reset_user=%llu "
-                              "fec_wait_carrier=%llu fec_backpressure=%llu\n",
+                              "fec_wait_carrier=%llu fec_backpressure=%llu "
+                              "fec_flush_skip=%llu fec_flush_pass=%llu "
+                              "fec_hol_wait=%llu fec_outq_drop=%llu "
+                              "fec_outq_depth=%u fec_outq_max=%u "
+                              "fec_outq_bytes=%u fec_outq_ctl=%u "
+                              "fec_out_ctl_bytes=%u "
+                              "fec_replay_queued=%u fec_replay_bytes=%u "
+                              "fec_replay_skip=%llu "
+                              "fec_reset_hole=%llu "
+                              "tx_stall_suppressed_fec=%llu "
+                              "fec_repair_last_ns=%llu\n",
                            t->cfg.id,
                            tbt_stat_read(&s->fec_nack_tx),
                            tbt_stat_read(&s->fec_nack_rx),
@@ -1048,7 +1082,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_replay_miss),
                            tbt_stat_read(&s->fec_replay_miss_no_ring),
                            tbt_stat_read(&s->fec_replay_miss_alloc),
+                           tbt_stat_read(&s->fec_replay_miss_enospc),
                            tbt_stat_read(&s->fec_replay_miss_get),
+                           tbt_stat_read(&s->fec_replay_drop),
                            tbt_stat_read(&s->fec_nack_retx_bytes),
                            tbt_stat_read(&s->fec_replace_retx_bytes),
                            tbt_stat_read(&s->fec_nack_lat_ns),
@@ -1058,7 +1094,34 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_reset_tcp_failed),
                            tbt_stat_read(&s->fec_reset_user),
                            tbt_stat_read(&s->fec_wait_carrier),
-                           tbt_stat_read(&s->fec_backpressure));
+                           tbt_stat_read(&s->fec_backpressure),
+                           tbt_stat_read(&s->fec_flush_skip),
+                           tbt_stat_read(&s->fec_flush_pass),
+                           tbt_stat_read(&s->fec_hol_wait),
+                           tbt_stat_read(&s->fec_outq_drop),
+                           qdepth, qmax, qbytes, qctl, qctl_bytes, rq, rb,
+                           tbt_stat_read(&s->fec_replay_skip),
+                           tbt_stat_read(&s->fec_reset_hole),
+                           tbt_stat_read(&s->tx_stall_suppressed_fec),
+                           READ_ONCE(s->fec_repair_last_ns));
+                /* Per-carrier data queue detail: index:records/bytes.
+                 * Only non-empty queues are printed; a healthy session emits
+                 * one short line, a congested one names the carriers. */
+                if (s->fec_outq)
+                {
+                    int ci;
+
+                    seq_printf(m, "tunnel %llu c12 fec_outq", t->cfg.id);
+                    for (ci = 0; ci < s->n_car; ci++)
+                    {
+                        u32 d = READ_ONCE(s->fec_outq[ci].depth);
+
+                        if (d)
+                            seq_printf(m, " %d:%u/%u", ci, d,
+                                       READ_ONCE(s->fec_outq[ci].bytes));
+                    }
+                    seq_printf(m, "\n");
+                }
                 seq_printf(m, "tunnel %llu c8 profile_mismatch=%llu http_parse_err=%llu "
                               "http_status_err=%llu http_req=%llu http_resp=%llu "
                               "pad_tx=%llu drip_tx=%llu\n",
