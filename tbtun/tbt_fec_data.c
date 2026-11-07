@@ -1227,11 +1227,40 @@ static int tbt_fec_send_nack(struct tbt_session *sess, u64 block_id,
     h.block_id = block_id;
     h.payload_len = TBT_FEC_NACK_LEN;
     h.conv = TBT_FEC_CONV;
-    if (tbt_fec_nack_pack(n, body))
+    /* tbt_fec_nack_pack() returns the positive body length on success. Only
+     * a negative value is an error; treating 64 as an error kept every NACK
+     * off the wire (fec_nack_tx=0, fec_nack_drop climbing). */
+    if (tbt_fec_nack_pack(n, body) != TBT_FEC_NACK_LEN)
         return -EINVAL;
     if (tbt_fec_make_record(sess, &h, body, rec, &len))
         return -EINVAL;
     return tbt_fec_send_record(sess, 0, rec, len, true, false);
+}
+
+/* One failed NACK, split by error code. The masks are logged once per rate
+ * window so a field run can tell a bad shape from an allocation failure. */
+static void tbt_fec_nack_drop(struct tbt_session *sess, int err, u64 block_id,
+                              const struct tbt_fec_nack *n)
+{
+    switch (err)
+    {
+    case -ENOMEM:
+        atomic64_inc(&sess->fec_nack_enomem);
+        break;
+    case -EINVAL:
+        atomic64_inc(&sess->fec_nack_einval);
+        break;
+    case -ENOSPC:
+        atomic64_inc(&sess->fec_nack_enospc);
+        break;
+    default:
+        atomic64_inc(&sess->fec_nack_eother);
+        break;
+    }
+    atomic64_inc(&sess->fec_nack_drop);
+    pr_info_ratelimited("tbtun: fec NACK drop err=%d block=%llu group=%*phN share=%*phN\n",
+                        err, block_id, TBT_FEC_BITMAP_BYTES, n->group_mask,
+                        TBT_FEC_BITMAP_BYTES, n->share_mask);
 }
 
 /* A NACK must not name a group or share the session shape does not have. */
@@ -1795,7 +1824,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
         if (!err)
             atomic64_inc(&sess->fec_nack_tx);
         else
-            atomic64_inc(&sess->fec_nack_drop);
+            tbt_fec_nack_drop(sess, err, s, &n);
     }
     /* The NACK itself may be lost; retry while the block is in the window.
      * No total attempt cap: only the window and the carrier TCP lifetime

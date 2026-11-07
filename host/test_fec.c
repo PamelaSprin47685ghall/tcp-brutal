@@ -692,6 +692,7 @@ static void test_control(void)
     u8 buf[64];
     u8 cbuf[TBT_FEC_CFG_LEN];
     u8 fbuf[TBT_FEC_FBK_LEN];
+    int n;
 
     /* ACK: 24 bytes, little-endian. The first 16 keep their 0x1002 offsets;
      * deliver_bytes sits at +16 so a reader of the frontier still parses. */
@@ -734,6 +735,18 @@ static void test_control(void)
     ok(!memcmp(&nk, &nk2, sizeof(nk)), "NACK round-trip", NULL);
     ok_int(tbt_fec_nack_pack(NULL, buf), -EINVAL, "NACK pack NULL");
     ok_int(tbt_fec_nack_unpack(NULL, &nk2), -EPROTO, "NACK unpack NULL");
+    /* Regression: the sender must treat this positive length as success.
+     * The 0x1004 NACK never reached the wire because `if (pack(...))` read
+     * the 64-byte body length as an error. */
+    n = tbt_fec_nack_pack(&nk, buf);
+    ok(n == TBT_FEC_NACK_LEN && n > 0,
+       "NACK pack success is a positive length, not an error", NULL);
+    /* The 1 GiB run's regression: `if (pack(...))` read this positive length
+     * as a failure, so every NACK was dropped before the out queue. */
+    ok_int(n ? -EINVAL : 0, -EINVAL,
+           "old boolean check would drop the NACK");
+    ok_int(n != TBT_FEC_NACK_LEN ? -EINVAL : 0, 0,
+           "fixed length check accepts the NACK");
 
     /* FEC_CFG: 32 bytes, internal CRC over +0..+23. */
     memset(&c, 0, sizeof(c));

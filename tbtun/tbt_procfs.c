@@ -1020,7 +1020,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                  * gone. */
                 seq_printf(m, "tunnel %llu c11 fec_nack_tx=%llu "
                               "fec_nack_rx=%llu fec_nack_retx=%llu "
-                              "fec_nack_drop=%llu fec_nack_bad=%llu "
+                              "fec_nack_drop=%llu fec_nack_enomem=%llu "
+                              "fec_nack_einval=%llu fec_nack_enospc=%llu "
+                              "fec_nack_eother=%llu fec_nack_bad=%llu "
                               "fec_replay_hit=%llu fec_replay_miss=%llu "
                               "fec_nack_retx_bytes=%llu "
                               "fec_replace_retx_bytes=%llu "
@@ -1034,6 +1036,10 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_nack_rx),
                            tbt_stat_read(&s->fec_nack_retx),
                            tbt_stat_read(&s->fec_nack_drop),
+                           tbt_stat_read(&s->fec_nack_enomem),
+                           tbt_stat_read(&s->fec_nack_einval),
+                           tbt_stat_read(&s->fec_nack_enospc),
+                           tbt_stat_read(&s->fec_nack_eother),
                            tbt_stat_read(&s->fec_nack_bad),
                            tbt_stat_read(&s->fec_replay_hit),
                            tbt_stat_read(&s->fec_replay_miss),

@@ -70,6 +70,12 @@ and moves independently of the module version.
 
 ### Fixed
 
+- FEC NACK never reached the wire: `tbt_fec_send_nack()` tested the positive
+  64-byte body length from `tbt_fec_nack_pack()` as a boolean and returned
+  `-EINVAL`, so every repair request was dropped (`fec_nack_tx=0`,
+  `fec_nack_drop` climbing, `fec_replay_hit=0`). The sender now compares the
+  return to `TBT_FEC_NACK_LEN`; a failed NACK is split into
+  `fec_nack_enomem/einval/enospc/eother` and logged with its block and masks.
 - FEC work re-entrancy: `w_fec_tx` and `w_fec_rx` can be re-queued while
   running, and workqueue then executes the new instance on another worker.
   Two packetizers shared `tx->pkt`/`tx->rec` (a header CRC computed for one

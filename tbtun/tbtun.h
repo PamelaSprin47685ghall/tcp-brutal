@@ -1074,6 +1074,10 @@ struct tbt_session
     atomic64_t fec_nack_rx;          /* valid NACK records received */
     atomic64_t fec_nack_retx;        /* shares queued from the replay ring */
     atomic64_t fec_nack_drop;        /* NACK send failed: retry next pass */
+    atomic64_t fec_nack_enomem;      /* ... -ENOMEM from the out queue */
+    atomic64_t fec_nack_einval;      /* ... pack/seal rejected the record */
+    atomic64_t fec_nack_enospc;      /* ... queue bound reached */
+    atomic64_t fec_nack_eother;      /* ... any other error */
     atomic64_t fec_nack_bad;         /* NACK bitmap/field outside the shape */
     atomic64_t fec_nack_retx_bytes;  /* replay bytes queued */
     atomic64_t fec_replace_retx_bytes; /* replay bytes after a replacement */
