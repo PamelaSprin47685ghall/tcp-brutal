@@ -975,6 +975,13 @@ struct tbt_session
     u64 replace_cost_ewma;       /* poll: EWMA of C_r */
     u64 last_stall_replace_ns;   /* poll: last replacement, for the T_r wait */
     u64 last_carrier_add_ns;     /* poll: last growth, paced like a dial */
+    /* Measured send rate: DATA bytes the pump handed to carriers since the
+     * last sample. The window/RTT estimate overstates a receive-heavy session
+     * (the far side sends little but has a large window), so the measured
+     * rate wins once two samples exist. All three are poll-only. */
+    u64 rate_sample_ns;
+    u64 rate_sample_bytes;
+    u64 rate_bps_ewma;
     u32 stall_survival_bucket;   /* poll: grid bucket of the last decision */
     u8 stall_replace_reason;     /* poll: enum tbt_stall_replace_reason */
     atomic64_t stall_replace_econ;    /* poll: replaced, economics said so */

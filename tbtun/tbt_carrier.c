@@ -1657,17 +1657,44 @@ static const u64 tbt_stall_grid_ns[TBT_STALL_GRID] = {
     4ULL * NSEC_PER_SEC, 8ULL * NSEC_PER_SEC, 16ULL * NSEC_PER_SEC,
 };
 
-/* Session send rate in bytes per second: the current window divided by the
- * mean RTT. Zero means the session has no estimate yet, and the economic
- * decision then falls back to the retransmission proxy alone. */
+/* Session send rate in bytes per second, measured from the DATA bytes the
+ * pump actually handed to carriers. window/RTT is only the initial value: it
+ * describes what the path could carry, and it overstates a receive-heavy
+ * session (the far side of a download sends little but has a large window),
+ * which made L_wait look far larger than the bytes at stake. */
 static u64 tbt_session_rate_bps(struct tbt_session *sess)
 {
-    u32 win = READ_ONCE(sess->tx_window);
-    u32 rtt = READ_ONCE(sess->rtt_mean_us);
+    u64 now = ktime_get_ns();
+    u64 tx = READ_ONCE(sess->stats_tx);
 
-    if (!win || !rtt)
-        return 0;
-    return (u64)win * 1000000ULL / rtt;
+    if (sess->rate_sample_ns && now > sess->rate_sample_ns)
+    {
+        u64 dt = now - sess->rate_sample_ns;
+
+        if (dt >= 200ULL * NSEC_PER_MSEC)
+        {
+            u64 db = tx - sess->rate_sample_bytes;
+            u64 r = db * NSEC_PER_SEC / dt;
+
+            sess->rate_bps_ewma = sess->rate_bps_ewma ?
+                (7 * sess->rate_bps_ewma + r) / 8 : r;
+            sess->rate_sample_ns = now;
+            sess->rate_sample_bytes = tx;
+        }
+    }
+    else
+    {
+        sess->rate_sample_ns = now;
+        sess->rate_sample_bytes = tx;
+    }
+    if (sess->rate_bps_ewma)
+        return sess->rate_bps_ewma;
+    {
+        u32 win = READ_ONCE(sess->tx_window);
+        u32 rtt = READ_ONCE(sess->rtt_mean_us);
+
+        return win && rtt ? (u64)win * 1000000ULL / rtt : 0;
+    }
 }
 
 /* Record one finished stall in the survival grid. recovered == false is a
@@ -1701,14 +1728,16 @@ static void tbt_stall_grid_note(struct tbt_session *sess, u64 t_ns,
 }
 
 /* P(recovery time > t_ns). Prior: RTO backoff, a Pareto-like tail T/(T+t)
- * with T = 2 RTO, which makes the conditional survival rise with t (the
- * longer the silence, the longer the remaining wait is likely to be). Once
- * enough finished stalls exist, the Kaplan-Meier product over the grid
+ * with T = max(2 RTO, 3 RTTVAR), which makes the conditional survival rise
+ * with t (the longer the silence, the longer the remaining wait is likely to
+ * be). The RTTVAR term matters on a WAN with 1-2.8 s of jitter: 2 RTO alone
+ * described a healthy path's own retransmission schedule as nearly permanent.
+ * Once enough finished stalls exist, the Kaplan-Meier product over the grid
  * replaces the prior. */
 static u32 tbt_stall_survival_ppm(struct tbt_session *sess, u64 t_ns,
-                                  u64 rto_ns, u32 *bucket)
+                                  u64 rto_ns, u64 rttvar_ns, u32 *bucket)
 {
-    u64 t0 = 2 * (rto_ns ? rto_ns : NSEC_PER_SEC);
+    u64 t0 = max_t(u64, 2 * (rto_ns ? rto_ns : NSEC_PER_SEC), 3 * rttvar_ns);
     u64 s = 1000000;
     int i, b = TBT_STALL_GRID - 1;
 
@@ -1766,15 +1795,19 @@ static u64 tbt_stall_replace_cost(struct tbt_session *sess,
  * V(t+dt) is L_replace itself: a path that stays silent ends in a
  * replacement anyway, only later. The integral is the trapezoid over the
  * conditional survival. Replace only when L_wait exceeds L_replace by the
- * hysteresis margin, and only after one RTO of silence and one T_r since the
- * last replacement. TCP retransmission exhaustion skips the economics. */
-#define TBT_STALL_EPS_PCT 15
+ * hysteresis margin, and only after two RTOs of silence and one T_r since
+ * the last replacement. TCP retransmission exhaustion skips the economics.
+ *
+ * The far side never replaces: it cannot dial, so a replacement there only
+ * clears the slot and forces the near side to redial, discarding the shares
+ * already in flight. It waits for the near side's RETIRE or recovery. */
+#define TBT_STALL_EPS_PCT 20
 static bool tbt_stall_should_replace(struct tbt_carrier *c, u64 now)
 {
     struct tbt_session *sess = c->sess;
     struct sock *sk;
     struct tcp_sock *tp;
-    u64 t_ns, rto_ns, dt, t_r, r_c, rate, c_r, l_replace, l_wait;
+    u64 t_ns, rto_ns, rttvar_ns, dt, t_r, r_c, rate, c_r, l_replace, l_wait;
     u64 s_t, s_next, p_wait, mean_ns;
     u32 retrans, bucket;
     u8 reason;
@@ -1782,14 +1815,22 @@ static bool tbt_stall_should_replace(struct tbt_carrier *c, u64 now)
     sk = tbt_carrier_sk_get(c);
     if (!sk)
         return true; /* no socket: nothing left to wait for */
+    if (!sess->tunnel || sess->tunnel->cfg.role == TBT_ROLE_FAR)
+    {
+        WRITE_ONCE(sess->stall_replace_reason, TBT_STALL_REPLACE_NONE);
+        tbt_carrier_sk_put(sk);
+        return false;
+    }
     tp = tcp_sk(sk);
+    rttvar_ns = (u64)READ_ONCE(tp->mdev_us) * NSEC_PER_USEC;
     rto_ns = max_t(u64, (u64)(READ_ONCE(tp->srtt_us) >> 3) +
                         4ULL * READ_ONCE(tp->mdev_us),
                    200000ULL) * NSEC_PER_USEC;
     t_ns = now - c->stall_since_ns;
     retrans = READ_ONCE(inet_csk(sk)->icsk_retransmits);
-    /* Debounce: never judge before one RTO, and give a replacement T_r to
-     * ramp before replacing again. */
+    /* Debounce: two RTOs of silence before the first judgment, so one lost
+     * ACK plus the RTO backoff cannot look like a dead path; and give a
+     * replacement T_r to ramp before replacing again. */
     dt = rto_ns;
     {
         u64 count = atomic64_read(&sess->connect_ns_count);
@@ -1799,7 +1840,7 @@ static bool tbt_stall_should_replace(struct tbt_carrier *c, u64 now)
               3ULL * (u64)(READ_ONCE(tp->srtt_us) >> 3) * NSEC_PER_USEC;
     }
     if (retrans < TBT_STALL_RETX_MAX &&
-        (t_ns < dt ||
+        (t_ns < 2 * dt ||
          (sess->last_stall_replace_ns &&
           now - sess->last_stall_replace_ns < t_r)))
     {
@@ -1808,14 +1849,14 @@ static bool tbt_stall_should_replace(struct tbt_carrier *c, u64 now)
         return false;
     }
     rate = tbt_session_rate_bps(sess);
-    /* The carrier's share of the session rate. */
+    /* The carrier's share of the measured session rate. */
     {
         u16 ncar = READ_ONCE(sess->n_car);
 
         r_c = rate / (ncar ? ncar : 1);
     }
-    s_t = tbt_stall_survival_ppm(sess, t_ns, rto_ns, &bucket);
-    s_next = tbt_stall_survival_ppm(sess, t_ns + dt, rto_ns, NULL);
+    s_t = tbt_stall_survival_ppm(sess, t_ns, rto_ns, rttvar_ns, &bucket);
+    s_next = tbt_stall_survival_ppm(sess, t_ns + dt, rto_ns, rttvar_ns, NULL);
     p_wait = s_t ? min_t(u64, s_next * 1000000 / s_t, 1000000) : 0;
     mean_ns = dt * (1000000 + p_wait) / 2000000;
     c_r = tbt_stall_replace_cost(sess, tp, r_c);
