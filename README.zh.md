@@ -50,8 +50,8 @@ socket 层关闭，早于 `stall_dead` 上限。DATA 的准入在
 对端通告窗口处停止，因此载体 TCP 发送缓冲里最多只有一个窗口的数据
 （`win_block`/`win_resume`）；控制帧不受这个门限约束。窗口检查读取的是 `snd_wnd`，
 所以它只是一个启发式判断；窗口未知时只放行一个 chunk。隧道自己的发送窗口按各载体的
-BBR 速率样本自动调整，下限 1 MiB，上限为 `rx_reorder_bytes`；`tx_window_bytes=`
-可以固定它。被钉住的控制帧在第一次
+BBR 速率样本与聚合通告窗口自动调整；bootstrap 下限与自动上限都随载体数缩放，
+`tx_window_bytes=` 可以固定它且不会被截断。被钉住的控制帧在第一次
 `-EAGAIN` 时不会被丢弃，而是重试并重新入队；即使队列里没有负载字节，泵也会因
 `ctl_queued` 被唤醒。
 
@@ -84,7 +84,7 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.2.0`）。
+`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.2.1`）。
 线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x0006` 与 FEC 记录的
 `TBT_FEC_CONV=0x1004`，三者都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
@@ -275,7 +275,7 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 | `max_inflate` | `2.000` | 重复膨胀上限 |
 | `hole_budget_ms` | `0` | 空洞允许存在的时间，毫秒，`0..60000`；`0` 表示按 RTT 自动推导（下限 2 s） |
 | `rx_reorder_bytes` | `8388608` | 接收端重排预算，字节，`1..268435456`；同时约束每条流的重排树和全会话总和；`0` 会被拒绝 |
-| `tx_window_bytes` | `0` | 发送端窗口字节数；`0` 表示按各载体的 BBR 样本自动推导；显式值不得大于 `rx_reorder_bytes` |
+| `tx_window_bytes` | `0` | 发送端窗口字节数；`0` 表示按各载体的 BBR 样本与聚合通告窗口自动推导（上限随载体数缩放）；显式值不得大于 `rx_reorder_bytes`，且不会被截断 |
 | `tx_retain_bytes` | `0` | 发送端保留字节数，`0` 表示不限 |
 | `carrier_stall_ms` | `0` | stall 阈值的上限，毫秒，`0..3600000`；`0` 表示自动：5 × RTO（`SRTT + 4×RTTVAR`），钳制在 1..60 s。显式值只能调低自动阈值 |
 | `profile` | `http-kal` | `http-kal`、`http-kal-drip` 或 `raw` |
@@ -486,14 +486,16 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   （`retx_ppm` 1,842、`wire/app` 1.0146），另一次是 11.37 Mbit/s。最终
   `n=1`/`n=8`/`n=16` 分别是 3.11/22.36/32.75 Mbit/s；完整矩阵在
   `review/final-bench/`。
-- **发送窗口受重排预算封顶。** `tx_window_bytes=0` 会按各载体的 BBR 样本推导窗口，
-  但永远不会超过 `rx_reorder_bytes`；如果把 `rx_reorder_bytes` 配得低于路径的
-  BDP（RTT × 带宽），吞吐仍会被它封住。推导值是目标而非保证：它按
-  `k × mean BDP` 计算，其中 `k =（RTO + 单向延迟 + 反馈延迟）/ mean SRTT`
-  （实测路径上约 2–5）；它不是最大 RTT 乘积，也不是各载体 BDP 之和。重排预算
-  必须至少覆盖这个 `k × mean BDP`，因为重排树的峰值占用就是整个窗口。两端应使用
-  相同的 `rx_reorder_bytes`，因为接收端的预算不在线上传输：发送端只能用自己的
-  配置值给自己封顶。将来由 WINDOW 帧通告接收信用后，这个配置契约就不再需要。
+- **发送窗口取 `k × mean BDP` 与载体聚合的较大者。** `tx_window_bytes=0` 以
+  `sum(snd_wnd)`（没有窗口样本时用 `n_car × 单载体 BDP`）作为单流
+  `k × mean BDP` 目标之上的下限，bootstrap 下限为
+  `max(1 MiB, n_car × 8 × payload)`。`k =（RTO + 单向延迟 + 反馈延迟）/
+  mean SRTT`（实测路径上约 2–5）。自动上限与接收端重排预算都随载体数缩放
+  （至少 8 MiB、每载体 8 个整帧、上限 256 MiB），因此 256 载体不会被单路径的
+  8 MiB 卡住。显式 `tx_window_bytes=` 是运维契约，不会被截断。重排预算仍必须
+  覆盖窗口，因为重排树的峰值占用就是整个窗口。两端应使用相同的
+  `rx_reorder_bytes`，因为接收端的预算不在线上传输：发送端只能用自己的配置值
+  给自己封顶。将来由 WINDOW 帧通告接收信用后，这个配置契约就不再需要。
 - **重排树和就绪队列是两笔不同的开销。** 乱序到达的帧等待在隧道的重排树里
   （`rx_reorder_bytes`，默认 8 MiB，全会话共享）；已按序到达但应用尚未读取的字节
   等待在 64 MiB 的就绪队列里。发送窗口只需要装下前者；后者是普通的背压。

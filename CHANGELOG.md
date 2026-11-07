@@ -16,6 +16,44 @@ and moves independently of the module version.
   `benches/results/` and `benches/baseline/remote-fix29.csv` as 0.3.0
   reference, not as 0.2.0 behavior (`benches/MICROBENCH.md`, "真机基线").
 
+## [0.2.1] - 2026-11-08
+
+### Fixed
+
+- TX window auto-sizing takes the carrier aggregate as its floor: `sum(snd_wnd)`
+  (or `n_car × per-carrier BDP`), with a bootstrap floor of
+  `max(1 MiB, n_car × 8 × TBT_PAYLOAD_MAX)`. The auto cap and the receiver's
+  reorder budget scale with the carrier count (at least 8 MiB, eight full
+  frames per carrier, 256 MiB ceiling), so a 256-carrier tunnel is no longer
+  held at the single-flow 8 MiB cap. An explicit `tx_window_bytes=` is never
+  truncated. (ba938c6, b4ca269)
+- The BDP estimate covers every live carrier: a carrier without a delivery-rate
+  sample falls back to its advertised window divided by SRTT, so the aggregate
+  is not estimated from the few carriers that happened to produce a sample.
+  (cdae2a4)
+- FEC replay and credit are sized from the aggregate BDP: the ring keeps the
+  largest K up to `TBT_FEC_REPLAY_K_MAX` that fits 15 MiB (the 256-carrier shape
+  lands on K=7, smaller shapes get a larger window), and the ACK credit is
+  `K_eff - 2` super-blocks capped at `TBT_FEC_CREDIT_MAX` (1024 packets, 8 MiB
+  at S=8192). (f651bb4)
+- Each FEC carrier drains its own queue in its own work; writes are batched in
+  8-frame parts and the part buffer covers a full batch (66 KB, u32 counts).
+  (d0953f8, 20c1511, af0ee9a, d03b817, 04b1298)
+- The TX pump does not run in FEC mode when `tx_q`/`ctl_q` are empty. (e155fb7)
+
+### Performance
+
+- 32/64/256 carriers: app 107.6/118.2/97.3 Mbit/s, which is 96.0%/105.4%/86.8%
+  of direct/2 (112.1 Mbit/s). 256 is +70.7% over fix30 (57.0 Mbit/s), its wire
+  rate is 96.3% of the direct P32 run, wire/app falls from 2.44 to 2.22 and retx
+  from 13.5% to 4.9%. 32 and 64 meet the target; 256 is 3.2 points short of
+  90% and stays on the 0.3.0 list (`txq_max` 16.8 MB still full, far CPU 1.47
+  cores).
+- Raw data: `benches/results/20261107T231300Z-fix31-compare/` and
+  `benches/results/20261107T231242Z-remote-fix31/`; fix30 comparison kept under
+  `benches/results/20261107T223300Z-fix30-direct32-vs-tunnel/` and
+  `benches/baseline/remote-fix30.csv`.
+
 ## [0.2.0] - 2026-11-08
 
 ### Added

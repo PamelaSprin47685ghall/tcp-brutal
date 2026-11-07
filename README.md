@@ -64,9 +64,10 @@ before the `stall_dead` bound. DATA admission stops at the peer's advertised win
 at most one window sits in the carrier's TCP send buffer
 (`win_block`/`win_resume`); control frames bypass that gate. The window check
 reads `snd_wnd`, so it is a heuristic, and an unknown window admits one chunk.
-The tunnel's own sender window auto-sizes from the carriers' BBR rate samples,
-with a 1 MiB floor and `rx_reorder_bytes` as the ceiling; `tx_window_bytes=`
-pins it. Pinned control frames are retried and requeued instead of being
+The tunnel's own sender window auto-sizes from the carriers' BBR rate samples
+and their aggregate advertised window; the bootstrap floor and the auto cap
+both scale with the carrier count, and `tx_window_bytes=` pins it without
+being truncated. Pinned control frames are retried and requeued instead of being
 dropped at the first `-EAGAIN`, and the pump wakes on `ctl_queued` even when no
 payload bytes are queued.
 
@@ -103,7 +104,7 @@ when it is present.
 ## Packaging
 
 The module version has one authority: `TBT_VERSION_MAJOR/MINOR/PATCH` in
-`tbtun/tbt_uapi.h` (currently `0.2.0`). The wire
+`tbtun/tbt_uapi.h` (currently `0.2.1`). The wire
 version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x0006` for the 32-byte frames
 and `TBT_FEC_CONV=0x1004` for the 40-byte FEC records; all three are independent of
 the module version. `TBT_CONV 0x0005` removed the unused PREDICT/CANCEL
@@ -276,7 +277,7 @@ join, and the port in a far `peer=` is grammar filler. Add a shared
 `nonce=`, the far side adopts the nonce from the first HELLO; if `peer=` is also
 absent, that first HELLO fixes the anchor and the module logs one
 trust-on-first-use warning. Addresses are literal IPv4 only — no DNS, no IPv6
-in 0.2.0.
+in 0.2.x.
 
 ## What you can observe
 
@@ -323,7 +324,7 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `max_inflate` | `2.000` | Duplication inflation ceiling |
 | `hole_budget_ms` | `0` | How long a hole may stay open, `0..60000` ms; `0` = auto from the measured RTT (floor 2 s) |
 | `rx_reorder_bytes` | `8388608` | Receiver reorder budget, bytes, `1..268435456`; bounds each stream's reorder tree and the session-wide sum; `0` is refused |
-| `tx_window_bytes` | `0` | Sender window bytes; `0` = auto from the carriers' BBR samples; an explicit value must not exceed `rx_reorder_bytes` |
+| `tx_window_bytes` | `0` | Sender window bytes; `0` = auto from the carriers' BBR samples and aggregate advertised window (the cap scales with the carrier count); an explicit value must not exceed `rx_reorder_bytes` and is never truncated |
 | `tx_retain_bytes` | `0` | Sender retention bytes, `0` = unlimited |
 | `carrier_stall_ms` | `0` | Cap on the stall threshold, `0..3600000` ms; `0` = auto: 5 × RTO (`SRTT + 4×RTTVAR`), clamped to 1..60 s. An explicit value only lowers the auto threshold |
 | `profile` | `http-kal` | `http-kal`, `http-kal-drip`, or `raw` |
@@ -563,17 +564,20 @@ real line.
   module measured 8.38 Mbit/s (`retx_ppm` 1,842, `wire/app` 1.0146) and another
   11.37 Mbit/s. The final `n=1`/`n=8`/`n=16` rows are 3.11/22.36/32.75 Mbit/s;
   the full matrix is in `review/final-bench/`.
-- **The sender window is capped by the reorder budget.** `tx_window_bytes=0`
-  derives the window from the carriers' BBR samples, but it never exceeds
-  `rx_reorder_bytes`; a configured `rx_reorder_bytes` below the path's BDP
-  (RTT × bandwidth) still caps throughput. The derived value is a target, not a
-  guarantee: it is `k × mean BDP`, with `k = (RTO + one-way + feedback delay) /
-  mean SRTT` (about 2–5 on measured paths), not a max-RTT product or a sum of
-  per-carrier BDPs. The reorder budget must be at least that `k × mean BDP`,
-  because the peak tree occupancy is the whole window. Both ends should use the
-  same `rx_reorder_bytes`, because the receiver's budget is not on the wire: the
-  sender caps itself with its own configured value. A future WINDOW credit would
-  remove that configuration contract.
+- **The sender window is the larger of `k × mean BDP` and the carrier
+  aggregate.** `tx_window_bytes=0` takes `sum(snd_wnd)` (or `n_car × per-carrier
+  BDP` when no window sample exists) as a floor over the single-flow `k × mean
+  BDP` target, with a bootstrap floor of `max(1 MiB, n_car × 8 × payload)`.
+  `k = (RTO + one-way + feedback delay) / mean SRTT` (about 2–5 on measured
+  paths). The auto cap and the receiver's reorder budget scale with the carrier
+  count (at least 8 MiB, eight full frames per carrier, 256 MiB ceiling), so a
+  256-carrier tunnel is not held at one path's 8 MiB. An explicit
+  `tx_window_bytes=` is the operator's contract and is not truncated. The
+  reorder budget must still cover the window, because the peak tree occupancy is
+  the whole window. Both ends should use the same `rx_reorder_bytes`, because
+  the receiver's budget is not on the wire: the sender caps itself with its own
+  configured value. A future WINDOW credit would remove that configuration
+  contract.
 - **The reorder tree and the ready queue are different costs.** A frame that
   arrives out of order waits in the tunnel's reorder tree (`rx_reorder_bytes`,
   8 MiB default, shared by the session); bytes that arrived in order but that

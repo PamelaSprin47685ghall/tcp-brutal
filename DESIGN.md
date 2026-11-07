@@ -394,21 +394,23 @@ container:
   empty group of the blocked super-block, not only the frontier group. A
   block outside the NACK window is not NACKed: its bytes are
   still in the carrier TCP send queue, and that TCP owns the retransmission.
-  The sender keeps up to the last `K = 7` super-blocks of encoded DATA+PARITY
-  records in a replay ring (the effective K shrinks until the 15 MiB cap fits)
-  and re-queues the requested records on any up, non-stalled carrier. The
-  share index stays the same; the carrier does not. The sender's ACK credit is
-  capped to `K - 2` super-blocks, so the oldest block the receiver can still
-  NACK is never evicted; the two spare blocks absorb a block boundary and the
-  in-flight parity.
+  The sender keeps the last `K` super-blocks of encoded DATA+PARITY records in
+  a replay ring; `K` is the largest value up to `TBT_FEC_REPLAY_K_MAX` (64)
+  whose records fit the 15 MiB budget, so the 256-carrier shape lands on
+  `K = 7` and smaller shapes get a larger window. It re-queues the requested
+  records on any up, non-stalled carrier. The share index stays the same; the
+  carrier does not. The ACK credit is `K_eff - 2` super-blocks, capped at
+  `TBT_FEC_CREDIT_MAX` (1024 packets, 8 MiB at S=8192), so the oldest block the
+  receiver can still NACK is never evicted; the two spare blocks absorb a block
+  boundary and the in-flight parity.
 - **The replay buffers are constant.** The ring is `K * groups * (n + m)`
   slots of `TBT_FEC_HDR_LEN + S` bytes plus 10 bytes of metadata, capped at
   `TBT_FEC_REPLAY_BUDGET` (15 MiB; the production 32-group shape uses about
   14.08 MiB). The effective K shrinks until the shape fits; a shape that
   cannot hold one super-block gets no ring and falls back to parity and TCP.
   The receive window is the ACK credit over the same `groups * (n+m) * S`
-  arena (16 MiB), but the grant is capped to `K - 2` super-blocks (and to
-  `TBT_FEC_CREDIT_MAX`); the sender applies the same cap. The total FEC
+  arena (16 MiB), but the grant is `K_eff - 2` super-blocks, capped to
+  `TBT_FEC_CREDIT_MAX`; the sender applies the same cap. The total FEC
   memory is therefore at most 16 MiB RX + 15 MiB replay = 31 MiB, independent
   of the stream length. The replay queue itself is capped at
   `TBT_FEC_REPLAY_QUEUE_MAX` (256 records); a full queue is a repair miss that
@@ -1124,21 +1126,26 @@ cap, `ooo_bytes`/`reorder_max_depth` for the reorder tree), so the numbers show 
 is in use.
 
 **Auto sizing (`tx_window_bytes=0`, the default).** Each carrier's own BBR estimator is
-the only rate source. This kernel has no `tcp_sock.delivery_rate` field: `tcp_rate_gen()`
-stores the sample BBR's bandwidth filter consumes, `rate_delivered` packets over
-`rate_interval_us`; multiply by `mss_cache` for bytes/s. The byte budget is
+the rate source, and a carrier without a delivery-rate sample falls back to its
+advertised window divided by SRTT, so the aggregate is not estimated from the few
+carriers that happened to produce a sample. This kernel has no
+`tcp_sock.delivery_rate` field: `tcp_rate_gen()` stores the sample BBR's bandwidth
+filter consumes, `rate_delivered` packets over `rate_interval_us`; multiply by
+`mss_cache` for bytes/s. The byte budget is
 
-    W = min(R or credit, max(k × mean_BDP, 2 × TBT_PAYLOAD_MAX))
+    W = min(R_auto, max(k × mean_BDP, Σ snd_wnd, n_car × per_car_BDP, W_floor))
     mean_BDP = mean_srtt × Σ delivery_rate_i
+    W_floor = max(1 MiB, n_car × 8 × TBT_PAYLOAD_MAX)
+    R_auto = min(256 MiB, max(rx_reorder_bytes, 8 MiB, n_car × 8 × TBT_PAYLOAD_MAX))
     k = (RTO + one_way + feedback_delay) / mean_srtt
 
-The 1 MiB value is a bootstrap floor only: it applies while no carrier has a
-rate/RTT sample (`k × mean_BDP` undefined). Once a sample exists, the window
-is `k × mean_BDP` and a 1 MiB floor must not override it: on a 2.4 Mbit carrier
-with `mean_BDP` 70 KB and `k = 2`, a 1 MiB window is 15 × B, drains in 3.4 s,
-and outlives the 1.5 s hole budget (measured: the strict phase aborted with
-EPIPE). The only floor after bootstrap is two maximum frames, the liveness
-bound below which no frame can pass.
+The bootstrap floor scales with the carrier count: one 1 MiB window is right for
+one path, not for 32 paths that can each carry a BDP. Once samples exist, the
+window is the larger of `k × mean_BDP` and the carriers' aggregate (`Σ snd_wnd`,
+or `n_car × per-carrier BDP` when no window sample exists); the aggregate is a
+floor, not an upper bound, so it breaks the small-window feedback loop without
+letting a slow carrier's advertisement set the target. The liveness floor is
+still two maximum frames, below which no frame can pass.
 
 where `mean_srtt` is the delivery-weighted mean SRTT across carriers (the RTT an average
 byte sees), `RTTVAR` is the largest per-carrier `mdev_us` (the spread reordering must
@@ -1155,41 +1162,49 @@ link jitter, not a persistently slow carrier: a slow carrier is a jitter sample,
 expected demand. With the jitter term, `k` is 2–5 on the measured paths; the regression
 reports `k = W / mean_BDP`. A heavy tail needs a high percentile of
 the spread, which only widens the target. It is never an upper bound: the hard bound is
-`R` or a receiver credit. `2 × Σ BDP_i`, a single mean sample, and `Σ snd_cwnd` /
-`Σ snd_wnd` are not bounds either.
+`R` or a receiver credit. `2 × Σ BDP_i` and `Σ snd_cwnd` are not bounds; `Σ snd_wnd`
+is a floor, not a bound.
 
-**Capacity identity: `R ≥ W = k × mean_BDP`.** The receiver's peak reorder occupancy is
+**Capacity identity: `R ≥ W`.** The receiver's peak reorder occupancy is
 the whole window, not `(k − 1) × mean_BDP`: at the instant the loss is detected,
 `(k − 1) × mean_BDP` is already in the tree and the last BDP is still in flight; it
 arrives before the repair, so the peak is still `k × mean_BDP`. If the loss clock were
 measured from the expected arrival instead of the send, the same argument would give
-`W = (k + 1) × mean_BDP`; this implementation measures from the send, so
-`W = k × mean_BDP`. Consequently `rx_reorder_bytes` must be at least the expected
-`k × mean_BDP`; the 8 MiB default covers `k = 5` at 218 ms / 17 Mbit (2.3 MB).
+`W = (k + 1) × mean_BDP`; this implementation measures from the send, so the
+target is `k × mean_BDP`. Consequently `rx_reorder_bytes` must be
+at least the expected window, `max(k × mean_BDP, aggregate)`; the auto cap grows to
+the carrier-count floor (eight full frames per carrier, at least 8 MiB, ceiling
+256 MiB), so the 8 MiB default covers `k = 5` at 218 ms / 17 Mbit (2.3 MB) for one
+path and scales for more carriers.
 
 **The upper bound is `R`, never a cwnd or window sum.** `R` is `rx_reorder_bytes`, or the
 receiver's credit when WINDOW is implemented. `Σ snd_cwnd` is not a substitute: it is a
 per-carrier congestion snapshot, and a carrier TCP releases cwnd when its own ACK arrives
 while those bytes remain in the receiver's reorder tree until the gap fills, so the
 tunnel's lead (`H - A`) can be far larger than `Σ snd_cwnd`; `Σ snd_cwnd` can also exceed
-`R` and overflow the tree. `Σ snd_wnd` is not one either: each advertised window is per
-carrier and says nothing about cross-carrier reordering. A per-carrier `snd_cwnd` is not a
-tunnel window in the first place: BBR's initial cwnd is 10 MSS, about 0.5 Mbit at 218 ms,
-while the tunnel's in-flight spans every carrier. `snd_cwnd` and `snd_wnd` are
-cross-checks, never inputs.
+`R` and overflow the tree. `Σ snd_wnd` is a floor, not a bound: each advertised window is
+per carrier, so the sum is a lower bound on what the paths can carry, while the reorder
+budget still caps the result. A per-carrier `snd_cwnd` is not a tunnel window in the first
+place: BBR's initial cwnd is 10 MSS, about 0.5 Mbit at 218 ms, while the tunnel's
+in-flight spans every carrier. `snd_cwnd` is a cross-check, never an input; `snd_wnd`
+enters only through the aggregate floor.
 
 **Bootstrap and hysteresis.** At session birth no carrier has a sample (`delivery_rate` or
-`srtt_us` is zero), so the window starts at 1 MiB (bootstrap only) and switches to
-`k × mean_BDP` as soon as a sample exists. It is recomputed once per pump pass, not per
-frame: grow immediately, shrink only when no retransmit was queued in the last second and
-the new estimate is below 75% of the current window, so one stale sample or one hole
-cannot collapse a window that is already filling the path.
+`srtt_us` is zero), so the window starts at `max(1 MiB, n_car × 8 × payload)` and
+switches to the larger of `k × mean_BDP` and the aggregate as soon as a sample exists.
+It is recomputed once per pump pass, not per frame: grow immediately, shrink only when
+no retransmit was queued in the last second and the new estimate is below 75% of the
+current window, so one stale sample or one hole cannot collapse a window that is
+already filling the path.
 
 **Bounds.** The window is capped at `R`: `rx_reorder_bytes` in this revision, or a receiver
-credit when WINDOW is implemented. A frame beyond the peer's reorder budget is a stream
-kill (`TBT_ST_REORDER`), not a retransmit, so the cap is a safety property, not tuning.
-`tx_window_bytes=N` fixes the window at `N`; the parser refuses an explicit `N` above
-`rx_reorder_bytes` in either key order (§8.4.1). This revision puts no credit on the wire:
+credit when WINDOW is implemented. In auto mode the cap is raised to
+`tbt_tx_reorder_floor(n_car)` (eight full frames per carrier, at least 8 MiB, ceiling
+256 MiB) and the receiver's reorder budget grows with it. A frame beyond the peer's
+reorder budget is a stream kill (`TBT_ST_REORDER`), not a retransmit, so the cap is a
+safety property, not tuning. `tx_window_bytes=N` fixes the window at `N` and is not
+truncated by the auto cap; the parser refuses an explicit `N` above `rx_reorder_bytes`
+in either key order (§8.4.1). This revision puts no credit on the wire:
 frame type `0x21` WINDOW is defined and reserved, the receiver refuses it with `-EPROTO`,
 and no sender emits one (§3.3). The sender therefore caps `W` by its own configured
 `rx_reorder_bytes`, and both ends must be configured with the same value. That is a
@@ -2689,33 +2704,35 @@ makes this design different from a generic L4 tunnel.
 | `tests/*.sh` | **new** |
 
 Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the released tree reports
-`0.2.0`. The wire revision `TBT_CONV=0x0006`
+`0.2.1`. The wire revision `TBT_CONV=0x0006`
 and the FEC record revision `TBT_FEC_CONV=0x1004` bump independently of it. HELLO
 `body[0]` carries `TBT_WIRE_VERSION=1`, not the module version, so the module
-version and the wire version are decoupled. 0.2.0 has flipped `TBT_CONV` to
-0x0006 (FIN carries a 16-byte body); the unreleased tree raises `TBT_FEC_CONV`
-through 0x1003 (the ACK body is 24 bytes and carries `deliver_bytes`) to
-0x1004 (NACK becomes a 64-byte bitmap repair request). Peers of
+version and the wire version are decoupled. 0.2.0 flipped `TBT_CONV` to
+0x0006 (FIN carries a 16-byte body) and `TBT_FEC_CONV` to 0x1004: `0x1002`
+added the PARITY block marker, `0x1003` the 24-byte ACK with `deliver_bytes`,
+and `0x1004` the 64-byte bitmap NACK. 0.2.1 keeps the same wire. Peers of
 different wire revisions do not interoperate, because the first HELLO is
 rejected by the conv check.
 
 **Packaging.** `tbtun/tbt_uapi.h` is the single version authority: the
-`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/2/0`). `scripts/mkdkmsconf.sh`
+`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/2/1`). `scripts/mkdkmsconf.sh`
 parses those macros and emits `PACKAGE_VERSION="<major>.<minor>.<patch>"`; parsing
 failure is fatal and never falls back to an old value. `dkms.conf` is a generated file —
 `make dkms.conf` (or `make dkms-tarball`) writes it, and it must not be hand-edited; the
-current generated value is `PACKAGE_VERSION="0.2.0"`. `scripts/install_dkms.sh` reads
+current generated value is `PACKAGE_VERSION="0.2.1"`. `scripts/install_dkms.sh` reads
 the same value through `mkdkmsconf.sh --version`. A development suffix
 `.r<commits>.<sha>` is opt-in with `TBT_DKMS_GIT_SUFFIX=1`; it is not the default.
 
-**Real-machine DKMS install is not validated.** On this host `sudo` needs a password and
+**Real-machine DKMS install is validated on `.65`.** The `.65` seven-step run
+produced `review/wan-experiment/arm64/dkms-65-20261107T142840Z/` with
+`DKMS_RESULT PASS` on `dkms 3.2.2-1ubuntu1` / kernel 6.1.172 (install,
+`modprobe`, `rmmod` and `uninstall`, with the config round-trip). The earlier
+caveat stands as history: on this development host `sudo` needs a password and
 neither `dkms` nor the matching kernel headers is installed, so no real-machine
-`dkms install` / `modprobe` / `rmmod` was run. The equivalent `/tmp` build and load
-validation passed; that is not the same claim. The install script's dry-run and staged-tree
-paths are exercised (§11), and `make` still requires `linux72-headers` (§8.8).
-This is a 0.2.0 release gate: the `.65` seven-step DKMS run must produce
-`review/wan-experiment/arm64/dkms-65-<UTC>/` with `DKMS_RESULT PASS` before the
-statement above can be replaced. Until that evidence exists, it stands.
+`dkms install` / `modprobe` / `rmmod` was run there; the equivalent `/tmp` build
+and load validation passed, but that is not the same claim. The install
+script's dry-run and staged-tree paths are exercised (§11), and `make` still
+requires `linux72-headers` (§8.8).
 
 ---
 
@@ -2738,7 +2755,7 @@ covers; no known leak remains but a long-soak kref/RCU audit is still worthwhile
 
 | # | Risk | Mitigation |
 |---|---|---|
-| R1 | **Duplex backpressure deadlock**: a single-threaded application sends a full volume before reading, while the echo's return path fills | Capture and transmit use opposite queues; the queue caps pause a direction instead of dropping; the strict 4 MiB send-then-read case is the acceptance test (T2). The window base is the peer's contiguous received offset (the TX code's delivered offset), never the application's read cursor: a window on that cursor was measured deadlocking this case in C3 (§15). The 64 MiB ready queue and a window of at least 1 MiB (§5.4) are what make the received-offset window safe. The strict volume must still fit the application's own socket buffers; 4 MiB does. |
+| R1 | **Duplex backpressure deadlock**: a single-threaded application sends a full volume before reading, while the echo's return path fills | Capture and transmit use opposite queues; the queue caps pause a direction instead of dropping; the strict 4 MiB send-then-read case is the acceptance test (T2). The window base is the peer's contiguous received offset (the TX code's delivered offset), never the application's read cursor: a window on that cursor was measured deadlocking this case in C3 (§15). The 64 MiB ready queue and a window of at least `max(1 MiB, n_car × 8 × payload)` (§5.4) are what make the received-offset window safe. The strict volume must still fit the application's own socket buffers; 4 MiB does. |
 | R2 | Byte exactness vs hole repair | Reset beats corruption (§4.6 B); `holes_unrecoverable` monitored. |
 | R3 | Ring under-protects fast links | `replay` is a configured byte budget (8 MiB default, 64 ms at 1 Gbps); a faster path must raise it. The ring has no automatic BDP check; T8 measures the held bytes. |
 | R4 | Port starvation | Reserved block + one global bitmap + 200 ms retry; `port_exhaust`/`port_alloc_fail` make the reason visible; T9. |
@@ -2826,8 +2843,9 @@ controls do not apply; these replace them.
    sid from OPEN and drops DATA/FIN/RST for an unknown sid.
 9. A DATA frame is written only inside the send window `seq + len <= tx_ack + tx_window`,
    where `tx_ack` is the peer's contiguous delivered (received) offset and `tx_window` is
-   the configured value or the BBR-derived auto value, capped at `rx_reorder_bytes` (the
-   auto value's bootstrap 1 MiB and the two-frame liveness floor are subject to that cap). A conforming peer therefore
+   the configured value or the BBR-derived auto value, capped at `R_auto` (the scaled
+   `rx_reorder_bytes`; the carrier-count bootstrap floor and the two-frame liveness
+   floor are subject to that cap). A conforming peer therefore
    cannot make the reorder tree exceed `rx_reorder_bytes`; a non-conforming one is killed
    with `TBT_ST_REORDER`.
    The cap is a configuration contract until a WINDOW credit exists (§5.4).
