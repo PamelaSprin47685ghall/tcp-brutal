@@ -324,11 +324,12 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `crypto` | follows `fec` | `on` ChaCha8-obfuscates the FEC DATA/PARITY payload; `on` requires `fec=on`; unset means the same as `fec` |
 | `crypto_key` | — | 64 hex digits: pre-shared 256-bit key; `-` clears it. Unset: the near side generates the key and sends it in HELLO (`key_id=1`) |
 | `portblock` | `0-0` | Per-tunnel source port block, recorded and rendered only (`0-0` = none); carriers use the global block set through `/ports` |
+| `dev` | — | Near only: bind each dialling carrier socket to this interface (`SO_BINDTODEVICE`) before connect, `1..15` bytes. A bind failure is a dial failure: `connect_fail` climbs and the carrier retries after 200 ms. Forces a direct path around a multi-homed or proxy-TUN route |
 | `srcaddrs` | — | Comma-separated local source addresses; only the first is used |
 | `nonce` | — | `16` or `32` hex digits: pin the session nonce; near uses it locally, far requires it from the near side |
 
 Keys that were parsed but never acted on (`framing=`, `chunk=`, `max_retry=`,
-`dev=`, `uid=`) were removed; an unknown key is refused with `EINVAL`.
+`uid=`) were removed; an unknown key is refused with `EINVAL`.
 
 `nonce=` pins the 128-bit session nonce. 32 hex digits are the full value;
 16 hex digits pin the low 64 bits and render left-padded with zeros. On a

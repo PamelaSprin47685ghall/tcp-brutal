@@ -1455,8 +1455,15 @@ costs one TCP handshake instead of a new session.
   `TIME_WAIT` tuple can make `connect()` fail; the retry below frees the port and draws a
   new one on the next attempt. The block
   is reserved and the module's bitmap prevents two live carriers from sharing a port,
-  so this does not steal an unrelated session's port. `SO_BINDTODEVICE` is not
-  implemented; there is no `dev=` key.
+  so this does not steal an unrelated session's port. `dev=<ifname>` (near
+  only) binds the dialling socket to that interface with `SO_BINDTODEVICE`
+  before `kernel_bind`/`kernel_connect`, so a TUN or proxy policy route cannot
+  capture the dial. The option needs `CAP_NET_RAW` in the network namespace's
+  user namespace; an unknown interface fails with `-ENODEV`, a missing capability
+  with `-EPERM`. Either failure releases the socket and enters the normal
+  failed-dial path below: `connect_fail++`, the port returns to the bitmap,
+  and the 50 ms poll retries after 200 ms; the ratelimited log names the
+  interface and the error. The far side's target connections are never bound.
 - Far side: binds `listen=` (the address carriers connect to). `srcaddrs` is a near-side
   key: it selects the local source address for carriers, and only the first entry is used;
   the remaining entries are recorded for round-trip. Multi-address listeners are not
@@ -1611,7 +1618,7 @@ line.)
 tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443
         n=4 m=1 dup=1 keepalive=5000 drip_ms=1000
         profile=http-kal fec=on mode=grouped carriers=10 crypto=on
-        srcaddrs=10.0.0.10,10.0.0.11 portblock=40000-40063
+        portblock=40000-40063 dev=eth0 srcaddrs=10.0.0.10,10.0.0.11
         replay=8388608 tunnel_rate=0 max_inflate=2.0 hole_budget_ms=500
         rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=3000
 tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:7000
@@ -1637,6 +1644,16 @@ random at tunnel creation).
 - `portblock=` is accepted and recorded per tunnel, but the data path uses the **single
   global port block** (`/proc/net/tbtun/ports`) shared by every tunnel. Per-tunnel blocks
   are not implemented. Known gap, tracked.
+- `dev=` (near only) binds each dialling carrier socket to one interface with
+  `SO_BINDTODEVICE` before `bind`/`connect`; it does not affect the far side's
+  target connections. The name is 1..15 bytes (`IFNAMSIZ` includes the NUL);
+  whitespace, control characters and `/` are refused with `EINVAL`, and an
+  empty value is refused. The key is rendered only when set. A failed bind is
+  a failed dial, not a silent fallback: the socket is released, `connect_fail`
+  increments, the port returns to the bitmap, and the 50 ms poll retries after
+  200 ms; the ratelimited log names the interface and the error. The kernel
+  check is `CAP_NET_RAW` in the network namespace's user namespace; an
+  unknown interface is `-ENODEV`, a missing capability `-EPERM`.
 - `role=near` requires `listen` (public) and `peer` (carrier destination).
 - `role=far` requires `listen` (carrier destination) and `target` (literal). An
   optional `peer=` on a far line is the near source address allowed to join
@@ -1719,7 +1736,7 @@ random at tunnel creation).
   HELLO key field is zero. A mismatch is a payload CRC failure on every share,
   not a silent downgrade. The FEC header, HTTP headers, chunk framing and
   control records are never obfuscated.
-- `chunk=`, `framing=`, `max_retry=`, `dev=`, and `uid=` were removed: they were
+- `chunk=`, `framing=`, `max_retry=`, and `uid=` were removed: they were
   parsed but never read by the data path. An unknown key is refused with `EINVAL`.
 - All files are `0600 root` under `init_net.proc_net`, except `http`, which is
   `0400 root`. The control surface is **init_net-only**; there is no per-netns view.
@@ -1753,7 +1770,7 @@ The order is
 ```
 role listen [peer] [target] [peer] n m dup profile keepalive drip_ms replay
 tunnel_rate max_inflate hole_budget_ms rx_reorder_bytes tx_window_bytes
-tx_retain_bytes carrier_stall_ms portblock [nonce] [srcaddrs]
+tx_retain_bytes carrier_stall_ms portblock [dev] [nonce] [srcaddrs]
 ```
 
 `peer` is the near peer on a `role=near` line (always present) and the far source
@@ -1765,7 +1782,8 @@ prints `target` before `peer`.
 `peer=` omits the key, so `peer=0.0.0.0:0` never appears in canonical output (it is not
 parseable: port 0 is refused).
 
-`nonce` follows `portblock`, before the list key `srcaddrs`.
+`dev` follows `portblock`; `nonce` follows `dev`, before the list key
+`srcaddrs`.
 
 A saved file therefore round-trips **byte for byte**: `cat config > backup;
 cat backup > config` re-renders exactly what it read, and the text is a fixed point from
@@ -2611,9 +2629,10 @@ controls do not apply; these replace them.
   sets port blocks, or flips `profile=`. There is no unprivileged path.
 - **Who may connect**: everything that reaches the public port. There is no per-app
   credential to check — the socket is created by the module, so `sk_uid` is meaningless.
-  Inbound address/interface filtering is **not implemented**: there is no `src=`, `dev=`,
-  or `uid=` key. `srcaddrs` selects the local bind address for near-side carriers. What is
-  enforced today is the `0600 root` config surface and the nonce/session check.
+  Inbound address/interface filtering is **not implemented**: there is no `src=` or
+  `uid=` key. `dev=` binds only the near side's dialling carrier sockets; it is not an
+  inbound filter. `srcaddrs` selects the local bind address for near-side carriers. What
+  is enforced today is the `0600 root` config surface and the nonce/session check.
 - **What escapes**: the tunnel terminates TCP at the far side into a `kernel_connect` to a
   literal `target=`. That target is a configured address, not attacker-chosen, so the public
   side cannot proxy to arbitrary hosts (no SSRF surface beyond the operator's choice).

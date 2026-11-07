@@ -276,10 +276,11 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 | `crypto` | 跟随 `fec` | `on` 对 FEC 的 DATA/PARITY 负载做 ChaCha8 混淆；`on` 需要 `fec=on`；不写时等于 `fec` |
 | `crypto_key` | — | 64 个 hex 字符的预共享 256 位密钥；`-` 清除。不配置时由近端生成并在 HELLO 中明文携带（`key_id=1`） |
 | `portblock` | `0-0` | 每条隧道的源端口段，仅记录并渲染（`0-0` 表示不设）；载体使用 `/ports` 的全局端口段 |
+| `dev` | — | 仅近端：拨号前把每条 carrier socket 用 `SO_BINDTODEVICE` 绑到该网卡，`1..15` 字节。绑定失败按拨号失败处理：`connect_fail` 增加，200 ms 后重试。用于多网卡或代理 TUN 环境强制直连 |
 | `srcaddrs` | — | 逗号分隔的本地源地址；只有第一项被使用 |
 | `nonce` | — | `16` 或 `32` 个 hex 字符：固定会话 nonce；近端本地使用，远端要求对端使用 |
 
-曾被解析但从未生效的键（`framing=`、`chunk=`、`max_retry=`、`dev=`、`uid=`）
+曾被解析但从未生效的键（`framing=`、`chunk=`、`max_retry=`、`uid=`）
 已删除；未知键会返回 `EINVAL`。
 
 `nonce=` 固定 128 位会话 nonce。32 个 hex 字符是完整值；16 个 hex 字符固定

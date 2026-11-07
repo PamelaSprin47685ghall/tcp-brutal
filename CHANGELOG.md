@@ -5,6 +5,16 @@ and moves independently of the module version.
 
 ## [Unreleased]
 
+### Added
+
+- `dev=<ifname>` on a tunnel line binds the near side's dialling carrier
+  sockets to one interface with `SO_BINDTODEVICE` before `bind`/`connect`, so
+  a TUN or proxy policy route cannot capture the dial. The name is 1..15
+  bytes; an empty value, whitespace, control characters and `/` are refused.
+  The key is near-only and empty by default; a bind failure is a dial failure
+  (`connect_fail++`, retry after 200 ms, ratelimited log naming the interface
+  and the error).
+
 ### Changed
 
 - FEC wire: `TBT_FEC_CONV` moves from `0x1002` to `0x1003`. The ACK body
