@@ -1190,11 +1190,18 @@ static void tbt_fec_ack(struct tbt_session *sess, u64 next_deliver,
     a.deliver_bytes = deliver_bytes;
     /* The receiver buffers `slots` super-blocks; the credit must not exceed
      * that window, or the sender would overrun it and its shares would be
-     * dropped as "too far ahead". */
-    a.credit_packets = (u32)min_t(u64,
-                                  (u64)sess->fec_rx->slots * sess->fec_rx->groups *
-                                      sess->fec_rx->n,
-                                  TBT_FEC_CREDIT_MAX);
+     * dropped as "too far ahead". It also must not exceed K-2 super-blocks:
+     * the replay ring holds K, so the oldest block the receiver can still
+     * NACK is never evicted. The sender applies the same cap. */
+    {
+        struct tbt_fec_rx *rx = sess->fec_rx;
+        u32 blocks = rx->replay_k > 2 ? (u32)(rx->replay_k - 2) : 1;
+
+        a.credit_packets = (u32)min_t(u64,
+                                      (u64)rx->slots * rx->groups * rx->n,
+                                      (u64)blocks * rx->groups * rx->n);
+    }
+    a.credit_packets = min(a.credit_packets, TBT_FEC_CREDIT_MAX);
     if (!a.credit_packets)
         a.credit_packets = 1;
     if (tbt_fec_ack_pack(&a, body))
@@ -1708,7 +1715,6 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
 static void tbt_fec_nack_scan(struct tbt_session *sess)
 {
     struct tbt_fec_rx *rx = sess->fec_rx;
-    struct tbt_fec_tx *tx = sess->fec_tx;
     struct tbt_fec_nack n;
     u64 now = ktime_get_ns();
     u64 s, hi;
@@ -1718,9 +1724,10 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
     if (!rx || !rx->nack || READ_ONCE(rx->stopping) ||
         READ_ONCE(sess->closing))
         return;
-    /* Both ends run the same configuration, so the local TX ring is a proxy
-     * for the peer's: without one the NACK cannot be served. */
-    if (!tx || !tx->replay)
+    /* The shape must support a ring. Both ends derive the same effective K,
+     * so the receiver NACKs exactly the blocks the sender can replay; the
+     * sender counts fec_replay_miss_no_ring if its own allocation failed. */
+    if (!rx->replay_k)
         return;
 
     /* A previous NACK's block is now ready or delivered: that interval is
@@ -1747,8 +1754,10 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
     if (hi < rx->next_super)
         return;
     /* The ring covers [highest - K + 1, highest]. An older block is outside
-     * the window: do not NACK it, and do not reset it early. */
-    if (hi - rx->next_super >= TBT_FEC_REPLAY_K)
+     * the window: do not NACK it, and do not reset it early. The sender's
+     * credit is capped to K-2 super-blocks, so this window always covers the
+     * block the sender can still be waiting on. */
+    if (hi - rx->next_super >= rx->replay_k)
         return;
 
     spin_lock_bh(&rx->lock);
@@ -2166,8 +2175,17 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
             if (!a.credit_packets)
                 atomic64_inc(&sess->fec_ack_bad);
             else
+            {
+                u16 rk = tbt_fec_replay_k(tx->replay);
+                u32 blocks = rk > 2 ? (u32)(rk - 2) : 1;
+                u32 cap = blocks * tx->groups * tx->n;
+
+                /* The peer cannot widen the window past the replay ring:
+                 * the oldest block it may still NACK must stay in the ring. */
                 WRITE_ONCE(tx->credit,
-                           min_t(u32, a.credit_packets, TBT_FEC_CREDIT_MAX));
+                           min_t(u32, a.credit_packets,
+                                 min_t(u32, cap, TBT_FEC_CREDIT_MAX)));
+            }
             tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
             /* The FIN pump holds the close until tx_ack covers tx_seq. */
             tbt_tx_wake(sess);
@@ -2190,6 +2208,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
             return -EPROTO;
         if (!tx || !tx->replay)
         {
+            atomic64_inc(&sess->fec_replay_miss_no_ring);
             atomic64_inc(&sess->fec_replay_miss);
             return 0;
         }
@@ -2204,6 +2223,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         buf = kmalloc(TBT_FEC_REC_MAX, GFP_ATOMIC);
         if (!buf)
         {
+            atomic64_inc(&sess->fec_replay_miss_alloc);
             atomic64_inc(&sess->fec_replay_miss);
             return -ENOMEM;
         }
@@ -2232,6 +2252,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                 spin_unlock_bh(&tx->replay_lock);
                 if (len <= 0)
                 {
+                    atomic64_inc(&sess->fec_replay_miss_get);
                     atomic64_inc(&sess->fec_replay_miss);
                     continue;
                 }
@@ -2251,6 +2272,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                 }
                 if (tbt_fec_send_record(sess, 0, buf, (u16)len, true, true))
                 {
+                    atomic64_inc(&sess->fec_replay_miss_alloc);
                     atomic64_inc(&sess->fec_replay_miss);
                     continue;
                 }
@@ -2715,6 +2737,9 @@ int tbt_fec_data_init(struct tbt_session *sess)
     rx->s = TBT_FEC_S;
     rx->groups = groups;
     rx->slots = (u16)slots;
+    /* The receiver NACK window and the ACK credit use the same effective K
+     * as the sender ring: K-2 super-blocks of credit plus two of slack. */
+    rx->replay_k = tbt_fec_replay_k_for(groups, n, m, TBT_FEC_S);
     /* Optional: without it the NACK scan stays silent and the stream relies
      * on parity and the carrier TCP retransmission. */
     rx->nack = kvzalloc(sizeof(*rx->nack), GFP_KERNEL);
@@ -2753,11 +2778,16 @@ int tbt_fec_data_init(struct tbt_session *sess)
         pr_warn_ratelimited("tbtun: tunnel %llu: no FEC replay ring; NACK repair disabled\n",
                             (unsigned long long)t->cfg.id);
     tx->groups = groups;
-    /* Until the first ACK arrives the sender may run one window ahead; the
-     * receiver's first ACK replaces this with its own window size, which is
-     * the same slots * groups * n. Deriving it here keeps the two ends from
-     * drifting apart if the arena geometry changes. */
-    tx->credit = (u32)min_t(u64, (u64)slots * groups * n, TBT_FEC_CREDIT_MAX);
+    /* The first flight uses the same K-2 super-block window the receiver
+     * grants, so the replay ring covers it before the first ACK arrives. */
+    {
+        u16 rk = tbt_fec_replay_k(tx->replay);
+        u32 blocks = rk > 2 ? (u32)(rk - 2) : 1;
+
+        tx->credit = (u32)min_t(u64, (u64)slots * groups * n,
+                                (u64)blocks * groups * n);
+        tx->credit = min(tx->credit, TBT_FEC_CREDIT_MAX);
+    }
     tx->n = n;
     tx->m = m;
     tx->s = TBT_FEC_S;

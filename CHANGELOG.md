@@ -9,14 +9,17 @@ and moves independently of the module version.
 
 - FEC NACK repair (`TBT_FEC_CONV` 0x1004): a NACK names its super-block in
   the record header and carries a 32-byte group bitmap plus a 32-byte share
-  bitmap. The sender keeps up to the last `K = 4` super-blocks of DATA+PARITY
-  records in a replay ring capped at 9 MiB (about 8.05 MiB for the
+  bitmap. The sender keeps up to the last `K = 7` super-blocks of DATA+PARITY
+  records in a replay ring capped at 15 MiB (about 14.08 MiB for the
   production 32-group shape; the effective K shrinks until the cap fits) and
-  re-queues the requested shares on any up, non-stalled carrier. The ring and
-  the 16 MiB RX arena are constant; neither grows with the stream. The c11
-  line exports `fec_nack_tx/rx/retx`,
+  re-queues the requested shares on any up, non-stalled carrier. The ACK
+  credit is capped to `K - 2` super-blocks, so the ring covers the sender
+  window and the oldest NACKable block is never evicted. The ring and the
+  16 MiB RX arena are constant; the total FEC memory is at most 31 MiB and
+  neither grows with the stream. The c11 line exports `fec_nack_tx/rx/retx`,
   `fec_nack_drop`, `fec_nack_bad`, `fec_nack_retx_bytes`,
-  `fec_replace_retx_bytes`, `fec_replay_hit/miss`, `fec_nack_lat_ns`,
+  `fec_replace_retx_bytes`, `fec_replay_hit/miss`,
+  `fec_replay_miss_no_ring/alloc/get`, `fec_nack_lat_ns`,
   `fec_nack_lat_max_ns`, `fec_nack_repair_ns`, `fec_nack_repair_max_ns`,
   `fec_reset_tcp_failed`, `fec_reset_user`, `fec_wait_carrier` and
   `fec_backpressure`.

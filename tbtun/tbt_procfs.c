@@ -1024,6 +1024,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "fec_nack_einval=%llu fec_nack_enospc=%llu "
                               "fec_nack_eother=%llu fec_nack_bad=%llu "
                               "fec_replay_hit=%llu fec_replay_miss=%llu "
+                              "fec_replay_miss_no_ring=%llu "
+                              "fec_replay_miss_alloc=%llu "
+                              "fec_replay_miss_get=%llu "
                               "fec_nack_retx_bytes=%llu "
                               "fec_replace_retx_bytes=%llu "
                               "fec_nack_lat_ns=%llu fec_nack_lat_max_ns=%llu "
@@ -1043,6 +1046,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_nack_bad),
                            tbt_stat_read(&s->fec_replay_hit),
                            tbt_stat_read(&s->fec_replay_miss),
+                           tbt_stat_read(&s->fec_replay_miss_no_ring),
+                           tbt_stat_read(&s->fec_replay_miss_alloc),
+                           tbt_stat_read(&s->fec_replay_miss_get),
                            tbt_stat_read(&s->fec_nack_retx_bytes),
                            tbt_stat_read(&s->fec_replace_retx_bytes),
                            tbt_stat_read(&s->fec_nack_lat_ns),

@@ -481,23 +481,33 @@ size_t tbt_fec_replay_bytes(u16 groups, u16 n, u16 m, u16 s, u16 k)
            (size_t)k * groups * shares * per;
 }
 
-struct tbt_fec_replay *tbt_fec_replay_new(u16 groups, u16 n, u16 m, u16 s)
+u16 tbt_fec_replay_k_for(u16 groups, u16 n, u16 m, u16 s)
 {
-    struct tbt_fec_replay *r;
-    size_t shares = (size_t)n + m;
-    size_t stride, slots;
     u16 k = TBT_FEC_REPLAY_K;
-    u32 i;
 
-    if (!groups || !shares || !s || s > TBT_FEC_PAYLOAD_MAX)
-        return NULL;
-    stride = TBT_FEC_HDR_LEN + s;
+    if (!groups || !(u16)(n + m) || !s || s > TBT_FEC_PAYLOAD_MAX)
+        return 0;
     /* Shrink K until the ring fits the budget. A shape that cannot hold one
      * super-block gets no ring; the data plane then relies on parity and the
      * carrier TCP retransmission. */
     while (k > 0 && tbt_fec_replay_bytes(groups, n, m, s, k) >
                         TBT_FEC_REPLAY_BUDGET)
         k--;
+    return k;
+}
+
+struct tbt_fec_replay *tbt_fec_replay_new(u16 groups, u16 n, u16 m, u16 s)
+{
+    struct tbt_fec_replay *r;
+    size_t shares = (size_t)n + m;
+    size_t stride, slots;
+    u16 k;
+    u32 i;
+
+    if (!groups || !shares || !s || s > TBT_FEC_PAYLOAD_MAX)
+        return NULL;
+    stride = TBT_FEC_HDR_LEN + s;
+    k = tbt_fec_replay_k_for(groups, n, m, s);
     if (!k)
         return NULL;
     slots = (size_t)k * groups * shares;

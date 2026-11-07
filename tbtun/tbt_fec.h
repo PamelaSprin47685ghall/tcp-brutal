@@ -201,8 +201,15 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
  * uses one spinlock per TX direction. The host test calls it single-threaded.
  * ------------------------------------------------------------------ */
 
-#define TBT_FEC_REPLAY_K 4
-#define TBT_FEC_REPLAY_BUDGET (9u * 1024 * 1024)
+/* The sender window is the ACK credit in DATA packets, capped to K-2
+ * super-blocks by the data plane. K must therefore hold the window plus two
+ * super-blocks of slack: a block the receiver can still NACK is never
+ * evicted. K=7 with the production 2 MiB super-block is 14.08 MiB of records;
+ * the 15 MiB cap keeps the total FEC memory (16 MiB RX arena + replay) under
+ * 32 MiB. A shape that cannot hold K=7 shrinks; the credit cap follows the
+ * effective K. */
+#define TBT_FEC_REPLAY_K 7
+#define TBT_FEC_REPLAY_BUDGET (15u * 1024 * 1024)
 
 struct tbt_fec_replay;
 
@@ -212,6 +219,10 @@ struct tbt_fec_replay;
 struct tbt_fec_replay *tbt_fec_replay_new(u16 groups, u16 n, u16 m, u16 s);
 void tbt_fec_replay_free(struct tbt_fec_replay *r);
 u16 tbt_fec_replay_k(const struct tbt_fec_replay *r);
+/* Effective K for this shape without allocating: the largest k <=
+ * TBT_FEC_REPLAY_K whose ring fits TBT_FEC_REPLAY_BUDGET, or 0. The sender
+ * ring, the receiver NACK window and the credit cap all use this value. */
+u16 tbt_fec_replay_k_for(u16 groups, u16 n, u16 m, u16 s);
 size_t tbt_fec_replay_bytes(u16 groups, u16 n, u16 m, u16 s, u16 k);
 
 /* Store one complete encoded record (header included). A share outside

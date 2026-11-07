@@ -726,8 +726,11 @@ struct tbt_fec_rx
     u8 *data_ptrs[TBT_FEC_MAX_SHARES];   /* decode scratch */
     u8 *parity_ptrs[TBT_FEC_MAX_SHARES]; /* decode scratch */
     /* Highest super-block ever placed; the NACK window is
-     * [next_super, highest_block], clipped to K. */
+     * [next_super, highest_block], clipped to replay_k. */
     u64 highest_block;
+    /* Effective replay K for this shape: the sender ring, the NACK window
+     * and the credit cap all use the same value. 0 means no ring. */
+    u16 replay_k;
     /* NACK pacing and retry state, allocated with the rx arena. */
     struct tbt_fec_nack_state *nack;
 };
@@ -1082,7 +1085,10 @@ struct tbt_session
     atomic64_t fec_nack_retx_bytes;  /* replay bytes queued */
     atomic64_t fec_replace_retx_bytes; /* replay bytes after a replacement */
     atomic64_t fec_replay_hit;       /* requested share found in the ring */
-    atomic64_t fec_replay_miss;      /* requested share evicted or absent */
+    atomic64_t fec_replay_miss;      /* requested share not served */
+    atomic64_t fec_replay_miss_no_ring; /* no local ring / shape over budget */
+    atomic64_t fec_replay_miss_alloc;   /* kmalloc or replay queue failed */
+    atomic64_t fec_replay_miss_get;     /* block evicted or share absent */
     atomic64_t fec_reset_tcp_failed; /* FEC reset: no carrier TCP alive */
     atomic64_t fec_reset_user;       /* user/peer/application teardown */
     atomic64_t fec_wait_carrier;     /* waits for a usable carrier */

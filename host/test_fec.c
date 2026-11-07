@@ -2050,11 +2050,35 @@ static void test_replay(void)
        NULL);
     tbt_fec_replay_free(r);
 
-    /* The production 32-group shape (256 carriers, n=4, m=4) must keep K=4
-     * inside the budget; that is the sizing the design promises. */
+    /* Every block the receiver may NACK (K) is resident; one past K evicts
+     * the oldest. The data plane caps credit to K-2 super-blocks, so the
+     * sender never advances that far while the receiver is still NACKing. */
+    r = tbt_fec_replay_new(1, 4, 2, 64);
+    for (i = 0; i < TBT_FEC_REPLAY_K; i++)
+        ok_int(tbt_fec_replay_store(r, (u64)i, 0, 0, rec, len), 0,
+               "store a full NACK window");
+    for (i = 0; i < TBT_FEC_REPLAY_K; i++)
+        ok(tbt_fec_replay_has(r, (u64)i, 0, 0), "window block resident",
+           NULL);
+    ok_int(tbt_fec_replay_store(r, TBT_FEC_REPLAY_K, 0, 0, rec, len), 0,
+           "store one past the window");
+    ok(!tbt_fec_replay_has(r, 0, 0, 0), "oldest window block evicted", NULL);
+    tbt_fec_replay_free(r);
+
+    /* The production 32-group shape (256 carriers, n=4, m=4) keeps K=7
+     * inside the 15 MiB budget; credit is capped to K-2 super-blocks. */
+    ok_u32(tbt_fec_replay_k_for(32, 4, 4, 8192), TBT_FEC_REPLAY_K,
+           "production K from the shape");
+    ok(tbt_fec_replay_k_for(32, 4, 4, 8192) >= 6,
+       "production K is at least 6", NULL);
+    ok((u32)(tbt_fec_replay_k_for(32, 4, 4, 8192) - 2) + 2 <=
+           tbt_fec_replay_k_for(32, 4, 4, 8192),
+       "credit window plus slack fits the ring", NULL);
+    ok_u32(tbt_fec_replay_k_for(256, 128, 128, 8192), 0,
+           "over-budget shape has no K");
     r = tbt_fec_replay_new(32, 4, 4, 8192);
     ok(r != NULL, "production replay ring allocated", NULL);
-    ok_u32(tbt_fec_replay_k(r), TBT_FEC_REPLAY_K, "production replay K=4");
+    ok_u32(tbt_fec_replay_k(r), TBT_FEC_REPLAY_K, "production replay K=7");
     ok(tbt_fec_replay_bytes(32, 4, 4, 8192, TBT_FEC_REPLAY_K) <=
            TBT_FEC_REPLAY_BUDGET,
        "production replay fits the budget", NULL);

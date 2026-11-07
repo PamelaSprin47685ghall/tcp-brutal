@@ -372,20 +372,28 @@ container:
   started super-block is asked for its whole share range, which also repairs a
   lost empty marker. A block outside that window is not NACKed: its bytes are
   still in the carrier TCP send queue, and that TCP owns the retransmission.
-  The sender keeps up to the last `K = 4` super-blocks of encoded DATA+PARITY
-  records in a replay ring (the effective K shrinks until the 9 MiB cap fits)
+  The sender keeps up to the last `K = 7` super-blocks of encoded DATA+PARITY
+  records in a replay ring (the effective K shrinks until the 15 MiB cap fits)
   and re-queues the requested records on any up, non-stalled carrier. The
-  share index stays the same; the carrier does not.
+  share index stays the same; the carrier does not. The sender's ACK credit is
+  capped to `K - 2` super-blocks, so the oldest block the receiver can still
+  NACK is never evicted; the two spare blocks absorb a block boundary and the
+  in-flight parity.
 - **The replay buffers are constant.** The ring is `K * groups * (n + m)`
   slots of `TBT_FEC_HDR_LEN + S` bytes plus 10 bytes of metadata, capped at
-  `TBT_FEC_REPLAY_BUDGET` (9 MiB; the production 32-group shape uses
-  about 8.05 MiB). The effective K shrinks until the shape
-  fits; a shape that cannot hold one super-block gets no ring and falls back
-  to parity and TCP. The receive window is the ACK credit
-  (`slots * groups * n` packets, at most 1024) over the same `groups * (n+m) *
-  S` arena (16 MiB). Neither grows with the stream length. The replay queue itself is
-  capped at `TBT_FEC_REPLAY_QUEUE_MAX` (256 records); a full queue is a repair
-  miss that the next NACK retries, never a source-frame drop.
+  `TBT_FEC_REPLAY_BUDGET` (15 MiB; the production 32-group shape uses about
+  14.08 MiB). The effective K shrinks until the shape fits; a shape that
+  cannot hold one super-block gets no ring and falls back to parity and TCP.
+  The receive window is the ACK credit over the same `groups * (n+m) * S`
+  arena (16 MiB), but the grant is capped to `K - 2` super-blocks (and to
+  `TBT_FEC_CREDIT_MAX`); the sender applies the same cap. The total FEC
+  memory is therefore at most 16 MiB RX + 15 MiB replay = 31 MiB, independent
+  of the stream length. The replay queue itself is capped at
+  `TBT_FEC_REPLAY_QUEUE_MAX` (256 records); a full queue is a repair miss that
+  the next NACK retries, never a source-frame drop. A replay miss is split
+  into `fec_replay_miss_no_ring`, `fec_replay_miss_alloc` and
+  `fec_replay_miss_get` so an eviction can be told from a missing ring or a
+  failed allocation.
 - **NACK is retried, not timed out.** The first NACK for a block goes out
   immediately (global minimum `TBT_FEC_NACK_MIN_MS` = 10 ms between NACKs);
   an identical NACK is retried every `TBT_FEC_NACK_RETRY_MS` = 20 ms. There is
