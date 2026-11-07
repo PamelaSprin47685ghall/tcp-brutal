@@ -235,7 +235,11 @@ check_sk_release() {
 }
 
 check_stream_insert() {
-    body=$(func_body "$1/tbtun/tbt_session.c" tbt_stream_get)
+    # 0.2.0: the get-or-create body is tbt_stream_get_created(); the public
+    # tbt_stream_get() is a thin wrapper. Fall back to the old name so the
+    # check still fails on a tree where the helper was folded back.
+    body=$(func_body "$1/tbtun/tbt_session.c" tbt_stream_get_created)
+    [ -n "$body" ] || body=$(func_body "$1/tbtun/tbt_session.c" tbt_stream_get)
     n=$(printf '%s\n' "$body" | grep -c 'hlist_for_each_entry')
     [ "$n" -ge 2 ] && return 0
     printf 'only %s hash lookup(s) before hlist_add_head_rcu' "$n"

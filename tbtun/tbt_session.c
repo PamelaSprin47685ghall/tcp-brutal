@@ -624,12 +624,19 @@ void tbt_stream_put(struct tbt_stream *st)
         call_rcu(&st->rcu, tbt_stream_free_rcu);
 }
 
-// Look up (or create) the stream for `sid`. Callers hold no lock; the hash is
-// protected by sess->lock.
-struct tbt_stream *tbt_stream_get(struct tbt_session *sess, u64 sid, bool alloc, bool near)
+/* Look up (or create) the stream for `sid`. Callers hold no lock; the hash is
+ * protected by sess->lock. `created` tells the caller whether this call
+ * published the object: only the publisher may run the one-shot adoption
+ * (OPEN announce/target start), so 256 carriers that race on the same OPEN
+ * cannot each adopt the stream. */
+static struct tbt_stream *tbt_stream_get_created(struct tbt_session *sess,
+                                                 u64 sid, bool alloc,
+                                                 bool near, bool *created)
 {
     struct tbt_stream *st;
 
+    if (created)
+        *created = false;
     spin_lock(&sess->lock);
     hlist_for_each_entry(st, &sess->streams[TBT_STREAM_BUCKET(sid)], node)
     {
@@ -699,7 +706,15 @@ struct tbt_stream *tbt_stream_get(struct tbt_session *sess, u64 sid, bool alloc,
     sess->n_streams++;
     sess->n_active++;
     spin_unlock(&sess->lock);
+    if (created)
+        *created = true;
     return st;
+}
+
+struct tbt_stream *tbt_stream_get(struct tbt_session *sess, u64 sid,
+                                  bool alloc, bool near)
+{
+    return tbt_stream_get_created(sess, sid, alloc, near, NULL);
 }
 
 /* Refcounted snapshot of the active streams. The caller processes the array
@@ -835,11 +850,18 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open)
         return TBT_BIND_DROP;
     if (adopt && sess->tunnel->cfg.role == TBT_ROLE_FAR)
     {
-        struct tbt_stream *ast = tbt_stream_get(sess, sid, true, false);
+        bool created = false;
+        struct tbt_stream *ast =
+            tbt_stream_get_created(sess, sid, true, false, &created);
 
         if (ast)
         {
-            tbt_far_open_seen(ast);
+            /* 256 carriers deliver the same OPEN. tbt_stream_get_created()
+             * double-checks under sess->lock, so exactly one caller sees
+             * created=true; only that caller may announce/target the stream.
+             * The others hold the same object and just put their reference. */
+            if (created)
+                tbt_far_open_seen(ast);
             tbt_stream_put(ast);
         }
     }

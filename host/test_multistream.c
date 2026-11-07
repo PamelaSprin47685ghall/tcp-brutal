@@ -1069,6 +1069,65 @@ static void scenario_sid_alloc_p3b3(void)
        "sid: current kernel reuses the live stream (known defect)", "");
 }
 
+/* tbt_session.c:627-712: 256 carriers deliver the same OPEN. Every carrier
+ * may pass the "!st" precheck, but the get-or-create helper rechecks under
+ * sess->lock and reports whether it published the object. Only that one
+ * caller may run tbt_far_open_seen(); the rest reuse the stream. */
+static struct stream *stream_get_created(struct session *s, uint32_t sid,
+                                         bool *created)
+{
+    struct stream *st = stream_find(s, sid);
+
+    *created = false;
+    if (st)
+    {
+        st->refs++;
+        return st;
+    }
+    st = stream_new(s, sid);
+    if (st)
+        *created = true;
+    return st;
+}
+
+static void scenario_open_race_p3b3(void)
+{
+    enum { carriers = 256 };
+    struct session s = {0};
+    int created = 0, reused = 0, adopted = 0;
+    int i;
+
+    s.mode = MODE_P3B3;
+    s.ncar = 1;
+
+    /* All 256 carriers observe an empty hash before any of them publishes. */
+    for (i = 0; i < carriers; i++)
+        ok(stream_find(&s, 42) == NULL, "open race: precheck sees empty", "");
+
+    for (i = 0; i < carriers; i++)
+    {
+        bool made = false;
+        struct stream *st = stream_get_created(&s, 42, &made);
+
+        if (!st)
+            continue;
+        if (made)
+        {
+            created++;
+            adopted++; /* only the publisher calls tbt_far_open_seen() */
+        }
+        else
+        {
+            reused++;
+        }
+    }
+    ok(created == 1, "open race: exactly one stream published", "");
+    ok(reused == carriers - 1, "open race: all other carriers reuse", "");
+    ok(adopted == 1, "open race: only one OPEN adoption/announce", "");
+    ok(s.n_streams == 1 && s.n_active == 1,
+       "open race: one hash entry and one active stream", "");
+}
+
 int main(void)
 {
     static const enum mode modes[] = {
@@ -1097,6 +1156,7 @@ int main(void)
     scenario_pause_isolation_p3b3();
     scenario_churn_reap_p3b3();
     scenario_sid_alloc_p3b3();
+    scenario_open_race_p3b3();
 
     printf("test_multistream: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
