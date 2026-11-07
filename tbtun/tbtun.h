@@ -647,6 +647,11 @@ struct tbt_fec_tx
     u64 short_at_ns;
     u16 groups, n, m, s;
     u64 cur_block; /* block being built, shared by every group */
+    /* Last share the packetizer built or queued. Diagnostics only: the
+     * TXSTALLKILL log reads it to name the share that was in flight. The TX
+     * work is the only writer; a u16 store/load is atomic. */
+    u16 last_group;
+    u16 last_share;
     u8 *data_ptrs[TBT_FEC_MAX_SHARES];
     u8 *parity_ptrs[TBT_FEC_MAX_SHARES];
     struct tbt_fec_gtx *g; /* groups entries */

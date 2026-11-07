@@ -906,6 +906,8 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess, u16 group,
         h.conv = TBT_FEC_CONV;
         if (tbt_fec_make_record(sess, &h, tx->parity_ptrs[i], tx->rec, &rec_len))
             continue;
+        WRITE_ONCE(tx->last_group, group);
+        WRITE_ONCE(tx->last_share, (u16)(tx->n + i));
         if (tx->replay)
         {
             spin_lock_bh(&tx->replay_lock);
@@ -944,6 +946,8 @@ static void tbt_fec_tx_emit_empty(struct tbt_session *sess, u16 group,
     h.conv = TBT_FEC_CONV;
     if (tbt_fec_make_record(sess, &h, NULL, tx->rec, &rec_len))
         return;
+    WRITE_ONCE(tx->last_group, group);
+    WRITE_ONCE(tx->last_share, tx->n);
     if (tx->replay)
     {
         spin_lock_bh(&tx->replay_lock);
@@ -1095,6 +1099,8 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_stream *st,
     h.conv = TBT_FEC_CONV;
     if (!tbt_fec_make_record(sess, &h, tx->pkt, rec, &rec_len))
     {
+        WRITE_ONCE(tx->last_group, group);
+        WRITE_ONCE(tx->last_share, share);
         if (tx->replay)
         {
             spin_lock_bh(&tx->replay_lock);
