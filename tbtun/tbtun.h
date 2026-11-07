@@ -1514,9 +1514,6 @@ struct tbt_carrier
     u16 local_port;
     u8 *part;                     /* unwritten tail (TBT_CAR_PART_MAX) */
     u16 part_len, part_off;
-    u8 *fec_frame;                /* encoded FEC chunk (TBT_HTTP_FEC_FRAME_MAX);
-                                   * tbt_carrier_send_fec() only, under
-                                   * pump_lock */
     u8 index;
     u32 gen;                  /* session-unique; pinned frames carry it */
     struct tbt_parser *parser; /* this carrier's partial record (8 KiB) */

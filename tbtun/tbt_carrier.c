@@ -1290,18 +1290,18 @@ int tbt_carrier_send_fec(struct tbt_carrier *c, const u8 *rec, size_t len)
     err = tbt_carrier_http_begin(c, sk);
     if (err)
         return err;
-    /* Per-carrier scratch, allocated once at birth. send_fec() always runs
-     * under pump_lock, so no second writer can touch it. */
-    buf = (char *)c->fec_frame;
+    buf = kmalloc(TBT_HTTP_FEC_FRAME_MAX, GFP_KERNEL);
     if (!buf)
         return -ENOMEM;
     n = tbt_http_fec_chunk_encode(buf, TBT_HTTP_FEC_FRAME_MAX, rec, len);
     if (!n)
     {
+        kfree(buf);
         atomic64_inc(&sess->http_parse_err);
         return -EIO;
     }
     err = tbt_carrier_send_whole(c, sk, buf, n);
+    kfree(buf);
     if (err)
         return err;
     c->tx_frames++;
@@ -1559,15 +1559,14 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
     c->http_tx = kmalloc(TBT_HTTP_FRAME_MAX, GFP_KERNEL);
     c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX, GFP_KERNEL);
     c->part = kmalloc(TBT_CAR_PART_MAX, GFP_KERNEL);
-    c->fec_frame = kmalloc(TBT_HTTP_FEC_FRAME_MAX, GFP_KERNEL);
     /* Zeroed is the defined initial state: have == 0 for the parser and a
      * SIZE-state chunk parser for the assembler. kmalloc() would hand the
      * carrier whatever the previous slab user left there; a dirty `have`
      * then drives an unbounded memmove() in tbt_http_rx_parse(). */
     c->parser = kzalloc(sizeof(*c->parser), GFP_KERNEL);
     c->http_rx = kzalloc(sizeof(*c->http_rx), GFP_KERNEL);
-    if (!c->http_tx || !c->http_hdr || !c->part || !c->fec_frame ||
-        !c->parser || !c->http_rx)
+    if (!c->http_tx || !c->http_hdr || !c->part || !c->parser ||
+        !c->http_rx)
     {
         /* ctor-fail: never linked, so the helper's unlink is a no-op. */
         tbt_carrier_free(c);
@@ -2213,7 +2212,6 @@ void tbt_carrier_free(struct tbt_carrier *c)
     kfree(c->http_tx);
     kfree(c->http_hdr);
     kfree(c->part);
-    kfree(c->fec_frame);
     kfree(c->parser);
     kfree(c->http_rx);
     if (c->sess)
