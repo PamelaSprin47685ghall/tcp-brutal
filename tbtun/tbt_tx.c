@@ -1694,6 +1694,16 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
         break;
     }
     spin_unlock(&sess->tx_lock);
+    if (!start && sess->fec)
+    {
+        /* FEC data never enters retain: the packetizer keeps it in its own
+         * ring, so the loop above finds nothing and this reset could never
+         * fire. The FEC ACK is the only progress signal; time it the same
+         * way. */
+        start = st->last_ack_ns ? st->last_ack_ns : st->tx_start_ns;
+        if (st->pause_cleared_ns > start)
+            start = st->pause_cleared_ns;
+    }
     {
         u64 budget = tbt_tx_wait_budget_ns(sess, st);
 
