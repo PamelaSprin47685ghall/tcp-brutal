@@ -1663,6 +1663,32 @@ u64 tbt_tx_wait_budget_ns(struct tbt_session *sess, struct tbt_stream *st)
  * recoverable two-second outage into a failure (measured in probe H). The
  * timer therefore runs from the last time tx_ack advanced. Total loss leaves
  * it untouched, which is the case the reset exists for. */
+/* True while the FEC packetizer is stopped by the peer's credit window: the
+ * receiver has not delivered enough of its buffer for the sender to emit the
+ * next packet. That is flow control, not a TX-path stall; only the receiver's
+ * bounded reset or the next ACK can move it. Mirrors the FEC-owned
+ * tbt_fec_tx_credit_ok() without touching that file. */
+static bool tbt_fec_credit_waiting(const struct tbt_session *sess)
+{
+    const struct tbt_fec_tx *tx = READ_ONCE(sess->fec_tx);
+    u64 acked, seq;
+    u32 credit;
+
+    if (!tx)
+        return false;
+    acked = READ_ONCE(tx->peer_pkts);
+    seq = READ_ONCE(tx->seq);
+    credit = READ_ONCE(tx->credit);
+    /* Zero credit is a closed window: no grant has arrived yet. */
+    if (!credit)
+        return true;
+    /* An ACK cannot name packets that were not sent; clamp instead of letting
+     * the unsigned subtraction wrap into a huge outstanding count. */
+    if (acked >= seq)
+        return false;
+    return seq - acked >= (u64)credit;
+}
+
 static void tbt_tx_stall_check(struct tbt_session *sess,
                                struct tbt_stream *st)
 {
@@ -1703,6 +1729,13 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
         start = st->last_ack_ns ? st->last_ack_ns : st->tx_start_ns;
         if (st->pause_cleared_ns > start)
             start = st->pause_cleared_ns;
+        /* A closed credit window is peer flow control, not a lost ACK: the
+         * packetizer is waiting for the receiver to drain. Do not race the
+         * receiver's own bounded reset. When the window opens again, the ACK
+         * that opened it also advances last_ack_ns, so a genuinely dead ACK
+         * path still reaches the budget below. */
+        if (tbt_fec_credit_waiting(sess))
+            start = now;
     }
     {
         u64 budget = tbt_tx_wait_budget_ns(sess, st);
