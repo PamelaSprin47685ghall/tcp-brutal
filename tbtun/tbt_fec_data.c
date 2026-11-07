@@ -1359,6 +1359,11 @@ static void tbt_fec_tx_stall_diag(struct tbt_session *sess,
     u64 frontier = span ? READ_ONCE(tx->peer_pkts) / span : 0;
     u32 rq, rb;
 
+    /* An idle stream has nothing outstanding: ack == txseq is not a stall.
+     * The near's uplink GET sat at ack=txseq=91 and printed this line for
+     * 954 s, drowning the log (fix25). */
+    if (READ_ONCE(st->tx_ack) >= READ_ONCE(st->tx_seq))
+        return;
     if (!last || now <= last || now - last <= budget)
         return;
     spin_lock(&sess->fec_out_lock);
@@ -2153,11 +2158,14 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
         }
         spin_lock_bh(&rx->lock);
         ready = tbt_fec_super_ready_locked(rx, s);
-        if (!ready && debug)
+        if (!ready)
         {
             /* Name the group whose block holds the whole stream: without it
              * the frontier cannot move and the sender's credit is never
-             * renewed. */
+             * renewed. The ratelimit bounds this; acceptance runs debug=0
+             * and needs the line, so it is not gated on debug. */
+            u64 now_diag = ktime_get_ns();
+
             for (group = 0; group < rx->groups; group++)
             {
                 struct tbt_fec_blk *sb = tbt_fec_rx_blk(rx, group, s);
@@ -2167,13 +2175,19 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
                     continue;
                 for (k = 0; k < rx->n; k++)
                     have = (u16)(have + (sb->dpresent[k] ? 1 : 0));
-                pr_info_ratelimited("tbtun: fec super %llu stuck: group %u/%u used=%d ready=%d id=%llu nreal=%u shares=%u/%u parity=%u\n",
-                                    s, group, rx->groups, sb->used, sb->ready,
+                pr_info_ratelimited("tbtun: fec super %llu stuck: next=%llu total_known=%d total_pkts=%llu next_deliver=%llu deliver_bytes=%llu group=%u/%u used=%d ready=%d id=%llu nreal=%u shares=%u/%u parity=%u gap_us=%llu\n",
+                                    s, READ_ONCE(rx->next_super), known,
+                                    total_pkts,
+                                    READ_ONCE(rx->next_deliver),
+                                    READ_ONCE(rx->deliver_bytes), group,
+                                    rx->groups, sb->used, sb->ready,
                                     sb->block_id, sb->nreal, have, rx->n,
-                                    (unsigned)rx->m);
-                pr_info_ratelimited("tbtun: fec super not ready: s=%llu g=%u used=%d ready=%d id=%llu expect=%llu\n",
-                                    s, group, sb->used, sb->ready,
-                                    sb->block_id, s);
+                                    (unsigned)rx->m,
+                                    sb->first_gap_ns &&
+                                            now_diag > sb->first_gap_ns
+                                        ? (now_diag - sb->first_gap_ns) /
+                                              NSEC_PER_USEC
+                                        : 0);
                 break;
             }
         }
@@ -2770,11 +2784,13 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
             real = tbt_fec_blk_real_len(rx, g, b);
             if (!real)
                 continue;
-            /* A parity-only block (ndata == 0) is requested even when the
-             * parity count looks sufficient: the decode may be waiting for a
-             * DATA share whose band row is not present. */
-            if (b->ndata && b->nparity >= (u16)(real - b->ndata))
-                continue; /* the next pass can decode it */
+            /* The decode pass ran before this scan. A block that is still
+             * not ready cannot be completed by the shares it already holds:
+             * "ndata + nparity >= real" is a count test, not a rank test,
+             * and a rank-deficient block was skipped forever (fix25: the
+             * frontier never got the parity row it needed, the ACK stopped
+             * and the download stalled for 120 s). Request the missing DATA
+             * and parity shares; the per-share hold keeps repeats down. */
             missing = true;
             probe_only = false;
             if (!b->first_gap_ns)
@@ -2810,6 +2826,9 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
     }
     spin_unlock_bh(&rx->lock);
 
+    if (found && s > rx->next_super)
+        pr_info_ratelimited("tbtun: fec NACK skips frontier next=%llu for s=%llu hi=%llu\n",
+                            rx->next_super, s, hi);
     if (!found)
     {
         struct tbt_fec_nack last;

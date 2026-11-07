@@ -1678,6 +1678,45 @@ static void test_frontier_first_replay(void)
        "frontier: ordering drops no replay record");
 }
 
+/* fix25: the NACK scan skipped a block whose parity count looked
+ * sufficient ("ndata + nparity >= real"), but that is not a rank test.
+ * Band rows 0 and 1 are identical on columns 0 and 1, so two missing data
+ * shares plus two parity rows leave the block unsolvable. The scan then
+ * asked for a later block, the frontier never received the third row, the
+ * ACK stopped and the download stalled for 120 s. */
+static void test_rank_deficient_frontier(void)
+{
+    static const u16 full[N] = {S, S, S, S};
+    struct blk b;
+    u8 out[N * S];
+    int refused;
+    size_t off;
+
+    blk_init(&b, 0, full);
+    blk_encode(&b);
+    b.nreal = N;
+    b.dpresent[0] = 0;
+    b.dpresent[1] = 0;
+    /* Band rows 0 and 3 are identical on columns 0 and 1; rows 1 and 2 are
+     * lost, so the two equations for the two missing shares are the same. */
+    b.ppresent[1] = 0;
+    b.ppresent[2] = 0;
+    ok(b.dpresent[2] && b.dpresent[3],
+       "rank: the other two data shares are present");
+    ok(2 + 2 >= N - 2, "rank: the old count test calls the parity sufficient");
+    ok_int(blk_recover(&b), -EAGAIN,
+           "rank: two identical rows cannot solve the two missing shares");
+
+    /* The fixed scan requests the missing parity rows; one different row
+     * completes the block. */
+    b.ppresent[1] = 1;
+    ok_int(blk_recover(&b), 0, "rank: one different row completes the block");
+    off = blk_deliver(&b, out, sizeof(out), &refused);
+    ok(!refused, "rank: the completed block delivers");
+    ok_size(off, N * S, "rank: the completed block delivers every byte");
+    ok_prefix(out, off, "rank: the completed block is a source prefix");
+}
+
 /* A record that arrives for a settled block is classified, never refused.
  * A replayed empty marker used to return -EPROTO, and the carrier parser
  * kills the carrier that carried a -EPROTO record: one NACK retry became
@@ -1772,6 +1811,7 @@ int main(void)
     test_probe_and_absent();
     test_replay_high_water();
     test_frontier_first_replay();
+    test_rank_deficient_frontier();
     test_arrival_kind();
 
     printf("test_fec_rx: %d checks, %d failures\n", checks, failures);
