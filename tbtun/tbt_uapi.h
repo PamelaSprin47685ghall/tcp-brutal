@@ -57,8 +57,15 @@ typedef uint64_t u64;
  * carried no application byte and bought no progress; a 0x0004 peer that
  * still sends one fails tbt_hdr_check() and its carrier closes. The sender's
  * real repair path (retained bytes plus duplicate) and the receiver's bounded
- * hole reset are unchanged. */
+ * hole reset are unchanged.
+ * 0.2.0 (M2) raises this to TBT_CONV_NEXT 0x0006: FIN carries a 16-byte body
+ * (TBT_FIN_BODY_LEN) and a 0.1.0 peer is refused rather than guessed at. The
+ * skeleton keeps 0x0005 so the current code and the frozen host vectors stay
+ * valid; no frame may carry 0x0006 before M2 flips this constant. */
 #define TBT_CONV 0x0005u
+/* Next wire revision, not yet on the wire. M2: TBT_CONV takes this value;
+ * until that switch nothing may send it. */
+#define TBT_CONV_NEXT 0x0006u
 
 /* HELLO body[0]: wire-protocol version, independent of TBT_VERSION. The FEC
  * v6 session uses version 2 and the extended body below; the old ARQ keeps
@@ -105,6 +112,19 @@ typedef uint64_t u64;
  * behind a partial DATA record (the carrier writer emits each record whole).
  * ------------------------------------------------------------------ */
 #define TBT_FEC_CONV 0x1001u
+/* 0.2.0 (M2) target: TBT_FEC_CONV_NEXT 0x1002. The core change is that a
+ * PARITY record may be a block marker: win_len == 0 && payload_len == 0 &&
+ * epoch == 0. The current receiver requires PARITY payload_len == max_payload
+ * and win_len != 0, so a marker fails today; the skeleton therefore keeps
+ * 0x1001 and only names the next value. The two convs share one carrier
+ * (32-byte control records use TBT_CONV, 40-byte FEC records use
+ * TBT_FEC_CONV), so both are upgraded in the same version.
+ *
+ * There is no 4-byte marker and no magic number on this wire. A marker is a
+ * set of values inside the 40-byte tbt_fec_hdr: type TBT_FEC_PARITY (0x31),
+ * flags 0, share_index n (parity 0), epoch 0, win_len 0, payload_len 0,
+ * conv 0x1002, payload_crc32c 0 (CRC32C of an empty payload). */
+#define TBT_FEC_CONV_NEXT 0x1002u
 
 /* FEC record types. */
 #define TBT_FEC_DATA 0x30
@@ -212,11 +232,26 @@ enum tbt_frame_type
 #define TBT_REC_MAX (TBT_HDR_LEN + TBT_PAYLOAD_MAX) /* one record on the wire */
 #define TBT_CHUNK_MAX 8228 /* chunk-data ceiling; a full record is TBT_REC_MAX */
 #define TBT_MAX_CARRIERS_LIMIT 256 /* carrier slots; old ARQ caps at 16 */
+/* Duplicate copies per DATA frame, the ceiling of the `dup` config key. M1
+ * replaces the literal v > 3 in tbt_parse.c with this bound; the TX path
+ * sizes its dup array by it. */
+#define TBT_DUP_MAX 3
 
 /* Body length bounds per frame type (DESIGN.md §3.3, "Payload layouts").
  * tbt_hdr_check() accepts a type only if tbt_body_bounds() knows it and the
  * body length is inside its range; FBK also has an exact length that depends
  * on another header field, and the checker enforces that too. */
+/* FIN body (0.2.0, TBT_CONV_NEXT): exactly TBT_FIN_BODY_LEN bytes, little-
+ * endian.
+ *   +0  u64 pkt_end   absolute session packet seq after this stream's last
+ *                     DATA packet
+ *   +8  u64 pkt_base  absolute session packet seq of this stream's first DATA
+ *                     packet, aligned to the super-block (groups*n)
+ * tbt_body_bounds() will set TBT_F_FIN to *min = *max = TBT_FIN_BODY_LEN. A
+ * non-FEC session sends the same 16 zero bytes (pkt_end = pkt_base = 0), so
+ * one length rule covers both. The skeleton keeps FIN at 0 bytes until M2. */
+#define TBT_FIN_BODY_LEN 16
+
 /* FBK body: nr entries, each 18 bytes, no padding. nr is path_ack_count
  * (0..16), so the body is 0..288 bytes and the checker bounds it by
  * TBT_FBK_MAX. Fields are read byte by byte; uack at +2 is not 8-aligned on

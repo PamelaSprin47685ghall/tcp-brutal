@@ -16,11 +16,13 @@
 #define _TBTUN_H
 
 #include <linux/atomic.h>
+#include <linux/completion.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/net.h>
 #include <linux/refcount.h>
 #include <linux/rbtree.h>
+#include <linux/rcupdate.h>
 #include <linux/sched.h>
 #include <linux/spinlock.h>
 #include <linux/smp.h>
@@ -495,6 +497,16 @@ struct tbt_stream
 #define TBT_STREAM_F_DYING    1
 #define TBT_STREAM_F_UNLINKED 2
 #define TBT_STREAM_F_ACTIVE   3
+/* 0.2.0 stream work references (review/s2-merged-design.md §1.4): one bit per
+ * scheduled work instance. Bit 1 means one instance exists that has not yet
+ * entered its entry point, and that instance holds one stream reference.
+ * tbt_stream_schedule() owns the 0->1 transition; the entry point and
+ * tbt_stream_cancel() own 1->0. Bits 0..3 keep their 0.1.0 meaning. */
+#define TBT_STREAM_F_SCHED_READ   4
+#define TBT_STREAM_F_SCHED_DRAIN  5
+#define TBT_STREAM_F_SCHED_CTRL   6
+#define TBT_STREAM_F_SCHED_KILL   7
+#define TBT_STREAM_F_SCHED_TARGET 8
 
 enum tbt_stream_state
 {
@@ -647,14 +659,40 @@ struct tbt_fec_out
     u8 data[];
 };
 
+/* The seven session work items whose reference is owned by the bit in
+ * tbt_session.sched (review/s2-merged-design.md §1.3/§5.1). The order is the
+ * destroy cancel order in §5.2; do not renumber without updating it. */
+enum tbt_sess_work
+{
+    TBT_SW_POLL = 0,
+    TBT_SW_REPLACE,
+    TBT_SW_PENDING,
+    TBT_SW_REAP,
+    TBT_SW_FBK,
+    TBT_SW_FEC_TX,
+    TBT_SW_FEC_RX,
+};
+
 struct tbt_session
 {
     struct list_head node;    /* tbt_tunnel.sessions */
     struct tbt_tunnel *tunnel; /* back-pointer; the session never outlives it */
     refcount_t refs;
+    /* 0.2.0 lifetime: refs reaches zero exactly once, and only then is
+     * &drained completed. tbt_session_destroy() waits on it and remains the
+     * only freer; a put never frees (review/s2-merged-design.md §5.1). */
+    struct completion drained;
+    /* One bit per TBT_SW_* item, protected by ->lock. Bit 1 means a queued
+     * instance exists and holds one reference. */
+    unsigned long sched;
     struct net *net;
-    spinlock_t lock;          /* streams hash, car[], prov/dead lists */
-    struct mutex pump_lock;   /* serialises carrier writes and carrier swap */
+    /* Lock order (review/s2-merged-design.md §2): tbt_lock -> pump_lock ->
+     * {->lock -> tx_lock, fec_out_lock, c->http_lock}; socket lock -> ->lock.
+     * ->lock is a leaf below pump_lock. A path may take at most one of
+     * pump_lock, socket lock and ->lock as its outer lock. */
+    spinlock_t lock;          /* streams hash, car[], prov/dead lists, sched */
+    struct mutex pump_lock;   /* serialises carrier writes and carrier swap;
+                               * owns c->sk on every write path */
     struct tbt_sk_ops def_ops; /* copy of tunnel->def_ops; restore source */
     struct hlist_head streams[TBT_STREAM_HT];
 
@@ -682,6 +720,10 @@ struct tbt_session
     struct tbt_fec_tx *fec_tx; /* owned here: one stream per session */
     struct tbt_fec_rx *fec_rx;
     struct delayed_work w_fec_tx; /* packetizer + record writer */
+    /* 0.2.0: FEC receive work (decode outside rx->lock, then deliver).
+     * Declared only in this cut: M4/M8 initialise it, and nothing arms it
+     * yet. See review/s2-merged-design.md §1.3 and §2.3. */
+    struct delayed_work w_fec_rx;
     struct list_head fec_out;    /* records waiting for a carrier */
     spinlock_t fec_out_lock;
     /* Debug-only FEC share loss, indexed by the share's scheduled carrier.
@@ -999,9 +1041,19 @@ struct tbt_carrier
     struct list_head node;    /* sess->prov or sess->dead */
     struct list_head release_node; /* sess->dead_release while a release is
                                     * pending; self-linked otherwise */
-    struct socket *sock;
-    struct sock *sk;
-    struct tbt_session *sess;
+    struct socket *sock;      /* installer and tbt_carrier_close() only; never
+                               * published to a read path */
+    /* Published socket pointer (review/s2-merged-design.md §1.1/§1.2).
+     * Write paths that own sess->pump_lock use rcu_dereference_protected()
+     * once and then only the local `sk`; every other reader uses
+     * tbt_carrier_sk_get()/tbt_carrier_sk_present(). Clearing it requires a
+     * grace period before the socket is released. __rcu makes a bare
+     * dereference a sparse error instead of a silent race. */
+    struct sock __rcu *sk;
+    struct tbt_session *sess; /* holds one session reference; see §5.1 */
+    refcount_t refs;          /* 1 = container/installer; each reader adds
+                               * one; the last put -> kfree_rcu */
+    struct rcu_head rcu;      /* tbt_carrier_put() free path */
     struct work_struct w_connect; /* sock_create/bind/connect off the writer */
     struct work_struct w_rx;      /* drains carrier input -> tbt_rx */
     struct work_struct w_tx;      /* write-space wake -> tbt_tx_pump */
@@ -1010,11 +1062,19 @@ struct tbt_carrier
     atomic_t up;                  /* HELLO written; usable for scheduling */
     atomic_t stopping;
     atomic_t rx_again;            /* a wake was coalesced into a running rx */
+    /* 0.2.0: retained for this cut only. M5 deletes it together with the dead
+     * pool; the poll then holds refs instead (review/s2-merged-design.md
+     * §3.4). Do not add new readers. */
     atomic_t pollers;             /* the 50 ms poll is using this object;
                                    * a retired object is not reused while
                                    * this is non-zero */
     bool released;                /* tbt_carrier_release() has run; eligible
                                    * for reuse when no poll/work holds it */
+    /* join() has installed this carrier in sess->car[] (review/
+     * s2-lifecycle-design.md §3.2.2): joined => in car[] and not on prov.
+     * Protected by sess->lock. adopt() must skip a joined carrier instead of
+     * re-linking it onto prov. */
+    bool joined;
     bool hello_sent;              /* our HELLO was written on this carrier */
     bool open_sent;               /* this carrier has written at least one OPEN */
     bool saw_hello;               /* the peer's first frame was a HELLO */
@@ -1156,6 +1216,26 @@ u64 tbt_tx_wait_budget_ns(struct tbt_session *sess, struct tbt_stream *st);
 void tbt_tx_hole_check(struct tbt_session *sess, struct tbt_stream *st);
 
 /* tbt_carrier.c */
+/* 0.2.0 carrier lifetime and work API (review/s2-merged-design.md §1.2).
+ * Declarations only in this cut: M3/M5 implement them. Lock contract: get/put/
+ * gen and sk_get/sk_put are RCU + refcount only, take no sess->lock and never
+ * sleep; arm_* take sess->lock and are safe from softirq; quiesce may sleep
+ * and must not be called with pump_lock or tx_lock held. */
+struct tbt_carrier *tbt_carrier_get(struct tbt_session *sess, u8 index);
+void tbt_carrier_put(struct tbt_carrier *c);
+u32 tbt_carrier_gen(struct tbt_session *sess, u8 index);
+struct sock *tbt_carrier_sk_get(struct tbt_carrier *c);
+void tbt_carrier_sk_put(struct sock *sk);
+/* Existence check only: no reference, no sleep. Safe under RCU, and safe for
+ * the advisory checks in lost/action/connect work. */
+static inline bool tbt_carrier_sk_present(struct tbt_carrier *c)
+{
+    return rcu_access_pointer(c->sk) != NULL;
+}
+bool tbt_carrier_arm_tx(struct tbt_carrier *c);
+bool tbt_carrier_arm_pump(struct tbt_carrier *c, unsigned int ms);
+bool tbt_carrier_arm_rx(struct tbt_carrier *c);
+void tbt_carrier_quiesce(struct tbt_carrier *c);
 int tbt_carriers_start(struct tbt_tunnel *t, struct tbt_session *sess);
 void tbt_carriers_stop(struct tbt_session *sess);
 struct tbt_carrier *tbt_carrier_new(struct tbt_session *sess, u8 index);
@@ -1198,6 +1278,13 @@ void tbt_target_detach(struct tbt_stream *st);
 void tbt_target_work_fn(struct work_struct *w);
 
 /* tbt_stream.c helpers shared by tx/rx/session */
+/* 0.2.0 stream work reference (review/s2-merged-design.md §1.4). schedule()
+ * owns the 0->1 transition of `bit` and takes one reference; cancel() owns
+ * 1->0. Both may run under sess->lock. Declarations only in this cut. */
+bool tbt_stream_schedule(struct tbt_stream *st, struct work_struct *w,
+                         unsigned long bit);
+bool tbt_stream_cancel(struct tbt_stream *st, struct work_struct *w,
+                       unsigned long bit);
 struct tbt_stream *tbt_stream_get(struct tbt_session *sess, u64 sid, bool alloc, bool near);
 int tbt_session_stream_snapshot(struct tbt_session *sess,
                                 struct tbt_stream **out, int max);
@@ -1215,6 +1302,16 @@ void tbt_stream_maybe_detach(struct tbt_stream *st);
 bool tbt_session_fec_stream_live(const struct tbt_session *sess);
 void tbt_stream_kill(struct tbt_stream *st, u8 reason);
 void tbt_stream_kill_by_sid(struct tbt_session *sess, u64 sid, u8 reason);
+/* 0.2.0 session lifetime (review/s2-merged-design.md §1.3/§5). tbt_session_get()
+ * is the admission gate and takes sess->lock; tbt_session_put() completes
+ * &drained on the last reference and never frees. tbt_session_arm()/cancel()
+ * own the sched bit and its reference; arm's fast path may run in softirq and
+ * under sess->lock. Declarations only in this cut. */
+bool tbt_session_get(struct tbt_session *s);
+void tbt_session_put(struct tbt_session *s);
+bool tbt_session_arm(struct tbt_session *s, enum tbt_sess_work w,
+                     unsigned long delay);
+void tbt_session_cancel(struct tbt_session *s, enum tbt_sess_work w);
 void tbt_session_destroy(struct tbt_tunnel *t);
 int tbt_session_create(struct tbt_tunnel *t);
 int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index);

@@ -62,6 +62,31 @@ void tbt_hdr_encode(u8 *p, const struct tbt_hdr *h)
     tbt_put_le16(p + TBT_H_CONV, h->conv);
 }
 
+/* 0.2.0 wire target (TBT_CONV_NEXT 0x0006, TBT_FEC_CONV_NEXT 0x1002),
+ * recorded here as a comment; the skeleton does not implement it.
+ *
+ * FIN body, exactly TBT_FIN_BODY_LEN (16) bytes, little-endian:
+ *   +0  u64 pkt_end   absolute session packet seq after this stream's last
+ *                     DATA packet
+ *   +8  u64 pkt_base  absolute session packet seq of this stream's first DATA
+ *                     packet, aligned to the super-block (groups*n)
+ * tbt_body_bounds() then sets TBT_F_FIN to *min = *max = TBT_FIN_BODY_LEN.
+ * A non-FEC session sends the same 16 zero bytes (pkt_end = pkt_base = 0),
+ * so one length rule covers both. On receive, pkt_end < pkt_base is
+ * fec_fin_bad++ plus -EPROTO; pkt_base % (groups*n) != 0 is fec_fin_bad++
+ * plus ignore.
+ *
+ * PARITY marker: no 4-byte marker and no magic number exists. A marker is a
+ * set of values inside the 40-byte tbt_fec_hdr: type TBT_FEC_PARITY (0x31),
+ * flags 0, share_index n (parity 0), epoch 0, win_len 0, payload_len 0,
+ * conv 0x1002, payload_crc32c 0 (CRC32C of an empty payload). The current
+ * tbt_fec.c requires PARITY payload_len == max_payload and win_len != 0;
+ * relaxing both is the core change of TBT_FEC_CONV 0x1002.
+ *
+ * 0.1.0 <-> 0.2.0 fail closed at this function: the conv check and the body
+ * bounds below reject the other revision on the first record, so neither side
+ * parses the other's bytes under the wrong layout. */
+
 // Validate every field of the header, once, for every type: conv, flags,
 // path_id, path_ack_count, path_ack_mask, body_len, sid_hi, reserved2, and the
 // per-type body bounds. One type also has an exact length that depends on
