@@ -1,0 +1,217 @@
+   4604 DNs  tbt_show_stats                   python3 /usr/local/sbin/tbtun-sampler.py
+   5040 S<s  devkmsg_read                     python3 /usr/local/sbin/tbtun-kmsg-relay.py
+1142141 Ss   do_wait                          bash -c grep "c3 " /proc/net/tbtun/stats | cut -c1-80; ss -ltn | grep 9001
+1142142 D    tbt_show_stats                   grep c3  /proc/net/tbtun/stats
+1149621 Ss   do_wait                          bash -c grep -m1 "c3 " /proc/net/tbtun/stats | cut -c1-70
+1149622 D    tbt_show_stats                   grep -m1 c3  /proc/net/tbtun/stats
+1150988 Ds   tbt_config_apply                 bash -c echo flush > /proc/net/tbtun/config; echo near-flushed; uptime
+1154008 Ss   do_wait                          bash -c grep -m1 "c3 " /proc/net/tbtun/stats | cut -c1-80; ls -l /proc/net/tbtun/config
+1154009 D    tbt_show_stats                   grep -m1 c3  /proc/net/tbtun/stats
+1155372 Ds   tbt_config_apply                 bash -c printf 'del 1\n' > /proc/net/tbtun/config; echo near-del; uptime
+1159823 Ss   do_wait                          bash -c uptime; lsmod | grep tbtun; rmmod tbtun 2>&1; echo rmmod_rc=$?; ls /proc/net/tbtun 2>/dev/null || echo no-proc; uptime
+1159827 D    proc_entry_rundown               rmmod tbtun
+---refcnt
+-1
+---proc
+no-proc
+---dmesg
+[55910.801407] audit: type=1400 audit(1794061863.995:1898): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1104754 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[55910.801434] audit: type=1400 audit(1794061863.995:1899): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1104754 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[55910.801830] audit: type=1400 audit(1794061863.995:1900): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1104754 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[55910.801853] audit: type=1400 audit(1794061863.998:1901): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1104754 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[55974.350326] audit: type=1400 audit(1794061927.546:1902): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1108142 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[55974.350353] audit: type=1400 audit(1794061927.546:1903): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1108142 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[55974.350722] audit: type=1400 audit(1794061927.546:1904): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1108142 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[55974.350749] audit: type=1400 audit(1794061927.546:1905): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1108142 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56037.214127] audit: type=1400 audit(1794061990.413:1906): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1112343 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56037.214154] audit: type=1400 audit(1794061990.413:1907): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1112343 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56037.214582] audit: type=1400 audit(1794061990.413:1908): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1112343 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56037.214597] audit: type=1400 audit(1794061990.413:1909): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1112343 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56037.214990] audit: type=1400 audit(1794061990.413:1910): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1112343 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56037.215004] audit: type=1400 audit(1794061990.413:1911): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1112343 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56085.153011] tbtun 0.2.0 loaded: 64 tunnels max, 256 carriers max
+[56099.841964] audit: type=1400 audit(1794062053.040:1912): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1116120 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56099.841991] audit: type=1400 audit(1794062053.040:1913): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1116120 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56099.842034] audit: type=1400 audit(1794062053.040:1914): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1116120 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56099.842043] audit: type=1400 audit(1794062053.040:1915): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1116120 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56099.842159] audit: type=1400 audit(1794062053.040:1916): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1116120 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56099.842167] audit: type=1400 audit(1794062053.040:1917): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1116120 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56127.804719] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=0 shares=1/4 parity=4 gap_us=17
+[56127.804785] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=0 shares=1/4 parity=4 gap_us=84
+[56127.816015] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=0 shares=1/4 parity=4 gap_us=11313
+[56127.816071] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=0 shares=1/4 parity=4 gap_us=11370
+[56127.829359] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=0 shares=1/4 parity=4 gap_us=24658
+[56127.829413] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=0 shares=1/4 parity=4 gap_us=24713
+[56127.842677] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=0 shares=1/4 parity=4 gap_us=37976
+[56127.856036] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=0 shares=1/4 parity=4 gap_us=51335
+[56127.869253] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=0 shares=1/4 parity=4 gap_us=64552
+[56127.885910] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=0 shares=1/4 parity=4 gap_us=81210
+[56132.806147] tbt_fec_deliver_ready: 415 callbacks suppressed
+[56132.806168] tbtun: fec super 17 stuck: next=17 total_known=0 total_pkts=0 next_deliver=272 deliver_bytes=2097258 group=1/4 used=1 ready=0 id=17 nreal=0 shares=1/4 parity=4 gap_us=243529
+[56132.806223] tbtun: fec super 17 stuck: next=17 total_known=0 total_pkts=0 next_deliver=272 deliver_bytes=2097258 group=1/4 used=1 ready=0 id=17 nreal=0 shares=1/4 parity=4 gap_us=243605
+[56132.819291] tbtun: fec super 17 stuck: next=17 total_known=0 total_pkts=0 next_deliver=272 deliver_bytes=2097258 group=1/4 used=1 ready=0 id=17 nreal=0 shares=2/4 parity=4 gap_us=256673
+[56132.832726] tbtun: fec super 17 stuck: next=17 total_known=0 total_pkts=0 next_deliver=272 deliver_bytes=2097258 group=1/4 used=1 ready=0 id=17 nreal=0 shares=2/4 parity=4 gap_us=270108
+[56132.832868] tbtun: fec super 17 stuck: next=17 total_known=0 total_pkts=0 next_deliver=272 deliver_bytes=2097258 group=1/4 used=1 ready=0 id=17 nreal=0 shares=2/4 parity=4 gap_us=270251
+[56132.846080] tbtun: fec super 17 stuck: next=17 total_known=0 total_pkts=0 next_deliver=272 deliver_bytes=2097258 group=1/4 used=1 ready=0 id=17 nreal=0 shares=2/4 parity=4 gap_us=283461
+[56132.846136] tbtun: fec super 17 stuck: next=17 total_known=0 total_pkts=0 next_deliver=272 deliver_bytes=2097258 group=1/4 used=1 ready=0 id=17 nreal=0 shares=2/4 parity=4 gap_us=283518
+[56132.859234] tbtun: fec super 17 stuck: next=17 total_known=0 total_pkts=0 next_deliver=272 deliver_bytes=2097258 group=1/4 used=1 ready=0 id=17 nreal=0 shares=2/4 parity=4 gap_us=296616
+[56132.872568] tbtun: fec super 17 stuck: next=17 total_known=0 total_pkts=0 next_deliver=272 deliver_bytes=2097258 group=1/4 used=1 ready=0 id=17 nreal=0 shares=3/4 parity=4 gap_us=309950
+[56132.885948] tbtun: fec super 17 stuck: next=17 total_known=0 total_pkts=0 next_deliver=272 deliver_bytes=2097258 group=1/4 used=1 ready=0 id=17 nreal=0 shares=3/4 parity=4 gap_us=323331
+[56162.942555] audit: type=1400 audit(1794062116.144:1918): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1119631 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56162.942582] audit: type=1400 audit(1794062116.144:1919): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1119631 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56162.943017] audit: type=1400 audit(1794062116.144:1920): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1119631 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56162.943032] audit: type=1400 audit(1794062116.144:1921): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1119631 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56162.943431] audit: type=1400 audit(1794062116.144:1922): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1119631 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56162.943443] audit: type=1400 audit(1794062116.144:1923): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1119631 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56189.454702] tbtun: tunnel 1 carrier 10 gen 11 lost: sock=1 connected=1 hello_sent=1 up=1
+[56189.454772] tbtun: tunnel 1 carrier 4 gen 5 lost: sock=1 connected=1 hello_sent=1 up=1
+[56189.455770] tbtun: tunnel 1 carrier 3 gen 4 lost: sock=1 connected=1 hello_sent=1 up=1
+[56189.455819] tbtun: tunnel 1 carrier 14 gen 15 lost: sock=1 connected=1 hello_sent=1 up=1
+[56189.455838] tbtun: tunnel 1 carrier 5 gen 6 lost: sock=1 connected=1 hello_sent=1 up=1
+[56189.456944] tbtun: tunnel 1 carrier 11 gen 12 lost: sock=1 connected=1 hello_sent=1 up=1
+[56189.457335] tbtun: tunnel 1 carrier 15 gen 16 lost: sock=1 connected=1 hello_sent=1 up=1
+[56189.460427] tbtun: tunnel 1 carrier 21 gen 22 lost: sock=1 connected=1 hello_sent=1 up=1
+[56189.460497] tbtun: tunnel 1 carrier 26 gen 27 lost: sock=1 connected=1 hello_sent=1 up=1
+[56189.460547] tbtun: tunnel 1 carrier 28 gen 29 lost: sock=1 connected=1 hello_sent=1 up=1
+[56212.546933] tbt_fec_deliver_ready: 109 callbacks suppressed
+[56212.546948] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=4 shares=1/4 parity=4 gap_us=30
+[56212.547001] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=4 shares=1/4 parity=4 gap_us=100
+[56212.558405] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=4 shares=1/4 parity=4 gap_us=11502
+[56212.575076] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=4 shares=1/4 parity=4 gap_us=28174
+[56212.591688] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=4 shares=1/4 parity=4 gap_us=44786
+[56212.608315] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=4 shares=1/4 parity=4 gap_us=61413
+[56212.608335] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=4 shares=1/4 parity=4 gap_us=61435
+[56212.621594] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=4 shares=1/4 parity=4 gap_us=74692
+[56212.638482] tbtun: fec super 1 stuck: next=1 total_known=0 total_pkts=0 next_deliver=16 deliver_bytes=131072 group=0/4 used=1 ready=0 id=1 nreal=4 shares=0/4 parity=4 gap_us=0
+[56212.638517] tbtun: fec super 1 stuck: next=1 total_known=0 total_pkts=0 next_deliver=16 deliver_bytes=131072 group=0/4 used=1 ready=0 id=1 nreal=4 shares=0/4 parity=4 gap_us=0
+[56217.548222] tbt_fec_deliver_ready: 418 callbacks suppressed
+[56217.548239] tbtun: fec super 20 stuck: next=20 total_known=0 total_pkts=0 next_deliver=320 deliver_bytes=2621440 group=1/4 used=1 ready=0 id=20 nreal=4 shares=1/4 parity=4 gap_us=149621
+[56217.561572] tbtun: fec super 20 stuck: next=20 total_known=0 total_pkts=0 next_deliver=320 deliver_bytes=2621440 group=1/4 used=1 ready=0 id=20 nreal=4 shares=1/4 parity=4 gap_us=162970
+[56217.574909] tbtun: fec super 20 stuck: next=20 total_known=0 total_pkts=0 next_deliver=320 deliver_bytes=2621440 group=1/4 used=1 ready=0 id=20 nreal=4 shares=1/4 parity=4 gap_us=176307
+[56217.588235] tbtun: fec super 20 stuck: next=20 total_known=0 total_pkts=0 next_deliver=320 deliver_bytes=2621440 group=1/4 used=1 ready=0 id=20 nreal=4 shares=1/4 parity=4 gap_us=189633
+[56217.601574] tbtun: fec super 20 stuck: next=20 total_known=0 total_pkts=0 next_deliver=320 deliver_bytes=2621440 group=1/4 used=1 ready=0 id=20 nreal=4 shares=1/4 parity=4 gap_us=202973
+[56217.614886] tbtun: fec super 20 stuck: next=20 total_known=0 total_pkts=0 next_deliver=320 deliver_bytes=2621440 group=1/4 used=1 ready=0 id=20 nreal=4 shares=1/4 parity=4 gap_us=216285
+[56217.628304] tbtun: fec super 20 stuck: next=20 total_known=0 total_pkts=0 next_deliver=320 deliver_bytes=2621440 group=1/4 used=1 ready=0 id=20 nreal=4 shares=1/4 parity=4 gap_us=229703
+[56217.641583] tbtun: fec super 20 stuck: next=20 total_known=0 total_pkts=0 next_deliver=320 deliver_bytes=2621440 group=1/4 used=1 ready=0 id=20 nreal=4 shares=1/4 parity=4 gap_us=242983
+[56217.654861] tbtun: fec super 20 stuck: next=20 total_known=0 total_pkts=0 next_deliver=320 deliver_bytes=2621440 group=1/4 used=1 ready=0 id=20 nreal=4 shares=1/4 parity=4 gap_us=256261
+[56217.668181] tbtun: fec super 20 stuck: next=20 total_known=0 total_pkts=0 next_deliver=320 deliver_bytes=2621440 group=1/4 used=1 ready=0 id=20 nreal=4 shares=1/4 parity=4 gap_us=269582
+[56226.209683] audit: type=1400 audit(1794062179.408:1924): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1123172 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56226.209710] audit: type=1400 audit(1794062179.408:1925): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1123172 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56226.210124] audit: type=1400 audit(1794062179.408:1926): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1123172 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56226.210138] audit: type=1400 audit(1794062179.408:1927): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1123172 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56226.210483] audit: type=1400 audit(1794062179.408:1928): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1123172 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56226.210511] audit: type=1400 audit(1794062179.408:1929): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1123172 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56241.284639] tbtun: carrier 1 stalled: repath paused, new frames avoid it
+[56241.337976] tbtun: carrier 1 recovered after 53 ms: back in the stripe
+[56259.204486] tbtun: carrier 3 stalled: repath paused, new frames avoid it
+[56259.417692] tbtun: carrier 3 recovered after 213 ms: back in the stripe
+[56272.427848] tbt_carrier_lost: 17 callbacks suppressed
+[56272.427865] tbtun: tunnel 1 carrier 8 gen 9 lost: sock=1 connected=1 hello_sent=1 up=1
+[56272.428855] tbtun: tunnel 1 carrier 7 gen 8 lost: sock=1 connected=1 hello_sent=1 up=1
+[56272.428928] tbtun: tunnel 1 carrier 9 gen 10 lost: sock=1 connected=1 hello_sent=1 up=1
+[56272.428947] tbtun: tunnel 1 carrier 11 gen 12 lost: sock=1 connected=1 hello_sent=1 up=1
+[56272.429042] tbtun: tunnel 1 carrier 2 gen 3 lost: sock=1 connected=1 hello_sent=1 up=1
+[56272.429061] tbtun: tunnel 1 carrier 17 gen 18 lost: sock=1 connected=1 hello_sent=1 up=1
+[56272.429077] tbtun: tunnel 1 carrier 10 gen 11 lost: sock=1 connected=1 hello_sent=1 up=1
+[56272.429142] tbtun: tunnel 1 carrier 3 gen 4 lost: sock=1 connected=1 hello_sent=1 up=1
+[56272.429607] tbtun: tunnel 1 carrier 21 gen 22 lost: sock=1 connected=1 hello_sent=1 up=1
+[56272.429653] tbtun: tunnel 1 carrier 6 gen 7 lost: sock=1 connected=1 hello_sent=1 up=1
+[56289.045480] audit: type=1400 audit(1794062242.246:1930): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1126680 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56289.045506] audit: type=1400 audit(1794062242.246:1931): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1126680 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56289.045969] audit: type=1400 audit(1794062242.246:1932): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1126680 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56289.045982] audit: type=1400 audit(1794062242.246:1933): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1126680 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56289.046341] audit: type=1400 audit(1794062242.246:1934): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1126680 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56289.046369] audit: type=1400 audit(1794062242.246:1935): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1126680 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56325.321636] tbt_fec_deliver_ready: 136 callbacks suppressed
+[56325.321654] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=4 shares=2/4 parity=4 gap_us=18
+[56325.321708] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=4 shares=2/4 parity=4 gap_us=91
+[56325.333694] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=4 shares=2/4 parity=4 gap_us=12076
+[56325.347067] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=4 shares=2/4 parity=4 gap_us=25450
+[56325.360310] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=0/4 used=1 ready=0 id=0 nreal=4 shares=2/4 parity=4 gap_us=38693
+[56325.376961] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=1/4 used=1 ready=0 id=0 nreal=0 shares=1/4 parity=4 gap_us=55345
+[56325.376976] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=1/4 used=1 ready=0 id=0 nreal=0 shares=1/4 parity=4 gap_us=55361
+[56325.393673] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=1/4 used=1 ready=0 id=0 nreal=0 shares=1/4 parity=4 gap_us=72056
+[56325.407015] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=1/4 used=1 ready=0 id=0 nreal=4 shares=2/4 parity=4 gap_us=85398
+[56325.420291] tbtun: fec super 0 stuck: next=0 total_known=0 total_pkts=0 next_deliver=0 deliver_bytes=0 group=1/4 used=1 ready=0 id=0 nreal=4 shares=2/4 parity=4 gap_us=98674
+[56330.330295] tbt_fec_deliver_ready: 421 callbacks suppressed
+[56330.330314] tbtun: fec super 23 stuck: next=23 total_known=0 total_pkts=0 next_deliver=368 deliver_bytes=3014656 group=0/4 used=1 ready=0 id=23 nreal=4 shares=0/4 parity=4 gap_us=120006
+[56330.343676] tbtun: fec super 23 stuck: next=23 total_known=0 total_pkts=0 next_deliver=368 deliver_bytes=3014656 group=0/4 used=1 ready=0 id=23 nreal=4 shares=1/4 parity=4 gap_us=133387
+[56330.356906] tbtun: fec super 23 stuck: next=23 total_known=0 total_pkts=0 next_deliver=368 deliver_bytes=3014656 group=0/4 used=1 ready=0 id=23 nreal=4 shares=1/4 parity=4 gap_us=146616
+[56330.370283] tbtun: fec super 23 stuck: next=23 total_known=0 total_pkts=0 next_deliver=368 deliver_bytes=3014656 group=0/4 used=1 ready=0 id=23 nreal=4 shares=1/4 parity=4 gap_us=159994
+[56330.383630] tbtun: fec super 23 stuck: next=23 total_known=0 total_pkts=0 next_deliver=368 deliver_bytes=3014656 group=0/4 used=1 ready=0 id=23 nreal=4 shares=1/4 parity=4 gap_us=173341
+[56330.396964] tbtun: fec super 23 stuck: next=23 total_known=0 total_pkts=0 next_deliver=368 deliver_bytes=3014656 group=0/4 used=1 ready=0 id=23 nreal=4 shares=1/4 parity=4 gap_us=186676
+[56330.410286] tbtun: fec super 23 stuck: next=23 total_known=0 total_pkts=0 next_deliver=368 deliver_bytes=3014656 group=0/4 used=1 ready=0 id=23 nreal=4 shares=1/4 parity=4 gap_us=199997
+[56330.423825] tbtun: fec super 23 stuck: next=23 total_known=0 total_pkts=0 next_deliver=368 deliver_bytes=3014656 group=0/4 used=1 ready=0 id=23 nreal=4 shares=1/4 parity=4 gap_us=213536
+[56330.423878] tbtun: fec super 23 stuck: next=23 total_known=0 total_pkts=0 next_deliver=368 deliver_bytes=3014656 group=0/4 used=1 ready=0 id=23 nreal=4 shares=1/4 parity=4 gap_us=213590
+[56330.437091] tbtun: fec super 23 stuck: next=23 total_known=0 total_pkts=0 next_deliver=368 deliver_bytes=3014656 group=0/4 used=1 ready=0 id=23 nreal=4 shares=1/4 parity=4 gap_us=226803
+[56351.875125] audit: type=1400 audit(1794062305.077:1936): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1130187 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56351.875151] audit: type=1400 audit(1794062305.077:1937): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1130187 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56351.875273] audit: type=1400 audit(1794062305.077:1938): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1130187 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56351.875282] audit: type=1400 audit(1794062305.077:1939): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1130187 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56351.875393] audit: type=1400 audit(1794062305.077:1940): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1130187 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56351.875402] audit: type=1400 audit(1794062305.077:1941): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1130187 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56364.130987] tbt_carrier_lost: 14 callbacks suppressed
+[56364.131006] tbtun: tunnel 1 carrier 4 gen 5 lost: sock=1 connected=1 hello_sent=1 up=1
+[56364.131139] tbtun: tunnel 1 carrier 8 gen 9 lost: sock=1 connected=1 hello_sent=1 up=1
+[56364.131157] tbtun: tunnel 1 carrier 6 gen 7 lost: sock=1 connected=1 hello_sent=1 up=1
+[56364.131964] tbtun: tunnel 1 carrier 10 gen 11 lost: sock=1 connected=1 hello_sent=1 up=1
+[56364.132077] tbtun: tunnel 1 carrier 1 gen 2 lost: sock=1 connected=1 hello_sent=1 up=1
+[56364.132098] tbtun: tunnel 1 carrier 31 gen 32 lost: sock=1 connected=1 hello_sent=1 up=1
+[56364.132117] tbtun: tunnel 1 carrier 3 gen 4 lost: sock=1 connected=1 hello_sent=1 up=1
+[56364.132139] tbtun: tunnel 1 carrier 5 gen 6 lost: sock=1 connected=1 hello_sent=1 up=1
+[56364.132156] tbtun: tunnel 1 carrier 27 gen 28 lost: sock=1 connected=1 hello_sent=1 up=1
+[56364.132690] tbtun: tunnel 1 carrier 29 gen 30 lost: sock=1 connected=1 hello_sent=1 up=1
+[56414.736274] audit: type=1400 audit(1794062367.941:1942): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1133600 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56414.736302] audit: type=1400 audit(1794062367.941:1943): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1133600 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56414.736352] audit: type=1400 audit(1794062367.941:1944): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1133600 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56414.736362] audit: type=1400 audit(1794062367.941:1945): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1133600 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56414.736502] audit: type=1400 audit(1794062367.941:1946): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1133600 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56414.736515] audit: type=1400 audit(1794062367.941:1947): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1133600 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56477.567945] audit: type=1400 audit(1794062430.768:1948): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1136997 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56477.567973] audit: type=1400 audit(1794062430.768:1949): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1136997 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56477.568345] audit: type=1400 audit(1794062430.768:1950): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1136997 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56477.568374] audit: type=1400 audit(1794062430.768:1951): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1136997 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56477.568849] audit: type=1400 audit(1794062430.771:1952): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1136997 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56477.568912] audit: type=1400 audit(1794062430.771:1953): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1136997 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56540.468605] audit: type=1400 audit(1794062493.672:1954): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1140396 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56540.468633] audit: type=1400 audit(1794062493.672:1955): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1140396 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56540.469022] audit: type=1400 audit(1794062493.672:1956): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1140396 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56540.469035] audit: type=1400 audit(1794062493.672:1957): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1140396 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56540.469430] audit: type=1400 audit(1794062493.672:1958): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1140396 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56540.469443] audit: type=1400 audit(1794062493.672:1959): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1140396 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56603.384096] audit: type=1400 audit(1794062556.590:1960): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1143797 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56603.384123] audit: type=1400 audit(1794062556.590:1961): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1143797 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56603.384574] audit: type=1400 audit(1794062556.590:1962): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1143797 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56603.384592] audit: type=1400 audit(1794062556.590:1963): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1143797 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56603.384995] audit: type=1400 audit(1794062556.590:1964): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1143797 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56603.385007] audit: type=1400 audit(1794062556.590:1965): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1143797 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56666.265545] audit: type=1400 audit(1794062619.470:1966): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1147202 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56666.265572] audit: type=1400 audit(1794062619.470:1967): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1147202 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56666.265935] audit: type=1400 audit(1794062619.470:1968): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1147202 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56666.265963] audit: type=1400 audit(1794062619.470:1969): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1147202 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56666.266502] audit: type=1400 audit(1794062619.474:1970): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1147202 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56666.266520] audit: type=1400 audit(1794062619.474:1971): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1147202 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56729.313734] audit: type=1400 audit(1794062682.518:1972): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1150604 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56729.313762] audit: type=1400 audit(1794062682.518:1973): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1150604 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56729.314167] audit: type=1400 audit(1794062682.518:1974): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1150604 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56729.314181] audit: type=1400 audit(1794062682.518:1975): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1150604 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56729.314528] audit: type=1400 audit(1794062682.518:1976): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1150604 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56729.314555] audit: type=1400 audit(1794062682.518:1977): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1150604 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56792.020139] audit: type=1400 audit(1794062745.225:1978): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1154007 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56792.020166] audit: type=1400 audit(1794062745.225:1979): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1154007 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56792.020201] audit: type=1400 audit(1794062745.225:1980): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1154007 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56792.020211] audit: type=1400 audit(1794062745.225:1981): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1154007 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56792.020367] audit: type=1400 audit(1794062745.225:1982): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1154007 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56792.020381] audit: type=1400 audit(1794062745.225:1983): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1154007 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56854.950903] audit: type=1400 audit(1794062808.159:1984): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1157407 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56854.950931] audit: type=1400 audit(1794062808.159:1985): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1157407 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56854.951054] audit: type=1400 audit(1794062808.159:1986): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1157407 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56854.951063] audit: type=1400 audit(1794062808.159:1987): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1157407 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56854.951181] audit: type=1400 audit(1794062808.159:1988): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1157407 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56854.951190] audit: type=1400 audit(1794062808.159:1989): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1157407 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56917.813892] audit: type=1400 audit(1794062871.023:1990): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1160807 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56917.813919] audit: type=1400 audit(1794062871.023:1991): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1160807 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56917.814333] audit: type=1400 audit(1794062871.023:1992): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1160807 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56917.814350] audit: type=1400 audit(1794062871.023:1993): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1160807 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56917.814736] audit: type=1400 audit(1794062871.023:1994): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=1160807 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[56917.814749] audit: type=1400 audit(1794062871.023:1995): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=1160807 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0

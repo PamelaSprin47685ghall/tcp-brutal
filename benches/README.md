@@ -1,5 +1,10 @@
 # benches - the performance envelope of tbtun
 
+> For the 1-second feedback loop used while tuning, see
+> [MICROBENCH.md](MICROBENCH.md): `make bench`, `make bench-full`, and
+> `scripts/microbench.sh run|baseline|compare`. This file describes the
+> longer QEMU scenario sweep.
+
 This directory answers two questions with numbers, not with the design's
 intentions:
 

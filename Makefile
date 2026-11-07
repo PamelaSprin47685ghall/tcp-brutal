@@ -39,6 +39,8 @@ HOST_CRYPTO_HDRS := tbtun/tbt_crypto.h tbtun/tbt_http.h tbtun/tbt_proto.h tbtun/
 HOST_BENCH_CRYPTO := host/bench_crypto
 HOST_BENCH_CRYPTO_SRCS := host/bench_crypto.c tbtun/tbt_crypto.c tbtun/tbt_proto.c
 HOST_BENCH_CRYPTO_HDRS := tbtun/tbt_crypto.h tbtun/tbt_proto.h tbtun/tbt_uapi.h
+HOST_BENCH_MICRO := host/bench_micro
+HOST_BENCH_MICRO_SRCS := host/bench_micro.c tbtun/tbt_fec.c tbtun/tbt_crypto.c tbtun/tbt_proto.c
 HOST_HTTP_LIVE  := host/test_http_live
 HOST_HTTP_LIVE_SRCS := host/test_http_live.c tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
 HOST_HTTP_LIVE_HDRS := tbtun/tbt_http.h tbtun/tbt_uapi.h tbtun/tbt_proto.h tbtun/tbt_rec.h
@@ -87,7 +89,7 @@ ccflags-y       := -std=gnu99 -I$(src)/tbtun
 # variable must name the object path Kbuild sees for a composite module.
 CFLAGS_tbtun/tbt_crypto.o := -O3
 
-.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-live
+.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-live host-bench-micro bench bench-full
 
 all:
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) modules
@@ -157,6 +159,23 @@ $(HOST_BENCH_CRYPTO): $(HOST_BENCH_CRYPTO_SRCS) $(HOST_BENCH_CRYPTO_HDRS)
 # measurement, not a gate.
 host-bench-crypto: $(HOST_BENCH_CRYPTO)
 	@./$(HOST_BENCH_CRYPTO)
+
+# The microbenchmark base: one binary, CSV on stdout. -O2 is the module's
+# default for tbt_fec.c; the crypto object is -O3 in the module, so its rows
+# here are a lower bound (host/bench_crypto measures that core at -O3).
+$(HOST_BENCH_MICRO): $(HOST_BENCH_MICRO_SRCS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_BENCH_MICRO_SRCS)
+
+host-bench-micro: $(HOST_BENCH_MICRO)
+
+# The feedback loop. `bench` is the <= 2 s pass for iteration; `bench-full`
+# is the <= 10 s pass for a recorded baseline. Both write a timestamped
+# directory under benches/results/ and print its path.
+bench: $(HOST_BENCH_MICRO)
+	@./scripts/microbench.sh run --quick
+
+bench-full: $(HOST_BENCH_MICRO)
+	@./scripts/microbench.sh run --full
 
 $(HOST_REORDER): $(HOST_REORDER_SRCS)
 	$(HOSTCC) $(HOST_CFLAGS) -o $@ $(HOST_REORDER_SRCS)
@@ -260,7 +279,7 @@ host-test-live: $(HOST_HTTP_LIVE)
 	fi
 
 clean: clean-dkms.conf clean-dkms-tarball
-	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_PORTMAP) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_portmap_san
+	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_PORTMAP) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_portmap_san
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
 
 load:
