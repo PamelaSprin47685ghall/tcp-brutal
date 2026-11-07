@@ -194,6 +194,39 @@ static unsigned int tbt_tunnel_count_locked(void)
     return n;
 }
 
+/* Carry the session crypto state across a tunnel overwrite. The peer checks
+ * every later HELLO against the first one it saw: a new key or a new TX
+ * nonce is refused on every carrier, and the peer cannot tell the replaced
+ * session's last HELLOs from the replacement's. The TX nonce therefore
+ * survives whenever the role is unchanged. The key survives only when this
+ * near side generated and announced it; a configured or adopted key is not
+ * this tunnel's to carry. The old session is still alive here:
+ * tbt_tunnel_add() destroys it after the new one is installed. */
+static void tbt_tunnel_inherit_crypto(struct tbt_tunnel *t,
+                                      const struct tbt_tunnel *old)
+{
+    struct tbt_session *s = old->sess;
+
+    if (!s || !t->cfg.crypto || t->cfg.role != old->cfg.role)
+        return;
+    spin_lock(&s->lock);
+    if (s->crypto)
+    {
+        memcpy(t->crypto_tx_nonce_inherit, s->crypto_tx_nonce,
+               sizeof(t->crypto_tx_nonce_inherit));
+        t->crypto_tx_nonce_inherit_valid = true;
+    }
+    if (t->cfg.role == TBT_ROLE_NEAR && !t->cfg.crypto_key_set &&
+        s->crypto_have_key && !s->crypto_key_peer &&
+        s->crypto_key_id == TBT_CRYPTO_KEY_ID_HELLO)
+    {
+        memcpy(t->crypto_key_inherit, s->crypto_key,
+               sizeof(t->crypto_key_inherit));
+        t->crypto_key_inherit_valid = true;
+    }
+    spin_unlock(&s->lock);
+}
+
 /* Installs `cfg`, replacing an existing tunnel with the same id
  * (DESIGN.md §8.4.1 "re-applying the same line is idempotent"). The list/cap
  * section runs under tbt_lock; listener/session teardown runs
@@ -239,6 +272,7 @@ int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net)
 
     if (old)
     {
+        tbt_tunnel_inherit_crypto(t, old);
         list_del_rcu(&old->node);
         tbt_listen_stop(old);
     }
@@ -1285,10 +1319,25 @@ int tbt_session_create(struct tbt_tunnel *t)
         TBT_DIAG("crypto setup start tunnel=%llu role=%u key_set=%d",
                  (unsigned long long)t->cfg.id, t->cfg.role,
                  t->cfg.crypto_key_set);
-        get_random_bytes(s->crypto_tx_nonce, sizeof(s->crypto_tx_nonce));
+        /* Replacing a tunnel must repeat this direction's nonce: the peer
+         * checks every later HELLO against the first one it saw, and the
+         * replacement's HELLOs are indistinguishable from the old ones.
+         * Only a tunnel with no predecessor generates a fresh nonce. */
+        if (t->crypto_tx_nonce_inherit_valid)
+            memcpy(s->crypto_tx_nonce, t->crypto_tx_nonce_inherit,
+                   sizeof(s->crypto_tx_nonce));
+        else
+            get_random_bytes(s->crypto_tx_nonce, sizeof(s->crypto_tx_nonce));
         if (t->cfg.role == TBT_ROLE_NEAR && !s->crypto_have_key)
         {
-            get_random_bytes(s->crypto_key, sizeof(s->crypto_key));
+            /* The same rule for the key the far side adopted from us. Only a
+             * tunnel with no predecessor, or an explicit delete and re-add,
+             * generates a fresh key. */
+            if (t->crypto_key_inherit_valid)
+                memcpy(s->crypto_key, t->crypto_key_inherit,
+                       sizeof(s->crypto_key));
+            else
+                get_random_bytes(s->crypto_key, sizeof(s->crypto_key));
             s->crypto_have_key = true;
             s->crypto_key_id = TBT_CRYPTO_KEY_ID_HELLO;
         }
@@ -1300,7 +1349,9 @@ int tbt_session_create(struct tbt_tunnel *t)
             smp_store_release(&s->crypto_tx_ready, true);
             TBT_DIAG("crypto tx init tunnel=%llu key_id=%u source=%s rc=%d nonce=%*phN",
                      (unsigned long long)t->cfg.id, s->crypto_key_id,
-                     t->cfg.crypto_key_set ? "configured" : "generated", rc,
+                     t->cfg.crypto_key_set ? "configured" :
+                     t->crypto_key_inherit_valid ? "inherited" : "generated",
+                     rc,
                      TBT_CRYPTO_NONCE_LEN, s->crypto_tx_nonce);
         }
         else

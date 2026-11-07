@@ -1339,6 +1339,118 @@ static void test_body_share(void)
     }
 }
 
+/* The far side's HELLO crypto check, as tbt_rx_hello_crypto() runs it. The
+ * first HELLO is adopted; every later one must resolve to the same key and
+ * repeat the same TX nonce, or the carrier is refused. */
+static bool far_hello_ok(bool adopted, const u8 key[32], const u8 nonce[8],
+                         const u8 hello[66], u8 got_key[32],
+                         u8 got_nonce[8])
+{
+    bool enabled = false;
+    u8 key_id = TBT_CRYPTO_KEY_ID_NONE;
+    u8 hello_key[32];
+    u8 resolved[32];
+
+    if (tbt_crypto_hello_parse(hello, 66, &enabled, &key_id, got_nonce,
+                               hello_key) != 0)
+        return false;
+    if (tbt_crypto_resolve_key(false, NULL, enabled, key_id, hello_key,
+                               resolved) != 0)
+        return false;
+    if (!adopted)
+    {
+        memcpy(got_key, resolved, 32);
+        return true;
+    }
+    return memcmp(key, resolved, 32) == 0 &&
+           memcmp(nonce, got_nonce, 8) == 0;
+}
+
+/* A far side keeps the near's key and TX nonce for the life of its session.
+ * The near must repeat both across carrier reconnects and across a tunnel
+ * overwrite; regenerating either one rejected every carrier of a 256-carrier
+ * replacement ("crypto key changed"). */
+static void test_reconnect_key(void)
+{
+    u8 key[32];
+    u8 other_key[32];
+    u8 nonce[8];
+    u8 other_nonce[8];
+    u8 hello[66];
+    u8 adopted_key[32];
+    u8 adopted_nonce[8];
+    u8 got_key[32];
+    u8 got_nonce[8];
+
+    fill(key, sizeof(key), 0x5a);
+    fill(other_key, sizeof(other_key), 0xa5);
+    fill(nonce, sizeof(nonce), 0x33);
+    fill(other_nonce, sizeof(other_nonce), 0x44);
+
+    memset(hello, 0, sizeof(hello));
+    tbt_crypto_hello_fill(hello, true, TBT_CRYPTO_KEY_ID_HELLO, nonce, key);
+    if (!far_hello_ok(false, NULL, NULL, hello, adopted_key, adopted_nonce) ||
+        memcmp(adopted_key, key, sizeof(key)) != 0 ||
+        memcmp(adopted_nonce, nonce, sizeof(nonce)) != 0)
+    {
+        printf("FAIL reconnect: the far did not adopt key and nonce\n");
+        failures++;
+        return;
+    }
+    printf("PASS reconnect: the far adopts the near key and nonce\n");
+
+    /* A carrier reconnect of the same session repeats both. */
+    if (!far_hello_ok(true, adopted_key, adopted_nonce, hello, got_key,
+                      got_nonce))
+    {
+        printf("FAIL reconnect: a repeated carrier HELLO was refused\n");
+        failures++;
+        return;
+    }
+    printf("PASS reconnect: a repeated carrier HELLO keeps the key and nonce\n");
+
+    /* A tunnel overwrite that inherits both is indistinguishable to the
+     * far, which is the point. */
+    if (!far_hello_ok(true, adopted_key, adopted_nonce, hello, got_key,
+                      got_nonce))
+    {
+        printf("FAIL reconnect: an inherited key and nonce were refused\n");
+        failures++;
+        return;
+    }
+    printf("PASS reconnect: a replacement that inherits key and nonce is accepted\n");
+
+    /* A fresh TX nonce alone is enough to lose every carrier. */
+    memset(hello, 0, sizeof(hello));
+    tbt_crypto_hello_fill(hello, true, TBT_CRYPTO_KEY_ID_HELLO, other_nonce,
+                          key);
+    if (far_hello_ok(true, adopted_key, adopted_nonce, hello, got_key,
+                     got_nonce))
+    {
+        printf("FAIL reconnect: a changed nonce was accepted\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS reconnect: a changed nonce is refused\n");
+    }
+
+    /* A fresh key alone is the failure this test locks down. */
+    memset(hello, 0, sizeof(hello));
+    tbt_crypto_hello_fill(hello, true, TBT_CRYPTO_KEY_ID_HELLO, nonce,
+                          other_key);
+    if (far_hello_ok(true, adopted_key, adopted_nonce, hello, got_key,
+                     got_nonce))
+    {
+        printf("FAIL reconnect: a changed key was accepted\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS reconnect: a changed key is refused\n");
+    }
+}
+
 /* The full key path the session will use: each side fills its own HELLO v6
  * with its own TX nonce, parses the peer's, and keeps tx/rx contexts. */
 static void test_session_path(void)
@@ -1493,6 +1605,7 @@ int main(void)
     test_hello();
     test_direction_nonce();
     test_pair();
+    test_reconnect_key();
     test_session_path();
 
     if (failures != 0)

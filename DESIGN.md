@@ -1855,8 +1855,13 @@ random at tunnel creation).
   `crypto_key=`, the near side generates the key and announces it in the HELLO
   v6 body (`key_id=1`); with `crypto_key=` on both ends, `key_id=0` and the
   HELLO key field is zero. A mismatch is a payload CRC failure on every share,
-  not a silent downgrade. The FEC header, HTTP headers, chunk framing and
-  control records are never obfuscated.
+  not a silent downgrade. The key and each direction's `crypto_nonce` stay
+  fixed for the life of a tunnel: a carrier reconnect repeats them, and
+  re-applying the same tunnel id (a session replacement) inherits them,
+  because the peer refuses a HELLO that changes either one and cannot tell
+  the replaced session's HELLOs from the replacement's. Only a new tunnel, or
+  a delete and re-add, generates fresh values. The FEC header, HTTP headers,
+  chunk framing and control records are never obfuscated.
 - `chunk=`, `framing=`, `max_retry=`, and `uid=` were removed: they were
   parsed but never read by the data path. An unknown key is refused with `EINVAL`.
 - All files are `0600 root` under `init_net.proc_net`, except `http`, which is

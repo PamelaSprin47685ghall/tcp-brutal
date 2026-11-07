@@ -142,6 +142,21 @@ struct tbt_tunnel
     struct tbt_session *sess; /* C2: one session per tunnel */
     struct list_head sessions;
 
+    /* Crypto state kept from the tunnel this one replaced. Each side checks
+     * every later HELLO against the first one it saw: a different key is
+     * "crypto key changed" and a different TX nonce is "crypto nonce
+     * changed". The replaced session's last HELLOs and the replacement's
+     * HELLOs are indistinguishable to the peer, so regenerating either one
+     * rejects every carrier of the replacement (measured: 256 carriers, near
+     * up=18, 25 far HELLO rejections). The TX nonce is inherited whenever
+     * the role is unchanged. The key is inherited only by a near side, and
+     * only when it generated and announced that key (key_id=1): a configured
+     * or adopted key is not this tunnel's to carry. */
+    u8 crypto_key_inherit[TBT_CRYPTO_KEY_LEN];
+    u8 crypto_tx_nonce_inherit[TBT_CRYPTO_NONCE_LEN];
+    bool crypto_key_inherit_valid;
+    bool crypto_tx_nonce_inherit_valid;
+
     /* Listener, present for a near tunnel once bound. */
     struct socket *lsock;
     struct work_struct w_accept; /* scheduled from lsock->sk->sk_data_ready */

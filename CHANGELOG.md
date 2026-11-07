@@ -5,6 +5,19 @@ and moves independently of the module version.
 
 ## [0.3.0] - planned
 
+### Fixed
+
+- A tunnel overwrite keeps the session crypto state. Each side adopts the
+  peer's key and TX nonce from the first HELLO and refuses a different one on
+  every later carrier, but the replaced session's last HELLOs and the
+  replacement's are indistinguishable to it. Regenerating the key or nonce on
+  every overwrite therefore rejected every carrier of the replacement
+  (measured: 256 carriers, near up=18, 25 far "crypto key changed"). A
+  replacement now inherits the TX nonce when the role is unchanged, and a
+  near side also inherits the key it generated and announced. Only a new
+  tunnel, or a delete and re-add, generates fresh crypto state. The
+  `crypto_key=` path is unchanged.
+
 ### Deferred from 0.2.0
 
 - Two fix29 performance experiments stay out of 0.2.0 and are the first

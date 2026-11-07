@@ -47,9 +47,14 @@
  * side generates it and the HELLO v6 body carries it in clear text
  * (key_id=1); the far side adopts it. With `crypto_key=` set on both ends,
  * key_id=0 and the HELLO key field is zero; a mismatch is detected as a
- * payload CRC failure. The helpers at the bottom of this header define the
- * HELLO crypto field layout and the resolve rules, so the HELLO builder and
- * parser do not re-derive them.
+ * payload CRC failure. A far side keeps the adopted key for the life of its
+ * session and refuses a HELLO that names a different one, so a near side
+ * must keep its key stable across carrier reconnects and across a tunnel
+ * overwrite: the far cannot tell the replaced session's last HELLOs from the
+ * replacement's. Only a new tunnel (or a delete and re-add) generates a
+ * fresh key. The helpers at the bottom of this header define the HELLO crypto
+ * field layout and the resolve rules, so the HELLO builder and parser do not
+ * re-derive them.
  *
  * Direction separation. The counter has no direction bit, and both directions
  * start seq at 0. Each side therefore generates an independent 8-byte
