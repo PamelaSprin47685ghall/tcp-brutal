@@ -2443,7 +2443,7 @@ makes this design different from a generic L4 tunnel.
 | `scripts/tbtunctl` | **never created** — no userspace program ships in any form |
 | `tests/*.sh` | **new** |
 
-Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the current tree reports `0.0.1`.
+Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the current tree reports `0.1.0`.
 The wire revision `TBT_CONV=0x0005` bumps independently. HELLO `body[0]` carries
 `TBT_WIRE_VERSION=1`, not the module version, so the module version and the wire version
 are decoupled.
@@ -2453,7 +2453,7 @@ are decoupled.
 parses those macros and emits `PACKAGE_VERSION="<major>.<minor>.<patch>"`; parsing
 failure is fatal and never falls back to an old value. `dkms.conf` is a generated file —
 `make dkms.conf` (or `make dkms-tarball`) writes it, and it must not be hand-edited; the
-current generated value is `PACKAGE_VERSION="0.0.1"`. `scripts/install_dkms.sh` reads
+current generated value is `PACKAGE_VERSION="0.1.0"`. `scripts/install_dkms.sh` reads
 the same value through `mkdkmsconf.sh --version`. A development suffix
 `.r<commits>.<sha>` is opt-in with `TBT_DKMS_GIT_SUFFIX=1`; it is not the default.
 

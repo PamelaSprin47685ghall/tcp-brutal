@@ -64,7 +64,7 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.0.1`）。线上版本是
+`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.1.0`）。线上版本是
 `TBT_WIRE_VERSION=1` 与 `TBT_CONV=0x0005`，二者都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
 失败，其载体关闭；0x0004 的对端在第一个头部就会因为 conv 不匹配而被拒绝。
@@ -92,6 +92,55 @@ sudo insmod tbtun.ko debug_loss=0
 
 控制面只在 `init_net` 中创建；没有 per-netns 视图。
 卸载用 `sudo rmmod tbtun`。卸载会清空所有隧道，关闭所有监听端口和载体。
+
+### 生产部署
+
+两端必须运行同一个修复版本。2026-11-06 的现场崩溃是模块内部的内存破坏：
+`tbt_carrier_new_locked()` 用 `kmalloc()` 分配每条载体的 `parser` 与 `http_rx`，
+复用 slab 对象时 `parser->have` 可能是脏值，而 `tbt_http_rx_parse()` 把它当作
+`memmove()` 的长度。表现是加载后几秒内的 `Internal error: Oops`，常常落在无关
+进程里，因为破坏是 slab 级的。新旧混搭不会"基本能用"：未修复的那一端自己就会
+破坏内存，与对端做什么无关。
+
+`/sys/module/tbtun/srcversion` 是身份门，因为线上没有任何字段能区分这两个构建。
+把已加载的模块和你要部署的那个文件对一下：
+
+```sh
+modinfo -F srcversion tbtun.ko      # 加载前
+cat /sys/module/tbtun/srcversion    # 加载后
+```
+
+`srcversion` 是每个构建各自的哈希，所以两端架构或内核配置不同时，近端与远端的值
+本来就该不同（现场那一对是 aarch64 的 `72168C1C…` 与 x86_64 的 `332759AF…`，
+源码相同）。要求的是每台主机对上自己的产物；两端都要查，每次重新部署后都要再查。
+
+`debug=0` 是生产设置，也正是崩溃后现场所剩无几的原因：按包、按轮的诊断都由
+`debug` 把关，最多只剩一次性的 `tbtun-diag:` bring-up 行（会话与载体创建、
+最初几轮 poll、第一个接收窗口）。可见性要在需要之前就搭好：
+
+- journald 持久化（`Storage=persistent`，或者至少有 `/var/log/journal` 目录），
+  这样上一次启动的记录能活过重启。
+- `sysctl -w kernel.panic_on_oops=1 kernel.panic=10`：被破坏的内存触发 Oops 时，
+  十秒后重启，而重启本身就是"出事了"的信号。不设的话，主机会带着被污染的 slab
+  继续跑，证据散落在互不相关的进程里。
+- 保持 ramoops 已注册、每次加载前 `/sys/fs/pstore` 为空。它是唯一能活过 panic 的通道。
+- netconsole 在 `rk_gmac-dwmac` 上只能算尽力而为，不能当主通道：`netconsole` 是模块，
+  用户态加载它之前的任何事都覆盖不到；`eth0` 一重新注册，它自己就会断开
+  （`network logging stopped on interface eth0 as it unregistered`）。
+  主通道改成用户态转发 `/dev/kmsg`，netconsole 留作第二份副本。
+
+受控检查只跑一次，不要循环：
+
+```sh
+# 前提：隧道已配置好并监听 127.0.0.1:9001
+timeout 10 ./host/tbt_burst 127.0.0.1 9001 1 5 interleaved   # 1 MiB，5 秒
+cat /proc/net/tbtun/stats | head -3
+dmesg | tail -20
+```
+
+重试会掩盖它本该暴露的问题：第二次加载用的正是第一次已经破坏过的 slab，
+所以第二次干净通过什么也证明不了。完整流程（身份核对、可见性预检、join 门、
+单次 burst、证据收集）是 `review/wan-experiment/arm64/controlled-c8-once.sh`。
 
 ## 双机示例
 
@@ -126,7 +175,7 @@ cat /proc/net/tbtun/tunnels
 far `peer=` 里的端口只是语法占位。给两行加上相同的 `nonce=<32 个 hex 字符>` 可以固定会话
 nonce。没有 `nonce=` 时，远端会采纳第一条 HELLO 的 nonce；如果连 `peer=` 也没有，
 这条 HELLO 还会固定锚，并打印一次首连信任告警。地址只接受字面 IPv4：
-0.0.1 不支持 DNS，也不支持 IPv6。
+0.1.0 不支持 DNS，也不支持 IPv6。
 
 ## 能观测到什么
 
@@ -373,6 +422,12 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   发布 `/proc/net/tbtun`，隧道行写入后按规范读回，`rmmod` 卸载，再次
   `modprobe`/`rmmod` 通过，`--uninstall` 删除全部条目与文件：38 步、
   39 项检查、0 失败（`review/dkms-qemu/`）。不要把这读成宿主安装成功。
+- **2026-11-07 之前的构建会破坏内核内存。** 每条载体的 `parser` 与 `http_rx`
+  当时用 `kmalloc()` 分配，复用 slab 对象时 `parser->have` 可能是脏值，
+  `tbt_http_rx_parse()` 又把它当作 `memmove()` 长度；现场主机在加载后几秒内
+  出了六次 Oops。修复后的构建会把这两个对象清零（`kzalloc()`，复用路径再加一次
+  显式 `memset()`），`tbt_rx_parse_pending()` 在 `have` 超过缓冲区时直接拒绝该载体，
+  作为第二道防线。线上没有任何字段能区分新旧构建；两端都查 `srcversion`。
 
 ## 运维
 
@@ -408,6 +463,11 @@ cat /etc/tbtun.conf > /proc/net/tbtun/config
   常见原因是近端多宿主或 NAT 重绑源地址。
 - `debug_loss=1` 配合 `carrier <i> drop_ppm 10000`，会在载体的写边界按比例丢弃整条记录，
   从而在没有丢包线路的情况下演练丢包处理。`peers` 里的 `dropped` 列会计数。
+- `__memcpy` 里的 `Internal error: Oops`，且栈上是
+  `tbt_http_rx_parse → tbt_rx_parse_pending → tbt_car_rx_work`，是解析器未初始化
+  的那个 bug，不是网络故障。两端都用 `cat /sys/module/tbtun/srcversion` 核对
+  你要加载的那个产物。2026-11-06 的证据与取证流程在
+  `review/wan-experiment/arm64/stop-65-down-20261106T2250Z/forensics-65/`。
 - 卸载模块会关闭所有监听端口和载体；已连接的客户端会看到 EOF，而不是挂住。
 
 ## QoS 说明

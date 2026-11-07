@@ -5,6 +5,8 @@ and moves independently of the module version.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-07
+
 ### Added
 
 - FEC v6 grouped data plane. One share rides each carrier:
@@ -210,6 +212,53 @@ and moves independently of the module version.
   second while the far logged `awaiting HELLO`). `tbt_connect_bounded()` waits
   again inside a 4 s budget and counts the dials that needed it
   (`connect_retry`).
+- A fresh carrier allocated `parser` and `http_rx` with `kmalloc()` and never
+  zeroed them; only the dead-pool reuse path cleared `parser->have`, and the
+  chunk assembler was reset lazily on the first parsed chunk. A slab that
+  came back dirty therefore made `tbt_rx_parse_pending()` enter
+  `tbt_http_rx_parse()` with a huge `have`, and the `memmove()` that drains
+  the parse buffer ran past it (8-carrier near: Oops in `__memcpy` from
+  `tbt_http_rx_parse`, then dcache corruption in unrelated tasks). Both
+  objects are now reset on every birth, new or reused; `tbt_carrier_release()`
+  resets the assembler too; and `tbt_http_rx_parse()` refuses a carrier whose
+  `have`/`http_have` exceed their buffers with `-EPROTO` instead of copying.
+- The bring-up trace is now behind the module's `debug` parameter. `TBT_DIAG`
+  and `TBT_DIAG_WARN` printed unconditionally, which at 256 carriers would
+  emit a line per poll pass, per carrier and per HELLO on a production host.
+  Both macros now expand to `if (debug >= 1)`: `debug=0` is silent and the
+  arguments are not evaluated, while `debug>=1` still prints with
+  `pr_info`/`pr_warn` and the `tbtun-diag:` prefix. Failures an operator must
+  see at `debug=0` keep their own `pr_warn_ratelimited()` line: HTTP header
+  alloc/build failure, carrier and control-frame allocation failure, FEC
+  configuration rejection and arena failure, HELLO crypto parse/resolve
+  rejection, HELLO write failure or abandonment, and a lost carrier. The one
+  unconditional per-dial `DIALED` success line moved under the same gate.
+- `tbt_frame_alloc()` left `fr->dropped` uninitialized. Only the `drop_ppm`
+  injector sets it, but the pump reads it on every write to choose between
+  `drop_snd_nxt` and `write_seq` for `first_sent_seq`; a `kmalloc()`ed frame
+  could record the injector's mark for a frame that was never dropped, and
+  the retention entry then looked acknowledged too early.
+- A retransmit copy set `retx_copy` after `tbt_tx_enqueue()`, so the frame
+  became visible with its state incomplete. The pump is the only consumer
+  today and holds `pump_lock` across both calls, so the window is not
+  reachable; the flag is now set before the enqueue, so the object is
+  published initialized and a second consumer cannot read the wrong path mask
+  or skip the `retx_frames` accounting.
+- `tbt_tx_fbk()` read `c->sk` twice (`if (c->sk)`, then `tcp_sk(c->sk)`).
+  `tbt_carrier_release()` clears the pointer with a plain store, so the
+  second read could be NULL after the check. The function now takes one
+  `READ_ONCE()` snapshot.
+- A FEC share's `epoch` (the block's last real share length) was not bounded
+  by S. The receiver stores it in `short_len` and uses it as a delivery
+  length, so a peer could name up to 65535 and make
+  `tbt_fec_deliver_ready()` read past the block's S-byte slot.
+  `tbt_fec_hdr_check()` now rejects `epoch > max_payload`, and the delivery
+  path clamps `len` to `rx->s` as a second gate.
+- `tbt_rx_skb()` computed `sizeof(p->buf) - p->have` without the bound
+  `tbt_rx_parse_pending()` applies. A dirty `have` left by a missed
+  initialization made the subtraction underflow to a huge `take`, the copy
+  failed with `-EFAULT`, and the carrier stopped reading. It now returns
+  `-EPROTO` when `have > sizeof(p->buf)`.
 
 ### Known limitations
 

@@ -88,7 +88,7 @@ when it is present.
 ## Packaging
 
 The module version has one authority: `TBT_VERSION_MAJOR/MINOR/PATCH` in
-`tbtun/tbt_uapi.h` (currently `0.0.1`). The wire version is
+`tbtun/tbt_uapi.h` (currently `0.1.0`). The wire version is
 `TBT_WIRE_VERSION=1` with `TBT_CONV=0x0005`; both are independent of the module
 version. `TBT_CONV 0x0005` removed the unused PREDICT/CANCEL placeholder
 frames: a peer that still sends one fails the header check and its carrier
@@ -118,6 +118,66 @@ Module parameters, read-only after load:
 The control surface is created in `init_net` only; there is no per-netns view.
 Unload with `sudo rmmod tbtun`. Unloading flushes every tunnel and closes every
 listener and carrier.
+
+### Production deployment
+
+Both ends must run the same fixed build. The 2026-11-06 field crash was memory
+corruption inside the module: `tbt_carrier_new_locked()` allocated the
+per-carrier `parser` and `http_rx` with `kmalloc()`, so a reused slab object
+could leave `parser->have` dirty, and `tbt_http_rx_parse()` uses that value as
+a `memmove()` length. The symptom is an `Internal error: Oops` within seconds
+of load, often in an unrelated process, because the damage is slab-wide. A
+mixed pair does not degrade gracefully: the unfixed end corrupts memory on its
+own, whatever the other end does.
+
+`/sys/module/tbtun/srcversion` is the identity gate, because nothing on the
+wire tells the two builds apart. Compare the loaded module with the artifact
+you meant to load:
+
+```sh
+modinfo -F srcversion tbtun.ko      # before load
+cat /sys/module/tbtun/srcversion    # after load
+```
+
+`srcversion` is a per-build hash, so the near and far values are expected to
+differ when the hosts differ in architecture or kernel config (the field pair
+was `72168C1C…` on aarch64 and `332759AF…` on x86_64, from the same source).
+Each host must match its own artifact; check both, and recheck after every
+redeploy.
+
+`debug=0` is the production setting, and it is also why a crash leaves so
+little behind: the per-packet and per-poll diagnostics are gated by `debug`,
+and at most the one-shot `tbtun-diag:` bring-up lines remain (session and
+carrier creation, the first poll rounds, the first receive window). Arrange
+visibility before you need it:
+
+- Persist journald (`Storage=persistent`, or at least a `/var/log/journal`
+  directory), so the last boot survives the reboot.
+- `sysctl -w kernel.panic_on_oops=1 kernel.panic=10`: an Oops from corrupted
+  memory becomes a ten-second reboot, and the reboot is the signal that
+  something broke. Left alone, the host keeps running on a corrupted slab and
+  the evidence scatters across unrelated processes.
+- Keep ramoops registered and `/sys/fs/pstore` empty before each load. It is
+  the only channel that survives a panic.
+- netconsole is best effort on `rk_gmac-dwmac`, not a primary channel:
+  `netconsole` is a module, so it covers nothing before userspace loads it,
+  and it detaches itself (`network logging stopped on interface eth0 as it
+  unregistered`) whenever `eth0` re-registers. Forward `/dev/kmsg` from a
+  userspace relay instead, and keep netconsole as a second copy.
+
+One controlled check, run once, never in a loop:
+
+```sh
+# against a tunnel already configured to listen on 127.0.0.1:9001
+timeout 10 ./host/tbt_burst 127.0.0.1 9001 1 5 interleaved   # 1 MiB over 5 s
+cat /proc/net/tbtun/stats | head -3
+dmesg | tail -20
+```
+
+A retry hides the bug it is meant to expose: the second load starts on a slab
+the first one already damaged, so a clean second run proves nothing. The full
+harness — identity, visibility preflight, join gate, one burst, evidence
+collection — is `review/wan-experiment/arm64/controlled-c8-once.sh`.
 
 ## Two-host example
 
@@ -193,7 +253,7 @@ join, and the port in a far `peer=` is grammar filler. Add a shared
 `nonce=`, the far side adopts the nonce from the first HELLO; if `peer=` is also
 absent, that first HELLO fixes the anchor and the module logs one
 trust-on-first-use warning. Addresses are literal IPv4 only — no DNS, no IPv6
-in 0.0.1.
+in 0.1.0.
 
 ## What you can observe
 
@@ -490,6 +550,15 @@ real line.
   canonically, `rmmod` unloaded it, a second `modprobe`/`rmmod` passed, and
   `--uninstall` removed every entry and file: 38 steps, 39 checks, 0 failures
   (`review/dkms-qemu/`). Do not read that as a host install.
+- **Builds older than the 2026-11-07 fix corrupt kernel memory.** The
+  per-carrier `parser` and `http_rx` were allocated with `kmalloc()`, so a
+  reused slab object could leave `parser->have` dirty and
+  `tbt_http_rx_parse()` used it as a `memmove()` length; the field host
+  produced six Oopses within seconds of load. Fixed builds zero both objects
+  (`kzalloc()`, plus an explicit `memset()` on the reuse path), and
+  `tbt_rx_parse_pending()` refuses a carrier whose `have` exceeds its buffer
+  as a second line of defence. Nothing on the wire distinguishes the two
+  builds; check `srcversion` on both ends.
 
 ## Operations
 
@@ -531,6 +600,12 @@ The module itself must be loaded first, by `/etc/modules-load.d/tbtun.conf` or
 - `debug_loss=1` plus `carrier <i> drop_ppm 10000` drops one record in a hundred
   at the carrier's write boundary, so loss handling can be exercised without a
   lossy line. The `dropped` column in `peers` counts it.
+- An `Internal error: Oops` in `__memcpy` with
+  `tbt_http_rx_parse → tbt_rx_parse_pending → tbt_car_rx_work` in the stack is
+  the uninitialised-parser bug, not a network fault. Check
+  `cat /sys/module/tbtun/srcversion` on both ends against the artifact you
+  meant to load. The 2026-11-06 evidence and the collection procedure are in
+  `review/wan-experiment/arm64/stop-65-down-20261106T2250Z/forensics-65/`.
 - Unloading the module closes every listener and carrier; connected clients see
   EOF, not a hang.
 
