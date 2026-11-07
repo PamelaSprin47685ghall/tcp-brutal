@@ -48,10 +48,17 @@ stream is filled from the replay ring instead of killing the stream.
 overran `rx_reorder_bytes`; `gaps_total` counts reorder overflows. Either one
 resets the stream.
 
-Backpressure is not loss. A carrier is declared lost only after
-`carrier_stall_ms` of unacked bytes with no ack progress; an idle carrier, a
-delivery pause and a closed peer window restart that clock (`stall_idle_skips`,
-`stall_paused_skips`). DATA admission stops at the peer's advertised window, so
+Backpressure is not loss. The stall threshold is 5 × the carrier's RTO
+(`SRTT + 4×RTTVAR`), clamped to 1..60 s; `carrier_stall_ms=` is a cap that can
+only lower it. Under FEC a stall pauses the carrier: new shares avoid it, the
+shares already in flight are treated as lost and rebuilt from parity, and the
+carrier is replaced only after `min(2×stall, 300 s)` with no wire progress
+(`stall_dead`). Under the old ARQ a stalled carrier is still killed and its
+retained frames are repathed immediately. An idle carrier, a delivery pause and
+a closed peer window restart the clock (`stall_idle_skips`,
+`stall_paused_skips`). Every carrier socket also enables TCP keepalive (30 s
+idle, 10 s between probes, 3 probes), so a half-open path closes at the socket
+before the `stall_dead` bound. DATA admission stops at the peer's advertised window, so
 at most one window sits in the carrier's TCP send buffer
 (`win_block`/`win_resume`); control frames bypass that gate. The window check
 reads `snd_wnd`, so it is a heuristic, and an unknown window admits one chunk.
@@ -306,7 +313,7 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `n` | `4` | DATA shares per group, `1..255`; `n + m <= 256` |
 | `m` | `1` | Parity shares per group, `0..255`; `fec=on` needs `m >= 1`; `n + m <= 256` |
 | `dup` | `1` | Duplication degree, `0..3` |
-| `keepalive` | `5000` | Idle PAD interval, ms |
+| `keepalive` | `5000` | Idle PAD interval, ms. The carrier's TCP keepalive is fixed at 30 s / 10 s / 3 probes and is not this key |
 | `drip_ms` | `1000` | `http-kal-drip` idle byte interval, ms |
 | `replay` | `8388608` | Replay ring bytes |
 | `tunnel_rate` | `0` | Bytes/s ceiling, `0` = unset |
@@ -315,7 +322,7 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `rx_reorder_bytes` | `8388608` | Receiver reorder budget, bytes, `1..268435456`; bounds each stream's reorder tree and the session-wide sum; `0` is refused |
 | `tx_window_bytes` | `0` | Sender window bytes; `0` = auto from the carriers' BBR samples; an explicit value must not exceed `rx_reorder_bytes` |
 | `tx_retain_bytes` | `0` | Sender retention bytes, `0` = unlimited |
-| `carrier_stall_ms` | `0` | Silence before a carrier is declared lost, `0..3600000` ms; `0` = auto from the measured RTO |
+| `carrier_stall_ms` | `0` | Cap on the stall threshold, `0..3600000` ms; `0` = auto: 5 × RTO (`SRTT + 4×RTTVAR`), clamped to 1..60 s. An explicit value only lowers the auto threshold |
 | `profile` | `http-kal` | `http-kal`, `http-kal-drip`, or `raw` |
 | `fec` | `off` | `off` (old ARQ) or `on` (FEC v6 data plane) |
 | `mode` | `rlnc` | `rlnc` (one group), `grouped`, or `sc-ldpc` (reserved) |
@@ -415,7 +422,8 @@ snapshot, `txwake`, `c3` (carriers, joins, retransmission, reorder, gates),
 | `join_src_reject`, `join_nonce_reject`, `join_bad`, `join_dup` | HELLO refused by the anchor, by the first-HELLO source, by the nonce, or by an occupied slot |
 | `ctl_lost`, `ctl_retry`, `ctl_requeue`, `ctl_obsolete`, `ctl_queued` | pinned control frames: explicit loss after the retry bound, retries, requeues, obsolete generation, live depth |
 | `stall_paused_skips`, `win_block`, `win_resume` | stall decision deferred while paused / DATA held at the peer-window gate / released |
-| `stall_idle_skips`, `stall_declared`, `tx_window`, `rtt_mean_us`, `rttvar_us`, `rtt_max_us`, `txq_max` | stall clock restarted because nothing was unacked / stall clock killed a carrier / effective sender window and its inputs / frame-queue bound |
+| `stall_idle_skips`, `stall_declared`, `stall_recovered`, `stall_drop`, `stall_dead` | stall clock restarted because nothing was unacked / a FEC carrier was paused / its ack moved again / frames dropped by the ARQ pause helper (no caller yet, stays 0) / a paused carrier outlived `min(2×stall, 300 s)` and was replaced |
+| `tx_window`, `rtt_mean_us`, `rttvar_us`, `rtt_max_us`, `txq_max` | effective sender window and its inputs / frame-queue bound |
 | `holes_declared`, `holes_repaired`, `holes_unrecoverable`, `rx_max_stall_us` | hole accounting |
 | `dup_tx`, `dup_used`, `dup_suppressed`, `inflate_ppm` | duplication |
 | `c9` line (`fec_proto_fail`, `fec_hdr_crc_fail`, `fec_payload_crc_fail`, `fec_short_tx`, `fec_short_unknown`, `fec_drop_window`, `fec_drop_crypto`) | FEC receive verdict: header/CRC failures close the carrier, a payload CRC drops only that share; `fec_drop_crypto` counts shares that arrived before the key |

@@ -718,6 +718,13 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
 - **`keepalive_ms` default 5000 ms**. Rationale: DPI/state machines that reap
   idle flows are commonly configured in the 5–30 s range; 5000 ms sits below the low end. This
   is an **assumption, not a measurement** (§19 Q2, §17).
+- **TCP keepalive is fixed, not the `keepalive_ms` key.** Every carrier socket
+  (dialled and accepted) enables `SO_KEEPALIVE` with `TCP_KEEPIDLE=30 s`,
+  `TCP_KEEPINTVL=10 s` and `TCP_KEEPCNT=3`. A half-open path (peer gone, no
+  FIN or RST) otherwise leaves `snd_una` frozen until the `stall_dead` bound;
+  the probes make the kernel close the socket, which the poll sees as a dead
+  carrier. A failure to set the options is logged and not fatal: the poll's
+  `stall_dead` bound remains the fallback.
 - If a carrier has written no bytes for `keepalive_ms`, emit a PAD chunk (32 bytes: one
   header-only PAD frame) in its request/response body. Each side runs the test on its own
   transmit clock, so an idle far side emits its own PAD. The receiving parser discards it.
@@ -730,10 +737,13 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
   module never sends one.
 - A carrier the classifier downgrades or drops is detected by its own TCP state: a closed
   or non-`ESTABLISHED` socket, or `snd_una` static while `snd_nxt` moved for
-  `carrier_stall_ms` (0 = auto: 3 × this carrier's measured RTO; an explicit
-  value pins it). The clock runs only while unacked bytes are outstanding;
+  the stall threshold. The threshold is `5 × RTO` (`RTO = SRTT + 4×RTTVAR`,
+  floored at 200 ms), clamped to 1..60 s; `carrier_stall_ms=` is a cap that can
+  only lower it. The clock runs only while unacked bytes are outstanding;
   an idle carrier, a delivery pause and a closed peer window reset it (§5.5). The
-  replacement then dials from the spare pool (§9.7).
+  FEC plane pauses the carrier and replaces it only after
+  `min(2×stall, 300 s)` without wire progress; ARQ kills and repaths it at
+  once (§5.5, §9.7).
 
 ---
 
@@ -1113,8 +1123,9 @@ sender's RTO: per carrier `srtt + 4 × mdev`, the largest across carriers, floor
 200 ms minimum, raised by `2 × feedback_delay`, and capped at 500 ms. `hole_budget_ms`
 should be 2–3 × that RTO plus one one-way delay for the repair, not a fixed constant: the
 500 ms default suits low-RTT paths, and a 218 ms path needs about 1000–1500 ms.
-`carrier_stall_ms` is a multiple of the same RTO, and an idle carrier
-(`snd_una == snd_nxt`), a delivery pause or a closed peer window restarts its clock (§5.5).
+The stall threshold is `5 × RTO`, clamped to 1..60 s; `carrier_stall_ms=` is a
+cap that can only lower it. An idle carrier (`snd_una == snd_nxt`), a delivery
+pause or a closed peer window restarts its clock (§5.5).
 The receiver's reorder tree must hold the whole window (`R ≥ W`, above); its hard bound is
 still `R`.
 
@@ -1269,32 +1280,37 @@ Delivery can still be delayed by the carrier's TCP zero-window persist, a separa
 condition documented under "Carrier stall vs peer pause" below.
 
 **Carrier stall vs peer pause.** `tbt_car_poll_work()` keeps a per-carrier stall clock
-that runs only while `snd_una != snd_nxt` and `snd_una` has not moved. An idle carrier
+that runs only while `snd_una != snd_nxt` and `snd_una` has not moved. The threshold is
+`5 × RTO` (`RTO = SRTT + 4×RTTVAR`, floored at 200 ms), clamped to 1..60 s;
+`carrier_stall_ms=` is a cap and can only lower it. An idle carrier
 (`snd_una == snd_nxt`: nothing on the wire) restarts the clock and counts
 `stall_idle_skips`; real `snd_una` progress restarts it; a delivery pause (FBK rx_state=2,
 published as `peer_paused`, or our own delivery queue full) or a closed peer window
-(`snd_wnd == 0`) restarts it and counts `stall_paused_skips`. The two skip counters are
-atomic because every carrier's poll work writes them. Only a clock that has run
-`carrier_stall_ms` with none of those restarts declares the carrier lost
-(`stall_declared`), matching `tbt_tx_stall_check()`. The old code refreshed the clock only
-on `snd_una` progress, so a long idle gap counted as stall time and the first DATA after
-the gap killed every raw carrier: on the real WAN the raw run reported `lost = n + m`,
-`replaced = n + m - 1`, `holes_unrecoverable = 0`, while `http-kal`, which keeps the wire
-warm with PADs, reported `lost = 0`. The old `sk_wmem_queued > 0` backpressure test could
-not make that distinction at all: it counts TCP's own retransmission queue, so it is
-positive for every carrier with unacked bytes, blackholed or merely flow-controlled, and
-refreshed the clock forever, masking the real stalls it was meant to detect. A resume gets
-a full `carrier_stall_ms`; a genuinely dead socket still fails on `!sk` or a
-non-ESTABLISHED state. `carrier_stall_ms` must exceed several RTTs plus the 10 ms feedback
-cadence: an ACK cannot arrive before one RTT, and the uack/FBK feedback shares the ordered
-stream with the data. The auto value is 3 × the measured RTO (about 3 s when the
-RTO is 1 s); an explicit `carrier_stall_ms=` pins it, and the WAN experiment that
-exposed the false kills used 15000 ms. Measured in `near.rst_eagain`:
-`peer_paused=1`, `lost=0`, `replaced=0`, `stall_paused_skips=1184` during the paused
-drain; before the pause gate the same window reported `lost=1 replaced=1`. The gate trusts
-the peer's pause report: a peer that keeps reporting `rx_state=2` (or an application that
-never reads) defers loss detection indefinitely, so a dead carrier behind a paused stream
-is replaced only after the pause clears or the socket itself closes.
+(`snd_wnd == 0`) restarts it and counts `stall_paused_skips`. The skip counters are
+atomic because every carrier's poll work writes them.
+
+What a stall does depends on the data plane. Under FEC it **pauses** the carrier
+(`stall_declared`): the slot, socket and generation stay, the scheduler stops giving it
+new shares, and the shares already in flight are the FEC plane's loss -- parity rebuilds
+the block, or its 30 s bound resets the stream. `stall_recovered` counts the pause that
+ends when `snd_una` moves again. A paused carrier is declared dead only when it outlives
+`min(2×stall, 300 s)` with `snd_una` frozen and no wire progress (`packets_out` unchanged
+or the RTO retransmit count at `TBT_STALL_RETX_MAX`); that path counts `stall_dead` and
+takes the normal replacement path. A zero peer window or our own delivery pause is
+evidence the peer is alive and never feeds the dead bound. Under the old ARQ a stall is
+immediately a loss: the carrier is killed and its retained frames are repathed
+(`tbt_tx_path_lost`), because ARQ has retain and no parity to recover from.
+
+The old code refreshed the clock only on `snd_una` progress, so a long idle gap counted
+as stall time and the first DATA after the gap killed every raw carrier: on the real WAN
+the raw run reported `lost = n + m`, `replaced = n + m - 1`, `holes_unrecoverable = 0`,
+while `http-kal`, which keeps the wire warm with PADs, reported `lost = 0`. The old
+`sk_wmem_queued > 0` backpressure test could not make that distinction at all: it counts
+TCP's own retransmission queue, so it is positive for every carrier with unacked bytes,
+blackholed or merely flow-controlled, and refreshed the clock forever, masking the real
+stalls it was meant to detect. Measured in `near.rst_eagain`: `peer_paused=1`, `lost=0`,
+`replaced=0`, `stall_paused_skips=1184` during the paused drain; before the pause gate
+the same window reported `lost=1 replaced=1`.
 
 **Peer-window admission.** DATA is admitted only while
 `write_seq - snd_una < snd_wnd` (or one chunk when `snd_wnd` is 0). `snd_nxt` is not
@@ -1389,12 +1405,16 @@ is genuinely missing, and suppressing it deadlocked the strict send-then-read ca
 reading is backpressure, not loss.
 
 **Retention and replacement.** A DATA frame is retained until `tx_ack` passes its end
-offset, capped by `tx_retain_bytes` (0 = unlimited). When a carrier is marked lost (write
-error, closed socket, or no `snd_una` progress for `carrier_stall_ms`), every retained frame
-last sent on it becomes immediately overdue and is re-sent by the same path selection. The
-carrier is excluded from the scheduler at once; the replacement worker dials a fresh
-carrier at the same index on a fresh port, and its HELLO re-joins the session.
-The stats keys `lost` and `replaced` count the two events.
+offset, capped by `tx_retain_bytes` (0 = unlimited). Under ARQ, a carrier marked lost
+(write error, closed socket, or a stall) makes every retained frame last sent on it
+immediately overdue; the frames are re-sent by the same path selection
+(`tbt_tx_path_lost`). The carrier is excluded from the scheduler at once, and the
+replacement worker dials a fresh carrier at the same index on a fresh port; its HELLO
+re-joins the session. The stats keys `lost` and `replaced` count the two events.
+Under FEC a stall does not repath anything: the carrier is paused, the shares already in
+flight are recovered by parity, and only `stall_dead` (no wire progress for
+`min(2×stall, 300 s)`) triggers the same replacement path. FEC has no ARQ retain entries
+to re-send.
 
 ---
 
@@ -2058,8 +2078,10 @@ writer of that carrier's `rx_frames/rx_bytes`. Per-carrier TX counters
 (`data_frames`, `tx_frames`, `tx_bytes`, `payload_bytes_sent`, `retx_data`) are
 written only by `tbt_carrier_xmit()` under `pump_lock`; cross-context readers
 use `READ_ONCE()`. The split matters at the margins: `stall_paused_skips`,
-`stall_idle_skips` and `stall_declared` are `atomic64_t` because every carrier's poll
-work writes them; `tx_window`, `rtt_mean_us`, `rttvar_us`, `rtt_max_us` and `txq_max` are
+`stall_idle_skips`, `stall_declared`, `stall_recovered` and `stall_dead` are
+`atomic64_t` because every carrier's poll work writes them; `stall_drop` is a
+plain `u64` because `tbt_tx_path_stalled()` is its only writer (and has no
+caller today); `tx_window`, `rtt_mean_us`, `rttvar_us`, `rtt_max_us` and `txq_max` are
 pump-written `u32` read with `READ_ONCE()`; `win_block`/`win_resume`
 are plain `u64` because only the pump writes them; `ctl_lost` is atomic because the
 pump and the RST retry path both write it, while `ctl_retry`/`ctl_requeue`/
@@ -2099,7 +2121,7 @@ cannot silently lose its atomicity again.
 | live | `live rxq rxp txq txp pub_state pub_wmem pub_una pub_nxt car_wmem car_nxt car_copied car_rcvbuf car_sndbuf car_state car_stop car_ud car_ready car_ws txw_pend txw_busy` |
 | tx wake | `txwake txwake_busy txwork` |
 | write space | `ws_calls` |
-| c3 | `c3 n up lost replaced spare_activated alloc_fail port_exhaust port_alloc_fail connect_fail connect_retry join_dup join_bad join_nonce_reject join_src_reject fbk_tx fbk_rx retx_frames retx_bytes retain_drop retx_hole retx_slow retx_pathloss retx_other data_tx retx_data_ppm dup_bytes_ppm reorder_overflow reorder_max_depth ooo_bytes ooo_frames retain_bytes tx_ack rx_ack peer_paused fb_delay_us rto_us una_stall_us stall_paused_skips stall_idle_skips stall_declared tx_window rtt_mean_us rttvar_us rtt_max_us txq_max win_block win_resume pump_hw_armed pump_hw_fired` |
+| c3 | `c3 n up lost replaced spare_activated alloc_fail port_exhaust port_alloc_fail connect_fail connect_retry join_dup join_bad join_nonce_reject join_src_reject fbk_tx fbk_rx retx_frames retx_bytes retain_drop retx_hole retx_slow retx_pathloss retx_other data_tx retx_data_ppm dup_bytes_ppm reorder_overflow reorder_max_depth ooo_bytes ooo_frames retain_bytes tx_ack rx_ack peer_paused fb_delay_us rto_us una_stall_us stall_paused_skips stall_idle_skips stall_declared stall_recovered stall_drop stall_dead tx_window rtt_mean_us rttvar_us rtt_max_us txq_max win_block win_resume pump_hw_armed pump_hw_fired` |
 | ctl | `ctl ctl_lost ctl_retry ctl_requeue ctl_obsolete ctl_queued` |
 | streams | `streams streams_active n_streams n_pending` |
 | c6 | `c6 holes_declared holes_repaired holes_unrecoverable rx_max_stall_us hole_checks gate_fail depth_fail time_fail` |
@@ -2115,8 +2137,11 @@ included), and `dup_tx` counts duplicate copies; the two subtraction terms are w
 ratio is over unique records. `retx_hole`/`retx_slow`/`retx_pathloss`/`retx_other` split
 those copies by the branch that queued them (§4.3). `stall_paused_skips` counts a carrier
 poll that restarted the stall clock for delivery backpressure or a closed peer window;
-`stall_idle_skips` counts one that found nothing unacked (`snd_una == snd_nxt`), and
-`stall_declared` counts the polls that actually killed a carrier. `tx_window` is the
+`stall_idle_skips` counts one that found nothing unacked (`snd_una == snd_nxt`);
+`stall_declared` counts a FEC carrier paused by the poll, `stall_recovered` counts a
+paused carrier whose `snd_una` moved again, and `stall_dead` counts a paused carrier
+that outlived `min(2×stall, 300 s)` without wire progress and was replaced. `stall_drop`
+is the ARQ pause helper's frame counter; it has no caller today and stays 0. `tx_window` is the
 effective sender window, `rtt_mean_us` the delivery-weighted mean SRTT, `rttvar_us` the
 largest carrier `mdev_us` (the jitter term), `rtt_max_us` the largest carrier SRTT (a
 distribution fact), and `txq_max` the frame-queue bound derived from it (§5.4).
@@ -2454,19 +2479,27 @@ Implemented in C3, per session:
 1. Each carrier runs a 50 ms `w_poll`. It re-arms a queue that has work (the C2 liveness
    net), and it is also the health check: a socket whose `sk_state` is not
    `TCP_ESTABLISHED`, or data that is **sent but never acknowledged** (`snd_una` static
-   while `snd_nxt` is ahead, for `carrier_stall_ms` (0 = auto: 3 × the measured
-   RTO; an explicit value pins it), is marked lost once
-   (`carrier_lost++`). Backpressure is not a stall: the clock runs only while
+   while `snd_nxt` is ahead, for the stall threshold). The threshold is `5 × RTO`
+   (`RTO = SRTT + 4×RTTVAR`, floored at 200 ms), clamped to 1..60 s;
+   `carrier_stall_ms=` is a cap that can only lower it. Under FEC the poll pauses the
+   carrier (`stall_declared`): new shares avoid it, the shares in flight are recovered
+   by parity, and only `min(2×stall, 300 s)` without wire progress declares it dead
+   (`stall_dead`) and replaces it. Under ARQ the same clock marks the carrier lost at
+   once (`carrier_lost++`) and repaths its retained frames. Backpressure is not a stall:
+   the clock runs only while
    `snd_una != snd_nxt`, and an idle carrier, a delivery pause or a closed peer window
    (`snd_wnd == 0`) restarts it (§5.5). The old `sk_wmem_queued > 0` test could not tell
    the two apart, because it counts TCP's own retransmission queue; without the
    distinction a 9 MB stream whose peer stopped reading declared every carrier dead and
    stormed replacements (measured: 191 replacements, 15 far-side `join_dup`, a 32 s
-   receiver hole). A provisional carrier that has not presented a HELLO within 5 s is
-   retired.
+   receiver hole). Every carrier socket also enables TCP keepalive (30 s idle, 10 s
+   between probes, 3 probes), so a half-open path closes at the socket before the
+   `stall_dead` bound. A provisional carrier that has not presented a HELLO within 5 s
+   is retired.
 2. `tbt_carrier_lost()` also runs on a carrier write error and on `carrier <n> down`. It
    excludes the path from scheduling immediately and marks every retained frame last sent
-   on it overdue, so the normal scheduler re-sends them on the live paths.
+   on it overdue, so the normal scheduler re-sends them on the live paths. An ARQ stall
+   calls it directly; a FEC stall does not.
 3. A per-session `w_replace` work item swaps in a fresh carrier at the same index under
    `pump_lock` (so no pump can be using the old object), then retires the old one outside
    the lock: cancel its work items, clear the callbacks, shut the socket down, release it,

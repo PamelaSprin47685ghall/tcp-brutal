@@ -14,9 +14,30 @@ and moves independently of the module version.
   The key is near-only and empty by default; a bind failure is a dial failure
   (`connect_fail++`, retry after 200 ms, ratelimited log naming the interface
   and the error).
+- The c3 line gains `stall_recovered`, `stall_drop` and `stall_dead`.
+  `stall_declared` now counts a FEC carrier paused by the poll, not a carrier
+  killed; `stall_recovered` counts a paused carrier whose `snd_una` moved
+  again; `stall_dead` counts a paused carrier that outlived
+  `min(2×stall, 300 s)` without wire progress and was replaced. `stall_drop`
+  is the ARQ pause helper's frame counter; it has no caller yet and stays 0.
 
 ### Changed
 
+- `carrier_stall_ms` is now a cap, not the threshold. The threshold is
+  `5 × RTO` (`RTO = SRTT + 4×RTTVAR`, floored at 200 ms), clamped to 1..60 s;
+  an explicit `carrier_stall_ms=` can only lower it. Under FEC a stall pauses
+  the carrier: new shares avoid it, the shares already in flight are treated
+  as lost and recovered by parity, and the carrier is replaced only after
+  `min(2×stall, 300 s)` without wire progress. Under ARQ a stall still kills
+  the carrier and repaths its retained frames immediately.
+- Every carrier socket enables TCP keepalive with `TCP_KEEPIDLE=30 s`,
+  `TCP_KEEPINTVL=10 s` and `TCP_KEEPCNT=3`, so a half-open path closes at the
+  socket before the `stall_dead` bound. A failure to set the options is logged
+  and not fatal; the poll's bound remains the fallback.
+- The FEC sender skips stalled carriers for new shares. When every usable
+  carrier is stalled, an ACK stays queued and the flush returns `-EAGAIN`
+  instead of dropping it, so a recovered carrier can reopen the credit window
+  instead of deadlocking on an ACK that was never sent.
 - FEC wire: `TBT_FEC_CONV` moves from `0x1002` to `0x1003`. The ACK body
   grows from 16 to 24 bytes and carries `deliver_bytes`, the stream-relative
   byte count the receiver actually handed to its output socket. The first 16

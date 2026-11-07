@@ -36,8 +36,14 @@ chunk 分帧保持明文。`mode=grouped` 把载体分成 `groups` 组，每组 
 超过 `hole_budget_ms` 或 `rx_reorder_bytes` 仍补不上的空洞计入 `holes_unrecoverable`；
 重排溢出导致的重置计入 `gaps_total`；这两种情况都会重置流。
 
-背压不是丢包。只有存在未确认字节、且 `carrier_stall_ms` 内没有任何确认进展时，载体才会被判为失效；
-空闲载体、投递暂停和对端窗口关闭都会重置这个计时器（`stall_idle_skips`、`stall_paused_skips`）。DATA 的准入在
+背压不是丢包。stall 阈值是 5 × 该载体的 RTO（`SRTT + 4×RTTVAR`），
+钳制在 1..60 s；`carrier_stall_ms=` 只是上限，只能把它调低。FEC 下 stall
+暂停载体：新 share 绕开它，已发未确认的 share 按丢失处理并由 parity 恢复，
+只有 `min(2×stall, 300 s)` 内线路毫无进展时才替换（`stall_dead`）。旧 ARQ
+仍然激进：stall 即杀载体，并用 retain 立即改派。空闲载体、投递暂停和对端窗口
+关闭都会重置计时器（`stall_idle_skips`、`stall_paused_skips`）。每条载体
+socket 还启用 TCP keepalive（空闲 30 s、间隔 10 s、3 次探测），半开路径会先在
+socket 层关闭，早于 `stall_dead` 上限。DATA 的准入在
 对端通告窗口处停止，因此载体 TCP 发送缓冲里最多只有一个窗口的数据
 （`win_block`/`win_resume`）；控制帧不受这个门限约束。窗口检查读取的是 `snd_wnd`，
 所以它只是一个启发式判断；窗口未知时只放行一个 chunk。隧道自己的发送窗口按各载体的
@@ -258,7 +264,7 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 | `n` | `4` | 每组的 DATA share 数，`1..255`；`n + m <= 256` |
 | `m` | `1` | 每组的校验 share 数，`0..255`；`fec=on` 需要 `m >= 1`；`n + m <= 256` |
 | `dup` | `1` | 重复度，`0..3` |
-| `keepalive` | `5000` | 空闲 PAD 间隔，毫秒 |
+| `keepalive` | `5000` | 空闲 PAD 间隔，毫秒。载体的 TCP keepalive 固定为 30 s / 10 s / 3 次探测，不是这个键 |
 | `drip_ms` | `1000` | `http-kal-drip` 空闲时每字节的间隔，毫秒 |
 | `replay` | `8388608` | 重放环字节数 |
 | `tunnel_rate` | `0` | 字节/秒上限，`0` 表示不设 |
@@ -267,7 +273,7 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 | `rx_reorder_bytes` | `8388608` | 接收端重排预算，字节，`1..268435456`；同时约束每条流的重排树和全会话总和；`0` 会被拒绝 |
 | `tx_window_bytes` | `0` | 发送端窗口字节数；`0` 表示按各载体的 BBR 样本自动推导；显式值不得大于 `rx_reorder_bytes` |
 | `tx_retain_bytes` | `0` | 发送端保留字节数，`0` 表示不限 |
-| `carrier_stall_ms` | `0` | 多久没有确认进展就判定载体失效，毫秒，`0..3600000`；`0` 表示按实测 RTO 自动推导 |
+| `carrier_stall_ms` | `0` | stall 阈值的上限，毫秒，`0..3600000`；`0` 表示自动：5 × RTO（`SRTT + 4×RTTVAR`），钳制在 1..60 s。显式值只能调低自动阈值 |
 | `profile` | `http-kal` | `http-kal`、`http-kal-drip` 或 `raw` |
 | `fec` | `off` | `off`（旧 ARQ）或 `on`（FEC v6 数据面） |
 | `mode` | `rlnc` | `rlnc`（单组）、`grouped` 或 `sc-ldpc`（保留） |
@@ -358,7 +364,8 @@ HELLO 的源地址会成为会话锚：之后来自其他地址的 HELLO 在检�
 | `join_src_reject`、`join_nonce_reject`、`join_bad`、`join_dup` | HELLO 被锚、首条 HELLO 的来源、nonce 或已占用槽位拒绝 |
 | `ctl_lost`、`ctl_retry`、`ctl_requeue`、`ctl_obsolete`、`ctl_queued` | 被钉住的控制帧：重试上限后的显式丢失、重试、重新入队、过期代、当前队列深度 |
 | `stall_paused_skips`、`win_block`、`win_resume` | 暂停时推迟失效判定 / DATA 在对端窗口门限处被挡住 / 放行 |
-| `stall_idle_skips`、`stall_declared`、`tx_window`、`rtt_mean_us`、`rttvar_us`、`rtt_max_us`、`txq_max` | 因没有未确认字节而重置失效计时 / 失效计时真正宣告载体丢失 / 生效的发送窗口及其输入 / 帧队列上限 |
+| `stall_idle_skips`、`stall_declared`、`stall_recovered`、`stall_drop`、`stall_dead` | 因没有未确认字节而重置计时 / 暂停了一个 FEC 载体 / 该载体 ack 又开始前进 / 被 ARQ 暂停助手丢弃的帧（当前无调用者，恒为 0）/ 暂停载体超过 `min(2×stall, 300 s)` 无进展而被替换 |
+| `tx_window`、`rtt_mean_us`、`rttvar_us`、`rtt_max_us`、`txq_max` | 生效的发送窗口及其输入 / 帧队列上限 |
 | `holes_declared`、`holes_repaired`、`holes_unrecoverable`、`rx_max_stall_us` | 空洞统计 |
 | `dup_tx`、`dup_used`、`dup_suppressed`、`inflate_ppm` | 重复发送 |
 | `c9` 行（`fec_proto_fail`、`fec_hdr_crc_fail`、`fec_payload_crc_fail`、`fec_short_tx`、`fec_short_unknown`、`fec_drop_window`、`fec_drop_crypto`） | FEC 接收判定：头/CRC 失败关闭载体，payload CRC 失败只丢该 share；`fec_drop_crypto` 统计密钥就绪前到达的 share |
