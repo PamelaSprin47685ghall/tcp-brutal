@@ -885,6 +885,96 @@ void tbt_tx_path_lost(struct tbt_session *sess, u8 index)
     tbt_fbk_kick(sess, true);
 }
 
+/* A live carrier stopped acknowledging: its unacknowledged frames are lost,
+ * but the path is not. Drop the frames only this path carried, together with
+ * their queued copies, so the loss does not turn into a repath through the
+ * back door. Never set retx_now (that is tbt_tx_path_lost()'s rule) and never
+ * advance tx_ack: the peer may still deliver those bytes from another copy,
+ * and the receiver's own ack is the only thing allowed to move the window.
+ *
+ * Runs from the 50 ms carrier poll, never from atomic context. The pump's
+ * retransmit candidates and write batch hold struct tbt_retain pointers
+ * outside tx_lock, so pump_lock serialises this drop with them; the entries
+ * are unlinked under tx_lock and freed after it is dropped. */
+void tbt_tx_path_stalled(struct tbt_session *sess, u8 index)
+{
+    struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
+    struct tbt_retain *r, *rtmp;
+    struct tbt_frame *fr, *ftmp;
+    LIST_HEAD(free);
+    LIST_HEAD(drop);
+    u16 bit;
+    int n, i;
+
+    if (!sess || index >= READ_ONCE(sess->n_car) ||
+        index >= TBT_MAX_CARRIERS_LIMIT)
+        return;
+    if (READ_ONCE(sess->closing))
+        return;
+
+    /* The retention arrays are 16 slots wide; a FEC v6 path has no ARQ
+     * retention entries to drop. */
+    bit = index < TBT_ARQ_MAX_PATHS ? BIT(index) : 0;
+
+    mutex_lock(&sess->pump_lock);
+    n = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
+    spin_lock(&sess->tx_lock);
+    for (i = 0; i < n; i++)
+    {
+        struct tbt_stream *st = snap[i];
+        u64 ack = READ_ONCE(st->tx_ack);
+
+        list_for_each_entry_safe(r, rtmp, &st->retain, list)
+        {
+            bool had = bit && (r->path_mask & bit);
+
+            if (bit)
+            {
+                r->path_mask &= ~bit;
+                r->reserve_mask &= ~bit;
+            }
+            /* Keep a frame that still has another copy, and one the peer has
+             * already delivered (the retention GC owns that one). A fresh
+             * entry that never reached this path has no bit and is untouched:
+             * its frame is still owned by tx_q. */
+            if (!had || r->path_mask || r->seq + r->len <= ack)
+                continue;
+
+            /* The frame had no copy on another path. Its queued copies must
+             * die with the entry: writing them on another path would be the
+             * repath this rule forbids. */
+            list_for_each_entry_safe(fr, ftmp, &sess->tx_q, list)
+            {
+                if (fr->ret != r)
+                    continue;
+                list_del(&fr->list);
+                sess->tx_queued -= fr->len;
+                tbt_tx_frame_drop_account(sess, fr);
+                list_add_tail(&fr->list, &drop);
+            }
+            list_move_tail(&r->list, &free);
+            st->retain_bytes -= r->len;
+            sess->stall_drop++;
+        }
+    }
+    spin_unlock(&sess->tx_lock);
+    mutex_unlock(&sess->pump_lock);
+
+    list_for_each_entry_safe(r, rtmp, &free, list)
+    {
+        list_del(&r->list);
+        kfree(r);
+    }
+    list_for_each_entry_safe(fr, ftmp, &drop, list)
+    {
+        list_del(&fr->list);
+        tbt_frame_free(fr);
+    }
+    for (i = 0; i < n; i++)
+        tbt_stream_put(snap[i]);
+    tbt_fbk_kick(sess, true);
+}
+
 /* Drain the lost-carrier bits once, outside atomic context, for every stream
  * in the caller's snapshot. */
 static void tbt_tx_path_lost_drain(struct tbt_session *sess,
@@ -1971,6 +2061,26 @@ static u16 tbt_path_stalled_mask(struct tbt_session *sess)
     return mask;
 }
 
+/* Carriers the poll has paused. New frames must not enter them: the path is
+ * alive, but anything written there only waits for a recovery that may not
+ * come before the receiver's hole budget. This is the scheduler-side mask;
+ * tbt_path_stalled_mask() above stays the retransmit-side clock test, which
+ * deliberately keeps its own (snd_una based) meaning. */
+static u16 tbt_path_stall_now_mask(struct tbt_session *sess)
+{
+    u16 mask = 0;
+    int i;
+
+    for (i = 0; i < sess->n_car && i < TBT_ARQ_MAX_PATHS; i++)
+    {
+        struct tbt_carrier *c = READ_ONCE(sess->car[i]);
+
+        if (c && READ_ONCE(c->stalled))
+            mask |= BIT(i);
+    }
+    return mask;
+}
+
 static bool tbt_sched_better(struct tbt_session *sess, struct tbt_stream *st,
                              const struct tbt_sched *s, u8 a, u8 b)
 {
@@ -2000,6 +2110,10 @@ static void tbt_sched_rebuild(struct tbt_session *sess, struct tbt_stream *st,
         struct tbt_carrier *c = READ_ONCE(sess->car[i]);
 
         if (!c || atomic_read(&c->stopping) || !atomic_read(&c->up))
+            continue;
+        /* A stalled carrier is paused, not dead: keep it out of the stripe
+         * until the poll sees snd_una move again. */
+        if (READ_ONCE(c->stalled))
             continue;
         /* An idle spare is warm but not a DATA path; it still carries FBK. */
         if (need_open && c->spare && !c->active)
@@ -2037,6 +2151,9 @@ static struct tbt_carrier *tbt_sched_pick(struct tbt_session *sess,
     u64 now = tbt_now_ns();
     int tries;
 
+    /* The order may predate the stall (it is rebuilt at most every 10 ms);
+     * skip the paused slots even then. */
+    blocked |= tbt_path_stall_now_mask(sess);
     if (!s->n || s->need_open != need_open ||
         now - s->sort_ns > TBT_FBK_INTERVAL_MS * NSEC_PER_MSEC)
         tbt_sched_rebuild(sess, st, need_open);
