@@ -10,6 +10,9 @@
  *       (tbt_fec_out_flush_carrier()): -EAGAIN leaves that carrier's head
  *       and re-arms only its own work; it never gates the other carriers or
  *       the packetizer.
+ *     - tbt_fec_out_drain_work(): takes the queue head up to BATCH_MAX
+ *       records (and a bounded framed total) and commits them with one
+ *       tbt_carrier_send_fec_batch(); -EAGAIN keeps the whole batch.
  *     - tbt_fec_out_push(): data bound to its share's carrier with per-carrier
  *       depth/byte caps; replay on a session queue with a session byte
  *       budget; control on its own queue.
@@ -32,11 +35,16 @@
 #include <string.h>
 
 #define NCAR 8
-#define OUTQ_DEPTH_MAX 4u
+#define OUTQ_DEPTH_MAX 32u
 #define OUTQ_BYTES_MAX (OUTQ_DEPTH_MAX * REC_LEN)
 #define REPLAY_BYTES_MAX (16u * REC_LEN)
 #define REC_LEN 64u
 #define NACK_REQ_MAX 256u
+#define BATCH_MAX 8
+/* The kernel caps a batch by the carrier's short-write tail. The model uses
+ * four records so the batch arithmetic is visible; the byte cap, not the
+ * count, is the rule under test. */
+#define BATCH_BYTES_MAX (4u * REC_LEN)
 
 static int checks;
 static int failures;
@@ -97,6 +105,7 @@ struct sched
     uint64_t replay_enospc;
     uint64_t replay_drop;
     uint64_t nack_lat_ns;
+    uint32_t batches[NCAR];
     /* Fake carrier state. */
     bool up[NCAR];
     bool connected[NCAR];
@@ -446,6 +455,69 @@ static uint32_t drain_all(struct sched *s, bool *again_any)
     return wrote;
 }
 
+/* Mirrors tbt_carrier_send_fec_batch(): one carrier write for the whole
+ * batch. -EAGAIN means no record of the batch was committed. */
+static int carrier_send_batch(struct sched *s, int idx, struct rec **recs,
+                              int n)
+{
+    uint32_t bytes = 0;
+    int i;
+
+    if (s->full[idx])
+        return -EAGAIN;
+    s->batches[idx]++;
+    for (i = 0; i < n; i++)
+    {
+        s->writes[idx]++;
+        bytes += recs[i]->len;
+        if (s->nwrite < (int)(sizeof(s->write_seq) / sizeof(s->write_seq[0])))
+            s->write_seq[s->nwrite++] = recs[i]->id;
+    }
+    s->wire_bytes[idx] += bytes;
+    return 0;
+}
+
+/* Mirrors tbt_fec_out_drain_work()'s batch loop: take the queue head up to
+ * BATCH_MAX records and BATCH_BYTES_MAX framed bytes, send once, and remove
+ * exactly what the carrier accepted. */
+static uint32_t drain_batch(struct sched *s, int idx, bool *again)
+{
+    struct outq *q = &s->q[idx];
+    uint32_t wrote = 0;
+
+    *again = false;
+    for (;;)
+    {
+        struct rec *recs[BATCH_MAX];
+        struct rec *r;
+        uint32_t bytes = 0;
+        int n = 0, i, err;
+
+        for (r = q->head; r && n < BATCH_MAX; r = r->next)
+        {
+            if (bytes + r->len > BATCH_BYTES_MAX)
+                break;
+            recs[n++] = r;
+            bytes += r->len;
+        }
+        if (!n)
+            break;
+        err = carrier_send_batch(s, idx, recs, n);
+        if (err == -EAGAIN)
+        {
+            s->flush_skip++;
+            s->hol_wait += q->depth;
+            *again = true;
+            break;
+        }
+        for (i = 0; i < n; i++)
+            rec_free(s, q, q_pop_head(q));
+        wrote += n;
+        s->flush_pass += n;
+    }
+    return wrote;
+}
+
 /* Mirrors tbt_fec_out_flush(): control and replay only. The bound data
  * queues are the per-carrier works' responsibility. */
 static int flush(struct sched *s, uint32_t *written)
@@ -753,6 +825,44 @@ static void case_per_carrier_retry(void)
     sched_free(&s);
 }
 
+/* The per-carrier drain batches the queue head: one carrier write for up to
+ * BATCH_MAX records / BATCH_BYTES_MAX bytes, in queue order; -EAGAIN keeps
+ * the whole batch. */
+static void case_batch_drain(void)
+{
+    struct sched s;
+    uint32_t wrote;
+    bool again;
+    int i;
+
+    sched_init(&s);
+    for (i = 0; i < 20; i++)
+        push(&s, 0, false, false, 0, i);
+
+    wrote = drain_batch(&s, 0, &again);
+    ok(!again, "batch drain completes", NULL);
+    ok_u32(wrote, 20, "batch drain wrote every record");
+    ok_u32(s.q[0].depth, 0, "batch drain emptied the queue");
+    ok_u32(s.batches[0], 5, "20 records at 4 per batch take five writes");
+    ok_u32(s.writes[0], 20, "every record accepted");
+    ok_u32(s.write_seq[0], 0, "the first batch keeps queue order");
+    ok_u32(s.write_seq[19], 19, "the last batch keeps queue order");
+
+    s.full[0] = true;
+    push(&s, 0, false, false, 0, 100);
+    push(&s, 0, false, false, 0, 101);
+    wrote = drain_batch(&s, 0, &again);
+    ok(again && wrote == 0, "EAGAIN keeps the whole batch", NULL);
+    ok_u32(s.q[0].depth, 2, "both records stay queued");
+    ok_u32(s.batches[0], 5, "a refused batch did not count as a write");
+
+    s.full[0] = false;
+    wrote = drain_batch(&s, 0, &again);
+    ok(!again && wrote == 2, "retry writes the kept batch", NULL);
+    ok_u32(s.batches[0], 6, "the retry is one batch");
+    sched_free(&s);
+}
+
 /* The replay ring is indexed by block/group/share, not by carrier: moving a
  * replay to another carrier must not change the record it carries. */
 static void case_replay_identity(void)
@@ -781,6 +891,7 @@ int main(void)
     case_replay_priority_and_isolation();
     case_replay_identity();
     case_per_carrier_retry();
+    case_batch_drain();
 
     printf("%s: %d checks, %d failures\n",
            failures ? "FAIL" : "PASS", checks, failures);
