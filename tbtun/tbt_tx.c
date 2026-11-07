@@ -885,14 +885,20 @@ void tbt_tx_path_lost(struct tbt_session *sess, u8 index)
     tbt_fbk_kick(sess, true);
 }
 
-/* A live carrier stopped acknowledging: its unacknowledged frames are lost,
- * but the path is not. Drop the frames only this path carried, together with
- * their queued copies, so the loss does not turn into a repath through the
- * back door. Never set retx_now (that is tbt_tx_path_lost()'s rule) and never
- * advance tx_ack: the peer may still deliver those bytes from another copy,
- * and the receiver's own ack is the only thing allowed to move the window.
+/* ARQ entry for "a stalled path pauses, it does not repath". It has no caller
+ * today: ARQ still takes tbt_carrier_lost() (kill the carrier and repath its
+ * frames), and FEC has no struct tbt_retain entries for this function to drop.
+ * Keep it for the day ARQ switches to the pause semantics; the FEC container
+ * deliberately does not call it.
  *
- * Runs from the 50 ms carrier poll, never from atomic context. The pump's
+ * When that switch happens, this drops the frames only the stalled path
+ * carried, together with their queued copies, so the loss does not turn into a
+ * repath through the back door. It never sets retx_now (that is
+ * tbt_tx_path_lost()'s rule) and never advances tx_ack: the peer may still
+ * deliver those bytes from another copy, and the receiver's own ack is the only
+ * thing allowed to move the window.
+ *
+ * Must run from the 50 ms carrier poll, never from atomic context. The pump's
  * retransmit candidates and write batch hold struct tbt_retain pointers
  * outside tx_lock, so pump_lock serialises this drop with them; the entries
  * are unlinked under tx_lock and freed after it is dropped. */
