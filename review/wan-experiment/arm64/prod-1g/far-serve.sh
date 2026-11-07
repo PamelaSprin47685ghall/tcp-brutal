@@ -203,7 +203,8 @@ check size "$([ "$size" -eq "$BYTES" ]; echo $?)" "size=$size expected=$BYTES"
 say "== 3. sha256"
 sha256sum "$PATH_FILE" >"$SHA_FILE"
 hash=$(file_hash)
-check sha256 "$([ -n "$hash" ]; echo $?)" "sha256=${hash:0:16}..."
+hash_head=$(printf '%s' "$hash" | cut -c1-16)
+check sha256 "$([ -n "$hash" ]; echo $?)" "sha256=$hash_head..."
 
 say "== 4. httpd"
 pid=$(httpd_pid || true)
