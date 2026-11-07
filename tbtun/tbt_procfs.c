@@ -1054,6 +1054,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "fec_replay_miss_never_stored=%llu "
                               "fec_nack_sparse_probe=%llu "
                               "fec_nack_empty_reply=%llu "
+                              "fec_nack_parity_reply=%llu "
                               "fec_replay_drop=%llu "
                               "fec_nack_retx_bytes=%llu "
                               "fec_replace_retx_bytes=%llu "
@@ -1092,6 +1093,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_replay_miss_never_stored),
                            tbt_stat_read(&s->fec_nack_sparse_probe),
                            tbt_stat_read(&s->fec_nack_empty_reply),
+                           tbt_stat_read(&s->fec_nack_parity_reply),
                            tbt_stat_read(&s->fec_replay_drop),
                            tbt_stat_read(&s->fec_nack_retx_bytes),
                            tbt_stat_read(&s->fec_replace_retx_bytes),

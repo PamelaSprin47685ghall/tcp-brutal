@@ -377,7 +377,11 @@ container:
   be requested whole. If a probed share was never stored and the block is
   closed with no packet in that group, the sender answers with the empty
   marker and stores it in the ring, so the receiver marks the group empty
-  instead of waiting. A block outside the NACK window is not NACKed: its bytes are
+  instead of waiting. A closed short block (`win_len < n`) has no records for
+  its padding DATA shares; a NACK for one of those is answered with a parity
+  row whose header carries the real `win_len`/`epoch`, so the receiver learns
+  the cut instead of waiting for a share that will never exist. A block
+  outside the NACK window is not NACKed: its bytes are
   still in the carrier TCP send queue, and that TCP owns the retransmission.
   The sender keeps up to the last `K = 7` super-blocks of encoded DATA+PARITY
   records in a replay ring (the effective K shrinks until the 15 MiB cap fits)

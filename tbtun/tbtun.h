@@ -1145,6 +1145,7 @@ struct tbt_session
     atomic64_t fec_replay_miss_never_stored; /* block resident, share absent */
     atomic64_t fec_nack_sparse_probe;   /* unstarted group: probe parity 0 only */
     atomic64_t fec_nack_empty_reply;    /* empty marker sent for an absent share */
+    atomic64_t fec_nack_parity_reply;   /* parity/cut sent for a short block */
     atomic64_t fec_replay_drop;         /* queued replay freed without a write */
     atomic64_t fec_reset_tcp_failed; /* FEC reset: no carrier TCP alive */
     atomic64_t fec_reset_user;       /* user/peer/application teardown */

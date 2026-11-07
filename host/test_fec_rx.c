@@ -773,6 +773,53 @@ static void test_nack_replay(void)
     tbt_fec_replay_free(r);
 }
 
+/* A short block: only DATA share 0 is real (win_len=1); shares 1..3 are
+ * padding that the sender never generates. If the parity is lost, the
+ * receiver asks for shares 1..3 and the sender must answer with a parity row
+ * whose header carries win_len=1, not with silence. The test models that
+ * reply: the ring says share 1 was never stored, but parity 0 is resident. */
+static void test_short_block_reply(void)
+{
+    static const u16 one[N] = {S, 0, 0, 0};
+    struct tbt_fec_replay *r;
+    struct blk b;
+    u8 buf[S];
+    u8 out[N * S];
+    int i, refused;
+    size_t off;
+
+    r = tbt_fec_replay_new(1, N, M, S);
+    ok(r != NULL, "short-block replay ring");
+    blk_init(&b, 0, one);
+    b.dpresent[1] = 0;
+    b.dpresent[2] = 0;
+    b.dpresent[3] = 0;
+    blk_encode(&b);
+    b.nreal = 1;
+
+    ok_int(tbt_fec_replay_store(r, 0, 0, 0, b.data[0], S), 0,
+           "short block stores its real share");
+    for (i = 0; i < M; i++)
+        ok_int(tbt_fec_replay_store(r, 0, 0, (u16)(N + i), b.parity[i], S),
+               0, "short block stores a parity row");
+
+    /* The receiver asks for padding share 1: it was never generated. */
+    ok_int(tbt_fec_replay_get(r, 0, 0, 1, buf, S), -ENODATA,
+           "padding share is never stored");
+    /* The sender's reply is parity 0: its header carries win_len=1. */
+    ok_int(tbt_fec_replay_get(r, 0, 0, N, buf, S), S,
+           "parity row is available for the short-block reply");
+    memcpy(b.parity[0], buf, S);
+    b.ppresent[0] = 1;
+    ok(b.nreal == 1 && b.dpresent[0],
+       "short block is ready from its one real share");
+    off = blk_deliver(&b, out, sizeof(out), &refused);
+    ok(!refused, "short block delivers");
+    ok_size(off, S, "short block delivers only its real share");
+    ok_prefix(out, off, "short block prefix");
+    tbt_fec_replay_free(r);
+}
+
 int main(void)
 {
     src_init();
@@ -787,6 +834,7 @@ int main(void)
     test_ack_bytes();
     test_super_prefix();
     test_nack_replay();
+    test_short_block_reply();
 
     printf("test_fec_rx: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

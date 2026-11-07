@@ -80,7 +80,10 @@ and moves independently of the module version.
   was reset. The receiver now probes only parity 0 for an unstarted group
   until `total_pkts` is known; the empty marker, the parity's `win_len` or FIN
   gives the real shape. The sender answers a never-stored share in a closed
-  empty group with its empty marker and stores it in the ring.
+  empty group with its empty marker and stores it in the ring. A closed short
+  block (`win_len < n`) has no records for its padding DATA shares; a NACK for
+  one of those is answered with a parity row carrying the real
+  `win_len`/`epoch`, so the receiver learns the cut instead of waiting.
   `fec_replay_miss_get` is split into `fec_replay_miss_evicted` and
   `fec_replay_miss_never_stored`; `fec_nack_sparse_probe` and
   `fec_nack_empty_reply` count the new paths.

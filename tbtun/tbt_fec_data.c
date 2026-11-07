@@ -2699,14 +2699,42 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                 spin_unlock_bh(&tx->replay_lock);
                 if (len == -ENODATA)
                 {
+                    bool replied = false;
+                    u16 pi;
+
                     atomic64_inc(&sess->fec_replay_miss_never_stored);
                     atomic64_inc(&sess->fec_replay_miss_get);
                     atomic64_inc(&sess->fec_replay_miss);
-                    /* A closed block with no packet in this group is empty.
-                     * Send its marker so the receiver can mark the group
-                     * empty instead of waiting for a share that will never
-                     * exist. */
-                    if (h.block_id < READ_ONCE(tx->cur_block) &&
+                    if (h.block_id >= READ_ONCE(tx->cur_block))
+                        continue; /* still being built: the share may appear */
+                    /* The block is closed and this share was never
+                     * generated. A short block (win_len < n) has padding
+                     * shares that will never exist, but it does have parity
+                     * rows whose header carries the real win_len/epoch.
+                     * Re-send one of those rows: the receiver learns the cut
+                     * and stops waiting for padding. This also repairs a
+                     * real lost share when the parity can recover it. */
+                    for (pi = 0; pi < tx->m && !replied; pi++)
+                    {
+                        int plen;
+
+                        spin_lock_bh(&tx->replay_lock);
+                        plen = tbt_fec_replay_get(tx->replay, h.block_id, g,
+                                                  (u16)(tx->n + pi), buf,
+                                                  TBT_FEC_REC_MAX);
+                        spin_unlock_bh(&tx->replay_lock);
+                        if (plen <= 0)
+                            continue;
+                        if (tbt_fec_replay_enqueue(sess, buf, (u16)plen, t0))
+                            continue;
+                        atomic64_inc(&sess->fec_nack_retx);
+                        atomic64_add((u64)plen, &sess->fec_nack_retx_bytes);
+                        atomic64_inc(&sess->fec_nack_parity_reply);
+                        replied = true;
+                    }
+                    /* A group with no packet in the block has no parity
+                     * row either: its empty marker is the truth. */
+                    if (!replied &&
                         READ_ONCE(tx->g[g].blk_id) != h.block_id)
                     {
                         if (!tbt_fec_send_empty_marker(sess, g, h.block_id))
