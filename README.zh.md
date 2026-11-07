@@ -19,7 +19,18 @@
 见 [QoS 说明](#qos-说明)。如果测量结果相反，`profile=raw` 会关掉这层包装，
 按流分散带来的收益仍然存在。
 
-当前代码实现了 [DESIGN.md](DESIGN.md) 的 C1–C8：`/proc` 控制面、监听器与远端、
+FEC v6（`fec=on`）是可选的第二数据面：应用的字节流被切成 8 KiB 的 DATA share
+和 RLNC 校验 share，每条载体承载一个 share；接收端用同一块内的校验 share
+恢复丢失的 share，而不是等重传。它同时支持 `profile=raw` 和 HTTP chunk 容器：
+HTTP 档位下一个 chunk body 恰好是一条 40 字节 FEC 记录，请求行、头部和
+chunk 分帧保持明文。`mode=grouped` 把载体分成 `groups` 组，每组 `n` 个 DATA
+加 `m` 个校验，`carriers = groups * (n + m)`，最多 256 条；生产形状是
+32 组 `n=4, m=4`。`crypto=on`（`fec=on` 时的默认值）只对 DATA/PARITY 的
+负载做 ChaCha8 混淆，40 字节 FEC 头、HTTP 头部与控制帧仍是明文。
+`fec=off` 时旧的 ARQ 路径不变。
+
+当前代码实现了 [DESIGN.md](DESIGN.md) 的 C1–C8，以及 FEC v6 grouped 数据面与
+256 载体扩展：`/proc` 控制面、监听器与远端、
 备用载体与带 RETIRE 握手的载体替换、带重放环的重复发送、保留字节重放的空洞修复，
 以及 `http-kal`/`http-kal-drip` 容器。载体字节流里的空洞由重放环补齐，而不是终止整条流。
 超过 `hole_budget_ms` 或 `rx_reorder_bytes` 仍补不上的空洞计入 `holes_unrecoverable`；
@@ -64,10 +75,16 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.1.0`）。线上版本是
-`TBT_WIRE_VERSION=1` 与 `TBT_CONV=0x0005`，二者都与模块版本独立。
+`TBT_VERSION_MAJOR/MINOR/PATCH`（已发布的 `0.1.0`；`0.2.0` 是目标版本）。
+线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x0005` 与 FEC 记录的
+`TBT_FEC_CONV=0x1001`，三者都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
 失败，其载体关闭；0x0004 的对端在第一个头部就会因为 conv 不匹配而被拒绝。
+0.2.0 目标（尚未上线）把 `TBT_CONV` 升到 `0x0006`、`TBT_FEC_CONV` 升到
+`0x1002`：FIN 携带 16 字节 body（`pkt_end`/`pkt_base`），PARITY 记录可以用
+`win_len=0, payload_len=0, epoch=0` 表示空块 marker。`tbt_uapi.h` 用
+`TBT_CONV_NEXT`/`TBT_FEC_CONV_NEXT` 命名这两个目标值；发布前模块仍发送
+0x0005/0x1001。两种 conv 都是硬拒绝，所以 0.1.0 与 0.2.0 不能互操作。
 `scripts/mkdkmsconf.sh` 派生
 `PACKAGE_VERSION="<major>.<minor>.<patch>"`；`dkms.conf` 是生成物，由
 `make dkms.conf` / `make dkms-tarball` 写出，不要手改。
@@ -87,7 +104,7 @@ sudo insmod tbtun.ko debug_loss=0
 |---|---|---|
 | `debug` | `0` | 日志详细程度，`0..3` |
 | `max_tunnels` | `64` | 最多可配置的隧道数；新 id 超过上限返回 `ENOSPC` |
-| `max_carriers` | `16` | 每个会话的载体数，`1..16`；`n + m` 超过上限返回 `EINVAL` |
+| `max_carriers` | `256` | 每个会话的载体槽，`1..256`；`n + m` 或 `carriers` 超过上限返回 `EINVAL` |
 | `debug_loss` | `0` | 是否允许写 `drop_ppm`（确定性丢包注入） |
 
 控制面只在 `init_net` 中创建；没有 per-netns 视图。
@@ -170,12 +187,42 @@ cat /proc/net/tbtun/tunnels
 `127.0.0.1:5201`。可以用 `iperf3 -c 10.0.0.1 -p 9000 -t 60 -P 1` 对远端的
 `iperf3 -s` 做测试。
 
-两端必须在隧道 id、`n`、`m` 以及 profile 家族上保持一致。远端的 `listen` 是载体到达的地址，
+两端必须在隧道 id、`n`、`m`、`w`、`mode`、`carriers` 以及 profile 家族上保持一致。远端的 `listen` 是载体到达的地址，
 近端的 `peer` 是载体发往的地址。远端的 `peer` 是锚：只有来自 `10.0.0.1` 的 HELLO 才能加入，
 far `peer=` 里的端口只是语法占位。给两行加上相同的 `nonce=<32 个 hex 字符>` 可以固定会话
 nonce。没有 `nonce=` 时，远端会采纳第一条 HELLO 的 nonce；如果连 `peer=` 也没有，
 这条 HELLO 还会固定锚，并打印一次首连信任告警。地址只接受字面 IPv4：
-0.1.0 不支持 DNS，也不支持 IPv6。
+本版本不支持 DNS，也不支持 IPv6。
+
+HTTP 容器上的 FEC v6：一组六条载体（四条 DATA、两条校验）：
+
+```sh
+# 近端
+echo 'tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443 n=4 m=2 fec=on carriers=6' \
+     > /proc/net/tbtun/config
+# 远端
+echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=2 fec=on carriers=6 peer=10.0.0.1:9000' \
+     > /proc/net/tbtun/config
+```
+
+grouped 会话每条载体一个 share：`carriers = groups * (n + m)`，
+`groups = carriers / (n + m)`。生产形状是 32 组 `n=4, m=4`，共 256 条载体：
+
+```sh
+# 近端
+echo 'tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443 n=4 m=4 fec=on mode=grouped carriers=256' \
+     > /proc/net/tbtun/config
+# 远端
+echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec=on mode=grouped carriers=256 peer=10.0.0.1:9000' \
+     > /proc/net/tbtun/config
+```
+
+全局包序号按组条带化（`group = seq % groups`）。每组有自己的块窗口和校验，
+接收端只有在跨度内每组的块都解码后才投递这个全局跨度。载体 `c` 永远承载
+组 `c / (n + m)` 的 share `c % (n + m)`；替换载体保持同一序号。
+
+默认档位是 `http-kal`，所以每条 40 字节 FEC 记录就是一个 HTTP chunk body，
+请求行、头部和 chunk 分帧保持明文。`profile=raw` 去掉 HTTP 包装，记录本身不变。
 
 ## 能观测到什么
 
@@ -209,20 +256,26 @@ nonce。没有 `nonce=` 时，远端会采纳第一条 HELLO 的 nonce；如果�
 | `listen` | — | `a.b.c.d:port`；近端为对外地址，远端为载体地址 |
 | `peer` | — | 近端：载体的目的地；远端：唯一允许加入载体的近端源地址（锚），端口只是语法占位 |
 | `target` | — | 仅远端：负载投递到的字面地址 |
-| `n` | `4` | 活跃载体数，`1..16` |
-| `m` | `1` | 备用载体数，`0..16`；`n + m <= 16` |
+| `n` | `4` | 每组的 DATA share 数，`1..255`；`n + m <= 256` |
+| `m` | `1` | 每组的校验 share 数，`0..255`；`fec=on` 需要 `m >= 1`；`n + m <= 256` |
 | `dup` | `1` | 重复度，`0..3` |
 | `keepalive` | `5000` | 空闲 PAD 间隔，毫秒 |
 | `drip_ms` | `1000` | `http-kal-drip` 空闲时每字节的间隔，毫秒 |
 | `replay` | `8388608` | 重放环字节数 |
 | `tunnel_rate` | `0` | 字节/秒上限，`0` 表示不设 |
 | `max_inflate` | `2.000` | 重复膨胀上限 |
-| `hole_budget_ms` | `500` | 空洞允许存在的时间，毫秒，`1..60000`；`0` 会被拒绝 |
+| `hole_budget_ms` | `0` | 空洞允许存在的时间，毫秒，`0..60000`；`0` 表示按 RTT 自动推导（下限 2 s） |
 | `rx_reorder_bytes` | `8388608` | 接收端重排预算，字节，`1..268435456`；同时约束每条流的重排树和全会话总和；`0` 会被拒绝 |
 | `tx_window_bytes` | `0` | 发送端窗口字节数；`0` 表示按各载体的 BBR 样本自动推导；显式值不得大于 `rx_reorder_bytes` |
 | `tx_retain_bytes` | `0` | 发送端保留字节数，`0` 表示不限 |
-| `carrier_stall_ms` | `3000` | 多久没有数据就判定载体失效，毫秒 |
+| `carrier_stall_ms` | `0` | 多久没有确认进展就判定载体失效，毫秒，`0..3600000`；`0` 表示按实测 RTO 自动推导 |
 | `profile` | `http-kal` | `http-kal`、`http-kal-drip` 或 `raw` |
+| `fec` | `off` | `off`（旧 ARQ）或 `on`（FEC v6 数据面） |
+| `mode` | `rlnc` | `rlnc`（单组）、`grouped` 或 `sc-ldpc`（保留） |
+| `w` | `0` | RLNC 窗口，`0..1024`；`0` 解析为 `2*n` |
+| `carriers` | `0` | 载体槽，`0..256`；`0` 解析为 `n + m`；必须是 `n + m` 的整数倍 |
+| `crypto` | 跟随 `fec` | `on` 对 FEC 的 DATA/PARITY 负载做 ChaCha8 混淆；`on` 需要 `fec=on`；不写时等于 `fec` |
+| `crypto_key` | — | 64 个 hex 字符的预共享 256 位密钥；`-` 清除。不配置时由近端生成并在 HELLO 中明文携带（`key_id=1`） |
 | `portblock` | `0-0` | 每条隧道的源端口段，仅记录并渲染（`0-0` 表示不设）；载体使用 `/ports` 的全局端口段 |
 | `srcaddrs` | — | 逗号分隔的本地源地址；只有第一项被使用 |
 | `nonce` | — | `16` 或 `32` 个 hex 字符：固定会话 nonce；近端本地使用，远端要求对端使用 |
@@ -292,7 +345,8 @@ HELLO 的源地址会成为会话锚：之后来自其他地址的 HELLO 在检�
 只有一个写者的计数器是普通 `u64`，并以写者命名。块按所属的设计步骤分组：
 最前面是捕获与 RX 工作，然后是 `dbg` 行和 `live` 快照、`txwake`、`c3`
 （载体、加入、重传、重排、门限）、`ctl`（被钉住的控制帧）、`streams`（流普查）、
-`c6`（空洞）、`c8`（HTTP）、`c5`（重复），最后是 `reconcile`。
+`c6`（空洞）、`c8`（HTTP）、`c9`（FEC 接收判定）、`c5`（重复），最后是
+`reconcile`。
 
 | 键 | 含义 |
 | --- | --- |
@@ -307,6 +361,7 @@ HELLO 的源地址会成为会话锚：之后来自其他地址的 HELLO 在检�
 | `stall_idle_skips`、`stall_declared`、`tx_window`、`rtt_mean_us`、`rttvar_us`、`rtt_max_us`、`txq_max` | 因没有未确认字节而重置失效计时 / 失效计时真正宣告载体丢失 / 生效的发送窗口及其输入 / 帧队列上限 |
 | `holes_declared`、`holes_repaired`、`holes_unrecoverable`、`rx_max_stall_us` | 空洞统计 |
 | `dup_tx`、`dup_used`、`dup_suppressed`、`inflate_ppm` | 重复发送 |
+| `c9` 行（`fec_proto_fail`、`fec_hdr_crc_fail`、`fec_payload_crc_fail`、`fec_short_tx`、`fec_short_unknown`、`fec_drop_window`、`fec_drop_crypto`） | FEC 接收判定：头/CRC 失败关闭载体，payload CRC 失败只丢该 share；`fec_drop_crypto` 统计密钥就绪前到达的 share |
 | `reconcile live_*`/`retired_*` | 活跃 + 已退休等于会话总数（字节、DATA、重传） |
 
 `reconcile` 行用来确认载体替换没有让字节凭空消失：
@@ -381,11 +436,23 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
 
 - **没有 IPv6，也没有 DNS。** 所有地址都是字面 IPv4：`listen=`、`peer=`、
   `target=`、`srcaddrs=` 只接受 `a.b.c.d`；不做域名解析。
-- **不加密，也不认证。** 隧道在线上是明文；nonce 是会话标识，不是密钥。
-  路径不可信时套 WireGuard；此时只应选 `raw` 档位，因为 HTTP 解析器看不到
-  TLS 内部。
-- **没有 FEC。** 丢包靠重放环里的真实字节重传和重复发送来修复，没有校验块或
-  纠删码。重放环已经丢掉这些字节时，接收端会重置流（`holes_unrecoverable`），
+- **默认不加密，也不认证；`crypto=on` 只是混淆。** `crypto=on`（`fec=on`
+  时的默认值）对 FEC 的 DATA/PARITY 负载做 ChaCha8 混淆，目的是把应用字节
+  从朴素的 DPI 特征里藏起来；40 字节 FEC 头、HTTP 头部和控制帧仍是明文，
+  而且没有认证。未配置 `crypto_key=` 时，近端生成 32 字节会话密钥并在
+  HELLO v6 body 中明文发送（`key_id=1`），远端采纳；两端都配置
+  `crypto_key=` 时 `key_id=0`，HELLO 的 key 字段为零，密钥不匹配表现为每个
+  share 的 payload CRC 失败。nonce 是会话标识，不是密钥。路径不可信时套
+  WireGuard；此时只应选 `raw` 档位，因为 HTTP 解析器看不到 TLS 内部。
+- **FEC 可选；grouped 是生产形状。** `fec=on` 支持单组
+  （`carriers == n + m`）和 grouped（`carriers = groups * (n + m)`，最多
+  256 条载体），`raw` 与 `http-kal` 容器都支持。发送端每组每块发 `n` 个
+  DATA share 加 `m` 个校验 share；接收端在块的校验足以解出缺失 share 时
+  解码，然后按全局序号投递整个 super-block。FEC 路径没有 NACK，也没有重传：
+  丢失超过校验能力的块会停住，直到关闭计时器重置流。流的最后一块用零填充，
+  真实长度放在校验的 `win_len`（FIN 偏移是第二来源），所以最后一段短包不会
+  被当作填充投递。`fec=off` 时丢包靠重放环重传与重复发送修复，没有校验块或
+  纠删码；环里不再保留这些字节时，接收端重置流（`holes_unrecoverable`），
   而不是猜测。
 - **每条远端隧道只有一个锚。** 一个 `peer=`（或第一条 HELLO）固定源地址。
   近端多宿主，或者 NAT 重绑源地址，都会让后续 HELLO 被拒绝（`join_src_reject`）；
@@ -483,16 +550,22 @@ cat /etc/tbtun.conf > /proc/net/tbtun/config
 
 ## 安全
 
-这条隧道不加密。负载字节按应用发出的原样经过网络，装在任何人于路径上都能读取的 TCP 连接里。
-配置仅限 root（`0600`），加载模块同样需要 root。如果两台主机之间的路径不可信，
-就把隧道放进 WireGuard 里跑：载体走在加密链路之上，此时只应选择 `raw` 档位，
-因为 HTTP 解析器看不到 TLS 内部。
+默认不加密，也不认证。`crypto=on`（`fec=on` 时的默认值）对 FEC 的
+DATA/PARITY 负载做 ChaCha8 混淆：它把应用字节从朴素的 DPI 特征里藏起来，
+但不是机密性——未配置 `crypto_key=` 时会话密钥在 HELLO v6 body 里明文传输
+（`key_id=1`），而且没有消息认证。两端都配置 `crypto_key=` 时 `key_id=0`，
+密钥不匹配表现为 payload CRC 失败，连接不会静默降级。FEC 头、HTTP 头、
+chunk 分帧和控制帧始终是明文。配置仅限 root（`0600`），加载模块同样需要
+root。如果两台主机之间的路径不可信，就把隧道放进 WireGuard 里跑：载体走在
+加密链路之上，此时只应选择 `raw` 档位，因为 HTTP 解析器看不到 TLS 内部。
 
 ## 适用范围
 
 这不是通用 VPN。它只转发 TCP，每条隧道只对应一个字面目标地址，没有路由、没有 NAT、
-没有认证、没有加密、没有 FEC，也不支持 IPv6。它的用途是放大"每流限速"的额度，
-并验证某个 QoS 档位是否有效。其它场景请用 WireGuard。
+没有认证，也不支持 IPv6。FEC v6 可选（`fec=on`），grouped 形状
+`carriers = groups * (n + m)` 最多 256 条载体；`crypto=on` 只做 ChaCha8 body
+混淆，不是加密，也不做认证。它的用途是放大"每流限速"的额度，并验证某个
+QoS 档位是否有效。其它场景请用 WireGuard。
 
 ---
 

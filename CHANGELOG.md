@@ -5,6 +5,38 @@ and moves independently of the module version.
 
 ## [Unreleased]
 
+### Changed (0.2.0 target)
+
+- The 0.2.0 wire revision (target; not on the wire yet) moves `TBT_CONV` from
+  0x0005 to 0x0006 and `TBT_FEC_CONV` from 0x1001 to 0x1002. FIN carries an
+  exactly 16-byte body (`pkt_end`, `pkt_base`); a PARITY record may be an
+  empty-block marker (`win_len=0`, `payload_len=0`, `epoch=0`).
+  `tbt_uapi.h` names the target values `TBT_CONV_NEXT`/`TBT_FEC_CONV_NEXT`;
+  both convs are hard-rejected, so 0.1.0 and 0.2.0 do not interoperate
+  (`review/s2-merged-design.md` §6).
+- Carrier lifetime (target): carriers are no longer reused from a dead pool.
+  `tbt_carrier_get/put/gen` with a refcount and `kfree_rcu` replace
+  `take_dead`, and `tbt_carrier_unpublish/close` release `c->sk` before the
+  pointer is cleared (`review/s2-merged-design.md` §3).
+- Session and stream lifetime (target): `tbt_session_get/put/arm/cancel` with
+  the `drained` completion replace the dead `refs` field, and stream work
+  holds one of five bits and is cancelled through `tbt_stream_schedule/cancel`
+  (`review/s2-merged-design.md` §1, §5).
+
+### Fixed (0.2.0 target)
+
+- TX (target): a duplicate frame is fully built before publication, and the
+  retention index is bounded so a 16-slot overflow cannot write past the array
+  (`review/s2-merged-design.md` §9.1).
+- FEC receive (target): decoding moves out of `rx->lock` into `w_fec_rx`,
+  delivery commits per packet with a cursor, FIN uses `pkt_end`/`pkt_base`,
+  an empty group uses the block marker, the FEC ACK byte count is clamped, and
+  `short_len` is fixed by the first PARITY record
+  (`review/s2-merged-design.md` §9.1).
+- Adoption (target): the far side installs the stream callback only after the
+  provisional carrier is published, with `joined` and a `WARN_ON_ONCE` on the
+  ordering (`review/s2-merged-design.md` §9.1).
+
 ## [0.1.0] - 2026-11-07
 
 ### Added

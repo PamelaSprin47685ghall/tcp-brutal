@@ -49,11 +49,16 @@ carrier manager, no userspace accept/connect (§2.1, §8.5, §11).
 
 - No congestion-control product. Brutal's "fixed rate + inflate on loss" is deleted; under
   duplicates it is a self-DoS (§5.1).
-- No encryption at the tunnel layer. The `http-kal` QoS profile and encryption are in
-  tension: a parser-based classifier cannot see inside TLS, so a TLS-wrapped carrier loses
-  the class it was chosen for (§3.2, §9.4). Two escapes, both honest: use `raw` inside
-  WireGuard when QoS does not matter (§4.2 c), or accept that confidentiality and
-  classifier visibility are mutually exclusive on a parser-classified line (§19 Q4).
+- No encryption or authentication at the tunnel layer. `crypto=on` (0.1.0) is
+  ChaCha8 obfuscation of the FEC DATA/PARITY body, not encryption: the key
+  travels in clear in the HELLO v6 body unless `crypto_key=` is configured, and
+  nothing is authenticated. Its purpose is to keep application bytes out of
+  naive DPI signatures. The `http-kal` QoS profile and real encryption are in
+  tension: a parser-based classifier cannot see inside TLS, so a TLS-wrapped
+  carrier loses the class it was chosen for (§3.2, §9.4). Two escapes, both
+  honest: use `raw` inside WireGuard when QoS does not matter (§4.2 c), or
+  accept that confidentiality and classifier visibility are mutually exclusive
+  on a parser-classified line (§19 Q4).
 - No DNS in the kernel: targets and peers are literal addresses in `/proc` configuration
   (§8.3).
 - **v0 is IPv4-only.** The public listener, carriers and targets are all `AF_INET`; a
@@ -249,10 +254,11 @@ rather than in a new field so the HELLO body length is unchanged.
 | `http-kal-drip` | identical headers, identical framing | one **byte per `drip_ms`** when idle (a legal 1-byte chunk every `drip_ms`), volume `≈ 1 B/drip_ms` | the `M` spares: an idle flow that a classifier would reap or de-prioritise is kept alive with ~8 bit/s (1 B/s payload) instead of a burst every 5000 ms |
 | `raw` | one frame per record, no HTTP bytes at all | none needed | second hop / VPS-to-home leg, loopback tests, or any line where QoS does not apply. Also the only safe profile inside WireGuard when the classifier is SNI-based (§16.5) |
 
-### FEC v6 over the container (T0 0x1001)
+### FEC v6 over the container (T0 0x1001; 0.2.0 target 0x1002)
 
-FEC v6 is an independent 40-byte record format (`conv=0x1001`), not a wider old
-frame. It rides the same carriers and the same HTTP container:
+FEC v6 is an independent 40-byte record format (`conv=0x1001`; 0.2.0 target
+`0x1002`), not a wider old frame. It rides the same carriers and the same HTTP
+container:
 
 - `profile=raw`: one 40-byte FEC record follows another with no wrapper.
 - `profile=http-kal` / `http-kal-drip`: one HTTP chunk body is exactly one FEC
@@ -262,6 +268,17 @@ frame. It rides the same carriers and the same HTTP container:
 - Control records (ACK/NACK/FEC_CFG/FEC_FBK) use the same one-chunk-per-record
   rule. They are written only at record boundaries; a partial record is never
   interleaved with a control frame.
+- **PARITY block marker (0.2.0 target, `TBT_FEC_CONV` 0x1002).** There is no
+  4-byte marker and no magic number. A marker is a set of values inside the
+  40-byte `struct tbt_fec_hdr`: `type = TBT_FEC_PARITY` (0x31), `flags = 0`,
+  `share_index = n` (parity 0), `epoch = 0`, `win_len = 0`, `payload_len = 0`,
+  `conv = 0x1002`, `payload_crc32c = 0` (the CRC32C of an empty payload).
+  `header_crc32c` still covers +0..+35 and must match. The receiver accepts
+  `win_len == 0` only with `payload_len == 0 && epoch == 0`, rejects a marker
+  for a block that already holds DATA/parity or `win_len_set`, and rejects DATA
+  for a block after its marker. 0.1.0 requires PARITY
+  `payload_len == max_payload` and `win_len != 0`, so the marker and that
+  relaxation ship together with 0x1002.
 - `fec=on` maps one share to each carrier: `carriers = groups * (n + m)`,
   `group(c) = c / (n + m)`, `share(c) = c % (n + m)`. `mode=rlnc` is one group
   (`carriers == n + m`); `mode=grouped` is 32 groups of 8 in production
@@ -477,7 +494,8 @@ Frame header, exactly 32 bytes (offsets add up):
                      bit4 MUST_ORDER, bit5 HAS_TOKEN; bits 6..7 must be zero.
                      Only bit3 is ever set by this revision's emitter; the other five
                      are defined and accepted so a later use needs no wire bump
-+2  u8   path_id     index of the carrier this copy will be sent on (0..15)
++2  u8   path_id     carrier index (0..255); only the old ARQ's per-path ack
+                     fields are 16 wide
 +3  u8   path_ack_count (0..16)
 +4  u16  path_ack_mask   bit p set ⇔ feedback present for path p
 +6  u16  body_len    bytes of payload after this header (0..8192)
@@ -487,7 +505,7 @@ Frame header, exactly 32 bytes (offsets add up):
 +24 u32  sid_lo       low 32 bits of the 40-bit stream id
 +28 u8   sid_hi       high 8 bits of the 40-bit stream id (v4 uses them)
 +29 u8   reserved2 (0)
-+30 u16  conv         0x0005
++30 u16  conv         0x0005 (0.2.0 target 0x0006)
 (total: 32 bytes)
 ```
 
@@ -496,7 +514,7 @@ no "high bits only in OPEN" variant. Session-level frames (HELLO, RETIRE) carry 
 
 **Receive validation is total.** `tbt_hdr_check()` runs once per record and rejects a
 header unless every field is in range: `conv` exact, flag bits outside `TBT_FF_MASK` zero,
-`path_id` 0..15, `path_ack_count` 0..16, `path_ack_mask` bits outside the carrier limit
+`path_id` 0..255, `path_ack_count` 0..16, `path_ack_mask` bits outside the carrier limit
 zero, `body_len` at most `TBT_PAYLOAD_MAX` and inside the type's bounds, `reserved2` zero.
 The 40-bit sid is fully valid. A record that passes is safe for any consumer; payload *contents* (the
 OPEN and HELLO fields) are validated by the layer that reads them.
@@ -506,6 +524,14 @@ Payload layouts:
 - **DATA**: payload = raw application bytes (1..8192); a zero-length DATA frame is
   refused on receive, because it wedges the receiver and the emitter never sends one.
 - **OPEN**: payload empty; the header's `sid_hi:sid_lo` names the stream.
+- **FIN**: payload empty in 0.1.0. 0.2.0 target (`TBT_CONV` 0x0006): exactly
+  `TBT_FIN_BODY_LEN` = 16 bytes, little-endian: `+0 u64 pkt_end` (the absolute
+  session packet seq after this stream's last DATA packet) and `+8 u64 pkt_base`
+  (the absolute session packet seq of this stream's first DATA packet, aligned
+  to the super-block `groups*n`). `tbt_body_bounds()` sets `TBT_F_FIN` to
+  `min = max = 16`; a non-FEC session sends the same 16 zero bytes, so one
+  length rule covers both. The 0.1.0 peer sends an empty FIN body and is
+  refused by the new bound.
 - **FBK**: payload = `nr × 18 B`, one entry per path, `nr = path_ack_count`:
   `u8 path_id; u8 rx_state; u64 uack; u32 recv_cnt; u32 rtt_us`. `path_id`'s low nibble is
   the carrier index and its high nibble is the *peer's* generation for that path (learned
@@ -567,8 +593,9 @@ than the emit rules, because it must accept a peer and a middlebox that only rel
   a security-relevant stance: it removes the ambiguous framing a hostile peer could
   use to smuggle bytes.
 - The frame layout is `TBT_CONV` 0x0005: `body_len` is the u16 at header offset +6 and
-  there is no 4-byte prefix. `tbt_uapi.h`/`tbt_proto.c` are authoritative for the current
-  wire.
+  there is no 4-byte prefix. 0.2.0 targets `TBT_CONV` 0x0006 (FIN body 16
+  bytes); `tbt_uapi.h`/`tbt_proto.c` are authoritative for the current wire, and
+  `TBT_CONV_NEXT` names the target that must not be sent before the flip.
 - The response parser requires status 200, accepts HTTP/1.0 and HTTP/1.1 status lines,
   requires `Transfer-Encoding` to be exactly `chunked` when present, and rejects a message
   carrying both `Transfer-Encoding` and `Content-Length` (RFC 9112 §6.3).
@@ -658,7 +685,8 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
   module never sends one.
 - A carrier the classifier downgrades or drops is detected by its own TCP state: a closed
   or non-`ESTABLISHED` socket, or `snd_una` static while `snd_nxt` moved for
-  `carrier_stall_ms` (3000 ms). The clock runs only while unacked bytes are outstanding;
+  `carrier_stall_ms` (0 = auto: 3 × this carrier's measured RTO; an explicit
+  value pins it). The clock runs only while unacked bytes are outstanding;
   an idle carrier, a delivery pause and a closed peer window reset it (§5.5). The
   replacement then dials from the spare pool (§9.7).
 
@@ -832,8 +860,9 @@ tree empties. The byte bound is `rx_reorder_bytes` per stream, plus the same val
 session-wide sum of every stream's tree; the per-stream and session bounds are checked on
 every insert, and the hole's own byte test uses the larger of 64 KiB and
 `rx_reorder_bytes`. Both are independent of the timer. The events that may expire a hole
-are: the head not advancing for `hole_budget_ms` (default 500 ms; size it at 2–3 × the
-sender RTO plus one one-way delay, §5.4), or the tree exceeding either byte bound. A new
+are: the head not advancing for `hole_budget_ms` (0 = auto with a 2 s floor; an
+explicit value sizes it at 2–3 × the sender RTO plus one one-way delay, §5.4),
+or the tree exceeding either byte bound. A new
 frame arriving behind the hole does not by itself restart the
 deadline; if it did, a full send window could keep the hole alive forever and deadlock
 (measured: probe I strict phase, the near's window closed on the far's hole and the
@@ -1213,8 +1242,9 @@ refreshed the clock forever, masking the real stalls it was meant to detect. A r
 a full `carrier_stall_ms`; a genuinely dead socket still fails on `!sk` or a
 non-ESTABLISHED state. `carrier_stall_ms` must exceed several RTTs plus the 10 ms feedback
 cadence: an ACK cannot arrive before one RTT, and the uack/FBK feedback shares the ordered
-stream with the data. The 3000 ms default is about 13 RTT at 218 ms; the WAN experiment
-that exposed the false kills used 15000 ms. Measured in `near.rst_eagain`:
+stream with the data. The auto value is 3 × the measured RTO (about 3 s when the
+RTO is 1 s); an explicit `carrier_stall_ms=` pins it, and the WAN experiment that
+exposed the false kills used 15000 ms. Measured in `near.rst_eagain`:
 `peer_paused=1`, `lost=0`, `replaced=0`, `stall_paused_skips=1184` during the paused
 drain; before the pause gate the same window reported `lost=1 replaced=1`. The gate trusts
 the peer's pause report: a peer that keeps reporting `rx_state=2` (or an application that
@@ -1540,9 +1570,10 @@ line.)
 
 ```
 # profile is one of: http-kal | http-kal-drip | raw
+# fec is off | on; mode is rlnc | grouped | sc-ldpc (reserved)
 tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443
         n=4 m=1 dup=1 keepalive=5000 drip_ms=1000
-        profile=http-kal
+        profile=http-kal fec=on mode=grouped carriers=10 crypto=on
         srcaddrs=10.0.0.10,10.0.0.11 portblock=40000-40063
         replay=8388608 tunnel_rate=0 max_inflate=2.0 hole_budget_ms=500
         rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=3000
@@ -1590,8 +1621,11 @@ random at tunnel creation).
   The module logs one warning at session creation for this configuration.
 - `max_tunnels`/`max_carriers` are enforced before any allocation: a new tunnel id
   when the global list is at `max_tunnels` returns `-ENOSPC` and changes nothing
-  (re-sending an existing id still replaces it), and `n + m > max_carriers` returns
-  `-EINVAL`. Both checks run under `tbt_lock` in `tbt_tunnel_add()`.
+  (re-sending an existing id still replaces it); `n + m > 256` or
+  `carriers > max_carriers` returns `-EINVAL`. `max_carriers` defaults to 256
+  (`1..256`); with `fec=off` the old ARQ still caps `n + m` at 16 because its
+  per-path ack fields are 16 bits wide. Both checks run under `tbt_lock` in
+  `tbt_tunnel_add()`.
 - Unknown keys → `EINVAL` with no partial application (parse into a stack `struct
   tbt_cmd`, validate, then commit under `tbt_lock`).
 - `tunnels` (read): one line per tunnel, nine columns:
@@ -1633,6 +1667,21 @@ random at tunnel creation).
   tunnel automatically use the `http-kal-drip` cadence; there is no separate spare
   profile value. `profile=raw` is refused on a tunnel whose peer has not also negotiated
   `raw` in HELLO.
+- `fec=off|on` selects the data plane. `mode=rlnc` is one group
+  (`carriers == n + m`); `mode=grouped` maps one share to each carrier
+  (`carriers = groups * (n + m)`, `group = carrier / (n + m)`,
+  `share = carrier % (n + m)`); `mode=sc-ldpc` is reserved and returns
+  `-EOPNOTSUPP` with `fec=on`. `w=0` resolves to `2*n` (`256` for sc-ldpc),
+  `carriers=0` resolves to `n + m`, and a nonzero `carriers` must be a multiple
+  of `n + m`. `fec=on` requires `m >= 1` and `carriers >= n + m`.
+- `crypto=on|off` enables ChaCha8 obfuscation of the FEC DATA/PARITY payload
+  only; it requires `fec=on`, and omitting `crypto=` means "same as `fec`".
+  `crypto_key=` takes 64 hex digits (256 bits) or `-` to clear. With no
+  `crypto_key=`, the near side generates the key and announces it in the HELLO
+  v6 body (`key_id=1`); with `crypto_key=` on both ends, `key_id=0` and the
+  HELLO key field is zero. A mismatch is a payload CRC failure on every share,
+  not a silent downgrade. The FEC header, HTTP headers, chunk framing and
+  control records are never obfuscated.
 - `chunk=`, `framing=`, `max_retry=`, `dev=`, and `uid=` were removed: they were
   parsed but never read by the data path. An unknown key is refused with `EINVAL`.
 - All files are `0600 root` under `init_net.proc_net`, except `http`, which is
@@ -2124,7 +2173,7 @@ not symbol resolution.
 ### 8.9 Module parameters
 
 ```
-debug=0, max_tunnels=64, max_carriers=16, debug_loss=0
+debug=0, max_tunnels=64, max_carriers=256, debug_loss=0
 ```
 
 These are read-only after load (§8.4.2). Everything else — `n`, `m`, `dup`, `profile`,
@@ -2342,7 +2391,8 @@ Implemented in C3, per session:
 1. Each carrier runs a 50 ms `w_poll`. It re-arms a queue that has work (the C2 liveness
    net), and it is also the health check: a socket whose `sk_state` is not
    `TCP_ESTABLISHED`, or data that is **sent but never acknowledged** (`snd_una` static
-   while `snd_nxt` is ahead, for `carrier_stall_ms`, default 3000 ms), is marked lost once
+   while `snd_nxt` is ahead, for `carrier_stall_ms` (0 = auto: 3 × the measured
+   RTO; an explicit value pins it), is marked lost once
    (`carrier_lost++`). Backpressure is not a stall: the clock runs only while
    `snd_una != snd_nxt`, and an idle carrier, a delivery pause or a closed peer window
    (`snd_wnd == 0`) restarts it (§5.5). The old `sk_wmem_queued > 0` test could not tell
@@ -2443,13 +2493,17 @@ makes this design different from a generic L4 tunnel.
 | `scripts/tbtunctl` | **never created** — no userspace program ships in any form |
 | `tests/*.sh` | **new** |
 
-Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the current tree reports `0.1.0`.
-The wire revision `TBT_CONV=0x0005` bumps independently. HELLO `body[0]` carries
-`TBT_WIRE_VERSION=1`, not the module version, so the module version and the wire version
-are decoupled.
+Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the released tree reports
+`0.1.0`, and `0.2.0` is the target. The wire revision `TBT_CONV=0x0005` and the
+FEC record revision `TBT_FEC_CONV=0x1001` bump independently of it. HELLO
+`body[0]` carries `TBT_WIRE_VERSION=1`, not the module version, so the module
+version and the wire version are decoupled. 0.2.0 (target, not on the wire yet)
+raises them to `TBT_CONV=0x0006` (FIN carries a 16-byte body) and
+`TBT_FEC_CONV=0x1002` (PARITY may be an empty-block marker); `tbt_uapi.h` names
+those as `TBT_CONV_NEXT`/`TBT_FEC_CONV_NEXT` until the release flips them.
 
 **Packaging.** `tbtun/tbt_uapi.h` is the single version authority: the
-`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/0/1`). `scripts/mkdkmsconf.sh`
+`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/1/0`). `scripts/mkdkmsconf.sh`
 parses those macros and emits `PACKAGE_VERSION="<major>.<minor>.<patch>"`; parsing
 failure is fatal and never falls back to an old value. `dkms.conf` is a generated file —
 `make dkms.conf` (or `make dkms-tarball`) writes it, and it must not be hand-edited; the
@@ -2462,6 +2516,9 @@ neither `dkms` nor the matching kernel headers is installed, so no real-machine
 `dkms install` / `modprobe` / `rmmod` was run. The equivalent `/tmp` build and load
 validation passed; that is not the same claim. The install script's dry-run and staged-tree
 paths are exercised (§11), and `make` still requires `linux72-headers` (§8.8).
+This is a 0.2.0 release gate: the `.65` seven-step DKMS run must produce
+`review/wan-experiment/arm64/dkms-65-<UTC>/` with `DKMS_RESULT PASS` before the
+statement above can be replaced. Until that evidence exists, it stands.
 
 ---
 
@@ -2503,6 +2560,7 @@ covers; no known leak remains but a long-soak kref/RCU audit is still worthwhile
 | R16 | Memory at 10 Gbps | `tx_window_bytes` bounds retention and the frame queue (`txq_max = tx_window + 8 chunks`) and sizes the carrier buffers from the same number; `rx_reorder_bytes` bounds the reorder tree per stream and per session; the 64 MiB delivery ring is the largest fixed cost and costs about 2× its payload in physical memory. Per session the bound is about 3× window + `rx_reorder_bytes` + 64 MiB per stream (§5.4). T8 measures the peak. |
 | R17 | Jitter adds RTT | The reorder tree is consulted only past a gap; the in-order path adds zero delay (T1 asserts). |
 | R18 | `inet_csk_reset_xmit_timer` etc. drift | Not used; stock timers only. |
+| R19 | 0.1.0 and 0.2.0 peers mixed | Both wire revisions are hard-rejected: the first HELLO fails `tbt_hdr_check()` (0x0005 vs 0x0006), and a FEC record fails `tbt_fec_hdr_check()` (0x1001 vs 0x1002). `rx_parse_proto`/`fec_proto_fail` make it visible. Upgrade both ends together; rollback is the 0.1.0 binary. |
 
 ---
 
@@ -2533,6 +2591,15 @@ controls do not apply; these replace them.
   nonce poisons the carrier and counts `join_bad` or `join_nonce_reject`. There is no
   cryptographic authentication in v0 — the tunnel is a transport, not a security boundary.
   Wrap in WireGuard if peers are untrusted.
+- **Body obfuscation, not confidentiality**: `crypto=on` (the default whenever
+  `fec=on`) ChaCha8-obfuscates only the FEC DATA/PARITY payload. The 40-byte
+  FEC header, the HTTP headers, the chunk framing and every control record stay
+  plaintext. With `crypto_key=` unset, the near side generates the 32-byte
+  session key and sends it in the HELLO v6 body (`key_id=1`); with
+  `crypto_key=` set on both ends, `key_id=0` and the HELLO key field is zero. A
+  wrong key is a payload CRC failure on every share, so it cannot silently
+  downgrade. Each direction uses its own 8-byte `crypto_nonce`; the key may be
+  shared, the nonces must not be. This is not a substitute for WireGuard.
 - **Module unload** always works and resets every stream (§8.9).
 
 ## 14. Design invariants (for reviewers)
