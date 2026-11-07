@@ -692,10 +692,12 @@ static void test_nack_replay(void)
     static const u16 full[N] = {S, S, S, S};
     struct tbt_fec_replay *r;
     u64 block = 0;
+    u16 k;
     int pattern;
 
     r = tbt_fec_replay_new(1, N, M, S);
     ok(r != NULL, "replay ring for the block model");
+    k = tbt_fec_replay_k(r);
 
     for (pattern = 1; pattern <= 3; pattern++)
     {
@@ -756,7 +758,7 @@ static void test_nack_replay(void)
 
         memset(full_share, 0x5a, sizeof(full_share));
         for (i = 0; i < N + M; i++)
-            ok_int(tbt_fec_replay_store(r, block + TBT_FEC_REPLAY_K, 0,
+            ok_int(tbt_fec_replay_store(r, block + k, 0,
                                         (u16)i, full_share, S), 0,
                    "store evicting block");
         blk_init(&b, 0, full);
@@ -1257,6 +1259,7 @@ static void test_ack_split(void)
 static void test_replay_window(void)
 {
     struct tbt_fec_replay *r;
+    u32 per, slots, credit, blocks;
     u16 k;
     u64 b;
     u8 buf[S];
@@ -1264,11 +1267,33 @@ static void test_replay_window(void)
     r = tbt_fec_replay_new(G, N, M, S);
     ok(r != NULL, "replay window: ring");
     k = tbt_fec_replay_k(r);
-    ok_int(k, TBT_FEC_REPLAY_K, "replay window: the ring holds K super-blocks");
+    ok_int(k, TBT_FEC_REPLAY_K_MAX,
+           "replay window: the small shape reaches K_MAX");
+    ok(tbt_fec_replay_bytes(G, N, M, S, k) <= TBT_FEC_REPLAY_BUDGET,
+       "replay window: K fits the budget");
+
+    /* The arena formula from tbt_fec_data_init(): 16 MiB of super-blocks,
+     * clamped to [4, 256] slots per group. */
+    per = (u32)G * (N + M) * S;
+    slots = (16u * 1024 * 1024) / per;
+    if (slots < 4)
+        slots = 4;
+    if (slots > 256)
+        slots = 256;
+
+    /* The credit is K_eff-2 super-blocks, K_eff = min(ring K, arena slots),
+     * capped to TBT_FEC_CREDIT_MAX packets. For this shape the ring binds. */
+    credit = tbt_fec_credit_packets(G, N, k, (u16)slots,
+                                    TBT_FEC_CREDIT_MAX);
+    blocks = credit / ((u32)G * N);
+    ok_int((int)blocks, (int)k - 2,
+           "replay window: credit is K-2 super-blocks");
+    ok(credit <= TBT_FEC_CREDIT_MAX,
+       "replay window: credit is capped at 1024 packets");
 
     /* The receiver delivered up to block 3 and stalls on block 4. The sender
-     * closes blocks 4..(3 + K - 2): the credit cap, one short share each. */
-    for (b = 0; b <= 3 + (u64)(k - 2); b++)
+     * closes blocks 4..(3 + credit blocks): the cap, one short share each. */
+    for (b = 0; b <= 3 + (u64)blocks; b++)
         ok_int(tbt_fec_replay_store(r, b, 0, 0, src, S), 0,
                "replay window: short block stored");
 
@@ -1285,6 +1310,56 @@ static void test_replay_window(void)
     ok_int(tbt_fec_replay_get(r, 4, 0, 0, buf, S), -ESTALE,
            "replay window: past the cap the stalled block is evicted");
     tbt_fec_replay_free(r);
+
+    /* Production shapes at S=8192. K is the largest ring the 15 MiB budget
+     * holds, capped at TBT_FEC_REPLAY_K_MAX=64; the credit is K_eff-2
+     * super-blocks, capped at 1024 packets. 32 and 64 carriers now cover the
+     * carrier aggregate BDP (912 and 864 packets, 7.47 and 7.08 MiB); the
+     * 256-carrier shapes keep K=7 and their old credit (640 grouped, 960
+     * single). */
+    ok_int(tbt_fec_replay_k_for(4, 4, 4, 8192), 59, "32-carrier K");
+    ok_int(tbt_fec_replay_k_for(8, 4, 4, 8192), 29, "64-carrier K");
+    ok_int(tbt_fec_replay_k_for(32, 4, 4, 8192), 7,
+           "256-carrier grouped K");
+    ok_int(tbt_fec_replay_k_for(1, 192, 64, 8192), 7,
+           "256-carrier single K");
+    ok_int((int)tbt_fec_credit_packets(4, 4, 59, 64, TBT_FEC_CREDIT_MAX),
+           912, "32-carrier credit");
+    ok_int((int)tbt_fec_credit_packets(8, 4, 29, 32, TBT_FEC_CREDIT_MAX),
+           864, "64-carrier credit");
+    ok_int((int)tbt_fec_credit_packets(32, 4, 7, 8, TBT_FEC_CREDIT_MAX),
+           640, "256-carrier grouped credit");
+    ok_int((int)tbt_fec_credit_packets(1, 192, 7, 8, TBT_FEC_CREDIT_MAX),
+           960, "256-carrier single credit");
+
+    /* The three bounds hold for every shape and do not depend on the stream
+     * length: the ring stays inside 15 MiB, the arena inside 16 MiB, and the
+     * credit inside 1024 packets (8 MiB of payload). */
+    ok(tbt_fec_replay_bytes(4, 4, 4, 8192, 59) <= TBT_FEC_REPLAY_BUDGET,
+       "32-carrier ring stays inside 15 MiB");
+    ok(tbt_fec_replay_bytes(8, 4, 4, 8192, 29) <= TBT_FEC_REPLAY_BUDGET,
+       "64-carrier ring stays inside 15 MiB");
+    ok(tbt_fec_replay_bytes(32, 4, 4, 8192, 7) <= TBT_FEC_REPLAY_BUDGET,
+       "256-carrier grouped ring stays inside 15 MiB");
+    ok(tbt_fec_replay_bytes(1, 192, 64, 8192, 7) <= TBT_FEC_REPLAY_BUDGET,
+       "256-carrier single ring stays inside 15 MiB");
+    ok((u64)64 * 4 * 8 * 8192 <= 16u * 1024 * 1024,
+       "32-carrier arena stays inside 16 MiB");
+    ok((u64)32 * 8 * 8 * 8192 <= 16u * 1024 * 1024,
+       "64-carrier arena stays inside 16 MiB");
+    ok((u64)8 * 32 * 8 * 8192 <= 16u * 1024 * 1024,
+       "256-carrier grouped arena stays inside 16 MiB");
+    ok((u64)8 * 1 * 256 * 8192 <= 16u * 1024 * 1024,
+       "256-carrier single arena stays inside 16 MiB");
+    ok(tbt_fec_credit_packets(4, 4, 59, 64, TBT_FEC_CREDIT_MAX) <=
+           TBT_FEC_CREDIT_MAX &&
+           tbt_fec_credit_packets(8, 4, 29, 32, TBT_FEC_CREDIT_MAX) <=
+               TBT_FEC_CREDIT_MAX &&
+           tbt_fec_credit_packets(32, 4, 7, 8, TBT_FEC_CREDIT_MAX) <=
+               TBT_FEC_CREDIT_MAX &&
+           tbt_fec_credit_packets(1, 192, 7, 8, TBT_FEC_CREDIT_MAX) <=
+               TBT_FEC_CREDIT_MAX,
+       "credit stays inside the 1024-packet cap");
 }
 
 /* ------------------------------------------------------------------ *
@@ -1436,9 +1511,11 @@ static void test_replay_dedup_model(void)
     u8 rec[S];
     u64 t;
     u32 queued = 0;
+    u16 k;
     int i;
 
     ok(r != NULL, "dedup: replay ring");
+    k = tbt_fec_replay_k(r);
     memset(rec, 0x33, sizeof(rec));
     for (i = 0; i < N + M; i++)
         ok_int(tbt_fec_replay_store(r, 0, 0, (u16)i, rec, S), 0,
@@ -1471,7 +1548,7 @@ static void test_replay_dedup_model(void)
 
     /* The stamp names the block, not the slot: evicting block 0 leaves
      * block K's stamp, and block 0 reads zero. */
-    ok_int(tbt_fec_replay_store(r, TBT_FEC_REPLAY_K, 0, 0, rec, S), 0,
+    ok_int(tbt_fec_replay_store(r, k, 0, 0, rec, S), 0,
            "dedup: evicting store");
     ok_size((size_t)tbt_fec_replay_sent_ns(r, 0, 0, 0), 0,
             "dedup: an evicted block has no send stamp");

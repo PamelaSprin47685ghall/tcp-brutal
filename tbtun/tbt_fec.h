@@ -204,12 +204,22 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
 /* The sender window is the ACK credit in DATA packets, capped to K-2
  * super-blocks by the data plane. K must therefore hold the window plus two
  * super-blocks of slack: a block the receiver can still NACK is never
- * evicted. K=7 with the production 2 MiB super-block is 14.08 MiB of records;
- * the 15 MiB cap keeps the total FEC memory (16 MiB RX arena + replay) under
- * 32 MiB. A shape that cannot hold K=7 shrinks; the credit cap follows the
+ * evicted. K is derived from the shape: the ring is allocated at the largest
+ * K that fits TBT_FEC_REPLAY_BUDGET, up to TBT_FEC_REPLAY_K_MAX, so a shape
+ * with small super-blocks (32/64 carriers) gets a window that covers the
+ * carrier aggregate BDP, while the 256-carrier shape still lands on K=7.
+ * The bounds do not depend on the stream length:
+ *   ring   <= TBT_FEC_REPLAY_BUDGET (15 MiB of records),
+ *   arena  <= TBT_FEC_RX_BUDGET (16 MiB, tbt_fec_data.c),
+ *   credit <= TBT_FEC_CREDIT_MAX packets (8 MiB at S=8192).
+ * A shape that cannot hold K=1 gets no ring; the credit cap follows the
  * effective K. */
-#define TBT_FEC_REPLAY_K 7
+#define TBT_FEC_REPLAY_K_MAX 64
 #define TBT_FEC_REPLAY_BUDGET (15u * 1024 * 1024)
+/* The ACK grants at most this many DATA packets of FEC credit. The credit
+ * bounds the sender's in-flight data; the ring bounds the repair storage,
+ * and both are constant-size for a given shape. */
+#define TBT_FEC_CREDIT_MAX 1024u
 
 struct tbt_fec_replay;
 
@@ -220,10 +230,46 @@ struct tbt_fec_replay *tbt_fec_replay_new(u16 groups, u16 n, u16 m, u16 s);
 void tbt_fec_replay_free(struct tbt_fec_replay *r);
 u16 tbt_fec_replay_k(const struct tbt_fec_replay *r);
 /* Effective K for this shape without allocating: the largest k <=
- * TBT_FEC_REPLAY_K whose ring fits TBT_FEC_REPLAY_BUDGET, or 0. The sender
- * ring, the receiver NACK window and the credit cap all use this value. */
+ * TBT_FEC_REPLAY_K_MAX whose ring fits TBT_FEC_REPLAY_BUDGET, or 0. The
+ * sender ring, the receiver NACK window and the credit cap all use this
+ * value. */
 u16 tbt_fec_replay_k_for(u16 groups, u16 n, u16 m, u16 s);
 size_t tbt_fec_replay_bytes(u16 groups, u16 n, u16 m, u16 s, u16 k);
+
+/* The FEC in-flight window in DATA packets, derived from the effective K.
+ *
+ * The sender may run at most K-2 super-blocks past the delivered frontier:
+ * the ring holds K, and two are slack for the ACK in flight. K_eff is the
+ * smallest of the ring K, the receiver's arena `slots` and
+ * TBT_FEC_REPLAY_K_MAX; `slots` may be 0 when the caller has no arena. The
+ * result is rounded down to whole super-blocks so the sender never opens a
+ * partial block the ring cannot cover, and capped to `max_packets`
+ * (TBT_FEC_CREDIT_MAX) to bound memory. A K too small to hold the two-block
+ * slack still grants one super-block: the stream must move, and repair is
+ * already unavailable. */
+static inline u32 tbt_fec_credit_packets(u16 groups, u16 n, u16 k_ring,
+                                         u16 slots, u32 max_packets)
+{
+    u32 per_block = (u32)groups * n;
+    u32 k_eff = k_ring;
+    u32 blocks;
+
+    if (!per_block)
+        return 1;
+    if (slots && k_eff > slots)
+        k_eff = slots;
+    if (k_eff > TBT_FEC_REPLAY_K_MAX)
+        k_eff = TBT_FEC_REPLAY_K_MAX;
+    blocks = k_eff > 2 ? k_eff - 2 : 1;
+    if (max_packets)
+    {
+        u32 limit = max_packets / per_block;
+
+        if (blocks > limit)
+            blocks = limit;
+    }
+    return blocks ? blocks * per_block : 1;
+}
 
 /* Store one complete encoded record (header included). A share outside
  * [0, n+m) or a record longer than header+S is refused. */

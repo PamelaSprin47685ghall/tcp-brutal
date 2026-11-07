@@ -490,13 +490,17 @@ size_t tbt_fec_replay_bytes(u16 groups, u16 n, u16 m, u16 s, u16 k)
 
 u16 tbt_fec_replay_k_for(u16 groups, u16 n, u16 m, u16 s)
 {
-    u16 k = TBT_FEC_REPLAY_K;
+    u16 k = TBT_FEC_REPLAY_K_MAX;
 
-    if (!groups || !(u16)(n + m) || !s || s > TBT_FEC_PAYLOAD_MAX)
+    if (!groups || groups > TBT_FEC_MAX_GROUPS || !n || !m ||
+        (u32)n + m > TBT_FEC_MAX_SHARES || !s || s > TBT_FEC_PAYLOAD_MAX)
         return 0;
-    /* Shrink K until the ring fits the budget. A shape that cannot hold one
-     * super-block gets no ring; the data plane then relies on parity and the
-     * carrier TCP retransmission. */
+    /* Start at the cap and shrink until the ring fits the budget. A small
+     * shape therefore gets the largest ring the budget allows (32 carriers
+     * K=59, 64 carriers K=29) instead of the old fixed K=7; the 256-carrier
+     * shape still lands on K=7. A shape that cannot hold one super-block
+     * gets no ring; the data plane then relies on parity and the carrier TCP
+     * retransmission. */
     while (k > 0 && tbt_fec_replay_bytes(groups, n, m, s, k) >
                         TBT_FEC_REPLAY_BUDGET)
         k--;

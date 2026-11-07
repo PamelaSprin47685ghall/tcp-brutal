@@ -70,11 +70,10 @@
  * silent stall. */
 #define TBT_FEC_STALL_MS 30000
 #define TBT_FEC_NONCE_GOLDEN 0x9e3779b97f4a7c15ULL
-/* The RX arena keeps at most one window of 1024 packets, and the ACK grants
- * exactly that: slots * groups * n reaches 1024 for every supported shape
- * (the 16 MiB arena divided by (n + m) * S is 256 super-blocks). */
+/* The RX arena holds at most 16 MiB of super-blocks: slots is the per-group
+ * block count, and the ACK credit is additionally capped to
+ * TBT_FEC_CREDIT_MAX packets (8 MiB at S=8192) and to K-2 super-blocks. */
 #define TBT_FEC_RX_BUDGET (16u * 1024 * 1024)
-#define TBT_FEC_CREDIT_MAX 1024u
 
 /* No carrier TCP is left to deliver a share: a retransmit count at the
  * default tcp_retries2 (15) is the point where TCP itself gives up. */
@@ -1779,26 +1778,21 @@ static void tbt_fec_ack(struct tbt_session *sess, u64 next_deliver,
     memset(&a, 0, sizeof(a));
     a.next_deliver = next_deliver;
     a.deliver_bytes = deliver_bytes;
-    /* The receiver buffers `slots` super-blocks; the credit must not exceed
-     * that window, or the sender would overrun it and its shares would be
-     * dropped as "too far ahead". It also must not exceed K-2 super-blocks:
-     * the replay ring holds K, so the oldest block the receiver can still
-     * NACK is never evicted. The sender applies the same cap. */
+    /* The credit is K_eff-2 super-blocks: the ring holds K, and two are
+     * slack so a block the receiver can still NACK is never evicted. The
+     * receiver's arena `slots` is the other bound (a sender inside the
+     * credit cannot overrun it), and TBT_FEC_CREDIT_MAX caps the packets
+     * (8 MiB at S=8192). The sender applies the same cap. */
     {
         struct tbt_fec_rx *rx = sess->fec_rx;
-        u32 blocks = rx->replay_k > 2 ? (u32)(rx->replay_k - 2) : 1;
 
-        a.credit_packets = (u32)min_t(u64,
-                                      (u64)rx->slots * rx->groups * rx->n,
-                                      (u64)blocks * rx->groups * rx->n);
+        a.credit_packets = tbt_fec_credit_packets(
+            rx->groups, rx->n, rx->replay_k, rx->slots, TBT_FEC_CREDIT_MAX);
         /* The peer uses this as the replay round trip: a share asked again
          * before it can arrive would only duplicate the repair. The sample
          * is the NACK scan's carrier RTT gauge, 0 before the first one. */
         a.rtt_us = READ_ONCE(rx->rtt_us);
     }
-    a.credit_packets = min(a.credit_packets, TBT_FEC_CREDIT_MAX);
-    if (!a.credit_packets)
-        a.credit_packets = 1;
     if (tbt_fec_ack_pack(&a, body))
         return;
     memset(&h, 0, sizeof(h));
@@ -3359,14 +3353,12 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
             else
             {
                 u16 rk = tbt_fec_replay_k(tx->replay);
-                u32 blocks = rk > 2 ? (u32)(rk - 2) : 1;
-                u32 cap = blocks * tx->groups * tx->n;
+                u32 cap = tbt_fec_credit_packets(
+                    tx->groups, tx->n, rk, 0, TBT_FEC_CREDIT_MAX);
 
                 /* The peer cannot widen the window past the replay ring:
                  * the oldest block it may still NACK must stay in the ring. */
-                WRITE_ONCE(tx->credit,
-                           min_t(u32, a.credit_packets,
-                                 min_t(u32, cap, TBT_FEC_CREDIT_MAX)));
+                WRITE_ONCE(tx->credit, min_t(u32, a.credit_packets, cap));
             }
             /* The peer's measured RTT is how long a replay needs to come
              * back; the NACK reply deduplicates inside it. A zero sample is
@@ -4216,11 +4208,9 @@ int tbt_fec_data_init(struct tbt_session *sess)
      * grants, so the replay ring covers it before the first ACK arrives. */
     {
         u16 rk = tbt_fec_replay_k(tx->replay);
-        u32 blocks = rk > 2 ? (u32)(rk - 2) : 1;
 
-        tx->credit = (u32)min_t(u64, (u64)slots * groups * n,
-                                (u64)blocks * groups * n);
-        tx->credit = min(tx->credit, TBT_FEC_CREDIT_MAX);
+        tx->credit = tbt_fec_credit_packets(groups, n, rk, (u16)slots,
+                                            TBT_FEC_CREDIT_MAX);
     }
     /* Capture pauses at ring granularity, so match the ring to the credit
      * window instead of a fixed 256 KiB. The floor keeps a small shape from

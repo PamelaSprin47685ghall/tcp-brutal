@@ -2014,12 +2014,14 @@ static void test_replay(void)
     struct tbt_fec_replay *r;
     u8 rec[96], out[96];
     u16 len = 80;
+    u16 k;
     int i;
 
     r = tbt_fec_replay_new(2, 4, 2, 64);
     ok(r != NULL, "replay ring allocated", NULL);
-    ok_u32(tbt_fec_replay_k(r), TBT_FEC_REPLAY_K, "replay K");
-    ok(tbt_fec_replay_bytes(2, 4, 2, 64, TBT_FEC_REPLAY_K) <=
+    k = tbt_fec_replay_k(r);
+    ok_u32(k, TBT_FEC_REPLAY_K_MAX, "small shape reaches K_MAX");
+    ok(tbt_fec_replay_bytes(2, 4, 2, 64, k) <=
            TBT_FEC_REPLAY_BUDGET,
        "replay fits the budget", NULL);
     for (i = 0; i < (int)len; i++)
@@ -2043,10 +2045,10 @@ static void test_replay(void)
     ok_int(tbt_fec_replay_store(r, 7, 0, 0, rec, 105), -EINVAL,
            "replay record too long");
     /* A block K later reuses the slot: the old block is gone. */
-    ok_int(tbt_fec_replay_store(r, 7 + TBT_FEC_REPLAY_K, 1, 5, rec, len), 0,
+    ok_int(tbt_fec_replay_store(r, 7 + k, 1, 5, rec, len), 0,
            "replay evicting store");
     ok(!tbt_fec_replay_has(r, 7, 1, 5), "replay evicted", NULL);
-    ok(tbt_fec_replay_has(r, 7 + TBT_FEC_REPLAY_K, 1, 5), "replay new block",
+    ok(tbt_fec_replay_has(r, 7 + k, 1, 5), "replay new block",
        NULL);
     tbt_fec_replay_free(r);
 
@@ -2054,15 +2056,16 @@ static void test_replay(void)
      * the oldest. The data plane caps credit to K-2 super-blocks, so the
      * sender never advances that far while the receiver is still NACKing. */
     r = tbt_fec_replay_new(1, 4, 2, 64);
-    for (i = 0; i < TBT_FEC_REPLAY_K; i++)
+    k = tbt_fec_replay_k(r);
+    for (i = 0; i < k; i++)
         ok_int(tbt_fec_replay_store(r, (u64)i, 0, 0, rec, len), 0,
                "store a full NACK window");
-    for (i = 0; i < TBT_FEC_REPLAY_K; i++)
+    for (i = 0; i < k; i++)
         ok(tbt_fec_replay_has(r, (u64)i, 0, 0), "window block resident",
            NULL);
     ok_int(tbt_fec_replay_get(r, 0, 0, 1, out, sizeof(out)), -ENODATA,
            "resident block with an unstored share is -ENODATA");
-    ok_int(tbt_fec_replay_store(r, TBT_FEC_REPLAY_K, 0, 0, rec, len), 0,
+    ok_int(tbt_fec_replay_store(r, k, 0, 0, rec, len), 0,
            "store one past the window");
     ok(!tbt_fec_replay_has(r, 0, 0, 0), "oldest window block evicted", NULL);
     ok_int(tbt_fec_replay_get(r, 0, 0, 0, out, sizeof(out)), -ESTALE,
@@ -2088,7 +2091,7 @@ static void test_replay(void)
 
     /* The production 32-group shape (256 carriers, n=4, m=4) keeps K=7
      * inside the 15 MiB budget; credit is capped to K-2 super-blocks. */
-    ok_u32(tbt_fec_replay_k_for(32, 4, 4, 8192), TBT_FEC_REPLAY_K,
+    ok_u32(tbt_fec_replay_k_for(32, 4, 4, 8192), 7,
            "production K from the shape");
     ok(tbt_fec_replay_k_for(32, 4, 4, 8192) >= 6,
        "production K is at least 6", NULL);
@@ -2099,11 +2102,23 @@ static void test_replay(void)
            "over-budget shape has no K");
     r = tbt_fec_replay_new(32, 4, 4, 8192);
     ok(r != NULL, "production replay ring allocated", NULL);
-    ok_u32(tbt_fec_replay_k(r), TBT_FEC_REPLAY_K, "production replay K=7");
-    ok(tbt_fec_replay_bytes(32, 4, 4, 8192, TBT_FEC_REPLAY_K) <=
+    ok_u32(tbt_fec_replay_k(r), 7, "production replay K=7");
+    ok(tbt_fec_replay_bytes(32, 4, 4, 8192, 7) <=
            TBT_FEC_REPLAY_BUDGET,
        "production replay fits the budget", NULL);
     tbt_fec_replay_free(r);
+
+    /* Small shapes grow the ring to the budget: 32 carriers (4 groups) get
+     * K=59, 64 carriers (8 groups) K=29. Both fit the 15 MiB cap, so the
+     * credit can cover the aggregate TX window. */
+    ok_u32(tbt_fec_replay_k_for(4, 4, 4, 8192), 59,
+           "32-carrier K from the budget");
+    ok_u32(tbt_fec_replay_k_for(8, 4, 4, 8192), 29,
+           "64-carrier K from the budget");
+    ok(tbt_fec_replay_bytes(4, 4, 4, 8192, 59) <= TBT_FEC_REPLAY_BUDGET,
+       "32-carrier ring fits the budget", NULL);
+    ok(tbt_fec_replay_bytes(8, 4, 4, 8192, 29) <= TBT_FEC_REPLAY_BUDGET,
+       "64-carrier ring fits the budget", NULL);
 
     /* A shape that cannot hold one super-block in the budget gets no ring. */
     r = tbt_fec_replay_new(256, 128, 128, 8192);
