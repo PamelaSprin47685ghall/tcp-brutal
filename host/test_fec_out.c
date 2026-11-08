@@ -869,6 +869,54 @@ static void case_batch_drain(void)
     sched_free(&s);
 }
 
+/* A stream switch drops the old stream's queued TX state and releases its
+ * credit frontier; the new stream's records still drain. */
+static void case_stream_switch_cleanup(void)
+{
+    struct sched s;
+    uint32_t wrote;
+    bool again;
+    int i;
+
+    sched_init(&s);
+    push(&s, 0, false, false, 0, 1); /* old data */
+    push(&s, 0, false, true, 0, 2);  /* old replay */
+    push(&s, 0, true, false, 0, 3);  /* old control */
+    ok_u32(s.queued, 3, "switch: old records queued");
+
+    /* The kernel's switch frees the old sid's queues and resets peer_pkts;
+     * this model has no sid, so all old queues are dropped. */
+    while (s.ctl)
+    {
+        struct rec *r = s.ctl;
+
+        s.ctl = r->next;
+        rec_free(&s, NULL, r);
+    }
+    while (s.replay_head)
+    {
+        struct rec *r = s.replay_head;
+
+        s.replay_head = r->next;
+        if (!s.replay_head)
+            s.replay_tail = NULL;
+        rec_free(&s, NULL, r);
+    }
+    for (i = 0; i < NCAR; i++)
+        while (s.q[i].head)
+            rec_free(&s, &s.q[i], q_pop_head(&s.q[i]));
+    ok_u32(s.queued, 0, "switch: old TX state cleared");
+    ok(s.ctl == NULL && s.replay_head == NULL,
+       "switch: old control/replay cleared", NULL);
+
+    /* The new stream sends after the switch. */
+    push(&s, 0, false, false, 0, 10);
+    wrote = drain_all(&s, &again);
+    ok(!again && wrote == 1, "switch: the new stream drains", NULL);
+    ok_u32(s.writes[0], 1, "switch: the new record reached the carrier");
+    sched_free(&s);
+}
+
 /* A share may not ride a carrier whose OPEN for this stream is not on the
  * wire yet: it waits in its own queue, and only an up carrier may carry it
  * (or serve as the fallback). */
@@ -935,6 +983,7 @@ int main(void)
     case_per_carrier_retry();
     case_batch_drain();
     case_open_gate();
+    case_stream_switch_cleanup();
 
     printf("%s: %d checks, %d failures\n",
            failures ? "FAIL" : "PASS", checks, failures);

@@ -842,6 +842,9 @@ struct tbt_fec_out
      * it without a write once the peer's delivered frontier passes that
      * block, so an acked repair never sits ahead of the tail. */
     u64 block_id;
+    /* Stream id from the record header; a stream switch drops the old
+     * stream's queued data and control while keeping the new stream's. */
+    u64 sid;
     /* NACK receipt time for a replay record; the flush charges NACK->wire
      * latency when the carrier accepts it. Zero for every other record. */
     u64 stamp_ns;

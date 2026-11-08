@@ -268,15 +268,19 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier, const u8 *buf
     o->control = control ? 1 : 0;
     o->replay = replay ? 1 : 0;
     o->block_id = 0;
-    if (replay)
+    o->sid = 0;
     {
         struct tbt_fec_hdr h;
 
         /* The record is complete here, header included; unpack is a plain
          * byte copy. The block id lets the flush drop a repair the peer has
-         * already delivered. */
+         * already delivered; the sid lets a stream switch drop the old
+         * stream's queued records. */
         if (!tbt_fec_hdr_unpack(buf, &h))
+        {
             o->block_id = h.block_id;
+            o->sid = h.sid;
+        }
     }
     o->stamp_ns = stamp_ns;
     memcpy(o->data, buf, len);
@@ -1653,6 +1657,9 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
         spin_unlock(&tx->lock);
         if (switched)
         {
+            struct tbt_fec_out *o, *tmp;
+            u16 i;
+
             if (tx->cur_block_sid && tx->cur_block_sid != st->sid)
             {
                 u64 start = tx->cur_block * (u64)tx->n * tx->groups;
@@ -1661,6 +1668,35 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
                     tbt_fec_tx_close_block(sess, true);
             }
             tx->cur_block_sid = st->sid;
+            /* The old stream's TX state must not outlive it. Its ACKs are
+             * dropped by the sid filter, so its credit frontier would stay
+             * full forever and the new stream would wait on a window that
+             * can never advance. Stop the old per-carrier drains, drop the
+             * old stream's queued data/replay/control, and release the
+             * frontier. The new stream's data is still in the ring (the
+             * packetizer builds it after this switch). */
+            for (i = 0; i < tx->ndrain; i++)
+                cancel_delayed_work_sync(&tx->drain[i].work);
+            spin_lock(&sess->fec_out_lock);
+            list_for_each_entry_safe(o, tmp, &sess->fec_out_ctl, node)
+                if (o->sid && o->sid != st->sid)
+                    tbt_fec_out_free(sess, NULL, o);
+            list_for_each_entry_safe(o, tmp, &sess->fec_out_replay, node)
+                if (o->sid && o->sid != st->sid)
+                    tbt_fec_out_free(sess, NULL, o);
+            for (i = 0; i < sess->n_car; i++)
+            {
+                struct tbt_fec_outq *q = &sess->fec_outq[i];
+
+                list_for_each_entry_safe(o, tmp, &q->queue, node)
+                    tbt_fec_out_free(sess, q, o);
+            }
+            spin_unlock(&sess->fec_out_lock);
+            WRITE_ONCE(tx->peer_pkts, tx->seq);
+            WRITE_ONCE(tx->flush_req, false);
+            tx->short_at_ns = 0;
+            tx->carrier_wait = false;
+            tx->backpressure_counted = false;
         }
     }
     /* A closing stream caps replay admission at
