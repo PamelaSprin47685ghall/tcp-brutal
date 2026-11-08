@@ -20,6 +20,7 @@
 #endif
 
 #include "tbt_parse.h"
+#include "tbt_portmap.h"
 
 #define TBT_U32_MAX 0xffffffffu
 #define TBT_U64_MAX (~(u64)0)
@@ -589,15 +590,6 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         {
             if (tbt_parse_range(val, &cfg->portblock_lo, &cfg->portblock_hi, e))
                 return TBT_PARSE_EINVAL;
-            /* Parsed and rendered for line compatibility only. Carrier source
-             * ports come from the global /proc/net/tbtun/ports block; a
-             * per-tunnel portblock does not move them. Say so once instead of
-             * letting a run believe it configured a port plan nobody used. */
-#ifdef __KERNEL__
-            if (cfg->portblock_lo || cfg->portblock_hi)
-                pr_warn_ratelimited("tbtun: tunnel %llu: portblock= is parsed but unused; carrier source ports come from /proc/net/tbtun/ports\n",
-                                    (unsigned long long)cfg->id);
-#endif
         }
         else if (!strcmp(key, "srcaddrs"))
         {
@@ -717,6 +709,20 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     if (!cfg->fec && cfg->n + cfg->m > TBT_LEGACY_MAX_CARRIERS)
         return tbt_fail(e, "fec",
                         "legacy ARQ supports n+m<=16; set fec=on for 256 carriers");
+    /* A near tunnel's carriers hold one source port each. A per-tunnel block
+     * smaller than the effective carrier count can never bring the session
+     * up; refuse it here so the operator sees the key and the reason. A far
+     * tunnel never dials, so its portblock= is recorded but not sized. */
+    if (cfg->role == TBT_ROLE_NEAR &&
+        (cfg->portblock_lo || cfg->portblock_hi))
+    {
+        unsigned int slots = cfg->fec ? cfg->carriers
+                                      : (unsigned int)cfg->n + cfg->m;
+
+        if (!tbt_portmap_fits(cfg->portblock_lo, cfg->portblock_hi, slots))
+            return tbt_fail(e, "portblock",
+                            "portblock must hold at least n + m (or carriers) ports");
+    }
     /* A sender window above the peer's reorder budget kills the stream on the
      * first frame past that budget, so the two keys are checked together once
      * both are known; the line may name them in either order. */

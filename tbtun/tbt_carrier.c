@@ -2660,20 +2660,33 @@ static void tbt_port_alloc_note(struct tbt_session *sess, u8 index,
                                 enum tbt_port_alloc_err why)
 {
     u16 lo, hi;
-    bool configured;
+    u64 id = sess->tunnel ? sess->tunnel->cfg.id : 0;
 
     switch (why)
     {
     case TBT_PORT_ALLOC_EXHAUSTED:
         atomic64_inc(&sess->port_exhaust);
-        tbt_portmap_get(&lo, &hi, &configured);
+        /* Name the window that ran dry: the tunnel's own block when set,
+         * else the global fallback. */
+        if (sess->tunnel &&
+            (sess->tunnel->cfg.portblock_lo || sess->tunnel->cfg.portblock_hi))
+        {
+            lo = sess->tunnel->cfg.portblock_lo;
+            hi = sess->tunnel->cfg.portblock_hi;
+        }
+        else
+        {
+            bool configured;
+
+            tbt_portmap_get(&lo, &hi, &configured);
+        }
         pr_warn_ratelimited("tbtun: tunnel %llu carrier %u: source port block %u-%u is exhausted; carrier retries\n",
-                            sess->tunnel->cfg.id, index, lo, hi);
+                            id, index, lo, hi);
         break;
     case TBT_PORT_ALLOC_NOMEM:
         atomic64_inc(&sess->port_alloc_fail);
         pr_warn_ratelimited("tbtun: tunnel %llu carrier %u: cannot allocate the source port bitmap; carrier retries\n",
-                            sess->tunnel->cfg.id, index);
+                            id, index);
         break;
     default:
         break;
@@ -2868,7 +2881,7 @@ static void tbt_replace_body(struct tbt_session *sess)
             {
                 enum tbt_port_alloc_err perr = TBT_PORT_ALLOC_OK;
 
-                nc->local_port = tbt_port_alloc(&perr);
+                nc->local_port = tbt_port_alloc(sess->tunnel, &perr);
                 if (!nc->local_port)
                 {
                     tbt_port_alloc_note(sess, (u8)i, perr);
@@ -2944,7 +2957,7 @@ static void tbt_replace_body(struct tbt_session *sess)
             {
                 enum tbt_port_alloc_err perr = TBT_PORT_ALLOC_OK;
 
-                nc->local_port = tbt_port_alloc(&perr);
+                nc->local_port = tbt_port_alloc(sess->tunnel, &perr);
                 if (!nc->local_port)
                 {
                     tbt_port_alloc_note(sess, (u8)i, perr);
@@ -3306,7 +3319,7 @@ static void tbt_car_connect_work(struct work_struct *w)
     {
         enum tbt_port_alloc_err perr = TBT_PORT_ALLOC_OK;
 
-        c->local_port = tbt_port_alloc(&perr);
+        c->local_port = tbt_port_alloc(t, &perr);
         if (!c->local_port)
         {
             atomic64_inc(&sess->carrier_alloc_fail);
