@@ -3,19 +3,48 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
-## [0.3.1] - planned
+## [0.3.1] - 2026-11-08
 
-### Deferred from 0.3.0
+### Fixed
 
-- SC-LDPC rate adaptation (the 0.3.1 design target), Adaptive Phase 2
-  (`n + m` other than 8) and concurrent multi-stream (v7) are not in 0.3.0.
-- Two fix29 performance experiments remain the first bisection targets:
-  word-wise XOR in the FEC encoder (751715b) and the per-carrier FEC frame
-  buffer (28e3de2). Both are reverted; 0.2.0 ships the fix28 code (acba55d).
-  At 256 carriers fix29 showed a 20-35% higher median retx/replay/NACK count
-  and a 5.6% lower median app rate with overlapping ranges, so the cause is
-  still open. The fix29 measurements stay under `benches/results/` and
-  `benches/baseline/remote-fix29.csv` as reference.
+- A short final block no longer NACKs its padding shares: the receiver asks
+  only for shares the sender produced (`fec_nack_pad_skip` counts a skipped
+  request), so the last block does not wait for records that never existed.
+- A short block keeps at most 8 KiB of parity instead of a full 1 MiB block
+  (`fec_short_parity_saved`).
+- `fec_replay_miss_never_stored` falls from 42,963 in the 0.3.0 1 GiB run to
+  24 (near) / 21 (far): the replay ring now holds the shares the receiver
+  asks for.
+
+### Verification
+
+- 1 GiB single stream: rc=0, HTTP 200, size 1,073,741,824, near/far sha256
+  equal (`e926b854…ad7393`), 889.20 s (9.66 Mbit/s), TTFB 0.540 s; no reset,
+  holes or drops.
+- NACK→wire `fec_nack_lat_ns` 502.20 s (far) < 600 s; replay high-water
+  2.94 MB (< 5 MiB); `fec_nack_backpressure=0`; `fec_nack_pad_skip=0`;
+  `fec_short_parity_saved` 23 near / 889 far.
+- Wire: `TBT_FEC_CONV 0x1006` / `TBT_WIRE_VERSION_V6 3` unchanged; 0.3.0 and
+  0.3.1 interoperate.
+
+### Known observations
+
+- At the end of the 1 GiB run `up=252` (near) and `up=254` (far): 2-4
+  carriers became unschedulable. The transfer stayed byte-exact with no
+  reset/hole/drop; a run that requires 256 up for the whole transfer should
+  judge this separately.
+- far logged a `tbt_car_rx_work` workqueue hog (>10 ms, 7 times) during the
+  steady window. It is a CPU hotspot on the 256-carrier RX path, not a
+  reset/hole/drop.
+
+### Deferred to 0.3.2 and later
+
+- Concurrent multi-stream v7 (branch `w-fec-v7`).
+- SC-LDPC rate adaptation and Adaptive Phase 2.
+- The end-of-run `up=252/254` carrier availability.
+- HND0 CPU cost (the far `tbt_car_rx_work` hotspot).
+- The fix29 XOR/fec_frame bisection (word-wise XOR 751715b, per-carrier FEC
+  frame buffer 28e3de2); measurements stay under `benches/results/`.
 
 ## [0.2.3] - 2026-11-08
 

@@ -444,11 +444,12 @@ at the first HELLO.
   the share is kept and parity/NACK states the real cut. The parity reply
   starts at row `s % m`, which always covers DATA share `s` under the band
   matrix, and falls back to the other covering rows; a fixed row 0 does not
-  cover shares with `s % m >= band`. A closed short block
-  (`win_len < n`) has no records for
-  its padding DATA shares; a NACK for one of those is answered with a parity
-  row whose header carries the real `win_len`/`epoch`, so the receiver learns
-  the cut instead of waiting for a share that will never exist. The empty
+  cover shares with `s % m >= band`. A closed short block (`win_len < n`)
+  sends row 0 only, with the real `win_len`/`epoch`; the receiver does not
+  NACK its padding DATA shares (`fec_nack_pad_skip` counts a skipped
+  request), so it learns the cut instead of waiting for a share that never
+  exists. A short block also keeps at most 8 KiB of parity rather than a full
+  1 MiB block (`fec_short_parity_saved`). The empty
   marker is a control record: it rides any up carrier, is stored in the replay
   ring, and a failed send is logged and re-armed; the NACK scan probes every
   empty group of the blocked super-block, not only the frontier group. A
@@ -2807,7 +2808,7 @@ makes this design different from a generic L4 tunnel.
 | `tests/*.sh` | **new** |
 
 Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the released tree reports
-`0.3.0`. The wire revision `TBT_CONV=0x0006`
+`0.3.1`. The wire revision `TBT_CONV=0x0006`
 and the FEC record revision `TBT_FEC_CONV=0x1006` bump independently of it.
 HELLO `body[0]` carries `TBT_WIRE_VERSION=1` for the old ARQ and
 `TBT_WIRE_VERSION_V6=3` for a FEC v6 session, not the module version, so the
@@ -2821,11 +2822,11 @@ different wire revisions do not interoperate, because the first HELLO is
 rejected by the conv check.
 
 **Packaging.** `tbtun/tbt_uapi.h` is the single version authority: the
-`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/3/0`). `scripts/mkdkmsconf.sh`
+`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/3/1`). `scripts/mkdkmsconf.sh`
 parses those macros and emits `PACKAGE_VERSION="<major>.<minor>.<patch>"`; parsing
 failure is fatal and never falls back to an old value. `dkms.conf` is a generated file —
 `make dkms.conf` (or `make dkms-tarball`) writes it, and it must not be hand-edited; the
-current generated value is `PACKAGE_VERSION="0.3.0"`. `scripts/install_dkms.sh` reads
+current generated value is `PACKAGE_VERSION="0.3.1"`. `scripts/install_dkms.sh` reads
 the same value through `mkdkmsconf.sh --version`. A development suffix
 `.r<commits>.<sha>` is opt-in with `TBT_DKMS_GIT_SUFFIX=1`; it is not the default.
 
