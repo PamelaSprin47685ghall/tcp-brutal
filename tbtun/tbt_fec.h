@@ -863,24 +863,35 @@ static inline u16 tbt_fec_group_tail_len(u64 total_pkts, u16 groups, u16 n,
  * lost. A tail of 0 with a present DATA share is a stale stream end (FIN
  * froze pkt_end before that share was packetized): do not treat the share as
  * padding; keep n and let parity/NACK state the real cut. */
+static inline u16 tbt_fec_blk_real_len_from_tail_base(
+    u16 nreal, u16 n, bool total_known, u64 total_pkts, u64 base_pkt,
+    u64 base_block, u16 groups, u64 block_id, u16 group, bool has_data)
+{
+    u16 len = nreal ? nreal : n;
+
+    if (nreal || !total_known)
+        return len;
+    if (block_id == tbt_fec_final_block_of_total_base(total_pkts, base_pkt,
+                                                      base_block, groups, n))
+    {
+        u16 tail = tbt_fec_group_tail_len_base(total_pkts, base_pkt,
+                                               base_block, groups, n, group);
+
+        if (tail < len && !(tail == 0 && has_data))
+            len = tail;
+    }
+    return len;
+}
+
 static inline u16 tbt_fec_blk_real_len_from_tail(u16 nreal, u16 n,
                                                  bool total_known,
                                                  u64 total_pkts, u16 groups,
                                                  u64 block_id, u16 group,
                                                  bool has_data)
 {
-    u16 len = nreal ? nreal : n;
-
-    if (nreal || !total_known)
-        return len;
-    if (block_id == tbt_fec_final_block_of_total(total_pkts, groups, n))
-    {
-        u16 tail = tbt_fec_group_tail_len(total_pkts, groups, n, group);
-
-        if (tail < len && !(tail == 0 && has_data))
-            len = tail;
-    }
-    return len;
+    return tbt_fec_blk_real_len_from_tail_base(
+        nreal, n, total_known, total_pkts, 0, 0, groups, block_id, group,
+        has_data);
 }
 
 /* A block that holds only parity: its DATA shares are the missing ones. The
@@ -901,16 +912,26 @@ static inline bool tbt_fec_nack_parity_only(bool used, u16 nparity,
  * share count, so do not NACK the whole range. Once total_pkts is known, a
  * final-block group with no packet is known empty; a group that has packets
  * in a non-final block is a real whole-block loss and may be requested. */
+static inline bool tbt_fec_nack_unstarted_group_base(
+    u64 total_pkts, u64 base_pkt, u64 base_block, u16 groups, u16 n,
+    u64 block, u16 group, bool total_known)
+{
+    if (!total_known)
+        return false;
+    if (block == tbt_fec_final_block_of_total_base(total_pkts, base_pkt,
+                                                   base_block, groups, n) &&
+        !tbt_fec_group_tail_len_base(total_pkts, base_pkt, base_block, groups,
+                                     n, group))
+        return false;
+    return true;
+}
+
 static inline bool tbt_fec_nack_unstarted_group(u64 total_pkts, u16 groups,
                                                 u16 n, u64 block, u16 group,
                                                 bool total_known)
 {
-    if (!total_known)
-        return false;
-    if (block == tbt_fec_final_block_of_total(total_pkts, groups, n) &&
-        !tbt_fec_group_tail_len(total_pkts, groups, n, group))
-        return false;
-    return true;
+    return tbt_fec_nack_unstarted_group_base(total_pkts, 0, 0, groups, n,
+                                             block, group, total_known);
 }
 
 /* Delivery length of share p in a block whose real share count is `real`.

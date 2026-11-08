@@ -1646,6 +1646,22 @@ static void test_base_mapping(void)
            "tail len group 0");
     ok_u32(tbt_fec_group_tail_len_base(bp + 129, bp, bb, G, N, 1), 0,
            "tail len group 1");
+    /* The final-block real length uses the same origin. */
+    ok_u32(tbt_fec_blk_real_len_from_tail_base(0, N, true, bp + 129, bp, bb,
+                                               G, bb + 1, 0, false),
+           1, "base real len group 0");
+    ok_u32(tbt_fec_blk_real_len_from_tail_base(0, N, true, bp + 129, bp, bb,
+                                               G, bb + 1, 1, false),
+           0, "base real len group 1");
+    ok_u32(tbt_fec_blk_real_len_from_tail_base(0, N, true, 129, 0, 0, G,
+                                               tbt_fec_final_block_of_total(
+                                                   129, G, N),
+                                               0, false),
+           tbt_fec_blk_real_len_from_tail(0, N, true, 129, G,
+                                          tbt_fec_final_block_of_total(129, G,
+                                                                       N),
+                                          0, false),
+           "base real len matches legacy");
 }
 
 /* The 0.2.x peer sends HELLO body[0] == 2. 0.3.0 names 3, and
@@ -2219,6 +2235,14 @@ static void test_replay(void)
     ok(!tbt_fec_replay_has(r, 7, 1, 5), "replay evicted", NULL);
     ok(tbt_fec_replay_has(r, 7 + k, 1, 5), "replay new block",
        NULL);
+    tbt_fec_replay_reset(r);
+    ok(!tbt_fec_replay_has(r, 7 + k, 1, 5), "replay reset drops blocks",
+       NULL);
+    ok_int(tbt_fec_replay_get(r, 7 + k, 1, 5, out, sizeof(out)), -ESTALE,
+           "replay reset leaves the ring empty");
+    ok_u32(tbt_fec_replay_k(r), k, "replay reset keeps the geometry");
+    ok_int(tbt_fec_replay_store(r, 7 + k, 1, 5, rec, len), 0,
+           "replay store after reset");
     tbt_fec_replay_free(r);
 
     /* Every block the receiver may NACK (K) is resident; one past K evicts

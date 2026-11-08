@@ -736,6 +736,7 @@ struct tbt_fec_tx
     u64 base_pkt;
     u64 base_block;
     u32 credit_cap; /* cached credit cap: the ACK path must not read n/m */
+    u16 band;       /* parity band of the shape, for the NACK reply */
     spinlock_t shape_lock;
     struct tbt_fec_grouped *old_codec; /* released on the next swap */
     u8 switch_state;                   /* enum tbt_fec_switch_state */
@@ -894,12 +895,16 @@ struct tbt_fec_rx
     u64 prev_base_pkt;
     u64 prev_base_block;
     struct tbt_fec_grouped *old_codec; /* kept until the new shape commits */
+    struct tbt_fec_grouped *pending_codec; /* PREP allocated, not applied */
     u8 switch_state;                   /* STEADY/PREP/ARMED/APPLIED */
     u64 switch_pkt;
     u64 switch_block;
     u64 switch_start_ns;
     struct tbt_fec_cfg pending_cfg;
     bool cfg_pending;
+    bool commit_pending;   /* first new-shape record: free old_codec */
+    bool rollback_pending; /* old-shape record after APPLIED: undo */
+    u32 prev_epoch;
     /* Estimator (tbt_fec_adapt.h), owned by w_fec_rx. */
     struct tbt_fec_est *est;
     u8 alive_bm[TBT_FEC_BITMAP_BYTES];
@@ -909,6 +914,7 @@ struct tbt_fec_rx
     u64 pause_start_ns;
     u64 fbk_last_ns;
     u8 fbk_flags; /* flags owed on the next report */
+    u32 fbk_epoch; /* epoch to report with a handshake flag, 0 = current */
     /* The stream's first shape, for FIN alignment across a switch. */
     u64 stream_span;
     u64 stream_base_pkt;
