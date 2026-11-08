@@ -96,12 +96,12 @@ declare -a SKIPS=()
 # parser falls back to the first tunnel line that carries the field.
 # The drop counters are part of the leak/drop judgement: a steady stream
 # must not lose frames to a budget, a queue, a window, or an unknown sid.
-# fec_drop_sid is deliberately absent: the stream-isolation design drops
-# records that name a previous sid, so a nonzero delta is expected at a
-# stream boundary. It is recorded as information; new-stream integrity is
-# judged by holes_unrecoverable, fec_reset_hole, fec_deliver_bad and the
-# other reset counters.
-ZERO_SPECS="c3:stream_reset_tcp_failed c11:fec_reset_tcp_failed c11:fec_reset_hole c6:holes_unrecoverable c10:fec_deliver_bad c9:fec_proto_fail c9:fec_hdr_crc_fail c9:fec_payload_crc_fail c3:retain_drop c3:stall_drop c11:fec_outq_drop c11:fec_replay_drop c9:fec_drop_window c9:fec_drop_crypto c9:bind_drop_no_stream"
+# fec_drop_sid and bind_drop_no_stream are deliberately absent: both name a
+# record that belongs to a stream which is already gone at teardown. A
+# nonzero delta is expected at a stream boundary. They are recorded as
+# information; new-stream integrity is judged by holes_unrecoverable,
+# fec_reset_hole, fec_deliver_bad and the other reset counters.
+ZERO_SPECS="c3:stream_reset_tcp_failed c11:fec_reset_tcp_failed c11:fec_reset_hole c6:holes_unrecoverable c10:fec_deliver_bad c9:fec_proto_fail c9:fec_hdr_crc_fail c9:fec_payload_crc_fail c3:retain_drop c3:stall_drop c11:fec_outq_drop c11:fec_replay_drop c9:fec_drop_window c9:fec_drop_crypto"
 
 CYCLE_HEADER='cycle,start_epoch,end_epoch,elapsed,bytes,http,near_up,far_up,near_rx_delivered_delta,rc'
 CSV_HEADER='cycle,phase,ts,host,mem_available_kb,slab_carrier_active,slab_carrier_num,slab_session_active,slab_session_num,slab_stream_active,slab_stream_num,rss_kib,dstate'
@@ -141,9 +141,9 @@ Judgement:
   Zero deltas per cycle: stream_reset_tcp_failed, fec_reset_tcp_failed,
     fec_reset_hole, holes_unrecoverable, fec_deliver_bad, fec_proto_fail,
     fec_hdr_crc_fail, fec_payload_crc_fail, retain_drop, stall_drop,
-    fec_outq_drop, fec_replay_drop, fec_drop_window, fec_drop_crypto,
-    bind_drop_no_stream. fec_drop_sid is information only: it counts
-    records from a previous sid, which the stream-isolation design drops.
+    fec_outq_drop, fec_replay_drop, fec_drop_window, fec_drop_crypto.
+    fec_drop_sid and bind_drop_no_stream are information only: they count
+    records for a stream that was already gone at teardown.
   Data: near rx_delivered delta > 0 in every cycle (the run is a downlink).
   Kernel window: BUG/Oops/WARNING/UBSAN/general protection fault fails a
     cycle and stops the run. An empty window is SKIP.
@@ -773,7 +773,7 @@ cycle_record() { # cycle rc
 write_summary() { # [stop] [kind] [detail]
     local stop=${1:-complete} kind=${2:-} detail=${3:-}
     local verdict=PASS n_cyc=0 total=0 mean_rate=0 min_rate=0
-    local wall=0 need=$((CYCLES * WIN_SECONDS)) mean_mbit=0 i spec fld
+    local wall=0 need=$((CYCLES * WIN_SECONDS)) mean_mbit=0 i spec fld info
 
     if ! qa_num "${RUN_END:-}"; then
         RUN_END=$(qa_epoch)
@@ -836,10 +836,12 @@ write_summary() { # [stop] [kind] [detail]
                 printf ' absent_observations=%s' "${ZABSENT[$fld]}"
             printf '\n'
         done
-        printf '\nfec_drop_sid (information only; old-sid records are expected)\n'
+        printf '\nold-stream teardown counters (information only)\n'
         for i in near far; do
-            fld=$(sf "$EV/c$CYCLES-$i-post.txt" c9 fec_drop_sid)
-            printf '  %s final=%s\n' "$i" "${fld:-?}"
+            for info in fec_drop_sid bind_drop_no_stream; do
+                fld=$(sf "$EV/c$CYCLES-$i-post.txt" c9 "$info")
+                printf '  %s %s final=%s\n' "$i" "$info" "${fld:-?}"
+            done
         done
         printf '\nresource\n'
         if [[ -n ${RESOURCE_TEXT:-} ]]; then
@@ -886,7 +888,7 @@ cycle_abort() { # cycle kind detail
 run_soak() {
     local c k win_start now next nearmem farmem near_t0 far_t0 tag
     local pre post p q d spec cls fld n up rep emp inv_fail checks_fail
-    local traffic_fail fail_detail dead wall
+    local traffic_fail fail_detail dead wall end info
 
     qa_evidence_init soak-0.3.3 >/dev/null || {
         printf 'soak: cannot create the evidence directory under %s\n' \
@@ -1076,13 +1078,17 @@ run_soak() {
             CYC_DATA_TX=$(qa_delta "$p" "$q")
             printf 'near rx_delivered pre=%s post=%s delta=%s\n' \
                 "${p:-?}" "${q:-?}" "$CYC_DATA_TX"
-            # A previous stream's tail can still name the old sid. That is
-            # the isolation design, not corruption. Record it, never judge it.
+            # A previous stream's tail can still name the old sid or arrive
+            # after the stream is gone. That is the isolation design, not
+            # corruption. Record both, never judge them.
             for end in near far; do
-                p=$(sf "$EV/c$c-$end-pre.txt" c9 fec_drop_sid)
-                q=$(sf "$EV/c$c-$end-post.txt" c9 fec_drop_sid)
-                printf '%s fec_drop_sid pre=%s post=%s delta=%s (old-sid only; not judged)\n' \
-                    "$end" "${p:-?}" "${q:-?}" "$(qa_delta "$p" "$q")"
+                for info in fec_drop_sid bind_drop_no_stream; do
+                    p=$(sf "$EV/c$c-$end-pre.txt" c9 "$info")
+                    q=$(sf "$EV/c$c-$end-post.txt" c9 "$info")
+                    printf '%s %s pre=%s post=%s delta=%s (old-stream teardown; not judged)\n' \
+                        "$end" "$info" "${p:-?}" "${q:-?}" \
+                        "$(qa_delta "$p" "$q")"
+                done
             done
         } >"$EV/c$c-deltas.txt"
 
