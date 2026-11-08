@@ -3,6 +3,48 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [Unreleased]
+
+### Added
+
+- SC-LDPC adaptive rate control Phase 2 as host-testable pure logic
+  (`tbtun/tbt_fec_adapt_sclc.{c,h}`). The estimator folds per-group
+  256-bit miss masks into eight 500 ms buckets (4 s window) and a 1/8
+  EWMA; `p_used = max(EWMA, window)` becomes valid after 8 super-blocks
+  and 512 alive-filtered shares. The controller maps p to
+  `r_t = clamp(1 - p - 0.20, 0.25, 0.70)`, quantizes down onto the codec
+  ladder `{25,30,40,50,60,70}`, and derives `n = floor(r_actual * (n+m))`.
+  It is off by default, never suggests a switch while off, and adds fast
+  start, 2 pp hysteresis, two-sample down / six-sample up, 3 s / 10 s
+  dwell, 5 s reverse cooldown, 10-in-60 s cap, 3-in-30 s hold, burst,
+  residual fail-down, probe up/commit/revert/abort, post-commit rollback,
+  and CFG-reject fallback.
+- Phase 3 wiring: `adaptive=on` is accepted for `mode=sc-ldpc` when the
+  initial shape is a shipped profile on the rate ladder. The receiver folds
+  the real 256-bit miss bitmap into the SC estimator (eight 500 ms buckets,
+  4 s window, 1/8 EWMA, 1 s p_fast, codec-failure mask). FEC_FBK carries
+  p_used and the switch handshake; for SC adaptive, the last four bytes of
+  the carrier bitmap carry p_fast and codec_fail in 16 ppm units, so the
+  48-byte body and every offset stay unchanged. The sender evaluates the
+  controller every 250 ms and drives the existing two-phase FEC_CFG
+  transaction; CFG_NACK, abort, swap, rollback and post-commit failure feed
+  `rejected`, `abort`, `applied` and `commit_failed`. INIT validates the
+  peer profile and NACKs an unsupported one; the first switch epoch is 2
+  because INIT owns generation 1; the recovered-slot scratch is sized for
+  the largest supported split so a rate switch cannot overrun it.
+  The downlink binary codec is still the fixed 1x256/L8/r0.5 profile, so its
+  controller stays at rate 50; the uplink GF(16) 8x32/L16 codec can build
+  every ladder split (8/24 through 22/10) and switches rates.
+- `host/test_fec_adapt_sclc` covers the rate ladder and n/m for the
+  256-share downlink and 32-share uplink, estimator windows and masks,
+  target boundaries, convergence at 0/1/3/5/10/15/25/35/45/55/100% loss,
+  non-oscillation, all boundary paths, parameter validation, the CFG wire
+  profile conversion, the FBK overlay, rate masks, and the epoch base.
+- `host/test_parse` accepts the downlink and uplink adaptive lines and
+  rejects off-ladder n/m, a wrong block, and a wrong L. `host/test_fec`
+  round-trips the two shipped SC profiles and the SC FBK overlay;
+  `host/test_sclc_uplink` pins all six uplink ladder splits.
+
 ## [0.3.3] - 2026-11-08
 
 ### Fixed

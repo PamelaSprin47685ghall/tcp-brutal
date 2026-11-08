@@ -632,8 +632,14 @@ struct tbt_fec_blk
     u8 *data;     /* n * s bytes: buf[0..n*s) */
     u8 *parity;   /* m * s bytes: buf[n*s..(n+m)*s) */
     /* The estimator's evidence for this block: bit i marks DATA share i as
-     * needing repair (parity recovered it or a NACK named it). */
+     * needing repair (parity recovered it or a NACK named it). The u32 is
+     * the RLNC estimator's 8-share window; the bitmap is the SC-LDPC
+     * estimator's 256-share mask. Both are filled at the same two points. */
     u32 miss_mask;
+    u8 miss_bits[TBT_FEC_BITMAP_BYTES];
+    /* Missing shares the last decode attempt could not recover. Rebuilt on
+     * every attempt, and masked by dpresent at the estimator fold. */
+    u8 codec_fail_bits[TBT_FEC_BITMAP_BYTES];
     bool judged;  /* already folded into tbt_fec_est_super() */
     u8 *dpresent; /* n flags */
     u8 *ppresent; /* m flags */
@@ -680,6 +686,9 @@ struct tbt_fec_nack_state;
 struct tbt_fec_adapt;
 struct tbt_fec_est;
 struct tbt_fec_flow;
+struct tbt_fec_drain;
+struct tbt_fec_adapt_sclc_ctl;
+struct tbt_fec_adapt_sclc_est;
 
 struct tbt_fec_tx
 {
@@ -779,8 +788,13 @@ struct tbt_fec_tx
     /* Control law state (tbt_fec_adapt.h). Allocated in init so this header
      * stays independent of the pure logic module. */
     struct tbt_fec_adapt *adapt;
+    /* SC-LDPC control law (mode 3). Allocated for every mode-3 session and
+     * disabled when adaptive=off, so a runtime enable needs no allocation. */
+    struct tbt_fec_adapt_sclc_ctl *adapt_sclc;
     /* Peer report from FEC_FBK plus the local residual counters. */
     u32 peer_p_ppm;
+    u32 peer_p_fast_ppm;     /* SC-LDPC: FBK bitmap tail, ppm/16 */
+    u32 peer_codec_fail_ppm; /* SC-LDPC: FBK bitmap tail, ppm/16 */
     u16 peer_expected;
     u16 peer_received;
     u32 peer_epoch;
@@ -932,8 +946,10 @@ struct tbt_fec_rx
     bool commit_pending;   /* first new-shape record: free old_codec */
     bool rollback_pending; /* old-shape record after APPLIED: undo */
     u32 prev_epoch;
-    /* Estimator (tbt_fec_adapt.h), owned by w_fec_rx. */
+    /* Estimator (tbt_fec_adapt.h), owned by w_fec_rx. The SC-LDPC
+     * estimator is allocated for mode 3 and uses the 256-bit miss bitmap. */
     struct tbt_fec_est *est;
+    struct tbt_fec_adapt_sclc_est *est_sclc;
     u8 alive_bm[TBT_FEC_BITMAP_BYTES];
     atomic64_t abandoned_shares; /* counted by blk_reset, folded by w_fec_rx */
     u64 est_abandoned_last;
@@ -1122,7 +1138,7 @@ struct tbt_fec_adapt_ctl
     u8 state;         /* enum tbt_fec_adapt_state */
     u8 reason;        /* enum tbt_fec_adapt_reason */
     u32 p_ppm;        /* max(p_ewma, p_win): the value the law used */
-    u32 p_win_ppm;    /* 1 s double-bucket window */
+    u32 p_win_ppm;    /* RLNC 1 s window, SC-LDPC 4 s window */
     u32 r_fail_ppm;   /* residual: NACK-named shares / DATA packets */
     u64 sent, miss;   /* alive-filtered DATA shares and repairs, this epoch */
     u32 switches, aborts, rollbacks;

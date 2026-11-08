@@ -705,6 +705,36 @@ static void test_ops(void)
     ops->free(ctx);
 }
 
+/* Every n/m split the SC-LDPC rate ladder derives for 8x32 must build with
+ * the production GF(16) parameters (block 128, L 16, interleaved). */
+static void test_ladder_shapes(void)
+{
+    static const u16 n[6] = {8, 9, 12, 16, 18, 22};
+    static const u16 m[6] = {24, 23, 20, 16, 14, 10};
+    int i;
+
+    for (i = 0; i < 6; i++)
+    {
+        struct tbt_sclc_params p;
+        struct tbt_sclc_uplink *u;
+
+        memset(&p, 0, sizeof(p));
+        p.n = n[i];
+        p.m = m[i];
+        p.block = 128;
+        p.L = 16;
+        p.rate_num = (u16)(n[i] * 256 / (n[i] + m[i]));
+        p.rate_den = 256;
+        p.max_core = 256;
+        p.mapping = TBT_SCLC_MAP_INTERLEAVED;
+        p.seed = 1;
+        u = tbt_sclc_uplink_new(8, &p);
+        ok(u != NULL, "ladder: shape builds", "NULL");
+        if (u)
+            tbt_sclc_uplink_free(u);
+    }
+}
+
 static void test_reject(void)
 {
     struct tbt_sclc_params p;
@@ -747,6 +777,7 @@ int main(void)
     test_contiguous_ab();
     test_grouped();
     test_ops();
+    test_ladder_shapes();
     test_reject();
 
     printf("%s: %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks,

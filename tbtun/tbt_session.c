@@ -600,6 +600,15 @@ int tbt_action_apply(const struct tbt_cmd *cmd)
                 err = -EINVAL;
                 goto out_unlock;
             }
+            /* A mode=3 session can adapt only when the data plane built the
+             * SC-LDPC controller from an on-ladder initial profile. */
+            if (cmd->adaptive && s->tunnel &&
+                s->tunnel->cfg.mode == 3 &&
+                (!s->fec_tx || !s->fec_tx->adapt_sclc))
+            {
+                err = -EOPNOTSUPP;
+                goto out_unlock;
+            }
             spin_lock(&s->lock);
             WRITE_ONCE(s->adaptive, cmd->adaptive != 0);
             if (cmd->adaptive)

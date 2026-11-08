@@ -41,6 +41,7 @@
 #include "tbtun.h"
 #include "tbt_fec.h"
 #include "tbt_fec_adapt.h"
+#include "tbt_fec_adapt_sclc.h"
 #include "tbt_sclc_uplink.h"
 #include "tbt_rec.h"
 
@@ -2172,6 +2173,19 @@ static void tbt_fec_tx_init_tick(struct tbt_session *sess,
         tx->init_done = true;
         return;
     }
+    if (tx->peer_est_valid && tx->peer_epoch == 1 &&
+        (tx->peer_flags & TBT_FEC_FBK_F_CFG_NACK))
+    {
+        /* The peer cannot build this shape. Retrying cannot help; keep the
+         * two-sided configured shape and name the mismatch once. */
+        tx->init_done = true;
+        pr_warn_ratelimited("tbtun: tunnel %llu: peer refused the INIT shape sid=%llu n=%u m=%u groups=%u w=%u k=%u d=%u\n",
+                            (unsigned long long)sess->tunnel->cfg.id,
+                            (unsigned long long)tx->sid, tx->n, tx->m,
+                            tx->groups, tx->shape_w, tx->shape_k,
+                            tx->shape_d);
+        return;
+    }
     if (tx->init_tries >= 6)
     {
         tx->init_done = true;
@@ -2210,6 +2224,11 @@ static void tbt_fec_tx_clear_data_queues(struct tbt_session *sess)
     spin_unlock(&sess->fec_out_lock);
 }
 
+static bool tbt_fec_sess_sclc(const struct tbt_session *sess)
+{
+    return sess->fec_sclc;
+}
+
 static void tbt_fec_tx_switch_abort(struct tbt_session *sess,
                                     struct tbt_fec_tx *tx, bool tell_peer)
 {
@@ -2220,7 +2239,10 @@ static void tbt_fec_tx_switch_abort(struct tbt_session *sess,
         tbt_fec_tx_send_cfg(sess, tx, TBT_FEC_CFG_F_ABORT);
     tx->switch_state = TBT_FEC_SW_COOLDOWN;
     tx->switch_start_ns = ktime_get_ns();
-    tbt_fec_adapt_abort(tx->adapt);
+    if (tbt_fec_sess_sclc(sess) && tx->adapt_sclc)
+        tbt_fec_adapt_sclc_ctl_abort(tx->adapt_sclc);
+    else
+        tbt_fec_adapt_abort(tx->adapt);
     atomic64_inc(&sess->fec_switch_abort);
     spin_lock(&sess->lock);
     sess->adapt.state = TBT_FEC_ADAPT_ABORT;
@@ -2283,15 +2305,23 @@ static void tbt_fec_tx_swap(struct tbt_session *sess, struct tbt_fec_tx *tx)
     tx->carrier_wait = false;
     tx->backpressure_counted = false;
     tx->outq_paused = false;
+    tx->shape_w = tx->switch_shape.w;
+    tx->shape_k = tx->switch_shape.k;
+    tx->shape_d = tx->switch_shape.d;
     tx->switch_state = TBT_FEC_SW_STEADY;
-    tbt_fec_adapt_applied(tx->adapt, ktime_get_ns());
+    if (tbt_fec_sess_sclc(sess) && tx->adapt_sclc)
+        tbt_fec_adapt_sclc_ctl_applied(tx->adapt_sclc, ktime_get_ns());
+    else
+        tbt_fec_adapt_applied(tx->adapt, ktime_get_ns());
     atomic64_inc(&sess->fec_switch_done);
     spin_lock(&sess->lock);
     sess->adapt.epoch = tx->switch_epoch;
     sess->adapt.n = tx->n;
     sess->adapt.m = tx->m;
     sess->adapt.groups = tx->groups;
-    sess->adapt.class = tx->adapt->cur;
+    sess->adapt.class = (tbt_fec_sess_sclc(sess) && tx->adapt_sclc)
+                            ? tx->adapt_sclc->cur
+                            : tx->adapt->cur;
     sess->adapt.state = TBT_FEC_ADAPT_STEADY;
     sess->adapt.reason = TBT_FEC_ADAPT_CTL_R_NONE;
     spin_unlock(&sess->lock);
@@ -2307,9 +2337,10 @@ static void tbt_fec_tx_swap(struct tbt_session *sess, struct tbt_fec_tx *tx)
 
 /* Close the current old-shape block at P0 and send the first CFG. The
  * packetizer is paused from here until the swap or the abort. */
-static void tbt_fec_tx_switch_begin(struct tbt_session *sess,
-                                    struct tbt_fec_tx *tx,
-                                    const struct tbt_fec_adapt_out *sw)
+static void tbt_fec_tx_switch_begin_shape(struct tbt_session *sess,
+                                          struct tbt_fec_tx *tx,
+                                          const struct tbt_fec_shape *shape,
+                                          u32 epoch)
 {
     struct tbt_stream *st;
     u64 block_start;
@@ -2317,9 +2348,9 @@ static void tbt_fec_tx_switch_begin(struct tbt_session *sess,
     if (!tx || tx->switch_state != TBT_FEC_SW_STEADY)
         return;
     /* Phase 1 keeps the carrier geometry: n+m and groups must not change. */
-    if (sw->shape.groups != tx->groups ||
-        (u16)(sw->shape.n + sw->shape.m) != (u16)(tx->n + tx->m) ||
-        !sw->shape.n || !sw->shape.m)
+    if (shape->groups != tx->groups ||
+        (u16)(shape->n + shape->m) != (u16)(tx->n + tx->m) ||
+        !shape->n || !shape->m)
         return;
     st = tbt_fec_stream(sess);
     if (!st)
@@ -2336,8 +2367,8 @@ static void tbt_fec_tx_switch_begin(struct tbt_session *sess,
         tbt_fec_tx_close_block(sess, tx, true);
     tx->switch_pkt = tx->seq;
     tx->switch_block = tx->cur_block;
-    tx->switch_epoch = sw->epoch;
-    tx->switch_shape = sw->shape;
+    tx->switch_epoch = epoch;
+    tx->switch_shape = *shape;
     tx->switch_shape.base_pkt = tx->switch_pkt;
     tx->switch_shape.base_block = tx->switch_block;
     tx->switch_shape.slots = 0;
@@ -2355,6 +2386,13 @@ static void tbt_fec_tx_switch_begin(struct tbt_session *sess,
     tbt_stream_put(st);
 }
 
+static void tbt_fec_tx_switch_begin(struct tbt_session *sess,
+                                    struct tbt_fec_tx *tx,
+                                    const struct tbt_fec_adapt_out *sw)
+{
+    tbt_fec_tx_switch_begin_shape(sess, tx, &sw->shape, sw->epoch);
+}
+
 static void tbt_fec_tx_switch_tick(struct tbt_session *sess,
                                    struct tbt_fec_tx *tx)
 {
@@ -2368,6 +2406,8 @@ static void tbt_fec_tx_switch_tick(struct tbt_session *sess,
         if (tx->peer_est_valid && tx->peer_epoch == tx->switch_epoch &&
             (tx->peer_flags & TBT_FEC_FBK_F_CFG_NACK))
         {
+            if (tbt_fec_sess_sclc(sess) && tx->adapt_sclc)
+                tbt_fec_adapt_sclc_ctl_rejected(tx->adapt_sclc, now);
             tbt_fec_tx_switch_abort(sess, tx, false);
             return;
         }
@@ -2425,24 +2465,70 @@ static void tbt_fec_tx_switch_tick(struct tbt_session *sess,
     }
 }
 
+/* Build the next SC-LDPC wire shape from a controller suggestion. The
+ * current block/L/variant stay fixed; only n/m and the rate move. */
+static bool tbt_fec_tx_sclc_next_shape(
+    struct tbt_fec_tx *tx, const struct tbt_fec_adapt_sclc_out *sw,
+    struct tbt_fec_shape *out)
+{
+    struct tbt_fec_cfg curcfg, nextcfg;
+    struct tbt_fec_adapt_sclc_wire curw, nextw;
+    struct tbt_fec_adapt_sclc_shape s;
+    u16 shares = (u16)(tx->n + tx->m);
+
+    memset(&curcfg, 0, sizeof(curcfg));
+    curcfg.n = tx->n;
+    curcfg.m = tx->m;
+    curcfg.groups = tx->groups;
+    curcfg.w = tx->shape_w;
+    curcfg.k = tx->shape_k;
+    curcfg.d = tx->shape_d;
+    if (tbt_fec_adapt_sclc_wire_of_cfg(&curcfg,
+                                      (u16)(tx->groups * shares), &curw) ||
+        tbt_fec_adapt_sclc_shape(sw->shape.rate_pct, shares, tx->groups, &s))
+        return false;
+    nextw = curw;
+    nextw.n = s.n;
+    nextw.m = s.m;
+    nextw.groups = s.groups;
+    nextw.rate_pct = s.rate_pct;
+    nextw.rate_ppm = s.rate_ppm;
+    if (tbt_fec_adapt_sclc_wire_to_cfg(&nextw, sw->epoch,
+                                       TBT_FEC_CFG_F_APPLY, &nextcfg))
+        return false;
+    memset(out, 0, sizeof(*out));
+    out->n = nextcfg.n;
+    out->m = nextcfg.m;
+    out->groups = nextcfg.groups;
+    out->w = nextcfg.w;
+    out->k = nextcfg.k;
+    out->d = nextcfg.d;
+    return true;
+}
+
 /* The 250 ms control-law tick. The receiver measures p and reports it in
- * FEC_FBK; this side measures the residual repair rate from its own NACKs
- * and feeds both to tbt_fec_adapt_eval(). */
+ * FEC_FBK; this side measures the residual repair rate from its own NACKs.
+ * Mode 3 runs the SC-LDPC law; every other mode keeps the RLNC law. */
 static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
                                   struct tbt_fec_tx *tx)
 {
     struct tbt_fec_est_out o;
     struct tbt_fec_adapt_out sw;
+    struct tbt_fec_adapt_sclc_est_out so;
+    struct tbt_fec_adapt_sclc_out sws;
     u64 now = ktime_get_ns();
     u64 req, pkts;
     u32 r_ppm = 0;
     bool r_valid = false;
+    bool sc = tx && tx->adapt_sclc && tbt_fec_sess_sclc(sess);
 
-    if (!tx || !tx->adapt || READ_ONCE(tx->stopping) ||
+    if (!tx || (!tx->adapt && !tx->adapt_sclc) || READ_ONCE(tx->stopping) ||
         READ_ONCE(sess->closing))
         return;
     if (!READ_ONCE(sess->adaptive))
     {
+        if (sc)
+            tbt_fec_adapt_sclc_ctl_set_enabled(tx->adapt_sclc, false, now);
         if (tx->switch_state == TBT_FEC_SW_CFG_SENT ||
             tx->switch_state == TBT_FEC_SW_DRAIN)
             tbt_fec_tx_switch_abort(sess, tx, true);
@@ -2450,6 +2536,8 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
             tx->switch_state = TBT_FEC_SW_STEADY;
         return;
     }
+    if (sc)
+        tbt_fec_adapt_sclc_ctl_set_enabled(tx->adapt_sclc, true, now);
     tbt_fec_tx_switch_tick(sess, tx);
     if (tx->switch_state != TBT_FEC_SW_STEADY)
         return;
@@ -2477,6 +2565,52 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
         tx->fail_win_ns = now;
         tx->fail_req_last = req;
         tx->fail_pkts_last = pkts;
+    }
+
+    if (sc)
+    {
+        memset(&so, 0, sizeof(so));
+        so.p_ppm = tx->peer_p_ppm;
+        so.p_ewma_ppm = tx->peer_p_ppm;
+        so.p_win_ppm = tx->peer_p_ppm;
+        so.p_fast_ppm = tx->peer_p_fast_ppm;
+        so.r_fail_ppm = r_ppm;
+        so.r_valid = r_valid;
+        so.codec_fail_ppm = tx->peer_codec_fail_ppm;
+        so.sent_win = tx->peer_expected;
+        so.miss_win = tx->peer_expected >= tx->peer_received
+                          ? tx->peer_expected - tx->peer_received
+                          : 0;
+        so.supers_win = (tx->peer_flags & TBT_FEC_FBK_F_P_VALID) ? 8 : 0;
+        so.p_valid = tx->peer_est_valid &&
+                     (tx->peer_flags & TBT_FEC_FBK_F_P_VALID) != 0;
+        so.pause_idle = !tx->peer_est_valid ||
+                        now - tx->peer_est_ns > 500000000ULL;
+        so.burst = so.p_fast_ppm && so.p_fast_ppm > so.p_ppm &&
+                   so.p_fast_ppm > TBT_FEC_ADAPT_SCLC_BURST_PPM &&
+                   so.p_fast_ppm >
+                       so.p_ewma_ppm + TBT_FEC_ADAPT_SCLC_BURST_GAP_PPM;
+        if (!so.pause_idle)
+            tbt_fec_adapt_sclc_ctl_commit_failed(tx->adapt_sclc, &so, now);
+        tbt_fec_adapt_sclc_ctl_eval(tx->adapt_sclc, &so, now, &sws);
+        if (sws.switch_now)
+        {
+            struct tbt_fec_shape shape;
+
+            if (tbt_fec_tx_sclc_next_shape(tx, &sws, &shape))
+            {
+                tbt_fec_tx_switch_begin_shape(sess, tx, &shape, sws.epoch);
+                if (tx->switch_state == TBT_FEC_SW_STEADY)
+                    tbt_fec_adapt_sclc_ctl_abort(tx->adapt_sclc);
+            }
+            else
+                tbt_fec_adapt_sclc_ctl_abort(tx->adapt_sclc);
+        }
+        spin_lock(&sess->lock);
+        sess->adapt.class = tx->adapt_sclc->cur;
+        sess->adapt.r_fail_ppm = r_ppm;
+        spin_unlock(&sess->lock);
+        return;
     }
 
     memset(&o, 0, sizeof(o));
@@ -2686,6 +2820,8 @@ static void tbt_fec_blk_reset(struct tbt_session *sess,
     b->short_unknown = false;
     b->first_gap_ns = 0;
     b->miss_mask = 0;
+    memset(b->miss_bits, 0, sizeof(b->miss_bits));
+    memset(b->codec_fail_bits, 0, sizeof(b->codec_fail_bits));
     b->judged = false;
     b->block_id = block_id;
     b->sid = 0;
@@ -3408,47 +3544,95 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess,
         /* Fold this super-block's repair evidence into the estimator before
          * next_super moves: a carrier reuses a slot as soon as the window
          * advances, and the mask belongs to the block just delivered. */
-        if (READ_ONCE(sess->adaptive) && rx->est &&
-            rx->groups <= TBT_FEC_ADAPT_GROUPS &&
-            (u16)(rx->n + rx->m) == TBT_FEC_ADAPT_SHARES)
         {
-            u16 real_buf[TBT_FEC_ADAPT_GROUPS];
-            u32 miss_buf[TBT_FEC_ADAPT_GROUPS];
-            bool unk_buf[TBT_FEC_ADAPT_GROUPS];
-            u64 est_now = ktime_get_ns();
-            u16 eg;
+            bool sc_mode = rx->est_sclc &&
+                           tbt_fec_grouped_mode(rx->codec) == 3;
+            bool rlnc_mode =
+                READ_ONCE(sess->adaptive) && rx->est &&
+                rx->groups <= TBT_FEC_ADAPT_GROUPS &&
+                (u16)(rx->n + rx->m) == TBT_FEC_ADAPT_SHARES;
 
-            spin_lock_bh(&rx->lock);
-            for (eg = 0; eg < rx->groups; eg++)
+            if (sc_mode || rlnc_mode)
             {
-                struct tbt_fec_blk *eb = tbt_fec_rx_blk(rx, eg, s);
+                u16 real_buf[TBT_FEC_ADAPT_GROUPS];
+                u32 miss_buf[TBT_FEC_ADAPT_GROUPS];
+                u32 fail_buf[TBT_FEC_ADAPT_GROUPS];
+                u8 sc_miss[TBT_FEC_ADAPT_GROUPS][TBT_FEC_BITMAP_BYTES];
+                bool unk_buf[TBT_FEC_ADAPT_GROUPS];
+                u64 est_now = ktime_get_ns();
+                u16 eg;
 
-                if (!eb->used || eb->block_id != s || eb->judged)
+                spin_lock_bh(&rx->lock);
+                for (eg = 0; eg < rx->groups; eg++)
                 {
+                    struct tbt_fec_blk *eb = tbt_fec_rx_blk(rx, eg, s);
+
                     real_buf[eg] = 0;
                     miss_buf[eg] = 0;
+                    fail_buf[eg] = 0;
                     unk_buf[eg] = false;
-                    continue;
+                    if (sc_mode)
+                        memset(sc_miss[eg], 0, TBT_FEC_BITMAP_BYTES);
+                    if (!eb->used || eb->block_id != s || eb->judged)
+                        continue;
+                    eb->judged = true;
+                    real_buf[eg] = tbt_fec_blk_real_len(rx, eg, eb);
+                    miss_buf[eg] = eb->miss_mask;
+                    if (sc_mode)
+                    {
+                        u16 si;
+
+                        memcpy(sc_miss[eg], eb->miss_bits,
+                               TBT_FEC_BITMAP_BYTES);
+                        for (si = 0; si < real_buf[eg]; si++)
+                        {
+                            if (eb->dpresent[si])
+                                continue;
+                            tbt_fec_adapt_bitmap_set(sc_miss[eg], si);
+                            if (tbt_fec_adapt_bitmap_test(
+                                    eb->codec_fail_bits, si))
+                                fail_buf[eg]++;
+                        }
+                    }
+                    /* Without a parity cut and without the stream end, a
+                     * block that never filled n slots has an unknown real
+                     * length: do not estimate p from it. */
+                    unk_buf[eg] = !eb->win_len_set && !rx->total_known &&
+                                  eb->ndata < rx->n;
                 }
-                eb->judged = true;
-                real_buf[eg] = tbt_fec_blk_real_len(rx, eg, eb);
-                miss_buf[eg] = eb->miss_mask;
-                /* Without a parity cut and without the stream end, a block
-                 * that never filled n slots has an unknown real length: do
-                 * not estimate p from it. */
-                unk_buf[eg] = !eb->win_len_set && !rx->total_known &&
-                              eb->ndata < rx->n;
+                spin_unlock_bh(&rx->lock);
+                for (eg = 0; eg < rx->groups; eg++)
+                {
+                    if (unk_buf[eg])
+                    {
+                        if (sc_mode)
+                            tbt_fec_adapt_sclc_est_unknown(rx->est_sclc,
+                                                           est_now);
+                        else
+                            tbt_fec_est_unknown(rx->est, est_now);
+                    }
+                    else if (real_buf[eg])
+                    {
+                        if (sc_mode)
+                        {
+                            tbt_fec_adapt_sclc_est_block(
+                                rx->est_sclc, est_now, eg, real_buf[eg],
+                                sc_miss[eg], rx->alive_bm);
+                            if (fail_buf[eg])
+                                tbt_fec_adapt_sclc_est_codec_fail(
+                                    rx->est_sclc, est_now, fail_buf[eg]);
+                        }
+                        else
+                            tbt_fec_est_block(rx->est, est_now, eg,
+                                              real_buf[eg], miss_buf[eg],
+                                              rx->alive_bm);
+                    }
+                }
+                if (sc_mode)
+                    tbt_fec_adapt_sclc_est_super(rx->est_sclc, est_now);
+                else
+                    tbt_fec_est_super(rx->est, est_now);
             }
-            spin_unlock_bh(&rx->lock);
-            for (eg = 0; eg < rx->groups; eg++)
-            {
-                if (unk_buf[eg])
-                    tbt_fec_est_unknown(rx->est, est_now);
-                else if (real_buf[eg])
-                    tbt_fec_est_block(rx->est, est_now, eg, real_buf[eg],
-                                      miss_buf[eg], rx->alive_bm);
-            }
-            tbt_fec_est_super(rx->est, est_now);
         }
         rx->deliver_partial = false;
         rx->deliver_p = 0;
@@ -3561,11 +3745,15 @@ static u16 tbt_fec_nack_add(struct tbt_session *sess, struct tbt_fec_rx *rx,
     tbt_fec_bitmap_set(n->share_mask, share);
     /* A DATA share the NACK names needed repair. The estimator reads the
      * block's mask when the super-block completes. */
-    if (share < rx->n && share < 32)
+    if (share < rx->n)
     {
         b = tbt_fec_rx_blk(rx, group, block_id);
         if (b->used && b->block_id == block_id)
-            b->miss_mask |= 1u << share;
+        {
+            if (share < 32)
+                b->miss_mask |= 1u << share;
+            tbt_fec_adapt_bitmap_set(b->miss_bits, share);
+        }
     }
     (*count)++;
     return 1;
@@ -4215,7 +4403,9 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
     if (rc == 0)
     {
         bool commit_block_code = tbt_fec_grouped_mode(rx->codec) == 3;
+        u8 fail[TBT_FEC_BITMAP_BYTES];
 
+        memset(fail, 0, sizeof(fail));
         for (i = 0, k = 0; i < real; i++)
         {
             if (rx->dpresent_snap[i])
@@ -4226,6 +4416,7 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
             if (commit_block_code &&
                 !tbt_fec_grouped_is_known(rx->codec, group, i))
             {
+                tbt_fec_adapt_bitmap_set(fail, i);
                 k++;
                 continue;
             }
@@ -4240,9 +4431,11 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
                  * estimator's miss evidence for this block. */
                 if (i < 32)
                     b->miss_mask |= 1u << i;
+                tbt_fec_adapt_bitmap_set(b->miss_bits, i);
             }
             k++;
         }
+        memcpy(b->codec_fail_bits, fail, sizeof(fail));
         /* Ready only when every real share is present; a skipped share keeps
          * the block decodable on the next pass. */
         b->ready = b->ndata >= real;
@@ -4280,11 +4473,67 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
 /* One FEC_FBK report. Control records are plaintext and ride the control
  * queue; the sender's control law consumes the fields. `extra` carries the
  * handshake flags (CFG_ACK / SWITCH_DONE / ROLLBACK / CFG_NACK). */
+static bool tbt_fec_rx_sc_mode(const struct tbt_fec_rx *rx)
+{
+    return rx->est_sclc && tbt_fec_grouped_mode(rx->codec) == 3;
+}
+
+static u64 tbt_fec_rx_est_activity(const struct tbt_fec_rx *rx)
+{
+    if (tbt_fec_rx_sc_mode(rx))
+        return rx->est_sclc->last_activity_ns;
+    return rx->est ? rx->est->last_activity_ns : 0;
+}
+
+/* Sample whichever estimator owns this shape. The RLNC-shaped out is the
+ * common view the c13 snapshot already consumes; the SC out carries the
+ * p_fast/codec_fail values the FBK overlay needs. */
+static void tbt_fec_rx_sample(struct tbt_fec_rx *rx, u64 now,
+                              struct tbt_fec_est_out *o,
+                              struct tbt_fec_adapt_sclc_est_out *so)
+{
+    if (tbt_fec_rx_sc_mode(rx))
+    {
+        tbt_fec_adapt_sclc_est_sample(rx->est_sclc, now, so);
+        memset(o, 0, sizeof(*o));
+        o->p_ppm = so->p_ppm;
+        o->p_ewma_ppm = so->p_ewma_ppm;
+        o->p_win_ppm = so->p_win_ppm;
+        o->r_fail_ppm = so->r_fail_ppm;
+        o->sent_win = so->sent_win;
+        o->miss_win = so->miss_win;
+        o->supers_win = so->supers_win;
+        o->abandoned_win = so->abandoned_win;
+        o->unknown_win = so->unknown_win;
+        o->requested_win = so->requested_win;
+        o->pkts_win = so->pkts_win;
+        o->abandoned_total = so->abandoned_total;
+        o->unknown_total = so->unknown_total;
+        o->alive = so->alive;
+        o->stalled = so->stalled;
+        o->carriers = so->carriers;
+        o->p_valid = so->p_valid;
+        o->r_valid = so->r_valid;
+        o->pause_idle = so->pause_idle;
+        o->pause_carrier = so->pause_carrier;
+        o->pause_abandoned = so->pause_abandoned;
+    }
+    else
+    {
+        memset(so, 0, sizeof(*so));
+        if (rx->est)
+            tbt_fec_est_sample(rx->est, now, o);
+        else
+            memset(o, 0, sizeof(*o));
+    }
+}
+
 static void tbt_fec_rx_fbk_send(struct tbt_session *sess,
                                 struct tbt_fec_flow *flow, u8 extra)
 {
     struct tbt_fec_rx *rx = flow->rx;
     struct tbt_fec_est_out o;
+    struct tbt_fec_adapt_sclc_est_out so;
     struct tbt_fec_fbk f;
     struct tbt_fec_hdr h;
     struct tbt_fec_shape suggest;
@@ -4293,16 +4542,30 @@ static void tbt_fec_rx_fbk_send(struct tbt_session *sess,
     u16 len;
     u64 now = ktime_get_ns();
     u32 expected;
+    bool sc;
 
-    if (!rx || !rx->est)
+    if (!rx || (!rx->est && !rx->est_sclc))
         return;
-    tbt_fec_est_sample(rx->est, now, &o);
+    sc = tbt_fec_rx_sc_mode(rx);
+    tbt_fec_rx_sample(rx, now, &o, &so);
     memset(&f, 0, sizeof(f));
     tbt_fec_fbk_set_epoch(&f, rx->fbk_epoch ? rx->fbk_epoch : rx->epoch);
     rx->fbk_epoch = 0;
-    f.m_current = (u8)rx->m;
-    tbt_fec_adapt_shape(tbt_fec_adapt_class_of_p(o.p_ppm), &suggest);
-    f.m_target = (u8)suggest.m;
+    if (sc)
+    {
+        u8 idx = tbt_fec_adapt_sclc_rate_index_for_shape(rx->n, rx->m);
+
+        f.m_current = idx == 0xff
+                          ? 0
+                          : tbt_fec_adapt_sclc_rate_at(idx)->pct;
+        f.m_target = f.m_current; /* the sender owns the control law */
+    }
+    else
+    {
+        f.m_current = (u8)rx->m;
+        tbt_fec_adapt_shape(tbt_fec_adapt_class_of_p(o.p_ppm), &suggest);
+        f.m_target = (u8)suggest.m;
+    }
     /* The field keeps its 0x1006 name, but the control law consumes the same
      * p_used the receiver used: max(EWMA, 1 s window). */
     f.p_ewma_ppm = o.p_ppm;
@@ -4318,6 +4581,13 @@ static void tbt_fec_rx_fbk_send(struct tbt_session *sess,
         extra |= TBT_FEC_FBK_F_P_VALID;
     f.flags = extra;
     memcpy(f.carrier_bitmap, rx->alive_bm, TBT_FEC_BITMAP_BYTES);
+    if (sc)
+    {
+        /* SC-LDPC overlay: the last four bitmap bytes carry the values the
+         * sender's burst and rollback predicates need. */
+        tbt_fec_fbk_sc_set_p_fast(&f, so.p_fast_ppm);
+        tbt_fec_fbk_sc_set_codec_fail(&f, so.codec_fail_ppm);
+    }
     if (tbt_fec_fbk_pack(&f, body))
         return;
     memset(&h, 0, sizeof(h));
@@ -4344,15 +4614,17 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess,
     struct tbt_fec_rx *rx = f->rx;
     struct tbt_fec_adapt_ctl *a = &sess->adapt;
     struct tbt_fec_est_out o;
+    struct tbt_fec_adapt_sclc_est_out so;
     u64 now = ktime_get_ns();
     u64 abandoned;
     u16 i, alive = 0, stalled = 0;
     u8 flags;
-    bool paused;
+    bool paused, sc;
 
-    if (!rx || !rx->est || READ_ONCE(rx->stopping) ||
+    if (!rx || (!rx->est && !rx->est_sclc) || READ_ONCE(rx->stopping) ||
         READ_ONCE(sess->closing))
         return;
+    sc = tbt_fec_rx_sc_mode(rx);
     if (!READ_ONCE(sess->adaptive))
     {
         /* The initial shape is not a switch: install it even with the
@@ -4400,23 +4672,42 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess,
             stalled++;
         tbt_carrier_put(c);
     }
-    tbt_fec_est_carriers(rx->est, alive, stalled, sess->n_car);
+    if (rx->est)
+        tbt_fec_est_carriers(rx->est, alive, stalled, sess->n_car);
+    if (rx->est_sclc)
+        tbt_fec_adapt_sclc_est_carriers(rx->est_sclc, alive, stalled,
+                                        sess->n_car);
     abandoned = (u64)atomic64_read(&rx->abandoned_shares);
     if (abandoned > rx->est_abandoned_last)
     {
-        tbt_fec_est_abandoned(rx->est, now,
-                              (u32)(abandoned - rx->est_abandoned_last));
+        if (rx->est)
+            tbt_fec_est_abandoned(rx->est, now,
+                                  (u32)(abandoned -
+                                        rx->est_abandoned_last));
+        if (rx->est_sclc)
+            tbt_fec_adapt_sclc_est_abandoned(
+                rx->est_sclc, now,
+                (u32)(abandoned - rx->est_abandoned_last));
         rx->est_abandoned_last = abandoned;
     }
-    tbt_fec_est_sample(rx->est, now, &o);
+    tbt_fec_rx_sample(rx, now, &o, &so);
 
     a->epoch = rx->epoch;
     a->n = rx->n;
     a->m = rx->m;
     a->groups = rx->groups;
-    a->class = tbt_fec_adapt_class_of_shape(rx->n, rx->m);
-    if (a->class == 0xff)
-        a->class = 3;
+    if (sc)
+    {
+        u8 idx = tbt_fec_adapt_sclc_rate_index_for_shape(rx->n, rx->m);
+
+        a->class = idx == 0xff ? 0 : idx;
+    }
+    else
+    {
+        a->class = tbt_fec_adapt_class_of_shape(rx->n, rx->m);
+        if (a->class == 0xff)
+            a->class = 3;
+    }
     a->p_ppm = o.p_ppm;
     a->p_win_ppm = o.p_win_ppm;
     a->r_fail_ppm = 0; /* the sender measures the residual */
@@ -4478,11 +4769,14 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess,
     }
     flags = rx->fbk_flags;
     rx->fbk_flags = 0;
-    if (flags ||
-        (rx->est->last_activity_ns &&
-         now - rx->est->last_activity_ns < 1000000000ULL &&
-         now - rx->fbk_last_ns >= 100000000ULL))
-        tbt_fec_rx_fbk_send(sess, f, flags);
+    {
+        u64 activity = tbt_fec_rx_est_activity(rx);
+
+        if (flags ||
+            (activity && now - activity < 1000000000ULL &&
+             now - rx->fbk_last_ns >= 100000000ULL))
+            tbt_fec_rx_fbk_send(sess, f, flags);
+    }
 }
 
 static void tbt_fec_rx_fbk_kick(struct tbt_session *sess, u8 flags)
@@ -4539,6 +4833,8 @@ static void tbt_fec_rx_reset_blocks_locked(struct tbt_fec_rx *rx)
         b->nparity = 0;
         b->count_real = 0xffff;
         b->miss_mask = 0;
+        memset(b->miss_bits, 0, sizeof(b->miss_bits));
+        memset(b->codec_fail_bits, 0, sizeof(b->codec_fail_bits));
         b->judged = false;
         memset(b->dpresent, 0, TBT_FEC_MAX_SHARES);
         memset(b->ppresent, 0, TBT_FEC_MAX_SHARES);
@@ -4787,6 +5083,27 @@ static struct tbt_fec_blk *tbt_fec_rx_blk_alloc(u32 total, u16 shares, u16 n)
  * The peer's L is not on the wire; the local session's L is the only source.
  * Both ends must configure the same codec, so a mismatch is a configuration
  * error the caller reports rather than a shape this path can detect. */
+/* Scratch slots for recovered DATA shares. A rate switch changes n/m but not
+ * the arena, so size for the largest supported split once, at INIT. */
+static u16 tbt_fec_sclc_rec_slots(const struct tbt_fec_cfg *cfg, u16 shares)
+{
+    struct tbt_fec_adapt_sclc_wire w;
+    u16 side = cfg->n > cfg->m ? cfg->n : cfg->m;
+    u16 sc;
+    u8 mask;
+
+    if (!cfg->groups || !shares ||
+        (u32)cfg->groups * shares > TBT_FEC_MAX_CARRIERS)
+        return side;
+    if (tbt_fec_adapt_sclc_wire_of_cfg(cfg, (u16)(cfg->groups * shares), &w))
+        return side;
+    mask = w.kind == TBT_FEC_SCLC_DOWN
+               ? (u8)(1u << 3)
+               : (u8)((1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u);
+    sc = tbt_fec_adapt_sclc_max_side(shares, mask);
+    return sc > side ? sc : side;
+}
+
 static int tbt_fec_rx_apply_init(struct tbt_session *sess,
                                  struct tbt_fec_flow *f,
                                  const struct tbt_fec_cfg *cfg)
@@ -4826,6 +5143,16 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
      * was placed by a graph the sender never encoded with. */
     if (tbt_fec_sclc_shape_of_cfg(cfg, (u16)(cfg->groups * shares), &sclc) == 0)
     {
+        /* With adaptive on, the peer's INIT must name a shipped profile on
+         * the rate ladder; an off-ladder split cannot be switched later. */
+        if (READ_ONCE(sess->adaptive))
+        {
+            struct tbt_fec_adapt_sclc_wire w;
+
+            if (tbt_fec_adapt_sclc_wire_of_cfg(
+                    cfg, (u16)(cfg->groups * shares), &w))
+                return -EINVAL;
+        }
         codec = tbt_fec_sclc_new(&sclc, TBT_FEC_S, cfg->seed);
         block_code = true;
     }
@@ -4851,6 +5178,8 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     {
         u16 slots_per_share = cfg->n > cfg->m ? cfg->n : cfg->m;
 
+        if (sess->fec_sclc)
+            slots_per_share = tbt_fec_sclc_rec_slots(cfg, shares);
         if (slots_per_share < TBT_FEC_ADAPT_CLASSES)
             slots_per_share = TBT_FEC_ADAPT_CLASSES;
         rec = kvzalloc((size_t)slots_per_share * TBT_FEC_S, GFP_KERNEL);
@@ -4906,6 +5235,8 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     tbt_fec_grouped_free(old_codec);
     if (rx->est)
         tbt_fec_est_init(rx->est, shares);
+    if (rx->est_sclc)
+        tbt_fec_adapt_sclc_est_init(rx->est_sclc, shares);
     pr_info_ratelimited("tbtun: tunnel %llu: fec rx shape from peer: n=%u m=%u groups=%u slots=%u block=%u L=%u rate=%u\n",
                         (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id
                                                           : 0),
@@ -4947,6 +5278,14 @@ static void tbt_fec_rx_init_tick(struct tbt_session *sess,
         pr_warn_ratelimited("tbtun: tunnel %llu: fec init shape rejected: %d n=%u m=%u groups=%u w=%u k=%u d=%u\n",
                             (unsigned long long)sess->tunnel->cfg.id, err,
                             cfg.n, cfg.m, cfg.groups, cfg.w, cfg.k, cfg.d);
+        /* A permanent profile mismatch is refused once; a transient
+         * allocation failure is left to the sender's retry window. */
+        if (err == -EINVAL)
+        {
+            rx->fbk_epoch = cfg.epoch;
+            tbt_fec_rx_fbk_send(sess, f, TBT_FEC_FBK_F_CFG_NACK);
+            rx->fbk_epoch = 0;
+        }
         return;
     }
     atomic64_inc(&sess->fec_init_rx);
@@ -5015,6 +5354,32 @@ static void tbt_fec_rx_on_cfg(struct tbt_session *sess,
     {
         spin_unlock_bh(&rx->lock);
         return;
+    }
+    if (sess->fec_sclc)
+    {
+        struct tbt_fec_cfg cur;
+        struct tbt_fec_adapt_sclc_wire nw;
+        u16 carriers = (u16)(rx->groups * (rx->n + rx->m));
+
+        memset(&cur, 0, sizeof(cur));
+        cur.n = rx->n;
+        cur.m = rx->m;
+        cur.groups = rx->groups;
+        cur.w = rx->shape.w;
+        cur.k = rx->shape.k;
+        cur.d = rx->shape.d;
+        if (!tbt_fec_adapt_sclc_wire_compatible(&cur, cfg, carriers) ||
+            tbt_fec_adapt_sclc_wire_of_cfg(cfg, carriers, &nw))
+        {
+            /* A variant/block/L change or an off-ladder split is not a rate
+             * switch: refuse it with the CFG's own epoch. The lock is held
+             * here; release it before the FBK path. */
+            spin_unlock_bh(&rx->lock);
+            rx->fbk_epoch = cfg->epoch;
+            tbt_fec_rx_fbk_send(sess, f, TBT_FEC_FBK_F_CFG_NACK);
+            rx->fbk_epoch = 0;
+            return;
+        }
     }
     if (cfg->epoch <= rx->epoch && !rx->cfg_pending)
     {
@@ -5788,6 +6153,11 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
         if (!tx)
             return 0;
         tx->peer_p_ppm = fb.p_ewma_ppm;
+        if (sess->fec_sclc)
+        {
+            tx->peer_p_fast_ppm = tbt_fec_fbk_sc_p_fast(&fb);
+            tx->peer_codec_fail_ppm = tbt_fec_fbk_sc_codec_fail(&fb);
+        }
         tx->peer_expected = fb.expected_shares;
         tx->peer_received = fb.received_shares;
         tx->peer_epoch = tbt_fec_fbk_epoch(&fb);
@@ -6421,6 +6791,7 @@ static void tbt_fec_tx_plane_free(struct tbt_fec_tx *tx)
     tbt_fec_grouped_free(tx->codec);
     tbt_fec_grouped_free(tx->old_codec);
     kfree(tx->adapt);
+    kfree(tx->adapt_sclc);
     kvfree(tx->ring);
     kvfree(tx->pkt);
     kvfree(tx->rec);
@@ -6444,6 +6815,7 @@ static void tbt_fec_rx_plane_free(struct tbt_fec_rx *rx)
     tbt_fec_grouped_free(rx->old_codec);
     tbt_fec_grouped_free(rx->pending_codec);
     kfree(rx->est);
+    kfree(rx->est_sclc);
     kvfree(rx);
 }
 
@@ -6498,6 +6870,44 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     tx->adapt = kzalloc(sizeof(*tx->adapt), GFP_KERNEL);
     if (tx->adapt)
         tbt_fec_adapt_init(tx->adapt, sess->adapt.class);
+    if (sess->fec_sclc)
+    {
+        u8 idx, sc_mask;
+
+        if (tbt_fec_adapt_sclc_init_plan(
+                n, m, groups, sess->fec_sclc_shape.variant, &idx,
+                &sc_mask) == 0)
+        {
+            tx->adapt_sclc = kzalloc(sizeof(*tx->adapt_sclc), GFP_KERNEL);
+            if (tx->adapt_sclc &&
+                tbt_fec_adapt_sclc_ctl_init(
+                    tx->adapt_sclc, READ_ONCE(sess->adaptive),
+                    tbt_fec_adapt_sclc_rate_at(idx)->pct, shares, groups))
+            {
+                kfree(tx->adapt_sclc);
+                tx->adapt_sclc = NULL;
+            }
+            if (tx->adapt_sclc)
+            {
+                /* INIT uses generation 1; the first switch must be 2. */
+                tbt_fec_adapt_sclc_ctl_set_epoch(tx->adapt_sclc, 1);
+                tbt_fec_adapt_sclc_ctl_set_rate_mask(tx->adapt_sclc,
+                                                     sc_mask);
+                TBT_DIAG("fec sclc adapt tunnel=%llu sid=%llu rate=%u mask=0x%02x shares=%u groups=%u",
+                         (unsigned long long)sess->tunnel->cfg.id,
+                         (unsigned long long)sid,
+                         tbt_fec_adapt_sclc_rate_at(idx)->pct, sc_mask,
+                         shares, groups);
+            }
+        }
+        else if (READ_ONCE(sess->adaptive))
+        {
+            pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: adaptive mode=3 needs a supported ladder profile (n=%u m=%u groups=%u)\n",
+                                (unsigned long long)sess->tunnel->cfg.id,
+                                n, m, groups);
+            goto fail;
+        }
+    }
     tx->replay = tbt_fec_replay_new_k(groups, n, m, TBT_FEC_S,
                                       sess->fec_replay_k);
     tx->groups = groups;
@@ -6529,7 +6939,10 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     if (tx->codec)
         tx->band = tbt_fec_grouped_band(tx->codec, 0);
     if (!tx->ring || !tx->pkt || !tx->rec || !tx->g || !tx->codec ||
-        !tx->adapt || !tx->replay)
+        !tx->adapt || !tx->replay ||
+        (sess->fec_sclc &&
+         tbt_fec_adapt_sclc_rate_index_for_shape(n, m) != 0xff &&
+         !tx->adapt_sclc))
         goto fail;
     for (i = 0; i < groups; i++)
     {
@@ -6590,6 +7003,12 @@ tbt_fec_rx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     rx->est = kzalloc(sizeof(*rx->est), GFP_KERNEL);
     if (rx->est)
         tbt_fec_est_init(rx->est, shares);
+    if (sess->fec_sclc)
+    {
+        rx->est_sclc = kzalloc(sizeof(*rx->est_sclc), GFP_KERNEL);
+        if (rx->est_sclc)
+            tbt_fec_adapt_sclc_est_init(rx->est_sclc, shares);
+    }
     rx->nack = kvzalloc(sizeof(*rx->nack), GFP_KERNEL);
     rx->blk = tbt_fec_rx_blk_alloc(total, shares, n);
     rx->req_ns = kvzalloc((size_t)total * shares * sizeof(*rx->req_ns),
@@ -6597,16 +7016,34 @@ tbt_fec_rx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     rx->req_block = kvzalloc((size_t)total * sizeof(*rx->req_block),
                              GFP_KERNEL);
     rx->nack_cadence_ms = TBT_FEC_NACK_RETRY_MS;
-    rx->rec = kvzalloc((size_t)((n > m ? n : m) > TBT_FEC_ADAPT_CLASSES
-                                    ? (n > m ? n : m)
-                                    : TBT_FEC_ADAPT_CLASSES) *
-                           TBT_FEC_S,
-                       GFP_KERNEL);
+    {
+        u16 rec_slots = n > m ? n : m;
+
+        if (rec_slots < TBT_FEC_ADAPT_CLASSES)
+            rec_slots = TBT_FEC_ADAPT_CLASSES;
+        if (sess->fec_sclc)
+        {
+            u8 idx, sc_mask;
+
+            if (tbt_fec_adapt_sclc_init_plan(
+                    n, m, groups, sess->fec_sclc_shape.variant, &idx,
+                    &sc_mask) == 0)
+            {
+                u16 sc_slots = tbt_fec_adapt_sclc_max_side(shares,
+                                                           sc_mask);
+
+                if (sc_slots > rec_slots)
+                    rec_slots = sc_slots;
+            }
+        }
+        rx->rec = kvzalloc((size_t)rec_slots * TBT_FEC_S, GFP_KERNEL);
+    }
     rx->zero = kvzalloc(TBT_FEC_S, GFP_KERNEL);
     rx->codec = tbt_fec_codec_new(sclc, groups, n, m, n, sess->fec_w,
                                   sess->fec_d, tbt_fec_base_nonce(sess));
     if (!rx->blk || !rx->req_ns || !rx->req_block || !rx->codec ||
-        !rx->rec || !rx->zero || !rx->est || !rx->nack)
+        !rx->rec || !rx->zero || !rx->est || !rx->nack ||
+        (sess->fec_sclc && !rx->est_sclc))
         goto fail;
     return rx;
 
@@ -6984,6 +7421,7 @@ int tbt_fec_data_init(struct tbt_session *sess)
     u32 per, slots, total, i;
     u8 mask[TBT_FEC_BITMAP_BYTES];
     u16 primary_groups;
+    u8 sclc_idx, sclc_mask;
 
     /* Every record the parsers accept must fit the buffer that assembles it.
      * Without these, raising TBT_FEC_PAYLOAD_MAX would make a full record
@@ -7008,12 +7446,6 @@ int tbt_fec_data_init(struct tbt_session *sess)
         pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: not an SC-LDPC shape n=%u m=%u carriers=%u w=%u L=%u\n",
                             (unsigned long long)t->cfg.id, n, m,
                             t->cfg.carriers, t->cfg.w, t->cfg.L);
-        return -EINVAL;
-    }
-    if (is_sclc && READ_ONCE(sess->adaptive))
-    {
-        pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: adaptive is off for mode=3\n",
-                            (unsigned long long)t->cfg.id);
         return -EINVAL;
     }
     shares = (u16)(n + m);
@@ -7043,6 +7475,17 @@ int tbt_fec_data_init(struct tbt_session *sess)
         {
             w = sclc.L;
             d = sclc.rate_256;
+        }
+        /* The controller starts at the configured ladder point and may move
+         * only to the points this codec can build. The binary downlink is
+         * fixed at 128/128; the GF(16) uplink builds every ladder split. */
+        if (tbt_fec_adapt_sclc_init_plan(n, m, groups, sclc.variant,
+                                         &sclc_idx, &sclc_mask) &&
+            READ_ONCE(sess->adaptive))
+        {
+            pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: adaptive mode=3 needs an n/m split on the rate ladder (n=%u m=%u)\n",
+                                (unsigned long long)t->cfg.id, n, m);
+            return -EINVAL;
         }
     }
     else
@@ -7131,7 +7574,11 @@ int tbt_fec_data_init(struct tbt_session *sess)
      * = 0 keeps the old single-stream geometry; 16 on 256 carriers leaves 16
      * groups for a second flow. A far-side OPEN later replaces this mask. */
     primary_groups = groups;
-    if (tbt_fec_groups_per_flow && tbt_fec_groups_per_flow < primary_groups)
+    /* SC-LDPC keeps the whole carrier geometry in its single flow: a partial
+     * group set would make the CFG groups field disagree with 256/(n+m) and
+     * the rate switch would be refused. */
+    if (!is_sclc && tbt_fec_groups_per_flow &&
+        tbt_fec_groups_per_flow < primary_groups)
         primary_groups = (u16)tbt_fec_groups_per_flow;
     if (!primary_groups)
         primary_groups = 1;
