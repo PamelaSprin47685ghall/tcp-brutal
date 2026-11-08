@@ -26,9 +26,11 @@ FORMAT_SRCS     := $(filter %.c %.h,$(SRCS))
 HOSTCC          ?= cc
 HOST_CFLAGS     ?= -std=gnu99 -O2 -Wall -Wextra -Werror
 HOST_TEST       := host/test_parse
-HOST_TEST_SRCS  := host/test_parse.c tbtun/tbt_parse.c tbtun/tbt_fec_adapt_sclc.c
-HOST_TEST_HDRS  := tbtun/tbt_parse.h tbtun/tbt_uapi.h tbtun/tbt_crypto.h \
-                   tbtun/tbt_fec_adapt_sclc.h tbtun/tbt_fec_adapt.h tbtun/tbt_fec.h
+HOST_TEST_SRCS  := host/test_parse.c tbtun/tbt_parse.c tbtun/tbt_fec_adapt_sclc.c \
+                   tbtun/tbt_portmap.c
+HOST_TEST_HDRS  := tbtun/tbt_parse.h tbtun/tbt_portmap.h tbtun/tbt_uapi.h \
+                   tbtun/tbt_crypto.h tbtun/tbt_fec_adapt_sclc.h \
+                   tbtun/tbt_fec_adapt.h tbtun/tbt_fec.h
 HOST_FUZZ       := host/test_fuzz
 HOST_FUZZ_SRCS  := host/test_fuzz.c tbtun/tbt_rec.c tbtun/tbt_proto.c
 HOST_FUZZ_HDRS  := tbtun/tbt_rec.h tbtun/tbt_proto.h tbtun/tbt_uapi.h

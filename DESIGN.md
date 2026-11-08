@@ -1356,9 +1356,10 @@ the ARQ path masks and per-path arrays are `u16`/`[16]` (`avoid_mask`, `path_mas
 `una_observed_ns[]`, `sched.order[]`, and the `unsigned long` FIN/RST masks). Raising the
 limit to 256 requires widening those to 256-bit masks and chunking or enlarging the FBK
 and WINDOW bodies; that is a data-plane change and is deferred to the FEC block model.
-What is already scalable: the socket-buffer budget above, `TBT_PORTMAP_MAX` (4096 ports,
-so a 1024-port block is fine), the per-stream limits, and the procfs renderers (per
-carrier, no fixed stride). Resource estimate at 256 carriers: 256 TCP sockets and
+What is already scalable: the socket-buffer budget above, the port map (one absolute
+65536-bit bitmap, so any window over 1..65535 is fine), the per-stream limits, and the
+procfs renderers (per carrier, no fixed stride). Resource estimate at 256 carriers:
+256 TCP sockets and
 5 work structs each (poll/pump/rx/tx/connect), 256 × ~24 KiB of HTTP/parser state
 (~6 MiB), and a per-carrier 50 ms poll = 5120 wakes/s; the poll must become one
 session-level scan (20 wakes/s) before 256 is enabled, and the per-carrier keepalive
@@ -1634,9 +1635,15 @@ costs one TCP handshake instead of a new session.
   **reserved block** configured once at boot:
   `net.ipv4.ip_local_reserved_ports=40000-44095` (stated in the docs), default block
   `40000-44095` (4096 ports = 256 carriers × 16 rebuilds), overridable via
-  `/proc/net/tbtun/ports` (`ports 41000-45095`). The module keeps one global
-  **bitmap** of block ports
-  (`tbt_portmap`), allocates with `find_next_zero_bit`, and releases on carrier close.
+  `/proc/net/tbtun/ports` (`ports 41000-45095`). A near tunnel may instead name its
+  own window with `portblock=lo-hi`. The module keeps one **bitmap over the whole
+  16-bit source-port space** (`tbt_portmap`); each tunnel's block is a window over
+  it, and a port is marked by its absolute number, so two overlapping windows share
+  capacity and can never hand out the same live port. Allocation scans the window
+  lowest-first and releases on carrier close. A near window must hold at least one
+  port per carrier slot (`n + m`, or `carriers` with FEC), or the line is refused.
+  Every block in use must also be reserved in `net.ipv4.ip_local_reserved_ports`;
+  the sysctl does not know about per-tunnel windows.
   This is strictly better than `IP_LOCAL_PORT_RANGE` alone because the TCP bind below it
   cannot fail on an unrelated ephemeral allocation.
 - Bind sequence: `inet_bind()` with the exact `(src_addr, src_port)` from the bitmap, then
@@ -1845,9 +1852,13 @@ random at tunnel creation).
 - **Comments**: a line whose first non-blank character is `#` is a comment and is ignored.
   A `#` *after* a token is not a comment: the token is unknown and the whole line is
   rejected with `EINVAL` (nothing from it applies).
-- `portblock=` is accepted and recorded per tunnel, but the data path uses the **single
-  global port block** (`/proc/net/tbtun/ports`) shared by every tunnel. Per-tunnel blocks
-  are not implemented. Known gap, tracked.
+- `portblock=lo-hi` (near only) is the source-port window for that tunnel's
+  carriers; `0-0` means the global `/proc/net/tbtun/ports` block. The range must
+  satisfy `1 <= lo <= hi <= 65535` and hold at least one port per carrier slot
+  (`n + m`, or `carriers` with FEC), or the line is refused with `EINVAL`. Windows
+  may overlap: one absolute bitmap prevents duplicate live source ports, so an
+  overlap costs capacity, not correctness. A far tunnel records the key but never
+  dials. Changing the window means re-sending the tunnel line.
 - `dev=` (near only) binds each dialling carrier socket to one interface with
   `SO_BINDTODEVICE` before `bind`/`connect`; it does not affect the far side's
   target connections. The name is 1..15 bytes (`IFNAMSIZ` includes the NUL);
@@ -2036,7 +2047,7 @@ therefore a **per-open-file line buffer**:
   nothing from it applies (the same rule as any other bad key).
 - Defaults are rendered, not omitted, so the operator reads the effective value instead
   of having to know it. `portblock=lo-hi` is parsed, stored and rendered; `0-0` is the
-  canonical spelling of "no per-tunnel block" (the module keeps one global block, §8.3).
+  canonical spelling of "use the global block" (§8.3).
 - `hole_budget_ms` accepts `1..60000`; `rx_reorder_bytes` accepts `1..268435456`; and
   `tx_window_bytes` accepts `0..268435456`, where `0` is the auto default and an explicit
   value must not exceed `rx_reorder_bytes` (the two are checked together after the line

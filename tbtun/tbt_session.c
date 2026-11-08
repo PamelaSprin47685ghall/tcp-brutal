@@ -4,7 +4,8 @@
  * Owns:
  *   - turning a parsed struct tbt_cfg into a live tbt_tunnel (or rejecting it
  *     without side effects, DESIGN.md §8.3 "no partial application").
- *   - the per-netns carrier port block (§7.2) and its bitmap.
+ *   - the module-wide carrier source-port bitmap and the global fallback
+ *     block (§7.2).
  *   - the session's carrier slots (0..n-1), its nonce, and the far side's
  *     HELLO join rule (§9.5).
  *   - the reference counts and RCU freeing of tunnels.
@@ -22,7 +23,6 @@
 #include <linux/ktime.h>
 #include <linux/nsproxy.h>
 #include <linux/random.h>
-#include <linux/vmalloc.h>
 #include <net/inet_sock.h>
 #include <net/tcp.h>
 #include <net/sock.h>
@@ -61,24 +61,28 @@ static const char *tbt_state_name(const struct tbt_tunnel *t)
 
 int tbt_portmap_set(u16 lo, u16 hi)
 {
-    unsigned long *used;
-    unsigned int n;
+    int err = 0;
 
-    n = tbt_portmap_words(lo, hi);
-    if (!n)
+    if (!lo || lo > hi)
         return -EINVAL;
-    used = kcalloc(n, sizeof(*used), GFP_KERNEL);
-    if (!used)
-        return -ENOMEM;
-
     mutex_lock(&tbt_ports.lock);
-    kvfree(tbt_ports.used);
-    tbt_ports.used = used;
-    tbt_ports.lo = lo;
-    tbt_ports.hi = hi;
-    tbt_ports.configured = true;
+    if (!tbt_ports.used)
+    {
+        tbt_ports.used = bitmap_zalloc(TBT_PORTMAP_PORTS, GFP_KERNEL);
+        if (!tbt_ports.used)
+            err = -ENOMEM;
+    }
+    if (!err)
+    {
+        /* The bitmap is absolute: changing the window never invalidates a
+         * port a live carrier still holds. A port outside the new window
+         * simply stops being a candidate until its carrier frees it. */
+        tbt_ports.lo = lo;
+        tbt_ports.hi = hi;
+        tbt_ports.configured = true;
+    }
     mutex_unlock(&tbt_ports.lock);
-    return 0;
+    return err;
 }
 
 void tbt_portmap_get(u16 *lo, u16 *hi, bool *configured)
@@ -90,6 +94,15 @@ void tbt_portmap_get(u16 *lo, u16 *hi, bool *configured)
     mutex_unlock(&tbt_ports.lock);
 }
 
+/* Called once from module exit, after every tunnel and carrier is gone. */
+void tbt_portmap_exit(void)
+{
+    mutex_lock(&tbt_ports.lock);
+    bitmap_free(tbt_ports.used);
+    tbt_ports.used = NULL;
+    mutex_unlock(&tbt_ports.lock);
+}
+
 void tbt_portmap_show(struct seq_file *m)
 {
     u16 lo, hi;
@@ -97,7 +110,7 @@ void tbt_portmap_show(struct seq_file *m)
     mutex_lock(&tbt_ports.lock);
     lo = tbt_ports.lo;
     hi = tbt_ports.hi;
-    seq_printf(m, "# block %u-%u (%u ports)\n", lo, hi, hi - lo + 1);
+    seq_printf(m, "# global block %u-%u (%u ports)\n", lo, hi, hi - lo + 1);
     seq_printf(m, "# %s\n", tbt_ports.configured ? "configured" : "default, not yet set");
     mutex_unlock(&tbt_ports.lock);
 }
@@ -166,6 +179,22 @@ static bool tbt_cfg_sane(const struct tbt_cfg *c, int *err)
     {
         *err = -EINVAL;
         return false;
+    }
+    /* A near tunnel's carriers hold one source port each. A per-tunnel block
+     * smaller than the effective carrier count can never bring the session
+     * up, so refuse the line instead of letting every replacement retry into
+     * port_exhaust. The global block keeps its runtime behaviour: an operator
+     * may widen it after the tunnel exists. */
+    if (c->role == TBT_ROLE_NEAR && (c->portblock_lo || c->portblock_hi))
+    {
+        unsigned int slots = c->fec ? c->carriers
+                                    : (unsigned int)c->n + c->m;
+
+        if (!tbt_portmap_fits(c->portblock_lo, c->portblock_hi, slots))
+        {
+            *err = -EINVAL;
+            return false;
+        }
     }
     // Role-specific requirements, exactly as DESIGN.md §8.3 states them:
     //   near: listen= (public port, where apps connect) and peer= (the far end)
@@ -688,39 +717,41 @@ out_unlock:
 // ---------------------------------------------------------------------------
 // Carrier port block allocation (DESIGN.md §7.2)
 //
-// C3 keeps one global block (the §8.3 "known gap"); the bitmap is per module,
-// guarded by tbt_ports.lock. Ports are released when the carrier goes away, so
-// a replacement carrier can reuse one immediately.
+// One absolute bitmap covers the whole 16-bit source port space and is
+// guarded by tbt_ports.lock. A tunnel's window is its own portblock= when
+// set, else the global /ports block. Overlapping windows share the bitmap, so
+// they can only compete for capacity; they can never hand out the same live
+// port. Ports are released when the carrier goes away, so a replacement
+// carrier can reuse one immediately.
 
-u16 tbt_port_alloc(enum tbt_port_alloc_err *err)
+u16 tbt_port_alloc(const struct tbt_tunnel *t, enum tbt_port_alloc_err *err)
 {
     enum tbt_port_alloc_err why = TBT_PORT_ALLOC_OK;
-    u16 port = 0;
+    u16 lo = 0, hi = 0, port = 0;
     int rc;
 
     mutex_lock(&tbt_ports.lock);
-    /* The block has a usable default (40000-44095, 4096 ports): a tunnel must
-     * work without the operator writing `ports` first, and a session may dial
-     * up to 256 carriers. Allocate the bitmap on first use. */
+    /* The global block has a usable default (40000-44095, 4096 ports): a
+     * tunnel must work without the operator writing `ports` first, and a
+     * session may dial up to 256 carriers. Allocate the bitmap on first
+     * use. */
     if (!tbt_ports.used)
     {
-        unsigned int words = tbt_portmap_words(tbt_ports.lo, tbt_ports.hi);
-
-        tbt_ports.used = words ?
-            bitmap_zalloc(words * BITS_PER_LONG, GFP_KERNEL) : NULL;
+        tbt_ports.used = bitmap_zalloc(TBT_PORTMAP_PORTS, GFP_KERNEL);
         if (!tbt_ports.used)
         {
             why = TBT_PORT_ALLOC_NOMEM;
             goto out;
         }
     }
-    /* The bit arithmetic lives in tbt_portmap.c so the host test exercises
-     * the same allocator over the same 4096-port block. */
-    rc = tbt_portmap_alloc(tbt_ports.used, tbt_ports.lo, tbt_ports.hi, &port);
+    rc = tbt_portmap_window(t->cfg.portblock_lo, t->cfg.portblock_hi,
+                            tbt_ports.lo, tbt_ports.hi, &lo, &hi);
+    if (!rc)
+        rc = tbt_portmap_alloc(tbt_ports.used, lo, hi, &port);
     if (rc == -ENOSPC)
         why = TBT_PORT_ALLOC_EXHAUSTED;
     else if (rc)
-        why = TBT_PORT_ALLOC_NOMEM; /* -EINVAL: the block is unusable */
+        why = TBT_PORT_ALLOC_NOMEM; /* -EINVAL: the window is unusable */
 out:
     mutex_unlock(&tbt_ports.lock);
     if (err)
@@ -731,7 +762,7 @@ out:
 void tbt_port_free(u16 port)
 {
     mutex_lock(&tbt_ports.lock);
-    tbt_portmap_free(tbt_ports.used, tbt_ports.lo, tbt_ports.hi, port);
+    tbt_portmap_free(tbt_ports.used, port);
     mutex_unlock(&tbt_ports.lock);
 }
 

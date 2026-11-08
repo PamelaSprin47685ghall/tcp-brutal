@@ -323,7 +323,7 @@ program, and `echo`/`cat` are the whole interface.
 | `config` | the canonical configuration; write tunnel lines, `del`, `flush`, `carrier ...`, and `session ...` actions here |
 | `tunnels` | one line per tunnel: role, state, listen/peer/target, n, m, streams |
 | `peers` | one line per carrier slot, 19 columns (below) |
-| `ports` | the global source port block and whether it is configured |
+| `ports` | the global fallback source port block and whether it is configured |
 | `stats` | `debug_loss=<0\|1>`, gap and stream totals, then one counter block per tunnel (below) |
 | `http` | debug only (`debug>=2`): the last **emitted** HTTP request header block from the near side's carrier 0 (headers only), for checking the container against a parser; not a received request, a response, or a live stream |
 
@@ -368,7 +368,7 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `carriers` | `0` | Carrier slots, `0..256`; `0` resolves to `n + m`; must be a multiple of `n + m` |
 | `crypto` | follows `fec` | `on` ChaCha8-obfuscates the FEC DATA/PARITY payload; `on` requires `fec=on`; unset means the same as `fec` |
 | `crypto_key` | — | 64 hex digits: pre-shared 256-bit key; `-` clears it. Unset: the near side generates the key and sends it in HELLO (`key_id=1`) |
-| `portblock` | `0-0` | Per-tunnel source port block, recorded and rendered only (`0-0` = none); carriers use the global block set through `/ports` |
+| `portblock` | `0-0` | Near only: source-port window for this tunnel's carriers, `1..65535`; `0-0` = draw from the global block set through `/ports`. Must hold at least `n + m` ports (`carriers` with FEC). A far tunnel records it but never dials |
 | `dev` | — | Near only: bind each dialling carrier socket to this interface (`SO_BINDTODEVICE`) before connect, `1..15` bytes. A bind failure is a dial failure: `connect_fail` climbs and the carrier retries after 200 ms. Forces a direct path around a multi-homed or proxy-TUN route |
 | `srcaddrs` | — | Comma-separated local source addresses; only the first is used |
 | `nonce` | — | `16` or `32` hex digits: pin the session nonce; near uses it locally, far requires it from the near side |
@@ -457,7 +457,7 @@ snapshot, `txwake`, `c3` (carriers, joins, retransmission, reorder, gates),
 | `data_tx`, `retx_frames`, `retx_bytes` | DATA records written (copies included) / copies / copy payload |
 | `retx_hole`, `retx_slow`, `retx_pathloss`, `retx_other` | copies by source: hole repair (a record at the ack stalled at least 2×RTO), slow-path grace (TCP delivered it, but the ack has not covered it after 3×RTO), lost path, other |
 | `retx_data_ppm`, `dup_bytes_ppm` | copies per million unique DATA records / copy payload per million application bytes |
-| `port_exhaust`, `port_alloc_fail` | source port block exhausted / port bitmap allocation failed; the carrier retries, nothing is killed |
+| `port_exhaust`, `port_alloc_fail` | the tunnel's source-port window exhausted / port bitmap allocation failed; the carrier retries, nothing is killed |
 | `join_src_reject`, `join_nonce_reject`, `join_bad`, `join_dup` | HELLO refused by the anchor, by the first-HELLO source, by the nonce, or by an occupied slot |
 | `ctl_lost`, `ctl_retry`, `ctl_requeue`, `ctl_obsolete`, `ctl_queued` | pinned control frames: explicit loss after the retry bound, retries, requeues, obsolete generation, live depth |
 | `stall_paused_skips`, `win_block`, `win_resume` | stall decision deferred while paused / DATA held at the peer-window gate / released |
@@ -480,6 +480,19 @@ retired_data`, and `retx_frames == live_retx + retired_retx`.
 `40000-44095` (4096 ports = 256 carriers × 16 rebuilds). A blank line, or
 `ports 0-0`, is a no-op and leaves the block unchanged. Reading the file prints
 the block, whether it is configured, and the directive.
+
+The module keeps one bitmap over the whole 16-bit source-port space. A
+tunnel's `portblock=` is a window over that bitmap; when it is `0-0`, the
+tunnel draws from this global block instead. Windows may overlap: they share
+capacity, and the allocator never hands the same live source port to two
+carriers. A window is therefore a search range, not a hard reservation; use
+disjoint windows for isolation. A near block must hold at least one port per
+carrier slot (`n + m`, or `carriers` with FEC), or the tunnel line is refused.
+Changing `/ports` affects new allocations immediately; carriers already up
+keep their ports until they close. Changing a tunnel's `portblock=` means
+re-sending its tunnel line, which replaces the tunnel and its session. Reserve
+every block in use in `net.ipv4.ip_local_reserved_ports`, not only the global
+one.
 
 ## Verified performance
 
@@ -689,9 +702,10 @@ The module itself must be loaded first, by `/etc/modules-load.d/tbtun.conf` or
 - `stats` carries `gaps_total`. A non-zero count means a stream was reset by a
   reorder overflow; `holes_unrecoverable` counts holes the replay ring could
   not fill.
-- `port_exhaust` climbing means the global source port block is too small for
-  the carrier count; widen it with `ports`. `port_alloc_fail` means the bitmap
-  allocation failed (`ENOMEM`); the carrier retries either way.
+- `port_exhaust` climbing means the global or per-tunnel source port block is
+  too small for the carrier count; widen it with `ports`, or widen that
+  tunnel's `portblock=`. `port_alloc_fail` means the bitmap allocation failed
+  (`ENOMEM`); the carrier retries either way.
 - `win_block` climbing while `wire` stalls means the peer's advertised window is
   the limit, not loss; `win_resume` follows when the window opens.
 - `join_src_reject` climbing means a near source address other than the anchor

@@ -44,6 +44,27 @@ and moves independently of the module version.
   rejects off-ladder n/m, a wrong block, and a wrong L. `host/test_fec`
   round-trips the two shipped SC profiles and the SC FBK overlay;
   `host/test_sclc_uplink` pins all six uplink ladder splits.
+- Per-tunnel `portblock=lo-hi` is consumed by the near-side carrier
+  allocator instead of being recorded only. A near tunnel's carriers draw
+  from its own window; `0-0` keeps drawing from the global block set through
+  `/proc/net/tbtun/ports`. The module now keeps one absolute bitmap over the
+  whole 16-bit source-port space, so overlapping windows share capacity but
+  can never be handed the same live source port. A near window must hold at
+  least one port per carrier slot (`n + m`, or `carriers` with FEC); a
+  shorter block is refused with `EINVAL` and the `portblock` key is named.
+  A far tunnel records the key but never dials.
+- `host/test_portmap` pins the window rules, the overlap-conflict rule, the
+  ports 1 and 65535 boundaries, lowest-first reuse after free, and the parse
+  refusals (`0-0`, reversed, out of range, too small for the carrier count).
+
+### Changed
+
+- Writing `/ports` no longer replaces the bitmap. The absolute bitmap keeps
+  the bits of live carriers, so changing the global window cannot hand a
+  port still held by a carrier to a new one; carriers already up keep their
+  ports until they close.
+- The `ports` view labels its block `# global block ...`, because a tunnel
+  with `portblock=` no longer uses it.
 
 ## [0.3.3] - 2026-11-08
 

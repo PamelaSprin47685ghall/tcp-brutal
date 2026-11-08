@@ -116,8 +116,8 @@ struct tbt_hole {
 /* struct tbt_cfg, struct tbt_linebuf and TBT_LINE_MAX live in tbt_parse.h,
  * which compiles both into the module and into host/test_parse.c. */
 #include "tbt_parse.h"
-/* The port-block bitmap and TBT_PORTMAP_MAX are pure code, shared with the
- * host test (tbt_portmap.h). */
+/* The absolute source-port bitmap and its window helpers are pure code,
+ * shared with the host test (tbt_portmap.h). */
 #include "tbt_portmap.h"
 
 /* The four callbacks sock_init_data() installs.  Take the snapshot from a
@@ -178,7 +178,9 @@ extern unsigned int max_carriers;
 /* Peripheral BBR hold, opt-in (module param hold_enable). */
 extern bool tbt_hold_enable;
 
-/* Port block for carrier sources (DESIGN.md §7.2). Owned by tbt_session.c. */
+/* Carrier source ports (DESIGN.md §7.2). `used` is one absolute bitmap over
+ * the whole 16-bit port space; `lo`/`hi` are the global fallback window for a
+ * tunnel whose own portblock= is 0-0. Owned by tbt_session.c. */
 struct tbt_portmap
 {
     struct mutex lock;
@@ -194,7 +196,7 @@ enum tbt_port_alloc_err
 {
     TBT_PORT_ALLOC_OK = 0,
     TBT_PORT_ALLOC_NOMEM,     /* the bitmap allocation failed */
-    TBT_PORT_ALLOC_EXHAUSTED, /* every port in the block is in use */
+    TBT_PORT_ALLOC_EXHAUSTED, /* every port in the tunnel's window is in use */
 };
 
 /* tbt_core.c */
@@ -204,8 +206,9 @@ bool tbt_debug_loss(void);
 extern struct tbt_portmap tbt_ports;
 int tbt_portmap_set(u16 lo, u16 hi);
 void tbt_portmap_get(u16 *lo, u16 *hi, bool *configured);
+void tbt_portmap_exit(void);
 void tbt_portmap_show(struct seq_file *m);
-u16 tbt_port_alloc(enum tbt_port_alloc_err *err);
+u16 tbt_port_alloc(const struct tbt_tunnel *t, enum tbt_port_alloc_err *err);
 void tbt_port_free(u16 port);
 int tbt_carrier_init(void);
 int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net);

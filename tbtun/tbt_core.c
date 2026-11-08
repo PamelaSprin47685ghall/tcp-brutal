@@ -172,6 +172,9 @@ static void __exit tbtun_exit(void)
      * TBT_WQ (w_kill, w_fbk, w_pump; system_dfl_wq on 6.5+, system_unbound_wq on 6.1). */
     synchronize_rcu();
     rcu_barrier();
+    /* Every carrier released its port during the tunnel teardown; the bitmap
+     * itself is module state and goes away last. */
+    tbt_portmap_exit();
     pr_info("tbtun: unloaded\n");
 }
 

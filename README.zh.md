@@ -267,7 +267,7 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 | `config` | 规范形式的配置；隧道行、`del`、`flush`、`carrier ...`、`session ...` 动作都写到这里 |
 | `tunnels` | 每条隧道一行：角色、状态、listen/peer/target、n、m、streams |
 | `peers` | 每个载体槽一行，共 19 列（见下） |
-| `ports` | 全局源端口段，以及它是否已经配置 |
+| `ports` | 全局后备源端口段，以及它是否已经配置 |
 | `stats` | 前三行是 `debug_loss=<0\|1>`、空洞与流总数，之后每条隧道一个计数器块（见下） |
 | `http` | 仅调试（`debug>=2`）：近端 0 号载体最近一次**发出的** HTTP 请求头块（只有头部），用来对照解析器检查容器；不是收到的请求、不是响应、也不是实时流 |
 
@@ -310,7 +310,7 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 | `carriers` | `0` | 载体槽，`0..256`；`0` 解析为 `n + m`；必须是 `n + m` 的整数倍 |
 | `crypto` | 跟随 `fec` | `on` 对 FEC 的 DATA/PARITY 负载做 ChaCha8 混淆；`on` 需要 `fec=on`；不写时等于 `fec` |
 | `crypto_key` | — | 64 个 hex 字符的预共享 256 位密钥；`-` 清除。不配置时由近端生成并在 HELLO 中明文携带（`key_id=1`） |
-| `portblock` | `0-0` | 每条隧道的源端口段，仅记录并渲染（`0-0` 表示不设）；载体使用 `/ports` 的全局端口段 |
+| `portblock` | `0-0` | 仅近端：本条隧道载体的源端口窗口，`1..65535`；`0-0` 表示使用 `/ports` 的全局端口段。至少容纳 `n + m` 个端口（FEC 时为 `carriers`）。远端只记录，不拨号 |
 | `dev` | — | 仅近端：拨号前把每条 carrier socket 用 `SO_BINDTODEVICE` 绑到该网卡，`1..15` 字节。绑定失败按拨号失败处理：`connect_fail` 增加，200 ms 后重试。用于多网卡或代理 TUN 环境强制直连 |
 | `srcaddrs` | — | 逗号分隔的本地源地址；只有第一项被使用 |
 | `nonce` | — | `16` 或 `32` 个 hex 字符：固定会话 nonce；近端本地使用，远端要求对端使用 |
@@ -390,7 +390,7 @@ HELLO 的源地址会成为会话锚：之后来自其他地址的 HELLO 在检�
 | `data_tx`、`retx_frames`、`retx_bytes` | 写出的 DATA 记录数（含副本）/ 副本数 / 副本负载 |
 | `retx_hole`、`retx_slow`、`retx_pathloss`、`retx_other` | 按来源分的副本：补洞（ack 处的记录停顿至少 2×RTO）、慢路径宽限（TCP 已送达，但 3×RTO 后 ack 仍未覆盖）、路径丢失、其它 |
 | `retx_data_ppm`、`dup_bytes_ppm` | 每百万条唯一 DATA 记录中的副本数 / 每百万应用字节中的副本负载 |
-| `port_exhaust`、`port_alloc_fail` | 全局源端口段耗尽 / 端口位图分配失败；载体重试，不会杀死任何东西 |
+| `port_exhaust`、`port_alloc_fail` | 本隧道的源端口窗口耗尽 / 端口位图分配失败；载体重试，不会杀死任何东西 |
 | `join_src_reject`、`join_nonce_reject`、`join_bad`、`join_dup` | HELLO 被锚、首条 HELLO 的来源、nonce 或已占用槽位拒绝 |
 | `ctl_lost`、`ctl_retry`、`ctl_requeue`、`ctl_obsolete`、`ctl_queued` | 被钉住的控制帧：重试上限后的显式丢失、重试、重新入队、过期代、当前队列深度 |
 | `stall_paused_skips`、`win_block`、`win_resume` | 暂停时推迟失效判定 / DATA 在对端窗口门限处被挡住 / 放行 |
@@ -413,6 +413,14 @@ HELLO 的源地址会成为会话锚：之后来自其他地址的 HELLO 在检�
 （4096 个端口 = 256 条载体 × 16 次重建）。
 空行或 `ports 0-0` 是 no-op，不会改变当前端口段。读取该文件会输出端口段、
 它是否已经配置，以及那条指令。
+
+模块维护一张覆盖整个 16 位源端口空间的位图。隧道的 `portblock=` 是这张位图上的
+一个窗口；`0-0` 表示改用这里的全局端口段。窗口可以重叠：它们共享容量，分配器绝不会
+把同一个仍在使用的源端口交给两条载体。因此窗口是搜索范围，不是硬预留；需要隔离时
+请使用互不重叠的窗口。近端窗口至少要容纳每个载体槽一个端口（`n + m`，FEC 时为
+`carriers`），否则整行配置被拒绝。修改 `/ports` 立即影响新分配；已经建立的载体保留
+原端口直到关闭。修改隧道的 `portblock=` 需要重发整条隧道行，这会替换隧道及其会话。
+所有用到的端口段都要写进 `net.ipv4.ip_local_reserved_ports`，不只是全局段。
 
 ## 验证过的性能
 
@@ -581,8 +589,9 @@ cat /etc/tbtun.conf > /proc/net/tbtun/config
   `rtt_us` 远高于 `minrtt_us`，或者 `inflight` 居高不下而 `tx_bytes` 不动。
 - `stats` 里的 `gaps_total` 不为零，说明重排溢出重置了流；
   `holes_unrecoverable` 统计重放环补不上的空洞。
-- `port_exhaust` 上升，说明全局源端口段对当前载体数太小；用 `ports` 加宽它。
-  `port_alloc_fail` 说明端口位图分配失败（`ENOMEM`）；两种情况下载体都会重试。
+- `port_exhaust` 上升，说明全局或本隧道的源端口段对当前载体数太小；用 `ports`
+  加宽它，或加宽该隧道的 `portblock=`。`port_alloc_fail` 说明端口位图分配失败
+  （`ENOMEM`）；两种情况下载体都会重试。
 - `win_block` 上升而 `wire` 停住，说明限制来自对端通告窗口，而不是丢包；
   窗口打开后 `win_resume` 会跟着上升。
 - `join_src_reject` 上升，说明有锚之外的近端源地址在尝试加入；
