@@ -172,6 +172,8 @@ extern struct mutex tbt_lock;
 extern unsigned int debug;
 extern unsigned int max_tunnels;
 extern unsigned int max_carriers;
+/* Peripheral BBR hold, opt-in (module param hold_enable). */
+extern bool tbt_hold_enable;
 
 /* Port block for carrier sources (DESIGN.md §7.2). Owned by tbt_session.c. */
 struct tbt_portmap
@@ -1523,6 +1525,14 @@ struct tbt_carrier
     u64 last_rx_ns;
     u64 last_tx_ns;
     u64 join_deadline_ns;         /* provisional carriers only */
+    /* hold_enable: last good cwnd/pacing captured while the carrier is idle.
+     * The 50 ms poll restores them until real data, loss or the deadline. */
+    u32 hold_cwnd;
+    unsigned long hold_pacing;
+    u64 hold_until_ns;
+    u64 hold_since_ns;
+    u64 hold_last_loss_ns;
+    bool hold_active;
     u64 retry_at_ns;              /* next connect attempt */
     u64 rx_frames;                /* DATA frames received here; this rx work */
     u64 rx_bytes;                 /* bytes received here; this rx work */

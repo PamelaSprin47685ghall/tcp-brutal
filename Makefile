@@ -59,6 +59,9 @@ HOST_TX_INDEX_HDRS := tbtun/tbt_tx_acct.h tbtun/tbt_uapi.h
 HOST_FIN_PRIORITY := host/test_fin_priority
 HOST_FIN_PRIORITY_SRCS := host/test_fin_priority.c
 HOST_FIN_PRIORITY_HDRS := tbtun/tbt_tx_acct.h tbtun/tbt_uapi.h
+HOST_HOLD       := host/test_hold
+HOST_HOLD_SRCS  := host/test_hold.c
+HOST_HOLD_HDRS  := tbtun/tbt_tx_acct.h tbtun/tbt_uapi.h
 HOST_MULTISTREAM := host/test_multistream
 HOST_MULTISTREAM_SRCS := host/test_multistream.c
 HOST_ANCHOR     := host/test_anchor
@@ -105,7 +108,7 @@ check:
 # root, no module and no kernel headers: the grammar test (tbt_parse.c), the
 # hostile-input test (tbt_rec.c + tbt_proto.c) and the HTTP container test
 # (tbt_http.c + tbt_proto.c).
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_PORTMAP)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_PORTMAP)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
@@ -116,6 +119,7 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_TX_PUBLISH)
 	@./$(HOST_TX_INDEX)
 	@./$(HOST_FIN_PRIORITY)
+	@./$(HOST_HOLD)
 	@./$(HOST_MULTISTREAM)
 	@./$(HOST_ANCHOR)
 	@./$(HOST_FEC)
@@ -194,6 +198,9 @@ $(HOST_TX_INDEX): $(HOST_TX_INDEX_SRCS) $(HOST_TX_INDEX_HDRS)
 
 $(HOST_FIN_PRIORITY): $(HOST_FIN_PRIORITY_SRCS) $(HOST_FIN_PRIORITY_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_FIN_PRIORITY_SRCS)
+
+$(HOST_HOLD): $(HOST_HOLD_SRCS) $(HOST_HOLD_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_HOLD_SRCS)
 
 $(HOST_MULTISTREAM): $(HOST_MULTISTREAM_SRCS)
 	$(HOSTCC) $(HOST_CFLAGS) -o $@ $(HOST_MULTISTREAM_SRCS)
@@ -279,7 +286,7 @@ host-test-live: $(HOST_HTTP_LIVE)
 	fi
 
 clean: clean-dkms.conf clean-dkms-tarball
-	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_PORTMAP) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_portmap_san
+	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_PORTMAP) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_portmap_san
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
 
 load:

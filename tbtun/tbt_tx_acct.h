@@ -234,6 +234,27 @@ static inline bool tbt_tx_pump_idle(bool fec, u32 tx_queued, u32 ctl_queued)
     return fec && !tx_queued && !ctl_queued;
 }
 
+/* Peripheral BBR hold state rules (tbt_carrier.c). The kernel only restores
+ * cwnd/pacing; these predicates decide when that is allowed. */
+static inline bool tbt_hold_enter(bool enable, bool app_limited,
+                                  bool no_inflight, bool tbt_idle,
+                                  bool ca_open, bool lost, bool recent_loss,
+                                  u64 idle_since, u64 now, u64 enter_ns)
+{
+    if (!enable || !tbt_idle || !ca_open || lost || recent_loss)
+        return false;
+    if (!app_limited && !no_inflight)
+        return false;
+    return idle_since && now >= idle_since && now - idle_since >= enter_ns;
+}
+
+static inline bool tbt_hold_keep(bool active, bool real_data, bool loss,
+                                 bool wnd_shrunk, u64 now, u64 until_ns)
+{
+    return active && !real_data && !loss && !wnd_shrunk &&
+           (!until_ns || now <= until_ns);
+}
+
 /* Pure path bound: idx must name a slot the session owns and fit the 16-slot
  * retain arrays. No warning here; FEC sessions legally walk 256 slots. */
 static inline bool tbt_tx_path_in_range(unsigned int idx, unsigned int n_car)

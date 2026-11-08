@@ -43,6 +43,13 @@ bool debug_loss;
 module_param(debug_loss, bool, 0444);
 MODULE_PARM_DESC(debug_loss, "Allow carrier drop_ppm (frame loss injection) writes; 0 refuses them");
 
+/* Peripheral BBR hold: the 50 ms carrier poll restores the last good cwnd and
+ * pacing rate while a carrier is idle, so BBR does not start the next burst
+ * from an idle-collapsed window. Opt-in; 0 leaves BBR completely untouched. */
+bool tbt_hold_enable;
+module_param_named(hold_enable, tbt_hold_enable, bool, 0644);
+MODULE_PARM_DESC(hold_enable, "Hold BBR cwnd/pacing across idle periods (0=off)");
+
 // The wire header is defined field by field in DESIGN.md §3.3; a compiler that
 // pads it differently would produce bytes that no peer can parse. Checked at
 // build time, so a layout change cannot reach a running module.
