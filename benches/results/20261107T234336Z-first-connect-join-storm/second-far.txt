@@ -1,0 +1,74 @@
+tunnel 1 c3 n=256 up=0 lost=23 replaced=0 stream_reset_tcp_failed=3 stream_reset_user=0 carrier_add=0 carrier_add_fail=0 backpressure_enter=2 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=0 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=0 una_stall_us=0 stall_paused_skips=0 stall_idle_skips=0 stall_declared=0 stall_recovered=0 stall_drop=0 stall_dead=0 stall_replaced=0 stall_survival_bucket=0 stall_wait_loss_bytes=0 replace_cost_bytes=0 replace_cost_ewma=0 stall_replace_econ=0 stall_replace_retrans=0 stall_replace_dead=0 tx_window=16777216 bdp_bytes=68870 k_x100=500 rtt_mean_us=196551 rttvar_us=393102 rtt_max_us=196551 bdp_sum_rate=333430 bdp_agg_wnd=65536 bdp_n_live=1 bdp_coverage=1 txq_max=16843040 win_block=0 win_resume=0 tx_wait_carrier=0 tx_backpressure=0 tx_wait_carrier_bytes=0 tx_wait_carrier_ns=0 tx_backpressure_bytes=0 tx_backpressure_ns=0 pump_hw_armed=0 pump_hw_fired=0 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0 prov_now=1 prov_peak=13 prov_reject=0 dead_release=0 carrier_retired=6495
+tunnel 1 c10 fec_decode_blocks=0 fec_decode_recovered=0 fec_decode_nomem=0 fec_deliver_nomem=0 fec_deliver_dup=0 fec_deliver_ooo=0 fec_deliver_bad=0 fec_dup_share=0 fec_late_share=0 fec_late_data=0 fec_pad_share=0 fec_dup_marker=0 fec_marker_conflict=0 fec_epoch_conflict=0 fec_slot_past_cut=0 fec_fin_bad=0 fec_ack_bad=0 fec_tx_share_gap=0 fec_empty_block=0
+tunnel 1 c11 fec_nack_tx=0 fec_nack_rx=17 fec_nack_retx=0 fec_nack_drop=0 fec_nack_enomem=0 fec_nack_einval=0 fec_nack_enospc=0 fec_nack_eother=0 fec_nack_bad=0 fec_replay_hit=0 fec_replay_miss=686 fec_replay_miss_no_ring=0 fec_replay_miss_alloc=0 fec_replay_miss_enospc=0 fec_replay_miss_get=686 fec_replay_miss_evicted=0 fec_replay_miss_never_stored=686 fec_nack_sparse_probe=0 fec_nack_empty_reply=0 fec_nack_parity_reply=0 fec_replay_drop=0 fec_nack_retx_bytes=0 fec_replace_retx_bytes=0 fec_nack_lat_ns=0 fec_nack_lat_max_ns=0 fec_nack_repair_ns=0 fec_nack_repair_max_ns=0 fec_reset_tcp_failed=0 fec_reset_user=0 fec_wait_carrier=0 fec_backpressure=0 fec_flush_skip=0 fec_flush_pass=0 fec_hol_wait=0 fec_outq_drop=0 fec_outq_depth=0 fec_outq_max=0 fec_outq_bytes=0 fec_outq_ctl=0 fec_out_ctl_bytes=0 fec_replay_queued=0 fec_replay_bytes=0 fec_replay_skip=0 fec_nack_filtered_ready=0 fec_nack_filtered_inflight=0 fec_nack_filtered_dup=0 fec_nack_filtered_young=0 fec_replay_dedup=0 fec_nack_req_shares=119 fec_nack_backpressure=0 fec_replay_stale=0 fec_fin_wait_replay=0 fec_nack_never_stored=17 fec_nack_absent_reply=0 fec_nack_req_invalid=0 fec_replay_high_water=0 fec_replay_pass_throttled=0 fec_replay_drain_bps=0 fec_replay_queue_high=0 fec_reset_hole=0 tx_stall_suppressed_fec=0 fec_repair_last_ns=144964882582931
+---ss
+Recv-Q Send-Q Local Address:Port   Peer Address:Port 
+104    0         45.11.1.62:9000 171.120.34.226:47206
+	 bbr wscale:3,5 rto:562 rtt:187.296/93.648 ato:40 mss:1400 pmtu:1500 rcvmss:536 advmss:1448 cwnd:10 bytes_received:436 segs_out:2 segs_in:4 data_segs_in:2 bbr:(bw:0bps,mrtt:187.296) send 597984bps lastsnd:4 lastrcv:3 lastack:3 pacing_rate 1707496bps delivered:1 app_limited rcv_space:14480 rcv_ssthresh:1047128 minrtt:187.296 snd_wnd:65536 rcv_wnd:1047936
+---dmesg
+[145132.256759] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145132.266565] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145132.277446] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145132.292133] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145132.351358] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145134.948962] tbt_carrier_adopt: 171 callbacks suppressed
+[145134.949028] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30018, awaiting HELLO
+[145134.987080] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30015, awaiting HELLO
+[145134.993580] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=46836, awaiting HELLO
+[145135.008251] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=46838, awaiting HELLO
+[145135.059566] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=46841, awaiting HELLO
+[145135.086564] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30007, awaiting HELLO
+[145135.110467] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=46842, awaiting HELLO
+[145135.130395] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=46844, awaiting HELLO
+[145135.199200] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=46846, awaiting HELLO
+[145135.222775] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30022, awaiting HELLO
+[145137.108072] tbt_rx_hello_crypto: 175 callbacks suppressed
+[145137.108086] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145137.136840] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145137.150159] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145137.160592] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145137.207493] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145137.220907] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145137.236382] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145137.279065] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145137.300012] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145137.371550] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145139.964530] tbt_carrier_adopt: 175 callbacks suppressed
+[145139.964634] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=47013, awaiting HELLO
+[145139.988478] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=47014, awaiting HELLO
+[145139.998208] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=47017, awaiting HELLO
+[145140.020680] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30008, awaiting HELLO
+[145140.043852] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30011, awaiting HELLO
+[145140.046234] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30004, awaiting HELLO
+[145140.070552] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=47018, awaiting HELLO
+[145140.080285] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30016, awaiting HELLO
+[145140.205298] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=47021, awaiting HELLO
+[145140.205410] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=47022, awaiting HELLO
+[145142.126937] tbt_rx_hello_crypto: 175 callbacks suppressed
+[145142.127099] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145142.180695] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145142.224066] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145142.276089] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145142.312556] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145142.328724] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145142.331462] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145142.333817] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145142.364049] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145142.418052] tbtun: tunnel 1: HELLO crypto resolve failed: crypto key changed (-71)
+[145144.984117] tbt_carrier_adopt: 171 callbacks suppressed
+[145144.984129] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=47199, awaiting HELLO
+[145145.046497] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30002, awaiting HELLO
+[145145.074791] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30010, awaiting HELLO
+[145145.077054] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30035, awaiting HELLO
+[145145.132313] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=47201, awaiting HELLO
+[145145.161685] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=47203, awaiting HELLO
+[145145.185596] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=47204, awaiting HELLO
+[145145.193260] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30016, awaiting HELLO
+[145145.257284] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30008, awaiting HELLO
+[145145.327621] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30025, awaiting HELLO
+---rawlog
+2026-11-07T23:31:59Z GET /accept-1g.bin HTTP/1.1 client gone after sent=8388608 elapsed=0.305: [Errno 32] Broken pipe
+2026-11-07T23:31:59Z GET /accept-1g.bin HTTP/1.1 client gone after sent=8388608 elapsed=0.218: [Errno 32] Broken pipe
+2026-11-07T23:32:33Z GET /accept-1g.bin HTTP/1.1 client gone after sent=8388608 elapsed=0.246: [Errno 32] Broken pipe
+2026-11-07T23:40:15Z listen 127.0.0.1:5210 file=/root/accept-1g/accept-1g.bin size=1073741824 pid=304166
+2026-11-07T23:41:17Z GET /accept-1g.bin HTTP/1.1 client gone after sent=10485760 elapsed=0.331: [Errno 32] Broken pipe

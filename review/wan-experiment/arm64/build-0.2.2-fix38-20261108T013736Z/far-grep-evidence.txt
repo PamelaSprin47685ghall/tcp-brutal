@@ -1,0 +1,16 @@
+=== window step ===
+tbtun/tbt_fec.h:173:tbt_fec_rx_window_step(u64 next_super, u64 block_id, u16 slots, bool rebase,
+tbtun/tbt_fec_data.c:4129:    switch (tbt_fec_rx_window_step(rx->next_super, h.block_id, rx->slots,
+=== rebase_pending ===
+2348:    rx->rebase_pending = true;
+2490:    if (READ_ONCE(rx->rebase_pending))
+2990:    if (READ_ONCE(rx->rebase_pending))
+4114:     * (rebase_pending), and a record of another sid may only move it once the
+4124:    rebase = READ_ONCE(rx->rebase_pending) ||
+4159:        rx->rebase_pending = false;
+=== counters ===
+1237:    atomic64_t fec_drop_window;
+1243:    atomic64_t fec_credit_wait;
+=== warnings/errors ===
+11
+0

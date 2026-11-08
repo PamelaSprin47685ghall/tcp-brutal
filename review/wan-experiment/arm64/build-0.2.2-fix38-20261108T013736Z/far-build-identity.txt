@@ -1,0 +1,9 @@
+# far x86_64 rebuild at 3bfa36b (clean archive)
+build_dir=/root/tbtun-0.2.2-fix38-20261108T013736Z
+sha256=877c960145c389e487bc79bcea0808d6827fc46bdd29eae1d98c477d61a10470
+srcversion=14710CD8DEBA4F5147DEDB4
+vermagic=7.0.0-42-generic SMP preempt mod_unload modversions
+version=0.2.1
+size=8805384
+make_rc=0
+build_log=/root/tbtun-0.2.2-fix38-20261108T013736Z/build-x86_64.log

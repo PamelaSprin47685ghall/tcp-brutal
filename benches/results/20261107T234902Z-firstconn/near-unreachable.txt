@@ -1,0 +1,7 @@
+Sat 07 Nov 2026 11:52:28 PM UTC
+2 packets transmitted, 2 received, 0% packet loss, time 1001ms
+rtt min/avg/max/mdev = 1.879/1.887/1.895/0.008 ms
+bash: connect: Connection refused
+bash: line 1: /dev/tcp/192.168.123.82/22: Connection refused
+192.168.123.82 dev wlp4s0 lladdr 02:51:22:e5:67:53 REACHABLE 
+ssh: connect to host 192.168.123.82 port 22: Connection refused

@@ -1,0 +1,77 @@
+fix38 far build and deployment — summary
+=========================================
+UTC window      : 2026-11-08T01:37:36Z .. 2026-11-08T01:39Z
+source          : HEAD 3bfa36b84f62857af977ea06247dc28ebb9a0ab2
+                  "fix: rebase the FEC RX window on the new stream's first block"
+parent commit   : d82123c fix37
+clean tree      : git archive HEAD -> /tmp/tbtun-fix38-clean-20261108T013736Z
+                  2368 files, no .git, no worktree changes
+version note    : TBT_VERSION_MAJOR 0, MINOR 2, PATCH 1 -> MODULE_VERSION
+                  0.2.1; the tree did not bump the macro
+
+what this commit carries (3bfa36b)
+- The FEC RX reset now clears every cursor and sets rebase_pending
+  (tbtun/tbt_fec_data.c:2348); the new stream's first DATA or PARITY
+  record rebases next_super, highest_block and next_deliver to its own
+  block (:4124-4159). A record of another sid may only move the window
+  once the delivery walk has drained the stream it holds; before the new
+  stream's first delivery a lower block lowers the window to itself, after
+  that the cursor never moves back. A record that arrives before the
+  barrier keeps its smallest block across the reset (:4415-4431).
+- tbt_fec_rx_window_step() (tbtun/tbt_fec.h:173) holds the decision; call
+  tbtun/tbt_fec_data.c:4129; host/test_fec_rx.c:1160-1186 models the
+  inherited cursor dropping block 140 and the rebase accepting it.
+- The field fault it fixes: after an aborted connection was replaced, 1271
+  records were dropped as fec_drop_window (tbtun/tbtun.h:1237) and the peer
+  waited on fec_credit_wait=681 (:1243) with no byte delivered.
+- Wire unchanged from fix36/fix37: TBT_FEC_CONV 0x1005, header 48 bytes.
+
+far (hnd0.kw92.cyou, root@45.11.1.62, 7.0.0-42-generic x86_64)
+  build dir     /root/tbtun-0.2.2-fix38-20261108T013736Z
+  build         rm -f Module.symvers && make -C /lib/modules/$(uname -r)/build M=$PWD modules -j2
+  make_rc       0 (69 log lines, 11 warnings: 9 frame-size + 2 toolchain, 0 errors)
+  sha256        877c960145c389e487bc79bcea0808d6827fc46bdd29eae1d98c477d61a10470
+  srcversion    14710CD8DEBA4F5147DEDB4
+  vermagic      7.0.0-42-generic SMP preempt mod_unload modversions
+  version       0.2.1, size 8805384
+
+deployment
+  pre           fix37 loaded (version 0.2.1, srcversion D4AA099F...);
+                c3 n=32 up=0; 5210 raw sender python3 pid 304166
+  teardown      rmmod rc=0; /proc/net/tbtun gone; 9000 free; raw sender
+                untouched
+  insmod        /root/tbtun-0.2.2-fix38-20261108T013736Z/tbtun.ko
+                max_carriers=256 max_tunnels=1 debug=0 rc=0
+  loaded        version 0.2.1, srcversion 14710CD8DEBA4F5147DEDB4, refcnt=0,
+                debug=0, max_carriers=256, max_tunnels=1
+  ports         printf 'ports 31000-31511\n' > /proc/net/tbtun/ports; rc=0
+  config        32 carriers, written line:
+                tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5210
+                n=4 m=4 fec=on mode=grouped w=8 carriers=32 crypto=on
+                crypto_key=- dup=1 profile=http-kal keepalive=5000
+                drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000
+                hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0
+                tx_retain_bytes=0 portblock=31000-31511
+                nonce=00112233445566778899aabbccddeeff
+                Readback is identical (carrier_stall_ms renders 0, no
+                dev=); 32 carriers do not trigger the rx_reorder_bytes
+                auto-raise.
+  listen        0.0.0.0:9000 (tbtun) and 127.0.0.1:5210 (python3 pid 304166)
+  tunnels       id=1 role=far listening target=127.0.0.1:5210 n=4 m=4 streams=0
+  c3            n=32 up=0 at t0 (01:38:43Z)
+  c10/c11/c12   all zero at t0
+  ubsan/warnings tbtun_warning=0, kernel_warn=0 (dmesg from the load: only
+                "unloaded", "tbtun 0.2.1 loaded", one backpressure line)
+  t20           01:39:04Z: version 0.2.1, srcversion 14710CD8..., debug=0,
+                refcnt=0, 9000/5210 listening, kernel_warn=0, c3 n=32
+                up=32 - the near side reconnected inside the 20 s window
+                (peer behaviour, not a deployment change); at t0 the
+                counter was up=0.
+
+not done (by instruction)
+  no 1 GiB transfer, no DKMS run; no near-side work (far-only task).
+
+evidence
+  review/wan-experiment/arm64/build-0.2.2-fix38-20261108T013736Z/
+    far-build-identity.txt, far-grep-evidence.txt,
+    deploy/far-deploy.txt, deploy/far-final-state.txt, summary.txt
