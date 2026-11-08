@@ -302,7 +302,8 @@ cleanup_traffic() {
 }
 
 latency_phase() { # phase outfile
-    local phase=$1 out=$2 remote=/tmp/perf-direct-lat-$phase.csv
+    local phase=$1 out=$2
+    local remote=/tmp/perf-direct-lat-$phase.csv
     ssh_near_long 900 "rm -f '$remote'
         i=0
         while [ \$i -lt $LAT_ITERS ]; do
@@ -392,7 +393,9 @@ run_window() { # run
     [ -n "$f_freq" ] && f_freq=$(awk -v f="$f_freq" 'BEGIN{printf "%.0f", f/1000}') || f_freq=
 
     valid=1
-    [ "$window" -ge $((SECS - 2)) ] && [ "$window" -le $((SECS + 5)) ] || valid=0
+    # A 60 s window takes 66-73 s on the real hosts: the A/B snapshots and
+    # the sampler stop cost 6-13 s.  Judge the actual window, not the sleep.
+    [ "$window" -ge "$SECS" ] && [ "$window" -le $((SECS + 20)) ] || valid=0
     [ "$app" -gt 0 ] || valid=0
     [ "$alive" = 1 ] || valid=0
     noisy=0

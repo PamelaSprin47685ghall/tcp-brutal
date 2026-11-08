@@ -402,6 +402,11 @@ def write_markdown(path, data):
     lines.append("")
     lines.append("- verdict threshold: %.0f%% (a smaller difference is SAME)"
                  % data["threshold_pct"])
+    if data.get("valid_recomputed"):
+        lines.append("- valid recomputed from window_s/app/wchar/stream_alive "
+                     "with %d..%d s; %d row(s) changed" % (
+                         data.get("secs", 60), data.get("secs", 60) + 20,
+                         data.get("valid_changed", 0)))
     lines.append("- unit: one steady window (one valid CSV row); median across rows")
     lines.append("- dispersion: (max-min)/median over the same rows")
     lines.append("")
@@ -515,6 +520,33 @@ def write_markdown(path, data):
         handle.write("\n".join(lines) + "\n")
 
 
+def recompute_valid(rows, secs):
+    """Re-apply the 60 s window rule to an older runs.csv.
+
+    The scripts used to require 58..65 s, but the real snapshots take
+    66..73 s.  This helper keeps the raw file intact and only rewrites the
+    in-memory valid flag: window in [secs, secs+20], app>0, wchar>0,
+    stream_alive=1.
+    """
+    changed = 0
+    for row in rows:
+        old = str(row.get("valid", "")).strip()
+        window = as_float(row.get("window_s"))
+        app = as_float(row.get("app_bytes"))
+        wchar = as_float(row.get("wchar_bytes"))
+        alive = str(row.get("stream_alive", "")).strip() == "1"
+        new = "1" if (
+            window is not None and secs <= window <= secs + 20
+            and app is not None and app > 0
+            and wchar is not None and wchar > 0
+            and alive
+        ) else "0"
+        if new != old:
+            changed += 1
+        row["valid"] = new
+    return changed
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -524,6 +556,10 @@ def main():
     parser.add_argument("--pairs", default=None, help="A:B,C:D")
     parser.add_argument("--threshold", type=float, default=5.0)
     parser.add_argument("--latency", default=None)
+    parser.add_argument("--recompute-valid", action="store_true",
+                        help="re-apply the window rule to an old runs.csv")
+    parser.add_argument("--secs", type=int, default=60,
+                        help="nominal window for --recompute-valid (default 60)")
     args = parser.parse_args()
 
     rows = load_rows(args.runs)
@@ -531,8 +567,14 @@ def main():
         sys.exit("no rows in %s" % ", ".join(args.runs))
     if args.latency and not os.path.exists(args.latency):
         sys.exit("latency file not found: %s" % args.latency)
+    changed = 0
+    if args.recompute_valid:
+        changed = recompute_valid(rows, args.secs)
     latency = latency_stats(args.latency) if args.latency else None
     data = build(rows, args.threshold, args.baseline, args.pairs, latency)
+    data["valid_recomputed"] = bool(args.recompute_valid)
+    data["valid_changed"] = changed
+    data["secs"] = args.secs
 
     out = args.out or os.path.join(os.path.dirname(os.path.abspath(args.runs[0])), "analysis")
     os.makedirs(out, exist_ok=True)

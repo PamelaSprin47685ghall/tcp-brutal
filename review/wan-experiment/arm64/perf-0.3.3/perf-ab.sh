@@ -598,7 +598,9 @@ run_window() { # version block order run
     rtt_f=$(stat_field "$dir/far-b.txt" c3 rtt_mean_us)
 
     valid=1
-    [ "$window" -ge $((SECS - 2)) ] && [ "$window" -le $((SECS + 5)) ] || valid=0
+    # A 60 s window takes 66-73 s on the real hosts: the A/B snapshots and
+    # the sampler stop cost 6-13 s.  Judge the actual window, not the sleep.
+    [ "$window" -ge "$SECS" ] && [ "$window" -le $((SECS + 20)) ] || valid=0
     [ "$app" -gt 0 ] && [ "$wchar" -gt 0 ] || valid=0
     [ "$alive" = 1 ] || valid=0
 

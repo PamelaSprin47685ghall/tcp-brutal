@@ -134,6 +134,9 @@ cd review/wan-experiment/arm64/perf-0.3.3
 #    drift 仍按文件分别计算
 ./perf-stats.py results/*-ab/runs.csv --out results/analysis
 
+# 旧 runs.csv 的 valid 列按 58..65 s 写成 0 时，用实际窗口重新判定：
+./perf-stats.py <old>/runs.csv --recompute-valid --secs 60 --out <old>/analysis-fixed
+
 #    直连：每次 direct 运行有自己的 latency.csv，逐个分析（不要用 glob
 #    把多个 latency.csv 塞给一个 --latency）
 for d in results/*-direct; do
@@ -168,7 +171,9 @@ block 按 `0.3.0 0.3.1 0.3.2`，第二 block 按 `0.3.2 0.3.1 0.3.0`，用于抵
 
 - 分析单位是一个 60 s 窗口，不是一次 SSH 或一个 10 s 滑窗。
 - 每个版本先取 `valid=1` 且 `noisy=0` 的窗口作为主样本；`valid` 要求
-  `app>0`、`wchar>0`、窗口在 58..65 s、curl 在窗口末仍存活。
+  `app>0`、`wchar>0`、窗口在 **60..80 s**、curl 在窗口末仍存活。真实
+  窗口是 66-73 s：20 s 预热之后的 A/B 快照和 sampler 停止有 6-13 s
+  开销；吞吐按实际 `window_s` 计算，所以窗口偏长不影响速率。
 - 中心用**中位数**，不用均值：一次 carrier stall 可以把均值拉走，中位数
   不动。
 - 离散度同时给两个：
