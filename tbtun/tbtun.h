@@ -1344,6 +1344,9 @@ struct tbt_session
     atomic64_t stall_replace_econ;    /* poll: replaced, economics said so */
     atomic64_t stall_replace_retrans; /* poll: replaced, retrans exhausted */
     atomic64_t stall_replace_dead;    /* poll: replaced, stall_dead backstop */
+    atomic64_t up_rescued;       /* poll: a connected carrier whose HELLO was
+                                  * written but whose OPEN never queued was
+                                  * re-announced (up 0 -> 1) */
     /* Connect latency samples for the replacement cost. Every dialling
      * carrier's work writes them, so both halves are atomic. */
     atomic64_t connect_ns_sum, connect_ns_count;
@@ -1783,6 +1786,10 @@ struct tbt_carrier
     u32 stall_packets_out;        /* packets_out at that moment; the bound
                                    * needs a wire that never moved */
     u64 last_una_move_ns;         /* when snd_una really moved: progress */
+    u64 up_rescue_ns;             /* poll: first sighting of connected +
+                                   * hello_sent + up==0; the rescue waits one
+                                   * interval so a normal HELLO->OPEN window
+                                   * is never touched */
     u64 last_rx_ns;
     u64 last_tx_ns;
     u64 join_deadline_ns;         /* provisional carriers only */

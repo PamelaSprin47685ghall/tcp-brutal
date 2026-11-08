@@ -70,6 +70,10 @@
 /* tcp_retries2 defaults to 15; at that count TCP itself is about to give up,
  * so a wire that has not moved either way is dead. */
 #define TBT_STALL_RETX_MAX 15
+/* A carrier that wrote its HELLO but never queued an OPEN is connected and
+ * invisible to the scheduler. Wait one poll interval before repairing it so
+ * the normal HELLO->OPEN window inside one pump run is never touched. */
+#define TBT_UP_RESCUE_NS (100ULL * NSEC_PER_MSEC)
 /* Growth is paced like a dial: one new carrier per second at most, so a peer
  * that refuses the new index cannot turn growth into a connect storm. */
 #define TBT_CARRIER_ADD_COOLDOWN_MS 1000
@@ -95,6 +99,60 @@ static void tbt_stall_grid_note(struct tbt_session *sess, u64 t_ns,
                                 bool recovered);
 static bool tbt_carriers_all_dead(struct tbt_session *sess);
 static void tbt_carrier_capacity_check(struct tbt_session *sess);
+
+/* Drop every stream's "announced on this slot" mark. A replacement carrier
+ * has a new generation, but the mark stores only its low four bits: a
+ * generation 16, 32, ... greater than the dead one looks identical and
+ * tbt_tx_announce_carrier() would skip the OPEN, leaving a connected carrier
+ * at up=0 forever. The slot changed hands, so the old mark is stale by
+ * definition. Safe from work and softirq: an RCU walk plus an atomic bit
+ * clear, and the worst race with a concurrent OPEN write is one duplicate
+ * OPEN, which the peer's bind treats as idempotent. */
+static void tbt_carrier_unannounce(struct tbt_session *sess, u8 index)
+{
+    struct tbt_stream *st;
+    int i;
+
+    if (index >= TBT_MAX_CARRIERS_LIMIT)
+        return;
+    rcu_read_lock();
+    for (i = 0; i < TBT_STREAM_HT; i++)
+        hlist_for_each_entry_rcu(st, &sess->streams[i], node)
+            clear_bit(index, st->announced_mask);
+    rcu_read_unlock();
+}
+
+/* Repair a carrier that is connected and has written its HELLO, but whose
+ * up flag never came back: the OPEN that tbt_tx_announce_carrier() queued at
+ * HELLO time was refused (the control queue was full) or skipped (the
+ * four-bit generation looked already announced). Nothing else retries that
+ * OPEN, so without this the carrier stays out of the stripe for the rest of
+ * the session while its socket is healthy. Called from the 50 ms poll. */
+static void tbt_carrier_rescue_up(struct tbt_session *sess,
+                                  struct tbt_carrier *c)
+{
+    struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
+    int n, i;
+
+    n = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
+    if (!n)
+    {
+        /* No stream needs an OPEN, so there is nothing left to announce;
+         * the HELLO write branch only left up==0 because it snapshotted a
+         * stream that has since died. The carrier is usable for control
+         * frames, and the next stream announces itself on creation. */
+        atomic_set(&c->up, 1);
+        atomic64_inc(&sess->up_rescued);
+        return;
+    }
+    for (i = 0; i < n; i++)
+    {
+        clear_bit(c->index, snap[i]->announced_mask);
+        tbt_tx_announce(sess, snap[i], GFP_KERNEL);
+        tbt_stream_put(snap[i]);
+    }
+    atomic64_inc(&sess->up_rescued);
+}
 
 /* The effective container for a slot. The M spares of an http-kal tunnel use
  * the drip cadence: same container family, cheaper keep-alive. Both ends derive
@@ -635,6 +693,27 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
         tbt_carrier_sk_put(sk);
         tbt_carrier_lost(sess, c);
         return;
+    }
+    /* A connected carrier with a written HELLO and up==0 is not schedulable:
+     * the OPEN queued at HELLO time was refused (control queue full) or
+     * skipped (four-bit generation looked already announced), and no other
+     * path retries it. Repair it once per poll interval, and only when the
+     * control queue has room, so the retry cannot pile onto the same
+     * backpressure that caused it. */
+    if (READ_ONCE(c->hello_sent) && !atomic_read(&c->up))
+    {
+        if (!c->up_rescue_ns)
+            c->up_rescue_ns = now;
+        else if (now - c->up_rescue_ns > TBT_UP_RESCUE_NS &&
+                 READ_ONCE(sess->ctl_queued) < TBT_CTL_QUEUE_MAX)
+        {
+            c->up_rescue_ns = now;
+            tbt_carrier_rescue_up(sess, c);
+        }
+    }
+    else
+    {
+        c->up_rescue_ns = 0;
     }
     tp = tcp_sk(sk);
     tbt_car_hold_check(c, tp, sk, now);
@@ -2242,6 +2321,11 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c)
     if (!sess || !c || READ_ONCE(sess->closing) || atomic_read(&c->stopping))
         return;
     atomic_set(&c->stopping, 1);
+    /* The replacement has a different generation; drop the four-bit announce
+     * marks for this slot or the new carrier can be mistaken for the old one
+     * and never queue its OPEN (observed: carrier 3 gen 4 lost, replacement
+     * gen 292 = 4 mod 16, up stayed 0). */
+    tbt_carrier_unannounce(sess, c->index);
     c->state = TBT_CAR_STALLED;
     if (!c->lost_counted)
     {

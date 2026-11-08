@@ -1689,7 +1689,13 @@ void tbt_session_retire(struct tbt_session *sess, u8 index, u8 gen)
         return;
     spin_lock(&sess->lock);
     old = sess->car[index];
-    if (old && (old->gen & 0xf) == (gen & 0xf))
+    /* RETIRE names the *peer's* generation of the victim. `old->gen` is this
+     * side's own allocation counter and drifts from the peer's (every failed
+     * or refused dial increments one side only), so comparing it here can
+     * miss the victim -- leaving it to refuse the replacement -- or match a
+     * newer carrier and kill it. `peer_gen` is the generation the peer named
+     * in its HELLO for this slot, which is what the RETIRE body carries. */
+    if (old && (old->peer_gen & 0xf) == (gen & 0xf))
         atomic_set(&old->stopping, 1);
     spin_unlock(&sess->lock);
 }
@@ -1800,6 +1806,13 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
     nsnap = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
     for (i = 0; i < nsnap; i++)
     {
+        /* The stream's announce bookkeeping stores four bits of the carrier
+         * generation. A replacement whose generation is 16, 32, ... greater
+         * than the dead one then looks "already announced" and the OPEN is
+         * never queued, leaving a connected carrier at up=0 forever. The
+         * slot changed generation, so forget the old announcement first. */
+        if (index < TBT_MAX_CARRIERS_LIMIT)
+            clear_bit(index, snap[i]->announced_mask);
         tbt_tx_announce(sess, snap[i], GFP_ATOMIC);
         tbt_carrier_open_target(snap[i]);
         tbt_stream_put(snap[i]);

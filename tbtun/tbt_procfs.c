@@ -761,12 +761,28 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                        tbt_stat_read(&s->tx_work_runs));
             seq_printf(m, "tunnel %llu ws_calls=%llu\n", id,
                        tbt_stat_read(&s->carrier_ws_calls));
-            /* C3: the multi-carrier session's own counters. `up` counts the
-             * carrier slots currently schedulable; `lost` and `replaced` are
-             * the replacement record; `rx_reorder_max_depth` is the deepest
-             * out-of-order backlog ever held, in frames. */
+            /* C3: the multi-carrier session's own counters.
+             *
+             * `up` counts the slots whose carrier has written its HELLO and
+             * whose socket has not been closed. A paused (FEC-stalled)
+             * carrier stays counted: the pause is a scheduling state, not a
+             * death. A stopping carrier also stays counted until the release
+             * closes its socket, because the slot is still owned.
+             *
+             * `replacing` counts slots that hold a carrier which is not up
+             * yet (a replacement dialling, or a joined carrier whose OPEN
+             * has not been written). `empty` counts slots with no carrier:
+             * a near dial that could not allocate, or a far slot whose
+             * carrier was lost and whose replacement has not joined. The
+             * invariant is up + replacing + empty == n at every instant.
+             * A repair therefore moves a slot from `up` to `replacing` (or
+             * `empty` on the far) and back; it does not leak it.
+             *
+             * `lost`/`replaced` are the replacement record;
+             * `rx_reorder_max_depth` is the deepest out-of-order backlog
+             * ever held, in frames. */
             {
-                unsigned int up = 0, n = s->n_car;
+                unsigned int up = 0, replacing = 0, empty = 0, n = s->n_car;
                 u32 max_depth = 0, ooo_bytes = 0, retain_bytes = 0;
                 u32 ooo_frames = 0, max_stall_us = 0;
                 u64 rt_copies, rt_data, rt_unique, app_bytes, dup_copies;
@@ -779,8 +795,12 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                 {
                     struct tbt_carrier *c = READ_ONCE(s->car[k]);
 
-                    if (c && atomic_read(&c->up))
+                    if (!c)
+                        empty++;
+                    else if (atomic_read(&c->up))
                         up++;
+                    else
+                        replacing++;
                 }
                 rcu_read_lock();
                 {
@@ -823,7 +843,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                 dup_bytes_ppm = app_bytes ?
                     min_t(u64, READ_ONCE(s->retx_bytes) * 1000000 / app_bytes,
                           1000000) : 0;
-                seq_printf(m, "tunnel %llu c3 n=%u up=%u lost=%llu replaced=%llu "
+                seq_printf(m, "tunnel %llu c3 n=%u up=%u replacing=%u empty=%u "
+                              "lost=%llu replaced=%llu "
                               "stream_reset_tcp_failed=%llu stream_reset_user=%llu "
                               "carrier_add=%llu carrier_add_fail=%llu "
                               "backpressure_enter=%llu "
@@ -847,7 +868,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "stall_wait_loss_bytes=%llu replace_cost_bytes=%llu "
                               "replace_cost_ewma=%llu "
                               "stall_replace_econ=%llu stall_replace_retrans=%llu "
-                              "stall_replace_dead=%llu "
+                              "stall_replace_dead=%llu up_rescued=%llu "
                               "tx_window=%u bdp_bytes=%u k_x100=%u "
                               "rtt_mean_us=%u rttvar_us=%u "
                               "rtt_max_us=%u bdp_sum_rate=%llu "
@@ -863,7 +884,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "retx_eagain=%llu retx_memshort=%llu retx_wndshort=%llu "
                               "prov_now=%d prov_peak=%u prov_reject=%llu "
                               "dead_release=%u carrier_retired=%llu\n",
-                           id, n, up, tbt_stat_read(&s->carrier_lost),
+                           id, n, up, replacing, empty,
+                           tbt_stat_read(&s->carrier_lost),
                            tbt_stat_read(&s->carrier_replaced),
                            tbt_stat_read(&s->stream_reset_tcp_failed),
                            tbt_stat_read(&s->stream_reset_user),
@@ -907,6 +929,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->stall_replace_econ),
                            tbt_stat_read(&s->stall_replace_retrans),
                            tbt_stat_read(&s->stall_replace_dead),
+                           tbt_stat_read(&s->up_rescued),
                            READ_ONCE(s->tx_window), READ_ONCE(s->bdp_bytes),
                            READ_ONCE(s->k_x100), READ_ONCE(s->rtt_mean_us),
                            READ_ONCE(s->rttvar_us), READ_ONCE(s->rtt_max_us),
