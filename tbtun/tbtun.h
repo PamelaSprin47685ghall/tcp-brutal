@@ -742,6 +742,9 @@ struct tbt_fec_tx
     u64 base_block;
     u32 credit_cap; /* cached credit cap: the ACK path must not read n/m */
     u16 band;       /* parity band of the shape, for the NACK reply */
+    /* The packetizer stopped on the outq high-water mark and re-armed; kept
+     * so the transition is counted once per episode, not once per retry. */
+    bool outq_paused;
     spinlock_t shape_lock;
     struct tbt_fec_grouped *old_codec; /* released on the next swap */
     u8 switch_state;                   /* enum tbt_fec_switch_state */
@@ -959,13 +962,35 @@ struct tbt_fec_outq
     u32 bytes;
 };
 
-/* One carrier may hold at most this many records / bytes. The peer's credit
- * window is the real bound; this keeps one congested carrier from growing
- * without limit. A full credit window (TBT_FEC_CREDIT_MAX packets) gives one
- * carrier at most 256 records even when the session has a single group, so
- * the cap is reachable only by a socket that stopped draining. */
-#define TBT_FEC_OUTQ_DEPTH_MAX 256u
+/* One carrier may hold at most this many records / bytes. This is the hard
+ * cap, the last line of defence: the packetizer stops building new DATA
+ * before any queue reaches the high-water mark, so a healthy session never
+ * gets here. The cap stays above the high-water mark by more than one FEC
+ * block's parity burst (m <= 128), because a block closes by queueing all of
+ * its parity at once. */
+#define TBT_FEC_OUTQ_DEPTH_MAX 384u
 #define TBT_FEC_OUTQ_BYTES_MAX (TBT_FEC_OUTQ_DEPTH_MAX * TBT_FEC_REC_MAX)
+
+/* High-water mark of one carrier's bound queue. The packetizer checks this
+ * before building the next DATA packet and pauses until the carrier drains,
+ * which pushes the pressure into the capture ring and then into the
+ * application. Dropping the record instead is what made a 1 GiB run pay a
+ * 7.8 s NACK repair for 22 shares: the replay ring still had them, but only
+ * after the receiver noticed the gap. */
+#define TBT_FEC_OUTQ_HIGH_DEPTH 160u
+#define TBT_FEC_OUTQ_HIGH_BYTES (TBT_FEC_OUTQ_HIGH_DEPTH * TBT_FEC_REC_MAX)
+
+/* Session-wide bound on bound data records. 256 carriers times the per-
+ * carrier cap would be 1.3 GiB, so the sum has its own record and byte
+ * ceiling. 32 MiB is 7.6 s of queue at the 4.215 MB/s app target: enough to
+ * ride out a burst of slow carriers, bounded regardless of carrier count. */
+#define TBT_FEC_OUTQ_QUEUE_HIGH 2048u
+#define TBT_FEC_OUTQ_QUEUE_BYTES_HIGH (16u * 1024 * 1024)
+/* The hard session ceiling stays one FEC block (n+m <= 256 records) above
+ * the mark: the packetizer checks the mark before a block, and the block
+ * then queues its n+m records without touching the ceiling. */
+#define TBT_FEC_OUTQ_QUEUE_MAX (TBT_FEC_OUTQ_QUEUE_HIGH + TBT_FEC_MAX_SHARES)
+#define TBT_FEC_OUTQ_QUEUE_BYTES_MAX (32u * 1024 * 1024)
 
 /* One NACK may name at most this many shares; the receiver retries the rest.
  * This bounds the work one NACK can create, not the storage it needs. */
@@ -1102,6 +1127,7 @@ struct tbt_session
     struct tbt_fec_outq *fec_outq; /* n_car queues, indexed by the share's carrier */
     u32 fec_out_queued;          /* records on every queue, control included */
     u32 fec_outq_queued;         /* bound data records across carrier queues */
+    u32 fec_outq_bytes;          /* bound data bytes across carrier queues */
     u32 fec_outq_depth_max;      /* high-water per-carrier depth */
     u32 fec_out_ctl_depth;       /* control records queued */
     u32 fec_out_ctl_bytes;       /* control bytes queued */
@@ -1386,6 +1412,10 @@ struct tbt_session
     atomic64_t fec_flush_pass;
     atomic64_t fec_hol_wait;
     atomic64_t fec_outq_drop;
+    /* Packetizer pauses spent waiting for a bound data queue to fall below
+     * its high-water mark. Non-zero proves the backpressure path ran; a
+     * healthy session with no slow carrier keeps it at 0. */
+    atomic64_t fec_outq_high_wait;
     atomic64_t fec_replay_skip; /* replay head found no carrier with room */
     /* NACK/replay repair, reset causes, and the carrier wait that precedes
      * backpressure. The reset counters prove the FEC layer only tears a

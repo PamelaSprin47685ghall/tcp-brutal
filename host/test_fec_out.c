@@ -35,8 +35,14 @@
 #include <string.h>
 
 #define NCAR 8
+#define OUTQ_HIGH_DEPTH 24u
 #define OUTQ_DEPTH_MAX 32u
 #define OUTQ_BYTES_MAX (OUTQ_DEPTH_MAX * REC_LEN)
+#define OUTQ_HIGH_BYTES (OUTQ_HIGH_DEPTH * REC_LEN)
+#define OUTQ_QUEUE_HIGH 200u
+#define OUTQ_QUEUE_BYTES_HIGH (OUTQ_QUEUE_HIGH * REC_LEN)
+#define OUTQ_QUEUE_MAX (OUTQ_QUEUE_HIGH + NCAR)
+#define OUTQ_QUEUE_BYTES_MAX (OUTQ_QUEUE_MAX * REC_LEN)
 #define REPLAY_BYTES_MAX (16u * REC_LEN)
 #define REC_LEN 64u
 #define NACK_REQ_MAX 256u
@@ -92,6 +98,8 @@ struct sched
     struct rec *replay_head;
     struct rec *replay_tail;
     uint32_t queued;
+    uint32_t outq_queued;
+    uint32_t outq_bytes;
     uint32_t ctl_depth;
     uint32_t ctl_bytes;
     uint32_t replay_queued;
@@ -100,6 +108,8 @@ struct sched
     uint64_t flush_pass;
     uint64_t hol_wait;
     uint64_t outq_drop;
+    uint64_t outq_high_wait;
+    bool outq_paused;
     uint64_t replay_skip;
     uint64_t replay_enospc;
     uint64_t replay_drop;
@@ -187,7 +197,9 @@ static int push(struct sched *s, uint16_t carrier, bool control, bool replay,
         return -ENOSPC;
     }
     if (q && (q->depth >= OUTQ_DEPTH_MAX ||
-              q->bytes + r->len > OUTQ_BYTES_MAX))
+              q->bytes + r->len > OUTQ_BYTES_MAX ||
+              s->outq_queued >= OUTQ_QUEUE_MAX ||
+              s->outq_bytes + r->len > OUTQ_QUEUE_BYTES_MAX))
     {
         free(r);
         s->outq_drop++;
@@ -215,6 +227,8 @@ static int push(struct sched *s, uint16_t carrier, bool control, bool replay,
         q_push_tail(q, r);
         q->depth++;
         q->bytes += r->len;
+        s->outq_queued++;
+        s->outq_bytes += r->len;
     }
     s->queued++;
     return 0;
@@ -238,8 +252,18 @@ static void rec_free(struct sched *s, struct outq *q, struct rec *r)
     }
     if (q)
     {
-        q->depth--;
-        q->bytes -= r->len;
+        if (q->depth)
+            q->depth--;
+        if (q->bytes >= r->len)
+            q->bytes -= r->len;
+        else
+            q->bytes = 0;
+        if (s->outq_queued)
+            s->outq_queued--;
+        if (s->outq_bytes >= r->len)
+            s->outq_bytes -= r->len;
+        else
+            s->outq_bytes = 0;
     }
     if (s->queued)
         s->queued--;
@@ -273,6 +297,40 @@ static void sched_free(struct sched *s)
 static bool usable(const struct sched *s, uint16_t idx)
 {
     return s->up[idx] && s->connected[idx] && !s->stalled[idx];
+}
+
+/* Mirrors tbt_fec_tx_outq_high(): any bound data queue at or above its high
+ * water mark, or the session-wide ceiling reached. */
+static bool outq_high(const struct sched *s)
+{
+    int i;
+
+    if (s->outq_queued >= OUTQ_QUEUE_HIGH ||
+        s->outq_bytes >= OUTQ_QUEUE_BYTES_HIGH)
+        return true;
+    for (i = 0; i < NCAR; i++)
+        if (s->q[i].depth >= OUTQ_HIGH_DEPTH ||
+            s->q[i].bytes >= OUTQ_HIGH_BYTES)
+            return true;
+    return false;
+}
+
+/* Mirrors the packetizer's gate in tbt_fec_tx_work_body(): the transition
+ * into a pause is counted once, and the pause lasts until the queues fall
+ * below the mark. */
+static bool packetizer_gate(struct sched *s)
+{
+    if (!outq_high(s))
+    {
+        s->outq_paused = false;
+        return false;
+    }
+    if (!s->outq_paused)
+    {
+        s->outq_paused = true;
+        s->outq_high_wait++;
+    }
+    return true;
 }
 
 /* Mirrors tbt_carrier_send_fec()'s backpressure check. */
@@ -686,6 +744,78 @@ static void case_cap_is_per_carrier(void)
     sched_free(&s);
 }
 
+/* The packetizer stops at the high-water mark instead of letting a queue
+ * reach the cap: the bytes stay in the capture ring (which pauses the
+ * socket), so no DATA record is dropped and no NACK repair is needed. */
+static void case_high_water_backpressure(void)
+{
+    struct sched s;
+    uint32_t wrote;
+    bool again;
+    int i;
+
+    sched_init(&s);
+    for (i = 0; i < (int)OUTQ_HIGH_DEPTH - 1; i++)
+        ok(push(&s, 0, false, false, 0, i) == 0,
+           "fill below the high-water mark", NULL);
+    ok(!packetizer_gate(&s), "below the mark the packetizer runs", NULL);
+    ok_u32((uint32_t)s.outq_high_wait, 0, "no pause counted yet");
+
+    /* The record that reaches the mark is queued, and the gate closes. */
+    ok(push(&s, 0, false, false, 0, 500) == 0,
+       "the record at the mark is still queued", NULL);
+    ok(packetizer_gate(&s), "at the mark the packetizer pauses", NULL);
+    ok_u32((uint32_t)s.outq_high_wait, 1, "one pause counted");
+    ok(packetizer_gate(&s), "the retry still sees the mark", NULL);
+    ok_u32((uint32_t)s.outq_high_wait, 1, "the retry is not a new pause");
+    ok_u32((uint32_t)s.outq_drop, 0, "no record was dropped");
+
+    /* A socket that stops draining keeps the queue; nothing is lost. */
+    s.full[0] = true;
+    wrote = drain_all(&s, &again);
+    ok(again && wrote == 0, "the full carrier keeps its queue", NULL);
+    ok(packetizer_gate(&s), "the gate stays shut while full", NULL);
+    ok_u32(s.q[0].depth, OUTQ_HIGH_DEPTH, "the queue is intact");
+
+    /* It drains: the same episode ends and the packetizer resumes. */
+    s.full[0] = false;
+    wrote = drain_all(&s, &again);
+    ok(!again && wrote == OUTQ_HIGH_DEPTH, "the queue drains", NULL);
+    ok(!packetizer_gate(&s), "below the mark the packetizer resumes", NULL);
+    ok(!s.outq_paused, "the pause episode ended", NULL);
+    ok_u32(s.q[0].depth, 0, "nothing left queued");
+    ok_u32((uint32_t)s.outq_drop, 0, "still no drop");
+    sched_free(&s);
+}
+
+/* The session-wide ceiling is the hard bound when many carriers are slow:
+ * it refuses a record instead of letting the sum grow with the carrier
+ * count, and the refusal is counted. */
+static void case_session_ceiling(void)
+{
+    struct sched s;
+    int n = 0;
+
+    sched_init(&s);
+    /* One record per carrier per round until the session cap is reached. */
+    while (s.outq_queued < OUTQ_QUEUE_MAX)
+    {
+        int err = push(&s, (uint16_t)(n % NCAR), false, false, 0, n);
+
+        if (err)
+            break;
+        n++;
+        ok(n <= (int)OUTQ_QUEUE_MAX, "the session cap bounds the queue",
+           NULL);
+    }
+    ok_u32(s.outq_queued, OUTQ_QUEUE_MAX, "the session cap is the bound");
+    ok(push(&s, 0, false, false, 0, 999) == -ENOSPC,
+       "the record past the session cap is refused", NULL);
+    ok_u32((uint32_t)s.outq_drop, 1, "the refusal is counted");
+    ok(packetizer_gate(&s), "the session cap pauses the packetizer", NULL);
+    sched_free(&s);
+}
+
 /* The sweep visits every carrier and skips only the full one, in any order. */
 static void case_sweep_visits_all(void)
 {
@@ -975,6 +1105,8 @@ int main(void)
     case_eagain_isolated();
     case_control_not_blocked();
     case_cap_is_per_carrier();
+    case_high_water_backpressure();
+    case_session_ceiling();
     case_sweep_visits_all();
     case_replay_spread_and_budget();
     case_replay_fallback();

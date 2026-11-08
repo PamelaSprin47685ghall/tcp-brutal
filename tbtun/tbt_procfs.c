@@ -1151,6 +1151,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "fec_wait_carrier=%llu fec_backpressure=%llu "
                               "fec_flush_skip=%llu fec_flush_pass=%llu "
                               "fec_hol_wait=%llu fec_outq_drop=%llu "
+                              "fec_outq_high_wait=%llu "
                               "fec_outq_depth=%u fec_outq_max=%u "
                               "fec_outq_bytes=%u fec_outq_ctl=%u "
                               "fec_out_ctl_bytes=%u "
@@ -1211,6 +1212,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_flush_pass),
                            tbt_stat_read(&s->fec_hol_wait),
                            tbt_stat_read(&s->fec_outq_drop),
+                           tbt_stat_read(&s->fec_outq_high_wait),
                            qdepth, qmax, qbytes, qctl, qctl_bytes, rq, rb,
                            tbt_stat_read(&s->fec_replay_skip),
                            tbt_stat_read(&s->fec_nack_filtered_ready),

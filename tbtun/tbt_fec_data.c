@@ -212,10 +212,22 @@ static void tbt_fec_out_free(struct tbt_session *sess, struct tbt_fec_outq *q,
     }
     if (q)
     {
-        q->depth--;
-        q->bytes -= o->len;
+        /* Guard both counters: a double free or a mismatched queue must not
+         * wrap them. A wrapped byte count makes every later push look full
+         * (the 1 GiB field run dropped 22 shares while its depth high-water
+         * stayed at 99, which is exactly that signature). */
+        if (q->depth)
+            q->depth--;
+        if (q->bytes >= o->len)
+            q->bytes -= o->len;
+        else
+            q->bytes = 0;
         if (sess->fec_outq_queued)
             sess->fec_outq_queued--;
+        if (sess->fec_outq_bytes >= o->len)
+            sess->fec_outq_bytes -= o->len;
+        else
+            sess->fec_outq_bytes = 0;
     }
     if (sess->fec_out_queued)
         sess->fec_out_queued--;
@@ -300,12 +312,16 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier, const u8 *buf
         kfree(o);
         return -ENOSPC;
     }
-    /* A full carrier queue drops this record only: the replay ring already
-     * holds the share, so the receiver's NACK repairs it. Blocking the
-     * packetizer here would let one congested carrier stall every other
-     * carrier, which is the defect this queue split exists to remove. */
+    /* These are the hard caps, not the normal stop: the packetizer pauses at
+     * TBT_FEC_OUTQ_HIGH_* and pushes the pressure into the capture ring, so a
+     * record reaches this branch only if the pause was bypassed (a parity
+     * burst larger than the margin, or a shape switch). The replay ring still
+     * holds the share and a NACK repairs it, but every hit is a multi-second
+     * repair, so it stays counted and visible. */
     if (q && (q->depth >= TBT_FEC_OUTQ_DEPTH_MAX ||
-              q->bytes + len > TBT_FEC_OUTQ_BYTES_MAX))
+              q->bytes + len > TBT_FEC_OUTQ_BYTES_MAX ||
+              sess->fec_outq_queued >= TBT_FEC_OUTQ_QUEUE_MAX ||
+              sess->fec_outq_bytes + len > TBT_FEC_OUTQ_QUEUE_BYTES_MAX))
     {
         spin_unlock(&sess->fec_out_lock);
         kfree(o);
@@ -356,6 +372,7 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier, const u8 *buf
         q->depth++;
         q->bytes += len;
         sess->fec_outq_queued++;
+        sess->fec_outq_bytes += len;
         if (q->depth > sess->fec_outq_depth_max)
             sess->fec_outq_depth_max = q->depth;
     }
@@ -1553,6 +1570,41 @@ static bool tbt_fec_tx_credit_ok(const struct tbt_fec_tx *tx)
     return seq - acked < (u64)credit;
 }
 
+/* Any bound data queue at or above its high-water mark. The packetizer
+ * checks this before it builds the next packet: pausing there pushes the
+ * pressure into the capture ring, which pauses the socket once full
+ * (tbt_fec_tx_submit), so the sender never drops a share it would have to
+ * repair with a NACK round trip. The hard caps in tbt_fec_out_push() remain
+ * as the last line of defence. */
+static bool tbt_fec_tx_outq_high(struct tbt_session *sess)
+{
+    bool high = false;
+    u16 i;
+
+    if (!sess->fec_outq)
+        return false;
+    spin_lock(&sess->fec_out_lock);
+    if (sess->fec_outq_queued >= TBT_FEC_OUTQ_QUEUE_HIGH ||
+        sess->fec_outq_bytes >= TBT_FEC_OUTQ_QUEUE_BYTES_HIGH)
+        high = true;
+    else
+    {
+        for (i = 0; i < sess->n_car; i++)
+        {
+            struct tbt_fec_outq *q = &sess->fec_outq[i];
+
+            if (q->depth >= TBT_FEC_OUTQ_HIGH_DEPTH ||
+                q->bytes >= TBT_FEC_OUTQ_HIGH_BYTES)
+            {
+                high = true;
+                break;
+            }
+        }
+    }
+    spin_unlock(&sess->fec_out_lock);
+    return high;
+}
+
 static bool tbt_fec_tx_is_idle(struct tbt_session *sess)
 {
     struct tbt_fec_tx *tx = sess->fec_tx;
@@ -1738,6 +1790,22 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
              tx->switch_state == TBT_FEC_SW_DRAIN) &&
             tx->seq >= tx->switch_pkt)
             break;
+        /* A bound data queue is behind. Stop building new DATA until it
+         * drains: the bytes stay in the capture ring, which pauses the
+         * socket when full. Dropping the record instead costs a NACK round
+         * trip (7.8 s measured at 1 GiB), and the peer sees the gap only
+         * after the block's other shares arrive. */
+        if (tbt_fec_tx_outq_high(sess))
+        {
+            if (!tx->outq_paused)
+            {
+                tx->outq_paused = true;
+                atomic64_inc(&sess->fec_outq_high_wait);
+            }
+            tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
+            break;
+        }
+        tx->outq_paused = false;
         spin_lock(&tx->lock);
         got = tbt_fec_ring_get(tx, tx->pkt + tx->fill, TBT_FEC_S - tx->fill);
         if (got)
@@ -1784,6 +1852,7 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
     /* While a switch drains, the partial packet must wait for the new shape:
      * closing the block here would advance seq past P0 behind the swap. */
     if (short_ready && !READ_ONCE(tx->flush_req) &&
+        !tbt_fec_tx_outq_high(sess) &&
         tx->switch_state != TBT_FEC_SW_CFG_SENT &&
         tx->switch_state != TBT_FEC_SW_DRAIN)
     {
@@ -1958,6 +2027,7 @@ static void tbt_fec_tx_swap(struct tbt_session *sess)
     tx->short_at_ns = 0;
     tx->carrier_wait = false;
     tx->backpressure_counted = false;
+    tx->outq_paused = false;
     tx->switch_state = TBT_FEC_SW_STEADY;
     tbt_fec_adapt_applied(tx->adapt, ktime_get_ns());
     atomic64_inc(&sess->fec_switch_done);
