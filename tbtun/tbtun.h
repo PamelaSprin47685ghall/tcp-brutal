@@ -1384,6 +1384,7 @@ struct tbt_session
     atomic64_t retired_tx_bytes, retired_data_frames, retired_retx_data;
     u64 carrier_bytes, carrier_err, carrier_short; /* pump (tbt_carrier_xmit) */
     atomic64_t carrier_ws_calls;
+    atomic64_t carrier_nospace_armed; /* FEC/ARQ EAGAIN armed SOCK_NOSPACE */
     u64 pump_hw_armed, pump_hw_disarmed; /* pump only */
     atomic64_t pump_hw_fired;            /* per-carrier pump work */
     u64 dropped_by_ppm;                  /* pump only */

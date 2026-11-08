@@ -1333,6 +1333,15 @@ static int tbt_carrier_part_flush(struct tbt_carrier *c, struct sock *sk)
  * tail in c->part; the next writer on this carrier flushes it before any new
  * bytes, so records stay in order and a control frame is never spliced into
  * the middle of a DATA record. */
+static void tbt_carrier_arm_nospace(struct tbt_carrier *c, struct sock *sk)
+{
+    if (sk && sk->sk_socket)
+    {
+        set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
+        atomic64_inc(&c->sess->carrier_nospace_armed);
+    }
+}
+
 static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
                                   const void *data, size_t len)
 {
@@ -1352,19 +1361,35 @@ static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
         return -EINVAL;
     err = tbt_carrier_part_flush(c, sk);
     if (err)
+    {
+        if (err == -EAGAIN)
+            tbt_carrier_arm_nospace(c, sk);
         return err;
+    }
     wmem = READ_ONCE(sk->sk_wmem_queued);
     sndbuf = READ_ONCE(sk->sk_sndbuf);
     mem_avail = sndbuf > wmem ? sndbuf - wmem : 0;
     if (mem_avail < len)
+    {
+        /* The batch needs its whole byte range to fit, so this can refuse
+         * while sk_stream_memory_free() is still true.  Arm SOCK_NOSPACE:
+         * the next ACK calls tbt_car_write_space(), which kicks the FEC
+         * drain immediately.  The drain keeps its 2 ms timer as the bounded
+         * fallback for a stack that never calls back. */
+        tbt_carrier_arm_nospace(c, sk);
         return -EAGAIN;
+    }
     iov_iter_kvec(&msg.msg_iter, ITER_SOURCE, &iov, 1, len);
     msg.msg_flags = MSG_DONTWAIT;
     lock_sock(sk);
     err = tcp_sendmsg_locked(sk, &msg, len);
     release_sock(sk);
     if (err < 0)
+    {
+        if (err == -EAGAIN)
+            tbt_carrier_arm_nospace(c, sk);
         return err == -EAGAIN ? -EAGAIN : err;
+    }
     if ((size_t)err < len)
     {
         memcpy(c->part, (const u8 *)data + err, len - (size_t)err);
