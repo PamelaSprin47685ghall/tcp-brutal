@@ -283,6 +283,7 @@ host/test_fec_out_san
 host/test_fec_rx
 host/test_fec_rx_san
 host/test_fin_priority
+host/test_hold
 host/test_tx_index
 host/test_tx_publish
 host/test_portmap
