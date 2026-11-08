@@ -3,6 +3,32 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.2.4] - 2026-11-08
+
+### Fixed
+
+- The FEC packetizer backpressures the bound data queues instead of dropping
+  records. The 0.2.3 gate lost 22 DATA shares to `fec_outq_drop` on far: one
+  carrier's queue reached its cap while nine carriers were still draining,
+  and each lost share cost a NACK round trip (one repair measured 7.8 s). The
+  packetizer now stops before it builds the next DATA packet when any bound
+  queue is at its high-water mark (160 records / 1.3 MiB per carrier, 2048
+  records / 16 MiB per session) and re-arms in 2 ms; the bytes stay in the
+  capture ring, which pauses the socket when full, so the pressure reaches
+  the application and no record is dropped. The hard caps remain as the last
+  line of defence, one FEC block above the mark (384 per carrier, 2304 per
+  session, 32 MiB), and every hit is still counted.
+- The per-queue depth and byte accounting is guarded against underflow: a
+  wrapped byte count made every later push look full, which matches the field
+  signature (22 drops while the depth high-water stayed at 99).
+- `fec_outq_high_wait` counts packetizer pause episodes; a healthy session
+  keeps it at 0.
+
+### Wire
+
+- `TBT_FEC_CONV` is unchanged. 0.2.4 changes TX queue policy and counters
+  only, so 0.2.3 and 0.2.4 interoperate.
+
 ## [0.2.3] - 2026-11-08
 
 ### Changed
