@@ -1623,6 +1623,46 @@ int main(void)
     /* 24d. dev= interface bind. */
     test_dev_cfg();
 
+    /* 24e. mode=sc-ldpc: L is rendered only for mode 3, adaptive defaults
+     * off, and both directions round-trip through the canonical line. */
+    {
+        static const char *const down =
+            "tunnel 2 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
+            " n=128 m=128 fec=on mode=sc-ldpc w=256 carriers=256";
+        static const char *const up =
+            "tunnel 2 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
+            " n=8 m=24 fec=on mode=sc-ldpc w=128 carriers=256 L=16";
+        char once[TBT_LINE_MAX * 2], twice[TBT_LINE_MAX * 2];
+        struct tbt_cmd again;
+
+        parse(down, &cmd, &perr);
+        ok(cmd.cfg.mode == 3 && cmd.cfg.w == 256 && cmd.cfg.n == 128 &&
+               cmd.cfg.m == 128 && cmd.cfg.L == 0,
+           "downlink sc-ldpc shape parsed", NULL);
+        ok(cmd.cfg.adaptive == 0, "mode=3 defaults adaptive off", NULL);
+        tbt_render_cfg(&cmd.cfg, once, sizeof(once));
+        ok(strstr(once, " L=0") != NULL, "L is rendered for mode 3", once);
+        parse(once, &again, &perr);
+        tbt_render_cfg(&again.cfg, twice, sizeof(twice));
+        ok(!strcmp(once, twice), "downlink sc-ldpc line is a fixed point", twice);
+
+        parse(up, &cmd, &perr);
+        ok(cmd.cfg.mode == 3 && cmd.cfg.w == 128 && cmd.cfg.n == 8 &&
+               cmd.cfg.m == 24 && cmd.cfg.L == 16,
+           "uplink sc-ldpc shape parsed", NULL);
+        ok(cmd.cfg.adaptive == 0, "uplink mode=3 defaults adaptive off", NULL);
+        tbt_render_cfg(&cmd.cfg, once, sizeof(once));
+        ok(strstr(once, " L=16") != NULL, "uplink L is rendered", once);
+        parse(once, &again, &perr);
+        tbt_render_cfg(&again.cfg, twice, sizeof(twice));
+        ok(!strcmp(once, twice), "uplink sc-ldpc line is a fixed point", twice);
+
+        refuse("sc-ldpc adaptive", "tunnel 1 role=near listen=10.0.0.1:1"
+               " peer=10.0.0.2:2 n=128 m=128 fec=on mode=sc-ldpc"
+               " adaptive=on carriers=256",
+               TBT_PARSE_EINVAL, "adaptive", "does not adapt");
+    }
+
     /* 25. The frozen /proc/net/tbtun/http text contract. */
     test_http_contract();
 
