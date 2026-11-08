@@ -1860,3 +1860,12 @@ int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
         return -EINVAL;
     return 0;
 }
+
+#ifndef __KERNEL__
+/* Host-only: bench_micro times the encoder's XOR inner loop without the
+ * codec around it. The module build does not compile this. */
+void tbt_fec_host_xor_into(u8 *dst, const u8 *src, size_t len)
+{
+    tbt_xor_into(dst, src, len);
+}
+#endif
