@@ -21,8 +21,12 @@ FAR_PORT=${FAR_PORT:-5210}
 TUNNEL=${TUNNEL:-1}
 SSH_TMO=${SSH_TMO:-20}
 PROC_ROOT=${PROC_ROOT:-/proc/net/tbtun}
-CARRIER_PORT_MIN=${CARRIER_PORT_MIN:-31000}
-CARRIER_PORT_MAX=${CARRIER_PORT_MAX:-31511}
+# Carrier topology (0.3.3): near dials far:9000 from its local source ports
+# 30000-30511. The far listen block is not the near source block, and ss on
+# near shows the source port, so filter on that side of the connection.
+CARRIER_SPORT_MIN=${CARRIER_SPORT_MIN:-30000}
+CARRIER_SPORT_MAX=${CARRIER_SPORT_MAX:-30511}
+CARRIER_DPORT=${CARRIER_DPORT:-9000}
 STREAM_SECONDS=${STREAM_SECONDS:-60}
 EVIDENCE_ROOT=${EVIDENCE_ROOT:-$QA_REPO/review/wan-experiment/arm64}
 REMOTE_QA=${REMOTE_QA:-/root/tbtun-qa}
@@ -285,13 +289,15 @@ qa_preflight() {
 
 qa_carrier_conns() { # near-side established carrier TCP: "lport rport"
     qa_ssh near "ss -Htn state established dst $FAR_IP 2>/dev/null" 2>/dev/null |
-        awk -v lo="$CARRIER_PORT_MIN" -v hi="$CARRIER_PORT_MAX" '
-            NF >= 5 {
-                lp = $4; rp = $5
+        awk -v lo="$CARRIER_SPORT_MIN" -v hi="$CARRIER_SPORT_MAX" \
+            -v dp="$CARRIER_DPORT" '
+            # ss -Htn prints four columns (no State): recvq sendq local peer.
+            NF >= 4 {
+                lp = $(NF - 1); rp = $NF
                 sub(/.*:/, "", lp)
                 sub(/.*:/, "", rp)
                 if (lp ~ /^[0-9]+$/ && rp ~ /^[0-9]+$/ &&
-                    rp >= lo && rp <= hi)
+                    lp >= lo && lp <= hi && rp == dp)
                     print lp, rp
             }'
 }
@@ -299,17 +305,19 @@ qa_carrier_conns() { # near-side established carrier TCP: "lport rport"
 qa_carrier_kill() { # lport rport - tcp_abort on the near side
     qa_ssh near "ss -K 'sport = :$1' 'dport = :$2' >/dev/null 2>&1" &&
         return 0
-    qa_ssh near "ss -K 'dport = :$2' >/dev/null 2>&1" && return 0
+    # The far dport (9000) is shared by every carrier, so a dport-only
+    # filter would kill the whole pool. Retry on the unique near sport.
+    qa_ssh near "ss -K 'sport = :$1' >/dev/null 2>&1" && return 0
     return 1
 }
 
 qa_rst_add() { # far-side RST rejection for the carrier port block
-    qa_ssh far "iptables -w 5 -I INPUT -p tcp --dport $CARRIER_PORT_MIN:$CARRIER_PORT_MAX -j REJECT --reject-with tcp-reset" \
+    qa_ssh far "iptables -w 5 -I INPUT -p tcp --dport $CARRIER_DPORT -j REJECT --reject-with tcp-reset" \
         >/dev/null 2>&1
 }
 
 qa_rst_del() {
-    qa_ssh far "iptables -w 5 -D INPUT -p tcp --dport $CARRIER_PORT_MIN:$CARRIER_PORT_MAX -j REJECT --reject-with tcp-reset" \
+    qa_ssh far "iptables -w 5 -D INPUT -p tcp --dport $CARRIER_DPORT -j REJECT --reject-with tcp-reset" \
         >/dev/null 2>&1
 }
 
