@@ -20,13 +20,31 @@
 
 ## 2. 集成 gap（必须由数据面 owner 处理）
 
-1. **`tbt_fec_cfg_unpack()` 的 `w >= k` 检查会拒绝 SC-LDPC 的 w=256/k=500**
-   （`tbtun/tbt_fec.c:790`：`if (!c->k || c->w < c->k || ...) return -EPROTO;`）。
-   数据面 owner 必须按 codec 放宽该校验，或改用另一种 k 编码；不能让
-   FEC_CFG 在接收端先于 codec 建立就被静默拒绝。
+状态（0.3.0 接线，commit e029909 / fbcc21a / b7f570f）：gap 1 已解决；
+数据面 `mode=3` 已接线（下行二进制单组、上行 GF(16) grouped），
+per-direction INIT 已实现，adaptive 在 mode=3 强制 off。
+
+1. ~~**`tbt_fec_cfg_unpack()` 的 `w >= k` 检查会拒绝 SC-LDPC 的 w=256/k=500**~~
+   已解决：unpack 按 (d, k vs w) 区分三种编码——RLNC `d>=1, k<=w`；
+   下行二进制 `d=0, k∈100..1000`（k 是千分码率）；上行 GF(16)
+   `k>w`（k=block, w=L, d=rate/256）。codec 工厂仍是精确参数集的权威。
 2. **连续 codeword-major 映射未实现、未测。** 当前只支持交错 bit-plane；
    原型 `--corr` 的 118.99 MB/s 只属于交错口径，不要拿它当连续映射的数字，
    也不要混用两种布局的恢复率。
+
+### 2.1 接线后新增的残余风险
+
+- **L 不在 wire**：FEC_CFG 没有 codec/L 字段（0x1006 reserved 不动）。
+  上行 L 由本地 session 配置提供；两端 L 不同会静默解错，无检测。
+  0.3.1 若把 L 放进 CFG，需要新 conv 或复用 reserved。
+- **短块放大**：2 ms 静默关闭一个块时，SC-LDPC 仍发满 m 个 parity
+  （下行 128 条 ≈ 1 MiB，上行 24 条）。码率 0.5 只在满块成立。
+- **NACK 修复粒度**：下行 256-share 块在 p=0.5 时一次 NACK 最多 64 share，
+  修复需要多轮；30 s stall 预算可能先到。
+- **解码成本**：下行一次块解码 128 batch；本机 109–119 MB/s，HND0
+  8–11 MB/s。失败后退避 20→200 ms（`fec_decode_backoff`）。
+- **INIT epoch=1**：0.3.0 adaptive off，无冲突；0.3.1 的切换 epoch 必须
+  从 2 起，或把 INIT 与切换 epoch 分开。
 
 ## 3. 性能口径
 
