@@ -1466,9 +1466,7 @@ int tbt_carrier_send_fec_batch(struct tbt_carrier *c,
     if (c->profile == 3)
     {
         cap = (size_t)count * TBT_HTTP_FEC_FRAME_MAX;
-        buf = count == 1 ? c->fec_frame
-                         : kmalloc_array(count, TBT_HTTP_FEC_FRAME_MAX,
-                                         GFP_KERNEL);
+        buf = kmalloc_array(count, TBT_HTTP_FEC_FRAME_MAX, GFP_KERNEL);
         if (!buf)
         {
             err = -ENOMEM;
@@ -1493,9 +1491,7 @@ int tbt_carrier_send_fec_batch(struct tbt_carrier *c,
         if (err)
             goto out;
         cap = (size_t)count * TBT_HTTP_FEC_FRAME_MAX;
-        buf = count == 1 ? c->fec_frame
-                         : kmalloc_array(count, TBT_HTTP_FEC_FRAME_MAX,
-                                         GFP_KERNEL);
+        buf = kmalloc_array(count, TBT_HTTP_FEC_FRAME_MAX, GFP_KERNEL);
         if (!buf)
         {
             err = -ENOMEM;
@@ -1528,7 +1524,7 @@ int tbt_carrier_send_fec_batch(struct tbt_carrier *c,
     }
 
 out_free:
-    if (buf && buf != c->fec_frame)
+    if (buf)
         kfree(buf);
 out:
     mutex_unlock(&c->tx_lock);
@@ -1811,7 +1807,6 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
     c->sess = sess;
     c->http_tx = kmalloc(TBT_HTTP_FRAME_MAX, GFP_KERNEL);
     c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX, GFP_KERNEL);
-    c->fec_frame = kmalloc(TBT_HTTP_FEC_FRAME_MAX, GFP_KERNEL);
     c->part = kmalloc(TBT_CAR_PART_MAX, GFP_KERNEL);
     /* Zeroed is the defined initial state: have == 0 for the parser and a
      * SIZE-state chunk parser for the assembler. kmalloc() would hand the
@@ -1819,8 +1814,8 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
      * then drives an unbounded memmove() in tbt_http_rx_parse(). */
     c->parser = kzalloc(sizeof(*c->parser), GFP_KERNEL);
     c->http_rx = kzalloc(sizeof(*c->http_rx), GFP_KERNEL);
-    if (!c->http_tx || !c->http_hdr || !c->fec_frame || !c->part ||
-        !c->parser || !c->http_rx)
+    if (!c->http_tx || !c->http_hdr || !c->part || !c->parser ||
+        !c->http_rx)
     {
         /* ctor-fail: never linked, so the helper's unlink is a no-op. */
         tbt_carrier_free(c);
@@ -2473,7 +2468,6 @@ void tbt_carrier_free(struct tbt_carrier *c)
     list_del_init(&c->release_node);
     kfree(c->http_tx);
     kfree(c->http_hdr);
-    kfree(c->fec_frame);
     kfree(c->part);
     kfree(c->parser);
     kfree(c->http_rx);
