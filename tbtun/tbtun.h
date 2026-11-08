@@ -32,6 +32,8 @@
 
 /* Wire constants, /proc names and the version live in the shared header. */
 #include "tbt_uapi.h"
+/* The adaptive shape/switch structs and their mapping helpers. */
+#include "tbt_fec.h"
 #include <linux/version.h>
 
 /* system_dfl_wq exists from 6.5. Its documented semantics are "unbound, not
@@ -598,8 +600,16 @@ struct tbt_fec_blk
     bool decoding;    /* w_fec_rx owns this block: no second decoder */
     bool empty;       /* PARITY marker with win_len == 0 */
     bool win_len_set; /* a PARITY record fixed win_len/short_len */
-    u8 *data;     /* n * s bytes */
-    u8 *parity;   /* m * s bytes */
+    /* One shape-invariant buffer of (n+m)*s bytes. A switch only re-slices
+     * data/parity inside it: Phase 1 keeps n+m = 8, so the allocation never
+     * changes. */
+    u8 *buf;
+    u8 *data;     /* n * s bytes: buf[0..n*s) */
+    u8 *parity;   /* m * s bytes: buf[n*s..(n+m)*s) */
+    /* The estimator's evidence for this block: bit i marks DATA share i as
+     * needing repair (parity recovered it or a NACK named it). */
+    u32 miss_mask;
+    bool judged;  /* already folded into tbt_fec_est_super() */
     u8 *dpresent; /* n flags */
     u8 *ppresent; /* m flags */
     u16 *dlen;    /* n payload lengths */
@@ -622,6 +632,7 @@ struct tbt_fec_blk
  * shared by all groups because the packetizer is one ordered stream. */
 struct tbt_fec_gtx
 {
+    u8 *buf; /* (n+m)*s bytes: blk and par are slices of it */
     u8 *blk; /* n * s bytes: this group's current block */
     u8 *par; /* m * s bytes: this group's parity scratch */
     /* Block this group's nreal/last_len belong to. A block that already
@@ -641,6 +652,8 @@ struct tbt_fec_gtx
 
 struct tbt_fec_replay;
 struct tbt_fec_nack_state;
+struct tbt_fec_adapt;
+struct tbt_fec_est;
 
 struct tbt_fec_tx
 {
@@ -716,6 +729,39 @@ struct tbt_fec_tx
      * carriers nor the packetizer. Allocated in tbt_fec_data_init(). */
     struct tbt_fec_drain *drain;
     u16 ndrain;
+    /* Adaptive shape (0.3.0). base_pkt/base_block are the relative origin of
+     * the shape in force; the mapping helpers in tbt_fec.h use them.
+     * shape_lock protects the shape fields the carrier RX path reads (the
+     * NACK handler); the packetizer is the only writer and runs in w_fec_tx. */
+    u64 base_pkt;
+    u64 base_block;
+    u32 credit_cap; /* cached credit cap: the ACK path must not read n/m */
+    spinlock_t shape_lock;
+    struct tbt_fec_grouped *old_codec; /* released on the next swap */
+    u8 switch_state;                   /* enum tbt_fec_switch_state */
+    u8 switch_retries;
+    u32 switch_epoch;
+    u64 switch_pkt;   /* P0: first new-shape record */
+    u64 switch_block; /* B0: first new-shape block id */
+    u64 switch_start_ns;
+    u64 switch_cfg_ns; /* last CFG (re)transmission */
+    struct tbt_fec_shape switch_shape;
+    /* Control law state (tbt_fec_adapt.h). Allocated in init so this header
+     * stays independent of the pure logic module. */
+    struct tbt_fec_adapt *adapt;
+    /* Peer report from FEC_FBK plus the local residual counters. */
+    u32 peer_p_ppm;
+    u16 peer_expected;
+    u16 peer_received;
+    u32 peer_epoch;
+    u8 peer_flags;
+    bool peer_est_valid;
+    u64 peer_est_ns;
+    u64 nack_req_shares; /* DATA shares named in received NACKs, total */
+    u64 data_pkts_sent;  /* DATA packets emitted, total */
+    u64 fail_win_ns;     /* start of the current r_fail window */
+    u64 fail_req_last;
+    u64 fail_pkts_last;
 };
 
 struct tbt_session;
@@ -838,6 +884,34 @@ struct tbt_fec_rx
     u64 rtt_sample_ns;   /* last carrier RTT sample */
     u32 rtt_us;          /* largest carrier RTT: the replay path's bound */
     u32 nack_cadence_ms; /* adaptive retry interval, 20..500 ms */
+    /* Adaptive shape (0.3.0). The shape fields are read and written under
+     * rx->lock: a carrier places a share while w_fec_rx may apply a switch. */
+    u64 base_pkt;
+    u64 base_block;
+    u32 epoch; /* committed configuration generation */
+    struct tbt_fec_shape shape;
+    struct tbt_fec_shape prev_shape;
+    u64 prev_base_pkt;
+    u64 prev_base_block;
+    struct tbt_fec_grouped *old_codec; /* kept until the new shape commits */
+    u8 switch_state;                   /* STEADY/PREP/ARMED/APPLIED */
+    u64 switch_pkt;
+    u64 switch_block;
+    u64 switch_start_ns;
+    struct tbt_fec_cfg pending_cfg;
+    bool cfg_pending;
+    /* Estimator (tbt_fec_adapt.h), owned by w_fec_rx. */
+    struct tbt_fec_est *est;
+    u8 alive_bm[TBT_FEC_BITMAP_BYTES];
+    atomic64_t abandoned_shares; /* counted by blk_reset, folded by w_fec_rx */
+    u64 est_abandoned_last;
+    bool est_paused;
+    u64 pause_start_ns;
+    u64 fbk_last_ns;
+    u8 fbk_flags; /* flags owed on the next report */
+    /* The stream's first shape, for FIN alignment across a switch. */
+    u64 stream_span;
+    u64 stream_base_pkt;
 };
 
 /* One queued FEC record waiting for a carrier. Control records may be sent on
@@ -931,17 +1005,17 @@ enum tbt_fec_adapt_state
     TBT_FEC_ADAPT_COOLDOWN,
 };
 
-enum tbt_fec_adapt_reason
+enum tbt_fec_adapt_ctl_reason
 {
-    TBT_FEC_ADAPT_R_NONE = 0,
-    TBT_FEC_ADAPT_R_OFF,       /* adaptive=off: the configured shape is fixed */
-    TBT_FEC_ADAPT_R_IDLE,      /* application idle: p frozen */
-    TBT_FEC_ADAPT_R_CARRIER,   /* fewer than 90% of carriers alive */
-    TBT_FEC_ADAPT_R_ABANDONED, /* abandoned/sent above 1% */
-    TBT_FEC_ADAPT_R_SAMPLE,    /* too few shares or blocks in the window */
-    TBT_FEC_ADAPT_R_SWITCHING, /* a switch is in flight */
-    TBT_FEC_ADAPT_R_HOLD,      /* rate/hold freeze after a jitter episode */
-    TBT_FEC_ADAPT_R_ERROR,     /* protocol or shape errors: freeze */
+    TBT_FEC_ADAPT_CTL_R_NONE = 0,
+    TBT_FEC_ADAPT_CTL_R_OFF,       /* adaptive=off: the configured shape is fixed */
+    TBT_FEC_ADAPT_CTL_R_IDLE,      /* application idle: p frozen */
+    TBT_FEC_ADAPT_CTL_R_CARRIER,   /* fewer than 90% of carriers alive */
+    TBT_FEC_ADAPT_CTL_R_ABANDONED, /* abandoned/sent above 1% */
+    TBT_FEC_ADAPT_CTL_R_SAMPLE,    /* too few shares or blocks in the window */
+    TBT_FEC_ADAPT_CTL_R_SWITCHING, /* a switch is in flight */
+    TBT_FEC_ADAPT_CTL_R_HOLD,      /* rate/hold freeze after a jitter episode */
+    TBT_FEC_ADAPT_CTL_R_ERROR,     /* protocol or shape errors: freeze */
 };
 
 struct tbt_fec_adapt_ctl
@@ -1401,6 +1475,15 @@ struct tbt_session
     atomic64_t fec_dup_marker;        /* replayed marker for a settled block */
     atomic64_t fec_marker_conflict;   /* marker and real shares disagree */
     atomic64_t fec_epoch_conflict;    /* PARITY shape disagrees with block */
+    /* Adaptive switch health. A record whose shape matches no epoch, and a
+     * NACK for a block below the current base, are dropped instead of
+     * killing the carrier; these counters name them. */
+    atomic64_t fec_epoch_bad;
+    atomic64_t fec_nack_stale_epoch;
+    atomic64_t fec_switch_begin;
+    atomic64_t fec_switch_done;
+    atomic64_t fec_switch_abort;
+    atomic64_t fec_switch_rollback;
     /* A share sits in a slot the block's stated cut says holds no stream
      * byte: the sender's win_len and its own DATA records disagree. Skipping
      * the slot would delete its payload while the ACK ran past it, so the

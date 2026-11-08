@@ -40,6 +40,7 @@
 
 #include "tbtun.h"
 #include "tbt_fec.h"
+#include "tbt_fec_adapt.h"
 #include "tbt_rec.h"
 
 /* The source ring is the capture's pause granularity: tbt_fec_tx_submit()
@@ -1492,6 +1493,7 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_stream *st,
             spin_unlock_bh(&tx->replay_lock);
         }
         (void)tbt_fec_send_record(sess, carrier, rec, rec_len, false, false);
+        tx->data_pkts_sent++;
     }
     /* The block buffer must hold the real byte even when the share did not
      * reach its carrier: parity then describes the truth, and the receiver
@@ -1804,6 +1806,77 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
         tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
 }
 
+/* The 250 ms control-law tick. The receiver measures p and reports it in
+ * FEC_FBK; this side measures the residual repair rate from its own NACKs
+ * and feeds both to tbt_fec_adapt_eval(). */
+static void tbt_fec_tx_adapt_tick(struct tbt_session *sess)
+{
+    struct tbt_fec_tx *tx = sess->fec_tx;
+    struct tbt_fec_est_out o;
+    struct tbt_fec_adapt_out sw;
+    u64 now = ktime_get_ns();
+    u64 req, pkts;
+    u32 r_ppm = 0;
+    bool r_valid = false;
+
+    if (!tx || !tx->adapt || !READ_ONCE(sess->adaptive))
+        return;
+    if (tx->switch_state != TBT_FEC_SW_STEADY)
+        return;
+
+    req = tx->nack_req_shares;
+    pkts = tx->data_pkts_sent;
+    if (!tx->fail_win_ns)
+    {
+        tx->fail_win_ns = now;
+        tx->fail_req_last = req;
+        tx->fail_pkts_last = pkts;
+    }
+    else if (now - tx->fail_win_ns >= 1000000000ULL)
+    {
+        u64 dreq = req - tx->fail_req_last;
+        u64 dpkts = pkts - tx->fail_pkts_last;
+
+        if (dpkts)
+        {
+            u64 r = dreq * 1000000ull / dpkts;
+
+            r_ppm = r > 1000000ull ? 1000000u : (u32)r;
+            r_valid = true;
+        }
+        tx->fail_win_ns = now;
+        tx->fail_req_last = req;
+        tx->fail_pkts_last = pkts;
+    }
+
+    memset(&o, 0, sizeof(o));
+    o.p_ppm = tx->peer_p_ppm;
+    o.p_ewma_ppm = tx->peer_p_ppm;
+    o.sent_win = tx->peer_expected;
+    o.miss_win = tx->peer_expected >= tx->peer_received ?
+                     tx->peer_expected - tx->peer_received :
+                     0;
+    o.r_fail_ppm = r_ppm;
+    o.r_valid = r_valid;
+    o.p_valid = tx->peer_est_valid &&
+                (tx->peer_flags & TBT_FEC_FBK_F_P_VALID) &&
+                tx->peer_expected >= TBT_FEC_EST_MIN_SHARES;
+    o.pause_idle = !tx->peer_est_valid ||
+                   now - tx->peer_est_ns > 500000000ULL;
+    tbt_fec_adapt_eval(tx->adapt, &o, now, &sw);
+    if (sw.switch_now)
+    {
+        /* Phase 1a: the estimator and the control law run, but the shape
+         * switch itself lands in the next commit. Abort the suggestion so
+         * the law is not left busy. */
+        tbt_fec_adapt_abort(tx->adapt);
+    }
+    spin_lock(&sess->lock);
+    sess->adapt.class = tx->adapt->cur;
+    sess->adapt.r_fail_ppm = r_ppm;
+    spin_unlock(&sess->lock);
+}
+
 void tbt_fec_tx_work(struct work_struct *w)
 {
     struct tbt_session *sess =
@@ -1822,10 +1895,16 @@ void tbt_fec_tx_work(struct work_struct *w)
         goto out;
     }
     tbt_fec_tx_work_body(sess);
+    tbt_fec_tx_adapt_tick(sess);
     atomic_fetch_and(~(1u << TBT_FEC_RUN_BIT), &tx->run);
     if (atomic_fetch_and(~(1u << TBT_FEC_AGAIN_BIT), &tx->run) &
         (1u << TBT_FEC_AGAIN_BIT))
         tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+    /* The control law needs a fixed 250 ms cadence even when no share or ACK
+     * wakes the packetizer. */
+    if (READ_ONCE(sess->adaptive) && !READ_ONCE(tx->stopping) &&
+        !READ_ONCE(sess->closing))
+        tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(250));
 out:
     if (owned)
         tbt_session_put(sess);
@@ -1934,8 +2013,26 @@ int tbt_fec_record_len(const u8 *buf, size_t have, size_t *need)
     return have < *need ? TBT_REC_NEED_MORE : TBT_REC_OK;
 }
 
-static void tbt_fec_blk_reset(struct tbt_fec_blk *b, u64 block_id)
+/* Re-slice the shape-invariant buffer for the current n/m. A switch keeps the
+ * allocation and moves only these two pointers. */
+static void tbt_fec_blk_slice(const struct tbt_fec_rx *rx,
+                              struct tbt_fec_blk *b)
 {
+    b->data = b->buf;
+    b->parity = b->buf + (size_t)rx->n * rx->s;
+}
+
+static void tbt_fec_blk_reset(struct tbt_session *sess, struct tbt_fec_blk *b,
+                              u64 block_id)
+{
+    struct tbt_fec_rx *rx = sess->fec_rx;
+
+    /* A block that never became ready is dropped with its slot: its DATA
+     * shares are not evidence for p (they would understate it), but a high
+     * abandoned rate freezes the controller. Carrier RX counts here under
+     * rx->lock; w_fec_rx folds the delta into the estimator. */
+    if (rx && b->used && !b->ready && !b->empty && !b->judged)
+        atomic64_add(b->nreal ? b->nreal : rx->n, &rx->abandoned_shares);
     b->used = true;
     b->ready = false;
     b->nreal = 0;
@@ -1948,6 +2045,8 @@ static void tbt_fec_blk_reset(struct tbt_fec_blk *b, u64 block_id)
     b->short_len = 0;
     b->short_unknown = false;
     b->first_gap_ns = 0;
+    b->miss_mask = 0;
+    b->judged = false;
     b->block_id = block_id;
     b->sid = 0;
     memset(b->dpresent, 0, TBT_FEC_MAX_SHARES);
@@ -2823,6 +2922,51 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
          * frontier past bytes the application never received. */
         if (blocked)
             break;
+        /* Fold this super-block's repair evidence into the estimator before
+         * next_super moves: a carrier reuses a slot as soon as the window
+         * advances, and the mask belongs to the block just delivered. */
+        if (READ_ONCE(sess->adaptive) && rx->est &&
+            rx->groups <= TBT_FEC_ADAPT_GROUPS &&
+            (u16)(rx->n + rx->m) == TBT_FEC_ADAPT_SHARES)
+        {
+            u16 real_buf[TBT_FEC_ADAPT_GROUPS];
+            u32 miss_buf[TBT_FEC_ADAPT_GROUPS];
+            bool unk_buf[TBT_FEC_ADAPT_GROUPS];
+            u64 est_now = ktime_get_ns();
+            u16 eg;
+
+            spin_lock_bh(&rx->lock);
+            for (eg = 0; eg < rx->groups; eg++)
+            {
+                struct tbt_fec_blk *eb = tbt_fec_rx_blk(rx, eg, s);
+
+                if (!eb->used || eb->block_id != s || eb->judged)
+                {
+                    real_buf[eg] = 0;
+                    miss_buf[eg] = 0;
+                    unk_buf[eg] = false;
+                    continue;
+                }
+                eb->judged = true;
+                real_buf[eg] = tbt_fec_blk_real_len(rx, eg, eb);
+                miss_buf[eg] = eb->miss_mask;
+                /* Without a parity cut and without the stream end, a block
+                 * that never filled n slots has an unknown real length: do
+                 * not estimate p from it. */
+                unk_buf[eg] = !eb->win_len_set && !rx->total_known &&
+                              eb->ndata < rx->n;
+            }
+            spin_unlock_bh(&rx->lock);
+            for (eg = 0; eg < rx->groups; eg++)
+            {
+                if (unk_buf[eg])
+                    tbt_fec_est_unknown(rx->est, est_now);
+                else if (real_buf[eg])
+                    tbt_fec_est_block(rx->est, est_now, eg, real_buf[eg],
+                                      miss_buf[eg], rx->alive_bm);
+            }
+            tbt_fec_est_super(rx->est, est_now);
+        }
         rx->deliver_partial = false;
         rx->deliver_p = 0;
         rx->deliver_g = 0;
@@ -2918,6 +3062,8 @@ static u16 tbt_fec_nack_add(struct tbt_session *sess, struct tbt_fec_rx *rx,
                             struct tbt_fec_nack *n, u16 group, u64 block_id,
                             u16 share, u64 now, u64 hold, u16 *count)
 {
+    struct tbt_fec_blk *b;
+
     if (tbt_fec_nack_share_skip(false, now,
                                 tbt_fec_req_ns(rx, group, block_id, share),
                                 hold) == TBT_FEC_NACK_SKIP_INFLIGHT)
@@ -2929,6 +3075,14 @@ static u16 tbt_fec_nack_add(struct tbt_session *sess, struct tbt_fec_rx *rx,
         return 0;
     tbt_fec_bitmap_set(n->group_mask, group);
     tbt_fec_bitmap_set(n->share_mask, share);
+    /* A DATA share the NACK names needed repair. The estimator reads the
+     * block's mask when the super-block completes. */
+    if (share < rx->n && share < 32)
+    {
+        b = tbt_fec_rx_blk(rx, group, block_id);
+        if (b->used && b->block_id == block_id)
+            b->miss_mask |= 1u << share;
+    }
     (*count)++;
     return 1;
 }
@@ -3484,6 +3638,10 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
                 b->dpresent[i] = 1;
                 b->dlen[i] = 0; /* a recovered share has no own length */
                 b->ndata++;
+                /* Parity recovered this DATA share: it is a repair, the
+                 * estimator's miss evidence for this block. */
+                if (i < 32)
+                    b->miss_mask |= 1u << i;
             }
             k++;
         }
@@ -3492,6 +3650,160 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
     b->decoding = false;
     spin_unlock_bh(&rx->lock);
     return rc == 0;
+}
+
+/* One FEC_FBK report. Control records are plaintext and ride the control
+ * queue; the sender's control law consumes the fields. `extra` carries the
+ * handshake flags (CFG_ACK / SWITCH_DONE / ROLLBACK / CFG_NACK). */
+static void tbt_fec_rx_fbk_send(struct tbt_session *sess, u8 extra)
+{
+    struct tbt_fec_rx *rx = sess->fec_rx;
+    struct tbt_fec_est_out o;
+    struct tbt_fec_fbk f;
+    struct tbt_fec_hdr h;
+    struct tbt_fec_shape suggest;
+    u8 body[TBT_FEC_FBK_LEN];
+    u8 rec[TBT_FEC_HDR_LEN + TBT_FEC_FBK_LEN];
+    u16 len;
+    u64 now = ktime_get_ns();
+    u32 expected;
+
+    if (!rx || !rx->est)
+        return;
+    tbt_fec_est_sample(rx->est, now, &o);
+    memset(&f, 0, sizeof(f));
+    tbt_fec_fbk_set_epoch(&f, rx->epoch);
+    f.m_current = (u8)rx->m;
+    tbt_fec_adapt_shape(tbt_fec_adapt_class_of_p(o.p_ppm), &suggest);
+    f.m_target = (u8)suggest.m;
+    f.p_ewma_ppm = o.p_ewma_ppm;
+    expected = o.sent_win;
+    f.expected_shares = expected > 0xffffu ? 0xffffu : (u16)expected;
+    f.received_shares =
+        (u16)(f.expected_shares -
+              (o.miss_win > f.expected_shares ? f.expected_shares
+                                              : o.miss_win));
+    f.n_current = (u8)rx->n;
+    if (o.p_valid && !o.pause_idle && !o.pause_carrier &&
+        !o.pause_abandoned)
+        extra |= TBT_FEC_FBK_F_P_VALID;
+    f.flags = extra;
+    memcpy(f.carrier_bitmap, rx->alive_bm, TBT_FEC_BITMAP_BYTES);
+    if (tbt_fec_fbk_pack(&f, body))
+        return;
+    memset(&h, 0, sizeof(h));
+    h.type = TBT_FEC_FBK;
+    h.payload_len = TBT_FEC_FBK_LEN;
+    h.conv = TBT_FEC_CONV;
+    if (tbt_fec_make_record(sess, &h, body, rec, &len))
+        return;
+    if (!tbt_fec_send_record(sess, 0, rec, len, true, false))
+        rx->fbk_last_ns = now;
+}
+
+/* Refresh the alive bitmap, fold the abandoned delta and publish the c13
+ * snapshot. Called only from w_fec_rx, the estimator's single writer. */
+static void tbt_fec_rx_adapt_tick(struct tbt_session *sess)
+{
+    struct tbt_fec_rx *rx = sess->fec_rx;
+    struct tbt_fec_adapt_ctl *a = &sess->adapt;
+    struct tbt_fec_est_out o;
+    u64 now = ktime_get_ns();
+    u64 abandoned;
+    u16 i, alive = 0, stalled = 0;
+    u8 flags;
+    bool paused;
+
+    if (!rx || !rx->est || !READ_ONCE(sess->adaptive))
+        return;
+    memset(rx->alive_bm, 0, sizeof(rx->alive_bm));
+    for (i = 0; i < sess->n_car; i++)
+    {
+        struct tbt_carrier *c = tbt_carrier_get(sess, (u8)i);
+
+        if (!c)
+            continue;
+        if (tbt_fec_adapt_carrier_alive(atomic_read(&c->up),
+                                        atomic_read(&c->stopping),
+                                        atomic_read(&c->connected), now,
+                                        READ_ONCE(c->last_rx_ns),
+                                        READ_ONCE(c->rtt_us)))
+        {
+            tbt_fec_adapt_bitmap_set(rx->alive_bm, i);
+            alive++;
+        }
+        if (READ_ONCE(c->stalled))
+            stalled++;
+        tbt_carrier_put(c);
+    }
+    tbt_fec_est_carriers(rx->est, alive, stalled, sess->n_car);
+    abandoned = (u64)atomic64_read(&rx->abandoned_shares);
+    if (abandoned > rx->est_abandoned_last)
+    {
+        tbt_fec_est_abandoned(rx->est, now,
+                              (u32)(abandoned - rx->est_abandoned_last));
+        rx->est_abandoned_last = abandoned;
+    }
+    tbt_fec_est_sample(rx->est, now, &o);
+
+    a->epoch = rx->epoch;
+    a->n = rx->n;
+    a->m = rx->m;
+    a->groups = rx->groups;
+    a->class = tbt_fec_adapt_class_of_shape(rx->n, rx->m);
+    if (a->class == 0xff)
+        a->class = 3;
+    a->p_ppm = o.p_ppm;
+    a->p_win_ppm = o.p_win_ppm;
+    a->r_fail_ppm = 0; /* the sender measures the residual */
+    a->sent = o.sent_win;
+    a->miss = o.miss_win;
+    a->sample_unknown = o.unknown_total;
+    a->abandoned = o.abandoned_total;
+
+    paused = o.pause_idle || o.pause_carrier || o.pause_abandoned;
+    if (paused && !rx->est_paused)
+    {
+        rx->est_paused = true;
+        rx->pause_start_ns = now;
+        a->pauses++;
+    }
+    else if (!paused && rx->est_paused)
+    {
+        rx->est_paused = false;
+        a->pause_ns += now - rx->pause_start_ns;
+    }
+
+    if (rx->switch_state == TBT_FEC_SW_PREP ||
+        rx->switch_state == TBT_FEC_SW_ARMED)
+    {
+        a->state = TBT_FEC_ADAPT_CFG_SENT;
+        a->reason = TBT_FEC_ADAPT_CTL_R_SWITCHING;
+    }
+    else if (rx->switch_state == TBT_FEC_SW_APPLIED)
+    {
+        a->state = TBT_FEC_ADAPT_SWAP;
+        a->reason = TBT_FEC_ADAPT_CTL_R_SWITCHING;
+    }
+    else
+    {
+        a->state = TBT_FEC_ADAPT_STEADY;
+        if (o.pause_idle)
+            a->reason = TBT_FEC_ADAPT_CTL_R_IDLE;
+        else if (o.pause_carrier)
+            a->reason = TBT_FEC_ADAPT_CTL_R_CARRIER;
+        else if (o.pause_abandoned)
+            a->reason = TBT_FEC_ADAPT_CTL_R_ABANDONED;
+        else if (!o.p_valid)
+            a->reason = TBT_FEC_ADAPT_CTL_R_SAMPLE;
+        else
+            a->reason = TBT_FEC_ADAPT_CTL_R_NONE;
+    }
+
+    flags = rx->fbk_flags;
+    rx->fbk_flags = 0;
+    if (flags || now - rx->fbk_last_ns >= 100000000ULL)
+        tbt_fec_rx_fbk_send(sess, flags);
 }
 
 /* One pass over groups*slots. Called only by w_fec_rx. */
@@ -3556,10 +3868,16 @@ void tbt_fec_rx_work(struct work_struct *w)
         goto out;
     }
     tbt_fec_rx_work_body(sess);
+    tbt_fec_rx_adapt_tick(sess);
     atomic_fetch_and(~(1u << TBT_FEC_RUN_BIT), &rx->run);
     if (atomic_fetch_and(~(1u << TBT_FEC_AGAIN_BIT), &rx->run) &
         (1u << TBT_FEC_AGAIN_BIT))
         tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
+    /* The estimator needs a periodic sample even on an idle queue: the 1 s
+     * window expires and the FBK cadence is 100 ms. */
+    if (READ_ONCE(sess->adaptive) && !READ_ONCE(rx->stopping) &&
+        !READ_ONCE(sess->closing))
+        tbt_session_arm(sess, TBT_SW_FEC_RX, msecs_to_jiffies(100));
 out:
     if (owned)
         tbt_session_put(sess);
@@ -3879,6 +4197,10 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
 
                 if (!tbt_fec_bitmap_test(n.share_mask, s))
                     continue;
+                /* r_fail counts DATA shares the peer had to name, not the
+                 * parity rows it also asked for. */
+                if (s < tx->n)
+                    tx->nack_req_shares++;
                 /* A NACK may name a large bitmap; bound the replay work per
                  * record. The receiver retries the remainder. */
                 if (++requested > TBT_FEC_NACK_REQ_MAX)
@@ -4097,8 +4419,27 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
             atomic64_inc(&sess->fec_nack_never_stored);
         return 0;
     }
+    if (h.type == TBT_FEC_FBK)
+    {
+        struct tbt_fec_fbk f;
+        struct tbt_fec_tx *tx = sess->fec_tx;
+
+        if (tbt_fec_fbk_unpack(rec + TBT_FEC_HDR_LEN, &f))
+            return -EPROTO;
+        if (!tx)
+            return 0;
+        tx->peer_p_ppm = f.p_ewma_ppm;
+        tx->peer_expected = f.expected_shares;
+        tx->peer_received = f.received_shares;
+        tx->peer_epoch = tbt_fec_fbk_epoch(&f);
+        tx->peer_flags = f.flags;
+        tx->peer_est_ns = ktime_get_ns();
+        tx->peer_est_valid = true;
+        tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+        return 0;
+    }
     if (h.type != TBT_FEC_DATA && h.type != TBT_FEC_PARITY)
-        return 0; /* FBK/CFG are accepted and ignored by this cut. */
+        return 0; /* CFG is handled by the switch layer (WP6). */
 
     /* The header names the share; the carrier it arrived on only has to be
      * one of this session's. A carrier that dies with a share still queued has
@@ -4198,7 +4539,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
     b = &rx->blk[slot];
     if (!b->used || b->block_id != h.block_id)
     {
-        tbt_fec_blk_reset(b, h.block_id);
+        tbt_fec_blk_reset(sess, b, h.block_id);
         b->sid = READ_ONCE(sess->far_sid);
     }
     /* Defensive: a parity record is a share of this block. A path that
@@ -4497,8 +4838,7 @@ static void tbt_fec_rx_free(struct tbt_session *sess)
     total = (u32)rx->groups * rx->slots;
     for (i = 0; i < total; i++)
     {
-        kvfree(rx->blk[i].data);
-        kvfree(rx->blk[i].parity);
+        kvfree(rx->blk[i].buf);
         kvfree(rx->blk[i].dpresent);
         kvfree(rx->blk[i].ppresent);
         kvfree(rx->blk[i].dlen);
@@ -4510,6 +4850,8 @@ static void tbt_fec_rx_free(struct tbt_session *sess)
     kvfree(rx->req_ns);
     kvfree(rx->req_block);
     tbt_fec_grouped_free(rx->codec);
+    tbt_fec_grouped_free(rx->old_codec);
+    kfree(rx->est);
     kvfree(rx);
     sess->fec_rx = NULL;
 }
@@ -4556,14 +4898,13 @@ void tbt_fec_data_free(struct tbt_session *sess)
         if (tx->g)
         {
             for (i = 0; i < tx->groups; i++)
-            {
-                kvfree(tx->g[i].blk);
-                kvfree(tx->g[i].par);
-            }
+                kvfree(tx->g[i].buf);
             kvfree(tx->g);
         }
         tbt_fec_replay_free(tx->replay);
         tbt_fec_grouped_free(tx->codec);
+        tbt_fec_grouped_free(tx->old_codec);
+        kfree(tx->adapt);
         kvfree(tx->ring);
         kvfree(tx->pkt);
         kvfree(tx->rec);
@@ -4677,6 +5018,21 @@ int tbt_fec_data_init(struct tbt_session *sess)
     rx->s = TBT_FEC_S;
     rx->groups = groups;
     rx->slots = (u16)slots;
+    rx->base_pkt = 0;
+    rx->base_block = 0;
+    rx->epoch = 0;
+    rx->switch_state = TBT_FEC_SW_STEADY;
+    rx->shape.n = n;
+    rx->shape.m = m;
+    rx->shape.groups = groups;
+    rx->shape.slots = (u16)slots;
+    rx->shape.w = w;
+    rx->shape.k = n;
+    rx->shape.d = (u8)d;
+    rx->prev_shape = rx->shape;
+    rx->est = kzalloc(sizeof(*rx->est), GFP_KERNEL);
+    if (rx->est)
+        tbt_fec_est_init(rx->est, shares);
     /* tbt_session_fec_rx_barrier() quiesces w_fec_rx and calls this before a
      * new far_sid is installed. */
     rx->stream_reset = tbt_fec_rx_stream_reset;
@@ -4697,7 +5053,13 @@ int tbt_fec_data_init(struct tbt_session *sess)
     rx->nack_cadence_ms = TBT_FEC_NACK_RETRY_MS;
     /* Decode scratch: one recovered slot per parity row, and one zero slot
      * for padding and absent parity. Both are written outside rx->lock. */
-    rx->rec = kvzalloc((size_t)m * TBT_FEC_S, GFP_KERNEL);
+    /* Recovered-slot scratch covers the largest m a switch may install. The
+     * 0.3.0 family tops out at m = 6; a fixed non-adaptive shape may be
+     * larger, so keep the larger of the two. */
+    rx->rec = kvzalloc((size_t)(m > TBT_FEC_ADAPT_CLASSES ?
+                                    m : TBT_FEC_ADAPT_CLASSES) *
+                           TBT_FEC_S,
+                       GFP_KERNEL);
     rx->zero = kvzalloc(TBT_FEC_S, GFP_KERNEL);
     TBT_DIAG("fec grouped rx codec start tunnel=%llu groups=%u n=%u m=%u w=%u d=%u",
              (unsigned long long)t->cfg.id, groups, n, m, w, d);
@@ -4707,17 +5069,24 @@ int tbt_fec_data_init(struct tbt_session *sess)
              rx->codec ? "ok" : "FAILED", (unsigned long long)t->cfg.id,
              groups, !!rx->blk);
     if (!rx->blk || !rx->req_ns || !rx->req_block || !rx->codec ||
-        !rx->rec || !rx->zero)
+        !rx->rec || !rx->zero || !rx->est)
     {
-        pr_warn_ratelimited("tbtun: tunnel %llu: fec rx arena/codec failed: blk=%d req=%d reqblk=%d codec=%d rec=%d zero=%d\n",
+        pr_warn_ratelimited("tbtun: tunnel %llu: fec rx arena/codec failed: blk=%d req=%d reqblk=%d codec=%d rec=%d zero=%d est=%d\n",
                             (unsigned long long)t->cfg.id, !!rx->blk,
                             !!rx->req_ns, !!rx->req_block, !!rx->codec,
-                            !!rx->rec, !!rx->zero);
+                            !!rx->rec, !!rx->zero, !!rx->est);
         goto fail;
     }
 
     tx->nonce = tbt_fec_base_nonce(sess);
     spin_lock_init(&tx->replay_lock);
+    spin_lock_init(&tx->shape_lock);
+    tx->base_pkt = 0;
+    tx->base_block = 0;
+    tx->switch_state = TBT_FEC_SW_STEADY;
+    tx->adapt = kzalloc(sizeof(*tx->adapt), GFP_KERNEL);
+    if (tx->adapt)
+        tbt_fec_adapt_init(tx->adapt, sess->adapt.class);
     tx->replay = tbt_fec_replay_new(groups, n, m, TBT_FEC_S);
     if (tx->replay)
         TBT_DIAG("fec replay ring tunnel=%llu k=%u bytes=%zu budget=%u",
@@ -4748,8 +5117,9 @@ int tbt_fec_data_init(struct tbt_session *sess)
     {
         u16 rk = tbt_fec_replay_k(tx->replay);
 
-        tx->credit = tbt_fec_credit_packets(groups, n, rk, (u16)slots,
-                                            TBT_FEC_CREDIT_MAX);
+        tx->credit_cap = tbt_fec_credit_packets(groups, n, rk, (u16)slots,
+                                                TBT_FEC_CREDIT_MAX);
+        tx->credit = tx->credit_cap;
     }
     /* Capture pauses at ring granularity, so match the ring to the credit
      * window instead of a fixed 256 KiB. The floor keeps a small shape from
@@ -4779,27 +5149,33 @@ int tbt_fec_data_init(struct tbt_session *sess)
     TBT_DIAG("fec grouped tx codec %s tunnel=%llu groups=%u ring=%d pkt=%d rec=%d g=%d",
              tx->codec ? "ok" : "FAILED", (unsigned long long)t->cfg.id,
              groups, !!tx->ring, !!tx->pkt, !!tx->rec, !!tx->g);
-    if (!tx->ring || !tx->pkt || !tx->rec || !tx->g || !tx->codec)
+    if (!tx->ring || !tx->pkt || !tx->rec || !tx->g || !tx->codec ||
+        !tx->adapt)
     {
-        pr_warn_ratelimited("tbtun: tunnel %llu: fec tx arena/codec failed: ring=%d pkt=%d rec=%d g=%d codec=%d\n",
+        pr_warn_ratelimited("tbtun: tunnel %llu: fec tx arena/codec failed: ring=%d pkt=%d rec=%d g=%d codec=%d adapt=%d\n",
                             (unsigned long long)t->cfg.id, !!tx->ring,
-                            !!tx->pkt, !!tx->rec, !!tx->g, !!tx->codec);
+                            !!tx->pkt, !!tx->rec, !!tx->g, !!tx->codec,
+                            !!tx->adapt);
         goto fail;
     }
 
     for (i = 0; i < groups; i++)
     {
-        tx->g[i].blk = kvzalloc((size_t)n * TBT_FEC_S, GFP_KERNEL);
-        tx->g[i].par = kvzalloc((size_t)m * TBT_FEC_S, GFP_KERNEL);
+        tx->g[i].buf = kvzalloc((size_t)shares * TBT_FEC_S, GFP_KERNEL);
+        if (tx->g[i].buf)
+        {
+            tx->g[i].blk = tx->g[i].buf;
+            tx->g[i].par = tx->g[i].buf + (size_t)n * TBT_FEC_S;
+        }
         /* No group belongs to block 0 until it writes a packet into it. The
          * sentinel is what lets close_block() tell "empty group" from "full
          * block whose nreal was already cleared". */
         tx->g[i].blk_id = ~0ULL;
-        if (!tx->g[i].blk || !tx->g[i].par)
+        if (!tx->g[i].buf)
         {
-            pr_warn_ratelimited("tbtun: tunnel %llu: fec tx group alloc failed: group=%u blk=%d par=%d\n",
+            pr_warn_ratelimited("tbtun: tunnel %llu: fec tx group alloc failed: group=%u buf=%d\n",
                                 (unsigned long long)t->cfg.id, i,
-                                !!tx->g[i].blk, !!tx->g[i].par);
+                                !!tx->g[i].buf);
             goto fail;
         }
     }
@@ -4807,17 +5183,17 @@ int tbt_fec_data_init(struct tbt_session *sess)
     {
         struct tbt_fec_blk *b = &rx->blk[i];
 
-        b->data = kvzalloc((size_t)n * TBT_FEC_S, GFP_KERNEL);
-        b->parity = kvzalloc((size_t)m * TBT_FEC_S, GFP_KERNEL);
+        b->buf = kvzalloc((size_t)shares * TBT_FEC_S, GFP_KERNEL);
+        if (b->buf)
+            tbt_fec_blk_slice(rx, b);
         b->dpresent = kvzalloc(TBT_FEC_MAX_SHARES, GFP_KERNEL);
         b->ppresent = kvzalloc(TBT_FEC_MAX_SHARES, GFP_KERNEL);
         b->dlen = kvzalloc(TBT_FEC_MAX_SHARES * sizeof(u16), GFP_KERNEL);
-        if (!b->data || !b->parity || !b->dpresent || !b->ppresent ||
-            !b->dlen)
+        if (!b->buf || !b->dpresent || !b->ppresent || !b->dlen)
         {
-            pr_warn_ratelimited("tbtun: tunnel %llu: fec rx block alloc failed: block=%u of %u data=%d parity=%d dpresent=%d ppresent=%d dlen=%d\n",
+            pr_warn_ratelimited("tbtun: tunnel %llu: fec rx block alloc failed: block=%u of %u buf=%d dpresent=%d ppresent=%d dlen=%d\n",
                                 (unsigned long long)t->cfg.id, i, total,
-                                !!b->data, !!b->parity, !!b->dpresent,
+                                !!b->buf, !!b->dpresent,
                                 !!b->ppresent, !!b->dlen);
             goto fail;
         }

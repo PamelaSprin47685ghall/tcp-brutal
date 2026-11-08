@@ -372,6 +372,11 @@ u64 tbt_fec_replay_sent_ns(const struct tbt_fec_replay *r, u64 block_id,
  * hold is ignored: there is nothing in flight to deduplicate. */
 void tbt_fec_replay_mark_sent(struct tbt_fec_replay *r, u64 block_id,
                               u16 group, u16 share, u64 now_ns);
+/* Drop every resident block and its stamps. A shape switch calls this after
+ * it stops the old block: a replay for a block below the new base must not
+ * survive, and the ring geometry (groups, n+m, K) is unchanged in Phase 1.
+ * The caller holds the TX replay lock. */
+void tbt_fec_replay_reset(struct tbt_fec_replay *r);
 
 /* NACK pacing. The first NACK for a block goes out once the gap has been
  * visible for one round trip (the carrier TCP still holds the share and the

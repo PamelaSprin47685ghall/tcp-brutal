@@ -603,14 +603,14 @@ int tbt_action_apply(const struct tbt_cmd *cmd)
             spin_lock(&s->lock);
             WRITE_ONCE(s->adaptive, cmd->adaptive != 0);
             if (cmd->adaptive)
-                s->adapt.reason = TBT_FEC_ADAPT_R_NONE;
+                s->adapt.reason = TBT_FEC_ADAPT_CTL_R_NONE;
             else
             {
                 /* Fixed-shape fallback: the shape in force stays exactly as
                  * it is and the controller stops evaluating. No new epoch is
                  * started, so the c13 window keeps its last values. */
                 s->adapt.state = TBT_FEC_ADAPT_STEADY;
-                s->adapt.reason = TBT_FEC_ADAPT_R_OFF;
+                s->adapt.reason = TBT_FEC_ADAPT_CTL_R_OFF;
             }
             spin_unlock(&s->lock);
             err = 0;
@@ -1368,7 +1368,7 @@ int tbt_session_create(struct tbt_tunnel *t)
         (u16)(t->cfg.carriers / (t->cfg.n + t->cfg.m)) : 0;
     s->adapt.class = tbt_fec_adapt_class(t->cfg.n, t->cfg.m);
     s->adapt.state = TBT_FEC_ADAPT_STEADY;
-    s->adapt.reason = s->adaptive ? TBT_FEC_ADAPT_R_NONE : TBT_FEC_ADAPT_R_OFF;
+    s->adapt.reason = s->adaptive ? TBT_FEC_ADAPT_CTL_R_NONE : TBT_FEC_ADAPT_CTL_R_OFF;
     /* The sender window is a session property from birth: capture, the pump
      * and the carrier socket sizing all read it before the first ACK. */
     tbt_tx_window_init(s);

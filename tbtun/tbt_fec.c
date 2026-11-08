@@ -660,6 +660,22 @@ void tbt_fec_replay_mark_sent(struct tbt_fec_replay *r, u64 block_id,
     r->sent_ns[slot] = now_ns;
 }
 
+void tbt_fec_replay_reset(struct tbt_fec_replay *r)
+{
+    u32 i;
+
+    if (!r)
+        return;
+    for (i = 0; i < r->slots; i++)
+    {
+        r->block_id[i] = ~0ULL;
+        r->sent_ns[i] = 0;
+        r->len[i] = 0;
+    }
+    for (i = 0; i < r->bslots; i++)
+        r->block_gen[i] = ~0ULL;
+}
+
 /* ------------------------------------------------------------------ *
  * NACK pacing
  * ------------------------------------------------------------------ */
