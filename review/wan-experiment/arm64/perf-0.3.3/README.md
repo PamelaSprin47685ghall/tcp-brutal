@@ -65,9 +65,10 @@ near 192.168.123.85                                     far 45.11.1.62
 | 文件 | 作用 |
 |---|---|
 | `perf-ab.sh` | 三版本轮换：卸模块、装模块、校验 srcversion、写配置、等 join、3×60 s |
-| `perf-direct.sh` | near→far 单 TCP 直连（不经过 tbtun）：3×60 s 吞吐 + 前后各 100 次 HEAD 延迟（每次新 TCP，分别给 connect/TTFB/total） |
+| `perf-direct.sh` | near→far 单 TCP 直连（不经过 tbtun）：3×60 s 吞吐 + 前后各 100 次 HEAD 延迟（每次新 TCP，分别给 connect/TTFB/total）；1 GiB 在窗口内跑完时自动接上下一个 GET |
 | `perf-sampler.sh` | 远端 1 s 采样器：c3/c6/c9/c11、load1；给窗口内 `up_min` 与 stall 时序 |
 | `perf-curl.sh` | 一次有界 GET，写 pidfile；`exec curl` 保证 wchar 属于这条流 |
+| `perf-curl-loop.sh` | 直连用：一个 GET 完成后立刻接下一个，窗口内始终有流量 |
 | `perf-stats.py` | 读 `runs.csv`，出中位数、范围、MAD、block drift、5% 判据、延迟分位 |
 | `perf-versions.conf` | 版本名到两端 `.ko` 路径的映射 |
 
@@ -280,7 +281,7 @@ c9_drop_sid,c9_stream_refused,valid,noisy,rc,note
 results/<UTC>-direct[-tag]/
   meta.txt run.log runs.csv         与 A/B 同一个 52 列 schema
   latency-pre.csv latency-post.csv latency.csv
-  runs/direct-r<N>/                 near-a/b、far-a/b、result.txt
+  runs/direct-r<N>/                 near-a/b、far-a/b、curl.out、curl.pid、curl.pid.loop、result.txt
   analysis/                         若 perf-stats.py 可执行
 ```
 
@@ -291,7 +292,10 @@ results/<UTC>-direct[-tag]/
 首字节，`total_s` 是连接关闭；吞吐窗口内的 TCP RTT 另由 `ss -tin` 的
 `rtt:` 记录到 `rtt_near_us`。
 
-直连行的 `dataset=direct`、`version=direct`、`app_source=curl_wchar`；
+直连行的 `dataset=direct`、`version=direct`、`app_source=curl_wchar`。
+`app` 是窗口内已完成请求的 `size=` 之和加上当前请求的 wchar 差值；
+`curl_requests` 可能大于 1；`stream_alive` 只表示窗口末是否正有一个
+请求在跑，不再作为 `valid` 的必要条件。
 `ack_*`、`c3_*`、`c6_*` 留空；`rtt_near_us` 来自 `ss -tin` 的 `rtt:`（毫秒
 转微秒）。`app_mbps == wchar_mbps` 是口径决定的，不是巧合。
 

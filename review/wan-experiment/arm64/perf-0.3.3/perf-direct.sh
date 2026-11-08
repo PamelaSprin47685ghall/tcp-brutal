@@ -12,9 +12,13 @@
 #     -> far public NIC -> far-raw-serve.py on 0.0.0.0:5211
 #     -> the same 1 GiB file the tunnel's far side reads from 127.0.0.1:5210
 #
-# One connection at a time, one GET per window, the same 60 s boundary
-# method as perf-ab.sh. Latency is 100 sequential HEADs before and after
-# the throughput windows. The TCP RTT is read from ss at the window end.
+# One connection at a time. A 1 GiB GET can finish inside a 60 s window on
+# a 75-115 Mbit/s link, so a small loop starts the next GET immediately and
+# the window always carries traffic. Each request appends its curl -w line;
+# the window app is the sum of completed sizes plus the current wchar delta.
+# The same 60 s boundary method as perf-ab.sh is used. Latency is 100
+# sequential HEADs before and after the throughput windows. The TCP RTT is
+# read from ss at the window end.
 #
 # This script does not unload tbtun. Direct traffic does not traverse it,
 # and tbtun is idle between sessions; the module state is recorded in
@@ -50,10 +54,12 @@ LOG=$FAR_DIR/raw-serve.log
 PIDFILE=$FAR_DIR/raw-serve.pid
 BYPASS_PREF=${BYPASS_PREF:-100}
 BYPASS_MARK=${BYPASS_MARK:-/root/.tbt-perf-direct-bypass-pref100}
-CUR_PID=
+CUR_PIDFILE=
+CUR_STOP=
 SERVER_STARTED=0
 REMOTE_DIR=/root/perf-0.3.3
 CURLER=$REMOTE_DIR/perf-curl.sh
+LOOPER=$REMOTE_DIR/perf-curl-loop.sh
 
 SSH_TMO=${SSH_TMO:-20}
 RUNS=${RUNS:-3}
@@ -280,24 +286,48 @@ stop_server() {
     ssh_far "rm -f '$PIDFILE'" >/dev/null 2>&1 || true
 }
 
-start_curl() { # url timeout pidfile outfile
-    ssh_near "setsid sh '$CURLER' '$1' '$3' '$4' '$2' \
-        </dev/null >/dev/null 2>&1 &
+start_curl_loop() { # url timeout pidfile outfile stopfile
+    ssh_near "rm -f '$3' '$3.loop' '$4' '$5'
+        setsid sh '$LOOPER' '$1' '$3' '$4' '$2' '$5' \
+            </dev/null >/dev/null 2>&1 &
         echo started" >/dev/null 2>&1
 }
+
 curl_pid() { ssh_near "cat '$1' 2>/dev/null" 2>/dev/null | tr -d '[:space:]'; }
 pid_alive() { [ -n "$1" ] || return 1; ssh_near "kill -0 '$1' 2>/dev/null && echo alive || echo dead" 2>/dev/null | grep -q alive; }
 wchar_of() { [ -n "$1" ] || { printf ''; return 0; }; ssh_near "awk '/^wchar:/{print \$2; exit}' /proc/$1/io 2>/dev/null" 2>/dev/null | tr -d '[:space:]'; }
-kill_curl() {
-    [ -n "$1" ] || return 0
-    ssh_near "kill -TERM '$1' 2>/dev/null || true
-        i=0; while [ \$i -lt 10 ] && kill -0 '$1' 2>/dev/null; do sleep 1; i=\$((i+1)); done
-        kill -KILL '$1' 2>/dev/null || true" >/dev/null 2>&1 || true
+
+curl_completed() { # outfile -> sum of size= in completed -w lines
+    [ -f "$1" ] || { printf 0; return 0; }
+    awk '{ for (i = 1; i <= NF; i++)
+        if ($i ~ /^size=/) { sub(/^size=/, "", $i); s += $i }
+    } END { printf "%.0f", s + 0 }' "$1" 2>/dev/null
+}
+
+curl_requests() { # outfile -> number of completed requests
+    [ -f "$1" ] || { printf 0; return 0; }
+    awk '/http=/{n++} END{print n+0}' "$1" 2>/dev/null
+}
+
+stop_curl_loop() { # pidfile stopfile
+    [ -n "${1:-}" ] || return 0
+    ssh_near "touch '$2'
+        pid=\$(cat '$1' 2>/dev/null || true)
+        loop=\$(cat '$1.loop' 2>/dev/null || true)
+        [ -n \"\$pid\" ] && kill -TERM \"\$pid\" 2>/dev/null || true
+        [ -n \"\$loop\" ] && kill -TERM \"\$loop\" 2>/dev/null || true
+        i=0
+        while [ \$i -lt 10 ] && [ -n \"\$pid\" ] && kill -0 \"\$pid\" 2>/dev/null; do
+            sleep 1; i=\$((i+1))
+        done
+        [ -n \"\$pid\" ] && kill -KILL \"\$pid\" 2>/dev/null || true
+        [ -n \"\$loop\" ] && kill -KILL \"\$loop\" 2>/dev/null || true
+        true" >/dev/null 2>&1 || true
 }
 
 cleanup_traffic() {
-    [ -n "${CUR_PID:-}" ] && ssh_near "kill -KILL '$CUR_PID' 2>/dev/null || true" >/dev/null 2>&1 || true
-    CUR_PID=
+    [ -n "${CUR_PIDFILE:-}" ] && stop_curl_loop "$CUR_PIDFILE" "$CUR_STOP"
+    CUR_PIDFILE= CUR_STOP=
     [ "${SERVER_STARTED:-0}" = 1 ] && [ "${KEEP_SERVER:-0}" = 0 ] && stop_server
 }
 
@@ -329,7 +359,8 @@ ss_rtt_us() { # near -> far:DIRECT_PORT
 }
 
 run_window() { # run
-    local run=$1 dir rdir pid alive wa wb app wire
+    local run=$1 dir rdir pid_a pid_b alive_a alive_b wa wb app wire
+    local completed_a completed_b requests_a requests_b requests
     local cpa cpb cfa cfb n2 n3 f2 f3
     local t_a t_b window far_window n_cpu f_cpu n_load f_load n_temp f_temp n_freq f_freq
     local rtt valid noisy note_txt
@@ -340,30 +371,39 @@ run_window() { # run
     ssh_near "mkdir -p '$rdir'" >/dev/null 2>&1 || die "cannot create $rdir on near"
     note "direct run $run"
 
-    start_curl "http://$FAR_IP:$DIRECT_PORT/accept-1g.bin" "$((WARMUP + SECS + 60))" \
-        "$rdir/curl.pid" "$rdir/curl.out"
+    start_curl_loop "http://$FAR_IP:$DIRECT_PORT/accept-1g.bin" \
+        "$((WARMUP + SECS + 60))" "$rdir/curl.pid" "$rdir/curl.out" "$rdir/stop"
+    CUR_PIDFILE=$rdir/curl.pid
+    CUR_STOP=$rdir/stop
     sleep 2
-    pid=$(curl_pid "$rdir/curl.pid")
-    CUR_PID=$pid
-    alive=0
-    pid_alive "$pid" && alive=1
 
     sleep "$WARMUP"
     snapshot near "$dir/near-a.txt"
     snapshot far "$dir/far-a.txt"
-    wa=$(wchar_of "$pid")
+    ssh_near "cat '$rdir/curl.out' 2>/dev/null" >"$dir/curl.out.a" 2>/dev/null || true
+    pid_a=$(curl_pid "$rdir/curl.pid")
+    wa=$(wchar_of "$pid_a")
+    completed_a=$(curl_completed "$dir/curl.out.a")
+    requests_a=$(curl_requests "$dir/curl.out.a")
+    alive_a=0
+    pid_alive "$pid_a" && alive_a=1
 
     sleep "$SECS"
-    alive=0
-    pid_alive "$pid" && alive=1
     snapshot near "$dir/near-b.txt"
     snapshot far "$dir/far-b.txt"
-    wb=$(wchar_of "$pid")
+    ssh_near "cat '$rdir/curl.out' 2>/dev/null" >"$dir/curl.out.b" 2>/dev/null || true
+    pid_b=$(curl_pid "$rdir/curl.pid")
+    wb=$(wchar_of "$pid_b")
+    completed_b=$(curl_completed "$dir/curl.out.b")
+    requests_b=$(curl_requests "$dir/curl.out.b")
+    alive_b=0
+    pid_alive "$pid_b" && alive_b=1
     rtt=$(ss_rtt_us)
-    kill_curl "$pid"
-    CUR_PID=
-    ssh_near "cat '$rdir/curl.out' 2>/dev/null" >"$dir/curl.out" 2>/dev/null || true
+    stop_curl_loop "$rdir/curl.pid" "$rdir/stop"
+    CUR_PIDFILE= CUR_STOP=
+    cp "$dir/curl.out.b" "$dir/curl.out" 2>/dev/null || : >"$dir/curl.out"
     ssh_near "cat '$rdir/curl.pid' 2>/dev/null" >"$dir/curl.pid" 2>/dev/null || true
+    ssh_near "cat '$rdir/curl.pid.loop' 2>/dev/null" >"$dir/curl.pid.loop" 2>/dev/null || true
 
     t_a=$(snap_date "$dir/near-a.txt")
     t_b=$(snap_date "$dir/near-b.txt")
@@ -372,8 +412,19 @@ run_window() { # run
     far_window=$(delta "$(snap_date "$dir/far-a.txt")" "$(snap_date "$dir/far-b.txt")")
     case ${far_window:-} in '' | *[!0-9]*) far_window=$window ;; esac
 
-    app=$(delta "${wa:-}" "${wb:-}")
-    case ${app:-} in '' | *[!0-9]*) app=0 ;; esac
+    completed_a=$(nz "$completed_a")
+    completed_b=$(nz "$completed_b")
+    requests_a=$(nz "$requests_a")
+    requests_b=$(nz "$requests_b")
+    wa=$(nz "$wa")
+    wb=$(nz "$wb")
+    # Bytes in the window: requests that completed after A plus the current
+    # request's wchar at B, minus the current request's wchar at A.  A
+    # request that completed between A and B contributes its full size once.
+    app=$(( (completed_b - completed_a) + (wb - wa) ))
+    [ "$app" -ge 0 ] || app=0
+    requests=$(( (requests_b - requests_a) + alive_b ))
+    [ "$requests" -ge 1 ] || [ "$app" -eq 0 ] || requests=1
     wire=$(delta "$(netdev_tx "$dir/far-a.txt" "$FAR_DEV")" "$(netdev_tx "$dir/far-b.txt" "$FAR_DEV")")
     case ${wire:-} in '' | *[!0-9]*) wire=0 ;; esac
 
@@ -397,10 +448,16 @@ run_window() { # run
     # the sampler stop cost 6-13 s.  Judge the actual window, not the sleep.
     [ "$window" -ge "$SECS" ] && [ "$window" -le $((SECS + 20)) ] || valid=0
     [ "$app" -gt 0 ] || valid=0
-    [ "$alive" = 1 ] || valid=0
     noisy=0
     note_txt=direct
-    [ "$alive" = 1 ] || { noisy=1; note_txt="$note_txt+short_stream"; }
+    if [ "$app" -le 0 ]; then
+        noisy=1
+        note_txt="$note_txt+short_stream"
+    elif [ "$alive_b" != 1 ]; then
+        # The loop is between two requests at the boundary; bytes in the
+        # window are still complete, so this is not a failure.
+        note_txt="$note_txt+between_requests"
+    fi
     [ "$valid" = 1 ] || note_txt="$note_txt+invalid"
 
     app_mbps=$(awk -v b="$app" -v s="$window" 'BEGIN{ if(s>0) printf "%.3f", b*8/s/1e6; else printf "0" }')
@@ -410,6 +467,8 @@ run_window() { # run
     {
         printf 'window_s=%s far_window_s=%s\n' "$window" "$far_window"
         printf 'app_bytes=%s source=curl_wchar wire_bytes=%s\n' "$app" "$wire"
+        printf 'completed_a=%s completed_b=%s requests_a=%s requests_b=%s requests=%s alive_b=%s\n' \
+            "$completed_a" "$completed_b" "$requests_a" "$requests_b" "$requests" "$alive_b"
         printf 'app_mbps=%s wire_mbps=%s wire_over_app=%s tcp_rtt_us=%s\n' \
             "$app_mbps" "$wire_mbps" "$wire_over" "${rtt:-?}"
         printf 'cpu_near=%s cpu_far=%s\n' "${n_cpu:-?}" "${f_cpu:-?}"
@@ -428,8 +487,8 @@ run_window() { # run
     row_add "$app"
     row_add curl_wchar
     row_add "$app"
-    row_add 1
-    row_add "$alive"
+    row_add "$requests"
+    row_add "$alive_b"
     row_add "$app_mbps"
     row_add "$app_mbps"
     row_add "$wire_mbps"
@@ -533,7 +592,7 @@ plan() {
     say "  direct URL: http://$FAR_IP:$DIRECT_PORT/accept-1g.bin"
     say "  source: $SOURCE; server: $SERVER_PY on far 0.0.0.0:$DIRECT_PORT"
     say "  windows: $RUNS x ${SECS}s + ${WARMUP}s warm-up; latency $LAT_ITERS HEADs before and after"
-    say "  one TCP flow per window; no tbtun in the path"
+    say "  one TCP flow at a time; a new GET starts when the 1 GiB source completes"
     say "  output: ${OUT:-<script>/results/<UTC>-direct}"
     say "  no ssh, no writes (dry-run)"
 }
@@ -574,6 +633,8 @@ printf '%s\n' "$bypass_out" >>"$OUT/meta.txt"
 ssh_near "mkdir -p '$REMOTE_DIR'" >/dev/null 2>&1 || die "cannot create $REMOTE_DIR on near" 4
 scp_near "$SCRIPT_DIR/perf-curl.sh" "$NEAR_HOST:$REMOTE_DIR/perf-curl.sh" ||
     die "cannot upload curl helper to near" 4
+scp_near "$SCRIPT_DIR/perf-curl-loop.sh" "$NEAR_HOST:$REMOTE_DIR/perf-curl-loop.sh" ||
+    die "cannot upload curl loop helper to near" 4
 
 start_server || die "far direct source did not become ready on $DIRECT_PORT" 4
 
