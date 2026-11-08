@@ -1,0 +1,5 @@
+[22359.976456] tbtun: tunnel 1: fec rx shape from peer: n=128 m=128 groups=1 slots=8 block=256 L=8 rate=500
+[22887.731739] tbtun: tunnel 1: fec rx shape from peer: n=128 m=128 groups=1 slots=8 block=256 L=8 rate=500
+[23349.004020] tbtun: tunnel 1: fec rx shape from peer: n=128 m=128 groups=1 slots=8 block=256 L=8 rate=500
+[24060.138818] tbtun: tunnel 1: fec rx shape from peer: n=128 m=128 groups=1 slots=8 block=256 L=8 rate=500
+[24383.226766] tbtun: tunnel 1: fec rx shape from peer: n=128 m=128 groups=1 slots=8 block=256 L=8 rate=500

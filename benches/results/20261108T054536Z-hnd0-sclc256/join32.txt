@@ -1,0 +1,2 @@
+join32_elapsed_s=0
+near_up=32 far_up=32

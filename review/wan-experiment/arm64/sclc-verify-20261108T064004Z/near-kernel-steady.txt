@@ -1,0 +1,3 @@
+KW_SOURCE=journalctl
+11月 08 14:41:23 lubancat kernel: tbtun: carrier 110 stalled: repath paused, new frames avoid it
+11月 08 14:41:26 lubancat kernel: tbtun: carrier 110 recovered after 2860 ms: back in the stripe

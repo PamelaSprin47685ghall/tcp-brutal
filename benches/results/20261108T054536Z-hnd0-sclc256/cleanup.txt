@@ -1,0 +1,57 @@
+++ date -u +%FT%TZ
++ echo '== cleanup 2026-11-08T05:54:27Z'
+== cleanup 2026-11-08T05:54:27Z
++ echo '-- near del'
+-- near del
++ ssh root@192.168.123.82 'timeout 10 sh -c "echo del\ 1 > /proc/net/tbtun/config"; echo rc=$?; sleep 1; ls /proc/net/tbtun/ 2>/dev/null'
+rc=124
+config
+http
+peers
+ports
+stats
+tunnels
++ echo '-- far del'
+-- far del
++ ssh root@45.11.1.62 'timeout 10 sh -c "echo del\ 1 > /proc/net/tbtun/config"; echo rc=$?; sleep 1; ls /proc/net/tbtun/ 2>/dev/null'
+rc=0
+config
+http
+peers
+ports
+stats
+tunnels
++ echo '-- near rmmod'
+-- near rmmod
++ ssh root@192.168.123.82 'rmmod tbtun; echo rc=$?; lsmod | grep tbtun || echo no-tbtun'
+rc=0
+no-tbtun
++ echo '-- far rmmod'
+-- far rmmod
++ ssh root@45.11.1.62 'rmmod tbtun; echo rc=$?; lsmod | grep tbtun || echo no-tbtun'
+rc=0
+no-tbtun
++ echo '-- far stop sink/raw'
+-- far stop sink/raw
++ ssh root@45.11.1.62 'pkill -f "nc -l 127.0.0.1 5211"; pkill -f far-raw-serve.py; sleep 1; ss -ltn | grep -E ":(5210|5211) " || echo ports-free'
++ echo '-- near ip rule remove'
+-- near ip rule remove
++ ssh root@192.168.123.82 'ip rule del to 45.11.1.62/32 lookup main pref 100 2>/dev/null; ip rule show | grep "45.11.1.62" || echo rule-gone'
+rule-gone
++ echo '-- final'
+-- final
++ ssh root@192.168.123.82 'pgrep -a tbtun || echo near-no-tbtun; pgrep -af "curl|nc 127.0.0.1 9001" || echo near-no-bench-proc'
+near-no-tbtun
+178581 bash -c pgrep -a tbtun || echo near-no-tbtun; pgrep -af "curl|nc 127.0.0.1 9001" || echo near-no-bench-proc
++ ssh root@45.11.1.62 'pgrep -a tbtun || echo far-no-tbtun; pgrep -af "nc -l|far-raw-serve" || echo far-no-bench-proc'
+far-no-tbtun
+358091 python3 /root/sclc-verify/far-raw-serve.py --file /root/sclc-verify-1g/accept-1g.bin --bind 127.0.0.1 --port 5210 --log /root/sclc-verify-1g/raw-serve.log --pidfile /root/sclc-verify-1g/raw-serve.pid
+358829 bash -c pgrep -a tbtun || echo far-no-tbtun; pgrep -af "nc -l|far-raw-serve" || echo far-no-bench-proc
+358832 bash -c kill 358091 2>/dev/null; sleep 1; pgrep -af far-raw-serve || echo raw-server-gone; ss -ltn | grep -E ":(5210|5211) " || echo ports-5210-5211-free
+ports-5210-5211-free
+near-clean
+1047 python3 /usr/local/sbin/tbtun-sampler.py
+1514 python3 /usr/local/sbin/tbtun-kmsg-relay.py
+178594 bash -c lsmod | grep tbtun || echo near-clean; pgrep -af tbtun || true
+far-clean
+358837 bash -c lsmod | grep tbtun || echo far-clean; pgrep -af tbtun || true

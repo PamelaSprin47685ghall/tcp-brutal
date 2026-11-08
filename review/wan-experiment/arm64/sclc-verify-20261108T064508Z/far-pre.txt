@@ -1,0 +1,1138 @@
+
+=== date ===
+2026-11-08T06:45:12Z
+
+=== boot_id ===
+746ecb8d-28fa-4769-85ee-f3dcde062d4c
+
+=== uptime ===
+170390.25 268145.02
+
+=== uname ===
+Linux hnd0.kw92.cyou 7.0.0-42-generic #42-Ubuntu SMP PREEMPT_DYNAMIC Thu Oct 15 08:06:44 UTC 2026 x86_64 GNU/Linux
+
+=== loadavg ===
+0.25 0.52 0.60 1/406 367409
+
+=== module ===
+tbtun                 471040  0
+
+=== modinfo ===
+
+=== srcversion ===
+4A34EC0ACF15D6418F03E4C
+
+=== max_carriers ===
+256
+
+=== config ===
+tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5210 n=128 m=128 fec=on adaptive=off mode=sc-ldpc w=256 carriers=256 crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=16777216 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=31000-31511 L=8 nonce=00112233445566778899aabbccddeeff
+
+=== ports ===
+# block 31000-31511 (512 ports)
+# configured
+ports 31000-31511
+
+=== tunnels ===
+# id role state listen peer target n m streams
+1 far listening 0.0.0.0:9000 0.0.0.0:0 127.0.0.1:5210 128 128 286
+
+=== stats ===
+debug_loss=0
+gaps_total=0
+streams_total=286
+tunnel 1 capture_runs=0 actor_calls=0 submit_bytes=0 tx=0 wire=123957 err=0 short=0
+tunnel 1 rx_work_runs=1932 rx_drain_entries=1887 rx_drain_bytes=177145 rx_paused_skips=0 rx_adopt_events=286 rx_records=0 carrier_write_space_runs=286 poll_rescues=104
+tunnel 1 rx_ready_calls=1664 rx_reads=1932 rx_read_bytes=172221 rx_read_zero=58 rx_resume=0 rx_resume_busy=0 rx_last_drained=38 rx_proto=13 rx_errs=13 rx_last_err=-71 tx_submit_calls=0 rx_delivered=0
+tunnel 1 dbg rcv_nxt=0 copied=0 after=0 qlen=0 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=169271 pmoved=1737 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=0 car_nxt=3685447899 car_copied=3685447899 car_rcvbuf=524288 car_sndbuf=524288 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=394792 txwake_busy=226603 txwork=168481
+tunnel 1 ws_calls=286
+tunnel 1 c3 n=256 up=256 lost=0 replaced=0 stream_reset_tcp_failed=0 stream_reset_user=0 carrier_add=0 carrier_add_fail=0 backpressure_enter=1 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=0 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=0 una_stall_us=0 stall_paused_skips=0 stall_idle_skips=139050 stall_declared=2 stall_recovered=2 stall_drop=0 stall_dead=0 stall_replaced=0 stall_survival_bucket=0 stall_wait_loss_bytes=0 replace_cost_bytes=0 replace_cost_ewma=0 stall_replace_econ=0 stall_replace_retrans=0 stall_replace_dead=0 tx_window=16777216 bdp_bytes=617049 k_x100=500 rtt_mean_us=306451 rttvar_us=2179087 rtt_max_us=545615 bdp_sum_rate=1949906 bdp_agg_wnd=17098816 bdp_n_live=256 bdp_coverage=256 txq_max=16843040 win_block=0 win_resume=0 tx_wait_carrier=0 tx_backpressure=0 tx_wait_carrier_bytes=0 tx_wait_carrier_ns=0 tx_backpressure_bytes=0 tx_backpressure_ns=0 pump_hw_armed=0 pump_hw_fired=599 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0 prov_now=0 prov_peak=22 prov_reject=0 dead_release=0 carrier_retired=30
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=12 ctl_queued=0 pinned_bad_path=0 close_timeouts=0 fin_starved=0 fin_written=0 close_hold_fec=0 close_detaches=0
+tunnel 1 streams streams_active=0 n_streams=0 n_pending=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c9 fec_proto_fail=0 fec_hdr_crc_fail=0 fec_payload_crc_fail=0 fec_short_tx=0 fec_short_unknown=0 fec_stream_refused=0 bind_drop_no_stream=0 fec_drop_window=0 fec_drop_sid=0 fec_drop_crypto=0 fec_ack_tx=0 fec_ack_rx=0 fec_credit_wait=0
+tunnel 1 c10 fec_decode_blocks=0 fec_decode_recovered=0 fec_decode_nomem=0 fec_deliver_nomem=0 fec_deliver_dup=0 fec_deliver_ooo=0 fec_deliver_bad=0 fec_dup_share=0 fec_late_share=0 fec_late_data=0 fec_pad_share=0 fec_dup_marker=0 fec_marker_conflict=0 fec_epoch_conflict=0 fec_slot_past_cut=0 fec_fin_bad=0 fec_ack_bad=0 fec_tx_share_gap=0 fec_empty_block=0
+tunnel 1 c11 fec_nack_tx=2 fec_nack_rx=1 fec_nack_retx=0 fec_nack_drop=0 fec_nack_enomem=0 fec_nack_einval=0 fec_nack_enospc=0 fec_nack_eother=0 fec_nack_bad=1 fec_replay_hit=0 fec_replay_miss=1 fec_replay_miss_no_ring=0 fec_replay_miss_alloc=0 fec_replay_miss_enospc=0 fec_replay_miss_get=1 fec_replay_miss_evicted=0 fec_replay_miss_never_stored=1 fec_nack_sparse_probe=9 fec_nack_empty_reply=0 fec_nack_parity_reply=0 fec_replay_drop=0 fec_nack_retx_bytes=0 fec_replace_retx_bytes=0 fec_nack_lat_ns=0 fec_nack_lat_max_ns=0 fec_nack_repair_ns=0 fec_nack_repair_max_ns=0 fec_reset_tcp_failed=0 fec_reset_user=0 fec_wait_carrier=1 fec_backpressure=0 fec_flush_skip=0 fec_flush_pass=11 fec_hol_wait=0 fec_outq_drop=0 fec_outq_high_wait=0 fec_encode_fail=0 fec_init_rx=3 fec_init_bad=0 fec_decode_backoff=0 fec_outq_depth=0 fec_outq_max=0 fec_outq_bytes=0 fec_outq_ctl=0 fec_out_ctl_bytes=0 fec_replay_queued=0 fec_replay_bytes=0 fec_replay_skip=0 fec_nack_filtered_ready=0 fec_nack_filtered_inflight=0 fec_nack_filtered_dup=0 fec_nack_filtered_young=0 fec_replay_dedup=0 fec_nack_req_shares=1 fec_nack_backpressure=0 fec_replay_stale=0 fec_fin_wait_replay=0 fec_nack_never_stored=1 fec_nack_absent_reply=0 fec_nack_req_invalid=0 fec_replay_high_water=0 fec_replay_pass_throttled=0 fec_replay_drain_bps=0 fec_replay_queue_high=0 fec_reset_hole=0 tx_stall_suppressed_fec=0 fec_repair_last_ns=170352398082993 fec_short_parity_saved=0 fec_nack_pad_skip=0
+tunnel 1 c12 fec_outq
+tunnel 1 c13 adaptive=off epoch=0 n=128 m=128 groups=1 class=3 p_ppm=0 p_win_ppm=0 r_fail_ppm=0 sent=0 miss=0 switches=0 aborts=0 rollbacks=0 pauses=0 pause_ns=0 sample_unknown=0 abandoned=0 state=steady reason=off
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=257 pad_tx=1480 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=0 dup_bytes=0
+tunnel 1 reconcile live_bytes=123698 live_data=0 live_retx=0 retired_bytes=259 retired_data=0 retired_retx=0
+
+=== ss ===
+State  Recv-Q Send-Q Local Address:Port  Peer Address:PortProcess                                                
+LISTEN 0      4096       127.0.0.1:44302      0.0.0.0:*    users:(("xray",pid=685,fd=10))                        
+LISTEN 0      4096       127.0.0.1:44301      0.0.0.0:*    users:(("xray",pid=685,fd=9))                         
+LISTEN 0      4096      127.0.0.54:53         0.0.0.0:*    users:(("systemd-resolve",pid=336,fd=19))             
+LISTEN 0      4096         0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=693,fd=3),("systemd",pid=1,fd=178))
+LISTEN 0      4096       127.0.0.1:10809      0.0.0.0:*    users:(("xray",pid=685,fd=8))                         
+LISTEN 0      4096   127.0.0.53%lo:53         0.0.0.0:*    users:(("systemd-resolve",pid=336,fd=17))             
+LISTEN 0      9          127.0.0.1:5210       0.0.0.0:*    users:(("busybox",pid=367370,fd=3))                   
+LISTEN 0      128          0.0.0.0:9000       0.0.0.0:*                                                          
+LISTEN 0      4096               *:13022            *:*    users:(("frps",pid=667,fd=22))                        
+LISTEN 0      4096               *:14022            *:*    users:(("frps",pid=667,fd=12))                        
+LISTEN 0      4096               *:8443             *:*    users:(("xray",pid=685,fd=4))                         
+LISTEN 0      4096               *:12022            *:*    users:(("frps",pid=667,fd=17))                        
+LISTEN 0      4096               *:19090            *:*    users:(("frps",pid=667,fd=29))                        
+LISTEN 0      4096               *:17578            *:*    users:(("frps",pid=667,fd=27))                        
+LISTEN 0      4096               *:15022            *:*    users:(("frps",pid=667,fd=18))                        
+LISTEN 0      4096               *:18080            *:*    users:(("frps",pid=667,fd=28))                        
+LISTEN 0      4096               *:80               *:*    users:(("caddy",pid=322464,fd=8))                     
+LISTEN 0      4096            [::]:22            [::]:*    users:(("sshd",pid=693,fd=4),("systemd",pid=1,fd=179))
+LISTEN 0      4096               *:18443            *:*    users:(("frps",pid=667,fd=26))                        
+LISTEN 0      4096               *:11676            *:*    users:(("frps",pid=667,fd=13))                        
+LISTEN 0      4096               *:12676            *:*    users:(("frps",pid=667,fd=19))                        
+LISTEN 0      4096               *:443              *:*    users:(("caddy",pid=322464,fd=4))                     
+LISTEN 0      4096               *:10676            *:*    users:(("frps",pid=667,fd=31))                        
+LISTEN 0      4096               *:7000             *:*    users:(("frps",pid=667,fd=4))                         
+LISTEN 0      4096               *:14676            *:*    users:(("frps",pid=667,fd=8))                         
+LISTEN 0      4096               *:13676            *:*    users:(("frps",pid=667,fd=21))                        
+LISTEN 0      4096               *:13080            *:*    users:(("frps",pid=667,fd=23))                        
+LISTEN 0      4096               *:15120            *:*    users:(("frps",pid=667,fd=25))                        
+LISTEN 0      4096               *:15123            *:*    users:(("frps",pid=667,fd=30))                        
+LISTEN 0      4096               *:11022            *:*    users:(("frps",pid=667,fd=34))                        
+LISTEN 0      4096               *:15676            *:*    users:(("frps",pid=667,fd=16))                        
+LISTEN 0      4096               *:12080            *:*    users:(("frps",pid=667,fd=11))                        
+LISTEN 0      4096               *:12599            *:*    users:(("frps",pid=667,fd=14))                        
+LISTEN 0      4096               *:10022            *:*    users:(("frps",pid=667,fd=32))                        
+
+=== ip_rule ===
+0:	from all lookup local
+10:	from all fwmark 0x100 lookup main
+15:	from 45.11.1.62 lookup main
+20:	from all to 1.1.1.1 lookup main
+21:	from all to 1.2.4.8 lookup main
+22:	from all to 8.8.8.8 lookup main
+23:	from all to 8.8.4.4 lookup main
+24:	from all to 103.200.30.77 lookup main
+25:	from all to 35.223.238.0/24 lookup main
+26:	from all to 76.76.21.21 lookup main
+100:	from all lookup main suppress_prefixlength 0
+101:	not from all fwmark 0xc350 lookup 50000
+32766:	from all lookup main
+32767:	from all lookup default
+
+=== ip_route ===
+default via 45.11.1.126 dev eth0 proto static 
+1.1.1.1 via 45.11.1.126 dev eth0 proto static 
+1.2.4.8 via 45.11.1.126 dev eth0 proto static 
+45.11.1.0/25 dev eth0 proto kernel scope link src 45.11.1.62 
+
+=== netdev ===
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 17236538504  625181    0    0    0     0          0         0 17236538504  625181    0    0    0     0       0          0
+  eth0: 8358712674 40581658    0 56746    0     0          0         0 62381079303 45153875    0    0    0     0       0          0
+   r64:  135328    1475    0    0    0     0          0         0   607792   13876    0    0    0     0       0          0
+  WARP: 14907916   28502    0    0    0     0          0         0  5463824   36801    0    0    0     0       0          0
+
+=== meminfo ===
+MemTotal:         978880 kB
+MemFree:          200604 kB
+MemAvailable:     533460 kB
+
+=== slab ===
+
+=== dmesg ===
+[169425.115225] tbtun: carrier 154 stalled: repath paused, new frames avoid it
+[169426.041774] tbtun: carrier 134 recovered after 1337 ms: back in the stripe
+[169426.971583] tbtun: carrier 71 recovered after 2573 ms: back in the stripe
+[169427.791699] tbtun: carrier 154 recovered after 2676 ms: back in the stripe
+[169427.791899] tbtun: carrier 221 recovered after 7089 ms: back in the stripe
+[169428.457074] tbtun: carrier 223 stalled: repath paused, new frames avoid it
+[169428.767343] tbtun: carrier 223 recovered after 310 ms: back in the stripe
+[169428.921299] tbtun: carrier 224 stalled: repath paused, new frames avoid it
+[169430.509892] tbtun: carrier 224 recovered after 1588 ms: back in the stripe
+[169431.129302] tbtun: carrier 97 stalled: repath paused, new frames avoid it
+[169431.284806] tbtun: carrier 97 recovered after 155 ms: back in the stripe
+[169434.416775] tbtun: carrier 145 stalled: repath paused, new frames avoid it
+[169436.734575] tbtun: carrier 90 stalled: repath paused, new frames avoid it
+[169437.041793] tbtun: carrier 191 stalled: repath paused, new frames avoid it
+[169438.481407] tbtun: carrier 4 stalled: repath paused, new frames avoid it
+[169438.685508] tbtun: carrier 4 recovered after 204 ms: back in the stripe
+[169439.146677] tbtun: carrier 90 recovered after 2412 ms: back in the stripe
+[169440.017547] tbtun: carrier 68 stalled: repath paused, new frames avoid it
+[169440.119558] tbtun: carrier 68 recovered after 102 ms: back in the stripe
+[169440.376041] tbtun: carrier 247 stalled: repath paused, new frames avoid it
+[169440.587281] tbtun: carrier 145 recovered after 6170 ms: back in the stripe
+[169440.744179] tbtun: carrier 247 recovered after 368 ms: back in the stripe
+[169443.628817] tbtun: carrier 191 recovered after 6587 ms: back in the stripe
+[169444.295280] tbtun: carrier 227 stalled: repath paused, new frames avoid it
+[169444.398998] tbtun: carrier 227 recovered after 103 ms: back in the stripe
+[169444.502003] tbtun: carrier 245 stalled: repath paused, new frames avoid it
+[169446.714139] tbtun: carrier 245 recovered after 2212 ms: back in the stripe
+[169447.075541] tbtun: carrier 18 stalled: repath paused, new frames avoid it
+[169447.587621] tbtun: carrier 18 recovered after 512 ms: back in the stripe
+[169449.230561] tbtun: carrier 98 stalled: repath paused, new frames avoid it
+[169450.666951] tbtun: carrier 30 stalled: repath paused, new frames avoid it
+[169450.977380] tbtun: carrier 30 recovered after 310 ms: back in the stripe
+[169451.028937] tbtun: carrier 98 recovered after 1798 ms: back in the stripe
+[169454.168778] tbtun: carrier 226 stalled: repath paused, new frames avoid it
+[169454.322953] tbtun: carrier 226 recovered after 154 ms: back in the stripe
+[169454.835490] tbtun: carrier 66 stalled: repath paused, new frames avoid it
+[169454.989464] tbtun: carrier 66 recovered after 153 ms: back in the stripe
+[169457.911699] tbtun: carrier 117 stalled: repath paused, new frames avoid it
+[169458.116694] tbtun: carrier 117 recovered after 205 ms: back in the stripe
+[169460.902908] tbtun: carrier 173 stalled: repath paused, new frames avoid it
+[169462.906951] tbtun: carrier 173 recovered after 2004 ms: back in the stripe
+[169463.532565] tbtun: carrier 47 stalled: repath paused, new frames avoid it
+[169465.432454] tbtun: carrier 47 recovered after 1899 ms: back in the stripe
+[169465.535880] tbtun: carrier 129 stalled: repath paused, new frames avoid it
+[169465.947012] tbtun: carrier 129 recovered after 411 ms: back in the stripe
+[169468.002680] tbtun: carrier 118 stalled: repath paused, new frames avoid it
+[169468.261954] tbtun: carrier 118 recovered after 259 ms: back in the stripe
+[169470.983839] tbtun: carrier 221 stalled: repath paused, new frames avoid it
+[169471.495823] tbtun: carrier 221 recovered after 512 ms: back in the stripe
+[169471.750275] tbtun: carrier 12 stalled: repath paused, new frames avoid it
+[169471.853837] tbtun: carrier 170 stalled: repath paused, new frames avoid it
+[169473.287263] tbtun: carrier 12 recovered after 1536 ms: back in the stripe
+[169473.389834] tbtun: carrier 170 recovered after 1536 ms: back in the stripe
+[169473.492235] tbtun: carrier 4 stalled: repath paused, new frames avoid it
+[169473.493114] tbtun: carrier 218 stalled: repath paused, new frames avoid it
+[169473.953271] tbtun: carrier 4 recovered after 461 ms: back in the stripe
+[169473.953920] tbtun: carrier 218 recovered after 460 ms: back in the stripe
+[169477.895383] tbtun: carrier 29 stalled: repath paused, new frames avoid it
+[169479.848435] tbtun: carrier 29 recovered after 1953 ms: back in the stripe
+[169480.566753] tbtun: carrier 247 stalled: repath paused, new frames avoid it
+[169480.928537] tbtun: carrier 89 stalled: repath paused, new frames avoid it
+[169481.082548] tbtun: carrier 172 stalled: repath paused, new frames avoid it
+[169481.338528] tbtun: carrier 89 recovered after 409 ms: back in the stripe
+[169481.594575] tbtun: carrier 172 recovered after 512 ms: back in the stripe
+[169483.083726] tbtun: carrier 247 recovered after 2516 ms: back in the stripe
+[169483.695708] tbtun: carrier 214 stalled: repath paused, new frames avoid it
+[169484.004763] tbtun: carrier 214 recovered after 309 ms: back in the stripe
+[169484.566568] tbtun: carrier 210 stalled: repath paused, new frames avoid it
+[169484.822943] tbtun: carrier 210 recovered after 256 ms: back in the stripe
+[169485.081282] tbtun: carrier 8 stalled: repath paused, new frames avoid it
+[169485.236724] tbtun: carrier 243 stalled: repath paused, new frames avoid it
+[169485.338115] tbtun: carrier 1 stalled: repath paused, new frames avoid it
+[169485.389133] tbtun: carrier 8 recovered after 307 ms: back in the stripe
+[169485.389170] tbtun: carrier 19 stalled: repath paused, new frames avoid it
+[169485.645187] tbtun: carrier 19 recovered after 256 ms: back in the stripe
+[169485.645859] tbtun: carrier 243 recovered after 409 ms: back in the stripe
+[169485.749141] tbtun: carrier 1 recovered after 411 ms: back in the stripe
+[169488.419781] tbtun: carrier 157 stalled: repath paused, new frames avoid it
+[169488.575850] tbtun: carrier 209 stalled: repath paused, new frames avoid it
+[169488.779685] tbtun: carrier 157 recovered after 359 ms: back in the stripe
+[169488.779837] tbtun: carrier 209 recovered after 203 ms: back in the stripe
+[169489.968789] tbtun: carrier 238 stalled: repath paused, new frames avoid it
+[169490.225806] tbtun: carrier 238 recovered after 257 ms: back in the stripe
+[169493.110500] audit: type=1400 audit(1794119415.584:2157): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=364981 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[169493.110516] audit: type=1400 audit(1794119415.584:2158): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=364981 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[169493.110698] audit: type=1400 audit(1794119415.585:2159): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=364981 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[169493.110882] audit: type=1400 audit(1794119415.585:2160): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=364981 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[169493.112628] audit: type=1400 audit(1794119415.586:2161): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/nsswitch.conf" pid=364981 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[169493.112644] audit: type=1400 audit(1794119415.586:2162): apparmor="DENIED" operation="open" class="file" profile="who" name="/etc/passwd" pid=364981 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[169495.523351] tbtun: carrier 84 stalled: repath paused, new frames avoid it
+[169495.936342] tbtun: carrier 84 recovered after 412 ms: back in the stripe
+[169498.805895] tbtun: carrier 130 stalled: repath paused, new frames avoid it
+[169499.012941] tbtun: carrier 130 recovered after 207 ms: back in the stripe
+[169499.731876] tbtun: carrier 226 stalled: repath paused, new frames avoid it
+[169500.145186] tbtun: carrier 66 stalled: repath paused, new frames avoid it
+[169500.298369] tbtun: carrier 66 recovered after 153 ms: back in the stripe
+[169505.529642] tbtun: carrier 129 stalled: repath paused, new frames avoid it
+[169505.580435] tbtun: carrier 129 recovered after 50 ms: back in the stripe
+[169506.094871] tbtun: carrier 226 recovered after 6363 ms: back in the stripe
+[169506.762334] tbtun: carrier 179 stalled: repath paused, new frames avoid it
+[169508.254623] tbtun: carrier 122 stalled: repath paused, new frames avoid it
+[169510.636439] tbtun: carrier 122 recovered after 2381 ms: back in the stripe
+[169512.762349] tbtun: carrier 179 recovered after 6000 ms: back in the stripe
+[169512.919035] tbtun: carrier 251 stalled: repath paused, new frames avoid it
+[169515.400749] tbtun: carrier 251 recovered after 2481 ms: back in the stripe
+[169517.809437] tbtun: carrier 111 stalled: repath paused, new frames avoid it
+[169518.117373] tbtun: carrier 111 recovered after 307 ms: back in the stripe
+[169518.889288] tbtun: carrier 132 stalled: repath paused, new frames avoid it
+[169519.354154] tbtun: carrier 132 recovered after 464 ms: back in the stripe
+[169523.313195] tbtun: carrier 120 stalled: repath paused, new frames avoid it
+[169523.517297] tbtun: carrier 120 recovered after 204 ms: back in the stripe
+[169529.421169] tbtun: carrier 138 stalled: repath paused, new frames avoid it
+[169531.685604] tbtun: carrier 138 recovered after 2264 ms: back in the stripe
+[169534.784178] tbtun: carrier 139 stalled: repath paused, new frames avoid it
+[169535.039205] tbtun: carrier 139 recovered after 255 ms: back in the stripe
+[169536.272583] tbtun: carrier 221 stalled: repath paused, new frames avoid it
+[169537.155551] tbtun: carrier 183 stalled: repath paused, new frames avoid it
+[169537.513325] tbtun: carrier 183 recovered after 357 ms: back in the stripe
+[169538.435385] tbtun: carrier 221 recovered after 2162 ms: back in the stripe
+[169539.772168] tbtun: carrier 140 stalled: repath paused, new frames avoid it
+[169539.823132] tbtun: carrier 140 recovered after 50 ms: back in the stripe
+[169541.872514] tbtun: carrier 103 stalled: repath paused, new frames avoid it
+[169542.443027] tbtun: carrier 103 recovered after 570 ms: back in the stripe
+[169542.698964] tbtun: carrier 70 stalled: repath paused, new frames avoid it
+[169543.109914] tbtun: carrier 70 recovered after 410 ms: back in the stripe
+[169545.676811] tbtun: carrier 0 stalled: repath paused, new frames avoid it
+[169547.169359] tbtun: carrier 183 stalled: repath paused, new frames avoid it
+[169547.737795] tbtun: carrier 0 recovered after 2060 ms: back in the stripe
+[169548.148106] tbtun: carrier 192 stalled: repath paused, new frames avoid it
+[169548.406328] tbtun: carrier 192 recovered after 258 ms: back in the stripe
+[169548.665382] tbtun: carrier 209 stalled: repath paused, new frames avoid it
+[169549.036193] tbtun: carrier 183 recovered after 1866 ms: back in the stripe
+[169549.138083] tbtun: carrier 133 stalled: repath paused, new frames avoid it
+[169549.189216] tbtun: carrier 209 recovered after 523 ms: back in the stripe
+[169549.445230] tbtun: carrier 133 recovered after 307 ms: back in the stripe
+[169553.139984] tbtun: carrier 51 stalled: repath paused, new frames avoid it
+[169553.653957] tbtun: carrier 51 recovered after 514 ms: back in the stripe
+[169554.373471] tbtun: carrier 222 stalled: repath paused, new frames avoid it
+[169554.373492] tbtun: carrier 223 stalled: repath paused, new frames avoid it
+[169554.628835] tbtun: carrier 38 stalled: repath paused, new frames avoid it
+[169554.629405] tbtun: carrier 222 recovered after 255 ms: back in the stripe
+[169554.629413] tbtun: carrier 223 recovered after 255 ms: back in the stripe
+[169555.089956] tbtun: carrier 38 recovered after 461 ms: back in the stripe
+[169558.835850] tbtun: carrier 106 stalled: repath paused, new frames avoid it
+[169559.249171] tbtun: carrier 106 recovered after 413 ms: back in the stripe
+[169560.690739] tbtun: carrier 3 stalled: repath paused, new frames avoid it
+[169560.844810] tbtun: carrier 3 recovered after 154 ms: back in the stripe
+[169562.794914] tbtun: carrier 18 stalled: repath paused, new frames avoid it
+[169562.947820] tbtun: carrier 70 stalled: repath paused, new frames avoid it
+[169563.255846] tbtun: carrier 70 recovered after 308 ms: back in the stripe
+[169563.413229] tbtun: carrier 114 stalled: repath paused, new frames avoid it
+[169565.472752] tbtun: carrier 18 recovered after 2677 ms: back in the stripe
+[169565.831726] tbtun: carrier 21 stalled: repath paused, new frames avoid it
+[169565.831870] tbtun: carrier 114 recovered after 2418 ms: back in the stripe
+[169568.713724] tbtun: carrier 21 recovered after 2882 ms: back in the stripe
+[169570.927858] tbtun: carrier 84 stalled: repath paused, new frames avoid it
+[169570.927961] tbtun: carrier 146 stalled: repath paused, new frames avoid it
+[169570.979950] tbtun: carrier 84 recovered after 52 ms: back in the stripe
+[169572.115940] tbtun: carrier 181 stalled: repath paused, new frames avoid it
+[169573.038042] tbtun: carrier 146 recovered after 2110 ms: back in the stripe
+[169574.068372] tbtun: carrier 181 recovered after 1952 ms: back in the stripe
+[169575.864707] tbtun: carrier 3 stalled: repath paused, new frames avoid it
+[169576.070072] tbtun: carrier 233 stalled: repath paused, new frames avoid it
+[169576.686794] tbtun: carrier 78 stalled: repath paused, new frames avoid it
+[169576.687132] tbtun: carrier 233 recovered after 617 ms: back in the stripe
+[169577.096861] tbtun: carrier 78 recovered after 410 ms: back in the stripe
+[169578.019671] tbtun: carrier 3 recovered after 2154 ms: back in the stripe
+[169580.332612] tbtun: carrier 5 stalled: repath paused, new frames avoid it
+[169580.692055] tbtun: carrier 152 stalled: repath paused, new frames avoid it
+[169581.050237] tbtun: carrier 162 stalled: repath paused, new frames avoid it
+[169581.204321] tbtun: carrier 152 recovered after 512 ms: back in the stripe
+[169581.205482] tbtun: carrier 247 stalled: repath paused, new frames avoid it
+[169582.287611] tbtun: carrier 5 recovered after 1955 ms: back in the stripe
+[169583.720009] tbtun: carrier 162 recovered after 2669 ms: back in the stripe
+[169585.257453] tbtun: carrier 236 stalled: repath paused, new frames avoid it
+[169585.360455] tbtun: carrier 236 recovered after 103 ms: back in the stripe
+[169588.024059] tbtun: carrier 247 recovered after 6818 ms: back in the stripe
+[169588.899025] tbtun: carrier 206 stalled: repath paused, new frames avoid it
+[169589.260031] tbtun: carrier 206 recovered after 361 ms: back in the stripe
+[169591.257580] tbtun: carrier 7 stalled: repath paused, new frames avoid it
+[169591.359638] tbtun: carrier 30 stalled: repath paused, new frames avoid it
+[169591.412241] tbtun: carrier 252 stalled: repath paused, new frames avoid it
+[169591.719537] tbtun: carrier 7 recovered after 461 ms: back in the stripe
+[169591.924573] tbtun: carrier 30 recovered after 564 ms: back in the stripe
+[169593.517208] tbtun: carrier 252 recovered after 2104 ms: back in the stripe
+[169597.817887] tbtun: carrier 188 stalled: repath paused, new frames avoid it
+[169597.919974] tbtun: carrier 187 stalled: repath paused, new frames avoid it
+[169598.176283] tbtun: carrier 246 stalled: repath paused, new frames avoid it
+[169598.226978] tbtun: carrier 246 recovered after 50 ms: back in the stripe
+[169598.380989] tbtun: carrier 188 recovered after 563 ms: back in the stripe
+[169598.638051] tbtun: carrier 116 stalled: repath paused, new frames avoid it
+[169598.638071] tbtun: carrier 117 stalled: repath paused, new frames avoid it
+[169598.638078] tbtun: carrier 118 stalled: repath paused, new frames avoid it
+[169599.101778] tbtun: carrier 117 recovered after 463 ms: back in the stripe
+[169599.458591] tbtun: carrier 23 stalled: repath paused, new frames avoid it
+[169599.816237] tbtun: carrier 23 recovered after 357 ms: back in the stripe
+[169600.582988] tbtun: carrier 187 recovered after 2663 ms: back in the stripe
+[169600.840151] tbtun: carrier 236 stalled: repath paused, new frames avoid it
+[169601.146819] tbtun: carrier 116 recovered after 2508 ms: back in the stripe
+[169601.299927] tbtun: carrier 118 recovered after 2661 ms: back in the stripe
+[169602.534962] tbtun: carrier 236 recovered after 1694 ms: back in the stripe
+[169604.583770] tbtun: carrier 40 stalled: repath paused, new frames avoid it
+[169604.839553] tbtun: carrier 40 recovered after 255 ms: back in the stripe
+[169608.343194] tbtun: carrier 110 stalled: repath paused, new frames avoid it
+[169608.344729] tbtun: carrier 197 stalled: repath paused, new frames avoid it
+[169608.707076] tbtun: carrier 197 recovered after 362 ms: back in the stripe
+[169608.758177] tbtun: carrier 110 recovered after 415 ms: back in the stripe
+[169611.170447] tbtun: carrier 1 stalled: repath paused, new frames avoid it
+[169611.631447] tbtun: carrier 1 recovered after 460 ms: back in the stripe
+[169613.685207] tbtun: carrier 208 stalled: repath paused, new frames avoid it
+[169613.789899] tbtun: carrier 208 recovered after 104 ms: back in the stripe
+[169614.404626] tbtun: carrier 99 stalled: repath paused, new frames avoid it
+[169614.966448] tbtun: carrier 2 stalled: repath paused, new frames avoid it
+[169615.478756] tbtun: carrier 99 recovered after 1074 ms: back in the stripe
+[169616.504785] tbtun: carrier 87 stalled: repath paused, new frames avoid it
+[169616.608745] tbtun: carrier 87 recovered after 103 ms: back in the stripe
+[169618.508911] tbtun: carrier 112 stalled: repath paused, new frames avoid it
+[169619.948768] tbtun: carrier 140 stalled: repath paused, new frames avoid it
+[169620.410932] tbtun: carrier 140 recovered after 462 ms: back in the stripe
+[169620.665646] tbtun: carrier 112 recovered after 2156 ms: back in the stripe
+[169621.280416] tbtun: carrier 2 recovered after 6314 ms: back in the stripe
+[169624.625647] tbtun: carrier 50 stalled: repath paused, new frames avoid it
+[169624.677440] tbtun: carrier 23 stalled: repath paused, new frames avoid it
+[169624.938582] tbtun: carrier 140 stalled: repath paused, new frames avoid it
+[169624.989474] tbtun: carrier 23 recovered after 312 ms: back in the stripe
+[169624.989572] tbtun: carrier 50 recovered after 363 ms: back in the stripe
+[169625.451044] tbtun: carrier 140 recovered after 512 ms: back in the stripe
+[169633.430676] tbtun: carrier 246 stalled: repath paused, new frames avoid it
+[169633.534008] tbtun: carrier 246 recovered after 103 ms: back in the stripe
+[169634.351657] tbtun: carrier 196 stalled: repath paused, new frames avoid it
+[169635.019763] tbtun: carrier 137 stalled: repath paused, new frames avoid it
+[169635.377586] tbtun: carrier 137 recovered after 357 ms: back in the stripe
+[169636.768006] tbtun: carrier 196 recovered after 2416 ms: back in the stripe
+[169637.847360] tbtun: carrier 33 stalled: repath paused, new frames avoid it
+[169638.153689] tbtun: carrier 33 recovered after 306 ms: back in the stripe
+[169643.704484] tbtun: carrier 48 stalled: repath paused, new frames avoid it
+[169644.219445] tbtun: carrier 48 recovered after 514 ms: back in the stripe
+[169648.015675] tbtun: carrier 184 stalled: repath paused, new frames avoid it
+[169648.119742] tbtun: carrier 185 stalled: repath paused, new frames avoid it
+[169648.324621] tbtun: carrier 185 recovered after 204 ms: back in the stripe
+[169648.792837] tbtun: carrier 251 stalled: repath paused, new frames avoid it
+[169649.207791] tbtun: carrier 251 recovered after 414 ms: back in the stripe
+[169650.238686] tbtun: carrier 184 recovered after 2223 ms: back in the stripe
+[169652.196491] tbtun: carrier 171 stalled: repath paused, new frames avoid it
+[169654.969636] tbtun: carrier 171 recovered after 2773 ms: back in the stripe
+[169660.534405] tbtun: carrier 39 stalled: repath paused, new frames avoid it
+[169661.046273] tbtun: carrier 39 recovered after 511 ms: back in the stripe
+[169661.149299] tbtun: carrier 17 stalled: repath paused, new frames avoid it
+[169661.820067] tbtun: carrier 233 stalled: repath paused, new frames avoid it
+[169662.285740] tbtun: carrier 233 recovered after 465 ms: back in the stripe
+[169662.749549] tbtun: carrier 180 stalled: repath paused, new frames avoid it
+[169663.160515] tbtun: carrier 180 recovered after 410 ms: back in the stripe
+[169663.928233] tbtun: carrier 17 recovered after 2778 ms: back in the stripe
+[169663.928711] tbtun: carrier 115 stalled: repath paused, new frames avoid it
+[169664.134585] tbtun: carrier 115 recovered after 205 ms: back in the stripe
+[169664.341591] tbtun: carrier 119 stalled: repath paused, new frames avoid it
+[169664.343847] tbtun: carrier 193 stalled: repath paused, new frames avoid it
+[169664.753905] tbtun: carrier 193 recovered after 410 ms: back in the stripe
+[169664.855563] tbtun: carrier 119 recovered after 513 ms: back in the stripe
+[169666.647477] tbtun: carrier 82 stalled: repath paused, new frames avoid it
+[169667.056449] tbtun: carrier 82 recovered after 408 ms: back in the stripe
+[169670.962594] tbtun: carrier 59 stalled: repath paused, new frames avoid it
+[169671.319625] tbtun: carrier 59 recovered after 357 ms: back in the stripe
+[169673.702802] tbtun: carrier 175 stalled: repath paused, new frames avoid it
+[169674.115630] tbtun: carrier 175 recovered after 412 ms: back in the stripe
+[169674.683189] tbtun: carrier 60 stalled: repath paused, new frames avoid it
+[169675.097272] tbtun: carrier 60 recovered after 414 ms: back in the stripe
+[169677.407439] tbtun: carrier 89 stalled: repath paused, new frames avoid it
+[169677.668268] tbtun: carrier 89 recovered after 260 ms: back in the stripe
+[169678.490197] tbtun: carrier 31 stalled: repath paused, new frames avoid it
+[169679.262686] tbtun: carrier 49 stalled: repath paused, new frames avoid it
+[169679.470225] tbtun: carrier 49 recovered after 207 ms: back in the stripe
+[169680.653146] tbtun: carrier 31 recovered after 2162 ms: back in the stripe
+[169680.653204] tbtun: carrier 65 stalled: repath paused, new frames avoid it
+[169683.330537] tbtun: carrier 185 stalled: repath paused, new frames avoid it
+[169683.689265] tbtun: carrier 65 recovered after 3036 ms: back in the stripe
+[169684.974567] tbtun: carrier 133 stalled: repath paused, new frames avoid it
+[169685.384427] tbtun: carrier 133 recovered after 409 ms: back in the stripe
+[169685.693288] tbtun: carrier 185 recovered after 2362 ms: back in the stripe
+[169687.037859] tbtun: carrier 252 stalled: repath paused, new frames avoid it
+[169687.499557] tbtun: carrier 252 recovered after 461 ms: back in the stripe
+[169689.038362] tbtun: carrier 99 stalled: repath paused, new frames avoid it
+[169689.499401] tbtun: carrier 99 recovered after 461 ms: back in the stripe
+[169689.652761] tbtun: carrier 206 stalled: repath paused, new frames avoid it
+[169689.754110] tbtun: carrier 55 stalled: repath paused, new frames avoid it
+[169689.856503] tbtun: carrier 35 stalled: repath paused, new frames avoid it
+[169689.856902] tbtun: carrier 212 stalled: repath paused, new frames avoid it
+[169689.962160] tbtun: carrier 55 recovered after 208 ms: back in the stripe
+[169689.962369] tbtun: carrier 206 recovered after 309 ms: back in the stripe
+[169690.064409] tbtun: carrier 132 stalled: repath paused, new frames avoid it
+[169690.321219] tbtun: carrier 35 recovered after 464 ms: back in the stripe
+[169690.321834] tbtun: carrier 212 recovered after 464 ms: back in the stripe
+[169690.577617] tbtun: carrier 132 recovered after 513 ms: back in the stripe
+[169692.429759] tbtun: carrier 221 stalled: repath paused, new frames avoid it
+[169692.787171] tbtun: carrier 95 stalled: repath paused, new frames avoid it
+[169694.070788] tbtun: carrier 246 stalled: repath paused, new frames avoid it
+[169694.740559] tbtun: carrier 196 stalled: repath paused, new frames avoid it
+[169694.791362] tbtun: carrier 195 stalled: repath paused, new frames avoid it
+[169695.098424] tbtun: carrier 133 stalled: repath paused, new frames avoid it
+[169695.098578] tbtun: carrier 221 recovered after 2668 ms: back in the stripe
+[169695.149796] tbtun: carrier 195 recovered after 358 ms: back in the stripe
+[169695.149821] tbtun: carrier 196 recovered after 409 ms: back in the stripe
+[169695.203553] tbtun: carrier 40 stalled: repath paused, new frames avoid it
+[169695.307235] tbtun: carrier 95 recovered after 2520 ms: back in the stripe
+[169695.358284] tbtun: carrier 62 stalled: repath paused, new frames avoid it
+[169695.409424] tbtun: carrier 133 recovered after 310 ms: back in the stripe
+[169696.278018] tbtun: carrier 12 stalled: repath paused, new frames avoid it
+[169696.482461] tbtun: carrier 246 recovered after 2411 ms: back in the stripe
+[169696.637991] tbtun: carrier 12 recovered after 359 ms: back in the stripe
+[169697.049199] tbtun: carrier 85 stalled: repath paused, new frames avoid it
+[169697.820199] tbtun: carrier 62 recovered after 2461 ms: back in the stripe
+[169697.975077] tbtun: carrier 40 recovered after 2771 ms: back in the stripe
+[169698.745570] tbtun: carrier 189 stalled: repath paused, new frames avoid it
+[169699.362586] tbtun: carrier 201 stalled: repath paused, new frames avoid it
+[169699.568134] tbtun: carrier 85 recovered after 2518 ms: back in the stripe
+[169699.772143] tbtun: carrier 45 stalled: repath paused, new frames avoid it
+[169700.028070] tbtun: carrier 45 recovered after 255 ms: back in the stripe
+[169700.639985] tbtun: carrier 2 stalled: repath paused, new frames avoid it
+[169701.150952] tbtun: carrier 2 recovered after 510 ms: back in the stripe
+[169701.304436] tbtun: carrier 189 recovered after 2558 ms: back in the stripe
+[169701.815368] tbtun: carrier 201 recovered after 2452 ms: back in the stripe
+[169706.953190] tbtun: carrier 129 stalled: repath paused, new frames avoid it
+[169707.107765] tbtun: carrier 254 stalled: repath paused, new frames avoid it
+[169707.158625] tbtun: carrier 254 recovered after 50 ms: back in the stripe
+[169709.518398] tbtun: carrier 117 stalled: repath paused, new frames avoid it
+[169709.672429] tbtun: carrier 129 recovered after 2719 ms: back in the stripe
+[169709.878488] tbtun: carrier 117 recovered after 359 ms: back in the stripe
+[169714.450408] tbtun: carrier 102 stalled: repath paused, new frames avoid it
+[169714.910023] tbtun: carrier 102 recovered after 459 ms: back in the stripe
+[169717.365562] tbtun: carrier 239 stalled: repath paused, new frames avoid it
+[169717.980404] tbtun: carrier 239 recovered after 614 ms: back in the stripe
+[169721.421027] tbtun: carrier 16 stalled: repath paused, new frames avoid it
+[169721.879869] tbtun: carrier 16 recovered after 458 ms: back in the stripe
+[169723.795057] tbtun: carrier 105 stalled: repath paused, new frames avoid it
+[169724.152994] tbtun: carrier 105 recovered after 357 ms: back in the stripe
+[169725.695482] tbtun: carrier 230 stalled: repath paused, new frames avoid it
+[169726.001373] tbtun: carrier 210 stalled: repath paused, new frames avoid it
+[169726.462282] tbtun: carrier 210 recovered after 460 ms: back in the stripe
+[169728.370814] tbtun: carrier 230 recovered after 2675 ms: back in the stripe
+[169729.757003] tbtun: carrier 56 stalled: repath paused, new frames avoid it
+[169729.807963] tbtun: carrier 56 recovered after 50 ms: back in the stripe
+[169733.462677] tbtun: carrier 165 stalled: repath paused, new frames avoid it
+[169733.768862] tbtun: carrier 36 stalled: repath paused, new frames avoid it
+[169733.923172] tbtun: carrier 165 recovered after 460 ms: back in the stripe
+[169733.974268] tbtun: carrier 186 stalled: repath paused, new frames avoid it
+[169734.076960] tbtun: carrier 36 recovered after 308 ms: back in the stripe
+[169734.230234] tbtun: carrier 186 recovered after 255 ms: back in the stripe
+[169740.083066] tbtun: carrier 130 stalled: repath paused, new frames avoid it
+[169740.597246] tbtun: carrier 198 stalled: repath paused, new frames avoid it
+[169740.648355] tbtun: carrier 130 recovered after 565 ms: back in the stripe
+[169740.648512] tbtun: carrier 198 recovered after 51 ms: back in the stripe
+[169741.417464] tbtun: carrier 235 stalled: repath paused, new frames avoid it
+[169742.035323] tbtun: carrier 235 recovered after 617 ms: back in the stripe
+[169747.682849] tbtun: carrier 86 stalled: repath paused, new frames avoid it
+[169747.734152] tbtun: carrier 172 stalled: repath paused, new frames avoid it
+[169748.039894] tbtun: carrier 86 recovered after 357 ms: back in the stripe
+[169748.450343] tbtun: carrier 172 recovered after 716 ms: back in the stripe
+[169750.141037] tbtun: carrier 212 stalled: repath paused, new frames avoid it
+[169750.605444] tbtun: carrier 224 stalled: repath paused, new frames avoid it
+[169750.656113] tbtun: carrier 212 recovered after 515 ms: back in the stripe
+[169751.118200] tbtun: carrier 224 recovered after 512 ms: back in the stripe
+[169754.400099] tbtun: carrier 99 stalled: repath paused, new frames avoid it
+[169754.866058] tbtun: carrier 99 recovered after 465 ms: back in the stripe
+[169760.167378] tbtun: carrier 213 stalled: repath paused, new frames avoid it
+[169760.577230] tbtun: carrier 213 recovered after 409 ms: back in the stripe
+[169762.215077] tbtun: carrier 247 stalled: repath paused, new frames avoid it
+[169762.882222] tbtun: carrier 178 stalled: repath paused, new frames avoid it
+[169764.418221] tbtun: carrier 192 stalled: repath paused, new frames avoid it
+[169764.418362] tbtun: carrier 247 recovered after 2203 ms: back in the stripe
+[169764.826482] tbtun: carrier 192 recovered after 408 ms: back in the stripe
+[169765.134269] tbtun: carrier 178 recovered after 2252 ms: back in the stripe
+[169765.654151] tbtun: carrier 138 stalled: repath paused, new frames avoid it
+[169765.859139] tbtun: carrier 138 recovered after 205 ms: back in the stripe
+[169766.319751] tbtun: carrier 59 stalled: repath paused, new frames avoid it
+[169766.472742] tbtun: carrier 59 recovered after 152 ms: back in the stripe
+[169767.750723] tbtun: carrier 78 stalled: repath paused, new frames avoid it
+[169767.801697] tbtun: carrier 78 recovered after 50 ms: back in the stripe
+[169774.850400] tbtun: carrier 208 stalled: repath paused, new frames avoid it
+[169775.158264] tbtun: carrier 195 stalled: repath paused, new frames avoid it
+[169775.314839] tbtun: carrier 133 stalled: repath paused, new frames avoid it
+[169775.471621] tbtun: carrier 208 recovered after 621 ms: back in the stripe
+[169775.935135] tbtun: carrier 133 recovered after 620 ms: back in the stripe
+[169776.651888] tbtun: carrier 66 stalled: repath paused, new frames avoid it
+[169776.652140] tbtun: carrier 148 stalled: repath paused, new frames avoid it
+[169776.702859] tbtun: carrier 66 recovered after 50 ms: back in the stripe
+[169776.907971] tbtun: carrier 154 stalled: repath paused, new frames avoid it
+[169777.113015] tbtun: carrier 158 stalled: repath paused, new frames avoid it
+[169777.165364] tbtun: carrier 229 stalled: repath paused, new frames avoid it
+[169777.216023] tbtun: carrier 148 recovered after 563 ms: back in the stripe
+[169777.216136] tbtun: carrier 195 recovered after 2057 ms: back in the stripe
+[169777.216189] tbtun: carrier 229 recovered after 50 ms: back in the stripe
+[169777.266580] tbtun: carrier 3 stalled: repath paused, new frames avoid it
+[169777.317572] tbtun: carrier 3 recovered after 50 ms: back in the stripe
+[169777.675969] tbtun: carrier 158 recovered after 562 ms: back in the stripe
+[169778.648208] tbtun: carrier 184 stalled: repath paused, new frames avoid it
+[169779.058076] tbtun: carrier 184 recovered after 409 ms: back in the stripe
+[169779.262898] tbtun: carrier 34 recovered after 411 ms: back in the stripe
+[169779.981930] tbt_carrier_stall: 3 callbacks suppressed
+[169779.981950] tbtun: carrier 193 stalled: repath paused, new frames avoid it
+[169780.497808] tbtun: carrier 50 stalled: repath paused, new frames avoid it
+[169780.498180] tbt_car_poll_one: 3 callbacks suppressed
+[169780.498196] tbtun: carrier 193 recovered after 516 ms: back in the stripe
+[169780.599641] tbtun: carrier 50 recovered after 101 ms: back in the stripe
+[169782.188393] tbtun: carrier 229 stalled: repath paused, new frames avoid it
+[169782.444640] tbtun: carrier 28 stalled: repath paused, new frames avoid it
+[169782.597609] tbtun: carrier 25 stalled: repath paused, new frames avoid it
+[169782.854945] tbtun: carrier 229 recovered after 666 ms: back in the stripe
+[169783.111602] tbtun: carrier 28 recovered after 666 ms: back in the stripe
+[169783.213625] tbtun: carrier 25 recovered after 616 ms: back in the stripe
+[169784.190411] tbtun: carrier 175 stalled: repath paused, new frames avoid it
+[169784.293047] tbtun: carrier 175 recovered after 102 ms: back in the stripe
+[169784.910102] tbtun: carrier 116 stalled: repath paused, new frames avoid it
+[169785.371987] tbtun: carrier 116 recovered after 461 ms: back in the stripe
+[169787.630068] tbtun: carrier 168 stalled: repath paused, new frames avoid it
+[169788.351188] tbtun: carrier 168 recovered after 721 ms: back in the stripe
+[169789.229113] tbtun: carrier 191 stalled: repath paused, new frames avoid it
+[169789.585931] tbtun: carrier 114 stalled: repath paused, new frames avoid it
+[169789.638867] tbtun: carrier 191 recovered after 409 ms: back in the stripe
+[169791.897865] tbtun: carrier 114 recovered after 2311 ms: back in the stripe
+[169792.463746] tbtun: carrier 74 stalled: repath paused, new frames avoid it
+[169793.132759] tbtun: carrier 74 recovered after 669 ms: back in the stripe
+[169795.238286] tbtun: carrier 154 stalled: repath paused, new frames avoid it
+[169795.912544] tbtun: carrier 38 stalled: repath paused, new frames avoid it
+[169796.684247] tbtun: carrier 143 stalled: repath paused, new frames avoid it
+[169797.199098] tbtun: carrier 143 recovered after 514 ms: back in the stripe
+[169797.608999] tbtun: carrier 164 stalled: repath paused, new frames avoid it
+[169797.659858] tbtun: carrier 164 recovered after 50 ms: back in the stripe
+[169798.839719] tbtun: carrier 38 recovered after 2927 ms: back in the stripe
+[169800.187755] tbtun: carrier 123 stalled: repath paused, new frames avoid it
+[169800.545954] tbtun: carrier 222 stalled: repath paused, new frames avoid it
+[169800.750983] tbtun: carrier 222 recovered after 205 ms: back in the stripe
+[169800.801930] tbtun: carrier 123 recovered after 614 ms: back in the stripe
+[169801.522944] tbtun: carrier 154 recovered after 6284 ms: back in the stripe
+[169801.624552] tbtun: carrier 69 stalled: repath paused, new frames avoid it
+[169802.187952] tbtun: carrier 69 recovered after 563 ms: back in the stripe
+[169802.600566] tbtun: carrier 85 stalled: repath paused, new frames avoid it
+[169802.702706] tbtun: carrier 85 recovered after 102 ms: back in the stripe
+[169804.142689] tbtun: carrier 92 stalled: repath paused, new frames avoid it
+[169804.194266] tbtun: carrier 190 stalled: repath paused, new frames avoid it
+[169804.451756] tbtun: carrier 109 stalled: repath paused, new frames avoid it
+[169804.604871] tbtun: carrier 92 recovered after 462 ms: back in the stripe
+[169804.656247] tbtun: carrier 190 recovered after 461 ms: back in the stripe
+[169805.119258] tbtun: carrier 109 recovered after 667 ms: back in the stripe
+[169805.482524] tbtun: carrier 46 stalled: repath paused, new frames avoid it
+[169805.584602] tbtun: carrier 50 stalled: repath paused, new frames avoid it
+[169805.950790] tbtun: carrier 46 recovered after 468 ms: back in the stripe
+[169806.315531] tbtun: carrier 50 recovered after 730 ms: back in the stripe
+[169806.367150] tbtun: carrier 210 stalled: repath paused, new frames avoid it
+[169806.570757] tbtun: carrier 98 stalled: repath paused, new frames avoid it
+[169806.826747] tbtun: carrier 135 stalled: repath paused, new frames avoid it
+[169806.826802] tbtun: carrier 150 stalled: repath paused, new frames avoid it
+[169807.034560] tbtun: carrier 98 recovered after 463 ms: back in the stripe
+[169807.034752] tbtun: carrier 210 recovered after 667 ms: back in the stripe
+[169807.392143] tbtun: carrier 158 stalled: repath paused, new frames avoid it
+[169807.444878] tbtun: carrier 150 recovered after 618 ms: back in the stripe
+[169807.546522] tbtun: carrier 135 recovered after 719 ms: back in the stripe
+[169807.649113] tbtun: carrier 249 stalled: repath paused, new frames avoid it
+[169808.366938] tbt_car_poll_one: 1 callbacks suppressed
+[169808.366972] tbtun: carrier 249 recovered after 717 ms: back in the stripe
+[169808.756541] tbtun: carrier 17 stalled: repath paused, new frames avoid it
+[169809.156099] tbtun: carrier 218 stalled: repath paused, new frames avoid it
+[169809.207640] tbtun: carrier 159 stalled: repath paused, new frames avoid it
+[169809.414629] tbtun: carrier 70 recovered after 51 ms: back in the stripe
+[169809.414879] tbtun: carrier 159 recovered after 207 ms: back in the stripe
+[169809.624440] tbtun: carrier 17 recovered after 867 ms: back in the stripe
+[169810.125554] tbtun: carrier 52 recovered after 607 ms: back in the stripe
+[169810.126081] tbtun: carrier 206 recovered after 608 ms: back in the stripe
+[169810.126165] tbtun: carrier 227 recovered after 762 ms: back in the stripe
+[169810.126182] tbtun: carrier 232 recovered after 608 ms: back in the stripe
+[169810.126190] tbtun: carrier 233 recovered after 659 ms: back in the stripe
+[169810.695406] tbt_carrier_stall: 7 callbacks suppressed
+[169810.695423] tbtun: carrier 245 stalled: repath paused, new frames avoid it
+[169811.009849] tbtun: carrier 245 recovered after 314 ms: back in the stripe
+[169812.198343] tbtun: carrier 4 stalled: repath paused, new frames avoid it
+[169818.540121] tbtun: carrier 123 stalled: repath paused, new frames avoid it
+[169818.899659] tbtun: carrier 25 stalled: repath paused, new frames avoid it
+[169819.366682] tbt_car_poll_one: 3 callbacks suppressed
+[169819.366703] tbtun: carrier 123 recovered after 826 ms: back in the stripe
+[169819.468384] tbtun: carrier 25 recovered after 568 ms: back in the stripe
+[169824.872707] tbtun: carrier 255 stalled: repath paused, new frames avoid it
+[169825.025741] tbtun: carrier 112 stalled: repath paused, new frames avoid it
+[169825.638683] tbtun: carrier 112 recovered after 612 ms: back in the stripe
+[169827.330856] tbtun: carrier 255 recovered after 2458 ms: back in the stripe
+[169829.854335] tbtun: carrier 34 stalled: repath paused, new frames avoid it
+[169829.854379] tbtun: carrier 35 stalled: repath paused, new frames avoid it
+[169830.007318] tbtun: carrier 36 stalled: repath paused, new frames avoid it
+[169830.109477] tbtun: carrier 31 stalled: repath paused, new frames avoid it
+[169830.160681] tbtun: carrier 176 stalled: repath paused, new frames avoid it
+[169830.570286] tbtun: carrier 31 recovered after 460 ms: back in the stripe
+[169830.570314] tbtun: carrier 35 recovered after 715 ms: back in the stripe
+[169832.618343] tbtun: carrier 36 recovered after 2611 ms: back in the stripe
+[169832.720473] tbtun: carrier 176 recovered after 2559 ms: back in the stripe
+[169832.874314] tbtun: carrier 34 recovered after 3019 ms: back in the stripe
+[169834.992871] tbtun: carrier 196 stalled: repath paused, new frames avoid it
+[169835.044763] tbtun: carrier 196 recovered after 51 ms: back in the stripe
+[169841.817433] tbtun: carrier 202 stalled: repath paused, new frames avoid it
+[169842.072764] tbtun: carrier 202 recovered after 255 ms: back in the stripe
+[169850.503227] tbtun: carrier 12 stalled: repath paused, new frames avoid it
+[169851.629138] tbtun: carrier 12 recovered after 1125 ms: back in the stripe
+[169853.764481] tbtun: tunnel 1 carrier 0 gen 29 lost: sock=1 connected=1 hello_sent=1 up=1
+[169853.765209] tbtun: tunnel 1 carrier 1 gen 30 lost: sock=1 connected=1 hello_sent=1 up=1
+[169853.766342] tbtun: tunnel 1 carrier 10 gen 17 lost: sock=1 connected=1 hello_sent=1 up=1
+[169853.766367] tbtun: tunnel 1 carrier 16 gen 24 lost: sock=1 connected=1 hello_sent=1 up=1
+[169853.766580] tbtun: tunnel 1 carrier 15 gen 23 lost: sock=1 connected=1 hello_sent=1 up=1
+[169853.766594] tbtun: tunnel 1 carrier 22 gen 32 lost: sock=1 connected=1 hello_sent=1 up=1
+[169853.770130] tbtun: tunnel 1 carrier 31 gen 50 lost: sock=1 connected=1 hello_sent=1 up=1
+[169853.770196] tbtun: tunnel 1 carrier 28 gen 40 lost: sock=1 connected=1 hello_sent=1 up=1
+[169853.770208] tbtun: tunnel 1 carrier 3 gen 34 lost: sock=1 connected=1 hello_sent=1 up=1
+[169853.770218] tbtun: tunnel 1 carrier 7 gen 35 lost: sock=1 connected=1 hello_sent=1 up=1
+[169854.572115] tbtun: tunnel 1 no carrier can carry: user side backpressured
+[169863.918090] tbtun: unloaded
+[170015.579617] tbtun 0.3.0 loaded: 64 tunnels max, 256 carriers max
+[170016.616235] tbtun: tunnel 1: portblock= is parsed but unused; carrier source ports come from /proc/net/tbtun/ports
+[170016.738813] tbtun: tunnel 1 no carrier can carry: user side backpressured
+[170027.728667] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55101, awaiting HELLO
+[170027.730068] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55095, awaiting HELLO
+[170027.732085] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30004, awaiting HELLO
+[170027.733484] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30012, awaiting HELLO
+[170027.745332] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55103, awaiting HELLO
+[170027.768787] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30002, awaiting HELLO
+[170027.769272] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30010, awaiting HELLO
+[170027.769446] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55099, awaiting HELLO
+[170027.770031] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55097, awaiting HELLO
+[170027.779733] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30017, awaiting HELLO
+[170028.060354] tbtun: tunnel 1: fec rx shape from peer: n=8 m=24 groups=8 slots=8 block=128 L=16 rate=64
+[170032.730150] tbt_carrier_adopt: 83 callbacks suppressed
+[170032.730188] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55175, awaiting HELLO
+[170032.777537] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55177, awaiting HELLO
+[170032.787958] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30090, awaiting HELLO
+[170033.002781] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30076, awaiting HELLO
+[170033.094739] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55167, awaiting HELLO
+[170033.112835] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30092, awaiting HELLO
+[170033.144750] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55179, awaiting HELLO
+[170033.171671] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30094, awaiting HELLO
+[170033.192098] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55181, awaiting HELLO
+[170033.434210] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30084, awaiting HELLO
+[170037.743578] tbt_carrier_adopt: 65 callbacks suppressed
+[170037.743588] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30162, awaiting HELLO
+[170037.792947] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30150, awaiting HELLO
+[170037.839782] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55239, awaiting HELLO
+[170038.051968] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30154, awaiting HELLO
+[170038.170801] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30166, awaiting HELLO
+[170038.226499] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55233, awaiting HELLO
+[170038.233619] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55243, awaiting HELLO
+[170038.265347] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30168, awaiting HELLO
+[170038.286404] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55245, awaiting HELLO
+[170038.629492] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30146, awaiting HELLO
+[170042.745755] tbt_carrier_adopt: 73 callbacks suppressed
+[170042.745768] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55295, awaiting HELLO
+[170042.798016] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30241, awaiting HELLO
+[170042.799369] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30240, awaiting HELLO
+[170042.841548] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30242, awaiting HELLO
+[170042.896263] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30244, awaiting HELLO
+[170042.943646] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30245, awaiting HELLO
+[170043.162915] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30248, awaiting HELLO
+[170043.220878] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30252, awaiting HELLO
+[170043.228192] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55305, awaiting HELLO
+[170043.229255] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55303, awaiting HELLO
+[170052.191611] tbtun: carrier 198 stalled: repath paused, new frames avoid it
+[170055.590313] tbtun: carrier 36 stalled: repath paused, new frames avoid it
+[170056.511843] tbtun: carrier 198 recovered after 4320 ms: back in the stripe
+[170057.281440] tbtun: carrier 36 recovered after 1691 ms: back in the stripe
+[170064.160658] tbtun: carrier 119 stalled: repath paused, new frames avoid it
+[170064.263818] tbtun: carrier 119 recovered after 103 ms: back in the stripe
+[170066.677794] tbtun: carrier 60 stalled: repath paused, new frames avoid it
+[170068.367611] tbtun: carrier 60 recovered after 1689 ms: back in the stripe
+[170075.609154] tbtun: carrier 213 stalled: repath paused, new frames avoid it
+[170077.360195] tbtun: carrier 213 recovered after 1750 ms: back in the stripe
+[170077.768713] tbtun: carrier 101 stalled: repath paused, new frames avoid it
+[170077.922902] tbtun: carrier 101 recovered after 154 ms: back in the stripe
+[170079.819780] tbtun: carrier 64 stalled: repath paused, new frames avoid it
+[170080.177764] tbtun: carrier 64 recovered after 357 ms: back in the stripe
+[170080.330587] tbtun: carrier 5 stalled: repath paused, new frames avoid it
+[170080.943600] tbtun: carrier 5 recovered after 613 ms: back in the stripe
+[170081.455131] tbtun: carrier 70 stalled: repath paused, new frames avoid it
+[170081.455193] tbtun: carrier 85 stalled: repath paused, new frames avoid it
+[170082.020863] tbtun: carrier 97 stalled: repath paused, new frames avoid it
+[170082.021397] tbtun: carrier 240 stalled: repath paused, new frames avoid it
+[170082.430063] tbtun: carrier 97 recovered after 409 ms: back in the stripe
+[170083.761448] tbtun: carrier 240 recovered after 1740 ms: back in the stripe
+[170084.070211] tbtun: carrier 70 recovered after 2615 ms: back in the stripe
+[170085.714699] tbtun: carrier 6 stalled: repath paused, new frames avoid it
+[170085.816668] tbtun: carrier 4 stalled: repath paused, new frames avoid it
+[170085.919477] tbtun: carrier 152 stalled: repath paused, new frames avoid it
+[170086.178211] tbtun: carrier 152 recovered after 258 ms: back in the stripe
+[170086.331712] tbtun: carrier 6 recovered after 617 ms: back in the stripe
+[170088.746083] tbtun: carrier 85 recovered after 7290 ms: back in the stripe
+[170088.799732] tbtun: carrier 4 recovered after 2983 ms: back in the stripe
+[170090.496758] tbtun: carrier 17 stalled: repath paused, new frames avoid it
+[170091.061778] tbtun: carrier 17 recovered after 565 ms: back in the stripe
+[170093.262164] tbtun: carrier 113 stalled: repath paused, new frames avoid it
+[170093.725063] tbtun: carrier 113 recovered after 462 ms: back in the stripe
+[170094.136211] tbtun: carrier 39 stalled: repath paused, new frames avoid it
+[170094.391796] tbtun: carrier 39 recovered after 255 ms: back in the stripe
+[170095.363882] tbtun: carrier 59 stalled: repath paused, new frames avoid it
+[170095.830111] tbtun: carrier 59 recovered after 466 ms: back in the stripe
+[170095.983858] tbtun: carrier 2 stalled: repath paused, new frames avoid it
+[170096.655220] tbtun: carrier 160 stalled: repath paused, new frames avoid it
+[170097.114038] tbtun: carrier 160 recovered after 458 ms: back in the stripe
+[170097.267041] tbtun: carrier 82 stalled: repath paused, new frames avoid it
+[170097.473936] tbtun: carrier 82 recovered after 206 ms: back in the stripe
+[170099.168118] tbtun: carrier 2 recovered after 3184 ms: back in the stripe
+[170099.683155] tbtun: carrier 215 stalled: repath paused, new frames avoid it
+[170100.200650] tbtun: carrier 215 recovered after 517 ms: back in the stripe
+[170102.411019] tbtun: carrier 91 stalled: repath paused, new frames avoid it
+[170102.615983] tbtun: carrier 95 stalled: repath paused, new frames avoid it
+[170103.026195] tbtun: carrier 91 recovered after 615 ms: back in the stripe
+[170103.131510] tbtun: carrier 174 stalled: repath paused, new frames avoid it
+[170103.805136] tbtun: carrier 174 recovered after 673 ms: back in the stripe
+[170104.901075] tbtun: carrier 95 recovered after 2285 ms: back in the stripe
+[170112.295304] tbtun: carrier 91 stalled: repath paused, new frames avoid it
+[170112.502082] tbtun: carrier 91 recovered after 206 ms: back in the stripe
+[170112.809295] tbtun: carrier 253 stalled: repath paused, new frames avoid it
+[170113.476239] tbtun: carrier 253 recovered after 666 ms: back in the stripe
+[170115.120048] tbtun: carrier 3 stalled: repath paused, new frames avoid it
+[170115.275523] tbtun: carrier 228 stalled: repath paused, new frames avoid it
+[170115.892949] tbtun: carrier 3 recovered after 772 ms: back in the stripe
+[170115.893594] tbtun: carrier 228 recovered after 618 ms: back in the stripe
+[170117.947390] tbtun: carrier 111 stalled: repath paused, new frames avoid it
+[170118.151347] tbtun: carrier 111 recovered after 203 ms: back in the stripe
+[170119.637502] tbtun: carrier 208 stalled: repath paused, new frames avoid it
+[170119.688630] tbtun: carrier 208 recovered after 51 ms: back in the stripe
+[170119.945478] tbtun: carrier 145 stalled: repath paused, new frames avoid it
+[170120.204580] tbtun: carrier 145 recovered after 259 ms: back in the stripe
+[170121.127338] tbtun: carrier 158 stalled: repath paused, new frames avoid it
+[170121.280761] tbtun: carrier 161 stalled: repath paused, new frames avoid it
+[170121.333462] tbtun: carrier 163 stalled: repath paused, new frames avoid it
+[170121.952680] tbtun: carrier 172 stalled: repath paused, new frames avoid it
+[170122.003583] tbtun: carrier 241 stalled: repath paused, new frames avoid it
+[170122.105841] tbtun: carrier 161 recovered after 825 ms: back in the stripe
+[170122.105867] tbtun: carrier 163 recovered after 772 ms: back in the stripe
+[170122.209588] tbtun: carrier 172 recovered after 256 ms: back in the stripe
+[170122.209716] tbtun: carrier 241 recovered after 206 ms: back in the stripe
+[170122.576712] tbtun: carrier 107 stalled: repath paused, new frames avoid it
+[170122.576847] tbtun: carrier 182 stalled: repath paused, new frames avoid it
+[170123.400243] tbtun: carrier 107 recovered after 823 ms: back in the stripe
+[170123.451494] tbtun: carrier 108 recovered after 821 ms: back in the stripe
+[170123.451669] tbtun: carrier 182 recovered after 874 ms: back in the stripe
+[170124.222756] tbtun: carrier 158 recovered after 3095 ms: back in the stripe
+[170125.505007] workqueue: tbt_car_rx_work [tbtun] hogged CPU for >10000us 7 times, consider switching to WQ_UNBOUND
+[170125.716353] tbt_carrier_stall: 1 callbacks suppressed
+[170125.716364] tbtun: carrier 149 stalled: repath paused, new frames avoid it
+[170126.641344] tbtun: carrier 149 recovered after 924 ms: back in the stripe
+[170127.102304] tbtun: carrier 139 stalled: repath paused, new frames avoid it
+[170127.205199] tbtun: carrier 137 stalled: repath paused, new frames avoid it
+[170127.257164] tbtun: carrier 137 recovered after 51 ms: back in the stripe
+[170127.564397] tbtun: carrier 140 stalled: repath paused, new frames avoid it
+[170127.615398] tbtun: carrier 140 recovered after 51 ms: back in the stripe
+[170128.440282] tbtun: carrier 139 recovered after 1337 ms: back in the stripe
+[170129.207206] tbtun: carrier 76 stalled: repath paused, new frames avoid it
+[170129.570436] tbtun: carrier 76 recovered after 363 ms: back in the stripe
+[170131.026683] tbtun: carrier 232 stalled: repath paused, new frames avoid it
+[170131.846622] tbtun: carrier 216 stalled: repath paused, new frames avoid it
+[170131.898787] tbtun: carrier 232 recovered after 872 ms: back in the stripe
+[170132.104550] tbtun: carrier 216 recovered after 257 ms: back in the stripe
+[170132.513413] tbtun: carrier 233 stalled: repath paused, new frames avoid it
+[170132.768414] tbtun: carrier 233 recovered after 254 ms: back in the stripe
+[170133.749493] tbtun: carrier 168 stalled: repath paused, new frames avoid it
+[170134.267327] tbtun: carrier 168 recovered after 517 ms: back in the stripe
+[170135.296420] tbtun: carrier 86 stalled: repath paused, new frames avoid it
+[170136.585651] tbtun: carrier 86 recovered after 1289 ms: back in the stripe
+[170138.241559] tbtun: carrier 134 stalled: repath paused, new frames avoid it
+[170138.447975] tbtun: carrier 178 stalled: repath paused, new frames avoid it
+[170138.499507] tbtun: carrier 178 recovered after 51 ms: back in the stripe
+[170138.962596] tbtun: carrier 235 stalled: repath paused, new frames avoid it
+[170139.064612] tbtun: carrier 235 recovered after 102 ms: back in the stripe
+[170139.269063] tbtun: carrier 134 recovered after 1027 ms: back in the stripe
+[170139.526342] tbtun: carrier 74 stalled: repath paused, new frames avoid it
+[170139.577416] tbtun: carrier 74 recovered after 51 ms: back in the stripe
+[170140.456574] tbtun: carrier 166 stalled: repath paused, new frames avoid it
+[170140.507521] tbtun: carrier 27 stalled: repath paused, new frames avoid it
+[170141.023315] tbtun: carrier 27 recovered after 515 ms: back in the stripe
+[170141.023588] tbtun: carrier 166 recovered after 567 ms: back in the stripe
+[170144.677412] tbtun: carrier 84 stalled: repath paused, new frames avoid it
+[170144.677579] tbtun: carrier 166 stalled: repath paused, new frames avoid it
+[170144.728919] tbtun: carrier 166 recovered after 51 ms: back in the stripe
+[170144.986661] tbtun: carrier 84 recovered after 309 ms: back in the stripe
+[170145.707282] tbtun: carrier 0 stalled: repath paused, new frames avoid it
+[170145.965288] tbtun: carrier 0 recovered after 258 ms: back in the stripe
+[170148.595145] tbtun: carrier 180 stalled: repath paused, new frames avoid it
+[170148.851740] tbtun: carrier 180 recovered after 256 ms: back in the stripe
+[170149.212778] tbtun: carrier 159 stalled: repath paused, new frames avoid it
+[170150.190881] tbtun: carrier 159 recovered after 978 ms: back in the stripe
+[170150.241592] tbtun: carrier 92 stalled: repath paused, new frames avoid it
+[170150.395462] tbtun: carrier 92 recovered after 153 ms: back in the stripe
+[170151.886607] tbtun: carrier 119 stalled: repath paused, new frames avoid it
+[170152.092770] tbtun: carrier 132 stalled: repath paused, new frames avoid it
+[170152.299865] tbtun: carrier 119 recovered after 413 ms: back in the stripe
+[170152.299896] tbtun: carrier 132 recovered after 207 ms: back in the stripe
+[170154.199482] tbtun: carrier 103 stalled: repath paused, new frames avoid it
+[170154.510975] tbtun: carrier 194 stalled: repath paused, new frames avoid it
+[170154.562231] tbtun: carrier 210 stalled: repath paused, new frames avoid it
+[170154.926853] tbtun: carrier 210 recovered after 364 ms: back in the stripe
+[170155.187412] tbtun: carrier 103 recovered after 987 ms: back in the stripe
+[170155.187736] tbtun: carrier 161 stalled: repath paused, new frames avoid it
+[170155.580833] tbtun: carrier 204 stalled: repath paused, new frames avoid it
+[170155.632692] tbtun: carrier 204 recovered after 51 ms: back in the stripe
+[170155.734467] tbtun: carrier 64 stalled: repath paused, new frames avoid it
+[170155.734589] tbtun: carrier 161 recovered after 546 ms: back in the stripe
+[170155.734628] tbtun: carrier 194 recovered after 1223 ms: back in the stripe
+[170157.940653] tbtun: carrier 64 recovered after 2206 ms: back in the stripe
+[170158.303723] tbtun: carrier 201 stalled: repath paused, new frames avoid it
+[170159.484873] tbtun: carrier 201 recovered after 1181 ms: back in the stripe
+[170159.535838] tbtun: carrier 110 stalled: repath paused, new frames avoid it
+[170159.900752] tbtun: carrier 110 recovered after 364 ms: back in the stripe
+[170159.900875] tbtun: carrier 187 stalled: repath paused, new frames avoid it
+[170160.053945] tbtun: carrier 187 recovered after 153 ms: back in the stripe
+[170161.487770] tbtun: carrier 145 stalled: repath paused, new frames avoid it
+[170162.100873] tbtun: carrier 201 stalled: repath paused, new frames avoid it
+[170162.358228] tbtun: carrier 145 recovered after 870 ms: back in the stripe
+[170162.879680] tbtun: carrier 201 recovered after 778 ms: back in the stripe
+[170164.933772] tbtun: carrier 6 stalled: repath paused, new frames avoid it
+[170165.087728] tbtun: carrier 136 stalled: repath paused, new frames avoid it
+[170165.138820] tbtun: carrier 136 recovered after 51 ms: back in the stripe
+[170165.397587] tbtun: carrier 229 stalled: repath paused, new frames avoid it
+[170165.502185] tbtun: carrier 229 recovered after 104 ms: back in the stripe
+[170165.603856] tbtun: carrier 110 stalled: repath paused, new frames avoid it
+[170165.705722] tbtun: carrier 44 stalled: repath paused, new frames avoid it
+[170165.756852] tbtun: carrier 6 recovered after 823 ms: back in the stripe
+[170166.118912] tbtun: carrier 246 stalled: repath paused, new frames avoid it
+[170166.424906] tbtun: carrier 246 recovered after 305 ms: back in the stripe
+[170166.476905] tbtun: carrier 110 recovered after 872 ms: back in the stripe
+[170166.990704] tbtun: carrier 44 recovered after 1284 ms: back in the stripe
+[170167.041827] tbtun: carrier 210 stalled: repath paused, new frames avoid it
+[170167.144059] tbtun: carrier 210 recovered after 102 ms: back in the stripe
+[170168.746154] tbtun: carrier 201 stalled: repath paused, new frames avoid it
+[170168.950731] tbtun: carrier 171 stalled: repath paused, new frames avoid it
+[170169.052910] tbtun: carrier 179 stalled: repath paused, new frames avoid it
+[170169.103501] tbtun: carrier 6 stalled: repath paused, new frames avoid it
+[170169.103740] tbtun: carrier 179 recovered after 50 ms: back in the stripe
+[170169.155668] tbtun: carrier 86 stalled: repath paused, new frames avoid it
+[170169.206730] tbtun: carrier 6 recovered after 103 ms: back in the stripe
+[170169.257544] tbtun: carrier 36 stalled: repath paused, new frames avoid it
+[170169.257731] tbtun: carrier 125 stalled: repath paused, new frames avoid it
+[170169.257780] tbtun: carrier 171 recovered after 307 ms: back in the stripe
+[170169.359700] tbtun: carrier 2 stalled: repath paused, new frames avoid it
+[170169.513602] tbtun: carrier 36 recovered after 256 ms: back in the stripe
+[170169.513767] tbtun: carrier 125 recovered after 256 ms: back in the stripe
+[170169.670772] tbtun: carrier 157 stalled: repath paused, new frames avoid it
+[170169.927756] tbtun: carrier 86 recovered after 772 ms: back in the stripe
+[170169.927877] tbtun: carrier 157 recovered after 257 ms: back in the stripe
+[170169.979445] tbtun: carrier 2 recovered after 619 ms: back in the stripe
+[170171.158317] tbtun: carrier 201 recovered after 2412 ms: back in the stripe
+[170172.097874] tbtun: carrier 131 recovered after 101 ms: back in the stripe
+[170173.127096] tbt_carrier_stall: 2 callbacks suppressed
+[170173.127203] tbtun: carrier 205 stalled: repath paused, new frames avoid it
+[170173.538217] tbtun: carrier 186 stalled: repath paused, new frames avoid it
+[170173.590883] tbtun: carrier 158 stalled: repath paused, new frames avoid it
+[170174.011784] tbtun: carrier 206 stalled: repath paused, new frames avoid it
+[170174.319124] tbt_car_poll_one: 3 callbacks suppressed
+[170174.319134] tbtun: carrier 186 recovered after 780 ms: back in the stripe
+[170174.369900] tbtun: carrier 206 recovered after 358 ms: back in the stripe
+[170174.676015] tbtun: carrier 139 stalled: repath paused, new frames avoid it
+[170174.831014] tbtun: carrier 232 stalled: repath paused, new frames avoid it
+[170174.933120] tbtun: carrier 228 stalled: repath paused, new frames avoid it
+[170174.933138] tbtun: carrier 232 recovered after 102 ms: back in the stripe
+[170174.983851] tbtun: carrier 134 stalled: repath paused, new frames avoid it
+[170174.984145] tbtun: carrier 228 recovered after 51 ms: back in the stripe
+[170175.187636] tbtun: carrier 3 stalled: repath paused, new frames avoid it
+[170175.239239] tbtun: carrier 231 stalled: repath paused, new frames avoid it
+[170175.289775] tbtun: carrier 3 recovered after 102 ms: back in the stripe
+[170175.290634] tbtun: carrier 231 recovered after 51 ms: back in the stripe
+[170175.600809] tbtun: carrier 134 recovered after 616 ms: back in the stripe
+[170175.807823] tbtun: carrier 139 recovered after 1131 ms: back in the stripe
+[170176.064094] tbtun: carrier 104 recovered after 412 ms: back in the stripe
+[170176.169205] tbtun: carrier 211 recovered after 258 ms: back in the stripe
+[170179.007770] tbt_carrier_stall: 3 callbacks suppressed
+[170179.007794] tbtun: carrier 174 stalled: repath paused, new frames avoid it
+[170179.317165] tbtun: carrier 125 stalled: repath paused, new frames avoid it
+[170179.473175] tbtun: carrier 186 stalled: repath paused, new frames avoid it
+[170179.730848] tbt_car_poll_one: 2 callbacks suppressed
+[170179.730860] tbtun: carrier 125 recovered after 413 ms: back in the stripe
+[170179.782132] tbtun: carrier 186 recovered after 308 ms: back in the stripe
+[170180.447858] tbtun: carrier 181 stalled: repath paused, new frames avoid it
+[170180.654683] tbtun: carrier 162 stalled: repath paused, new frames avoid it
+[170180.808969] tbtun: carrier 181 recovered after 361 ms: back in the stripe
+[170180.859939] tbtun: carrier 162 recovered after 205 ms: back in the stripe
+[170180.962014] tbtun: carrier 111 stalled: repath paused, new frames avoid it
+[170181.115245] tbtun: carrier 238 stalled: repath paused, new frames avoid it
+[170181.267969] tbtun: carrier 111 recovered after 305 ms: back in the stripe
+[170181.320406] tbtun: carrier 238 recovered after 205 ms: back in the stripe
+[170181.525658] tbtun: carrier 28 stalled: repath paused, new frames avoid it
+[170182.399797] tbtun: carrier 28 recovered after 874 ms: back in the stripe
+[170182.451099] tbtun: carrier 145 stalled: repath paused, new frames avoid it
+[170182.554187] tbtun: carrier 145 recovered after 103 ms: back in the stripe
+[170182.760892] tbtun: carrier 186 stalled: repath paused, new frames avoid it
+[170183.434160] tbtun: carrier 199 recovered after 310 ms: back in the stripe
+[170183.485176] tbtun: carrier 186 recovered after 724 ms: back in the stripe
+[170184.102106] tbt_carrier_stall: 2 callbacks suppressed
+[170184.102115] tbtun: carrier 195 stalled: repath paused, new frames avoid it
+[170184.153777] tbtun: carrier 74 stalled: repath paused, new frames avoid it
+[170184.770037] tbtun: carrier 47 stalled: repath paused, new frames avoid it
+[170184.821005] tbtun: carrier 191 stalled: repath paused, new frames avoid it
+[170184.821026] tbtun: carrier 198 stalled: repath paused, new frames avoid it
+[170185.079049] tbt_car_poll_one: 3 callbacks suppressed
+[170185.079063] tbtun: carrier 191 recovered after 258 ms: back in the stripe
+[170185.182702] tbtun: carrier 47 recovered after 412 ms: back in the stripe
+[170185.546138] tbtun: carrier 198 recovered after 725 ms: back in the stripe
+[170186.019316] tbtun: carrier 143 stalled: repath paused, new frames avoid it
+[170186.019334] tbtun: carrier 151 stalled: repath paused, new frames avoid it
+[170186.070936] tbtun: carrier 176 stalled: repath paused, new frames avoid it
+[170186.329962] tbtun: carrier 143 recovered after 310 ms: back in the stripe
+[170186.745828] tbtun: carrier 151 recovered after 726 ms: back in the stripe
+[170186.797910] tbtun: carrier 186 stalled: repath paused, new frames avoid it
+[170187.158064] tbtun: carrier 176 recovered after 1087 ms: back in the stripe
+[170187.158102] tbtun: carrier 186 recovered after 360 ms: back in the stripe
+[170188.391867] tbtun: carrier 19 stalled: repath paused, new frames avoid it
+[170188.648741] tbtun: carrier 19 recovered after 256 ms: back in the stripe
+[170189.113762] tbtun: carrier 30 stalled: repath paused, new frames avoid it
+[170189.216680] tbtun: carrier 30 recovered after 102 ms: back in the stripe
+[170189.421187] tbtun: carrier 195 stalled: repath paused, new frames avoid it
+[170189.525941] tbtun: carrier 153 stalled: repath paused, new frames avoid it
+[170189.680296] tbtun: carrier 153 recovered after 154 ms: back in the stripe
+[170190.192818] tbtun: carrier 7 stalled: repath paused, new frames avoid it
+[170190.348180] tbtun: carrier 197 stalled: repath paused, new frames avoid it
+[170190.661441] tbtun: carrier 195 recovered after 1240 ms: back in the stripe
+[170190.818059] tbtun: carrier 186 stalled: repath paused, new frames avoid it
+[170190.869020] tbtun: carrier 186 recovered after 50 ms: back in the stripe
+[170190.920951] tbtun: carrier 197 recovered after 572 ms: back in the stripe
+[170192.003454] tbtun: carrier 250 stalled: repath paused, new frames avoid it
+[170192.054131] tbtun: carrier 250 recovered after 50 ms: back in the stripe
+[170193.551968] tbtun: carrier 7 recovered after 3359 ms: back in the stripe
+[170194.742091] tbtun: carrier 170 stalled: repath paused, new frames avoid it
+[170194.950323] tbtun: carrier 145 stalled: repath paused, new frames avoid it
+[170195.317133] tbtun: carrier 170 recovered after 575 ms: back in the stripe
+[170195.525993] tbtun: carrier 145 recovered after 575 ms: back in the stripe
+[170195.629913] tbtun: carrier 144 stalled: repath paused, new frames avoid it
+[170195.732907] tbtun: carrier 68 stalled: repath paused, new frames avoid it
+[170195.784005] tbtun: carrier 144 recovered after 154 ms: back in the stripe
+[170196.038806] tbtun: carrier 68 recovered after 305 ms: back in the stripe
+[170196.400132] tbtun: carrier 36 stalled: repath paused, new frames avoid it
+[170196.504127] tbtun: carrier 153 stalled: repath paused, new frames avoid it
+[170196.557145] tbtun: carrier 49 stalled: repath paused, new frames avoid it
+[170196.557365] tbtun: carrier 153 recovered after 53 ms: back in the stripe
+[170196.557487] tbtun: carrier 221 stalled: repath paused, new frames avoid it
+[170196.660146] tbtun: carrier 36 recovered after 260 ms: back in the stripe
+[170196.660193] tbtun: carrier 49 recovered after 103 ms: back in the stripe
+[170196.660590] tbtun: carrier 221 recovered after 103 ms: back in the stripe
+[170197.541110] tbtun: carrier 59 stalled: repath paused, new frames avoid it
+[170197.747277] tbtun: carrier 31 stalled: repath paused, new frames avoid it
+[170197.850019] tbtun: carrier 59 recovered after 308 ms: back in the stripe
+[170197.953748] tbtun: carrier 31 recovered after 206 ms: back in the stripe
+[170198.574039] tbtun: carrier 21 recovered after 308 ms: back in the stripe
+[170199.659622] tbtun: carrier 94 recovered after 465 ms: back in the stripe
+[170199.824406] tbt_carrier_stall: 3 callbacks suppressed
+[170199.824488] tbtun: carrier 221 stalled: repath paused, new frames avoid it
+[170204.399600] tbtun: carrier 112 stalled: repath paused, new frames avoid it
+[170204.559987] tbtun: carrier 226 stalled: repath paused, new frames avoid it
+[170204.611439] tbt_car_poll_one: 2 callbacks suppressed
+[170204.611474] tbtun: carrier 112 recovered after 211 ms: back in the stripe
+[170204.664099] tbtun: carrier 226 recovered after 104 ms: back in the stripe
+[170208.085297] tbtun: carrier 1 stalled: repath paused, new frames avoid it
+[170208.295441] tbtun: carrier 200 stalled: repath paused, new frames avoid it
+[170208.554669] tbtun: carrier 200 recovered after 259 ms: back in the stripe
+[170208.811650] tbtun: carrier 98 stalled: repath paused, new frames avoid it
+[170208.863150] tbtun: carrier 98 recovered after 51 ms: back in the stripe
+[170209.375970] tbtun: carrier 1 recovered after 1290 ms: back in the stripe
+[170209.941703] tbtun: carrier 8 stalled: repath paused, new frames avoid it
+[170210.097253] tbtun: carrier 8 recovered after 155 ms: back in the stripe
+[170210.202523] tbtun: carrier 69 stalled: repath paused, new frames avoid it
+[170210.564990] tbtun: carrier 69 recovered after 362 ms: back in the stripe
+[170211.031288] tbtun: carrier 36 stalled: repath paused, new frames avoid it
+[170211.339976] tbtun: carrier 36 recovered after 308 ms: back in the stripe
+[170212.634447] tbtun: carrier 233 stalled: repath paused, new frames avoid it
+[170213.301026] tbtun: carrier 121 stalled: repath paused, new frames avoid it
+[170213.456975] tbtun: carrier 48 stalled: repath paused, new frames avoid it
+[170213.559359] tbtun: carrier 48 recovered after 102 ms: back in the stripe
+[170213.972073] tbtun: carrier 53 stalled: repath paused, new frames avoid it
+[170214.896405] tbtun: carrier 121 recovered after 1595 ms: back in the stripe
+[170214.946994] tbtun: carrier 53 recovered after 974 ms: back in the stripe
+[170214.947237] tbtun: carrier 233 recovered after 2312 ms: back in the stripe
+[170217.656649] tbtun: carrier 181 stalled: repath paused, new frames avoid it
+[170219.023444] warn_alloc: 12 callbacks suppressed
+[170219.023467] kworker/u10:6: page allocation failure: order:5, mode:0x40cc0(GFP_KERNEL|__GFP_COMP), nodemask=(null),cpuset=/,mems_allowed=0
+[170219.023711] CPU: 1 UID: 0 PID: 358815 Comm: kworker/u10:6 Tainted: G        W  OE       7.0.0-42-generic #42-Ubuntu PREEMPT(lazy) 
+[170219.023959] Tainted: [W]=WARN, [O]=OOT_MODULE, [E]=UNSIGNED_MODULE
+[170219.023970] Hardware name: Red Hat KVM, BIOS 1.15.0-2.module_el8.6.0+2880+7d9e3703 04/01/2014
+[170219.023978] Workqueue: events_unbound tbt_fec_out_drain_work [tbtun]
+[170219.024322] Call Trace:
+[170219.024338]  <TASK>
+[170219.024594]  show_stack+0x49/0x60
+[170219.026713]  dump_stack_lvl+0x5f/0x90
+[170219.027805]  dump_stack+0x10/0x18
+[170219.027811]  warn_alloc+0x172/0x1a0
+[170219.028672]  __alloc_pages_slowpath.constprop.0+0x5cf/0x9f0
+[170219.028681]  __alloc_frozen_pages_noprof+0x327/0x360
+[170219.028876]  alloc_pages_mpol+0x88/0x1b0
+[170219.029314]  alloc_frozen_pages_noprof+0x59/0xe0
+[170219.029321]  ___kmalloc_large_node+0xf6/0x140
+[170219.029597]  ? _raw_spin_lock_irqsave+0xe/0x20
+[170219.031020]  __kmalloc_large_node_noprof+0x1f/0x110
+[170219.031034]  ? _raw_spin_unlock_irqrestore+0x11/0x60
+[170219.031042]  ? tbt_carrier_send_fec_batch+0x2b0/0x340 [tbtun]
+[170219.031071]  __kmalloc_noprof+0x425/0x610
+[170219.031211]  tbt_carrier_send_fec_batch+0x2b0/0x340 [tbtun]
+[170219.031236]  tbt_fec_out_drain_work+0x1f1/0x440 [tbtun]
+[170219.031273]  process_one_work+0x1ac/0x3d0
+[170219.031914]  worker_thread+0x1b8/0x360
+[170219.031925]  ? __pfx_worker_thread+0x10/0x10
+[170219.031935]  kthread+0xf7/0x130
+[170219.032127]  ? __pfx_kthread+0x10/0x10
+[170219.032132]  ret_from_fork+0x195/0x2a0
+[170219.032700]  ? __pfx_kthread+0x10/0x10
+[170219.032707]  ? __pfx_kthread+0x10/0x10
+[170219.032713]  ret_from_fork_asm+0x1a/0x30
+[170219.033073]  </TASK>
+[170219.041146] Mem-Info:
+[170219.041232] active_anon:13450 inactive_anon:3218 isolated_anon:0
+                 active_file:43766 inactive_file:80206 isolated_file:0
+                 unevictable:2668 dirty:83 writeback:0
+                 slab_reclaimable:9310 slab_unreclaimable:41389
+                 mapped:19783 shmem:296 pagetables:1765
+                 sec_pagetables:0 bounce:0
+                 kernel_misc_reclaimable:0
+                 free:18547 free_pcp:339 free_cma:0
+[170219.041253] Node 0 active_anon:53800kB inactive_anon:12872kB active_file:175064kB inactive_file:320824kB unevictable:10672kB isolated(anon):0kB isolated(file):0kB mapped:79132kB dirty:332kB writeback:0kB shmem:1184kB shmem_thp:0kB shmem_pmdmapped:0kB anon_thp:0kB kernel_stack:6512kB pagetables:7060kB sec_pagetables:0kB all_unreclaimable? no Balloon:0kB gpu_active:0kB gpu_reclaim:0kB
+[170219.041265] Node 0 DMA free:4436kB boost:0kB min:760kB low:948kB high:1136kB reserved_highatomic:0KB free_highatomic:0KB active_anon:36kB inactive_anon:24kB active_file:336kB inactive_file:6848kB unevictable:0kB writepending:0kB zspages:0kB present:15992kB managed:15360kB mlocked:0kB bounce:0kB free_pcp:0kB local_pcp:0kB free_cma:0kB
+[170219.041279] lowmem_reserve[]: 0 940 940 940 940
+[170219.041292] Node 0 DMA32 free:69752kB boost:18432kB min:61080kB low:71740kB high:82400kB reserved_highatomic:2048KB free_highatomic:2048KB active_anon:53764kB inactive_anon:12848kB active_file:174688kB inactive_file:313976kB unevictable:10672kB writepending:332kB zspages:0kB present:1032044kB managed:963520kB mlocked:9732kB bounce:0kB free_pcp:1356kB local_pcp:516kB free_cma:0kB
+[170219.041312] lowmem_reserve[]: 0 0 0 0 0
+[170219.041323] Node 0 DMA: 2*4kB (UM) 10*8kB (UM) 11*16kB (UM) 9*32kB (UM) 5*64kB (U) 3*128kB (U) 5*256kB (UM) 4*512kB (UM) 0*1024kB 0*2048kB 0*4096kB = 4584kB
+[170219.041363] Node 0 DMA32: 959*4kB (UM) 1427*8kB (UME) 435*16kB (UM) 766*32kB (UME) 184*64kB (UME) 38*128kB (UME) 6*256kB (UME) 4*512kB (M) 1*1024kB (M) 1*2048kB (H) 0*4096kB = 70020kB
+[170219.041408] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=2048kB
+[170219.041419] 137544 total pagecache pages
+[170219.041422] 11372 pages in swap cache
+[170219.041425] Free swap  = 332296kB
+[170219.041428] Total swap = 524284kB
+[170219.041431] 262009 pages RAM
+[170219.041434] 0 pages HighMem/MovableOnly
+[170219.041436] 17289 pages reserved
+[170219.041439] 0 pages cma reserved
+[170219.041441] 0 pages hwpoisoned
+[170219.041453] Memory cgroup min protection 0kB -- low protection 0kB
+[170219.384290] tbtun: carrier 181 recovered after 1727 ms: back in the stripe
+[170220.811288] tbtun: carrier 174 stalled: repath paused, new frames avoid it
+[170222.716382] tbtun: carrier 26 stalled: repath paused, new frames avoid it
+[170222.823312] tbtun: carrier 26 recovered after 106 ms: back in the stripe
+[170223.859318] tbtun: carrier 198 stalled: repath paused, new frames avoid it
+[170224.523661] tbtun: carrier 198 recovered after 664 ms: back in the stripe
+[170225.466502] tbtun: carrier 174 recovered after 4655 ms: back in the stripe
+[170226.337388] tbtun: carrier 127 stalled: repath paused, new frames avoid it
+[170226.696234] tbtun: carrier 127 recovered after 358 ms: back in the stripe
+[170227.133876] tbtun: tunnel 1 carrier 0 gen 35 lost: sock=1 connected=1 hello_sent=1 up=1
+[170227.134626] tbtun: tunnel 1 carrier 1 gen 10 lost: sock=1 connected=1 hello_sent=1 up=1
+[170227.135448] tbtun: tunnel 1 carrier 10 gen 17 lost: sock=1 connected=1 hello_sent=1 up=1
+[170227.135472] tbtun: tunnel 1 carrier 22 gen 57 lost: sock=1 connected=1 hello_sent=1 up=1
+[170227.136897] tbtun: tunnel 1 carrier 35 gen 66 lost: sock=1 connected=1 hello_sent=1 up=1
+[170227.137309] tbtun: tunnel 1 carrier 39 gen 74 lost: sock=1 connected=1 hello_sent=1 up=1
+[170227.137955] tbtun: tunnel 1 carrier 34 gen 48 lost: sock=1 connected=1 hello_sent=1 up=1
+[170227.137980] tbtun: tunnel 1 carrier 46 gen 69 lost: sock=1 connected=1 hello_sent=1 up=1
+[170227.138987] tbtun: tunnel 1 carrier 2 gen 36 lost: sock=1 connected=1 hello_sent=1 up=1
+[170227.139008] tbtun: tunnel 1 carrier 5 gen 11 lost: sock=1 connected=1 hello_sent=1 up=1
+[170227.220107] tbtun: tunnel 1 no carrier can carry: user side backpressured
+[170237.314238] tbtun: unloaded
+[170347.229356] tbtun 0.3.0 loaded: 64 tunnels max, 256 carriers max
+[170348.269492] tbtun: tunnel 1: portblock= is parsed but unused; carrier source ports come from /proc/net/tbtun/ports
+[170348.402829] tbtun: tunnel 1 no carrier can carry: user side backpressured
+[170350.576574] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30014, awaiting HELLO
+[170350.577187] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55337, awaiting HELLO
+[170350.583385] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30008, awaiting HELLO
+[170350.585930] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30006, awaiting HELLO
+[170350.587596] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55335, awaiting HELLO
+[170350.612686] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30000, awaiting HELLO
+[170350.614540] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30002, awaiting HELLO
+[170350.619588] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30010, awaiting HELLO
+[170350.621580] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55325, awaiting HELLO
+[170350.623240] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30001, awaiting HELLO
+[170350.867671] tbtun: tunnel 1: fec rx shape from peer: n=8 m=24 groups=8 slots=8 block=128 L=16 rate=64
+[170354.587044] workqueue: tbt_accept_work [tbtun] hogged CPU for >10000us 19 times, consider switching to WQ_UNBOUND
+[170355.622460] tbt_carrier_adopt: 108 callbacks suppressed
+[170355.622512] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55421, awaiting HELLO
+[170355.624063] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30114, awaiting HELLO
+[170355.688068] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55423, awaiting HELLO
+[170355.801738] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30116, awaiting HELLO
+[170355.904857] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30118, awaiting HELLO
+[170355.925098] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55427, awaiting HELLO
+[170355.980803] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30120, awaiting HELLO
+[170356.025616] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30121, awaiting HELLO
+[170356.095296] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30122, awaiting HELLO
+[170356.221370] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55415, awaiting HELLO
+[170360.678381] tbt_carrier_adopt: 75 callbacks suppressed
+[170360.678437] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30196, awaiting HELLO
+[170360.690788] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55481, awaiting HELLO
+[170360.761467] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30198, awaiting HELLO
+[170360.772515] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55483, awaiting HELLO
+[170360.779430] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55485, awaiting HELLO
+[170360.876078] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30038, awaiting HELLO
+[170361.003162] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55487, awaiting HELLO
+[170361.082076] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30186, awaiting HELLO
+[170361.101221] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30202, awaiting HELLO
+[170361.101359] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30203, awaiting HELLO
+[170366.117702] tbt_carrier_adopt: 69 callbacks suppressed
+[170366.117718] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55545, awaiting HELLO
+[170366.249017] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55547, awaiting HELLO
+[170366.431566] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30144, awaiting HELLO
+[170366.618297] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=55523, awaiting HELLO
+[170372.547366] tbtun: carrier 133 stalled: repath paused, new frames avoid it
+[170374.495240] tbtun: carrier 133 recovered after 1947 ms: back in the stripe
+[170375.371377] tbtun: carrier 187 stalled: repath paused, new frames avoid it
+[170381.118653] tbtun: carrier 187 recovered after 5747 ms: back in the stripe

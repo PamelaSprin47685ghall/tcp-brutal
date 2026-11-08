@@ -1,0 +1,5 @@
+7c71208c4ba61ecac81311be8d0e5d29957709d053c80fd6ab0dd838fd90ab30  tbtun.ko
+version:        0.2.3
+srcversion:     2296207711D4F7FC38D809F
+vermagic:       7.0.0-42-generic SMP preempt mod_unload modversions 
+7.0.0-42-generic

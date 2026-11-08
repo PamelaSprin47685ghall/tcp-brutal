@@ -1,0 +1,300 @@
+1794120045.844290424
+up=256 decode_blocks=0 nack_retx=0 replay_queued=0 replay_queue_high=0 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=0 outq_drop=0 outq_depth=0 ack_tx=0 ack_rx=0 stream_state= stream_kill= submit_bytes=0 netdev_rx=8330748670 netdev_tx=61717859471 cpu_busy=6501758 cpu_idle=26830188
+1794120046.405001458
+up=256 decode_blocks=0 nack_retx=0 replay_queued=0 replay_queue_high=0 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=0 outq_drop=0 outq_depth=0 ack_tx=0 ack_rx=0 stream_state= stream_kill= submit_bytes=0 netdev_rx=8330755862 netdev_tx=61717866804 cpu_busy=6501775 cpu_idle=26830277
+1794120046.953984134
+up=256 decode_blocks=0 nack_retx=0 replay_queued=0 replay_queue_high=0 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=0 outq_drop=0 outq_depth=0 ack_tx=0 ack_rx=0 stream_state= stream_kill= submit_bytes=0 netdev_rx=8330761846 netdev_tx=61717874259 cpu_busy=6501791 cpu_idle=26830369
+1794120047.503240401
+up=256 decode_blocks=0 nack_retx=0 replay_queued=0 replay_queue_high=0 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=0 outq_drop=0 outq_depth=0 ack_tx=0 ack_rx=0 stream_state= stream_kill= submit_bytes=0 netdev_rx=8330771021 netdev_tx=61717881652 cpu_busy=6501807 cpu_idle=26830459
+1794120048.095835409
+up=256 decode_blocks=0 nack_retx=0 replay_queued=0 replay_queue_high=0 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=0 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=0 stream_state=1 stream_kill=0 submit_bytes=1048682 netdev_rx=8330813287 netdev_tx=61717930893 cpu_busy=6501852 cpu_idle=26830533
+1794120048.671998057
+up=256 decode_blocks=0 nack_retx=0 replay_queued=0 replay_queue_high=0 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=0 outq_drop=0 outq_depth=1 ack_tx=1 ack_rx=0 stream_state=1 stream_kill=0 submit_bytes=3145834 netdev_rx=8330941022 netdev_tx=61723156606 cpu_busy=6501940 cpu_idle=26830559
+1794120049.278121004
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=8 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=2 stream_state=1 stream_kill=0 submit_bytes=6348906 netdev_rx=8331206634 netdev_tx=61729571959 cpu_busy=6502016 cpu_idle=26830594
+1794120049.863110314
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=23 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=3 stream_state=1 stream_kill=0 submit_bytes=7397482 netdev_rx=8331460691 netdev_tx=61734785781 cpu_busy=6502071 cpu_idle=26830645
+1794120050.430476965
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=28 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=7 stream_state=1 stream_kill=0 submit_bytes=10592362 netdev_rx=8331645907 netdev_tx=61740666976 cpu_busy=6502147 cpu_idle=26830679
+1794120050.998997505
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=35 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=8 stream_state=1 stream_kill=0 submit_bytes=12714090 netdev_rx=8331912383 netdev_tx=61748024658 cpu_busy=6502213 cpu_idle=26830715
+1794120051.532404276
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=46 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=9 stream_state=1 stream_kill=0 submit_bytes=13779050 netdev_rx=8332137619 netdev_tx=61751990831 cpu_busy=6502243 cpu_idle=26830783
+1794120052.095829566
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=47 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=12 stream_state=1 stream_kill=0 submit_bytes=17989738 netdev_rx=8332330893 netdev_tx=61760460983 cpu_busy=6502344 cpu_idle=26830818
+1794120052.770049572
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=53 outq_drop=0 outq_depth=2 ack_tx=1 ack_rx=15 stream_state=1 stream_kill=0 submit_bytes=20086890 netdev_rx=8332491131 netdev_tx=61766465840 cpu_busy=6502397 cpu_idle=26830869
+1794120053.322685919
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=69 outq_drop=0 outq_depth=1 ack_tx=1 ack_rx=17 stream_state=1 stream_kill=0 submit_bytes=22184042 netdev_rx=8332720176 netdev_tx=61772815205 cpu_busy=6502448 cpu_idle=26830921
+1794120053.870094327
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=75 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=19 stream_state=1 stream_kill=0 submit_bytes=25624682 netdev_rx=8332881231 netdev_tx=61779105596 cpu_busy=6502509 cpu_idle=26830961
+1794120054.412900964
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=84 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=21 stream_state=1 stream_kill=0 submit_bytes=28098666 netdev_rx=8333062563 netdev_tx=61784548109 cpu_busy=6502556 cpu_idle=26831020
+1794120054.979699846
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=94 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=23 stream_state=1 stream_kill=0 submit_bytes=31244394 netdev_rx=8333274553 netdev_tx=61792461333 cpu_busy=6502615 cpu_idle=26831067
+1794120055.561952048
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=104 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=26 stream_state=1 stream_kill=0 submit_bytes=33357930 netdev_rx=8333434308 netdev_tx=61797865898 cpu_busy=6502676 cpu_idle=26831120
+1794120056.144737271
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=111 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=28 stream_state=1 stream_kill=0 submit_bytes=36626538 netdev_rx=8333649989 netdev_tx=61806416649 cpu_busy=6502748 cpu_idle=26831156
+1794120056.700669165
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=115 outq_drop=0 outq_depth=3 ack_tx=1 ack_rx=30 stream_state=1 stream_kill=0 submit_bytes=38723690 netdev_rx=8333818234 netdev_tx=61811893209 cpu_busy=6502809 cpu_idle=26831202
+1794120057.274801761
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=122 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=32 stream_state=1 stream_kill=0 submit_bytes=41869418 netdev_rx=8333970530 netdev_tx=61818057454 cpu_busy=6502869 cpu_idle=26831252
+1794120057.879506532
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=128 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=34 stream_state=1 stream_kill=0 submit_bytes=43974762 netdev_rx=8334228488 netdev_tx=61825615734 cpu_busy=6502944 cpu_idle=26831294
+1794120058.489358508
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=147 outq_drop=0 outq_depth=6 ack_tx=1 ack_rx=36 stream_state=1 stream_kill=0 submit_bytes=45056106 netdev_rx=8334377776 netdev_tx=61829450925 cpu_busy=6502989 cpu_idle=26831365
+1794120059.080214407
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=153 outq_drop=0 outq_depth=1 ack_tx=1 ack_rx=38 stream_state=1 stream_kill=0 submit_bytes=49250410 netdev_rx=8334616997 netdev_tx=61837972652 cpu_busy=6503052 cpu_idle=26831414
+1794120059.659774650
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=165 outq_drop=0 outq_depth=4 ack_tx=1 ack_rx=39 stream_state=1 stream_kill=0 submit_bytes=50298986 netdev_rx=8334783185 netdev_tx=61842396747 cpu_busy=6503087 cpu_idle=26831486
+1794120060.263002536
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=188 outq_drop=0 outq_depth=2 ack_tx=1 ack_rx=42 stream_state=1 stream_kill=0 submit_bytes=53477482 netdev_rx=8334998909 netdev_tx=61849633196 cpu_busy=6503159 cpu_idle=26831529
+1794120060.852067601
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=193 outq_drop=0 outq_depth=13 ack_tx=1 ack_rx=44 stream_state=1 stream_kill=0 submit_bytes=55582826 netdev_rx=8335200517 netdev_tx=61853745091 cpu_busy=6503226 cpu_idle=26831575
+1794120061.439107459
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=211 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=46 stream_state=1 stream_kill=0 submit_bytes=57679978 netdev_rx=8335310240 netdev_tx=61859654776 cpu_busy=6503273 cpu_idle=26831631
+1794120061.991101587
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=227 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=47 stream_state=1 stream_kill=0 submit_bytes=59777130 netdev_rx=8335531130 netdev_tx=61865111620 cpu_busy=6503319 cpu_idle=26831686
+1794120062.552059953
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=234 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=49 stream_state=1 stream_kill=0 submit_bytes=60825706 netdev_rx=8335722492 netdev_tx=61869642962 cpu_busy=6503392 cpu_idle=26831725
+1794120063.150494601
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=236 outq_drop=0 outq_depth=5 ack_tx=1 ack_rx=51 stream_state=1 stream_kill=0 submit_bytes=64028778 netdev_rx=8335942386 netdev_tx=61877029742 cpu_busy=6503483 cpu_idle=26831749
+1794120063.725684267
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=271 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=52 stream_state=1 stream_kill=0 submit_bytes=65126506 netdev_rx=8336106283 netdev_tx=61881151101 cpu_busy=6503525 cpu_idle=26831810
+1794120064.266454835
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=276 outq_drop=0 outq_depth=5 ack_tx=1 ack_rx=54 stream_state=1 stream_kill=0 submit_bytes=67420266 netdev_rx=8336241384 netdev_tx=61885682688 cpu_busy=6503582 cpu_idle=26831859
+1794120064.836752582
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=281 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=56 stream_state=1 stream_kill=0 submit_bytes=70803562 netdev_rx=8336514588 netdev_tx=61892958657 cpu_busy=6503659 cpu_idle=26831903
+1794120065.467500454
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=303 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=57 stream_state=1 stream_kill=0 submit_bytes=72900714 netdev_rx=8336690210 netdev_tx=61898165779 cpu_busy=6503714 cpu_idle=26831957
+1794120066.041260022
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=318 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=60 stream_state=1 stream_kill=0 submit_bytes=75006058 netdev_rx=8336867684 netdev_tx=61903594083 cpu_busy=6503774 cpu_idle=26832005
+1794120066.622402387
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=335 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=60 stream_state=1 stream_kill=0 submit_bytes=76054634 netdev_rx=8337128340 netdev_tx=61908652202 cpu_busy=6503823 cpu_idle=26832061
+1794120067.185202243
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=346 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=62 stream_state=1 stream_kill=0 submit_bytes=79306858 netdev_rx=8337238747 netdev_tx=61914474185 cpu_busy=6503889 cpu_idle=26832101
+1794120067.748228639
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=359 outq_drop=0 outq_depth=0 ack_tx=1 ack_rx=63 stream_state=1 stream_kill=0 submit_bytes=80511082 netdev_rx=8337451956 netdev_tx=61917574190 cpu_busy=6503923 cpu_idle=26832170
+1794120068.310558471
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=359 outq_drop=0 outq_depth=1 ack_tx=1 ack_rx=66 stream_state=1 stream_kill=0 submit_bytes=83681386 netdev_rx=8337598105 netdev_tx=61923779331 cpu_busy=6504006 cpu_idle=26832197
+1794120068.890868618
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=373 outq_drop=0 outq_depth=1 ack_tx=1 ack_rx=68 stream_state=1 stream_kill=0 submit_bytes=85909610 netdev_rx=8337844890 netdev_tx=61929711527 cpu_busy=6504072 cpu_idle=26832245
+1794120069.494693146
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=387 outq_drop=0 outq_depth=2 ack_tx=1 ack_rx=69 stream_state=1 stream_kill=0 submit_bytes=86958186 netdev_rx=8338049051 netdev_tx=61934312676 cpu_busy=6504123 cpu_idle=26832303
+1794120070.067937115
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=394 outq_drop=0 outq_depth=10 ack_tx=1 ack_rx=72 stream_state=1 stream_kill=0 submit_bytes=90112106 netdev_rx=8338205769 netdev_tx=61939835158 cpu_busy=6504206 cpu_idle=26832340
+1794120070.697910112
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=410 outq_drop=0 outq_depth=7 ack_tx=1 ack_rx=74 stream_state=1 stream_kill=0 submit_bytes=92274794 netdev_rx=8338443034 netdev_tx=61945368159 cpu_busy=6504270 cpu_idle=26832389
+1794120071.299042217
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=418 outq_drop=0 outq_depth=12 ack_tx=1 ack_rx=75 stream_state=1 stream_kill=0 submit_bytes=92274794 netdev_rx=8338597329 netdev_tx=61949506539 cpu_busy=6504332 cpu_idle=26832439
+1794120071.893464450
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=422 outq_drop=0 outq_depth=11 ack_tx=1 ack_rx=78 stream_state=1 stream_kill=0 submit_bytes=95928426 netdev_rx=8338799237 netdev_tx=61955949426 cpu_busy=6504406 cpu_idle=26832473
+1794120072.464352813
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=434 outq_drop=0 outq_depth=12 ack_tx=1 ack_rx=79 stream_state=1 stream_kill=0 submit_bytes=97001578 netdev_rx=8338996671 netdev_tx=61960160994 cpu_busy=6504452 cpu_idle=26832530
+1794120073.018803720
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=444 outq_drop=0 outq_depth=14 ack_tx=1 ack_rx=81 stream_state=1 stream_kill=0 submit_bytes=99131498 netdev_rx=8339138022 netdev_tx=61964865426 cpu_busy=6504517 cpu_idle=26832574
+1794120073.598626054
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=448 outq_drop=0 outq_depth=19 ack_tx=1 ack_rx=84 stream_state=1 stream_kill=0 submit_bytes=102555754 netdev_rx=8339415367 netdev_tx=61970871927 cpu_busy=6504586 cpu_idle=26832610
+1794120074.157966688
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=461 outq_drop=0 outq_depth=18 ack_tx=1 ack_rx=85 stream_state=1 stream_kill=0 submit_bytes=103817322 netdev_rx=8339619750 netdev_tx=61975560117 cpu_busy=6504644 cpu_idle=26832659
+1794120074.758389171
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=467 outq_drop=0 outq_depth=24 ack_tx=1 ack_rx=88 stream_state=1 stream_kill=0 submit_bytes=105914474 netdev_rx=8339834919 netdev_tx=61981578791 cpu_busy=6504727 cpu_idle=26832689
+1794120075.332697936
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=483 outq_drop=0 outq_depth=22 ack_tx=1 ack_rx=89 stream_state=1 stream_kill=0 submit_bytes=108011626 netdev_rx=8340046345 netdev_tx=61985884190 cpu_busy=6504770 cpu_idle=26832754
+1794120075.899708455
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=495 outq_drop=0 outq_depth=22 ack_tx=1 ack_rx=89 stream_state=1 stream_kill=0 submit_bytes=108011626 netdev_rx=8340152461 netdev_tx=61987255844 cpu_busy=6504799 cpu_idle=26832831
+1794120076.468146586
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=500 outq_drop=0 outq_depth=18 ack_tx=1 ack_rx=92 stream_state=1 stream_kill=0 submit_bytes=111181930 netdev_rx=8340266117 netdev_tx=61993025447 cpu_busy=6504878 cpu_idle=26832865
+1794120077.051213517
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=511 outq_drop=0 outq_depth=19 ack_tx=1 ack_rx=93 stream_state=1 stream_kill=0 submit_bytes=112418922 netdev_rx=8340461438 netdev_tx=61996138088 cpu_busy=6504927 cpu_idle=26832925
+1794120077.636596310
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=531 outq_drop=0 outq_depth=20 ack_tx=1 ack_rx=94 stream_state=1 stream_kill=0 submit_bytes=113524842 netdev_rx=8340587592 netdev_tx=62000210988 cpu_busy=6504978 cpu_idle=26832980
+1794120078.208710219
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=548 outq_drop=0 outq_depth=21 ack_tx=1 ack_rx=96 stream_state=1 stream_kill=0 submit_bytes=114573418 netdev_rx=8340736414 netdev_tx=62003791128 cpu_busy=6505035 cpu_idle=26833037
+1794120078.814068046
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=566 outq_drop=0 outq_depth=23 ack_tx=1 ack_rx=97 stream_state=1 stream_kill=0 submit_bytes=116809834 netdev_rx=8340925064 netdev_tx=62008386813 cpu_busy=6505097 cpu_idle=26833086
+1794120079.386685071
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=574 outq_drop=0 outq_depth=25 ack_tx=1 ack_rx=98 stream_state=1 stream_kill=0 submit_bytes=119013482 netdev_rx=8341068597 netdev_tx=62012351719 cpu_busy=6505154 cpu_idle=26833132
+1794120079.938271487
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=585 outq_drop=0 outq_depth=25 ack_tx=1 ack_rx=98 stream_state=1 stream_kill=0 submit_bytes=119013482 netdev_rx=8341236763 netdev_tx=62015028143 cpu_busy=6505182 cpu_idle=26833204
+1794120080.509125279
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=591 outq_drop=0 outq_depth=28 ack_tx=1 ack_rx=100 stream_state=1 stream_kill=0 submit_bytes=122175594 netdev_rx=8341373821 netdev_tx=62020294681 cpu_busy=6505251 cpu_idle=26833243
+1794120081.067593445
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=597 outq_drop=0 outq_depth=30 ack_tx=1 ack_rx=102 stream_state=1 stream_kill=0 submit_bytes=124280938 netdev_rx=8341572024 netdev_tx=62025278388 cpu_busy=6505322 cpu_idle=26833278
+1794120081.643593480
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=606 outq_drop=0 outq_depth=34 ack_tx=1 ack_rx=103 stream_state=1 stream_kill=0 submit_bytes=124788842 netdev_rx=8341761210 netdev_tx=62028719174 cpu_busy=6505370 cpu_idle=26833338
+1794120082.245895872
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=617 outq_drop=0 outq_depth=33 ack_tx=1 ack_rx=105 stream_state=1 stream_kill=0 submit_bytes=127934570 netdev_rx=8341932409 netdev_tx=62033379271 cpu_busy=6505444 cpu_idle=26833374
+1794120082.822229909
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=642 outq_drop=0 outq_depth=35 ack_tx=1 ack_rx=107 stream_state=1 stream_kill=0 submit_bytes=130031722 netdev_rx=8342124972 netdev_tx=62038141760 cpu_busy=6505502 cpu_idle=26833425
+1794120083.380929743
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=653 outq_drop=0 outq_depth=36 ack_tx=1 ack_rx=108 stream_state=1 stream_kill=0 submit_bytes=131080298 netdev_rx=8342289783 netdev_tx=62041657082 cpu_busy=6505541 cpu_idle=26833488
+1794120083.939160360
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=669 outq_drop=0 outq_depth=38 ack_tx=1 ack_rx=110 stream_state=1 stream_kill=0 submit_bytes=133177450 netdev_rx=8342473693 netdev_tx=62046217897 cpu_busy=6505599 cpu_idle=26833540
+1794120084.520891719
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=686 outq_drop=0 outq_depth=39 ack_tx=1 ack_rx=111 stream_state=1 stream_kill=0 submit_bytes=134226026 netdev_rx=8342589748 netdev_tx=62049506361 cpu_busy=6505646 cpu_idle=26833603
+1794120085.127100078
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=694 outq_drop=0 outq_depth=43 ack_tx=1 ack_rx=114 stream_state=1 stream_kill=0 submit_bytes=136323178 netdev_rx=8342812288 netdev_tx=62054885919 cpu_busy=6505724 cpu_idle=26833639
+1794120085.713212166
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=711 outq_drop=0 outq_depth=47 ack_tx=1 ack_rx=116 stream_state=1 stream_kill=0 submit_bytes=138420330 netdev_rx=8343028378 netdev_tx=62059838815 cpu_busy=6505785 cpu_idle=26833688
+1794120086.290218400
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=734 outq_drop=0 outq_depth=48 ack_tx=1 ack_rx=116 stream_state=1 stream_kill=0 submit_bytes=139468906 netdev_rx=8343210555 netdev_tx=62062742283 cpu_busy=6505822 cpu_idle=26833755
+1794120086.864436477
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=749 outq_drop=0 outq_depth=53 ack_tx=1 ack_rx=118 stream_state=1 stream_kill=0 submit_bytes=141672554 netdev_rx=8343329461 netdev_tx=62067414376 cpu_busy=6505888 cpu_idle=26833801
+1794120087.461935042
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=762 outq_drop=0 outq_depth=50 ack_tx=1 ack_rx=120 stream_state=1 stream_kill=0 submit_bytes=143786090 netdev_rx=8343550933 netdev_tx=62072574850 cpu_busy=6505952 cpu_idle=26833847
+1794120088.039341282
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=772 outq_drop=0 outq_depth=53 ack_tx=1 ack_rx=121 stream_state=1 stream_kill=0 submit_bytes=144834666 netdev_rx=8343700568 netdev_tx=62074979796 cpu_busy=6505997 cpu_idle=26833906
+1794120088.611859063
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=781 outq_drop=0 outq_depth=59 ack_tx=1 ack_rx=123 stream_state=1 stream_kill=0 submit_bytes=147120234 netdev_rx=8343850706 netdev_tx=62079356097 cpu_busy=6506058 cpu_idle=26833958
+1794120089.210993498
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=797 outq_drop=0 outq_depth=61 ack_tx=1 ack_rx=124 stream_state=1 stream_kill=0 submit_bytes=148168810 netdev_rx=8344002097 netdev_tx=62082614200 cpu_busy=6506111 cpu_idle=26834015
+1794120089.791597144
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=808 outq_drop=0 outq_depth=68 ack_tx=1 ack_rx=126 stream_state=1 stream_kill=0 submit_bytes=151003242 netdev_rx=8344147556 netdev_tx=62087011118 cpu_busy=6506169 cpu_idle=26834061
+1794120090.342986550
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=827 outq_drop=0 outq_depth=71 ack_tx=1 ack_rx=127 stream_state=1 stream_kill=0 submit_bytes=152051818 netdev_rx=8344328983 netdev_tx=62091038704 cpu_busy=6506222 cpu_idle=26834115
+1794120090.920872626
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=854 outq_drop=0 outq_depth=82 ack_tx=1 ack_rx=130 stream_state=1 stream_kill=0 submit_bytes=154148970 netdev_rx=8344503208 netdev_tx=62095744161 cpu_busy=6506295 cpu_idle=26834157
+1794120091.535836651
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=864 outq_drop=0 outq_depth=82 ack_tx=1 ack_rx=131 stream_state=1 stream_kill=0 submit_bytes=155197546 netdev_rx=8344692454 netdev_tx=62099525314 cpu_busy=6506350 cpu_idle=26834211
+1794120092.109150865
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=877 outq_drop=0 outq_depth=86 ack_tx=1 ack_rx=132 stream_state=1 stream_kill=0 submit_bytes=157294698 netdev_rx=8344821370 netdev_tx=62103193083 cpu_busy=6506407 cpu_idle=26834262
+1794120092.686365029
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=891 outq_drop=0 outq_depth=92 ack_tx=1 ack_rx=134 stream_state=1 stream_kill=0 submit_bytes=158343274 netdev_rx=8344965060 netdev_tx=62106857495 cpu_busy=6506456 cpu_idle=26834322
+1794120093.271592958
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=904 outq_drop=0 outq_depth=92 ack_tx=1 ack_rx=134 stream_state=1 stream_kill=0 submit_bytes=159391850 netdev_rx=8345144211 netdev_tx=62109886713 cpu_busy=6506501 cpu_idle=26834385
+1794120093.848760773
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=919 outq_drop=0 outq_depth=99 ack_tx=1 ack_rx=137 stream_state=1 stream_kill=0 submit_bytes=160632449 netdev_rx=8345236567 netdev_tx=62112978777 cpu_busy=6506562 cpu_idle=26834435
+1794120094.465898822
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=927 outq_drop=0 outq_depth=109 ack_tx=1 ack_rx=138 stream_state=1 stream_kill=0 submit_bytes=162729601 netdev_rx=8345416978 netdev_tx=62117623224 cpu_busy=6506636 cpu_idle=26834478
+1794120095.047943694
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=936 outq_drop=0 outq_depth=113 ack_tx=1 ack_rx=139 stream_state=1 stream_kill=0 submit_bytes=164626538 netdev_rx=8345592297 netdev_tx=62121583335 cpu_busy=6506700 cpu_idle=26834520
+1794120095.620841124
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=948 outq_drop=0 outq_depth=118 ack_tx=1 ack_rx=140 stream_state=1 stream_kill=0 submit_bytes=165675114 netdev_rx=8345730781 netdev_tx=62124694833 cpu_busy=6506751 cpu_idle=26834577
+1794120096.193545900
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=961 outq_drop=0 outq_depth=120 ack_tx=1 ack_rx=142 stream_state=1 stream_kill=0 submit_bytes=167780458 netdev_rx=8345870524 netdev_tx=62128734593 cpu_busy=6506817 cpu_idle=26834618
+1794120096.759955077
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=973 outq_drop=0 outq_depth=128 ack_tx=1 ack_rx=144 stream_state=1 stream_kill=0 submit_bytes=168829034 netdev_rx=8346033733 netdev_tx=62132369774 cpu_busy=6506865 cpu_idle=26834672
+1794120097.334003976
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=993 outq_drop=0 outq_depth=135 ack_tx=1 ack_rx=145 stream_state=1 stream_kill=0 submit_bytes=170917994 netdev_rx=8346196695 netdev_tx=62136166795 cpu_busy=6506927 cpu_idle=26834719
+1794120097.936820094
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1008 outq_drop=0 outq_depth=144 ack_tx=1 ack_rx=147 stream_state=1 stream_kill=0 submit_bytes=171974762 netdev_rx=8346326939 netdev_tx=62139339638 cpu_busy=6506979 cpu_idle=26834775
+1794120098.502824734
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1024 outq_drop=0 outq_depth=144 ack_tx=1 ack_rx=148 stream_state=1 stream_kill=0 submit_bytes=173023338 netdev_rx=8346499211 netdev_tx=62143182688 cpu_busy=6507036 cpu_idle=26834824
+1794120099.071175984
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1044 outq_drop=0 outq_depth=139 ack_tx=1 ack_rx=149 stream_state=1 stream_kill=0 submit_bytes=175120490 netdev_rx=8346618069 netdev_tx=62145436785 cpu_busy=6507073 cpu_idle=26834888
+1794120099.631408013
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1065 outq_drop=0 outq_depth=144 ack_tx=1 ack_rx=150 stream_state=1 stream_kill=0 submit_bytes=176169066 netdev_rx=8346724057 netdev_tx=62148767423 cpu_busy=6507115 cpu_idle=26834948
+1794120100.219520856
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1076 outq_drop=0 outq_depth=149 ack_tx=1 ack_rx=151 stream_state=1 stream_kill=0 submit_bytes=177217642 netdev_rx=8346875656 netdev_tx=62152285596 cpu_busy=6507169 cpu_idle=26835003
+1794120100.805246400
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1086 outq_drop=0 outq_depth=160 ack_tx=1 ack_rx=153 stream_state=1 stream_kill=0 submit_bytes=178266218 netdev_rx=8346998964 netdev_tx=62155212607 cpu_busy=6507228 cpu_idle=26835055
+1794120101.387879635
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1109 outq_drop=0 outq_depth=168 ack_tx=1 ack_rx=154 stream_state=1 stream_kill=0 submit_bytes=180355178 netdev_rx=8347162815 netdev_tx=62159311341 cpu_busy=6507288 cpu_idle=26835104
+1794120101.988123180
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1121 outq_drop=0 outq_depth=182 ack_tx=1 ack_rx=156 stream_state=1 stream_kill=0 submit_bytes=182460522 netdev_rx=8347340649 netdev_tx=62163459356 cpu_busy=6507350 cpu_idle=26835150
+1794120102.588498430
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1132 outq_drop=0 outq_depth=189 ack_tx=1 ack_rx=157 stream_state=1 stream_kill=0 submit_bytes=183509098 netdev_rx=8347498745 netdev_tx=62166801805 cpu_busy=6507405 cpu_idle=26835203
+1794120103.193449323
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1144 outq_drop=0 outq_depth=191 ack_tx=1 ack_rx=158 stream_state=1 stream_kill=0 submit_bytes=184549482 netdev_rx=8347644051 netdev_tx=62169835623 cpu_busy=6507459 cpu_idle=26835264
+1794120103.784188435
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1162 outq_drop=0 outq_depth=194 ack_tx=1 ack_rx=160 stream_state=1 stream_kill=0 submit_bytes=186654826 netdev_rx=8347787104 netdev_tx=62174006562 cpu_busy=6507515 cpu_idle=26835312
+1794120104.378719530
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1173 outq_drop=0 outq_depth=210 ack_tx=1 ack_rx=162 stream_state=1 stream_kill=0 submit_bytes=187703402 netdev_rx=8347976272 netdev_tx=62177934046 cpu_busy=6507582 cpu_idle=26835355
+1794120104.962467920
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1186 outq_drop=0 outq_depth=210 ack_tx=1 ack_rx=162 stream_state=1 stream_kill=0 submit_bytes=188751978 netdev_rx=8348158307 netdev_tx=62181047184 cpu_busy=6507637 cpu_idle=26835407
+1794120105.551845654
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1192 outq_drop=0 outq_depth=233 ack_tx=1 ack_rx=165 stream_state=1 stream_kill=0 submit_bytes=190849130 netdev_rx=8348271443 netdev_tx=62184893239 cpu_busy=6507714 cpu_idle=26835437
+1794120106.122206759
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1216 outq_drop=0 outq_depth=234 ack_tx=1 ack_rx=166 stream_state=1 stream_kill=0 submit_bytes=191897706 netdev_rx=8348453145 netdev_tx=62188598771 cpu_busy=6507782 cpu_idle=26835485
+1794120106.772535868
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1240 outq_drop=0 outq_depth=228 ack_tx=1 ack_rx=166 stream_state=1 stream_kill=0 submit_bytes=192946282 netdev_rx=8348611122 netdev_tx=62191639753 cpu_busy=6507827 cpu_idle=26835548
+1794120107.347708126
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1245 outq_drop=0 outq_depth=258 ack_tx=1 ack_rx=169 stream_state=1 stream_kill=0 submit_bytes=195117162 netdev_rx=8348724908 netdev_tx=62195802804 cpu_busy=6507901 cpu_idle=26835579
+1794120107.942490515
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1253 outq_drop=0 outq_depth=261 ack_tx=1 ack_rx=170 stream_state=1 stream_kill=0 submit_bytes=197132394 netdev_rx=8348907318 netdev_tx=62199552604 cpu_busy=6507959 cpu_idle=26835628
+1794120108.535646695
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1267 outq_drop=0 outq_depth=259 ack_tx=1 ack_rx=171 stream_state=1 stream_kill=0 submit_bytes=198189162 netdev_rx=8349073585 netdev_tx=62203092355 cpu_busy=6508010 cpu_idle=26835676
+1794120109.091192610
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1275 outq_drop=0 outq_depth=279 ack_tx=1 ack_rx=173 stream_state=1 stream_kill=0 submit_bytes=200278122 netdev_rx=8349206784 netdev_tx=62206850642 cpu_busy=6508094 cpu_idle=26835700
+1794120109.661465662
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1295 outq_drop=0 outq_depth=289 ack_tx=1 ack_rx=174 stream_state=1 stream_kill=0 submit_bytes=201334890 netdev_rx=8349387703 netdev_tx=62210275085 cpu_busy=6508142 cpu_idle=26835752
+1794120110.215017094
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1311 outq_drop=0 outq_depth=314 ack_tx=1 ack_rx=176 stream_state=1 stream_kill=0 submit_bytes=203432042 netdev_rx=8349511130 netdev_tx=62213296513 cpu_busy=6508202 cpu_idle=26835795
+1794120110.827633564
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1330 outq_drop=0 outq_depth=326 ack_tx=1 ack_rx=177 stream_state=1 stream_kill=0 submit_bytes=204472426 netdev_rx=8349648960 netdev_tx=62217115077 cpu_busy=6508274 cpu_idle=26835836
+1794120111.453255446
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1340 outq_drop=0 outq_depth=350 ack_tx=1 ack_rx=178 stream_state=1 stream_kill=0 submit_bytes=205570154 netdev_rx=8349778076 netdev_tx=62220743459 cpu_busy=6508343 cpu_idle=26835879
+1794120112.041262374
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1351 outq_drop=0 outq_depth=355 ack_tx=1 ack_rx=179 stream_state=1 stream_kill=0 submit_bytes=207626346 netdev_rx=8349946080 netdev_tx=62224575995 cpu_busy=6508392 cpu_idle=26835926
+1794120112.598138337
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1366 outq_drop=0 outq_depth=345 ack_tx=1 ack_rx=179 stream_state=1 stream_kill=0 submit_bytes=207626346 netdev_rx=8350074288 netdev_tx=62226597336 cpu_busy=6508420 cpu_idle=26835993
+1794120113.167624371
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1369 outq_drop=0 outq_depth=368 ack_tx=1 ack_rx=182 stream_state=1 stream_kill=0 submit_bytes=210772074 netdev_rx=8350187857 netdev_tx=62230791482 cpu_busy=6508507 cpu_idle=26836014
+1794120113.756246541
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1387 outq_drop=0 outq_depth=381 ack_tx=1 ack_rx=183 stream_state=1 stream_kill=0 submit_bytes=211820650 netdev_rx=8350379493 netdev_tx=62234949932 cpu_busy=6508559 cpu_idle=26836067
+1794120114.355266244
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1399 outq_drop=0 outq_depth=399 ack_tx=1 ack_rx=185 stream_state=1 stream_kill=0 submit_bytes=213917802 netdev_rx=8350551378 netdev_tx=62239051103 cpu_busy=6508630 cpu_idle=26836101
+1794120114.928158057
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1417 outq_drop=0 outq_depth=412 ack_tx=1 ack_rx=186 stream_state=1 stream_kill=0 submit_bytes=214966378 netdev_rx=8350717331 netdev_tx=62242489758 cpu_busy=6508680 cpu_idle=26836150
+1794120115.502261424
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1432 outq_drop=0 outq_depth=430 ack_tx=1 ack_rx=188 stream_state=1 stream_kill=0 submit_bytes=217063530 netdev_rx=8350841950 netdev_tx=62246014970 cpu_busy=6508741 cpu_idle=26836191
+1794120116.074057180
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1450 outq_drop=0 outq_depth=427 ack_tx=1 ack_rx=189 stream_state=1 stream_kill=0 submit_bytes=218112106 netdev_rx=8351012113 netdev_tx=62249723790 cpu_busy=6508791 cpu_idle=26836242
+1794120116.662981227
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1462 outq_drop=0 outq_depth=455 ack_tx=1 ack_rx=191 stream_state=1 stream_kill=0 submit_bytes=220209258 netdev_rx=8351168579 netdev_tx=62253999868 cpu_busy=6508849 cpu_idle=26836283
+1794120117.246363633
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1479 outq_drop=0 outq_depth=448 ack_tx=1 ack_rx=193 stream_state=1 stream_kill=0 submit_bytes=222298218 netdev_rx=8351349503 netdev_tx=62258137669 cpu_busy=6508926 cpu_idle=26836315
+1794120117.824048465
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1491 outq_drop=0 outq_depth=452 ack_tx=1 ack_rx=194 stream_state=1 stream_kill=0 submit_bytes=222961770 netdev_rx=8351506710 netdev_tx=62261566944 cpu_busy=6508982 cpu_idle=26836364
+1794120118.396484718
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1502 outq_drop=0 outq_depth=473 ack_tx=1 ack_rx=196 stream_state=1 stream_kill=0 submit_bytes=225067721 netdev_rx=8351665045 netdev_tx=62265633771 cpu_busy=6509043 cpu_idle=26836404
+1794120119.011770403
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1512 outq_drop=0 outq_depth=498 ack_tx=1 ack_rx=198 stream_state=1 stream_kill=0 submit_bytes=227352682 netdev_rx=8351877523 netdev_tx=62269860263 cpu_busy=6509111 cpu_idle=26836456
+1794120119.669988666
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1539 outq_drop=0 outq_depth=487 ack_tx=1 ack_rx=198 stream_state=1 stream_kill=0 submit_bytes=227549290 netdev_rx=8352014023 netdev_tx=62272473557 cpu_busy=6509168 cpu_idle=26836501
+1794120120.234580971
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1542 outq_drop=0 outq_depth=520 ack_tx=1 ack_rx=200 stream_state=1 stream_kill=0 submit_bytes=230047850 netdev_rx=8352123902 netdev_tx=62276793279 cpu_busy=6509248 cpu_idle=26836526
+1794120120.825176048
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1560 outq_drop=0 outq_depth=548 ack_tx=1 ack_rx=202 stream_state=1 stream_kill=0 submit_bytes=232505450 netdev_rx=8352279797 netdev_tx=62279395137 cpu_busy=6509297 cpu_idle=26836575
+1794120121.403145290
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1577 outq_drop=0 outq_depth=540 ack_tx=1 ack_rx=202 stream_state=1 stream_kill=0 submit_bytes=232505450 netdev_rx=8352415745 netdev_tx=62283180997 cpu_busy=6509345 cpu_idle=26836630
+1794120121.989073737
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1590 outq_drop=0 outq_depth=478 ack_tx=1 ack_rx=203 stream_state=1 stream_kill=0 submit_bytes=233578602 netdev_rx=8352537360 netdev_tx=62286289510 cpu_busy=6509392 cpu_idle=26836681
+1794120122.649955766
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1610 outq_drop=0 outq_depth=514 ack_tx=1 ack_rx=206 stream_state=1 stream_kill=0 submit_bytes=235937898 netdev_rx=8352718868 netdev_tx=62290726952 cpu_busy=6509487 cpu_idle=26836710
+1794120123.293906926
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1630 outq_drop=0 outq_depth=541 ack_tx=1 ack_rx=208 stream_state=1 stream_kill=0 submit_bytes=239083626 netdev_rx=8352893206 netdev_tx=62295519275 cpu_busy=6509554 cpu_idle=26836749
+1794120123.881395628
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1647 outq_drop=0 outq_depth=547 ack_tx=1 ack_rx=209 stream_state=1 stream_kill=0 submit_bytes=239083626 netdev_rx=8353106119 netdev_tx=62298799254 cpu_busy=6509594 cpu_idle=26836814
+1794120124.481517285
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1669 outq_drop=0 outq_depth=557 ack_tx=1 ack_rx=210 stream_state=1 stream_kill=0 submit_bytes=241180778 netdev_rx=8353232774 netdev_tx=62302703453 cpu_busy=6509656 cpu_idle=26836855
+1794120125.080173393
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1679 outq_drop=0 outq_depth=586 ack_tx=1 ack_rx=212 stream_state=1 stream_kill=0 submit_bytes=242229354 netdev_rx=8353394400 netdev_tx=62306504452 cpu_busy=6509730 cpu_idle=26836892
+1794120125.689908556
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1707 outq_drop=0 outq_depth=587 ack_tx=1 ack_rx=213 stream_state=1 stream_kill=0 submit_bytes=244326506 netdev_rx=8353563787 netdev_tx=62310093953 cpu_busy=6509789 cpu_idle=26836930
+1794120126.252440882
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1718 outq_drop=0 outq_depth=607 ack_tx=1 ack_rx=215 stream_state=1 stream_kill=0 submit_bytes=245375082 netdev_rx=8353718092 netdev_tx=62313847649 cpu_busy=6509848 cpu_idle=26836973
+1794120126.851878752
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1739 outq_drop=0 outq_depth=625 ack_tx=1 ack_rx=216 stream_state=1 stream_kill=0 submit_bytes=247472234 netdev_rx=8353891881 netdev_tx=62317788324 cpu_busy=6509910 cpu_idle=26837015
+1794120127.427173916
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1764 outq_drop=0 outq_depth=642 ack_tx=1 ack_rx=218 stream_state=1 stream_kill=0 submit_bytes=248520810 netdev_rx=8354022612 netdev_tx=62320917540 cpu_busy=6509967 cpu_idle=26837056
+1794120128.036586507
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1775 outq_drop=0 outq_depth=667 ack_tx=1 ack_rx=220 stream_state=1 stream_kill=0 submit_bytes=251658346 netdev_rx=8354211307 netdev_tx=62325651303 cpu_busy=6510068 cpu_idle=26837080
+1794120128.718679297
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1787 outq_drop=0 outq_depth=698 ack_tx=1 ack_rx=221 stream_state=1 stream_kill=0 submit_bytes=252715114 netdev_rx=8354393550 netdev_tx=62329743443 cpu_busy=6510126 cpu_idle=26837124
+1794120129.293508651
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1804 outq_drop=0 outq_depth=719 ack_tx=1 ack_rx=222 stream_state=1 stream_kill=0 submit_bytes=253763690 netdev_rx=8354555720 netdev_tx=62332881042 cpu_busy=6510177 cpu_idle=26837173
+1794120129.947675630
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1814 outq_drop=0 outq_depth=723 ack_tx=1 ack_rx=223 stream_state=1 stream_kill=0 submit_bytes=254812266 netdev_rx=8354651290 netdev_tx=62335326634 cpu_busy=6510230 cpu_idle=26837228
+1794120130.525823186
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1825 outq_drop=0 outq_depth=766 ack_tx=1 ack_rx=225 stream_state=1 stream_kill=0 submit_bytes=257745002 netdev_rx=8354795672 netdev_tx=62339764001 cpu_busy=6510314 cpu_idle=26837254
+1794120131.185861823
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1839 outq_drop=0 outq_depth=770 ack_tx=1 ack_rx=226 stream_state=1 stream_kill=0 submit_bytes=258998378 netdev_rx=8355005730 netdev_tx=62344081695 cpu_busy=6510385 cpu_idle=26837290
+1794120131.774060909
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1853 outq_drop=0 outq_depth=774 ack_tx=1 ack_rx=227 stream_state=1 stream_kill=0 submit_bytes=260055146 netdev_rx=8355137298 netdev_tx=62347184762 cpu_busy=6510434 cpu_idle=26837340
+1794120132.368646716
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1860 outq_drop=0 outq_depth=807 ack_tx=1 ack_rx=229 stream_state=1 stream_kill=0 submit_bytes=261095530 netdev_rx=8355302525 netdev_tx=62350768732 cpu_busy=6510505 cpu_idle=26837378
+1794120132.989033696
+up=256 decode_blocks=0 nack_retx=3 replay_queued=0 replay_queue_high=16480 enospc=0 replay_drop=0 reset_tcp=0 reset_hole=0 credit_wait=1890 outq_drop=0 outq_depth=802 ack_tx=1 ack_rx=229 stream_state=5 stream_kill=5 submit_bytes=262152298 netdev_rx=8355498027 netdev_tx=62353557660 cpu_busy=6510559 cpu_idle=26837421

@@ -1,0 +1,253 @@
+== grouped 32 short 5s 2026-11-08T05:49:55Z
+curl_out=14155776 5.000837 200 rc=28
+wall=5.046
+@@near_before
+@@stats
+debug_loss=0
+gaps_total=0
+streams_total=0
+tunnel 1 capture_runs=0 actor_calls=0 submit_bytes=0 tx=0 wire=23948 err=0 short=0
+tunnel 1 rx_work_runs=188 rx_drain_entries=124 rx_drain_bytes=12891 rx_paused_skips=0 rx_adopt_events=0 rx_records=0 carrier_write_space_runs=0 poll_rescues=449
+tunnel 1 rx_ready_calls=146 rx_reads=188 rx_read_bytes=12277 rx_read_zero=67 rx_resume=0 rx_resume_busy=0 rx_last_drained=38 rx_proto=3 rx_errs=3 rx_last_err=-71 tx_submit_calls=0 rx_delivered=0
+tunnel 1 dbg rcv_nxt=0 copied=0 after=0 qlen=0 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=3378 pmoved=132 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=0 car_nxt=2912765427 car_copied=2912765427 car_rcvbuf=2097152 car_sndbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=3647 txwake_busy=806 txwork=3271
+tunnel 1 ws_calls=0
+tunnel 1 c3 n=32 up=32 lost=14 replaced=21 stream_reset_tcp_failed=0 stream_reset_user=0 carrier_add=0 carrier_add_fail=0 backpressure_enter=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=11 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=0 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=0 una_stall_us=0 stall_paused_skips=0 stall_idle_skips=6864 stall_declared=1 stall_recovered=0 stall_drop=0 stall_dead=0 stall_replaced=1 stall_survival_bucket=3 stall_wait_loss_bytes=2448396 replace_cost_bytes=907047 replace_cost_ewma=907047 stall_replace_econ=1 stall_replace_retrans=0 stall_replace_dead=0 tx_window=8388608 bdp_bytes=117787 k_x100=500 rtt_mean_us=414623 rttvar_us=2716943 rtt_max_us=1097361 bdp_sum_rate=277392 bdp_agg_wnd=33531968 bdp_n_live=32 bdp_coverage=32 txq_max=8454432 win_block=0 win_resume=0 tx_wait_carrier=0 tx_backpressure=0 tx_wait_carrier_bytes=0 tx_wait_carrier_ns=0 tx_backpressure_bytes=0 tx_backpressure_ns=0 pump_hw_armed=0 pump_hw_fired=94 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0 prov_now=0 prov_peak=0 prov_reject=0 dead_release=0 carrier_retired=13
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=2 ctl_queued=0 pinned_bad_path=0 close_timeouts=0 fin_starved=0 fin_written=0 close_hold_fec=0 close_detaches=0
+tunnel 1 streams streams_active=0 n_streams=0 n_pending=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c9 fec_proto_fail=0 fec_hdr_crc_fail=0 fec_payload_crc_fail=0 fec_short_tx=0 fec_short_unknown=0 fec_stream_refused=0 bind_drop_no_stream=0 fec_drop_window=0 fec_drop_sid=0 fec_drop_crypto=0 fec_ack_tx=0 fec_ack_rx=0 fec_credit_wait=0
+tunnel 1 c10 fec_decode_blocks=0 fec_decode_recovered=0 fec_decode_nomem=0 fec_deliver_nomem=0 fec_deliver_dup=0 fec_deliver_ooo=0 fec_deliver_bad=0 fec_dup_share=0 fec_late_share=0 fec_late_data=0 fec_pad_share=0 fec_dup_marker=0 fec_marker_conflict=0 fec_epoch_conflict=0 fec_slot_past_cut=0 fec_fin_bad=0 fec_ack_bad=0 fec_tx_share_gap=0 fec_empty_block=0
+tunnel 1 c11 fec_nack_tx=0 fec_nack_rx=0 fec_nack_retx=0 fec_nack_drop=0 fec_nack_enomem=0 fec_nack_einval=0 fec_nack_enospc=0 fec_nack_eother=0 fec_nack_bad=0 fec_replay_hit=0 fec_replay_miss=0 fec_replay_miss_no_ring=0 fec_replay_miss_alloc=0 fec_replay_miss_enospc=0 fec_replay_miss_get=0 fec_replay_miss_evicted=0 fec_replay_miss_never_stored=0 fec_nack_sparse_probe=0 fec_nack_empty_reply=0 fec_nack_parity_reply=0 fec_replay_drop=0 fec_nack_retx_bytes=0 fec_replace_retx_bytes=0 fec_nack_lat_ns=0 fec_nack_lat_max_ns=0 fec_nack_repair_ns=0 fec_nack_repair_max_ns=0 fec_reset_tcp_failed=0 fec_reset_user=0 fec_wait_carrier=1 fec_backpressure=0 fec_flush_skip=0 fec_flush_pass=6 fec_hol_wait=0 fec_outq_drop=0 fec_outq_high_wait=0 fec_encode_fail=0 fec_init_rx=0 fec_init_bad=0 fec_decode_backoff=0 fec_outq_depth=0 fec_outq_max=0 fec_outq_bytes=0 fec_outq_ctl=0 fec_out_ctl_bytes=0 fec_replay_queued=0 fec_replay_bytes=0 fec_replay_skip=0 fec_nack_filtered_ready=0 fec_nack_filtered_inflight=0 fec_nack_filtered_dup=0 fec_nack_filtered_young=0 fec_replay_dedup=0 fec_nack_req_shares=0 fec_nack_backpressure=0 fec_replay_stale=0 fec_fin_wait_replay=0 fec_nack_never_stored=0 fec_nack_absent_reply=0 fec_nack_req_invalid=0 fec_replay_high_water=0 fec_replay_pass_throttled=0 fec_replay_drain_bps=0 fec_replay_queue_high=0 fec_reset_hole=0 tx_stall_suppressed_fec=0 fec_repair_last_ns=0
+tunnel 1 c12 fec_outq
+tunnel 1 c13 adaptive=off epoch=0 n=4 m=4 groups=4 class=3 p_ppm=0 p_win_ppm=0 r_fail_ppm=0 sent=0 miss=0 switches=0 aborts=0 rollbacks=0 pauses=0 pause_ns=0 sample_unknown=0 abandoned=0 state=steady reason=off
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=45 http_resp=0 pad_tx=67 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=0 dup_bytes=0
+tunnel 1 reconcile live_bytes=16461 live_data=0 live_retx=0 retired_bytes=7487 retired_data=0 retired_retx=0
+@@peers
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+1 0 40044 45.11.1.62:9000 0 306172 0 up http-kal 0 0 0 2 474 0 0 8906 14000 1047904 85 66624 1047128 0
+1 1 40286 45.11.1.62:9000 0 784848 0 up http-kal 0 0 0 5 589 0 0 4345 9800 1047808 85 66624 1047128 0
+1 2 40018 45.11.1.62:9000 0 316020 0 up http-kal 0 0 0 4 550 0 0 8856 14000 1047840 85 66624 1047128 0
+1 3 40156 45.11.1.62:9000 0 309775 0 up http-kal 0 0 0 4 550 0 0 9649 14000 1047840 85 66624 1047128 0
+1 4 40206 45.11.1.62:9000 0 844376 0 up http-kal 0 0 0 4 550 0 0 8625 14000 1047840 85 66624 1047128 0
+1 5 40284 45.11.1.62:9000 0 357581 0 up http-kal 0 0 0 4 550 0 0 4556 9800 1047840 85 67680 1047128 0
+1 6 40019 45.11.1.62:9000 0 307744 0 up http-kal 0 0 0 4 550 0 0 8905 14000 1047840 85 66624 1047128 0
+1 7 40042 45.11.1.62:9000 0 324338 0 up http-kal 0 0 0 2 474 0 0 8407 14000 1047904 85 66624 1047128 0
+1 8 40039 45.11.1.62:9000 0 309221 0 up http-kal 0 0 0 3 512 0 0 9514 14000 1047904 85 66624 1047128 0
+1 9 40024 45.11.1.62:9000 0 302211 0 up http-kal 0 0 0 4 550 0 0 9181 14000 1047872 85 66624 1047128 0
+1 10 40020 45.11.1.62:9000 0 310029 0 up http-kal 0 0 0 3 512 0 0 4429 9800 1047872 85 67680 1047128 0
+1 11 40021 45.11.1.62:9000 0 333493 0 up http-kal 0 0 0 3 512 0 0 8317 14000 1047872 85 66624 1047128 0
+1 12 40023 45.11.1.62:9000 0 411026 0 up http-kal 0 0 0 3 512 0 0 9040 14000 1047872 85 66624 1047128 0
+1 13 40025 45.11.1.62:9000 0 436961 0 up http-kal 0 0 0 3 512 0 0 8607 9800 1047872 85 66624 1047128 0
+1 14 40026 45.11.1.62:9000 0 392159 0 up http-kal 0 0 0 3 512 0 0 9220 14000 1047872 85 66624 1047128 0
+1 15 40027 45.11.1.62:9000 0 299389 0 up http-kal 0 0 0 3 512 0 0 9105 14000 1047872 85 66624 1047128 0
+1 16 40028 45.11.1.62:9000 0 310202 0 up http-kal 0 0 0 3 512 0 0 8922 14000 1047872 85 66624 1047128 0
+1 17 40029 45.11.1.62:9000 0 315287 0 up http-kal 0 0 0 3 512 0 0 8965 14000 1047872 85 66624 1047128 0
+1 18 40030 45.11.1.62:9000 0 333570 0 up http-kal 0 0 0 3 512 0 0 8422 14000 1047872 85 67680 1047128 0
+1 19 40031 45.11.1.62:9000 0 1097361 0 up http-kal 0 0 0 3 512 0 0 9134 14000 1047872 85 66624 1047128 0
+1 20 40032 45.11.1.62:9000 0 304833 0 up http-kal 0 0 0 3 512 0 0 9540 14000 1047872 85 67680 1047128 0
+1 21 40033 45.11.1.62:9000 0 323997 0 up http-kal 0 0 0 3 512 0 0 8474 14000 1047872 85 66624 1047128 0
+1 22 40034 45.11.1.62:9000 0 986762 0 up http-kal 0 0 0 3 512 0 0 8983 14000 1047872 85 66624 1047128 0
+1 23 40035 45.11.1.62:9000 0 314121 0 up http-kal 0 0 0 3 512 0 0 9111 14000 1047872 85 66624 1047128 0
+1 24 40036 45.11.1.62:9000 0 301264 0 up http-kal 0 0 0 3 512 0 0 9193 14000 1047872 85 66624 1047128 0
+1 25 40037 45.11.1.62:9000 0 302363 0 up http-kal 0 0 0 3 512 0 0 9029 4200 1047904 85 66624 1047128 0
+1 26 40038 45.11.1.62:9000 0 306329 0 up http-kal 0 0 0 3 512 0 0 9216 14000 1047872 85 67680 1047128 0
+1 27 40016 45.11.1.62:9000 0 297864 0 up http-kal 0 0 0 3 512 0 0 10414 14000 1047904 85 66624 1047128 0
+1 28 40040 45.11.1.62:9000 0 980694 0 up http-kal 0 0 0 2 474 0 0 9187 14000 1047904 85 66624 1047128 0
+1 29 40041 45.11.1.62:9000 0 304915 0 up http-kal 0 0 0 2 474 0 0 9989 14000 1047904 85 67680 1047128 0
+1 30 40017 45.11.1.62:9000 0 290966 0 up http-kal 0 0 0 2 474 0 0 10361 14000 1047904 85 66624 1047128 0
+1 31 40043 45.11.1.62:9000 0 310221 0 up http-kal 0 0 0 2 474 0 0 8790 14000 1047904 85 66624 1047128 0
+@@cpu
+cpu  356075 49573 258816 16094668 27723 0 25531 0 0 0
+@@clk
+100
+@@near_after
+@@stats
+debug_loss=0
+gaps_total=0
+streams_total=1
+tunnel 1 capture_runs=4 actor_calls=1 submit_bytes=91 tx=0 wire=73551 err=0 short=0
+tunnel 1 rx_work_runs=1297 rx_drain_entries=2279 rx_drain_bytes=29237351 rx_paused_skips=0 rx_adopt_events=0 rx_records=0 carrier_write_space_runs=0 poll_rescues=450
+tunnel 1 rx_ready_calls=1266 rx_reads=1297 rx_read_bytes=29236737 rx_read_zero=67 rx_resume=0 rx_resume_busy=0 rx_last_drained=159512 rx_proto=3 rx_errs=3 rx_last_err=-71 tx_submit_calls=1 rx_delivered=14155882
+tunnel 1 dbg rcv_nxt=604058891 copied=604058890 after=604058891 qlen=1 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=4986 pmoved=201 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=8 pub_wmem=0 pub_una=1701973757 pub_nxt=1701973757 car_wmem=1334 car_nxt=2913692201 car_copied=2913692201 car_rcvbuf=2097152 car_sndbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=5919 txwake_busy=1862 txwork=4487
+tunnel 1 ws_calls=0
+tunnel 1 c3 n=32 up=32 lost=14 replaced=21 stream_reset_tcp_failed=0 stream_reset_user=0 carrier_add=0 carrier_add_fail=0 backpressure_enter=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=11 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=91 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=500000 una_stall_us=2616164 stall_paused_skips=0 stall_idle_skips=9803 stall_declared=1 stall_recovered=0 stall_drop=0 stall_dead=0 stall_replaced=1 stall_survival_bucket=3 stall_wait_loss_bytes=2448396 replace_cost_bytes=907047 replace_cost_ewma=907047 stall_replace_econ=1 stall_replace_retrans=0 stall_replace_dead=0 tx_window=8388608 bdp_bytes=146532 k_x100=500 rtt_mean_us=383650 rttvar_us=2591660 rtt_max_us=832960 bdp_sum_rate=372241 bdp_agg_wnd=33608320 bdp_n_live=32 bdp_coverage=32 txq_max=8454432 win_block=0 win_resume=0 tx_wait_carrier=0 tx_backpressure=0 tx_wait_carrier_bytes=0 tx_wait_carrier_ns=0 tx_backpressure_bytes=0 tx_backpressure_ns=0 pump_hw_armed=0 pump_hw_fired=112 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0 prov_now=0 prov_peak=0 prov_reject=0 dead_release=0 carrier_retired=13
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=2 ctl_queued=0 pinned_bad_path=0 close_timeouts=0 fin_starved=0 fin_written=32 close_hold_fec=0 close_detaches=0
+tunnel 1 streams streams_active=1 n_streams=1 n_pending=0
+tunnel 1 stream sid=413659037696 state=1 kill=0 attached=0x9 rxq=0 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=0 tgt_err=0 fin_seq=91 fin_q=1 fin_w=1 rst_w=0 rxf=0/0 dage_ms=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c9 fec_proto_fail=0 fec_hdr_crc_fail=0 fec_payload_crc_fail=0 fec_short_tx=1 fec_short_unknown=0 fec_stream_refused=0 bind_drop_no_stream=0 fec_drop_window=0 fec_drop_sid=0 fec_drop_crypto=0 fec_ack_tx=36 fec_ack_rx=1 fec_credit_wait=0
+tunnel 1 c10 fec_decode_blocks=583 fec_decode_recovered=756 fec_decode_nomem=0 fec_deliver_nomem=0 fec_deliver_dup=0 fec_deliver_ooo=0 fec_deliver_bad=0 fec_dup_share=0 fec_late_share=1447 fec_late_data=0 fec_pad_share=3 fec_dup_marker=0 fec_marker_conflict=0 fec_epoch_conflict=0 fec_slot_past_cut=0 fec_fin_bad=0 fec_ack_bad=0 fec_tx_share_gap=0 fec_empty_block=3
+tunnel 1 c11 fec_nack_tx=17 fec_nack_rx=4 fec_nack_retx=1 fec_nack_drop=0 fec_nack_enomem=0 fec_nack_einval=0 fec_nack_enospc=0 fec_nack_eother=0 fec_nack_bad=0 fec_replay_hit=1 fec_replay_miss=14 fec_replay_miss_no_ring=0 fec_replay_miss_alloc=0 fec_replay_miss_enospc=0 fec_replay_miss_get=14 fec_replay_miss_evicted=0 fec_replay_miss_never_stored=14 fec_nack_sparse_probe=5 fec_nack_empty_reply=2 fec_nack_parity_reply=0 fec_replay_drop=0 fec_nack_retx_bytes=8240 fec_replace_retx_bytes=0 fec_nack_lat_ns=214086 fec_nack_lat_max_ns=214086 fec_nack_repair_ns=1465652722 fec_nack_repair_max_ns=539229813 fec_reset_tcp_failed=0 fec_reset_user=0 fec_wait_carrier=1 fec_backpressure=0 fec_flush_skip=0 fec_flush_pass=70 fec_hol_wait=0 fec_outq_drop=0 fec_outq_high_wait=0 fec_encode_fail=0 fec_init_rx=0 fec_init_bad=0 fec_decode_backoff=150 fec_outq_depth=0 fec_outq_max=0 fec_outq_bytes=0 fec_outq_ctl=0 fec_out_ctl_bytes=0 fec_replay_queued=0 fec_replay_bytes=0 fec_replay_skip=0 fec_nack_filtered_ready=0 fec_nack_filtered_inflight=682 fec_nack_filtered_dup=20 fec_nack_filtered_young=1103 fec_replay_dedup=0 fec_nack_req_shares=4 fec_nack_backpressure=0 fec_replay_stale=0 fec_fin_wait_replay=0 fec_nack_never_stored=4 fec_nack_absent_reply=2 fec_nack_req_invalid=0 fec_replay_high_water=0 fec_replay_pass_throttled=0 fec_replay_drain_bps=214 fec_replay_queue_high=8240 fec_reset_hole=0 tx_stall_suppressed_fec=0 fec_repair_last_ns=21095055713508
+tunnel 1 c12 fec_outq
+tunnel 1 c13 adaptive=off epoch=0 n=4 m=4 groups=4 class=3 p_ppm=0 p_win_ppm=0 r_fail_ppm=0 sent=0 miss=0 switches=0 aborts=0 rollbacks=0 pauses=0 pause_ns=0 sample_unknown=0 abandoned=0 state=steady reason=off
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=45 http_resp=0 pad_tx=72 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0
+tunnel 1 reconcile live_bytes=66064 live_data=0 live_retx=0 retired_bytes=7487 retired_data=0 retired_retx=0
+@@peers
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+1 0 40044 45.11.1.62:9000 0 301432 0 up http-kal 0 0 0 7 9037 0 0 19181 14000 1064320 85 987264 1047128 604352
+1 1 40286 45.11.1.62:9000 0 631997 0 up http-kal 0 0 0 9 853 0 0 8595 9800 1047648 85 856032 1047128 385088
+1 2 40018 45.11.1.62:9000 0 315262 0 up http-kal 0 0 0 8 774 0 0 8856 14000 1047712 85 862560 1047128 580352
+1 3 40156 45.11.1.62:9000 0 303806 0 up http-kal 0 0 0 8 774 0 0 9649 14000 1047712 85 883840 1047128 378240
+1 4 40206 45.11.1.62:9000 0 523589 0 up http-kal 0 0 0 9 9022 0 0 30325 22400 1064128 85 967648 1047128 627456
+1 5 40284 45.11.1.62:9000 0 325213 0 up http-kal 0 0 0 9 9062 0 0 31963 12600 1063840 85 917376 1047128 277120
+1 6 40019 45.11.1.62:9000 0 304843 0 up http-kal 0 0 0 9 9086 0 0 31532 14000 1064128 85 905952 1047128 285248
+1 7 40042 45.11.1.62:9000 0 333123 0 up http-kal 0 0 0 8 9088 0 0 16964 14000 1063648 85 929760 1047128 362432
+1 8 40039 45.11.1.62:9000 0 367364 0 up http-kal 0 0 0 7 840 0 0 9514 14000 1047648 85 968416 1047128 167616
+1 9 40024 45.11.1.62:9000 0 322151 0 up http-kal 0 0 0 8 878 0 0 9181 9800 1047616 85 962528 1047128 183104
+1 10 40020 45.11.1.62:9000 0 321700 0 up http-kal 0 0 0 8 878 0 0 4429 9800 1047616 85 908896 1047128 509312
+1 11 40021 45.11.1.62:9000 0 394812 0 up http-kal 0 0 0 8 838 0 0 8317 9800 1047648 85 903424 1047128 75392
+1 12 40023 45.11.1.62:9000 0 371902 0 up http-kal 0 0 0 8 798 0 0 9040 14000 1047680 85 1034272 1047128 34176
+1 13 40025 45.11.1.62:9000 0 402281 0 up http-kal 0 0 0 8 838 0 0 8640 9800 1047648 85 884928 1047128 361600
+1 14 40026 45.11.1.62:9000 0 375297 0 up http-kal 0 0 0 7 760 0 0 9220 14000 1047712 85 977696 1047128 563904
+1 15 40027 45.11.1.62:9000 0 301205 0 up http-kal 0 0 0 7 800 0 0 9105 14000 1047680 85 945984 1047128 205184
+1 16 40028 45.11.1.62:9000 0 311649 0 up http-kal 0 0 0 7 760 0 0 8922 14000 1047712 85 953888 1047128 189376
+1 17 40029 45.11.1.62:9000 0 317060 0 up http-kal 0 0 0 7 760 0 0 8965 14000 1047712 85 930944 1047128 512768
+1 18 40030 45.11.1.62:9000 0 331730 0 up http-kal 0 0 0 7 760 0 0 8422 14000 1047712 85 922624 1047128 253440
+1 19 40031 45.11.1.62:9000 0 832960 0 up http-kal 0 0 0 7 760 0 0 9134 14000 1047712 85 959648 1047128 230464
+1 20 40032 45.11.1.62:9000 0 304029 0 up http-kal 0 0 0 7 760 0 0 9540 14000 1047712 85 920320 1047128 438464
+1 21 40033 45.11.1.62:9000 0 323284 0 up http-kal 0 0 0 7 800 0 0 8474 14000 1047680 85 1015616 1047128 639040
+1 22 40034 45.11.1.62:9000 0 765119 0 up http-kal 0 0 0 7 760 0 0 8983 14000 1047712 85 976640 1047128 495808
+1 23 40035 45.11.1.62:9000 0 309519 0 up http-kal 0 0 0 7 760 0 0 9111 14000 1047712 85 890944 1047128 436672
+1 24 40036 45.11.1.62:9000 0 302947 0 up http-kal 0 0 0 7 760 0 0 9193 14000 1047776 85 902208 1047128 566528
+1 25 40037 45.11.1.62:9000 0 303028 0 up http-kal 0 0 0 7 760 0 0 9029 14000 1047776 85 967360 1047128 311360
+1 26 40038 45.11.1.62:9000 0 310477 0 up http-kal 0 0 0 7 760 0 0 9216 14000 1047776 85 956512 1047128 439872
+1 27 40016 45.11.1.62:9000 0 370369 0 up http-kal 0 0 0 6 722 0 0 10414 14000 1047744 85 919968 1047128 708480
+1 28 40040 45.11.1.62:9000 0 826572 0 up http-kal 0 0 0 5 684 0 0 9187 14000 1047776 85 900224 1047128 296704
+1 29 40041 45.11.1.62:9000 0 314141 0 up http-kal 0 0 0 5 644 0 0 9989 14000 1047808 85 630880 1047128 2112
+1 30 40017 45.11.1.62:9000 0 294087 0 up http-kal 0 0 0 5 644 0 0 10361 14000 1047808 85 968704 1047128 159744
+1 31 40043 45.11.1.62:9000 0 313925 0 up http-kal 0 0 0 5 644 0 0 8790 14000 1047808 85 938016 1047128 221120
+@@cpu
+cpu  356094 49583 258847 16099256 27726 0 25540 0 0 0
+@@clk
+100
+@@far_before
+@@stats
+debug_loss=0
+gaps_total=0
+streams_total=94
+tunnel 1 capture_runs=0 actor_calls=0 submit_bytes=0 tx=0 wire=13221 err=0 short=0
+tunnel 1 rx_work_runs=250 rx_drain_entries=151 rx_drain_bytes=23237 rx_paused_skips=0 rx_adopt_events=94 rx_records=0 carrier_write_space_runs=94 poll_rescues=0
+tunnel 1 rx_ready_calls=162 rx_reads=250 rx_read_bytes=21249 rx_read_zero=109 rx_resume=0 rx_resume_busy=0 rx_last_drained=38 rx_proto=10 rx_errs=10 rx_last_err=-71 tx_submit_calls=0 rx_delivered=0
+tunnel 1 dbg rcv_nxt=0 copied=0 after=0 qlen=0 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=2640 pmoved=105 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=0 car_nxt=868862607 car_copied=868862607 car_rcvbuf=2097152 car_sndbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=2568 txwake_busy=128 txwork=2534
+tunnel 1 ws_calls=94
+tunnel 1 c3 n=32 up=32 lost=38 replaced=0 stream_reset_tcp_failed=0 stream_reset_user=0 carrier_add=0 carrier_add_fail=0 backpressure_enter=2 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=0 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=0 una_stall_us=0 stall_paused_skips=0 stall_idle_skips=7027 stall_declared=0 stall_recovered=0 stall_drop=0 stall_dead=0 stall_replaced=0 stall_survival_bucket=0 stall_wait_loss_bytes=0 replace_cost_bytes=0 replace_cost_ewma=0 stall_replace_econ=0 stall_replace_retrans=0 stall_replace_dead=0 tx_window=2581696 bdp_bytes=74857 k_x100=500 rtt_mean_us=308023 rttvar_us=357196 rtt_max_us=332975 bdp_sum_rate=235383 bdp_agg_wnd=2138304 bdp_n_live=32 bdp_coverage=32 txq_max=2647520 win_block=0 win_resume=0 tx_wait_carrier=0 tx_backpressure=0 tx_wait_carrier_bytes=0 tx_wait_carrier_ns=0 tx_backpressure_bytes=0 tx_backpressure_ns=0 pump_hw_armed=0 pump_hw_fired=64 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0 prov_now=0 prov_peak=48 prov_reject=3 dead_release=0 carrier_retired=62
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=6 ctl_queued=0 pinned_bad_path=0 close_timeouts=0 fin_starved=0 fin_written=0 close_hold_fec=0 close_detaches=0
+tunnel 1 streams streams_active=0 n_streams=0 n_pending=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c9 fec_proto_fail=0 fec_hdr_crc_fail=0 fec_payload_crc_fail=0 fec_short_tx=0 fec_short_unknown=0 fec_stream_refused=0 bind_drop_no_stream=0 fec_drop_window=0 fec_drop_sid=0 fec_drop_crypto=0 fec_ack_tx=0 fec_ack_rx=0 fec_credit_wait=0
+tunnel 1 c10 fec_decode_blocks=0 fec_decode_recovered=0 fec_decode_nomem=0 fec_deliver_nomem=0 fec_deliver_dup=0 fec_deliver_ooo=0 fec_deliver_bad=0 fec_dup_share=0 fec_late_share=0 fec_late_data=0 fec_pad_share=0 fec_dup_marker=0 fec_marker_conflict=0 fec_epoch_conflict=0 fec_slot_past_cut=0 fec_fin_bad=0 fec_ack_bad=0 fec_tx_share_gap=0 fec_empty_block=0
+tunnel 1 c11 fec_nack_tx=0 fec_nack_rx=0 fec_nack_retx=0 fec_nack_drop=0 fec_nack_enomem=0 fec_nack_einval=0 fec_nack_enospc=0 fec_nack_eother=0 fec_nack_bad=0 fec_replay_hit=0 fec_replay_miss=0 fec_replay_miss_no_ring=0 fec_replay_miss_alloc=0 fec_replay_miss_enospc=0 fec_replay_miss_get=0 fec_replay_miss_evicted=0 fec_replay_miss_never_stored=0 fec_nack_sparse_probe=0 fec_nack_empty_reply=0 fec_nack_parity_reply=0 fec_replay_drop=0 fec_nack_retx_bytes=0 fec_replace_retx_bytes=0 fec_nack_lat_ns=0 fec_nack_lat_max_ns=0 fec_nack_repair_ns=0 fec_nack_repair_max_ns=0 fec_reset_tcp_failed=0 fec_reset_user=0 fec_wait_carrier=1 fec_backpressure=0 fec_flush_skip=0 fec_flush_pass=6 fec_hol_wait=0 fec_outq_drop=0 fec_outq_high_wait=0 fec_encode_fail=0 fec_init_rx=0 fec_init_bad=0 fec_decode_backoff=0 fec_outq_depth=0 fec_outq_max=0 fec_outq_bytes=0 fec_outq_ctl=0 fec_out_ctl_bytes=0 fec_replay_queued=0 fec_replay_bytes=0 fec_replay_skip=0 fec_nack_filtered_ready=0 fec_nack_filtered_inflight=0 fec_nack_filtered_dup=0 fec_nack_filtered_young=0 fec_replay_dedup=0 fec_nack_req_shares=0 fec_nack_backpressure=0 fec_replay_stale=0 fec_fin_wait_replay=0 fec_nack_never_stored=0 fec_nack_absent_reply=0 fec_nack_req_invalid=0 fec_replay_high_water=0 fec_replay_pass_throttled=0 fec_replay_drain_bps=0 fec_replay_queue_high=0 fec_reset_hole=0 tx_stall_suppressed_fec=0 fec_repair_last_ns=0
+tunnel 1 c12 fec_outq
+tunnel 1 c13 adaptive=off epoch=0 n=4 m=4 groups=4 class=3 p_ppm=0 p_win_ppm=0 r_fail_ppm=0 sent=0 miss=0 switches=0 aborts=0 rollbacks=0 pauses=0 pause_ns=0 sample_unknown=0 abandoned=0 state=steady reason=off
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=39 pad_tx=66 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=0 dup_bytes=0
+tunnel 1 reconcile live_bytes=10796 live_data=0 live_retx=0 retired_bytes=2425 retired_data=0 retired_retx=0
+@@peers
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+1 0 9000 171.120.34.226:40044 0 311249 0 up http-kal 0 0 0 2 297 0 0 8929 19600 66624 85 1047904 1047128 0
+1 1 9000 171.120.34.226:40286 0 329597 0 up http-kal 0 0 0 4 373 0 0 8279 19600 66624 85 1047808 1047128 0
+1 2 9000 171.120.34.226:40018 0 310271 0 up http-kal 0 0 0 4 373 0 0 4607 22400 66624 85 1047840 1047128 0
+1 3 9000 171.120.34.226:40156 0 294451 0 up http-kal 0 0 0 4 373 0 0 9151 21000 66624 85 1047840 1047128 0
+1 4 9000 171.120.34.226:40206 0 322455 0 up http-kal 0 0 0 4 373 0 0 8799 21000 66624 85 1047840 1047128 0
+1 5 9000 171.120.34.226:40284 0 308458 0 up http-kal 0 0 0 4 373 0 0 4706 21000 67680 85 1047840 1047128 0
+1 6 9000 171.120.34.226:53253 0 314169 0 up http-kal 0 0 0 4 373 0 0 8860 21000 66624 85 1047840 1047128 0
+1 7 9000 171.120.34.226:53526 0 326926 0 up http-kal 0 0 0 2 297 0 0 8428 18200 66624 85 1047904 1047128 0
+1 8 9000 171.120.34.226:40039 0 290778 0 up http-kal 0 0 0 3 335 0 0 10454 18200 66624 85 1047872 1047128 0
+1 9 9000 171.120.34.226:40024 0 299998 0 up http-kal 0 0 0 4 373 0 0 5007 22400 66624 85 1047840 1047128 0
+1 10 9000 171.120.34.226:40020 0 313964 0 up http-kal 0 0 0 3 335 0 0 4895 21000 67680 85 1047840 1047128 0
+1 11 9000 171.120.34.226:53255 0 332975 0 up http-kal 0 0 0 4 373 0 0 8342 19600 66624 85 1047840 1047128 0
+1 12 9000 171.120.34.226:53525 0 307294 0 up http-kal 0 0 0 3 335 0 0 4535 19600 66624 85 1047872 1047128 0
+1 13 9000 171.120.34.226:53257 0 325052 0 up http-kal 0 0 0 3 335 0 0 4233 19600 66624 85 1047872 1047128 0
+1 14 9000 171.120.34.226:40026 0 305390 0 up http-kal 0 0 0 3 335 0 0 8985 19600 66624 85 1047872 1047128 0
+1 15 9000 171.120.34.226:53259 0 304561 0 up http-kal 0 0 0 3 335 0 0 9131 19600 66624 85 1047872 1047128 0
+1 16 9000 171.120.34.226:40028 0 310748 0 up http-kal 0 0 0 3 335 0 0 8939 19600 66624 85 1047872 1047128 0
+1 17 9000 171.120.34.226:40029 0 309705 0 up http-kal 0 0 0 3 335 0 0 9046 19600 66624 85 1047872 1047128 0
+1 18 9000 171.120.34.226:40030 0 330773 0 up http-kal 0 0 0 3 335 0 0 4214 19600 67680 85 1047872 1047128 0
+1 19 9000 171.120.34.226:53261 0 304053 0 up http-kal 0 0 0 3 335 0 0 9148 19600 66624 85 1047872 1047128 0
+1 20 9000 171.120.34.226:53262 0 299464 0 up http-kal 0 0 0 3 335 0 0 4530 19600 67680 85 1047872 1047128 0
+1 21 9000 171.120.34.226:40033 0 327126 0 up http-kal 0 0 0 3 335 0 0 8479 19600 66624 85 1047872 1047128 0
+1 22 9000 171.120.34.226:40034 0 306573 0 up http-kal 0 0 0 3 335 0 0 9000 19600 66624 85 1047872 1047128 0
+1 23 9000 171.120.34.226:40035 0 304533 0 up http-kal 0 0 0 3 335 0 0 8944 19600 66624 85 1047872 1047128 0
+1 24 9000 171.120.34.226:40036 0 303317 0 up http-kal 0 0 0 3 335 0 0 5071 19600 66624 85 1047872 1047128 0
+1 25 9000 171.120.34.226:53265 0 307549 0 up http-kal 0 0 0 3 335 0 0 9163 19600 66624 85 1047872 1047128 0
+1 26 9000 171.120.34.226:40038 0 295724 0 up http-kal 0 0 0 3 335 0 0 4935 19600 67680 85 1047872 1047128 0
+1 27 9000 171.120.34.226:53522 0 277722 0 up http-kal 0 0 0 3 335 0 0 9740 18200 66624 85 1047872 1047128 0
+1 28 9000 171.120.34.226:40040 0 303056 0 up http-kal 0 0 0 2 297 0 0 4604 8400 66624 85 1047904 1047128 0
+1 29 9000 171.120.34.226:53529 0 286212 0 up http-kal 0 0 0 2 297 0 0 4574 16800 67680 85 1047904 1047128 0
+1 30 9000 171.120.34.226:40017 0 281331 0 up http-kal 0 0 0 2 297 0 0 9236 18200 66624 85 1047904 1047128 0
+1 31 9000 171.120.34.226:40043 0 320909 0 up http-kal 0 0 0 2 297 0 0 8419 18200 66624 85 1047904 1047128 0
+@@cpu
+cpu  3374483 261742 2317618 26306511 50852 0 390148 34608 0 0
+@@clk
+100
+@@far_after
+@@stats
+debug_loss=0
+gaps_total=0
+streams_total=94
+tunnel 1 capture_runs=23 actor_calls=140 submit_bytes=20422762 tx=0 wire=41405643 err=0 short=0
+tunnel 1 rx_work_runs=395 rx_drain_entries=296 rx_drain_bytes=73108 rx_paused_skips=0 rx_adopt_events=94 rx_records=0 carrier_write_space_runs=94 poll_rescues=0
+tunnel 1 rx_ready_calls=320 rx_reads=395 rx_read_bytes=71120 rx_read_zero=109 rx_resume=0 rx_resume_busy=0 rx_last_drained=38 rx_proto=10 rx_errs=10 rx_last_err=-71 tx_submit_calls=140 rx_delivered=91
+tunnel 1 dbg rcv_nxt=2930931711 copied=2928912781 after=2929961357 qlen=7 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=2806 pmoved=172 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=0 pub_wmem=0 pub_una=0 pub_nxt=0 car_wmem=285174 car_nxt=868871208 car_copied=868871208 car_rcvbuf=2097152 car_sndbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=4776 txwake_busy=2176 txwork=2694
+tunnel 1 ws_calls=94
+tunnel 1 c3 n=32 up=32 lost=38 replaced=0 stream_reset_tcp_failed=0 stream_reset_user=0 carrier_add=0 carrier_add_fail=0 backpressure_enter=2 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=14811242 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=200000 una_stall_us=5623039 stall_paused_skips=0 stall_idle_skips=7312 stall_declared=0 stall_recovered=0 stall_drop=0 stall_dead=0 stall_replaced=0 stall_survival_bucket=0 stall_wait_loss_bytes=0 replace_cost_bytes=0 replace_cost_ewma=0 stall_replace_econ=0 stall_replace_retrans=0 stall_replace_dead=0 tx_window=8388608 bdp_bytes=8352850 k_x100=200 rtt_mean_us=314513 rttvar_us=152035 rtt_max_us=335364 bdp_sum_rate=25739649 bdp_agg_wnd=29193120 bdp_n_live=32 bdp_coverage=32 txq_max=8454432 win_block=0 win_resume=0 tx_wait_carrier=0 tx_backpressure=0 tx_wait_carrier_bytes=0 tx_wait_carrier_ns=0 tx_backpressure_bytes=0 tx_backpressure_ns=0 pump_hw_armed=0 pump_hw_fired=69 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0 prov_now=0 prov_peak=48 prov_reject=3 dead_release=0 carrier_retired=62
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=6 ctl_queued=0 pinned_bad_path=0 close_timeouts=0 fin_starved=0 fin_written=0 close_hold_fec=0 close_detaches=0
+tunnel 1 streams streams_active=0 n_streams=1 n_pending=0
+tunnel 1 stream sid=413659037696 state=5 kill=5 attached=0x2 rxq=0 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=0 tgt_err=0 fin_seq=0 fin_q=0 fin_w=0 rst_w=1 rxf=1/1 dage_ms=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c9 fec_proto_fail=0 fec_hdr_crc_fail=0 fec_payload_crc_fail=0 fec_short_tx=1 fec_short_unknown=0 fec_stream_refused=0 bind_drop_no_stream=0 fec_drop_window=0 fec_drop_sid=1 fec_drop_crypto=0 fec_ack_tx=1 fec_ack_rx=35 fec_credit_wait=143
+tunnel 1 c10 fec_decode_blocks=0 fec_decode_recovered=0 fec_decode_nomem=0 fec_deliver_nomem=0 fec_deliver_dup=0 fec_deliver_ooo=0 fec_deliver_bad=0 fec_dup_share=0 fec_late_share=6 fec_late_data=0 fec_pad_share=3 fec_dup_marker=0 fec_marker_conflict=0 fec_epoch_conflict=0 fec_slot_past_cut=0 fec_fin_bad=0 fec_ack_bad=0 fec_tx_share_gap=0 fec_empty_block=3
+tunnel 1 c11 fec_nack_tx=4 fec_nack_rx=17 fec_nack_retx=54 fec_nack_drop=0 fec_nack_enomem=0 fec_nack_einval=0 fec_nack_enospc=0 fec_nack_eother=0 fec_nack_bad=0 fec_replay_hit=54 fec_replay_miss=10 fec_replay_miss_no_ring=0 fec_replay_miss_alloc=0 fec_replay_miss_enospc=0 fec_replay_miss_get=10 fec_replay_miss_evicted=0 fec_replay_miss_never_stored=10 fec_nack_sparse_probe=15 fec_nack_empty_reply=10 fec_nack_parity_reply=0 fec_replay_drop=0 fec_nack_retx_bytes=444960 fec_replace_retx_bytes=0 fec_nack_lat_ns=53319746 fec_nack_lat_max_ns=31534410 fec_nack_repair_ns=22294791 fec_nack_repair_max_ns=22294791 fec_reset_tcp_failed=0 fec_reset_user=1 fec_wait_carrier=1 fec_backpressure=0 fec_flush_skip=0 fec_flush_pass=5043 fec_hol_wait=0 fec_outq_drop=0 fec_outq_high_wait=0 fec_encode_fail=0 fec_init_rx=0 fec_init_bad=0 fec_decode_backoff=0 fec_outq_depth=0 fec_outq_max=0 fec_outq_bytes=0 fec_outq_ctl=0 fec_out_ctl_bytes=0 fec_replay_queued=0 fec_replay_bytes=0 fec_replay_skip=0 fec_nack_filtered_ready=0 fec_nack_filtered_inflight=3 fec_nack_filtered_dup=0 fec_nack_filtered_young=0 fec_replay_dedup=5 fec_nack_req_shares=59 fec_nack_backpressure=0 fec_replay_stale=0 fec_fin_wait_replay=0 fec_nack_never_stored=5 fec_nack_absent_reply=10 fec_nack_req_invalid=0 fec_replay_high_water=0 fec_replay_pass_throttled=0 fec_replay_drain_bps=54543 fec_replay_queue_high=41200 fec_reset_hole=0 tx_stall_suppressed_fec=0 fec_repair_last_ns=167072334089277
+tunnel 1 c12 fec_outq
+tunnel 1 c13 adaptive=off epoch=0 n=4 m=4 groups=4 class=3 p_ppm=0 p_win_ppm=0 r_fail_ppm=0 sent=0 miss=0 switches=0 aborts=0 rollbacks=0 pauses=0 pause_ns=0 sample_unknown=0 abandoned=0 state=steady reason=off
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=39 pad_tx=69 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0
+tunnel 1 reconcile live_bytes=41403218 live_data=0 live_retx=0 retired_bytes=2425 retired_data=0 retired_retx=0
+@@peers
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+1 0 9000 171.120.34.226:40044 0 308379 0 up http-kal 0 0 0 178 1427437 0 0 874070 694400 906208 85 1064320 1171456 0
+1 1 9000 171.120.34.226:40286 0 330727 0 up http-kal 0 0 0 172 1369617 0 0 859248 772800 856032 85 1047584 1047128 0
+1 2 9000 171.120.34.226:40018 0 310957 0 up http-kal 0 0 0 172 1369617 0 0 962640 792400 862560 85 1047648 1047128 0
+1 3 9000 171.120.34.226:40156 0 306311 0 up http-kal 0 0 0 171 1353239 0 0 905934 410200 883840 85 1047648 1047128 0
+1 4 9000 171.120.34.226:40206 0 328343 0 up http-kal 0 0 0 168 1328455 0 0 884861 742000 940128 85 1064128 1449984 1792
+1 5 9000 171.120.34.226:40284 0 321089 0 up http-kal 0 0 0 163 1287191 0 0 896564 705600 906496 85 1063840 1171456 0
+1 6 9000 171.120.34.226:53253 0 312626 0 up http-kal 0 0 0 163 1287191 0 0 842116 371000 900512 85 1064128 1449984 0
+1 7 9000 171.120.34.226:53526 0 335364 0 up http-kal 0 0 0 162 1287153 0 0 462981 5600 929760 85 1063648 1449984 1792
+1 8 9000 171.120.34.226:40039 0 313201 0 up http-kal 0 0 0 161 1278969 0 0 900910 404600 968416 85 1047584 1047128 0
+1 9 9000 171.120.34.226:40024 0 310032 0 up http-kal 0 0 0 162 1278943 0 0 914130 392000 962528 85 1047552 1047128 0
+1 10 9000 171.120.34.226:40020 0 319317 0 up http-kal 0 0 0 161 1278905 0 0 899458 683200 908896 85 1047552 1047128 0
+1 11 9000 171.120.34.226:53255 0 333340 0 up http-kal 0 0 0 162 1278943 0 0 878239 693000 1010880 85 1047616 1047128 0
+1 12 9000 171.120.34.226:53525 0 311928 0 up http-kal 0 0 0 162 1278943 0 0 133818 100800 1034272 85 1047616 1047128 0
+1 13 9000 171.120.34.226:53257 0 328932 0 up http-kal 0 0 0 162 1278943 0 0 908618 763000 884928 85 1047648 1047128 1792
+1 14 9000 171.120.34.226:40026 0 309519 0 up http-kal 0 0 0 161 1278905 0 0 830577 418600 965440 85 1047648 1047128 0
+1 15 9000 171.120.34.226:53259 0 302632 0 up http-kal 0 0 0 161 1278905 0 0 871633 677600 945984 85 1047616 1047128 0
+1 16 9000 171.120.34.226:40028 0 312632 0 up http-kal 0 0 0 161 1278905 0 0 826982 413000 952160 85 1047648 1047128 0
+1 17 9000 171.120.34.226:40029 0 306657 0 up http-kal 0 0 0 161 1278969 0 0 920905 595000 930944 85 1047648 1047128 0
+1 18 9000 171.120.34.226:40030 0 328243 0 up http-kal 0 0 0 161 1278905 0 0 848708 414400 922624 85 1047648 1047128 0
+1 19 9000 171.120.34.226:53261 0 303081 0 up http-kal 0 0 0 161 1278905 0 0 860810 410200 1031552 85 1047648 1047128 0
+1 20 9000 171.120.34.226:53262 0 305765 0 up http-kal 0 0 0 161 1278969 0 0 787571 323400 906496 85 1047648 1047128 0
+1 21 9000 171.120.34.226:40033 0 330487 0 up http-kal 0 0 0 160 1278851 0 0 839832 455000 992096 85 1047616 1047128 0
+1 22 9000 171.120.34.226:40034 0 305997 0 up http-kal 0 0 0 160 1278851 0 0 1083890 392000 976640 85 1047712 1047128 1792
+1 23 9000 171.120.34.226:40035 0 307284 0 up http-kal 0 0 0 160 1278851 0 0 805765 655200 890944 85 1047680 1047128 0
+1 24 9000 171.120.34.226:40036 0 308696 0 up http-kal 0 0 0 160 1278851 0 0 889545 701400 959232 85 1047648 1047128 0
+1 25 9000 171.120.34.226:53265 0 310928 0 up http-kal 0 0 0 160 1278851 0 0 266253 452200 917536 85 1047680 1047128 0
+1 26 9000 171.120.34.226:40038 0 302941 0 up http-kal 0 0 0 160 1278851 0 0 872408 371000 956512 85 1047776 1047128 1792
+1 27 9000 171.120.34.226:53522 0 312638 0 up http-kal 0 0 0 160 1278851 0 0 764864 631400 919968 85 1047616 1047128 0
+1 28 9000 171.120.34.226:40040 0 310919 0 up http-kal 0 0 0 159 1278813 0 0 968451 772800 900224 85 1047776 1047128 960
+1 29 9000 171.120.34.226:53529 0 308384 0 up http-kal 0 0 0 159 1278813 0 0 76805 56000 642464 85 1047744 1047128 0
+1 30 9000 171.120.34.226:40017 0 303172 0 up http-kal 0 0 0 159 1278813 0 0 944332 726600 968704 85 1047744 1047128 0
+1 31 9000 171.120.34.226:40043 0 330253 0 up http-kal 0 0 0 159 1278813 0 0 801986 702800 938016 85 1047808 1047128 1792
+@@cpu
+cpu  3374562 261742 2317776 26307229 50852 0 390238 34611 0 0
+@@clk
+100

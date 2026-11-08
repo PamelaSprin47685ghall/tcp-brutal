@@ -1,0 +1,44 @@
+tunnel 1 role=near listen=127.0.0.1:9001 peer=45.11.1.62:9000 n=8 m=24 fec=on adaptive=off mode=sc-ldpc w=128 carriers=256 crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=16777216 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=30000-30511 L=16 dev=eth0 nonce=00112233445566778899aabbccddeeff
+tunnel 1 c3 n=256 up=256 lost=33 replaced=34 stream_reset_tcp_failed=0 stream_reset_user=0 carrier_add=0 carrier_add_fail=0 backpressure_enter=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=79 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=78 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=500000 una_stall_us=4704773 stall_paused_skips=0 stall_idle_skips=96729 stall_declared=0 stall_recovered=0 stall_drop=0 stall_dead=0 stall_replaced=0 stall_survival_bucket=0 stall_wait_loss_bytes=0 replace_cost_bytes=0 replace_cost_ewma=0 stall_replace_econ=0 stall_replace_retrans=0 stall_replace_dead=0 tx_window=16777216 bdp_bytes=1098122 k_x100=500 rtt_mean_us=422133 rttvar_us=6037903 rtt_max_us=1525028 bdp_sum_rate=2541168 bdp_agg_wnd=133833744 bdp_n_live=256 bdp_coverage=256 txq_max=16843040 win_block=0 win_resume=0 tx_wait_carrier=0 tx_backpressure=0 tx_wait_carrier_bytes=0 tx_wait_carrier_ns=0 tx_backpressure_bytes=0 tx_backpressure_ns=0 pump_hw_armed=0 pump_hw_fired=754 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0 prov_now=0 prov_peak=0 prov_reject=0 dead_release=0 carrier_retired=18
+tunnel 1 c9 fec_proto_fail=0 fec_hdr_crc_fail=0 fec_payload_crc_fail=0 fec_short_tx=1 fec_short_unknown=0 fec_stream_refused=0 bind_drop_no_stream=0 fec_drop_window=0 fec_drop_sid=467 fec_drop_crypto=0 fec_ack_tx=16 fec_ack_rx=1 fec_credit_wait=0
+tunnel 1 c11 fec_nack_tx=36 fec_nack_rx=11 fec_nack_retx=0 fec_nack_drop=0 fec_nack_enomem=0 fec_nack_einval=0 fec_nack_enospc=0 fec_nack_eother=0 fec_nack_bad=1 fec_replay_hit=0 fec_replay_miss=74 fec_replay_miss_no_ring=0 fec_replay_miss_alloc=0 fec_replay_miss_enospc=0 fec_replay_miss_get=74 fec_replay_miss_evicted=0 fec_replay_miss_never_stored=74 fec_nack_sparse_probe=11 fec_nack_empty_reply=42 fec_nack_parity_reply=0 fec_replay_drop=0 fec_nack_retx_bytes=0 fec_replace_retx_bytes=0 fec_nack_lat_ns=0 fec_nack_lat_max_ns=0 fec_nack_repair_ns=1123193123 fec_nack_repair_max_ns=700098896 fec_reset_tcp_failed=0 fec_reset_user=1 fec_wait_carrier=1 fec_backpressure=0 fec_flush_skip=0 fec_flush_pass=133 fec_hol_wait=0 fec_outq_drop=0 fec_outq_high_wait=0 fec_encode_fail=0 fec_init_rx=4 fec_init_bad=0 fec_decode_backoff=86 fec_outq_depth=0 fec_outq_max=0 fec_outq_bytes=0 fec_outq_ctl=0 fec_out_ctl_bytes=0 fec_replay_queued=0 fec_replay_bytes=0 fec_replay_skip=0 fec_nack_filtered_ready=0 fec_nack_filtered_inflight=8281 fec_nack_filtered_dup=15 fec_nack_filtered_young=9856 fec_replay_dedup=1 fec_nack_req_shares=11 fec_nack_backpressure=0 fec_replay_stale=0 fec_fin_wait_replay=0 fec_nack_never_stored=10 fec_nack_absent_reply=42 fec_nack_req_invalid=0 fec_replay_high_water=0 fec_replay_pass_throttled=0 fec_replay_drain_bps=0 fec_replay_queue_high=0 fec_reset_hole=0 tx_stall_suppressed_fec=0 fec_repair_last_ns=21756864510515
+[21308.170052] tbtun: carrier 139 recovered after 643 ms: back in the stripe
+[21311.359652] tbtun: carrier 5 stalled: repath paused, new frames avoid it
+[21312.213027] tbtun: carrier 5 recovered after 853 ms: back in the stripe
+[21315.680031] audit: type=1400 audit(1794117205.843:862): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=177987 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[21315.680050] audit: type=1400 audit(1794117205.843:863): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=177987 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[21315.680184] audit: type=1400 audit(1794117205.843:864): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=177987 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[21315.680192] audit: type=1400 audit(1794117205.843:865): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=177987 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[21315.680303] audit: type=1400 audit(1794117205.843:866): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=177987 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[21315.680311] audit: type=1400 audit(1794117205.843:867): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=177987 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[21326.056276] tbtun: carrier 72 stalled: repath paused, new frames avoid it
+[21326.162975] tbtun: carrier 72 recovered after 106 ms: back in the stripe
+[21345.342556] tbtun: carrier 17 stalled: repath paused, new frames avoid it
+[21347.012625] tbtun: carrier 17 recovered after 1670 ms: back in the stripe
+[21370.752825] tbtun: carrier 243 stalled: repath paused, new frames avoid it
+[21372.572402] tbtun: carrier 243 recovered after 1819 ms: back in the stripe
+[21387.642058] tbtun: tunnel 1 session destroy: 16 references still held after 10000 ms (sched=0x0 streams=1 active=0 carriers=256); session leaked
+[21390.048616] tbtun: unloaded
+[21476.406133] audit: type=1400 audit(1794117366.572:868): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=179057 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[21476.406188] audit: type=1400 audit(1794117366.572:869): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=179057 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[21476.406603] audit: type=1400 audit(1794117366.572:870): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=179057 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[21476.406632] audit: type=1400 audit(1794117366.572:871): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=179057 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[21476.407011] audit: type=1400 audit(1794117366.572:872): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=179057 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[21476.407039] audit: type=1400 audit(1794117366.572:873): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=179057 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[21716.786959] tbtun 0.3.0 loaded: 1 tunnels max, 256 carriers max
+[21732.465315] tbtun: tunnel 1: portblock= is parsed but unused; carrier source ports come from /proc/net/tbtun/ports
+[21733.460113] tbtun: tunnel 1: fec rx shape from peer: n=128 m=128 groups=1 slots=8 block=256 L=8 rate=500
+[21735.473071] tbtun: tunnel 1 carrier 40 gen 57 lost: sock=1 connected=1 hello_sent=1 up=1
+[21735.611498] tbtun: tunnel 1 carrier 41 gen 58 lost: sock=1 connected=1 hello_sent=1 up=1
+[21735.816776] tbtun: tunnel 1 carrier 45 gen 62 lost: sock=1 connected=1 hello_sent=1 up=1
+[21736.021278] tbtun: tunnel 1 carrier 43 gen 60 lost: sock=1 connected=1 hello_sent=1 up=1
+[21736.121673] tbtun: tunnel 1 carrier 49 gen 66 lost: sock=1 connected=1 hello_sent=1 up=1
+[21736.331651] tbtun: tunnel 1 carrier 39 gen 56 lost: sock=1 connected=1 hello_sent=1 up=1
+[21736.378322] tbtun: tunnel 1 carrier 47 gen 64 lost: sock=1 connected=1 hello_sent=1 up=1
+[21736.686317] tbtun: tunnel 1 carrier 51 gen 68 lost: sock=1 connected=1 hello_sent=1 up=1
+[21736.737543] tbtun: tunnel 1 carrier 52 gen 69 lost: sock=1 connected=1 hello_sent=1 up=1
+[21736.803558] tbtun: tunnel 1 carrier 44 gen 61 lost: sock=1 connected=1 hello_sent=1 up=1
+[21742.085493] tbt_carrier_lost: 20 callbacks suppressed
+[21742.085505] tbtun: tunnel 1 carrier 48 gen 65 lost: sock=1 connected=1 hello_sent=1 up=1
+[21744.277557] tbtun: tunnel 1 carrier 42 gen 59 lost: sock=1 connected=1 hello_sent=1 up=1
+[21754.185409] tbtun: tunnel 1 carrier 239 gen 256 lost: sock=1 connected=1 hello_sent=1 up=1

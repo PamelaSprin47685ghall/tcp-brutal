@@ -1,0 +1,1 @@
+near_up=64 far_up=64
