@@ -166,13 +166,17 @@ static inline bool tbt_fec_rx_stream_changed(u64 stream_sid, u64 rec_sid,
 
 /* The shared FEC TX ring carries no per-byte sid, so a stream switch must
  * drop the whole ring before the new stream's bytes enter it.  While the
- * packetizer still owns the old block, the new stream's first submit is
+ * packetizer still owns the old block -- or the last submit came from the
+ * old stream before any block existed -- the new stream's first submit is
  * refused (backpressure) until the switch work has flushed the ring.  The
  * old stream is not queued at all: its bytes are consumed and discarded. */
 static inline bool tbt_fec_tx_wait_switch(u64 far_sid, u64 cur_block_sid,
-                                          u64 st_sid)
+                                          u64 last_submit_sid, u64 st_sid)
 {
-    return st_sid == far_sid && cur_block_sid && cur_block_sid != st_sid;
+    if (st_sid != far_sid)
+        return false;
+    return (cur_block_sid && cur_block_sid != st_sid) ||
+           (last_submit_sid && last_submit_sid != st_sid);
 }
 
 /* A pending switch that names a stream the session has already left can
@@ -184,15 +188,28 @@ static inline bool tbt_fec_tx_switch_stale(u64 switch_sid, u64 far_sid)
     return switch_sid && switch_sid != far_sid;
 }
 
-/* The old stream may have submitted bytes before the packetizer ever built
- * a block.  They are dropped when the new stream's first submit arrives, but
- * only while the packetizer does not yet own this stream's block: once it
- * does, the ring belongs to this stream. */
-static inline bool tbt_fec_tx_drop_prefix(u64 last_submit_sid,
-                                          u64 cur_block_sid, u64 st_sid)
+/* The packetizer must own a switch when the block it built belongs to
+ * another stream, when the ring's last submit came from another stream
+ * (including the case where no block was built yet), or when a submit
+ * already refused bytes for the stream taking over. */
+static inline bool tbt_fec_tx_need_switch(u64 cur_block_sid,
+                                          u64 last_submit_sid,
+                                          u64 switch_sid, u64 st_sid)
 {
-    return last_submit_sid && last_submit_sid != st_sid &&
-           cur_block_sid != st_sid;
+    return (cur_block_sid && cur_block_sid != st_sid) ||
+           (last_submit_sid && last_submit_sid != st_sid) ||
+           (switch_sid && switch_sid == st_sid);
+}
+
+/* A queued record may be sent only for the session's current stream.  A
+ * control record with sid 0 is session-scoped and stays; a DATA/PARITY or
+ * replay record must name the current sid exactly. */
+static inline bool tbt_fec_tx_record_sid_ok(u64 rec_sid, u64 far_sid,
+                                            bool control)
+{
+    if (control)
+        return !rec_sid || rec_sid == far_sid;
+    return rec_sid == far_sid;
 }
 
 /* A block placed for one stream must never be delivered to another.  The

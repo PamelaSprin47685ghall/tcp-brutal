@@ -790,7 +790,8 @@ static u16 tbt_fec_out_batch_peek(struct tbt_session *sess, u16 idx,
                                   struct tbt_fec_out **outs)
 {
     struct tbt_fec_outq *q;
-    struct tbt_fec_out *o;
+    struct tbt_fec_out *o, *tmp;
+    u64 far;
     size_t bytes = 0;
     u16 n = 0;
 
@@ -798,10 +799,19 @@ static u16 tbt_fec_out_batch_peek(struct tbt_session *sess, u16 idx,
         return 0;
     q = &sess->fec_outq[idx];
     spin_lock(&sess->fec_out_lock);
-    list_for_each_entry(o, &q->queue, node)
+    far = READ_ONCE(sess->far_sid);
+    list_for_each_entry_safe(o, tmp, &q->queue, node)
     {
         size_t framed = (size_t)o->len + TBT_HTTP_CHUNK_HDR_MAX + 2;
 
+        /* A record queued for an older stream must not be written under the
+         * current sid.  The switch frees the queues, but a record that raced
+         * the switch is caught here, before it reaches a carrier. */
+        if (!tbt_fec_tx_record_sid_ok(o->sid, far, false))
+        {
+            tbt_fec_out_free(sess, q, o);
+            continue;
+        }
         if (n >= TBT_FEC_BATCH_MAX)
             break;
         if (bytes + framed > TBT_FEC_DRAIN_BYTES_MAX)
@@ -961,6 +971,13 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
             spin_lock(&sess->fec_out_lock);
             o = list_first_entry_or_null(&sess->fec_out_ctl,
                                          struct tbt_fec_out, node);
+            if (o && !tbt_fec_tx_record_sid_ok(o->sid,
+                                               READ_ONCE(sess->far_sid), true))
+            {
+                tbt_fec_out_free(sess, NULL, o);
+                spin_unlock(&sess->fec_out_lock);
+                continue;
+            }
             spin_unlock(&sess->fec_out_lock);
             if (!o)
                 break;
@@ -1020,6 +1037,13 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
             spin_lock(&sess->fec_out_lock);
             o = list_first_entry_or_null(&sess->fec_out_replay,
                                          struct tbt_fec_out, node);
+            if (o && !tbt_fec_tx_record_sid_ok(o->sid,
+                                               READ_ONCE(sess->far_sid), false))
+            {
+                tbt_fec_out_free(sess, NULL, o);
+                spin_unlock(&sess->fec_out_lock);
+                continue;
+            }
             if (o)
                 depth = sess->fec_replay_queued;
             stamp_ns = o ? o->stamp_ns : 0;
@@ -1776,18 +1800,25 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
     }
     /* A stream switch owns the block being built: close it so the old
      * stream's parity is tagged with its own sid, drop its un-packetized
-     * bytes, and start the new stream on a fresh block. */
-    if ((tx->cur_block_sid && tx->cur_block_sid != st->sid) ||
-        (tx->switch_sid && tx->switch_sid == st->sid))
+     * bytes, and start the new stream on a fresh block.  The last-submit
+     * check catches the case where the packetizer runs before the new
+     * stream's first submit: the ring holds old bytes but no block exists
+     * yet, so the block-owner checks alone would miss it. */
+    if (tbt_fec_tx_need_switch(tx->cur_block_sid, tx->last_submit_sid,
+                               tx->switch_sid, st->sid))
     {
-        u64 old_sid = tx->cur_block_sid;
+        u64 old_sid = tx->cur_block_sid ? tx->cur_block_sid
+                                        : tx->last_submit_sid;
 
         spin_lock(&tx->lock);
         /* The switch owns the whole ring: no byte the old stream submitted
          * may be packetized under the new sid.  The new stream's first
-         * submit was refused until this point, so every queued byte is old.
+         * submit is refused until this point, so every queued byte is old.
          * Do not use a submit-time boundary: an old target's last submit can
-         * race past it and land after the boundary. */
+         * race past it and land after the boundary.  Hold switch_sid through
+         * the cleanup so no submit can enter before the new owner is
+         * published. */
+        tx->switch_sid = st->sid;
         tx->tail = tx->head;
         tx->fill = 0;
         spin_unlock(&tx->lock);
@@ -1795,13 +1826,13 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
             struct tbt_fec_out *o, *tmp;
             u16 i;
 
-            /* Close and advance the old block even when it is empty.  The
-             * new stream must start at a fresh block id: reusing an empty
+            /* Close and advance the old block when one exists.  The new
+             * stream must start at a fresh block id: reusing an empty
              * block's id would collide with the receiver's old marker for
              * that id, and the new stream's first share would be dropped as
              * late.  The close emits the old sid (cur_block_sid is still
              * old), so the receiver drops any marker or parity it makes. */
-            if (old_sid && old_sid != st->sid)
+            if (tx->cur_block_sid && tx->cur_block_sid != st->sid)
                 tbt_fec_tx_close_block(sess, true);
             /* The old stream is no longer the session's.  Kill it now so its
              * target socket is shut down before the new stream's target can
@@ -1854,6 +1885,7 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
              * submit during this cleanup is refused by switch_sid. */
             spin_lock(&tx->lock);
             tx->cur_block_sid = st->sid;
+            tx->last_submit_sid = st->sid;
             tx->switch_sid = 0;
             spin_unlock(&tx->lock);
             WRITE_ONCE(st->tx_paused, false);
@@ -2499,24 +2531,14 @@ size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,
      * flushed the whole ring; the switch clears tx_paused and reschedules
      * the read work.  This closes the submit-boundary race: no new byte
      * can be queued before the old prefix is gone. */
-    if (tbt_fec_tx_wait_switch(far, tx->cur_block_sid, st->sid))
+    if (tbt_fec_tx_wait_switch(far, tx->cur_block_sid, tx->last_submit_sid,
+                               st->sid))
     {
         tx->switch_sid = st->sid;
         WRITE_ONCE(st->tx_paused, true);
         spin_unlock(&tx->lock);
         tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
         return 0;
-    }
-    /* The old stream submitted bytes before the packetizer ever built a
-     * block; none of them belong to this stream.  Drop the prefix now, since
-     * the packetizer would otherwise tag it with this stream's sid.  Once the
-     * packetizer owns this stream's block, the ring is this stream's: never
-     * drop it, even if a late old submit left last_submit_sid behind. */
-    if (tbt_fec_tx_drop_prefix(tx->last_submit_sid, tx->cur_block_sid,
-                               st->sid))
-    {
-        tx->tail = tx->head;
-        tx->fill = 0;
     }
     tx->last_submit_sid = st->sid;
     take = tbt_fec_ring_put(tx, skb, off, (u32)min_t(size_t, len, U32_MAX));
