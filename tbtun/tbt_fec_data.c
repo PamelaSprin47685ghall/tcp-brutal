@@ -2511,6 +2511,8 @@ static void tbt_fec_blk_reset(struct tbt_session *sess, struct tbt_fec_blk *b,
     b->nparity = 0;
     b->count_real = 0xffff;
     b->decoding = false;
+    b->decode_tries = 0;
+    b->decode_next_ns = 0;
     b->empty = false;
     b->win_len_set = false;
     b->short_len = 0;
@@ -4112,10 +4114,11 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
     struct tbt_fec_blk *b = &rx->blk[(size_t)group * rx->slots + slot];
     u16 real = 0, i, k;
     bool claimed = false;
+    u64 now = ktime_get_ns();
     int rc;
 
     spin_lock_bh(&rx->lock);
-    if (b->used && !b->ready && !b->decoding)
+    if (b->used && !b->ready && !b->decoding && now >= b->decode_next_ns)
     {
         real = tbt_fec_blk_real_len(rx, group, b);
         tbt_fec_blk_counts(rx, group, b);
@@ -4179,6 +4182,24 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
         /* Ready only when every real share is present; a skipped share keeps
          * the block decodable on the next pass. */
         b->ready = b->ndata >= real;
+    }
+    if (rc == 0)
+    {
+        b->decode_tries = 0;
+        b->decode_next_ns = 0;
+    }
+    else
+    {
+        /* Exponential backoff, 20 ms doubling to 200 ms. A NACK repair that
+         * arrives inside the window is decoded on the next pass after it. */
+        u64 wait = 20000000ULL << (b->decode_tries < 4 ? b->decode_tries : 4);
+
+        if (wait > 200000000ULL)
+            wait = 200000000ULL;
+        if (b->decode_tries < 0xff)
+            b->decode_tries++;
+        b->decode_next_ns = ktime_get_ns() + wait;
+        atomic64_inc(&sess->fec_decode_backoff);
     }
     b->decoding = false;
     spin_unlock_bh(&rx->lock);

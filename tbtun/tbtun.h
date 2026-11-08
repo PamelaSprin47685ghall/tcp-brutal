@@ -603,6 +603,12 @@ struct tbt_fec_blk
     u16 nparity;      /* present PARITY shares */
     u16 count_real;   /* real length ndata/nparity were computed for */
     bool decoding;    /* w_fec_rx owns this block: no second decoder */
+    /* A block codec that could not finish the block keeps the block
+     * decodable, but every arriving share would re-run a decode that costs
+     * a whole block (downlink ~1 MiB). Back off after a failure so a 50%
+     * loss block does not decode 128 times before its NACK repairs arrive. */
+    u8 decode_tries;
+    u64 decode_next_ns;
     bool empty;       /* PARITY marker with win_len == 0 */
     bool win_len_set; /* a PARITY record fixed win_len/short_len */
     /* One shape-invariant buffer of (n+m)*s bytes. A switch only re-slices
@@ -1435,6 +1441,9 @@ struct tbt_session
      * local receive shape in force; the first DATA then shows the mismatch. */
     atomic64_t fec_init_rx;
     atomic64_t fec_init_bad;
+    /* A block decode that could not finish the block: counted so the cost of
+     * a lossy block is visible, not repeated silently. */
+    atomic64_t fec_decode_backoff;
     atomic64_t fec_replay_skip; /* replay head found no carrier with room */
     /* NACK/replay repair, reset causes, and the carrier wait that precedes
      * backpressure. The reset counters prove the FEC layer only tears a
