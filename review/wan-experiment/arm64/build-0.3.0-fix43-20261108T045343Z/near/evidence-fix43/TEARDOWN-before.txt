@@ -1,0 +1,5 @@
+== lsmod before
+tbtun: NOT LOADED
+== /proc/net/tbtun before
+ls: cannot access '/proc/net/tbtun': No such file or directory
+proc/net/tbtun: ABSENT

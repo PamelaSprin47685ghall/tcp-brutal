@@ -1,0 +1,27 @@
+=== lsmod ===
+tbtun                 462848  0
+=== parameters ===
+max_carriers=256
+max_tunnels=1
+debug=0
+=== dmesg load ===
+[163201.629744] tbtun: carrier 247 stalled: repath paused, new frames avoid it
+[163201.680463] tbtun: carrier 105 stalled: repath paused, new frames avoid it
+[163201.732366] tbtun: carrier 57 stalled: repath paused, new frames avoid it
+[163201.783368] tbtun: carrier 107 stalled: repath paused, new frames avoid it
+[163202.039599] tbtun: carrier 146 stalled: repath paused, new frames avoid it
+[163202.193703] tbtun: carrier 107 recovered after 410 ms: back in the stripe
+[163203.266597] tbtun: carrier 247 recovered after 1636 ms: back in the stripe
+[163203.642434] tbtun: tunnel 1 carrier 0 gen 37 lost: sock=1 connected=1 hello_sent=1 up=1
+[163203.643150] tbtun: tunnel 1 carrier 1 gen 13 lost: sock=1 connected=1 hello_sent=1 up=1
+[163203.644335] tbtun: tunnel 1 carrier 21 gen 30 lost: sock=1 connected=1 hello_sent=1 up=1
+[163203.644604] tbtun: tunnel 1 carrier 23 gen 36 lost: sock=1 connected=1 hello_sent=1 up=1
+[163203.644967] tbtun: tunnel 1 carrier 22 gen 32 lost: sock=1 connected=1 hello_sent=1 up=1
+[163203.646331] tbtun: tunnel 1 carrier 30 gen 46 lost: sock=1 connected=1 hello_sent=1 up=1
+[163203.646353] tbtun: tunnel 1 carrier 33 gen 61 lost: sock=1 connected=1 hello_sent=1 up=1
+[163203.646360] tbtun: tunnel 1 carrier 28 gen 42 lost: sock=1 connected=1 hello_sent=1 up=1
+[163203.646847] tbtun: tunnel 1 carrier 36 gen 59 lost: sock=1 connected=1 hello_sent=1 up=1
+[163203.646865] tbtun: tunnel 1 carrier 41 gen 80 lost: sock=1 connected=1 hello_sent=1 up=1
+[163205.589291] tbtun: tunnel 1 no carrier can carry: user side backpressured
+[163214.024468] tbtun: unloaded
+[163799.952876] tbtun 0.2.3 loaded: 1 tunnels max, 256 carriers max

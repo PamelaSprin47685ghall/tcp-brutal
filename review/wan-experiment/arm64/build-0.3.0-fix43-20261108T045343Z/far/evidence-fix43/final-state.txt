@@ -1,0 +1,27 @@
+=== date ===
+Sun Nov  8 04:56:29 AM UTC 2026
+=== uname ===
+Linux hnd0.kw92.cyou 7.0.0-42-generic #42-Ubuntu SMP PREEMPT_DYNAMIC Thu Oct 15 08:06:44 UTC 2026 x86_64 GNU/Linux
+=== lsmod ===
+tbtun                 462848  0
+=== module params ===
+max_carriers=256
+max_tunnels=1
+debug=0
+=== 5210 process ===
+    PID    PPID     SID STAT CMD
+ 347871       1  347871 Ss   busybox httpd -f -p 127.0.0.1:5210 -h /root/tbtun-target
+=== curl 5210 ===
+fix43-target
+=== listeners ===
+LISTEN 0      9          127.0.0.1:5210       0.0.0.0:*    users:(("busybox",pid=347871,fd=3))                   
+LISTEN 0      128          0.0.0.0:9000       0.0.0.0:*                                                          
+=== tunnels ===
+# id role state listen peer target n m streams
+1 far listening 0.0.0.0:9000 0.0.0.0:0 127.0.0.1:5210 128 128 290
+=== ports ===
+# block 31000-31511 (512 ports)
+# configured
+ports 31000-31511
+=== c3 up/lost ===
+tunnel 1 c3 n=256 up=256 lost=1

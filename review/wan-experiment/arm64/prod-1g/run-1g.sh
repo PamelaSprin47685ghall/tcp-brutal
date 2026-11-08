@@ -79,6 +79,10 @@ TRANSFER_MAX_TIME=${TRANSFER_MAX_TIME:-7200}
 TRANSFER_TMO=${TRANSFER_TMO:-$((TRANSFER_MAX_TIME + 300))}
 KEEP_SRC=${KEEP_SRC:-0}
 REQUIRE_SESS_REFS=${REQUIRE_SESS_REFS:-0}
+# The feeder is a safety precondition, not a product criterion. 0 is an
+# explicit operator waiver for a board deliberately left unarmed; the check
+# is then SKIP, never PASS.
+REQUIRE_FEEDER=${REQUIRE_FEEDER:-1}
 FAR_DIR=${FAR_DIR:-/root/accept-1g}
 DL_DIR=${DL_DIR:-/root/dl-1g}
 EXPECT_BYTES=1073741824
@@ -111,6 +115,7 @@ Environment:
   EVIDENCE_ROOT=<repo>/review/wan-experiment/arm64
   KEEP_SRC=0                       1: keep the uploaded scripts on the hosts
   REQUIRE_SESS_REFS=0              1: fail when the build does not export sess_refs
+  REQUIRE_FEEDER=1                 0: waiver; feeder check becomes SKIP
   FAIL keeps evidence automatically; run --cleanup to remove it
 
 Example:
@@ -518,9 +523,9 @@ cleanup_all() {
         ssh_far "printf 'del 1\n' > /proc/net/tbtun/config 2>/dev/null || true
                  rmmod tbtun 2>/dev/null || true
                  if [ -f '$FAR_DIR/httpd.pid' ]; then kill \$(cat '$FAR_DIR/httpd.pid') 2>/dev/null || true; fi
-                 pkill -f 'far-raw-serve.py' 2>/dev/null || true
-                 pkill -f 'far-stream-watch.sh' 2>/dev/null || true
-                 pkill -f 'busybox httpd -f -p 127.0.0.1:5210' 2>/dev/null || true
+                 pkill -f 'far[-]raw-serve.py' 2>/dev/null || true
+                 pkill -f 'far[-]stream-watch.sh' 2>/dev/null || true
+                 pkill -f 'busybox httpd -f -p 127[.]0[.]0[.]1:5210' 2>/dev/null || true
                  rm -rf '$FAR_DIR' 2>/dev/null || true
                  lsmod | grep -E '^tbtun ' || echo 'far: module unloaded'
                  test -e /proc/net/tbtun && echo 'far: /proc/net/tbtun still present' || echo 'far: procfs gone'
@@ -559,8 +564,10 @@ say "== 2. watchdog feeder on near (acceptance precondition)"
 feeder=$(near_feeder || true)
 if [[ -n $feeder ]]; then
     check near_feeder 0 "$feeder holds /dev/watchdog0"
-else
+elif ((REQUIRE_FEEDER)); then
     check near_feeder 1 "no process holds /dev/watchdog0; stopping the feeder is a 44 s reset"
+else
+    skip near_feeder "waiver REQUIRE_FEEDER=0: no process holds /dev/watchdog0; the board is unprotected"
 fi
 say "   netwatch: $(ssh_near 'systemctl is-active tbtun-netwatch 2>/dev/null || true' || true)"
 say "   RuntimeWatchdogUSec: $(ssh_near 'systemctl show -p RuntimeWatchdogUSec --value 2>/dev/null || true' || true)"
@@ -830,7 +837,7 @@ case $FAR_T0 in '' | *[!0-9]*) FAR_T0=$START_EPOCH ;; esac
 say "== 10b. far stream teardown watcher"
 ssh_far "rm -f '$FAR_DIR/.far-stream-watch.stop' '$FAR_DIR/far-stream-watch.txt' '$FAR_DIR/far-stream-watch.last' '$FAR_DIR/far-stream-watch.fields'; OUT='$FAR_DIR/far-stream-watch.txt' LAST='$FAR_DIR/far-stream-watch.last' FIELDS='$FAR_DIR/far-stream-watch.fields' STOP='$FAR_DIR/.far-stream-watch.stop' setsid sh /root/far-stream-watch.sh >/dev/null 2>&1 &" || true
 near_rc=0
-ssh_near_transfer "FAR_HASH='$FAR_HASH' FAR_IP='$FAR_IP' NEAR_DEV='$NEAR_DEV' REQUIRE_SESS_REFS='$REQUIRE_SESS_REFS' MAX_TIME='$TRANSFER_MAX_TIME' sh /root/near-fetch.sh --run" 2>&1 |
+ssh_near_transfer "FAR_HASH='$FAR_HASH' FAR_IP='$FAR_IP' NEAR_DEV='$NEAR_DEV' REQUIRE_SESS_REFS='$REQUIRE_SESS_REFS' REQUIRE_FEEDER='$REQUIRE_FEEDER' MAX_TIME='$TRANSFER_MAX_TIME' sh /root/near-fetch.sh --run" 2>&1 |
     tee "$EV/near-fetch.log" >&2 || near_rc=$?
 say "NEAR_FETCH_RC=$near_rc"
 if ((near_rc == 124)); then
@@ -1087,7 +1094,11 @@ done
 check near_no_restart "$([ -n "$NEAR_BOOT_BEFORE" ] && [ "$NEAR_BOOT_BEFORE" = "$NEAR_BOOT_AFTER" ]; echo $?)" \
     "boot_id ${NEAR_BOOT_BEFORE:0:8}.. -> ${NEAR_BOOT_AFTER:0:8}.."
 feeder_after=$(near_feeder || true)
-check feeder_alive "$([ -n "$feeder_after" ]; echo $?)" "${feeder_after:-no holder}"
+if [[ -n $feeder_after ]] || ((REQUIRE_FEEDER)); then
+    check feeder_alive "$([ -n "$feeder_after" ]; echo $?)" "${feeder_after:-no holder}"
+else
+    skip feeder_alive "waiver REQUIRE_FEEDER=0: no feeder was armed before or after the run"
+fi
 
 # ---------------------------------------------------------------------------
 # performance

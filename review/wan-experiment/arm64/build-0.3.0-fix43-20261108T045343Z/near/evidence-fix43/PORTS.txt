@@ -1,0 +1,4 @@
+== cat /proc/net/tbtun/ports
+# block 30000-30511 (512 ports)
+# configured
+ports 30000-30511

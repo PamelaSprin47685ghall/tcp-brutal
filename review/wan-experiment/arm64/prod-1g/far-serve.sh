@@ -97,8 +97,18 @@ httpd_pid() {
     pgrep -f "far-raw-serve.py" 2>/dev/null | head -n 1
 }
 
-legacy_httpd_pid() {
-    pgrep -f "busybox httpd -f -p $BIND:$PORT" 2>/dev/null | head -n 1
+legacy_httpd_pids() {
+    pgrep -f "busybox httpd -f -p $BIND:$PORT" 2>/dev/null
+}
+
+# The busybox instance the build deploys can be a child of a wrapper that
+# pgrep names first; killing the wrapper leaves the listener alive and the
+# raw sender then fails with EADDRINUSE. Name the process that actually
+# holds the port.
+port_pid() {
+    have ss || return 1
+    ss -ltnpH "sport = :$PORT" 2>/dev/null |
+        sed -n 's/.*pid=\([0-9][0-9]*\).*/\1/p' | head -n 1
 }
 
 port_listening() {
@@ -143,7 +153,7 @@ status)
     exit 0
     ;;
 stop)
-    for pid in $(httpd_pid || true) $(legacy_httpd_pid || true); do
+    for pid in $(httpd_pid || true) $(legacy_httpd_pids || true) $(port_pid || true); do
         [ -n "$pid" ] || continue
         kill "$pid" 2>/dev/null || true
         i=0
@@ -211,16 +221,24 @@ hash_head=$(printf '%s' "$hash" | cut -c1-16)
 check sha256 "$([ -n "$hash" ]; echo $?)" "sha256=$hash_head..."
 
 say "== 4. raw sender (no write timeout)"
-legacy=$(legacy_httpd_pid || true)
+legacy=$(legacy_httpd_pids || true)
 if [ -n "${legacy:-}" ]; then
-    say "   stopping legacy busybox httpd pid=$legacy"
-    kill "$legacy" 2>/dev/null || true
-    i=0
-    while [ "$i" -lt 5 ] && kill -0 "$legacy" 2>/dev/null; do
-        sleep 1
-        i=$((i + 1))
+    say "   stopping legacy busybox httpd pid(s)=$(echo $legacy)"
+    for pid in $legacy $(port_pid || true); do
+        kill "$pid" 2>/dev/null || true
+        i=0
+        while [ "$i" -lt 5 ] && kill -0 "$pid" 2>/dev/null; do
+            sleep 1
+            i=$((i + 1))
+        done
+        kill -9 "$pid" 2>/dev/null || true
     done
-    kill -9 "$legacy" 2>/dev/null || true
+    sleep 1
+    if port_listening; then
+        check httpd_stop 1 "port $BIND:$PORT still listening after legacy stop"
+        say "FAR_RESULT FAIL"
+        exit 3
+    fi
 fi
 pid=$(httpd_pid || true)
 if [ -n "${pid:-}" ] && port_listening; then

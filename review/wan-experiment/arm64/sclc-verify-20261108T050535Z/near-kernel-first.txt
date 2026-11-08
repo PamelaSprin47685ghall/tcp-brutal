@@ -1,0 +1,3 @@
+KW_SOURCE=dmesg
+[18484.525068] tbtun: carrier 0 stalled: repath paused, new frames avoid it
+[18484.685069] tbtun: carrier 0 recovered after 160 ms: back in the stripe

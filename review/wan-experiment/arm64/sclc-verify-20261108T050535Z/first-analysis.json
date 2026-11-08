@@ -1,0 +1,137 @@
+{
+ "profile": "fix43",
+ "curl": {
+  "http": "200",
+  "size": "53477376",
+  "ttfb": "1.261854",
+  "time": "15.002101",
+  "speed": "3564659"
+ },
+ "rc": 28,
+ "http": 200,
+ "size": 53477376,
+ "file_size": 53477376,
+ "near": {
+  "snapshots": 146,
+  "during_ts": 1794114394.4337187,
+  "dead_ts": 1794114394.8292553,
+  "exit_ts": 1794114394.6236367,
+  "decode_blocks": 269,
+  "credit_wait": 0,
+  "ack_tx": 43,
+  "ack_rx": 1
+ },
+ "far": {
+  "snapshots": 116,
+  "during_ts": 1794114394.875899,
+  "dead_ts": 1794114395.0702202,
+  "decode_blocks": 4,
+  "late_share": 57,
+  "dup_share": 2,
+  "credit_wait": 274,
+  "ack_tx": 1,
+  "ack_rx": 44
+ },
+ "checks": [
+  {
+   "name": "first_curl_rc",
+   "pass": true,
+   "detail": "rc=28 (28 = curl -m deadline, the expected end of this probe)"
+  },
+  {
+   "name": "first_http",
+   "pass": true,
+   "detail": "http=200"
+  },
+  {
+   "name": "first_body",
+   "pass": true,
+   "detail": "size_download=53477376 file=53477376"
+  },
+  {
+   "name": "first_ttfb",
+   "pass": true,
+   "detail": "ttfb=1.261854s"
+  },
+  {
+   "name": "first_near_decode_blocks",
+   "pass": true,
+   "detail": "delta=269"
+  },
+  {
+   "name": "first_near_ack_tx",
+   "pass": true,
+   "detail": "delta=43"
+  },
+  {
+   "name": "near_first_replay_not_full",
+   "pass": true,
+   "detail": "queue_high=140080 max_queued=0 enospc=0 replay_drop=0 (bound 5242880)"
+  },
+  {
+   "name": "near_first_nack_backpressure",
+   "pass": true,
+   "detail": "delta=0"
+  },
+  {
+   "name": "far_first_replay_not_full",
+   "pass": true,
+   "detail": "queue_high=4919280 max_queued=582 enospc=0 replay_drop=0 (bound 5242880)"
+  },
+  {
+   "name": "far_first_nack_backpressure",
+   "pass": true,
+   "detail": "delta=0"
+  },
+  {
+   "name": "near_first_no_early_teardown",
+   "pass": true,
+   "detail": "first dead ts=1794114394.8292553 exit=1794114394.624"
+  },
+  {
+   "name": "near_first_no_reset",
+   "pass": true,
+   "detail": "reset_tcp=0 reset_hole=0 holes_unrec=0 holes_declared=0 deliver_bad=0 init_bad=0"
+  },
+  {
+   "name": "near_first_stream_alive",
+   "pass": true,
+   "detail": "state=1 kill=0"
+  },
+  {
+   "name": "far_first_no_reset",
+   "pass": true,
+   "detail": "reset_tcp=0 reset_hole=0 holes_unrec=0 holes_declared=0 deliver_bad=0 init_bad=0"
+  },
+  {
+   "name": "far_first_stream_alive",
+   "pass": true,
+   "detail": "state=1 kill=0"
+  },
+  {
+   "name": "near_first_credit_progress",
+   "pass": true,
+   "detail": "credit_wait=0 far_ack_tx=1"
+  },
+  {
+   "name": "far_first_credit_progress",
+   "pass": true,
+   "detail": "credit_wait=274 near_ack_tx=43"
+  },
+  {
+   "name": "first_far_ack_rx",
+   "pass": true,
+   "detail": "delta=44"
+  },
+  {
+   "name": "near_first_credit_trend",
+   "pass": true,
+   "detail": "last_third=0 peer_ack_last_third=0 all=0"
+  },
+  {
+   "name": "far_first_credit_trend",
+   "pass": true,
+   "detail": "last_third=100 peer_ack_last_third=21 all=159"
+  }
+ ]
+}

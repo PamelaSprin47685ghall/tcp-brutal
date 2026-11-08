@@ -1,0 +1,4 @@
+snapshot_utc=2026-11-08T04:57:23Z
+tunnel 1 c3 n=256 up=256 lost=2
+fec_init_bad=0
+256

@@ -1,0 +1,1115 @@
+
+=== date ===
+2026-11-08T05:09:57Z
+
+=== boot_id ===
+a1a01693-4960-471d-a473-445da858bb05
+
+=== uptime ===
+18699.63 142750.91
+
+=== uname ===
+Linux lubancat 6.1.172 #1 SMP Sat Oct 17 15:47:17 CST 2026 aarch64 GNU/Linux
+
+=== loadavg ===
+0.89 0.86 0.53 1/361 157714
+
+=== module ===
+tbtun                 282624  0
+
+=== modinfo ===
+
+=== srcversion ===
+B66D7B86A162F744837BFF3
+
+=== max_carriers ===
+256
+
+=== config ===
+tunnel 1 role=near listen=127.0.0.1:9001 peer=45.11.1.62:9000 n=8 m=24 fec=on adaptive=off mode=sc-ldpc w=128 carriers=256 crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=16777216 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=30000-30511 L=16 dev=eth0 nonce=00112233445566778899aabbccddeeff
+
+=== ports ===
+# block 30000-30511 (512 ports)
+# configured
+ports 30000-30511
+
+=== tunnels ===
+# id role state listen peer target n m streams
+1 near listening 127.0.0.1:9001 45.11.1.62:9000 - 8 24 2
+
+=== stats ===
+debug_loss=0
+gaps_total=0
+streams_total=2
+tunnel 1 capture_runs=452 actor_calls=2 submit_bytes=156 tx=0 wire=1965595 err=0 short=0
+tunnel 1 rx_work_runs=167946 rx_drain_entries=172931 rx_drain_bytes=707482838 rx_paused_skips=0 rx_adopt_events=0 rx_records=0 carrier_write_space_runs=0 poll_rescues=27684
+tunnel 1 rx_ready_calls=171104 rx_reads=167946 rx_read_bytes=707482838 rx_read_zero=388 rx_resume=0 rx_resume_busy=0 rx_last_drained=1400 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=2 rx_delivered=271597780
+tunnel 1 dbg rcv_nxt=2414953933 copied=2414953933 after=2414953933 qlen=0 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=2064984 pmoved=28321 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=1040384 rxp=0 txq=0 txp=0 pub_state=8 pub_wmem=0 pub_una=3575412563 pub_nxt=3575412563 car_wmem=0 car_nxt=627651610 car_copied=627651610 car_rcvbuf=524288 car_sndbuf=524288 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=7221838 txwake_busy=5178495 txwork=2046799
+tunnel 1 ws_calls=0
+tunnel 1 c3 n=256 up=256 lost=33 replaced=35 stream_reset_tcp_failed=0 stream_reset_user=0 carrier_add=0 carrier_add_fail=0 backpressure_enter=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=73 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=78 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=500000 una_stall_us=5024179 stall_paused_skips=0 stall_idle_skips=2336572 stall_declared=23 stall_recovered=23 stall_drop=0 stall_dead=0 stall_replaced=0 stall_survival_bucket=2 stall_wait_loss_bytes=691629 replace_cost_bytes=290061 replace_cost_ewma=293841 stall_replace_econ=0 stall_replace_retrans=0 stall_replace_dead=0 tx_window=16777216 bdp_bytes=889924 k_x100=500 rtt_mean_us=371817 rttvar_us=2212090 rtt_max_us=695325 bdp_sum_rate=2330763 bdp_agg_wnd=132416464 bdp_n_live=256 bdp_coverage=256 txq_max=16843040 win_block=0 win_resume=0 tx_wait_carrier=0 tx_backpressure=0 tx_wait_carrier_bytes=0 tx_wait_carrier_ns=0 tx_backpressure_bytes=0 tx_backpressure_ns=0 pump_hw_armed=0 pump_hw_fired=11825 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0 prov_now=0 prov_peak=0 prov_reject=0 dead_release=0 carrier_retired=19
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0 pinned_bad_path=0 close_timeouts=0 fin_starved=0 fin_written=512 close_hold_fec=0 close_detaches=0
+tunnel 1 streams streams_active=0 n_streams=0 n_pending=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=0 gate_fail=0 depth_fail=0 time_fail=0 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c9 fec_proto_fail=0 fec_hdr_crc_fail=0 fec_payload_crc_fail=0 fec_short_tx=2 fec_short_unknown=0 fec_stream_refused=0 bind_drop_no_stream=0 fec_drop_window=0 fec_drop_sid=21581 fec_drop_crypto=0 fec_ack_tx=243 fec_ack_rx=2 fec_credit_wait=0
+tunnel 1 c10 fec_decode_blocks=3754 fec_decode_recovered=13393 fec_decode_nomem=0 fec_deliver_nomem=0 fec_deliver_dup=0 fec_deliver_ooo=0 fec_deliver_bad=0 fec_dup_share=0 fec_late_share=21431 fec_late_data=0 fec_pad_share=0 fec_dup_marker=0 fec_marker_conflict=0 fec_epoch_conflict=0 fec_slot_past_cut=0 fec_fin_bad=0 fec_ack_bad=0 fec_tx_share_gap=0 fec_empty_block=14
+tunnel 1 c11 fec_nack_tx=345 fec_nack_rx=11 fec_nack_retx=39 fec_nack_drop=0 fec_nack_enomem=0 fec_nack_einval=0 fec_nack_enospc=0 fec_nack_eother=0 fec_nack_bad=1 fec_replay_hit=39 fec_replay_miss=140 fec_replay_miss_no_ring=0 fec_replay_miss_alloc=0 fec_replay_miss_enospc=0 fec_replay_miss_get=140 fec_replay_miss_evicted=0 fec_replay_miss_never_stored=140 fec_nack_sparse_probe=9 fec_nack_empty_reply=4 fec_nack_parity_reply=0 fec_replay_drop=0 fec_nack_retx_bytes=313246 fec_replace_retx_bytes=0 fec_nack_lat_ns=11916765 fec_nack_lat_max_ns=563507 fec_nack_repair_ns=30193503557 fec_nack_repair_max_ns=29073219465 fec_reset_tcp_failed=0 fec_reset_user=2 fec_wait_carrier=1 fec_backpressure=0 fec_flush_skip=0 fec_flush_pass=698 fec_hol_wait=0 fec_outq_drop=0 fec_outq_high_wait=0 fec_encode_fail=0 fec_init_rx=1 fec_init_bad=0 fec_decode_backoff=3492 fec_outq_depth=0 fec_outq_max=0 fec_outq_bytes=0 fec_outq_ctl=0 fec_out_ctl_bytes=0 fec_replay_queued=0 fec_replay_bytes=0 fec_replay_skip=0 fec_nack_filtered_ready=0 fec_nack_filtered_inflight=888082 fec_nack_filtered_dup=12 fec_nack_filtered_young=199907 fec_replay_dedup=47 fec_nack_req_shares=92 fec_nack_backpressure=0 fec_replay_stale=0 fec_fin_wait_replay=0 fec_nack_never_stored=7 fec_nack_absent_reply=4 fec_nack_req_invalid=0 fec_replay_high_water=0 fec_replay_pass_throttled=0 fec_replay_drain_bps=0 fec_replay_queue_high=140080 fec_reset_hole=0 tx_stall_suppressed_fec=0 fec_repair_last_ns=18699583476912
+tunnel 1 c12 fec_outq
+tunnel 1 c13 adaptive=off epoch=0 n=8 m=24 groups=8 class=3 p_ppm=0 p_win_ppm=0 r_fail_ppm=0 sent=0 miss=0 switches=0 aborts=0 rollbacks=0 pauses=0 pause_ns=0 sample_unknown=0 abandoned=0 state=steady reason=off
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=275 http_resp=0 pad_tx=26461 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0
+tunnel 1 reconcile live_bytes=1953405 live_data=0 live_retx=0 retired_bytes=12190 retired_data=0 retired_retx=0
+
+=== ss ===
+State  Recv-Q Send-Q       Local Address:Port  Peer Address:PortProcess                                                 
+LISTEN 0      4096             127.0.0.1:14022      0.0.0.0:*    users:(("frpc",pid=1729,fd=11))                        
+LISTEN 0      4096            127.0.0.54:53         0.0.0.0:*    users:(("systemd-resolve",pid=553,fd=19))              
+LISTEN 0      4096             127.0.0.1:10022      0.0.0.0:*    users:(("frpc",pid=1729,fd=7))                         
+LISTEN 0      4096             127.0.0.1:13022      0.0.0.0:*    users:(("frpc",pid=1729,fd=10))                        
+LISTEN 0      128              127.0.0.1:9001       0.0.0.0:*                                                           
+LISTEN 0      4096             127.0.0.1:7890       0.0.0.0:*    users:(("mihomo",pid=1517,fd=3))                       
+LISTEN 0      4096             127.0.0.1:12022      0.0.0.0:*    users:(("frpc",pid=1729,fd=9))                         
+LISTEN 0      4096               0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=4157,fd=3),("systemd",pid=1,fd=289))
+LISTEN 0      4096            198.18.0.1:35797      0.0.0.0:*    users:(("mihomo",pid=1517,fd=10))                      
+LISTEN 0      512              127.0.0.1:7676       0.0.0.0:*    users:(("bun",pid=1515,fd=6))                          
+LISTEN 0      4096         127.0.0.53%lo:53         0.0.0.0:*    users:(("systemd-resolve",pid=553,fd=17))              
+LISTEN 0      4096             127.0.0.1:11022      0.0.0.0:*    users:(("frpc",pid=1729,fd=8))                         
+LISTEN 0      4096   [fdfe:dcba:9876::1]:45485         [::]:*    users:(("mihomo",pid=1517,fd=11))                      
+LISTEN 0      4096                  [::]:22            [::]:*    users:(("sshd",pid=4157,fd=4),("systemd",pid=1,fd=290))
+
+=== ip_rule ===
+0:	from all lookup local
+100:	from all to 45.11.1.62 lookup main
+9000:	from all to 198.18.0.0/30 lookup 2022
+9001:	not from all dport 53 lookup main suppress_prefixlength 0
+9001:	from all iif Meta goto 9010
+9002:	not from all iif lo lookup 2022
+9002:	from 0.0.0.0 iif lo lookup 2022
+9002:	from 198.18.0.0/30 iif lo lookup 2022
+9010:	from all nop
+32766:	from all lookup main
+32767:	from all lookup default
+
+=== ip_route ===
+default via 192.168.123.254 dev eth0 proto dhcp src 192.168.123.82 metric 100 
+192.168.123.0/24 dev eth0 proto kernel scope link src 192.168.123.82 metric 100 
+198.18.0.0/30 dev Meta proto kernel scope link src 198.18.0.1 
+
+=== netdev ===
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo: 4580187287  267056    0    0    0     0          0         0 4580187287  267056    0    0    0     0       0          0
+  eth0: 11463664159 8572771    0 1320    0     0          0         0 972228659 5439442    0    0    0     0       0          0
+  eth1:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  usb0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  Meta: 924238231  365039    0    0    0     0          0         0 924237934  365066    0    0    0     0       0          0
+
+=== meminfo ===
+MemTotal:        8104768 kB
+MemFree:         5364232 kB
+MemAvailable:    7363008 kB
+
+=== slab ===
+
+=== dmesg ===
+[10419.755751] audit: type=1400 audit(1794106309.785:523): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=82056 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10419.755879] audit: type=1400 audit(1794106309.785:524): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=82056 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10419.755889] audit: type=1400 audit(1794106309.785:525): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=82056 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10419.755996] audit: type=1400 audit(1794106309.785:526): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=82056 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10419.756004] audit: type=1400 audit(1794106309.785:527): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=82056 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10485.803572] audit: type=1400 audit(1794106375.832:528): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=83609 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10485.803623] audit: type=1400 audit(1794106375.832:529): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=83609 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10485.804036] audit: type=1400 audit(1794106375.832:530): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=83609 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10485.804064] audit: type=1400 audit(1794106375.832:531): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=83609 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10485.804438] audit: type=1400 audit(1794106375.832:532): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=83609 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10485.804466] audit: type=1400 audit(1794106375.832:533): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=83609 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10565.776276] audit: type=1400 audit(1794106455.803:534): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=85236 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10565.776328] audit: type=1400 audit(1794106455.803:535): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=85236 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10565.776739] audit: type=1400 audit(1794106455.803:536): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=85236 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10565.776767] audit: type=1400 audit(1794106455.803:537): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=85236 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10636.575567] audit: type=1400 audit(1794106526.604:538): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=86099 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10636.575618] audit: type=1400 audit(1794106526.604:539): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=86099 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10636.576044] audit: type=1400 audit(1794106526.604:540): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=86099 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10636.576072] audit: type=1400 audit(1794106526.604:541): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=86099 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10700.468378] audit: type=1400 audit(1794106590.498:542): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=86577 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10700.468430] audit: type=1400 audit(1794106590.498:543): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=86577 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10700.468884] audit: type=1400 audit(1794106590.501:544): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=86577 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10700.468918] audit: type=1400 audit(1794106590.501:545): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=86577 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10872.299565] audit: type=1400 audit(1794106762.330:546): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=88648 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10872.299616] audit: type=1400 audit(1794106762.330:547): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=88648 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10872.300049] audit: type=1400 audit(1794106762.330:548): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=88648 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10872.300077] audit: type=1400 audit(1794106762.330:549): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=88648 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10872.300488] audit: type=1400 audit(1794106762.333:550): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=88648 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10872.300516] audit: type=1400 audit(1794106762.333:551): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=88648 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[10872.637999] audit: type=1400 audit(1794106762.670:552): apparmor="DENIED" operation="mount" info="failed mntpnt match" error=-13 profile="fusermount3" name="/" pid=88694 comm="fusermount3" flags="rw, rprivate"
+[10872.854675] audit: type=1400 audit(1794106762.887:553): apparmor="DENIED" operation="mount" info="failed mntpnt match" error=-13 profile="fusermount3" name="/" pid=88696 comm="fusermount3" flags="rw, rprivate"
+[10887.379061] tbtun 0.2.3 loaded: 64 tunnels max, 256 carriers max
+[10949.344264] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[10949.397565] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[10949.557690] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[10949.557729] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[10949.610752] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[10949.610781] tbtun: tunnel 1 carrier 181 failed to connect: -98
+[10949.610803] tbtun: tunnel 1 carrier 182 failed to connect: -98
+[10949.664420] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[10949.717786] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[10949.770894] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[10954.360258] tbt_car_connect_work: 250 callbacks suppressed
+[10954.360274] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[10954.360305] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[10954.360328] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[10954.413682] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[10954.413711] tbtun: tunnel 1 carrier 186 failed to connect: -98
+[10954.413734] tbtun: tunnel 1 carrier 189 failed to connect: -98
+[10954.467031] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[10954.467059] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[10954.467080] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[10954.520592] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[10959.376850] tbt_car_connect_work: 272 callbacks suppressed
+[10959.376863] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[10959.376892] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[10959.376914] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[10959.429845] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[10959.429871] tbtun: tunnel 1 carrier 181 failed to connect: -98
+[10959.429894] tbtun: tunnel 1 carrier 182 failed to connect: -98
+[10959.483664] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[10959.483693] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[10959.483717] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[10959.537138] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[10964.390197] tbt_car_connect_work: 272 callbacks suppressed
+[10964.390212] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[10964.390242] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[10964.390265] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[10964.443579] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[10964.443608] tbtun: tunnel 1 carrier 186 failed to connect: -98
+[10964.443631] tbtun: tunnel 1 carrier 189 failed to connect: -98
+[10964.497140] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[10964.497168] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[10964.497191] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[10964.550422] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[10969.402905] tbt_car_connect_work: 272 callbacks suppressed
+[10969.402919] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[10969.402948] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[10969.402970] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[10969.457162] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[10969.457194] tbtun: tunnel 1 carrier 181 failed to connect: -98
+[10969.457218] tbtun: tunnel 1 carrier 182 failed to connect: -98
+[10969.510120] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[10969.510148] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[10969.510169] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[10969.563651] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[10974.423627] tbt_car_connect_work: 272 callbacks suppressed
+[10974.423642] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[10974.423674] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[10974.423696] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[10974.481099] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[10974.481142] tbtun: tunnel 1 carrier 186 failed to connect: -98
+[10974.481164] tbtun: tunnel 1 carrier 189 failed to connect: -98
+[10974.533976] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[10974.534004] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[10974.534030] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[10974.587331] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[10979.440074] tbt_car_connect_work: 272 callbacks suppressed
+[10979.440088] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[10979.440119] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[10979.440142] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[10979.493412] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[10979.493442] tbtun: tunnel 1 carrier 181 failed to connect: -98
+[10979.493465] tbtun: tunnel 1 carrier 182 failed to connect: -98
+[10979.546291] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[10979.546318] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[10979.546341] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[10979.599666] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[10984.453284] tbt_car_connect_work: 272 callbacks suppressed
+[10984.453297] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[10984.453327] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[10984.453348] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[10984.506695] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[10984.506723] tbtun: tunnel 1 carrier 186 failed to connect: -98
+[10984.506745] tbtun: tunnel 1 carrier 189 failed to connect: -98
+[10984.559934] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[10984.559959] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[10984.559981] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[10984.612855] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[10989.467202] tbt_car_connect_work: 272 callbacks suppressed
+[10989.467217] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[10989.467249] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[10989.467273] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[10989.520333] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[10989.520360] tbtun: tunnel 1 carrier 181 failed to connect: -98
+[10989.520384] tbtun: tunnel 1 carrier 182 failed to connect: -98
+[10989.573327] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[10989.573355] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[10989.573380] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[10989.626781] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[10994.483212] tbt_car_connect_work: 272 callbacks suppressed
+[10994.483225] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[10994.483257] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[10994.483281] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[10994.536536] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[10994.536563] tbtun: tunnel 1 carrier 186 failed to connect: -98
+[10994.536586] tbtun: tunnel 1 carrier 189 failed to connect: -98
+[10994.589922] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[10994.589950] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[10994.589974] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[10994.643371] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[10999.495746] tbt_car_connect_work: 272 callbacks suppressed
+[10999.495753] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[10999.495765] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[10999.495773] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[10999.549742] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[10999.549772] tbtun: tunnel 1 carrier 181 failed to connect: -98
+[10999.549794] tbtun: tunnel 1 carrier 182 failed to connect: -98
+[10999.603072] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[10999.603098] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[10999.603120] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[10999.655625] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[11004.508823] tbt_car_connect_work: 272 callbacks suppressed
+[11004.508830] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[11004.508844] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[11004.508852] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[11004.562249] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[11004.562260] tbtun: tunnel 1 carrier 186 failed to connect: -98
+[11004.562266] tbtun: tunnel 1 carrier 189 failed to connect: -98
+[11004.615514] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[11004.615523] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[11004.615530] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[11004.668842] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[11009.528749] tbt_car_connect_work: 272 callbacks suppressed
+[11009.528755] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[11009.528767] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[11009.528774] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[11009.582182] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[11009.582193] tbtun: tunnel 1 carrier 181 failed to connect: -98
+[11009.582200] tbtun: tunnel 1 carrier 182 failed to connect: -98
+[11009.635464] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[11009.635474] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[11009.635481] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[11009.688782] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[11014.545365] tbt_car_connect_work: 272 callbacks suppressed
+[11014.545372] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[11014.545384] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[11014.545391] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[11014.598785] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[11014.598795] tbtun: tunnel 1 carrier 186 failed to connect: -98
+[11014.598803] tbtun: tunnel 1 carrier 189 failed to connect: -98
+[11014.652202] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[11014.652212] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[11014.652218] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[11014.705763] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[11019.558792] tbt_car_connect_work: 272 callbacks suppressed
+[11019.558799] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[11019.558811] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[11019.558817] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[11019.612261] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[11019.612270] tbtun: tunnel 1 carrier 181 failed to connect: -98
+[11019.612277] tbtun: tunnel 1 carrier 182 failed to connect: -98
+[11019.665587] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[11019.665594] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[11019.665601] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[11019.718846] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[11024.578796] tbt_car_connect_work: 272 callbacks suppressed
+[11024.578802] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[11024.578815] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[11024.578822] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[11024.632728] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[11024.632758] tbtun: tunnel 1 carrier 186 failed to connect: -98
+[11024.632780] tbtun: tunnel 1 carrier 189 failed to connect: -98
+[11024.686126] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[11024.686153] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[11024.686175] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[11024.739446] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[11025.169315] tbtun: carrier 135 stalled: repath paused, new frames avoid it
+[11027.305170] tbtun: carrier 135 recovered after 2135 ms: back in the stripe
+[11029.602394] tbt_car_connect_work: 272 callbacks suppressed
+[11029.602408] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[11029.602439] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[11029.602461] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[11029.656164] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[11029.656192] tbtun: tunnel 1 carrier 181 failed to connect: -98
+[11029.656216] tbtun: tunnel 1 carrier 182 failed to connect: -98
+[11029.708952] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[11029.708977] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[11029.708998] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[11029.762453] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[11034.619328] tbt_car_connect_work: 272 callbacks suppressed
+[11034.619342] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[11034.619374] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[11034.619399] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[11034.672306] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[11034.672335] tbtun: tunnel 1 carrier 186 failed to connect: -98
+[11034.672356] tbtun: tunnel 1 carrier 189 failed to connect: -98
+[11034.726080] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[11034.726107] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[11034.726130] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[11034.779607] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[11039.635317] tbt_car_connect_work: 272 callbacks suppressed
+[11039.635324] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[11039.635337] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[11039.635344] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[11039.689334] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[11039.689361] tbtun: tunnel 1 carrier 181 failed to connect: -98
+[11039.689384] tbtun: tunnel 1 carrier 182 failed to connect: -98
+[11039.742751] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[11039.742780] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[11039.742802] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[11039.795509] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[11044.652573] tbt_car_connect_work: 272 callbacks suppressed
+[11044.652587] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[11044.652617] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[11044.652640] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[11044.705880] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[11044.705908] tbtun: tunnel 1 carrier 186 failed to connect: -98
+[11044.705931] tbtun: tunnel 1 carrier 189 failed to connect: -98
+[11044.759651] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[11044.759689] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[11044.759711] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[11044.813357] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[11048.918277] tbtun: carrier 12 stalled: repath paused, new frames avoid it
+[11049.665221] tbt_car_connect_work: 272 callbacks suppressed
+[11049.665228] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[11049.665241] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[11049.665248] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[11049.719162] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[11049.719193] tbtun: tunnel 1 carrier 181 failed to connect: -98
+[11049.719215] tbtun: tunnel 1 carrier 182 failed to connect: -98
+[11049.772051] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[11049.772080] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[11049.772103] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[11049.825943] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[11050.838081] tbtun: carrier 12 recovered after 1919 ms: back in the stripe
+[11054.679517] tbt_car_connect_work: 272 callbacks suppressed
+[11054.679533] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[11054.679565] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[11054.679588] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[11054.733066] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[11054.733098] tbtun: tunnel 1 carrier 186 failed to connect: -98
+[11054.733121] tbtun: tunnel 1 carrier 189 failed to connect: -98
+[11054.786301] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[11054.786327] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[11054.786350] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[11054.839841] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[11059.695114] tbt_car_connect_work: 272 callbacks suppressed
+[11059.695121] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[11059.695133] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[11059.695139] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[11059.748491] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[11059.748501] tbtun: tunnel 1 carrier 181 failed to connect: -98
+[11059.748508] tbtun: tunnel 1 carrier 182 failed to connect: -98
+[11059.801831] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[11059.801840] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[11059.801846] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[11059.855030] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[11061.402171] tbtun: carrier 67 stalled: repath paused, new frames avoid it
+[11061.455302] tbtun: carrier 67 recovered after 53 ms: back in the stripe
+[11064.709040] tbt_car_connect_work: 272 callbacks suppressed
+[11064.709056] tbtun: tunnel 1 carrier 183 failed to connect: -98
+[11064.709087] tbtun: tunnel 1 carrier 185 failed to connect: -98
+[11064.709110] tbtun: tunnel 1 carrier 188 failed to connect: -98
+[11064.762479] tbtun: tunnel 1 carrier 184 failed to connect: -98
+[11064.762507] tbtun: tunnel 1 carrier 186 failed to connect: -98
+[11064.762529] tbtun: tunnel 1 carrier 189 failed to connect: -98
+[11064.815693] tbtun: tunnel 1 carrier 178 failed to connect: -98
+[11064.815720] tbtun: tunnel 1 carrier 180 failed to connect: -98
+[11064.815741] tbtun: tunnel 1 carrier 187 failed to connect: -98
+[11064.869687] tbtun: tunnel 1 carrier 179 failed to connect: -98
+[11066.899046] tbtun: carrier 163 stalled: repath paused, new frames avoid it
+[11068.925497] tbtun: carrier 163 recovered after 2026 ms: back in the stripe
+[11069.457955] tbtun: carrier 38 stalled: repath paused, new frames avoid it
+[11071.964799] tbtun: carrier 38 recovered after 2506 ms: back in the stripe
+[11073.571182] tbtun: carrier 12 stalled: repath paused, new frames avoid it
+[11073.784506] tbtun: carrier 12 recovered after 213 ms: back in the stripe
+[11076.881769] tbtun: tunnel 1 carrier 196 gen 197 lost: sock=1 connected=1 hello_sent=1 up=1
+[11078.231188] tbtun: carrier 99 stalled: repath paused, new frames avoid it
+[11078.444542] tbtun: carrier 99 recovered after 213 ms: back in the stripe
+[11083.672089] tbtun: carrier 74 stalled: repath paused, new frames avoid it
+[11083.724489] tbtun: carrier 74 recovered after 52 ms: back in the stripe
+[11083.724505] tbtun: carrier 76 stalled: repath paused, new frames avoid it
+[11083.778882] tbtun: carrier 76 recovered after 54 ms: back in the stripe
+[11155.050263] tbtun: drop_ppm refused: load the module with debug_loss=1 to enable loss injection
+[11221.799634] tbtun: carrier 55 stalled: repath paused, new frames avoid it
+[11221.906549] tbtun: carrier 55 recovered after 106 ms: back in the stripe
+[11222.173338] tbtun: carrier 99 stalled: repath paused, new frames avoid it
+[11222.496505] tbtun: carrier 99 recovered after 323 ms: back in the stripe
+[11227.889541] tbtun: carrier 52 stalled: repath paused, new frames avoid it
+[11228.639481] tbtun: carrier 104 stalled: repath paused, new frames avoid it
+[11228.692824] tbtun: carrier 104 recovered after 53 ms: back in the stripe
+[11229.069482] tbtun: carrier 52 recovered after 1179 ms: back in the stripe
+[11233.999270] tbtun: tunnel 1 carrier 10 gen 11 lost: sock=1 connected=1 hello_sent=1 up=1
+[11234.000064] tbtun: tunnel 1 carrier 12 gen 13 lost: sock=1 connected=1 hello_sent=1 up=1
+[11234.000231] tbtun: tunnel 1 carrier 29 gen 30 lost: sock=1 connected=1 hello_sent=1 up=1
+[11234.000407] tbtun: tunnel 1 carrier 14 gen 15 lost: sock=1 connected=1 hello_sent=1 up=1
+[11234.000465] tbtun: tunnel 1 carrier 27 gen 28 lost: sock=1 connected=1 hello_sent=1 up=1
+[11234.000601] tbtun: tunnel 1 carrier 33 gen 34 lost: sock=1 connected=1 hello_sent=1 up=1
+[11234.001138] tbtun: tunnel 1 carrier 37 gen 38 lost: sock=1 connected=1 hello_sent=1 up=1
+[11234.001285] tbtun: tunnel 1 carrier 47 gen 48 lost: sock=1 connected=1 hello_sent=1 up=1
+[11234.001333] tbtun: tunnel 1 carrier 35 gen 36 lost: sock=1 connected=1 hello_sent=1 up=1
+[11234.001387] tbtun: tunnel 1 carrier 39 gen 40 lost: sock=1 connected=1 hello_sent=1 up=1
+[11238.062724] tbt_car_connect_work: 272 callbacks suppressed
+[11238.062738] tbtun: tunnel 1 carrier 73 failed to connect: -110
+[11246.052942] tbt_carrier_lost: 198 callbacks suppressed
+[11246.052957] tbtun: tunnel 1 carrier 40 gen 41 lost: sock=1 connected=1 hello_sent=1 up=1
+[11250.929238] tbtun: tunnel 1 carrier 186 gen 187 lost: sock=1 connected=1 hello_sent=1 up=1
+[11251.075808] tbtun: tunnel 1 carrier 229 failed to connect: -110
+[11252.215956] tbtun: tunnel 1 carrier 206 gen 207 lost: sock=1 connected=1 hello_sent=1 up=1
+[11324.218413] tbtun: unloaded
+[12018.744576] audit: type=1400 audit(1794107908.790:554): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=91765 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12018.744590] audit: type=1400 audit(1794107908.790:555): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=91765 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12018.744724] audit: type=1400 audit(1794107908.790:556): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=91765 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12018.744732] audit: type=1400 audit(1794107908.790:557): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=91765 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12413.174068] audit: type=1400 audit(1794108303.225:558): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=96809 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12413.174090] audit: type=1400 audit(1794108303.225:559): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=96809 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12413.174226] audit: type=1400 audit(1794108303.225:560): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=96809 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12413.174235] audit: type=1400 audit(1794108303.225:561): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=96809 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12413.174351] audit: type=1400 audit(1794108303.225:562): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=96809 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12413.174359] audit: type=1400 audit(1794108303.225:563): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=96809 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12529.907533] audit: type=1400 audit(1794108419.960:564): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=97734 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12529.907547] audit: type=1400 audit(1794108419.960:565): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=97734 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12529.907678] audit: type=1400 audit(1794108419.960:566): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=97734 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12529.907686] audit: type=1400 audit(1794108419.960:567): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=97734 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12529.907799] audit: type=1400 audit(1794108419.960:568): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=97734 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12529.907807] audit: type=1400 audit(1794108419.960:569): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=97734 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12619.931714] audit: type=1400 audit(1794108509.984:570): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=98263 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12619.931728] audit: type=1400 audit(1794108509.984:571): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=98263 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12619.931860] audit: type=1400 audit(1794108509.984:572): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=98263 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12619.931868] audit: type=1400 audit(1794108509.984:573): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=98263 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12619.931978] audit: type=1400 audit(1794108509.984:574): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=98263 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12619.931986] audit: type=1400 audit(1794108509.984:575): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=98263 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12756.194342] audit: type=1400 audit(1794108646.253:576): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=102576 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12756.194357] audit: type=1400 audit(1794108646.253:577): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=102576 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12756.194489] audit: type=1400 audit(1794108646.253:578): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=102576 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12756.194498] audit: type=1400 audit(1794108646.253:579): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=102576 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12756.194607] audit: type=1400 audit(1794108646.253:580): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=102576 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12756.194616] audit: type=1400 audit(1794108646.253:581): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=102576 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12824.213917] audit: type=1400 audit(1794108714.270:582): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=104344 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12824.213931] audit: type=1400 audit(1794108714.270:583): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=104344 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12824.214074] audit: type=1400 audit(1794108714.270:584): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=104344 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12824.214082] audit: type=1400 audit(1794108714.270:585): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=104344 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12824.214198] audit: type=1400 audit(1794108714.270:586): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=104344 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12824.214206] audit: type=1400 audit(1794108714.270:587): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=104344 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12938.987283] audit: type=1400 audit(1794108829.045:588): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=108183 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12938.987336] audit: type=1400 audit(1794108829.045:589): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=108183 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12938.987768] audit: type=1400 audit(1794108829.045:590): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=108183 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12938.987796] audit: type=1400 audit(1794108829.045:591): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=108183 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12938.988185] audit: type=1400 audit(1794108829.045:592): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=108183 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[12938.988232] audit: type=1400 audit(1794108829.048:593): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=108183 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13027.549128] audit: type=1400 audit(1794108917.606:594): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=108717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13027.549178] audit: type=1400 audit(1794108917.606:595): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=108717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13027.549592] audit: type=1400 audit(1794108917.606:596): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=108717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13027.549620] audit: type=1400 audit(1794108917.606:597): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=108717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13027.550000] audit: type=1400 audit(1794108917.606:598): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=108717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13027.550028] audit: type=1400 audit(1794108917.606:599): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=108717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13084.095680] audit: type=1400 audit(1794108974.154:600): apparmor="DENIED" operation="mount" info="failed mntpnt match" error=-13 profile="fusermount3" name="/" pid=110535 comm="fusermount3" flags="rw, rprivate"
+[13084.650341] audit: type=1400 audit(1794108974.710:601): apparmor="DENIED" operation="mount" info="failed mntpnt match" error=-13 profile="fusermount3" name="/" pid=110545 comm="fusermount3" flags="rw, rprivate"
+[13110.403273] audit: type=1400 audit(1794109000.464:602): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=111217 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13110.403294] audit: type=1400 audit(1794109000.464:603): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=111217 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13110.403420] audit: type=1400 audit(1794109000.464:604): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=111217 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13110.403430] audit: type=1400 audit(1794109000.464:605): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=111217 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13110.403535] audit: type=1400 audit(1794109000.464:606): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=111217 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13110.403542] audit: type=1400 audit(1794109000.464:607): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=111217 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13167.278991] tbtun 0.2.3 loaded: 1 tunnels max, 256 carriers max
+[13198.017537] audit: type=1400 audit(1794109088.078:608): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=113443 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13198.017583] audit: type=1400 audit(1794109088.078:609): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=113443 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13198.017977] audit: type=1400 audit(1794109088.078:610): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=113443 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13198.018005] audit: type=1400 audit(1794109088.078:611): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=113443 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13198.018407] audit: type=1400 audit(1794109088.082:612): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=113443 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13198.018431] audit: type=1400 audit(1794109088.082:613): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=113443 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13382.561023] audit: type=1400 audit(1794109272.624:614): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=114540 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13382.561072] audit: type=1400 audit(1794109272.624:615): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=114540 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13382.561491] audit: type=1400 audit(1794109272.624:616): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=114540 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13382.561519] audit: type=1400 audit(1794109272.624:617): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=114540 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13382.561914] audit: type=1400 audit(1794109272.624:618): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=114540 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13382.561946] audit: type=1400 audit(1794109272.624:619): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=114540 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13478.941889] audit: type=1400 audit(1794109369.009:620): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=115443 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13478.941942] audit: type=1400 audit(1794109369.009:621): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=115443 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13478.942355] audit: type=1400 audit(1794109369.009:622): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=115443 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13478.942383] audit: type=1400 audit(1794109369.009:623): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=115443 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13478.942765] audit: type=1400 audit(1794109369.009:624): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=115443 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13478.942793] audit: type=1400 audit(1794109369.009:625): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=115443 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13478.943168] audit: type=1400 audit(1794109369.009:626): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=115443 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13478.943196] audit: type=1400 audit(1794109369.009:627): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=115443 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13630.166179] audit: type=1400 audit(1794109520.234:628): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=116142 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13630.166193] audit: type=1400 audit(1794109520.234:629): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=116142 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13630.166319] audit: type=1400 audit(1794109520.234:630): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=116142 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13630.166328] audit: type=1400 audit(1794109520.234:631): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=116142 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13630.166436] audit: type=1400 audit(1794109520.234:632): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=116142 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13630.166444] audit: type=1400 audit(1794109520.234:633): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=116142 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13630.166552] audit: type=1400 audit(1794109520.234:634): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=116142 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13630.166560] audit: type=1400 audit(1794109520.234:635): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=116142 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13780.321143] tbtun: carrier 194 stalled: repath paused, new frames avoid it
+[13781.267302] tbtun: carrier 194 recovered after 946 ms: back in the stripe
+[13786.250262] tbtun: carrier 3 stalled: repath paused, new frames avoid it
+[13786.783481] tbtun: carrier 3 recovered after 533 ms: back in the stripe
+[13790.590107] tbtun: carrier 4 stalled: repath paused, new frames avoid it
+[13792.319977] tbtun: carrier 4 recovered after 1729 ms: back in the stripe
+[13820.766560] tbtun: carrier 189 stalled: repath paused, new frames avoid it
+[13822.228086] tbtun: carrier 189 recovered after 1461 ms: back in the stripe
+[13830.217776] tbtun: carrier 165 stalled: repath paused, new frames avoid it
+[13830.269695] tbtun: carrier 165 recovered after 51 ms: back in the stripe
+[13849.919301] tbtun: carrier 11 stalled: repath paused, new frames avoid it
+[13850.292742] tbtun: carrier 11 recovered after 373 ms: back in the stripe
+[13855.096316] tbtun: carrier 10 stalled: repath paused, new frames avoid it
+[13855.150691] tbtun: carrier 63 stalled: repath paused, new frames avoid it
+[13855.150905] tbtun: carrier 149 stalled: repath paused, new frames avoid it
+[13855.257478] tbtun: carrier 57 stalled: repath paused, new frames avoid it
+[13855.257927] tbtun: carrier 236 stalled: repath paused, new frames avoid it
+[13855.310716] tbtun: carrier 57 recovered after 53 ms: back in the stripe
+[13855.364122] tbtun: carrier 63 recovered after 213 ms: back in the stripe
+[13855.416316] tbtun: carrier 10 recovered after 320 ms: back in the stripe
+[13855.417671] tbtun: carrier 236 recovered after 159 ms: back in the stripe
+[13855.474283] tbtun: carrier 149 recovered after 323 ms: back in the stripe
+[13859.816538] tbtun: carrier 146 stalled: repath paused, new frames avoid it
+[13860.413618] tbtun: carrier 146 recovered after 597 ms: back in the stripe
+[13870.122478] tbtun: carrier 66 stalled: repath paused, new frames avoid it
+[13870.284295] tbtun: carrier 222 stalled: repath paused, new frames avoid it
+[13870.445682] tbtun: carrier 66 recovered after 323 ms: back in the stripe
+[13870.499140] tbtun: carrier 222 recovered after 214 ms: back in the stripe
+[13874.908997] tbtun: carrier 130 stalled: repath paused, new frames avoid it
+[13875.015906] tbtun: carrier 7 stalled: repath paused, new frames avoid it
+[13875.017499] tbtun: carrier 43 stalled: repath paused, new frames avoid it
+[13875.017563] tbtun: carrier 46 stalled: repath paused, new frames avoid it
+[13875.186732] tbtun: carrier 86 stalled: repath paused, new frames avoid it
+[13875.296888] tbtun: carrier 33 stalled: repath paused, new frames avoid it
+[13875.455727] tbtun: carrier 33 recovered after 158 ms: back in the stripe
+[13875.455768] tbtun: carrier 43 recovered after 438 ms: back in the stripe
+[13875.455783] tbtun: carrier 46 recovered after 438 ms: back in the stripe
+[13876.477102] tbtun: carrier 86 recovered after 1290 ms: back in the stripe
+[13876.477216] tbtun: carrier 130 recovered after 1568 ms: back in the stripe
+[13877.012318] tbtun: carrier 7 recovered after 1996 ms: back in the stripe
+[13880.085509] tbtun: carrier 44 stalled: repath paused, new frames avoid it
+[13880.462310] tbtun: carrier 44 recovered after 376 ms: back in the stripe
+[13884.771004] tbtun: carrier 255 stalled: repath paused, new frames avoid it
+[13884.939374] tbtun: carrier 12 stalled: repath paused, new frames avoid it
+[13885.100173] tbtun: carrier 133 stalled: repath paused, new frames avoid it
+[13885.423760] tbtun: carrier 255 recovered after 652 ms: back in the stripe
+[13885.529395] tbtun: carrier 12 recovered after 590 ms: back in the stripe
+[13885.582280] tbtun: carrier 133 recovered after 482 ms: back in the stripe
+[13889.865676] tbtun: carrier 19 stalled: repath paused, new frames avoid it
+[13889.976991] tbtun: carrier 174 stalled: repath paused, new frames avoid it
+[13889.977155] tbtun: carrier 252 stalled: repath paused, new frames avoid it
+[13890.030052] tbtun: carrier 131 stalled: repath paused, new frames avoid it
+[13890.092691] tbtun: carrier 254 stalled: repath paused, new frames avoid it
+[13890.146633] tbtun: carrier 222 stalled: repath paused, new frames avoid it
+[13890.474202] tbtun: carrier 254 recovered after 381 ms: back in the stripe
+[13890.530434] tbtun: carrier 174 recovered after 553 ms: back in the stripe
+[13890.582974] tbtun: carrier 19 recovered after 717 ms: back in the stripe
+[13890.583708] tbtun: carrier 131 recovered after 553 ms: back in the stripe
+[13891.655979] tbtun: carrier 252 recovered after 1678 ms: back in the stripe
+[13892.309285] tbtun: carrier 222 recovered after 2162 ms: back in the stripe
+[13896.315252] tbtun: unloaded
+[13977.394801] audit: type=1400 audit(1794109867.469:636): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=118189 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13977.394821] audit: type=1400 audit(1794109867.469:637): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=118189 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13977.394958] audit: type=1400 audit(1794109867.469:638): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=118189 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13977.394966] audit: type=1400 audit(1794109867.469:639): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=118189 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13977.395081] audit: type=1400 audit(1794109867.469:640): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=118189 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[13977.395089] audit: type=1400 audit(1794109867.469:641): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=118189 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14074.923302] audit: type=1400 audit(1794109964.997:642): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=119399 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14074.923354] audit: type=1400 audit(1794109964.997:643): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=119399 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14074.923779] audit: type=1400 audit(1794109964.997:644): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=119399 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14074.923811] audit: type=1400 audit(1794109964.997:645): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=119399 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14074.924194] audit: type=1400 audit(1794109964.997:646): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=119399 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14074.924222] audit: type=1400 audit(1794109964.997:647): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=119399 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14155.292810] audit: type=1400 audit(1794110045.368:648): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=119906 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14155.292830] audit: type=1400 audit(1794110045.368:649): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=119906 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14155.292962] audit: type=1400 audit(1794110045.368:650): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=119906 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14155.292971] audit: type=1400 audit(1794110045.368:651): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=119906 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14155.293082] audit: type=1400 audit(1794110045.368:652): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=119906 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14155.293091] audit: type=1400 audit(1794110045.368:653): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=119906 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14229.420433] audit: type=1400 audit(1794110119.496:654): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=121189 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14229.420483] audit: type=1400 audit(1794110119.496:655): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=121189 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14229.420918] audit: type=1400 audit(1794110119.499:656): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=121189 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14229.420945] audit: type=1400 audit(1794110119.499:657): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=121189 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14229.421323] audit: type=1400 audit(1794110119.499:658): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=121189 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14229.421351] audit: type=1400 audit(1794110119.499:659): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=121189 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14308.072451] audit: type=1400 audit(1794110198.147:660): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=123037 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14308.072500] audit: type=1400 audit(1794110198.147:661): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=123037 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14308.072913] audit: type=1400 audit(1794110198.147:662): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=123037 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14308.072940] audit: type=1400 audit(1794110198.147:663): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=123037 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14308.073349] audit: type=1400 audit(1794110198.150:664): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=123037 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14308.073371] audit: type=1400 audit(1794110198.150:665): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=123037 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14373.563505] audit: type=1400 audit(1794110263.641:666): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=123851 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14373.563519] audit: type=1400 audit(1794110263.641:667): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=123851 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14373.563650] audit: type=1400 audit(1794110263.641:668): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=123851 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14373.563658] audit: type=1400 audit(1794110263.641:669): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=123851 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14373.563770] audit: type=1400 audit(1794110263.641:670): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=123851 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14373.563778] audit: type=1400 audit(1794110263.641:671): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=123851 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14443.220965] audit: type=1400 audit(1794110333.298:672): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=124811 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14443.221009] audit: type=1400 audit(1794110333.298:673): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=124811 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14443.221434] audit: type=1400 audit(1794110333.302:674): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=124811 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14443.221461] audit: type=1400 audit(1794110333.302:675): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=124811 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14443.221843] audit: type=1400 audit(1794110333.302:676): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=124811 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14443.221870] audit: type=1400 audit(1794110333.302:677): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=124811 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14443.222248] audit: type=1400 audit(1794110333.302:678): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=124811 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14443.222275] audit: type=1400 audit(1794110333.302:679): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=124811 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14525.593546] audit: type=1400 audit(1794110415.669:680): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=125540 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14525.593599] audit: type=1400 audit(1794110415.669:681): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=125540 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14525.594188] audit: type=1400 audit(1794110415.673:682): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=125540 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14525.594221] audit: type=1400 audit(1794110415.673:683): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=125540 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14525.594720] audit: type=1400 audit(1794110415.673:684): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=125540 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14525.594750] audit: type=1400 audit(1794110415.673:685): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=125540 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14594.621239] audit: type=1400 audit(1794110484.700:686): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=126372 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14594.621253] audit: type=1400 audit(1794110484.700:687): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=126372 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14594.621392] audit: type=1400 audit(1794110484.700:688): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=126372 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14594.621400] audit: type=1400 audit(1794110484.700:689): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=126372 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14594.621510] audit: type=1400 audit(1794110484.700:690): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=126372 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14594.621519] audit: type=1400 audit(1794110484.700:691): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=126372 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14683.609524] audit: type=1400 audit(1794110573.691:692): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=126903 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14683.609574] audit: type=1400 audit(1794110573.691:693): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=126903 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14683.609982] audit: type=1400 audit(1794110573.691:694): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=126903 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14683.610012] audit: type=1400 audit(1794110573.691:695): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=126903 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14683.610395] audit: type=1400 audit(1794110573.691:696): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=126903 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14683.610425] audit: type=1400 audit(1794110573.691:697): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=126903 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14931.120914] audit: type=1400 audit(1794110821.205:698): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=128053 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14931.120965] audit: type=1400 audit(1794110821.205:699): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=128053 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14931.121383] audit: type=1400 audit(1794110821.205:700): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=128053 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14931.121412] audit: type=1400 audit(1794110821.205:701): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=128053 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14931.121816] audit: type=1400 audit(1794110821.208:702): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=128053 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[14931.121841] audit: type=1400 audit(1794110821.208:703): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=128053 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15014.261651] audit: type=1400 audit(1794110904.349:704): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=129003 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15014.261703] audit: type=1400 audit(1794110904.349:705): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=129003 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15014.262122] audit: type=1400 audit(1794110904.349:706): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=129003 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15014.262150] audit: type=1400 audit(1794110904.349:707): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=129003 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15014.262525] audit: type=1400 audit(1794110904.349:708): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=129003 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15014.262553] audit: type=1400 audit(1794110904.349:709): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=129003 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15200.905963] audit: type=1400 audit(1794111090.995:710): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=129717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15200.905978] audit: type=1400 audit(1794111090.995:711): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=129717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15200.906108] audit: type=1400 audit(1794111090.995:712): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=129717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15200.906117] audit: type=1400 audit(1794111090.995:713): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=129717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15200.906227] audit: type=1400 audit(1794111090.995:714): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=129717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15200.906236] audit: type=1400 audit(1794111090.995:715): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=129717 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15301.448227] audit: type=1400 audit(1794111191.536:716): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=130308 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15301.448242] audit: type=1400 audit(1794111191.536:717): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=130308 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15301.448373] audit: type=1400 audit(1794111191.536:718): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=130308 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15301.448378] audit: type=1400 audit(1794111191.536:719): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=130308 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15301.448489] audit: type=1400 audit(1794111191.536:720): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=130308 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15301.448497] audit: type=1400 audit(1794111191.536:721): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=130308 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15301.448606] audit: type=1400 audit(1794111191.536:722): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=130308 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15301.448614] audit: type=1400 audit(1794111191.536:723): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=130308 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15400.765567] audit: type=1400 audit(1794111290.854:724): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=131927 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15400.765582] audit: type=1400 audit(1794111290.854:725): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=131927 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15400.765721] audit: type=1400 audit(1794111290.854:726): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=131927 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15400.765730] audit: type=1400 audit(1794111290.854:727): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=131927 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15400.765840] audit: type=1400 audit(1794111290.854:728): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=131927 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15400.765848] audit: type=1400 audit(1794111290.854:729): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=131927 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15400.765975] audit: type=1400 audit(1794111290.857:730): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=131927 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15400.765983] audit: type=1400 audit(1794111290.857:731): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=131927 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15499.105571] audit: type=1400 audit(1794111389.198:732): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=133323 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15499.105623] audit: type=1400 audit(1794111389.198:733): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=133323 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15499.106034] audit: type=1400 audit(1794111389.198:734): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=133323 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15499.106064] audit: type=1400 audit(1794111389.198:735): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=133323 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15499.106450] audit: type=1400 audit(1794111389.198:736): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=133323 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15499.106478] audit: type=1400 audit(1794111389.198:737): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=133323 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15499.106859] audit: type=1400 audit(1794111389.198:738): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=133323 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15499.106889] audit: type=1400 audit(1794111389.198:739): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=133323 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[15856.008147] tbtun 0.2.3 loaded: 1 tunnels max, 256 carriers max
+[15864.343597] tbtun: tunnel 1 carrier 15 gen 32 lost: sock=1 connected=1 hello_sent=1 up=1
+[15864.496922] tbtun: tunnel 1 carrier 7 gen 8 lost: sock=1 connected=1 hello_sent=1 up=1
+[15864.655752] tbtun: tunnel 1 carrier 20 gen 37 lost: sock=1 connected=1 hello_sent=1 up=1
+[15864.820347] tbtun: tunnel 1 carrier 19 gen 36 lost: sock=1 connected=1 hello_sent=1 up=1
+[15865.733325] tbtun: tunnel 1 carrier 21 gen 38 lost: sock=1 connected=1 hello_sent=1 up=1
+[15865.733587] tbtun: tunnel 1 carrier 16 gen 33 lost: sock=1 connected=1 hello_sent=1 up=1
+[15865.786532] tbtun: tunnel 1 carrier 30 gen 47 lost: sock=1 connected=1 hello_sent=1 up=1
+[15865.837625] tbtun: tunnel 1 carrier 23 gen 40 lost: sock=1 connected=1 hello_sent=1 up=1
+[15866.390321] tbtun: tunnel 1 carrier 27 gen 44 lost: sock=1 connected=1 hello_sent=1 up=1
+[15868.749275] tbtun: tunnel 1 carrier 15 gen 16 lost: sock=1 connected=1 hello_sent=0 up=0
+[15869.497086] tbt_carrier_lost: 11 callbacks suppressed
+[15869.497100] tbtun: tunnel 1 carrier 17 gen 34 lost: sock=1 connected=1 hello_sent=1 up=1
+[15869.719434] tbtun: tunnel 1 carrier 21 gen 22 lost: sock=1 connected=1 hello_sent=0 up=0
+[15869.724382] tbtun: tunnel 1 carrier 30 gen 31 lost: sock=1 connected=1 hello_sent=0 up=0
+[15869.767022] tbtun: tunnel 1 carrier 22 gen 39 lost: sock=1 connected=1 hello_sent=1 up=1
+[15869.873560] tbtun: tunnel 1 carrier 24 gen 41 lost: sock=1 connected=1 hello_sent=1 up=1
+[15869.878054] tbtun: tunnel 1 carrier 4 gen 5 lost: sock=1 connected=1 hello_sent=1 up=1
+[15870.420326] tbtun: tunnel 1 carrier 26 gen 43 lost: sock=1 connected=1 hello_sent=1 up=1
+[15871.283517] tbtun: tunnel 1 carrier 18 gen 35 lost: sock=1 connected=1 hello_sent=1 up=1
+[15871.443695] tbtun: tunnel 1 carrier 25 gen 42 lost: sock=1 connected=1 hello_sent=1 up=1
+[15871.873620] tbtun: tunnel 1 carrier 29 gen 46 lost: sock=1 connected=1 hello_sent=1 up=1
+[15875.861884] tbtun: tunnel 1 carrier 26 gen 27 lost: sock=1 connected=1 hello_sent=0 up=0
+[15876.983532] tbtun: tunnel 1 carrier 112 gen 129 lost: sock=1 connected=1 hello_sent=1 up=1
+[15914.363285] tbtun: carrier 234 stalled: repath paused, new frames avoid it
+[15914.949842] tbtun: carrier 234 recovered after 586 ms: back in the stripe
+[15925.763108] tbtun: carrier 213 stalled: repath paused, new frames avoid it
+[15925.869785] tbtun: carrier 213 recovered after 106 ms: back in the stripe
+[15943.282663] tbtun: carrier 38 stalled: repath paused, new frames avoid it
+[15943.716035] tbtun: carrier 38 recovered after 433 ms: back in the stripe
+[15951.322729] tbtun: carrier 155 stalled: repath paused, new frames avoid it
+[15951.322816] tbtun: carrier 205 stalled: repath paused, new frames avoid it
+[15951.482797] tbtun: carrier 205 recovered after 159 ms: back in the stripe
+[15953.786477] tbtun: carrier 155 recovered after 2463 ms: back in the stripe
+[15955.015962] tbtun: carrier 122 stalled: repath paused, new frames avoid it
+[15955.342666] tbtun: carrier 211 stalled: repath paused, new frames avoid it
+[15955.719296] tbtun: carrier 132 stalled: repath paused, new frames avoid it
+[15955.773389] tbtun: carrier 211 recovered after 430 ms: back in the stripe
+[15956.039493] tbtun: carrier 132 recovered after 320 ms: back in the stripe
+[15956.469677] tbtun: carrier 159 stalled: repath paused, new frames avoid it
+[15956.843124] tbtun: carrier 122 recovered after 1827 ms: back in the stripe
+[15959.146638] tbtun: carrier 159 recovered after 2676 ms: back in the stripe
+[15959.626188] tbtun: carrier 54 stalled: repath paused, new frames avoid it
+[15959.892775] tbtun: carrier 56 stalled: repath paused, new frames avoid it
+[15960.106212] tbtun: carrier 54 recovered after 480 ms: back in the stripe
+[15960.265908] tbtun: carrier 56 recovered after 373 ms: back in the stripe
+[15982.482301] tbtun: tunnel 1 session destroy: 16 references still held after 10000 ms (sched=0x0 streams=1 active=1 carriers=256); session leaked
+[15982.508897] tbtun: unloaded
+[16018.680234] audit: type=1400 audit(1794111908.778:740): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=137787 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[16018.680282] audit: type=1400 audit(1794111908.778:741): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=137787 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[16018.680697] audit: type=1400 audit(1794111908.778:742): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=137787 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[16018.680725] audit: type=1400 audit(1794111908.778:743): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=137787 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[16031.044352] tbtun 0.2.3 loaded: 1 tunnels max, 256 carriers max
+[16039.889998] tbtun: tunnel 1 carrier 49 failed to connect: -111
+[16039.894098] tbtun: tunnel 1 carrier 47 failed to connect: -111
+[16039.894136] tbtun: tunnel 1 carrier 54 failed to connect: -111
+[16039.896336] tbtun: tunnel 1 carrier 46 failed to connect: -111
+[16039.899239] tbtun: tunnel 1 carrier 50 failed to connect: -111
+[16039.911448] tbtun: tunnel 1 carrier 43 failed to connect: -111
+[16039.913491] tbtun: tunnel 1 carrier 45 failed to connect: -111
+[16039.914036] tbtun: tunnel 1 carrier 56 failed to connect: -111
+[16039.914070] tbtun: tunnel 1 carrier 58 failed to connect: -111
+[16039.917656] tbtun: tunnel 1 carrier 48 failed to connect: -111
+[16044.916575] tbt_car_connect_work: 109 callbacks suppressed
+[16044.916588] tbtun: tunnel 1 carrier 6 failed to connect: -111
+[16044.972029] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[16045.005557] tbtun: tunnel 1 carrier 17 failed to connect: -111
+[16045.008963] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[16045.034869] tbtun: tunnel 1 carrier 15 failed to connect: -111
+[16045.123639] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[16045.344338] tbtun: tunnel 1 carrier 13 failed to connect: -111
+[16045.451416] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[16045.486039] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[16045.698062] tbtun: tunnel 1 carrier 16 failed to connect: -111
+[16049.923797] tbt_car_connect_work: 93 callbacks suppressed
+[16049.923804] tbtun: tunnel 1 carrier 14 failed to connect: -111
+[16049.967925] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[16050.005860] tbtun: tunnel 1 carrier 6 failed to connect: -111
+[16050.057410] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[16050.057618] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[16050.106591] tbtun: tunnel 1 carrier 7 failed to connect: -111
+[16050.126047] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[16050.132539] tbtun: tunnel 1 carrier 12 failed to connect: -111
+[16050.229238] tbtun: tunnel 1 carrier 14 failed to connect: -111
+[16050.278253] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[16054.995158] tbt_car_connect_work: 116 callbacks suppressed
+[16054.995173] tbtun: tunnel 1 carrier 7 failed to connect: -111
+[16054.999054] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[16054.999931] tbtun: tunnel 1 carrier 10 failed to connect: -111
+[16055.013891] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[16055.187426] tbtun: tunnel 1 carrier 11 failed to connect: -111
+[16055.315661] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[16055.377697] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[16055.434583] tbtun: tunnel 1 carrier 14 failed to connect: -111
+[16055.538286] tbtun: tunnel 1 carrier 7 failed to connect: -111
+[16055.646338] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[16060.073797] tbt_car_connect_work: 88 callbacks suppressed
+[16060.073805] tbtun: tunnel 1 carrier 6 failed to connect: -111
+[16060.090865] tbtun: tunnel 1 carrier 14 failed to connect: -111
+[16060.177377] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[16060.237804] tbtun: tunnel 1 carrier 13 failed to connect: -111
+[16060.251891] tbtun: tunnel 1 carrier 9 failed to connect: -111
+[16060.312839] tbtun: tunnel 1 carrier 8 failed to connect: -111
+[16060.379249] tbtun: tunnel 1 carrier 6 failed to connect: -111
+[16060.440301] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[16060.471782] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[16060.552178] tbtun: tunnel 1 carrier 9 failed to connect: -111
+[16065.084653] tbt_car_connect_work: 99 callbacks suppressed
+[16065.084661] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[16065.091467] tbtun: tunnel 1 carrier 15 failed to connect: -111
+[16065.111020] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[16065.114361] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[16065.175169] tbtun: tunnel 1 carrier 10 failed to connect: -111
+[16065.206142] tbtun: tunnel 1 carrier 8 failed to connect: -111
+[16065.237689] tbtun: tunnel 1 carrier 12 failed to connect: -111
+[16065.320338] tbtun: tunnel 1 carrier 7 failed to connect: -111
+[16065.374144] tbtun: tunnel 1 carrier 13 failed to connect: -111
+[16065.396808] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[16070.133485] tbt_car_connect_work: 96 callbacks suppressed
+[16070.133498] tbtun: tunnel 1 carrier 9 failed to connect: -111
+[16070.202208] tbtun: tunnel 1 carrier 16 failed to connect: -111
+[16070.232247] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[16070.291372] tbtun: tunnel 1 carrier 17 failed to connect: -111
+[16070.311579] tbtun: tunnel 1 carrier 11 failed to connect: -111
+[16070.347676] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[16070.383126] tbtun: tunnel 1 carrier 5 failed to connect: -111
+[16070.395510] tbtun: tunnel 1 carrier 6 failed to connect: -111
+[16070.542423] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[16070.572176] tbtun: tunnel 1 carrier 7 failed to connect: -111
+[16075.229700] tbt_car_connect_work: 134 callbacks suppressed
+[16075.229714] tbtun: tunnel 1 carrier 9 failed to connect: -111
+[16075.286401] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[16075.348448] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[16075.367498] tbtun: tunnel 1 carrier 12 failed to connect: -111
+[16075.426662] tbtun: tunnel 1 carrier 7 failed to connect: -111
+[16075.592009] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[16075.651258] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[16075.670684] tbtun: tunnel 1 carrier 12 failed to connect: -111
+[16075.759701] tbtun: tunnel 1 carrier 11 failed to connect: -111
+[16075.761977] tbtun: tunnel 1 carrier 7 failed to connect: -111
+[16080.247996] tbt_car_connect_work: 106 callbacks suppressed
+[16080.248004] tbtun: tunnel 1 carrier 6 failed to connect: -111
+[16080.248511] tbtun: tunnel 1 carrier 8 failed to connect: -111
+[16080.334692] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[16080.411438] tbtun: tunnel 1 carrier 11 failed to connect: -111
+[16080.433520] tbtun: tunnel 1 carrier 9 failed to connect: -111
+[16080.448658] tbtun: tunnel 1 carrier 12 failed to connect: -111
+[16080.489003] tbtun: tunnel 1 carrier 10 failed to connect: -111
+[16080.556771] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[16080.560471] tbtun: tunnel 1 carrier 6 failed to connect: -111
+[16080.584143] tbtun: tunnel 1 carrier 8 failed to connect: -111
+[16085.252382] tbt_car_connect_work: 123 callbacks suppressed
+[16085.252391] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[16085.263255] tbtun: tunnel 1 carrier 11 failed to connect: -111
+[16085.356991] tbtun: tunnel 1 carrier 9 failed to connect: -111
+[16085.397253] tbtun: tunnel 1 carrier 8 failed to connect: -111
+[16085.403849] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[16085.485452] tbtun: tunnel 1 carrier 15 failed to connect: -111
+[16085.594843] tbtun: tunnel 1 carrier 11 failed to connect: -111
+[16085.709042] tbtun: tunnel 1 carrier 12 failed to connect: -111
+[16085.709042] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[16085.727544] tbtun: tunnel 1 carrier 8 failed to connect: -111
+[16090.260020] tbt_car_connect_work: 100 callbacks suppressed
+[16090.260027] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[16090.427663] tbtun: tunnel 1 carrier 6 failed to connect: -111
+[16090.508544] tbtun: tunnel 1 carrier 8 failed to connect: -111
+[16090.516393] tbtun: tunnel 1 carrier 12 failed to connect: -111
+[16090.557826] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[16091.655478] tbtun: tunnel 1 carrier 0 gen 1 lost: sock=1 connected=1 hello_sent=1 up=1
+[16108.907486] tbtun: tunnel 1 carrier 234 failed to connect: -110
+[16121.600568] tbtun: carrier 22 stalled: repath paused, new frames avoid it
+[16122.293957] tbtun: carrier 22 recovered after 693 ms: back in the stripe
+[16142.827095] tbtun: carrier 53 stalled: repath paused, new frames avoid it
+[16144.493567] tbtun: carrier 53 recovered after 1666 ms: back in the stripe
+[16191.686638] tbtun: carrier 208 stalled: repath paused, new frames avoid it
+[16193.567072] tbtun: carrier 208 recovered after 1880 ms: back in the stripe
+[16230.828591] tbtun: tunnel 1 carrier 3 gen 4 lost: sock=1 connected=1 hello_sent=1 up=1
+[16230.828961] tbtun: tunnel 1 carrier 0 gen 274 lost: sock=1 connected=1 hello_sent=1 up=1
+[16230.829010] tbtun: tunnel 1 carrier 1 gen 2 lost: sock=1 connected=1 hello_sent=1 up=1
+[16230.842530] tbtun: tunnel 1 carrier 2 gen 3 lost: sock=1 connected=1 hello_sent=1 up=1
+[16230.842612] tbtun: tunnel 1 carrier 4 gen 5 lost: sock=1 connected=1 hello_sent=1 up=1
+[16230.842649] tbtun: tunnel 1 carrier 5 gen 6 lost: sock=1 connected=1 hello_sent=1 up=1
+[16230.842688] tbtun: tunnel 1 carrier 6 gen 273 lost: sock=1 connected=1 hello_sent=1 up=1
+[16230.842734] tbtun: tunnel 1 carrier 8 gen 9 lost: sock=1 connected=1 hello_sent=1 up=1
+[16230.842778] tbtun: tunnel 1 carrier 9 gen 10 lost: sock=1 connected=1 hello_sent=1 up=1
+[16230.842814] tbtun: tunnel 1 carrier 10 gen 11 lost: sock=1 connected=1 hello_sent=1 up=1
+[16231.137033] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[16231.140401] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[16231.143082] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[16231.153897] tbtun: tunnel 1 carrier 22 failed to connect: -111
+[16231.158340] tbtun: tunnel 1 carrier 44 failed to connect: -111
+[16231.158358] tbtun: tunnel 1 carrier 39 failed to connect: -111
+[16231.158810] tbtun: tunnel 1 carrier 23 failed to connect: -111
+[16231.159628] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[16231.159633] tbtun: tunnel 1 carrier 40 failed to connect: -111
+[16231.160333] tbtun: tunnel 1 carrier 12 failed to connect: -111
+[16244.665720] tbtun: tunnel 1 session destroy: 16 references still held after 10000 ms (sched=0x0 streams=0 active=0 carriers=256); session leaked
+[16244.665833] tbtun: unloaded
+[16607.278540] tbtun 0.2.3 loaded: 1 tunnels max, 256 carriers max
+[16728.083408] tbtun: tunnel 1: portblock= is parsed but unused; carrier source ports come from /proc/net/tbtun/ports
+[16728.822056] tbtun: tunnel 1: fec rx shape from peer: n=128 m=128 groups=1 slots=8 block=256 L=8 rate=500
+[16730.329530] tbtun: tunnel 1 carrier 31 gen 48 lost: sock=1 connected=1 hello_sent=1 up=1
+[16730.593987] tbtun: tunnel 1 carrier 34 gen 51 lost: sock=1 connected=1 hello_sent=1 up=1
+[16730.685288] tbtun: tunnel 1 carrier 35 gen 52 lost: sock=1 connected=1 hello_sent=1 up=1
+[16730.740051] tbtun: tunnel 1 carrier 36 gen 53 lost: sock=1 connected=1 hello_sent=1 up=1
+[16730.849342] tbtun: tunnel 1 carrier 33 gen 50 lost: sock=1 connected=1 hello_sent=1 up=1
+[16731.095867] tbtun: tunnel 1 carrier 37 gen 54 lost: sock=1 connected=1 hello_sent=1 up=1
+[16731.252205] tbtun: tunnel 1 carrier 45 gen 62 lost: sock=1 connected=1 hello_sent=1 up=1
+[16731.455200] tbtun: tunnel 1 carrier 32 gen 49 lost: sock=1 connected=1 hello_sent=1 up=1
+[16731.763850] tbtun: tunnel 1 carrier 38 gen 55 lost: sock=1 connected=1 hello_sent=1 up=1
+[16731.864714] tbtun: tunnel 1 carrier 46 gen 63 lost: sock=1 connected=1 hello_sent=1 up=1
+[16735.789420] tbt_carrier_lost: 21 callbacks suppressed
+[16735.789435] tbtun: tunnel 1 carrier 39 gen 56 lost: sock=1 connected=1 hello_sent=1 up=1
+[16736.322782] tbtun: tunnel 1 carrier 44 gen 61 lost: sock=1 connected=1 hello_sent=1 up=1
+[16743.932710] tbtun: tunnel 1 carrier 107 gen 124 lost: sock=1 connected=1 hello_sent=1 up=1
+[16748.552650] tbtun: tunnel 1 carrier 233 failed to connect: -110
+[16771.288951] tbtun: carrier 50 stalled: repath paused, new frames avoid it
+[16772.422257] tbtun: carrier 190 stalled: repath paused, new frames avoid it
+[16772.529142] tbtun: carrier 50 recovered after 1240 ms: back in the stripe
+[16772.583485] tbtun: carrier 190 recovered after 161 ms: back in the stripe
+[16773.438835] tbtun: carrier 89 stalled: repath paused, new frames avoid it
+[16775.052477] tbtun: carrier 89 recovered after 1613 ms: back in the stripe
+[16782.818845] tbtun: carrier 28 stalled: repath paused, new frames avoid it
+[16783.512877] tbtun: carrier 236 stalled: repath paused, new frames avoid it
+[16784.525639] tbtun: carrier 28 recovered after 1706 ms: back in the stripe
+[16784.899329] tbtun: carrier 236 recovered after 1386 ms: back in the stripe
+[16787.245410] tbtun: carrier 18 stalled: repath paused, new frames avoid it
+[16789.015273] tbtun: carrier 18 recovered after 1769 ms: back in the stripe
+[16795.475916] tbtun: carrier 203 stalled: repath paused, new frames avoid it
+[16795.582741] tbtun: carrier 203 recovered after 106 ms: back in the stripe
+[16806.805205] tbtun: carrier 18 stalled: repath paused, new frames avoid it
+[16807.231809] tbtun: carrier 18 recovered after 426 ms: back in the stripe
+[16807.391799] tbtun: carrier 27 stalled: repath paused, new frames avoid it
+[16807.498580] tbtun: carrier 236 stalled: repath paused, new frames avoid it
+[16807.765177] tbtun: carrier 27 recovered after 373 ms: back in the stripe
+[16807.925266] tbtun: carrier 236 recovered after 426 ms: back in the stripe
+[16816.421665] tbtun: carrier 12 stalled: repath paused, new frames avoid it
+[16816.635057] tbtun: carrier 18 stalled: repath paused, new frames avoid it
+[16817.224939] tbtun: carrier 18 recovered after 589 ms: back in the stripe
+[16819.091626] tbtun: carrier 12 recovered after 2669 ms: back in the stripe
+[16825.768645] tbtun: carrier 140 stalled: repath paused, new frames avoid it
+[16827.798747] tbtun: carrier 140 recovered after 2030 ms: back in the stripe
+[16848.039130] tbtun: carrier 236 stalled: repath paused, new frames avoid it
+[16850.921720] tbtun: carrier 236 recovered after 2882 ms: back in the stripe
+[16857.232149] tbtun: carrier 226 stalled: repath paused, new frames avoid it
+[16857.285557] tbtun: carrier 226 recovered after 53 ms: back in the stripe
+[16859.484471] tbtun: carrier 118 stalled: repath paused, new frames avoid it
+[16859.541116] tbtun: carrier 118 recovered after 56 ms: back in the stripe
+[16874.504876] tbtun: carrier 118 stalled: repath paused, new frames avoid it
+[16874.611183] tbtun: carrier 118 recovered after 106 ms: back in the stripe
+[16877.397872] tbtun: carrier 85 stalled: repath paused, new frames avoid it
+[16877.824444] tbtun: carrier 85 recovered after 426 ms: back in the stripe
+[16886.714277] tbtun: carrier 79 stalled: repath paused, new frames avoid it
+[16887.304599] tbtun: carrier 79 recovered after 590 ms: back in the stripe
+[16900.300547] tbtun: carrier 19 stalled: repath paused, new frames avoid it
+[16900.743805] tbtun: carrier 19 recovered after 443 ms: back in the stripe
+[16914.000775] tbtun: carrier 102 stalled: repath paused, new frames avoid it
+[16916.137388] tbtun: carrier 102 recovered after 2136 ms: back in the stripe
+[16917.263769] tbtun: carrier 6 stalled: repath paused, new frames avoid it
+[16917.796989] tbtun: carrier 6 recovered after 533 ms: back in the stripe
+[16940.720639] tbtun: carrier 204 stalled: repath paused, new frames avoid it
+[16940.933871] tbtun: carrier 204 recovered after 213 ms: back in the stripe
+[16964.516823] tbtun: carrier 180 stalled: repath paused, new frames avoid it
+[16964.946690] tbtun: carrier 180 recovered after 429 ms: back in the stripe
+[16980.756220] tbtun: carrier 132 stalled: repath paused, new frames avoid it
+[16981.130064] tbtun: carrier 132 recovered after 373 ms: back in the stripe
+[17001.866404] tbtun: carrier 144 stalled: repath paused, new frames avoid it
+[17001.920208] tbtun: carrier 144 recovered after 53 ms: back in the stripe
+[17003.426054] tbtun: carrier 167 stalled: repath paused, new frames avoid it
+[17003.639303] tbtun: carrier 167 recovered after 213 ms: back in the stripe
+[17026.992209] tbtun: carrier 67 stalled: repath paused, new frames avoid it
+[17029.622419] tbtun: carrier 67 recovered after 2630 ms: back in the stripe
+[17047.838561] tbtun: carrier 6 stalled: repath paused, new frames avoid it
+[17048.585353] tbtun: carrier 6 recovered after 746 ms: back in the stripe
+[17088.505437] tbtun: carrier 67 stalled: repath paused, new frames avoid it
+[17089.972202] tbtun: carrier 67 recovered after 1466 ms: back in the stripe
+[17091.575044] tbtun: carrier 202 stalled: repath paused, new frames avoid it
+[17091.792017] tbtun: carrier 202 recovered after 216 ms: back in the stripe
+[17149.614129] tbtun: carrier 186 stalled: repath paused, new frames avoid it
+[17149.774372] tbtun: carrier 186 recovered after 160 ms: back in the stripe
+[17164.423873] tbtun: carrier 21 stalled: repath paused, new frames avoid it
+[17166.570459] tbtun: carrier 21 recovered after 2146 ms: back in the stripe
+[17183.346838] tbtun: carrier 40 stalled: repath paused, new frames avoid it
+[17183.453880] tbtun: carrier 40 recovered after 107 ms: back in the stripe
+[17186.340538] tbtun: carrier 178 stalled: repath paused, new frames avoid it
+[17187.470741] tbtun: carrier 178 recovered after 1130 ms: back in the stripe
+[17200.194538] tbtun: carrier 229 stalled: repath paused, new frames avoid it
+[17200.784277] tbtun: carrier 229 recovered after 589 ms: back in the stripe
+[17235.046581] tbtun: carrier 81 stalled: repath paused, new frames avoid it
+[17245.829340] tbtun: tunnel 1 session destroy: 16 references still held after 10000 ms (sched=0x0 streams=0 active=0 carriers=256); session leaked
+[17245.829405] tbtun: unloaded
+[17676.780766] audit: type=1400 audit(1794113566.898:744): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=146968 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17676.780815] audit: type=1400 audit(1794113566.898:745): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=146968 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17676.781247] audit: type=1400 audit(1794113566.902:746): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=146968 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17676.781273] audit: type=1400 audit(1794113566.902:747): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=146968 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17676.781744] audit: type=1400 audit(1794113566.902:748): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=146968 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17676.781773] audit: type=1400 audit(1794113566.902:749): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=146968 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17793.608810] tbtun 0.2.3 loaded: 1 tunnels max, 256 carriers max
+[17844.972172] tbtun: tunnel 1: portblock= is parsed but unused; carrier source ports come from /proc/net/tbtun/ports
+[17846.109354] tbtun: tunnel 1: fec rx shape from peer: n=128 m=128 groups=1 slots=8 block=256 L=8 rate=500
+[17847.541302] tbtun: tunnel 1 carrier 40 gen 57 lost: sock=1 connected=1 hello_sent=1 up=1
+[17847.588879] tbtun: tunnel 1 carrier 41 gen 58 lost: sock=1 connected=1 hello_sent=1 up=1
+[17848.004704] tbtun: tunnel 1 carrier 47 gen 64 lost: sock=1 connected=1 hello_sent=1 up=1
+[17848.203788] tbtun: tunnel 1 carrier 43 gen 60 lost: sock=1 connected=1 hello_sent=1 up=1
+[17848.456011] tbtun: tunnel 1 carrier 50 gen 67 lost: sock=1 connected=1 hello_sent=1 up=1
+[17848.461595] tbtun: tunnel 1 carrier 49 gen 66 lost: sock=1 connected=1 hello_sent=1 up=1
+[17848.507668] tbtun: tunnel 1 carrier 52 gen 69 lost: sock=1 connected=1 hello_sent=1 up=1
+[17848.512243] tbtun: tunnel 1 carrier 51 gen 68 lost: sock=1 connected=1 hello_sent=1 up=1
+[17848.559748] tbtun: tunnel 1 carrier 53 gen 70 lost: sock=1 connected=1 hello_sent=1 up=1
+[17848.717310] tbtun: tunnel 1 carrier 42 gen 59 lost: sock=1 connected=1 hello_sent=1 up=1
+[17851.365699] tbtun: tunnel 1 carrier 44 failed to connect: -110
+[17852.748871] tbt_carrier_lost: 21 callbacks suppressed
+[17852.748883] tbtun: tunnel 1 carrier 28 gen 29 lost: sock=1 connected=1 hello_sent=1 up=1
+[17853.152323] tbtun: tunnel 1 carrier 48 gen 65 lost: sock=1 connected=1 hello_sent=1 up=1
+[17857.098963] tbtun: tunnel 1 carrier 134 failed to connect: -110
+[17863.875556] tbtun: tunnel 1 carrier 255 failed to connect: -110
+[17913.409822] tbtun: tunnel 1 carrier 220 gen 237 lost: sock=1 connected=1 hello_sent=1 up=1
+[17939.734745] tbtun: carrier 11 stalled: repath paused, new frames avoid it
+[17940.001431] tbtun: carrier 11 recovered after 266 ms: back in the stripe
+[17953.865261] tbtun: carrier 241 stalled: repath paused, new frames avoid it
+[17954.398737] tbtun: carrier 241 recovered after 533 ms: back in the stripe
+[17958.938055] tbtun: carrier 86 stalled: repath paused, new frames avoid it
+[17959.098010] tbtun: carrier 86 recovered after 159 ms: back in the stripe
+[17968.972758] audit: type=1400 audit(1794113859.095:750): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=151042 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17968.972777] audit: type=1400 audit(1794113859.095:751): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=151042 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17968.972903] audit: type=1400 audit(1794113859.095:752): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=151042 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17968.972912] audit: type=1400 audit(1794113859.095:753): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=151042 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17968.973020] audit: type=1400 audit(1794113859.095:754): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=151042 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17968.973027] audit: type=1400 audit(1794113859.095:755): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=151042 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17983.808130] tbtun: carrier 159 stalled: repath paused, new frames avoid it
+[17985.154334] tbtun: carrier 159 recovered after 1346 ms: back in the stripe
+[18058.846871] tbtun: carrier 187 stalled: repath paused, new frames avoid it
+[18062.830102] tbtun: tunnel 1 carrier 187 gen 204 lost: sock=1 connected=1 hello_sent=1 up=1
+[18093.276316] tbtun: carrier 100 stalled: repath paused, new frames avoid it
+[18094.146303] tbtun: carrier 100 recovered after 869 ms: back in the stripe
+[18098.526238] tbtun: carrier 66 stalled: repath paused, new frames avoid it
+[18098.632903] tbtun: carrier 66 recovered after 106 ms: back in the stripe
+[18103.021948] audit: type=1400 audit(1794113993.143:756): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=153134 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[18103.021963] audit: type=1400 audit(1794113993.143:757): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=153134 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[18103.022091] audit: type=1400 audit(1794113993.143:758): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=153134 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[18103.022101] audit: type=1400 audit(1794113993.143:759): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=153134 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[18103.022217] audit: type=1400 audit(1794113993.143:760): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=153134 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[18103.022226] audit: type=1400 audit(1794113993.143:761): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=153134 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[18103.022333] audit: type=1400 audit(1794113993.143:762): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=153134 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[18103.022341] audit: type=1400 audit(1794113993.143:763): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=153134 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[18115.365949] tbtun: tunnel 1 session destroy: 16 references still held after 10000 ms (sched=0x0 streams=0 active=0 carriers=256); session leaked
+[18115.382678] tbtun: unloaded
+[18157.763941] tbtun 0.2.3 loaded: 1 tunnels max, 256 carriers max
+[18159.119805] tbtun: tunnel 1: portblock= is parsed but unused; carrier source ports come from /proc/net/tbtun/ports
+[18160.855302] tbtun: tunnel 1: fec rx shape from peer: n=128 m=128 groups=1 slots=8 block=256 L=8 rate=500
+[18161.679674] tbtun: tunnel 1 carrier 39 gen 56 lost: sock=1 connected=1 hello_sent=1 up=1
+[18161.684140] tbtun: tunnel 1 carrier 40 gen 57 lost: sock=1 connected=1 hello_sent=1 up=1
+[18161.779984] tbtun: tunnel 1 carrier 41 gen 58 lost: sock=1 connected=1 hello_sent=1 up=1
+[18161.987324] tbtun: tunnel 1 carrier 43 gen 60 lost: sock=1 connected=1 hello_sent=1 up=1
+[18162.087831] tbtun: tunnel 1 carrier 45 gen 62 lost: sock=1 connected=1 hello_sent=1 up=1
+[18162.092299] tbtun: tunnel 1 carrier 44 gen 61 lost: sock=1 connected=1 hello_sent=1 up=1
+[18162.144234] tbtun: tunnel 1 carrier 46 gen 63 lost: sock=1 connected=1 hello_sent=1 up=1
+[18162.188903] tbtun: tunnel 1 carrier 48 gen 65 lost: sock=1 connected=1 hello_sent=1 up=1
+[18162.292201] tbtun: tunnel 1 carrier 50 gen 67 lost: sock=1 connected=1 hello_sent=1 up=1
+[18162.297396] tbtun: tunnel 1 carrier 42 gen 59 lost: sock=1 connected=1 hello_sent=1 up=1
+[18167.138895] tbt_carrier_lost: 19 callbacks suppressed
+[18167.138908] tbtun: tunnel 1 carrier 47 gen 64 lost: sock=1 connected=1 hello_sent=1 up=1
+[18178.445327] tbtun: tunnel 1 carrier 45 gen 277 lost: sock=1 connected=1 hello_sent=1 up=1
+[18213.654884] tbtun: carrier 12 stalled: repath paused, new frames avoid it
+[18215.098124] tbtun: carrier 12 recovered after 1443 ms: back in the stripe
+[18253.147930] tbtun: carrier 164 stalled: repath paused, new frames avoid it
+[18253.694775] tbtun: carrier 251 stalled: repath paused, new frames avoid it
+[18255.411625] tbtun: carrier 164 recovered after 2263 ms: back in the stripe
+[18256.108692] tbtun: carrier 251 recovered after 2413 ms: back in the stripe
+[18273.451752] tbtun: tunnel 1 carrier 246 gen 263 lost: sock=1 connected=1 hello_sent=1 up=1
+[18293.000630] tbtun: carrier 62 stalled: repath paused, new frames avoid it
+[18294.294198] tbtun: carrier 62 recovered after 1293 ms: back in the stripe
+[18307.034091] tbtun: carrier 51 stalled: repath paused, new frames avoid it
+[18307.250792] tbtun: carrier 51 recovered after 216 ms: back in the stripe
+[18319.453770] tbtun: carrier 38 stalled: repath paused, new frames avoid it
+[18319.773808] tbtun: carrier 38 recovered after 320 ms: back in the stripe
+[18324.414037] tbtun: carrier 108 stalled: repath paused, new frames avoid it
+[18326.870574] tbtun: carrier 108 recovered after 2456 ms: back in the stripe
+[18328.687257] tbtun: carrier 98 stalled: repath paused, new frames avoid it
+[18329.654667] tbtun: carrier 198 stalled: repath paused, new frames avoid it
+[18332.170513] tbtun: carrier 98 recovered after 3483 ms: back in the stripe
+[18332.224212] tbtun: carrier 198 recovered after 2569 ms: back in the stripe
+[18345.440203] tbtun: carrier 79 stalled: repath paused, new frames avoid it
+[18345.813821] tbtun: carrier 79 recovered after 373 ms: back in the stripe
+[18346.241044] tbtun: carrier 187 stalled: repath paused, new frames avoid it
+[18346.933589] tbtun: carrier 187 recovered after 692 ms: back in the stripe
+[18361.600461] tbtun: tunnel 1 carrier 233 gen 250 lost: sock=1 connected=1 hello_sent=1 up=1
+[18363.146559] tbtun: carrier 175 stalled: repath paused, new frames avoid it
+[18363.786817] tbtun: carrier 175 recovered after 640 ms: back in the stripe
+[18373.599696] tbtun: carrier 17 stalled: repath paused, new frames avoid it
+[18373.972960] tbtun: carrier 17 recovered after 373 ms: back in the stripe
+[18378.657037] tbtun: carrier 173 stalled: repath paused, new frames avoid it
+[18378.710291] tbtun: carrier 173 recovered after 53 ms: back in the stripe
+[18387.909780] tbtun: carrier 248 stalled: repath paused, new frames avoid it
+[18388.177367] tbtun: carrier 248 recovered after 267 ms: back in the stripe
+[18403.989486] tbtun: carrier 86 stalled: repath paused, new frames avoid it
+[18404.042671] tbtun: carrier 86 recovered after 53 ms: back in the stripe
+[18404.682609] tbtun: carrier 28 stalled: repath paused, new frames avoid it
+[18407.356051] tbtun: carrier 28 recovered after 2673 ms: back in the stripe
+[18417.749903] tbtun: carrier 158 stalled: repath paused, new frames avoid it
+[18418.816086] tbtun: carrier 87 stalled: repath paused, new frames avoid it
+[18419.086089] tbtun: carrier 87 recovered after 270 ms: back in the stripe
+[18420.315863] tbtun: carrier 158 recovered after 2565 ms: back in the stripe
+[18424.752438] tbtun: carrier 3 stalled: repath paused, new frames avoid it
+[18424.969103] tbtun: carrier 3 recovered after 216 ms: back in the stripe
+[18438.455740] tbtun: carrier 7 stalled: repath paused, new frames avoid it
+[18438.782321] tbtun: carrier 7 recovered after 326 ms: back in the stripe
+[18447.102940] tbtun: carrier 222 stalled: repath paused, new frames avoid it
+[18448.873506] tbtun: carrier 222 recovered after 1770 ms: back in the stripe
+[18484.525068] tbtun: carrier 0 stalled: repath paused, new frames avoid it
+[18484.685069] tbtun: carrier 0 recovered after 160 ms: back in the stripe

@@ -1,0 +1,14 @@
++ sha256sum tbtun.ko
+7c71208c4ba61ecac81311be8d0e5d29957709d053c80fd6ab0dd838fd90ab30  tbtun.ko
++ modinfo tbtun.ko
++ grep -E '^(filename|version|srcversion|vermagic|name|depends):'
+filename:       /root/tbtun-0.3.0-fix43-20261108T045343Z/tbtun.ko
+version:        0.2.3
+srcversion:     2296207711D4F7FC38D809F
+depends:        
+name:           tbtun
+vermagic:       7.0.0-42-generic SMP preempt mod_unload modversions 
++ uname -r
+7.0.0-42-generic
++ cat /proc/version
+Linux version 7.0.0-42-generic (buildd@lcy02-amd64-049) (x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46) #42-Ubuntu SMP PREEMPT_DYNAMIC Thu Oct 15 08:06:44 UTC 2026

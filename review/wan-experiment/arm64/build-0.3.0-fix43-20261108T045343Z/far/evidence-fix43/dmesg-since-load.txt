@@ -1,0 +1,46 @@
+=== all tbtun dmesg since load ===
+[163799.952876] tbtun 0.2.3 loaded: 1 tunnels max, 256 carriers max
+[163805.550493] tbtun: tunnel 1: portblock= is parsed but unused; carrier source ports come from /proc/net/tbtun/ports
+[163805.875648] tbtun: tunnel 1 no carrier can carry: user side backpressured
+[163807.099335] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=36836, awaiting HELLO
+[163807.099373] tbtun: tunnel 1 carrier 255 gen 1 lost: sock=1 connected=1 hello_sent=0 up=0
+[163813.258207] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=52753, awaiting HELLO
+[163813.260990] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30014, awaiting HELLO
+[163813.263093] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30004, awaiting HELLO
+[163813.264670] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=52745, awaiting HELLO
+[163813.265432] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30012, awaiting HELLO
+[163813.266067] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=52759, awaiting HELLO
+[163813.266440] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30006, awaiting HELLO
+[163813.300494] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=52757, awaiting HELLO
+[163813.300859] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30002, awaiting HELLO
+[163813.302406] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30010, awaiting HELLO
+[163813.759877] tbtun: tunnel 1: fec rx shape from peer: n=8 m=24 groups=8 slots=8 block=128 L=16 rate=64
+[163818.351069] tbt_carrier_adopt: 94 callbacks suppressed
+[163818.351115] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=52835, awaiting HELLO
+[163818.351378] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=52837, awaiting HELLO
+[163818.372926] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30094, awaiting HELLO
+[163818.453333] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=52839, awaiting HELLO
+[163818.457414] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30098, awaiting HELLO
+[163818.465286] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30096, awaiting HELLO
+[163818.473580] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=52841, awaiting HELLO
+[163818.507717] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=52843, awaiting HELLO
+[163818.513155] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30100, awaiting HELLO
+[163818.658745] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=52845, awaiting HELLO
+[163819.765568] workqueue: tbt_accept_work [tbtun] hogged CPU for >10000us 4 times, consider switching to WQ_UNBOUND
+[163823.381048] tbt_carrier_adopt: 87 callbacks suppressed
+[163823.381064] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=52917, awaiting HELLO
+[163823.403717] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30186, awaiting HELLO
+[163823.557560] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30188, awaiting HELLO
+[163823.558046] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30189, awaiting HELLO
+[163823.671300] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30192, awaiting HELLO
+[163823.673716] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30194, awaiting HELLO
+[163823.792967] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30196, awaiting HELLO
+[163823.882266] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=52925, awaiting HELLO
+[163823.988779] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30198, awaiting HELLO
+[163823.993114] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30199, awaiting HELLO
+[163828.744720] tbt_carrier_adopt: 75 callbacks suppressed
+[163828.744732] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=52945, awaiting HELLO
+[163828.756262] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30268, awaiting HELLO
+[163833.492807] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=52971, awaiting HELLO
+[163845.569025] tbtun: carrier 195 stalled: repath paused, new frames avoid it
+[163846.591335] tbtun: carrier 195 recovered after 1022 ms: back in the stripe

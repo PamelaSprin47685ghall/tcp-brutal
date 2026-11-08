@@ -53,6 +53,7 @@ SPEED_LIMIT=${SPEED_LIMIT:-65536}
 SPEED_TIME=${SPEED_TIME:-120}
 DEAD_NOW_MAX=${DEAD_NOW_MAX:-64}
 REQUIRE_SESS_REFS=${REQUIRE_SESS_REFS:-0}
+REQUIRE_FEEDER=${REQUIRE_FEEDER:-1}
 EVIDENCE=${EVIDENCE:-$DL_DIR/evidence}
 
 FAILED=0
@@ -307,8 +308,10 @@ fi
 say "== 5. watchdog feeder (must stay up; stopping it resets the board)"
 if holder=$(feeder_state); then
     check feeder 0 "$holder holds /dev/watchdog0"
-else
+elif [ "$REQUIRE_FEEDER" -eq 1 ]; then
     check feeder 1 "no process holds /dev/watchdog0"
+else
+    skip feeder "waiver REQUIRE_FEEDER=0: no process holds /dev/watchdog0"
 fi
 
 say "== 6. join gate (near side only; run-1g.sh checks far)"

@@ -1,0 +1,33 @@
+2026年 11月 08日 星期日 05:01:50 UTC
+== load ==
+[18157.763941] tbtun 0.2.3 loaded: 1 tunnels max, 256 carriers max
+== config ==
+tunnel 1 role=near listen=127.0.0.1:9001 peer=45.11.1.62:9000 n=8 m=24 fec=on adaptive=off mode=sc-ldpc w=128 carriers=256 crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=16777216 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=30000-30511 L=16 dev=eth0 nonce=00112233445566778899aabbccddeeff
+== ports ==
+# block 30000-30511 (512 ports)
+# configured
+ports 30000-30511
+== stats ==
+tunnel 1 c3 n=256 up=256 lost=31 replaced=33 stream_reset_tcp_failed=0 stream_reset_user=0 carrier_add=0 carrier_add_fail=0 backpressure_enter=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 connect_retry=72 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=0 fbk_rx=0 retx_frames=0 retx_bytes=0 retain_drop=0 retx_hole=0 retx_slow=0 retx_pathloss=0 retx_other=0 data_tx=0 retx_data_ppm=0 dup_bytes_ppm=0 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=0 rx_ack=0 peer_paused=0 fb_delay_us=0 rto_us=0 una_stall_us=0 stall_paused_skips=0 stall_idle_skips=227291 stall_declared=1 stall_recovered=1 stall_drop=0 stall_dead=0 stall_replaced=0 stall_survival_bucket=2 stall_wait_loss_bytes=491169 replace_cost_bytes=241603 replace_cost_ewma=241623 stall_replace_econ=0 stall_replace_retrans=0 stall_replace_dead=0 tx_window=16777216 bdp_bytes=923199 k_x100=500 rtt_mean_us=384764 rttvar_us=7359422 rtt_max_us=1601573 bdp_sum_rate=2338610 bdp_agg_wnd=133999584 bdp_n_live=256 bdp_coverage=256 txq_max=16843040 win_block=0 win_resume=0 tx_wait_carrier=0 tx_backpressure=0 tx_wait_carrier_bytes=0 tx_wait_carrier_ns=0 tx_backpressure_bytes=0 tx_backpressure_ns=0 pump_hw_armed=0 pump_hw_fired=1602 retx_evident=0 retx_cand=0 retx_nosends=0 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=0 retx_eagain=0 retx_memshort=0 retx_wndshort=0 prov_now=0 prov_peak=0 prov_reject=0 dead_release=0 carrier_retired=17
+tunnel 1 c10 fec_decode_blocks=0 fec_decode_recovered=0 fec_decode_nomem=0 fec_deliver_nomem=0 fec_deliver_dup=0 fec_deliver_ooo=0 fec_deliver_bad=0 fec_dup_share=0 fec_late_share=0 fec_late_data=0 fec_pad_share=0 fec_dup_marker=0 fec_marker_conflict=0 fec_epoch_conflict=0 fec_slot_past_cut=0 fec_fin_bad=0 fec_ack_bad=0 fec_tx_share_gap=0 fec_empty_block=0
+tunnel 1 c11 fec_nack_tx=1 fec_nack_rx=0 fec_nack_retx=0 fec_nack_drop=0 fec_nack_enomem=0 fec_nack_einval=0 fec_nack_enospc=0 fec_nack_eother=0 fec_nack_bad=1 fec_replay_hit=0 fec_replay_miss=0 fec_replay_miss_no_ring=0 fec_replay_miss_alloc=0 fec_replay_miss_enospc=0 fec_replay_miss_get=0 fec_replay_miss_evicted=0 fec_replay_miss_never_stored=0 fec_nack_sparse_probe=8 fec_nack_empty_reply=0 fec_nack_parity_reply=0 fec_replay_drop=0 fec_nack_retx_bytes=0 fec_replace_retx_bytes=0 fec_nack_lat_ns=0 fec_nack_lat_max_ns=0 fec_nack_repair_ns=0 fec_nack_repair_max_ns=0 fec_reset_tcp_failed=0 fec_reset_user=0 fec_wait_carrier=1 fec_backpressure=0 fec_flush_skip=0 fec_flush_pass=4 fec_hol_wait=0 fec_outq_drop=0 fec_outq_high_wait=0 fec_encode_fail=0 fec_init_rx=1 fec_init_bad=0 fec_decode_backoff=0 fec_outq_depth=0 fec_outq_max=0 fec_outq_bytes=0 fec_outq_ctl=0 fec_out_ctl_bytes=0 fec_replay_queued=0 fec_replay_bytes=0 fec_replay_skip=0 fec_nack_filtered_ready=0 fec_nack_filtered_inflight=0 fec_nack_filtered_dup=0 fec_nack_filtered_young=0 fec_replay_dedup=0 fec_nack_req_shares=0 fec_nack_backpressure=0 fec_replay_stale=0 fec_fin_wait_replay=0 fec_nack_never_stored=0 fec_nack_absent_reply=0 fec_nack_req_invalid=0 fec_replay_high_water=0 fec_replay_pass_throttled=0 fec_replay_drain_bps=0 fec_replay_queue_high=0 fec_reset_hole=0 tx_stall_suppressed_fec=0 fec_repair_last_ns=18152631243132
+tunnel 1 c12 fec_outq
+tunnel 1 c13 adaptive=off epoch=0 n=8 m=24 groups=8 class=3 p_ppm=0 p_win_ppm=0 r_fail_ppm=0 sent=0 miss=0 switches=0 aborts=0 rollbacks=0 pauses=0 pause_ns=0 sample_unknown=0 abandoned=0 state=steady reason=off
+== shape ==
+[18160.855302] tbtun: tunnel 1: fec rx shape from peer: n=128 m=128 groups=1 slots=8 block=256 L=8 rate=500
+== rule/route ==
+100:	from all to 45.11.1.62 lookup main
+45.11.1.62 via 192.168.123.254 dev eth0 src 192.168.123.82 uid 0 
+    cache 
+== listen ==
+LISTEN 0      128              127.0.0.1:9001       0.0.0.0:*                                                           
+== conns ==
+256
+n=256 min=9000 max=9000
+== warn ==
+0
+== sha ==
+639706af2bd60b69688d308b3e0702f1b8c7aae9e9f81e0ef401170f54b923fc  /root/tbtun-0.3.0-fix43-20261108T045343Z/tbtun.ko
+version:        0.2.3
+srcversion:     B66D7B86A162F744837BFF3
+vermagic:       6.1.172 SMP mod_unload modversions aarch64

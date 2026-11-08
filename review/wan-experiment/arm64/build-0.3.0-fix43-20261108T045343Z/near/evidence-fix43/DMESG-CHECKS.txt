@@ -1,0 +1,6 @@
+== kernel warning count since load line
+0
+== fec rx shape from peer
+[17846.109354] tbtun: tunnel 1: fec rx shape from peer: n=128 m=128 groups=1 slots=8 block=256 L=8 rate=500
+== portblock pr_warn
+[17844.972172] tbtun: tunnel 1: portblock= is parsed but unused; carrier source ports come from /proc/net/tbtun/ports

@@ -1,0 +1,32 @@
+== lsmod
+tbtun                 282624  0
+== params
+max_carriers=256
+max_tunnels=1
+debug=0
+== dmesg tail
+[17048.585353] tbtun: carrier 6 recovered after 746 ms: back in the stripe
+[17088.505437] tbtun: carrier 67 stalled: repath paused, new frames avoid it
+[17089.972202] tbtun: carrier 67 recovered after 1466 ms: back in the stripe
+[17091.575044] tbtun: carrier 202 stalled: repath paused, new frames avoid it
+[17091.792017] tbtun: carrier 202 recovered after 216 ms: back in the stripe
+[17149.614129] tbtun: carrier 186 stalled: repath paused, new frames avoid it
+[17149.774372] tbtun: carrier 186 recovered after 160 ms: back in the stripe
+[17164.423873] tbtun: carrier 21 stalled: repath paused, new frames avoid it
+[17166.570459] tbtun: carrier 21 recovered after 2146 ms: back in the stripe
+[17183.346838] tbtun: carrier 40 stalled: repath paused, new frames avoid it
+[17183.453880] tbtun: carrier 40 recovered after 107 ms: back in the stripe
+[17186.340538] tbtun: carrier 178 stalled: repath paused, new frames avoid it
+[17187.470741] tbtun: carrier 178 recovered after 1130 ms: back in the stripe
+[17200.194538] tbtun: carrier 229 stalled: repath paused, new frames avoid it
+[17200.784277] tbtun: carrier 229 recovered after 589 ms: back in the stripe
+[17235.046581] tbtun: carrier 81 stalled: repath paused, new frames avoid it
+[17245.829340] tbtun: tunnel 1 session destroy: 16 references still held after 10000 ms (sched=0x0 streams=0 active=0 carriers=256); session leaked
+[17245.829405] tbtun: unloaded
+[17676.780766] audit: type=1400 audit(1794113566.898:744): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=146968 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17676.780815] audit: type=1400 audit(1794113566.898:745): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=146968 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17676.781247] audit: type=1400 audit(1794113566.902:746): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=146968 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17676.781273] audit: type=1400 audit(1794113566.902:747): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=146968 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17676.781744] audit: type=1400 audit(1794113566.902:748): apparmor="DENIED" operation="open" profile="who" name="/etc/nsswitch.conf" pid=146968 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17676.781773] audit: type=1400 audit(1794113566.902:749): apparmor="DENIED" operation="open" profile="who" name="/etc/passwd" pid=146968 comm="who" requested_mask="r" denied_mask="r" fsuid=0 ouid=0
+[17793.608810] tbtun 0.2.3 loaded: 1 tunnels max, 256 carriers max

@@ -1,0 +1,6 @@
+=== kernel warnings/bugs since load (ts >= 163799.952876) ===
+--- counts ---
+WARNING: = 0
+BUG: = 0
+Call Trace = 0
+page allocation failure = 0

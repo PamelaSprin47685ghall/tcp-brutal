@@ -1,0 +1,18 @@
+== ip rule show (before)
+0:	from all lookup local
+9000:	from all to 198.18.0.0/30 lookup 2022
+9001:	not from all dport 53 lookup main suppress_prefixlength 0
+9001:	from all iif Meta goto 9010
+9002:	not from all iif lo lookup 2022
+9002:	from 0.0.0.0 iif lo lookup 2022
+9002:	from 198.18.0.0/30 iif lo lookup 2022
+9010:	from all nop
+32766:	from all lookup main
+32767:	from all lookup default
+== ip route (before)
+default via 192.168.123.254 dev eth0 proto dhcp src 192.168.123.82 metric 100 
+192.168.123.0/24 dev eth0 proto kernel scope link src 192.168.123.82 metric 100 
+198.18.0.0/30 dev Meta proto kernel scope link src 198.18.0.1 
+== ip route get 45.11.1.62 (before)
+45.11.1.62 via 198.18.0.2 dev Meta table 2022 src 198.18.0.1 uid 0 
+    cache 
