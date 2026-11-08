@@ -254,11 +254,68 @@ rather than in a new field so the HELLO body length is unchanged.
 | `http-kal-drip` | identical headers, identical framing | one **byte per `drip_ms`** when idle (a legal 1-byte chunk every `drip_ms`), volume `≈ 1 B/drip_ms` | the `M` spares: an idle flow that a classifier would reap or de-prioritise is kept alive with ~8 bit/s (1 B/s payload) instead of a burst every 5000 ms |
 | `raw` | one frame per record, no HTTP bytes at all | none needed | second hop / VPS-to-home leg, loopback tests, or any line where QoS does not apply. Also the only safe profile inside WireGuard when the classifier is SNI-based (§16.5) |
 
-### FEC v6 over the container (T0 0x1005)
+### 3.1.2 FEC code families and their status
 
-FEC v6 is an independent 48-byte record format (`conv=0x1005`; 0.1.0 used
-`0x1001`), not a wider old frame. It rides the same carriers and the same HTTP
-container:
+The final FEC code is **SC-LDPC**, an SC-IRA construction: a ring window of
+payload degree 5, a parity accumulator, check degree 6–7, systematic, decoded
+by BEC peeling. The target shape is per direction:
+
+| Direction | Carriers | Shape | Rate at p = 30/40/50% |
+|---|---:|---|---|
+| Downlink | 256 | one group, `n + m = 256`, `groups = 1` | 0.50 / 0.40 / 0.30 |
+| Uplink | 256 | grouped, `n + m = 8` (32 groups) or `n + m = 32` (8 groups) | 0.50 / 0.45 (GF16) / 0.30 |
+
+The design and its evidence are in `review/sc-ldpc-0.3.0-design.md`. The
+downlink decodes binary bit-sliced codewords; the uplink prefers GF(16) 4-bit
+codes, whose measured recovery at rate 0.45 beats the binary code at the same
+block size. SC-LDPC adapts its **code rate**, not an `n/m` class table.
+
+**Status: not implemented.** `mode=sc-ldpc` is accepted by the parser
+(`w=0` resolves to 256; an explicit `w` must be 256 or 512) so a configuration
+can be validated, but `tbt_fec_params_check()` and the data plane refuse it
+with `-EOPNOTSUPP` (`fec rejected: mode=3 is SC-LDPC`). `tbt_fec_ops` reserves
+the codec slot; there is no codec, no share-to-codeword mapping, no
+per-direction CFG, and no rate control. Do not describe SC-LDPC as supported.
+
+The implemented data plane is **GF(2) band RLNC** (`mode=rlnc` or
+`mode=grouped`). It is the bridge: it ships, it is what 0.2.x and the current
+0.3.0 tree run, and it stays as the low-CPU fallback. It is no longer tuned:
+the `n/m` class table is frozen and the SC-LDPC work does not extend it. The
+production shape is 32 groups of `n=4, m=4` (256 carriers).
+
+**Adaptive status (0.3.0, in tree, unreleased).** Adaptive FEC is implemented
+for the GF(2) data plane, Phase 1 only: `n + m = 8`, `groups = 32`, and `m` in
+1..6. The receiver estimates the DATA-share loss rate from per-block miss
+bitmaps (1 s window, EWMA, at least 1024 alive-filtered shares and 4
+super-blocks); the sender runs the control law and switches shape through
+`FEC_CFG`/`FEC_FBK` (48-byte bodies, `TBT_FEC_CONV` 0x1006) at a super-block
+boundary. `adaptive=` follows `fec` by default, and `session <id>
+adaptive=on|off` flips it at runtime; the `c13` line exports the state.
+Phase 2 (`n + m` other than 8) is not implemented. SC-LDPC rate adaptation is
+a separate, later step (0.3.1 in the design), not this control law.
+
+**Multi-stream status.** FEC v6 carries one live application stream per
+tunnel. A sequential connection after the previous one closes is supported:
+the new stream resets the FEC RX/TX state and rebases the window on its own
+first block. A second **concurrent** stream is refused (`-EOPNOTSUPP`,
+`fec_stream_refused`) because the far side keeps one `far_sid` and one RX
+delivery state; the 64-bit `sid` in the record only keeps a queued old-stream
+record out of the new stream, it is not a demultiplexer. Concurrent
+multi-stream is deferred to **v7** and is not implemented.
+
+The 256-carrier performance target remains **90% of a direct/2 stream**. The
+0.2.1 measurement is 86.8% (97.3 Mbit/s against 112.1), 3.2 points short, and
+the gap stays open; 0.2.3's 256-carrier steady state is a different
+measurement (23.9 Mbit/s average over 60 s, 27.9 Mbit/s 10 s max).
+
+### 3.1.3 FEC v6 over the container (T0 0x1006)
+
+FEC v6 is an independent 48-byte record format (`conv=0x1006`; 0x1005 was the
+0.2.2 stream-id cut, 0.1.0 used `0x1001`), not a wider old frame. It rides the
+same carriers and the same HTTP container. The 0x1006 cut is the adaptive one:
+`FEC_CFG` grows to 48 bytes and names the shape switch, `FEC_FBK` becomes a
+48-byte report, and HELLO body[0] moves to version 3. A 0.2.x peer is refused
+at the first HELLO.
 
 - `profile=raw`: one 48-byte FEC record follows another with no wrapper.
 - `profile=http-kal` / `http-kal-drip`: one HTTP chunk body is exactly one FEC
@@ -458,9 +515,11 @@ container:
   repaired by NACK; it is still held by TCP, and it becomes visible only when
   that TCP fails, exactly as a direct stream would. The inequality is not a
   promise that the tunnel never stalls.
-- **One live stream per session.** A FEC record carries no stream id, and the
-  plane names its stream with `far_sid`, so a second live stream would have its
-  bytes delivered to whichever stream is current. A two-connection protocol --
+- **One live stream per session.** The plane names its stream with `far_sid`,
+  and the far side keeps one RX delivery state, so a second live stream would
+  have its bytes delivered to whichever stream is current. A FEC record does
+  carry a 64-bit `sid` (0x1005), but it only lets the receiver drop a queued
+  old-stream record; it is not a demultiplexer. A two-connection protocol --
   iperf3 opens a control connection and a data connection, and keeps both open
   for the whole test -- therefore cannot run over `fec=on`: the near's
   `tbt_stream_start_now()` refuses the second connection (`-EOPNOTSUPP`,
@@ -469,10 +528,12 @@ container:
   bytes, the far acknowledged 37, iperf3's server failed its own cookie read,
   and the client reported an idle timeout after 114 s. A load tool with one
   connection per test (`tbt_ping`/`tbt_burst`) is unaffected; a multi-stream
-  FEC plane needs a stream tag in the record, which T0 does not have.
-- The FEC plane carries the session's packet sequence, not a stream's: a DATA
-  record has no sid. The receiver therefore measures the delivery offset from
-  the byte at which the current stream began (`stream_base`), so the next
+  FEC plane needs per-stream RX/TX state and a demux key, which is v7 work
+  (§3.1.2).
+- The FEC plane carries the session's packet sequence, not a per-stream one:
+  DATA/PARITY carry the current stream's `sid` for filtering, but delivery
+  offsets are measured from the byte at which the current stream began
+  (`stream_base`), so the next
   connection in the same session starts at stream byte 0 -- iperf3's data
   connection after its control connection, and any request/response protocol
   that reconnects.
@@ -776,7 +837,10 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
   first frame on every carrier MUST be HELLO, which carries the session nonce; the frame
   header's `path_id` is the carrier index. HELLO is what authorises the peer to name
   streams on that connection. A session carries up to `TBT_STREAMS_MAX` (128) concurrent
-  streams. On the far side an OPEN for an unknown sid adopts that stream; DATA, FIN or RST
+  streams. In **FEC mode** this is narrowed to one live application stream: the far side
+  keeps one `far_sid` and one RX delivery state, a second concurrent stream is refused
+  (`-EOPNOTSUPP`, `fec_stream_refused`), and concurrent multi-stream is deferred to v7
+  (§3.1.2). On the far side an OPEN for an unknown sid adopts that stream; DATA, FIN or RST
   for an unknown sid is dropped, because only OPEN may create a stream. OPEN is sent once
   per carrier for each stream. A FEC share is sent on a carrier only after this stream's
   OPEN has been written on it (`c->up`); a share that arrives before the far's stream
@@ -1746,10 +1810,10 @@ line.)
 
 ```
 # profile is one of: http-kal | http-kal-drip | raw
-# fec is off | on; mode is rlnc | grouped | sc-ldpc (reserved)
+# fec is off | on; mode is rlnc | grouped | sc-ldpc (parsed; data plane refuses it)
 tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443
         n=4 m=1 dup=1 keepalive=5000 drip_ms=1000
-        profile=http-kal fec=on mode=grouped carriers=10 crypto=on
+        profile=http-kal fec=on adaptive=on mode=grouped carriers=10 crypto=on
         portblock=40000-40063 dev=eth0 srcaddrs=10.0.0.10,10.0.0.11
         replay=8388608 tunnel_rate=0 max_inflate=2.0 hole_budget_ms=500
         rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=3000
@@ -1856,10 +1920,18 @@ random at tunnel creation).
 - `fec=off|on` selects the data plane. `mode=rlnc` is one group
   (`carriers == n + m`); `mode=grouped` maps one share to each carrier
   (`carriers = groups * (n + m)`, `group = carrier / (n + m)`,
-  `share = carrier % (n + m)`); `mode=sc-ldpc` is reserved and returns
+  `share = carrier % (n + m)`); `mode=sc-ldpc` is the final code direction
+  (§3.1.2), not implemented: the parser accepts it, but the data plane returns
   `-EOPNOTSUPP` with `fec=on`. `w=0` resolves to `2*n` (`256` for sc-ldpc),
   `carriers=0` resolves to `n + m`, and a nonzero `carriers` must be a multiple
   of `n + m`. `fec=on` requires `m >= 1` and `carriers >= n + m`.
+- `adaptive=on|off` selects the 0.3.0 shape control law (§3.1.2). It defaults
+  to `fec` (on when `fec=on`), requires `fec=on`, and only the `n + m = 8`
+  family is implemented. `adaptive=on` ignores `w` and uses `w = 2n, d = n`;
+  the configured `n/m` is the initial class. `session <id> adaptive=on|off`
+  flips it on the running session without rebuilding it. The `c13` line in
+  `stats` reports the epoch, shape, class, `p_ppm`, `p_win_ppm`,
+  `r_fail_ppm`, switches, aborts, rollbacks and pauses.
 - `crypto=on|off` enables ChaCha8 obfuscation of the FEC DATA/PARITY payload
   only; it requires `fec=on`, and omitting `crypto=` means "same as `fec`".
   `crypto_key=` takes 64 hex digits (256 bits) or `-` to clear. With no
@@ -2730,13 +2802,15 @@ makes this design different from a generic L4 tunnel.
 
 Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the released tree reports
 `0.2.3`. The wire revision `TBT_CONV=0x0006`
-and the FEC record revision `TBT_FEC_CONV=0x1005` bump independently of it. HELLO
-`body[0]` carries `TBT_WIRE_VERSION=1`, not the module version, so the module
-version and the wire version are decoupled. 0.2.0 flipped `TBT_CONV` to
+and the FEC record revision `TBT_FEC_CONV=0x1006` bump independently of it.
+HELLO `body[0]` carries `TBT_WIRE_VERSION=1` for the old ARQ and
+`TBT_WIRE_VERSION_V6=3` for a FEC v6 session, not the module version, so the
+module version and the wire version are decoupled. 0.2.0 flipped `TBT_CONV` to
 0x0006 (FIN carries a 16-byte body) and `TBT_FEC_CONV` through `0x1002`
 (PARITY block marker), `0x1003` (24-byte ACK with `deliver_bytes`) and
 `0x1004` (64-byte bitmap NACK) to `0x1005` (48-byte header with the u64 stream
-id). Peers of
+id); 0.3.0 moves it to `0x1006` (48-byte `FEC_CFG`, 48-byte `FEC_FBK` report,
+adaptive shape switch). Peers of
 different wire revisions do not interoperate, because the first HELLO is
 rejected by the conv check.
 
@@ -2800,7 +2874,7 @@ covers; no known leak remains but a long-soak kref/RCU audit is still worthwhile
 | R16 | Memory at 10 Gbps | `tx_window_bytes` bounds retention and the frame queue (`txq_max = tx_window + 8 chunks`) and sizes the carrier buffers from the same number; `rx_reorder_bytes` bounds the reorder tree per stream and per session; the 64 MiB delivery ring is the largest fixed cost and costs about 2× its payload in physical memory. Per session the bound is about 3× window + `rx_reorder_bytes` + 64 MiB per stream (§5.4). T8 measures the peak. |
 | R17 | Jitter adds RTT | The reorder tree is consulted only past a gap; the in-order path adds zero delay (T1 asserts). |
 | R18 | `inet_csk_reset_xmit_timer` etc. drift | Not used; stock timers only. |
-| R19 | Mixed wire revisions | Both wire revisions are hard-rejected: the first HELLO fails `tbt_hdr_check()` (0x0005 vs 0x0006), and a FEC record fails `tbt_fec_hdr_check()` (any older conv vs the current 0x1005). `rx_parse_proto`/`fec_proto_fail` make it visible. Upgrade both ends together; rollback is the previous binary. |
+| R19 | Mixed wire revisions | Both wire revisions are hard-rejected: the first HELLO fails `tbt_hdr_check()` (0x0005 vs 0x0006), and a FEC record fails `tbt_fec_hdr_check()` (any older conv vs the current 0x1006). `rx_parse_proto`/`fec_proto_fail` make it visible. Upgrade both ends together; rollback is the previous binary. |
 
 ---
 

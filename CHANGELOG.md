@@ -78,6 +78,50 @@ and moves independently of the module version.
 
 ## [0.3.0] - planned
 
+### Added (in tree, unreleased)
+
+- Adaptive FEC Phase 1 (GF(2) data plane). The receiver estimates the
+  DATA-share loss rate from per-block miss bitmaps (1 s window, EWMA, at
+  least 1024 alive-filtered shares and 4 super-blocks); the sender runs the
+  control law over the fixed `n + m = 8`, `groups = 32` family (`m` 1..6) and
+  switches shape through `FEC_CFG`/`FEC_FBK` at a super-block boundary.
+  `adaptive=` defaults to `fec`, `session <id> adaptive=on|off` flips it at
+  runtime, and the `c13` line reports epoch, shape, class, `p_ppm`,
+  `p_win_ppm`, `r_fail_ppm`, switches, aborts, rollbacks and pauses.
+  (02f2517, 00d34cf)
+- Wire `TBT_FEC_CONV 0x1006`: `FEC_CFG` grows from 32 to 48 bytes and names
+  the shape switch, `FEC_FBK` becomes a 48-byte report, and HELLO body[0]
+  moves to `TBT_WIRE_VERSION_V6 3`. A 0.2.x peer is refused at the first
+  HELLO; both ends must be upgraded together.
+- `host/test_fec_adapt` covers the estimator and the control law.
+
+### Planned (not implemented)
+
+- **SC-LDPC is the final FEC code and is not implemented.** Target: downlink
+  256 carriers in one group (`n + m = 256`, `groups = 1`), uplink grouped
+  (`n + m = 8` or 32), rates 0.50/0.40/0.30 at p = 30/40/50% (uplink uses
+  GF(16) 0.45 at p = 40%). `mode=sc-ldpc` is accepted by the parser, but
+  `tbt_fec_params_check()` and the data plane return `-EOPNOTSUPP`; there is
+  no codec, share-to-codeword mapping, per-direction CFG or rate control.
+  Design: `review/sc-ldpc-0.3.0-design.md`.
+- **Multi-stream v7 is not implemented.** FEC v6 carries one live application
+  stream per tunnel; a sequential connection is supported, a second
+  concurrent stream is refused (`-EOPNOTSUPP`, `fec_stream_refused`).
+  Concurrent multi-stream is deferred to v7.
+- **Adaptive Phase 2 is not implemented.** Shapes with `n + m` other than 8
+  need a hot rebuild of the group/block/replay state and stay out of this
+  cut.
+- **SC-LDPC rate adaptation is not implemented.** It is the 0.3.1 design
+  target, not this control law.
+
+### Performance
+
+- Target: 256 carriers at 90% of direct/2. 0.2.1 measured 86.8% (97.3 Mbit/s
+  against 112.1), 3.2 points short, and the gap stays open (`txq_max` 16.8 MB
+  still full, far CPU 1.47 cores). 32 and 64 carriers measured 96.0% and
+  105.4%. 0.2.3 records a different 256-carrier steady state (23.9 Mbit/s
+  average over 60 s, 27.9 Mbit/s 10 s max); neither number is the target.
+
 ### Deferred from 0.2.0
 
 - Two fix29 performance experiments stay out of 0.2.0 and are the first
