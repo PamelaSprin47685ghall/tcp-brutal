@@ -652,9 +652,15 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     /* Adaptive is meaningful only where a control law runs. Unset, it
      * follows fec, so an old line keeps the old fixed shape. */
     if (!have_adaptive)
-        cfg->adaptive = cfg->fec;
+        cfg->adaptive = cfg->fec && cfg->mode != 3;
     if (cfg->adaptive && !cfg->fec)
         return tbt_fail(e, "adaptive", "adaptive=on requires fec=on");
+    /* 0.3.0 fixes the SC-LDPC shape. The control law and its estimator are
+     * the 8-share RLNC family and cannot describe a 256-share or 32-share
+     * block, so a mode=3 session with adaptive=on would only send CFGs the
+     * peer must refuse. Rate adaptation returns in 0.3.1. */
+    if (cfg->adaptive && cfg->mode == 3)
+        return tbt_fail(e, "adaptive", "sc-ldpc does not adapt in 0.3.0");
 
     if (!cfg->role)
         return tbt_fail(e, "role", "tunnel needs role=near or role=far");
@@ -669,11 +675,15 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     /* w=0 and carriers=0 mean "auto". Resolve them before validating, so the
      * struct holds the effective value and the canonical render is stable:
      * a written 0 reads back as the value it stands for. */
-    if (cfg->mode == 3 && cfg->w && cfg->w != 256 && cfg->w != 512)
-        return tbt_fail(e, "w", "sc-ldpc w must be 256 or 512");
+    /* mode=3 reuses w as the codeword block: 256 is the binary downlink, 128
+     * the GF(16) uplink; 512 is reserved for the L16/block512 profile. It is
+     * not an RLNC window, so w >= n does not apply to it. */
+    if (cfg->mode == 3 && cfg->w && cfg->w != 128 && cfg->w != 256 &&
+        cfg->w != 512)
+        return tbt_fail(e, "w", "sc-ldpc w must be 128, 256 or 512");
     if (!cfg->w)
         cfg->w = cfg->mode == 3 ? 256 : (u16)(2 * cfg->n);
-    if (cfg->w < cfg->n)
+    if (cfg->mode != 3 && cfg->w < cfg->n)
         return tbt_fail(e, "w", "w must be 0 or at least n");
     if (!cfg->carriers)
         cfg->carriers = cfg->n + cfg->m;

@@ -94,6 +94,13 @@ HOST_SCLC_SRCS  := host/test_sclc_uplink.c tbtun/tbt_sc_ldpc.c \
                    tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c
 HOST_SCLC_HDRS  := tbtun/tbt_sc_ldpc.h tbtun/tbt_sc_ldpc_gf16.h \
                    tbtun/tbt_sclc_uplink.h tbtun/tbt_fec.h tbtun/tbt_uapi.h
+HOST_SCLC_DATA  := host/test_fec_sclc_data
+HOST_SCLC_DATA_SRCS := host/test_fec_sclc_data.c tbtun/tbt_fec.c \
+                       tbtun/tbt_fec_sclc.c tbtun/tbt_sclc_uplink.c \
+                       tbtun/tbt_sc_ldpc.c tbtun/tbt_sc_ldpc_gf16.c
+HOST_SCLC_DATA_HDRS := tbtun/tbt_fec.h tbtun/tbt_fec_sclc.h \
+                       tbtun/tbt_sclc_uplink.h tbtun/tbt_sc_ldpc.h \
+                       tbtun/tbt_sc_ldpc_gf16.h tbtun/tbt_uapi.h
 HOST_BENCH_SCLC := host/bench_sclc_uplink
 HOST_BENCH_SCLC_SRCS := host/bench_sclc_uplink.c tbtun/tbt_sc_ldpc.c \
                    tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c
@@ -131,7 +138,7 @@ check:
 # root, no module and no kernel headers: the grammar test (tbt_parse.c), the
 # hostile-input test (tbt_rec.c + tbt_proto.c) and the HTTP container test
 # (tbt_http.c + tbt_proto.c).
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
@@ -153,6 +160,7 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_PORTMAP)
 	@./$(HOST_LIFETIME)
 	@./$(HOST_SCLC)
+	@./$(HOST_SCLC_DATA)
 	@# Third-party cross-check: h11 is not a build dependency. uv with a cached
 	@# h11 runs it offline; anything else gets a clear skip, not a failure.
 	@if command -v uv >/dev/null 2>&1 && \
@@ -266,6 +274,12 @@ $(HOST_LIFETIME): $(HOST_LIFETIME_SRCS)
 $(HOST_SCLC): $(HOST_SCLC_SRCS) $(HOST_SCLC_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_SCLC_SRCS)
 
+$(HOST_SCLC_DATA): $(HOST_SCLC_DATA_SRCS) $(HOST_SCLC_DATA_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_SCLC_DATA_SRCS)
+
+host/test_fec_sclc_data_san: $(HOST_SCLC_DATA_SRCS) $(HOST_SCLC_DATA_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_SCLC_DATA_SRCS)
+
 $(HOST_BENCH_SCLC): $(HOST_BENCH_SCLC_SRCS) $(HOST_SCLC_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_BENCH_SCLC_SRCS)
 
@@ -282,7 +296,7 @@ host-test-san:
 		echo "host-test-san: skipped, $(HOSTCC) cannot link -fsanitize=address,undefined"; \
 	fi
 
-host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_sclc_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san
+host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_sclc_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san
 	@./host/test_parse_san
 	@./host/test_fuzz_san
 	@./host/test_http_san
@@ -296,6 +310,7 @@ host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san hos
 	@./host/test_portmap_san
 	@./host/test_lifetime_san
 	@./host/test_sclc_uplink_san
+	@./host/test_fec_sclc_data_san
 
 host/test_parse_san: $(HOST_TEST_SRCS) $(HOST_TEST_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_TEST_SRCS)

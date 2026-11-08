@@ -742,6 +742,14 @@ struct tbt_fec_tx
     u64 base_block;
     u32 credit_cap; /* cached credit cap: the ACK path must not read n/m */
     u16 band;       /* parity band of the shape, for the NACK reply */
+    /* Initial-shape announcement (TBT_FEC_CFG_F_INIT). The codec's shape
+     * fields are not the RLNC window, so they are kept apart from n/m. */
+    u16 shape_w;
+    u16 shape_k;
+    u8 shape_d;
+    u8 init_tries;
+    bool init_done;
+    u64 init_ns;
     /* The packetizer stopped on the outq high-water mark and re-armed; kept
      * so the transition is counted once per episode, not once per retry. */
     bool outq_paused;
@@ -910,6 +918,10 @@ struct tbt_fec_rx
     u64 switch_start_ns;
     struct tbt_fec_cfg pending_cfg;
     bool cfg_pending;
+    /* The peer's initial shape arrived: applied by w_fec_rx, which may
+     * allocate. The carrier path only records it. */
+    struct tbt_fec_cfg init_cfg;
+    bool init_pending;
     bool commit_pending;   /* first new-shape record: free old_codec */
     bool rollback_pending; /* old-shape record after APPLIED: undo */
     u32 prev_epoch;
@@ -1416,6 +1428,13 @@ struct tbt_session
      * its high-water mark. Non-zero proves the backpressure path ran; a
      * healthy session with no slow carrier keeps it at 0. */
     atomic64_t fec_outq_high_wait;
+    /* A parity encode refused by the codec: the block can then be repaired
+     * only by NACKing its shares, never by its own parity. */
+    atomic64_t fec_encode_fail;
+    /* Peer initial shapes installed / refused. A refused INIT leaves the
+     * local receive shape in force; the first DATA then shows the mismatch. */
+    atomic64_t fec_init_rx;
+    atomic64_t fec_init_bad;
     atomic64_t fec_replay_skip; /* replay head found no carrier with room */
     /* NACK/replay repair, reset causes, and the carrier wait that precedes
      * backpressure. The reset counters prove the FEC layer only tears a

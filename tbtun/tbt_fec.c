@@ -787,10 +787,32 @@ int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], struct tbt_fec_cfg *c)
     shares = (u32)n + m; /* u32 first: 65535 + 65535 must not wrap */
     if (!n || !m || shares > TBT_FEC_MAX_SHARES)
         return -EPROTO;
-    if (!c->k || c->w < c->k || c->w > TBT_FEC_MAX_W || c->d > c->w)
+    if (!c->k || c->w > TBT_FEC_MAX_W)
         return -EPROTO;
-    if (c->d && c->w > 1 && c->d == c->w)
+    /* Three encodings share this body and (d, k vs w) tells them apart.
+     * RLNC has d >= 1, d <= w and k <= w (k is the window's data count).
+     * SC-LDPC binary has d == 0, k is the code rate in parts per thousand,
+     * and w is the codeword block, so w >= k does not describe it: the
+     * downlink is w=256, k=500. SC-LDPC GF(16) has k = codeword block,
+     * w = coupling length, d = rate in 1/256, so k > w and d may exceed w.
+     * Refusing these pairs here dropped every SC-LDPC CFG before the codec
+     * was built; the codec factory stays the authority on the exact set. */
+    if (c->d == 0)
+    {
+        if (c->k < 100 || c->k > 1000)
+            return -EPROTO;
+    }
+    else if (c->w < c->k)
+    {
         return -EPROTO;
+    }
+    else
+    {
+        if (c->d > c->w)
+            return -EPROTO;
+        if (c->w > 1 && c->d == c->w)
+            return -EPROTO;
+    }
     /* groups is the carrier geometry: one share per carrier, so n+m must
      * divide the 256 carriers and groups must be exactly the quotient. */
     if (!groups || (TBT_FEC_MAX_CARRIERS % shares) ||
@@ -1417,6 +1439,7 @@ int tbt_fec_rlnc_is_known(const struct tbt_fec_rlnc *ctx, u32 index)
 
 struct tbt_fec_grouped
 {
+    const struct tbt_fec_ops *ops;
     u16 groups;
     u16 n;
     u16 m;
@@ -1425,20 +1448,25 @@ struct tbt_fec_grouped
     size_t s;
     u16 d;
     u64 nonce;
-    struct tbt_fec_rlnc *ctx[TBT_FEC_MAX_GROUPS];
+    void *ctx[TBT_FEC_MAX_GROUPS];
 };
 
-struct tbt_fec_grouped *tbt_fec_grouped_new(u16 groups, u16 n, u16 m, u16 k, u16 w,
-                                            size_t s, u16 d, u64 nonce)
+struct tbt_fec_grouped *tbt_fec_grouped_new_ops(const struct tbt_fec_ops *ops,
+                                                u16 groups, u16 n, u16 m,
+                                                u16 k, u16 w, size_t s,
+                                                u16 d, u64 nonce)
 {
     struct tbt_fec_grouped *g;
     u16 i;
 
+    if (!ops || !ops->new || !ops->free || !ops->encode || !ops->decode)
+        return NULL;
     if (!groups || groups > TBT_FEC_MAX_GROUPS)
         return NULL;
     g = tbt_fec_alloc(sizeof(*g));
     if (!g)
         return NULL;
+    g->ops = ops;
     g->groups = groups;
     g->n = n;
     g->m = m;
@@ -1449,7 +1477,7 @@ struct tbt_fec_grouped *tbt_fec_grouped_new(u16 groups, u16 n, u16 m, u16 k, u16
     g->nonce = nonce;
     for (i = 0; i < groups; i++)
     {
-        g->ctx[i] = tbt_fec_rlnc_new(n, m, k, w, s, d, nonce ^ ((u64)i << 32));
+        g->ctx[i] = ops->new(n, m, k, w, s, d, nonce ^ ((u64)i << 32));
         if (!g->ctx[i])
         {
             tbt_fec_grouped_free(g);
@@ -1459,6 +1487,13 @@ struct tbt_fec_grouped *tbt_fec_grouped_new(u16 groups, u16 n, u16 m, u16 k, u16
     return g;
 }
 
+struct tbt_fec_grouped *tbt_fec_grouped_new(u16 groups, u16 n, u16 m, u16 k, u16 w,
+                                            size_t s, u16 d, u64 nonce)
+{
+    return tbt_fec_grouped_new_ops(&tbt_fec_ops_rlnc, groups, n, m, k, w, s,
+                                   d, nonce);
+}
+
 void tbt_fec_grouped_free(struct tbt_fec_grouped *g)
 {
     u16 i;
@@ -1466,7 +1501,8 @@ void tbt_fec_grouped_free(struct tbt_fec_grouped *g)
     if (!g)
         return;
     for (i = 0; i < g->groups; i++)
-        tbt_fec_rlnc_free(g->ctx[i]);
+        if (g->ctx[i])
+            g->ops->free(g->ctx[i]);
     tbt_fec_free(g);
 }
 
@@ -1477,9 +1513,55 @@ u16 tbt_fec_grouped_count(const struct tbt_fec_grouped *g)
 
 struct tbt_fec_rlnc *tbt_fec_grouped_ctx(struct tbt_fec_grouped *g, u16 group)
 {
-    if (!g || group >= g->groups)
+    if (!g || group >= g->groups || g->ops->mode != 1)
         return NULL;
     return g->ctx[group];
+}
+
+u8 tbt_fec_grouped_mode(const struct tbt_fec_grouped *g)
+{
+    return g ? g->ops->mode : 0;
+}
+
+int tbt_fec_grouped_encode(struct tbt_fec_grouped *g, u16 group, u8 *data[],
+                           u32 L, u8 *parity[])
+{
+    if (!g || group >= g->groups)
+        return -EINVAL;
+    return g->ops->encode(g->ctx[group], data, L, parity);
+}
+
+int tbt_fec_grouped_decode(struct tbt_fec_grouped *g, u16 group, u8 *data[],
+                           u8 *parity[], const u8 *data_present,
+                           const u8 *parity_present, u32 L)
+{
+    if (!g || group >= g->groups)
+        return -EINVAL;
+    return g->ops->decode(g->ctx[group], data, parity, data_present,
+                          parity_present, L);
+}
+
+void tbt_fec_grouped_set_nonce(struct tbt_fec_grouped *g, u16 group,
+                               u64 nonce)
+{
+    if (!g || group >= g->groups || g->ops->mode != 1)
+        return;
+    tbt_fec_rlnc_set_nonce(g->ctx[group], nonce);
+}
+
+u16 tbt_fec_grouped_band(const struct tbt_fec_grouped *g, u16 group)
+{
+    if (!g || group >= g->groups || g->ops->mode != 1)
+        return 0;
+    return tbt_fec_rlnc_band(g->ctx[group]);
+}
+
+int tbt_fec_grouped_is_known(const struct tbt_fec_grouped *g, u16 group,
+                             u32 index)
+{
+    if (!g || group >= g->groups || !g->ops->is_known)
+        return 0;
+    return g->ops->is_known(g->ctx[group], index);
 }
 
 /* ------------------------------------------------------------------ *
@@ -1577,8 +1659,23 @@ int tbt_fec_params_check(const struct tbt_fec_params *p)
 
     if (!p)
         return -EINVAL;
+    /* SC-LDPC shares the n/m/groups geometry and reuses k/w/d for the code
+     * rate and the codeword block, so it needs its own rules rather than the
+     * RLNC window ones. */
     if (p->codec == TBT_FEC_CODEC_SC_LDPC)
-        return -EINVAL; /* reserved for D; no implementation in this file */
+    {
+        if (!p->groups || p->groups > TBT_FEC_MAX_GROUPS || !p->group_size)
+            return -EINVAL;
+        if (!p->n || !p->m ||
+            (u32)p->n + p->m != p->group_size ||
+            (u32)p->groups * p->group_size > TBT_FEC_MAX_SHARES)
+            return -EINVAL;
+        if (!p->k || p->k < 100 || p->k > 1000)
+            return -EINVAL;
+        if (p->d || !p->w || p->w > TBT_FEC_MAX_W)
+            return -EINVAL;
+        return 0;
+    }
     if (p->codec != TBT_FEC_CODEC_RLNC_SINGLE &&
         p->codec != TBT_FEC_CODEC_RLNC_GROUPED)
         return -EINVAL;
@@ -1677,3 +1774,55 @@ const struct tbt_fec_ops tbt_fec_ops_rlnc = {
     .recovered = tbt_fec_ops_rlnc_recovered,
     .is_known = tbt_fec_ops_rlnc_is_known,
 };
+
+/* ------------------------------------------------------------------ *
+ * SC-LDPC shape selection (mode 3)
+ *
+ * The shape alone names the variant: one group is the binary downlink block
+ * of 256 shares; more than one group is the GF(16) uplink, one block per
+ * group. The rate is derived from n/(n+m) and never configured, so a shape
+ * can never claim more parity capacity than its graph produces.
+ * ------------------------------------------------------------------ */
+
+int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
+                          struct tbt_fec_sclc_shape *out)
+{
+    u32 shares = (u32)n + m;
+    u16 groups;
+
+    if (!out || !n || !m || !carriers || !shares ||
+        shares > TBT_FEC_MAX_SHARES || carriers % shares)
+        return -EINVAL;
+    groups = (u16)(carriers / shares);
+    if (!groups || groups > TBT_FEC_MAX_GROUPS)
+        return -EINVAL;
+    memset(out, 0, sizeof(*out));
+    out->n = n;
+    out->m = m;
+    out->groups = groups;
+    out->rate_ppm = (u16)((u32)n * 1000u / shares);
+    out->rate_256 = (u16)((u32)n * 256u / shares);
+    if (groups == 1 && shares == TBT_FEC_MAX_SHARES)
+    {
+        /* The binary codec's graph is fixed at 128 payload + 128 parity
+         * variables per codeword block; any other split of the 256 shares
+         * cannot be encoded, so name it as a shape error instead of letting
+         * the codec factory fail as an allocation error. */
+        if (n != TBT_FEC_MAX_SHARES / 2 || m != TBT_FEC_MAX_SHARES / 2)
+            return -EINVAL;
+        out->variant = TBT_FEC_SCLC_DOWN;
+        out->block = block ? block : TBT_FEC_SCLC_BLOCK_DOWN;
+        out->L = L ? L : TBT_FEC_SCLC_L_DOWN;
+    }
+    else
+    {
+        /* The GF(16) grouped uplink is wired separately; until then only the
+         * binary single-group shape exists. */
+        return -EINVAL;
+    }
+    if (!out->block || (out->block & 1) || !out->L)
+        return -EINVAL;
+    if (!out->rate_ppm || !out->rate_256)
+        return -EINVAL;
+    return 0;
+}

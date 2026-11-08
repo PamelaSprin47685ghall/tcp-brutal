@@ -244,7 +244,13 @@ typedef uint64_t u64;
 
 #define TBT_FEC_CFG_F_APPLY 0x01 /* the shape named here takes effect */
 #define TBT_FEC_CFG_F_ABORT 0x02 /* cancel the pending switch */
-#define TBT_FEC_CFG_F_MASK 0x03
+/* The sender's initial shape, sent once at session start. Unlike APPLY it is
+ * not a switch: the receiver installs it as its receive shape before any
+ * DATA, which is what lets the downlink (1x256) and the uplink (8x32) differ
+ * in one session. An older receiver refuses the whole body on the unknown
+ * flag, so it simply keeps the two-sided shape. */
+#define TBT_FEC_CFG_F_INIT 0x04
+#define TBT_FEC_CFG_F_MASK 0x07
 
 /* FEC_FBK body (48 bytes). The receiver reports the loss it measured and the
  * shape it holds; the flags carry the switch handshake. epoch is

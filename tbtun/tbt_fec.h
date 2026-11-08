@@ -723,6 +723,7 @@ int tbt_fec_rlnc_is_known(const struct tbt_fec_rlnc *ctx, u32 index);
 
 
 struct tbt_fec_grouped;
+struct tbt_fec_ops;
 
 /* groups in 1..TBT_FEC_MAX_GROUPS; the same (n,m,k,w,d) for every group.
  * The caller binds each group independently because each has its own L.
@@ -730,9 +731,40 @@ struct tbt_fec_grouped;
  * the same way from FEC_CFG.seed, so no per-group seed travels on the wire. */
 struct tbt_fec_grouped *tbt_fec_grouped_new(u16 groups, u16 n, u16 m, u16 k, u16 w,
                                             size_t s, u16 d, u64 nonce);
+
+/* Same container with an explicit codec table. The RLNC constructor above is
+ * the mode-1 special case. A mode-3 table builds one context per group with
+ * that table's new() and the caller's parameters, so the data plane keeps one
+ * codec object whatever the codec is. `new` returning NULL fails the whole
+ * construction. */
+struct tbt_fec_grouped *tbt_fec_grouped_new_ops(const struct tbt_fec_ops *ops,
+                                                u16 groups, u16 n, u16 m,
+                                                u16 k, u16 w, size_t s,
+                                                u16 d, u64 nonce);
 void tbt_fec_grouped_free(struct tbt_fec_grouped *g);
 u16 tbt_fec_grouped_count(const struct tbt_fec_grouped *g);
 struct tbt_fec_rlnc *tbt_fec_grouped_ctx(struct tbt_fec_grouped *g, u16 group);
+
+/* Codec dispatch for the data plane. Every call is a no-op or an error when
+ * `group` is out of range; none allocates. */
+u8 tbt_fec_grouped_mode(const struct tbt_fec_grouped *g);
+int tbt_fec_grouped_encode(struct tbt_fec_grouped *g, u16 group, u8 *data[],
+                           u32 L, u8 *parity[]);
+int tbt_fec_grouped_decode(struct tbt_fec_grouped *g, u16 group, u8 *data[],
+                           u8 *parity[], const u8 *data_present,
+                           const u8 *parity_present, u32 L);
+/* Re-seeds an RLNC context. An SC-LDPC graph is fixed at construction, so
+ * this is a no-op there and the data plane may call it unconditionally. */
+void tbt_fec_grouped_set_nonce(struct tbt_fec_grouped *g, u16 group,
+                               u64 nonce);
+/* RLNC parity band of a group; 0 for a codec that has none (SC-LDPC), which
+ * makes the NACK reply replay-only instead of regenerating a parity row. */
+u16 tbt_fec_grouped_band(const struct tbt_fec_grouped *g, u16 group);
+/* Whether share `index` of the group's last decode is complete. For a block
+ * codec this is the only safe success oracle: decode() returns a count, not
+ * a whole-block status. */
+int tbt_fec_grouped_is_known(const struct tbt_fec_grouped *g, u16 group,
+                             u32 index);
 
 /* Adaptive mapping (0.3.0, TBT_FEC_CONV 0x1006). `base_pkt` and
  * `base_block` are the relative origin of the current shape: the first
@@ -1147,6 +1179,63 @@ struct tbt_fec_ops
 
 extern const struct tbt_fec_ops tbt_fec_ops_rlnc;
 extern const struct tbt_fec_ops tbt_fec_ops_sclc;
+
+/* ------------------------------------------------------------------ *
+ * SC-LDPC shape (mode 3, TBT_FEC_CONV 0x1006)
+ *
+ * The wire carries no codec field, so the shape itself names the codec
+ * variant and its graph parameters. Both variants are block codes over one
+ * FEC block of n data shares and m parity shares:
+ *
+ *   downlink   groups == 1: one binary SC-IRA block of n+m = 256 shares.
+ *              block = w, L = L, rate = n/(n+m) in parts per thousand.
+ *              tbt_fec_ops_sclc.new(n, m, rate_ppm, block, S, 0, seed).
+ *   uplink     groups  > 1: one GF(16) SC-IRA block per group, n+m shares
+ *              each. block = w, L = L, rate = n/(n+m) scaled to 1/256.
+ *              tbt_fec_ops_sclc_gf16.new(n, m, block, L, S, rate_256, seed).
+ *
+ * `rate` is derived from n/(n+m), never configured: a shape whose share
+ * ratio disagrees with the graph rate would silently lose parity capacity.
+ * block and L come from the session configuration; 0 selects the defaults
+ * below.
+ * ------------------------------------------------------------------ */
+
+#define TBT_FEC_SCLC_BLOCK_DOWN 256
+#define TBT_FEC_SCLC_L_DOWN 8
+#define TBT_FEC_SCLC_BLOCK_UP 128
+#define TBT_FEC_SCLC_L_UP 16
+
+enum tbt_fec_sclc_variant
+{
+    TBT_FEC_SCLC_NONE = 0,
+    TBT_FEC_SCLC_DOWN = 1, /* binary, one group of 256 shares */
+    TBT_FEC_SCLC_UP = 2,   /* GF(16), one block per group */
+};
+
+struct tbt_fec_sclc_shape
+{
+    u8 variant; /* enum tbt_fec_sclc_variant */
+    u16 n;
+    u16 m;
+    u16 groups;
+    u16 block;    /* codeword block, the codec's w */
+    u16 L;
+    u16 rate_ppm; /* n / (n+m) in parts per thousand, for FEC_CFG.k */
+    u16 rate_256; /* the same rate in 1/256 units, the GF(16) factory's d */
+};
+
+/* Resolve a configured (mode, n, m, carriers, block, L) into the codec
+ * variant and its graph parameters. `block`/`L` of 0 take the variant
+ * default. Returns 0, or -EINVAL when the shape is not an SC-LDPC shape
+ * (bad carrier multiple, n or m zero, unsupported block). */
+int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
+                          struct tbt_fec_sclc_shape *out);
+
+/* Build one grouped container for a resolved shape. The downlink variant is
+ * a single binary context; the uplink variant is one GF(16) context per
+ * group. Returns NULL when the shape or the codec rejects the parameters. */
+struct tbt_fec_grouped *tbt_fec_sclc_new(const struct tbt_fec_sclc_shape *sh,
+                                         size_t s, u64 nonce);
 
 /* ------------------------------------------------------------------ *
  * Adaptive shape (0.3.0, TBT_FEC_CONV 0x1006)

@@ -43,6 +43,12 @@
 #include "tbt_fec_adapt.h"
 #include "tbt_rec.h"
 
+/* Defined next to the codec constructors; the shape-switch paths that run
+ * earlier in this file need the declaration. */
+static const struct tbt_fec_ops *tbt_fec_ops_of_shape(
+    const struct tbt_fec_shape *sh);
+static void tbt_fec_tx_init_tick(struct tbt_session *sess);
+
 /* The source ring is the capture's pause granularity: tbt_fec_tx_submit()
  * sets tx_paused only when the ring cannot take the next chunk. 256 KiB
  * paused capture every 32 packets while the credit window allowed 1024, so
@@ -1238,22 +1244,31 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess, u16 group,
 {
     struct tbt_fec_tx *tx = sess->fec_tx;
     struct tbt_fec_gtx *g = &tx->g[group];
-    struct tbt_fec_rlnc *ctx = tbt_fec_grouped_ctx(tx->codec, group);
     struct tbt_fec_hdr h;
     u64 last_seq;
     u16 rec_len, i;
     int st;
     int err;
 
-    if (!ctx || !win_len || win_len > tx->n)
+    if (!tx->codec || !win_len || win_len > tx->n)
         return;
-    tbt_fec_rlnc_set_nonce(ctx, tbt_fec_group_nonce(tx->nonce, group, block_id));
+    tbt_fec_grouped_set_nonce(tx->codec, group,
+                              tbt_fec_group_nonce(tx->nonce, group, block_id));
     for (i = 0; i < tx->n; i++)
         tx->data_ptrs[i] = g->blk + (size_t)i * TBT_FEC_S;
     for (i = 0; i < tx->m; i++)
         tx->parity_ptrs[i] = g->par + (size_t)i * TBT_FEC_S;
-    if (tbt_fec_rlnc_encode(ctx, tx->data_ptrs, tx->n, tx->parity_ptrs) < 0)
+    if (tbt_fec_grouped_encode(tx->codec, group, tx->data_ptrs, tx->n,
+                               tx->parity_ptrs) < 0)
+    {
+        /* No parity means the peer can only repair this block by NACKing the
+         * shares themselves; name it instead of failing silently. */
+        atomic64_inc(&sess->fec_encode_fail);
+        pr_warn_ratelimited("tbtun: fec parity encode failed block=%llu group=%u n=%u m=%u mode=%u\n",
+                            block_id, group, tx->n, tx->m,
+                            tbt_fec_grouped_mode(tx->codec));
         return;
+    }
     last_seq = tbt_fec_seq_of_block_pkt_base(
         block_id, group, (u16)(win_len - 1), tx->base_pkt, tx->base_block,
         tx->groups, tx->n);
@@ -1676,6 +1691,7 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
      * queues drain in their per-carrier works, so a full socket never stops
      * the packetizer. */
     (void)tbt_fec_out_flush(sess, NULL);
+    tbt_fec_tx_init_tick(sess);
 
     /* crypto=on: the far side cannot packetize until the near's HELLO has
      * delivered the session key. The ring keeps the bytes; retry shortly. */
@@ -1934,6 +1950,77 @@ static void tbt_fec_tx_send_cfg(struct tbt_session *sess, u8 flags)
     (void)tbt_fec_send_record(sess, 0, rec, len, true, false);
 }
 
+/* The peer's receive shape is this side's transmit shape, and the wire
+ * carries no codec field, so a session whose directions differ (downlink
+ * 1x256, uplink 8x32) has to announce it. INIT is not a switch: the receiver
+ * installs it before its first DATA and the sender keeps its own codec. It is
+ * retried until the peer's CFG_ACK names epoch 1. */
+static void tbt_fec_tx_send_init(struct tbt_session *sess)
+{
+    struct tbt_fec_tx *tx = sess->fec_tx;
+    struct tbt_fec_cfg c;
+    struct tbt_fec_hdr h;
+    u8 body[TBT_FEC_CFG_LEN];
+    u8 rec[TBT_FEC_HDR_LEN + TBT_FEC_CFG_LEN];
+    u16 len;
+
+    if (!tx)
+        return;
+    memset(&c, 0, sizeof(c));
+    c.epoch = 1;
+    c.n = tx->n;
+    c.m = tx->m;
+    c.w = tx->shape_w;
+    c.k = tx->shape_k;
+    c.d = tx->shape_d;
+    c.flags = TBT_FEC_CFG_F_APPLY | TBT_FEC_CFG_F_INIT;
+    c.groups = tx->groups;
+    c.switch_pkt = 0;
+    c.block_base = 0;
+    c.seed = tx->nonce;
+    if (tbt_fec_cfg_pack(&c, body))
+        return;
+    memset(&h, 0, sizeof(h));
+    h.type = TBT_FEC_CFG;
+    h.payload_len = TBT_FEC_CFG_LEN;
+    h.conv = TBT_FEC_CONV;
+    if (tbt_fec_make_record(sess, &h, body, rec, &len))
+        return;
+    (void)tbt_fec_send_record(sess, 0, rec, len, true, false);
+}
+
+/* Pace the announcement: first pass immediately, then every 500 ms, at most
+ * six times. A peer that never acks keeps the two-sided shape it configured
+ * itself; the mismatch then shows as a shape drop, not as silence. */
+static void tbt_fec_tx_init_tick(struct tbt_session *sess)
+{
+    struct tbt_fec_tx *tx = sess->fec_tx;
+    u64 now = ktime_get_ns();
+
+    if (!tx || tx->init_done)
+        return;
+    if (tx->peer_est_valid && tx->peer_epoch == 1 &&
+        (tx->peer_flags & TBT_FEC_FBK_F_CFG_ACK))
+    {
+        tx->init_done = true;
+        return;
+    }
+    if (tx->init_tries >= 6)
+    {
+        tx->init_done = true;
+        return;
+    }
+    if (tx->init_tries && now - tx->init_ns < 500000000ULL)
+    {
+        tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(500));
+        return;
+    }
+    tbt_fec_tx_send_init(sess);
+    tx->init_tries++;
+    tx->init_ns = now;
+    tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(500));
+}
+
 static void tbt_fec_tx_switch_abort(struct tbt_session *sess, bool tell_peer);
 static void tbt_fec_tx_swap(struct tbt_session *sess);
 static void tbt_fec_tx_switch_tick(struct tbt_session *sess);
@@ -1985,10 +2072,12 @@ static void tbt_fec_tx_swap(struct tbt_session *sess)
     struct tbt_stream *st;
     u16 i, rk;
 
-    codec = tbt_fec_grouped_new(tx->switch_shape.groups, tx->switch_shape.n,
-                                tx->switch_shape.m, tx->switch_shape.k,
-                                tx->switch_shape.w, TBT_FEC_S,
-                                tx->switch_shape.d, tx->nonce);
+    codec = tbt_fec_grouped_new_ops(tbt_fec_ops_of_shape(&tx->switch_shape),
+                                    tx->switch_shape.groups,
+                                    tx->switch_shape.n, tx->switch_shape.m,
+                                    tx->switch_shape.k, tx->switch_shape.w,
+                                    TBT_FEC_S, tx->switch_shape.d,
+                                    tx->nonce);
     if (!codec)
     {
         tbt_fec_tx_switch_abort(sess, true);
@@ -1999,7 +2088,7 @@ static void tbt_fec_tx_swap(struct tbt_session *sess)
     tx->old_codec = tx->codec;
     tx->codec = codec;
     spin_lock(&tx->shape_lock);
-    tx->band = tbt_fec_rlnc_band(tbt_fec_grouped_ctx(codec, 0));
+    tx->band = tbt_fec_grouped_band(codec, 0);
     tx->n = tx->switch_shape.n;
     tx->m = tx->switch_shape.m;
     tx->groups = tx->switch_shape.groups;
@@ -2489,7 +2578,7 @@ static int tbt_fec_blk_decode(struct tbt_session *sess, u16 group,
                               struct tbt_fec_blk *b)
 {
     struct tbt_fec_rx *rx = sess->fec_rx;
-    struct tbt_fec_rlnc *ctx = tbt_fec_grouped_ctx(rx->codec, group);
+    bool block_code = tbt_fec_grouped_mode(rx->codec) == 3;
     u16 real, i, k, missing = 0, have_parity = 0;
     int rc;
 
@@ -2504,7 +2593,12 @@ static int tbt_fec_blk_decode(struct tbt_session *sess, u16 group,
             have_parity++;
     if (!missing)
         return 0;
-    if (!ctx || have_parity < missing)
+    /* RLNC needs one independent row per missing share; an SC-LDPC block code
+     * needs any parity at all and decides itself how much it can recover, so
+     * the count test would both reject decodable blocks and admit blocks the
+     * parity indices do not cover. */
+    if (!rx->codec || (!block_code && have_parity < missing) ||
+        (block_code && !have_parity))
         return -EAGAIN;
     /* A recovered share has no payload_len of its own, so the block's shape
      * must name every length the delivery walk will use. Only the last real
@@ -2539,16 +2633,33 @@ static int tbt_fec_blk_decode(struct tbt_session *sess, u16 group,
         rx->parity_ptrs[i] = rx->ppresent_snap[i] ?
             b->parity + (size_t)i * rx->s : rx->zero;
 
-    tbt_fec_rlnc_set_nonce(ctx, tbt_fec_group_nonce(tbt_fec_base_nonce(sess),
-                                                    group, b->block_id));
+    tbt_fec_grouped_set_nonce(rx->codec, group,
+                              tbt_fec_group_nonce(tbt_fec_base_nonce(sess),
+                                                  group, b->block_id));
     atomic64_inc(&sess->fec_decode_blocks);
-    rc = tbt_fec_rlnc_decode(ctx, rx->data_ptrs, rx->parity_ptrs,
-                             rx->dpresent_snap, rx->ppresent_snap, rx->n);
+    rc = tbt_fec_grouped_decode(rx->codec, group, rx->data_ptrs,
+                                rx->parity_ptrs, rx->dpresent_snap,
+                                rx->ppresent_snap, rx->n);
     if (rc == TBT_FEC_RLNC_ERR_NOMEM)
         atomic64_inc(&sess->fec_decode_nomem);
     if (rc > 0)
         atomic64_add(rc, &sess->fec_decode_recovered);
-    return rc < 0 ? -EAGAIN : 0;
+    if (rc < 0)
+        return -EAGAIN;
+    /* A block codec returns how much it recovered, not whether the block is
+     * whole: the binary decoder returns the recovered count (partial), the
+     * GF(16) decoder the number of complete shares (0..n). The commit path
+     * copies every missing slot from rx->rec, so a partial decode reported as
+     * success would hand the application stale bytes. Ask the codec which
+     * shares are complete and refuse the block until every real one is. */
+    if (block_code)
+    {
+        for (i = 0; i < real; i++)
+            if (!rx->dpresent_snap[i] &&
+                !tbt_fec_grouped_is_known(rx->codec, group, i))
+                return -EAGAIN;
+    }
+    return 0;
 }
 
 /* next_deliver is the packet frontier the sender's credit window uses.
@@ -4011,8 +4122,14 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
         {
             b->ready = true; /* complete without the codec */
         }
-        else if (b->nparity >= (u16)(real - b->ndata))
+        else if (tbt_fec_grouped_mode(rx->codec) == 3 ? b->nparity > 0
+                                                      : b->nparity >=
+                                                            (u16)(real -
+                                                                  b->ndata))
         {
+            /* An SC-LDPC block codec needs any parity share and reports what
+             * it could recover; the RLNC path needs one row per missing
+             * share. */
             memcpy(rx->dpresent_snap, b->dpresent, rx->n);
             memcpy(rx->ppresent_snap, b->ppresent, rx->m);
             for (i = real; i < rx->n; i++)
@@ -4029,10 +4146,21 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
     spin_lock_bh(&rx->lock);
     if (rc == 0)
     {
+        bool block_code = tbt_fec_grouped_mode(rx->codec) == 3;
+
         for (i = 0, k = 0; i < real; i++)
         {
             if (rx->dpresent_snap[i])
                 continue;
+            /* Belt and braces for a block codec: copy a recovered slot only
+             * when the codec says that share is complete. A partial decode
+             * must not turn stale rx->rec bytes into delivered data. */
+            if (block_code &&
+                !tbt_fec_grouped_is_known(rx->codec, group, i))
+            {
+                k++;
+                continue;
+            }
             if (!b->dpresent[i])
             {
                 memcpy(b->data + (size_t)i * rx->s,
@@ -4047,7 +4175,9 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
             }
             k++;
         }
-        b->ready = true;
+        /* Ready only when every real share is present; a skipped share keeps
+         * the block decodable on the next pass. */
+        b->ready = b->ndata >= real;
     }
     b->decoding = false;
     spin_unlock_bh(&rx->lock);
@@ -4107,6 +4237,7 @@ static void tbt_fec_rx_fbk_send(struct tbt_session *sess, u8 extra)
 }
 
 static void tbt_fec_rx_switch_tick(struct tbt_session *sess);
+static void tbt_fec_rx_init_tick(struct tbt_session *sess);
 
 /* Refresh the alive bitmap, fold the abandoned delta and publish the c13
  * snapshot. Called only from w_fec_rx, the estimator's single writer. */
@@ -4126,6 +4257,10 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess)
         return;
     if (!READ_ONCE(sess->adaptive))
     {
+        /* The initial shape is not a switch: install it even with the
+         * control law off, which is the 0.3.0 SC-LDPC configuration. */
+        if (rx->init_pending)
+            tbt_fec_rx_init_tick(sess);
         /* adaptive=off keeps the shape in force but abandons any pending
          * switch. The installed codec is never freed here. */
         if (rx->switch_state != TBT_FEC_SW_STEADY)
@@ -4441,10 +4576,21 @@ static void tbt_fec_rx_switch_tick(struct tbt_session *sess)
     switch (rx->switch_state)
     {
     case TBT_FEC_SW_PREP:
-        codec = tbt_fec_grouped_new(
-            rx->pending_cfg.groups, rx->pending_cfg.n, rx->pending_cfg.m,
-            rx->pending_cfg.k, rx->pending_cfg.w, TBT_FEC_S,
-            rx->pending_cfg.d, rx->pending_cfg.seed);
+    {
+        struct tbt_fec_shape sh;
+
+        memset(&sh, 0, sizeof(sh));
+        sh.n = rx->pending_cfg.n;
+        sh.m = rx->pending_cfg.m;
+        sh.groups = rx->pending_cfg.groups;
+        sh.w = rx->pending_cfg.w;
+        sh.k = rx->pending_cfg.k;
+        sh.d = rx->pending_cfg.d;
+        codec = tbt_fec_grouped_new_ops(tbt_fec_ops_of_shape(&sh),
+                                        sh.groups, sh.n, sh.m, sh.k, sh.w,
+                                        TBT_FEC_S, sh.d,
+                                        rx->pending_cfg.seed);
+    }
         if (!codec)
         {
             rx->switch_state = TBT_FEC_SW_STEADY;
@@ -4474,6 +4620,220 @@ static void tbt_fec_rx_switch_tick(struct tbt_session *sess)
     }
 }
 
+/* Free one block array allocated by tbt_fec_rx_blk_alloc(). */
+static void tbt_fec_rx_blk_free(struct tbt_fec_blk *blk, u32 total)
+{
+    u32 i;
+
+    if (!blk)
+        return;
+    for (i = 0; i < total; i++)
+    {
+        kvfree(blk[i].buf);
+        kvfree(blk[i].dpresent);
+        kvfree(blk[i].ppresent);
+        kvfree(blk[i].dlen);
+    }
+    kvfree(blk);
+}
+
+/* `total` block slots of `shares` shares each, sliced for a block of `n` DATA
+ * shares. Returns NULL on the first failure and releases what it took. */
+static struct tbt_fec_blk *tbt_fec_rx_blk_alloc(u32 total, u16 shares, u16 n)
+{
+    struct tbt_fec_blk *blk = kvzalloc((size_t)total * sizeof(*blk),
+                                       GFP_KERNEL);
+    u32 i;
+
+    if (!blk)
+        return NULL;
+    for (i = 0; i < total; i++)
+    {
+        struct tbt_fec_blk *b = &blk[i];
+
+        b->buf = kvzalloc((size_t)shares * TBT_FEC_S, GFP_KERNEL);
+        b->dpresent = kvzalloc(TBT_FEC_MAX_SHARES, GFP_KERNEL);
+        b->ppresent = kvzalloc(TBT_FEC_MAX_SHARES, GFP_KERNEL);
+        b->dlen = kvzalloc(TBT_FEC_MAX_SHARES * sizeof(u16), GFP_KERNEL);
+        if (!b->buf || !b->dpresent || !b->ppresent || !b->dlen)
+        {
+            tbt_fec_rx_blk_free(blk, total);
+            return NULL;
+        }
+        b->data = b->buf;
+        b->parity = b->buf + (size_t)n * TBT_FEC_S;
+    }
+    return blk;
+}
+
+/* Install the peer's initial shape (TBT_FEC_CFG_F_INIT). This is the only
+ * path that changes the receive geometry outside a switch, and it is accepted
+ * only before the first share: a carrier may be placing a share under
+ * rx->lock, so the pointer swap happens there and the old arena is freed
+ * after the unlock. Runs in w_fec_rx (process context) because it allocates.
+ *
+ * The peer's L is not on the wire; the local session's L is the only source.
+ * Both ends must configure the same codec, so a mismatch is a configuration
+ * error the caller reports rather than a shape this path can detect. */
+static int tbt_fec_rx_apply_init(struct tbt_session *sess,
+                                 const struct tbt_fec_cfg *cfg)
+{
+    struct tbt_fec_rx *rx = sess->fec_rx;
+    struct tbt_fec_sclc_shape sclc;
+    struct tbt_fec_grouped *codec, *old_codec;
+    struct tbt_fec_blk *blk, *old_blk;
+    u64 *req_ns, *req_block, *old_req_ns, *old_req_block;
+    u8 *rec, *old_rec;
+    u32 per, slots, total, old_total;
+    u16 shares = (u16)(cfg->n + cfg->m);
+    u16 local_L;
+    bool same, fresh, block_code = false;
+
+    if (!rx)
+        return -EINVAL;
+    spin_lock_bh(&rx->lock);
+    same = rx->n == cfg->n && rx->m == cfg->m &&
+           rx->groups == cfg->groups && rx->shape.w == cfg->w &&
+           rx->shape.k == cfg->k && rx->shape.d == cfg->d;
+    fresh = rx->next_deliver == 0 && rx->next_super == 0 &&
+            rx->highest_block == 0 && rx->epoch == 0;
+    spin_unlock_bh(&rx->lock);
+    if (same)
+        return 0;
+    if (!fresh)
+    {
+        atomic64_inc(&sess->fec_epoch_bad);
+        return -EBUSY;
+    }
+
+    local_L = 0; /* the binary downlink codec ignores L */
+    if (cfg->d == 0 && cfg->k >= 100 && cfg->k <= 1000)
+    {
+        if (tbt_fec_sclc_shape_of(cfg->n, cfg->m,
+                                  (u16)(cfg->groups * shares), cfg->w,
+                                  local_L, &sclc))
+            return -EINVAL;
+        codec = tbt_fec_sclc_new(&sclc, TBT_FEC_S, cfg->seed);
+        block_code = true;
+    }
+    else
+    {
+        codec = tbt_fec_grouped_new_ops(&tbt_fec_ops_rlnc, cfg->groups,
+                                        cfg->n, cfg->m, cfg->k, cfg->w,
+                                        TBT_FEC_S, cfg->d, cfg->seed);
+    }
+    if (!codec)
+        return -ENOMEM;
+
+    per = (u32)cfg->groups * shares * TBT_FEC_S;
+    slots = TBT_FEC_RX_BUDGET / per;
+    if (slots < 4)
+        slots = 4;
+    if (slots > 256)
+        slots = 256;
+    total = (u32)cfg->groups * slots;
+    blk = tbt_fec_rx_blk_alloc(total, shares, cfg->n);
+    req_ns = kvzalloc((size_t)total * shares * sizeof(*req_ns), GFP_KERNEL);
+    req_block = kvzalloc((size_t)total * sizeof(*req_block), GFP_KERNEL);
+    {
+        u16 slots_per_share = cfg->n > cfg->m ? cfg->n : cfg->m;
+
+        if (slots_per_share < TBT_FEC_ADAPT_CLASSES)
+            slots_per_share = TBT_FEC_ADAPT_CLASSES;
+        rec = kvzalloc((size_t)slots_per_share * TBT_FEC_S, GFP_KERNEL);
+    }
+    if (!blk || !req_ns || !req_block || !rec)
+    {
+        tbt_fec_rx_blk_free(blk, total);
+        kvfree(req_ns);
+        kvfree(req_block);
+        kvfree(rec);
+        tbt_fec_grouped_free(codec);
+        return -ENOMEM;
+    }
+
+    spin_lock_bh(&rx->lock);
+    old_blk = rx->blk;
+    old_req_ns = rx->req_ns;
+    old_req_block = rx->req_block;
+    old_rec = rx->rec;
+    old_codec = rx->codec;
+    old_total = (u32)rx->groups * rx->slots;
+    rx->n = cfg->n;
+    rx->m = cfg->m;
+    rx->groups = cfg->groups;
+    rx->slots = (u16)slots;
+    rx->blk = blk;
+    rx->req_ns = req_ns;
+    rx->req_block = req_block;
+    rx->rec = rec;
+    rx->codec = codec;
+    rx->shape.n = cfg->n;
+    rx->shape.m = cfg->m;
+    rx->shape.groups = cfg->groups;
+    rx->shape.slots = (u16)slots;
+    rx->shape.w = cfg->w;
+    rx->shape.k = cfg->k;
+    rx->shape.d = cfg->d;
+    rx->shape.base_pkt = 0;
+    rx->shape.base_block = 0;
+    rx->prev_shape = rx->shape;
+    rx->base_pkt = 0;
+    rx->base_block = 0;
+    rx->epoch = cfg->epoch;
+    rx->replay_k = tbt_fec_replay_k_for(cfg->groups, cfg->n, cfg->m,
+                                        TBT_FEC_S);
+    rx->nack_cadence_ms = TBT_FEC_NACK_RETRY_MS;
+    spin_unlock_bh(&rx->lock);
+
+    tbt_fec_rx_blk_free(old_blk, old_total);
+    kvfree(old_req_ns);
+    kvfree(old_req_block);
+    kvfree(old_rec);
+    tbt_fec_grouped_free(old_codec);
+    if (rx->est)
+        tbt_fec_est_init(rx->est, shares);
+    TBT_DIAG("fec rx init shape tunnel=%llu n=%u m=%u groups=%u slots=%u mode=%u block=%d",
+             (unsigned long long)sess->tunnel->cfg.id, cfg->n, cfg->m,
+             cfg->groups, slots, block_code ? 3 : 1, block_code);
+    return 0;
+}
+
+/* w_fec_rx side of TBT_FEC_CFG_F_INIT: apply and acknowledge. The ACK names
+ * epoch 1, which is what stops the sender's retry. */
+static void tbt_fec_rx_init_tick(struct tbt_session *sess)
+{
+    struct tbt_fec_rx *rx = sess->fec_rx;
+    struct tbt_fec_cfg cfg;
+    int err;
+
+    if (!rx)
+        return;
+    spin_lock_bh(&rx->lock);
+    if (!rx->init_pending)
+    {
+        spin_unlock_bh(&rx->lock);
+        return;
+    }
+    cfg = rx->init_cfg;
+    rx->init_pending = false;
+    spin_unlock_bh(&rx->lock);
+    err = tbt_fec_rx_apply_init(sess, &cfg);
+    if (err)
+    {
+        atomic64_inc(&sess->fec_init_bad);
+        pr_warn_ratelimited("tbtun: tunnel %llu: fec init shape rejected: %d n=%u m=%u groups=%u w=%u k=%u d=%u\n",
+                            (unsigned long long)sess->tunnel->cfg.id, err,
+                            cfg.n, cfg.m, cfg.groups, cfg.w, cfg.k, cfg.d);
+        return;
+    }
+    atomic64_inc(&sess->fec_init_rx);
+    rx->fbk_flags |= TBT_FEC_FBK_F_CFG_ACK;
+    rx->fbk_epoch = cfg.epoch;
+    tbt_fec_rx_fbk_send(sess, rx->fbk_flags);
+    rx->fbk_flags = 0;
+}
+
 /* FEC_CFG from the sender. The body is already validated; this function
  * decides whether the shape can be armed at all. Allocation and the ACK run
  * in w_fec_rx, never in the carrier's RX context. */
@@ -4484,7 +4844,25 @@ static void tbt_fec_rx_on_cfg(struct tbt_session *sess,
     u64 span;
     bool ack = false;
 
-    if (!rx || !READ_ONCE(sess->adaptive))
+    if (!rx)
+        return;
+    if (cfg->flags & TBT_FEC_CFG_F_INIT)
+    {
+        /* The arena swap allocates, and a carrier parser can run in softirq:
+         * record the shape here and let w_fec_rx install it. */
+        spin_lock_bh(&rx->lock);
+        if (READ_ONCE(rx->stopping) || rx->init_pending)
+        {
+            spin_unlock_bh(&rx->lock);
+            return;
+        }
+        rx->init_cfg = *cfg;
+        rx->init_pending = true;
+        spin_unlock_bh(&rx->lock);
+        tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
+        return;
+    }
+    if (!READ_ONCE(sess->adaptive))
         return;
     /* Phase 1 keeps the carrier geometry: only n/m move inside n+m=8. */
     if ((u16)(cfg->n + cfg->m) != (u16)(rx->n + rx->m) ||
@@ -5016,6 +5394,16 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                     atomic64_inc(&sess->fec_replay_miss);
                     if (h.block_id >= READ_ONCE(tx->cur_block))
                         continue; /* still being built: the share may appear */
+                    /* With no parity band (SC-LDPC) there is no "covering
+                     * row" relation, so a synthesized parity row can be one
+                     * the receiver already holds and the NACK would be
+                     * answered with a duplicate. Replay nothing for a DATA
+                     * share and let the receiver name a share that exists. */
+                    if (s < tn && !band)
+                    {
+                        atomic64_inc(&sess->fec_nack_req_invalid);
+                        continue;
+                    }
                     /* The block is closed and this share was never
                      * generated. A short block (win_len < n) has padding
                      * shares that will never exist, but it does have parity
@@ -5651,7 +6039,7 @@ void tbt_fec_rx_fin(struct tbt_session *sess, struct tbt_stream *st,
 static void tbt_fec_rx_free(struct tbt_session *sess)
 {
     struct tbt_fec_rx *rx = sess->fec_rx;
-    u32 total, i;
+    u32 total;
 
     if (!rx)
         return;
@@ -5671,14 +6059,7 @@ static void tbt_fec_rx_free(struct tbt_session *sess)
         return;
     }
     total = (u32)rx->groups * rx->slots;
-    for (i = 0; i < total; i++)
-    {
-        kvfree(rx->blk[i].buf);
-        kvfree(rx->blk[i].dpresent);
-        kvfree(rx->blk[i].ppresent);
-        kvfree(rx->blk[i].dlen);
-    }
-    kvfree(rx->blk);
+    tbt_fec_rx_blk_free(rx->blk, total);
     kvfree(rx->rec);
     kvfree(rx->zero);
     kvfree(rx->nack);
@@ -5752,11 +6133,62 @@ void tbt_fec_data_free(struct tbt_session *sess)
     tbt_fec_rx_free(sess);
 }
 
+/* One grouped container for the configured shape. The RLNC path keeps the
+ * caller's window; mode 3 resolves the variant to its ops table and the
+ * parameter permutation that table documents (see tbt_fec.h). */
+struct tbt_fec_grouped *tbt_fec_sclc_new(const struct tbt_fec_sclc_shape *sh,
+                                         size_t s, u64 nonce)
+{
+    const struct tbt_fec_ops *ops;
+    u16 k, w, d;
+
+    if (!sh)
+        return NULL;
+    if (sh->variant == TBT_FEC_SCLC_DOWN)
+    {
+        ops = &tbt_fec_ops_sclc;
+        k = sh->rate_ppm;
+        w = sh->block;
+        d = 0;
+    }
+    else
+    {
+        return NULL;
+    }
+    return tbt_fec_grouped_new_ops(ops, sh->groups, sh->n, sh->m, k, w, s, d,
+                                   nonce);
+}
+
+/* The wire names no codec, so a shape is classified the way cfg_unpack()
+ * classifies it: d == 0 is the binary SC-LDPC block (k is the rate in parts
+ * per thousand), k > w is the GF(16) block (k is the codeword block, w the
+ * coupling length, d the rate in 1/256), and everything else is RLNC. */
+static const struct tbt_fec_ops *tbt_fec_ops_of_shape(
+    const struct tbt_fec_shape *sh)
+{
+    if (!sh)
+        return &tbt_fec_ops_rlnc;
+    if (sh->d == 0 && sh->k >= 100 && sh->k <= 1000)
+        return &tbt_fec_ops_sclc;
+    return &tbt_fec_ops_rlnc;
+}
+
+static struct tbt_fec_grouped *tbt_fec_codec_new(
+    const struct tbt_fec_sclc_shape *sclc, u16 groups, u16 n, u16 m, u16 k,
+    u16 w, u8 d, u64 nonce)
+{
+    if (sclc)
+        return tbt_fec_sclc_new(sclc, TBT_FEC_S, nonce);
+    return tbt_fec_grouped_new(groups, n, m, k, w, TBT_FEC_S, d, nonce);
+}
+
 int tbt_fec_data_init(struct tbt_session *sess)
 {
     struct tbt_tunnel *t = sess->tunnel;
     struct tbt_fec_rx *rx;
     struct tbt_fec_tx *tx;
+    struct tbt_fec_sclc_shape sclc;
+    bool is_sclc = t->cfg.mode == 3;
     u16 n = t->cfg.n, m = t->cfg.m, shares, groups, w, d;
     u32 per, slots, total, i;
 
@@ -5777,11 +6209,26 @@ int tbt_fec_data_init(struct tbt_session *sess)
                             TBT_FEC_MAX_SHARES);
         return -EINVAL;
     }
-    if (t->cfg.mode == 3)
+    /* mode=3 names the codec variant and its graph from the shape itself:
+     * one group of 256 shares is the binary downlink. The rate is derived
+     * from n/(n+m), never configured. */
+    if (is_sclc && tbt_fec_sclc_shape_of(n, m, t->cfg.carriers, t->cfg.w, 0,
+                                         &sclc))
     {
-        pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: mode=3 is SC-LDPC\n",
+        pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: not an SC-LDPC shape n=%u m=%u carriers=%u w=%u\n",
+                            (unsigned long long)t->cfg.id, n, m,
+                            t->cfg.carriers, t->cfg.w);
+        return -EINVAL;
+    }
+    /* 0.3.0 fixes the shape; the rate control law cannot represent a
+     * 256-share or 32-share block and would send a CFG the peer must refuse
+     * every 250 ms. The parser already defaults it off; keep the invariant
+     * explicit for a caller that sets it another way. */
+    if (is_sclc && READ_ONCE(sess->adaptive))
+    {
+        pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: adaptive is off for mode=3\n",
                             (unsigned long long)t->cfg.id);
-        return -EOPNOTSUPP; /* SC-LDPC is D's codec, not a silent RLNC alias */
+        return -EINVAL;
     }
     shares = (u16)(n + m);
     if (!t->cfg.carriers || t->cfg.carriers % shares)
@@ -5799,23 +6246,42 @@ int tbt_fec_data_init(struct tbt_session *sess)
                             TBT_FEC_MAX_GROUPS);
         return -EINVAL;
     }
-    /* One group keeps the proven block code (w = n). A grouped session uses
-     * the configured window (2n by default): its wider coefficient space lets
-     * four parity rows reach rank 4, which the even-weight rows of w = n
-     * cannot do for n = 4. The window is a local codec parameter; win_len on
-     * the wire still names the n packets of one block. */
-    w = n;
-    if (groups > 1)
+    if (is_sclc)
     {
-        w = t->cfg.w ? t->cfg.w : (u16)(2 * n);
-        if (w < n)
-            w = n;
+        /* The codec's w/k/d are not an RLNC window: the downlink carries
+         * (rate_ppm, block, 0), the uplink (block, L, rate_256). */
+        if (sclc.variant == TBT_FEC_SCLC_DOWN)
+        {
+            w = sclc.block;
+            d = 0;
+        }
+        else
+        {
+            w = sclc.L;
+            d = sclc.rate_256;
+        }
     }
-    d = (u16)(w / 2);
-    if (!d)
-        d = 1;
-    if (w > 1 && d >= w)
-        d = (u16)(w - 1);
+    else
+    {
+        /* One group keeps the proven block code (w = n). A grouped session
+         * uses the configured window (2n by default): its wider coefficient
+         * space lets four parity rows reach rank 4, which the even-weight
+         * rows of w = n cannot do for n = 4. The window is a local codec
+         * parameter; win_len on the wire still names the n packets of one
+         * block. */
+        w = n;
+        if (groups > 1)
+        {
+            w = t->cfg.w ? t->cfg.w : (u16)(2 * n);
+            if (w < n)
+                w = n;
+        }
+        d = (u16)(w / 2);
+        if (!d)
+            d = 1;
+        if (w > 1 && d >= w)
+            d = (u16)(w - 1);
+    }
 
     /* One super-block across every group is groups*(n+m)*S bytes. Keep the
      * whole RX arena at or below 16 MiB: 32x8 gets 8 slots, one group keeps
@@ -5863,7 +6329,13 @@ int tbt_fec_data_init(struct tbt_session *sess)
     rx->shape.groups = groups;
     rx->shape.slots = (u16)slots;
     rx->shape.w = w;
-    rx->shape.k = n;
+    /* The shape fields are the codec identity the CFG carries. RLNC keeps
+     * k = n; SC-LDPC reuses them for the graph: binary (rate_ppm, block, 0)
+     * and GF(16) (block, L, rate_256). */
+    rx->shape.k = is_sclc ? (u16)(sclc.variant == TBT_FEC_SCLC_DOWN
+                                      ? sclc.rate_ppm
+                                      : sclc.block)
+                          : n;
     rx->shape.d = (u8)d;
     rx->prev_shape = rx->shape;
     rx->est = kzalloc(sizeof(*rx->est), GFP_KERNEL);
@@ -5887,20 +6359,21 @@ int tbt_fec_data_init(struct tbt_session *sess)
     rx->req_block = kvzalloc((size_t)total * sizeof(*rx->req_block),
                              GFP_KERNEL);
     rx->nack_cadence_ms = TBT_FEC_NACK_RETRY_MS;
-    /* Decode scratch: one recovered slot per parity row, and one zero slot
-     * for padding and absent parity. Both are written outside rx->lock. */
-    /* Recovered-slot scratch covers the largest m a switch may install. The
-     * 0.3.0 family tops out at m = 6; a fixed non-adaptive shape may be
-     * larger, so keep the larger of the two. */
-    rx->rec = kvzalloc((size_t)(m > TBT_FEC_ADAPT_CLASSES ?
-                                    m : TBT_FEC_ADAPT_CLASSES) *
+    /* Decode scratch: one recovered slot per missing DATA share, and one zero
+     * slot for padding and absent parity. Both are written outside rx->lock.
+     * The RLNC path never has more than m missing (its gate requires one
+     * parity row per missing share), but an SC-LDPC block can miss up to n
+     * DATA shares and still recover them, so size by max(n, m). */
+    rx->rec = kvzalloc((size_t)((n > m ? n : m) > TBT_FEC_ADAPT_CLASSES
+                                    ? (n > m ? n : m)
+                                    : TBT_FEC_ADAPT_CLASSES) *
                            TBT_FEC_S,
                        GFP_KERNEL);
     rx->zero = kvzalloc(TBT_FEC_S, GFP_KERNEL);
     TBT_DIAG("fec grouped rx codec start tunnel=%llu groups=%u n=%u m=%u w=%u d=%u",
              (unsigned long long)t->cfg.id, groups, n, m, w, d);
-    rx->codec = tbt_fec_grouped_new(groups, n, m, n, w, TBT_FEC_S, d,
-                                    tbt_fec_base_nonce(sess));
+    rx->codec = tbt_fec_codec_new(is_sclc ? &sclc : NULL, groups, n, m, n, w,
+                                  (u8)d, tbt_fec_base_nonce(sess));
     TBT_DIAG("fec grouped rx codec %s tunnel=%llu groups=%u blk=%d",
              rx->codec ? "ok" : "FAILED", (unsigned long long)t->cfg.id,
              groups, !!rx->blk);
@@ -5972,6 +6445,11 @@ int tbt_fec_data_init(struct tbt_session *sess)
     tx->n = n;
     tx->m = m;
     tx->s = TBT_FEC_S;
+    /* The shape the peer must receive with. RLNC keeps k = n; SC-LDPC uses
+     * the codec permutation (see tbt_fec_sclc_shape). */
+    tx->shape_w = w;
+    tx->shape_k = rx->shape.k;
+    tx->shape_d = (u8)d;
     spin_lock_init(&tx->lock);
     atomic_set(&tx->run, 0);
     tx->ring = kvzalloc(tx->ring_size, GFP_KERNEL);
@@ -5980,10 +6458,10 @@ int tbt_fec_data_init(struct tbt_session *sess)
     tx->g = kvzalloc((size_t)groups * sizeof(*tx->g), GFP_KERNEL);
     TBT_DIAG("fec grouped tx codec start tunnel=%llu groups=%u n=%u m=%u w=%u d=%u",
              (unsigned long long)t->cfg.id, groups, n, m, w, d);
-    tx->codec = tbt_fec_grouped_new(groups, n, m, n, w, TBT_FEC_S, d,
-                                    tx->nonce);
+    tx->codec = tbt_fec_codec_new(is_sclc ? &sclc : NULL, groups, n, m, n, w,
+                                  (u8)d, tx->nonce);
     if (tx->codec)
-        tx->band = tbt_fec_rlnc_band(tbt_fec_grouped_ctx(tx->codec, 0));
+        tx->band = tbt_fec_grouped_band(tx->codec, 0);
     TBT_DIAG("fec grouped tx codec %s tunnel=%llu groups=%u ring=%d pkt=%d rec=%d g=%d",
              tx->codec ? "ok" : "FAILED", (unsigned long long)t->cfg.id,
              groups, !!tx->ring, !!tx->pkt, !!tx->rec, !!tx->g);
@@ -6045,9 +6523,13 @@ int tbt_fec_data_init(struct tbt_session *sess)
     INIT_DELAYED_WORK(&sess->w_fec_tx, tbt_fec_tx_work);
     INIT_DELAYED_WORK(&sess->w_fec_rx, tbt_fec_rx_work);
     sess->fec = true;
-    TBT_DIAG("fec init done tunnel=%llu groups=%u slots=%u credit=%u tx_ring=%u",
+    /* Announce the transmit shape before the first DATA so a session whose
+     * directions differ (downlink 1x256, uplink 8x32) can start. The retry
+     * lives in the TX work; this first arm only starts it. */
+    tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+    TBT_DIAG("fec init done tunnel=%llu groups=%u slots=%u credit=%u tx_ring=%u mode=%u",
              (unsigned long long)t->cfg.id, groups, slots, tx->credit,
-             tx->ring_size);
+             tx->ring_size, t->cfg.mode);
     return 0;
 
 fail:
