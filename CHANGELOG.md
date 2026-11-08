@@ -3,7 +3,32 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
-## [Unreleased]
+## [0.3.3] - 2026-11-08
+
+### Fixed
+
+- A far-side OPEN for a new sid retires the old stream instead of leaving
+  it live until an unrelated timeout: the old target, ACTIVE slot and hash
+  entry are released, the old FEC RX cursor is barriered, and a live object
+  that is no longer `far_sid` drops its late DATA/FIN/RST and is killed.
+  The near allocator skips every sid still in the hash (including
+  tombstones), so a 24-bit wrap cannot hand out a sid the far still
+  protects. (e0312f6)
+- A late FEC RX barrier no longer cancels a newer stream's pending
+  decode/delivery. `tbt_session_bind_sid()` barriers only while `far_sid`
+  still names the stream that adopted the OPEN, and re-arms the RX work if
+  a later adoption wins the race during the cancel. (c6d863b)
+
+### Added
+
+- Uplink track: 0.3.3 uplink 1 GiB byte-exact acceptance harness and
+  documentation under `review/wan-experiment/arm64/sclc-verify/`
+  (`verify-uplink-1g.sh`, `far-uplink-recv.py`, `UPLINK-1G.md`). (18fd717)
+- Fault track: `host/test_fault.c` models carrier kill, RST, FIN, a fast
+  A->B->C redial and FEC block loss with the real RLNC codec;
+  `scripts/qa/` adds the fault-injection and soak tools. (539bf24)
+- Perf track: same-link A/B and direct-baseline tooling under
+  `review/wan-experiment/arm64/perf-0.3.3/`. (a49f49d)
 
 ### Changed
 
@@ -14,6 +39,7 @@ and moves independently of the module version.
   for 0.2-2.4 s. Three frames stay in kmalloc-32k (order-3), and
   `TBT_CAR_PART_MAX` follows the same cap. `tbt_core.c` now fails the build
   if the part buffer grows past 32 KiB.
+  This is the t040-tx batch P0 (8 -> 3) stability/performance fix. (4df9a5c)
 - The uplink GF(16) decoder returns immediately when every DATA share is
   already present, instead of gathering and re-solving the whole block.
   Missing parity shares stay unknown for the NACK path; `codes_ok` still

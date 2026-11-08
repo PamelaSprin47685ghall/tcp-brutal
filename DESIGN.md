@@ -2808,7 +2808,7 @@ makes this design different from a generic L4 tunnel.
 | `tests/*.sh` | **new** |
 
 Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the released tree reports
-`0.3.2`. The wire revision `TBT_CONV=0x0006`
+`0.3.3`. The wire revision `TBT_CONV=0x0006`
 and the FEC record revision `TBT_FEC_CONV=0x1006` bump independently of it.
 HELLO `body[0]` carries `TBT_WIRE_VERSION=1` for the old ARQ and
 `TBT_WIRE_VERSION_V6=3` for a FEC v6 session, not the module version, so the
@@ -2822,11 +2822,11 @@ different wire revisions do not interoperate, because the first HELLO is
 rejected by the conv check.
 
 **Packaging.** `tbtun/tbt_uapi.h` is the single version authority: the
-`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/3/2`). `scripts/mkdkmsconf.sh`
+`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/3/3`). `scripts/mkdkmsconf.sh`
 parses those macros and emits `PACKAGE_VERSION="<major>.<minor>.<patch>"`; parsing
 failure is fatal and never falls back to an old value. `dkms.conf` is a generated file —
 `make dkms.conf` (or `make dkms-tarball`) writes it, and it must not be hand-edited; the
-current generated value is `PACKAGE_VERSION="0.3.2"`. `scripts/install_dkms.sh` reads
+current generated value is `PACKAGE_VERSION="0.3.3"`. `scripts/install_dkms.sh` reads
 the same value through `mkdkmsconf.sh --version`. A development suffix
 `.r<commits>.<sha>` is opt-in with `TBT_DKMS_GIT_SUFFIX=1`; it is not the default.
 
