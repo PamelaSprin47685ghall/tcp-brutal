@@ -1,0 +1,20 @@
+[Fri Nov  6 08:01:17 2026] tbtun: hole timefail seq=10158889 age_us=625423 rtt_us=320532
+[Fri Nov  6 08:01:17 2026] tbtun: hole timefail seq=10158889 age_us=625433 rtt_us=320532
+[Fri Nov  6 08:01:17 2026] tbt_tx_hole_check: 39 callbacks suppressed
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole timefail seq=11075598 age_us=946067 rtt_us=489825
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole timefail seq=11100174 age_us=891029 rtt_us=446300
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole depthfail seq=171 g=1 mask=0x1
+[Fri Nov  6 08:01:17 2026] tbtun: hole timefail seq=11206670 age_us=590359 rtt_us=445927
+[Fri Nov  6 08:01:17 2026] tbtun: hole timefail seq=11206670 age_us=590368 rtt_us=412307
+[Fri Nov  6 08:01:54 2026] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[Fri Nov  6 08:01:55 2026] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[Fri Nov  6 08:01:55 2026] tbtun: tunnel 1 carrier 0 failed to connect: -111

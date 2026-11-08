@@ -1,0 +1,5 @@
+b0ad315a7c0dfb3cb27c051fcdf583616ed5b2316ed9590e1c66a3fb1c328f70  /tmp/tbtun-t1-f8023a2/tbtun.ko
+version:        0.0.1
+srcversion:     475868A5062251A7C237E22
+vermagic:       7.0.0-42-generic SMP preempt mod_unload modversions 
+7.0.0-42-generic

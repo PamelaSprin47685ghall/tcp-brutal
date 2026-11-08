@@ -1,0 +1,16 @@
+source_commit=4c58b0eed002c1cd0c0fb15f9b04f97b44ff1beb (w-window, parent ddef988)
+source_tarball_sha256=a60f33ab5db7521d3108c37528a746e85ada9e7bd137b586ebac50af49c1dc76
+source_tarball=git archive 4c58b0e | sha256sum
+tbt_carrier.c_md5=cd71ea20dff9471018690c19d5209d0a (same on both ends)
+build_near=make KERNEL_DIR=$KDIR PAHOLE=$PAHOLE -j2 (7.2.9-1-MANJARO)
+build_far=make -C /lib/modules/7.0.0-42-generic/build M=$PWD PAHOLE=false -j1 modules
+ko_near_sha256=b82999b66607fd411b1ca4ea1a1177421a376bd6ea2c790c62e1cea94a2afc0a
+ko_far_sha256=0da134805ffd13b78423cc0e3c6eee3896d354cd671bd5fa2d9edca797b9b87f
+srcversion_both=10C45DCB900C5C78F725596
+vermagic_near=7.2.9-1-MANJARO SMP preempt mod_unload
+vermagic_far=7.0.0-42-generic SMP preempt mod_unload modversions
+adv_probe_near_sha256=c03ea90ad5e5e3ef6978dd39bcf00fab75111c1ccad3cad4de62024bc50ec8e9
+adv_probe_far_sha256=c4daa2794d4b56088c2908065d55b75b03132ef66df0a960f253136cebfe7256
+adv_probe_near_build=cc -D_GNU_SOURCE -std=gnu99 -O2 -Wall -Wextra -Werror -I tbtun -o adv_probe adversarial/adv_probe.c
+adv_probe_far_build=cc -D_GNU_SOURCE -std=gnu99 -O2 -Wall -Wextra -Werror -Wno-error=unused-result -I tbtun -o adv_probe adversarial/adv_probe.c
+invariant=same source 4c58b0e + per-end build + srcversion 10C45DCB; ko sha differs by build path/kernel

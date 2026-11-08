@@ -1,0 +1,7 @@
+source_commit=ddef988f57af8a49d1da04c3b5bd374fa59cacbd (w-window, parent f8023a2)
+source_tarball_sha256=7da4624b0ba63e5a04922e4024fef34aedda37243593f1db649fa985edfa514b
+build_near=make KERNEL_DIR=$KDIR PAHOLE=$PAHOLE -j2 (7.2.9-1-MANJARO)
+build_far=make -C /lib/modules/7.0.0-42-generic/build M=$PWD PAHOLE=false -j1 modules
+adv_probe_near=cc -D_GNU_SOURCE -std=gnu99 -O2 -Wall -Wextra -Werror -I tbtun -o adv_probe adversarial/adv_probe.c sha256=c03ea90ad5e5e3ef6978dd39bcf00fab75111c1ccad3cad4de62024bc50ec8e9
+adv_probe_far=cc ... -Werror -Wno-error=unused-result ... sha256=c4daa2794d4b56088c2908065d55b75b03132ef66df0a960f253136cebfe7256
+invariant=same source ddef988 + per-end build + srcversion 62E75E1C; ko sha differs by build path/kernel

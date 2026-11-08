@@ -1,0 +1,103 @@
+REMOTE_SYNTAX_OK
+===STATUS===
+mode=dry-run cmd=status
+carriers=4 spares=1 window_bytes=0
+carrier_port=9000 target_port=5201 app_target_mbps=33.72
+module=./tbtun.ko state_dir=/tmp/tbtun-hnd0
+module: absent
+proc: absent
+services:
+  frps=active
+  caddy=active
+  hysteria-server=active
+  xray=active
+ports:
+  9000=free
+  5201=free
+snapshots:
+  none
+===DEPLOY_DRY_4===
+mode=dry-run cmd=deploy
+carriers=4 spares=1 window_bytes=0
+carrier_port=9000 target_port=5201 app_target_mbps=33.72
+module=./tbtun.ko state_dir=/tmp/tbtun-hnd0
+deploy_hnd0.sh: module missing: ./tbtun.ko (dry-run continues; build before --execute)
+port 9000: free
+port 5201: free
+[dry-run] snapshot -> /tmp/tbtun-hnd0/state-20261105-225043.txt
+[dry-run] insmod ./tbtun.ko max_carriers=4 
+[dry-run] sh -c printf '%s\n' 'tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5201 n=4 m=1 profile=raw nonce=00112233445566778899aabbccddeeff portblock=31000-31099' > /proc/net/tbtun/config
+[dry-run] sh -c cat /proc/net/tbtun/config; cat /proc/net/tbtun/tunnels
+[dry-run] systemd-run --unit=tbtun-iperf3-5201 --property=StandardOutput=file:/tmp/tbtun-hnd0/iperf3-5201.log --property=StandardError=file:/tmp/tbtun-hnd0/iperf3-5201.log /usr/bin/iperf3 -s -B 127.0.0.1 -p 5201 
+[dry-run] sh -c ss -lntH | awk '$4 ~ ":9000$" || $4 ~ ":5201$"'
+===DEPLOY_DRY_8===
+deploy_hnd0.sh: deploy requested; verify with: deploy_hnd0.sh verify
+mode=dry-run cmd=deploy
+carriers=8 spares=2 window_bytes=0
+carrier_port=9000 target_port=5201 app_target_mbps=33.72
+module=./tbtun.ko state_dir=/tmp/tbtun-hnd0
+deploy_hnd0.sh: module missing: ./tbtun.ko (dry-run continues; build before --execute)
+port 9000: free
+port 5201: free
+[dry-run] snapshot -> /tmp/tbtun-hnd0/state-20261105-225044.txt
+[dry-run] insmod ./tbtun.ko max_carriers=8 
+[dry-run] sh -c printf '%s\n' 'tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5201 n=8 m=2 profile=raw nonce=00112233445566778899aabbccddeeff portblock=31000-31099' > /proc/net/tbtun/config
+[dry-run] sh -c cat /proc/net/tbtun/config; cat /proc/net/tbtun/tunnels
+[dry-run] systemd-run --unit=tbtun-iperf3-5201 --property=StandardOutput=file:/tmp/tbtun-hnd0/iperf3-5201.log --property=StandardError=file:/tmp/tbtun-hnd0/iperf3-5201.log /usr/bin/iperf3 -s -B 127.0.0.1 -p 5201 
+[dry-run] sh -c ss -lntH | awk '$4 ~ ":9000$" || $4 ~ ":5201$"'
+===DEPLOY_DRY_256===
+mode=dry-run cmd=deploy
+carriers=256 spares=64 window_bytes=0
+carrier_port=9000 target_port=5201 app_target_mbps=33.72
+module=./tbtun.ko state_dir=/tmp/tbtun-hnd0
+deploy_hnd0.sh: deploy requested; verify with: deploy_hnd0.sh verify
+deploy_hnd0.sh: module missing: ./tbtun.ko (dry-run continues; build before --execute)
+port 9000: free
+port 5201: free
+[dry-run] snapshot -> /tmp/tbtun-hnd0/state-20261105-225044.txt
+deploy_hnd0.sh: requesting 256 carriers; the w-window module caps at 16.
+deploy_hnd0.sh: insmod is expected to fail until the FEC v6/grouped branch lands.
+deploy_hnd0.sh: this script will abort and print the rollback command, not shrink the request.
+[dry-run] insmod ./tbtun.ko max_carriers=256 
+[dry-run] sh -c printf '%s\n' 'tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5201 n=256 m=64 profile=raw nonce=00112233445566778899aabbccddeeff portblock=31000-31099' > /proc/net/tbtun/config
+[dry-run] sh -c cat /proc/net/tbtun/config; cat /proc/net/tbtun/tunnels
+[dry-run] systemd-run --unit=tbtun-iperf3-5201 --property=StandardOutput=file:/tmp/tbtun-hnd0/iperf3-5201.log --property=StandardError=file:/tmp/tbtun-hnd0/iperf3-5201.log /usr/bin/iperf3 -s -B 127.0.0.1 -p 5201 
+[dry-run] sh -c ss -lntH | awk '$4 ~ ":9000$" || $4 ~ ":5201$"'
+deploy_hnd0.sh: deploy requested; verify with: deploy_hnd0.sh verify
+===ROLLBACK_DRY===
+mode=dry-run cmd=rollback
+carriers=4 spares=1 window_bytes=0
+carrier_port=9000 target_port=5201 app_target_mbps=33.72
+module=./tbtun.ko state_dir=/tmp/tbtun-hnd0
+[dry-run] sh -c systemctl stop 'tbtun-iperf3-5201.service' 2>/dev/null || true
+[dry-run] sh -c systemctl reset-failed 'tbtun-iperf3-5201.service' 2>/dev/null || true
+module: already absent
+[dry-run] sh -c test ! -d /proc/net/tbtun
+[dry-run] sh -c ! ss -lntH | awk '$4 ~ ":9000$" || $4 ~ ":5201$"' | grep -q .
+deploy_hnd0.sh: no snapshot found; checking services as-is
+  frps=active
+  caddy=active
+  hysteria-server=active
+  xray=active
+routes (unchanged by this script):
+default via 45.11.1.126 dev eth0 proto static 
+1.1.1.1 via 45.11.1.126 dev eth0 proto static 
+1.2.4.8 via 45.11.1.126 dev eth0 proto static 
+45.11.1.0/25 dev eth0 proto kernel scope link src 45.11.1.62 
+deploy_hnd0.sh: rollback requested; verify with: deploy_hnd0.sh verify
+===VERIFY===
+mode=dry-run cmd=verify
+carriers=4 spares=1 window_bytes=0
+carrier_port=9000 target_port=5201 app_target_mbps=33.72
+module=./tbtun.ko state_dir=/tmp/tbtun-hnd0
+module=absent
+proc=absent
+service frps=active
+service caddy=active
+service hysteria-server=active
+service xray=active
+port 9000=free
+port 5201=free
+snapshot=none
+app_target_mbps=33.72 (throughput is measured by T5.2, not here)
+VERIFY_RC=0

@@ -1,0 +1,17 @@
+=== near poll window 1793921471.042 .. 1793921476.289 (run 1793921471.050 .. 1793921476.314)
+before_cpu=cpu  20071173 13780 4895564 600827305 121687 1424226 615997 0 2629584 0
+after_cpu=cpu  20071868 13780 4895645 600834915 121687 1424243 616018 0 2629584 0
+delta user nice sys idle iowait irq softirq steal guest guest_nice = [695, 0, 81, 7610, 0, 17, 21, 0, 0, 0]
+busy_jiffies=814 total_jiffies=8424 cpu_pct=9.66
+loadavg before=1.55 1.77 2.91 3/1453 3526776 after=1.50 1.76 2.90 2/1455 3527021
+stream_lines=68
+=== far poll window 1793921471.019 .. 1793921476.281 (run 1793921471.050 .. 1793921476.314)
+before_cpu=cpu  691122 59021 757699 27156482 11422 0 64215 16727 0 0
+after_cpu=cpu  691173 59021 757836 27157278 11423 0 64247 16728 0 0
+delta user nice sys idle iowait irq softirq steal guest guest_nice = [51, 0, 137, 796, 1, 0, 32, 1, 0, 0]
+busy_jiffies=221 total_jiffies=1018 cpu_pct=21.71
+loadavg before=0.33 0.37 0.45 1/205 875567 after=0.31 0.37 0.45 1/206 875731
+stream_lines=47
+=== iperf3 cpu_utilization_percent: {"host_total": 15.127880593031856, "host_user": 15.08002440280799, "host_system": 0.04783480676085227, "remote_total": 2.463901330224292, "remote_user": 0.13465777751461827, "remote_system": 2.3292905454779564}
+=== iperf3 sum_sent: {"start": 0, "end": 4.000568, "seconds": 4.000568, "bytes": 16777216, "bits_per_second": 33549667.9471515, "retransmits": 6, "sender": true}
+=== iperf3 sum_received: {"start": 0, "end": 4.255907, "seconds": 4.255907, "bytes": 13500416, "bits_per_second": 25377276.336160544, "sender": true}

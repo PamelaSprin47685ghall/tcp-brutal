@@ -1,0 +1,370 @@
+[Fri Nov  6 03:20:17 2026] tbtun: loading out-of-tree module taints kernel.
+[Fri Nov  6 03:20:17 2026] tbtun: module verification failed: signature and/or required key missing - tainting kernel
+[Fri Nov  6 03:20:17 2026] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[Fri Nov  6 03:20:31 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:20:31 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:20:31 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:20:31 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:20:31 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:21:36 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40005 peer=45.11.1.62:9000
+[Fri Nov  6 03:21:36 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:21:36 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:21:36 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:40 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:40 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:40 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:40 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:40 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:40 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40006 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:40 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40007 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:40 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40005 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:40 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:41 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:41 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:41 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40008 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:41 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:41 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40006 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:41 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40005 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:41 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40007 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:41 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:42 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:42 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:42 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40008 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:42 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:42 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40006 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:42 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40005 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:42 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:42 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:43 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:43 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40007 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:43 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:43 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40008 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:43 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40006 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:43 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:43 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:43 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40005 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:43 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:44 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40008 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:44 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:44 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40007 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:44 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40006 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:44 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:44 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:44 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40005 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:44 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:44 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40007 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:44 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40008 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:44 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:45 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:45 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:45 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40005 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:45 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40006 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:45 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:45 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:46 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:46 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:46 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:46 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:22:47 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:23:09 2026] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[Fri Nov  6 03:23:09 2026] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[Fri Nov  6 03:23:09 2026] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[Fri Nov  6 03:23:10 2026] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[Fri Nov  6 03:23:10 2026] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[Fri Nov  6 03:23:10 2026] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[Fri Nov  6 03:23:10 2026] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[Fri Nov  6 03:23:10 2026] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[Fri Nov  6 03:23:10 2026] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[Fri Nov  6 03:23:10 2026] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[Fri Nov  6 03:23:10 2026] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[Fri Nov  6 03:23:10 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:23:10 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:23:10 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:23:18 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:23:18 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:23:18 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:23:18 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:23:18 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:23:46 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40005 peer=45.11.1.62:9000
+[Fri Nov  6 03:23:46 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40006 peer=45.11.1.62:9000
+[Fri Nov  6 03:23:46 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40007 peer=45.11.1.62:9000
+[Fri Nov  6 03:23:46 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40008 peer=45.11.1.62:9000
+[Fri Nov  6 03:23:46 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:23:52 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:23:52 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:24:39 2026] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[Fri Nov  6 03:24:39 2026] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[Fri Nov  6 03:24:39 2026] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[Fri Nov  6 03:24:39 2026] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[Fri Nov  6 03:24:39 2026] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[Fri Nov  6 03:24:39 2026] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[Fri Nov  6 03:24:39 2026] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[Fri Nov  6 03:24:39 2026] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[Fri Nov  6 03:24:40 2026] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[Fri Nov  6 03:24:40 2026] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[Fri Nov  6 03:24:40 2026] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[Fri Nov  6 03:24:40 2026] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[Fri Nov  6 03:24:40 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:24:40 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:24:40 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:24:40 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:24:44 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:24:44 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:24:44 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:24:44 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:24:44 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:25:03 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40006 peer=45.11.1.62:9000
+[Fri Nov  6 03:25:03 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40005 peer=45.11.1.62:9000
+[Fri Nov  6 03:25:03 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40007 peer=45.11.1.62:9000
+[Fri Nov  6 03:25:03 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:25:03 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:25:14 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:25:14 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:25:56 2026] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[Fri Nov  6 03:25:56 2026] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[Fri Nov  6 03:25:56 2026] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[Fri Nov  6 03:25:56 2026] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[Fri Nov  6 03:25:57 2026] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[Fri Nov  6 03:25:57 2026] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[Fri Nov  6 03:25:57 2026] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[Fri Nov  6 03:25:57 2026] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[Fri Nov  6 03:25:57 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:25:57 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:25:57 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:25:57 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:26:03 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:26:03 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:26:03 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:26:03 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:26:03 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:26:31 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40005 peer=45.11.1.62:9000
+[Fri Nov  6 03:26:32 2026] tbtun: tunnel 1 carrier 1 failed to connect: -115
+[Fri Nov  6 03:26:32 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:27:05 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:27:05 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:27:05 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:27:05 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40005 peer=45.11.1.62:9000
+[Fri Nov  6 03:28:03 2026] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[Fri Nov  6 03:28:03 2026] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[Fri Nov  6 03:28:03 2026] tbtun: tunnel 1 carrier 0 failed to connect: -111
+[Fri Nov  6 03:28:04 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:28:04 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:28:04 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:28:06 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:28:06 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:28:06 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:28:06 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:28:06 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:29:14 2026] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[Fri Nov  6 03:29:14 2026] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[Fri Nov  6 03:29:14 2026] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[Fri Nov  6 03:29:14 2026] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[Fri Nov  6 03:29:15 2026] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[Fri Nov  6 03:29:15 2026] tbtun: tunnel 1 carrier 4 failed to connect: -111
+[Fri Nov  6 03:29:15 2026] tbtun: tunnel 1 carrier 1 failed to connect: -111
+[Fri Nov  6 03:29:15 2026] tbtun: tunnel 1 carrier 2 failed to connect: -111
+[Fri Nov  6 03:29:15 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:29:15 2026] tbtun: tunnel 1 carrier 3 failed to connect: -111
+[Fri Nov  6 03:29:15 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:29:15 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:29:15 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:29:17 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:29:17 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:29:17 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:29:17 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:29:17 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:29:47 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:29:47 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:39:24 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:39:42 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:40:22 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:40:39 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:41:18 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:41:18 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:41:18 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:41:18 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:41:18 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:41:36 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40006 peer=45.11.1.62:9000
+[Fri Nov  6 03:41:36 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40005 peer=45.11.1.62:9000
+[Fri Nov  6 03:41:36 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:41:36 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:42:16 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:42:16 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:42:16 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:42:16 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:42:16 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:42:34 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40006 peer=45.11.1.62:9000
+[Fri Nov  6 03:42:35 2026] tbtun: tunnel 1 carrier 4 failed to connect: -115
+[Fri Nov  6 03:42:35 2026] tbtun: tunnel 1 carrier 0 failed to connect: -115
+[Fri Nov  6 03:42:35 2026] tbtun: tunnel 1 carrier 2 failed to connect: -115
+[Fri Nov  6 03:42:35 2026] tbtun: tunnel 1 carrier 3 failed to connect: -115
+[Fri Nov  6 03:42:35 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:42:35 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:42:35 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:42:35 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:13 2026] tbtun: tunnel 1 carrier 8 DIALED lport=40006 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:13 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:13 2026] tbtun: tunnel 1 carrier 5 DIALED lport=40005 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:13 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:13 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:13 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:13 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:13 2026] tbtun: tunnel 1 carrier 6 DIALED lport=40007 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:13 2026] tbtun: tunnel 1 carrier 7 DIALED lport=40008 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:31 2026] tbtun: tunnel 1 carrier 6 DIALED lport=40009 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:31 2026] tbtun: tunnel 1 carrier 8 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:31 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40006 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:31 2026] tbtun: tunnel 1 carrier 7 DIALED lport=40010 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:31 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40007 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:31 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40011 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:31 2026] tbtun: tunnel 1 carrier 5 DIALED lport=40012 peer=45.11.1.62:9000
+[Fri Nov  6 03:43:31 2026] tbtun: tunnel 1 carrier 2 failed to connect: -115
+[Fri Nov  6 03:43:32 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:09 2026] tbtun: tunnel 1 carrier 6 DIALED lport=40006 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:09 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:09 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:09 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:09 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:09 2026] tbtun: tunnel 1 carrier 5 DIALED lport=40005 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:09 2026] tbtun: tunnel 1 carrier 7 DIALED lport=40007 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:09 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:09 2026] tbtun: tunnel 1 carrier 8 DIALED lport=40008 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:27 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40013 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:27 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40011 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:27 2026] tbtun: tunnel 1 carrier 5 DIALED lport=40014 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:27 2026] tbtun: tunnel 1 carrier 8 DIALED lport=40009 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:27 2026] tbtun: tunnel 1 carrier 6 DIALED lport=40015 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:27 2026] tbtun: tunnel 1 carrier 7 DIALED lport=40016 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:27 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40012 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:27 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40010 peer=45.11.1.62:9000
+[Fri Nov  6 03:44:28 2026] tbtun: tunnel 1 carrier 0 failed to connect: -115
+[Fri Nov  6 03:44:28 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:45:05 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:45:05 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:45:05 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:45:05 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:45:05 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:46:03 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:46:03 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:46:03 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:46:03 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:46:03 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:47:06 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:47:06 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:47:06 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:47:06 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:47:07 2026] tbtun: tunnel 1 carrier 3 failed to connect: -115
+[Fri Nov  6 03:47:07 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:47:24 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40006 peer=45.11.1.62:9000
+[Fri Nov  6 03:47:24 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40005 peer=45.11.1.62:9000
+[Fri Nov  6 03:47:25 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40007 peer=45.11.1.62:9000
+[Fri Nov  6 03:47:25 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:47:25 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:47:41 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:47:41 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:48:07 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:48:07 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:48:07 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:48:07 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:48:07 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:48:22 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40006 peer=45.11.1.62:9000
+[Fri Nov  6 03:48:22 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40009 peer=45.11.1.62:9000
+[Fri Nov  6 03:48:22 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40005 peer=45.11.1.62:9000
+[Fri Nov  6 03:48:22 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40007 peer=45.11.1.62:9000
+[Fri Nov  6 03:48:22 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40008 peer=45.11.1.62:9000
+[Fri Nov  6 03:48:38 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:50:49 2026] tbtun: tunnel 1 carrier 3 DIALED lport=40003 peer=45.11.1.62:9000
+[Fri Nov  6 03:50:49 2026] tbtun: tunnel 1 carrier 2 DIALED lport=40002 peer=45.11.1.62:9000
+[Fri Nov  6 03:50:49 2026] tbtun: tunnel 1 carrier 1 DIALED lport=40001 peer=45.11.1.62:9000
+[Fri Nov  6 03:50:49 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 03:50:49 2026] tbtun: tunnel 1 carrier 4 DIALED lport=40004 peer=45.11.1.62:9000
+[Fri Nov  6 03:53:13 2026] tbtun: unloaded
+[Fri Nov  6 07:04:39 2026] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[Fri Nov  6 07:04:44 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 07:09:29 2026] tbtun: unloaded
+[Fri Nov  6 07:15:58 2026] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[Fri Nov  6 07:16:03 2026] tbtun: tunnel 1 carrier 0 DIALED lport=40000 peer=45.11.1.62:9000
+[Fri Nov  6 07:16:33 2026] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[Fri Nov  6 07:16:33 2026] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[Fri Nov  6 07:16:33 2026] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[Fri Nov  6 07:16:33 2026] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[Fri Nov  6 07:16:33 2026] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[Fri Nov  6 07:16:33 2026] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[Fri Nov  6 07:16:33 2026] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[Fri Nov  6 07:16:33 2026] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[Fri Nov  6 07:16:33 2026] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[Fri Nov  6 07:16:33 2026] tbtun: hole depthfail seq=37 g=1 mask=0x1
+[Fri Nov  6 07:16:33 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:16:33 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:16:33 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:16:33 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:16:33 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:16:33 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:16:33 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:16:33 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:16:33 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:16:33 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:16:36 2026] tbtun: TXSTALLKILL sid=939272437760 ack=171 txseq=172 age_us=3170447
+[Fri Nov  6 07:16:36 2026] tbtun: retx wndshort seq=13507085 len=8192 total=8224 wnd=785248 inflight=785496 wnd_avail=0 mem_avail=1148456
+[Fri Nov  6 07:16:36 2026] tbtun: retx wndshort seq=13777156 len=8192 total=8224 wnd=886432 inflight=881097 wnd_avail=5335 mem_avail=1053815
+[Fri Nov  6 07:16:36 2026] tbtun: retx wndshort seq=13768964 len=8192 total=8224 wnd=886432 inflight=889321 wnd_avail=0 mem_avail=1045591
+[Fri Nov  6 07:16:36 2026] tbtun: retx wndshort seq=13760772 len=8192 total=8224 wnd=886432 inflight=897545 wnd_avail=0 mem_avail=1036407
+[Fri Nov  6 07:16:36 2026] tbtun: retx wndshort seq=13752580 len=8192 total=8224 wnd=886432 inflight=905769 wnd_avail=0 mem_avail=1028183
+[Fri Nov  6 07:16:36 2026] tbtun: retx wndshort seq=13744388 len=8192 total=8224 wnd=886432 inflight=913993 wnd_avail=0 mem_avail=1019959
+[Fri Nov  6 07:16:36 2026] tbtun: retx wndshort seq=13736196 len=8192 total=8224 wnd=886432 inflight=922217 wnd_avail=0 mem_avail=1011735
+[Fri Nov  6 07:16:36 2026] tbtun: retx wndshort seq=13728004 len=8192 total=8224 wnd=886432 inflight=930441 wnd_avail=0 mem_avail=1003511
+[Fri Nov  6 07:16:36 2026] tbtun: retx wndshort seq=13719812 len=8192 total=8224 wnd=886432 inflight=938665 wnd_avail=0 mem_avail=995287
+[Fri Nov  6 07:16:36 2026] tbtun: retx wndshort seq=13777156 len=8192 total=8224 wnd=886432 inflight=946889 wnd_avail=0 mem_avail=987063
+[Fri Nov  6 07:16:36 2026] tbtun: hole timefail seq=14063611 age_us=375436 rtt_us=248489
+[Fri Nov  6 07:16:36 2026] tbtun: hole timefail seq=14112763 age_us=6030 rtt_us=188591
+[Fri Nov  6 07:16:36 2026] tbtun: hole timefail seq=14112763 age_us=19294 rtt_us=185380
+[Fri Nov  6 07:16:36 2026] tbtun: hole timefail seq=14112763 age_us=28180 rtt_us=185380
+[Fri Nov  6 07:16:36 2026] tbtun: hole timefail seq=14112763 age_us=39549 rtt_us=185497
+[Fri Nov  6 07:16:36 2026] tbtun: hole timefail seq=14112763 age_us=49985 rtt_us=189475
+[Fri Nov  6 07:16:36 2026] tbtun: hole timefail seq=14112763 age_us=61043 rtt_us=193110
+[Fri Nov  6 07:16:36 2026] tbtun: hole timefail seq=14112763 age_us=73127 rtt_us=193378
+[Fri Nov  6 07:16:36 2026] tbtun: hole timefail seq=14112763 age_us=82935 rtt_us=193551
+[Fri Nov  6 07:16:36 2026] tbtun: hole timefail seq=14112763 age_us=94324 rtt_us=193400
+[Fri Nov  6 07:17:24 2026] tbtun: unloaded
+[Fri Nov  6 07:30:40 2026] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[Fri Nov  6 07:30:58 2026] tbtun: tunnel 1 carrier 0 DIALED lport=30000 peer=45.11.1.62:9000
+[Fri Nov  6 07:31:22 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 07:31:22 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 07:31:23 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 07:31:23 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 07:31:23 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 07:31:23 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 07:31:23 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 07:31:23 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 07:31:23 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 07:31:23 2026] tbtun: hole depthfail seq=37 g=2 mask=0x1
+[Fri Nov  6 07:31:23 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:31:23 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:31:23 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:31:23 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:31:23 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:31:23 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:31:23 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:31:23 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:31:23 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:31:23 2026] tbtun: hole gatefail seq=37 mask=0x1 ack=37
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=12721925 age_us=266949 rtt_us=265459
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=12844805 age_us=267916 rtt_us=265621
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=12951036 age_us=267162 rtt_us=267370
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=13123068 age_us=515407 rtt_us=289864
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=13213180 age_us=504925 rtt_us=307075
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=13352179 age_us=370115 rtt_us=317319
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=13352179 age_us=370152 rtt_us=304157
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=13352179 age_us=370182 rtt_us=294087
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=13352179 age_us=370218 rtt_us=286375
+[Fri Nov  6 07:31:27 2026] tbtun: hole timefail seq=13352179 age_us=370244 rtt_us=280447
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1
+[Fri Nov  6 07:31:28 2026] tbtun: hole depthfail seq=499 g=1 mask=0x1

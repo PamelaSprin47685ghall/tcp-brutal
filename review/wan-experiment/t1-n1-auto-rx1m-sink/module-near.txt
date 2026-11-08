@@ -1,0 +1,4 @@
+path=/tmp/tbtun-t1-close/tbtun-near.ko
+sha256=c476bd480d658be5e5607c043b58d4116fd469fdcb618d53a65c2e1ea3a43a7a
+srcversion=62E75E1CE05E5C4887C9AAA
+vermagic=7.2.9-1-MANJARO SMP preempt mod_unload

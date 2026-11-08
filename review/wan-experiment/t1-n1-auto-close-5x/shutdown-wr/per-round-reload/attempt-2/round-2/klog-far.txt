@@ -1,0 +1,3 @@
+[148879.177152] tbtun 0.0.1 loaded: 64 tunnels max, 16 carriers max
+[148879.719237] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30000, awaiting HELLO
+[148880.600435] tbtun: tunnel 1 carrier ACCEPTED lport=9000 rport=30000, awaiting HELLO

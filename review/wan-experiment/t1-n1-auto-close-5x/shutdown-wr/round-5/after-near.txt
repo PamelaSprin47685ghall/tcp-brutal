@@ -1,0 +1,34 @@
+=== 1793926190.340738357
+--- cpu
+cpu  20679632 13780 4957469 607707034 122017 1438929 625049 0 2650616 0
+1.93 1.72 1.60 2/1450 3672561
+--- stats
+debug_loss=0
+gaps_total=0
+streams_total=5
+tunnel 1 capture_runs=126 actor_calls=562 submit_bytes=83886080 tx=87185973 wire=87997313 err=0 short=0
+tunnel 1 rx_work_runs=1714 rx_drain_entries=3367 rx_drain_bytes=519682 rx_paused_skips=0 rx_adopt_events=0 rx_records=11087 carrier_write_space_runs=12 poll_rescues=1676
+tunnel 1 rx_ready_calls=1950 rx_reads=1714 rx_read_bytes=519682 rx_read_zero=8 rx_resume=0 rx_resume_busy=0 rx_last_drained=400 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=562 rx_delivered=0
+tunnel 1 dbg rcv_nxt=1795871876 copied=1795871876 after=1795871876 qlen=0 allocf=0 over=216 copyf=0 hiwat=202613 pdead=0 prun=21063 pmoved=20075 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=0 rxp=0 txq=0 txp=0 pub_state=7 pub_wmem=0 pub_una=2656772375 pub_nxt=2656772375 car_wmem=0 car_nxt=3675839239 car_copied=3675839239 car_rcvbuf=2097152 car_sndbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=11930 txwake_busy=1911 txwork=11668
+tunnel 1 ws_calls=12
+tunnel 1 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=9384 fbk_rx=9047 retx_frames=406 retx_bytes=3299893 retain_drop=0 retx_hole=132 retx_slow=274 retx_pathloss=0 retx_other=0 data_tx=10675 retx_data_ppm=39536 dup_bytes_ppm=39337 reorder_overflow=0 reorder_max_depth=0 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=16777216 rx_ack=0 peer_paused=0 fb_delay_us=2752 rto_us=346215 una_stall_us=267047 stall_paused_skips=0 stall_idle_skips=4451 stall_declared=0 tx_window=915924 bdp_bytes=455118 k_x100=200 rtt_mean_us=331690 rttvar_us=3264 rtt_max_us=331690 txq_max=981748 win_block=147574 win_resume=19 pump_hw_armed=0 pump_hw_fired=6 retx_evident=5132 retx_cand=408 retx_nosends=1704153 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=406 retx_eagain=0 retx_memshort=0 retx_wndshort=154
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0 close_timeouts=0 close_detaches=0
+tunnel 1 streams streams_active=0 n_streams=0 n_pending=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=0 hole_checks=7703 gate_fail=4974 depth_fail=64 time_fail=711 deliver_timeouts=0 deliver_checks=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0
+tunnel 1 reconcile live_bytes=87997313 live_data=10675 live_retx=406 retired_bytes=0 retired_data=0 retired_retx=0
+--- peers
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+1 0 30000 45.11.1.62:9000 87185973 323827 0 up raw 10675 3009 5800 20075 87997313 0 39536 1331964 1078000 1144064 85 555904 548864 0
+--- tunnels
+# id role state listen peer target n m streams
+1 near listening 127.0.0.1:9001 45.11.1.62:9000 - 1 0 5
+--- config
+tunnel 1 role=near listen=127.0.0.1:9001 peer=45.11.1.62:9000 n=1 m=0 dup=0 profile=raw keepalive=2000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=1048576 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=15000 portblock=30000-30099 nonce=00112233445566778899aabbccddeeff
+--- ports
+# block 30000-30099 (100 ports)
+# configured
+ports 30000-30099

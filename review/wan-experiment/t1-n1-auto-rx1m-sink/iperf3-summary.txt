@@ -1,0 +1,5 @@
+rc=0
+sum_sent={"start": 0, "end": 6.001013, "seconds": 6.001013, "bytes": 16777216, "bits_per_second": 22365845.233129807, "retransmits": 14, "sender": true}
+sum_received={"start": 0, "end": 6.479503, "seconds": 6.479503, "bytes": 11796480, "bits_per_second": 14564672.62998412, "sender": true}
+cpu_utilization_percent={"host_total": 11.5994933639668, "host_user": 11.553359560316215, "host_system": 0.04612010189719958, "remote_total": 0.7460884291017696, "remote_user": 0.06766769590492387, "remote_system": 0.6787293657893425}
+note=iperf3 throughput only; QEMU regression load from window-verify was running; not byte-exact oracle

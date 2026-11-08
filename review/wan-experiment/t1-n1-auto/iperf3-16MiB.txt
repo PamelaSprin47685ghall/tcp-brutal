@@ -1,0 +1,11 @@
+Connecting to host 127.0.0.1, port 9001
+[  5] local 127.0.0.1 port 58176 connected to 127.0.0.1 port 9001
+[ ID] Interval           Transfer     Bitrate         Retr  Cwnd
+[  5]   0.00-1.00   sec  9.38 MBytes  78.6 Mbits/sec    6   1.62 MBytes       
+[  5]   1.00-2.00   sec  5.00 MBytes  41.9 Mbits/sec    0   1.25 MBytes       
+[  5]   2.00-3.00   sec  1.62 MBytes  13.6 Mbits/sec    0   1.25 MBytes       
+- - - - - - - - - - - - - - - - - - - - - - - - -
+[ ID] Interval           Transfer     Bitrate         Retr
+[  5]   0.00-3.00   sec  16.0 MBytes  44.7 Mbits/sec    6            sender
+[  5]   0.00-3.00   sec  0.00 Bytes  0.00 bits/sec                  receiver
+iperf3: error - control socket has closed unexpectedly

@@ -1,0 +1,4 @@
+0da134805ffd13b78423cc0e3c6eee3896d354cd671bd5fa2d9edca797b9b87f  /tmp/tbtun-t1-close5x/tbtun.ko
+c4daa2794d4b56088c2908065d55b75b03132ef66df0a960f253136cebfe7256  /tmp/tbtun-t1-close5x/adv_probe
+srcversion:     10C45DCB900C5C78F725596
+vermagic:       7.0.0-42-generic SMP preempt mod_unload modversions 

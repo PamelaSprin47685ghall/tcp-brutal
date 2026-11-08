@@ -1,0 +1,6 @@
+before_cpu=cpu  20071173 13780 4895564 600827305 121687 1424226 615997 0 2629584 0
+after_cpu=cpu  20071868 13780 4895645 600834915 121687 1424243 616018 0 2629584 0
+delta user nice sys idle iowait irq softirq steal guest guest_nice = [695, 0, 81, 7610, 0, 17, 21, 0, 0, 0]
+busy_jiffies=814 total_jiffies=8424 cpu_pct=9.66
+loadavg before=1.55 1.77 2.91 3/1453 3526776 after=1.50 1.76 2.90 2/1455 3527021
+stream_lines=68

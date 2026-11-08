@@ -1,0 +1,3 @@
+Password: 
+# id carrier sport peer uack rtt_us inflight state class recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped retx_ppm delivery_rate_bps cwnd_bytes snd_wnd wscale rcv_wnd window_clamp rmem_alloc
+1 0 40000 45.11.1.62:9000 16925953 171054 0 up raw 2082 0 115466 2938 17035242 0 12645 6960421 3325000 1171456 85 994784 245760 0

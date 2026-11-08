@@ -1,0 +1,13 @@
+round=4
+sink_bytes=16777216 sink_eof=1
+far_rx_delivered=16777216
+near_fin_seq=16777216 near_fin_w=1 near_rst_w=0
+far_fin_w=1 far_rst_w=0
+near_rxf=1/1 far_rxf=1/1
+near_live_txq=0 far_live_txq=0
+sender_bytes=16777216 sender_eof=1
+near_lost=0 far_lost=1 near_carrier_lost=0 far_carrier_lost=1
+holes_declared=0 holes_unrecoverable=0 deliver_timeouts=0
+close_timeouts=0 close_detaches=0
+txstallkill=0
+VERDICT=FAIL

@@ -1,0 +1,18 @@
+debug_loss=0
+gaps_total=0
+streams_total=1
+tunnel 1 capture_runs=8 actor_calls=4 submit_bytes=4 tx=9 wire=108628 err=0 short=0
+tunnel 1 rx_work_runs=4722 rx_drain_entries=4717 rx_drain_bytes=17035242 rx_paused_skips=0 rx_adopt_events=1 rx_records=2938 carrier_write_space_runs=1 poll_rescues=322
+tunnel 1 rx_ready_calls=6674 rx_reads=4722 rx_read_bytes=17035242 rx_read_zero=71 rx_resume=0 rx_resume_busy=0 rx_last_drained=50 rx_proto=0 rx_errs=0 rx_last_err=0 tx_submit_calls=4 rx_delivered=14121126
+tunnel 1 dbg rcv_nxt=1059793106 copied=1059793106 after=1059793106 qlen=0 allocf=0 over=0 copyf=0 hiwat=0 pdead=0 prun=3355 pmoved=2264 p_nocar=0 p_down=0 p_stop=0 p_empty=0 p_qlen=0
+tunnel 1 live rxq=2656298 rxp=0 txq=0 txp=0 pub_state=7 pub_wmem=0 pub_una=405022672 pub_nxt=405030864 car_wmem=17170 car_nxt=491329692 car_copied=491329692 car_rcvbuf=2097152 car_sndbuf=2097152 car_state=1 car_stop=0 car_ud=1 car_ready=1 car_ws=1 txw_pend=0 txw_busy=0
+tunnel 1 txwake=2266 txwake_busy=585 txwork=1682
+tunnel 1 ws_calls=1
+tunnel 1 c3 n=1 up=1 lost=0 replaced=0 spare_activated=0 alloc_fail=0 port_exhaust=0 port_alloc_fail=0 connect_fail=0 join_dup=0 join_bad=0 join_nonce_reject=0 join_src_reject=0 fbk_tx=1994 fbk_rx=847 retx_frames=5 retx_bytes=5 retain_drop=0 retx_hole=1 retx_slow=4 retx_pathloss=0 retx_other=0 data_tx=9 retx_data_ppm=1000000 dup_bytes_ppm=1000000 reorder_overflow=0 reorder_max_depth=124 ooo_bytes=0 ooo_frames=0 retain_bytes=0 tx_ack=4 rx_ack=16777253 peer_paused=0 fb_delay_us=5000 rto_us=200000 una_stall_us=30078 stall_paused_skips=0 stall_idle_skips=565 stall_declared=0 tx_window=168850 bdp_bytes=76516 k_x100=200 rtt_mean_us=185503 rttvar_us=42248 rtt_max_us=185503 txq_max=234674 win_block=0 win_resume=0 pump_hw_armed=0 pump_hw_fired=1 retx_evident=38 retx_cand=5 retx_nosends=4 retx_txqdrop=0 retx_nopick=0 retx_stalled=0 retx_notup=0 retx_notann=0 retx_batch=5 retx_eagain=0 retx_memshort=0 retx_wndshort=0
+tunnel 1 ctl ctl_lost=0 ctl_retry=0 ctl_requeue=0 ctl_obsolete=0 ctl_queued=0
+tunnel 1 streams streams_active=1 n_streams=1 n_pending=0
+tunnel 1 stream sid=939272437761 state=1 kill=0 attached=0x9 rxq=2656298 rxp=0 txp=0 peer_paused=0 skerr=0 tgt_state=7 tgt_err=0
+tunnel 1 c6 holes_declared=0 holes_repaired=0 holes_unrecoverable=0 rx_max_stall_us=388292 hole_checks=42 gate_fail=27 depth_fail=15 time_fail=0
+tunnel 1 c8 profile_mismatch=0 http_parse_err=0 http_status_err=0 http_req=0 http_resp=0 pad_tx=0 drip_tx=0
+tunnel 1 c5 dup_tx=0 dup_used=0 dup_suppressed=0 dup_same_path=0 inflate_ppm=1000000 dup_bytes=0
+tunnel 1 reconcile live_bytes=108628 live_data=9 live_retx=5 retired_bytes=0 retired_data=0 retired_retx=0
