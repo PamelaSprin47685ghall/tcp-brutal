@@ -1029,6 +1029,12 @@ struct tbt_fec_outq
  * but a NACK burst cannot hold the close path's FIN behind it for the whole
  * 2 MiB burst. The TX work is re-armed immediately while records remain. */
 #define TBT_FEC_REPLAY_PASS_MAX 8u
+/* NACK replies admitted per record while the replay queue is above its
+ * high-water mark. The receiver retries the rest. fix42 queued 1348 shares
+ * (11 MB) in one initial burst, filled the 8 MiB ring, and made the sender
+ * refuse eight further replies; a burst must queue at a rate the drain can
+ * match, not at the speed the NACKs arrive. */
+#define TBT_FEC_NACK_REQ_THROTTLED 4u
 
 /* The seven session work items whose reference is owned by the bit in
  * tbt_session.sched (review/s2-merged-design.md §1.3/§5.1). The order is the

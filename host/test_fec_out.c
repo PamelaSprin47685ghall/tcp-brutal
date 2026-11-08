@@ -44,6 +44,7 @@
 #define OUTQ_QUEUE_MAX (OUTQ_QUEUE_HIGH + NCAR)
 #define OUTQ_QUEUE_BYTES_MAX (OUTQ_QUEUE_MAX * REC_LEN)
 #define REPLAY_BYTES_MAX (16u * REC_LEN)
+#define REPLAY_HIGH (REPLAY_BYTES_MAX / 2)
 #define REC_LEN 64u
 #define NACK_REQ_MAX 256u
 #define BATCH_MAX 8
@@ -307,6 +308,10 @@ static bool outq_high(const struct sched *s)
 
     if (s->outq_queued >= OUTQ_QUEUE_HIGH ||
         s->outq_bytes >= OUTQ_QUEUE_BYTES_HIGH)
+        return true;
+    /* A deep repair backlog yields the packetizer: more new DATA would only
+     * compete with the repair for the same sockets. */
+    if (s->replay_bytes >= REPLAY_HIGH)
         return true;
     for (i = 0; i < NCAR; i++)
         if (s->q[i].depth >= OUTQ_HIGH_DEPTH ||
@@ -816,6 +821,41 @@ static void case_session_ceiling(void)
     sched_free(&s);
 }
 
+/* A repair backlog at its high-water mark stops new DATA: the receiver is
+ * missing shares, and more DATA only competes with the repair. */
+static void case_replay_backpressure(void)
+{
+    struct sched s;
+    int i;
+
+    sched_init(&s);
+    ok(!packetizer_gate(&s), "an empty replay queue lets the packetizer run", NULL);
+    for (i = 0; i < (int)(REPLAY_HIGH / REC_LEN) - 1; i++)
+        ok(push(&s, 0, false, true, 0, i) == 0, "queue a repair", NULL);
+    ok(!packetizer_gate(&s), "below the mark the packetizer still runs", NULL);
+    ok(push(&s, 0, false, true, 0, 900) == 0,
+       "the record at the mark is queued", NULL);
+    ok(packetizer_gate(&s), "at the mark the packetizer pauses", NULL);
+    ok_u32((uint32_t)s.outq_high_wait, 1, "one pause counted");
+    ok_u32((uint32_t)s.outq_drop, 0, "no DATA record was dropped");
+
+    /* Draining the repairs opens the gate again. */
+    s.q[0].bytes = 0; /* the model's flush path is exercised elsewhere */
+    while (s.replay_head)
+    {
+        struct rec *r = s.replay_head;
+
+        s.replay_head = r->next;
+        if (!s.replay_head)
+            s.replay_tail = NULL;
+        rec_free(&s, NULL, r);
+    }
+    ok(!packetizer_gate(&s), "an empty repair queue resumes the packetizer",
+       NULL);
+    ok(!s.outq_paused, "the pause episode ended", NULL);
+    sched_free(&s);
+}
+
 /* The sweep visits every carrier and skips only the full one, in any order. */
 static void case_sweep_visits_all(void)
 {
@@ -1106,6 +1146,7 @@ int main(void)
     case_control_not_blocked();
     case_cap_is_per_carrier();
     case_high_water_backpressure();
+    case_replay_backpressure();
     case_session_ceiling();
     case_sweep_visits_all();
     case_replay_spread_and_budget();

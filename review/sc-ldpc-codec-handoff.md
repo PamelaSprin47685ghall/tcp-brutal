@@ -43,6 +43,12 @@ per-direction INIT 已实现，adaptive 在 mode=3 强制 off。
   （下行 128 条 ≈ 1 MiB，上行 24 条）。码率 0.5 只在满块成立。
 - **NACK 修复粒度**：下行 256-share 块在 p=0.5 时一次 NACK 最多 64 share，
   修复需要多轮；30 s stall 预算可能先到。
+- **修复突发与 replay 环**：fix42 首连里，接收端在一次初始突发中请求
+  1348 个 share（11 MB），把 8 MiB replay 环打满并触发 8 次背压。
+  现在 replay 队列到 50% 时 packetizer 让路（不再产生新 DATA），
+  入队也按 4 条/NACK 节流；环的 75% 高水位仍用于 flush 节流。
+  重发去重靠 `tbt_fec_replay_dup()`（一个 RTT 内）与
+  `tbt_fec_nack_share_skip()`（请求窗口内不重复点名）。
 - **解码成本**：下行一次块解码 128 batch；本机 109–119 MB/s，HND0
   8–11 MB/s。失败后退避 20→200 ms（`fec_decode_backoff`）。块码的部分
   恢复现在会提交：早先"整块全恢复才提交"把 parity 已恢复的 share 丢掉，

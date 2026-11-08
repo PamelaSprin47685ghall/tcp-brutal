@@ -2394,6 +2394,33 @@ static void test_nack_pacing(void)
     ok(!st.valid && st.tries == 0, "NACK state reset", NULL);
 }
 
+/* The two dedup rules a repair burst relies on: do not name a share that is
+ * already in flight, and do not queue a replay for one already sent inside
+ * the round trip. fix42's 25.6% retransmit ratio and full replay ring came
+ * from a burst; these predicates are what keep a burst from repeating. */
+static void test_nack_dedup(void)
+{
+    const u64 hold = 100 * 1000000ULL; /* 100 ms */
+
+    ok(!tbt_fec_replay_dup(1000, 0, hold), "never sent is not a duplicate",
+       NULL);
+    ok(tbt_fec_replay_dup(hold - 1, 1, hold),
+       "sent inside the hold is a duplicate", NULL);
+    ok(!tbt_fec_replay_dup(hold + 1, 1, hold),
+       "sent before the hold is not a duplicate", NULL);
+
+    ok(tbt_fec_nack_share_skip(true, 1000, 0, hold) ==
+           TBT_FEC_NACK_SKIP_PRESENT,
+       "an arrived share is not requested", NULL);
+    ok(tbt_fec_nack_share_skip(false, hold - 1, 1, hold) ==
+           TBT_FEC_NACK_SKIP_INFLIGHT,
+       "a share requested inside the hold is not re-requested", NULL);
+    ok(tbt_fec_nack_share_skip(false, 1000, 0, hold) == TBT_FEC_NACK_KEEP,
+       "a fresh gap is requested", NULL);
+    ok(tbt_fec_nack_share_skip(false, hold + 1, 1, hold) == TBT_FEC_NACK_KEEP,
+       "a gap older than the hold is requested again", NULL);
+}
+
 int main(void)
 {
     test_header_roundtrip();
@@ -2417,6 +2444,7 @@ int main(void)
     test_tail_guard();
     test_parity_only();
     test_nack_pacing();
+    test_nack_dedup();
 
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

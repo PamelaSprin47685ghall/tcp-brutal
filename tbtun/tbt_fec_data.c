@@ -1603,6 +1603,14 @@ static bool tbt_fec_tx_outq_high(struct tbt_session *sess)
     if (sess->fec_outq_queued >= TBT_FEC_OUTQ_QUEUE_HIGH ||
         sess->fec_outq_bytes >= TBT_FEC_OUTQ_QUEUE_BYTES_HIGH)
         high = true;
+    else if (sess->fec_replay_bytes >=
+             tbt_fec_replay_cap(READ_ONCE(sess->fec_closing),
+                                TBT_FEC_REPLAY_BYTES_MAX) / 2)
+        /* Half the ring is a repair backlog the receiver is waiting on; more
+         * new DATA only competes with the repair for the same sockets. Stop
+         * the packetizer until the queue drains below the mark. The flush
+         * high-water (75%) still throttles the drain itself. */
+        high = true;
     else
     {
         for (i = 0; i < sess->n_car; i++)
@@ -5292,6 +5300,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         u64 tbase;
         u16 tband;
         u32 requested = 0;
+        u32 nack_limit = TBT_FEC_NACK_REQ_MAX;
         bool full = false;
         bool never = false; /* a requested share was not resident */
 
@@ -5361,11 +5370,24 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
             return -ENOMEM;
         }
         memset(marker_done, 0, sizeof(marker_done));
+        {
+            u32 cap = tbt_fec_replay_cap(READ_ONCE(sess->fec_closing),
+                                         TBT_FEC_REPLAY_BYTES_MAX);
+            u32 limit = TBT_FEC_NACK_REQ_MAX;
+
+            spin_lock(&sess->fec_out_lock);
+            if (sess->fec_replay_bytes >= cap / 2)
+                limit = TBT_FEC_NACK_REQ_THROTTLED;
+            spin_unlock(&sess->fec_out_lock);
+            if (limit > TBT_FEC_NACK_REQ_MAX)
+                limit = TBT_FEC_NACK_REQ_MAX;
+            nack_limit = limit;
+        }
         for (g = 0; g < tg && !full; g++)
         {
             if (!tbt_fec_bitmap_test(n.group_mask, g))
                 continue;
-            if (requested > TBT_FEC_NACK_REQ_MAX)
+            if (requested >= nack_limit)
                 break;
             for (s = 0; s < shares; s++)
             {
@@ -5382,7 +5404,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                     tx->nack_req_shares++;
                 /* A NACK may name a large bitmap; bound the replay work per
                  * record. The receiver retries the remainder. */
-                if (++requested > TBT_FEC_NACK_REQ_MAX)
+                if (++requested >= nack_limit)
                     break;
                 spin_lock_bh(&tx->replay_lock);
                 len = tbt_fec_replay_get(tx->replay, h.block_id, g, s, buf,
