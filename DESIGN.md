@@ -270,24 +270,29 @@ GF(16) uplink, 512 reserved) and the rate follows `n/(n+m)`. The
 per-direction `FEC_CFG` INIT carries `L`, block and rate; the receiver uses
 the peer's shape. The codec lives in `tbt_fec_sclc.c`; `host/test_fec_sclc`
 and `host/test_fec_sclc_data` cover construction and the data-plane mapping.
-SC-LDPC rate adaptation is a later cut, not this one.
+SC-LDPC rate adaptation ships in 0.4.0 as a per-flow adaptive law (off by
+default): the uplink GF(16) codec can switch along the ladder; the downlink
+binary codec stays at rate 50%.
 
 The **GF(2) band RLNC** data plane (`mode=rlnc` or `mode=grouped`) remains the
 low-CPU fallback. It is no longer tuned:
 the `n/m` class table is frozen and the SC-LDPC work does not extend it. The
 production shape is 32 groups of `n=4, m=4` (256 carriers).
 
-**Adaptive status (0.3.0).** Adaptive FEC is implemented
+**Adaptive status (0.4.0).** Adaptive FEC is implemented
 for the GF(2) data plane, Phase 1 only: `n + m = 8`, `groups = 32`, and `m` in
 1..6. The receiver estimates the DATA-share loss rate from per-block miss
 bitmaps (1 s window, EWMA, at least 1024 alive-filtered shares and 4
 super-blocks); the sender runs the control law and switches shape through
-`FEC_CFG`/`FEC_FBK` (48-byte bodies, `TBT_FEC_CONV` 0x1006) at a super-block
+`FEC_CFG`/`FEC_FBK` (48-byte bodies, `TBT_FEC_CONV` 0x1007) at a super-block
 boundary. `adaptive=` follows `fec` by default, and `session <id>
 adaptive=on|off` flips it at runtime; the `c13` line exports the state.
-Phase 2 (`n + m` other than 8) is not implemented. SC-LDPC rate adaptation is
-a separate, later step, not this control law;
-`mode=sc-ldpc` refuses `adaptive=on` in 0.3.0.
+Phase 2 (`n + m` other than 8) is not implemented. The SC-LDPC per-flow law
+uses the same `FEC_CFG`/`FEC_FBK` handshake: the uplink GF(16) 8x32/L16 codec
+can build every ladder split and switches rates; the downlink binary
+1x256/L8 codec is fixed at rate 50, so its controller stays at 50 (known
+limitation). `adaptive=` is off by default; `mode=sc-ldpc` accepts
+`adaptive=on` in 0.4.0.
 
 **Multi-stream status.** FEC v6 carries one live application stream per
 tunnel. A sequential connection after the previous one closes is supported:
@@ -295,8 +300,9 @@ the new stream resets the FEC RX/TX state and rebases the window on its own
 first block. A second **concurrent** stream is refused (`-EOPNOTSUPP`,
 `fec_stream_refused`) because the far side keeps one `far_sid` and one RX
 delivery state; the 64-bit `sid` in the record only keeps a queued old-stream
-record out of the new stream, it is not a demultiplexer. Concurrent
-multi-stream is deferred to **v7** and is not implemented.
+record out of the new stream. Concurrent multi-stream is the **v7** cut
+(`0x1007`) and is implemented in 0.4.0: each stream owns a per-flow FEC TX/RX
+context and an admission reference.
 
 The 256-carrier performance target remains **90% of a direct/2 stream**. The
 0.2.1 measurement is 86.8% (97.3 Mbit/s against 112.1), 3.2 points short, and
@@ -304,6 +310,10 @@ the gap stays open; 0.2.3's 256-carrier steady state is a different
 measurement (23.9 Mbit/s average over 60 s, 27.9 Mbit/s 10 s max).
 
 ### 3.1.3 FEC v6 over the container (T0 0x1006)
+
+0.4.0 moves the FEC record revision to `0x1007` (multi-stream). The 0x1006
+description below is the adaptive cut; the 48-byte record layout and every
+offset stay unchanged.
 
 FEC v6 is an independent 48-byte record format (`conv=0x1006`; 0x1005 was the
 0.2.2 stream-id cut, 0.1.0 used `0x1001`), not a wider old frame. It rides the
@@ -524,8 +534,8 @@ at the first HELLO.
   bytes, the far acknowledged 37, iperf3's server failed its own cookie read,
   and the client reported an idle timeout after 114 s. A load tool with one
   connection per test (`tbt_ping`/`tbt_burst`) is unaffected; a multi-stream
-  FEC plane needs per-stream RX/TX state and a demux key, which is v7 work
-  (§3.1.2).
+  FEC plane needs per-stream RX/TX state and a demux key, which the v7 cut
+  (`0x1007`, 0.4.0) provides (§3.1.2).
 - The FEC plane carries the session's packet sequence, not a per-stream one:
   DATA/PARITY carry the current stream's `sid` for filtering, but delivery
   offsets are measured from the byte at which the current stream began
@@ -835,8 +845,8 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
   streams on that connection. A session carries up to `TBT_STREAMS_MAX` (128) concurrent
   streams. In **FEC mode** this is narrowed to one live application stream: the far side
   keeps one `far_sid` and one RX delivery state, a second concurrent stream is refused
-  (`-EOPNOTSUPP`, `fec_stream_refused`), and concurrent multi-stream is deferred to v7
-  (§3.1.2). On the far side an OPEN for an unknown sid adopts that stream; DATA, FIN or RST
+  (`-EOPNOTSUPP`, `fec_stream_refused`) before 0.4.0; concurrent multi-stream is the v7
+  cut (`0x1007`, 0.4.0) (§3.1.2). On the far side an OPEN for an unknown sid adopts that stream; DATA, FIN or RST
   for an unknown sid is dropped, because only OPEN may create a stream. OPEN is sent once
   per carrier for each stream. A FEC share is sent on a carrier only after this stream's
   OPEN has been written on it (`c->up`); a share that arrives before the far's stream
@@ -2819,10 +2829,10 @@ makes this design different from a generic L4 tunnel.
 | `tests/*.sh` | **new** |
 
 Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the released tree reports
-`0.3.3`. The wire revision `TBT_CONV=0x0006`
-and the FEC record revision `TBT_FEC_CONV=0x1006` bump independently of it.
+`0.4.0`. The wire revision `TBT_CONV=0x0007`
+and the FEC record revision `TBT_FEC_CONV=0x1007` bump independently of it.
 HELLO `body[0]` carries `TBT_WIRE_VERSION=1` for the old ARQ and
-`TBT_WIRE_VERSION_V6=3` for a FEC v6 session, not the module version, so the
+`TBT_WIRE_VERSION_V6=4` for a FEC v7 session, not the module version, so the
 module version and the wire version are decoupled. 0.2.0 flipped `TBT_CONV` to
 0x0006 (FIN carries a 16-byte body) and `TBT_FEC_CONV` through `0x1002`
 (PARITY block marker), `0x1003` (24-byte ACK with `deliver_bytes`) and
@@ -2833,11 +2843,11 @@ different wire revisions do not interoperate, because the first HELLO is
 rejected by the conv check.
 
 **Packaging.** `tbtun/tbt_uapi.h` is the single version authority: the
-`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/3/3`). `scripts/mkdkmsconf.sh`
+`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/4/0`). `scripts/mkdkmsconf.sh`
 parses those macros and emits `PACKAGE_VERSION="<major>.<minor>.<patch>"`; parsing
 failure is fatal and never falls back to an old value. `dkms.conf` is a generated file —
 `make dkms.conf` (or `make dkms-tarball`) writes it, and it must not be hand-edited; the
-current generated value is `PACKAGE_VERSION="0.3.3"`. `scripts/install_dkms.sh` reads
+current generated value is `PACKAGE_VERSION="0.4.0"`. `scripts/install_dkms.sh` reads
 the same value through `mkdkmsconf.sh --version`. A development suffix
 `.r<commits>.<sha>` is opt-in with `TBT_DKMS_GIT_SUFFIX=1`; it is not the default.
 

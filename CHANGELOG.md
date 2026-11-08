@@ -3,10 +3,16 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
-## [Unreleased]
+## [0.4.0] - 2026-11-09
 
 ### Added
 
+- Multi-stream FEC v7: each stream owns a per-flow FEC TX/RX context, so
+  one session can carry concurrent streams. `TBT_FEC_CONV` moves to
+  `0x1007` and `TBT_WIRE_VERSION_V6` to 4. Per-flow admission references,
+  flow lifetime/teardown, a late far OPEN publisher's live flow, and a
+  peer-FIN stream whose target never closes are handled; the single-stream
+  path remains available.
 - SC-LDPC adaptive rate control Phase 2 as host-testable pure logic
   (`tbtun/tbt_fec_adapt_sclc.{c,h}`). The estimator folds per-group
   256-bit miss masks into eight 500 ms buckets (4 s window) and a 1/8
@@ -65,6 +71,35 @@ and moves independently of the module version.
   ports until they close.
 - The `ports` view labels its block `# global block ...`, because a tunnel
   with `portblock=` no longer uses it.
+- TX P0/P1: a carrier that refuses a FEC batch with `-EAGAIN` now arms
+  `SOCK_NOSPACE`, so the next ACK calls `tbt_car_write_space()` and kicks
+  that carrier's drain immediately. The drain keeps its 2 ms timer as the
+  bounded fallback. `/proc/net/tbtun/stats` reports `nospace_armed` next to
+  `ws_calls`.
+- TX P0/P1: the ARQ/control pump has one session work item. `tbt_tx_wake()`
+  used to schedule one `w_tx` per carrier, and all of them then serialised
+  on `pump_lock`; the session work clears its bit at entry, so a wake that
+  races a running pump re-arms it instead of being lost.
+- TX P0/P1: FEC carrier drains share one delayed work with a ready bitmap
+  and a round-robin cursor. A carrier that refuses a batch keeps only its
+  own bit and the 2 ms fallback; the other ready carriers are served in the
+  same run. This is the single-thread TX step for 0.4.0.
+
+### Verification
+
+- Kernel matrix (2026-11-08): 6.6.162, 6.12.116 and 7.0.14 pass the module
+  build, host tests and QEMU load check on x86_64 and aarch64. 5.15.225
+  fails the module build as intended: the source requires Linux 6.1 or
+  newer. See `docs/kernel-matrix.md` and `scripts/kernel-matrix.sh`.
+- `host/test_fec_out` covers the write-space wake, the timeout fallback,
+  and the shared ready-list (a full carrier cannot hold a ready carrier
+  behind it).
+
+### Known limitations
+
+- Adaptive rate control is off by default. When enabled, the uplink GF(16)
+  8x32/L16 codec can switch along the rate ladder; the downlink binary
+  1x256/L8 codec is fixed at rate 50%, so its controller stays at 50.
 
 ## [0.3.3] - 2026-11-08
 
@@ -107,28 +142,13 @@ and moves independently of the module version.
   already present, instead of gathering and re-solving the whole block.
   Missing parity shares stay unknown for the NACK path; `codes_ok` still
   reports every codeword as complete.
-- A carrier that refuses a FEC batch with `-EAGAIN` now arms
-  `SOCK_NOSPACE`, so the next ACK calls `tbt_car_write_space()` and kicks
-  that carrier's drain immediately. The drain keeps its 2 ms timer as the
-  bounded fallback. `/proc/net/tbtun/stats` reports `nospace_armed` next to
-  `ws_calls`.
-- The ARQ/control pump has one session work item. `tbt_tx_wake()` used to
-  schedule one `w_tx` per carrier, and all of them then serialised on
-  `pump_lock`; the session work clears its bit at entry, so a wake that
-  races a running pump re-arms it instead of being lost.
-- FEC carrier drains share one delayed work with a ready bitmap and a
-  round-robin cursor. A carrier that refuses a batch keeps only its own bit
-  and the 2 ms fallback; the other ready carriers are served in the same
-  run. This is the single-thread TX step for 0.4.0.
 
 ### Tests
 
 - `host/test_fec_out` and `host/test_http` pin the three-record batch
   boundary: one, three and eight records, short records, and the
   part/short-write split. `host/test_sclc_uplink` covers the parity-only
-  early return and its `share_known`/stat results. `host/test_fec_out` also
-  covers the write-space wake, the timeout fallback, and the shared
-  ready-list (a full carrier cannot hold a ready carrier behind it).
+  early return and its `share_known`/stat results.
 
 ## [0.3.2] - 2026-11-08
 
