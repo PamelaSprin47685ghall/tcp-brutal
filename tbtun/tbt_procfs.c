@@ -36,6 +36,28 @@
 #define TBT_STATS_NAME TBT_PROC_STATS
 #define TBT_HTTP_NAME TBT_PROC_HTTP
 
+/* c13 state/reason names. The numbers are the enums in tbtun.h; the stats
+ * line spells them out because a paused controller is diagnosed by why it
+ * paused, not by a bare index. */
+static const char *tbt_adapt_state_name(u8 state)
+{
+    static const char *const names[] = {
+        "steady", "cfg_sent", "drain", "swap", "abort", "cooldown",
+    };
+
+    return state < ARRAY_SIZE(names) ? names[state] : "?";
+}
+
+static const char *tbt_adapt_reason_name(u8 reason)
+{
+    static const char *const names[] = {
+        "none", "off", "idle", "carrier", "abandoned", "sample",
+        "switching", "hold", "error",
+    };
+
+    return reason < ARRAY_SIZE(names) ? names[reason] : "?";
+}
+
 // ---------------------------------------------------------------------------
 // config: write
 
@@ -1227,6 +1249,38 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                                        READ_ONCE(s->fec_outq[ci].bytes));
                     }
                     seq_printf(m, "\n");
+                }
+                /* c13: the adaptive control surface. The shape is the one in
+                 * force (updated by the data plane on every epoch), and the
+                 * window counters are alive-filtered DATA shares since that
+                 * epoch began. adaptive=off means the configured n/m is
+                 * fixed and reason=off names the fallback. */
+                {
+                    const struct tbt_fec_adapt_ctl *a = &s->adapt;
+                    u16 an = READ_ONCE(a->n), am = READ_ONCE(a->m);
+                    u16 ag = READ_ONCE(a->groups);
+
+                    seq_printf(m, "tunnel %llu c13 adaptive=%s epoch=%u "
+                                  "n=%u m=%u groups=%u class=%u "
+                                  "p_ppm=%u p_win_ppm=%u r_fail_ppm=%u "
+                                  "sent=%llu miss=%llu "
+                                  "switches=%u aborts=%u rollbacks=%u "
+                                  "pauses=%llu pause_ns=%llu "
+                                  "sample_unknown=%llu abandoned=%llu "
+                                  "state=%s reason=%s\n",
+                               id, READ_ONCE(s->adaptive) ? "on" : "off",
+                               READ_ONCE(a->epoch), an, am, ag,
+                               READ_ONCE(a->class), READ_ONCE(a->p_ppm),
+                               READ_ONCE(a->p_win_ppm),
+                               READ_ONCE(a->r_fail_ppm),
+                               READ_ONCE(a->sent), READ_ONCE(a->miss),
+                               READ_ONCE(a->switches), READ_ONCE(a->aborts),
+                               READ_ONCE(a->rollbacks),
+                               READ_ONCE(a->pauses), READ_ONCE(a->pause_ns),
+                               READ_ONCE(a->sample_unknown),
+                               READ_ONCE(a->abandoned),
+                               tbt_adapt_state_name(READ_ONCE(a->state)),
+                               tbt_adapt_reason_name(READ_ONCE(a->reason)));
                 }
                 seq_printf(m, "tunnel %llu c8 profile_mismatch=%llu http_parse_err=%llu "
                               "http_status_err=%llu http_req=%llu http_resp=%llu "

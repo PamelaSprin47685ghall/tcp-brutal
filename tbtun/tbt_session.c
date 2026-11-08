@@ -105,6 +105,25 @@ void tbt_portmap_show(struct seq_file *m)
 // ---------------------------------------------------------------------------
 // Tunnel lifecycle
 
+/* Control class of a configured shape (design §4.1). Phase 1 adapts only
+ * n+m=8; any other pair starts at C3 (4/4), the safe fixed point, and the
+ * controller may replace it. */
+static u8 tbt_fec_adapt_class(u16 n, u16 m)
+{
+    if (n + m != 8)
+        return 3;
+    switch (n)
+    {
+    case 7: return 0;
+    case 6: return 1;
+    case 5: return 2;
+    case 4: return 3;
+    case 3: return 4;
+    case 2: return 5;
+    default: return 3;
+    }
+}
+
 static bool tbt_cfg_sane(const struct tbt_cfg *c, int *err)
 {
     unsigned int limit;
@@ -121,6 +140,13 @@ static bool tbt_cfg_sane(const struct tbt_cfg *c, int *err)
     }
     /* crypto=on has no decrypt point without the FEC data plane (T0 §2.4). */
     if (c->crypto && !c->fec)
+    {
+        *err = -EINVAL;
+        return false;
+    }
+    /* The control law lives in the FEC data plane; without it there is no
+     * shape to adapt. The parser already rejects this pair. */
+    if (c->adaptive && !c->fec)
     {
         *err = -EINVAL;
         return false;
@@ -561,6 +587,33 @@ int tbt_action_apply(const struct tbt_cmd *cmd)
         if (!t->sess)
         {
             err = -ENOTCONN;
+            goto out_unlock;
+        }
+        if (cmd->adaptive_set)
+        {
+            struct tbt_session *s = t->sess;
+
+            /* The control law needs the FEC data plane; a legacy session has
+             * no shape to adapt. */
+            if (cmd->adaptive && !s->fec)
+            {
+                err = -EINVAL;
+                goto out_unlock;
+            }
+            spin_lock(&s->lock);
+            WRITE_ONCE(s->adaptive, cmd->adaptive != 0);
+            if (cmd->adaptive)
+                s->adapt.reason = TBT_FEC_ADAPT_R_NONE;
+            else
+            {
+                /* Fixed-shape fallback: the shape in force stays exactly as
+                 * it is and the controller stops evaluating. No new epoch is
+                 * started, so the c13 window keeps its last values. */
+                s->adapt.state = TBT_FEC_ADAPT_STEADY;
+                s->adapt.reason = TBT_FEC_ADAPT_R_OFF;
+            }
+            spin_unlock(&s->lock);
+            err = 0;
             goto out_unlock;
         }
         spin_lock(&t->sess->lock);
@@ -1305,6 +1358,17 @@ int tbt_session_create(struct tbt_tunnel *t)
      * its n DATA carriers plus m spares. */
     s->n_car = t->cfg.fec ? t->cfg.carriers : (u16)(t->cfg.n + t->cfg.m);
     s->n_pri = t->cfg.fec ? t->cfg.carriers : t->cfg.n;
+    /* Adaptive FEC control surface: the switch is effective only with the
+     * FEC data plane, and the snapshot starts at the configured shape. The
+     * control law replaces n/m and the class as it switches. */
+    s->adaptive = t->cfg.fec && t->cfg.adaptive;
+    s->adapt.n = t->cfg.n;
+    s->adapt.m = t->cfg.m;
+    s->adapt.groups = t->cfg.fec && t->cfg.n + t->cfg.m ?
+        (u16)(t->cfg.carriers / (t->cfg.n + t->cfg.m)) : 0;
+    s->adapt.class = tbt_fec_adapt_class(t->cfg.n, t->cfg.m);
+    s->adapt.state = TBT_FEC_ADAPT_STEADY;
+    s->adapt.reason = s->adaptive ? TBT_FEC_ADAPT_R_NONE : TBT_FEC_ADAPT_R_OFF;
     /* The sender window is a session property from birth: capture, the pump
      * and the carrier socket sizing all read it before the first ACK. */
     tbt_tx_window_init(s);

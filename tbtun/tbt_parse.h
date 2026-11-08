@@ -49,6 +49,9 @@ struct tbt_cfg
     u8 role;    /* TBT_ROLE_NEAR | TBT_ROLE_FAR */
     u8 profile; /* 1 http-kal, 2 http-kal-drip, 3 raw; never 0 after parsing */
     u8 fec;     /* 0 off (old ARQ), 1 on; parsed and rendered, no data plane */
+    u8 adaptive; /* fec=on: 1 lets the control law choose n/m, 0 keeps the
+                  * configured pair. Defaults to fec; requires fec=on. The
+                  * configured n/m are the initial shape and the upper hint. */
     u8 mode;    /* 1 rlnc, 2 grouped, 3 sc-ldpc; never 0 after parsing */
     u16 w;      /* effective window: 1..1024, or 2*n / 256 resolved from w=0 */
     u16 carriers; /* effective slots: a multiple of n+m, or n+m resolved from 0 */
@@ -133,6 +136,10 @@ struct tbt_cmd
 
     /* TBT_CMD_SESSION: pinned 128-bit nonce */
     u8 nonce[16];
+    /* TBT_CMD_SESSION: adaptive=on|off. Exactly one of nonce/adaptive is
+     * carried, so `session <id> adaptive=off` never touches the nonce. */
+    u8 adaptive;
+    bool adaptive_set;
 };
 
 /* Per-open-file /proc config line buffer (DESIGN.md §8.4.1). Pure data: the

@@ -396,7 +396,7 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     char *tok;
     u64 id;
     int have_listen = 0, have_peer = 0, have_target = 0;
-    bool have_crypto = false;
+    bool have_crypto = false, have_adaptive = false;
 
     memset(cfg, 0, sizeof(*cfg));
     cfg->profile = 1; /* http-kal: the default is an effective value, not 0 */
@@ -552,6 +552,18 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
             if (tbt_parse_fec(key, val, &cfg->fec, e))
                 return TBT_PARSE_EINVAL;
         }
+        else if (!strcmp(key, "adaptive"))
+        {
+            /* The control law chooses n/m; the configured pair is the
+             * initial shape and the upper hint (design §4.5). */
+            if (!strcmp(val, "on"))
+                cfg->adaptive = 1;
+            else if (!strcmp(val, "off"))
+                cfg->adaptive = 0;
+            else
+                return tbt_fail(e, key, "adaptive must be on or off");
+            have_adaptive = true;
+        }
         else if (!strcmp(key, "mode"))
         {
             if (tbt_parse_mode(key, val, &cfg->mode, e))
@@ -637,6 +649,12 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         cfg->crypto = cfg->fec;
     if (cfg->crypto && !cfg->fec)
         return tbt_fail(e, "crypto", "crypto=on requires fec=on");
+    /* Adaptive is meaningful only where a control law runs. Unset, it
+     * follows fec, so an old line keeps the old fixed shape. */
+    if (!have_adaptive)
+        cfg->adaptive = cfg->fec;
+    if (cfg->adaptive && !cfg->fec)
+        return tbt_fail(e, "adaptive", "adaptive=on requires fec=on");
 
     if (!cfg->role)
         return tbt_fail(e, "role", "tunnel needs role=near or role=far");
@@ -787,8 +805,10 @@ static int tbt_parse_carrier(char *args, struct tbt_cmd *out, struct tbt_parse_e
     return tbt_fail(e, act, "carrier action must be down, up or drop_ppm");
 }
 
-/* `session <tunnel> nonce=<hex>`: pin the 128-bit session nonce for
- * reproducible tests. A runtime action, never part of the canonical config. */
+/* `session <tunnel> nonce=<hex>` pins the 128-bit session nonce for
+ * reproducible tests; `session <tunnel> adaptive=on|off` flips the FEC
+ * control law at runtime. Both are runtime actions, never part of the
+ * canonical config, and one line carries exactly one of them. */
 static int tbt_parse_session(char *args, struct tbt_cmd *out, struct tbt_parse_error *e)
 {
     char *tok = tbt_next_tok(&args);
@@ -798,18 +818,35 @@ static int tbt_parse_session(char *args, struct tbt_cmd *out, struct tbt_parse_e
         return tbt_fail(e, "session", "session needs a non-zero tunnel id");
     tok = tbt_next_tok(&args);
     if (!tok)
-        return tbt_fail(e, TBT_ACT_NONCE, "session needs nonce=<hex>");
+        return tbt_fail(e, TBT_ACT_NONCE,
+                        "session needs nonce=<hex> or adaptive=on|off");
     eq = strchr(tok, '=');
     if (!eq)
-        return tbt_fail(e, tok, "expected nonce=<hex>");
+        return tbt_fail(e, tok, "expected nonce=<hex> or adaptive=on|off");
     *eq = '\0';
-    if (strcmp(tok, TBT_ACT_NONCE))
-        return tbt_fail(e, tok, "unknown key; session accepts nonce=<hex>");
-    if (tbt_parse_nonce(eq + 1, out->nonce))
-        return tbt_fail(e, TBT_ACT_NONCE, "nonce must be 16 or 32 hex digits");
-    if (tbt_next_tok(&args))
-        return tbt_fail(e, "session", "trailing tokens after session <tunnel> nonce=<hex>");
-    return 0;
+    if (!strcmp(tok, TBT_ACT_NONCE))
+    {
+        if (tbt_parse_nonce(eq + 1, out->nonce))
+            return tbt_fail(e, TBT_ACT_NONCE, "nonce must be 16 or 32 hex digits");
+        if (tbt_next_tok(&args))
+            return tbt_fail(e, "session", "trailing tokens after session <tunnel> nonce=<hex>");
+        return 0;
+    }
+    if (!strcmp(tok, "adaptive"))
+    {
+        if (!strcmp(eq + 1, "on"))
+            out->adaptive = 1;
+        else if (!strcmp(eq + 1, "off"))
+            out->adaptive = 0;
+        else
+            return tbt_fail(e, "adaptive", "adaptive must be on or off");
+        out->adaptive_set = true;
+        if (tbt_next_tok(&args))
+            return tbt_fail(e, "session",
+                            "trailing tokens after session <tunnel> adaptive=on|off");
+        return 0;
+    }
+    return tbt_fail(e, tok, "unknown key; session accepts nonce=<hex> or adaptive=on|off");
 }
 
 int tbt_parse_line(char *line, struct tbt_cmd *out, struct tbt_parse_error *e)
@@ -1024,16 +1061,17 @@ int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
             kb[0] = '-';
             kb[1] = '\0';
         }
-        /* T0 §4.2 order: n m fec mode w carriers crypto crypto_key dup
+        /* T0 §4.2 order: n m fec adaptive mode w carriers crypto crypto_key dup
          * profile keepalive ... */
         rc = tbt_addf(buf, size, &off,
-                      " n=%u m=%u fec=%s mode=%s w=%u carriers=%u"
+                      " n=%u m=%u fec=%s adaptive=%s mode=%s w=%u carriers=%u"
                       " crypto=%s crypto_key=%s dup=%u profile=%s keepalive=%u"
                       " drip_ms=%u replay=%u tunnel_rate=%u"
                       " max_inflate=%u.%03u hole_budget_ms=%u rx_reorder_bytes=%u"
                       " tx_window_bytes=%u tx_retain_bytes=%u carrier_stall_ms=%u"
                       " portblock=%u-%u",
                       c->n, c->m, fec_modes[c->fec ? 1 : 0],
+                      c->adaptive ? "on" : "off",
                       modes[c->mode & 3], c->w, c->carriers,
                       c->crypto ? "on" : "off", kb, c->dup,
                       profiles[c->profile & 3], c->keepalive_ms,
@@ -1112,8 +1150,15 @@ int tbt_render_action(const struct tbt_cmd *c, char *buf, size_t size)
             return TBT_PARSE_EINVAL;
         break;
     case TBT_CMD_SESSION:
-        tbt_fmt_hex(c->nonce, sizeof(c->nonce), nonce);
-        rc = tbt_addf(buf, size, &off, "session %llu nonce=%s\n", (unsigned long long)c->id, nonce);
+        if (c->adaptive_set)
+            rc = tbt_addf(buf, size, &off, "session %llu adaptive=%s\n",
+                          (unsigned long long)c->id, c->adaptive ? "on" : "off");
+        else
+        {
+            tbt_fmt_hex(c->nonce, sizeof(c->nonce), nonce);
+            rc = tbt_addf(buf, size, &off, "session %llu nonce=%s\n",
+                          (unsigned long long)c->id, nonce);
+        }
         break;
     default:
         return TBT_PARSE_EINVAL; /* not an action verb */

@@ -916,6 +916,50 @@ enum tbt_sess_work
     TBT_SW_FEC_RX,
 };
 
+/* Adaptive FEC control-surface snapshot (0.3.0). The estimator/controller in
+ * the FEC data plane owns every field; c13 only reads it. `sent`/`miss` are
+ * the current epoch's alive-filtered DATA shares and repairs, so an epoch
+ * change starts a fresh window. `state` and `reason` stay numeric here; the
+ * stats line maps them to the names below. */
+enum tbt_fec_adapt_state
+{
+    TBT_FEC_ADAPT_STEADY = 0,
+    TBT_FEC_ADAPT_CFG_SENT,
+    TBT_FEC_ADAPT_DRAIN,
+    TBT_FEC_ADAPT_SWAP,
+    TBT_FEC_ADAPT_ABORT,
+    TBT_FEC_ADAPT_COOLDOWN,
+};
+
+enum tbt_fec_adapt_reason
+{
+    TBT_FEC_ADAPT_R_NONE = 0,
+    TBT_FEC_ADAPT_R_OFF,       /* adaptive=off: the configured shape is fixed */
+    TBT_FEC_ADAPT_R_IDLE,      /* application idle: p frozen */
+    TBT_FEC_ADAPT_R_CARRIER,   /* fewer than 90% of carriers alive */
+    TBT_FEC_ADAPT_R_ABANDONED, /* abandoned/sent above 1% */
+    TBT_FEC_ADAPT_R_SAMPLE,    /* too few shares or blocks in the window */
+    TBT_FEC_ADAPT_R_SWITCHING, /* a switch is in flight */
+    TBT_FEC_ADAPT_R_HOLD,      /* rate/hold freeze after a jitter episode */
+    TBT_FEC_ADAPT_R_ERROR,     /* protocol or shape errors: freeze */
+};
+
+struct tbt_fec_adapt_ctl
+{
+    u32 epoch;
+    u16 n, m, groups; /* shape in force */
+    u8 class;         /* control class 0..5, derived from n/m */
+    u8 state;         /* enum tbt_fec_adapt_state */
+    u8 reason;        /* enum tbt_fec_adapt_reason */
+    u32 p_ppm;        /* max(p_ewma, p_win): the value the law used */
+    u32 p_win_ppm;    /* 1 s double-bucket window */
+    u32 r_fail_ppm;   /* residual: NACK-named shares / DATA packets */
+    u64 sent, miss;   /* alive-filtered DATA shares and repairs, this epoch */
+    u32 switches, aborts, rollbacks;
+    u64 sample_unknown, abandoned; /* blocks skipped / dropped unfinished */
+    u64 pauses, pause_ns;          /* entries into a frozen state, time spent */
+};
+
 struct tbt_session
 {
     struct list_head node;    /* tbt_tunnel.sessions */
@@ -985,6 +1029,12 @@ struct tbt_session
      * It lives on the session, not the carrier object, so the injector keeps
      * dropping that share after its carrier dies and is replaced. */
     u32 fec_drop_ppm[TBT_MAX_CARRIERS_LIMIT];
+    /* Adaptive FEC control surface (0.3.0). `adaptive` is the runtime switch
+     * copied from the tunnel config and toggled by `session <id>
+     * adaptive=on|off`; the snapshot is written by the FEC data plane and
+     * read by the c13 stats line. */
+    bool adaptive;
+    struct tbt_fec_adapt_ctl adapt;
     bool closing; /* session teardown started: no new joins, no new work */
     struct list_head prov; /* accepted carriers waiting for HELLO */
     /* Join-replaced carriers whose socket release is deferred out of the

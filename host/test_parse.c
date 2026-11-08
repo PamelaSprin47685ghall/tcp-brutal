@@ -115,6 +115,7 @@ static void action_roundtrip(const char *what, const char *text, const char *wan
         }
         ok(again.kind == cmd.kind && again.id == cmd.id && again.carrier == cmd.carrier &&
                again.carrier_action == cmd.carrier_action && again.drop_ppm == cmd.drop_ppm &&
+               again.adaptive == cmd.adaptive && again.adaptive_set == cmd.adaptive_set &&
                !memcmp(again.nonce, cmd.nonce, sizeof(cmd.nonce)),
            what, "round-trip changed the action");
     }
@@ -142,6 +143,10 @@ static void test_actions(void)
                      "session 7 nonce=00000000000000000011223344556677\n");
     action_roundtrip("session nonce uppercase", "session 7 nonce=00112233445566778899AABBCCDDEEFF",
                      "session 7 nonce=00112233445566778899aabbccddeeff\n");
+    action_roundtrip("session adaptive off", "session 7 adaptive=off",
+                     "session 7 adaptive=off\n");
+    action_roundtrip("session adaptive on", "session 7 adaptive=on",
+                     "session 7 adaptive=on\n");
     ok(parse("carrier 3 down\r\n", &cmd, &perr) == 0 && cmd.kind == TBT_CMD_CARRIER,
        "action line with CRLF", NULL);
 
@@ -177,6 +182,10 @@ static void test_actions(void)
     refuse("session non-hex nonce", "session 7 nonce=zz112233445566778899aabbccddeeff", TBT_PARSE_EINVAL,
            "nonce", "hex");
     refuse("session unknown key", "session 7 frob=1", TBT_PARSE_EINVAL, "frob", "unknown key");
+    refuse("session adaptive maybe", "session 7 adaptive=maybe", TBT_PARSE_EINVAL,
+           "adaptive", "on or off");
+    refuse("session adaptive trailing token", "session 7 adaptive=on extra",
+           TBT_PARSE_EINVAL, "session", "trailing");
     refuse("session trailing token", "session 7 nonce=00112233445566778899aabbccddeeff extra",
            TBT_PARSE_EINVAL, "session", "trailing");
 
@@ -206,7 +215,7 @@ static void test_tunnel_nonce(void)
         "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2";
     static const char *const canon_near =
         "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-        " n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
         " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
         " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
@@ -224,7 +233,7 @@ static void test_tunnel_nonce(void)
     snprintf(text, sizeof(text), "%s nonce=0011223344556677", base_near);
     roundtrip("tunnel nonce 64-bit pin", text,
               "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-              " n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+              " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
               " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
               " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
               " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
@@ -240,7 +249,7 @@ static void test_tunnel_nonce(void)
               "tunnel 2 role=far listen=10.0.0.1:1 target=10.0.0.2:2"
               " nonce=00112233445566778899aabbccddeeff",
               "tunnel 2 role=far listen=10.0.0.1:1 target=10.0.0.2:2"
-              " n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+              " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
               " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
               " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
               " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
@@ -297,21 +306,21 @@ static void test_crypto_cfg(void)
         "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 fec=on";
     static const char *const canon_off =
         "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-        " n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
         " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
         " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
         " carrier_stall_ms=0 portblock=0-0\n";
     static const char *const canon_on =
         "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-        " n=4 m=1 fec=on mode=rlnc w=8 carriers=5 crypto=on crypto_key=-"
+        " n=4 m=1 fec=on adaptive=on mode=rlnc w=8 carriers=5 crypto=on crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
         " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
         " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
         " carrier_stall_ms=0 portblock=0-0\n";
     static const char *const canon_on_crypto_off =
         "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-        " n=4 m=1 fec=on mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " n=4 m=1 fec=on adaptive=on mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
         " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
         " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
@@ -350,7 +359,8 @@ static void test_crypto_cfg(void)
 
         snprintf(want, sizeof(want), "%s",
                  "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-                 " n=4 m=1 fec=on mode=rlnc w=8 carriers=5 crypto=on crypto_key=");
+                 " n=4 m=1 fec=on adaptive=on mode=rlnc w=8 carriers=5"
+                 " crypto=on crypto_key=");
         strncat(want, key_hex, sizeof(want) - strlen(want) - 1);
         strncat(want,
                 " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
@@ -401,6 +411,55 @@ static void test_crypto_cfg(void)
     refuse("crypto_key non-hex", text, TBT_PARSE_EINVAL, "crypto_key", "64 hex");
     snprintf(text, sizeof(text), "%s crypto_key=", base_on);
     refuse("crypto_key empty", text, TBT_PARSE_EINVAL, "crypto_key", "empty");
+}
+
+/* --- adaptive= (0.3.0): the control-law switch. It follows fec by default;
+ * adaptive=on needs fec=on, and the configured n/m stay as the initial shape
+ * and the upper hint (design §4.5). --------------------------------------- */
+static void test_adaptive_cfg(void)
+{
+    static const char *const base =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2";
+    static const char *const base_on =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 fec=on";
+    static const char *const canon_off =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+        " n=4 m=1 fec=on adaptive=off mode=rlnc w=8 carriers=5"
+        " crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000"
+        " drip_ms=1000 replay=8388608 tunnel_rate=0"
+        " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608"
+        " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0"
+        " portblock=0-0\n";
+    char text[TBT_LINE_MAX];
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+
+    /* The default follows fec: off for the legacy plane, on with FEC. */
+    parse(base, &cmd, &perr);
+    ok(cmd.cfg.adaptive == 0, "adaptive defaults off with fec=off", NULL);
+    parse(base_on, &cmd, &perr);
+    ok(cmd.cfg.adaptive == 1, "adaptive defaults on with fec=on", NULL);
+
+    /* An explicit off keeps the configured pair fixed and round-trips. */
+    snprintf(text, sizeof(text), "%s adaptive=off", base_on);
+    roundtrip("adaptive off with fec=on", text, canon_off);
+    parse(text, &cmd, &perr);
+    ok(cmd.cfg.n == 4 && cmd.cfg.m == 1 && cmd.cfg.adaptive == 0,
+       "adaptive=off keeps the configured n/m", NULL);
+
+    /* Explicit n/m under adaptive are hints, not rewritten by the parser. */
+    parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=5 m=3"
+          " fec=on adaptive=on", &cmd, &perr);
+    ok(cmd.cfg.adaptive == 1 && cmd.cfg.n == 5 && cmd.cfg.m == 3,
+       "adaptive=on keeps explicit n/m as the initial hint", NULL);
+
+    refuse("adaptive on without fec",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 adaptive=on",
+           TBT_PARSE_EINVAL, "adaptive", "fec=on");
+    snprintf(text, sizeof(text), "%s adaptive=maybe", base_on);
+    refuse("adaptive value", text, TBT_PARSE_EINVAL, "adaptive", "on or off");
+    snprintf(text, sizeof(text), "%s adaptive=1", base_on);
+    refuse("adaptive numeric", text, TBT_PARSE_EINVAL, "adaptive", "on or off");
 }
 
 /* --- stats prefix: a key=value parser, so a stray space or a missing '='
@@ -491,7 +550,7 @@ static void test_dev_cfg(void)
         "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2";
     static const char *const base_canon =
         "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-        " n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000"
         " drip_ms=1000 replay=8388608 tunnel_rate=0"
         " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608"
@@ -1063,7 +1122,7 @@ int main(void)
         "tunnel 1 role=near listen=10.123.0.1:9000 peer=10.123.0.2:443";
     static const char *const minimal_canon =
         "tunnel 1 role=near listen=10.123.0.1:9000 peer=10.123.0.2:443"
-        " n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000"
         " drip_ms=1000 replay=8388608 tunnel_rate=0"
         " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608"
@@ -1071,7 +1130,7 @@ int main(void)
         " portblock=0-0\n";
     static const char *const full_near =
         "tunnel 7 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443"
-        " n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=2 profile=http-kal-drip keepalive=5000"
         " drip_ms=1000 replay=8388608 tunnel_rate=0"
         " max_inflate=2.000 hole_budget_ms=500 rx_reorder_bytes=8388608"
@@ -1080,7 +1139,7 @@ int main(void)
         " srcaddrs=10.0.0.10,10.0.0.11\n";
     static const char *const full_far =
         "tunnel 9 role=far listen=203.0.113.9:443 peer=198.51.100.7:8443"
-        " target=127.0.0.1:7000 n=2 m=0 fec=off mode=rlnc w=4 carriers=2"
+        " target=127.0.0.1:7000 n=2 m=0 fec=off adaptive=off mode=rlnc w=4 carriers=2"
         " crypto=off crypto_key=- dup=0 profile=raw keepalive=1000"
         " drip_ms=250 replay=0 tunnel_rate=1048576"
         " max_inflate=1.500 hole_budget_ms=50 rx_reorder_bytes=8388608"
@@ -1091,7 +1150,7 @@ int main(void)
     static const char *const full_far_canon =
         "tunnel 9 role=far listen=203.0.113.9:443 target=127.0.0.1:7000"
         " peer=198.51.100.7:8443"
-        " n=2 m=0 fec=off mode=rlnc w=4 carriers=2 crypto=off crypto_key=-"
+        " n=2 m=0 fec=off adaptive=off mode=rlnc w=4 carriers=2 crypto=off crypto_key=-"
         " dup=0 profile=raw keepalive=1000"
         " drip_ms=250 replay=0 tunnel_rate=1048576 max_inflate=1.500"
         " hole_budget_ms=50 rx_reorder_bytes=8388608 tx_window_bytes=0"
@@ -1280,7 +1339,7 @@ int main(void)
     parse("tunnel 8 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=224 m=32 fec=on",
           &cmd, &perr);
     tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
-    ok(strstr(buf, " fec=on mode=rlnc w=448 carriers=256 crypto=on"
+    ok(strstr(buf, " fec=on adaptive=on mode=rlnc w=448 carriers=256 crypto=on"
                     " crypto_key=- dup=1 profile=http-kal keepalive=") != NULL,
        "fec=on renders in canonical order", buf);
     {
@@ -1294,14 +1353,14 @@ int main(void)
     }
     parse("tunnel 8 role=near listen=10.0.0.1:1 peer=10.0.0.2:2", &cmd, &perr);
     tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
-    ok(strstr(buf, " fec=off mode=rlnc w=8 carriers=5 ") != NULL,
+    ok(strstr(buf, " fec=off adaptive=off mode=rlnc w=8 carriers=5 ") != NULL,
        "fec/mode/w/carriers defaults render in canonical text", buf);
 
     /* 11d. The 4096-port default block round-trips. */
     roundtrip("portblock 40000-44095",
               "tunnel 5 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 portblock=40000-44095",
               "tunnel 5 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-              " n=4 m=1 fec=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+              " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
               " dup=1 profile=http-kal keepalive=5000"
               " drip_ms=1000 replay=8388608 tunnel_rate=0"
               " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608"
@@ -1557,6 +1616,9 @@ int main(void)
 
     /* 24c. crypto= / crypto_key=: default on, off, key, clear, refusals. */
     test_crypto_cfg();
+
+    /* 24c2. adaptive=: default follows fec, explicit off, hint n/m, refusals. */
+    test_adaptive_cfg();
 
     /* 24d. dev= interface bind. */
     test_dev_cfg();
