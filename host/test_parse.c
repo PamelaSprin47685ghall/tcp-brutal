@@ -1657,10 +1657,55 @@ int main(void)
         tbt_render_cfg(&again.cfg, twice, sizeof(twice));
         ok(!strcmp(once, twice), "uplink sc-ldpc line is a fixed point", twice);
 
-        refuse("sc-ldpc adaptive", "tunnel 1 role=near listen=10.0.0.1:1"
-               " peer=10.0.0.2:2 n=128 m=128 fec=on mode=sc-ldpc"
-               " adaptive=on carriers=256",
-               TBT_PARSE_EINVAL, "adaptive", "does not adapt");
+        /* adaptive=on is accepted from a shipped profile on the ladder. */
+        parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+              " n=128 m=128 fec=on mode=sc-ldpc adaptive=on carriers=256",
+              &cmd, &perr);
+        ok(cmd.cfg.adaptive == 1 && cmd.cfg.mode == 3 &&
+               cmd.cfg.n == 128 && cmd.cfg.m == 128 && cmd.cfg.w == 256,
+           "downlink adaptive=on parsed", NULL);
+        tbt_render_cfg(&cmd.cfg, once, sizeof(once));
+        ok(strstr(once, "adaptive=on") != NULL,
+           "downlink adaptive renders on", once);
+        parse(once, &again, &perr);
+        tbt_render_cfg(&again.cfg, twice, sizeof(twice));
+        ok(!strcmp(once, twice), "downlink adaptive line is a fixed point",
+           twice);
+
+        parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+              " n=8 m=24 fec=on mode=sc-ldpc adaptive=on w=128 carriers=256"
+              " L=16",
+              &cmd, &perr);
+        ok(cmd.cfg.adaptive == 1 && cmd.cfg.mode == 3 &&
+               cmd.cfg.n == 8 && cmd.cfg.m == 24 && cmd.cfg.w == 128 &&
+               cmd.cfg.L == 16,
+           "uplink adaptive=on parsed", NULL);
+        tbt_render_cfg(&cmd.cfg, once, sizeof(once));
+        ok(strstr(once, "adaptive=on") != NULL,
+           "uplink adaptive renders on", once);
+        parse(once, &again, &perr);
+        tbt_render_cfg(&again.cfg, twice, sizeof(twice));
+        ok(!strcmp(once, twice), "uplink adaptive line is a fixed point",
+           twice);
+
+        refuse("sc-ldpc adaptive: downlink n/m",
+               "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+               " n=64 m=192 fec=on mode=sc-ldpc adaptive=on carriers=256",
+               TBT_PARSE_EINVAL, "adaptive", "supported profile");
+        refuse("sc-ldpc adaptive: downlink block",
+               "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+               " n=128 m=128 fec=on mode=sc-ldpc adaptive=on w=512"
+               " carriers=256",
+               TBT_PARSE_EINVAL, "adaptive", "block=256");
+        refuse("sc-ldpc adaptive: uplink block",
+               "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+               " n=8 m=24 fec=on mode=sc-ldpc adaptive=on carriers=256 L=16",
+               TBT_PARSE_EINVAL, "adaptive", "block=128");
+        refuse("sc-ldpc adaptive: uplink off-ladder n/m",
+               "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+               " n=14 m=18 fec=on mode=sc-ldpc adaptive=on w=128"
+               " carriers=256 L=16",
+               TBT_PARSE_EINVAL, "adaptive", "rate ladder");
     }
 
     /* 25. The frozen /proc/net/tbtun/http text contract. */

@@ -349,6 +349,50 @@ static inline void tbt_fec_fbk_set_epoch(struct tbt_fec_fbk *f, u32 epoch)
     f->epoch_hi = (u16)(epoch >> 16);
 }
 
+/* SC-LDPC FBK overlay (mode=3, adaptive=on). The last four bytes of the
+ * carrier bitmap carry p_fast and codec_fail in 16 ppm units, little-endian.
+ * The alive bitmap then covers carriers 0..223; no current consumer reads
+ * the bitmap, and the 48-byte body and every offset stay unchanged. */
+#define TBT_FEC_FBK_SC_P_FAST_OFF (TBT_FEC_BITMAP_BYTES - 4)
+#define TBT_FEC_FBK_SC_CODEC_FAIL_OFF (TBT_FEC_BITMAP_BYTES - 2)
+
+static inline u32 tbt_fec_fbk_sc_p_fast(const struct tbt_fec_fbk *f)
+{
+    u32 v = (u32)f->carrier_bitmap[TBT_FEC_FBK_SC_P_FAST_OFF] |
+            ((u32)f->carrier_bitmap[TBT_FEC_FBK_SC_P_FAST_OFF + 1] << 8);
+
+    return v * 16u;
+}
+
+static inline void tbt_fec_fbk_sc_set_p_fast(struct tbt_fec_fbk *f, u32 ppm)
+{
+    u32 v = ppm / 16u;
+
+    if (v > 0xffffu)
+        v = 0xffffu;
+    f->carrier_bitmap[TBT_FEC_FBK_SC_P_FAST_OFF] = (u8)v;
+    f->carrier_bitmap[TBT_FEC_FBK_SC_P_FAST_OFF + 1] = (u8)(v >> 8);
+}
+
+static inline u32 tbt_fec_fbk_sc_codec_fail(const struct tbt_fec_fbk *f)
+{
+    u32 v = (u32)f->carrier_bitmap[TBT_FEC_FBK_SC_CODEC_FAIL_OFF] |
+            ((u32)f->carrier_bitmap[TBT_FEC_FBK_SC_CODEC_FAIL_OFF + 1] << 8);
+
+    return v * 16u;
+}
+
+static inline void tbt_fec_fbk_sc_set_codec_fail(struct tbt_fec_fbk *f,
+                                                 u32 ppm)
+{
+    u32 v = ppm / 16u;
+
+    if (v > 0xffffu)
+        v = 0xffffu;
+    f->carrier_bitmap[TBT_FEC_FBK_SC_CODEC_FAIL_OFF] = (u8)v;
+    f->carrier_bitmap[TBT_FEC_FBK_SC_CODEC_FAIL_OFF + 1] = (u8)(v >> 8);
+}
+
 int tbt_fec_ack_pack(const struct tbt_fec_ack *a, u8 out[TBT_FEC_ACK_LEN]);
 int tbt_fec_ack_unpack(const u8 in[TBT_FEC_ACK_LEN], struct tbt_fec_ack *a);
 

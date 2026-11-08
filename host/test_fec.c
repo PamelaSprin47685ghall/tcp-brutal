@@ -2421,6 +2421,89 @@ static void test_nack_dedup(void)
        "a gap older than the hold is requested again", NULL);
 }
 
+/* The two shipped SC-LDPC profiles must survive the real CFG/FBK wire
+ * path: 1x256/L8/r0.5 downlink and 8x32/L16/r1/4 uplink. */
+static void test_sclc_wire_profiles(void)
+{
+    struct tbt_fec_cfg c, c2;
+    struct tbt_fec_sclc_shape sh;
+    struct tbt_fec_fbk f, f2;
+    u8 cbuf[TBT_FEC_CFG_LEN];
+    u8 fbuf[TBT_FEC_FBK_LEN];
+
+    memset(&c, 0, sizeof(c));
+    c.epoch = 2;
+    c.n = 128;
+    c.m = 128;
+    c.w = 256;
+    c.k = 500;
+    c.d = 0;
+    c.flags = TBT_FEC_CFG_F_APPLY;
+    c.groups = 1;
+    ok_int(tbt_fec_cfg_pack(&c, cbuf), 0, "sclc cfg down: pack");
+    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), 0, "sclc cfg down: unpack");
+    ok(c2.n == 128 && c2.m == 128 && c2.w == 256 && c2.k == 500 &&
+           c2.d == 0 && c2.groups == 1,
+       "sclc cfg down: round-trip", NULL);
+    ok_int(tbt_fec_sclc_shape_of_cfg(&c2, 256, &sh), 0,
+           "sclc cfg down: shape");
+    ok(sh.variant == TBT_FEC_SCLC_DOWN && sh.block == 256 && sh.L == 8 &&
+           sh.rate_ppm == 500,
+       "sclc cfg down: profile", NULL);
+
+    memset(&c, 0, sizeof(c));
+    c.epoch = 3;
+    c.n = 8;
+    c.m = 24;
+    c.w = 16;
+    c.k = 128;
+    c.d = 64;
+    c.flags = TBT_FEC_CFG_F_APPLY;
+    c.groups = 8;
+    ok_int(tbt_fec_cfg_pack(&c, cbuf), 0, "sclc cfg up: pack");
+    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), 0, "sclc cfg up: unpack");
+    ok(c2.n == 8 && c2.m == 24 && c2.w == 16 && c2.k == 128 &&
+           c2.d == 64 && c2.groups == 8,
+       "sclc cfg up: round-trip", NULL);
+    ok_int(tbt_fec_sclc_shape_of_cfg(&c2, 256, &sh), 0,
+           "sclc cfg up: shape");
+    ok(sh.variant == TBT_FEC_SCLC_UP && sh.block == 128 && sh.L == 16 &&
+           sh.rate_ppm == 250 && sh.rate_256 == 64,
+       "sclc cfg up: profile", NULL);
+
+    /* A binary shape with a non-128/128 split is refused by the resolver. */
+    c.n = 64;
+    c.m = 192;
+    ok_int(tbt_fec_sclc_shape_of_cfg(&c, 256, &sh), -EINVAL,
+           "sclc cfg down: bad split");
+
+    /* FBK: the SC overlay rides the last four bitmap bytes. */
+    memset(&f, 0, sizeof(f));
+    tbt_fec_fbk_set_epoch(&f, 7);
+    f.m_current = 25;
+    f.m_target = 25;
+    f.p_ewma_ppm = 123456;
+    f.expected_shares = 1024;
+    f.received_shares = 1000;
+    f.n_current = 8;
+    f.flags = TBT_FEC_FBK_F_P_VALID;
+    tbt_fec_bitmap_set(f.carrier_bitmap, 0);
+    tbt_fec_fbk_sc_set_p_fast(&f, 400000);
+    tbt_fec_fbk_sc_set_codec_fail(&f, 100000);
+    ok_int(tbt_fec_fbk_pack(&f, fbuf), 0, "sclc fbk: pack");
+    ok_int(tbt_fec_fbk_unpack(fbuf, &f2), 0, "sclc fbk: unpack");
+    ok(tbt_fec_fbk_epoch(&f2) == 7 && f2.m_current == 25 &&
+           f2.p_ewma_ppm == 123456 && f2.expected_shares == 1024 &&
+           f2.received_shares == 1000 && f2.n_current == 8,
+       "sclc fbk: round-trip", NULL);
+    ok(tbt_fec_bitmap_test(f2.carrier_bitmap, 0),
+       "sclc fbk: bitmap head", NULL);
+    ok(tbt_fec_fbk_sc_p_fast(&f2) == 400000,
+       "sclc fbk: p_fast overlay", NULL);
+    ok(tbt_fec_fbk_sc_codec_fail(&f2) == 100000,
+       "sclc fbk: codec_fail overlay", NULL);
+}
+
 int main(void)
 {
     test_header_roundtrip();
@@ -2445,6 +2528,7 @@ int main(void)
     test_parity_only();
     test_nack_pacing();
     test_nack_dedup();
+    test_sclc_wire_profiles();
 
     printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

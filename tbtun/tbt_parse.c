@@ -20,6 +20,7 @@
 #endif
 
 #include "tbt_parse.h"
+#include "tbt_fec_adapt_sclc.h"
 
 #define TBT_U32_MAX 0xffffffffu
 #define TBT_U64_MAX (~(u64)0)
@@ -669,13 +670,6 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         cfg->adaptive = cfg->fec && cfg->mode != 3;
     if (cfg->adaptive && !cfg->fec)
         return tbt_fail(e, "adaptive", "adaptive=on requires fec=on");
-    /* 0.3.0 fixes the SC-LDPC shape. The control law and its estimator are
-     * the 8-share RLNC family and cannot describe a 256-share or 32-share
-     * block, so a mode=3 session with adaptive=on would only send CFGs the
-     * peer must refuse. Rate adaptation returns in 0.3.1. */
-    if (cfg->adaptive && cfg->mode == 3)
-        return tbt_fail(e, "adaptive", "sc-ldpc does not adapt in 0.3.0");
-
     if (!cfg->role)
         return tbt_fail(e, "role", "tunnel needs role=near or role=far");
     if (!have_listen)
@@ -711,6 +705,45 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         return tbt_fail(e, "m", "fec=on needs m>=1");
     if (cfg->fec && cfg->carriers < cfg->n + cfg->m)
         return tbt_fail(e, "carriers", "fec=on needs carriers >= n + m");
+    /* mode=3 adaptive starts from a shipped codec profile on the rate
+     * ladder: binary 1x256/L8/r0.5, or GF(16) 8x32/L16 with n/m on the
+     * ladder. The CFG carries no L for binary, so the fixed L8 is part of
+     * the profile; the uplink carries L in w. */
+    if (cfg->adaptive && cfg->mode == 3)
+    {
+        struct tbt_fec_cfg fc;
+        struct tbt_fec_adapt_sclc_wire wp;
+        u16 shares = (u16)(cfg->n + cfg->m);
+        u16 groups = (u16)(cfg->carriers / shares);
+
+        memset(&fc, 0, sizeof(fc));
+        fc.n = cfg->n;
+        fc.m = cfg->m;
+        fc.groups = groups;
+        if (groups == 1 && shares == TBT_FEC_MAX_SHARES)
+        {
+            if (cfg->w != TBT_FEC_SCLC_BLOCK_DOWN ||
+                (cfg->L && cfg->L != TBT_FEC_SCLC_L_DOWN))
+                return tbt_fail(e, "adaptive",
+                                "downlink adaptive needs block=256 L=8");
+            fc.w = cfg->w;
+            fc.k = (u16)((u32)cfg->n * 1000u / shares);
+            fc.d = 0;
+        }
+        else
+        {
+            if (cfg->w != TBT_FEC_SCLC_BLOCK_UP ||
+                (cfg->L && cfg->L != TBT_FEC_SCLC_L_UP))
+                return tbt_fail(e, "adaptive",
+                                "uplink adaptive needs block=128 L=16");
+            fc.w = cfg->L ? cfg->L : TBT_FEC_SCLC_L_UP;
+            fc.k = cfg->w;
+            fc.d = (u8)((u32)cfg->n * 256u / shares);
+        }
+        if (tbt_fec_adapt_sclc_wire_of_cfg(&fc, cfg->carriers, &wp))
+            return tbt_fail(e, "adaptive",
+                            "mode=3 adaptive needs a supported profile on the rate ladder");
+    }
     /* The old ARQ record names at most 16 carriers (path_ack_mask is u16 and
      * its FBK/WINDOW bodies hold 16 entries). A larger session is only
      * meaningful with FEC. */
