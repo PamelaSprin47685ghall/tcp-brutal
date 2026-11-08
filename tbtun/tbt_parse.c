@@ -574,6 +574,11 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
             if (tbt_parse_u16(val, &cfg->w) || cfg->w > TBT_FEC_MAX_W)
                 return tbt_fail(e, key, "w must be 0..1024");
         }
+        else if (!strcmp(key, "L"))
+        {
+            if (tbt_parse_u16(val, &cfg->L) || cfg->L > 4096)
+                return tbt_fail(e, key, "L must be 0..4096");
+        }
         else if (!strcmp(key, "carriers"))
         {
             if (tbt_parse_u16(val, &cfg->carriers) ||
@@ -1090,6 +1095,17 @@ int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
                       c->hole_budget_ms, c->rx_reorder_bytes, c->tx_window_bytes,
                       c->tx_retain_bytes, c->carrier_stall_ms, c->portblock_lo,
                       c->portblock_hi);
+        if (rc)
+            return rc;
+        /* L exists only for mode=3; rendering it for every mode would rewrite
+         * every stored line. The auto value renders as 0 and parses back to
+         * 0, so the canonical form round-trips. */
+        if (c->mode == 3)
+        {
+            rc = tbt_addf(buf, size, &off, " L=%u", c->L);
+            if (rc)
+                return rc;
+        }
     }
     if (rc)
         return rc;

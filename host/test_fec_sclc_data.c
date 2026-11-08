@@ -25,6 +25,7 @@
 #include <string.h>
 
 #include "tbt_fec.h"
+#include "tbt_sclc_uplink.h"
 
 static int checks;
 static int failures;
@@ -89,8 +90,13 @@ static void case_shape_of(void)
     ok_u16(sh.rate_ppm, 500, "downlink rate from n/(n+m)");
 
     memset(&sh, 0, sizeof(sh));
-    ok_int(tbt_fec_sclc_shape_of(8, 24, 256, 0, 0, &sh), -EINVAL,
-           "the grouped uplink is not wired yet");
+    ok_int(tbt_fec_sclc_shape_of(8, 24, 256, 0, 0, &sh), 0,
+           "uplink shape resolves");
+    ok(sh.variant == TBT_FEC_SCLC_UP, "uplink variant");
+    ok_u16(sh.groups, 8, "uplink eight groups");
+    ok_u16(sh.block, TBT_FEC_SCLC_BLOCK_UP, "uplink default block");
+    ok_u16(sh.L, TBT_FEC_SCLC_L_UP, "uplink default L");
+    ok_u16(sh.rate_256, 64, "uplink rate in 1/256");
 
     /* The binary codec's graph is 128+128; any other split of 256 shares is
      * a shape error, not an allocation failure. */
@@ -147,6 +153,24 @@ static void case_cfg_roundtrip(void)
        "downlink CFG round-trips");
     ok(out.flags == (TBT_FEC_CFG_F_APPLY | TBT_FEC_CFG_F_INIT),
        "INIT flag survives the round trip");
+
+    /* Uplink: k = block (128) > w = L (16), d = rate in 1/256. */
+    memset(&c, 0, sizeof(c));
+    c.epoch = 1;
+    c.n = 8;
+    c.m = 24;
+    c.w = 16;
+    c.k = 128;
+    c.d = 64;
+    c.flags = TBT_FEC_CFG_F_APPLY | TBT_FEC_CFG_F_INIT;
+    c.groups = 8;
+    c.seed = 0x5678;
+    ok_int(tbt_fec_cfg_pack(&c, body), 0, "uplink CFG packs");
+    memset(&out, 0, sizeof(out));
+    ok_int(tbt_fec_cfg_unpack(body, &out), 0, "uplink CFG unpacks");
+    ok(out.n == 8 && out.m == 24 && out.w == 16 && out.k == 128 &&
+           out.d == 64 && out.groups == 8,
+       "uplink CFG round-trips");
 
     /* An RLNC body with w < k stays invalid: k=4, w=2 is not a codeword
      * block the GF(16) factory accepts (block >= 16, even). */
@@ -287,6 +311,85 @@ static void case_downlink_roundtrip(void)
     }
 }
 
+/* ---- uplink: one group of 8+24 -------------------------------------- */
+
+static void case_uplink_roundtrip(void)
+{
+    struct tbt_fec_grouped *tx, *rx;
+    uint8_t *data[8], *parity[24];
+    uint8_t *rxdata[8], *rxparity[24];
+    uint8_t present_d[8], present_p[24];
+    int i, rc;
+
+    tx = tbt_fec_grouped_new_ops(&tbt_fec_ops_sclc_gf16, 1, 8, 24, 128, 16,
+                                 TBT_FEC_S, 64, 0xdef);
+    ok(tx != NULL, "uplink tx codec builds");
+    if (!tx)
+        return;
+    ok_int(tbt_fec_grouped_mode(tx), 3, "uplink container is mode 3");
+
+    for (i = 0; i < 8; i++)
+    {
+        data[i] = malloc(TBT_FEC_S);
+        rxdata[i] = malloc(TBT_FEC_S);
+        if (!data[i] || !rxdata[i])
+        {
+            ok(false, "uplink data buffers");
+            return;
+        }
+        fill_pattern(data[i], TBT_FEC_S, (uint32_t)(0x100 + i));
+        memset(rxdata[i], 0, TBT_FEC_S);
+    }
+    for (i = 0; i < 24; i++)
+    {
+        parity[i] = malloc(TBT_FEC_S);
+        rxparity[i] = malloc(TBT_FEC_S);
+        if (!parity[i] || !rxparity[i])
+        {
+            ok(false, "uplink parity buffers");
+            return;
+        }
+        memset(parity[i], 0, TBT_FEC_S);
+        memset(rxparity[i], 0, TBT_FEC_S);
+    }
+    ok_int(tbt_fec_grouped_encode(tx, 0, data, 8, parity), 0,
+           "uplink encode");
+
+    rx = tbt_fec_grouped_new_ops(&tbt_fec_ops_sclc_gf16, 1, 8, 24, 128, 16,
+                                 TBT_FEC_S, 64, 0xdef);
+    ok(rx != NULL, "uplink rx codec builds");
+    if (!rx)
+        return;
+    memset(present_d, 1, sizeof(present_d));
+    memset(present_p, 1, sizeof(present_p));
+    for (i = 0; i < 8; i++)
+        if (i != 3)
+            memcpy(rxdata[i], data[i], TBT_FEC_S);
+    for (i = 0; i < 24; i++)
+        memcpy(rxparity[i], parity[i], TBT_FEC_S);
+    present_d[3] = 0;
+    rc = tbt_fec_grouped_decode(rx, 0, rxdata, rxparity, present_d, present_p,
+                                8);
+    ok(rc >= 0, "uplink decode returns a count");
+    ok(tbt_fec_grouped_is_known(rx, 0, 3) != 0,
+       "the lost uplink share is known");
+    ok(memcmp(rxdata[3], data[3], TBT_FEC_S) == 0,
+       "the recovered uplink share is byte-exact");
+    tbt_fec_grouped_free(rx);
+    tbt_fec_grouped_free(tx);
+
+    for (i = 0; i < 8; i++)
+    {
+        free(data[i]);
+        free(rxdata[i]);
+    }
+    for (i = 0; i < 24; i++)
+    {
+        free(parity[i]);
+        free(rxparity[i]);
+    }
+}
+
 /* An RLNC container still dispatches through the same accessors, so the data
  * plane has one path for every codec. */
 static void case_rlnc_dispatch(void)
@@ -328,6 +431,7 @@ int main(void)
     case_shape_of();
     case_cfg_roundtrip();
     case_downlink_roundtrip();
+    case_uplink_roundtrip();
     case_rlnc_dispatch();
     printf("%s: %d checks, %d failures\n",
            failures ? "FAIL" : "PASS", checks, failures);

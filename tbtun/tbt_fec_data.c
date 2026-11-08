@@ -41,6 +41,7 @@
 #include "tbtun.h"
 #include "tbt_fec.h"
 #include "tbt_fec_adapt.h"
+#include "tbt_sclc_uplink.h"
 #include "tbt_rec.h"
 
 /* Defined next to the codec constructors; the shape-switch paths that run
@@ -4706,8 +4707,8 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
         return -EBUSY;
     }
 
-    local_L = 0; /* the binary downlink codec ignores L */
-    if (cfg->d == 0 && cfg->k >= 100 && cfg->k <= 1000)
+    local_L = sess->tunnel ? sess->tunnel->cfg.L : 0;
+    if ((cfg->d == 0 && cfg->k >= 100 && cfg->k <= 1000) || cfg->k > cfg->w)
     {
         if (tbt_fec_sclc_shape_of(cfg->n, cfg->m,
                                   (u16)(cfg->groups * shares), cfg->w,
@@ -6151,6 +6152,13 @@ struct tbt_fec_grouped *tbt_fec_sclc_new(const struct tbt_fec_sclc_shape *sh,
         w = sh->block;
         d = 0;
     }
+    else if (sh->variant == TBT_FEC_SCLC_UP)
+    {
+        ops = &tbt_fec_ops_sclc_gf16;
+        k = sh->block;
+        w = sh->L;
+        d = sh->rate_256;
+    }
     else
     {
         return NULL;
@@ -6170,6 +6178,8 @@ static const struct tbt_fec_ops *tbt_fec_ops_of_shape(
         return &tbt_fec_ops_rlnc;
     if (sh->d == 0 && sh->k >= 100 && sh->k <= 1000)
         return &tbt_fec_ops_sclc;
+    if (sh->k > sh->w)
+        return &tbt_fec_ops_sclc_gf16;
     return &tbt_fec_ops_rlnc;
 }
 
@@ -6210,14 +6220,15 @@ int tbt_fec_data_init(struct tbt_session *sess)
         return -EINVAL;
     }
     /* mode=3 names the codec variant and its graph from the shape itself:
-     * one group of 256 shares is the binary downlink. The rate is derived
-     * from n/(n+m), never configured. */
-    if (is_sclc && tbt_fec_sclc_shape_of(n, m, t->cfg.carriers, t->cfg.w, 0,
-                                         &sclc))
+     * one group of 256 shares is the binary downlink, more than one group is
+     * the GF(16) uplink with one block per group. The rate is derived from
+     * n/(n+m), never configured. */
+    if (is_sclc && tbt_fec_sclc_shape_of(n, m, t->cfg.carriers, t->cfg.w,
+                                         t->cfg.L, &sclc))
     {
-        pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: not an SC-LDPC shape n=%u m=%u carriers=%u w=%u\n",
+        pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: not an SC-LDPC shape n=%u m=%u carriers=%u w=%u L=%u\n",
                             (unsigned long long)t->cfg.id, n, m,
-                            t->cfg.carriers, t->cfg.w);
+                            t->cfg.carriers, t->cfg.w, t->cfg.L);
         return -EINVAL;
     }
     /* 0.3.0 fixes the shape; the rate control law cannot represent a

@@ -804,7 +804,12 @@ int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], struct tbt_fec_cfg *c)
     }
     else if (c->w < c->k)
     {
-        return -EPROTO;
+        /* GF(16): k is the codeword block, w the coupling length, d the rate
+         * in 1/256 units (its u8 range is already the valid set). The codec's
+         * own bounds are the discriminator: a codeword block is at least 16
+         * and even, and RLNC never has k > w. */
+        if (c->k < 16 || (c->k & 1) || c->w < 2)
+            return -EPROTO;
     }
     else
     {
@@ -1814,10 +1819,17 @@ int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
         out->block = block ? block : TBT_FEC_SCLC_BLOCK_DOWN;
         out->L = L ? L : TBT_FEC_SCLC_L_DOWN;
     }
+    else if (groups > 1)
+    {
+        out->variant = TBT_FEC_SCLC_UP;
+        out->block = block ? block : TBT_FEC_SCLC_BLOCK_UP;
+        out->L = L ? L : TBT_FEC_SCLC_L_UP;
+    }
     else
     {
-        /* The GF(16) grouped uplink is wired separately; until then only the
-         * binary single-group shape exists. */
+        /* One group of fewer than 256 shares is neither shipped shape. The
+         * binary codec's graph is bound to 128+128, so accepting it would
+         * build a codec that cannot encode the block. */
         return -EINVAL;
     }
     if (!out->block || (out->block & 1) || !out->L)

@@ -54,6 +54,10 @@ struct tbt_cfg
                   * configured n/m are the initial shape and the upper hint. */
     u8 mode;    /* 1 rlnc, 2 grouped, 3 sc-ldpc; never 0 after parsing */
     u16 w;      /* effective window: 1..1024, or 2*n / 256 resolved from w=0 */
+    u16 L;      /* sc-ldpc coupling length; 0 = the variant default. Not a
+                 * wire field: both ends must configure it, and 0.3.0 keeps
+                 * the shape fixed, so the value only has to match within a
+                 * session. */
     u16 carriers; /* effective slots: a multiple of n+m, or n+m resolved from 0 */
     __be32 listen_addr;
     __be16 listen_port;
