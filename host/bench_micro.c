@@ -55,6 +55,10 @@
 #include <string.h>
 #include <time.h>
 
+/* Host-only hook into tbt_fec.c's static XOR inner loop; the module build
+ * never sees it. */
+void tbt_fec_host_xor_into(u8 *dst, const u8 *src, size_t len);
+
 /* ------------------------------------------------------------------ *
  * Driver
  * ------------------------------------------------------------------ */
@@ -237,6 +241,35 @@ static void run_fec_encode8(unsigned int iters, u64 *sum)
             exit(1);
         }
         *sum += fec_parity[0][0] + fec_parity[3][FEC_S - 1];
+    }
+}
+
+/* The encoder's XOR inner loop, timed without the codec around it. 8192 B is
+ * the v6 FEC payload; the encode rows pay this loop once per (parity row,
+ * data share) pair. */
+#define XOR_LEN TBT_FEC_PAYLOAD_MAX
+static u8 xor_dst[XOR_LEN];
+static u8 xor_src[XOR_LEN];
+
+static void xor_init(void)
+{
+    unsigned int i;
+
+    for (i = 0; i < XOR_LEN; i++)
+    {
+        xor_dst[i] = (u8)(0x11 + i * 7);
+        xor_src[i] = (u8)(0x5a + i * 13);
+    }
+}
+
+static void run_fec_xor(unsigned int iters, u64 *sum)
+{
+    unsigned int i;
+
+    for (i = 0; i < iters; i++)
+    {
+        tbt_fec_host_xor_into(xor_dst, xor_src, XOR_LEN);
+        *sum += xor_dst[0] + xor_dst[XOR_LEN - 1];
     }
 }
 
@@ -816,6 +849,7 @@ static const struct bench benches[] = {
      fec_data[0], FEC_S, NULL},
     {"fec.decode.n4m4.w8.k8.erase1.s1500", FEC_L8 * FEC_S, run_fec_decode8,
      fec_data[7], FEC_S, NULL},
+    {"fec.xor_into.8192", XOR_LEN, run_fec_xor, xor_dst, XOR_LEN, NULL},
     {"fec.grouped64.encode_one_group.n4m4.w8.s1500", FEC_L4 * FEC_S,
      run_fec_grouped, fec_data[1], FEC_S, NULL},
     {"fec.hdr.seal_verify.s1500", FEC_S, run_fec_hdr, hdr_payload, FEC_S, NULL},
@@ -875,6 +909,7 @@ int main(int argc, char **argv)
     }
 
     fec_fixture_init();
+    xor_init();
     grouped_init();
     bitmap_init();
     replay_init();
