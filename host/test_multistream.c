@@ -95,6 +95,7 @@ struct carrier
 struct stream
 {
     uint32_t sid;
+    int state;              /* ST_PENDING/ST_OPEN/ST_DEAD */
     bool active;
     bool retired;
     bool tombstone;
@@ -151,8 +152,20 @@ struct session
     int free_slots[MAX_STREAMS];
     int nfree;
     uint64_t rx_paused_skips;
+    /* Far-side bind decisions, asserted by the session state-machine cases. */
+    uint64_t far_tombstone_opens;
+    uint64_t far_switch_kills;
+    uint64_t far_barriers;
+    uint64_t far_adopts;
+    uint64_t near_sid_skips;
 };
 
+enum stream_state
+{
+    ST_PENDING = 0,
+    ST_OPEN,
+    ST_DEAD,
+};
 
 static struct stream *stream_new(struct session *s, uint32_t sid)
 {
@@ -170,6 +183,7 @@ static struct stream *stream_new(struct session *s, uint32_t sid)
         return NULL;
     memset(st, 0, sizeof(*st));
     st->sid = sid;
+    st->state = ST_PENDING;
     st->active = true;
     st->target = -1;
     st->tx_ack = 0;
@@ -538,23 +552,32 @@ static int session_hash_count(const struct session *s)
     return n;
 }
 
-/* tbt_sock.c:554-559: sid = prefix<<24 | (next_sid & 0xffffff); next_sid++;
- * sid 0 becomes 1 because 0 is the "no stream" sentinel.  A wrap onto a live
- * sid must be a collision, not a silent reuse. */
+/* tbt_sock.c: sid = prefix<<24 | (next_sid & 0xffffff); next_sid++; sid 0 is
+ * the "no stream" sentinel and is skipped.  The allocator skips every sid
+ * still in the hash, including a tombstone the reaper has not collected:
+ * reusing one would let the far side drop the new OPEN while its own
+ * tombstone is armed.  n_streams bounds the skip on the rare 24-bit wrap. */
 static enum sid_result session_alloc_sid(struct session *s, uint32_t *out)
 {
     uint32_t sid;
+    int tries;
 
     if (s->n_active >= TBT_STREAMS_MAX)
         return SID_FULL;
-    sid = (uint32_t)(s->next_sid & 0xffffff);
-    s->next_sid++;
-    if (!sid)
-        sid = 1;
-    if (stream_find(s, sid))
-        return SID_COLLISION;
-    *out = sid;
-    return SID_OK;
+    for (tries = 0; tries <= s->n_streams + 1; tries++)
+    {
+        sid = (uint32_t)(s->next_sid & 0xffffff);
+        s->next_sid++;
+        if (!sid)
+            continue;
+        if (!stream_find(s, sid))
+        {
+            *out = sid;
+            return SID_OK;
+        }
+        s->near_sid_skips++;
+    }
+    return SID_COLLISION;
 }
 
 /* Current kernel behaviour, kept visible for the test: tbt_session.c:622-630
@@ -567,6 +590,132 @@ static struct stream *session_create_current(struct session *s, uint32_t sid)
     if (found)
         return found;
     return stream_new(s, sid);
+}
+
+static int stream_release_target(struct stream *st);
+
+static bool stream_is_closing(const struct stream *st)
+{
+    return st->state == ST_DEAD || st->tombstone || st->rx_fin_seen;
+}
+
+/* tbt_stream_kill(): one winner marks the stream DEAD, clears ACTIVE, stamps
+ * the tombstone, and the kill work releases the target.  The model releases it
+ * inline so a target that outlives its stream is a test failure. */
+static void stream_kill(struct session *s, struct stream *st)
+{
+    if (!st || st->state == ST_DEAD)
+        return;
+    st->state = ST_DEAD;
+    st->active = false;
+    stream_detach_from_session(s, st);
+    st->announced_mask = 0;
+    memset(st->announced_gen, 0, sizeof(st->announced_gen));
+    stream_release_target(st);
+}
+
+enum bind_result
+{
+    BIND_OK = 0,
+    BIND_DROP,
+    BIND_ADOPT,
+};
+
+/* tbt_session_bind_sid() far branch.
+ *
+ * A fresh OPEN supersedes the stream far_sid still names.  Kill that stream
+ * even when it never submitted a byte: its target and ACTIVE slot must not
+ * outlive the session's only stream.  A tombstoned sid is protected for
+ * TBT_TOMBSTONE_MS; the near allocator skips every sid still in the hash, so
+ * an OPEN can only be a duplicate of the old one.  It is dropped and counted;
+ * only the reaper frees the sid, after which a later allocation may reuse it. */
+static int far_bind(struct session *s, uint32_t sid, bool open)
+{
+    struct stream *st = stream_find(s, sid);
+    uint32_t kill_sid = 0, barrier_sid = 0;
+    bool adopt = false, drop = false, tombstone_open = false;
+
+    if (!sid)
+        return BIND_DROP;
+    if (st && (st->state == ST_DEAD || st->tombstone))
+    {
+        drop = true;
+        tombstone_open = open;
+    }
+    if (!drop && !st && !open)
+    {
+        drop = true;
+    }
+    else if (!drop && st && s->far_sid != sid)
+    {
+        /* A live object that is no longer the session stream. */
+        drop = true;
+        if (st->state != ST_DEAD && !st->tombstone)
+            kill_sid = sid;
+    }
+    else if (!drop && st && open && stream_is_closing(st))
+    {
+        drop = true;
+    }
+    else if (!drop && !st)
+    {
+        uint32_t old = s->far_sid;
+
+        if (old && old != sid)
+        {
+            struct stream *ost = stream_find(s, old);
+
+            barrier_sid = old;
+            if (ost && ost->state != ST_DEAD && !ost->tombstone)
+                kill_sid = old;
+        }
+        s->far_sid = sid;
+        adopt = true;
+    }
+
+    if (kill_sid)
+    {
+        struct stream *old = stream_find(s, kill_sid);
+
+        stream_kill(s, old);
+        s->far_switch_kills++;
+    }
+    if (barrier_sid)
+        s->far_barriers++;
+    if (tombstone_open)
+        s->far_tombstone_opens++;
+    if (drop)
+        return BIND_DROP;
+    if (adopt)
+    {
+        struct stream *fresh = stream_new(s, sid);
+
+        if (!fresh)
+        {
+            if (s->far_sid == sid)
+                s->far_sid = 0;
+            return BIND_DROP;
+        }
+        fresh->state = ST_OPEN;
+        target_attach(fresh);
+        s->far_adopts++;
+        return BIND_ADOPT;
+    }
+    return BIND_OK;
+}
+
+/* tbt_far_open_seen(): the publisher of a stream may run after a later OPEN
+ * has already superseded it.  It must not announce or start a target for a
+ * stream the session no longer names. */
+static void far_open_seen_model(struct session *s, struct stream *st)
+{
+    if (s->far_sid != st->sid || st->state == ST_DEAD)
+    {
+        stream_kill(s, st);
+        return;
+    }
+    st->state = ST_OPEN;
+    target_attach(st);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1014,10 +1163,9 @@ static void scenario_churn_reap_p3b3(void)
     ok(s.n_active == 0 && s.n_streams == 0, "churn: churn ends empty", "");
 }
 
-/* P3B3: the 24-bit sid allocator must never hand out a live sid twice.
- * tbt_sock.c:554-559 wraps next_sid & 0xffffff; tbt_session.c:622-630
- * currently returns the found stream ("lost the race") and tbt_stream_start_now
- * then overwrites its socket.  A wrap onto a live sid must be a collision. */
+/* P3B3: the 24-bit sid allocator must never hand out a live or tombstoned sid.
+ * tbt_sock.c wraps next_sid & 0xffffff and skips every sid still in the hash;
+ * tbt_stream_get_created() is the second gate. */
 static void scenario_sid_alloc_p3b3(void)
 {
     struct session s = {0};
@@ -1051,22 +1199,32 @@ static void scenario_sid_alloc_p3b3(void)
 
     first = stream_new(&s, 1);
     ok(first != NULL, "sid: stream 1 is live", "");
+    first->state = ST_OPEN;
     first->has_sk = true;   /* an attached socket */
     first->target = 42;
     first->target_attached = 1;
     s.next_sid = 1u << 24; /* 2^24 wrap lands on sid 1 */
-    ok(session_alloc_sid(&s, &sid) == SID_COLLISION,
-       "sid: 2^24 wrap onto a live sid is a collision", "");
-    ok(s.next_sid == (1ull << 24) + 1,
-       "sid: allocator advances past the wrap", "");
+    ok(session_alloc_sid(&s, &sid) == SID_OK && sid == 2,
+       "sid: a wrap onto a live sid is skipped, not reused", "");
+    ok(s.next_sid == (1ull << 24) + 3,
+       "sid: allocator advances past the skip", "");
     found = stream_find(&s, 1);
     ok(found == first && first->has_sk && first->target == 42 && first->active,
-       "sid: collision does not overwrite the live stream", "");
+       "sid: skip does not overwrite the live stream", "");
+
+    /* The same rule covers a tombstone the reaper has not collected. */
+    stream_retire(&s, first);
+    ok(first->tombstone && stream_find(&s, 1) == first,
+       "sid: retired stream stays in the tombstone window", "");
+    s.next_sid = 1u << 24;
+    ok(session_alloc_sid(&s, &sid) == SID_OK && sid == 2,
+       "sid: a wrap onto a tombstoned sid is skipped", "");
+    ok(s.near_sid_skips == 2, "sid: both skips are visible", "");
 
     /* Current kernel behaviour, kept visible: tbt_session.c:622-630 returns
-     * the found object instead of reporting a collision. */
+     * the found object; the allocator is what keeps it from happening. */
     ok(session_create_current(&s, 1) == first,
-       "sid: current kernel reuses the live stream (known defect)", "");
+       "sid: get-or-create still returns the existing object (known defect)", "");
 }
 
 /* tbt_session.c:627-712: 256 carriers deliver the same OPEN. Every carrier
@@ -1185,6 +1343,199 @@ static void scenario_target_close_on_abort(void)
        "target abort: new stream target is readable", "");
 }
 
+/* A far-side OPEN for a new sid supersedes the stream far_sid still names.
+ * The old stream here has never submitted a byte and its target is attached:
+ * only an explicit kill closes that target and releases the ACTIVE slot. */
+static void scenario_far_switch_idle(void)
+{
+    struct session s = {0};
+    struct stream *old, *fresh;
+
+    s.ncar = 1;
+    s.car[0].index = 0;
+    s.car[0].gen = 1;
+    carrier_hello(&s, 0);
+
+    old = stream_new(&s, 7001);
+    old->state = ST_OPEN;
+    target_attach(old);
+    ok(old->tx_seq == 0 && old->data_sent == 0 && old->data_pending == 0,
+       "switch idle: old stream never submitted a byte", "");
+    ok(old->target == 7001 && s.n_active == 1 && s.far_sid == 7001,
+       "switch idle: old target is attached", "");
+
+    ok(far_bind(&s, 7002, true) == BIND_ADOPT,
+       "switch idle: new OPEN is adopted", "");
+    ok(old->state == ST_DEAD && old->session_detached && old->tombstone,
+       "switch idle: old stream is DEAD and tombstoned", "");
+    ok(!old->active && old->target == -1 && old->target_attached == 0,
+       "switch idle: old ACTIVE slot released and target closed", "");
+    ok(s.far_sid == 7002 && s.n_active == 1,
+       "switch idle: exactly the new stream is active", "");
+    fresh = stream_find(&s, 7002);
+    ok(fresh && fresh->state == ST_OPEN && fresh->target == 7002 &&
+       fresh->target_attached == 1,
+       "switch idle: new stream is OPEN with its own target", "");
+    ok(s.far_switch_kills == 1 && s.far_barriers == 1 && s.far_adopts == 1,
+       "switch idle: kill, RX barrier and adoption each ran once", "");
+
+    /* A late DATA frame for the old sid must not reach either stream. */
+    ok(far_bind(&s, 7001, false) == BIND_DROP,
+       "switch idle: late DATA for the old sid is dropped", "");
+    ok(s.far_sid == 7002 && s.n_active == 1,
+       "switch idle: late old DATA does not disturb the new stream", "");
+}
+
+/* A -> B -> C as fast as the carriers can deliver three OPENs. Each adoption
+ * kills the previous stream, including one that never carried data; only C
+ * remains active, and A/B reap without leaving a DEAD hash entry or a target. */
+static void scenario_far_fast_reconnect(void)
+{
+    struct session s = {0};
+    struct stream *a, *b, *c;
+    int i;
+
+    s.ncar = 1;
+    s.car[0].index = 0;
+    s.car[0].gen = 1;
+    carrier_hello(&s, 0);
+
+    a = stream_new(&s, 7101);
+    a->state = ST_OPEN;
+    target_attach(a);
+
+    ok(far_bind(&s, 7102, true) == BIND_ADOPT, "reconnect: B adopted", "");
+    b = stream_find(&s, 7102);
+    ok(b && b->state == ST_OPEN && b->target == 7102,
+       "reconnect: B is OPEN with a target", "");
+    ok(far_bind(&s, 7103, true) == BIND_ADOPT, "reconnect: C adopted", "");
+    c = stream_find(&s, 7103);
+    ok(c && c->state == ST_OPEN && c->target == 7103,
+       "reconnect: C is OPEN with a target", "");
+
+    ok(a->state == ST_DEAD && b->state == ST_DEAD,
+       "reconnect: A and B are DEAD", "");
+    ok(a->target == -1 && b->target == -1 && c->target == 7103,
+       "reconnect: only C still owns a target", "");
+    ok(s.far_sid == 7103 && s.n_active == 1 && s.n_streams == 3,
+       "reconnect: one active stream and two tombstones", "");
+    ok(s.far_switch_kills == 2 && s.far_adopts == 2,
+       "reconnect: each adoption killed its predecessor", "");
+
+    s.now_ns += (uint64_t)TBT_TOMBSTONE_MS * 1000000ull;
+    ok(session_reap(&s) == 2, "reconnect: A and B reap", "");
+    ok(s.n_streams == 1 && s.n_active == 1 && s.far_sid == 7103,
+       "reconnect: C survives the reap", "");
+    ok(session_hash_count(&s) == 1, "reconnect: no dead hash entry remains", "");
+    for (i = 0; i < s.nst; i++)
+        if (!s.st[i].unlinked)
+            ok(s.st[i].state != ST_DEAD,
+               "reconnect: a live hash entry is not DEAD", "");
+
+    stream_kill(&s, c);
+    s.now_ns += (uint64_t)TBT_TOMBSTONE_MS * 1000000ull;
+    ok(session_reap(&s) == 1, "reconnect: C reaps", "");
+    ok(s.n_streams == 0 && s.n_active == 0 && s.far_sid == 0,
+       "reconnect: the session ends empty", "");
+    ok(session_hash_count(&s) == 0, "reconnect: no stream or target leaked", "");
+}
+
+/* The publisher of B can lose the race to C's adoption while it sits between
+ * stream creation and tbt_far_open_seen().  The late publisher must kill its
+ * own stream instead of announcing it and starting a target. */
+static void scenario_far_open_race_superseded(void)
+{
+    struct session s = {0};
+    struct stream *b;
+
+    ok(far_bind(&s, 7303, true) == BIND_ADOPT,
+       "open race: C is adopted with no B object yet", "");
+    b = stream_new(&s, 7302);
+    ok(b != NULL && b->state == ST_PENDING,
+       "open race: B's publisher creates its object late", "");
+    s.far_sid = 7303; /* tbt_stream_get_created() does not touch far_sid */
+
+    far_open_seen_model(&s, b);
+    ok(b->state == ST_DEAD && b->target == -1 && !b->active,
+       "open race: superseded publisher starts no target", "");
+    ok(s.far_sid == 7303 && s.n_active == 1,
+       "open race: C remains the only active stream", "");
+    ok(session_hash_count(&s) == 2 && stream_find(&s, 7302) == b,
+       "open race: B is a tombstone, not a live orphan", "");
+
+    s.now_ns += (uint64_t)TBT_TOMBSTONE_MS * 1000000ull;
+    ok(session_reap(&s) == 1, "open race: the orphan tombstone reaps", "");
+    ok(session_hash_count(&s) == 1 && s.n_active == 1,
+       "open race: no object or target leaked", "");
+}
+
+/* An OPEN for a sid whose tombstone is still in the hash is a duplicate of
+ * the old OPEN, not a new stream: it is dropped and counted, never silently
+ * ignored.  The near allocator skips the tombstoned sid, so a new stream
+ * cannot legitimately name it until the reaper unlinks it. */
+static void scenario_tombstone_open_window(void)
+{
+    struct session s = {0};
+    struct stream *old, *fresh;
+    uint32_t sid = 0;
+
+    s.ncar = 1;
+    s.car[0].index = 0;
+    s.car[0].gen = 1;
+    carrier_hello(&s, 0);
+
+    old = stream_new(&s, 7201);
+    old->state = ST_OPEN;
+    target_attach(old);
+    stream_kill(&s, old);
+    ok(old->tombstone && old->state == ST_DEAD && old->target == -1,
+       "tombstone window: old stream is dead and its target closed", "");
+    ok(s.far_sid == 0 && s.n_active == 0 && s.n_streams == 1,
+       "tombstone window: only the tombstone remains", "");
+
+    ok(far_bind(&s, 7201, true) == BIND_DROP,
+       "tombstone window: in-window OPEN is dropped", "");
+    ok(s.far_tombstone_opens == 1,
+       "tombstone window: the drop is observable, not silent", "");
+    ok(stream_find(&s, 7201) == old && old->tombstone &&
+       s.far_sid == 0 && s.n_active == 0 && s.n_streams == 1,
+       "tombstone window: drop creates no stream or target", "");
+
+    /* The near side must not hand out the tombstoned sid. */
+    s.next_sid = 7201;
+    ok(session_alloc_sid(&s, &sid) == SID_OK && sid == 7202,
+       "tombstone window: allocator skips the tombstoned sid", "");
+    ok(s.near_sid_skips == 1, "tombstone window: the skip is visible", "");
+
+    /* The window has passed but the reaper has not run. The sid is still in
+     * the hash, so the near allocator still refuses it and an OPEN for it is
+     * still a late duplicate. */
+    s.now_ns += (uint64_t)TBT_TOMBSTONE_MS * 1000000ull;
+    ok(far_bind(&s, 7201, true) == BIND_DROP,
+       "tombstone window: OPEN before the reap is still dropped", "");
+    ok(s.far_tombstone_opens == 2,
+       "tombstone window: the second drop is observable", "");
+    ok(stream_find(&s, 7201) == old && old->tombstone && s.n_streams == 1,
+       "tombstone window: the reaper, not the OPEN, frees the sid", "");
+
+    /* Only the reap frees the sid. Then the allocator may reuse it and a new
+     * OPEN creates a fresh stream with no duplicate hash entry. */
+    ok(session_reap(&s) == 1, "tombstone window: the old tombstone reaps", "");
+    ok(s.n_streams == 0 && s.n_active == 0 && s.far_sid == 0,
+       "tombstone window: the hash is empty after the reap", "");
+    s.next_sid = 7201;
+    ok(session_alloc_sid(&s, &sid) == SID_OK && sid == 7201,
+       "tombstone window: a reaped sid is allocatable again", "");
+    ok(far_bind(&s, 7201, true) == BIND_ADOPT,
+       "tombstone window: post-reap OPEN is accepted", "");
+    fresh = stream_find(&s, 7201);
+    ok(fresh && fresh->state == ST_OPEN && !fresh->tombstone &&
+       !fresh->session_detached && fresh->target == 7201,
+       "tombstone window: a fresh stream owns the sid", "");
+    ok(s.n_streams == 1 && s.n_active == 1 && s.far_sid == 7201,
+       "tombstone window: no duplicate hash entry or ACTIVE leak", "");
+}
+
 int main(void)
 {
     static const enum mode modes[] = {
@@ -1216,6 +1567,10 @@ int main(void)
     scenario_open_race_p3b3();
     scenario_fec_abort_barrier();
     scenario_target_close_on_abort();
+    scenario_far_switch_idle();
+    scenario_far_fast_reconnect();
+    scenario_far_open_race_superseded();
+    scenario_tombstone_open_window();
 
     printf("test_multistream: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
