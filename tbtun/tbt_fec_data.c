@@ -2141,6 +2141,19 @@ static void tbt_fec_tx_init_tick(struct tbt_session *sess,
         tx->init_done = true;
         return;
     }
+    if (tx->peer_est_valid && tx->peer_epoch == 1 &&
+        (tx->peer_flags & TBT_FEC_FBK_F_CFG_NACK))
+    {
+        /* The peer cannot build this shape. Retrying cannot help; keep the
+         * two-sided configured shape and name the mismatch once. */
+        tx->init_done = true;
+        pr_warn_ratelimited("tbtun: tunnel %llu: peer refused the INIT shape sid=%llu n=%u m=%u groups=%u w=%u k=%u d=%u\n",
+                            (unsigned long long)sess->tunnel->cfg.id,
+                            (unsigned long long)tx->sid, tx->n, tx->m,
+                            tx->groups, tx->shape_w, tx->shape_k,
+                            tx->shape_d);
+        return;
+    }
     if (tx->init_tries >= 6)
     {
         tx->init_done = true;
@@ -5233,6 +5246,14 @@ static void tbt_fec_rx_init_tick(struct tbt_session *sess,
         pr_warn_ratelimited("tbtun: tunnel %llu: fec init shape rejected: %d n=%u m=%u groups=%u w=%u k=%u d=%u\n",
                             (unsigned long long)sess->tunnel->cfg.id, err,
                             cfg.n, cfg.m, cfg.groups, cfg.w, cfg.k, cfg.d);
+        /* A permanent profile mismatch is refused once; a transient
+         * allocation failure is left to the sender's retry window. */
+        if (err == -EINVAL)
+        {
+            rx->fbk_epoch = cfg.epoch;
+            tbt_fec_rx_fbk_send(sess, f, TBT_FEC_FBK_F_CFG_NACK);
+            rx->fbk_epoch = 0;
+        }
         return;
     }
     atomic64_inc(&sess->fec_init_rx);
@@ -7527,7 +7548,11 @@ int tbt_fec_data_init(struct tbt_session *sess)
      * = 0 keeps the old single-stream geometry; 16 on 256 carriers leaves 16
      * groups for a second flow. A far-side OPEN later replaces this mask. */
     primary_groups = groups;
-    if (tbt_fec_groups_per_flow && tbt_fec_groups_per_flow < primary_groups)
+    /* SC-LDPC keeps the whole carrier geometry in its single flow: a partial
+     * group set would make the CFG groups field disagree with 256/(n+m) and
+     * the rate switch would be refused. */
+    if (!is_sclc && tbt_fec_groups_per_flow &&
+        tbt_fec_groups_per_flow < primary_groups)
         primary_groups = (u16)tbt_fec_groups_per_flow;
     if (!primary_groups)
         primary_groups = 1;

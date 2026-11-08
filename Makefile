@@ -15,7 +15,8 @@ SRCS            := Makefile \
                    tbtun/tbt_carrier.c tbtun/tbt_sock.c tbtun/tbt_tx.c tbtun/tbt_rx.c \
                    tbtun/tbt_parse.c tbtun/tbt_proto.c tbtun/tbt_rec.c tbtun/tbt_http.c \
                    tbtun/tbt_crypto.c tbtun/tbt_fec.c tbtun/tbt_fec_data.c tbtun/tbt_fec_adapt.c \
-                   tbtun/tbt_fec_adapt_sclc.c tbtun/tbt_portmap.c \
+                   tbtun/tbt_fec_adapt_sclc.c tbtun/tbt_fec_sclc.c \
+                   tbtun/tbt_fec_sclc.h tbtun/tbt_portmap.c \
                    tbtun/tbt_sc_ldpc.c tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c \
                    tbtun/tbt_sc_ldpc.h tbtun/tbt_sc_ldpc_gf16.h tbtun/tbt_sclc_uplink.h \
                    scripts/mkdkmsconf.sh scripts/install_dkms.sh \
