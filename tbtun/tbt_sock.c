@@ -788,8 +788,10 @@ static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
     if (READ_ONCE(sess->closing) || sess->n_active >= TBT_STREAMS_MAX)
     {
         spin_unlock(&sess->lock);
+        /* Abort consumes the admission reference; a bare put here would
+         * leave the unlinked flow's planes alive forever. */
         if (flow)
-            tbt_fec_flow_abort(sess, sid);
+            tbt_fec_flow_abort(sess, flow);
         return -EBUSY;
     }
     sess->far_sid = sid;
@@ -799,7 +801,7 @@ static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
     if (!st)
     {
         if (flow)
-            tbt_fec_flow_abort(sess, sid);
+            tbt_fec_flow_abort(sess, flow);
         return -ENOMEM;
     }
     if (flow)

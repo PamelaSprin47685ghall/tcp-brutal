@@ -6845,16 +6845,14 @@ static void tbt_fec_flow_purge(struct tbt_session *sess,
     spin_unlock(&sess->fec_out_lock);
 }
 
-/* Undo an admission whose stream could not be created. The caller holds one
- * reference from admit; the table holds another. Remove both. */
-void tbt_fec_flow_abort(struct tbt_session *sess, u64 sid)
+/* Undo an admission whose stream could not be created. `f` is the caller's
+ * admission reference; the table holds another. This function consumes both,
+ * so a failed stream start cannot leave the flow unlinked but alive. */
+void tbt_fec_flow_abort(struct tbt_session *sess, struct tbt_fec_flow *f)
 {
-    struct tbt_fec_flow *f, *next;
+    struct tbt_fec_flow *next;
 
-    if (!sess || !sess->fec || !sid)
-        return;
-    f = tbt_fec_flow_lookup(sess, sid);
-    if (!f)
+    if (!sess || !sess->fec || !f)
         return;
     mutex_lock(&sess->fec_alloc_lock);
     spin_lock(&sess->lock);
@@ -6890,8 +6888,8 @@ void tbt_fec_flow_abort(struct tbt_session *sess, u64 sid)
     /* Purge after the flow is unreachable: a racing producer now refuses at
      * tbt_fec_out_push(), and an in-flight flush owns a record reference. */
     tbt_fec_flow_purge(sess, f);
-    tbt_fec_flow_put(f); /* lookup reference */
     tbt_fec_flow_put(f); /* table reference */
+    tbt_fec_flow_put(f); /* caller's admission reference */
 }
 
 void tbt_fec_flow_attach(struct tbt_stream *st, struct tbt_fec_flow *f)

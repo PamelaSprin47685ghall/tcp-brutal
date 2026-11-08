@@ -2052,7 +2052,7 @@ void tbt_fec_flow_put(struct tbt_fec_flow *f);
 /* Bind a stream to its flow (one reference moves to the stream) and release
  * it at detach. */
 void tbt_fec_flow_attach(struct tbt_stream *st, struct tbt_fec_flow *f);
-void tbt_fec_flow_abort(struct tbt_session *sess, u64 sid);
+void tbt_fec_flow_abort(struct tbt_session *sess, struct tbt_fec_flow *f);
 void tbt_fec_flow_detach(struct tbt_stream *st);
 /* Build the next free group bitmap for a new flow. Returns the group count,
  * or 0 when no group is free. */

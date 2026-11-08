@@ -1424,6 +1424,32 @@ static void test_flow_lifetime(void)
        "isolation: no adopted stream has no sid to compare");
 }
 
+/* Admission hands the caller one reference and the table another. A failed
+ * stream start calls abort, which must consume both: a bare lookup+table put
+ * left the unlinked flow's planes alive. This models the refcount arithmetic
+ * (the kernel function is not linkable here). */
+static void test_admit_abort_refs(void)
+{
+    int refs = 2; /* table + admission */
+    bool planes = true;
+
+    refs -= 2; /* abort: table ref, then the caller's admission ref */
+    if (!refs)
+        planes = false;
+    ok(refs == 0, "abort: both the table and admission refs are consumed");
+    ok(!planes, "abort: the planes are released when the last ref drops");
+
+    /* A racing snapshot can hold one more reference across the abort. */
+    refs = 3;
+    planes = true;
+    refs -= 2;
+    ok(refs == 1 && planes, "abort: a snapshot ref keeps the planes alive");
+    refs--;
+    if (!refs)
+        planes = false;
+    ok(refs == 0 && !planes, "abort: the last snapshot put frees the planes");
+}
+
 static void test_super_cursor(void)
 {
     static const u16 full[N] = {S, S, S, S};
@@ -2235,6 +2261,7 @@ int main(void)
     test_window_rebase();
     test_stream_reset_isolation();
     test_flow_lifetime();
+    test_admit_abort_refs();
     test_ack_split();
     test_rx_poll();
     test_nack_settle_gate();
