@@ -352,7 +352,10 @@ static inline void tbt_fec_fbk_set_epoch(struct tbt_fec_fbk *f, u32 epoch)
 /* SC-LDPC FBK overlay (mode=3, adaptive=on). The last four bytes of the
  * carrier bitmap carry p_fast and codec_fail in 16 ppm units, little-endian.
  * The alive bitmap then covers carriers 0..223; no current consumer reads
- * the bitmap, and the 48-byte body and every offset stay unchanged. */
+ * the bitmap, and the 48-byte body and every offset stay unchanged.
+ * Merge note: w-0.4.0-multistream's 0x1007 changes per-flow FEC framing but
+ * keeps this FBK body; a later per-flow FBK extension must recheck this
+ * overlay and the 224-carrier truncation. */
 #define TBT_FEC_FBK_SC_P_FAST_OFF (TBT_FEC_BITMAP_BYTES - 4)
 #define TBT_FEC_FBK_SC_CODEC_FAIL_OFF (TBT_FEC_BITMAP_BYTES - 2)
 

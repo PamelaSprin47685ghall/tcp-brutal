@@ -7141,6 +7141,17 @@ int tbt_fec_data_init(struct tbt_session *sess)
             w = sclc.L;
             d = sclc.rate_256;
         }
+        /* The controller starts at the configured ladder point and may move
+         * only to the points this codec can build. The binary downlink is
+         * fixed at 128/128; the GF(16) uplink builds every ladder split. */
+        if (tbt_fec_adapt_sclc_init_plan(n, m, groups, sclc.variant,
+                                         &sclc_idx, &sclc_mask) &&
+            READ_ONCE(sess->adaptive))
+        {
+            pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: adaptive mode=3 needs an n/m split on the rate ladder (n=%u m=%u)\n",
+                                (unsigned long long)t->cfg.id, n, m);
+            return -EINVAL;
+        }
     }
     else
     {
@@ -7310,6 +7321,10 @@ int tbt_fec_data_init(struct tbt_session *sess)
             /* INIT uses generation 1; the first switch must be 2. */
             tbt_fec_adapt_sclc_ctl_set_epoch(tx->adapt_sclc, 1);
             tbt_fec_adapt_sclc_ctl_set_rate_mask(tx->adapt_sclc, sclc_mask);
+            TBT_DIAG("fec sclc adapt tunnel=%llu rate=%u mask=0x%02x shares=%u groups=%u",
+                     (unsigned long long)t->cfg.id,
+                     tbt_fec_adapt_sclc_rate_at(sclc_idx)->pct, sclc_mask,
+                     shares, groups);
         }
     }
     tx->replay = tbt_fec_replay_new(groups, n, m, TBT_FEC_S);
