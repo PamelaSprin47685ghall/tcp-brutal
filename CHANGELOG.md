@@ -3,7 +3,7 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
-## [Unreleased]
+## [0.2.3] - 2026-11-08
 
 ### Changed
 
@@ -13,6 +13,15 @@ and moves independently of the module version.
   `/sys/module/tbtun/parameters/hold_enable`, to opt out. The hold writes
   `tcp_sock` fields directly, which is not a stable kernel API; `hold_enable=0`
   is the rollback.
+- Wire: `TBT_FEC_CONV` stays `0x1005`; 0.2.3 changes only the default
+  parameter, so 0.2.2 and 0.2.3 interoperate.
+
+### Verification
+
+- 256 carriers steady state: 10 s window max 27.9 Mbit/s, 60 s average
+  23.9 Mbit/s; wire/app 2.03; far CPU 65.7%; retx 37k ppm. The tunnel stayed
+  at 256 carriers for the whole run; `bind_drop_no_stream=0`,
+  `fec_drop_window=0`; no WARNING in the kernel window.
 
 ## [0.2.2] - 2026-11-08
 
