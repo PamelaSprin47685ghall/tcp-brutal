@@ -41,6 +41,8 @@ HOST_BENCH_CRYPTO_SRCS := host/bench_crypto.c tbtun/tbt_crypto.c tbtun/tbt_proto
 HOST_BENCH_CRYPTO_HDRS := tbtun/tbt_crypto.h tbtun/tbt_proto.h tbtun/tbt_uapi.h
 HOST_BENCH_MICRO := host/bench_micro
 HOST_BENCH_MICRO_SRCS := host/bench_micro.c tbtun/tbt_fec.c tbtun/tbt_crypto.c tbtun/tbt_proto.c
+HOST_BENCH_TXPATH := host/bench_txpath
+HOST_BENCH_TXPATH_SRCS := host/bench_txpath.c tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
 HOST_HTTP_LIVE  := host/test_http_live
 HOST_HTTP_LIVE_SRCS := host/test_http_live.c tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
 HOST_HTTP_LIVE_HDRS := tbtun/tbt_http.h tbtun/tbt_uapi.h tbtun/tbt_proto.h tbtun/tbt_rec.h
@@ -177,6 +179,13 @@ $(HOST_BENCH_MICRO): $(HOST_BENCH_MICRO_SRCS)
 
 host-bench-micro: $(HOST_BENCH_MICRO)
 
+# Per-record FEC TX cost: queue allocation, HTTP chunk framing, and the
+# buffer-reuse alternative. Not part of `check`; it is a measurement.
+$(HOST_BENCH_TXPATH): $(HOST_BENCH_TXPATH_SRCS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_BENCH_TXPATH_SRCS)
+
+host-bench-txpath: $(HOST_BENCH_TXPATH)
+
 # The feedback loop. `bench` is the <= 2 s pass for iteration; `bench-full`
 # is the <= 10 s pass for a recorded baseline. Both write a timestamped
 # directory under benches/results/ and print its path.
@@ -298,7 +307,7 @@ host-test-live: $(HOST_HTTP_LIVE)
 	fi
 
 clean: clean-dkms.conf clean-dkms-tarball
-	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_PORTMAP) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_portmap_san
+	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_PORTMAP) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_portmap_san
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
 
 load:
