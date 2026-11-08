@@ -294,6 +294,8 @@ host/test_sclc_uplink
 host/test_sclc_uplink_san
 host/test_fec_adapt
 host/test_fec_adapt_san
+host/test_fec_adapt_sclc
+host/test_fec_adapt_sclc_san
 host/test_fec_sclc
 host/test_fec_sclc_san
 host/test_fec_sclc_data
