@@ -140,85 +140,26 @@ void tbt_fec_bitmap_clear(u8 bm[TBT_FEC_BITMAP_BYTES], u16 index);
 bool tbt_fec_bitmap_test(const u8 bm[TBT_FEC_BITMAP_BYTES], u16 index);
 u16 tbt_fec_bitmap_count(const u8 bm[TBT_FEC_BITMAP_BYTES]);
 
-/* May a DATA/PARITY record with sid `rec` enter the current stream? `cur` is
- * the session's current far_sid; `barrier` is the old stream id installed by
- * tbt_session_fec_rx_barrier() before the new far_sid. A record from the old
- * sid must be dropped even while `cur` still names it, and a record from any
- * other sid after the switch must be dropped too. */
-static inline bool tbt_fec_sid_accept(u64 cur, u64 barrier, u64 rec)
+/* v7 has no cross-stream TX gate. Each stream owns a TX plane, a ring and a
+ * block; a detached stream is replaced by its flow lifetime (lookup, purge,
+ * and a record-held flow reference), not by comparing far_sid at send time. */
+
+/* A flow accepts new work only while it is active. A detach publishes state 3
+ * before it unlinks, so a snapshot, a push or an in-flight flush that already
+ * holds a reference stops instead of producing work for a dead stream. */
+static inline bool tbt_fec_flow_live(u8 state)
 {
-    if (!cur || (barrier && cur == barrier))
+    return state == 1;
+}
+
+/* Take the queue reference exactly once. Purge and a flush can both reach a
+ * record; only the winner unlinks it and charges the queue counters. */
+static inline bool tbt_fec_out_unlink_once(bool *queued)
+{
+    if (!*queued)
         return false;
-    return rec == cur;
-}
-
-/* The session carries one stream at a time.  A record for a new sid whose
- * old stream is already gone must reset the data plane here: the session's
- * barrier is skipped when far_sid was cleared before the new stream started,
- * and the old blocks would otherwise stay at the delivery cursor and be
- * handed to the new stream. */
-static inline bool tbt_fec_rx_stream_changed(u64 stream_sid, u64 rec_sid,
-                                             bool old_stream_alive)
-{
-    return stream_sid && rec_sid && rec_sid != stream_sid &&
-           !old_stream_alive;
-}
-
-/* The shared FEC TX ring carries no per-byte sid, so a stream switch must
- * drop the whole ring before the new stream's bytes enter it.  While the
- * packetizer still owns the old block -- or the last submit came from the
- * old stream before any block existed -- the new stream's first submit is
- * refused (backpressure) until the switch work has flushed the ring.  The
- * old stream is not queued at all: its bytes are consumed and discarded. */
-static inline bool tbt_fec_tx_wait_switch(u64 far_sid, u64 cur_block_sid,
-                                          u64 last_submit_sid, u64 st_sid)
-{
-    if (st_sid != far_sid)
-        return false;
-    return (cur_block_sid && cur_block_sid != st_sid) ||
-           (last_submit_sid && last_submit_sid != st_sid);
-}
-
-/* A pending switch that names a stream the session has already left can
- * never be applied: the packetizer only clears it when it names the current
- * stream.  The submit path drops it so the current stream's first submit
- * records the old prefix boundary instead of being blocked forever. */
-static inline bool tbt_fec_tx_switch_stale(u64 switch_sid, u64 far_sid)
-{
-    return switch_sid && switch_sid != far_sid;
-}
-
-/* The packetizer must own a switch when the block it built belongs to
- * another stream, when the ring's last submit came from another stream
- * (including the case where no block was built yet), or when a submit
- * already refused bytes for the stream taking over. */
-static inline bool tbt_fec_tx_need_switch(u64 cur_block_sid,
-                                          u64 last_submit_sid,
-                                          u64 switch_sid, u64 st_sid)
-{
-    return (cur_block_sid && cur_block_sid != st_sid) ||
-           (last_submit_sid && last_submit_sid != st_sid) ||
-           (switch_sid && switch_sid == st_sid);
-}
-
-/* A queued record may be sent only for the session's current stream.  A
- * control record with sid 0 is session-scoped and stays; a DATA/PARITY or
- * replay record must name the current sid exactly. */
-static inline bool tbt_fec_tx_record_sid_ok(u64 rec_sid, u64 far_sid,
-                                            bool control)
-{
-    if (control)
-        return !rec_sid || rec_sid == far_sid;
-    return rec_sid == far_sid;
-}
-
-/* An empty marker answers a NACK for `nack_sid`; it may be sent only while
- * that stream is still the session's current one.  Stamping an old block's
- * marker with the new stream's sid lets the receiver rebase its window to an
- * old block id. */
-static inline bool tbt_fec_tx_marker_sid_ok(u64 nack_sid, u64 far_sid)
-{
-    return !nack_sid || nack_sid == far_sid;
+    *queued = false;
+    return true;
 }
 
 /* A stream the TX work may use: not dead, still attached to the session, and
@@ -230,10 +171,10 @@ static inline bool tbt_fec_tx_stream_usable(bool dead, bool active,
     return !dead && active && !tombstone_until_ns;
 }
 
-/* A block placed for one stream must never be delivered to another.  The
- * block carries the sid it was placed under; the delivery walk compares it
- * with the stream it is about to hand bytes to.  `stream_sid` 0 means no
- * stream has been adopted yet, so there is nothing to compare. */
+/* Defense in depth: a block placed for one stream must never be delivered to
+ * another. A v7 flow owns its blocks, so the two sids normally match; a
+ * detached and rebound primary is the case this still catches. `stream_sid`
+ * 0 means no stream has been adopted yet, so there is nothing to compare. */
 static inline bool tbt_fec_blk_sid_match(u64 block_sid, u64 stream_sid)
 {
     return !stream_sid || block_sid == stream_sid;

@@ -1831,23 +1831,25 @@ u64 tbt_tx_wait_budget_ns(struct tbt_session *sess, struct tbt_stream *st)
  * tbt_fec_tx_credit_ok() without touching that file. */
 static bool tbt_fec_credit_waiting(const struct tbt_session *sess)
 {
-    const struct tbt_fec_tx *tx = READ_ONCE(sess->fec_tx);
+    const struct tbt_fec_tx *tx;
     u64 acked, seq;
     u32 credit;
+    bool waiting = false;
 
-    if (!tx)
-        return false;
-    acked = READ_ONCE(tx->peer_pkts);
-    seq = READ_ONCE(tx->seq);
-    credit = READ_ONCE(tx->credit);
-    /* Zero credit is a closed window: no grant has arrived yet. */
-    if (!credit)
-        return true;
-    /* An ACK cannot name packets that were not sent; clamp instead of letting
-     * the unsigned subtraction wrap into a huge outstanding count. */
-    if (acked >= seq)
-        return false;
-    return seq - acked >= (u64)credit;
+    rcu_read_lock();
+    tx = rcu_dereference(sess->fec_tx);
+    if (tx)
+    {
+        acked = READ_ONCE(tx->peer_pkts);
+        seq = READ_ONCE(tx->seq);
+        credit = READ_ONCE(tx->credit);
+        /* Zero credit is a closed window: no grant has arrived yet. An ACK
+         * cannot name packets that were not sent; clamp instead of letting
+         * the unsigned subtraction wrap into a huge outstanding count. */
+        waiting = !credit || (acked < seq && seq - acked >= (u64)credit);
+    }
+    rcu_read_unlock();
+    return waiting;
 }
 
 /* A FEC repair is still in progress: replay records are queued, or the FEC
@@ -1874,11 +1876,15 @@ static bool tbt_fec_repair_active(struct tbt_session *sess, u64 now,
  * zero in FEC mode, so it cannot be the wake test. */
 static bool tbt_fec_ring_busy(struct tbt_session *sess)
 {
-    struct tbt_fec_tx *tx = READ_ONCE(sess->fec_tx);
+    struct tbt_fec_tx *tx;
+    bool busy = false;
 
-    if (!tx)
-        return false;
-    return READ_ONCE(tx->head) != READ_ONCE(tx->tail);
+    rcu_read_lock();
+    tx = rcu_dereference(sess->fec_tx);
+    if (tx)
+        busy = READ_ONCE(tx->head) != READ_ONCE(tx->tail);
+    rcu_read_unlock();
+    return busy;
 }
 
 static void tbt_tx_stall_check(struct tbt_session *sess,
@@ -1949,9 +1955,18 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
          * shape and the sender waits for its ACK. That pause is flow control,
          * not a lost ACK: do not let the stall timer kill the stream during
          * the bounded switch (the switch's own 2 s timeout aborts it). */
-        bool switching = sess->fec && sess->fec_tx &&
-                         READ_ONCE(sess->fec_tx->switch_state) !=
-                             TBT_FEC_SW_STEADY;
+        bool switching = false;
+
+        if (sess->fec)
+        {
+            const struct tbt_fec_tx *ftx;
+
+            rcu_read_lock();
+            ftx = rcu_dereference(sess->fec_tx);
+            switching = ftx && READ_ONCE(ftx->switch_state) !=
+                                    TBT_FEC_SW_STEADY;
+            rcu_read_unlock();
+        }
 
         if (would_kill && switching)
         {
@@ -1974,10 +1989,12 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
     {
         if (debug >= 2)
         {
-            struct tbt_fec_tx *tx =
-                sess->fec ? READ_ONCE(sess->fec_tx) : NULL;
-            u16 g = tx ? READ_ONCE(tx->last_group) : 0;
+            struct tbt_fec_tx *tx;
+            u16 g;
 
+            rcu_read_lock();
+            tx = sess->fec ? rcu_dereference(sess->fec_tx) : NULL;
+            g = tx ? READ_ONCE(tx->last_group) : 0;
             if (tx && tx->g && g < READ_ONCE(tx->groups))
                 pr_info("tbtun: TXSTALLKILL sid=%llu ack=%llu txseq=%llu age_us=%llu "
                         "fec_block=%llu fec_group=%u fec_share=%u fec_nreal=%u "
@@ -1996,6 +2013,7 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
                         (unsigned long long)st->sid, ack,
                         READ_ONCE(st->tx_seq),
                         (now - start) / NSEC_PER_USEC);
+            rcu_read_unlock();
         }
         atomic64_inc(&sess->holes_unrecoverable);
         if (sess->fec)

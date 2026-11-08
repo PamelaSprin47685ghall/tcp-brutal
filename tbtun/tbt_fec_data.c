@@ -234,11 +234,42 @@ static struct tbt_stream *tbt_fec_stream(struct tbt_session *sess)
  * Output queue
  * ------------------------------------------------------------------ */
 
-/* Unlink and free one record. `q` is its carrier queue, or NULL for a control
- * or replay record. The caller holds fec_out_lock. */
+/* Drop one record reference. The record owns a flow reference for as long as
+ * it exists, so a detached flow's planes cannot be freed under an in-flight
+ * flush. */
+static void tbt_fec_out_put(struct tbt_fec_out *o)
+{
+    if (!o)
+        return;
+    if (refcount_dec_and_test(&o->refs))
+    {
+        tbt_fec_flow_put(o->flow);
+        kfree(o);
+    }
+}
+
+/* Take one reader reference while the record is still on its queue. The
+ * caller holds fec_out_lock. */
+static struct tbt_fec_out *tbt_fec_out_get(struct tbt_fec_out *o)
+{
+    if (o)
+        refcount_inc(&o->refs);
+    return o;
+}
+
+/* Unlink one queued record and drop the queue's reference. `q` is its carrier
+ * queue, or NULL for a control or replay record. The caller holds
+ * fec_out_lock. A record already unlinked by a flow purge is left alone, so
+ * purge and an in-flight flush can race without a double list_del. */
 static void tbt_fec_out_free(struct tbt_session *sess, struct tbt_fec_outq *q,
                              struct tbt_fec_out *o)
 {
+    if (!tbt_fec_out_unlink_once(&o->queued))
+    {
+        /* The queue reference is already gone (a flow purge won the race);
+         * the caller still owns whatever reader reference it took. */
+        return;
+    }
     list_del(&o->node);
     if (o->replay)
     {
@@ -277,7 +308,7 @@ static void tbt_fec_out_free(struct tbt_session *sess, struct tbt_fec_outq *q,
         sess->fec_out_queued--;
     if (o->owner && o->owner->queued)
         o->owner->queued--;
-    kfree(o);
+    tbt_fec_out_put(o);
 }
 
 /* One carrier's bound data queue drains in its own delayed work. A full
@@ -300,12 +331,19 @@ void tbt_fec_out_kick(struct tbt_session *sess, u16 carrier)
 
 static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
                             const u8 *buf, u16 len, bool control, bool replay,
-                            u64 stamp_ns, struct tbt_fec_tx *owner)
+                            u64 stamp_ns, struct tbt_fec_flow *flow)
 {
     struct tbt_fec_out *o;
+    struct tbt_fec_tx *owner = flow ? flow->tx : NULL;
     struct tbt_fec_outq *q = NULL;
     bool first = false;
 
+    /* A record is per-flow work. Refuse one whose flow is already dying:
+     * purge may have run, and this would otherwise reach a carrier after the
+     * flow left the table. A NULL flow is reserved for session-wide records
+     * (v7 has none). */
+    if (flow && !tbt_fec_flow_live(READ_ONCE(flow->state)))
+        return -ESHUTDOWN;
     if (control)
     {
         /* The session control queue is carrier-agnostic; the flush picks an
@@ -326,6 +364,16 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
     o = kmalloc(struct_size(o, data, len), GFP_ATOMIC);
     if (!o)
         return -ENOMEM;
+    refcount_set(&o->refs, 1); /* the queue reference */
+    o->queued = false;
+    o->flow = flow;
+    if (flow && !refcount_inc_not_zero(&flow->refs))
+    {
+        /* The caller raced the final put. Do not publish a record that
+         * outlives its flow. */
+        kfree(o);
+        return -ESHUTDOWN;
+    }
     o->carrier = carrier;
     o->len = len;
     o->control = control ? 1 : 0;
@@ -338,8 +386,7 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
 
         /* The record is complete here, header included; unpack is a plain
          * byte copy. The block id lets the flush drop a repair the peer has
-         * already delivered; the sid lets a stream switch drop the old
-         * stream's queued records. */
+         * already delivered. */
         if (!tbt_fec_hdr_unpack(buf, &h))
         {
             o->block_id = h.block_id;
@@ -355,7 +402,7 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
                                TBT_FEC_REPLAY_BYTES_MAX))
     {
         spin_unlock(&sess->fec_out_lock);
-        kfree(o);
+        tbt_fec_out_put(o);
         return -ENOSPC;
     }
     /* These are the hard caps, not the normal stop: the packetizer pauses at
@@ -370,7 +417,7 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
               sess->fec_outq_bytes + len > TBT_FEC_OUTQ_QUEUE_BYTES_MAX))
     {
         spin_unlock(&sess->fec_out_lock);
-        kfree(o);
+        tbt_fec_out_put(o);
         atomic64_inc(&sess->fec_outq_drop);
         return -ENOSPC;
     }
@@ -425,6 +472,7 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
         if (q->depth > sess->fec_outq_depth_max)
             sess->fec_outq_depth_max = q->depth;
     }
+    o->queued = true;
     sess->fec_out_queued++;
     spin_unlock(&sess->fec_out_lock);
     if (!control && !replay)
@@ -447,10 +495,9 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
  * record queued. The 2 ms flush arm retries; a source share is never dropped
  * here. The first wait in an episode is counted once, and the source ring is
  * the backpressure of last resort. */
-static void tbt_fec_wait_carrier(struct tbt_session *sess)
+static void tbt_fec_wait_carrier(struct tbt_session *sess,
+                                 struct tbt_fec_tx *tx)
 {
-    struct tbt_fec_tx *tx = sess->fec_tx;
-
     if (tx && !tx->carrier_wait)
     {
         tx->carrier_wait = true;
@@ -474,14 +521,14 @@ static int tbt_fec_out_try_replay(struct tbt_session *sess,
                                   struct tbt_fec_out *o, bool *sent,
                                   const u8 *usable, u16 ncand, u32 *pace)
 {
-    struct tbt_fec_tx *tx = sess->fec_tx;
+    struct tbt_fec_tx *tx = o->flow ? o->flow->tx : NULL;
     u16 start, i;
     int rc = -ENODEV;
 
     start = ncand ? tbt_fec_replay_pick(sess, usable, pace) : U16_MAX;
     if (start == U16_MAX)
     {
-        tbt_fec_wait_carrier(sess);
+        tbt_fec_wait_carrier(sess, tx);
         return -EAGAIN;
     }
     for (i = 0; i < sess->n_car; i++)
@@ -526,7 +573,7 @@ static int tbt_fec_out_try_replay(struct tbt_session *sess,
     }
     if (rc == -ENODEV)
     {
-        tbt_fec_wait_carrier(sess);
+        tbt_fec_wait_carrier(sess, tx);
         return -EAGAIN;
     }
     return rc;
@@ -544,6 +591,11 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o,
 
     if (sent)
         *sent = false;
+    /* The flow may have detached after this record was queued. Drop it
+     * instead of putting a dead sid on the wire; the receiver would discard
+     * it as an unknown flow. */
+    if (o->flow && !tbt_fec_flow_live(READ_ONCE(o->flow->state)))
+        return 0;
     if (o->replay)
         return tbt_fec_out_try_replay(sess, o, sent, usable, ncand, pace);
     if (o->control)
@@ -553,7 +605,7 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o,
          * pinning the queue to the lowest up carrier lets one congested
          * socket hold every ACK behind its data, and a late ACK is a stalled
          * credit window. */
-        struct tbt_fec_tx *tx = sess->fec_tx;
+        struct tbt_fec_tx *tx = o->flow ? o->flow->tx : NULL;
         u16 start = tx ? tx->ctl_rot : 0;
         int rc = -ENODEV;
         int err;
@@ -604,7 +656,7 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o,
          * record goes out when a carrier recovers or a replacement appears. */
         if (rc == -ENODEV)
         {
-            tbt_fec_wait_carrier(sess);
+            tbt_fec_wait_carrier(sess, tx);
             rc = -EAGAIN;
         }
         return rc;
@@ -647,7 +699,7 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o,
     }
     if (c && atomic_read(&c->up) && !atomic_read(&c->stopping))
     {
-        struct tbt_fec_tx *tx = sess->fec_tx;
+        struct tbt_fec_tx *tx = o->flow ? o->flow->tx : NULL;
         int err = tbt_carrier_send_fec(c, o->data, o->len);
 
         tbt_carrier_put(c);
@@ -700,10 +752,14 @@ fallback:
         tbt_carrier_put(c);
         if (err == -ENOTCONN || err == -ENODEV)
             continue;
-        if (sess->fec_tx && (err == 0 || err == -EAGAIN))
         {
-            sess->fec_tx->carrier_wait = false;
-            sess->fec_tx->backpressure_counted = false;
+            struct tbt_fec_tx *ftx = o->flow ? o->flow->tx : NULL;
+
+            if (ftx && (err == 0 || err == -EAGAIN))
+            {
+                ftx->carrier_wait = false;
+                ftx->backpressure_counted = false;
+            }
         }
         if (!err)
         {
@@ -723,7 +779,7 @@ fallback:
      * carrier from this path. */
     if (rc == -ENODEV)
     {
-        tbt_fec_wait_carrier(sess);
+        tbt_fec_wait_carrier(sess, o->flow ? o->flow->tx : NULL);
         return -EAGAIN;
     }
     return rc;
@@ -783,7 +839,10 @@ static u32 tbt_fec_out_flush_carrier(struct tbt_session *sess, u16 idx,
         spin_lock(&sess->fec_out_lock);
         o = list_first_entry_or_null(&q->queue, struct tbt_fec_out, node);
         if (o)
+        {
+            refcount_inc(&o->refs);
             depth = q->depth;
+        }
         spin_unlock(&sess->fec_out_lock);
         if (!o)
             break;
@@ -794,11 +853,13 @@ static u32 tbt_fec_out_flush_carrier(struct tbt_session *sess, u16 idx,
             atomic64_inc(&sess->fec_flush_skip);
             atomic64_add(depth, &sess->fec_hol_wait);
             *again = true;
+            tbt_fec_out_put(o);
             break;
         }
         spin_lock(&sess->fec_out_lock);
         tbt_fec_out_free(sess, q, o);
         spin_unlock(&sess->fec_out_lock);
+        tbt_fec_out_put(o);
         if (sent)
             wrote++;
     }
@@ -834,7 +895,7 @@ static u16 tbt_fec_out_batch_peek(struct tbt_session *sess, u16 idx,
             break;
         recs[n] = o->data;
         lens[n] = o->len;
-        outs[n] = o;
+        outs[n] = tbt_fec_out_get(o);
         bytes += framed;
         n++;
     }
@@ -842,10 +903,12 @@ static u16 tbt_fec_out_batch_peek(struct tbt_session *sess, u16 idx,
     return n;
 }
 
-/* Remove the records the carrier accepted. The queue belongs to this work;
- * only the producer appends at the tail. */
+/* Remove the records the carrier accepted and release every peek reference.
+ * `n` is the peeked count and `sent` the accepted prefix; the caller must not
+ * reuse outs[] afterwards. */
 static void tbt_fec_out_batch_commit(struct tbt_session *sess, u16 idx,
-                                     struct tbt_fec_out **outs, u16 n)
+                                     struct tbt_fec_out **outs, u16 n,
+                                     u16 sent)
 {
     struct tbt_fec_outq *q = &sess->fec_outq[idx];
     u16 i;
@@ -853,15 +916,28 @@ static void tbt_fec_out_batch_commit(struct tbt_session *sess, u16 idx,
     spin_lock(&sess->fec_out_lock);
     for (i = 0; i < n; i++)
     {
-        struct tbt_fec_out *o = list_first_entry_or_null(&q->queue,
-                                                         struct tbt_fec_out,
-                                                         node);
+        struct tbt_fec_out *o = outs[i];
 
-        if (!o || o != outs[i])
-            break;
-        tbt_fec_out_free(sess, q, o);
+        if (i < sent)
+        {
+            struct tbt_fec_out *head = list_first_entry_or_null(
+                &q->queue, struct tbt_fec_out, node);
+
+            if (head == o)
+                tbt_fec_out_free(sess, q, o);
+        }
+        tbt_fec_out_put(o);
     }
     spin_unlock(&sess->fec_out_lock);
+}
+
+/* Release peek references when no commit runs. */
+static void tbt_fec_out_batch_put(struct tbt_fec_out **outs, u16 n)
+{
+    u16 i;
+
+    for (i = 0; i < n; i++)
+        tbt_fec_out_put(outs[i]);
 }
 
 /* A carrier the batch writer may use without falling back. */
@@ -914,6 +990,7 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
         {
             /* The carrier is down or stalled: the per-record path can fall
              * back to another carrier and owns the drop policy. */
+            tbt_fec_out_batch_put(outs, n);
             tbt_fec_out_flush_carrier(sess, d->idx, &again);
             break;
         }
@@ -922,7 +999,7 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
         if (!err)
         {
             atomic64_add(sent, &sess->fec_flush_pass);
-            tbt_fec_out_batch_commit(sess, d->idx, outs, sent);
+            tbt_fec_out_batch_commit(sess, d->idx, outs, n, sent);
             if (sent != n)
             {
                 /* All-or-nothing is the batch contract; keep the rest for a
@@ -936,11 +1013,13 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
         {
             atomic64_inc(&sess->fec_flush_skip);
             atomic64_add(n, &sess->fec_hol_wait);
+            tbt_fec_out_batch_put(outs, n);
             again = true;
             break;
         }
         /* A dead socket or a local framing error: the per-record path owns
          * the fallback and the drop policy. */
+        tbt_fec_out_batch_put(outs, n);
         tbt_fec_out_flush_carrier(sess, d->idx, &again);
         break;
     }
@@ -985,6 +1064,8 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
             spin_lock(&sess->fec_out_lock);
             o = list_first_entry_or_null(&sess->fec_out_ctl,
                                          struct tbt_fec_out, node);
+            if (o)
+                refcount_inc(&o->refs);
             spin_unlock(&sess->fec_out_lock);
             if (!o)
                 break;
@@ -992,11 +1073,13 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
             if (err == -EAGAIN)
             {
                 ret = -EAGAIN;
+                tbt_fec_out_put(o);
                 break;
             }
             spin_lock(&sess->fec_out_lock);
             tbt_fec_out_free(sess, NULL, o);
             spin_unlock(&sess->fec_out_lock);
+            tbt_fec_out_put(o);
             if (sent)
                 pass++;
         }
@@ -1038,7 +1121,6 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
             bool sent = false;
             u64 stamp_ns = 0;
             u64 block_id = 0;
-            u64 osid = 0;
             u16 olen = 0;
             int err;
 
@@ -1046,38 +1128,35 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
             o = list_first_entry_or_null(&sess->fec_out_replay,
                                          struct tbt_fec_out, node);
             if (o)
+            {
+                refcount_inc(&o->refs);
                 depth = sess->fec_replay_queued;
+            }
             stamp_ns = o ? o->stamp_ns : 0;
             block_id = o ? o->block_id : 0;
-            osid = o ? o->sid : 0;
             olen = o ? o->len : 0;
             spin_unlock(&sess->fec_out_lock);
             if (!o)
                 break;
-            if (block_id && osid)
+            if (block_id && o->flow && o->flow->tx)
             {
-                struct tbt_fec_flow *rf = tbt_fec_flow_lookup(sess, osid);
+                struct tbt_fec_tx *rtx = o->flow->tx;
+                bool stale = tbt_fec_block_delivered_base(
+                    block_id, READ_ONCE(rtx->peer_pkts), rtx->base_pkt,
+                    rtx->base_block, rtx->groups, rtx->n);
 
-                if (rf)
+                if (stale)
                 {
-                    struct tbt_fec_tx *rtx = rf->tx;
-                    bool stale = tbt_fec_block_delivered_base(
-                        block_id, READ_ONCE(rtx->peer_pkts), rtx->base_pkt,
-                        rtx->base_block, rtx->groups, rtx->n);
-
-                    tbt_fec_flow_put(rf);
-                    if (stale)
-                    {
                 /* The delivered frontier passed this block while the repair
                  * waited in the queue: every share in it is a duplicate of
                  * data the peer already has. Free it instead of writing it,
                  * so the tail repair and the FIN are not stuck behind it. */
-                        spin_lock(&sess->fec_out_lock);
-                        tbt_fec_out_free(sess, NULL, o);
-                        spin_unlock(&sess->fec_out_lock);
-                        atomic64_inc(&sess->fec_replay_stale);
-                        continue;
-                    }
+                    spin_lock(&sess->fec_out_lock);
+                    tbt_fec_out_free(sess, NULL, o);
+                    spin_unlock(&sess->fec_out_lock);
+                    tbt_fec_out_put(o);
+                    atomic64_inc(&sess->fec_replay_stale);
+                    continue;
                 }
             }
             err = tbt_fec_out_try(sess, o, &sent, usable, ncand, pace);
@@ -1088,11 +1167,13 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
                 atomic64_inc(&sess->fec_replay_skip);
                 atomic64_add(depth, &sess->fec_hol_wait);
                 ret = -EAGAIN;
+                tbt_fec_out_put(o);
                 break;
             }
             spin_lock(&sess->fec_out_lock);
             tbt_fec_out_free(sess, NULL, o);
             spin_unlock(&sess->fec_out_lock);
+            tbt_fec_out_put(o);
             if (sent)
             {
                 replay_bytes += olen;
@@ -1136,19 +1217,20 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
 
 /* Queue one complete record. Control records may ride any up carrier; data
  * records are bound to their share's carrier. Returns 0 when queued. */
-static int tbt_fec_send_record_owner(struct tbt_session *sess, u16 carrier,
-                                     u8 *buf, u16 len, bool control,
-                                     bool replay, struct tbt_fec_tx *owner)
+static int tbt_fec_send_record_flow(struct tbt_session *sess, u16 carrier,
+                                    u8 *buf, u16 len, bool control,
+                                    bool replay, struct tbt_fec_flow *flow)
 {
     return tbt_fec_out_push(sess, carrier, buf, len, control, replay, 0,
-                            owner);
+                            flow);
 }
 
 static int tbt_fec_send_record(struct tbt_session *sess, u16 carrier, u8 *buf,
-                               u16 len, bool control, bool replay)
+                               u16 len, bool control, bool replay,
+                               struct tbt_fec_flow *flow)
 {
-    return tbt_fec_send_record_owner(sess, carrier, buf, len, control, replay,
-                                     NULL);
+    return tbt_fec_send_record_flow(sess, carrier, buf, len, control, replay,
+                                    flow);
 }
 
 /* Carriers that may carry a replay record right now. The share header names
@@ -1208,10 +1290,11 @@ static u16 tbt_fec_replay_pick(struct tbt_session *sess, const u8 *usable,
  * at write time by queue bytes; `nack_ns` is when the NACK arrived and the
  * flush charges NACK->wire when a carrier accepts the record. */
 static int tbt_fec_replay_enqueue(struct tbt_session *sess, const u8 *buf,
-                                  u16 len, u64 nack_ns)
+                                  u16 len, u64 nack_ns,
+                                  struct tbt_fec_flow *flow)
 {
     int err = tbt_fec_out_push(sess, 0, buf, len, false, true, nack_ns,
-                               NULL);
+                               flow);
 
     if (!err)
         WRITE_ONCE(sess->fec_repair_last_ns, ktime_get_ns());
@@ -1371,10 +1454,10 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess,
                                       (u16)(tx->n + i), tx->rec, rec_len);
             spin_unlock_bh(&tx->replay_lock);
         }
-        err = tbt_fec_send_record_owner(
+        err = tbt_fec_send_record_flow(
             sess,
             (u16)(tx->group_map[group] * (tx->n + tx->m) + tx->n + i),
-            tx->rec, rec_len, false, false, tx);
+            tx->rec, rec_len, false, false, tx->flow);
         if (debug >= 2)
             pr_info("tbtun: fec parity tx block=%llu group=%u parity=%u win_len=%u epoch=%u store=%d send=%d\n",
                     block_id, group, i, win_len, h.epoch, st, err);
@@ -1430,7 +1513,8 @@ static void tbt_fec_tx_emit_empty(struct tbt_session *sess,
     /* A marker is control-like: it must ride any up carrier. The parity-0
      * carrier may be stalled or full, and the data path would drop the
      * marker as a stalled share. */
-    err = tbt_fec_send_record(sess, 0, tx->rec, rec_len, true, false);
+    err = tbt_fec_send_record(sess, 0, tx->rec, rec_len, true, false,
+                              tx->flow);
     if (err)
     {
         if (debug >= 2)
@@ -1607,8 +1691,8 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
                                  rec, rec_len);
             spin_unlock_bh(&tx->replay_lock);
         }
-        (void)tbt_fec_send_record_owner(sess, carrier, rec, rec_len, false,
-                                        false, tx);
+        (void)tbt_fec_send_record_flow(sess, carrier, rec, rec_len, false,
+                                       false, tx->flow);
         tx->data_pkts_sent++;
     }
     /* The block buffer must hold the real byte even when the share did not
@@ -1867,14 +1951,75 @@ static void tbt_fec_tx_pump(struct tbt_session *sess, struct tbt_fec_flow *f)
     tbt_stream_put(st);
 }
 
+/* Take a reference on the session's primary flow. The pointer is a borrowed
+ * view, so a work body that keeps it across an unlock must own a reference:
+ * detach can swap it and drop the last table reference at any time. */
+static struct tbt_fec_flow *tbt_fec_primary_get(struct tbt_session *sess)
+{
+    struct tbt_fec_flow *f;
+
+    if (!sess || !sess->fec)
+        return NULL;
+    spin_lock(&sess->lock);
+    f = sess->fec_primary;
+    if (f && !refcount_inc_not_zero(&f->refs))
+        f = NULL;
+    spin_unlock(&sess->lock);
+    return f;
+}
+
+/* Snapshot the live flow table with one reference per entry. A flow owns at
+ * least one group and every flow has a stream, so TBT_STREAMS_MAX covers
+ * every possible entry. The snapshot is taken under sess->lock, which
+ * is also where admit, detach and abort link/unlink; processing runs after
+ * the unlock with the references held, so a flow can be detached but not
+ * freed under the walk. */
+static u16 tbt_fec_flow_snapshot(struct tbt_session *sess,
+                                 struct tbt_fec_flow **out, u16 max)
+{
+    struct tbt_fec_flow *f;
+    u16 n = 0, b;
+
+    if (!sess || !sess->fec || !out || !max)
+        return 0;
+    spin_lock(&sess->lock);
+    for (b = 0; b < TBT_STREAM_HT && n < max; b++)
+        hlist_for_each_entry(f, &sess->fec_flows[b], node)
+            if (tbt_fec_flow_live(f->state) && f->sid &&
+                refcount_inc_not_zero(&f->refs))
+                out[n++] = f;
+    spin_unlock(&sess->lock);
+    return n;
+}
+
+static void tbt_fec_flow_put_all(struct tbt_fec_flow **flows, u16 n)
+{
+    u16 i;
+
+    for (i = 0; i < n; i++)
+        tbt_fec_flow_put(flows[i]);
+}
+
+/* Publish the primary compatibility pointers for the RCU readers outside the
+ * data plane (tbt_tx.c and tbt_carrier.c). The caller holds sess->lock. */
+static void tbt_fec_primary_publish(struct tbt_session *sess,
+                                    struct tbt_fec_flow *f)
+{
+    rcu_assign_pointer(sess->fec_primary, f);
+    rcu_assign_pointer(sess->fec_tx, f ? f->tx : NULL);
+    rcu_assign_pointer(sess->fec_rx, f ? f->rx : NULL);
+}
+
 static void tbt_fec_tx_work_body(struct tbt_session *sess)
 {
-    struct tbt_fec_tx *guard = READ_ONCE(sess->fec_tx);
-    struct tbt_fec_flow *f;
-    u16 b;
+    struct tbt_fec_flow *primary;
+    struct tbt_fec_flow *flows[TBT_STREAMS_MAX];
+    u16 n, i;
 
-    if (!guard || READ_ONCE(sess->closing) ||
-        READ_ONCE(sess->fec_stopping))
+    if (READ_ONCE(sess->closing) || READ_ONCE(sess->fec_stopping))
+        return;
+    primary = tbt_fec_primary_get(sess);
+    if (!primary)
         return;
     /* Control and replay are session-wide and flush here; the bound data
      * queues drain in their per-carrier works, so a full socket never stops
@@ -1883,25 +2028,22 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
     /* The initial shape is a session property; with one flow it is also the
      * flow's shape. N>1 freezes CFG/FBK (design §3.8). */
     if (sess->n_fec_flows <= 1)
-        tbt_fec_tx_init_tick(sess, guard);
+        tbt_fec_tx_init_tick(sess, primary->tx);
 
     if (sess->crypto && !smp_load_acquire(&sess->crypto_tx_ready))
     {
         tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(10));
-        return;
+        goto out;
     }
 
-    for (b = 0; b < TBT_STREAM_HT; b++)
-    {
-        hlist_for_each_entry(f, &sess->fec_flows[b], node)
-        {
-            if (f->state != 1 || !f->sid)
-                continue;
-            tbt_fec_tx_pump(sess, f);
-        }
-    }
+    n = tbt_fec_flow_snapshot(sess, flows, ARRAY_SIZE(flows));
+    for (i = 0; i < n; i++)
+        tbt_fec_tx_pump(sess, flows[i]);
+    tbt_fec_flow_put_all(flows, n);
     if (tbt_fec_out_flush(sess, NULL) == -EAGAIN)
         tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
+out:
+    tbt_fec_flow_put(primary);
 }
 
 /* Send one FEC_CFG. APPLY announces the pending shape; ABORT cancels one the
@@ -1939,7 +2081,7 @@ static void tbt_fec_tx_send_cfg(struct tbt_session *sess,
     h.sid = tx->sid;
     if (tbt_fec_make_record(sess, &h, body, rec, &len))
         return;
-    (void)tbt_fec_send_record(sess, 0, rec, len, true, false);
+    (void)tbt_fec_send_record(sess, 0, rec, len, true, false, tx->flow);
 }
 
 /* The peer's receive shape is this side's transmit shape, and the wire
@@ -1979,7 +2121,7 @@ static void tbt_fec_tx_send_init(struct tbt_session *sess,
     h.sid = tx->sid;
     if (tbt_fec_make_record(sess, &h, body, rec, &len))
         return;
-    (void)tbt_fec_send_record(sess, 0, rec, len, true, false);
+    (void)tbt_fec_send_record(sess, 0, rec, len, true, false, tx->flow);
 }
 
 /* Pace the announcement: first pass immediately, then every 500 ms, at most
@@ -2150,8 +2292,7 @@ static void tbt_fec_tx_switch_begin(struct tbt_session *sess,
     st = tbt_fec_stream(sess);
     if (!st)
         return;
-    if (READ_ONCE(st->fec_finished) || READ_ONCE(sess->closing) ||
-        tx->switch_sid)
+    if (READ_ONCE(st->fec_finished) || READ_ONCE(sess->closing))
     {
         tbt_stream_put(st);
         return;
@@ -2343,24 +2484,30 @@ void tbt_fec_tx_work(struct work_struct *w)
 {
     struct tbt_session *sess =
         container_of(to_delayed_work(w), struct tbt_session, w_fec_tx);
-    struct tbt_fec_tx *tx = sess->fec_tx;
     bool owned = test_and_clear_bit(TBT_SW_FEC_TX, &sess->sched);
 
-    if (!tx)
-        goto out;
-    if (atomic_fetch_or(1u << TBT_FEC_RUN_BIT, &tx->run) &
+    /* The run word lives on the session, not on a flow's TX plane: detach can
+     * swap the primary while a body is running, and two bodies over the same
+     * flow would corrupt its packetizer. */
+    if (atomic_fetch_or(1u << TBT_FEC_RUN_BIT, &sess->fec_tx_run) &
         (1u << TBT_FEC_RUN_BIT))
     {
-        /* Another instance owns the packetizer buffers. Record the wake; the
-         * owner re-arms once when it finishes. Never run the body here. */
-        atomic_fetch_or(1u << TBT_FEC_AGAIN_BIT, &tx->run);
+        atomic_fetch_or(1u << TBT_FEC_AGAIN_BIT, &sess->fec_tx_run);
         goto out;
     }
     tbt_fec_tx_work_body(sess);
     if (sess->n_fec_flows <= 1)
-        tbt_fec_tx_adapt_tick(sess, tx);
-    atomic_fetch_and(~(1u << TBT_FEC_RUN_BIT), &tx->run);
-    if (atomic_fetch_and(~(1u << TBT_FEC_AGAIN_BIT), &tx->run) &
+    {
+        struct tbt_fec_flow *primary = tbt_fec_primary_get(sess);
+
+        if (primary)
+        {
+            tbt_fec_tx_adapt_tick(sess, primary->tx);
+            tbt_fec_flow_put(primary);
+        }
+    }
+    atomic_fetch_and(~(1u << TBT_FEC_RUN_BIT), &sess->fec_tx_run);
+    if (atomic_fetch_and(~(1u << TBT_FEC_AGAIN_BIT), &sess->fec_tx_run) &
         (1u << TBT_FEC_AGAIN_BIT))
         tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
     /* The control law needs a fixed 250 ms cadence even when no share or ACK
@@ -2686,10 +2833,10 @@ static void tbt_fec_ack(struct tbt_session *sess, struct tbt_fec_flow *f,
     h.seq = next_deliver;
     h.payload_len = TBT_FEC_ACK_LEN;
     h.conv = TBT_FEC_CONV;
-    h.sid = st ? st->sid : 0;
+    h.sid = f ? f->sid : (st ? st->sid : 0);
     if (tbt_fec_make_record(sess, &h, body, rec, &len))
         return;
-    if (tbt_fec_send_record(sess, 0, rec, len, true, false))
+    if (tbt_fec_send_record(sess, 0, rec, len, true, false, f))
         return;
     atomic64_inc(&sess->fec_ack_tx);
 }
@@ -2720,7 +2867,7 @@ static int tbt_fec_send_nack(struct tbt_session *sess,
     if (tbt_fec_make_record(sess, &h, body, rec, &len))
         return -EINVAL;
     {
-        int err = tbt_fec_send_record(sess, 0, rec, len, true, false);
+        int err = tbt_fec_send_record(sess, 0, rec, len, true, false, f);
 
         if (!err)
             WRITE_ONCE(sess->fec_repair_last_ns, ktime_get_ns());
@@ -2767,7 +2914,7 @@ static int tbt_fec_send_empty_marker(struct tbt_session *sess,
     if (debug >= 2)
         pr_info("tbtun: fec empty reply tx block=%llu group=%u share=%u cur=%llu\n",
                 block_id, group, tx->n, READ_ONCE(tx->cur_block));
-    return tbt_fec_send_record(sess, 0, rec, len, true, false);
+    return tbt_fec_send_record(sess, 0, rec, len, true, false, tx->flow);
 }
 
 /* One failed NACK, split by error code. The masks are logged once per rate
@@ -2812,84 +2959,6 @@ static struct tbt_fec_blk *tbt_fec_rx_blk(struct tbt_fec_rx *rx, u16 group,
                                           u64 block_id)
 {
     return &rx->blk[(size_t)group * rx->slots + (block_id % rx->slots)];
-}
-
-/* tbt_session_fec_rx_barrier() calls this after w_fec_rx is quiesced and
- * before a new far_sid is installed. `sid` is the old stream; the old
- * stream's undelivered blocks and every delivery cursor are dropped so its
- * bytes cannot reach the new stream. The new stream starts at byte 0 and the
- * first FEC record after this call rebases next_super/next_deliver.
- *
- * No cursor survives: a block id comes from the session's packet sequence,
- * which the old stream pushed ahead, so the old highest block + 1 names no
- * block the new stream will ever send. Setting next_super there made every
- * first-flight record of the new stream land beyond the window
- * (fec_drop_window=1271) and the peer stopped reading the new target. */
-static void tbt_fec_flow_reset(struct tbt_session *sess,
-                               struct tbt_fec_flow *f)
-{
-    struct tbt_fec_rx *rx = f->rx;
-    u32 total, i;
-
-    if (!rx)
-        return;
-    spin_lock_bh(&rx->lock);
-    rx->stream_sid = f->sid;
-    rx->stream_base = 0;
-    rx->deliver_bytes = 0;
-    rx->stream_pkt_base = 0;
-    rx->stream_span = 0;
-    rx->stream_base_pkt = 0;
-    rx->total_known = false;
-    rx->total_pkts = 0;
-    rx->total_bytes = 0;
-    rx->deliver_partial = false;
-    rx->deliver_p = 0;
-    rx->deliver_g = 0;
-    rx->progress_super = 0;
-    rx->progress_ns = 0;
-    rx->next_super = 0;
-    rx->next_deliver = 0;
-    rx->ack_deliver = 0;
-    rx->highest_block = 0;
-    rx->rebase_pending = true;
-    rx->rebase_sid = 0;
-    rx->min_block_seen = 0;
-    rx->barrier_sid = 0;
-    rx->next_fin_sid = 0;
-    rx->next_fin_end = 0;
-    rx->next_fin_base = 0;
-    rx->next_fin_bytes = 0;
-    rx->next_fin_valid = false;
-    total = (u32)rx->groups * rx->slots;
-    for (i = 0; i < total; i++)
-    {
-        struct tbt_fec_blk *b = &rx->blk[i];
-
-        if (!b->used)
-            continue;
-        b->used = false;
-        b->ready = false;
-        b->decoding = false;
-        b->empty = false;
-        b->block_id = ~0ULL;
-        b->sid = 0;
-        b->first_gap_ns = 0;
-    }
-    spin_unlock_bh(&rx->lock);
-}
-
-/* Compatibility wrapper for rx->stream_reset: the session teardown path may
- * still name a sid. A v7 flow is reset by its own detach; this only serves a
- * caller that holds the old (sess, sid) shape. */
-static void tbt_fec_rx_stream_reset(struct tbt_session *sess, u64 sid)
-{
-    struct tbt_fec_flow *f = tbt_fec_flow_lookup(sess, sid);
-
-    if (!f)
-        return;
-    tbt_fec_flow_reset(sess, f);
-    tbt_fec_flow_put(f);
 }
 
 /* Every group must have decoded block s before any byte of it is delivered.
@@ -4226,18 +4295,21 @@ static void tbt_fec_rx_fbk_send(struct tbt_session *sess,
     h.sid = flow->sid;
     if (tbt_fec_make_record(sess, &h, body, rec, &len))
         return;
-    if (!tbt_fec_send_record(sess, 0, rec, len, true, false))
+    if (!tbt_fec_send_record(sess, 0, rec, len, true, false, flow))
         rx->fbk_last_ns = now;
 }
 
-static void tbt_fec_rx_switch_tick(struct tbt_session *sess);
-static void tbt_fec_rx_init_tick(struct tbt_session *sess);
+static void tbt_fec_rx_switch_tick(struct tbt_session *sess,
+                                   struct tbt_fec_flow *f);
+static void tbt_fec_rx_init_tick(struct tbt_session *sess,
+                                 struct tbt_fec_flow *f);
 
 /* Refresh the alive bitmap, fold the abandoned delta and publish the c13
  * snapshot. Called only from w_fec_rx, the estimator's single writer. */
-static void tbt_fec_rx_adapt_tick(struct tbt_session *sess)
+static void tbt_fec_rx_adapt_tick(struct tbt_session *sess,
+                                  struct tbt_fec_flow *f)
 {
-    struct tbt_fec_rx *rx = sess->fec_rx;
+    struct tbt_fec_rx *rx = f->rx;
     struct tbt_fec_adapt_ctl *a = &sess->adapt;
     struct tbt_fec_est_out o;
     u64 now = ktime_get_ns();
@@ -4254,7 +4326,7 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess)
         /* The initial shape is not a switch: install it even with the
          * control law off, which is the 0.3.0 SC-LDPC configuration. */
         if (rx->init_pending)
-            tbt_fec_rx_init_tick(sess);
+            tbt_fec_rx_init_tick(sess, f);
         /* adaptive=off keeps the shape in force but abandons any pending
          * switch. The installed codec is never freed here. */
         if (rx->switch_state != TBT_FEC_SW_STEADY)
@@ -4275,7 +4347,7 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess)
         }
         return;
     }
-    tbt_fec_rx_switch_tick(sess);
+    tbt_fec_rx_switch_tick(sess, f);
     memset(rx->alive_bm, 0, sizeof(rx->alive_bm));
     for (i = 0; i < sess->n_car; i++)
     {
@@ -4378,33 +4450,34 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess)
         (rx->est->last_activity_ns &&
          now - rx->est->last_activity_ns < 1000000000ULL &&
          now - rx->fbk_last_ns >= 100000000ULL))
-        if (sess->fec_primary)
-            tbt_fec_rx_fbk_send(sess, sess->fec_primary, flags);
+        tbt_fec_rx_fbk_send(sess, f, flags);
 }
 
 static void tbt_fec_rx_fbk_kick(struct tbt_session *sess, u8 flags)
 {
-    struct tbt_fec_flow *f;
-    u16 b;
+    struct tbt_fec_flow *flows[TBT_STREAMS_MAX];
+    u16 n, i;
 
     if (!sess->fec)
         return;
-    for (b = 0; b < TBT_STREAM_HT; b++)
-        hlist_for_each_entry(f, &sess->fec_flows[b], node)
-        {
-            struct tbt_fec_rx *rx = f->rx;
+    n = tbt_fec_flow_snapshot(sess, flows, ARRAY_SIZE(flows));
+    for (i = 0; i < n; i++)
+    {
+        struct tbt_fec_flow *f = flows[i];
+        struct tbt_fec_rx *rx = f->rx;
 
-            if (f->state != 1 || !rx)
-                continue;
-            rx->fbk_flags |= flags;
-            if (flags & (TBT_FEC_FBK_F_CFG_ACK | TBT_FEC_FBK_F_CFG_NACK |
-                         TBT_FEC_FBK_F_SWITCH_DONE))
-                rx->fbk_epoch = rx->switch_state == TBT_FEC_SW_APPLIED
-                                    ? rx->epoch
-                                    : rx->pending_cfg.epoch;
-            tbt_fec_rx_fbk_send(sess, f, rx->fbk_flags);
-            rx->fbk_flags = 0;
-        }
+        if (!rx)
+            continue;
+        rx->fbk_flags |= flags;
+        if (flags & (TBT_FEC_FBK_F_CFG_ACK | TBT_FEC_FBK_F_CFG_NACK |
+                     TBT_FEC_FBK_F_SWITCH_DONE))
+            rx->fbk_epoch = rx->switch_state == TBT_FEC_SW_APPLIED
+                                ? rx->epoch
+                                : rx->pending_cfg.epoch;
+        tbt_fec_rx_fbk_send(sess, f, rx->fbk_flags);
+        rx->fbk_flags = 0;
+    }
+    tbt_fec_flow_put_all(flows, n);
 }
 
 /* Clear the reorder tree and the NACK state for a new shape. The caller
@@ -4447,9 +4520,10 @@ static void tbt_fec_rx_reset_blocks_locked(struct tbt_fec_rx *rx)
 
 /* Install the armed shape at P0. The old codec is kept until the first
  * new-shape record, so an abort can still roll back. */
-static void tbt_fec_rx_switch_apply(struct tbt_session *sess)
+static void tbt_fec_rx_switch_apply(struct tbt_session *sess,
+                                    struct tbt_fec_flow *f)
 {
-    struct tbt_fec_rx *rx = sess->fec_rx;
+    struct tbt_fec_rx *rx = f->rx;
     struct tbt_fec_cfg *c = &rx->pending_cfg;
     struct tbt_stream *st;
 
@@ -4493,12 +4567,10 @@ static void tbt_fec_rx_switch_apply(struct tbt_session *sess)
 
     /* The sender's DRAIN waits for this ACK: it carries the new frontier
      * and the new credit. */
-    st = tbt_fec_stream(sess);
+    st = tbt_stream_get(sess, f->sid, false, false);
     if (st)
     {
-        if (sess->fec_primary)
-            tbt_fec_ack(sess, sess->fec_primary, st, rx->next_deliver,
-                        rx->deliver_bytes);
+        tbt_fec_ack(sess, f, st, rx->next_deliver, rx->deliver_bytes);
         tbt_stream_put(st);
     }
     tbt_fec_rx_fbk_kick(sess, TBT_FEC_FBK_F_SWITCH_DONE);
@@ -4507,9 +4579,10 @@ static void tbt_fec_rx_switch_apply(struct tbt_session *sess)
 /* Undo ARMED (sender never reached P0) or APPLIED (sender aborted). ARMED
  * only drops the pending codec; APPLIED restores the previous shape at the
  * same P0, so the old-shape stream continues without a byte gap. */
-static void tbt_fec_rx_switch_rollback(struct tbt_session *sess)
+static void tbt_fec_rx_switch_rollback(struct tbt_session *sess,
+                                       struct tbt_fec_flow *f)
 {
-    struct tbt_fec_rx *rx = sess->fec_rx;
+    struct tbt_fec_rx *rx = f->rx;
     struct tbt_fec_grouped *drop = NULL;
     bool applied = false;
 
@@ -4549,9 +4622,10 @@ static void tbt_fec_rx_switch_rollback(struct tbt_session *sess)
         tbt_fec_rx_fbk_kick(sess, TBT_FEC_FBK_F_ROLLBACK);
 }
 
-static void tbt_fec_rx_switch_tick(struct tbt_session *sess)
+static void tbt_fec_rx_switch_tick(struct tbt_session *sess,
+                                   struct tbt_fec_flow *f)
 {
-    struct tbt_fec_rx *rx = sess->fec_rx;
+    struct tbt_fec_rx *rx = f->rx;
     struct tbt_fec_grouped *codec;
     u64 now = ktime_get_ns();
 
@@ -4576,7 +4650,7 @@ static void tbt_fec_rx_switch_tick(struct tbt_session *sess)
     }
     if (rx->rollback_pending)
     {
-        tbt_fec_rx_switch_rollback(sess);
+        tbt_fec_rx_switch_rollback(sess, f);
         return;
     }
     switch (rx->switch_state)
@@ -4611,9 +4685,9 @@ static void tbt_fec_rx_switch_tick(struct tbt_session *sess)
         break;
     case TBT_FEC_SW_ARMED:
         if (rx->next_deliver >= rx->switch_pkt)
-            tbt_fec_rx_switch_apply(sess);
+            tbt_fec_rx_switch_apply(sess, f);
         else if (now - rx->switch_start_ns >= 2000000000ULL)
-            tbt_fec_rx_switch_rollback(sess);
+            tbt_fec_rx_switch_rollback(sess, f);
         break;
     case TBT_FEC_SW_APPLIED:
         /* Wait for the first new-shape record or for an old-shape record
@@ -4682,9 +4756,10 @@ static struct tbt_fec_blk *tbt_fec_rx_blk_alloc(u32 total, u16 shares, u16 n)
  * Both ends must configure the same codec, so a mismatch is a configuration
  * error the caller reports rather than a shape this path can detect. */
 static int tbt_fec_rx_apply_init(struct tbt_session *sess,
+                                 struct tbt_fec_flow *f,
                                  const struct tbt_fec_cfg *cfg)
 {
-    struct tbt_fec_rx *rx = sess->fec_rx;
+    struct tbt_fec_rx *rx = f->rx;
     struct tbt_fec_sclc_shape sclc;
     struct tbt_fec_grouped *codec, *old_codec;
     struct tbt_fec_blk *blk, *old_blk;
@@ -4815,9 +4890,10 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
 
 /* w_fec_rx side of TBT_FEC_CFG_F_INIT: apply and acknowledge. The ACK names
  * epoch 1, which is what stops the sender's retry. */
-static void tbt_fec_rx_init_tick(struct tbt_session *sess)
+static void tbt_fec_rx_init_tick(struct tbt_session *sess,
+                                 struct tbt_fec_flow *f)
 {
-    struct tbt_fec_rx *rx = sess->fec_rx;
+    struct tbt_fec_rx *rx = f->rx;
     struct tbt_fec_cfg cfg;
     int err;
 
@@ -4832,7 +4908,7 @@ static void tbt_fec_rx_init_tick(struct tbt_session *sess)
     cfg = rx->init_cfg;
     rx->init_pending = false;
     spin_unlock_bh(&rx->lock);
-    err = tbt_fec_rx_apply_init(sess, &cfg);
+    err = tbt_fec_rx_apply_init(sess, f, &cfg);
     if (err)
     {
         atomic64_inc(&sess->fec_init_bad);
@@ -4844,8 +4920,7 @@ static void tbt_fec_rx_init_tick(struct tbt_session *sess)
     atomic64_inc(&sess->fec_init_rx);
     rx->fbk_flags |= TBT_FEC_FBK_F_CFG_ACK;
     rx->fbk_epoch = cfg.epoch;
-    if (sess->fec_primary)
-        tbt_fec_rx_fbk_send(sess, sess->fec_primary, rx->fbk_flags);
+    tbt_fec_rx_fbk_send(sess, f, rx->fbk_flags);
     rx->fbk_flags = 0;
 }
 
@@ -4853,9 +4928,10 @@ static void tbt_fec_rx_init_tick(struct tbt_session *sess)
  * decides whether the shape can be armed at all. Allocation and the ACK run
  * in w_fec_rx, never in the carrier's RX context. */
 static void tbt_fec_rx_on_cfg(struct tbt_session *sess,
+                              struct tbt_fec_flow *f,
                               const struct tbt_fec_cfg *cfg)
 {
-    struct tbt_fec_rx *rx = sess->fec_rx;
+    struct tbt_fec_rx *rx = f->rx;
     u64 span;
     bool ack = false;
 
@@ -4975,10 +5051,8 @@ static int tbt_fec_rx_pass_flow(struct tbt_session *sess,
 
 static void tbt_fec_rx_work_body(struct tbt_session *sess)
 {
-    struct tbt_fec_flow *f;
     bool again;
     int rounds = 0;
-    u16 b;
     int decoded = 0;
 
     if (!sess->fec || READ_ONCE(sess->closing) ||
@@ -4986,29 +5060,34 @@ static void tbt_fec_rx_work_body(struct tbt_session *sess)
         return;
     do
     {
-        again = false;
-        for (b = 0; b < TBT_STREAM_HT; b++)
-            hlist_for_each_entry(f, &sess->fec_flows[b], node)
-            {
-                struct tbt_fec_rx *rx = f->rx;
+        struct tbt_fec_flow *flows[TBT_STREAMS_MAX];
+        u16 n, i;
 
-                if (f->state != 1 || !rx || READ_ONCE(rx->stopping))
-                    continue;
-                decoded += tbt_fec_rx_pass_flow(sess, f);
-                /* Ask for the missing shares before the delivery walk arms
-                 * its own (possibly 30 s) stall timer: the earlier 10 ms arm
-                 * wins and keeps the NACK retry alive. */
-                tbt_fec_nack_scan(sess, f);
-                if (tbt_fec_deliver_ready(sess, f) == -ENOMEM)
-                    continue; /* a retry is already armed */
-                spin_lock_bh(&rx->lock);
-                if (rx->work_pending)
-                {
-                    rx->work_pending = false;
-                    again = true;
-                }
-                spin_unlock_bh(&rx->lock);
+        again = false;
+        n = tbt_fec_flow_snapshot(sess, flows, ARRAY_SIZE(flows));
+        for (i = 0; i < n; i++)
+        {
+            struct tbt_fec_flow *f = flows[i];
+            struct tbt_fec_rx *rx = f->rx;
+
+            if (!rx || READ_ONCE(rx->stopping))
+                continue;
+            decoded += tbt_fec_rx_pass_flow(sess, f);
+            /* Ask for the missing shares before the delivery walk arms
+             * its own (possibly 30 s) stall timer: the earlier 10 ms arm
+             * wins and keeps the NACK retry alive. */
+            tbt_fec_nack_scan(sess, f);
+            if (tbt_fec_deliver_ready(sess, f) == -ENOMEM)
+                continue; /* a retry is already armed */
+            spin_lock_bh(&rx->lock);
+            if (rx->work_pending)
+            {
+                rx->work_pending = false;
+                again = true;
             }
+            spin_unlock_bh(&rx->lock);
+        }
+        tbt_fec_flow_put_all(flows, n);
         /* A block decode is the expensive unit (tens of milliseconds on the
          * target).  Deliver and re-arm after one such round instead of
          * stacking up to four of them, which starved the ACK and NACK walk
@@ -5025,22 +5104,27 @@ void tbt_fec_rx_work(struct work_struct *w)
 {
     struct tbt_session *sess =
         container_of(to_delayed_work(w), struct tbt_session, w_fec_rx);
-    struct tbt_fec_rx *rx = sess->fec_rx;
     bool owned = test_and_clear_bit(TBT_SW_FEC_RX, &sess->sched);
 
-    if (!rx)
-        goto out;
-    if (atomic_fetch_or(1u << TBT_FEC_RUN_BIT, &rx->run) &
+    if (atomic_fetch_or(1u << TBT_FEC_RUN_BIT, &sess->fec_rx_run) &
         (1u << TBT_FEC_RUN_BIT))
     {
-        atomic_fetch_or(1u << TBT_FEC_AGAIN_BIT, &rx->run);
+        atomic_fetch_or(1u << TBT_FEC_AGAIN_BIT, &sess->fec_rx_run);
         goto out;
     }
     tbt_fec_rx_work_body(sess);
     if (sess->n_fec_flows <= 1)
-        tbt_fec_rx_adapt_tick(sess);
-    atomic_fetch_and(~(1u << TBT_FEC_RUN_BIT), &rx->run);
-    if (atomic_fetch_and(~(1u << TBT_FEC_AGAIN_BIT), &rx->run) &
+    {
+        struct tbt_fec_flow *primary = tbt_fec_primary_get(sess);
+
+        if (primary)
+        {
+            tbt_fec_rx_adapt_tick(sess, primary);
+            tbt_fec_flow_put(primary);
+        }
+    }
+    atomic_fetch_and(~(1u << TBT_FEC_RUN_BIT), &sess->fec_rx_run);
+    if (atomic_fetch_and(~(1u << TBT_FEC_AGAIN_BIT), &sess->fec_rx_run) &
         (1u << TBT_FEC_AGAIN_BIT))
         tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
     /* The estimator needs a periodic sample even on an idle queue: the 1 s
@@ -5481,7 +5565,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
                                 break;
                             }
                             if (tbt_fec_replay_enqueue(sess, buf, (u16)plen0,
-                                                       t0))
+                                                       t0, tx->flow))
                                 continue;
                             atomic64_inc(&sess->fec_nack_retx);
                             atomic64_add((u64)plen0,
@@ -5544,7 +5628,8 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
                             full = true;
                             break;
                         }
-                        if (tbt_fec_replay_enqueue(sess, buf, (u16)plen, t0))
+                        if (tbt_fec_replay_enqueue(sess, buf, (u16)plen, t0,
+                                                   tx->flow))
                             continue;
                         atomic64_inc(&sess->fec_nack_retx);
                         atomic64_add((u64)plen, &sess->fec_nack_retx_bytes);
@@ -5638,7 +5723,8 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
                         tbt_carrier_put(pc);
                     }
                 }
-                err = tbt_fec_replay_enqueue(sess, buf, (u16)len, t0);
+                err = tbt_fec_replay_enqueue(sess, buf, (u16)len, t0,
+                                             tx->flow);
                 if (err)
                 {
                     if (err == -ENOMEM)
@@ -5685,7 +5771,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
 
         if (tbt_fec_cfg_unpack(rec + TBT_FEC_HDR_LEN, &cfg))
             return -EPROTO;
-        tbt_fec_rx_on_cfg(sess, &cfg);
+        tbt_fec_rx_on_cfg(sess, f, &cfg);
         return 0;
     }
     if (h.type != TBT_FEC_DATA && h.type != TBT_FEC_PARITY)
@@ -6190,9 +6276,7 @@ void tbt_fec_data_free(struct tbt_session *sess)
     }
     kvfree(sess->fec_outq);
     sess->fec_outq = NULL;
-    sess->fec_primary = NULL;
-    sess->fec_tx = NULL;
-    sess->fec_rx = NULL;
+    tbt_fec_primary_publish(sess, NULL);
     sess->fec = false;
 }
 
@@ -6336,6 +6420,10 @@ static void tbt_fec_flow_free_work(struct work_struct *w)
 {
     struct tbt_fec_flow *f = container_of(w, struct tbt_fec_flow, free_work);
 
+    /* The primary compatibility pointers are RCU-published and read by
+     * tbt_tx.c/tbt_carrier.c without a flow reference. Wait one grace period
+     * so no reader can still hold a pointer into these planes. */
+    synchronize_rcu();
     tbt_fec_tx_plane_free(f->tx);
     tbt_fec_rx_plane_free(f->rx);
     kfree(f);
@@ -6373,7 +6461,6 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     spin_lock_init(&tx->lock);
     spin_lock_init(&tx->replay_lock);
     spin_lock_init(&tx->shape_lock);
-    atomic_set(&tx->run, 0);
     tx->base_pkt = 0;
     tx->base_block = 0;
     tx->switch_state = TBT_FEC_SW_STEADY;
@@ -6451,7 +6538,6 @@ tbt_fec_rx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
         groups)
         goto fail;
     spin_lock_init(&rx->lock);
-    atomic_set(&rx->run, 0);
     rx->n = n;
     rx->m = m;
     rx->s = TBT_FEC_S;
@@ -6473,7 +6559,6 @@ tbt_fec_rx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     rx->est = kzalloc(sizeof(*rx->est), GFP_KERNEL);
     if (rx->est)
         tbt_fec_est_init(rx->est, shares);
-    rx->stream_reset = tbt_fec_rx_stream_reset;
     rx->nack = kvzalloc(sizeof(*rx->nack), GFP_KERNEL);
     rx->blk = tbt_fec_rx_blk_alloc(total, shares, n);
     rx->req_ns = kvzalloc((size_t)total * shares * sizeof(*rx->req_ns),
@@ -6640,9 +6725,7 @@ tbt_fec_flow_admit_locked(struct tbt_session *sess, u64 sid,
     sess->fec_groups_used += count;
     if (!sess->fec_primary)
     {
-        sess->fec_primary = f;
-        sess->fec_tx = f->tx;
-        sess->fec_rx = f->rx;
+        tbt_fec_primary_publish(sess, f);
     }
     spin_unlock(&sess->lock);
     return f;
@@ -6746,17 +6829,17 @@ static void tbt_fec_flow_purge(struct tbt_session *sess,
 
     spin_lock(&sess->fec_out_lock);
     list_for_each_entry_safe(o, tmp, &sess->fec_out_ctl, node)
-        if (o->sid == f->sid)
+        if (o->flow == f)
             tbt_fec_out_free(sess, NULL, o);
     list_for_each_entry_safe(o, tmp, &sess->fec_out_replay, node)
-        if (o->sid == f->sid)
+        if (o->flow == f)
             tbt_fec_out_free(sess, NULL, o);
     for (i = 0; i < sess->n_car; i++)
     {
         struct tbt_fec_outq *q = &sess->fec_outq[i];
 
         list_for_each_entry_safe(o, tmp, &q->queue, node)
-            if (o->sid == f->sid || o->owner == f->tx)
+            if (o->flow == f)
                 tbt_fec_out_free(sess, q, o);
     }
     spin_unlock(&sess->fec_out_lock);
@@ -6773,9 +6856,11 @@ void tbt_fec_flow_abort(struct tbt_session *sess, u64 sid)
     f = tbt_fec_flow_lookup(sess, sid);
     if (!f)
         return;
-    tbt_fec_flow_purge(sess, f);
     mutex_lock(&sess->fec_alloc_lock);
     spin_lock(&sess->lock);
+    /* Publish the death before unlinking: a snapshot or a send that already
+     * has a reference must see a dead flow and stop producing work for it. */
+    WRITE_ONCE(f->state, 3);
     if (!hlist_unhashed(&f->node))
         hlist_del_init(&f->node);
     if (sess->n_fec_flows)
@@ -6786,20 +6871,25 @@ void tbt_fec_flow_abort(struct tbt_session *sess, u64 sid)
     {
         u16 b;
 
-        sess->fec_primary = NULL;
-        sess->fec_tx = NULL;
-        sess->fec_rx = NULL;
+        tbt_fec_primary_publish(sess, NULL);
         for (b = 0; b < TBT_STREAM_HT && !sess->fec_primary; b++)
             hlist_for_each_entry(next, &sess->fec_flows[b], node)
             {
-                sess->fec_primary = next;
-                sess->fec_tx = next->tx;
-                sess->fec_rx = next->rx;
+                tbt_fec_primary_publish(sess, next);
                 break;
             }
     }
     spin_unlock(&sess->lock);
     mutex_unlock(&sess->fec_alloc_lock);
+    if (f->rx)
+    {
+        spin_lock_bh(&f->rx->lock);
+        WRITE_ONCE(f->rx->stopping, true);
+        spin_unlock_bh(&f->rx->lock);
+    }
+    /* Purge after the flow is unreachable: a racing producer now refuses at
+     * tbt_fec_out_push(), and an in-flight flush owns a record reference. */
+    tbt_fec_flow_purge(sess, f);
     tbt_fec_flow_put(f); /* lookup reference */
     tbt_fec_flow_put(f); /* table reference */
 }
@@ -6821,9 +6911,9 @@ void tbt_fec_flow_detach(struct tbt_stream *st)
     f = st->fec_flow;
     st->fec_flow = NULL;
     sess = f->sess;
-    tbt_fec_flow_purge(sess, f);
     mutex_lock(&sess->fec_alloc_lock);
     spin_lock(&sess->lock);
+    WRITE_ONCE(f->state, 3);
     if (!hlist_unhashed(&f->node))
         hlist_del_init(&f->node);
     if (sess->n_fec_flows)
@@ -6834,20 +6924,23 @@ void tbt_fec_flow_detach(struct tbt_stream *st)
     {
         u16 b;
 
-        sess->fec_primary = NULL;
-        sess->fec_tx = NULL;
-        sess->fec_rx = NULL;
+        tbt_fec_primary_publish(sess, NULL);
         for (b = 0; b < TBT_STREAM_HT && !sess->fec_primary; b++)
             hlist_for_each_entry(next, &sess->fec_flows[b], node)
             {
-                sess->fec_primary = next;
-                sess->fec_tx = next->tx;
-                sess->fec_rx = next->rx;
+                tbt_fec_primary_publish(sess, next);
                 break;
             }
     }
     spin_unlock(&sess->lock);
     mutex_unlock(&sess->fec_alloc_lock);
+    if (f->rx)
+    {
+        spin_lock_bh(&f->rx->lock);
+        WRITE_ONCE(f->rx->stopping, true);
+        spin_unlock_bh(&f->rx->lock);
+    }
+    tbt_fec_flow_purge(sess, f);
     tbt_fec_flow_put(f); /* table reference */
     tbt_fec_flow_put(f); /* stream reference */
 }
@@ -6999,9 +7092,9 @@ int tbt_fec_data_init(struct tbt_session *sess)
     sess->fec_rr = 0;
     sess->fec_ctl_rot = 0;
     sess->fec_stopping = false;
-    sess->fec_primary = NULL;
-    sess->fec_tx = NULL;
-    sess->fec_rx = NULL;
+    atomic_set(&sess->fec_tx_run, 0);
+    atomic_set(&sess->fec_rx_run, 0);
+    tbt_fec_primary_publish(sess, NULL);
 
     INIT_LIST_HEAD(&sess->fec_out_ctl);
     INIT_LIST_HEAD(&sess->fec_out_replay);

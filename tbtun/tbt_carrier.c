@@ -449,14 +449,19 @@ static bool tbt_car_paused(struct tbt_session *sess)
 static bool tbt_car_hold_idle(struct tbt_session *sess)
 {
     struct tbt_fec_tx *tx;
+    bool busy = false;
 
     if (READ_ONCE(sess->tx_queued) || READ_ONCE(sess->ctl_queued))
         return false;
     if (!sess->fec)
         return true;
-    tx = READ_ONCE(sess->fec_tx);
+    rcu_read_lock();
+    tx = rcu_dereference(sess->fec_tx);
     if (tx && (READ_ONCE(tx->head) != READ_ONCE(tx->tail) ||
                READ_ONCE(tx->fill)))
+        busy = true;
+    rcu_read_unlock();
+    if (busy)
         return false;
     return !READ_ONCE(sess->fec_outq_queued) &&
            !READ_ONCE(sess->fec_out_ctl_depth) &&

@@ -691,11 +691,6 @@ struct tbt_fec_tx
     u16 group_map[TBT_FEC_MAX_GROUPS];
     struct tbt_fec_flow *flow;
     spinlock_t lock; /* protects ring head/tail and the counters below */
-    /* One FEC work body at a time: bit 0 running, bit 1 again. The sched bit
-     * owns the session reference; this word owns the shared packetizer
-     * buffers (pkt/rec/ring/block). A second entry while running must not
-     * touch them. */
-    atomic_t run;
     u8 *ring;
     u32 ring_size;
     u32 head, tail;
@@ -727,17 +722,6 @@ struct tbt_fec_tx
     /* This flow is closing: its replay admission uses the close budget. */
     bool closing;
     u64 cur_block; /* block being built, shared by every group */
-    /* Stream that owns the block being built. A stream switch closes the old
-     * block and tags its records with this sid; the receiver drops a DATA or
-     * PARITY record whose sid is not its current stream. */
-    u64 cur_block_sid;
-    /* Set while a stream switch is pending: the packetizer still owns the
-     * old block, so the new stream's first submit is refused until the
-     * switch work has dropped the whole ring. */
-    u64 switch_sid;
-    /* Last stream that submitted bytes into the ring. A change records the
-     * boundary even before the packetizer has built the first block. */
-    u64 last_submit_sid;
     /* Last share the packetizer built or queued. Diagnostics only: the
      * TXSTALLKILL log reads it to name the share that was in flight. The TX
      * work is the only writer; a u16 store/load is atomic. */
@@ -828,14 +812,6 @@ struct tbt_fec_rx
     struct tbt_fec_flow *flow;
     bool closing;
     spinlock_t lock; /* carrier rx works assemble blocks concurrently */
-    /* Bit 0 running, bit 1 again: the delivery cursors and block cuts are
-     * single-owner. Two bodies would duplicate one 8 KiB slot and skip
-     * another. */
-    atomic_t run;
-    /* Set by tbt_fec_data_init(). tbt_session_fec_rx_barrier() calls it after
-     * w_fec_rx is quiesced, before a new far_sid is used, so the old stream's
-     * stream_sid/base, delivery cursors and undelivered blocks are dropped. */
-    void (*stream_reset)(struct tbt_session *sess, u64 sid);
     u16 n, m, s;
     u16 groups;
     u16 slots; /* block slots per group */
@@ -867,9 +843,6 @@ struct tbt_fec_rx
      * skipped. */
     u64 rebase_sid;
     u64 min_block_seen;
-    /* The old stream id installed by tbt_session_fec_rx_barrier(). While
-     * far_sid still names it, every DATA/PARITY record is stale. */
-    u64 barrier_sid;
     u64 ack_deliver;  /* last frontier sent in an ACK */
     u64 total_pkts;   /* stream packet count; valid when total_known */
     u64 total_bytes;  /* FIN's byte offset; 0 when only LAST named the end */
@@ -1012,6 +985,8 @@ struct tbt_fec_flow
 struct tbt_fec_out
 {
     struct list_head node;
+    refcount_t refs; /* queue reference plus every in-flight reader */
+    bool queued;     /* still linked; unlink is once-only */
     u16 carrier;
     u16 len;
     u8 control;
@@ -1020,12 +995,15 @@ struct tbt_fec_out
      * it without a write once the peer's delivered frontier passes that
      * block, so an acked repair never sits ahead of the tail. */
     u64 block_id;
-    /* Stream id from the record header; a stream switch drops the old
-     * stream's queued data and control while keeping the new stream's. */
+    /* Stream id from the record header; the flush uses it only for stats. */
     u64 sid;
-    /* Bound data records charge this flow's FIN gate. NULL for control and
-     * replay records, which are session-wide. The flow purges its records
-     * before its planes are freed, so this pointer never dangles. */
+    /* The flow this record belongs to, holding one reference for the record's
+     * lifetime. Every per-stream record has one; a session-wide record has
+     * NULL. It keeps the planes alive while the record is in flight, even if
+     * the flow detaches and its table reference goes away. */
+    struct tbt_fec_flow *flow;
+    /* Bound data records charge this flow's FIN gate. Set for data records
+     * only; equal to flow->tx. */
     struct tbt_fec_tx *owner;
     /* NACK receipt time for a replay record; the flush charges NACK->wire
      * latency when the carrier accepts it. Zero for every other record. */
@@ -1213,6 +1191,11 @@ struct tbt_session
     struct tbt_fec_flow *fec_primary;
     struct tbt_fec_tx *fec_tx;
     struct tbt_fec_rx *fec_rx;
+    /* Session-level work serialisation: the flow table is shared, so the
+     * packetizer and the delivery walk must have one owner each even when
+     * the primary flow changes. Bits are TBT_FEC_RUN_BIT/AGAIN_BIT. */
+    atomic_t fec_tx_run;
+    atomic_t fec_rx_run;
     /* Session geometry: total physical groups, the groups already owned by a
      * flow, the per-group RX slots and the replay K shared by every flow. */
     u16 fec_groups_total;
@@ -2141,9 +2124,6 @@ void tbt_stream_put(struct tbt_stream *st);
 void tbt_stream_detach_from_session(struct tbt_stream *st);
 void tbt_stream_maybe_detach(struct tbt_stream *st);
 bool tbt_session_fec_stream_live(const struct tbt_session *sess);
-/* Quiesce the session FEC RX work and ask the FEC data plane to drop the old
- * stream's delivery state before a new far_sid is installed. */
-void tbt_session_fec_rx_barrier(struct tbt_session *sess, u64 sid);
 void tbt_stream_kill(struct tbt_stream *st, u8 reason);
 void tbt_stream_kill_by_sid(struct tbt_session *sess, u64 sid, u8 reason);
 /* 0.2.0 session lifetime (review/s2-merged-design.md §1.3/§5). tbt_session_get()

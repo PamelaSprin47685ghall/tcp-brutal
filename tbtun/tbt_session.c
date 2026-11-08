@@ -1412,20 +1412,6 @@ void tbt_session_cancel(struct tbt_session *s, enum tbt_sess_work w)
         tbt_session_put(s);
 }
 
-/* Called before a new stream takes over the session's FEC RX. The FEC work is
- * a single delivery cursor; it must stop before the old stream is unlinked and
- * the new far_sid is installed, otherwise an in-flight super-block of the old
- * stream is delivered at the new stream's offset. The data plane owns the
- * cursor reset (stream_sid/base, next_super, blocks); this function only
- * provides the ordering and the hook. */
-void tbt_session_fec_rx_barrier(struct tbt_session *sess, u64 sid)
-{
-    if (!sess || !READ_ONCE(sess->fec))
-        return;
-    tbt_session_cancel(sess, TBT_SW_FEC_RX);
-    if (sess->fec_rx && sess->fec_rx->stream_reset)
-        sess->fec_rx->stream_reset(sess, sid);
-}
 
 // ---------------------------------------------------------------------------
 // Session lifecycle (C3: one session per tunnel, n carriers, one stream)

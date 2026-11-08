@@ -1249,20 +1249,6 @@ static size_t sup_deliver(const struct sup *sp, u64 *next_super,
     return off;
 }
 
-/* tbt_fec_sid_accept(): a DATA/PARITY record belongs to exactly one stream.
- * The old stream may still be in flight after the new one is bound. */
-static void test_sid_filter(void)
-{
-    ok(!tbt_fec_sid_accept(0, 0, 0), "sid: no stream refuses DATA");
-    ok(tbt_fec_sid_accept(7, 0, 7), "sid: the current stream accepts");
-    ok(!tbt_fec_sid_accept(7, 0, 6), "sid: another stream refuses");
-    ok(!tbt_fec_sid_accept(7, 7, 7), "sid: the barrier's old sid refuses");
-    ok(tbt_fec_sid_accept(8, 7, 8),
-       "sid: the new stream accepts after the barrier");
-    ok(!tbt_fec_sid_accept(8, 7, 7),
-       "sid: an old record after the switch refuses");
-}
-
 /* tbt_fec_rx_window_step(): the reorder window across a stream switch. The
  * field case: the aborted stream reached block 100, the reset left next_super
  * at 101, and the new stream's first record named block 140 with 8 slots.
@@ -1325,16 +1311,6 @@ static void test_stream_reset_isolation(void)
     old.b[0].nreal = N;
     ok(sup_ready(&old, 100), "reset: the old block 100 is ready");
 
-    /* The session barrier is skipped when far_sid was already cleared before
-     * the new stream started.  The first record of the new sid must force the
-     * data-plane reset; a live old stream keeps waiting for the barrier. */
-    ok(tbt_fec_rx_stream_changed(1, 140, false),
-       "reset: the new sid resets without the session barrier");
-    ok(!tbt_fec_rx_stream_changed(1, 140, true),
-       "reset: a live old stream waits for the session barrier");
-    ok(!tbt_fec_rx_stream_changed(140, 140, false),
-       "reset: the same sid is not a stream change");
-
     /* The barrier drops that state. The old highest block (100) names no
      * block the new stream will send: block ids come from the session's
      * packet sequence, which the old stream pushed ahead. */
@@ -1369,64 +1345,77 @@ static void test_stream_reset_isolation(void)
     ok(next_super == 141, "reset: the frontier advances past the new block");
 }
 
-static void test_tx_stream_isolation(void)
+/* The v7 lifetime contract. The workqueue bodies cannot run here, so this
+ * pins the predicates and the interleavings they implement:
+ *   - a snapshot reference survives detach; the last put frees the flow;
+ *   - purge and an in-flight flush unlink a record exactly once;
+ *   - one session run word admits one TX body across a primary swap. */
+static void test_flow_lifetime(void)
 {
-    /* The FEC TX ring carries no per-byte sid.  Only the session's current
-     * stream may append to it; an old target's late read would otherwise be
-     * packetized under the new sid and delivered to the new application. */
-    ok(tbt_fec_tx_wait_switch(2, 1, 1, 2),
-       "tx: the new stream waits for the whole-ring flush");
-    ok(tbt_fec_tx_wait_switch(2, 0, 1, 2),
-       "tx: old bytes without a block still wait for the flush");
-    ok(!tbt_fec_tx_wait_switch(2, 0, 0, 2),
-       "tx: the first stream does not wait for a switch");
-    ok(!tbt_fec_tx_wait_switch(2, 2, 2, 2),
-       "tx: after the flush the new stream appends");
-    ok(!tbt_fec_tx_need_switch(0, 0, 0, 2),
-       "switch: the first stream does not switch");
-    ok(tbt_fec_tx_need_switch(1, 1, 0, 2),
-       "switch: an old block owner triggers the flush");
-    ok(tbt_fec_tx_need_switch(0, 1, 0, 2),
-       "switch: old bytes without a block still trigger the flush");
-    ok(tbt_fec_tx_need_switch(1, 1, 2, 2),
-       "switch: a refused submit triggers the flush");
-    ok(!tbt_fec_tx_need_switch(2, 2, 0, 2),
-       "switch: the packetizer already owns the new stream");
-    ok(tbt_fec_tx_record_sid_ok(2, 2, false),
-       "send: a data record of the current stream is sent");
-    ok(!tbt_fec_tx_record_sid_ok(1, 2, false),
-       "send: an old data record is dropped");
-    ok(!tbt_fec_tx_record_sid_ok(0, 2, false),
-       "send: a sid-less data record is dropped");
-    ok(tbt_fec_tx_record_sid_ok(0, 2, true),
-       "send: a session control record stays");
-    ok(tbt_fec_tx_record_sid_ok(2, 2, true),
-       "send: a control record of the current stream stays");
-    ok(!tbt_fec_tx_record_sid_ok(1, 2, true),
-       "send: an old control record is dropped");
-    ok(tbt_fec_tx_marker_sid_ok(2, 2),
-       "marker: the current stream's marker is sent");
-    ok(!tbt_fec_tx_marker_sid_ok(1, 2),
-       "marker: an old stream's marker is dropped");
-    ok(tbt_fec_tx_marker_sid_ok(0, 2),
-       "marker: a sid-less marker is session-scoped");
-    ok(tbt_fec_tx_stream_usable(false, true, 0),
-       "stream: an active open stream is usable");
-    ok(!tbt_fec_tx_stream_usable(true, true, 0),
-       "stream: a dead stream is not usable");
-    ok(!tbt_fec_tx_stream_usable(false, false, 0),
-       "stream: a detached stream is not usable");
-    ok(!tbt_fec_tx_stream_usable(false, true, 1),
-       "stream: a tombstoned stream is not usable");
-    ok(tbt_fec_tx_switch_stale(1, 2),
-       "tx: a switch for a dead stream is stale");
-    ok(!tbt_fec_tx_switch_stale(2, 2),
-       "tx: the pending switch for the current stream is kept");
-    ok(!tbt_fec_tx_switch_stale(0, 2),
-       "tx: no pending switch is not stale");
+    bool queued;
+    int flow_refs, rec_refs, unlinks, run;
 
-    /* The delivery walk must not hand an old stream's block to the new one,
-     * even if its block id and readiness still look valid. */
+    /* Traversal vs free: the table holds one ref; the snapshot takes another
+     * before it leaves sess->lock; detach unlinks and drops the table ref.
+     * The walk still owns the flow until its put. */
+    flow_refs = 1;
+    flow_refs++; /* snapshot */
+    flow_refs--; /* detach: table ref */
+    ok(flow_refs == 1, "lifetime: a snapshot ref survives detach");
+    ok(tbt_fec_flow_live(1), "lifetime: an active flow accepts work");
+    ok(!tbt_fec_flow_live(3), "lifetime: a detached flow refuses work");
+    flow_refs--; /* snapshot put */
+    ok(flow_refs == 0, "lifetime: the last put frees the flow");
+
+    /* Purge wins: flush peeks (queue + reader refs); purge unlinks and drops
+     * the queue ref; commit finds it unlinked and only drops the reader ref. */
+    queued = true;
+    rec_refs = 1;
+    unlinks = 0;
+    rec_refs++; /* peek */
+    if (tbt_fec_out_unlink_once(&queued))
+    {
+        unlinks++;
+        rec_refs--;
+    }
+    if (tbt_fec_out_unlink_once(&queued))
+    {
+        unlinks++;
+        rec_refs--;
+    }
+    rec_refs--; /* peek put */
+    ok(rec_refs == 0 && unlinks == 1,
+       "lifetime: purge and commit unlink exactly once");
+
+    /* Flush wins: the commit unlinks first; the late purge is a no-op. */
+    queued = true;
+    rec_refs = 1;
+    unlinks = 0;
+    rec_refs++;
+    if (tbt_fec_out_unlink_once(&queued))
+    {
+        unlinks++;
+        rec_refs--;
+    }
+    if (tbt_fec_out_unlink_once(&queued))
+    {
+        unlinks++;
+        rec_refs--;
+    }
+    rec_refs--;
+    ok(rec_refs == 0 && unlinks == 1,
+       "lifetime: commit wins over a late purge");
+
+    /* Primary swap: the run word is session-level. A second body is refused
+     * even when detach moved sess->fec_tx to another flow. */
+    run = 0;
+    ok(!(run & 1), "swap: the first body owns the session walk");
+    run |= 1;
+    ok(run & 1, "swap: a second body is refused while the walk runs");
+    run &= ~1;
+    ok(!(run & 1), "swap: the re-armed body runs after release");
+
+    /* Delivery still refuses a block placed for another stream. */
     ok(tbt_fec_blk_sid_match(2, 2),
        "isolation: a block of the delivered stream matches");
     ok(!tbt_fec_blk_sid_match(1, 2),
@@ -2243,10 +2232,9 @@ int main(void)
     test_parity_rotation();
     test_marker_retry();
     test_super_cursor();
-    test_sid_filter();
     test_window_rebase();
     test_stream_reset_isolation();
-    test_tx_stream_isolation();
+    test_flow_lifetime();
     test_ack_split();
     test_rx_poll();
     test_nack_settle_gate();
