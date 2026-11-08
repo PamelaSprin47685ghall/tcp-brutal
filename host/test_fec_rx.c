@@ -1325,6 +1325,16 @@ static void test_stream_reset_isolation(void)
     old.b[0].nreal = N;
     ok(sup_ready(&old, 100), "reset: the old block 100 is ready");
 
+    /* The session barrier is skipped when far_sid was already cleared before
+     * the new stream started.  The first record of the new sid must force the
+     * data-plane reset; a live old stream keeps waiting for the barrier. */
+    ok(tbt_fec_rx_stream_changed(1, 140, false),
+       "reset: the new sid resets without the session barrier");
+    ok(!tbt_fec_rx_stream_changed(1, 140, true),
+       "reset: a live old stream waits for the session barrier");
+    ok(!tbt_fec_rx_stream_changed(140, 140, false),
+       "reset: the same sid is not a stream change");
+
     /* The barrier drops that state. The old highest block (100) names no
      * block the new stream will send: block ids come from the session's
      * packet sequence, which the old stream pushed ahead. */
@@ -1357,6 +1367,38 @@ static void test_stream_reset_isolation(void)
             stale = true;
     ok(!stale, "reset: the old stream's body is not delivered");
     ok(next_super == 141, "reset: the frontier advances past the new block");
+}
+
+static void test_tx_stream_isolation(void)
+{
+    /* The FEC TX ring carries no per-byte sid.  Only the session's current
+     * stream may append to it; an old target's late read would otherwise be
+     * packetized under the new sid and delivered to the new application. */
+    ok(tbt_fec_tx_sid_current(2, 0, 2),
+       "tx: the current stream feeds the ring");
+    ok(!tbt_fec_tx_sid_current(2, 0, 1),
+       "tx: an old stream's late bytes are dropped");
+    ok(!tbt_fec_tx_sid_current(1, 2, 1),
+       "tx: the switch target gates the ring");
+    ok(tbt_fec_tx_sid_current(2, 2, 2),
+       "tx: the switch target admits the new stream");
+    ok(!tbt_fec_tx_sid_current(0, 0, 1),
+       "tx: no stream drops every submit");
+    ok(tbt_fec_tx_switch_stale(1, 2),
+       "tx: a switch for a dead stream is stale");
+    ok(!tbt_fec_tx_switch_stale(2, 2),
+       "tx: the pending switch for the current stream is kept");
+    ok(!tbt_fec_tx_switch_stale(0, 2),
+       "tx: no pending switch is not stale");
+
+    /* The delivery walk must not hand an old stream's block to the new one,
+     * even if its block id and readiness still look valid. */
+    ok(tbt_fec_blk_sid_match(2, 2),
+       "isolation: a block of the delivered stream matches");
+    ok(!tbt_fec_blk_sid_match(1, 2),
+       "isolation: an old block cannot be delivered to the new stream");
+    ok(tbt_fec_blk_sid_match(1, 0),
+       "isolation: no adopted stream has no sid to compare");
 }
 
 static void test_super_cursor(void)
@@ -2170,6 +2212,7 @@ int main(void)
     test_sid_filter();
     test_window_rebase();
     test_stream_reset_isolation();
+    test_tx_stream_isolation();
     test_ack_split();
     test_rx_poll();
     test_nack_settle_gate();

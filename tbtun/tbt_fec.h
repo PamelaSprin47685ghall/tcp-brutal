@@ -152,6 +152,51 @@ static inline bool tbt_fec_sid_accept(u64 cur, u64 barrier, u64 rec)
     return rec == cur;
 }
 
+/* The session carries one stream at a time.  A record for a new sid whose
+ * old stream is already gone must reset the data plane here: the session's
+ * barrier is skipped when far_sid was cleared before the new stream started,
+ * and the old blocks would otherwise stay at the delivery cursor and be
+ * handed to the new stream. */
+static inline bool tbt_fec_rx_stream_changed(u64 stream_sid, u64 rec_sid,
+                                             bool old_stream_alive)
+{
+    return stream_sid && rec_sid && rec_sid != stream_sid &&
+           !old_stream_alive;
+}
+
+/* Only the session's current stream may feed the shared FEC TX ring: the
+ * ring carries no per-byte sid, so an old target's late bytes would be
+ * packetized under the new stream's sid.  `switch_sid` is the first submit
+ * of the stream that is taking over; it closes the race before far_sid is
+ * observed. */
+static inline bool tbt_fec_tx_sid_current(u64 far_sid, u64 switch_sid,
+                                          u64 st_sid)
+{
+    if (st_sid != far_sid)
+        return false;
+    if (switch_sid && st_sid != switch_sid)
+        return false;
+    return true;
+}
+
+/* A pending switch that names a stream the session has already left can
+ * never be applied: the packetizer only clears it when it names the current
+ * stream.  The submit path drops it so the current stream's first submit
+ * records the old prefix boundary instead of being blocked forever. */
+static inline bool tbt_fec_tx_switch_stale(u64 switch_sid, u64 far_sid)
+{
+    return switch_sid && switch_sid != far_sid;
+}
+
+/* A block placed for one stream must never be delivered to another.  The
+ * block carries the sid it was placed under; the delivery walk compares it
+ * with the stream it is about to hand bytes to.  `stream_sid` 0 means no
+ * stream has been adopted yet, so there is nothing to compare. */
+static inline bool tbt_fec_blk_sid_match(u64 block_sid, u64 stream_sid)
+{
+    return !stream_sid || block_sid == stream_sid;
+}
+
 /* Where a DATA/PARITY record's block sits against the receiver's reorder
  * window. The window belongs to one stream, and the block id comes from the
  * session's packet sequence: a stream switch leaves the old cursor naming no

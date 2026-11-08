@@ -1760,6 +1760,7 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
     {
         u32 drop_to = 0;
         bool switched = false;
+        u64 old_sid = tx->cur_block_sid;
 
         spin_lock(&tx->lock);
         if (tx->switch_sid == st->sid)
@@ -1796,6 +1797,12 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
                     tbt_fec_tx_close_block(sess, true);
             }
             tx->cur_block_sid = st->sid;
+            /* The old stream is no longer the session's.  Kill it now so its
+             * target socket is shut down before the new stream's target can
+             * be served; a single-threaded target source otherwise keeps
+             * sending the old body and the new connection waits forever. */
+            if (old_sid && old_sid != st->sid)
+                tbt_stream_kill_by_sid(sess, old_sid, TBT_ST_DEAD);
             /* The old stream's TX state must not outlive it. Its ACKs are
              * dropped by the sid filter, so its credit frontier would stay
              * full forever and the new stream would wait on a window that
@@ -1820,6 +1827,16 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
                     tbt_fec_out_free(sess, q, o);
             }
             spin_unlock(&sess->fec_out_lock);
+            /* The replay ring stores whole records with their original sid.
+             * A new stream's block ids never name an old entry, but reset it
+             * anyway so no old body can be replayed if an id is reused after
+             * a wrap. */
+            if (tx->replay)
+            {
+                spin_lock_bh(&tx->replay_lock);
+                tbt_fec_replay_reset(tx->replay);
+                spin_unlock_bh(&tx->replay_lock);
+            }
             WRITE_ONCE(tx->peer_pkts, tx->seq);
             WRITE_ONCE(tx->flush_req, false);
             tx->short_at_ns = 0;
@@ -2426,6 +2443,23 @@ size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,
     if (!tx)
         return 0;
     spin_lock(&tx->lock);
+    /* A pending switch whose stream is no longer the session's can never be
+     * applied: the packetizer only clears switch_sid when it names the
+     * current stream.  Drop it here so the !switch_sid branch below records
+     * the old prefix boundary for the current stream instead of leaving the
+     * gate stuck forever. */
+    if (tbt_fec_tx_switch_stale(tx->switch_sid, READ_ONCE(sess->far_sid)))
+        tx->switch_sid = 0;
+    /* The ring has no per-byte sid: a late read from the old stream's target
+     * would be packetized under the new stream's sid and delivered to the new
+     * application.  Consume and discard it; returning 0 would make the old
+     * reader retry the same bytes forever. */
+    if (!tbt_fec_tx_sid_current(READ_ONCE(sess->far_sid), tx->switch_sid,
+                                st->sid))
+    {
+        spin_unlock(&tx->lock);
+        return len;
+    }
     /* First submit of a new stream: remember where its bytes begin. The
      * packetizer drops the old stream's raw ring prefix and fill. The
      * last_submit_sid check also covers the case where the old stream's
@@ -2951,6 +2985,15 @@ static void tbt_fec_rx_stream_reset(struct tbt_session *sess, u64 sid)
     if (!rx)
         return;
     spin_lock_bh(&rx->lock);
+    /* The session barrier calls this after w_fec_rx is quiesced.  The data
+     * plane also calls it from carrier RX when the barrier was skipped; that
+     * late reset must not run after the new stream has been adopted, or it
+     * would wipe the delivery cursor under the running walk. */
+    if (sid && rx->stream_sid && rx->stream_sid != sid)
+    {
+        spin_unlock_bh(&rx->lock);
+        return;
+    }
     /* A record of the stream that follows can arrive before this barrier runs
      * (tbt_session_bind_sid() installs far_sid first). Its blocks were placed
      * and are about to be wiped; keep the sid and the smallest block so the
@@ -3043,7 +3086,11 @@ static bool tbt_fec_super_ready_locked(const struct tbt_fec_rx *rx, u64 s)
                     continue;
             }
         }
-        if (!b->used || !b->ready || b->block_id != s)
+        /* A block placed for the old stream must not make the new stream's
+         * super-block look ready: the delivery walk would advance its cursor
+         * without handing over any byte. */
+        if (!b->used || !b->ready || b->block_id != s ||
+            !tbt_fec_blk_sid_match(b->sid, rx->stream_sid))
             return false;
     }
     return true;
@@ -3303,7 +3350,8 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
 
                 b = tbt_fec_rx_blk(rx, group, s);
                 if (!tbt_fec_blk_deliverable(b->used, b->ready, b->block_id,
-                                             s))
+                                             s) ||
+                    !tbt_fec_blk_sid_match(b->sid, st->sid))
                     continue;
                 /* A block that was closed early has fewer real shares than n;
                  * the rest are the encoder's zero padding and carry no stream
@@ -5848,6 +5896,32 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
     if (h.type != TBT_FEC_DATA && h.type != TBT_FEC_PARITY)
         return 0;
 
+    /* The session barrier runs before a new far_sid is installed, but it is
+     * skipped when the old stream was already detached and far_sid was
+     * cleared.  If the new sid's first record arrives with the old stream
+     * gone, reset here: no old block or delivery cursor may survive into
+     * this stream (a ready old block at the cursor would be handed to the
+     * new application, which is the fix47 HTTP/0.9 failure). */
+    {
+        u64 old_sid = READ_ONCE(rx->stream_sid);
+        bool old_alive = false;
+
+        if (old_sid && h.sid && h.sid != old_sid)
+        {
+            struct tbt_stream *ost =
+                tbt_stream_get(sess, old_sid, false, false);
+
+            if (ost)
+            {
+                old_alive = READ_ONCE(ost->state) != TBT_ST_DEAD &&
+                            !ost->tombstone_until_ns;
+                tbt_stream_put(ost);
+            }
+        }
+        if (tbt_fec_rx_stream_changed(old_sid, h.sid, old_alive))
+            tbt_fec_rx_stream_reset(sess, old_sid);
+    }
+
     payload = rec + TBT_FEC_HDR_LEN;
     spin_lock_bh(&rx->lock);
     if (READ_ONCE(rx->stopping))
@@ -5973,7 +6047,11 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
     if (!b->used || b->block_id != h.block_id)
     {
         tbt_fec_blk_reset(sess, b, h.block_id);
-        b->sid = READ_ONCE(sess->far_sid);
+        /* Tag the block with the sid of the record that passed the filter,
+         * not the session's current value: far_sid can change between the
+         * filter and this placement, and a sticky wrong tag would keep the
+         * frontier from becoming ready. */
+        b->sid = h.sid ? h.sid : READ_ONCE(sess->far_sid);
     }
     /* Defensive: a parity record is a share of this block. A path that
      * placed parity without the reset must still make the block visible to
