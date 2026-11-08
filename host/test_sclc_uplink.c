@@ -498,10 +498,13 @@ static void test_p_sweep(void)
     /* 1/4 is the smallest rate that clears the >0.99 floor on the measured
      * host; the 0.999 target is at the edge of the binomial share-loss tail
      * (8 data shares).  Replay (asserted inside run_p) is byte-exact. */
-    ok(primary.cw_rec >= cw_min, "p=0.40 r1/4 codeword recovery",
+    ok(primary.cw_rec >= cw_min, "p=0.40 r1/4 codeword floor",
        "below the measured floor");
-    ok(primary.block_ok >= block_min, "p=0.40 r1/4 block recovery",
+    ok(primary.block_ok >= block_min, "p=0.40 r1/4 block floor",
        "below the measured floor");
+    printf("TARGET p=0.40 block 0.999: %s (measured %.4f)\n",
+           primary.block_ok >= 0.999 ? "MET" : "NOT MET",
+           primary.block_ok);
 
     rng_seed(23);
     r = run_p(1, 8, 24, 1, 4, TBT_SCLC_MAP_INTERLEAVED, 0.50, blocks, 256);
