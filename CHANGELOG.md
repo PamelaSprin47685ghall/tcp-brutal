@@ -3,6 +3,81 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.3.2] - 2026-11-08
+
+### Fixed
+
+- The per-stream announce mark is cleared when a carrier is lost and when
+  `join()` installs a new generation. It stored four bits of the carrier
+  generation while `sess->carrier_gen` is a full counter, so a replacement
+  whose generation was 16, 32, ... greater looked already announced, its
+  OPEN was skipped, and the slot stayed `up=0` forever (observed: carrier 3
+  gen 4 replaced by gen 292). The 50 ms session poll also re-announces a
+  connected carrier whose HELLO was written but whose OPEN never queued,
+  counted as `up_rescued`. `tbt_session_retire()` compares the peer's
+  generation carried in RETIRE with `peer_gen`, not the local counter. c3
+  reports `replacing=` and `empty=`, so `up + replacing + empty == n` holds
+  at every instant. (78d5a90)
+- The NACK scan no longer probes a block while its 50 ms decode settle
+  window is open. The scan and the window raced on first connect: each
+  replay restarted the window (fix45 measured 482 NACKs, 27,465 replayed
+  shares and 226 MB in one connect, with far NACK->wire 286.7 s). A block
+  with no parity is never gated, and a failed decode still asks for repair.
+  (2f074e5)
+- The FEC data plane is isolated across a stream switch: a new sid resets
+  the RX cursor and blocks even when the session barrier was skipped; a
+  block carries the sid of the record that placed it, and a non-current
+  block is refused at delivery; only the current stream may append to the
+  shared TX ring; a stale target read is consumed and discarded; and the
+  old stream is killed with its replay ring reset. (859ddd4)
+- A stream switch flushes the whole FEC TX ring. The new stream's first
+  submit is refused while the packetizer owns the old block; `switch_sid`
+  stays set through the cleanup; `[tail, head)` is dropped
+  unconditionally; every replay record is freed; and an old stream's late
+  submit is discarded while the gate is set. (7751dc9)
+- The packetizer also triggers the ring switch, because it can run before
+  the new stream's first submit when `cur_block_sid` and `switch_sid` are
+  both 0. A submit from a different stream (including the no-block case)
+  flushes the ring; the old stream is killed even if it never built a
+  block; and every queued data/replay record is validated against the
+  current `far_sid` at send time. (a275dea)
+- An empty marker built for a NACK now carries the NACK's sid and is
+  dropped if that sid is no longer current. `tbt_fec_stream()` rejects a
+  dead, detached or tombstoned stream, the packetizer switch decision and
+  the whole-ring flush are re-evaluated in one `tx->lock` section,
+  `old_sid` is the block owner or last submitter (never the current
+  stream), and the per-carrier fallback flush validates the record sid.
+  (1a5bf63)
+
+### Added
+
+- FEC block decode runs once, at the end of its share burst, instead of
+  as soon as one parity share arrives. Every new share pushes
+  `decode_next_ns` out by 50 ms; a failed decode backs off 50..400 ms; a
+  duplicate share does not postpone the decode; and only the delivery
+  frontier is decoded. On HND0 a 1 MiB block took 47.8 ms and was decoded
+  7.7 times per delivered block; the single `w_fec_rx` worker spent
+  0.96 core to deliver 2.86 MB/s. The 64x8 bit plane gather/scatter is
+  replaced by an 8x8 SWAR transpose: host -O2 encode 135 -> 528 MB/s,
+  decode with one share erased 112 -> 356 MB/s, and a block-end decode at
+  0.5% share loss costs 3.8 ms instead of 8.9 ms. (78db715)
+
+### Documentation
+
+- `review/0.3.2-scope-audit.md` records the 0.2.x content against 0.3.1,
+  the release-evidence gaps, and the P0/P1/P2 work list. (a1cbae1)
+
+### Verification
+
+- fix54 substantive acceptance PASS. The tag-exact 0.3.2 release gate
+  (tag archive build on both hosts, 1 GiB, DKMS, watchdog, up=256, windowed
+  NACK->wire) remains pending; see `review/0.3.2-release-draft.md`.
+- Correction to 0.3.1: `fec_nack_lat_ns` is a session cumulative sum
+  (far 502.20 s in the 1 GiB run), not a NACK->wire latency. The tail is
+  `fec_nack_lat_max_ns` 603.9 ms (far), so the 600 s cumulative bound does
+  not establish a 600 s latency bound. 0.3.2 gates use the windowed delta
+  and record `fec_nack_lat_max_ns` / `fec_nack_repair_max_ns`.
+
 ## [0.3.1] - 2026-11-08
 
 ### Fixed
@@ -21,9 +96,11 @@ and moves independently of the module version.
 - 1 GiB single stream: rc=0, HTTP 200, size 1,073,741,824, near/far sha256
   equal (`e926b854…ad7393`), 889.20 s (9.66 Mbit/s), TTFB 0.540 s; no reset,
   holes or drops.
-- NACK→wire `fec_nack_lat_ns` 502.20 s (far) < 600 s; replay high-water
-  2.94 MB (< 5 MiB); `fec_nack_backpressure=0`; `fec_nack_pad_skip=0`;
-  `fec_short_parity_saved` 23 near / 889 far.
+- NACK→wire: `fec_nack_lat_ns` is a session cumulative sum (far 502.20 s),
+  not a latency. The tail is `fec_nack_lat_max_ns` 603.9 ms (far); the
+  600 s cumulative bound does not establish a 600 s latency bound. Replay
+  high-water 2.94 MB (< 5 MiB); `fec_nack_backpressure=0`;
+  `fec_nack_pad_skip=0`; `fec_short_parity_saved` 23 near / 889 far.
 - Wire: `TBT_FEC_CONV 0x1006` / `TBT_WIRE_VERSION_V6 3` unchanged; 0.3.0 and
   0.3.1 interoperate.
 
