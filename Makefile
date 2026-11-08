@@ -79,6 +79,9 @@ HOST_FEC_OUT_SRCS := host/test_fec_out.c
 HOST_FEC_ADAPT  := host/test_fec_adapt
 HOST_FEC_ADAPT_SRCS := host/test_fec_adapt.c tbtun/tbt_fec_adapt.c
 HOST_FEC_ADAPT_HDRS := tbtun/tbt_fec_adapt.h tbtun/tbt_fec.h tbtun/tbt_uapi.h
+HOST_FEC_SCLC   := host/test_fec_sclc
+HOST_FEC_SCLC_SRCS := host/test_fec_sclc.c tbtun/tbt_fec_sclc.c
+HOST_FEC_SCLC_HDRS := tbtun/tbt_fec_sclc.h tbtun/tbt_fec.h tbtun/tbt_uapi.h
 HOST_PORTMAP    := host/test_portmap
 HOST_PORTMAP_SRCS := host/test_portmap.c tbtun/tbt_portmap.c tbtun/tbt_parse.c
 HOST_PORTMAP_HDRS := tbtun/tbt_portmap.h tbtun/tbt_parse.h tbtun/tbt_uapi.h
@@ -90,7 +93,7 @@ tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
                    tbtun/tbt_sock.o tbtun/tbt_tx.o tbtun/tbt_rx.o tbtun/tbt_rec.o \
                    tbtun/tbt_parse.o tbtun/tbt_http.o tbtun/tbt_crypto.o \
                    tbtun/tbt_portmap.o tbtun/tbt_fec.o tbtun/tbt_fec_data.o \
-                   tbtun/tbt_fec_adapt.o
+                   tbtun/tbt_fec_adapt.o tbtun/tbt_fec_sclc.o
 
 ccflags-y       := -std=gnu99 -I$(src)/tbtun
 # ChaCha8 is a hot per-byte loop; keep the kernel's -O2 for the rest of the
@@ -132,6 +135,7 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_FEC_RX)
 	@./$(HOST_FEC_OUT)
 	@./$(HOST_FEC_ADAPT)
+	@./$(HOST_FEC_SCLC)
 	@./$(HOST_PORTMAP)
 	@# Third-party cross-check: h11 is not a build dependency. uv with a cached
 	@# h11 runs it offline; anything else gets a clear skip, not a failure.
@@ -234,6 +238,9 @@ $(HOST_FEC_OUT): $(HOST_FEC_OUT_SRCS)
 $(HOST_FEC_ADAPT): $(HOST_FEC_ADAPT_SRCS) $(HOST_FEC_ADAPT_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_FEC_ADAPT_SRCS)
 
+$(HOST_FEC_SCLC): $(HOST_FEC_SCLC_SRCS) $(HOST_FEC_SCLC_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_FEC_SCLC_SRCS)
+
 $(HOST_PORTMAP): $(HOST_PORTMAP_SRCS) $(HOST_PORTMAP_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_PORTMAP_SRCS)
 
@@ -246,7 +253,7 @@ host-test-san:
 		echo "host-test-san: skipped, $(HOSTCC) cannot link -fsanitize=address,undefined"; \
 	fi
 
-host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_portmap_san
+host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_sclc_san host/test_portmap_san
 	@./host/test_parse_san
 	@./host/test_fuzz_san
 	@./host/test_http_san
@@ -256,6 +263,7 @@ host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san hos
 	@./host/test_fec_rx_san
 	@./host/test_fec_out_san
 	@./host/test_fec_adapt_san
+	@./host/test_fec_sclc_san
 	@./host/test_portmap_san
 
 host/test_parse_san: $(HOST_TEST_SRCS) $(HOST_TEST_HDRS)
@@ -285,6 +293,9 @@ host/test_fec_out_san: $(HOST_FEC_OUT_SRCS)
 host/test_fec_adapt_san: $(HOST_FEC_ADAPT_SRCS) $(HOST_FEC_ADAPT_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_FEC_ADAPT_SRCS)
 
+host/test_fec_sclc_san: $(HOST_FEC_SCLC_SRCS) $(HOST_FEC_SCLC_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_FEC_SCLC_SRCS)
+
 host/test_portmap_san: $(HOST_PORTMAP_SRCS) $(HOST_PORTMAP_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_PORTMAP_SRCS)
 
@@ -307,7 +318,7 @@ host-test-live: $(HOST_HTTP_LIVE)
 	fi
 
 clean: clean-dkms.conf clean-dkms-tarball
-	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_PORTMAP) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_portmap_san
+	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_SCLC) $(HOST_PORTMAP) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_sclc_san host/test_portmap_san
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
 
 load:

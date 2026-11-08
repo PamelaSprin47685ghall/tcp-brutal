@@ -1087,7 +1087,7 @@ enum tbt_fec_codec
 {
     TBT_FEC_CODEC_RLNC_SINGLE = 0,
     TBT_FEC_CODEC_RLNC_GROUPED = 1,
-    TBT_FEC_CODEC_SC_LDPC = 2, /* reserved for D; no implementation here */
+    TBT_FEC_CODEC_SC_LDPC = 2, /* downlink rate 0.50, see tbt_fec_sclc.h */
 };
 
 struct tbt_fec_params
@@ -1146,6 +1146,7 @@ struct tbt_fec_ops
 };
 
 extern const struct tbt_fec_ops tbt_fec_ops_rlnc;
+extern const struct tbt_fec_ops tbt_fec_ops_sclc;
 
 /* ------------------------------------------------------------------ *
  * Adaptive shape (0.3.0, TBT_FEC_CONV 0x1006)
