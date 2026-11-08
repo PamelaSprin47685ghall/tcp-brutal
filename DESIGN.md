@@ -254,13 +254,13 @@ rather than in a new field so the HELLO body length is unchanged.
 | `http-kal-drip` | identical headers, identical framing | one **byte per `drip_ms`** when idle (a legal 1-byte chunk every `drip_ms`), volume `≈ 1 B/drip_ms` | the `M` spares: an idle flow that a classifier would reap or de-prioritise is kept alive with ~8 bit/s (1 B/s payload) instead of a burst every 5000 ms |
 | `raw` | one frame per record, no HTTP bytes at all | none needed | second hop / VPS-to-home leg, loopback tests, or any line where QoS does not apply. Also the only safe profile inside WireGuard when the classifier is SNI-based (§16.5) |
 
-### FEC v6 over the container (T0 0x1004)
+### FEC v6 over the container (T0 0x1005)
 
-FEC v6 is an independent 40-byte record format (`conv=0x1004`; 0.1.0 used
+FEC v6 is an independent 48-byte record format (`conv=0x1005`; 0.1.0 used
 `0x1001`), not a wider old frame. It rides the same carriers and the same HTTP
 container:
 
-- `profile=raw`: one 40-byte FEC record follows another with no wrapper.
+- `profile=raw`: one 48-byte FEC record follows another with no wrapper.
 - `profile=http-kal` / `http-kal-drip`: one HTTP chunk body is exactly one FEC
   record. The request line, headers, `Transfer-Encoding: chunked`, chunk-size
   lines and CRLFs stay plaintext; only the FEC body may be encrypted by the
@@ -268,17 +268,25 @@ container:
 - Control records (ACK/NACK/FEC_CFG/FEC_FBK) use the same one-chunk-per-record
   rule. They are written only at record boundaries; a partial record is never
   interleaved with a control frame.
-- **PARITY block marker (`TBT_FEC_CONV` 0x1004).** There is no
+- **PARITY block marker (`TBT_FEC_CONV` 0x1005).** There is no
   4-byte marker and no magic number. A marker is a set of values inside the
-  40-byte `struct tbt_fec_hdr`: `type = TBT_FEC_PARITY` (0x31), `flags = 0`,
+  48-byte `struct tbt_fec_hdr`: `type = TBT_FEC_PARITY` (0x31), `flags = 0`,
   `share_index = n` (parity 0), `epoch = 0`, `win_len = 0`, `payload_len = 0`,
-  `conv = 0x1004`, `payload_crc32c = 0` (the CRC32C of an empty payload).
-  `header_crc32c` still covers +0..+35 and must match. The receiver accepts
+  `conv = 0x1005`, `payload_crc32c = 0` (the CRC32C of an empty payload).
+  `header_crc32c` still covers +0..+43 and must match. The receiver accepts
   `win_len == 0` only with `payload_len == 0 && epoch == 0`, rejects a marker
   for a block that already holds DATA/parity or `win_len_set`, and rejects DATA
   for a block after its marker. 0.1.0 required PARITY
   `payload_len == max_payload` and `win_len != 0`, so the marker and that
-  relaxation shipped together with 0x1002 and stays in 0x1004.
+  relaxation shipped together with 0x1002 and stays through 0x1005.
+- **Stream id (`TBT_FEC_CONV` 0x1005).** DATA and PARITY carry a u64 `sid` at
+  header +32; control records carry 0. The receiver drops a share whose sid is
+  not its current stream, and the sender tags the old block's records with the
+  old sid when a stream switches, so a queued old record cannot reach the new
+  stream. The header grows to 48 bytes: `payload_crc32c` moves to +40 and
+  `header_crc32c` to +44 (covers +0..+43). A sequential new stream resets the
+  RX delivery state and rebases its window on the first block; switching
+  streams also clears the old TX state and closes the old target socket.
 - `fec=on` maps one share to each carrier: `carriers = groups * (n + m)`,
   `group(c) = c / (n + m)`, `share(c) = c % (n + m)`. `mode=rlnc` is one group
   (`carriers == n + m`); `mode=grouped` is 32 groups of 8 in production
@@ -770,7 +778,10 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
   streams on that connection. A session carries up to `TBT_STREAMS_MAX` (128) concurrent
   streams. On the far side an OPEN for an unknown sid adopts that stream; DATA, FIN or RST
   for an unknown sid is dropped, because only OPEN may create a stream. OPEN is sent once
-  per carrier for each stream. A late OPEN for a stream that is already closing is
+  per carrier for each stream. A FEC share is sent on a carrier only after this stream's
+  OPEN has been written on it (`c->up`); a share that arrives before the far's stream
+  exists is dropped by this rule (`bind_drop_no_stream`) and is never NACKed, so the
+  sender waits instead of consuming it. A late OPEN for a stream that is already closing is
   dropped. The HELLO gate is stronger than C2's OPEN gate: a port-reusing or hostile
   connection cannot name a stream at all without the session nonce. On the far side the
   nonce is pinned by `nonce=`, or adopted from the first HELLO that passes the source
@@ -1969,7 +1980,7 @@ therefore a **per-open-file line buffer**:
 ### 8.4.2 `/proc` is the control surface, not `/sys`
 
 All tunables live under `/proc/net/tbtun/`. `/sys/module/tbtun/parameters/` holds only the
-load-time module params (`debug`, `max_tunnels`, `max_carriers`, `debug_loss`), all
+load-time module params (`debug`, `max_tunnels`, `max_carriers`, `debug_loss`, `hold_enable`), all
 read-only after load. Reasons: sysfs module params are **per-module, not per-netns**, so
 two netns cannot have different tunnels; sysfs attributes cannot express lists or
 structures; and sysfs has no idiom for returning an error message a shell can display.
@@ -2224,7 +2235,7 @@ cannot silently lose its atomicity again.
 | streams | `streams streams_active n_streams n_pending` |
 | c6 | `c6 holes_declared holes_repaired holes_unrecoverable rx_max_stall_us hole_checks gate_fail depth_fail time_fail` |
 | c8 | `c8 profile_mismatch http_parse_err http_status_err http_req http_resp pad_tx drip_tx` |
-| c9 | `c9 fec_proto_fail fec_hdr_crc_fail fec_payload_crc_fail fec_short_tx fec_short_unknown fec_drop_window fec_drop_crypto` |
+| c9 | `c9 fec_proto_fail fec_hdr_crc_fail fec_payload_crc_fail fec_short_tx fec_short_unknown fec_stream_refused bind_drop_no_stream fec_drop_window fec_drop_crypto` |
 | c10 | `c10 fec_decode_blocks fec_decode_recovered fec_decode_nomem fec_deliver_nomem fec_deliver_dup fec_deliver_ooo fec_deliver_bad fec_dup_share fec_late_share fec_late_data fec_pad_share fec_epoch_conflict fec_slot_past_cut fec_fin_bad fec_ack_bad fec_tx_share_gap fec_empty_block` |
 | c11 | `c11 fec_nack_tx fec_nack_rx fec_nack_retx fec_nack_drop fec_nack_bad fec_replay_hit fec_replay_miss fec_nack_retx_bytes fec_replace_retx_bytes fec_nack_lat_ns fec_nack_lat_max_ns fec_nack_repair_ns fec_nack_repair_max_ns fec_reset_tcp_failed fec_reset_user fec_wait_carrier fec_backpressure` |
 | c5 | `c5 dup_tx dup_used dup_suppressed dup_same_path inflate_ppm dup_bytes` |
@@ -2309,7 +2320,7 @@ and a frame already written on two paths is a copy hole (§4.3). `dropped` count
 probe cannot lose a handshake and turn into a carrier-replacement probe. C8 adds
 `profile_mismatch, http_parse_err, http_status_err, http_req, http_resp, pad_tx,
 drip_tx`. C9 is the FEC v6 receive verdict (T0 §1.3): `fec_proto_fail` and
-`fec_hdr_crc_fail` mean the 40-byte header could not be trusted, so the carrier closes;
+`fec_hdr_crc_fail` mean the 48-byte header could not be trusted, so the carrier closes;
 `fec_payload_crc_fail` means the framing was sound and only the body was damaged, so the
 share is dropped and the carrier stays. With `crypto=on` a wrong key is a payload CRC
 failure on every share, which makes this counter the difference between "the key is
@@ -2615,6 +2626,12 @@ Implemented in C3, per session:
    between probes, 3 probes), so a half-open path closes at the socket before the
    `stall_dead` bound. A provisional carrier that has not presented a HELLO within 5 s
    is retired.
+
+   The poll also owns the opt-in BBR hold (`hold_enable=1`, default 0): when a carrier
+   has been idle long enough for the stack to reset its cwnd and pacing, the poll
+   restores the last good `snd_cwnd`/pacing rate instead of letting the next burst
+   restart from the initial window. The hold is released on loss, on a carrier
+   replacement, and when the saved rate is stale; `host/test_hold` covers those rules.
 2. `tbt_carrier_lost()` also runs on a carrier write error and on `carrier <n> down`. It
    excludes the path from scheduling immediately and marks every retained frame last sent
    on it overdue, so the normal scheduler re-sends them on the live paths. An ARQ stall
@@ -2709,22 +2726,23 @@ makes this design different from a generic L4 tunnel.
 | `tests/*.sh` | **new** |
 
 Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the released tree reports
-`0.2.1`. The wire revision `TBT_CONV=0x0006`
-and the FEC record revision `TBT_FEC_CONV=0x1004` bump independently of it. HELLO
+`0.2.2`. The wire revision `TBT_CONV=0x0006`
+and the FEC record revision `TBT_FEC_CONV=0x1005` bump independently of it. HELLO
 `body[0]` carries `TBT_WIRE_VERSION=1`, not the module version, so the module
 version and the wire version are decoupled. 0.2.0 flipped `TBT_CONV` to
-0x0006 (FIN carries a 16-byte body) and `TBT_FEC_CONV` to 0x1004: `0x1002`
-added the PARITY block marker, `0x1003` the 24-byte ACK with `deliver_bytes`,
-and `0x1004` the 64-byte bitmap NACK. 0.2.1 keeps the same wire. Peers of
+0x0006 (FIN carries a 16-byte body) and `TBT_FEC_CONV` through `0x1002`
+(PARITY block marker), `0x1003` (24-byte ACK with `deliver_bytes`) and
+`0x1004` (64-byte bitmap NACK) to `0x1005` (48-byte header with the u64 stream
+id). Peers of
 different wire revisions do not interoperate, because the first HELLO is
 rejected by the conv check.
 
 **Packaging.** `tbtun/tbt_uapi.h` is the single version authority: the
-`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/2/1`). `scripts/mkdkmsconf.sh`
+`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/2/2`). `scripts/mkdkmsconf.sh`
 parses those macros and emits `PACKAGE_VERSION="<major>.<minor>.<patch>"`; parsing
 failure is fatal and never falls back to an old value. `dkms.conf` is a generated file —
 `make dkms.conf` (or `make dkms-tarball`) writes it, and it must not be hand-edited; the
-current generated value is `PACKAGE_VERSION="0.2.1"`. `scripts/install_dkms.sh` reads
+current generated value is `PACKAGE_VERSION="0.2.2"`. `scripts/install_dkms.sh` reads
 the same value through `mkdkmsconf.sh --version`. A development suffix
 `.r<commits>.<sha>` is opt-in with `TBT_DKMS_GIT_SUFFIX=1`; it is not the default.
 
@@ -2779,7 +2797,7 @@ covers; no known leak remains but a long-soak kref/RCU audit is still worthwhile
 | R16 | Memory at 10 Gbps | `tx_window_bytes` bounds retention and the frame queue (`txq_max = tx_window + 8 chunks`) and sizes the carrier buffers from the same number; `rx_reorder_bytes` bounds the reorder tree per stream and per session; the 64 MiB delivery ring is the largest fixed cost and costs about 2× its payload in physical memory. Per session the bound is about 3× window + `rx_reorder_bytes` + 64 MiB per stream (§5.4). T8 measures the peak. |
 | R17 | Jitter adds RTT | The reorder tree is consulted only past a gap; the in-order path adds zero delay (T1 asserts). |
 | R18 | `inet_csk_reset_xmit_timer` etc. drift | Not used; stock timers only. |
-| R19 | Mixed wire revisions | Both wire revisions are hard-rejected: the first HELLO fails `tbt_hdr_check()` (0x0005 vs 0x0006), and a FEC record fails `tbt_fec_hdr_check()` (any older conv vs the current 0x1004). `rx_parse_proto`/`fec_proto_fail` make it visible. Upgrade both ends together; rollback is the previous binary. |
+| R19 | Mixed wire revisions | Both wire revisions are hard-rejected: the first HELLO fails `tbt_hdr_check()` (0x0005 vs 0x0006), and a FEC record fails `tbt_fec_hdr_check()` (any older conv vs the current 0x1005). `rx_parse_proto`/`fec_proto_fail` make it visible. Upgrade both ends together; rollback is the previous binary. |
 
 ---
 
@@ -2812,7 +2830,7 @@ controls do not apply; these replace them.
   cryptographic authentication in v0 — the tunnel is a transport, not a security boundary.
   Wrap in WireGuard if peers are untrusted.
 - **Body obfuscation, not confidentiality**: `crypto=on` (the default whenever
-  `fec=on`) ChaCha8-obfuscates only the FEC DATA/PARITY payload. The 40-byte
+  `fec=on`) ChaCha8-obfuscates only the FEC DATA/PARITY payload. The 48-byte
   FEC header, the HTTP headers, the chunk framing and every control record stay
   plaintext. With `crypto_key=` unset, the near side generates the 32-byte
   session key and sends it in the HELLO v6 body (`key_id=1`); with

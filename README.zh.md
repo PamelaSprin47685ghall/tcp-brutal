@@ -21,16 +21,21 @@
 
 FEC v6（`fec=on`）是可选的第二数据面：应用的字节流被切成 8 KiB 的 DATA share
 和 RLNC 校验 share，每条载体承载一个 share；接收端先用同一块内的校验 share
-恢复丢失的 share。最近 `K = 4` 个 super-block 内仍缺的 share 由 NACK 请求、
+恢复丢失的 share。最近 `K` 个 super-block 内仍缺的 share 由 NACK 请求
+（`K` 是 15 MiB 重放环能容纳的最大值，最多 64）、
 发送端从重放环重发；更老的丢失留在载体的 TCP 发送队列里，由 TCP 重传。
 它同时支持 `profile=raw` 和 HTTP chunk 容器：
-HTTP 档位下一个 chunk body 恰好是一条 40 字节 FEC 记录（`TBT_FEC_CONV=0x1004`；
+HTTP 档位下一个 chunk body 恰好是一条 48 字节 FEC 记录（`TBT_FEC_CONV=0x1005`；
 0.1.0 为 `0x1001`），请求行、头部和
 chunk 分帧保持明文。`mode=grouped` 把载体分成 `groups` 组，每组 `n` 个 DATA
 加 `m` 个校验，`carriers = groups * (n + m)`，最多 256 条；生产形状是
 32 组 `n=4, m=4`。`crypto=on`（`fec=on` 时的默认值）只对 DATA/PARITY 的
-负载做 ChaCha8 混淆，40 字节 FEC 头、HTTP 头部与控制帧仍是明文。
+负载做 ChaCha8 混淆，48 字节 FEC 头、HTTP 头部与控制帧仍是明文。
 `fec=off` 时旧的 ARQ 路径不变。
+
+同一时刻只有一个 FEC 流。前一个流关闭后的顺序新连接会重置 FEC RX/TX 状态、
+把窗口重定基到新流的第一个块，并关闭旧的 target socket；DATA/PARITY 携带
+stream id（`0x1005`），因此排队中的旧流记录不会进入新流。
 
 当前代码实现了 [DESIGN.md](DESIGN.md) 的 C1–C8，以及 FEC v6 grouped 数据面与
 256 载体扩展：`/proc` 控制面、监听器与远端、
@@ -84,15 +89,16 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.2.1`）。
+`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.2.2`）。
 线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x0006` 与 FEC 记录的
-`TBT_FEC_CONV=0x1004`，三者都与模块版本独立。
+`TBT_FEC_CONV=0x1005`，三者都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
 失败，其载体关闭；0x0004 的对端在第一个头部就会因为 conv 不匹配而被拒绝。
-当前 FEC wire 是 `0x1004`：`0x1002` 增加 FIN 的 16 字节 body
+当前 FEC wire 是 `0x1005`：`0x1002` 增加 FIN 的 16 字节 body
 （`pkt_end`/`pkt_base`）与 PARITY 空块 marker（`win_len=0`、
 `payload_len=0`、`epoch=0`）；`0x1003` 把 ACK 扩到 24 字节并加入
-`deliver_bytes`；`0x1004` 把 NACK 变成 64 字节位图修复请求。`0.1.0` 与
+`deliver_bytes`；`0x1004` 把 NACK 变成 64 字节位图修复请求；`0x1005`
+在头部 +32 加入 64 位 stream id，并把头部扩到 48 字节。`0.1.0`/`0.2.1` 与
 当前 wire 不互操作，首个 HELLO 即硬拒绝。
 `scripts/mkdkmsconf.sh` 派生
 `PACKAGE_VERSION="<major>.<minor>.<patch>"`；`dkms.conf` 是生成物，由
@@ -115,6 +121,7 @@ sudo insmod tbtun.ko debug_loss=0
 | `max_tunnels` | `64` | 最多可配置的隧道数；新 id 超过上限返回 `ENOSPC` |
 | `max_carriers` | `256` | 每个会话的载体槽，`1..256`；`n + m` 或 `carriers` 超过上限返回 `EINVAL` |
 | `debug_loss` | `0` | 是否允许写 `drop_ppm`（确定性丢包注入） |
+| `hold_enable` | `0` | 可选 BBR hold：50 ms carrier poll 在空闲期后恢复上次的 cwnd/pacing；默认关闭 |
 
 控制面只在 `init_net` 中创建；没有 per-netns 视图。
 卸载用 `sudo rmmod tbtun`。卸载会清空所有隧道，关闭所有监听端口和载体。
@@ -230,7 +237,7 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 接收端只有在跨度内每组的块都解码后才投递这个全局跨度。载体 `c` 永远承载
 组 `c / (n + m)` 的 share `c % (n + m)`；替换载体保持同一序号。
 
-默认档位是 `http-kal`，所以每条 40 字节 FEC 记录就是一个 HTTP chunk body，
+默认档位是 `http-kal`，所以每条 48 字节 FEC 记录就是一个 HTTP chunk body，
 请求行、头部和 chunk 分帧保持明文。`profile=raw` 去掉 HTTP 包装，记录本身不变。
 
 ## 能观测到什么
@@ -452,7 +459,7 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   `target=`、`srcaddrs=` 只接受 `a.b.c.d`；不做域名解析。
 - **默认不加密，也不认证；`crypto=on` 只是混淆。** `crypto=on`（`fec=on`
   时的默认值）对 FEC 的 DATA/PARITY 负载做 ChaCha8 混淆，目的是把应用字节
-  从朴素的 DPI 特征里藏起来；40 字节 FEC 头、HTTP 头部和控制帧仍是明文，
+  从朴素的 DPI 特征里藏起来；48 字节 FEC 头、HTTP 头部和控制帧仍是明文，
   而且没有认证。未配置 `crypto_key=` 时，近端生成 32 字节会话密钥并在
   HELLO v6 body 中明文发送（`key_id=1`），远端采纳；两端都配置
   `crypto_key=` 时 `key_id=0`，HELLO 的 key 字段为零，密钥不匹配表现为每个
@@ -464,13 +471,14 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   DATA share 加 `m` 个校验 share；接收端在块的校验足以解出缺失 share 时
   解码，然后按全局序号投递整个 super-block。修复有界：接收端用 NACK
   （记录类型 `0x33`）只为最近
-  `K = 4` 个 super-block 内最老的未完成块发 NACK，发送端从 9 MiB 重放环
+  `K` 个 super-block 内最老的未完成块发 NACK（`K` 是 15 MiB 重放环能容纳
+  的最大值，最多 64），发送端从该重放环
   在任意 up 且非 stalled 的载体重发。窗口内是 RTT 级修复（一次 NACK 往返
   加重放写入），不是 30 s 计时器。窗口外的丢失不发 NACK，留在载体 TCP
   发送队列里由 TCP 重传。就丢失恢复而言，只有所有 carrier TCP 都失败
   （没有 ESTABLISHED socket 且低于 `tcp_retries2=15`）或用户/对端关闭时才
   重置流；30 s FEC 计时器只重新计时。协议违规（乱序投递、坏头）仍然
-  fail-closed。每个 FEC 会话的重放环与 RX arena 是常数（9 MiB + 16 MiB），
+  fail-closed。每个 FEC 会话的重放环与 RX arena 是常数（15 MiB + 16 MiB），
   不随流长度增长。流的最后一块用零填充，
   真实长度放在校验的 `win_len`（FIN 偏移是第二来源），所以最后一段短包不会
   被当作填充投递。`fec=off` 时丢包靠重放环重传与重复发送修复，没有校验块或

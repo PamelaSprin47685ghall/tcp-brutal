@@ -5,26 +5,36 @@ and moves independently of the module version.
 
 ## [0.2.2] - 2026-11-08
 
+### Added
+
+- Opt-in BBR hold (`hold_enable=0`, module parameter, default off): the 50 ms
+  carrier poll restores the last good cwnd and pacing across an idle period
+  instead of letting the stack restart from the initial window. It is off by
+  default because it changes carrier behaviour; `host/test_hold` covers the
+  hold/release rules.
+
 ### Fixed
 
 - FEC DATA no longer leaves on a carrier whose OPEN for the current stream is
   not on the wire. The far drops DATA that arrives before its stream exists,
   and the sender has already consumed the share; the first connection could
-  lose its request and wait for the application timeout.
+  lose its request and wait for the application timeout. The far counts that
+  drop as `bind_drop_no_stream`.
 - A new stream resets the FEC RX delivery state (frontier, reorder blocks,
-  partial cursor, FIN bounds) before it is bound, so the previous stream's
-  reordered tail cannot be delivered to it.
+  partial cursor, FIN bounds) before it is bound, and rebases the window on
+  its own first block: `next_super`, `highest_block` and `next_deliver` follow
+  the new sid, while a lower block may only move the window before the new
+  stream's first delivery. The previous stream's reordered tail can no longer
+  be delivered to the new stream or leave it stuck behind a stale window.
 - FEC DATA/PARITY carry the 64-bit stream id in the record header
   (`TBT_FEC_CONV` 0x1005, 48-byte header). The receiver drops a share whose
   sid is not its current stream (or whose sid is the old barrier sid); the
   sender closes the old block and tags its records with the old sid, so a
-  queued old-stream record is never delivered to the new stream. Both ends
-  must run this wire version.
-
-## [0.3.0] - planned
-
-### Fixed
-
+  queued old-stream record is never delivered to the new stream.
+- Switching streams clears the old stream's FEC TX state before the new one
+  publishes, so no old-stream record is queued or sent under the new sid.
+- The old target socket is closed when its stream dies, so a sequential
+  connection cannot leave the previous target open or answer with HTTP/0.9.
 - A tunnel overwrite keeps the session crypto state. Each side adopts the
   peer's key and TX nonce from the first HELLO and refuses a different one on
   every later carrier, but the replaced session's last HELLOs and the
@@ -35,6 +45,18 @@ and moves independently of the module version.
   near side also inherits the key it generated and announced. Only a new
   tunnel, or a delete and re-add, generates fresh crypto state. The
   `crypto_key=` path is unchanged.
+
+### Verification
+
+- 32 carriers: join and first connect reached 78/72 Mbit/s; a sequential
+  stream aborted and replaced delivered 92.7 MB in 15 s with no HTTP/0.9
+  response, `fec_drop_window=0` and no stuck stream. The 32-carrier short test
+  ran at 32.1 Mbit/s with no regression.
+- Wire: `TBT_FEC_CONV` 0x1005 and the 48-byte header are not compatible with
+  0.2.1 (0x1004, 40-byte header); both ends must be upgraded together.
+  `hold_enable` is opt-in and off by default.
+
+## [0.3.0] - planned
 
 ### Deferred from 0.2.0
 
