@@ -52,6 +52,14 @@ bool tbt_hold_enable = true;
 module_param_named(hold_enable, tbt_hold_enable, bool, 0644);
 MODULE_PARM_DESC(hold_enable, "Hold BBR cwnd/pacing across idle periods (default 1; 0=off)");
 
+/* FEC v7 multi-stream: cap the physical groups one flow may own. 0 keeps the
+ * single-stream behaviour (the first flow owns every group and a second flow
+ * is refused with -ENOSPC). Set it to total_groups/N to run N concurrent
+ * streams; e.g. 16 on a 256-carrier n=4,m=4 tunnel admits two flows. */
+unsigned int tbt_fec_groups_per_flow;
+module_param_named(fec_groups_per_flow, tbt_fec_groups_per_flow, uint, 0444);
+MODULE_PARM_DESC(fec_groups_per_flow, "Max FEC groups per flow (0 = all groups; 16 = two flows on 256 carriers)");
+
 // The wire header is defined field by field in DESIGN.md §3.3; a compiler that
 // pads it differently would produce bytes that no peer can parse. Checked at
 // build time, so a layout change cannot reach a running module.

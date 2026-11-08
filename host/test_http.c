@@ -2330,6 +2330,8 @@ static void test_pad_drip(void)
 /* ------------------------------------------------------------------------- */
 /* Cadence.                                                                   */
 
+static u8 open_body[TBT_OPEN_BODY_LEN];
+
 static int make_valid_hdr(u8 type, u16 len, struct tbt_hdr *h)
 {
     memset(h, 0, sizeof(*h));
@@ -2345,7 +2347,13 @@ static int make_valid_hdr(u8 type, u16 len, struct tbt_hdr *h)
     case TBT_F_DATA:
         break;
     case TBT_F_OPEN:
+        if (len != TBT_OPEN_BODY_LEN)
+            return 0;
+        break;
     case TBT_F_FIN:
+        if (len != TBT_FIN_BODY_LEN)
+            return 0;
+        break;
     case TBT_F_RST:
         if (len != 0)
             return 0;
@@ -2481,9 +2489,9 @@ static void test_frame_codec(void)
         memcpy(stream + o, req_hdr, hlen);
         o += hlen;
 
-        make_valid_hdr(TBT_F_OPEN, 0, &h);
+        make_valid_hdr(TBT_F_OPEN, TBT_OPEN_BODY_LEN, &h);
         out.hdr = &h;
-        out.body = NULL;
+        out.body = open_body;
         n = tbt_http_frame_encode(stream + o, sizeof(stream) - o, &out);
         o += n;
         n = tbt_http_chunk_hdr(stream + o, sizeof(stream) - o, 0);
@@ -2573,20 +2581,22 @@ static void test_frame_codec(void)
     /* Two records in one chunk. */
     {
         struct tbt_hdr h1, h2;
-        char r1[TBT_HDR_LEN], r2[TBT_HDR_LEN];
-        char two[128];
+        char r1[TBT_HDR_LEN], r2[TBT_HDR_LEN + TBT_OPEN_BODY_LEN];
+        char two[160];
         size_t o = 0;
 
         make_valid_hdr(TBT_F_DATA, 0, &h1);
-        make_valid_hdr(TBT_F_OPEN, 0, &h2);
+        make_valid_hdr(TBT_F_OPEN, TBT_OPEN_BODY_LEN, &h2);
         tbt_hdr_encode((u8 *)r1, &h1);
         tbt_hdr_encode((u8 *)r2, &h2);
-        n = tbt_http_chunk_hdr(two, sizeof(two), 2 * TBT_HDR_LEN);
+        memset(r2 + TBT_HDR_LEN, 0, TBT_OPEN_BODY_LEN);
+        n = tbt_http_chunk_hdr(two, sizeof(two),
+                               2 * TBT_HDR_LEN + TBT_OPEN_BODY_LEN);
         o = n;
         memcpy(two + o, r1, TBT_HDR_LEN);
         o += TBT_HDR_LEN;
-        memcpy(two + o, r2, TBT_HDR_LEN);
-        o += TBT_HDR_LEN;
+        memcpy(two + o, r2, TBT_HDR_LEN + TBT_OPEN_BODY_LEN);
+        o += TBT_HDR_LEN + TBT_OPEN_BODY_LEN;
         n = tbt_http_chunk_tail(two + o, sizeof(two) - o);
         o += n;
         tbt_http_rx_new_message(&rx);
@@ -2657,9 +2667,9 @@ static void test_frame_codec(void)
         o += n;
         n = tbt_http_drip_chunk(stream + o, sizeof(stream) - o);
         o += n;
-        make_valid_hdr(TBT_F_OPEN, 0, &h);
+        make_valid_hdr(TBT_F_OPEN, TBT_OPEN_BODY_LEN, &h);
         out.hdr = &h;
-        out.body = NULL;
+        out.body = open_body;
         n = tbt_http_frame_encode(stream + o, sizeof(stream) - o, &out);
         o += n;
         n = tbt_http_chunk_hdr(stream + o, sizeof(stream) - o, 0);
