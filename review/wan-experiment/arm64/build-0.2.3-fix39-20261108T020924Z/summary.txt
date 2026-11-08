@@ -1,0 +1,84 @@
+fix39 build (both ends) and far 256 deployment — summary
+=========================================================
+UTC window      : 2026-11-08T02:09:24Z .. 2026-11-08T02:12Z
+source          : HEAD a6eb228a62f0e653998f77d3372fe3ad48a718d1
+                  "feat: enable the BBR hold by default"
+parent commit   : 3d235d7 (bench: record the 0.2.2 first-connect evidence
+                  and the fix38 build)
+clean tree      : git archive HEAD -> /tmp/tbtun-fix39-clean-20261108T020924Z
+                  2407 files, no .git, no worktree changes
+source fingerprint (tbtun+host *.c/*.h/*.py/*.sh):
+                  adeb78ee87e2a606118a87c10ee6651b80f37654cd0be2de735b27e6af4dd9d5
+                  identical on the workstation clean tree, far build tree and
+                  near build tree (53 files compared one by one: no diff)
+version note    : TBT_VERSION_MAJOR 0, MINOR 2, PATCH 2 -> MODULE_VERSION
+                  0.2.2; the build-dir prefix 0.2.3-fix39 is the requested
+                  name, the module version stays 0.2.2 until a bump commit
+
+what this commit carries (a6eb228)
+- hold_enable is on by default: tbtun/tbt_core.c:51
+  `bool tbt_hold_enable = true;` and the param description at :53 says
+  "(default 1; 0=off)". tbtun/tbt_carrier.c:438 reads it in the 50 ms
+  carrier poll. host/test_hold.c asserts the default and the opt-out.
+
+far (hnd0.kw92.cyou, root@45.11.1.62, 7.0.0-42-generic x86_64)
+  build dir     /root/tbtun-0.2.3-fix39-20261108T020924Z
+  build         rm -f Module.symvers && make -C /lib/modules/$(uname -r)/build M=$PWD modules -j2
+  make_rc       0 (69 log lines, 11 warnings: 9 frame-size + 2 toolchain, 0 errors)
+  sha256        4b652f3a46f4fbac0e51983fb4d3eb269027ee2a212c85fe1c2dc9e3f725465b
+  srcversion    02ABBA67E2B39C4CE23EC65
+  vermagic      7.0.0-42-generic SMP preempt mod_unload modversions
+  version       0.2.2, size 8805544
+
+near (192.168.123.82, lubancat, 6.1.172 aarch64)
+  build dir     /root/tbtun-0.2.3-fix39-20261108T020924Z
+  make_rc       0 (23 log lines, 1 toolchain warning, 0 errors)
+  sha256        7716e743371be04b26c8a22eb5820162de7b389c8a6b7f7bea56a132d0dc1af7
+  srcversion    1D8B6C0D0981A4D87FD0535
+  vermagic      6.1.172 SMP mod_unload modversions aarch64
+  version       0.2.2, size 349832
+  module path   /root/tbtun-0.2.3-fix39-20261108T020924Z/tbtun.ko
+  loaded        no load performed by this worker; the host had no tbtun
+                loaded at build time; local-near loads fix39
+
+far deployment
+  pre           fix38 loaded (version 0.2.1, srcversion 14710CD8...,
+                hold_enable=N); c3 n=32 up=0; 5210 raw sender python3
+                pid 304166
+  teardown      rmmod rc=0; /proc/net/tbtun gone; 9000 free; raw sender
+                untouched
+  insmod        /root/tbtun-0.2.3-fix39-20261108T020924Z/tbtun.ko
+                max_carriers=256 max_tunnels=1 debug=0 rc=0
+  loaded        version 0.2.2, srcversion 02ABBA67E2B39C4CE23EC65, refcnt=0,
+                debug=0, max_carriers=256, max_tunnels=1, hold_enable=Y
+                (the new default)
+  ports         printf 'ports 31000-31511\n' > /proc/net/tbtun/ports; rc=0
+  config        256 carriers, written line:
+                tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5210
+                n=4 m=4 fec=on mode=grouped w=8 carriers=256 crypto=on
+                crypto_key=- dup=1 profile=http-kal keepalive=5000
+                drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000
+                hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0
+                tx_retain_bytes=0 portblock=31000-31511
+                nonce=00112233445566778899aabbccddeeff
+                Readback renders carrier_stall_ms=0, no dev=, and
+                rx_reorder_bytes=16777216 (the documented auto-raise from
+                tbt_tx.c:813-814 for the 256-carrier window).
+  listen        0.0.0.0:9000 (tbtun) and 127.0.0.1:5210 (python3 pid 304166)
+  tunnels       id=1 role=far listening target=127.0.0.1:5210 n=4 m=4 streams=0
+  c3            n=256 up=0 at t0 (02:10:55Z)
+  c10/c11/c12   all zero at t0
+  ubsan/warnings tbtun_warning=0, kernel_warn=0 (dmesg from the load: only
+                "unloaded", "tbtun 0.2.2 loaded", one backpressure line)
+  t20           02:11:16Z: version 0.2.2, srcversion 02ABBA67..., debug=0,
+                hold_enable=Y, refcnt=0, c3 n=256 up=0, 9000/5210
+                listening, kernel_warn=0
+
+not done (by instruction)
+  no 1 GiB transfer, no DKMS run; near was built only (local-near loads it).
+
+evidence
+  review/wan-experiment/arm64/build-0.2.3-fix39-20261108T020924Z/
+    far-build-identity.txt, near-build-identity.txt, near-build-live.txt,
+    near-grep-evidence.txt, deploy/far-deploy.txt,
+    deploy/far-final-state.txt, summary.txt

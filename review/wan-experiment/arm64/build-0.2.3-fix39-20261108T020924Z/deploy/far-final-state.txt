@@ -1,0 +1,38 @@
+=== far fix39 state 2026-11-08T02:10:55Z ===
+--- module ---
+tbtun                 372736  0
+version=0.2.2
+srcversion=02ABBA67E2B39C4CE23EC65
+refcnt=0
+debug=0
+max_carriers=256
+max_tunnels=1
+hold_enable=Y
+--- listen ---
+LISTEN 0      8          127.0.0.1:5210       0.0.0.0:*    users:(("python3",pid=304166,fd=3))                   
+LISTEN 0      128          0.0.0.0:9000       0.0.0.0:*                                                          
+--- config ---
+tunnel 1 role=far listen=0.0.0.0:9000 target=127.0.0.1:5210 n=4 m=4 fec=on mode=grouped w=8 carriers=256 crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=16777216 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0 portblock=31000-31511 nonce=00112233445566778899aabbccddeeff
+--- tunnels ---
+# id role state listen peer target n m streams
+1 far listening 0.0.0.0:9000 0.0.0.0:0 127.0.0.1:5210 4 4 0
+--- c3 ---
+n=256 up=0
+--- c10/c11/c12 nonzero ---
+(blank=all zero)
+--- ubsan/warning ---
+tbtun_warning=0
+kernel_warn=0
+--- dmesg since load ---
+[153922.459228] tbtun: unloaded
+[153922.823876] tbtun 0.2.2 loaded: 1 tunnels max, 256 carriers max
+[153923.594208] tbtun: tunnel 1 no carrier can carry: user side backpressured
+t20 2026-11-08T02:11:16Z
+0.2.2
+02ABBA67E2B39C4CE23EC65
+0
+Y
+0
+n=256 up=0
+LISTEN 0      8          127.0.0.1:5210       0.0.0.0:*    users:(("python3",pid=304166,fd=3))                   
+LISTEN 0      128          0.0.0.0:9000       0.0.0.0:*                                                          
