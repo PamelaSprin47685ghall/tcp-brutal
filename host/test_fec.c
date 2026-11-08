@@ -118,7 +118,7 @@ static int hdr_eq(const struct tbt_fec_hdr *a, const struct tbt_fec_hdr *b)
            a->epoch == b->epoch && a->block_id == b->block_id && a->seq == b->seq &&
            a->win_len == b->win_len && a->payload_len == b->payload_len &&
            a->conv == b->conv && a->reserved == b->reserved &&
-           a->payload_crc32c == b->payload_crc32c &&
+           a->sid == b->sid && a->payload_crc32c == b->payload_crc32c &&
            a->header_crc32c == b->header_crc32c;
 }
 
@@ -151,6 +151,7 @@ static void test_header_roundtrip(void)
     lo.payload_len = 0;
     lo.conv = TBT_FEC_CONV;
     lo.reserved = 0;
+    lo.sid = 0;
     lo.payload_crc32c = 0;
     lo.header_crc32c = 0;
     hdr_roundtrip("header low boundary", &lo);
@@ -168,6 +169,7 @@ static void test_header_roundtrip(void)
     hi.payload_len = 8192;
     hi.conv = TBT_FEC_CONV;
     hi.reserved = 0;
+    hi.sid = ~(u64)0;
     hi.payload_crc32c = 0xdeadbeefu;
     hi.header_crc32c = 0x12345678u;
     hdr_roundtrip("header high boundary", &hi);
@@ -187,6 +189,7 @@ static void test_header_roundtrip(void)
     le.payload_len = 0x2000; /* 8192 */
     le.conv = TBT_FEC_CONV;
     le.reserved = 0;
+    le.sid = 0x8877665544332211ULL;
     le.payload_crc32c = 0xdeadbeefu;
     le.header_crc32c = 0x12345678u;
 
@@ -202,18 +205,20 @@ static void test_header_roundtrip(void)
     ok_u16le(wire + TBT_FEC_H_PAYLEN, le.payload_len, "payload_len at +26");
     ok_u16le(wire + TBT_FEC_H_CONV, le.conv, "conv at +28");
     ok_u16le(wire + TBT_FEC_H_RESERVED, le.reserved, "reserved at +30");
-    ok_u32le(wire + TBT_FEC_H_PAYCRC, le.payload_crc32c, "payload_crc at +32");
-    ok_u32le(wire + TBT_FEC_H_HDRCRC, le.header_crc32c, "header_crc at +36");
+    ok_u64le(wire + TBT_FEC_H_SID, le.sid, "sid at +32");
+    ok_u32le(wire + TBT_FEC_H_PAYCRC, le.payload_crc32c, "payload_crc at +40");
+    ok_u32le(wire + TBT_FEC_H_HDRCRC, le.header_crc32c, "header_crc at +44");
 
     /* The offsets themselves are part of the ABI. */
-    ok(TBT_FEC_HDR_LEN == 40 && TBT_FEC_H_TYPE == 0 && TBT_FEC_H_FLAGS == 1 &&
+    ok(TBT_FEC_HDR_LEN == 48 && TBT_FEC_H_TYPE == 0 && TBT_FEC_H_FLAGS == 1 &&
            TBT_FEC_H_SHARE == 2 && TBT_FEC_H_N == 4 && TBT_FEC_H_M == 5 &&
            TBT_FEC_H_EPOCH == 6 && TBT_FEC_H_BLOCK == 8 && TBT_FEC_H_SEQ == 16 &&
            TBT_FEC_H_WINLEN == 24 && TBT_FEC_H_PAYLEN == 26 && TBT_FEC_H_CONV == 28 &&
-           TBT_FEC_H_RESERVED == 30 && TBT_FEC_H_PAYCRC == 32 && TBT_FEC_H_HDRCRC == 36,
+           TBT_FEC_H_RESERVED == 30 && TBT_FEC_H_SID == 32 &&
+           TBT_FEC_H_PAYCRC == 40 && TBT_FEC_H_HDRCRC == 44,
        "header offsets", NULL);
-    /* 0x1003 grows the ACK body to 24 bytes and adds deliver_bytes. */
-    ok(TBT_FEC_CONV == 0x1004u, "TBT_FEC_CONV", NULL);
+    /* 0x1005 adds the stream sid and grows the header to 48 bytes. */
+    ok(TBT_FEC_CONV == 0x1005u, "TBT_FEC_CONV", NULL);
 
     /* NULL arguments are refused, not dereferenced. */
     ok_int(tbt_fec_hdr_pack(NULL, wire), -EINVAL, "pack NULL header");
@@ -2042,7 +2047,8 @@ static void test_replay(void)
            "replay group out of range");
     ok_int(tbt_fec_replay_store(r, 7, 0, 6, rec, len), -EINVAL,
            "replay share out of range");
-    ok_int(tbt_fec_replay_store(r, 7, 0, 0, rec, 105), -EINVAL,
+    ok_int(tbt_fec_replay_store(r, 7, 0, 0, rec,
+                                TBT_FEC_HDR_LEN + 64 + 1), -EINVAL,
            "replay record too long");
     /* A block K later reuses the slot: the old block is gone. */
     ok_int(tbt_fec_replay_store(r, 7 + k, 1, 5, rec, len), 0,

@@ -1,4 +1,4 @@
-/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x1004), control frames, and the
+/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x1005), control frames, and the
  * GF(2) sliding-window RLNC codec.
  *
  * This file and tbt_fec.c compile twice: into the module and into the host
@@ -13,7 +13,7 @@
  * and update the host test vectors in the same commit.
  *
  * Scope:
- *   - 40-byte share header: pack/unpack, structural checks, both CRCs.
+ *   - 48-byte share header: pack/unpack, structural checks, both CRCs.
  *   - 256-bit carrier bitmap (32 bytes), independent of the old u16
  *     path_ack_mask.
  *   - ACK / NACK / FEC_CFG / FEC_FBK control bodies.
@@ -39,7 +39,7 @@
 #define TBT_FEC_S TBT_FEC_PAYLOAD_MAX
 
 /* ------------------------------------------------------------------ *
- * 40-byte share header
+ * 48-byte share header
  * ------------------------------------------------------------------ */
 
 struct tbt_fec_hdr
@@ -56,8 +56,11 @@ struct tbt_fec_hdr
     u16 payload_len;
     u16 conv;
     u16 reserved;
+    /* DATA/PARITY only: the stream this share belongs to. The receiver drops
+     * a share whose sid is not its current stream; control records carry 0. */
+    u64 sid;
     u32 payload_crc32c; /* payload only */
-    u32 header_crc32c;  /* header bytes +0..+35, this field excluded */
+    u32 header_crc32c;  /* header bytes +0..+43, this field excluded */
 };
 
 /* Pack h into out[40] (little-endian). Returns 0, or -EINVAL for a NULL
@@ -129,8 +132,20 @@ void tbt_fec_bitmap_clear(u8 bm[TBT_FEC_BITMAP_BYTES], u16 index);
 bool tbt_fec_bitmap_test(const u8 bm[TBT_FEC_BITMAP_BYTES], u16 index);
 u16 tbt_fec_bitmap_count(const u8 bm[TBT_FEC_BITMAP_BYTES]);
 
+/* May a DATA/PARITY record with sid `rec` enter the current stream? `cur` is
+ * the session's current far_sid; `barrier` is the old stream id installed by
+ * tbt_session_fec_rx_barrier() before the new far_sid. A record from the old
+ * sid must be dropped even while `cur` still names it, and a record from any
+ * other sid after the switch must be dropped too. */
+static inline bool tbt_fec_sid_accept(u64 cur, u64 barrier, u64 rec)
+{
+    if (!cur || (barrier && cur == barrier))
+        return false;
+    return rec == cur;
+}
+
 /* ------------------------------------------------------------------ *
- * Control bodies (payload after the 40-byte header)
+ * Control bodies (payload after the 48-byte header)
  * ------------------------------------------------------------------ */
 
 struct tbt_fec_ack

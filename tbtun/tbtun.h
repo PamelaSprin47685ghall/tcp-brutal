@@ -675,6 +675,17 @@ struct tbt_fec_tx
     u64 short_at_ns;
     u16 groups, n, m, s;
     u64 cur_block; /* block being built, shared by every group */
+    /* Stream that owns the block being built. A stream switch closes the old
+     * block and tags its records with this sid; the receiver drops a DATA or
+     * PARITY record whose sid is not its current stream. */
+    u64 cur_block_sid;
+    /* First submit of a new stream: the ring head at the boundary and the new
+     * sid. The packetizer drops [tail, switch_to) and fill before reading. */
+    u32 switch_to;
+    u64 switch_sid;
+    /* Last stream that submitted bytes into the ring. A change records the
+     * boundary even before the packetizer has built the first block. */
+    u64 last_submit_sid;
     /* Last share the packetizer built or queued. Diagnostics only: the
      * TXSTALLKILL log reads it to name the share that was in flight. The TX
      * work is the only writer; a u16 store/load is atomic. */
@@ -740,6 +751,9 @@ struct tbt_fec_rx
      * delivery walk and NACK scan wait, and the first record sets the new
      * next_super/next_deliver base. */
     bool stream_await;
+    /* The old stream id installed by tbt_session_fec_rx_barrier(). While
+     * far_sid still names it, every DATA/PARITY record is stale. */
+    u64 barrier_sid;
     u64 ack_deliver;  /* last frontier sent in an ACK */
     u64 total_pkts;   /* stream packet count; valid when total_known */
     u64 total_bytes;  /* FIN's byte offset; 0 when only LAST named the end */
@@ -1188,7 +1202,7 @@ struct tbt_session
      * exactly like a damaged body, and this counter is the only thing that
      * separates "the key is wrong" from "the peer is silent". */
     atomic64_t fec_proto_fail;      /* header unpack/field check failed */
-    atomic64_t fec_hdr_crc_fail;    /* 40-byte header CRC mismatch */
+    atomic64_t fec_hdr_crc_fail;    /* 48-byte header CRC mismatch */
     atomic64_t fec_payload_crc_fail; /* body CRC mismatch: share dropped */
     /* A partial packet the packetizer flushed because the application went
      * quiet, and a block the receiver had to refuse because it held one of
@@ -1317,6 +1331,7 @@ struct tbt_session
     atomic64_t fec_deliver_bad;       /* delivery offset overflow */
     atomic64_t fec_dup_share;         /* share for a slot already present */
     atomic64_t fec_late_share;        /* share for a block already ready */
+    atomic64_t fec_drop_sid;          /* share from a non-current stream */
     atomic64_t fec_late_data;         /* late DATA whose slot is still absent */
     atomic64_t fec_pad_share;         /* empty-block marker received */
     atomic64_t fec_dup_marker;        /* replayed marker for a settled block */

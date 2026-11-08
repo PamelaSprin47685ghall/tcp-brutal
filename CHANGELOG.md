@@ -3,6 +3,24 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.2.2] - 2026-11-08
+
+### Fixed
+
+- FEC DATA no longer leaves on a carrier whose OPEN for the current stream is
+  not on the wire. The far drops DATA that arrives before its stream exists,
+  and the sender has already consumed the share; the first connection could
+  lose its request and wait for the application timeout.
+- A new stream resets the FEC RX delivery state (frontier, reorder blocks,
+  partial cursor, FIN bounds) before it is bound, so the previous stream's
+  reordered tail cannot be delivered to it.
+- FEC DATA/PARITY carry the 64-bit stream id in the record header
+  (`TBT_FEC_CONV` 0x1005, 48-byte header). The receiver drops a share whose
+  sid is not its current stream (or whose sid is the old barrier sid); the
+  sender closes the old block and tags its records with the old sid, so a
+  queued old-stream record is never delivered to the new stream. Both ends
+  must run this wire version.
+
 ## [0.3.0] - planned
 
 ### Fixed

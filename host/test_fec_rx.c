@@ -1143,6 +1143,20 @@ static size_t sup_deliver(const struct sup *sp, u64 *next_super,
     return off;
 }
 
+/* tbt_fec_sid_accept(): a DATA/PARITY record belongs to exactly one stream.
+ * The old stream may still be in flight after the new one is bound. */
+static void test_sid_filter(void)
+{
+    ok(!tbt_fec_sid_accept(0, 0, 0), "sid: no stream refuses DATA");
+    ok(tbt_fec_sid_accept(7, 0, 7), "sid: the current stream accepts");
+    ok(!tbt_fec_sid_accept(7, 0, 6), "sid: another stream refuses");
+    ok(!tbt_fec_sid_accept(7, 7, 7), "sid: the barrier's old sid refuses");
+    ok(tbt_fec_sid_accept(8, 7, 8),
+       "sid: the new stream accepts after the barrier");
+    ok(!tbt_fec_sid_accept(8, 7, 7),
+       "sid: an old record after the switch refuses");
+}
+
 /* tbt_fec_rx_stream_reset(): after an abort, the old stream's reorder block
  * must be dropped and the new stream must start at its own super-block. The
  * first byte the application sees is HTTP/, never the old body. */
@@ -1969,6 +1983,7 @@ int main(void)
     test_parity_rotation();
     test_marker_retry();
     test_super_cursor();
+    test_sid_filter();
     test_stream_reset_isolation();
     test_ack_split();
     test_rx_poll();

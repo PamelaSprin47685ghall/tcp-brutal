@@ -9,7 +9,7 @@
  *   - a block is n DATA packets followed by m parity packets; the codec is the
  *     host-tested GF(2) RLNC in tbt_fec.c, reused with a per-group, per-block
  *     nonce;
- *   - both containers: raw records, or one 40-byte record per HTTP chunk.
+ *   - both containers: raw records, or one 48-byte record per HTTP chunk.
  *
  * The capture actor runs in softirq: tbt_fec_tx_submit only copies bytes into
  * a ring and schedules a work item. Packetization, encoding, and socket writes
@@ -140,7 +140,7 @@ static bool tbt_fec_any_tcp_alive(struct tbt_session *sess)
 /* Both ends derive the same coefficients from the configured parameters. The
  * session nonce is not available on the far side until HELLO, and FEC state is
  * built before that; a fixed base keeps sender and receiver aligned. FEC_CFG
- * can carry a negotiated seed later without changing the 40-byte header. */
+ * can carry a negotiated seed later without changing the 48-byte header. */
 static u64 tbt_fec_base_nonce(const struct tbt_session *sess)
 {
     (void)sess;
@@ -1146,7 +1146,7 @@ static int tbt_fec_make_record(struct tbt_session *sess, struct tbt_fec_hdr *h,
     if (h->payload_len)
         memcpy(out + TBT_FEC_HDR_LEN, payload, h->payload_len);
     /* The payload CRC above covers the clear bytes (T0 §2.2). Only DATA and
-     * PARITY are transformed; the 40-byte header stays clear. The TX work is
+     * PARITY are transformed; the 48-byte header stays clear. The TX work is
      * serialized and only runs once the TX context is ready. */
     if (sess->crypto &&
         (h->type == TBT_FEC_DATA || h->type == TBT_FEC_PARITY))
@@ -1241,6 +1241,7 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess, u16 group,
         h.payload_len = TBT_FEC_S;
         h.epoch = (u16)(g->last_len && g->last_len < TBT_FEC_S ? g->last_len : 0);
         h.conv = TBT_FEC_CONV;
+        h.sid = tx->cur_block_sid;
         if (tbt_fec_make_record(sess, &h, tx->parity_ptrs[i], tx->rec, &rec_len))
             continue;
         WRITE_ONCE(tx->last_group, group);
@@ -1292,6 +1293,7 @@ static void tbt_fec_tx_emit_empty(struct tbt_session *sess, u16 group,
     h.payload_len = 0;
     h.epoch = 0;
     h.conv = TBT_FEC_CONV;
+    h.sid = tx->cur_block_sid;
     if (tbt_fec_make_record(sess, &h, NULL, tx->rec, &rec_len))
         return;
     WRITE_ONCE(tx->last_group, group);
@@ -1413,6 +1415,8 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_stream *st,
 
     if (!tx->fill && !last)
         return;
+    if (!tx->cur_block_sid)
+        tx->cur_block_sid = st->sid;
     len = tx->fill;
     seq = tx->seq++;
     group = (u16)(seq % tx->groups);
@@ -1462,6 +1466,7 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_stream *st,
      * share that carried it overwrote the block's last-share length. */
     h.epoch = 0;
     h.conv = TBT_FEC_CONV;
+    h.sid = tx->cur_block_sid;
     if (!tbt_fec_make_record(sess, &h, tx->pkt, rec, &rec_len))
     {
         WRITE_ONCE(tx->last_group, group);
@@ -1617,6 +1622,47 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
             tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
         return;
     }
+    /* A stream switch owns the block being built: close it so the old
+     * stream's parity is tagged with its own sid, drop its un-packetized
+     * bytes, and start the new stream on a fresh block. */
+    if ((tx->cur_block_sid && tx->cur_block_sid != st->sid) ||
+        (tx->switch_sid && tx->switch_sid == st->sid))
+    {
+        u32 drop_to = 0;
+        bool switched = false;
+
+        spin_lock(&tx->lock);
+        if (tx->switch_sid == st->sid)
+        {
+            drop_to = tx->switch_to;
+            tx->switch_sid = 0;
+            switched = true;
+        }
+        else if (!tx->switch_sid)
+        {
+            /* The packetizer ran before the first submit of the new stream:
+             * the ring holds only the old stream's bytes. */
+            drop_to = tx->head;
+            switched = true;
+        }
+        if (switched)
+        {
+            tx->tail = drop_to;
+            tx->fill = 0;
+        }
+        spin_unlock(&tx->lock);
+        if (switched)
+        {
+            if (tx->cur_block_sid && tx->cur_block_sid != st->sid)
+            {
+                u64 start = tx->cur_block * (u64)tx->n * tx->groups;
+
+                if (tx->seq > start)
+                    tbt_fec_tx_close_block(sess, true);
+            }
+            tx->cur_block_sid = st->sid;
+        }
+    }
     /* A closing stream caps replay admission at
      * TBT_FEC_REPLAY_CLOSE_BYTES_MAX: the last block's repair must fit the
      * close budget, so an older backlog must not refill the queue. */
@@ -1749,6 +1795,18 @@ size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,
     if (!tx)
         return 0;
     spin_lock(&tx->lock);
+    /* First submit of a new stream: remember where its bytes begin. The
+     * packetizer drops the old stream's raw ring prefix and fill. The
+     * last_submit_sid check also covers the case where the old stream's
+     * bytes were submitted before the packetizer ever built a block. */
+    if (!tx->last_submit_sid)
+        tx->last_submit_sid = st->sid;
+    else if (tx->last_submit_sid != st->sid && !tx->switch_sid)
+    {
+        tx->switch_to = tx->head;
+        tx->switch_sid = st->sid;
+        tx->last_submit_sid = st->sid;
+    }
     take = tbt_fec_ring_put(tx, skb, off, (u32)min_t(size_t, len, U32_MAX));
     if (take)
     {
@@ -1971,8 +2029,8 @@ static int tbt_fec_blk_decode(struct tbt_session *sess, u16 group,
  * deliver_bytes is the stream-relative byte count this receiver has actually
  * handed over; it is the only value the sender may use as tx_ack, because a
  * packet frontier can name bytes that no delivered share carried. */
-static void tbt_fec_ack(struct tbt_session *sess, u64 next_deliver,
-                        u64 deliver_bytes)
+static void tbt_fec_ack(struct tbt_session *sess, struct tbt_stream *st,
+                        u64 next_deliver, u64 deliver_bytes)
 {
     struct tbt_fec_hdr h;
     struct tbt_fec_ack a;
@@ -2005,6 +2063,7 @@ static void tbt_fec_ack(struct tbt_session *sess, u64 next_deliver,
     h.seq = next_deliver;
     h.payload_len = TBT_FEC_ACK_LEN;
     h.conv = TBT_FEC_CONV;
+    h.sid = st ? st->sid : 0;
     if (tbt_fec_make_record(sess, &h, body, rec, &len))
         return;
     if (tbt_fec_send_record(sess, 0, rec, len, true, false))
@@ -2028,6 +2087,13 @@ static int tbt_fec_send_nack(struct tbt_session *sess, u64 block_id,
     h.block_id = block_id;
     h.payload_len = TBT_FEC_NACK_LEN;
     h.conv = TBT_FEC_CONV;
+    {
+        struct tbt_stream *st = tbt_fec_stream(sess);
+
+        h.sid = st ? st->sid : 0;
+        if (st)
+            tbt_stream_put(st);
+    }
     /* tbt_fec_nack_pack() returns the positive body length on success. Only
      * a negative value is an error; treating 64 as an error kept every NACK
      * off the wire (fec_nack_tx=0, fec_nack_drop climbing). */
@@ -2073,6 +2139,7 @@ static int tbt_fec_send_empty_marker(struct tbt_session *sess, u16 group,
     h.payload_len = 0;
     h.epoch = 0;
     h.conv = TBT_FEC_CONV;
+    h.sid = tx->cur_block_sid;
     if (tbt_fec_make_record(sess, &h, NULL, rec, &len))
         return -EINVAL;
     /* The reply is built fresh every time and is never stored: a marker for
@@ -2191,7 +2258,6 @@ static void tbt_fec_rx_stream_reset(struct tbt_session *sess, u64 sid)
     u64 old_high;
     u32 total, i;
 
-    (void)sid;
     if (!rx)
         return;
     spin_lock_bh(&rx->lock);
@@ -2215,6 +2281,7 @@ static void tbt_fec_rx_stream_reset(struct tbt_session *sess, u64 sid)
     rx->ack_deliver = 0;
     rx->highest_block = old_high;
     rx->stream_await = true;
+    rx->barrier_sid = sid;
     rx->next_fin_sid = 0;
     rx->next_fin_end = 0;
     rx->next_fin_base = 0;
@@ -2699,7 +2766,7 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
          * tx_ack and every retention decision use. They are not
          * interchangeable: a block closed early, or a share whose payload is
          * shorter than S, leaves the frontier ahead of the bytes. */
-        tbt_fec_ack(sess, rx->next_deliver, stream_bytes);
+        tbt_fec_ack(sess, st, rx->next_deliver, stream_bytes);
     }
     if (blocked)
     {
@@ -3456,6 +3523,19 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
          * never decrypt the same buffer twice. */
         if (READ_ONCE(rx->stopping))
             return -ESHUTDOWN;
+        /* A DATA/PARITY record belongs to exactly one stream. The old stream
+         * may still be in flight after a new one is bound (or while far_sid
+         * still names it during the barrier); it must never enter the new
+         * stream's reorder tree. */
+        if ((h.type == TBT_FEC_DATA || h.type == TBT_FEC_PARITY ||
+             h.type == TBT_FEC_ACK || h.type == TBT_FEC_NACK) &&
+            h.sid &&
+            !tbt_fec_sid_accept(READ_ONCE(sess->far_sid),
+                                READ_ONCE(rx->barrier_sid), h.sid))
+        {
+            atomic64_inc(&sess->fec_drop_sid);
+            return 0;
+        }
         /* A duplicate record must be dropped before decryption. The record
          * buffer is decrypted in place; a second pass XORs the plaintext and
          * fails the payload CRC, which looks like wire corruption and hides

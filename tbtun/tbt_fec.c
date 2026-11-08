@@ -134,7 +134,7 @@ static u64 tbt_get_u64(const u8 *p)
 }
 
 /* ------------------------------------------------------------------ *
- * 40-byte header
+ * 48-byte header
  * ------------------------------------------------------------------ */
 
 int tbt_fec_hdr_pack(const struct tbt_fec_hdr *h, u8 out[TBT_FEC_HDR_LEN])
@@ -153,6 +153,7 @@ int tbt_fec_hdr_pack(const struct tbt_fec_hdr *h, u8 out[TBT_FEC_HDR_LEN])
     tbt_put_u16(out + TBT_FEC_H_PAYLEN, h->payload_len);
     tbt_put_u16(out + TBT_FEC_H_CONV, h->conv);
     tbt_put_u16(out + TBT_FEC_H_RESERVED, h->reserved);
+    tbt_put_u64(out + TBT_FEC_H_SID, h->sid);
     tbt_put_u32(out + TBT_FEC_H_PAYCRC, h->payload_crc32c);
     tbt_put_u32(out + TBT_FEC_H_HDRCRC, h->header_crc32c);
     return 0;
@@ -174,6 +175,7 @@ int tbt_fec_hdr_unpack(const u8 in[TBT_FEC_HDR_LEN], struct tbt_fec_hdr *h)
     h->payload_len = tbt_get_u16(in + TBT_FEC_H_PAYLEN);
     h->conv = tbt_get_u16(in + TBT_FEC_H_CONV);
     h->reserved = tbt_get_u16(in + TBT_FEC_H_RESERVED);
+    h->sid = tbt_get_u64(in + TBT_FEC_H_SID);
     h->payload_crc32c = tbt_get_u32(in + TBT_FEC_H_PAYCRC);
     h->header_crc32c = tbt_get_u32(in + TBT_FEC_H_HDRCRC);
     return 0;

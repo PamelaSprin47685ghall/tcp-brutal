@@ -73,7 +73,7 @@ typedef uint64_t u64;
 #define TBT_WIRE_VERSION_V6 2
 
 /* ------------------------------------------------------------------ *
- * FEC wire: an independent record format, TBT_FEC_CONV 0x1004.
+ * FEC wire: an independent record format, TBT_FEC_CONV 0x1005.
  *
  * The old ARQ record above is frozen at 16 carriers: its path_ack_mask is
  * u16 and its FBK/WINDOW bodies have 16 entries. FEC never reuses those
@@ -81,7 +81,7 @@ typedef uint64_t u64;
  * old records start with 0x10..0x25, FEC records with 0x30..0x35.
  * The conv field is checked too, so a wrong-format byte stream fails closed.
  *
- * T0 frozen layout (little-endian, 40 bytes):
+ * Layout (little-endian, 48 bytes):
  *   +0  u8  type        0x30 DATA, 0x31 PARITY, 0x32 ACK, 0x33 NACK,
  *                       0x34 FEC_CFG, 0x35 FEC_FBK
  *   +1  u8  flags       bit0 LAST; every other bit must be zero
@@ -99,21 +99,23 @@ typedef uint64_t u64;
  *   +16 u64 seq         DATA: packet sequence; PARITY: window end
  *   +24 u16 win_len     PARITY: covered packets; DATA: 0
  *   +26 u16 payload_len payload bytes following this header
- *   +28 u16 conv        0x1004
+ *   +28 u16 conv        0x1005
  *   +30 u16 reserved    must be 0
- *   +32 u32 payload_crc32c  CRC32C over the payload only
- *   +36 u32 header_crc32c   CRC32C over header bytes +0..+35
+ *   +32 u64 sid         stream id this DATA/PARITY belongs to; 0 on control
+ *   +40 u32 payload_crc32c  CRC32C over the payload only
+ *   +44 u32 header_crc32c   CRC32C over header bytes +0..+43
  *
  * A receiver checks conv, type and length first, then header_crc32c, then
  * payload_crc32c. It never uses a field from a header that failed either CRC.
  * Control frames are complete records of their own and must never be queued
  * behind a partial DATA record (the carrier writer emits each record whole).
  * ------------------------------------------------------------------ */
-#define TBT_FEC_CONV 0x1004u
-/* 0.2.0 raises TBT_FEC_CONV from 0x1001 to 0x1004 in three wire steps.
+#define TBT_FEC_CONV 0x1005u
+/* 0.2.0 raises TBT_FEC_CONV from 0x1001 to 0x1004 in three wire steps;
+ * 0.2.2 adds M5 below.
  * M2 (0x1002): a PARITY record may be a block marker: win_len == 0 &&
  * payload_len == 0 && epoch == 0. The two convs share one carrier (32-byte
- * control records use TBT_CONV, 40-byte FEC records use TBT_FEC_CONV), so
+ * control records use TBT_CONV, FEC records use TBT_FEC_CONV), so
  * both are upgraded in the same version.
  *
  * M3 (0x1003): the ACK body grows from 16 to 24 bytes and
@@ -128,10 +130,17 @@ typedef uint64_t u64;
  * the record header's block_id names the super-block. The old 0x1003 NACK
  * body was a list of missing sequence ranges and had no caller.
  *
+ * M5 (0x1005): DATA and PARITY carry the stream id in a u64 at +32. A FEC
+ * record has no other stream identity, and a sequential new stream can
+ * otherwise receive the previous stream's reordered tail. The receiver drops
+ * a share whose sid is not its current stream (and every share while the old
+ * sid is still installed at the barrier). The header grows from 40 to 48
+ * bytes; payload_crc32c moves to +40 and header_crc32c to +44.
+ *
  * There is no 4-byte marker and no magic number on this wire. A marker is a
- * set of values inside the 40-byte tbt_fec_hdr: type TBT_FEC_PARITY (0x31),
+ * set of values inside the 48-byte tbt_fec_hdr: type TBT_FEC_PARITY (0x31),
  * flags 0, share_index n (parity 0), epoch 0, win_len 0, payload_len 0,
- * conv 0x1004, payload_crc32c 0 (CRC32C of an empty payload). */
+ * conv 0x1005, payload_crc32c 0 (CRC32C of an empty payload). */
 
 /* FEC record types. */
 #define TBT_FEC_DATA 0x30
@@ -146,7 +155,7 @@ typedef uint64_t u64;
 #define TBT_FEC_FF_MASK 0x01
 
 /* FEC header field offsets and size. */
-#define TBT_FEC_HDR_LEN 40
+#define TBT_FEC_HDR_LEN 48
 #define TBT_FEC_H_TYPE 0
 #define TBT_FEC_H_FLAGS 1
 #define TBT_FEC_H_SHARE 2
@@ -159,13 +168,14 @@ typedef uint64_t u64;
 #define TBT_FEC_H_PAYLEN 26
 #define TBT_FEC_H_CONV 28
 #define TBT_FEC_H_RESERVED 30
-#define TBT_FEC_H_PAYCRC 32
-#define TBT_FEC_H_HDRCRC 36
+#define TBT_FEC_H_SID 32
+#define TBT_FEC_H_PAYCRC 40
+#define TBT_FEC_H_HDRCRC 44
 
 /* FEC payload and record bounds. S is the configured packet size, at most
  * TBT_FEC_PAYLOAD_MAX. A full record is header plus payload. */
 #define TBT_FEC_PAYLOAD_MAX 8192
-#define TBT_FEC_REC_MAX (TBT_FEC_HDR_LEN + TBT_FEC_PAYLOAD_MAX) /* 8232 */
+#define TBT_FEC_REC_MAX (TBT_FEC_HDR_LEN + TBT_FEC_PAYLOAD_MAX) /* 8240 */
 #define TBT_FEC_CHUNK_MAX (TBT_FEC_REC_MAX + 4) /* hex size line + CRLF slack */
 
 /* Share and carrier limits. shares = n + m <= 256; 1 share per carrier in

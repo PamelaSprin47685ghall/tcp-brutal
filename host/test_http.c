@@ -2028,7 +2028,7 @@ static void test_chunk_decode(void)
         {"", 0, "", TBT_HTTP_CHUNK_SIZE, TBT_HTTP_NEED_MORE},
         {"ffffffffffffffff\r\n", 0, "", TBT_HTTP_CHUNK_BAD, TBT_HTTP_PROTO},
         {"100000\r\n", 0, "", TBT_HTTP_CHUNK_BAD, TBT_HTTP_PROTO},
-        {"2029\r\n", 0, "", TBT_HTTP_CHUNK_BAD, TBT_HTTP_PROTO},
+        {"2031\r\n", 0, "", TBT_HTTP_CHUNK_BAD, TBT_HTTP_PROTO},
         {"8g\r\n", 0, "", TBT_HTTP_CHUNK_BAD, TBT_HTTP_PROTO},
         {" 8\r\n", 0, "", TBT_HTTP_CHUNK_BAD, TBT_HTTP_PROTO},
         {"8 \r\n", 0, "", TBT_HTTP_CHUNK_BAD, TBT_HTTP_PROTO},
