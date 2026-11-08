@@ -43,6 +43,17 @@ per-direction INIT 已实现，adaptive 在 mode=3 强制 off。
   （下行 128 条 ≈ 1 MiB，上行 24 条）。码率 0.5 只在满块成立。
 - **NACK 修复粒度**：下行 256-share 块在 p=0.5 时一次 NACK 最多 64 share，
   修复需要多轮；30 s stall 预算可能先到。
+- **0.3.0 发布状态（fix43，2026-11-08）**：1 GiB 单流 737.6 s、
+  11.65 Mbit/s、sha256 一致；replay 高水位 4.9 MB（< 5 MiB）、
+  backpressure 0、无 reset/holes、无 workqueue hog。
+- **0.3.1 优化项：`fec_replay_miss_never_stored=42,963`**（1 GiB run）。
+  NACK 点名了 replay 环里从未存在的 share。最可能的来源是短块：接收端
+  在 parity 的 `win_len` 到达前把全部 n 个 DATA share 都当作缺失并 NACK，
+  其中 `[win_len, n)` 是发送端从未写的 padding 位置，环里自然没有记录。
+  每次这类 NACK 都浪费一个往返。0.3.1 可做：(a) 接收端在 real 未知时
+  只请求已看到缺口的 share，或先等 parity 定 cut；(b) 发送端对 padding
+  位置的请求回一个带 `win_len` 的 marker，让接收端立刻收敛。
+  不阻塞 0.3.0。
 - **修复突发与 replay 环**：fix42 首连里，接收端在一次初始突发中请求
   1348 个 share（11 MB），把 8 MiB replay 环打满并触发 8 次背压。
   现在 replay 队列到 50% 时 packetizer 让路（不再产生新 DATA），
