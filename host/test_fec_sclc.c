@@ -259,6 +259,35 @@ static void test_mapping(void)
             break;
         }
 
+    /* A single payload bit at codeword 3 must leave every parity byte
+     * outside byte 3 zero.  The parity bits inside the byte are the code's
+     * own combination, not a copy of the payload bit, so only the codeword
+     * axis is pinned here; a transpose that reversed that axis still passes
+     * the codeword-0 test above. */
+    memset(data, 0, (size_t)N * SHARE);
+    memset(parity, 0, (size_t)M * SHARE);
+    data[3] = 0x20; /* batch 0, codeword 3, bit 5 */
+    rc = ops->encode(c, dp, N, pp);
+    check(rc == 0, "encode single bit at codeword 3");
+    {
+        int stray = 0, nonzero = 0;
+
+        for (i = 0; i < M; i++)
+        {
+            for (u = 0; u < SHARE; u++)
+            {
+                u8 got = parity[(size_t)i * SHARE + u];
+
+                if (u != 3 && got)
+                    stray = 1;
+                if (got)
+                    nonzero = 1;
+            }
+        }
+        check(!stray, "bit-plane: only codeword 3 carries parity");
+        check(nonzero, "codeword-3 bit produces parity");
+    }
+
     free(mask);
     free(dp);
     free(pp);

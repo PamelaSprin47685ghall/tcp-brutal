@@ -97,6 +97,22 @@ static void tbt_fec_tx_init_tick(struct tbt_session *sess);
  * up to TBT_FEC_BATCH_MAX full records without overflowing the tail. */
 #define TBT_FEC_DRAIN_BYTES_MAX TBT_CAR_PART_MAX
 
+/* A block codec decodes a whole block per attempt, so an attempt made while
+ * the block is still receiving shares both fails and runs the expensive
+ * erasure-heavy path (the uplink GF(16) peeling is ~3.6x slower at 70%
+ * erasures than at 2%, and the downlink runs all 128 batches regardless).
+ * Wake the decoder only after the block has been quiet for this long.  The
+ * window is longer than the gap between a block's shares on the field path
+ * (the uplink's 32 shares span ~0.8 s, so ~25 ms apart; the downlink's 256
+ * span ~0.35 s), which makes a burst coalesce into one decode at its end.
+ * A failed decode then backs off; a new share restarts the quiet window
+ * because it is new evidence.  Without this the field measured 7.7
+ * downlink decodes per delivered 1 MiB block and 2 uplink decodes per
+ * 64 KiB group block. */
+#define TBT_FEC_DECODE_SETTLE_MS 50
+#define TBT_FEC_DECODE_RETRY_MS 50
+#define TBT_FEC_DECODE_RETRY_MAX_MS 400
+
 /* No carrier TCP is left to deliver a share: a retransmit count at the
  * default tcp_retries2 (15) is the point where TCP itself gives up. */
 #define TBT_FEC_TCP_RETX_MAX 15
@@ -4171,13 +4187,19 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
     struct tbt_fec_rx *rx = sess->fec_rx;
     struct tbt_fec_blk *b = &rx->blk[(size_t)group * rx->slots + slot];
     u16 real = 0, i, k;
-    u16 before = 0;
     bool claimed = false;
+    bool block_code;
     u64 now = ktime_get_ns();
     int rc;
 
     spin_lock_bh(&rx->lock);
-    if (b->used && !b->ready && !b->decoding && now >= b->decode_next_ns)
+    block_code = tbt_fec_grouped_mode(rx->codec) == 3;
+    /* Only the delivery frontier can use a decoded block.  Decoding a later
+     * slot speculatively costs a whole block of CPU and delays the frontier
+     * it cannot overtake; the field body ran up to eight 46 ms decodes
+     * before it delivered the one block the application was waiting for. */
+    if (b->used && !b->ready && !b->decoding && now >= b->decode_next_ns &&
+        (!block_code || b->block_id == rx->next_super))
     {
         real = tbt_fec_blk_real_len(rx, group, b);
         tbt_fec_blk_counts(rx, group, b);
@@ -4185,10 +4207,8 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
         {
             b->ready = true; /* complete without the codec */
         }
-        else if (tbt_fec_grouped_mode(rx->codec) == 3 ? b->nparity > 0
-                                                      : b->nparity >=
-                                                            (u16)(real -
-                                                                  b->ndata))
+        else if (block_code ? b->nparity > 0
+                            : b->nparity >= (u16)(real - b->ndata))
         {
             /* An SC-LDPC block codec needs any parity share and reports what
              * it could recover; the RLNC path needs one row per missing
@@ -4198,7 +4218,6 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
             for (i = real; i < rx->n; i++)
                 rx->dpresent_snap[i] = 1; /* padding is known zero */
             b->decoding = true;
-            before = b->ndata;
             claimed = true;
         }
     }
@@ -4210,7 +4229,7 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
     spin_lock_bh(&rx->lock);
     if (rc == 0)
     {
-        bool block_code = tbt_fec_grouped_mode(rx->codec) == 3;
+        bool commit_block_code = tbt_fec_grouped_mode(rx->codec) == 3;
 
         for (i = 0, k = 0; i < real; i++)
         {
@@ -4219,7 +4238,7 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
             /* Belt and braces for a block codec: copy a recovered slot only
              * when the codec says that share is complete. A partial decode
              * must not turn stale rx->rec bytes into delivered data. */
-            if (block_code &&
+            if (commit_block_code &&
                 !tbt_fec_grouped_is_known(rx->codec, group, i))
             {
                 k++;
@@ -4250,20 +4269,22 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
     }
     else
     {
-        /* Exponential backoff, 20 ms doubling to 200 ms. A NACK repair that
-         * arrives inside the window is decoded on the next pass after it. A
-         * decode that committed new shares restarts at the short delay: it
-         * made progress, and the next pass may finish the block. */
-        u64 wait;
+        /* Exponential backoff, 50 ms doubling to 400 ms.  A share that
+         * arrives after this attempt is new evidence and sets its own quiet
+         * deadline in the placement path; keep whichever deadline is later,
+         * so a repair is not decoded before its burst has settled. */
+        u64 wait = (u64)TBT_FEC_DECODE_RETRY_MS * NSEC_PER_MSEC;
+        u64 deadline;
 
-        if (rc == 0 && b->ndata > before)
-            b->decode_tries = 0;
-        wait = 20000000ULL << (b->decode_tries < 4 ? b->decode_tries : 4);
-        if (wait > 200000000ULL)
-            wait = 200000000ULL;
+        if (b->decode_tries < 4)
+            wait <<= b->decode_tries;
+        else
+            wait = (u64)TBT_FEC_DECODE_RETRY_MAX_MS * NSEC_PER_MSEC;
         if (b->decode_tries < 0xff)
             b->decode_tries++;
-        b->decode_next_ns = ktime_get_ns() + wait;
+        deadline = ktime_get_ns() + wait;
+        if (b->decode_next_ns < deadline)
+            b->decode_next_ns = deadline;
         atomic64_inc(&sess->fec_decode_backoff);
     }
     b->decoding = false;
@@ -5021,15 +5042,26 @@ static void tbt_fec_rx_on_cfg(struct tbt_session *sess,
     tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
 }
 
-/* One pass over groups*slots. Called only by w_fec_rx. */
-static void tbt_fec_rx_pass(struct tbt_session *sess)
+/* One pass over groups*slots. Called only by w_fec_rx. Returns the number of
+ * blocks decoded, so the caller can yield after a whole-block decode instead
+ * of running several of them before it delivers the first one. */
+static int tbt_fec_rx_pass(struct tbt_session *sess)
 {
     struct tbt_fec_rx *rx = sess->fec_rx;
     u16 group, slot;
+    int decoded = 0;
 
     for (group = 0; group < rx->groups; group++)
         for (slot = 0; slot < rx->slots; slot++)
-            (void)tbt_fec_rx_decode_one(sess, group, slot);
+        {
+            if (tbt_fec_rx_decode_one(sess, group, slot))
+                decoded++;
+            /* A grouped block code decodes one group per slot and a group
+             * block can run tens of milliseconds on the target CPU.  Let
+             * the carrier works and the timer softirq run between them. */
+            cond_resched();
+        }
+    return decoded;
 }
 
 static void tbt_fec_rx_work_body(struct tbt_session *sess)
@@ -5038,13 +5070,14 @@ static void tbt_fec_rx_work_body(struct tbt_session *sess)
     bool again;
     bool nack_done = false;
     int rounds = 0;
+    int decoded;
 
     if (!rx || READ_ONCE(sess->closing) || READ_ONCE(rx->stopping))
         return;
     do
     {
         again = false;
-        tbt_fec_rx_pass(sess);
+        decoded = tbt_fec_rx_pass(sess);
         /* Ask for the missing shares before the delivery walk arms its own
          * (possibly 30 s) stall timer: the earlier 10 ms arm wins and keeps
          * the NACK retry alive. */
@@ -5062,6 +5095,13 @@ static void tbt_fec_rx_work_body(struct tbt_session *sess)
             again = true;
         }
         spin_unlock_bh(&rx->lock);
+        /* A block decode is the expensive unit (tens of milliseconds on the
+         * target).  Deliver and re-arm after one such round instead of
+         * stacking up to four of them, which starved the ACK and NACK walk
+         * behind the decode and held the delivery cursor for hundreds of
+         * milliseconds.  The re-arm below runs the next round at once. */
+        if (decoded)
+            break;
     } while (again && ++rounds < 4);
     if (again)
         tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
@@ -5107,6 +5147,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
     const u8 *payload;
     u16 shares, group, share, slot;
     bool wake = false, rebase;
+    bool fresh = false;
 
     if (!rx || len < TBT_FEC_HDR_LEN)
         return -EPROTO;
@@ -5967,6 +6008,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         }
         else
         {
+            fresh = true;
             memcpy(b->data + (size_t)share * rx->s, payload, h.payload_len);
             /* The sender zero-pads a short share before encoding parity. The
              * decoder XORs the whole S-byte slot into the right-hand side, so
@@ -6024,6 +6066,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         }
         else
         {
+            fresh = true;
             memcpy(b->parity + (size_t)idx * rx->s, payload, h.payload_len);
             b->ppresent[idx] = 1;
             b->nparity++;
@@ -6065,11 +6108,25 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                  ? b->nparity > 0
                  : b->nparity >=
                        (u16)(tbt_fec_blk_real_len(rx, group, b) - b->ndata))
+    {
         /* RLNC needs one row per missing share before a decode can succeed;
          * a block codec needs any parity and recovers what it can, so one
          * arriving parity share must wake the decoder. Waiting for the RLNC
          * count left SC-LDPC blocks asleep until the next unrelated pass. */
+        if (fresh && tbt_fec_grouped_mode(rx->codec) == 3)
+        {
+            /* The decoder runs once the block has been quiet for a while.
+             * Every new share pushes the deadline out, so a burst coalesces
+             * into one decode at the end instead of one per share.  A
+             * duplicate changes no block state and must not postpone the
+             * decode or clear the backoff. */
+            b->decode_next_ns =
+                ktime_get_ns() +
+                (u64)TBT_FEC_DECODE_SETTLE_MS * NSEC_PER_MSEC;
+            b->decode_tries = 0;
+        }
         rx->work_pending = true;
+    }
     wake = rx->work_pending;
     spin_unlock_bh(&rx->lock);
     if (wake)
