@@ -164,19 +164,15 @@ static inline bool tbt_fec_rx_stream_changed(u64 stream_sid, u64 rec_sid,
            !old_stream_alive;
 }
 
-/* Only the session's current stream may feed the shared FEC TX ring: the
- * ring carries no per-byte sid, so an old target's late bytes would be
- * packetized under the new stream's sid.  `switch_sid` is the first submit
- * of the stream that is taking over; it closes the race before far_sid is
- * observed. */
-static inline bool tbt_fec_tx_sid_current(u64 far_sid, u64 switch_sid,
+/* The shared FEC TX ring carries no per-byte sid, so a stream switch must
+ * drop the whole ring before the new stream's bytes enter it.  While the
+ * packetizer still owns the old block, the new stream's first submit is
+ * refused (backpressure) until the switch work has flushed the ring.  The
+ * old stream is not queued at all: its bytes are consumed and discarded. */
+static inline bool tbt_fec_tx_wait_switch(u64 far_sid, u64 cur_block_sid,
                                           u64 st_sid)
 {
-    if (st_sid != far_sid)
-        return false;
-    if (switch_sid && st_sid != switch_sid)
-        return false;
-    return true;
+    return st_sid == far_sid && cur_block_sid && cur_block_sid != st_sid;
 }
 
 /* A pending switch that names a stream the session has already left can
@@ -186,6 +182,17 @@ static inline bool tbt_fec_tx_sid_current(u64 far_sid, u64 switch_sid,
 static inline bool tbt_fec_tx_switch_stale(u64 switch_sid, u64 far_sid)
 {
     return switch_sid && switch_sid != far_sid;
+}
+
+/* The old stream may have submitted bytes before the packetizer ever built
+ * a block.  They are dropped when the new stream's first submit arrives, but
+ * only while the packetizer does not yet own this stream's block: once it
+ * does, the ring belongs to this stream. */
+static inline bool tbt_fec_tx_drop_prefix(u64 last_submit_sid,
+                                          u64 cur_block_sid, u64 st_sid)
+{
+    return last_submit_sid && last_submit_sid != st_sid &&
+           cur_block_sid != st_sid;
 }
 
 /* A block placed for one stream must never be delivered to another.  The

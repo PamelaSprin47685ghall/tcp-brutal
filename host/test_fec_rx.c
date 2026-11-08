@@ -1374,16 +1374,20 @@ static void test_tx_stream_isolation(void)
     /* The FEC TX ring carries no per-byte sid.  Only the session's current
      * stream may append to it; an old target's late read would otherwise be
      * packetized under the new sid and delivered to the new application. */
-    ok(tbt_fec_tx_sid_current(2, 0, 2),
-       "tx: the current stream feeds the ring");
-    ok(!tbt_fec_tx_sid_current(2, 0, 1),
-       "tx: an old stream's late bytes are dropped");
-    ok(!tbt_fec_tx_sid_current(1, 2, 1),
-       "tx: the switch target gates the ring");
-    ok(tbt_fec_tx_sid_current(2, 2, 2),
-       "tx: the switch target admits the new stream");
-    ok(!tbt_fec_tx_sid_current(0, 0, 1),
-       "tx: no stream drops every submit");
+    ok(tbt_fec_tx_wait_switch(2, 1, 2),
+       "tx: the new stream waits for the whole-ring flush");
+    ok(!tbt_fec_tx_wait_switch(2, 0, 2),
+       "tx: the first stream does not wait for a switch");
+    ok(!tbt_fec_tx_wait_switch(2, 2, 2),
+       "tx: after the flush the new stream appends");
+    ok(tbt_fec_tx_drop_prefix(1, 0, 2),
+       "tx: the old stream's pre-block prefix is dropped");
+    ok(!tbt_fec_tx_drop_prefix(1, 2, 2),
+       "tx: the packetizer's own block is never dropped");
+    ok(!tbt_fec_tx_drop_prefix(2, 0, 2),
+       "tx: the same stream's prefix is kept");
+    ok(!tbt_fec_tx_drop_prefix(0, 0, 2),
+       "tx: the first stream has no prefix to drop");
     ok(tbt_fec_tx_switch_stale(1, 2),
        "tx: a switch for a dead stream is stale");
     ok(!tbt_fec_tx_switch_stale(2, 2),

@@ -1752,51 +1752,57 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
             tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
         return;
     }
+    /* A pending switch for a stream the session has left can never run;
+     * clear it before deciding whether this body owns a switch.  That stream
+     * was refused with tx_paused set; release its read work too, or its
+     * capture stays stopped forever (the switch target's tx_paused is the
+     * only one this body clears below). */
+    if (tx->switch_sid && tx->switch_sid != st->sid)
+    {
+        u64 stale = tx->switch_sid;
+        struct tbt_stream *os;
+
+        spin_lock(&tx->lock);
+        if (tx->switch_sid == stale)
+            tx->switch_sid = 0;
+        spin_unlock(&tx->lock);
+        os = tbt_stream_get(sess, stale, false, false);
+        if (os)
+        {
+            WRITE_ONCE(os->tx_paused, false);
+            tbt_stream_schedule(os, &os->w_read, TBT_STREAM_F_SCHED_READ);
+            tbt_stream_put(os);
+        }
+    }
     /* A stream switch owns the block being built: close it so the old
      * stream's parity is tagged with its own sid, drop its un-packetized
      * bytes, and start the new stream on a fresh block. */
     if ((tx->cur_block_sid && tx->cur_block_sid != st->sid) ||
         (tx->switch_sid && tx->switch_sid == st->sid))
     {
-        u32 drop_to = 0;
-        bool switched = false;
         u64 old_sid = tx->cur_block_sid;
 
         spin_lock(&tx->lock);
-        if (tx->switch_sid == st->sid)
-        {
-            drop_to = tx->switch_to;
-            tx->switch_sid = 0;
-            switched = true;
-        }
-        else if (!tx->switch_sid)
-        {
-            /* The packetizer ran before the first submit of the new stream:
-             * the ring holds only the old stream's bytes. */
-            drop_to = tx->head;
-            switched = true;
-        }
-        if (switched)
-        {
-            tx->tail = drop_to;
-            tx->fill = 0;
-        }
+        /* The switch owns the whole ring: no byte the old stream submitted
+         * may be packetized under the new sid.  The new stream's first
+         * submit was refused until this point, so every queued byte is old.
+         * Do not use a submit-time boundary: an old target's last submit can
+         * race past it and land after the boundary. */
+        tx->tail = tx->head;
+        tx->fill = 0;
         spin_unlock(&tx->lock);
-        if (switched)
         {
             struct tbt_fec_out *o, *tmp;
             u16 i;
 
-            if (tx->cur_block_sid && tx->cur_block_sid != st->sid)
-            {
-                u64 start = tbt_fec_seq_of_block_pkt_base(
-                    tx->cur_block, 0, 0, tx->base_pkt, tx->base_block,
-                    tx->groups, tx->n);
-
-                if (tx->seq > start)
-                    tbt_fec_tx_close_block(sess, true);
-            }
-            tx->cur_block_sid = st->sid;
+            /* Close and advance the old block even when it is empty.  The
+             * new stream must start at a fresh block id: reusing an empty
+             * block's id would collide with the receiver's old marker for
+             * that id, and the new stream's first share would be dropped as
+             * late.  The close emits the old sid (cur_block_sid is still
+             * old), so the receiver drops any marker or parity it makes. */
+            if (old_sid && old_sid != st->sid)
+                tbt_fec_tx_close_block(sess, true);
             /* The old stream is no longer the session's.  Kill it now so its
              * target socket is shut down before the new stream's target can
              * be served; a single-threaded target source otherwise keeps
@@ -1816,9 +1822,10 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
             list_for_each_entry_safe(o, tmp, &sess->fec_out_ctl, node)
                 if (o->sid && o->sid != st->sid)
                     tbt_fec_out_free(sess, NULL, o);
+            /* Every queued replay is an old-stream record; free them all,
+             * including records whose sid field is still 0. */
             list_for_each_entry_safe(o, tmp, &sess->fec_out_replay, node)
-                if (o->sid && o->sid != st->sid)
-                    tbt_fec_out_free(sess, NULL, o);
+                tbt_fec_out_free(sess, NULL, o);
             for (i = 0; i < sess->n_car; i++)
             {
                 struct tbt_fec_outq *q = &sess->fec_outq[i];
@@ -1842,6 +1849,15 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
             tx->short_at_ns = 0;
             tx->carrier_wait = false;
             tx->backpressure_counted = false;
+            /* Publish the new block owner and release the submit gate only
+             * after the old block's parity, queues and replay are gone.  A
+             * submit during this cleanup is refused by switch_sid. */
+            spin_lock(&tx->lock);
+            tx->cur_block_sid = st->sid;
+            tx->switch_sid = 0;
+            spin_unlock(&tx->lock);
+            WRITE_ONCE(st->tx_paused, false);
+            tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
         }
     }
     /* A closing stream caps replay admission at
@@ -2439,39 +2455,70 @@ size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,
     struct tbt_session *sess = st->sess;
     struct tbt_fec_tx *tx = sess->fec_tx;
     u32 take;
+    u64 far;
 
     if (!tx)
         return 0;
     spin_lock(&tx->lock);
-    /* A pending switch whose stream is no longer the session's can never be
-     * applied: the packetizer only clears switch_sid when it names the
-     * current stream.  Drop it here so the !switch_sid branch below records
-     * the old prefix boundary for the current stream instead of leaving the
-     * gate stuck forever. */
-    if (tbt_fec_tx_switch_stale(tx->switch_sid, READ_ONCE(sess->far_sid)))
+    /* One snapshot for the whole critical section: a second read could see
+     * a different stream between the sid gate and the switch gate, letting
+     * a submit through that the switch must refuse. */
+    far = READ_ONCE(sess->far_sid);
+    /* A pending switch owns the ring until its cleanup is complete.  A
+     * switch whose sid is neither the session's nor this submitter's can
+     * never be applied; drop it.  Keep the switch that belongs to `st`: the
+     * submitter's own switch is the backpressure marker. */
+    if (tbt_fec_tx_switch_stale(tx->switch_sid, far) &&
+        tx->switch_sid != st->sid)
         tx->switch_sid = 0;
+    if (tx->switch_sid)
+    {
+        if (st->sid != tx->switch_sid)
+        {
+            /* Not the stream taking over: consume and discard. */
+            spin_unlock(&tx->lock);
+            return len;
+        }
+        /* The stream taking over must wait for the whole-ring flush. */
+        WRITE_ONCE(st->tx_paused, true);
+        spin_unlock(&tx->lock);
+        tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+        return 0;
+    }
     /* The ring has no per-byte sid: a late read from the old stream's target
      * would be packetized under the new stream's sid and delivered to the new
      * application.  Consume and discard it; returning 0 would make the old
      * reader retry the same bytes forever. */
-    if (!tbt_fec_tx_sid_current(READ_ONCE(sess->far_sid), tx->switch_sid,
-                                st->sid))
+    if (st->sid != far)
     {
         spin_unlock(&tx->lock);
         return len;
     }
-    /* First submit of a new stream: remember where its bytes begin. The
-     * packetizer drops the old stream's raw ring prefix and fill. The
-     * last_submit_sid check also covers the case where the old stream's
-     * bytes were submitted before the packetizer ever built a block. */
-    if (!tx->last_submit_sid)
-        tx->last_submit_sid = st->sid;
-    else if (tx->last_submit_sid != st->sid && !tx->switch_sid)
+    /* The packetizer still owns the old block.  Refuse this submit so the
+     * new stream's bytes stay in the socket until the switch work has
+     * flushed the whole ring; the switch clears tx_paused and reschedules
+     * the read work.  This closes the submit-boundary race: no new byte
+     * can be queued before the old prefix is gone. */
+    if (tbt_fec_tx_wait_switch(far, tx->cur_block_sid, st->sid))
     {
-        tx->switch_to = tx->head;
         tx->switch_sid = st->sid;
-        tx->last_submit_sid = st->sid;
+        WRITE_ONCE(st->tx_paused, true);
+        spin_unlock(&tx->lock);
+        tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+        return 0;
     }
+    /* The old stream submitted bytes before the packetizer ever built a
+     * block; none of them belong to this stream.  Drop the prefix now, since
+     * the packetizer would otherwise tag it with this stream's sid.  Once the
+     * packetizer owns this stream's block, the ring is this stream's: never
+     * drop it, even if a late old submit left last_submit_sid behind. */
+    if (tbt_fec_tx_drop_prefix(tx->last_submit_sid, tx->cur_block_sid,
+                               st->sid))
+    {
+        tx->tail = tx->head;
+        tx->fill = 0;
+    }
+    tx->last_submit_sid = st->sid;
     take = tbt_fec_ring_put(tx, skb, off, (u32)min_t(size_t, len, U32_MAX));
     if (take)
     {
@@ -3030,6 +3077,15 @@ static void tbt_fec_rx_stream_reset(struct tbt_session *sess, u64 sid)
     rx->rebase_sid = keep_sid;
     rx->min_block_seen = keep_min;
     rx->barrier_sid = sid;
+    /* The old stream's NACK and repair state name old blocks.  Keeping it
+     * would resend an old-block NACK after the switch and ask the peer to
+     * replay a block that belongs to the stream that just ended.  Only the
+     * valid flag is published: the rest of the state is read only while it
+     * is true, and the next NACK overwrites it. */
+    if (rx->nack)
+        WRITE_ONCE(rx->nack->valid, false);
+    rx->repair_first_ns = 0;
+    rx->repair_block = 0;
     rx->next_fin_sid = 0;
     rx->next_fin_end = 0;
     rx->next_fin_base = 0;

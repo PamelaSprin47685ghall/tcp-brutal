@@ -703,9 +703,9 @@ struct tbt_fec_tx
      * block and tags its records with this sid; the receiver drops a DATA or
      * PARITY record whose sid is not its current stream. */
     u64 cur_block_sid;
-    /* First submit of a new stream: the ring head at the boundary and the new
-     * sid. The packetizer drops [tail, switch_to) and fill before reading. */
-    u32 switch_to;
+    /* Set while a stream switch is pending: the packetizer still owns the
+     * old block, so the new stream's first submit is refused until the
+     * switch work has dropped the whole ring. */
     u64 switch_sid;
     /* Last stream that submitted bytes into the ring. A change records the
      * boundary even before the packetizer has built the first block. */
