@@ -170,7 +170,7 @@ atomic_stats_names='
     rx_parse_proto rx_records rx_ready_calls rx_work_early rx_reads
     rx_read_bytes rx_resume_calls rx_read_zero rx_resume_busy rx_errs
     carrier_write_space_runs poll_rescues tx_wake_calls tx_wake_busy
-    tx_work_runs carrier_ws_calls pump_hw_fired carrier_lost carrier_replaced
+    tx_work_runs carrier_ws_calls carrier_nospace_armed pump_hw_fired carrier_lost carrier_replaced
     carrier_alloc_fail connect_fail port_exhaust port_alloc_fail
     profile_mismatch http_parse_err http_status_err pad_tx drip_tx dup_bytes
     dup_used dup_suppressed holes_unrecoverable hole_checks hole_gate_fail

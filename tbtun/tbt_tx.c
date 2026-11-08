@@ -161,30 +161,24 @@ static struct tbt_retain *tbt_retain_alloc(u16 len, gfp_t gfp)
     return r;
 }
 
-/* Ask every connected carrier's writer to drain the session queue. Safe from
- * any context: it only schedules work. The pump itself must never run while a
- * caller holds a socket lock that the opposite direction needs. */
+/* Ask the session's writer to drain the session queue. One work item is
+ * enough: tbt_tx_pump() is session-wide and serialised by pump_lock, so the
+ * old per-carrier schedule only made 256 entries contend for the same lock.
+ * Safe from any context: it only schedules work. The pump itself must never
+ * run while a caller holds a socket lock that the opposite direction needs. */
 void tbt_tx_wake(struct tbt_session *sess)
 {
-    struct tbt_carrier *c;
-    int i;
-
-    /* FEC data never enters the ARQ queue. Waking every carrier's w_tx for an
-     * empty queue only makes the pump contend for pump_lock with the FEC
-     * drain. A queued control frame (ctl_queued) still wakes it. */
-    if (tbt_tx_pump_idle(sess->fec, READ_ONCE(sess->tx_queued),
+    /* FEC data never enters the ARQ queue. Waking the pump for an empty queue
+     * only makes it contend for pump_lock with the FEC drain. A queued control
+     * frame (ctl_queued) still wakes it. */
+    if (!sess ||
+        tbt_tx_pump_idle(sess->fec, READ_ONCE(sess->tx_queued),
                          READ_ONCE(sess->ctl_queued)))
         return;
-    for (i = 0; i < sess->n_car; i++)
-    {
-        c = READ_ONCE(sess->car[i]);
-        if (c && atomic_read(&c->connected) && !atomic_read(&c->stopping))
-        {
-            atomic64_inc(&sess->tx_wake_calls);
-            if (!schedule_work(&c->w_tx))
-                atomic64_inc(&sess->tx_wake_busy);
-        }
-    }
+    atomic64_inc(&sess->tx_wake_calls);
+    if (test_bit(TBT_SW_TX, &sess->sched) ||
+        !tbt_session_arm(sess, TBT_SW_TX, 0))
+        atomic64_inc(&sess->tx_wake_busy);
 }
 
 /* Append one frame to the session queue. `head` puts it in front of every
@@ -299,13 +293,14 @@ int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
                  path, fr->gen, len, READ_ONCE(sess->ctl_queued),
                  READ_ONCE(sess->tx_queued));
     tbt_tx_wake(sess);
-    /* schedule_work(&c->w_tx) is lost when that work is already running and
-     * has passed the queue scan. A control frame that is the last thing a
-     * dying stream sends (the RST) then waits for a wake that never comes:
-     * the stream is dead, so the feedback tick stops re-arming. The bounded
-     * pump is a delayed work, so mod_delayed_work always leaves one run
-     * pending (measured: near.rst_eagain, the RST queued at 12.63 s and never
-     * written while the far drained for 60 s). */
+    /* A wake that races a running pump sets the session bit again and
+     * re-arms it, so the queue scan cannot miss the frame. A control frame
+     * that is the last thing a dying stream sends (the RST) would otherwise
+     * wait for a wake that never comes: the stream is dead, so the feedback
+     * tick stops re-arming. The bounded pump is a delayed work, so
+     * mod_delayed_work always leaves one run pending (measured:
+     * near.rst_eagain, the RST queued at 12.63 s and never written while the
+     * far drained for 60 s). */
     tbt_tx_ctl_arm(sess, NULL, 0);
     return 0;
 }

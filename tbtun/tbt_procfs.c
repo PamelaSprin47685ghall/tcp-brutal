@@ -759,8 +759,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                        id, tbt_stat_read(&s->tx_wake_calls),
                        tbt_stat_read(&s->tx_wake_busy),
                        tbt_stat_read(&s->tx_work_runs));
-            seq_printf(m, "tunnel %llu ws_calls=%llu\n", id,
-                       tbt_stat_read(&s->carrier_ws_calls));
+            seq_printf(m, "tunnel %llu ws_calls=%llu nospace_armed=%llu\n", id,
+                       tbt_stat_read(&s->carrier_ws_calls),
+                       tbt_stat_read(&s->carrier_nospace_armed));
             /* C3: the multi-carrier session's own counters.
              *
              * `up` counts the slots whose carrier has written its HELLO and

@@ -121,6 +121,9 @@ struct sched
     bool connected[NCAR];
     bool stalled[NCAR];
     bool full[NCAR];
+    bool need_wake[NCAR];
+    uint32_t write_space[NCAR];
+    uint32_t timeout_wakes[NCAR];
     uint32_t writes[NCAR];
     uint32_t wire_bytes[NCAR];
     int write_seq[128];
@@ -569,6 +572,7 @@ static uint32_t drain_batch(struct sched *s, int idx, bool *again)
         {
             s->flush_skip++;
             s->hol_wait += q->depth;
+            s->need_wake[idx] = true;
             *again = true;
             break;
         }
@@ -576,6 +580,77 @@ static uint32_t drain_batch(struct sched *s, int idx, bool *again)
             rec_free(s, q, q_pop_head(q));
         wrote += n;
         s->flush_pass += n;
+    }
+    return wrote;
+}
+
+/* Mirrors tbt_car_write_space(): the socket has room, so wake this carrier's
+ * drain now instead of waiting for the 2 ms fallback. */
+static uint32_t carrier_write_space(struct sched *s, int idx, bool *again)
+{
+    s->write_space[idx]++;
+    s->need_wake[idx] = false;
+    s->full[idx] = false;
+    return drain_batch(s, idx, again);
+}
+
+/* Mirrors the bounded fallback: the timer retries a carrier that armed a
+ * wake but whose stack never called back. */
+static uint32_t drain_timeout(struct sched *s, int idx, bool *again)
+{
+    *again = false;
+    if (!s->need_wake[idx])
+        return 0;
+    s->timeout_wakes[idx]++;
+    s->need_wake[idx] = false;
+    s->full[idx] = false;
+    return drain_batch(s, idx, again);
+}
+
+/* Mirrors the shared drain work: one batch from each ready carrier in cursor
+ * order. A carrier that refuses its batch keeps its bit and does not stop the
+ * other ready carriers. */
+#define DRAIN_PASS_MAX 8
+static uint32_t drain_ready_pass(struct sched *s, bool ready[NCAR],
+                                 uint16_t *cursor, bool *blocked)
+{
+    uint32_t wrote = 0;
+    unsigned pass;
+
+    *blocked = false;
+    for (pass = 0; pass < DRAIN_PASS_MAX; pass++)
+    {
+        int idx = -1;
+        int i;
+
+        for (i = 0; i < NCAR; i++)
+        {
+            int j = (int)((*cursor + i) % NCAR);
+
+            if (ready[j])
+            {
+                idx = j;
+                break;
+            }
+        }
+        if (idx < 0)
+            break;
+        ready[idx] = false;
+        *cursor = (uint16_t)((idx + 1) % NCAR);
+        {
+            bool again = false;
+
+            wrote += drain_batch(s, idx, &again);
+            if (again)
+            {
+                ready[idx] = true;
+                *blocked = true;
+            }
+            else if (s->q[idx].depth)
+            {
+                ready[idx] = true;
+            }
+        }
     }
     return wrote;
 }
@@ -1051,6 +1126,77 @@ static void case_batch_drain(void)
     sched_free(&s);
 }
 
+/* An EAGAIN batch waits for either the socket's write-space callback or the
+ * bounded timeout; both must drain exactly once and keep the accounting. */
+static void case_write_space_wake(void)
+{
+    struct sched s;
+    bool again;
+    uint32_t wrote;
+    int i;
+
+    sched_init(&s);
+    s.full[0] = true;
+    for (i = 0; i < 5; i++)
+        push(&s, 0, false, false, 0, 400 + i);
+    wrote = drain_batch(&s, 0, &again);
+    ok(again && wrote == 0, "full carrier defers the batch", NULL);
+    ok(s.need_wake[0], "EAGAIN marks the carrier for a wake", NULL);
+    ok_u32(s.write_space[0], 0, "no callback before write_space");
+
+    wrote = carrier_write_space(&s, 0, &again);
+    ok(!again && wrote == 5, "write_space drains the deferred batch", NULL);
+    ok_u32(s.write_space[0], 1, "write_space callback ran once");
+    ok(!s.need_wake[0], "write_space clears the wake flag", NULL);
+
+    s.full[1] = true;
+    push(&s, 1, false, false, 0, 500);
+    push(&s, 1, false, false, 0, 501);
+    wrote = drain_batch(&s, 1, &again);
+    ok(again && wrote == 0, "timeout case defers the batch", NULL);
+    ok(s.need_wake[1], "timeout case marks the wake", NULL);
+
+    wrote = drain_timeout(&s, 1, &again);
+    ok(!again && wrote == 2, "timeout fallback drains", NULL);
+    ok_u32(s.timeout_wakes[1], 1, "timeout fallback ran once");
+    ok_u32((uint32_t)s.flush_skip, 2, "both EAGAINs counted");
+    ok_u32((uint32_t)s.flush_pass, 7, "both wake paths counted their records");
+    sched_free(&s);
+}
+
+/* The shared drain work serves every ready carrier; a full carrier keeps its
+ * bit but cannot hold the others behind it. */
+static void case_ready_list(void)
+{
+    struct sched s;
+    bool ready[NCAR] = {false};
+    uint16_t cursor = 0;
+    bool blocked;
+    uint32_t wrote;
+
+    sched_init(&s);
+    s.full[0] = true;
+    push(&s, 0, false, false, 0, 600);
+    push(&s, 0, false, false, 0, 601);
+    push(&s, 0, false, false, 0, 602);
+    push(&s, 1, false, false, 0, 610);
+    push(&s, 1, false, false, 0, 611);
+    ready[0] = true;
+    ready[1] = true;
+
+    wrote = drain_ready_pass(&s, ready, &cursor, &blocked);
+    ok(blocked, "full carrier keeps its ready bit", NULL);
+    ok_u32(wrote, 2, "ready carrier drains despite the full one");
+    ok(ready[0], "full carrier stays queued", NULL);
+    ok(!ready[1], "drained carrier clears its bit", NULL);
+
+    s.full[0] = false;
+    wrote = drain_ready_pass(&s, ready, &cursor, &blocked);
+    ok(!blocked && wrote == 3, "the retry drains the blocked carrier", NULL);
+    ok(!ready[0] && !ready[1], "no ready bit remains", NULL);
+    sched_free(&s);
+}
+
 /* A stream switch drops the old stream's queued TX state and releases its
  * credit frontier; the new stream's records still drain. */
 static void case_stream_switch_cleanup(void)
@@ -1167,6 +1313,8 @@ int main(void)
     case_replay_identity();
     case_per_carrier_retry();
     case_batch_drain();
+    case_write_space_wake();
+    case_ready_list();
     case_open_gate();
     case_stream_switch_cleanup();
 

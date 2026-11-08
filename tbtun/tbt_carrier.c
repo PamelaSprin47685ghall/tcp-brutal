@@ -329,7 +329,7 @@ static void tbt_car_write_space(struct sock *sk)
                                        EPOLLOUT | EPOLLWRNORM | EPOLLWRBAND);
         rcu_read_unlock();
     }
-    schedule_work(&c->w_tx);
+    tbt_tx_wake(c->sess);
     if (c->sess->fec)
     {
         /* Wake this carrier's own FEC drain now that the socket has room.
@@ -395,18 +395,6 @@ static void tbt_pump_work(struct work_struct *w)
     atomic64_inc(&sess->pump_hw_fired);
     if (READ_ONCE(sess->tx_queued) || READ_ONCE(sess->ctl_queued))
         tbt_tx_pump(sess);
-}
-
-static void tbt_car_tx_work(struct work_struct *w)
-{
-    struct tbt_carrier *c = container_of(w, struct tbt_carrier, w_tx);
-
-    atomic64_inc(&c->sess->tx_work_runs);
-    /* The pump also writes HELLO/OPEN, so a connected carrier is enough; `up`
-     * only gates DATA and would deadlock the handshake if required here. */
-    if (atomic_read(&c->stopping) || !atomic_read(&c->connected))
-        return;
-    tbt_tx_pump(c->sess);
 }
 
 /* A peer that is not reading cannot advance snd_una; the same rule
@@ -1247,7 +1235,7 @@ static void tbt_car_rx_body(struct tbt_carrier *c)
     tbt_carrier_sk_put(sk);
 
     /* Parsing may have enqueued a control frame (OPEN, FBK). The enqueue
-     * already asked w_tx to drain it; never pump from this work item, because
+     * already asked the session pump to drain it; never pump from this work item, because
      * pumping the carrier whose lock this work item holds deadlocks against
      * the peer window that only this work item's next read can open. */
 }
@@ -1338,6 +1326,15 @@ static int tbt_carrier_part_flush(struct tbt_carrier *c, struct sock *sk)
  * tail in c->part; the next writer on this carrier flushes it before any new
  * bytes, so records stay in order and a control frame is never spliced into
  * the middle of a DATA record. */
+static void tbt_carrier_arm_nospace(struct tbt_carrier *c, struct sock *sk)
+{
+    if (sk && sk->sk_socket)
+    {
+        set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
+        atomic64_inc(&c->sess->carrier_nospace_armed);
+    }
+}
+
 static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
                                   const void *data, size_t len)
 {
@@ -1357,19 +1354,35 @@ static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
         return -EINVAL;
     err = tbt_carrier_part_flush(c, sk);
     if (err)
+    {
+        if (err == -EAGAIN)
+            tbt_carrier_arm_nospace(c, sk);
         return err;
+    }
     wmem = READ_ONCE(sk->sk_wmem_queued);
     sndbuf = READ_ONCE(sk->sk_sndbuf);
     mem_avail = sndbuf > wmem ? sndbuf - wmem : 0;
     if (mem_avail < len)
+    {
+        /* The batch needs its whole byte range to fit, so this can refuse
+         * while sk_stream_memory_free() is still true.  Arm SOCK_NOSPACE:
+         * the next ACK calls tbt_car_write_space(), which kicks the FEC
+         * drain immediately.  The drain keeps its 2 ms timer as the bounded
+         * fallback for a stack that never calls back. */
+        tbt_carrier_arm_nospace(c, sk);
         return -EAGAIN;
+    }
     iov_iter_kvec(&msg.msg_iter, ITER_SOURCE, &iov, 1, len);
     msg.msg_flags = MSG_DONTWAIT;
     lock_sock(sk);
     err = tcp_sendmsg_locked(sk, &msg, len);
     release_sock(sk);
     if (err < 0)
+    {
+        if (err == -EAGAIN)
+            tbt_carrier_arm_nospace(c, sk);
         return err == -EAGAIN ? -EAGAIN : err;
+    }
     if ((size_t)err < len)
     {
         memcpy(c->part, (const u8 *)data + err, len - (size_t)err);
@@ -1930,7 +1943,6 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
     mutex_init(&c->tx_lock);
     INIT_WORK(&c->w_connect, tbt_car_connect_work);
     INIT_WORK(&c->w_rx, tbt_car_rx_work);
-    INIT_WORK(&c->w_tx, tbt_car_tx_work);
     INIT_DELAYED_WORK(&c->w_pump, tbt_pump_work);
     return c;
 }
@@ -2404,7 +2416,7 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c)
 
 /* Stop every work item that can still touch this carrier. Sets stopping under
  * sess->lock, so tbt_carrier_arm_*() and this function cannot interleave; the
- * cancels run outside the lock because w_tx/w_pump take pump_lock and
+ * cancels run outside the lock because the session pump/w_pump take pump_lock and
  * cancel_work_sync() sleeps. The caller must not hold pump_lock or tx_lock. */
 void tbt_carrier_quiesce(struct tbt_carrier *c)
 {
@@ -2418,7 +2430,6 @@ void tbt_carrier_quiesce(struct tbt_carrier *c)
     spin_unlock(&sess->lock);
     cancel_work_sync(&c->w_connect);
     cancel_work_sync(&c->w_rx);
-    cancel_work_sync(&c->w_tx);
     cancel_delayed_work_sync(&c->w_pump);
 }
 
@@ -2439,18 +2450,17 @@ static void tbt_carrier_unpublish(struct tbt_session *sess,
     if (s && s->sk)
     {
         /* write_lock_bh() inside restore waits for every in-flight callback;
-         * after it returns no new w_tx/w_rx can be queued from sk_user_data. */
+         * after it returns no new pump/rx wake can be queued from sk_user_data. */
         tbt_sk_ops_restore(s->sk, &sess->def_ops);
         sock_replace_proto(s->sk, &tcp_prot);
     }
     rcu_assign_pointer(c->sk, NULL);
     mutex_unlock(&c->tx_lock);
 
-    /* A callback that ran before the restore may have queued w_rx/w_tx/w_pump
+    /* A callback that ran before the restore may have queued w_rx/w_pump or the session pump
      * after quiesce() cancelled them. They all check sk_present()/stopping
      * and return without touching the socket. */
     cancel_work_sync(&c->w_rx);
-    cancel_work_sync(&c->w_tx);
     cancel_delayed_work_sync(&c->w_pump);
 }
 
@@ -2573,10 +2583,10 @@ void tbt_carrier_free(struct tbt_carrier *c)
     kfree(c);
 }
 
-/* Arm a carrier work item. The sess->lock section is the handshake with
- * tbt_carrier_quiesce(): either this queues before stopping is visible, and
- * quiesce's cancel_work_sync() removes it, or it sees stopping and refuses.
- * Any context, including softirq; never sleeps. */
+/* Arm the session's ARQ/control pump. The sess->lock section is the
+ * handshake with tbt_carrier_quiesce(): either this queues before stopping
+ * is visible, or it sees stopping and refuses. Any context, including
+ * softirq; never sleeps. */
 bool tbt_carrier_arm_tx(struct tbt_carrier *c)
 {
     struct tbt_session *sess;
@@ -2590,10 +2600,7 @@ bool tbt_carrier_arm_tx(struct tbt_carrier *c)
         spin_unlock(&sess->lock);
         return false;
     }
-    /* false means an instance is already pending; that instance holds no
-     * reference of its own, but the carrier object itself is owned by the
-     * container, so the wake is not lost. */
-    queue_work(TBT_WQ, &c->w_tx);
+    tbt_session_arm(sess, TBT_SW_TX, 0);
     spin_unlock(&sess->lock);
     return true;
 }
@@ -3091,7 +3098,7 @@ void tbt_carriers_stop(struct tbt_session *sess)
 
     /* Swap every container under pump_lock, so no pump can still hold a
      * carrier after this section. The cancels and the socket release happen
-     * outside it: w_tx/w_pump take pump_lock, and cancel_work_sync() sleeps. */
+     * outside it: the session pump/w_pump take pump_lock, and cancel_work_sync() sleeps. */
     mutex_lock(&sess->pump_lock);
     spin_lock(&sess->lock);
     for (i = 0; i < TBT_MAX_CARRIERS_LIMIT; i++)
@@ -3536,8 +3543,8 @@ void tbt_carrier_snapshot(struct tbt_session *sess)
     sess->snap_car_ud = READ_ONCE(sk->sk_user_data) != NULL;
     sess->snap_car_ready_ok = READ_ONCE(sk->sk_data_ready) == tbt_car_ready;
     sess->snap_car_ws_ok = READ_ONCE(sk->sk_write_space) == tbt_car_write_space;
-    sess->snap_txw_pending = work_pending(&c->w_tx);
-    sess->snap_txw_busy = work_busy(&c->w_tx);
+    sess->snap_txw_pending = work_pending(&sess->w_tx.work);
+    sess->snap_txw_busy = work_busy(&sess->w_tx.work);
     sess->snap_car_wmem = READ_ONCE(sk->sk_wmem_queued);
     sess->snap_car_rcv_nxt = READ_ONCE(tcp_sk(sk)->rcv_nxt);
     sess->snap_car_copied = READ_ONCE(tcp_sk(sk)->copied_seq);

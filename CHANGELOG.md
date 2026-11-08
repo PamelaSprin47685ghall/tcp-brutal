@@ -44,13 +44,28 @@ and moves independently of the module version.
   already present, instead of gathering and re-solving the whole block.
   Missing parity shares stay unknown for the NACK path; `codes_ok` still
   reports every codeword as complete.
+- A carrier that refuses a FEC batch with `-EAGAIN` now arms
+  `SOCK_NOSPACE`, so the next ACK calls `tbt_car_write_space()` and kicks
+  that carrier's drain immediately. The drain keeps its 2 ms timer as the
+  bounded fallback. `/proc/net/tbtun/stats` reports `nospace_armed` next to
+  `ws_calls`.
+- The ARQ/control pump has one session work item. `tbt_tx_wake()` used to
+  schedule one `w_tx` per carrier, and all of them then serialised on
+  `pump_lock`; the session work clears its bit at entry, so a wake that
+  races a running pump re-arms it instead of being lost.
+- FEC carrier drains share one delayed work with a ready bitmap and a
+  round-robin cursor. A carrier that refuses a batch keeps only its own bit
+  and the 2 ms fallback; the other ready carriers are served in the same
+  run. This is the single-thread TX step for 0.4.0.
 
 ### Tests
 
 - `host/test_fec_out` and `host/test_http` pin the three-record batch
   boundary: one, three and eight records, short records, and the
   part/short-write split. `host/test_sclc_uplink` covers the parity-only
-  early return and its `share_known`/stat results.
+  early return and its `share_known`/stat results. `host/test_fec_out` also
+  covers the write-space wake, the timeout fallback, and the shared
+  ready-list (a full carrier cannot hold a ready carrier behind it).
 
 ## [0.3.2] - 2026-11-08
 

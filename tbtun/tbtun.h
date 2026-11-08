@@ -680,7 +680,6 @@ struct tbt_fec_nack_state;
 struct tbt_fec_adapt;
 struct tbt_fec_est;
 struct tbt_fec_flow;
-struct tbt_fec_drain;
 
 struct tbt_fec_tx
 {
@@ -748,12 +747,6 @@ struct tbt_fec_tx
     u64 carrier_wait_since_ns;
     bool carrier_wait;
     bool backpressure_counted;
-    /* One delayed work per carrier drains that carrier's bound data queue.
-     * The packetizer queues a record and wakes only its carrier's work; a
-     * full socket re-arms only its own work, so it delays neither the other
-     * carriers nor the packetizer. Allocated in tbt_fec_data_init(). */
-    struct tbt_fec_drain *drain;
-    u16 ndrain;
     /* Adaptive shape (0.3.0). base_pkt/base_block are the relative origin of
      * the shape in force; the mapping helpers in tbt_fec.h use them.
      * shape_lock protects the shape fields the carrier RX path reads (the
@@ -1078,7 +1071,7 @@ struct tbt_fec_outq
  * match, not at the speed the NACKs arrive. */
 #define TBT_FEC_NACK_REQ_THROTTLED 4u
 
-/* The seven session work items whose reference is owned by the bit in
+/* The eight session work items whose reference is owned by the bit in
  * tbt_session.sched (review/s2-merged-design.md §1.3/§5.1). The order is the
  * destroy cancel order in §5.2; do not renumber without updating it. */
 enum tbt_sess_work
@@ -1090,6 +1083,7 @@ enum tbt_sess_work
     TBT_SW_FBK,
     TBT_SW_FEC_TX,
     TBT_SW_FEC_RX,
+    TBT_SW_TX,
 };
 
 /* Adaptive FEC control-surface snapshot (0.3.0). The estimator/controller in
@@ -1215,7 +1209,14 @@ struct tbt_session
      * flow. */
     u16 fec_ctl_rot;
     bool fec_stopping;
-    struct tbt_fec_drain *fec_drain;
+    /* One delayed work drains every ready carrier's bound data queue. A
+     * carrier is set in fec_drain_ready when the packetizer or write_space
+     * wakes it; the work takes one batch from each ready carrier in a
+     * round-robin cursor, so a full socket cannot hold the others behind
+     * it. The cursor and the bitmap are owned by the work. */
+    struct delayed_work fec_drain_work;
+    DECLARE_BITMAP(fec_drain_ready, TBT_MAX_CARRIERS_LIMIT);
+    u16 fec_drain_cursor;
     u16 fec_ndrain;
     struct delayed_work w_fec_tx; /* packetizer + control/replay writer */
     /* 0.2.0: FEC receive work (decode outside rx->lock, then deliver).
@@ -1277,6 +1278,7 @@ struct tbt_session
     u64 dial_refill_ns;
     spinlock_t dial_lock;  /* tbt_dial_take(): w_replace, the poll, start */
     struct delayed_work w_fbk;    /* feedback tick and retransmit timer */
+    struct delayed_work w_tx;     /* one ARQ/control pump wake for the session */
     struct delayed_work w_reap;   /* P1: tombstone sweeper */
     struct delayed_work w_pending; /* P1: starts one queued public socket */
     struct delayed_work w_poll;   /* 50 ms liveness net: every carrier slot and
@@ -1453,6 +1455,7 @@ struct tbt_session
     atomic64_t retired_tx_bytes, retired_data_frames, retired_retx_data;
     u64 carrier_bytes, carrier_err, carrier_short; /* pump (tbt_carrier_xmit) */
     atomic64_t carrier_ws_calls;
+    atomic64_t carrier_nospace_armed; /* FEC/ARQ EAGAIN armed SOCK_NOSPACE */
     u64 pump_hw_armed, pump_hw_disarmed; /* pump only */
     atomic64_t pump_hw_fired;            /* per-carrier pump work */
     u64 dropped_by_ppm;                  /* pump only */
@@ -1791,7 +1794,6 @@ struct tbt_carrier
     struct rcu_head rcu;      /* tbt_carrier_put() free path */
     struct work_struct w_connect; /* sock_create/bind/connect off the writer */
     struct work_struct w_rx;      /* drains carrier input -> tbt_rx */
-    struct work_struct w_tx;      /* write-space wake -> tbt_tx_pump */
     struct delayed_work w_pump;   /* correctness wake while a carrier is full */
     /* Serialises every byte write on this carrier: the pump's ARQ/control
      * record and the FEC drain's batched frame. Replacing pump_lock with this
