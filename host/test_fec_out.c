@@ -607,6 +607,54 @@ static uint32_t drain_timeout(struct sched *s, int idx, bool *again)
     return drain_batch(s, idx, again);
 }
 
+/* Mirrors the shared drain work: one batch from each ready carrier in cursor
+ * order. A carrier that refuses its batch keeps its bit and does not stop the
+ * other ready carriers. */
+#define DRAIN_PASS_MAX 8
+static uint32_t drain_ready_pass(struct sched *s, bool ready[NCAR],
+                                 uint16_t *cursor, bool *blocked)
+{
+    uint32_t wrote = 0;
+    unsigned pass;
+
+    *blocked = false;
+    for (pass = 0; pass < DRAIN_PASS_MAX; pass++)
+    {
+        int idx = -1;
+        int i;
+
+        for (i = 0; i < NCAR; i++)
+        {
+            int j = (int)((*cursor + i) % NCAR);
+
+            if (ready[j])
+            {
+                idx = j;
+                break;
+            }
+        }
+        if (idx < 0)
+            break;
+        ready[idx] = false;
+        *cursor = (uint16_t)((idx + 1) % NCAR);
+        {
+            bool again = false;
+
+            wrote += drain_batch(s, idx, &again);
+            if (again)
+            {
+                ready[idx] = true;
+                *blocked = true;
+            }
+            else if (s->q[idx].depth)
+            {
+                ready[idx] = true;
+            }
+        }
+    }
+    return wrote;
+}
+
 /* Mirrors tbt_fec_out_flush(): control and replay only. The bound data
  * queues are the per-carrier works' responsibility. */
 static int flush(struct sched *s, uint32_t *written)
@@ -1116,6 +1164,39 @@ static void case_write_space_wake(void)
     sched_free(&s);
 }
 
+/* The shared drain work serves every ready carrier; a full carrier keeps its
+ * bit but cannot hold the others behind it. */
+static void case_ready_list(void)
+{
+    struct sched s;
+    bool ready[NCAR] = {false};
+    uint16_t cursor = 0;
+    bool blocked;
+    uint32_t wrote;
+
+    sched_init(&s);
+    s.full[0] = true;
+    push(&s, 0, false, false, 0, 600);
+    push(&s, 0, false, false, 0, 601);
+    push(&s, 0, false, false, 0, 602);
+    push(&s, 1, false, false, 0, 610);
+    push(&s, 1, false, false, 0, 611);
+    ready[0] = true;
+    ready[1] = true;
+
+    wrote = drain_ready_pass(&s, ready, &cursor, &blocked);
+    ok(blocked, "full carrier keeps its ready bit", NULL);
+    ok_u32(wrote, 2, "ready carrier drains despite the full one");
+    ok(ready[0], "full carrier stays queued", NULL);
+    ok(!ready[1], "drained carrier clears its bit", NULL);
+
+    s.full[0] = false;
+    wrote = drain_ready_pass(&s, ready, &cursor, &blocked);
+    ok(!blocked && wrote == 3, "the retry drains the blocked carrier", NULL);
+    ok(!ready[0] && !ready[1], "no ready bit remains", NULL);
+    sched_free(&s);
+}
+
 /* A stream switch drops the old stream's queued TX state and releases its
  * credit frontier; the new stream's records still drain. */
 static void case_stream_switch_cleanup(void)
@@ -1233,6 +1314,7 @@ int main(void)
     case_per_carrier_retry();
     case_batch_drain();
     case_write_space_wake();
+    case_ready_list();
     case_open_gate();
     case_stream_switch_cleanup();
 
