@@ -3466,6 +3466,13 @@ static void test_fec_http(void)
     int err;
     unsigned i;
 
+    /* The carrier's batch cap is three full frames: 3 * 8260 = 24,780 B,
+     * which stays in the kmalloc-32k (order-3) class.  Eight frames were
+     * 66,080 B and needed order-5 pages, which failed on the far host. */
+#define TEST_BATCH_MAX 3
+    _Static_assert(TEST_BATCH_MAX * TBT_HTTP_FEC_FRAME_MAX <= 32768,
+                   "FEC batch must stay in the order-3 size class");
+
     memset(&rx, 0, sizeof(rx));
     tbt_http_chunk_reset(&rx.chunk);
     memset(rec, 0, sizeof(rec));
@@ -3528,18 +3535,19 @@ static void test_fec_http(void)
     ok(err == TBT_RX_OK && out_len == TBT_FEC_HDR_LEN + 16 && out[0] == TBT_FEC_ACK,
        "fec control frame in a chunk", NULL);
 
-    /* Batch layout: eight records concatenated into one HTTP write. The
+    /* Batch layout: three records concatenated into one HTTP write. The
      * carrier batch path encodes each record back-to-back; one decoder pass
-     * must recover all eight in order. */
+     * must recover all three in order.  The records are short (8..22 B
+     * payloads), so this also covers the short final-block shape. */
     {
-        u8 recs[8][TBT_FEC_HDR_LEN + 64];
-        u16 lens[8];
-        u8 batch[8 * TBT_HTTP_FEC_FRAME_MAX];
-        size_t flen[8];
+        u8 recs[TEST_BATCH_MAX][TBT_FEC_HDR_LEN + 64];
+        u16 lens[TEST_BATCH_MAX];
+        u8 batch[TEST_BATCH_MAX * TBT_HTTP_FEC_FRAME_MAX];
+        size_t flen[TEST_BATCH_MAX];
         size_t off = 0, pos = 0;
         unsigned b;
 
-        for (b = 0; b < 8; b++)
+        for (b = 0; b < TEST_BATCH_MAX; b++)
         {
             u16 plen = (u16)(8 + b * 7);
 
@@ -3553,7 +3561,7 @@ static void test_fec_http(void)
                 recs[b][TBT_FEC_HDR_LEN + i] = (u8)(b * 31 + i);
             lens[b] = (u16)(TBT_FEC_HDR_LEN + plen);
         }
-        for (b = 0; b < 8; b++)
+        for (b = 0; b < TEST_BATCH_MAX; b++)
         {
             size_t bn = tbt_http_fec_chunk_encode((char *)batch + off,
                                                   sizeof(batch) - off,
@@ -3563,12 +3571,13 @@ static void test_fec_http(void)
             flen[b] = bn;
             off += bn;
         }
-        ok(off <= sizeof(batch), "fec batch fits the per-carrier cap", NULL);
+        ok(off <= sizeof(batch), "three fec records fit the per-carrier cap",
+           NULL);
 
         tbt_http_chunk_reset(&rx.chunk);
         rx.chunk_started = false;
         rx.rec_len = 0;
-        for (b = 0; b < 8; b++)
+        for (b = 0; b < TEST_BATCH_MAX; b++)
         {
             size_t used = tbt_http_fec_frame_decode(&rx, batch + pos,
                                                     off - pos, &out, &out_len,
@@ -3587,11 +3596,11 @@ static void test_fec_http(void)
         /* Short socket write: the kernel accepted `cut` bytes, the rest goes
          * to c->part and is flushed before the next record. Cut at a frame
          * boundary and inside a frame; the tail must fit the part buffer and
-         * the reconstructed byte stream must decode all eight records. */
+         * the reconstructed byte stream must decode all three records. */
         {
             size_t cuts[4];
-            u8 part[8 * TBT_HTTP_FEC_FRAME_MAX];
-            u8 joined[8 * TBT_HTTP_FEC_FRAME_MAX];
+            u8 part[TEST_BATCH_MAX * TBT_HTTP_FEC_FRAME_MAX];
+            u8 joined[TEST_BATCH_MAX * TBT_HTTP_FEC_FRAME_MAX];
             unsigned c;
 
             cuts[0] = flen[0];
@@ -3614,7 +3623,7 @@ static void test_fec_http(void)
                 rx.chunk_started = false;
                 rx.rec_len = 0;
                 pos = 0;
-                for (b = 0; b < 8; b++)
+                for (b = 0; b < TEST_BATCH_MAX; b++)
                 {
                     size_t used = tbt_http_fec_frame_decode(&rx, joined + pos,
                                                             off - pos, &out,
@@ -3626,6 +3635,52 @@ static void test_fec_http(void)
                     pos += used;
                 }
             }
+        }
+    }
+
+    /* Eight full records are 8 * 8260 = 66,080 B, so they cannot fit the
+     * three-frame part buffer.  The parser still has to consume such a
+     * stream when the drain splits it into 3 + 3 + 2 writes; this case pins
+     * that split boundary. */
+    {
+        static u8 recs8[8][TBT_FEC_REC_MAX];
+        static u8 batch8[8 * TBT_HTTP_FEC_FRAME_MAX];
+        size_t off8 = 0, pos8 = 0;
+        unsigned b;
+
+        for (b = 0; b < 8; b++)
+        {
+            memset(recs8[b], 0, sizeof(recs8[b]));
+            recs8[b][0] = TBT_FEC_DATA;
+            recs8[b][26] = 0x00;
+            recs8[b][27] = 0x20; /* 8192 payload bytes */
+            recs8[b][28] = 0x01;
+            recs8[b][29] = 0x10;
+        }
+        for (b = 0; b < 8; b++)
+        {
+            size_t bn = tbt_http_fec_chunk_encode(
+                (char *)batch8 + off8, sizeof(batch8) - off8, recs8[b],
+                TBT_FEC_REC_MAX);
+
+            ok(bn > 0, "eight-record chunk encodes", NULL);
+            off8 += bn;
+        }
+        ok(off8 > TEST_BATCH_MAX * TBT_HTTP_FEC_FRAME_MAX,
+           "eight records exceed the three-frame carrier cap", NULL);
+
+        tbt_http_chunk_reset(&rx.chunk);
+        rx.chunk_started = false;
+        rx.rec_len = 0;
+        for (b = 0; b < 8; b++)
+        {
+            size_t used = tbt_http_fec_frame_decode(
+                &rx, batch8 + pos8, off8 - pos8, &out, &out_len, &err);
+
+            ok(err == TBT_RX_OK && out_len == TBT_FEC_REC_MAX &&
+                   !memcmp(out, recs8[b], TBT_FEC_REC_MAX),
+               "eight-record stream round-trips", NULL);
+            pos8 += used;
         }
     }
 }

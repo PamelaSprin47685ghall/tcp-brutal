@@ -59,6 +59,11 @@ static void tbt_wire_layout_check(void)
 {
     BUILD_BUG_ON(TBT_HDR_LEN + TBT_PAYLOAD_MAX != TBT_REC_MAX);
     BUILD_BUG_ON(TBT_REC_MAX > TBT_CHUNK_MAX); // a full record fits in a chunk
+    /* The FEC batch buffer must stay in the kmalloc-32k class (order-3 on
+     * 4K pages). Eight 8260 B frames crossed 64 KiB and needed order-5
+     * pages; that allocation failed on the 955 MB far host and stalled the
+     * drain in direct reclaim. */
+    BUILD_BUG_ON(TBT_CAR_PART_MAX > 32768);
     /* Every field offset of DESIGN.md §3.3, checked against both the TBT_H_*
      * constants and the struct layout, so a "cleanup" of either cannot change
      * the bytes on the wire without failing the build. */
