@@ -1566,6 +1566,62 @@ static void case_rate_index_for_shape(void)
            "shape index: empty shape");
 }
 
+/* The data plane allocates the SC controller only when this plan resolves.
+ * These assertions pin the index/mask it will use for the two shipped
+ * profiles and the disabled start when adaptive=off. */
+static void case_init_plan(void)
+{
+    struct tbt_fec_adapt_sclc_ctl c;
+    struct tbt_fec_adapt_sclc_out out;
+    u8 idx, mask;
+
+    eq_u32((u32)tbt_fec_adapt_sclc_init_plan(128, 128, 1,
+                                             TBT_FEC_SCLC_DOWN, &idx, &mask),
+           0, "plan: downlink");
+    eq_u32(idx, 3, "plan: downlink index");
+    eq_u32(mask, 1u << 3, "plan: downlink mask");
+
+    eq_u32((u32)tbt_fec_adapt_sclc_init_plan(8, 24, 8, TBT_FEC_SCLC_UP,
+                                             &idx, &mask),
+           0, "plan: uplink");
+    eq_u32(idx, 0, "plan: uplink index");
+    eq_u32(mask, (1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u,
+           "plan: uplink mask");
+
+    eq_u32((u32)tbt_fec_adapt_sclc_init_plan(16, 16, 8, TBT_FEC_SCLC_UP,
+                                             &idx, &mask),
+           0, "plan: uplink rate 50");
+    eq_u32(idx, 3, "plan: uplink rate 50 index");
+
+    eq_u32((u32)tbt_fec_adapt_sclc_init_plan(14, 18, 8, TBT_FEC_SCLC_UP,
+                                             &idx, &mask),
+           (u32)-1, "plan: off-ladder refused");
+    eq_u32(idx, 0xff, "plan: off-ladder index");
+    eq_u32(mask, 0, "plan: off-ladder mask");
+    eq_u32((u32)tbt_fec_adapt_sclc_init_plan(128, 128, 2,
+                                             TBT_FEC_SCLC_DOWN, &idx, &mask),
+           (u32)-1, "plan: downlink needs one group");
+    eq_u32((u32)tbt_fec_adapt_sclc_init_plan(8, 24, 1, TBT_FEC_SCLC_UP,
+                                             &idx, &mask),
+           (u32)-1, "plan: uplink needs more than one group");
+
+    /* The resolved plan starts the controller at the configured point. */
+    eq_u32((u32)tbt_fec_adapt_sclc_ctl_init(
+               &c, true, tbt_fec_adapt_sclc_rate_at(3)->pct, 256, 1),
+           0, "plan: downlink controller init");
+    tbt_fec_adapt_sclc_ctl_set_rate_mask(&c, 1u << 3);
+    eq_u32(c.rate_mask, 1u << 3, "plan: downlink controller mask");
+    ok(c.ready && c.enabled, "plan: downlink controller ready");
+
+    eq_u32((u32)tbt_fec_adapt_sclc_ctl_init(
+               &c, false, tbt_fec_adapt_sclc_rate_at(0)->pct, 32, 8),
+           0, "plan: disabled controller init");
+    ok(c.ready && !c.enabled, "plan: adaptive=off starts disabled");
+    eval(&c, 0, 0, SEC, &out);
+    eq_u32(out.reason, TBT_FEC_ADAPT_SCLC_R_DISABLED,
+           "plan: disabled controller does not switch");
+}
+
 static void case_rate_mask(void)
 {
     struct tbt_fec_adapt_sclc_ctl c;
@@ -1860,6 +1916,7 @@ int main(void)
     case_est_unknown();
     case_profile();
     case_rate_index_for_shape();
+    case_init_plan();
     case_rate_mask();
     case_wire_profile();
     case_fbk_overlay();

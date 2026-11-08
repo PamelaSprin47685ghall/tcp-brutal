@@ -63,6 +63,28 @@ u8 tbt_fec_adapt_sclc_rate_index_for_shape(u16 n, u16 m)
     return 0xff;
 }
 
+int tbt_fec_adapt_sclc_init_plan(u16 n, u16 m, u16 groups, u8 variant,
+                                 u8 *idx, u8 *mask)
+{
+    u8 i = tbt_fec_adapt_sclc_rate_index_for_shape(n, m);
+    u8 msk = 0;
+
+    if (!idx || !mask)
+        return -1;
+    if (i != 0xff)
+    {
+        if (variant == TBT_FEC_SCLC_DOWN && groups == 1)
+            msk = (u8)(1u << i);
+        else if (variant == TBT_FEC_SCLC_UP && groups > 1)
+            msk = (u8)((1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u);
+        else
+            i = 0xff;
+    }
+    *idx = i;
+    *mask = i == 0xff ? 0 : msk;
+    return i == 0xff ? -1 : 0;
+}
+
 int tbt_fec_adapt_sclc_shape(u8 rate_pct, u16 shares, u16 groups,
                              struct tbt_fec_adapt_sclc_shape *out)
 {

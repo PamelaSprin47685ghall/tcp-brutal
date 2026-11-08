@@ -6820,14 +6820,12 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
         tbt_fec_adapt_init(tx->adapt, sess->adapt.class);
     if (sess->fec_sclc)
     {
-        u8 idx = tbt_fec_adapt_sclc_rate_index_for_shape(n, m);
-        u8 sc_mask = 0;
+        u8 idx, sc_mask;
 
-        if (idx != 0xff)
+        if (tbt_fec_adapt_sclc_init_plan(
+                n, m, groups, sess->fec_sclc_shape.variant, &idx,
+                &sc_mask) == 0)
         {
-            sc_mask = sess->fec_sclc_shape.variant == TBT_FEC_SCLC_DOWN
-                          ? (u8)(1u << idx)
-                          : (u8)((1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u);
             tx->adapt_sclc = kzalloc(sizeof(*tx->adapt_sclc), GFP_KERNEL);
             if (tx->adapt_sclc &&
                 tbt_fec_adapt_sclc_ctl_init(
@@ -6852,7 +6850,7 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
         }
         else if (READ_ONCE(sess->adaptive))
         {
-            pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: adaptive mode=3 needs an n/m split on the rate ladder (n=%u m=%u groups=%u)\n",
+            pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: adaptive mode=3 needs a supported ladder profile (n=%u m=%u groups=%u)\n",
                                 (unsigned long long)sess->tunnel->cfg.id,
                                 n, m, groups);
             goto fail;
@@ -6973,14 +6971,18 @@ tbt_fec_rx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
             rec_slots = TBT_FEC_ADAPT_CLASSES;
         if (sess->fec_sclc)
         {
-            u8 sc_mask =
-                sess->fec_sclc_shape.variant == TBT_FEC_SCLC_DOWN
-                    ? (u8)(1u << 3)
-                    : (u8)((1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u);
-            u16 sc_slots = tbt_fec_adapt_sclc_max_side(shares, sc_mask);
+            u8 idx, sc_mask;
 
-            if (sc_slots > rec_slots)
-                rec_slots = sc_slots;
+            if (tbt_fec_adapt_sclc_init_plan(
+                    n, m, groups, sess->fec_sclc_shape.variant, &idx,
+                    &sc_mask) == 0)
+            {
+                u16 sc_slots = tbt_fec_adapt_sclc_max_side(shares,
+                                                           sc_mask);
+
+                if (sc_slots > rec_slots)
+                    rec_slots = sc_slots;
+            }
         }
         rx->rec = kvzalloc((size_t)rec_slots * TBT_FEC_S, GFP_KERNEL);
     }
@@ -7367,6 +7369,7 @@ int tbt_fec_data_init(struct tbt_session *sess)
     u32 per, slots, total, i;
     u8 mask[TBT_FEC_BITMAP_BYTES];
     u16 primary_groups;
+    u8 sclc_idx, sclc_mask;
 
     /* Every record the parsers accept must fit the buffer that assembles it.
      * Without these, raising TBT_FEC_PAYLOAD_MAX would make a full record
@@ -7421,7 +7424,11 @@ int tbt_fec_data_init(struct tbt_session *sess)
             w = sclc.L;
             d = sclc.rate_256;
         }
-        if (tbt_fec_adapt_sclc_rate_index_for_shape(n, m) == 0xff &&
+        /* The controller starts at the configured ladder point and may move
+         * only to the points this codec can build. The binary downlink is
+         * fixed at 128/128; the GF(16) uplink builds every ladder split. */
+        if (tbt_fec_adapt_sclc_init_plan(n, m, groups, sclc.variant,
+                                         &sclc_idx, &sclc_mask) &&
             READ_ONCE(sess->adaptive))
         {
             pr_warn_ratelimited("tbtun: tunnel %llu: fec rejected: adaptive mode=3 needs an n/m split on the rate ladder (n=%u m=%u)\n",
