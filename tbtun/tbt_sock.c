@@ -381,6 +381,7 @@ static void tbt_drain_body(struct tbt_stream *st)
         st->rx_next >= st->rx_fin_seq)
     {
         st->rx_fin_done = true;
+        st->rx_fin_done_ns = ktime_get_ns();
         eof = true;
     }
     /* If the last delivered frame took the queue below the low-water mark, the

@@ -2033,8 +2033,27 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
 static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
 {
     u64 since = READ_ONCE(st->close_since_ns);
-    u64 start, budget, now;
+    u64 start, budget, bound, now = tbt_now_ns();
+    bool peer_fin = READ_ONCE(st->rx_fin_done);
+    bool fin_written = READ_ONCE(st->tx_fin_written);
 
+    /* The peer's FIN reached the application but the target never closed its
+     * half, so our FIN was never requested or written. Without this bound the
+     * far flow and its target would live until session teardown, and a
+     * single-threaded source could be held by the idle old stream. */
+    if (peer_fin && !fin_written)
+    {
+        bound = max_t(u64, 60 * NSEC_PER_SEC,
+                      2 * tbt_tx_wait_budget_ns(sess, st));
+        if (tbt_tx_peer_fin_close_expired(peer_fin, fin_written,
+                                          READ_ONCE(st->rx_fin_done_ns),
+                                          now, bound))
+        {
+            atomic64_inc(&sess->close_timeouts);
+            tbt_stream_kill(st, TBT_ST_DEAD);
+            return;
+        }
+    }
     if (!since)
         return;
     if (READ_ONCE(st->tx_fin_written))
@@ -2045,10 +2064,6 @@ static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
          * socket forever.  Detach, do not reset: the peer may yet send data,
          * it is dropped, and the peer's own stall timer resets it. */
         u64 fw = READ_ONCE(st->close_fin_written_ns);
-        u64 bound = max_t(u64, 60 * NSEC_PER_SEC,
-                          2 * tbt_tx_wait_budget_ns(sess, st));
-
-        now = tbt_now_ns();
         if (!fw || READ_ONCE(st->rx_fin_done) || READ_ONCE(st->rx_queued))
             return;
         if (now <= fw || now - fw <= bound)
@@ -2068,7 +2083,6 @@ static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
     if (READ_ONCE(st->pause_cleared_ns) > start)
         start = READ_ONCE(st->pause_cleared_ns);
     budget = tbt_tx_wait_budget_ns(sess, st);
-    now = tbt_now_ns();
     if (now <= start || now - start <= budget)
         return;
     /* FEC tail repair: the FIN gate waits for tx_ack == tx_seq, and the last

@@ -162,6 +162,18 @@ static inline bool tbt_fec_out_unlink_once(bool *queued)
     return true;
 }
 
+/* The peer's FIN reached the application but our FIN never left the wire: the
+ * far target never closed its half. After the close bound the stream must be
+ * killed so its flow and target cannot pin the session until teardown. */
+static inline bool tbt_tx_peer_fin_close_expired(bool rx_fin_done,
+                                                 bool tx_fin_written,
+                                                 u64 rx_fin_done_ns,
+                                                 u64 now, u64 bound)
+{
+    return rx_fin_done && !tx_fin_written && rx_fin_done_ns &&
+           now > rx_fin_done_ns && now - rx_fin_done_ns > bound;
+}
+
 /* A stream the TX work may use: not dead, still attached to the session, and
  * not inside its tombstone window.  A gracefully closed stream keeps state
  * OPEN after detach, so the state alone is not enough. */

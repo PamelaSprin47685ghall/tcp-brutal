@@ -1448,6 +1448,28 @@ static void test_admit_abort_refs(void)
     ok(refs == 0 && !planes, "abort: the last snapshot put frees the planes");
 }
 
+/* The far target received the peer's FIN but never closes its half. The close
+ * timer must kill the stream after the bound instead of leaving the flow and
+ * target alive until session teardown. */
+static void test_peer_fin_close_bound(void)
+{
+    const u64 bound = 60ULL * 1000000000ULL;
+    const u64 t = 1000;
+
+    ok(!tbt_tx_peer_fin_close_expired(false, false, t, t + bound + 1, bound),
+       "close bound: no peer FIN, no bound");
+    ok(!tbt_tx_peer_fin_close_expired(true, true, t, t + bound + 1, bound),
+       "close bound: our FIN was written, the other path owns it");
+    ok(!tbt_tx_peer_fin_close_expired(true, false, 0, t + bound + 1, bound),
+       "close bound: no peer-FIN timestamp, no bound");
+    ok(!tbt_tx_peer_fin_close_expired(true, false, t, t + bound, bound),
+       "close bound: exactly at the bound is not expired");
+    ok(tbt_tx_peer_fin_close_expired(true, false, t, t + bound + 1, bound),
+       "close bound: one ns past the bound kills");
+    ok(!tbt_tx_peer_fin_close_expired(true, false, t + 10, t, bound),
+       "close bound: a timestamp from the future does not expire");
+}
+
 static void test_super_cursor(void)
 {
     static const u16 full[N] = {S, S, S, S};
@@ -2260,6 +2282,7 @@ int main(void)
     test_stream_reset_isolation();
     test_flow_lifetime();
     test_admit_abort_refs();
+    test_peer_fin_close_bound();
     test_ack_split();
     test_rx_poll();
     test_nack_settle_gate();

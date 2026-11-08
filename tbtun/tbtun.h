@@ -522,6 +522,8 @@ struct tbt_stream
     u64 rx_fin_seq;           /* byte offset the peer's FIN follows */
     bool rx_fin_seen;
     bool rx_fin_done;
+    u64 rx_fin_done_ns;       /* when the peer's FIN reached the application;
+                               * bounds a target that never closes its half */
     u64 deliver_mark;         /* last rx_delivered the FBK tick saw */
     u64 deliver_since_ns;     /* no delivery progress since this time */
     u8 rx_err;                /* pending socket error, 0 = none */

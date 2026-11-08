@@ -154,15 +154,8 @@ struct session
     uint64_t rx_paused_skips;
     /* Far-side bind decisions, asserted by the session state-machine cases. */
     uint64_t far_tombstone_opens;
-    uint64_t far_switch_kills;
-    uint64_t far_barriers;
     uint64_t far_adopts;
     uint64_t near_sid_skips;
-    /* Session-wide FEC RX work and its delivery cursor. */
-    uint32_t fec_rx_stream_sid;
-    bool fec_rx_work_armed;
-    uint64_t fec_rx_canceled;
-    uint64_t fec_rx_rearms;
 };
 
 enum stream_state
@@ -626,43 +619,17 @@ enum bind_result
     BIND_ADOPT,
 };
 
-/* tbt_far_fec_rx_barrier(): the RX work is session-wide. A carrier whose
- * barrier is late must not cancel the newer stream's work; if a newer OPEN
- * wins the race during the cancel, re-arm it. `adopt_during` injects that
- * concurrent adoption for the test. */
-static void far_fec_rx_barrier_model(struct session *s, uint32_t old_sid,
-                                     uint32_t new_sid, uint32_t adopt_during)
-{
-    if (s->far_sid != new_sid)
-        return;
-    if (s->fec_rx_work_armed)
-    {
-        s->fec_rx_work_armed = false;
-        s->fec_rx_canceled++;
-    }
-    if (!s->fec_rx_stream_sid || s->fec_rx_stream_sid == old_sid)
-        s->fec_rx_stream_sid = 0;
-    if (adopt_during)
-        s->far_sid = adopt_during; /* the later OPEN wins during the cancel */
-    if (s->far_sid != new_sid)
-    {
-        s->fec_rx_work_armed = true;
-        s->fec_rx_rearms++;
-    }
-}
-
-/* tbt_session_bind_sid() far branch.
+/* tbt_session_bind_sid() far branch, v7 semantics.
  *
- * A fresh OPEN supersedes the stream far_sid still names.  Kill that stream
- * even when it never submitted a byte: its target and ACTIVE slot must not
- * outlive the session's only stream.  A tombstoned sid is protected for
- * TBT_TOMBSTONE_MS; the near allocator skips every sid still in the hash, so
- * an OPEN can only be a duplicate of the old one.  It is dropped and counted;
- * only the reaper frees the sid, after which a later allocation may reuse it. */
+ * Every live flow is routed by sid and far_sid is only the last/primary
+ * compatibility pointer. A fresh OPEN adopts a new stream but does not kill a
+ * live old one; DATA/FIN/RST for a known live sid are accepted. A tombstoned
+ * sid is protected for TBT_TOMBSTONE_MS; the near allocator skips every sid
+ * still in the hash, so an OPEN can only be a duplicate of the old one. It is
+ * dropped and counted; only the reaper frees the sid. */
 static int far_bind(struct session *s, uint32_t sid, bool open)
 {
     struct stream *st = stream_find(s, sid);
-    uint32_t kill_sid = 0, barrier_sid = 0;
     bool adopt = false, drop = false, tombstone_open = false;
 
     if (!sid)
@@ -676,45 +643,23 @@ static int far_bind(struct session *s, uint32_t sid, bool open)
     {
         drop = true;
     }
-    else if (!drop && st && s->far_sid != sid)
-    {
-        /* A live object that is no longer the session stream. */
-        drop = true;
-        if (st->state != ST_DEAD && !st->tombstone)
-            kill_sid = sid;
-    }
     else if (!drop && st && open && stream_is_closing(st))
     {
         drop = true;
     }
     else if (!drop && !st)
     {
-        uint32_t old = s->far_sid;
-
-        if (old && old != sid)
+        if (open)
         {
-            struct stream *ost = stream_find(s, old);
-
-            barrier_sid = old;
-            if (ost && ost->state != ST_DEAD && !ost->tombstone)
-                kill_sid = old;
+            s->far_sid = sid;
+            adopt = true;
         }
-        s->far_sid = sid;
-        adopt = true;
+        else
+        {
+            drop = true;
+        }
     }
 
-    if (kill_sid)
-    {
-        struct stream *old = stream_find(s, kill_sid);
-
-        stream_kill(s, old);
-        s->far_switch_kills++;
-    }
-    if (barrier_sid)
-    {
-        s->far_barriers++;
-        far_fec_rx_barrier_model(s, barrier_sid, sid, 0);
-    }
     if (tombstone_open)
         s->far_tombstone_opens++;
     if (drop)
@@ -1318,30 +1263,6 @@ static void scenario_open_race_p3b3(void)
        "open race: one hash entry and one active stream", "");
 }
 
-/* tbt_session_fec_rx_barrier(): an aborted stream may still have one FEC RX
- * frontier byte queued. The new stream must not start until that old RX work
- * is quiesced and the data plane drops its cursor; the first byte the new
- * stream sees is its own HTTP request, never the old tail. */
-static void scenario_fec_abort_barrier(void)
-{
-    static const char rx[] = "XHTTP/1.1 200 OK\r\n";
-    int head = 0;
-    int barrier = 0;
-    uint64_t far_sid = 1;
-
-    /* Old stream aborted; its stale byte X is still at the RX cursor. */
-    if (rx[head] != 'H')
-    {
-        barrier++;
-        head++; /* tbt_session_fec_rx_barrier() drops the old frontier */
-    }
-    far_sid = 2; /* the new stream is installed only after the barrier */
-    ok(barrier == 1, "fec abort: barrier ran once", "");
-    ok(far_sid == 2, "fec abort: new sid installed after barrier", "");
-    ok(!strncmp(rx + head, "HTTP/", 5),
-       "fec abort: new stream first bytes are HTTP/", "");
-}
-
 /* tbt_stream_release_socket_now(): a target published before st->sk must
  * still be closed when the stream aborts. The next stream's target is then
  * readable; the old target cannot stay in FIN_WAIT/CLOSE_WAIT. */
@@ -1375,10 +1296,9 @@ static void scenario_target_close_on_abort(void)
        "target abort: new stream target is readable", "");
 }
 
-/* A far-side OPEN for a new sid supersedes the stream far_sid still names.
- * The old stream here has never submitted a byte and its target is attached:
- * only an explicit kill closes that target and releases the ACTIVE slot. */
-static void scenario_far_switch_idle(void)
+/* A far-side OPEN for a new sid adopts another flow. v7 keeps the old live
+ * stream, its target and its ACTIVE slot; far_sid only names the newest. */
+static void scenario_far_open_keeps_old(void)
 {
     struct session s = {0};
     struct stream *old, *fresh;
@@ -1398,30 +1318,26 @@ static void scenario_far_switch_idle(void)
 
     ok(far_bind(&s, 7002, true) == BIND_ADOPT,
        "switch idle: new OPEN is adopted", "");
-    ok(old->state == ST_DEAD && old->session_detached && old->tombstone,
-       "switch idle: old stream is DEAD and tombstoned", "");
-    ok(!old->active && old->target == -1 && old->target_attached == 0,
-       "switch idle: old ACTIVE slot released and target closed", "");
-    ok(s.far_sid == 7002 && s.n_active == 1,
-       "switch idle: exactly the new stream is active", "");
+    ok(old->state == ST_OPEN && old->active && old->target == 7001,
+       "switch idle: the old live stream and target are kept", "");
+    ok(s.far_sid == 7002 && s.n_active == 2,
+       "switch idle: both flows stay active", "");
     fresh = stream_find(&s, 7002);
     ok(fresh && fresh->state == ST_OPEN && fresh->target == 7002 &&
        fresh->target_attached == 1,
        "switch idle: new stream is OPEN with its own target", "");
-    ok(s.far_switch_kills == 1 && s.far_barriers == 1 && s.far_adopts == 1,
-       "switch idle: kill, RX barrier and adoption each ran once", "");
+    ok(s.far_adopts == 1, "switch idle: the new OPEN adopted once", "");
 
-    /* A late DATA frame for the old sid must not reach either stream. */
-    ok(far_bind(&s, 7001, false) == BIND_DROP,
-       "switch idle: late DATA for the old sid is dropped", "");
-    ok(s.far_sid == 7002 && s.n_active == 1,
-       "switch idle: late old DATA does not disturb the new stream", "");
+    /* A late DATA frame for the old sid belongs to its own live flow. */
+    ok(far_bind(&s, 7001, false) == BIND_OK,
+       "switch idle: old-sid DATA reaches its own flow", "");
+    ok(s.far_sid == 7002 && s.n_active == 2,
+       "switch idle: old DATA does not disturb the new flow", "");
 }
 
-/* A -> B -> C as fast as the carriers can deliver three OPENs. Each adoption
- * kills the previous stream, including one that never carried data; only C
- * remains active, and A/B reap without leaving a DEAD hash entry or a target. */
-static void scenario_far_fast_reconnect(void)
+/* A -> B -> C as fast as the carriers can deliver three OPENs. v7 keeps all
+ * three live flows; each OPEN only moves the compatibility pointer. */
+static void scenario_far_open_chain_live(void)
 {
     struct session s = {0};
     struct stream *a, *b, *c;
@@ -1445,31 +1361,26 @@ static void scenario_far_fast_reconnect(void)
     ok(c && c->state == ST_OPEN && c->target == 7103,
        "reconnect: C is OPEN with a target", "");
 
-    ok(a->state == ST_DEAD && b->state == ST_DEAD,
-       "reconnect: A and B are DEAD", "");
-    ok(a->target == -1 && b->target == -1 && c->target == 7103,
-       "reconnect: only C still owns a target", "");
-    ok(s.far_sid == 7103 && s.n_active == 1 && s.n_streams == 3,
-       "reconnect: one active stream and two tombstones", "");
-    ok(s.far_switch_kills == 2 && s.far_adopts == 2,
-       "reconnect: each adoption killed its predecessor", "");
+    ok(a->state == ST_OPEN && b->state == ST_OPEN && c->state == ST_OPEN,
+       "reconnect: A, B and C all stay live", "");
+    ok(a->target == 7101 && b->target == 7102 && c->target == 7103,
+       "reconnect: every flow keeps its own target", "");
+    ok(s.far_sid == 7103 && s.n_active == 3 && s.n_streams == 3,
+       "reconnect: three active flows", "");
+    ok(s.far_adopts == 2, "reconnect: each new OPEN adopted once", "");
 
+    stream_kill(&s, a);
+    stream_kill(&s, b);
+    stream_kill(&s, c);
     s.now_ns += (uint64_t)TBT_TOMBSTONE_MS * 1000000ull;
-    ok(session_reap(&s) == 2, "reconnect: A and B reap", "");
-    ok(s.n_streams == 1 && s.n_active == 1 && s.far_sid == 7103,
-       "reconnect: C survives the reap", "");
-    ok(session_hash_count(&s) == 1, "reconnect: no dead hash entry remains", "");
+    ok(session_reap(&s) == 3, "reconnect: A, B and C reap", "");
+    ok(s.n_streams == 0 && s.n_active == 0 && s.far_sid == 0,
+       "reconnect: the session ends empty", "");
+    ok(session_hash_count(&s) == 0, "reconnect: no dead hash entry remains", "");
     for (i = 0; i < s.nst; i++)
         if (!s.st[i].unlinked)
             ok(s.st[i].state != ST_DEAD,
                "reconnect: a live hash entry is not DEAD", "");
-
-    stream_kill(&s, c);
-    s.now_ns += (uint64_t)TBT_TOMBSTONE_MS * 1000000ull;
-    ok(session_reap(&s) == 1, "reconnect: C reaps", "");
-    ok(s.n_streams == 0 && s.n_active == 0 && s.far_sid == 0,
-       "reconnect: the session ends empty", "");
-    ok(session_hash_count(&s) == 0, "reconnect: no stream or target leaked", "");
 }
 
 /* The publisher of B can run after C's adoption while it sits between stream
@@ -1500,47 +1411,6 @@ static void scenario_far_open_race_live(void)
     ok(session_reap(&s) == 1, "open race: B's tombstone reaps", "");
     ok(session_hash_count(&s) == 1 && s.n_active == 1,
        "open race: C remains and no target leaked", "");
-}
-
-/* A -> B -> C can leave B's carrier between installing far_sid=B and running
- * the barrier for A. C's RX work is session-wide; B's late barrier must not
- * cancel it, and a C adoption that wins during the cancel must re-arm it. */
-static void scenario_barrier_late(void)
-{
-    struct session s = {0};
-
-    /* C already owns the session and has pending RX work. */
-    s.far_sid = 7303;
-    s.fec_rx_stream_sid = 7303;
-    s.fec_rx_work_armed = true;
-    far_fec_rx_barrier_model(&s, 7301, 7302, 0);
-    ok(s.far_sid == 7303 && s.fec_rx_work_armed,
-       "barrier late: a stale barrier leaves C's RX work armed", "");
-    ok(s.fec_rx_canceled == 0 && s.fec_rx_rearms == 0,
-       "barrier late: a stale barrier is a no-op", "");
-    ok(s.fec_rx_stream_sid == 7303,
-       "barrier late: C's delivery cursor is untouched", "");
-
-    /* A barrier that still belongs to B resets A's cursor and stops the work. */
-    s.far_sid = 7302;
-    s.fec_rx_stream_sid = 7301;
-    s.fec_rx_work_armed = true;
-    far_fec_rx_barrier_model(&s, 7301, 7302, 0);
-    ok(s.fec_rx_canceled == 1 && !s.fec_rx_work_armed &&
-       s.fec_rx_stream_sid == 0,
-       "barrier late: a current barrier still resets A", "");
-
-    /* C adopts while B's cancel runs: re-arm C's work instead of stalling it. */
-    s.far_sid = 7302;
-    s.fec_rx_stream_sid = 7302;
-    s.fec_rx_work_armed = true;
-    far_fec_rx_barrier_model(&s, 7301, 7302, 7303);
-    ok(s.far_sid == 7303 && s.fec_rx_work_armed,
-       "barrier late: a racing adoption leaves C armed, no stall", "");
-    ok(s.fec_rx_canceled == 2 && s.fec_rx_rearms == 1,
-       "barrier late: the canceled work is re-armed exactly once", "");
-    ok(s.fec_rx_stream_sid == 7302,
-       "barrier late: the late reset does not wipe C's cursor", "");
 }
 
 /* An OPEN for a sid whose tombstone is still in the hash is a duplicate of
@@ -1639,12 +1509,10 @@ int main(void)
     scenario_churn_reap_p3b3();
     scenario_sid_alloc_p3b3();
     scenario_open_race_p3b3();
-    scenario_fec_abort_barrier();
     scenario_target_close_on_abort();
-    scenario_far_switch_idle();
-    scenario_far_fast_reconnect();
+    scenario_far_open_keeps_old();
+    scenario_far_open_chain_live();
     scenario_far_open_race_live();
-    scenario_barrier_late();
     scenario_tombstone_open_window();
 
     printf("test_multistream: %d checks, %d failures\n", checks, failures);
