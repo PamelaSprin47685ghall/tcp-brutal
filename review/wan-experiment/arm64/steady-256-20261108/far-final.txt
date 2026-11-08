@@ -1,0 +1,9 @@
+srcversion=02ABBA67E2B39C4CE23EC65 max_carriers=256
+# id role state listen peer target n m streams
+1 far listening 0.0.0.0:9000 0.0.0.0:0 127.0.0.1:5210 4 4 258
+tunnel 1 c3 n=256 up=59 lost=256 replaced=0 stream_reset_tcp
+LISTEN 0      8          127.0.0.1:5210       0.0.0.0:*   
+LISTEN 0      128          0.0.0.0:9000       0.0.0.0:*   
+ss5210:
+ 304166 python3 /root/far-raw-serve.py --file /root/accept-1g/accept-1g.bin --bind 127.0.0.1 --port 5210 --log /root/accept-1g/httpd.log --pidfile /root/accept-1g/httpd.pid
+warnings=0

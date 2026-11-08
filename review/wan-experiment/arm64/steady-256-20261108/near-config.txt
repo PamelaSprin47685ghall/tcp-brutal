@@ -1,0 +1,5 @@
+tunnel 1 role=near listen=127.0.0.1:9001 peer=45.11.1.62:9000 n=4 m=4 fec=on mode=grouped w=8 carriers=256 crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000 drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=16777216 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0 portblock=30000-30511 dev=eth0 nonce=00112233445566778899aabbccddeeff
+
+# block 30000-30511 (512 ports)
+# configured
+ports 30000-30511

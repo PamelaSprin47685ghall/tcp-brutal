@@ -1,0 +1,5 @@
+0:	from all lookup local
+100:	from all to 45.11.1.62 lookup main
+9000:	from all to 198.18.0.0/30 lookup 2022
+45.11.1.62 via 192.168.123.254 dev eth0 src 192.168.123.82 uid 0 
+    cache 

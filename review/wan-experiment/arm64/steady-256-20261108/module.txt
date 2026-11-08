@@ -1,0 +1,7 @@
+near_ko=/root/tbtun-0.2.3-fix39-20261108T020924Z/tbtun.ko
+far_srcversion=02ABBA67E2B39C4CE23EC65
+far_max_carriers=256
+near_srcversion=1D8B6C0D0981A4D87FD0535
+near_vermagic=6.1.172 SMP mod_unload modversions aarch64
+near_version=0.2.2
+7716e743371be04b26c8a22eb5820162de7b389c8a6b7f7bea56a132d0dc1af7  /root/tbtun-0.2.3-fix39-20261108T020924Z/tbtun.ko
