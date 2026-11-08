@@ -1,0 +1,42 @@
+=== env
+date_utc=2026-11-06T17:09:28Z
+hostname=lubancat
+Linux lubancat 6.1.172 #1 SMP Sat Oct 17 15:47:17 CST 2026 aarch64 GNU/Linux
+gcc=gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+cflags=-O3 -std=c99 -Wall -Wextra -Werror -march=armv8-a
+nproc=8
+loadavg=0.01 0.02 0.00 1/307 263001
+cpu0 max_khz=1800000
+cpu0 governor=performance
+cpu4 max_khz=2304000
+cpu4 governor=performance
+-- source sha256
+e224925ec7c599e0547587bd3b6607d5de2df83e2e9c65a59cffd9c44eb55c2a  gf16/sc_ldpc.c
+7ff4ef96944274a021eace6a26f02ecc906bb0f76eba13344c471be9bffdc5f0  gf16/sc_ldpc.h
+b6fb421be63e9c1a6e5578f33aca979601aea6adc4614affcbdc4ebd996b623b  gf16/sc_ldpc_gf16.c
+928c17eb5bfcd75a3cdb1c0d9b3de8b4e9a94c6b667d98dd55b4eee93e3cb565  gf16/sc_ldpc_gf16.h
+095a49566382bceb0d4d5eff7e6ca05a11b89410adb608d47e0ea6268a2ab078  gf16/sc_ldpc_gf16_bench.c
+2b77d7aba715524c292a8554fd9d6bd34886f90969ee9f3f13958cf35264190c  bs/sc_ldpc.c
+e12cdfa66b550e9d428f4ec94e28dfebde4361cd070a3d5efa3f144d8e23248a  bs/sc_ldpc.h
+5b2cf50267b2b763e4dbe0b8c6b6e4131250852df3582fa66c3a7b96e5db975b  bs/sc_ldpc_bench.c
+0c7598a02d019134bddeabace7eaa39bc1b940e97a46d0dfc11cef02c5ad3857  bs/sc_ldpc_bs.c
+825e18848819ae0a773893c6de2d98827874997e5c8a7ff08375df237aef3f2e  bs/sc_ldpc_bs.h
+18cdfcac8190ba3284af11fb55bb33ac89710307567d133113e153671a51f054  bs/sc_ldpc_bs_bench.c
+b71facb6ce1dd816a28b5634005846d7133ef25bf0c3a7edda1435c1ef93f1fd  bs/sc_ldpc_bs_test.c
+=== build
+BUILD_OK
+CORRECTNESS_OK
+=== correctness
+payload_check code 0: verify=0 errors=0 n=64 n_data=32
+payload_check code 1: verify=0 errors=0 n=64 n_data=32
+payload_check code 2: verify=0 errors=0 n=64 n_data=32
+payload_check code 3: verify=0 errors=0 n=64 n_data=32
+series,host,block,L,rate_target,rate_actual,p,model,trials,codes,seed,recovery,ci99,unresolved_mean,iter_mean,enc_mbps,dec_mbps,mem_bytes,n,n_data,n_chk,edges
+gf16-sim,lubancat,128,16,0.45,0.449912,0.40,symmetric,2000,4,1,1.000000,0.001653,0.000,10.658,36.112,7.746,120876,2276,1024,1252,8328
+# core max=256 calls=1 solved=1 failed=0 skipped=0 vars_max=8 vars_avg=8.00 gf2_deficient=0 gf16_rank_avg=8.00 under=0 rankdef=0 bad=0
+# cross_check trials=2000 binary_only=0 gf16_extra=8
+RESULT: PASS
+payload_check: bytes=8192 codewords=2048 bit_errors=0 ok=1
+point: block=16 L=4 rate=0.50 p=0.10 model=systematic term=acc n=64 data=32 chk=32 edges=216 rate_actual=0.50000 mem=2736 enc=11.585MB/s(200000) dec=6.880MB/s(171526)
+block,L,rate,p,trials,recovery,ci99,iter_mean,enc_mbps,dec_mbps,latency_ms,mem_bytes
+16,4,0.50,0.10,2000,1.000000,0.001653,1.70,11.585,6.880,0.262144,2736
