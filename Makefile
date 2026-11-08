@@ -138,7 +138,7 @@ check:
 # root, no module and no kernel headers: the grammar test (tbt_parse.c), the
 # hostile-input test (tbt_rec.c + tbt_proto.c) and the HTTP container test
 # (tbt_http.c + tbt_proto.c).
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_SCLC) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
