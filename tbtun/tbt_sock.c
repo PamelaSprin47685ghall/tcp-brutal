@@ -674,7 +674,7 @@ struct tbt_pending
 static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
 {
     struct tbt_stream *st;
-    u64 sid;
+    u64 sid, old_fec_sid = 0;
 
     spin_lock(&sess->lock);
     if (READ_ONCE(sess->closing) ||
@@ -698,12 +698,28 @@ static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
         atomic64_inc(&sess->fec_stream_refused);
         return -EOPNOTSUPP;
     }
+    if (sess->fec)
+        old_fec_sid = READ_ONCE(sess->far_sid);
     sid = ((u64)(sess->sid_prefix & 0xffff) << 24) |
           (sess->next_sid & 0xffffff);
     sess->next_sid++;
     /* sid 0 is the "no stream" sentinel in sess->far_sid. */
     if (!sid)
         sid = 1;
+    spin_unlock(&sess->lock);
+
+    /* The old FEC stream is dead (the live check above refused otherwise).
+     * Quiesce its RX work and let the data plane drop its cursor/blocks
+     * before far_sid names the new stream. */
+    if (old_fec_sid)
+        tbt_session_fec_rx_barrier(sess, old_fec_sid);
+
+    spin_lock(&sess->lock);
+    if (READ_ONCE(sess->closing) || sess->n_active >= TBT_STREAMS_MAX)
+    {
+        spin_unlock(&sess->lock);
+        return -EBUSY;
+    }
     sess->far_sid = sid;
     spin_unlock(&sess->lock);
 

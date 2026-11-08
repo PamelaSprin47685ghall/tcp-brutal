@@ -582,6 +582,10 @@ struct tbt_fec_grouped;
 struct tbt_fec_blk
 {
     u64 block_id;
+    /* Stream generation this block was placed for. A new stream bind clears
+     * every block whose sid differs, so the previous stream's reorder bytes
+     * cannot be delivered to the new one. */
+    u64 sid;
     bool used;
     bool ready;
     u16 nreal;    /* real DATA packets in this block; 0 = not yet known */
@@ -703,6 +707,8 @@ struct tbt_fec_tx
     u16 ndrain;
 };
 
+struct tbt_session;
+
 struct tbt_fec_rx
 {
     spinlock_t lock; /* carrier rx works assemble blocks concurrently */
@@ -710,6 +716,10 @@ struct tbt_fec_rx
      * single-owner. Two bodies would duplicate one 8 KiB slot and skip
      * another. */
     atomic_t run;
+    /* Set by tbt_fec_data_init(). tbt_session_fec_rx_barrier() calls it after
+     * w_fec_rx is quiesced, before a new far_sid is used, so the old stream's
+     * stream_sid/base, delivery cursors and undelivered blocks are dropped. */
+    void (*stream_reset)(struct tbt_session *sess, u64 sid);
     u16 n, m, s;
     u16 groups;
     u16 slots; /* block slots per group */
@@ -726,6 +736,10 @@ struct tbt_fec_rx
      * session starts at stream byte 0 again. */
     u64 stream_sid;
     u64 stream_base;
+    /* A new stream was bound but its first FEC record has not arrived: the
+     * delivery walk and NACK scan wait, and the first record sets the new
+     * next_super/next_deliver base. */
+    bool stream_await;
     u64 ack_deliver;  /* last frontier sent in an ACK */
     u64 total_pkts;   /* stream packet count; valid when total_known */
     u64 total_bytes;  /* FIN's byte offset; 0 when only LAST named the end */
@@ -1702,6 +1716,10 @@ void tbt_fec_out_kick(struct tbt_session *sess, u16 carrier);
 void tbt_fec_rx_work(struct work_struct *w);
 int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len);
 int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len);
+/* A new stream takes over the session's FEC plane: drop the previous stream's
+ * reorder blocks and delivery cursors before its bytes can reach the new
+ * stream. The first FEC record after this call sets the new frontier. */
+void tbt_fec_rx_new_stream(struct tbt_session *sess, u64 sid);
 /* The old FIN record names the stream's total byte offset. The FEC receiver
  * uses it to complete a final block whose parity and LAST flag were lost. */
 void tbt_fec_rx_fin(struct tbt_session *sess, struct tbt_stream *st,
@@ -1749,6 +1767,9 @@ void tbt_stream_put(struct tbt_stream *st);
 void tbt_stream_detach_from_session(struct tbt_stream *st);
 void tbt_stream_maybe_detach(struct tbt_stream *st);
 bool tbt_session_fec_stream_live(const struct tbt_session *sess);
+/* Quiesce the session FEC RX work and ask the FEC data plane to drop the old
+ * stream's delivery state before a new far_sid is installed. */
+void tbt_session_fec_rx_barrier(struct tbt_session *sess, u64 sid);
 void tbt_stream_kill(struct tbt_stream *st, u8 reason);
 void tbt_stream_kill_by_sid(struct tbt_session *sess, u64 sid, u8 reason);
 /* 0.2.0 session lifetime (review/s2-merged-design.md §1.3/§5). tbt_session_get()

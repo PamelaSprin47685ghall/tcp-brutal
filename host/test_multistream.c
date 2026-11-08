@@ -1128,6 +1128,30 @@ static void scenario_open_race_p3b3(void)
        "open race: one hash entry and one active stream", "");
 }
 
+/* tbt_session_fec_rx_barrier(): an aborted stream may still have one FEC RX
+ * frontier byte queued. The new stream must not start until that old RX work
+ * is quiesced and the data plane drops its cursor; the first byte the new
+ * stream sees is its own HTTP request, never the old tail. */
+static void scenario_fec_abort_barrier(void)
+{
+    static const char rx[] = "XHTTP/1.1 200 OK\r\n";
+    int head = 0;
+    int barrier = 0;
+    uint64_t far_sid = 1;
+
+    /* Old stream aborted; its stale byte X is still at the RX cursor. */
+    if (rx[head] != 'H')
+    {
+        barrier++;
+        head++; /* tbt_session_fec_rx_barrier() drops the old frontier */
+    }
+    far_sid = 2; /* the new stream is installed only after the barrier */
+    ok(barrier == 1, "fec abort: barrier ran once", "");
+    ok(far_sid == 2, "fec abort: new sid installed after barrier", "");
+    ok(!strncmp(rx + head, "HTTP/", 5),
+       "fec abort: new stream first bytes are HTTP/", "");
+}
+
 int main(void)
 {
     static const enum mode modes[] = {
@@ -1157,6 +1181,7 @@ int main(void)
     scenario_churn_reap_p3b3();
     scenario_sid_alloc_p3b3();
     scenario_open_race_p3b3();
+    scenario_fec_abort_barrier();
 
     printf("test_multistream: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

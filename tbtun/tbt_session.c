@@ -881,6 +881,7 @@ bool tbt_session_fec_stream_live(const struct tbt_session *sess)
 int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open)
 {
     bool adopt = false, drop = false;
+    u64 barrier_sid = 0;
 
     if (!sid)
         return TBT_BIND_DROP;
@@ -916,6 +917,20 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open)
             drop = true; /* late OPEN for a closing stream */
         else if (!st)
         {
+            u64 old = READ_ONCE(sess->far_sid);
+
+            /* The FEC RX cursor belongs to the old stream until the data
+             * plane resets it. If that stream is already dead/tombstoned,
+             * stop the RX work before the new sid is installed; a live old
+             * stream keeps its tail and B's drain decides when to switch. */
+            if (old && old != sid)
+            {
+                struct tbt_stream *ost = tbt_stream_find_locked(sess, old);
+
+                if (!ost || READ_ONCE(ost->state) == TBT_ST_DEAD ||
+                    ost->tombstone_until_ns)
+                    barrier_sid = old;
+            }
             sess->far_sid = sid; /* last/primary compatibility only */
             adopt = true;
         }
@@ -924,6 +939,8 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open)
 
     if (drop)
         return TBT_BIND_DROP;
+    if (barrier_sid)
+        tbt_session_fec_rx_barrier(sess, barrier_sid);
     if (adopt && sess->tunnel->cfg.role == TBT_ROLE_FAR)
     {
         bool created = false;
@@ -1235,6 +1252,21 @@ void tbt_session_cancel(struct tbt_session *s, enum tbt_sess_work w)
         return;
     if (cancel_delayed_work_sync(dw) && test_and_clear_bit(w, &s->sched))
         tbt_session_put(s);
+}
+
+/* Called before a new stream takes over the session's FEC RX. The FEC work is
+ * a single delivery cursor; it must stop before the old stream is unlinked and
+ * the new far_sid is installed, otherwise an in-flight super-block of the old
+ * stream is delivered at the new stream's offset. The data plane owns the
+ * cursor reset (stream_sid/base, next_super, blocks); this function only
+ * provides the ordering and the hook. */
+void tbt_session_fec_rx_barrier(struct tbt_session *sess, u64 sid)
+{
+    if (!sess || !READ_ONCE(sess->fec))
+        return;
+    tbt_session_cancel(sess, TBT_SW_FEC_RX);
+    if (sess->fec_rx && sess->fec_rx->stream_reset)
+        sess->fec_rx->stream_reset(sess, sid);
 }
 
 // ---------------------------------------------------------------------------
