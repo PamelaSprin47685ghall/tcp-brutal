@@ -158,6 +158,11 @@ struct session
     uint64_t far_barriers;
     uint64_t far_adopts;
     uint64_t near_sid_skips;
+    /* Session-wide FEC RX work and its delivery cursor. */
+    uint32_t fec_rx_stream_sid;
+    bool fec_rx_work_armed;
+    uint64_t fec_rx_canceled;
+    uint64_t fec_rx_rearms;
 };
 
 enum stream_state
@@ -621,6 +626,31 @@ enum bind_result
     BIND_ADOPT,
 };
 
+/* tbt_far_fec_rx_barrier(): the RX work is session-wide. A carrier whose
+ * barrier is late must not cancel the newer stream's work; if a newer OPEN
+ * wins the race during the cancel, re-arm it. `adopt_during` injects that
+ * concurrent adoption for the test. */
+static void far_fec_rx_barrier_model(struct session *s, uint32_t old_sid,
+                                     uint32_t new_sid, uint32_t adopt_during)
+{
+    if (s->far_sid != new_sid)
+        return;
+    if (s->fec_rx_work_armed)
+    {
+        s->fec_rx_work_armed = false;
+        s->fec_rx_canceled++;
+    }
+    if (!s->fec_rx_stream_sid || s->fec_rx_stream_sid == old_sid)
+        s->fec_rx_stream_sid = 0;
+    if (adopt_during)
+        s->far_sid = adopt_during; /* the later OPEN wins during the cancel */
+    if (s->far_sid != new_sid)
+    {
+        s->fec_rx_work_armed = true;
+        s->fec_rx_rearms++;
+    }
+}
+
 /* tbt_session_bind_sid() far branch.
  *
  * A fresh OPEN supersedes the stream far_sid still names.  Kill that stream
@@ -681,7 +711,10 @@ static int far_bind(struct session *s, uint32_t sid, bool open)
         s->far_switch_kills++;
     }
     if (barrier_sid)
+    {
         s->far_barriers++;
+        far_fec_rx_barrier_model(s, barrier_sid, sid, 0);
+    }
     if (tombstone_open)
         s->far_tombstone_opens++;
     if (drop)
@@ -1469,6 +1502,47 @@ static void scenario_far_open_race_superseded(void)
        "open race: no object or target leaked", "");
 }
 
+/* A -> B -> C can leave B's carrier between installing far_sid=B and running
+ * the barrier for A. C's RX work is session-wide; B's late barrier must not
+ * cancel it, and a C adoption that wins during the cancel must re-arm it. */
+static void scenario_barrier_late(void)
+{
+    struct session s = {0};
+
+    /* C already owns the session and has pending RX work. */
+    s.far_sid = 7303;
+    s.fec_rx_stream_sid = 7303;
+    s.fec_rx_work_armed = true;
+    far_fec_rx_barrier_model(&s, 7301, 7302, 0);
+    ok(s.far_sid == 7303 && s.fec_rx_work_armed,
+       "barrier late: a stale barrier leaves C's RX work armed", "");
+    ok(s.fec_rx_canceled == 0 && s.fec_rx_rearms == 0,
+       "barrier late: a stale barrier is a no-op", "");
+    ok(s.fec_rx_stream_sid == 7303,
+       "barrier late: C's delivery cursor is untouched", "");
+
+    /* A barrier that still belongs to B resets A's cursor and stops the work. */
+    s.far_sid = 7302;
+    s.fec_rx_stream_sid = 7301;
+    s.fec_rx_work_armed = true;
+    far_fec_rx_barrier_model(&s, 7301, 7302, 0);
+    ok(s.fec_rx_canceled == 1 && !s.fec_rx_work_armed &&
+       s.fec_rx_stream_sid == 0,
+       "barrier late: a current barrier still resets A", "");
+
+    /* C adopts while B's cancel runs: re-arm C's work instead of stalling it. */
+    s.far_sid = 7302;
+    s.fec_rx_stream_sid = 7302;
+    s.fec_rx_work_armed = true;
+    far_fec_rx_barrier_model(&s, 7301, 7302, 7303);
+    ok(s.far_sid == 7303 && s.fec_rx_work_armed,
+       "barrier late: a racing adoption leaves C armed, no stall", "");
+    ok(s.fec_rx_canceled == 2 && s.fec_rx_rearms == 1,
+       "barrier late: the canceled work is re-armed exactly once", "");
+    ok(s.fec_rx_stream_sid == 7302,
+       "barrier late: the late reset does not wipe C's cursor", "");
+}
+
 /* An OPEN for a sid whose tombstone is still in the hash is a duplicate of
  * the old OPEN, not a new stream: it is dropped and counted, never silently
  * ignored.  The near allocator skips the tombstoned sid, so a new stream
@@ -1570,6 +1644,7 @@ int main(void)
     scenario_far_switch_idle();
     scenario_far_fast_reconnect();
     scenario_far_open_race_superseded();
+    scenario_barrier_late();
     scenario_tombstone_open_window();
 
     printf("test_multistream: %d checks, %d failures\n", checks, failures);

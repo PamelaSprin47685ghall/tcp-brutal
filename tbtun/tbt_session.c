@@ -931,6 +931,23 @@ bool tbt_session_fec_stream_live(const struct tbt_session *sess)
            !READ_ONCE(st->tx_fin_sent);
 }
 
+/* The FEC RX work is session-wide. A carrier that adopted this OPEN may be
+ * delayed after installing far_sid; by the time it runs the barrier, a later
+ * OPEN can own the session. Canceling TBT_SW_FEC_RX then would stop the newer
+ * stream's pending delivery until the stall timer. Barrier only while
+ * `new_sid` is still the session's stream, and if a later adoption wins the
+ * race during the cancel, arm the work again for the current stream. The data
+ * plane resets its cursor on the current stream's first record otherwise. */
+static void tbt_far_fec_rx_barrier(struct tbt_session *sess, u64 old_sid,
+                                   u64 new_sid)
+{
+    if (READ_ONCE(sess->far_sid) != new_sid)
+        return;
+    tbt_session_fec_rx_barrier(sess, old_sid);
+    if (READ_ONCE(sess->fec) && READ_ONCE(sess->far_sid) != new_sid)
+        tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
+}
+
 int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open)
 {
     bool adopt = false, drop = false, tombstone_open = false;
@@ -1013,7 +1030,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open)
     if (kill_sid)
         tbt_stream_kill_by_sid(sess, kill_sid, TBT_ST_DEAD);
     if (barrier_sid)
-        tbt_session_fec_rx_barrier(sess, barrier_sid);
+        tbt_far_fec_rx_barrier(sess, barrier_sid, sid);
     if (drop)
     {
         if (tombstone_open)
