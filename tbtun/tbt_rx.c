@@ -225,6 +225,22 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
     INIT_LIST_HEAD(&fr->list);
     fr->len = len;
     fr->off = 0;
+    /* RX frames never enter the TX path, but the frame is kmalloc()ed and a
+     * bool field must never be read from stale slab bytes. Keep every flag at
+     * its zero/false initial state. */
+    fr->open_pending = 0;
+    fr->pinned = false;
+    fr->dup_copy = false;
+    fr->retx_copy = false;
+    fr->dropped = false;
+    fr->retx_src = TBT_RETX_NONE;
+    fr->path = TBT_PATH_NONE;
+    fr->gen = 0;
+    fr->retries = 0;
+    fr->retry_at_ns = 0;
+    fr->avoid_mask = 0;
+    fr->ret = NULL;
+    fr->st = NULL;
     fr->hdr = *hdr;
     if (len)
         memcpy(fr->data, payload, len);

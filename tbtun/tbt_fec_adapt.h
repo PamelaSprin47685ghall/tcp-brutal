@@ -163,18 +163,24 @@ void tbt_fec_est_sample(const struct tbt_fec_est *e, u64 now_ns,
 static inline bool tbt_fec_adapt_bitmap_test(
     const u8 bm[TBT_FEC_ADAPT_BITMAP_BYTES], u16 index)
 {
+    if (index >= TBT_FEC_ADAPT_CARRIERS)
+        return false;
     return (bm[index >> 3] >> (index & 7)) & 1u;
 }
 
 static inline void tbt_fec_adapt_bitmap_set(u8 bm[TBT_FEC_ADAPT_BITMAP_BYTES],
                                             u16 index)
 {
+    if (index >= TBT_FEC_ADAPT_CARRIERS)
+        return;
     bm[index >> 3] |= (u8)(1u << (index & 7));
 }
 
 static inline void tbt_fec_adapt_bitmap_clear(
     u8 bm[TBT_FEC_ADAPT_BITMAP_BYTES], u16 index)
 {
+    if (index >= TBT_FEC_ADAPT_CARRIERS)
+        return;
     bm[index >> 3] &= (u8)~(1u << (index & 7));
 }
 

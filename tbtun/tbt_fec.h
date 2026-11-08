@@ -174,6 +174,13 @@ static inline bool tbt_tx_peer_fin_close_expired(bool rx_fin_done,
            now > rx_fin_done_ns && now - rx_fin_done_ns > bound;
 }
 
+/* Admission arithmetic: a flow needs at least one group, and its count must
+ * fit the groups no live flow owns. The subtraction form cannot overflow. */
+static inline bool tbt_fec_groups_fit(u16 total, u16 used, u16 count)
+{
+    return count && used <= total && count <= (u16)(total - used);
+}
+
 /* A stream the TX work may use: not dead, still attached to the session, and
  * not inside its tombstone window.  A gracefully closed stream keeps state
  * OPEN after detach, so the state alone is not enough. */

@@ -3546,7 +3546,8 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess,
          * advances, and the mask belongs to the block just delivered. */
         {
             bool sc_mode = rx->est_sclc &&
-                           tbt_fec_grouped_mode(rx->codec) == 3;
+                           tbt_fec_grouped_mode(rx->codec) == 3 &&
+                           rx->groups <= TBT_FEC_ADAPT_GROUPS;
             bool rlnc_mode =
                 READ_ONCE(sess->adaptive) && rx->est &&
                 rx->groups <= TBT_FEC_ADAPT_GROUPS &&
@@ -7129,40 +7130,57 @@ bool tbt_fec_flow_can_admit(struct tbt_session *sess)
     return can;
 }
 
-/* Allocate and publish a flow. The caller holds fec_alloc_lock, so the group
- * check and the insertion cannot interleave with another admission. */
+/* Allocate and publish a flow. The caller holds fec_alloc_lock, which
+ * serialises admission and detach; the spinlock is taken only for the table
+ * check/reserve and for the final publish. The plane allocations sleep and
+ * must never run under sess->lock. */
 static struct tbt_fec_flow *
-tbt_fec_flow_admit_locked(struct tbt_session *sess, u64 sid,
-                          const u8 mask[TBT_FEC_BITMAP_BYTES], u16 count)
+tbt_fec_flow_create(struct tbt_session *sess, u64 sid,
+                    const u8 mask[TBT_FEC_BITMAP_BYTES], u16 count)
 {
     struct tbt_fec_flow *f, *it;
-    u16 p;
+    u16 p, b;
     u64 nonce;
+    int err = -ENOMEM;
 
     if (!count || count > sess->fec_groups_total)
         return ERR_PTR(-EPROTO);
-    if (sess->fec_sclc && sess->n_fec_flows)
-        return ERR_PTR(-EOPNOTSUPP);
-    if (sid && tbt_fec_flow_find_locked(sess, sid))
-        return ERR_PTR(-EEXIST);
-    if (sess->fec_groups_used + count > sess->fec_groups_total)
-        return ERR_PTR(-ENOSPC);
-    {
-        u16 b;
 
-        for (b = 0; b < TBT_STREAM_HT; b++)
-            hlist_for_each_entry(it, &sess->fec_flows[b], node)
-            {
-                for (p = 0; p < sess->fec_groups_total; p++)
-                    if (tbt_fec_bitmap_test(mask, p) &&
-                        tbt_fec_bitmap_test(it->group_mask, p))
-                        return ERR_PTR(-EPROTO);
-            }
+    spin_lock(&sess->lock);
+    if (sess->fec_sclc && sess->n_fec_flows)
+    {
+        spin_unlock(&sess->lock);
+        return ERR_PTR(-EOPNOTSUPP);
     }
+    if (sid && tbt_fec_flow_find_locked(sess, sid))
+    {
+        spin_unlock(&sess->lock);
+        return ERR_PTR(-EEXIST);
+    }
+    if (!tbt_fec_groups_fit(sess->fec_groups_total,
+                            sess->fec_groups_used, count))
+    {
+        spin_unlock(&sess->lock);
+        return ERR_PTR(-ENOSPC);
+    }
+    for (b = 0; b < TBT_STREAM_HT; b++)
+        hlist_for_each_entry(it, &sess->fec_flows[b], node)
+            for (p = 0; p < sess->fec_groups_total; p++)
+                if (tbt_fec_bitmap_test(mask, p) &&
+                    tbt_fec_bitmap_test(it->group_mask, p))
+                {
+                    spin_unlock(&sess->lock);
+                    return ERR_PTR(-EPROTO);
+                }
+    /* Reserve the groups before the sleeping allocation. fec_alloc_lock
+     * prevents another admission from stealing them; a failure below puts
+     * the reservation back. */
+    sess->fec_groups_used += count;
+    spin_unlock(&sess->lock);
 
     f = kzalloc(sizeof(*f), GFP_KERNEL);
     if (!f)
-        return ERR_PTR(-ENOMEM);
+        goto fail_unreserve;
     f->sess = sess;
     f->sid = sid;
     f->groups = count;
@@ -7172,7 +7190,8 @@ tbt_fec_flow_admit_locked(struct tbt_session *sess, u64 sid,
         count)
     {
         kfree(f);
-        return ERR_PTR(-EPROTO);
+        err = -EPROTO;
+        goto fail_unreserve;
     }
     nonce = tbt_fec_base_nonce(sess);
     f->tx = tbt_fec_tx_plane_new(sess, f, count, sid, mask, nonce);
@@ -7182,7 +7201,7 @@ tbt_fec_flow_admit_locked(struct tbt_session *sess, u64 sid,
         tbt_fec_tx_plane_free(f->tx);
         tbt_fec_rx_plane_free(f->rx);
         kfree(f);
-        return ERR_PTR(-ENOMEM);
+        goto fail_unreserve;
     }
     refcount_set(&f->refs, 2); /* one table reference, one caller reference */
     INIT_WORK(&f->free_work, tbt_fec_flow_free_work);
@@ -7190,13 +7209,18 @@ tbt_fec_flow_admit_locked(struct tbt_session *sess, u64 sid,
     spin_lock(&sess->lock);
     hlist_add_head(&f->node, &sess->fec_flows[TBT_STREAM_BUCKET(sid)]);
     sess->n_fec_flows++;
-    sess->fec_groups_used += count;
     if (!sess->fec_primary)
     {
         tbt_fec_primary_publish(sess, f);
     }
     spin_unlock(&sess->lock);
     return f;
+
+fail_unreserve:
+    spin_lock(&sess->lock);
+    sess->fec_groups_used -= count;
+    spin_unlock(&sess->lock);
+    return ERR_PTR(err);
 }
 
 /* Bind the unbound primary flow to the first stream. Its planes were sized
@@ -7226,6 +7250,7 @@ struct tbt_fec_flow *tbt_fec_flow_admit_mask(struct tbt_session *sess, u64 sid,
 {
     struct tbt_fec_flow *f;
     u16 count;
+    bool bound = false;
 
     if (!sess || !sess->fec || !sid)
         return ERR_PTR(-EINVAL);
@@ -7239,11 +7264,18 @@ struct tbt_fec_flow *tbt_fec_flow_admit_mask(struct tbt_session *sess, u64 sid,
         if (memcmp(mask, f->group_mask, TBT_FEC_BITMAP_BYTES))
             f = ERR_PTR(-EPROTO);
         else
+        {
             f = tbt_fec_flow_bind_primary_locked(sess, f, sid);
+            bound = true;
+        }
     }
-    else
-        f = tbt_fec_flow_admit_locked(sess, sid, mask, count);
     spin_unlock(&sess->lock);
+    if (bound || (f && IS_ERR(f)))
+    {
+        mutex_unlock(&sess->fec_alloc_lock);
+        return f;
+    }
+    f = tbt_fec_flow_create(sess, sid, mask, count);
     mutex_unlock(&sess->fec_alloc_lock);
     return f;
 }
@@ -7281,8 +7313,8 @@ struct tbt_fec_flow *tbt_fec_flow_admit(struct tbt_session *sess, u64 sid,
         mutex_unlock(&sess->fec_alloc_lock);
         return ERR_PTR(-ENOSPC);
     }
-    f = tbt_fec_flow_admit_locked(sess, sid, mask, got);
     spin_unlock(&sess->lock);
+    f = tbt_fec_flow_create(sess, sid, mask, got);
     mutex_unlock(&sess->fec_alloc_lock);
     return f;
 }
@@ -7587,9 +7619,7 @@ int tbt_fec_data_init(struct tbt_session *sess)
         tbt_fec_bitmap_set(mask, (u16)i);
 
     mutex_lock(&sess->fec_alloc_lock);
-    spin_lock(&sess->lock);
-    f = tbt_fec_flow_admit_locked(sess, 0, mask, primary_groups);
-    spin_unlock(&sess->lock);
+    f = tbt_fec_flow_create(sess, 0, mask, primary_groups);
     mutex_unlock(&sess->fec_alloc_lock);
     if (IS_ERR(f))
     {

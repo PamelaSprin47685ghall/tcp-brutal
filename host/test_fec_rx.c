@@ -1470,6 +1470,30 @@ static void test_peer_fin_close_bound(void)
        "close bound: a timestamp from the future does not expire");
 }
 
+/* Init creates the primary flow before any OPEN. The default quota takes all
+ * groups, so a second flow is refused; a 16-group quota leaves room for a
+ * second flow and refuses a third. This is the arithmetic the admission
+ * reserve uses around its sleeping plane allocation. */
+static void test_admission_groups(void)
+{
+    u16 used = 0;
+
+    ok(tbt_fec_groups_fit(32, used, 32), "admit: primary takes all groups");
+    used = 32;
+    ok(!tbt_fec_groups_fit(32, used, 16),
+       "admit: default init refuses a second flow");
+
+    used = 16; /* primary capped by fec_groups_per_flow=16 */
+    ok(tbt_fec_groups_fit(32, used, 16),
+       "admit: the second flow fits the remaining groups");
+    used = 32;
+    ok(!tbt_fec_groups_fit(32, used, 16), "admit: a third flow is refused");
+
+    ok(!tbt_fec_groups_fit(32, 0, 0), "admit: zero groups is refused");
+    ok(!tbt_fec_groups_fit(32, 33, 1),
+       "admit: used above total cannot overflow into a fit");
+}
+
 static void test_super_cursor(void)
 {
     static const u16 full[N] = {S, S, S, S};
@@ -2283,6 +2307,7 @@ int main(void)
     test_flow_lifetime();
     test_admit_abort_refs();
     test_peer_fin_close_bound();
+    test_admission_groups();
     test_ack_split();
     test_rx_poll();
     test_nack_settle_gate();

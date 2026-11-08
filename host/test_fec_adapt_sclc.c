@@ -1873,6 +1873,26 @@ static void case_epoch_base(void)
     eq_u32(out.epoch, 2, "epoch base: after INIT generation 1");
 }
 
+/* The adaptive bitmap helpers must refuse an index outside the 256-carrier
+ * map. An unchecked write here would land in the bool fields next to the
+ * block's masks and produce an invalid-load report. */
+static void case_bitmap_bounds(void)
+{
+    u8 bm[TBT_FEC_ADAPT_BITMAP_BYTES];
+    u8 copy[TBT_FEC_ADAPT_BITMAP_BYTES];
+
+    memset(bm, 0, sizeof(bm));
+    tbt_fec_adapt_bitmap_set(bm, 255);
+    ok(tbt_fec_adapt_bitmap_test(bm, 255), "bitmap: index 255 is valid");
+    memcpy(copy, bm, sizeof(bm));
+    tbt_fec_adapt_bitmap_set(bm, 256);
+    tbt_fec_adapt_bitmap_clear(bm, 256);
+    ok(!memcmp(bm, copy, sizeof(bm)),
+       "bitmap: index 256 is a no-op for set and clear");
+    ok(!tbt_fec_adapt_bitmap_test(bm, 256),
+       "bitmap: index 256 tests false");
+}
+
 /* ------------------------------------------------------------------ *
  * main
  * ------------------------------------------------------------------ */
@@ -1928,6 +1948,7 @@ int main(void)
     case_convergence();
     case_convergence_uplink();
     case_no_oscillation();
+    case_bitmap_bounds();
 
     printf("test_fec_adapt_sclc: %d checks, %d failures\n", checks,
            failures);
