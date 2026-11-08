@@ -1207,6 +1207,21 @@ static void tbt_reap_work(struct work_struct *w)
         tbt_session_put(sess);
 }
 
+/* One session-wide ARQ/control pump wake.  tbt_tx_wake() used to schedule
+ * one work item per carrier, and all of them then serialised on pump_lock;
+ * this is the same pump with one queue entry. */
+static void tbt_tx_pump_work(struct work_struct *w)
+{
+    struct tbt_session *sess =
+        container_of(to_delayed_work(w), struct tbt_session, w_tx);
+    bool owned = test_and_clear_bit(TBT_SW_TX, &sess->sched);
+
+    atomic64_inc(&sess->tx_work_runs);
+    tbt_tx_pump(sess);
+    if (owned)
+        tbt_session_put(sess);
+}
+
 /* Map a TBT_SW_* bit to its work item. NULL means the work is not live for
  * this session: fec=off has no w_fec_tx, and w_fec_rx stays inert until the
  * FEC receive track initialises it. */
@@ -1230,6 +1245,8 @@ static struct delayed_work *tbt_sess_dw(struct tbt_session *s,
     case TBT_SW_FEC_RX:
         /* The receive work is declared but not initialised in this cut. */
         return READ_ONCE(s->w_fec_rx.work.func) ? &s->w_fec_rx : NULL;
+    case TBT_SW_TX:
+        return &s->w_tx;
     }
     return NULL;
 }
@@ -1404,6 +1421,7 @@ int tbt_session_create(struct tbt_tunnel *t)
     INIT_DELAYED_WORK(&s->w_replace, tbt_replace_work);
     INIT_DELAYED_WORK(&s->w_pending, tbt_pending_work);
     INIT_DELAYED_WORK(&s->w_fbk, tbt_fbk_work);
+    INIT_DELAYED_WORK(&s->w_tx, tbt_tx_pump_work);
     INIT_DELAYED_WORK(&s->w_reap, tbt_reap_work);
     INIT_DELAYED_WORK(&s->w_poll, tbt_session_poll_work);
     for (int i = 0; i < TBT_STREAM_HT; i++)
@@ -1572,6 +1590,7 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     tbt_session_cancel(s, TBT_SW_FBK);
     tbt_session_cancel(s, TBT_SW_FEC_TX);
     tbt_session_cancel(s, TBT_SW_FEC_RX);
+    tbt_session_cancel(s, TBT_SW_TX);
 
     /* Stop every carrier: cancel its works, restore callbacks, unpublish,
      * one grace period, close, put. Each put returns one session reference. */
@@ -1647,6 +1666,7 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     tbt_session_cancel(s, TBT_SW_REPLACE);
     tbt_session_cancel(s, TBT_SW_FEC_TX);
     tbt_session_cancel(s, TBT_SW_FEC_RX);
+    tbt_session_cancel(s, TBT_SW_TX);
 
     tbt_fec_data_free(s);
 
