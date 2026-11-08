@@ -1845,6 +1845,7 @@ static void tbt_fec_blk_reset(struct tbt_fec_blk *b, u64 block_id)
     b->short_unknown = false;
     b->first_gap_ns = 0;
     b->block_id = block_id;
+    b->sid = 0;
     memset(b->dpresent, 0, TBT_FEC_MAX_SHARES);
     memset(b->ppresent, 0, TBT_FEC_MAX_SHARES);
     memset(b->dlen, 0, TBT_FEC_MAX_SHARES * sizeof(u16));
@@ -2179,6 +2180,64 @@ static struct tbt_stream *tbt_fec_rx_stream(struct tbt_session *sess,
     return st;
 }
 
+/* tbt_session_fec_rx_barrier() calls this after w_fec_rx is quiesced and
+ * before a new far_sid is installed. `sid` is the old stream; the old
+ * stream's undelivered blocks and every delivery cursor are dropped so its
+ * bytes cannot reach the new stream. The new stream starts at byte 0 and the
+ * first FEC record after this call sets next_super/next_deliver. */
+static void tbt_fec_rx_stream_reset(struct tbt_session *sess, u64 sid)
+{
+    struct tbt_fec_rx *rx = sess->fec_rx;
+    u64 old_high;
+    u32 total, i;
+
+    (void)sid;
+    if (!rx)
+        return;
+    spin_lock_bh(&rx->lock);
+    old_high = rx->highest_block;
+    rx->stream_sid = 0;
+    rx->stream_base = 0;
+    rx->deliver_bytes = 0;
+    rx->stream_pkt_base = 0;
+    rx->total_known = false;
+    rx->total_pkts = 0;
+    rx->total_bytes = 0;
+    rx->deliver_partial = false;
+    rx->deliver_p = 0;
+    rx->deliver_g = 0;
+    rx->progress_super = 0;
+    rx->progress_ns = 0;
+    /* Skip the old stream's block range. The first new record may raise this
+     * to its own block; a lower old record is dropped by the await below. */
+    rx->next_super = old_high + 1;
+    rx->next_deliver = 0;
+    rx->ack_deliver = 0;
+    rx->highest_block = old_high;
+    rx->stream_await = true;
+    rx->next_fin_sid = 0;
+    rx->next_fin_end = 0;
+    rx->next_fin_base = 0;
+    rx->next_fin_bytes = 0;
+    rx->next_fin_valid = false;
+    total = (u32)rx->groups * rx->slots;
+    for (i = 0; i < total; i++)
+    {
+        struct tbt_fec_blk *b = &rx->blk[i];
+
+        if (!b->used)
+            continue;
+        b->used = false;
+        b->ready = false;
+        b->decoding = false;
+        b->empty = false;
+        b->block_id = ~0ULL;
+        b->sid = 0;
+        b->first_gap_ns = 0;
+    }
+    spin_unlock_bh(&rx->lock);
+}
+
 /* Every group must have decoded block s before any byte of it is delivered.
  * In the final super-block a group with no packet is complete by definition.
  * The caller holds rx->lock: block slots are reset by a carrier as soon as
@@ -2291,6 +2350,11 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
     bool blocked = false;
     const char *blocked_why = "?";
 
+    /* tbt_session_fec_rx_barrier() reset the cursors; the first record of the
+     * new stream sets next_super/next_deliver. Delivering before it would
+     * start at the old stream's frontier. */
+    if (READ_ONCE(rx->stream_await))
+        return 0;
     if (READ_ONCE(rx->total_known) && !READ_ONCE(rx->total_pkts) &&
         !rx->deliver_partial)
         return 0;
@@ -2358,10 +2422,10 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
         ready = tbt_fec_super_ready_locked(rx, s);
         if (!ready)
         {
-            /* Name the group whose block holds the whole stream: without it
-             * the frontier cannot move and the sender's credit is never
-             * renewed. The ratelimit bounds this; acceptance runs debug=0
-             * and needs the line, so it is not gated on debug. */
+            /* Name the group whose block holds the whole stream. This is a
+             * per-frontier diagnostic: the barrier resets the state on a
+             * stream switch, and an aborted stream must not fill the log
+             * (0.2.2 saw 20-40 lines per abort). Keep it behind debug. */
             u64 now_diag = ktime_get_ns();
 
             for (group = 0; group < rx->groups; group++)
@@ -2373,19 +2437,20 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
                     continue;
                 for (k = 0; k < rx->n; k++)
                     have = (u16)(have + (sb->dpresent[k] ? 1 : 0));
-                pr_info_ratelimited("tbtun: fec super %llu stuck: next=%llu total_known=%d total_pkts=%llu next_deliver=%llu deliver_bytes=%llu group=%u/%u used=%d ready=%d id=%llu nreal=%u shares=%u/%u parity=%u gap_us=%llu\n",
-                                    s, READ_ONCE(rx->next_super), known,
-                                    total_pkts,
-                                    READ_ONCE(rx->next_deliver),
-                                    READ_ONCE(rx->deliver_bytes), group,
-                                    rx->groups, sb->used, sb->ready,
-                                    sb->block_id, sb->nreal, have, rx->n,
-                                    (unsigned)rx->m,
-                                    sb->first_gap_ns &&
-                                            now_diag > sb->first_gap_ns
-                                        ? (now_diag - sb->first_gap_ns) /
-                                              NSEC_PER_USEC
-                                        : 0);
+                if (debug)
+                    pr_info_ratelimited("tbtun: fec super %llu stuck: next=%llu total_known=%d total_pkts=%llu next_deliver=%llu deliver_bytes=%llu group=%u/%u used=%d ready=%d id=%llu nreal=%u shares=%u/%u parity=%u gap_us=%llu\n",
+                                        s, READ_ONCE(rx->next_super), known,
+                                        total_pkts,
+                                        READ_ONCE(rx->next_deliver),
+                                        READ_ONCE(rx->deliver_bytes), group,
+                                        rx->groups, sb->used, sb->ready,
+                                        sb->block_id, sb->nreal, have, rx->n,
+                                        (unsigned)rx->m,
+                                        sb->first_gap_ns &&
+                                                now_diag > sb->first_gap_ns
+                                            ? (now_diag - sb->first_gap_ns) /
+                                                  NSEC_PER_USEC
+                                            : 0);
                 break;
             }
         }
@@ -2787,6 +2852,8 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
 
     if (!rx || !rx->nack || READ_ONCE(rx->stopping) ||
         READ_ONCE(sess->closing))
+        return;
+    if (READ_ONCE(rx->stream_await))
         return;
     /* The shape must support a ring. Both ends derive the same effective K,
      * so the receiver NACKs exactly the blocks the sender can replay; the
@@ -3896,6 +3963,24 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         spin_unlock_bh(&rx->lock);
         return -ESHUTDOWN;
     }
+    if (READ_ONCE(rx->stream_await))
+    {
+        if (h.block_id < rx->next_super)
+        {
+            /* An old in-flight record below the barrier's block fence. */
+            atomic64_inc(&sess->fec_late_share);
+            spin_unlock_bh(&rx->lock);
+            return 0;
+        }
+        rx->next_super = h.block_id;
+        rx->highest_block = h.block_id;
+        rx->next_deliver = h.block_id * (u64)rx->groups * rx->n;
+        if (!rx->stream_pkt_base)
+            rx->stream_pkt_base = rx->next_deliver;
+        rx->progress_super = 0;
+        rx->progress_ns = 0;
+        rx->stream_await = false;
+    }
     if (h.block_id < rx->next_super)
     {
         atomic64_inc(&sess->fec_late_share);
@@ -3911,7 +3996,10 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
     slot = (u16)((size_t)group * rx->slots + (h.block_id % rx->slots));
     b = &rx->blk[slot];
     if (!b->used || b->block_id != h.block_id)
+    {
         tbt_fec_blk_reset(b, h.block_id);
+        b->sid = READ_ONCE(sess->far_sid);
+    }
     /* Defensive: a parity record is a share of this block. A path that
      * placed parity without the reset must still make the block visible to
      * the decode/NACK walk. */
@@ -4139,6 +4227,17 @@ void tbt_fec_rx_fin(struct tbt_session *sess, struct tbt_stream *st,
         rx->stream_sid = st->sid;
         rx->stream_base = rx->deliver_bytes;
         rx->stream_pkt_base = pkt_base;
+    }
+    if (READ_ONCE(rx->stream_await))
+    {
+        rx->next_super = pkt_base / span;
+        rx->next_deliver = pkt_base;
+        if (!rx->stream_pkt_base)
+            rx->stream_pkt_base = pkt_base;
+        rx->highest_block = rx->next_super;
+        rx->progress_super = 0;
+        rx->progress_ns = 0;
+        rx->stream_await = false;
     }
     if (!rx->total_known)
     {
@@ -4369,6 +4468,9 @@ int tbt_fec_data_init(struct tbt_session *sess)
     rx->s = TBT_FEC_S;
     rx->groups = groups;
     rx->slots = (u16)slots;
+    /* tbt_session_fec_rx_barrier() quiesces w_fec_rx and calls this before a
+     * new far_sid is installed. */
+    rx->stream_reset = tbt_fec_rx_stream_reset;
     /* The receiver NACK window and the ACK credit use the same effective K
      * as the sender ring: K-2 super-blocks of credit plus two of slack. */
     rx->replay_k = tbt_fec_replay_k_for(groups, n, m, TBT_FEC_S);
