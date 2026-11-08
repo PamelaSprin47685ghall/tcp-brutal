@@ -278,7 +278,10 @@ static void tbt_car_write_space(struct sock *sk)
          * The packetizer still runs on the session work; the drain is the
          * per-carrier writer that can use the freed send memory immediately. */
         tbt_fec_out_kick(c->sess, c->index);
-        schedule_work(&c->sess->w_fec_tx.work);
+        /* Through the session bit, not schedule_work(): a raw queue takes no
+         * session reference and is silently dropped while a cancel has the
+         * work disabled. */
+        tbt_session_arm(c->sess, TBT_SW_FEC_TX, 0);
     }
     read_unlock_bh(&sk->sk_callback_lock);
 }
@@ -904,7 +907,7 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
     if (rescued)
         atomic64_inc(&sess->poll_rescues);
     if (sess->fec)
-        schedule_work(&sess->w_fec_tx.work);
+        tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
     tbt_carrier_sk_put(sk);
 }
 

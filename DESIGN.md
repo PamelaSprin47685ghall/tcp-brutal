@@ -1803,6 +1803,17 @@ Data-plane work runs in work items, not in a single pump thread: per stream `w_r
 sleeping in the pump: the pump checks `sk_wmem_queued` and leaves the record in the
 carrier's `part` tail or the stream queue until a wake arrives.
 
+**Work ownership.** Each session/stream work item has one sched bit that owns one
+reference. `tbt_session_arm()` and `tbt_stream_schedule()` take that reference before
+they publish the bit, so a canceller that sees the bit always has a reference to return.
+The queue attempt itself can still be refused: `cancel_work_sync()` disables the work
+while it runs, and a queue that races the cancel is dropped. The arm checks
+`work_pending()` afterwards and returns its own reference when no instance took it.
+Without that check the reference is owed to an instance that never exists, and
+`tbt_session_destroy()` waits forever (the 0.2.1 `del 1` hang). The destroy wait is
+bounded (`TBT_SESSION_DRAIN_MS`): a leak is reported with the remaining state and the
+session is leaked rather than pinning the writer and `rmmod` behind it.
+
 ### 8.3 `/proc/net/tbtun/*` grammar
 
 `config` (read/write, one directive per write; a read renders the current config):

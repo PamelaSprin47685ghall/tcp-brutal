@@ -3,6 +3,26 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [Unreleased]
+
+### Fixed
+
+- A session work reference is no longer lost when `tbt_session_arm()` races a
+  `cancel_delayed_work_sync()`. `cancel_work_sync()` disables the work while it
+  runs (kernel 6.13+), so a queue attempted in that window is dropped. The arm
+  now takes its reference before publishing the sched bit and returns it when
+  `work_pending()` shows that no instance took the queue. The same protocol
+  fixes `tbt_stream_schedule()`, and the two raw `schedule_work()` calls for
+  `w_fec_tx` go through the session bit. Without this, one lost reference kept
+  `refs` above zero, `wait_for_completion(&drained)` never returned, and a
+  `del 1` config write plus `rmmod` stayed in D state forever (observed on
+  0.2.1: `tbt_session_destroy+0x40b` waiting on the FEC RX stuck path).
+- Session destroy waits for `drained` with a bound (`TBT_SESSION_DRAIN_MS`,
+  10 s). A leak is reported with the remaining reference count, sched bits,
+  streams and carriers, and the session is leaked instead of blocking the
+  caller and every later `rmmod`. `host/test_lifetime` pins the ownership
+  interleavings and the bounded drain.
+
 ## [0.2.3] - 2026-11-08
 
 ### Changed

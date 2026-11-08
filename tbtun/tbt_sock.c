@@ -57,24 +57,40 @@
  * and owns exactly one stream reference (review/s2-merged-design.md §1.4).
  * The entry point clears the bit first and puts the reference last, so a wake
  * that arrives while the work runs takes a second reference and is served by
- * a second run. */
+ * a second run.
+ *
+ * The reference is taken before the bit is published, so a canceller that
+ * sees the bit always has a reference it may return. cancel_work_sync()
+ * disables a work item while it runs, and a queue that races the cancel is
+ * dropped silently; the work_pending() check returns that reference here
+ * instead of leaving it to an instance that never exists. */
 bool tbt_stream_schedule(struct tbt_stream *st, struct work_struct *w,
                          unsigned long bit)
 {
     if (!st)
         return false;
-    if (test_and_set_bit(bit, &st->attached))
+    if (test_bit(bit, &st->attached))
         return true;
     if (!refcount_inc_not_zero(&st->refs))
+        return false;
+    if (test_and_set_bit(bit, &st->attached))
     {
-        clear_bit(bit, &st->attached);
+        /* Another schedule owns the bit and its reference. */
+        tbt_stream_put(st);
+        return true;
+    }
+    queue_work(TBT_WQ, w);
+    /* queue_work() returns %false both when the work was already pending (a
+     * queued instance owns a reference and will clear the bit) and when a
+     * concurrent cancel disabled the work and the queue was dropped. The
+     * entry clears the bit before it runs, so checking the bit after the
+     * queue separates the two: a dropped queue leaves the bit set with no
+     * pending instance. */
+    if (!work_pending(w) && test_and_clear_bit(bit, &st->attached))
+    {
+        tbt_stream_put(st);
         return false;
     }
-    /* queue_work() returns %false when the work is already pending (for
-     * example a legacy raw schedule). That queued instance's entry sees the
-     * bit set by test_and_set_bit() above and returns this reference, so the
-     * reference must not be rolled back on %false. */
-    queue_work(TBT_WQ, w);
     return true;
 }
 

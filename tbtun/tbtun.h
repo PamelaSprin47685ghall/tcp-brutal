@@ -228,6 +228,11 @@ void tbt_listen_stop(struct tbt_tunnel *t);
 #define TBT_STREAM_HT 64
 #define TBT_TOMBSTONE_MS 2000
 #define TBT_REAP_INTERVAL_MS 200
+/* A destroy that cannot collect every session reference is a bug, not a
+ * wait. The 0.2.1 `del 1` hung for hours in wait_for_completion() and pinned
+ * rmmod behind it; the wait is bounded and a timeout reports and leaks the
+ * session instead of the thread. */
+#define TBT_SESSION_DRAIN_MS 10000
 #define TBT_PENDING_MAX 128
 #define TBT_STREAMS_MAX 128
 #define TBT_STREAM_SNAP_MAX 128
@@ -1049,8 +1054,9 @@ struct tbt_session
      * &drained completed. tbt_session_destroy() waits on it and remains the
      * only freer; a put never frees (review/s2-merged-design.md §5.1). */
     struct completion drained;
-    /* One bit per TBT_SW_* item, protected by ->lock. Bit 1 means a queued
-     * instance exists and holds one reference. */
+    /* One bit per TBT_SW_* item, changed with atomic bit ops. Bit 1 means one
+     * reference is reserved for that item: a queued instance owns it until its
+     * entry returns it, or the arm that could not queue returns it itself. */
     unsigned long sched;
     struct net *net;
     /* Lock order (review/s2-merged-design.md §2): tbt_lock -> pump_lock ->

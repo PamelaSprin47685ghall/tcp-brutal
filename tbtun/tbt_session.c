@@ -1258,7 +1258,16 @@ void tbt_session_put(struct tbt_session *s)
 /* Arm one session work item. The bit owns the reference: the 0->1 transition
  * takes it, and either the entry point or tbt_session_cancel() returns it.
  * The fast path takes no lock, so this is safe from softirq and from code
- * already holding sess->lock. `delay` is in jiffies. */
+ * already holding sess->lock. `delay` is in jiffies.
+ *
+ * The reference is taken before the bit is published: a canceller that sees
+ * the bit must always have a reference it may return. The queue attempt can
+ * still be refused. cancel_work_sync() disables a work item while it runs,
+ * and a queue that races the cancel is dropped silently (kernel 6.13+
+ * workqueue). The work_pending() check below detects that and returns the
+ * reference here. Without it the reference would be owed to an instance that
+ * never exists, so refs would never reach zero and tbt_session_destroy()
+ * would wait forever -- the 0.2.1 `del 1` hang. */
 bool tbt_session_arm(struct tbt_session *s, enum tbt_sess_work w,
                      unsigned long delay)
 {
@@ -1269,31 +1278,48 @@ bool tbt_session_arm(struct tbt_session *s, enum tbt_sess_work w,
     dw = tbt_sess_dw(s, w);
     if (!dw)
         return false;
+    /* The common case: an instance already owns the bit and its reference.
+     * Losing this wake only delays the pass; every one of these works is
+     * periodic and self-rearming. */
+    if (test_bit(w, &s->sched))
+        return true;
+    if (!refcount_inc_not_zero(&s->refs))
+        return false;
     if (test_and_set_bit(w, &s->sched))
     {
-        /* An instance already owns a reference. Do not retime it: a retime
-         * would let tbt_session_cancel() clear the bit and return that same
-         * reference while this caller re-queues the work, leaving a pending
-         * instance with no reference. Losing an early wake only delays the
-         * pass; every one of these works is periodic and self-rearming. */
+        /* Lost the race to another arm. Do not retime it: a retime would let
+         * tbt_session_cancel() clear the bit and return that same reference
+         * while this caller re-queues the work, leaving a pending instance
+         * with no reference. */
+        tbt_session_put(s);
         return true;
     }
-    if (READ_ONCE(s->closing) || !refcount_inc_not_zero(&s->refs))
+    if (READ_ONCE(s->closing))
     {
-        clear_bit(w, &s->sched);
+        /* A canceller may have cleared the bit and returned this reference
+         * already; only the winner returns it. */
+        if (test_and_clear_bit(w, &s->sched))
+            tbt_session_put(s);
         return false;
     }
-    /* mod_delayed_work() returns %true when the work was already pending and
-     * %false when this call queued it. Both outcomes leave exactly one
-     * instance that owns the reference just taken: the entry's
-     * test_and_clear_bit() consumes it. Never roll back on %true. */
     mod_delayed_work(TBT_WQ, dw, delay);
+    /* A queue dropped by a concurrent cancel leaves no instance to consume
+     * the bit. The entry clears the bit before it runs, so a lost race with
+     * the entry is not mistaken for a dropped queue: exactly one of the two
+     * clears it and returns the reference. */
+    if (!work_pending(&dw->work) && test_and_clear_bit(w, &s->sched))
+    {
+        tbt_session_put(s);
+        return false;
+    }
     return true;
 }
 
 /* Cancel one session work item. A pending instance never runs its entry, so
  * the canceller returns its reference. A running instance returns its own at
- * the end of the entry wrapper, and cancel_delayed_work_sync() waits for it. */
+ * the end of the entry wrapper, and cancel_delayed_work_sync() waits for it.
+ * A reference taken by an arm that raced this cancel is returned by that
+ * arm's own post-queue check; the canceller must not guess at it. */
 void tbt_session_cancel(struct tbt_session *s, enum tbt_sess_work w)
 {
     struct delayed_work *dw;
@@ -1627,7 +1653,20 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     /* Drop the tunnel's reference, then wait for every stream/work/carrier
      * reference. No scheduler can take a new one after the steps above. */
     tbt_session_put(s);
-    wait_for_completion(&s->drained);
+    if (!wait_for_completion_timeout(&s->drained,
+                                     msecs_to_jiffies(TBT_SESSION_DRAIN_MS)))
+    {
+        /* A reference nobody returns used to block this thread forever
+         * (0.2.1: `del 1` waited hours in D state and pinned rmmod behind
+         * it). Do not free a session that a holder can still reach: report
+         * what is left and leak it. */
+        pr_err("tbtun: tunnel %llu session destroy: %u references still held after %u ms (sched=%#lx streams=%u active=%u carriers=%u); session leaked\n",
+               (unsigned long long)t->cfg.id,
+               (unsigned int)refcount_read(&s->refs), TBT_SESSION_DRAIN_MS,
+               READ_ONCE(s->sched), (unsigned int)s->n_streams,
+               (unsigned int)s->n_active, (unsigned int)s->n_car);
+        return;
+    }
 
     tbt_crypto_pair_wipe(&s->crypto_ctx);
     put_net(s->net);
