@@ -192,12 +192,33 @@ static struct tbt_stream *tbt_fec_stream(struct tbt_session *sess)
 
     sid = READ_ONCE(sess->far_sid);
     if (sid)
-        return tbt_stream_get(sess, sid, false, false);
+    {
+        st = tbt_stream_get(sess, sid, false, false);
+        if (st &&
+            !tbt_fec_tx_stream_usable(
+                READ_ONCE(st->state) == TBT_ST_DEAD,
+                test_bit(TBT_STREAM_F_ACTIVE, &st->attached),
+                READ_ONCE(st->tombstone_until_ns)))
+        {
+            tbt_stream_put(st);
+            return NULL;
+        }
+        return st;
+    }
     spin_lock(&sess->lock);
     for (i = 0; i < TBT_STREAM_HT; i++)
     {
         hlist_for_each_entry(st, &sess->streams[i], node)
         {
+            /* A gracefully closed stream is detached and tombstoned while
+             * its state is still OPEN; returning it makes the TX work arm
+             * itself at 0 delay until the reaper runs.  Only a live,
+             * attached stream is a usable fallback. */
+            if (!tbt_fec_tx_stream_usable(
+                    READ_ONCE(st->state) == TBT_ST_DEAD,
+                    test_bit(TBT_STREAM_F_ACTIVE, &st->attached),
+                    READ_ONCE(st->tombstone_until_ns)))
+                continue;
             if (refcount_inc_not_zero(&st->refs))
             {
                 spin_unlock(&sess->lock);
@@ -756,6 +777,13 @@ static u32 tbt_fec_out_flush_carrier(struct tbt_session *sess, u16 idx,
 
         spin_lock(&sess->fec_out_lock);
         o = list_first_entry_or_null(&q->queue, struct tbt_fec_out, node);
+        if (o && !tbt_fec_tx_record_sid_ok(o->sid,
+                                           READ_ONCE(sess->far_sid), false))
+        {
+            tbt_fec_out_free(sess, q, o);
+            spin_unlock(&sess->fec_out_lock);
+            continue;
+        }
         if (o)
             depth = q->depth;
         spin_unlock(&sess->fec_out_lock);
@@ -1776,6 +1804,14 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
             tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
         return;
     }
+    /* The hash fallback can name a stream the session already killed; never
+     * packetize or switch against it. */
+    if (READ_ONCE(st->state) == TBT_ST_DEAD)
+    {
+        tbt_stream_put(st);
+        tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
+        return;
+    }
     /* A pending switch for a stream the session has left can never run;
      * clear it before deciding whether this body owns a switch.  That stream
      * was refused with tx_paused set; release its read work too, or its
@@ -1804,76 +1840,113 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
      * check catches the case where the packetizer runs before the new
      * stream's first submit: the ring holds old bytes but no block exists
      * yet, so the block-owner checks alone would miss it. */
-    if (tbt_fec_tx_need_switch(tx->cur_block_sid, tx->last_submit_sid,
-                               tx->switch_sid, st->sid))
     {
-        u64 old_sid = tx->cur_block_sid ? tx->cur_block_sid
-                                        : tx->last_submit_sid;
+        bool stale = false;
+        bool do_switch = false;
+        u64 old_sid = 0;
 
         spin_lock(&tx->lock);
-        /* The switch owns the whole ring: no byte the old stream submitted
-         * may be packetized under the new sid.  The new stream's first
-         * submit is refused until this point, so every queued byte is old.
-         * Do not use a submit-time boundary: an old target's last submit can
-         * race past it and land after the boundary.  Hold switch_sid through
-         * the cleanup so no submit can enter before the new owner is
-         * published. */
-        tx->switch_sid = st->sid;
-        tx->tail = tx->head;
-        tx->fill = 0;
-        spin_unlock(&tx->lock);
+        /* Re-evaluate under the lock that publishes cur_block_sid,
+         * last_submit_sid and switch_sid: a submit can change them between
+         * the earlier read and this critical section.  If far_sid already
+         * moved on, `st` is stale and this body must not packetize or kill
+         * anything with it. */
+        if (READ_ONCE(sess->far_sid) != st->sid)
+            stale = true;
+        else if (tbt_fec_tx_need_switch(tx->cur_block_sid,
+                                        tx->last_submit_sid,
+                                        tx->switch_sid, st->sid))
         {
-            struct tbt_fec_out *o, *tmp;
-            u16 i;
-
-            /* Close and advance the old block when one exists.  The new
-             * stream must start at a fresh block id: reusing an empty
-             * block's id would collide with the receiver's old marker for
-             * that id, and the new stream's first share would be dropped as
-             * late.  The close emits the old sid (cur_block_sid is still
-             * old), so the receiver drops any marker or parity it makes. */
-            if (tx->cur_block_sid && tx->cur_block_sid != st->sid)
-                tbt_fec_tx_close_block(sess, true);
-            /* The old stream is no longer the session's.  Kill it now so its
-             * target socket is shut down before the new stream's target can
-             * be served; a single-threaded target source otherwise keeps
-             * sending the old body and the new connection waits forever. */
-            if (old_sid && old_sid != st->sid)
-                tbt_stream_kill_by_sid(sess, old_sid, TBT_ST_DEAD);
-            /* The old stream's TX state must not outlive it. Its ACKs are
-             * dropped by the sid filter, so its credit frontier would stay
-             * full forever and the new stream would wait on a window that
-             * can never advance. Stop the old per-carrier drains, drop the
-             * old stream's queued data/replay/control, and release the
-             * frontier. The new stream's data is still in the ring (the
-             * packetizer builds it after this switch). */
-            for (i = 0; i < tx->ndrain; i++)
-                cancel_delayed_work_sync(&tx->drain[i].work);
-            spin_lock(&sess->fec_out_lock);
-            list_for_each_entry_safe(o, tmp, &sess->fec_out_ctl, node)
-                if (o->sid && o->sid != st->sid)
-                    tbt_fec_out_free(sess, NULL, o);
-            /* Every queued replay is an old-stream record; free them all,
-             * including records whose sid field is still 0. */
-            list_for_each_entry_safe(o, tmp, &sess->fec_out_replay, node)
-                tbt_fec_out_free(sess, NULL, o);
-            for (i = 0; i < sess->n_car; i++)
+            /* The stream that produced the ring bytes: the block owner, or
+             * the last submitter when no block exists yet.  Never select the
+             * current stream itself. */
+            old_sid = (tx->cur_block_sid &&
+                       tx->cur_block_sid != st->sid)
+                          ? tx->cur_block_sid
+                          : (tx->last_submit_sid &&
+                                     tx->last_submit_sid != st->sid
+                                 ? tx->last_submit_sid
+                                 : 0);
+            /* The switch owns the whole ring: no byte the old stream
+             * submitted may be packetized under the new sid.  The new
+             * stream's first submit is refused until this point, so every
+             * queued byte is old.  Hold switch_sid through the cleanup so no
+             * submit can enter before the new owner is published. */
+            tx->switch_sid = st->sid;
+            if (old_sid)
             {
-                struct tbt_fec_outq *q = &sess->fec_outq[i];
-
-                list_for_each_entry_safe(o, tmp, &q->queue, node)
-                    tbt_fec_out_free(sess, q, o);
+                tx->tail = tx->head;
+                tx->fill = 0;
             }
-            spin_unlock(&sess->fec_out_lock);
-            /* The replay ring stores whole records with their original sid.
-             * A new stream's block ids never name an old entry, but reset it
-             * anyway so no old body can be replayed if an id is reused after
-             * a wrap. */
-            if (tx->replay)
+            do_switch = true;
+            }
+            spin_unlock(&tx->lock);
+            if (stale)
             {
-                spin_lock_bh(&tx->replay_lock);
-                tbt_fec_replay_reset(tx->replay);
-                spin_unlock_bh(&tx->replay_lock);
+                tbt_stream_put(st);
+                /* far_sid == 0 means the stream detached; arming at 0 would spin
+                 * until the reaper runs.  The no-stream path handles pending
+                 * bytes on its own cadence. */
+                if (READ_ONCE(sess->far_sid))
+                    tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+                return;
+            }
+            if (do_switch)
+            {
+                struct tbt_fec_out *o, *tmp;
+                u16 i;
+
+                if (old_sid)
+                {
+                /* Close and advance the old block when one exists.  The new
+                 * stream must start at a fresh block id: reusing an empty
+                 * block's id would collide with the receiver's old marker for
+                 * that id, and the new stream's first share would be dropped as
+                 * late.  The close emits the old sid (cur_block_sid is still
+                 * old), so the receiver drops any marker or parity it makes. */
+                if (tx->cur_block_sid && tx->cur_block_sid != st->sid)
+                    tbt_fec_tx_close_block(sess, true);
+                /* The old stream is no longer the session's.  Kill it now so its
+                 * target socket is shut down before the new stream's target can
+                 * be served; a single-threaded target source otherwise keeps
+                 * sending the old body and the new connection waits forever. */
+                if (old_sid && old_sid != st->sid)
+                    tbt_stream_kill_by_sid(sess, old_sid, TBT_ST_DEAD);
+                /* The old stream's TX state must not outlive it. Its ACKs are
+                 * dropped by the sid filter, so its credit frontier would stay
+                 * full forever and the new stream would wait on a window that
+                 * can never advance. Stop the old per-carrier drains, drop the
+                 * old stream's queued data/replay/control, and release the
+                 * frontier. The new stream's data is still in the ring (the
+                 * packetizer builds it after this switch). */
+                for (i = 0; i < tx->ndrain; i++)
+                    cancel_delayed_work_sync(&tx->drain[i].work);
+                spin_lock(&sess->fec_out_lock);
+                list_for_each_entry_safe(o, tmp, &sess->fec_out_ctl, node)
+                    if (o->sid && o->sid != st->sid)
+                        tbt_fec_out_free(sess, NULL, o);
+                /* Every queued replay is an old-stream record; free them all,
+                 * including records whose sid field is still 0. */
+                list_for_each_entry_safe(o, tmp, &sess->fec_out_replay, node)
+                    tbt_fec_out_free(sess, NULL, o);
+                for (i = 0; i < sess->n_car; i++)
+                {
+                    struct tbt_fec_outq *q = &sess->fec_outq[i];
+
+                    list_for_each_entry_safe(o, tmp, &q->queue, node)
+                        tbt_fec_out_free(sess, q, o);
+                }
+                spin_unlock(&sess->fec_out_lock);
+                /* The replay ring stores whole records with their original sid.
+                 * A new stream's block ids never name an old entry, but reset it
+                 * anyway so no old body can be replayed if an id is reused after
+                 * a wrap. */
+                if (tx->replay)
+                {
+                    spin_lock_bh(&tx->replay_lock);
+                    tbt_fec_replay_reset(tx->replay);
+                    spin_unlock_bh(&tx->replay_lock);
+                }
             }
             WRITE_ONCE(tx->peer_pkts, tx->seq);
             WRITE_ONCE(tx->flush_req, false);
@@ -2887,7 +2960,7 @@ static int tbt_fec_send_nack(struct tbt_session *sess, u64 block_id,
  * never exist. The marker is also stored in the replay ring, so a later NACK
  * for share n hits it. */
 static int tbt_fec_send_empty_marker(struct tbt_session *sess, u16 group,
-                                     u64 block_id)
+                                     u64 block_id, u64 sid)
 {
     struct tbt_fec_tx *tx = sess->fec_tx;
     struct tbt_fec_hdr h;
@@ -2896,6 +2969,12 @@ static int tbt_fec_send_empty_marker(struct tbt_session *sess, u16 group,
 
     if (!tx || !tx->n || !tx->m)
         return -EINVAL;
+    /* The marker answers a NACK that named a block of `sid`.  The stream may
+     * switch while this NACK is processed; stamping the marker with the
+     * current block's sid would let the receiver accept an old block id
+     * under the new stream and rebase its window to it. */
+    if (!tbt_fec_tx_marker_sid_ok(sid, READ_ONCE(sess->far_sid)))
+        return -ESTALE;
     if (debug >= 2)
         pr_info("tbtun: fec NACK empty reply block=%llu group=%u share=%u win_len=0\n",
                 block_id, group, tx->n);
@@ -2911,7 +2990,7 @@ static int tbt_fec_send_empty_marker(struct tbt_session *sess, u16 group,
     h.payload_len = 0;
     h.epoch = 0;
     h.conv = TBT_FEC_CONV;
-    h.sid = tx->cur_block_sid;
+    h.sid = sid ? sid : tx->cur_block_sid;
     if (tbt_fec_make_record(sess, &h, NULL, rec, &len))
         return -EINVAL;
     /* The reply is built fresh every time and is never stored: a marker for
@@ -5893,7 +5972,8 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                         !tbt_fec_bitmap_test(marker_done, g))
                     {
                         tbt_fec_bitmap_set(marker_done, g);
-                        if (!tbt_fec_send_empty_marker(sess, g, h.block_id))
+                        if (!tbt_fec_send_empty_marker(sess, g, h.block_id,
+                                                        h.sid))
                         {
                             atomic64_inc(&sess->fec_nack_empty_reply);
                             atomic64_inc(&sess->fec_nack_absent_reply);

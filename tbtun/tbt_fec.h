@@ -212,6 +212,24 @@ static inline bool tbt_fec_tx_record_sid_ok(u64 rec_sid, u64 far_sid,
     return rec_sid == far_sid;
 }
 
+/* An empty marker answers a NACK for `nack_sid`; it may be sent only while
+ * that stream is still the session's current one.  Stamping an old block's
+ * marker with the new stream's sid lets the receiver rebase its window to an
+ * old block id. */
+static inline bool tbt_fec_tx_marker_sid_ok(u64 nack_sid, u64 far_sid)
+{
+    return !nack_sid || nack_sid == far_sid;
+}
+
+/* A stream the TX work may use: not dead, still attached to the session, and
+ * not inside its tombstone window.  A gracefully closed stream keeps state
+ * OPEN after detach, so the state alone is not enough. */
+static inline bool tbt_fec_tx_stream_usable(bool dead, bool active,
+                                            u64 tombstone_until_ns)
+{
+    return !dead && active && !tombstone_until_ns;
+}
+
 /* A block placed for one stream must never be delivered to another.  The
  * block carries the sid it was placed under; the delivery walk compares it
  * with the stream it is about to hand bytes to.  `stream_sid` 0 means no

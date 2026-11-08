@@ -1404,6 +1404,20 @@ static void test_tx_stream_isolation(void)
        "send: a control record of the current stream stays");
     ok(!tbt_fec_tx_record_sid_ok(1, 2, true),
        "send: an old control record is dropped");
+    ok(tbt_fec_tx_marker_sid_ok(2, 2),
+       "marker: the current stream's marker is sent");
+    ok(!tbt_fec_tx_marker_sid_ok(1, 2),
+       "marker: an old stream's marker is dropped");
+    ok(tbt_fec_tx_marker_sid_ok(0, 2),
+       "marker: a sid-less marker is session-scoped");
+    ok(tbt_fec_tx_stream_usable(false, true, 0),
+       "stream: an active open stream is usable");
+    ok(!tbt_fec_tx_stream_usable(true, true, 0),
+       "stream: a dead stream is not usable");
+    ok(!tbt_fec_tx_stream_usable(false, false, 0),
+       "stream: a detached stream is not usable");
+    ok(!tbt_fec_tx_stream_usable(false, true, 1),
+       "stream: a tombstoned stream is not usable");
     ok(tbt_fec_tx_switch_stale(1, 2),
        "tx: a switch for a dead stream is stale");
     ok(!tbt_fec_tx_switch_stale(2, 2),
