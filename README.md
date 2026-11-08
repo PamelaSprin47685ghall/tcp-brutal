@@ -130,6 +130,11 @@ header payload instead of `/lib/modules/$(uname -r)/build`; see
 produces, and the pahole gotchas. `make check` sources that environment itself
 when it is present.
 
+The multi-kernel compatibility check (5.15, 6.6, 6.12 and 7.0 on x86_64 and
+aarch64, including a QEMU load check) is `scripts/kernel-matrix.sh`; see
+[docs/kernel-matrix.md](docs/kernel-matrix.md) for the cells, the current
+results and their cost.
+
 ## Packaging
 
 The module version has one authority: `TBT_VERSION_MAJOR/MINOR/PATCH` in
