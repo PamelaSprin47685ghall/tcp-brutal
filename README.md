@@ -146,7 +146,7 @@ Module parameters, read-only after load:
 | `max_tunnels` | `64` | Maximum configured tunnels; a new id over the cap fails with `ENOSPC` |
 | `max_carriers` | `256` | Carrier sockets per session, `1..256`; `carriers` over the cap fails with `EINVAL` |
 | `debug_loss` | `0` | Allow `drop_ppm` writes, the deterministic loss injector |
-| `hold_enable` | `0` | Opt-in BBR hold: the 50 ms carrier poll restores the last good cwnd/pacing across idle periods; off by default |
+| `hold_enable` | `1` | BBR hold: the 50 ms carrier poll restores the last good cwnd/pacing across idle periods. On by default; write `0` to opt out. It writes `tcp_sock` fields directly, which is not a stable kernel API |
 
 The control surface is created in `init_net` only; there is no per-netns view.
 Unload with `sudo rmmod tbtun`. Unloading flushes every tunnel and closes every

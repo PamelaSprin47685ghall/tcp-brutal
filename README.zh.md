@@ -121,7 +121,7 @@ sudo insmod tbtun.ko debug_loss=0
 | `max_tunnels` | `64` | 最多可配置的隧道数；新 id 超过上限返回 `ENOSPC` |
 | `max_carriers` | `256` | 每个会话的载体槽，`1..256`；`n + m` 或 `carriers` 超过上限返回 `EINVAL` |
 | `debug_loss` | `0` | 是否允许写 `drop_ppm`（确定性丢包注入） |
-| `hold_enable` | `0` | 可选 BBR hold：50 ms carrier poll 在空闲期后恢复上次的 cwnd/pacing；默认关闭 |
+| `hold_enable` | `1` | BBR hold：50 ms carrier poll 在空闲期后恢复上次的 cwnd/pacing。默认开启；写 `0` 关闭。它直接写 `tcp_sock` 字段，不是稳定的内核 API |
 
 控制面只在 `init_net` 中创建；没有 per-netns 视图。
 卸载用 `sudo rmmod tbtun`。卸载会清空所有隧道，关闭所有监听端口和载体。

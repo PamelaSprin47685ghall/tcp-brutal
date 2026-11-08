@@ -3,6 +3,17 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [Unreleased]
+
+### Changed
+
+- The peripheral BBR hold is enabled by default (`hold_enable=1`). The 50 ms
+  carrier poll restores the last good `snd_cwnd`/pacing across idle periods.
+  Set `hold_enable=0` at load, or write
+  `/sys/module/tbtun/parameters/hold_enable`, to opt out. The hold writes
+  `tcp_sock` fields directly, which is not a stable kernel API; `hold_enable=0`
+  is the rollback.
+
 ## [0.2.2] - 2026-11-08
 
 ### Added

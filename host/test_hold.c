@@ -170,11 +170,28 @@ static void case_state(void)
     ok(!m.active, "state: window shrink exits");
 }
 
+static void case_default_on(void)
+{
+    /* The module default is hold_enable=1. */
+    ok(tbt_hold_enter(true, true, true, true, true, false, false,
+                      100, 300 * MS, 200 * MS),
+       "default: hold enters with the shipped default");
+    ok(tbt_hold_keep(true, false, false, false, 100, 10 * 1000 * MS),
+       "default: hold keeps while idle");
+    /* Opt-out: hold_enable=0 must leave BBR untouched. */
+    ok(!tbt_hold_enter(false, true, true, true, true, false, false,
+                       100, 300 * MS, 200 * MS),
+       "opt-out: hold never enters");
+    ok(!tbt_hold_keep(false, false, false, false, 100, 10 * 1000 * MS),
+       "opt-out: inactive hold never keeps");
+}
+
 int main(void)
 {
     case_enter();
     case_keep();
     case_state();
+    case_default_on();
 
     printf("test_hold: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

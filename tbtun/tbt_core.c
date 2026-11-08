@@ -45,10 +45,12 @@ MODULE_PARM_DESC(debug_loss, "Allow carrier drop_ppm (frame loss injection) writ
 
 /* Peripheral BBR hold: the 50 ms carrier poll restores the last good cwnd and
  * pacing rate while a carrier is idle, so BBR does not start the next burst
- * from an idle-collapsed window. Opt-in; 0 leaves BBR completely untouched. */
-bool tbt_hold_enable;
+ * from an idle-collapsed window. Default on; write 0 to
+ * /sys/module/tbtun/parameters/hold_enable to opt out. It writes tcp_sock
+ * fields directly, which is not a stable kernel API. */
+bool tbt_hold_enable = true;
 module_param_named(hold_enable, tbt_hold_enable, bool, 0644);
-MODULE_PARM_DESC(hold_enable, "Hold BBR cwnd/pacing across idle periods (0=off)");
+MODULE_PARM_DESC(hold_enable, "Hold BBR cwnd/pacing across idle periods (default 1; 0=off)");
 
 // The wire header is defined field by field in DESIGN.md §3.3; a compiler that
 // pads it differently would produce bytes that no peer can parse. Checked at

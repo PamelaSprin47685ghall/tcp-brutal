@@ -1980,8 +1980,9 @@ therefore a **per-open-file line buffer**:
 ### 8.4.2 `/proc` is the control surface, not `/sys`
 
 All tunables live under `/proc/net/tbtun/`. `/sys/module/tbtun/parameters/` holds only the
-load-time module params (`debug`, `max_tunnels`, `max_carriers`, `debug_loss`, `hold_enable`), all
-read-only after load. Reasons: sysfs module params are **per-module, not per-netns**, so
+load-time module params (`debug`, `max_tunnels`, `max_carriers`, `debug_loss`, `hold_enable`).
+All are read-only after load except `hold_enable`, which stays writable (0644) so the
+peripheral BBR hold can be disabled at runtime. Reasons: sysfs module params are **per-module, not per-netns**, so
 two netns cannot have different tunnels; sysfs attributes cannot express lists or
 structures; and sysfs has no idiom for returning an error message a shell can display.
 `/proc/net/` is where per-netns socket state already lives and it is plain `echo`-able.
@@ -2627,11 +2628,13 @@ Implemented in C3, per session:
    `stall_dead` bound. A provisional carrier that has not presented a HELLO within 5 s
    is retired.
 
-   The poll also owns the opt-in BBR hold (`hold_enable=1`, default 0): when a carrier
-   has been idle long enough for the stack to reset its cwnd and pacing, the poll
-   restores the last good `snd_cwnd`/pacing rate instead of letting the next burst
-   restart from the initial window. The hold is released on loss, on a carrier
+   The poll also owns the BBR hold (`hold_enable=1` by default; write `0` to disable):
+   when a carrier has been idle long enough for the stack to reset its cwnd and pacing,
+   the poll restores the last good `snd_cwnd`/pacing rate instead of letting the next
+   burst restart from the initial window. The hold is released on loss, on a carrier
    replacement, and when the saved rate is stale; `host/test_hold` covers those rules.
+   It writes `tcp_sock` fields directly, which is not a stable kernel API; keep
+   `hold_enable=0` as the rollback if a kernel change breaks the assumption.
 2. `tbt_carrier_lost()` also runs on a carrier write error and on `carrier <n> down`. It
    excludes the path from scheduling immediately and marks every retained frame last sent
    on it overdue, so the normal scheduler re-sends them on the live paths. An ARQ stall
