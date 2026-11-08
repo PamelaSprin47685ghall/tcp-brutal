@@ -101,8 +101,9 @@ and moves independently of the module version.
   256 carriers in one group (`n + m = 256`, `groups = 1`), uplink grouped
   (`n + m = 8` or 32), rates 0.50/0.40/0.30 at p = 30/40/50% (uplink uses
   GF(16) 0.45 at p = 40%). `mode=sc-ldpc` is accepted by the parser, but
-  `tbt_fec_params_check()` and the data plane return `-EOPNOTSUPP`; there is
-  no codec, share-to-codeword mapping, per-direction CFG or rate control.
+  `tbt_fec_params_check()` returns `-EINVAL` and the data plane returns
+  `-EOPNOTSUPP`; there is no codec, share-to-codeword mapping, per-direction
+  CFG or rate control.
   Design: `review/sc-ldpc-0.3.0-design.md`.
 - **Multi-stream v7 is not implemented.** FEC v6 carries one live application
   stream per tunnel; a sequential connection is supported, a second
@@ -121,6 +122,14 @@ and moves independently of the module version.
   still full, far CPU 1.47 cores). 32 and 64 carriers measured 96.0% and
   105.4%. 0.2.3 records a different 256-carrier steady state (23.9 Mbit/s
   average over 60 s, 27.9 Mbit/s 10 s max); neither number is the target.
+
+### Release gaps
+
+- Merge train D/E is not merged: D `w-sclc` does not exist (the SC-LDPC
+  prototypes are outside master), and E `w-hnd0` has 14 commits outside
+  master.
+- 0.2.3 has not rerun the 1 GiB acceptance or the real-host DKMS flow; the
+  existing 1 GiB and DKMS evidence is 0.2.0 fix27 on `.65`.
 
 ### Deferred from 0.2.0
 

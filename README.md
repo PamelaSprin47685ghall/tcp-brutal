@@ -474,9 +474,9 @@ retired_data`, and `retx_frames == live_retx + retired_retx`.
 ### `ports` (read/write)
 
 `ports <lo>-<hi>` sets the global source port block for carriers; the default is
-`40000-40063` (64 ports). A blank line, or `ports 0-0`, is a no-op and leaves
-the block unchanged. Reading the file prints the block, whether it is
-configured, and the directive.
+`40000-44095` (4096 ports = 256 carriers × 16 rebuilds). A blank line, or
+`ports 0-0`, is a no-op and leaves the block unchanged. Reading the file prints
+the block, whether it is configured, and the directive.
 
 ## Verified performance
 

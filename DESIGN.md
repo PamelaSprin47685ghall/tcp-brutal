@@ -272,8 +272,8 @@ block size. SC-LDPC adapts its **code rate**, not an `n/m` class table.
 
 **Status: not implemented.** `mode=sc-ldpc` is accepted by the parser
 (`w=0` resolves to 256; an explicit `w` must be 256 or 512) so a configuration
-can be validated, but `tbt_fec_params_check()` and the data plane refuse it
-with `-EOPNOTSUPP` (`fec rejected: mode=3 is SC-LDPC`). `tbt_fec_ops` reserves
+can be validated, but `tbt_fec_params_check()` returns `-EINVAL` and the data
+plane returns `-EOPNOTSUPP` (`fec rejected: mode=3 is SC-LDPC`). `tbt_fec_ops` reserves
 the codec slot; there is no codec, no share-to-codeword mapping, no
 per-direction CFG, and no rate control. Do not describe SC-LDPC as supported.
 
@@ -1636,9 +1636,10 @@ costs one TCP handshake instead of a new session.
 
 - Near side: carrier sources use the host's local address(es), ports drawn from a
   **reserved block** configured once at boot:
-  `net.ipv4.ip_local_reserved_ports=40000-40063` (stated in the docs), default block
-  `40000-40063` (16 ports), overridable via `/proc/net/tbtun/ports`
-  (`ports 41000-41015`). The module keeps one global **bitmap** of block ports
+  `net.ipv4.ip_local_reserved_ports=40000-44095` (stated in the docs), default block
+  `40000-44095` (4096 ports = 256 carriers × 16 rebuilds), overridable via
+  `/proc/net/tbtun/ports` (`ports 41000-45095`). The module keeps one global
+  **bitmap** of block ports
   (`tbt_portmap`), allocates with `find_next_zero_bit`, and releases on carrier close.
   This is strictly better than `IP_LOCAL_PORT_RANGE` alone because the TCP bind below it
   cannot fail on an unrelated ephemeral allocation.
@@ -1674,7 +1675,7 @@ costs one TCP handshake instead of a new session.
 
 | Use | Default |
 |---|---|
-| Client carrier block | `40000–40063` (16 slots; `N+M ≤ 16`) |
+| Client carrier block | `40000–44095` (4096 slots; `N+M ≤ 256`) |
 | Far-side carrier listen port | `listen=` is required; there is no default (`443` appears only in examples) |
 | Public proxy port (near) | configured, e.g. 9000 |
 | Target (far) | configured literal `ip:port` |

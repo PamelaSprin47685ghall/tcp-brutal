@@ -1,8 +1,15 @@
 # tbtun v6 接口冻结（T0）
 
-状态：**冻结，T0 已验收**（Main 裁决，2026-11-06；验收基线 `7105507`，745 行）。本文件后续只追加裁决/跟踪，ABI 未变。基线 `master 0db5166`。
+> **Superseded（2026-11-08）**：本文件是 T0 历史契约，不再是当前 ABI。
+> T0 的 `0x1001`、40 B header、ACK 16、FEC_CFG 32 已被取代。
+> 已发布 0.2.3：`TBT_FEC_CONV 0x1005`、48 B header、ACK 24、NACK 64、
+> FEC_CFG 32、FEC_FBK 48。未发布 0.3.0：`0x1006`、48 B header、ACK 24、
+> NACK 64、FEC_CFG 48、FEC_FBK 48 报告、HELLO v3。以
+> `tbtun/tbt_uapi.h` 与 `CHANGELOG.md` 为准。
+
+状态：**冻结，T0 已验收**（Main 裁决，2026-11-06；验收基线 `7105507`，745 行）。本文件后续只追加裁决/跟踪；ABI 已多次 bump（见上方注记），本文件只保留 T0 历史契约。基线 `master 0db5166`。
 权威来源：B（`fec-v6`）的 40B header / 控制帧提案，经用户批准为 T0 冻结基线；本文件是 T0 的唯一接口契约。
-变更控制：任何 wire 字段、偏移、类型、CRC 顺序的变更，必须 B 与 integrator 书面同意，并 bump `TBT_FEC_CONV`（当前 `0x1001`）。只改文档、不改 ABI 的编辑不 bump。
+变更控制：任何 wire 字段、偏移、类型、CRC 顺序的变更，必须 B 与 integrator 书面同意，并 bump `TBT_FEC_CONV`（T0 时为 `0x1001`；当前值见上方注记）。只改文档、不改 ABI 的编辑不 bump。
 范围：T0 只写文档，不改 `tbtun/` 产品代码。本文中的头文件签名是 B/C/D 的实现契约，不是已落地的代码。
 
 ---
