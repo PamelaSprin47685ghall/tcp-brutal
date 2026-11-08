@@ -3,6 +3,28 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [Unreleased]
+
+### Added
+
+- SC-LDPC adaptive rate control Phase 2 as host-testable pure logic
+  (`tbtun/tbt_fec_adapt_sclc.{c,h}`). The estimator folds per-group
+  256-bit miss masks into eight 500 ms buckets (4 s window) and a 1/8
+  EWMA; `p_used = max(EWMA, window)` becomes valid after 8 super-blocks
+  and 512 alive-filtered shares. The controller maps p to
+  `r_t = clamp(1 - p - 0.20, 0.25, 0.70)`, quantizes down onto the codec
+  ladder `{25,30,40,50,60,70}`, and derives `n = floor(r_actual * (n+m))`.
+  It is off by default, never suggests a switch while off, and adds fast
+  start, 2 pp hysteresis, two-sample down / six-sample up, 3 s / 10 s
+  dwell, 5 s reverse cooldown, 10-in-60 s cap, 3-in-30 s hold, burst,
+  residual fail-down, probe up/commit/revert/abort, post-commit rollback,
+  and CFG-reject fallback. The data plane still rejects `adaptive=on` for
+  `mode=3`; wiring the controller to FEC_CFG is Phase 3.
+- `host/test_fec_adapt_sclc` covers the rate ladder and n/m for the
+  256-share downlink and 32-share uplink, estimator windows and masks,
+  target boundaries, convergence at 0/1/3/5/10/15/25/35/45/55/100% loss,
+  non-oscillation, all boundary paths, and parameter validation.
+
 ## [0.3.3] - 2026-11-08
 
 ### Fixed
