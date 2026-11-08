@@ -217,8 +217,9 @@ static void test_header_roundtrip(void)
            TBT_FEC_H_RESERVED == 30 && TBT_FEC_H_SID == 32 &&
            TBT_FEC_H_PAYCRC == 40 && TBT_FEC_H_HDRCRC == 44,
        "header offsets", NULL);
-    /* 0x1005 adds the stream sid and grows the header to 48 bytes. */
-    ok(TBT_FEC_CONV == 0x1005u, "TBT_FEC_CONV", NULL);
+    /* 0x1005 adds the stream sid and grows the header to 48 bytes; 0x1006
+     * makes FEC_CFG/FEC_FBK carry the adaptive shape. */
+    ok(TBT_FEC_CONV == 0x1006u, "TBT_FEC_CONV", NULL);
 
     /* NULL arguments are refused, not dereferenced. */
     ok_int(tbt_fec_hdr_pack(NULL, wire), -EINVAL, "pack NULL header");
@@ -506,11 +507,11 @@ static void test_hdr_check(void)
     ok_int(tbt_fec_hdr_check(&h, 64), 0, "NACK names its block in block_id");
 
     h = ctl_hdr(TBT_FEC_CFG, TBT_FEC_CFG_LEN);
-    ok_int(tbt_fec_hdr_check(&h, 64), 0, "CFG 32");
+    ok_int(tbt_fec_hdr_check(&h, 64), 0, "CFG 48");
     h = ctl_hdr(TBT_FEC_CFG, TBT_FEC_CFG_LEN - 1);
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "CFG 31");
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "CFG 47");
     h = ctl_hdr(TBT_FEC_CFG, TBT_FEC_CFG_LEN + 1);
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "CFG 33");
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "CFG 49");
     h = ctl_hdr(TBT_FEC_CFG, TBT_FEC_CFG_LEN);
     h.seq = 1;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "CFG seq != 0");
@@ -680,12 +681,12 @@ static void test_bitmap(void)
 
 static void cfg_fix_crc(u8 *buf)
 {
-    u32 crc = tbt_fec_crc32c(0, buf, 24);
+    u32 crc = tbt_fec_crc32c(0, buf, TBT_FEC_CFG_CRC_BYTES);
 
-    buf[24] = (u8)crc;
-    buf[25] = (u8)(crc >> 8);
-    buf[26] = (u8)(crc >> 16);
-    buf[27] = (u8)(crc >> 24);
+    buf[TBT_FEC_CFG_CRC + 0] = (u8)crc;
+    buf[TBT_FEC_CFG_CRC + 1] = (u8)(crc >> 8);
+    buf[TBT_FEC_CFG_CRC + 2] = (u8)(crc >> 16);
+    buf[TBT_FEC_CFG_CRC + 3] = (u8)(crc >> 24);
 }
 
 static void test_control(void)
@@ -753,113 +754,158 @@ static void test_control(void)
     ok_int(n != TBT_FEC_NACK_LEN ? -EINVAL : 0, 0,
            "fixed length check accepts the NACK");
 
-    /* FEC_CFG: 32 bytes, internal CRC over +0..+23. */
+    /* FEC_CFG: 48 bytes, CRC over +0..+39 (0x1006). */
     memset(&c, 0, sizeof(c));
     c.epoch = 0x12345678u;
-    c.n = 224;
-    c.m = 32;
-    c.w = 384;
-    c.k = 192;
-    c.d = 64;
-    c.seed = 0x1122334455667788ULL;
+    c.n = 4;
+    c.m = 4;
+    c.w = 8;
+    c.k = 4;
+    c.d = 4;
+    c.flags = TBT_FEC_CFG_F_APPLY;
+    c.groups = 32;
+    c.switch_pkt = 0x1122334455667788ULL;
+    c.block_base = 0x0102030405060708ULL;
+    c.seed = 0x8877665544332211ULL;
     ok_int(tbt_fec_cfg_pack(&c, cbuf), 0, "CFG pack");
-    ok_u32le(cbuf + 0, c.epoch, "CFG epoch at +0");
-    ok_u16le(cbuf + 4, c.n, "CFG n at +4");
-    ok_u16le(cbuf + 6, c.m, "CFG m at +6");
-    ok_u16le(cbuf + 8, c.w, "CFG w at +8");
-    ok_u16le(cbuf + 10, c.k, "CFG k at +10");
-    ok(cbuf[12] == 64, "CFG d at +12", NULL);
-    ok_u64le(cbuf + 16, c.seed, "CFG seed at +16");
-    ok_u32le(cbuf + 24, tbt_fec_crc32c(0, cbuf, 24), "CFG CRC at +24");
-    ok_u32le(cbuf + 28, 0, "CFG reserved2 at +28");
+    ok_u32le(cbuf + TBT_FEC_CFG_EPOCH, c.epoch, "CFG epoch at +0");
+    ok_u16le(cbuf + TBT_FEC_CFG_N, c.n, "CFG n at +4");
+    ok_u16le(cbuf + TBT_FEC_CFG_M, c.m, "CFG m at +6");
+    ok_u16le(cbuf + TBT_FEC_CFG_W, c.w, "CFG w at +8");
+    ok_u16le(cbuf + TBT_FEC_CFG_K, c.k, "CFG k at +10");
+    ok(cbuf[TBT_FEC_CFG_D] == 4, "CFG d at +12", NULL);
+    ok(cbuf[TBT_FEC_CFG_FLAGS] == TBT_FEC_CFG_F_APPLY, "CFG flags at +13", NULL);
+    ok_u16le(cbuf + TBT_FEC_CFG_GROUPS, c.groups, "CFG groups at +14");
+    ok_u64le(cbuf + TBT_FEC_CFG_SWITCH_PKT, c.switch_pkt,
+             "CFG switch_pkt at +16");
+    ok_u64le(cbuf + TBT_FEC_CFG_BLOCK_BASE, c.block_base,
+             "CFG block_base at +24");
+    ok_u64le(cbuf + TBT_FEC_CFG_SEED, c.seed, "CFG seed at +32");
+    ok_u32le(cbuf + TBT_FEC_CFG_CRC,
+             tbt_fec_crc32c(0, cbuf, TBT_FEC_CFG_CRC_BYTES), "CFG CRC at +40");
+    ok_u32le(cbuf + TBT_FEC_CFG_RESERVED, 0, "CFG reserved at +44");
+    ok(TBT_FEC_CFG_LEN == 48, "CFG body is 48 bytes", NULL);
+    ok((int)sizeof(struct tbt_fec_cfg) == TBT_FEC_CFG_LEN,
+       "CFG struct is 48 bytes", NULL);
     memset(&c2, 0, sizeof(c2));
     ok_int(tbt_fec_cfg_unpack(cbuf, &c2), 0, "CFG unpack");
-    ok(c2.epoch == c.epoch && c2.n == c.n && c2.m == c.m && c2.w == c.w && c2.k == c.k &&
-           c2.d == c.d && c2.seed == c.seed,
+    ok(c2.epoch == c.epoch && c2.n == c.n && c2.m == c.m && c2.w == c.w &&
+           c2.k == c.k && c2.d == c.d && c2.flags == c.flags &&
+           c2.groups == c.groups && c2.switch_pkt == c.switch_pkt &&
+           c2.block_base == c.block_base && c2.seed == c.seed,
        "CFG round-trip", NULL);
 
-    cbuf[0] ^= 1;
+    cbuf[TBT_FEC_CFG_EPOCH] ^= 1;
     ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG body CRC mismatch");
+    /* The switch coordinates sit under the same CRC as the shape fields. */
     tbt_fec_cfg_pack(&c, cbuf);
-    cbuf[28] = 1;
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG reserved2 != 0");
+    cbuf[TBT_FEC_CFG_SWITCH_PKT] ^= 1;
+    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO,
+           "CFG switch_pkt is CRC-covered");
+    tbt_fec_cfg_pack(&c, cbuf);
+    cbuf[TBT_FEC_CFG_RESERVED] = 1;
+    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG reserved != 0");
+    tbt_fec_cfg_pack(&c, cbuf);
+    cbuf[TBT_FEC_CFG_FLAGS] = 0x80;
+    cfg_fix_crc(cbuf);
+    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG unknown flags");
 
     tbt_fec_cfg_pack(&c, cbuf);
-    cbuf[4] = 0;
-    cbuf[5] = 0;
+    cbuf[TBT_FEC_CFG_N] = 0;
+    cbuf[TBT_FEC_CFG_N + 1] = 0;
     cfg_fix_crc(cbuf);
     ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG n=0");
     tbt_fec_cfg_pack(&c, cbuf);
-    cbuf[6] = 0;
-    cbuf[7] = 0;
+    cbuf[TBT_FEC_CFG_M] = 0;
+    cbuf[TBT_FEC_CFG_M + 1] = 0;
     cfg_fix_crc(cbuf);
     ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG m=0");
     tbt_fec_cfg_pack(&c, cbuf);
-    cbuf[4] = 255;
-    cbuf[5] = 0;
-    cbuf[6] = 2;
-    cbuf[7] = 0;
+    cbuf[TBT_FEC_CFG_N] = 255;
+    cbuf[TBT_FEC_CFG_N + 1] = 0;
+    cbuf[TBT_FEC_CFG_M] = 2;
+    cbuf[TBT_FEC_CFG_M + 1] = 0;
     cfg_fix_crc(cbuf);
     ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG n+m=257");
     tbt_fec_cfg_pack(&c, cbuf);
-    cbuf[10] = 0;
-    cbuf[11] = 0;
+    cbuf[TBT_FEC_CFG_N] = 2;
+    cbuf[TBT_FEC_CFG_N + 1] = 0;
+    cbuf[TBT_FEC_CFG_M] = 1;
+    cbuf[TBT_FEC_CFG_M + 1] = 0;
+    cfg_fix_crc(cbuf);
+    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG n+m does not divide 256");
+    tbt_fec_cfg_pack(&c, cbuf);
+    cbuf[TBT_FEC_CFG_GROUPS] = 31;
+    cbuf[TBT_FEC_CFG_GROUPS + 1] = 0;
+    cfg_fix_crc(cbuf);
+    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG groups != 256/(n+m)");
+    tbt_fec_cfg_pack(&c, cbuf);
+    cbuf[TBT_FEC_CFG_K] = 0;
+    cbuf[TBT_FEC_CFG_K + 1] = 0;
     cfg_fix_crc(cbuf);
     ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG k=0");
     tbt_fec_cfg_pack(&c, cbuf);
-    cbuf[8] = 100;
-    cbuf[9] = 0;
+    cbuf[TBT_FEC_CFG_W] = 2;
+    cbuf[TBT_FEC_CFG_W + 1] = 0;
     cfg_fix_crc(cbuf);
     ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG w<k");
     tbt_fec_cfg_pack(&c, cbuf);
-    cbuf[8] = 0x01;
-    cbuf[9] = 0x04; /* 1025 */
+    cbuf[TBT_FEC_CFG_W] = 0x01;
+    cbuf[TBT_FEC_CFG_W + 1] = 0x04; /* 1025 */
     cfg_fix_crc(cbuf);
     ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG w over TBT_FEC_MAX_W");
     tbt_fec_cfg_pack(&c, cbuf);
-    cbuf[8] = 200;
-    cbuf[9] = 0;
-    cbuf[12] = 255;
+    cbuf[TBT_FEC_CFG_D] = 9;
     cfg_fix_crc(cbuf);
     ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG d>w");
     tbt_fec_cfg_pack(&c, cbuf);
-    cbuf[8] = 8;
-    cbuf[9] = 0;
-    cbuf[10] = 8;
-    cbuf[11] = 0;
-    cbuf[12] = 8;
+    cbuf[TBT_FEC_CFG_D] = 8;
     cfg_fix_crc(cbuf);
     ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG d==w with w>1");
 
-    /* FEC_FBK: 48 bytes including the 32-byte bitmap. */
-    ok((int)sizeof(struct tbt_fec_fbk) == TBT_FEC_FBK_LEN, "FBK struct is 48 bytes", NULL);
+    /* FEC_FBK: 48 bytes including the 32-byte bitmap (0x1006 layout). */
+    ok((int)sizeof(struct tbt_fec_fbk) == TBT_FEC_FBK_LEN,
+       "FBK struct is 48 bytes", NULL);
     ok(TBT_FEC_FBK_LEN == 48, "FBK length constant", NULL);
     memset(&f, 0, sizeof(f));
-    f.epoch = 0xbeef;
+    tbt_fec_fbk_set_epoch(&f, 0x12345678u);
     f.m_current = 4;
     f.m_target = 6;
     f.p_ewma_ppm = 500000;
     f.expected_shares = 1000;
     f.received_shares = 900;
+    f.flags = TBT_FEC_FBK_F_CFG_ACK | TBT_FEC_FBK_F_P_VALID;
+    f.n_current = 4;
     tbt_fec_bitmap_set(f.carrier_bitmap, 0);
     tbt_fec_bitmap_set(f.carrier_bitmap, 255);
     ok_int(tbt_fec_fbk_pack(&f, fbuf), 0, "FBK pack");
-    ok_u16le(fbuf + 0, f.epoch, "FBK epoch at +0");
-    ok(fbuf[2] == 4 && fbuf[3] == 6, "FBK m_current/m_target at +2/+3", NULL);
-    ok_u32le(fbuf + 4, f.p_ewma_ppm, "FBK p_ewma at +4");
-    ok_u16le(fbuf + 8, f.expected_shares, "FBK expected at +8");
-    ok_u16le(fbuf + 10, f.received_shares, "FBK received at +10");
-    ok_u32le(fbuf + 12, 0, "FBK reserved at +12");
-    ok((fbuf[16] & 1) && (fbuf[16 + 31] & 0x80), "FBK bitmap bits 0 and 255", NULL);
+    ok_u16le(fbuf + TBT_FEC_FBK_EPOCH_LO, 0x5678, "FBK epoch_lo at +0");
+    ok(fbuf[TBT_FEC_FBK_M_CURRENT] == 4 && fbuf[TBT_FEC_FBK_M_TARGET] == 6,
+       "FBK m_current/m_target at +2/+3", NULL);
+    ok_u32le(fbuf + TBT_FEC_FBK_P_EWMA, f.p_ewma_ppm, "FBK p_ewma at +4");
+    ok_u16le(fbuf + TBT_FEC_FBK_EXPECTED, f.expected_shares,
+             "FBK expected at +8");
+    ok_u16le(fbuf + TBT_FEC_FBK_RECEIVED, f.received_shares,
+             "FBK received at +10");
+    ok_u16le(fbuf + TBT_FEC_FBK_EPOCH_HI, 0x1234, "FBK epoch_hi at +12");
+    ok(fbuf[TBT_FEC_FBK_FLAGS] == 0x11, "FBK flags at +14", NULL);
+    ok(fbuf[TBT_FEC_FBK_N_CURRENT] == 4, "FBK n_current at +15", NULL);
+    ok((fbuf[TBT_FEC_FBK_BITMAP] & 1) &&
+           (fbuf[TBT_FEC_FBK_BITMAP + 31] & 0x80),
+       "FBK bitmap bits 0 and 255", NULL);
     memset(&f2, 0, sizeof(f2));
     ok_int(tbt_fec_fbk_unpack(fbuf, &f2), 0, "FBK unpack");
-    ok(f2.epoch == f.epoch && f2.m_current == f.m_current && f2.m_target == f.m_target &&
-           f2.p_ewma_ppm == f.p_ewma_ppm && f2.expected_shares == f.expected_shares &&
+    ok(tbt_fec_fbk_epoch(&f2) == 0x12345678u, "FBK 32-bit epoch round-trip",
+       NULL);
+    ok(f2.m_current == f.m_current && f2.m_target == f.m_target &&
+           f2.p_ewma_ppm == f.p_ewma_ppm &&
+           f2.expected_shares == f.expected_shares &&
            f2.received_shares == f.received_shares &&
+           f2.flags == f.flags && f2.n_current == f.n_current &&
            !memcmp(f2.carrier_bitmap, f.carrier_bitmap, TBT_FEC_BITMAP_BYTES),
        "FBK round-trip", NULL);
-    fbuf[12] = 1;
-    ok_int(tbt_fec_fbk_unpack(fbuf, &f2), -EPROTO, "FBK reserved != 0");
+    fbuf[TBT_FEC_FBK_FLAGS] = 0x20;
+    ok_int(tbt_fec_fbk_unpack(fbuf, &f2), -EPROTO, "FBK unknown flags");
 }
 
 /* ------------------------------------------------------------------ *
@@ -1500,6 +1546,123 @@ static void test_group_mapping(void)
         prev = b;
     }
     ok(mono, "block_id is monotonic", NULL);
+}
+
+/* ------------------------------------------------------------------ *
+ * 9a. Relative mapping: base_pkt/base_block == 0 must reproduce the
+ * 0.2.x formulas exactly, and a non-zero origin is the coordinate system
+ * the 0x1006 shape switch uses (TBT_FEC_CONV 0x1006).
+ * ------------------------------------------------------------------ */
+
+static void test_base_mapping(void)
+{
+    enum { G = 32, N = 4 };
+    const u64 bp = 1000;
+    const u64 bb = 7;
+    u64 seq, block, total;
+    u16 group, p;
+
+    /* base 0 must reproduce every legacy helper exactly. */
+    for (seq = 0; seq < 4096; seq += 37)
+    {
+        ok_u32(tbt_fec_group_of_seq_base(seq, 0, G),
+               tbt_fec_group_of_seq(seq, G), "base 0 group matches legacy");
+        ok_u64(tbt_fec_block_of_seq_base(seq, 0, 0, G, N),
+               tbt_fec_block_of_seq(seq, G, N),
+               "base 0 block matches legacy");
+        ok_u32(tbt_fec_share_of_seq_base(seq, 0, G, N),
+               (u32)((seq / G) % N), "base 0 share matches legacy");
+    }
+    for (total = 1; total < 2048; total += 37)
+    {
+        ok_u64(tbt_fec_final_block_of_total_base(total, 0, 0, G, N),
+               tbt_fec_final_block_of_total(total, G, N),
+               "base 0 final block matches legacy");
+        ok_u32(tbt_fec_group_tail_len_base(total, 0, 0, G, N, 0),
+               tbt_fec_group_tail_len(total, G, N, 0),
+               "base 0 tail matches legacy");
+        ok_u32(tbt_fec_group_tail_len_base(total, 0, 0, G, N, 31),
+               tbt_fec_group_tail_len(total, G, N, 31),
+               "base 0 tail group 31 matches legacy");
+    }
+
+    /* A non-zero origin: the first new-shape record is (bp, bb). */
+    ok_u32(tbt_fec_group_of_seq_base(bp, bp, G), 0, "base group at P0");
+    ok_u32(tbt_fec_group_of_seq_base(bp + 31, bp, G), 31, "base group P0+31");
+    ok_u32(tbt_fec_group_of_seq_base(bp + 32, bp, G), 0, "base group P0+32");
+    ok_u64(tbt_fec_block_of_seq_base(bp, bp, bb, G, N), bb,
+           "base block at P0");
+    ok_u64(tbt_fec_block_of_seq_base(bp + 127, bp, bb, G, N), bb,
+           "base block last share");
+    ok_u64(tbt_fec_block_of_seq_base(bp + 128, bp, bb, G, N), bb + 1,
+           "base block after a span");
+    ok_u32(tbt_fec_share_of_seq_base(bp, bp, G, N), 0, "base share 0");
+    ok_u32(tbt_fec_share_of_seq_base(bp + 32, bp, G, N), 1, "base share 1");
+    ok_u32(tbt_fec_share_of_seq_base(bp + 96, bp, G, N), 3, "base share 3");
+    ok_u32(tbt_fec_share_of_seq_base(bp + 128, bp, G, N), 0,
+           "base share wraps to 0");
+    ok_u64(tbt_fec_seq_of_block_pkt_base(bb, 0, 0, bp, bb, G, N), bp,
+           "base seq of first block");
+    ok_u64(tbt_fec_seq_of_block_pkt_base(bb + 1, 0, 0, bp, bb, G, N),
+           bp + 128, "base seq of second block");
+
+    /* The four coordinates are a bijection around the origin. */
+    for (block = bb; block < bb + 2; block++)
+        for (group = 0; group < G; group++)
+            for (p = 0; p < N; p++)
+            {
+                u64 s = tbt_fec_seq_of_block_pkt_base(block, group, p, bp, bb,
+                                                      G, N);
+
+                ok_u64(tbt_fec_block_of_seq_base(s, bp, bb, G, N), block,
+                       "base round-trip block");
+                ok_u32(tbt_fec_group_of_seq_base(s, bp, G), group,
+                       "base round-trip group");
+                ok_u32(tbt_fec_share_of_seq_base(s, bp, G, N), p,
+                       "base round-trip share");
+            }
+
+    /* FIN alignment, delivery frontier and the final block all measure from
+     * the origin, not from absolute zero. */
+    ok(tbt_fec_fin_valid_base(bp + 128, bp, bp, 128), "FIN base at origin",
+       NULL);
+    ok(!tbt_fec_fin_valid_base(bp + 129, bp + 1, bp, 128),
+       "FIN base off the origin grid", NULL);
+    ok(!tbt_fec_fin_valid_base(bp, bp, bp + 1, 128),
+       "FIN base below origin", NULL);
+    ok(tbt_fec_block_delivered_base(bb - 1, bp, bp, bb, G, N),
+       "old block delivered at P0", NULL);
+    ok(!tbt_fec_block_delivered_base(bb, bp, bp, bb, G, N),
+       "new block not delivered at P0", NULL);
+    ok(tbt_fec_block_delivered_base(bb, bp + 128, bp, bb, G, N),
+       "block delivered after a span", NULL);
+    ok(!tbt_fec_block_delivered_base(bb + 1, bp + 128, bp, bb, G, N),
+       "next block not delivered", NULL);
+    ok_u64(tbt_fec_final_block_of_total_base(bp + 128, bp, bb, G, N), bb,
+           "final block before the next span");
+    ok_u64(tbt_fec_final_block_of_total_base(bp + 129, bp, bb, G, N), bb + 1,
+           "final block at the next span");
+    ok_u32(tbt_fec_group_tail_len_base(bp + 129, bp, bb, G, N, 0), 1,
+           "tail len group 0");
+    ok_u32(tbt_fec_group_tail_len_base(bp + 129, bp, bb, G, N, 1), 0,
+           "tail len group 1");
+}
+
+/* The 0.2.x peer sends HELLO body[0] == 2. 0.3.0 names 3, and
+ * tbt_rx_hello() compares the byte exactly, so the first HELLO fails with
+ * -EPROTO and the carrier closes. */
+static void test_wire_version(void)
+{
+    u8 hello[TBT_HELLO_BODY_LEN_V6];
+
+    memset(hello, 0, sizeof(hello));
+    hello[0] = TBT_WIRE_VERSION_V6;
+    ok(hello[0] == 3, "0.3.0 FEC HELLO names version 3", NULL);
+    hello[0] = 2;
+    ok(hello[0] != TBT_WIRE_VERSION_V6,
+       "0.2.x HELLO version 2 is refused", NULL);
+    ok(TBT_WIRE_VERSION == 1, "legacy ARQ HELLO stays version 1", NULL);
+    ok(TBT_FEC_CONV == 0x1006u, "0x1006 is the adaptive FEC revision", NULL);
 }
 
 /* ------------------------------------------------------------------ *
@@ -2216,10 +2379,12 @@ int main(void)
     test_crc();
     test_bitmap();
     test_control();
+    test_wire_version();
     test_rlnc_single();
     test_rlnc_loss_reorder();
     test_grouped();
     test_group_mapping();
+    test_base_mapping();
     test_group_reassembly();
     test_params();
     test_ops();

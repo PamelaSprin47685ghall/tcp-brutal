@@ -1,4 +1,4 @@
-/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x1005), control frames, and the
+/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x1006), control frames, and the
  * GF(2) sliding-window RLNC codec.
  *
  * This file and tbt_fec.c compile twice: into the module and into the host
@@ -101,14 +101,22 @@ u64 tbt_fec_ack_bytes(u64 next_deliver, u64 pkt_base, u64 tx_seq);
 /* FIN range check: pkt_end is the packet after the stream's last DATA packet,
  * pkt_base the first one, and both are absolute session packet seqs. The end
  * may not precede the base, and a non-zero span (groups*n) requires the base
- * to start a super-block. */
-static inline bool tbt_fec_fin_valid(u64 pkt_end, u64 pkt_base, u64 span)
+ * to start a super-block. `base_pkt` is the current shape's origin: the
+ * stream may start before it (the stream outlives a shape switch), so the
+ * alignment is measured from the origin, not from absolute zero. */
+static inline bool tbt_fec_fin_valid_base(u64 pkt_end, u64 pkt_base,
+                                          u64 base_pkt, u64 span)
 {
-    if (pkt_end < pkt_base)
+    if (pkt_end < pkt_base || pkt_base < base_pkt)
         return false;
-    if (span && pkt_base % span)
+    if (span && (pkt_base - base_pkt) % span)
         return false;
     return true;
+}
+
+static inline bool tbt_fec_fin_valid(u64 pkt_end, u64 pkt_base, u64 span)
+{
+    return tbt_fec_fin_valid_base(pkt_end, pkt_base, 0, span);
 }
 
 /* Standard CRC32C (Castagnoli), reflected, init ~0, final xor. A fresh CRC
@@ -207,6 +215,8 @@ struct tbt_fec_nack
     u8 share_mask[TBT_FEC_BITMAP_BYTES];
 };
 
+/* Shape change request (0x1006, 48 bytes). See tbt_uapi.h for the byte
+ * offsets; this struct is the host-side mirror, not the wire layout. */
 struct tbt_fec_cfg
 {
     u32 epoch;
@@ -215,23 +225,42 @@ struct tbt_fec_cfg
     u16 w;
     u16 k;
     u8 d;
-    u8 reserved[3];
+    u8 flags; /* TBT_FEC_CFG_F_APPLY / _ABORT */
+    u16 groups;
+    u64 switch_pkt; /* absolute seq of the first new-shape record */
+    u64 block_base; /* block id of the first new-shape block */
     u64 seed;
-    u32 crc32c; /* covers the first 24 bytes of this body */
-    u32 reserved2;
+    u32 crc32c;  /* CRC32C over the first 40 bytes of this body */
+    u32 reserved;
 };
 
+/* Receiver report (0x1006, 48 bytes). `epoch` is the 32-bit generation
+ * assembled from epoch_lo/epoch_hi; the wire keeps the two halves apart so
+ * the first 12 bytes stay at their 0x1002 offsets. */
 struct tbt_fec_fbk
 {
-    u16 epoch;
+    u16 epoch_lo;
     u8 m_current;
     u8 m_target;
     u32 p_ewma_ppm;
     u16 expected_shares;
     u16 received_shares;
-    u32 reserved;
+    u16 epoch_hi;
+    u8 flags; /* TBT_FEC_FBK_F_* */
+    u8 n_current;
     u8 carrier_bitmap[TBT_FEC_BITMAP_BYTES];
 };
+
+static inline u32 tbt_fec_fbk_epoch(const struct tbt_fec_fbk *f)
+{
+    return ((u32)f->epoch_hi << 16) | f->epoch_lo;
+}
+
+static inline void tbt_fec_fbk_set_epoch(struct tbt_fec_fbk *f, u32 epoch)
+{
+    f->epoch_lo = (u16)epoch;
+    f->epoch_hi = (u16)(epoch >> 16);
+}
 
 int tbt_fec_ack_pack(const struct tbt_fec_ack *a, u8 out[TBT_FEC_ACK_LEN]);
 int tbt_fec_ack_unpack(const u8 in[TBT_FEC_ACK_LEN], struct tbt_fec_ack *a);
@@ -473,13 +502,24 @@ static inline bool tbt_fec_replay_dup(u64 now_ns, u64 last_sent_ns,
     return last_sent_ns && now_ns - last_sent_ns < hold_ns;
 }
 
-/* The whole block lies below the peer's delivered packet frontier. */
-static inline bool tbt_fec_block_delivered(u64 block_id, u64 peer_pkts,
-                                           u16 groups, u16 n)
+/* The whole block lies below the peer's delivered packet frontier. The
+ * frontier is absolute, so the comparison is against the shape origin. */
+static inline bool tbt_fec_block_delivered_base(u64 block_id, u64 peer_pkts,
+                                                u64 base_pkt,
+                                                u64 base_block, u16 groups,
+                                                u16 n)
 {
     u64 span = (u64)groups * n;
 
-    return span && peer_pkts / span > block_id;
+    if (!span || peer_pkts < base_pkt)
+        return false;
+    return base_block + (peer_pkts - base_pkt) / span > block_id;
+}
+
+static inline bool tbt_fec_block_delivered(u64 block_id, u64 peer_pkts,
+                                           u16 groups, u16 n)
+{
+    return tbt_fec_block_delivered_base(block_id, peer_pkts, 0, 0, groups, n);
 }
 
 /* The FIN may be queued once the packetizer and every new DATA record are
@@ -689,10 +729,34 @@ void tbt_fec_grouped_free(struct tbt_fec_grouped *g);
 u16 tbt_fec_grouped_count(const struct tbt_fec_grouped *g);
 struct tbt_fec_rlnc *tbt_fec_grouped_ctx(struct tbt_fec_grouped *g, u16 group);
 
+/* Adaptive mapping (0.3.0, TBT_FEC_CONV 0x1006). `base_pkt` and
+ * `base_block` are the relative origin of the current shape: the first
+ * record of the shape has seq base_pkt and block id base_block. A switch
+ * only moves the origin, so one set of formulas covers every shape.
+ * base_pkt == base_block == 0 reproduces the 0.2.x mapping exactly.
+ *
+ * The caller guarantees seq >= base_pkt. A record below the origin belongs
+ * to a block the switch already delivered; the receiver drops it before
+ * these helpers run. */
+static inline u16 tbt_fec_group_of_seq_base(u64 seq, u64 base_pkt, u16 groups)
+{
+    return groups ? (u16)((seq - base_pkt) % groups) : 0;
+}
+
 /* Application seq is striped across groups: group = seq % groups. */
 static inline u16 tbt_fec_group_of_seq(u64 seq, u16 groups)
 {
-    return groups ? (u16)(seq % groups) : 0;
+    return tbt_fec_group_of_seq_base(seq, 0, groups);
+}
+
+/* Share inside the group: (relative seq / groups) % n. The packetizer uses
+ * it to pick the DATA share, so a shape switch only changes the origin. */
+static inline u16 tbt_fec_share_of_seq_base(u64 seq, u64 base_pkt, u16 groups,
+                                            u16 n)
+{
+    if (!groups || !n)
+        return 0;
+    return (u16)(((seq - base_pkt) / groups) % n);
 }
 
 /* 1 share/carrier mapping (T0 §3.6): carriers = groups * (n+m). */
@@ -706,50 +770,87 @@ static inline u16 tbt_fec_share_of_carrier(u16 carrier, u16 shares)
     return shares ? (u16)(carrier % shares) : 0;
 }
 
-/* block_id is the group-local generation: (seq / groups) / k. It does not
- * encode the group and does not demux streams. */
+/* block_id is the group-local generation: base_block + ((seq - base_pkt) /
+ * groups) / n. It does not encode the group and does not demux streams. */
+static inline u64 tbt_fec_block_of_seq_base(u64 seq, u64 base_pkt,
+                                            u64 base_block, u16 groups,
+                                            u16 n)
+{
+    if (!groups || !n)
+        return 0;
+    return base_block + ((seq - base_pkt) / groups) / n;
+}
+
 static inline u64 tbt_fec_block_of_seq(u64 seq, u16 groups, u16 k)
 {
-    return (groups && k) ? (seq / groups) / k : 0;
+    return tbt_fec_block_of_seq_base(seq, 0, 0, groups, (u16)k);
 }
 
 /* Global seq of packet p (0..n-1) of group `group` inside `block_id`. The
  * stripe is group = seq % groups, so a block of every group covers one
  * contiguous span of groups*n global packets: the "super-block". */
+static inline u64 tbt_fec_seq_of_block_pkt_base(u64 block_id, u16 group,
+                                                u16 p, u64 base_pkt,
+                                                u64 base_block, u16 groups,
+                                                u16 n)
+{
+    return base_pkt + ((block_id - base_block) * n + p) * groups + group;
+}
+
 static inline u64 tbt_fec_seq_of_block_pkt(u64 block_id, u16 group, u16 p,
                                            u16 groups, u16 n)
 {
-    return ((block_id * n + p) * groups) + group;
+    return tbt_fec_seq_of_block_pkt_base(block_id, group, p, 0, 0, groups, n);
 }
 
 /* Last super-block that holds at least one packet, given the stream's total
- * packet count P. Undefined for P == 0; callers check that first. */
-static inline u64 tbt_fec_final_block_of_total(u64 total_pkts, u16 groups, u16 n)
+ * packet count P (an absolute pkt_end). Undefined for P == 0 or P <=
+ * base_pkt; callers check that first. */
+static inline u64 tbt_fec_final_block_of_total_base(u64 total_pkts,
+                                                    u64 base_pkt,
+                                                    u64 base_block,
+                                                    u16 groups, u16 n)
 {
-    if (!total_pkts || !groups || !n)
+    if (!total_pkts || total_pkts <= base_pkt || !groups || !n)
         return 0;
-    return (total_pkts - 1) / ((u64)groups * n);
+    return base_block + (total_pkts - base_pkt - 1) / ((u64)groups * n);
+}
+
+static inline u64 tbt_fec_final_block_of_total(u64 total_pkts, u16 groups,
+                                               u16 n)
+{
+    return tbt_fec_final_block_of_total_base(total_pkts, 0, 0, groups, n);
 }
 
 /* Number of real DATA packets group `group` has in its final block when the
  * stream holds `total_pkts` packets. 0 means the group has no packet in that
  * super-block. The sender zero-fills the remaining positions before encoding
  * parity; the receiver marks them known-zero and never delivers them. */
-static inline u16 tbt_fec_group_tail_len(u64 total_pkts, u16 groups, u16 n,
-                                         u16 group)
+static inline u16 tbt_fec_group_tail_len_base(u64 total_pkts, u64 base_pkt,
+                                              u64 base_block, u16 groups,
+                                              u16 n, u16 group)
 {
     u64 final_block;
     u64 first;
     u64 last_local;
 
-    if (!total_pkts || !groups || !n || group >= groups)
+    if (!total_pkts || total_pkts <= base_pkt || !groups || !n ||
+        group >= groups)
         return 0;
-    final_block = tbt_fec_final_block_of_total(total_pkts, groups, n);
-    first = (u64)group + (u64)groups * final_block * n;
+    final_block = tbt_fec_final_block_of_total_base(total_pkts, base_pkt,
+                                                    base_block, groups, n);
+    first = tbt_fec_seq_of_block_pkt_base(final_block, group, 0, base_pkt,
+                                          base_block, groups, n);
     if (total_pkts <= first)
         return 0;
-    last_local = (total_pkts - 1 - group) / groups;
-    return (u16)(last_local - final_block * n + 1);
+    last_local = (total_pkts - 1 - base_pkt - group) / groups;
+    return (u16)(last_local - (final_block - base_block) * n + 1);
+}
+
+static inline u16 tbt_fec_group_tail_len(u64 total_pkts, u16 groups, u16 n,
+                                         u16 group)
+{
+    return tbt_fec_group_tail_len_base(total_pkts, 0, 0, groups, n, group);
 }
 
 /* Real share count for a block. The parity's win_len is authoritative; the
@@ -1019,5 +1120,71 @@ struct tbt_fec_ops
 };
 
 extern const struct tbt_fec_ops tbt_fec_ops_rlnc;
+
+/* ------------------------------------------------------------------ *
+ * Adaptive shape (0.3.0, TBT_FEC_CONV 0x1006)
+ *
+ * The shape was frozen per session in 0.2.x. From 0.3.0 the sender may move
+ * it at a super-block boundary; `base_pkt`/`base_block` are the relative
+ * origin of the shape currently in force (see the mapping helpers above).
+ * `slots` is the receiver's reorder depth in blocks per group, not a wire
+ * field: the receiver derives it from the arena and a switch keeps it.
+ * ------------------------------------------------------------------ */
+
+struct tbt_fec_shape
+{
+    u16 n;
+    u16 m;
+    u16 groups;
+    u16 slots;
+    u16 w;
+    u16 k;
+    u8 d;
+    u64 base_pkt;
+    u64 base_block;
+};
+
+enum tbt_fec_switch_state
+{
+    TBT_FEC_SW_STEADY = 0, /* no switch in flight */
+    TBT_FEC_SW_CFG_SENT,   /* sender: CFG sent, waiting for CFG_ACK */
+    TBT_FEC_SW_DRAIN,      /* sender: packetizer stopped at P0 */
+    TBT_FEC_SW_PREP,       /* receiver: allocating the new codec */
+    TBT_FEC_SW_ARMED,      /* receiver: CFG_ACK sent, waiting for P0 */
+    TBT_FEC_SW_APPLIED,    /* receiver: new shape installed */
+    TBT_FEC_SW_COOLDOWN,   /* sender: abort finished, cooling down */
+};
+
+/* One shape change in flight. The wire form is FEC_CFG; this struct is the
+ * in-kernel record both sides keep while the two-phase commit runs. `flags`
+ * is reserved for the WP6/WP7 state machine. */
+struct tbt_fec_switch
+{
+    u32 epoch;
+    u8 state;
+    u8 flags;
+    u64 switch_pkt;
+    u64 block_base;
+    struct tbt_fec_shape shape;
+};
+
+/* Control and estimator entry points. Phase 1 freezes the interface only;
+ * WP4-WP7 provide the bodies. */
+struct tbt_session;
+struct tbt_fec_blk;
+
+int tbt_fec_switch_begin(struct tbt_session *sess, struct tbt_fec_shape shape);
+void tbt_fec_switch_on_cfg(struct tbt_session *sess,
+                           const struct tbt_fec_cfg *cfg);
+void tbt_fec_switch_on_fbk(struct tbt_session *sess,
+                           const struct tbt_fec_fbk *fbk);
+void tbt_fec_switch_on_frontier(struct tbt_session *sess, u64 next_deliver);
+
+/* Called only from w_fec_rx, the single writer of the estimator state. */
+void tbt_fec_est_recovered(struct tbt_session *sess, u16 group,
+                           struct tbt_fec_blk *b);
+void tbt_fec_est_requested(struct tbt_session *sess, u16 group, u64 block_id,
+                           u16 share);
+void tbt_fec_est_super_done(struct tbt_session *sess, u64 super);
 
 #endif /* _TBT_FEC_H */

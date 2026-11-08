@@ -67,13 +67,17 @@ typedef uint64_t u64;
 #define TBT_CONV 0x0006u
 
 /* HELLO body[0]: wire-protocol version, independent of TBT_VERSION. The FEC
- * v6 session uses version 2 and the extended body below; the old ARQ keeps
- * version 1 and 23 bytes. */
+ * v6 session uses version 3 and the extended body below; the old ARQ keeps
+ * version 1 and 23 bytes. Version 3 is the adaptive-shape cut: the FEC
+ * records use TBT_FEC_CONV 0x1006, and FEC_CFG/FEC_FBK carry the shape
+ * switch. tbt_rx_hello() compares this byte exactly, so a 0.2.x peer fails
+ * the first HELLO with -EPROTO and its carrier closes; both ends must be
+ * upgraded together. */
 #define TBT_WIRE_VERSION 1
-#define TBT_WIRE_VERSION_V6 2
+#define TBT_WIRE_VERSION_V6 3
 
 /* ------------------------------------------------------------------ *
- * FEC wire: an independent record format, TBT_FEC_CONV 0x1005.
+ * FEC wire: an independent record format, TBT_FEC_CONV 0x1006.
  *
  * The old ARQ record above is frozen at 16 carriers: its path_ack_mask is
  * u16 and its FBK/WINDOW bodies have 16 entries. FEC never reuses those
@@ -99,7 +103,7 @@ typedef uint64_t u64;
  *   +16 u64 seq         DATA: packet sequence; PARITY: window end
  *   +24 u16 win_len     PARITY: covered packets; DATA: 0
  *   +26 u16 payload_len payload bytes following this header
- *   +28 u16 conv        0x1005
+ *   +28 u16 conv        0x1006
  *   +30 u16 reserved    must be 0
  *   +32 u64 sid         stream id this DATA/PARITY belongs to; 0 on control
  *   +40 u32 payload_crc32c  CRC32C over the payload only
@@ -110,7 +114,7 @@ typedef uint64_t u64;
  * Control frames are complete records of their own and must never be queued
  * behind a partial DATA record (the carrier writer emits each record whole).
  * ------------------------------------------------------------------ */
-#define TBT_FEC_CONV 0x1005u
+#define TBT_FEC_CONV 0x1006u
 /* 0.2.0 raises TBT_FEC_CONV from 0x1001 to 0x1004 in three wire steps;
  * 0.2.2 adds M5 below.
  * M2 (0x1002): a PARITY record may be a block marker: win_len == 0 &&
@@ -137,10 +141,18 @@ typedef uint64_t u64;
  * sid is still installed at the barrier). The header grows from 40 to 48
  * bytes; payload_crc32c moves to +40 and header_crc32c to +44.
  *
+ * M6 (0x1006): FEC_CFG grows from 32 to 48 bytes and names the adaptive
+ * shape (epoch, n/m, w/k/d, groups, switch_pkt, block_base, seed) with one
+ * CRC over the whole body. FEC_FBK keeps 48 bytes but becomes a report: a
+ * 32-bit epoch split across +0/+12, switch flags and n_current at +14/+15.
+ * Both keep their frame types and the 48-byte record header; the switch
+ * handshake rides these two records. HELLO body[0] moves to version 3 in
+ * the same revision, so a 0.2.x peer is refused at the first HELLO.
+ *
  * There is no 4-byte marker and no magic number on this wire. A marker is a
  * set of values inside the 48-byte tbt_fec_hdr: type TBT_FEC_PARITY (0x31),
  * flags 0, share_index n (parity 0), epoch 0, win_len 0, payload_len 0,
- * conv 0x1005, payload_crc32c 0 (CRC32C of an empty payload). */
+ * conv 0x1006, payload_crc32c 0 (CRC32C of an empty payload). */
 
 /* FEC record types. */
 #define TBT_FEC_DATA 0x30
@@ -197,8 +209,76 @@ typedef uint64_t u64;
  * super-block. A sender replays every selected share for every selected
  * group; a share that is already present is a harmless duplicate. */
 #define TBT_FEC_NACK_LEN (2 * TBT_FEC_BITMAP_BYTES)
-#define TBT_FEC_CFG_LEN 32
+/* FEC_CFG body (48 bytes, little-endian). One record carries a shape change
+ * request; the flags say whether it applies or aborts one. The record
+ * header leaves n/m/share_index/win_len/seq zero and names no block.
+ *   +0  u32 epoch       configuration generation, starts at 1, monotonic
+ *   +4  u16 n
+ *   +6  u16 m
+ *   +8  u16 w
+ *   +10 u16 k
+ *   +12 u8  d
+ *   +13 u8  flags       TBT_FEC_CFG_F_APPLY / _ABORT
+ *   +14 u16 groups      carriers/(n+m); must divide 256
+ *   +16 u64 switch_pkt  absolute packet seq of the first new-shape record
+ *   +24 u64 block_base  block id of the first new-shape block
+ *   +32 u64 seed        codec seed; both ends derive the group seeds from it
+ *   +40 u32 crc32c      CRC32C over bytes +0..+39
+ *   +44 u32 reserved    must be 0
+ */
+#define TBT_FEC_CFG_LEN 48
+#define TBT_FEC_CFG_EPOCH 0
+#define TBT_FEC_CFG_N 4
+#define TBT_FEC_CFG_M 6
+#define TBT_FEC_CFG_W 8
+#define TBT_FEC_CFG_K 10
+#define TBT_FEC_CFG_D 12
+#define TBT_FEC_CFG_FLAGS 13
+#define TBT_FEC_CFG_GROUPS 14
+#define TBT_FEC_CFG_SWITCH_PKT 16
+#define TBT_FEC_CFG_BLOCK_BASE 24
+#define TBT_FEC_CFG_SEED 32
+#define TBT_FEC_CFG_CRC 40
+#define TBT_FEC_CFG_RESERVED 44
+#define TBT_FEC_CFG_CRC_BYTES 40
+
+#define TBT_FEC_CFG_F_APPLY 0x01 /* the shape named here takes effect */
+#define TBT_FEC_CFG_F_ABORT 0x02 /* cancel the pending switch */
+#define TBT_FEC_CFG_F_MASK 0x03
+
+/* FEC_FBK body (48 bytes). The receiver reports the loss it measured and the
+ * shape it holds; the flags carry the switch handshake. epoch is
+ * ((u32)epoch_hi << 16) | epoch_lo, so a u32 generation fits the layout
+ * that 0x1002 defined for the old 16-bit field.
+ *   +0  u16 epoch_lo
+ *   +2  u8  m_current
+ *   +3  u8  m_target
+ *   +4  u32 p_ewma_ppm
+ *   +8  u16 expected_shares
+ *   +10 u16 received_shares
+ *   +12 u16 epoch_hi
+ *   +14 u8  flags       TBT_FEC_FBK_F_*
+ *   +15 u8  n_current
+ *   +16 u8  carrier_bitmap[32]
+ */
 #define TBT_FEC_FBK_LEN 48
+#define TBT_FEC_FBK_EPOCH_LO 0
+#define TBT_FEC_FBK_M_CURRENT 2
+#define TBT_FEC_FBK_M_TARGET 3
+#define TBT_FEC_FBK_P_EWMA 4
+#define TBT_FEC_FBK_EXPECTED 8
+#define TBT_FEC_FBK_RECEIVED 10
+#define TBT_FEC_FBK_EPOCH_HI 12
+#define TBT_FEC_FBK_FLAGS 14
+#define TBT_FEC_FBK_N_CURRENT 15
+#define TBT_FEC_FBK_BITMAP 16
+
+#define TBT_FEC_FBK_F_CFG_ACK 0x01     /* CFG accepted, receiver ARMED */
+#define TBT_FEC_FBK_F_CFG_NACK 0x02    /* CFG refused, sender aborts */
+#define TBT_FEC_FBK_F_SWITCH_DONE 0x04 /* receiver APPLIED the shape */
+#define TBT_FEC_FBK_F_ROLLBACK 0x08    /* receiver fell back to the old shape */
+#define TBT_FEC_FBK_F_P_VALID 0x10     /* p_ewma_ppm has enough samples */
+#define TBT_FEC_FBK_F_MASK 0x1f
 
 /* Old ARQ keeps its 16-slot wire limit even though the carrier layer grows to
  * 256 slots. Every old wire field that was sized by the carrier count uses

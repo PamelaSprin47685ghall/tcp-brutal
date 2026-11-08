@@ -718,46 +718,67 @@ int tbt_fec_cfg_pack(const struct tbt_fec_cfg *c, u8 out[TBT_FEC_CFG_LEN])
     if (!c || !out)
         return -EINVAL;
     memset(out, 0, TBT_FEC_CFG_LEN);
-    tbt_put_u32(out + 0, c->epoch);
-    tbt_put_u16(out + 4, c->n);
-    tbt_put_u16(out + 6, c->m);
-    tbt_put_u16(out + 8, c->w);
-    tbt_put_u16(out + 10, c->k);
-    out[12] = c->d;
-    tbt_put_u64(out + 16, c->seed);
-    tbt_put_u32(out + 24, tbt_fec_crc32c(0, out, 24));
-    tbt_put_u32(out + 28, 0);
+    tbt_put_u32(out + TBT_FEC_CFG_EPOCH, c->epoch);
+    tbt_put_u16(out + TBT_FEC_CFG_N, c->n);
+    tbt_put_u16(out + TBT_FEC_CFG_M, c->m);
+    tbt_put_u16(out + TBT_FEC_CFG_W, c->w);
+    tbt_put_u16(out + TBT_FEC_CFG_K, c->k);
+    out[TBT_FEC_CFG_D] = c->d;
+    out[TBT_FEC_CFG_FLAGS] = c->flags;
+    tbt_put_u16(out + TBT_FEC_CFG_GROUPS, c->groups);
+    tbt_put_u64(out + TBT_FEC_CFG_SWITCH_PKT, c->switch_pkt);
+    tbt_put_u64(out + TBT_FEC_CFG_BLOCK_BASE, c->block_base);
+    tbt_put_u64(out + TBT_FEC_CFG_SEED, c->seed);
+    tbt_put_u32(out + TBT_FEC_CFG_CRC,
+                tbt_fec_crc32c(0, out, TBT_FEC_CFG_CRC_BYTES));
+    tbt_put_u32(out + TBT_FEC_CFG_RESERVED, 0);
     return 0;
 }
 
 int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], struct tbt_fec_cfg *c)
 {
     u32 crc;
+    u32 shares;
+    u16 n, m, groups;
 
     if (!in || !c)
         return -EINVAL;
-    if (tbt_get_u32(in + 28) != 0)
+    /* The CRC covers every field before the reserved word, so verify it
+     * before trusting n/m/groups or the switch coordinates. */
+    crc = tbt_fec_crc32c(0, in, TBT_FEC_CFG_CRC_BYTES);
+    if (crc != tbt_get_u32(in + TBT_FEC_CFG_CRC))
         return -EPROTO;
-    if (in[13] || in[14] || in[15])
+    if (tbt_get_u32(in + TBT_FEC_CFG_RESERVED) != 0)
         return -EPROTO;
-    crc = tbt_fec_crc32c(0, in, 24);
-    if (crc != tbt_get_u32(in + 24))
+    if (in[TBT_FEC_CFG_FLAGS] & ~TBT_FEC_CFG_F_MASK)
         return -EPROTO;
-    c->epoch = tbt_get_u32(in + 0);
-    c->n = tbt_get_u16(in + 4);
-    c->m = tbt_get_u16(in + 6);
-    c->w = tbt_get_u16(in + 8);
-    c->k = tbt_get_u16(in + 10);
-    c->d = in[12];
-    memset(c->reserved, 0, sizeof(c->reserved));
-    c->seed = tbt_get_u64(in + 16);
+    c->epoch = tbt_get_u32(in + TBT_FEC_CFG_EPOCH);
+    n = tbt_get_u16(in + TBT_FEC_CFG_N);
+    m = tbt_get_u16(in + TBT_FEC_CFG_M);
+    c->w = tbt_get_u16(in + TBT_FEC_CFG_W);
+    c->k = tbt_get_u16(in + TBT_FEC_CFG_K);
+    c->d = in[TBT_FEC_CFG_D];
+    c->flags = in[TBT_FEC_CFG_FLAGS];
+    groups = tbt_get_u16(in + TBT_FEC_CFG_GROUPS);
+    c->switch_pkt = tbt_get_u64(in + TBT_FEC_CFG_SWITCH_PKT);
+    c->block_base = tbt_get_u64(in + TBT_FEC_CFG_BLOCK_BASE);
+    c->seed = tbt_get_u64(in + TBT_FEC_CFG_SEED);
+    c->n = n;
+    c->m = m;
+    c->groups = groups;
     c->crc32c = crc;
-    c->reserved2 = 0;
-    if (!c->n || !c->m || (u16)c->n + (u16)c->m > TBT_FEC_MAX_SHARES)
+    c->reserved = 0;
+    shares = (u32)n + m; /* u32 first: 65535 + 65535 must not wrap */
+    if (!n || !m || shares > TBT_FEC_MAX_SHARES)
         return -EPROTO;
     if (!c->k || c->w < c->k || c->w > TBT_FEC_MAX_W || c->d > c->w)
         return -EPROTO;
     if (c->d && c->w > 1 && c->d == c->w)
+        return -EPROTO;
+    /* groups is the carrier geometry: one share per carrier, so n+m must
+     * divide the 256 carriers and groups must be exactly the quotient. */
+    if (!groups || (TBT_FEC_MAX_CARRIERS % shares) ||
+        groups != TBT_FEC_MAX_CARRIERS / shares)
         return -EPROTO;
     return 0;
 }
@@ -767,14 +788,17 @@ int tbt_fec_fbk_pack(const struct tbt_fec_fbk *f, u8 out[TBT_FEC_FBK_LEN])
     if (!f || !out)
         return -EINVAL;
     memset(out, 0, TBT_FEC_FBK_LEN);
-    tbt_put_u16(out + 0, f->epoch);
-    out[2] = f->m_current;
-    out[3] = f->m_target;
-    tbt_put_u32(out + 4, f->p_ewma_ppm);
-    tbt_put_u16(out + 8, f->expected_shares);
-    tbt_put_u16(out + 10, f->received_shares);
-    tbt_put_u32(out + 12, 0);
-    memcpy(out + 16, f->carrier_bitmap, TBT_FEC_BITMAP_BYTES);
+    tbt_put_u16(out + TBT_FEC_FBK_EPOCH_LO, f->epoch_lo);
+    out[TBT_FEC_FBK_M_CURRENT] = f->m_current;
+    out[TBT_FEC_FBK_M_TARGET] = f->m_target;
+    tbt_put_u32(out + TBT_FEC_FBK_P_EWMA, f->p_ewma_ppm);
+    tbt_put_u16(out + TBT_FEC_FBK_EXPECTED, f->expected_shares);
+    tbt_put_u16(out + TBT_FEC_FBK_RECEIVED, f->received_shares);
+    tbt_put_u16(out + TBT_FEC_FBK_EPOCH_HI, f->epoch_hi);
+    out[TBT_FEC_FBK_FLAGS] = f->flags;
+    out[TBT_FEC_FBK_N_CURRENT] = f->n_current;
+    memcpy(out + TBT_FEC_FBK_BITMAP, f->carrier_bitmap,
+           TBT_FEC_BITMAP_BYTES);
     return 0;
 }
 
@@ -782,16 +806,19 @@ int tbt_fec_fbk_unpack(const u8 in[TBT_FEC_FBK_LEN], struct tbt_fec_fbk *f)
 {
     if (!in || !f)
         return -EINVAL;
-    if (tbt_get_u32(in + 12) != 0)
+    if (in[TBT_FEC_FBK_FLAGS] & ~TBT_FEC_FBK_F_MASK)
         return -EPROTO;
-    f->epoch = tbt_get_u16(in + 0);
-    f->m_current = in[2];
-    f->m_target = in[3];
-    f->p_ewma_ppm = tbt_get_u32(in + 4);
-    f->expected_shares = tbt_get_u16(in + 8);
-    f->received_shares = tbt_get_u16(in + 10);
-    f->reserved = 0;
-    memcpy(f->carrier_bitmap, in + 16, TBT_FEC_BITMAP_BYTES);
+    f->epoch_lo = tbt_get_u16(in + TBT_FEC_FBK_EPOCH_LO);
+    f->m_current = in[TBT_FEC_FBK_M_CURRENT];
+    f->m_target = in[TBT_FEC_FBK_M_TARGET];
+    f->p_ewma_ppm = tbt_get_u32(in + TBT_FEC_FBK_P_EWMA);
+    f->expected_shares = tbt_get_u16(in + TBT_FEC_FBK_EXPECTED);
+    f->received_shares = tbt_get_u16(in + TBT_FEC_FBK_RECEIVED);
+    f->epoch_hi = tbt_get_u16(in + TBT_FEC_FBK_EPOCH_HI);
+    f->flags = in[TBT_FEC_FBK_FLAGS];
+    f->n_current = in[TBT_FEC_FBK_N_CURRENT];
+    memcpy(f->carrier_bitmap, in + TBT_FEC_FBK_BITMAP,
+           TBT_FEC_BITMAP_BYTES);
     return 0;
 }
 

@@ -4,8 +4,11 @@
  * Scope (T2):
  *   - carriers = groups * (n + m), one share per carrier;
  *   - carrier c carries group c/(n+m) share c%(n+m);
- *   - global packet seq is striped: group = seq % groups, block_id =
- *     (seq / groups) / n, share = (seq / groups) % n;
+ *   - global packet seq is striped relative to the shape origin: group =
+ *     (seq - base_pkt) % groups, block_id = base_block + ((seq - base_pkt) /
+ *     groups) / n, share = ((seq - base_pkt) / groups) % n. The 0.2.x
+ *     mapping is the base_pkt = base_block = 0 case; a shape switch only
+ *     moves the origin (tbt_fec.h helpers).
  *   - a block is n DATA packets followed by m parity packets; the codec is the
  *     host-tested GF(2) RLNC in tbt_fec.c, reused with a per-group, per-block
  *     nonce;
@@ -22,9 +25,11 @@
  * codec or calls a socket from that path.
  *
  * Delivery is by super-block: block b of every group covers the contiguous
- * global range [b*groups*n, (b+1)*groups*n). A super-block is handed to the
- * stream only when every group's block b is decoded, so the byte stream has no
- * hole and the ACK frontier is a real global frontier, not a per-group guess.
+ * global range [base_pkt + (b-base_block)*groups*n,
+ * base_pkt + (b+1-base_block)*groups*n). A super-block is handed to the
+ * stream only when every group's block b is decoded, so the byte stream has
+ * no hole and the ACK frontier is a real global frontier, not a per-group
+ * guess.
  */
 #include <linux/ktime.h>
 #include <linux/random.h>
@@ -983,8 +988,9 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
             if (!o)
                 break;
             if (tx && block_id &&
-                tbt_fec_block_delivered(block_id, READ_ONCE(tx->peer_pkts),
-                                        tx->groups, tx->n))
+                tbt_fec_block_delivered_base(block_id,
+                                             READ_ONCE(tx->peer_pkts), 0, 0,
+                                             tx->groups, tx->n))
             {
                 /* The delivered frontier passed this block while the repair
                  * waited in the queue: every share in it is a duplicate of
@@ -1230,8 +1236,9 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess, u16 group,
         tx->parity_ptrs[i] = g->par + (size_t)i * TBT_FEC_S;
     if (tbt_fec_rlnc_encode(ctx, tx->data_ptrs, tx->n, tx->parity_ptrs) < 0)
         return;
-    last_seq = tbt_fec_seq_of_block_pkt(block_id, group, (u16)(win_len - 1),
-                                        tx->groups, tx->n);
+    last_seq = tbt_fec_seq_of_block_pkt_base(block_id, group,
+                                             (u16)(win_len - 1), 0, 0,
+                                             tx->groups, tx->n);
     for (i = 0; i < tx->m; i++)
     {
         memset(&h, 0, sizeof(h));
@@ -1292,7 +1299,8 @@ static void tbt_fec_tx_emit_empty(struct tbt_session *sess, u16 group,
     h.n = (u8)tx->n;
     h.m = (u8)tx->m;
     h.block_id = block_id;
-    h.seq = tbt_fec_seq_of_block_pkt(block_id, group, 0, tx->groups, tx->n);
+    h.seq = tbt_fec_seq_of_block_pkt_base(block_id, group, 0, 0, 0,
+                                          tx->groups, tx->n);
     h.win_len = 0;
     h.payload_len = 0;
     h.epoch = 0;
@@ -1374,7 +1382,8 @@ static void tbt_fec_tx_close_block(struct tbt_session *sess, bool advance)
     }
     if (advance)
     {
-        tx->seq = (block_id + 1) * (u64)tx->n * tx->groups;
+        tx->seq = tbt_fec_seq_of_block_pkt_base(block_id + 1, 0, 0, 0, 0,
+                                                tx->groups, tx->n);
         tx->cur_block = block_id + 1;
     }
 }
@@ -1402,7 +1411,8 @@ static void tbt_fec_tx_finish(struct tbt_session *sess, struct tbt_stream *st)
      * that never carried a packet (field: fec_empty_block=63 for a 198-byte
      * request, i.e. 31 group markers plus a second all-empty block). Only
      * close a block that actually received a packet. */
-    block_start = tx->cur_block * (u64)tx->n * tx->groups;
+    block_start = tbt_fec_seq_of_block_pkt_base(tx->cur_block, 0, 0, 0, 0,
+                                                tx->groups, tx->n);
     if (st->fec_pkt_base_set && tx->seq > block_start)
         tbt_fec_tx_close_block(sess, true);
     smp_store_release(&st->fec_finished, true);
@@ -1414,7 +1424,7 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_stream *st,
     struct tbt_fec_tx *tx = sess->fec_tx;
     struct tbt_fec_hdr h;
     u16 rec_len, group, share, len, carrier;
-    u64 seq, local, block_id;
+    u64 seq, block_id;
     u8 *rec = tx->rec;
 
     if (!tx->fill && !last)
@@ -1423,10 +1433,9 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_stream *st,
         tx->cur_block_sid = st->sid;
     len = tx->fill;
     seq = tx->seq++;
-    group = (u16)(seq % tx->groups);
-    local = seq / tx->groups;
-    share = (u16)(local % tx->n);
-    block_id = local / tx->n;
+    group = tbt_fec_group_of_seq_base(seq, 0, tx->groups);
+    share = tbt_fec_share_of_seq_base(seq, 0, tx->groups, tx->n);
+    block_id = tbt_fec_block_of_seq_base(seq, 0, 0, tx->groups, tx->n);
     carrier = (u16)(group * (tx->n + tx->m) + share);
 
     /* The first packet of a stream fixes its absolute base; the FIN body
@@ -1564,8 +1573,8 @@ static void tbt_fec_tx_stall_diag(struct tbt_session *sess,
     u64 now = ktime_get_ns();
     u64 last = READ_ONCE(st->last_ack_ns);
     u64 budget = tbt_tx_wait_budget_ns(sess, st);
-    u64 span = (u64)tx->groups * tx->n;
-    u64 frontier = span ? READ_ONCE(tx->peer_pkts) / span : 0;
+    u64 frontier = tbt_fec_block_of_seq_base(READ_ONCE(tx->peer_pkts), 0, 0,
+                                             tx->groups, tx->n);
     u32 rq, rb;
 
     /* An idle stream has nothing outstanding: ack == txseq is not a stall.
@@ -1662,7 +1671,8 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
 
             if (tx->cur_block_sid && tx->cur_block_sid != st->sid)
             {
-                u64 start = tx->cur_block * (u64)tx->n * tx->groups;
+                u64 start = tbt_fec_seq_of_block_pkt_base(
+                    tx->cur_block, 0, 0, 0, 0, tx->groups, tx->n);
 
                 if (tx->seq > start)
                     tbt_fec_tx_close_block(sess, true);
@@ -2170,7 +2180,8 @@ static int tbt_fec_send_empty_marker(struct tbt_session *sess, u16 group,
     h.n = (u8)tx->n;
     h.m = (u8)tx->m;
     h.block_id = block_id;
-    h.seq = tbt_fec_seq_of_block_pkt(block_id, group, 0, tx->groups, tx->n);
+    h.seq = tbt_fec_seq_of_block_pkt_base(block_id, group, 0, 0, 0,
+                                          tx->groups, tx->n);
     h.win_len = 0;
     h.payload_len = 0;
     h.epoch = 0;
@@ -2252,8 +2263,8 @@ static struct tbt_stream *tbt_fec_rx_stream(struct tbt_session *sess,
 
         if (READ_ONCE(rx->total_known) && READ_ONCE(rx->total_pkts))
         {
-            u64 final = tbt_fec_final_block_of_total(
-                READ_ONCE(rx->total_pkts), rx->groups, rx->n);
+            u64 final = tbt_fec_final_block_of_total_base(
+                READ_ONCE(rx->total_pkts), 0, 0, rx->groups, rx->n);
 
             drained = rx->next_super > final;
         }
@@ -2292,7 +2303,8 @@ static bool tbt_fec_rx_stream_drained_locked(const struct tbt_fec_rx *rx)
     if (!rx->total_known || !rx->total_pkts)
         return true;
     return rx->next_super >
-           tbt_fec_final_block_of_total(rx->total_pkts, rx->groups, rx->n);
+           tbt_fec_final_block_of_total_base(rx->total_pkts, 0, 0,
+                                             rx->groups, rx->n);
 }
 
 /* tbt_session_fec_rx_barrier() calls this after w_fec_rx is quiesced and
@@ -2388,12 +2400,12 @@ static bool tbt_fec_super_ready_locked(const struct tbt_fec_rx *rx, u64 s)
         b = tbt_fec_rx_blk((struct tbt_fec_rx *)rx, group, s);
         if (rx->total_known)
         {
-            u64 final = tbt_fec_final_block_of_total(rx->total_pkts,
-                                                     rx->groups, rx->n);
+            u64 final = tbt_fec_final_block_of_total_base(
+                rx->total_pkts, 0, 0, rx->groups, rx->n);
 
             if (s == final &&
-                !tbt_fec_group_tail_len(rx->total_pkts, rx->groups, rx->n,
-                                        group))
+                !tbt_fec_group_tail_len_base(rx->total_pkts, 0, 0,
+                                             rx->groups, rx->n, group))
             {
                 /* The final super-block may leave a group with no packet.
                  * Skip it only when no block was ever placed for it; a block
@@ -2532,7 +2544,8 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
     for (;;)
     {
         u64 s = rx->next_super;
-        u64 base = s * (u64)rx->groups * rx->n;
+        u64 base = tbt_fec_seq_of_block_pkt_base(s, 0, 0, 0, 0,
+                                                 rx->groups, rx->n);
         u64 off = rx->deliver_bytes;
         u16 p, group, start_p, start_g;
         bool ready;
@@ -2546,8 +2559,8 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
             break;
         if (known)
         {
-            u64 final = tbt_fec_final_block_of_total(total_pkts,
-                                                     rx->groups, rx->n);
+            u64 final = tbt_fec_final_block_of_total_base(
+                total_pkts, 0, 0, rx->groups, rx->n);
 
             if (s > final)
                 break;
@@ -2815,7 +2828,8 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
         rx->deliver_g = 0;
         rx->next_super++;
         rx->progress_ns = 0; /* progress: the stall budget restarts */
-        rx->next_deliver = (s + 1) * (u64)rx->groups * rx->n;
+        rx->next_deliver = tbt_fec_seq_of_block_pkt_base(
+            s + 1, 0, 0, 0, 0, rx->groups, rx->n);
         if (known && rx->next_deliver > total_pkts)
             rx->next_deliver = total_pkts;
         if (debug >= 2)
@@ -3079,8 +3093,8 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
          * interval until the connection closed. The delivery walk already
          * refuses to deliver past the end; stop asking here too. */
         if (READ_ONCE(rx->total_known) &&
-            s > tbt_fec_final_block_of_total(READ_ONCE(rx->total_pkts),
-                                             rx->groups, rx->n))
+            s > tbt_fec_final_block_of_total_base(READ_ONCE(rx->total_pkts),
+                                                  0, 0, rx->groups, rx->n))
             break;
         for (g = 0; g < rx->groups; g++)
         {
@@ -3273,8 +3287,8 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
         }
         if (READ_ONCE(rx->total_known) &&
             rx->next_super >
-                tbt_fec_final_block_of_total(rx->total_pkts, rx->groups,
-                                             rx->n))
+                tbt_fec_final_block_of_total_base(rx->total_pkts, 0, 0,
+                                                  rx->groups, rx->n))
         {
             tbt_fec_nack_reset(rx->nack);
             return;
@@ -3610,7 +3624,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
          * trustworthy. */
         if (h.type == TBT_FEC_DATA || h.type == TBT_FEC_PARITY)
         {
-            u16 cg = rx->groups ? (u16)(h.seq % rx->groups) : 0;
+            u16 cg = tbt_fec_group_of_seq_base(h.seq, 0, rx->groups);
             u16 csh = h.share_index;
             u16 cshares = (u16)(rx->n + rx->m);
             u64 next = READ_ONCE(rx->next_super);
@@ -3829,8 +3843,9 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         /* The block is already delivered: a replay cannot help, and every
          * share of it would be a duplicate on the wire. This races a NACK
          * sent before the ACK reached the peer. */
-        if (tbt_fec_block_delivered(h.block_id, READ_ONCE(tx->peer_pkts),
-                                    tx->groups, tx->n))
+        if (tbt_fec_block_delivered_base(h.block_id,
+                                         READ_ONCE(tx->peer_pkts), 0, 0,
+                                         tx->groups, tx->n))
         {
             atomic64_add(tbt_fec_bitmap_count(n.share_mask),
                          &sess->fec_replay_dedup);
@@ -4094,13 +4109,14 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
     shares = (u16)(rx->n + rx->m);
     if (!shares)
         return -EPROTO;
-    group = (u16)(h.seq % rx->groups);
+    group = tbt_fec_group_of_seq_base(h.seq, 0, rx->groups);
     share = h.share_index;
     if (group >= rx->groups || share >= shares)
         return -EPROTO;
     if (h.n != (u8)rx->n || h.m != (u8)rx->m)
         return -EPROTO;
-    if (h.block_id != (h.seq / rx->groups) / rx->n)
+    if (h.block_id !=
+        tbt_fec_block_of_seq_base(h.seq, 0, 0, rx->groups, rx->n))
         return -EPROTO;
 
     payload = rec + TBT_FEC_HDR_LEN;
@@ -4151,7 +4167,8 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         rx->next_super = base;
         if (base > rx->highest_block)
             rx->highest_block = base;
-        rx->next_deliver = base * (u64)rx->groups * rx->n;
+        rx->next_deliver = tbt_fec_seq_of_block_pkt_base(
+            base, 0, 0, 0, 0, rx->groups, rx->n);
         if (!rx->stream_pkt_base)
             rx->stream_pkt_base = rx->next_deliver;
         rx->progress_super = 0;
@@ -4386,7 +4403,7 @@ void tbt_fec_rx_fin(struct tbt_session *sess, struct tbt_stream *st,
         return;
     }
     span = (u64)rx->groups * rx->n;
-    if (!tbt_fec_fin_valid(pkt_end, pkt_base, span))
+    if (!tbt_fec_fin_valid_base(pkt_end, pkt_base, 0, span))
     {
         atomic64_inc(&sess->fec_fin_bad);
         spin_unlock_bh(&rx->lock);
@@ -4417,7 +4434,8 @@ void tbt_fec_rx_fin(struct tbt_session *sess, struct tbt_stream *st,
         /* The FIN overtook the stream's first DATA record. Its absolute
          * packet base names the first super-block, the same base that record
          * would have set. */
-        u64 base = pkt_base / span;
+        u64 base = tbt_fec_block_of_seq_base(pkt_base, 0, 0, rx->groups,
+                                             rx->n);
 
         rx->rebase_sid = st->sid;
         rx->min_block_seen = base;
