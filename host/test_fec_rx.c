@@ -2116,6 +2116,37 @@ static void test_rx_poll(void)
        "a shape probe is paced slower than a repair retry");
 }
 
+static void test_nack_settle_gate(void)
+{
+    /* The scan must not name a block during its first decode settle window:
+     * a replay is new evidence that restarts the window, and fix45 turned
+     * that into 482 NACKs / 226 MB.  Once the pass has attempted and failed,
+     * the scan must ask even though the pass re-armed a backoff; otherwise
+     * the next pass re-arms it before the scan and the repair is never
+     * requested. */
+    const u64 s = 42;
+    const u64 now = 1000;
+    const u64 settle = 1050;
+    const u64 backoff = 1450;
+
+    ok(tbt_fec_nack_wait_decode(true, true, s, s, 1, 0, now, settle),
+       "first settle: the scan does not NACK");
+    ok(!tbt_fec_nack_wait_decode(true, true, s, s, 1, 0, settle, settle),
+       "settle deadline reached: the scan may NACK");
+    ok(!tbt_fec_nack_wait_decode(true, true, s, s, 1, 1, now, backoff),
+       "failed decode: the scan asks despite the new backoff");
+    ok(!tbt_fec_nack_wait_decode(true, true, s, s, 1, 2, now, backoff),
+       "later retry: the scan still asks");
+    ok(!tbt_fec_nack_wait_decode(true, true, s, s, 0, 0, now, settle),
+       "no parity: no decode to wait for");
+    ok(!tbt_fec_nack_wait_decode(true, false, s, s, 1, 0, now, settle),
+       "unused block is not gated");
+    ok(!tbt_fec_nack_wait_decode(true, true, s - 1, s, 1, 0, now, settle),
+       "another block id is not gated");
+    ok(!tbt_fec_nack_wait_decode(false, true, s, s, 1, 0, now, settle),
+       "RLNC has no settle window");
+}
+
 int main(void)
 {
     src_init();
@@ -2141,6 +2172,7 @@ int main(void)
     test_stream_reset_isolation();
     test_ack_split();
     test_rx_poll();
+    test_nack_settle_gate();
     test_replay_window();
     test_nack_filter();
     test_nack_storm();

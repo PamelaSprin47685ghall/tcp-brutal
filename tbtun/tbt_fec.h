@@ -1172,6 +1172,25 @@ static inline unsigned long tbt_fec_rx_poll_ms(u64 left_ms, u64 waited_ns)
     return (unsigned long)cadence;
 }
 
+/* The NACK scan must not ask while a block codec's first settle window is
+ * open: the decode pass runs before the scan in the same work body, so the
+ * block will be attempted before the scan would ask, and a replay would
+ * restart the settle window (fix45: 482 NACKs, 27,465 replayed shares and
+ * 226 MB in the first connect).  Once the pass has attempted and failed
+ * (decode_tries != 0), the scan must ask: the next body's pass re-arms the
+ * backoff before the scan runs, so gating the post-failure backoff would
+ * suppress the only repair.  `s` is the super-block the scan is
+ * considering; only the block at the delivery frontier is gated. */
+static inline bool tbt_fec_nack_wait_decode(bool block_code, bool used,
+                                            u64 block_id, u64 s,
+                                            u16 nparity, u8 decode_tries,
+                                            u64 now,
+                                            u64 decode_next_ns)
+{
+    return block_code && used && block_id == s && nparity > 0 &&
+           !decode_tries && now < decode_next_ns;
+}
+
 /* ------------------------------------------------------------------ *
  * Dynamic parameters
  * ------------------------------------------------------------------ */

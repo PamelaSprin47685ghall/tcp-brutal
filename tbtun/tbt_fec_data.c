@@ -3816,6 +3816,17 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
             struct tbt_fec_blk *b = tbt_fec_rx_blk(rx, g, s);
             u16 real;
 
+            /* Do not ask during the first settle window: the pass above has
+             * not attempted this block yet, and a replay would restart the
+             * window.  After the pass has tried and failed, decode_tries is
+             * set and the scan asks normally; gating that backoff here would
+             * suppress the only repair, because the next pass re-arms it
+             * before this scan runs. */
+            if (tbt_fec_nack_wait_decode(block_code, b->used, b->block_id,
+                                         s, b->nparity, b->decode_tries,
+                                         now,
+                                         b->decode_next_ns))
+                continue;
             if (!b->used || b->block_id != s)
             {
                 /* A block that holds only parity is not "unstarted": its
@@ -4055,6 +4066,35 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
             spin_unlock_bh(&rx->lock);
             tbt_fec_nack_reset(rx->nack);
             return;
+        }
+        /* The resend path below rebuilds the previous bitmap.  It must leave
+         * a settling block alone too, or the same storm returns through the
+         * retry path instead of a fresh request. */
+        if (block_code)
+        {
+            bool settling = false;
+
+            for (g = 0; g < rx->groups; g++)
+            {
+                struct tbt_fec_blk *sb = tbt_fec_rx_blk(rx, g, last_block);
+
+                if (tbt_fec_nack_wait_decode(block_code, sb->used,
+                                             sb->block_id, last_block,
+                                             sb->nparity,
+                                             sb->decode_tries, now,
+                                             sb->decode_next_ns))
+                {
+                    settling = true;
+                    break;
+                }
+            }
+            if (settling)
+            {
+                spin_unlock_bh(&rx->lock);
+                tbt_session_arm(sess, TBT_SW_FEC_RX,
+                                msecs_to_jiffies(TBT_FEC_NACK_MIN_MS));
+                return;
+            }
         }
         /* The scan found no fresh missing set, but the blocked super-block
          * is still not ready. Rebuild the previous bitmap from the block's
