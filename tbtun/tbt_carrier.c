@@ -1506,7 +1506,8 @@ int tbt_carrier_send_fec(struct tbt_carrier *c, const u8 *rec, size_t len)
 }
 
 
-/* Write up to eight FEC records with one HTTP header and one socket write.
+/* Write up to TBT_FEC_BATCH_MAX FEC records with one HTTP header and one
+ * socket write.
  * Only c->tx_lock is held; sess->pump_lock is not required, so each carrier's
  * drain work can run on its own CPU. The pump's ARQ/control writes take the
  * same c->tx_lock, which keeps one carrier's byte stream ordered without

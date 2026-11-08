@@ -557,9 +557,16 @@ enum tbt_stream_state
  * A record is TBT_REC_MAX (old ARQ) or TBT_FEC_REC_MAX (v6); the buffer must
  * hold the larger one. The write-side tail must hold a whole batched FEC
  * write (TBT_FEC_BATCH_MAX concatenated HTTP frames), because
- * tcp_sendmsg_locked() can short-write anywhere in that byte range. */
+ * tcp_sendmsg_locked() can short-write anywhere in that byte range.
+ *
+ * Keep the batch at 3 frames. Three frames are 24,780 B and stay in the
+ * kmalloc-32k cache (order-3); eight frames are 66,080 B and need a
+ * kmalloc-128k object (order-5). On the 955 MB far host the order-5 request
+ * failed in tbt_carrier_send_fec_batch(), and direct reclaim/compaction
+ * stalled the FEC drain for 0.2-2.4 s. tbt_core.c has a BUILD_BUG_ON that
+ * keeps this buffer at or below 32 KiB. */
 #define TBT_PARSER_BUF (TBT_FEC_REC_MAX > TBT_REC_MAX ? TBT_FEC_REC_MAX : TBT_REC_MAX)
-#define TBT_FEC_BATCH_MAX 8
+#define TBT_FEC_BATCH_MAX 3
 #define TBT_CAR_PART_MAX (TBT_HTTP_FEC_FRAME_MAX * TBT_FEC_BATCH_MAX)
 struct tbt_parser
 {

@@ -280,6 +280,49 @@ static void test_roundtrip(void)
         snprintf(what, sizeof(what), "%s: byte-exact", shapes[s].name);
         ok_int(block_compare_known(u, 0, &b), 0, what);
 
+        /* All DATA present, two parity shares missing.  No codeword needs
+         * to be solved; the early return must still publish every DATA
+         * share as known, leave the absent parity shares unknown for the
+         * NACK path, and not modify the payload. */
+        present_p[0] = 0;
+        present_p[1] = 0;
+        r = tbt_sclc_uplink_decode(u, 0, b.data, b.parity, present_d,
+                                   present_p);
+        snprintf(what, sizeof(what), "%s: decode parity-only loss",
+                 shapes[s].name);
+        ok_int(r, p.n, what);
+        {
+            struct tbt_sclc_stat st;
+
+            tbt_sclc_uplink_stat(u, 0, &st);
+            snprintf(what, sizeof(what), "%s: parity-only codes_ok",
+                     shapes[s].name);
+            ok_u32(st.codes_ok, tbt_sclc_uplink_codes(u), what);
+            snprintf(what, sizeof(what), "%s: parity-only codes_failed",
+                     shapes[s].name);
+            ok_u32(st.codes_failed, 0, what);
+            snprintf(what, sizeof(what), "%s: parity-only missing",
+                     shapes[s].name);
+            ok_u32(st.shares_missing, 2, what);
+            snprintf(what, sizeof(what), "%s: parity-only recovered",
+                     shapes[s].name);
+            ok_u32(st.shares_recovered, 0, what);
+        }
+        snprintf(what, sizeof(what), "%s: parity-only data known",
+                 shapes[s].name);
+        ok_int(tbt_sclc_uplink_share_known(u, 0, 0), 1, what);
+        snprintf(what, sizeof(what), "%s: parity-only absent unknown",
+                 shapes[s].name);
+        ok_int(tbt_sclc_uplink_share_known(u, 0, p.n), 0, what);
+        snprintf(what, sizeof(what), "%s: parity-only present known",
+                 shapes[s].name);
+        ok_int(tbt_sclc_uplink_share_known(u, 0, p.n + 2), 1, what);
+        snprintf(what, sizeof(what), "%s: parity-only payload untouched",
+                 shapes[s].name);
+        ok_int(block_compare_known(u, 0, &b), 0, what);
+        present_p[0] = 1;
+        present_p[1] = 1;
+
         /* Determinism: a second encode must produce identical shares. */
         {
             u8 *p2[256];

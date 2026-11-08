@@ -3,6 +3,29 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [Unreleased]
+
+### Changed
+
+- The FEC carrier batch is capped at three records (24,780 B) instead of
+  eight (66,080 B). Eight frames crossed the 64 KiB boundary and needed
+  order-5 pages; on the 955 MB far host the allocation failed in
+  `tbt_carrier_send_fec_batch()` and direct reclaim stalled the FEC drain
+  for 0.2-2.4 s. Three frames stay in kmalloc-32k (order-3), and
+  `TBT_CAR_PART_MAX` follows the same cap. `tbt_core.c` now fails the build
+  if the part buffer grows past 32 KiB.
+- The uplink GF(16) decoder returns immediately when every DATA share is
+  already present, instead of gathering and re-solving the whole block.
+  Missing parity shares stay unknown for the NACK path; `codes_ok` still
+  reports every codeword as complete.
+
+### Tests
+
+- `host/test_fec_out` and `host/test_http` pin the three-record batch
+  boundary: one, three and eight records, short records, and the
+  part/short-write split. `host/test_sclc_uplink` covers the parity-only
+  early return and its `share_known`/stat results.
+
 ## [0.3.2] - 2026-11-08
 
 ### Fixed

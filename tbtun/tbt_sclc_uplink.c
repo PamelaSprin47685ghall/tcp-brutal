@@ -471,6 +471,39 @@ int tbt_sclc_uplink_decode(struct tbt_sclc_uplink *u, u16 group,
         !data_present || !parity_present)
         return -EINVAL;
     g = &u->g[group];
+
+    /*
+     * No DATA share is missing: every payload byte the caller can deliver
+     * is already in data[].  Solving the codewords would only recompute
+     * bytes that are already present, and a missing parity share is a
+     * repair question that share_known answers below.  Return before the
+     * gather/peel/scatter pass.  The decoder costs about 19 MB/s even with
+     * no erasure and about 5 MB/s with four missing shares, so a block
+     * with all DATA present is pure waste.
+     */
+    for (j = 0; j < u->n; j++)
+        if (!data_present[j])
+            break;
+    if (j == u->n)
+    {
+        u32 absent = 0;
+
+        memset(g->share_bad, 0, u->shares);
+        for (j = 0; j < u->n; j++)
+            g->share_known[j] = data_present[j] ? 1 : 0;
+        for (j = 0; j < u->m; j++)
+        {
+            g->share_known[u->n + j] = parity_present[j] ? 1 : 0;
+            if (!parity_present[j])
+                absent++;
+        }
+        memset(&g->st, 0, sizeof(g->st));
+        g->st.codes = u->codes;
+        g->st.codes_ok = u->codes;
+        g->st.shares_missing = absent;
+        return (int)u->n;
+    }
+
     memset(g->share_bad, 0, u->shares);
     memset(&g->st, 0, sizeof(g->st));
     memset(g->offp, 0, (size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
