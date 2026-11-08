@@ -2309,7 +2309,7 @@ cannot silently lose its atomicity again.
 | dbg | `dbg rcv_nxt copied after qlen allocf over copyf hiwat pdead prun pmoved p_nocar p_down p_stop p_empty p_qlen` |
 | live | `live rxq rxp txq txp pub_state pub_wmem pub_una pub_nxt car_wmem car_nxt car_copied car_rcvbuf car_sndbuf car_state car_stop car_ud car_ready car_ws txw_pend txw_busy` |
 | tx wake | `txwake txwake_busy txwork` |
-| write space | `ws_calls` |
+| write space | `ws_calls nospace_armed` |
 | c3 | `c3 n up lost replaced spare_activated alloc_fail port_exhaust port_alloc_fail connect_fail connect_retry join_dup join_bad join_nonce_reject join_src_reject fbk_tx fbk_rx retx_frames retx_bytes retain_drop retx_hole retx_slow retx_pathloss retx_other data_tx retx_data_ppm dup_bytes_ppm reorder_overflow reorder_max_depth ooo_bytes ooo_frames retain_bytes tx_ack rx_ack peer_paused fb_delay_us rto_us una_stall_us stall_paused_skips stall_idle_skips stall_declared stall_recovered stall_drop stall_dead tx_window rtt_mean_us rttvar_us rtt_max_us txq_max win_block win_resume pump_hw_armed pump_hw_fired` |
 | ctl | `ctl ctl_lost ctl_retry ctl_requeue ctl_obsolete ctl_queued` |
 | streams | `streams streams_active n_streams n_pending` |
