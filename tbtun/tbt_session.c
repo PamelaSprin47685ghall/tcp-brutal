@@ -931,10 +931,27 @@ bool tbt_session_fec_stream_live(const struct tbt_session *sess)
            !READ_ONCE(st->tx_fin_sent);
 }
 
+/* The FEC RX work is session-wide. A carrier that adopted this OPEN may be
+ * delayed after installing far_sid; by the time it runs the barrier, a later
+ * OPEN can own the session. Canceling TBT_SW_FEC_RX then would stop the newer
+ * stream's pending delivery until the stall timer. Barrier only while
+ * `new_sid` is still the session's stream, and if a later adoption wins the
+ * race during the cancel, arm the work again for the current stream. The data
+ * plane resets its cursor on the current stream's first record otherwise. */
+static void tbt_far_fec_rx_barrier(struct tbt_session *sess, u64 old_sid,
+                                   u64 new_sid)
+{
+    if (READ_ONCE(sess->far_sid) != new_sid)
+        return;
+    tbt_session_fec_rx_barrier(sess, old_sid);
+    if (READ_ONCE(sess->fec) && READ_ONCE(sess->far_sid) != new_sid)
+        tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
+}
+
 int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open)
 {
-    bool adopt = false, drop = false;
-    u64 barrier_sid = 0;
+    bool adopt = false, drop = false, tombstone_open = false;
+    u64 barrier_sid = 0, kill_sid = 0;
 
     if (!sid)
         return TBT_BIND_DROP;
@@ -960,29 +977,49 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open)
 
         if (st && (READ_ONCE(st->state) == TBT_ST_DEAD ||
                     st->tombstone_until_ns))
-            drop = true; /* late frame for a tombstone */
-        else if (!st && !open)
+        {
+            /* A tombstone protects the old sid's late frames for
+             * TBT_TOMBSTONE_MS. An OPEN that names it can only be a duplicate
+             * of the old one: the near allocator never reuses a live or
+             * tombstoned sid. Drop it, but say so; the reaper is the only
+             * thing that frees the sid. */
+            drop = true;
+            tombstone_open = open;
+        }
+        if (!drop && !st && !open)
         {
             drop = true; /* DATA/FIN/RST cannot create a stream */
             atomic64_inc(&sess->bind_drop_no_stream);
         }
-        else if (st && open && tbt_stream_is_closing(st))
+        else if (!drop && st && READ_ONCE(sess->far_sid) != sid)
+        {
+            /* A live object that is no longer the session stream. Its frames
+             * are late: the next OPEN superseded it. Drop them, and stop the
+             * object if the supersession path has not killed it yet. */
+            drop = true;
+            if (READ_ONCE(st->state) != TBT_ST_DEAD &&
+                !st->tombstone_until_ns)
+                kill_sid = sid;
+        }
+        else if (!drop && st && open && tbt_stream_is_closing(st))
             drop = true; /* late OPEN for a closing stream */
-        else if (!st)
+        else if (!drop && !st)
         {
             u64 old = READ_ONCE(sess->far_sid);
 
-            /* The FEC RX cursor belongs to the old stream until the data
-             * plane resets it. If that stream is already dead/tombstoned,
-             * stop the RX work before the new sid is installed; a live old
-             * stream keeps its tail and B's drain decides when to switch. */
+            /* The new OPEN supersedes the stream `far_sid` still names. The
+             * FEC RX cursor and the old target belong to a stream the peer
+             * has abandoned: stop the cursor and kill the old stream even
+             * when it never submitted a byte, or its target (or its ACTIVE
+             * slot) would outlive the session's only stream. */
             if (old && old != sid)
             {
                 struct tbt_stream *ost = tbt_stream_find_locked(sess, old);
 
-                if (!ost || READ_ONCE(ost->state) == TBT_ST_DEAD ||
-                    ost->tombstone_until_ns)
-                    barrier_sid = old;
+                barrier_sid = old;
+                if (ost && READ_ONCE(ost->state) != TBT_ST_DEAD &&
+                    !ost->tombstone_until_ns)
+                    kill_sid = old;
             }
             sess->far_sid = sid; /* last/primary compatibility only */
             adopt = true;
@@ -990,26 +1027,43 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open)
     }
     spin_unlock(&sess->lock);
 
-    if (drop)
-        return TBT_BIND_DROP;
+    if (kill_sid)
+        tbt_stream_kill_by_sid(sess, kill_sid, TBT_ST_DEAD);
     if (barrier_sid)
-        tbt_session_fec_rx_barrier(sess, barrier_sid);
+        tbt_far_fec_rx_barrier(sess, barrier_sid, sid);
+    if (drop)
+    {
+        if (tombstone_open)
+            pr_warn_ratelimited("tbtun: tunnel %llu dropped OPEN for tombstoned sid %llu\n",
+                                (unsigned long long)sess->tunnel->cfg.id,
+                                (unsigned long long)sid);
+        return TBT_BIND_DROP;
+    }
     if (adopt && sess->tunnel->cfg.role == TBT_ROLE_FAR)
     {
         bool created = false;
         struct tbt_stream *ast =
             tbt_stream_get_created(sess, sid, true, false, &created);
 
-        if (ast)
+        if (!ast)
+        {
+            /* Do not leave far_sid naming a sid with no object: a later OPEN
+             * must be able to adopt it. */
+            spin_lock(&sess->lock);
+            if (READ_ONCE(sess->far_sid) == sid)
+                WRITE_ONCE(sess->far_sid, 0);
+            spin_unlock(&sess->lock);
+            return TBT_BIND_DROP;
+        }
+        if (created)
         {
             /* 256 carriers deliver the same OPEN. tbt_stream_get_created()
              * double-checks under sess->lock, so exactly one caller sees
              * created=true; only that caller may announce/target the stream.
              * The others hold the same object and just put their reference. */
-            if (created)
-                tbt_far_open_seen(ast);
-            tbt_stream_put(ast);
+            tbt_far_open_seen(ast);
         }
+        tbt_stream_put(ast);
     }
     return TBT_BIND_OK;
 }

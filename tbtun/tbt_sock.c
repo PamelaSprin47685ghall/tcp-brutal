@@ -705,10 +705,23 @@ struct tbt_pending
     struct socket *sock;
 };
 
+/* The near allocator's view of a sid: any object still in the hash owns the
+ * id, including a tombstone the reaper has not collected yet. */
+static bool tbt_sid_in_use_locked(struct tbt_session *sess, u64 sid)
+{
+    struct tbt_stream *st;
+
+    hlist_for_each_entry(st, &sess->streams[TBT_STREAM_BUCKET(sid)], node)
+        if (st->sid == sid)
+            return true;
+    return false;
+}
+
 static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
 {
     struct tbt_stream *st;
-    u64 sid, old_fec_sid = 0;
+    u64 sid = 0, old_fec_sid = 0;
+    int tries;
 
     spin_lock(&sess->lock);
     if (READ_ONCE(sess->closing) ||
@@ -734,12 +747,34 @@ static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
     }
     if (sess->fec)
         old_fec_sid = READ_ONCE(sess->far_sid);
-    sid = ((u64)(sess->sid_prefix & 0xffff) << 24) |
-          (sess->next_sid & 0xffffff);
-    sess->next_sid++;
-    /* sid 0 is the "no stream" sentinel in sess->far_sid. */
+    /* Never hand out a sid that is still live or tombstoned. Reusing a
+     * tombstone would let the far side drop the new OPEN while its own
+     * tombstone is armed, and a late frame of the old stream could enter the
+     * new one. The 24-bit counter leaves ample room; n_streams bounds the
+     * skip on the rare 24-bit wrap. */
+    for (tries = 0; tries <= sess->n_streams + 1; tries++)
+    {
+        u64 cand = ((u64)(sess->sid_prefix & 0xffff) << 24) |
+                   (sess->next_sid & 0xffffff);
+
+        sess->next_sid++;
+        /* sid 0 is the "no stream" sentinel in sess->far_sid. */
+        if (!cand)
+            continue;
+        if (!tbt_sid_in_use_locked(sess, cand))
+        {
+            sid = cand;
+            break;
+        }
+    }
     if (!sid)
-        sid = 1;
+    {
+        spin_unlock(&sess->lock);
+        pr_warn_ratelimited("tbtun: tunnel %llu sid allocator exhausted at %u hash entries\n",
+                            (unsigned long long)sess->tunnel->cfg.id,
+                            sess->n_streams);
+        return -EAGAIN;
+    }
     spin_unlock(&sess->lock);
 
     /* The old FEC stream is dead (the live check above refused otherwise).
@@ -924,7 +959,22 @@ void tbt_far_open_seen(struct tbt_stream *st)
 
     struct socket *tg;
 
+    /* A later OPEN can supersede this one while its publisher is between
+     * tbt_stream_get_created() and this call. Do not announce or start a
+     * target for a stream the session no longer names: the FEC data plane
+     * only feeds far_sid, so such a stream would hold a target and an ACTIVE
+     * slot with no data path. */
+    spin_lock(&sess->lock);
+    if (READ_ONCE(sess->far_sid) != st->sid ||
+        READ_ONCE(st->state) == TBT_ST_DEAD)
+    {
+        spin_unlock(&sess->lock);
+        tbt_stream_kill(st, TBT_ST_DEAD);
+        return;
+    }
     WRITE_ONCE(st->state, TBT_ST_OPEN);
+    spin_unlock(&sess->lock);
+
     tbt_tx_announce(sess, st, GFP_ATOMIC);
     tg = READ_ONCE(st->target);
     if (tg)
