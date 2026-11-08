@@ -43,6 +43,7 @@
 #define DOC_WINDOW_LEN 138u /* 8 + 8*16 + 2 */
 #define DOC_HELLO_LEN 23u   /* old ARQ: 1 + 1 + 16 + 2 + 2 + 1 */
 #define DOC_HELLO_LEN_V6 66u /* FEC v6: legacy 23 + crypto fields */
+#define DOC_OPEN_BODY_LEN 32u /* 0.4.0: 256-bit physical group bitmap */
 
 static u64 rng_state = 1;
 static unsigned long case_no;
@@ -166,6 +167,9 @@ static int doc_accepts(u8 type, u8 ackc, unsigned len)
     case TBT_F_DATA:
         return len >= 1;
     case TBT_F_OPEN:
+        /* 0.4.0: exactly the 32-byte physical group bitmap. A non-FEC
+         * session sends 32 zero bytes, so one length rule covers both. */
+        return len == DOC_OPEN_BODY_LEN;
     case TBT_F_RST:
     case TBT_F_PAD:
         return len == 0;
@@ -203,7 +207,7 @@ static void test_bounds_table(void)
         u16 min, max;
     } want[] = {
         { TBT_F_DATA, 1, DOC_DATA_MAX },
-        { TBT_F_OPEN, 0, 0 },
+        { TBT_F_OPEN, DOC_OPEN_BODY_LEN, DOC_OPEN_BODY_LEN },
         { TBT_F_FIN, TBT_FIN_BODY_LEN, TBT_FIN_BODY_LEN },
         { TBT_F_RST, 0, 0 },
         { TBT_F_FBK, 0, DOC_FBK_ENTRY * DOC_FBK_MAX_ENTRIES },
@@ -218,7 +222,7 @@ static void test_bounds_table(void)
     char d[64];
 
     case_no++;
-    check(TBT_HDR_LEN == 32 && TBT_CHUNK_MAX == 8228 && TBT_REC_MAX == 8224 && TBT_CONV == 0x0006,
+    check(TBT_HDR_LEN == 32 && TBT_CHUNK_MAX == 8228 && TBT_REC_MAX == 8224 && TBT_CONV == 0x0007,
           "design constants", NULL);
     for (i = 0; i < sizeof(want) / sizeof(want[0]); i++)
     {
@@ -460,9 +464,30 @@ static void test_adversarial(void)
     n = rec_make(rec, TBT_F_DATA, 0, 0, 1, 0, DOC_DATA_MAX + 1);
     case_no++;
     expect("DATA one byte over payload max", rec, TBT_HDR_LEN, TBT_REC_PROTO);
-    n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, 0, 1);
+    n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, 0, DOC_OPEN_BODY_LEN);
     case_no++;
-    expect("OPEN with a body", rec, n, TBT_REC_PROTO);
+    expect("OPEN with the 32-byte bitmap", rec, n, TBT_REC_OK);
+    n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, 0, DOC_OPEN_BODY_LEN - 1);
+    case_no++;
+    expect("OPEN one byte short", rec, n, TBT_REC_PROTO);
+    n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, 0, DOC_OPEN_BODY_LEN + 1);
+    case_no++;
+    expect("OPEN one byte long", rec, n, TBT_REC_PROTO);
+    n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, 0, 0);
+    case_no++;
+    expect("OPEN without a body", rec, n, TBT_REC_PROTO);
+    /* The bitmap bits are opaque to the framing layer: a random 32-byte
+     * body is a well-formed record and never changes the consumed length. */
+    for (i = 0; i < 256; i++)
+    {
+        size_t k;
+
+        n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, 0, DOC_OPEN_BODY_LEN);
+        for (k = 0; k < DOC_OPEN_BODY_LEN; k++)
+            rec[TBT_HDR_LEN + k] = (u8)rnd64();
+        case_no++;
+        expect("OPEN with a random 32-byte bitmap", rec, n, TBT_REC_OK);
+    }
     n = rec_make(rec, TBT_F_FIN, 0, 0, 1, 0, 1);
     case_no++;
     expect("FIN with a body", rec, n, TBT_REC_PROTO);
@@ -522,7 +547,7 @@ static void test_adversarial(void)
     used = scan_copy(rec, n, &r, &st);
     case_no++;
     check(st == TBT_REC_OK && used == n && r.hdr.seq == ~(u64)0, "seq wrap survives decode", NULL);
-    n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, ~(u64)0, 0);
+    n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, ~(u64)0, DOC_OPEN_BODY_LEN);
     case_no++;
     expect("OPEN at seq 2^64-1", rec, n, TBT_REC_OK);
 
@@ -553,7 +578,7 @@ static void test_adversarial(void)
     /* OPEN names sid 7, DATA names sid 9: both records are well formed. The
      * "one sid per session" rule lives in tbt_rx_bytes (saw_open + adopt),
      * not in the stateless record layer, and this test pins that split. */
-    n = rec_make(two, TBT_F_OPEN, 0, 0, 7, 0, 0);
+    n = rec_make(two, TBT_F_OPEN, 0, 0, 7, 0, DOC_OPEN_BODY_LEN);
     used = rec_make(two + n, TBT_F_DATA, 0, 0, 9, 1, 4);
     st = -1;
     checks++;
@@ -765,6 +790,9 @@ static size_t gen_record(u8 *buf, size_t room)
     {
     case TBT_F_DATA:
         len = (u16)(1 + rnd_below(body_room < DOC_DATA_MAX ? body_room : DOC_DATA_MAX));
+        break;
+    case TBT_F_OPEN:
+        len = DOC_OPEN_BODY_LEN;
         break;
     case TBT_F_RETIRE:
         len = 1;

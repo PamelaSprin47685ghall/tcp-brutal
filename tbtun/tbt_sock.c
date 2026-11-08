@@ -46,6 +46,7 @@
  */
 #include <linux/skbuff.h>
 #include <linux/delay.h>
+#include <linux/err.h>
 #include <linux/uio.h>
 #include <linux/wait.h>
 #include <net/sock.h>
@@ -708,7 +709,8 @@ struct tbt_pending
 static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
 {
     struct tbt_stream *st;
-    u64 sid, old_fec_sid = 0;
+    struct tbt_fec_flow *flow = NULL;
+    u64 sid;
 
     spin_lock(&sess->lock);
     if (READ_ONCE(sess->closing) ||
@@ -717,23 +719,6 @@ static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
         spin_unlock(&sess->lock);
         return -EBUSY;
     }
-    /* The FEC v6 data plane names one stream per session (`far_sid`) and a FEC
-     * record carries no stream id, so a second live stream has its bytes
-     * delivered to whichever stream is current. A two-connection protocol
-     * (iperf3's control connection plus its data connection) then reads the
-     * other connection's bytes and its handshake dies -- measured on the WAN
-     * smoke: the near's control connection sent 167 bytes, the far acknowledged
-     * 37, and iperf3 -s failed its own cookie read. Refuse the second stream
-     * instead of corrupting the first: the application sees a reset, and the
-     * counter says why. */
-    if (sess->fec && tbt_session_fec_stream_live(sess))
-    {
-        spin_unlock(&sess->lock);
-        atomic64_inc(&sess->fec_stream_refused);
-        return -EOPNOTSUPP;
-    }
-    if (sess->fec)
-        old_fec_sid = READ_ONCE(sess->far_sid);
     sid = ((u64)(sess->sid_prefix & 0xffff) << 24) |
           (sess->next_sid & 0xffffff);
     sess->next_sid++;
@@ -742,16 +727,34 @@ static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
         sid = 1;
     spin_unlock(&sess->lock);
 
-    /* The old FEC stream is dead (the live check above refused otherwise).
-     * Quiesce its RX work and let the data plane drop its cursor/blocks
-     * before far_sid names the new stream. */
-    if (old_fec_sid)
-        tbt_session_fec_rx_barrier(sess, old_fec_sid);
+    /* Admit the FEC flow before the stream exists: its group bitmap travels
+     * in the OPEN, and the packetizer must never see a stream without one.
+     * The planes are allocated with GFP_KERNEL, so this runs in the pending
+     * work item, not in the accept callback. */
+    if (sess->fec)
+    {
+        int err;
+
+        flow = tbt_fec_flow_admit(sess, sid,
+                                   (u16)tbt_fec_groups_per_flow);
+        if (IS_ERR(flow))
+        {
+            err = PTR_ERR(flow);
+            /* No group is free, or the shape cannot carry a second flow:
+             * queueing the socket would not help. The pending path resets
+             * the connection, and the counter says why. */
+            if (err == -ENOSPC)
+                atomic64_inc(&sess->fec_stream_refused);
+            return err == -ENOSPC ? -EOPNOTSUPP : -EINVAL;
+        }
+    }
 
     spin_lock(&sess->lock);
     if (READ_ONCE(sess->closing) || sess->n_active >= TBT_STREAMS_MAX)
     {
         spin_unlock(&sess->lock);
+        if (flow)
+            tbt_fec_flow_abort(sess, sid);
         return -EBUSY;
     }
     sess->far_sid = sid;
@@ -759,7 +762,13 @@ static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
 
     st = tbt_stream_get(sess, sid, true, true);
     if (!st)
+    {
+        if (flow)
+            tbt_fec_flow_abort(sess, sid);
         return -ENOMEM;
+    }
+    if (flow)
+        tbt_fec_flow_attach(st, flow); /* moves the reference */
     st->sk = sock->sk;
     WRITE_ONCE(st->state, TBT_ST_OPEN);
 
@@ -810,12 +819,11 @@ static void tbt_pending_body(struct tbt_session *sess)
         err = tbt_stream_start_now(sess, sock);
         if (err == -EOPNOTSUPP)
         {
-            /* The FEC data plane already carries a live stream and a FEC record
-             * cannot name a second one. Reset this connection now: queueing it
-             * until the first closes would hang a two-connection protocol
-             * (iperf3's data connection waiting for a control connection that
-             * waits for the test), and accepting it would deliver its bytes to
-             * the first stream. */
+            /* The FEC flow table has no group left for this stream. Reset the
+             * connection now: queueing it cannot help until another flow
+             * detaches, and a two-connection protocol (iperf3's control
+             * connection plus its data connection) must see the refusal as an
+             * error instead of hanging. */
             kfree(p);
             if (sock->sk)
                 tbt_sk_ops_restore(sock->sk, &sess->def_ops);
@@ -825,8 +833,8 @@ static void tbt_pending_body(struct tbt_session *sess)
         }
         if (err == -EBUSY)
         {
-            /* The old stream's gate has not cleared yet; keep the accepted
-             * socket queued instead of refusing it. */
+            /* The session is full or closing; keep the accepted socket
+             * queued instead of refusing it. */
             spin_lock(&sess->lock);
             list_add(&p->node, &sess->pending);
             sess->n_pending++;
