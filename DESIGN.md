@@ -256,34 +256,28 @@ rather than in a new field so the HELLO body length is unchanged.
 
 ### 3.1.2 FEC code families and their status
 
-The final FEC code is **SC-LDPC**, an SC-IRA construction: a ring window of
+The FEC code is **SC-LDPC**, an SC-IRA construction: a ring window of
 payload degree 5, a parity accumulator, check degree 6–7, systematic, decoded
-by BEC peeling. The target shape is per direction:
+by BEC peeling. The implemented shapes are per direction:
 
-| Direction | Carriers | Shape | Rate at p = 30/40/50% |
+| Direction | Carriers | Shape | Code |
 |---|---:|---|---|
-| Downlink | 256 | one group, `n + m = 256`, `groups = 1` | 0.50 / 0.40 / 0.30 |
-| Uplink | 256 | grouped, `n + m = 8` (32 groups) or `n + m = 32` (8 groups) | 0.50 / 0.45 (GF16) / 0.30 |
+| Downlink | 256 | one group, `n + m = 256`, `groups = 1` | binary SC-LDPC, `L=8`, rate 0.5 |
+| Uplink | 256 | grouped, `n + m = 32` (8 groups) | GF(16) SC-LDPC, `L=16`, rate 1/4 |
 
-The design and its evidence are in `review/sc-ldpc-0.3.0-design.md`. The
-downlink decodes binary bit-sliced codewords; the uplink prefers GF(16) 4-bit
-codes, whose measured recovery at rate 0.45 beats the binary code at the same
-block size. SC-LDPC adapts its **code rate**, not an `n/m` class table.
+`mode=sc-ldpc` selects it; `w` is the codeword block (256 downlink, 128
+GF(16) uplink, 512 reserved) and the rate follows `n/(n+m)`. The
+per-direction `FEC_CFG` INIT carries `L`, block and rate; the receiver uses
+the peer's shape. The codec lives in `tbt_fec_sclc.c`; `host/test_fec_sclc`
+and `host/test_fec_sclc_data` cover construction and the data-plane mapping.
+SC-LDPC rate adaptation is 0.3.1, not this cut.
 
-**Status: not implemented.** `mode=sc-ldpc` is accepted by the parser
-(`w=0` resolves to 256; an explicit `w` must be 256 or 512) so a configuration
-can be validated, but `tbt_fec_params_check()` returns `-EINVAL` and the data
-plane returns `-EOPNOTSUPP` (`fec rejected: mode=3 is SC-LDPC`). `tbt_fec_ops` reserves
-the codec slot; there is no codec, no share-to-codeword mapping, no
-per-direction CFG, and no rate control. Do not describe SC-LDPC as supported.
-
-The implemented data plane is **GF(2) band RLNC** (`mode=rlnc` or
-`mode=grouped`). It is the bridge: it ships, it is what 0.2.x and the current
-0.3.0 tree run, and it stays as the low-CPU fallback. It is no longer tuned:
+The **GF(2) band RLNC** data plane (`mode=rlnc` or `mode=grouped`) remains the
+low-CPU fallback. It is no longer tuned:
 the `n/m` class table is frozen and the SC-LDPC work does not extend it. The
 production shape is 32 groups of `n=4, m=4` (256 carriers).
 
-**Adaptive status (0.3.0, in tree, unreleased).** Adaptive FEC is implemented
+**Adaptive status (0.3.0).** Adaptive FEC is implemented
 for the GF(2) data plane, Phase 1 only: `n + m = 8`, `groups = 32`, and `m` in
 1..6. The receiver estimates the DATA-share loss rate from per-block miss
 bitmaps (1 s window, EWMA, at least 1024 alive-filtered shares and 4
@@ -292,7 +286,8 @@ super-blocks); the sender runs the control law and switches shape through
 boundary. `adaptive=` follows `fec` by default, and `session <id>
 adaptive=on|off` flips it at runtime; the `c13` line exports the state.
 Phase 2 (`n + m` other than 8) is not implemented. SC-LDPC rate adaptation is
-a separate, later step (0.3.1 in the design), not this control law.
+a separate, later step (0.3.1 in the design), not this control law;
+`mode=sc-ldpc` refuses `adaptive=on` in 0.3.0.
 
 **Multi-stream status.** FEC v6 carries one live application stream per
 tunnel. A sequential connection after the previous one closes is supported:
@@ -325,7 +320,7 @@ at the first HELLO.
 - Control records (ACK/NACK/FEC_CFG/FEC_FBK) use the same one-chunk-per-record
   rule. They are written only at record boundaries; a partial record is never
   interleaved with a control frame.
-- **PARITY block marker (`TBT_FEC_CONV` 0x1005).** There is no
+- **PARITY block marker (`TBT_FEC_CONV` 0x1005; still in 0x1006).** There is no
   4-byte marker and no magic number. A marker is a set of values inside the
   48-byte `struct tbt_fec_hdr`: `type = TBT_FEC_PARITY` (0x31), `flags = 0`,
   `share_index = n` (parity 0), `epoch = 0`, `win_len = 0`, `payload_len = 0`,
@@ -335,8 +330,8 @@ at the first HELLO.
   for a block that already holds DATA/parity or `win_len_set`, and rejects DATA
   for a block after its marker. 0.1.0 required PARITY
   `payload_len == max_payload` and `win_len != 0`, so the marker and that
-  relaxation shipped together with 0x1002 and stays through 0x1005.
-- **Stream id (`TBT_FEC_CONV` 0x1005).** DATA and PARITY carry a u64 `sid` at
+  relaxation shipped together with 0x1002 and stays through 0x1006.
+- **Stream id (`TBT_FEC_CONV` 0x1005; still in 0x1006).** DATA and PARITY carry a u64 `sid` at
   header +32; control records carry 0. The receiver drops a share whose sid is
   not its current stream, and the sender tags the old block's records with the
   old sid when a stream switches, so a queued old record cannot reach the new
@@ -1822,7 +1817,7 @@ line.)
 
 ```
 # profile is one of: http-kal | http-kal-drip | raw
-# fec is off | on; mode is rlnc | grouped | sc-ldpc (parsed; data plane refuses it)
+# fec is off | on; mode is rlnc | grouped | sc-ldpc (implemented)
 tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443
         n=4 m=1 dup=1 keepalive=5000 drip_ms=1000
         profile=http-kal fec=on adaptive=on mode=grouped carriers=10 crypto=on
@@ -1932,9 +1927,8 @@ random at tunnel creation).
 - `fec=off|on` selects the data plane. `mode=rlnc` is one group
   (`carriers == n + m`); `mode=grouped` maps one share to each carrier
   (`carriers = groups * (n + m)`, `group = carrier / (n + m)`,
-  `share = carrier % (n + m)`); `mode=sc-ldpc` is the final code direction
-  (§3.1.2), not implemented: the parser accepts it, but the data plane returns
-  `-EOPNOTSUPP` with `fec=on`. `w=0` resolves to `2*n` (`256` for sc-ldpc),
+  `share = carrier % (n + m)`); `mode=sc-ldpc` selects the SC-LDPC codec
+  (§3.1.2); `w` is the codeword block (256 downlink, 128 GF(16) uplink), and
   `carriers=0` resolves to `n + m`, and a nonzero `carriers` must be a multiple
   of `n + m`. `fec=on` requires `m >= 1` and `carriers >= n + m`.
 - `adaptive=on|off` selects the 0.3.0 shape control law (§3.1.2). It defaults
@@ -2813,7 +2807,7 @@ makes this design different from a generic L4 tunnel.
 | `tests/*.sh` | **new** |
 
 Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the released tree reports
-`0.2.3`. The wire revision `TBT_CONV=0x0006`
+`0.3.0`. The wire revision `TBT_CONV=0x0006`
 and the FEC record revision `TBT_FEC_CONV=0x1006` bump independently of it.
 HELLO `body[0]` carries `TBT_WIRE_VERSION=1` for the old ARQ and
 `TBT_WIRE_VERSION_V6=3` for a FEC v6 session, not the module version, so the
@@ -2827,11 +2821,11 @@ different wire revisions do not interoperate, because the first HELLO is
 rejected by the conv check.
 
 **Packaging.** `tbtun/tbt_uapi.h` is the single version authority: the
-`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/2/3`). `scripts/mkdkmsconf.sh`
+`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/3/0`). `scripts/mkdkmsconf.sh`
 parses those macros and emits `PACKAGE_VERSION="<major>.<minor>.<patch>"`; parsing
 failure is fatal and never falls back to an old value. `dkms.conf` is a generated file —
 `make dkms.conf` (or `make dkms-tarball`) writes it, and it must not be hand-edited; the
-current generated value is `PACKAGE_VERSION="0.2.3"`. `scripts/install_dkms.sh` reads
+current generated value is `PACKAGE_VERSION="0.3.0"`. `scripts/install_dkms.sh` reads
 the same value through `mkdkmsconf.sh --version`. A development suffix
 `.r<commits>.<sha>` is opt-in with `TBT_DKMS_GIT_SUFFIX=1`; it is not the default.
 

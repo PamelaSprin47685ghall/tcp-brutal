@@ -43,11 +43,13 @@ ChaCha8-obfuscates the DATA/PARITY payload only; the 48-byte FEC header, the
 HTTP headers and every control frame stay clear. The old ARQ path is unchanged
 when `fec=off`.
 
-The implemented code is GF(2) band RLNC (`mode=rlnc` or `mode=grouped`), a
-transitional code. `mode=sc-ldpc` is the planned final code (SC-LDPC:
-downlink 256 carriers in one group, uplink grouped) and is **not implemented**:
-the parser accepts it, but the data plane returns `-EOPNOTSUPP`. Do not
-configure it expecting FEC.
+The FEC code is selected by `mode`. `mode=sc-ldpc` is implemented: the
+downlink is the binary SC-LDPC block (one group of 256 shares, `L=8`, rate
+0.5); the uplink is the grouped GF(16) SC-LDPC code (8 groups of 32 shares,
+`L=16`, rate 1/4). `w` is the codeword block (256 downlink, 128 GF(16)
+uplink, 512 reserved) and the rate follows `n/(n+m)`. The per-direction
+`FEC_CFG` INIT carries `L`, block and rate, and the receiver uses the peer's
+shape. `mode=rlnc`/`grouped` remain as the GF(2) band RLNC fallback.
 
 Adaptive FEC (`adaptive=`, on by default when `fec=on`) is implemented for
 the GF(2) data plane, Phase 1 only: the shape stays in the `n + m = 8`,
@@ -55,7 +57,8 @@ the GF(2) data plane, Phase 1 only: the shape stays in the `n + m = 8`,
 loss rate; the sender switches shape at a super-block boundary through
 `FEC_CFG`/`FEC_FBK` (wire `0x1006`). `session <id> adaptive=off` disables it
 at runtime. Shapes with `n + m != 8` are not implemented. SC-LDPC rate
-adaptation is a later step, not this control law.
+adaptation is a later step, not this control law. `mode=sc-ldpc` refuses
+`adaptive=on` in 0.3.0.
 
 Only one FEC stream is live at a time. A sequential connection after the
 previous one closes resets the FEC RX/TX state, rebases the window on its own
@@ -130,7 +133,7 @@ when it is present.
 ## Packaging
 
 The module version has one authority: `TBT_VERSION_MAJOR/MINOR/PATCH` in
-`tbtun/tbt_uapi.h` (currently `0.2.3`). The wire
+`tbtun/tbt_uapi.h` (currently `0.3.0`). The wire
 version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x0006` for the 32-byte frames
 and `TBT_FEC_CONV=0x1006` for the 48-byte FEC records; all three are independent of
 the module version. `TBT_CONV 0x0005` removed the unused PREDICT/CANCEL
@@ -360,7 +363,7 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `profile` | `http-kal` | `http-kal`, `http-kal-drip`, or `raw` |
 | `fec` | `off` | `off` (old ARQ) or `on` (FEC v6 data plane) |
 | `adaptive` | follows `fec` | `on` lets the 0.3.0 control law choose `n/m` in the `n + m = 8` family; `on` requires `fec=on`; unset means the same as `fec` |
-| `mode` | `rlnc` | `rlnc` (one group), `grouped`, or `sc-ldpc` (parsed; the data plane returns `-EOPNOTSUPP`; not implemented) |
+| `mode` | `rlnc` | `rlnc` (one group), `grouped` (GF(2) band RLNC), or `sc-ldpc` (downlink 1×256 binary, uplink grouped GF(16); `w` is the codeword block) |
 | `w` | `0` | RLNC window, `0..1024`; `0` resolves to `2*n` |
 | `carriers` | `0` | Carrier slots, `0..256`; `0` resolves to `n + m`; must be a multiple of `n + m` |
 | `crypto` | follows `fec` | `on` ChaCha8-obfuscates the FEC DATA/PARITY payload; `on` requires `fec=on`; unset means the same as `fec` |
@@ -584,10 +587,10 @@ real line.
   duplication; there is no parity or erasure code. When the ring no longer holds
   the bytes, the receiver resets the stream (`holes_unrecoverable`) instead of
   guessing.
-- **SC-LDPC is the planned final code, not an implemented one.** `mode=sc-ldpc`
-  is parsed and its `w` is validated, but the data plane refuses it with
-  `-EOPNOTSUPP`. The implemented codes are `rlnc` and `grouped` (GF(2) band
-  RLNC), which remain as the transition and the low-CPU fallback.
+- **SC-LDPC is implemented; rate adaptation is not.** `mode=sc-ldpc` runs the
+  downlink binary block (1×256, `L=8`, rate 0.5) or the uplink grouped GF(16)
+  code (8×32, `L=16`, rate 1/4); `adaptive=on` is refused. `rlnc`/`grouped`
+  remain as the GF(2) band RLNC fallback.
 - **Adaptive FEC is Phase 1 only.** `adaptive=on` moves `m` in the fixed
   `n + m = 8`, 32-group family; `n + m != 8` is not implemented, and SC-LDPC
   rate adaptation is a separate later step. `adaptive=off` keeps the configured
@@ -738,9 +741,10 @@ is the only sensible choice, because an HTTP parser cannot see inside TLS.
 
 This is not a general-purpose VPN. It forwards TCP only, to one literal target
 per tunnel, with no routing, no NAT, no authentication, and no IPv6. FEC v6 is
-optional (`fec=on`); the implemented code is GF(2) band RLNC, and the grouped
-shape uses `carriers = groups * (n + m)` up to 256 carriers. SC-LDPC is the
-planned final code and is not implemented. One live FEC stream is supported;
+optional (`fec=on`); `mode=sc-ldpc` is implemented (binary downlink, grouped
+GF(16) uplink), and `mode=rlnc`/`grouped` remain as the GF(2) band RLNC
+fallback with `carriers = groups * (n + m)` up to 256 carriers. One live FEC
+stream is supported;
 concurrent multi-stream is deferred to v7. `crypto=on` is ChaCha8 body
 obfuscation, not encryption, and it does not authenticate. It exists to multiply
 a per-flow rate limit and to test whether a QoS profile helps. For anything

@@ -33,15 +33,19 @@ chunk 分帧保持明文。`mode=grouped` 把载体分成 `groups` 组，每组 
 负载做 ChaCha8 混淆，48 字节 FEC 头、HTTP 头部与控制帧仍是明文。
 `fec=off` 时旧的 ARQ 路径不变。
 
-当前实现的码型是 GF(2) band RLNC（`mode=rlnc` 或 `mode=grouped`），属于过渡码。
-`mode=sc-ldpc` 是计划的最终码型（SC-LDPC：下行 256 条载体单组，上行 grouped），
-**尚未实现**：解析器接受它，但数据面返回 `-EOPNOTSUPP`。不要按“已支持”配置。
+FEC 码型由 `mode` 选择。`mode=sc-ldpc` 已实现：下行是 binary SC-LDPC 块
+（单组 256 shares，`L=8`，rate 0.5），上行是 grouped GF(16) SC-LDPC
+（8 组 × 32 shares，`L=16`，rate 1/4）。`w` 是 codeword block（下行 256、
+GF(16) 上行 128、512 保留），码率由 `n/(n+m)` 决定。per-direction
+`FEC_CFG` INIT 携带 `L`/block/rate，接收端使用对端形状。
+`mode=rlnc`/`grouped` 保留为 GF(2) band RLNC 回退。
 
 自适应 FEC（`adaptive=`，`fec=on` 时默认开启）只为 GF(2) 数据面实现了 Phase 1：
 形状固定在 `n + m = 8`、32 组的族内，`m` 在 1..6 之间移动。接收端估计 DATA
 share 丢失率；发送端在 super-block 边界通过 `FEC_CFG`/`FEC_FBK`（wire `0x1006`）
 切换形状。`session <id> adaptive=off` 可在运行时关闭。`n + m != 8` 的形状尚未实现。
-SC-LDPC 的码率自适应是更晚的独立步骤，不是这套控制律。
+SC-LDPC 的码率自适应是更晚的独立步骤，不是这套控制律；`mode=sc-ldpc` 在 0.3.0
+拒绝 `adaptive=on`。
 
 同一时刻只有一个 FEC 流。前一个流关闭后的顺序新连接会重置 FEC RX/TX 状态、
 把窗口重定基到新流的第一个块，并关闭旧的 target socket；DATA/PARITY 携带
@@ -101,7 +105,7 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.2.3`）。
+`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.3.0`）。
 线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x0006` 与 FEC 记录的
 `TBT_FEC_CONV=0x1006`，三者都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
@@ -301,7 +305,7 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 | `profile` | `http-kal` | `http-kal`、`http-kal-drip` 或 `raw` |
 | `fec` | `off` | `off`（旧 ARQ）或 `on`（FEC v6 数据面） |
 | `adaptive` | 跟随 `fec` | `on` 让 0.3.0 控制律在 `n + m = 8` 族内选择 `n/m`；`on` 需要 `fec=on`；不写时等于 `fec` |
-| `mode` | `rlnc` | `rlnc`（单组）、`grouped`，或 `sc-ldpc`（可解析，但数据面返回 `-EOPNOTSUPP`，尚未实现） |
+| `mode` | `rlnc` | `rlnc`（单组）、`grouped`（GF(2) band RLNC），或 `sc-ldpc`（下行 1×256 binary、上行 grouped GF(16)；`w` 是 codeword block） |
 | `w` | `0` | RLNC 窗口，`0..1024`；`0` 解析为 `2*n` |
 | `carriers` | `0` | 载体槽，`0..256`；`0` 解析为 `n + m`；必须是 `n + m` 的整数倍 |
 | `crypto` | 跟随 `fec` | `on` 对 FEC 的 DATA/PARITY 负载做 ChaCha8 混淆；`on` 需要 `fec=on`；不写时等于 `fec` |
@@ -499,9 +503,9 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   被当作填充投递。`fec=off` 时丢包靠重放环重传与重复发送修复，没有校验块或
   纠删码；环里不再保留这些字节时，接收端重置流（`holes_unrecoverable`），
   而不是猜测。
-- **SC-LDPC 是计划的最终码型，不是已实现的码型。** `mode=sc-ldpc` 能被解析、
-  `w` 也会校验，但数据面以 `-EOPNOTSUPP` 拒绝。已实现的码型是 `rlnc` 与
-  `grouped`（GF(2) band RLNC），它们作为过渡码和低 CPU 回退保留。
+- **SC-LDPC 已实现；码率自适应尚未实现。** `mode=sc-ldpc` 运行下行 binary
+  块（1×256，`L=8`，rate 0.5）或上行 grouped GF(16)（8×32，`L=16`，rate 1/4）；
+  `adaptive=on` 会被拒绝。`rlnc`/`grouped` 保留为 GF(2) band RLNC 回退。
 - **自适应 FEC 只有 Phase 1。** `adaptive=on` 只在固定的 `n + m = 8`、32 组
   族内移动 `m`；`n + m != 8` 尚未实现，SC-LDPC 的码率自适应是更晚的独立步骤。
   `adaptive=off` 保持配置的形状。
@@ -617,9 +621,10 @@ root。如果两台主机之间的路径不可信，就把隧道放进 WireGuard
 ## 适用范围
 
 这不是通用 VPN。它只转发 TCP，每条隧道只对应一个字面目标地址，没有路由、没有 NAT、
-没有认证，也不支持 IPv6。FEC v6 可选（`fec=on`），当前实现的是 GF(2) band
-RLNC，grouped 形状 `carriers = groups * (n + m)` 最多 256 条载体；SC-LDPC 是
-计划的最终码型，尚未实现。FEC 只支持一个活动流；并发多流留到 v7。
+没有认证，也不支持 IPv6。FEC v6 可选（`fec=on`）；`mode=sc-ldpc` 已实现
+（binary 下行、grouped GF(16) 上行），`mode=rlnc`/`grouped` 保留为 GF(2)
+band RLNC 回退，`carriers = groups * (n + m)` 最多 256 条载体。FEC 只支持
+一个活动流；并发多流留到 v7。
 `crypto=on` 只做 ChaCha8 body
 混淆，不是加密，也不做认证。它的用途是放大"每流限速"的额度，并验证某个
 QoS 档位是否有效。其它场景请用 WireGuard。

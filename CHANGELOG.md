@@ -3,25 +3,19 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
-## [Unreleased]
+## [0.3.1] - planned
 
-### Fixed
+### Deferred from 0.3.0
 
-- A session work reference is no longer lost when `tbt_session_arm()` races a
-  `cancel_delayed_work_sync()`. `cancel_work_sync()` disables the work while it
-  runs (kernel 6.13+), so a queue attempted in that window is dropped. The arm
-  now takes its reference before publishing the sched bit and returns it when
-  `work_pending()` shows that no instance took the queue. The same protocol
-  fixes `tbt_stream_schedule()`, and the two raw `schedule_work()` calls for
-  `w_fec_tx` go through the session bit. Without this, one lost reference kept
-  `refs` above zero, `wait_for_completion(&drained)` never returned, and a
-  `del 1` config write plus `rmmod` stayed in D state forever (observed on
-  0.2.1: `tbt_session_destroy+0x40b` waiting on the FEC RX stuck path).
-- Session destroy waits for `drained` with a bound (`TBT_SESSION_DRAIN_MS`,
-  10 s). A leak is reported with the remaining reference count, sched bits,
-  streams and carriers, and the session is leaked instead of blocking the
-  caller and every later `rmmod`. `host/test_lifetime` pins the ownership
-  interleavings and the bounded drain.
+- SC-LDPC rate adaptation (the 0.3.1 design target), Adaptive Phase 2
+  (`n + m` other than 8) and concurrent multi-stream (v7) are not in 0.3.0.
+- Two fix29 performance experiments remain the first bisection targets:
+  word-wise XOR in the FEC encoder (751715b) and the per-carrier FEC frame
+  buffer (28e3de2). Both are reverted; 0.2.0 ships the fix28 code (acba55d).
+  At 256 carriers fix29 showed a 20-35% higher median retx/replay/NACK count
+  and a 5.6% lower median app rate with overlapping ranges, so the cause is
+  still open. The fix29 measurements stay under `benches/results/` and
+  `benches/baseline/remote-fix29.csv` as reference.
 
 ## [0.2.3] - 2026-11-08
 
@@ -96,10 +90,19 @@ and moves independently of the module version.
   0.2.1 (0x1004, 40-byte header); both ends must be upgraded together.
   `hold_enable` is opt-in and off by default.
 
-## [0.3.0] - planned
+## [0.3.0] - 2026-11-08
 
-### Added (in tree, unreleased)
+### Added
 
+- Downlink SC-LDPC (binary, one group of 256 shares, L=8, rate 0.5) is wired
+  into the FEC data plane; the shape alone names the variant (`mode=sc-ldpc`,
+  `w` is the codeword block: 256 downlink, 128 GF(16) uplink, 512 reserved).
+- Uplink grouped GF(16) SC-LDPC (8 groups of 32 shares, L=16, rate 1/4) is
+  wired; the per-direction INIT (`FEC_CFG`) carries L, block and rate, and the
+  receiver uses the peer's shape.
+- FEC outq backpressure instead of dropping records; the packetizer stops at
+  the replay high-water mark; a NACK reply is capped at 4 records and
+  deduplicated.
 - Adaptive FEC Phase 1 (GF(2) data plane). The receiver estimates the
   DATA-share loss rate from per-block miss bitmaps (1 s window, EWMA, at
   least 1024 alive-filtered shares and 4 super-blocks); the sender runs the
@@ -111,56 +114,55 @@ and moves independently of the module version.
   (02f2517, 00d34cf)
 - Wire `TBT_FEC_CONV 0x1006`: `FEC_CFG` grows from 32 to 48 bytes and names
   the shape switch, `FEC_FBK` becomes a 48-byte report, and HELLO body[0]
-  moves to `TBT_WIRE_VERSION_V6 3`. A 0.2.x peer is refused at the first
-  HELLO; both ends must be upgraded together.
-- `host/test_fec_adapt` covers the estimator and the control law.
+  moves to `TBT_WIRE_VERSION_V6 3`. A 0.2.x peer (0x1005) is refused at the
+  first HELLO; both ends must be upgraded together.
+- `host/test_fec_adapt`, `host/test_fec_sclc` and `host/test_fec_sclc_data`
+  cover the estimator, the control law and the SC-LDPC codec.
 
-### Planned (not implemented)
+### Fixed
 
-- **SC-LDPC is the final FEC code and is not implemented.** Target: downlink
-  256 carriers in one group (`n + m = 256`, `groups = 1`), uplink grouped
-  (`n + m = 8` or 32), rates 0.50/0.40/0.30 at p = 30/40/50% (uplink uses
-  GF(16) 0.45 at p = 40%). `mode=sc-ldpc` is accepted by the parser, but
-  `tbt_fec_params_check()` returns `-EINVAL` and the data plane returns
-  `-EOPNOTSUPP`; there is no codec, share-to-codeword mapping, per-direction
-  CFG or rate control.
-  Design: `review/sc-ldpc-0.3.0-design.md`.
-- **Multi-stream v7 is not implemented.** FEC v6 carries one live application
-  stream per tunnel; a sequential connection is supported, a second
-  concurrent stream is refused (`-EOPNOTSUPP`, `fec_stream_refused`).
-  Concurrent multi-stream is deferred to v7.
-- **Adaptive Phase 2 is not implemented.** Shapes with `n + m` other than 8
-  need a hot rebuild of the group/block/replay state and stay out of this
-  cut.
-- **SC-LDPC rate adaptation is not implemented.** It is the 0.3.1 design
-  target, not this control law.
+- A session work reference is no longer lost when `tbt_session_arm()` races a
+  `cancel_delayed_work_sync()`. `cancel_work_sync()` disables the work while it
+  runs (kernel 6.13+), so a queue attempted in that window is dropped. The arm
+  now takes its reference before publishing the sched bit and returns it when
+  `work_pending()` shows that no instance took the queue. The same protocol
+  fixes `tbt_stream_schedule()`, and the two raw `schedule_work()` calls for
+  `w_fec_tx` go through the session bit. Without this, one lost reference kept
+  `refs` above zero, `wait_for_completion(&drained)` never returned, and a
+  `del 1` config write plus `rmmod` stayed in D state forever (observed on
+  0.2.1: `tbt_session_destroy+0x40b` waiting on the FEC RX stuck path).
+- Session destroy waits for `drained` with a bound (`TBT_SESSION_DRAIN_MS`,
+  10 s). A leak is reported with the remaining reference count, sched bits,
+  streams and carriers, and the session is leaked instead of blocking the
+  caller and every later `rmmod`. `host/test_lifetime` pins the ownership
+  interleavings and the bounded drain.
+- A block decode that cannot finish the block backs off instead of decoding
+  the same block 128 times before its NACK repairs arrive.
+- The peer's graph is taken from the initial `FEC_CFG`; a repair burst is
+  paced instead of filling the replay ring.
 
-### Performance
+### Verification
 
-- Target: 256 carriers at 90% of direct/2. 0.2.1 measured 86.8% (97.3 Mbit/s
-  against 112.1), 3.2 points short, and the gap stays open (`txq_max` 16.8 MB
-  still full, far CPU 1.47 cores). 32 and 64 carriers measured 96.0% and
-  105.4%. 0.2.3 records a different 256-carrier steady state (23.9 Mbit/s
-  average over 60 s, 27.9 Mbit/s 10 s max); neither number is the target.
+- First connect 15 s: 53,477,376 B, HTTP 200, TTFB 1.262 s.
+- Steady state 60 s: 2.59 MB/s app (155,500,544 B), wire 374 MB far /
+  312 MB near, outq_drop 0, NACK backpressure 0, up=256.
+- 1 GiB single stream: rc=0, HTTP 200, size 1,073,741,824, near/far sha256
+  equal (`e926b854…ad7393`), 737.60 s (11.65 Mbit/s); no reset, holes or
+  drops.
+- Wire: `TBT_FEC_CONV 0x1006` is not compatible with 0.2.x (`0x1005`); both
+  ends must be upgraded together.
 
-### Release gaps
+### Known limitations
 
-- Merge train D/E is not merged: D `w-sclc` does not exist (the SC-LDPC
-  prototypes are outside master), and E `w-hnd0` has 14 commits outside
-  master.
-- 0.2.3 has not rerun the 1 GiB acceptance or the real-host DKMS flow; the
-  existing 1 GiB and DKMS evidence is 0.2.0 fix27 on `.65`.
-
-### Deferred from 0.2.0
-
-- Two fix29 performance experiments stay out of 0.2.0 and are the first
-  bisection targets: word-wise XOR in the FEC encoder (751715b) and the
-  per-carrier FEC frame buffer (28e3de2). Both are reverted; 0.2.0 ships the
-  fix28 code (acba55d). At 256 carriers fix29 showed a 20-35% higher median
-  retx/replay/NACK count and a 5.6% lower median app rate with overlapping
-  ranges, so the cause is still open. The fix29 measurements stay under
-  `benches/results/` and `benches/baseline/remote-fix29.csv` as 0.3.0
-  reference, not as 0.2.0 behavior (`benches/MICROBENCH.md`, "真机基线").
+- `fec_replay_miss=42,963` (all `never_stored`) on the far side of the 1 GiB
+  run: the requested shares were not in the replay ring, the receiver
+  retried, and the transfer still finished byte-exact; replay high-water
+  4.9 MiB and backpressure 0. This is a repair-efficiency residual, not a
+  failed acceptance criterion.
+- The last block of a stream carries full parity; there is no partial-parity
+  saving for a short block.
+- SC-LDPC rate adaptation, Adaptive Phase 2 and concurrent multi-stream are
+  not in 0.3.0; see [0.3.1].
 
 ## [0.2.1] - 2026-11-08
 
