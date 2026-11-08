@@ -290,6 +290,9 @@ host/test_portmap
 host/test_portmap_san
 host/test_lifetime
 host/test_lifetime_san
+host/test_sclc_uplink
+host/test_sclc_uplink_san
+host/bench_sclc_uplink
 # guest traffic checker (tests/qemu/mkinitramfs.sh)
 host/tbt_burst
 host/tbt_ping

@@ -1,0 +1,73 @@
+/*
+ * tbt_sc_ldpc_gf16.h - q-ary (GF(16)) SC-IRA codec for the uplink grouped
+ * FEC block.
+ *
+ * Kernel port of review/fec-prototype/sc_ldpc/sc_ldpc_gf16.{c,h}
+ * (w-sclc-gf16).  The graph is the SC_TERM_ACC graph; every variable and
+ * check symbol is a GF(16) element and every check is a random nonzero
+ * linear combination.  The owned parity symbol of a check has coefficient
+ * 1, so encoding is one forward sweep.
+ *
+ * The decoder is q-ary peeling plus a bounded dense core solve.  The core
+ * solve is capped by max_core variables and by a fixed byte budget so a
+ * pathological stopping set cannot allocate without bound in the module.
+ */
+
+#ifndef _TBT_SC_LDPC_GF16_H
+#define _TBT_SC_LDPC_GF16_H
+
+#include "tbt_sc_ldpc.h"
+
+typedef struct gf16_code gf16_code;
+
+typedef struct
+{
+    long unresolved;  /* target variables still erased after peeling */
+    long target;      /* n_data (systematic) or n (symmetric) */
+    long rounds;      /* peeling waves */
+    long edge_visits; /* adjacency entries touched */
+    long resolved;    /* target variables recovered */
+    long core_calls;
+    long core_solved;
+    long core_failed;
+    long core_skipped;
+    long core_max_vars;
+    long core_vars_sum;
+    long core_gf2_deficient;
+    long core_gf16_rank_sum;
+    long core_under;
+    long core_rankdef;
+    long core_bad;
+} gf16_dec_stat;
+
+/* Build a q-ary code on the SC_TERM_ACC graph.  p->term must be
+ * SC_TERM_ACC.  coef_seed controls the random nonzero edge coefficients.
+ * Returns NULL and fills err[] on invalid parameters or allocation failure. */
+gf16_code *gf16_build(const sc_params *p, uint64_t coef_seed, char *err,
+                      size_t errlen);
+void gf16_free(gf16_code *c);
+
+int gf16_n(const gf16_code *c);
+int gf16_n_data(const gf16_code *c);
+int gf16_n_par(const gf16_code *c);
+u32 gf16_mem(const gf16_code *c);
+
+/* Systematic encoder.  code[0 .. n_data-1] holds the payload symbols on
+ * entry; code[n_data .. n-1] receives the parity symbols. */
+int gf16_encode(gf16_code *c, uint8_t *code);
+
+/* Returns 0 if every check equation holds, else 1 + index of first bad check. */
+int gf16_verify(const gf16_code *c, const uint8_t *code);
+
+/* q-ary peeling decoder for the BEC.  recv[v] holds the received symbol of
+ * a non-erased variable; erased[v] != 0 marks an erasure.  out[v] receives
+ * the decoded symbol of every variable (0 for unresolved).  max_core caps
+ * the dense core solve in variables; 0 disables it. */
+gf16_dec_stat gf16_decode(gf16_code *c, const uint8_t *recv,
+                          const uint8_t *erased, uint8_t *out,
+                          int target_data_only, int max_core);
+
+/* Decoder knowledge after the last gf16_decode(): 1 = value known. */
+const uint8_t *gf16_known(const gf16_code *c);
+
+#endif /* _TBT_SC_LDPC_GF16_H */
