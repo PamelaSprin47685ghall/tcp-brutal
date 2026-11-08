@@ -778,10 +778,12 @@ static void test_nack_replay(void)
 }
 
 /* A short block: only DATA share 0 is real (win_len=1); shares 1..3 are
- * padding that the sender never generates. If the parity is lost, the
- * receiver asks for shares 1..3 and the sender must answer with a parity row
+ * padding that the sender never generates. A NACK already in flight (or one
+ * from a peer that still names padding) must be answered with parity 0,
  * whose header carries win_len=1, not with silence. The test models that
- * reply: the ring says share 1 was never stored, but parity 0 is resident. */
+ * reply: the ring says share 1 was never stored, but parity 0 is resident.
+ * A 0.3.1 receiver never names share 1 in the first place; the next test
+ * pins that rule. */
 static void test_short_block_reply(void)
 {
     static const u16 one[N] = {S, 0, 0, 0};
@@ -885,6 +887,110 @@ static void test_two_short_writes(void)
     ok_size(off1, 40, "40 B block length");
     ok_prefix(out, off0 + off1, "two short writes prefix");
     tbt_fec_replay_free(r);
+}
+
+/* The NACK scan must not name a share the sender never wrote.
+ *
+ * The scan lives in tbt_fec_data.c, which cannot link here; the decision it
+ * makes is tbt_fec_nack_data_limit()/tbt_fec_nack_parity_limit(). This model
+ * builds the mask the scan would build for one block. Before the parity's
+ * win_len arrives, only shares below a present DATA share are proven real:
+ * real shares are 0..real-1 with no hole, so a present share j proves
+ * real >= j + 1, while a missing share above the highest present one may be
+ * the zero padding of a short block. The old scan named all n shares; the
+ * sender counted each one as fec_replay_miss_never_stored (42,963 on the
+ * 1 GiB run) and answered nothing. */
+static void nack_mask(const struct blk *b, bool block_code,
+                      struct tbt_fec_nack *n)
+{
+    u16 real = b->nreal ? b->nreal : N;
+    u16 seen_hi = 0;
+    u16 dlimit, plimit, i;
+
+    for (i = N; i > 0; i--)
+        if (b->dpresent[i - 1])
+        {
+            seen_hi = i;
+            break;
+        }
+    dlimit = tbt_fec_nack_data_limit(b->nreal != 0, real, seen_hi);
+    plimit = tbt_fec_nack_parity_limit(b->nreal != 0, real, N, M,
+                                       block_code);
+    memset(n, 0, sizeof(*n));
+    tbt_fec_bitmap_set(n->group_mask, 0);
+    for (i = 0; i < dlimit; i++)
+        if (!b->dpresent[i])
+            tbt_fec_bitmap_set(n->share_mask, i);
+    for (i = 0; i < plimit; i++)
+        if (!b->ppresent[i])
+            tbt_fec_bitmap_set(n->share_mask, (u16)(N + i));
+}
+
+static bool mask_has(const struct tbt_fec_nack *n, u16 share)
+{
+    return tbt_fec_bitmap_test(n->share_mask, share) != 0;
+}
+
+static void test_short_block_nack(void)
+{
+    static const u16 one[N] = {S, 0, 0, 0};
+    static const u16 full[N] = {S, S, S, S};
+    struct tbt_fec_nack n;
+    struct blk b;
+
+    /* Short block, cut unknown: share 0 is real, 1..3 are padding. Only the
+     * cut row (parity 0) may be requested; naming a padding share costs a
+     * round trip and a never-stored miss. */
+    blk_init(&b, 0, one);
+    b.dpresent[1] = b.dpresent[2] = b.dpresent[3] = 0;
+    nack_mask(&b, true, &n);
+    ok(!mask_has(&n, 1) && !mask_has(&n, 2) && !mask_has(&n, 3),
+       "short block: no padding DATA share is NACKed");
+    ok(mask_has(&n, N), "short block: the cut row is requested");
+
+    /* The cut row arrives: the block is complete, nothing is requested. */
+    b.nreal = 1;
+    b.ppresent[0] = 1;
+    nack_mask(&b, true, &n);
+    ok(tbt_fec_bitmap_count(n.share_mask) == 0,
+       "short block: cut known and complete, no NACK");
+
+    /* Cut unknown but a present share proves a gap below it: share 0 lost,
+     * share 1 present means shares 0 and 1 are both real. */
+    blk_init(&b, 0, one);
+    b.dpresent[0] = 0;
+    b.dpresent[2] = b.dpresent[3] = 0;
+    b.nreal = 0;
+    nack_mask(&b, true, &n);
+    ok(mask_has(&n, 0),
+       "cut unknown: a proven gap below a present share is NACKed");
+    ok(!mask_has(&n, 2) && !mask_has(&n, 3),
+       "cut unknown: unproven shares above it are not NACKed");
+
+    /* A full block with its last share lost: the cut is unknown, so share 3
+     * waits for parity 0; once win_len=4 arrives it is named. */
+    blk_init(&b, 0, full);
+    b.dpresent[3] = 0;
+    b.nreal = 0;
+    nack_mask(&b, true, &n);
+    ok(!mask_has(&n, 3), "full block, cut unknown: the last share waits");
+    b.nreal = N;
+    memset(b.ppresent, 1, sizeof(b.ppresent));
+    nack_mask(&b, true, &n);
+    ok(mask_has(&n, 3), "full block, cut known: the lost last share is NACKed");
+    ok(tbt_fec_bitmap_count(n.share_mask) == 1,
+       "full block, cut known: only the lost share is named");
+
+    /* RLNC keeps every parity row in its range, but the proven-real rule for
+     * DATA is the same: its rows also state win_len. */
+    blk_init(&b, 0, one);
+    b.dpresent[1] = b.dpresent[2] = b.dpresent[3] = 0;
+    b.nreal = 0;
+    nack_mask(&b, false, &n);
+    ok(!mask_has(&n, 1) && !mask_has(&n, 2) && !mask_has(&n, 3),
+       "RLNC short block: padding is not NACKed either");
+    ok(mask_has(&n, N) && mask_has(&n, N + 1),
+       "RLNC keeps every parity row in its range");
 }
 
 /* The parity band: row r covers every DATA column except c == r (band=3 for
@@ -2026,6 +2132,7 @@ int main(void)
     test_nack_replay();
     test_short_block_reply();
     test_two_short_writes();
+    test_short_block_nack();
     test_parity_rotation();
     test_marker_retry();
     test_super_cursor();

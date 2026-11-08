@@ -1237,21 +1237,30 @@ static u32 tbt_fec_ring_get(struct tbt_fec_tx *tx, u8 *dst, u32 len)
     return take;
 }
 
-/* Encode and send the m parity shares of one group block. win_len is the
- * number of real DATA packets in the block: n for a full block, less for the
- * stream's final block. The unused positions are already zero-filled. */
+/* Encode one group block and send the parity shares the codec needs.
+ *
+ * win_len is the number of real DATA packets in the block: n for a full
+ * block, less for a block the short-write path closed early. The unused
+ * positions are already zero-filled. A full block sends all m rows; a short
+ * SC-LDPC block sends row 0 alone, which states win_len/epoch so the receiver
+ * stops waiting for shares the sender never wrote, and leaves the few real
+ * shares to the NACK replay (see tbt_fec_tx_parity_count()). */
 static void tbt_fec_tx_emit_parity(struct tbt_session *sess, u16 group,
                                    u64 block_id, u16 win_len)
 {
     struct tbt_fec_tx *tx = sess->fec_tx;
     struct tbt_fec_gtx *g = &tx->g[group];
     struct tbt_fec_hdr h;
+    bool block_code = tbt_fec_grouped_mode(tx->codec) == 3;
     u64 last_seq;
-    u16 rec_len, i;
+    u16 count, rec_len, i;
     int st;
     int err;
 
     if (!tx->codec || !win_len || win_len > tx->n)
+        return;
+    count = tbt_fec_tx_parity_count(win_len, tx->n, tx->m, block_code);
+    if (!count)
         return;
     tbt_fec_grouped_set_nonce(tx->codec, group,
                               tbt_fec_group_nonce(tx->nonce, group, block_id));
@@ -1273,7 +1282,7 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess, u16 group,
     last_seq = tbt_fec_seq_of_block_pkt_base(
         block_id, group, (u16)(win_len - 1), tx->base_pkt, tx->base_block,
         tx->groups, tx->n);
-    for (i = 0; i < tx->m; i++)
+    for (i = 0; i < count; i++)
     {
         memset(&h, 0, sizeof(h));
         h.type = TBT_FEC_PARITY;
@@ -1312,6 +1321,8 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess, u16 group,
             tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
         }
     }
+    if (count < tx->m)
+        atomic64_add((u64)(tx->m - count), &sess->fec_short_parity_saved);
 }
 
 /* One PARITY record that says "this group has no packet in this block".
@@ -3665,6 +3676,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
     bool young = false;
     bool any_probe = false; /* the NACK being built names probe shares */
     bool probe_only = false; /* the request being sent is only a shape probe */
+    bool block_code;
 
     if (!rx || !rx->nack || READ_ONCE(rx->stopping) ||
         READ_ONCE(sess->closing))
@@ -3676,6 +3688,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
      * sender counts fec_replay_miss_no_ring if its own allocation failed. */
     if (!rx->replay_k)
         return;
+    block_code = tbt_fec_grouped_mode(rx->codec) == 3;
 
     tbt_fec_rx_sample_rtt(sess, now);
 
@@ -3795,16 +3808,30 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
                 if (tbt_fec_nack_parity_only(b->used, b->nparity, b->block_id,
                                              s, b->ndata, b->ready))
                 {
+                    u16 dlimit, plimit, seen_hi = 0;
+
                     missing = true;
                     probe_only = false;
                     if (!b->first_gap_ns)
                         b->first_gap_ns = now;
                     if (!first_gap || b->first_gap_ns < first_gap)
                         first_gap = b->first_gap_ns;
-                    for (i = 0; i < rx->n; i++)
-                        tbt_fec_nack_add(sess, rx, &n, g, s, i, now, hold,
-                                         &nmissing);
-                    for (i = 0; i < rx->m; i++)
+                    real = tbt_fec_blk_real_len(rx, g, b);
+                    for (i = rx->n; i > 0; i--)
+                        if (b->dpresent[i - 1])
+                        {
+                            seen_hi = i;
+                            break;
+                        }
+                    dlimit = tbt_fec_nack_data_limit(b->win_len_set, real,
+                                                     seen_hi);
+                    plimit = tbt_fec_nack_parity_limit(
+                        b->win_len_set, real, rx->n, rx->m, block_code);
+                    for (i = 0; i < dlimit; i++)
+                        if (!b->dpresent[i])
+                            tbt_fec_nack_add(sess, rx, &n, g, s, i, now,
+                                             hold, &nmissing);
+                    for (i = 0; i < plimit; i++)
                         if (!b->ppresent[i])
                             tbt_fec_nack_add(sess, rx, &n, g, s,
                                              (u16)(rx->n + i), now, hold,
@@ -3823,8 +3850,12 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
                         READ_ONCE(rx->total_known)))
                 {
                     /* Total is known and this group has packets in the
-                     * block: a wholly missing block is a real loss. Request
-                     * its range; the ring returns only what it has. */
+                     * block: a wholly missing block is a real loss. A block
+                     * code has no present share to prove any DATA slot real,
+                     * so ask for parity 0 alone: it states win_len, and the
+                     * next pass names the real DATA range. Asking for all n
+                     * here named padding on every short block. RLNC has no
+                     * cut to learn and keeps its full range. */
                     missing = true;
                     probe_only = false;
                     if (rx->gap_block != s)
@@ -3834,8 +3865,13 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
                     }
                     if (!first_gap || rx->gap_ns < first_gap)
                         first_gap = rx->gap_ns;
-                    for (i = 0; i < (u16)(rx->n + rx->m); i++)
-                        tbt_fec_nack_add(sess, rx, &n, g, s, i, now, hold,
+                    if (!block_code)
+                        for (i = 0; i < rx->n; i++)
+                            tbt_fec_nack_add(sess, rx, &n, g, s, i, now,
+                                             hold, &nmissing);
+                    for (i = 0; i < (block_code ? 1 : rx->m); i++)
+                        tbt_fec_nack_add(sess, rx, &n, g, s,
+                                         (u16)(rx->n + i), now, hold,
                                          &nmissing);
                     continue;
                 }
@@ -3873,21 +3909,42 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
              * and a rank-deficient block was skipped forever (fix25: the
              * frontier never got the parity row it needed, the ACK stopped
              * and the download stalled for 120 s). Request the missing DATA
-             * and parity shares; the per-share hold keeps repeats down. */
-            missing = true;
-            probe_only = false;
-            if (!b->first_gap_ns)
-                b->first_gap_ns = now;
-            if (!first_gap || b->first_gap_ns < first_gap)
-                first_gap = b->first_gap_ns;
-            for (i = 0; i < real; i++)
-                if (!b->dpresent[i])
-                    tbt_fec_nack_add(sess, rx, &n, g, s, i, now, hold,
-                                     &nmissing);
-            for (i = 0; i < rx->m; i++)
-                if (!b->ppresent[i])
-                    tbt_fec_nack_add(sess, rx, &n, g, s, (u16)(rx->n + i),
-                                     now, hold, &nmissing);
+             * and parity shares; the per-share hold keeps repeats down.
+             *
+             * A DATA share is named only when it is proven real: the parity's
+             * win_len states the cut, or a present share after it proves the
+             * block has that many shares. The tail of a short block is zero
+             * padding the sender never wrote; naming it bought a round trip
+             * and an absent-share miss per share. */
+            {
+                u16 dlimit, plimit, seen_hi = 0;
+
+                for (i = rx->n; i > 0; i--)
+                    if (b->dpresent[i - 1])
+                    {
+                        seen_hi = i;
+                        break;
+                    }
+                dlimit = tbt_fec_nack_data_limit(b->win_len_set, real,
+                                                 seen_hi);
+                plimit = tbt_fec_nack_parity_limit(
+                    b->win_len_set, real, rx->n, rx->m, block_code);
+                missing = true;
+                probe_only = false;
+                if (!b->first_gap_ns)
+                    b->first_gap_ns = now;
+                if (!first_gap || b->first_gap_ns < first_gap)
+                    first_gap = b->first_gap_ns;
+                for (i = 0; i < dlimit; i++)
+                    if (!b->dpresent[i])
+                        tbt_fec_nack_add(sess, rx, &n, g, s, i, now, hold,
+                                         &nmissing);
+                for (i = 0; i < plimit; i++)
+                    if (!b->ppresent[i])
+                        tbt_fec_nack_add(sess, rx, &n, g, s,
+                                         (u16)(rx->n + i), now, hold,
+                                         &nmissing);
+            }
         }
         if (!(missing && tbt_fec_bitmap_count(n.share_mask)))
         {
@@ -5446,33 +5503,83 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                         pr_info("tbtun: fec NACK absent block=%llu group=%u share=%u cur=%llu gblk=%llu\n",
                                 h.block_id, g, s, READ_ONCE(tx->cur_block),
                                 READ_ONCE(tx->g[g].blk_id));
-                    atomic64_inc(&sess->fec_replay_miss_never_stored);
-                    atomic64_inc(&sess->fec_replay_miss_get);
-                    atomic64_inc(&sess->fec_replay_miss);
                     if (h.block_id >= READ_ONCE(tx->cur_block))
                         continue; /* still being built: the share may appear */
-                    /* With no parity band (SC-LDPC) there is no "covering
-                     * row" relation, so a synthesized parity row can be one
-                     * the receiver already holds and the NACK would be
-                     * answered with a duplicate. Replay nothing for a DATA
-                     * share and let the receiver name a share that exists. */
+                    /* A block code stores parity 0 for every block it wrote.
+                     * If the named DATA share sits at or past the cut that
+                     * row states, it is padding the sender never wrote: not
+                     * a replay miss. Answer with the row (the receiver then
+                     * learns win_len and stops naming padding), and count
+                     * the skipped request. A request for a real share that
+                     * was never stored is a miss and takes the same row as
+                     * its answer. */
                     if (s < tn && !band)
                     {
+                        struct tbt_fec_hdr ph0;
+                        int plen0;
+
+                        spin_lock_bh(&tx->replay_lock);
+                        plen0 = tbt_fec_replay_get(tx->replay, h.block_id, g,
+                                                   tn, buf, TBT_FEC_REC_MAX);
+                        spin_unlock_bh(&tx->replay_lock);
+                        if (plen0 > 0 && !tbt_fec_hdr_unpack(buf, &ph0) &&
+                            ph0.win_len && s >= ph0.win_len)
+                            atomic64_inc(&sess->fec_nack_pad_skip);
+                        else
+                        {
+                            atomic64_inc(&sess->fec_replay_miss_never_stored);
+                            atomic64_inc(&sess->fec_replay_miss_get);
+                            atomic64_inc(&sess->fec_replay_miss);
+                        }
+                        if (plen0 > 0)
+                        {
+                            u64 last;
+                            bool dup;
+
+                            spin_lock_bh(&tx->replay_lock);
+                            last = tbt_fec_replay_sent_ns(tx->replay,
+                                                          h.block_id, g, tn);
+                            dup = tbt_fec_replay_dup(t0, last, hold);
+                            if (!dup)
+                                tbt_fec_replay_mark_sent(tx->replay,
+                                                         h.block_id, g, tn,
+                                                         t0);
+                            spin_unlock_bh(&tx->replay_lock);
+                            if (dup)
+                            {
+                                atomic64_inc(&sess->fec_replay_dedup);
+                                continue;
+                            }
+                            if (tbt_fec_replay_space(sess) < (u32)plen0)
+                            {
+                                atomic64_inc(&sess->fec_nack_backpressure);
+                                full = true;
+                                break;
+                            }
+                            if (tbt_fec_replay_enqueue(sess, buf, (u16)plen0,
+                                                       t0))
+                                continue;
+                            atomic64_inc(&sess->fec_nack_retx);
+                            atomic64_add((u64)plen0,
+                                         &sess->fec_nack_retx_bytes);
+                            atomic64_inc(&sess->fec_nack_parity_reply);
+                            atomic64_inc(&sess->fec_nack_absent_reply);
+                            continue;
+                        }
                         atomic64_inc(&sess->fec_nack_req_invalid);
                         continue;
                     }
-                    /* The block is closed and this share was never
-                     * generated. A short block (win_len < n) has padding
-                     * shares that will never exist, but it does have parity
-                     * rows whose header carries the real win_len/epoch.
-                     * Row r covers DATA share s when
+                    atomic64_inc(&sess->fec_replay_miss_never_stored);
+                    atomic64_inc(&sess->fec_replay_miss_get);
+                    atomic64_inc(&sess->fec_replay_miss);
+                    /* With a parity band, row r covers DATA share s when
                      * (s + m - (r % m)) % m < band. r = s % m always covers
                      * it (band >= 1); a fixed row 0 does not cover s with
                      * s % m >= band, and repeating it cannot decode the
                      * block. Start at r = s % m, then try the other covering
-                     * rows if that row is not in the ring. */
-                    first = s < tn ? (u16)(s % tm) :
-                                        (u16)(s - tn);
+                     * rows if that row is not in the ring. A no-band DATA
+                     * share was answered above. */
+                    first = s < tn ? (u16)(s % tm) : (u16)(s - tn);
                     for (ri = 0; ri < tm && !replied; ri++)
                     {
                         u16 r = (u16)((first + ri) % tm);
@@ -5480,7 +5587,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
                         bool dup;
                         int plen;
 
-                        if (s < tn && band &&
+                        if (s < tn &&
                             (u16)((s + tm - (r % tm)) % tm) >= band)
                             continue;
                         spin_lock_bh(&tx->replay_lock);

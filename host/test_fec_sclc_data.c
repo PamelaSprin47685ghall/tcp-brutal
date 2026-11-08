@@ -498,6 +498,112 @@ static void case_rlnc_dispatch(void)
     }
 }
 
+/* 0.3.1: a short block sends one cut row, and the NACK scan names only
+ * shares the sender could have written.
+ *
+ * The sender's data-plane code is kernel-only, so the decisions it makes are
+ * the two pure helpers in tbt_fec.h; this case pins them and the exact bytes
+ * of the one record a short block still sends. */
+static void case_short_block_parity(void)
+{
+    struct tbt_fec_grouped *tx;
+    struct tbt_fec_hdr h, back;
+    uint8_t *data[128], *parity[128];
+    uint8_t wire[TBT_FEC_HDR_LEN], wire2[TBT_FEC_HDR_LEN];
+    int i;
+
+    /* The sender keeps row 0 alone for a short SC-LDPC block. */
+    ok_u16(tbt_fec_tx_parity_count(1, 128, 128, true), 1,
+           "short block: one cut row");
+    ok_u16(tbt_fec_tx_parity_count(127, 128, 128, true), 1,
+           "127-share short block: one cut row");
+    ok_u16(tbt_fec_tx_parity_count(128, 128, 128, true), 128,
+           "full block: every parity row");
+    ok_u16(tbt_fec_tx_parity_count(1, 128, 4, false), 4,
+           "RLNC short block: every row");
+    ok_u16(tbt_fec_tx_parity_count(1, 128, 0, true), 0,
+           "no parity shape: no row");
+
+    /* The NACK scan names a DATA share only when it is proven real. */
+    ok_u16(tbt_fec_nack_data_limit(false, 128, 0), 0,
+           "cut unknown, no DATA seen: no DATA NACK");
+    ok_u16(tbt_fec_nack_data_limit(false, 128, 1), 1,
+           "cut unknown, share 0 seen: only share 0 is proven");
+    ok_u16(tbt_fec_nack_data_limit(false, 128, 64), 64,
+           "cut unknown, share 63 seen: gaps below it are proven");
+    ok_u16(tbt_fec_nack_data_limit(true, 7, 1), 7,
+           "cut known: every real share may be named");
+    ok_u16(tbt_fec_nack_data_limit(false, 7, 9), 7,
+           "the proven range is capped at the block's real length");
+
+    /* Parity requests converge on the rows the sender kept. */
+    ok_u16(tbt_fec_nack_parity_limit(false, 128, 128, 128, true), 1,
+           "cut unknown: only the cut row");
+    ok_u16(tbt_fec_nack_parity_limit(true, 1, 128, 128, true), 1,
+           "short block: only the cut row exists");
+    ok_u16(tbt_fec_nack_parity_limit(true, 128, 128, 128, true), 128,
+           "full block: every row may be named");
+    ok_u16(tbt_fec_nack_parity_limit(true, 1, 128, 4, false), 4,
+           "RLNC short block: every row may be named");
+
+    /* The one record a short block sends is a normal PARITY row: same
+     * 48-byte layout, win_len states the cut, epoch states the last share's
+     * length, and the payload is the codec's row 0 byte for byte. */
+    tx = tbt_fec_grouped_new_ops(&tbt_fec_ops_sclc, 1, 128, 128, 500, 256,
+                                 TBT_FEC_S, 0, 0xabc);
+    ok(tx != NULL, "short-block codec builds");
+    if (!tx)
+        return;
+    for (i = 0; i < 128; i++)
+    {
+        data[i] = calloc(1, TBT_FEC_S);
+        parity[i] = calloc(1, TBT_FEC_S);
+        if (!data[i] || !parity[i])
+        {
+            ok(false, "short-block buffers");
+            tbt_fec_grouped_free(tx);
+            return;
+        }
+    }
+    fill_pattern(data[0], TBT_FEC_S, 0x51);
+    ok_int(tbt_fec_grouped_encode(tx, 0, data, 128, parity), 0,
+           "short-block encode");
+
+    memset(&h, 0, sizeof(h));
+    h.type = TBT_FEC_PARITY;
+    h.share_index = 128; /* parity 0 */
+    h.n = 128;
+    h.m = 128;
+    h.block_id = 7;
+    h.seq = tbt_fec_seq_of_block_pkt(7, 0, 0, 1, 128);
+    h.win_len = 1;
+    h.payload_len = TBT_FEC_S;
+    h.epoch = 4;
+    h.conv = TBT_FEC_CONV;
+    h.sid = 0x1234;
+    ok_int(tbt_fec_hdr_seal(&h, parity[0]), 0, "cut row seals");
+    ok_int(tbt_fec_hdr_pack(&h, wire), 0, "cut row packs");
+    ok_int(tbt_fec_hdr_unpack(wire, &back), 0, "cut row unpacks");
+    ok_int(tbt_fec_hdr_pack(&back, wire2), 0, "cut row re-packs");
+    ok(memcmp(wire, wire2, TBT_FEC_HDR_LEN) == 0,
+       "cut row is byte-exact through pack/unpack/pack");
+    ok_int(tbt_fec_hdr_check(&back, TBT_FEC_S), 0,
+           "cut row passes the frozen wire check");
+    ok_int(tbt_fec_hdr_verify(&back, parity[0]), 0,
+           "cut row payload verifies byte-exact");
+    ok_u16(back.win_len, 1, "cut row states the real share count");
+    ok_u16(back.epoch, 4, "cut row states the last share's length");
+    ok(back.share_index == 128 && back.payload_len == TBT_FEC_S,
+       "cut row is parity 0 with a full slot");
+
+    tbt_fec_grouped_free(tx);
+    for (i = 0; i < 128; i++)
+    {
+        free(data[i]);
+        free(parity[i]);
+    }
+}
+
 int main(void)
 {
     case_shape_of();
@@ -506,6 +612,7 @@ int main(void)
     case_downlink_roundtrip();
     case_uplink_roundtrip();
     case_rlnc_dispatch();
+    case_short_block_parity();
     printf("%s: %d checks, %d failures\n",
            failures ? "FAIL" : "PASS", checks, failures);
     return failures ? 1 : 0;

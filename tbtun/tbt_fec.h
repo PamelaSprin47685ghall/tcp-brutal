@@ -966,6 +966,67 @@ static inline bool tbt_fec_nack_unstarted_group(u64 total_pkts, u16 groups,
                                              block, group, total_known);
 }
 
+/* How many parity rows the sender emits for one block.
+ *
+ * An SC-LDPC block code does not repair a lost DATA share from one parity
+ * row: the erased share touches checks across five coupling blocks, and a
+ * short block's prefix of rows recovers a different share than a full set
+ * does. Trimming a short block to `win_len` rows would therefore leave real
+ * losses unrecoverable while still paying tens of rows per short write. The
+ * short block instead sends row 0 alone as a cut announcement (win_len and
+ * epoch) and leaves the few real shares to the NACK replay, which is a
+ * round trip on a share that was lost, not a megabyte of parity per block
+ * that was not. Every other codec keeps all m rows: there m is small and
+ * the rows themselves are the repair.
+ */
+static inline u16 tbt_fec_tx_parity_count(u16 win_len, u16 n, u16 m,
+                                          bool block_code)
+{
+    if (!m)
+        return 0;
+    if (block_code && win_len && win_len < n)
+        return 1;
+    return m;
+}
+
+/* How many DATA shares a NACK may name for one block.
+ *
+ * A present share j proves the block has at least j + 1 real shares: real
+ * shares are 0..real-1 with no hole, so a missing share below the highest
+ * present one is a real gap. A missing share above it may be zero padding
+ * the sender never wrote -- the tail of a short block -- and naming it costs
+ * a round trip that answers nothing (field: fec_replay_miss_never_stored
+ * 42,963 on the 1 GiB run). Until the parity's win_len states the cut, only
+ * the proven range is requested. `seen_hi` is the highest present DATA
+ * index plus one, 0 when none is present.
+ */
+static inline u16 tbt_fec_nack_data_limit(bool win_len_set, u16 real,
+                                          u16 seen_hi)
+{
+    if (win_len_set)
+        return real;
+    return seen_hi < real ? seen_hi : real;
+}
+
+/* How many parity rows a NACK may name for one block.
+ *
+ * Before win_len arrives only row 0 is named: it states the cut, and a short
+ * block stored no other row. After the cut is known, a short SC-LDPC block
+ * still has row 0 only, while a full block has all m. Every other codec
+ * keeps m, because there the rows are the repair.
+ */
+static inline u16 tbt_fec_nack_parity_limit(bool win_len_set, u16 real,
+                                            u16 n, u16 m, bool block_code)
+{
+    if (!m)
+        return 0;
+    if (!block_code)
+        return m;
+    if (!win_len_set)
+        return 1;
+    return real < n ? 1 : m;
+}
+
 /* Delivery length of share p in a block whose real share count is `real`.
  *
  * A share that arrived carries its own payload_len (dlen); a share recovered

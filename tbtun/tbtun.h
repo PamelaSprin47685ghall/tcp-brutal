@@ -1409,6 +1409,10 @@ struct tbt_session
      * those and a recovered share whose length is therefore unknown. */
     atomic64_t fec_short_tx;
     atomic64_t fec_short_unknown;
+    /* Parity shares a short SC-LDPC block did not send: the block sends
+     * row 0 alone as its cut announcement, and the NACK replay repairs the
+     * few real shares. Counted in shares, so a 128-row block saves 127. */
+    atomic64_t fec_short_parity_saved;
     /* Shares the receiver dropped before they reached a block: outside the
      * block window, or a DATA/PARITY share that arrived before the session key
      * was installed. Both leave the block to its parity, and a recovered share
@@ -1500,6 +1504,11 @@ struct tbt_session
     atomic64_t fec_nack_never_stored;
     atomic64_t fec_nack_absent_reply;
     atomic64_t fec_nack_req_invalid;
+    /* A received NACK named a DATA share at or past the block's cut: padding
+     * the sender never wrote. The cut row answered it and no replay miss was
+     * counted. A 0.3.1 receiver never sends these; a non-zero value names a
+     * peer whose NACK scan still names padding. */
+    atomic64_t fec_nack_pad_skip;
     /* Replay high-water: episodes where the queue crossed 75% of its cap,
      * and flush passes that were held to one replay record so new DATA got
      * a turn. */

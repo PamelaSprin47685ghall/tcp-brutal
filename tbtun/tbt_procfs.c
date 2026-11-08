@@ -1176,7 +1176,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "fec_replay_queue_high=%llu "
                               "fec_reset_hole=%llu "
                               "tx_stall_suppressed_fec=%llu "
-                              "fec_repair_last_ns=%llu\n",
+                              "fec_repair_last_ns=%llu "
+                              "fec_short_parity_saved=%llu "
+                              "fec_nack_pad_skip=%llu\n",
                            id,
                            tbt_stat_read(&s->fec_nack_tx),
                            tbt_stat_read(&s->fec_nack_rx),
@@ -1238,7 +1240,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_replay_queue_high),
                            tbt_stat_read(&s->fec_reset_hole),
                            tbt_stat_read(&s->tx_stall_suppressed_fec),
-                           READ_ONCE(s->fec_repair_last_ns));
+                           READ_ONCE(s->fec_repair_last_ns),
+                           tbt_stat_read(&s->fec_short_parity_saved),
+                           tbt_stat_read(&s->fec_nack_pad_skip));
                 /* Per-carrier data queue detail: index:records/bytes.
                  * Only non-empty queues are printed; a healthy session emits
                  * one short line, a congested one names the carriers. */
