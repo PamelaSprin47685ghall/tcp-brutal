@@ -140,7 +140,7 @@ static struct tbt_frame *tbt_frame_alloc(u16 len, gfp_t gfp)
     fr->dropped = false;
     fr->retx_src = TBT_RETX_NONE;
     fr->path = TBT_PATH_NONE;
-    fr->avoid_mask = 0;
+    bitmap_zero(fr->avoid_mask, TBT_MAX_CARRIERS_LIMIT);
     fr->ret = NULL;
     fr->st = NULL;
     fr->gen = 0;
@@ -1292,7 +1292,8 @@ retx_queued:
         fr->hdr = r->hdr;
         fr->hdr.body_len = r->len;
         fr->hdr.seq = r->seq;
-        fr->avoid_mask = r->path_mask;
+        bitmap_zero(fr->avoid_mask, TBT_MAX_CARRIERS_LIMIT);
+        tbt_mask_add_u16(fr->avoid_mask, r->path_mask);
         fr->ret = r;
         fr->st = st;
         fr->retx_src = srcs[i];
@@ -1509,7 +1510,8 @@ static void tbt_tx_inject_locked(struct tbt_session *sess, struct tbt_stream *st
         fr->hdr = r->hdr;
         fr->hdr.body_len = r->len;
         fr->hdr.seq = r->seq;
-        fr->avoid_mask = r->path_mask;
+        bitmap_zero(fr->avoid_mask, TBT_MAX_CARRIERS_LIMIT);
+        tbt_mask_add_u16(fr->avoid_mask, r->path_mask);
         fr->ret = r;
         fr->st = st;
         fr->retx_src = TBT_RETX_HOLE; /* a declared-hole filler */
@@ -2287,16 +2289,12 @@ static void tbt_path_stall_now_mask(struct tbt_session *sess,
     }
 }
 
-/* Fold the legacy 16-bit avoid/stalled masks into the 256-bit scheduler
- * mask. Those two are properties of a retained DATA copy, and only the
- * legacy ARQ creates one, so their width is correct. */
+/* Fold the legacy 16-bit stalled mask into the 256-bit scheduler mask. Only
+ * the legacy ARQ creates a retained DATA copy, so this width is correct; the
+ * frame's avoid mask is already 256 bits. */
 static void tbt_blocked_add_u16(unsigned long *mask, u16 bits)
 {
-    int i;
-
-    for (i = 0; i < TBT_ARQ_MAX_PATHS; i++)
-        if (bits & BIT(i))
-            set_bit(i, mask);
+    tbt_mask_add_u16(mask, bits);
 }
 
 static bool tbt_sched_better(struct tbt_session *sess, struct tbt_stream *st,
@@ -2364,7 +2362,8 @@ static void tbt_sched_rebuild(struct tbt_session *sess, struct tbt_stream *st,
 static struct tbt_carrier *tbt_sched_pick(struct tbt_session *sess,
                                           struct tbt_stream *st,
                                           const unsigned long *blocked,
-                                          u16 avoid, u16 stalled,
+                                          const unsigned long *avoid,
+                                          u16 stalled,
                                           bool need_open)
 {
     struct tbt_sched *s = st ? &st->sched : &sess->ctrl_sched;
@@ -2372,8 +2371,10 @@ static struct tbt_carrier *tbt_sched_pick(struct tbt_session *sess,
     u64 now = tbt_now_ns();
     int tries;
 
-    memcpy(mask, blocked, sizeof(mask));
-    tbt_blocked_add_u16(mask, avoid);
+    if (avoid)
+        bitmap_or(mask, blocked, avoid, TBT_MAX_CARRIERS_LIMIT);
+    else
+        memcpy(mask, blocked, sizeof(mask));
     tbt_blocked_add_u16(mask, stalled);
     /* The order may predate the stall (it is rebuilt at most every 10 ms);
      * skip the paused slots even then. */
@@ -2873,23 +2874,26 @@ int tbt_tx_pump(struct tbt_session *sess)
             }
             else
             {
-                u16 avoid = fr->avoid_mask;
+                DECLARE_BITMAP(avoid, TBT_MAX_CARRIERS_LIMIT);
                 u16 stalled = fr->retx_copy ? tbt_path_stalled_mask(sess) : 0;
                 /* DATA and stream-owned control use this stream's scheduler;
                  * FBK stays on the session-level control scheduler. */
                 struct tbt_stream *sst =
                     type == TBT_F_FBK ? NULL : fr->st;
 
+                bitmap_copy(avoid, fr->avoid_mask, TBT_MAX_CARRIERS_LIMIT);
                 /* No copy of a sequence may reuse a path another copy went
                  * out on, whichever copy is selected first. A retransmit has
                  * the same rule. If every path is used, fall back rather than
                  * stall, and count it (dup_same_path must stay 0 in the
                  * probe). */
                 if (type == TBT_F_DATA && fr->ret)
-                    avoid |= fr->ret->path_mask | fr->ret->reserve_mask;
+                    tbt_mask_add_u16(avoid, fr->ret->path_mask |
+                                                fr->ret->reserve_mask);
                 c = tbt_sched_pick(sess, sst, blocked, avoid, stalled,
                                    type == TBT_F_DATA);
-                if (!c && avoid && fr->dup_copy)
+                if (!c && !bitmap_empty(avoid, TBT_MAX_CARRIERS_LIMIT) &&
+                    fr->dup_copy)
                 {
                     /* No path free of the primary: a duplicate on the same
                      * path is worse than none. The harness asserts
@@ -2897,8 +2901,8 @@ int tbt_tx_pump(struct tbt_session *sess)
                     atomic64_inc(&sess->dup_suppressed);
                     goto drop;
                 }
-                if (!c && avoid)
-                    c = tbt_sched_pick(sess, sst, blocked, 0, stalled,
+                if (!c && !bitmap_empty(avoid, TBT_MAX_CARRIERS_LIMIT))
+                    c = tbt_sched_pick(sess, sst, blocked, NULL, stalled,
                                        type == TBT_F_DATA);
                 /* A stalled path is one whose snd_una has not moved for an
                  * RTO with bytes still unacked: the copy is better sent
@@ -2913,7 +2917,7 @@ int tbt_tx_pump(struct tbt_session *sess)
                     c = tbt_sched_pick(sess, sst, blocked, avoid, 0,
                                        type == TBT_F_DATA);
                 if (!c && stalled)
-                    c = tbt_sched_pick(sess, sst, blocked, 0, 0,
+                    c = tbt_sched_pick(sess, sst, blocked, NULL, 0,
                                        type == TBT_F_DATA);
                 if (!c)
                 {
@@ -3177,7 +3181,7 @@ ctl_fail:
                      * dropped the record): this is not a write. Release the
                      * path reservation, or the per-path high-water would later
                      * "prove" a frame that never reached the wire. */
-                    if (fr->ret)
+                    if (fr->ret && c->index < TBT_ARQ_MAX_PATHS)
                     {
                         spin_lock(&sess->tx_lock);
                         fr->ret->reserve_mask &= ~BIT(c->index);
@@ -3193,7 +3197,8 @@ ctl_fail:
                         continue;
                     }
                     fr->path = TBT_PATH_NONE;
-                    fr->avoid_mask = BIT(c->index);
+                    bitmap_zero(fr->avoid_mask, TBT_MAX_CARRIERS_LIMIT);
+                    set_bit(c->index, fr->avoid_mask);
                     sess->dbg_pump_hiwat++;
                     if (fr->retx_copy)
                     {
@@ -3211,7 +3216,7 @@ ctl_fail:
                     continue;
                 }
                 sess->dbg_pump_dead++;
-                if (fr->ret)
+                if (fr->ret && c->index < TBT_ARQ_MAX_PATHS)
                 {
                     spin_lock(&sess->tx_lock);
                     fr->ret->reserve_mask &= ~BIT(c->index);
@@ -3233,7 +3238,8 @@ ctl_fail:
                  * that carrier is closed; the receiver gets the whole frame
                  * from the new path. */
                 fr->path = TBT_PATH_NONE;
-                fr->avoid_mask = BIT(c->index);
+                bitmap_zero(fr->avoid_mask, TBT_MAX_CARRIERS_LIMIT);
+                set_bit(c->index, fr->avoid_mask);
                 tbt_tx_enqueue(sess, fr, false);
                 continue;
             }

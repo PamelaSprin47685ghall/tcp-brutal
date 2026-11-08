@@ -42,6 +42,8 @@ static void case_arq_bounds(void)
         ok(tbt_tx_path_in_range(idx, 16), "arq: 0..15 accepted");
 
     ok(!tbt_tx_path_in_range(16, 16), "arq: 16 refused at n_car=16");
+    ok(!tbt_tx_path_in_range(18, 256), "arq: 18 refused at n_car=256");
+    ok(!tbt_tx_path_in_range(64, 256), "arq: 64 refused at n_car=256");
     ok(!tbt_tx_path_in_range(255, 256), "arq: 255 refused at n_car=256");
     ok(tbt_tx_path_in_range(15, 256),
        "arq: 15 accepted even when the session has 256 slots");
@@ -129,11 +131,33 @@ static void case_blocked_mask(void)
        "blocked: index 255 is independent");
 }
 
+/* Fold a legacy 16-bit mask into the 256-bit avoid/blocked mask without
+ * aliasing or shifting past bit 15. */
+static void case_mask_fold(void)
+{
+    DECLARE_BITMAP(b, TBT_MAX_CARRIERS_LIMIT);
+
+    memset(b, 0, sizeof(b));
+    tbt_mask_add_u16(b, (u16)(1u | (1u << 15)));
+    ok(test_bit(0, b), "fold: bit 0");
+    ok(test_bit(15, b), "fold: bit 15");
+    ok(!test_bit(16, b) && !test_bit(64, b) && !test_bit(255, b),
+       "fold: no alias above the legacy width");
+
+    memset(b, 0, sizeof(b));
+    set_bit(64, b);
+    set_bit(255, b);
+    tbt_mask_add_u16(b, (u16)(1u << 15));
+    ok(test_bit(15, b) && test_bit(64, b) && test_bit(255, b),
+       "fold: high bits survive");
+}
+
 int main(void)
 {
     case_arq_bounds();
     case_retain_bounds();
     case_blocked_mask();
+    case_mask_fold();
 
     printf("test_tx_index: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

@@ -63,6 +63,19 @@ and moves independently of the module version.
   ports 1 and 65535 boundaries, lowest-first reuse after free, and the parse
   refusals (`0-0`, reversed, out of range, too small for the carrier count).
 
+### Fixed
+
+- FEC flow admission no longer self-deadlocks at init: the group
+  reservation and publish take `sess->lock` briefly, while the flow and
+  plane allocations run outside it. The SC-LDPC estimator's 32-entry arrays
+  are guarded by `rx->groups <= TBT_FEC_ADAPT_GROUPS`, closing the
+  bool-corrupting overrun. (e9e85bb)
+- TX path masks cover all 256 carriers: `struct tbt_frame.avoid_mask` is a
+  256-bit bitmap, the scheduler folds it without a u16 shift, and the retain
+  bookkeeping is guarded to its legacy 16 slots. The RX frame initializer
+  uses the same bitmap form. This removes the UBSAN index/shift reports seen
+  on a 256-carrier 0.4.0 deployment. (17b8b49)
+
 ### Changed
 
 - Writing `/ports` no longer replaces the bitmap. The absolute bitmap keeps
