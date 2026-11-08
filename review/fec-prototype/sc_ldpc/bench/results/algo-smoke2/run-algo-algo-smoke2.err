@@ -1,0 +1,7 @@
+tag=algo-smoke2 rounds=1 trials=200 codes=4 point=256:16:0.50:0.30
+== build algo_base (baseline decoder, candidate bench)
+== build algo_opt (345682d)
+== algo_fast (prebuilt by sclc-algo)
+SMOKE,algo_base,256,16,0.50,0.30,100,1.000000,0.031110,7.64,5.164,2.848,1.048576,167088
+SMOKE,algo_fast,256,16,0.50,0.30,100,1.000000,0.031110,7.64,5.518,2.255,1.048576,167136
+SMOKE,algo_opt,256,16,0.50,0.30,100,1.000000,0.031110,7.64,5.532,3.030,1.048576,167136

@@ -1,0 +1,30 @@
+tag=bs-ab-8c64ccf
+
+== t1b512 base vs cand@512 ==
+b256 L16 r0.25 p0.50: base 0.581 -> cand 4.006 MB/s x6.1726 [3.8124,14.7717], speedup 7.84x, rec 0.999512/1.000000, mismatch 0/0
+b256 L16 r0.30 p0.50: base 0.640 -> cand 4.062 MB/s x6.3469 [4.6190,7.6810], speedup 5.93x, rec 0.999512/1.000000, mismatch 0/0
+b256 L16 r0.40 p0.40: base 1.054 -> cand 5.766 MB/s x5.6144 [4.8076,7.1809], speedup 5.91x, rec 0.999023/1.000000, mismatch 0/0
+b256 L16 r0.50 p0.30: base 1.651 -> cand 8.470 MB/s x4.6796 [2.4202,9.7752], speedup 5.63x, rec 1.000000/1.000000, mismatch 0/0
+b256 L16 r0.60 p0.30: base 2.086 -> cand 5.086 MB/s x2.2992 [2.2584,2.8570], speedup 2.45x, rec 0.999512/1.000000, mismatch 0/0
+b256 L16 r0.70 p0.20: base 4.144 -> cand 7.824 MB/s x2.1004 [1.5739,3.1615], speedup 2.40x, rec 1.000000/1.000000, mismatch 0/0
+b512 L16 r0.50 p0.30: base 2.057 -> cand 8.267 MB/s x4.6239 [2.2718,10.3467], speedup 5.24x, rec 1.000000/1.000000, mismatch 0/0
+
+== t2b512 base vs cand@512 ==
+b256 L16 r0.25 p0.50: base 0.749 -> cand 4.003 MB/s x4.9420, speedup 8.10x
+b256 L16 r0.30 p0.50: base 0.851 -> cand 5.803 MB/s x7.7979, speedup 7.64x
+b256 L16 r0.40 p0.40: base 1.352 -> cand 5.910 MB/s x4.3713, speedup 6.68x
+b256 L16 r0.50 p0.30: base 2.593 -> cand 11.202 MB/s x4.1187, speedup 6.32x
+b256 L16 r0.60 p0.30: base 2.339 -> cand 5.695 MB/s x2.1548, speedup 2.57x
+b256 L16 r0.70 p0.20: base 6.023 -> cand 6.633 MB/s x1.1654, speedup 2.43x
+b512 L16 r0.50 p0.30: base 2.445 -> cand 10.584 MB/s x4.3130, speedup 4.87x
+
+== cand batch 512 vs 1024 ==
+b256 L16 r0.25 p0.50: 512 3.902 -> 1024 3.470 MB/s x0.8893 [0.7324,1.0264]
+b256 L16 r0.30 p0.50: 512 3.547 -> 1024 4.427 MB/s x1.3036 [1.2432,1.3197]
+b256 L16 r0.40 p0.40: 512 4.813 -> 1024 7.188 MB/s x1.0172 [0.9709,1.4935]
+b256 L16 r0.50 p0.30: 512 8.832 -> 1024 9.249 MB/s x0.9635 [0.9135,1.2971]
+b256 L16 r0.60 p0.30: 512 3.787 -> 1024 4.509 MB/s x1.1658 [0.8397,1.3601]
+b256 L16 r0.70 p0.20: 512 5.143 -> 1024 8.036 MB/s x1.5625 [1.0859,1.8322]
+b512 L16 r0.50 p0.30: 512 9.663 -> 1024 10.302 MB/s x1.0661 [1.0422,1.2038]
+
+files: /home/kunweiz/tbtun-worktrees/sclc-bench/review/fec-prototype/sc_ldpc/bench/results/bs-ab-8c64ccf/metrics-bs-bs-ab-8c64ccf.csv /home/kunweiz/tbtun-worktrees/sclc-bench/review/fec-prototype/sc_ldpc/bench/results/bs-ab-8c64ccf/ab-bs-bs-ab-8c64ccf.csv /home/kunweiz/tbtun-worktrees/sclc-bench/review/fec-prototype/sc_ldpc/bench/results/bs-ab-8c64ccf/batch-bs-bs-ab-8c64ccf.csv /home/kunweiz/tbtun-worktrees/sclc-bench/review/fec-prototype/sc_ldpc/bench/results/bs-ab-8c64ccf/correctness-bs-bs-ab-8c64ccf.csv

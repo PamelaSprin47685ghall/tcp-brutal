@@ -1,0 +1,10 @@
+tag=enc-ab-27765f1 app_payload=4.215 MB/s
+threads,rate,target,scalar_med,enc64_med,e2e_med,sse2_med,e2e_ratio,enc64_ratio,e2e_ge_target
+1,0.30,14.050,4.231,562.007,112.219,922.633,21.51,132.83,5
+1,0.40,10.537,4.740,822.565,140.582,1498.064,29.66,175.07,5
+1,0.50,8.430,9.287,1337.602,188.068,2088.017,17.87,134.26,5
+2,0.30,14.050,2.928,462.000,105.608,810.236,33.18,143.56,5
+2,0.40,10.537,5.317,728.779,121.972,1336.991,24.20,141.32,5
+2,0.50,8.430,5.713,1142.269,178.579,2011.314,30.91,177.96,5
+load1 median=0.88 min=0.26 max=1.18
+files: /home/kunweiz/tbtun-worktrees/sclc-bench/review/fec-prototype/sc_ldpc/bench/results/enc-ab-27765f1/enc-metrics-enc-ab-27765f1.csv /home/kunweiz/tbtun-worktrees/sclc-bench/review/fec-prototype/sc_ldpc/bench/results/enc-ab-27765f1/enc-ratios-enc-ab-27765f1.csv /home/kunweiz/tbtun-worktrees/sclc-bench/review/fec-prototype/sc_ldpc/bench/results/enc-ab-27765f1/enc-load-enc-ab-27765f1.csv

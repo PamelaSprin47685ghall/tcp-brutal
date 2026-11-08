@@ -1,0 +1,5 @@
+local: ./hnd0_ab.sh --tag smoke2 --rounds 2 --trials 200 --threads 1 --points 0.50:0.25
+remote build: sh /tmp/sclc-bench/batch/remote-build.sh
+remote run:   sh /tmp/sclc-bench/batch/remote-run.sh
+remote conf:  /tmp/sclc-bench/batch/run.conf
+summarize:    awk -v cand=ctl -f summarize.awk runs-smoke2.csv

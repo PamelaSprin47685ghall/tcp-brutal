@@ -1,0 +1,4 @@
+local: ./hnd0_enc_ab.sh --tag enc-ab-27765f1 --rounds 5 --threads 1 2
+remote: sh /tmp/sclc-bench/batch/remote-enc64.sh
+conf: /tmp/sclc-bench/batch/run-enc64.conf
+summarize: python3 summarize_enc.py runs-enc-enc-ab-27765f1.csv . enc-ab-27765f1

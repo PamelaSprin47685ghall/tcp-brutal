@@ -1,0 +1,2 @@
+tag=bs-smoke2 rounds=1 rounds_b2=1 rounds_2t=1
+trials=512 codes=4 batch=512 batch2=1024 points=256:16:0.50:0.30

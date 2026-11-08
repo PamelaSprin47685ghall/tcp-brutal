@@ -1,0 +1,2 @@
+tag,threads,block,L,rate,p,n,b512_dec,b1024_dec,ratio_1024_512,ratio_min,ratio_max,b512_speedup,b1024_speedup
+bs-smoke2,1,256,16,0.50,0.30,1,5.260,3.470,0.6597,0.6597,0.6597,5.43,2.37

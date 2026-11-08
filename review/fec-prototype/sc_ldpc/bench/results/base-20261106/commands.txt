@@ -1,0 +1,5 @@
+local: ./hnd0_ab.sh --tag base-20261106 --rounds 7 --trials 2000 --threads 1 2
+remote build: sh /tmp/sclc-bench/batch/remote-build.sh
+remote run:   sh /tmp/sclc-bench/batch/remote-run.sh
+remote conf:  /tmp/sclc-bench/batch/run.conf
+summarize:    awk -v cand=ctl -f summarize.awk runs-base-20261106.csv

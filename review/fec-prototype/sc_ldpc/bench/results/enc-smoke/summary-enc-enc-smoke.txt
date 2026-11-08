@@ -1,0 +1,7 @@
+tag=enc-smoke app_payload=4.215 MB/s
+threads,rate,target,scalar_med,enc64_med,e2e_med,sse2_med,e2e_ratio,enc64_ratio,e2e_ge_target
+1,0.30,14.050,5.196,464.198,105.146,824.491,20.24,89.34,1
+1,0.40,10.537,8.731,1103.556,172.207,1150.726,19.72,126.40,1
+1,0.50,8.430,7.059,1221.056,216.732,2386.264,30.70,172.98,1
+load1 median=0.42 min=0.37 max=0.47
+files: /home/kunweiz/tbtun-worktrees/sclc-bench/review/fec-prototype/sc_ldpc/bench/results/enc-smoke/enc-metrics-enc-smoke.csv /home/kunweiz/tbtun-worktrees/sclc-bench/review/fec-prototype/sc_ldpc/bench/results/enc-smoke/enc-ratios-enc-smoke.csv /home/kunweiz/tbtun-worktrees/sclc-bench/review/fec-prototype/sc_ldpc/bench/results/enc-smoke/enc-load-enc-smoke.csv

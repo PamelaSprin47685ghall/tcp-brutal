@@ -1,0 +1,18 @@
+tag=enc-ab-27765f1
+date_utc=2026-11-06T08:32:43Z
+host=root@45.11.1.62
+local_args=--tag enc-ab-27765f1 --rounds 5 --threads 1 2
+rounds=5 rates=0.50 0.40 0.30 seconds=0.20 runs=5 threads=1 2
+point=block256 L16 seed_base=1
+enc_src=/home/kunweiz/tbtun-worktrees/sclc-encode/review/fec-prototype/sc_ldpc
+## enc commit=27765f1dc3407695c84e0e272ab1e86a5bd7b052
+## enc dirty=0 entries
+enc e224925ec7c599e0547587bd3b6607d5de2df83e2e9c65a59cffd9c44eb55c2a  sc_ldpc.c
+enc 7ff4ef96944274a021eace6a26f02ecc906bb0f76eba13344c471be9bffdc5f0  sc_ldpc.h
+enc 989f96a115c4c8097dc4c6804eb7ee536b0b6afbc524d0ed57f051add561e832  sc_enc64.c
+enc dc5c9131f5feac73076bca86f2b22cafdc4da562a39ca06430e42765fa2dfdac  sc_enc64.h
+enc 6eb0fa5d14fb1e2e30fa20f6d947f0f3a96405460a44c55e8cd350f1f54b8725  sc_enc64_internal.h
+enc d3f5f11ad29f5fce034156eee4e2d41e0eeb767bdb0094ab128a12fd6d04ef64  sc_enc64_pack.c
+enc 525a79b24a594b819d97354b7d791f3695aabd946e108664f2543a27fa6ab04a  sc_enc64_sse2.c
+enc 44610fb042895d80918cbb8b6425648084c74bd03744702f9a8d3f9a5990ac04  sc_enc64_bench.c
+enc 9f7df04ec0d198bccfe7bb68ab8145cc5ee775c303afd82b07e9a684872b2e81  sc_enc64_test.c

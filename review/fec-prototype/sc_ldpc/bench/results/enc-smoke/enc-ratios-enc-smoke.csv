@@ -1,0 +1,4 @@
+tag,threads,rate,n,target_wire,scalar_med,e2e_med,e2e_ratio,e2e_ratio_min,e2e_ratio_max,enc64_ratio,sse2_ratio,e2e_ge_target
+enc-smoke,1,0.30,1,14.050,5.196,105.146,20.24,20.24,20.24,89.34,158.68,1
+enc-smoke,1,0.40,1,10.537,8.731,172.207,19.72,19.72,19.72,126.40,131.80,1
+enc-smoke,1,0.50,1,8.430,7.059,216.732,30.70,30.70,30.70,172.98,338.05,1

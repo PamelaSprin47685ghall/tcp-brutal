@@ -1,0 +1,12 @@
+tag=bs-smoke2
+
+== t1b512 base vs cand@512 ==
+b256 L16 r0.50 p0.30: base 0.777 -> cand 5.340 MB/s x6.8726 [6.8726,6.8726], speedup 6.11x, rec 1.000000/1.000000, mismatch 0/0
+
+== t2b512 base vs cand@512 ==
+b256 L16 r0.50 p0.30: base 1.026 -> cand 3.916 MB/s x3.8168, speedup 3.70x
+
+== cand batch 512 vs 1024 ==
+b256 L16 r0.50 p0.30: 512 5.260 -> 1024 3.470 MB/s x0.6597 [0.6597,0.6597]
+
+files: /home/kunweiz/tbtun-worktrees/sclc-bench/review/fec-prototype/sc_ldpc/bench/results/bs-smoke2/metrics-bs-bs-smoke2.csv /home/kunweiz/tbtun-worktrees/sclc-bench/review/fec-prototype/sc_ldpc/bench/results/bs-smoke2/ab-bs-bs-smoke2.csv /home/kunweiz/tbtun-worktrees/sclc-bench/review/fec-prototype/sc_ldpc/bench/results/bs-smoke2/batch-bs-bs-smoke2.csv /home/kunweiz/tbtun-worktrees/sclc-bench/review/fec-prototype/sc_ldpc/bench/results/bs-smoke2/correctness-bs-bs-smoke2.csv

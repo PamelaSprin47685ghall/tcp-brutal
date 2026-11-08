@@ -1,0 +1,5 @@
+tag=enc-ab-27765f1 rounds=5 rates=0.50 0.40 0.30 seconds=0.20 runs=5
+BIN,enc64_test,21821977bfe6c5451990b4082663f938455e41b3a2067a08dc5c4bfb8fed713e,42208,ymm_zmm_refs=0,vex_xmm_refs=0
+BIN,enc64_bench,26749947d43d08bee7348048338cf2a149a98eebd68ea16f824beb7f2a8f7fef,47008,ymm_zmm_refs=0,vex_xmm_refs=0
+summary: codewords_exact=3840/3840 configs=12 patterns=5 failures=0 sse2_configs=12/12
+RESULT: PASS
