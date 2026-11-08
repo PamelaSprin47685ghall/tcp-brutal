@@ -2123,7 +2123,6 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
 void tbt_stream_put(struct tbt_stream *st);
 void tbt_stream_detach_from_session(struct tbt_stream *st);
 void tbt_stream_maybe_detach(struct tbt_stream *st);
-bool tbt_session_fec_stream_live(const struct tbt_session *sess);
 void tbt_stream_kill(struct tbt_stream *st, u8 reason);
 void tbt_stream_kill_by_sid(struct tbt_session *sess, u64 sid, u8 reason);
 /* 0.2.0 session lifetime (review/s2-merged-design.md §1.3/§5). tbt_session_get()
