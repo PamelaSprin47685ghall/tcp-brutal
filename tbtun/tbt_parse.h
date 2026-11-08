@@ -69,6 +69,9 @@ struct tbt_cfg
     u16 m;
     u8 dup;
     u32 keepalive_ms;
+    /* Legacy line keys: parsed, rendered and round-tripped, but the carrier
+     * allocator reads the global /proc/net/tbtun/ports block. A per-tunnel
+     * portblock has no effect (the parser warns once when it is non-zero). */
     u16 portblock_lo;
     u16 portblock_hi;
 

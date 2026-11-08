@@ -2650,18 +2650,11 @@ static int tbt_fec_blk_decode(struct tbt_session *sess, u16 group,
     if (rc < 0)
         return -EAGAIN;
     /* A block codec returns how much it recovered, not whether the block is
-     * whole: the binary decoder returns the recovered count (partial), the
-     * GF(16) decoder the number of complete shares (0..n). The commit path
-     * copies every missing slot from rx->rec, so a partial decode reported as
-     * success would hand the application stale bytes. Ask the codec which
-     * shares are complete and refuse the block until every real one is. */
-    if (block_code)
-    {
-        for (i = 0; i < real; i++)
-            if (!rx->dpresent_snap[i] &&
-                !tbt_fec_grouped_is_known(rx->codec, group, i))
-                return -EAGAIN;
-    }
+     * whole. The commit path checks is_known() per share, so a partial
+     * recovery is committed and the block stays open for the rest. Refusing
+     * the whole block here threw the parity recovery away and forced a NACK
+     * for every share the codec had already restored: the 0.3.0 first-connect
+     * repair took 102 s on one block because of it. */
     return 0;
 }
 
@@ -4113,6 +4106,7 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
     struct tbt_fec_rx *rx = sess->fec_rx;
     struct tbt_fec_blk *b = &rx->blk[(size_t)group * rx->slots + slot];
     u16 real = 0, i, k;
+    u16 before = 0;
     bool claimed = false;
     u64 now = ktime_get_ns();
     int rc;
@@ -4139,6 +4133,7 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
             for (i = real; i < rx->n; i++)
                 rx->dpresent_snap[i] = 1; /* padding is known zero */
             b->decoding = true;
+            before = b->ndata;
             claimed = true;
         }
     }
@@ -4183,7 +4178,7 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
          * the block decodable on the next pass. */
         b->ready = b->ndata >= real;
     }
-    if (rc == 0)
+    if (b->ready)
     {
         b->decode_tries = 0;
         b->decode_next_ns = 0;
@@ -4191,9 +4186,14 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess, u16 group,
     else
     {
         /* Exponential backoff, 20 ms doubling to 200 ms. A NACK repair that
-         * arrives inside the window is decoded on the next pass after it. */
-        u64 wait = 20000000ULL << (b->decode_tries < 4 ? b->decode_tries : 4);
+         * arrives inside the window is decoded on the next pass after it. A
+         * decode that committed new shares restarts at the short delay: it
+         * made progress, and the next pass may finish the block. */
+        u64 wait;
 
+        if (rc == 0 && b->ndata > before)
+            b->decode_tries = 0;
+        wait = 20000000ULL << (b->decode_tries < 4 ? b->decode_tries : 4);
         if (wait > 200000000ULL)
             wait = 200000000ULL;
         if (b->decode_tries < 0xff)
@@ -4708,11 +4708,11 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     u8 *rec, *old_rec;
     u32 per, slots, total, old_total;
     u16 shares = (u16)(cfg->n + cfg->m);
-    u16 local_L;
     bool same, fresh, block_code = false;
 
     if (!rx)
         return -EINVAL;
+    memset(&sclc, 0, sizeof(sclc));
     spin_lock_bh(&rx->lock);
     same = rx->n == cfg->n && rx->m == cfg->m &&
            rx->groups == cfg->groups && rx->shape.w == cfg->w &&
@@ -4728,13 +4728,13 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
         return -EBUSY;
     }
 
-    local_L = sess->tunnel ? sess->tunnel->cfg.L : 0;
-    if ((cfg->d == 0 && cfg->k >= 100 && cfg->k <= 1000) || cfg->k > cfg->w)
+    /* Every graph parameter comes from the announced shape, including L:
+     * this side's own L describes its transmit codec, and the two directions
+     * legitimately differ (downlink L 8, uplink L 16). Using the local L here
+     * built the peer's codec with the wrong coupling length, so every share
+     * was placed by a graph the sender never encoded with. */
+    if (tbt_fec_sclc_shape_of_cfg(cfg, (u16)(cfg->groups * shares), &sclc) == 0)
     {
-        if (tbt_fec_sclc_shape_of(cfg->n, cfg->m,
-                                  (u16)(cfg->groups * shares), cfg->w,
-                                  local_L, &sclc))
-            return -EINVAL;
         codec = tbt_fec_sclc_new(&sclc, TBT_FEC_S, cfg->seed);
         block_code = true;
     }
@@ -4815,9 +4815,17 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     tbt_fec_grouped_free(old_codec);
     if (rx->est)
         tbt_fec_est_init(rx->est, shares);
-    TBT_DIAG("fec rx init shape tunnel=%llu n=%u m=%u groups=%u slots=%u mode=%u block=%d",
-             (unsigned long long)sess->tunnel->cfg.id, cfg->n, cfg->m,
-             cfg->groups, slots, block_code ? 3 : 1, block_code);
+    pr_info_ratelimited("tbtun: tunnel %llu: fec rx shape from peer: n=%u m=%u groups=%u slots=%u block=%u L=%u rate=%u\n",
+                        (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id
+                                                          : 0),
+                        cfg->n, cfg->m, cfg->groups, slots,
+                        block_code ? sclc.block : 0,
+                        block_code ? sclc.L : 0,
+                        block_code
+                            ? (sclc.variant == TBT_FEC_SCLC_DOWN
+                                   ? sclc.rate_ppm
+                                   : sclc.rate_256)
+                            : 0);
     return 0;
 }
 
@@ -5314,8 +5322,13 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         if (!tbt_fec_bitmap_clear_from(n.group_mask, tg) ||
             !tbt_fec_bitmap_clear_from(n.share_mask, shares))
         {
+            /* A NACK naming a share outside the shape in force is a record
+             * from before the initial-shape install or from the other
+             * direction's geometry. Drop it: returning -EPROTO here counted
+             * against the carrier, and a join-time burst of stale NACKs is
+             * not a reason to kill a carrier. */
             atomic64_inc(&sess->fec_nack_bad);
-            return -EPROTO;
+            return 0;
         }
         atomic64_inc(&sess->fec_nack_rx);
         atomic64_add(tbt_fec_bitmap_count(n.share_mask),
@@ -5919,8 +5932,14 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         b->ready = true;
         rx->work_pending = true; /* deliver_ready() has a block to hand over */
     }
-    else if (b->nparity >=
-             (u16)(tbt_fec_blk_real_len(rx, group, b) - b->ndata))
+    else if (tbt_fec_grouped_mode(rx->codec) == 3
+                 ? b->nparity > 0
+                 : b->nparity >=
+                       (u16)(tbt_fec_blk_real_len(rx, group, b) - b->ndata))
+        /* RLNC needs one row per missing share before a decode can succeed;
+         * a block codec needs any parity and recovers what it can, so one
+         * arriving parity share must wake the decoder. Waiting for the RLNC
+         * count left SC-LDPC blocks asleep until the next unrelated pass. */
         rx->work_pending = true;
     wake = rx->work_pending;
     spin_unlock_bh(&rx->lock);

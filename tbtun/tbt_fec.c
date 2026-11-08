@@ -1789,6 +1789,28 @@ const struct tbt_fec_ops tbt_fec_ops_rlnc = {
  * can never claim more parity capacity than its graph produces.
  * ------------------------------------------------------------------ */
 
+int tbt_fec_sclc_shape_of_cfg(const struct tbt_fec_cfg *cfg, u16 carriers,
+                              struct tbt_fec_sclc_shape *out)
+{
+    if (!cfg || !out)
+        return -EINVAL;
+    if (cfg->d == 0 && cfg->k >= 100 && cfg->k <= 1000)
+    {
+        /* Binary: w is the codeword block, k the rate. The binary codec's
+         * graph has no coupling-length parameter to carry. */
+        return tbt_fec_sclc_shape_of(cfg->n, cfg->m, carriers, cfg->w, 0,
+                                     out);
+    }
+    if (cfg->k > cfg->w)
+    {
+        /* GF(16): k is the codeword block, w the coupling length, d the
+         * rate in 1/256. */
+        return tbt_fec_sclc_shape_of(cfg->n, cfg->m, carriers, cfg->k,
+                                     cfg->w, out);
+    }
+    return -EINVAL;
+}
+
 int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
                           struct tbt_fec_sclc_shape *out)
 {

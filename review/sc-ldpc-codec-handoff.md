@@ -34,15 +34,19 @@ per-direction INIT 已实现，adaptive 在 mode=3 强制 off。
 
 ### 2.1 接线后新增的残余风险
 
-- **L 不在 wire**：FEC_CFG 没有 codec/L 字段（0x1006 reserved 不动）。
-  上行 L 由本地 session 配置提供；两端 L 不同会静默解错，无检测。
-  0.3.1 若把 L 放进 CFG，需要新 conv 或复用 reserved。
+- **L 必须来自对端 INIT，不能用本地 L**：0x1006 的 FEC_CFG 复用字段携带
+  图参数——下行 `w=block, k=rate_ppm, d=0`；上行 `k=block, w=L,
+  d=rate/256`。首连失败的直接原因就是接收端用本地 L=8 安装 near 的
+  上行 INIT（应为 L=16），图错、share 全解不出。`tbt_fec_sclc_shape_of_cfg()`
+  现在只从 INIT 取参数，本地 L 只用于本端 TX。
 - **短块放大**：2 ms 静默关闭一个块时，SC-LDPC 仍发满 m 个 parity
   （下行 128 条 ≈ 1 MiB，上行 24 条）。码率 0.5 只在满块成立。
 - **NACK 修复粒度**：下行 256-share 块在 p=0.5 时一次 NACK 最多 64 share，
   修复需要多轮；30 s stall 预算可能先到。
 - **解码成本**：下行一次块解码 128 batch；本机 109–119 MB/s，HND0
-  8–11 MB/s。失败后退避 20→200 ms（`fec_decode_backoff`）。
+  8–11 MB/s。失败后退避 20→200 ms（`fec_decode_backoff`）。块码的部分
+  恢复现在会提交：早先"整块全恢复才提交"把 parity 已恢复的 share 丢掉，
+  一个块的重修实测 102 s。
 - **INIT epoch=1**：0.3.0 adaptive off，无冲突；0.3.1 的切换 epoch 必须
   从 2 起，或把 INIT 与切换 epoch 分开。
 

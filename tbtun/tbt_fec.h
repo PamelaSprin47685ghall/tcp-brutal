@@ -1231,6 +1231,18 @@ struct tbt_fec_sclc_shape
 int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
                           struct tbt_fec_sclc_shape *out);
 
+/* Resolve the shape a peer announced in FEC_CFG. The two variants reuse the
+ * fields differently, and the receiver must take every graph parameter from
+ * the wire, never from its own configuration: the peer's transmit L is not
+ * this side's L (a downlink L=8 peer receives an uplink L=16 block).
+ *
+ *   binary  d == 0, k in 100..1000:  block = w, rate = k, L unused
+ *   GF(16)  k > w:                   block = k, L = w, rate_256 = d
+ *
+ * Returns 0, or -EINVAL when the body is not an SC-LDPC shape. */
+int tbt_fec_sclc_shape_of_cfg(const struct tbt_fec_cfg *cfg, u16 carriers,
+                              struct tbt_fec_sclc_shape *out);
+
 /* Build one grouped container for a resolved shape. The downlink variant is
  * a single binary context; the uplink variant is one GF(16) context per
  * group. Returns NULL when the shape or the codec rejects the parameters. */

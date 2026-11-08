@@ -589,6 +589,15 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         {
             if (tbt_parse_range(val, &cfg->portblock_lo, &cfg->portblock_hi, e))
                 return TBT_PARSE_EINVAL;
+            /* Parsed and rendered for line compatibility only. Carrier source
+             * ports come from the global /proc/net/tbtun/ports block; a
+             * per-tunnel portblock does not move them. Say so once instead of
+             * letting a run believe it configured a port plan nobody used. */
+#ifdef __KERNEL__
+            if (cfg->portblock_lo || cfg->portblock_hi)
+                pr_warn_ratelimited("tbtun: tunnel %llu: portblock= is parsed but unused; carrier source ports come from /proc/net/tbtun/ports\n",
+                                    (unsigned long long)cfg->id);
+#endif
         }
         else if (!strcmp(key, "srcaddrs"))
         {
