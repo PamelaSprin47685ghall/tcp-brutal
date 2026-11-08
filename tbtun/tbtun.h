@@ -747,10 +747,21 @@ struct tbt_fec_rx
      * session starts at stream byte 0 again. */
     u64 stream_sid;
     u64 stream_base;
-    /* A new stream was bound but its first FEC record has not arrived: the
-     * delivery walk and NACK scan wait, and the first record sets the new
-     * next_super/next_deliver base. */
-    bool stream_await;
+    /* A reset dropped the old stream's cursors and the new stream's first FEC
+     * record has not arrived: the delivery walk and NACK scan wait, and that
+     * record rebases the window. Block ids come from the session's packet
+     * sequence, which the old stream pushed ahead, so the old cursor names no
+     * block the new stream will send and must never be inherited. */
+    bool rebase_pending;
+    /* The stream whose blocks the reorder tree holds, and the block the
+     * window was last rebased to (0 while the session's first stream holds
+     * the tree, whose base is packet 0). A record of the next stream can
+     * arrive before the barrier runs (the session installs far_sid first);
+     * keeping this pair across the reset lets the first rebase start at that
+     * block, so the shares the reset wiped are NACKed instead of silently
+     * skipped. */
+    u64 rebase_sid;
+    u64 min_block_seen;
     /* The old stream id installed by tbt_session_fec_rx_barrier(). While
      * far_sid still names it, every DATA/PARITY record is stale. */
     u64 barrier_sid;

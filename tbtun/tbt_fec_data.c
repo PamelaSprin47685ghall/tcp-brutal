@@ -2283,21 +2283,50 @@ static struct tbt_stream *tbt_fec_rx_stream(struct tbt_session *sess,
     return st;
 }
 
+/* Would tbt_fec_rx_stream() keep the old stream? It does only while that
+ * stream's final super-block is known and still undelivered. A record of the
+ * next stream must not rebase the window under such a stream: its blocks would
+ * be handed to the old stream's socket. The caller holds rx->lock. */
+static bool tbt_fec_rx_stream_drained_locked(const struct tbt_fec_rx *rx)
+{
+    if (!rx->total_known || !rx->total_pkts)
+        return true;
+    return rx->next_super >
+           tbt_fec_final_block_of_total(rx->total_pkts, rx->groups, rx->n);
+}
+
 /* tbt_session_fec_rx_barrier() calls this after w_fec_rx is quiesced and
  * before a new far_sid is installed. `sid` is the old stream; the old
  * stream's undelivered blocks and every delivery cursor are dropped so its
  * bytes cannot reach the new stream. The new stream starts at byte 0 and the
- * first FEC record after this call sets next_super/next_deliver. */
+ * first FEC record after this call rebases next_super/next_deliver.
+ *
+ * No cursor survives: a block id comes from the session's packet sequence,
+ * which the old stream pushed ahead, so the old highest block + 1 names no
+ * block the new stream will ever send. Setting next_super there made every
+ * first-flight record of the new stream land beyond the window
+ * (fec_drop_window=1271) and the peer stopped reading the new target. */
 static void tbt_fec_rx_stream_reset(struct tbt_session *sess, u64 sid)
 {
     struct tbt_fec_rx *rx = sess->fec_rx;
-    u64 old_high;
+    u64 keep_sid, keep_min;
     u32 total, i;
 
     if (!rx)
         return;
     spin_lock_bh(&rx->lock);
-    old_high = rx->highest_block;
+    /* A record of the stream that follows can arrive before this barrier runs
+     * (tbt_session_bind_sid() installs far_sid first). Its blocks were placed
+     * and are about to be wiped; keep the sid and the smallest block so the
+     * first rebase after the reset starts there and the NACK scan asks for the
+     * shares the wipe removed. */
+    keep_sid = rx->rebase_sid;
+    keep_min = rx->min_block_seen;
+    if (!keep_sid || keep_sid == sid)
+    {
+        keep_sid = 0;
+        keep_min = 0;
+    }
     rx->stream_sid = 0;
     rx->stream_base = 0;
     rx->deliver_bytes = 0;
@@ -2310,13 +2339,15 @@ static void tbt_fec_rx_stream_reset(struct tbt_session *sess, u64 sid)
     rx->deliver_g = 0;
     rx->progress_super = 0;
     rx->progress_ns = 0;
-    /* Skip the old stream's block range. The first new record may raise this
-     * to its own block; a lower old record is dropped by the await below. */
-    rx->next_super = old_high + 1;
+    /* The old stream's block range means nothing to the new one: start the
+     * window empty and let the new stream's first record rebase it. */
+    rx->next_super = 0;
     rx->next_deliver = 0;
     rx->ack_deliver = 0;
-    rx->highest_block = old_high;
-    rx->stream_await = true;
+    rx->highest_block = 0;
+    rx->rebase_pending = true;
+    rx->rebase_sid = keep_sid;
+    rx->min_block_seen = keep_min;
     rx->barrier_sid = sid;
     rx->next_fin_sid = 0;
     rx->next_fin_end = 0;
@@ -2454,9 +2485,9 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess)
     const char *blocked_why = "?";
 
     /* tbt_session_fec_rx_barrier() reset the cursors; the first record of the
-     * new stream sets next_super/next_deliver. Delivering before it would
-     * start at the old stream's frontier. */
-    if (READ_ONCE(rx->stream_await))
+     * new stream rebases next_super/next_deliver. Delivering before it would
+     * start at a block the new stream never sends. */
+    if (READ_ONCE(rx->rebase_pending))
         return 0;
     if (READ_ONCE(rx->total_known) && !READ_ONCE(rx->total_pkts) &&
         !rx->deliver_partial)
@@ -2956,7 +2987,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess)
     if (!rx || !rx->nack || READ_ONCE(rx->stopping) ||
         READ_ONCE(sess->closing))
         return;
-    if (READ_ONCE(rx->stream_await))
+    if (READ_ONCE(rx->rebase_pending))
         return;
     /* The shape must support a ring. Both ends derive the same effective K,
      * so the receiver NACKs exactly the blocks the sender can replay; the
@@ -3528,7 +3559,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
     struct tbt_fec_blk *b;
     const u8 *payload;
     u16 shares, group, share, slot;
-    bool wake = false;
+    bool wake = false, rebase;
 
     if (!rx || len < TBT_FEC_HDR_LEN)
         return -EPROTO;
@@ -4079,35 +4110,72 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         spin_unlock_bh(&rx->lock);
         return -ESHUTDOWN;
     }
-    if (READ_ONCE(rx->stream_await))
+    /* The reorder window belongs to one stream. A reset leaves it empty
+     * (rebase_pending), and a record of another sid may only move it once the
+     * delivery walk has drained the stream it holds; the first such record
+     * rebases it to its own block. A lower block before the stream's first
+     * delivery lowers the window to itself, so an out-of-order first record
+     * costs a NACK instead of skipping the blocks below it.
+     *
+     * The session's first stream is not rebased: it starts at packet 0, so its
+     * window is already at the base and a first block whose records were lost
+     * must be NACKed, not skipped. `rebase_sid` is bound here so a later
+     * switch can tell whose blocks the tree holds. */
+    rebase = READ_ONCE(rx->rebase_pending) ||
+             (rx->rebase_sid && h.sid != rx->rebase_sid &&
+              tbt_fec_rx_stream_drained_locked(rx));
+    if (!rx->rebase_sid)
+        rx->rebase_sid = h.sid;
+    switch (tbt_fec_rx_window_step(rx->next_super, h.block_id, rx->slots,
+                                   rebase,
+                                   rx->deliver_bytes != 0 ||
+                                       rx->deliver_partial))
     {
-        if (h.block_id < rx->next_super)
-        {
-            /* An old in-flight record below the barrier's block fence. */
-            atomic64_inc(&sess->fec_late_share);
-            spin_unlock_bh(&rx->lock);
-            return 0;
-        }
-        rx->next_super = h.block_id;
-        rx->highest_block = h.block_id;
-        rx->next_deliver = h.block_id * (u64)rx->groups * rx->n;
+    case TBT_FEC_RX_WIN_REBASE:
+    {
+        /* The first rebase uses the smallest block seen for this sid: a
+         * record that arrived before the reset kept its minimum, so the
+         * shares the reset wiped stay inside the window and the NACK scan
+         * asks for them. */
+        u64 base = h.block_id;
+
+        if (rx->rebase_sid == h.sid && rx->min_block_seen &&
+            rx->min_block_seen < base)
+            base = rx->min_block_seen;
+        if (debug)
+            pr_info("tbtun: fec rx rebase sid=%llu block=%llu base=%llu next=%llu highest=%llu\n",
+                    h.sid, h.block_id, base, rx->next_super,
+                    rx->highest_block);
+        rx->rebase_sid = h.sid;
+        rx->min_block_seen = base;
+        rx->next_super = base;
+        if (base > rx->highest_block)
+            rx->highest_block = base;
+        rx->next_deliver = base * (u64)rx->groups * rx->n;
         if (!rx->stream_pkt_base)
             rx->stream_pkt_base = rx->next_deliver;
         rx->progress_super = 0;
         rx->progress_ns = 0;
-        rx->stream_await = false;
+        rx->rebase_pending = false;
+        break;
     }
-    if (h.block_id < rx->next_super)
-    {
+    case TBT_FEC_RX_WIN_LATE:
         atomic64_inc(&sess->fec_late_share);
         spin_unlock_bh(&rx->lock);
         return 0; /* already delivered */
+    case TBT_FEC_RX_WIN_FAR:
+        atomic64_inc(&sess->fec_drop_window);
+        spin_unlock_bh(&rx->lock);
+        return 0; /* too far ahead to buffer */
+    case TBT_FEC_RX_WIN_PLACE:
+        break;
     }
     if (h.block_id >= rx->next_super + rx->slots)
     {
         atomic64_inc(&sess->fec_drop_window);
         spin_unlock_bh(&rx->lock);
-        return 0; /* too far ahead to buffer */
+        return 0; /* the kept minimum from before the reset left this record
+                   * beyond the window; the NACK scan recovers the rest */
     }
     slot = (u16)((size_t)group * rx->slots + (h.block_id % rx->slots));
     b = &rx->blk[slot];
@@ -4344,16 +4412,23 @@ void tbt_fec_rx_fin(struct tbt_session *sess, struct tbt_stream *st,
         rx->stream_base = rx->deliver_bytes;
         rx->stream_pkt_base = pkt_base;
     }
-    if (READ_ONCE(rx->stream_await))
+    if (READ_ONCE(rx->rebase_pending))
     {
-        rx->next_super = pkt_base / span;
+        /* The FIN overtook the stream's first DATA record. Its absolute
+         * packet base names the first super-block, the same base that record
+         * would have set. */
+        u64 base = pkt_base / span;
+
+        rx->rebase_sid = st->sid;
+        rx->min_block_seen = base;
+        rx->next_super = base;
         rx->next_deliver = pkt_base;
         if (!rx->stream_pkt_base)
             rx->stream_pkt_base = pkt_base;
-        rx->highest_block = rx->next_super;
+        rx->highest_block = base;
         rx->progress_super = 0;
         rx->progress_ns = 0;
-        rx->stream_await = false;
+        rx->rebase_pending = false;
     }
     if (!rx->total_known)
     {

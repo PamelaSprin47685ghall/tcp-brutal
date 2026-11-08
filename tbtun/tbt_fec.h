@@ -144,6 +144,44 @@ static inline bool tbt_fec_sid_accept(u64 cur, u64 barrier, u64 rec)
     return rec == cur;
 }
 
+/* Where a DATA/PARITY record's block sits against the receiver's reorder
+ * window. The window belongs to one stream, and the block id comes from the
+ * session's packet sequence: a stream switch leaves the old cursor naming no
+ * block the new stream will send. Resetting `next_super` to the old highest
+ * block + 1 did exactly that, and every first-flight record of the new stream
+ * landed beyond `next_super + slots` (field: fec_drop_window=1271 after an
+ * aborted connection was replaced; the peer then waited on credit forever).
+ *
+ * `rebase` says this record belongs to a stream the window was not based on
+ * (a reset is pending, or the record's sid is not the window's stream and the
+ * delivery walk has drained the old one). A rebase moves the window to the
+ * record's block. Before the stream's first delivery (`delivered` false: no
+ * byte handed over and no saved partial cursor) a lower block lowers the
+ * window to itself instead of being called late: the first record to arrive
+ * need not be the stream's lowest block, and blocks the reset wiped are
+ * repaired by NACK once they are inside the window. After the first delivery
+ * the cursor never moves back; a lower block is late. */
+enum tbt_fec_rx_win
+{
+    TBT_FEC_RX_WIN_REBASE = 0, /* move the window to this block, then place */
+    TBT_FEC_RX_WIN_PLACE,      /* inside [next_super, next_super + slots) */
+    TBT_FEC_RX_WIN_LATE,       /* below the window: already delivered */
+    TBT_FEC_RX_WIN_FAR,        /* beyond the window: cannot buffer */
+};
+
+static inline enum tbt_fec_rx_win
+tbt_fec_rx_window_step(u64 next_super, u64 block_id, u16 slots, bool rebase,
+                       bool delivered)
+{
+    if (rebase)
+        return TBT_FEC_RX_WIN_REBASE;
+    if (block_id < next_super)
+        return delivered ? TBT_FEC_RX_WIN_LATE : TBT_FEC_RX_WIN_REBASE;
+    if (block_id >= next_super + slots)
+        return TBT_FEC_RX_WIN_FAR;
+    return TBT_FEC_RX_WIN_PLACE;
+}
+
 /* ------------------------------------------------------------------ *
  * Control bodies (payload after the 48-byte header)
  * ------------------------------------------------------------------ */

@@ -1157,9 +1157,46 @@ static void test_sid_filter(void)
        "sid: an old record after the switch refuses");
 }
 
+/* tbt_fec_rx_window_step(): the reorder window across a stream switch. The
+ * field case: the aborted stream reached block 100, the reset left next_super
+ * at 101, and the new stream's first record named block 140 with 8 slots.
+ * Every record landed beyond the window (fec_drop_window=1271) and the peer
+ * waited on credit that never came (fec_credit_wait=681). */
+static void test_window_rebase(void)
+{
+    /* The old rule: block 140 is 39 blocks ahead of a window of 8. */
+    ok_int(tbt_fec_rx_window_step(101, 140, 8, false, false),
+           TBT_FEC_RX_WIN_FAR, "rebase: the inherited cursor drops block 140");
+    /* The new rule: the new stream's first record rebases the window. */
+    ok_int(tbt_fec_rx_window_step(101, 140, 8, true, false),
+           TBT_FEC_RX_WIN_REBASE, "rebase: the first record moves the window");
+    /* Inside the rebased window, and one block past it. */
+    ok_int(tbt_fec_rx_window_step(140, 140, 8, false, false),
+           TBT_FEC_RX_WIN_PLACE, "rebase: the first block is placed");
+    ok_int(tbt_fec_rx_window_step(140, 147, 8, false, false),
+           TBT_FEC_RX_WIN_PLACE, "rebase: the last slot is placed");
+    ok_int(tbt_fec_rx_window_step(140, 148, 8, false, false),
+           TBT_FEC_RX_WIN_FAR, "rebase: one past the window is dropped");
+    /* The first record to arrive need not be the stream's lowest block: a
+     * lower block before the first delivery lowers the window to itself. */
+    ok_int(tbt_fec_rx_window_step(140, 139, 8, false, false),
+           TBT_FEC_RX_WIN_REBASE,
+           "rebase: a lower first record lowers the window");
+    /* Once the stream delivered, the cursor never moves back. */
+    ok_int(tbt_fec_rx_window_step(140, 139, 8, false, true),
+           TBT_FEC_RX_WIN_LATE,
+           "rebase: a lower block after delivery is late");
+    /* The session's first stream starts at block 0, so its window is already
+     * at the base: a lost first block is NACKed from there, never skipped. */
+    ok_int(tbt_fec_rx_window_step(0, 3, 8, false, false),
+           TBT_FEC_RX_WIN_PLACE, "rebase: the first stream keeps block 0");
+}
+
 /* tbt_fec_rx_stream_reset(): after an abort, the old stream's reorder block
- * must be dropped and the new stream must start at its own super-block. The
- * first byte the application sees is HTTP/, never the old body. */
+ * must be dropped and the new stream must start at its own super-block. No
+ * cursor survives the reset, and the new stream's first record rebases the
+ * window to its own block. The first byte the application sees is HTTP/,
+ * never the old body. */
 static void test_stream_reset_isolation(void)
 {
     static const u16 full[N] = {S, S, S, S};
@@ -1171,27 +1208,36 @@ static void test_stream_reset_isolation(void)
     int blocked;
     bool stale = false;
 
-    /* The aborted stream still holds a ready block with its body. */
-    sup_markers(&old, 0);
+    /* The aborted stream still holds a ready block with its body; its highest
+     * super-block is 100, so the old reset left next_super at 101. */
+    sup_markers(&old, 100);
     blk_init(&old.b[0], 0, full);
     memcpy(old.b[0].data[0], "OLD!", 4);
-    old.b[0].block_id = 0;
+    old.b[0].block_id = 100;
     old.b[0].ready = true;
     old.b[0].empty = false;
     old.b[0].nreal = N;
+    ok(sup_ready(&old, 100), "reset: the old block 100 is ready");
 
-    /* The barrier drops that state and pushes the frontier past the old
-     * highest block; the new stream starts at super-block 1. */
+    /* The barrier drops that state. The old highest block (100) names no
+     * block the new stream will send: block ids come from the session's
+     * packet sequence, which the old stream pushed ahead. */
     memset(&old, 0, sizeof(old));
-    next_super = 1;
+    next_super = 0;
     p = g = 0;
     ok(!sup_ready(&old, 0), "reset: the old super-block is cleared");
+    ok(!sup_ready(&old, 100), "reset: the old block 100 is cleared");
+
+    /* The new stream's first record names block 140; it rebases the window. */
+    ok_int(tbt_fec_rx_window_step(101, 140, 8, true, false),
+           TBT_FEC_RX_WIN_REBASE, "reset: the first record rebases the window");
+    next_super = 140;
 
     /* The new stream's first block carries its own bytes. */
-    sup_markers(&next, 1);
+    sup_markers(&next, 140);
     blk_init(&next.b[0], 0, full);
     memcpy(next.b[0].data[0], "HTTP/", 5);
-    next.b[0].block_id = 1;
+    next.b[0].block_id = 140;
     next.b[0].ready = true;
     next.b[0].empty = false;
     next.b[0].nreal = N;
@@ -1204,7 +1250,7 @@ static void test_stream_reset_isolation(void)
         if (!memcmp(out + i, "OLD!", 4))
             stale = true;
     ok(!stale, "reset: the old stream's body is not delivered");
-    ok(next_super == 2, "reset: the frontier advances to the new block");
+    ok(next_super == 141, "reset: the frontier advances past the new block");
 }
 
 static void test_super_cursor(void)
@@ -1984,6 +2030,7 @@ int main(void)
     test_marker_retry();
     test_super_cursor();
     test_sid_filter();
+    test_window_rebase();
     test_stream_reset_isolation();
     test_ack_split();
     test_rx_poll();
