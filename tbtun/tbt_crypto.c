@@ -460,6 +460,38 @@ int tbt_crypto_body_xor_share(struct tbt_crypto_ctx *c, u64 seq, bool parity,
     return tbt_crypto_xor_at(&tmp, (seq << 8) | 0x80u, payload, len);
 }
 
+int tbt_crypto_body_xor_flow(struct tbt_crypto_ctx *c, u64 sid, u64 seq,
+                             bool parity, u16 share_index, u8 *payload,
+                             u16 len)
+{
+    struct tbt_crypto_ctx tmp;
+
+    if (c == NULL)
+        return -EINVAL;
+    if (!c->ready)
+        return 0;
+    if (len > TBT_CRYPTO_BODY_MAX || seq > TBT_CRYPTO_SEQ_MAX)
+        return -EINVAL;
+    if (len != 0 && payload == NULL)
+        return -EINVAL;
+    /* sid == 0 is the old single-stream domain: keep it byte-for-byte
+     * identical so a non-multi-stream caller does not change its ciphertext. */
+    if (!sid)
+        return tbt_crypto_body_xor_share(c, seq, parity, share_index, payload,
+                                         len);
+
+    /* The nonce words are state[14] (low 32 bits) and state[15] (high 8 bits
+     * of the 40-bit sid, plus the parity share index). A 40-bit sid is
+     * injective into these 40 bits, so two flows never share a keystream. */
+    tmp = *c;
+    tmp.state[14] ^= (u32)sid;
+    tmp.state[15] ^= (u32)(sid >> 32);
+    if (parity)
+        tmp.state[15] ^= (u32)share_index;
+    return tbt_crypto_xor_at(&tmp, (seq << 8) | (parity ? 0x80u : 0u),
+                             payload, len);
+}
+
 void tbt_crypto_wipe(struct tbt_crypto_ctx *c)
 {
     volatile u8 *p = (volatile u8 *)c;

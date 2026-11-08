@@ -167,6 +167,16 @@ int tbt_crypto_body_xor(struct tbt_crypto_ctx *c, u64 seq, bool parity,
 int tbt_crypto_body_xor_share(struct tbt_crypto_ctx *c, u64 seq, bool parity,
                               u16 share_index, u8 *payload, u16 len);
 
+/* Per-flow variant. The FEC v7 header's seq is stream-local, so two flows can
+ * name the same (seq, parity, share_index) and would reuse one keystream.
+ * Fold the 40-bit sid into the 64-bit nonce (state[14]/[15]) before the
+ * counter is applied: distinct flows then use distinct keystreams while the
+ * counter formula and the clear header stay unchanged. sid == 0 reproduces
+ * tbt_crypto_body_xor_share() exactly. */
+int tbt_crypto_body_xor_flow(struct tbt_crypto_ctx *c, u64 sid, u64 seq,
+                             bool parity, u16 share_index, u8 *payload,
+                             u16 len);
+
 /* Erase the schedule, keystream and key material with volatile stores. */
 void tbt_crypto_wipe(struct tbt_crypto_ctx *c);
 

@@ -190,7 +190,7 @@ static bool tbt_fec_is_share_type(u8 type)
 static bool tbt_fec_is_control_type(u8 type)
 {
     return type == TBT_FEC_ACK || type == TBT_FEC_NACK || type == TBT_FEC_CFG ||
-           type == TBT_FEC_FBK;
+           type == TBT_FEC_FBK || type == TBT_FEC_ALLOC;
 }
 
 int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
@@ -294,6 +294,8 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
     if ((h->type == TBT_FEC_CFG || h->type == TBT_FEC_FBK ||
          h->type == TBT_FEC_NACK) && h->seq)
         return -EPROTO;
+    if (h->type == TBT_FEC_ALLOC && (h->seq || h->sid == 0))
+        return -EPROTO;
 
     switch (h->type)
     {
@@ -305,6 +307,8 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
         return h->payload_len == TBT_FEC_CFG_LEN ? 0 : -EPROTO;
     case TBT_FEC_FBK:
         return h->payload_len == TBT_FEC_FBK_LEN ? 0 : -EPROTO;
+    case TBT_FEC_ALLOC:
+        return h->payload_len == TBT_FEC_ALLOC_LEN ? 0 : -EPROTO;
     default:
         return -EPROTO;
     }
@@ -452,6 +456,45 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n)
     return 0;
 }
 
+int tbt_fec_alloc_pack(const struct tbt_fec_alloc *a,
+                       u8 out[TBT_FEC_ALLOC_LEN])
+{
+    u32 crc;
+
+    if (!a || !out)
+        return -EINVAL;
+    memset(out, 0, TBT_FEC_ALLOC_LEN);
+    tbt_put_u32(out + TBT_FEC_ALLOC_EPOCH, a->epoch);
+    memcpy(out + TBT_FEC_ALLOC_GROUPS, a->group_mask, TBT_FEC_BITMAP_BYTES);
+    out[TBT_FEC_ALLOC_FLAGS] = a->flags;
+    tbt_put_u64(out + TBT_FEC_ALLOC_SWITCH_PKT, a->switch_pkt);
+    tbt_put_u64(out + TBT_FEC_ALLOC_BLOCK_BASE, a->block_base);
+    crc = tbt_fec_crc32c(0, out, TBT_FEC_ALLOC_CRC_BYTES);
+    tbt_put_u32(out + TBT_FEC_ALLOC_CRC, crc);
+    return TBT_FEC_ALLOC_LEN;
+}
+
+int tbt_fec_alloc_unpack(const u8 in[TBT_FEC_ALLOC_LEN],
+                         struct tbt_fec_alloc *a)
+{
+    u32 want;
+
+    if (!in || !a)
+        return -EPROTO;
+    a->epoch = tbt_get_u32(in + TBT_FEC_ALLOC_EPOCH);
+    memcpy(a->group_mask, in + TBT_FEC_ALLOC_GROUPS, TBT_FEC_BITMAP_BYTES);
+    a->flags = in[TBT_FEC_ALLOC_FLAGS];
+    if (a->flags & ~TBT_FEC_ALLOC_F_MASK)
+        return -EPROTO;
+    a->switch_pkt = tbt_get_u64(in + TBT_FEC_ALLOC_SWITCH_PKT);
+    a->block_base = tbt_get_u64(in + TBT_FEC_ALLOC_BLOCK_BASE);
+    a->crc32c = tbt_get_u32(in + TBT_FEC_ALLOC_CRC);
+    want = tbt_fec_crc32c(0, in, TBT_FEC_ALLOC_CRC_BYTES);
+    if (want != a->crc32c)
+        return -EPROTO;
+    return 0;
+}
+
 /* ------------------------------------------------------------------ *
  * Bounded replay ring
  * ------------------------------------------------------------------ */
@@ -509,20 +552,20 @@ u16 tbt_fec_replay_k_for(u16 groups, u16 n, u16 m, u16 s)
     return k;
 }
 
-struct tbt_fec_replay *tbt_fec_replay_new(u16 groups, u16 n, u16 m, u16 s)
+/* Build a ring with an explicit K. A multi-stream session keeps one K for the
+ * whole session and gives each flow a slice of the group budget, so the sum
+ * of the flow rings is the single-stream ring (design §3.1). */
+struct tbt_fec_replay *tbt_fec_replay_new_k(u16 groups, u16 n, u16 m, u16 s,
+                                            u16 k)
 {
     struct tbt_fec_replay *r;
     size_t shares = (size_t)n + m;
     size_t stride, slots;
-    u16 k;
     u32 i;
 
-    if (!groups || !shares || !s || s > TBT_FEC_PAYLOAD_MAX)
+    if (!groups || !shares || !s || s > TBT_FEC_PAYLOAD_MAX || !k)
         return NULL;
     stride = TBT_FEC_HDR_LEN + s;
-    k = tbt_fec_replay_k_for(groups, n, m, s);
-    if (!k)
-        return NULL;
     slots = (size_t)k * groups * shares;
     if (slots > 0xffffffffu)
         return NULL;
@@ -552,6 +595,12 @@ struct tbt_fec_replay *tbt_fec_replay_new(u16 groups, u16 n, u16 m, u16 s)
     for (i = 0; i < r->bslots; i++)
         r->block_gen[i] = ~0ULL;
     return r;
+}
+
+struct tbt_fec_replay *tbt_fec_replay_new(u16 groups, u16 n, u16 m, u16 s)
+{
+    return tbt_fec_replay_new_k(groups, n, m, s,
+                                tbt_fec_replay_k_for(groups, n, m, s));
 }
 
 void tbt_fec_replay_free(struct tbt_fec_replay *r)

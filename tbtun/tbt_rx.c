@@ -171,9 +171,9 @@ static bool tbt_rx_tree_insert_locked(struct tbt_stream *st, struct tbt_frame *f
  * the canonical handover to a new sid; DATA/FIN/RST may adopt only the first
  * stream, or follow an old stream that is already closing. */
 static int tbt_rx_bind_stream(struct tbt_carrier *c, const struct tbt_hdr *h,
-                              bool open)
+                              bool open, const u8 *body, u16 len)
 {
-    int r = tbt_session_bind_sid(c->sess, tbt_hdr_sid(h), open);
+    int r = tbt_session_bind_sid(c->sess, tbt_hdr_sid(h), open, body, len);
 
     return r == TBT_BIND_BAD ? -EPROTO : 0;
 }
@@ -448,19 +448,20 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
     switch (hdr->type)
     {
     case TBT_F_DATA:
-        if (tbt_rx_bind_stream(c, hdr, false))
+        if (tbt_rx_bind_stream(c, hdr, false, NULL, 0))
             return -EPROTO;
         return tbt_rx_data(c, hdr, payload, len);
 
     case TBT_F_OPEN:
-        return tbt_rx_bind_stream(c, hdr, true);
+        /* The body is the 32-byte group bitmap the flow admission uses. */
+        return tbt_rx_bind_stream(c, hdr, true, payload, len);
 
     case TBT_F_FIN:
-        if (tbt_rx_bind_stream(c, hdr, false))
+        if (tbt_rx_bind_stream(c, hdr, false, NULL, 0))
             return -EPROTO;
         c->rx_bytes += len;
-        /* 0.2.0 FIN body: absolute packet range, little-endian. A peer that
-         * names an end before its base is refused before any stream state is
+        /* FIN body: flow-local packet range, little-endian. A peer that names
+         * an end before its base is refused before any stream state is
          * touched. */
         {
             u64 pkt_end = tbt_le64(payload);
@@ -496,7 +497,7 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
         return 0;
 
     case TBT_F_RST:
-        if (tbt_rx_bind_stream(c, hdr, false))
+        if (tbt_rx_bind_stream(c, hdr, false, NULL, 0))
             return -EPROTO;
         tbt_stream_kill_by_sid(sess, tbt_hdr_sid(hdr), TBT_ST_DEAD);
         return 0;

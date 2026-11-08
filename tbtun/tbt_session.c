@@ -911,57 +911,49 @@ static bool tbt_stream_is_closing(const struct tbt_stream *st)
     return false;
 }
 
-/* True while the stream the FEC data plane is bound to (`far_sid`) is still
- * alive. The FEC record carries no stream id, so a second live stream would
- * have its bytes delivered to whichever stream is current; the near side
- * refuses to create one while this is true. Called with sess->lock held. */
-bool tbt_session_fec_stream_live(const struct tbt_session *sess)
+/* Find the flow an OPEN names, or admit one from its bitmap. Returns a
+ * referenced flow or an ERR_PTR. Two carriers deliver the same OPEN, so a
+ * lost admission race (-EEXIST) is resolved by looking the winner up. */
+static struct tbt_fec_flow *tbt_session_open_flow(struct tbt_session *sess,
+                                                  u64 sid, const u8 *body)
 {
-    struct tbt_stream *st;
-    u64 sid = READ_ONCE(sess->far_sid);
+    struct tbt_fec_flow *flow = tbt_fec_flow_lookup(sess, sid);
 
-    if (!sid)
-        return false;
-    st = tbt_stream_find_locked((struct tbt_session *)sess, sid);
-    /* A stream whose application has closed is on its way out: its bytes are
-     * already in the ring and the next connection may start (a sequential
-     * client must not be refused). Only a stream that is still carrying an open
-     * application connection blocks the next one. */
-    return st && READ_ONCE(st->state) != TBT_ST_DEAD &&
-           !READ_ONCE(st->tx_fin_sent);
+    if (flow)
+        return flow;
+    flow = tbt_fec_flow_admit_mask(sess, sid, body);
+    if (IS_ERR(flow) && PTR_ERR(flow) == -EEXIST)
+        return tbt_fec_flow_lookup(sess, sid);
+    return flow;
 }
 
-/* The FEC RX work is session-wide. A carrier that adopted this OPEN may be
- * delayed after installing far_sid; by the time it runs the barrier, a later
- * OPEN can own the session. Canceling TBT_SW_FEC_RX then would stop the newer
- * stream's pending delivery until the stall timer. Barrier only while
- * `new_sid` is still the session's stream, and if a later adoption wins the
- * race during the cancel, arm the work again for the current stream. The data
- * plane resets its cursor on the current stream's first record otherwise. */
-static void tbt_far_fec_rx_barrier(struct tbt_session *sess, u64 old_sid,
-                                   u64 new_sid)
+/* Bind one frame's sid to the session. OPEN may create the stream and, on a
+ * FEC session, the flow its 32-byte body describes. A repeated OPEN is
+ * idempotent only when it names the groups the flow already owns. DATA, FIN
+ * and RST never create a stream.
+ *
+ * The flow admission allocates its planes with GFP_KERNEL, so this runs in
+ * the carrier RX work item, never in softirq. */
+int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
+                         const u8 *body, u16 len)
 {
-    if (READ_ONCE(sess->far_sid) != new_sid)
-        return;
-    tbt_session_fec_rx_barrier(sess, old_sid);
-    if (READ_ONCE(sess->fec) && READ_ONCE(sess->far_sid) != new_sid)
-        tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
-}
-
-int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open)
-{
+    bool near = sess->tunnel->cfg.role == TBT_ROLE_NEAR;
     bool adopt = false, drop = false, tombstone_open = false;
-    u64 barrier_sid = 0, kill_sid = 0;
+    struct tbt_fec_flow *flow = NULL;
 
     if (!sid)
         return TBT_BIND_DROP;
+    /* The wire checker bounds an OPEN to this length too; the check here is
+     * the one the bitmap admission relies on. */
+    if (open && sess->fec && (!body || len != TBT_FEC_BITMAP_BYTES))
+        return TBT_BIND_BAD;
 
     spin_lock(&sess->lock);
     if (READ_ONCE(sess->closing))
     {
         drop = true;
     }
-    else if (sess->tunnel->cfg.role == TBT_ROLE_NEAR)
+    else if (near)
     {
         struct tbt_stream *st = tbt_stream_find_locked(sess, sid);
 
@@ -991,46 +983,20 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open)
             drop = true; /* DATA/FIN/RST cannot create a stream */
             atomic64_inc(&sess->bind_drop_no_stream);
         }
-        else if (!drop && st && READ_ONCE(sess->far_sid) != sid)
-        {
-            /* A live object that is no longer the session stream. Its frames
-             * are late: the next OPEN superseded it. Drop them, and stop the
-             * object if the supersession path has not killed it yet. */
-            drop = true;
-            if (READ_ONCE(st->state) != TBT_ST_DEAD &&
-                !st->tombstone_until_ns)
-                kill_sid = sid;
-        }
         else if (!drop && st && open && tbt_stream_is_closing(st))
             drop = true; /* late OPEN for a closing stream */
-        else if (!drop && !st)
+        else if (open)
         {
-            u64 old = READ_ONCE(sess->far_sid);
-
-            /* The new OPEN supersedes the stream `far_sid` still names. The
-             * FEC RX cursor and the old target belong to a stream the peer
-             * has abandoned: stop the cursor and kill the old stream even
-             * when it never submitted a byte, or its target (or its ACTIVE
-             * slot) would outlive the session's only stream. */
-            if (old && old != sid)
-            {
-                struct tbt_stream *ost = tbt_stream_find_locked(sess, old);
-
-                barrier_sid = old;
-                if (ost && READ_ONCE(ost->state) != TBT_ST_DEAD &&
-                    !ost->tombstone_until_ns)
-                    kill_sid = old;
-            }
-            sess->far_sid = sid; /* last/primary compatibility only */
-            adopt = true;
+            /* A second OPEN no longer takes the session away from the first
+             * stream: `far_sid` is only the last/primary compatibility
+             * pointer. */
+            adopt = !st;
+            if (adopt)
+                sess->far_sid = sid;
         }
     }
     spin_unlock(&sess->lock);
 
-    if (kill_sid)
-        tbt_stream_kill_by_sid(sess, kill_sid, TBT_ST_DEAD);
-    if (barrier_sid)
-        tbt_far_fec_rx_barrier(sess, barrier_sid, sid);
     if (drop)
     {
         if (tombstone_open)
@@ -1039,7 +1005,54 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open)
                                 (unsigned long long)sid);
         return TBT_BIND_DROP;
     }
-    if (adopt && sess->tunnel->cfg.role == TBT_ROLE_FAR)
+    if (open && sess->fec)
+    {
+        int err;
+
+        if (near)
+        {
+            /* The far side echoes the near's own bitmap. Never admit a flow
+             * here: the near is the only allocator. */
+            flow = tbt_fec_flow_lookup(sess, sid);
+            if (!flow)
+            {
+                atomic64_inc(&sess->bind_drop_no_stream);
+                return TBT_BIND_DROP;
+            }
+        }
+        else
+        {
+            flow = tbt_session_open_flow(sess, sid, body);
+            if (IS_ERR(flow))
+            {
+                err = PTR_ERR(flow);
+                /* A malformed or overlapping bitmap is a framing error:
+                 * close the carrier. No free group only refuses this OPEN;
+                 * the carrier and the other flows stay. */
+                if (err == -EPROTO)
+                    return TBT_BIND_BAD;
+                atomic64_inc(&sess->fec_stream_refused);
+                return TBT_BIND_DROP;
+            }
+            if (!flow)
+            {
+                /* The flow vanished between the admission race and the
+                 * lookup: a stream without one would have no FEC plane. */
+                atomic64_inc(&sess->bind_drop_no_stream);
+                return TBT_BIND_DROP;
+            }
+        }
+        if (memcmp(flow->group_mask, body, TBT_FEC_BITMAP_BYTES) != 0)
+        {
+            /* One sid, one bitmap. A repeated OPEN that renames the groups of
+             * a live flow is refused; the local allocation stands. */
+            tbt_fec_flow_put(flow);
+            atomic64_inc(&sess->bind_drop_no_stream);
+            return TBT_BIND_DROP;
+        }
+    }
+
+    if (adopt && !near)
     {
         bool created = false;
         struct tbt_stream *ast =
@@ -1047,23 +1060,34 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open)
 
         if (!ast)
         {
-            /* Do not leave far_sid naming a sid with no object: a later OPEN
-             * must be able to adopt it. */
             spin_lock(&sess->lock);
             if (READ_ONCE(sess->far_sid) == sid)
                 WRITE_ONCE(sess->far_sid, 0);
             spin_unlock(&sess->lock);
+            if (flow)
+                tbt_fec_flow_put(flow);
             return TBT_BIND_DROP;
         }
+        /* 256 carriers deliver the same OPEN. tbt_stream_get_created()
+         * double-checks under sess->lock, so exactly one caller sees
+         * created=true; only that caller attaches the flow and may
+         * announce/target the stream. The others hold the same object, put
+         * their flow reference and just put their stream reference. */
         if (created)
         {
-            /* 256 carriers deliver the same OPEN. tbt_stream_get_created()
-             * double-checks under sess->lock, so exactly one caller sees
-             * created=true; only that caller may announce/target the stream.
-             * The others hold the same object and just put their reference. */
+            if (flow)
+                tbt_fec_flow_attach(ast, flow); /* moves the reference */
             tbt_far_open_seen(ast);
         }
+        else if (flow)
+        {
+            tbt_fec_flow_put(flow);
+        }
         tbt_stream_put(ast);
+    }
+    else if (flow)
+    {
+        tbt_fec_flow_put(flow);
     }
     return TBT_BIND_OK;
 }
@@ -1241,6 +1265,7 @@ out:
          * connection leaks one.  Called with sess->lock dropped: release takes
          * it again, and cancel_work_sync(&w_kill) must not run under a lock
          * the kill work itself needs. */
+        tbt_fec_flow_detach(dead[i]);
         tbt_stream_release_socket(dead[i]);
         tbt_stream_put(dead[i]); /* drops the hash reference */
     }
@@ -1603,6 +1628,7 @@ void tbt_session_destroy(struct tbt_tunnel *t)
 
     /* Stop the two FEC entry points. rx->lock is a leaf; the stopping flag
      * makes record()/arm() refuse new work after this point. */
+    WRITE_ONCE(s->fec_stopping, true);
     if (s->fec_rx)
     {
         spin_lock_bh(&s->fec_rx->lock);
@@ -1684,6 +1710,7 @@ void tbt_session_destroy(struct tbt_tunnel *t)
              * for it and return a pending instance's reference. */
             tbt_stream_cancel(victim, &victim->w_kill,
                               TBT_STREAM_F_SCHED_KILL);
+            tbt_fec_flow_detach(victim);
             /* Detach restores core callbacks, then release the socket this
              * stream owns.  A detached but unreleased accepted socket keeps
              * module text and oopses after unload (F2). */

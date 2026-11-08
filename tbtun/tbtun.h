@@ -172,6 +172,7 @@ struct tbt_tunnel
 extern struct list_head tbt_tunnels;
 extern struct mutex tbt_lock;
 extern unsigned int debug;
+extern unsigned int tbt_fec_groups_per_flow;
 extern unsigned int max_tunnels;
 extern unsigned int max_carriers;
 /* Peripheral BBR hold, opt-in (module param hold_enable). */
@@ -467,6 +468,10 @@ struct tbt_stream
      * with tx_fin_seq. Non-FEC streams leave them zero. */
     u64 tx_fin_pkts;          /* pkt_end: after the last DATA packet */
     u64 tx_fin_pkt_base;      /* pkt_base: first DATA packet, block-aligned */
+    /* The FEC flow this stream owns. Set when the stream is admitted (near)
+     * or its OPEN is bound (far); cleared at detach. It is the only pointer
+     * the capture, FIN and ACK paths use to reach the stream's FEC plane. */
+    struct tbt_fec_flow *fec_flow;
     u64 fec_pkt_base;         /* first global FEC packet seq of this stream */
     bool fec_pkt_base_set;
     u64 fec_pkt_end;          /* actual end, frozen by tbt_fec_tx_finish() */
@@ -672,9 +677,19 @@ struct tbt_fec_replay;
 struct tbt_fec_nack_state;
 struct tbt_fec_adapt;
 struct tbt_fec_est;
+struct tbt_fec_flow;
+struct tbt_fec_drain;
 
 struct tbt_fec_tx
 {
+    /* This plane belongs to one stream. `sid` is the routing key; the group
+     * map turns a local group index (0..groups-1) into the physical group
+     * that owns the carrier. Both ends derive the same map from the bitmap
+     * OPEN/ALLOC carried. */
+    u64 sid;
+    u8 group_mask[TBT_FEC_BITMAP_BYTES];
+    u16 group_map[TBT_FEC_MAX_GROUPS];
+    struct tbt_fec_flow *flow;
     spinlock_t lock; /* protects ring head/tail and the counters below */
     /* One FEC work body at a time: bit 0 running, bit 1 again. The sched bit
      * owns the session reference; this word owns the shared packetizer
@@ -705,6 +720,12 @@ struct tbt_fec_tx
      * ring ran dry with bytes in `pkt`, cleared when it emits. 0 = not armed. */
     u64 short_at_ns;
     u16 groups, n, m, s;
+    /* Bound data records this flow still has on the carrier queues. The FIN
+     * gate reads it instead of the session-wide count, so one stream's
+     * backlog cannot hold another stream's close. */
+    u32 queued;
+    /* This flow is closing: its replay admission uses the close budget. */
+    bool closing;
     u64 cur_block; /* block being built, shared by every group */
     /* Stream that owns the block being built. A stream switch closes the old
      * block and tags its records with this sid; the receiver drops a DATA or
@@ -798,6 +819,14 @@ struct tbt_session;
 
 struct tbt_fec_rx
 {
+    /* This receive plane belongs to one stream; sid is the routing key and
+     * group_map the local-to-physical group mapping that matches the sender's
+     * TX plane for the same flow. */
+    u64 sid;
+    u8 group_mask[TBT_FEC_BITMAP_BYTES];
+    u16 group_map[TBT_FEC_MAX_GROUPS];
+    struct tbt_fec_flow *flow;
+    bool closing;
     spinlock_t lock; /* carrier rx works assemble blocks concurrently */
     /* Bit 0 running, bit 1 again: the delivery cursors and block cuts are
      * single-owner. Two bodies would duplicate one 8 KiB slot and skip
@@ -953,6 +982,31 @@ struct tbt_fec_rx
     u64 stream_base_pkt;
 };
 
+/* One live FEC stream in a session. The session owns a hash of these keyed by
+ * sid; each one owns a TX and an RX plane whose groups are the physical
+ * groups named by group_mask. The session's arena, replay budget, carrier
+ * queues and work items are shared, but every cursor, credit and FIN state
+ * below is per flow. A flow lives from OPEN (near: stream start) to detach;
+ * late records find no flow and are dropped. */
+struct tbt_fec_flow
+{
+    struct hlist_node node;
+    struct tbt_session *sess;
+    refcount_t refs;
+    u64 sid;
+    u8 group_mask[TBT_FEC_BITMAP_BYTES];
+    u16 group_map[TBT_FEC_MAX_GROUPS];
+    u16 groups;
+    /* 0 = free slot, 1 = active, 2 = draining, 3 = dead. Only the control
+     * path writes it; carrier RX reads it to refuse a dying flow. */
+    u8 state;
+    struct tbt_fec_tx *tx;
+    struct tbt_fec_rx *rx;
+    /* Final reference may be dropped by a carrier RX lookup, where freeing a
+     * vmalloc arena is illegal. The last put schedules this work. */
+    struct work_struct free_work;
+};
+
 /* One queued FEC record waiting for a carrier. Control records may be sent on
  * any up carrier; data records are bound to their share's carrier. */
 struct tbt_fec_out
@@ -969,6 +1023,10 @@ struct tbt_fec_out
     /* Stream id from the record header; a stream switch drops the old
      * stream's queued data and control while keeping the new stream's. */
     u64 sid;
+    /* Bound data records charge this flow's FIN gate. NULL for control and
+     * replay records, which are session-wide. The flow purges its records
+     * before its planes are freed, so this pointer never dangles. */
+    struct tbt_fec_tx *owner;
     /* NACK receipt time for a replay record; the flush charges NACK->wire
      * latency when the carrier accepts it. Zero for every other record. */
     u64 stamp_ns;
@@ -1146,8 +1204,37 @@ struct tbt_session
     struct tbt_crypto_pair crypto_ctx;
     bool crypto_tx_ready; /* published after tx context init */
     bool crypto_ready;    /* rx nonce learned; both contexts initialized */
-    struct tbt_fec_tx *fec_tx; /* owned here: one stream per session */
+    /* FEC flows, keyed by sid. `fec_tx`/`fec_rx` name the primary flow (the
+     * first live one) for the old single-stream readers; every data-plane
+     * path looks its flow up by sid and never assumes these are the only
+     * plane. */
+    struct hlist_head fec_flows[TBT_STREAM_HT];
+    u16 n_fec_flows;
+    struct tbt_fec_flow *fec_primary;
+    struct tbt_fec_tx *fec_tx;
     struct tbt_fec_rx *fec_rx;
+    /* Session geometry: total physical groups, the groups already owned by a
+     * flow, the per-group RX slots and the replay K shared by every flow. */
+    u16 fec_groups_total;
+    u16 fec_groups_used;
+    u16 fec_slots;
+    u16 fec_replay_k;
+    /* Session shape, copied into every flow's planes. */
+    u16 fec_n, fec_m, fec_w, fec_k;
+    u8 fec_d;
+    bool fec_sclc;
+    struct tbt_fec_sclc_shape fec_sclc_shape;
+    /* Serialises flow admission: the group check and the plane allocation
+     * must not interleave between two carriers' OPEN handlers. */
+    struct mutex fec_alloc_lock;
+    /* Round-robin cursor for the TX/RX work bodies. */
+    u16 fec_rr;
+    /* Control-record rotation and teardown flag: session resources, not per
+     * flow. */
+    u16 fec_ctl_rot;
+    bool fec_stopping;
+    struct tbt_fec_drain *fec_drain;
+    u16 fec_ndrain;
     struct delayed_work w_fec_tx; /* packetizer + control/replay writer */
     /* 0.2.0: FEC receive work (decode outside rx->lock, then deliver).
      * Declared only in this cut: M4/M8 initialise it, and nothing arms it
@@ -1965,6 +2052,31 @@ int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp);
 /* FEC v6 data plane (tbt_fec_data.c). */
 int tbt_fec_data_init(struct tbt_session *sess);
 void tbt_fec_data_free(struct tbt_session *sess);
+/* Flow table. `admit` allocates a flow for sid with `want` physical groups
+ * (0 = the fair share) and returns it with one reference, or an ERR_PTR:
+ * -ENOSPC when no group is free, -EEXIST for a duplicate sid. `lookup`
+ * returns a referenced flow or NULL; every caller must put it. */
+struct tbt_fec_flow *tbt_fec_flow_admit(struct tbt_session *sess, u64 sid,
+                                        u16 want);
+/* Admit a flow with an exact bitmap (the far side's OPEN). Returns -EPROTO
+ * for an invalid/overlapping/out-of-range mask and -ENOSPC when it names no
+ * free group. */
+struct tbt_fec_flow *tbt_fec_flow_admit_mask(struct tbt_session *sess,
+                                             u64 sid,
+                                             const u8 mask[TBT_FEC_BITMAP_BYTES]);
+struct tbt_fec_flow *tbt_fec_flow_lookup(struct tbt_session *sess, u64 sid);
+void tbt_fec_flow_put(struct tbt_fec_flow *f);
+/* Bind a stream to its flow (one reference moves to the stream) and release
+ * it at detach. */
+void tbt_fec_flow_attach(struct tbt_stream *st, struct tbt_fec_flow *f);
+void tbt_fec_flow_abort(struct tbt_session *sess, u64 sid);
+void tbt_fec_flow_detach(struct tbt_stream *st);
+/* Build the next free group bitmap for a new flow. Returns the group count,
+ * or 0 when no group is free. */
+u16 tbt_fec_flow_mask_alloc(struct tbt_session *sess, u16 want,
+                            u8 mask[TBT_FEC_BITMAP_BYTES]);
+/* Whether any FEC flow can still be admitted (free groups exist). */
+bool tbt_fec_flow_can_admit(struct tbt_session *sess);
 size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,
                          unsigned int off, size_t len);
 int tbt_fec_tx_flush(struct tbt_stream *st);
@@ -2023,7 +2135,8 @@ enum tbt_bind_result
     TBT_BIND_DROP,
     TBT_BIND_BAD,
 };
-int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open);
+int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
+                         const u8 *body, u16 len);
 void tbt_stream_put(struct tbt_stream *st);
 void tbt_stream_detach_from_session(struct tbt_stream *st);
 void tbt_stream_maybe_detach(struct tbt_stream *st);

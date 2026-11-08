@@ -1,4 +1,4 @@
-/* test_fec.c - host conformance test for the FEC v6 wire and RLNC codec.
+/* test_fec.c - host conformance test for the FEC v7 wire and RLNC codec.
  *
  * Links tbtun/tbt_fec.c, the same object the module builds, so a wire rule
  * that passes here is a rule the kernel enforces. No root, no module, no
@@ -217,9 +217,9 @@ static void test_header_roundtrip(void)
            TBT_FEC_H_RESERVED == 30 && TBT_FEC_H_SID == 32 &&
            TBT_FEC_H_PAYCRC == 40 && TBT_FEC_H_HDRCRC == 44,
        "header offsets", NULL);
-    /* 0x1005 adds the stream sid and grows the header to 48 bytes; 0x1006
-     * makes FEC_CFG/FEC_FBK carry the adaptive shape. */
-    ok(TBT_FEC_CONV == 0x1006u, "TBT_FEC_CONV", NULL);
+    /* 0x1005 adds the stream sid and grows the header to 48 bytes; 0x1007
+     * makes FEC_CFG/FEC_FBK carry the adaptive shape and adds FEC_ALLOC. */
+    ok(TBT_FEC_CONV == 0x1007u, "TBT_FEC_CONV", NULL);
 
     /* NULL arguments are refused, not dereferenced. */
     ok_int(tbt_fec_hdr_pack(NULL, wire), -EINVAL, "pack NULL header");
@@ -401,8 +401,8 @@ static void test_hdr_check(void)
     h.reserved = 1;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "reserved != 0");
     h = data_hdr();
-    h.type = 0x36;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "unknown type 0x36");
+    h.type = 0x37;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "unknown type 0x37");
     h = data_hdr();
     h.type = 0x00;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "unknown type 0x00");
@@ -754,7 +754,7 @@ static void test_control(void)
     ok_int(n != TBT_FEC_NACK_LEN ? -EINVAL : 0, 0,
            "fixed length check accepts the NACK");
 
-    /* FEC_CFG: 48 bytes, CRC over +0..+39 (0x1006). */
+    /* FEC_CFG: 48 bytes, CRC over +0..+39 (0x1007). */
     memset(&c, 0, sizeof(c));
     c.epoch = 0x12345678u;
     c.n = 4;
@@ -863,7 +863,7 @@ static void test_control(void)
     cfg_fix_crc(cbuf);
     ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG d==w with w>1");
 
-    /* FEC_FBK: 48 bytes including the 32-byte bitmap (0x1006 layout). */
+    /* FEC_FBK: 48 bytes including the 32-byte bitmap (0x1007 layout). */
     ok((int)sizeof(struct tbt_fec_fbk) == TBT_FEC_FBK_LEN,
        "FBK struct is 48 bytes", NULL);
     ok(TBT_FEC_FBK_LEN == 48, "FBK length constant", NULL);
@@ -906,6 +906,147 @@ static void test_control(void)
        "FBK round-trip", NULL);
     fbuf[TBT_FEC_FBK_FLAGS] = 0x20;
     ok_int(tbt_fec_fbk_unpack(fbuf, &f2), -EPROTO, "FBK unknown flags");
+}
+
+/* ------------------------------------------------------------------ *
+ * 5b. FEC_ALLOC (0x36): a 64-byte body that moves one flow between
+ * physical group sets. ACK and DONE are the only body flags; the header
+ * names the flow (sid != 0), never a seq or a block.
+ * ------------------------------------------------------------------ */
+
+static void alloc_fix_crc(u8 *buf)
+{
+    u32 crc = tbt_fec_crc32c(0, buf, TBT_FEC_ALLOC_CRC_BYTES);
+
+    buf[TBT_FEC_ALLOC_CRC + 0] = (u8)crc;
+    buf[TBT_FEC_ALLOC_CRC + 1] = (u8)(crc >> 8);
+    buf[TBT_FEC_ALLOC_CRC + 2] = (u8)(crc >> 16);
+    buf[TBT_FEC_ALLOC_CRC + 3] = (u8)(crc >> 24);
+}
+
+static void test_alloc(void)
+{
+    struct tbt_fec_alloc a, a2;
+    struct tbt_fec_hdr h;
+    u8 buf[TBT_FEC_ALLOC_LEN];
+
+    memset(&a, 0, sizeof(a));
+    a.epoch = 0x12345678u;
+    tbt_fec_bitmap_set(a.group_mask, 0);
+    tbt_fec_bitmap_set(a.group_mask, 5);
+    tbt_fec_bitmap_set(a.group_mask, 255);
+    a.flags = TBT_FEC_ALLOC_F_ACK | TBT_FEC_ALLOC_F_DONE;
+    a.switch_pkt = 0x1122334455667788ULL;
+    a.block_base = 0x0102030405060708ULL;
+
+    ok(TBT_FEC_ALLOC == 0x36, "ALLOC type is 0x36", NULL);
+    ok_int(tbt_fec_alloc_pack(&a, buf), TBT_FEC_ALLOC_LEN, "ALLOC pack length");
+    ok(TBT_FEC_ALLOC_LEN == 64, "ALLOC body is 64 bytes", NULL);
+    ok_u32le(buf + TBT_FEC_ALLOC_EPOCH, a.epoch, "ALLOC epoch at +0");
+    ok(tbt_fec_bitmap_test(buf + TBT_FEC_ALLOC_GROUPS, 0) &&
+           tbt_fec_bitmap_test(buf + TBT_FEC_ALLOC_GROUPS, 5) &&
+           tbt_fec_bitmap_test(buf + TBT_FEC_ALLOC_GROUPS, 255),
+       "ALLOC group mask at +4", NULL);
+    ok(buf[TBT_FEC_ALLOC_FLAGS] ==
+           (TBT_FEC_ALLOC_F_ACK | TBT_FEC_ALLOC_F_DONE),
+       "ALLOC flags at +36", NULL);
+    ok_u64le(buf + TBT_FEC_ALLOC_SWITCH_PKT, a.switch_pkt,
+             "ALLOC switch_pkt at +40");
+    ok_u64le(buf + TBT_FEC_ALLOC_BLOCK_BASE, a.block_base,
+             "ALLOC block_base at +48");
+    ok_u32le(buf + TBT_FEC_ALLOC_CRC,
+             tbt_fec_crc32c(0, buf, TBT_FEC_ALLOC_CRC_BYTES),
+             "ALLOC CRC at +56");
+    ok_u32le(buf + TBT_FEC_ALLOC_RESERVED2, 0, "ALLOC reserved2 at +60");
+
+    memset(&a2, 0, sizeof(a2));
+    ok_int(tbt_fec_alloc_unpack(buf, &a2), 0, "ALLOC unpack");
+    ok(a2.epoch == a.epoch && a2.flags == a.flags &&
+           a2.switch_pkt == a.switch_pkt && a2.block_base == a.block_base &&
+           !memcmp(a2.group_mask, a.group_mask, TBT_FEC_BITMAP_BYTES),
+       "ALLOC round-trip", NULL);
+
+    /* The CRC covers the whole body, including both coordinates. */
+    buf[TBT_FEC_ALLOC_EPOCH] ^= 1;
+    ok_int(tbt_fec_alloc_unpack(buf, &a2), -EPROTO,
+           "ALLOC epoch CRC mismatch");
+    tbt_fec_alloc_pack(&a, buf);
+    buf[TBT_FEC_ALLOC_GROUPS + 3] ^= 0x80;
+    ok_int(tbt_fec_alloc_unpack(buf, &a2), -EPROTO,
+           "ALLOC mask is CRC-covered");
+    tbt_fec_alloc_pack(&a, buf);
+    buf[TBT_FEC_ALLOC_SWITCH_PKT] ^= 1;
+    ok_int(tbt_fec_alloc_unpack(buf, &a2), -EPROTO,
+           "ALLOC switch_pkt is CRC-covered");
+    tbt_fec_alloc_pack(&a, buf);
+    buf[TBT_FEC_ALLOC_BLOCK_BASE] ^= 1;
+    ok_int(tbt_fec_alloc_unpack(buf, &a2), -EPROTO,
+           "ALLOC block_base is CRC-covered");
+
+    /* Body flags: ACK and DONE only, in any combination. */
+    tbt_fec_alloc_pack(&a, buf);
+    buf[TBT_FEC_ALLOC_FLAGS] = TBT_FEC_ALLOC_F_ACK;
+    alloc_fix_crc(buf);
+    ok_int(tbt_fec_alloc_unpack(buf, &a2), 0, "ALLOC ACK flag");
+    buf[TBT_FEC_ALLOC_FLAGS] = TBT_FEC_ALLOC_F_DONE;
+    alloc_fix_crc(buf);
+    ok_int(tbt_fec_alloc_unpack(buf, &a2), 0, "ALLOC DONE flag");
+    buf[TBT_FEC_ALLOC_FLAGS] = 0;
+    alloc_fix_crc(buf);
+    ok_int(tbt_fec_alloc_unpack(buf, &a2), 0, "ALLOC no flags");
+    buf[TBT_FEC_ALLOC_FLAGS] = 0x04;
+    alloc_fix_crc(buf);
+    ok_int(tbt_fec_alloc_unpack(buf, &a2), -EPROTO,
+           "ALLOC unknown body flags");
+
+    ok_int(tbt_fec_alloc_pack(NULL, buf), -EINVAL, "ALLOC pack NULL body");
+    ok_int(tbt_fec_alloc_pack(&a, NULL), -EINVAL, "ALLOC pack NULL out");
+    ok_int(tbt_fec_alloc_unpack(NULL, &a2), -EPROTO, "ALLOC unpack NULL");
+
+    /* Header gate: exactly 64 bytes, sid != 0, seq and block_id zero. */
+    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
+    h.sid = 7;
+    ok_int(tbt_fec_hdr_check(&h, 64), 0, "ALLOC baseline");
+    h.sid = 0;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC sid=0");
+    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
+    h.sid = 7;
+    h.seq = 1;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC seq != 0");
+    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
+    h.sid = 7;
+    h.block_id = 1;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC block_id != 0");
+    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN - 1);
+    h.sid = 7;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC body 63");
+    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN + 1);
+    h.sid = 7;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC body 65");
+    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
+    h.sid = 7;
+    h.n = 1;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC n != 0");
+    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
+    h.sid = 7;
+    h.m = 1;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC m != 0");
+    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
+    h.sid = 7;
+    h.share_index = 1;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC share_index != 0");
+    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
+    h.sid = 7;
+    h.win_len = 1;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC win_len != 0");
+    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
+    h.sid = 7;
+    h.conv = 0x1006;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC old conv");
+    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
+    h.sid = 7;
+    h.reserved = 1;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC header reserved != 0");
 }
 
 /* ------------------------------------------------------------------ *
@@ -1549,9 +1690,148 @@ static void test_group_mapping(void)
 }
 
 /* ------------------------------------------------------------------ *
+ * 9.0. Physical group bitmap: a flow owns a subset of the session's
+ * groups. The map turns a flow-local group into a physical carrier, so
+ * two flows can name the same local seq without colliding on the wire.
+ * ------------------------------------------------------------------ */
+
+static void test_group_map(void)
+{
+    u8 mask[TBT_FEC_BITMAP_BYTES];
+    u8 mask_b[TBT_FEC_BITMAP_BYTES];
+    u16 map[TBT_FEC_MAX_GROUPS];
+    u16 map_b[TBT_FEC_MAX_GROUPS];
+    u16 count, i;
+    u64 seq;
+
+    /* All 16 bits of a 16-group session: identity map. */
+    memset(mask, 0, sizeof(mask));
+    for (i = 0; i < 16; i++)
+        tbt_fec_bitmap_set(mask, i);
+    count = 0;
+    ok(tbt_fec_group_mask_valid(mask, 16, &count), "mask all ones is valid",
+       NULL);
+    ok_u32(count, 16, "mask all ones count");
+    ok_u32(tbt_fec_group_map_build(mask, 16, map), 16, "map all ones count");
+    for (i = 0; i < 16; i++)
+        ok_u32(map[i], i, "map all ones is the identity");
+
+    /* A 32-group session split 16/16: each flow owns one contiguous half. */
+    memset(mask, 0, sizeof(mask));
+    for (i = 0; i < 16; i++)
+        tbt_fec_bitmap_set(mask, i);
+    count = 0;
+    ok(tbt_fec_group_mask_valid(mask, 32, &count), "low half is valid", NULL);
+    ok_u32(count, 16, "low half count");
+    ok_u32(tbt_fec_group_map_build(mask, 32, map), 16, "low half map count");
+    for (i = 0; i < 16; i++)
+        ok_u32(map[i], i, "low half map");
+
+    memset(mask_b, 0, sizeof(mask_b));
+    for (i = 16; i < 32; i++)
+        tbt_fec_bitmap_set(mask_b, i);
+    count = 0;
+    ok(tbt_fec_group_mask_valid(mask_b, 32, &count), "high half is valid",
+       NULL);
+    ok_u32(count, 16, "high half count");
+    ok_u32(tbt_fec_group_map_build(mask_b, 32, map_b), 16,
+           "high half map count");
+    for (i = 0; i < 16; i++)
+        ok_u32(map_b[i], 16 + i, "high half map");
+
+    /* Interleaved bits keep ascending physical order. */
+    memset(mask, 0, sizeof(mask));
+    for (i = 0; i < 32; i += 2)
+        tbt_fec_bitmap_set(mask, i);
+    ok_u32(tbt_fec_group_map_build(mask, 32, map), 16, "even bits map count");
+    for (i = 0; i < 16; i++)
+        ok_u32(map[i], 2 * i, "even bits map");
+
+    /* A single bit names a one-group flow. */
+    memset(mask, 0, sizeof(mask));
+    tbt_fec_bitmap_set(mask, 7);
+    count = 0;
+    ok(tbt_fec_group_mask_valid(mask, 16, &count), "single bit is valid",
+       NULL);
+    ok_u32(count, 1, "single bit count");
+    ok_u32(tbt_fec_group_map_build(mask, 16, map), 1, "single bit map count");
+    ok_u32(map[0], 7, "single bit map");
+    for (seq = 0; seq < 8; seq++)
+        ok_u32(tbt_fec_carrier_of_seq_map(seq, 0, 1, 4, 4, map),
+               7 * 8 + (u32)(seq % 4), "single group carrier");
+
+    /* Empty and out-of-range sets are invalid. */
+    memset(mask, 0, sizeof(mask));
+    count = 0;
+    ok(!tbt_fec_group_mask_valid(mask, 16, &count), "empty mask is invalid",
+       NULL);
+    ok_u32(tbt_fec_group_map_build(mask, 16, map), 0, "empty mask map");
+    tbt_fec_bitmap_set(mask, 0);
+    tbt_fec_bitmap_set(mask, 16);
+    ok(!tbt_fec_group_mask_valid(mask, 16, &count),
+       "bit at total_groups is invalid", NULL);
+    ok_u32(tbt_fec_group_map_build(mask, 16, map), 0,
+           "out-of-range bit map");
+    tbt_fec_bitmap_set(mask, 255);
+    ok(!tbt_fec_group_mask_valid(mask, 255, &count),
+       "bit 255 over 255 groups is invalid", NULL);
+    ok(tbt_fec_group_mask_valid(mask, 256, &count), "bit 255 over 256 groups",
+       NULL);
+    ok(!tbt_fec_group_mask_valid(NULL, 16, &count), "NULL mask is invalid",
+       NULL);
+    ok(!tbt_fec_group_mask_valid(mask, 16, NULL), "NULL count is invalid",
+       NULL);
+    ok(!tbt_fec_group_mask_valid(mask, 0, &count), "zero groups is invalid",
+       NULL);
+    ok(!tbt_fec_group_mask_valid(mask, TBT_FEC_MAX_GROUPS + 1, &count),
+       "over 256 groups is invalid", NULL);
+
+    /* G=16, two flows: the same local seq maps to different physical
+     * carriers because the local group is resolved through each flow's map. */
+    memset(mask, 0, sizeof(mask));
+    for (i = 0; i < 16; i++)
+        tbt_fec_bitmap_set(mask, i);
+    ok_u32(tbt_fec_group_map_build(mask, 16, map), 16, "two-flow map");
+    for (seq = 0; seq < 64; seq++)
+    {
+        u16 ca = tbt_fec_carrier_of_seq_map(seq, 0, 16, 4, 4, map);
+        u16 cb = tbt_fec_carrier_of_seq_map(seq, 0, 16, 4, 4, map_b);
+
+        ok(ca != cb, "two flows, same local seq, different carrier", NULL);
+    }
+    ok_u32(tbt_fec_carrier_of_seq_map(5, 0, 16, 4, 4, map), 5 * 8 + 0,
+           "low half carrier of seq 5");
+    ok_u32(tbt_fec_carrier_of_seq_map(5, 0, 16, 4, 4, map_b), 21 * 8 + 0,
+           "high half carrier of seq 5");
+
+    /* G=32 with every group set must reproduce the legacy carrier formula
+     * byte for byte, with and without a non-zero origin. */
+    memset(mask, 0, sizeof(mask));
+    for (i = 0; i < 32; i++)
+        tbt_fec_bitmap_set(mask, i);
+    ok_u32(tbt_fec_group_map_build(mask, 32, map), 32, "G=32 map count");
+    for (seq = 0; seq < 4096; seq++)
+    {
+        u16 want = (u16)(tbt_fec_group_of_seq(seq, 32) * 8 +
+                         tbt_fec_share_of_seq_base(seq, 0, 32, 4));
+
+        ok_u32(tbt_fec_carrier_of_seq_map(seq, 0, 32, 4, 4, map), want,
+               "G=32 carrier matches the legacy formula");
+    }
+    for (seq = 1000; seq < 1000 + 4096; seq += 37)
+    {
+        u16 want = (u16)(tbt_fec_group_of_seq_base(seq, 1000, 32) * 8 +
+                         tbt_fec_share_of_seq_base(seq, 1000, 32, 4));
+
+        ok_u32(tbt_fec_carrier_of_seq_map(seq, 1000, 32, 4, 4, map), want,
+               "G=32 carrier matches the base formula");
+    }
+}
+
+/* ------------------------------------------------------------------ *
  * 9a. Relative mapping: base_pkt/base_block == 0 must reproduce the
  * 0.2.x formulas exactly, and a non-zero origin is the coordinate system
- * the 0x1006 shape switch uses (TBT_FEC_CONV 0x1006).
+ * the 0x1007 shape switch uses (TBT_FEC_CONV 0x1007).
  * ------------------------------------------------------------------ */
 
 static void test_base_mapping(void)
@@ -1664,7 +1944,7 @@ static void test_base_mapping(void)
            "base real len matches legacy");
 }
 
-/* The 0.2.x peer sends HELLO body[0] == 2. 0.3.0 names 3, and
+/* The 0.2.x peer sends HELLO body[0] == 2. 0.4.0 names 4, and
  * tbt_rx_hello() compares the byte exactly, so the first HELLO fails with
  * -EPROTO and the carrier closes. */
 static void test_wire_version(void)
@@ -1673,12 +1953,12 @@ static void test_wire_version(void)
 
     memset(hello, 0, sizeof(hello));
     hello[0] = TBT_WIRE_VERSION_V6;
-    ok(hello[0] == 3, "0.3.0 FEC HELLO names version 3", NULL);
+    ok(hello[0] == 4, "0.4.0 FEC HELLO names version 4", NULL);
     hello[0] = 2;
     ok(hello[0] != TBT_WIRE_VERSION_V6,
        "0.2.x HELLO version 2 is refused", NULL);
     ok(TBT_WIRE_VERSION == 1, "legacy ARQ HELLO stays version 1", NULL);
-    ok(TBT_FEC_CONV == 0x1006u, "0x1006 is the adaptive FEC revision", NULL);
+    ok(TBT_FEC_CONV == 0x1007u, "0x1007 is the multi-stream FEC revision", NULL);
 }
 
 /* ------------------------------------------------------------------ *
@@ -1845,6 +2125,65 @@ static void test_group_reassembly(void)
     free(out);
     free(present);
     tbt_fec_grouped_free(codec);
+}
+
+/* ------------------------------------------------------------------ *
+ * 9c. Credit split: the sender window is (K-2) super-blocks, bounded by
+ * the packet cap. Splitting one G=32 flow into two G=16 flows must keep
+ * the same aggregate window, because the two rings hold the same packets.
+ * ------------------------------------------------------------------ */
+
+static void test_credit_split(void)
+{
+    enum { N = 4, K = 64, SLOTS = 64 };
+    u32 prev = 0;
+    u32 credit;
+    u16 g;
+
+    /* No packet cap: credit follows K-2 whole super-blocks and rises with
+     * the group count. */
+    for (g = 1; g <= 32; g++)
+    {
+        credit = tbt_fec_credit_packets(g, N, K, SLOTS, 0);
+        ok_u32(credit % ((u32)g * N), 0, "credit is whole super-blocks");
+        ok(credit <= (u32)(K - 2) * g * N,
+           "credit is at most K-2 super-blocks", NULL);
+        ok(credit >= prev, "credit is monotonic in groups", NULL);
+        prev = credit;
+    }
+    ok_u32(tbt_fec_credit_packets(16, N, K, SLOTS, 0) * 2,
+           tbt_fec_credit_packets(32, N, K, SLOTS, 0),
+           "two G=16 flows equal one G=32 flow");
+    ok_u32(tbt_fec_credit_packets(32, N, K, SLOTS, 0),
+           (u32)(K - 2) * 32 * N, "G=32 credit is K-2 super-blocks");
+
+    /* A packet cap bounds every shape. */
+    for (g = 1; g <= 32; g++)
+    {
+        credit = tbt_fec_credit_packets(g, N, K, SLOTS, TBT_FEC_CREDIT_MAX);
+        ok(credit <= TBT_FEC_CREDIT_MAX, "credit is bounded by the cap", NULL);
+        ok(credit >= 1, "credit grants at least one packet", NULL);
+    }
+
+    /* A small arena slot count caps K before the ring K does. */
+    ok_u32(tbt_fec_credit_packets(32, N, K, 8, 0), 6 * 32 * N,
+           "slots cap the credit to K-2 blocks");
+    ok_u32(tbt_fec_credit_packets(16, N, K, 8, 0) * 2,
+           tbt_fec_credit_packets(32, N, K, 8, 0),
+           "two capped G=16 flows equal one capped G=32 flow");
+
+    /* A K too small for the two-block slack still grants one super-block. */
+    ok_u32(tbt_fec_credit_packets(32, N, 2, SLOTS, 0), 32 * N,
+           "K=2 grants one super-block");
+    ok_u32(tbt_fec_credit_packets(32, N, 0, SLOTS, 0), 32 * N,
+           "K=0 grants one super-block");
+    /* A cap below one super-block returns the single-packet floor. */
+    ok_u32(tbt_fec_credit_packets(32, N, K, SLOTS, 1), 1,
+           "cap below a super-block floors at one packet");
+    ok_u32(tbt_fec_credit_packets(0, N, K, SLOTS, 0), 1,
+           "zero groups floors at one packet");
+    ok_u32(tbt_fec_credit_packets(32, 0, K, SLOTS, 0), 1,
+           "zero n floors at one packet");
 }
 
 /* ------------------------------------------------------------------ *
@@ -2430,13 +2769,16 @@ int main(void)
     test_crc();
     test_bitmap();
     test_control();
+    test_alloc();
     test_wire_version();
     test_rlnc_single();
     test_rlnc_loss_reorder();
     test_grouped();
     test_group_mapping();
+    test_group_map();
     test_base_mapping();
     test_group_reassembly();
+    test_credit_split();
     test_params();
     test_ops();
     test_framing();

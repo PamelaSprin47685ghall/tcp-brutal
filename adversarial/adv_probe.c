@@ -385,6 +385,17 @@ static int send_frame(int fd, const struct fr *f, const void *body, size_t blen)
     return send_chunk(fd, rec, 32 + blen);
 }
 
+/* OPEN names the flow's 256-bit physical group bitmap (TBT_CONV 0x0007).
+ * A non-FEC flow sends 32 zero bytes; both use the same length rule. */
+static int send_open(int fd, int idx, uint32_t sid, uint8_t sidhi)
+{
+    static const unsigned char mask[TBT_OPEN_BODY_LEN];
+    struct fr o = { .type = TBT_F_OPEN, .path = (uint8_t)idx, .sid = sid,
+                    .sidhi = sidhi, .conv = TBT_CONV };
+
+    return send_frame(fd, &o, mask, sizeof(mask));
+}
+
 /* The raw profile has no HTTP container: one record follows another.  The
  * near side's raw carrier keeps a partial record in the module and returns
  * -EAGAIN for the *next* frame, which is the narrow path review 22 is about;
@@ -1065,11 +1076,7 @@ static int far_suite(int port, int tunnel)
         return failures;
     }
     result("far.anchor", 1, "carrier joined index 0, far generation %d", anchor_gen);
-    {
-        struct fr o = { .type = TBT_F_OPEN, .path = 0, .sid = sid, .conv = TBT_CONV };
-
-        send_frame(anchor, &o, NULL, 0);
-    }
+    send_open(anchor, 0, sid, 0);
     msleep(300);
     klog_check("far.anchor");
 
@@ -1268,13 +1275,11 @@ static int far_suite(int port, int tunnel)
         }
         else
         {
-            struct fr o = { .type = TBT_F_OPEN, .path = 1, .sid = sid2,
-                            .conv = TBT_CONV };
             unsigned char s2body[8192];
             int echoed = 0, crossed = 0, closed = 0;
             long end2;
 
-            send_frame(fd2, &o, NULL, 0);
+            send_open(fd2, 1, sid2, 0);
             msleep(300);
             send_data(fd2, 1, sid2, 0, 0, "two!", 4);
             end2 = now_ms() + 4000;
@@ -1649,11 +1654,7 @@ static int mode_overlap(int port, int tunnel)
         result("far.overlap", 0, "carrier join failed");
         return failures;
     }
-    {
-        struct fr o = { .type = TBT_F_OPEN, .path = 0, .sid = sid, .conv = TBT_CONV };
-
-        send_frame(fd, &o, NULL, 0);
-    }
+    send_open(fd, 0, sid, 0);
     msleep(300);
 
     for (round = 0; round < 3; round++)
@@ -1745,11 +1746,7 @@ static int mode_secondcarrier(int port, int tunnel)
         result("far.second_carrier", 0, "the first carrier did not join");
         return failures;
     }
-    {
-        struct fr o = { .type = TBT_F_OPEN, .path = 0, .sid = sid, .conv = TBT_CONV };
-
-        send_frame(fd0, &o, NULL, 0);
-    }
+    send_open(fd0, 0, sid, 0);
     msleep(300);
     send_data(fd0, 0, sid, 0, 0, "alpha", 5);
 
@@ -4336,16 +4333,11 @@ static int mode_hole(int port, int tunnel)
         result("hole.created", 0, "carrier join failed");
         return 1;
     }
+    if (send_open(fd, 0, sid, 0))
     {
-        struct fr o = { .type = TBT_F_OPEN, .path = 0, .sid = sid,
-                        .conv = TBT_CONV };
-
-        if (send_frame(fd, &o, NULL, 0))
-        {
-            result("hole.created", 0, "OPEN send failed");
-            close(fd);
-            return 1;
-        }
+        result("hole.created", 0, "OPEN send failed");
+        close(fd);
+        return 1;
     }
     msleep(300);
     if (send_data(fd, 0, sid, 0, 1, "X", 1))

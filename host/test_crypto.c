@@ -1339,6 +1339,181 @@ static void test_body_share(void)
     }
 }
 
+/* FEC v7 headers carry a stream-local seq, so two flows may name the same
+ * (seq, parity, share_index). The flow variant must fold the 40-bit sid
+ * into the nonce; sid == 0 must reproduce the single-stream cipher. */
+static void test_crypto_flow(void)
+{
+    u8 key[32];
+    u8 nonce[8];
+    u8 payload[1024];
+    u8 a[1024];
+    u8 b[1024];
+    u8 old[1024];
+    struct tbt_crypto_ctx ctx;
+    const u64 seq = 0x1234;
+    const u64 sid_a = 0x123456789aULL;
+    const u64 sid_b = 0x9876543210ULL;
+    int p;
+    u16 share;
+
+    fill(key, sizeof(key), 0x91);
+    fill(nonce, sizeof(nonce), 0x92);
+    fill(payload, sizeof(payload), 0x93);
+
+    if (tbt_crypto_init(&ctx, key, nonce, 0) != 0)
+    {
+        printf("FAIL flow: init error\n");
+        failures++;
+        return;
+    }
+
+    /* Same (seq, parity, share), two flows: different ciphertext. */
+    for (p = 0; p <= 1; p++)
+    {
+        bool parity = p != 0;
+
+        memcpy(a, payload, sizeof(a));
+        memcpy(b, payload, sizeof(b));
+        if (tbt_crypto_body_xor_flow(&ctx, sid_a, seq, parity, 3, a,
+                                     sizeof(a)) != 0 ||
+            tbt_crypto_body_xor_flow(&ctx, sid_b, seq, parity, 3, b,
+                                     sizeof(b)) != 0)
+        {
+            printf("FAIL flow: xor error\n");
+            failures++;
+            return;
+        }
+        if (memcmp(a, b, sizeof(a)) == 0)
+        {
+            printf("FAIL flow: two flows reused the keystream (parity=%d)\n",
+                   p);
+            failures++;
+        }
+        else
+        {
+            printf("PASS flow: sid separates the keystream (parity=%d)\n", p);
+        }
+    }
+
+    /* sid == 0 is the old single-stream domain, byte for byte. */
+    for (share = 0; share < 4; share++)
+    {
+        memcpy(a, payload, sizeof(a));
+        memcpy(old, payload, sizeof(old));
+        if (tbt_crypto_body_xor_flow(&ctx, 0, seq, true, share, a,
+                                     sizeof(a)) != 0 ||
+            tbt_crypto_body_xor_share(&ctx, seq, true, share, old,
+                                      sizeof(old)) != 0)
+        {
+            printf("FAIL flow: sid=0 xor error\n");
+            failures++;
+            return;
+        }
+        if (memcmp(a, old, sizeof(a)) != 0)
+        {
+            printf("FAIL flow: sid=0 differs from the share variant\n");
+            failures++;
+            break;
+        }
+    }
+    if (share == 4)
+        printf("PASS flow: sid=0 matches the share variant\n");
+
+    memcpy(a, payload, sizeof(a));
+    memcpy(old, payload, sizeof(old));
+    tbt_crypto_body_xor_flow(&ctx, 0, seq, false, 9, a, sizeof(a));
+    tbt_crypto_body_xor(&ctx, seq, false, old, sizeof(old));
+    if (memcmp(a, old, sizeof(a)) != 0)
+    {
+        printf("FAIL flow: sid=0 DATA differs from the body variant\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS flow: sid=0 DATA matches the body variant\n");
+    }
+
+    /* Both halves of the sid enter the nonce. */
+    memcpy(a, payload, sizeof(a));
+    memcpy(b, payload, sizeof(b));
+    tbt_crypto_body_xor_flow(&ctx, sid_a, seq, true, 3, a, sizeof(a));
+    tbt_crypto_body_xor_flow(&ctx, sid_a | (1ULL << 32), seq, true, 3, b,
+                             sizeof(b));
+    if (memcmp(a, b, sizeof(a)) == 0)
+    {
+        printf("FAIL flow: the sid high half is ignored\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS flow: the sid high half is mixed\n");
+    }
+
+    /* Independent construction: the 40-bit sid XORs the 64-bit nonce, and
+     * the parity share_index XORs its high word. */
+    {
+        u8 fnonce[8];
+        u64 n = 0;
+        u64 v;
+        size_t j;
+
+        for (j = 0; j < 8; j++)
+            n |= (u64)nonce[j] << (8 * j);
+        v = n ^ sid_a ^ ((u64)3 << 32);
+        for (j = 0; j < 8; j++)
+            fnonce[j] = (u8)(v >> (8 * j));
+        memcpy(old, payload, sizeof(old));
+        if (tbt_chacha8_xor(key, sizeof(key), fnonce, (seq << 8) | 0x80u, 8,
+                            old, sizeof(old)) != 0)
+        {
+            printf("FAIL flow: direct xor error\n");
+            failures++;
+        }
+        else if (memcmp(a, old, sizeof(a)) != 0)
+        {
+            printf("FAIL flow: sid does not XOR the nonce words\n");
+            failures++;
+        }
+        else
+        {
+            printf("PASS flow: sid XORs the nonce words\n");
+        }
+    }
+
+    /* Decryption is the same call with the same sid. */
+    memcpy(a, payload, sizeof(a));
+    if (tbt_crypto_body_xor_flow(&ctx, sid_a, seq, true, 3, a, sizeof(a)) !=
+            0 ||
+        tbt_crypto_body_xor_flow(&ctx, sid_a, seq, true, 3, a, sizeof(a)) !=
+            0 ||
+        memcmp(a, payload, sizeof(a)) != 0)
+    {
+        printf("FAIL flow: round trip did not restore the payload\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS flow: round trip restores the payload\n");
+    }
+
+    /* Bounds are the same as the share variant. */
+    if (tbt_crypto_body_xor_flow(NULL, sid_a, seq, false, 0, payload, 1) !=
+            -EINVAL ||
+        tbt_crypto_body_xor_flow(&ctx, sid_a, seq, false, 0, payload,
+                                 TBT_CRYPTO_BODY_MAX + 1) != -EINVAL ||
+        tbt_crypto_body_xor_flow(&ctx, sid_a, TBT_CRYPTO_SEQ_MAX + 1, false,
+                                 0, payload, 1) != -EINVAL)
+    {
+        printf("FAIL flow: invalid arguments accepted\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS flow: invalid arguments rejected\n");
+    }
+}
+
 /* The far side's HELLO crypto check, as tbt_rx_hello_crypto() runs it. The
  * first HELLO is adopted; every later one must resolve to the same key and
  * repeat the same TX nonce, or the carrier is refused. */
@@ -1602,6 +1777,7 @@ int main(void)
     test_wipe();
     test_body_xor();
     test_body_share();
+    test_crypto_flow();
     test_hello();
     test_direction_nonce();
     test_pair();

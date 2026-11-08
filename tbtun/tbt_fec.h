@@ -302,6 +302,20 @@ struct tbt_fec_nack
     u8 share_mask[TBT_FEC_BITMAP_BYTES];
 };
 
+/* Group rebalancing request/ack (0x1007, 64 bytes). See tbt_uapi.h for the
+ * byte offsets; this struct is the host-side mirror, not the wire layout.
+ * switch_pkt and block_base are flow-local, so the same body means the same
+ * thing in either direction. */
+struct tbt_fec_alloc
+{
+    u32 epoch;
+    u8 group_mask[TBT_FEC_BITMAP_BYTES];
+    u8 flags; /* TBT_FEC_ALLOC_F_ACK / _DONE */
+    u64 switch_pkt;
+    u64 block_base;
+    u32 crc32c;
+};
+
 /* Shape change request (0x1006, 48 bytes). See tbt_uapi.h for the byte
  * offsets; this struct is the host-side mirror, not the wire layout. */
 struct tbt_fec_cfg
@@ -357,6 +371,13 @@ int tbt_fec_ack_unpack(const u8 in[TBT_FEC_ACK_LEN], struct tbt_fec_ack *a);
 int tbt_fec_nack_pack(const struct tbt_fec_nack *n, u8 out[TBT_FEC_NACK_LEN]);
 int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
 
+/* ALLOC pack returns TBT_FEC_ALLOC_LEN or -EINVAL. Unpack returns 0 or
+ * -EPROTO. Pack computes crc32c over bytes +0..+55. */
+int tbt_fec_alloc_pack(const struct tbt_fec_alloc *a,
+                       u8 out[TBT_FEC_ALLOC_LEN]);
+int tbt_fec_alloc_unpack(const u8 in[TBT_FEC_ALLOC_LEN],
+                         struct tbt_fec_alloc *a);
+
 /* ------------------------------------------------------------------ *
  * Bounded replay ring and NACK pacing
  *
@@ -396,6 +417,10 @@ struct tbt_fec_replay;
  * K = 1, or when an allocation fails. The effective K is then 0 and the data
  * plane falls back to parity and the TCP retransmission. */
 struct tbt_fec_replay *tbt_fec_replay_new(u16 groups, u16 n, u16 m, u16 s);
+/* Same ring with an explicit K. A multi-stream session shares one K across
+ * flows and sizes each ring by its own group count. */
+struct tbt_fec_replay *tbt_fec_replay_new_k(u16 groups, u16 n, u16 m, u16 s,
+                                            u16 k);
 void tbt_fec_replay_free(struct tbt_fec_replay *r);
 u16 tbt_fec_replay_k(const struct tbt_fec_replay *r);
 /* Effective K for this shape without allocating: the largest k <=
@@ -908,6 +933,69 @@ static inline u64 tbt_fec_block_of_seq_base(u64 seq, u64 base_pkt,
 static inline u64 tbt_fec_block_of_seq(u64 seq, u16 groups, u16 k)
 {
     return tbt_fec_block_of_seq_base(seq, 0, 0, groups, (u16)k);
+}
+
+/* A stream owns a subset of the session's physical groups. `mask` is the
+ * 256-bit set (bit p = physical group p); `map[local]` is the physical group
+ * of local index 0..count-1. Bits at or above total_groups are invalid, and
+ * an empty set is invalid: every stream needs at least one group. */
+static inline bool tbt_fec_group_mask_valid(const u8 mask[TBT_FEC_BITMAP_BYTES],
+                                            u16 total_groups, u16 *count)
+{
+    u16 p, n = 0;
+
+    if (!mask || !count || !total_groups ||
+        total_groups > TBT_FEC_MAX_GROUPS)
+        return false;
+    for (p = 0; p < TBT_FEC_MAX_GROUPS; p++)
+    {
+        bool set = (mask[p / 8] & (u8)(1u << (p % 8))) != 0;
+
+        if (set && p >= total_groups)
+            return false;
+        if (set)
+            n++;
+    }
+    if (!n)
+        return false;
+    *count = n;
+    return true;
+}
+
+/* Fill map[] with the physical groups named by mask, in ascending order.
+ * Returns the count, or 0 for an invalid mask. */
+static inline u16 tbt_fec_group_map_build(const u8 mask[TBT_FEC_BITMAP_BYTES],
+                                          u16 total_groups,
+                                          u16 map[TBT_FEC_MAX_GROUPS])
+{
+    u16 p, n = 0;
+
+    if (!tbt_fec_group_mask_valid(mask, total_groups, &n))
+        return 0;
+    n = 0;
+    for (p = 0; p < total_groups; p++)
+        if (mask[p / 8] & (u8)(1u << (p % 8)))
+            map[n++] = p;
+    return n;
+}
+
+static inline u16 tbt_fec_phys_group(u16 local,
+                                     const u16 map[TBT_FEC_MAX_GROUPS])
+{
+    return map[local];
+}
+
+/* Carrier of the share seq names, for a flow whose local group g maps to
+ * map[g]. The record does not carry the carrier; both ends derive it from
+ * seq and the same bitmap. */
+static inline u16 tbt_fec_carrier_of_seq_map(u64 seq, u64 base_pkt, u16 groups,
+                                             u16 n, u16 m,
+                                             const u16 map[TBT_FEC_MAX_GROUPS])
+{
+    u16 g = tbt_fec_group_of_seq_base(seq, base_pkt, groups);
+    u16 share = tbt_fec_share_of_seq_base(seq, base_pkt, groups, n);
+
+    return (u16)(tbt_fec_phys_group(g, map) * (n + m) + share);
 }
 
 /* Global seq of packet p (0..n-1) of group `group` inside `block_id`. The

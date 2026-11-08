@@ -316,15 +316,23 @@ static void tbt_tx_announce_carrier(struct tbt_session *sess,
                                     struct tbt_stream *st,
                                     struct tbt_carrier *c, gfp_t gfp)
 {
+    u8 body[TBT_FEC_BITMAP_BYTES] = {0};
+    struct tbt_fec_flow *flow;
+
     if (!c || !atomic_read(&c->connected) || !READ_ONCE(c->hello_sent) ||
         atomic_read(&c->stopping))
         return;
     if (tbt_stream_announced(st, c))
         return;
+    /* FEC: the OPEN body is this flow's physical group bitmap. A non-FEC
+     * session sends 32 zero bytes so one length rule covers both. */
+    flow = READ_ONCE(st->fec_flow);
+    if (sess->fec && flow)
+        memcpy(body, flow->group_mask, sizeof(body));
     WRITE_ONCE(st->tx_open_sent, true);
     atomic_set(&c->up, 0);
     if (tbt_tx_control_pinned(sess, st, c->index, TBT_F_OPEN, st->sid, 0,
-                              NULL, 0, true, gfp))
+                              body, sizeof(body), true, gfp))
         atomic_set(&c->up, 1);
 }
 
@@ -341,8 +349,9 @@ void tbt_tx_announce(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
 }
 
 /* FIN is stream-ordered: its seq is the byte offset after the last DATA byte,
- * so a receiver that still has a hole does not shut the write side early. One
- * copy per usable carrier, at most one per (stream, index). A second call is
+ * so a receiver that still has a hole does not shut the write side early. On
+ * a FEC session the 16-byte body names flow-local packet seqs. One copy per
+ * usable carrier, at most one per (stream, index). A second call is
  * idempotent: the per-index mask already names every copy. */
 int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
 {
@@ -367,9 +376,9 @@ int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
     spin_lock(&sess->tx_lock);
     /* Freeze the offset once: a retry must name the same byte, even if a late
      * capture submitted more DATA after the first request. The FEC packet
-     * bounds are frozen with it: pkt_end is the packet after the last DATA
-     * packet, pkt_base the stream's first packet (or pkt_end when the stream
-     * sent no DATA). */
+     * bounds are frozen with it: pkt_end is this flow's packet after its last
+     * DATA packet, pkt_base its first packet (or pkt_end when the flow sent
+     * no DATA). Both are flow-local sequence numbers. */
     if (!st->tx_fin_seq_set)
     {
         st->tx_fin_seq = st->tx_seq;
@@ -3260,10 +3269,15 @@ ctl_fail:
                 break;
             case TBT_F_FIN:
             case TBT_F_RST:
-                /* The old stream's close control is on the wire.  Give the
-                 * far side a moment to process it before the next stream's
-                 * OPEN (which is inserted at the queue head) can race it. */
-                if (!READ_ONCE(sess->far_sid) && READ_ONCE(sess->n_pending))
+                /* The close control is on the wire. Give the far side a
+                 * moment to process it before the next stream's OPEN (which
+                 * is inserted at the queue head) can race it. A FEC session
+                 * may start the next stream while the previous one is still
+                 * draining, so its gate is the free-group check, not
+                 * `far_sid`. */
+                if (READ_ONCE(sess->n_pending) &&
+                    (sess->fec ? tbt_fec_flow_can_admit(sess) :
+                                 !READ_ONCE(sess->far_sid)))
                     tbt_session_arm(sess, TBT_SW_PENDING,
                                     msecs_to_jiffies(1));
                 break;
