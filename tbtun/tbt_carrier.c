@@ -3619,17 +3619,18 @@ static void tbt_target_body(struct tbt_stream *st)
         goto fail;
     }
     tcp_sk(s->sk)->nonagle = TCP_NAGLE_OFF;
-    WRITE_ONCE(st->target, s);
     err = tbt_target_attach(st, s);
-    if (err == -ECANCELED)
+    if (err)
     {
-        WRITE_ONCE(st->target, NULL);
+        /* Attach publishes st->sk and st->target under sess->lock. A failed
+         * attach owns no stream reference: close the new socket here, or a
+         * concurrent stream kill sees a target with no sk and leaks it. */
         tbt_sock_abort_on_close(s);
         sock_release(s);
+        if (err == -EALREADY)
+            return;
         goto fail;
     }
-    if (err)
-        pr_debug("tbtun: far tunnel %llu target waiting for OPEN\n", t->cfg.id);
     tbt_tx_pump(sess);
     return;
 fail:

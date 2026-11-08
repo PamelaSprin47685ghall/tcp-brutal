@@ -621,19 +621,19 @@ void tbt_sock_abort_on_close(struct socket *sock)
 static void tbt_stream_release_socket_now(struct tbt_stream *st)
 {
     struct tbt_session *sess = st->sess;
-    struct sock *sk = READ_ONCE(st->sk);
-    struct socket *sock;
+    struct socket *target, *sock, *other = NULL;
+    struct sock *sk;
     bool kick = false;
 
-    if (!sk)
-        return;
-    sock = sk->sk_socket;
-
-    /* Unpublish the target *before* detach: a concurrent far OPEN must not
-     * see the old target with sk_user_data already cleared and mistake it
-     * for an orphan target. */
+    /* A target work that published st->target but not st->sk (or a kill that
+     * raced that publish) must still close the target. Adopt the target's sk
+     * for detach/restore, then clear both under the session lock. */
     spin_lock(&sess->lock);
-    if (st->target == sock)
+    target = READ_ONCE(st->target);
+    if (!READ_ONCE(st->sk) && target && target->sk)
+        WRITE_ONCE(st->sk, target->sk);
+    sk = READ_ONCE(st->sk);
+    if (target)
     {
         st->target = NULL;
         st->target_started = false;
@@ -641,14 +641,32 @@ static void tbt_stream_release_socket_now(struct tbt_stream *st)
     }
     spin_unlock(&sess->lock);
 
-    tbt_sock_detach(st); /* idempotent: the attached bit */
-    /* Publish NULL before the release: a concurrent kill reads st->sk. */
-    WRITE_ONCE(st->sk, NULL);
-    if (!sock)
+    if (!sk && !target)
         return;
 
-    tbt_sock_abort_on_close(sock);
-    sock_release(sock);
+    /* Detach/restore/cancel while st->sk is still visible to the work items. */
+    tbt_sock_detach(st);
+    if (target && target->sk && (!sk || target->sk != sk))
+        tbt_sk_ops_restore(target->sk, &sess->def_ops);
+
+    spin_lock(&sess->lock);
+    WRITE_ONCE(st->sk, NULL);
+    spin_unlock(&sess->lock);
+
+    sock = target ? target : (sk && sk->sk_socket ? sk->sk_socket : NULL);
+    if (sk && sk->sk_socket && sk->sk_socket != sock)
+        other = sk->sk_socket;
+
+    if (other)
+    {
+        tbt_sock_abort_on_close(other);
+        sock_release(other);
+    }
+    if (sock)
+    {
+        tbt_sock_abort_on_close(sock);
+        sock_release(sock);
+    }
 
     /* The old target is unpublished; a new far-side stream may be waiting. */
     (void)kick;
@@ -888,32 +906,40 @@ void tbt_far_open_seen(struct tbt_stream *st)
 {
     struct tbt_session *sess = st->sess;
 
+    struct socket *tg;
+
     WRITE_ONCE(st->state, TBT_ST_OPEN);
     tbt_tx_announce(sess, st, GFP_ATOMIC);
-    if (st->target)
-        tbt_target_attach(st, st->target);
+    tg = READ_ONCE(st->target);
+    if (tg)
+        tbt_target_attach(st, tg);
     else
         tbt_carrier_open_target(st);
 }
 
 int tbt_target_attach(struct tbt_stream *st, struct socket *s)
 {
+    struct tbt_session *sess = st->sess;
+    bool attach = false;
     int err = 0;
 
+    /* Publish sk and target together. tbt_stream_release_socket_now() reads
+     * both under the same lock; a window with target set and sk NULL let the
+     * killer return early and leave the old target in FIN_WAIT/CLOSE_WAIT. */
+    spin_lock(&sess->lock);
     if (READ_ONCE(st->state) == TBT_ST_DEAD)
-    {
         err = -ECANCELED;
-        goto out;
-    }
-    if (st->sk && st->sk != s->sk)
-    {
+    else if (st->sk && st->sk != s->sk)
         err = -EALREADY;
-        goto out;
+    else
+    {
+        st->sk = s->sk;
+        WRITE_ONCE(st->target, s);
+        attach = true;
     }
-    st->target = s;
-    st->sk = s->sk;
-    tbt_sock_attach(st);
-out:
+    spin_unlock(&sess->lock);
+    if (attach)
+        tbt_sock_attach(st);
     return err;
 }
 

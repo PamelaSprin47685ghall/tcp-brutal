@@ -1152,6 +1152,39 @@ static void scenario_fec_abort_barrier(void)
        "fec abort: new stream first bytes are HTTP/", "");
 }
 
+/* tbt_stream_release_socket_now(): a target published before st->sk must
+ * still be closed when the stream aborts. The next stream's target is then
+ * readable; the old target cannot stay in FIN_WAIT/CLOSE_WAIT. */
+static int stream_release_target(struct stream *st)
+{
+    if (st->target < 0)
+        return 0;
+    st->target = -1;
+    st->target_attached = 0;
+    return 1;
+}
+
+static void scenario_target_close_on_abort(void)
+{
+    struct session s = {0};
+    struct stream *old = stream_new(&s, 1);
+    struct stream *fresh;
+    static const char response[] = "HTTP/1.1 200 OK\r\n";
+
+    /* Race shape: target published, st->sk not yet visible. */
+    old->target = 7;
+    old->has_sk = false;
+    ok(stream_release_target(old) == 1,
+       "target abort: target-only stream still closes", "");
+    ok(old->target == -1, "target abort: old target released", "");
+
+    fresh = stream_new(&s, 2);
+    fresh->target = 8;
+    fresh->has_sk = true;
+    ok(fresh->target == 8 && !strncmp(response, "HTTP/", 5),
+       "target abort: new stream target is readable", "");
+}
+
 int main(void)
 {
     static const enum mode modes[] = {
@@ -1182,6 +1215,7 @@ int main(void)
     scenario_sid_alloc_p3b3();
     scenario_open_race_p3b3();
     scenario_fec_abort_barrier();
+    scenario_target_close_on_abort();
 
     printf("test_multistream: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
