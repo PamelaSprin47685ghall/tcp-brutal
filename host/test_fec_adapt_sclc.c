@@ -989,6 +989,18 @@ static void case_ctl_default_off(void)
     ok(out.switch_now, "off: enabling starts control");
     eq_u32(out.to, 5, "off: fast start to rate 70");
 
+    /* Re-asserting the same state must not reset the run counters. */
+    {
+        struct tbt_fec_adapt_sclc_ctl r;
+        struct tbt_fec_adapt_sclc_out d;
+
+        init_ctl(&r, true, 50, 256, 1);
+        eval(&r, 50000, 10000, SEC, &d);
+        eq_u32(r.up_run, 1, "enable: first up sample");
+        tbt_fec_adapt_sclc_ctl_set_enabled(&r, true, SEC + 250 * MS);
+        eq_u32(r.up_run, 1, "enable: the same state keeps the run");
+    }
+
     /* Disabling drops a suggestion that was already returned. */
     tbt_fec_adapt_sclc_ctl_set_enabled(&c, false, SEC + 250 * MS);
     ok(!c.busy, "off: disable clears the pending switch");
@@ -1522,6 +1534,289 @@ static void case_ctl_epoch_shape(void)
     eq_u32(c.cur, 1, "epoch: at rate 30");
 }
 
+
+static void case_rate_index_for_shape(void)
+{
+    static const struct
+    {
+        u16 n, m;
+        u8 idx;
+    } down[] = {{128, 128, 3}, {64, 192, 0}, {76, 180, 1},
+                {102, 154, 2}, {151, 105, 4}, {178, 78, 5}};
+    static const struct
+    {
+        u16 n, m;
+        u8 idx;
+    } up[] = {{8, 24, 0}, {9, 23, 1}, {12, 20, 2},
+              {16, 16, 3}, {18, 14, 4}, {22, 10, 5}};
+    u32 i;
+
+    for (i = 0; i < sizeof(down) / sizeof(down[0]); i++)
+        eq_u32(tbt_fec_adapt_sclc_rate_index_for_shape(down[i].n,
+                                                       down[i].m),
+               down[i].idx, "shape index: downlink");
+    for (i = 0; i < sizeof(up) / sizeof(up[0]); i++)
+        eq_u32(tbt_fec_adapt_sclc_rate_index_for_shape(up[i].n, up[i].m),
+               up[i].idx, "shape index: uplink");
+    eq_u32(tbt_fec_adapt_sclc_rate_index_for_shape(14, 18), 0xff,
+           "shape index: 14/18 is not on the ladder");
+    eq_u32(tbt_fec_adapt_sclc_rate_index_for_shape(10, 22), 0xff,
+           "shape index: 10/22 is not on the ladder");
+    eq_u32(tbt_fec_adapt_sclc_rate_index_for_shape(0, 0), 0xff,
+           "shape index: empty shape");
+}
+
+static void case_rate_mask(void)
+{
+    struct tbt_fec_adapt_sclc_ctl c;
+    struct tbt_fec_adapt_sclc_out out;
+    u64 t = SEC;
+
+    /* A downlink codec that builds only rate 50 never leaves it. */
+    init_ctl(&c, true, 50, 256, 1);
+    tbt_fec_adapt_sclc_ctl_set_rate_mask(&c, 1u << 3);
+    eval(&c, 0, 0, t, &out);
+    ok(!out.switch_now, "mask: rate 70 is not supported");
+    eq_u32(out.to, 3, "mask: stays at rate 50");
+    eval(&c, 600000, 0, t + 250 * MS, &out);
+    eval(&c, 600000, 0, t + 500 * MS, &out);
+    ok(!out.switch_now, "mask: rate 25 is not supported either");
+    eq_u32(out.to, 3, "mask: still rate 50");
+
+    /* Supported 50 and 70 only: fast start to 70, then back to 50. */
+    init_ctl(&c, true, 50, 256, 1);
+    tbt_fec_adapt_sclc_ctl_set_rate_mask(&c, (1u << 3) | (1u << 5));
+    eval(&c, 0, 0, t, &out);
+    ok(out.switch_now, "mask: fast start to a supported rate");
+    eq_u32(out.to, 5, "mask: to rate 70");
+    tbt_fec_adapt_sclc_ctl_applied(&c, t);
+    eval(&c, 600000, 0, t + 5 * SEC, &out);
+    ok(!out.switch_now, "mask: one down sample");
+    eval(&c, 600000, 0, t + 5250 * MS, &out);
+    ok(out.switch_now, "mask: down to the next supported rate");
+    eq_u32(out.to, 3, "mask: to rate 50");
+
+    /* A mask without the current rate is ignored. */
+    init_ctl(&c, true, 50, 256, 1);
+    tbt_fec_adapt_sclc_ctl_set_rate_mask(&c, 1u << 5);
+    eq_u32(c.rate_mask, (1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u,
+           "mask: unsupported current rate is ignored");
+
+    eq_u32(tbt_fec_adapt_sclc_max_side(256, 1u << 3), 128,
+           "max side: downlink rate 50");
+    eq_u32(tbt_fec_adapt_sclc_max_side(32, 0), 24,
+           "max side: uplink all rates");
+    eq_u32(tbt_fec_adapt_sclc_max_side(32, 1u << 5), 22,
+           "max side: uplink rate 70");
+}
+
+static void case_wire_profile(void)
+{
+    struct tbt_fec_adapt_sclc_wire w;
+    struct tbt_fec_cfg cfg, back;
+    u16 carriers = 256;
+
+    /* Downlink 1x256/L8/r0.5. */
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.n = 128;
+    cfg.m = 128;
+    cfg.w = 256;
+    cfg.k = 500;
+    cfg.d = 0;
+    cfg.groups = 1;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), 0,
+           "wire: downlink accepted");
+    eq_u32(w.kind, TBT_FEC_SCLC_DOWN, "wire: downlink kind");
+    eq_u32(w.symbol, 0, "wire: downlink binary");
+    eq_u32(w.block, 256, "wire: downlink block");
+    eq_u32(w.L, 8, "wire: downlink L");
+    eq_u32(w.rate_pct, 50, "wire: downlink rate");
+    eq_u32(w.n, 128, "wire: downlink n");
+    eq_u32(w.m, 128, "wire: downlink m");
+    eq_u32(w.groups, 1, "wire: downlink groups");
+
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_to_cfg(&w, 7,
+                                               TBT_FEC_CFG_F_APPLY, &back),
+           0, "wire: downlink to cfg");
+    eq_u32(back.w, 256, "wire: downlink cfg w");
+    eq_u32(back.k, 500, "wire: downlink cfg k");
+    eq_u32(back.d, 0, "wire: downlink cfg d");
+
+    /* Uplink 8x32/L16/r1/4. */
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.n = 8;
+    cfg.m = 24;
+    cfg.w = 16;
+    cfg.k = 128;
+    cfg.d = 64;
+    cfg.groups = 8;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), 0,
+           "wire: uplink accepted");
+    eq_u32(w.kind, TBT_FEC_SCLC_UP, "wire: uplink kind");
+    eq_u32(w.symbol, 1, "wire: uplink gf16");
+    eq_u32(w.block, 128, "wire: uplink block");
+    eq_u32(w.L, 16, "wire: uplink L");
+    eq_u32(w.rate_pct, 25, "wire: uplink rate");
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_to_cfg(&w, 8,
+                                               TBT_FEC_CFG_F_APPLY, &back),
+           0, "wire: uplink to cfg");
+    eq_u32(back.w, 16, "wire: uplink cfg w");
+    eq_u32(back.k, 128, "wire: uplink cfg k");
+    eq_u32(back.d, 64, "wire: uplink cfg d");
+
+    /* The 60% ladder point is 18/14 of 32, d=144. */
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.n = 18;
+    cfg.m = 14;
+    cfg.w = 16;
+    cfg.k = 128;
+    cfg.d = 144;
+    cfg.groups = 8;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), 0,
+           "wire: uplink 18/14 accepted");
+    eq_u32(w.rate_pct, 60, "wire: uplink 18/14 is rate 60");
+
+    /* Every uplink ladder point round-trips through the CFG fields. */
+    {
+        static const u8 pct[TBT_FEC_ADAPT_SCLC_LEVELS] = {25, 30, 40, 50,
+                                                          60, 70};
+        u8 i;
+
+        for (i = 0; i < TBT_FEC_ADAPT_SCLC_LEVELS; i++)
+        {
+            struct tbt_fec_adapt_sclc_shape s;
+
+            eq_u32((u32)tbt_fec_adapt_sclc_shape(pct[i], 32, 8, &s), 0,
+                   "wire: uplink ladder shape");
+            memset(&cfg, 0, sizeof(cfg));
+            cfg.n = s.n;
+            cfg.m = s.m;
+            cfg.w = 16;
+            cfg.k = 128;
+            cfg.d = (u8)((u32)s.n * 256u / 32u);
+            cfg.groups = 8;
+            eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w),
+                   0, "wire: uplink ladder resolves");
+            eq_u32(w.rate_pct, pct[i], "wire: uplink ladder rate");
+            eq_u32((u32)tbt_fec_adapt_sclc_wire_to_cfg(
+                       &w, 2, TBT_FEC_CFG_F_APPLY, &back),
+                   0, "wire: uplink ladder to cfg");
+            eq_u32(back.n, s.n, "wire: uplink ladder n");
+            eq_u32(back.m, s.m, "wire: uplink ladder m");
+            eq_u32(back.d, cfg.d, "wire: uplink ladder d");
+        }
+    }
+
+    /* Rejections: every hard profile boundary. */
+    cfg.n = 127;
+    cfg.m = 129;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
+           "wire: downlink needs 128/128");
+    cfg.n = 128;
+    cfg.m = 128;
+    cfg.w = 512;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
+           "wire: downlink block 512 rejected");
+    cfg.w = 256;
+    cfg.groups = 2;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
+           "wire: downlink groups must be 1");
+    cfg.groups = 8;
+    cfg.n = 8;
+    cfg.m = 24;
+    cfg.w = 16;
+    cfg.k = 256;
+    cfg.d = 64;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
+           "wire: uplink block 256 rejected");
+    cfg.k = 128;
+    cfg.w = 8;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
+           "wire: uplink L 8 rejected");
+    cfg.w = 16;
+    cfg.n = 14;
+    cfg.m = 18;
+    cfg.d = 112;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
+           "wire: 14/18 is not on the ladder");
+    cfg.n = 8;
+    cfg.m = 24;
+    cfg.d = 65;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
+           "wire: uplink d must agree with n/m");
+    cfg.d = 64;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, 255, &w), (u32)-1,
+           "wire: carriers must equal groups*(n+m)");
+
+    /* Compatibility: a rate change inside the same codec is allowed. */
+    {
+        struct tbt_fec_cfg a, b;
+
+        memset(&a, 0, sizeof(a));
+        a.n = 8;
+        a.m = 24;
+        a.w = 16;
+        a.k = 128;
+        a.d = 64;
+        a.groups = 8;
+        b = a;
+        b.n = 16;
+        b.m = 16;
+        b.d = 128;
+        ok(tbt_fec_adapt_sclc_wire_compatible(&a, &b, carriers),
+           "wire: uplink rate change is compatible");
+        b.w = 8;
+        ok(!tbt_fec_adapt_sclc_wire_compatible(&a, &b, carriers),
+           "wire: an L change is incompatible");
+        b = a;
+        b.k = 256;
+        ok(!tbt_fec_adapt_sclc_wire_compatible(&a, &b, carriers),
+           "wire: a block change is incompatible");
+
+        /* A direction change (uplink vs downlink) is never compatible. */
+        memset(&b, 0, sizeof(b));
+        b.n = 128;
+        b.m = 128;
+        b.w = 256;
+        b.k = 500;
+        b.d = 0;
+        b.groups = 1;
+        ok(!tbt_fec_adapt_sclc_wire_compatible(&a, &b, carriers),
+           "wire: a direction change is incompatible");
+    }
+}
+
+static void case_fbk_overlay(void)
+{
+    struct tbt_fec_fbk f;
+
+    memset(&f, 0, sizeof(f));
+    tbt_fec_fbk_sc_set_p_fast(&f, 400000);
+    tbt_fec_fbk_sc_set_codec_fail(&f, 100000);
+    eq_u32(tbt_fec_fbk_sc_p_fast(&f), 400000, "fbk: p_fast roundtrip");
+    eq_u32(tbt_fec_fbk_sc_codec_fail(&f), 100000,
+           "fbk: codec_fail roundtrip");
+    eq_u32(f.carrier_bitmap[TBT_FEC_FBK_SC_P_FAST_OFF],
+           (400000 / 16) & 0xff, "fbk: p_fast low byte");
+    eq_u32(f.carrier_bitmap[TBT_FEC_FBK_SC_P_FAST_OFF + 1],
+           (400000 / 16) >> 8, "fbk: p_fast high byte");
+    tbt_fec_fbk_sc_set_p_fast(&f, 2000000);
+    eq_u32(tbt_fec_fbk_sc_p_fast(&f), 0xffffu * 16u,
+           "fbk: p_fast saturates");
+}
+
+static void case_epoch_base(void)
+{
+    struct tbt_fec_adapt_sclc_ctl c;
+    struct tbt_fec_adapt_sclc_out out;
+
+    init_ctl(&c, true, 50, 256, 1);
+    tbt_fec_adapt_sclc_ctl_set_epoch(&c, 1);
+    eval(&c, 0, 0, SEC, &out);
+    ok(out.switch_now, "epoch base: first switch");
+    eq_u32(out.epoch, 2, "epoch base: after INIT generation 1");
+}
+
 /* ------------------------------------------------------------------ *
  * main
  * ------------------------------------------------------------------ */
@@ -1564,6 +1859,11 @@ int main(void)
     case_est_p_valid_boundary();
     case_est_unknown();
     case_profile();
+    case_rate_index_for_shape();
+    case_rate_mask();
+    case_wire_profile();
+    case_fbk_overlay();
+    case_epoch_base();
     case_ctl_fail_down_zero();
     case_ctl_probe_gate();
     case_ctl_reverse();

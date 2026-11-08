@@ -49,6 +49,20 @@ u32 tbt_fec_adapt_sclc_rate_ppm(u8 rate_pct)
     return i == 0xff ? 0u : tbt_fec_adapt_sclc_ladder[i].ppm;
 }
 
+u8 tbt_fec_adapt_sclc_rate_index_for_shape(u16 n, u16 m)
+{
+    u16 shares = (u16)(n + m);
+    u8 i;
+
+    if (!n || !m)
+        return 0xff;
+    for (i = 0; i < TBT_FEC_ADAPT_SCLC_LEVELS; i++)
+        if ((u16)((u64)tbt_fec_adapt_sclc_ladder[i].ppm * shares /
+                  1000000ull) == n)
+            return i;
+    return 0xff;
+}
+
 int tbt_fec_adapt_sclc_shape(u8 rate_pct, u16 shares, u16 groups,
                              struct tbt_fec_adapt_sclc_shape *out)
 {
@@ -89,6 +103,120 @@ int tbt_fec_adapt_sclc_profile_of(u8 rate_pct,
         out->payload = 2048;
     }
     return 0;
+}
+
+int tbt_fec_adapt_sclc_wire_of_cfg(const struct tbt_fec_cfg *cfg,
+                                  u16 carriers,
+                                  struct tbt_fec_adapt_sclc_wire *out)
+{
+    u16 shares, block, L;
+    u8 kind, idx;
+
+    if (!cfg || !out || !carriers || !cfg->n || !cfg->m || !cfg->groups)
+        return -1;
+    shares = (u16)(cfg->n + cfg->m);
+    if (shares > TBT_FEC_MAX_SHARES ||
+        (u32)cfg->groups * shares != carriers)
+        return -1;
+    if (cfg->d == 0 && cfg->k >= 100 && cfg->k <= 1000)
+    {
+        kind = TBT_FEC_SCLC_DOWN;
+        block = cfg->w;
+        L = TBT_FEC_SCLC_L_DOWN;
+        if (cfg->groups != 1 || shares != TBT_FEC_MAX_SHARES ||
+            cfg->n != TBT_FEC_MAX_SHARES / 2 ||
+            cfg->m != TBT_FEC_MAX_SHARES / 2 ||
+            block != TBT_FEC_SCLC_BLOCK_DOWN)
+            return -1;
+    }
+    else if (cfg->k > cfg->w)
+    {
+        kind = TBT_FEC_SCLC_UP;
+        block = cfg->k;
+        L = cfg->w;
+        if (cfg->groups <= 1 || shares != 32 ||
+            block != TBT_FEC_SCLC_BLOCK_UP || L != TBT_FEC_SCLC_L_UP)
+            return -1;
+        /* The wire d must agree with the n/m split; the codec derives its
+         * rate from n/m, so an inconsistent d is a malformed profile. */
+        if (cfg->d != (u8)((u32)cfg->n * 256u / shares))
+            return -1;
+    }
+    else
+        return -1;
+    idx = tbt_fec_adapt_sclc_rate_index_for_shape(cfg->n, cfg->m);
+    if (idx == 0xff)
+        return -1;
+    memset(out, 0, sizeof(*out));
+    out->kind = kind;
+    out->symbol = kind == TBT_FEC_SCLC_DOWN ? 0 : 1;
+    out->block = block;
+    out->L = L;
+    out->rate_pct = tbt_fec_adapt_sclc_ladder[idx].pct;
+    out->rate_ppm = tbt_fec_adapt_sclc_ladder[idx].ppm;
+    out->n = cfg->n;
+    out->m = cfg->m;
+    out->groups = cfg->groups;
+    return 0;
+}
+
+int tbt_fec_adapt_sclc_wire_to_cfg(const struct tbt_fec_adapt_sclc_wire *p,
+                                  u32 epoch, u8 flags,
+                                  struct tbt_fec_cfg *cfg)
+{
+    u16 shares;
+    u8 idx;
+
+    if (!p || !cfg || !p->n || !p->m || !p->groups)
+        return -1;
+    shares = (u16)(p->n + p->m);
+    if ((u32)p->groups * shares > TBT_FEC_MAX_SHARES)
+        return -1;
+    idx = tbt_fec_adapt_sclc_rate_index_for_shape(p->n, p->m);
+    if (idx == 0xff)
+        return -1;
+    memset(cfg, 0, sizeof(*cfg));
+    cfg->epoch = epoch;
+    cfg->flags = flags;
+    cfg->n = p->n;
+    cfg->m = p->m;
+    cfg->groups = p->groups;
+    if (p->kind == TBT_FEC_SCLC_DOWN)
+    {
+        if (shares != TBT_FEC_MAX_SHARES ||
+            p->block != TBT_FEC_SCLC_BLOCK_DOWN)
+            return -1;
+        cfg->w = TBT_FEC_SCLC_BLOCK_DOWN;
+        /* Binary CFG k is parts per thousand, not ppm: 500 for rate 0.50. */
+        cfg->k = (u16)((u32)p->n * 1000u / shares);
+        cfg->d = 0;
+    }
+    else if (p->kind == TBT_FEC_SCLC_UP)
+    {
+        if (shares != 32 || p->block != TBT_FEC_SCLC_BLOCK_UP ||
+            p->L != TBT_FEC_SCLC_L_UP)
+            return -1;
+        cfg->w = TBT_FEC_SCLC_L_UP;
+        cfg->k = TBT_FEC_SCLC_BLOCK_UP;
+        cfg->d = (u8)((u32)p->n * 256u / shares);
+    }
+    else
+        return -1;
+    return 0;
+}
+
+bool tbt_fec_adapt_sclc_wire_compatible(const struct tbt_fec_cfg *cur,
+                                        const struct tbt_fec_cfg *next,
+                                        u16 carriers)
+{
+    struct tbt_fec_adapt_sclc_wire a, b;
+
+    if (tbt_fec_adapt_sclc_wire_of_cfg(cur, carriers, &a) ||
+        tbt_fec_adapt_sclc_wire_of_cfg(next, carriers, &b))
+        return false;
+    return a.kind == b.kind && a.symbol == b.symbol && a.block == b.block &&
+           a.L == b.L && a.groups == b.groups &&
+           (u16)(a.n + a.m) == (u16)(b.n + b.m);
 }
 
 /* ------------------------------------------------------------------ *
@@ -364,8 +492,35 @@ static u32 tbt_fec_adapt_sclc_boundary(u8 index)
            TBT_FEC_ADAPT_SCLC_MARGIN_PPM;
 }
 
-/* Largest ladder index whose actual rate does not exceed 1 - p - margin. */
-static u8 tbt_fec_adapt_sclc_target(u32 p_ppm)
+/* Next supported ladder index above `idx`, or `idx` when none. */
+static u8 tbt_fec_adapt_sclc_next_rate(
+    const struct tbt_fec_adapt_sclc_ctl *c, u8 idx)
+{
+    int i;
+
+    for (i = idx + 1; i < TBT_FEC_ADAPT_SCLC_LEVELS; i++)
+        if (c->rate_mask & (1u << i))
+            return (u8)i;
+    return idx;
+}
+
+/* Previous supported ladder index below `idx`, or `idx` when none. */
+static u8 tbt_fec_adapt_sclc_prev_rate(
+    const struct tbt_fec_adapt_sclc_ctl *c, u8 idx)
+{
+    int i;
+
+    for (i = idx; i > 0; i--)
+        if (c->rate_mask & (1u << (i - 1)))
+            return (u8)(i - 1);
+    return idx;
+}
+
+/* Largest supported ladder index whose actual rate does not exceed
+ * 1 - p - margin. When every supported rate is above that bound, the lowest
+ * supported rate is the safe answer. */
+static u8 tbt_fec_adapt_sclc_target(
+    const struct tbt_fec_adapt_sclc_ctl *c, u32 p_ppm)
 {
     u32 r_t;
     int i;
@@ -379,9 +534,13 @@ static u8 tbt_fec_adapt_sclc_target(u32 p_ppm)
     if (r_t < tbt_fec_adapt_sclc_ladder[0].ppm)
         r_t = tbt_fec_adapt_sclc_ladder[0].ppm;
     for (i = TBT_FEC_ADAPT_SCLC_LEVELS - 1; i >= 0; i--)
-        if (tbt_fec_adapt_sclc_ladder[i].ppm <= r_t)
+        if ((c->rate_mask & (1u << i)) &&
+            tbt_fec_adapt_sclc_ladder[i].ppm <= r_t)
             return (u8)i;
-    return 0;
+    for (i = 0; i < TBT_FEC_ADAPT_SCLC_LEVELS; i++)
+        if (c->rate_mask & (1u << i))
+            return (u8)i;
+    return c->cur;
 }
 
 static u32 tbt_fec_adapt_sclc_switches_since(
@@ -505,16 +664,55 @@ int tbt_fec_adapt_sclc_ctl_init(struct tbt_fec_adapt_sclc_ctl *c, bool enabled,
     c->cur = idx;
     c->prev_idx = idx;
     c->probe_from = idx;
+    c->rate_mask = (u8)((1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u);
     c->dwell_mul = 1;
     c->shares = shares;
     c->groups = groups;
     return 0;
 }
 
+void tbt_fec_adapt_sclc_ctl_set_rate_mask(struct tbt_fec_adapt_sclc_ctl *c,
+                                          u8 mask)
+{
+    if (!c->ready || !mask || !(mask & (1u << c->cur)))
+        return;
+    c->rate_mask = mask;
+}
+
+void tbt_fec_adapt_sclc_ctl_set_epoch(struct tbt_fec_adapt_sclc_ctl *c,
+                                      u32 epoch)
+{
+    if (c->ready)
+        c->epoch = epoch;
+}
+
+u16 tbt_fec_adapt_sclc_max_side(u16 shares, u8 mask)
+{
+    u16 max = 0;
+    u8 i;
+
+    for (i = 0; i < TBT_FEC_ADAPT_SCLC_LEVELS; i++)
+    {
+        u16 n, m, side;
+
+        if (mask && !(mask & (1u << i)))
+            continue;
+        n = (u16)((u64)tbt_fec_adapt_sclc_ladder[i].ppm * shares /
+                  1000000ull);
+        m = (u16)(shares - n);
+        side = n > m ? n : m;
+        if (side > max)
+            max = side;
+    }
+    return max;
+}
+
 void tbt_fec_adapt_sclc_ctl_set_enabled(struct tbt_fec_adapt_sclc_ctl *c,
                                         bool enabled, u64 now_ns)
 {
     if (!c->ready)
+        return;
+    if ((enabled ? 1 : 0) == c->enabled)
         return;
     if (enabled && !c->enabled)
     {
@@ -622,7 +820,7 @@ void tbt_fec_adapt_sclc_ctl_eval(struct tbt_fec_adapt_sclc_ctl *c,
     p_eff = p;
     if (o->burst && o->p_fast_ppm > p_eff)
         p_eff = o->p_fast_ppm > 1000000u ? 1000000u : o->p_fast_ppm;
-    target = tbt_fec_adapt_sclc_target(p_eff);
+    target = tbt_fec_adapt_sclc_target(c, p_eff);
     /* A refused CFG must not be retried; try one step below it. A refused
      * raise waits out its 30 s raise ban first, so its fallback window is
      * twice as long. */
@@ -712,9 +910,13 @@ void tbt_fec_adapt_sclc_ctl_eval(struct tbt_fec_adapt_sclc_ctl *c,
         {
             c->no_raise_until = now_ns + TBT_FEC_ADAPT_SCLC_FAIL_BAN_NS;
             if (c->cur > 0 && tbt_fec_adapt_sclc_can_switch(c, now_ns, 2))
-                tbt_fec_adapt_sclc_issue(c, (u8)(c->cur - 1),
-                                         TBT_FEC_ADAPT_SCLC_R_FAIL_DOWN, 0,
-                                         out);
+            {
+                u8 down = tbt_fec_adapt_sclc_prev_rate(c, c->cur);
+
+                if (down != c->cur)
+                    tbt_fec_adapt_sclc_issue(
+                        c, down, TBT_FEC_ADAPT_SCLC_R_FAIL_DOWN, 0, out);
+            }
             return;
         }
     }
@@ -729,7 +931,12 @@ void tbt_fec_adapt_sclc_ctl_eval(struct tbt_fec_adapt_sclc_ctl *c,
             c->up_run = 0;
             return;
         }
-        next = (u8)(c->cur + 1);
+        next = tbt_fec_adapt_sclc_next_rate(c, c->cur);
+        if (next == c->cur)
+        {
+            c->up_run = 0;
+            return;
+        }
         boundary = tbt_fec_adapt_sclc_boundary(next);
         if (p_eff + TBT_FEC_ADAPT_SCLC_HYST_PPM <= boundary)
         {
@@ -922,7 +1129,7 @@ void tbt_fec_adapt_sclc_ctl_rejected(struct tbt_fec_adapt_sclc_ctl *c,
     c->pending_probe = 0;
     /* A refused lowest rate has no lower target: stay at the current rate
      * for the ban instead of retrying the same shape. */
-    c->reject_target = bad ? (u8)(bad - 1) : c->cur;
+    c->reject_target = bad ? tbt_fec_adapt_sclc_prev_rate(c, bad) : c->cur;
     c->reject_until_ns = now_ns + (bad > c->cur
                                        ? 2 * TBT_FEC_ADAPT_SCLC_FAIL_BAN_NS
                                        : TBT_FEC_ADAPT_SCLC_FAIL_BAN_NS);

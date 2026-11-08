@@ -71,6 +71,11 @@ u8 tbt_fec_adapt_sclc_rate_index(u8 rate_pct);
 /* Actual rate in ppm, or 0 when rate_pct is not on the ladder. */
 u32 tbt_fec_adapt_sclc_rate_ppm(u8 rate_pct);
 
+/* Ladder index whose n/m split for `shares = n + m` is exactly (n, m), or
+ * 0xff. The split uses the actual codec rate, so 18/14 of 32 maps to rate_pct
+ * 60 even though 18/32 is 0.5625, not 0.592593. */
+u8 tbt_fec_adapt_sclc_rate_index_for_shape(u16 n, u16 m);
+
 /* A rate and the n/m it derives for one direction. `groups * (n + m)` is the
  * carrier count. The struct is local to the control law; the wire still
  * carries n, m, groups, block and rate_pct. */
@@ -104,6 +109,42 @@ struct tbt_fec_adapt_sclc_profile
 
 int tbt_fec_adapt_sclc_profile_of(u8 rate_pct,
                                   struct tbt_fec_adapt_sclc_profile *out);
+
+/* A wire profile resolved from FEC_CFG. `kind` is TBT_FEC_SCLC_DOWN or
+ * TBT_FEC_SCLC_UP, `symbol` is 0 (binary) or 1 (GF(16)), and `rate_pct` is
+ * the ladder label (0 when the n/m split is not on the ladder). */
+struct tbt_fec_adapt_sclc_wire
+{
+    u8 kind;
+    u8 symbol;
+    u16 block;
+    u16 L;
+    u8 rate_pct;
+    u32 rate_ppm;
+    u16 n;
+    u16 m;
+    u16 groups;
+};
+
+/* Resolve a CFG into the supported profile set. Returns 0, or -1 when the
+ * body is not a complete SC-LDPC profile, the variant/block/L does not match
+ * a shipped codec, or the n/m split is not on the rate ladder. */
+int tbt_fec_adapt_sclc_wire_of_cfg(const struct tbt_fec_cfg *cfg,
+                                  u16 carriers,
+                                  struct tbt_fec_adapt_sclc_wire *out);
+
+/* Fill a CFG body for `p`. The caller sets switch_pkt/block_base/seed/CRC
+ * afterwards. DOWN carries block in w and rate_ppm in k; UP carries L in w,
+ * block in k and the codec rate in d. Returns 0 or -1. */
+int tbt_fec_adapt_sclc_wire_to_cfg(const struct tbt_fec_adapt_sclc_wire *p,
+                                  u32 epoch, u8 flags,
+                                  struct tbt_fec_cfg *cfg);
+
+/* True when `next` may replace `cur` by a rate-only switch: same variant,
+ * symbol, block, L, groups and n+m. n/m may differ. */
+bool tbt_fec_adapt_sclc_wire_compatible(const struct tbt_fec_cfg *cur,
+                                        const struct tbt_fec_cfg *next,
+                                        u16 carriers);
 
 /* ------------------------------------------------------------------ *
  * Estimator
@@ -299,6 +340,7 @@ struct tbt_fec_adapt_sclc_ctl
 {
     u8 ready;   /* init accepted the rate and geometry */
     u8 enabled; /* 0 keeps the fixed shape; eval never suggests a switch */
+    u8 rate_mask; /* bit i: ladder index i is supported by this codec */
     u8 cur;     /* current ladder index */
     u8 busy;    /* a suggestion is in flight */
     u8 pending_to;
@@ -352,6 +394,23 @@ struct tbt_fec_adapt_sclc_out
  * eval reports DISABLED. */
 int tbt_fec_adapt_sclc_ctl_init(struct tbt_fec_adapt_sclc_ctl *c, bool enabled,
                                 u8 rate_pct, u16 shares, u16 groups);
+
+/* Restrict the ladder to the rates this codec can build. Bit i is ladder
+ * index i; the current rate must stay supported. A mask of 0 is ignored.
+ * The default after init is every ladder point. */
+void tbt_fec_adapt_sclc_ctl_set_rate_mask(struct tbt_fec_adapt_sclc_ctl *c,
+                                          u8 mask);
+
+/* Set the last suggested epoch. The data plane starts at 1 after the INIT
+ * CFG, so the first switch suggestion is 2 and the receiver never mistakes
+ * it for the INIT generation. */
+void tbt_fec_adapt_sclc_ctl_set_epoch(struct tbt_fec_adapt_sclc_ctl *c,
+                                      u32 epoch);
+
+/* Largest n or m over the supported ladder points for `shares`. The caller
+ * sizes the recovered-slot scratch so a later rate switch cannot outgrow
+ * it. `mask` 0 means every ladder point. */
+u16 tbt_fec_adapt_sclc_max_side(u16 shares, u8 mask);
 
 /* Turn the control law on or off at runtime. Turning it off abandons any
  * pending suggestion and probe; the rate in force stays fixed. Turning it on

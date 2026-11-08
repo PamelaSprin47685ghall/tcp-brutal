@@ -25,8 +25,9 @@ FORMAT_SRCS     := $(filter %.c %.h,$(SRCS))
 HOSTCC          ?= cc
 HOST_CFLAGS     ?= -std=gnu99 -O2 -Wall -Wextra -Werror
 HOST_TEST       := host/test_parse
-HOST_TEST_SRCS  := host/test_parse.c tbtun/tbt_parse.c
-HOST_TEST_HDRS  := tbtun/tbt_parse.h tbtun/tbt_uapi.h tbtun/tbt_crypto.h
+HOST_TEST_SRCS  := host/test_parse.c tbtun/tbt_parse.c tbtun/tbt_fec_adapt_sclc.c
+HOST_TEST_HDRS  := tbtun/tbt_parse.h tbtun/tbt_uapi.h tbtun/tbt_crypto.h \
+                   tbtun/tbt_fec_adapt_sclc.h tbtun/tbt_fec_adapt.h tbtun/tbt_fec.h
 HOST_FUZZ       := host/test_fuzz
 HOST_FUZZ_SRCS  := host/test_fuzz.c tbtun/tbt_rec.c tbtun/tbt_proto.c
 HOST_FUZZ_HDRS  := tbtun/tbt_rec.h tbtun/tbt_proto.h tbtun/tbt_uapi.h
@@ -91,8 +92,11 @@ HOST_FEC_SCLC   := host/test_fec_sclc
 HOST_FEC_SCLC_SRCS := host/test_fec_sclc.c tbtun/tbt_fec_sclc.c
 HOST_FEC_SCLC_HDRS := tbtun/tbt_fec_sclc.h tbtun/tbt_fec.h tbtun/tbt_uapi.h
 HOST_PORTMAP    := host/test_portmap
-HOST_PORTMAP_SRCS := host/test_portmap.c tbtun/tbt_portmap.c tbtun/tbt_parse.c
-HOST_PORTMAP_HDRS := tbtun/tbt_portmap.h tbtun/tbt_parse.h tbtun/tbt_uapi.h
+HOST_PORTMAP_SRCS := host/test_portmap.c tbtun/tbt_portmap.c tbtun/tbt_parse.c \
+                     tbtun/tbt_fec_adapt_sclc.c
+HOST_PORTMAP_HDRS := tbtun/tbt_portmap.h tbtun/tbt_parse.h tbtun/tbt_uapi.h \
+                     tbtun/tbt_fec_adapt_sclc.h tbtun/tbt_fec_adapt.h \
+                     tbtun/tbt_fec.h
 HOST_LIFETIME   := host/test_lifetime
 HOST_LIFETIME_SRCS := host/test_lifetime.c
 HOST_SCLC       := host/test_sclc_uplink
