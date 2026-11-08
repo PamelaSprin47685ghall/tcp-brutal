@@ -1284,11 +1284,10 @@ static void test_window_rebase(void)
            TBT_FEC_RX_WIN_PLACE, "rebase: the first stream keeps block 0");
 }
 
-/* tbt_fec_rx_stream_reset(): after an abort, the old stream's reorder block
- * must be dropped and the new stream must start at its own super-block. No
- * cursor survives the reset, and the new stream's first record rebases the
- * window to its own block. The first byte the application sees is HTTP/,
- * never the old body. */
+/* A v7 flow owns its reorder state. After an abort or detach the old flow's
+ * block must be dropped, and the new flow starts at its own base 0 with no
+ * inherited cursor. The first byte the application sees is HTTP/, never the
+ * old body. */
 static void test_stream_reset_isolation(void)
 {
     static const u16 full[N] = {S, S, S, S};
@@ -1311,9 +1310,8 @@ static void test_stream_reset_isolation(void)
     old.b[0].nreal = N;
     ok(sup_ready(&old, 100), "reset: the old block 100 is ready");
 
-    /* The barrier drops that state. The old highest block (100) names no
-     * block the new stream will send: block ids come from the session's
-     * packet sequence, which the old stream pushed ahead. */
+    /* The flow reset drops that state. A new v7 flow starts at base 0, so the
+     * old highest block (100) can never name one of its blocks. */
     memset(&old, 0, sizeof(old));
     next_super = 0;
     p = g = 0;

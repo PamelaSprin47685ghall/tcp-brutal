@@ -835,12 +835,9 @@ struct tbt_fec_rx
      * block the new stream will send and must never be inherited. */
     bool rebase_pending;
     /* The stream whose blocks the reorder tree holds, and the block the
-     * window was last rebased to (0 while the session's first stream holds
-     * the tree, whose base is packet 0). A record of the next stream can
-     * arrive before the barrier runs (the session installs far_sid first);
-     * keeping this pair across the reset lets the first rebase start at that
-     * block, so the shares the reset wiped are NACKed instead of silently
-     * skipped. */
+     * window was last rebased to (0 while the flow holds the tree, whose base
+     * is packet 0). A v7 flow starts at base 0, so these only describe the
+     * current flow's own rebase; they never carry another stream's cursor. */
     u64 rebase_sid;
     u64 min_block_seen;
     u64 ack_deliver;  /* last frontier sent in an ACK */

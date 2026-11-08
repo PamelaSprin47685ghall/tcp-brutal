@@ -737,16 +737,15 @@ static int far_bind(struct session *s, uint32_t sid, bool open)
     return BIND_OK;
 }
 
-/* tbt_far_open_seen(): the publisher of a stream may run after a later OPEN
- * has already superseded it.  It must not announce or start a target for a
- * stream the session no longer names. */
+/* tbt_far_open_seen(): the publisher of a stream may run after a later OPEN.
+ * v7 routes every live flow by sid, so the late publisher still owns a valid
+ * flow: it announces and starts its target. Only an already-DEAD stream (the
+ * other kill path won) is refused. */
 static void far_open_seen_model(struct session *s, struct stream *st)
 {
-    if (s->far_sid != st->sid || st->state == ST_DEAD)
-    {
-        stream_kill(s, st);
+    (void)s;
+    if (st->state == ST_DEAD)
         return;
-    }
     st->state = ST_OPEN;
     target_attach(st);
 }
@@ -1473,10 +1472,10 @@ static void scenario_far_fast_reconnect(void)
     ok(session_hash_count(&s) == 0, "reconnect: no stream or target leaked", "");
 }
 
-/* The publisher of B can lose the race to C's adoption while it sits between
- * stream creation and tbt_far_open_seen().  The late publisher must kill its
- * own stream instead of announcing it and starting a target. */
-static void scenario_far_open_race_superseded(void)
+/* The publisher of B can run after C's adoption while it sits between stream
+ * creation and tbt_far_open_seen(). v7 keeps both flows: B must announce and
+ * start its own target instead of killing itself over far_sid. */
+static void scenario_far_open_race_live(void)
 {
     struct session s = {0};
     struct stream *b;
@@ -1489,17 +1488,18 @@ static void scenario_far_open_race_superseded(void)
     s.far_sid = 7303; /* tbt_stream_get_created() does not touch far_sid */
 
     far_open_seen_model(&s, b);
-    ok(b->state == ST_DEAD && b->target == -1 && !b->active,
-       "open race: superseded publisher starts no target", "");
-    ok(s.far_sid == 7303 && s.n_active == 1,
-       "open race: C remains the only active stream", "");
+    ok(b->state == ST_OPEN && b->target == (int)b->sid && b->active,
+       "open race: the late publisher starts B's own target", "");
+    ok(s.far_sid == 7303 && s.n_active == 2,
+       "open race: both B and C remain active", "");
     ok(session_hash_count(&s) == 2 && stream_find(&s, 7302) == b,
-       "open race: B is a tombstone, not a live orphan", "");
+       "open race: B stays a live flow", "");
 
+    stream_kill(&s, b);
     s.now_ns += (uint64_t)TBT_TOMBSTONE_MS * 1000000ull;
-    ok(session_reap(&s) == 1, "open race: the orphan tombstone reaps", "");
+    ok(session_reap(&s) == 1, "open race: B's tombstone reaps", "");
     ok(session_hash_count(&s) == 1 && s.n_active == 1,
-       "open race: no object or target leaked", "");
+       "open race: C remains and no target leaked", "");
 }
 
 /* A -> B -> C can leave B's carrier between installing far_sid=B and running
@@ -1643,7 +1643,7 @@ int main(void)
     scenario_target_close_on_abort();
     scenario_far_switch_idle();
     scenario_far_fast_reconnect();
-    scenario_far_open_race_superseded();
+    scenario_far_open_race_live();
     scenario_barrier_late();
     scenario_tombstone_open_window();
 

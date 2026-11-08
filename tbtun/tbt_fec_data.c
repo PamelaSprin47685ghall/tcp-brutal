@@ -3119,9 +3119,9 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess,
         if (!ready)
         {
             /* Name the group whose block holds the whole stream. This is a
-             * per-frontier diagnostic: the barrier resets the state on a
-             * stream switch, and an aborted stream must not fill the log
-             * (0.2.2 saw 20-40 lines per abort). Keep it behind debug. */
+             * per-frontier diagnostic: a v7 flow is per stream, and a detached
+             * or aborted flow must not fill the log (0.2.2 saw 20-40 lines per
+             * abort). Keep it behind debug. */
             u64 now_diag = ktime_get_ns();
 
             for (group = 0; group < rx->groups; group++)

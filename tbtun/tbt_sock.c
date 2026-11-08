@@ -969,17 +969,15 @@ void tbt_far_open_seen(struct tbt_stream *st)
 
     struct socket *tg;
 
-    /* A later OPEN can supersede this one while its publisher is between
-     * tbt_stream_get_created() and this call. Do not announce or start a
-     * target for a stream the session no longer names: the FEC data plane
-     * only feeds far_sid, so such a stream would hold a target and an ACTIVE
-     * slot with no data path. */
+    /* A later OPEN can arrive while this publisher is between
+     * tbt_stream_get_created() and this call. In v7 every live flow is routed
+     * by sid and far_sid is only the last/primary compatibility pointer, so a
+     * newer OPEN must not kill this stream: both flows are valid. Only a
+     * stream another path already marked DEAD is refused. */
     spin_lock(&sess->lock);
-    if (READ_ONCE(sess->far_sid) != st->sid ||
-        READ_ONCE(st->state) == TBT_ST_DEAD)
+    if (READ_ONCE(st->state) == TBT_ST_DEAD)
     {
         spin_unlock(&sess->lock);
-        tbt_stream_kill(st, TBT_ST_DEAD);
         return;
     }
     WRITE_ONCE(st->state, TBT_ST_OPEN);
