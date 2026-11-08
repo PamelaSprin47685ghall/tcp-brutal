@@ -235,3 +235,5 @@ rm -f /root/.tbt-adaptive-bypass-pref100
 9. **源文件大小**：1 GiB 在高吞吐下会提前完成，`early=1` 会标出来；正式验收建议 2 GiB。
 10. **同一台主机同时只跑一个 harness**：`/tmp/tbt-adaptive*` 与 netem marker 按设备名共用。
 11. **不自动重启模块**：`--near-module` 只在 `/proc/net/tbtun` 缺失时 insmod 一次，从不 rmmod。
+12. **ssh 瞬断不算传输结束**：warm-up/稳态的存活探测只在 near 明确报告 `curl.rc` 存在时结束；
+    ssh 失败或超时连续 `TBT_TRANSFER_FAIL_MAX`（默认 3）次才判定传输结束，单次失败不置 `early=1`。

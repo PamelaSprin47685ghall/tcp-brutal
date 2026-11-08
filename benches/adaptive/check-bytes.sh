@@ -60,6 +60,11 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# `sha256sum < fifo` prints "HEX  -"; accept a raw sha256sum line and compare
+# only the digest. A bare hex string is unchanged.
+SHA=$(printf '%s' "$SHA" | awk 'NR == 1 { print $1 }')
+EXPECT=$(printf '%s' "$EXPECT" | awk 'NR == 1 { print $1 }')
+
 rsh() {
     rh=$1
     shift

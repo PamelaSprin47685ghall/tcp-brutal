@@ -93,6 +93,8 @@ CHECK_BYTES=${CHECK_BYTES:-${root:-.}/benches/adaptive/check-bytes.sh}
 
 INJECT_ACTIVE=
 TRANSFER_STARTED=0
+TRANSFER_FAILS=0
+TRANSFER_FAIL_MAX=${TBT_TRANSFER_FAIL_MAX:-3}
 STOP=0
 TA_TRAP=0
 
@@ -691,20 +693,44 @@ D=$1; URL=$2; TOTAL=$3
 rm -rf "$D"
 mkdir -p "$D" || exit 4
 mkfifo "$D/fifo" || exit 4
-sha256sum < "$D/fifo" > "$D/sha" 2>/dev/null &
-printf '%s\n' "$!" > "$D/hpid"
+# `sha256sum < fifo` prints "HEX  -"; store only the digest so the CSV and
+# check-bytes compare one field.
+sha256sum < "$D/fifo" 2>/dev/null | awk '{print $1}' > "$D/sha" &
 # curl -f: an HTTP error is a failed run, not an error body hashed as data.
 ( curl -fsS --max-time "$TOTAL" "$URL" 2>"$D/curl.err"; echo $? > "$D/curl.rc" ) |
     tee "$D/fifo" | wc -c > "$D/size" &
 printf '%s\n' "$!" > "$D/pid"
 EOS
     TRANSFER_STARTED=1
+    TRANSFER_FAILS=0
 }
 
 # curl writes curl.rc when it exits; the hash/count may still be flushing.
 # Polling the file is exact, while kill -0 can stay true for a zombie.
+# A failed ssh is not proof the transfer ended: only a definite answer from
+# near does that. One lost ssh packet during a lossy warm-up must not set
+# early=1, so a run ends only after TRANSFER_FAIL_MAX consecutive failures.
 transfer_alive() {
-    remote_sh "$NEAR" "test ! -f '$REMOTE_DIR/curl.rc'" >/dev/null 2>&1
+    ta_state=$(remote_sh "$NEAR" \
+        "if [ -f '$REMOTE_DIR/curl.rc' ]; then echo ended; else echo alive; fi" \
+        2>/dev/null || true)
+    case $ta_state in
+    alive)
+        TRANSFER_FAILS=0
+        return 0
+        ;;
+    ended)
+        TRANSFER_FAILS=0
+        return 1
+        ;;
+    esac
+    TRANSFER_FAILS=$((TRANSFER_FAILS + 1))
+    warn "near liveness probe failed ($TRANSFER_FAILS/$TRANSFER_FAIL_MAX)"
+    if [ "$TRANSFER_FAILS" -lt "$TRANSFER_FAIL_MAX" ]; then
+        return 0
+    fi
+    TRANSFER_FAILS=0
+    return 1
 }
 
 # Wait for curl and both pipeline tails to finish. curl.rc appearing is not
@@ -836,7 +862,10 @@ run_one() {
         snapshot "$NEAR" "$R_dir/near-b.txt"
         snapshot "$FAR" "$R_dir/far-b.txt"
         if [ "$warm_early" -eq 1 ]; then
-            R_window=$((tA - t0))
+            # near-a is a copy of near-pre here, so the app delta spans the
+            # whole transfer; the window is the real elapsed time.
+            R_note="${R_note:+$R_note+}warm_early"
+            R_window=$((tB - t0))
         else
             R_window=$((tB - tA))
         fi
@@ -963,7 +992,7 @@ collect_row() {
     R_sha=
     R_bytes=0
     R_curl_rc=
-    if [ -f "$R_dir/sha" ]; then R_sha=$(tr -d '\n ' <"$R_dir/sha"); fi
+    if [ -f "$R_dir/sha" ]; then R_sha=$(awk 'NR == 1 { print $1 }' "$R_dir/sha"); fi
     if [ -f "$R_dir/size" ]; then R_bytes=$(num "$(tr -d '\n ' <"$R_dir/size")"); fi
     if [ -f "$R_dir/curl.rc" ]; then R_curl_rc=$(tr -d '\n ' <"$R_dir/curl.rc"); fi
     R_curl_bytes=$R_bytes
@@ -1084,6 +1113,7 @@ run_grid() {
     : >"$OUT/run.log"
     csv_init
     note "grid $grid_inject: loss=$LOSS_LIST carriers=$CARRIER_LIST modes=$MODE_LIST repeats=$REPEATS window=${WARMUP}+${DURATION}s"
+    grid_mode_list=$(printf '%s' "$MODE_LIST" | tr ',' ' ')
     grid_rep=1
     grid_runs=0
     while [ "$grid_rep" -le "$REPEATS" ]; do
@@ -1096,7 +1126,7 @@ run_grid() {
                 fi
                 grid_ord=0
                 for grid_m in $grid_modes; do
-                    case " $MODE_LIST " in
+                    case " $grid_mode_list " in
                     *" $grid_m "*) ;;
                     *) continue ;;
                     esac
