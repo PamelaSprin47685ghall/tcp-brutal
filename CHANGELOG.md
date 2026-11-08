@@ -3,6 +3,16 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [Unreleased]
+
+### Fixed
+
+- TX path masks now cover all 256 carriers. `struct tbt_frame.avoid_mask` is
+  a 256-bit bitmap, the scheduler folds it without a u16 shift, and the
+  retain bookkeeping is guarded to its legacy 16 slots. This removes the
+  UBSAN reports "index 18/64 out of range for type u8[16]" and "shift
+  exponent 64/255 is too large" seen on a 256-carrier 0.4.0 deployment.
+
 ## [0.3.3] - 2026-11-08
 
 ### Fixed

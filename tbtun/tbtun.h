@@ -364,7 +364,8 @@ struct tbt_frame
     u32 gen;             /* pinned frames: carrier generation they belong to */
     u8 retries;          /* transient control failures (review 22) */
     u64 retry_at_ns;     /* earliest next attempt; 0 = now */
-    u16 avoid_mask;      /* paths this copy must not reuse */
+    DECLARE_BITMAP(avoid_mask, TBT_MAX_CARRIERS_LIMIT);
+                         /* paths this copy must not reuse */
     struct tbt_retain *ret; /* ring entry for a DATA frame, valid in the pump */
     struct tbt_stream *st;  /* DATA owner; holds a ref */
     struct tbt_hdr hdr;  /* already filled in, including sid and seq */
@@ -381,7 +382,8 @@ struct tbt_retain
     u16 len;
     u16 path_mask;       /* every path a copy of this seq was written on */
     u16 reserve_mask;    /* selected but not yet written (in flight) */
-    u8 path_gen[16];     /* generation of the carrier that wrote each bit */
+    u8 path_gen[TBT_MAX_CARRIERS_LIMIT]; /* generation of the carrier that
+                                          * wrote each bit */
     u64 path_end[16];    /* end offset in that path's payload-byte space */
     u32 first_sent_seq[16]; /* write_seq just past the record, per path: the
                              * mark the carrier's TCP must ack before this

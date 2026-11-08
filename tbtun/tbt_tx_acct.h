@@ -255,6 +255,18 @@ static inline bool tbt_hold_keep(bool active, bool real_data, bool loss,
            (!until_ns || now <= until_ns);
 }
 
+/* Fold the legacy 16-bit path mask into a 256-bit carrier mask. The source is
+ * a retained DATA copy, which only the old ARQ creates, so the loop bound is
+ * the retain width, not TBT_MAX_CARRIERS_LIMIT. */
+static inline void tbt_mask_add_u16(unsigned long *mask, u16 bits)
+{
+    int i;
+
+    for (i = 0; i < TBT_ARQ_MAX_PATHS; i++)
+        if (bits & (u16)(1u << i))
+            set_bit(i, mask);
+}
+
 /* Pure path bound: idx must name a slot the session owns and fit the 16-slot
  * retain arrays. No warning here; FEC sessions legally walk 256 slots. */
 static inline bool tbt_tx_path_in_range(unsigned int idx, unsigned int n_car)
