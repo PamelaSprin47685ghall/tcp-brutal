@@ -10252,6 +10252,7 @@ static void tbt_fec_flow_purge(struct tbt_session *sess,
      * work grow the survivors into the freed slice; during teardown there is
      * nothing to grow. */
     if (sess->fec_allocator && !sess->fec_sclc &&
+        !tbt_fec_groups_per_flow &&
         !READ_ONCE(sess->closing) && !READ_ONCE(sess->fec_stopping))
     {
         spin_lock(&sess->lock);
@@ -10641,7 +10642,11 @@ int tbt_fec_data_init(struct tbt_session *sess)
     sess->fec_fbk_busy = false;
     sess->fec_fbk_pending = 0;
     mutex_init(&sess->fec_rebalance_lock);
-    sess->fec_allocator = t->cfg.role == TBT_ROLE_NEAR;
+    /* A configured static quota is not an allocator: growing the first flow
+     * past fec_groups_per_flow would starve the later streams of the very
+     * groups the quota reserves for them. */
+    sess->fec_allocator = t->cfg.role == TBT_ROLE_NEAR &&
+                          !tbt_fec_groups_per_flow;
     sess->fec_alloc_round = false;
     sess->fec_alloc_req = false;
     sess->fec_alloc_failed = false;
