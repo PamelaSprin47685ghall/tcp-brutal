@@ -3158,6 +3158,25 @@ static noinline void tbt_fec_alloc_tx_tick(struct tbt_session *sess,
         tbt_fec_alloc_responder_tick(sess, f);
         return;
     }
+    /* The round that started this exchange is gone (timeout or a failed
+     * plan) while our TX never swapped. Retrying the REQUEST forever leaves
+     * the peer's TX stopped and keeps alloc_role set, so no later round can
+     * plan this flow (observed as the regrow stage of the 1->2->4->1 QEMU
+     * gate). Abort at the current mask and release the role. A flow already
+     * in COMMIT keeps its DONE retry: its TX did swap, so an ABORT with the
+     * old mask would misdescribe what is on the wire. */
+    if (!READ_ONCE(sess->fec_alloc_round) && !tx->alloc.tx_swapped &&
+        tx->alloc.state != TBT_FEC_ALLOC_DONE &&
+        tx->alloc.state != TBT_FEC_ALLOC_FAILED &&
+        tx->alloc.state != TBT_FEC_ALLOC_IDLE)
+    {
+        (void)tbt_fec_send_alloc(sess, f, TBT_FEC_ALLOC_F_ABORT,
+                                 tx->alloc_target.epoch, f->group_mask,
+                                 tx->alloc_target.pkt, tx->alloc_target.block);
+        atomic64_inc(&sess->fec_alloc_abort);
+        tbt_fec_alloc_flow_done(sess, f, tx->alloc_target.epoch, false);
+        return;
+    }
     if (!tx->alloc_hold && tx->alloc.state == TBT_FEC_ALLOC_REQ)
     {
         if (!tbt_fec_alloc_tx_stop(sess, f))
@@ -6385,13 +6404,32 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
     {
         if (near)
         {
-            /* ABORT ACK: the far restored the old mask. */
+            /* ABORT ACK: the far restored the old mask. Our own RX may have
+             * armed (2) or applied (3) the far TX's switch; an armed state
+             * left behind blocks every later ACK arm, and an applied plane
+             * must roll back without answering the ACK again. */
+            spin_lock_bh(&rx->lock);
+            if (rx->alloc.epoch == a->epoch)
+            {
+                if (rx->alloc_state == 3)
+                {
+                    rx->alloc_abort_pending = true;
+                    rx->alloc_abort_epoch = a->epoch;
+                }
+                else if (rx->alloc_state == 2)
+                {
+                    rx->alloc_state = 0;
+                    rx->alloc_epoch = a->epoch; /* tombstone */
+                }
+            }
+            spin_unlock_bh(&rx->lock);
             spin_lock_bh(&tx->alloc_lock);
             if (a->epoch == tx->alloc_target.epoch)
                 tbt_fec_alloc_sm_abort_ack(&tx->alloc);
             else
                 atomic64_inc(&sess->fec_alloc_bad);
             spin_unlock_bh(&tx->alloc_lock);
+            tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
             tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
             return;
         }
@@ -6568,12 +6606,18 @@ static void tbt_fec_alloc_rx_tick(struct tbt_session *sess,
         tbt_fec_grouped_free(drop_codec);
         kvfree(drop_req_ns);
         kvfree(drop_req_block);
-        (void)tbt_fec_send_alloc(sess, f,
-                                 TBT_FEC_ALLOC_F_ABORT |
-                                     TBT_FEC_ALLOC_F_ACK,
-                                 epoch, rx->group_mask, rx->base_pkt,
-                                 rx->base_block);
-        atomic64_inc(&sess->fec_alloc_abort);
+        if (!sess->fec_allocator)
+        {
+            /* Only the responder owns the answer. An initiator rolls its
+             * applied plane back silently after receiving ABORT|ACK;
+             * answering would bounce the record between the two ends. */
+            (void)tbt_fec_send_alloc(sess, f,
+                                     TBT_FEC_ALLOC_F_ABORT |
+                                         TBT_FEC_ALLOC_F_ACK,
+                                     epoch, rx->group_mask, rx->base_pkt,
+                                     rx->base_block);
+            atomic64_inc(&sess->fec_alloc_abort);
+        }
         return;
     }
     if (rx->alloc_commit_pending)
