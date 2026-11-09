@@ -3,6 +3,29 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [Unreleased]
+
+### Fixed
+
+- `tbt_fec_alloc_unpack()` enforces the whole FEC_ALLOC body contract: the
+  three reserved bytes at +37, the reserved word at +60 and a non-empty
+  `group_mask`. The extended hostile-input corpus found that a body with
+  those faults passed the parser, so a peer could name no group or carry
+  undefined fields into the rebalancing state machine.
+
+### Tests
+
+- `host/test_fuzz` covers the 0.4.0 v7 control bodies: 20k mutated
+  FEC_ALLOC bodies (every mask shape, every flag value, reserved bytes,
+  both CRCs), 40k mutated FEC_CFG bodies over the RLNC, SC-LDPC binary and
+  SC-LDPC GF(16) shapes with the `n=0`, `m=0`, `n+m=65536`, `n+m>256` and
+  `groups=0` edges, and 8k mutated config lines aimed at `portblock=`,
+  `adaptive=`, `L=` and `mode=sc-ldpc`.
+- `host/test_http_fuzz` carries OPEN records with every 32-byte mask shape
+  as one chunk per record, splits the byte stream at every 1..7 byte
+  boundary and requires the same records back; body lengths 0/1/31/33/64
+  and chunks that disagree with the header's `body_len` must end in PROTO.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added
