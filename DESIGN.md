@@ -2143,8 +2143,12 @@ holding the socket lock. The reset path (`tbt_kill_work -> tbt_sock_detach`) can
 work item, and `cancel_work_sync()` then waits for the sleeper forever: QEMU reported
 `INFO: task kworker blocked for more than 122 s` in exactly that stack. Delivery is
 therefore `MSG_DONTWAIT`, and the reset close runs on `system_dfl_wq` so it never shares
-a pool with the work it cancels. The public/target socket gets 1 MiB send/receive
-buffers; a carrier's buffers are sized from its share of the sender window —
+a pool with the work it cancels. The `SHUT_RDWR` wake is part of `w_kill`, not
+`tbt_stream_kill()`: the RST path runs inside the carrier's `tcp_read_sock()` under
+`lock_sock(carrier)`, and `kernel_sock_shutdown()` takes `lock_sock()` on the stream
+socket; nesting the two trips lockdep's shared `sk_lock-AF_INET` class. The
+public/target socket gets 1 MiB send/receive buffers; a carrier's buffers are sized
+from its share of the sender window —
 `clamp((window_share + 2 × TBT_CHUNK_MAX) / 2, 128 KiB, 4 MiB)`, set with
 `SO_SNDBUFFORCE`/`SO_RCVBUFFORCE` (§5.4) — so the FBK cannot trail the write by more than
 the window allows. The default 16 KiB buffer is not the first thing the tunnel hits.

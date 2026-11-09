@@ -519,10 +519,22 @@ void tbt_stream_init_work(struct tbt_stream *st)
 static void tbt_kill_body(struct tbt_stream *st)
 {
     struct tbt_session *sess = st->sess;
+    struct sock *sk;
 
     might_sleep();
     tbt_tx_rst_retry(sess, st);
     tbt_stream_cancel(st, &st->w_target, TBT_STREAM_F_SCHED_TARGET);
+
+    /* Wake anything asleep on the stream socket: a delivery blocked in
+     * tcp_sendmsg_locked()/lock_sock() would otherwise keep w_drain running
+     * and release_socket_now() would wait forever in cancel_work_sync().
+     * This must not run in tbt_stream_kill(): the RST path calls it from the
+     * carrier receive work under lock_sock(carrier), and shutdown takes
+     * lock_sock(stream) -- a nested sk_lock-AF_INET lockdep report. w_target
+     * is cancelled above, so st->sk cannot change before release closes it. */
+    sk = READ_ONCE(st->sk);
+    if (sk && sk->sk_socket)
+        kernel_sock_shutdown(sk->sk_socket, SHUT_RDWR);
 
     /* No self cancel: this is the w_kill work item. */
     tbt_stream_release_socket_now(st);
