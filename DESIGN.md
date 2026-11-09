@@ -300,11 +300,14 @@ stream its own FEC TX/RX plane keyed by `sid`: block ids, credit, delivery
 cursors, NACK state and FIN are per flow, and the 48-byte record layout is
 unchanged. The carriers are split into physical groups
 (`carriers / (n + m)`; 32 on the production 256/4+4 shape). Each flow owns a
-disjoint group bitmap, carried in OPEN; `fec_groups_per_flow=` keeps the
-static quota for A/B tests (`0`: the first flow owns every group; `16`: it
-owns half) and for a peer that does not implement `FEC_ALLOC`.
+disjoint group bitmap, carried in OPEN. `fec_groups_per_flow=N` with `N > 0`
+fixes a static per-flow quota for A/B tests (`16` leaves half the 32 groups
+of the production shape for a second flow); the default `0` selects the
+dynamic allocator below. A peer that does not speak `FEC_ALLOC` keeps the
+mask it bootstrapped from OPEN, because a REQUEST nobody answers is
+abandoned.
 
-With the default quota the near side is the allocator. A joining stream
+With `fec_groups_per_flow=0` the near side is the allocator. A joining stream
 takes its equal share (`total/(N+1)`, remainder to the lowest sids) from
 free groups, or the allocator sends `FEC_ALLOC` (`0x36`) to shrink the
 donors before admitting it. A stream close returns its groups and grows the

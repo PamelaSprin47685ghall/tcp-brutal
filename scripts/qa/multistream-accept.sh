@@ -12,7 +12,8 @@
 #   - both streams are live with distinct sids and no cross-delivery;
 #   - each body's sha256 and byte count match the far target;
 #   - c3 up=256 and fec_drop_sid does not grow;
-#   - with fec_groups_per_flow=0 the second stream is refused.
+#   - with the 0.4.4 default fec_groups_per_flow=0 the near side rebalances
+#     the groups and admits the second stream instead of refusing it.
 #
 # The tool does not reload the module. Load both ends with the same parameter
 # before --run:
@@ -22,7 +23,7 @@
 #
 # Modes
 #   --run        two concurrent 1 GiB (or --seconds) streams (default)
-#   --param0     one stream plus a refused second stream at parameter 0
+#   --param0     two concurrent streams at parameter 0 (dynamic rebalancing)
 #   --status     read-only preflight
 #   --cleanup    stop the remote clients/target and restore --setup config
 #
@@ -307,26 +308,13 @@ run_multistream() {
 }
 
 run_param0() {
-    start_target || { qa_check target_start 1 "see $EV/target-start.log"; return; }
-    qa_ssh near "mkdir -p '$MS_DIR'" >/dev/null 2>&1 || true
-    qa_ssh near "rm -f '$MS_DIR/out-a.bin' '$MS_DIR/rc-a' '$MS_DIR/rc-b'; nohup curl -sS --local-port '$MS_NEAR_LPORT_A' --max-time 70 -o '$MS_DIR/out-a.bin' 'http://127.0.0.1:$NEAR_PORT/stream/a' >'$MS_DIR/curl-a.log' 2>&1 & echo \$! >'$MS_DIR/curl-a.pid'" >/dev/null 2>&1 || true
-    local i
-    for i in $(seq 1 10); do
-        sleep 1
-        snap near mid
-        [[ $(active_streams "$EV/near-mid-stats.txt") == 1 ]] && break
-    done
-    local before refused active
-    before=$(field "$EV/near-mid-stats.txt" c9 fec_stream_refused)
-    qa_ssh near "curl -sS --local-port '$MS_NEAR_LPORT_B' --max-time 10 -o '$MS_DIR/out-b.bin' 'http://127.0.0.1:$NEAR_PORT/stream/b' >'$MS_DIR/curl-b.log' 2>&1; echo \$? >'$MS_DIR/rc-b'" >/dev/null 2>&1 || true
-    snap near after
-    refused=$(field "$EV/near-after-stats.txt" c9 fec_stream_refused)
-    active=$(awk -v t="$TUNNEL" '$1=="tunnel" && $2==t && $3=="streams" { for (i=1;i<=NF;i++) if ($i ~ /^streams_active=/) { split($i,a,"="); print a[2]; exit } }' "$EV/near-after-stats.txt" 2>/dev/null)
-    local rc_b
-    rc_b=$(qa_ssh near "cat '$MS_DIR/rc-b' 2>/dev/null" | tr -d '[:space:]')
-    qa_check param0_second_refused "$([[ ${rc_b:-0} != 0 ]]; echo $?)" "curl rc=${rc_b:-?}"
-    qa_check param0_counter "$([[ ${refused:-0} -gt ${before:-0} ]]; echo $?)" "fec_stream_refused ${before:-?} -> ${refused:-?}"
-    qa_check param0_one_stream "$([[ ${active:-0} == 1 ]]; echo $?)" "streams_active=${active:-?}"
+    # 0.4.4: fec_groups_per_flow=0 no longer refuses the second stream. The
+    # near side rebalances the group set at runtime (FEC_ALLOC), so the
+    # default admits the second stream through the allocator instead of the
+    # static quota --run exercises at 16. Same acceptance checks, different
+    # admission path; a peer without FEC_ALLOC still aborts to the static
+    # mask and then refuses with -ENOSPC.
+    run_multistream
 }
 
 case $MODE in

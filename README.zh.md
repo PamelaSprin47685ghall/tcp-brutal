@@ -53,6 +53,9 @@ per-flow FEC TX/RX 上下文与 admission 引用。前一个流关闭后的顺�
 旧 FEC RX/TX 状态、把窗口重定基到新流的第一个块，并关闭旧 target socket；
 DATA/PARITY 携带 stream id（`0x1005` 引入，`0x1007` 仍在），因此排队中的旧流
 记录不会进入新流。
+0.4.4 起近端在运行时重平衡物理组（`FEC_ALLOC` 0x36）：默认
+`fec_groups_per_flow=0` 时，新流在捐赠者的下一个 super-block 边界取走自己的
+份额，流关闭时归还；非零值保留静态配额。
 
 当前代码实现了 [DESIGN.md](DESIGN.md) 的 C1–C8，以及 FEC v6 grouped 数据面与
 自适应 Phase 1、256 载体扩展：`/proc` 控制面、监听器与远端、
@@ -142,6 +145,7 @@ sudo insmod tbtun.ko debug_loss=0
 | `max_carriers` | `256` | 每个会话的载体槽，`1..256`；`n + m` 或 `carriers` 超过上限返回 `EINVAL` |
 | `debug_loss` | `0` | 是否允许写 `drop_ppm`（确定性丢包注入） |
 | `hold_enable` | `1` | BBR hold：50 ms carrier poll 在空闲期后恢复上次的 cwnd/pacing。默认开启；写 `0` 关闭。它直接写 `tcp_sock` 字段，不是稳定的内核 API |
+| `fec_groups_per_flow` | `0` | 单条流最多可占的 FEC 组数。`0` 表示近端在运行时重平衡组集合（`FEC_ALLOC` 0x36）；非零值保留静态配额，例如生产 256/4+4 形状下 `16` 可跑两条流 |
 
 控制面只在 `init_net` 中创建；没有 per-netns 视图。
 卸载用 `sudo rmmod tbtun`。卸载会清空所有隧道，关闭所有监听端口和载体。
@@ -526,7 +530,7 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   `adaptive=off` 保持配置的形状。
 - **多流 FEC v7。** 0.4.0 起一个会话可承载并发流（wire `0x1007`）；每条流有
   自己的 FEC TX/RX flow 与 admission 引用。顺序连接仍会重置旧状态并关闭旧
-  target。
+  target。0.4.4 起近端默认在运行时重平衡组集合（`fec_groups_per_flow=0`）。
 - **每条远端隧道只有一个锚。** 一个 `peer=`（或第一条 HELLO）固定源地址。
   近端多宿主，或者 NAT 重绑源地址，都会让后续 HELLO 被拒绝（`join_src_reject`）；
   请保持一个稳定的源地址，例如用 `srcaddrs=`。

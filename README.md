@@ -70,6 +70,10 @@ reference. A sequential connection after the previous one closes still resets
 the old FEC RX/TX state, rebases the window on its own first block, and closes
 the old target socket. DATA/PARITY carry the stream id (`0x1005`; carried
 through `0x1007`), so a queued old-stream record cannot reach the new stream.
+Since 0.4.4 the near side rebalances the physical groups at runtime
+(`FEC_ALLOC` 0x36). With the default `fec_groups_per_flow=0` a joining
+stream takes its share from the donors at their next super-block boundary
+and a stream close returns it; a non-zero value keeps a static quota.
 
 This tree implements C1–C8 of [DESIGN.md](DESIGN.md), plus the FEC v6 grouped
 data plane, adaptive Phase 1, and the 256-carrier extension: the `/proc`
@@ -181,6 +185,7 @@ Module parameters, read-only after load:
 | `max_carriers` | `256` | Carrier sockets per session, `1..256`; `carriers` over the cap fails with `EINVAL` |
 | `debug_loss` | `0` | Allow `drop_ppm` writes, the deterministic loss injector |
 | `hold_enable` | `1` | BBR hold: the 50 ms carrier poll restores the last good cwnd/pacing across idle periods. On by default; write `0` to opt out. It writes `tcp_sock` fields directly, which is not a stable kernel API |
+| `fec_groups_per_flow` | `0` | Max FEC groups one flow may own. `0` lets the near side rebalance the group set at runtime (`FEC_ALLOC` 0x36); a non-zero value keeps a static per-flow quota, e.g. `16` runs two flows on the production 256/4+4 shape |
 
 The control surface is created in `init_net` only; there is no per-netns view.
 Unload with `sudo rmmod tbtun`. Unloading flushes every tunnel and closes every
@@ -625,7 +630,8 @@ real line.
 - **Multi-stream FEC v7.** A session can carry concurrent streams (0.4.0,
   wire `0x1007`); each stream has its own FEC TX/RX flow and admission
   reference. A sequential connection still resets the old state and closes the
-  old target.
+  old target. Since 0.4.4 the near side rebalances the group set at runtime
+  by default (`fec_groups_per_flow=0`).
 - **One anchor per far tunnel.** A single `peer=` (or the first HELLO) fixes the
   source address. A multi-homed near host, or a NAT that rebinds the source
   address, will have later HELLOs refused (`join_src_reject`); keep one stable

@@ -9170,9 +9170,10 @@ int tbt_fec_data_init(struct tbt_session *sess)
     INIT_DELAYED_WORK(&sess->w_fec_rx, tbt_fec_rx_work);
     sess->fec = true;
 
-    /* The first flow owns one fair share from the start. fec_groups_per_flow
-     * = 0 keeps the old single-stream geometry; 16 on 256 carriers leaves 16
-     * groups for a second flow. A far-side OPEN later replaces this mask. */
+    /* The first flow owns one fair share from the start. A non-zero
+     * fec_groups_per_flow caps it (16 on 256 carriers leaves 16 groups for a
+     * second flow); the default 0 leaves the pool to the allocator, which
+     * rebalances it at runtime. A far-side OPEN later replaces this mask. */
     primary_groups = groups;
     /* SC-LDPC keeps the whole carrier geometry in its single flow: a partial
      * group set would make the CFG groups field disagree with the session's
