@@ -267,6 +267,7 @@ $RECYCLE.BIN/
 host/test_parse
 host/test_fuzz
 host/test_http
+host/test_http_fuzz
 host/test_http_fuzz_san
 host/test_http_live
 host/test_parse_san
@@ -274,8 +275,12 @@ host/test_fuzz_san
 host/test_http_san
 host/test_crypto
 host/test_crypto_san
+host/test_reorder
+host/test_ack
+host/test_control
 host/bench_crypto
 host/bench_micro
+host/bench_txpath
 host/test_fec
 host/test_fec_san
 host/test_fec_out
@@ -283,7 +288,10 @@ host/test_fec_out_san
 host/test_fec_rx
 host/test_fec_rx_san
 host/test_fin_priority
+host/test_close_wake
 host/test_hold
+host/test_multistream
+host/test_anchor
 host/test_tx_index
 host/test_tx_publish
 host/test_portmap
@@ -300,6 +308,9 @@ host/test_fec_sclc
 host/test_fec_sclc_san
 host/test_fec_sclc_data
 host/test_fec_sclc_data_san
+host/test_close_wake_san
+host/test_fault
+host/test_fault_san
 host/bench_sclc_uplink
 # guest traffic checker (tests/qemu/mkinitramfs.sh)
 host/tbt_burst
