@@ -6673,39 +6673,41 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
     {
         if (near)
         {
-            bool peer_committed;
-
             /* ABORT ACK: the far restored its TX to the old mask. Our own RX
              * may have armed (2) or applied (3) that switch; an armed state
              * left behind blocks every later ACK arm. If the far already
              * committed its TX (peer_committed), the new plane is what it
              * still sends on: release the old buffers and keep it. */
             spin_lock_bh(&rx->lock);
-            peer_committed = READ_ONCE(tx->alloc.peer_committed);
-            if (peer_committed &&
-                (rx->alloc_state == 3 || rx->alloc_old_codec))
+
             {
-                if (rx->alloc_state == 3)
-                    rx->alloc_state = 0;
-                /* Let w_fec_rx free a rollback copy that a newer arm kept
-                 * past its epoch; state 2 alone owns no old plane. */
-                rx->alloc_commit_pending = true;
-            }
-            if (rx->alloc.epoch == a->epoch)
-            {
-                if (rx->alloc_state == 3)
+                bool committed = READ_ONCE(tx->alloc.peer_committed);
+
+                if (rx->alloc.epoch == a->epoch)
                 {
-                    rx->alloc_abort_pending = true;
-                    rx->alloc_abort_epoch = a->epoch;
-                }
-                else if (rx->alloc_state == 2 && !peer_committed)
-                {
-                    /* The peer did not commit: its TX is back on the old
-                     * mask, so an armed RX must be disarmed too. When it
-                     * did commit, the armed plane is the one its TX now
-                     * uses and has to stay. */
-                    rx->alloc_state = 0;
-                    rx->alloc_epoch = a->epoch; /* tombstone */
+                    if (committed)
+                    {
+                        /* The peer keeps its new TX plane, so our RX must
+                         * keep the switch armed (2) or treat the applied
+                         * plane as final (3); only a rollback copy is
+                         * retired. Disarming state 2 here would leave the
+                         * two directions on different masks. */
+                        if (rx->alloc_state == 3)
+                            rx->alloc_state = 0;
+                        if (rx->alloc_state == 3 ||
+                            rx->alloc_old_codec)
+                            rx->alloc_commit_pending = true;
+                    }
+                    else if (rx->alloc_state == 3)
+                    {
+                        rx->alloc_abort_pending = true;
+                        rx->alloc_abort_epoch = a->epoch;
+                    }
+                    else if (rx->alloc_state == 2)
+                    {
+                        rx->alloc_state = 0;
+                        rx->alloc_epoch = a->epoch; /* tombstone */
+                    }
                 }
             }
             spin_unlock_bh(&rx->lock);
