@@ -28,7 +28,7 @@ typedef uint64_t u64;
 #endif
 
 #define TBT_VERSION_MAJOR 0
-#define TBT_VERSION_MINOR 4
+#define TBT_VERSION_MINOR 5
 #define TBT_VERSION_PATCH 0
 #define TBT_VERSION ((TBT_VERSION_MAJOR << 16) | (TBT_VERSION_MINOR << 8) | TBT_VERSION_PATCH)
 
@@ -36,7 +36,7 @@ typedef uint64_t u64;
 #define TBT_ROLE_NEAR 2
 #define TBT_ROLE_FAR 3
 
-/* Wire protocol revision: u16 at frame offset +30, 0x0007. Independent of the
+/* Wire protocol revision: u16 at frame offset +30, 0x0008. Independent of the
  * module version (DESIGN.md §11); bump it alone on any wire change.
  * 0x0002 moved body_len into the header (+6) and removed the 4-byte prefix.
  * 0x0003 carries RETIRE (24) and the HELLO profile|gen byte; a 0x0002 peer
@@ -69,33 +69,44 @@ typedef uint64_t u64;
  * body; FIN's pkt_end/pkt_base become stream-local packet seqs; and the FEC
  * plane adds ALLOC (0x36) for group rebalancing. A 0x0006 peer fails the
  * first HELLO (version 4) and the first OPEN length check, so the hard
- * cutover is explicit rather than a silent reinterpretation. */
-#define TBT_CONV 0x0007u
+ * cutover is explicit rather than a silent reinterpretation.
+ * 0x0008 (0.5.0) is the SC-LDPC single-plane multistream cut. The 48-byte
+ * FEC header and the 32-byte main header are unchanged, but the DATA/PARITY
+ * payloads inside an SC-LDPC FEC plane now carry 32-byte subframes
+ * (tbt_fec_ms.h): one FEC plane carries every stream, and each subframe
+ * names its own stream. The FEC plane adds MS_WIN (0x37), which carries one
+ * stream's receive window. A 0x0007 peer fails the first HELLO (version 5)
+ * and the first FEC conv check, so the hard cutover is explicit rather than
+ * a silent reinterpretation. */
+#define TBT_CONV 0x0008u
 
 /* HELLO body[0]: wire-protocol version, independent of TBT_VERSION. The FEC
- * v6 session uses version 3 and the extended body below; the old ARQ keeps
- * version 1 and 23 bytes. Version 3 is the adaptive-shape cut: the FEC
- * records use TBT_FEC_CONV 0x1006, and FEC_CFG/FEC_FBK carry the shape
- * switch. tbt_rx_hello() compares this byte exactly, so a 0.2.x peer fails
- * the first HELLO with -EPROTO and its carrier closes; both ends must be
- * upgraded together. Version 4 is the multi-stream cut: TBT_FEC_CONV 0x1007,
- * a 32-byte OPEN group bitmap, stream-local FEC seq/block ids and ALLOC
- * (0x36). */
+ * v6 session uses the extended body below; the old ARQ keeps version 1 and
+ * 23 bytes. Version 3 was the adaptive-shape cut: the FEC records use
+ * TBT_FEC_CONV 0x1006, and FEC_CFG/FEC_FBK carry the shape switch.
+ * tbt_rx_hello() compares this byte exactly, so a mismatched peer fails the
+ * first HELLO with -EPROTO and its carrier closes; both ends must be
+ * upgraded together. Version 4 was the multi-stream cut: TBT_FEC_CONV
+ * 0x1007, a 32-byte OPEN group bitmap, stream-local FEC seq/block ids and
+ * ALLOC (0x36). Version 5 is the SC-LDPC single-plane multistream cut:
+ * TBT_FEC_CONV 0x1008, 32-byte subframes inside DATA/PARITY payloads, and
+ * MS_WIN (0x37) for per-stream receive windows. */
 #define TBT_WIRE_VERSION 1
-#define TBT_WIRE_VERSION_V6 4
+#define TBT_WIRE_VERSION_V6 5
 
 /* ------------------------------------------------------------------ *
- * FEC wire: an independent record format, TBT_FEC_CONV 0x1007.
+ * FEC wire: an independent record format, TBT_FEC_CONV 0x1008.
  *
  * The old ARQ record above is frozen at 16 carriers: its path_ack_mask is
  * u16 and its FBK/WINDOW bodies have 16 entries. FEC never reuses those
  * fields. A receiver tells the two formats apart by the first header byte:
- * old records start with 0x10..0x25, FEC records with 0x30..0x36.
+ * old records start with 0x10..0x25, FEC records with 0x30..0x37.
  * The conv field is checked too, so a wrong-format byte stream fails closed.
  *
  * Layout (little-endian, 48 bytes):
  *   +0  u8  type        0x30 DATA, 0x31 PARITY, 0x32 ACK, 0x33 NACK,
- *                       0x34 FEC_CFG, 0x35 FEC_FBK, 0x36 FEC_ALLOC
+ *                       0x34 FEC_CFG, 0x35 FEC_FBK, 0x36 FEC_ALLOC,
+ *                       0x37 FEC_MS_WIN
  *   +1  u8  flags       bit0 LAST; every other bit must be zero
  *   +2  u16 share_index 0..n+m-1; u16 so n+m=256 is representable
  *   +4  u8  n           data shares in the block
@@ -111,12 +122,13 @@ typedef uint64_t u64;
  *   +16 u64 seq         DATA: packet sequence; PARITY: window end
  *   +24 u16 win_len     PARITY: covered packets; DATA: 0
  *   +26 u16 payload_len payload bytes following this header
- *   +28 u16 conv        0x1007
+ *   +28 u16 conv        0x1008
  *   +30 u16 reserved    must be 0
  *   +32 u64 sid         stream id this record belongs to. DATA/PARITY and
  *                       every per-stream control record (ACK/NACK/CFG/FBK/
- *                       ALLOC) carry the flow's sid; 0 is reserved for a
- *                       session-wide record.
+ *                       ALLOC) carry the flow's sid; MS_WIN carries the
+ *                       target stream id; 0 is reserved for a session-wide
+ *                       record.
  *   +40 u32 payload_crc32c  CRC32C over the payload only
  *   +44 u32 header_crc32c   CRC32C over header bytes +0..+43
  *
@@ -125,7 +137,7 @@ typedef uint64_t u64;
  * Control frames are complete records of their own and must never be queued
  * behind a partial DATA record (the carrier writer emits each record whole).
  * ------------------------------------------------------------------ */
-#define TBT_FEC_CONV 0x1007u
+#define TBT_FEC_CONV 0x1008u
 /* 0.2.0 raises TBT_FEC_CONV from 0x1001 to 0x1004 in three wire steps;
  * 0.2.2 adds M5 below.
  * M2 (0x1002): a PARITY record may be a block marker: win_len == 0 &&
@@ -163,12 +175,19 @@ typedef uint64_t u64;
  * There is no 4-byte marker and no magic number on this wire. A marker is a
  * set of values inside the 48-byte tbt_fec_hdr: type TBT_FEC_PARITY (0x31),
  * flags 0, share_index n (parity 0), epoch 0, win_len 0, payload_len 0,
- * conv 0x1007, payload_crc32c 0 (CRC32C of an empty payload).
+ * conv 0x1008, payload_crc32c 0 (CRC32C of an empty payload).
  *
  * M7 (0x1007, 0.4.0): seq and block_id are stream-local; sid is the routing
  * key for every per-stream record, not an entry filter; OPEN names the
  * flow's physical group bitmap; ALLOC (0x36) moves a flow between group
- * sets. The 48-byte header layout is unchanged. */
+ * sets. The 48-byte header layout is unchanged.
+ *
+ * M8 (0x1008, 0.5.0): one SC-LDPC FEC plane carries several streams. The
+ * DATA/PARITY payload bytes are 32-byte subframes (TBT_MS_HDR_LEN and the
+ * stream tag live in tbt_fec_ms.h), so the 48-byte FEC header and every
+ * offset above stay unchanged. MS_WIN (0x37) reports one stream's receive
+ * window: delivered offset and credit. The main wire adds no record; its
+ * 0x0008 bump is the hard cutover marker. */
 
 /* FEC record types. */
 #define TBT_FEC_DATA 0x30
@@ -178,6 +197,7 @@ typedef uint64_t u64;
 #define TBT_FEC_CFG 0x34
 #define TBT_FEC_FBK 0x35
 #define TBT_FEC_ALLOC 0x36
+#define TBT_FEC_MS_WIN 0x37
 
 /* FEC header flags: bit0 LAST, all others reserved and refused. */
 #define TBT_FEC_FF_LAST 0x01
@@ -251,6 +271,18 @@ typedef uint64_t u64;
 #define TBT_FEC_ALLOC_F_ACK 0x01
 #define TBT_FEC_ALLOC_F_DONE 0x02
 #define TBT_FEC_ALLOC_F_MASK 0x03
+/* FEC_MS_WIN body (16 bytes, 0x1008). One stream's receive window inside the
+ * shared SC-LDPC FEC plane. The record header's sid is the target stream id,
+ * not the FEC plane's flow sid; n = m = share_index = win_len = block_id =
+ * seq = 0 and payload_len = TBT_FEC_MS_WIN_LEN.
+ *   +0  u64 delivered  stream byte offset the receiver has consumed
+ *   +8  u32 credit     receive window bytes beyond delivered
+ *   +12 u32 reserved   must be 0
+ */
+#define TBT_FEC_MS_WIN_LEN 16
+#define TBT_FEC_MS_WIN_DELIVERED 0
+#define TBT_FEC_MS_WIN_CREDIT 8
+#define TBT_FEC_MS_WIN_RESERVED 12
 /* FEC_CFG body (48 bytes, little-endian). One record carries a shape change
  * request; the flags say whether it applies or aborts one. The record
  * header leaves n/m/share_index/win_len/seq zero and names no block.

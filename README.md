@@ -62,12 +62,14 @@ rate 50%, so its controller stays at 50 (known limitation). The switch rides
 at runtime. Shapes with `n + m != 8` are not implemented for the GF(2)
 family.
 
-A session can carry multiple concurrent FEC streams in 0.4.0 (v7, wire
-`0x1007`). Each stream owns a per-flow FEC TX/RX context and an admission
-reference. A sequential connection after the previous one closes still resets
-the old FEC RX/TX state, rebases the window on its own first block, and closes
-the old target socket. DATA/PARITY carry the stream id (`0x1005`; carried
-through `0x1007`), so a queued old-stream record cannot reach the new stream.
+A session can carry multiple concurrent FEC streams in 0.5.0 (wire `0x1008`).
+Multi-group FEC gives each stream its own flow. SC-LDPC has one physical plane
+(downlink `1x256`, uplink `8x32`), so its DATA/PARITY payload is a stream of
+32-byte subframes tagged `[sid, offset, length, type]`; up to 16 streams share
+the plane with per-stream receive windows (`MS_WIN`, 0x37) and independent
+FIN/RST close. A lost share is repaired for the whole block, never for one
+stream. The stream id also rides in the FEC header (`0x1005`), so a queued
+old-stream record cannot reach a new stream.
 
 This tree implements C1–C8 of [DESIGN.md](DESIGN.md), plus the FEC v6 grouped
 data plane, adaptive Phase 1, and the 256-carrier extension: the `/proc`
@@ -139,9 +141,9 @@ results and their cost.
 ## Packaging
 
 The module version has one authority: `TBT_VERSION_MAJOR/MINOR/PATCH` in
-`tbtun/tbt_uapi.h` (currently `0.4.0`). The wire
-version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x0007` for the 32-byte frames
-and `TBT_FEC_CONV=0x1007` for the 48-byte FEC records; all three are independent of
+`tbtun/tbt_uapi.h` (currently `0.5.0`). The wire
+version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x0008` for the 32-byte frames
+and `TBT_FEC_CONV=0x1008` for the 48-byte FEC records; all three are independent of
 the module version. `TBT_CONV 0x0005` removed the unused PREDICT/CANCEL
 placeholder frames: a peer that still sends one fails the header check and its
 carrier closes, and a 0x0004 peer is refused at the first header because its
@@ -615,13 +617,13 @@ real line.
   `rlnc`/`grouped` remain as the GF(2) band RLNC fallback.
 - **Adaptive FEC.** The GF(2) family keeps Phase 1: `adaptive=on` moves `m`
   in the fixed `n + m = 8`, 32-group family; `n + m != 8` is not implemented.
-  `mode=sc-ldpc` uses the per-flow SC-LDPC controller (off by default): the
-  uplink GF(16) codec switches along the ladder; the downlink binary codec is
-  fixed at rate 50%. `adaptive=off` keeps the configured shape.
-- **Multi-stream FEC v7.** A session can carry concurrent streams (0.4.0,
-  wire `0x1007`); each stream has its own FEC TX/RX flow and admission
-  reference. A sequential connection still resets the old state and closes the
-  old target.
+  `mode=sc-ldpc` keeps the configured shape in 0.5.0: the subframe mux fixes
+  the block span, so the controller reports but does not switch. The downlink
+  binary codec is fixed at rate 50%. `adaptive=off` keeps the configured shape.
+- **Multi-stream FEC.** A session can carry concurrent streams (0.5.0,
+  wire `0x1008`). Multi-group FEC gives each stream its own flow; SC-LDPC
+  multiplexes up to 16 streams inside its single plane with subframes and
+  per-stream windows.
 - **One anchor per far tunnel.** A single `peer=` (or the first HELLO) fixes the
   source address. A multi-homed near host, or a NAT that rebinds the source
   address, will have later HELLOs refused (`join_src_reject`); keep one stable
@@ -768,7 +770,7 @@ per tunnel, with no routing, no NAT, no authentication, and no IPv6. FEC v6 is
 optional (`fec=on`); `mode=sc-ldpc` is implemented (binary downlink, grouped
 GF(16) uplink), and `mode=rlnc`/`grouped` remain as the GF(2) band RLNC
 fallback with `carriers = groups * (n + m)` up to 256 carriers. Multiple
-concurrent FEC streams are supported in 0.4.0 (v7, `0x1007`). `crypto=on` is
+concurrent FEC streams are supported in 0.5.0 (`0x1008`). `crypto=on` is
 ChaCha8 body
 obfuscation, not encryption, and it does not authenticate. It exists to multiply
 a per-flow rate limit and to test whether a QoS profile helps. For anything

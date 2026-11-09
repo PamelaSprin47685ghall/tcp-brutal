@@ -3,6 +3,27 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.5.0] - unreleased
+
+### Added
+
+- SC-LDPC single-plane stream multiplexing: one SC-LDPC FEC plane carries
+  32-byte subframes tagged by stream id (`tbt_fec_ms.h`), with per-stream
+  receive windows, FIN and RST.
+- `TBT_FEC_MS_WIN` (`0x37`) carries one stream's receive window: delivered
+  byte offset, credit, and a reserved word. The 16-byte body names the
+  target stream in the record header's `sid`.
+- `host/test_fec` covers the MS_WIN body and its header rules.
+
+### Changed
+
+- Wire: `TBT_CONV` moves to `0x0008`, `TBT_FEC_CONV` to `0x1008`, and
+  `TBT_WIRE_VERSION_V6` to 5. The 32-byte main header and the 48-byte FEC
+  header keep every offset; the DATA/PARITY payload interpretation and the
+  new MS_WIN record are the changes. A 0.4.0 peer is refused at the first
+  HELLO.
+- Module version is `0.5.0`.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

@@ -1090,6 +1090,12 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
             /* The far side echoes the near's own bitmap. Never admit a flow
              * here: the near is the only allocator. */
             flow = tbt_fec_flow_lookup(sess, sid);
+            if (!flow && sess->fec_sclc)
+            {
+                /* A second stream's echoed OPEN names its own sid, while the
+                 * single SC-LDPC plane is keyed by the first stream's sid. */
+                flow = tbt_fec_flow_shared(sess);
+            }
             if (!flow)
             {
                 atomic64_inc(&sess->bind_drop_no_stream);
@@ -1118,14 +1124,24 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
                 return TBT_BIND_DROP;
             }
         }
-        if (!tbt_fec_primary_mask_match(sess->fec_sclc, flow->group_mask,
-                                        body))
         {
-            /* One sid, one bitmap. A repeated OPEN that renames the groups of
-             * a live flow is refused; the local allocation stands. */
-            tbt_fec_flow_put(flow);
-            atomic64_inc(&sess->bind_drop_no_stream);
-            return TBT_BIND_DROP;
+            /* Near side compares the echoed bitmap with its own TX mask;
+             * the far side compares it with the peer bitmap bound at the
+             * first OPEN. A different bitmap on the same plane cannot be
+             * served by one codec. */
+            const u8 *bound = (!near && sess->fec_sclc && flow->rx)
+                                  ? flow->rx->group_mask
+                                  : flow->group_mask;
+
+            if (!tbt_fec_primary_mask_match(sess->fec_sclc, bound, body))
+            {
+                /* One sid, one bitmap. A repeated OPEN that renames the
+                 * groups of a live flow is refused; the local allocation
+                 * stands. */
+                tbt_fec_flow_put(flow);
+                atomic64_inc(&sess->bind_drop_no_stream);
+                return TBT_BIND_DROP;
+            }
         }
     }
 
@@ -1153,7 +1169,17 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
         if (created)
         {
             if (flow)
-                tbt_fec_flow_attach(ast, flow); /* moves the reference */
+            {
+                if (tbt_fec_flow_attach(ast, flow)) /* moves the reference */
+                {
+                    /* The shared mux could not take another leg; the OPEN
+                     * cannot be served, so drop it instead of leaving a
+                     * stream with no data plane. */
+                    tbt_stream_kill(ast, TBT_ST_DEAD);
+                    tbt_stream_put(ast);
+                    return TBT_BIND_DROP;
+                }
+            }
             tbt_far_open_seen(ast);
         }
         else if (flow)

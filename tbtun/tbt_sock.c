@@ -739,6 +739,10 @@ static bool tbt_fec_retire_closing(struct tbt_session *sess)
     u64 sid;
     bool old = false;
 
+    /* SC-LDPC shares one plane, so there is no group to reclaim and no
+     * reason to kill a live stream when another connection arrives. */
+    if (!sess || sess->fec_sclc)
+        return false;
     spin_lock(&sess->lock);
     f = sess->fec_primary;
     sid = f ? f->sid : 0;
@@ -853,8 +857,14 @@ static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
             tbt_fec_flow_abort(sess, flow);
         return -ENOMEM;
     }
-    if (flow)
-        tbt_fec_flow_attach(st, flow); /* moves the reference */
+    if (flow && tbt_fec_flow_attach(st, flow)) /* moves the reference */
+    {
+        /* The shared mux leg could not be built. The stream never reached
+         * OPEN, so release it before the pending path resets the socket. */
+        tbt_stream_kill(st, TBT_ST_DEAD);
+        tbt_stream_put(st);
+        return -ENOMEM;
+    }
     st->sk = sock->sk;
     WRITE_ONCE(st->state, TBT_ST_OPEN);
 

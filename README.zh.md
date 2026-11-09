@@ -47,11 +47,12 @@ GF(16) 上行 128、512 保留），码率由 `n/(n+m)` 决定。per-direction
 切换走 `FEC_CFG`/`FEC_FBK`（wire `0x1007`）。`session <id> adaptive=off` 可在
 运行时关闭。GF(2) 族的 `n + m != 8` 尚未实现。
 
-0.4.0 起一个会话可承载多条并发 FEC 流（v7，wire `0x1007`）。每条流有自己的
-per-flow FEC TX/RX 上下文与 admission 引用。前一个流关闭后的顺序新连接仍会重置
-旧 FEC RX/TX 状态、把窗口重定基到新流的第一个块，并关闭旧 target socket；
-DATA/PARITY 携带 stream id（`0x1005` 引入，`0x1007` 仍在），因此排队中的旧流
-记录不会进入新流。
+0.5.0 起一个会话可承载多条并发 FEC 流（wire `0x1008`）。多组 FEC 仍按组给每条
+流独立 flow。SC-LDPC 只有一个物理平面（下行 `1x256`、上行 `8x32`），因此
+DATA/PARITY 载荷是 32 字节子帧流，每帧携带 `[sid, offset, length, type]`；
+最多 16 条流共享该平面，各有接收窗口（`MS_WIN`，0x37）与独立 FIN/RST 关闭。
+丢包修复以整块为单位，不会只修某条流。FEC 头仍携带 stream id（`0x1005` 引入），
+排队中的旧流记录不会进入新流。
 
 当前代码实现了 [DESIGN.md](DESIGN.md) 的 C1–C8，以及 FEC v6 grouped 数据面与
 自适应 Phase 1、256 载体扩展：`/proc` 控制面、监听器与远端、
@@ -105,9 +106,9 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.4.0`）。
-线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x0007` 与 FEC 记录的
-`TBT_FEC_CONV=0x1007`，三者都与模块版本独立。
+`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.5.0`）。
+线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x0008` 与 FEC 记录的
+`TBT_FEC_CONV=0x1008`，三者都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
 失败，其载体关闭；0x0004 的对端在第一个头部就会因为 conv 不匹配而被拒绝。
 当前 FEC wire 是 `0x1007`：`0x1002` 增加 FIN 的 16 字节 body
@@ -519,11 +520,10 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   `rlnc`/`grouped` 保留为 GF(2) band RLNC 回退。
 - **自适应 FEC。** GF(2) 族保留 Phase 1：`adaptive=on` 只在固定的 `n + m = 8`、
   32 组族内移动 `m`；`n + m != 8` 尚未实现。`mode=sc-ldpc` 使用 per-flow
-  SC-LDPC 控制器（默认 off）：上行 GF(16) 沿阶梯切换，下行 binary 固定
-  rate 50%。`adaptive=off` 保持配置的形状。
-- **多流 FEC v7。** 0.4.0 起一个会话可承载并发流（wire `0x1007`）；每条流有
-  自己的 FEC TX/RX flow 与 admission 引用。顺序连接仍会重置旧状态并关闭旧
-  target。
+  SC-LDPC 控制器（默认 off）：0.5.0 的子帧复用固定块跨度，因此只报告不切换；
+  下行 binary 固定 rate 50%。`adaptive=off` 保持配置的形状。
+- **多流 FEC。** 0.5.0 起一个会话可承载并发流（wire `0x1008`）。多组 FEC
+  按组给每条流独立 flow；SC-LDPC 用子帧与每流窗口在单一平面内复用最多 16 条流。
 - **每条远端隧道只有一个锚。** 一个 `peer=`（或第一条 HELLO）固定源地址。
   近端多宿主，或者 NAT 重绑源地址，都会让后续 HELLO 被拒绝（`join_src_reject`）；
   请保持一个稳定的源地址，例如用 `srcaddrs=`。
@@ -637,8 +637,8 @@ root。如果两台主机之间的路径不可信，就把隧道放进 WireGuard
 这不是通用 VPN。它只转发 TCP，每条隧道只对应一个字面目标地址，没有路由、没有 NAT、
 没有认证，也不支持 IPv6。FEC v6 可选（`fec=on`）；`mode=sc-ldpc` 已实现
 （binary 下行、grouped GF(16) 上行），`mode=rlnc`/`grouped` 保留为 GF(2)
-band RLNC 回退，`carriers = groups * (n + m)` 最多 256 条载体。0.4.0 支持
-多条并发 FEC 流（v7，`0x1007`）。
+band RLNC 回退，`carriers = groups * (n + m)` 最多 256 条载体。0.5.0 支持
+多条并发 FEC 流（`0x1008`）。
 `crypto=on` 只做 ChaCha8 body
 混淆，不是加密，也不做认证。它的用途是放大"每流限速"的额度，并验证某个
 QoS 档位是否有效。其它场景请用 WireGuard。
