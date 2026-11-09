@@ -12,7 +12,11 @@
  *      be served; the first stream must keep working afterwards.
  *   3. tear the pair down, rebuild it as mode=grouped, and run two streams
  *      concurrently with a distinct sid each, both echo-verified.
- *   4. del both tunnels and delete_module.  The unload must return within the
+ *   4. rebuild it once more with one map= slot: public :19001 routes to
+ *      :15210 and public :19002 to :15211, backed by two target servers with
+ *      different response signatures.  Concurrent clients on both ports must
+ *      see their own target's signature, so a swapped slot cannot pass.
+ *   5. del both tunnels and delete_module.  The unload must return within the
  *      deadline (no D-state hang), and the kernel log must hold no UBSAN,
  *      BUG, Oops, WARNING, lockdep or stall report.
  *
@@ -50,11 +54,20 @@
 #define PUB_PORT 19000
 #define CAR_PORT 19001
 #define TGT_PORT 19070
+/* Multi-port phase: slot 0 public :19001 reaches :15210, slot 1 public
+ * :19002 reaches :15211.  The carrier listener moves to :19011 because
+ * :19001 is now a public port. */
+#define MP_PUB0 19001
+#define MP_PUB1 19002
+#define MP_TGT0 15210
+#define MP_TGT1 15211
+#define MP_SIG1 0x5au
+#define MP_BYTES (64u * 1024u)
 #define CARRIERS 256
 #define PORTBLOCK "30000-30511"
 #define STREAM_BYTES (128u * 1024u)
 #define CHUNK 32768u
-#define WATCHDOG_S 40
+#define WATCHDOG_S 60
 #define UP_TIMEOUT_MS 15000
 #define IDLE_TIMEOUT_MS 6000
 #define UNLOAD_TIMEOUT_MS 8000
@@ -345,7 +358,7 @@ static void load_module(void)
         verdict_fail("finit_module: %s", strerror(errno));
 }
 
-static int connect_client(void)
+static int connect_client_port(uint16_t port)
 {
     struct sockaddr_in sa;
     int fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -362,7 +375,7 @@ static int connect_client(void)
     }
     memset(&sa, 0, sizeof(sa));
     sa.sin_family = AF_INET;
-    sa.sin_port = htons(PUB_PORT);
+    sa.sin_port = htons(port);
     sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     rc = connect(fd, (struct sockaddr *)&sa, sizeof(sa));
     if (rc < 0 && errno == EINPROGRESS)
@@ -394,6 +407,11 @@ static int connect_client(void)
         return -1;
     }
     return fd;
+}
+
+static int connect_client(void)
+{
+    return connect_client_port(PUB_PORT);
 }
 
 static int wait_fd(int fd, short ev, int timeout_ms)
@@ -504,7 +522,11 @@ static int send_bytes(int fd, size_t bytes, char *why, size_t cap)
     return 0;
 }
 
-static int recv_verify(int fd, size_t bytes, char *why, size_t cap)
+/* `sig` is the target's response signature: target 0 echoes the byte, target
+ * 1 xors it with MP_SIG1.  A stream that lands on the wrong mapping slot
+ * therefore fails on the first byte rather than passing as clean echo. */
+static int recv_verify(int fd, size_t bytes, unsigned char sig, char *why,
+                       size_t cap)
 {
     size_t off = 0;
 
@@ -522,10 +544,12 @@ static int recv_verify(int fd, size_t bytes, char *why, size_t cap)
             return -1;
         }
         for (i = 0; i < n; i++)
-            if (chunk_recv[i] != chunk_send[i])
+            if (chunk_recv[i] != (unsigned char)(chunk_send[i] ^ sig))
             {
-                snprintf(why, cap, "byte %zu differs: got %02x want %02x",
-                         off + i, chunk_recv[i], chunk_send[i]);
+                snprintf(why, cap,
+                         "byte %zu differs: got %02x want %02x (sig %02x)",
+                         off + i, chunk_recv[i],
+                         (unsigned char)(chunk_send[i] ^ sig), sig);
                 return -1;
             }
         off += n;
@@ -538,12 +562,18 @@ static int recv_verify(int fd, size_t bytes, char *why, size_t cap)
  * and the receiver only delivers a block at its cut or at the stream end, so
  * a short request is delivered when FIN names the end -- waiting for the
  * echo before the half-close would wait for data the sender never sends. */
-static int roundtrip(int fd, size_t bytes, char *why, size_t cap)
+static int roundtrip_sig(int fd, size_t bytes, unsigned char sig, char *why,
+                         size_t cap)
 {
     if (send_bytes(fd, bytes, why, cap))
         return -1;
     shutdown(fd, SHUT_WR);
-    return recv_verify(fd, bytes, why, cap);
+    return recv_verify(fd, bytes, sig, why, cap);
+}
+
+static int roundtrip(int fd, size_t bytes, char *why, size_t cap)
+{
+    return roundtrip_sig(fd, bytes, 0, why, cap);
 }
 
 static void close_stream(int fd)
@@ -567,9 +597,12 @@ static void stream_once(const char *tag, size_t bytes)
     fflush(stdout);
 }
 
-static int echo_conn(int c)
+/* One target connection: reply with every byte transformed by `sig`.  sig=0
+ * is a plain echo; any other value is that target's response signature. */
+static int echo_conn(int c, unsigned char sig)
 {
     unsigned char buf[16384];
+    size_t i;
 
     for (;;)
     {
@@ -584,6 +617,8 @@ static int echo_conn(int c)
         }
         if (!n)
             break;
+        for (i = 0; i < (size_t)n; i++)
+            buf[i] = (unsigned char)(buf[i] ^ sig);
         while (off < (size_t)n)
         {
             ssize_t w = write(c, buf + off, (size_t)n - off);
@@ -603,7 +638,7 @@ out:
     return 0;
 }
 
-static pid_t start_echo(void)
+static pid_t start_echo(uint16_t port, unsigned char sig)
 {
     struct sockaddr_in sa;
     int lfd, one = 1;
@@ -615,10 +650,10 @@ static pid_t start_echo(void)
     setsockopt(lfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
     memset(&sa, 0, sizeof(sa));
     sa.sin_family = AF_INET;
-    sa.sin_port = htons(TGT_PORT);
+    sa.sin_port = htons(port);
     sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     if (bind(lfd, (struct sockaddr *)&sa, sizeof(sa)) < 0)
-        verdict_fail("echo: bind %d: %s", TGT_PORT, strerror(errno));
+        verdict_fail("echo: bind %u: %s", port, strerror(errno));
     if (listen(lfd, 128) < 0)
         verdict_fail("echo: listen: %s", strerror(errno));
 
@@ -649,7 +684,7 @@ static pid_t start_echo(void)
             if (!child)
             {
                 close(lfd);
-                _exit(echo_conn(c));
+                _exit(echo_conn(c, sig));
             }
             close(c);
         }
@@ -858,7 +893,7 @@ static void unload_module(void)
 int main(void)
 {
     long long t0 = now_ms();
-    pid_t echo_pid;
+    pid_t echo_pid[3];
     int fd, i;
 
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -873,7 +908,9 @@ int main(void)
     load_module();
     printf("QEMU_E2E_MODULE loaded fec_groups_per_flow=16\n");
 
-    echo_pid = start_echo();
+    echo_pid[0] = start_echo(TGT_PORT, 0x00);
+    echo_pid[1] = start_echo(MP_TGT0, 0x00);
+    echo_pid[2] = start_echo(MP_TGT1, MP_SIG1);
 
     /* --- phase 1: 256-carrier SC-LDPC, three sequential streams ---------- */
     configure("tunnel 1 role=far profile=raw listen=127.0.0.1:19001"
@@ -939,7 +976,7 @@ int main(void)
         /* The first stream must still work: the refusal came from the
          * admission boundary, not from a wedged session. */
         shutdown(first, SHUT_WR);
-        if (recv_verify(first, STREAM_BYTES / 4, why, sizeof(why)))
+        if (recv_verify(first, STREAM_BYTES / 4, 0, why, sizeof(why)))
             verdict_fail("first stream after refusal: %s", why);
         printf("QEMU_E2E_STREAM sclc-after-reject ok\n");
         fflush(stdout);
@@ -1030,16 +1067,95 @@ int main(void)
             verdict_fail("grouped session did not drain after close");
     }
 
-    /* --- phase 4: clean teardown ---------------------------------------- */
-    kill(echo_pid, SIGKILL);
-    waitpid(echo_pid, NULL, 0);
+    /* --- phase 4: two mappings on one tunnel, distinct signatures -------- */
+    delete_tunnel(1);
+    delete_tunnel(2);
+    if (wait_tunnels_gone(6000))
+        verdict_fail("tunnels did not go away before the map phase");
+    printf("QEMU_E2E_DEL grouped ok\n");
+    fflush(stdout);
+
+    /* Slot 0 keeps :19001 -> :15210 and the map= adds :19002 -> :15211.  The
+     * near side sends each slot's target port in OPEN; the far side may only
+     * dial a port its target= or map= names. */
+    configure("tunnel 1 role=far profile=raw listen=127.0.0.1:19011"
+              " target=127.0.0.1:15210 map=19002:15211"
+              " n=4 m=4 fec=on mode=grouped w=8 carriers=256 crypto=off"
+              " dup=1\n",
+              "tunnel 2 role=near profile=raw listen=127.0.0.1:19001"
+              " peer=127.0.0.1:19011 target=127.0.0.1:15210"
+              " map=19002:15211 n=4 m=4 fec=on mode=grouped w=8"
+              " carriers=256 crypto=off dup=1 portblock=31200-31711\n");
+    if (wait_carriers(CARRIERS, UP_TIMEOUT_MS))
+        verdict_fail("map carriers did not come up");
+    printf("QEMU_E2E_UP map up=%u\n", CARRIERS);
+    fflush(stdout);
+
+    {
+        static const uint16_t ports[2] = { MP_PUB0, MP_PUB1 };
+        static const unsigned char sigs[2] = { 0x00, MP_SIG1 };
+        pid_t kids[2];
+
+        for (i = 0; i < 2; i++)
+        {
+            kids[i] = fork();
+            if (kids[i] < 0)
+                verdict_fail("map client %d: fork: %s", i, strerror(errno));
+            if (!kids[i])
+            {
+                char cwhy[256] = "";
+                int cfd;
+
+                alarm(0);
+                cfd = connect_client_port(ports[i]);
+                if (cfd < 0)
+                {
+                    printf("QEMU_E2E_NOTE map%d connect port %u: %s\n", i,
+                           ports[i], strerror(errno));
+                    _exit(1);
+                }
+                /* Half-close first: the SC-LDPC cut and the target's EOF both
+                 * need FIN before the response can be verified. */
+                if (roundtrip_sig(cfd, MP_BYTES, sigs[i], cwhy, sizeof(cwhy)))
+                {
+                    printf("QEMU_E2E_NOTE map%d port %u: %s\n", i, ports[i],
+                           cwhy);
+                    _exit(1);
+                }
+                close_stream(cfd);
+                _exit(0);
+            }
+        }
+        for (i = 0; i < 2; i++)
+        {
+            int status = 0;
+
+            if (waitpid(kids[i], &status, 0) != kids[i] ||
+                !WIFEXITED(status) || WEXITSTATUS(status))
+                verdict_fail("map stream on port %u failed", ports[i]);
+        }
+        printf("QEMU_E2E_MAPPORT slot=0 port=%u target=%u sig=00 ok\n",
+               MP_PUB0, MP_TGT0);
+        printf("QEMU_E2E_MAPPORT slot=1 port=%u target=%u sig=%02x ok\n",
+               MP_PUB1, MP_TGT1, MP_SIG1);
+        fflush(stdout);
+        if (wait_idle(IDLE_TIMEOUT_MS))
+            verdict_fail("map session did not drain after close");
+    }
+
+    /* --- phase 5: clean teardown ---------------------------------------- */
+    for (i = 0; i < 3; i++)
+    {
+        kill(echo_pid[i], SIGKILL);
+        waitpid(echo_pid[i], NULL, 0);
+    }
     delete_tunnel(1);
     delete_tunnel(2);
     if (wait_tunnels_gone(6000))
         verdict_fail("tunnels did not go away after del");
     if (wait_idle(IDLE_TIMEOUT_MS))
         verdict_fail("streams still active before unload");
-    printf("QEMU_E2E_DEL grouped ok\n");
+    printf("QEMU_E2E_DEL map ok\n");
     fflush(stdout);
 
     unload_module();

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # qemu-e2e-smoke.sh - boot a real kernel in QEMU, load tbtun.ko, and drive the
-# 0.4.1 data plane through the operator surface before any real machine does.
+# 0.5.0 data plane through the operator surface before any real machine does.
 #
 #   scripts/qemu-e2e-smoke.sh                 # 7.0.14, cached under ~/.cache
 #   scripts/qemu-e2e-smoke.sh --kernel 6.12.116
@@ -11,6 +11,8 @@
 #     streams each carry 128 KiB byte-exact with streams_active=0 in between;
 #   * a concurrent second SC-LDPC stream is refused and the first one survives;
 #   * a rebuilt n=4 m=4 grouped pair carries two concurrent streams (two sids);
+#   * one map= slot on the grouped pair: :19001 reaches target :15210 and
+#     :19002 reaches :15211, each proven by its own response signature;
 #   * del + delete_module return inside the deadline (no D state), the module
 #     leaves /proc/modules, and the kernel log gained no UBSAN, BUG, Oops,
 #     WARNING, lockdep or stall report.
@@ -41,7 +43,7 @@ die() {
 }
 
 usage() {
-    sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 while [ $# -gt 0 ]; do
@@ -222,7 +224,10 @@ evidence=(
     "QEMU_E2E_REJECT sclc-second"
     "QEMU_E2E_STREAM sclc-after-reject"
     "QEMU_E2E_MULTISTREAM 2 streams ok"
+    "QEMU_E2E_MAPPORT slot=0"
+    "QEMU_E2E_MAPPORT slot=1"
     "QEMU_E2E_DEL grouped ok"
+    "QEMU_E2E_DEL map ok"
     "QEMU_E2E_UNLOAD ok"
 )
 
