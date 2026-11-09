@@ -31,6 +31,10 @@ and moves independently of the module version.
 
 ### Changed
 
+- The wire accepts only 0.4.x peers: a 0.2.x or 0.3.x frame carries a
+  different `TBT_CONV` and is refused at the first header, so both ends must
+  be upgraded to 0.4.x. `host/test_wire_compat` pins the refusal and the
+  current header acceptance (121 checks).
 - The FEC batch staging path has no allocation and no payload copy on the
   full-write path. `tbt_carrier_send_fec_batch()` now describes the batch as a segment
   list over the existing `struct tbt_fec_out` buffers (HTTP: chunk size
