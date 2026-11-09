@@ -793,6 +793,11 @@ struct tbt_fec_tx
     u16 shape_w;
     u16 shape_k;
     u8 shape_d;
+    /* v8 codec identity, copied to every CFG/FBK this plane emits. */
+    u8 codec_variant;
+    u8 sclc_L;
+    u16 sclc_block;
+    u32 rate_ppm;
     u8 init_tries;
     bool init_done;
     u64 init_ns;
@@ -817,8 +822,10 @@ struct tbt_fec_tx
     struct tbt_fec_adapt_sclc_ctl *adapt_sclc;
     /* Peer report from FEC_FBK plus the local residual counters. */
     u32 peer_p_ppm;
-    u32 peer_p_fast_ppm;     /* SC-LDPC: FBK bitmap tail, ppm/16 */
-    u32 peer_codec_fail_ppm; /* SC-LDPC: FBK bitmap tail, ppm/16 */
+    u32 peer_p_fast_ppm;     /* SC-LDPC: FBK +48, parts per million */
+    /* codec_fail has no v8 wire field (spec §7); it stays a local procfs
+     * diagnostic, so this sender-side mirror is always zero. */
+    u32 peer_codec_fail_ppm;
     u16 peer_expected;
     u16 peer_received;
     u32 peer_epoch;

@@ -218,8 +218,9 @@ static void test_header_roundtrip(void)
            TBT_FEC_H_PAYCRC == 40 && TBT_FEC_H_HDRCRC == 44,
        "header offsets", NULL);
     /* 0x1005 adds the stream sid and grows the header to 48 bytes; 0x1007
-     * makes FEC_CFG/FEC_FBK carry the adaptive shape and adds FEC_ALLOC. */
-    ok(TBT_FEC_CONV == 0x1007u, "TBT_FEC_CONV", NULL);
+     * makes FEC_CFG/FEC_FBK carry the adaptive shape and adds FEC_ALLOC;
+     * 0x1008 grows CFG/FBK to 64 bytes and restores the full bitmap. */
+    ok(TBT_FEC_CONV == 0x1008u, "TBT_FEC_CONV", NULL);
 
     /* NULL arguments are refused, not dereferenced. */
     ok_int(tbt_fec_hdr_pack(NULL, wire), -EINVAL, "pack NULL header");
@@ -507,21 +508,29 @@ static void test_hdr_check(void)
     ok_int(tbt_fec_hdr_check(&h, 64), 0, "NACK names its block in block_id");
 
     h = ctl_hdr(TBT_FEC_CFG, TBT_FEC_CFG_LEN);
-    ok_int(tbt_fec_hdr_check(&h, 64), 0, "CFG 48");
+    ok_int(tbt_fec_hdr_check(&h, 64), 0, "CFG 64");
     h = ctl_hdr(TBT_FEC_CFG, TBT_FEC_CFG_LEN - 1);
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "CFG 47");
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "CFG 63");
     h = ctl_hdr(TBT_FEC_CFG, TBT_FEC_CFG_LEN + 1);
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "CFG 49");
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "CFG 65");
+    /* A 0.4.0 (v7) 48-byte CFG is a length failure, never a short parse. */
+    h = ctl_hdr(TBT_FEC_CFG, 48);
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "v7 CFG 48 refused");
+    h = ctl_hdr(TBT_FEC_CFG, TBT_FEC_CFG_LEN);
+    h.conv = 0x1007;
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "v7 conv 0x1007 refused");
     h = ctl_hdr(TBT_FEC_CFG, TBT_FEC_CFG_LEN);
     h.seq = 1;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "CFG seq != 0");
 
     h = ctl_hdr(TBT_FEC_FBK, TBT_FEC_FBK_LEN);
-    ok_int(tbt_fec_hdr_check(&h, 64), 0, "FBK 48");
+    ok_int(tbt_fec_hdr_check(&h, 64), 0, "FBK 64");
     h = ctl_hdr(TBT_FEC_FBK, TBT_FEC_FBK_LEN - 1);
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "FBK 47");
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "FBK 63");
     h = ctl_hdr(TBT_FEC_FBK, TBT_FEC_FBK_LEN + 1);
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "FBK 49");
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "FBK 65");
+    h = ctl_hdr(TBT_FEC_FBK, 48);
+    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "v7 FBK 48 refused");
     h = ctl_hdr(TBT_FEC_FBK, TBT_FEC_FBK_LEN);
     h.seq = 1;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "FBK seq != 0");
@@ -689,6 +698,17 @@ static void cfg_fix_crc(u8 *buf)
     buf[TBT_FEC_CFG_CRC + 3] = (u8)(crc >> 24);
 }
 
+static void cfg_fix_crc_ext(u8 *buf)
+{
+    u32 crc = tbt_fec_crc32c(0, buf + TBT_FEC_CFG_CODEC_VARIANT,
+                             TBT_FEC_CFG_CRC_EXT_BYTES);
+
+    buf[TBT_FEC_CFG_CRC_EXT + 0] = (u8)crc;
+    buf[TBT_FEC_CFG_CRC_EXT + 1] = (u8)(crc >> 8);
+    buf[TBT_FEC_CFG_CRC_EXT + 2] = (u8)(crc >> 16);
+    buf[TBT_FEC_CFG_CRC_EXT + 3] = (u8)(crc >> 24);
+}
+
 static void test_control(void)
 {
     struct tbt_fec_ack a, a2;
@@ -754,7 +774,8 @@ static void test_control(void)
     ok_int(n != TBT_FEC_NACK_LEN ? -EINVAL : 0, 0,
            "fixed length check accepts the NACK");
 
-    /* FEC_CFG: 48 bytes, CRC over +0..+39 (0x1007). */
+    /* FEC_CFG: 64 bytes, prefix CRC over +0..+39 and extension CRC over
+     * +48..+55 (0x1008). */
     memset(&c, 0, sizeof(c));
     c.epoch = 0x12345678u;
     c.n = 4;
@@ -784,15 +805,27 @@ static void test_control(void)
     ok_u32le(cbuf + TBT_FEC_CFG_CRC,
              tbt_fec_crc32c(0, cbuf, TBT_FEC_CFG_CRC_BYTES), "CFG CRC at +40");
     ok_u32le(cbuf + TBT_FEC_CFG_RESERVED, 0, "CFG reserved at +44");
-    ok(TBT_FEC_CFG_LEN == 48, "CFG body is 48 bytes", NULL);
+    ok(cbuf[TBT_FEC_CFG_CODEC_VARIANT] == 0, "CFG variant at +48", NULL);
+    ok(cbuf[TBT_FEC_CFG_L] == 0 && cbuf[TBT_FEC_CFG_BLOCK] == 0 &&
+           cbuf[TBT_FEC_CFG_BLOCK + 1] == 0,
+       "CFG L/block are zero for RLNC", NULL);
+    ok_u32le(cbuf + TBT_FEC_CFG_RATE_PPM, 0, "CFG rate_ppm is zero for RLNC");
+    ok_u32le(cbuf + TBT_FEC_CFG_CRC_EXT,
+             tbt_fec_crc32c(0, cbuf + TBT_FEC_CFG_CODEC_VARIANT,
+                            TBT_FEC_CFG_CRC_EXT_BYTES),
+             "CFG extension CRC at +56");
+    ok_u32le(cbuf + TBT_FEC_CFG_RESERVED2, 0, "CFG reserved2 at +60");
+    ok(TBT_FEC_CFG_LEN == 64, "CFG body is 64 bytes", NULL);
     ok((int)sizeof(struct tbt_fec_cfg) == TBT_FEC_CFG_LEN,
-       "CFG struct is 48 bytes", NULL);
+       "CFG struct is 64 bytes", NULL);
     memset(&c2, 0, sizeof(c2));
     ok_int(tbt_fec_cfg_unpack(cbuf, &c2), 0, "CFG unpack");
     ok(c2.epoch == c.epoch && c2.n == c.n && c2.m == c.m && c2.w == c.w &&
            c2.k == c.k && c2.d == c.d && c2.flags == c.flags &&
            c2.groups == c.groups && c2.switch_pkt == c.switch_pkt &&
-           c2.block_base == c.block_base && c2.seed == c.seed,
+           c2.block_base == c.block_base && c2.seed == c.seed &&
+           c2.codec_variant == c.codec_variant && c2.L == c.L &&
+           c2.block == c.block && c2.rate_ppm == c.rate_ppm,
        "CFG round-trip", NULL);
 
     cbuf[TBT_FEC_CFG_EPOCH] ^= 1;
@@ -828,17 +861,11 @@ static void test_control(void)
     cfg_fix_crc(cbuf);
     ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG n+m=257");
     tbt_fec_cfg_pack(&c, cbuf);
-    cbuf[TBT_FEC_CFG_N] = 2;
-    cbuf[TBT_FEC_CFG_N + 1] = 0;
-    cbuf[TBT_FEC_CFG_M] = 1;
-    cbuf[TBT_FEC_CFG_M + 1] = 0;
-    cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG n+m does not divide 256");
-    tbt_fec_cfg_pack(&c, cbuf);
-    cbuf[TBT_FEC_CFG_GROUPS] = 31;
+    cbuf[TBT_FEC_CFG_GROUPS] = 40; /* 40 * 8 shares > 256 carriers */
     cbuf[TBT_FEC_CFG_GROUPS + 1] = 0;
     cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG groups != 256/(n+m)");
+    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO,
+           "CFG groups * shares over the carrier bound");
     tbt_fec_cfg_pack(&c, cbuf);
     cbuf[TBT_FEC_CFG_K] = 0;
     cbuf[TBT_FEC_CFG_K + 1] = 0;
@@ -863,10 +890,11 @@ static void test_control(void)
     cfg_fix_crc(cbuf);
     ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG d==w with w>1");
 
-    /* FEC_FBK: 48 bytes including the 32-byte bitmap (0x1007 layout). */
+    /* FEC_FBK: 64 bytes including the full 32-byte bitmap. The v8 extension
+     * starts at +48, so no bitmap bit is overlaid. */
     ok((int)sizeof(struct tbt_fec_fbk) == TBT_FEC_FBK_LEN,
-       "FBK struct is 48 bytes", NULL);
-    ok(TBT_FEC_FBK_LEN == 48, "FBK length constant", NULL);
+       "FBK struct is 64 bytes", NULL);
+    ok(TBT_FEC_FBK_LEN == 64, "FBK length constant", NULL);
     memset(&f, 0, sizeof(f));
     tbt_fec_fbk_set_epoch(&f, 0x12345678u);
     f.m_current = 4;
@@ -876,6 +904,12 @@ static void test_control(void)
     f.received_shares = 900;
     f.flags = TBT_FEC_FBK_F_CFG_ACK | TBT_FEC_FBK_F_P_VALID;
     f.n_current = 4;
+    f.p_fast_ppm = 400000;
+    f.codec_variant = 2;
+    f.L = 8;
+    f.block = 256;
+    f.rate_ppm_current = 500000;
+    f.rate_ppm_target = 400000;
     tbt_fec_bitmap_set(f.carrier_bitmap, 0);
     tbt_fec_bitmap_set(f.carrier_bitmap, 255);
     ok_int(tbt_fec_fbk_pack(&f, fbuf), 0, "FBK pack");
@@ -893,6 +927,15 @@ static void test_control(void)
     ok((fbuf[TBT_FEC_FBK_BITMAP] & 1) &&
            (fbuf[TBT_FEC_FBK_BITMAP + 31] & 0x80),
        "FBK bitmap bits 0 and 255", NULL);
+    ok_u32le(fbuf + TBT_FEC_FBK_P_FAST_PPM, f.p_fast_ppm,
+             "FBK p_fast at +48");
+    ok(fbuf[TBT_FEC_FBK_CODEC_VARIANT] == 2 && fbuf[TBT_FEC_FBK_L] == 8,
+       "FBK variant/L at +52/+53", NULL);
+    ok_u16le(fbuf + TBT_FEC_FBK_BLOCK, 256, "FBK block at +54");
+    ok_u32le(fbuf + TBT_FEC_FBK_RATE_CURRENT, f.rate_ppm_current,
+             "FBK rate current at +56");
+    ok_u32le(fbuf + TBT_FEC_FBK_RATE_TARGET, f.rate_ppm_target,
+             "FBK rate target at +60");
     memset(&f2, 0, sizeof(f2));
     ok_int(tbt_fec_fbk_unpack(fbuf, &f2), 0, "FBK unpack");
     ok(tbt_fec_fbk_epoch(&f2) == 0x12345678u, "FBK 32-bit epoch round-trip",
@@ -902,10 +945,89 @@ static void test_control(void)
            f2.expected_shares == f.expected_shares &&
            f2.received_shares == f.received_shares &&
            f2.flags == f.flags && f2.n_current == f.n_current &&
-           !memcmp(f2.carrier_bitmap, f.carrier_bitmap, TBT_FEC_BITMAP_BYTES),
+           !memcmp(f2.carrier_bitmap, f.carrier_bitmap, TBT_FEC_BITMAP_BYTES) &&
+           f2.p_fast_ppm == f.p_fast_ppm &&
+           f2.codec_variant == f.codec_variant && f2.L == f.L &&
+           f2.block == f.block &&
+           f2.rate_ppm_current == f.rate_ppm_current &&
+           f2.rate_ppm_target == f.rate_ppm_target,
        "FBK round-trip", NULL);
+    fbuf[TBT_FEC_FBK_CODEC_VARIANT] = 3;
+    ok_int(tbt_fec_fbk_unpack(fbuf, &f2), -EPROTO, "FBK unknown variant");
+    fbuf[TBT_FEC_FBK_CODEC_VARIANT] = 0;
+    fbuf[TBT_FEC_FBK_L] = 8;
+    ok_int(tbt_fec_fbk_unpack(fbuf, &f2), -EPROTO,
+           "FBK RLNC variant with L != 0");
+    fbuf[TBT_FEC_FBK_CODEC_VARIANT] = 2;
+    fbuf[TBT_FEC_FBK_L] = 0;
+    ok_int(tbt_fec_fbk_unpack(fbuf, &f2), -EPROTO,
+           "FBK SC-LDPC without L");
     fbuf[TBT_FEC_FBK_FLAGS] = 0x20;
     ok_int(tbt_fec_fbk_unpack(fbuf, &f2), -EPROTO, "FBK unknown flags");
+}
+
+/* v8 FEC_CFG extension: an SC-LDPC body names variant/L/block/rate at +48
+ * and leaves the v7 w/k/d bytes zero. The unpacker rebuilds the internal
+ * legacy mirror only after the wire bytes have been checked. */
+static void test_cfg_sclc(void)
+{
+    struct tbt_fec_cfg c, c2;
+    u8 buf[TBT_FEC_CFG_LEN];
+
+    memset(&c, 0, sizeof(c));
+    c.epoch = 9;
+    c.n = 128;
+    c.m = 128;
+    c.groups = 1;
+    c.flags = TBT_FEC_CFG_F_APPLY;
+    c.codec_variant = 2;
+    c.L = 8;
+    c.block = 256;
+    c.rate_ppm = 500000;
+    /* The legacy mirror in the struct must not leak to the wire. */
+    c.w = 256;
+    c.k = 500;
+    c.d = 0;
+    ok_int(tbt_fec_cfg_pack(&c, buf), 0, "SC CFG pack");
+    ok_u16le(buf + TBT_FEC_CFG_W, 0, "SC CFG wire w is zero");
+    ok_u16le(buf + TBT_FEC_CFG_K, 0, "SC CFG wire k is zero");
+    ok(buf[TBT_FEC_CFG_D] == 0, "SC CFG wire d is zero", NULL);
+    ok(buf[TBT_FEC_CFG_CODEC_VARIANT] == 2 && buf[TBT_FEC_CFG_L] == 8,
+       "SC CFG variant/L at +48/+49", NULL);
+    ok_u16le(buf + TBT_FEC_CFG_BLOCK, 256, "SC CFG block at +50");
+    ok_u32le(buf + TBT_FEC_CFG_RATE_PPM, 500000, "SC CFG rate at +52");
+    ok_u32le(buf + TBT_FEC_CFG_CRC_EXT,
+             tbt_fec_crc32c(0, buf + TBT_FEC_CFG_CODEC_VARIANT,
+                            TBT_FEC_CFG_CRC_EXT_BYTES),
+             "SC CFG extension CRC");
+    memset(&c2, 0, sizeof(c2));
+    ok_int(tbt_fec_cfg_unpack(buf, &c2), 0, "SC CFG unpack");
+    ok(c2.codec_variant == 2 && c2.L == 8 && c2.block == 256 &&
+           c2.rate_ppm == 500000,
+       "SC CFG extension round-trip", NULL);
+    ok(c2.w == 256 && c2.k == 500 && c2.d == 0,
+       "SC CFG legacy mirror is rebuilt", NULL);
+
+    /* A rate that does not name this split is refused. */
+    tbt_fec_cfg_pack(&c, buf);
+    buf[TBT_FEC_CFG_RATE_PPM + 0] = (u8)400000;
+    buf[TBT_FEC_CFG_RATE_PPM + 1] = (u8)(400000 >> 8);
+    buf[TBT_FEC_CFG_RATE_PPM + 2] = (u8)(400000 >> 16);
+    buf[TBT_FEC_CFG_RATE_PPM + 3] = (u8)(400000 >> 24);
+    cfg_fix_crc_ext(buf);
+    ok_int(tbt_fec_cfg_unpack(buf, &c2), -EPROTO,
+           "SC CFG n does not follow rate");
+    /* An RLNC body may not carry SC extension values. */
+    tbt_fec_cfg_pack(&c, buf);
+    buf[TBT_FEC_CFG_CODEC_VARIANT] = 0;
+    cfg_fix_crc_ext(buf);
+    ok_int(tbt_fec_cfg_unpack(buf, &c2), -EPROTO,
+           "RLNC variant with SC extension");
+    /* The extension CRC is a real gate, not decoration. */
+    tbt_fec_cfg_pack(&c, buf);
+    buf[TBT_FEC_CFG_BLOCK] ^= 1;
+    ok_int(tbt_fec_cfg_unpack(buf, &c2), -EPROTO,
+           "SC CFG extension CRC mismatch");
 }
 
 /* ------------------------------------------------------------------ *
@@ -994,7 +1116,13 @@ static void test_alloc(void)
     buf[TBT_FEC_ALLOC_FLAGS] = 0;
     alloc_fix_crc(buf);
     ok_int(tbt_fec_alloc_unpack(buf, &a2), 0, "ALLOC no flags");
-    buf[TBT_FEC_ALLOC_FLAGS] = 0x04;
+    buf[TBT_FEC_ALLOC_FLAGS] = TBT_FEC_ALLOC_F_COMMITTED |
+                               TBT_FEC_ALLOC_F_ABORT;
+    alloc_fix_crc(buf);
+    ok_int(tbt_fec_alloc_unpack(buf, &a2), 0,
+           "ALLOC COMMITTED|ABORT flags");
+    ok(TBT_FEC_ALLOC_F_MASK == 0x0f, "ALLOC flag mask", NULL);
+    buf[TBT_FEC_ALLOC_FLAGS] = 0x10;
     alloc_fix_crc(buf);
     ok_int(tbt_fec_alloc_unpack(buf, &a2), -EPROTO,
            "ALLOC unknown body flags");
@@ -2078,21 +2206,26 @@ static void test_base_mapping(void)
            "base real len matches legacy");
 }
 
-/* The 0.2.x peer sends HELLO body[0] == 2. 0.4.0 names 4, and
- * tbt_rx_hello() compares the byte exactly, so the first HELLO fails with
- * -EPROTO and the carrier closes. */
+/* A 0.4.0 peer sends HELLO body[0] == 4 and conv 0x1007. 0.5.0 names 5 and
+ * 0x1008; tbt_rx_hello() and tbt_fec_hdr_check() compare exactly, so the
+ * first HELLO and the first FEC record fail with -EPROTO and the carrier
+ * closes. */
 static void test_wire_version(void)
 {
     u8 hello[TBT_HELLO_BODY_LEN_V6];
 
     memset(hello, 0, sizeof(hello));
     hello[0] = TBT_WIRE_VERSION_V6;
-    ok(hello[0] == 4, "0.4.0 FEC HELLO names version 4", NULL);
-    hello[0] = 2;
+    ok(hello[0] == 5, "0.5.0 FEC HELLO names version 5", NULL);
+    hello[0] = 4;
     ok(hello[0] != TBT_WIRE_VERSION_V6,
-       "0.2.x HELLO version 2 is refused", NULL);
+       "0.4.0 HELLO version 4 is refused", NULL);
     ok(TBT_WIRE_VERSION == 1, "legacy ARQ HELLO stays version 1", NULL);
-    ok(TBT_FEC_CONV == 0x1007u, "0x1007 is the multi-stream FEC revision", NULL);
+    ok(TBT_FEC_CONV == 0x1008u, "0x1008 is the v8 FEC revision", NULL);
+    ok(TBT_CONV == 0x0008u, "0x0008 is the v8 ARQ revision", NULL);
+    ok(TBT_OPEN_BODY_LEN == 36, "OPEN body is 36 bytes", NULL);
+    ok(TBT_OPEN_ROUTE_SLOT == 32 && TBT_OPEN_TARGET_PORT == 34,
+       "OPEN route/target offsets", NULL);
 }
 
 /* ------------------------------------------------------------------ *
@@ -2911,12 +3044,17 @@ static void test_sclc_wire_profiles(void)
     c.w = 256;
     c.k = 500;
     c.d = 0;
+    c.codec_variant = 2;
+    c.L = 8;
+    c.block = 256;
+    c.rate_ppm = 500000;
     c.flags = TBT_FEC_CFG_F_APPLY;
     c.groups = 1;
     ok_int(tbt_fec_cfg_pack(&c, cbuf), 0, "sclc cfg down: pack");
     ok_int(tbt_fec_cfg_unpack(cbuf, &c2), 0, "sclc cfg down: unpack");
     ok(c2.n == 128 && c2.m == 128 && c2.w == 256 && c2.k == 500 &&
-           c2.d == 0 && c2.groups == 1,
+           c2.d == 0 && c2.groups == 1 && c2.codec_variant == 2 &&
+           c2.L == 8 && c2.block == 256 && c2.rate_ppm == 500000,
        "sclc cfg down: round-trip", NULL);
     ok_int(tbt_fec_sclc_shape_of_cfg(&c2, 256, &sh), 0,
            "sclc cfg down: shape");
@@ -2931,12 +3069,17 @@ static void test_sclc_wire_profiles(void)
     c.w = 16;
     c.k = 128;
     c.d = 64;
+    c.codec_variant = 2;
+    c.L = 16;
+    c.block = 128;
+    c.rate_ppm = 250000;
     c.flags = TBT_FEC_CFG_F_APPLY;
     c.groups = 8;
     ok_int(tbt_fec_cfg_pack(&c, cbuf), 0, "sclc cfg up: pack");
     ok_int(tbt_fec_cfg_unpack(cbuf, &c2), 0, "sclc cfg up: unpack");
     ok(c2.n == 8 && c2.m == 24 && c2.w == 16 && c2.k == 128 &&
-           c2.d == 64 && c2.groups == 8,
+           c2.d == 64 && c2.groups == 8 && c2.codec_variant == 2 &&
+           c2.L == 16 && c2.block == 128 && c2.rate_ppm == 250000,
        "sclc cfg up: round-trip", NULL);
     ok_int(tbt_fec_sclc_shape_of_cfg(&c2, 256, &sh), 0,
            "sclc cfg up: shape");
@@ -2950,7 +3093,7 @@ static void test_sclc_wire_profiles(void)
     ok_int(tbt_fec_sclc_shape_of_cfg(&c, 256, &sh), -EINVAL,
            "sclc cfg down: bad split");
 
-    /* FBK: the SC overlay rides the last four bitmap bytes. */
+    /* FBK: v8 moves p_fast to +48 and restores the full bitmap. */
     memset(&f, 0, sizeof(f));
     tbt_fec_fbk_set_epoch(&f, 7);
     f.m_current = 25;
@@ -2960,21 +3103,29 @@ static void test_sclc_wire_profiles(void)
     f.received_shares = 1000;
     f.n_current = 8;
     f.flags = TBT_FEC_FBK_F_P_VALID;
+    f.p_fast_ppm = 400000;
+    f.codec_variant = 2;
+    f.L = 16;
+    f.block = 128;
+    f.rate_ppm_current = 250000;
+    f.rate_ppm_target = 400000;
     tbt_fec_bitmap_set(f.carrier_bitmap, 0);
-    tbt_fec_fbk_sc_set_p_fast(&f, 400000);
-    tbt_fec_fbk_sc_set_codec_fail(&f, 100000);
+    tbt_fec_bitmap_set(f.carrier_bitmap, 255);
     ok_int(tbt_fec_fbk_pack(&f, fbuf), 0, "sclc fbk: pack");
     ok_int(tbt_fec_fbk_unpack(fbuf, &f2), 0, "sclc fbk: unpack");
     ok(tbt_fec_fbk_epoch(&f2) == 7 && f2.m_current == 25 &&
            f2.p_ewma_ppm == 123456 && f2.expected_shares == 1024 &&
            f2.received_shares == 1000 && f2.n_current == 8,
        "sclc fbk: round-trip", NULL);
-    ok(tbt_fec_bitmap_test(f2.carrier_bitmap, 0),
-       "sclc fbk: bitmap head", NULL);
-    ok(tbt_fec_fbk_sc_p_fast(&f2) == 400000,
-       "sclc fbk: p_fast overlay", NULL);
-    ok(tbt_fec_fbk_sc_codec_fail(&f2) == 100000,
-       "sclc fbk: codec_fail overlay", NULL);
+    ok(tbt_fec_bitmap_test(f2.carrier_bitmap, 0) &&
+           tbt_fec_bitmap_test(f2.carrier_bitmap, 255),
+       "sclc fbk: full 256-bit bitmap", NULL);
+    ok(fbuf[TBT_FEC_FBK_BITMAP + 31] == 0x80,
+       "sclc fbk: bitmap byte 31 is not overlaid", NULL);
+    ok(f2.p_fast_ppm == 400000, "sclc fbk: p_fast at +48", NULL);
+    ok(f2.codec_variant == 2 && f2.L == 16 && f2.block == 128 &&
+           f2.rate_ppm_current == 250000 && f2.rate_ppm_target == 400000,
+       "sclc fbk: extension round-trip", NULL);
 }
 
 int main(void)
@@ -2986,6 +3137,7 @@ int main(void)
     test_crc();
     test_bitmap();
     test_control();
+    test_cfg_sclc();
     test_alloc();
     test_wire_version();
     test_rlnc_single();

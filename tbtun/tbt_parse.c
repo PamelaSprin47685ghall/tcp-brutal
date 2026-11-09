@@ -699,8 +699,7 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         return tbt_fail(e, "carriers", "fec=on needs carriers >= n + m");
     /* mode=3 adaptive starts from a shipped codec profile on the rate
      * ladder: binary 1x256/L8/r0.5, or GF(16) 8x32/L16 with n/m on the
-     * ladder. The CFG carries no L for binary, so the fixed L8 is part of
-     * the profile; the uplink carries L in w. */
+     * ladder. v8 names L/block/rate in the CFG extension for both variants. */
     if (cfg->adaptive && cfg->mode == 3)
     {
         struct tbt_fec_cfg fc;
@@ -712,6 +711,9 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         fc.n = cfg->n;
         fc.m = cfg->m;
         fc.groups = groups;
+        fc.codec_variant = 2;
+        fc.rate_ppm =
+            (u32)((((u64)cfg->n * 1000000u) + shares - 1) / shares);
         if (groups == 1 && shares == TBT_FEC_MAX_SHARES)
         {
             if (cfg->w != TBT_FEC_SCLC_BLOCK_DOWN ||
@@ -721,6 +723,8 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
             fc.w = cfg->w;
             fc.k = (u16)((u32)cfg->n * 1000u / shares);
             fc.d = 0;
+            fc.L = cfg->L ? cfg->L : TBT_FEC_SCLC_L_DOWN;
+            fc.block = cfg->w;
         }
         else
         {
@@ -731,6 +735,8 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
             fc.w = cfg->L ? cfg->L : TBT_FEC_SCLC_L_UP;
             fc.k = cfg->w;
             fc.d = (u8)((u32)cfg->n * 256u / shares);
+            fc.L = cfg->L ? cfg->L : TBT_FEC_SCLC_L_UP;
+            fc.block = cfg->w;
         }
         if (tbt_fec_adapt_sclc_wire_of_cfg(&fc, cfg->carriers, &wp))
             return tbt_fail(e, "adaptive",
