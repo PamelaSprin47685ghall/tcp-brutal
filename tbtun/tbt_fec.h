@@ -227,6 +227,27 @@ tbt_fec_flow_admit_check(bool sclc, u16 n_flows, u16 total, u16 count)
     return TBT_FEC_ADMIT_OK;
 }
 
+/* One refusal code for flow creation. A duplicate sid must win over every
+ * admission rule: concurrent OPEN copies of the same stream are duplicates,
+ * not a second SC-LDPC flow, so they must return -EEXIST (not -EOPNOTSUPP). */
+static inline int tbt_fec_flow_create_code(bool sid_exists, bool sclc,
+                                           u16 n_flows, u16 total,
+                                           u16 count)
+{
+    if (sid_exists)
+        return -EEXIST;
+    switch (tbt_fec_flow_admit_check(sclc, n_flows, total, count))
+    {
+    case TBT_FEC_ADMIT_SECOND_SCLC:
+        return -EOPNOTSUPP;
+    case TBT_FEC_ADMIT_NO_GROUPS:
+        return -EPROTO;
+    case TBT_FEC_ADMIT_OK:
+        break;
+    }
+    return 0;
+}
+
 /* The single SC-LDPC primary binds the peer's bitmap without resizing its
  * local TX plane; the RX shape is installed later by FEC_CFG INIT. Other
  * modes keep the one-sid-one-bitmap rule. */

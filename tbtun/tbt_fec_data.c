@@ -1644,6 +1644,10 @@ static void tbt_fec_tx_finish(struct tbt_session *sess,
     if (st->fec_pkt_base_set && tx->seq > block_start)
         tbt_fec_tx_close_block(sess, tx, true);
     smp_store_release(&st->fec_finished, true);
+    /* The close path's tbt_tx_fin() retry is driven by w_fbk. If the tick
+     * slept while the session had no stream, wake it now that the final block
+     * is finished and the FIN can be named. */
+    tbt_fbk_kick(sess, false);
 }
 
 static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
@@ -7170,22 +7174,13 @@ tbt_fec_flow_create(struct tbt_session *sess, u64 sid,
     int err = -ENOMEM;
 
     spin_lock(&sess->lock);
-    switch (tbt_fec_flow_admit_check(sess->fec_sclc, sess->n_fec_flows,
-                                     sess->fec_groups_total, count))
-    {
-    case TBT_FEC_ADMIT_SECOND_SCLC:
-        spin_unlock(&sess->lock);
-        return ERR_PTR(-EOPNOTSUPP);
-    case TBT_FEC_ADMIT_NO_GROUPS:
-        spin_unlock(&sess->lock);
-        return ERR_PTR(-EPROTO);
-    case TBT_FEC_ADMIT_OK:
-        break;
-    }
-    if (sid && tbt_fec_flow_find_locked(sess, sid))
+    err = tbt_fec_flow_create_code(
+        sid && tbt_fec_flow_find_locked(sess, sid) != NULL,
+        sess->fec_sclc, sess->n_fec_flows, sess->fec_groups_total, count);
+    if (err)
     {
         spin_unlock(&sess->lock);
-        return ERR_PTR(-EEXIST);
+        return ERR_PTR(err);
     }
     if (!tbt_fec_groups_fit(sess->fec_groups_total,
                             sess->fec_groups_used, count))

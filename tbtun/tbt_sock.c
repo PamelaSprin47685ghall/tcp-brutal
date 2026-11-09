@@ -403,6 +403,10 @@ static void tbt_drain_body(struct tbt_stream *st)
     if (eof)
     {
         tbt_sock_shutdown_wr(st);
+        /* rx_fin_done is half of the detach gate; the FBK tick owns the
+         * other half (tx_fin_written) and the close bound. Wake it even when
+         * the session had no stream while it stopped. */
+        tbt_fbk_kick(st->sess, false);
         /* The peer's FIN is delivered; this is one half of the close.  Leave
          * the session only after our own FIN is written as well, so its order
          * gate is not released while DATA is still unacknowledged.  detach()
@@ -1034,6 +1038,11 @@ void tbt_far_open_seen(struct tbt_stream *st)
         tbt_target_attach(st, tg);
     else
         tbt_carrier_open_target(st);
+    /* A new far stream must restart the FBK tick: it is the only driver of
+     * tbt_tx_fin() retries and tbt_tx_close_check(). The tick stops when the
+     * session had no streams, so without this a new stream inherits a dead
+     * timer until an unrelated carrier loss happens to kick it. */
+    tbt_fbk_kick(sess, false);
 }
 
 int tbt_target_attach(struct tbt_stream *st, struct socket *s)

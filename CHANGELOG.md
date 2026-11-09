@@ -119,6 +119,12 @@ and moves independently of the module version.
   stream while a concurrent live stream stays refused. Host `test_close_bound`
   and `test_stream_peer_eof` cover the 3 s/60 s bounds and
   RCV_SHUTDOWN/TCP_CLOSE EOF. (63ba0a1)
+- G4 close-path wakeups: a new far stream, a finished FEC block, a received
+  FIN and a delivered peer FIN now kick the FBK tick. `w_fbk` stops when the
+  session has no stream, and the FIN retry / `tbt_tx_close_check()` otherwise
+  slept until an unrelated carrier loss. `tbt_tx_fin()` stamps
+  `close_since_ns` before its FEC early returns, and a duplicate sid is
+  refused with `-EEXIST` before the SC-LDPC admission check. (587792d)
 
 ### Changed
 
