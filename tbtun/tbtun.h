@@ -2028,6 +2028,9 @@ int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
 /* One OPEN per live carrier, so a carrier that dies before the first copy
  * still cannot strand the stream (DESIGN.md §3.6, C3). */
 void tbt_tx_announce(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp);
+/* Recompute a carrier's OPEN-ready flag from the session's usable streams:
+ * set only when every one of their OPENs is written on this carrier. */
+void tbt_tx_carrier_publish_up(struct tbt_session *sess, struct tbt_carrier *c);
 /* FIN with the stream's next byte offset as its seq, one copy per live
  * carrier; the receiver applies it only when every earlier byte arrived.
  * Returns the number of copies actually enqueued: 0 means no carrier was
