@@ -11,6 +11,8 @@
 | 3 | watchdog 回滚演练 | `scripts/watchdog-rollback-drill.sh` |
 | 4 | `.85` 引用清单/迁移 | `review/ops-0.4-ip85-migration.md` |
 | 5 | 0.2.4 tag + 本机 D 态 | `scripts/local-dstate-check.sh`、`review/ops-0.4-tag024-and-dstate.md` |
+| 6 | watchdog 回滚/喂狗沙箱证据 | `review/ops-0.4-watchdog-drill.md` |
+| 7 | 0.4.x 性能/架构候选分析 | `review/0.4.x-roadmap-analysis.md` |
 
 ## 现场结论
 
@@ -35,6 +37,8 @@
 `scripts/watchdog-rollback-drill.sh` 默认只读：收集 unit/holder/uptime/budget/nowayout/cmdline/sysfs，跑 `rollback --status` 和两个 `--dry-run`。`--verify` 在重启后比较 boot_id、unit disabled、无 holder。`--execute-next-boot` 需 `--yes`；`--execute-now` 还需 `--i-know-this-reboots`，并交给 rollback 重启。
 
 契约（脚本头部重复）：`MAGICCLOSE=1`，close 不带 `'V'` 不停表；停 unit 就是 44 s 倒计时；**重启是唯一退场**。`nowayout=1` 会让 `'V'+close` 和 `WDIOS_DISABLECARD` 都失败，喂狗者一死就是硬复位；它本身不武装设备，但 `RuntimeWatchdogUSec` 必须保持 0。sysrq 未编译，不要用。
+
+沙箱演练的逐字节喂狗证据、rollback/drill 的 mock 调用记录和 `.85` 只读快照见 `review/ops-0.4-watchdog-drill.md`。
 
 关键发现：`netwatch-84/` 的 7 个文件在 `e723dff` 中**未跟踪**（1598 行），`git clean -fdx` 会删掉；`netwatch-82` 文档引用在全部 git 历史中不存在。先 `git add` 再迁移。
 
