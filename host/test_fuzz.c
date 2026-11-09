@@ -1,5 +1,7 @@
-/* test_fuzz.c - hostile-input tests for the two peer-controlled parsers:
- * tbt_rec_scan() (record framing) and tbt_hdr_check() (header validation).
+/* test_fuzz.c - hostile-input tests for the peer-controlled parsers:
+ * tbt_rec_scan() (record framing), tbt_hdr_check() (header validation),
+ * tbt_fec_alloc_unpack()/tbt_fec_cfg_unpack() (0.4.0 v7 control bodies) and
+ * tbt_parse_line() (the /proc config grammar).
  *
  * Deterministic: xorshift64 seeded with 1, no fixtures, no external
  * dependencies. It links tbtun/tbt_rec.c and tbtun/tbt_proto.c, the same
@@ -22,6 +24,16 @@
  *     0..TBT_PAYLOAD_MAX, with the accepted set compared against DESIGN.md
  *     §3.3's bounds, plus one accept/reject pair per range rule (path_id,
  *     path_ack_count, path_ack_mask, flags, sid_hi, reserved2, conv).
+ *   - 20k mutated FEC_ALLOC bodies: random mask flips, all-zero/all-one
+ *     masks, every flag value, reserved bytes and reserved2, CRC faults and
+ *     a full pack/unpack round trip for every accepted body.
+ *   - 40k mutated FEC_CFG bodies seeded from the RLNC, SC-LDPC binary and
+ *     SC-LDPC GF(16) profiles, bombarding n=0, m=0, n+m=65536, n+m>256 and
+ *     groups=0; every verdict is compared with an independent reading of the
+ *     documented rules, and every accepted body must repack byte for byte.
+ *   - 8k mutated /proc lines aimed at portblock=, adaptive=, L= and
+ *     mode=sc-ldpc, plus a canonical render/parse fixed-point check on every
+ *     accepted tunnel line.
  *
  *   make host-test          # normal build
  *   make host-test-san      # the same, with ASan and UBSan
@@ -29,8 +41,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 
 #include "tbt_rec.h"
+#include "tbt_fec.h"
+#include "tbt_parse.h"
 
 #define FUZZ_BUFFERS 200000
 #define FUZZ_BODY_LENGTHS 200000
@@ -973,6 +988,869 @@ static void test_body_lengths(void)
     }
 }
 
+/* ------------------------------------------------------------------------- */
+/* 0.4.0 v7 control bodies and the /proc config grammar. */
+
+#define ALLOC_FUZZ 20000
+
+static void alloc_fix_crc(u8 *buf)
+{
+    tbt_put_le32(buf + TBT_FEC_ALLOC_CRC,
+                 tbt_fec_crc32c(0, buf, TBT_FEC_ALLOC_CRC_BYTES));
+}
+
+static int alloc_unpack_copy(const u8 *src, struct tbt_fec_alloc *a)
+{
+    u8 *copy = malloc(TBT_FEC_ALLOC_LEN);
+    int rc;
+
+    if (!copy)
+    {
+        printf("FAIL seed=1 case=%lu: out of memory\n", case_no);
+        exit(2);
+    }
+    memcpy(copy, src, TBT_FEC_ALLOC_LEN);
+    rc = tbt_fec_alloc_unpack(copy, a);
+    free(copy);
+    return rc;
+}
+
+static void alloc_expect(const char *what, const u8 *buf, int want)
+{
+    struct tbt_fec_alloc a;
+    int rc = alloc_unpack_copy(buf, &a);
+
+    checks++;
+    if (rc != want)
+    {
+        failures++;
+        printf("FAIL seed=1 case=%lu: %s: want %s, got %d\n", case_no, what,
+               want ? "EPROTO" : "OK", rc);
+    }
+}
+
+static void alloc_seed(struct tbt_fec_alloc *a)
+{
+    memset(a, 0, sizeof(*a));
+    a->epoch = 1;
+    tbt_fec_bitmap_set(a->group_mask, 0);
+    tbt_fec_bitmap_set(a->group_mask, 5);
+    tbt_fec_bitmap_set(a->group_mask, 255);
+    a->flags = TBT_FEC_ALLOC_F_ACK;
+    a->switch_pkt = 0x1122334455667788ull;
+    a->block_base = 0x0102030405060708ull;
+}
+
+/* FEC_ALLOC (0x36): every mask shape, every flag value, every reserved byte,
+ * both CRCs and 20k random bodies. An accepted body must repack unchanged. */
+static void test_alloc_body(void)
+{
+    static const u8 extra[] = { 1, 0x80, 0xff };
+    struct tbt_fec_alloc a, b;
+    u8 seed[TBT_FEC_ALLOC_LEN], buf[TBT_FEC_ALLOC_LEN], out[TBT_FEC_ALLOC_LEN];
+    unsigned i, p, k;
+
+    case_no++;
+    check(TBT_FEC_ALLOC == 0x36 && TBT_FEC_ALLOC_LEN == 64 &&
+              TBT_FEC_ALLOC_CRC_BYTES == 56 && TBT_FEC_BITMAP_BYTES == 32,
+          "ALLOC wire constants", NULL);
+
+    alloc_seed(&a);
+    case_no++;
+    check(tbt_fec_alloc_pack(&a, seed) == TBT_FEC_ALLOC_LEN,
+          "ALLOC pack length", NULL);
+    alloc_expect("ALLOC seed", seed, 0);
+
+    memset(&b, 0, sizeof(b));
+    case_no++;
+    check(alloc_unpack_copy(seed, &b) == 0 && b.epoch == a.epoch &&
+              b.flags == a.flags && b.switch_pkt == a.switch_pkt &&
+              b.block_base == a.block_base &&
+              !memcmp(b.group_mask, a.group_mask, TBT_FEC_BITMAP_BYTES),
+          "ALLOC round trip", NULL);
+
+    /* The bitmap is opaque here, but it must name at least one group. */
+    memcpy(buf, seed, sizeof(buf));
+    memset(buf + TBT_FEC_ALLOC_GROUPS, 0, TBT_FEC_BITMAP_BYTES);
+    alloc_fix_crc(buf);
+    case_no++;
+    alloc_expect("ALLOC empty group mask", buf, -EPROTO);
+
+    memcpy(buf, seed, sizeof(buf));
+    memset(buf + TBT_FEC_ALLOC_GROUPS, 0xff, TBT_FEC_BITMAP_BYTES);
+    alloc_fix_crc(buf);
+    case_no++;
+    alloc_expect("ALLOC all-one group mask", buf, 0);
+
+    for (p = 0; p < TBT_FEC_MAX_CARRIERS; p++)
+    {
+        memcpy(buf, seed, sizeof(buf));
+        memset(buf + TBT_FEC_ALLOC_GROUPS, 0, TBT_FEC_BITMAP_BYTES);
+        buf[TBT_FEC_ALLOC_GROUPS + p / 8] = (u8)(1u << (p % 8));
+        alloc_fix_crc(buf);
+        case_no++;
+        alloc_expect("ALLOC single-bit group mask", buf, 0);
+    }
+
+    for (i = 0; i < 256; i++)
+    {
+        memcpy(buf, seed, sizeof(buf));
+        buf[TBT_FEC_ALLOC_FLAGS] = (u8)i;
+        alloc_fix_crc(buf);
+        case_no++;
+        alloc_expect("ALLOC flags", buf,
+                     (i & ~TBT_FEC_ALLOC_F_MASK) ? -EPROTO : 0);
+    }
+
+    for (i = 0; i < 3; i++)
+        for (k = 0; k < sizeof(extra); k++)
+        {
+            memcpy(buf, seed, sizeof(buf));
+            buf[TBT_FEC_ALLOC_RESERVED + i] = extra[k];
+            alloc_fix_crc(buf);
+            case_no++;
+            alloc_expect("ALLOC reserved byte", buf, -EPROTO);
+        }
+
+    for (i = 0; i < 4; i++)
+        for (k = 0; k < sizeof(extra); k++)
+        {
+            memcpy(buf, seed, sizeof(buf));
+            buf[TBT_FEC_ALLOC_RESERVED2 + i] = extra[k];
+            alloc_fix_crc(buf);
+            case_no++;
+            alloc_expect("ALLOC reserved2 byte", buf, -EPROTO);
+        }
+
+    for (i = 0; i < 4; i++)
+    {
+        memcpy(buf, seed, sizeof(buf));
+        buf[TBT_FEC_ALLOC_CRC + i] ^= 0xff;
+        case_no++;
+        alloc_expect("ALLOC CRC byte", buf, -EPROTO);
+    }
+    for (i = 0; i < TBT_FEC_ALLOC_CRC_BYTES; i++)
+    {
+        memcpy(buf, seed, sizeof(buf));
+        buf[i] ^= 0x01;
+        case_no++;
+        alloc_expect("ALLOC body bit flip", buf, -EPROTO);
+    }
+
+    for (i = 0; i < ALLOC_FUZZ; i++)
+    {
+        unsigned muts = 1 + (unsigned)rnd_below(6);
+        int crc_ok, mask_ok, flags_ok, res_ok, want;
+
+        case_no++;
+        memcpy(buf, seed, sizeof(buf));
+        while (muts--)
+            buf[rnd_below(TBT_FEC_ALLOC_LEN)] ^= (u8)(1 + rnd_below(255));
+        if (rnd64() & 3)
+            alloc_fix_crc(buf);
+        crc_ok = tbt_le32(buf + TBT_FEC_ALLOC_CRC) ==
+                 tbt_fec_crc32c(0, buf, TBT_FEC_ALLOC_CRC_BYTES);
+        mask_ok = tbt_fec_bitmap_count(buf + TBT_FEC_ALLOC_GROUPS) != 0;
+        flags_ok = !(buf[TBT_FEC_ALLOC_FLAGS] & ~TBT_FEC_ALLOC_F_MASK);
+        res_ok = !buf[TBT_FEC_ALLOC_RESERVED] &&
+                 !buf[TBT_FEC_ALLOC_RESERVED + 1] &&
+                 !buf[TBT_FEC_ALLOC_RESERVED + 2] &&
+                 tbt_le32(buf + TBT_FEC_ALLOC_RESERVED2) == 0;
+        want = (crc_ok && mask_ok && flags_ok && res_ok) ? 0 : -EPROTO;
+        alloc_expect("ALLOC random body", buf, want);
+        if (!want)
+        {
+            memset(&b, 0, sizeof(b));
+            case_no++;
+            check(alloc_unpack_copy(buf, &b) == 0 &&
+                      tbt_fec_alloc_pack(&b, out) == TBT_FEC_ALLOC_LEN &&
+                      !memcmp(out, buf, TBT_FEC_ALLOC_LEN),
+                  "ALLOC accepted body repacks", NULL);
+        }
+    }
+}
+
+#define CFG_FUZZ 40000
+#define PARSE_FUZZ 8000
+
+static void cfg_fix_crc(u8 *buf)
+{
+    tbt_put_le32(buf + TBT_FEC_CFG_CRC,
+                 tbt_fec_crc32c(0, buf, TBT_FEC_CFG_CRC_BYTES));
+}
+
+static int cfg_unpack_copy(const u8 *src, struct tbt_fec_cfg *c)
+{
+    u8 *copy = malloc(TBT_FEC_CFG_LEN);
+    int rc;
+
+    if (!copy)
+    {
+        printf("FAIL seed=1 case=%lu: out of memory\n", case_no);
+        exit(2);
+    }
+    memcpy(copy, src, TBT_FEC_CFG_LEN);
+    rc = tbt_fec_cfg_unpack(copy, c);
+    free(copy);
+    return rc;
+}
+
+struct cfg_seed
+{
+    u16 n, m, w, k;
+    u8 d, flags;
+};
+
+/* Three legal shapes, one per encoding the FEC_CFG body shares. */
+static const struct cfg_seed cfg_seeds[3] = {
+    { 8, 8, 64, 32, 4, TBT_FEC_CFG_F_APPLY },      /* RLNC */
+    { 128, 128, 256, 500, 0, TBT_FEC_CFG_F_INIT }, /* SC-LDPC binary */
+    { 8, 24, 16, 128, 64, TBT_FEC_CFG_F_APPLY },   /* SC-LDPC GF(16) */
+};
+
+static const u16 cfg_edges[] = { 0,    1,    2,    3,    5,    15,   16,
+                                 17,   31,   32,   100,  127,  128,  129,
+                                 255,  256,  257,  511,  512,  1000, 1001,
+                                 1024, 1025, 0x7fff, 0xffff };
+
+static u16 cfg_rand_u16(void)
+{
+    if (rnd64() & 3)
+        return cfg_edges[rnd_below(sizeof(cfg_edges) / sizeof(cfg_edges[0]))];
+    return (u16)rnd64();
+}
+
+static u16 cfg_groups_for(u16 n, u16 m)
+{
+    u32 shares = (u32)n + m;
+
+    if (!shares || TBT_FEC_MAX_CARRIERS % shares)
+        return 0;
+    return (u16)(TBT_FEC_MAX_CARRIERS / shares);
+}
+
+static void cfg_pack_seed(unsigned which, u8 *buf)
+{
+    const struct cfg_seed *s = &cfg_seeds[which];
+    struct tbt_fec_cfg c;
+
+    memset(&c, 0, sizeof(c));
+    c.epoch = 7;
+    c.n = s->n;
+    c.m = s->m;
+    c.w = s->w;
+    c.k = s->k;
+    c.d = s->d;
+    c.flags = s->flags;
+    c.groups = cfg_groups_for(s->n, s->m);
+    c.switch_pkt = 0x0102030405060708ull;
+    c.block_base = 0x1112131415161718ull;
+    c.seed = 0x2122232425262728ull;
+    if (tbt_fec_cfg_pack(&c, buf))
+    {
+        printf("FAIL seed=1 case=%lu: CFG seed %u does not pack\n", case_no,
+               which);
+        exit(2);
+    }
+}
+
+static void cfg_expect(const char *what, const u8 *buf, int want)
+{
+    struct tbt_fec_cfg c;
+    int rc = cfg_unpack_copy(buf, &c);
+
+    checks++;
+    if (rc != want)
+    {
+        failures++;
+        printf("FAIL seed=1 case=%lu: %s: want %s, got %d\n", case_no, what,
+               want ? "EPROTO" : "OK", rc);
+    }
+}
+
+/* The documented acceptance rules, re-derived from tbt_uapi.h. Kept apart
+ * from tbt_fec_cfg_unpack() so a drift on either side fails the fuzz. */
+static int cfg_doc_accepts(const u8 *b)
+{
+    u16 n = tbt_le16(b + TBT_FEC_CFG_N);
+    u16 m = tbt_le16(b + TBT_FEC_CFG_M);
+    u16 w = tbt_le16(b + TBT_FEC_CFG_W);
+    u16 k = tbt_le16(b + TBT_FEC_CFG_K);
+    u16 groups = tbt_le16(b + TBT_FEC_CFG_GROUPS);
+    u8 d = b[TBT_FEC_CFG_D];
+    u32 shares = (u32)n + m;
+
+    if (tbt_le32(b + TBT_FEC_CFG_CRC) !=
+        tbt_fec_crc32c(0, b, TBT_FEC_CFG_CRC_BYTES))
+        return 0;
+    if (tbt_le32(b + TBT_FEC_CFG_RESERVED) != 0)
+        return 0;
+    if (b[TBT_FEC_CFG_FLAGS] & ~TBT_FEC_CFG_F_MASK)
+        return 0;
+    if (!n || !m || shares > TBT_FEC_MAX_SHARES)
+        return 0;
+    if (!k || w > TBT_FEC_MAX_W)
+        return 0;
+    if (d == 0)
+    {
+        if (k < 100 || k > 1000)
+            return 0;
+    }
+    else if (w < k)
+    {
+        if (k < 16 || (k & 1) || w < 2)
+            return 0;
+    }
+    else
+    {
+        if (d > w)
+            return 0;
+        if (w > 1 && d == w)
+            return 0;
+    }
+    if (!groups || TBT_FEC_MAX_CARRIERS % shares ||
+        groups != TBT_FEC_MAX_CARRIERS / shares)
+        return 0;
+    return 1;
+}
+
+/* FEC_CFG (0x34): the three (d, k, w, n, m, groups) families, the zero and
+ * overflow edges that would divide by zero downstream, and 40k mutations
+ * checked against cfg_doc_accepts(). */
+static void test_cfg_body(void)
+{
+    static u8 seeds[3][TBT_FEC_CFG_LEN];
+    static u8 buf[TBT_FEC_CFG_LEN], out[TBT_FEC_CFG_LEN];
+    unsigned i, s;
+
+    case_no++;
+    check(TBT_FEC_CFG_LEN == 48 && TBT_FEC_CONV == 0x1007u &&
+              TBT_FEC_CFG_CRC_BYTES == 40 && TBT_FEC_MAX_SHARES == 256,
+          "FEC_CFG wire constants", NULL);
+
+    for (s = 0; s < 3; s++)
+    {
+        struct tbt_fec_cfg c;
+        u16 groups = cfg_groups_for(cfg_seeds[s].n, cfg_seeds[s].m);
+
+        cfg_pack_seed(s, seeds[s]);
+        memset(&c, 0, sizeof(c));
+        case_no++;
+        check(cfg_unpack_copy(seeds[s], &c) == 0 &&
+                  c.n == cfg_seeds[s].n && c.m == cfg_seeds[s].m &&
+                  c.w == cfg_seeds[s].w && c.k == cfg_seeds[s].k &&
+                  c.d == cfg_seeds[s].d && c.flags == cfg_seeds[s].flags &&
+                  c.groups == groups,
+              "CFG seed round trip", NULL);
+
+        memcpy(buf, seeds[s], sizeof(buf));
+        tbt_put_le16(buf + TBT_FEC_CFG_N, 0);
+        cfg_fix_crc(buf);
+        case_no++;
+        cfg_expect("CFG n=0", buf, -EPROTO);
+
+        memcpy(buf, seeds[s], sizeof(buf));
+        tbt_put_le16(buf + TBT_FEC_CFG_M, 0);
+        cfg_fix_crc(buf);
+        case_no++;
+        cfg_expect("CFG m=0", buf, -EPROTO);
+
+        /* u16 wrap edges: the shares sum must be computed in 32 bits. */
+        memcpy(buf, seeds[s], sizeof(buf));
+        tbt_put_le16(buf + TBT_FEC_CFG_N, 1);
+        tbt_put_le16(buf + TBT_FEC_CFG_M, 0xffff);
+        cfg_fix_crc(buf);
+        case_no++;
+        cfg_expect("CFG n+m=65536", buf, -EPROTO);
+        memcpy(buf, seeds[s], sizeof(buf));
+        tbt_put_le16(buf + TBT_FEC_CFG_N, 0xffff);
+        tbt_put_le16(buf + TBT_FEC_CFG_M, 1);
+        cfg_fix_crc(buf);
+        case_no++;
+        cfg_expect("CFG n+m=65536 (reversed)", buf, -EPROTO);
+        memcpy(buf, seeds[s], sizeof(buf));
+        tbt_put_le16(buf + TBT_FEC_CFG_N, 0xffff);
+        tbt_put_le16(buf + TBT_FEC_CFG_M, 0xffff);
+        cfg_fix_crc(buf);
+        case_no++;
+        cfg_expect("CFG n+m=131070", buf, -EPROTO);
+
+        memcpy(buf, seeds[s], sizeof(buf));
+        tbt_put_le16(buf + TBT_FEC_CFG_N, 200);
+        tbt_put_le16(buf + TBT_FEC_CFG_M, 100);
+        cfg_fix_crc(buf);
+        case_no++;
+        cfg_expect("CFG shares over 256", buf, -EPROTO);
+
+        /* 256 is not divisible by 5, so no groups value can describe it. */
+        memcpy(buf, seeds[s], sizeof(buf));
+        tbt_put_le16(buf + TBT_FEC_CFG_N, 3);
+        tbt_put_le16(buf + TBT_FEC_CFG_M, 2);
+        tbt_put_le16(buf + TBT_FEC_CFG_GROUPS, 51);
+        cfg_fix_crc(buf);
+        case_no++;
+        cfg_expect("CFG shares do not divide 256", buf, -EPROTO);
+
+        memcpy(buf, seeds[s], sizeof(buf));
+        tbt_put_le16(buf + TBT_FEC_CFG_GROUPS, 0);
+        cfg_fix_crc(buf);
+        case_no++;
+        cfg_expect("CFG groups=0", buf, -EPROTO);
+
+        memcpy(buf, seeds[s], sizeof(buf));
+        tbt_put_le16(buf + TBT_FEC_CFG_GROUPS,
+                     (u16)(cfg_groups_for(cfg_seeds[s].n, cfg_seeds[s].m) + 1));
+        cfg_fix_crc(buf);
+        case_no++;
+        cfg_expect("CFG groups mismatch", buf, -EPROTO);
+
+        memcpy(buf, seeds[s], sizeof(buf));
+        tbt_put_le16(buf + TBT_FEC_CFG_K, 0);
+        cfg_fix_crc(buf);
+        case_no++;
+        cfg_expect("CFG k=0", buf, -EPROTO);
+
+        memcpy(buf, seeds[s], sizeof(buf));
+        tbt_put_le16(buf + TBT_FEC_CFG_W, TBT_FEC_MAX_W + 1);
+        cfg_fix_crc(buf);
+        case_no++;
+        cfg_expect("CFG w over the cap", buf, -EPROTO);
+
+        memcpy(buf, seeds[s], sizeof(buf));
+        buf[TBT_FEC_CFG_FLAGS] |= 0x08;
+        cfg_fix_crc(buf);
+        case_no++;
+        cfg_expect("CFG unknown flag", buf, -EPROTO);
+
+        memcpy(buf, seeds[s], sizeof(buf));
+        buf[TBT_FEC_CFG_FLAGS] = 0xff;
+        cfg_fix_crc(buf);
+        case_no++;
+        cfg_expect("CFG all flags", buf, -EPROTO);
+
+        memcpy(buf, seeds[s], sizeof(buf));
+        buf[TBT_FEC_CFG_RESERVED] = 1;
+        cfg_fix_crc(buf);
+        case_no++;
+        cfg_expect("CFG reserved", buf, -EPROTO);
+
+        memcpy(buf, seeds[s], sizeof(buf));
+        buf[TBT_FEC_CFG_CRC + 1] ^= 0x80;
+        case_no++;
+        cfg_expect("CFG CRC fault", buf, -EPROTO);
+
+        /* The discriminator between the three encodings. */
+        memcpy(buf, seeds[s], sizeof(buf));
+        if (s == 0)
+        {
+            buf[TBT_FEC_CFG_D] = (u8)(cfg_seeds[s].w + 1);
+            cfg_fix_crc(buf);
+            case_no++;
+            cfg_expect("CFG RLNC d over w", buf, -EPROTO);
+            memcpy(buf, seeds[s], sizeof(buf));
+            buf[TBT_FEC_CFG_D] = (u8)cfg_seeds[s].w;
+            cfg_fix_crc(buf);
+            case_no++;
+            cfg_expect("CFG RLNC d=w", buf, -EPROTO);
+        }
+        else if (s == 1)
+        {
+            tbt_put_le16(buf + TBT_FEC_CFG_K, 99);
+            cfg_fix_crc(buf);
+            case_no++;
+            cfg_expect("CFG binary k below 100", buf, -EPROTO);
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le16(buf + TBT_FEC_CFG_K, 1001);
+            cfg_fix_crc(buf);
+            case_no++;
+            cfg_expect("CFG binary k over 1000", buf, -EPROTO);
+        }
+        else
+        {
+            tbt_put_le16(buf + TBT_FEC_CFG_K, 15);
+            cfg_fix_crc(buf);
+            case_no++;
+            cfg_expect("CFG GF16 k=15", buf, -EPROTO);
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le16(buf + TBT_FEC_CFG_K, 17);
+            cfg_fix_crc(buf);
+            case_no++;
+            cfg_expect("CFG GF16 odd k", buf, -EPROTO);
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le16(buf + TBT_FEC_CFG_W, 1);
+            cfg_fix_crc(buf);
+            case_no++;
+            cfg_expect("CFG GF16 w=1", buf, -EPROTO);
+        }
+    }
+
+    for (i = 0; i < CFG_FUZZ; i++)
+    {
+        struct tbt_fec_cfg c;
+        unsigned muts = 1 + (unsigned)rnd_below(5);
+        int rc, want;
+
+        case_no = i + 1;
+        s = (unsigned)rnd_below(3);
+        memcpy(buf, seeds[s], sizeof(buf));
+        while (muts--)
+        {
+            switch (rnd_below(7))
+            {
+            case 0:
+                tbt_put_le16(buf + TBT_FEC_CFG_N, cfg_rand_u16());
+                break;
+            case 1:
+                tbt_put_le16(buf + TBT_FEC_CFG_M, cfg_rand_u16());
+                break;
+            case 2:
+                tbt_put_le16(buf + TBT_FEC_CFG_W, cfg_rand_u16());
+                break;
+            case 3:
+                tbt_put_le16(buf + TBT_FEC_CFG_K, cfg_rand_u16());
+                break;
+            case 4:
+                buf[TBT_FEC_CFG_D] = (u8)rnd64();
+                break;
+            case 5:
+                tbt_put_le16(buf + TBT_FEC_CFG_GROUPS, cfg_rand_u16());
+                break;
+            default:
+                buf[TBT_FEC_CFG_FLAGS] = (u8)rnd64();
+                break;
+            }
+        }
+        if (!(rnd64() & 7))
+            buf[TBT_FEC_CFG_CRC + rnd_below(4)] ^= (u8)(1 + rnd_below(255));
+        else
+            cfg_fix_crc(buf);
+        want = cfg_doc_accepts(buf);
+        memset(&c, 0, sizeof(c));
+        rc = cfg_unpack_copy(buf, &c);
+        checks++;
+        if ((rc == 0) != (want != 0) || (rc != 0 && rc != -EPROTO))
+        {
+            failures++;
+            printf("FAIL seed=1 case=%lu: CFG random body: want %s, got %d\n",
+                   case_no, want ? "OK" : "EPROTO", rc);
+            continue;
+        }
+        if (!want)
+            continue;
+        checks++;
+        if (!c.n || !c.m || (u32)c.n + c.m > TBT_FEC_MAX_SHARES ||
+            !c.groups || !c.k || c.w > TBT_FEC_MAX_W)
+        {
+            failures++;
+            printf("FAIL seed=1 case=%lu: CFG accepted an unusable shape\n",
+                   case_no);
+            continue;
+        }
+        checks++;
+        if (tbt_fec_cfg_pack(&c, out) || memcmp(out, buf, sizeof(out)))
+        {
+            failures++;
+            printf("FAIL seed=1 case=%lu: CFG accepted body does not repack\n",
+                   case_no);
+        }
+    }
+}
+
+/* Parse one line in place and hold every accepted tunnel to the invariants
+ * the parser promises plus the canonical render/parse fixed point. */
+static int parse_case(const char *text, const char *what)
+{
+    char buf[TBT_LINE_MAX + 1];
+    char rendered[TBT_LINE_MAX];
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+    size_t len = strlen(text);
+    int rc;
+
+    if (len > TBT_LINE_MAX - 1)
+        len = TBT_LINE_MAX - 1;
+    memcpy(buf, text, len);
+    buf[len] = '\0';
+
+    rc = tbt_parse_line(buf, &cmd, &perr);
+    checks++;
+    if (rc != 0 && rc != TBT_PARSE_EINVAL && rc != TBT_PARSE_E2BIG &&
+        rc != TBT_PARSE_EAFNOSUPPORT)
+    {
+        failures++;
+        printf("FAIL seed=1 case=%lu: %s: unexpected rc=%d\n", case_no, what,
+               rc);
+        return rc;
+    }
+    if (rc)
+    {
+        checks++;
+        if (!perr.why)
+        {
+            failures++;
+            printf("FAIL seed=1 case=%lu: %s: refusal without a reason\n",
+                   case_no, what);
+        }
+        return rc;
+    }
+    checks++;
+    if (perr.key || perr.why)
+    {
+        failures++;
+        printf("FAIL seed=1 case=%lu: %s: success left an error behind\n",
+               case_no, what);
+        return rc;
+    }
+    checks++;
+    if (cmd.kind < TBT_CMD_NONE || cmd.kind > TBT_CMD_SESSION)
+    {
+        failures++;
+        printf("FAIL seed=1 case=%lu: %s: unknown command kind\n", case_no,
+               what);
+        return rc;
+    }
+    if (cmd.kind != TBT_CMD_TUNNEL)
+        return rc;
+
+    checks++;
+    if (!cmd.cfg.role || cmd.cfg.role > TBT_ROLE_FAR || !cmd.cfg.profile ||
+        cmd.cfg.profile > 3 || !cmd.cfg.mode || cmd.cfg.mode > 3 ||
+        !cmd.cfg.n || cmd.cfg.n + cmd.cfg.m > TBT_MAX_CARRIERS_LIMIT ||
+        !cmd.cfg.carriers ||
+        cmd.cfg.carriers % (cmd.cfg.n + cmd.cfg.m) ||
+        (cmd.cfg.fec && (cmd.cfg.m < 1 ||
+                         cmd.cfg.carriers < cmd.cfg.n + cmd.cfg.m)) ||
+        (cmd.cfg.adaptive && !cmd.cfg.fec) ||
+        cmd.cfg.portblock_lo > cmd.cfg.portblock_hi)
+    {
+        failures++;
+        printf("FAIL seed=1 case=%lu: %s: accepted config violates its invariants\n",
+               case_no, what);
+        return rc;
+    }
+
+    rc = tbt_render_cfg(&cmd.cfg, rendered, sizeof(rendered));
+    checks++;
+    if (rc <= 0 || rc >= (int)sizeof(rendered))
+    {
+        failures++;
+        printf("FAIL seed=1 case=%lu: %s: render failed (%d)\n", case_no, what,
+               rc);
+        return rc;
+    }
+    {
+        char text2[TBT_LINE_MAX], rendered2[TBT_LINE_MAX];
+        struct tbt_cmd again;
+        struct tbt_parse_error perr2 = { NULL, NULL };
+        int rc2;
+
+        memcpy(text2, rendered, (size_t)rc + 1);
+        rc2 = tbt_parse_line(text2, &again, &perr2);
+        checks++;
+        if (rc2)
+        {
+            failures++;
+            printf("FAIL seed=1 case=%lu: %s: canonical line was refused (%d)\n",
+                   case_no, what, rc2);
+            return rc;
+        }
+        rc2 = tbt_render_cfg(&again.cfg, rendered2, sizeof(rendered2));
+        checks++;
+        if (rc2 != rc || memcmp(rendered, rendered2, (size_t)rc))
+        {
+            failures++;
+            printf("FAIL seed=1 case=%lu: %s: canonical form is not a fixed point\n",
+                   case_no, what);
+        }
+    }
+    return 0;
+}
+
+static void parse_expect(const char *what, const char *text, int want)
+{
+    int rc = parse_case(text, what);
+
+    checks++;
+    if (rc != want)
+    {
+        failures++;
+        printf("FAIL seed=1 case=%lu: %s: want rc=%d, got rc=%d\n", case_no,
+               what, want, rc);
+    }
+}
+
+static void parse_suffix(const char *what, const char *extra, int want)
+{
+    char line[TBT_LINE_MAX];
+
+    snprintf(line, sizeof(line),
+             "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 %s", extra);
+    case_no++;
+    parse_expect(what, line, want);
+}
+
+/* portblock=, adaptive=, L= and mode=sc-ldpc: values that must be refused,
+ * the legal boundary on both sides, and 8k mutated lines. */
+static void test_parse_bomb(void)
+{
+    static const char *const key_values[] = {
+        "portblock=0-0",         "portblock=40000-44095",
+        "portblock=40000-40003", "portblock=40000-40004",
+        "portblock=40000-39999", "portblock=0-5",
+        "portblock=",            "portblock=-",
+        "portblock=65536-65536", "adaptive=on",
+        "adaptive=off",          "adaptive=maybe",
+        "adaptive=",             "L=0",
+        "L=4096",                "L=4097",
+        "L=65536",               "L=-1",
+        "L=0x10",                "mode=sc-ldpc",
+        "mode=SC-LDPC",          "mode=scldpc",
+        "mode=sc-ldpcx",         "mode=",
+        "mode=sc-ldpc w=100",    "mode=sc-ldpc w=128",
+        "mode=sc-ldpc w=512",    "mode=sc-ldpc w=1000",
+    };
+    static const char charset[] = "0123456789abcdefx-= .:\t#";
+    char line[TBT_LINE_MAX];
+    unsigned i;
+
+    case_no++;
+    parse_expect("valid 0.4.0 near line",
+                 "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                 " n=4 m=1 fec=on adaptive=on mode=rlnc w=8 carriers=5"
+                 " crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000"
+                 " drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000"
+                 " hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0"
+                 " tx_retain_bytes=0 carrier_stall_ms=0"
+                 " portblock=40000-44095\n",
+                 0);
+
+    parse_suffix("portblock 0-0", "portblock=0-0", 0);
+    parse_suffix("portblock exact fit", "portblock=40000-40004", 0);
+    parse_suffix("portblock one short", "portblock=40000-40003",
+                 TBT_PARSE_EINVAL);
+    parse_suffix("portblock reversed", "portblock=40000-39999",
+                 TBT_PARSE_EINVAL);
+    parse_suffix("portblock zero start", "portblock=0-5", TBT_PARSE_EINVAL);
+    parse_suffix("portblock missing hi", "portblock=40000",
+                 TBT_PARSE_EINVAL);
+    parse_suffix("portblock empty", "portblock=", TBT_PARSE_EINVAL);
+    parse_suffix("portblock dash only", "portblock=-", TBT_PARSE_EINVAL);
+    parse_suffix("portblock double dash", "portblock=40000--40010",
+                 TBT_PARSE_EINVAL);
+    parse_suffix("portblock u16 overflow", "portblock=65536-65536",
+                 TBT_PARSE_EINVAL);
+    parse_suffix("portblock too long",
+                 "portblock=0000000000000000000000000001-000000000002",
+                 TBT_PARSE_EINVAL);
+    parse_suffix("portblock hex", "portblock=0x9c40-0x9c44", 0);
+
+    parse_expect("portblock holds every carrier",
+                 "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                 " n=128 m=128 fec=on portblock=40000-40255",
+                 0);
+    parse_expect("portblock one short of carriers",
+                 "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                 " n=128 m=128 fec=on portblock=40000-40254",
+                 TBT_PARSE_EINVAL);
+    parse_expect("far portblock is recorded, not sized",
+                 "tunnel 2 role=far listen=10.0.0.1:1 target=10.0.0.2:2"
+                 " n=128 m=128 fec=on portblock=40000-40000",
+                 0);
+
+    parse_suffix("adaptive without fec", "adaptive=on", TBT_PARSE_EINVAL);
+    parse_suffix("adaptive off", "adaptive=off", 0);
+    parse_suffix("adaptive with fec", "fec=on adaptive=on", 0);
+    parse_suffix("adaptive empty", "adaptive=", TBT_PARSE_EINVAL);
+    parse_suffix("adaptive maybe", "adaptive=maybe", TBT_PARSE_EINVAL);
+    parse_suffix("adaptive numeric", "adaptive=1", TBT_PARSE_EINVAL);
+    parse_suffix("adaptive uppercase", "adaptive=ON", TBT_PARSE_EINVAL);
+    parse_suffix("adaptive trailing token", "fec=on adaptive=on extra",
+                 TBT_PARSE_EINVAL);
+
+    parse_suffix("L zero", "L=0", 0);
+    parse_suffix("L max", "L=4096", 0);
+    parse_suffix("L over max", "L=4097", TBT_PARSE_EINVAL);
+    parse_suffix("L u16 overflow", "L=65536", TBT_PARSE_EINVAL);
+    parse_suffix("L negative", "L=-1", TBT_PARSE_EINVAL);
+    parse_suffix("L empty", "L=", TBT_PARSE_EINVAL);
+    parse_suffix("L hex", "L=0x10", 0);
+    parse_suffix("L trailing", "L=16x", TBT_PARSE_EINVAL);
+
+    parse_suffix("mode sc-ldpc", "mode=sc-ldpc", 0);
+    parse_suffix("mode sc-ldpc w=128", "mode=sc-ldpc w=128", 0);
+    parse_suffix("mode sc-ldpc w=256", "mode=sc-ldpc w=256", 0);
+    parse_suffix("mode sc-ldpc w=512", "mode=sc-ldpc w=512", 0);
+    parse_suffix("mode sc-ldpc w=100", "mode=sc-ldpc w=100",
+                 TBT_PARSE_EINVAL);
+    parse_suffix("mode uppercase", "mode=SC-LDPC", TBT_PARSE_EINVAL);
+    parse_suffix("mode glued", "mode=scldpc", TBT_PARSE_EINVAL);
+    parse_suffix("mode suffix", "mode=sc-ldpcx", TBT_PARSE_EINVAL);
+    parse_suffix("mode empty", "mode=", TBT_PARSE_EINVAL);
+
+    parse_expect("downlink adaptive profile",
+                 "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                 " n=128 m=128 fec=on mode=sc-ldpc adaptive=on w=256"
+                 " carriers=256",
+                 0);
+    parse_expect("uplink adaptive profile",
+                 "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                 " n=8 m=24 fec=on mode=sc-ldpc adaptive=on w=128"
+                 " carriers=256 L=16",
+                 0);
+    parse_expect("uplink adaptive L wrong",
+                 "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                 " n=8 m=24 fec=on mode=sc-ldpc adaptive=on w=128"
+                 " carriers=256 L=15",
+                 TBT_PARSE_EINVAL);
+    parse_expect("adaptive off-ladder n/m",
+                 "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                 " n=14 m=18 fec=on mode=sc-ldpc adaptive=on w=128"
+                 " carriers=256 L=16",
+                 TBT_PARSE_EINVAL);
+
+    for (i = 0; i < PARSE_FUZZ; i++)
+    {
+        static const char *const base[] = {
+            "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+            " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5"
+            " crypto=off crypto_key=- dup=1 profile=http-kal keepalive=5000"
+            " drip_ms=1000 replay=8388608 tunnel_rate=0 max_inflate=2.000"
+            " hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0"
+            " tx_retain_bytes=0 carrier_stall_ms=0 portblock=40000-44095",
+            "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+            " n=128 m=128 fec=on adaptive=on mode=sc-ldpc w=256"
+            " carriers=256 portblock=40000-44095",
+            "tunnel 2 role=far listen=10.0.0.1:1 target=10.0.0.2:2"
+            " n=8 m=24 fec=on adaptive=on mode=sc-ldpc w=128 carriers=256"
+            " L=16",
+        };
+        size_t len;
+
+        case_no = i + 1;
+        snprintf(line, sizeof(line), "%s", base[i % 3]);
+        len = strlen(line);
+        if ((rnd64() & 3) && len)
+        {
+            line[rnd_below(len)] = charset[rnd_below(sizeof(charset) - 1)];
+        }
+        else if (!(rnd64() & 1))
+        {
+            snprintf(line + len, sizeof(line) - len, " %s",
+                     key_values[rnd_below(sizeof(key_values) /
+                                          sizeof(key_values[0]))]);
+        }
+        else
+        {
+            size_t j, n = rnd_below(160);
+
+            for (j = 0; j < n; j++)
+                line[j] = charset[rnd_below(sizeof(charset) - 1)];
+            line[n] = '\0';
+        }
+        parse_case(line, "random config line");
+    }
+}
+
 int main(void)
 {
     test_bounds_table();
@@ -980,8 +1858,13 @@ int main(void)
     test_adversarial();
     test_random_buffers();
     test_body_lengths();
+    test_alloc_body();
+    test_cfg_body();
+    test_parse_bomb();
 
-    printf("test_fuzz: seed=1 checks=%ld failures=%d buffers=%d bodies=%d\n", checks, failures, FUZZ_BUFFERS,
-           FUZZ_BODY_LENGTHS);
+    printf("test_fuzz: seed=1 checks=%ld failures=%d buffers=%d bodies=%d"
+           " alloc=%d cfg=%d parse=%d\n",
+           checks, failures, FUZZ_BUFFERS, FUZZ_BODY_LENGTHS, ALLOC_FUZZ,
+           CFG_FUZZ, PARSE_FUZZ);
     return failures ? 1 : 0;
 }

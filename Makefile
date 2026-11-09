@@ -38,8 +38,12 @@ HOST_TEST_HDRS  := tbtun/tbt_parse.h tbtun/tbt_portmap.h tbtun/tbt_uapi.h \
                    tbtun/tbt_crypto.h tbtun/tbt_fec_adapt_sclc.h \
                    tbtun/tbt_fec_adapt.h tbtun/tbt_fec.h
 HOST_FUZZ       := host/test_fuzz
-HOST_FUZZ_SRCS  := host/test_fuzz.c tbtun/tbt_rec.c tbtun/tbt_proto.c
-HOST_FUZZ_HDRS  := tbtun/tbt_rec.h tbtun/tbt_proto.h tbtun/tbt_uapi.h
+HOST_FUZZ_SRCS  := host/test_fuzz.c tbtun/tbt_rec.c tbtun/tbt_proto.c \
+                   tbtun/tbt_fec.c tbtun/tbt_parse.c \
+                   tbtun/tbt_fec_adapt_sclc.c tbtun/tbt_portmap.c
+HOST_FUZZ_HDRS  := tbtun/tbt_rec.h tbtun/tbt_proto.h tbtun/tbt_uapi.h \
+                   tbtun/tbt_fec.h tbtun/tbt_parse.h tbtun/tbt_fec_adapt_sclc.h \
+                   tbtun/tbt_fec_adapt.h tbtun/tbt_portmap.h
 HOST_HTTP       := host/test_http
 HOST_HTTP_SRCS  := host/test_http.c tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
 HOST_HTTP_HDRS  := tbtun/tbt_http.h tbtun/tbt_uapi.h tbtun/tbt_proto.h tbtun/tbt_rec.h

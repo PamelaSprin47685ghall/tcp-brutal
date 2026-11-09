@@ -500,22 +500,28 @@ int tbt_fec_alloc_unpack(const u8 in[TBT_FEC_ALLOC_LEN],
 
     if (!in || !a)
         return -EPROTO;
+    want = tbt_fec_crc32c(0, in, TBT_FEC_ALLOC_CRC_BYTES);
+    if (want != tbt_get_u32(in + TBT_FEC_ALLOC_CRC))
+        return -EPROTO;
     a->epoch = tbt_get_u32(in + TBT_FEC_ALLOC_EPOCH);
     memcpy(a->group_mask, in + TBT_FEC_ALLOC_GROUPS, TBT_FEC_BITMAP_BYTES);
     a->flags = in[TBT_FEC_ALLOC_FLAGS];
+    /* Reserved bytes and the trailing word are part of the body contract,
+     * not free space: a sender that sets one is not speaking this revision.
+     * reserved2 sits outside the CRC, so it needs its own check. */
+    if (in[TBT_FEC_ALLOC_RESERVED] || in[TBT_FEC_ALLOC_RESERVED + 1] ||
+        in[TBT_FEC_ALLOC_RESERVED + 2])
+        return -EPROTO;
+    if (tbt_get_u32(in + TBT_FEC_ALLOC_RESERVED2) != 0)
+        return -EPROTO;
     if (a->flags & ~TBT_FEC_ALLOC_F_MASK)
+        return -EPROTO;
+    /* A body that names no physical group cannot move a flow anywhere. */
+    if (!tbt_fec_bitmap_count(a->group_mask))
         return -EPROTO;
     a->switch_pkt = tbt_get_u64(in + TBT_FEC_ALLOC_SWITCH_PKT);
     a->block_base = tbt_get_u64(in + TBT_FEC_ALLOC_BLOCK_BASE);
     a->crc32c = tbt_get_u32(in + TBT_FEC_ALLOC_CRC);
-    want = tbt_fec_crc32c(0, in, TBT_FEC_ALLOC_CRC_BYTES);
-    if (want != a->crc32c)
-        return -EPROTO;
-    /* The trailing word is reserved, not padding: the format says it must be
-     * zero, and a future field there must arrive with its own conv bump
-     * rather than be ignored by an old receiver. */
-    if (tbt_get_u32(in + TBT_FEC_ALLOC_RESERVED2) != 0)
-        return -EPROTO;
     return 0;
 }
 
