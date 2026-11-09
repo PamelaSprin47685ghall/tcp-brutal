@@ -55,6 +55,8 @@ static struct tbt_fec_grouped *tbt_fec_codec_new(
 static void tbt_fec_tx_init_tick(struct tbt_session *sess, struct tbt_fec_tx *tx);
 static void tbt_fec_alloc_tx_tick(struct tbt_session *sess,
                                   struct tbt_fec_flow *f);
+static void tbt_fec_alloc_rx_release_old(struct tbt_session *sess,
+                                         struct tbt_fec_flow *f);
 
 /* The source ring is the capture's pause granularity: tbt_fec_tx_submit()
  * sets tx_paused only when the ring cannot take the next chunk. 256 KiB
@@ -629,6 +631,9 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o,
             tbt_carrier_put(c);
             if (!err)
             {
+                if (debug && o->data[0] == TBT_FEC_ALLOC)
+                    pr_info("tbtun: fec alloc wire carrier=%u len=%u\n",
+                            idx, o->len);
                 if (tx)
                 {
                     tx->ctl_rot = (u16)((idx + 1) % sess->n_car);
@@ -656,6 +661,9 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o,
             tbt_fec_wait_carrier(sess, tx);
             rc = -EAGAIN;
         }
+        if (debug && o->data[0] == TBT_FEC_ALLOC)
+            pr_info_ratelimited("tbtun: fec alloc no carrier rc=%d depth=%u\n",
+                                rc, READ_ONCE(sess->fec_out_ctl_depth));
         return rc;
     }
     if (o->carrier >= sess->n_car)
@@ -2512,6 +2520,10 @@ static int tbt_fec_send_alloc(struct tbt_session *sess, struct tbt_fec_flow *f,
 
     if (!sess || !f || !mask)
         return -EINVAL;
+    if (debug)
+        pr_info("tbtun: fec alloc tx sid=%llu flags=%#x epoch=%u groups=%u pkt=%llu blk=%llu\n",
+                f->sid, flags, epoch, tbt_fec_bitmap_count(mask), switch_pkt,
+                block_base);
     memset(&a, 0, sizeof(a));
     a.epoch = epoch;
     memcpy(a.group_mask, mask, TBT_FEC_BITMAP_BYTES);
@@ -2530,7 +2542,14 @@ static int tbt_fec_send_alloc(struct tbt_session *sess, struct tbt_fec_flow *f,
     h.sid = f->sid;
     if (tbt_fec_make_record(sess, &h, body, rec, &len))
         return -EINVAL;
-    return tbt_fec_send_record(sess, 0, rec, len, true, false, f);
+    {
+        int err = tbt_fec_send_record(sess, 0, rec, len, true, false, f);
+
+        if (debug)
+            pr_info("tbtun: fec alloc queued sid=%llu flags=%#x err=%d\n",
+                    f->sid, flags, err);
+        return err;
+    }
 }
 
 /* Publish a committed flow mask: the group pool and the OPEN body both read
@@ -3084,6 +3103,10 @@ static void tbt_fec_alloc_responder_tick(struct tbt_session *sess,
     {
         if (!tx->alloc_hold && !tbt_fec_alloc_tx_stop(sess, f))
         {
+            if (debug)
+                pr_info_ratelimited("tbtun: fec alloc responder waiting to stop sid=%llu switch=%u hold=%u\n",
+                                    f->sid, tx->switch_state,
+                                    tx->alloc_hold);
             tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(5));
             return;
         }
@@ -3107,6 +3130,8 @@ static void tbt_fec_alloc_responder_tick(struct tbt_session *sess,
     {
         if (!tbt_fec_tx_alloc_swap(sess, f))
         {
+            pr_warn_ratelimited("tbtun: fec alloc responder swap failed sid=%llu groups=%u\n",
+                                f->sid, target.groups);
             tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
             return;
         }
@@ -3158,22 +3183,17 @@ static noinline void tbt_fec_alloc_tx_tick(struct tbt_session *sess,
         tbt_fec_alloc_responder_tick(sess, f);
         return;
     }
-    /* The round that started this exchange is gone (timeout or a failed
-     * plan) while our TX never swapped. Retrying the REQUEST forever leaves
-     * the peer's TX stopped and keeps alloc_role set, so no later round can
-     * plan this flow (observed as the regrow stage of the 1->2->4->1 QEMU
-     * gate). Abort at the current mask and release the role. A flow already
-     * in COMMIT keeps its DONE retry: its TX did swap, so an ABORT with the
-     * old mask would misdescribe what is on the wire. */
-    if (!READ_ONCE(sess->fec_alloc_round) && !tx->alloc.tx_swapped &&
-        tx->alloc.state != TBT_FEC_ALLOC_DONE &&
-        tx->alloc.state != TBT_FEC_ALLOC_FAILED &&
-        tx->alloc.state != TBT_FEC_ALLOC_IDLE)
+    /* The exchange is owned by the per-flow state machine, never by the
+     * session round that started it. An ABORT while the peer already applied
+     * (or committed) its TX would resume the old mask against a new plane,
+     * and clearing alloc_role before ABORT|ACK lets the pump send old-mask
+     * records the peer can no longer place. The SM aborts on its own only in
+     * REQ, before any ACK, where the peer has not armed anything. */
+    if (tx->alloc.state == TBT_FEC_ALLOC_FAILED)
     {
-        (void)tbt_fec_send_alloc(sess, f, TBT_FEC_ALLOC_F_ABORT,
-                                 tx->alloc_target.epoch, f->group_mask,
-                                 tx->alloc_target.pkt, tx->alloc_target.block);
-        atomic64_inc(&sess->fec_alloc_abort);
+        /* Safety net for an engine that reached FAILED without running the
+         * FINISH action: release the role/hold, or every later plan is
+         * refused and the regrow stage stalls again. */
         tbt_fec_alloc_flow_done(sess, f, tx->alloc_target.epoch, false);
         return;
     }
@@ -3181,6 +3201,9 @@ static noinline void tbt_fec_alloc_tx_tick(struct tbt_session *sess,
     {
         if (!tbt_fec_alloc_tx_stop(sess, f))
         {
+            if (debug)
+                pr_info_ratelimited("tbtun: fec alloc initiator waiting to stop sid=%llu switch=%u\n",
+                                    f->sid, tx->switch_state);
             tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(5));
             return;
         }
@@ -3208,16 +3231,24 @@ static noinline void tbt_fec_alloc_tx_tick(struct tbt_session *sess,
     if (act & TBT_FEC_ALLOC_ACT_ABORT)
     {
         /* No peer state has committed: restore the old mask at the same
-         * P0. The far rolls its armed RX back on this record. */
-        (void)tbt_fec_send_alloc(sess, f, TBT_FEC_ALLOC_F_ABORT,
-                                 target.epoch, f->group_mask, target.pkt,
-                                 target.block);
+         * P0. The far rolls its armed RX back on this record. A failed
+         * enqueue must not be counted as sent; keep the SM in ABORT and
+         * let the next tick retry, or the peer's TX stays stopped. */
+        if (tbt_fec_send_alloc(sess, f, TBT_FEC_ALLOC_F_ABORT,
+                               target.epoch, f->group_mask, target.pkt,
+                               target.block))
+        {
+            tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
+            return;
+        }
         atomic64_inc(&sess->fec_alloc_abort);
     }
     if (act & TBT_FEC_ALLOC_ACT_SWAP)
     {
         if (!tbt_fec_tx_alloc_swap(sess, f))
         {
+            pr_warn_ratelimited("tbtun: fec alloc initiator swap failed sid=%llu groups=%u\n",
+                                f->sid, target.groups);
             tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
             return;
         }
@@ -3232,6 +3263,10 @@ static noinline void tbt_fec_alloc_tx_tick(struct tbt_session *sess,
     if (act & TBT_FEC_ALLOC_ACT_FINISH)
     {
         ok = sm.state == TBT_FEC_ALLOC_DONE;
+        /* Both directions committed: the RX plane's rollback copy is dead
+         * even if no new-plane record has arrived yet. */
+        if (ok)
+            tbt_fec_alloc_rx_release_old(sess, f);
         tbt_fec_alloc_flow_done(sess, f, target.epoch, ok);
         if (ok)
             atomic64_inc(&sess->fec_alloc_done);
@@ -3537,11 +3572,6 @@ int tbt_fec_tx_flush(struct tbt_stream *st)
 /* ------------------------------------------------------------------ *
  * RX
  * ------------------------------------------------------------------ */
-
-bool tbt_fec_record_type(u8 type)
-{
-    return type >= TBT_FEC_DATA && type <= TBT_FEC_ALLOC;
-}
 
 int tbt_fec_record_len(const u8 *buf, size_t have, size_t *need)
 {
@@ -4078,14 +4108,16 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess,
                 for (k = 0; k < rx->n; k++)
                     have = (u16)(have + (sb->dpresent[k] ? 1 : 0));
                 if (debug)
-                    pr_info_ratelimited("tbtun: fec super %llu stuck: next=%llu total_known=%d total_pkts=%llu next_deliver=%llu deliver_bytes=%llu group=%u/%u used=%d ready=%d id=%llu nreal=%u shares=%u/%u parity=%u gap_us=%llu\n",
+                    pr_info_ratelimited("tbtun: fec super %llu stuck: next=%llu total_known=%d total_pkts=%llu next_deliver=%llu deliver_bytes=%llu group=%u/%u used=%d ready=%d id=%llu nreal=%u shares=%u/%u parity=%u wset=%d empty=%d short=%u cnt=%d gap_us=%llu\n",
                                         s, READ_ONCE(rx->next_super), known,
                                         total_pkts,
                                         READ_ONCE(rx->next_deliver),
                                         READ_ONCE(rx->deliver_bytes), group,
                                         rx->groups, sb->used, sb->ready,
                                         sb->block_id, sb->nreal, have, rx->n,
-                                        (unsigned)rx->m,
+                                        (unsigned)rx->m, sb->win_len_set,
+                                        sb->empty, sb->short_len,
+                                        (int)sb->count_real,
                                         sb->first_gap_ns &&
                                                 now_diag > sb->first_gap_ns
                                             ? (now_diag - sb->first_gap_ns) /
@@ -6253,6 +6285,67 @@ static bool tbt_fec_alloc_mask_overlap(struct tbt_session *sess,
     return overlap;
 }
 
+/* Drop the RX plane a completed switch no longer needs. The old plane is
+ * kept from apply until commit so an ABORT can restore it; a new epoch (or a
+ * locally finished round, `force`) proves the exchange completed. The old
+ * state stayed `applied` when the reverse direction carried no further data,
+ * because the commit event is the first new-plane record; the next ACK arm
+ * then failed forever. Called without rx->lock. */
+/* Detach and free the rollback copy of the defeated RX plane. Process
+ * context only (w_fec_rx commit or w_fec_tx FINISH): the carrier RX handler
+ * marks it with tbt_fec_alloc_rx_retire_locked() instead, because vfree and
+ * the arena walk must not run under the carrier's sk_lock/BH-disabled
+ * section. `state` becomes idle only when it was applied; a newer arm may
+ * already own the new plane by the time this runs. */
+static void tbt_fec_alloc_rx_release_old(struct tbt_session *sess,
+                                         struct tbt_fec_flow *f)
+{
+    struct tbt_fec_rx *rx = f ? f->rx : NULL;
+    struct tbt_fec_grouped *codec = NULL;
+    struct tbt_fec_blk *blk = NULL;
+    u64 *ns = NULL, *rb = NULL;
+    u32 total = 0;
+
+    if (!rx)
+        return;
+    spin_lock_bh(&rx->lock);
+    codec = rx->alloc_old_codec;
+    blk = rx->alloc_old_blk;
+    ns = rx->alloc_old_req_ns;
+    rb = rx->alloc_old_req_block;
+    total = (u32)rx->alloc_old_groups * rx->slots;
+    rx->alloc_old_codec = NULL;
+    rx->alloc_old_blk = NULL;
+    rx->alloc_old_req_ns = NULL;
+    rx->alloc_old_req_block = NULL;
+    rx->alloc_old_groups = 0;
+    if (rx->alloc_state == 3)
+        rx->alloc_state = 0;
+    spin_unlock_bh(&rx->lock);
+    if (blk)
+        tbt_fec_rx_blk_free(blk, total);
+    tbt_fec_grouped_free(codec);
+    kvfree(ns);
+    kvfree(rb);
+    (void)sess;
+}
+
+/* Carrier RX side: a strictly newer epoch proves the previous exchange
+ * completed, but the buffers are freed later by w_fec_rx. Clearing the
+ * applied state here is what lets the new ACK arm; leaving it was the
+ * "applied then the reverse direction stayed idle" stall. */
+static void tbt_fec_alloc_rx_retire_locked(struct tbt_fec_rx *rx,
+                                           u32 newer_epoch)
+{
+    if (rx->alloc_epoch < newer_epoch &&
+        (rx->alloc_state == 3 || rx->alloc_old_codec))
+    {
+        if (rx->alloc_state == 3)
+            rx->alloc_state = 0;
+        rx->alloc_commit_pending = true;
+    }
+}
+
 /* FEC_ALLOC reception. Carrier RX only records the event and arms a work
  * item: the RX plane may need allocations and the TX plane may need to close
  * a block, and neither may run in softirq. */
@@ -6281,6 +6374,9 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
         atomic64_inc(&sess->fec_alloc_bad);
         return;
     }
+    if (debug)
+        pr_info("tbtun: fec alloc rx sid=%llu flags=%#x epoch=%u groups=%u near=%u\n",
+                f->sid, a->flags, a->epoch, count, near);
     if (a->flags == 0)
     {
         /* REQUEST: the near TX names its P0; the far side owns this end. */
@@ -6294,6 +6390,9 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
         if (tx->switch_state != TBT_FEC_SW_STEADY ||
             rx->switch_state != TBT_FEC_SW_STEADY)
         {
+            if (debug)
+                pr_info("tbtun: fec alloc request rejected sid=%llu tx_switch=%u rx_switch=%u\n",
+                        f->sid, tx->switch_state, rx->switch_state);
             atomic64_inc(&sess->fec_alloc_bad);
             return;
         }
@@ -6387,6 +6486,7 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
         tx->alloc_hold = false;
         spin_unlock_bh(&tx->alloc_lock);
         spin_lock_bh(&rx->lock);
+        tbt_fec_alloc_rx_retire_locked(rx, a->epoch);
         rx->alloc.epoch = a->epoch;
         rx->alloc.groups = count;
         memcpy(rx->alloc.mask, a->group_mask, TBT_FEC_BITMAP_BYTES);
@@ -6404,11 +6504,18 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
     {
         if (near)
         {
-            /* ABORT ACK: the far restored the old mask. Our own RX may have
-             * armed (2) or applied (3) the far TX's switch; an armed state
-             * left behind blocks every later ACK arm, and an applied plane
-             * must roll back without answering the ACK again. */
+            /* ABORT ACK: the far restored its TX to the old mask. Our own RX
+             * may have armed (2) or applied (3) that switch; an armed state
+             * left behind blocks every later ACK arm. If the far already
+             * committed its TX (peer_committed), the new plane is what it
+             * still sends on: release the old buffers and keep it. */
             spin_lock_bh(&rx->lock);
+            if (READ_ONCE(tx->alloc.peer_committed) &&
+                rx->alloc_state == 3)
+            {
+                rx->alloc_state = 0;
+                rx->alloc_commit_pending = true;
+            }
             if (rx->alloc.epoch == a->epoch)
             {
                 if (rx->alloc_state == 3)
@@ -6484,6 +6591,7 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
             tbt_fec_alloc_sm_ack(&tx->alloc);
             spin_unlock_bh(&tx->alloc_lock);
             spin_lock_bh(&rx->lock);
+            tbt_fec_alloc_rx_retire_locked(rx, a->epoch);
             if (debug)
                 pr_info("tbtun: alloc ack t=%llu sid=%llu pkt=%llu blk=%llu grp=%u rx(alloc=%u ep=%u/%u sw=%u base=%llu/%llu grp=%u next=%llu nexts=%llu valid=%d ahead=%d)\n",
                         sess->tunnel ? sess->tunnel->cfg.id : 0, f->sid,
@@ -6506,8 +6614,10 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
                 rx->alloc = peer;
                 rx->alloc_state = 2;
             }
-            else
+            else if (a->epoch > rx->alloc_epoch)
                 atomic64_inc(&sess->fec_alloc_bad);
+            /* A duplicate ACK for an epoch already applied or armed is the
+             * peer repeating its last response; nothing to arm. */
             spin_unlock_bh(&rx->lock);
             tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
             tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
@@ -6591,9 +6701,23 @@ static void tbt_fec_alloc_rx_tick(struct tbt_session *sess,
             rx->alloc_old_req_ns = NULL;
             rx->alloc_old_req_block = NULL;
             rx->alloc_old_groups = 0;
-            rx->next_super = rx->alloc.pkt;
-            rx->highest_block = rx->alloc.pkt;
-            rx->next_deliver = rx->alloc.pkt;
+            /* next_super/highest_block are block ids, not packet seqs.
+             * Writing the switch packet here made every record of the
+             * restored blocks look older than the cursor, so an ABORT
+             * silently discarded the sender's resumed stream (observed as
+             * fec_late_share in the thousands and a frozen frontier).
+             * alloc.pkt lies on the restored grid: P0 was computed from the
+             * old mask, and the initiator never swapped its TX. */
+            {
+                u64 resume = rx->alloc.pkt;
+
+                if (resume < rx->base_pkt)
+                    resume = rx->base_pkt; /* defensive: never go backwards */
+                rx->next_super = tbt_fec_block_of_seq_base(
+                    resume, rx->base_pkt, rx->base_block, rx->groups, rx->n);
+                rx->highest_block = rx->next_super;
+                rx->next_deliver = resume;
+            }
             tbt_fec_rx_reset_blocks_locked(rx);
             rx->work_pending = true;
         }
@@ -6610,46 +6734,35 @@ static void tbt_fec_alloc_rx_tick(struct tbt_session *sess,
         {
             /* Only the responder owns the answer. An initiator rolls its
              * applied plane back silently after receiving ABORT|ACK;
-             * answering would bounce the record between the two ends. */
-            (void)tbt_fec_send_alloc(sess, f,
-                                     TBT_FEC_ALLOC_F_ABORT |
-                                         TBT_FEC_ALLOC_F_ACK,
-                                     epoch, rx->group_mask, rx->base_pkt,
-                                     rx->base_block);
+             * answering would bounce the record between the two ends. A
+             * failed send keeps the abort pending so the next RX pass
+             * repeats it instead of dropping the peer's only release. */
+            if (tbt_fec_send_alloc(sess, f,
+                                   TBT_FEC_ALLOC_F_ABORT |
+                                       TBT_FEC_ALLOC_F_ACK,
+                                   epoch, rx->group_mask, rx->base_pkt,
+                                   rx->base_block))
+            {
+                spin_lock_bh(&rx->lock);
+                rx->alloc_abort_pending = true;
+                rx->alloc_abort_epoch = epoch;
+                spin_unlock_bh(&rx->lock);
+                tbt_session_arm(sess, TBT_SW_FEC_RX,
+                                msecs_to_jiffies(10));
+                return;
+            }
             atomic64_inc(&sess->fec_alloc_abort);
         }
         return;
     }
     if (rx->alloc_commit_pending)
     {
-        struct tbt_fec_grouped *drop_codec;
-        struct tbt_fec_blk *drop_blk;
-        u64 *drop_req_ns, *drop_req_block;
-        u32 drop_total;
-
         spin_lock_bh(&rx->lock);
         rx->alloc_commit_pending = false;
-        drop_codec = rx->alloc_old_codec;
-        drop_blk = rx->alloc_old_blk;
-        drop_req_ns = rx->alloc_old_req_ns;
-        drop_req_block = rx->alloc_old_req_block;
-        drop_total = (u32)rx->alloc_old_groups * rx->slots;
-        rx->alloc_old_codec = NULL;
-        rx->alloc_old_blk = NULL;
-        rx->alloc_old_req_ns = NULL;
-        rx->alloc_old_req_block = NULL;
-        rx->alloc_old_groups = 0;
-        /* The commit is the end of this epoch's RX life: the old plane is
-         * gone, so the next FEC_ALLOC ACK may arm. Leaving the state at 3
-         * made the ACK arm check (alloc_state == 0) reject every later
-         * switch on the same flow, which stalled the 3-flow round. */
-        rx->alloc_state = 0;
         spin_unlock_bh(&rx->lock);
-        if (drop_blk)
-            tbt_fec_rx_blk_free(drop_blk, drop_total);
-        tbt_fec_grouped_free(drop_codec);
-        kvfree(drop_req_ns);
-        kvfree(drop_req_block);
+        /* First record on the new plane: the old plane can go and the next
+         * epoch may arm. */
+        tbt_fec_alloc_rx_release_old(sess, f);
     }
     if (rx->alloc_done_resend && rx->alloc_state == 3)
     {

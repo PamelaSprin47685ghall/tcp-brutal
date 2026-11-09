@@ -1401,9 +1401,11 @@ static inline void tbt_fec_alloc_sm_abort_ack(struct tbt_fec_alloc_sm *sm)
 {
     if (!sm)
         return;
+    /* Only raise the event: the ABORT case owns the transition to FAILED and
+     * the ACT_RESUME|ACT_FINISH that releases alloc_role/alloc_hold. Setting
+     * FAILED here swallowed that action, so an aborted exchange left the TX
+     * held and every later plan was refused by the role check. */
     sm->ack = true;
-    if (sm->state == TBT_FEC_ALLOC_ABORT)
-        sm->state = TBT_FEC_ALLOC_FAILED;
 }
 
 /* Advance the initiator and return the actions the caller must perform. It
@@ -1483,7 +1485,22 @@ static inline u32 tbt_fec_alloc_sm_step(struct tbt_fec_alloc_sm *sm, u64 now,
     case TBT_FEC_ALLOC_COMMIT:
     alloc_commit:
         if (!sm->tx_swapped || !sm->done_sent || !sm->peer_committed)
+        {
+            /* The peer commits its TX only after our RX-applied DONE. A
+             * single DONE that is lost would leave both sides waiting
+             * (observed: responder ack_sent=1, hold=1, initiator COMMIT
+             * forever). Repeat it at the REQUEST retry cadence; the peer
+             * answers a duplicate with COMMITTED. */
+            if (sm->done_sent && !sm->peer_committed &&
+                now >= sm->last_send_ns +
+                           (u64)TBT_FEC_ALLOC_RETRY_MS *
+                               TBT_FEC_NSEC_PER_MSEC)
+            {
+                sm->last_send_ns = now;
+                act |= TBT_FEC_ALLOC_ACT_DONE;
+            }
             break;
+        }
         sm->state = TBT_FEC_ALLOC_DONE;
         act |= TBT_FEC_ALLOC_ACT_FINISH;
         break;
