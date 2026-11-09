@@ -111,8 +111,7 @@ static size_t http_tx_request(bool fec)
 
 static size_t carrier_request(bool http, bool fec)
 {
-    size_t n = TBT_HTTP_FEC_FRAME_MAX +        /* fec_frame, every profile */
-               TBT_HTTP_FEC_FRAME_MAX * TBT_FEC_BATCH_MAX + /* part */
+    size_t n = TBT_HTTP_FEC_FRAME_MAX * TBT_FEC_BATCH_MAX + /* part */
                TBT_PARSER_BUF;                 /* parser, every profile */
 
     if (http)
@@ -123,8 +122,7 @@ static size_t carrier_request(bool http, bool fec)
 
 static size_t carrier_slab(bool http, bool fec)
 {
-    size_t n = slab_bytes(TBT_HTTP_FEC_FRAME_MAX) +
-               slab_bytes(TBT_HTTP_FEC_FRAME_MAX * TBT_FEC_BATCH_MAX) +
+    size_t n = slab_bytes(TBT_HTTP_FEC_FRAME_MAX * TBT_FEC_BATCH_MAX) +
                slab_bytes(TBT_PARSER_BUF);
 
     if (http)
@@ -135,8 +133,7 @@ static size_t carrier_slab(bool http, bool fec)
 
 static size_t carrier_high_order(bool http, bool fec)
 {
-    size_t n = high_order_bytes(TBT_HTTP_FEC_FRAME_MAX) +
-               high_order_bytes(TBT_HTTP_FEC_FRAME_MAX * TBT_FEC_BATCH_MAX) +
+    size_t n = high_order_bytes(TBT_HTTP_FEC_FRAME_MAX * TBT_FEC_BATCH_MAX) +
                high_order_bytes(TBT_PARSER_BUF);
 
     if (http)
@@ -159,9 +156,9 @@ static void test_carrier_ledger(void)
     size_t fec_saved_ho = (size_t)CARRIERS * (base_ho - fec_ho);
     size_t raw_saved_ho = (size_t)CARRIERS * (base_ho - raw_ho);
 
-    CHECK(base == 102400u);
-    CHECK(fec == 86528u);
-    CHECK(raw == 65536u);
+    CHECK(base == 86016u);
+    CHECK(fec == 70144u);
+    CHECK(raw == 49152u);
     CHECK(slab_bytes(TBT_HTTP_CTL_FRAME_MAX) == 512);
     CHECK(fec_saved == 256u * (16384u - 512u));
     CHECK(raw_saved == 256u * (16384u + 4096u + 16384u));

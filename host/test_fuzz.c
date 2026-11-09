@@ -1190,7 +1190,7 @@ static int cfg_unpack_copy(const u8 *src, struct tbt_fec_cfg *c)
         exit(2);
     }
     memcpy(copy, src, TBT_FEC_CFG_LEN);
-    rc = tbt_fec_cfg_unpack(copy, c);
+    rc = tbt_fec_cfg_unpack(copy, TBT_FEC_MAX_CARRIERS, c);
     free(copy);
     return rc;
 }

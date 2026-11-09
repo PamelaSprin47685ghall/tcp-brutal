@@ -633,16 +633,17 @@ static void test_control_bodies(void)
     struct tbt_fec_alloc a;
 
     cfg_body(cfg);
-    ok(tbt_fec_cfg_unpack(cfg, &c) == 0, "0.4.0 FEC_CFG body passes",
+    ok(tbt_fec_cfg_unpack(cfg, TBT_FEC_MAX_CARRIERS, &c) == 0,
+       "0.4.0 FEC_CFG body passes",
        "cfg unpack refused it");
 
     cfg[4] ^= 0x01;
-    ok(tbt_fec_cfg_unpack(cfg, &c) == -EPROTO,
+    ok(tbt_fec_cfg_unpack(cfg, TBT_FEC_MAX_CARRIERS, &c) == -EPROTO,
        "tampered FEC_CFG body CRC is refused", "cfg unpack accepted it");
     cfg[4] ^= 0x01;
 
     cfg[TBT_FEC_CFG_RESERVED] = 1;
-    ok(tbt_fec_cfg_unpack(cfg, &c) == -EPROTO,
+    ok(tbt_fec_cfg_unpack(cfg, TBT_FEC_MAX_CARRIERS, &c) == -EPROTO,
        "nonzero FEC_CFG reserved is refused", "cfg unpack accepted it");
     cfg[TBT_FEC_CFG_RESERVED] = 0;
 
@@ -650,7 +651,7 @@ static void test_control_bodies(void)
     cfg[TBT_FEC_CFG_FLAGS] = 0x08;
     tbt_put_le32(cfg + TBT_FEC_CFG_CRC,
                  tbt_fec_crc32c(0, cfg, TBT_FEC_CFG_CRC_BYTES));
-    ok(tbt_fec_cfg_unpack(cfg, &c) == -EPROTO,
+    ok(tbt_fec_cfg_unpack(cfg, TBT_FEC_MAX_CARRIERS, &c) == -EPROTO,
        "unknown FEC_CFG flag is refused", "cfg unpack accepted it");
 
     fbk_body(fbk);

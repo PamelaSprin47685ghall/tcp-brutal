@@ -1958,9 +1958,7 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
     /* The raw container (profile 3) writes the 32-byte record header
      * directly: it has no HTTP framing to encode and no chunk parser to run.
      * Its three HTTP buffers would never be read, so a 256-carrier raw
-     * session would hold 36 KiB of dead slab per carrier. fec_frame stays
-     * for every profile because tbt_carrier_send_fec_batch() batches records
-     * through it in both containers. */
+     * session would hold 36 KiB of dead slab per carrier. */
     if (profile != 3)
     {
         /* A FEC session carries no ARQ DATA frame, so its encoder buffer only
@@ -1973,14 +1971,13 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
         c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX, GFP_KERNEL);
         c->http_rx = kzalloc(sizeof(*c->http_rx), GFP_KERNEL);
     }
-    c->fec_frame = kmalloc(TBT_HTTP_FEC_FRAME_MAX, GFP_KERNEL);
     c->part = kmalloc(TBT_CAR_PART_MAX, GFP_KERNEL);
     /* Zeroed is the defined initial state: have == 0 for the parser and a
      * SIZE-state chunk parser for the assembler. kmalloc() would hand the
      * carrier whatever the previous slab user left there; a dirty `have`
      * then drives an unbounded memmove() in tbt_http_rx_parse(). */
     c->parser = kzalloc(sizeof(*c->parser), GFP_KERNEL);
-    if (!c->fec_frame || !c->part || !c->parser ||
+    if (!c->part || !c->parser ||
         (profile != 3 && (!c->http_tx || !c->http_hdr || !c->http_rx)))
     {
         /* ctor-fail: never linked, so the helper's unlink is a no-op. */
