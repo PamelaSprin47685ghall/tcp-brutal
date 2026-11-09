@@ -994,7 +994,7 @@ static void test_alloc(void)
     buf[TBT_FEC_ALLOC_FLAGS] = 0;
     alloc_fix_crc(buf);
     ok_int(tbt_fec_alloc_unpack(buf, &a2), 0, "ALLOC no flags");
-    buf[TBT_FEC_ALLOC_FLAGS] = 0x04;
+    buf[TBT_FEC_ALLOC_FLAGS] = 0x10;
     alloc_fix_crc(buf);
     ok_int(tbt_fec_alloc_unpack(buf, &a2), -EPROTO,
            "ALLOC unknown body flags");
@@ -2977,6 +2977,302 @@ static void test_sclc_wire_profiles(void)
        "sclc fbk: codec_fail overlay", NULL);
 }
 
+/* ------------------------------------------------------------------ *
+ * 9c. Dynamic group rebalance: the split keeps every flow's set disjoint
+ * while the count matches the equal share, and the initiator state machine
+ * converges when messages are lost.
+ * ------------------------------------------------------------------ */
+
+static void alloc_mask_range(u8 *mask, u16 lo, u16 hi)
+{
+    u16 i;
+
+    memset(mask, 0, TBT_FEC_BITMAP_BYTES);
+    for (i = lo; i < hi; i++)
+        tbt_fec_bitmap_set(mask, i);
+}
+
+static int alloc_masks_disjoint(const u8 *a, const u8 *b, u16 total)
+{
+    u16 i;
+
+    for (i = 0; i < total; i++)
+        if (tbt_fec_bitmap_test(a, i) && tbt_fec_bitmap_test(b, i))
+            return 0;
+    return 1;
+}
+
+static int alloc_union_full(u8 (*masks)[TBT_FEC_BITMAP_BYTES], u16 n,
+                            const u8 *pending, u16 total)
+{
+    u16 i, p;
+
+    for (p = 0; p < total; p++)
+    {
+        int seen = 0;
+
+        for (i = 0; i < n; i++)
+            if (tbt_fec_bitmap_test(masks[i], p))
+                seen = 1;
+        if (pending && tbt_fec_bitmap_test(pending, p))
+            seen = 1;
+        if (!seen)
+            return 0;
+    }
+    return 1;
+}
+
+static void test_alloc_split(void)
+{
+    enum { T = 32, N = 4 };
+    u8 masks[N][TBT_FEC_BITMAP_BYTES];
+    u16 target[N];
+    u8 pending[TBT_FEC_BITMAP_BYTES];
+    u16 i, j;
+
+    /* One flow owns the whole pool; a second flow takes half. */
+    alloc_mask_range(masks[0], 0, T);
+    target[0] = 16;
+    ok(tbt_fec_alloc_split(T, 1, masks, target, pending, 16),
+       "split 1->2 succeeds", NULL);
+    ok_u32(tbt_fec_bitmap_count(masks[0]), 16, "split 1->2 donor count");
+    ok_u32(tbt_fec_bitmap_count(pending), 16, "split 1->2 new count");
+    ok(alloc_masks_disjoint(masks[0], pending, T),
+       "split 1->2 sets are disjoint", NULL);
+    ok(alloc_union_full(masks, 1, pending, T),
+       "split 1->2 covers the pool", NULL);
+
+    /* 2 -> 3: 11/11/10. The new flow may sort anywhere; this is sid 3. */
+    alloc_mask_range(masks[0], 0, 16);
+    alloc_mask_range(masks[1], 16, 32);
+    target[0] = 11;
+    target[1] = 11;
+    ok(tbt_fec_alloc_split(T, 2, masks, target, pending, 10),
+       "split 2->3 succeeds", NULL);
+    ok_u32(tbt_fec_bitmap_count(masks[0]), 11, "split 2->3 flow0 count");
+    ok_u32(tbt_fec_bitmap_count(masks[1]), 11, "split 2->3 flow1 count");
+    ok_u32(tbt_fec_bitmap_count(pending), 10, "split 2->3 new count");
+    ok(alloc_masks_disjoint(masks[0], masks[1], T) &&
+           alloc_masks_disjoint(masks[0], pending, T) &&
+           alloc_masks_disjoint(masks[1], pending, T),
+       "split 2->3 sets are disjoint", NULL);
+    ok(alloc_union_full(masks, 2, pending, T),
+       "split 2->3 covers the pool", NULL);
+
+    /* 3 -> 4: four groups of eight. */
+    alloc_mask_range(masks[0], 0, 11);
+    alloc_mask_range(masks[1], 16, 27);
+    alloc_mask_range(masks[2], 11, 16);
+    for (i = 27; i < 32; i++)
+        tbt_fec_bitmap_set(masks[2], i);
+    target[0] = 8;
+    target[1] = 8;
+    target[2] = 8;
+    ok(tbt_fec_alloc_split(T, 3, masks, target, pending, 8),
+       "split 3->4 succeeds", NULL);
+    for (i = 0; i < 3; i++)
+        ok_u32(tbt_fec_bitmap_count(masks[i]), 8,
+               "split 3->4 existing count");
+    ok_u32(tbt_fec_bitmap_count(pending), 8, "split 3->4 new count");
+    for (i = 0; i < 3; i++)
+        for (j = i + 1; j < 3; j++)
+            ok(alloc_masks_disjoint(masks[i], masks[j], T),
+               "split 3->4 existing sets are disjoint", NULL);
+    ok(alloc_union_full(masks, 3, pending, T),
+       "split 3->4 covers the pool", NULL);
+
+    /* 4 -> 1: the survivor grows back to the whole pool one step at a time.
+     * The test simulates the three detach rounds with the masks the split
+     * produced above. */
+    alloc_mask_range(masks[0], 0, 8);
+    alloc_mask_range(masks[1], 16, 24);
+    alloc_mask_range(masks[2], 11, 16);
+    tbt_fec_bitmap_set(masks[2], 27);
+    tbt_fec_bitmap_set(masks[2], 28);
+    tbt_fec_bitmap_set(masks[2], 29);
+    target[0] = 11;
+    target[1] = 11;
+    target[2] = 10;
+    ok(tbt_fec_alloc_split(T, 3, masks, target, NULL, 0),
+       "grow 4->3 succeeds", NULL);
+    ok_u32(tbt_fec_bitmap_count(masks[0]), 11, "grow 4->3 flow0");
+    ok_u32(tbt_fec_bitmap_count(masks[1]), 11, "grow 4->3 flow1");
+    ok_u32(tbt_fec_bitmap_count(masks[2]), 10, "grow 4->3 flow2");
+    ok(alloc_union_full(masks, 3, NULL, T), "grow 4->3 covers the pool",
+       NULL);
+
+    target[0] = 16;
+    target[1] = 16;
+    ok(tbt_fec_alloc_split(T, 2, masks, target, NULL, 0),
+       "grow 3->2 succeeds", NULL);
+    ok_u32(tbt_fec_bitmap_count(masks[0]), 16, "grow 3->2 flow0");
+    ok_u32(tbt_fec_bitmap_count(masks[1]), 16, "grow 3->2 flow1");
+    ok(alloc_union_full(masks, 2, NULL, T), "grow 3->2 covers the pool",
+       NULL);
+
+    target[0] = 32;
+    ok(tbt_fec_alloc_split(T, 1, masks, target, NULL, 0),
+       "grow 2->1 succeeds", NULL);
+    ok_u32(tbt_fec_bitmap_count(masks[0]), 32, "grow 2->1 owns the pool");
+    ok(alloc_union_full(masks, 1, NULL, T), "grow 2->1 covers the pool",
+       NULL);
+
+    /* A new flow that sorts first must not steal a bit another live flow
+     * keeps: the split only adds bits that are free in `taken`. */
+    alloc_mask_range(masks[0], 0, 16);
+    alloc_mask_range(masks[1], 16, 32);
+    target[0] = 11;
+    target[1] = 10;
+    ok(tbt_fec_alloc_split(T, 2, masks, target, pending, 11),
+       "split insertion-first succeeds", NULL);
+    ok(alloc_masks_disjoint(masks[0], masks[1], T) &&
+           alloc_masks_disjoint(masks[0], pending, T) &&
+           alloc_masks_disjoint(masks[1], pending, T),
+       "split insertion-first is disjoint", NULL);
+    ok(alloc_union_full(masks, 2, pending, T),
+       "split insertion-first covers the pool", NULL);
+
+    /* Impossible targets are refused, not approximated. */
+    ok(!tbt_fec_alloc_split(T, 1, masks, target, pending, 0),
+       "split zero pending target is refused", NULL);
+    target[0] = 33;
+    ok(!tbt_fec_alloc_split(T, 1, masks, target, NULL, 0),
+       "split over the pool is refused", NULL);
+}
+
+static void test_alloc_p0(void)
+{
+    u64 pkt, block;
+
+    /* No packet in the current block: switch at its origin. */
+    tbt_fec_alloc_p0(128, 1, 0, 0, 32, 4, &pkt, &block);
+    ok_u64(pkt, 128, "alloc P0 at an empty block origin");
+    ok_u64(block, 1, "alloc B0 at an empty block");
+
+    /* A packet was emitted: close the block and switch at the next one. */
+    tbt_fec_alloc_p0(129, 1, 0, 0, 32, 4, &pkt, &block);
+    ok_u64(pkt, 256, "alloc P0 after a started block");
+    ok_u64(block, 2, "alloc B0 after a started block");
+    ok(tbt_fec_alloc_switch_valid(256, 2, 0, 0, 32, 4),
+       "alloc switch point is on the block grid", NULL);
+    ok(!tbt_fec_alloc_switch_valid(257, 2, 0, 0, 32, 4),
+       "alloc switch point off the grid is refused", NULL);
+    ok(!tbt_fec_alloc_switch_valid(256, 3, 0, 0, 32, 4),
+       "alloc block_base mismatch is refused", NULL);
+
+    /* The mapping is continuous across the switch: P0 names B0/group 0. */
+    ok_u64(tbt_fec_block_of_seq_base(256, 256, 2, 16, 4), 2,
+           "alloc new base block at P0");
+    ok_u32(tbt_fec_group_of_seq_base(256, 256, 16), 0,
+           "alloc new base group at P0");
+    ok_u32(tbt_fec_share_of_seq_base(256, 256, 16, 4), 0,
+           "alloc new base share at P0");
+    /* The old mapping stops at P0: the last old packet is in block B0-1. */
+    ok_u64(tbt_fec_block_of_seq_base(255, 0, 0, 32, 4), 1,
+           "alloc old block below P0");
+}
+
+static u32 alloc_rng_state;
+
+static int alloc_drop(void)
+{
+    alloc_rng_state = alloc_rng_state * 1664525u + 1013904223u;
+    return (alloc_rng_state >> 16) % 4u == 0; /* 25% loss */
+}
+
+static void test_alloc_fsm(void)
+{
+    struct tbt_fec_alloc_sm sm;
+    u64 t = 1000000000ULL;
+    u32 act;
+
+    tbt_fec_alloc_sm_init(&sm);
+    ok_int(sm.state, TBT_FEC_ALLOC_IDLE, "alloc fsm starts idle");
+    ok(!tbt_fec_alloc_sm_step(&sm, t, false),
+       "alloc fsm idle step is a no-op", NULL);
+    ok(tbt_fec_alloc_sm_start(&sm, t), "alloc fsm starts", NULL);
+    ok_int(sm.state, TBT_FEC_ALLOC_REQ, "alloc fsm start -> REQUEST");
+    ok(!tbt_fec_alloc_sm_start(&sm, t),
+       "alloc fsm refuses a second start", NULL);
+    act = tbt_fec_alloc_sm_step(&sm, t, false);
+    ok(act & TBT_FEC_ALLOC_ACT_REQ, "alloc fsm sends the first REQUEST",
+       NULL);
+
+    /* No ACK: the REQUEST is retried twice, then the exchange is aborted. */
+    act = tbt_fec_alloc_sm_step(&sm, t + 40ULL * 1000000ULL, false);
+    ok(!(act & TBT_FEC_ALLOC_ACT_REQ), "alloc fsm waits before the retry",
+       NULL);
+    act = tbt_fec_alloc_sm_step(&sm, t + 50ULL * 1000000ULL, false);
+    ok(act & TBT_FEC_ALLOC_ACT_REQ, "alloc fsm retries the REQUEST", NULL);
+    act = tbt_fec_alloc_sm_step(&sm, t + 100ULL * 1000000ULL, false);
+    ok(act & TBT_FEC_ALLOC_ACT_REQ, "alloc fsm retries again", NULL);
+    act = tbt_fec_alloc_sm_step(&sm, t + 160ULL * 1000000ULL, false);
+    ok(!(act & TBT_FEC_ALLOC_ACT_REQ), "alloc fsm stops after three sends",
+       NULL);
+    act = tbt_fec_alloc_sm_step(&sm, t + 500ULL * 1000000ULL, false);
+    ok(act & TBT_FEC_ALLOC_ACT_ABORT, "alloc fsm aborts without an ACK",
+       NULL);
+    ok_int(sm.state, TBT_FEC_ALLOC_ABORT, "alloc fsm -> ABORT");
+    act = tbt_fec_alloc_sm_step(&sm, t + 600ULL * 1000000ULL, false);
+    ok(act & TBT_FEC_ALLOC_ACT_ABORT, "alloc fsm repeats the ABORT", NULL);
+    act = tbt_fec_alloc_sm_step(&sm, t + 1100ULL * 1000000ULL, false);
+    ok((act & (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH)) ==
+           (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH),
+       "alloc fsm resumes the old mask after ABORT", NULL);
+    ok_int(sm.state, TBT_FEC_ALLOC_FAILED, "alloc fsm -> FAILED");
+
+    /* Success path: ACK, peer DONE, swap, RX done, COMMITTED. */
+    tbt_fec_alloc_sm_init(&sm);
+    ok(tbt_fec_alloc_sm_start(&sm, t), "alloc fsm success start", NULL);
+    tbt_fec_alloc_sm_ack(&sm);
+    act = tbt_fec_alloc_sm_step(&sm, t + 1000000ULL, false);
+    ok_int(sm.state, TBT_FEC_ALLOC_WAIT, "alloc fsm ACK -> WAIT");
+    ok(!(act & TBT_FEC_ALLOC_ACT_SWAP), "alloc fsm waits for peer DONE",
+       NULL);
+    tbt_fec_alloc_sm_peer_done(&sm);
+    tbt_fec_alloc_sm_rx_done(&sm);
+    act = tbt_fec_alloc_sm_step(&sm, t + 2000000ULL, false);
+    ok(act & TBT_FEC_ALLOC_ACT_SWAP, "alloc fsm peer DONE -> swap TX",
+       NULL);
+    ok(act & TBT_FEC_ALLOC_ACT_DONE, "alloc fsm RX done -> send DONE",
+       NULL);
+    tbt_fec_alloc_sm_tx_swapped(&sm);
+    ok_int(sm.state, TBT_FEC_ALLOC_COMMIT, "alloc fsm swap -> COMMIT");
+    tbt_fec_alloc_sm_peer_committed(&sm);
+    act = tbt_fec_alloc_sm_step(&sm, t + 3000000ULL, false);
+    ok(act & TBT_FEC_ALLOC_ACT_FINISH, "alloc fsm COMMITTED -> finish",
+       NULL);
+    ok_int(sm.state, TBT_FEC_ALLOC_DONE, "alloc fsm -> DONE");
+
+    /* Packet-loss convergence: every event may be dropped, but the REQUEST
+     * retry carries the same epoch and the peer repeats its last answer. */
+    alloc_rng_state = 0x5eed1234u;
+    tbt_fec_alloc_sm_init(&sm);
+    tbt_fec_alloc_sm_start(&sm, 0);
+    for (t = 0; t < 20000ULL * 1000000ULL; t += 1000000ULL)
+    {
+        act = tbt_fec_alloc_sm_step(&sm, t, false);
+        if (act & TBT_FEC_ALLOC_ACT_REQ)
+        {
+            if (!sm.ack && !alloc_drop())
+            {
+                tbt_fec_alloc_sm_ack(&sm);
+                tbt_fec_alloc_sm_rx_done(&sm);
+            }
+            if (sm.ack && !sm.peer_done && !alloc_drop())
+                tbt_fec_alloc_sm_peer_done(&sm);
+        }
+        if (sm.done_sent && !sm.peer_committed && !alloc_drop())
+            tbt_fec_alloc_sm_peer_committed(&sm);
+        if (act & TBT_FEC_ALLOC_ACT_SWAP)
+            tbt_fec_alloc_sm_tx_swapped(&sm);
+        if (act & TBT_FEC_ALLOC_ACT_FINISH)
+            break;
+    }
+    ok_int(sm.state, TBT_FEC_ALLOC_DONE,
+           "alloc fsm converges under 25% message loss");
+}
+
 int main(void)
 {
     test_header_roundtrip();
@@ -2998,6 +3294,9 @@ int main(void)
     test_stream_peer_eof();
     test_close_bound();
     test_base_mapping();
+    test_alloc_split();
+    test_alloc_p0();
+    test_alloc_fsm();
     test_group_reassembly();
     test_credit_split();
     test_params();

@@ -3,6 +3,29 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.4.1] - unreleased
+
+### Added
+
+- FEC v7 dynamic group rebalancing (`FEC_ALLOC` 0x36). The near side is the
+  allocator: with the default `fec_groups_per_flow=0` a joining stream
+  takes its equal share of the session's physical groups, shrinking the
+  donors at their next super-block boundary; a stream close returns its
+  groups and grows the survivors back. Each direction switches at its own
+  origin with the REQUEST/ACK/DONE/COMMITTED exchange, the receiver applies
+  a mask only after its delivery frontier reached the sender's switch
+  point, and the sender stays stopped until the peer confirms. A REQUEST
+  that is never acknowledged is aborted and the old mask resumes; growth
+  retries a bounded number of times while the far side finishes its
+  teardown. SC-LDPC keeps one flow. The wire layout, `TBT_FEC_CONV 0x1007`
+  and HELLO version 4 are unchanged: a 0.4.0 peer parses but ignores the
+  record, so the allocator aborts and keeps the static quota. No 0.5.0
+  bump is needed.
+- `host/test_fec` covers the 1->2->4->1 split (disjoint, full coverage,
+  remainder order, insertion at the front), the P0/B0 switch arithmetic,
+  and the initiator state machine including REQUEST retry, abort, the
+  success path and convergence under 25% message loss.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added
