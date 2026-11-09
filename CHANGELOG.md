@@ -51,6 +51,29 @@ and moves independently of the module version.
   keepalive period. `host/test_hold` covers the OK/SKIP/EXIT gate, the
   multi-carrier PAD pass and the no-inflight entry; the sanitizer target now
   runs it too.
+- An SC-LDPC stream now delivers without FIN, and an interactive exchange no
+  longer waits for the slow FEC cadence. Two defects kept a request/response
+  stream silent. A block whose last DATA share filled the 8192-byte packet
+  exactly left `fill == 0`, so the 2 ms short-write timer was never armed:
+  the receiver never learned the cut, and an echo of exactly 128 KiB or
+  8192 bytes waited until half-close (measured: no echo in 5 s, and the QEMU
+  smoke had learned to half-close first). Independently, every 0 ms wake and
+  the 2 ms cut shared the packetizer work with a 500 ms INIT retry, so a
+  200-byte request and its echo each waited out one retry (measured 1113 ms
+  round trip in the guest). The packetizer now seals a block after 2 ms of
+  silence whenever the current block already holds shares, and the slow
+  cadences moved to dedicated works: `TBT_SW_FEC_TICK` carries the 500 ms
+  INIT retry, the 250 ms adaptation tick and the 10 ms crypto wait;
+  `TBT_SW_FEC_RX_POLL` carries the NACK retry, the estimator sample and the
+  stall poll. The packetizer and receiver works now carry only 0 ms wakes
+  and a 2 ms retry/cut, so no slow timer can sit in front of an interactive
+  packet. In the 7.0.14 QEMU guest over both shipped SC-LDPC shapes, with
+  the connection fully open: a 200-byte exchange completes in 17-22 ms for
+  the first exchange (stream admission included) and 10-15 ms steady; 8192
+  bytes in 16-21 ms (downlink) and 40-43 ms (uplink, eight groups); 128 KiB
+  in 60-103 ms (downlink) and 92-151 ms (uplink). `fec_drop_sid`,
+  `fec_proto_fail`, `fec_credit_wait` and `fec_short_unknown` stay 0, and
+  module unload remains clean.
 
 ### Changed
 
@@ -92,6 +115,18 @@ and moves independently of the module version.
   carriers) that no raw carrier can use. `http-kal` is unchanged.
 - `TBT_FEC_BATCH_MAX`, `TBT_PARSER_BUF` and the 3-frame batch comment moved
   to `tbt_fec.h` so the host memory ledger sees the same constants.
+- `tbt_crypto_xor_at()` and the share-body path XOR ChaCha8 keystream
+  straight into the payload through a new `tbt_chacha8_blocks_xor()`, which
+  folds the final add and the XOR into the permutation, runs one call per
+  run instead of one per 64 bytes, and keeps the counter in a local u64.
+  Under the kernel's real flags (`-O3 -mno-sse`) the 8 KiB share entry drops
+  from 5.11 to 4.31 us (-15.6%) and the crypto core rises from 1606.5 to
+  1829.8 MB/s (+13.9%). `x[]` and `base[]` are wiped once per run, the last
+  wipe erasing the only copy that outlives the call, and `xor_at` now has a
+  single exit that wipes `st` and `block`. `host/test_crypto` gains a
+  512-byte KAT, a 1..320 length sweep through both entry points, and a
+  65-block carry run from `0xFFFFFFF0`; the rejected four-block interleave
+  is recorded in `review/0.4.2-crypto-mno-sse.md`.
 
 ### Added
 
