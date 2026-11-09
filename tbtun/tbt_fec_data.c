@@ -87,17 +87,15 @@ static int tbt_fec_ms_drain(struct tbt_session *sess, struct tbt_fec_flow *f);
 #define TBT_FEC_MS_SHORT_MS 10
 /* Concurrent streams on the one SC-LDPC plane. The 0.6.0 target is 2..16. */
 #define TBT_FEC_MS_STREAMS 16
-/* Per-stream window: four complete 1 MiB SC-LDPC blocks, so a bulk write
- * is not cut into short blocks by the receive window. */
-#define TBT_FEC_MS_WINDOW TBT_MS_WINDOW
-
 /* The source ring is the capture's pause granularity: tbt_fec_tx_submit()
  * sets tx_paused only when the ring cannot take the next chunk. 256 KiB
  * paused capture every 32 packets while the credit window allowed 1024, so
  * the pump had to resume capture repeatedly. Size the ring from the credit
- * window, with the old 256 KiB floor and a 1 MiB ceiling. */
+ * window, with the old 256 KiB floor and a 16 MiB ceiling. The ceiling is
+ * allocated by tbt_fec_vzalloc() (vzalloc/kvzalloc), never a high-order
+ * kzalloc. */
 #define TBT_FEC_TX_RING (256 * 1024)
-#define TBT_FEC_TX_RING_MAX (1024 * 1024)
+#define TBT_FEC_TX_RING_MAX (16u * 1024 * 1024)
 
 /* tx->run / rx->run ownership bits. The sched bit in the session owns the
  * reference; this word owns the shared buffers and cursors. A work entry that
@@ -10682,7 +10680,9 @@ int tbt_fec_data_init(struct tbt_session *sess)
     if (is_sclc)
     {
         u32 span = (u32)groups * n * TBT_FEC_S;
-        u32 window = TBT_FEC_MS_WINDOW;
+        u32 window = sclc.variant == TBT_FEC_SCLC_DOWN
+                         ? TBT_FEC_MS_WINDOW_DOWN
+                         : TBT_FEC_MS_WINDOW_UP;
 
         sess->fec_sclc_shape = sclc;
         /* Per-stream windows bound memory; a block is shared by the streams

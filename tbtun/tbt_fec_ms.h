@@ -39,10 +39,9 @@
 #define TBT_MS_HDR_LEN 32
 #define TBT_MS_DATA_MAX TBT_FEC_S
 #define TBT_MS_MAX_STREAMS 32
-/* Default flow-control window per stream. One 1x256 SC-LDPC block is 1 MiB,
- * so a single stream may fill four complete blocks before the window stops
- * it. This covers a 320 ms WAN BDP and keeps short blocks to the final tail
- * instead of turning every 256 KiB into one. */
+/* Default flow-control window per stream for the host API and tests. The
+ * kernel parent picks TBT_FEC_MS_WINDOW_DOWN/UP (tbt_fec.h) per SC-LDPC
+ * direction: eight 1 MiB rounds down, four MiB up. */
 #define TBT_MS_WINDOW (4u * 1024u * 1024u)
 /* Bytes one stream may contribute per visit inside a block. */
 #define TBT_MS_QUANTUM 64u

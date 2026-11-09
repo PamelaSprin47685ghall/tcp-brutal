@@ -579,6 +579,14 @@ int tbt_fec_alloc_unpack(const u8 in[TBT_FEC_ALLOC_LEN],
  * effective K. */
 #define TBT_FEC_REPLAY_K_MAX 64
 #define TBT_FEC_REPLAY_BUDGET (15u * 1024 * 1024)
+/* The parent stream window is eight FEC rounds, not 256 carriers x 1 MiB.
+ * The downlink 1x256 block is 1 MiB, so 8 MiB is eight rounds; the uplink
+ * 8x32 block is smaller and its return window is 4 MiB. The credit cap
+ * below (1024 packets x 8192 B = 8 MiB) bounds the in-flight downlink
+ * data at the same eight rounds; neither window multiplies again by the
+ * carrier count. */
+#define TBT_FEC_MS_WINDOW_DOWN (8u * 1024 * 1024)
+#define TBT_FEC_MS_WINDOW_UP (4u * 1024 * 1024)
 /* The ACK grants at most this many DATA packets of FEC credit. The credit
  * bounds the sender's in-flight data; the ring bounds the repair storage,
  * and both are constant-size for a given shape. */

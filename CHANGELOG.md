@@ -3,6 +3,26 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.7.0] - 2026-11-10
+
+0.7.0 widens the parent stream and runs its FEC window as eight rounds. The
+wire revision is unchanged; both ends must run 0.7.0 for the larger windows.
+
+### Changed
+
+- The parent stream socket (public accept and far target) asks for an 8 MiB
+  `SO_SNDBUF`/`SO_RCVBUF` through `SO_SNDBUFFORCE`/`SO_RCVBUFFORCE`, so the
+  kernel holds 16 MiB per direction; the near listener reserves the same
+  buffer before the handshake, and an unprivileged context falls back to the
+  capped `SO_*BUF`. The parent receive pause mark rises from 2 to 8 MiB.
+- The parent FEC window is eight rounds: 8 MiB downlink (eight 1 MiB blocks)
+  and 4 MiB uplink, not 256 carriers x 1 MiB. `TBT_FEC_CREDIT_MAX` stays at
+  1024 packets (8 MiB at S=8192), which is the same eight rounds.
+- `TBT_FEC_TX_RING_MAX` rises from 1 to 16 MiB. The ring is allocated with
+  `tbt_fec_vzalloc()` (`vzalloc`/`kvzalloc`) and released with `kvfree`, so
+  the ceiling never asks for a high-order page.
+- Module version is `0.7.0`.
+
 ## [0.6.0] - 2026-11-09
 
 0.6.0 is the merge cut. Two parallel 0.5.0 lines had each taken the same
