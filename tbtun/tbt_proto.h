@@ -88,4 +88,20 @@ size_t tbt_raw_put(u8 *dst, const struct tbt_hdr *h, const void *payload, u16 le
  * payload onto the caller's stack, which is what oopsed in QEMU. */
 size_t tbt_raw_put_hdr(u8 *dst, const struct tbt_hdr *h, u16 payload_len);
 
+/* Session-level HELLO gate: exact body length and wire version for this
+ * side's data plane, then the peer role. tbt_rec_scan() has already bounded
+ * the body, so this is the only place a 0.2.x/0.3.x HELLO is refused. The
+ * caller passes `fec` because both data planes share one record format. */
+static inline bool tbt_hello_admit(bool fec, u16 body_len, const u8 *body,
+                                   u8 want_role)
+{
+    if (!body)
+        return false;
+    if (body_len != (fec ? TBT_HELLO_BODY_LEN_V6 : TBT_HELLO_BODY_LEN))
+        return false;
+    if (body[0] != (fec ? TBT_WIRE_VERSION_V6 : TBT_WIRE_VERSION))
+        return false;
+    return body[1] == want_role;
+}
+
 #endif /* _TBT_PROTO_H */

@@ -131,6 +131,15 @@ int tbt_fec_hdr_seal(struct tbt_fec_hdr *h, const u8 *payload);
  * CRC mismatch, or -EINVAL on a NULL payload with a nonzero length. */
 int tbt_fec_hdr_verify(const struct tbt_fec_hdr *h, const u8 *payload);
 
+/* Locate and validate one complete FEC record header in rec[0..len). This is
+ * the receive gate: len < TBT_FEC_HDR_LEN is refused before any read, then
+ * unpack, structural check and header_crc32c, in that order. Returns 0 and
+ * fills *out when the header is safe to use, -EPROTO for framing, or
+ * -EBADMSG for a header CRC failure. `out` may be NULL. The payload CRC is
+ * separate because the body is not always buffered with the header. */
+int tbt_fec_rec_check(const u8 *rec, size_t len, u16 max_payload,
+                      struct tbt_fec_hdr *out);
+
 /* ------------------------------------------------------------------ *
  * 256-bit carrier bitmap
  * ------------------------------------------------------------------ */

@@ -699,9 +699,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
     u8 want_role = t->cfg.role == TBT_ROLE_NEAR ? TBT_ROLE_FAR : TBT_ROLE_NEAR;
     int err;
 
-    if (h->body_len != (sess->fec ? TBT_HELLO_BODY_LEN_V6 : TBT_HELLO_BODY_LEN) ||
-        body[0] != (sess->fec ? TBT_WIRE_VERSION_V6 : TBT_WIRE_VERSION) ||
-        body[1] != want_role)
+    if (!tbt_hello_admit(sess->fec, h->body_len, body, want_role))
         return tbt_hello_bad(c, "length/version/role");
     /* The last HELLO byte names the container. Both ends derive the expected
      * value from the carrier index (spares of an http-kal tunnel drip), so a
