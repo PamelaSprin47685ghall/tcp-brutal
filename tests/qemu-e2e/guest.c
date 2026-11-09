@@ -981,6 +981,83 @@ struct pump_res
     char why[160];
 };
 
+static int pump_stop_pending(int fd)
+{
+    struct pollfd p;
+
+    p.fd = fd;
+    p.events = POLLIN;
+    p.revents = 0;
+    return poll(&p, 1, 0) > 0;
+}
+
+/* Read up to want bytes of echo, verifying every byte against the stream
+ * pattern at `base`. Returns 0 when complete, 1 when the parent asked to
+ * stop first (partial progress in *got), -1 on a stall or a mismatch. The
+ * socket is non-blocking, so a short wait leaves a stop check responsive. */
+static int pump_read(int cfd, int stop_fd, uint32_t seed,
+                     unsigned long long base, size_t want, size_t *got,
+                     char *why, size_t cap)
+{
+    long long deadline = now_ms() + 10000;
+
+    while (*got < want)
+    {
+        size_t n = want - *got < CHUNK ? want - *got : CHUNK;
+        ssize_t m = recv(cfd, chunk_recv, n, 0);
+        size_t i;
+
+        if (m > 0)
+        {
+            for (i = 0; i < (size_t)m; i++)
+            {
+                unsigned char expect =
+                    pattern_byte(seed + (uint32_t)(base + *got + i));
+
+                if (chunk_recv[i] != expect)
+                {
+                    snprintf(why, cap,
+                             "byte %llu differs: got %02x want %02x",
+                             base + *got + i, chunk_recv[i], expect);
+                    return -1;
+                }
+            }
+            *got += (size_t)m;
+            deadline = now_ms() + 10000;
+            continue;
+        }
+        if (!m)
+        {
+            snprintf(why, cap, "echo eof at %llu", base + *got);
+            return -1;
+        }
+        if (errno == EINTR)
+            continue;
+        if (errno != EAGAIN && errno != EWOULDBLOCK)
+        {
+            snprintf(why, cap, "echo at %llu: %s", base + *got,
+                     strerror(errno));
+            return -1;
+        }
+        if (pump_stop_pending(stop_fd))
+            return 1;
+        if (now_ms() >= deadline)
+        {
+            snprintf(why, cap, "echo at %llu: timeout", base + *got);
+            return -1;
+        }
+        {
+            struct pollfd p;
+
+            p.fd = cfd;
+            p.events = POLLIN;
+            p.revents = 0;
+            (void)poll(&p, 1, 200);
+        }
+    }
+    return 0;
+}
+
 static void pump_child(int stop_fd, int res_fd, uint32_t seed)
 {
     struct pump_res r;
@@ -1020,31 +1097,88 @@ static void pump_child(int stop_fd, int res_fd, uint32_t seed)
             }
             sent += n;
         }
-        while (got < SUPER_BYTES)
         {
-            size_t n = SUPER_BYTES - got < CHUNK ? SUPER_BYTES - got : CHUNK;
-            size_t i;
+            int rc = pump_read(cfd, stop_fd, seed, off, SUPER_BYTES, &got,
+                               r.why, sizeof(r.why));
 
-            if (recv_all(cfd, chunk_recv, n, 10000))
-            {
-                snprintf(r.why, sizeof(r.why), "echo at %llu: %s",
-                         off + got, strerror(errno));
+            if (rc < 0)
                 goto out;
-            }
-            for (i = 0; i < n; i++)
+            if (rc > 0)
             {
-                unsigned char want =
-                    pattern_byte(seed + (uint32_t)(off + got + i));
+                /* Stop arrived mid-super. Half-close so the stream end
+                 * flushes the partial tail, then verify to EOF instead of
+                 * waiting for bytes the peer will never send. */
+                long long deadline = now_ms() + 15000;
 
-                if (chunk_recv[i] != want)
+                shutdown(cfd, SHUT_WR);
+                for (;;)
+                {
+                    ssize_t m = recv(cfd, chunk_recv, sizeof(chunk_recv), 0);
+                    size_t i;
+
+                    if (m > 0)
+                    {
+                        if (got + (size_t)m > SUPER_BYTES)
+                        {
+                            snprintf(r.why, sizeof(r.why),
+                                     "echo past super at %llu", off + got);
+                            goto out;
+                        }
+                        for (i = 0; i < (size_t)m; i++)
+                        {
+                            unsigned char expect = pattern_byte(
+                                seed + (uint32_t)(off + got + i));
+
+                            if (chunk_recv[i] != expect)
+                            {
+                                snprintf(r.why, sizeof(r.why),
+                                         "byte %llu differs: got %02x want %02x",
+                                         off + got + i, chunk_recv[i],
+                                         expect);
+                                goto out;
+                            }
+                        }
+                        got += (size_t)m;
+                        continue;
+                    }
+                    if (!m)
+                        break;
+                    if (errno == EINTR)
+                        continue;
+                    if (errno != EAGAIN && errno != EWOULDBLOCK)
+                    {
+                        snprintf(r.why, sizeof(r.why), "echo drain: %s",
+                                 strerror(errno));
+                        goto out;
+                    }
+                    if (now_ms() >= deadline)
+                    {
+                        snprintf(r.why, sizeof(r.why),
+                                 "echo drain stalled at %llu", off + got);
+                        goto out;
+                    }
+                    {
+                        struct pollfd p;
+
+                        p.fd = cfd;
+                        p.events = POLLIN;
+                        p.revents = 0;
+                        (void)poll(&p, 1, 200);
+                    }
+                }
+                if (got != SUPER_BYTES)
                 {
                     snprintf(r.why, sizeof(r.why),
-                             "byte %llu differs: got %02x want %02x",
-                             off + got + i, chunk_recv[i], want);
+                             "short tail %llu/%u after FIN",
+                             (unsigned long long)got,
+                             (unsigned)SUPER_BYTES);
                     goto out;
                 }
+                r.bytes += got;
+                off += got;
+                r.ok = 1;
+                goto out;
             }
-            got += n;
         }
         off += SUPER_BYTES;
         r.bytes += SUPER_BYTES;

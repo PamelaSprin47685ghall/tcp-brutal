@@ -50,8 +50,18 @@ and moves independently of the module version.
   at `applied` after the first switch, and the ACK arm check (`state == 0`)
   then rejected every later switch on the same flow: the second joining
   stream shrank the donors but could never arm its ACK, the round timed out
-  after `finished=1/2`, and the client was refused. The QEMU gate now drives
-  1 -> 2 -> 3 -> 4 -> 1 at 10/11/11 and 8+8+8+8.
+  after `finished=1/2`, and the client was refused.
+- An abandoned round releases the flows it started. A flow whose TX never
+  swapped kept `alloc_role`/`alloc_hold` after the round timed out, which
+  made every later plan fail on the role check while the flow retried its
+  REQUEST forever (the regrow stage of the QEMU gate). The initiator now
+  sends ABORT with the old mask, and an initiator that receives ABORT|ACK
+  disarms its armed RX (or rolls an applied plane back silently) instead of
+  leaving `alloc_state` set or bouncing the record back.
+- The QEMU gate drives 1 -> 2 -> 3 -> 4 -> 1 at 32, 16+16, 10+11+11 and
+  8+8+8+8, then grows the survivor back to 32. Its pumps half-close on stop
+  and verify the flushed tail to EOF, so a deliberate stop does not look
+  like a data-plane hole.
 
 ## [0.4.0] - 2026-11-09
 
