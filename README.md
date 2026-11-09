@@ -152,7 +152,7 @@ current results and their cost.
 ## Packaging
 
 The module version has one authority: `TBT_VERSION_MAJOR/MINOR/PATCH` in
-`tbtun/tbt_uapi.h` (currently `0.4.0`). The wire revisions are
+`tbtun/tbt_uapi.h` (currently `0.4.1`). The wire revisions are
 `TBT_CONV=0x0007` for the 32-byte frames, `TBT_WIRE_VERSION=1` for the legacy
 HELLO, `TBT_WIRE_VERSION_V6=4` for a FEC v7 session, and
 `TBT_FEC_CONV=0x1007` for the FEC records whose header is 48 bytes; they are independent of the
