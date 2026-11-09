@@ -304,6 +304,22 @@ The wire is unchanged: `TBT_CONV` stays 0x0007 and `TBT_FEC_CONV` 0x1007.
 
 ### Fixed
 
+- The SC-LDPC adaptive INIT install carried by 0.4.0 is part of this release
+  too: with `adaptive=on` a pending peer INIT is applied before the switch
+  walk, the single SC-LDPC flow is held until the peer acks INIT, a stream
+  freezes `stream_span`/`stream_base_pkt` at its first DATA/PARITY record,
+  and a `drop_ppm`-armed carrier uses the per-record injector. Without it an
+  adaptive download carried zero bytes. (backport of 977cfba; also in 0.4.0)
+- F3 port-map defects on the 0.4.1 cascade. A near carrier whose
+  `tbt_port_alloc()` returns EXHAUSTED or ENOMEM now parks for the paced
+  retry before any socket exists: the dial path never falls back to an
+  ephemeral source port. A far-side HELLO that repeats the slot's current
+  four-bit peer generation now supersedes the half-open occupant (only an
+  older generation is a join duplicate), closes the old socket and arms
+  `w_replace` at once. The `peers` view hides a stopping far carrier, so it
+  cannot keep naming the replaced port. `host/test_carrier_policy` pins the
+  three decisions through the same `tbt_carrier_policy.h` the module
+  compiles (38 checks).
 - Session keys are now erased with `memzero_explicit()` before their storage
   is freed or a temporary key buffer goes out of scope: the session and
   tunnel key copies, the crypto schedules copied by `tbt_crypto_xor_at()`
@@ -458,6 +474,16 @@ The wire is unchanged: `TBT_CONV` stays 0x0007 and `TBT_FEC_CONV` 0x1007.
 
 ### Fixed
 
+- SC-LDPC adaptive receive installs a peer INIT before the switch walk.
+  With `adaptive=on` the INIT tick lived only in the `adaptive=off` branch,
+  so each side kept its configured asymmetric shape (downlink 1x256 versus
+  uplink 8x32), no block completed, and an adaptive download carried zero
+  bytes. The single SC-LDPC flow is held until the peer acknowledges INIT
+  (the bounded retry still gives up), and a stream freezes
+  `stream_span`/`stream_base_pkt` at its first DATA/PARITY record so a FIN
+  after a switch keeps its alignment. A carrier with `drop_ppm` armed is
+  routed through the per-record injector instead of the batch writer, so
+  debug loss is real. (backport of 977cfba)
 - FEC flow admission no longer self-deadlocks at init: the group
   reservation and publish take `sess->lock` briefly, while the flow and
   plane allocations run outside it. The SC-LDPC estimator's 32-entry arrays

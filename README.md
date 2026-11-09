@@ -414,10 +414,12 @@ from another address is refused before the nonce is examined
 (`join_src_reject`), and a far `peer=` fixes the anchor at creation instead.
 The join counters separate the reasons: `join_bad` is a nonce mismatch,
 `join_nonce_reject` is a first HELLO from a source other than the configured far
-`peer=` when no nonce is pinned, and `join_dup` is an occupied slot. The nonce
-travels in clear text in HELLO: it is a session identifier and an anti-confusion
-token, not a cryptographic secret. Use WireGuard when the path is hostile. A
-64-hex-digit (256-bit) value is refused: the HELLO nonce field is 128 bits.
+`peer=` when no nonce is pinned, and `join_dup` is an older generation at an
+occupied slot. An equal or newer generation replaces the occupant and closes
+its socket. The nonce travels in clear text in HELLO: it is a session
+identifier and an anti-confusion token, not a cryptographic secret. Use
+WireGuard when the path is hostile. A 64-hex-digit (256-bit) value is
+refused: the HELLO nonce field is 128 bits.
 
 Other directives: `del <id>`, `flush`, `carrier <index> down|up|drop_ppm <n>`,
 and `session <id> nonce=<hex>` (pins the session nonce for reproducible tests).

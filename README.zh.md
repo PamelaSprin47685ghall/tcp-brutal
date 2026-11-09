@@ -347,7 +347,8 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 HELLO 的源地址会成为会话锚：之后来自其他地址的 HELLO 在检查 nonce 之前就被拒绝
 （`join_src_reject`）；far 的 `peer=` 则在创建会话时就固定锚。加入计数器区分原因：
 `join_bad` 是 nonce 不匹配，`join_nonce_reject` 是未固定 nonce 时第一条 HELLO
-来自 far `peer=` 之外的地址，`join_dup` 是槽位已被占用。nonce 在 HELLO 里明文
+来自 far `peer=` 之外的地址，`join_dup` 是槽位上收到更旧的代际；相同或更新的代际
+会替换占用者并关闭旧 socket。nonce 在 HELLO 里明文
 传输：它是会话标识与反混淆 token，不是密码；链路不可信时套 WireGuard。
 64 个 hex 字符（256 位）会被拒绝：HELLO 的 nonce 字段只有 128 位。
 
