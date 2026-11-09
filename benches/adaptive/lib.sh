@@ -811,6 +811,11 @@ run_one() {
         R_rc=1
     fi
     if [ "$R_rc" -eq 0 ]; then
+        # Optional entry-script hook: start a c13 sampler after join and
+        # before the first transfer. Empty for the 0.3.0 scripts.
+        if [ -n "${SC_SAMPLE_START:-}" ]; then
+            "$SC_SAMPLE_START"
+        fi
         snapshot "$NEAR" "$R_dir/near-pre.txt"
         snapshot "$FAR" "$R_dir/far-pre.txt"
         if ! inject_apply "$R_inject" "$R_loss"; then
@@ -1391,6 +1396,9 @@ json_summary() {
 
 do_cleanup() {
     say "== cleanup"
+    if [ -n "${SC_SAMPLE_STOP:-}" ]; then
+        "$SC_SAMPLE_STOP" >/dev/null 2>&1 || true
+    fi
     for h in "$NEAR" "$FAR"; do
         remote_sh "$h" true >/dev/null 2>&1 ||
             warn "$h unreachable; its qdisc/drop_ppm/config was not cleaned"
@@ -1419,6 +1427,9 @@ ta_cleanup_trap() {
     trap - EXIT INT TERM
     [ "$TA_TRAP" = 1 ] || exit "$st"
     [ "$DRY" = 1 ] && exit "$st"
+    if [ -n "${SC_SAMPLE_STOP:-}" ]; then
+        "$SC_SAMPLE_STOP" >/dev/null 2>&1 || true
+    fi
     transfer_stop >/dev/null 2>&1 || true
     case ${INJECT_ACTIVE:-} in
     ppm) inject_ppm_clear >/dev/null 2>&1 || true ;;

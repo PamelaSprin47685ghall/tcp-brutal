@@ -237,3 +237,22 @@ rm -f /root/.tbt-adaptive-bypass-pref100
 11. **不自动重启模块**：`--near-module` 只在 `/proc/net/tbtun` 缺失时 insmod 一次，从不 rmmod。
 12. **ssh 瞬断不算传输结束**：warm-up/稳态的存活探测只在 near 明确报告 `curl.rc` 存在时结束；
     ssh 失败或超时连续 `TBT_TRANSFER_FAIL_MAX`（默认 3）次才判定传输结束，单次失败不置 `early=1`。
+
+## 0.4.0 SC-LDPC adaptive acceptance
+
+`benches/adaptive/sclc-0.4.0.sh` is the 0.4.0 counterpart. It keeps the
+same host/ssh/injection/transfer conventions, but configures the asymmetric
+SC-LDPC pair: near TX is the fixed binary downlink (1x256, block 256, L 8,
+rate 0.50), far TX is the GF(16) uplink (8x32, block 128, L 16) whose six
+ladder rates {22/10, 18/14, 16/16, 12/20, 9/23, 8/24} are the adaptive
+direction. It runs `adaptive=on`, explicit `adaptive=off`, and the omitted-key
+default-off regression, injects `carrier <i> drop_ppm` on the far, samples the
+near/far c13 every 0.25 s, and checks p_est convergence, the final rate,
+transitions/reversals, six-rate coverage, bytes, holes, reset and up=256.
+The downlink fixed rate is a known limitation and is asserted by config.
+
+```sh
+benches/adaptive/sclc-0.4.0.sh --near root@192.168.123.82 \
+    --far root@45.11.1.62 --near-ip 192.168.123.82 --far-ip 45.11.1.62 \
+    --source /root/accept-1g/accept-2g.bin --quick --tag smoke
+```
