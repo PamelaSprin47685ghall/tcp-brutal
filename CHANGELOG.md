@@ -46,14 +46,12 @@ and moves independently of the module version.
   removes the recursive `k-sk_lock-AF_INET` lockdep report seen on 7.0.14.
 - `/proc/net/tbtun/stats` names each flow's `fec_groups`/`fec_mask` and the
   session's rebalance round counters; the QEMU gate reads both.
-
-### Known issues
-
-- The QEMU 3-flow stage is still red: after the two donors shrink to 11+11,
-  the joining flow's round times out (`finished=1/2`) and the client is
-  refused. The near SM shows `peer_done=1, tx_swapped=1, rx_done=0`, and the
-  receiver holds an empty block at the switch point, so the RX never applies
-  and the responder keeps its TX held. The 1->2 and 2->1 stages pass.
+- The RX allocation state is reset when the old plane is committed. It stayed
+  at `applied` after the first switch, and the ACK arm check (`state == 0`)
+  then rejected every later switch on the same flow: the second joining
+  stream shrank the donors but could never arm its ACK, the round timed out
+  after `finished=1/2`, and the client was refused. The QEMU gate now drives
+  1 -> 2 -> 3 -> 4 -> 1 at 10/11/11 and 8+8+8+8.
 
 ## [0.4.0] - 2026-11-09
 
