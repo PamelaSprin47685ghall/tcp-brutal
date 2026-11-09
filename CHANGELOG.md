@@ -3,6 +3,23 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.4.1] - unreleased
+
+### Performance
+
+- Uplink GF(16) SC-IRA: the encoder runs 64 codewords at once, bit-sliced
+  over four uint64 planes per variable with a 4x4 GF(16) multiply mask
+  table. The check order, coefficients and output are bit-identical to
+  `gf16_encode()`, and the wire layout is unchanged: the gather and scatter
+  still advance the share offsets codeword by codeword. The decoder keeps
+  its scalar peel but peels four codewords in lockstep, so independent
+  pointer walks overlap their cache misses. Host, pinned core, process CPU
+  time, p=0.30: rate 1/4 encode 28.7 -> 45.9 MB/s and decode 7.4 ->
+  8.8 MB/s; rate 7/16 encode 56.3 -> 80.4 MB/s and decode 12.0 ->
+  13.9 MB/s. The preallocated lane buffers and lockstep slots add 1.4 MiB
+  at rate 1/4 with 8 groups (3658 -> 5052 KiB); every allocation goes
+  through kvzalloc/kvfree, so no high-order contiguous page is required.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added
