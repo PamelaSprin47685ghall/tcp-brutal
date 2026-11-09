@@ -3,7 +3,7 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
-## [Unreleased]
+## [0.4.1] - 2026-11-09
 
 ### Added
 
@@ -13,6 +13,41 @@ and moves independently of the module version.
   with the real functions where the module's translation unit is
   host-linkable and a stated model for the kernel-only parts. It is a
   measurement, not a gate.
+
+### Performance
+
+- Uplink GF(16) SC-IRA: the encoder runs 64 codewords at once, bit-sliced
+  over four uint64 planes per variable with a 4x4 GF(16) multiply mask
+  table. The check order, coefficients and output are bit-identical to
+  `gf16_encode()`, and the wire layout is unchanged: the gather and scatter
+  still advance the share offsets codeword by codeword. The decoder keeps
+  its scalar peel but peels two codewords in lockstep, so independent
+  pointer walks overlap their cache misses. Host, pinned core, process CPU
+  time, p=0.30: rate 1/4 encode 28.7 -> 45.9 MB/s and decode 7.4 ->
+  8.8 MB/s; rate 7/16 encode 56.3 -> 80.4 MB/s and decode 12.0 ->
+  13.9 MB/s. The preallocated lane buffers and lockstep slots add 1.4 MiB
+  at rate 1/4 with 8 groups (3658 -> 5052 KiB); every allocation goes
+  through kvzalloc/kvfree, so no high-order contiguous page is required.
+
+### Changed
+
+- The FEC batch staging path has no allocation and no payload copy on the
+  full-write path. `tbt_carrier_send_fec_batch()` now describes the batch as a segment
+  list over the existing `struct tbt_fec_out` buffers (HTTP: chunk size
+  line, record, CRLF; raw: the records) and commits it with one
+  `iov_iter_kvec()` + `tcp_sendmsg_locked()`. The
+  `kmalloc_array(count, TBT_HTTP_FEC_FRAME_MAX)` batch buffer and the
+  per-record `memcpy` are gone; the stack cost is a 3x18 B size-line scratch
+  and nine `kvec` entries. Only a kernel short write copies its unwritten
+  tail into `c->part`, and that staged tail is bounded by the always-present
+  `TBT_CAR_PART_MAX` buffer.
+- The per-carrier `fec_frame` buffer is removed: the batch path no longer
+  needs a single-record frame buffer, removing a 8260 B request per carrier
+  (2.02 MiB requested at 256 carriers).
+- `host/test_batch` pins the new wire builder and short-write staging:
+  1/2/3 records, HTTP size-line boundaries through `TBT_FEC_REC_MAX`, raw
+  mode, every byte offset of a maximal batch, multi-write ordering, and the
+  zero-byte `-EAGAIN` retry.
 
 ### Fixed
 
@@ -107,28 +142,6 @@ and moves independently of the module version.
   as one chunk per record, splits the byte stream at every 1..7 byte
   boundary and requires the same records back; body lengths 0/1/31/33/64
   and chunks that disagree with the header's `body_len` must end in PROTO.
-
-## [0.4.1] - 2026-11-09
-
-### Changed
-
-- The FEC batch staging path has no allocation and no payload copy on the
-  full-write path. `tbt_carrier_send_fec_batch()` now describes the batch as a segment
-  list over the existing `struct tbt_fec_out` buffers (HTTP: chunk size
-  line, record, CRLF; raw: the records) and commits it with one
-  `iov_iter_kvec()` + `tcp_sendmsg_locked()`. The
-  `kmalloc_array(count, TBT_HTTP_FEC_FRAME_MAX)` batch buffer and the
-  per-record `memcpy` are gone; the stack cost is a 3x18 B size-line scratch
-  and nine `kvec` entries. Only a kernel short write copies its unwritten
-  tail into `c->part`, and that staged tail is bounded by the always-present
-  `TBT_CAR_PART_MAX` buffer.
-- The per-carrier `fec_frame` buffer is removed: the batch path no longer
-  needs a single-record frame buffer, removing a 8260 B request per carrier
-  (2.02 MiB requested at 256 carriers).
-- `host/test_batch` pins the new wire builder and short-write staging:
-  1/2/3 records, HTTP size-line boundaries through `TBT_FEC_REC_MAX`, raw
-  mode, every byte offset of a maximal batch, multi-write ordering, and the
-  zero-byte `-EAGAIN` retry.
 
 ## [0.4.0] - 2026-11-09
 

@@ -17,6 +17,17 @@
  * positions [c*n_data, (c+1)*n_data).  It loses whole codewords when a data
  * share is lost; the host test measures the difference.
  *
+ * Encoding is bit-sliced: a batch of 64 codewords shares the graph and the
+ * check order, so one call to gf16_encode_planes() carries four uint64
+ * planes per variable and replaces 64 scalar sweeps.  The gather and
+ * scatter remain per codeword, which keeps the share offsets and therefore
+ * the wire layout identical to the scalar path.
+ *
+ * Decoding keeps the scalar peel (each codeword erases a different symbol
+ * set) but peels GF16_BATCH codewords in lockstep: independent adjacency
+ * walks overlap their cache misses.  Both paths write byte-identical
+ * output to the scalar reference.
+ *
  * This file does not touch tbt_fec_data.c; the data plane calls the ops
  * table or the direct API.
  */
@@ -31,9 +42,14 @@
 struct sclc_group
 {
     gf16_code *code;
-    u8 *recv;      /* n symbols */
-    u8 *erased;    /* n bytes */
-    u8 *out;       /* n symbols */
+    /* One batch of codeword slots for the lockstep decoder.  recv_b and
+     * out_b share one buffer: the batch init reads every slot before the
+     * peel writes any output. */
+    u8 *recv_b;    /* GF16_BATCH * nsym symbols */
+    u8 *erased_b;  /* GF16_BATCH * nsym bytes */
+    u8 *out_b;     /* alias of recv_b */
+    gf16_dec_stat *st_b; /* GF16_BATCH */
+    u64 *vp;       /* n * 4 bit planes, 64-lane encoder scratch */
     u8 *codebuf;   /* n symbols, encoder scratch */
     u8 *share_bad; /* n+m bytes, 1 = a failed codeword touches the share */
     u8 *share_known;
@@ -275,8 +291,6 @@ struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
     n_par = n_data * (par->rate_den - par->rate_num) / par->rate_num;
     if (!n_par)
         return NULL;
-    if ((u64)codes * n_par > (u64)par->m * SCLC_SYM_PER_SHARE)
-        return NULL;
 
     share_bytes = (u16)((u32)par->n + par->m);
 
@@ -296,17 +310,8 @@ struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
     u->seed = par->seed;
     u->mem = sizeof(*u);
 
-    if (u->mapping == TBT_SCLC_MAP_INTERLEAVED)
-    {
-        u16 cnt[TBT_FEC_MAX_SHARES];
-
-        if (codes % par->n)
-            goto fail; /* exact fill needs C a multiple of n */
-        if (sclc_parity_counts(u, cnt) > SCLC_SYM_PER_SHARE)
-            goto fail;
-    }
-    if (u->mapping == TBT_SCLC_MAP_RANDOM && sclc_build_labels(u) != 0)
-        goto fail;
+    if (u->mapping == TBT_SCLC_MAP_INTERLEAVED && codes % par->n)
+        goto fail; /* exact fill needs C a multiple of n */
 
     u->g = sclc_zalloc((size_t)groups * sizeof(*u->g));
     if (!u->g)
@@ -332,21 +337,58 @@ struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
         g->code = gf16_build(&p, seed ^ SCLC_COEF_SALT, err, sizeof(err));
         if (!g->code)
             goto fail;
-        g->recv = sclc_zalloc((size_t)u->nsym);
-        g->erased = sclc_zalloc((size_t)u->nsym);
-        g->out = sclc_zalloc((size_t)u->nsym);
+        /*
+         * The graph decides the real parity count.  The rate arithmetic
+         * above overestimates it on the 18/14 and 22/10 ladder splits, and
+         * an underestimate would read past the staging buffer, so size the
+         * codec from group 0's graph and require every other group to
+         * agree.
+         */
+        if (gf16_n_data(g->code) != (int)n_data || gf16_n_par(g->code) <= 0)
+            goto fail; /* the share mapping assumes this payload size */
+        if (i == 0)
+        {
+            u->n_par = (u32)gf16_n_par(g->code);
+            u->nsym = n_data + u->n_par;
+            if ((u64)codes * u->n_par >
+                (u64)par->m * SCLC_SYM_PER_SHARE)
+                goto fail;
+            if (u->mapping == TBT_SCLC_MAP_INTERLEAVED)
+            {
+                u32 cnt[TBT_FEC_MAX_SHARES];
+
+                if (sclc_parity_counts(u, cnt) > SCLC_SYM_PER_SHARE)
+                    goto fail;
+            }
+            if (u->mapping == TBT_SCLC_MAP_RANDOM &&
+                sclc_build_labels(u) != 0)
+                goto fail;
+        }
+        else if (gf16_n(g->code) != (int)u->nsym ||
+                 gf16_n_par(g->code) != (int)u->n_par)
+            goto fail; /* every group must agree on the block size */
+
+        g->recv_b = sclc_zalloc((size_t)GF16_BATCH * u->nsym);
+        g->erased_b = sclc_zalloc((size_t)GF16_BATCH * u->nsym);
+        g->out_b = g->recv_b;
+        g->st_b = sclc_zalloc((size_t)GF16_BATCH * sizeof(gf16_dec_stat));
+        g->vp = sclc_zalloc((size_t)u->nsym * 4u * sizeof(u64));
         g->codebuf = sclc_zalloc((size_t)u->nsym);
         g->share_bad = sclc_zalloc(share_bytes);
         g->share_known = sclc_zalloc(share_bytes);
         g->offp = sclc_zalloc((size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
         g->offq = sclc_zalloc((size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
         g->woff = sclc_zalloc((size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
-        if (!g->recv || !g->erased || !g->out || !g->codebuf ||
+        if (!g->recv_b || !g->erased_b || !g->st_b || !g->vp ||
+            !g->codebuf ||
             !g->share_bad || !g->share_known || !g->offp || !g->offq ||
             !g->woff)
             goto fail;
-        u->mem += gf16_mem(g->code) + u->nsym * 4u +
-                  (u32)share_bytes * 2u +
+        u->mem += gf16_mem(g->code) +
+                  (u32)GF16_BATCH * u->nsym * 2u +
+                  u->nsym +
+                  (u32)GF16_BATCH * (u32)sizeof(gf16_dec_stat) +
+                  (u32)u->nsym * 4u * (u32)sizeof(u64) +
                   (u32)TBT_FEC_MAX_SHARES * 3u * sizeof(u32);
     }
     return u;
@@ -369,9 +411,10 @@ void tbt_sclc_uplink_free(struct tbt_sclc_uplink *u)
             struct sclc_group *g = &u->g[i];
 
             gf16_free(g->code);
-            sclc_free(g->recv);
-            sclc_free(g->erased);
-            sclc_free(g->out);
+            sclc_free(g->recv_b);
+            sclc_free(g->erased_b);
+            sclc_free(g->st_b);
+            sclc_free(g->vp);
             sclc_free(g->codebuf);
             sclc_free(g->share_bad);
             sclc_free(g->share_known);
@@ -430,6 +473,67 @@ int tbt_sclc_uplink_encode(struct tbt_sclc_uplink *u, u16 group,
     memset(g->offp, 0, (size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
     memset(g->offq, 0, (size_t)TBT_FEC_MAX_SHARES * sizeof(u32));
 
+    if (u->mapping == TBT_SCLC_MAP_INTERLEAVED)
+    {
+        /*
+         * 64 codewords share the graph and the scan order, so the check
+         * sweep runs bit-sliced: one uint64 holds lane cw's symbol bit.
+         * The gather and scatter stay per codeword because the share
+         * offsets advance codeword by codeword, exactly as the scalar
+         * path does, which keeps the wire layout identical.
+         */
+        u32 c0;
+
+        for (c0 = 0; c0 < u->codes; c0 += GF16_LANES)
+        {
+            int B = (int)((u->codes - c0 < GF16_LANES)
+                              ? u->codes - c0
+                              : GF16_LANES);
+            int cw;
+
+            memset(g->vp, 0, (size_t)u->nsym * 4u * sizeof(u64));
+            for (cw = 0; cw < B; cw++)
+            {
+                u32 shp = (c0 + (u32)cw) % u->n;
+
+                for (j = 0; j < u->n_data; j++)
+                {
+                    u64 *p = g->vp + (size_t)j * 4;
+                    u8 x;
+
+                    off = g->offp[shp]++;
+                    x = sclc_get_sym(data[shp], off);
+                    p[0] |= (u64)(x & 1u) << cw;
+                    p[1] |= (u64)((x >> 1) & 1u) << cw;
+                    p[2] |= (u64)((x >> 2) & 1u) << cw;
+                    p[3] |= (u64)((x >> 3) & 1u) << cw;
+                    if (++shp == u->n)
+                        shp = 0;
+                }
+            }
+            gf16_encode_planes(g->code, B, g->vp);
+            for (cw = 0; cw < B; cw++)
+            {
+                u32 shq = (c0 + (u32)cw) % u->m;
+
+                for (j = 0; j < u->n_par; j++)
+                {
+                    const u64 *p = g->vp + (size_t)(u->n_data + j) * 4;
+                    u8 x = (u8)(((p[0] >> cw) & 1u) |
+                                (((p[1] >> cw) & 1u) << 1) |
+                                (((p[2] >> cw) & 1u) << 2) |
+                                (((p[3] >> cw) & 1u) << 3));
+
+                    off = g->offq[shq]++;
+                    sclc_put_sym(parity[shq], off, x);
+                    if (++shq == u->m)
+                        shq = 0;
+                }
+            }
+        }
+        return 0;
+    }
+
     for (c = 0; c < u->codes; c++)
     {
         memset(g->codebuf, 0, u->nsym);
@@ -463,13 +567,115 @@ int tbt_sclc_uplink_encode(struct tbt_sclc_uplink *u, u16 group,
     return 0;
 }
 
+/* Gather one codeword into a batch slot.  The interleaved mapping is the
+ * production path: share (j + c) mod n, so a codeword's symbols rotate
+ * through the shares in step.  Walking that rotation with a counter avoids
+ * one integer division per symbol; only the first share needs a division
+ * per codeword. */
+static void sclc_gather_slot(struct tbt_sclc_uplink *u, struct sclc_group *g,
+                             u32 c, u8 *data[], const u8 *data_present,
+                             u8 *parity[], const u8 *parity_present,
+                             u8 *recv, u8 *erased)
+{
+    u32 j, sh, off;
+
+    memset(erased, 0, u->nsym);
+    if (u->mapping == TBT_SCLC_MAP_INTERLEAVED)
+    {
+        u32 shp = c % u->n;
+        u32 shq = c % u->m;
+
+        for (j = 0; j < u->n_data; j++)
+        {
+            off = g->offp[shp]++;
+            if (data_present[shp])
+                recv[j] = sclc_get_sym(data[shp], off);
+            else
+                erased[j] = 1;
+            if (++shp == u->n)
+                shp = 0;
+        }
+        for (j = 0; j < u->n_par; j++)
+        {
+            off = g->offq[shq]++;
+            if (parity_present[shq])
+                recv[u->n_data + j] = sclc_get_sym(parity[shq], off);
+            else
+                erased[u->n_data + j] = 1;
+            if (++shq == u->m)
+                shq = 0;
+        }
+        return;
+    }
+
+    for (j = 0; j < u->n_data; j++)
+    {
+        sh = sclc_payload_share(u, c, j);
+        off = (u->mapping == TBT_SCLC_MAP_CONTIGUOUS)
+                  ? sclc_payload_off(u, c, j)
+                  : g->offp[sh]++;
+        if (data_present[sh])
+            recv[j] = sclc_get_sym(data[sh], off);
+        else
+            erased[j] = 1;
+    }
+    for (j = 0; j < u->n_par; j++)
+    {
+        if (u->mapping == TBT_SCLC_MAP_CONTIGUOUS)
+        {
+            u32 pos = c * u->n_par + j;
+
+            sh = (u16)(pos / SCLC_SYM_PER_SHARE);
+            off = pos % SCLC_SYM_PER_SHARE;
+        }
+        else
+        {
+            sh = sclc_parity_share(u, c, j);
+            off = g->offq[sh]++;
+        }
+        if (parity_present[sh])
+            recv[u->n_data + j] = sclc_get_sym(parity[sh], off);
+        else
+            erased[u->n_data + j] = 1;
+    }
+}
+
+/* Scatter a decoded codeword back into the data shares. */
+static void sclc_scatter_slot(struct tbt_sclc_uplink *u, struct sclc_group *g,
+                              u32 c, u8 *data[], const u8 *out)
+{
+    u32 j, sh, off;
+
+    if (u->mapping == TBT_SCLC_MAP_INTERLEAVED)
+    {
+        u32 shp = c % u->n;
+
+        for (j = 0; j < u->n_data; j++)
+        {
+            off = g->woff[shp]++;
+            sclc_put_sym(data[shp], off, out[j]);
+            if (++shp == u->n)
+                shp = 0;
+        }
+        return;
+    }
+    for (j = 0; j < u->n_data; j++)
+    {
+        sh = sclc_payload_share(u, c, j);
+        off = (u->mapping == TBT_SCLC_MAP_CONTIGUOUS)
+                  ? sclc_payload_off(u, c, j)
+                  : g->woff[sh]++;
+        sclc_put_sym(data[sh], off, out[j]);
+    }
+}
+
 int tbt_sclc_uplink_decode(struct tbt_sclc_uplink *u, u16 group,
                            u8 *data[], u8 *parity[],
                            const u8 *data_present,
                            const u8 *parity_present)
 {
     struct sclc_group *g;
-    u32 c, j, sh, off;
+    u32 j, c0;
     u32 missing = 0, recovered = 0;
     u32 ok = 0, failed = 0;
 
@@ -483,9 +689,7 @@ int tbt_sclc_uplink_decode(struct tbt_sclc_uplink *u, u16 group,
      * is already in data[].  Solving the codewords would only recompute
      * bytes that are already present, and a missing parity share is a
      * repair question that share_known answers below.  Return before the
-     * gather/peel/scatter pass.  The decoder costs about 19 MB/s even with
-     * no erasure and about 5 MB/s with four missing shares, so a block
-     * with all DATA present is pure waste.
+     * gather/peel/scatter pass.
      */
     for (j = 0; j < u->n; j++)
         if (!data_present[j])
@@ -523,71 +727,52 @@ int tbt_sclc_uplink_decode(struct tbt_sclc_uplink *u, u16 group,
         if (!parity_present[j])
             missing++;
 
-    for (c = 0; c < u->codes; c++)
+    for (c0 = 0; c0 < u->codes; c0 += GF16_BATCH)
     {
-        memset(g->recv, 0, u->nsym);
-        memset(g->erased, 0, u->nsym);
-        for (j = 0; j < u->n_data; j++)
-        {
-            sh = sclc_payload_share(u, c, j);
-            off = (u->mapping == TBT_SCLC_MAP_CONTIGUOUS)
-                      ? sclc_payload_off(u, c, j)
-                      : g->offp[sh]++;
-            if (data_present[sh])
-                g->recv[j] = sclc_get_sym(data[sh], off);
-            else
-                g->erased[j] = 1;
-        }
-        for (j = 0; j < u->n_par; j++)
-        {
-            if (u->mapping == TBT_SCLC_MAP_CONTIGUOUS)
-            {
-                u32 pos = c * u->n_par + j;
+        int B = (int)((u->codes - c0 < GF16_BATCH) ? u->codes - c0
+                                                   : GF16_BATCH);
+        int cw;
 
-                sh = (u16)(pos / SCLC_SYM_PER_SHARE);
-                off = pos % SCLC_SYM_PER_SHARE;
-            }
-            else
-            {
-                sh = sclc_parity_share(u, c, j);
-                off = g->offq[sh]++;
-            }
-            if (parity_present[sh])
-                g->recv[u->n_data + j] = sclc_get_sym(parity[sh], off);
-            else
-                g->erased[u->n_data + j] = 1;
-        }
-
+        for (cw = 0; cw < B; cw++)
+            sclc_gather_slot(u, g, c0 + (u32)cw, data, data_present,
+                             parity, parity_present,
+                             g->recv_b + (size_t)cw * u->nsym,
+                             g->erased_b + (size_t)cw * u->nsym);
+        gf16_decode_batch(g->code, B, g->recv_b, g->erased_b, g->out_b,
+                          1, u->max_core, g->st_b);
+        for (cw = 0; cw < B; cw++)
         {
-            gf16_dec_stat st = gf16_decode(g->code, g->recv, g->erased,
-                                           g->out, 1, u->max_core);
+            gf16_dec_stat *st = &g->st_b[cw];
+            u32 cc = c0 + (u32)cw;
 
-            g->st.core_calls += (u32)st.core_calls;
-            g->st.core_solved += (u32)st.core_solved;
-            g->st.core_skipped += (u32)st.core_skipped;
-            if (st.unresolved == 0)
+            g->st.core_calls += (u32)st->core_calls;
+            g->st.core_solved += (u32)st->core_solved;
+            g->st.core_skipped += (u32)st->core_skipped;
+            if (st->unresolved == 0)
             {
                 ok++;
-                for (j = 0; j < u->n_data; j++)
-                {
-                    sh = sclc_payload_share(u, c, j);
-                    off = (u->mapping == TBT_SCLC_MAP_CONTIGUOUS)
-                              ? sclc_payload_off(u, c, j)
-                              : g->woff[sh]++;
-                    sclc_put_sym(data[sh], off, g->out[j]);
-                }
+                sclc_scatter_slot(u, g, cc, data,
+                                  g->out_b + (size_t)cw * u->nsym);
             }
             else
             {
                 failed++;
-                sclc_mark_bad(u, g, c);
-                if (u->mapping == TBT_SCLC_MAP_INTERLEAVED ||
-                    u->mapping == TBT_SCLC_MAP_RANDOM)
+                sclc_mark_bad(u, g, cc);
+                if (u->mapping == TBT_SCLC_MAP_INTERLEAVED)
                 {
-                    /* woff is only used for successful codewords; advance
-                     * it past this codeword's payload slots. */
+                    u32 shp = cc % u->n;
+
                     for (j = 0; j < u->n_data; j++)
-                        g->woff[sclc_payload_share(u, c, j)]++;
+                    {
+                        g->woff[shp]++;
+                        if (++shp == u->n)
+                            shp = 0;
+                    }
+                }
+                else if (u->mapping == TBT_SCLC_MAP_RANDOM)
+                {
+                    for (j = 0; j < u->n_data; j++)
+                        g->woff[sclc_payload_share(u, cc, j)]++;
                 }
             }
         }
