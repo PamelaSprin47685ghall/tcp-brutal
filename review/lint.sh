@@ -408,8 +408,12 @@ int main(void)
 }
 EOF
     lim=$(awk '/#define TBT_LINE_MAX/{ print $3; exit }' "$1/tbtun/tbt_parse.h")
+    # The parser's render path links the port-block and adaptive-SC helpers,
+    # so the probe must compile the same three sources as HOST_TEST_SRCS.
     if ! cc -std=gnu99 -O2 -I "$1/tbtun" -o "$tmp/render_len" \
-        "$tmp/render_len.c" "$1/tbtun/tbt_parse.c" 2>"$tmp/cc.err"; then
+        "$tmp/render_len.c" "$1/tbtun/tbt_parse.c" \
+        "$1/tbtun/tbt_portmap.c" "$1/tbtun/tbt_fec_adapt_sclc.c" \
+        2>"$tmp/cc.err"; then
         printf 'cannot compile probe: %s' "$(head -1 "$tmp/cc.err")"
         return 1
     fi

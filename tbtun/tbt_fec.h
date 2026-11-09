@@ -848,7 +848,11 @@ static inline bool tbt_fec_nack_due(struct tbt_fec_nack_state *st, u64 now_ns,
 void tbt_fec_nack_reset(struct tbt_fec_nack_state *st);
 
 int tbt_fec_cfg_pack(const struct tbt_fec_cfg *c, u8 out[TBT_FEC_CFG_LEN]);
-int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], struct tbt_fec_cfg *c);
+/* `carriers` is the receiving session's effective carrier count. The body's
+ * groups must name exactly `carriers / (n + m)` groups, one share per
+ * carrier; the old fixed 256 rejected every 32/64/128-carrier INIT/CFG. */
+int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], u16 carriers,
+                       struct tbt_fec_cfg *c);
 
 int tbt_fec_fbk_pack(const struct tbt_fec_fbk *f, u8 out[TBT_FEC_FBK_LEN]);
 int tbt_fec_fbk_unpack(const u8 in[TBT_FEC_FBK_LEN], struct tbt_fec_fbk *f);

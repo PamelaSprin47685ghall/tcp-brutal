@@ -3,6 +3,35 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.4.2] - 2026-11-09
+
+### Fixed
+
+- `tbt_fec_cfg_unpack` derives the legal carrier geometry from the
+  session's effective `carriers` instead of the 256 constant, so the
+  per-direction FEC_CFG/FEC_INIT of a 32/64/128-carrier session is
+  accepted; the geometry rule is `groups * (n + m) == carriers`. Wire
+  behaviour of the 256-carrier 1x256 and 8x32 shapes is unchanged, and
+  `TBT_FEC_CONV` stays `0x1007`.
+- A `mode=sc-ldpc` session treats an INIT whose shape the codec cannot build
+  as a permanent profile mismatch (`-EINVAL`, CFG_NACK); the old RLNC fallback
+  reported the factory's NULL as `-ENOMEM` and armed the wrong decoder for a
+  valid-geometry 64/128-carrier downlink body.
+
+### Changed
+
+- With `fec=on mode=grouped` and no explicit `carriers=`, the default is
+  now the largest whole number of `n + m` groups that fits 64 carriers
+  (`4+4` -> 64, `5` -> 60, `n + m > 64` -> one group). An explicit
+  `carriers=` value, the `mode=rlnc` default (`n + m`) and the
+  `mode=sc-ldpc` defaults are unchanged. 64 carriers measured 118.2
+  Mbit/s against 97.3 at 256, with the far CPU 30..45% lower (0.2.1).
+
+### Added
+
+- Host CFG/INIT/parse coverage for 32/64/128/256-carrier sessions,
+  including the downlink one-group SC-LDPC geometry.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

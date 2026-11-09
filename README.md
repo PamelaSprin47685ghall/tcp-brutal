@@ -373,7 +373,7 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `adaptive` | follows `fec` | `on` lets the 0.3.0 control law choose `n/m` in the `n + m = 8` family; `on` requires `fec=on`; unset means the same as `fec` |
 | `mode` | `rlnc` | `rlnc` (one group), `grouped` (GF(2) band RLNC), or `sc-ldpc` (downlink 1×256 binary, uplink grouped GF(16); `w` is the codeword block) |
 | `w` | `0` | RLNC window, `0..1024`; `0` resolves to `2*n` |
-| `carriers` | `0` | Carrier slots, `0..256`; `0` resolves to `n + m`; must be a multiple of `n + m` |
+| `carriers` | `0` | Carrier slots, `0..256`; `0` resolves to `n + m`, except `fec=on mode=grouped`, which takes the largest multiple of `n + m` not above 64; must be a multiple of `n + m` |
 | `crypto` | follows `fec` | `on` ChaCha8-obfuscates the FEC DATA/PARITY payload; `on` requires `fec=on`; unset means the same as `fec` |
 | `crypto_key` | — | 64 hex digits: pre-shared 256-bit key; `-` clears it. Unset: the near side generates the key and sends it in HELLO (`key_id=1`) |
 | `portblock` | `0-0` | Near only: source-port window for this tunnel's carriers, `1..65535`; `0-0` = draw from the global block set through `/ports`. Must hold at least `n + m` ports (`carriers` with FEC). A far tunnel records it but never dials |

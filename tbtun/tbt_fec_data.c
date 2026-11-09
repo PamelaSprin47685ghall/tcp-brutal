@@ -5167,6 +5167,14 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
         codec = tbt_fec_sclc_new(&sclc, TBT_FEC_S, cfg->seed);
         block_code = true;
     }
+    else if (sess->fec_sclc)
+    {
+        /* Mode 3 has no RLNC fallback. A body that is not a buildable
+         * SC-LDPC shape is a permanent profile mismatch: refuse it here so
+         * the caller NACKs the INIT, instead of building the wrong codec
+         * and reporting the factory's NULL as a transient -ENOMEM. */
+        return -EINVAL;
+    }
     else
     {
         codec = tbt_fec_grouped_new_ops(&tbt_fec_ops_rlnc, cfg->groups,
@@ -6191,8 +6199,9 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
     if (h.type == TBT_FEC_CFG)
     {
         struct tbt_fec_cfg cfg;
+        u16 carriers = sess->tunnel->cfg.carriers;
 
-        if (tbt_fec_cfg_unpack(rec + TBT_FEC_HDR_LEN, &cfg))
+        if (tbt_fec_cfg_unpack(rec + TBT_FEC_HDR_LEN, carriers, &cfg))
             return -EPROTO;
         tbt_fec_rx_on_cfg(sess, f, &cfg);
         return 0;
@@ -7662,8 +7671,8 @@ int tbt_fec_data_init(struct tbt_session *sess)
      * groups for a second flow. A far-side OPEN later replaces this mask. */
     primary_groups = groups;
     /* SC-LDPC keeps the whole carrier geometry in its single flow: a partial
-     * group set would make the CFG groups field disagree with 256/(n+m) and
-     * the rate switch would be refused. */
+     * group set would make the CFG groups field disagree with the session's
+     * carriers/(n+m) and the rate switch would be refused. */
     if (!is_sclc && tbt_fec_groups_per_flow &&
         tbt_fec_groups_per_flow < primary_groups)
         primary_groups = (u16)tbt_fec_groups_per_flow;

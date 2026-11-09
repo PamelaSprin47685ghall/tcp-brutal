@@ -147,7 +147,7 @@ static void case_cfg_roundtrip(void)
     c.seed = 0x1234;
     ok_int(tbt_fec_cfg_pack(&c, body), 0, "downlink CFG packs");
     memset(&out, 0, sizeof(out));
-    ok_int(tbt_fec_cfg_unpack(body, &out), 0, "downlink CFG unpacks");
+    ok_int(tbt_fec_cfg_unpack(body, 256, &out), 0, "downlink CFG unpacks");
     ok(out.n == 128 && out.m == 128 && out.w == 256 && out.k == 500 &&
            out.d == 0 && out.groups == 1,
        "downlink CFG round-trips");
@@ -167,7 +167,7 @@ static void case_cfg_roundtrip(void)
     c.seed = 0x5678;
     ok_int(tbt_fec_cfg_pack(&c, body), 0, "uplink CFG packs");
     memset(&out, 0, sizeof(out));
-    ok_int(tbt_fec_cfg_unpack(body, &out), 0, "uplink CFG unpacks");
+    ok_int(tbt_fec_cfg_unpack(body, 256, &out), 0, "uplink CFG unpacks");
     ok(out.n == 8 && out.m == 24 && out.w == 16 && out.k == 128 &&
            out.d == 64 && out.groups == 8,
        "uplink CFG round-trips");
@@ -185,14 +185,14 @@ static void case_cfg_roundtrip(void)
     c.groups = 32;
     ok_int(tbt_fec_cfg_pack(&c, body), 0, "bad RLNC CFG packs");
     memset(&out, 0, sizeof(out));
-    ok_int(tbt_fec_cfg_unpack(body, &out), -EPROTO,
+    ok_int(tbt_fec_cfg_unpack(body, 256, &out), -EPROTO,
            "w<k that is not a block is refused");
 
     /* The INIT bit is the only new flag; an unknown bit is still refused. */
     tbt_fec_cfg_pack(&c, body);
     body[TBT_FEC_CFG_FLAGS] = 0x08;
     cfg_fix_crc(body);
-    ok_int(tbt_fec_cfg_unpack(body, &out), -EPROTO,
+    ok_int(tbt_fec_cfg_unpack(body, 256, &out), -EPROTO,
            "unknown CFG flag is refused");
 }
 

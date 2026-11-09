@@ -309,7 +309,7 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 | `adaptive` | 跟随 `fec` | `on` 让 0.3.0 控制律在 `n + m = 8` 族内选择 `n/m`；`on` 需要 `fec=on`；不写时等于 `fec` |
 | `mode` | `rlnc` | `rlnc`（单组）、`grouped`（GF(2) band RLNC），或 `sc-ldpc`（下行 1×256 binary、上行 grouped GF(16)；`w` 是 codeword block） |
 | `w` | `0` | RLNC 窗口，`0..1024`；`0` 解析为 `2*n` |
-| `carriers` | `0` | 载体槽，`0..256`；`0` 解析为 `n + m`；必须是 `n + m` 的整数倍 |
+| `carriers` | `0` | 载体槽，`0..256`；`0` 解析为 `n + m`，但 `fec=on mode=grouped` 取不超过 64 的 `n + m` 最大整数倍；必须是 `n + m` 的整数倍 |
 | `crypto` | 跟随 `fec` | `on` 对 FEC 的 DATA/PARITY 负载做 ChaCha8 混淆；`on` 需要 `fec=on`；不写时等于 `fec` |
 | `crypto_key` | — | 64 个 hex 字符的预共享 256 位密钥；`-` 清除。不配置时由近端生成并在 HELLO 中明文携带（`key_id=1`） |
 | `portblock` | `0-0` | 仅近端：本条隧道载体的源端口窗口，`1..65535`；`0-0` 表示使用 `/ports` 的全局端口段。至少容纳 `n + m` 个端口（FEC 时为 `carriers`）。远端只记录，不拨号 |
