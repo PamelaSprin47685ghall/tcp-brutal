@@ -169,9 +169,11 @@ static void tbt_pub_capture_body(struct tbt_stream *st)
     tcp_read_sock(sk, &desc, tbt_pub_actor);
     st->sess->pub_last_after = tcp_sk(sk)->copied_seq;
     if (!READ_ONCE(sk->sk_err) &&
-        (READ_ONCE(sk->sk_shutdown) & RCV_SHUTDOWN) &&
-        tcp_sk(sk)->copied_seq == tcp_sk(sk)->rcv_nxt &&
-        READ_ONCE(st->state) != TBT_ST_DEAD)
+        tbt_stream_peer_eof(
+            (READ_ONCE(sk->sk_shutdown) & RCV_SHUTDOWN) != 0,
+            READ_ONCE(sk->sk_state) == TCP_CLOSE,
+            READ_ONCE(st->state) == TBT_ST_DEAD) &&
+        tcp_sk(sk)->copied_seq == tcp_sk(sk)->rcv_nxt)
         fin = true;
     release_sock(sk);
 
@@ -453,7 +455,9 @@ static void tbt_ctrl_body(struct tbt_stream *st)
         tbt_stream_kill(st, TBT_ST_DEAD);
         return;
     }
-    if (READ_ONCE(sk->sk_shutdown) & RCV_SHUTDOWN)
+    if (tbt_stream_peer_eof(
+            (READ_ONCE(sk->sk_shutdown) & RCV_SHUTDOWN) != 0,
+            READ_ONCE(sk->sk_state) == TCP_CLOSE, false))
     {
         /* The peer's FIN is graceful, whatever the TCP state name is: it may
          * already be CLOSE after FIN_WAIT2 -> tcp_time_wait -> tcp_done.  The
@@ -719,6 +723,42 @@ static bool tbt_sid_in_use_locked(struct tbt_session *sess, u64 sid)
     return false;
 }
 
+/* A new stream may arrive while the previous flow is still live only because
+ * its stream has not detached yet. If that old stream has already seen the
+ * peer FIN (or is a tombstone), stop it now so its flow is released and the
+ * sequential stream can admit; a genuinely concurrent live stream is left
+ * alone and the new one is refused. */
+static bool tbt_fec_retire_closing(struct tbt_session *sess)
+{
+    struct tbt_fec_flow *f;
+    struct tbt_stream *st;
+    u64 sid;
+    bool old = false;
+
+    spin_lock(&sess->lock);
+    f = sess->fec_primary;
+    sid = f ? f->sid : 0;
+    spin_unlock(&sess->lock);
+    if (!sid)
+        return false;
+    st = tbt_stream_get(sess, sid, false, false);
+    if (!st)
+        return false;
+    old = READ_ONCE(st->rx_fin_seen) ||
+          READ_ONCE(st->state) == TBT_ST_DEAD ||
+          READ_ONCE(st->tombstone_until_ns);
+    if (old)
+    {
+        if (READ_ONCE(st->state) != TBT_ST_DEAD)
+            tbt_stream_kill(st, TBT_ST_DEAD);
+        /* kill() detaches, but a racing DYING winner may have returned early;
+         * detach is idempotent and guarantees the flow is gone before retry. */
+        tbt_fec_flow_detach(st);
+    }
+    tbt_stream_put(st);
+    return old;
+}
+
 static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
 {
     struct tbt_stream *st;
@@ -773,6 +813,10 @@ static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
 
         flow = tbt_fec_flow_admit(sess, sid,
                                    (u16)tbt_fec_groups_per_flow);
+        if (IS_ERR(flow) && PTR_ERR(flow) == -ENOSPC &&
+            tbt_fec_retire_closing(sess))
+            flow = tbt_fec_flow_admit(sess, sid,
+                                       (u16)tbt_fec_groups_per_flow);
         if (IS_ERR(flow))
         {
             err = PTR_ERR(flow);

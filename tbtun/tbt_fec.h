@@ -174,6 +174,31 @@ static inline bool tbt_tx_peer_fin_close_expired(bool rx_fin_done,
            now > rx_fin_done_ns && now - rx_fin_done_ns > bound;
 }
 
+/* A peer/target has closed its write side when TCP reports RCV_SHUTDOWN, or
+ * when the socket reached TCP_CLOSE without a local kill. The latter catches a
+ * target that closed fully and cleared sk_shutdown; a dead stream is ignored. */
+static inline bool tbt_stream_peer_eof(bool rcv_shutdown, bool tcp_close,
+                                       bool dead)
+{
+    return !dead && (rcv_shutdown || tcp_close);
+}
+
+/* Close bound: a peer FIN that never produced our FIN is a stuck target and
+ * gets a short, dedicated bound. A written FIN waits for the peer's half and
+ * keeps the old 60 s / two-budget bound. */
+#define TBT_FEC_PEER_FIN_CLOSE_NS (3ULL * 1000000000ULL)
+
+static inline u64 tbt_tx_close_bound(bool peer_fin_unwritten,
+                                     u64 wait_budget_ns)
+{
+    u64 b;
+
+    if (peer_fin_unwritten)
+        return TBT_FEC_PEER_FIN_CLOSE_NS;
+    b = 2 * wait_budget_ns;
+    return b > 60ULL * 1000000000ULL ? b : 60ULL * 1000000000ULL;
+}
+
 /* Admission arithmetic: a flow needs at least one group, and its count must
  * fit the groups no live flow owns. The subtraction form cannot overflow. */
 static inline bool tbt_fec_groups_fit(u16 total, u16 used, u16 count)

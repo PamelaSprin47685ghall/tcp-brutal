@@ -2034,14 +2034,30 @@ static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
     bool peer_fin = READ_ONCE(st->rx_fin_done);
     bool fin_written = READ_ONCE(st->tx_fin_written);
 
+    budget = tbt_tx_wait_budget_ns(sess, st);
+    bound = tbt_tx_close_bound(peer_fin && !fin_written, budget);
+
     /* The peer's FIN reached the application but the target never closed its
      * half, so our FIN was never requested or written. Without this bound the
      * far flow and its target would live until session teardown, and a
      * single-threaded source could be held by the idle old stream. */
     if (peer_fin && !fin_written)
     {
-        bound = max_t(u64, 60 * NSEC_PER_SEC,
-                      2 * tbt_tx_wait_budget_ns(sess, st));
+        struct sock *sk = READ_ONCE(st->sk);
+
+        /* The peer FIN is in, but the delivery queue still holds bytes: the
+         * target is not idle, so the short bound does not apply yet. */
+        if (READ_ONCE(st->rx_queued))
+            return;
+
+        /* The target closed but its state-change callback was missed or the
+         * socket cleared RCV_SHUTDOWN: wake the capture work now so it can
+         * emit our FIN, instead of waiting for the bound. The bound remains
+         * the fallback if the capture never runs. */
+        if (sk && tbt_stream_peer_eof(
+                      (READ_ONCE(sk->sk_shutdown) & RCV_SHUTDOWN) != 0,
+                      READ_ONCE(sk->sk_state) == TCP_CLOSE, false))
+            tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
         if (tbt_tx_peer_fin_close_expired(peer_fin, fin_written,
                                           READ_ONCE(st->rx_fin_done_ns),
                                           now, bound))
@@ -2061,6 +2077,13 @@ static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
          * socket forever.  Detach, do not reset: the peer may yet send data,
          * it is dropped, and the peer's own stall timer resets it. */
         u64 fw = READ_ONCE(st->close_fin_written_ns);
+
+        if (!fw)
+            fw = READ_ONCE(st->close_since_ns);
+        if (!fw)
+            fw = READ_ONCE(st->last_ack_ns);
+        if (!fw)
+            fw = READ_ONCE(st->tx_start_ns);
         if (!fw || READ_ONCE(st->rx_fin_done) || READ_ONCE(st->rx_queued))
             return;
         if (now <= fw || now - fw <= bound)

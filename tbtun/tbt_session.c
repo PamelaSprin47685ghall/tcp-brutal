@@ -1192,6 +1192,11 @@ void tbt_stream_detach_from_session(struct tbt_stream *st)
     tbt_stream_tombstone_locked(st);
     spin_unlock(&sess->lock);
 
+    /* Release the FEC flow with the stream, not at the tombstone/reap
+     * deadline: the next sequential stream must be able to admit its flow
+     * immediately, and n_fec_flows must reach zero here. */
+    tbt_fec_flow_detach(st);
+
     /* A graceful FIN path never queues w_kill, so without this the reaper
      * would never run and the tombstone (and its socket) would stay forever.
      * The tombstone deadline still decides when the stream may be unlinked. */
