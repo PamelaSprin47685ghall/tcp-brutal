@@ -2648,6 +2648,10 @@ static bool tbt_fec_tx_alloc_swap(struct tbt_session *sess,
     spin_unlock_bh(&tx->shape_lock);
     tx->seq = a->pkt;
     tx->cur_block = a->block;
+    if (debug)
+        pr_info("tbtun: alloc swap t=%llu sid=%llu role=%u grp=%u base=%llu/%llu\n",
+                sess->tunnel ? sess->tunnel->cfg.id : 0, f->sid,
+                tx->alloc_role, a->groups, a->pkt, a->block);
     for (i = 0; i < a->groups; i++)
     {
         tx->g[i].blk = tx->g[i].buf;
@@ -2689,6 +2693,12 @@ static bool tbt_fec_alloc_tx_stop(struct tbt_session *sess,
     tx->alloc_target.block = block;
     spin_unlock_bh(&tx->alloc_lock);
     tx->alloc_hold = true;
+    if (debug)
+        pr_info("tbtun: alloc stop t=%llu sid=%llu role=%u grp=%u n=%u seq=%llu cur=%llu base=%llu/%llu start=%llu -> pkt=%llu blk=%llu peerpkts=%llu\n",
+                sess->tunnel ? sess->tunnel->cfg.id : 0, f->sid,
+                tx->alloc_role, tx->groups, tx->n, tx->seq, tx->cur_block,
+                tx->base_pkt, tx->base_block, block_start, pkt, block,
+                READ_ONCE(tx->peer_pkts));
     return true;
 }
 
@@ -3165,6 +3175,11 @@ static noinline void tbt_fec_alloc_tx_tick(struct tbt_session *sess,
     sm = tx->alloc;
     spin_unlock_bh(&tx->alloc_lock);
 
+    if (debug && act)
+        pr_info("tbtun: alloc fsm t=%llu sid=%llu role=%u state=%u act=%#x ack=%u pdone=%u pcomm=%u swapped=%u dsent=%u target=%llu/%llu\n",
+                sess->tunnel ? sess->tunnel->cfg.id : 0, f->sid, role, sm.state,
+                act, sm.ack, sm.peer_done, sm.peer_committed, sm.tx_swapped,
+                sm.done_sent, target.pkt, target.block);
     if (act & TBT_FEC_ALLOC_ACT_REQ)
     {
         (void)tbt_fec_send_alloc(sess, f, 0, target.epoch, target.mask,
@@ -6431,6 +6446,17 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
             tbt_fec_alloc_sm_ack(&tx->alloc);
             spin_unlock_bh(&tx->alloc_lock);
             spin_lock_bh(&rx->lock);
+            if (debug)
+                pr_info("tbtun: alloc ack t=%llu sid=%llu pkt=%llu blk=%llu grp=%u rx(alloc=%u ep=%u/%u sw=%u base=%llu/%llu grp=%u next=%llu nexts=%llu valid=%d ahead=%d)\n",
+                        sess->tunnel ? sess->tunnel->cfg.id : 0, f->sid,
+                        a->switch_pkt, a->block_base, count,
+                        rx->alloc_state, rx->alloc_epoch, a->epoch,
+                        rx->switch_state, rx->base_pkt, rx->base_block,
+                        rx->groups, rx->next_deliver, rx->next_super,
+                        (int)tbt_fec_alloc_switch_valid(
+                            a->switch_pkt, a->block_base, rx->base_pkt,
+                            rx->base_block, rx->groups, rx->n),
+                        (int)(a->switch_pkt >= rx->next_deliver));
             if (rx->alloc_state == 0 &&
                 rx->alloc_epoch < a->epoch &&
                 rx->switch_state == TBT_FEC_SW_STEADY &&
@@ -6569,6 +6595,11 @@ static void tbt_fec_alloc_rx_tick(struct tbt_session *sess,
         rx->alloc_old_req_ns = NULL;
         rx->alloc_old_req_block = NULL;
         rx->alloc_old_groups = 0;
+        /* The commit is the end of this epoch's RX life: the old plane is
+         * gone, so the next FEC_ALLOC ACK may arm. Leaving the state at 3
+         * made the ACK arm check (alloc_state == 0) reject every later
+         * switch on the same flow, which stalled the 3-flow round. */
+        rx->alloc_state = 0;
         spin_unlock_bh(&rx->lock);
         if (drop_blk)
             tbt_fec_rx_blk_free(drop_blk, drop_total);
@@ -6596,9 +6627,21 @@ static void tbt_fec_alloc_rx_tick(struct tbt_session *sess,
     spin_unlock_bh(&rx->lock);
     if (!ready)
     {
+        if (debug)
+            pr_info_ratelimited("tbtun: alloc apply-wait t=%llu sid=%llu next=%llu pkt=%llu blk=%llu partial=%d sw=%u state=%u rebase=%d\n",
+                                sess->tunnel ? sess->tunnel->cfg.id : 0,
+                                f->sid, READ_ONCE(rx->next_deliver), a.pkt,
+                                a.block, (int)READ_ONCE(rx->deliver_partial),
+                                READ_ONCE(rx->switch_state),
+                                READ_ONCE(rx->alloc_state),
+                                (int)READ_ONCE(rx->rebase_pending));
         tbt_session_arm(sess, TBT_SW_FEC_RX, msecs_to_jiffies(10));
         return;
     }
+    if (debug)
+        pr_info("tbtun: alloc apply t=%llu sid=%llu next=%llu pkt=%llu blk=%llu grp=%u\n",
+                sess->tunnel ? sess->tunnel->cfg.id : 0, f->sid,
+                READ_ONCE(rx->next_deliver), a.pkt, a.block, a.groups);
     total = (u32)a.groups * rx->slots;
     shares = (u16)(rx->n + rx->m);
     new_blk = tbt_fec_rx_blk_alloc(total, shares, rx->n);
