@@ -238,7 +238,7 @@ static int tbt_rx_data(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pay
     fr->gen = 0;
     fr->retries = 0;
     fr->retry_at_ns = 0;
-    fr->avoid_mask = 0;
+    bitmap_zero(fr->avoid_mask, TBT_MAX_CARRIERS_LIMIT);
     fr->ret = NULL;
     fr->st = NULL;
     fr->hdr = *hdr;
