@@ -209,6 +209,16 @@ and moves independently of the module version.
 
 ### Fixed
 
+- SC-LDPC adaptive receive installs a peer INIT before the switch walk.
+  With `adaptive=on` the INIT tick lived only in the `adaptive=off` branch,
+  so each side kept its configured asymmetric shape (downlink 1x256 versus
+  uplink 8x32), no block completed, and an adaptive download carried zero
+  bytes. The single SC-LDPC flow is held until the peer acknowledges INIT
+  (the bounded retry still gives up), and a stream freezes
+  `stream_span`/`stream_base_pkt` at its first DATA/PARITY record so a FIN
+  after a switch keeps its alignment. A carrier with `drop_ppm` armed is
+  routed through the per-record injector instead of the batch writer, so
+  debug loss is real. (backport of 977cfba)
 - FEC flow admission no longer self-deadlocks at init: the group
   reservation and publish take `sess->lock` briefly, while the flow and
   plane allocations run outside it. The SC-LDPC estimator's 32-entry arrays
