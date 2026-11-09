@@ -1234,11 +1234,11 @@ static inline u64 tbt_fec_seq_of_block_pkt(u64 block_id, u16 group, u16 p,
  * retried: it has already stopped its TX at our P0, so an abort could strand
  * records that are in flight. */
 #define TBT_FEC_NSEC_PER_MSEC 1000000ULL
-#define TBT_FEC_ALLOC_RETRY_MS 50u
-#define TBT_FEC_ALLOC_ABORT_MS 500u
+#define TBT_FEC_ALLOC_RETRY_MS 100u
+#define TBT_FEC_ALLOC_ABORT_MS 5000u
 #define TBT_FEC_ALLOC_TIMEOUT_MS 15000u
 #define TBT_FEC_ALLOC_ADMIT_WAIT_MS 20000u
-#define TBT_FEC_ALLOC_RETRIES 3u
+#define TBT_FEC_ALLOC_RETRIES 20u
 
 /* Equal split of `total` groups over `n` flows, remainder to the lowest
  * indexes (flows are ordered by ascending sid). Returns 0 for a bad index. */
@@ -1414,6 +1414,7 @@ struct tbt_fec_alloc_sm
     bool rx_done;        /* we applied our RX at the peer's P0 */
     bool tx_swapped;     /* we swapped our TX to the new mask */
     bool done_sent;      /* our DONE is on the wire */
+    bool abort_ack;      /* peer acknowledged our ABORT (never a normal ACK) */
     u64 start_ns;
     u64 last_send_ns;
     u64 rx_progress;     /* last next_deliver seen by the step caller */
@@ -1427,6 +1428,7 @@ static inline void tbt_fec_alloc_sm_init(struct tbt_fec_alloc_sm *sm)
         sm->retries = 0;
         sm->ack = sm->peer_done = sm->peer_committed = false;
         sm->rx_done = sm->tx_swapped = sm->done_sent = false;
+        sm->abort_ack = false;
         sm->start_ns = sm->last_send_ns = 0;
         sm->rx_progress = 0;
     }
@@ -1439,6 +1441,7 @@ static inline bool tbt_fec_alloc_sm_start(struct tbt_fec_alloc_sm *sm,
         return false;
     sm->ack = sm->peer_done = sm->peer_committed = false;
     sm->rx_done = sm->tx_swapped = sm->done_sent = false;
+    sm->abort_ack = false;
     sm->retries = 0;
     sm->start_ns = now;
     sm->last_send_ns = now;
@@ -1488,11 +1491,12 @@ static inline void tbt_fec_alloc_sm_abort_ack(struct tbt_fec_alloc_sm *sm)
 {
     if (!sm)
         return;
-    /* Only raise the event: the ABORT case owns the transition to FAILED and
-     * the ACT_RESUME|ACT_FINISH that releases alloc_role/alloc_hold. Setting
-     * FAILED here swallowed that action, so an aborted exchange left the TX
-     * held and every later plan was refused by the role check. */
-    sm->ack = true;
+    /* A separate event: the normal ack may still be set from the round this
+     * abort is unwinding, and sharing it would end the abort wait instantly
+     * instead of waiting for the peer's ABORT|ACK. Only raise the event: the
+     * ABORT case owns the transition to FAILED and the ACT_RESUME|FINISH
+     * that releases alloc_role/alloc_hold. */
+    sm->abort_ack = true;
 }
 
 /* Advance the initiator and return the actions the caller must perform. It
@@ -1625,7 +1629,7 @@ static inline u32 tbt_fec_alloc_sm_step(struct tbt_fec_alloc_sm *sm, u64 now,
         act |= TBT_FEC_ALLOC_ACT_FINISH;
         break;
     case TBT_FEC_ALLOC_ABORT:
-        if (sm->ack ||
+        if (sm->abort_ack ||
             now >= sm->start_ns +
                        (u64)TBT_FEC_ALLOC_ABORT_MS * TBT_FEC_NSEC_PER_MSEC)
         {
