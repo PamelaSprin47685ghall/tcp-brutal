@@ -7363,7 +7363,16 @@ struct tbt_fec_flow *tbt_fec_flow_admit(struct tbt_session *sess, u64 sid,
         if (want && want != f->groups)
             f = ERR_PTR(-EPROTO);
         else
+        {
+            /* The primary's RX mask is the peer's TX bitmap, which this
+             * synchronous admission does not have yet. Bind the flow-local
+             * TX mask as the placeholder: its count is the flow's group
+             * count, and FEC_CFG INIT replaces the bits before any record
+             * is decoded. Leaving the array uninitialised leaked stack bits
+             * into rx->group_mask. */
+            memcpy(mask, f->group_mask, TBT_FEC_BITMAP_BYTES);
             f = tbt_fec_flow_bind_primary_locked(sess, f, sid, mask);
+        }
         spin_unlock(&sess->lock);
         mutex_unlock(&sess->fec_alloc_lock);
         return f;

@@ -97,6 +97,16 @@ and moves independently of the module version.
 - Host CFG/INIT/parse coverage for 32/64/128/256-carrier sessions,
   including the downlink one-group SC-LDPC geometry.
 
+### Tests
+
+- `host/test_invariants` drives the group ledger, the source-port bitmap,
+  the SC-LDPC estimator/rate law and the reorder-window classifier through
+  60,000 seeded operations (4,611,771 checks): group bitmaps stay disjoint
+  and sum to `groups_used`, source ports stay unique and a freed port is
+  immediately reusable, every controller shape keeps `n + m == shares`
+  inside `rate_mask`, and the reorder cursor never regresses within one
+  window generation. It runs under `host-test`, `host-test-san` and `clean`.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

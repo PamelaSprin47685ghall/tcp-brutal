@@ -315,6 +315,8 @@ host/test_fec_sclc_data_san
 host/test_close_wake_san
 host/test_fault
 host/test_fault_san
+host/test_invariants
+host/test_invariants_san
 host/bench_sclc_uplink
 host/bench_sclc_downlink
 # guest traffic checker (tests/qemu/mkinitramfs.sh)
