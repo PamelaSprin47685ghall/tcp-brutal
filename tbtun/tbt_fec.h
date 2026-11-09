@@ -1388,13 +1388,19 @@ static inline void tbt_fec_alloc_sm_rx_done(struct tbt_fec_alloc_sm *sm)
         sm->rx_done = true;
 }
 
-static inline void tbt_fec_alloc_sm_tx_swapped(struct tbt_fec_alloc_sm *sm)
+static inline void tbt_fec_alloc_sm_tx_swapped(struct tbt_fec_alloc_sm *sm,
+                                               u64 now)
 {
     if (!sm)
         return;
     sm->tx_swapped = true;
     if (sm->state == TBT_FEC_ALLOC_WAIT)
         sm->state = TBT_FEC_ALLOC_COMMIT;
+    /* Measure the COMMIT budget from the swap myself: the normal path sets
+     * COMMIT here, so the WAIT branch below never refreshes start_ns and a
+     * slow WAIT would otherwise fail the commit early. */
+    sm->start_ns = now;
+    sm->last_send_ns = now;
 }
 
 static inline void tbt_fec_alloc_sm_abort_ack(struct tbt_fec_alloc_sm *sm)
@@ -1465,10 +1471,7 @@ static inline u32 tbt_fec_alloc_sm_step(struct tbt_fec_alloc_sm *sm, u64 now,
     case TBT_FEC_ALLOC_WAIT:
     alloc_wait:
         if (sm->tx_swapped)
-        {
             sm->state = TBT_FEC_ALLOC_COMMIT;
-            sm->start_ns = now;
-        }
         else if (sm->peer_done)
             act |= TBT_FEC_ALLOC_ACT_SWAP;
         /* A peer that never answers must not own this flow forever: after

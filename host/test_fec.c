@@ -3256,7 +3256,7 @@ static void test_alloc_fsm(void)
        NULL);
     ok(act & TBT_FEC_ALLOC_ACT_DONE, "alloc fsm RX done -> send DONE",
        NULL);
-    tbt_fec_alloc_sm_tx_swapped(&sm);
+    tbt_fec_alloc_sm_tx_swapped(&sm, t + 2000000ULL);
     ok_int(sm.state, TBT_FEC_ALLOC_COMMIT, "alloc fsm swap -> COMMIT");
     tbt_fec_alloc_sm_peer_committed(&sm);
     act = tbt_fec_alloc_sm_step(&sm, t + 3000000ULL, false);
@@ -3285,7 +3285,7 @@ static void test_alloc_fsm(void)
         if (sm.done_sent && !sm.peer_committed && !alloc_drop())
             tbt_fec_alloc_sm_peer_committed(&sm);
         if (act & TBT_FEC_ALLOC_ACT_SWAP)
-            tbt_fec_alloc_sm_tx_swapped(&sm);
+            tbt_fec_alloc_sm_tx_swapped(&sm, t);
         if (act & TBT_FEC_ALLOC_ACT_FINISH)
             break;
     }

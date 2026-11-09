@@ -72,8 +72,10 @@ and moves independently of the module version.
   counted as an unknown future epoch. A silent peer has a bounded exit: the
   initiator aborts from WAIT after the round timeout, and COMMIT releases
   the role while keeping the already-swapped plane instead of holding it
-  forever. A committed peer's ABORT|ACK also retires any rollback copy a
-  newer arm kept past its epoch.
+  forever. The COMMIT budget starts at the swap (the normal path sets COMMIT
+  inside sm_tx_swapped, so the WAIT branch never refreshed it). An ABORT|ACK
+  whose peer already committed keeps an armed RX armed, so the two
+  directions cannot end on different masks.
 - The QEMU gate drives 1 -> 2 -> 3 -> 4 -> 1 at 32, 16+16, 10+11+11 and
   8+8+8+8, then grows the survivor back to 32. It idles both donors across
   the 2- and 3-flow switches (an applied plane with no following new-plane
