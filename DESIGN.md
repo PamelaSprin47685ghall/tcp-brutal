@@ -724,14 +724,15 @@ Payload layouts:
 
 - **DATA**: payload = raw application bytes (1..8192); a zero-length DATA frame is
   refused on receive, because it wedges the receiver and the emitter never sends one.
-- **OPEN** (`TBT_CONV` 0x0008): payload exactly `TBT_OPEN_BODY_LEN` = 34
+- **OPEN** (`TBT_CONV` 0x0008): payload exactly `TBT_OPEN_BODY_LEN` = 36
   bytes. `+0 u8 group_mask[32]` names the flow's physical FEC groups (all zero
-  without FEC); `+32 u16 target_port` is the far-side destination port in
-  little-endian. Zero means "use the far side's `target=`", which is the
-  0.4.0 behavior; any other value must appear in that far tunnel's `target=`
-  or `map=` list or the OPEN is dropped before a stream is created. The
-  header's `sid_hi:sid_lo` names the stream. A 0.4.0 OPEN is 32 bytes and is
-  refused by the length bound.
+  without FEC); `+32 u16 route_slot` is the near side's listen mapping slot;
+  `+34 u16 target_port` is that slot's far-side destination port, both
+  little-endian. Zero means "use the far side's configured port for this
+  slot", which is the 0.4.0 behavior; any other value must equal it or the
+  OPEN is dropped before a stream is created. The far echo repeats the slot
+  and names no port. The header's `sid_hi:sid_lo` names the stream. A 0.4.0
+  OPEN is 32 bytes and is refused by the length bound.
 - **FIN**: payload exactly `TBT_FIN_BODY_LEN` = 16 bytes, little-endian
   (`TBT_CONV` 0x0006): `+0 u64 pkt_end` (the absolute
   session packet seq after this stream's last DATA packet) and `+8 u64 pkt_base`
@@ -2861,8 +2862,8 @@ module version and the wire version are decoupled. 0.2.0 flipped `TBT_CONV` to
 `0x1004` (64-byte bitmap NACK) to `0x1005` (48-byte header with the u64 stream
 id); 0.3.0 moves it to `0x1006` (48-byte `FEC_CFG`, 48-byte `FEC_FBK` report,
 adaptive shape switch); 0.4.0 moves it to `0x1007` (multi-stream flows).
-0.5.0 moves `TBT_CONV` to `0x0008` (34-byte OPEN with the target port) and
-the FEC HELLO version to 5. Peers of
+0.5.0 moves `TBT_CONV` to `0x0008` (36-byte OPEN with route slot and target
+port) and the FEC HELLO version to 5. Peers of
 different wire revisions do not interoperate, because the first HELLO is
 rejected by the conv check.
 
