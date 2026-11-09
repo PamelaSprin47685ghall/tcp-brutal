@@ -7793,6 +7793,8 @@ tbt_fec_flow_create(struct tbt_session *sess, u64 sid,
         goto fail_unreserve;
     }
     refcount_set(&f->refs, 2); /* one table reference, one caller reference */
+    if (sess->fec_sclc && sid)
+        f->ms_pending = 1; /* this admission owns a pending slot */
     INIT_WORK(&f->free_work, tbt_fec_flow_free_work);
 
     spin_lock(&sess->lock);
