@@ -1258,7 +1258,8 @@ static void case_ctl_rejected(void)
         eq_u32(out.to, 4, "reject: rate 60, not 70");
     }
 
-    /* A refused down switch forces one more step down. */
+    /* A refused down switch keeps the current rate: a lower shape would
+     * only earn another NACK from a peer that refused this one. */
     init_ctl(&c, true, 70, 256, 1);
     eval(&c, 0, 0, t, &out);
     ok(!out.switch_now, "reject: start at rate 70");
@@ -1268,10 +1269,10 @@ static void case_ctl_rejected(void)
     eq_u32(out.to, 2, "reject: at rate 40");
     tbt_fec_adapt_sclc_ctl_rejected(&c, t + 500 * MS);
     eval(&c, 400000, 0, t + 750 * MS, &out);
-    ok(!out.switch_now, "reject: first lower sample");
-    eval(&c, 400000, 0, t + 1000 * MS, &out);
-    ok(out.switch_now, "reject: retries one step lower");
-    eq_u32(out.to, 1, "reject: rate 30");
+    ok(!out.switch_now, "reject: quiet after the refused down");
+    eval(&c, 400000, 0, t + 31 * SEC, &out);
+    ok(!out.switch_now, "reject: the refused down is not retried");
+    eq_u32(c.cur, 5, "reject: stays at rate 70");
 
     /* The lowest rate has no lower target: the ban keeps the current rate. */
     init_ctl(&c, true, 30, 256, 1);
@@ -1283,6 +1284,90 @@ static void case_ctl_rejected(void)
     ok(!out.switch_now, "reject: lowest rate is not retried");
     eval(&c, 550000, 0, t + 29 * SEC, &out);
     ok(!out.switch_now, "reject: lowest rate stays banned");
+}
+
+/* A legacy 0.4.0 peer supports only 128/128 (rate 50%). The controller may
+ * propose 178/78, its 151/105 fallback, and later a 102/154 down step; the
+ * peer NACKs every CFG. Each refusal must return to 128/128, and after the
+ * last one the controller must stay there without generating any further
+ * CFG for the rest of the session. */
+static void case_ctl_legacy_nack(void)
+{
+    struct tbt_fec_adapt_sclc_ctl c;
+    struct tbt_fec_adapt_sclc_out out;
+    u64 t = SEC;
+    u32 refused = 0;
+    int i;
+
+    init_ctl(&c, true, 50, 256, 1);
+
+    /* Low loss (2%) proposes the top rung 178/78. The legacy peer refuses. */
+    eval(&c, 20000, 0, t, &out);
+    ok(out.switch_now, "legacy: low loss proposes a raise");
+    eq_u32(out.to, 5, "legacy: 70% proposal");
+    eq_u32(out.shape.n, 178, "legacy: 178/78 n");
+    eq_u32(out.shape.m, 78, "legacy: 178/78 m");
+    tbt_fec_adapt_sclc_ctl_rejected(&c, t);
+    refused++;
+    ok(!c.busy, "legacy: NACK clears the suggestion");
+    eq_u32(c.cur, 3, "legacy: 128/128 still in force");
+
+    /* The 30 s raise ban holds; the single fallback is 151/105 at 60%. */
+    for (i = 1; i <= 119; i++)
+    {
+        eval(&c, 20000, 0, t + (u64)i * 250 * MS, &out);
+        ok(!out.switch_now, "legacy: no CFG during the raise ban");
+    }
+    for (i = 1; i <= 12; i++)
+    {
+        eval(&c, 20000, 0, t + 30 * SEC + (u64)i * 250 * MS, &out);
+        if (out.switch_now)
+            break;
+    }
+    ok(out.switch_now, "legacy: one lower fallback is tried");
+    eq_u32(out.to, 4, "legacy: 60% fallback");
+    eq_u32(out.shape.n, 151, "legacy: 151/105 n");
+    eq_u32(out.shape.m, 105, "legacy: 151/105 m");
+    tbt_fec_adapt_sclc_ctl_rejected(&c, t + 33 * SEC);
+    refused++;
+    eq_u32(c.cur, 3, "legacy: the fallback NACK also keeps 128/128");
+
+    /* Both raises are remembered: 180 s of low loss must produce no CFG. */
+    for (i = 1; i <= 720; i++)
+    {
+        eval(&c, 20000, 0, t + 33 * SEC + (u64)i * 250 * MS, &out);
+        ok(!out.switch_now, "legacy: no retry of a refused raise");
+        eq_u32(out.shape.n, 128, "legacy: out shape stays 128");
+        eq_u32(out.shape.m, 128, "legacy: out shape stays 128");
+    }
+    eq_u32(c.cur, 3, "legacy: steady on 128/128 after the raises");
+
+    /* Loss rises to 35%: the law wants 102/154 at 40%, and the peer refuses
+     * that too. The controller must keep 128/128 and stop walking down. */
+    for (i = 1; i <= 4; i++)
+    {
+        eval(&c, 350000, 0, t + 213 * SEC + (u64)i * 250 * MS, &out);
+        if (out.switch_now)
+            break;
+    }
+    ok(out.switch_now, "legacy: 35% loss proposes a down step");
+    eq_u32(out.to, 2, "legacy: 40% down proposal");
+    eq_u32(out.shape.n, 102, "legacy: 102/154 n");
+    eq_u32(out.shape.m, 154, "legacy: 102/154 m");
+    tbt_fec_adapt_sclc_ctl_rejected(&c, t + 214 * SEC);
+    refused++;
+
+    for (i = 1; i <= 720; i++)
+    {
+        eval(&c, 350000, 0, t + 214 * SEC + (u64)i * 250 * MS, &out);
+        ok(!out.switch_now, "legacy: no retry of a refused down");
+        eq_u32(out.shape.n, 128, "legacy: down refusal keeps 128/128");
+        eq_u32(out.shape.m, 128, "legacy: down refusal keeps 128/128");
+    }
+    eq_u32(c.cur, 3, "legacy: steady on 128/128 after the down NACK");
+    eq_u32(refused, 3, "legacy: three NACKs, then silence");
+    ok(c.ready && c.enabled, "legacy: the controller stays live");
+    eq_u32(c.shares, 256, "legacy: the block still spans 256 shares");
 }
 
 static void case_ctl_r_ignore(void)
@@ -1579,7 +1664,12 @@ static void case_init_plan(void)
                                              TBT_FEC_SCLC_DOWN, &idx, &mask),
            0, "plan: downlink");
     eq_u32(idx, 3, "plan: downlink index");
-    eq_u32(mask, 1u << 3, "plan: downlink mask");
+    eq_u32(mask, (1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u,
+           "plan: downlink supports the ladder");
+    eq_u32((u32)tbt_fec_adapt_sclc_init_plan(151, 105, 1,
+                                             TBT_FEC_SCLC_DOWN, &idx, &mask),
+           0, "plan: downlink rate 60");
+    eq_u32(idx, 4, "plan: downlink rate 60 index");
 
     eq_u32((u32)tbt_fec_adapt_sclc_init_plan(8, 24, 8, TBT_FEC_SCLC_UP,
                                              &idx, &mask),
@@ -1660,6 +1750,9 @@ static void case_rate_mask(void)
 
     eq_u32(tbt_fec_adapt_sclc_max_side(256, 1u << 3), 128,
            "max side: downlink rate 50");
+    eq_u32(tbt_fec_adapt_sclc_max_side(256,
+                                       (1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u),
+           192, "max side: downlink full ladder");
     eq_u32(tbt_fec_adapt_sclc_max_side(32, 0), 24,
            "max side: uplink all rates");
     eq_u32(tbt_fec_adapt_sclc_max_side(32, 1u << 5), 22,
@@ -1767,7 +1860,25 @@ static void case_wire_profile(void)
     cfg.n = 127;
     cfg.m = 129;
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
-           "wire: downlink needs 128/128");
+           "wire: off-ladder downlink split rejected");
+    cfg.n = 151;
+    cfg.m = 105;
+    cfg.w = 256;
+    cfg.k = 589;
+    cfg.d = 0;
+    cfg.groups = 1;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), 0,
+           "wire: rate 60 downlink accepted");
+    eq_u32(w.rate_pct, 60, "wire: rate 60 label");
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_to_cfg(&w, 9,
+                                               TBT_FEC_CFG_F_APPLY, &back),
+           0, "wire: rate 60 downlink to cfg");
+    eq_u32(back.n, 151, "wire: rate 60 cfg n");
+    eq_u32(back.m, 105, "wire: rate 60 cfg m");
+    eq_u32(back.k, 589, "wire: rate 60 cfg k");
+    cfg.k = 590;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
+           "wire: downlink k must agree with n/m");
     cfg.n = 128;
     cfg.m = 128;
     cfg.w = 512;
@@ -1929,6 +2040,7 @@ int main(void)
     case_ctl_invalid_init();
     case_ctl_pause_wait_busy();
     case_ctl_rejected();
+    case_ctl_legacy_nack();
     case_ctl_r_ignore();
     case_ctl_no_raise_probe();
     case_est_carrier_limit();

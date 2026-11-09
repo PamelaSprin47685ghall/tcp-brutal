@@ -78,10 +78,13 @@ u8 tbt_fec_adapt_sclc_rate_index_for_shape(u16 n, u16 m);
 
 /* Resolve the controller's initial ladder index and rate mask from a
  * configured SC-LDPC shape. `variant` is TBT_FEC_SCLC_DOWN or
- * TBT_FEC_SCLC_UP. A downlink supports only the one ladder point it names;
- * the uplink supports every ladder split. Returns 0 and fills idx/mask when
- * n/m is on the ladder, or -1 with idx=0xff/mask=0 when it is not or the
- * variant/group count does not match. */
+ * TBT_FEC_SCLC_UP. Both directions support every ladder split: the binary
+ * downlink lowers its payload degree above 50% and adds one check per
+ * parity share (no puncturing), and the GF(16) uplink builds each split as
+ * its own graph. Returns 0
+ * and fills idx/mask when n/m is on the ladder, or -1 with
+ * idx=0xff/mask=0 when it is not or the variant/group count does not
+ * match. */
 int tbt_fec_adapt_sclc_init_plan(u16 n, u16 m, u16 groups, u8 variant,
                                  u8 *idx, u8 *mask);
 
@@ -350,6 +353,9 @@ struct tbt_fec_adapt_sclc_ctl
     u8 ready;   /* init accepted the rate and geometry */
     u8 enabled; /* 0 keeps the fixed shape; eval never suggests a switch */
     u8 rate_mask; /* bit i: ladder index i is supported by this codec */
+    u8 refused_mask; /* bit i: the peer refused ladder index i with a CFG
+                      * NACK; no later suggestion may select it */
+    u8 no_down; /* a refused lower rate bans further down steps */
     u8 cur;     /* current ladder index */
     u8 busy;    /* a suggestion is in flight */
     u8 pending_to;
@@ -380,8 +386,8 @@ struct tbt_fec_adapt_sclc_ctl
     u64 probe_low_since_ns; /* residual has been below 0.3% since here */
     u64 commit_ns;
     u64 r_ignore_until_ns; /* new epoch: old-epoch NACKs must not count */
-    u64 reject_until_ns;   /* a refused CFG bans its shape for 30 s */
-    u8 reject_target;      /* the lower rate to try instead */
+    u64 reject_until_ns;   /* quiet window after a refused CFG */
+    u8 reject_target;      /* the fallback to try inside that window */
     u64 sw[TBT_FEC_ADAPT_SCLC_RATE_MAX];
     u32 sw_n;
     u32 sw_head;
@@ -460,11 +466,12 @@ void tbt_fec_adapt_sclc_ctl_commit_failed(
     struct tbt_fec_adapt_sclc_ctl *c,
     const struct tbt_fec_adapt_sclc_est_out *o, u64 now_ns);
 
-/* The receiver refused the suggested CFG (for example, it could not allocate
- * the new codec). Clears the suggestion, bans raises for 30 s when the refused
- * shape was higher, and forces the next target to one rate step below the
- * refused shape for 30 s (60 s for a refused raise, so its fallback can run
- * after the raise ban). A refused lowest rate stays at the current rate. */
+/* The receiver refused the suggested CFG (for example, a legacy peer that
+ * only supports 128/128). Clears the suggestion and remembers the refused
+ * shape for the rest of the session: eval never suggests it again. A refused
+ * raise bans raises for 30 s and retries one lower step (after 30 s, inside a
+ * 60 s quiet window) in case the refusal was transient. A refused lower rate
+ * keeps the current rate and bans every further down step. */
 void tbt_fec_adapt_sclc_ctl_rejected(struct tbt_fec_adapt_sclc_ctl *c,
                                      u64 now_ns);
 

@@ -270,16 +270,17 @@ GF(16) uplink, 512 reserved) and the rate follows `n/(n+m)`. The
 per-direction `FEC_CFG` INIT carries `L`, block and rate; the receiver uses
 the peer's shape. The codec lives in `tbt_fec_sclc.c`; `host/test_fec_sclc`
 and `host/test_fec_sclc_data` cover construction and the data-plane mapping.
-SC-LDPC rate adaptation ships in 0.4.0 as a per-flow adaptive law (off by
-default): the uplink GF(16) codec can switch along the ladder; the downlink
-binary codec stays at rate 50%.
+SC-LDPC rate adaptation ships as a per-flow adaptive law (off by default):
+since 0.4.3 both the downlink 1x256 and the uplink 8x32 codecs switch along
+the six-point ladder. With an old 0.4.0..0.4.2 peer, a CFG_NACK makes the
+controller silently stay at 128/128.
 
 The **GF(2) band RLNC** data plane (`mode=rlnc` or `mode=grouped`) remains the
 low-CPU fallback. It is no longer tuned:
 the `n/m` class table is frozen and the SC-LDPC work does not extend it. The
 production shape is 32 groups of `n=4, m=4` (256 carriers).
 
-**Adaptive status (0.4.0).** Adaptive FEC is implemented
+**Adaptive status (0.4.3).** Adaptive FEC is implemented
 for the GF(2) data plane, Phase 1 only: `n + m = 8`, `groups = 32`, and `m` in
 1..6. The receiver estimates the DATA-share loss rate from per-block miss
 bitmaps (1 s window, EWMA, at least 1024 alive-filtered shares and 4
@@ -288,11 +289,11 @@ super-blocks); the sender runs the control law and switches shape through
 boundary. `adaptive=` follows `fec` by default, and `session <id>
 adaptive=on|off` flips it at runtime; the `c13` line exports the state.
 Phase 2 (`n + m` other than 8) is not implemented. The SC-LDPC per-flow law
-uses the same `FEC_CFG`/`FEC_FBK` handshake: the uplink GF(16) 8x32/L16 codec
-can build every ladder split and switches rates; the downlink binary
-1x256/L8 codec is fixed at rate 50, so its controller stays at 50 (known
-limitation). `adaptive=` is off by default; `mode=sc-ldpc` accepts
-`adaptive=on` in 0.4.0.
+uses the same `FEC_CFG`/`FEC_FBK` handshake: since 0.4.3 both the downlink
+binary 1x256/L8 and the uplink GF(16) 8x32/L16 codecs build every ladder
+split and switch rates. `adaptive=` is off by default; with an old
+0.4.0..0.4.2 peer, a CFG_NACK makes the controller silently stay at
+128/128. `mode=sc-ldpc` accepts `adaptive=on`.
 
 **Multi-stream status.** FEC v6 carries one live application stream per
 tunnel. A sequential connection after the previous one closes is supported:

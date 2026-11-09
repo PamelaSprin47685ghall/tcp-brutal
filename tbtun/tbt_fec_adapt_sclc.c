@@ -73,8 +73,11 @@ int tbt_fec_adapt_sclc_init_plan(u16 n, u16 m, u16 groups, u8 variant,
         return -1;
     if (i != 0xff)
     {
+        /* The binary downlink builds every ladder split: above 50% the
+         * graph lowers the payload degree and adds one check per transmitted
+         * parity share, so nothing is punctured. */
         if (variant == TBT_FEC_SCLC_DOWN && groups == 1)
-            msk = (u8)(1u << i);
+            msk = (u8)((1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u);
         else if (variant == TBT_FEC_SCLC_UP && groups > 1)
             msk = (u8)((1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u);
         else
@@ -146,9 +149,13 @@ int tbt_fec_adapt_sclc_wire_of_cfg(const struct tbt_fec_cfg *cfg,
         block = cfg->w;
         L = TBT_FEC_SCLC_L_DOWN;
         if (cfg->groups != 1 || shares != TBT_FEC_MAX_SHARES ||
-            cfg->n != TBT_FEC_MAX_SHARES / 2 ||
-            cfg->m != TBT_FEC_MAX_SHARES / 2 ||
-            block != TBT_FEC_SCLC_BLOCK_DOWN)
+            block != TBT_FEC_SCLC_BLOCK_DOWN ||
+            !tbt_fec_sclc_down_split(cfg->n, cfg->m))
+            return -1;
+        /* k is the codec rate in parts per thousand. It must agree with
+         * n/(n+m), or the receiver would build a graph the sender did not
+         * name. */
+        if (cfg->k != (u16)((u32)cfg->n * 1000u / shares))
             return -1;
     }
     else if (cfg->k > cfg->w)
@@ -538,6 +545,18 @@ static u8 tbt_fec_adapt_sclc_prev_rate(
     return idx;
 }
 
+/* Highest supported ladder index below `idx` that the peer has not refused,
+ * or the current rate when there is none. */
+static u8 tbt_fec_adapt_sclc_fallback(
+    const struct tbt_fec_adapt_sclc_ctl *c, u8 idx)
+{
+    u8 r = tbt_fec_adapt_sclc_prev_rate(c, idx);
+
+    while (r != idx && (c->refused_mask & (1u << r)))
+        r = tbt_fec_adapt_sclc_prev_rate(c, r);
+    return r == idx ? c->cur : r;
+}
+
 /* Largest supported ladder index whose actual rate does not exceed
  * 1 - p - margin. When every supported rate is above that bound, the lowest
  * supported rate is the safe answer. */
@@ -638,6 +657,10 @@ static void tbt_fec_adapt_sclc_issue(struct tbt_fec_adapt_sclc_ctl *c, u8 to,
 {
     struct tbt_fec_adapt_sclc_shape shape;
 
+    /* The peer refused this shape: never put the same CFG on the wire
+     * again. The callers filter their targets; this is the last guard. */
+    if (c->refused_mask & (1u << to))
+        return;
     /* init() proves every ladder point builds for this geometry, so this
      * cannot fail; check anyway instead of leaving `busy` stuck. */
     if (tbt_fec_adapt_sclc_shape(tbt_fec_adapt_sclc_ladder[to].pct, c->shares,
@@ -843,13 +866,26 @@ void tbt_fec_adapt_sclc_ctl_eval(struct tbt_fec_adapt_sclc_ctl *c,
     if (o->burst && o->p_fast_ppm > p_eff)
         p_eff = o->p_fast_ppm > 1000000u ? 1000000u : o->p_fast_ppm;
     target = tbt_fec_adapt_sclc_target(c, p_eff);
-    /* A refused CFG must not be retried; try one step below it. A refused
-     * raise waits out its 30 s raise ban first, so its fallback window is
-     * twice as long. */
-    if (c->reject_until_ns && now_ns < c->reject_until_ns)
-        target = c->reject_target;
-    else
-        c->reject_until_ns = 0;
+    /* A refused CFG must not be retried. The fallback applies only while
+     * the fresh target points the same way: a refused raise must not force
+     * a raise after the channel has turned worse. A refused raise waits out
+     * its 30 s raise ban first, so its fallback window is twice as long. */
+    if (c->reject_until_ns)
+    {
+        if (now_ns < c->reject_until_ns && target != c->cur &&
+            c->reject_target != c->cur &&
+            (target > c->cur) == (c->reject_target > c->cur))
+            target = c->reject_target;
+        else if (now_ns >= c->reject_until_ns)
+            c->reject_until_ns = 0;
+    }
+    /* A refused lower rate means the peer does not build even lower shapes.
+     * Stay at the current rate instead of walking down one NACK at a time. */
+    if (c->no_down && target < c->cur)
+        target = c->cur;
+    /* A shape the peer refused is never suggested again. */
+    if (c->refused_mask & (1u << target))
+        target = c->cur;
     if (r_valid && r < TBT_FEC_ADAPT_SCLC_PROBE_LOW_PPM)
     {
         if (!c->probe_low_since_ns)
@@ -931,9 +967,10 @@ void tbt_fec_adapt_sclc_ctl_eval(struct tbt_fec_adapt_sclc_ctl *c,
         if (++c->fail_run >= TBT_FEC_ADAPT_SCLC_FAIL_RUN)
         {
             c->no_raise_until = now_ns + TBT_FEC_ADAPT_SCLC_FAIL_BAN_NS;
-            if (c->cur > 0 && tbt_fec_adapt_sclc_can_switch(c, now_ns, 2))
+            if (c->cur > 0 && !c->no_down &&
+                tbt_fec_adapt_sclc_can_switch(c, now_ns, 2))
             {
-                u8 down = tbt_fec_adapt_sclc_prev_rate(c, c->cur);
+                u8 down = tbt_fec_adapt_sclc_fallback(c, c->cur);
 
                 if (down != c->cur)
                     tbt_fec_adapt_sclc_issue(
@@ -1149,14 +1186,26 @@ void tbt_fec_adapt_sclc_ctl_rejected(struct tbt_fec_adapt_sclc_ctl *c,
     c->pending_to = c->cur;
     c->pending_reason = TBT_FEC_ADAPT_SCLC_R_NONE;
     c->pending_probe = 0;
-    /* A refused lowest rate has no lower target: stay at the current rate
-     * for the ban instead of retrying the same shape. */
-    c->reject_target = bad ? tbt_fec_adapt_sclc_prev_rate(c, bad) : c->cur;
-    c->reject_until_ns = now_ns + (bad > c->cur
-                                       ? 2 * TBT_FEC_ADAPT_SCLC_FAIL_BAN_NS
-                                       : TBT_FEC_ADAPT_SCLC_FAIL_BAN_NS);
+    /* Remember the refusal for the session: a later switch must not put the
+     * same CFG on the wire after the peer said NACK. */
+    c->refused_mask |= (u8)(1u << bad);
     if (bad > c->cur)
+    {
+        /* The refusal may be transient (the peer could not allocate the
+         * codec), so retry one step lower after the raise ban. */
+        c->reject_target = tbt_fec_adapt_sclc_fallback(c, bad);
+        c->reject_until_ns =
+            now_ns + 2 * TBT_FEC_ADAPT_SCLC_FAIL_BAN_NS;
         c->no_raise_until = now_ns + TBT_FEC_ADAPT_SCLC_FAIL_BAN_NS;
+    }
+    else
+    {
+        /* A refused lower rate says the peer does not support it: keep the
+         * rate both ends have already used and stop walking down. */
+        c->reject_target = c->cur;
+        c->reject_until_ns = now_ns + TBT_FEC_ADAPT_SCLC_FAIL_BAN_NS;
+        c->no_down = 1;
+    }
     c->up_run = 0;
     c->down_run = 0;
     c->fail_run = 0;

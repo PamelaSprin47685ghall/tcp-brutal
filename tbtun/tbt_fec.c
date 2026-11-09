@@ -2004,11 +2004,12 @@ int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
     out->rate_256 = (u16)((u32)n * 256u / shares);
     if (groups == 1 && shares == TBT_FEC_MAX_SHARES)
     {
-        /* The binary codec's graph is fixed at 128 payload + 128 parity
-         * variables per codeword block; any other split of the 256 shares
-         * cannot be encoded, so name it as a shape error instead of letting
-         * the codec factory fail as an allocation error. */
-        if (n != TBT_FEC_MAX_SHARES / 2 || m != TBT_FEC_MAX_SHARES / 2)
+        /* The binary codec builds the six ladder splits of the 256 shares
+         * (25..70 percent). Above 50 percent it adds one check per parity
+         * share and lowers the payload degree, so every point on the ladder
+         * is a real encoded shape with no punctured parity, not a
+         * share-count guess. */
+        if (!tbt_fec_sclc_down_split(n, m))
             return -EINVAL;
         out->variant = TBT_FEC_SCLC_DOWN;
         out->block = block ? block : TBT_FEC_SCLC_BLOCK_DOWN;
@@ -2023,8 +2024,8 @@ int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
     else
     {
         /* One group of fewer than 256 shares is neither shipped shape. The
-         * binary codec's graph is bound to 128+128, so accepting it would
-         * build a codec that cannot encode the block. */
+         * binary codec is defined on the 256-share block; a smaller single
+         * group has no wire block to carry its shares. */
         return -EINVAL;
     }
     if (!out->block || (out->block & 1) || !out->L)
