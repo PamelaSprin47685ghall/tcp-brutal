@@ -1182,6 +1182,17 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
          * their flow reference and just put their stream reference. */
         if (created)
         {
+            if (flow && !flow_admitted &&
+                tbt_fec_flow_claim_slot(sess, flow))
+            {
+                /* The plane died between the lookup and this attach. The
+                 * stream has no data plane; drop it rather than attach to a
+                 * dead flow and underflow its table reference later. */
+                tbt_stream_kill(ast, TBT_ST_DEAD);
+                tbt_stream_put(ast);
+                tbt_fec_flow_put(flow);
+                return TBT_BIND_DROP;
+            }
             if (flow)
             {
                 if (tbt_fec_flow_attach(ast, flow)) /* moves the reference */

@@ -7121,26 +7121,32 @@ void tbt_fec_rx_fin(struct tbt_session *sess, struct tbt_stream *st,
     {
         /* A shared SC-LDPC plane has no per-stream packet range: the main
          * FIN's zero body must not become the plane's total_pkts, and the
-         * mux FIN/byte count already names where this stream ends. */
-        struct tbt_fec_flow *mf = st->fec_flow;
+         * mux FIN/byte count already names where this stream ends. Take a
+         * reference on the plane: another carrier can detach the stream and
+         * drop the last table reference between this lookup and the lock. */
+        struct tbt_fec_flow *mf = tbt_fec_primary_get(sess);
 
-        if (mf && mf->rx)
+        if (mf)
         {
-            u64 delivered;
-            u32 credit;
-            bool send = false;
-
-            mutex_lock(&mf->rx->ms_lock);
-            delivered = tbt_ms_rx_delivered(sess->fec_ms_rx, st->sid);
-            if (tbt_ms_rx_win(sess->fec_ms_rx, st->sid, &delivered,
-                              &credit, true))
+            if (mf->rx)
             {
-                tbt_ms_rx_win_ack(sess->fec_ms_rx, st->sid, delivered);
-                send = true;
+                u64 delivered;
+                u32 credit;
+                bool send = false;
+
+                mutex_lock(&mf->rx->ms_lock);
+                delivered = tbt_ms_rx_delivered(sess->fec_ms_rx, st->sid);
+                if (tbt_ms_rx_win(sess->fec_ms_rx, st->sid, &delivered,
+                                  &credit, true))
+                {
+                    tbt_ms_rx_win_ack(sess->fec_ms_rx, st->sid, delivered);
+                    send = true;
+                }
+                mutex_unlock(&mf->rx->ms_lock);
+                if (send)
+                    tbt_fec_ms_win_send(sess, mf, st->sid, delivered, credit);
             }
-            mutex_unlock(&mf->rx->ms_lock);
-            if (send)
-                tbt_fec_ms_win_send(sess, mf, st->sid, delivered, credit);
+            tbt_fec_flow_put(mf);
         }
         return;
     }
@@ -7794,7 +7800,7 @@ tbt_fec_flow_create(struct tbt_session *sess, u64 sid,
     }
     refcount_set(&f->refs, 2); /* one table reference, one caller reference */
     if (sess->fec_sclc && sid)
-        f->ms_pending = 1; /* this admission owns a pending slot */
+        tbt_ms_admit_claim(&f->admit); /* this admission owns a slot */
     INIT_WORK(&f->free_work, tbt_fec_flow_free_work);
 
     spin_lock(&sess->lock);
@@ -7845,7 +7851,7 @@ tbt_fec_flow_bind_primary_locked(struct tbt_session *sess,
     hlist_add_head(&f->node, &sess->fec_flows[TBT_STREAM_BUCKET(sid)]);
     refcount_inc(&f->refs); /* caller reference */
     if (sess->fec_sclc)
-        f->ms_pending++; /* the admission slot, released at attach/abort */
+        tbt_ms_admit_claim(&f->admit); /* released at attach/abort */
     return f;
 }
 
@@ -7902,7 +7908,7 @@ struct tbt_fec_flow *tbt_fec_flow_admit_mask(struct tbt_session *sess, u64 sid,
                 mask) &&
             refcount_inc_not_zero(&shared->refs))
         {
-            shared->ms_pending++;
+            tbt_ms_admit_claim(&shared->admit);
             spin_unlock(&sess->lock);
             mutex_unlock(&sess->fec_alloc_lock);
             return shared;
@@ -7959,7 +7965,7 @@ struct tbt_fec_flow *tbt_fec_flow_admit(struct tbt_session *sess, u64 sid,
     {
         /* SC-LDPC has one physical plane. A later stream shares it; the mux
          * gives each stream its own subframe queue and window. */
-        f->ms_pending++;
+        tbt_ms_admit_claim(&f->admit);
         spin_unlock(&sess->lock);
         mutex_unlock(&sess->fec_alloc_lock);
         return f;
@@ -8026,6 +8032,7 @@ static void tbt_fec_flow_purge(struct tbt_session *sess,
 void tbt_fec_flow_abort(struct tbt_session *sess, struct tbt_fec_flow *f)
 {
     struct tbt_fec_flow *next;
+    bool unlinked = false;
 
     if (!sess || !sess->fec || !f)
         return;
@@ -8037,9 +8044,8 @@ void tbt_fec_flow_abort(struct tbt_session *sess, struct tbt_fec_flow *f)
          * same admission lock, so a concurrent share cannot slip in. */
         mutex_lock(&sess->fec_alloc_lock);
         spin_lock(&sess->lock);
-        if (f->ms_pending)
-            f->ms_pending--;
-        if (f->ms_pending || f->ms_refs)
+        tbt_ms_admit_abort(&f->admit);
+        if (!tbt_ms_admit_last(&f->admit))
         {
             spin_unlock(&sess->lock);
             mutex_unlock(&sess->fec_alloc_lock);
@@ -8055,22 +8061,25 @@ void tbt_fec_flow_abort(struct tbt_session *sess, struct tbt_fec_flow *f)
      * has a reference must see a dead flow and stop producing work for it. */
     WRITE_ONCE(f->state, 3);
     if (!hlist_unhashed(&f->node))
-        hlist_del_init(&f->node);
-    if (sess->n_fec_flows)
-        sess->n_fec_flows--;
-    if (sess->fec_groups_used >= f->groups)
-        sess->fec_groups_used -= f->groups;
-    if (sess->fec_primary == f)
     {
-        u16 b;
+        hlist_del_init(&f->node);
+        unlinked = true;
+        if (sess->n_fec_flows)
+            sess->n_fec_flows--;
+        if (sess->fec_groups_used >= f->groups)
+            sess->fec_groups_used -= f->groups;
+        if (sess->fec_primary == f)
+        {
+            u16 b;
 
-        tbt_fec_primary_publish(sess, NULL);
-        for (b = 0; b < TBT_STREAM_HT && !sess->fec_primary; b++)
-            hlist_for_each_entry(next, &sess->fec_flows[b], node)
-            {
-                tbt_fec_primary_publish(sess, next);
-                break;
-            }
+            tbt_fec_primary_publish(sess, NULL);
+            for (b = 0; b < TBT_STREAM_HT && !sess->fec_primary; b++)
+                hlist_for_each_entry(next, &sess->fec_flows[b], node)
+                {
+                    tbt_fec_primary_publish(sess, next);
+                    break;
+                }
+        }
     }
     spin_unlock(&sess->lock);
     mutex_unlock(&sess->fec_alloc_lock);
@@ -8083,8 +8092,34 @@ void tbt_fec_flow_abort(struct tbt_session *sess, struct tbt_fec_flow *f)
     /* Purge after the flow is unreachable: a racing producer now refuses at
      * tbt_fec_out_push(), and an in-flight flush owns a record reference. */
     tbt_fec_flow_purge(sess, f);
-    tbt_fec_flow_put(f); /* table reference */
+    if (unlinked)
+        tbt_fec_flow_put(f); /* table reference, only if we took it out */
     tbt_fec_flow_put(f); /* caller's admission reference */
+}
+
+/* A stream that found its flow by lookup (not by admission) must take its
+ * own slot before attach. The allocation lock serialises this with the
+ * last-detach decision: either the slot is counted before that decision, or
+ * the plane is already dying and the claim fails. Without it, the lookup
+ * winner decremented a slot another carrier owned, and that carrier's abort
+ * could unlink the plane before this stream attached. */
+int tbt_fec_flow_claim_slot(struct tbt_session *sess, struct tbt_fec_flow *f)
+{
+    int err = 0;
+
+    if (!sess || !f)
+        return -EINVAL;
+    if (!sess->fec_sclc)
+        return 0;
+    mutex_lock(&sess->fec_alloc_lock);
+    spin_lock(&sess->lock);
+    if (READ_ONCE(f->state) != 1)
+        err = -ESTALE;
+    else
+        tbt_ms_admit_claim(&f->admit);
+    spin_unlock(&sess->lock);
+    mutex_unlock(&sess->fec_alloc_lock);
+    return err;
 }
 
 int tbt_fec_flow_attach(struct tbt_stream *st, struct tbt_fec_flow *f)
@@ -8137,9 +8172,7 @@ int tbt_fec_flow_attach(struct tbt_stream *st, struct tbt_fec_flow *f)
             return err;
         }
         spin_lock(&sess->lock);
-        if (f->ms_pending)
-            f->ms_pending--;
-        f->ms_refs++; /* this stream now owns a mux leg */
+        tbt_ms_admit_attach(&f->admit); /* pending -> one mux leg */
         spin_unlock(&sess->lock);
     }
     st->fec_flow = f; /* consumes the caller's reference */
@@ -8152,6 +8185,7 @@ void tbt_fec_flow_detach(struct tbt_stream *st)
     struct tbt_fec_flow *f, *next;
     bool last = true;
     bool alloc_held = false;
+    bool unlinked = false;
 
     if (!st || !st->fec_flow)
         return;
@@ -8186,9 +8220,8 @@ void tbt_fec_flow_detach(struct tbt_stream *st)
         mutex_lock(&sess->fec_alloc_lock);
         alloc_held = true;
         spin_lock(&sess->lock);
-        if (f->ms_refs)
-            f->ms_refs--;
-        last = !f->ms_refs && !f->ms_pending;
+        tbt_ms_admit_detach(&f->admit);
+        last = tbt_ms_admit_last(&f->admit);
         spin_unlock(&sess->lock);
         if (!last)
         {
@@ -8202,22 +8235,25 @@ void tbt_fec_flow_detach(struct tbt_stream *st)
     spin_lock(&sess->lock);
     WRITE_ONCE(f->state, 3);
     if (!hlist_unhashed(&f->node))
-        hlist_del_init(&f->node);
-    if (sess->n_fec_flows)
-        sess->n_fec_flows--;
-    if (sess->fec_groups_used >= f->groups)
-        sess->fec_groups_used -= f->groups;
-    if (sess->fec_primary == f)
     {
-        u16 b;
+        hlist_del_init(&f->node);
+        unlinked = true;
+        if (sess->n_fec_flows)
+            sess->n_fec_flows--;
+        if (sess->fec_groups_used >= f->groups)
+            sess->fec_groups_used -= f->groups;
+        if (sess->fec_primary == f)
+        {
+            u16 b;
 
-        tbt_fec_primary_publish(sess, NULL);
-        for (b = 0; b < TBT_STREAM_HT && !sess->fec_primary; b++)
-            hlist_for_each_entry(next, &sess->fec_flows[b], node)
-            {
-                tbt_fec_primary_publish(sess, next);
-                break;
-            }
+            tbt_fec_primary_publish(sess, NULL);
+            for (b = 0; b < TBT_STREAM_HT && !sess->fec_primary; b++)
+                hlist_for_each_entry(next, &sess->fec_flows[b], node)
+                {
+                    tbt_fec_primary_publish(sess, next);
+                    break;
+                }
+        }
     }
     spin_unlock(&sess->lock);
     mutex_unlock(&sess->fec_alloc_lock);
@@ -8228,7 +8264,8 @@ void tbt_fec_flow_detach(struct tbt_stream *st)
         spin_unlock_bh(&f->rx->lock);
     }
     tbt_fec_flow_purge(sess, f);
-    tbt_fec_flow_put(f); /* table reference */
+    if (unlinked)
+        tbt_fec_flow_put(f); /* table reference, only if we took it out */
     tbt_fec_flow_put(f); /* stream reference */
 }
 

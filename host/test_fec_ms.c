@@ -8,6 +8,7 @@
  *   make host/test_fec_ms && ./host/test_fec_ms
  */
 #include <errno.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1442,6 +1443,299 @@ static void test_stress16(void)
     link_free(&l);
 }
 
+/* ------------------------------------------------------------------ *
+ * Ring lifecycle: the kernel attach/detach path in allocation-free form
+ * ------------------------------------------------------------------ */
+
+static void test_ring_lifecycle(void)
+{
+    struct tbt_ms_tx *tx;
+    struct tbt_ms_tx_ring a, b, c, out;
+    const u8 *blk = NULL;
+    u32 len = 0;
+    u8 payload[64];
+
+    phase = "test_ring_lifecycle";
+    memset(payload, 0x5a, sizeof(payload));
+    tx = tbt_ms_tx_new(2, 65536, 65536, 8192);
+    ok(tx != NULL, "ring constructors", NULL);
+    if (!tx)
+        return;
+
+    ok_int(tbt_ms_tx_ring_new(NULL, 1, &a), -EINVAL, "ring_new rejects no mux");
+    ok_int(tbt_ms_tx_ring_new(tx, 0, &a), -EINVAL, "ring_new rejects sid 0");
+    ok_int(tbt_ms_tx_ring_new(tx, 1, NULL), -EINVAL,
+           "ring_new rejects no output");
+    ok_int(tbt_ms_tx_install(tx, NULL), -EINVAL, "install rejects no ring");
+    ok_int(tbt_ms_tx_remove(tx, 1, NULL), -ENOENT,
+           "remove rejects no output before it looks");
+
+    ok_int(tbt_ms_tx_ring_new(tx, 1, &a), 0, "ring_new a");
+    ok(a.ring != NULL && a.cap == 65536 + 2 * TBT_MS_DATA_MAX,
+       "ring_new sizes window plus slack", NULL);
+    ok_int(tbt_ms_tx_install(tx, &a), 0, "install a");
+    ok_int(tbt_ms_tx_install(tx, &a), -EEXIST, "duplicate install");
+    ok_u32(tbt_ms_tx_write(tx, 1, payload, sizeof(payload)), sizeof(payload),
+           "write through the installed ring");
+    ok_int(tbt_ms_tx_block(tx, &blk, &len), 0, "block with one leg");
+    ok(len > 0 && blk != NULL, "block packs the installed ring", NULL);
+    ok_int(tbt_ms_tx_remove(tx, 99, &out), -ENOENT, "remove an unknown sid");
+    ok_int(tbt_ms_tx_remove(tx, 1, &out), 0, "remove a");
+    ok(out.ring == a.ring && out.cap == a.cap && out.sid == 1,
+       "remove hands the exact ring back", NULL);
+    ok_int(tbt_ms_tx_remove(tx, 1, &out), -ENOENT, "removed sid is gone");
+    /* `out` still owns the ring, and `a` aliases it: reinstall, then free
+     * once through the second remove so the test never double-frees. */
+    ok_int(tbt_ms_tx_install(tx, &a), 0, "reinstall after remove");
+    ok_int(tbt_ms_tx_remove(tx, 1, &out), 0, "remove the reinstall");
+    tbt_ms_tx_ring_free(&out);
+
+    ok_int(tbt_ms_tx_ring_new(tx, 2, &b), 0, "ring_new b");
+    ok_int(tbt_ms_tx_ring_new(tx, 3, &c), 0, "ring_new c");
+    ok_int(tbt_ms_tx_install(tx, &b), 0, "install b");
+    ok_int(tbt_ms_tx_install(tx, &c), 0, "install c");
+    ok_int(tbt_ms_tx_ring_new(tx, 4, &a), 0, "ring_new over capacity");
+    ok_int(tbt_ms_tx_install(tx, &a), -ENOSPC, "install refuses a full table");
+    tbt_ms_tx_ring_free(&a);
+    ok_int(tbt_ms_tx_remove(tx, 2, &out), 0, "remove b");
+    tbt_ms_tx_ring_free(&out);
+    ok_int(tbt_ms_tx_remove(tx, 3, &out), 0, "remove c");
+    tbt_ms_tx_ring_free(&out);
+    ok_u32(tbt_ms_tx_queued(tx), 0, "no queued bytes after the removals");
+    tbt_ms_tx_free(tx);
+}
+
+/* ------------------------------------------------------------------ *
+ * Attach/detach concurrency: install and remove rings while another
+ * caller packs blocks. The kernel holds tx->ms_lock across these calls;
+ * the test models that contract with one mutex.
+ * ------------------------------------------------------------------ */
+
+#define RING_THREADS 4
+#define RING_ROUNDS 4000
+
+struct ring_stress
+{
+    struct tbt_ms_tx *tx;
+    pthread_mutex_t *lock; /* the kernel's one tx->ms_lock */
+    u64 sid;
+    int failures;
+};
+
+static void *ring_worker(void *arg)
+{
+    struct ring_stress *s = arg;
+    u8 payload[64];
+    u32 i;
+
+    memset(payload, (int)(s->sid & 0xff), sizeof(payload));
+    for (i = 0; i < RING_ROUNDS; i++)
+    {
+        struct tbt_ms_tx_ring ring, out;
+        const u8 *blk = NULL;
+        u32 len = 0;
+        int rc;
+
+        if (tbt_ms_tx_ring_new(s->tx, s->sid, &ring))
+        {
+            s->failures++;
+            break;
+        }
+        pthread_mutex_lock(s->lock);
+        rc = tbt_ms_tx_install(s->tx, &ring);
+        if (!rc)
+        {
+            (void)tbt_ms_tx_write(s->tx, s->sid, payload, sizeof(payload));
+            (void)tbt_ms_tx_block(s->tx, &blk, &len);
+        }
+        pthread_mutex_unlock(s->lock);
+        if (rc)
+        {
+            tbt_ms_tx_ring_free(&ring);
+            s->failures++;
+            break;
+        }
+        pthread_mutex_lock(s->lock);
+        rc = tbt_ms_tx_remove(s->tx, s->sid, &out);
+        pthread_mutex_unlock(s->lock);
+        if (rc || out.ring != ring.ring || out.cap != ring.cap)
+        {
+            if (!rc)
+                tbt_ms_tx_ring_free(&out);
+            else
+                tbt_ms_tx_ring_free(&ring);
+            s->failures++;
+            break;
+        }
+        tbt_ms_tx_ring_free(&out);
+    }
+    return NULL;
+}
+
+static void test_ring_concurrent(void)
+{
+    struct tbt_ms_tx *tx;
+    struct ring_stress rings[RING_THREADS];
+    pthread_t th[RING_THREADS];
+    pthread_mutex_t lock;
+    int i, spawned = 0, failures = 0;
+
+    phase = "test_ring_concurrent";
+    tx = tbt_ms_tx_new(RING_THREADS, 65536, 65536, 8192);
+    ok(tx != NULL, "concurrent ring constructors", NULL);
+    if (!tx)
+        return;
+    ok_int(pthread_mutex_init(&lock, NULL), 0, "one mux lock");
+    for (i = 0; i < RING_THREADS; i++)
+    {
+        rings[i].tx = tx;
+        rings[i].lock = &lock;
+        rings[i].sid = 0x2000000000ULL + (u64)i;
+        rings[i].failures = 0;
+        if (pthread_create(&th[i], NULL, ring_worker, &rings[i]))
+            break;
+        spawned++;
+    }
+    for (i = 0; i < spawned; i++)
+    {
+        pthread_join(th[i], NULL);
+        failures += rings[i].failures;
+    }
+    pthread_mutex_destroy(&lock);
+    ok_int(spawned, RING_THREADS, "all ring workers started");
+    ok_int(failures, 0, "no install/remove race lost a ring");
+    ok_u32(tbt_ms_tx_queued(tx), 0, "workers leave no queued bytes");
+    {
+        struct tbt_ms_tx_ring ring, out;
+
+        ok_int(tbt_ms_tx_ring_new(tx, 0x3000000000ULL, &ring), 0,
+               "ring_new after the churn");
+        ok_int(tbt_ms_tx_install(tx, &ring), 0, "install after the churn");
+        ok_int(tbt_ms_tx_remove(tx, 0x3000000000ULL, &out), 0,
+               "remove after the churn");
+        tbt_ms_tx_ring_free(&out);
+    }
+    tbt_ms_tx_free(tx);
+}
+
+/* ------------------------------------------------------------------ *
+ * Admission ledger: the sequences the flow table runs under
+ * fec_alloc_lock + sess->lock
+ * ------------------------------------------------------------------ */
+
+static void test_admit_ledger(void)
+{
+    struct tbt_ms_admit a = { 0, 0 };
+
+    phase = "test_admit_ledger";
+    ok(tbt_ms_admit_last(&a), "empty ledger is last", NULL);
+    tbt_ms_admit_claim(&a);
+    ok(a.pending == 1 && a.refs == 0, "claim takes a pending slot", NULL);
+    ok(!tbt_ms_admit_last(&a), "a pending slot keeps the plane", NULL);
+    tbt_ms_admit_attach(&a);
+    ok(a.pending == 0 && a.refs == 1, "attach moves pending to refs", NULL);
+    tbt_ms_admit_detach(&a);
+    ok(tbt_ms_admit_last(&a), "last detach ends the plane", NULL);
+    tbt_ms_admit_abort(&a);
+    tbt_ms_admit_detach(&a);
+    ok(a.pending == 0 && a.refs == 0,
+       "extra abort/detach do not underflow", NULL);
+
+    /* Two carriers admit; one aborts before the other attaches. */
+    tbt_ms_admit_claim(&a);
+    tbt_ms_admit_claim(&a);
+    tbt_ms_admit_abort(&a);
+    tbt_ms_admit_attach(&a);
+    ok(!tbt_ms_admit_last(&a) && a.refs == 1,
+       "abort before attach leaves the plane alive", NULL);
+    tbt_ms_admit_detach(&a);
+    ok(tbt_ms_admit_last(&a), "plane ends after that leg", NULL);
+
+    /* The lookup winner claims its own slot; the admitting loser aborts. */
+    tbt_ms_admit_claim(&a); /* the carrier that admitted the flow */
+    tbt_ms_admit_claim(&a); /* the lookup winner's claim_slot */
+    tbt_ms_admit_attach(&a); /* the lookup winner attaches */
+    tbt_ms_admit_abort(&a); /* the admitting loser gives its slot back */
+    ok(!tbt_ms_admit_last(&a) && a.refs == 1,
+       "a losing admission cannot end a lookup-attached plane", NULL);
+    tbt_ms_admit_detach(&a);
+    ok(tbt_ms_admit_last(&a), "lookup-attached plane ends at detach", NULL);
+
+    a.pending = (u16)~0u;
+    tbt_ms_admit_claim(&a);
+    ok(a.pending == (u16)~0u, "claim saturates instead of wrapping", NULL);
+    a.pending = 0;
+    a.refs = (u16)~0u;
+    tbt_ms_admit_attach(&a);
+    ok(a.refs == (u16)~0u, "attach saturates instead of wrapping", NULL);
+}
+
+struct admit_stress
+{
+    struct tbt_ms_admit *a;
+    pthread_mutex_t *lock;
+    unsigned int rounds;
+    int attach;
+};
+
+static void *admit_worker(void *arg)
+{
+    struct admit_stress *s = arg;
+    unsigned int i;
+
+    for (i = 0; i < s->rounds; i++)
+    {
+        pthread_mutex_lock(s->lock);
+        tbt_ms_admit_claim(s->a);
+        pthread_mutex_unlock(s->lock);
+        if (s->attach)
+        {
+            pthread_mutex_lock(s->lock);
+            tbt_ms_admit_attach(s->a);
+            pthread_mutex_unlock(s->lock);
+            pthread_mutex_lock(s->lock);
+            tbt_ms_admit_detach(s->a);
+            pthread_mutex_unlock(s->lock);
+        }
+        else
+        {
+            pthread_mutex_lock(s->lock);
+            tbt_ms_admit_abort(s->a);
+            pthread_mutex_unlock(s->lock);
+        }
+    }
+    return NULL;
+}
+
+static void test_admit_concurrent(void)
+{
+    struct tbt_ms_admit a = { 0, 0 };
+    struct admit_stress args[4];
+    pthread_mutex_t lock;
+    pthread_t th[4];
+    unsigned int i;
+    int spawned = 0;
+
+    phase = "test_admit_concurrent";
+    ok_int(pthread_mutex_init(&lock, NULL), 0, "admission stress lock");
+    for (i = 0; i < 4; i++)
+    {
+        args[i].a = &a;
+        args[i].lock = &lock;
+        args[i].rounds = 20000;
+        args[i].attach = (i % 2) != 0;
+        if (pthread_create(&th[i], NULL, admit_worker, &args[i]))
+            break;
+        spawned++;
+    }
+    for (i = 0; i < (unsigned int)spawned; i++)
+        pthread_join(th[i], NULL);
+    pthread_mutex_destroy(&lock);
+    ok_int(spawned, 4, "all admission workers started");
+    ok(tbt_ms_admit_last(&a),
+       "claims, attaches and aborts balance under churn", NULL);
+}
+
 int main(void)
 {
 #define RUN(fn)                                                                \
@@ -1453,6 +1747,10 @@ int main(void)
 
     RUN(test_header);
     RUN(test_tx_ring);
+    RUN(test_ring_lifecycle);
+    RUN(test_ring_concurrent);
+    RUN(test_admit_ledger);
+    RUN(test_admit_concurrent);
     RUN(test_boundary_frames);
     phase = "test_concurrency(1)";
     test_concurrency(1, 1u << 20);
