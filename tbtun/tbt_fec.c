@@ -800,13 +800,14 @@ int tbt_fec_cfg_pack(const struct tbt_fec_cfg *c, u8 out[TBT_FEC_CFG_LEN])
     return 0;
 }
 
-int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], struct tbt_fec_cfg *c)
+int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], u16 carriers,
+                       struct tbt_fec_cfg *c)
 {
     u32 crc;
     u32 shares;
     u16 n, m, groups;
 
-    if (!in || !c)
+    if (!in || !c || !carriers || carriers > TBT_FEC_MAX_CARRIERS)
         return -EINVAL;
     /* The CRC covers every field before the reserved word, so verify it
      * before trusting n/m/groups or the switch coordinates. */
@@ -867,10 +868,12 @@ int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], struct tbt_fec_cfg *c)
         if (c->w > 1 && c->d == c->w)
             return -EPROTO;
     }
-    /* groups is the carrier geometry: one share per carrier, so n+m must
-     * divide the 256 carriers and groups must be exactly the quotient. */
-    if (!groups || (TBT_FEC_MAX_CARRIERS % shares) ||
-        groups != TBT_FEC_MAX_CARRIERS / shares)
+    /* groups is the carrier geometry: one share per carrier, so the body
+     * must name exactly this session's carrier count. The old rule divided
+     * a fixed 256 and refused every 32/64/128-carrier INIT and CFG. The
+     * codec factory stays the authority on which (n, m, groups) shapes are
+     * buildable, including the downlink 1-group SC-LDPC block. */
+    if (!groups || (u32)groups * shares != carriers)
         return -EPROTO;
     return 0;
 }

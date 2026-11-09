@@ -354,6 +354,12 @@ at the first HELLO.
   (`carriers == n + m`); `mode=grouped` is 32 groups of 8 in production
   (`carriers=256`, `n=4`, `m=4`). `profile=raw` and `http-kal` are both
   supported.
+- With `fec=on mode=grouped` and no explicit `carriers=`, the parser
+  picks the largest multiple of `n + m` not above 64 (`4+4` -> 64,
+  `5` -> 60, `n + m > 64` -> one group). The CFG receiver checks
+  `groups * (n + m) == carriers` against the session's effective
+  `carriers`, not a fixed 256, so 32/64/128-carrier FEC_CFG/FEC_INIT is
+  legal; explicit `carriers=256` remains the 32x8 production shape.
 - The global packet sequence is striped over the groups
   (`group = seq % groups`). Each group owns its block window, codec state and
   parity. A super-block is one block from every group; it covers the contiguous
@@ -1951,8 +1957,10 @@ random at tunnel creation).
   (`carriers = groups * (n + m)`, `group = carrier / (n + m)`,
   `share = carrier % (n + m)`); `mode=sc-ldpc` selects the SC-LDPC codec
   (§3.1.2); `w` is the codeword block (256 downlink, 128 GF(16) uplink), and
-  `carriers=0` resolves to `n + m`, and a nonzero `carriers` must be a multiple
-  of `n + m`. `fec=on` requires `m >= 1` and `carriers >= n + m`.
+  `carriers=0` resolves to `n + m`, except `fec=on mode=grouped`, which
+  takes the largest multiple of `n + m` not above 64 (one group when
+  `n + m > 64`); a nonzero `carriers` must be a multiple of `n + m`.
+  `fec=on` requires `m >= 1` and `carriers >= n + m`.
 - `adaptive=on|off` selects the 0.3.0 shape control law (§3.1.2). It defaults
   to `fec` (on when `fec=on`), requires `fec=on`, and only the `n + m = 8`
   family is implemented. `adaptive=on` ignores `w` and uses `w = 2n, d = n`;

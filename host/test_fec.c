@@ -788,7 +788,7 @@ static void test_control(void)
     ok((int)sizeof(struct tbt_fec_cfg) == TBT_FEC_CFG_LEN,
        "CFG struct is 48 bytes", NULL);
     memset(&c2, 0, sizeof(c2));
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), 0, "CFG unpack");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), 0, "CFG unpack");
     ok(c2.epoch == c.epoch && c2.n == c.n && c2.m == c.m && c2.w == c.w &&
            c2.k == c.k && c2.d == c.d && c2.flags == c.flags &&
            c2.groups == c.groups && c2.switch_pkt == c.switch_pkt &&
@@ -796,72 +796,75 @@ static void test_control(void)
        "CFG round-trip", NULL);
 
     cbuf[TBT_FEC_CFG_EPOCH] ^= 1;
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG body CRC mismatch");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO, "CFG body CRC mismatch");
     /* The switch coordinates sit under the same CRC as the shape fields. */
     tbt_fec_cfg_pack(&c, cbuf);
     cbuf[TBT_FEC_CFG_SWITCH_PKT] ^= 1;
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO,
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO,
            "CFG switch_pkt is CRC-covered");
     tbt_fec_cfg_pack(&c, cbuf);
     cbuf[TBT_FEC_CFG_RESERVED] = 1;
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG reserved != 0");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO, "CFG reserved != 0");
     tbt_fec_cfg_pack(&c, cbuf);
     cbuf[TBT_FEC_CFG_FLAGS] = 0x80;
     cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG unknown flags");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO, "CFG unknown flags");
 
     tbt_fec_cfg_pack(&c, cbuf);
     cbuf[TBT_FEC_CFG_N] = 0;
     cbuf[TBT_FEC_CFG_N + 1] = 0;
     cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG n=0");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO, "CFG n=0");
     tbt_fec_cfg_pack(&c, cbuf);
     cbuf[TBT_FEC_CFG_M] = 0;
     cbuf[TBT_FEC_CFG_M + 1] = 0;
     cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG m=0");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO, "CFG m=0");
     tbt_fec_cfg_pack(&c, cbuf);
     cbuf[TBT_FEC_CFG_N] = 255;
     cbuf[TBT_FEC_CFG_N + 1] = 0;
     cbuf[TBT_FEC_CFG_M] = 2;
     cbuf[TBT_FEC_CFG_M + 1] = 0;
     cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG n+m=257");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO, "CFG n+m=257");
     tbt_fec_cfg_pack(&c, cbuf);
     cbuf[TBT_FEC_CFG_N] = 2;
     cbuf[TBT_FEC_CFG_N + 1] = 0;
     cbuf[TBT_FEC_CFG_M] = 1;
     cbuf[TBT_FEC_CFG_M + 1] = 0;
     cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG n+m does not divide 256");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO,
+           "CFG n+m does not divide 256");
     tbt_fec_cfg_pack(&c, cbuf);
     cbuf[TBT_FEC_CFG_GROUPS] = 31;
     cbuf[TBT_FEC_CFG_GROUPS + 1] = 0;
     cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG groups != 256/(n+m)");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO,
+           "CFG groups != 256/(n+m)");
     tbt_fec_cfg_pack(&c, cbuf);
     cbuf[TBT_FEC_CFG_K] = 0;
     cbuf[TBT_FEC_CFG_K + 1] = 0;
     cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG k=0");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO, "CFG k=0");
     tbt_fec_cfg_pack(&c, cbuf);
     cbuf[TBT_FEC_CFG_W] = 2;
     cbuf[TBT_FEC_CFG_W + 1] = 0;
     cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG w<k");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO, "CFG w<k");
     tbt_fec_cfg_pack(&c, cbuf);
     cbuf[TBT_FEC_CFG_W] = 0x01;
     cbuf[TBT_FEC_CFG_W + 1] = 0x04; /* 1025 */
     cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG w over TBT_FEC_MAX_W");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO,
+           "CFG w over TBT_FEC_MAX_W");
     tbt_fec_cfg_pack(&c, cbuf);
     cbuf[TBT_FEC_CFG_D] = 9;
     cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG d>w");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO, "CFG d>w");
     tbt_fec_cfg_pack(&c, cbuf);
     cbuf[TBT_FEC_CFG_D] = 8;
     cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG d==w with w>1");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO, "CFG d==w with w>1");
 
     /* FEC_FBK: 48 bytes including the 32-byte bitmap (0x1007 layout). */
     ok((int)sizeof(struct tbt_fec_fbk) == TBT_FEC_FBK_LEN,
@@ -906,6 +909,183 @@ static void test_control(void)
        "FBK round-trip", NULL);
     fbuf[TBT_FEC_FBK_FLAGS] = 0x20;
     ok_int(tbt_fec_fbk_unpack(fbuf, &f2), -EPROTO, "FBK unknown flags");
+}
+
+/* ------------------------------------------------------------------ *
+ * 5a. FEC_CFG carrier geometry: the session's carrier count, not the
+ * 256-carrier default, decides whether groups*(n+m) is valid.
+ * ------------------------------------------------------------------ */
+
+/* Build a small RLNC shape with an n:m split of 3:1. `shares` is n+m. */
+static void cfg_rlnc_make(struct tbt_fec_cfg *c, u16 shares, u16 groups)
+{
+    memset(c, 0, sizeof(*c));
+    c->epoch = 1;
+    c->n = (u16)(3 * shares / 4);
+    c->m = (u16)(shares / 4);
+    c->w = (u16)(2 * c->n);
+    c->k = c->n;
+    c->d = (u8)(c->n / 2);
+    c->flags = TBT_FEC_CFG_F_INIT | TBT_FEC_CFG_F_APPLY;
+    c->groups = groups;
+    c->seed = 0x5a5a;
+}
+
+/* Build one downlink SC-LDPC block: n = m, w = block, k = rate. */
+static void cfg_down_make(struct tbt_fec_cfg *c, u16 half)
+{
+    memset(c, 0, sizeof(*c));
+    c->epoch = 1;
+    c->n = half;
+    c->m = half;
+    c->w = 256;
+    c->k = 500;
+    c->d = 0;
+    c->flags = TBT_FEC_CFG_F_INIT | TBT_FEC_CFG_F_APPLY;
+    c->groups = 1;
+}
+
+/* Build the uplink GF(16) shape: k = block, w = L, d = rate in 1/256. */
+static void cfg_up_make(struct tbt_fec_cfg *c, u16 groups)
+{
+    memset(c, 0, sizeof(*c));
+    c->epoch = 1;
+    c->n = 8;
+    c->m = 24;
+    c->w = 16;
+    c->k = 128;
+    c->d = 64;
+    c->flags = TBT_FEC_CFG_F_INIT | TBT_FEC_CFG_F_APPLY;
+    c->groups = groups;
+}
+
+/* Pack one RLNC shape and unpack it with the session's carrier count. */
+static void cfg_rlnc_roundtrip(u16 carriers, u16 shares, const char *what)
+{
+    struct tbt_fec_cfg c, out;
+    u8 body[TBT_FEC_CFG_LEN];
+
+    cfg_rlnc_make(&c, shares, (u16)(carriers / shares));
+    ok_int(tbt_fec_cfg_pack(&c, body), 0, what);
+    memset(&out, 0, sizeof(out));
+    ok_int(tbt_fec_cfg_unpack(body, carriers, &out), 0, what);
+    ok(out.n == c.n && out.m == c.m && out.groups == c.groups &&
+           out.flags == c.flags && out.n + out.m == shares,
+       what, "round-trip changed n/m/groups/flags");
+}
+
+static void cfg_unpack_expect(const u8 *body, u16 carriers, int want,
+                              const char *what)
+{
+    struct tbt_fec_cfg out;
+
+    memset(&out, 0, sizeof(out));
+    ok_int(tbt_fec_cfg_unpack(body, carriers, &out), want, what);
+}
+
+static void test_cfg_carriers(void)
+{
+    struct tbt_fec_cfg c, out;
+    u8 body[TBT_FEC_CFG_LEN];
+    u8 body32[TBT_FEC_CFG_LEN];
+    u8 body64[TBT_FEC_CFG_LEN];
+    u8 body128[TBT_FEC_CFG_LEN];
+    u8 body256[TBT_FEC_CFG_LEN];
+    u16 carriers;
+    u16 shares;
+    char what[64];
+
+    /* a. Every carrier count a session may announce, with every small
+     * group width that divides it. */
+    for (carriers = 32; carriers <= 256; carriers *= 2)
+        for (shares = 4; shares <= 16; shares *= 2)
+            if (carriers % shares == 0)
+            {
+                snprintf(what, sizeof(what), "RLNC cfg C=%u shares=%u",
+                         (unsigned)carriers, (unsigned)shares);
+                cfg_rlnc_roundtrip(carriers, shares, what);
+            }
+
+    /* b. The session carrier count is authoritative: a body that is valid
+     * for one count is refused for every other count. */
+    cfg_rlnc_make(&c, 8, 4);
+    ok_int(tbt_fec_cfg_pack(&c, body32), 0, "32-carrier body packs");
+    cfg_unpack_expect(body32, 64, -EPROTO, "32-carrier body on 64");
+    cfg_unpack_expect(body32, 128, -EPROTO, "32-carrier body on 128");
+    cfg_unpack_expect(body32, 256, -EPROTO, "32-carrier body on 256");
+
+    cfg_rlnc_make(&c, 8, 8);
+    ok_int(tbt_fec_cfg_pack(&c, body64), 0, "64-carrier body packs");
+    cfg_unpack_expect(body64, 32, -EPROTO, "64-carrier body on 32");
+
+    cfg_rlnc_make(&c, 8, 16);
+    ok_int(tbt_fec_cfg_pack(&c, body128), 0, "128-carrier body packs");
+    cfg_unpack_expect(body128, 256, -EPROTO, "128-carrier body on 256");
+
+    /* c. A zero or a one-too-large group count, and a carrier count
+     * outside 1..256, are refused. */
+    cfg_rlnc_make(&c, 8, 4);
+    ok_int(tbt_fec_cfg_pack(&c, body32), 0, "group mutation base");
+    body32[TBT_FEC_CFG_GROUPS] = 0;
+    body32[TBT_FEC_CFG_GROUPS + 1] = 0;
+    cfg_fix_crc(body32);
+    cfg_unpack_expect(body32, 32, -EPROTO, "groups=0");
+    cfg_rlnc_make(&c, 8, 4);
+    ok_int(tbt_fec_cfg_pack(&c, body32), 0, "overflow group base");
+    body32[TBT_FEC_CFG_GROUPS] = 5;
+    body32[TBT_FEC_CFG_GROUPS + 1] = 0;
+    cfg_fix_crc(body32);
+    cfg_unpack_expect(body32, 32, -EPROTO, "groups=5 on 32 carriers");
+    cfg_rlnc_make(&c, 8, 4);
+    ok_int(tbt_fec_cfg_pack(&c, body32), 0, "carrier argument base");
+    cfg_unpack_expect(body32, 0, -EINVAL, "carriers=0");
+    cfg_unpack_expect(body32, 257, -EINVAL, "carriers=257");
+
+    /* d. One downlink SC-LDPC block: 64, 128, and 256 carriers. The
+     * geometry is exact, so a body built for one width fails on the next. */
+    cfg_down_make(&c, 32);
+    ok_int(tbt_fec_cfg_pack(&c, body64), 0, "downlink 64 body packs");
+    memset(&out, 0, sizeof(out));
+    ok_int(tbt_fec_cfg_unpack(body64, 64, &out), 0,
+           "downlink 64 body unpacks");
+    ok(out.n == 32 && out.m == 32 && out.groups == 1 &&
+           out.flags == (TBT_FEC_CFG_F_INIT | TBT_FEC_CFG_F_APPLY) &&
+           out.w == 256 && out.k == 500 && out.d == 0,
+       "downlink 64 body round-trips", NULL);
+
+    cfg_down_make(&c, 64);
+    ok_int(tbt_fec_cfg_pack(&c, body128), 0, "downlink 128 body packs");
+    memset(&out, 0, sizeof(out));
+    ok_int(tbt_fec_cfg_unpack(body128, 128, &out), 0,
+           "downlink 128 body unpacks");
+    ok(out.n == 64 && out.m == 64 && out.groups == 1,
+       "downlink 128 body round-trips", NULL);
+
+    cfg_down_make(&c, 128);
+    ok_int(tbt_fec_cfg_pack(&c, body256), 0, "downlink 256 body packs");
+    memset(&out, 0, sizeof(out));
+    ok_int(tbt_fec_cfg_unpack(body256, 256, &out), 0,
+           "downlink 256 body unpacks");
+    ok(out.n == 128 && out.m == 128 && out.groups == 1,
+       "downlink 256 body round-trips", NULL);
+
+    cfg_unpack_expect(body64, 128, -EPROTO, "downlink 64 body on 128");
+    cfg_unpack_expect(body128, 64, -EPROTO, "downlink 128 body on 64");
+
+    /* e. Uplink GF(16): 32 shares per group and k=128 > w=16. */
+    for (carriers = 64; carriers <= 256; carriers *= 2)
+    {
+        snprintf(what, sizeof(what), "uplink body C=%u",
+                 (unsigned)carriers);
+        cfg_up_make(&c, (u16)(carriers / 32));
+        ok_int(tbt_fec_cfg_pack(&c, body), 0, what);
+        memset(&out, 0, sizeof(out));
+        ok_int(tbt_fec_cfg_unpack(body, carriers, &out), 0, what);
+        ok(out.n == 8 && out.m == 24 && out.groups == c.groups &&
+               out.flags == (TBT_FEC_CFG_F_INIT | TBT_FEC_CFG_F_APPLY) &&
+               out.k == 128 && out.w == 16 && out.d == 64,
+           what, "round-trip changed n/m/groups/flags");
+    }
 }
 
 /* ------------------------------------------------------------------ *
@@ -2914,7 +3094,7 @@ static void test_sclc_wire_profiles(void)
     c.flags = TBT_FEC_CFG_F_APPLY;
     c.groups = 1;
     ok_int(tbt_fec_cfg_pack(&c, cbuf), 0, "sclc cfg down: pack");
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), 0, "sclc cfg down: unpack");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), 0, "sclc cfg down: unpack");
     ok(c2.n == 128 && c2.m == 128 && c2.w == 256 && c2.k == 500 &&
            c2.d == 0 && c2.groups == 1,
        "sclc cfg down: round-trip", NULL);
@@ -2934,7 +3114,7 @@ static void test_sclc_wire_profiles(void)
     c.flags = TBT_FEC_CFG_F_APPLY;
     c.groups = 8;
     ok_int(tbt_fec_cfg_pack(&c, cbuf), 0, "sclc cfg up: pack");
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), 0, "sclc cfg up: unpack");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), 0, "sclc cfg up: unpack");
     ok(c2.n == 8 && c2.m == 24 && c2.w == 16 && c2.k == 128 &&
            c2.d == 64 && c2.groups == 8,
        "sclc cfg up: round-trip", NULL);
@@ -2986,6 +3166,7 @@ int main(void)
     test_crc();
     test_bitmap();
     test_control();
+    test_cfg_carriers();
     test_alloc();
     test_wire_version();
     test_rlnc_single();

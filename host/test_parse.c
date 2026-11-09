@@ -1319,6 +1319,53 @@ int main(void)
         tbt_render_cfg(&again.cfg, twice, sizeof(twice));
         ok(!strcmp(buf, twice), "auto value line is a render fixed point", twice);
     }
+    /* An omitted carriers= on grouped FEC starts at the largest whole number
+     * of groups that fits 64 carriers (TBT_FEC_DEFAULT_GROUPED_CARRIERS). */
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=4 fec=on"
+          " mode=grouped",
+          &cmd, &perr);
+    ok(cmd.cfg.mode == 2 && cmd.cfg.w == 8 && cmd.cfg.carriers == 64,
+       "grouped fec=on defaults to 64 carriers", NULL);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(strstr(buf, " mode=grouped w=8 carriers=64 ") != NULL,
+       "grouped carriers default renders its effective value", buf);
+    {
+        struct tbt_cmd again;
+        char twice[TBT_LINE_MAX * 2];
+
+        parse(buf, &again, &perr);
+        ok(again.cfg.carriers == 64, "grouped carriers default reparses as 64", NULL);
+        tbt_render_cfg(&again.cfg, twice, sizeof(twice));
+        ok(!strcmp(buf, twice), "grouped carriers default is a render fixed point",
+           twice);
+    }
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=1 fec=on"
+          " mode=grouped",
+          &cmd, &perr);
+    ok(cmd.cfg.carriers == 60, "grouped default rounds down to whole groups", NULL);
+    /* An explicit carriers= is used as written, so the operator keeps the
+     * exact group count. */
+    {
+        static const u16 given[] = { 32, 64, 128, 256 };
+        size_t i;
+
+        for (i = 0; i < sizeof(given) / sizeof(given[0]); i++)
+        {
+            char line[TBT_LINE_MAX + 1];
+
+            snprintf(line, sizeof(line),
+                     "tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                     " n=4 m=4 fec=on mode=grouped w=8 carriers=%u",
+                     (unsigned int)given[i]);
+            ok(parse(line, &cmd, &perr) == 0 && cmd.cfg.carriers == given[i],
+               "explicit carriers= survives the grouped default", line);
+        }
+    }
+    /* rlnc is one group, so its default stays n + m. */
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=1 fec=on"
+          " mode=rlnc",
+          &cmd, &perr);
+    ok(cmd.cfg.carriers == 5, "rlnc default stays n + m", NULL);
     parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=1"
           " mode=sc-ldpc w=0",
           &cmd, &perr);
@@ -1328,6 +1375,13 @@ int main(void)
           " mode=sc-ldpc w=512",
           &cmd, &perr);
     ok(cmd.cfg.w == 512, "sc-ldpc w=512 accepted", NULL);
+    /* sc-ldpc ships explicit 256-carrier profiles, so its default stays n + m
+     * under the grouped-carrier rule. */
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=4 fec=on"
+          " mode=sc-ldpc",
+          &cmd, &perr);
+    ok(cmd.cfg.mode == 3 && cmd.cfg.w == 256 && cmd.cfg.carriers == 8,
+       "sc-ldpc fec=on default stays n + m", NULL);
     parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=1 w=16",
           &cmd, &perr);
     tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));

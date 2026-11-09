@@ -685,8 +685,21 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         cfg->w = cfg->mode == 3 ? 256 : (u16)(2 * cfg->n);
     if (cfg->mode != 3 && cfg->w < cfg->n)
         return tbt_fail(e, "w", "w must be 0 or at least n");
+    /* An explicit carriers= is used as written. An omitted one starts at
+     * n + m, except grouped FEC: it starts at the largest whole number of
+     * groups that fits TBT_FEC_DEFAULT_GROUPED_CARRIERS, because 64 carriers
+     * measured +21.5% app over 256 at lower CPU (CHANGELOG 0.2.1). rlnc is
+     * one group, and the sc-ldpc profiles ship an explicit 256, so both keep
+     * the n + m default here. */
     if (!cfg->carriers)
-        cfg->carriers = cfg->n + cfg->m;
+    {
+        u16 shares = (u16)(cfg->n + cfg->m);
+
+        cfg->carriers = shares;
+        if (cfg->fec && cfg->mode == 2 &&
+            shares <= TBT_FEC_DEFAULT_GROUPED_CARRIERS)
+            cfg->carriers = (u16)((TBT_FEC_DEFAULT_GROUPED_CARRIERS / shares) * shares);
+    }
     if (cfg->carriers % (cfg->n + cfg->m))
         return tbt_fail(e, "carriers", "carriers must be a multiple of n + m");
     /* mode=rlnc is one group: carriers == n+m. Grouped/sc-ldpc may use more
