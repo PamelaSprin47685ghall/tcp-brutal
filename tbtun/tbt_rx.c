@@ -509,6 +509,10 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
         /* The drain shuts the write side once rx_next reaches the FIN's seq
          * and every earlier byte has been delivered. */
         tbt_sock_kick(st);
+        /* A FIN is also the close timer's input: the FBK tick runs
+         * tbt_tx_close_check() and the FIN retry. It may have stopped while
+         * the session had no stream, so wake it here. */
+        tbt_fbk_kick(sess, false);
         tbt_stream_put(st);
         return 0;
 

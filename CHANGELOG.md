@@ -3,6 +3,17 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [Unreleased]
+
+### Fixed
+
+- G4 close-path wakeups: a new far stream, a finished FEC block, a received
+  FIN and a delivered peer FIN now kick the FBK tick. `w_fbk` stops when the
+  session has no stream, and the FIN retry / `tbt_tx_close_check()` otherwise
+  slept until an unrelated carrier loss. `tbt_tx_fin()` stamps
+  `close_since_ns` before its FEC early returns, and a duplicate sid is
+  refused with `-EEXIST` before the SC-LDPC admission check.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

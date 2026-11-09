@@ -354,6 +354,13 @@ int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
     u8 body[TBT_FIN_BODY_LEN] = {0};
     int i, queued = 0, err = 0;
 
+    /* The close budget starts at the first request, before the FEC early
+     * returns. Otherwise a stream whose packetizer is not idle yet (credit
+     * or outq backpressure) would retry this function forever with
+     * close_since_ns == 0 and bypass tbt_tx_close_check()'s bound. */
+    if (!READ_ONCE(st->close_since_ns))
+        WRITE_ONCE(st->close_since_ns, tbt_now_ns());
+
     /* FEC: the packetizer must finish the stream's last block before FIN
      * names its end. The first call only requests the flush and returns 0;
      * the close path retries. Once finish has run, pkt_end is frozen and the
@@ -390,11 +397,6 @@ int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
     spin_unlock(&sess->tx_lock);
     tbt_put_le64(body, st->tx_fin_pkts);
     tbt_put_le64(body + 8, st->tx_fin_pkt_base);
-    /* The close timer starts at the first request, not at the write: a FIN
-     * that never gets a carrier, or whose preceding DATA the peer never
-     * acknowledges, must end in a bounded reset instead of a pinned stream. */
-    if (!READ_ONCE(st->close_since_ns))
-        WRITE_ONCE(st->close_since_ns, tbt_now_ns());
     for (i = 0; i < sess->n_car; i++)
     {
         struct tbt_carrier *c = READ_ONCE(sess->car[i]);
