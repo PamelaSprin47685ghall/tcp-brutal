@@ -5,6 +5,15 @@ and moves independently of the module version.
 
 ## [Unreleased]
 
+### Added
+
+- `host/bench_rx_stages` (target `host-bench-rxpath`): per-record cost of the
+  FEC RX chain on the host, one row per stage (HTTP chunk deframe, header
+  unpack/CRC, ChaCha8, payload CRC, FEC slot placement, ordered delivery),
+  with the real functions where the module's translation unit is
+  host-linkable and a stated model for the kernel-only parts. It is a
+  measurement, not a gate.
+
 ### Fixed
 
 - Session keys are now erased with `memzero_explicit()` before their storage
@@ -20,6 +29,20 @@ and moves independently of the module version.
 - `review/lint.sh`'s render probe links `tbt_portmap.c` and
   `tbt_fec_adapt_sclc.c`, the helpers `tbt_parse_line()` calls, so the
   `render-fits-line-max` check runs instead of failing to link.
+- One carrier RX work item can no longer drain a whole receive queue. The
+  actor stops between 8 KiB pieces after 2 ms (`tbtun/tbt_rx_budget.h`) and
+  the body re-arms from the shared `tbt_rx_resume_plan()` rule while
+  `copied_seq != rcv_nxt`; unread bytes stay in the socket, so nothing is
+  dropped or parsed twice. This removes the far-side
+  `workqueue: tbt_car_rx_work [tbtun] hogged CPU for >10000us ...` reports on
+  the 1 GiB gates, where one item could walk a 2 MiB carrier queue. A new
+  `rx_budget_yields` counter in `/proc/net/tbtun/tunnels` shows the splits.
+  `tcp_read_sock()`'s loop flag is now set explicitly to a non-zero sentinel
+  (`desc.count = SIZE_MAX`) instead of accumulating consumed bytes in a
+  field the kernel tests for zero.
+- `host/test_rx_budget` pins the deadline boundary, batched reads with no
+  lost or duplicated byte, the resume truth table (budgeted stop, coalesced
+  wake, held record, stopping carrier), and the two-bit wake machine.
 
 ## [0.4.1] - 2026-11-09
 

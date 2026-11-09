@@ -2343,7 +2343,7 @@ cannot silently lose its atomicity again.
 |---|---|
 | capture | `capture_runs actor_calls submit_bytes tx wire err short` |
 | rx work | `rx_work_runs rx_drain_entries rx_drain_bytes rx_paused_skips rx_adopt_events rx_records carrier_write_space_runs poll_rescues` |
-| rx ready | `rx_ready_calls rx_reads rx_read_bytes rx_read_zero rx_resume rx_resume_busy rx_last_drained rx_proto rx_errs rx_last_err tx_submit_calls rx_delivered` |
+| rx ready | `rx_ready_calls rx_reads rx_read_bytes rx_read_zero rx_resume rx_resume_busy rx_last_drained rx_proto rx_errs rx_last_err tx_submit_calls rx_delivered rx_budget_yields` |
 | dbg | `dbg rcv_nxt copied after qlen allocf over copyf hiwat pdead prun pmoved p_nocar p_down p_stop p_empty p_qlen` |
 | live | `live rxq rxp txq txp pub_state pub_wmem pub_una pub_nxt car_wmem car_nxt car_copied car_rcvbuf car_sndbuf car_state car_stop car_ud car_ready car_ws txw_pend txw_busy` |
 | tx wake | `txwake txwake_busy txwork` |
