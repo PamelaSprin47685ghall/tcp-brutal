@@ -2275,6 +2275,23 @@ static void tbt_fec_tx_pump_mux(struct tbt_session *sess,
             break;
         }
         tx->outq_paused = false;
+        /* The mux owns the packetizer, so it also owns the lazy repair ring.
+         * Without this, every NACK on a mux block lands in
+         * replay_miss_no_ring and the hole becomes unrecoverable. Allocate
+         * outside ms_lock: the ~14 MiB ring may sleep. */
+        if (!tx->replay)
+        {
+            u32 pending;
+
+            spin_lock(&tx->ms_lock);
+            pending = tbt_ms_tx_queued(sess->fec_ms_tx);
+            spin_unlock(&tx->ms_lock);
+            if (pending && !tbt_fec_tx_replay_ensure(sess, tx))
+            {
+                tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
+                break;
+            }
+        }
         now = ktime_get_ns();
         spin_lock(&tx->ms_lock);
         queued = tbt_ms_tx_queued(sess->fec_ms_tx);
