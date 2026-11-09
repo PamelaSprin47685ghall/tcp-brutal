@@ -56,7 +56,7 @@
 #define IDLE_TIMEOUT_MS 8000
 #define UNLOAD_TIMEOUT_MS 10000
 #define PHASE_A_S 20
-#define PHASE_B_S 24
+#define PHASE_B_S 36
 #define DRAIN_S 10
 #define SEND_BYTES_PER_MS 8192u /* essentially unpaced; the drain handles the backlog */
 #define SETTLE_TIMEOUT_MS 15000
