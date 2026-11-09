@@ -285,8 +285,6 @@ struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
     n_par = n_data * (par->rate_den - par->rate_num) / par->rate_num;
     if (!n_par)
         return NULL;
-    if ((u64)codes * n_par > (u64)par->m * SCLC_SYM_PER_SHARE)
-        return NULL;
 
     share_bytes = (u16)((u32)par->n + par->m);
 
@@ -306,17 +304,8 @@ struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
     u->seed = par->seed;
     u->mem = sizeof(*u);
 
-    if (u->mapping == TBT_SCLC_MAP_INTERLEAVED)
-    {
-        u32 cnt[TBT_FEC_MAX_SHARES];
-
-        if (codes % par->n)
-            goto fail; /* exact fill needs C a multiple of n */
-        if (sclc_parity_counts(u, cnt) > SCLC_SYM_PER_SHARE)
-            goto fail;
-    }
-    if (u->mapping == TBT_SCLC_MAP_RANDOM && sclc_build_labels(u) != 0)
-        goto fail;
+    if (u->mapping == TBT_SCLC_MAP_INTERLEAVED && codes % par->n)
+        goto fail; /* exact fill needs C a multiple of n */
 
     u->g = sclc_zalloc((size_t)groups * sizeof(*u->g));
     if (!u->g)
@@ -342,6 +331,37 @@ struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
         g->code = gf16_build(&p, seed ^ SCLC_COEF_SALT, err, sizeof(err));
         if (!g->code)
             goto fail;
+        /*
+         * The graph decides the real parity count.  The rate arithmetic
+         * above overestimates it on the 18/14 and 22/10 ladder splits, and
+         * an underestimate would read past the staging buffer, so size the
+         * codec from group 0's graph and require every other group to
+         * agree.
+         */
+        if (gf16_n_data(g->code) != (int)n_data || gf16_n_par(g->code) <= 0)
+            goto fail; /* the share mapping assumes this payload size */
+        if (i == 0)
+        {
+            u->n_par = (u32)gf16_n_par(g->code);
+            u->nsym = n_data + u->n_par;
+            if ((u64)codes * u->n_par >
+                (u64)par->m * SCLC_SYM_PER_SHARE)
+                goto fail;
+            if (u->mapping == TBT_SCLC_MAP_INTERLEAVED)
+            {
+                u32 cnt[TBT_FEC_MAX_SHARES];
+
+                if (sclc_parity_counts(u, cnt) > SCLC_SYM_PER_SHARE)
+                    goto fail;
+            }
+            if (u->mapping == TBT_SCLC_MAP_RANDOM &&
+                sclc_build_labels(u) != 0)
+                goto fail;
+        }
+        else if (gf16_n(g->code) != (int)u->nsym ||
+                 gf16_n_par(g->code) != (int)u->n_par)
+            goto fail; /* every group must agree on the block size */
+
         g->recv_b = sclc_zalloc((size_t)GF16_BATCH * u->nsym);
         g->erased_b = sclc_zalloc((size_t)GF16_BATCH * u->nsym);
         g->out_b = g->recv_b;
@@ -510,6 +530,7 @@ int tbt_sclc_uplink_encode(struct tbt_sclc_uplink *u, u16 group,
 
     for (c = 0; c < u->codes; c++)
     {
+        memset(g->codebuf, 0, u->nsym);
         for (j = 0; j < u->n_data; j++)
         {
             sh = sclc_payload_share(u, c, j);

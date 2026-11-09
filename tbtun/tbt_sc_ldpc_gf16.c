@@ -130,7 +130,6 @@ struct gf16_code {
     int batch;
     uint16_t *bcx;  /* batch * n_chk */
     uint8_t *bval;  /* batch * n */
-    uint8_t *bout;  /* batch * n */
     uint16_t *bq;   /* batch * n_chk */
 
     /* 64-lane bit-sliced encoder scratch.  vp holds four uint64 planes per
@@ -165,7 +164,6 @@ void gf16_free(gf16_code *c)
     sclc_free(c->queue);
     sclc_free(c->bcx);
     sclc_free(c->bval);
-    sclc_free(c->bout);
     sclc_free(c->bq);
     sclc_free(c->mul_mask);
     sclc_free(c);
@@ -328,11 +326,10 @@ gf16_code *gf16_build(const sc_params *p, uint64_t coef_seed, char *err,
     c->bcx = zalloc((size_t)GF16_BATCH * (size_t)c->n_chk,
                     sizeof(uint16_t));
     c->bval = zalloc((size_t)GF16_BATCH * (size_t)c->n, 1);
-    c->bout = zalloc((size_t)GF16_BATCH * (size_t)c->n, 1);
     c->bq = zalloc((size_t)GF16_BATCH * (size_t)c->n_chk,
                    sizeof(uint16_t));
     if (!c->cx || !c->val || !c->known || !c->queue || !c->bcx ||
-        !c->bval || !c->bout || !c->bq) {
+        !c->bval || !c->bq) {
         snprintf(err, errlen, "out of memory");
         goto fail;
     }
@@ -365,7 +362,7 @@ gf16_code *gf16_build(const sc_params *p, uint64_t coef_seed, char *err,
           (size_t)c->n_chk * sizeof(uint16_t) + (size_t)c->n +
           (size_t)c->n + (size_t)c->n_chk * sizeof(uint16_t) +
           (size_t)GF16_BATCH * ((size_t)c->n_chk * sizeof(uint16_t) +
-                                (size_t)c->n * 2 +
+                                (size_t)c->n +
                                 (size_t)c->n_chk * sizeof(uint16_t)) +
           16u * 16u * sizeof(uint64_t);
     c->mem_bytes = mem;
@@ -917,6 +914,7 @@ void gf16_decode_batch(gf16_code *c, int B, const uint8_t *recv_b,
 {
     int n = c->n, nchk = c->n_chk;
     int cw, ck, k;
+    int round = 0;
     int unknown[GF16_BATCH];
     int qh[GF16_BATCH], qt[GF16_BATCH];
     long visits[GF16_BATCH];
@@ -948,6 +946,7 @@ void gf16_decode_batch(gf16_code *c, int B, const uint8_t *recv_b,
     for (;;) {
         int active = 0;
 
+        round++;
         for (cw = 0; cw < B; cw++) {
             uint16_t *cx = c->bcx + (size_t)cw * nchk;
             uint8_t *val = c->bval + (size_t)cw * n;
@@ -994,8 +993,16 @@ void gf16_decode_batch(gf16_code *c, int B, const uint8_t *recv_b,
                 if (c2 == ck)
                     continue;
                 cx[c2] = (uint16_t)((cx[c2] - 0x100u) ^ gf_mul(coef, x));
-                queue[t] = (uint16_t)c2;
-                t += (int)((cx[c2] >> 8) == 1);
+                /*
+                 * The store is only valid below nchk.  t reaches nchk
+                 * exactly when every check is already queued, and the
+                 * branch is then taken once per remaining edge; it stays
+                 * predictable because t < nchk almost always holds.
+                 */
+                if (t < nchk) {
+                    queue[t] = (uint16_t)c2;
+                    t += (int)((cx[c2] >> 8) == 1);
+                }
             }
             qh[cw] = q;
             qt[cw] = t;
@@ -1006,6 +1013,7 @@ void gf16_decode_batch(gf16_code *c, int B, const uint8_t *recv_b,
 
     for (cw = 0; cw < B; cw++) {
         st_b[cw].edge_visits = visits[cw];
+        st_b[cw].rounds = round;
         gf16_slot_finish(c, cw, out_b + (size_t)cw * n, target_data_only,
                          max_core, unknown[cw], &st_b[cw]);
     }

@@ -12,7 +12,7 @@ and moves independently of the module version.
   table. The check order, coefficients and output are bit-identical to
   `gf16_encode()`, and the wire layout is unchanged: the gather and scatter
   still advance the share offsets codeword by codeword. The decoder keeps
-  its scalar peel but peels four codewords in lockstep, so independent
+  its scalar peel but peels two codewords in lockstep, so independent
   pointer walks overlap their cache misses. Host, pinned core, process CPU
   time, p=0.30: rate 1/4 encode 28.7 -> 45.9 MB/s and decode 7.4 ->
   8.8 MB/s; rate 7/16 encode 56.3 -> 80.4 MB/s and decode 12.0 ->
