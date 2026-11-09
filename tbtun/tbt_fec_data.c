@@ -981,6 +981,18 @@ static bool tbt_fec_out_drain_one(struct tbt_session *sess, u16 idx,
     n = tbt_fec_out_batch_peek(sess, idx, recs, lens, outs);
     if (!n)
         return false;
+    /* The batch writer hands records straight to the carrier socket, so it
+     * bypasses the per-record drop injector in tbt_fec_out_try(). With debug
+     * loss armed on this carrier, take the fallback path: the injector must
+     * see every share, or a 25% run silently carries zero loss (and the
+     * adaptive law never sees the loss it is asked to track). */
+    if (READ_ONCE(sess->fec_drop_ppm[idx]))
+    {
+        tbt_fec_out_batch_put(outs, n);
+        tbt_fec_out_flush_carrier(sess, idx, &again);
+        *blocked = again;
+        return !tbt_fec_out_queue_empty(sess, idx);
+    }
     c = tbt_fec_out_carrier_ready(sess, idx);
     if (!c)
     {
@@ -1894,6 +1906,21 @@ static void tbt_fec_tx_pump(struct tbt_session *sess, struct tbt_fec_flow *f)
     st = tbt_stream_get(sess, f->sid, false, false);
     if (!st)
         return;
+
+    /* SC-LDPC announces its transmit shape with a per-flow INIT CFG, and the
+     * receiver installs it from w_fec_rx asynchronously. Pumping shares
+     * first makes the peer drop every one of them as a stale shape; the
+     * repair burst then looks like channel loss to the brand-new control law
+     * and pins the first rate decision low. Hold the packetizer until the
+     * peer acknowledged INIT, or the bounded retry gave up. Grouped flows
+     * never run the INIT handshake, so they are exempt. */
+    if (sess->fec_sclc && sess->n_fec_flows <= 1 && tx->sid &&
+        !tx->init_done)
+    {
+        tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
+        tbt_stream_put(st);
+        return;
+    }
 
     /* A closing stream caps replay admission at
      * TBT_FEC_REPLAY_CLOSE_BYTES_MAX: the last block's repair must fit the
@@ -4656,6 +4683,13 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess,
         }
         return;
     }
+    /* INIT is not a switch: it installs the peer's asymmetric shape (the
+     * downlink 1x256 and uplink 8x32 differ) before the first share can be
+     * placed. Living only in the adaptive=off branch left every adaptive
+     * pair decoding the peer's shares with its own configured codec, so no
+     * block ever completed and no FBK could start the control law. */
+    if (rx->init_pending)
+        tbt_fec_rx_init_tick(sess, f);
     tbt_fec_rx_switch_tick(sess, f);
     memset(rx->alive_bm, 0, sizeof(rx->alive_bm));
     for (i = 0; i < sess->n_car; i++)
@@ -6251,6 +6285,17 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
         }
         if (rx->switch_state == TBT_FEC_SW_APPLIED)
             rx->commit_pending = true;
+    }
+    /* Freeze the shape the stream started in before any switch can move
+     * base_pkt. FIN validates its pkt_base (the stream's first packet, which
+     * predates every later switch) against this origin and span. Capturing
+     * them lazily at FIN time measured the post-switch origin, so every FIN
+     * of a stream that had adapted failed alignment and the peer reset the
+     * stream instead of delivering its tail. */
+    if (!rx->stream_span)
+    {
+        rx->stream_span = (u64)rx->groups * rx->n;
+        rx->stream_base_pkt = rx->base_pkt;
     }
     /* The reorder window belongs to one stream. A reset leaves it empty
      * (rebase_pending), and a record of another sid may only move it once the
