@@ -286,7 +286,7 @@ $(HOST_FEC): $(HOST_FEC_SRCS) $(HOST_FEC_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_FEC_SRCS)
 
 $(HOST_MS): $(HOST_MS_SRCS) $(HOST_MS_HDRS)
-	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_MS_SRCS)
+	$(HOSTCC) $(HOST_CFLAGS) -pthread -I tbtun -o $@ $(HOST_MS_SRCS)
 
 $(HOST_FEC_RX): $(HOST_FEC_RX_SRCS) $(HOST_FEC_RX_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_FEC_RX_SRCS)
@@ -376,7 +376,7 @@ host/test_fec_san: $(HOST_FEC_SRCS) $(HOST_FEC_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_FEC_SRCS)
 
 host/test_fec_ms_san: $(HOST_MS_SRCS) $(HOST_MS_HDRS)
-	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_MS_SRCS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -pthread -I tbtun -o $@ $(HOST_MS_SRCS)
 
 host/test_close_wake_san: $(HOST_CLOSE_WAKE_SRCS) $(HOST_CLOSE_WAKE_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_CLOSE_WAKE_SRCS)

@@ -78,6 +78,54 @@ int tbt_ms_hdr_unpack(const u8 in[TBT_MS_HDR_LEN], struct tbt_ms_hdr *h);
 int tbt_ms_hdr_check(const struct tbt_ms_hdr *h, u32 max_payload);
 
 /* ------------------------------------------------------------------ *
+ * Shared-plane admission ledger
+ *
+ * The one SC-LDPC plane is referenced by carriers that are still admitting
+ * a stream (pending) and by streams whose mux leg is attached (refs). The
+ * plane is unlinked only when both reach zero. The helpers are plain
+ * arithmetic: every caller serialises updates with the flow's allocation
+ * lock (fec_alloc_lock + sess->lock). They live here, not in the kernel
+ * file, so host tests can drive the attach/abort interleavings directly.
+ * ------------------------------------------------------------------ */
+
+struct tbt_ms_admit
+{
+    u16 pending;
+    u16 refs;
+};
+
+static inline void tbt_ms_admit_claim(struct tbt_ms_admit *a)
+{
+    if (a->pending != (u16)~0u)
+        a->pending++;
+}
+
+static inline void tbt_ms_admit_abort(struct tbt_ms_admit *a)
+{
+    if (a->pending)
+        a->pending--;
+}
+
+static inline void tbt_ms_admit_attach(struct tbt_ms_admit *a)
+{
+    if (a->pending)
+        a->pending--;
+    if (a->refs != (u16)~0u)
+        a->refs++;
+}
+
+static inline void tbt_ms_admit_detach(struct tbt_ms_admit *a)
+{
+    if (a->refs)
+        a->refs--;
+}
+
+static inline bool tbt_ms_admit_last(const struct tbt_ms_admit *a)
+{
+    return !a->pending && !a->refs;
+}
+
+/* ------------------------------------------------------------------ *
  * Sender
  *
  * One sender owns every outgoing stream of one session direction. Bytes are
@@ -165,11 +213,11 @@ struct tbt_ms_rx;
 struct tbt_ms_rx *tbt_ms_rx_new(u16 max_streams, u32 window);
 void tbt_ms_rx_free(struct tbt_ms_rx *rx);
 
-/* Optional: mark a stream before its first subframe. feed() also creates a
- * leg on demand for an unknown sid, bounded by max_streams. */
+/* Optional: mark a stream before its first subframe. feed() never creates a
+ * leg for an unknown sid; only this call does, bounded by max_streams. */
 int tbt_ms_rx_open(struct tbt_ms_rx *rx, u64 sid);
-/* Drop the leg and its bytes. A later subframe for the sid starts a new leg
- * only if it is a DATA or FIN frame; a late frame is ignored after reset. */
+/* Drop the leg and its bytes. A later subframe for the sid is ignored until
+ * an explicit open creates a new leg. */
 int tbt_ms_rx_close(struct tbt_ms_rx *rx, u64 sid);
 
 /* Consume up to len bytes of the shared stream. Returns the consumed count;

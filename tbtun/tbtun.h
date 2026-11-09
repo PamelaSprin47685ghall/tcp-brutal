@@ -53,6 +53,8 @@
 #include "tbt_uapi.h"
 /* The adaptive shape/switch structs and their mapping helpers. */
 #include "tbt_fec.h"
+/* The pure mux core also owns the shared-plane admission ledger. */
+#include "tbt_fec_ms.h"
 #include <linux/version.h>
 
 /* system_dfl_wq exists from 6.5. Its documented semantics are "unbound, not
@@ -1019,12 +1021,11 @@ struct tbt_fec_flow
     /* 0 = free slot, 1 = active, 2 = draining, 3 = dead. Only the control
      * path writes it; carrier RX reads it to refuse a dying flow. */
     u8 state;
-    /* SC-LDPC shared plane: ms_pending counts admitted references that have
-     * not attached yet; ms_refs counts attached mux legs. The plane is
+    /* SC-LDPC shared plane: pending counts admitted references that have
+     * not attached yet; refs counts attached mux legs. The plane is
      * unlinked only when both reach zero. A duplicate OPEN takes a pending
      * slot and must give it back through tbt_fec_flow_abort(). */
-    u16 ms_pending;
-    u16 ms_refs;
+    struct tbt_ms_admit admit;
     struct tbt_fec_tx *tx;
     struct tbt_fec_rx *rx;
     /* Final reference may be dropped by a carrier RX lookup, where freeing a
@@ -1262,8 +1263,8 @@ struct tbt_session
     struct tbt_fec_sclc_shape fec_sclc_shape;
     /* SC-LDPC carries every stream on one FEC plane, so the payload byte
      * stream is multiplexed: one TX packer and one RX parser per session.
-     * fec_ms_refs counts the streams attached to the shared flow; the flow
-     * is destroyed only when the last one detaches. */
+     * The shared flow's admission ledger counts admitted carriers and
+     * attached legs; the flow is destroyed only when both reach zero. */
     struct tbt_ms_tx *fec_ms_tx;
     struct tbt_ms_rx *fec_ms_rx;
     /* Diagnostic counters for the subframe layer (0.5.0). */
@@ -2129,6 +2130,9 @@ void tbt_fec_flow_put(struct tbt_fec_flow *f);
 /* Bind a stream to its flow (one reference moves to the stream) and release
  * it at detach. A nonzero return consumed the admission reference already. */
 int tbt_fec_flow_attach(struct tbt_stream *st, struct tbt_fec_flow *f);
+/* Take one admission slot for a stream whose flow came from lookup. Fails
+ * with -ESTALE when the plane died before the slot could be counted. */
+int tbt_fec_flow_claim_slot(struct tbt_session *sess, struct tbt_fec_flow *f);
 void tbt_fec_flow_abort(struct tbt_session *sess, struct tbt_fec_flow *f);
 void tbt_fec_flow_detach(struct tbt_stream *st);
 /* Build the next free group bitmap for a new flow. Returns the group count,
