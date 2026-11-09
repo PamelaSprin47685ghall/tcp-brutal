@@ -355,7 +355,7 @@ struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
                 goto fail;
             if (u->mapping == TBT_SCLC_MAP_INTERLEAVED)
             {
-                u32 cnt[TBT_FEC_MAX_SHARES];
+                u16 cnt[TBT_FEC_MAX_SHARES];
 
                 if (sclc_parity_counts(u, cnt) > SCLC_SYM_PER_SHARE)
                     goto fail;
