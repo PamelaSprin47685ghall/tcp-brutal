@@ -1240,6 +1240,13 @@ void tbt_stream_detach_from_session(struct tbt_stream *st)
     struct tbt_session *sess = st->sess;
     bool detached;
 
+    /* Release the FEC flow before the readiness gate opens. A reader that
+     * sees streams_active=0 must see the plane unlinked, not "about to be":
+     * a sequential stream admitted inside this window shared a plane whose
+     * only owner was already leaving, and the peer dropped every record
+     * under the old sid. */
+    tbt_fec_flow_detach(st);
+
     spin_lock(&sess->lock);
     detached = test_and_clear_bit(TBT_STREAM_F_ACTIVE, &st->attached);
     if (detached && sess->n_active)
@@ -1248,11 +1255,6 @@ void tbt_stream_detach_from_session(struct tbt_stream *st)
         WRITE_ONCE(sess->far_sid, 0);
     tbt_stream_tombstone_locked(st);
     spin_unlock(&sess->lock);
-
-    /* Release the FEC flow with the stream, not at the tombstone/reap
-     * deadline: the next sequential stream must be able to admit its flow
-     * immediately, and n_fec_flows must reach zero here. */
-    tbt_fec_flow_detach(st);
 
     /* A graceful FIN path never queues w_kill, so without this the reaper
      * would never run and the tombstone (and its socket) would stay forever.
@@ -1310,8 +1312,6 @@ static void tbt_tx_purge_stream(struct tbt_session *sess, struct tbt_stream *st)
 
 void tbt_stream_kill(struct tbt_stream *st, u8 reason)
 {
-    struct sock *sk = READ_ONCE(st->sk);
-
     /* One winner.  A read-then-write let two carriers both queue w_kill and
      * leak one reference. */
     if (test_and_set_bit(TBT_STREAM_F_DYING, &st->attached))
@@ -1329,13 +1329,6 @@ void tbt_stream_kill(struct tbt_stream *st, u8 reason)
      * space and stamps the tombstone deadline. */
     tbt_stream_detach_from_session(st);
     tbt_tx_purge_stream(st->sess, st);
-
-    /* Wake anything asleep on the socket first: a delivery blocked in
-     * tcp_sendmsg_locked() would otherwise keep w_drain running and the reset
-     * work would wait forever in cancel_work_sync(). The reset close itself
-     * sleeps (detach, socket release), so it runs in a work item. */
-    if (sk && sk->sk_socket)
-        kernel_sock_shutdown(sk->sk_socket, SHUT_RDWR);
 
     /* w_kill can outlive the hash reference; tbt_stream_schedule() takes the
      * reference the work entry will return. A refused schedule means the

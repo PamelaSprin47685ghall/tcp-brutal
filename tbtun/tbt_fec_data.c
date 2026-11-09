@@ -7872,7 +7872,13 @@ struct tbt_fec_flow *tbt_fec_flow_admit_mask(struct tbt_session *sess, u64 sid,
     f = sess->fec_primary;
     if (f && !f->sid && sess->n_fec_flows == 1)
     {
-        if (!tbt_fec_primary_mask_match(sess->fec_sclc, f->group_mask, mask))
+        /* The OPEN names the peer's TX bitmap, which is this side's RX
+         * bitmap. The two directions are allowed to differ (1x256 downlink
+         * against 8x32 uplink), so for SC-LDPC the local TX mask is not the
+         * thing to compare: nothing has bound a peer bitmap yet. A repeated
+         * OPEN is checked against rx->group_mask by the caller. */
+        if (!sess->fec_sclc &&
+            !tbt_fec_primary_mask_match(false, f->group_mask, mask))
             f = ERR_PTR(-EPROTO);
         else
         {
