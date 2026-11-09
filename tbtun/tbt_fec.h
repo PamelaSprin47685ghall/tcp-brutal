@@ -30,15 +30,57 @@
 
 #ifdef __KERNEL__
 #include <linux/errno.h>
+#include <linux/errno.h>
+#include <linux/slab.h>
+#include <linux/vmalloc.h>
 #include <linux/string.h>
 #else
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 #endif
 
 /* S: one packet slot on the wire, the only packet size this cut encodes.
  * tbt_fec_data.c and tbt_fec_ack_bytes() must agree on it. */
 #define TBT_FEC_S TBT_FEC_PAYLOAD_MAX
+
+/* One FEC drain write carries at most this many complete HTTP frames. Three
+ * frames are 24,780 B and stay in the kmalloc-32k cache (order-3); eight were
+ * 66,080 B and needed an order-5 page block, whose allocation failed on the
+ * 955 MB far host and stalled the drain under direct reclaim. */
+#define TBT_FEC_BATCH_MAX 3
+
+/* Per-carrier record assembler capacity: the larger of the ARQ and FEC record
+ * maxima. Shared with host tests so the memory ledger cannot drift from the
+ * buffers the carrier actually allocates. */
+#define TBT_PARSER_BUF (TBT_FEC_REC_MAX > TBT_REC_MAX ? TBT_FEC_REC_MAX : TBT_REC_MAX)
+
+/* Long-lived planes above this size are mapped by vmalloc. They are touched
+ * in sequential bursts and never need physical contiguity; keeping them out
+ * of the kmalloc caches stops a 256-carrier session from holding dozens of
+ * order-6..9 page blocks, which is what fragmented the 955 MB far host.
+ * Below the threshold kvzalloc stays the single small-object path. */
+#define TBT_FEC_VMALLOC_MIN (32u * 1024u)
+
+static inline bool tbt_fec_plane_uses_vmalloc(size_t len)
+{
+    return len >= TBT_FEC_VMALLOC_MIN;
+}
+
+/* Zeroed allocation for FEC planes. kvfree() releases either kind. Process
+ * context only: vzalloc() may sleep. */
+static inline void *tbt_fec_vzalloc(size_t len)
+{
+#ifdef __KERNEL__
+    if (!len)
+        len = 1;
+    if (tbt_fec_plane_uses_vmalloc(len))
+        return vzalloc(len);
+    return kvzalloc(len, GFP_KERNEL);
+#else
+    return calloc(1, len ? len : 1);
+#endif
+}
 
 /* ------------------------------------------------------------------ *
  * 48-byte share header
@@ -125,6 +167,16 @@ static inline bool tbt_fec_fin_valid(u64 pkt_end, u64 pkt_base, u64 span)
  * uses seed 0; chaining uses the previous return value as the next seed. */
 u32 tbt_fec_crc32c(u32 seed, const void *data, size_t len);
 
+#ifndef __KERNEL__
+/* Host-only halves of the CRC32C contract. The public call above dispatches
+ * to the instruction path when the CPU has one, and to the portable table
+ * otherwise. The host tests compare the two bit for bit; the module keeps
+ * only crc32c(). */
+u32 tbt_fec_crc32c_soft(u32 seed, const void *data, size_t len);
+u32 tbt_fec_crc32c_hw(u32 seed, const void *data, size_t len);
+int tbt_fec_crc32c_hw_available(void);
+#endif
+
 /* Fill payload_crc32c and header_crc32c. `payload` is payload_len bytes; it
  * may be NULL only when payload_len is 0. Returns 0 or -EINVAL. */
 int tbt_fec_hdr_seal(struct tbt_fec_hdr *h, const u8 *payload);
@@ -132,6 +184,15 @@ int tbt_fec_hdr_seal(struct tbt_fec_hdr *h, const u8 *payload);
 /* Verify header_crc32c first, then payload_crc32c. Returns 0, -EBADMSG on a
  * CRC mismatch, or -EINVAL on a NULL payload with a nonzero length. */
 int tbt_fec_hdr_verify(const struct tbt_fec_hdr *h, const u8 *payload);
+
+/* Locate and validate one complete FEC record header in rec[0..len). This is
+ * the receive gate: len < TBT_FEC_HDR_LEN is refused before any read, then
+ * unpack, structural check and header_crc32c, in that order. Returns 0 and
+ * fills *out when the header is safe to use, -EPROTO for framing, or
+ * -EBADMSG for a header CRC failure. `out` may be NULL. The payload CRC is
+ * separate because the body is not always buffered with the header. */
+int tbt_fec_rec_check(const u8 *rec, size_t len, u16 max_payload,
+                      struct tbt_fec_hdr *out);
 
 /* ------------------------------------------------------------------ *
  * 256-bit carrier bitmap
@@ -365,7 +426,7 @@ struct tbt_fec_alloc
 {
     u32 epoch;
     u8 group_mask[TBT_FEC_BITMAP_BYTES];
-    u8 flags; /* TBT_FEC_ALLOC_F_ACK / _DONE */
+    u8 flags; /* TBT_FEC_ALLOC_F_ACK / _DONE / _COMMITTED / _ABORT */
     u64 switch_pkt;
     u64 block_base;
     u32 crc32c;
@@ -850,7 +911,11 @@ static inline bool tbt_fec_nack_due(struct tbt_fec_nack_state *st, u64 now_ns,
 void tbt_fec_nack_reset(struct tbt_fec_nack_state *st);
 
 int tbt_fec_cfg_pack(const struct tbt_fec_cfg *c, u8 out[TBT_FEC_CFG_LEN]);
-int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], struct tbt_fec_cfg *c);
+/* `carriers` is the receiving session's effective carrier count. The body's
+ * groups must name exactly `carriers / (n + m)` groups, one share per
+ * carrier; the old fixed 256 rejected every 32/64/128-carrier INIT/CFG. */
+int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], u16 carriers,
+                       struct tbt_fec_cfg *c);
 
 int tbt_fec_fbk_pack(const struct tbt_fec_fbk *f, u8 out[TBT_FEC_FBK_LEN]);
 int tbt_fec_fbk_unpack(const u8 in[TBT_FEC_FBK_LEN], struct tbt_fec_fbk *f);
@@ -1395,12 +1460,10 @@ static inline void tbt_fec_alloc_sm_tx_swapped(struct tbt_fec_alloc_sm *sm,
         return;
     sm->tx_swapped = true;
     if (sm->state == TBT_FEC_ALLOC_WAIT)
+    {
         sm->state = TBT_FEC_ALLOC_COMMIT;
-    /* Measure the COMMIT budget from the swap myself: the normal path sets
-     * COMMIT here, so the WAIT branch below never refreshes start_ns and a
-     * slow WAIT would otherwise fail the commit early. */
-    sm->start_ns = now;
-    sm->last_send_ns = now;
+        sm->start_ns = now;
+    }
 }
 
 static inline void tbt_fec_alloc_sm_abort_ack(struct tbt_fec_alloc_sm *sm)
@@ -1471,7 +1534,10 @@ static inline u32 tbt_fec_alloc_sm_step(struct tbt_fec_alloc_sm *sm, u64 now,
     case TBT_FEC_ALLOC_WAIT:
     alloc_wait:
         if (sm->tx_swapped)
+        {
             sm->state = TBT_FEC_ALLOC_COMMIT;
+            sm->start_ns = now;
+        }
         else if (sm->peer_done)
             act |= TBT_FEC_ALLOC_ACT_SWAP;
         /* A peer that never answers must not own this flow forever: after
@@ -2007,6 +2073,30 @@ extern const struct tbt_fec_ops tbt_fec_ops_sclc;
 #define TBT_FEC_SCLC_L_DOWN 8
 #define TBT_FEC_SCLC_BLOCK_UP 128
 #define TBT_FEC_SCLC_L_UP 16
+
+/* The binary downlink builds exactly these n/m splits of the 256 shares;
+ * the transmitted rate is n / 256. The order is the rate ladder used by
+ * tbt_fec_adapt_sclc.c: 25, 30, 40, 50, 60 and 70 percent. */
+static inline bool tbt_fec_sclc_down_split(u16 n, u16 m)
+{
+    switch (n)
+    {
+    case 64:
+        return m == 192;
+    case 76:
+        return m == 180;
+    case 102:
+        return m == 154;
+    case 128:
+        return m == 128;
+    case 151:
+        return m == 105;
+    case 178:
+        return m == 78;
+    default:
+        return false;
+    }
+}
 
 enum tbt_fec_sclc_variant
 {

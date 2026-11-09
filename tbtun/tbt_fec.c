@@ -27,11 +27,7 @@
 
 static void *tbt_fec_alloc(size_t len)
 {
-#ifdef __KERNEL__
-    return kvzalloc(len, GFP_KERNEL);
-#else
-    return calloc(1, len);
-#endif
+    return tbt_fec_vzalloc(len);
 }
 
 static void tbt_fec_free(void *p)
@@ -58,6 +54,7 @@ u32 tbt_fec_crc32c(u32 seed, const void *data, size_t len)
 
 #else
 
+/* Portable fallback: one reflected Castagnoli lookup per byte. */
 static u32 tbt_crc32c_table[256];
 static int tbt_crc32c_ready;
 
@@ -77,7 +74,7 @@ static void tbt_crc32c_init(void)
     tbt_crc32c_ready = 1;
 }
 
-u32 tbt_fec_crc32c(u32 seed, const void *data, size_t len)
+u32 tbt_fec_crc32c_soft(u32 seed, const void *data, size_t len)
 {
     const u8 *p = data;
     u32 crc = ~seed;
@@ -89,6 +86,126 @@ u32 tbt_fec_crc32c(u32 seed, const void *data, size_t len)
     while (len--)
         crc = tbt_crc32c_table[(crc ^ *p++) & 0xff] ^ (crc >> 8);
     return ~crc;
+}
+
+/*
+ * Hardware path. The instruction updates the same reflected Castagnoli
+ * register as the table, so the init complement and the final xor stay in the
+ * caller and both paths chain with any seed.
+ *
+ * x86_64 uses SSE4.2 crc32q behind a target attribute: the host build keeps
+ * its baseline ISA and the dispatcher checks the CPU at run time. aarch64
+ * uses the optional ARMv8 CRC32X extension behind HWCAP_CRC32; a CPU without
+ * it, or a compiler without the target attribute, keeps the table path.
+ */
+#if defined(__x86_64__)
+
+#include <nmmintrin.h>
+
+#define TBT_CRC32C_HW 1
+
+__attribute__((target("sse4.2"))) static u32
+tbt_crc32c_hw_update(u32 crc, const u8 *p, size_t len)
+{
+    /* crc32q reads memory, but an aligned pointer lets the core feed it one
+     * load per instruction instead of splitting a cache line. */
+    while (((uintptr_t)p & 7) && len)
+    {
+        crc = (u32)_mm_crc32_u8(crc, *p++);
+        len--;
+    }
+    while (len >= 8)
+    {
+        u64 v;
+
+        memcpy(&v, p, sizeof(v));
+        crc = (u32)_mm_crc32_u64(crc, v);
+        p += 8;
+        len -= 8;
+    }
+    while (len--)
+        crc = (u32)_mm_crc32_u8(crc, *p++);
+    return crc;
+}
+
+static int tbt_crc32c_hw_detect(void)
+{
+    return __builtin_cpu_supports("sse4.2") ? 1 : 0;
+}
+
+/* GCC documents the extension-only target string from 9 on; old compilers,
+ * Clang, a non-Linux libc without getauxval, and a big-endian ABI all keep
+ * the table path (CRC32X consumes the register's native byte order). */
+#elif defined(__aarch64__) && defined(__linux__) && defined(__GNUC__) && \
+    !defined(__clang__) && __GNUC__ >= 9 && defined(__BYTE_ORDER__) &&    \
+    __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+
+#include <arm_acle.h>
+#include <asm/hwcap.h>
+#include <sys/auxv.h>
+
+#define TBT_CRC32C_HW 1
+
+__attribute__((target("+crc"))) static u32
+tbt_crc32c_hw_update(u32 crc, const u8 *p, size_t len)
+{
+    while (((uintptr_t)p & 7) && len)
+    {
+        crc = __crc32cb(crc, *p++);
+        len--;
+    }
+    while (len >= 8)
+    {
+        u64 v;
+
+        memcpy(&v, p, sizeof(v));
+        crc = __crc32cd(crc, v);
+        p += 8;
+        len -= 8;
+    }
+    while (len--)
+        crc = __crc32cb(crc, *p++);
+    return crc;
+}
+
+static int tbt_crc32c_hw_detect(void)
+{
+    return (getauxval(AT_HWCAP) & (unsigned long)HWCAP_CRC32) != 0;
+}
+
+#endif
+
+int tbt_fec_crc32c_hw_available(void)
+{
+#ifdef TBT_CRC32C_HW
+    static int state = -1; /* two writers store the same value: benign race */
+
+    if (state < 0)
+        state = tbt_crc32c_hw_detect();
+    return state;
+#else
+    return 0;
+#endif
+}
+
+u32 tbt_fec_crc32c_hw(u32 seed, const void *data, size_t len)
+{
+    if (!len)
+        return seed;
+#ifdef TBT_CRC32C_HW
+    return ~tbt_crc32c_hw_update(~seed, data, len);
+#else
+    return tbt_fec_crc32c_soft(seed, data, len);
+#endif
+}
+
+u32 tbt_fec_crc32c(u32 seed, const void *data, size_t len)
+{
+    if (!len)
+        return seed;
+    if (tbt_fec_crc32c_hw_available())
+        return tbt_fec_crc32c_hw(seed, data, len);
+    return tbt_fec_crc32c_soft(seed, data, len);
 }
 
 #endif
@@ -367,6 +484,25 @@ int tbt_fec_hdr_verify(const struct tbt_fec_hdr *h, const u8 *payload)
     return 0;
 }
 
+int tbt_fec_rec_check(const u8 *rec, size_t len, u16 max_payload,
+                      struct tbt_fec_hdr *out)
+{
+    struct tbt_fec_hdr h;
+    u8 buf[TBT_FEC_HDR_LEN];
+
+    if (!rec || len < TBT_FEC_HDR_LEN)
+        return -EPROTO;
+    if (tbt_fec_hdr_unpack(rec, &h) || tbt_fec_hdr_check(&h, max_payload))
+        return -EPROTO;
+    if (tbt_fec_hdr_pack(&h, buf))
+        return -EPROTO;
+    if (tbt_fec_crc32c(0, buf, TBT_FEC_H_HDRCRC) != h.header_crc32c)
+        return -EBADMSG;
+    if (out)
+        *out = h;
+    return 0;
+}
+
 /* ------------------------------------------------------------------ *
  * 256-bit carrier bitmap
  * ------------------------------------------------------------------ */
@@ -481,24 +617,28 @@ int tbt_fec_alloc_unpack(const u8 in[TBT_FEC_ALLOC_LEN],
 
     if (!in || !a)
         return -EPROTO;
+    want = tbt_fec_crc32c(0, in, TBT_FEC_ALLOC_CRC_BYTES);
+    if (want != tbt_get_u32(in + TBT_FEC_ALLOC_CRC))
+        return -EPROTO;
     a->epoch = tbt_get_u32(in + TBT_FEC_ALLOC_EPOCH);
     memcpy(a->group_mask, in + TBT_FEC_ALLOC_GROUPS, TBT_FEC_BITMAP_BYTES);
     a->flags = in[TBT_FEC_ALLOC_FLAGS];
+    /* Reserved bytes and the trailing word are part of the body contract,
+     * not free space: a sender that sets one is not speaking this revision.
+     * reserved2 sits outside the CRC, so it needs its own check. */
+    if (in[TBT_FEC_ALLOC_RESERVED] || in[TBT_FEC_ALLOC_RESERVED + 1] ||
+        in[TBT_FEC_ALLOC_RESERVED + 2])
+        return -EPROTO;
+    if (tbt_get_u32(in + TBT_FEC_ALLOC_RESERVED2) != 0)
+        return -EPROTO;
     if (a->flags & ~TBT_FEC_ALLOC_F_MASK)
         return -EPROTO;
-    /* Reserved bytes are covered by the CRC, but a peer that fills them is
-     * speaking a body this version does not understand: refuse it instead of
-     * silently ignoring the extension. */
-    if (in[TBT_FEC_ALLOC_RESERVED] || in[TBT_FEC_ALLOC_RESERVED + 1] ||
-        in[TBT_FEC_ALLOC_RESERVED + 2] ||
-        tbt_get_u32(in + TBT_FEC_ALLOC_RESERVED2))
+    /* A body that names no physical group cannot move a flow anywhere. */
+    if (!tbt_fec_bitmap_count(a->group_mask))
         return -EPROTO;
     a->switch_pkt = tbt_get_u64(in + TBT_FEC_ALLOC_SWITCH_PKT);
     a->block_base = tbt_get_u64(in + TBT_FEC_ALLOC_BLOCK_BASE);
     a->crc32c = tbt_get_u32(in + TBT_FEC_ALLOC_CRC);
-    want = tbt_fec_crc32c(0, in, TBT_FEC_ALLOC_CRC_BYTES);
-    if (want != a->crc32c)
-        return -EPROTO;
     return 0;
 }
 
@@ -807,13 +947,14 @@ int tbt_fec_cfg_pack(const struct tbt_fec_cfg *c, u8 out[TBT_FEC_CFG_LEN])
     return 0;
 }
 
-int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], struct tbt_fec_cfg *c)
+int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], u16 carriers,
+                       struct tbt_fec_cfg *c)
 {
     u32 crc;
     u32 shares;
     u16 n, m, groups;
 
-    if (!in || !c)
+    if (!in || !c || !carriers || carriers > TBT_FEC_MAX_CARRIERS)
         return -EINVAL;
     /* The CRC covers every field before the reserved word, so verify it
      * before trusting n/m/groups or the switch coordinates. */
@@ -874,10 +1015,12 @@ int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], struct tbt_fec_cfg *c)
         if (c->w > 1 && c->d == c->w)
             return -EPROTO;
     }
-    /* groups is the carrier geometry: one share per carrier, so n+m must
-     * divide the 256 carriers and groups must be exactly the quotient. */
-    if (!groups || (TBT_FEC_MAX_CARRIERS % shares) ||
-        groups != TBT_FEC_MAX_CARRIERS / shares)
+    /* groups is the carrier geometry: one share per carrier, so the body
+     * must name exactly this session's carrier count. The old rule divided
+     * a fixed 256 and refused every 32/64/128-carrier INIT and CFG. The
+     * codec factory stays the authority on which (n, m, groups) shapes are
+     * buildable, including the downlink 1-group SC-LDPC block. */
+    if (!groups || (u32)groups * shares != carriers)
         return -EPROTO;
     return 0;
 }
@@ -1887,11 +2030,12 @@ int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
     out->rate_256 = (u16)((u32)n * 256u / shares);
     if (groups == 1 && shares == TBT_FEC_MAX_SHARES)
     {
-        /* The binary codec's graph is fixed at 128 payload + 128 parity
-         * variables per codeword block; any other split of the 256 shares
-         * cannot be encoded, so name it as a shape error instead of letting
-         * the codec factory fail as an allocation error. */
-        if (n != TBT_FEC_MAX_SHARES / 2 || m != TBT_FEC_MAX_SHARES / 2)
+        /* The binary codec builds the six ladder splits of the 256 shares
+         * (25..70 percent). Above 50 percent it adds one check per parity
+         * share and lowers the payload degree, so every point on the ladder
+         * is a real encoded shape with no punctured parity, not a
+         * share-count guess. */
+        if (!tbt_fec_sclc_down_split(n, m))
             return -EINVAL;
         out->variant = TBT_FEC_SCLC_DOWN;
         out->block = block ? block : TBT_FEC_SCLC_BLOCK_DOWN;
@@ -1906,8 +2050,8 @@ int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
     else
     {
         /* One group of fewer than 256 shares is neither shipped shape. The
-         * binary codec's graph is bound to 128+128, so accepting it would
-         * build a codec that cannot encode the block. */
+         * binary codec is defined on the 256-share block; a smaller single
+         * group has no wire block to carry its shares. */
         return -EINVAL;
     }
     if (!out->block || (out->block & 1) || !out->L)

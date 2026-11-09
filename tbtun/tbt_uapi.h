@@ -29,7 +29,7 @@ typedef uint64_t u64;
 
 #define TBT_VERSION_MAJOR 0
 #define TBT_VERSION_MINOR 4
-#define TBT_VERSION_PATCH 0
+#define TBT_VERSION_PATCH 4
 #define TBT_VERSION ((TBT_VERSION_MAJOR << 16) | (TBT_VERSION_MINOR << 8) | TBT_VERSION_PATCH)
 
 /* Roles, as carried in HELLO and in the `role=` key. */
@@ -179,9 +179,10 @@ typedef uint64_t u64;
 #define TBT_FEC_FBK 0x35
 #define TBT_FEC_ALLOC 0x36
 
-/* One gate for both carrier paths (raw and HTTP container). ALLOC is a FEC
- * record too: a range that stopped at FBK pushed it into the old-frame
- * scanner, which killed the carrier under profile=http-kal. */
+/* Every record type the FEC data plane owns. The container uses this one
+ * range to route a decoded HTTP chunk; a raw range that stopped at FBK sent
+ * ALLOC (0x36) to the old-frame scanner. Kept here so host tests and the
+ * module share it. */
 static inline bool tbt_fec_record_type(u8 type)
 {
     return type >= TBT_FEC_DATA && type <= TBT_FEC_ALLOC;
@@ -223,6 +224,12 @@ static inline bool tbt_fec_record_type(u8 type)
 #define TBT_FEC_MAX_W 1024
 #define TBT_FEC_MAX_D 256
 #define TBT_FEC_MAX_GROUPS 256
+
+/* Grouped FEC with an omitted carriers= starts at the largest whole number of
+ * groups that fits 64 carriers: 64 measured +21.5% app over 256 at lower CPU
+ * (CHANGELOG 0.2.1), and a shape with n+m > 64 keeps one group. An explicit
+ * carriers= is never changed. */
+#define TBT_FEC_DEFAULT_GROUPED_CARRIERS 64
 
 /* Control-frame payload lengths. */
 /* next_deliver (u64) + credit_packets (u32) + rtt_us (u32) + deliver_bytes
@@ -277,7 +284,8 @@ static inline bool tbt_fec_record_type(u8 type)
  *   +10 u16 k
  *   +12 u8  d
  *   +13 u8  flags       TBT_FEC_CFG_F_APPLY / _ABORT
- *   +14 u16 groups      carriers/(n+m); must divide 256
+ *   +14 u16 groups      carriers/(n+m); the receiver checks it against the
+ *                       session's effective carriers (1..256)
  *   +16 u64 switch_pkt  absolute packet seq of the first new-shape record
  *   +24 u64 block_base  block id of the first new-shape block
  *   +32 u64 seed        codec seed; both ends derive the group seeds from it
