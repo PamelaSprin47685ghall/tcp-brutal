@@ -105,11 +105,15 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.4.0`）。
-线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x0007` 与 FEC 记录的
+`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.5.0`）。
+线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x0008` 与 FEC 记录的
 `TBT_FEC_CONV=0x1007`，三者都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
 失败，其载体关闭；0x0004 的对端在第一个头部就会因为 conv 不匹配而被拒绝。
+`TBT_CONV 0x0008` 把 OPEN 扩到 34 字节：32 字节 FEC group bitmap 后面是
+小端 target 端口。0 表示沿用远端的 `target=`；其他值必须在远端的 `target=`
+或 `map=` 里配置过。`TBT_WIRE_VERSION_V6` 升到 5，0.4.0 的 FEC 对端会在
+第一条 HELLO 就被拒绝，而不是等到第一条 OPEN。
 当前 FEC wire 是 `0x1007`：`0x1002` 增加 FIN 的 16 字节 body
 （`pkt_end`/`pkt_base`）与 PARITY 空块 marker（`win_len=0`、
 `payload_len=0`、`epoch=0`）；`0x1003` 把 ACK 扩到 24 字节并加入
@@ -118,7 +122,8 @@ make check
 `FEC_CFG` 扩到 48 字节、把 `FEC_FBK` 变成 48 字节报告，并把 HELLO body[0]
 升到版本 3，用于自适应形状切换。`0x1007` 是多流版本：stream-local FEC
 seq/block id、32 字节 OPEN group bitmap 与 ALLOC (0x36)；HELLO body[0] 升到
-版本 4。0.2.x 与当前 wire 不互操作，首个 HELLO 即硬拒绝。
+版本 4；0.5.0 升到版本 5（34 字节 OPEN）。0.2.x/0.4.x 与当前 wire 不互操作，
+首个 HELLO 即硬拒绝。
 `scripts/mkdkmsconf.sh` 派生
 `PACKAGE_VERSION="<major>.<minor>.<patch>"`；`dkms.conf` 是生成物，由
 `make dkms.conf` / `make dkms-tarball` 写出，不要手改。
@@ -290,7 +295,8 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 | `role` | — | `near` 或 `far`，必填 |
 | `listen` | — | `a.b.c.d:port`；近端为对外地址，远端为载体地址 |
 | `peer` | — | 近端：载体的目的地；远端：唯一允许加入载体的近端源地址（锚），端口只是语法占位 |
-| `target` | — | 仅远端：负载投递到的字面地址 |
+| `target` | — | 远端：必填，负载投递到的字面 `ip:port`；slot 0 的目的地，也是 OPEN 里端口为 0 时的默认值。近端：可选的 slot 0 target 端口，地址只是语法占位（远端始终拨自己的 `target_addr`） |
+| `map` | — | `listen_port:target_port[,listen_port:target_port...]`，最多 7 个附加槽。近端在 `listen=` 的地址上监听每个 listen 端口，并把 target 端口写进 OPEN；远端把这些 target 端口作为允许的目的地（listen 半边不绑定）。slot 0 就是 `listen=`/`target=`。近端拒绝与 `listen=` 或彼此重复的 listen 端口 |
 | `n` | `4` | 每组的 DATA share 数，`1..255`；`n + m <= 256` |
 | `m` | `1` | 每组的校验 share 数，`0..255`；`fec=on` 需要 `m >= 1`；`n + m <= 256` |
 | `dup` | `1` | 重复度，`0..3` |

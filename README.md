@@ -139,13 +139,19 @@ results and their cost.
 ## Packaging
 
 The module version has one authority: `TBT_VERSION_MAJOR/MINOR/PATCH` in
-`tbtun/tbt_uapi.h` (currently `0.4.0`). The wire
-version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x0007` for the 32-byte frames
+`tbtun/tbt_uapi.h` (currently `0.5.0`). The wire
+version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x0008` for the 32-byte frames
 and `TBT_FEC_CONV=0x1007` for the 48-byte FEC records; all three are independent of
 the module version. `TBT_CONV 0x0005` removed the unused PREDICT/CANCEL
 placeholder frames: a peer that still sends one fails the header check and its
 carrier closes, and a 0x0004 peer is refused at the first header because its
 conv does not match.
+
+`TBT_CONV 0x0008` makes OPEN 34 bytes: the 32-byte FEC group bitmap followed
+by a little-endian target port. Zero keeps the far side's `target=`; any other
+value must be configured there with `target=` or `map=`. `TBT_WIRE_VERSION_V6`
+moves to 5, so a 0.4.0 FEC peer is refused at the first HELLO rather than at
+the first OPEN.
 
 The current FEC wire is `0x1007`: `0x1002` added FIN's 16-byte body
 (`pkt_end`, `pkt_base`) and the PARITY block marker (`win_len=0`,
@@ -354,7 +360,8 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `role` | — | `near` or `far`; required |
 | `listen` | — | `a.b.c.d:port`; near: public address; far: carrier address |
 | `peer` | — | near: where carriers are sent; far: the only near source address allowed to join (the anchor; the port is grammar filler) |
-| `target` | — | far only: literal address the payload is delivered to |
+| `target` | — | far: required literal `ip:port` the payload is delivered to; slot 0's destination and the default for OPENs that name port 0. Near: optional slot-0 target port; the address is grammar filler (the far side always dials its own `target_addr`) |
+| `map` | — | `listen_port:target_port[,listen_port:target_port...]`, up to 7 extra slots. Near: bind each listen port on `listen=`'s address and send its target in OPEN. Far: accept those target ports as destinations (the listen half is ignored). Slot 0 is the `listen=`/`target=` pair. A near line refuses duplicate listen ports or one equal to `listen=` |
 | `n` | `4` | DATA shares per group, `1..255`; `n + m <= 256` |
 | `m` | `1` | Parity shares per group, `0..255`; `fec=on` needs `m >= 1`; `n + m <= 256` |
 | `dup` | `1` | Duplication degree, `0..3` |

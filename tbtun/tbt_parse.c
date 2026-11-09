@@ -21,6 +21,7 @@
 
 #include "tbt_parse.h"
 #include "tbt_fec_adapt_sclc.h"
+#include "tbt_map.h"
 #include "tbt_portmap.h"
 
 #define TBT_U32_MAX 0xffffffffu
@@ -187,19 +188,12 @@ static int tbt_parse_ipv4(const char *s, __be32 *out, struct tbt_parse_error *e)
  * the kernel agree on the byte layout. */
 static __be16 tbt_port_store(u16 host_order)
 {
-    u8 b[2] = { (u8)(host_order >> 8), (u8)(host_order & 0xff) };
-    __be16 out;
-
-    memcpy(&out, b, sizeof(out));
-    return out;
+    return tbt_port_be16(host_order);
 }
 
 static u16 tbt_port_load(__be16 net_order)
 {
-    u8 b[2];
-
-    memcpy(b, &net_order, sizeof(b));
-    return (u16)((b[0] << 8) | b[1]);
+    return tbt_port_host16(net_order);
 }
 
 static int tbt_parse_addr(const char *s, __be32 *addr, __be16 *port,
@@ -393,6 +387,48 @@ static int tbt_hexval(char c);
 
 static int tbt_parse_dev(const char *s, char out[IFNAMSIZ]);
 
+/* `map=listen_port:target_port[,listen_port:target_port...]`. The value has no
+ * spaces, so a comma is the only list separator. Repeating map= on one line
+ * replaces the list, like every other key: one line, one value. */
+static int tbt_parse_map(const char *v, struct tbt_cfg *cfg,
+                         struct tbt_parse_error *e)
+{
+    char buf[128];
+    char *p = buf;
+
+    if (strlen(v) >= sizeof(buf))
+        return tbt_fail(e, "map", "map list is too long");
+    memcpy(buf, v, strlen(v) + 1);
+    cfg->nmap = 0;
+    while (*p)
+    {
+        char *comma = strchr(p, ',');
+        char *colon;
+        u16 lp, tp;
+
+        if (comma)
+            *comma = '\0';
+        if (cfg->nmap >= TBT_MAP_MAX - 1)
+            return tbt_fail(e, "map", "too many map entries (max 7)");
+        colon = strchr(p, ':');
+        if (!colon || strchr(colon + 1, ':'))
+            return tbt_fail(e, "map", "map entry must be listen_port:target_port");
+        *colon = '\0';
+        if (tbt_parse_u16(p, &lp) || !lp ||
+            tbt_parse_u16(colon + 1, &tp) || !tp)
+            return tbt_fail(e, "map", "map ports must be 1..65535");
+        cfg->maps[cfg->nmap].listen_port = lp;
+        cfg->maps[cfg->nmap].target_port = tp;
+        cfg->nmap++;
+        if (!comma)
+            break;
+        p = comma + 1;
+        if (!*p)
+            return tbt_fail(e, "map", "empty map entry");
+    }
+    return 0;
+}
+
 static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_error *e)
 {
     char *tok;
@@ -470,6 +506,11 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
             if (rc)
                 return rc;
             have_target = 1;
+        }
+        else if (!strcmp(key, "map"))
+        {
+            if (tbt_parse_map(val, cfg, e))
+                return TBT_PARSE_EINVAL;
         }
         else if (!strcmp(key, "n"))
         {
@@ -670,6 +711,23 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         return tbt_fail(e, "peer", "role=near needs peer=addr:port");
     if (cfg->role == TBT_ROLE_FAR && !have_target)
         return tbt_fail(e, "target", "role=far needs target=addr:port");
+    /* A near tunnel binds slot 0 and every map on the same address, so two
+     * equal listen ports cannot both exist. A far tunnel ignores the map
+     * listen half, so its numbers need not be distinct. */
+    if (cfg->role == TBT_ROLE_NEAR)
+    {
+        u16 base = tbt_port_host16(cfg->listen_port);
+        int i, j;
+
+        for (i = 0; i < cfg->nmap; i++)
+        {
+            if (cfg->maps[i].listen_port == base)
+                return tbt_fail(e, "map", "map listen port collides with listen=");
+            for (j = 0; j < i; j++)
+                if (cfg->maps[i].listen_port == cfg->maps[j].listen_port)
+                    return tbt_fail(e, "map", "duplicate map listen port");
+        }
+    }
     if (cfg->n + cfg->m > TBT_MAX_CARRIERS_LIMIT)
         return tbt_fail(e, "n", "n + m exceeds the 256-carrier limit");
     /* w=0 and carriers=0 mean "auto". Resolve them before validating, so the
@@ -1103,6 +1161,16 @@ int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
         rc = tbt_addf(buf, size, &off, " peer=%s:%u", pa, tbt_port_load(c->peer_port));
         if (rc)
             return rc;
+        /* A near tunnel may name slot 0's target port explicitly; the address
+         * is grammar filler (the far side always dials its own target_addr).
+         * Rendered when set, so the line still round-trips. */
+        if (c->target_port)
+        {
+            rc = tbt_addf(buf, size, &off, " target=%s:%u", ta,
+                          tbt_port_load(c->target_port));
+            if (rc)
+                return rc;
+        }
     }
     else
     {
@@ -1116,6 +1184,19 @@ int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
         {
             rc = tbt_addf(buf, size, &off, " peer=%s:%u", pa,
                           tbt_port_load(c->peer_port));
+            if (rc)
+                return rc;
+        }
+    }
+    if (c->nmap)
+    {
+        rc = tbt_addf(buf, size, &off, " map=");
+        if (rc)
+            return rc;
+        for (i = 0; i < c->nmap && i < TBT_MAP_MAX - 1; i++)
+        {
+            rc = tbt_addf(buf, size, &off, "%s%u:%u", i ? "," : "",
+                          c->maps[i].listen_port, c->maps[i].target_port);
             if (rc)
                 return rc;
         }

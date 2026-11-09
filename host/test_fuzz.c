@@ -170,8 +170,9 @@ static int doc_accepts(u8 type, u8 ackc, unsigned len)
     case TBT_F_DATA:
         return len >= 1;
     case TBT_F_OPEN:
-        /* 0.4.0: exactly the 32-byte physical group bitmap. A non-FEC
-         * session sends 32 zero bytes, so one length rule covers both. */
+        /* 0.5.0: the 32-byte physical group bitmap then a u16 target port.
+         * A non-FEC session sends 32 zero bytes then the port, so one length
+         * rule covers both. */
         return len == DOC_OPEN_BODY_LEN;
     case TBT_F_RST:
     case TBT_F_PAD:

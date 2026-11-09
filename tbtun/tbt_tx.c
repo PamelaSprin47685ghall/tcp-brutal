@@ -319,13 +319,18 @@ static void tbt_tx_announce_carrier(struct tbt_session *sess,
         return;
     if (tbt_stream_announced(st, c))
         return;
-    /* FEC: the OPEN body is this flow's physical group bitmap, then the
-     * v8 route_slot and target_port. The single-route default is 0/0: use
-     * route 0 and the far side's configured target. A non-FEC session sends
-     * 36 zero bytes so one length rule covers both. */
+    /* FEC: the OPEN body is this flow's physical group bitmap, then the v8
+     * route_slot and target_port. The near side names both: the mapping slot
+     * that accepted the connection and that slot's target (0 = the far side's
+     * configured port). The far side's echo repeats the slot and never names
+     * a port back. A non-FEC session sends a zero bitmap and keeps the same
+     * port mapping. */
     flow = READ_ONCE(st->fec_flow);
     if (sess->fec && flow)
         memcpy(body, flow->group_mask, TBT_FEC_BITMAP_BYTES);
+    tbt_put_le16(body + TBT_OPEN_ROUTE_SLOT, READ_ONCE(st->route_slot));
+    tbt_put_le16(body + TBT_OPEN_TARGET_PORT,
+                 READ_ONCE(st->near) ? READ_ONCE(st->target_port) : 0);
     WRITE_ONCE(st->tx_open_sent, true);
     atomic_set(&c->up, 0);
     if (tbt_tx_control_pinned(sess, st, c->index, TBT_F_OPEN, st->sid, 0,

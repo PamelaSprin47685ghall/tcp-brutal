@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "tbt_parse.h"
+#include "tbt_map.h"
 
 static int failures;
 static int checks;
@@ -585,6 +586,134 @@ static void test_dev_cfg(void)
            "interface name");
 }
 
+/* map=listen:target[,listen:target...]: the parser, the canonical render, the
+ * near-side listen conflict rules, and the far-side role (listen half is
+ * ignored, target half is the allow list). */
+static void test_map_cfg(void)
+{
+    static const char *const base_near =
+        "tunnel 1 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443";
+    static const char *const suffix =
+        " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+        " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+        " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+        " carrier_stall_ms=0"
+        " portblock=0-0\n";
+    char text[TBT_LINE_MAX], want[TBT_LINE_MAX * 2], list[160];
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+    int i;
+
+    snprintf(text, sizeof(text), "%s map=9001:80,9002:443", base_near);
+    snprintf(want, sizeof(want),
+             "tunnel 1 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
+             " map=9001:80,9002:443%s", suffix);
+    roundtrip("near map list", text, want);
+    parse(text, &cmd, &perr);
+    ok(cmd.cfg.nmap == 2 && cmd.cfg.maps[0].listen_port == 9001 &&
+           cmd.cfg.maps[0].target_port == 80 &&
+           cmd.cfg.maps[1].listen_port == 9002 &&
+           cmd.cfg.maps[1].target_port == 443,
+       "near map list is stored in order", NULL);
+
+    /* A near target= names slot 0's port (the address is filler) and must
+     * survive the canonical render, or a reload would drop it. */
+    roundtrip("near explicit slot 0 target",
+              "tunnel 1 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
+              " target=10.0.0.2:80 map=9001:81",
+              "tunnel 1 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
+              " target=10.0.0.2:80 map=9001:81"
+              " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+              " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+              " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+              " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+              " carrier_stall_ms=0"
+              " portblock=0-0\n");
+    parse("tunnel 1 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
+          " target=10.0.0.2:80",
+          &cmd, &perr);
+    ok(tbt_map_target_for_slot(&cmd.cfg, 0) == 80,
+       "near target= resolves slot 0", NULL);
+
+    roundtrip("far map list",
+              "tunnel 2 role=far listen=10.0.0.1:7000 target=10.0.0.2:8080"
+              " map=9001:80,9002:443",
+              "tunnel 2 role=far listen=10.0.0.1:7000 target=10.0.0.2:8080"
+              " map=9001:80,9002:443"
+              " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+              " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+              " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+              " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+              " carrier_stall_ms=0"
+              " portblock=0-0\n");
+
+    /* A far tunnel ignores the listen half, so the same two listen numbers
+     * are legal there and must still round-trip. */
+    roundtrip("far duplicate map listen ports",
+              "tunnel 2 role=far listen=10.0.0.1:7000 target=10.0.0.2:8080"
+              " map=9001:80,9001:81",
+              "tunnel 2 role=far listen=10.0.0.1:7000 target=10.0.0.2:8080"
+              " map=9001:80,9001:81"
+              " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+              " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+              " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+              " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+              " carrier_stall_ms=0"
+              " portblock=0-0\n");
+
+    /* A repeated map= replaces the earlier list, like every other key. */
+    snprintf(text, sizeof(text), "%s map=9001:80 map=9002:443", base_near);
+    parse(text, &cmd, &perr);
+    ok(cmd.cfg.nmap == 1 && cmd.cfg.maps[0].listen_port == 9002 &&
+           cmd.cfg.maps[0].target_port == 443,
+       "a repeated map= replaces the list", NULL);
+
+    snprintf(text, sizeof(text), "%s map=9000:80", base_near);
+    refuse("map listen collides with listen=", text,
+           TBT_PARSE_EINVAL, "map", "collides");
+
+    snprintf(text, sizeof(text), "%s map=9001:80,9001:81", base_near);
+    refuse("duplicate map listen port", text,
+           TBT_PARSE_EINVAL, "map", "duplicate");
+
+    snprintf(text, sizeof(text), "%s map=9001:0", base_near);
+    refuse("map target port 0", text, TBT_PARSE_EINVAL, "map", "1..65535");
+
+    snprintf(text, sizeof(text), "%s map=0:80", base_near);
+    refuse("map listen port 0", text, TBT_PARSE_EINVAL, "map", "1..65535");
+
+    snprintf(text, sizeof(text), "%s map=9001", base_near);
+    refuse("map entry without a colon", text,
+           TBT_PARSE_EINVAL, "map", "listen_port:target_port");
+
+    snprintf(text, sizeof(text), "%s map=9001:80,", base_near);
+    refuse("map trailing comma", text, TBT_PARSE_EINVAL, "map", "empty map entry");
+
+    snprintf(text, sizeof(text), "%s map=9001:80:1", base_near);
+    refuse("map entry with two colons", text,
+           TBT_PARSE_EINVAL, "map", "listen_port:target_port");
+
+    /* TBT_MAP_MAX includes slot 0, so 7 extra entries fit and the 8th is
+     * refused before it can reach the listener array. */
+    list[0] = '\0';
+    for (i = 0; i < TBT_MAP_MAX; i++)
+    {
+        char one[24];
+
+        snprintf(one, sizeof(one), "%s%u:1", i ? "," : "", 9001 + i);
+        strncat(list, one, sizeof(list) - strlen(list) - 1);
+    }
+    snprintf(text, sizeof(text), "%s map=%s", base_near, list);
+    refuse("too many map entries", text, TBT_PARSE_EINVAL, "map", "too many");
+
+    list[0] = '\0';
+    for (i = 0; i < 40; i++)
+        strncat(list, "1:1,", sizeof(list) - strlen(list) - 1);
+    snprintf(text, sizeof(text), "%s map=%s", base_near, list);
+    refuse("map list too long", text, TBT_PARSE_EINVAL, "map", "too long");
+}
+
 static void test_stats_prefix(void)
 {
     static const char *const want[] = { "debug_loss", "gaps_total", "streams_total" };
@@ -655,6 +784,12 @@ static void maximal_cfg(struct tbt_cfg *c, u64 id)
     c->peer_port = (__be16)0xffff;
     c->target_addr = (__be32)0xffffffffu;
     c->target_port = (__be16)0xffff;
+    c->nmap = TBT_MAP_MAX - 1;
+    for (i = 0; i < c->nmap; i++)
+    {
+        c->maps[i].listen_port = 65535;
+        c->maps[i].target_port = 65535;
+    }
     /* The widest legal line: a full 256-carrier FEC session (n + m = 256,
      * m >= 1), the longest mode name, and the largest window it accepts. */
     c->n = TBT_MAX_CARRIERS_LIMIT - 1;
@@ -1622,6 +1757,9 @@ int main(void)
 
     /* 24d. dev= interface bind. */
     test_dev_cfg();
+
+    /* 24d2. map=: multi-port slots, near listen conflicts, far allow list. */
+    test_map_cfg();
 
     /* 24e. mode=sc-ldpc: L is rendered only for mode 3, adaptive defaults
      * off, and both directions round-trip through the canonical line. */

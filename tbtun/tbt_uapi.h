@@ -28,13 +28,46 @@ typedef uint64_t u64;
 #endif
 
 #define TBT_VERSION_MAJOR 0
-#define TBT_VERSION_MINOR 4
+#define TBT_VERSION_MINOR 5
 #define TBT_VERSION_PATCH 0
 #define TBT_VERSION ((TBT_VERSION_MAJOR << 16) | (TBT_VERSION_MINOR << 8) | TBT_VERSION_PATCH)
 
 /* Roles, as carried in HELLO and in the `role=` key. */
 #define TBT_ROLE_NEAR 2
 #define TBT_ROLE_FAR 3
+
+/* One tunnel may carry this many listen/target mappings, slot 0 included.
+ * Slot 0 is the original listen= (near public port, far carrier port) and
+ * target= pair; map= adds slots 1..TBT_MAP_MAX-1. The limit keeps the
+ * canonical config line inside TBT_LINE_MAX and bounds the listener array. */
+#define TBT_MAP_MAX 8
+
+/* Network-order port <-> host-order port without arpa/inet.h, so the host
+ * parser and the module agree on the bytes. The network-order side is a u16
+ * so this header stays includable from userspace; a __be16 is the same type
+ * on the kernel side. */
+static inline u16 tbt_port_be16(u16 host)
+{
+    union {
+        u16 be;
+        u8 b[2];
+    } u;
+
+    u.b[0] = (u8)(host >> 8);
+    u.b[1] = (u8)(host & 0xff);
+    return u.be;
+}
+
+static inline u16 tbt_port_host16(u16 net)
+{
+    union {
+        u16 be;
+        u8 b[2];
+    } u;
+
+    u.be = net;
+    return (u16)((u16)u.b[0] << 8 | (u16)u.b[1]);
+}
 
 /* Wire protocol revision: u16 at frame offset +30, 0x0008. Independent of the
  * module version (DESIGN.md §11); bump it alone on any wire change.
@@ -65,7 +98,7 @@ typedef uint64_t u64;
  * 16 bytes for FIN, so the first HELLO fails with -EPROTO and the carrier
  * closes. Both ends must be upgraded together.
  * 0x0007 (0.4.0) makes a session carry several FEC streams. OPEN carries a
- * 32-byte physical group bitmap (TBT_OPEN_BODY_LEN) instead of an empty
+ * 32-byte physical group bitmap instead of an empty
  * body; FIN's pkt_end/pkt_base become stream-local packet seqs; and the FEC
  * plane adds ALLOC (0x36) for group rebalancing. A 0x0006 peer fails the
  * first HELLO (version 4) and the first OPEN length check, so the hard
@@ -73,9 +106,13 @@ typedef uint64_t u64;
  * 0x0008 (0.5.0) is the v8 cut: OPEN grows to 36 bytes (route_slot and
  * target_port), FEC_CFG and FEC_FBK grow to 64 bytes with a new extension
  * area, and all three wire version constants move together (TBT_CONV,
- * TBT_FEC_CONV, HELLO body[0]). A 0.4.0 peer fails the first HELLO (version
- * 5), the first FEC record (0x1007) and the first OPEN length check; there
- * is no compatibility branch. */
+ * TBT_FEC_CONV, HELLO body[0]). Multi-port mapping rides the same cut:
+ * route_slot names the near listen endpoint (mapping slot), and target_port
+ * selects that slot's far port (0 = the far side's configured default; any
+ * other value must equal it as a drift guard, not a routing source). A
+ * 0.4.0 peer fails the first HELLO (version 5), the first FEC record
+ * (0x1007) and the first OPEN length check; there is no compatibility
+ * branch. */
 #define TBT_CONV 0x0008u
 
 /* HELLO body[0]: wire-protocol version, independent of TBT_VERSION. The FEC
@@ -86,8 +123,8 @@ typedef uint64_t u64;
  * the first HELLO with -EPROTO and its carrier closes; both ends must be
  * upgraded together. Version 4 is the multi-stream cut: TBT_FEC_CONV 0x1007,
  * a 32-byte OPEN group bitmap, stream-local FEC seq/block ids and ALLOC
- * (0x36). Version 5 is the v8 cut: TBT_FEC_CONV 0x1008, a 36-byte OPEN, and
- * 64-byte FEC_CFG/FEC_FBK bodies. */
+ * (0x36). Version 5 is the v8 cut: TBT_FEC_CONV 0x1008, a 36-byte OPEN with
+ * route_slot and target_port, and 64-byte FEC_CFG/FEC_FBK bodies. */
 #define TBT_WIRE_VERSION 1
 #define TBT_WIRE_VERSION_V6 5
 
@@ -431,10 +468,12 @@ enum tbt_frame_type
 /* OPEN body (0.5.0, TBT_CONV 0x0008): exactly TBT_OPEN_BODY_LEN bytes.
  *   +0  u8  group_mask[32]  bit p = physical FEC group p; bits at or above
  *                           carriers/(n+m) must be zero
- *   +32 u16 route_slot      near-side listen endpoint index
- *   +34 u16 target_port     far target port; 0 = use the remote config
+ *   +32 u16 route_slot      near-side listen endpoint index (mapping slot)
+ *   +34 u16 target_port     far target port for that slot; 0 = the far
+ *                           side's configured target for the slot
  * A non-FEC session sends 36 zero bytes so one length rule covers both.
- * A single-route session sends route_slot=0, target_port=0. */
+ * A single-route session sends route_slot=0 and its target_port, or 0/0 to
+ * use the far side's configured target. */
 #define TBT_OPEN_BODY_LEN (TBT_FEC_BITMAP_BYTES + 4) /* 36 */
 #define TBT_OPEN_ROUTE_SLOT 32
 #define TBT_OPEN_TARGET_PORT 34

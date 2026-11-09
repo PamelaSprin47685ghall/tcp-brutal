@@ -724,7 +724,14 @@ Payload layouts:
 
 - **DATA**: payload = raw application bytes (1..8192); a zero-length DATA frame is
   refused on receive, because it wedges the receiver and the emitter never sends one.
-- **OPEN**: payload empty; the header's `sid_hi:sid_lo` names the stream.
+- **OPEN** (`TBT_CONV` 0x0008): payload exactly `TBT_OPEN_BODY_LEN` = 34
+  bytes. `+0 u8 group_mask[32]` names the flow's physical FEC groups (all zero
+  without FEC); `+32 u16 target_port` is the far-side destination port in
+  little-endian. Zero means "use the far side's `target=`", which is the
+  0.4.0 behavior; any other value must appear in that far tunnel's `target=`
+  or `map=` list or the OPEN is dropped before a stream is created. The
+  header's `sid_hi:sid_lo` names the stream. A 0.4.0 OPEN is 32 bytes and is
+  refused by the length bound.
 - **FIN**: payload exactly `TBT_FIN_BODY_LEN` = 16 bytes, little-endian
   (`TBT_CONV` 0x0006): `+0 u64 pkt_end` (the absolute
   session packet seq after this stream's last DATA packet) and `+8 u64 pkt_base`
@@ -1674,10 +1681,11 @@ costs one TCP handshake instead of a new session.
   failed-dial path below: `connect_fail++`, the port returns to the bitmap,
   and the 50 ms poll retries after 200 ms; the ratelimited log names the
   interface and the error. The far side's target connections are never bound.
-- Far side: binds `listen=` (the address carriers connect to). `srcaddrs` is a near-side
-  key: it selects the local source address for carriers, and only the first entry is used;
-  the remaining entries are recorded for round-trip. Multi-address listeners are not
-  implemented.
+- Far side: binds `listen=` (the address carriers connect to). A near side binds
+  `listen=` plus every `map=` listen port, all on `listen=`'s address; several
+  addresses for one tunnel are not implemented. `srcaddrs` is a near-side key: it
+  selects the local source address for carriers, and only the first entry is used;
+  the remaining entries are recorded for round-trip.
 - Allocation retry: a failed bind or connect frees the port and returns the carrier to the
   50 ms poll, which re-dials after 200 ms with a fresh draw from the bitmap. There is no
   fixed attempt count inside one dial; the carrier keeps retrying until the tunnel is
@@ -1837,12 +1845,14 @@ line.)
 # profile is one of: http-kal | http-kal-drip | raw
 # fec is off | on; mode is rlnc | grouped | sc-ldpc (implemented)
 tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443
+        map=9001:80,9002:443
         n=4 m=1 dup=1 keepalive=5000 drip_ms=1000
         profile=http-kal fec=on adaptive=on mode=grouped carriers=10 crypto=on
         portblock=40000-40063 dev=eth0 srcaddrs=10.0.0.10,10.0.0.11
         replay=8388608 tunnel_rate=0 max_inflate=2.0 hole_budget_ms=500
         rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=3000
 tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:7000
+        map=9001:80,9002:443
         nonce=00112233445566778899aabbccddeeff
         portblock=40000-40063 n=4 m=1 ...
 del 1
@@ -1862,6 +1872,16 @@ random at tunnel creation).
 - **Comments**: a line whose first non-blank character is `#` is a comment and is ignored.
   A `#` *after* a token is not a comment: the token is unknown and the whole line is
   rejected with `EINVAL` (nothing from it applies).
+- `map=listen_port:target_port[,listen_port:target_port...]` adds port slots to
+  one tunnel; `listen=`/`target=` remain slot 0, and at most `TBT_MAP_MAX - 1`
+  (7) extra entries fit. On a near line the listen port is a public port bound
+  on `listen=`'s address and the target port travels in OPEN; on a far line the
+  listen half is grammar symmetry and only the target ports matter, as the
+  allowed destination set. Ports are `1..65535`. A near line refuses a map
+  listen port that equals `listen=` or another map listen port; a far line
+  accepts those numbers because it binds none of them. A repeated `map=` on one
+  line replaces the earlier list, and the canonical render prints one
+  comma-separated key.
 - `portblock=lo-hi` (near only) is the source-port window for that tunnel's
   carriers; `0-0` means the global `/proc/net/tbtun/ports` block. The range must
   satisfy `1 <= lo <= hi <= 65535` and hold at least one port per carrier slot
@@ -2001,11 +2021,11 @@ cat /proc/net/tbtun/http     # debug >= 2: last emitted request header block
 
 `config` reads back in **canonical form**: one complete directive per line, a fixed key
 order, and **every scalar key rendered explicitly with its effective value**, defaults
-included. The list key (`srcaddrs`) and `nonce` are rendered only when set.
+included. The list keys (`map`, `srcaddrs`) and `nonce` are rendered only when set.
 The order is
 
 ```
-role listen [peer] [target] [peer] n m dup profile keepalive drip_ms replay
+role listen [peer] [target] [peer] [map] n m dup profile keepalive drip_ms replay
 tunnel_rate max_inflate hole_budget_ms rx_reorder_bytes tx_window_bytes
 tx_retain_bytes carrier_stall_ms portblock [dev] [nonce] [srcaddrs]
 ```
@@ -2015,12 +2035,14 @@ anchor on a `role=far` line (present only when configured); a far line therefore
 prints `target` before `peer`.
 
 `peer` is rendered for `role=near` always and for `role=far` only when it is configured
-(the source anchor); `target` is rendered only for `role=far`. A far tunnel without
+(the source anchor); `target` is required for `role=far` and rendered for `role=near`
+only when set (slot 0's target port; the address is filler). A far tunnel without
 `peer=` omits the key, so `peer=0.0.0.0:0` never appears in canonical output (it is not
 parseable: port 0 is refused).
 
-`dev` follows `portblock`; `nonce` follows `dev`, before the list key
-`srcaddrs`.
+`map` follows the role's `peer`/`target` keys and precedes `n`; it is one
+comma-separated list in slot order. `dev` follows `portblock`; `nonce` follows
+`dev`, before the list key `srcaddrs`.
 
 A saved file therefore round-trips **byte for byte**: `cat config > backup;
 cat backup > config` re-renders exactly what it read, and the text is a fixed point from
@@ -2829,25 +2851,27 @@ makes this design different from a generic L4 tunnel.
 | `tests/*.sh` | **new** |
 
 Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the released tree reports
-`0.4.0`. The wire revision `TBT_CONV=0x0007`
+`0.5.0`. The wire revision `TBT_CONV=0x0008`
 and the FEC record revision `TBT_FEC_CONV=0x1007` bump independently of it.
 HELLO `body[0]` carries `TBT_WIRE_VERSION=1` for the old ARQ and
-`TBT_WIRE_VERSION_V6=4` for a FEC v7 session, not the module version, so the
+`TBT_WIRE_VERSION_V6=5` for a FEC v7 session, not the module version, so the
 module version and the wire version are decoupled. 0.2.0 flipped `TBT_CONV` to
 0x0006 (FIN carries a 16-byte body) and `TBT_FEC_CONV` through `0x1002`
 (PARITY block marker), `0x1003` (24-byte ACK with `deliver_bytes`) and
 `0x1004` (64-byte bitmap NACK) to `0x1005` (48-byte header with the u64 stream
 id); 0.3.0 moves it to `0x1006` (48-byte `FEC_CFG`, 48-byte `FEC_FBK` report,
-adaptive shape switch). Peers of
+adaptive shape switch); 0.4.0 moves it to `0x1007` (multi-stream flows).
+0.5.0 moves `TBT_CONV` to `0x0008` (34-byte OPEN with the target port) and
+the FEC HELLO version to 5. Peers of
 different wire revisions do not interoperate, because the first HELLO is
 rejected by the conv check.
 
 **Packaging.** `tbtun/tbt_uapi.h` is the single version authority: the
-`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/4/0`). `scripts/mkdkmsconf.sh`
+`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/5/0`). `scripts/mkdkmsconf.sh`
 parses those macros and emits `PACKAGE_VERSION="<major>.<minor>.<patch>"`; parsing
 failure is fatal and never falls back to an old value. `dkms.conf` is a generated file —
 `make dkms.conf` (or `make dkms-tarball`) writes it, and it must not be hand-edited; the
-current generated value is `PACKAGE_VERSION="0.4.0"`. `scripts/install_dkms.sh` reads
+current generated value is `PACKAGE_VERSION="0.5.0"`. `scripts/install_dkms.sh` reads
 the same value through `mkdkmsconf.sh --version`. A development suffix
 `.r<commits>.<sha>` is opt-in with `TBT_DKMS_GIT_SUFFIX=1`; it is not the default.
 
@@ -2920,10 +2944,12 @@ controls do not apply; these replace them.
   inbound filter. `srcaddrs` selects the local bind address for near-side carriers. What
   is enforced today is the `0600 root` config surface and the nonce/session check.
 - **What escapes**: the tunnel terminates TCP at the far side into a `kernel_connect` to a
-  literal `target=`. That target is a configured address, not attacker-chosen, so the public
-  side cannot proxy to arbitrary hosts (no SSRF surface beyond the operator's choice).
-  Per-stream target selection is *out of scope*; the module is a port mapper, and one
-  tunnel maps one target port (§19 Q6 covers lifting this).
+  literal `target=` address. The port comes from OPEN, but only after the far side
+  proves it is the configured `target=` or one `map=` target; an OPEN naming any
+  other port is dropped and logged before a stream or socket exists. The public
+  side therefore cannot proxy to arbitrary hosts or ports (no SSRF surface beyond
+  the operator's explicit mapping), and a forged port cannot cost the session its
+  carriers.
 - **Resource limits**: `max_tunnels` (new ids over the cap return `-ENOSPC`) and
   `max_carriers` (`n + m` over the cap returns `-EINVAL`) are enforced before allocation;
   per-tunnel `replay`, `tx_retain_bytes`, `tx_window_bytes` and `rx_reorder_bytes` bound
