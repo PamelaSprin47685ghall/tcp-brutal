@@ -2,6 +2,7 @@
  * GF(16) SC-IRA codec.
  *
  *   ./host/bench_sclc_uplink [groups] [n] [m] [rate_num] [rate_den] [p]
+ *                            [mapping]
  *
  * Payload MB/s: one group block carries n*S bytes of application data.
  * Encode is measured over fresh blocks; decode is measured over a block
@@ -44,6 +45,7 @@ int main(int argc, char **argv)
     u16 rn = argc > 4 ? (u16)atoi(argv[4]) : 7;
     u16 rd = argc > 5 ? (u16)atoi(argv[5]) : 16;
     double p = argc > 6 ? atof(argv[6]) : 0.0;
+    u8 mapping = argc > 7 ? (u8)atoi(argv[7]) : TBT_SCLC_MAP_BITPLANE64;
     struct tbt_sclc_params par;
     struct tbt_sclc_uplink *u;
     u8 *data[256], *parity[256];
@@ -61,7 +63,7 @@ int main(int argc, char **argv)
     par.rate_num = rn;
     par.rate_den = rd;
     par.max_core = 256;
-    par.mapping = TBT_SCLC_MAP_INTERLEAVED;
+    par.mapping = mapping;
     par.seed = 1;
     u = tbt_sclc_uplink_new(groups, &par);
     if (!u)
@@ -75,9 +77,10 @@ int main(int argc, char **argv)
         parity[i] = malloc(TBT_FEC_S);
 
     printf("shape %u groups x (%u data + %u parity), block %u, L %u, "
-           "rate %u/%u, codes %u, mem %u KiB\n",
+           "rate %u/%u, codes %u, npar %u, mapping %u, mem %u KiB\n",
            groups, n, m, par.block, par.L, rn, rd,
-           tbt_sclc_uplink_codes(u), tbt_sclc_uplink_mem(u) / 1024);
+           tbt_sclc_uplink_codes(u), tbt_sclc_uplink_n_par(u), mapping,
+           tbt_sclc_uplink_mem(u) / 1024);
 
     /* Encode: fill fresh payload, encode every group in turn. */
     t0 = now_sec();
@@ -118,6 +121,15 @@ int main(int argc, char **argv)
     for (i = 0; i < m; i++)
         pp[i] = (u8)(p == 0.0 || ((rng_next() >> 32) % 1000) >=
                                    (uint64_t)(p * 1000.0));
+    if (p > 0.0)
+    {
+        u16 present = 0;
+
+        for (i = 0; i < n; i++)
+            present += pd[i] ? 1u : 0u;
+        if (present == n)
+            pd[0] = 0; /* measure the peel, not the all-data-present return */
+    }
 
     t0 = now_sec();
     do
@@ -136,6 +148,15 @@ int main(int argc, char **argv)
 
     printf("encode %.2f MB/s   decode %.2f MB/s (p=%.2f, 1 group)\n",
            enc_mbps, dec_mbps, p);
+    {
+        struct tbt_sclc_stat st;
+
+        tbt_sclc_uplink_stat(u, 0, &st);
+        printf("last decode: codes_ok %u/%u failed %u, shares missing %u "
+               "recovered %u\n",
+               st.codes_ok, st.codes, st.codes_failed, st.shares_missing,
+               st.shares_recovered);
+    }
     printf("projected %u-group encode %.2f MB/s, decode %.2f MB/s\n",
            groups, enc_mbps, dec_mbps);
     return 0;
