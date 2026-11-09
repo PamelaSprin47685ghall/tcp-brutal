@@ -131,10 +131,13 @@ static void tbt_carrier_unannounce(struct tbt_session *sess, u8 index)
 static void tbt_carrier_rescue_up(struct tbt_session *sess,
                                   struct tbt_carrier *c)
 {
-    struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
+    struct tbt_stream **snap;
     int n, i;
 
-    n = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
+    snap = kmalloc_array(TBT_STREAM_SNAP_MAX, sizeof(*snap), GFP_KERNEL);
+    if (!snap)
+        return; /* the next poll retries */
+    n = tbt_session_stream_snapshot(sess, snap, TBT_STREAM_SNAP_MAX);
     if (!n)
     {
         /* No stream needs an OPEN, so there is nothing left to announce;
@@ -143,6 +146,7 @@ static void tbt_carrier_rescue_up(struct tbt_session *sess,
          * frames, and the next stream announces itself on creation. */
         atomic_set(&c->up, 1);
         atomic64_inc(&sess->up_rescued);
+        kfree(snap);
         return;
     }
     for (i = 0; i < n; i++)
@@ -151,6 +155,7 @@ static void tbt_carrier_rescue_up(struct tbt_session *sess,
         tbt_tx_announce(sess, snap[i], GFP_KERNEL);
         tbt_stream_put(snap[i]);
     }
+    kfree(snap);
     atomic64_inc(&sess->up_rescued);
 }
 
@@ -2398,18 +2403,27 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c)
      * may reset its streams here. */
     if (sess->join_retries > 20 && tbt_carriers_all_dead(sess))
     {
-        struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
+        struct tbt_stream **snap;
         int n, i;
 
         atomic64_inc(&sess->stream_reset_tcp_failed);
-        n = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
+        /* Carrier loss runs in atomic context, so the snapshot cannot sleep
+         * for a 1 KiB stack array. A refused allocation leaves the streams
+         * for the next loss; the replacement is already armed below. */
+        snap = kmalloc_array(TBT_STREAM_SNAP_MAX, sizeof(*snap),
+                             GFP_ATOMIC);
+        if (!snap)
+            goto arm_replace;
+        n = tbt_session_stream_snapshot(sess, snap, TBT_STREAM_SNAP_MAX);
         for (i = 0; i < n; i++)
         {
             tbt_stream_kill(snap[i], TBT_ST_DEAD);
             tbt_stream_put(snap[i]);
         }
+        kfree(snap);
         return;
     }
+arm_replace:
     c->retry_at_ns = ktime_get_ns() + 50 * NSEC_PER_MSEC;
     tbt_session_arm(sess, TBT_SW_REPLACE, 0);
 }

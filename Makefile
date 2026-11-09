@@ -136,7 +136,9 @@ tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
                    tbtun/tbt_sc_ldpc.o \
                    tbtun/tbt_sc_ldpc_gf16.o tbtun/tbt_sclc_uplink.o
 
-ccflags-y       := -std=gnu99 -I$(src)/tbtun
+# Keep every module frame small enough for the kernel stack: a 1 KiB bound
+# catches a TBT_STREAMS_MAX pointer array before it reaches a real call path.
+ccflags-y       := -std=gnu99 -I$(src)/tbtun -Wframe-larger-than=1024
 # ChaCha8 is a hot per-byte loop; keep the kernel's -O2 for the rest of the
 # module and let this one file unroll its fixed 8-round permutation. The
 # variable must name the object path Kbuild sees for a composite module.
@@ -414,6 +416,7 @@ host-test-live: $(HOST_HTTP_LIVE)
 	fi
 
 clean: clean-dkms.conf clean-dkms-tarball
+	$(RM) $(wildcard tbtun/*.su) $(wildcard host/*.su)
 	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_FAULT) $(HOST_BENCH_SCLC) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fault_san
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
 

@@ -966,7 +966,7 @@ void tbt_tx_path_lost(struct tbt_session *sess, u8 index)
  * are unlinked under tx_lock and freed after it is dropped. */
 void tbt_tx_path_stalled(struct tbt_session *sess, u8 index)
 {
-    struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
+    struct tbt_stream **snap;
     struct tbt_retain *r, *rtmp;
     struct tbt_frame *fr, *ftmp;
     LIST_HEAD(free);
@@ -980,12 +980,15 @@ void tbt_tx_path_stalled(struct tbt_session *sess, u8 index)
     if (READ_ONCE(sess->closing))
         return;
 
+    snap = kmalloc_array(TBT_STREAM_SNAP_MAX, sizeof(*snap), GFP_KERNEL);
+    if (!snap)
+        return;
     /* The retention arrays are 16 slots wide; a FEC v6 path has no ARQ
      * retention entries to drop. */
     bit = index < TBT_ARQ_MAX_PATHS ? BIT(index) : 0;
 
     mutex_lock(&sess->pump_lock);
-    n = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
+    n = tbt_session_stream_snapshot(sess, snap, TBT_STREAM_SNAP_MAX);
     spin_lock(&sess->tx_lock);
     for (i = 0; i < n; i++)
     {
@@ -1040,6 +1043,7 @@ void tbt_tx_path_stalled(struct tbt_session *sess, u8 index)
     }
     for (i = 0; i < n; i++)
         tbt_stream_put(snap[i]);
+    kfree(snap);
     tbt_fbk_kick(sess, true);
 }
 
@@ -2641,7 +2645,7 @@ static int tbt_tx_retire_alt(struct tbt_session *sess, u16 path)
  * its pinned carrier is not ready yet; the next pass retries it. */
 int tbt_tx_pump(struct tbt_session *sess)
 {
-    struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
+    struct tbt_stream **snap;
     int nsnap, i;
     int pass, moved = 0;
     bool wait_carrier = false;
@@ -2660,6 +2664,7 @@ int tbt_tx_pump(struct tbt_session *sess)
                          READ_ONCE(sess->ctl_queued)))
         return 0;
     mutex_lock(&sess->pump_lock);
+    snap = sess->tx_pump_snap;
     if (!sess->tunnel)
     {
         mutex_unlock(&sess->pump_lock);
@@ -2706,7 +2711,7 @@ int tbt_tx_pump(struct tbt_session *sess)
         }
     }
     tbt_tx_window_update(sess);
-    nsnap = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
+    nsnap = tbt_session_stream_snapshot(sess, snap, TBT_STREAM_SNAP_MAX);
     for (i = 0; i < nsnap; i++)
     {
         if (READ_ONCE(snap[i]->close_since_ns) ||
@@ -3956,7 +3961,7 @@ int tbt_tx_sack(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
 void tbt_fbk_work(struct work_struct *w)
 {
     struct tbt_session *sess = container_of(to_delayed_work(w), struct tbt_session, w_fbk);
-    struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
+    struct tbt_stream **snap = sess->fbk_snap;
     bool owned = test_and_clear_bit(TBT_SW_FBK, &sess->sched);
     bool alive = false;
     int nsnap, i;
@@ -3967,7 +3972,7 @@ void tbt_fbk_work(struct work_struct *w)
             tbt_session_put(sess);
         return;
     }
-    nsnap = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
+    nsnap = tbt_session_stream_snapshot(sess, snap, TBT_STREAM_SNAP_MAX);
     tbt_tx_path_lost_drain(sess, snap, nsnap);
     for (i = 0; i < nsnap; i++)
     {

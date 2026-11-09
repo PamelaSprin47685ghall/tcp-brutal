@@ -1263,6 +1263,21 @@ struct tbt_session
      * Declared only in this cut: M4/M8 initialise it, and nothing arms it
      * yet. See review/s2-merged-design.md §1.3 and §2.3. */
     struct delayed_work w_fec_rx;
+    /* Ref snapshots for the work bodies. Each slot has one owner: the FEC
+     * TX work, the FEC RX work, the FBK coalescer, the pump (under
+     * pump_lock) and w_fbk. Keeping them on the session means no body needs
+     * a TBT_STREAMS_MAX pointer array on the kernel stack. */
+    struct tbt_fec_flow *fec_tx_snap[TBT_STREAMS_MAX];
+    struct tbt_fec_flow *fec_rx_snap[TBT_STREAMS_MAX];
+    struct tbt_fec_flow *fec_fbk_snap[TBT_STREAMS_MAX];
+    spinlock_t fec_fbk_lock; /* protects fec_fbk_busy and fec_fbk_pending */
+    bool fec_fbk_busy;
+    u8 fec_fbk_pending;      /* kick flags merged while the owner ran */
+    struct tbt_stream *tx_pump_snap[TBT_STREAM_SNAP_MAX];
+    struct tbt_stream *fbk_snap[TBT_STREAM_SNAP_MAX];
+    /* Replay pass scratch. tbt_fec_out_flush holds pump_lock throughout. */
+    u8 fec_replay_usable[TBT_MAX_CARRIERS_LIMIT];
+    u32 fec_replay_pace[TBT_MAX_CARRIERS_LIMIT];
     struct list_head fec_out_ctl;    /* ACK/NACK: any up, non-stalled carrier */
     struct list_head fec_out_replay; /* NACK repairs: any up carrier, byte-budgeted */
     struct tbt_fec_outq *fec_outq; /* n_car queues, indexed by the share's carrier */
