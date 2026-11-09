@@ -301,11 +301,12 @@ stream its own FEC TX/RX plane keyed by `sid`: block ids, credit, delivery
 cursors, NACK state and FIN are per flow, and the 48-byte record layout is
 unchanged. The carriers are split into physical groups
 (`carriers / (n + m)`; 32 on the production 256/4+4 shape). Each flow owns a
-disjoint group bitmap, carried in OPEN; `fec_groups_per_flow=` keeps the
-static quota for A/B tests (`0`: the first flow owns every group; `16`: it
-owns half) and for a peer that does not implement `FEC_ALLOC`.
+disjoint group bitmap, carried in OPEN. `fec_groups_per_flow=` selects the
+allocation mode: `0` (the default) enables runtime rebalancing, while a
+non-zero value pins a static quota for A/B tests or a peer that does not
+implement `FEC_ALLOC` (`16` owns half of the 32 production groups).
 
-With the default quota the near side is the allocator. A joining stream
+With the default `0` the near side is the allocator. A joining stream
 takes its equal share (`total/(N+1)`, remainder to the lowest sids) from
 free groups, or the allocator sends `FEC_ALLOC` (`0x36`) to shrink the
 donors before admitting it. A stream close returns its groups and grows the
@@ -561,10 +562,11 @@ version 4. A 0.2.x peer is refused at the first HELLO.
   connection sent 167 bytes, the far acknowledged 37, iperf3's server failed
   its own cookie read, and the client reported an idle timeout after 114 s.
   The v7 cut (`0x1007`, 0.4.0) adds per-flow RX/TX state, `sid` routing and the
-  `fec_groups_per_flow` quota, so a non-SC-LDPC grouped shape can run
-  concurrent streams when groups are reserved; the default quota 0 still
-  refuses the second flow. SC-LDPC remains single-flow. A load tool with one
-  connection per test (`tbt_ping`/`tbt_burst`) is unaffected either way.
+  `fec_groups_per_flow` quota. Since 0.4.4 the default `0` lets the near side
+  rebalance groups at runtime, so a non-SC-LDPC grouped shape admits a second
+  stream without a precomputed static quota; a non-zero value pins that quota.
+  SC-LDPC remains single-flow. A load tool with one connection per test
+  (`tbt_ping`/`tbt_burst`) is unaffected either way.
 - 0.4.0 makes the FEC packet sequence and block id stream-local; FIN's
   `pkt_end`/`pkt_base` are stream-local too. DATA/PARITY and per-stream
   control records carry the flow's `sid`, and delivery offsets are measured

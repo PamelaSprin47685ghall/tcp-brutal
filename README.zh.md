@@ -52,14 +52,15 @@ GF(16) 上行 128、512 保留），码率由 `n/(n+m)` 决定。per-direction
 
 0.4.0 起，非 SC-LDPC 的 grouped 形状可承载多条并发 FEC 流（v7，wire
 `0x1007`）。每条流有自己的 per-flow FEC TX/RX 上下文与 admission 引用。
-并发需要静态组配额：模块参数 `fec_groups_per_flow`（默认 `0`）限制一条流
-可拥有的物理组数。`0` 保持单流几何：第一条流独占全部组，第二条并发流会被
-`-EOPNOTSUPP` 拒绝；要接纳 `N` 条流，把它设为 `total_groups / N`，并在两端
-加载相同值。SC-LDPC 始终单流。`FEC_ALLOC`（0x36）只在 wire 格式中定义，
-0.4.0 数据面既不发送也不消费它：运行时重平衡未启用，组归属在 OPEN 建立流时
-固定。前一个流关闭后的顺序新连接仍会重置旧 FEC RX/TX 状态、把窗口重定基到
-新流的第一个块，并关闭旧 target socket；DATA/PARITY 携带 stream id
-（`0x1005` 引入，`0x1007` 仍在），因此排队中的旧流记录不会进入新流。
+0.4.4 起，模块参数 `fec_groups_per_flow`（默认 `0`）选择组分配方式：`0`
+表示 near 侧运行时动态重平衡——新流在下一个 super-block 边界取得均分，关闭
+的流归还组并让存活流长回，`FEC_ALLOC`（0x36）承载双向切换并由 far 侧应用；
+非零值则固定静态配额（设为 `total_groups / N` 可接纳 `N` 条流，两端必须
+相同）。0.4.0..0.4.3 对端忽略 `FEC_ALLOC`，仲裁器随即中止并保持静态配额。
+SC-LDPC 始终单流。前一个流关闭后的顺序新连接仍会重置旧 FEC RX/TX 状态、把
+窗口重定基到新流的第一个块，并关闭旧 target socket；DATA/PARITY 携带
+stream id（`0x1005` 引入，`0x1007` 仍在），因此排队中的旧流记录不会进入
+新流。
 
 当前代码实现了 [DESIGN.md](DESIGN.md) 的 C1–C8，以及 FEC v6 的 grouped 与
 SC-LDPC 数据面、自适应 FEC（GF(2) Phase 1 与 SC-LDPC 速率控制）、多流 v7
@@ -133,9 +134,9 @@ PARITY 空块 marker（`win_len=0`、`payload_len=0`、`epoch=0`）；`0x1003`
 48 字节；`0x1006` 把 `FEC_CFG` 扩到 48 字节、把 `FEC_FBK` 变成 48 字节
 报告，并把 HELLO body[0] 升到版本 3，用于自适应形状切换。`0x1007` 是多流
 版本：stream-local FEC seq/block id、32 字节 OPEN group bitmap 与
-`FEC_ALLOC` (0x36)；HELLO body[0] 升到版本 4。`FEC_ALLOC` 只在 wire 格式中定义，
-0.4.0 数据面不发送也不消费它（见上文的并发流说明）。0.2.x 与当前 wire
-不互操作，首个 HELLO 即硬拒绝。
+`FEC_ALLOC` (0x36)；HELLO body[0] 升到版本 4。`FEC_ALLOC` 与 0.4.0 的 wire
+兼容，但只有 0.4.4 发送并应用它（见上文的并发流说明）；旧对端会忽略它。
+0.2.x 与当前 wire 不互操作，首个 HELLO 即硬拒绝。
 `scripts/mkdkmsconf.sh` 派生
 `PACKAGE_VERSION="<major>.<minor>.<patch>"`；`dkms.conf` 是生成物，由
 `make dkms.conf` / `make dkms-tarball` 写出，不要手改。
@@ -541,10 +542,11 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   SC-LDPC 控制器（默认 off）：0.4.3 起下行 1x256 与上行 8x32 均支持六档
   自适应切换；与旧 0.4.0..0.4.2 混跑时遇 CFG_NACK 自动静默守住 128/128。
   `adaptive=off` 保持配置的形状。
-- **多流 FEC v7。** 0.4.0 起，一个会话可在 `fec_groups_per_flow` 预留了组时
-  承载并发流（wire `0x1007`）；默认 `0` 会拒绝第二条流，SC-LDPC 始终单流。
-  每条流有自己的 FEC TX/RX flow 与 admission 引用。顺序连接仍会重置旧状态
-  并关闭旧 target。运行时重平衡未启用（0.4.0 的 `FEC_ALLOC` 仅存在于 wire）。
+- **多流 FEC v7。** 0.4.0 起，一个会话可承载并发流（wire `0x1007`）。
+  0.4.4 起默认 `fec_groups_per_flow=0` 启用
+  运行时组重平衡：near 侧是仲裁器，far 侧应用每个 `FEC_ALLOC`（0x36）切换；
+  非零值则固定静态配额。SC-LDPC 始终单流。每条流有自己的 FEC TX/RX flow
+  与 admission 引用。顺序连接仍会重置旧状态并关闭旧 target。
 - **每条远端隧道只有一个锚。** 一个 `peer=`（或第一条 HELLO）固定源地址。
   近端多宿主，或者 NAT 重绑源地址，都会让后续 HELLO 被拒绝（`join_src_reject`）；
   请保持一个稳定的源地址，例如用 `srcaddrs=`。
@@ -659,8 +661,8 @@ root。如果两台主机之间的路径不可信，就把隧道放进 WireGuard
 没有认证，也不支持 IPv6。FEC v6 可选（`fec=on`）；`mode=sc-ldpc` 已实现
 （binary 下行、grouped GF(16) 上行），`mode=rlnc`/`grouped` 保留为 GF(2)
 band RLNC 回退，`carriers = groups * (n + m)` 最多 256 条载体。0.4.0 支持
-多条并发 FEC 流（v7，`0x1007`），前提是 `fec_groups_per_flow` 预留了组；
-SC-LDPC 始终单流。
+多条并发 FEC 流（v7，`0x1007`）；0.4.4 起默认 `fec_groups_per_flow=0`
+在运行时重平衡组，非零值则固定静态配额。SC-LDPC 始终单流。
 `crypto=on` 只做 ChaCha8 body
 混淆，不是加密，也不做认证。它的用途是放大"每流限速"的额度，并验证某个
 QoS 档位是否有效。其它场景请用 WireGuard。
