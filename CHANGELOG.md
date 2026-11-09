@@ -3,6 +3,34 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.4.2] - 2026-11-09
+
+### Fixed
+
+- An SC-LDPC stream now delivers without FIN, and an interactive exchange no
+  longer waits for the slow FEC cadence. Two defects kept a request/response
+  stream silent. A block whose last DATA share filled the 8192-byte packet
+  exactly left `fill == 0`, so the 2 ms short-write timer was never armed:
+  the receiver never learned the cut, and an echo of exactly 128 KiB or
+  8192 bytes waited until half-close (measured: no echo in 5 s, and the QEMU
+  smoke had learned to half-close first). Independently, every 0 ms wake and
+  the 2 ms cut shared the packetizer work with a 500 ms INIT retry, so a
+  200-byte request and its echo each waited out one retry (measured 1113 ms
+  round trip in the guest). The packetizer now seals a block after 2 ms of
+  silence whenever the current block already holds shares, and the slow
+  cadences moved to dedicated works: `TBT_SW_FEC_TICK` carries the 500 ms
+  INIT retry, the 250 ms adaptation tick and the 10 ms crypto wait;
+  `TBT_SW_FEC_RX_POLL` carries the NACK retry, the estimator sample and the
+  stall poll. The packetizer and receiver works now carry only 0 ms wakes
+  and a 2 ms retry/cut, so no slow timer can sit in front of an interactive
+  packet. In the 7.0.14 QEMU guest over both shipped SC-LDPC shapes, with
+  the connection fully open: a 200-byte exchange completes in 17-22 ms for
+  the first exchange (stream admission included) and 10-15 ms steady; 8192
+  bytes in 16-21 ms (downlink) and 40-43 ms (uplink, eight groups); 128 KiB
+  in 60-103 ms (downlink) and 92-151 ms (uplink). `fec_drop_sid`,
+  `fec_proto_fail`, `fec_credit_wait` and `fec_short_unknown` stay 0, and
+  module unload remains clean.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

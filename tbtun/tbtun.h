@@ -1124,6 +1124,8 @@ enum tbt_sess_work
     TBT_SW_FEC_TX,
     TBT_SW_FEC_RX,
     TBT_SW_TX,
+    TBT_SW_FEC_TICK,
+    TBT_SW_FEC_RX_POLL,
 };
 
 /* Adaptive FEC control-surface snapshot (0.3.0). The estimator/controller in
@@ -1259,6 +1261,16 @@ struct tbt_session
     u16 fec_drain_cursor;
     u16 fec_ndrain;
     struct delayed_work w_fec_tx; /* packetizer + control/replay writer */
+    /* Slow FEC cadence (INIT retry, adaptation, crypto key wait). Kept off
+     * w_fec_tx so a 10/250/500 ms arm can never hold a 2 ms cut or an
+     * immediate submit behind it: tbt_session_arm() does not retime a queued
+     * instance. The entry asks w_fec_tx for one pass; that body re-arms this
+     * work while the cadence is still needed. */
+    struct delayed_work w_fec_tick;
+    /* Slow RX cadence (NACK retry, estimator sample, stall poll). Kept off
+     * w_fec_rx so a ready block's 0 ms wake is never queued behind a 10 ms,
+     * 100 ms or 30 s poll. The entry asks w_fec_rx for one pass. */
+    struct delayed_work w_fec_rx_poll;
     /* 0.2.0: FEC receive work (decode outside rx->lock, then deliver).
      * Declared only in this cut: M4/M8 initialise it, and nothing arms it
      * yet. See review/s2-merged-design.md §1.3 and §2.3. */

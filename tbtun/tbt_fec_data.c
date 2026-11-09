@@ -1887,6 +1887,7 @@ static void tbt_fec_tx_pump(struct tbt_session *sess, struct tbt_fec_flow *f)
     struct tbt_stream *st;
     bool paused = false;
     bool short_ready;
+    bool block_dirty;
 
     if (!tx || f->state != 1 || READ_ONCE(sess->closing) ||
         READ_ONCE(sess->fec_stopping))
@@ -1954,8 +1955,22 @@ static void tbt_fec_tx_pump(struct tbt_session *sess, struct tbt_fec_flow *f)
         }
         break;
     }
+    /* A block must be sealed after this much silence even when its last share
+     * filled a packet exactly. The receiver learns the cut only from the
+     * PARITY's win_len, so a stream that stops on a block boundary -- an
+     * HTTP request of exactly N*S bytes, a sender waiting for the response --
+     * would otherwise leave the block open until FIN and never be delivered.
+     * The same 2 ms idle rule that already cuts a partial packet now cuts
+     * the block; any share that arrives first clears the timer. */
+    short_ready = false;
+    block_dirty = false;
+    if (tx->seq > tbt_fec_seq_of_block_pkt_base(
+                      READ_ONCE(tx->cur_block), 0, 0, tx->base_pkt,
+                      tx->base_block, tx->groups, tx->n))
+        block_dirty = true;
     spin_lock(&tx->lock);
-    short_ready = tx->fill && tx->head == tx->tail;
+    if ((tx->fill || block_dirty) && tx->head == tx->tail)
+        short_ready = true;
     spin_unlock(&tx->lock);
     if (short_ready && !READ_ONCE(tx->flush_req) &&
         !tbt_fec_tx_outq_high(sess) &&
@@ -1970,10 +1985,26 @@ static void tbt_fec_tx_pump(struct tbt_session *sess, struct tbt_fec_flow *f)
             tbt_session_arm(sess, TBT_SW_FEC_TX,
                             msecs_to_jiffies(TBT_FEC_SHORT_MS));
         }
-        else if (now >= tx->short_at_ns && tbt_fec_tx_credit_ok(tx))
+        else if (now >= tx->short_at_ns)
         {
-            tbt_fec_packetize(sess, tx, st, false);
-            tbt_fec_tx_close_block(sess, tx, true);
+            if (tbt_fec_tx_credit_ok(tx))
+            {
+                if (tx->fill)
+                    tbt_fec_packetize(sess, tx, st, false);
+                tbt_fec_tx_close_block(sess, tx, true);
+                tx->short_at_ns = 0;
+            }
+            /* Credit is a closed window, not a lost deadline: the ACK that
+             * reopens it is the wake this wait needs. */
+        }
+        else
+        {
+            /* An earlier wake consumed this instance before the deadline: a
+             * 0 ms flush, ACK or submit ran the pump with now < short_at_ns.
+             * Re-arm the short cut here or it would wait for the next
+             * unrelated wake. */
+            tbt_session_arm(sess, TBT_SW_FEC_TX,
+                            msecs_to_jiffies(TBT_FEC_SHORT_MS));
         }
     }
     else
@@ -2069,7 +2100,7 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
 
     if (sess->crypto && !smp_load_acquire(&sess->crypto_tx_ready))
     {
-        tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(10));
+        tbt_session_arm(sess, TBT_SW_FEC_TICK, msecs_to_jiffies(10));
         goto out;
     }
 
@@ -2197,13 +2228,13 @@ static void tbt_fec_tx_init_tick(struct tbt_session *sess,
     }
     if (tx->init_tries && now - tx->init_ns < 500000000ULL)
     {
-        tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(500));
+        tbt_session_arm(sess, TBT_SW_FEC_TICK, msecs_to_jiffies(500));
         return;
     }
     tbt_fec_tx_send_init(sess, tx);
     tx->init_tries++;
     tx->init_ns = now;
-    tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(500));
+    tbt_session_arm(sess, TBT_SW_FEC_TICK, msecs_to_jiffies(500));
 }
 
 static void tbt_fec_tx_switch_abort(struct tbt_session *sess, struct tbt_fec_tx *tx, bool tell_peer);
@@ -2650,6 +2681,26 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
     spin_unlock(&sess->lock);
 }
 
+/* Slow FEC cadence: the 500 ms INIT retry, the 250 ms adaptation tick and
+ * the 10 ms wait for the crypto TX key. The entry owns no data-plane state;
+ * it asks w_fec_tx for one pass, and that body arms this work again while
+ * the cadence is still needed. Keeping every delay above the short cut on a
+ * separate work leaves w_fec_tx free for the 0 ms wake and the 2 ms block
+ * cut, which tbt_session_arm() must never place behind a queued slow timer
+ * (measured: a 200-byte echo waited out the 500 ms INIT retry in each
+ * direction, 1113 ms round trip). */
+static void tbt_fec_tick_work(struct work_struct *w)
+{
+    struct tbt_session *sess =
+        container_of(to_delayed_work(w), struct tbt_session, w_fec_tick);
+    bool owned = test_and_clear_bit(TBT_SW_FEC_TICK, &sess->sched);
+
+    if (!READ_ONCE(sess->closing) && !READ_ONCE(sess->fec_stopping))
+        tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+    if (owned)
+        tbt_session_put(sess);
+}
+
 void tbt_fec_tx_work(struct work_struct *w)
 {
     struct tbt_session *sess =
@@ -2684,7 +2735,7 @@ void tbt_fec_tx_work(struct work_struct *w)
      * wakes the packetizer. */
     if (READ_ONCE(sess->adaptive) && !READ_ONCE(sess->fec_stopping) &&
         !READ_ONCE(sess->closing) && sess->n_fec_flows <= 1)
-        tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(250));
+        tbt_session_arm(sess, TBT_SW_FEC_TICK, msecs_to_jiffies(250));
 out:
     if (owned)
         tbt_session_put(sess);
@@ -3365,7 +3416,7 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess,
             {
                 left_ms = (budget - (now - rx->progress_ns)) / NSEC_PER_MSEC + 1;
             }
-            tbt_session_arm(sess, TBT_SW_FEC_RX,
+            tbt_session_arm(sess, TBT_SW_FEC_RX_POLL,
                             msecs_to_jiffies(tbt_fec_rx_poll_ms(
                                 left_ms, now - rx->progress_ns)));
             break;
@@ -4155,7 +4206,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
             /* A young block has nothing to ask yet; wake when its hold may
              * have expired instead of waiting for the next share. */
             if (young)
-                tbt_session_arm(sess, TBT_SW_FEC_RX,
+                tbt_session_arm(sess, TBT_SW_FEC_RX_POLL,
                                 msecs_to_jiffies(TBT_FEC_NACK_MIN_MS));
             return;
         }
@@ -4228,7 +4279,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
             if (settling)
             {
                 spin_unlock_bh(&rx->lock);
-                tbt_session_arm(sess, TBT_SW_FEC_RX,
+                tbt_session_arm(sess, TBT_SW_FEC_RX_POLL,
                                 msecs_to_jiffies(TBT_FEC_NACK_MIN_MS));
                 return;
             }
@@ -4282,7 +4333,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
             /* Every share arrived or its reply is still in flight. Nothing
              * to put on the wire; the next pass decodes the block or the
              * hold expires. */
-            tbt_session_arm(sess, TBT_SW_FEC_RX,
+            tbt_session_arm(sess, TBT_SW_FEC_RX_POLL,
                             msecs_to_jiffies(TBT_FEC_NACK_MIN_MS));
             return;
         }
@@ -4310,7 +4361,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
             else
                 tbt_fec_nack_drop(sess, err, last_block, &last);
         }
-        tbt_session_arm(sess, TBT_SW_FEC_RX,
+        tbt_session_arm(sess, TBT_SW_FEC_RX_POLL,
                         msecs_to_jiffies(TBT_FEC_NACK_MIN_MS));
         return;
     }
@@ -4321,7 +4372,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
          * connection would put a probe on the wire every retry interval for
          * as long as it stays open. Pace it; a real repair keeps the retry
          * cadence. */
-        tbt_session_arm(sess, TBT_SW_FEC_RX,
+        tbt_session_arm(sess, TBT_SW_FEC_RX_POLL,
                         msecs_to_jiffies(TBT_FEC_RX_POLL_SLOW_MS));
         return;
     }
@@ -4350,7 +4401,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
     /* The NACK itself may be lost; retry while the block is in the window.
      * No total attempt cap: only the window and the carrier TCP lifetime
      * bound the repair. */
-    tbt_session_arm(sess, TBT_SW_FEC_RX,
+    tbt_session_arm(sess, TBT_SW_FEC_RX_POLL,
                     msecs_to_jiffies(TBT_FEC_NACK_MIN_MS));
 }
 
@@ -5518,6 +5569,24 @@ static void tbt_fec_rx_work_body(struct tbt_session *sess)
         tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
 }
 
+/* Slow RX cadence: a NACK retry, the estimator sample or the stall poll.
+ * The delays range from 10 ms to the 30 s stall budget; on w_fec_rx they
+ * would hold a ready block's 0 ms wake for the whole delay. The entry asks
+ * w_fec_rx for one pass, and that pass arms this work again when the next
+ * super-block is still not ready. */
+static void tbt_fec_rx_poll_work(struct work_struct *w)
+{
+    struct tbt_session *sess =
+        container_of(to_delayed_work(w), struct tbt_session, w_fec_rx_poll);
+    bool owned = test_and_clear_bit(TBT_SW_FEC_RX_POLL, &sess->sched);
+
+    if (!READ_ONCE(sess->closing) && !READ_ONCE(sess->fec_stopping) &&
+        READ_ONCE(sess->fec))
+        tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
+    if (owned)
+        tbt_session_put(sess);
+}
+
 void tbt_fec_rx_work(struct work_struct *w)
 {
     struct tbt_session *sess =
@@ -5549,7 +5618,7 @@ void tbt_fec_rx_work(struct work_struct *w)
      * window expires and the FBK cadence is 100 ms. */
     if (READ_ONCE(sess->adaptive) && !READ_ONCE(sess->fec_stopping) &&
         !READ_ONCE(sess->closing) && sess->n_fec_flows <= 1)
-        tbt_session_arm(sess, TBT_SW_FEC_RX, msecs_to_jiffies(100));
+        tbt_session_arm(sess, TBT_SW_FEC_RX_POLL, msecs_to_jiffies(100));
 out:
     if (owned)
         tbt_session_put(sess);
@@ -7655,6 +7724,8 @@ int tbt_fec_data_init(struct tbt_session *sess)
     spin_lock_init(&sess->fec_out_lock);
     INIT_DELAYED_WORK(&sess->w_fec_tx, tbt_fec_tx_work);
     INIT_DELAYED_WORK(&sess->w_fec_rx, tbt_fec_rx_work);
+    INIT_DELAYED_WORK(&sess->w_fec_tick, tbt_fec_tick_work);
+    INIT_DELAYED_WORK(&sess->w_fec_rx_poll, tbt_fec_rx_poll_work);
     sess->fec = true;
 
     /* The first flow owns one fair share from the start. fec_groups_per_flow

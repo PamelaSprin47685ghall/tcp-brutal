@@ -1408,6 +1408,11 @@ static struct delayed_work *tbt_sess_dw(struct tbt_session *s,
         return READ_ONCE(s->w_fec_rx.work.func) ? &s->w_fec_rx : NULL;
     case TBT_SW_TX:
         return &s->w_tx;
+    case TBT_SW_FEC_TICK:
+        return READ_ONCE(s->w_fec_tick.work.func) ? &s->w_fec_tick : NULL;
+    case TBT_SW_FEC_RX_POLL:
+        return READ_ONCE(s->w_fec_rx_poll.work.func) ? &s->w_fec_rx_poll :
+                                                      NULL;
     }
     return NULL;
 }
@@ -1749,6 +1754,8 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     tbt_session_cancel(s, TBT_SW_FBK);
     tbt_session_cancel(s, TBT_SW_FEC_TX);
     tbt_session_cancel(s, TBT_SW_FEC_RX);
+    tbt_session_cancel(s, TBT_SW_FEC_TICK);
+    tbt_session_cancel(s, TBT_SW_FEC_RX_POLL);
     tbt_session_cancel(s, TBT_SW_TX);
 
     /* Stop every carrier: cancel its works, restore callbacks, unpublish,
@@ -1826,6 +1833,8 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     tbt_session_cancel(s, TBT_SW_REPLACE);
     tbt_session_cancel(s, TBT_SW_FEC_TX);
     tbt_session_cancel(s, TBT_SW_FEC_RX);
+    tbt_session_cancel(s, TBT_SW_FEC_TICK);
+    tbt_session_cancel(s, TBT_SW_FEC_RX_POLL);
     tbt_session_cancel(s, TBT_SW_TX);
 
     tbt_fec_data_free(s);
