@@ -325,10 +325,13 @@ static void tbt_tx_announce_carrier(struct tbt_session *sess,
     if (sess->fec && flow)
         memcpy(body, flow->group_mask, sizeof(body));
     WRITE_ONCE(st->tx_open_sent, true);
+    /* `up` means "the OPEN is on the wire": the pump sets it in the OPEN
+     * completion case. The FEC data path writes to the carrier directly, so
+     * a queued-but-unwritten OPEN must not admit data here. A failed enqueue
+     * also leaves it clear; up_rescue re-announces. */
     atomic_set(&c->up, 0);
-    if (tbt_tx_control_pinned(sess, st, c->index, TBT_F_OPEN, st->sid, 0,
-                              body, sizeof(body), true, gfp))
-        atomic_set(&c->up, 1);
+    (void)tbt_tx_control_pinned(sess, st, c->index, TBT_F_OPEN, st->sid, 0,
+                                body, sizeof(body), true, gfp);
 }
 
 /* Announce the stream on every carrier that has sent its HELLO and has not
