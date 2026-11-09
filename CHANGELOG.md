@@ -5,6 +5,9 @@ and moves independently of the module version.
 
 ## [0.4.1] - 2026-11-09
 
+The module version stays 0.4.0 on this branch; the release commit sets the
+patch number.
+
 ### Fixed
 
 - Module unload no longer races the asynchronous FEC flow free. The last
@@ -33,6 +36,15 @@ and moves independently of the module version.
   first appeared in 6.17 (commit 128ea9f6ccfb), so the previous 6.5
   threshold broke every 6.5..6.16 build, including the 6.6 and 6.12 LTS
   trees; those releases keep using the exported `system_unbound_wq`.
+- A stream reset no longer shuts down the stream socket while the carrier
+  receive work holds `lock_sock(carrier)`. The RST path called
+  `kernel_sock_shutdown()` from inside `tcp_read_sock()`, which takes
+  `lock_sock(stream)` and trips lockdep's recursive `sk_lock-AF_INET`
+  report under `PROVE_LOCKING`. The wake now runs in `tbt_kill_body()`
+  immediately before the socket release: `w_kill` runs on its own worker,
+  `w_target` is cancelled first so `st->sk` is stable, and the
+  refused-schedule case is covered by the destroy path's release. This
+  also removes the unsynchronised `st->sk` read from the carrier path.
 
 ## [0.4.0] - 2026-11-09
 
