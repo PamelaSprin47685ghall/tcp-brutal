@@ -68,7 +68,11 @@
 #define MP_TGT0 15210
 #define MP_TGT1 15211
 #define MP_SIG1 0x5au
-#define MP_BYTES (64u * 1024u)
+/* The near-side allocator shrinks the slot-0 donor only at a grouped
+ * super-block boundary (GROUP_TOTAL * n shares = 1 MiB). A 64 KiB echo
+ * stops before the first boundary, so admitting slot 1 would time out and
+ * the connection would reset. Keep both mappings busy across two boundaries. */
+#define MP_BYTES (2u * GROUP_TOTAL * 4u * 8192u)
 #define CARRIERS 256
 #define PORTBLOCK "30000-30511"
 /* carriers / (n + m) for the grouped 4+4 shape below: the physical group

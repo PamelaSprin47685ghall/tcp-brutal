@@ -38,8 +38,8 @@ from dataclasses import dataclass
 from email.utils import formatdate
 from pathlib import Path
 
-TBT_CONV = 0x0007
-TBT_FEC_CONV = 0x1007
+TBT_CONV = 0x0008
+TBT_FEC_CONV = 0x1008
 TBT_HDR_LEN = 32
 TBT_REC_MAX = 32 + 8192
 TBT_FEC_HDR_LEN = 48
@@ -59,7 +59,7 @@ ARQ_TYPES = {
 }
 ARQ_BOUNDS = {
     0x10: (1, 8192),
-    0x13: (32, 32),
+    0x13: (36, 36),
     0x14: (16, 16),
     0x15: (0, 0),
     0x20: (0, 288),
@@ -78,7 +78,7 @@ FEC_TYPES = {
     0x35: "FBK",
     0x36: "ALLOC",
 }
-FEC_CONTROL_LEN = {0x32: 24, 0x33: 64, 0x34: 48, 0x35: 48, 0x36: 64}
+FEC_CONTROL_LEN = {0x32: 24, 0x33: 64, 0x34: 64, 0x35: 64, 0x36: 64}
 
 TOKEN = re.compile(rb"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
 REQ_LINE = re.compile(rb"POST /api/v2/upload HTTP/1\.1")
@@ -245,7 +245,7 @@ def parse_arq_record(body, audit, ctx):
 
     audit.need(typ in ARQ_TYPES, f"{ctx}: ARQ type 0x{typ:02x} is defined")
     audit.need(TBT_HDR_LEN + body_len == len(body), f"{ctx}: ARQ body_len matches chunk")
-    audit.need(conv == TBT_CONV, f"{ctx}: ARQ conv is 0x0007")
+    audit.need(conv == TBT_CONV, f"{ctx}: ARQ conv is 0x0008")
     audit.need(flags & ~0x3F == 0, f"{ctx}: ARQ flags fit TBT_FF_MASK")
     audit.need(ack_count <= 16, f"{ctx}: path_ack_count <= 16")
     audit.need(ack_mask & ~0xFFFF == 0, f"{ctx}: path_ack_mask is 16 bits")
@@ -287,7 +287,7 @@ def parse_fec_record(body, audit, ctx):
     header_crc = le32(body, 44)
 
     audit.need(typ in FEC_TYPES, f"{ctx}: FEC type 0x{typ:02x} is defined")
-    audit.need(conv == TBT_FEC_CONV, f"{ctx}: FEC conv is 0x1007")
+    audit.need(conv == TBT_FEC_CONV, f"{ctx}: FEC conv is 0x1008")
     audit.need(reserved == 0, f"{ctx}: FEC reserved is zero")
     audit.need(flags & ~0x01 == 0, f"{ctx}: FEC flags fit TBT_FEC_FF_MASK")
     audit.need(
@@ -675,7 +675,7 @@ def audit_message(msg, direction, carrier, round_no, audit, ctx):
             f"{ctx}: HELLO uses the 66-byte v6 body",
         )
         audit.need(
-            hello["body"][0] == 4,
+            hello["body"][0] == 5,
             f"{ctx}: HELLO body[0] is TBT_WIRE_VERSION_V6",
         )
         audit.need(
@@ -689,11 +689,11 @@ def audit_message(msg, direction, carrier, round_no, audit, ctx):
         audit.need(hello["seq"] == 0, f"{ctx}: HELLO seq is zero")
     opened = next(r for r in arq if r["name"] == "OPEN")
     audit.need(
-        opened["body_len"] == 32 and opened["body"].count(0) < 32,
+        opened["body_len"] == 36 and opened["body"][:32].count(0) < 32,
         f"{ctx}: OPEN carries a non-empty 32-byte group bitmap",
     )
     audit.need(
-        sum(bin(b).count("1") for b in opened["body"]) == 1,
+        sum(bin(b).count("1") for b in opened["body"][:32]) == 1,
         f"{ctx}: OPEN bitmap names one group",
     )
     audit.need(
