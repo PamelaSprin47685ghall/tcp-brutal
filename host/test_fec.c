@@ -1704,9 +1704,26 @@ static void test_sclc_open_mask(void)
  * refusal keeps the carrier alive and increments fec_stream_refused. */
 static void test_sclc_second_flow(void)
 {
+    u8 eight[32];
+    u16 count = 0;
+
+    memset(eight, 0, sizeof(eight));
+    for (count = 0; count < 8; count++)
+        tbt_fec_bitmap_set(eight, count);
     ok_int(tbt_fec_flow_admit_check(true, 1, 1, 8),
            TBT_FEC_ADMIT_SECOND_SCLC,
            "sclc second flow: 8-group OPEN beats the local groups=1 check");
+    /* Sequential stream: the previous flow was released, n_flows=0. The peer
+     * still sends 8 groups while the local TX shape has one; create uses the
+     * local group count and the peer bitmap for RX, so admission succeeds. */
+    ok(tbt_fec_open_mask_valid(true, 1, eight, &count),
+       "sclc sequential: the 8-group peer bitmap is valid", NULL);
+    ok_u32(count, 8, "sclc sequential: peer bitmap count");
+    ok_int(tbt_fec_flow_admit_check(true, 0, 1, 1), TBT_FEC_ADMIT_OK,
+           "sclc sequential: local groups=1 admits the next flow");
+    ok_int(tbt_fec_flow_admit_check(true, 1, 1, 1),
+           TBT_FEC_ADMIT_SECOND_SCLC,
+           "sclc concurrent: a live flow still refuses the second");
     ok_int(tbt_fec_flow_admit_check(true, 0, 1, 1), TBT_FEC_ADMIT_OK,
            "sclc first flow: one local group is admitted");
     ok_int(tbt_fec_flow_admit_check(true, 0, 1, 8),
