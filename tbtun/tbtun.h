@@ -1252,10 +1252,20 @@ struct tbt_session
     /* One delayed work drains every ready carrier's bound data queue. A
      * carrier is set in fec_drain_ready when the packetizer or write_space
      * wakes it; the work takes one batch from each ready carrier in a
-     * round-robin cursor, so a full socket cannot hold the others behind
-     * it. The cursor and the bitmap are owned by the work. */
+     * round-robin cursor, up to TBT_FEC_DRAIN_PASS_MAX carriers per run, so
+     * a burst cannot monopolise the worker.
+     *
+     * A carrier that refuses its batch with -EAGAIN moves to
+     * fec_drain_retry and waits for the 2 ms timer; the two bitmaps never
+     * gate each other, so a blocked carrier cannot delay a fresh one by a
+     * single timer tick. When the timer fires, the retry bits rejoin
+     * fec_drain_ready and are served by the same bounded loop.
+     * fec_retry_at is the jiffies deadline for that merge, 0 while idle.
+     * The cursor and both bitmaps are owned by the work. */
     struct delayed_work fec_drain_work;
     DECLARE_BITMAP(fec_drain_ready, TBT_MAX_CARRIERS_LIMIT);
+    DECLARE_BITMAP(fec_drain_retry, TBT_MAX_CARRIERS_LIMIT);
+    unsigned long fec_retry_at;
     u16 fec_drain_cursor;
     u16 fec_ndrain;
     struct delayed_work w_fec_tx; /* packetizer + control/replay writer */

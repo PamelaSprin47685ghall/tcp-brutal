@@ -89,8 +89,10 @@ static void tbt_fec_tx_init_tick(struct tbt_session *sess, struct tbt_fec_tx *tx
  * TBT_FEC_CREDIT_MAX packets (8 MiB at S=8192) and to K-2 super-blocks. */
 #define TBT_FEC_RX_BUDGET (16u * 1024 * 1024)
 /* One FEC drain run sends at most this many batches before yielding to the
- * packetizer and the other carriers. */
-#define TBT_FEC_DRAIN_PASS_MAX 8
+ * packetizer and the other carriers. A full 256-carrier burst is served in
+ * four such runs, each of which re-arms with no delay while fresh bits
+ * remain; the cap bounds the worker hold time, not the delivery latency. */
+#define TBT_FEC_DRAIN_PASS_MAX 64
 /* The carrier's short-write tail holds a whole batch: TBT_CAR_PART_MAX is
  * TBT_FEC_BATCH_MAX frames and part_len is wide enough for it. A batch's
  * worst-case framed total is at most that (one full record is
@@ -1022,19 +1024,16 @@ static bool tbt_fec_out_drain_one(struct tbt_session *sess, u16 idx,
     return !tbt_fec_out_queue_empty(sess, idx);
 }
 
-/* One work drains one batch from each ready carrier, round-robin. A full
- * socket keeps only its own bit set and gets the 2 ms fallback; the other
- * ready carriers are served in the same run. */
-static void tbt_fec_out_drain_work(struct work_struct *w)
+/* Serve up to `cap` carriers from the ready bitmap, round-robin. A carrier
+ * that refused its batch moves to the retry bitmap; one that still has data
+ * keeps its ready bit and is served again by the next run without delay.
+ * Fresh and blocked bits never share a bitmap, so a full socket cannot push
+ * a fresh carrier into its retry timer. */
+static void tbt_fec_out_drain_ready(struct tbt_session *sess, u16 cap)
 {
-    struct tbt_session *sess =
-        container_of(to_delayed_work(w), struct tbt_session, fec_drain_work);
-    bool blocked = false;
     u16 pass;
 
-    if (!sess->fec || !sess->n_car || READ_ONCE(sess->fec_stopping))
-        return;
-    for (pass = 0; pass < TBT_FEC_DRAIN_PASS_MAX; pass++)
+    for (pass = 0; pass < cap; pass++)
     {
         unsigned long idx;
         bool one_blocked, one_more;
@@ -1053,17 +1052,63 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
         one_more = tbt_fec_out_drain_one(sess, (u16)idx, &one_blocked);
         if (one_blocked)
         {
-            set_bit(idx, sess->fec_drain_ready);
-            blocked = true;
+            /* The first refusal sets the deadline; later ones in the same
+             * run share it, and a fresh run never shortens it. */
+            if (bitmap_empty(sess->fec_drain_retry, sess->n_car))
+                sess->fec_retry_at = jiffies + msecs_to_jiffies(2);
+            set_bit(idx, sess->fec_drain_retry);
         }
         else if (one_more)
         {
             set_bit(idx, sess->fec_drain_ready);
         }
     }
-    if (find_first_bit(sess->fec_drain_ready, sess->n_car) < sess->n_car)
+}
+
+/* The retry timer gates blocked carriers only. When it fires, their bits
+ * rejoin the ready bitmap and the bounded loop serves them; while it has
+ * not fired, fresh bits are served immediately. A full set of carriers
+ * therefore retries once per timer tick instead of spinning. */
+static void tbt_fec_out_drain_work(struct work_struct *w)
+{
+    struct tbt_session *sess =
+        container_of(to_delayed_work(w), struct tbt_session, fec_drain_work);
+    u16 cap;
+
+    if (!sess->fec || !sess->n_car || READ_ONCE(sess->fec_stopping))
+        return;
+    if (!bitmap_empty(sess->fec_drain_retry, sess->n_car) &&
+        time_after_eq(jiffies, sess->fec_retry_at))
+    {
+        unsigned long idx;
+
+        /* Move bit by bit: kick() sets a ready bit concurrently, and a
+         * whole-word bitmap_or() could overwrite that atomic update. */
+        for_each_set_bit(idx, sess->fec_drain_retry, sess->n_car)
+        {
+            set_bit(idx, sess->fec_drain_ready);
+            clear_bit(idx, sess->fec_drain_retry);
+        }
+        sess->fec_retry_at = 0;
+    }
+
+    cap = (u16)min_t(unsigned int, sess->n_car, TBT_FEC_DRAIN_PASS_MAX);
+    tbt_fec_out_drain_ready(sess, cap);
+
+    if (!bitmap_empty(sess->fec_drain_ready, sess->n_car))
+        mod_delayed_work(TBT_WQ, &sess->fec_drain_work, 0);
+    else if (!bitmap_empty(sess->fec_drain_retry, sess->n_car))
+    {
         mod_delayed_work(TBT_WQ, &sess->fec_drain_work,
-                         blocked ? msecs_to_jiffies(2) : 0);
+                         max_t(long, 1,
+                               (long)(sess->fec_retry_at - jiffies)));
+        /* A kick can land between the ready check and this arm, and its
+         * own 0-delay mod would lose to the later retry arm. Re-check so
+         * the fresh bit always wins; a later kick re-arms itself after
+         * this point and needs no help. */
+        if (!bitmap_empty(sess->fec_drain_ready, sess->n_car))
+            mod_delayed_work(TBT_WQ, &sess->fec_drain_work, 0);
+    }
 }
 
 /* Write the session-wide queues that can make progress: control (ACK/NACK,
@@ -6661,6 +6706,8 @@ void tbt_fec_data_free(struct tbt_session *sess)
     {
         cancel_delayed_work_sync(&sess->fec_drain_work);
         bitmap_zero(sess->fec_drain_ready, TBT_MAX_CARRIERS_LIMIT);
+        bitmap_zero(sess->fec_drain_retry, TBT_MAX_CARRIERS_LIMIT);
+        sess->fec_retry_at = 0;
         sess->fec_drain_cursor = 0;
         sess->fec_ndrain = 0;
     }
@@ -7619,6 +7666,8 @@ int tbt_fec_data_init(struct tbt_session *sess)
 
     INIT_DELAYED_WORK(&sess->fec_drain_work, tbt_fec_out_drain_work);
     bitmap_zero(sess->fec_drain_ready, TBT_MAX_CARRIERS_LIMIT);
+    bitmap_zero(sess->fec_drain_retry, TBT_MAX_CARRIERS_LIMIT);
+    sess->fec_retry_at = 0;
     sess->fec_drain_cursor = 0;
     /* Publish the gate last: tbt_fec_out_kick() refuses while ndrain is 0,
      * so it cannot arm an uninitialised work during a partial init. */
