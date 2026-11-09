@@ -647,9 +647,10 @@ struct tbt_fec_blk
     u16 count_real;   /* real length ndata/nparity were computed for */
     bool decoding;    /* w_fec_rx owns this block: no second decoder */
     /* A block codec that could not finish the block keeps the block
-     * decodable, but every arriving share would re-run a decode that costs
-     * a whole block (downlink ~1 MiB). Back off after a failure so a 50%
-     * loss block does not decode 128 times before its NACK repairs arrive. */
+     * decodable, but a retry with no new share would re-run a decode that
+     * costs a whole block (downlink ~1 MiB). A failure backs off; a fresh
+     * share is new evidence, so the placement path clears this deadline and
+     * zeroes decode_tries, and the next pass retries at once. */
     u8 decode_tries;
     u64 decode_next_ns;
     bool empty;       /* PARITY marker with win_len == 0 */

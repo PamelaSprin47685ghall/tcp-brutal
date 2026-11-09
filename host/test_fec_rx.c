@@ -2299,35 +2299,84 @@ static void test_rx_poll(void)
        "a shape probe is paced slower than a repair retry");
 }
 
-static void test_nack_settle_gate(void)
+/* The decode trigger is a share count, never a clock: a block wakes the
+ * codec on the share that brings it to the wake line, and a new share
+ * clears the failure backoff. The two shipped blocks are the asymmetric
+ * downlink 1x256 and uplink 8x32 groups. */
+static void test_decode_wake(void)
 {
-    /* The scan must not name a block during its first decode settle window:
-     * a replay is new evidence that restarts the window, and fix45 turned
-     * that into 482 NACKs / 226 MB.  Once the pass has attempted and failed,
-     * the scan must ask even though the pass re-armed a backoff; otherwise
-     * the next pass re-arms it before the scan and the repair is never
-     * requested. */
-    const u64 s = 42;
-    const u64 now = 1000;
-    const u64 settle = 1050;
-    const u64 backoff = 1450;
+    /* Downlink 1x256: n=128, m=128, one group. Present = n + 8 wakes. */
+    ok(tbt_fec_sclc_decode_wake(128, 128, 1, 128, 0),
+       "downlink: complete DATA wakes without parity");
+    ok(tbt_fec_sclc_decode_wake(128, 128, 1, 127, 9),
+       "downlink: missing 1 with 9 parity wakes");
+    ok(!tbt_fec_sclc_decode_wake(128, 128, 1, 127, 8),
+       "downlink: missing 1 with 8 parity still waits");
+    ok(tbt_fec_sclc_decode_wake(128, 128, 1, 124, 12),
+       "downlink: missing 4 wakes");
+    ok(!tbt_fec_sclc_decode_wake(128, 128, 1, 124, 11),
+       "downlink: missing 4 still waits");
+    ok(tbt_fec_sclc_decode_wake(128, 128, 1, 96, 40),
+       "downlink: missing 32 wakes");
+    ok(!tbt_fec_sclc_decode_wake(128, 128, 1, 96, 39),
+       "downlink: missing 32 still waits");
+    ok(tbt_fec_sclc_decode_wake(128, 128, 1, 8, 128),
+       "downlink: missing 120 (< m) wakes at once");
+    ok(!tbt_fec_sclc_decode_wake(128, 128, 1, 7, 128),
+       "downlink: missing 121 waits for another share");
+    ok(!tbt_fec_sclc_decode_wake(128, 128, 1, 0, 128),
+       "downlink: missing 128 == m does not wake");
 
-    ok(tbt_fec_nack_wait_decode(true, true, s, s, 1, 0, now, settle),
-       "first settle: the scan does not NACK");
-    ok(!tbt_fec_nack_wait_decode(true, true, s, s, 1, 0, settle, settle),
-       "settle deadline reached: the scan may NACK");
-    ok(!tbt_fec_nack_wait_decode(true, true, s, s, 1, 1, now, backoff),
-       "failed decode: the scan asks despite the new backoff");
-    ok(!tbt_fec_nack_wait_decode(true, true, s, s, 1, 2, now, backoff),
-       "later retry: the scan still asks");
-    ok(!tbt_fec_nack_wait_decode(true, true, s, s, 0, 0, now, settle),
-       "no parity: no decode to wait for");
-    ok(!tbt_fec_nack_wait_decode(true, false, s, s, 1, 0, now, settle),
-       "unused block is not gated");
-    ok(!tbt_fec_nack_wait_decode(true, true, s - 1, s, 1, 0, now, settle),
-       "another block id is not gated");
-    ok(!tbt_fec_nack_wait_decode(false, true, s, s, 1, 0, now, settle),
-       "RLNC has no settle window");
+    /* Uplink 8x32 group: n=8, m=24, wakes at present n + 2 = 10. */
+    ok(tbt_fec_sclc_decode_wake(8, 24, 8, 8, 0),
+       "uplink: complete DATA wakes without parity");
+    ok(tbt_fec_sclc_decode_wake(8, 24, 8, 2, 8),
+       "uplink: missing 6 with 8 parity wakes");
+    ok(!tbt_fec_sclc_decode_wake(8, 24, 8, 2, 7),
+       "uplink: missing 6 with 7 parity still waits");
+    ok(!tbt_fec_sclc_decode_wake(8, 24, 8, 0, 9),
+       "uplink: present 9 does not wake");
+
+    /* A failed attempt backs off; a fresh share clears the deadline, so the
+     * next pass retries at once. */
+    ok_int(tbt_fec_decode_backoff_ms(0), 50,
+           "backoff: first failure waits 50 ms");
+    ok_int(tbt_fec_decode_backoff_ms(1), 100,
+           "backoff: second failure waits 100 ms");
+    ok_int(tbt_fec_decode_backoff_ms(3), 400,
+           "backoff: fourth failure waits 400 ms");
+    ok_int(tbt_fec_decode_backoff_ms(9), 400,
+           "backoff: capped at 400 ms");
+}
+
+/* A share for a block the delivery frontier has passed is dropped with one
+ * fec_late_share count. Before the first delivery the window may still
+ * move down, so the same block is not late yet. */
+static void test_block_late(void)
+{
+    const u64 next_super = 5;
+    const u64 next_deliver = 5 * 128; /* next packet: block 5, downlink n */
+    int late = 0;
+
+    if (tbt_fec_rx_block_late(false, true, next_super, 4, 5 * 128,
+                              next_deliver))
+        late++;
+    ok_int(late, 1, "late: block below the frontier counts once");
+    ok(tbt_fec_rx_block_late(false, true, next_super, 5, 4 * 128,
+                             next_deliver),
+       "late: next_deliver already past the block");
+    ok(!tbt_fec_rx_block_late(false, true, next_super, 5, 6 * 128,
+                              next_deliver),
+       "late: the frontier block is not late");
+    ok(!tbt_fec_rx_block_late(false, true, next_super, 6, 7 * 128,
+                              next_deliver),
+       "late: a later block is not late");
+    ok(!tbt_fec_rx_block_late(false, false, next_super, 4, 5 * 128,
+                              next_deliver),
+       "late: a lower block before the first delivery may still rebase");
+    ok(!tbt_fec_rx_block_late(true, true, next_super, 4, 5 * 128,
+                              next_deliver),
+       "late: a pending rebase owns the window");
 }
 
 int main(void)
@@ -2358,7 +2407,8 @@ int main(void)
     test_admission_groups();
     test_ack_split();
     test_rx_poll();
-    test_nack_settle_gate();
+    test_decode_wake();
+    test_block_late();
     test_replay_window();
     test_nack_filter();
     test_nack_storm();

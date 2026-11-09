@@ -31,6 +31,12 @@ payload is the application byte stream itself.
   48-byte FEC header and every offset stay unchanged. A 0.6.0 peer is refused
   at the first HELLO and the first FEC conv check; there is no compatibility
   branch.
+- FEC receive decodes on the share that can cover the block, not after a
+  50 ms quiet window. The downlink 1x256 block wakes on complete DATA or at
+  present shares >= n + 8 (missing <= 120 < m); the uplink 8x32 group wakes
+  at present shares >= n + 2. A failed attempt keeps its 50..400 ms backoff,
+  and a fresh share clears it; a share for a block behind the delivery
+  frontier is dropped as `fec_late_share` before decryption or placement.
 - Module version is `0.7.0`.
 
 ## [0.6.0] - 2026-11-09

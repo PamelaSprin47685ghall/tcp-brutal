@@ -383,6 +383,22 @@ tbt_fec_rx_window_step(u64 next_super, u64 block_id, u16 slots, bool rebase,
     return TBT_FEC_RX_WIN_PLACE;
 }
 
+/* A share whose whole block is behind the delivery frontier: the block was
+ * already handed over (or consumed as padding) and no byte may move again.
+ * The caller counts fec_late_share and drops it before decrypting, placing
+ * or delivering. `delivered` is the same first-delivery gate the reorder
+ * window uses; before it, a lower block may still lower the window, so the
+ * share is not late. `block_end_seq` is the first packet after the block,
+ * which names "next_deliver has passed this block" without a block count. */
+static inline bool tbt_fec_rx_block_late(bool rebase, bool delivered,
+                                         u64 next_super, u64 block_id,
+                                         u64 block_end_seq, u64 next_deliver)
+{
+    if (rebase || !delivered)
+        return false;
+    return block_id < next_super || block_end_seq <= next_deliver;
+}
+
 /* ------------------------------------------------------------------ *
  * Control bodies (payload after the 48-byte header)
  * ------------------------------------------------------------------ */
@@ -1497,25 +1513,6 @@ static inline unsigned long tbt_fec_rx_poll_ms(u64 left_ms, u64 waited_ns)
     return (unsigned long)cadence;
 }
 
-/* The NACK scan must not ask while a block codec's first settle window is
- * open: the decode pass runs before the scan in the same work body, so the
- * block will be attempted before the scan would ask, and a replay would
- * restart the settle window (fix45: 482 NACKs, 27,465 replayed shares and
- * 226 MB in the first connect).  Once the pass has attempted and failed
- * (decode_tries != 0), the scan must ask: the next body's pass re-arms the
- * backoff before the scan runs, so gating the post-failure backoff would
- * suppress the only repair.  `s` is the super-block the scan is
- * considering; only the block at the delivery frontier is gated. */
-static inline bool tbt_fec_nack_wait_decode(bool block_code, bool used,
-                                            u64 block_id, u64 s,
-                                            u16 nparity, u8 decode_tries,
-                                            u64 now,
-                                            u64 decode_next_ns)
-{
-    return block_code && used && block_id == s && nparity > 0 &&
-           !decode_tries && now < decode_next_ns;
-}
-
 /* ------------------------------------------------------------------ *
  * Dynamic parameters
  * ------------------------------------------------------------------ */
@@ -1632,6 +1629,47 @@ static inline bool tbt_fec_sclc_down_split(u16 n, u16 m)
     default:
         return false;
     }
+}
+
+/* The extra present shares beyond the block's real DATA length that an
+ * SC-LDPC attempt needs before it is worth waking. The downlink 1x256 block
+ * (one group of 256 shares, n=128/m=128) keeps eight spare rows, so a block
+ * missing 120 shares still attempts; the uplink 8x32 block (one group of
+ * 32 shares, n=8/m=24) keeps two. Both are below that block's m, so the
+ * attempt is the honest limit of its parity, never an over-claim. A decode
+ * that fails is retried at TBT_FEC_DECODE_RETRY_MS, and a new share clears
+ * that backoff: an arriving share is new evidence, not a reason to wait. */
+#define TBT_FEC_SCLC_WAKE_EXTRA_DOWN 8u
+#define TBT_FEC_SCLC_WAKE_EXTRA_UP 2u
+#define TBT_FEC_DECODE_RETRY_MS 50u
+#define TBT_FEC_DECODE_RETRY_MAX_MS 400u
+
+/* All real DATA shares are present, or enough shares are present to cover
+ * the missing ones with the variant's spare-row margin. No time input: the
+ * caller decodes on the share that crosses this line, in the same pass. */
+static inline bool tbt_fec_sclc_decode_wake(u16 real, u16 m, u16 groups,
+                                            u16 ndata, u16 nparity)
+{
+    u16 extra;
+
+    if (!real || !m)
+        return false;
+    if (ndata >= real)
+        return true;
+    if (ndata + nparity < real)
+        return false;
+    extra = groups > 1 ? TBT_FEC_SCLC_WAKE_EXTRA_UP
+                       : TBT_FEC_SCLC_WAKE_EXTRA_DOWN;
+    return (u32)ndata + nparity >= (u32)real + extra;
+}
+
+/* The wait a failed block decode arms before another attempt. A new share
+ * clears it to zero; only a block that receives nothing keeps escalating. */
+static inline u32 tbt_fec_decode_backoff_ms(u8 tries)
+{
+    if (tries >= 4)
+        return TBT_FEC_DECODE_RETRY_MAX_MS;
+    return TBT_FEC_DECODE_RETRY_MS << tries;
 }
 
 enum tbt_fec_sclc_variant

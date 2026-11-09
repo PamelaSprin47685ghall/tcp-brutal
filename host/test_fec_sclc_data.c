@@ -490,6 +490,203 @@ static void case_uplink_roundtrip(void)
     }
 }
 
+/* The receiver decodes on the share that reaches the wake line, with no
+ * settle delay: a block missing 1, 4 or 32 DATA shares is inferred and
+ * delivered byte-exact on that share. A block missing 120 shares (< m) is
+ * attempted at once; this code cannot recover 120 of its 128 DATA shares,
+ * so the attempt must not fabricate a whole-block delivery. Missing m
+ * shares does not even attempt. The uplink 8x32 group wakes at present
+ * n + 2 and recovers six missing shares exactly at that line. */
+static void case_immediate_decode(void)
+{
+    struct tbt_fec_grouped *tx, *rx;
+    uint8_t *data[128], *parity[128];
+    uint8_t *rxdata[128], *rxparity[128];
+    uint8_t present_d[128], present_p[128];
+    static const int miss[] = {1, 4, 32};
+    int i, k, rc;
+
+    tx = tbt_fec_grouped_new_ops(&tbt_fec_ops_sclc, 1, 128, 128, 500, 256,
+                                 TBT_FEC_S, 0, 0x5a5a);
+    ok(tx != NULL, "immediate: downlink codec builds");
+    if (!tx)
+        return;
+    for (i = 0; i < 128; i++)
+    {
+        data[i] = malloc(TBT_FEC_S);
+        parity[i] = malloc(TBT_FEC_S);
+        rxdata[i] = malloc(TBT_FEC_S);
+        rxparity[i] = malloc(TBT_FEC_S);
+        if (!data[i] || !parity[i] || !rxdata[i] || !rxparity[i])
+        {
+            ok(false, "immediate: downlink buffers");
+            return;
+        }
+        fill_pattern(data[i], TBT_FEC_S, (uint32_t)(0x200 + i));
+        memset(parity[i], 0, TBT_FEC_S);
+    }
+    ok_int(tbt_fec_grouped_encode(tx, 0, data, 128, parity), 0,
+           "immediate: downlink encode");
+
+    for (k = 0; k < (int)(sizeof(miss) / sizeof(miss[0])); k++)
+    {
+        int all_known = 1, bytes_ok = 1;
+
+        rx = tbt_fec_grouped_new_ops(&tbt_fec_ops_sclc, 1, 128, 128, 500,
+                                     256, TBT_FEC_S, 0, 0x5a5a);
+        ok(rx != NULL, "immediate: downlink rx builds");
+        if (!rx)
+            return;
+        memset(present_d, 1, sizeof(present_d));
+        memset(present_p, 1, sizeof(present_p));
+        for (i = 0; i < 128; i++)
+        {
+            if (i < miss[k])
+                present_d[i] = 0;
+            else
+                memcpy(rxdata[i], data[i], TBT_FEC_S);
+            memcpy(rxparity[i], parity[i], TBT_FEC_S);
+        }
+        ok(tbt_fec_sclc_decode_wake(128, 128, 1, 128 - miss[k], 128),
+           "immediate: missing DATA share reaches the wake line");
+        rc = tbt_fec_grouped_decode(rx, 0, rxdata, rxparity, present_d,
+                                    present_p, 128);
+        ok(rc > 0, "immediate: downlink decode recovers shares");
+        for (i = 0; i < 128; i++)
+        {
+            if (!tbt_fec_grouped_is_known(rx, 0, (u32)i))
+                all_known = 0;
+            if (memcmp(rxdata[i], data[i], TBT_FEC_S) != 0)
+                bytes_ok = 0;
+        }
+        ok(all_known, "immediate: every share is known after decode");
+        ok(bytes_ok, "immediate: delivered bytes are byte-exact");
+        tbt_fec_grouped_free(rx);
+    }
+
+    /* 120 missing DATA shares (< m = 128): the wake line still fires, the
+     * codec is attempted at once, and it must not report a whole block. */
+    rx = tbt_fec_grouped_new_ops(&tbt_fec_ops_sclc, 1, 128, 128, 500, 256,
+                                 TBT_FEC_S, 0, 0x5a5a);
+    if (rx)
+    {
+        int known = 0;
+
+        memset(present_d, 0, sizeof(present_d));
+        memset(present_p, 1, sizeof(present_p));
+        for (i = 0; i < 128; i++)
+        {
+            if (i >= 120)
+            {
+                memcpy(rxdata[i], data[i], TBT_FEC_S);
+                present_d[i] = 1;
+            }
+            memcpy(rxparity[i], parity[i], TBT_FEC_S);
+        }
+        ok(tbt_fec_sclc_decode_wake(128, 128, 1, 8, 128),
+           "immediate: 120 missing shares still wake the codec");
+        tbt_fec_grouped_decode(rx, 0, rxdata, rxparity, present_d, present_p,
+                               128);
+        for (i = 0; i < 128; i++)
+            if (tbt_fec_grouped_is_known(rx, 0, (u32)i))
+                known++;
+        ok(known < 128,
+           "immediate: an unrecoverable 120-share block is not delivered");
+        tbt_fec_grouped_free(rx);
+    }
+
+    /* Missing m shares: no attempt and no delivery. */
+    ok(!tbt_fec_sclc_decode_wake(128, 128, 1, 0, 128),
+       "immediate: 128 missing shares do not wake");
+
+    /* A block missing 120 PARITY shares has all its DATA and is delivered
+     * without a decode. */
+    ok(tbt_fec_sclc_decode_wake(128, 128, 1, 128, 8),
+       "immediate: complete DATA with 120 parity missing is ready");
+
+    for (i = 0; i < 128; i++)
+    {
+        free(data[i]);
+        free(parity[i]);
+        free(rxdata[i]);
+        free(rxparity[i]);
+    }
+    tbt_fec_grouped_free(tx);
+
+    /* Uplink 8x32 group: n=8, m=24, wake at present n + 2 = 10. Six
+     * missing DATA shares with eight parity shares are exactly the line,
+     * and the group is recovered and delivered byte-exact. */
+    {
+        uint8_t *udata[8], *uparity[24];
+        uint8_t *urx[8], *up[24];
+        uint8_t upd[8], upp[24];
+        struct tbt_fec_grouped *utx, *urxcodec;
+        int all_known = 1, bytes_ok = 1;
+
+        utx = tbt_fec_grouped_new_ops(&tbt_fec_ops_sclc_gf16, 1, 8, 24, 128,
+                                      16, TBT_FEC_S, 64, 0x6b6b);
+        ok(utx != NULL, "immediate: uplink codec builds");
+        if (!utx)
+            return;
+        for (i = 0; i < 8; i++)
+        {
+            udata[i] = malloc(TBT_FEC_S);
+            urx[i] = malloc(TBT_FEC_S);
+            fill_pattern(udata[i], TBT_FEC_S, (uint32_t)(0x300 + i));
+        }
+        for (i = 0; i < 24; i++)
+        {
+            uparity[i] = malloc(TBT_FEC_S);
+            up[i] = malloc(TBT_FEC_S);
+            memset(uparity[i], 0, TBT_FEC_S);
+        }
+        ok_int(tbt_fec_grouped_encode(utx, 0, udata, 8, uparity), 0,
+               "immediate: uplink encode");
+        urxcodec = tbt_fec_grouped_new_ops(&tbt_fec_ops_sclc_gf16, 1, 8, 24,
+                                           128, 16, TBT_FEC_S, 64, 0x6b6b);
+        ok(urxcodec != NULL, "immediate: uplink rx builds");
+        if (urxcodec)
+        {
+            memset(upd, 1, sizeof(upd));
+            memset(upp, 0, sizeof(upp));
+            for (i = 0; i < 8; i++)
+                if (i >= 6)
+                    memcpy(urx[i], udata[i], TBT_FEC_S);
+                else
+                    upd[i] = 0;
+            for (i = 0; i < 8; i++)
+            {
+                memcpy(up[i], uparity[i], TBT_FEC_S);
+                upp[i] = 1;
+            }
+            ok(tbt_fec_sclc_decode_wake(8, 24, 8, 2, 8),
+               "immediate: uplink missing 6 wakes at present 10");
+            tbt_fec_grouped_decode(urxcodec, 0, urx, up, upd, upp, 8);
+            for (i = 0; i < 8; i++)
+            {
+                if (!tbt_fec_grouped_is_known(urxcodec, 0, (u32)i))
+                    all_known = 0;
+                if (memcmp(urx[i], udata[i], TBT_FEC_S) != 0)
+                    bytes_ok = 0;
+            }
+            ok(all_known, "immediate: uplink group is fully known");
+            ok(bytes_ok, "immediate: uplink bytes are byte-exact");
+            tbt_fec_grouped_free(urxcodec);
+        }
+        tbt_fec_grouped_free(utx);
+        for (i = 0; i < 8; i++)
+        {
+            free(udata[i]);
+            free(urx[i]);
+        }
+        for (i = 0; i < 24; i++)
+        {
+            free(uparity[i]);
+            free(up[i]);
+        }
+    }
+}
+
 /* An RLNC container still dispatches through the same accessors, so the data
  * plane has one path for every codec. */
 static void case_rlnc_dispatch(void)
@@ -749,6 +946,7 @@ int main(void)
     case_downlink_roundtrip();
     case_downlink_ladder();
     case_uplink_roundtrip();
+    case_immediate_decode();
     case_rlnc_dispatch();
     case_short_block_parity();
     printf("%s: %d checks, %d failures\n",
