@@ -132,6 +132,12 @@ HOST_BENCH_SCLC_DOWN := host/bench_sclc_downlink
 HOST_BENCH_SCLC_DOWN_SRCS := host/bench_sclc_downlink.c tbtun/tbt_fec_sclc.c
 HOST_BENCH_SCLC_DOWN_HDRS := tbtun/tbt_fec_sclc.h tbtun/tbt_fec.h \
                    tbtun/tbt_uapi.h
+HOST_BENCH_SCLC_SIM := host/sim_sclc_adaptive
+HOST_BENCH_SCLC_SIM_SRCS := host/sim_sclc_adaptive.c tbtun/tbt_fec_sclc.c \
+                   tbtun/tbt_fec_adapt_sclc.c
+HOST_BENCH_SCLC_SIM_HDRS := tbtun/tbt_fec_sclc.h \
+                   tbtun/tbt_fec_adapt_sclc.h tbtun/tbt_fec_adapt.h \
+                   tbtun/tbt_fec.h tbtun/tbt_uapi.h
 SAN_CFLAGS      := -g -fsanitize=address,undefined -fno-omit-frame-pointer
 
 obj-m           += tbtun.o
@@ -151,7 +157,7 @@ ccflags-y       := -std=gnu99 -I$(src)/tbtun
 # variable must name the object path Kbuild sees for a composite module.
 CFLAGS_tbtun/tbt_crypto.o := -O3
 
-.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-live host-bench-micro host-bench-sclc host-bench-sclc-down bench bench-full
+.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-live host-bench-micro host-bench-sclc host-bench-sclc-down host-bench-sclc-sim bench bench-full
 
 all:
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) modules
@@ -338,6 +344,15 @@ host-bench-sclc: $(HOST_BENCH_SCLC)
 host-bench-sclc-down: $(HOST_BENCH_SCLC_DOWN)
 	@./$(HOST_BENCH_SCLC_DOWN)
 
+$(HOST_BENCH_SCLC_SIM): $(HOST_BENCH_SCLC_SIM_SRCS) $(HOST_BENCH_SCLC_SIM_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_BENCH_SCLC_SIM_SRCS)
+
+# Closed-loop 120 s BEC trace through the real estimator, controller and
+# downlink ladder. This is the cross-rate wire/app witness; it is not a gate
+# and stays out of `check` because it runs the codec for simulation time.
+host-bench-sclc-sim: $(HOST_BENCH_SCLC_SIM)
+	@./$(HOST_BENCH_SCLC_SIM)
+
 # The same tests with ASan and UBSan. A toolchain without the runtimes gets
 # a clear skip, not a build failure.
 host-test-san:
@@ -437,7 +452,7 @@ host-test-live: $(HOST_HTTP_LIVE)
 	fi
 
 clean: clean-dkms.conf clean-dkms-tarball
-	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_LADDER) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_FAULT) $(HOST_BENCH_SCLC) $(HOST_BENCH_SCLC_DOWN) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_ladder_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fault_san
+	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_LADDER) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_FAULT) $(HOST_BENCH_SCLC) $(HOST_BENCH_SCLC_DOWN) $(HOST_BENCH_SCLC_SIM) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_ladder_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fault_san
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
 
 load:
