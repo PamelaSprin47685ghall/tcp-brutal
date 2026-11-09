@@ -236,6 +236,11 @@ struct tbt_sclc
     u64 *resolve; /* n: resolved mask for this wave */
     u64 *vbits;   /* n: resolved value for this wave */
     int *stack;   /* n_chk */
+    /* Decode scratch: the parity pointer and presence view built per call.
+     * One codec has one decode owner, so this is session state rather than
+     * a 1.1 KiB stack frame. */
+    u8 *pp[TBT_SCLC_SEGS];
+    u8 pp_present[TBT_SCLC_SEGS];
     int *touched; /* n */
     u8 *tflag;    /* n */
 
@@ -846,8 +851,8 @@ static int sclc_decode(void *ctx, u8 *data[], u8 *parity[],
                        u32 L)
 {
     struct tbt_sclc *c = ctx;
-    u8 *pp[TBT_SCLC_SEGS];
-    u8 pp_present[TBT_SCLC_SEGS];
+    u8 **pp = c->pp;
+    u8 *pp_present = c->pp_present;
     u32 b, s;
     u32 recovered = 0;
     u32 missing = 0;

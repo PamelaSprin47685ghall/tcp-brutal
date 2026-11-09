@@ -8,12 +8,15 @@ TAR             ?= tar
 CLANG_FORMAT    ?= clang-format-18
 SRCS            := Makefile \
                    tbtun/tbtun.h tbtun/tbt_uapi.h tbtun/tbt_parse.h tbtun/tbt_proto.h \
-                   tbtun/tbt_rec.h tbtun/tbt_http.h tbtun/tbt_crypto.h \
+                   tbtun/tbt_rec.h tbtun/tbt_http.h tbtun/tbt_fec_batch.h \
+                   tbtun/tbt_crypto.h \
                    tbtun/tbt_fec.h tbtun/tbt_fec_adapt.h tbtun/tbt_fec_adapt_sclc.h \
                    tbtun/tbt_portmap.h tbtun/tbt_tx_acct.h \
+                   tbtun/tbt_rx_budget.h \
                    tbtun/tbt_core.c tbtun/tbt_session.c tbtun/tbt_procfs.c tbtun/tbt_listen.c \
                    tbtun/tbt_carrier.c tbtun/tbt_sock.c tbtun/tbt_tx.c tbtun/tbt_rx.c \
                    tbtun/tbt_parse.c tbtun/tbt_proto.c tbtun/tbt_rec.c tbtun/tbt_http.c \
+                   tbtun/tbt_fec_batch.c \
                    tbtun/tbt_crypto.c tbtun/tbt_fec.c tbtun/tbt_fec_data.c tbtun/tbt_fec_adapt.c \
                    tbtun/tbt_fec_adapt_sclc.c tbtun/tbt_fec_sclc.c \
                    tbtun/tbt_fec_sclc.h tbtun/tbt_portmap.c \
@@ -21,6 +24,9 @@ SRCS            := Makefile \
                    tbtun/tbt_sc_ldpc.h tbtun/tbt_sc_ldpc_gf16.h tbtun/tbt_sclc_uplink.h \
                    scripts/mkdkmsconf.sh scripts/install_dkms.sh \
                    .clang-format
+# scripts/install_dkms.sh stages these beside tbtun/*.c and *.h. A staged
+# tree cannot configure itself if one of them leaves SRCS.
+DKMS_STAGE_FILES := Makefile .clang-format scripts/mkdkmsconf.sh scripts/install_dkms.sh
 FORMAT_SRCS     := $(filter %.c %.h,$(SRCS))
 
 HOSTCC          ?= cc
@@ -32,8 +38,12 @@ HOST_TEST_HDRS  := tbtun/tbt_parse.h tbtun/tbt_portmap.h tbtun/tbt_uapi.h \
                    tbtun/tbt_crypto.h tbtun/tbt_fec_adapt_sclc.h \
                    tbtun/tbt_fec_adapt.h tbtun/tbt_fec.h
 HOST_FUZZ       := host/test_fuzz
-HOST_FUZZ_SRCS  := host/test_fuzz.c tbtun/tbt_rec.c tbtun/tbt_proto.c
-HOST_FUZZ_HDRS  := tbtun/tbt_rec.h tbtun/tbt_proto.h tbtun/tbt_uapi.h
+HOST_FUZZ_SRCS  := host/test_fuzz.c tbtun/tbt_rec.c tbtun/tbt_proto.c \
+                   tbtun/tbt_fec.c tbtun/tbt_parse.c \
+                   tbtun/tbt_fec_adapt_sclc.c tbtun/tbt_portmap.c
+HOST_FUZZ_HDRS  := tbtun/tbt_rec.h tbtun/tbt_proto.h tbtun/tbt_uapi.h \
+                   tbtun/tbt_fec.h tbtun/tbt_parse.h tbtun/tbt_fec_adapt_sclc.h \
+                   tbtun/tbt_fec_adapt.h tbtun/tbt_portmap.h
 HOST_HTTP       := host/test_http
 HOST_HTTP_SRCS  := host/test_http.c tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
 HOST_HTTP_HDRS  := tbtun/tbt_http.h tbtun/tbt_uapi.h tbtun/tbt_proto.h tbtun/tbt_rec.h
@@ -41,6 +51,13 @@ HOST_HTTP_H11   := host/test_http_h11.py
 HOST_HTTP_FUZZ  := host/test_http_fuzz
 HOST_HTTP_FUZZ_SRCS := host/test_http_fuzz.c tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
 HOST_HTTP_FUZZ_HDRS := tbtun/tbt_http.h tbtun/tbt_uapi.h tbtun/tbt_proto.h tbtun/tbt_rec.h
+HTTP_RFC_GEN    := tests/http_rfc9112_gen
+HTTP_RFC_GEN_SRCS := tests/http_rfc9112_gen.c tbtun/tbt_http.c tbtun/tbt_proto.c \
+                   tbtun/tbt_rec.c tbtun/tbt_fec.c
+HTTP_RFC_GEN_HDRS := tbtun/tbt_http.h tbtun/tbt_uapi.h tbtun/tbt_proto.h \
+                   tbtun/tbt_rec.h tbtun/tbt_fec.h
+HTTP_RFC_GEN_SAN := tests/http_rfc9112_gen_san
+HTTP_RFC_AUDIT  := tests/http_rfc9112_audit.py
 HOST_CRYPTO     := host/test_crypto
 HOST_CRYPTO_SRCS := host/test_crypto.c tbtun/tbt_crypto.c tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
 HOST_CRYPTO_HDRS := tbtun/tbt_crypto.h tbtun/tbt_http.h tbtun/tbt_proto.h tbtun/tbt_rec.h tbtun/tbt_uapi.h
@@ -50,7 +67,12 @@ HOST_BENCH_CRYPTO_HDRS := tbtun/tbt_crypto.h tbtun/tbt_proto.h tbtun/tbt_uapi.h
 HOST_BENCH_MICRO := host/bench_micro
 HOST_BENCH_MICRO_SRCS := host/bench_micro.c tbtun/tbt_fec.c tbtun/tbt_crypto.c tbtun/tbt_proto.c
 HOST_BENCH_TXPATH := host/bench_txpath
-HOST_BENCH_TXPATH_SRCS := host/bench_txpath.c tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
+HOST_BENCH_TXPATH_SRCS := host/bench_txpath.c tbtun/tbt_fec_batch.c \
+                   tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
+HOST_BENCH_RXPATH := host/bench_rx_stages
+HOST_BENCH_RXPATH_SRCS := host/bench_rx_stages.c tbtun/tbt_http.c \
+                   tbtun/tbt_fec.c tbtun/tbt_crypto.c tbtun/tbt_proto.c \
+                   tbtun/tbt_rec.c
 HOST_HTTP_LIVE  := host/test_http_live
 HOST_HTTP_LIVE_SRCS := host/test_http_live.c tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
 HOST_HTTP_LIVE_HDRS := tbtun/tbt_http.h tbtun/tbt_uapi.h tbtun/tbt_proto.h tbtun/tbt_rec.h
@@ -94,6 +116,11 @@ HOST_FEC_SWITCH_SRCS := host/test_fec_switch.c tbtun/tbt_fec.c
 HOST_FEC_SWITCH_HDRS := tbtun/tbt_fec.h tbtun/tbt_uapi.h
 HOST_FEC_OUT    := host/test_fec_out
 HOST_FEC_OUT_SRCS := host/test_fec_out.c
+HOST_BATCH      := host/test_batch
+HOST_BATCH_SRCS := host/test_batch.c tbtun/tbt_fec_batch.c tbtun/tbt_http.c \
+                   tbtun/tbt_proto.c tbtun/tbt_rec.c
+HOST_BATCH_HDRS := tbtun/tbt_fec_batch.h tbtun/tbt_http.h tbtun/tbt_uapi.h \
+                   tbtun/tbt_proto.h tbtun/tbt_rec.h
 HOST_FEC_ADAPT  := host/test_fec_adapt
 HOST_FEC_ADAPT_SRCS := host/test_fec_adapt.c tbtun/tbt_fec_adapt.c
 HOST_FEC_ADAPT_HDRS := tbtun/tbt_fec_adapt.h tbtun/tbt_fec.h tbtun/tbt_uapi.h
@@ -132,36 +159,56 @@ HOST_INVARIANTS_SRCS := host/test_invariants.c tbtun/tbt_fec.c \
                    tbtun/tbt_portmap.c tbtun/tbt_fec_adapt_sclc.c
 HOST_INVARIANTS_HDRS := tbtun/tbt_fec.h tbtun/tbt_uapi.h tbtun/tbt_portmap.h \
                    tbtun/tbt_fec_adapt_sclc.h tbtun/tbt_fec_adapt.h
+HOST_WIRE_COMPAT := host/test_wire_compat
+HOST_WIRE_COMPAT_SRCS := host/test_wire_compat.c tbtun/tbt_rec.c \
+                   tbtun/tbt_proto.c tbtun/tbt_fec.c tbtun/tbt_crypto.c
+HOST_WIRE_COMPAT_HDRS := tbtun/tbt_rec.h tbtun/tbt_proto.h tbtun/tbt_fec.h \
+                   tbtun/tbt_crypto.h tbtun/tbt_uapi.h
+HOST_RX_BUDGET  := host/test_rx_budget
+HOST_RX_BUDGET_SRCS := host/test_rx_budget.c
+HOST_RX_BUDGET_HDRS := tbtun/tbt_rx_budget.h tbtun/tbt_uapi.h
 HOST_BENCH_SCLC := host/bench_sclc_uplink
 HOST_BENCH_SCLC_SRCS := host/bench_sclc_uplink.c tbtun/tbt_sc_ldpc.c \
                    tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c
+HOST_BENCH_SCLC_PIPE := host/bench_sclc_pipe
+HOST_BENCH_SCLC_PIPE_SRCS := host/bench_sclc_pipe.c tbtun/tbt_fec.c \
+                   tbtun/tbt_fec_sclc.c tbtun/tbt_sclc_uplink.c \
+                   tbtun/tbt_sc_ldpc.c tbtun/tbt_sc_ldpc_gf16.c \
+                   tbtun/tbt_crypto.c tbtun/tbt_proto.c
+HOST_TSAN       := host/test_tsan_race
+HOST_TSAN_SRCS  := host/test_tsan_race.c tbtun/tbt_crypto.c
+HOST_TSAN_HDRS  := tbtun/tbt_fec.h tbtun/tbt_crypto.h tbtun/tbt_uapi.h
 SAN_CFLAGS      := -g -fsanitize=address,undefined -fno-omit-frame-pointer
+TSAN_CFLAGS     := -g -fsanitize=thread -fno-omit-frame-pointer
 
 obj-m           += tbtun.o
 tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
                    tbtun/tbt_listen.o tbtun/tbt_proto.o tbtun/tbt_carrier.o \
                    tbtun/tbt_sock.o tbtun/tbt_tx.o tbtun/tbt_rx.o tbtun/tbt_rec.o \
-                   tbtun/tbt_parse.o tbtun/tbt_http.o tbtun/tbt_crypto.o \
+                   tbtun/tbt_parse.o tbtun/tbt_http.o tbtun/tbt_fec_batch.o \
+                   tbtun/tbt_crypto.o \
                    tbtun/tbt_portmap.o tbtun/tbt_fec.o tbtun/tbt_fec_data.o \
                    tbtun/tbt_fec_adapt.o tbtun/tbt_fec_adapt_sclc.o \
                    tbtun/tbt_fec_sclc.o \
                    tbtun/tbt_sc_ldpc.o \
                    tbtun/tbt_sc_ldpc_gf16.o tbtun/tbt_sclc_uplink.o
 
-ccflags-y       := -std=gnu99 -I$(src)/tbtun
+# Keep every module frame small enough for the kernel stack: a 1 KiB bound
+# catches a TBT_STREAMS_MAX pointer array before it reaches a real call path.
+ccflags-y       := -std=gnu99 -I$(src)/tbtun -Wframe-larger-than=1024
 # ChaCha8 is a hot per-byte loop; keep the kernel's -O2 for the rest of the
 # module and let this one file unroll its fixed 8-round permutation. The
 # variable must name the object path Kbuild sees for a composite module.
 CFLAGS_tbtun/tbt_crypto.o := -O3
 
-.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-live host-bench-micro host-bench-sclc bench bench-full
+.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-tsan host-test-live host-bench-micro host-bench-sclc host-bench-sclc-pipe host-bench-rxpath bench bench-full
 
 all:
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) modules
 
 # One command for a human: resolves the header payload, prints the make line it
 # runs, then builds the module and runs all host tests (docs/build-env.md).
-check:
+check: dkms-srcs-check
 	@if [ -x ./scripts/build.sh ]; then ./scripts/build.sh; else \
 		$(MAKE) KERNEL_DIR=$(KERNEL_DIR) all; fi
 	@$(MAKE) --no-print-directory host-test
@@ -170,7 +217,7 @@ check:
 # root, no module and no kernel headers: the grammar test (tbt_parse.c), the
 # hostile-input test (tbt_rec.c + tbt_proto.c) and the HTTP container test
 # (tbt_http.c + tbt_proto.c).
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_INVARIANTS)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_INVARIANTS) $(HOST_WIRE_COMPAT) $(HTTP_RFC_GEN) $(HOST_RX_BUDGET)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
@@ -190,6 +237,7 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_FEC_RX)
 	@./$(HOST_FEC_SWITCH)
 	@./$(HOST_FEC_OUT)
+	@./$(HOST_BATCH)
 	@./$(HOST_FEC_ADAPT)
 	@./$(HOST_FEC_ADAPT_SCLC)
 	@./$(HOST_FEC_SCLC)
@@ -199,6 +247,8 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_SCLC_DATA)
 	@./$(HOST_FAULT)
 	@./$(HOST_INVARIANTS)
+	@./$(HOST_WIRE_COMPAT)
+	@./$(HOST_RX_BUDGET)
 	@# Third-party cross-check: h11 is not a build dependency. uv with a cached
 	@# h11 runs it offline; anything else gets a clear skip, not a failure.
 	@if command -v uv >/dev/null 2>&1 && \
@@ -206,6 +256,16 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 		uv run --offline --no-project --with h11 -q python $(HOST_HTTP_H11) ./$(HOST_HTTP); \
 	else \
 		echo "host-test: h11 cross-check skipped (uv or cached h11 unavailable)"; \
+	fi
+	@# The RFC 9112 audit drives tbt_http.c over many keep-alive cycles. uv
+	@# supplies h11 when its offline cache has it; the strict state machine in
+	@# the audit runs either way.
+	@if command -v uv >/dev/null 2>&1 && \
+		uv run --offline --no-project --with h11 -q python -c 'import h11' >/dev/null 2>&1; then \
+		uv run --offline --no-project --with h11 -q python $(HTTP_RFC_AUDIT) ./$(HTTP_RFC_GEN); \
+	else \
+		echo "host-test: http-rfc9112 audit runs without h11 (uv or cached h11 unavailable)"; \
+		python3 $(HTTP_RFC_AUDIT) ./$(HTTP_RFC_GEN); \
 	fi
 
 # Boot a kernel in QEMU and run the module there: the only way to exercise a
@@ -225,6 +285,9 @@ $(HOST_FUZZ): $(HOST_FUZZ_SRCS) $(HOST_FUZZ_HDRS)
 
 $(HOST_HTTP): $(HOST_HTTP_SRCS) $(HOST_HTTP_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_HTTP_SRCS)
+
+$(HTTP_RFC_GEN): $(HTTP_RFC_GEN_SRCS) $(HTTP_RFC_GEN_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HTTP_RFC_GEN_SRCS)
 
 $(HOST_CRYPTO): $(HOST_CRYPTO_SRCS) $(HOST_CRYPTO_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_CRYPTO_SRCS)
@@ -251,6 +314,14 @@ $(HOST_BENCH_TXPATH): $(HOST_BENCH_TXPATH_SRCS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_BENCH_TXPATH_SRCS)
 
 host-bench-txpath: $(HOST_BENCH_TXPATH)
+
+# Per-record RX chain cost (HTTP deframe, header/payload CRC, ChaCha8, FEC
+# placement, ordered delivery). Not part of `check`: a measurement.
+$(HOST_BENCH_RXPATH): $(HOST_BENCH_RXPATH_SRCS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_BENCH_RXPATH_SRCS)
+
+host-bench-rxpath: $(HOST_BENCH_RXPATH)
+	@./$(HOST_BENCH_RXPATH)
 
 # The feedback loop. `bench` is the <= 2 s pass for iteration; `bench-full`
 # is the <= 10 s pass for a recorded baseline. Both write a timestamped
@@ -306,6 +377,9 @@ $(HOST_FEC_SWITCH): $(HOST_FEC_SWITCH_SRCS) $(HOST_FEC_SWITCH_HDRS)
 $(HOST_FEC_OUT): $(HOST_FEC_OUT_SRCS)
 	$(HOSTCC) $(HOST_CFLAGS) -o $@ $(HOST_FEC_OUT_SRCS)
 
+$(HOST_BATCH): $(HOST_BATCH_SRCS) $(HOST_BATCH_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_BATCH_SRCS)
+
 $(HOST_FEC_ADAPT): $(HOST_FEC_ADAPT_SRCS) $(HOST_FEC_ADAPT_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_FEC_ADAPT_SRCS)
 
@@ -333,6 +407,12 @@ $(HOST_FAULT): $(HOST_FAULT_SRCS) $(HOST_FAULT_HDRS)
 $(HOST_INVARIANTS): $(HOST_INVARIANTS_SRCS) $(HOST_INVARIANTS_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_INVARIANTS_SRCS)
 
+$(HOST_WIRE_COMPAT): $(HOST_WIRE_COMPAT_SRCS) $(HOST_WIRE_COMPAT_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_WIRE_COMPAT_SRCS)
+
+$(HOST_RX_BUDGET): $(HOST_RX_BUDGET_SRCS) $(HOST_RX_BUDGET_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_RX_BUDGET_SRCS)
+
 host/test_fec_sclc_data_san: $(HOST_SCLC_DATA_SRCS) $(HOST_SCLC_DATA_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_SCLC_DATA_SRCS)
 
@@ -343,6 +423,14 @@ host-bench-sclc: $(HOST_BENCH_SCLC)
 	@./$(HOST_BENCH_SCLC) 8 8 24 1 4 0.3
 	@./$(HOST_BENCH_SCLC) 8 8 24 1 4 0.4
 
+# Full-chain production shapes: FEC, header CRCs and ChaCha8 for both
+# directions, at the report loss points. Not part of `check`.
+$(HOST_BENCH_SCLC_PIPE): $(HOST_BENCH_SCLC_PIPE_SRCS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_BENCH_SCLC_PIPE_SRCS)
+
+host-bench-sclc-pipe: $(HOST_BENCH_SCLC_PIPE)
+	@./$(HOST_BENCH_SCLC_PIPE)
+
 # The same tests with ASan and UBSan. A toolchain without the runtimes gets
 # a clear skip, not a build failure.
 host-test-san:
@@ -352,7 +440,7 @@ host-test-san:
 		echo "host-test-san: skipped, $(HOSTCC) cannot link -fsanitize=address,undefined"; \
 	fi
 
-host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_mem_budget_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_hold_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_invariants_san
+host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_mem_budget_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_batch_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_hold_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_invariants_san host/test_wire_compat_san host/test_rx_budget_san $(HTTP_RFC_GEN_SAN)
 	@./host/test_parse_san
 	@./host/test_fuzz_san
 	@./host/test_http_san
@@ -363,6 +451,7 @@ host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san hos
 	@./host/test_fec_rx_san
 	@./host/test_fec_switch_san
 	@./host/test_fec_out_san
+	@./host/test_batch_san
 	@./host/test_fec_adapt_san
 	@./host/test_fec_adapt_sclc_san
 	@./host/test_fec_sclc_san
@@ -374,6 +463,9 @@ host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san hos
 	@./host/test_close_wake_san
 	@./host/test_fault_san
 	@./host/test_invariants_san
+	@./host/test_wire_compat_san
+	@./host/test_rx_budget_san
+	@python3 $(HTTP_RFC_AUDIT) ./$(HTTP_RFC_GEN_SAN)
 
 host/test_parse_san: $(HOST_TEST_SRCS) $(HOST_TEST_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_TEST_SRCS)
@@ -386,6 +478,9 @@ host/test_http_san: $(HOST_HTTP_SRCS) $(HOST_HTTP_HDRS)
 
 host/test_http_fuzz_san: $(HOST_HTTP_FUZZ_SRCS) $(HOST_HTTP_FUZZ_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_HTTP_FUZZ_SRCS)
+
+$(HTTP_RFC_GEN_SAN): $(HTTP_RFC_GEN_SRCS) $(HTTP_RFC_GEN_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HTTP_RFC_GEN_SRCS)
 
 host/test_crypto_san: $(HOST_CRYPTO_SRCS) $(HOST_CRYPTO_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_CRYPTO_SRCS)
@@ -411,6 +506,9 @@ host/test_fec_switch_san: $(HOST_FEC_SWITCH_SRCS) $(HOST_FEC_SWITCH_HDRS)
 host/test_fec_out_san: $(HOST_FEC_OUT_SRCS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -o $@ $(HOST_FEC_OUT_SRCS)
 
+host/test_batch_san: $(HOST_BATCH_SRCS) $(HOST_BATCH_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_BATCH_SRCS)
+
 host/test_fec_adapt_san: $(HOST_FEC_ADAPT_SRCS) $(HOST_FEC_ADAPT_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_FEC_ADAPT_SRCS)
 
@@ -435,6 +533,30 @@ host/test_fault_san: $(HOST_FAULT_SRCS) $(HOST_FAULT_HDRS)
 host/test_invariants_san: $(HOST_INVARIANTS_SRCS) $(HOST_INVARIANTS_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_INVARIANTS_SRCS)
 
+host/test_wire_compat_san: $(HOST_WIRE_COMPAT_SRCS) $(HOST_WIRE_COMPAT_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_WIRE_COMPAT_SRCS)
+
+host/test_rx_budget_san: $(HOST_RX_BUDGET_SRCS) $(HOST_RX_BUDGET_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_RX_BUDGET_SRCS)
+
+# The concurrent host contracts under ThreadSanitizer. Opt-in, like
+# host-test-san: `check` stays free of a sanitizer runtime. A toolchain
+# without the TSan runtime gets a clear skip, not a build failure. The test
+# itself refuses to build without -fsanitize=thread, so a skipped runtime
+# cannot masquerade as "no race found".
+host-test-tsan:
+	@if printf 'int main(void){return 0;}\n' | $(HOSTCC) $(TSAN_CFLAGS) -pthread -x c - -o /dev/null 2>/dev/null; then \
+		$(MAKE) --no-print-directory host-test-tsan-run; \
+	else \
+		echo "host-test-tsan: skipped, $(HOSTCC) cannot link -fsanitize=thread"; \
+	fi
+
+host-test-tsan-run: $(HOST_TSAN)
+	@TSAN_OPTIONS=halt_on_error=1:exitcode=66 ./$(HOST_TSAN)
+
+$(HOST_TSAN): $(HOST_TSAN_SRCS) $(HOST_TSAN_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(TSAN_CFLAGS) -pthread -I tbtun -o $@ $(HOST_TSAN_SRCS)
+
 $(HOST_HTTP_LIVE): $(HOST_HTTP_LIVE_SRCS) $(HOST_HTTP_LIVE_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_HTTP_LIVE_SRCS)
 
@@ -458,6 +580,11 @@ clean: clean-dkms.conf clean-dkms-tarball
 	$(RM) $(HOST_INVARIANTS) host/test_invariants_san
 	$(RM) $(HOST_MEM_BUDGET) host/test_mem_budget_san
 	$(RM) host/test_hold_san
+	$(RM) $(HOST_BATCH) $(HOST_WIRE_COMPAT) $(HOST_TSAN) host/test_batch_san host/test_wire_compat_san
+	$(RM) $(HTTP_RFC_GEN) $(HTTP_RFC_GEN_SAN)
+	$(RM) $(HOST_RX_BUDGET) host/test_rx_budget_san
+	$(RM) $(HOST_BENCH_RXPATH)
+	$(RM) $(wildcard tbtun/*.su) $(wildcard host/*.su)
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
 
 load:
@@ -487,13 +614,27 @@ clean-dkms.conf:
 
 # A DKMS tarball must be buildable on a machine that has never seen this tree,
 # so every module source has to be in SRCS. Catch a new file that was not added
-# before the archive is written, not on the target machine.
+# before the archive is written, not on the target machine. The same gate
+# rejects a stale SRCS entry and a staging file that lost its SRCS entry.
 dkms-srcs-check:
 	@missing=$$(find tbtun \( -name '*.c' -o -name '*.h' \) | sort | while IFS= read -r f; do \
 		case " $(SRCS) " in *" $$f "*) ;; *) printf '%s\n' "$$f" ;; esac; done); \
 	if [ -n "$$missing" ]; then \
 		echo "dkms-srcs-check: SRCS omits:" >&2; \
 		printf '%s\n' "$$missing" >&2; \
+		exit 1; \
+	fi; \
+	absent=$$(for f in $(SRCS); do [ -e "$$f" ] || printf '%s\n' "$$f"; done); \
+	if [ -n "$$absent" ]; then \
+		echo "dkms-srcs-check: SRCS names missing files:" >&2; \
+		printf '%s\n' "$$absent" >&2; \
+		exit 1; \
+	fi; \
+	unlisted=$$(for f in $(DKMS_STAGE_FILES); do \
+		case " $(SRCS) " in *" $$f "*) ;; *) printf '%s\n' "$$f" ;; esac; done); \
+	if [ -n "$$unlisted" ]; then \
+		echo "dkms-srcs-check: SRCS omits a staged file:" >&2; \
+		printf '%s\n' "$$unlisted" >&2; \
 		exit 1; \
 	fi
 

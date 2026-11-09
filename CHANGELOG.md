@@ -7,19 +7,6 @@ and moves independently of the module version.
 
 ### Fixed
 
-- Session keys are now erased with `memzero_explicit()` before their storage
-  is freed or a temporary key buffer goes out of scope: the session and
-  tunnel key copies, the crypto schedules copied by `tbt_crypto_xor_at()`
-  and `tbt_crypto_body_xor_share()/flow()`, the HELLO body, the RX HELLO
-  parse buffers, and the parsed `struct tbt_cmd` in the `/proc` writers.
-- `tbt_render_cfg()` and `tbt_render_action()` read stored `bool` fields
-  through `tbt_read_bool()`, which loads a byte and normalizes it to
-  true/false. The helper keeps the kernel compile-time type check and gains a
-  host variant, so `tbt_parse.c` builds warning-free under `-Werror` and a
-  flag byte left neither 0 nor 1 cannot trip UBSAN's `invalid-load`.
-- `review/lint.sh`'s render probe links `tbt_portmap.c` and
-  `tbt_fec_adapt_sclc.c`, the helpers `tbt_parse_line()` calls, so the
-  `render-fits-line-max` check runs instead of failing to link.
 - `tbt_fec_cfg_unpack` derives the legal carrier geometry from the
   session's effective `carriers` instead of the 256 constant, so the
   per-direction FEC_CFG/FEC_INIT of a 32/64/128-carrier session is
@@ -150,6 +137,150 @@ and moves independently of the module version.
   window generation. It runs under `host-test`, `host-test-san` and `clean`.
 
 The wire is unchanged: `TBT_CONV` stays 0x0007 and `TBT_FEC_CONV` 0x1007.
+
+## [0.4.1] - 2026-11-09
+
+### Added
+
+- `host/bench_rx_stages` (target `host-bench-rxpath`): per-record cost of the
+  FEC RX chain on the host, one row per stage (HTTP chunk deframe, header
+  unpack/CRC, ChaCha8, payload CRC, FEC slot placement, ordered delivery),
+  with the real functions where the module's translation unit is
+  host-linkable and a stated model for the kernel-only parts. It is a
+  measurement, not a gate.
+
+### Performance
+
+- Uplink GF(16) SC-IRA: the encoder runs 64 codewords at once, bit-sliced
+  over four uint64 planes per variable with a 4x4 GF(16) multiply mask
+  table. The check order, coefficients and output are bit-identical to
+  `gf16_encode()`, and the wire layout is unchanged: the gather and scatter
+  still advance the share offsets codeword by codeword. The decoder keeps
+  its scalar peel but peels two codewords in lockstep, so independent
+  pointer walks overlap their cache misses. Host, pinned core, process CPU
+  time, p=0.30: rate 1/4 encode 28.7 -> 45.9 MB/s and decode 7.4 ->
+  8.8 MB/s; rate 7/16 encode 56.3 -> 80.4 MB/s and decode 12.0 ->
+  13.9 MB/s. The preallocated lane buffers and lockstep slots add 1.4 MiB
+  at rate 1/4 with 8 groups (3658 -> 5052 KiB); every allocation goes
+  through kvzalloc/kvfree, so no high-order contiguous page is required.
+
+### Changed
+
+- The wire accepts only 0.4.x peers: a 0.2.x or 0.3.x frame carries a
+  different `TBT_CONV` and is refused at the first header, so both ends must
+  be upgraded to 0.4.x. `host/test_wire_compat` pins the refusal and the
+  current header acceptance (121 checks).
+- The FEC batch staging path has no allocation and no payload copy on the
+  full-write path. `tbt_carrier_send_fec_batch()` now describes the batch as a segment
+  list over the existing `struct tbt_fec_out` buffers (HTTP: chunk size
+  line, record, CRLF; raw: the records) and commits it with one
+  `iov_iter_kvec()` + `tcp_sendmsg_locked()`. The
+  `kmalloc_array(count, TBT_HTTP_FEC_FRAME_MAX)` batch buffer and the
+  per-record `memcpy` are gone; the stack cost is a 3x18 B size-line scratch
+  and nine `kvec` entries. Only a kernel short write copies its unwritten
+  tail into `c->part`, and that staged tail is bounded by the always-present
+  `TBT_CAR_PART_MAX` buffer.
+- The per-carrier `fec_frame` buffer is removed: the batch path no longer
+  needs a single-record frame buffer, removing a 8260 B request per carrier
+  (2.02 MiB requested at 256 carriers).
+- `host/test_batch` pins the new wire builder and short-write staging:
+  1/2/3 records, HTTP size-line boundaries through `TBT_FEC_REC_MAX`, raw
+  mode, every byte offset of a maximal batch, multi-write ordering, and the
+  zero-byte `-EAGAIN` retry.
+
+### Fixed
+
+- Session keys are now erased with `memzero_explicit()` before their storage
+  is freed or a temporary key buffer goes out of scope: the session and
+  tunnel key copies, the crypto schedules copied by `tbt_crypto_xor_at()`
+  and `tbt_crypto_body_xor_share()/flow()`, the HELLO body, the RX HELLO
+  parse buffers, and the parsed `struct tbt_cmd` in the `/proc` writers.
+- `tbt_render_cfg()` and `tbt_render_action()` read stored `bool` fields
+  through `tbt_read_bool()`, which loads a byte and normalizes it to
+  true/false. The helper keeps the kernel compile-time type check and gains a
+  host variant, so `tbt_parse.c` builds warning-free under `-Werror` and a
+  flag byte left neither 0 nor 1 cannot trip UBSAN's `invalid-load`.
+- `review/lint.sh`'s render probe links `tbt_portmap.c` and
+  `tbt_fec_adapt_sclc.c`, the helpers `tbt_parse_line()` calls, so the
+  `render-fits-line-max` check runs instead of failing to link.
+- One carrier RX work item can no longer drain a whole receive queue. The
+  actor stops between 8 KiB pieces after 2 ms (`tbtun/tbt_rx_budget.h`) and
+  the body re-arms from the shared `tbt_rx_resume_plan()` rule while
+  `copied_seq != rcv_nxt`; unread bytes stay in the socket, so nothing is
+  dropped or parsed twice. This removes the far-side
+  `workqueue: tbt_car_rx_work [tbtun] hogged CPU for >10000us ...` reports on
+  the 1 GiB gates, where one item could walk a 2 MiB carrier queue. A new
+  `rx_budget_yields` counter in `/proc/net/tbtun/tunnels` shows the splits.
+  `tcp_read_sock()`'s loop flag is now set explicitly to a non-zero sentinel
+  (`desc.count = SIZE_MAX`) instead of accumulating consumed bytes in a
+  field the kernel tests for zero.
+- `host/test_rx_budget` pins the deadline boundary, batched reads with no
+  lost or duplicated byte, the resume truth table (budgeted stop, coalesced
+  wake, held record, stopping carrier), and the two-bit wake machine.
+- `tbt_fec_alloc_unpack()` enforces the whole FEC_ALLOC body contract: the
+  three reserved bytes at +37, the reserved word at +60 and a non-empty
+  `group_mask`. The extended hostile-input corpus found that a body with
+  those faults passed the parser, so a peer could name no group or carry
+  undefined fields into the rebalancing state machine.
+- Module unload no longer races the asynchronous FEC flow free. The last
+  `tbt_fec_flow_put()` (typically from `tbt_session_destroy()` while
+  `rmmod` tears the tunnels down) queued `tbt_fec_flow_free_work` on the
+  system-wide workqueue that `schedule_work()` targets, but `tbtun_exit()`
+  waited only with `synchronize_rcu()` and `rcu_barrier()`, which do not
+  cover work items: the free could run after the module text was unmapped.
+  The free now runs on the module-owned `tbt_fec_free_wq`, and
+  `tbtun_exit()` calls `destroy_workqueue()` after `tbt_tunnel_shutdown()`
+  to drain queued and running frees before the RCU barriers.
+  `flush_scheduled_work()` is not used: it is deprecated and warns since
+  6.6, flushes unrelated system work, and changed its target queue in 7.0.
+- `host/test_lifetime` models the flow reference drop and the module-exit
+  drain: a queued free, a free already inside `synchronize_rcu()`, the old
+  RCU-only exit that leaves the work pending, and a late put after the
+  queue is destroyed.
+- `/proc/net/tbtun/stats` now renders a session under a per-session read
+  gate. `tbt_session_destroy()` sets the write side before it clears
+  `car[]`, the stream hash and `fec_outq`, and releases it before the
+  drained wait. A stats reader holds a session reference, but that
+  reference never kept those children alive: a concurrent `del`/`flush`
+  could free them under the reader. The gate also orders a late reader
+  after the teardown, where the child pointers are NULL.
+- `TBT_WQ` selects `system_dfl_wq` only on 6.17 and later. That symbol
+  first appeared in 6.17 (commit 128ea9f6ccfb), so the previous 6.5
+  threshold broke every 6.5..6.16 build, including the 6.6 and 6.12 LTS
+  trees; those releases keep using the exported `system_unbound_wq`.
+- A stream reset no longer shuts down the stream socket while the carrier
+  receive work holds `lock_sock(carrier)`. The RST path called
+  `kernel_sock_shutdown()` from inside `tcp_read_sock()`, which takes
+  `lock_sock(stream)` and trips lockdep's recursive `sk_lock-AF_INET`
+  report under `PROVE_LOCKING`. The wake now runs in `tbt_kill_body()`
+  immediately before the socket release: `w_kill` runs on its own worker,
+  `w_target` is cancelled first so `st->sk` is stable, and the
+  refused-schedule case is covered by the destroy path's release. This
+  also removes the unsynchronised `st->sk` read from the carrier path.
+- The stream socket callbacks take `sk_callback_lock` with
+  `read_lock_bh()` instead of a plain `read_lock()`. The capture work runs
+  in process context while every writer uses `write_lock_bh()`, so the
+  plain read side marked the lock class SOFTIRQ-irq-unsafe while
+  `sk_clone()` acquires a listener's `sk_lock` in softirq.
+  `tbt_listen_stop()` then shuts the listening socket down under
+  `sk_lock` and reaches `sock_orphan()`'s callback-lock write; under
+  `PROVE_LOCKING` lockdep reports that nesting as
+  `SOFTIRQ-safe -> SOFTIRQ-unsafe` (or an inconsistent lock state). The
+  callbacks already run with BH disabled, so the `_bh` variant only
+  nests the disable.
+
+### Tests
+
+- `host/test_fuzz` covers the 0.4.0 v7 control bodies: 20k mutated
+  FEC_ALLOC bodies (every mask shape, every flag value, reserved bytes,
+  both CRCs), 40k mutated FEC_CFG bodies over the RLNC, SC-LDPC binary and
+  SC-LDPC GF(16) shapes with the `n=0`, `m=0`, `n+m=65536`, `n+m>256` and
+  `groups=0` edges, and 8k mutated config lines aimed at `portblock=`,
+  `adaptive=`, `L=` and `mode=sc-ldpc`.
+- `host/test_http_fuzz` carries OPEN records with every 32-byte mask shape
+  as one chunk per record, splits the byte stream at every 1..7 byte
+  boundary and requires the same records back; body lengths 0/1/31/33/64
+  and chunks that disagree with the header's `body_len` must end in PROTO.
 
 ## [0.4.0] - 2026-11-09
 

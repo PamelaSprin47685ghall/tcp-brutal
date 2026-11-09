@@ -484,6 +484,25 @@ int tbt_fec_hdr_verify(const struct tbt_fec_hdr *h, const u8 *payload)
     return 0;
 }
 
+int tbt_fec_rec_check(const u8 *rec, size_t len, u16 max_payload,
+                      struct tbt_fec_hdr *out)
+{
+    struct tbt_fec_hdr h;
+    u8 buf[TBT_FEC_HDR_LEN];
+
+    if (!rec || len < TBT_FEC_HDR_LEN)
+        return -EPROTO;
+    if (tbt_fec_hdr_unpack(rec, &h) || tbt_fec_hdr_check(&h, max_payload))
+        return -EPROTO;
+    if (tbt_fec_hdr_pack(&h, buf))
+        return -EPROTO;
+    if (tbt_fec_crc32c(0, buf, TBT_FEC_H_HDRCRC) != h.header_crc32c)
+        return -EBADMSG;
+    if (out)
+        *out = h;
+    return 0;
+}
+
 /* ------------------------------------------------------------------ *
  * 256-bit carrier bitmap
  * ------------------------------------------------------------------ */
@@ -598,17 +617,28 @@ int tbt_fec_alloc_unpack(const u8 in[TBT_FEC_ALLOC_LEN],
 
     if (!in || !a)
         return -EPROTO;
+    want = tbt_fec_crc32c(0, in, TBT_FEC_ALLOC_CRC_BYTES);
+    if (want != tbt_get_u32(in + TBT_FEC_ALLOC_CRC))
+        return -EPROTO;
     a->epoch = tbt_get_u32(in + TBT_FEC_ALLOC_EPOCH);
     memcpy(a->group_mask, in + TBT_FEC_ALLOC_GROUPS, TBT_FEC_BITMAP_BYTES);
     a->flags = in[TBT_FEC_ALLOC_FLAGS];
+    /* Reserved bytes and the trailing word are part of the body contract,
+     * not free space: a sender that sets one is not speaking this revision.
+     * reserved2 sits outside the CRC, so it needs its own check. */
+    if (in[TBT_FEC_ALLOC_RESERVED] || in[TBT_FEC_ALLOC_RESERVED + 1] ||
+        in[TBT_FEC_ALLOC_RESERVED + 2])
+        return -EPROTO;
+    if (tbt_get_u32(in + TBT_FEC_ALLOC_RESERVED2) != 0)
+        return -EPROTO;
     if (a->flags & ~TBT_FEC_ALLOC_F_MASK)
+        return -EPROTO;
+    /* A body that names no physical group cannot move a flow anywhere. */
+    if (!tbt_fec_bitmap_count(a->group_mask))
         return -EPROTO;
     a->switch_pkt = tbt_get_u64(in + TBT_FEC_ALLOC_SWITCH_PKT);
     a->block_base = tbt_get_u64(in + TBT_FEC_ALLOC_BLOCK_BASE);
     a->crc32c = tbt_get_u32(in + TBT_FEC_ALLOC_CRC);
-    want = tbt_fec_crc32c(0, in, TBT_FEC_ALLOC_CRC_BYTES);
-    if (want != a->crc32c)
-        return -EPROTO;
     return 0;
 }
 

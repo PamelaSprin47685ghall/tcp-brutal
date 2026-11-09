@@ -1,0 +1,91 @@
+name: "Build and test"
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host:
+    name: Host tests and packaging
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+
+      - name: Lower the ASLR entropy for the sanitizer tests
+        run: |
+          if [ -e /proc/sys/vm/mmap_rnd_bits ]; then
+            sudo sysctl -w vm.mmap_rnd_bits=28
+          fi
+
+      - name: Run the host tests
+        run: |
+          make host-test
+          make host-test-san
+
+      - name: Run the static invariant checks
+        run: bash review/lint.sh
+
+      - name: Build the DKMS tarball
+        run: |
+          make dkms-srcs-check dkms-tarball
+          tar tzf dkms.tar.gz > /tmp/dkms.list
+          for path in dkms.conf Makefile tbtun/tbtun.h tbtun/tbt_core.c \
+              scripts/mkdkmsconf.sh; do
+            grep -qx "./dkms_source_tree/$path" /tmp/dkms.list
+          done
+          version=$(./scripts/mkdkmsconf.sh --version)
+          tar xOf dkms.tar.gz ./dkms_source_tree/dkms.conf > /tmp/dkms.conf
+          grep -qx "PACKAGE_VERSION=\"$version\"" /tmp/dkms.conf
+
+  kernel:
+    name: Kernel module
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+
+      - name: Install the build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential dwarves zstd \
+            linux-headers-generic
+
+      - name: Select the newest generic header tree
+        id: kernel
+        run: |
+          kdir=$(ls -d /usr/src/linux-headers-*-generic 2>/dev/null |
+            sort -V | tail -1 || true)
+          if [ -z "$kdir" ] || [ ! -f "$kdir/Makefile" ]; then
+            echo "no kernel header tree found under /usr/src" >&2
+            exit 1
+          fi
+          release=$(basename "$kdir" | sed 's/^linux-headers-//')
+          if ! dpkg --compare-versions "$release" ge 6.1; then
+            echo "kernel headers $release are older than Linux 6.1" >&2
+            exit 1
+          fi
+          echo "kdir=$kdir" >> "$GITHUB_OUTPUT"
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+
+      - name: Build the module from the DKMS tarball
+        run: |
+          make dkms-srcs-check dkms-tarball
+          rm -rf /tmp/dkms-check
+          mkdir -p /tmp/dkms-check
+          tar xzf dkms.tar.gz -C /tmp/dkms-check
+          (cd /tmp/dkms-check/dkms_source_tree &&
+            make KERNEL_DIR="${{ steps.kernel.outputs.kdir }}" all)
+          ko=/tmp/dkms-check/dkms_source_tree/tbtun.ko
+          test -s "$ko"
+          test "$(modinfo -F name "$ko")" = tbtun
+          modinfo -F vermagic "$ko"

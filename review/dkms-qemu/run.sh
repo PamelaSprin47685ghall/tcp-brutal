@@ -80,8 +80,9 @@ fi
 
 # Never remove this directory: every file in it is tracked evidence, so a run
 # that fails or is interrupted would leave tracked deletions in the worktree
-# (guest-tbtun.ko.sha256 kept reappearing deleted after a partial run).  Heal
-# any accidental deletion first, then drop only untracked leftovers; every
+# (guest-tbtun-kmod.sha256 kept reappearing deleted after a partial run).  The
+# digest name avoids the *.ko.* pattern the kernel's module clean deletes.
+# Heal any accidental deletion first, then drop only untracked leftovers; every
 # tracked file below is overwritten.
 ( cd "$here/../.." &&
   git checkout -- "review/dkms-qemu/artifacts" &&
@@ -136,7 +137,7 @@ echo "run.sh: qemu exited $rc"
 if [ -f "$artifacts/tbtun.ko.zst" ]; then
     mkdir -p "$cache/dkms-qemu"
     mv "$artifacts/tbtun.ko.zst" "$cache/dkms-qemu/guest-tbtun.ko.zst"
-    sha256sum "$cache/dkms-qemu/guest-tbtun.ko.zst" > "$artifacts/guest-tbtun.ko.sha256"
+    sha256sum "$cache/dkms-qemu/guest-tbtun.ko.zst" > "$artifacts/guest-tbtun-kmod.sha256"
     echo "run.sh: guest module kept at $cache/dkms-qemu/guest-tbtun.ko.zst"
 fi
 

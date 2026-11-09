@@ -29,11 +29,13 @@
  *     carrier.
  */
 #include <linux/ktime.h>
+#include <linux/limits.h>
 #include <linux/skbuff.h>
 #include <net/sock.h>
 #include <net/tcp.h>
 
 #include "tbtun.h"
+#include "tbt_fec_batch.h"
 #include "tbt_tx_acct.h"
 
 /* One blocking wait inside kernel_connect(). A connect that has not completed
@@ -131,10 +133,13 @@ static void tbt_carrier_unannounce(struct tbt_session *sess, u8 index)
 static void tbt_carrier_rescue_up(struct tbt_session *sess,
                                   struct tbt_carrier *c)
 {
-    struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
+    struct tbt_stream **snap;
     int n, i;
 
-    n = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
+    snap = kmalloc_array(TBT_STREAM_SNAP_MAX, sizeof(*snap), GFP_KERNEL);
+    if (!snap)
+        return; /* the next poll retries */
+    n = tbt_session_stream_snapshot(sess, snap, TBT_STREAM_SNAP_MAX);
     if (!n)
     {
         /* No stream needs an OPEN, so there is nothing left to announce;
@@ -143,6 +148,7 @@ static void tbt_carrier_rescue_up(struct tbt_session *sess,
          * frames, and the next stream announces itself on creation. */
         atomic_set(&c->up, 1);
         atomic64_inc(&sess->up_rescued);
+        kfree(snap);
         return;
     }
     for (i = 0; i < n; i++)
@@ -151,6 +157,7 @@ static void tbt_carrier_rescue_up(struct tbt_session *sess,
         tbt_tx_announce(sess, snap[i], GFP_KERNEL);
         tbt_stream_put(snap[i]);
     }
+    kfree(snap);
     atomic64_inc(&sess->up_rescued);
 }
 
@@ -1098,32 +1105,49 @@ static int tbt_car_rx_actor(read_descriptor_t *desc, struct sk_buff *skb, unsign
 
     if (!c || atomic_read(&c->stopping))
         return 0;
+    /* One work item may not parse a whole multi-megabyte receive queue: the
+     * far side reported tbt_car_rx_work hogging a worker for >10 ms. Stop
+     * between pieces once the body's deadline is spent. A 0-byte actor
+     * return is "nothing consumed" to tcp_read_sock(): it stops the walk and
+     * leaves the remaining bytes in the socket, and tbt_car_rx_body()
+     * re-arms because copied_seq != rcv_nxt. */
+    if (tbt_rx_budget_stopped(&c->rx_budget, ktime_get_ns()))
+    {
+        atomic64_inc(&c->sess->rx_budget_yields);
+        return 0;
+    }
     atomic64_inc(&c->sess->rx_drain_entries);
     atomic64_add(len, &c->sess->rx_drain_bytes);
 
     while (used < len)
     {
         size_t n = 0;
+        size_t take = min_t(size_t, len - used, TBT_RX_RUN_SLICE);
 
-        err = tbt_rx_skb(c, skb, offset + used, len - used, &n);
+        err = tbt_rx_skb(c, skb, offset + used, take, &n);
         used += n;
+        tbt_rx_budget_charge(&c->rx_budget, n);
         if (err)
+            break;
+        /* A short return is legal: tcp_read_sock() advances copied_seq and
+         * calls the actor again for the same skb. The next call sees the
+         * deadline and returns 0, so the yield is always between pieces. */
+        if (tbt_rx_budget_stopped(&c->rx_budget, ktime_get_ns()))
             break;
     }
     if (err)
     {
         if (err == -EAGAIN)
         {
-            /* The stream's delivery ring is full. The bytes that were copied
-             * into the parser buffer are accounted for below; the record that
-             * did not fit stays there for the resume. */
-            desc->count += used;
+            /* The delivery ring is full. Return the consumed byte count so
+             * tcp_read_sock() advances copied_seq past exactly those bytes;
+             * the record that did not fit stays in the parser for the
+             * resume. */
             return used;
         }
         tbt_car_rx_error(c, err);
         return 0;
     }
-    desc->count += used;
     return used;
 }
 
@@ -1183,8 +1207,15 @@ static void tbt_car_rx_body(struct tbt_carrier *c)
         rcu_read_unlock();
     }
     desc.arg.data = c;
+    /* tcp_read_sock() stops after one whole skb when count is zero; any
+     * non-zero value lets it walk more. SIZE_MAX also stays non-zero if a
+     * core variant subtracts the used bytes (the splice actor does), so this
+     * is "not exhausted" on every kernel this module supports. The actor
+     * stops itself on the time budget instead. */
+    desc.count = SIZE_MAX;
 
     atomic64_inc(&c->sess->rx_reads);
+    tbt_rx_budget_start(&c->rx_budget, ktime_get_ns());
     lock_sock(sk);
     /* Retry a record an earlier -EAGAIN left in the parser before reading the
      * socket. Without this, the record is unreachable: its bytes are already
@@ -1226,20 +1257,27 @@ static void tbt_car_rx_body(struct tbt_carrier *c)
     {
         tbt_carrier_lost(c->sess, c);
     }
-    else if (tbt_carrier_sk_present(c) &&
-             READ_ONCE(tcp_sk(sk)->copied_seq) !=
-                 READ_ONCE(tcp_sk(sk)->rcv_nxt))
+    else
     {
-        /* Bytes arrived after tcp_read_sock() stopped but before this work
-         * returned. Re-arm; sk_data_ready may have been coalesced.
+        /* One rule decides the wake this run owes (tbt_rx_budget.h):
          *
-         * Never re-arm for parser->have alone: those bytes were already
-         * copied out of the socket (copied_seq == rcv_nxt), so a re-run can
-         * copy nothing. It spins at 100% of a kworker until the rest of the
-         * record arrives, which is the normal case on a path whose segments
-         * are smaller than a record. The 50 ms poll already retries a held
-         * record, and sk_data_ready runs this work when the tail arrives. */
-        tbt_carrier_arm_rx(c);
+         *   - unread socket bytes: re-arm now. This covers both a budgeted
+         *     yield and bytes that arrived after tcp_read_sock() stopped
+         *     (sk_data_ready may have been coalesced); the two must not
+         *     diverge, or a budget stop would strand the remainder.
+         *   - parser->have alone: wait for the 50 ms poll or sk_data_ready.
+         *     Those bytes are already out of the socket (copied_seq ==
+         *     rcv_nxt), so a re-run copies nothing and spins at 100% of a
+         *     kworker until the tail arrives. */
+        enum tbt_rx_resume plan =
+            tbt_rx_resume_plan(atomic_read(&c->stopping),
+                               tbt_carrier_sk_present(c),
+                               READ_ONCE(tcp_sk(sk)->copied_seq) !=
+                                   READ_ONCE(tcp_sk(sk)->rcv_nxt),
+                               c->parser->have != 0);
+
+        if (plan == TBT_RX_RESUME_ARM)
+            tbt_carrier_arm_rx(c);
     }
 
     tbt_carrier_sk_put(sk);
@@ -1330,12 +1368,7 @@ static int tbt_carrier_part_flush(struct tbt_carrier *c, struct sock *sk)
     return 0;
 }
 
-/* Write one whole record or HTTP frame. Flush an older tail first, then
- * pre-check the socket's free send memory so ordinary backpressure is
- * -EAGAIN, not a partial record. A kernel short write keeps the unwritten
- * tail in c->part; the next writer on this carrier flushes it before any new
- * bytes, so records stay in order and a control frame is never spliced into
- * the middle of a DATA record. */
+/* Ask the stack to call tbt_car_write_space() on the next ACK. */
 static void tbt_carrier_arm_nospace(struct tbt_carrier *c, struct sock *sk)
 {
     if (sk && sk->sk_socket)
@@ -1345,22 +1378,31 @@ static void tbt_carrier_arm_nospace(struct tbt_carrier *c, struct sock *sk)
     }
 }
 
-static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
-                                  const void *data, size_t len)
+/* Commit a segment list with one non-blocking socket write. Flush an older
+ * tail first, then pre-check the socket's free send memory so ordinary
+ * backpressure is -EAGAIN, not a partially written batch. A kernel short
+ * write keeps the unwritten tail in c->part; the next writer on this carrier
+ * flushes it before any new bytes, so records stay in order and a control
+ * frame is never spliced into the middle of a DATA record.
+ *
+ * The payload segments point straight at the caller's records: a full write
+ * copies no record byte and allocates nothing. Only a short write copies its
+ * tail, and a batch tail always fits c->part because total is bounded by it. */
+static int tbt_carrier_send_segs(struct tbt_carrier *c, struct sock *sk,
+                                 const struct tbt_fec_batch_seg *segs,
+                                 unsigned int nseg, size_t total)
 {
     struct msghdr msg = {};
-    struct kvec iov = { .iov_base = (void *)data, .iov_len = len };
+    struct kvec iov[TBT_BATCH_SEG_MAX];
     u32 wmem, sndbuf;
     u64 mem_avail;
+    unsigned int i;
     int err;
 
     lockdep_assert_held(&c->tx_lock);
     if (!sk)
         return -ENOTCONN;
-    /* Normal records fit one part buffer; a FEC batch may be up to eight
-     * concatenated frames. A short write still stores its tail in c->part,
-     * but the tail must fit that buffer (checked below). */
-    if (len > TBT_CAR_PART_MAX)
+    if (!nseg || nseg > TBT_BATCH_SEG_MAX || total > TBT_CAR_PART_MAX)
         return -EINVAL;
     err = tbt_carrier_part_flush(c, sk);
     if (err)
@@ -1372,9 +1414,9 @@ static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
     wmem = READ_ONCE(sk->sk_wmem_queued);
     sndbuf = READ_ONCE(sk->sk_sndbuf);
     mem_avail = sndbuf > wmem ? sndbuf - wmem : 0;
-    if (mem_avail < len)
+    if (mem_avail < total)
     {
-        /* The batch needs its whole byte range to fit, so this can refuse
+        /* The write needs its whole byte range to fit, so this can refuse
          * while sk_stream_memory_free() is still true.  Arm SOCK_NOSPACE:
          * the next ACK calls tbt_car_write_space(), which kicks the FEC
          * drain immediately.  The drain keeps its 2 ms timer as the bounded
@@ -1382,10 +1424,15 @@ static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
         tbt_carrier_arm_nospace(c, sk);
         return -EAGAIN;
     }
-    iov_iter_kvec(&msg.msg_iter, ITER_SOURCE, &iov, 1, len);
+    for (i = 0; i < nseg; i++)
+    {
+        iov[i].iov_base = (void *)segs[i].base;
+        iov[i].iov_len = segs[i].len;
+    }
+    iov_iter_kvec(&msg.msg_iter, ITER_SOURCE, iov, nseg, total);
     msg.msg_flags = MSG_DONTWAIT;
     lock_sock(sk);
-    err = tcp_sendmsg_locked(sk, &msg, len);
+    err = tcp_sendmsg_locked(sk, &msg, total);
     release_sock(sk);
     if (err < 0)
     {
@@ -1393,13 +1440,32 @@ static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
             tbt_carrier_arm_nospace(c, sk);
         return err == -EAGAIN ? -EAGAIN : err;
     }
-    if ((size_t)err < len)
+    if ((size_t)err < total)
     {
-        memcpy(c->part, (const u8 *)data + err, len - (size_t)err);
-        c->part_len = (u32)(len - (size_t)err);
+        u32 tail;
+
+        if (!tbt_fec_batch_tail(segs, nseg, total, (size_t)err, c->part,
+                                TBT_CAR_PART_MAX, &tail))
+            return -EIO;
+        c->part_len = tail;
         c->part_off = 0;
     }
     return 0;
+}
+
+/* Write one whole record or HTTP frame. The batch helper has the locking,
+ * tail-flush, memory-precheck and short-write rules; this wrapper supplies
+ * the one-segment list a single write needs. */
+static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
+                                  const void *data, size_t len)
+    {
+    struct tbt_fec_batch_seg seg;
+
+    if (len > TBT_CAR_PART_MAX)
+        return -EINVAL;
+    seg.base = data;
+    seg.len = (u32)len;
+    return tbt_carrier_send_segs(c, sk, &seg, 1, len);
 }
 
 /* The request/response header block for this carrier segment. The near side
@@ -1546,9 +1612,11 @@ int tbt_carrier_send_fec_batch(struct tbt_carrier *c,
 {
     struct tbt_session *sess;
     struct sock *sk;
-    char *buf = NULL;
-    size_t cap, off = 0;
-    u16 i;
+    char hdr[TBT_BATCH_REC_MAX][TBT_HTTP_CHUNK_HDR_MAX];
+    struct tbt_fec_batch_seg seg[TBT_BATCH_SEG_MAX];
+    size_t total = 0;
+    unsigned int nseg;
+    bool http;
     int err = 0;
 
     if (sent)
@@ -1571,73 +1639,38 @@ int tbt_carrier_send_fec_batch(struct tbt_carrier *c,
         goto out;
     }
 
-    if (c->profile == 3)
-    {
-        cap = (size_t)count * TBT_HTTP_FEC_FRAME_MAX;
-        buf = count == 1 ? c->fec_frame
-                         : kmalloc_array(count, TBT_HTTP_FEC_FRAME_MAX,
-                                         GFP_KERNEL);
-        if (!buf)
-        {
-            err = -ENOMEM;
-            goto out;
-        }
-        for (i = 0; i < count; i++)
-        {
-            if (off + lens[i] > cap)
-            {
-                err = -EINVAL;
-                goto out_free;
-            }
-            memcpy(buf + off, recs[i], lens[i]);
-            off += lens[i];
-        }
-    }
-    else
+    http = c->profile != 3;
+    if (http)
     {
         /* The header block is part of this carrier's byte stream: write it
-         * once before the concatenated chunks. */
+         * once before the chunks. */
         err = tbt_carrier_http_begin(c, sk);
         if (err)
             goto out;
-        cap = (size_t)count * TBT_HTTP_FEC_FRAME_MAX;
-        buf = count == 1 ? c->fec_frame
-                         : kmalloc_array(count, TBT_HTTP_FEC_FRAME_MAX,
-                                         GFP_KERNEL);
-        if (!buf)
-        {
-            err = -ENOMEM;
-            goto out;
-        }
-        for (i = 0; i < count; i++)
-        {
-            size_t n = tbt_http_fec_chunk_encode(buf + off, cap - off,
-                                                 recs[i], lens[i]);
-
-            if (!n)
-            {
-                atomic64_inc(&sess->http_parse_err);
-                err = -EIO;
-                goto out_free;
-            }
-            off += n;
-        }
+    }
+    /* The records are already one contiguous buffer each (struct tbt_fec_out
+     * data[]), so the layout is a segment list over them: no batch buffer,
+     * no record memcpy. */
+    nseg = tbt_fec_batch_build(seg, &hdr[0][0], recs, lens, count, http, &total);
+    if (!nseg)
+    {
+        if (http)
+            atomic64_inc(&sess->http_parse_err);
+        err = http ? -EIO : -EINVAL;
+        goto out;
     }
 
-    err = tbt_carrier_send_whole(c, sk, buf, off);
+    err = tbt_carrier_send_segs(c, sk, seg, nseg, total);
     if (!err)
     {
         c->tx_frames += count;
-        c->tx_bytes += off;
+        c->tx_bytes += total;
         c->last_tx_ns = ktime_get_ns();
-        sess->carrier_bytes += off;
+        sess->carrier_bytes += total;
         if (sent)
             *sent = count;
     }
 
-out_free:
-    if (buf && buf != c->fec_frame)
-        kfree(buf);
 out:
     mutex_unlock(&c->tx_lock);
     tbt_carrier_sk_put(sk);
@@ -2429,15 +2462,29 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c)
      * may reset its streams here. */
     if (sess->join_retries > 20 && tbt_carriers_all_dead(sess))
     {
-        struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
+        struct tbt_stream *batch[16];
+        unsigned int round;
         int n, i;
 
         atomic64_inc(&sess->stream_reset_tcp_failed);
-        n = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
-        for (i = 0; i < n; i++)
+        /* Carrier loss runs in atomic context. A small stack batch kills
+         * every stream without allocating; the killable snapshot skips a
+         * stream another killer already owns, so each round makes progress.
+         * n_active is bounded by TBT_STREAMS_MAX, hence the round cap. */
+        for (round = 0; round <= TBT_STREAMS_MAX / ARRAY_SIZE(batch);
+             round++)
         {
-            tbt_stream_kill(snap[i], TBT_ST_DEAD);
-            tbt_stream_put(snap[i]);
+            n = tbt_session_stream_snapshot_killable(sess, batch,
+                                                     ARRAY_SIZE(batch));
+            if (!n)
+                break;
+            for (i = 0; i < n; i++)
+            {
+                tbt_stream_kill(batch[i], TBT_ST_DEAD);
+                tbt_stream_put(batch[i]);
+            }
+            if (n < (int)ARRAY_SIZE(batch))
+                break;
         }
         return;
     }
@@ -2604,7 +2651,6 @@ void tbt_carrier_free(struct tbt_carrier *c)
     list_del_init(&c->release_node);
     kfree(c->http_tx);
     kfree(c->http_hdr);
-    kfree(c->fec_frame);
     kfree(c->part);
     kfree(c->parser);
     kfree(c->http_rx);
@@ -3600,7 +3646,7 @@ void tbt_carrier_snapshot(struct tbt_session *sess)
     tbt_carrier_put(c);
 }
 
-/* The five buffers are pointers, not inline arrays. If someone turns one of
+/* The four buffers are pointers, not inline arrays. If someone turns one of
  * them into an array, kzalloc() still zeroes the whole struct and the buffer
  * storage, and the "birth is all zero" invariant silently changes meaning.
  * Reject that at compile time, and pin the buffer sizes to the largest record
@@ -3619,6 +3665,7 @@ static void tbt_carrier_birth_checks(void)
         typeof(((struct tbt_carrier *)0)->http_hdr), char *));
     BUILD_BUG_ON(TBT_CAR_PART_MAX < TBT_REC_MAX);
     BUILD_BUG_ON(TBT_CAR_PART_MAX < TBT_HTTP_FEC_FRAME_MAX);
+    BUILD_BUG_ON(TBT_BATCH_REC_MAX != TBT_FEC_BATCH_MAX);
     BUILD_BUG_ON(TBT_PARSER_BUF < TBT_REC_MAX);
     BUILD_BUG_ON(TBT_PARSER_BUF < TBT_FEC_REC_MAX);
     /* The FEC-session encoder buffer holds every record type that can still

@@ -924,9 +924,13 @@ struct tbt_stream *tbt_stream_get(struct tbt_session *sess, u64 sid,
 }
 
 /* Refcounted snapshot of the active streams. The caller processes the array
- * with sess->lock dropped and puts each entry afterwards. */
-int tbt_session_stream_snapshot(struct tbt_session *sess,
-                                struct tbt_stream **out, int max)
+ * with sess->lock dropped and puts each entry afterwards. killable skips
+ * streams another killer already marked and detached tombstones: a batch
+ * loop then always makes progress, and its candidate set is bounded by
+ * n_active rather than by the hash's tombstone population. */
+static int tbt_stream_snapshot(struct tbt_session *sess,
+                               struct tbt_stream **out, int max,
+                               bool killable)
 {
     int n = 0, i;
 
@@ -937,7 +941,10 @@ int tbt_session_stream_snapshot(struct tbt_session *sess,
 
         hlist_for_each_entry(st, &sess->streams[i], node)
         {
-            if (READ_ONCE(st->state) == TBT_ST_DEAD)
+            if (READ_ONCE(st->state) == TBT_ST_DEAD ||
+                (killable &&
+                 (test_bit(TBT_STREAM_F_DYING, &st->attached) ||
+                  !test_bit(TBT_STREAM_F_ACTIVE, &st->attached))))
                 continue;
             if (n >= max)
             {
@@ -952,6 +959,18 @@ int tbt_session_stream_snapshot(struct tbt_session *sess,
     }
     spin_unlock(&sess->lock);
     return n;
+}
+
+int tbt_session_stream_snapshot(struct tbt_session *sess,
+                                struct tbt_stream **out, int max)
+{
+    return tbt_stream_snapshot(sess, out, max, false);
+}
+
+int tbt_session_stream_snapshot_killable(struct tbt_session *sess,
+                                         struct tbt_stream **out, int max)
+{
+    return tbt_stream_snapshot(sess, out, max, true);
 }
 
 /* Hash lookup for callers that already hold sess->lock.  The hash reference
@@ -1257,8 +1276,6 @@ static void tbt_tx_purge_stream(struct tbt_session *sess, struct tbt_stream *st)
 
 void tbt_stream_kill(struct tbt_stream *st, u8 reason)
 {
-    struct sock *sk = READ_ONCE(st->sk);
-
     /* One winner.  A read-then-write let two carriers both queue w_kill and
      * leak one reference. */
     if (test_and_set_bit(TBT_STREAM_F_DYING, &st->attached))
@@ -1277,12 +1294,11 @@ void tbt_stream_kill(struct tbt_stream *st, u8 reason)
     tbt_stream_detach_from_session(st);
     tbt_tx_purge_stream(st->sess, st);
 
-    /* Wake anything asleep on the socket first: a delivery blocked in
-     * tcp_sendmsg_locked() would otherwise keep w_drain running and the reset
-     * work would wait forever in cancel_work_sync(). The reset close itself
-     * sleeps (detach, socket release), so it runs in a work item. */
-    if (sk && sk->sk_socket)
-        kernel_sock_shutdown(sk->sk_socket, SHUT_RDWR);
+    /* The socket wake belongs to tbt_kill_body(): this function runs in the
+     * carrier receive work under lock_sock(carrier), and
+     * kernel_sock_shutdown() takes lock_sock() on the stream socket. Lockdep
+     * reports that nesting as recursive on its shared sk_lock-AF_INET class.
+     * w_kill owns the socket and runs without any socket lock. */
 
     /* w_kill can outlive the hash reference; tbt_stream_schedule() takes the
      * reference the work entry will return. A refused schedule means the
@@ -1450,7 +1466,7 @@ void tbt_session_put(struct tbt_session *s)
  * The reference is taken before the bit is published: a canceller that sees
  * the bit must always have a reference it may return. The queue attempt can
  * still be refused. cancel_work_sync() disables a work item while it runs,
- * and a queue that races the cancel is dropped silently (kernel 6.13+
+ * and a queue that races the cancel is dropped silently (kernel 6.10+
  * workqueue). The work_pending() check below detects that and returns the
  * reference here. Without it the reference would be owed to an instance that
  * never exists, so refs would never reach zero and tbt_session_destroy()
@@ -1546,6 +1562,7 @@ int tbt_session_create(struct tbt_tunnel *t)
     spin_lock_init(&s->tx_lock);
     spin_lock_init(&s->dial_lock);
     mutex_init(&s->pump_lock);
+    init_rwsem(&s->stats_lock);
     INIT_LIST_HEAD(&s->tx_q);
     INIT_LIST_HEAD(&s->prov);
     INIT_LIST_HEAD(&s->dead_release);
@@ -1731,6 +1748,11 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     spin_lock(&s->lock);
     s->closing = true;
     spin_unlock(&s->lock);
+    /* Stats readers hold a session reference but not the child objects it
+     * renders (car[], fec_outq, streams). Block them before the first child
+     * is cleared. The write side is released before the drained wait, since
+     * a blocked reader holds one of the references that wait is for. */
+    down_write(&s->stats_lock);
 
     /* Stop the two FEC entry points. rx->lock is a leaf; the stopping flag
      * makes record()/arm() refuse new work after this point. */
@@ -1843,6 +1865,8 @@ void tbt_session_destroy(struct tbt_tunnel *t)
 
     tbt_fec_data_free(s);
 
+    up_write(&s->stats_lock);
+
     /* Drop the tunnel's reference, then wait for every stream/work/carrier
      * reference. No scheduler can take a new one after the steps above. */
     tbt_session_put(s);
@@ -1897,7 +1921,7 @@ void tbt_session_retire(struct tbt_session *sess, u8 index, u8 gen)
 int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
 {
     struct tbt_carrier *old;
-    struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
+    struct tbt_stream **snap;
     struct sock *csk;
     __be32 src;
     int nsnap, i;
@@ -1996,8 +2020,18 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
     /* Our HELLO is the first frame in this direction. */
     tbt_tx_hello(sess, index, GFP_ATOMIC);
     /* Announce and target every active stream; the pump writes HELLO first
-     * because it is ahead in the queue. */
-    nsnap = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
+     * because it is ahead in the queue. HELLO runs under the carrier's
+     * socket lock, so the snapshot is allocated atomically instead of
+     * costing a TBT_STREAM_SNAP_MAX array on the stack. A refused
+     * allocation is repaired by the 50 ms poll: a carrier whose up flag
+     * never rose has every stream's OPEN re-announced there. */
+    snap = kmalloc_array(TBT_STREAM_SNAP_MAX, sizeof(*snap), GFP_ATOMIC);
+    if (!snap)
+    {
+        tbt_fbk_kick(sess, false);
+        return 0;
+    }
+    nsnap = tbt_session_stream_snapshot(sess, snap, TBT_STREAM_SNAP_MAX);
     for (i = 0; i < nsnap; i++)
     {
         /* The stream's announce bookkeeping stores four bits of the carrier
@@ -2011,6 +2045,7 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
         tbt_carrier_open_target(snap[i]);
         tbt_stream_put(snap[i]);
     }
+    kfree(snap);
     tbt_fbk_kick(sess, false);
     return 0;
 }
