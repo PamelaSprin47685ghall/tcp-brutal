@@ -227,8 +227,9 @@ evidence=(
     "QEMU_E2E_MULTISTREAM 2 streams ok"
     "QEMU_E2E_DEL grouped ok"
     "QEMU_E2E_UP kal64 up=64"
-    "QEMU_E2E_STREAM kal64-bidir ok"
-    "QEMU_E2E_FBK both-ends ok"
+    "QEMU_E2E_STREAM kal64-seq-1"
+    "QEMU_E2E_STREAM kal64-seq-2"
+    "QEMU_E2E_FBK kal64 init_rx"
     "QEMU_E2E_DEL kal64 ok"
     "QEMU_E2E_UNLOAD ok"
 )

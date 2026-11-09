@@ -315,44 +315,42 @@ static int wait_idle(int timeout_ms)
     return -1;
 }
 
-/* Read one c3 counter for tunnel `id`.  `key` carries its leading space so
- * "fbk_tx" cannot match a longer field. */
-static int stat_u64(unsigned int id, const char *key, unsigned long long *out)
+/* Read one stats counter for tunnel `id` from line `tag` ("c3", "c8").
+ * `key` carries its leading space so a short name cannot match a longer
+ * field. */
+static int stat_u64(unsigned int id, const char *tag, const char *key,
+                    unsigned long long *out)
 {
     char line[2048];
 
-    if (stats_line(id, "c3", line, sizeof(line)))
+    if (stats_line(id, tag, line, sizeof(line)))
         return -1;
     return line_kv(line, key, out);
 }
 
-/* Both ends must have sent and received at least one FBK.  The receiver sends
- * one when a window closes, and the 100 ms cadence covers the tail, so a FEC
- * pair that carried DATA in both directions proves the full control path. */
-static int wait_fbk_pair(int timeout_ms)
+/* The ARQ fbk_tx counter is 0 on a FEC session: its feedback is a FEC record
+ * with no procfs counter of its own.  fec_init_rx is the deterministic proxy:
+ * the receiver increments it and sends a CFG_ACK FBK on the very next line
+ * (tbt_fec_rx_init_tick).  With adaptive=off every flow takes that path, so a
+ * non-zero counter on both ends proves FBK left each side. */
+static int wait_fec_feedback(int timeout_ms)
 {
     long long deadline = now_ms() + timeout_ms;
-    unsigned long long far_tx = 0, far_rx = 0, near_tx = 0, near_rx = 0;
+    unsigned long long far = 0, near = 0;
 
     while (now_ms() < deadline)
     {
-        if (!stat_u64(1, " fbk_tx", &far_tx) &&
-            !stat_u64(1, " fbk_rx", &far_rx) &&
-            !stat_u64(2, " fbk_tx", &near_tx) &&
-            !stat_u64(2, " fbk_rx", &near_rx) && far_tx && far_rx && near_tx &&
-            near_rx)
+        if (!stat_u64(1, "c11", " fec_init_rx", &far) &&
+            !stat_u64(2, "c11", " fec_init_rx", &near) && far && near)
         {
-            printf("QEMU_E2E_FBK both-ends ok far_tx=%llu far_rx=%llu "
-                   "near_tx=%llu near_rx=%llu\n",
-                   far_tx, far_rx, near_tx, near_rx);
+            printf("QEMU_E2E_FBK kal64 init_rx far=%llu near=%llu\n", far,
+                   near);
             fflush(stdout);
             return 0;
         }
         msleep(50);
     }
-    printf("QEMU_E2E_STATE fbk far_tx=%llu far_rx=%llu near_tx=%llu "
-           "near_rx=%llu\n",
-           far_tx, far_rx, near_tx, near_rx);
+    printf("QEMU_E2E_STATE fec_init_rx far=%llu near=%llu\n", far, near);
     return -1;
 }
 
@@ -1088,10 +1086,12 @@ int main(void)
     fflush(stdout);
 
     configure("tunnel 1 role=far profile=http-kal listen=127.0.0.1:19001"
-              " target=127.0.0.1:19070 n=4 m=4 fec=on mode=grouped"
+              " target=127.0.0.1:19070 n=4 m=4 fec=on adaptive=off"
+              " mode=grouped"
               " w=8 carriers=64 crypto=off dup=1\n",
               "tunnel 2 role=near profile=http-kal listen=127.0.0.1:19000"
-              " peer=127.0.0.1:19001 n=4 m=4 fec=on mode=grouped"
+              " peer=127.0.0.1:19001 n=4 m=4 fec=on adaptive=off"
+              " mode=grouped"
               " w=8 carriers=64 crypto=off dup=1"
               " portblock=31600-32111\n");
     if (wait_carriers(CARRIERS_KAL, UP_TIMEOUT_MS))
@@ -1099,43 +1099,35 @@ int main(void)
     printf("QEMU_E2E_UP kal64 up=%u\n", CARRIERS_KAL);
     fflush(stdout);
 
+    /* One flow at a time: fec_groups_per_flow=16 does not fit two flows into
+     * 8 groups (the second OPEN is refused with ENOSPC).  Each roundtrip is
+     * bidirectional: request DATA and echo DATA both cross the FEC plane, so
+     * both ends allocate the lazy replay ring, and the second stream proves
+     * the release/re-admit path. */
+    for (i = 1; i <= 2; i++)
     {
-        pid_t kids[2];
+        char tag[32];
 
-        for (i = 0; i < 2; i++)
-        {
-            kids[i] = fork();
-            if (kids[i] < 0)
-                verdict_fail("kal64: fork: %s", strerror(errno));
-            if (!kids[i])
-            {
-                int cfd = connect_client();
-                char cwhy[256] = "";
-
-                alarm(0);
-                if (cfd < 0)
-                    _exit(1);
-                if (roundtrip(cfd, STREAM_BYTES, cwhy, sizeof(cwhy)))
-                    _exit(1);
-                close_stream(cfd);
-                _exit(0);
-            }
-        }
-        for (i = 0; i < 2; i++)
-        {
-            int status = 0;
-
-            if (waitpid(kids[i], &status, 0) != kids[i] ||
-                !WIFEXITED(status) || WEXITSTATUS(status))
-                verdict_fail("http-kal 64-carrier stream %d failed", i);
-        }
-        printf("QEMU_E2E_STREAM kal64-bidir ok\n");
-        fflush(stdout);
+        snprintf(tag, sizeof(tag), "kal64-seq-%d", i);
+        stream_once(tag, STREAM_BYTES);
         if (wait_idle(IDLE_TIMEOUT_MS))
-            verdict_fail("http-kal session did not drain after close");
+            verdict_fail("%s: session did not drain after close", tag);
     }
-    if (wait_fbk_pair(3000))
-        verdict_fail("FBK did not flow on both ends of the http-kal pair");
+    if (wait_fec_feedback(3000))
+        verdict_fail("FEC feedback did not cross both ends");
+    {
+        unsigned long long far_resp = 0, near_req = 0;
+
+        /* Every carrier HELLO is a control record encoded into the 340 B
+         * buffer; 64 of them in each direction prove the encoder ran. */
+        if (stat_u64(1, "c8", " http_resp", &far_resp) ||
+            stat_u64(2, "c8", " http_req", &near_req) ||
+            far_resp < CARRIERS_KAL || near_req < CARRIERS_KAL)
+            verdict_fail("http-kal control encoder saw far_resp=%llu "
+                         "near_req=%llu", far_resp, near_req);
+        printf("QEMU_E2E_KAL64 http far_resp=%llu near_req=%llu\n", far_resp,
+               near_req);
+    }
     printf("QEMU_E2E_KAL64 carriers=64 profile=http-kal ok\n");
     fflush(stdout);
 
