@@ -125,6 +125,13 @@ and moves independently of the module version.
   slept until an unrelated carrier loss. `tbt_tx_fin()` stamps
   `close_since_ns` before its FEC early returns, and a duplicate sid is
   refused with `-EEXIST` before the SC-LDPC admission check. (587792d)
+- PAD and drip no longer cancel the BBR hold. Every non-PAD writer clears
+  `hold_active` before it queues bytes, so an active hold with bytes in
+  flight is waiting for a keepalive. `tbt_car_hold_apply()` now skips that
+  application instead of ending the hold; the old exit re-paid the 200 ms
+  enter delay and restarted the 10 s cap once per keepalive period.
+  `host/test_hold` covers the OK/SKIP/EXIT gate, and the sanitizer target
+  now runs it too.
 
 ### Changed
 

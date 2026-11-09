@@ -255,6 +255,35 @@ static inline bool tbt_hold_keep(bool active, bool real_data, bool loss,
            (!until_ns || now <= until_ns);
 }
 
+/* Why tbt_car_hold_apply() may not write this poll.
+ *
+ * Every non-PAD writer clears hold_active before it queues bytes:
+ * tbt_carrier_xmit() for the ARQ/control pump, tbt_carrier_send_fec_batch()
+ * for FEC data. A hold that is still active with bytes in flight is therefore
+ * waiting for a PAD, whose writer deliberately exempts TBT_F_PAD. That is a
+ * SKIP, not an exit: ending the hold here re-paid the 200 ms enter delay and
+ * restarted the 10 s cap once per keepalive period. An inactive hold or a CA
+ * that left Open is a real race with a live congestion decision and ends it.
+ */
+enum tbt_hold_apply
+{
+    TBT_HOLD_APPLY_OK = 0,
+    TBT_HOLD_APPLY_SKIP,
+    TBT_HOLD_APPLY_EXIT,
+};
+
+static inline enum tbt_hold_apply tbt_hold_apply_gate(bool active,
+                                                      bool ca_open,
+                                                      bool una_eq_nxt,
+                                                      u32 packets_out)
+{
+    if (!active || !ca_open)
+        return TBT_HOLD_APPLY_EXIT;
+    if (!una_eq_nxt || packets_out)
+        return TBT_HOLD_APPLY_SKIP;
+    return TBT_HOLD_APPLY_OK;
+}
+
 /* Fold the legacy 16-bit path mask into a 256-bit carrier mask. The source is
  * a retained DATA copy, which only the old ARQ creates, so the loop bound is
  * the retain width, not TBT_MAX_CARRIERS_LIMIT. */

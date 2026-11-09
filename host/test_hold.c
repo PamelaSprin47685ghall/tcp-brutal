@@ -9,6 +9,8 @@
  *     - keep only while there is no real data, loss, window shrink or
  *       deadline expiry;
  *     - exit on real data, loss, window shrink or the 10 s idle cap.
+ *     - a write is skipped, not cancelled, while only a PAD is in flight;
+ *       it exits only when the hold is gone or CA left Open.
  *
  *   The model mirrors the poll: idle -> wait enter_ns -> active -> exit.
  *   It does not execute the kernel; the predicates are the shared code.
@@ -92,6 +94,20 @@ static void case_keep(void)
        "keep: exactly at the deadline");
     ok(tbt_hold_keep(true, false, false, false, 100, 0),
        "keep: zero deadline means no cap");
+}
+
+static void case_apply(void)
+{
+    ok(tbt_hold_apply_gate(true, true, true, 0) == TBT_HOLD_APPLY_OK,
+       "apply: idle carrier writes");
+    ok(tbt_hold_apply_gate(true, true, true, 1) == TBT_HOLD_APPLY_SKIP,
+       "apply: PAD in flight skips, does not cancel");
+    ok(tbt_hold_apply_gate(true, true, false, 1) == TBT_HOLD_APPLY_SKIP,
+       "apply: unacked PAD skips");
+    ok(tbt_hold_apply_gate(false, true, true, 0) == TBT_HOLD_APPLY_EXIT,
+       "apply: a non-PAD write cancelled the hold");
+    ok(tbt_hold_apply_gate(true, false, true, 0) == TBT_HOLD_APPLY_EXIT,
+       "apply: CA left Open exits");
 }
 
 struct model
@@ -190,6 +206,7 @@ int main(void)
 {
     case_enter();
     case_keep();
+    case_apply();
     case_state();
     case_default_on();
 

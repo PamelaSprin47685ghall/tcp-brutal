@@ -460,6 +460,7 @@ static void tbt_car_hold_apply(struct tbt_carrier *c, struct tcp_sock *tp,
                                struct sock *sk)
 {
     u32 cwnd = c->hold_cwnd;
+    enum tbt_hold_apply gate;
 
     if (!cwnd)
         return;
@@ -468,15 +469,25 @@ static void tbt_car_hold_apply(struct tbt_carrier *c, struct tcp_sock *tp,
     if (!cwnd)
         cwnd = 1;
     lock_sock(sk);
-    /* Real data or loss raced the poll: drop the hold instead of writing over
-     * a live BBR decision. */
-    if (READ_ONCE(tp->snd_una) != READ_ONCE(tp->snd_nxt) ||
-        READ_ONCE(tp->packets_out) != 0 ||
-        inet_csk(sk)->icsk_ca_state != TCP_CA_Open)
+    /* Re-check under the socket lock. A non-PAD writer clears hold_active
+     * before it queues bytes, so this catches the real race. The in-flight
+     * test must not end the hold: PAD is the only frame that leaves it active
+     * with packets_out set, and its writer exempts TBT_F_PAD on purpose. */
+    gate = tbt_hold_apply_gate(
+        READ_ONCE(c->hold_active),
+        inet_csk(sk)->icsk_ca_state == TCP_CA_Open,
+        READ_ONCE(tp->snd_una) == READ_ONCE(tp->snd_nxt),
+        READ_ONCE(tp->packets_out));
+    if (gate == TBT_HOLD_APPLY_EXIT)
     {
         release_sock(sk);
         WRITE_ONCE(c->hold_active, false);
         WRITE_ONCE(c->hold_since_ns, 0);
+        return;
+    }
+    if (gate == TBT_HOLD_APPLY_SKIP)
+    {
+        release_sock(sk);
         return;
     }
     tcp_snd_cwnd_set(tp, cwnd);
