@@ -83,6 +83,17 @@ and moves independently of the module version.
   `w_target` is cancelled first so `st->sk` is stable, and the
   refused-schedule case is covered by the destroy path's release. This
   also removes the unsynchronised `st->sk` read from the carrier path.
+- The stream socket callbacks take `sk_callback_lock` with
+  `read_lock_bh()` instead of a plain `read_lock()`. The capture work runs
+  in process context while every writer uses `write_lock_bh()`, so the
+  plain read side marked the lock class SOFTIRQ-irq-unsafe while
+  `sk_clone()` acquires a listener's `sk_lock` in softirq.
+  `tbt_listen_stop()` then shuts the listening socket down under
+  `sk_lock` and reaches `sock_orphan()`'s callback-lock write; under
+  `PROVE_LOCKING` lockdep reports that nesting as
+  `SOFTIRQ-safe -> SOFTIRQ-unsafe` (or an inconsistent lock state). The
+  callbacks already run with BH disabled, so the `_bh` variant only
+  nests the disable.
 
 ### Tests
 
