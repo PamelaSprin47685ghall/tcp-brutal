@@ -350,7 +350,7 @@ static ssize_t tbt_cfg_read(struct file *file, char __user *ubuf, size_t len, lo
         return -EINVAL;
 
     mutex_lock(&cf->lock);
-    if (!cf->snapshot_valid)
+    if (!tbt_read_bool(cf->snapshot_valid))
     {
         err = tbt_config_snapshot(cf);
         if (err)
@@ -395,7 +395,7 @@ static loff_t tbt_cfg_llseek(struct file *file, loff_t offset, int whence)
         break;
     case SEEK_END:
         mutex_lock(&cf->lock);
-        if (!cf->snapshot_valid)
+        if (!tbt_read_bool(cf->snapshot_valid))
         {
             err = tbt_config_snapshot(cf);
             if (err)
@@ -672,8 +672,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                 struct sock *sk = READ_ONCE(st->sk);
 
                 s->snap_rx_queued = READ_ONCE(st->rx_queued);
-                s->snap_rx_paused = READ_ONCE(st->paused);
-                s->snap_tx_paused = READ_ONCE(st->tx_paused);
+                s->snap_rx_paused = tbt_read_bool(st->paused);
+                s->snap_tx_paused = tbt_read_bool(st->tx_paused);
                 if (sk)
                 {
                     s->snap_pub_state = READ_ONCE(sk->sk_state);
@@ -914,7 +914,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->rx_reorder_overflow), max_depth,
                            ooo_bytes, ooo_frames,
                            retain_bytes, READ_ONCE(s->tx_ack), READ_ONCE(s->rx_ack),
-                           READ_ONCE(s->peer_paused), READ_ONCE(s->fb_delay_us),
+                           tbt_read_bool(s->peer_paused), READ_ONCE(s->fb_delay_us),
                            READ_ONCE(s->rto_us), READ_ONCE(s->una_stall_us),
                            tbt_stat_read(&s->stall_paused_skips),
                            tbt_stat_read(&s->stall_idle_skips),
@@ -1021,18 +1021,18 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                             ss[si].kill = READ_ONCE(st->kill_reason);
                             ss[si].attached = READ_ONCE(st->attached);
                             ss[si].rxq = READ_ONCE(st->rx_queued);
-                            ss[si].rxp = READ_ONCE(st->paused);
-                            ss[si].txp = READ_ONCE(st->tx_paused);
-                            ss[si].peer_paused = READ_ONCE(st->peer_paused);
+                            ss[si].rxp = tbt_read_bool(st->paused);
+                            ss[si].txp = tbt_read_bool(st->tx_paused);
+                            ss[si].peer_paused = tbt_read_bool(st->peer_paused);
                             ss[si].skerr = ps ? READ_ONCE(ps->sk_err) : 0;
                             ss[si].tgt_state = ts ? READ_ONCE(ts->sk_state) : 0;
                             ss[si].tgt_err = ts ? READ_ONCE(ts->sk_err) : 0;
                             ss[si].fin_seq = READ_ONCE(st->tx_fin_seq);
-                            ss[si].fin_q = READ_ONCE(st->tx_fin_queued);
-                            ss[si].fin_w = READ_ONCE(st->tx_fin_written);
-                            ss[si].rst_w = READ_ONCE(st->tx_rst_written);
-                            ss[si].rxf = READ_ONCE(st->rx_fin_seen);
-                            ss[si].rxfd = READ_ONCE(st->rx_fin_done);
+                            ss[si].fin_q = tbt_read_bool(st->tx_fin_queued);
+                            ss[si].fin_w = tbt_read_bool(st->tx_fin_written);
+                            ss[si].rst_w = tbt_read_bool(st->tx_rst_written);
+                            ss[si].rxf = tbt_read_bool(st->rx_fin_seen);
+                            ss[si].rxfd = tbt_read_bool(st->rx_fin_done);
                             ss[si].dage_ms = ds && now > ds
                                 ? (now - ds) / NSEC_PER_MSEC : 0;
                             si++;
@@ -1303,7 +1303,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                                   "pauses=%llu pause_ns=%llu "
                                   "sample_unknown=%llu abandoned=%llu "
                                   "state=%s reason=%s\n",
-                               id, READ_ONCE(s->adaptive) ? "on" : "off",
+                               id, tbt_read_bool(s->adaptive) ? "on" : "off",
                                READ_ONCE(a->epoch), an, am, ag,
                                READ_ONCE(a->class), READ_ONCE(a->p_ppm),
                                READ_ONCE(a->p_win_ppm),

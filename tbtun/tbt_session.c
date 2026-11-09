@@ -90,7 +90,7 @@ void tbt_portmap_get(u16 *lo, u16 *hi, bool *configured)
     mutex_lock(&tbt_ports.lock);
     *lo = tbt_ports.lo;
     *hi = tbt_ports.hi;
-    *configured = tbt_ports.configured;
+    *configured = tbt_read_bool(tbt_ports.configured);
     mutex_unlock(&tbt_ports.lock);
 }
 

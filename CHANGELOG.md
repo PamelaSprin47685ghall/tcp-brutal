@@ -75,6 +75,19 @@ and moves independently of the module version.
   bookkeeping is guarded to its legacy 16 slots. The RX frame initializer
   uses the same bitmap form. This removes the UBSAN index/shift reports seen
   on a 256-carrier 0.4.0 deployment. (17b8b49)
+- `/proc` flag reads go through `tbt_read_bool()`: a compile-time check
+  refuses a non-bool field, and the load is a byte load normalized to
+  true/false. A flag byte left neither 0 nor 1 by a neighbouring
+  carrier-indexed write no longer trips UBSAN's `invalid-load` in
+  `tbt_show_stats()` or the stream/config readers. All stream, session,
+  adaptive and portmap flags are covered. (eb8d242)
+- The adaptive SC-LDPC estimator fold is skipped when `rx->groups` exceeds
+  its 32-entry stack scratch; `BUILD_BUG_ON(TBT_FEC_ADAPT_GROUPS <
+  TBT_SCLC_MAX_GROUPS)` and the mirrored host check keep that scratch tied to
+  the codec limit. (eb8d242)
+- `tbt_carrier_init()` asserts that `fec_drop_ppm` covers
+  `TBT_MAX_CARRIERS_LIMIT`; it is the array immediately before the session's
+  `adaptive` flag. (eb8d242)
 
 ### Changed
 

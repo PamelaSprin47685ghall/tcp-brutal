@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "tbt_fec_adapt.h"
+#include "tbt_sclc_uplink.h"
 
 static int checks;
 static int failures;
@@ -813,6 +814,15 @@ static void case_carrier_helpers(void)
        "alive: never received");
 }
 
+/* The estimator fold in tbt_fec_data.c keeps one entry per physical group in
+ * fixed stack arrays. The module has a BUILD_BUG_ON for this; mirror it here
+ * so a host build sees the same invariant. */
+static void case_group_bounds(void)
+{
+    ok(TBT_FEC_ADAPT_GROUPS >= TBT_SCLC_MAX_GROUPS,
+       "estimator scratch covers the SC-LDPC group limit");
+}
+
 int main(void)
 {
     case_class_table();
@@ -839,6 +849,7 @@ int main(void)
     case_epoch_abort();
     case_base_zero();
     case_carrier_helpers();
+    case_group_bounds();
 
     printf("test_fec_adapt: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

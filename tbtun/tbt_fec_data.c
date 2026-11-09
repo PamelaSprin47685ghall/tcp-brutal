@@ -7464,6 +7464,9 @@ int tbt_fec_data_init(struct tbt_session *sess)
     BUILD_BUG_ON(TBT_PARSER_BUF < TBT_REC_MAX);
     BUILD_BUG_ON(TBT_CAR_PART_MAX < TBT_FEC_REC_MAX);
     BUILD_BUG_ON(sizeof(((struct tbt_http_rx *)0)->rec) != TBT_FEC_REC_MAX);
+    /* The estimator fold uses TBT_FEC_ADAPT_GROUPS entries on the stack; the
+     * SC-LDPC codec's own group limit must not outgrow that scratch. */
+    BUILD_BUG_ON(TBT_FEC_ADAPT_GROUPS < TBT_SCLC_MAX_GROUPS);
 
     if (!n || !m || (u16)n + (u16)m > TBT_FEC_MAX_SHARES)
     {

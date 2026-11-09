@@ -3612,6 +3612,10 @@ int tbt_carrier_init(void)
                  TBT_MAX_CARRIERS_LIMIT);
     BUILD_BUG_ON(sizeof(((struct tbt_session *)0)->path_lost_mask) * 8 <
                  TBT_MAX_CARRIERS_LIMIT);
+    /* The debug injector indexes this array with the carrier action's u16
+     * index after the tunnel's n_car bound check; it must cover the limit. */
+    BUILD_BUG_ON(ARRAY_SIZE(((struct tbt_session *)0)->fec_drop_ppm) <
+                 TBT_MAX_CARRIERS_LIMIT);
     BUILD_BUG_ON(ARRAY_SIZE(((struct tbt_stream *)0)->sched.order) <
                  TBT_MAX_CARRIERS_LIMIT);
     BUILD_BUG_ON(TBT_STREAM_F_SCHED_TARGET >= BITS_PER_LONG);
