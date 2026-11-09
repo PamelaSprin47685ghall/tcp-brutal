@@ -1739,6 +1739,38 @@ static void test_sclc_second_flow(void)
            "non-sclc: zero groups is a group error");
 }
 
+/* A target that closed fully can clear RCV_SHUTDOWN; TCP_CLOSE is still a
+ * peer EOF and must schedule the capture work so it can emit our FIN and let
+ * the stream detach. A dead stream is never treated as a graceful EOF. */
+static void test_stream_peer_eof(void)
+{
+    ok(tbt_stream_peer_eof(true, false, false),
+       "eof: RCV_SHUTDOWN is a peer EOF", NULL);
+    ok(tbt_stream_peer_eof(false, true, false),
+       "eof: TCP_CLOSE without RCV_SHUTDOWN is a peer EOF", NULL);
+    ok(!tbt_stream_peer_eof(false, false, false),
+       "eof: a live established socket is not EOF", NULL);
+    ok(!tbt_stream_peer_eof(true, true, true),
+       "eof: a dead stream is never a graceful EOF", NULL);
+}
+
+/* The close bound is initialized for both branches: a peer FIN that never
+ * produced our FIN gets a short 3 s bound; a written FIN keeps the old
+ * 60 s / two-budget bound. This pins the value used by the written branch,
+ * which previously read an uninitialized local. */
+static void test_close_bound(void)
+{
+    ok(tbt_tx_close_bound(true, 100ULL * 1000000000ULL) ==
+           TBT_FEC_PEER_FIN_CLOSE_NS,
+       "close bound: an unwritten peer FIN uses the short bound", NULL);
+    ok(tbt_tx_close_bound(false, 1ULL * 1000000000ULL) ==
+           60ULL * 1000000000ULL,
+       "close bound: a written FIN uses the 60 s floor", NULL);
+    ok(tbt_tx_close_bound(false, 40ULL * 1000000000ULL) ==
+           80ULL * 1000000000ULL,
+       "close bound: a written FIN uses two wait budgets", NULL);
+}
+
 static void test_group_mapping(void)
 {
     u16 c;
@@ -2963,6 +2995,8 @@ int main(void)
     test_group_map();
     test_sclc_open_mask();
     test_sclc_second_flow();
+    test_stream_peer_eof();
+    test_close_bound();
     test_base_mapping();
     test_group_reassembly();
     test_credit_split();
