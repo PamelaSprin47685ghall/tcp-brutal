@@ -152,13 +152,13 @@ static void tbt_pub_capture_body(struct tbt_stream *st)
      * here never loses the wake. */
     if (READ_ONCE(st->tx_paused))
         return;
-    read_lock(&sk->sk_callback_lock);
+    read_lock_bh(&sk->sk_callback_lock);
     if (sk->sk_user_data != st)
     {
-        read_unlock(&sk->sk_callback_lock);
+        read_unlock_bh(&sk->sk_callback_lock);
         return;
     }
-    read_unlock(&sk->sk_callback_lock);
+    read_unlock_bh(&sk->sk_callback_lock);
 
     desc.arg.data = st;
     atomic64_inc(&st->sess->pub_capture_runs);
@@ -219,14 +219,14 @@ static void tbt_pub_capture_work(struct work_struct *w)
 // ordinary process on the other end of the connection: wake the waiters.
 static void tbt_pub_ready(struct sock *sk)
 {
-    read_lock(&sk->sk_callback_lock);
+    read_lock_bh(&sk->sk_callback_lock);
     if (sk->sk_user_data)
     {
         struct tbt_stream *st = sk->sk_user_data;
 
         tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
     }
-    read_unlock(&sk->sk_callback_lock);
+    read_unlock_bh(&sk->sk_callback_lock);
     // These bytes are ours to take, not the app's to read. The app is woken by
     // its own socket when our transmit reaches it.
 }
@@ -234,26 +234,26 @@ static void tbt_pub_ready(struct sock *sk)
 // Peer's window opened: retry our own delivery queue if anything is pending.
 static void tbt_pub_write_space(struct sock *sk)
 {
-    read_lock(&sk->sk_callback_lock);
+    read_lock_bh(&sk->sk_callback_lock);
     if (sk->sk_user_data)
     {
         struct tbt_stream *st = sk->sk_user_data;
 
         tbt_stream_schedule(st, &st->w_drain, TBT_STREAM_F_SCHED_DRAIN);
     }
-    read_unlock(&sk->sk_callback_lock);
+    read_unlock_bh(&sk->sk_callback_lock);
 }
 
 static void tbt_pub_state_change(struct sock *sk)
 {
-    read_lock(&sk->sk_callback_lock);
+    read_lock_bh(&sk->sk_callback_lock);
     if (sk->sk_user_data)
     {
         struct tbt_stream *st = sk->sk_user_data;
 
         tbt_stream_schedule(st, &st->w_ctrl, TBT_STREAM_F_SCHED_CTRL);
     }
-    read_unlock(&sk->sk_callback_lock);
+    read_unlock_bh(&sk->sk_callback_lock);
 }
 
 // Deliver one run. Returns the number of bytes accepted (>= 0) or a negative
