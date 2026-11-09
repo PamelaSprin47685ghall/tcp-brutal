@@ -21,6 +21,28 @@ and moves independently of the module version.
   `tbt_fec_adapt_sclc.c`, the helpers `tbt_parse_line()` calls, so the
   `render-fits-line-max` check runs instead of failing to link.
 
+## [0.4.1] - 2026-11-09
+
+### Changed
+
+- The FEC batch staging path has no allocation and no payload copy on the
+  full-write path. `tbt_carrier_send_fec_batch()` now describes the batch as a segment
+  list over the existing `struct tbt_fec_out` buffers (HTTP: chunk size
+  line, record, CRLF; raw: the records) and commits it with one
+  `iov_iter_kvec()` + `tcp_sendmsg_locked()`. The
+  `kmalloc_array(count, TBT_HTTP_FEC_FRAME_MAX)` batch buffer and the
+  per-record `memcpy` are gone; the stack cost is a 3x18 B size-line scratch
+  and nine `kvec` entries. Only a kernel short write copies its unwritten
+  tail into `c->part`, and that staged tail is bounded by the always-present
+  `TBT_CAR_PART_MAX` buffer.
+- The per-carrier `fec_frame` buffer is removed: the batch path no longer
+  needs a single-record frame buffer, removing a 8260 B request per carrier
+  (2.02 MiB requested at 256 carriers).
+- `host/test_batch` pins the new wire builder and short-write staging:
+  1/2/3 records, HTTP size-line boundaries through `TBT_FEC_REC_MAX`, raw
+  mode, every byte offset of a maximal batch, multi-write ordering, and the
+  zero-byte `-EAGAIN` retry.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

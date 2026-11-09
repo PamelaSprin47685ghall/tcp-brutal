@@ -6,11 +6,12 @@
  *
  *     txpath.push_alloc.8k    tbt_fec_out_push(): kmalloc(record) + memcpy
  *                             + free, the per-record queue allocation.
- *     txpath.batch_alloc8.8k  tbt_carrier_send_fec_batch() with count=8:
- *                             kmalloc_array(8 frames) + 8 HTTP chunk
- *                             encodes + free.
- *     txpath.batch_reuse8.8k  The same eight encodes into one preallocated
+ *     txpath.batch_alloc3.8k  The retired batch path: kmalloc_array(3
+ *                             frames) + 3 HTTP chunk encodes + free.
+ *     txpath.batch_reuse3.8k  The same three encodes into one preallocated
  *                             frame buffer: the allocation is gone.
+ *     txpath.batch_kvec3.8k   tbt_fec_batch_build() over three records:
+ *                             segment list only, no record copy (0.4.1).
  *     txpath.chunk_encode.8k  One tbt_http_fec_chunk_encode() of an 8240 B
  *                             record: chunk size line + memcpy + CRLF.
  *     txpath.copy.8k          One memcpy of the 8192 B payload: the floor
@@ -40,6 +41,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "tbt_http.h"
+#include "tbt_fec_batch.h"
 #include "tbt_uapi.h"
 
 #include <stdio.h>
@@ -49,7 +51,7 @@
 
 #define REC_LEN TBT_FEC_REC_MAX /* 8240 */
 #define PAYLOAD 8192
-#define BATCH 8
+#define BATCH 3
 #define FRAME_MAX TBT_HTTP_FEC_FRAME_MAX
 #define ROUNDS 7
 
@@ -91,6 +93,7 @@ enum mode
     M_PUSH_ALLOC = 0,
     M_BATCH_ALLOC,
     M_BATCH_REUSE,
+    M_BATCH_KVEC,
     M_CHUNK_ENCODE,
     M_COPY,
     M_COUNT,
@@ -98,14 +101,15 @@ enum mode
 
 static const char *mode_name[M_COUNT] = {
     "txpath.push_alloc.8k",
-    "txpath.batch_alloc8.8k",
-    "txpath.batch_reuse8.8k",
+    "txpath.batch_alloc3.8k",
+    "txpath.batch_reuse3.8k",
+    "txpath.batch_kvec3.8k",
     "txpath.chunk_encode.8k",
     "txpath.copy.8k",
 };
 
-/* Records per operation: the batch rows move eight records. */
-static unsigned mode_records[M_COUNT] = { 1, BATCH, BATCH, 1, 1 };
+/* Records per operation: the batch rows move three records. */
+static unsigned mode_records[M_COUNT] = { 1, BATCH, BATCH, BATCH, 1, 1 };
 
 static void run_mode(enum mode m, unsigned iters, u64 *sum)
 {
@@ -164,6 +168,28 @@ static void run_mode(enum mode m, unsigned iters, u64 *sum)
                 off += n;
             }
             *sum += off;
+            break;
+        }
+        case M_BATCH_KVEC:
+        {
+            const u8 *recs[BATCH];
+            u16 lens[BATCH];
+            char hdr[BATCH][TBT_HTTP_CHUNK_HDR_MAX];
+            struct tbt_fec_batch_seg seg[TBT_BATCH_SEG_MAX];
+            size_t total = 0;
+            unsigned j;
+            unsigned n;
+
+            for (j = 0; j < BATCH; j++)
+            {
+                recs[j] = rec;
+                lens[j] = REC_LEN;
+            }
+            n = tbt_fec_batch_build(seg, &hdr[0][0], recs, lens, BATCH, true,
+                                    &total);
+            if (n != BATCH * 3 || total == 0)
+                abort();
+            *sum += total + n;
             break;
         }
         case M_CHUNK_ENCODE:
@@ -239,8 +265,9 @@ int main(void)
         double push = ns[M_PUSH_ALLOC];
         double batch_alloc = ns[M_BATCH_ALLOC] / BATCH;
         double batch_reuse = ns[M_BATCH_REUSE] / BATCH;
+        double batch_kvec = ns[M_BATCH_KVEC] / BATCH;
         double now = push + batch_alloc;
-        double opt = batch_reuse;
+        double opt = batch_kvec;
         double rec_s = 3400.0;
 
         fprintf(stderr,
@@ -248,15 +275,18 @@ int main(void)
                 "%-28s %8.1f ns/record  %7.2f %% cpu @3400/s\n"
                 "%-28s %8.1f ns/record  %7.2f %% cpu @3400/s\n"
                 "%-28s %8.1f ns/record  %7.2f %% cpu @3400/s\n"
+                "%-28s %8.1f ns/record  %7.2f %% cpu @3400/s\n"
                 "%-28s %8.1f ns/record\n"
                 "%-28s %8.1f ns/record\n"
-                "current = push_alloc + batch_alloc/8 = %.1f ns/record (%.2f %% cpu)\n"
-                "reuse   = batch_reuse/8             = %.1f ns/record (%.2f %% cpu)\n"
+                "current = push_alloc + batch_alloc/3 = %.1f ns/record (%.2f %% cpu)\n"
+                "kvec    = batch_kvec/3               = %.1f ns/record (%.2f %% cpu)\n"
                 "saving  = %.1f ns/record = %.2f %% cpu @3400/s\n",
                 mode_name[M_PUSH_ALLOC], push, push * rec_s / 1e7,
                 mode_name[M_BATCH_ALLOC], batch_alloc,
                 batch_alloc * rec_s / 1e7, mode_name[M_BATCH_REUSE],
                 batch_reuse, batch_reuse * rec_s / 1e7,
+                mode_name[M_BATCH_KVEC], batch_kvec,
+                batch_kvec * rec_s / 1e7,
                 mode_name[M_CHUNK_ENCODE], ns[M_CHUNK_ENCODE],
                 ns[M_CHUNK_ENCODE] * rec_s / 1e7, mode_name[M_COPY],
                 ns[M_COPY], "memcpy floor", ns[M_COPY], now,
