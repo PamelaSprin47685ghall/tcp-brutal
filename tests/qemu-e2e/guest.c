@@ -5,11 +5,14 @@
  * raises loopback, loads the module with fec_groups_per_flow=16, and drives
  * the real data plane through /proc/net/tbtun/{ports,config,stats,streams}:
  *
- *   1. a 256-carrier SC-LDPC near+far pair on 127.0.0.1, then three
- *      sequential streams.  Each stream is echo-verified and must be followed
- *      by streams_active=0, so the next stream proves the flow was released.
- *   2. a second SC-LDPC stream opened while the first is live.  It must not
- *      be served; the first stream must keep working afterwards.
+ *   1. a 256-carrier SC-LDPC pair on 127.0.0.1 (far 1x256 downlink, near
+ *      8x32 uplink), then three sequential streams.  Each stream is
+ *      echo-verified and must be followed by streams_active=0, so the next
+ *      stream proves the plane was released.
+ *   2. four client streams at once on that single plane, each carrying a
+ *      different pattern.  Three move 128 KiB in both directions byte-exact
+ *      while the fourth resets mid-stream; both ends must report all four
+ *      legs active and the three survivors must finish losslessly.
  *   3. tear the pair down, rebuild it as mode=grouped, and run two streams
  *      concurrently with a distinct sid each, both echo-verified.
  *   4. del both tunnels and delete_module.  The unload must return within the
@@ -54,7 +57,9 @@
 #define PORTBLOCK "30000-30511"
 #define STREAM_BYTES (128u * 1024u)
 #define CHUNK 32768u
-#define WATCHDOG_S 40
+#define CONCURRENCY 4
+#define ABORT_AFTER_MS 200
+#define WATCHDOG_S 60
 #define UP_TIMEOUT_MS 15000
 #define IDLE_TIMEOUT_MS 6000
 #define UNLOAD_TIMEOUT_MS 8000
@@ -469,10 +474,22 @@ static int recv_all(int fd, unsigned char *buf, size_t len, int timeout_ms)
 
 static unsigned char chunk_send[CHUNK];
 static unsigned char chunk_recv[CHUNK];
+/* One gate per concurrent child. The parent opens them only after both ends
+ * report all four legs active, so the data and the mid-stream reset provably
+ * overlap instead of racing the admission. */
+static int stream_gate[CONCURRENCY][2];
 
-static unsigned char pattern_byte(uint32_t i)
+static void gate_wait(int idx)
 {
-    uint32_t v = i * 2654435761u + 0x9e3779b9u;
+    char go;
+
+    while (read(stream_gate[idx][0], &go, 1) < 0 && errno == EINTR)
+        ;
+}
+
+static unsigned char pattern_byte(uint32_t i, uint32_t seed)
+{
+    uint32_t v = i * 2654435761u + 0x9e3779b9u + seed * 0x85ebca6bu;
 
     v ^= v >> 15;
     v *= 2246822519u;
@@ -482,7 +499,8 @@ static unsigned char pattern_byte(uint32_t i)
 
 /* Send one stream's bytes.  The scatter is by CHUNK because the near socket
  * buffer is smaller than a stream; the FEC capture ring holds the rest. */
-static int send_bytes(int fd, size_t bytes, char *why, size_t cap)
+static int send_bytes(int fd, size_t bytes, uint32_t seed, char *why,
+                      size_t cap)
 {
     size_t off = 0;
 
@@ -492,7 +510,7 @@ static int send_bytes(int fd, size_t bytes, char *why, size_t cap)
         size_t i;
 
         for (i = 0; i < n; i++)
-            chunk_send[i] = pattern_byte((uint32_t)(off + i));
+            chunk_send[i] = pattern_byte((uint32_t)(off + i), seed);
         if (send_all(fd, chunk_send, n, 4000))
         {
             snprintf(why, cap, "send stalled at %zu/%zu: %s", off, bytes,
@@ -504,7 +522,8 @@ static int send_bytes(int fd, size_t bytes, char *why, size_t cap)
     return 0;
 }
 
-static int recv_verify(int fd, size_t bytes, char *why, size_t cap)
+static int recv_verify(int fd, size_t bytes, uint32_t seed, char *why,
+                       size_t cap)
 {
     size_t off = 0;
 
@@ -514,7 +533,7 @@ static int recv_verify(int fd, size_t bytes, char *why, size_t cap)
         size_t i;
 
         for (i = 0; i < n; i++)
-            chunk_send[i] = pattern_byte((uint32_t)(off + i));
+            chunk_send[i] = pattern_byte((uint32_t)(off + i), seed);
         if (recv_all(fd, chunk_recv, n, 10000))
         {
             snprintf(why, cap, "echo stalled at %zu/%zu: %s", off, bytes,
@@ -538,12 +557,13 @@ static int recv_verify(int fd, size_t bytes, char *why, size_t cap)
  * and the receiver only delivers a block at its cut or at the stream end, so
  * a short request is delivered when FIN names the end -- waiting for the
  * echo before the half-close would wait for data the sender never sends. */
-static int roundtrip(int fd, size_t bytes, char *why, size_t cap)
+static int roundtrip(int fd, size_t bytes, uint32_t seed, char *why,
+                     size_t cap)
 {
-    if (send_bytes(fd, bytes, why, cap))
+    if (send_bytes(fd, bytes, seed, why, cap))
         return -1;
     shutdown(fd, SHUT_WR);
-    return recv_verify(fd, bytes, why, cap);
+    return recv_verify(fd, bytes, seed, why, cap);
 }
 
 static void close_stream(int fd)
@@ -553,14 +573,14 @@ static void close_stream(int fd)
 }
 
 /* One complete sequential stream: connect, echo-verify, close. */
-static void stream_once(const char *tag, size_t bytes)
+static void stream_once(const char *tag, size_t bytes, uint32_t seed)
 {
     char why[256] = "";
     int fd = connect_client();
 
     if (fd < 0)
         verdict_fail("%s: connect: %s", tag, strerror(errno));
-    if (roundtrip(fd, bytes, why, sizeof(why)))
+    if (roundtrip(fd, bytes, seed, why, sizeof(why)))
         verdict_fail("%s: %s", tag, why);
     close_stream(fd);
     printf("QEMU_E2E_STREAM %s bytes=%zu ok\n", tag, bytes);
@@ -855,11 +875,126 @@ static void unload_module(void)
     fflush(stdout);
 }
 
+/* The canonical tunnel table must name the asymmetric profile we asked for:
+ * far TX 1x256 (n=128 m=128), near TX 8x32 (n=8 m=24). */
+static void check_shape(void)
+{
+    static char buf[1 << 16];
+    char *line, *save;
+    unsigned int far_n = 0, far_m = 0, near_n = 0, near_m = 0;
+    int len = read_path("/proc/net/tbtun/tunnels", buf, sizeof(buf));
+
+    if (len < 0)
+        verdict_fail("tunnels readback: %s", strerror(errno));
+    for (line = strtok_r(buf, "\n", &save); line;
+         line = strtok_r(NULL, "\n", &save))
+    {
+        unsigned long long id, streams;
+        char role[16], state[16], listen[64], peer[64], target[64];
+        unsigned int n, m;
+
+        if (sscanf(line, "%llu %15s %15s %63s %63s %63s %u %u %llu",
+                   &id, role, state, listen, peer, target, &n, &m,
+                   &streams) != 9)
+            continue;
+        if (id == 1 && !strcmp(role, "far"))
+        {
+            far_n = n;
+            far_m = m;
+        }
+        else if (id == 2 && !strcmp(role, "near"))
+        {
+            near_n = n;
+            near_m = m;
+        }
+    }
+    if (far_n != 128 || far_m != 128 || near_n != 8 || near_m != 24)
+        verdict_fail("want far=128x128 near=8x24, read far=%ux%u near=%ux%u",
+                     far_n, far_m, near_n, near_m);
+    printf("QEMU_E2E_SHAPE far=1x256 near=8x32\n");
+    fflush(stdout);
+}
+
+/* Both ends must show `want` legs attached to the session at once. */
+static int wait_active_both(unsigned int want, int timeout_ms)
+{
+    long long deadline = now_ms() + timeout_ms;
+    struct stream_state a = { 0, 0, 0 }, b = { 0, 0, 0 };
+
+    while (now_ms() < deadline)
+    {
+        int ra = tunnel_streams(1, &a);
+        int rb = tunnel_streams(2, &b);
+
+        if (!ra && !rb && a.active >= want && b.active >= want)
+            return 0;
+        msleep(50);
+    }
+    printf("QEMU_E2E_STATE concurrent far active=%u near active=%u want=%u\n",
+           a.active, b.active, want);
+    return -1;
+}
+
+static void concurrent_child(int idx, uint32_t seed, size_t bytes)
+{
+    char why[256] = "";
+    int fd;
+
+    alarm(0);
+    fd = connect_client();
+    if (fd < 0)
+    {
+        printf("QEMU_E2E_NOTE concurrent%d connect: %s\n", idx,
+               strerror(errno));
+        _exit(1);
+    }
+    gate_wait(idx);
+    if (roundtrip(fd, bytes, seed, why, sizeof(why)))
+    {
+        printf("QEMU_E2E_NOTE concurrent%d: %s\n", idx, why);
+        _exit(1);
+    }
+    close_stream(fd);
+    _exit(0);
+}
+
+/* Wait for the parent's gate, send a prefix, then close with SO_LINGER(0,0):
+ * the kernel emits RST instead of FIN, so the peer sees this stream die
+ * while its siblings are still moving bytes. */
+static void abort_child(int idx, uint32_t seed, size_t bytes)
+{
+    struct linger lg = { 1, 0 };
+    char why[256] = "";
+    int fd;
+
+    alarm(0);
+    fd = connect_client();
+    if (fd < 0)
+    {
+        printf("QEMU_E2E_NOTE abort%d connect: %s\n", idx, strerror(errno));
+        _exit(1);
+    }
+    gate_wait(idx);
+    if (send_bytes(fd, bytes / 2, seed, why, sizeof(why)))
+    {
+        printf("QEMU_E2E_NOTE abort%d send: %s\n", idx, why);
+        _exit(1);
+    }
+    msleep(ABORT_AFTER_MS);
+    if (setsockopt(fd, SOL_SOCKET, SO_LINGER, &lg, sizeof(lg)))
+    {
+        printf("QEMU_E2E_NOTE abort%d linger: %s\n", idx, strerror(errno));
+        _exit(1);
+    }
+    close(fd);
+    _exit(0);
+}
+
 int main(void)
 {
     long long t0 = now_ms();
     pid_t echo_pid;
-    int fd, i;
+    int i;
 
     setvbuf(stdout, NULL, _IOLBF, 0);
     printf("QEMU_E2E_START\n");
@@ -880,72 +1015,101 @@ int main(void)
               " target=127.0.0.1:19070 n=128 m=128 fec=on mode=sc-ldpc"
               " adaptive=off w=256 carriers=256 crypto=off dup=1\n",
               "tunnel 2 role=near profile=raw listen=127.0.0.1:19000"
-              " peer=127.0.0.1:19001 n=128 m=128 fec=on mode=sc-ldpc"
-              " adaptive=off w=256 carriers=256 crypto=off dup=1"
+              " peer=127.0.0.1:19001 n=8 m=24 fec=on mode=sc-ldpc"
+              " adaptive=off w=128 carriers=256 crypto=off dup=1"
               " portblock=" PORTBLOCK "\n");
     if (wait_carriers(CARRIERS, UP_TIMEOUT_MS))
         verdict_fail("SC-LDPC carriers did not come up");
     printf("QEMU_E2E_UP sclc up=%u\n", CARRIERS);
     fflush(stdout);
+    check_shape();
 
     for (i = 1; i <= 3; i++)
     {
         char tag[32];
 
         snprintf(tag, sizeof(tag), "sclc-seq-%d", i);
-        stream_once(tag, STREAM_BYTES);
+        stream_once(tag, STREAM_BYTES, 0x1000u + (uint32_t)i);
         if (wait_idle(IDLE_TIMEOUT_MS))
             verdict_fail("%s: session did not drain after close", tag);
         printf("QEMU_E2E_DRAIN %s ok\n", tag);
         fflush(stdout);
     }
 
-    /* --- phase 2: a concurrent second SC-LDPC stream is refused --------- */
+    /* --- phase 2: four streams share the one SC-LDPC plane -------------- */
     {
-        unsigned char junk[CHUNK];
-        char tag2[32] = "sclc-second";
-        char why[256] = "";
-        size_t j;
-        int first;
+        pid_t kids[CONCURRENCY];
+        uint32_t seeds[CONCURRENCY];
+        int failed = 0;
 
-        /* Keep this stream live: it is the one the second must not displace
-         * or wedge.  The transfer proves it is serving before the refusal. */
-        first = connect_client();
-        if (first < 0)
-            verdict_fail("first stream: connect: %s", strerror(errno));
-        if (send_bytes(first, STREAM_BYTES / 4, why, sizeof(why)))
-            verdict_fail("first stream: %s", why);
-        fd = connect_client();
-        if (fd < 0)
-            verdict_fail("second stream: connect: %s", strerror(errno));
-        for (j = 0; j < sizeof(junk); j++)
-            junk[j] = pattern_byte((uint32_t)j ^ 0x5a5a5a5au);
-        if (send_all(fd, junk, sizeof(junk), 2000))
-            printf("QEMU_E2E_NOTE second stream send: %s\n", strerror(errno));
-        if (wait_fd(fd, POLLIN, 2500) > 0)
+        for (i = 0; i < CONCURRENCY; i++)
+            if (pipe(stream_gate[i]))
+                verdict_fail("concurrent: pipe: %s", strerror(errno));
+        for (i = 0; i < CONCURRENCY; i++)
         {
-            ssize_t n = recv(fd, chunk_recv, sizeof(chunk_recv), 0);
-
-            if (n > 0)
-                verdict_fail("second SC-LDPC stream was served (%zd bytes)",
-                             n);
-            printf("QEMU_E2E_REJECT %s closed=1\n", tag2);
+            seeds[i] = 0x51ed0000u + (uint32_t)i * 0x9e3779b9u;
+            kids[i] = fork();
+            if (kids[i] < 0)
+                verdict_fail("concurrent: fork: %s", strerror(errno));
+            if (!kids[i])
+            {
+                /* Stream 0 aborts mid-flight; the other three must finish. */
+                if (!i)
+                    abort_child(i, seeds[i], STREAM_BYTES);
+                concurrent_child(i, seeds[i], STREAM_BYTES);
+            }
+            msleep(40);
         }
-        else
-            printf("QEMU_E2E_REJECT %s queued=1\n", tag2);
+        /* All four legs must stand on that one plane at the same moment.
+         * The children have not sent a byte yet, so no leg can finish early
+         * and shrink the window. */
+        if (wait_active_both(CONCURRENCY, 5000))
+            verdict_fail("expected %d concurrent streams on both ends",
+                         CONCURRENCY);
+        for (i = 0; i < CONCURRENCY; i++)
+        {
+            if (write(stream_gate[i][1], "x", 1) != 1)
+                verdict_fail("concurrent: gate %d: %s", i,
+                             strerror(errno));
+            close(stream_gate[i][1]);
+        }
+        printf("QEMU_E2E_CONCURRENT %d active ok\n", CONCURRENCY);
         fflush(stdout);
-        close_stream(fd);
 
-        /* The first stream must still work: the refusal came from the
-         * admission boundary, not from a wedged session. */
-        shutdown(first, SHUT_WR);
-        if (recv_verify(first, STREAM_BYTES / 4, why, sizeof(why)))
-            verdict_fail("first stream after refusal: %s", why);
-        printf("QEMU_E2E_STREAM sclc-after-reject ok\n");
+        for (i = 0; i < CONCURRENCY; i++)
+        {
+            int status = 0;
+
+            if (waitpid(kids[i], &status, 0) != kids[i] ||
+                !WIFEXITED(status) || WEXITSTATUS(status))
+                failed++;
+        }
+        if (failed)
+            verdict_fail("%d of %d concurrent streams failed", failed,
+                         CONCURRENCY);
+        printf("QEMU_E2E_STREAMS 3 full + 1 reset ok\n");
         fflush(stdout);
-        close_stream(first);
+        {
+            char line[2048];
+            unsigned long long far = 0, near = 0;
+
+            if (stats_line(1, "c11", line, sizeof(line)) ||
+                line_kv(line, "fec_reset_user", &far))
+                verdict_fail("far reset counter unreadable");
+            if (stats_line(2, "c11", line, sizeof(line)) ||
+                line_kv(line, "fec_reset_user", &near))
+                verdict_fail("near reset counter unreadable");
+            if (!far || !near)
+                verdict_fail("reset did not cross the plane: far=%llu "
+                             "near=%llu", far, near);
+            printf("QEMU_E2E_RST far=%llu near=%llu\n", far, near);
+            fflush(stdout);
+        }
         if (wait_idle(IDLE_TIMEOUT_MS))
-            verdict_fail("SC-LDPC session did not drain after the refusal");
+            verdict_fail("SC-LDPC plane did not drain after the concurrent"
+                         " streams");
+        printf("QEMU_E2E_DRAIN sclc-concurrent ok\n");
+        fflush(stdout);
     }
 
     /* --- phase 3: RLNC (grouped) multi-stream --------------------------- */
@@ -989,7 +1153,8 @@ int main(void)
                            strerror(errno));
                     _exit(1);
                 }
-                if (roundtrip(cfd, STREAM_BYTES, cwhy, sizeof(cwhy)))
+                if (roundtrip(cfd, STREAM_BYTES, 0x9000u + (uint32_t)i,
+                              cwhy, sizeof(cwhy)))
                 {
                     printf("QEMU_E2E_NOTE stream%d: %s\n", i, cwhy);
                     _exit(1);

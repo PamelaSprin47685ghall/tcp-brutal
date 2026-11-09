@@ -519,8 +519,18 @@ void tbt_stream_init_work(struct tbt_stream *st)
 static void tbt_kill_body(struct tbt_stream *st)
 {
     struct tbt_session *sess = st->sess;
+    struct sock *sk;
 
     might_sleep();
+    /* Wake anything asleep on the socket first: a delivery blocked in
+     * tcp_sendmsg_locked() would otherwise keep w_drain running and the
+     * release would wait forever in cancel_work_sync(). This runs in the kill
+     * work item, never at the call site: kill() can be called from a carrier
+     * RX actor that already holds another socket's lock, and taking this
+     * socket's lock there is a recursive k-sk_lock-AF_INET nesting. */
+    sk = READ_ONCE(st->sk);
+    if (sk && sk->sk_socket)
+        kernel_sock_shutdown(sk->sk_socket, SHUT_RDWR);
     tbt_tx_rst_retry(sess, st);
     tbt_stream_cancel(st, &st->w_target, TBT_STREAM_F_SCHED_TARGET);
 

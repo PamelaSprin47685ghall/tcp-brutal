@@ -989,18 +989,44 @@ static bool tbt_stream_is_closing(const struct tbt_stream *st)
 
 /* Find the flow an OPEN names, or admit one from its bitmap. Returns a
  * referenced flow or an ERR_PTR. Two carriers deliver the same OPEN, so a
- * lost admission race (-EEXIST) is resolved by looking the winner up. */
+ * lost admission race (-EEXIST) is resolved by looking the winner up.
+ *
+ * *admitted is true only when this call took an SC-LDPC ms_refs admission
+ * slot. A caller that ends up not attaching a stream must hand that slot
+ * back with tbt_fec_flow_abort(), not with a bare put: 256 carriers deliver
+ * the same OPEN and only one wins the stream creation, so a plain put left
+ * the plane's reference count above zero forever. The next sequential
+ * stream then shared a plane whose sid differed from its own and the peer
+ * dropped every record under the old sid. */
 static struct tbt_fec_flow *tbt_session_open_flow(struct tbt_session *sess,
-                                                  u64 sid, const u8 *body)
+                                                  u64 sid, const u8 *body,
+                                                  bool *admitted)
 {
     struct tbt_fec_flow *flow = tbt_fec_flow_lookup(sess, sid);
 
+    *admitted = false;
     if (flow)
         return flow;
     flow = tbt_fec_flow_admit_mask(sess, sid, body);
     if (IS_ERR(flow) && PTR_ERR(flow) == -EEXIST)
         return tbt_fec_flow_lookup(sess, sid);
+    if (!IS_ERR_OR_NULL(flow))
+        *admitted = true;
     return flow;
+}
+
+/* Give back a flow reference taken by open/admit. An admission slot must go
+ * through abort(), which also drops the table reference when this was the
+ * last stream; a lookup reference is a plain put. */
+static void tbt_bind_flow_put(struct tbt_session *sess,
+                              struct tbt_fec_flow *flow, bool admitted)
+{
+    if (!flow)
+        return;
+    if (admitted)
+        tbt_fec_flow_abort(sess, flow);
+    else
+        tbt_fec_flow_put(flow);
 }
 
 /* Bind one frame's sid to the session. OPEN may create the stream and, on a
@@ -1015,6 +1041,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
 {
     bool near = sess->tunnel->cfg.role == TBT_ROLE_NEAR;
     bool adopt = false, drop = false, tombstone_open = false;
+    bool flow_admitted = false;
     struct tbt_fec_flow *flow = NULL;
 
     if (!sid)
@@ -1104,7 +1131,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
         }
         else
         {
-            flow = tbt_session_open_flow(sess, sid, body);
+            flow = tbt_session_open_flow(sess, sid, body, &flow_admitted);
             if (IS_ERR(flow))
             {
                 err = PTR_ERR(flow);
@@ -1138,7 +1165,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
                 /* One sid, one bitmap. A repeated OPEN that renames the
                  * groups of a live flow is refused; the local allocation
                  * stands. */
-                tbt_fec_flow_put(flow);
+                tbt_bind_flow_put(sess, flow, flow_admitted);
                 atomic64_inc(&sess->bind_drop_no_stream);
                 return TBT_BIND_DROP;
             }
@@ -1157,8 +1184,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
             if (READ_ONCE(sess->far_sid) == sid)
                 WRITE_ONCE(sess->far_sid, 0);
             spin_unlock(&sess->lock);
-            if (flow)
-                tbt_fec_flow_put(flow);
+            tbt_bind_flow_put(sess, flow, flow_admitted);
             return TBT_BIND_DROP;
         }
         /* 256 carriers deliver the same OPEN. tbt_stream_get_created()
@@ -1184,7 +1210,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
         }
         else if (flow)
         {
-            tbt_fec_flow_put(flow);
+            tbt_bind_flow_put(sess, flow, flow_admitted);
         }
         tbt_stream_put(ast);
     }
@@ -1209,6 +1235,13 @@ void tbt_stream_detach_from_session(struct tbt_stream *st)
     struct tbt_session *sess = st->sess;
     bool detached;
 
+    /* Release the FEC flow before the readiness gate opens. A reader that
+     * sees streams_active=0 must see the plane unlinked, not "about to be":
+     * a sequential stream admitted inside this window shared a plane whose
+     * only owner was already leaving, and the peer dropped every record
+     * under the old sid. */
+    tbt_fec_flow_detach(st);
+
     spin_lock(&sess->lock);
     detached = test_and_clear_bit(TBT_STREAM_F_ACTIVE, &st->attached);
     if (detached && sess->n_active)
@@ -1217,11 +1250,6 @@ void tbt_stream_detach_from_session(struct tbt_stream *st)
         WRITE_ONCE(sess->far_sid, 0);
     tbt_stream_tombstone_locked(st);
     spin_unlock(&sess->lock);
-
-    /* Release the FEC flow with the stream, not at the tombstone/reap
-     * deadline: the next sequential stream must be able to admit its flow
-     * immediately, and n_fec_flows must reach zero here. */
-    tbt_fec_flow_detach(st);
 
     /* A graceful FIN path never queues w_kill, so without this the reaper
      * would never run and the tombstone (and its socket) would stay forever.
@@ -1279,8 +1307,6 @@ static void tbt_tx_purge_stream(struct tbt_session *sess, struct tbt_stream *st)
 
 void tbt_stream_kill(struct tbt_stream *st, u8 reason)
 {
-    struct sock *sk = READ_ONCE(st->sk);
-
     /* One winner.  A read-then-write let two carriers both queue w_kill and
      * leak one reference. */
     if (test_and_set_bit(TBT_STREAM_F_DYING, &st->attached))
@@ -1298,13 +1324,6 @@ void tbt_stream_kill(struct tbt_stream *st, u8 reason)
      * space and stamps the tombstone deadline. */
     tbt_stream_detach_from_session(st);
     tbt_tx_purge_stream(st->sess, st);
-
-    /* Wake anything asleep on the socket first: a delivery blocked in
-     * tcp_sendmsg_locked() would otherwise keep w_drain running and the reset
-     * work would wait forever in cancel_work_sync(). The reset close itself
-     * sleeps (detach, socket release), so it runs in a work item. */
-    if (sk && sk->sk_socket)
-        kernel_sock_shutdown(sk->sk_socket, SHUT_RDWR);
 
     /* w_kill can outlive the hash reference; tbt_stream_schedule() takes the
      * reference the work entry will return. A refused schedule means the

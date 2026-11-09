@@ -835,8 +835,10 @@ struct tbt_fec_tx
     /* SC-LDPC multistream (0.5.0): the packetizer packs whole subframe
      * blocks from the session mux instead of this plane's capture ring.
      * Only w_fec_tx touches these; the mux object itself is serialised by
-     * ms_lock against the softirq capture path and window updates. */
-    spinlock_t ms_lock;
+     * ms_lock. Every mux caller runs in process context (capture work,
+     * carrier RX, the FEC work items), and opening or closing a stream ring
+     * allocates, so the lock must be sleepable. */
+    struct mutex ms_lock;
     const u8 *ms_blk; /* block returned by tbt_ms_tx_block() */
     u32 ms_blk_len;
     u32 ms_blk_off;

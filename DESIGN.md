@@ -307,6 +307,17 @@ every stream in that block. A single stream still finds the same plane
 geometry and pays the same 0.5% framing overhead (32 bytes per up-to-8192-byte
 subframe).
 
+**Plane lifetime and locks.** A plane lives exactly as long as the streams
+attached to it. The last stream's detach unlinks the flow *before* it clears
+the session's active count, so waiting for `streams_active=0` can never admit
+a successor onto a plane that is about to die; a carrier that loses the
+duplicate-OPEN race gives its admission slot back instead of leaving
+`ms_refs` above zero. Both mux halves are `mutex`es, not spinlocks: every mux
+caller runs in process context, and opening or closing a stream ring
+allocates. A kill shuts the stream's socket down in `w_kill`, never at the
+call site, because a kill can run inside a carrier RX actor that already
+holds another socket's lock.
+
 The 256-carrier performance target remains **90% of a direct/2 stream**. The
 0.2.1 measurement is 86.8% (97.3 Mbit/s against 112.1), 3.2 points short, and
 the gap stays open; 0.2.3's 256-carrier steady state is a different

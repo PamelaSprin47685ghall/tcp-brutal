@@ -14,6 +14,11 @@ and moves independently of the module version.
   byte offset, credit, and a reserved word. The 16-byte body names the
   target stream in the record header's `sid`.
 - `host/test_fec` covers the MS_WIN body and its header rules.
+- `scripts/qemu-e2e-smoke.sh` boots 7.0.14 under KVM with lockdep, UBSAN and
+  DEBUG_ATOMIC_SLEEP and drives the shipped 1x256 downlink / 8x32 uplink pair:
+  three sequential streams, then four concurrent streams on the one plane
+  (three byte-exact 128 KiB round trips plus a mid-stream RST), a grouped
+  pair, and `del` + `delete_module` with a clean kernel log.
 
 ### Changed
 
@@ -23,6 +28,20 @@ and moves independently of the module version.
   new MS_WIN record are the changes. A 0.4.0 peer is refused at the first
   HELLO.
 - Module version is `0.5.0`.
+
+### Fixed
+
+- The SC-LDPC TX mux lock was never initialised, so the first use turned the
+  locking validator off for the rest of the boot. Opening or closing a stream
+  ring allocates, so that lock is a sleepable `mutex` now.
+- A duplicate OPEN that lost the stream-creation race kept its `ms_refs`
+  admission slot. A sequential successor then shared a plane whose sid the
+  peer no longer knew and every record was dropped (`fec_drop_sid`).
+- Binding the first OPEN compared the peer's TX bitmap with the local TX
+  bitmap, so the shipped asymmetric 1x256 / 8x32 pair never came up.
+- Kill shut a socket down at the call site while a carrier RX actor already
+  held another socket's lock, which lockdep reports as recursive
+  `k-sk_lock-AF_INET` nesting; `w_kill` owns the shutdown now.
 
 ## [0.4.0] - 2026-11-09
 
