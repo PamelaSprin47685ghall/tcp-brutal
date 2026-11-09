@@ -1257,8 +1257,6 @@ static void tbt_tx_purge_stream(struct tbt_session *sess, struct tbt_stream *st)
 
 void tbt_stream_kill(struct tbt_stream *st, u8 reason)
 {
-    struct sock *sk = READ_ONCE(st->sk);
-
     /* One winner.  A read-then-write let two carriers both queue w_kill and
      * leak one reference. */
     if (test_and_set_bit(TBT_STREAM_F_DYING, &st->attached))
@@ -1277,12 +1275,11 @@ void tbt_stream_kill(struct tbt_stream *st, u8 reason)
     tbt_stream_detach_from_session(st);
     tbt_tx_purge_stream(st->sess, st);
 
-    /* Wake anything asleep on the socket first: a delivery blocked in
-     * tcp_sendmsg_locked() would otherwise keep w_drain running and the reset
-     * work would wait forever in cancel_work_sync(). The reset close itself
-     * sleeps (detach, socket release), so it runs in a work item. */
-    if (sk && sk->sk_socket)
-        kernel_sock_shutdown(sk->sk_socket, SHUT_RDWR);
+    /* The socket wake belongs to tbt_kill_body(): this function runs in the
+     * carrier receive work under lock_sock(carrier), and
+     * kernel_sock_shutdown() takes lock_sock() on the stream socket. Lockdep
+     * reports that nesting as recursive on its shared sk_lock-AF_INET class.
+     * w_kill owns the socket and runs without any socket lock. */
 
     /* w_kill can outlive the hash reference; tbt_stream_schedule() takes the
      * reference the work entry will return. A refused schedule means the
@@ -1445,7 +1442,7 @@ void tbt_session_put(struct tbt_session *s)
  * The reference is taken before the bit is published: a canceller that sees
  * the bit must always have a reference it may return. The queue attempt can
  * still be refused. cancel_work_sync() disables a work item while it runs,
- * and a queue that races the cancel is dropped silently (kernel 6.13+
+ * and a queue that races the cancel is dropped silently (kernel 6.10+
  * workqueue). The work_pending() check below detects that and returns the
  * reference here. Without it the reference would be owed to an instance that
  * never exists, so refs would never reach zero and tbt_session_destroy()
@@ -1541,6 +1538,7 @@ int tbt_session_create(struct tbt_tunnel *t)
     spin_lock_init(&s->tx_lock);
     spin_lock_init(&s->dial_lock);
     mutex_init(&s->pump_lock);
+    init_rwsem(&s->stats_lock);
     INIT_LIST_HEAD(&s->tx_q);
     INIT_LIST_HEAD(&s->prov);
     INIT_LIST_HEAD(&s->dead_release);
@@ -1726,6 +1724,11 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     spin_lock(&s->lock);
     s->closing = true;
     spin_unlock(&s->lock);
+    /* Stats readers hold a session reference but not the child objects it
+     * renders (car[], fec_outq, streams). Block them before the first child
+     * is cleared. The write side is released before the drained wait, since
+     * a blocked reader holds one of the references that wait is for. */
+    down_write(&s->stats_lock);
 
     /* Stop the two FEC entry points. rx->lock is a leaf; the stopping flag
      * makes record()/arm() refuse new work after this point. */
@@ -1833,6 +1836,8 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     tbt_session_cancel(s, TBT_SW_TX);
 
     tbt_fec_data_free(s);
+
+    up_write(&s->stats_lock);
 
     /* Drop the tunnel's reference, then wait for every stream/work/carrier
      * reference. No scheduler can take a new one after the steps above. */

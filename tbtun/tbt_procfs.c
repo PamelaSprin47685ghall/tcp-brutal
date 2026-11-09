@@ -673,6 +673,12 @@ static int tbt_show_stats(struct seq_file *m, void *v)
             u32 rq = 0, rb = 0;
             int i, ci;
 
+            /* The session reference keeps this struct alive, but destroy
+             * frees car[] and fec_outq before it waits for that reference.
+             * Render under the gate destroy takes before the first child
+             * goes; a reader that starts after the teardown sees NULL. */
+            down_read(&s->stats_lock);
+
             /* One live snapshot per tunnel, so a stalled direction is visible
              * without a rebuild: queue depths, pause flags, the public
              * socket's send state, and the carrier's write/read cursors. */
@@ -1386,6 +1392,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                                tbt_stat_read(&s->retired_retx_data));
                 }
             }
+            up_read(&s->stats_lock);
         }
         tbt_session_put(s);
         tbt_tunnel_put(t);

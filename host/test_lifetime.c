@@ -305,6 +305,196 @@ static void test_destroy_leak_is_bounded(void)
     ok_int(s.completed, 1, "destroy leak: a late put still completes");
 }
 
+/* --- FEC flow free work and module unload ----------------------------- */
+
+/* tbt_fec_flow_put(): the table, the stream and every in-flight packetizer
+ * pass hold one reference.  The zero transition queues free_work.  The module
+ * queues it on tbt_fec_free_wq, and tbtun_exit() destroys that queue after
+ * tbt_tunnel_shutdown(), before the module text is unmapped.  Neither
+ * synchronize_rcu() nor rcu_barrier() waits for a work item. */
+struct fec_module {
+    bool wq_live;
+    bool text_live;
+};
+
+struct fec_flow {
+    int refs;
+    bool queued;  /* free_work is on the queue */
+    bool running; /* the worker entered tbt_fec_flow_free_work() */
+    bool ran;     /* the free completed */
+    bool fault;   /* queue_work() after the queue was destroyed */
+};
+
+static void flow_put(struct fec_module *m, struct fec_flow *f)
+{
+    if (--f->refs)
+        return;
+    if (!m->wq_live)
+    {
+        /* WARN_ON_ONCE(!tbt_fec_free_wq) in the kernel: leak the flow, do
+         * not call into a queue that no longer exists. */
+        f->fault = true;
+        return;
+    }
+    f->queued = true;
+}
+
+static void flow_work_start(struct fec_module *m, struct fec_flow *f)
+{
+    ok(m->text_live, "flow free: module text is mapped while it runs");
+    f->queued = false;
+    f->running = true;
+}
+
+static void flow_work_finish(struct fec_flow *f)
+{
+    f->running = false;
+    f->ran = true;
+}
+
+/* destroy_workqueue(): run everything still queued, then wait for every
+ * running instance.  Only after this may the module text go away. */
+static void wq_destroy(struct fec_module *m, struct fec_flow **flows, int n)
+{
+    int i;
+
+    for (i = 0; i < n; i++)
+    {
+        if (flows[i]->queued)
+            flow_work_start(m, flows[i]);
+        if (flows[i]->running)
+            flow_work_finish(flows[i]);
+    }
+    m->wq_live = false;
+}
+
+/* tbt_session_destroy(): tbt_fec_data_free() drops the table reference,
+ * then tbt_fec_flow_detach() drops the stream reference.  The last put
+ * queues the free; the module-exit drain completes it while the text lives. */
+static void test_flow_free_is_drained_before_unload(void)
+{
+    struct fec_module m = { .wq_live = true, .text_live = true };
+    struct fec_flow f = { .refs = 2 };
+    struct fec_flow *flows[] = { &f };
+
+    flow_put(&m, &f); /* the table reference */
+    ok_int(f.refs, 1, "flow free: the stream reference keeps it alive");
+    ok(!f.queued, "flow free: no queue while a reference remains");
+    flow_put(&m, &f); /* the stream reference */
+    ok_int(f.refs, 0, "flow free: the last reference drops to zero");
+    ok(f.queued, "flow free: the last put queues free_work");
+    wq_destroy(&m, flows, 1);
+    ok(f.ran, "flow free: destroy_workqueue ran the queued free");
+    ok(!f.queued && !f.running, "flow free: nothing is left queued");
+    ok(!f.fault, "flow free: the queue was alive when the put ran");
+    m.text_live = false; /* tbtun_exit() returns after the drain */
+}
+
+/* The pre-0.4.1 exit path only called synchronize_rcu() and rcu_barrier().
+ * Both are no-ops here because the instance is a work item, not an RCU
+ * callback: the free stays queued when the module text goes away. */
+static void test_rcu_barriers_do_not_drain_flow_free(void)
+{
+    struct fec_module m = { .wq_live = true, .text_live = true };
+    struct fec_flow f = { .refs = 1 };
+
+    flow_put(&m, &f);
+    ok(f.queued, "rcu exit: free_work is still queued after the barriers");
+    ok(!f.ran, "rcu exit: the free has not run");
+    m.text_live = false;
+    ok(f.queued && !m.text_live,
+       "rcu exit: a system_wq free would outlive the module text");
+}
+
+/* A free that already started (inside its own synchronize_rcu()) is as
+ * dangerous as a queued one. destroy_workqueue() must wait for it too. */
+static void test_wq_destroy_waits_for_running_free(void)
+{
+    struct fec_module m = { .wq_live = true, .text_live = true };
+    struct fec_flow a = { .refs = 1 }, b = { .refs = 1 }, c = { .refs = 1 };
+    struct fec_flow *flows[] = { &a, &b, &c };
+
+    flow_put(&m, &a);
+    flow_put(&m, &b);
+    flow_work_start(&m, &a); /* the worker is inside synchronize_rcu() */
+    flow_put(&m, &c);
+    ok(a.running && !a.ran, "wq drain: one free is in flight");
+    ok(b.queued && c.queued, "wq drain: two frees are queued");
+    wq_destroy(&m, flows, 3);
+    ok(a.ran && b.ran && c.ran, "wq drain: queued and running frees complete");
+    ok(!m.wq_live, "wq drain: the queue is gone before the text");
+}
+
+/* No producer may put a flow after the drain.  The kernel WARNs and leaks
+ * rather than queueing into a destroyed workqueue. */
+static void test_late_put_is_reported_not_queued(void)
+{
+    struct fec_module m = { .wq_live = false, .text_live = false };
+    struct fec_flow f = { .refs = 1 };
+
+    flow_put(&m, &f);
+    ok(f.fault, "late put: queueing into a destroyed WQ is reported");
+    ok(!f.ran, "late put: no module text is called");
+}
+
+/* --- /proc stats render against session destroy ----------------------- */
+
+/* tbt_show_stats() holds a session reference, but destroy frees car[],
+ * fec_outq and the stream hash before it waits for that reference. The
+ * per-session stats_lock closes the window: the render takes the read side,
+ * destroy takes the write side before the first child goes and releases it
+ * before the drained wait. */
+struct stats_gate {
+    int readers;
+    bool writer;
+    bool children_valid;
+};
+
+static bool stats_enter(struct stats_gate *g)
+{
+    if (g->writer)
+        return false; /* down_read() blocks behind the writer */
+    g->readers++;
+    return true;
+}
+
+static void stats_leave(struct stats_gate *g)
+{
+    g->readers--;
+}
+
+/* down_write() waits for every reader that already holds the gate. */
+static bool destroy_take_gate(struct stats_gate *g)
+{
+    if (g->readers)
+        return false;
+    g->writer = true;
+    return true;
+}
+
+static void destroy_free_children(struct stats_gate *g)
+{
+    ok(g->writer, "stats gate: destroy owns the write side");
+    ok_int(g->readers, 0, "stats gate: no render is in flight");
+    g->children_valid = false;
+}
+
+static void test_stats_render_gate(void)
+{
+    struct stats_gate g = { .children_valid = true };
+
+    ok(stats_enter(&g), "stats gate: a reader enters");
+    ok(!destroy_take_gate(&g), "stats gate: destroy waits for the render");
+    ok(g.children_valid, "stats gate: children are alive during the render");
+    stats_leave(&g);
+    ok(destroy_take_gate(&g), "stats gate: destroy proceeds after the render");
+    destroy_free_children(&g);
+    g.writer = false; /* up_write() precedes the drained wait */
+    ok(stats_enter(&g), "stats gate: a late reader enters after teardown");
+    ok(!g.children_valid, "stats gate: a late reader sees no children");
+    stats_leave(&g);
+}
+
 int main(void)
 {
     test_arm_and_entry();
@@ -316,6 +506,11 @@ int main(void)
     test_entry_races_post_check();
     test_destroy_clean();
     test_destroy_leak_is_bounded();
+    test_flow_free_is_drained_before_unload();
+    test_rcu_barriers_do_not_drain_flow_free();
+    test_wq_destroy_waits_for_running_free();
+    test_late_put_is_reported_not_queued();
+    test_stats_render_gate();
 
     if (failures)
     {

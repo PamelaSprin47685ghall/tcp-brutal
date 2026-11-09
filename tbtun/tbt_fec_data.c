@@ -6643,6 +6643,36 @@ void tbt_fec_rx_fin(struct tbt_session *sess, struct tbt_stream *st,
  * Lifecycle
  * ------------------------------------------------------------------ */
 
+/* Flow frees run on a module-owned workqueue, not the system-wide one: the
+ * last tbt_fec_flow_put() often runs inside tbt_session_destroy(), and rmmod
+ * must be able to wait for every queued free before the module text is
+ * unmapped. synchronize_rcu()/rcu_barrier() only cover RCU callbacks.
+ * flush_scheduled_work() is not an option either: it is deprecated and warns
+ * at runtime since 6.6, it waits for every unrelated item on a system-wide
+ * queue (the deadlock its deprecation exists to prevent), and its target
+ * queue changed from system_wq to system_percpu_wq in 7.0. A private queue
+ * gives a barrier that covers exactly our frees on every supported release;
+ * destroy_workqueue() is that barrier. */
+static struct workqueue_struct *tbt_fec_free_wq;
+
+int tbt_fec_data_module_init(void)
+{
+    tbt_fec_free_wq = alloc_workqueue("tbt_fec_free",
+                                      WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
+    return tbt_fec_free_wq ? 0 : -ENOMEM;
+}
+
+void tbt_fec_data_module_exit(void)
+{
+    if (!tbt_fec_free_wq)
+        return;
+    /* tbt_tunnel_shutdown() has returned, so no session, stream or work item
+     * can take another flow reference. Draining here waits for queued and
+     * running frees; each free's own synchronize_rcu() completes first. */
+    destroy_workqueue(tbt_fec_free_wq);
+    tbt_fec_free_wq = NULL;
+}
+
 void tbt_fec_data_free(struct tbt_session *sess)
 {
     struct tbt_fec_flow *f;
@@ -6659,6 +6689,13 @@ void tbt_fec_data_free(struct tbt_session *sess)
         sess->fec_drain_cursor = 0;
         sess->fec_ndrain = 0;
     }
+
+    /* Clear the RCU-published views before the table reference can be the
+     * last put. free_work waits one grace period before releasing the
+     * planes; a reader that loaded fec_tx/fec_rx must be ordered before
+     * that grace period, not after it. This also covers a partially
+     * initialised session (fec == false). */
+    tbt_fec_primary_publish(sess, NULL);
 
     if (sess->fec)
     {
@@ -6694,7 +6731,6 @@ void tbt_fec_data_free(struct tbt_session *sess)
     }
     kvfree(sess->fec_outq);
     sess->fec_outq = NULL;
-    tbt_fec_primary_publish(sess, NULL);
     sess->fec = false;
 }
 
@@ -6853,7 +6889,15 @@ void tbt_fec_flow_put(struct tbt_fec_flow *f)
     if (!f)
         return;
     if (refcount_dec_and_test(&f->refs))
-        schedule_work(&f->free_work);
+    {
+        /* The zero transition happens once, so the queue cannot already hold
+         * this work. If the module is past tbt_fec_data_module_exit(), the
+         * missing WQ is a lifecycle bug; leaking one flow is safer than
+         * queueing into freed module state. */
+        if (WARN_ON_ONCE(!tbt_fec_free_wq))
+            return;
+        WARN_ON_ONCE(!queue_work(tbt_fec_free_wq, &f->free_work));
+    }
 }
 
 static struct tbt_fec_tx *
