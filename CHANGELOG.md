@@ -127,11 +127,16 @@ and moves independently of the module version.
   refused with `-EEXIST` before the SC-LDPC admission check. (587792d)
 - PAD and drip no longer cancel the BBR hold. Every non-PAD writer clears
   `hold_active` before it queues bytes, so an active hold with bytes in
-  flight is waiting for a keepalive. `tbt_car_hold_apply()` now skips that
-  application instead of ending the hold; the old exit re-paid the 200 ms
-  enter delay and restarted the 10 s cap once per keepalive period.
-  `host/test_hold` covers the OK/SKIP/EXIT gate, and the sanitizer target
-  now runs it too.
+  flight is waiting for a keepalive: `tbt_car_hold_apply()` skips that
+  application instead of ending the hold, and `tbt_hold_enter()` now takes
+  its cwnd/pacing snapshot only with `packets_out == 0`. A PAD is counted in
+  `ctl_queued` but not in the new `ctl_real`, so a PAD queued by one
+  carrier's 50 ms poll no longer makes every other carrier look busy in the
+  same pass. A pinned FBK no longer decrements a count it never took. The old
+  exit re-paid the 200 ms enter delay and restarted the 10 s cap once per
+  keepalive period. `host/test_hold` covers the OK/SKIP/EXIT gate, the
+  multi-carrier PAD pass and the no-inflight entry; the sanitizer target now
+  runs it too.
 
 ### Changed
 

@@ -234,16 +234,29 @@ static inline bool tbt_tx_pump_idle(bool fec, u32 tx_queued, u32 ctl_queued)
     return fec && !tx_queued && !ctl_queued;
 }
 
+/* True when the session queues hold no application or control work. PAD owns
+ * a control-queue slot but is keepalive, so it is not counted in ctl_real; a
+ * PAD queued by carrier A's poll must not make carrier B look busy in the
+ * same pass. Both counters are single-word reads, so the test needs no lock. */
+static inline bool tbt_hold_session_idle(u32 tx_queued, u32 ctl_real)
+{
+    return !tx_queued && !ctl_real;
+}
+
 /* Peripheral BBR hold state rules (tbt_carrier.c). The kernel only restores
- * cwnd/pacing; these predicates decide when that is allowed. */
-static inline bool tbt_hold_enter(bool enable, bool app_limited,
-                                  bool no_inflight, bool tbt_idle,
+ * cwnd/pacing; these predicates decide when that is allowed.
+ *
+ * Enter requires no bytes in flight. Taking a cwnd/pacing snapshot while an
+ * ACK is about to rewrite the window would replay a pre-ACK value after the
+ * carrier drains, overwriting BBR's newer decision. The 200 ms idle interval
+ * already implies an empty send path for a real carrier; this makes the
+ * snapshot point explicit. */
+static inline bool tbt_hold_enter(bool enable, bool no_inflight, bool tbt_idle,
                                   bool ca_open, bool lost, bool recent_loss,
                                   u64 idle_since, u64 now, u64 enter_ns)
 {
-    if (!enable || !tbt_idle || !ca_open || lost || recent_loss)
-        return false;
-    if (!app_limited && !no_inflight)
+    if (!enable || !no_inflight || !tbt_idle || !ca_open || lost ||
+        recent_loss)
         return false;
     return idle_since && now >= idle_since && now - idle_since >= enter_ns;
 }
