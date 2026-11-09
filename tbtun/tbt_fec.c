@@ -367,6 +367,25 @@ int tbt_fec_hdr_verify(const struct tbt_fec_hdr *h, const u8 *payload)
     return 0;
 }
 
+int tbt_fec_rec_check(const u8 *rec, size_t len, u16 max_payload,
+                      struct tbt_fec_hdr *out)
+{
+    struct tbt_fec_hdr h;
+    u8 buf[TBT_FEC_HDR_LEN];
+
+    if (!rec || len < TBT_FEC_HDR_LEN)
+        return -EPROTO;
+    if (tbt_fec_hdr_unpack(rec, &h) || tbt_fec_hdr_check(&h, max_payload))
+        return -EPROTO;
+    if (tbt_fec_hdr_pack(&h, buf))
+        return -EPROTO;
+    if (tbt_fec_crc32c(0, buf, TBT_FEC_H_HDRCRC) != h.header_crc32c)
+        return -EBADMSG;
+    if (out)
+        *out = h;
+    return 0;
+}
+
 /* ------------------------------------------------------------------ *
  * 256-bit carrier bitmap
  * ------------------------------------------------------------------ */
@@ -491,6 +510,11 @@ int tbt_fec_alloc_unpack(const u8 in[TBT_FEC_ALLOC_LEN],
     a->crc32c = tbt_get_u32(in + TBT_FEC_ALLOC_CRC);
     want = tbt_fec_crc32c(0, in, TBT_FEC_ALLOC_CRC_BYTES);
     if (want != a->crc32c)
+        return -EPROTO;
+    /* The trailing word is reserved, not padding: the format says it must be
+     * zero, and a future field there must arrive with its own conv bump
+     * rather than be ignored by an old receiver. */
+    if (tbt_get_u32(in + TBT_FEC_ALLOC_RESERVED2) != 0)
         return -EPROTO;
     return 0;
 }

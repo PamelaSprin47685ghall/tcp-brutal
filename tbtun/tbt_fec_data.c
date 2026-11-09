@@ -6530,22 +6530,17 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
     struct tbt_session *sess = c->sess;
     struct tbt_fec_hdr h;
     struct tbt_fec_flow *f;
-    u8 hb[TBT_FEC_HDR_LEN];
-    u32 want;
     int rc;
 
-    if (!sess || !sess->fec || len < TBT_FEC_HDR_LEN)
+    if (!sess || !sess->fec)
         return -EPROTO;
-    if (tbt_fec_hdr_unpack(rec, &h) || tbt_fec_hdr_check(&h, TBT_FEC_S))
+    rc = tbt_fec_rec_check(rec, len, TBT_FEC_S, &h);
+    if (rc)
     {
-        atomic64_inc(&sess->fec_proto_fail);
-        return -EPROTO;
-    }
-    tbt_fec_hdr_pack(&h, hb);
-    want = tbt_fec_crc32c(0, hb, TBT_FEC_H_HDRCRC);
-    if (want != h.header_crc32c)
-    {
-        atomic64_inc(&sess->fec_hdr_crc_fail);
+        if (rc == -EBADMSG)
+            atomic64_inc(&sess->fec_hdr_crc_fail);
+        else
+            atomic64_inc(&sess->fec_proto_fail);
         return -EPROTO;
     }
     if (READ_ONCE(sess->fec_stopping))
