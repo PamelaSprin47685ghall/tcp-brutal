@@ -1255,11 +1255,16 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
              * the far side compares it with the peer bitmap bound at the
              * first OPEN. A different bitmap on the same plane cannot be
              * served by one codec. */
-            const u8 *bound = (!near && sess->fec_sclc && flow->rx)
+            /* SC-LDPC directions are asymmetric: the near TX may be 8x32
+             * while the far TX is 1x256. The plane identity on receive is
+             * the peer TX mask stored in rx->group_mask; comparing a near
+             * echo against its own TX mask would reject every far OPEN. */
+            const u8 *bound = (sess->fec_sclc && flow->rx)
                                   ? flow->rx->group_mask
                                   : flow->group_mask;
 
-            if (!tbt_fec_primary_mask_match(sess->fec_sclc, bound, body))
+            if (!near &&
+                !tbt_fec_primary_mask_match(sess->fec_sclc, bound, body))
             {
                 /* One sid, one bitmap. A repeated OPEN that renames the
                  * groups of a live flow is refused; the local allocation
@@ -1318,11 +1323,12 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
                 {
                     /* Re-run the one-sid-one-bitmap rule: the retry may
                      * have built a fresh plane. */
-                    const u8 *bound = (!near && sess->fec_sclc && flow->rx)
+                    const u8 *bound = (sess->fec_sclc && flow->rx)
                                           ? flow->rx->group_mask
                                           : flow->group_mask;
 
-                    if (!tbt_fec_primary_mask_match(sess->fec_sclc, bound,
+                    if (!near &&
+                        !tbt_fec_primary_mask_match(sess->fec_sclc, bound,
                                                     body))
                     {
                         if (flow_admitted)
