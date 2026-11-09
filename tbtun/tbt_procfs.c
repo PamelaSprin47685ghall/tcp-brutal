@@ -603,6 +603,23 @@ static int tbt_show_stats(struct seq_file *m, void *v)
         u32 rxq, rxp, txp, peer_paused;
         int skerr, tgt_err;
         u8 state, kill, tgt_state, fin_q, fin_w, rst_w, rxf, rxfd;
+        /* The flow's committed group set, copied from the session flow table
+         * under sess->lock after the RCU pass. The stream's own fec_flow
+         * pointer is not usable here: detach clears it before the flow's
+         * reference is dropped, so dereferencing it under RCU alone could
+         * race the workqueue free. */
+        u16 fec_groups;
+        u8 fec_mask[TBT_FEC_BITMAP_BYTES];
+        u8 alloc_role;
+        u8 alloc_state;
+        u8 alloc_ack;
+        u8 alloc_hold;
+        u8 alloc_fail;
+        u8 alloc_rx_done;
+        u8 alloc_peer_done;
+        u8 alloc_peer_committed;
+        u8 alloc_tx_swapped;
+        u8 alloc_done_sent;
     } *ss;
     u64 streams = 0, gaps = 0;
     char prefix[64];
@@ -995,6 +1012,47 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "n_pending=%u\n",
                            id, READ_ONCE(s->n_active),
                            READ_ONCE(s->n_streams), READ_ONCE(s->n_pending));
+                /* The FEC_ALLOC allocator state and its round counters. They
+                 * are what an admission failure is diagnosed from: `bad`
+                 * moves when a round cannot be planned, `abort` when the
+                 * exchange fails after it started, and `done` counts the
+                 * committed rounds. Field names match the host acceptance
+                 * parser (rebalance allocator= total= used= ...). */
+                {
+                    u16 total, used, flows, finished;
+                    bool round, pending, grow, req, admit;
+
+                    spin_lock(&s->lock);
+                    total = s->fec_groups_total;
+                    used = s->fec_groups_used;
+                    flows = s->fec_alloc_flows;
+                    finished = s->fec_alloc_finished;
+                    round = s->fec_alloc_round;
+                    pending = s->fec_alloc_pending_valid;
+                    grow = s->fec_alloc_grow;
+                    req = s->fec_alloc_req;
+                    admit = s->fec_alloc_admit;
+                    spin_unlock(&s->lock);
+                    seq_printf(m, "tunnel %llu rebalance allocator=%u "
+                                  "total=%u used=%u begin=%llu done=%llu "
+                                  "abort=%llu retry=%llu bad=%llu overlap=%llu "
+                                  "round=%u flows=%u finished=%u pending=%u "
+                                  "grow=%u req=%u admit=%u\n",
+                               id,
+                               tbt_read_bool(s->fec_allocator) ? 1u : 0u,
+                               total, used,
+                               tbt_stat_read(&s->fec_alloc_begin),
+                               tbt_stat_read(&s->fec_alloc_done),
+                               tbt_stat_read(&s->fec_alloc_abort),
+                               tbt_stat_read(&s->fec_alloc_retry),
+                               tbt_stat_read(&s->fec_alloc_bad),
+                               tbt_stat_read(&s->fec_alloc_overlap),
+                               tbt_read_bool(round) ? 1u : 0u, flows, finished,
+                               tbt_read_bool(pending) ? 1u : 0u,
+                               tbt_read_bool(grow) ? 1u : 0u,
+                               tbt_read_bool(req) ? 1u : 0u,
+                               tbt_read_bool(admit) ? 1u : 0u);
+                }
                 /* Per-stream terminal state. Copy the fields under RCU
                  * into a heap snapshot; seq_printf() may sleep (it grows the
                  * seq_file buffer with GFP_KERNEL), and sleeping inside an
@@ -1038,13 +1096,79 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                             si++;
                         }
                     rcu_read_unlock();
+                    /* f->groups and f->group_mask are written under
+                     * sess->lock (tbt_fec_flow_mask_commit), so one pass
+                     * under that lock gives every rendered row a consistent
+                     * allocation snapshot; a tombstoned sid simply has no
+                     * entry and keeps zeros. */
+                    if (si)
+                    {
+                        struct tbt_fec_flow *f;
+                        int bj;
+
+                        spin_lock(&s->lock);
+                        for (bi = 0; bi < TBT_STREAM_HT; bi++)
+                            hlist_for_each_entry(f, &s->fec_flows[bi], node)
+                            {
+                                for (bj = 0; bj < si; bj++)
+                                    if (ss[bj].sid == f->sid)
+                                    {
+                                        struct tbt_fec_tx *ftx = f->tx;
+
+                                        ss[bj].fec_groups = f->groups;
+                                        memcpy(ss[bj].fec_mask, f->group_mask,
+                                               TBT_FEC_BITMAP_BYTES);
+                                        /* Diagnostics only: these are
+                                         * single-byte flags. A snapshot may
+                                         * straddle an update, which is why
+                                         * they are not used for decisions. */
+                                        if (ftx)
+                                        {
+                                            ss[bj].alloc_role =
+                                                READ_ONCE(ftx->alloc_role);
+                                            ss[bj].alloc_state =
+                                                READ_ONCE(ftx->alloc.state);
+                                            ss[bj].alloc_ack =
+                                                READ_ONCE(ftx->alloc_ack_sent);
+                                            ss[bj].alloc_hold =
+                                                READ_ONCE(ftx->alloc_hold);
+                                            ss[bj].alloc_fail =
+                                                READ_ONCE(ftx->alloc_fail);
+                                            ss[bj].alloc_rx_done =
+                                                READ_ONCE(ftx->alloc.rx_done);
+                                            ss[bj].alloc_peer_done =
+                                                READ_ONCE(ftx->alloc.peer_done);
+                                            ss[bj].alloc_peer_committed =
+                                                READ_ONCE(ftx->alloc.peer_committed);
+                                            ss[bj].alloc_tx_swapped =
+                                                READ_ONCE(ftx->alloc.tx_swapped);
+                                            ss[bj].alloc_done_sent =
+                                                READ_ONCE(ftx->alloc.done_sent);
+                                        }
+                                        break;
+                                    }
+                            }
+                        spin_unlock(&s->lock);
+                    }
                     for (bi = 0; bi < si; bi++)
+                    {
+                        char fec_hex[2 * TBT_FEC_BITMAP_BYTES + 1];
+                        int hj;
+
+                        for (hj = 0; hj < TBT_FEC_BITMAP_BYTES; hj++)
+                            snprintf(&fec_hex[2 * hj], 3, "%02x",
+                                     ss[bi].fec_mask[hj]);
+                        fec_hex[2 * TBT_FEC_BITMAP_BYTES] = 0;
                         seq_printf(m, "tunnel %llu stream sid=%llu state=%u "
                                       "kill=%u attached=%#lx rxq=%u rxp=%u "
                                       "txp=%u peer_paused=%u skerr=%d "
                                       "tgt_state=%u tgt_err=%d "
                                       "fin_seq=%llu fin_q=%u fin_w=%u rst_w=%u "
-                                      "rxf=%u/%u dage_ms=%llu\n",
+                                      "rxf=%u/%u dage_ms=%llu "
+                                      "fec_groups=%u fec_mask=%s "
+                                      "alloc_role=%u alloc_state=%u "
+                                      "alloc_ack=%u alloc_hold=%u "
+                                      "alloc_fail=%u sm=%u%u%u%u%u\n",
                                    id, ss[bi].sid, ss[bi].state,
                                    ss[bi].kill, ss[bi].attached,
                                    ss[bi].rxq, ss[bi].rxp, ss[bi].txp,
@@ -1053,7 +1177,15 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                                    ss[bi].fin_seq, ss[bi].fin_q,
                                    ss[bi].fin_w, ss[bi].rst_w,
                                    ss[bi].rxf, ss[bi].rxfd,
-                                   ss[bi].dage_ms);
+                                   ss[bi].dage_ms, ss[bi].fec_groups, fec_hex,
+                                   ss[bi].alloc_role, ss[bi].alloc_state,
+                                   ss[bi].alloc_ack, ss[bi].alloc_hold,
+                                   ss[bi].alloc_fail, ss[bi].alloc_rx_done,
+                                   ss[bi].alloc_peer_done,
+                                   ss[bi].alloc_peer_committed,
+                                   ss[bi].alloc_tx_swapped,
+                                   ss[bi].alloc_done_sent);
+                    }
                 }
                 seq_printf(m, "tunnel %llu c6 holes_declared=%llu holes_repaired=%llu "
                               "holes_unrecoverable=%llu rx_max_stall_us=%u "
