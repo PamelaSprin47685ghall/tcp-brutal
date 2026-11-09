@@ -1088,9 +1088,17 @@ int main(void)
 
     kill(echo_pid, SIGKILL);
     waitpid(echo_pid, NULL, 0);
-    printf("QEMU_HAMMER_PASS %llds rounds=%d reloads=%d\n",
-           (now_ms() - t0) / 1000, ADD_ROUNDS, RELOAD_ROUNDS);
-    fflush(stdout);
+    /* The serial console interleaves kernel printk inside a userspace write,
+     * so the last carrier messages can split the verdict line.  Let them
+     * drain, then repeat the verdict: the runner needs one intact copy. */
+    msleep(200);
+    for (i = 0; i < 3; i++)
+    {
+        printf("QEMU_HAMMER_PASS %llds rounds=%d reloads=%d\n",
+               (now_ms() - t0) / 1000, ADD_ROUNDS, RELOAD_ROUNDS);
+        fflush(stdout);
+        msleep(50);
+    }
     poweroff_now();
     return 0;
 }
