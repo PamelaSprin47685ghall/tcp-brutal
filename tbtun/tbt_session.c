@@ -1181,6 +1181,12 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
                                              &flow_admitted);
                 if (IS_ERR(flow))
                 {
+                    int rerr = PTR_ERR(flow);
+
+                    /* A malformed or overlapping bitmap is a framing error,
+                     * exactly as on the first admission. */
+                    if (rerr == -EPROTO)
+                        return TBT_BIND_BAD;
                     atomic64_inc(&sess->fec_stream_refused);
                     return TBT_BIND_DROP;
                 }
@@ -1188,6 +1194,24 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
                 {
                     atomic64_inc(&sess->bind_drop_no_stream);
                     return TBT_BIND_DROP;
+                }
+                {
+                    /* Re-run the one-sid-one-bitmap rule: the retry may
+                     * have built a fresh plane. */
+                    const u8 *bound = (!near && sess->fec_sclc && flow->rx)
+                                          ? flow->rx->group_mask
+                                          : flow->group_mask;
+
+                    if (!tbt_fec_primary_mask_match(sess->fec_sclc, bound,
+                                                    body))
+                    {
+                        if (flow_admitted)
+                            tbt_fec_flow_abort(sess, flow);
+                        else
+                            tbt_fec_flow_put(flow);
+                        atomic64_inc(&sess->bind_drop_no_stream);
+                        return TBT_BIND_DROP;
+                    }
                 }
                 if (!flow_admitted &&
                     tbt_fec_flow_claim_slot(sess, flow))
@@ -1239,7 +1263,12 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
         }
         else if (flow)
         {
-            if (flow_admitted)
+            /* created=false proves another OPEN copy created the stream. On
+             * the shared SC-LDPC plane abort() also returns this carrier's
+             * admission slot. A grouped flow belongs to the winner's single
+             * stream: use a plain put, because abort() would unlink the flow
+             * that stream is about to attach. */
+            if (sess->fec_sclc)
                 tbt_fec_flow_abort(sess, flow);
             else
                 tbt_fec_flow_put(flow);

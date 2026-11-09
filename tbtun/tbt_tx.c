@@ -228,8 +228,7 @@ static bool tbt_stream_announced(const struct tbt_stream *st,
  * scan clears `up` in its own announce before any of its data can exist. A
  * stream whose OPEN failed to queue keeps the carrier down until up_rescue
  * re-announces it. */
-static void tbt_tx_carrier_publish_up(struct tbt_session *sess,
-                                      struct tbt_carrier *c)
+void tbt_tx_carrier_publish_up(struct tbt_session *sess, struct tbt_carrier *c)
 {
     bool all = true;
     u16 b;
