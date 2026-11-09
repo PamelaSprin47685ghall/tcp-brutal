@@ -300,6 +300,7 @@ host/test_fec_sclc
 host/test_fec_sclc_san
 host/test_fec_sclc_data
 host/test_fec_sclc_data_san
+host/test_tsan_race
 host/bench_sclc_uplink
 # guest traffic checker (tests/qemu/mkinitramfs.sh)
 host/tbt_burst

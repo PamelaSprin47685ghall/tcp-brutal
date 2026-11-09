@@ -123,7 +123,11 @@ HOST_FAULT_HDRS := tbtun/tbt_fec.h tbtun/tbt_crypto.h tbtun/tbt_uapi.h
 HOST_BENCH_SCLC := host/bench_sclc_uplink
 HOST_BENCH_SCLC_SRCS := host/bench_sclc_uplink.c tbtun/tbt_sc_ldpc.c \
                    tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c
+HOST_TSAN       := host/test_tsan_race
+HOST_TSAN_SRCS  := host/test_tsan_race.c tbtun/tbt_crypto.c
+HOST_TSAN_HDRS  := tbtun/tbt_fec.h tbtun/tbt_crypto.h tbtun/tbt_uapi.h
 SAN_CFLAGS      := -g -fsanitize=address,undefined -fno-omit-frame-pointer
+TSAN_CFLAGS     := -g -fsanitize=thread -fno-omit-frame-pointer
 
 obj-m           += tbtun.o
 tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
@@ -142,7 +146,7 @@ ccflags-y       := -std=gnu99 -I$(src)/tbtun
 # variable must name the object path Kbuild sees for a composite module.
 CFLAGS_tbtun/tbt_crypto.o := -O3
 
-.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-live host-bench-micro host-bench-sclc bench bench-full
+.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-tsan host-test-live host-bench-micro host-bench-sclc bench bench-full
 
 all:
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) modules
@@ -395,6 +399,24 @@ host/test_sclc_uplink_san: $(HOST_SCLC_SRCS) $(HOST_SCLC_HDRS)
 host/test_fault_san: $(HOST_FAULT_SRCS) $(HOST_FAULT_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_FAULT_SRCS)
 
+# The concurrent host contracts under ThreadSanitizer. Opt-in, like
+# host-test-san: `check` stays free of a sanitizer runtime. A toolchain
+# without the TSan runtime gets a clear skip, not a build failure. The test
+# itself refuses to build without -fsanitize=thread, so a skipped runtime
+# cannot masquerade as "no race found".
+host-test-tsan:
+	@if printf 'int main(void){return 0;}\n' | $(HOSTCC) $(TSAN_CFLAGS) -pthread -x c - -o /dev/null 2>/dev/null; then \
+		$(MAKE) --no-print-directory host-test-tsan-run; \
+	else \
+		echo "host-test-tsan: skipped, $(HOSTCC) cannot link -fsanitize=thread"; \
+	fi
+
+host-test-tsan-run: $(HOST_TSAN)
+	@TSAN_OPTIONS=halt_on_error=1:exitcode=66 ./$(HOST_TSAN)
+
+$(HOST_TSAN): $(HOST_TSAN_SRCS) $(HOST_TSAN_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(TSAN_CFLAGS) -pthread -I tbtun -o $@ $(HOST_TSAN_SRCS)
+
 $(HOST_HTTP_LIVE): $(HOST_HTTP_LIVE_SRCS) $(HOST_HTTP_LIVE_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_HTTP_LIVE_SRCS)
 
@@ -414,7 +436,7 @@ host-test-live: $(HOST_HTTP_LIVE)
 	fi
 
 clean: clean-dkms.conf clean-dkms-tarball
-	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_FAULT) $(HOST_BENCH_SCLC) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fault_san
+	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_FAULT) $(HOST_BENCH_SCLC) $(HOST_TSAN) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fault_san
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
 
 load:
