@@ -45,11 +45,45 @@ and moves independently of the module version.
   8 KiB CRCs drop from 14.3 to 0.64 us, and `host/test_fec` now proves the
   instruction and table paths agree over every length 0..8240 at byte
   offsets 0..15, with nonzero seeds and every chaining split 0..96.
+- A 256-carrier `mode=sc-ldpc` session no longer pins its FEC planes in
+  high-order slabs. Every plane at or above 32 KiB (`tbt_fec.h:
+  TBT_FEC_VMALLOC_MIN`) is vmalloc-backed through `tbt_fec_vzalloc()`:
+  TX rings, group block buffers, the RX block arena, the recovered-slot
+  scratch, and the SC-LDPC codec graph planes. The four planes of one
+  256-carrier session (8×32 TX/RX and 1×256 TX/RX) total up to 40.4 MiB;
+  that is moved from order-6..9 page blocks to vmalloc. `kvzalloc`
+  remains for small objects.
+- A FEC session's per-carrier HTTP encode buffer shrinks from
+  `TBT_HTTP_FRAME_MAX` (8,244 B) to `TBT_HTTP_CTL_FRAME_MAX` (340 B, the
+  largest control record: a full FBK). FEC DATA bypasses the ARQ queue,
+  so no DATA record can reach that buffer; the encode call is handed the
+  same cap, and a record that does not fit poisons the carrier instead of
+  overflowing. This is 15,872 B less slab per carrier: 3.875 MiB per end,
+  7.75 MiB per session, and the 16 KiB page block per carrier is gone.
+- The FEC replay ring is allocated by the first packetizer pass instead of
+  at flow creation. A receive-only session never reserves the 14.1 MiB
+  repair window; a sender pays it before the first DATA share leaves, so
+  every NACK still has a ring to read. Allocation failure stops new DATA
+  and retries in 2 ms instead of silently losing repair ability.
+- A raw carrier (`profile=raw`, 3) no longer allocates `http_tx`,
+  `http_hdr` or `http_rx`; the raw container reads and writes records
+  directly. This is 36,864 B of slab (8.0 MiB of high-order slab at 256
+  carriers) that no raw carrier can use. `http-kal` is unchanged.
+- `TBT_FEC_BATCH_MAX`, `TBT_PARSER_BUF` and the 3-frame batch comment moved
+  to `tbt_fec.h` so the host memory ledger sees the same constants.
 
 ### Added
 
 - Host CFG/INIT/parse coverage for 32/64/128/256-carrier sessions,
   including the downlink one-group SC-LDPC geometry.
+- `host/test_mem_budget` pins the kmalloc size classes the ledger quotes
+  (8244/8260/8240/8288 B → 16 KiB, 24,780 B → 32 KiB), checks that every
+  FEC plane above 32 KiB selects vmalloc, and checks the lazy replay size
+  (K=7, 14.11 MiB, within the 15 MiB budget), the 340 B control encoder,
+  and the raw-carrier saving. It runs in `make check` and
+  `make host-test-san`.
+
+The wire is unchanged: `TBT_CONV` stays 0x0007 and `TBT_FEC_CONV` 0x1007.
 
 ## [0.4.0] - 2026-11-09
 

@@ -1692,7 +1692,10 @@ static int tbt_carrier_xmit_locked(struct tbt_session *sess,
         h.body_len = fr->len;
         out.hdr = &h;
         out.body = fr->len ? fr->data : NULL;
-        n = tbt_http_frame_encode(c->http_tx, TBT_HTTP_FRAME_MAX, &out);
+        n = tbt_http_frame_encode(c->http_tx,
+                                  sess->fec ? TBT_HTTP_CTL_FRAME_MAX
+                                            : TBT_HTTP_FRAME_MAX,
+                                  &out);
         if (!n)
         {
             /* The encoder never emits partial output; a 0 is a bug or a short
@@ -1895,6 +1898,8 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
                                                   u8 index)
 {
     struct tbt_carrier *c;
+    bool spare = index < sess->n_car && index >= sess->n_pri;
+    u8 profile = tbt_carrier_profile(sess, index, spare);
 
     c = kzalloc(sizeof(*c), GFP_KERNEL);
     if (!c)
@@ -1907,8 +1912,24 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
     refcount_set(&c->refs, 1);
     refcount_inc(&sess->refs);
     c->sess = sess;
-    c->http_tx = kmalloc(TBT_HTTP_FRAME_MAX, GFP_KERNEL);
-    c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX, GFP_KERNEL);
+    /* The raw container (profile 3) writes the 32-byte record header
+     * directly: it has no HTTP framing to encode and no chunk parser to run.
+     * Its three HTTP buffers would never be read, so a 256-carrier raw
+     * session would hold 36 KiB of dead slab per carrier. fec_frame stays
+     * for every profile because tbt_carrier_send_fec_batch() batches records
+     * through it in both containers. */
+    if (profile != 3)
+    {
+        /* A FEC session carries no ARQ DATA frame, so its encoder buffer only
+         * has to hold a control record. The encode call below is handed the
+         * same cap; a record that does not fit returns 0 and poisons the
+         * carrier instead of overflowing the buffer. */
+        c->http_tx = kmalloc(sess->fec ? TBT_HTTP_CTL_FRAME_MAX
+                                       : TBT_HTTP_FRAME_MAX,
+                             GFP_KERNEL);
+        c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX, GFP_KERNEL);
+        c->http_rx = kzalloc(sizeof(*c->http_rx), GFP_KERNEL);
+    }
     c->fec_frame = kmalloc(TBT_HTTP_FEC_FRAME_MAX, GFP_KERNEL);
     c->part = kmalloc(TBT_CAR_PART_MAX, GFP_KERNEL);
     /* Zeroed is the defined initial state: have == 0 for the parser and a
@@ -1916,9 +1937,8 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
      * carrier whatever the previous slab user left there; a dirty `have`
      * then drives an unbounded memmove() in tbt_http_rx_parse(). */
     c->parser = kzalloc(sizeof(*c->parser), GFP_KERNEL);
-    c->http_rx = kzalloc(sizeof(*c->http_rx), GFP_KERNEL);
-    if (!c->http_tx || !c->http_hdr || !c->fec_frame || !c->part ||
-        !c->parser || !c->http_rx)
+    if (!c->fec_frame || !c->part || !c->parser ||
+        (profile != 3 && (!c->http_tx || !c->http_hdr || !c->http_rx)))
     {
         /* ctor-fail: never linked, so the helper's unlink is a no-op. */
         tbt_carrier_free(c);
@@ -1928,9 +1948,9 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
     c->gen = ++sess->carrier_gen;
     /* 0xff is the provisional far-side index: not a spare, and the join sets
      * the real role when HELLO names the slot. */
-    c->spare = index < sess->n_car && index >= sess->n_pri;
+    c->spare = spare;
     c->active = !c->spare;
-    c->profile = tbt_carrier_profile(sess, index, c->spare);
+    c->profile = profile;
     c->state = TBT_CAR_CONNECTING;
     c->class = sess->tunnel ? sess->tunnel->cfg.profile : 1;
     c->join_deadline_ns = ktime_get_ns() + (u64)TBT_JOIN_TIMEOUT_MS * NSEC_PER_MSEC;
@@ -1938,7 +1958,8 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
     TBT_DIAG("tunnel=%llu carrier=%u gen=%u allocated spare=%d profile=%u state=%u join_deadline_ms=%u parser_have=%zu http_chunk_state=%d",
              (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
              index, c->gen, c->spare, c->profile, c->state,
-             TBT_JOIN_TIMEOUT_MS, c->parser->have, c->http_rx->chunk.state);
+             TBT_JOIN_TIMEOUT_MS, c->parser->have,
+             c->http_rx ? c->http_rx->chunk.state : -1);
     mutex_init(&c->http_lock);
     mutex_init(&c->tx_lock);
     INIT_WORK(&c->w_connect, tbt_car_connect_work);
@@ -3590,6 +3611,19 @@ static void tbt_carrier_birth_checks(void)
     BUILD_BUG_ON(TBT_CAR_PART_MAX < TBT_HTTP_FEC_FRAME_MAX);
     BUILD_BUG_ON(TBT_PARSER_BUF < TBT_REC_MAX);
     BUILD_BUG_ON(TBT_PARSER_BUF < TBT_FEC_REC_MAX);
+    /* The FEC-session encoder buffer holds every record type that can still
+     * reach a carrier once DATA bypasses the ARQ queue. If a new control
+     * frame grows past TBT_FBK_MAX this refuses to build instead of letting
+     * tbt_http_frame_encode() truncate it at run time. */
+    BUILD_BUG_ON(TBT_HTTP_CTL_FRAME_MAX <
+                 TBT_HTTP_CHUNK_HDR_MAX + TBT_HDR_LEN + TBT_FBK_MAX + 2);
+    BUILD_BUG_ON(TBT_HTTP_CTL_FRAME_MAX <
+                 TBT_HTTP_CHUNK_HDR_MAX + TBT_HDR_LEN +
+                     TBT_WINDOW_BODY_LEN + 2);
+    BUILD_BUG_ON(TBT_HTTP_CTL_FRAME_MAX <
+                 TBT_HTTP_CHUNK_HDR_MAX + TBT_HDR_LEN +
+                     TBT_HELLO_BODY_LEN_V6 + 2);
+    BUILD_BUG_ON(TBT_HTTP_CTL_FRAME_MAX >= TBT_HTTP_FRAME_MAX);
 }
 
 // Called once at load, from tbt_core.c, before any carrier exists.

@@ -32,6 +32,11 @@
 static inline void *sclc_zalloc(size_t len)
 {
 #ifdef __KERNEL__
+    /* The graph planes are sparse, long-lived and grow with the codeword;
+     * keep anything above the FEC vmalloc line out of the high-order slab
+     * caches. 32 KiB matches TBT_FEC_VMALLOC_MIN in tbt_fec.h. */
+    if (len >= 32u * 1024u)
+        return vzalloc(len);
     return kvzalloc(len ? len : 1, GFP_KERNEL);
 #else
     return calloc(1, len ? len : 1);

@@ -82,6 +82,9 @@ HOST_ANCHOR_SRCS := host/test_anchor.c
 HOST_FEC        := host/test_fec
 HOST_FEC_SRCS   := host/test_fec.c tbtun/tbt_fec.c
 HOST_FEC_HDRS   := tbtun/tbt_fec.h tbtun/tbt_uapi.h
+HOST_MEM_BUDGET := host/test_mem_budget
+HOST_MEM_BUDGET_SRCS := host/test_mem_budget.c tbtun/tbt_fec.c
+HOST_MEM_BUDGET_HDRS := tbtun/tbt_fec.h tbtun/tbt_http.h tbtun/tbt_uapi.h
 HOST_FEC_RX     := host/test_fec_rx
 HOST_FEC_RX_SRCS := host/test_fec_rx.c tbtun/tbt_fec.c tbtun/tbt_crypto.c
 HOST_FEC_RX_HDRS := tbtun/tbt_fec.h tbtun/tbt_uapi.h tbtun/tbt_crypto.h
@@ -161,7 +164,7 @@ check:
 # root, no module and no kernel headers: the grammar test (tbt_parse.c), the
 # hostile-input test (tbt_rec.c + tbt_proto.c) and the HTTP container test
 # (tbt_http.c + tbt_proto.c).
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
@@ -177,6 +180,7 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_MULTISTREAM)
 	@./$(HOST_ANCHOR)
 	@./$(HOST_FEC)
+	@./$(HOST_MEM_BUDGET)
 	@./$(HOST_FEC_RX)
 	@./$(HOST_FEC_SWITCH)
 	@./$(HOST_FEC_OUT)
@@ -283,6 +287,9 @@ $(HOST_ANCHOR): $(HOST_ANCHOR_SRCS)
 $(HOST_FEC): $(HOST_FEC_SRCS) $(HOST_FEC_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_FEC_SRCS)
 
+$(HOST_MEM_BUDGET): $(HOST_MEM_BUDGET_SRCS) $(HOST_MEM_BUDGET_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_MEM_BUDGET_SRCS)
+
 $(HOST_FEC_RX): $(HOST_FEC_RX_SRCS) $(HOST_FEC_RX_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_FEC_RX_SRCS)
 
@@ -335,13 +342,14 @@ host-test-san:
 		echo "host-test-san: skipped, $(HOSTCC) cannot link -fsanitize=address,undefined"; \
 	fi
 
-host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san
+host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_mem_budget_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san
 	@./host/test_parse_san
 	@./host/test_fuzz_san
 	@./host/test_http_san
 	@./host/test_http_fuzz_san
 	@./host/test_crypto_san
 	@./host/test_fec_san
+	@./host/test_mem_budget_san
 	@./host/test_fec_rx_san
 	@./host/test_fec_switch_san
 	@./host/test_fec_out_san
@@ -372,6 +380,9 @@ host/test_crypto_san: $(HOST_CRYPTO_SRCS) $(HOST_CRYPTO_HDRS)
 
 host/test_fec_san: $(HOST_FEC_SRCS) $(HOST_FEC_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_FEC_SRCS)
+
+host/test_mem_budget_san: $(HOST_MEM_BUDGET_SRCS) $(HOST_MEM_BUDGET_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_MEM_BUDGET_SRCS)
 
 host/test_close_wake_san: $(HOST_CLOSE_WAKE_SRCS) $(HOST_CLOSE_WAKE_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_CLOSE_WAKE_SRCS)
@@ -425,7 +436,7 @@ host-test-live: $(HOST_HTTP_LIVE)
 	fi
 
 clean: clean-dkms.conf clean-dkms-tarball
-	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_FAULT) $(HOST_BENCH_SCLC) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fault_san
+	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_FAULT) $(HOST_BENCH_SCLC) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_mem_budget_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fault_san
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
 
 load:
