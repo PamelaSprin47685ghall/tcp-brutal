@@ -3253,7 +3253,7 @@ static noinline void tbt_fec_alloc_tx_tick(struct tbt_session *sess,
             return;
         }
         spin_lock_bh(&tx->alloc_lock);
-        tbt_fec_alloc_sm_tx_swapped(&tx->alloc);
+        tbt_fec_alloc_sm_tx_swapped(&tx->alloc, now);
         spin_unlock_bh(&tx->alloc_lock);
     }
     if (act & TBT_FEC_ALLOC_ACT_DONE)
@@ -6511,26 +6511,34 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
              * committed its TX (peer_committed), the new plane is what it
              * still sends on: release the old buffers and keep it. */
             spin_lock_bh(&rx->lock);
-            if (READ_ONCE(tx->alloc.peer_committed) &&
-                (rx->alloc_state == 3 || rx->alloc_old_codec))
             {
-                if (rx->alloc_state == 3)
-                    rx->alloc_state = 0;
-                /* Let w_fec_rx free a rollback copy that a newer arm kept
-                 * past its epoch; state 2 alone owns no old plane. */
-                rx->alloc_commit_pending = true;
-            }
-            if (rx->alloc.epoch == a->epoch)
-            {
-                if (rx->alloc_state == 3)
+                bool committed = READ_ONCE(tx->alloc.peer_committed);
+
+                if (rx->alloc.epoch == a->epoch)
                 {
-                    rx->alloc_abort_pending = true;
-                    rx->alloc_abort_epoch = a->epoch;
-                }
-                else if (rx->alloc_state == 2)
-                {
-                    rx->alloc_state = 0;
-                    rx->alloc_epoch = a->epoch; /* tombstone */
+                    if (committed)
+                    {
+                        /* The peer keeps its new TX plane, so our RX must
+                         * keep the switch armed (2) or treat the applied
+                         * plane as final (3); only a rollback copy is
+                         * retired. Disarming state 2 here would leave the
+                         * two directions on different masks. */
+                        if (rx->alloc_state == 3)
+                            rx->alloc_state = 0;
+                        if (rx->alloc_state == 3 ||
+                            rx->alloc_old_codec)
+                            rx->alloc_commit_pending = true;
+                    }
+                    else if (rx->alloc_state == 3)
+                    {
+                        rx->alloc_abort_pending = true;
+                        rx->alloc_abort_epoch = a->epoch;
+                    }
+                    else if (rx->alloc_state == 2)
+                    {
+                        rx->alloc_state = 0;
+                        rx->alloc_epoch = a->epoch; /* tombstone */
+                    }
                 }
             }
             spin_unlock_bh(&rx->lock);
