@@ -6,13 +6,17 @@
  *   sk_buff, workqueues and the carrier locks):
  *
  *     - tbt_fec_out_flush(): control first, then the session replay queue.
- *       The bound data queues are drained by one work per carrier
- *       (tbt_fec_out_flush_carrier()): -EAGAIN leaves that carrier's head
- *       and re-arms only its own work; it never gates the other carriers or
- *       the packetizer.
+ *       The bound data queues are drained by one session work, not by a
+ *       work per carrier.
  *     - tbt_fec_out_drain_work(): takes the queue head up to BATCH_MAX
  *       records (and a bounded framed total) and commits them with one
  *       tbt_carrier_send_fec_batch(); -EAGAIN keeps the whole batch.
+ *     - One session work serves the fresh bitmap with no delay and moves a
+ *       refused carrier to a separate retry bitmap, so a full socket can
+ *       never put a fresh carrier behind its 2 ms timer. The retry timer
+ *       merges back into the fresh bitmap when it fires. Each run serves at
+ *       most DRAIN_PASS_MAX carriers, then re-arms at once if fresh bits
+ *       remain, so the cap bounds worker hold time rather than latency.
  *     - tbt_fec_out_push(): data bound to its share's carrier with per-carrier
  *       depth/byte caps; replay on a session queue with a session byte
  *       budget; control on its own queue.
@@ -35,14 +39,15 @@
 #include <string.h>
 
 #define NCAR 8
+/* The model's arrays are sized for the kernel limit; a case may set ncar to
+ * 256 to exercise the full carrier set. */
+#define NCAR_MAX 256
 #define OUTQ_HIGH_DEPTH 24u
 #define OUTQ_DEPTH_MAX 32u
 #define OUTQ_BYTES_MAX (OUTQ_DEPTH_MAX * REC_LEN)
 #define OUTQ_HIGH_BYTES (OUTQ_HIGH_DEPTH * REC_LEN)
 #define OUTQ_QUEUE_HIGH 200u
 #define OUTQ_QUEUE_BYTES_HIGH (OUTQ_QUEUE_HIGH * REC_LEN)
-#define OUTQ_QUEUE_MAX (OUTQ_QUEUE_HIGH + NCAR)
-#define OUTQ_QUEUE_BYTES_MAX (OUTQ_QUEUE_MAX * REC_LEN)
 #define REPLAY_BYTES_MAX (16u * REC_LEN)
 #define REPLAY_HIGH (REPLAY_BYTES_MAX / 2)
 #define REC_LEN 64u
@@ -51,6 +56,11 @@
 /* The kernel caps a batch by the carrier's short-write tail, which holds
  * BATCH_MAX frames. The model's cap matches that whole-part budget. */
 #define BATCH_BYTES_MAX (BATCH_MAX * REC_LEN)
+/* Mirrors TBT_FEC_DRAIN_PASS_MAX: one run serves at most this many carriers,
+ * then yields; fresh bits re-arm the work with no delay. */
+#define DRAIN_PASS_MAX 64
+/* Mirrors msecs_to_jiffies(2) as the retry gate. */
+#define DRAIN_RETRY_MS 2
 
 static int checks;
 static int failures;
@@ -94,7 +104,8 @@ struct outq
 
 struct sched
 {
-    struct outq q[NCAR];
+    struct outq q[NCAR_MAX];
+    uint16_t ncar;      /* carriers in this case; 1..NCAR_MAX */
     struct rec *ctl;
     struct rec *replay_head;
     struct rec *replay_tail;
@@ -115,31 +126,49 @@ struct sched
     uint64_t replay_enospc;
     uint64_t replay_drop;
     uint64_t nack_lat_ns;
-    uint32_t batches[NCAR];
+    uint32_t batches[NCAR_MAX];
     /* Fake carrier state. */
-    bool up[NCAR];
-    bool connected[NCAR];
-    bool stalled[NCAR];
-    bool full[NCAR];
-    bool need_wake[NCAR];
-    uint32_t write_space[NCAR];
-    uint32_t timeout_wakes[NCAR];
-    uint32_t writes[NCAR];
-    uint32_t wire_bytes[NCAR];
+    bool up[NCAR_MAX];
+    bool connected[NCAR_MAX];
+    bool stalled[NCAR_MAX];
+    bool full[NCAR_MAX];
+    bool need_wake[NCAR_MAX];
+    uint32_t write_space[NCAR_MAX];
+    uint32_t timeout_wakes[NCAR_MAX];
+    uint32_t writes[NCAR_MAX];
+    uint32_t wire_bytes[NCAR_MAX];
     int write_seq[128];
     int nwrite;
+    /* Mirrors fec_drain_ready / fec_drain_retry and their gate. `now_ms` is
+     * the fake jiffies clock; -1 in drain_next_ms means the work is idle. */
+    bool drain_ready[NCAR_MAX];
+    bool drain_retry[NCAR_MAX];
+    uint16_t drain_cursor;
+    uint64_t now_ms;
+    uint64_t retry_at_ms;
+    int64_t drain_next_ms;
+    uint32_t drain_runs;
 };
 
-static void sched_init(struct sched *s)
+static void sched_init_n(struct sched *s, uint16_t ncar)
 {
     int i;
 
     memset(s, 0, sizeof(*s));
-    for (i = 0; i < NCAR; i++)
+    if (!ncar || ncar > NCAR_MAX)
+        ncar = NCAR_MAX;
+    s->ncar = ncar;
+    s->drain_next_ms = -1;
+    for (i = 0; i < ncar; i++)
     {
         s->up[i] = true;
         s->connected[i] = true;
     }
+}
+
+static void sched_init(struct sched *s)
+{
+    sched_init_n(s, NCAR);
 }
 
 static struct rec *rec_new(int id, uint16_t carrier, bool control, bool replay,
@@ -186,10 +215,11 @@ static int push(struct sched *s, uint16_t carrier, bool control, bool replay,
 {
     struct rec *r;
     struct outq *q = NULL;
+    uint32_t queue_max;
 
     if (!control && !replay)
     {
-        if (carrier >= NCAR)
+        if (carrier >= s->ncar)
             return -EINVAL;
         q = &s->q[carrier];
     }
@@ -200,10 +230,14 @@ static int push(struct sched *s, uint16_t carrier, bool control, bool replay,
         s->replay_enospc++;
         return -ENOSPC;
     }
+    /* The session ceiling is OUTQ_QUEUE_HIGH records plus one per carrier,
+     * the kernel's shape; it scales with ncar so a 256-carrier case can
+     * queue one record per carrier. */
+    queue_max = OUTQ_QUEUE_HIGH + s->ncar;
     if (q && (q->depth >= OUTQ_DEPTH_MAX ||
               q->bytes + r->len > OUTQ_BYTES_MAX ||
-              s->outq_queued >= OUTQ_QUEUE_MAX ||
-              s->outq_bytes + r->len > OUTQ_QUEUE_BYTES_MAX))
+              s->outq_queued >= queue_max ||
+              s->outq_bytes + r->len > (uint64_t)queue_max * REC_LEN))
     {
         free(r);
         s->outq_drop++;
@@ -293,7 +327,7 @@ static void sched_free(struct sched *s)
         s->replay_head = r->next;
         free(r);
     }
-    for (i = 0; i < NCAR; i++)
+    for (i = 0; i < s->ncar; i++)
         while (s->q[i].head)
             free(q_pop_head(&s->q[i]));
 }
@@ -316,7 +350,7 @@ static bool outq_high(const struct sched *s)
      * compete with the repair for the same sockets. */
     if (s->replay_bytes >= REPLAY_HIGH)
         return true;
-    for (i = 0; i < NCAR; i++)
+    for (i = 0; i < s->ncar; i++)
         if (s->q[i].depth >= OUTQ_HIGH_DEPTH ||
             s->q[i].bytes >= OUTQ_HIGH_BYTES)
             return true;
@@ -509,7 +543,7 @@ static uint32_t drain_all(struct sched *s, bool *again_any)
     int i;
 
     *again_any = false;
-    for (i = 0; i < NCAR; i++)
+    for (i = 0; i < s->ncar; i++)
     {
         bool again = false;
 
@@ -607,52 +641,147 @@ static uint32_t drain_timeout(struct sched *s, int idx, bool *again)
     return drain_batch(s, idx, again);
 }
 
-/* Mirrors the shared drain work: one batch from each ready carrier in cursor
- * order. A carrier that refuses its batch keeps its bit and does not stop the
- * other ready carriers. */
-#define DRAIN_PASS_MAX 8
-static uint32_t drain_ready_pass(struct sched *s, bool ready[NCAR],
-                                 uint16_t *cursor, bool *blocked)
+static bool any_ready(const struct sched *s)
 {
-    uint32_t wrote = 0;
-    unsigned pass;
+    uint16_t i;
 
-    *blocked = false;
-    for (pass = 0; pass < DRAIN_PASS_MAX; pass++)
+    for (i = 0; i < s->ncar; i++)
+        if (s->drain_ready[i])
+            return true;
+    return false;
+}
+
+static bool any_retry(const struct sched *s)
+{
+    uint16_t i;
+
+    for (i = 0; i < s->ncar; i++)
+        if (s->drain_retry[i])
+            return true;
+    return false;
+}
+
+/* Mirrors tbt_fec_out_drain_ready(): serve up to cap carriers from src in
+ * cursor order. A refused carrier moves to the retry bitmap; a carrier with
+ * data left keeps a fresh bit. The fresh and retry bitmaps never share a
+ * bit, so a full socket cannot delay a fresh carrier. */
+static uint32_t drain_bits(struct sched *s, bool *src, uint32_t cap)
+{
+    uint32_t wrote = 0, pass;
+
+    for (pass = 0; pass < cap; pass++)
     {
-        int idx = -1;
-        int i;
+        uint16_t idx = s->ncar, i;
 
-        for (i = 0; i < NCAR; i++)
+        for (i = 0; i < s->ncar; i++)
         {
-            int j = (int)((*cursor + i) % NCAR);
+            uint16_t j = (uint16_t)((s->drain_cursor + i) % s->ncar);
 
-            if (ready[j])
+            if (src[j])
             {
                 idx = j;
                 break;
             }
         }
-        if (idx < 0)
+        if (idx >= s->ncar)
             break;
-        ready[idx] = false;
-        *cursor = (uint16_t)((idx + 1) % NCAR);
+        src[idx] = false;
+        s->drain_cursor = (uint16_t)((idx + 1) % s->ncar);
         {
             bool again = false;
 
             wrote += drain_batch(s, idx, &again);
             if (again)
             {
-                ready[idx] = true;
-                *blocked = true;
+                /* The first refusal sets the deadline; later ones in the
+                 * same run share it. */
+                if (!any_retry(s))
+                    s->retry_at_ms = s->now_ms + DRAIN_RETRY_MS;
+                s->drain_retry[idx] = true;
             }
             else if (s->q[idx].depth)
             {
-                ready[idx] = true;
+                s->drain_ready[idx] = true;
             }
         }
     }
     return wrote;
+}
+
+/* Mirrors tbt_fec_out_drain_work(): merge the retry set when its timer has
+ * fired, serve one bounded pass, then re-arm. Fresh bits re-arm with no
+ * delay; retry bits get the remaining timer; nothing ready means idle. */
+static void drain_work(struct sched *s)
+{
+    uint32_t cap;
+    uint16_t i;
+
+    s->drain_runs++;
+    if (any_retry(s) && s->now_ms >= s->retry_at_ms)
+    {
+        for (i = 0; i < s->ncar; i++)
+        {
+            if (s->drain_retry[i])
+            {
+                s->drain_retry[i] = false;
+                s->drain_ready[i] = true;
+            }
+        }
+        s->retry_at_ms = 0;
+    }
+    cap = s->ncar < DRAIN_PASS_MAX ? s->ncar : DRAIN_PASS_MAX;
+    drain_bits(s, s->drain_ready, cap);
+    if (any_ready(s))
+    {
+        s->drain_next_ms = 0;
+    }
+    else if (any_retry(s))
+    {
+        uint64_t wait = s->retry_at_ms > s->now_ms ?
+                        s->retry_at_ms - s->now_ms : 1;
+
+        s->drain_next_ms = (int64_t)wait;
+    }
+    else
+    {
+        s->drain_next_ms = -1;
+    }
+}
+
+/* Mirrors tbt_fec_out_kick(): mark a fresh bit and wake with no delay. */
+static void kick(struct sched *s, uint16_t idx)
+{
+    s->drain_ready[idx] = true;
+    s->drain_next_ms = 0;
+}
+
+/* Run the work only while it re-arms with no delay, as the workqueue would,
+ * without advancing the fake clock. Returns the number of runs. */
+static int pump_zero_delay(struct sched *s, int max_runs)
+{
+    int n = 0;
+
+    while (s->drain_next_ms == 0 && n < max_runs)
+    {
+        drain_work(s);
+        n++;
+    }
+    return n;
+}
+
+/* Run the work across timer waits: each iteration advances the fake clock by
+ * the delay the work itself armed. */
+static int pump_drain(struct sched *s, int max_runs)
+{
+    int n = 0;
+
+    while (s->drain_next_ms >= 0 && n < max_runs)
+    {
+        s->now_ms += (uint64_t)s->drain_next_ms;
+        drain_work(s);
+        n++;
+    }
+    return n;
 }
 
 /* Mirrors tbt_fec_out_flush(): control and replay only. The bound data
@@ -874,21 +1003,21 @@ static void case_high_water_backpressure(void)
 static void case_session_ceiling(void)
 {
     struct sched s;
-    int n = 0;
+    int n = 0, cap;
 
     sched_init(&s);
+    cap = (int)(OUTQ_QUEUE_HIGH + s.ncar);
     /* One record per carrier per round until the session cap is reached. */
-    while (s.outq_queued < OUTQ_QUEUE_MAX)
+    while (s.outq_queued < (uint32_t)cap)
     {
         int err = push(&s, (uint16_t)(n % NCAR), false, false, 0, n);
 
         if (err)
             break;
         n++;
-        ok(n <= (int)OUTQ_QUEUE_MAX, "the session cap bounds the queue",
-           NULL);
+        ok(n <= cap, "the session cap bounds the queue", NULL);
     }
-    ok_u32(s.outq_queued, OUTQ_QUEUE_MAX, "the session cap is the bound");
+    ok_u32(s.outq_queued, (uint32_t)cap, "the session cap is the bound");
     ok(push(&s, 0, false, false, 0, 999) == -ENOSPC,
        "the record past the session cap is refused", NULL);
     ok_u32((uint32_t)s.outq_drop, 1, "the refusal is counted");
@@ -1164,15 +1293,11 @@ static void case_write_space_wake(void)
     sched_free(&s);
 }
 
-/* The shared drain work serves every ready carrier; a full carrier keeps its
- * bit but cannot hold the others behind it. */
+/* The shared drain work serves every fresh carrier; a full carrier moves to
+ * its own retry bitmap and cannot hold the others behind it for one tick. */
 static void case_ready_list(void)
 {
     struct sched s;
-    bool ready[NCAR] = {false};
-    uint16_t cursor = 0;
-    bool blocked;
-    uint32_t wrote;
 
     sched_init(&s);
     s.full[0] = true;
@@ -1181,19 +1306,147 @@ static void case_ready_list(void)
     push(&s, 0, false, false, 0, 602);
     push(&s, 1, false, false, 0, 610);
     push(&s, 1, false, false, 0, 611);
-    ready[0] = true;
-    ready[1] = true;
+    kick(&s, 0);
+    kick(&s, 1);
 
-    wrote = drain_ready_pass(&s, ready, &cursor, &blocked);
-    ok(blocked, "full carrier keeps its ready bit", NULL);
-    ok_u32(wrote, 2, "ready carrier drains despite the full one");
-    ok(ready[0], "full carrier stays queued", NULL);
-    ok(!ready[1], "drained carrier clears its bit", NULL);
+    ok_u32((uint32_t)pump_zero_delay(&s, 8), 1,
+           "one run serves the fresh bits");
+    ok_u32((uint32_t)s.now_ms, 0, "the full carrier costs no delay");
+    ok_u32(s.writes[1], 2, "ready carrier drains despite the full one");
+    ok_u32(s.q[1].depth, 0, "drained carrier queue is empty");
+    ok(s.drain_retry[0], "full carrier moves to the retry bitmap", NULL);
+    ok(!s.drain_ready[1] && !s.drain_retry[1],
+       "drained carrier keeps no bit", NULL);
+    ok_u32((uint32_t)s.drain_next_ms, DRAIN_RETRY_MS,
+           "only the retry timer is armed");
 
     s.full[0] = false;
-    wrote = drain_ready_pass(&s, ready, &cursor, &blocked);
-    ok(!blocked && wrote == 3, "the retry drains the blocked carrier", NULL);
-    ok(!ready[0] && !ready[1], "no ready bit remains", NULL);
+    pump_drain(&s, 4);
+    ok_u32((uint32_t)s.now_ms, DRAIN_RETRY_MS,
+           "the retry waits for its timer");
+    ok_u32(s.writes[0], 3, "the retry drains the blocked carrier");
+    ok_u32((uint32_t)s.flush_skip, 1, "the full carrier refused once");
+    ok(s.drain_next_ms < 0, "the work goes idle", NULL);
+    sched_free(&s);
+}
+
+/* A 256-carrier burst with the first 16 sockets full: the 240 fresh
+ * carriers must drain with zero delay, and the full ones must be tried
+ * exactly once, then parked on the 2 ms timer. The old shared bitmap spent
+ * two 2 ms rounds here (4 ms) before it reached the healthy tail. */
+static void case_drain_fairness_256(void)
+{
+    struct sched s;
+    int i, queued = 0, runs;
+
+    sched_init_n(&s, 256);
+    for (i = 0; i < 256; i++)
+    {
+        s.full[i] = i < 16;
+        if (push(&s, (uint16_t)i, false, false, 0, 700 + i) == 0)
+            queued++;
+        kick(&s, (uint16_t)i);
+    }
+    ok_u32((uint32_t)queued, 256, "one record queued per carrier");
+
+    /* Carriers 0..15 sit at the cursor start, so every run meets the full
+     * sockets before the healthy tail and still must not delay it. */
+    runs = pump_zero_delay(&s, 16);
+    ok_u32((uint32_t)runs, 4, "four bounded runs serve 256 fresh bits");
+    ok_u32((uint32_t)s.now_ms, 0, "healthy carriers drain with zero delay");
+    for (i = 16; i < 256; i++)
+        ok_u32(s.q[i].depth, 0, "healthy carrier drained");
+    ok_u32((uint32_t)s.flush_pass, 240, "240 healthy records written");
+    ok_u32((uint32_t)s.flush_skip, 16, "each full carrier tried exactly once");
+    ok_u32((uint32_t)s.drain_next_ms, DRAIN_RETRY_MS,
+           "only the full carriers wait for the timer");
+
+    for (i = 0; i < 16; i++)
+        s.full[i] = false;
+    pump_drain(&s, 8);
+    ok_u32((uint32_t)s.flush_pass, 256, "the retry drains the blocked ones");
+    ok_u32((uint32_t)s.now_ms, DRAIN_RETRY_MS, "the retry took one tick");
+    ok(s.drain_next_ms < 0, "the work goes idle", NULL);
+    sched_free(&s);
+}
+
+/* The worst case for the old shared bitmap: one full socket in every
+ * eight-carrier window, so every run met a blocked bit and the cursor
+ * needed 62 ms to reach the 224 healthy carriers. A separate retry bitmap
+ * must serve all of them in the same zero-delay burst. */
+static void case_drain_scatter_256(void)
+{
+    struct sched s;
+    int i, queued = 0, fulls = 0, runs;
+
+    sched_init_n(&s, 256);
+    for (i = 0; i < 256; i++)
+    {
+        bool is_full = (i % 8) == 0;
+
+        s.full[i] = is_full;
+        if (is_full)
+            fulls++;
+        if (push(&s, (uint16_t)i, false, false, 0, 900 + i) == 0)
+            queued++;
+        kick(&s, (uint16_t)i);
+    }
+    ok_u32((uint32_t)queued, 256, "one record queued per carrier");
+    ok_u32((uint32_t)fulls, 32, "32 full carriers spread across the set");
+
+    runs = pump_zero_delay(&s, 16);
+    ok_u32((uint32_t)runs, 4, "four bounded runs serve 256 fresh bits");
+    ok_u32((uint32_t)s.now_ms, 0,
+           "a blocked carrier in every window costs no delay");
+    for (i = 0; i < 256; i++)
+        if (s.full[i])
+            ok_u32(s.q[i].depth, 1, "full carrier keeps its record");
+        else
+            ok_u32(s.q[i].depth, 0, "healthy carrier drained");
+    ok_u32((uint32_t)s.flush_pass, 224, "224 healthy records written");
+    ok_u32((uint32_t)s.flush_skip, 32, "each full carrier tried exactly once");
+    ok_u32((uint32_t)s.drain_next_ms, DRAIN_RETRY_MS,
+           "the full carriers wait for the timer");
+    sched_free(&s);
+}
+
+/* With every carrier full, the drain serves at most DRAIN_PASS_MAX carriers
+ * per run and then sleeps on the retry timer: no zero-delay spin and no
+ * unbounded burst, while every carrier is still retried once per tick. */
+static void case_drain_full_no_spin(void)
+{
+    struct sched s;
+    int i, queued = 0, runs;
+
+    sched_init_n(&s, 256);
+    for (i = 0; i < 256; i++)
+    {
+        s.full[i] = true;
+        if (push(&s, (uint16_t)i, false, false, 0, 800 + i) == 0)
+            queued++;
+        kick(&s, (uint16_t)i);
+    }
+    ok_u32((uint32_t)queued, 256, "the full carriers keep their queues");
+
+    runs = pump_zero_delay(&s, 16);
+    ok_u32((uint32_t)runs, 4, "all-full burst takes four bounded runs");
+    ok_u32((uint32_t)s.now_ms, 0, "the burst does not advance the clock");
+    ok_u32((uint32_t)s.flush_skip, 256, "each full carrier tried exactly once");
+    ok_u32((uint32_t)s.drain_next_ms, DRAIN_RETRY_MS,
+           "the work sleeps on the timer instead of spinning");
+
+    /* The timer run merges all 256 retry bits and serves them in four
+     * bounded runs, once each, then sleeps again. */
+    s.now_ms += DRAIN_RETRY_MS;
+    s.drain_runs = 0;
+    s.flush_skip = 0;
+    drain_work(&s);
+    runs = pump_zero_delay(&s, 16);
+    ok_u32(s.drain_runs, 4, "the timer burst is four bounded runs");
+    ok_u32((uint32_t)runs, 3, "three more zero-delay runs finish the set");
+    ok_u32((uint32_t)s.flush_skip, 256, "every carrier retried once");
+    ok_u32((uint32_t)s.drain_next_ms, DRAIN_RETRY_MS,
+           "back to the 2 ms timer, never zero");
     sched_free(&s);
 }
 
@@ -1315,6 +1568,9 @@ int main(void)
     case_batch_drain();
     case_write_space_wake();
     case_ready_list();
+    case_drain_fairness_256();
+    case_drain_scatter_256();
+    case_drain_full_no_spin();
     case_open_gate();
     case_stream_switch_cleanup();
 

@@ -30,13 +30,54 @@
 
 #ifdef __KERNEL__
 #include <linux/errno.h>
+#include <linux/slab.h>
+#include <linux/vmalloc.h>
 #else
 #include <errno.h>
+#include <stdlib.h>
 #endif
 
 /* S: one packet slot on the wire, the only packet size this cut encodes.
  * tbt_fec_data.c and tbt_fec_ack_bytes() must agree on it. */
 #define TBT_FEC_S TBT_FEC_PAYLOAD_MAX
+
+/* One FEC drain write carries at most this many complete HTTP frames. Three
+ * frames are 24,780 B and stay in the kmalloc-32k cache (order-3); eight were
+ * 66,080 B and needed an order-5 page block, whose allocation failed on the
+ * 955 MB far host and stalled the drain under direct reclaim. */
+#define TBT_FEC_BATCH_MAX 3
+
+/* Per-carrier record assembler capacity: the larger of the ARQ and FEC record
+ * maxima. Shared with host tests so the memory ledger cannot drift from the
+ * buffers the carrier actually allocates. */
+#define TBT_PARSER_BUF (TBT_FEC_REC_MAX > TBT_REC_MAX ? TBT_FEC_REC_MAX : TBT_REC_MAX)
+
+/* Long-lived planes above this size are mapped by vmalloc. They are touched
+ * in sequential bursts and never need physical contiguity; keeping them out
+ * of the kmalloc caches stops a 256-carrier session from holding dozens of
+ * order-6..9 page blocks, which is what fragmented the 955 MB far host.
+ * Below the threshold kvzalloc stays the single small-object path. */
+#define TBT_FEC_VMALLOC_MIN (32u * 1024u)
+
+static inline bool tbt_fec_plane_uses_vmalloc(size_t len)
+{
+    return len >= TBT_FEC_VMALLOC_MIN;
+}
+
+/* Zeroed allocation for FEC planes. kvfree() releases either kind. Process
+ * context only: vzalloc() may sleep. */
+static inline void *tbt_fec_vzalloc(size_t len)
+{
+#ifdef __KERNEL__
+    if (!len)
+        len = 1;
+    if (tbt_fec_plane_uses_vmalloc(len))
+        return vzalloc(len);
+    return kvzalloc(len, GFP_KERNEL);
+#else
+    return calloc(1, len ? len : 1);
+#endif
+}
 
 /* ------------------------------------------------------------------ *
  * 48-byte share header
@@ -140,6 +181,15 @@ int tbt_fec_hdr_seal(struct tbt_fec_hdr *h, const u8 *payload);
 /* Verify header_crc32c first, then payload_crc32c. Returns 0, -EBADMSG on a
  * CRC mismatch, or -EINVAL on a NULL payload with a nonzero length. */
 int tbt_fec_hdr_verify(const struct tbt_fec_hdr *h, const u8 *payload);
+
+/* Locate and validate one complete FEC record header in rec[0..len). This is
+ * the receive gate: len < TBT_FEC_HDR_LEN is refused before any read, then
+ * unpack, structural check and header_crc32c, in that order. Returns 0 and
+ * fills *out when the header is safe to use, -EPROTO for framing, or
+ * -EBADMSG for a header CRC failure. `out` may be NULL. The payload CRC is
+ * separate because the body is not always buffered with the header. */
+int tbt_fec_rec_check(const u8 *rec, size_t len, u16 max_payload,
+                      struct tbt_fec_hdr *out);
 
 /* ------------------------------------------------------------------ *
  * 256-bit carrier bitmap

@@ -25,6 +25,7 @@
 #include <linux/refcount.h>
 #include <linux/rbtree.h>
 #include <linux/rcupdate.h>
+#include <linux/rwsem.h>
 #include <linux/sched.h>
 #include <linux/spinlock.h>
 #include <linux/smp.h>
@@ -46,7 +47,9 @@
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 #error "tbtun needs Linux 6.1 or newer (README, DESIGN §2)"
 #endif
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+/* system_dfl_wq first appeared in 6.17 (commit 128ea9f6ccfb). 6.5..6.16 use
+ * system_unbound_wq, which is exported on every supported release. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 #define TBT_WQ system_dfl_wq
 #else
 #define TBT_WQ system_unbound_wq
@@ -107,6 +110,8 @@ static inline u64 tbt_stat_read(const atomic64_t *v)
 #include "tbt_proto.h"
 /* The HTTP/1.1 carrier container (C8); pure code, host-tested. */
 #include "tbt_http.h"
+/* One carrier RX work item's deadline; pure code, host-tested. */
+#include "tbt_rx_budget.h"
 
 struct tbt_hole {
     u64 sid;          /* 40-bit stream id; u64 avoids truncating the prefix */
@@ -573,14 +578,9 @@ enum tbt_stream_state
  * write (TBT_FEC_BATCH_MAX concatenated HTTP frames), because
  * tcp_sendmsg_locked() can short-write anywhere in that byte range.
  *
- * Keep the batch at 3 frames. Three frames are 24,780 B and stay in the
- * kmalloc-32k cache (order-3); eight frames are 66,080 B and need a
- * kmalloc-128k object (order-5). On the 955 MB far host the order-5 request
- * failed in tbt_carrier_send_fec_batch(), and direct reclaim/compaction
- * stalled the FEC drain for 0.2-2.4 s. tbt_core.c has a BUILD_BUG_ON that
- * keeps this buffer at or below 32 KiB. */
-#define TBT_PARSER_BUF (TBT_FEC_REC_MAX > TBT_REC_MAX ? TBT_FEC_REC_MAX : TBT_REC_MAX)
-#define TBT_FEC_BATCH_MAX 3
+ * TBT_FEC_BATCH_MAX and TBT_PARSER_BUF live in tbt_fec.h so the host memory
+ * ledger test sees the same values. tbt_core.c has a BUILD_BUG_ON that keeps
+ * this buffer at or below 32 KiB. */
 #define TBT_CAR_PART_MAX (TBT_HTTP_FEC_FRAME_MAX * TBT_FEC_BATCH_MAX)
 struct tbt_parser
 {
@@ -1107,6 +1107,8 @@ enum tbt_sess_work
     TBT_SW_FEC_TX,
     TBT_SW_FEC_RX,
     TBT_SW_TX,
+    TBT_SW_FEC_TICK,
+    TBT_SW_FEC_RX_POLL,
 };
 
 /* Adaptive FEC control-surface snapshot (0.3.0). The estimator/controller in
@@ -1162,6 +1164,13 @@ struct tbt_session
      * &drained completed. tbt_session_destroy() waits on it and remains the
      * only freer; a put never frees (review/s2-merged-design.md §5.1). */
     struct completion drained;
+    /* Serialises /proc stats rendering against tbt_session_destroy(). The
+     * reader holds a session reference, but that reference does not keep
+     * car[], fec_outq or the stream hash alive. Destroy takes the write side
+     * before it tears those down and releases it before the final drained
+     * wait: a reader blocked here also holds a reference, so waiting under
+     * the write side would deadlock. */
+    struct rw_semaphore stats_lock;
     /* One bit per TBT_SW_* item, changed with atomic bit ops. Bit 1 means one
      * reference is reserved for that item: a queued instance owns it until its
      * entry returns it, or the arm that could not queue returns it itself. */
@@ -1235,17 +1244,52 @@ struct tbt_session
     /* One delayed work drains every ready carrier's bound data queue. A
      * carrier is set in fec_drain_ready when the packetizer or write_space
      * wakes it; the work takes one batch from each ready carrier in a
-     * round-robin cursor, so a full socket cannot hold the others behind
-     * it. The cursor and the bitmap are owned by the work. */
+     * round-robin cursor, up to TBT_FEC_DRAIN_PASS_MAX carriers per run, so
+     * a burst cannot monopolise the worker.
+     *
+     * A carrier that refuses its batch with -EAGAIN moves to
+     * fec_drain_retry and waits for the 2 ms timer; the two bitmaps never
+     * gate each other, so a blocked carrier cannot delay a fresh one by a
+     * single timer tick. When the timer fires, the retry bits rejoin
+     * fec_drain_ready and are served by the same bounded loop.
+     * fec_retry_at is the jiffies deadline for that merge, 0 while idle.
+     * The cursor and both bitmaps are owned by the work. */
     struct delayed_work fec_drain_work;
     DECLARE_BITMAP(fec_drain_ready, TBT_MAX_CARRIERS_LIMIT);
+    DECLARE_BITMAP(fec_drain_retry, TBT_MAX_CARRIERS_LIMIT);
+    unsigned long fec_retry_at;
     u16 fec_drain_cursor;
     u16 fec_ndrain;
     struct delayed_work w_fec_tx; /* packetizer + control/replay writer */
+    /* Slow FEC cadence (INIT retry, adaptation, crypto key wait). Kept off
+     * w_fec_tx so a 10/250/500 ms arm can never hold a 2 ms cut or an
+     * immediate submit behind it: tbt_session_arm() does not retime a queued
+     * instance. The entry asks w_fec_tx for one pass; that body re-arms this
+     * work while the cadence is still needed. */
+    struct delayed_work w_fec_tick;
+    /* Slow RX cadence (NACK retry, estimator sample, stall poll). Kept off
+     * w_fec_rx so a ready block's 0 ms wake is never queued behind a 10 ms,
+     * 100 ms or 30 s poll. The entry asks w_fec_rx for one pass. */
+    struct delayed_work w_fec_rx_poll;
     /* 0.2.0: FEC receive work (decode outside rx->lock, then deliver).
      * Declared only in this cut: M4/M8 initialise it, and nothing arms it
      * yet. See review/s2-merged-design.md §1.3 and §2.3. */
     struct delayed_work w_fec_rx;
+    /* Ref snapshots for the work bodies. Each slot has one owner: the FEC
+     * TX work, the FEC RX work, the FBK coalescer, the pump (under
+     * pump_lock) and w_fbk. Keeping them on the session means no body needs
+     * a TBT_STREAMS_MAX pointer array on the kernel stack. */
+    struct tbt_fec_flow *fec_tx_snap[TBT_STREAMS_MAX];
+    struct tbt_fec_flow *fec_rx_snap[TBT_STREAMS_MAX];
+    struct tbt_fec_flow *fec_fbk_snap[TBT_STREAMS_MAX];
+    spinlock_t fec_fbk_lock; /* protects fec_fbk_busy and fec_fbk_pending */
+    bool fec_fbk_busy;
+    u8 fec_fbk_pending;      /* kick flags merged while the owner ran */
+    struct tbt_stream *tx_pump_snap[TBT_STREAM_SNAP_MAX];
+    struct tbt_stream *fbk_snap[TBT_STREAM_SNAP_MAX];
+    /* Replay pass scratch. tbt_fec_out_flush holds pump_lock throughout. */
+    u8 fec_replay_usable[TBT_MAX_CARRIERS_LIMIT];
+    u32 fec_replay_pace[TBT_MAX_CARRIERS_LIMIT];
     struct list_head fec_out_ctl;    /* ACK/NACK: any up, non-stalled carrier */
     struct list_head fec_out_replay; /* NACK repairs: any up carrier, byte-budgeted */
     struct tbt_fec_outq *fec_outq; /* n_car queues, indexed by the share's carrier */
@@ -1391,7 +1435,7 @@ struct tbt_session
     atomic64_t rx_paused_skips, rx_parse_proto, rx_records;
     u64 rx_adopt_events;  /* listen work only */
     atomic64_t rx_ready_calls, rx_work_early, rx_reads, rx_read_bytes;
-    atomic64_t rx_resume_calls, rx_read_zero;
+    atomic64_t rx_resume_calls, rx_read_zero, rx_budget_yields;
     atomic64_t rx_resume_busy;
     u32 rx_last_drained;  /* last value; carrier rx work */
     atomic64_t rx_errs;
@@ -1792,6 +1836,7 @@ struct tbt_session
     struct list_head tx_q;
     u32 tx_queued;            /* payload bytes queued */
     u32 ctl_queued;           /* pinned control frames queued or in a batch */
+    u32 ctl_real;             /* of ctl_queued, frames that are not PAD */
 };
 
 #define TBT_STREAM_BUCKET(sid) \
@@ -1918,7 +1963,6 @@ struct tbt_carrier
     u16 http_pending_len;
     char *http_tx;                /* one encoded chunk (TBT_HTTP_FRAME_MAX) */
     char *http_hdr;               /* peer header block (TBT_HTTP_HDR_MAX) */
-    char *fec_frame;              /* one FEC chunk frame (TBT_HTTP_FEC_FRAME_MAX) */
     u32 http_have;
     struct tbt_http_rx *http_rx;  /* RX record assembler (8 KiB) */
     u8 state;                     /* TBT_CAR_* */
@@ -1929,6 +1973,8 @@ struct tbt_carrier
     u8 index;
     u32 gen;                  /* session-unique; pinned frames carry it */
     struct tbt_parser *parser; /* this carrier's partial record (8 KiB) */
+    /* w_rx is the only writer and reader; see tbt_rx_budget.h. */
+    struct tbt_rx_budget rx_budget;
 };
 
 enum tbt_carrier_state
@@ -2059,6 +2105,11 @@ int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp);
 /* FEC v6 data plane (tbt_fec_data.c). */
 int tbt_fec_data_init(struct tbt_session *sess);
 void tbt_fec_data_free(struct tbt_session *sess);
+/* Module lifecycle for the workqueue that frees FEC flows. tbtun_exit() must
+ * call the exit half after tbt_tunnel_shutdown() and before the RCU
+ * barriers: a pending free would otherwise run after the text is unmapped. */
+int tbt_fec_data_module_init(void);
+void tbt_fec_data_module_exit(void);
 /* Flow table. `admit` allocates a flow for sid with `want` physical groups
  * (0 = the fair share) and returns it with one reference, or an ERR_PTR:
  * -ENOSPC when no group is free, -EEXIST for a duplicate sid. `lookup`
@@ -2135,6 +2186,11 @@ bool tbt_stream_cancel(struct tbt_stream *st, struct work_struct *w,
 struct tbt_stream *tbt_stream_get(struct tbt_session *sess, u64 sid, bool alloc, bool near);
 int tbt_session_stream_snapshot(struct tbt_session *sess,
                                 struct tbt_stream **out, int max);
+/* Same snapshot, skipping DEAD and already-DYING streams: a bounded batch
+ * loop can kill every remaining stream without re-selecting one another
+ * killer owns. */
+int tbt_session_stream_snapshot_killable(struct tbt_session *sess,
+                                         struct tbt_stream **out, int max);
 enum tbt_bind_result
 {
     TBT_BIND_OK = 0,

@@ -2,7 +2,7 @@
 
 `scripts/kernel-matrix.sh` builds tbtun against several kernel series on two
 architectures, runs the host tests in every cell, and loads the module in QEMU
-where a QEMU binary for the architecture exists.  It is the 0.4.0 compatibility
+where a QEMU binary for the architecture exists.  It is the 0.4.x compatibility
 check.  It does not install anything and it does not run on real hardware.
 
 | Series | Tarball | Architecture |

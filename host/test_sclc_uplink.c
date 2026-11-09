@@ -24,6 +24,7 @@
 #include <string.h>
 
 #include "tbt_sclc_uplink.h"
+#include "tbt_sc_ldpc_gf16.h"
 
 static int failures;
 static int checks;
@@ -705,6 +706,263 @@ static void test_ops(void)
     ops->free(ctx);
 }
 
+/* ------------------------------------------------------------------ */
+/* ladder codec and scalar reference                                   */
+/* ------------------------------------------------------------------ */
+
+#define LADDER_SHAPES 6
+static const u16 ladder_n[LADDER_SHAPES] = {8, 9, 12, 16, 18, 22};
+static const u16 ladder_m[LADDER_SHAPES] = {24, 23, 20, 16, 14, 10};
+
+static inline u8 ref_get_sym(const u8 *buf, u32 off)
+{
+    return (u8)((buf[off >> 1] >> ((off & 1u) * 4)) & 0x0fu);
+}
+
+static inline void ref_put_sym(u8 *buf, u32 off, u8 v)
+{
+    u32 byte = off >> 1;
+    u8 shift = (u8)((off & 1u) * 4);
+
+    buf[byte] = (u8)((buf[byte] & (u8)~(0x0fu << shift)) |
+                     (u8)((v & 0x0fu) << shift));
+}
+
+/* Independent scalar reference decoder.  It rebuilds the same graph and
+ * walks the documented interleaved mapping one codeword at a time through
+ * gf16_decode(), so the batch decoder can be compared against the path it
+ * replaced.  Results land in ref_data[], one share per entry. */
+static int ladder_scalar_decode(const struct tbt_sclc_params *p,
+                                const u8 *data[], const u8 *parity[],
+                                const u8 *pd, const u8 *pp,
+                                u8 *ref_data[])
+{
+    sc_params sp;
+    gf16_code *c = NULL;
+    char err[128];
+    u8 *recv = NULL, *erased = NULL, *out = NULL;
+    u32 offp[256], offq[256], woff[256];
+    u32 n_data = (u32)p->L * (p->block / 2);
+    u32 codes = (u32)p->n * (u32)(TBT_FEC_S * 2) / n_data;
+    int n, n_par, cc, rc = -1;
+    u32 j;
+
+    memset(&sp, 0, sizeof(sp));
+    sp.block = p->block;
+    sp.L = p->L;
+    sp.rate_num = p->rate_num;
+    sp.rate_den = p->rate_den;
+    sp.term = SC_TERM_ACC;
+    sp.extra_dc = 5;
+    sp.seed = p->seed;
+    c = gf16_build(&sp, p->seed ^ 0xD1B54A32D192ED03ULL, err, sizeof(err));
+    if (!c)
+        return -1;
+    n = gf16_n(c);
+    n_par = gf16_n_par(c);
+    recv = malloc((size_t)n);
+    erased = malloc((size_t)n);
+    out = malloc((size_t)n);
+    if (!recv || !erased || !out)
+        goto done;
+    memset(offp, 0, sizeof(offp));
+    memset(offq, 0, sizeof(offq));
+    memset(woff, 0, sizeof(woff));
+    for (cc = 0; cc < (int)codes; cc++) {
+        gf16_dec_stat st;
+
+        memset(erased, 0, (size_t)n);
+        for (j = 0; j < n_data; j++) {
+            u16 sh = (u16)((j + (u32)cc) % p->n);
+            u32 off = offp[sh]++;
+
+            if (pd[sh])
+                recv[j] = ref_get_sym(data[sh], off);
+            else
+                erased[j] = 1;
+        }
+        for (j = 0; j < (u32)n_par; j++) {
+            u16 sh = (u16)((j + (u32)cc) % p->m);
+            u32 off = offq[sh]++;
+
+            if (pp[sh])
+                recv[n_data + j] = ref_get_sym(parity[sh], off);
+            else
+                erased[n_data + j] = 1;
+        }
+        st = gf16_decode(c, recv, erased, out, 1, p->max_core);
+        if (st.unresolved == 0) {
+            for (j = 0; j < n_data; j++) {
+                u16 sh = (u16)((j + (u32)cc) % p->n);
+                u32 off = woff[sh]++;
+
+                ref_put_sym(ref_data[sh], off, out[j]);
+            }
+        } else {
+            for (j = 0; j < n_data; j++)
+                woff[(u16)((j + (u32)cc) % p->n)]++;
+        }
+    }
+    rc = 0;
+done:
+    free(recv);
+    free(erased);
+    free(out);
+    gf16_free(c);
+    return rc;
+}
+
+/* Every ladder split must encode and decode, and the batch decoder must
+ * match the scalar reference byte for byte.  The 18/14 and 22/10 splits
+ * used to size the codec from the rate arithmetic instead of the graph, so
+ * decoding could read past the staging buffer. */
+static void test_ladder_codec(void)
+{
+    int i;
+
+    for (i = 0; i < LADDER_SHAPES; i++) {
+        struct tbt_sclc_params p;
+        struct tbt_sclc_uplink *u;
+        struct block b, ref;
+        u8 pd[256], pp[256];
+        u16 k;
+        char what[96];
+
+        memset(&p, 0, sizeof(p));
+        p.n = ladder_n[i];
+        p.m = ladder_m[i];
+        p.block = 128;
+        p.L = 16;
+        p.rate_num = (u16)(ladder_n[i] * 256 /
+                           (ladder_n[i] + ladder_m[i]));
+        p.rate_den = 256;
+        p.max_core = 256;
+        p.mapping = TBT_SCLC_MAP_INTERLEAVED;
+        p.seed = 1;
+        u = tbt_sclc_uplink_new(1, &p);
+        snprintf(what, sizeof(what), "ladder %u/%u: new", p.n, p.m);
+        ok(u != NULL, what, "NULL");
+        if (!u)
+            continue;
+        memset(&b, 0, sizeof(b));
+        memset(&ref, 0, sizeof(ref));
+        if (block_alloc(&b, p.n, p.m) != 0 ||
+            block_alloc(&ref, p.n, p.m) != 0) {
+            ok(0, "ladder: block alloc", "failed");
+            tbt_sclc_uplink_free(u);
+            continue;
+        }
+        rng_seed(101 + (uint64_t)i);
+        block_fill(&b);
+        snprintf(what, sizeof(what), "ladder %u/%u: encode", p.n, p.m);
+        ok_int(tbt_sclc_uplink_encode(u, 0, b.data, b.parity), 0, what);
+
+        for (k = 0; k < p.n; k++)
+            memcpy(ref.data[k], b.data[k], TBT_FEC_S);
+        for (k = 0; k < p.m; k++)
+            memcpy(ref.parity[k], b.parity[k], TBT_FEC_S);
+
+        for (k = 0; k < p.n; k++)
+            pd[k] = 1;
+        for (k = 0; k < p.m; k++)
+            pp[k] = 1;
+        pd[p.n - 1] = 0;
+        pp[0] = 0;
+        pp[p.m - 1] = 0;
+        memset(b.data[p.n - 1], 0, TBT_FEC_S);
+        memset(b.parity[0], 0, TBT_FEC_S);
+        memset(b.parity[p.m - 1], 0, TBT_FEC_S);
+        memset(ref.data[p.n - 1], 0, TBT_FEC_S);
+        memset(ref.parity[0], 0, TBT_FEC_S);
+        memset(ref.parity[p.m - 1], 0, TBT_FEC_S);
+
+        snprintf(what, sizeof(what), "ladder %u/%u: decode", p.n, p.m);
+        ok_int(tbt_sclc_uplink_decode(u, 0, b.data, b.parity, pd, pp),
+               p.n, what);
+        snprintf(what, sizeof(what), "ladder %u/%u: byte-exact", p.n, p.m);
+        ok_int(block_compare_known(u, 0, &b), 0, what);
+
+        /* scalar reference over the second copy */
+        snprintf(what, sizeof(what), "ladder %u/%u: reference", p.n, p.m);
+        ok_int(ladder_scalar_decode(&p, (const u8 **)ref.data,
+                                    (const u8 **)ref.parity, pd, pp,
+                                    ref.data),
+               0, what);
+        for (k = 0; k < p.n; k++) {
+            snprintf(what, sizeof(what),
+                     "ladder %u/%u: batch vs scalar share %u", p.n, p.m, k);
+            ok(memcmp(b.data[k], ref.data[k], TBT_FEC_S) == 0, what,
+               "batch and scalar disagree");
+        }
+        block_free(&b);
+        block_free(&ref);
+        tbt_sclc_uplink_free(u);
+    }
+}
+
+/* Six of eight DATA shares gone.  Every check that can fire does fire, so
+ * the peel queue reaches n_chk; the batched decoder must not write past its
+ * slot and must still match the scalar reference. */
+static void test_full_queue(void)
+{
+    struct tbt_sclc_params p;
+    struct tbt_sclc_uplink *u;
+    struct block b, ref;
+    u8 pd[256], pp[256];
+    u16 k;
+
+    rng_seed(77);
+    memset(&p, 0, sizeof(p));
+    p.n = 8;
+    p.m = 24;
+    p.block = 128;
+    p.L = 16;
+    p.rate_num = 1;
+    p.rate_den = 4;
+    p.max_core = 256;
+    p.mapping = TBT_SCLC_MAP_INTERLEAVED;
+    p.seed = 1;
+    u = tbt_sclc_uplink_new(1, &p);
+    ok(u != NULL, "full queue: new", "NULL");
+    if (!u)
+        return;
+    memset(&b, 0, sizeof(b));
+    memset(&ref, 0, sizeof(ref));
+    if (block_alloc(&b, 8, 24) != 0 || block_alloc(&ref, 8, 24) != 0) {
+        ok(0, "full queue: block alloc", "failed");
+        tbt_sclc_uplink_free(u);
+        return;
+    }
+    block_fill(&b);
+    ok_int(tbt_sclc_uplink_encode(u, 0, b.data, b.parity), 0,
+           "full queue: encode");
+    for (k = 0; k < 8; k++)
+        pd[k] = (u8)(k >= 6);
+    for (k = 0; k < 24; k++)
+        pp[k] = 1;
+    for (k = 0; k < 8; k++)
+        memcpy(ref.data[k], b.data[k], TBT_FEC_S);
+    for (k = 0; k < 24; k++)
+        memcpy(ref.parity[k], b.parity[k], TBT_FEC_S);
+    for (k = 0; k < 6; k++) {
+        memset(b.data[k], 0, TBT_FEC_S);
+        memset(ref.data[k], 0, TBT_FEC_S);
+    }
+    ok_int(tbt_sclc_uplink_decode(u, 0, b.data, b.parity, pd, pp), 8,
+           "full queue: decode");
+    ok_int(block_compare_known(u, 0, &b), 0, "full queue: byte-exact");
+    ok_int(ladder_scalar_decode(&p, (const u8 **)ref.data,
+                                (const u8 **)ref.parity, pd, pp,
+                                ref.data),
+           0, "full queue: reference");
+    for (k = 0; k < 8; k++)
+        ok(memcmp(b.data[k], ref.data[k], TBT_FEC_S) == 0,
+           "full queue: batch vs scalar", "batch and scalar disagree");
+    block_free(&b);
+    block_free(&ref);
+    tbt_sclc_uplink_free(u);
+}
+
 /* Every n/m split the SC-LDPC rate ladder derives for 8x32 must build with
  * the production GF(16) parameters (block 128, L 16, interleaved). */
 static void test_ladder_shapes(void)
@@ -732,6 +990,159 @@ static void test_ladder_shapes(void)
         ok(u != NULL, "ladder: shape builds", "NULL");
         if (u)
             tbt_sclc_uplink_free(u);
+    }
+}
+
+/* All parity unknown means every check starts at count one: the initial
+ * queue holds n_chk entries, so any later enqueue must not write at index
+ * n_chk.  The unbranched form wrote there and clobbered the next slot (or
+ * ran two bytes past the buffer on the last slot). */
+static void test_gf16_full_queue(void)
+{
+    sc_params sp;
+    gf16_code *c;
+    char err[128];
+    int n, n_data, i, cw;
+    u8 *recv_b, *erased_b, *out_b;
+    u8 *recv, *erased, *out;
+    gf16_dec_stat st[2], st1;
+
+    memset(&sp, 0, sizeof(sp));
+    sp.block = 128;
+    sp.L = 16;
+    sp.rate_num = 1;
+    sp.rate_den = 4;
+    sp.term = SC_TERM_ACC;
+    sp.extra_dc = 5;
+    sp.seed = 1;
+    c = gf16_build(&sp, 1ULL ^ 0xD1B54A32D192ED03ULL, err, sizeof(err));
+    ok(c != NULL, "gf16 full queue: build", err);
+    if (!c)
+        return;
+    n = gf16_n(c);
+    n_data = gf16_n_data(c);
+    recv_b = calloc(2 * (size_t)n, 1);
+    erased_b = calloc(2 * (size_t)n, 1);
+    out_b = calloc(2 * (size_t)n, 1);
+    recv = calloc((size_t)n, 1);
+    erased = calloc((size_t)n, 1);
+    out = calloc((size_t)n, 1);
+    if (!recv_b || !erased_b || !out_b || !recv || !erased || !out) {
+        ok(0, "gf16 full queue: alloc", "failed");
+        goto done;
+    }
+    for (cw = 0; cw < 2; cw++)
+        for (i = 0; i < n; i++)
+            if (i < n_data) {
+                recv_b[(size_t)cw * n + i] = (u8)((i * 7) & 15);
+                erased_b[(size_t)cw * n + i] = 0;
+            } else {
+                erased_b[(size_t)cw * n + i] = 1;
+            }
+    for (i = 0; i < n; i++)
+        if (i < n_data) {
+            recv[i] = (u8)((i * 7) & 15);
+            erased[i] = 0;
+        } else {
+            erased[i] = 1;
+        }
+    gf16_decode_batch(c, 2, recv_b, erased_b, out_b, 1, 0, st);
+    st1 = gf16_decode(c, recv, erased, out, 1, 0);
+    ok_int((int)st1.unresolved, 0, "gf16 full queue: scalar resolves");
+    ok_int((int)st[0].unresolved, 0, "gf16 full queue: slot 0 resolves");
+    ok_int((int)st[1].unresolved, 0, "gf16 full queue: slot 1 resolves");
+    ok(memcmp(out_b, out, (size_t)n) == 0,
+       "gf16 full queue: slot 0 exact", "differs from scalar");
+    ok(memcmp(out_b + n, out, (size_t)n) == 0,
+       "gf16 full queue: slot 1 exact", "differs from scalar");
+done:
+    free(recv_b);
+    free(erased_b);
+    free(out_b);
+    free(recv);
+    free(erased);
+    free(out);
+    gf16_free(c);
+}
+
+static uint64_t scan_next(uint64_t *x)
+{
+    uint64_t z = (*x += 0x9E3779B97F4A7C15ULL);
+
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+    return z ^ (z >> 31);
+}
+
+/* Random erasure scans over four shapes: the peel queue reaches n_chk, so
+ * an unguarded write at index n_chk runs past the last slot (ASan catches
+ * it).  The RNG seed is fixed, so the same trajectories run every time. */
+static void test_queue_full_scan(void)
+{
+    static const struct
+    {
+        u16 n, m, rn, rd;
+    } sh[4] = {
+        {8, 24, 1, 4},
+        {4, 4, 1, 2},
+        {14, 18, 7, 16},
+        {12, 20, 3, 8},
+    };
+    uint64_t x = 12345;
+    int s, trial, cw, i;
+
+    for (s = 0; s < 4; s++) {
+        sc_params sp;
+        gf16_code *c;
+        char err[128];
+        int n, n_data;
+        u8 *rb, *eb, *ob, md[64], mp[64];
+        gf16_dec_stat st[2];
+
+        memset(&sp, 0, sizeof sp);
+        sp.block = 128;
+        sp.L = 16;
+        sp.rate_num = sh[s].rn;
+        sp.rate_den = sh[s].rd;
+        sp.term = SC_TERM_ACC;
+        sp.extra_dc = 5;
+        sp.seed = 1;
+        c = gf16_build(&sp, 1ULL ^ 0xD1B54A32D192ED03ULL, err, sizeof(err));
+        ok(c != NULL, "queue scan: build", err);
+        if (!c)
+            continue;
+        n = gf16_n(c);
+        n_data = gf16_n_data(c);
+        rb = calloc(2 * (size_t)n, 1);
+        eb = calloc(2 * (size_t)n, 1);
+        ob = calloc(2 * (size_t)n, 1);
+        if (!rb || !eb || !ob) {
+            ok(0, "queue scan: alloc", "failed");
+            goto next;
+        }
+        for (trial = 0; trial < 100; trial++) {
+            for (i = 0; i < sh[s].n; i++)
+                md[i] = (u8)(scan_next(&x) % 100 < 80);
+            for (i = 0; i < sh[s].m; i++)
+                mp[i] = (u8)(scan_next(&x) % 100 < 40);
+            for (cw = 0; cw < 2; cw++)
+                for (i = 0; i < n; i++) {
+                    if (i < n_data) {
+                        rb[(size_t)cw * n + i] = (u8)((i * 7 + cw) & 15);
+                        eb[(size_t)cw * n + i] = md[(i + cw) % sh[s].n];
+                    } else {
+                        eb[(size_t)cw * n + i] =
+                            mp[(i - n_data + cw) % sh[s].m];
+                    }
+                }
+            gf16_decode_batch(c, 2, rb, eb, ob, 1, 0, st);
+        }
+        ok(1, "queue scan: done", "");
+next:
+        free(rb);
+        free(eb);
+        free(ob);
+        gf16_free(c);
     }
 }
 
@@ -778,6 +1189,10 @@ int main(void)
     test_grouped();
     test_ops();
     test_ladder_shapes();
+    test_ladder_codec();
+    test_full_queue();
+    test_gf16_full_queue();
+    test_queue_full_scan();
     test_reject();
 
     printf("%s: %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks,

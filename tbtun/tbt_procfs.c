@@ -200,7 +200,7 @@ static ssize_t tbt_cfg_write(struct file *file, const char __user *ubuf, size_t 
 {
     struct tbt_cfg_file *cf = file->private_data;
     struct tbt_linebuf *lb = &cf->lb;
-    char tmp[TBT_LINE_MAX];
+    char *tmp;
     size_t n, i;
     int err = 0;
 
@@ -211,10 +211,18 @@ static ssize_t tbt_cfg_write(struct file *file, const char __user *ubuf, size_t 
     tbt_cfg_drop_snapshot(cf);
     if (len > TBT_LINE_MAX)
         len = TBT_LINE_MAX; // process at most one line's worth per chunk
-    n = min(len, sizeof(tmp));
+    n = len;
+    /* The line state lives in cf->lb; the chunk read only needs a staging
+     * copy, and this is process context, so a full TBT_LINE_MAX buffer does
+     * not belong on the kernel stack. */
+    tmp = kmalloc(n, GFP_KERNEL);
+    if (!tmp)
+        return -ENOMEM;
     if (copy_from_user(tmp, ubuf, n))
+    {
+        kfree(tmp);
         return -EFAULT;
-
+    }
     for (i = 0; i < n; i++)
     {
         char c = tmp[i];
@@ -243,6 +251,7 @@ static ssize_t tbt_cfg_write(struct file *file, const char __user *ubuf, size_t 
         }
         lb->buf[lb->len++] = c;
     }
+    kfree(tmp);
 
     /* A read that raced this write may have snapshotted an intermediate
      * config; drop it again so the next read sees the final state. */
@@ -284,15 +293,18 @@ static int tbt_cfg_release(struct inode *inode, struct file *file)
 static int tbt_config_snapshot(struct tbt_cfg_file *cf)
 {
     struct tbt_tunnel *t;
-    char line[TBT_LINE_MAX];
+    char *line;
     char *out;
     size_t total = 0, off = 0, alloc;
     int n, err = 0;
 
+    line = kvmalloc(TBT_LINE_MAX, GFP_KERNEL);
+    if (!line)
+        return -ENOMEM;
     mutex_lock(&tbt_lock);
     list_for_each_entry_rcu(t, &tbt_tunnels, node)
     {
-        n = tbt_render_cfg(&t->cfg, line, sizeof(line));
+        n = tbt_render_cfg(&t->cfg, line, TBT_LINE_MAX);
         if (n < 0)
         {
             err = n;
@@ -347,6 +359,7 @@ static int tbt_config_snapshot(struct tbt_cfg_file *cf)
 
 unlock:
     mutex_unlock(&tbt_lock);
+    kvfree(line);
     return err;
 }
 
@@ -463,24 +476,34 @@ static ssize_t tbt_ports_write(struct file *file, const char __user *ubuf, size_
 
 static ssize_t tbt_peers_write(struct file *file, const char __user *ubuf, size_t len, loff_t *ppos)
 {
-    char buf[TBT_LINE_MAX];
+    char *buf;
     struct tbt_parse_error perr = { NULL, NULL };
     struct tbt_cmd cmd = { 0 };
     int err;
 
     if (!len)
         return 0;
-    if (len >= sizeof(buf))
+    if (len >= TBT_LINE_MAX)
         return -E2BIG;
+    buf = kvmalloc(len + 1, GFP_KERNEL);
+    if (!buf)
+        return -ENOMEM;
     if (copy_from_user(buf, ubuf, len))
+    {
+        kvfree(buf);
         return -EFAULT;
+    }
     buf[len] = '\0';
     err = tbt_parse_line(buf, &cmd, &perr);
     if (err)
-        goto wipe;
+    {
+        kvfree(buf);
+        tbt_memzero_explicit(cmd.cfg.crypto_key, sizeof(cmd.cfg.crypto_key));
+        return err;
+    }
     if (cmd.kind != TBT_CMD_NONE)
         err = tbt_action_apply(&cmd);
-wipe:
+    kvfree(buf);
     tbt_memzero_explicit(cmd.cfg.crypto_key, sizeof(cmd.cfg.crypto_key));
     return err ? err : (ssize_t)len;
 }
@@ -673,6 +696,12 @@ static int tbt_show_stats(struct seq_file *m, void *v)
             u32 rq = 0, rb = 0;
             int i, ci;
 
+            /* The session reference keeps this struct alive, but destroy
+             * frees car[] and fec_outq before it waits for that reference.
+             * Render under the gate destroy takes before the first child
+             * goes; a reader that starts after the teardown sees NULL. */
+            down_read(&s->stats_lock);
+
             /* One live snapshot per tunnel, so a stalled direction is visible
              * without a rebuild: queue depths, pause flags, the public
              * socket's send state, and the carrier's write/read cursors. */
@@ -721,7 +750,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
             seq_printf(m, "tunnel %llu rx_ready_calls=%llu rx_reads=%llu rx_read_bytes=%llu "
                           "rx_read_zero=%llu rx_resume=%llu rx_resume_busy=%llu rx_last_drained=%u "
                           "rx_proto=%llu rx_errs=%llu rx_last_err=%d tx_submit_calls=%llu "
-                          "rx_delivered=%llu\n",
+                          "rx_delivered=%llu rx_budget_yields=%llu\n",
                        id, tbt_stat_read(&s->rx_ready_calls),
                        tbt_stat_read(&s->rx_reads),
                        tbt_stat_read(&s->rx_read_bytes),
@@ -733,7 +762,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                        tbt_stat_read(&s->rx_errs),
                        READ_ONCE(s->rx_last_err),
                        tbt_stat_read(&s->tx_submit_calls),
-                       tbt_stat_read(&s->rx_delivered_bytes));
+                       tbt_stat_read(&s->rx_delivered_bytes),
+                       tbt_stat_read(&s->rx_budget_yields));
             seq_printf(m, "tunnel %llu dbg rcv_nxt=%u copied=%u after=%u qlen=%u "
                           "allocf=%llu over=%llu copyf=%llu hiwat=%llu pdead=%llu "
                           "prun=%llu pmoved=%llu p_nocar=%llu p_down=%llu p_stop=%llu "
@@ -1385,6 +1415,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                                tbt_stat_read(&s->retired_retx_data));
                 }
             }
+            up_read(&s->stats_lock);
         }
         tbt_session_put(s);
         tbt_tunnel_put(t);

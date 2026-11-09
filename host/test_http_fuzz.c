@@ -24,6 +24,12 @@
  * so the header and chunk state machines, not just their first branch, see
  * hostile input.
  *
+ * The 0.4.0 v7 OPEN body (32-byte physical group bitmap) gets its own pass:
+ * every mask shape is carried as one chunk per record, the byte stream is
+ * split again at every 1..7 byte boundary and must reassemble to the same
+ * records; body lengths 0/1/31/33/64 and chunks whose size disagrees with the
+ * header's body_len must end in PROTO, never in a record.
+ *
  *   make host-test-san
  */
 #include <stdio.h>
@@ -39,6 +45,8 @@ static u64 fuzz_seed = 1;
 static unsigned long case_no;
 static long checks;
 static int failures;
+static unsigned long open_cases;
+static unsigned long open_feeds;
 
 static u64 rnd64(void)
 {
@@ -231,6 +239,275 @@ static void fuzz_case(const u8 *buf, size_t len)
     }
 }
 
+/* ------------------------------------------------------------------------- */
+/* 0.4.0 v7 OPEN bodies through the one-chunk-per-record container. */
+
+static size_t open_rec_make(u8 *dst, u16 body_len, const u8 *mask)
+{
+    size_t len = TBT_HDR_LEN + (size_t)body_len;
+
+    memset(dst, 0, len);
+    dst[TBT_H_TYPE] = TBT_F_OPEN;
+    tbt_put_le16(dst + TBT_H_BODYLEN, body_len);
+    tbt_put_le16(dst + TBT_H_CONV, TBT_CONV);
+    if (body_len)
+    {
+        memset(dst + TBT_HDR_LEN, 0xa5, body_len);
+        if (mask)
+            memcpy(dst + TBT_HDR_LEN, mask,
+                   body_len < TBT_OPEN_BODY_LEN ? body_len : TBT_OPEN_BODY_LEN);
+    }
+    return len;
+}
+
+static size_t open_add_chunk(u8 *dst, size_t cap, size_t off, const u8 *rec,
+                             size_t rec_len)
+{
+    size_t n = tbt_http_chunk_hdr((char *)dst + off, cap - off, rec_len);
+
+    if (!n || off + n + rec_len + 2 > cap)
+        return 0;
+    memcpy(dst + off + n, rec, rec_len);
+    if (!tbt_http_chunk_tail((char *)dst + off + n + rec_len,
+                             cap - off - n - rec_len))
+        return 0;
+    return off + n + rec_len + 2;
+}
+
+static size_t open_add_term(u8 *dst, size_t cap, size_t off)
+{
+    size_t n = tbt_http_chunk_hdr((char *)dst + off, cap - off, 0);
+
+    if (!n || off + n + 2 > cap)
+        return 0;
+    if (!tbt_http_chunk_tail((char *)dst + off + n, cap - off - n))
+        return 0;
+    return off + n + 2;
+}
+
+/* Feed the stream in pieces of `step` bytes. A record is valid only if its
+ * type, body length and 32 mask bytes match the source; PROTO is accepted
+ * only when the case expects it. */
+static void open_feed(const u8 *stream, size_t len, size_t step,
+                      const u8 masks[][TBT_OPEN_BODY_LEN],
+                      unsigned want_records, int want_done, int want_proto,
+                      const char *what)
+{
+    struct tbt_http_rx rx = {};
+    u8 *buf = malloc(len ? len : 1);
+    size_t pos = 0, fed = 0;
+    unsigned records = 0;
+    int saw_proto = 0;
+
+    open_cases++;
+    if (!buf)
+    {
+        printf("FAIL seed=1 case=%lu: out of memory\n", case_no);
+        exit(2);
+    }
+    memcpy(buf, stream, len);
+
+    while (fed < len || pos < fed)
+    {
+        struct tbt_rec rec;
+        size_t n;
+        int err = TBT_RX_NEED_MORE;
+
+        if (fed == pos && fed < len)
+        {
+            size_t take = len - fed;
+
+            if (take > step)
+                take = step;
+            fed += take;
+        }
+        if (fed == pos)
+            break;
+        open_feeds++;
+        n = tbt_http_frame_decode(&rx, buf + pos, fed - pos, &rec, &err);
+        checks++;
+        if (n > fed - pos)
+        {
+            failures++;
+            printf("FAIL seed=1 case=%lu: %s: consumed %zu of %zu\n", case_no,
+                   what, n, fed - pos);
+            break;
+        }
+        if (err == TBT_RX_OK)
+        {
+            checks++;
+            if (want_proto || records >= want_records ||
+                rec.hdr.type != TBT_F_OPEN ||
+                rec.body_len != TBT_OPEN_BODY_LEN ||
+                memcmp(rec.body, masks[records], TBT_OPEN_BODY_LEN))
+            {
+                failures++;
+                printf("FAIL seed=1 case=%lu: %s: bad record %u\n", case_no,
+                       what, records);
+                break;
+            }
+            records++;
+            pos += n;
+            continue;
+        }
+        if (err == TBT_RX_PROTO)
+        {
+            saw_proto = 1;
+            break;
+        }
+        /* NEED_MORE consumed every byte it was given. */
+        pos += n;
+        if (tbt_http_rx_done(&rx))
+            break;
+        if (!n)
+        {
+            failures++;
+            printf("FAIL seed=1 case=%lu: %s: no progress\n", case_no, what);
+            break;
+        }
+    }
+
+    checks++;
+    if (want_proto ? !saw_proto : saw_proto)
+    {
+        failures++;
+        printf("FAIL seed=1 case=%lu: %s: PROTO verdict %d\n", case_no, what,
+               saw_proto);
+    }
+    if (!want_proto)
+    {
+        checks++;
+        if (records != want_records)
+        {
+            failures++;
+            printf("FAIL seed=1 case=%lu: %s: decoded %u of %u records\n",
+                   case_no, what, records, want_records);
+        }
+        checks++;
+        if (want_done != (tbt_http_rx_done(&rx) ? 1 : 0))
+        {
+            failures++;
+            printf("FAIL seed=1 case=%lu: %s: done=%d want %d\n", case_no,
+                   what, tbt_http_rx_done(&rx), want_done);
+        }
+        checks++;
+        if (want_done && pos != len)
+        {
+            failures++;
+            printf("FAIL seed=1 case=%lu: %s: done at %zu of %zu\n", case_no,
+                   what, pos, len);
+        }
+    }
+    free(buf);
+}
+
+static void test_open_chunks(void)
+{
+    u8 base[TBT_OPEN_BODY_LEN];
+    u8 masks[3][TBT_OPEN_BODY_LEN];
+    u8 rec[TBT_HDR_LEN + 64];
+    u8 stream[1024];
+    unsigned c, j, step;
+
+    for (c = 0; c < 4; c++)
+    {
+        size_t off = 0;
+
+        case_no++;
+        if (c == 0)
+            memset(base, 0, sizeof(base));
+        else if (c == 1)
+            memset(base, 0xff, sizeof(base));
+        else if (c == 2)
+            memset(base, 0x55, sizeof(base));
+        else
+            for (j = 0; j < sizeof(base); j += 8)
+            {
+                u64 v = rnd64();
+
+                memcpy(base + j, &v, 8);
+            }
+        for (j = 0; j < sizeof(base); j++)
+        {
+            masks[0][j] = base[j];
+            masks[1][j] = (u8)(base[j] ^ 0x01);
+            masks[2][j] = (u8)~base[j];
+        }
+        for (j = 0; j < 3; j++)
+        {
+            size_t n = open_rec_make(rec, TBT_OPEN_BODY_LEN, masks[j]);
+
+            off = open_add_chunk(stream, sizeof(stream), off, rec, n);
+            if (!off)
+            {
+                printf("FAIL seed=1 case=%lu: OPEN chunk build\n", case_no);
+                exit(2);
+            }
+        }
+        off = open_add_term(stream, sizeof(stream), off);
+        if (!off)
+        {
+            printf("FAIL seed=1 case=%lu: OPEN terminator build\n", case_no);
+            exit(2);
+        }
+
+        for (step = 1; step <= 7; step++)
+            open_feed(stream, off, step, masks, 3, 1, 0,
+                      "OPEN chunks split at 1..7 bytes");
+        /* Cutting the terminator leaves every record decoded but not DONE. */
+        open_feed(stream, off - 2, 2, masks, 3, 0, 0,
+                  "OPEN stream with a short terminator");
+        open_feed(stream, off - 4, 5, masks, 3, 0, 0,
+                  "OPEN stream with a shorter terminator");
+    }
+
+    /* A body length other than 32, or a chunk whose size disagrees with the
+     * header, is a framing error whichever boundary the split lands on. */
+    {
+        static const struct
+        {
+            u16 hdr_body;
+            size_t wire_len;
+        } bad[] = {
+            { 0, 32 },  { 1, 33 },  { 31, 63 }, { 33, 65 }, { 64, 96 },
+            { 32, 63 }, { 32, 65 }, { 32, 66 }, { 32, 31 },
+        };
+
+        for (c = 0; c < sizeof(bad) / sizeof(bad[0]); c++)
+        {
+            size_t off;
+
+            case_no++;
+            memset(rec, 0, bad[c].wire_len);
+            if (bad[c].wire_len >= TBT_HDR_LEN)
+            {
+                rec[TBT_H_TYPE] = TBT_F_OPEN;
+                tbt_put_le16(rec + TBT_H_BODYLEN, bad[c].hdr_body);
+                tbt_put_le16(rec + TBT_H_CONV, TBT_CONV);
+                memset(rec + TBT_HDR_LEN, 0xa5,
+                       bad[c].wire_len - TBT_HDR_LEN);
+            }
+            off = open_add_chunk(stream, sizeof(stream), 0, rec,
+                                 bad[c].wire_len);
+            if (!off)
+            {
+                printf("FAIL seed=1 case=%lu: hostile chunk build\n", case_no);
+                exit(2);
+            }
+            off = open_add_term(stream, sizeof(stream), off);
+            if (!off)
+            {
+                printf("FAIL seed=1 case=%lu: hostile terminator build\n",
+                       case_no);
+                exit(2);
+            }
+            for (step = 1; step <= 7; step++)
+                open_feed(stream, off, step, NULL, 0, 0, 1,
+                          "hostile OPEN body or chunk size");
+        }
+    }
+}
+
 int main(void)
 {
     static const char *const prefixes[] = {
@@ -253,6 +530,8 @@ int main(void)
             fuzz_seed = v;
     }
     rng_state = fuzz_seed;
+
+    test_open_chunks();
 
     for (i = 0; i < FUZZ_BUFFERS; i++)
     {
@@ -291,7 +570,9 @@ int main(void)
         free(buf);
     }
 
-    printf("test_http_fuzz: seed=0x%016llx checks=%ld failures=%d buffers=%d\n",
-           (unsigned long long)fuzz_seed, checks, failures, FUZZ_BUFFERS);
+    printf("test_http_fuzz: seed=0x%016llx checks=%ld failures=%d buffers=%d"
+           " open_cases=%lu open_feeds=%lu\n",
+           (unsigned long long)fuzz_seed, checks, failures, FUZZ_BUFFERS,
+           open_cases, open_feeds);
     return failures ? 1 : 0;
 }

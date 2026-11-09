@@ -8,20 +8,27 @@ on:
 permissions:
   contents: write
 
+# A tag can be pushed again after a failed build, and two runs of the same
+# tag would both upload assets. Queue them instead of cancelling: a cancelled
+# run can leave a half-written release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Check that the tag matches the module version
         run: |
-          version=$(./scripts/mkdkmsconf.sh | sed -n 's/^PACKAGE_VERSION="\(.*\)"$/\1/p')
+          version=$(./scripts/mkdkmsconf.sh --version)
           if [ "v$version" != "$GITHUB_REF_NAME" ]; then
             echo "module version is $version but the tag is $GITHUB_REF_NAME"
             exit 1
@@ -30,33 +37,60 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential dwarves zstd linux-headers-generic
+          sudo apt-get install -y build-essential dwarves zstd \
+            linux-headers-generic
+
+      - name: Lower the ASLR entropy for the sanitizer tests
+        run: |
+          if [ -e /proc/sys/vm/mmap_rnd_bits ]; then
+            sudo sysctl -w vm.mmap_rnd_bits=28
+          fi
+
+      - name: Run the host tests
+        run: |
+          make host-test
+          make host-test-san
+
+      - name: Run the static invariant checks
+        run: bash review/lint.sh
 
       - name: Select the newest generic header tree
         id: kernel
         run: |
-          kdir=$(ls -d /usr/src/linux-headers-*-generic 2>/dev/null | sort -V | tail -1)
+          kdir=$(ls -d /usr/src/linux-headers-*-generic 2>/dev/null |
+            sort -V | tail -1 || true)
           if [ -z "$kdir" ] || [ ! -f "$kdir/Makefile" ]; then
             echo "no kernel header tree found under /usr/src" >&2
             exit 1
           fi
           release=$(basename "$kdir" | sed 's/^linux-headers-//')
+          if ! dpkg --compare-versions "$release" ge 6.1; then
+            echo "kernel headers $release are older than Linux 6.1" >&2
+            exit 1
+          fi
           echo "kdir=$kdir" >> "$GITHUB_OUTPUT"
           echo "release=$release" >> "$GITHUB_OUTPUT"
 
       - name: Build the DKMS tarball
         run: |
-          make dkms-tarball
+          make dkms-srcs-check dkms-tarball
+          version=$(./scripts/mkdkmsconf.sh --version)
+          tar xOf dkms.tar.gz ./dkms_source_tree/dkms.conf > /tmp/dkms.conf
+          grep -qx "PACKAGE_VERSION=\"$version\"" /tmp/dkms.conf
           mkdir -p build
           mv dkms.tar.gz "build/tbtun-${{ steps.kernel.outputs.release }}.dkms.tar.gz"
 
-      - name: Build the module
+      - name: Build the module from the DKMS tree
         run: |
-          make KERNEL_DIR="${{ steps.kernel.outputs.kdir }}" all
-          cp tbtun.ko "build/tbtun-${{ steps.kernel.outputs.release }}.ko"
-
-      - name: Run the host grammar test
-        run: make host-test
+          rm -rf /tmp/dkms-check
+          mkdir -p /tmp/dkms-check
+          tar xzf "build/tbtun-${{ steps.kernel.outputs.release }}.dkms.tar.gz" \
+            -C /tmp/dkms-check
+          (cd /tmp/dkms-check/dkms_source_tree &&
+            make KERNEL_DIR="${{ steps.kernel.outputs.kdir }}" all)
+          ko=/tmp/dkms-check/dkms_source_tree/tbtun.ko
+          test -s "$ko"
+          cp "$ko" "build/tbtun-${{ steps.kernel.outputs.release }}.ko"
 
       - name: Generate hashes
         run: |
@@ -65,6 +99,6 @@ jobs:
           cat hashes.txt
 
       - name: Upload GitHub release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: build/*

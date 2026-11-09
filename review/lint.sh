@@ -168,7 +168,7 @@ carrier_ctor_order_violation() {
 atomic_stats_names='
     stats_gap rx_work_runs rx_drain_entries rx_drain_bytes rx_paused_skips
     rx_parse_proto rx_records rx_ready_calls rx_work_early rx_reads
-    rx_read_bytes rx_resume_calls rx_read_zero rx_resume_busy rx_errs
+    rx_read_bytes rx_resume_calls rx_read_zero rx_budget_yields rx_resume_busy rx_errs
     carrier_write_space_runs poll_rescues tx_wake_calls tx_wake_busy
     tx_work_runs carrier_ws_calls carrier_nospace_armed pump_hw_fired carrier_lost carrier_replaced
     carrier_alloc_fail connect_fail port_exhaust port_alloc_fail

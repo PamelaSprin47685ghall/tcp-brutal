@@ -42,6 +42,11 @@
 static void *sclc_alloc(size_t len)
 {
 #ifdef __KERNEL__
+    /* Same policy as tbt_fec.h: a sparse codeword plane above 32 KiB is
+     * vmalloc-backed so a 256-carrier session does not pin high-order slab
+     * page blocks on a small host. */
+    if (len >= 32u * 1024u)
+        return vzalloc(len ? len : 1);
     return kvzalloc(len, GFP_KERNEL);
 #else
     return calloc(1, len);

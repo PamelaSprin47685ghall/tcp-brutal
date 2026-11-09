@@ -25,7 +25,8 @@ FEC v6（`fec=on`）是可选的第二数据面：应用的字节流被切成 8 
 （`K` 是 15 MiB 重放环能容纳的最大值，最多 64）、
 发送端从重放环重发；更老的丢失留在载体的 TCP 发送队列里，由 TCP 重传。
 它同时支持 `profile=raw` 和 HTTP chunk 容器：
-HTTP 档位下一个 chunk body 恰好是一条 48 字节 FEC 记录（`TBT_FEC_CONV=0x1007`；
+HTTP 档位下一个 chunk body 恰好是一条 FEC 记录（48 字节头加负载；
+`TBT_FEC_CONV=0x1007`；
 `0x1006` 是自适应版本，`0x1005` 是 0.2.2 的 stream-id 版本，0.1.0 为 `0x1001`），请求行、头部和
 chunk 分帧保持明文。`mode=grouped` 把载体分成 `groups` 组，每组 `n` 个 DATA
 加 `m` 个校验，`carriers = groups * (n + m)`，最多 256 条；生产形状是
@@ -40,22 +41,29 @@ GF(16) 上行 128、512 保留），码率由 `n/(n+m)` 决定。per-direction
 `FEC_CFG` INIT 携带 `L`/block/rate，接收端使用对端形状。
 `mode=rlnc`/`grouped` 保留为 GF(2) band RLNC 回退。
 
-自适应 FEC（`adaptive=`，默认 off）有两条路径。GF(2) 的 `mode=rlnc`/`grouped`
-保留 Phase 1：形状固定在 `n + m = 8`、32 组的族内，`m` 在 1..6 之间移动。
-`mode=sc-ldpc` 使用 per-flow SC-LDPC 估计器/控制器：0.4.3 起下行 1x256 与
-上行 8x32 均支持六档自适应切换（默认 adaptive=off；与旧 0.4.0..0.4.2 混跑时
-遇 CFG_NACK 自动静默守住 128/128）。
-切换走 `FEC_CFG`/`FEC_FBK`（wire `0x1007`）。`session <id> adaptive=off` 可在
-运行时关闭。GF(2) 族的 `n + m != 8` 尚未实现。
+自适应 FEC（`adaptive=`）有两条路径。`mode=rlnc`/`grouped` 时默认跟随 `fec`
+（`fec=on` 即开启）；`mode=sc-ldpc` 时默认 off。GF(2) 的
+`mode=rlnc`/`grouped` 保留 Phase 1：形状固定在 `n + m = 8`、32 组的族内，
+`m` 在 1..6 之间移动。`mode=sc-ldpc` 使用 per-flow SC-LDPC 估计器/控制器：
+0.4.3 起下行 1x256 与上行 8x32 均支持六档自适应切换（`25, 30, 40, 50, 60,
+70`）；与旧 0.4.0..0.4.2 混跑时遇 CFG_NACK 自动静默守住 128/128。切换走
+`FEC_CFG`/`FEC_FBK`（wire `0x1007`）。`session <id> adaptive=off` 可在运行时
+关闭。GF(2) 族的 `n + m != 8` 尚未实现。
 
-0.4.0 起一个会话可承载多条并发 FEC 流（v7，wire `0x1007`）。每条流有自己的
-per-flow FEC TX/RX 上下文与 admission 引用。前一个流关闭后的顺序新连接仍会重置
-旧 FEC RX/TX 状态、把窗口重定基到新流的第一个块，并关闭旧 target socket；
-DATA/PARITY 携带 stream id（`0x1005` 引入，`0x1007` 仍在），因此排队中的旧流
-记录不会进入新流。
+0.4.0 起，非 SC-LDPC 的 grouped 形状可承载多条并发 FEC 流（v7，wire
+`0x1007`）。每条流有自己的 per-flow FEC TX/RX 上下文与 admission 引用。
+并发需要静态组配额：模块参数 `fec_groups_per_flow`（默认 `0`）限制一条流
+可拥有的物理组数。`0` 保持单流几何：第一条流独占全部组，第二条并发流会被
+`-EOPNOTSUPP` 拒绝；要接纳 `N` 条流，把它设为 `total_groups / N`，并在两端
+加载相同值。SC-LDPC 始终单流。`FEC_ALLOC`（0x36）只在 wire 格式中定义，
+0.4.0 数据面既不发送也不消费它：运行时重平衡未启用，组归属在 OPEN 建立流时
+固定。前一个流关闭后的顺序新连接仍会重置旧 FEC RX/TX 状态、把窗口重定基到
+新流的第一个块，并关闭旧 target socket；DATA/PARITY 携带 stream id
+（`0x1005` 引入，`0x1007` 仍在），因此排队中的旧流记录不会进入新流。
 
-当前代码实现了 [DESIGN.md](DESIGN.md) 的 C1–C8，以及 FEC v6 grouped 数据面与
-自适应 Phase 1、256 载体扩展：`/proc` 控制面、监听器与远端、
+当前代码实现了 [DESIGN.md](DESIGN.md) 的 C1–C8，以及 FEC v6 的 grouped 与
+SC-LDPC 数据面、自适应 FEC（GF(2) Phase 1 与 SC-LDPC 速率控制）、多流 v7
+和 256 载体扩展：`/proc` 控制面、监听器与远端、
 备用载体与带 RETIRE 握手的载体替换、带重放环的重复发送、保留字节重放的空洞修复，
 以及 `http-kal`/`http-kal-drip` 容器。载体字节流里的空洞由重放环补齐，而不是终止整条流。
 超过 `hole_budget_ms` 或 `rx_reorder_bytes` 仍补不上的空洞计入 `holes_unrecoverable`；
@@ -85,6 +93,11 @@ BBR 速率样本与聚合通告窗口自动调整；bootstrap 下限与自动上
 - 加载模块和写 `/proc/net/tbtun/*` 需要 root（文件权限为 `0600`，
   仅调试用的 `http` 为 `0400`）。
 
+多内核兼容矩阵由 `scripts/kernel-matrix.sh` 执行：在 x86_64 与 aarch64 上
+构建 5.15、6.6、6.12、7.0，并在 QEMU 中加载模块。6.6/6.12/7.0 在两个架构上
+都通过；5.15 只作为下界记录，模块构建会因 6.1 最低版本而失败。详见
+[docs/kernel-matrix.md](docs/kernel-matrix.md)。
+
 ## 编译
 
 ```sh
@@ -107,19 +120,22 @@ make check
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
 `TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.4.3`）。
-线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x0007` 与 FEC 记录的
-`TBT_FEC_CONV=0x1007`，三者都与模块版本独立。
+线上修订是旧帧的 `TBT_CONV=0x0007`、旧 ARQ HELLO 的 `TBT_WIRE_VERSION=1`、
+FEC v7 会话的 `TBT_WIRE_VERSION_V6=4`，以及 FEC 记录的
+`TBT_FEC_CONV=0x1007`；它们都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
 失败，其载体关闭；0x0004 的对端在第一个头部就会因为 conv 不匹配而被拒绝。
-当前 FEC wire 是 `0x1007`：`0x1002` 增加 FIN 的 16 字节 body
-（`pkt_end`/`pkt_base`）与 PARITY 空块 marker（`win_len=0`、
-`payload_len=0`、`epoch=0`）；`0x1003` 把 ACK 扩到 24 字节并加入
-`deliver_bytes`；`0x1004` 把 NACK 变成 64 字节位图修复请求；`0x1005`
-在头部 +32 加入 64 位 stream id，并把头部扩到 48 字节；`0x1006` 把
-`FEC_CFG` 扩到 48 字节、把 `FEC_FBK` 变成 48 字节报告，并把 HELLO body[0]
-升到版本 3，用于自适应形状切换。`0x1007` 是多流版本：stream-local FEC
-seq/block id、32 字节 OPEN group bitmap 与 ALLOC (0x36)；HELLO body[0] 升到
-版本 4。0.2.x 与当前 wire 不互操作，首个 HELLO 即硬拒绝。
+当前 FEC wire 是 `0x1007`。`TBT_CONV 0x0006` 增加 FIN 的 16 字节 body
+（`pkt_end`/`pkt_base`，自 `0x0007` 起为 stream-local）；FEC `0x1002` 增加
+PARITY 空块 marker（`win_len=0`、`payload_len=0`、`epoch=0`）；`0x1003`
+把 ACK 扩到 24 字节并加入 `deliver_bytes`；`0x1004` 把 NACK 变成 64 字节
+位图修复请求；`0x1005` 在头部 +32 加入 64 位 stream id，并把头部扩到
+48 字节；`0x1006` 把 `FEC_CFG` 扩到 48 字节、把 `FEC_FBK` 变成 48 字节
+报告，并把 HELLO body[0] 升到版本 3，用于自适应形状切换。`0x1007` 是多流
+版本：stream-local FEC seq/block id、32 字节 OPEN group bitmap 与
+`FEC_ALLOC` (0x36)；HELLO body[0] 升到版本 4。`FEC_ALLOC` 只在 wire 格式中定义，
+0.4.0 数据面不发送也不消费它（见上文的并发流说明）。0.2.x 与当前 wire
+不互操作，首个 HELLO 即硬拒绝。
 `scripts/mkdkmsconf.sh` 派生
 `PACKAGE_VERSION="<major>.<minor>.<patch>"`；`dkms.conf` 是生成物，由
 `make dkms.conf` / `make dkms-tarball` 写出，不要手改。
@@ -133,7 +149,7 @@ seq/block id、32 字节 OPEN group bitmap 与 ALLOC (0x36)；HELLO body[0] 升�
 sudo insmod tbtun.ko debug_loss=0
 ```
 
-模块参数在加载后只读：
+模块参数（加载后只读，`hold_enable` 除外）：
 
 | 参数 | 默认值 | 含义 |
 |---|---|---|
@@ -142,6 +158,7 @@ sudo insmod tbtun.ko debug_loss=0
 | `max_carriers` | `256` | 每个会话的载体槽，`1..256`；`n + m` 或 `carriers` 超过上限返回 `EINVAL` |
 | `debug_loss` | `0` | 是否允许写 `drop_ppm`（确定性丢包注入） |
 | `hold_enable` | `1` | BBR hold：50 ms carrier poll 在空闲期后恢复上次的 cwnd/pacing。默认开启；写 `0` 关闭。它直接写 `tcp_sock` 字段，不是稳定的内核 API |
+| `fec_groups_per_flow` | `0` | 一条 FEC 流最多拥有的物理组数。`0` = 全部组（第一条流独占全部组，第二条并发流会被拒绝）。要接纳 `N` 条流，设为 `total_groups / N`，并在两端加载相同值。SC-LDPC 忽略它（始终单流） |
 
 控制面只在 `init_net` 中创建；没有 per-netns 视图。
 卸载用 `sudo rmmod tbtun`。卸载会清空所有隧道，关闭所有监听端口和载体。
@@ -307,7 +324,7 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 | `carrier_stall_ms` | `0` | stall 阈值的上限，毫秒，`0..3600000`；`0` 表示自动：5 × RTO（`SRTT + 4×RTTVAR`），钳制在 1..60 s。显式值只能调低自动阈值 |
 | `profile` | `http-kal` | `http-kal`、`http-kal-drip` 或 `raw` |
 | `fec` | `off` | `off`（旧 ARQ）或 `on`（FEC v6 数据面） |
-| `adaptive` | 跟随 `fec` | `on` 让 0.3.0 控制律在 `n + m = 8` 族内选择 `n/m`；`on` 需要 `fec=on`；不写时等于 `fec` |
+| `adaptive` | `rlnc`/`grouped` 跟随 `fec`；`sc-ldpc` 默认 off | `on` 让控制律选择 `n/m`：GF(2) 的 Phase 1 在 `n + m = 8` 族内，`mode=sc-ldpc` 则沿 SC-LDPC 码率阶梯；`on` 需要 `fec=on` |
 | `mode` | `rlnc` | `rlnc`（单组）、`grouped`（GF(2) band RLNC），或 `sc-ldpc`（下行 1×256 binary、上行 grouped GF(16)；`w` 是 codeword block） |
 | `w` | `0` | RLNC 窗口，`0..1024`；`0` 解析为 `2*n` |
 | `carriers` | `0` | 载体槽，`0..256`；`0` 解析为 `n + m`，但 `fec=on mode=grouped` 取不超过 64 的 `n + m` 最大整数倍；必须是 `n + m` 的整数倍 |
@@ -524,9 +541,10 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   SC-LDPC 控制器（默认 off）：0.4.3 起下行 1x256 与上行 8x32 均支持六档
   自适应切换；与旧 0.4.0..0.4.2 混跑时遇 CFG_NACK 自动静默守住 128/128。
   `adaptive=off` 保持配置的形状。
-- **多流 FEC v7。** 0.4.0 起一个会话可承载并发流（wire `0x1007`）；每条流有
-  自己的 FEC TX/RX flow 与 admission 引用。顺序连接仍会重置旧状态并关闭旧
-  target。
+- **多流 FEC v7。** 0.4.0 起，一个会话可在 `fec_groups_per_flow` 预留了组时
+  承载并发流（wire `0x1007`）；默认 `0` 会拒绝第二条流，SC-LDPC 始终单流。
+  每条流有自己的 FEC TX/RX flow 与 admission 引用。顺序连接仍会重置旧状态
+  并关闭旧 target。运行时重平衡未启用（0.4.0 的 `FEC_ALLOC` 仅存在于 wire）。
 - **每条远端隧道只有一个锚。** 一个 `peer=`（或第一条 HELLO）固定源地址。
   近端多宿主，或者 NAT 重绑源地址，都会让后续 HELLO 被拒绝（`join_src_reject`）；
   请保持一个稳定的源地址，例如用 `srcaddrs=`。
@@ -641,7 +659,8 @@ root。如果两台主机之间的路径不可信，就把隧道放进 WireGuard
 没有认证，也不支持 IPv6。FEC v6 可选（`fec=on`）；`mode=sc-ldpc` 已实现
 （binary 下行、grouped GF(16) 上行），`mode=rlnc`/`grouped` 保留为 GF(2)
 band RLNC 回退，`carriers = groups * (n + m)` 最多 256 条载体。0.4.0 支持
-多条并发 FEC 流（v7，`0x1007`）。
+多条并发 FEC 流（v7，`0x1007`），前提是 `fec_groups_per_flow` 预留了组；
+SC-LDPC 始终单流。
 `crypto=on` 只做 ChaCha8 body
 混淆，不是加密，也不做认证。它的用途是放大"每流限速"的额度，并验证某个
 QoS 档位是否有效。其它场景请用 WireGuard。

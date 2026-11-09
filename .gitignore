@@ -285,6 +285,8 @@ host/test_fec
 host/test_fec_san
 host/test_fec_out
 host/test_fec_out_san
+host/test_batch
+host/test_batch_san
 host/test_fec_rx
 host/test_fec_rx_san
 host/test_fec_switch
@@ -292,6 +294,7 @@ host/test_fec_switch_san
 host/test_fin_priority
 host/test_close_wake
 host/test_hold
+host/test_hold_san
 host/test_multistream
 host/test_anchor
 host/test_tx_index
@@ -315,9 +318,20 @@ host/test_fec_sclc_data_san
 host/test_close_wake_san
 host/test_fault
 host/test_fault_san
+host/test_invariants
+host/test_invariants_san
+host/test_mem_budget
+host/test_mem_budget_san
+host/test_wire_compat
+host/test_wire_compat_san
+host/test_tsan_race
 host/bench_sclc_uplink
 host/bench_sclc_downlink
 host/sim_sclc_adaptive
+host/bench_sclc_pipe
+host/test_rx_budget
+host/test_rx_budget_san
+host/bench_rx_stages
 # guest traffic checker (tests/qemu/mkinitramfs.sh)
 host/tbt_burst
 host/tbt_ping
@@ -342,6 +356,10 @@ tests/probe2/.tbt_probe2*
 tests/probe2/probe2_user
 tests/probe2/initramfs_probe2_user
 tests/probe2/arm_repair
+
+# RFC 9112 audit generator (make host-test, make host-test-san)
+tests/http_rfc9112_gen
+tests/http_rfc9112_gen_san
 
 # release staging (make dkms-tarball consumers)
 build/
