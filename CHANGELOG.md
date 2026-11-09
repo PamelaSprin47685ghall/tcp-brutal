@@ -93,6 +93,11 @@ and moves independently of the module version.
   session copies them (`source=inherited`) instead of generating a fresh
   key. This keeps the far's pinned key valid across session/stream churn and
   removes the G1 `crypto key changed` HELLO rejects. (0407b40)
+- SC-LDPC OPEN admission validates the group bitmap against the peer's RX
+  group count (the 256-bit wire map), not the local TX group count. A
+  1x256/L8 downlink (`groups=1`) now accepts the 8x32/L16 uplink's 8-group
+  OPEN instead of returning `-EPROTO`; the peer bitmap is installed into the
+  RX plane, and FEC_CFG INIT checks that its group count matches. (702e980)
 
 ### Changed
 

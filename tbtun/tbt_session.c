@@ -1118,7 +1118,8 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
                 return TBT_BIND_DROP;
             }
         }
-        if (memcmp(flow->group_mask, body, TBT_FEC_BITMAP_BYTES) != 0)
+        if (!tbt_fec_primary_mask_match(sess->fec_sclc, flow->group_mask,
+                                        body))
         {
             /* One sid, one bitmap. A repeated OPEN that renames the groups of
              * a live flow is refused; the local allocation stands. */

@@ -181,6 +181,32 @@ static inline bool tbt_fec_groups_fit(u16 total, u16 used, u16 count)
     return count && used <= total && count <= (u16)(total - used);
 }
 
+/* The single SC-LDPC primary binds the peer's bitmap without resizing its
+ * local TX plane; the RX shape is installed later by FEC_CFG INIT. Other
+ * modes keep the one-sid-one-bitmap rule. */
+static inline bool tbt_fec_primary_mask_match(bool sclc,
+                                              const u8 *flow_mask,
+                                              const u8 *open_mask)
+{
+    u16 i;
+
+    if (sclc)
+        return true;
+    for (i = 0; i < TBT_FEC_BITMAP_BYTES; i++)
+        if (flow_mask[i] != open_mask[i])
+            return false;
+    return true;
+}
+
+/* The SC-LDPC INIT shape names the same peer group count the OPEN bitmap
+ * selected. A full-1 bitmap (256 groups) or a single group does not describe
+ * an 8-group RX shape and must be refused when CFG INIT arrives. */
+static inline bool tbt_fec_open_groups_match(bool sclc, const u8 *mask,
+                                             u16 cfg_groups)
+{
+    return !sclc || tbt_fec_bitmap_count(mask) == cfg_groups;
+}
+
 /* A stream the TX work may use: not dead, still attached to the session, and
  * not inside its tombstone window.  A gracefully closed stream keeps state
  * OPEN after detach, so the state alone is not enough. */
@@ -967,6 +993,17 @@ static inline bool tbt_fec_group_mask_valid(const u8 mask[TBT_FEC_BITMAP_BYTES],
         return false;
     *count = n;
     return true;
+}
+
+/* SC-LDPC has one flow and asymmetric directions: the OPEN bitmap describes
+ * the peer's TX groups, which can exceed this side's local TX group count.
+ * Validate it against the 256-bit wire ceiling instead of the local pool. */
+static inline bool tbt_fec_open_mask_valid(bool sclc, u16 total,
+                                           const u8 *mask, u16 *count)
+{
+    return tbt_fec_group_mask_valid(mask,
+                                    sclc ? TBT_FEC_MAX_GROUPS : total,
+                                    count);
 }
 
 /* Fill map[] with the physical groups named by mask, in ascending order.
