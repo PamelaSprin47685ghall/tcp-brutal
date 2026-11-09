@@ -317,6 +317,7 @@ host/test_fault
 host/test_fault_san
 host/test_wire_compat
 host/test_wire_compat_san
+host/test_tsan_race
 host/bench_sclc_uplink
 host/bench_sclc_pipe
 host/test_rx_budget
