@@ -1232,7 +1232,8 @@ static inline u64 tbt_fec_seq_of_block_pkt(u64 block_id, u16 group, u16 p,
 #define TBT_FEC_NSEC_PER_MSEC 1000000ULL
 #define TBT_FEC_ALLOC_RETRY_MS 50u
 #define TBT_FEC_ALLOC_ABORT_MS 500u
-#define TBT_FEC_ALLOC_TIMEOUT_MS 2000u
+#define TBT_FEC_ALLOC_TIMEOUT_MS 15000u
+#define TBT_FEC_ALLOC_ADMIT_WAIT_MS 20000u
 #define TBT_FEC_ALLOC_RETRIES 3u
 
 /* Equal split of `total` groups over `n` flows, remainder to the lowest
@@ -1411,6 +1412,7 @@ struct tbt_fec_alloc_sm
     bool done_sent;      /* our DONE is on the wire */
     u64 start_ns;
     u64 last_send_ns;
+    u64 rx_progress;     /* last next_deliver seen by the step caller */
 };
 
 static inline void tbt_fec_alloc_sm_init(struct tbt_fec_alloc_sm *sm)
@@ -1422,6 +1424,7 @@ static inline void tbt_fec_alloc_sm_init(struct tbt_fec_alloc_sm *sm)
         sm->ack = sm->peer_done = sm->peer_committed = false;
         sm->rx_done = sm->tx_swapped = sm->done_sent = false;
         sm->start_ns = sm->last_send_ns = 0;
+        sm->rx_progress = 0;
     }
 }
 
@@ -1435,6 +1438,7 @@ static inline bool tbt_fec_alloc_sm_start(struct tbt_fec_alloc_sm *sm,
     sm->retries = 0;
     sm->start_ns = now;
     sm->last_send_ns = now;
+    sm->rx_progress = 0;
     sm->state = TBT_FEC_ALLOC_REQ;
     return true;
 }

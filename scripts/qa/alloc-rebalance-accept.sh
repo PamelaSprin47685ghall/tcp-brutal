@@ -517,9 +517,12 @@ preflight() {
         qa_check "${host}_idle" \
             "$([[ $(active_streams "$EV/$host-base-stats.txt") == 0 ]]; echo $?)" \
             "streams_active=0"
+        # data_init publishes the primary flow before any stream: with
+        # fec_groups_per_flow=0 it owns every group (used == total).
         qa_check "${host}_idle_groups" \
-            "$([[ $(field "$EV/$host-base-stats.txt" rebalance used) == 0 ]]; echo $?)" \
-            "used=$(field "$EV/$host-base-stats.txt" rebalance used)"
+            "$([[ $(field "$EV/$host-base-stats.txt" rebalance used) == \
+                  $(field "$EV/$host-base-stats.txt" rebalance total) ]]; echo $?)" \
+            "used=$(field "$EV/$host-base-stats.txt" rebalance used)/$(field "$EV/$host-base-stats.txt" rebalance total) (primary flow)"
         qa_check "${host}_has_alloc_fields" \
             "$(awk -v t="$TUNNEL" '$1=="tunnel" && $2==t && $3=="rebalance" {
                 for (i=1;i<=NF;i++) if ($i ~ /^allocator=/) f=1;
@@ -659,9 +662,10 @@ run_alloc() {
         qa_check "${host}_final_idle" \
             "$([[ $(active_streams "$EV/$host-final-stats.txt") == 0 ]]; echo $?)" \
             "streams_active=0"
-        qa_check "${host}_final_used0" \
-            "$([[ $(field "$EV/$host-final-stats.txt" rebalance used) == 0 ]]; echo $?)" \
-            "used=$(field "$EV/$host-final-stats.txt" rebalance used)"
+        qa_check "${host}_final_used_total" \
+            "$([[ $(field "$EV/$host-final-stats.txt" rebalance used) == \
+                  $(field "$EV/$host-final-stats.txt" rebalance total) ]]; echo $?)" \
+            "used=$(field "$EV/$host-final-stats.txt" rebalance used)/$(field "$EV/$host-final-stats.txt" rebalance total) (primary flow)"
     done
     delta_ge near_rebalance_begin6 "$EV/near-base-stats.txt" \
         "$EV/near-final-stats.txt" rebalance begin 6
