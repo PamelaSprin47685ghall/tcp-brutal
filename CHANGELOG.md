@@ -31,6 +31,34 @@ and moves independently of the module version.
   flag, `total`/`used` groups, and the begin/done/abort/retry/bad/overlap
   counters. `scripts/qa/alloc-rebalance-accept.sh` consumes both.
 
+### Fixed
+
+- The FEC_ALLOC exchange has bounded exits and correct duplicate accounting
+  after review. An applied RX plane is retired when a strictly newer epoch
+  arrives, and its buffers are freed only from `w_fec_rx` or a TX FINISH,
+  never under the carrier's `sk_lock`; a local FINISH releases the rollback
+  copy as well. An abandoned round no longer aborts from the session level:
+  the per-flow state machine owns ABORT, issues it only before an ACK,
+  retries a failed enqueue, and releases `alloc_role`/`alloc_hold` through
+  the normal `ACT_RESUME|ACT_FINISH` action. The HTTP container uses the
+  shared `tbt_fec_record_type()` gate, so an ALLOC chunk no longer reaches
+  the old-frame scanner, and the body rejects non-zero reserved bytes.
+- An armed allocation records its epoch, so a duplicate ACK is not counted
+  as an unknown future epoch. WAIT aborts at the old mask after the round
+  timeout; COMMIT starts its own timeout when the TX swaps, then releases
+  the role and keeps the new plane when COMMITTED is lost. A committed
+  peer's ABORT|ACK keeps an armed RX on the new plane and retires only its
+  rollback copy.
+
+### Known limitations
+
+- FEC_ALLOC retry still relies on the periodic tick. If all three ABORT
+  sends are lost, the far side keeps `alloc_role`/`alloc_hold` until the
+  flow is torn down, and ABORT|ACK has no independent retransmit. WAIT also
+  has no exit when the peer's DONE arrived but the local TX swap keeps
+  failing (for example on local allocation failure). These hold one flow,
+  not the session, and do not make the data plane unsafe.
+
 ## [0.4.3] - 2026-11-09
 
 ### Added
