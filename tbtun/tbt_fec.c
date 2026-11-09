@@ -989,12 +989,12 @@ int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], u16 carriers,
         if (c->w > 1 && c->d == c->w)
             return -EPROTO;
     }
-    /* groups is the carrier geometry: one share per carrier, so the body
-     * must name exactly this session's carrier count. The old rule divided
-     * a fixed 256 and refused every 32/64/128-carrier INIT and CFG. The
-     * codec factory stays the authority on which (n, m, groups) shapes are
+    /* groups is this flow's group count, not the session total: a multi-flow
+     * session gives each flow a subset. One share per carrier, so the flow's
+     * own carrier span must fit the announced session width. The codec
+     * factory stays the authority on which (n, m, groups) shapes are
      * buildable, including the downlink 1-group SC-LDPC block. */
-    if (!groups || (u32)groups * shares != carriers)
+    if (!groups || (u32)groups * shares > carriers)
         return -EPROTO;
     return 0;
 }

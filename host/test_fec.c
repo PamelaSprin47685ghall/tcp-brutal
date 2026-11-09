@@ -921,14 +921,14 @@ static void test_control(void)
     cbuf[TBT_FEC_CFG_M] = 1;
     cbuf[TBT_FEC_CFG_M + 1] = 0;
     cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO,
-           "CFG n+m does not divide 256");
+    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), 0,
+           "CFG n+m need not divide 256 per flow");
     tbt_fec_cfg_pack(&c, cbuf);
-    cbuf[TBT_FEC_CFG_GROUPS] = 31;
+    cbuf[TBT_FEC_CFG_GROUPS] = 33;
     cbuf[TBT_FEC_CFG_GROUPS + 1] = 0;
     cfg_fix_crc(cbuf);
     ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO,
-           "CFG groups != 256/(n+m)");
+           "CFG groups * (n+m) over 256 carriers");
     tbt_fec_cfg_pack(&c, cbuf);
     cbuf[TBT_FEC_CFG_K] = 0;
     cbuf[TBT_FEC_CFG_K + 1] = 0;
@@ -1094,13 +1094,16 @@ static void test_cfg_carriers(void)
                 cfg_rlnc_roundtrip(carriers, shares, what);
             }
 
-    /* b. The session carrier count is authoritative: a body that is valid
-     * for one count is refused for every other count. */
+    /* b. The session carrier count is a ceiling: a flow may name a subset of
+     * the session's groups, but never more carriers than the session. */
     cfg_rlnc_make(&c, 8, 4);
     ok_int(tbt_fec_cfg_pack(&c, body32), 0, "32-carrier body packs");
-    cfg_unpack_expect(body32, 64, -EPROTO, "32-carrier body on 64");
-    cfg_unpack_expect(body32, 128, -EPROTO, "32-carrier body on 128");
-    cfg_unpack_expect(body32, 256, -EPROTO, "32-carrier body on 256");
+    memset(&out, 0, sizeof(out));
+    ok_int(tbt_fec_cfg_unpack(body32, 64, &out), 0,
+           "32-carrier flow on 64");
+    ok_int((int)out.groups, 4, "per-flow groups survive a wider session");
+    cfg_unpack_expect(body32, 128, 0, "32-carrier flow on 128");
+    cfg_unpack_expect(body32, 256, 0, "32-carrier flow on 256");
 
     cfg_rlnc_make(&c, 8, 8);
     ok_int(tbt_fec_cfg_pack(&c, body64), 0, "64-carrier body packs");
@@ -1108,7 +1111,7 @@ static void test_cfg_carriers(void)
 
     cfg_rlnc_make(&c, 8, 16);
     ok_int(tbt_fec_cfg_pack(&c, body128), 0, "128-carrier body packs");
-    cfg_unpack_expect(body128, 256, -EPROTO, "128-carrier body on 256");
+    cfg_unpack_expect(body128, 256, 0, "128-carrier flow on 256");
 
     /* c. A zero or a one-too-large group count, and a carrier count
      * outside 1..256, are refused. */
@@ -1129,8 +1132,9 @@ static void test_cfg_carriers(void)
     cfg_unpack_expect(body32, 0, -EINVAL, "carriers=0");
     cfg_unpack_expect(body32, 257, -EINVAL, "carriers=257");
 
-    /* d. One downlink SC-LDPC block: 64, 128, and 256 carriers. The
-     * geometry is exact, so a body built for one width fails on the next. */
+    /* d. One downlink SC-LDPC block: 64, 128, and 256 carriers. The block is
+     * still one flow-local group; a wider session may carry it, a narrower
+     * one cannot. */
     cfg_down_make(&c, 32);
     ok_int(tbt_fec_cfg_pack(&c, body64), 0, "downlink 64 body packs");
     memset(&out, 0, sizeof(out));
@@ -1157,7 +1161,7 @@ static void test_cfg_carriers(void)
     ok(out.n == 128 && out.m == 128 && out.groups == 1,
        "downlink 256 body round-trips", NULL);
 
-    cfg_unpack_expect(body64, 128, -EPROTO, "downlink 64 body on 128");
+    cfg_unpack_expect(body64, 128, 0, "downlink 64 body on 128");
     cfg_unpack_expect(body128, 64, -EPROTO, "downlink 128 body on 64");
 
     /* e. Uplink GF(16): 32 shares per group and k=128 > w=16. */

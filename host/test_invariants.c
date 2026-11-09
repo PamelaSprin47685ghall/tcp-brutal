@@ -114,6 +114,8 @@ struct flow_rec
     u64 sid; /* 0 is the unbound primary */
     u16 groups;
     u8 mask[TBT_FEC_BITMAP_BYTES];
+    u8 rx_mask[TBT_FEC_BITMAP_BYTES];
+    bool primary_bound;
     u16 map[TBT_FEC_MAX_GROUPS];
 };
 
@@ -249,6 +251,11 @@ static void ledger_create(struct ledger *l, u64 sid,
     f->sid = sid;
     f->groups = count;
     memcpy(f->mask, mask, TBT_FEC_BITMAP_BYTES);
+    /* A freshly created RX plane has no peer bitmap yet. The primary bind
+     * must fill it; a zero mask here turns a forgotten copy into a failed
+     * assertion instead of silent stack garbage. */
+    memset(f->rx_mask, 0, sizeof(f->rx_mask));
+    f->primary_bound = false;
     built = tbt_fec_group_map_build(mask, l->total, f->map);
     if (built != count)
     {
@@ -276,6 +283,10 @@ static void ledger_admit_quota(struct ledger *l, u64 sid, u16 want,
             *rc = -EPROTO;
             return;
         }
+        /* tbt_fec_flow_admit(): the synchronous path has no peer bitmap, so
+         * the flow-local TX mask is the placeholder RX mask. */
+        memcpy(p->rx_mask, p->mask, TBT_FEC_BITMAP_BYTES);
+        p->primary_bound = true;
         p->sid = sid;
         *rc = 0;
         return;
@@ -310,6 +321,9 @@ static void ledger_admit_mask(struct ledger *l, u64 sid,
             *rc = -EPROTO;
             return;
         }
+        /* tbt_fec_flow_bind_primary_locked() installs the peer bitmap. */
+        memcpy(p->rx_mask, open, TBT_FEC_BITMAP_BYTES);
+        p->primary_bound = true;
         p->sid = sid;
         *rc = 0;
         return;
@@ -365,6 +379,9 @@ static void ledger_check(struct ledger *l)
         live_n++;
         ok(tbt_fec_group_mask_valid(f->mask, l->total, &count),
            "ledger: live mask is valid");
+        if (f->primary_bound)
+            ok(tbt_fec_bitmap_count(f->rx_mask) > 0,
+               "ledger: primary bind initializes the RX mask");
         eq64(count, f->groups, "ledger: mask count is the flow count");
         eq64(f->groups, tbt_fec_bitmap_count(f->mask),
              "ledger: bitmap count is the flow count");
