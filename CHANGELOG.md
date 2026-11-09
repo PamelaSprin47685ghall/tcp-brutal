@@ -3,6 +3,39 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.5.0] - unreleased
+
+### Changed
+
+- Uplink GF(16) SC-IRA moves to the Wire v8 bit-plane share mapping. The C
+  codewords split into 64-lane batches, every codeword of a batch uses the
+  same symbol->share map, and one symbol occupies four little-endian bit
+  planes of lanes/8 bytes. A lost share therefore erases one identical
+  variable set in all 64 lanes and one shared-control peel serves the
+  batch. The per-share symbol counts are solved at build time so every data
+  share still fills S bytes exactly; parity shares may keep a zero tail.
+  The bytes inside a share change, so the legacy symbol-interleaved layout
+  is not wire-compatible: both peers must take the Wire v8 cut.
+
+### Performance
+
+- Uplink GF(16) SC-IRA: the encoder keeps the 64-lane bit-sliced sweep
+  (four uint64 planes per variable, 4x4 GF(16) multiply masks) and the
+  gather/scatter become four plane loads and stores per symbol. The
+  decoder runs one peel and one dense GF(16) elimination for all 64 lanes
+  of a batch; scratch is preallocated with kvzalloc and no hot path
+  allocates. Host, pinned core, p=0.30: rate 1/4 encode 43.5 -> 400 MB/s,
+  decode 6.5 -> 373 MB/s; rate 1/2 encode 57 -> 622 MB/s, decode 16 ->
+  666 MB/s. At p=0.13 rate 11/16 encodes 121 -> 540 MB/s and decodes
+  32 -> 826 MB/s; at p=0.40 rate 3/8 decodes 7.8 -> 409 MB/s. The
+  eight-group rate-1/4 footprint is 8.75 MiB.
+- Paired BEC comparison (same block and share-loss mask, six rates,
+  p=0.10..0.45): the bit-plane block recovery is never below the legacy
+  mapping and is higher at the high-rate operating points (22/10 p=0.20
+  0.69 -> 0.73; 18/14 p=0.30 0.68 -> 0.72; 16/16 p=0.35 0.77 -> 0.79).
+  The codec now uses `sc_build`'s quantized parity count, so 18/14 and
+  22/10 do not map the 28/17 padding slots that the graph never solves.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

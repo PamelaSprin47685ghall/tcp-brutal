@@ -123,6 +123,9 @@ HOST_FAULT_HDRS := tbtun/tbt_fec.h tbtun/tbt_crypto.h tbtun/tbt_uapi.h
 HOST_BENCH_SCLC := host/bench_sclc_uplink
 HOST_BENCH_SCLC_SRCS := host/bench_sclc_uplink.c tbtun/tbt_sc_ldpc.c \
                    tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c
+HOST_BENCH_RECOVERY := host/bench_sclc_recovery
+HOST_BENCH_RECOVERY_SRCS := host/bench_sclc_recovery.c tbtun/tbt_sc_ldpc.c \
+                   tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c
 SAN_CFLAGS      := -g -fsanitize=address,undefined -fno-omit-frame-pointer
 
 obj-m           += tbtun.o
@@ -318,6 +321,15 @@ $(HOST_BENCH_SCLC): $(HOST_BENCH_SCLC_SRCS) $(HOST_SCLC_HDRS)
 host-bench-sclc: $(HOST_BENCH_SCLC)
 	@./$(HOST_BENCH_SCLC) 8 8 24 1 4 0.3
 	@./$(HOST_BENCH_SCLC) 8 8 24 1 4 0.4
+
+# Paired recovery comparison across the six uplink rate splits. A
+# measurement, not a gate: the same block and the same share-loss mask are
+# decoded with the legacy and the bit-plane mapping.
+$(HOST_BENCH_RECOVERY): $(HOST_BENCH_RECOVERY_SRCS) $(HOST_SCLC_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_BENCH_RECOVERY_SRCS)
+
+host-bench-recovery: $(HOST_BENCH_RECOVERY)
+	@./$(HOST_BENCH_RECOVERY)
 
 # The same tests with ASan and UBSan. A toolchain without the runtimes gets
 # a clear skip, not a build failure.

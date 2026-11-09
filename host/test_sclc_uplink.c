@@ -12,7 +12,8 @@
  *   - one lost share at a time (every data and parity position);
  *   - p=0.30/0.40/0.50 share loss, codeword and block recovery, replay;
  *   - grouped erasure (8 independent groups in one codec);
- *   - interleaved vs contiguous mapping A/B;
+ *   - bit-plane 64 (production) vs legacy interleaved recovery A/B;
+ *   - legacy interleaved vs contiguous mapping A/B;
  *   - the tbt_fec_ops adapter and parameter rejection.
  *
  *   make host-test
@@ -205,7 +206,7 @@ static void test_shapes(void)
         p.rate_num = shapes[s].rate_num;
         p.rate_den = shapes[s].rate_den;
         p.max_core = 256;
-        p.mapping = TBT_SCLC_MAP_INTERLEAVED;
+        p.mapping = TBT_SCLC_MAP_BITPLANE64;
         p.seed = 1;
         u = tbt_sclc_uplink_new(shapes[s].groups, &p);
         snprintf(what, sizeof(what), "%s: new", shapes[s].name);
@@ -246,7 +247,7 @@ static void test_roundtrip(void)
         p.rate_num = shapes[s].rate_num;
         p.rate_den = shapes[s].rate_den;
         p.max_core = 256;
-        p.mapping = TBT_SCLC_MAP_INTERLEAVED;
+        p.mapping = TBT_SCLC_MAP_BITPLANE64;
         p.seed = 1;
         u = tbt_sclc_uplink_new(shapes[s].groups, &p);
         ok(u != NULL, shapes[s].name, "codec allocation failed");
@@ -367,7 +368,7 @@ static void test_single_erasure(void)
         p.rate_num = shapes[s].rate_num;
         p.rate_den = shapes[s].rate_den;
         p.max_core = 256;
-        p.mapping = TBT_SCLC_MAP_INTERLEAVED;
+        p.mapping = TBT_SCLC_MAP_BITPLANE64;
         p.seed = 1;
         u = tbt_sclc_uplink_new(shapes[s].groups, &p);
         if (!u)
@@ -527,14 +528,14 @@ static void test_p_sweep(void)
     struct p_result r, primary;
 
     rng_seed(21);
-    r = run_p(1, 8, 24, 1, 4, TBT_SCLC_MAP_INTERLEAVED, 0.30, blocks, 256);
+    r = run_p(1, 8, 24, 1, 4, TBT_SCLC_MAP_BITPLANE64, 0.30, blocks, 256);
     printf("p=0.30 8x32 r1/4: codeword %.6f block %.4f\n", r.cw_rec,
            r.block_ok);
     ok(r.cw_rec >= 0.999, "p=0.30 r1/4 codeword recovery", "below 0.999");
     ok(r.block_ok >= 0.999, "p=0.30 r1/4 block recovery", "below 0.999");
 
     rng_seed(22);
-    primary = run_p(1, 8, 24, 1, 4, TBT_SCLC_MAP_INTERLEAVED, 0.40,
+    primary = run_p(1, 8, 24, 1, 4, TBT_SCLC_MAP_BITPLANE64, 0.40,
                     blocks4, 256);
     printf("p=0.40 8x32 r1/4: codeword %.6f block %.4f\n",
            primary.cw_rec, primary.block_ok);
@@ -550,7 +551,7 @@ static void test_p_sweep(void)
            primary.block_ok);
 
     rng_seed(23);
-    r = run_p(1, 8, 24, 1, 4, TBT_SCLC_MAP_INTERLEAVED, 0.50, blocks, 256);
+    r = run_p(1, 8, 24, 1, 4, TBT_SCLC_MAP_BITPLANE64, 0.50, blocks, 256);
     printf("p=0.50 8x32 r1/4: codeword %.6f block %.4f\n", r.cw_rec,
            r.block_ok);
     ok(r.cw_rec >= 0.90, "p=0.50 r1/4 codeword recovery", "below 0.90");
@@ -574,7 +575,7 @@ static void test_p_sweep(void)
         {
             rng_seed(30u + (u64)i);
             r = run_p(1, higher[i].n, higher[i].m, higher[i].rn,
-                      higher[i].rd, TBT_SCLC_MAP_INTERLEAVED, 0.40, blocks,
+                      higher[i].rd, TBT_SCLC_MAP_BITPLANE64, 0.40, blocks,
                       256);
             printf("p=0.40 8x32 %s: codeword %.6f block %.4f\n",
                    higher[i].name, r.cw_rec, r.block_ok);
@@ -582,6 +583,48 @@ static void test_p_sweep(void)
                "higher rate is not better than r1/4",
                "a higher-rate shape beat r1/4");
         }
+    }
+}
+
+/* The 64-lane mapping gives every codeword of a batch the same mask, so a
+ * block succeeds when a handful of batch masks decode instead of every
+ * legacy phase.  The shared-erasure bench (host-bench-recovery) records the
+ * full 6-rate x p grid; this guard keeps the production mapping from
+ * regressing against the legacy one at the p=0.30 operating point. */
+static void test_bitplane_recovery(void)
+{
+#ifdef __SANITIZE_ADDRESS__
+    const int blocks = 15;
+#else
+    const int blocks = 60;
+#endif
+    static const u16 n[6] = {8, 9, 12, 16, 18, 22};
+    static const u16 m[6] = {24, 23, 20, 16, 14, 10};
+    static const u16 d[6] = {64, 72, 96, 128, 144, 176};
+    int i;
+
+    for (i = 0; i < 6; i++)
+    {
+        struct p_result oldm, newm;
+        char what[96];
+
+        rng_seed(600u + (u64)i);
+        oldm = run_p(1, n[i], m[i], d[i], 256,
+                     TBT_SCLC_MAP_INTERLEAVED, 0.30, blocks, 256);
+        rng_seed(600u + (u64)i);
+        newm = run_p(1, n[i], m[i], d[i], 256,
+                     TBT_SCLC_MAP_BITPLANE64, 0.30, blocks, 256);
+        printf("mapping p=0.30 %u/%u: legacy cw %.4f block %.3f; "
+               "bitplane cw %.4f block %.3f\n",
+               n[i], m[i], oldm.cw_rec, oldm.block_ok, newm.cw_rec,
+               newm.block_ok);
+        snprintf(what, sizeof(what), "bitplane %u/%u recovery", n[i], m[i]);
+        /* These are unpaired finite-sample floors; the paired 6-rate sweep
+         * in host-bench-recovery is the precise comparison. */
+        ok(newm.cw_rec + 0.02 >= oldm.cw_rec, what,
+           "codeword recovery fell below the legacy mapping");
+        ok(newm.block_ok + 0.08 >= oldm.block_ok, what,
+           "block recovery fell below the legacy mapping");
     }
 }
 
@@ -622,7 +665,7 @@ static void test_grouped(void)
     p.rate_num = 1;
     p.rate_den = 4;
     p.max_core = 256;
-    p.mapping = TBT_SCLC_MAP_INTERLEAVED;
+    p.mapping = TBT_SCLC_MAP_BITPLANE64;
     p.seed = 1;
     u = tbt_sclc_uplink_new(8, &p);
     ok(u != NULL, "grouped: new 8 groups", "allocation failed");
@@ -711,6 +754,10 @@ static void test_ladder_shapes(void)
 {
     static const u16 n[6] = {8, 9, 12, 16, 18, 22};
     static const u16 m[6] = {24, 23, 20, 16, 14, 10};
+    /* sc_build rounds n_base down above rate 1/2, so the codec's parity
+     * count is 768 for 18/14 and 448 for 22/10, not the share-ratio
+     * estimate.  The wire keeps the extra slots as zero padding. */
+    static const u32 npar[6] = {3072, 2616, 1706, 1024, 768, 448};
     int i;
 
     for (i = 0; i < 6; i++)
@@ -726,12 +773,15 @@ static void test_ladder_shapes(void)
         p.rate_num = (u16)(n[i] * 256 / (n[i] + m[i]));
         p.rate_den = 256;
         p.max_core = 256;
-        p.mapping = TBT_SCLC_MAP_INTERLEAVED;
+        p.mapping = TBT_SCLC_MAP_BITPLANE64;
         p.seed = 1;
         u = tbt_sclc_uplink_new(8, &p);
         ok(u != NULL, "ladder: shape builds", "NULL");
         if (u)
+        {
+            ok_u32(tbt_sclc_uplink_n_par(u), npar[i], "ladder: n_par");
             tbt_sclc_uplink_free(u);
+        }
     }
 }
 
@@ -748,7 +798,7 @@ static void test_reject(void)
     p.rate_num = 7;
     p.rate_den = 16;
     p.max_core = 256;
-    p.mapping = TBT_SCLC_MAP_INTERLEAVED;
+    p.mapping = TBT_SCLC_MAP_BITPLANE64;
     p.seed = 1;
 
     u = tbt_sclc_uplink_new(0, &p);
@@ -774,6 +824,7 @@ int main(void)
     test_roundtrip();
     test_single_erasure();
     test_p_sweep();
+    test_bitplane_recovery();
     test_contiguous_ab();
     test_grouped();
     test_ops();

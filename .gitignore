@@ -301,6 +301,7 @@ host/test_fec_sclc_san
 host/test_fec_sclc_data
 host/test_fec_sclc_data_san
 host/bench_sclc_uplink
+host/bench_sclc_recovery
 # guest traffic checker (tests/qemu/mkinitramfs.sh)
 host/tbt_burst
 host/tbt_ping
