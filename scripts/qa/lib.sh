@@ -13,7 +13,7 @@
 QA_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 QA_REPO=$(cd -- "$QA_DIR/../.." && pwd)
 
-NEAR_HOST=${NEAR_HOST:-root@192.168.123.82}
+NEAR_HOST=${NEAR_HOST:-root@192.168.123.85}
 FAR_HOST=${FAR_HOST:-root@45.11.1.62}
 FAR_IP=${FAR_IP:-45.11.1.62}
 NEAR_PORT=${NEAR_PORT:-9001}

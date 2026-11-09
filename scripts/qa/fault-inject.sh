@@ -35,7 +35,7 @@
 #   - Run this on the test pair only. The near app is live during the run.
 #
 # Environment
-#   NEAR_HOST=root@192.168.123.82   FAR_HOST=root@45.11.1.62
+#   NEAR_HOST=root@192.168.123.85   FAR_HOST=root@45.11.1.62
 #   FAR_IP=45.11.1.62               NEAR_PORT=9001
 #   FAR_PORT=5210                   TUNNEL=1
 #   SSH_TMO=20                      PROC_ROOT=/proc/net/tbtun
