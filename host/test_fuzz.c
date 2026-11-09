@@ -1,6 +1,6 @@
 /* test_fuzz.c - hostile-input tests for the peer-controlled parsers:
  * tbt_rec_scan() (record framing), tbt_hdr_check() (header validation),
- * tbt_fec_alloc_unpack()/tbt_fec_cfg_unpack() (0.6.0 v9 control bodies) and
+ * tbt_fec_cfg_unpack() (0.7.0 control bodies) and
  * tbt_parse_line() (the /proc config grammar).
  *
  * Deterministic: xorshift64 seeded with 1, no fixtures, no external
@@ -24,11 +24,8 @@
  *     0..TBT_PAYLOAD_MAX, with the accepted set compared against DESIGN.md
  *     §3.3's bounds, plus one accept/reject pair per range rule (path_id,
  *     path_ack_count, path_ack_mask, flags, sid_hi, reserved2, conv).
- *   - 20k mutated FEC_ALLOC bodies: random mask flips, all-zero/all-one
- *     masks, every flag value, reserved bytes and reserved2, CRC faults and
- *     a full pack/unpack round trip for every accepted body.
  *   - 40k mutated FEC_CFG bodies seeded from the RLNC, SC-LDPC binary and
- *     SC-LDPC GF(16) profiles: 64-byte v9 bodies with a prefix CRC over
+ *     SC-LDPC GF(16) profiles: 64-byte bodies with a prefix CRC over
  *     +0..+39 and a second CRC over the +48..+55 extension, bombarding n=0,
  *     m=0, n+m=65536, n+m>256, groups=0 and groups*shares>256; every verdict
  *     is compared with an independent reading of the documented rules, and
@@ -245,7 +242,7 @@ static void test_bounds_table(void)
 
     case_no++;
     check(TBT_HDR_LEN == 32 && TBT_CHUNK_MAX == 8228 && TBT_REC_MAX == 8224 &&
-              TBT_CONV == 0x0009 && TBT_WIRE_VERSION_V6 == 6,
+              TBT_CONV == 0x000a && TBT_WIRE_VERSION_V6 == 7,
           "design constants", NULL);
     for (i = 0; i < sizeof(want) / sizeof(want[0]); i++)
     {
@@ -1003,186 +1000,7 @@ static void test_body_lengths(void)
 }
 
 /* ------------------------------------------------------------------------- */
-/* 0.6.0 v9 control bodies and the /proc config grammar. */
-
-#define ALLOC_FUZZ 20000
-
-static void alloc_fix_crc(u8 *buf)
-{
-    tbt_put_le32(buf + TBT_FEC_ALLOC_CRC,
-                 tbt_fec_crc32c(0, buf, TBT_FEC_ALLOC_CRC_BYTES));
-}
-
-static int alloc_unpack_copy(const u8 *src, struct tbt_fec_alloc *a)
-{
-    u8 *copy = malloc(TBT_FEC_ALLOC_LEN);
-    int rc;
-
-    if (!copy)
-    {
-        printf("FAIL seed=1 case=%lu: out of memory\n", case_no);
-        exit(2);
-    }
-    memcpy(copy, src, TBT_FEC_ALLOC_LEN);
-    rc = tbt_fec_alloc_unpack(copy, a);
-    free(copy);
-    return rc;
-}
-
-static void alloc_expect(const char *what, const u8 *buf, int want)
-{
-    struct tbt_fec_alloc a;
-    int rc = alloc_unpack_copy(buf, &a);
-
-    checks++;
-    if (rc != want)
-    {
-        failures++;
-        printf("FAIL seed=1 case=%lu: %s: want %s, got %d\n", case_no, what,
-               want ? "EPROTO" : "OK", rc);
-    }
-}
-
-static void alloc_seed(struct tbt_fec_alloc *a)
-{
-    memset(a, 0, sizeof(*a));
-    a->epoch = 1;
-    tbt_fec_bitmap_set(a->group_mask, 0);
-    tbt_fec_bitmap_set(a->group_mask, 5);
-    tbt_fec_bitmap_set(a->group_mask, 255);
-    a->flags = TBT_FEC_ALLOC_F_ACK;
-    a->switch_pkt = 0x1122334455667788ull;
-    a->block_base = 0x0102030405060708ull;
-}
-
-/* FEC_ALLOC (0x36): every mask shape, every flag value, every reserved byte,
- * both CRCs and 20k random bodies. An accepted body must repack unchanged. */
-static void test_alloc_body(void)
-{
-    static const u8 extra[] = { 1, 0x80, 0xff };
-    struct tbt_fec_alloc a, b;
-    u8 seed[TBT_FEC_ALLOC_LEN], buf[TBT_FEC_ALLOC_LEN], out[TBT_FEC_ALLOC_LEN];
-    unsigned i, p, k;
-
-    case_no++;
-    check(TBT_FEC_ALLOC == 0x36 && TBT_FEC_ALLOC_LEN == 64 &&
-              TBT_FEC_ALLOC_CRC_BYTES == 56 && TBT_FEC_BITMAP_BYTES == 32,
-          "ALLOC wire constants", NULL);
-
-    alloc_seed(&a);
-    case_no++;
-    check(tbt_fec_alloc_pack(&a, seed) == TBT_FEC_ALLOC_LEN,
-          "ALLOC pack length", NULL);
-    alloc_expect("ALLOC seed", seed, 0);
-
-    memset(&b, 0, sizeof(b));
-    case_no++;
-    check(alloc_unpack_copy(seed, &b) == 0 && b.epoch == a.epoch &&
-              b.flags == a.flags && b.switch_pkt == a.switch_pkt &&
-              b.block_base == a.block_base &&
-              !memcmp(b.group_mask, a.group_mask, TBT_FEC_BITMAP_BYTES),
-          "ALLOC round trip", NULL);
-
-    /* The bitmap is opaque here, but it must name at least one group. */
-    memcpy(buf, seed, sizeof(buf));
-    memset(buf + TBT_FEC_ALLOC_GROUPS, 0, TBT_FEC_BITMAP_BYTES);
-    alloc_fix_crc(buf);
-    case_no++;
-    alloc_expect("ALLOC empty group mask", buf, -EPROTO);
-
-    memcpy(buf, seed, sizeof(buf));
-    memset(buf + TBT_FEC_ALLOC_GROUPS, 0xff, TBT_FEC_BITMAP_BYTES);
-    alloc_fix_crc(buf);
-    case_no++;
-    alloc_expect("ALLOC all-one group mask", buf, 0);
-
-    for (p = 0; p < TBT_FEC_MAX_CARRIERS; p++)
-    {
-        memcpy(buf, seed, sizeof(buf));
-        memset(buf + TBT_FEC_ALLOC_GROUPS, 0, TBT_FEC_BITMAP_BYTES);
-        buf[TBT_FEC_ALLOC_GROUPS + p / 8] = (u8)(1u << (p % 8));
-        alloc_fix_crc(buf);
-        case_no++;
-        alloc_expect("ALLOC single-bit group mask", buf, 0);
-    }
-
-    for (i = 0; i < 256; i++)
-    {
-        memcpy(buf, seed, sizeof(buf));
-        buf[TBT_FEC_ALLOC_FLAGS] = (u8)i;
-        alloc_fix_crc(buf);
-        case_no++;
-        alloc_expect("ALLOC flags", buf,
-                     (i & ~TBT_FEC_ALLOC_F_MASK) ? -EPROTO : 0);
-    }
-
-    for (i = 0; i < 3; i++)
-        for (k = 0; k < sizeof(extra); k++)
-        {
-            memcpy(buf, seed, sizeof(buf));
-            buf[TBT_FEC_ALLOC_RESERVED + i] = extra[k];
-            alloc_fix_crc(buf);
-            case_no++;
-            alloc_expect("ALLOC reserved byte", buf, -EPROTO);
-        }
-
-    for (i = 0; i < 4; i++)
-        for (k = 0; k < sizeof(extra); k++)
-        {
-            memcpy(buf, seed, sizeof(buf));
-            buf[TBT_FEC_ALLOC_RESERVED2 + i] = extra[k];
-            alloc_fix_crc(buf);
-            case_no++;
-            alloc_expect("ALLOC reserved2 byte", buf, -EPROTO);
-        }
-
-    for (i = 0; i < 4; i++)
-    {
-        memcpy(buf, seed, sizeof(buf));
-        buf[TBT_FEC_ALLOC_CRC + i] ^= 0xff;
-        case_no++;
-        alloc_expect("ALLOC CRC byte", buf, -EPROTO);
-    }
-    for (i = 0; i < TBT_FEC_ALLOC_CRC_BYTES; i++)
-    {
-        memcpy(buf, seed, sizeof(buf));
-        buf[i] ^= 0x01;
-        case_no++;
-        alloc_expect("ALLOC body bit flip", buf, -EPROTO);
-    }
-
-    for (i = 0; i < ALLOC_FUZZ; i++)
-    {
-        unsigned muts = 1 + (unsigned)rnd_below(6);
-        int crc_ok, mask_ok, flags_ok, res_ok, want;
-
-        case_no++;
-        memcpy(buf, seed, sizeof(buf));
-        while (muts--)
-            buf[rnd_below(TBT_FEC_ALLOC_LEN)] ^= (u8)(1 + rnd_below(255));
-        if (rnd64() & 3)
-            alloc_fix_crc(buf);
-        crc_ok = tbt_le32(buf + TBT_FEC_ALLOC_CRC) ==
-                 tbt_fec_crc32c(0, buf, TBT_FEC_ALLOC_CRC_BYTES);
-        mask_ok = tbt_fec_bitmap_count(buf + TBT_FEC_ALLOC_GROUPS) != 0;
-        flags_ok = !(buf[TBT_FEC_ALLOC_FLAGS] & ~TBT_FEC_ALLOC_F_MASK);
-        res_ok = !buf[TBT_FEC_ALLOC_RESERVED] &&
-                 !buf[TBT_FEC_ALLOC_RESERVED + 1] &&
-                 !buf[TBT_FEC_ALLOC_RESERVED + 2] &&
-                 tbt_le32(buf + TBT_FEC_ALLOC_RESERVED2) == 0;
-        want = (crc_ok && mask_ok && flags_ok && res_ok) ? 0 : -EPROTO;
-        alloc_expect("ALLOC random body", buf, want);
-        if (!want)
-        {
-            memset(&b, 0, sizeof(b));
-            case_no++;
-            check(alloc_unpack_copy(buf, &b) == 0 &&
-                      tbt_fec_alloc_pack(&b, out) == TBT_FEC_ALLOC_LEN &&
-                      !memcmp(out, buf, TBT_FEC_ALLOC_LEN),
-                  "ALLOC accepted body repacks", NULL);
-        }
-    }
-}
+/* 0.7.0 control bodies and the /proc config grammar. */
 
 #define CFG_FUZZ 40000
 #define PARSE_FUZZ 8000
@@ -1219,7 +1037,7 @@ struct cfg_seed
     u32 rate_ppm;
 };
 
-/* Three legal v9 shapes, one per codec encoding the FEC_CFG body names. The
+/* Three legal shapes, one per codec encoding the FEC_CFG body names. The
  * SC-LDPC rows keep w/k/d zero on the wire: their graph lives in the
  * extension. */
 static const struct cfg_seed cfg_seeds[3] = {
@@ -1388,7 +1206,7 @@ static int cfg_shape_is_usable(const struct tbt_fec_cfg *c)
            c->d && c->d <= c->w && !(c->w > 1 && c->d == c->w);
 }
 
-/* FEC_CFG (0x34): the v9 codec variants, the zero and overflow edges that
+/* FEC_CFG (0x34): the codec variants, the zero and overflow edges that
  * would divide by zero downstream, both CRCs, and 40k mutations checked
  * against cfg_doc_accepts(). */
 static void test_cfg_body(void)
@@ -1398,7 +1216,7 @@ static void test_cfg_body(void)
     unsigned i, s;
 
     case_no++;
-    check(TBT_FEC_CFG_LEN == 64 && TBT_FEC_CONV == 0x1009u &&
+    check(TBT_FEC_CFG_LEN == 64 && TBT_FEC_CONV == 0x100au &&
               TBT_FEC_CFG_CRC_BYTES == 40 &&
               TBT_FEC_CFG_CRC_EXT_BYTES == 8 &&
               TBT_FEC_CFG_RESERVED2 == 60 && TBT_FEC_MAX_SHARES == 256,
@@ -2072,13 +1890,12 @@ int main(void)
     test_adversarial();
     test_random_buffers();
     test_body_lengths();
-    test_alloc_body();
     test_cfg_body();
     test_parse_bomb();
 
     printf("test_fuzz: seed=1 checks=%ld failures=%d buffers=%d bodies=%d"
-           " alloc=%d cfg=%d parse=%d\n",
-           checks, failures, FUZZ_BUFFERS, FUZZ_BODY_LENGTHS, ALLOC_FUZZ,
-           CFG_FUZZ, PARSE_FUZZ);
+           " cfg=%d parse=%d\n",
+           checks, failures, FUZZ_BUFFERS, FUZZ_BODY_LENGTHS, CFG_FUZZ,
+           PARSE_FUZZ);
     return failures ? 1 : 0;
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # qemu-e2e-smoke.sh - boot a real kernel in QEMU, load tbtun.ko, and drive the
-# 0.6.0 data plane through the operator surface before any real machine does.
+# 0.7.0 data plane through the operator surface before any real machine does.
 #
 #   scripts/qemu-e2e-smoke.sh                 # 7.0.14, cached under ~/.cache
 #   scripts/qemu-e2e-smoke.sh --kernel 6.12.116
@@ -17,9 +17,9 @@
 #   * a 256-carrier SC-LDPC pair (far TX 1x256, near TX 8x32) comes up over
 #     profile=http-kal, and three sequential streams carry 128 KiB
 #     byte-exact with streams_active=0 in between;
-#   * six client streams share that one plane at once: four bulk streams move
-#     6 MiB per direction (past the 4 MiB plane credit), one 50 KiB stream
-#     closes with a forced tail MS_WIN, and one resets mid-stream;
+#   * one bulk stream moves 6 MiB per direction past the 4 MiB plane credit,
+#     one 50 KiB stream closes with a forced short tail, and one resets
+#     mid-stream;
 #   * del + delete_module return inside the deadline (no D state), the module
 #     leaves /proc/modules, and the kernel log gained no UBSAN, BUG, Oops,
 #     WARNING, lockdep or stall report.

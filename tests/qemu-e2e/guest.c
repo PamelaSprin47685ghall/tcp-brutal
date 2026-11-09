@@ -16,11 +16,10 @@
  *   3. SC-LDPC GF(16) BITPLANE64 uplink: an n=8 m=24, block=128 L=16 pair
  *      (8 groups of 32 shares) carries one byte-exact roundtrip through the
  *      production TBT_SCLC_MAP_BITPLANE64 encoder and decoder.
- *   4. SC-LDPC single-plane multistream over profile=http-kal: the 1x256
- *      downlink / 8x32 uplink pair carries three sequential streams, then
- *      six concurrent streams on the one plane.  Four bulk streams move
- *      6 MiB per direction (past the 4 MiB plane credit), one 50 KiB stream
- *      closes with a forced tail MS_WIN, and one resets mid-stream; the RST
+ *   4. SC-LDPC single-stream over profile=http-kal: the 1x256 downlink /
+ *      8x32 uplink pair carries sequential streams. One bulk stream moves
+ *      6 MiB per direction past the 4 MiB plane credit, one 50 KiB stream
+ *      closes with a forced short tail, and one resets mid-stream; the RST
  *      must cross the plane on both ends.
  *   5. del both tunnels and delete_module.  The unload must return within the
  *      deadline (no D-state hang), and the kernel log must hold no UBSAN,
@@ -1304,7 +1303,7 @@ int main(void)
     /* --- phase 4 (burst): six streams, a 50 KiB tail and a reset -------- *
      * The bulk total is 4 x 1.5 MiB = 6 MiB per direction, past the 4 MiB
      * plane credit. The short stream is shorter than one window, so only the
-     * forced MS_WIN at FIN can close its sender gate. */
+     * forced short tail at FIN can close its sender gate. */
     {
         pid_t kids[CONCURRENCY];
         uint32_t seeds[CONCURRENCY];
@@ -1381,7 +1380,7 @@ int main(void)
         printf("QEMU_E2E_SHORT bytes=%u ok\n", SHORT_BYTES);
         fflush(stdout);
 
-        /* The MS_WIN records must survive the HTTP container dispatch. */
+        /* Per-stream control records must survive the HTTP container dispatch. */
         if (stats_line(2, "c8", line, sizeof(line)) ||
             line_kv(line, "http_req", &http_req))
             verdict_fail("near c8 unreadable");

@@ -37,8 +37,6 @@
 #include "tbt_uapi.h"
 /* The adaptive shape/switch structs and their mapping helpers. */
 #include "tbt_fec.h"
-/* The pure mux core also owns the shared-plane admission ledger. */
-#include "tbt_fec_ms.h"
 #include <linux/version.h>
 
 /* system_dfl_wq exists from 6.5. Its documented semantics are "unbound, not
@@ -720,29 +718,12 @@ struct tbt_fec_flow;
 struct tbt_fec_drain;
 struct tbt_fec_adapt_sclc_ctl;
 struct tbt_fec_adapt_sclc_est;
-struct tbt_ms_tx;
-struct tbt_ms_rx;
-
-/* One side of an FEC_ALLOC switch: the physical group set a flow will own
- * after the exchange, plus the flow-local packet/block origin of the first
- * record sent on that set. It is shared by the two TX roles (initiator and
- * responder) and by the pending RX switch. */
-struct tbt_fec_alloc_flow
-{
-    u32 epoch;
-    u8 mask[TBT_FEC_BITMAP_BYTES];
-    u16 map[TBT_FEC_MAX_GROUPS];
-    u16 groups;
-    u64 pkt;
-    u64 block;
-};
-
 struct tbt_fec_tx
 {
     /* This plane belongs to one stream. `sid` is the routing key; the group
      * map turns a local group index (0..groups-1) into the physical group
      * that owns the carrier. Both ends derive the same map from the bitmap
-     * OPEN/ALLOC carried. */
+     * the OPEN carried. */
     u64 sid;
     u8 group_mask[TBT_FEC_BITMAP_BYTES];
     u16 group_map[TBT_FEC_MAX_GROUPS];
@@ -861,34 +842,6 @@ struct tbt_fec_tx
     u64 fail_win_ns;     /* start of the current r_fail window */
     u64 fail_req_last;
     u64 fail_pkts_last;
-    /* Dynamic group rebalance (FEC_ALLOC). The near side is the only
-     * initiator; the far side holds the same flow's TX at P0 and answers.
-     * alloc_target is the new set our own TX will use; alloc_peer is the
-     * peer's TX origin, which becomes our RX base. All fields are read by
-     * carrier RX and written by carrier RX/w_fec_tx under alloc_lock except
-     * the ones only the TX work touches. */
-    struct tbt_fec_alloc_sm alloc;
-    spinlock_t alloc_lock;
-    struct tbt_fec_alloc_flow alloc_target;
-    struct tbt_fec_alloc_flow alloc_peer;
-    u8 alloc_role; /* 0 none, 1 initiator (near), 2 responder (far) */
-    bool alloc_hold; /* packetizer stopped at alloc_target.pkt */
-    bool alloc_remote_req; /* responder: REQUEST waiting for w_fec_tx */
-    bool alloc_ack_sent;   /* responder: ACK sent for alloc_target.epoch */
-    bool alloc_committed;  /* responder: TX swapped; COMMITTED sent */
-    bool alloc_commit_pending; /* responder: peer DONE, swap in w_fec_tx */
-    bool alloc_ack_resend;     /* responder: repeat the last ACK */
-    bool alloc_committed_resend; /* responder: repeat COMMITTED */
-    bool alloc_abort_pending; /* responder: ABORT received */
-    bool alloc_fail;       /* this flow's exchange failed */
-    /* SC-LDPC multistream (0.5.0): the packetizer packs whole subframe
-     * blocks from the session mux instead of this plane's capture ring.
-     * Only w_fec_tx touches these; the mux object itself is serialised by
-     * ms_lock against the softirq capture path and window updates. */
-    spinlock_t ms_lock;
-    const u8 *ms_blk; /* block returned by tbt_ms_tx_block() */
-    u32 ms_blk_len;
-    u32 ms_blk_off;
 };
 
 struct tbt_session;
@@ -904,10 +857,6 @@ struct tbt_fec_rx
     struct tbt_fec_flow *flow;
     bool closing;
     spinlock_t lock; /* carrier rx works assemble blocks concurrently */
-    /* Serialises the SC-LDPC mux legs: attach/detach open/close them from
-     * stream work, while w_fec_rx feeds and drains them. All are process
-     * context, so a mutex lets leg allocation stay GFP_KERNEL. */
-    struct mutex ms_lock;
     u16 n, m, s;
     u16 groups;
     u16 slots; /* block slots per group */
@@ -1048,28 +997,6 @@ struct tbt_fec_rx
     /* The stream's first shape, for FIN alignment across a switch. */
     u64 stream_span;
     u64 stream_base_pkt;
-    /* Pending RX side of an FEC_ALLOC switch. The target is applied by
-     * w_fec_rx once next_deliver reaches pkt, because the old mask must
-     * place every record below that point first. The old plane is kept
-     * until the first new-mask record commits the switch, so an ABORT can
-     * restore it without reallocating. */
-    struct tbt_fec_alloc_flow alloc;
-    u8 alloc_state; /* 0 none, 1 prep, 2 armed, 3 applied */
-    bool alloc_commit_pending; /* first new-mask record: free old plane */
-    bool alloc_abort_pending;  /* ABORT: restore old plane, reply */
-    bool alloc_done_resend;    /* responder: repeat DONE */
-    bool alloc_done_sent;      /* responder: DONE sent for this epoch */
-    u32 alloc_epoch;           /* last applied generation */
-    u32 alloc_abort_epoch;     /* tombstone: an ABORT cancelled this one */
-    struct tbt_fec_grouped *alloc_old_codec;
-    struct tbt_fec_blk *alloc_old_blk;
-    u64 *alloc_old_req_ns;
-    u64 *alloc_old_req_block;
-    u8 alloc_old_mask[TBT_FEC_BITMAP_BYTES];
-    u16 alloc_old_map[TBT_FEC_MAX_GROUPS];
-    u16 alloc_old_groups;
-    u64 alloc_old_base_pkt;
-    u64 alloc_old_base_block;
 };
 
 /* One live FEC stream in a session. The session owns a hash of these keyed by
@@ -1090,11 +1017,6 @@ struct tbt_fec_flow
     /* 0 = free slot, 1 = active, 2 = draining, 3 = dead. Only the control
      * path writes it; carrier RX reads it to refuse a dying flow. */
     u8 state;
-    /* SC-LDPC shared plane: pending counts admitted references that have
-     * not attached yet; refs counts attached mux legs. The plane is
-     * unlinked only when both reach zero. A duplicate OPEN takes a pending
-     * slot and must give it back through tbt_fec_flow_abort(). */
-    struct tbt_ms_admit admit;
     struct tbt_fec_tx *tx;
     struct tbt_fec_rx *rx;
     /* Final reference may be dropped by a carrier RX lookup, where freeing a
@@ -1339,44 +1261,9 @@ struct tbt_session
     u8 fec_d;
     bool fec_sclc;
     struct tbt_fec_sclc_shape fec_sclc_shape;
-    /* SC-LDPC carries every stream on one FEC plane, so the payload byte
-     * stream is multiplexed: one TX packer and one RX parser per session.
-     * The shared flow's admission ledger counts admitted carriers and
-     * attached legs; the flow is destroyed only when both reach zero. */
-    struct tbt_ms_tx *fec_ms_tx;
-    struct tbt_ms_rx *fec_ms_rx;
-    /* Diagnostic counters for the subframe layer (0.5.0). */
-    atomic64_t fec_ms_parse_bad;
-    atomic64_t fec_ms_win_tx;
-    atomic64_t fec_ms_win_rx;
-    atomic64_t fec_ms_fin;
-    atomic64_t fec_ms_rst;
-    atomic64_t fec_ms_credit_wait;
     /* Serialises flow admission: the group check and the plane allocation
      * must not interleave between two carriers' OPEN handlers. */
     struct mutex fec_alloc_lock;
-    /* Dynamic group rebalance (FEC_ALLOC). The near side is the only
-     * allocator. An admission round is driven from w_fec_tx while the
-     * caller sleeps on fec_rebalance_lock; the async growth after a detach
-     * uses the same round machinery without a waiter. Round fields are
-     * mutated under sess->lock; a per-flow switch lives in its TX/RX
-     * planes. */
-    struct mutex fec_rebalance_lock;
-    bool fec_allocator;      /* near side: owns the group split */
-    bool fec_alloc_admit;    /* a dynamic admission owns the free pool */
-    bool fec_alloc_round;    /* a round is in flight */
-    bool fec_alloc_req;      /* an admission is waiting for a round */
-    bool fec_alloc_failed;   /* the last round could not complete */
-    bool fec_alloc_grow;     /* a flow left: grow the survivors */
-    u8 fec_alloc_grow_tries; /* bounded retries of a failed grow round */
-    u32 fec_alloc_epoch;     /* next allocation generation */
-    u16 fec_alloc_flows;     /* flows expected to finish this round */
-    u16 fec_alloc_finished;  /* flows that reached DONE/FAILED */
-    u64 fec_alloc_deadline_ns;
-    u64 fec_alloc_pending_sid; /* admission waiting for a result */
-    struct tbt_fec_alloc_flow fec_alloc_pending; /* reserved new-flow mask */
-    bool fec_alloc_pending_valid;
-    bool fec_alloc_has_pending; /* this round also reserves a new flow */
     /* Round-robin cursor for the TX/RX work bodies. */
     u16 fec_rr;
     /* Control-record rotation and teardown flag: session resources, not per
@@ -1418,10 +1305,9 @@ struct tbt_session
      * yet. See review/s2-merged-design.md §1.3 and §2.3. */
     struct delayed_work w_fec_rx;
     /* Ref snapshots for the work bodies. Each slot has one owner: the FEC
-     * TX work, the FEC RX work, the FBK coalescer, the pump (under
-     * pump_lock) and w_fbk. Keeping them on the session means no body needs
-     * a TBT_STREAMS_MAX pointer array on the kernel stack. */
-    struct tbt_fec_flow *fec_tx_snap[TBT_STREAMS_MAX];
+     * RX work, the FBK coalescer and w_fbk. Keeping them on the session
+     * means no body needs a TBT_STREAMS_MAX pointer array on the kernel
+     * stack. */
     struct tbt_fec_flow *fec_rx_snap[TBT_STREAMS_MAX];
     struct tbt_fec_flow *fec_fbk_snap[TBT_STREAMS_MAX];
     spinlock_t fec_fbk_lock; /* protects fec_fbk_busy and fec_fbk_pending */
@@ -1860,15 +1746,6 @@ struct tbt_session
     atomic64_t fec_switch_done;
     atomic64_t fec_switch_abort;
     atomic64_t fec_switch_rollback;
-    /* Dynamic group rebalance health: rounds started/finished/aborted,
-     * REQUEST retransmissions, a peer answer that named an unknown epoch,
-     * and a new mask that overlapped a live flow. */
-    atomic64_t fec_alloc_begin;
-    atomic64_t fec_alloc_done;
-    atomic64_t fec_alloc_abort;
-    atomic64_t fec_alloc_retry;
-    atomic64_t fec_alloc_bad;
-    atomic64_t fec_alloc_overlap;
     /* A share sits in a slot the block's stated cut says holds no stream
      * byte: the sender's win_len and its own DATA records disagree. Skipping
      * the slot would delete its payload while the ACK ran past it, so the
@@ -2284,15 +2161,10 @@ void tbt_fec_flow_put(struct tbt_fec_flow *f);
 /* Bind a stream to its flow (one reference moves to the stream) and release
  * it at detach. A nonzero return consumed the admission reference already. */
 int tbt_fec_flow_attach(struct tbt_stream *st, struct tbt_fec_flow *f);
-/* Take one admission slot for a stream whose flow came from lookup. Fails
- * with -ESTALE when the plane died before the slot could be counted. */
+/* Check that a flow found by lookup is still alive. -ESTALE means it died. */
 int tbt_fec_flow_claim_slot(struct tbt_session *sess, struct tbt_fec_flow *f);
 void tbt_fec_flow_abort(struct tbt_session *sess, struct tbt_fec_flow *f);
 void tbt_fec_flow_detach(struct tbt_stream *st);
-/* Build the next free group bitmap for a new flow. Returns the group count,
- * or 0 when no group is free. */
-u16 tbt_fec_flow_mask_alloc(struct tbt_session *sess, u16 want,
-                            u8 mask[TBT_FEC_BITMAP_BYTES]);
 /* Whether any FEC flow can still be admitted (free groups exist). */
 bool tbt_fec_flow_can_admit(struct tbt_session *sess);
 size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,

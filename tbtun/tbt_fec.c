@@ -28,7 +28,6 @@
 _Static_assert(TBT_FEC_HDR_LEN == 48, "FEC header must stay 48 bytes");
 _Static_assert(TBT_FEC_CFG_LEN == 64, "FEC_CFG body must be 64 bytes");
 _Static_assert(TBT_FEC_FBK_LEN == 64, "FEC_FBK body must be 64 bytes");
-_Static_assert(TBT_FEC_ALLOC_LEN == 64, "FEC_ALLOC body must be 64 bytes");
 _Static_assert(TBT_FEC_CFG_CRC_EXT == TBT_FEC_CFG_CODEC_VARIANT + 8,
                "FEC_CFG extension CRC follows the eight extension bytes");
 _Static_assert(TBT_FEC_CFG_RESERVED2 == 60, "FEC_CFG reserved2 at +60");
@@ -322,8 +321,7 @@ static bool tbt_fec_is_share_type(u8 type)
 static bool tbt_fec_is_control_type(u8 type)
 {
     return type == TBT_FEC_ACK || type == TBT_FEC_NACK || type == TBT_FEC_CFG ||
-           type == TBT_FEC_FBK || type == TBT_FEC_ALLOC ||
-           type == TBT_FEC_MS_WIN;
+           type == TBT_FEC_FBK;
 }
 
 int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
@@ -334,7 +332,6 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
     BUILD_BUG_ON(TBT_FEC_HDR_LEN != 48);
     BUILD_BUG_ON(TBT_FEC_CFG_LEN != 64);
     BUILD_BUG_ON(TBT_FEC_FBK_LEN != 64);
-    BUILD_BUG_ON(TBT_FEC_ALLOC_LEN != 64);
     BUILD_BUG_ON(TBT_FEC_CFG_CRC_EXT != TBT_FEC_CFG_CODEC_VARIANT + 8);
     BUILD_BUG_ON(TBT_FEC_FBK_P_FAST_PPM != 48);
 #endif
@@ -433,11 +430,7 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
         return -EPROTO;
     /* ACK carries its frontier in header.seq; the others must leave it zero. */
     if ((h->type == TBT_FEC_CFG || h->type == TBT_FEC_FBK ||
-         h->type == TBT_FEC_NACK || h->type == TBT_FEC_ALLOC ||
-         h->type == TBT_FEC_MS_WIN) && h->seq)
-        return -EPROTO;
-    /* ALLOC and MS_WIN name one stream. */
-    if ((h->type == TBT_FEC_ALLOC || h->type == TBT_FEC_MS_WIN) && !h->sid)
+         h->type == TBT_FEC_NACK) && h->seq)
         return -EPROTO;
 
     switch (h->type)
@@ -450,10 +443,6 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
         return h->payload_len == TBT_FEC_CFG_LEN ? 0 : -EPROTO;
     case TBT_FEC_FBK:
         return h->payload_len == TBT_FEC_FBK_LEN ? 0 : -EPROTO;
-    case TBT_FEC_ALLOC:
-        return h->payload_len == TBT_FEC_ALLOC_LEN ? 0 : -EPROTO;
-    case TBT_FEC_MS_WIN:
-        return h->payload_len == TBT_FEC_MS_WIN_LEN ? 0 : -EPROTO;
     default:
         return -EPROTO;
     }
@@ -617,85 +606,6 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n)
         return -EPROTO;
     memcpy(n->group_mask, in, TBT_FEC_BITMAP_BYTES);
     memcpy(n->share_mask, in + TBT_FEC_BITMAP_BYTES, TBT_FEC_BITMAP_BYTES);
-    return 0;
-}
-
-int tbt_fec_alloc_pack(const struct tbt_fec_alloc *a,
-                       u8 out[TBT_FEC_ALLOC_LEN])
-{
-    u32 crc;
-
-    if (!a || !out)
-        return -EINVAL;
-    memset(out, 0, TBT_FEC_ALLOC_LEN);
-    tbt_put_u32(out + TBT_FEC_ALLOC_EPOCH, a->epoch);
-    memcpy(out + TBT_FEC_ALLOC_GROUPS, a->group_mask, TBT_FEC_BITMAP_BYTES);
-    out[TBT_FEC_ALLOC_FLAGS] = a->flags;
-    tbt_put_u64(out + TBT_FEC_ALLOC_SWITCH_PKT, a->switch_pkt);
-    tbt_put_u64(out + TBT_FEC_ALLOC_BLOCK_BASE, a->block_base);
-    crc = tbt_fec_crc32c(0, out, TBT_FEC_ALLOC_CRC_BYTES);
-    tbt_put_u32(out + TBT_FEC_ALLOC_CRC, crc);
-    return TBT_FEC_ALLOC_LEN;
-}
-
-int tbt_fec_alloc_unpack(const u8 in[TBT_FEC_ALLOC_LEN],
-                         struct tbt_fec_alloc *a)
-{
-    u32 want;
-
-    if (!in || !a)
-        return -EPROTO;
-    want = tbt_fec_crc32c(0, in, TBT_FEC_ALLOC_CRC_BYTES);
-    if (want != tbt_get_u32(in + TBT_FEC_ALLOC_CRC))
-        return -EPROTO;
-    a->epoch = tbt_get_u32(in + TBT_FEC_ALLOC_EPOCH);
-    memcpy(a->group_mask, in + TBT_FEC_ALLOC_GROUPS, TBT_FEC_BITMAP_BYTES);
-    a->flags = in[TBT_FEC_ALLOC_FLAGS];
-    /* Reserved bytes and the trailing word are part of the body contract,
-     * not free space: a sender that sets one is not speaking this revision.
-     * reserved2 sits outside the CRC, so it needs its own check. */
-    if (in[TBT_FEC_ALLOC_RESERVED] || in[TBT_FEC_ALLOC_RESERVED + 1] ||
-        in[TBT_FEC_ALLOC_RESERVED + 2])
-        return -EPROTO;
-    if (tbt_get_u32(in + TBT_FEC_ALLOC_RESERVED2) != 0)
-        return -EPROTO;
-    if (a->flags & ~TBT_FEC_ALLOC_F_MASK)
-        return -EPROTO;
-    if (in[TBT_FEC_ALLOC_FLAGS + 1] || in[TBT_FEC_ALLOC_FLAGS + 2] ||
-        in[TBT_FEC_ALLOC_FLAGS + 3])
-        return -EPROTO;
-    /* A body that names no physical group cannot move a flow anywhere. */
-    if (!tbt_fec_bitmap_count(a->group_mask))
-        return -EPROTO;
-    a->switch_pkt = tbt_get_u64(in + TBT_FEC_ALLOC_SWITCH_PKT);
-    a->block_base = tbt_get_u64(in + TBT_FEC_ALLOC_BLOCK_BASE);
-    a->crc32c = tbt_get_u32(in + TBT_FEC_ALLOC_CRC);
-    return 0;
-}
-
-int tbt_fec_ms_win_pack(const struct tbt_fec_ms_win *w,
-                        u8 out[TBT_FEC_MS_WIN_LEN])
-{
-    if (!w || !out)
-        return -EINVAL;
-    if (w->reserved)
-        return -EINVAL;
-    memset(out, 0, TBT_FEC_MS_WIN_LEN);
-    tbt_put_u64(out + TBT_FEC_MS_WIN_DELIVERED, w->delivered);
-    tbt_put_u32(out + TBT_FEC_MS_WIN_CREDIT, w->credit);
-    return 0;
-}
-
-int tbt_fec_ms_win_unpack(const u8 in[TBT_FEC_MS_WIN_LEN],
-                          struct tbt_fec_ms_win *w)
-{
-    if (!in || !w)
-        return -EINVAL;
-    if (tbt_get_u32(in + TBT_FEC_MS_WIN_RESERVED) != 0)
-        return -EPROTO;
-    w->delivered = tbt_get_u64(in + TBT_FEC_MS_WIN_DELIVERED);
-    w->credit = tbt_get_u32(in + TBT_FEC_MS_WIN_CREDIT);
-    w->reserved = 0;
     return 0;
 }
 

@@ -1033,10 +1033,8 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                 {
                     int err;
 
-                    /* The record-type gate lives in one place: ALLOC (0x36)
-                     * and MS_WIN (0x37) are FEC records too, and a raw range
-                     * that stopped at FBK pushed them into the old-frame
-                     * scanner. */
+                    /* The record-type gate lives in one place: the FEC range
+                     * 0x30..0x35 must not fall into the old-frame scanner. */
                     if (tbt_fec_record_type(frec[0]))
                     {
                         if (!c->saw_hello)
@@ -1118,9 +1116,9 @@ static int tbt_rx_parse_raw(struct tbt_carrier *c)
         size_t used;
 
         /* A FEC record's first byte is accepted by tbt_fec_record_type()
-         * (DATA..MS_WIN); the old 32-byte header never matches it. Parse the
-         * record here and leave the old scanner untouched, so a mixed carrier
-         * (HELLO/OPEN/FIN + FEC shares) works. */
+         * (DATA..FBK); the old 32-byte header never matches it. Parse the
+         * record here and leave the old scanner untouched, so a mixed
+         * carrier (HELLO/OPEN/FIN + FEC shares) works. */
         if (p->have && tbt_fec_record_type(p->buf[0]))
         {
             size_t need = 0;

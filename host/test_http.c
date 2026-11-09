@@ -3545,34 +3545,36 @@ static void test_fec_http(void)
     ok(err == TBT_RX_OK && out_len == TBT_FEC_HDR_LEN + 16 && out[0] == TBT_FEC_ACK,
        "fec control frame in a chunk", NULL);
 
-    /* FEC_ALLOC (0x36) is the highest record type. The carrier's raw gate
-     * used to stop at FBK (0x35), so this chunk fell into the old-frame
-     * scanner; the shared tbt_fec_record_type() range must accept it. */
+    /* FEC_FBK (0x35) is the highest record type in 0.7.0. The chunk decoder
+     * and the shared tbt_fec_record_type() range must both accept it; 0x36
+     * and 0x37 are now outside that range. */
     tbt_http_chunk_reset(&rx.chunk);
     rx.chunk_started = false;
     rx.rec_len = 0;
     memset(rec, 0, sizeof(rec));
-    rec[0] = TBT_FEC_ALLOC;
-    rec[26] = TBT_FEC_ALLOC_LEN;
-    for (i = 0; i < TBT_FEC_ALLOC_LEN; i++)
+    rec[0] = TBT_FEC_FBK;
+    rec[26] = TBT_FEC_FBK_LEN;
+    for (i = 0; i < TBT_FEC_FBK_LEN; i++)
         rec[TBT_FEC_HDR_LEN + i] = (u8)(0xa0 + i);
     n = tbt_http_fec_chunk_encode((char *)chunk, sizeof(chunk), rec,
-                                  TBT_FEC_HDR_LEN + TBT_FEC_ALLOC_LEN);
-    ok(n > 0, "fec ALLOC chunk encodes", NULL);
+                                  TBT_FEC_HDR_LEN + TBT_FEC_FBK_LEN);
+    ok(n > 0, "fec FBK chunk encodes", NULL);
     m = tbt_http_fec_frame_decode(&rx, chunk, n, &out, &out_len, &err);
     ok(err == TBT_RX_OK &&
-           out_len == TBT_FEC_HDR_LEN + TBT_FEC_ALLOC_LEN &&
-           out[0] == TBT_FEC_ALLOC,
-       "fec ALLOC chunk round-trips as a FEC record", NULL);
-    ok(tbt_fec_record_type(TBT_FEC_ALLOC),
-       "ALLOC is inside the shared FEC type gate", NULL);
+           out_len == TBT_FEC_HDR_LEN + TBT_FEC_FBK_LEN &&
+           out[0] == TBT_FEC_FBK,
+       "fec FBK chunk round-trips as a FEC record", NULL);
+    ok(tbt_fec_record_type(TBT_FEC_FBK),
+       "FBK is inside the shared FEC type gate", NULL);
     ok(tbt_fec_record_type(TBT_FEC_DATA),
        "DATA is inside the shared FEC type gate", NULL);
-    ok(tbt_fec_record_type(TBT_FEC_MS_WIN),
-       "0x37 is inside the shared FEC type gate", NULL);
-    ok(!tbt_fec_record_type((u8)(TBT_FEC_MS_WIN + 1)),
+    ok(!tbt_fec_record_type(0x36),
+       "0x36 is outside the shared FEC type gate", NULL);
+    ok(!tbt_fec_record_type(0x37),
+       "0x37 is outside the shared FEC type gate", NULL);
+    ok(!tbt_fec_record_type(0x38),
        "0x38 is outside the shared FEC type gate", NULL);
-    ok(!tbt_fec_record_type((u8)(TBT_FEC_DATA - 1)),
+    ok(!tbt_fec_record_type(0x2f),
        "0x2f is outside the shared FEC type gate", NULL);
 
     /* Batch layout: three records concatenated into one HTTP write. The

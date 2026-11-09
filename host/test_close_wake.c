@@ -7,7 +7,7 @@
  *     peer FIN must each kick the FBK tick; w_fbk stops when nsnap == 0.
  *   - tbt_tx_fin() stamps close_since_ns before the FEC "not finished / not
  *     idle" early returns.
- *   - a same-sid OPEN is -EEXIST before the SC-LDPC admission refusal.
+ *   - a same-sid OPEN is -EEXIST; a second flow is -ENOSPC.
  */
 #include <errno.h>
 #include <stdbool.h>
@@ -113,8 +113,8 @@ static void case_same_sid_priority(void)
 {
     ok(tbt_fec_flow_create_code(true, true, 1, 1, 1) == -EEXIST,
        "same sid returns EEXIST before SC-LDPC admission");
-    ok(tbt_fec_flow_create_code(false, true, 1, 1, 1) == -EEXIST,
-       "a second SC-LDPC flow shares the primary (EEXIST)");
+    ok(tbt_fec_flow_create_code(false, true, 1, 1, 1) == -ENOSPC,
+       "a second SC-LDPC flow is refused (ENOSPC)");
     ok(tbt_fec_flow_create_code(true, false, 0, 1, 1) == -EEXIST,
        "same sid returns EEXIST for non-SCLC admission");
     ok(tbt_fec_flow_create_code(false, false, 0, 0, 1) == -EPROTO,

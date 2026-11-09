@@ -18,8 +18,8 @@ SRCS            := Makefile \
                    tbtun/tbt_carrier.c tbtun/tbt_sock.c tbtun/tbt_tx.c tbtun/tbt_rx.c \
                    tbtun/tbt_parse.c tbtun/tbt_proto.c tbtun/tbt_rec.c tbtun/tbt_http.c \
                    tbtun/tbt_fec_batch.c \
-                   tbtun/tbt_crypto.c tbtun/tbt_fec.c tbtun/tbt_fec_ms.c \
-                   tbtun/tbt_fec_ms.h tbtun/tbt_fec_data.c tbtun/tbt_fec_adapt.c \
+                   tbtun/tbt_crypto.c tbtun/tbt_fec.c \
+                   tbtun/tbt_fec_data.c tbtun/tbt_fec_adapt.c \
                    tbtun/tbt_fec_adapt_sclc.c tbtun/tbt_fec_sclc.c \
                    tbtun/tbt_fec_sclc.h tbtun/tbt_portmap.c tbtun/tbt_map.c \
                    tbtun/tbt_sc_ldpc.c tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c \
@@ -110,9 +110,6 @@ HOST_MEM_BUDGET := host/test_mem_budget
 HOST_MEM_BUDGET_SRCS := host/test_mem_budget.c tbtun/tbt_fec.c
 HOST_MEM_BUDGET_HDRS := tbtun/tbt_fec.h tbtun/tbt_http.h tbtun/tbt_rec.h \
                    tbtun/tbt_proto.h tbtun/tbt_uapi.h
-HOST_MS         := host/test_fec_ms
-HOST_MS_SRCS    := host/test_fec_ms.c tbtun/tbt_fec_ms.c tbtun/tbt_fec.c
-HOST_MS_HDRS    := tbtun/tbt_fec_ms.h tbtun/tbt_fec.h tbtun/tbt_uapi.h
 HOST_FEC_RX     := host/test_fec_rx
 HOST_FEC_RX_SRCS := host/test_fec_rx.c tbtun/tbt_fec.c tbtun/tbt_crypto.c
 HOST_FEC_RX_HDRS := tbtun/tbt_fec.h tbtun/tbt_uapi.h tbtun/tbt_crypto.h
@@ -218,7 +215,7 @@ tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
                    tbtun/tbt_parse.o tbtun/tbt_http.o tbtun/tbt_fec_batch.o tbtun/tbt_crypto.o \
                    tbtun/tbt_portmap.o tbtun/tbt_map.o tbtun/tbt_fec.o tbtun/tbt_fec_data.o \
                    tbtun/tbt_parse.o tbtun/tbt_http.o tbtun/tbt_crypto.o \
-                   tbtun/tbt_portmap.o tbtun/tbt_fec.o tbtun/tbt_fec_ms.o \
+                   tbtun/tbt_portmap.o tbtun/tbt_fec.o \
                    tbtun/tbt_fec_data.o \
                    tbtun/tbt_fec_adapt.o tbtun/tbt_fec_adapt_sclc.o \
                    tbtun/tbt_fec_sclc.o \
@@ -254,7 +251,7 @@ check: dkms-srcs-check
 host-test: $(HOST_CARRIER_POLICY)
 host-test-san-run: host/test_carrier_policy_san
 
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MEM_BUDGET) $(HOST_MS) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_LADDER) $(HOST_PORTMAP) $(HOST_MAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_INVARIANTS) $(HOST_WIRE_COMPAT) $(HTTP_RFC_GEN) $(HOST_RX_BUDGET)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_LADDER) $(HOST_PORTMAP) $(HOST_MAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_INVARIANTS) $(HOST_WIRE_COMPAT) $(HTTP_RFC_GEN) $(HOST_RX_BUDGET)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
@@ -271,7 +268,6 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_ANCHOR)
 	@./$(HOST_FEC)
 	@./$(HOST_MEM_BUDGET)
-	@./$(HOST_MS)
 	@./$(HOST_FEC_RX)
 	@./$(HOST_FEC_SWITCH)
 	@./$(HOST_FEC_OUT)
@@ -408,9 +404,6 @@ $(HOST_FEC): $(HOST_FEC_SRCS) $(HOST_FEC_HDRS)
 
 $(HOST_MEM_BUDGET): $(HOST_MEM_BUDGET_SRCS) $(HOST_MEM_BUDGET_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_MEM_BUDGET_SRCS)
-$(HOST_MS): $(HOST_MS_SRCS) $(HOST_MS_HDRS)
-	$(HOSTCC) $(HOST_CFLAGS) -pthread -I tbtun -o $@ $(HOST_MS_SRCS)
-
 $(HOST_FEC_RX): $(HOST_FEC_RX_SRCS) $(HOST_FEC_RX_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_FEC_RX_SRCS)
 
@@ -516,8 +509,8 @@ host-test-san:
 		echo "host-test-san: skipped, $(HOSTCC) cannot link -fsanitize=address,undefined"; \
 	fi
 
-host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_mem_budget_san host/test_fec_ms_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_batch_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_ladder_san host/test_close_wake_san host/test_hold_san host/test_portmap_san host/test_map_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_invariants_san host/test_wire_compat_san host/test_rx_budget_san $(HTTP_RFC_GEN_SAN)
-host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_ms_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san
+host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_mem_budget_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_batch_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_ladder_san host/test_close_wake_san host/test_hold_san host/test_portmap_san host/test_map_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_invariants_san host/test_wire_compat_san host/test_rx_budget_san $(HTTP_RFC_GEN_SAN)
+host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san
 	@./host/test_parse_san
 	@./host/test_fuzz_san
 	@./host/test_http_san
@@ -525,8 +518,6 @@ host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san hos
 	@./host/test_crypto_san
 	@./host/test_fec_san
 	@./host/test_mem_budget_san
-	@./host/test_fec_ms_san
-	@./host/test_fec_ms_san
 	@./host/test_fec_rx_san
 	@./host/test_fec_switch_san
 	@./host/test_fec_out_san
@@ -572,9 +563,6 @@ host/test_fec_san: $(HOST_FEC_SRCS) $(HOST_FEC_HDRS)
 
 host/test_mem_budget_san: $(HOST_MEM_BUDGET_SRCS) $(HOST_MEM_BUDGET_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_MEM_BUDGET_SRCS)
-host/test_fec_ms_san: $(HOST_MS_SRCS) $(HOST_MS_HDRS)
-	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -pthread -I tbtun -o $@ $(HOST_MS_SRCS)
-
 host/test_close_wake_san: $(HOST_CLOSE_WAKE_SRCS) $(HOST_CLOSE_WAKE_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_CLOSE_WAKE_SRCS)
 
@@ -669,7 +657,7 @@ host-test-live: $(HOST_HTTP_LIVE)
 	fi
 
 clean: clean-dkms.conf clean-dkms-tarball
-	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MS) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_LADDER) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_FAULT) $(HOST_BENCH_SCLC) $(HOST_BENCH_SCLC_DOWN) $(HOST_BENCH_SCLC_SIM) $(HOST_BENCH_SCLC_PIPE) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_ladder_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fault_san
+	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_LADDER) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_FAULT) $(HOST_BENCH_SCLC) $(HOST_BENCH_SCLC_DOWN) $(HOST_BENCH_SCLC_SIM) $(HOST_BENCH_SCLC_PIPE) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_ladder_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fault_san
 	$(RM) $(HOST_INVARIANTS) host/test_invariants_san
 	$(RM) $(HOST_MEM_BUDGET) host/test_mem_budget_san
 	$(RM) host/test_hold_san

@@ -23,7 +23,6 @@
 #include <string.h>
 
 #include "tbt_fec.h"
-#include "tbt_fec_ms.h"
 
 #define S 64   /* the model uses a short slot; the code is size-agnostic */
 #define N 4    /* data shares per block */
@@ -537,31 +536,6 @@ static void test_sclc_admission(void)
        "open: a bogus INIT group count is refused");
     ok(tbt_fec_open_groups_match(false, m8, 32),
        "open: RLNC has no SC-LDPC group-count rule");
-
-    /* Admission ledger: 256 carriers deliver one OPEN. Every copy claims a
-     * pending slot, the winner attaches, and the losers abort; the plane is
-     * only unlinked when both counters are zero. */
-    {
-        struct tbt_ms_admit a;
-
-        memset(&a, 0, sizeof(a));
-        for (i = 0; i < 16; i++)
-            tbt_ms_admit_claim(&a);
-        ok_int((int)a.pending, 16, "admit: sixteen carrier claims counted");
-        ok(!tbt_ms_admit_last(&a), "admit: a pending slot keeps the plane");
-        tbt_ms_admit_attach(&a);
-        for (i = 0; i < 15; i++)
-            tbt_ms_admit_abort(&a);
-        ok_int((int)a.pending, 0, "admit: winner attaches, losers abort");
-        ok_int((int)a.refs, 1, "admit: one mux leg is attached");
-        ok(!tbt_ms_admit_last(&a), "admit: an attached leg keeps the plane");
-        tbt_ms_admit_claim(&a);
-        tbt_ms_admit_attach(&a);
-        ok_int((int)a.refs, 2, "admit: streams share one plane");
-        tbt_ms_admit_detach(&a);
-        tbt_ms_admit_detach(&a);
-        ok(tbt_ms_admit_last(&a), "admit: the last detach frees the plane");
-    }
 
     /* The replacement starts on its own sid and window; the old flow's block
      * is not deliverable to it. */

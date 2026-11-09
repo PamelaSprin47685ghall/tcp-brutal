@@ -1044,22 +1044,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "n_pending=%u\n",
                            id, READ_ONCE(s->n_active),
                            READ_ONCE(s->n_streams), READ_ONCE(s->n_pending));
-                /* Dynamic group rebalance. `begin` counts rounds, `done`
-                 * counts per-flow commits (both ends), so it is not a round
-                 * counter; `bad` and `overlap` are the two failure counters
-                 * that must stay zero. allocator=1 names the near side. */
-                seq_printf(m, "tunnel %llu rebalance allocator=%u total=%u "
-                              "used=%u begin=%llu done=%llu abort=%llu "
-                              "retry=%llu bad=%llu overlap=%llu\n",
-                           id, s->fec_allocator ? 1 : 0,
-                           READ_ONCE(s->fec_groups_total),
-                           READ_ONCE(s->fec_groups_used),
-                           tbt_stat_read(&s->fec_alloc_begin),
-                           tbt_stat_read(&s->fec_alloc_done),
-                           tbt_stat_read(&s->fec_alloc_abort),
-                           tbt_stat_read(&s->fec_alloc_retry),
-                           tbt_stat_read(&s->fec_alloc_bad),
-                           tbt_stat_read(&s->fec_alloc_overlap));
+                seq_printf(m, "tunnel %llu groups total=%u used=%u\n",
+                           id, READ_ONCE(s->fec_groups_total),
+                           READ_ONCE(s->fec_groups_used));
                 /* Per-stream terminal state. Copy the fields under RCU
                  * into a heap snapshot; seq_printf() may sleep (it grows the
                  * seq_file buffer with GFP_KERNEL), and sleeping inside an

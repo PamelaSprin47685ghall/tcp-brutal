@@ -218,10 +218,9 @@ static void test_header_roundtrip(void)
            TBT_FEC_H_PAYCRC == 40 && TBT_FEC_H_HDRCRC == 44,
        "header offsets", NULL);
     /* 0x1005 adds the stream sid and grows the header to 48 bytes; 0x1007
-     * makes FEC_CFG/FEC_FBK carry the adaptive shape and adds FEC_ALLOC;
-     * 0x1008 grows CFG/FBK to 64 bytes; 0x1009 adds MS_WIN and the
-     * SC-LDPC 32-byte subframe. */
-    ok(TBT_FEC_CONV == 0x1009u, "TBT_FEC_CONV", NULL);
+     * makes FEC_CFG/FEC_FBK carry the adaptive shape; 0x1008 grows CFG/FBK
+     * to 64 bytes; 0x100a is the 0.7.0 cut. */
+    ok(TBT_FEC_CONV == 0x100au, "TBT_FEC_CONV", NULL);
 
     /* NULL arguments are refused, not dereferenced. */
     ok_int(tbt_fec_hdr_pack(NULL, wire), -EINVAL, "pack NULL header");
@@ -1331,251 +1330,6 @@ static void test_cfg_carriers(void)
 }
 
 /* ------------------------------------------------------------------ *
- * 5b. FEC_ALLOC (0x36): a 64-byte body that moves one flow between
- * physical group sets. ACK and DONE are the only body flags; the header
- * names the flow (sid != 0), never a seq or a block.
- * ------------------------------------------------------------------ */
-
-static void alloc_fix_crc(u8 *buf)
-{
-    u32 crc = tbt_fec_crc32c(0, buf, TBT_FEC_ALLOC_CRC_BYTES);
-
-    buf[TBT_FEC_ALLOC_CRC + 0] = (u8)crc;
-    buf[TBT_FEC_ALLOC_CRC + 1] = (u8)(crc >> 8);
-    buf[TBT_FEC_ALLOC_CRC + 2] = (u8)(crc >> 16);
-    buf[TBT_FEC_ALLOC_CRC + 3] = (u8)(crc >> 24);
-}
-
-static void test_alloc(void)
-{
-    struct tbt_fec_alloc a, a2;
-    struct tbt_fec_hdr h;
-    u8 buf[TBT_FEC_ALLOC_LEN];
-
-    memset(&a, 0, sizeof(a));
-    a.epoch = 0x12345678u;
-    tbt_fec_bitmap_set(a.group_mask, 0);
-    tbt_fec_bitmap_set(a.group_mask, 5);
-    tbt_fec_bitmap_set(a.group_mask, 255);
-    a.flags = TBT_FEC_ALLOC_F_ACK | TBT_FEC_ALLOC_F_DONE;
-    a.switch_pkt = 0x1122334455667788ULL;
-    a.block_base = 0x0102030405060708ULL;
-
-    ok(TBT_FEC_ALLOC == 0x36, "ALLOC type is 0x36", NULL);
-    ok_int(tbt_fec_alloc_pack(&a, buf), TBT_FEC_ALLOC_LEN, "ALLOC pack length");
-    ok(TBT_FEC_ALLOC_LEN == 64, "ALLOC body is 64 bytes", NULL);
-    ok_u32le(buf + TBT_FEC_ALLOC_EPOCH, a.epoch, "ALLOC epoch at +0");
-    ok(tbt_fec_bitmap_test(buf + TBT_FEC_ALLOC_GROUPS, 0) &&
-           tbt_fec_bitmap_test(buf + TBT_FEC_ALLOC_GROUPS, 5) &&
-           tbt_fec_bitmap_test(buf + TBT_FEC_ALLOC_GROUPS, 255),
-       "ALLOC group mask at +4", NULL);
-    ok(buf[TBT_FEC_ALLOC_FLAGS] ==
-           (TBT_FEC_ALLOC_F_ACK | TBT_FEC_ALLOC_F_DONE),
-       "ALLOC flags at +36", NULL);
-    ok_u64le(buf + TBT_FEC_ALLOC_SWITCH_PKT, a.switch_pkt,
-             "ALLOC switch_pkt at +40");
-    ok_u64le(buf + TBT_FEC_ALLOC_BLOCK_BASE, a.block_base,
-             "ALLOC block_base at +48");
-    ok_u32le(buf + TBT_FEC_ALLOC_CRC,
-             tbt_fec_crc32c(0, buf, TBT_FEC_ALLOC_CRC_BYTES),
-             "ALLOC CRC at +56");
-    ok_u32le(buf + TBT_FEC_ALLOC_RESERVED2, 0, "ALLOC reserved2 at +60");
-
-    memset(&a2, 0, sizeof(a2));
-    ok_int(tbt_fec_alloc_unpack(buf, &a2), 0, "ALLOC unpack");
-    ok(a2.epoch == a.epoch && a2.flags == a.flags &&
-           a2.switch_pkt == a.switch_pkt && a2.block_base == a.block_base &&
-           !memcmp(a2.group_mask, a.group_mask, TBT_FEC_BITMAP_BYTES),
-       "ALLOC round-trip", NULL);
-
-    /* The CRC covers the whole body, including both coordinates. */
-    buf[TBT_FEC_ALLOC_EPOCH] ^= 1;
-    ok_int(tbt_fec_alloc_unpack(buf, &a2), -EPROTO,
-           "ALLOC epoch CRC mismatch");
-    tbt_fec_alloc_pack(&a, buf);
-    buf[TBT_FEC_ALLOC_GROUPS + 3] ^= 0x80;
-    ok_int(tbt_fec_alloc_unpack(buf, &a2), -EPROTO,
-           "ALLOC mask is CRC-covered");
-    tbt_fec_alloc_pack(&a, buf);
-    buf[TBT_FEC_ALLOC_SWITCH_PKT] ^= 1;
-    ok_int(tbt_fec_alloc_unpack(buf, &a2), -EPROTO,
-           "ALLOC switch_pkt is CRC-covered");
-    tbt_fec_alloc_pack(&a, buf);
-    buf[TBT_FEC_ALLOC_BLOCK_BASE] ^= 1;
-    ok_int(tbt_fec_alloc_unpack(buf, &a2), -EPROTO,
-           "ALLOC block_base is CRC-covered");
-
-    /* Body flags: ACK and DONE only, in any combination. */
-    tbt_fec_alloc_pack(&a, buf);
-    buf[TBT_FEC_ALLOC_FLAGS] = TBT_FEC_ALLOC_F_ACK;
-    alloc_fix_crc(buf);
-    ok_int(tbt_fec_alloc_unpack(buf, &a2), 0, "ALLOC ACK flag");
-    buf[TBT_FEC_ALLOC_FLAGS] = TBT_FEC_ALLOC_F_DONE;
-    alloc_fix_crc(buf);
-    ok_int(tbt_fec_alloc_unpack(buf, &a2), 0, "ALLOC DONE flag");
-    buf[TBT_FEC_ALLOC_FLAGS] = 0;
-    alloc_fix_crc(buf);
-    ok_int(tbt_fec_alloc_unpack(buf, &a2), 0, "ALLOC no flags");
-    buf[TBT_FEC_ALLOC_FLAGS] = TBT_FEC_ALLOC_F_COMMITTED |
-                               TBT_FEC_ALLOC_F_ABORT;
-    alloc_fix_crc(buf);
-    ok_int(tbt_fec_alloc_unpack(buf, &a2), 0,
-           "ALLOC COMMITTED|ABORT flags");
-    ok(TBT_FEC_ALLOC_F_MASK == 0x0f, "ALLOC flag mask", NULL);
-    buf[TBT_FEC_ALLOC_FLAGS] = 0x10;
-    alloc_fix_crc(buf);
-    ok_int(tbt_fec_alloc_unpack(buf, &a2), -EPROTO,
-           "ALLOC unknown body flags");
-
-    ok_int(tbt_fec_alloc_pack(NULL, buf), -EINVAL, "ALLOC pack NULL body");
-    ok_int(tbt_fec_alloc_pack(&a, NULL), -EINVAL, "ALLOC pack NULL out");
-    ok_int(tbt_fec_alloc_unpack(NULL, &a2), -EPROTO, "ALLOC unpack NULL");
-
-    /* Header gate: exactly 64 bytes, sid != 0, seq and block_id zero. */
-    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
-    h.sid = 7;
-    ok_int(tbt_fec_hdr_check(&h, 64), 0, "ALLOC baseline");
-    h.sid = 0;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC sid=0");
-    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
-    h.sid = 7;
-    h.seq = 1;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC seq != 0");
-    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
-    h.sid = 7;
-    h.block_id = 1;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC block_id != 0");
-    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN - 1);
-    h.sid = 7;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC body 63");
-    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN + 1);
-    h.sid = 7;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC body 65");
-    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
-    h.sid = 7;
-    h.n = 1;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC n != 0");
-    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
-    h.sid = 7;
-    h.m = 1;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC m != 0");
-    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
-    h.sid = 7;
-    h.share_index = 1;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC share_index != 0");
-    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
-    h.sid = 7;
-    h.win_len = 1;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC win_len != 0");
-    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
-    h.sid = 7;
-    h.conv = 0x1006;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC old conv");
-    h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
-    h.sid = 7;
-    h.reserved = 1;
-    ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC header reserved != 0");
-}
-
-/* ------------------------------------------------------------------ *
- * 5c. FEC_MS_WIN (0x37): one stream's receive window inside the shared
- * SC-LDPC plane. The body is 16 bytes; the header names the target stream
- * in sid, not the FEC plane's flow, and leaves every share field zero.
- * ------------------------------------------------------------------ */
-
-static void test_ms_win(void)
-{
-    struct tbt_fec_ms_win w, w2;
-    struct tbt_fec_hdr h;
-    u8 buf[TBT_FEC_MS_WIN_LEN];
-
-    ok(TBT_FEC_MS_WIN == 0x37, "MS_WIN type is 0x37", NULL);
-    ok(TBT_FEC_MS_WIN_LEN == 16, "MS_WIN body is 16 bytes", NULL);
-    ok((int)sizeof(struct tbt_fec_ms_win) == TBT_FEC_MS_WIN_LEN,
-       "MS_WIN struct is 16 bytes", NULL);
-
-    memset(&w, 0, sizeof(w));
-    w.delivered = 0x1122334455667788ULL;
-    w.credit = 0xdeadbeefu;
-    ok_int(tbt_fec_ms_win_pack(&w, buf), 0, "MS_WIN pack");
-    ok_u64le(buf + TBT_FEC_MS_WIN_DELIVERED, w.delivered,
-             "MS_WIN delivered at +0");
-    ok_u32le(buf + TBT_FEC_MS_WIN_CREDIT, w.credit, "MS_WIN credit at +8");
-    ok_u32le(buf + TBT_FEC_MS_WIN_RESERVED, 0, "MS_WIN reserved at +12");
-    memset(&w2, 0, sizeof(w2));
-    ok_int(tbt_fec_ms_win_unpack(buf, &w2), 0, "MS_WIN unpack");
-    ok(w2.delivered == w.delivered && w2.credit == w.credit &&
-           w2.reserved == 0,
-       "MS_WIN round-trip", NULL);
-
-    /* reserved is a wire zero: pack refuses to emit it, unpack refuses to
-     * accept it. */
-    w.reserved = 1;
-    ok_int(tbt_fec_ms_win_pack(&w, buf), -EINVAL,
-           "MS_WIN pack reserved != 0");
-    w.reserved = 0;
-    tbt_fec_ms_win_pack(&w, buf);
-    buf[TBT_FEC_MS_WIN_RESERVED] = 1;
-    ok_int(tbt_fec_ms_win_unpack(buf, &w2), -EPROTO,
-           "MS_WIN unpack reserved != 0");
-    ok_int(tbt_fec_ms_win_pack(NULL, buf), -EINVAL, "MS_WIN pack NULL body");
-    ok_int(tbt_fec_ms_win_pack(&w, NULL), -EINVAL, "MS_WIN pack NULL out");
-    ok_int(tbt_fec_ms_win_unpack(NULL, &w2), -EINVAL,
-           "MS_WIN unpack NULL in");
-    ok_int(tbt_fec_ms_win_unpack(buf, NULL), -EINVAL,
-           "MS_WIN unpack NULL body");
-
-    /* Header gate: exactly 16 bytes, sid != 0, and every share/block field
-     * zero. */
-    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
-    h.sid = 0x1234;
-    ok_int(tbt_fec_hdr_check(&h, 8192), 0, "MS_WIN baseline");
-    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN - 1);
-    h.sid = 0x1234;
-    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN body 15");
-    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN + 1);
-    h.sid = 0x1234;
-    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN body 17");
-    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
-    h.sid = 0;
-    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN sid=0");
-    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
-    h.sid = 0x1234;
-    h.block_id = 1;
-    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN block_id != 0");
-    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
-    h.sid = 0x1234;
-    h.seq = 1;
-    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN seq != 0");
-    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
-    h.sid = 0x1234;
-    h.n = 1;
-    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN n != 0");
-    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
-    h.sid = 0x1234;
-    h.m = 1;
-    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN m != 0");
-    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
-    h.sid = 0x1234;
-    h.share_index = 1;
-    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO,
-           "MS_WIN share_index != 0");
-    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
-    h.sid = 0x1234;
-    h.win_len = 1;
-    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN win_len != 0");
-    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
-    h.sid = 0x1234;
-    h.conv = 0x1007;
-    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN old conv");
-    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
-    h.sid = 0x1234;
-    h.reserved = 1;
-    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO,
-           "MS_WIN header reserved != 0");
-}
-
-/* ------------------------------------------------------------------ *
  * 6. RLNC single group.
  * ------------------------------------------------------------------ */
 
@@ -2227,10 +1981,9 @@ static void test_sclc_open_mask(void)
        "non-sclc primary: the same bitmap is accepted", NULL);
 }
 
-/* SC-LDPC has one physical flow. A second stream shares that plane, so the
- * create path returns -EEXIST (not a second plane), and a duplicate sid wins
- * over every admission rule. Only a group count that cannot be used is
- * -EPROTO. */
+/* One FEC flow per session. A second flow is refused with -ENOSPC, a
+ * duplicate sid still wins with -EEXIST, and only a group count that cannot
+ * be used is -EPROTO. */
 static void test_sclc_second_flow(void)
 {
     u8 eight[32];
@@ -2239,8 +1992,8 @@ static void test_sclc_second_flow(void)
     memset(eight, 0, sizeof(eight));
     for (count = 0; count < 8; count++)
         tbt_fec_bitmap_set(eight, count);
-    ok_int(tbt_fec_flow_create_code(false, true, 1, 1, 8), -EEXIST,
-           "sclc second flow: a live flow returns the primary plane");
+    ok_int(tbt_fec_flow_create_code(false, true, 1, 1, 8), -ENOSPC,
+           "sclc second flow: a live flow is refused");
     /* Sequential stream: the previous flow was released, n_flows=0. The peer
      * still sends 8 groups while the local TX shape has one; create uses the
      * local group count and the peer bitmap for RX, so admission succeeds. */
@@ -2249,17 +2002,17 @@ static void test_sclc_second_flow(void)
     ok_u32(count, 8, "sclc sequential: peer bitmap count");
     ok_int(tbt_fec_flow_create_code(false, true, 0, 1, 1), 0,
            "sclc sequential: local groups=1 admits the next flow");
-    ok_int(tbt_fec_flow_create_code(false, true, 1, 1, 1), -EEXIST,
+    ok_int(tbt_fec_flow_create_code(false, true, 1, 1, 1), -ENOSPC,
            "sclc concurrent: a live flow still refuses the second");
     ok_int(tbt_fec_flow_create_code(false, true, 0, 1, 1), 0,
            "sclc first flow: one local group is admitted");
     ok_int(tbt_fec_flow_create_code(false, true, 0, 1, 8), -EPROTO,
            "sclc create: an oversized first bitmap is a group error");
-    ok_int(tbt_fec_flow_create_code(false, false, 1, 1, 8), -EPROTO,
-           "non-sclc: the same bitmap is a group error");
-    ok_int(tbt_fec_flow_create_code(false, false, 1, 32, 16), 0,
-           "non-sclc: a fitting second flow is admitted");
-    ok_int(tbt_fec_flow_create_code(false, false, 1, 32, 0), -EPROTO,
+    ok_int(tbt_fec_flow_create_code(false, false, 0, 1, 8), -EPROTO,
+           "non-sclc: an oversized bitmap is a group error");
+    ok_int(tbt_fec_flow_create_code(false, false, 1, 32, 16), -ENOSPC,
+           "non-sclc: a second flow is refused");
+    ok_int(tbt_fec_flow_create_code(false, false, 0, 32, 0), -EPROTO,
            "non-sclc: zero groups is a group error");
     ok_int(tbt_fec_flow_create_code(true, false, 0, 1, 1), -EEXIST,
            "duplicate sid wins over admission");
@@ -2604,8 +2357,8 @@ static void test_base_mapping(void)
            "base real len matches legacy");
 }
 
-/* A 0.5.0 peer sends HELLO body[0] == 5 and conv 0x1008. 0.6.0 names 6 and
- * 0x1009; tbt_rx_hello() and tbt_fec_hdr_check() compare exactly, so the
+/* A 0.6.0 peer sends HELLO body[0] == 6 and conv 0x1009. 0.7.0 names 7 and
+ * 0x100a; tbt_rx_hello() and tbt_fec_hdr_check() compare exactly, so the
  * first HELLO and the first FEC record fail with -EPROTO and the carrier
  * closes. */
 static void test_wire_version(void)
@@ -2614,26 +2367,23 @@ static void test_wire_version(void)
 
     memset(hello, 0, sizeof(hello));
     hello[0] = TBT_WIRE_VERSION_V6;
-    ok(hello[0] == 6, "0.6.0 FEC HELLO names version 6", NULL);
-    hello[0] = 5;
+    ok(hello[0] == 7, "0.7.0 FEC HELLO names version 7", NULL);
+    hello[0] = 6;
     ok(hello[0] != TBT_WIRE_VERSION_V6,
-       "0.5.0 HELLO version 5 is refused", NULL);
+       "0.6.0 HELLO version 6 is refused", NULL);
     ok(TBT_WIRE_VERSION == 1, "legacy ARQ HELLO stays version 1", NULL);
-    ok(TBT_FEC_CONV == 0x1009u, "0x1009 is the v9 FEC revision", NULL);
-    ok(TBT_CONV == 0x0009u, "0x0009 is the v9 ARQ revision", NULL);
+    ok(TBT_FEC_CONV == 0x100au, "0x100a is the v10 FEC revision", NULL);
+    ok(TBT_CONV == 0x000au, "0x000a is the v10 ARQ revision", NULL);
     ok(TBT_OPEN_BODY_LEN == 36, "OPEN body is 36 bytes", NULL);
     ok(TBT_OPEN_ROUTE_SLOT == 32 && TBT_OPEN_TARGET_PORT == 34,
        "OPEN route/target offsets", NULL);
-    /* The container routes a decoded chunk through this one range; ALLOC
-     * (0x36) and MS_WIN (0x37) must be inside it or the record reaches the
-     * old-frame scanner. */
+    /* The container routes a decoded chunk through this one range; it must
+     * stop at FBK (0x35), and the two 0.6.0 records must fall outside it. */
     ok(tbt_fec_record_type(TBT_FEC_DATA), "FEC type gate accepts DATA", NULL);
-    ok(tbt_fec_record_type(TBT_FEC_ALLOC), "FEC type gate accepts ALLOC",
-       NULL);
-    ok(tbt_fec_record_type(TBT_FEC_MS_WIN), "FEC type gate accepts MS_WIN",
-       NULL);
-    ok(!tbt_fec_record_type((u8)(TBT_FEC_MS_WIN + 1)),
-       "FEC type gate rejects 0x38", NULL);
+    ok(tbt_fec_record_type(TBT_FEC_FBK), "FEC type gate accepts FBK", NULL);
+    ok(!tbt_fec_record_type(0x36), "FEC type gate rejects 0x36", NULL);
+    ok(!tbt_fec_record_type(0x37), "FEC type gate rejects 0x37", NULL);
+    ok(!tbt_fec_record_type(0x38), "FEC type gate rejects 0x38", NULL);
     ok(!tbt_fec_record_type((u8)(TBT_FEC_DATA - 1)),
        "FEC type gate rejects 0x2f", NULL);
 }
@@ -3545,379 +3295,6 @@ static void test_sclc_wire_profiles(void)
        "sclc fbk: extension round-trip", NULL);
 }
 
-/* ------------------------------------------------------------------ *
- * 9c. Dynamic group rebalance: the split keeps every flow's set disjoint
- * while the count matches the equal share, and the initiator state machine
- * converges when messages are lost.
- * ------------------------------------------------------------------ */
-
-static void alloc_mask_range(u8 *mask, u16 lo, u16 hi)
-{
-    u16 i;
-
-    memset(mask, 0, TBT_FEC_BITMAP_BYTES);
-    for (i = lo; i < hi; i++)
-        tbt_fec_bitmap_set(mask, i);
-}
-
-static int alloc_masks_disjoint(const u8 *a, const u8 *b, u16 total)
-{
-    u16 i;
-
-    for (i = 0; i < total; i++)
-        if (tbt_fec_bitmap_test(a, i) && tbt_fec_bitmap_test(b, i))
-            return 0;
-    return 1;
-}
-
-static int alloc_union_full(u8 (*masks)[TBT_FEC_BITMAP_BYTES], u16 n,
-                            const u8 *pending, u16 total)
-{
-    u16 i, p;
-
-    for (p = 0; p < total; p++)
-    {
-        int seen = 0;
-
-        for (i = 0; i < n; i++)
-            if (tbt_fec_bitmap_test(masks[i], p))
-                seen = 1;
-        if (pending && tbt_fec_bitmap_test(pending, p))
-            seen = 1;
-        if (!seen)
-            return 0;
-    }
-    return 1;
-}
-
-static void test_alloc_split(void)
-{
-    enum { T = 32, N = 4 };
-    u8 masks[N][TBT_FEC_BITMAP_BYTES];
-    u16 target[N];
-    u8 pending[TBT_FEC_BITMAP_BYTES];
-    u16 i, j;
-
-    /* One flow owns the whole pool; a second flow takes half. */
-    alloc_mask_range(masks[0], 0, T);
-    target[0] = 16;
-    ok(tbt_fec_alloc_split(T, 1, masks, target, pending, 16),
-       "split 1->2 succeeds", NULL);
-    ok_u32(tbt_fec_bitmap_count(masks[0]), 16, "split 1->2 donor count");
-    ok_u32(tbt_fec_bitmap_count(pending), 16, "split 1->2 new count");
-    ok(alloc_masks_disjoint(masks[0], pending, T),
-       "split 1->2 sets are disjoint", NULL);
-    ok(alloc_union_full(masks, 1, pending, T),
-       "split 1->2 covers the pool", NULL);
-
-    /* 2 -> 3: 11/11/10. The new flow may sort anywhere; this is sid 3. */
-    alloc_mask_range(masks[0], 0, 16);
-    alloc_mask_range(masks[1], 16, 32);
-    target[0] = 11;
-    target[1] = 11;
-    ok(tbt_fec_alloc_split(T, 2, masks, target, pending, 10),
-       "split 2->3 succeeds", NULL);
-    ok_u32(tbt_fec_bitmap_count(masks[0]), 11, "split 2->3 flow0 count");
-    ok_u32(tbt_fec_bitmap_count(masks[1]), 11, "split 2->3 flow1 count");
-    ok_u32(tbt_fec_bitmap_count(pending), 10, "split 2->3 new count");
-    ok(alloc_masks_disjoint(masks[0], masks[1], T) &&
-           alloc_masks_disjoint(masks[0], pending, T) &&
-           alloc_masks_disjoint(masks[1], pending, T),
-       "split 2->3 sets are disjoint", NULL);
-    ok(alloc_union_full(masks, 2, pending, T),
-       "split 2->3 covers the pool", NULL);
-
-    /* 3 -> 4: four groups of eight. */
-    alloc_mask_range(masks[0], 0, 11);
-    alloc_mask_range(masks[1], 16, 27);
-    alloc_mask_range(masks[2], 11, 16);
-    for (i = 27; i < 32; i++)
-        tbt_fec_bitmap_set(masks[2], i);
-    target[0] = 8;
-    target[1] = 8;
-    target[2] = 8;
-    ok(tbt_fec_alloc_split(T, 3, masks, target, pending, 8),
-       "split 3->4 succeeds", NULL);
-    for (i = 0; i < 3; i++)
-        ok_u32(tbt_fec_bitmap_count(masks[i]), 8,
-               "split 3->4 existing count");
-    ok_u32(tbt_fec_bitmap_count(pending), 8, "split 3->4 new count");
-    for (i = 0; i < 3; i++)
-        for (j = i + 1; j < 3; j++)
-            ok(alloc_masks_disjoint(masks[i], masks[j], T),
-               "split 3->4 existing sets are disjoint", NULL);
-    ok(alloc_union_full(masks, 3, pending, T),
-       "split 3->4 covers the pool", NULL);
-
-    /* 4 -> 1: the survivor grows back to the whole pool one step at a time.
-     * The test simulates the three detach rounds with the masks the split
-     * produced above. */
-    alloc_mask_range(masks[0], 0, 8);
-    alloc_mask_range(masks[1], 16, 24);
-    alloc_mask_range(masks[2], 11, 16);
-    tbt_fec_bitmap_set(masks[2], 27);
-    tbt_fec_bitmap_set(masks[2], 28);
-    tbt_fec_bitmap_set(masks[2], 29);
-    target[0] = 11;
-    target[1] = 11;
-    target[2] = 10;
-    ok(tbt_fec_alloc_split(T, 3, masks, target, NULL, 0),
-       "grow 4->3 succeeds", NULL);
-    ok_u32(tbt_fec_bitmap_count(masks[0]), 11, "grow 4->3 flow0");
-    ok_u32(tbt_fec_bitmap_count(masks[1]), 11, "grow 4->3 flow1");
-    ok_u32(tbt_fec_bitmap_count(masks[2]), 10, "grow 4->3 flow2");
-    ok(alloc_union_full(masks, 3, NULL, T), "grow 4->3 covers the pool",
-       NULL);
-
-    target[0] = 16;
-    target[1] = 16;
-    ok(tbt_fec_alloc_split(T, 2, masks, target, NULL, 0),
-       "grow 3->2 succeeds", NULL);
-    ok_u32(tbt_fec_bitmap_count(masks[0]), 16, "grow 3->2 flow0");
-    ok_u32(tbt_fec_bitmap_count(masks[1]), 16, "grow 3->2 flow1");
-    ok(alloc_union_full(masks, 2, NULL, T), "grow 3->2 covers the pool",
-       NULL);
-
-    target[0] = 32;
-    ok(tbt_fec_alloc_split(T, 1, masks, target, NULL, 0),
-       "grow 2->1 succeeds", NULL);
-    ok_u32(tbt_fec_bitmap_count(masks[0]), 32, "grow 2->1 owns the pool");
-    ok(alloc_union_full(masks, 1, NULL, T), "grow 2->1 covers the pool",
-       NULL);
-
-    /* A new flow that sorts first must not steal a bit another live flow
-     * keeps: the split only adds bits that are free in `taken`. */
-    alloc_mask_range(masks[0], 0, 16);
-    alloc_mask_range(masks[1], 16, 32);
-    target[0] = 11;
-    target[1] = 10;
-    ok(tbt_fec_alloc_split(T, 2, masks, target, pending, 11),
-       "split insertion-first succeeds", NULL);
-    ok(alloc_masks_disjoint(masks[0], masks[1], T) &&
-           alloc_masks_disjoint(masks[0], pending, T) &&
-           alloc_masks_disjoint(masks[1], pending, T),
-       "split insertion-first is disjoint", NULL);
-    ok(alloc_union_full(masks, 2, pending, T),
-       "split insertion-first covers the pool", NULL);
-
-    /* Impossible targets are refused, not approximated. */
-    ok(!tbt_fec_alloc_split(T, 1, masks, target, pending, 0),
-       "split zero pending target is refused", NULL);
-    target[0] = 33;
-    ok(!tbt_fec_alloc_split(T, 1, masks, target, NULL, 0),
-       "split over the pool is refused", NULL);
-}
-
-static void test_alloc_p0(void)
-{
-    u64 pkt, block;
-
-    /* No packet in the current block: switch at its origin. */
-    tbt_fec_alloc_p0(128, 1, 0, 0, 32, 4, &pkt, &block);
-    ok_u64(pkt, 128, "alloc P0 at an empty block origin");
-    ok_u64(block, 1, "alloc B0 at an empty block");
-
-    /* A packet was emitted: close the block and switch at the next one. */
-    tbt_fec_alloc_p0(129, 1, 0, 0, 32, 4, &pkt, &block);
-    ok_u64(pkt, 256, "alloc P0 after a started block");
-    ok_u64(block, 2, "alloc B0 after a started block");
-    ok(tbt_fec_alloc_switch_valid(256, 2, 0, 0, 32, 4),
-       "alloc switch point is on the block grid", NULL);
-    ok(!tbt_fec_alloc_switch_valid(257, 2, 0, 0, 32, 4),
-       "alloc switch point off the grid is refused", NULL);
-    ok(!tbt_fec_alloc_switch_valid(256, 3, 0, 0, 32, 4),
-       "alloc block_base mismatch is refused", NULL);
-
-    /* The mapping is continuous across the switch: P0 names B0/group 0. */
-    ok_u64(tbt_fec_block_of_seq_base(256, 256, 2, 16, 4), 2,
-           "alloc new base block at P0");
-    ok_u32(tbt_fec_group_of_seq_base(256, 256, 16), 0,
-           "alloc new base group at P0");
-    ok_u32(tbt_fec_share_of_seq_base(256, 256, 16, 4), 0,
-           "alloc new base share at P0");
-    /* The old mapping stops at P0: the last old packet is in block B0-1. */
-    ok_u64(tbt_fec_block_of_seq_base(255, 0, 0, 32, 4), 1,
-           "alloc old block below P0");
-}
-
-static u32 alloc_rng_state;
-
-static int alloc_drop(void)
-{
-    alloc_rng_state = alloc_rng_state * 1664525u + 1013904223u;
-    return (alloc_rng_state >> 16) % 4u == 0; /* 25% loss */
-}
-
-static void test_alloc_fsm(void)
-{
-    struct tbt_fec_alloc_sm sm;
-    u64 t = 1000000000ULL;
-    u32 act;
-    int i;
-
-    tbt_fec_alloc_sm_init(&sm);
-    ok_int(sm.state, TBT_FEC_ALLOC_IDLE, "alloc fsm starts idle");
-    ok(!tbt_fec_alloc_sm_step(&sm, t, false),
-       "alloc fsm idle step is a no-op", NULL);
-    ok(tbt_fec_alloc_sm_start(&sm, t), "alloc fsm starts", NULL);
-    ok_int(sm.state, TBT_FEC_ALLOC_REQ, "alloc fsm start -> REQUEST");
-    ok(!tbt_fec_alloc_sm_start(&sm, t),
-       "alloc fsm refuses a second start", NULL);
-    act = tbt_fec_alloc_sm_step(&sm, t, false);
-    ok(act & TBT_FEC_ALLOC_ACT_REQ, "alloc fsm sends the first REQUEST",
-       NULL);
-
-    /* No ACK: the REQUEST is retried at RETRY_MS up to the send cap, then
-     * the round aborts and waits the ABORT_MS budget for ABORT|ACK. A stale
-     * normal ACK must not shorten that wait (0.4.4 WAN 3->4 regression). */
-    act = tbt_fec_alloc_sm_step(
-        &sm, t + (u64)TBT_FEC_ALLOC_RETRY_MS * 500000ULL, false);
-    ok(!(act & TBT_FEC_ALLOC_ACT_REQ), "alloc fsm waits before the retry",
-       NULL);
-    act = tbt_fec_alloc_sm_step(
-        &sm, t + (u64)TBT_FEC_ALLOC_RETRY_MS * 1000000ULL, false);
-    ok(act & TBT_FEC_ALLOC_ACT_REQ, "alloc fsm retries the REQUEST", NULL);
-    act = tbt_fec_alloc_sm_step(
-        &sm, t + 2ULL * TBT_FEC_ALLOC_RETRY_MS * 1000000ULL, false);
-    ok(act & TBT_FEC_ALLOC_ACT_REQ, "alloc fsm retries again", NULL);
-    for (i = 3; i < (int)TBT_FEC_ALLOC_RETRIES; i++)
-        act = tbt_fec_alloc_sm_step(
-            &sm, t + (u64)i * TBT_FEC_ALLOC_RETRY_MS * 1000000ULL,
-            false);
-    ok(act & TBT_FEC_ALLOC_ACT_REQ, "alloc fsm sends the last REQUEST",
-       NULL);
-    act = tbt_fec_alloc_sm_step(
-        &sm, t + (u64)TBT_FEC_ALLOC_RETRIES * TBT_FEC_ALLOC_RETRY_MS *
-                     1000000ULL,
-        false);
-    ok(!(act & TBT_FEC_ALLOC_ACT_REQ), "alloc fsm stops at the send cap",
-       NULL);
-    act = tbt_fec_alloc_sm_step(
-        &sm, t + (u64)TBT_FEC_ALLOC_ABORT_MS * 1000000ULL - 1000000ULL,
-        false);
-    ok(!(act & TBT_FEC_ALLOC_ACT_ABORT) &&
-           sm.state == TBT_FEC_ALLOC_REQ,
-       "alloc fsm keeps the round alive for the abort budget", NULL);
-    act = tbt_fec_alloc_sm_step(
-        &sm, t + (u64)TBT_FEC_ALLOC_ABORT_MS * 1000000ULL + 1000000ULL,
-        false);
-    ok(act & TBT_FEC_ALLOC_ACT_ABORT, "alloc fsm aborts after the budget",
-       NULL);
-    ok_int(sm.state, TBT_FEC_ALLOC_ABORT, "alloc fsm -> ABORT");
-    sm.ack = true; /* the round's normal ACK is still set */
-    act = tbt_fec_alloc_sm_step(
-        &sm, t + (u64)TBT_FEC_ALLOC_ABORT_MS * 1000000ULL + 2000000ULL,
-        false);
-    ok(!(act & (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH)) &&
-           sm.state == TBT_FEC_ALLOC_ABORT,
-       "alloc fsm stale ACK does not end the abort wait", NULL);
-    tbt_fec_alloc_sm_abort_ack(&sm);
-    act = tbt_fec_alloc_sm_step(
-        &sm, t + (u64)TBT_FEC_ALLOC_ABORT_MS * 1000000ULL + 3000000ULL,
-        false);
-    ok((act & (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH)) ==
-           (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH),
-       "alloc fsm ABORT|ACK resumes the old mask", NULL);
-    ok_int(sm.state, TBT_FEC_ALLOC_FAILED, "alloc fsm -> FAILED");
-
-    /* A lost ABORT|ACK still ends at the abort budget. */
-    tbt_fec_alloc_sm_init(&sm);
-    ok(tbt_fec_alloc_sm_start(&sm, t), "alloc fsm lost-abort start", NULL);
-    (void)tbt_fec_alloc_sm_step(&sm, t, false);
-    act = tbt_fec_alloc_sm_step(
-        &sm, t + (u64)TBT_FEC_ALLOC_ABORT_MS * 1000000ULL + 1000000ULL,
-        false);
-    ok(act & TBT_FEC_ALLOC_ACT_ABORT, "alloc fsm lost-abort -> ABORT", NULL);
-    act = tbt_fec_alloc_sm_step(
-        &sm, t + 2ULL * (u64)TBT_FEC_ALLOC_ABORT_MS * 1000000ULL +
-                 2000000ULL,
-        false);
-    ok((act & (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH)) ==
-           (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH),
-       "alloc fsm lost ABORT|ACK ends at the budget", NULL);
-    ok_int(sm.state, TBT_FEC_ALLOC_FAILED, "alloc fsm lost-abort -> FAILED");
-
-    /* Success path: ACK, peer DONE, swap, RX done, COMMITTED. */
-    tbt_fec_alloc_sm_init(&sm);
-    ok(tbt_fec_alloc_sm_start(&sm, t), "alloc fsm success start", NULL);
-    tbt_fec_alloc_sm_ack(&sm);
-    act = tbt_fec_alloc_sm_step(&sm, t + 1000000ULL, false);
-    ok_int(sm.state, TBT_FEC_ALLOC_WAIT, "alloc fsm ACK -> WAIT");
-    ok(!(act & TBT_FEC_ALLOC_ACT_SWAP), "alloc fsm waits for peer DONE",
-       NULL);
-    tbt_fec_alloc_sm_peer_done(&sm);
-    tbt_fec_alloc_sm_rx_done(&sm);
-    act = tbt_fec_alloc_sm_step(&sm, t + 2000000ULL, false);
-    ok(act & TBT_FEC_ALLOC_ACT_SWAP, "alloc fsm peer DONE -> swap TX",
-       NULL);
-    ok(act & TBT_FEC_ALLOC_ACT_DONE, "alloc fsm RX done -> send DONE",
-       NULL);
-    tbt_fec_alloc_sm_tx_swapped(&sm, t + 2000000ULL);
-    ok_int(sm.state, TBT_FEC_ALLOC_COMMIT, "alloc fsm swap -> COMMIT");
-    tbt_fec_alloc_sm_peer_committed(&sm);
-    act = tbt_fec_alloc_sm_step(&sm, t + 3000000ULL, false);
-    ok(act & TBT_FEC_ALLOC_ACT_FINISH, "alloc fsm COMMITTED -> finish",
-       NULL);
-    ok_int(sm.state, TBT_FEC_ALLOC_DONE, "alloc fsm -> DONE");
-
-    /* A COMMIT with no COMMITTED survives up to the round timeout and fails
-     * at it. Pin the macro: the 0.4.4 WAN split needs 15 s, and a future
-     * shrink back to seconds would reopen the stall. */
-    tbt_fec_alloc_sm_init(&sm);
-    ok(tbt_fec_alloc_sm_start(&sm, t), "alloc fsm timeout start", NULL);
-    tbt_fec_alloc_sm_ack(&sm);
-    (void)tbt_fec_alloc_sm_step(&sm, t + 1000000ULL, false);
-    tbt_fec_alloc_sm_peer_done(&sm);
-    tbt_fec_alloc_sm_rx_done(&sm);
-    act = tbt_fec_alloc_sm_step(&sm, t + 2000000ULL, false);
-    tbt_fec_alloc_sm_tx_swapped(&sm, t + 2000000ULL);
-    ok_int(sm.state, TBT_FEC_ALLOC_COMMIT, "alloc fsm timeout -> COMMIT");
-    act = tbt_fec_alloc_sm_step(
-        &sm, t + 2000000ULL +
-                 (u64)TBT_FEC_ALLOC_TIMEOUT_MS * 1000000ULL - 1000000ULL,
-        false);
-    ok_int(sm.state, TBT_FEC_ALLOC_COMMIT,
-           "alloc fsm COMMIT survives just before the timeout");
-    ok(!(act & (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH)),
-       "alloc fsm does not resume before the timeout", NULL);
-    act = tbt_fec_alloc_sm_step(
-        &sm, t + 2000000ULL +
-                 (u64)TBT_FEC_ALLOC_TIMEOUT_MS * 1000000ULL + 1000000ULL,
-        false);
-    ok((act & (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH)) ==
-           (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH),
-       "alloc fsm resumes at the round timeout", NULL);
-    ok_int(sm.state, TBT_FEC_ALLOC_FAILED, "alloc fsm timeout -> FAILED");
-
-    /* Packet-loss convergence: every event may be dropped, but the REQUEST
-     * retry carries the same epoch and the peer repeats its last answer. */
-    alloc_rng_state = 0x5eed1234u;
-    tbt_fec_alloc_sm_init(&sm);
-    tbt_fec_alloc_sm_start(&sm, 0);
-    for (t = 0; t < 20000ULL * 1000000ULL; t += 1000000ULL)
-    {
-        act = tbt_fec_alloc_sm_step(&sm, t, false);
-        if (act & TBT_FEC_ALLOC_ACT_REQ)
-        {
-            if (!sm.ack && !alloc_drop())
-            {
-                tbt_fec_alloc_sm_ack(&sm);
-                tbt_fec_alloc_sm_rx_done(&sm);
-            }
-            if (sm.ack && !sm.peer_done && !alloc_drop())
-                tbt_fec_alloc_sm_peer_done(&sm);
-        }
-        if (sm.done_sent && !sm.peer_committed && !alloc_drop())
-            tbt_fec_alloc_sm_peer_committed(&sm);
-        if (act & TBT_FEC_ALLOC_ACT_SWAP)
-            tbt_fec_alloc_sm_tx_swapped(&sm, t);
-        if (act & TBT_FEC_ALLOC_ACT_FINISH)
-            break;
-    }
-    ok_int(sm.state, TBT_FEC_ALLOC_DONE,
-           "alloc fsm converges under 25% message loss");
-}
-
 int main(void)
 {
     test_header_roundtrip();
@@ -3931,8 +3308,6 @@ int main(void)
     test_cfg_sclc();
     test_fbk_variant();
     test_cfg_carriers();
-    test_alloc();
-    test_ms_win();
     test_wire_version();
     test_rlnc_single();
     test_rlnc_loss_reorder();
@@ -3944,9 +3319,6 @@ int main(void)
     test_stream_peer_eof();
     test_close_bound();
     test_base_mapping();
-    test_alloc_split();
-    test_alloc_p0();
-    test_alloc_fsm();
     test_group_reassembly();
     test_credit_split();
     test_params();

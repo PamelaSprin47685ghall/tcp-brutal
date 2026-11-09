@@ -1,4 +1,4 @@
-/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x1009), control frames, and the
+/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x100a), control frames, and the
  * GF(2) sliding-window RLNC codec.
  *
  * This file and tbt_fec.c compile twice: into the module and into the host
@@ -129,10 +129,8 @@ int tbt_fec_hdr_unpack(const u8 in[TBT_FEC_HDR_LEN], struct tbt_fec_hdr *h);
  *       win_len > 0: win_len <= n, payload_len == max_payload,
  *       epoch <= max_payload. The first PARITY of a block fixes
  *       (win_len, epoch); the receiver refuses a later PARITY that disagrees.
- * ACK/NACK/CFG/FBK/ALLOC/MS_WIN: n==0, m==0, share_index==0, win_len==0,
- *              exact body lengths, payload_len <= max_payload. ALLOC and
- *              MS_WIN also name a stream (sid != 0); MS_WIN leaves block_id
- *              and seq zero.
+ * ACK/NACK/CFG/FBK: n==0, m==0, share_index==0, win_len==0, exact body
+ *              lengths, payload_len <= max_payload.
  *
  * The caller must check header_crc32c before trusting any field; this
  * function is the second gate, not the first. */
@@ -288,26 +286,25 @@ static inline bool tbt_fec_groups_fit(u16 total, u16 used, u16 count)
 
 /* One refusal code for flow creation. A duplicate sid must win over every
  * admission rule: concurrent OPEN copies of the same stream are duplicates.
- * SC-LDPC has exactly one physical flow; every later stream shares it (the
- * admission path returns the primary with a reference instead of creating a
- * second plane), so a create for a second SC-LDPC flow is also -EEXIST: the
- * caller's retry must look up and share the existing plane. */
+ * A session carries one FEC flow, so a create while another flow is live is
+ * -ENOSPC: the caller refuses the second stream. */
 static inline int tbt_fec_flow_create_code(bool sid_exists, bool sclc,
                                            u16 n_flows, u16 total,
                                            u16 count)
 {
-    if (sid_exists || (sclc && n_flows))
+    if (sid_exists)
         return -EEXIST;
+    if (sclc && n_flows)
+        return -ENOSPC;
+    if (n_flows)
+        return -ENOSPC;
     if (!count || count > total)
         return -EPROTO;
     return 0;
 }
 
-/* Every OPEN of a stream on the same plane must name the same bitmap. The
- * SC-LDPC primary binds the first one; later streams are only routing legs
- * over that one plane, so a different bitmap is a protocol error. The
- * caller passes the bitmap the plane already bound (near: its own TX mask,
- * far: the peer RX mask). */
+/* A repeated OPEN must name the same bitmap the plane already bound. The
+ * caller passes that bitmap (near: its own TX mask, far: the peer RX mask). */
 static inline bool tbt_fec_primary_mask_match(bool sclc,
                                               const u8 *flow_mask,
                                               const u8 *open_mask)
@@ -411,39 +408,8 @@ struct tbt_fec_nack
     u8 share_mask[TBT_FEC_BITMAP_BYTES];
 };
 
-/* Group rebalancing request/ack (0x1008, 64 bytes). See tbt_uapi.h for the
- * byte offsets; this struct is the host-side mirror, not the wire layout.
- * switch_pkt and block_base are flow-local, so the same body means the same
- * thing in either direction. */
-struct tbt_fec_alloc
-{
-    u32 epoch;
-    u8 group_mask[TBT_FEC_BITMAP_BYTES];
-    u8 flags; /* TBT_FEC_ALLOC_F_ACK / _DONE / _COMMITTED / _ABORT */
-    u64 switch_pkt;
-    u64 block_base;
-    u32 crc32c;
-};
 
-/* Per-stream receive window (0x1009, 16 bytes). See tbt_uapi.h for the byte
- * offsets; this struct is the host-side mirror, not the wire layout. The
- * record header's sid names the target stream, not the FEC plane's flow. */
-struct tbt_fec_ms_win
-{
-    u64 delivered; /* stream byte offset the receiver has consumed */
-    u32 credit;    /* receive window bytes beyond delivered */
-    u32 reserved;  /* must be 0 */
-};
-
-/* Pack returns 0, or -EINVAL for a NULL argument or a non-zero reserved
- * field. Unpack returns 0, -EINVAL for a NULL argument, or -EPROTO when the
- * wire reserved word is non-zero. */
-int tbt_fec_ms_win_pack(const struct tbt_fec_ms_win *w,
-                        u8 out[TBT_FEC_MS_WIN_LEN]);
-int tbt_fec_ms_win_unpack(const u8 in[TBT_FEC_MS_WIN_LEN],
-                          struct tbt_fec_ms_win *w);
-
-/* Shape change request (0x1009, 64 bytes). See tbt_uapi.h for the byte
+/* Shape change request (0x100a, 64 bytes). See tbt_uapi.h for the byte
  * offsets; this struct is the host-side mirror, not the wire layout. The
  * extension fields name the codec explicitly; `codec_variant == 2` leaves
  * the wire w/k/d bytes zero, and w/k/d below carry the equivalent legacy
@@ -544,12 +510,6 @@ int tbt_fec_ack_unpack(const u8 in[TBT_FEC_ACK_LEN], struct tbt_fec_ack *a);
 int tbt_fec_nack_pack(const struct tbt_fec_nack *n, u8 out[TBT_FEC_NACK_LEN]);
 int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
 
-/* ALLOC pack returns TBT_FEC_ALLOC_LEN or -EINVAL. Unpack returns 0 or
- * -EPROTO. Pack computes crc32c over bytes +0..+55. */
-int tbt_fec_alloc_pack(const struct tbt_fec_alloc *a,
-                       u8 out[TBT_FEC_ALLOC_LEN]);
-int tbt_fec_alloc_unpack(const u8 in[TBT_FEC_ALLOC_LEN],
-                         struct tbt_fec_alloc *a);
 
 /* ------------------------------------------------------------------ *
  * Bounded replay ring and NACK pacing
@@ -1201,450 +1161,6 @@ static inline u64 tbt_fec_seq_of_block_pkt(u64 block_id, u16 group, u16 p,
                                            u16 groups, u16 n)
 {
     return tbt_fec_seq_of_block_pkt_base(block_id, group, p, 0, 0, groups, n);
-}
-
-/* ------------------------------------------------------------------ *
- * Dynamic group rebalancing (FEC_ALLOC 0x36)
- *
- * The near side is the only allocator. When a stream joins or leaves, it
- * recomputes an equal split of the session's physical groups and moves each
- * affected flow with one FEC_ALLOC exchange. The exchange is initiated by
- * the near side; the far side only follows. Every switch happens on a block
- * boundary of the old geometry, and each direction has its own boundary:
- *
- *   near -> far  REQUEST    new mask + P0_A/B0_A (the near TX switch)
- *   far  -> near ACK        P0_B/B0_B (the far TX switch it will make)
- *   far  -> near DONE       the far applied its RX at P0_A
- *   near -> far  DONE       the near applied its RX at P0_B
- *   far  -> near COMMITTED  the far swapped its TX; the round is complete
- *
- * The receiver applies a new mask only after its delivery frontier reached
- * the sender's P0, so no old-mask record remains to place. The sender keeps
- * the packetizer stopped at P0 until the peer confirms the RX side, so no
- * new-mask record can arrive early. An exchange that never got an ACK is
- * aborted (ABORT), because neither side has sent a new-mask record yet.
- * ------------------------------------------------------------------ */
-
-/* The initiator resends a REQUEST every RETRY_MS; a peer that never answers
- * is abandoned after ABORT_MS. Once the peer answered, the exchange is only
- * retried: it has already stopped its TX at our P0, so an abort could strand
- * records that are in flight. */
-#define TBT_FEC_NSEC_PER_MSEC 1000000ULL
-#define TBT_FEC_ALLOC_RETRY_MS 100u
-#define TBT_FEC_ALLOC_ABORT_MS 5000u
-#define TBT_FEC_ALLOC_TIMEOUT_MS 15000u
-#define TBT_FEC_ALLOC_ADMIT_WAIT_MS 20000u
-#define TBT_FEC_ALLOC_RETRIES 20u
-
-/* Equal split of `total` groups over `n` flows, remainder to the lowest
- * indexes (flows are ordered by ascending sid). Returns 0 for a bad index. */
-static inline u16 tbt_fec_alloc_count(u16 total, u16 n, u16 idx)
-{
-    if (!n || idx >= n || !total)
-        return 0;
-    return (u16)(total / n + (idx < total % n ? 1u : 0u));
-}
-
-/* Clear the highest set bits until `mask` holds `keep` groups. Returns the
- * resulting count, or 0 when the mask already holds fewer. */
-static inline u16 tbt_fec_mask_trim(u8 mask[TBT_FEC_BITMAP_BYTES], u16 total,
-                                    u16 keep)
-{
-    u16 p = total, n = tbt_fec_bitmap_count(mask);
-
-    if (keep > n)
-        return 0;
-    while (n > keep && p)
-    {
-        p--;
-        if (tbt_fec_bitmap_test(mask, p))
-        {
-            tbt_fec_bitmap_clear(mask, p);
-            n--;
-        }
-    }
-    return n;
-}
-
-/* Add the lowest physical groups that neither `mask` nor `taken` owns until
- * `mask` holds `want` groups. `taken` is the union of every other flow's
- * planned mask. Returns the resulting count, or 0 when the free pool is too
- * small. */
-static inline u16 tbt_fec_mask_add_free(u8 mask[TBT_FEC_BITMAP_BYTES],
-                                        const u8 taken[TBT_FEC_BITMAP_BYTES],
-                                        u16 total, u16 want)
-{
-    u16 p, n = tbt_fec_bitmap_count(mask);
-
-    if (n > want || !want)
-        return 0;
-    for (p = 0; p < total && n < want; p++)
-        if (!tbt_fec_bitmap_test(taken, p) &&
-            !tbt_fec_bitmap_test(mask, p))
-        {
-            tbt_fec_bitmap_set(mask, p);
-            n++;
-        }
-    return n == want ? n : 0;
-}
-
-/* Plan one split: `masks[0..n-1]` are the current sets, `target[]` the
- * count each must reach, and `pending` (when non-NULL) is a new flow that
- * takes the remaining free bits. Existing flows shrink first, then grow from
- * the pool, so every planned set stays disjoint while the switches run.
- * Returns false when the targets cannot be satisfied. No allocation. */
-static inline bool tbt_fec_alloc_split(
-    u16 total, u16 n, u8 masks[][TBT_FEC_BITMAP_BYTES], const u16 *target,
-    u8 pending[TBT_FEC_BITMAP_BYTES], u16 pending_target)
-{
-    u8 taken[TBT_FEC_BITMAP_BYTES];
-    u16 pos, i, count;
-
-    if (!masks || !target || !n || !total ||
-        pending_target > total)
-        return false;
-    for (pos = 0; pos < n; pos++)
-    {
-        if (!target[pos] || target[pos] > total ||
-            !tbt_fec_group_mask_valid(masks[pos], total, &count))
-            return false;
-        if (target[pos] < count &&
-            !tbt_fec_mask_trim(masks[pos], total, target[pos]))
-            return false;
-    }
-    memset(taken, 0, sizeof(taken));
-    for (pos = 0; pos < n; pos++)
-        for (i = 0; i < total; i++)
-            if (tbt_fec_bitmap_test(masks[pos], i))
-                tbt_fec_bitmap_set(taken, i);
-    for (pos = 0; pos < n; pos++)
-    {
-        count = tbt_fec_bitmap_count(masks[pos]);
-        if (target[pos] > count)
-        {
-            if (!tbt_fec_mask_add_free(masks[pos], taken, total, target[pos]))
-                return false;
-            for (i = 0; i < total; i++)
-                if (tbt_fec_bitmap_test(masks[pos], i))
-                    tbt_fec_bitmap_set(taken, i);
-        }
-    }
-    if (pending)
-    {
-        memset(pending, 0, TBT_FEC_BITMAP_BYTES);
-        if (!tbt_fec_mask_add_free(pending, taken, total, pending_target))
-            return false;
-    }
-    return true;
-}
-
-/* P0/B0 of a flow's next switch. The caller closes the block under
- * construction first when `seq` is past its first packet; this helper only
- * names the boundary: the first packet of the next block, or the current
- * origin when the current block is still empty. */
-static inline void tbt_fec_alloc_p0(u64 seq, u64 cur_block, u64 base_pkt,
-                                    u64 base_block, u16 groups, u16 n,
-                                    u64 *pkt, u64 *block)
-{
-    u64 start = tbt_fec_seq_of_block_pkt_base(cur_block, 0, 0, base_pkt,
-                                              base_block, groups, n);
-
-    if (seq > start)
-    {
-        *pkt = start + (u64)groups * n;
-        *block = cur_block + 1;
-    }
-    else
-    {
-        *pkt = seq;
-        *block = cur_block;
-    }
-}
-
-/* A received switch point must lie on the receiver's current super-block
- * grid and agree with the block_base it names. */
-static inline bool tbt_fec_alloc_switch_valid(u64 switch_pkt, u64 block_base,
-                                              u64 base_pkt, u64 base_block,
-                                              u16 groups, u16 n)
-{
-    u64 span = (u64)groups * n;
-
-    if (!span || switch_pkt < base_pkt)
-        return false;
-    if ((switch_pkt - base_pkt) % span)
-        return false;
-    return block_base == base_block + (switch_pkt - base_pkt) / span;
-}
-
-enum tbt_fec_alloc_state
-{
-    TBT_FEC_ALLOC_IDLE = 0,
-    TBT_FEC_ALLOC_REQ,    /* REQUEST sent, TX stopped at P0 */
-    TBT_FEC_ALLOC_WAIT,   /* ACK received, waiting for the peer's RX */
-    TBT_FEC_ALLOC_COMMIT, /* our TX swapped, waiting for COMMITTED */
-    TBT_FEC_ALLOC_DONE,   /* both sides committed */
-    TBT_FEC_ALLOC_ABORT,  /* ABORT sent, waiting for its ACK */
-    TBT_FEC_ALLOC_FAILED, /* old mask restored; the round failed */
-};
-
-enum tbt_fec_alloc_action
-{
-    TBT_FEC_ALLOC_ACT_NONE = 0,
-    TBT_FEC_ALLOC_ACT_REQ = 1u << 0,    /* (re)send REQUEST */
-    TBT_FEC_ALLOC_ACT_ABORT = 1u << 1,  /* send ABORT */
-    TBT_FEC_ALLOC_ACT_SWAP = 1u << 2,   /* build and install the new TX */
-    TBT_FEC_ALLOC_ACT_DONE = 1u << 3,   /* send DONE: our RX applied */
-    TBT_FEC_ALLOC_ACT_RESUME = 1u << 4, /* restore the old mask, no send */
-    TBT_FEC_ALLOC_ACT_FINISH = 1u << 5, /* round accounting */
-};
-
-/* The initiator's state. Carrier RX sets the event flags; w_fec_tx calls the
- * step and performs the returned actions. None of these helpers allocates. */
-struct tbt_fec_alloc_sm
-{
-    u8 state;
-    u8 retries;
-    bool ack;            /* peer ACK: it stopped its TX at its own P0 */
-    bool peer_done;      /* peer applied its RX at our P0 */
-    bool peer_committed; /* peer swapped its TX to the new mask */
-    bool rx_done;        /* we applied our RX at the peer's P0 */
-    bool tx_swapped;     /* we swapped our TX to the new mask */
-    bool done_sent;      /* our DONE is on the wire */
-    bool abort_ack;      /* peer acknowledged our ABORT (never a normal ACK) */
-    u64 start_ns;
-    u64 last_send_ns;
-    u64 rx_progress;     /* last next_deliver seen by the step caller */
-};
-
-static inline void tbt_fec_alloc_sm_init(struct tbt_fec_alloc_sm *sm)
-{
-    if (sm)
-    {
-        sm->state = TBT_FEC_ALLOC_IDLE;
-        sm->retries = 0;
-        sm->ack = sm->peer_done = sm->peer_committed = false;
-        sm->rx_done = sm->tx_swapped = sm->done_sent = false;
-        sm->abort_ack = false;
-        sm->start_ns = sm->last_send_ns = 0;
-        sm->rx_progress = 0;
-    }
-}
-
-static inline bool tbt_fec_alloc_sm_start(struct tbt_fec_alloc_sm *sm,
-                                          u64 now)
-{
-    if (!sm || sm->state != TBT_FEC_ALLOC_IDLE)
-        return false;
-    sm->ack = sm->peer_done = sm->peer_committed = false;
-    sm->rx_done = sm->tx_swapped = sm->done_sent = false;
-    sm->abort_ack = false;
-    sm->retries = 0;
-    sm->start_ns = now;
-    sm->last_send_ns = now;
-    sm->rx_progress = 0;
-    sm->state = TBT_FEC_ALLOC_REQ;
-    return true;
-}
-
-static inline void tbt_fec_alloc_sm_ack(struct tbt_fec_alloc_sm *sm)
-{
-    if (sm)
-        sm->ack = true;
-}
-
-static inline void tbt_fec_alloc_sm_peer_done(struct tbt_fec_alloc_sm *sm)
-{
-    if (sm)
-        sm->peer_done = true;
-}
-
-static inline void tbt_fec_alloc_sm_peer_committed(struct tbt_fec_alloc_sm *sm)
-{
-    if (sm)
-        sm->peer_committed = true;
-}
-
-static inline void tbt_fec_alloc_sm_rx_done(struct tbt_fec_alloc_sm *sm)
-{
-    if (sm)
-        sm->rx_done = true;
-}
-
-static inline void tbt_fec_alloc_sm_tx_swapped(struct tbt_fec_alloc_sm *sm,
-                                               u64 now)
-{
-    if (!sm)
-        return;
-    sm->tx_swapped = true;
-    if (sm->state == TBT_FEC_ALLOC_WAIT)
-    {
-        sm->state = TBT_FEC_ALLOC_COMMIT;
-        sm->start_ns = now;
-    }
-}
-
-static inline void tbt_fec_alloc_sm_abort_ack(struct tbt_fec_alloc_sm *sm)
-{
-    if (!sm)
-        return;
-    /* A separate event: the normal ack may still be set from the round this
-     * abort is unwinding, and sharing it would end the abort wait instantly
-     * instead of waiting for the peer's ABORT|ACK. Only raise the event: the
-     * ABORT case owns the transition to FAILED and the ACT_RESUME|FINISH
-     * that releases alloc_role/alloc_hold. */
-    sm->abort_ack = true;
-}
-
-/* Advance the initiator and return the actions the caller must perform. It
- * is a pure function of the state, the event flags and the clock, so the
- * host test drives the same transitions over a lossy link. */
-static inline u32 tbt_fec_alloc_sm_step(struct tbt_fec_alloc_sm *sm, u64 now,
-                                        bool stream_done)
-{
-    u32 act = TBT_FEC_ALLOC_ACT_NONE;
-
-    if (!sm)
-        return act;
-    /* Our RX may apply before our TX swaps: DONE only says the peer may
-     * start sending on the new set. */
-    if (sm->rx_done && !sm->done_sent &&
-        sm->state != TBT_FEC_ALLOC_ABORT &&
-        sm->state != TBT_FEC_ALLOC_FAILED)
-    {
-        sm->done_sent = true;
-        act |= TBT_FEC_ALLOC_ACT_DONE;
-    }
-    switch (sm->state)
-    {
-    case TBT_FEC_ALLOC_REQ:
-        if (!sm->ack && !sm->peer_done)
-        {
-            if (sm->retries == 0)
-            {
-                /* The caller starts the round: the first REQUEST goes out
-                 * before it next sleeps. */
-                sm->retries = 1;
-                sm->last_send_ns = now;
-                act |= TBT_FEC_ALLOC_ACT_REQ;
-            }
-            else if (now >= sm->last_send_ns +
-                                (u64)TBT_FEC_ALLOC_RETRY_MS *
-                                    TBT_FEC_NSEC_PER_MSEC &&
-                sm->retries < TBT_FEC_ALLOC_RETRIES)
-            {
-                sm->retries++;
-                sm->last_send_ns = now;
-                act |= TBT_FEC_ALLOC_ACT_REQ;
-            }
-            if (!stream_done &&
-                now < sm->start_ns +
-                          (u64)TBT_FEC_ALLOC_ABORT_MS * TBT_FEC_NSEC_PER_MSEC)
-                break;
-            sm->state = TBT_FEC_ALLOC_ABORT;
-            sm->retries = 1;
-            sm->start_ns = now;
-            sm->last_send_ns = now;
-            act |= TBT_FEC_ALLOC_ACT_ABORT;
-            break;
-        }
-        sm->state = TBT_FEC_ALLOC_WAIT;
-        goto alloc_wait;
-    case TBT_FEC_ALLOC_WAIT:
-    alloc_wait:
-        if (sm->tx_swapped)
-        {
-            sm->state = TBT_FEC_ALLOC_COMMIT;
-            sm->start_ns = now;
-        }
-        else if (sm->peer_done)
-            act |= TBT_FEC_ALLOC_ACT_SWAP;
-        /* A peer that never answers must not own this flow forever: after
-         * the round timeout the exchange aborts at the old mask. This is
-         * safe because no peer RX applied a mask we never swapped our TX
-         * to; the far restores its armed plane on the ABORT. */
-        if (sm->state == TBT_FEC_ALLOC_WAIT &&
-            now >= sm->start_ns +
-                       (u64)TBT_FEC_ALLOC_TIMEOUT_MS * TBT_FEC_NSEC_PER_MSEC &&
-            !sm->peer_done)
-        {
-            sm->state = TBT_FEC_ALLOC_ABORT;
-            sm->retries = 1;
-            sm->start_ns = now;
-            sm->last_send_ns = now;
-            act |= TBT_FEC_ALLOC_ACT_ABORT;
-            break;
-        }
-        if (sm->state == TBT_FEC_ALLOC_WAIT &&
-            now >= sm->start_ns +
-                       (u64)TBT_FEC_ALLOC_TIMEOUT_MS * TBT_FEC_NSEC_PER_MSEC &&
-            now >= sm->last_send_ns +
-                       (u64)TBT_FEC_ALLOC_ABORT_MS * TBT_FEC_NSEC_PER_MSEC)
-        {
-            /* The peer speaks ALLOC; a lost DONE is answered by resending
-             * the REQUEST, which makes it repeat its last response. Pace it
-             * at the abort interval, not at the initial retry burst. */
-            sm->last_send_ns = now;
-            act |= TBT_FEC_ALLOC_ACT_REQ;
-        }
-        if (sm->state != TBT_FEC_ALLOC_COMMIT)
-            break;
-        goto alloc_commit;
-    case TBT_FEC_ALLOC_COMMIT:
-    alloc_commit:
-        if (!sm->tx_swapped || !sm->done_sent || !sm->peer_committed)
-        {
-            /* Our TX already swapped, so an old-mask ABORT would misdescribe
-             * the wire; the only safe exit from a silent peer is to release
-             * the role and keep the new plane (both RX planes applied it).
-             * Without this, a lost COMMITTED held alloc_role forever. */
-            if (now >= sm->start_ns +
-                           (u64)TBT_FEC_ALLOC_TIMEOUT_MS *
-                               TBT_FEC_NSEC_PER_MSEC)
-            {
-                sm->state = TBT_FEC_ALLOC_FAILED;
-                act |= TBT_FEC_ALLOC_ACT_RESUME |
-                       TBT_FEC_ALLOC_ACT_FINISH;
-                break;
-            }
-            /* The peer commits its TX only after our RX-applied DONE. A
-             * single DONE that is lost would leave both sides waiting
-             * (observed: responder ack_sent=1, hold=1, initiator COMMIT
-             * forever). Repeat it at the REQUEST retry cadence; the peer
-             * answers a duplicate with COMMITTED. */
-            if (sm->done_sent && !sm->peer_committed &&
-                now >= sm->last_send_ns +
-                           (u64)TBT_FEC_ALLOC_RETRY_MS *
-                               TBT_FEC_NSEC_PER_MSEC)
-            {
-                sm->last_send_ns = now;
-                act |= TBT_FEC_ALLOC_ACT_DONE;
-            }
-            break;
-        }
-        sm->state = TBT_FEC_ALLOC_DONE;
-        act |= TBT_FEC_ALLOC_ACT_FINISH;
-        break;
-    case TBT_FEC_ALLOC_ABORT:
-        if (sm->abort_ack ||
-            now >= sm->start_ns +
-                       (u64)TBT_FEC_ALLOC_ABORT_MS * TBT_FEC_NSEC_PER_MSEC)
-        {
-            sm->state = TBT_FEC_ALLOC_FAILED;
-            act |= TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH;
-        }
-        else if (now >= sm->last_send_ns +
-                          (u64)TBT_FEC_ALLOC_RETRY_MS * TBT_FEC_NSEC_PER_MSEC &&
-                 sm->retries < TBT_FEC_ALLOC_RETRIES)
-        {
-            sm->retries++;
-            sm->last_send_ns = now;
-            act |= TBT_FEC_ALLOC_ACT_ABORT;
-        }
-        break;
-    default:
-        break;
-    }
-    return act;
 }
 
 /* Last super-block that holds at least one packet, given the stream's total

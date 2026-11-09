@@ -1,7 +1,7 @@
 /* test_wire_compat.c - cross-version wire refusal regression.
  *
- * The 0.4.0 wire (TBT_CONV 0x0007, TBT_FEC_CONV 0x1007, HELLO v4) is a hard
- * cutover: a peer from 0.2.x or 0.3.x must be refused by the first record,
+ * The 0.7.0 wire (TBT_CONV 0x000a, TBT_FEC_CONV 0x100a, HELLO v7) is a hard
+ * cutover: a peer from 0.6.0 or older must be refused by the first record,
  * never guessed at. This test builds the historical byte vectors and feeds
  * them to the same functions the receive path runs:
  *
@@ -216,9 +216,6 @@ static void fec_current_header(struct tbt_fec_hdr *h, u8 type, u16 conv)
     case TBT_FEC_FBK:
         h->payload_len = TBT_FEC_FBK_LEN;
         break;
-    case TBT_FEC_ALLOC:
-        h->payload_len = TBT_FEC_ALLOC_LEN;
-        break;
     default:
         break;
     }
@@ -333,19 +330,6 @@ static void fbk_body(u8 out[TBT_FEC_FBK_LEN])
     tbt_fec_fbk_pack(&f, out);
 }
 
-static void alloc_body(u8 out[TBT_FEC_ALLOC_LEN])
-{
-    struct tbt_fec_alloc a;
-
-    memset(&a, 0, sizeof(a));
-    a.epoch = 1;
-    a.group_mask[0] = 0x01;
-    a.flags = TBT_FEC_ALLOC_F_ACK;
-    a.switch_pkt = 10;
-    a.block_base = 2;
-    tbt_fec_alloc_pack(&a, out);
-}
-
 static void test_legacy_framing(void)
 {
     u8 hello23[TBT_HELLO_BODY_LEN];
@@ -442,13 +426,20 @@ static void test_legacy_framing(void)
 
 static void test_hello_versions(void)
 {
+    ok(TBT_CONV == 0x000au && TBT_FEC_CONV == 0x100au &&
+           TBT_WIRE_VERSION_V6 == 7,
+       "0.7.0 wire constants", "the current constants are not the v10 cut");
+
     expect_hello_refused(1, TBT_HELLO_BODY_LEN, "HELLO v1 (0.1.x/0.2.x ARQ)");
     expect_hello_refused(2, TBT_HELLO_BODY_LEN_V6, "HELLO v2 (0.2.x FEC)");
     expect_hello_refused(3, TBT_HELLO_BODY_LEN_V6, "HELLO v3 (0.3.x FEC)");
+    expect_hello_refused(4, TBT_HELLO_BODY_LEN_V6, "HELLO v4 (0.4.0 FEC)");
+    expect_hello_refused(5, TBT_HELLO_BODY_LEN_V6, "HELLO v5 (0.5.0 FEC)");
+    expect_hello_refused(6, TBT_HELLO_BODY_LEN_V6, "HELLO v6 (0.6.0 FEC)");
     expect_hello_refused(99, TBT_HELLO_BODY_LEN_V6, "HELLO v99 (future)");
 
     expect_hello_ok(TBT_WIRE_VERSION_V6, TBT_HELLO_BODY_LEN_V6, true,
-                    TBT_ROLE_FAR, "HELLO v4 passes the FEC gate");
+                    TBT_ROLE_FAR, "HELLO v7 passes the FEC gate");
     expect_hello_ok(TBT_WIRE_VERSION, TBT_HELLO_BODY_LEN, false,
                     TBT_ROLE_FAR, "HELLO v1 still passes the ARQ gate");
 
@@ -463,9 +454,9 @@ static void test_hello_versions(void)
         ok(tbt_rec_scan(raw, TBT_HDR_LEN + TBT_HELLO_BODY_LEN_V6, &rec,
                         &err) == TBT_HDR_LEN + TBT_HELLO_BODY_LEN_V6 &&
                err == TBT_REC_OK,
-           "HELLO v4 framing passes", "scan refused it");
+           "HELLO v7 framing passes", "scan refused it");
         ok(!tbt_hello_admit(true, rec.body_len, rec.body, TBT_ROLE_NEAR),
-           "HELLO v4 with the wrong role is refused", "gate accepted it");
+           "HELLO v7 with the wrong role is refused", "gate accepted it");
         free(raw);
     }
 
@@ -496,7 +487,7 @@ static void test_hello_crypto(void)
     body[21] = (u8)(TBT_CHUNK_MAX >> 8);
     body[22] = 1;
     ok(tbt_crypto_hello_parse(body, sizeof(body), NULL, NULL, NULL, NULL) == 0,
-       "HELLO v4 crypto fields, all off, pass", "parse refused them");
+       "HELLO v7 crypto fields, all off, pass", "parse refused them");
 
     body[TBT_CRYPTO_HELLO_RESERVED] = 1;
     ok(tbt_crypto_hello_parse(body, sizeof(body), NULL, NULL, NULL, NULL) ==
@@ -519,27 +510,26 @@ static void test_hello_crypto(void)
 
     ok(tbt_crypto_hello_parse(body, TBT_CRYPTO_HELLO_LEN - 1, NULL, NULL, NULL,
                               NULL) == -EPROTO,
-       "truncated HELLO v4 crypto body is refused", "parse accepted it");
+       "truncated HELLO v7 crypto body is refused", "parse accepted it");
 }
 
 static void test_fec_headers(void)
 {
     static const u8 types[] = {TBT_FEC_DATA, TBT_FEC_PARITY, TBT_FEC_CFG,
                                TBT_FEC_FBK, TBT_FEC_NACK};
-    static const u16 old_convs[] = {0x1005, 0x1006};
+    static const u16 old_convs[] = {0x1005, 0x1006, 0x1009};
     size_t i, j;
 
     for (j = 0; j < sizeof(old_convs) / sizeof(old_convs[0]); j++)
         for (i = 0; i < sizeof(types) / sizeof(types[0]); i++)
             expect_historical_fec(old_convs[j], types[i]);
 
-    expect_current_fec_ok(TBT_FEC_DATA, "0.4.0 DATA header passes");
-    expect_current_fec_ok(TBT_FEC_PARITY, "0.4.0 PARITY header passes");
-    expect_current_fec_ok(TBT_FEC_ACK, "0.4.0 ACK header passes");
-    expect_current_fec_ok(TBT_FEC_NACK, "0.4.0 NACK header passes");
-    expect_current_fec_ok(TBT_FEC_CFG, "0.4.0 CFG header passes");
-    expect_current_fec_ok(TBT_FEC_FBK, "0.4.0 FBK header passes");
-    expect_current_fec_ok(TBT_FEC_ALLOC, "0.4.0 ALLOC header passes");
+    expect_current_fec_ok(TBT_FEC_DATA, "0.7.0 DATA header passes");
+    expect_current_fec_ok(TBT_FEC_PARITY, "0.7.0 PARITY header passes");
+    expect_current_fec_ok(TBT_FEC_ACK, "0.7.0 ACK header passes");
+    expect_current_fec_ok(TBT_FEC_NACK, "0.7.0 NACK header passes");
+    expect_current_fec_ok(TBT_FEC_CFG, "0.7.0 CFG header passes");
+    expect_current_fec_ok(TBT_FEC_FBK, "0.7.0 FBK header passes");
 }
 
 static void test_fec_short_records(void)
@@ -628,13 +618,11 @@ static void test_control_bodies(void)
 {
     u8 cfg[TBT_FEC_CFG_LEN];
     u8 fbk[TBT_FEC_FBK_LEN];
-    u8 alloc[TBT_FEC_ALLOC_LEN];
     struct tbt_fec_cfg c;
-    struct tbt_fec_alloc a;
 
     cfg_body(cfg);
     ok(tbt_fec_cfg_unpack(cfg, TBT_FEC_MAX_CARRIERS, &c) == 0,
-       "0.4.0 FEC_CFG body passes",
+       "current FEC_CFG body passes",
        "cfg unpack refused it");
 
     cfg[4] ^= 0x01;
@@ -662,30 +650,6 @@ static void test_control_bodies(void)
         ok(tbt_fec_fbk_unpack(fbk, &f) == -EPROTO,
            "unknown FEC_FBK flag is refused", "fbk unpack accepted it");
     }
-
-    alloc_body(alloc);
-    ok(tbt_fec_alloc_unpack(alloc, &a) == 0, "0.4.0 FEC_ALLOC body passes",
-       "alloc unpack refused it");
-
-    alloc[8] ^= 0x01;
-    ok(tbt_fec_alloc_unpack(alloc, &a) == -EPROTO,
-       "tampered FEC_ALLOC body CRC is refused", "alloc unpack accepted it");
-    alloc[8] ^= 0x01;
-
-    alloc[TBT_FEC_ALLOC_FLAGS] = 0x10;
-    tbt_put_le32(alloc + TBT_FEC_ALLOC_CRC,
-                 tbt_fec_crc32c(0, alloc, TBT_FEC_ALLOC_CRC_BYTES));
-    ok(tbt_fec_alloc_unpack(alloc, &a) == -EPROTO,
-       "unknown FEC_ALLOC flag is refused", "alloc unpack accepted it");
-    alloc[TBT_FEC_ALLOC_FLAGS] = TBT_FEC_ALLOC_F_ACK;
-
-    tbt_put_le32(alloc + TBT_FEC_ALLOC_CRC,
-                 tbt_fec_crc32c(0, alloc, TBT_FEC_ALLOC_CRC_BYTES));
-    alloc[TBT_FEC_ALLOC_RESERVED2] = 1;
-    tbt_put_le32(alloc + TBT_FEC_ALLOC_CRC,
-                 tbt_fec_crc32c(0, alloc, TBT_FEC_ALLOC_CRC_BYTES));
-    ok(tbt_fec_alloc_unpack(alloc, &a) == -EPROTO,
-       "nonzero FEC_ALLOC reserved2 is refused", "alloc unpack accepted it");
 }
 
 int main(void)

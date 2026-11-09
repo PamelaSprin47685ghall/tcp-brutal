@@ -3,6 +3,36 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.7.0] - 2026-11-10
+
+0.7.0 removes the 0.6.0 kernel stream multiplexer and the shared FEC plane
+that carried it. One session carries one FEC flow again, and the DATA/PARITY
+payload is the application byte stream itself.
+
+### Removed
+
+- The SC-LDPC stream mux: the 0.6.0 multiplexer module and its header, the
+  32-byte subframes tagged `[sid, offset, length, type]`, the per-stream
+  receive windows and capture rings, and the per-stream receive-window record
+  (0x37). The shared plane admission ledger and the subframe FIN/RST path go
+  with it.
+- The `FEC_ALLOC` record (0x36), its multi-stream group rebalancing, and the
+  `tbt_fec_alloc_*` control path behind it. Record types are only 0x30..0x35
+  again.
+
+### Changed
+
+- Single-stream 8 KiB cut-through. One DATA share leaves per full 8 KiB
+  write and is sent as that write completes, not at a block boundary.
+  `TBT_FEC_SHORT_MS` (2) applies only to the interactive tail. A 1x256 block
+  is 128 DATA shares followed by its parity shares.
+- Wire v10. `TBT_CONV` moves to `0x000a`, `TBT_FEC_CONV` to `0x100a`, and
+  FEC HELLO `body[0]` to version 7; the three constants move together. The
+  48-byte FEC header and every offset stay unchanged. A 0.6.0 peer is refused
+  at the first HELLO and the first FEC conv check; there is no compatibility
+  branch.
+- Module version is `0.7.0`.
+
 ## [0.6.0] - 2026-11-09
 
 0.6.0 is the merge cut. Two parallel 0.5.0 lines had each taken the same
@@ -16,13 +46,13 @@ together; there is no compatibility branch.
 
 - SC-LDPC single-plane stream multiplexing. One 1x256 downlink plane (and
   the 8x32 GF(16) uplink) carries up to 16 concurrent streams as 32-byte
-  subframes tagged `[sid, offset, length, type]` (`tbt_fec_ms.h`), with
-  per-stream receive windows, FIN and RST. `TBT_FEC_MS_WIN` (0x37) reports
-  one stream's receive window in a 16-byte body named by the record
-  header's `sid`. The shared admission ledger (`struct tbt_ms_admit`)
-  counts claims, aborts, attaches and detaches and keeps `ms_pending` and
-  `ms_refs` balanced, so a losing carrier cannot tear down a plane that its
-  winner still needs.
+  subframes tagged `[sid, offset, length, type]` from the subframe layer,
+  with per-stream receive windows, FIN and RST. The per-stream
+  receive-window record (0x37) reports one stream's receive window in a
+  16-byte body named by the record header's `sid`. The shared admission
+  ledger counts claims, aborts, attaches and detaches and keeps its pending
+  admission slots and attached legs balanced, so a losing carrier cannot
+  tear down a plane that its winner still needs.
 - The 36-byte OPEN with `route_slot` and `target_port`, the 64-byte
   `FEC_CFG`/`FEC_FBK` bodies, and the GF(16) bit-plane64 share mapping are
   all retained under the merged revision; every length and offset from the
@@ -40,9 +70,9 @@ together; there is no compatibility branch.
 - Wire v9. `TBT_CONV` moves to `0x0009`, `TBT_FEC_CONV` to `0x1009`, and
   FEC HELLO `body[0]` to version 6; all three constants move together.
   `TBT_OPEN_BODY_LEN` is 36, `TBT_FEC_CFG_LEN` and `TBT_FEC_FBK_LEN` are 64,
-  `TBT_FEC_MS_WIN` is 0x37, and the SC-LDPC DATA/PARITY payload is the
-  32-byte subframe stream. The 48-byte FEC header and every offset stay
-  unchanged.
+  the per-stream receive-window record is 0x37, and the SC-LDPC DATA/PARITY
+  payload is the 32-byte subframe stream. The 48-byte FEC header and every
+  offset stay unchanged.
 - Module version is `0.6.0`.
 
 ### Verification
@@ -51,12 +81,12 @@ together; there is no compatibility branch.
   DEBUG_ATOMIC_SLEEP and drives the merged data plane over
   `profile=http-kal`: three sequential streams, then six concurrent streams
   on the one 1x256 plane (four bulk streams moving 6 MiB per direction,
-  one 50 KiB stream closing through a forced tail `MS_WIN`, one mid-stream
-  RST), the multiport mapping and GF(16) uplink stages, a grouped pair, and
-  `del` + `delete_module` with a clean kernel log.
+  one 50 KiB stream closing through a forced tail receive-window record, one
+  mid-stream RST), the multiport mapping and GF(16) uplink stages, a grouped
+  pair, and `del` + `delete_module` with a clean kernel log.
 - `host/test_fec` covers the 36-byte OPEN, the 64-byte CFG/FBK bodies and
-  MS_WIN; `host/test_fec_ms` covers the ring lifecycle and the admission
-  ledger under concurrent claim/attach/abort.
+  the receive-window record; the mux host test covers the ring lifecycle and
+  the admission ledger under concurrent claim/attach/abort.
 
 ## [0.5.0] - unreleased
 
@@ -80,18 +110,19 @@ together; there is no compatibility branch.
   `COMMITTED` (0x04) and `ABORT` (0x08) join `ACK`/`DONE`, and the reserved
   bytes are validated.
 - SC-LDPC single-plane stream multiplexing: one SC-LDPC FEC plane carries
-  32-byte subframes tagged by stream id (`tbt_fec_ms.h`), with per-stream
-  receive windows, FIN and RST.
-- `TBT_FEC_MS_WIN` (`0x37`) carries one stream's receive window: delivered
-  byte offset, credit, and a reserved word. The 16-byte body names the
-  target stream in the record header's `sid`.
-- `host/test_fec` covers the MS_WIN body and its header rules.
+  32-byte subframes tagged by stream id, with per-stream receive windows,
+  FIN and RST.
+- The per-stream receive-window record (0x37) carries one stream's receive
+  window: delivered byte offset, credit, and a reserved word. The 16-byte
+  body names the target stream in the record header's `sid`.
+- `host/test_fec` covers the receive-window body and its header rules.
 - `scripts/qemu-e2e-smoke.sh` boots 7.0.14 under KVM with lockdep, UBSAN and
   DEBUG_ATOMIC_SLEEP and drives the shipped 1x256 downlink / 8x32 uplink pair
   over `profile=http-kal`: three sequential streams, then six concurrent
   streams on the one plane (four bulk streams moving 6 MiB per direction,
-  one 50 KiB stream closing through a forced tail `MS_WIN`, one mid-stream
-  RST), a grouped pair, and `del` + `delete_module` with a clean kernel log.
+  one 50 KiB stream closing through a forced tail receive-window record, one
+  mid-stream RST), a grouped pair, and `del` + `delete_module` with a clean
+  kernel log.
 
 ### Changed
 
@@ -100,7 +131,7 @@ together; there is no compatibility branch.
   HELLO, the first FEC conv check and the first OPEN length check; there is
   no compatibility branch. The 32-byte main header and the 48-byte FEC
   header keep every offset; the DATA/PARITY payload interpretation and the
-  new MS_WIN record are the changes.
+  new receive-window record are the changes.
 - OPEN carries 36 bytes: the 32-byte physical group bitmap, then `route_slot`
   and `target_port` (both little-endian). The near side always sends its own
   mapping slot and that slot's target port; the port is 0 only when the slot
@@ -174,10 +205,10 @@ together; there is no compatibility branch.
 - Duplicate OPENs leaked their admission reference, and a fresh flow did not
   count its own admission at all: a losing carrier could abort a plane whose
   winner had not attached yet. A carrier that found its flow by lookup also
-  consumed a slot it did not own. `ms_pending`/`ms_refs` are now split and
-  both are balanced, and a lookup-attached stream claims its own slot (or is
-  refused with `-ESTALE` if the plane is already dying), so the plane
-  outlives every admission and attached leg.
+  consumed a slot it did not own. Pending admission slots and attached legs
+  are now tracked separately and both are balanced, and a lookup-attached
+  stream claims its own slot (or is refused with `-ESTALE` if the plane is
+  already dying), so the plane outlives every admission and attached leg.
 - An unlink path that lost the race to another unlink no longer drops the
   table reference a second time, so abort/detach cannot underflow the flow's
   refcount.
@@ -188,11 +219,12 @@ together; there is no compatibility branch.
 - Kill shut a socket down at the call site while a carrier RX actor already
   held another socket's lock, which lockdep reports as recursive
   `k-sk_lock-AF_INET` nesting; `w_kill` owns the shutdown now.
-- The HTTP container did not dispatch `MS_WIN` (0x37), the plane-level ACK
-  stopped updating with no single stream, and a sub-window tail never sent a
-  final `MS_WIN`; bulk multi-stream over `http-kal` stalled or left the
-  sender's FIN gate closed. `tbt_fec_record_type()`, the plane frontier and a
-  forced tail report cover all three.
+- The HTTP container did not dispatch the receive-window record (0x37), the
+  plane-level ACK stopped updating with no single stream, and a sub-window
+  tail never sent a final receive-window record; bulk multi-stream over
+  `http-kal` stalled or left the sender's FIN gate closed.
+  `tbt_fec_record_type()`, the plane frontier and a forced tail report cover
+  all three.
 - A carrier marked itself OPEN-ready when the pinned OPEN *failed* to queue
   (the success test was inverted), letting FEC data run before its OPEN. The
   flag now stays clear until the pump writes the OPEN; the direct FEC data
@@ -200,7 +232,7 @@ together; there is no compatibility branch.
 - The mux FIN tail report held a borrowed plane pointer across an unlock;
   it now takes a referenced primary. The receiver's closed-sid table was dead
   state once feed stopped creating legs, and is gone.
-- `host/test_fec_ms` covers the ring alloc/install/remove/free lifecycle, a
+- The mux host test covers the ring alloc/install/remove/free lifecycle, a
   four-thread install/remove/pack stress, and the admission ledger under
   concurrent claim/attach/abort (the kernel contract is one lock, as in the
   module).
