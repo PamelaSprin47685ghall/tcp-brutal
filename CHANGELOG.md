@@ -39,6 +39,12 @@ and moves independently of the module version.
   `carriers=` value, the `mode=rlnc` default (`n + m`) and the
   `mode=sc-ldpc` defaults are unchanged. 64 carriers measured 118.2
   Mbit/s against 97.3 at 256, with the far CPU 30..45% lower (0.2.1).
+- The host build of `tbt_fec_crc32c()` uses SSE4.2 `crc32q` on x86_64 and
+  CRC32X on aarch64 when the CPU supports it, chosen at runtime; other ABIs
+  and CPUs keep the portable table. The kernel path still calls `crc32c()`.
+  8 KiB CRCs drop from 14.3 to 0.64 us, and `host/test_fec` now proves the
+  instruction and table paths agree over every length 0..8240 at byte
+  offsets 0..15, with nonzero seeds and every chaining split 0..96.
 
 ### Added
 
