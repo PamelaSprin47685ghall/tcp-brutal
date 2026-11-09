@@ -52,10 +52,18 @@
 #define TGT_PORT 19070
 #define CARRIERS 256
 #define PORTBLOCK "30000-30511"
+/* carriers / (n + m) for the grouped 4+4 shape below: the physical group
+ * pool the near-side allocator divides between live flows. */
+#define GROUP_TOTAL (CARRIERS / (4 + 4))
+/* One grouped super-block: every group owns n shares of 8 KiB. The receiver
+ * delivers only at that boundary, so a stream that stops mid-block has no
+ * echo to read and its TX never reaches the allocator's switch point. */
+#define TBT_SHARE_BYTES 8192u
+#define SUPER_BYTES (GROUP_TOTAL * 4u * TBT_SHARE_BYTES)
 #define STREAM_BYTES (128u * 1024u)
 #define CHUNK 32768u
-#define WATCHDOG_S 40
-#define UP_TIMEOUT_MS 15000
+#define WATCHDOG_S 100
+#define UP_TIMEOUT_MS 30000
 #define IDLE_TIMEOUT_MS 6000
 #define UNLOAD_TIMEOUT_MS 8000
 
@@ -333,7 +341,9 @@ static void raise_loopback(void)
 
 static void load_module(void)
 {
-    const char *args = "fec_groups_per_flow=16";
+    /* 0 is the default dynamic arbitration: the near side owns the whole
+     * pool for one flow and rebalances it while streams join and leave. */
+    const char *args = "fec_groups_per_flow=0";
     int fd = open("/tbtun.ko", O_RDONLY | O_CLOEXEC);
     long rc;
 
@@ -709,38 +719,434 @@ static void delete_tunnel(unsigned int id)
     write_path("/proc/net/tbtun/config", line);
 }
 
-/* The per-stream snapshot lives in /proc/net/tbtun/stats, one
- * "tunnel N stream sid=..." line per live/tombstoned stream.  Two ends times
- * two concurrent streams is four. */
-static int count_stream_rows(void)
+/* One stream row from /proc/net/tbtun/stats with the flow's committed group
+ * set. `state` is the stream state; a detached flow reports groups=0. */
+struct flow_row
+{
+    unsigned long long sid;
+    unsigned int state;
+    unsigned int groups;
+    unsigned int alloc_role;
+    unsigned int alloc_state;
+    unsigned int alloc_ack;
+    unsigned int alloc_hold;
+    char sm[8];
+    char mask[2 * 32 + 1];
+};
+
+static int flow_rows(unsigned int id, struct flow_row *rows, int max)
 {
     static char buf[4u * 1024u * 1024u];
-    int len = read_path("/proc/net/tbtun/stats", buf, sizeof(buf));
-    int n = 0;
+    char want[64];
     char *line, *save;
+    size_t wl;
+    int len, n = 0;
 
+    len = read_path("/proc/net/tbtun/stats", buf, sizeof(buf));
     if (len < 0)
         return -1;
+    snprintf(want, sizeof(want), "tunnel %u stream ", id);
+    wl = strlen(want);
     for (line = strtok_r(buf, "\n", &save); line;
          line = strtok_r(NULL, "\n", &save))
-        if (strstr(line, "stream sid="))
-            n++;
+    {
+        unsigned long long v;
+
+        if (n >= max)
+            break;
+        if (strncmp(line, want, wl))
+            continue;
+        memset(&rows[n], 0, sizeof(rows[n]));
+        if (line_kv(line, "sid", &v))
+            continue;
+        rows[n].sid = v;
+        if (line_kv(line, "state", &v))
+            continue;
+        rows[n].state = (unsigned int)v;
+        if (line_kv(line, "fec_groups", &v))
+            continue;
+        rows[n].groups = (unsigned int)v;
+        if (!line_kv(line, "alloc_role", &v))
+            rows[n].alloc_role = (unsigned int)v;
+        if (!line_kv(line, "alloc_state", &v))
+            rows[n].alloc_state = (unsigned int)v;
+        if (!line_kv(line, "alloc_ack", &v))
+            rows[n].alloc_ack = (unsigned int)v;
+        if (!line_kv(line, "alloc_hold", &v))
+            rows[n].alloc_hold = (unsigned int)v;
+        {
+            const char *p = strstr(line, "sm=");
+
+            if (p && strlen(p + 3) >= 5)
+                memcpy(rows[n].sm, p + 3, 5);
+            else
+                snprintf(rows[n].sm, sizeof(rows[n].sm), "?");
+        }
+        {
+            const char *p = strstr(line, "fec_mask=");
+
+            if (!p || strlen(p + 9) < 2 * 32)
+                continue;
+            memcpy(rows[n].mask, p + 9, 2 * 32);
+            rows[n].mask[2 * 32] = 0;
+        }
+        n++;
+    }
     return n;
 }
 
-static int wait_stream_rows(int want, int timeout_ms)
+static unsigned int hex_masked(const char *mask, unsigned int bits,
+                               unsigned int *popcount)
 {
+    unsigned int v = 0, i, pc = 0;
+
+    for (i = 0; i < bits / 8; i++)
+    {
+        unsigned int b;
+
+        if (sscanf(mask + 2 * i, "%2x", &b) != 1)
+            return 0;
+        v |= b << (8 * i);
+        while (b)
+        {
+            pc += b & 1u;
+            b >>= 1;
+        }
+    }
+    if (popcount)
+        *popcount = pc;
+    return v;
+}
+
+static void split_desc(const struct flow_row *rows, int n, char *out, size_t cap)
+{
+    unsigned int got[32];
+    int live = 0, i, j;
+    size_t off = 0;
+
+    for (i = 0; i < n; i++)
+        if (rows[i].state == 1 && rows[i].groups)
+            got[live++] = rows[i].groups;
+    for (i = 1; i < live; i++)
+        for (j = i; j > 0 && got[j - 1] > got[j]; j--)
+        {
+            unsigned int t = got[j];
+
+            got[j] = got[j - 1];
+            got[j - 1] = t;
+        }
+    off += (size_t)snprintf(out + off, cap - off, "groups=");
+    for (i = 0; i < live; i++)
+    {
+        if (off >= cap)
+            break;
+        off += (size_t)snprintf(out + off, cap - off, "%s%u", i ? "+" : "",
+                                got[i]);
+    }
+    if (!live)
+        snprintf(out + off, cap - off, "none");
+}
+
+/* A converged split: exactly `nwant` live flows, each holding the expected
+ * count, summing to `total`, and their group bitmaps pairwise disjoint and
+ * covering every physical group. The bitmap check is what turns a plausible
+ * count into an allocation proof. */
+static int split_matches(const struct flow_row *rows, int n,
+                         const unsigned int *want, int nwant,
+                         unsigned int total, char *desc, size_t cap)
+{
+    unsigned int got[32], unionmask = 0;
+    int live = 0, i, j, bad = 0;
+
+    for (i = 0; i < n; i++)
+        if (rows[i].state == 1 && rows[i].groups)
+            got[live++] = rows[i].groups;
+    split_desc(rows, n, desc, cap);
+    if (live != nwant)
+        return 0;
+    for (i = 1; i < live; i++)
+        for (j = i; j > 0 && got[j - 1] > got[j]; j--)
+        {
+            unsigned int t = got[j];
+
+            got[j] = got[j - 1];
+            got[j - 1] = t;
+        }
+    for (i = 0; i < live; i++)
+        if (got[i] != want[i])
+            bad = 1;
+    if (bad)
+        return 0;
+    for (i = 0; i < n && !bad; i++)
+    {
+        unsigned int pc = 0, mask;
+
+        if (rows[i].state != 1 || !rows[i].groups)
+            continue;
+        mask = hex_masked(rows[i].mask, total, &pc);
+        if (pc != rows[i].groups || (unionmask & mask))
+            bad = 1;
+        unionmask |= mask;
+    }
+    if (bad || unionmask != (total >= 32 ? 0xffffffffu
+                                         : ((1u << total) - 1u)))
+        return 0;
+    return 1;
+}
+
+static void sample_side(unsigned int id, const char *tag)
+{
+    struct flow_row rows[32];
+    char rb[512];
+    int n, fj;
+
+    n = flow_rows(id, rows, (int)(sizeof(rows) / sizeof(rows[0])));
+    if (stats_line(id, "rebalance", rb, sizeof(rb)))
+        snprintf(rb, sizeof(rb), "rebalance=unreadable");
+    printf("QEMU_E2E_STATE %s %s", tag, rb);
+    for (fj = 0; n >= 0 && fj < n; fj++)
+        if (rows[fj].state == 1 && rows[fj].groups)
+            printf(" f=%llu:%u:%u:%u:%u:%u:%s", rows[fj].sid,
+                   rows[fj].groups, rows[fj].alloc_role,
+                   rows[fj].alloc_state, rows[fj].alloc_ack,
+                   rows[fj].alloc_hold, rows[fj].sm);
+    printf("\n");
+    fflush(stdout);
+}
+
+static int wait_flow_split(unsigned int id, const unsigned int *want, int nwant,
+                           unsigned int total, int timeout_ms, char *desc,
+                           size_t cap)
+{
+    struct flow_row rows[32];
     long long deadline = now_ms() + timeout_ms;
+    long long next_trace = now_ms();
     int n = -1;
 
     while (now_ms() < deadline)
     {
-        n = count_stream_rows();
-        if (n >= want)
-            return n;
-        msleep(100);
+        n = flow_rows(id, rows, (int)(sizeof(rows) / sizeof(rows[0])));
+        if (n >= 0 && split_matches(rows, n, want, nwant, total, desc, cap))
+            return 0;
+        if (now_ms() >= next_trace)
+        {
+            if (n >= 0)
+                split_desc(rows, n, desc, cap);
+            printf("QEMU_E2E_STATE split=%s\n", desc);
+            sample_side(2, "near");
+            sample_side(1, "far");
+            next_trace = now_ms() + 500;
+        }
+        msleep(50);
     }
-    return n;
+    if (n < 0)
+        snprintf(desc, cap, "stats unreadable");
+    else
+        split_desc(rows, n, desc, cap);
+    return -1;
+}
+
+static void dump_flow_masks(unsigned int id)
+{
+    struct flow_row rows[32];
+    int n, i;
+
+    n = flow_rows(id, rows, (int)(sizeof(rows) / sizeof(rows[0])));
+    for (i = 0; i < n; i++)
+    {
+        if (rows[i].state != 1 || !rows[i].groups)
+            continue;
+        printf("QEMU_E2E_FLOW tunnel=%u sid=%llu fec_groups=%u fec_mask=%s\n",
+               id, rows[i].sid, rows[i].groups, rows[i].mask);
+    }
+    fflush(stdout);
+}
+
+/* One live stream that keeps the FEC flow busy until the parent stops it.
+ * The rebalance switches at a super-block boundary, so a donor that stops
+ * sending would starve its own exchange; the pump is the load that lets
+ * every round reach P0 and proves each switch carried bytes intact. */
+struct pump
+{
+    pid_t pid;
+    int stop_fd;
+    int res_fd;
+    const char *tag;
+};
+
+struct pump_res
+{
+    unsigned long long bytes;
+    unsigned int ok;
+    char why[160];
+};
+
+static void pump_child(int stop_fd, int res_fd, uint32_t seed)
+{
+    struct pump_res r;
+    int cfd;
+    unsigned long long off = 0;
+
+    memset(&r, 0, sizeof(r));
+    alarm(0);
+    cfd = connect_client();
+    if (cfd < 0)
+    {
+        snprintf(r.why, sizeof(r.why), "connect: %s", strerror(errno));
+        goto out;
+    }
+    for (;;)
+    {
+        struct pollfd p;
+        size_t sent = 0, got = 0;
+
+        p.fd = stop_fd;
+        p.events = POLLIN;
+        p.revents = 0;
+        if (poll(&p, 1, 0) > 0)
+            break;
+        while (sent < SUPER_BYTES)
+        {
+            size_t n = SUPER_BYTES - sent < CHUNK ? SUPER_BYTES - sent : CHUNK;
+            size_t i;
+
+            for (i = 0; i < n; i++)
+                chunk_send[i] = pattern_byte(seed + (uint32_t)(off + sent + i));
+            if (send_all(cfd, chunk_send, n, 4000))
+            {
+                snprintf(r.why, sizeof(r.why), "send at %llu: %s",
+                         off + sent, strerror(errno));
+                goto out;
+            }
+            sent += n;
+        }
+        while (got < SUPER_BYTES)
+        {
+            size_t n = SUPER_BYTES - got < CHUNK ? SUPER_BYTES - got : CHUNK;
+            size_t i;
+
+            if (recv_all(cfd, chunk_recv, n, 10000))
+            {
+                snprintf(r.why, sizeof(r.why), "echo at %llu: %s",
+                         off + got, strerror(errno));
+                goto out;
+            }
+            for (i = 0; i < n; i++)
+            {
+                unsigned char want =
+                    pattern_byte(seed + (uint32_t)(off + got + i));
+
+                if (chunk_recv[i] != want)
+                {
+                    snprintf(r.why, sizeof(r.why),
+                             "byte %llu differs: got %02x want %02x",
+                             off + got + i, chunk_recv[i], want);
+                    goto out;
+                }
+            }
+            got += n;
+        }
+        off += SUPER_BYTES;
+        r.bytes += SUPER_BYTES;
+    }
+    r.ok = 1;
+out:
+    printf("QEMU_E2E_NOTE pump seed=%08x %s bytes=%llu%s%s\n", seed,
+           r.ok ? "done" : "failed", r.bytes, r.why[0] ? " why=" : "", r.why);
+    fflush(stdout);
+    if (cfd >= 0)
+        close(cfd);
+    (void)!write(res_fd, &r, sizeof(r));
+    _exit(r.ok ? 0 : 1);
+}
+
+static void spawn_pump(struct pump *p, const char *tag, uint32_t seed)
+{
+    int sp[2], rp[2];
+
+    if (pipe(sp) || pipe(rp))
+        verdict_fail("%s: pipe: %s", tag, strerror(errno));
+    p->pid = fork();
+    if (p->pid < 0)
+        verdict_fail("%s: fork: %s", tag, strerror(errno));
+    if (!p->pid)
+    {
+        close(sp[1]);
+        close(rp[0]);
+        pump_child(sp[0], rp[1], seed);
+    }
+    close(sp[0]);
+    close(rp[1]);
+    p->stop_fd = sp[1];
+    p->res_fd = rp[0];
+    p->tag = tag;
+}
+
+static void stop_pump(struct pump *p)
+{
+    char one = 1;
+
+    (void)!write(p->stop_fd, &one, 1);
+}
+
+static void join_pump(struct pump *p, unsigned long long min_bytes)
+{
+    struct pump_res r;
+    size_t off = 0;
+    int status = 0;
+
+    memset(&r, 0, sizeof(r));
+    while (off < sizeof(r))
+    {
+        ssize_t n = read(p->res_fd, (char *)&r + off, sizeof(r) - off);
+
+        if (n <= 0)
+            break;
+        off += (size_t)n;
+    }
+    close(p->stop_fd);
+    close(p->res_fd);
+    if (waitpid(p->pid, &status, 0) != p->pid)
+        verdict_fail("%s: waitpid: %s", p->tag, strerror(errno));
+    if (off != sizeof(r) || !r.ok || !WIFEXITED(status) ||
+        WEXITSTATUS(status))
+        verdict_fail("%s: %s", p->tag,
+                     off == sizeof(r) && r.why[0] ? r.why : "pump failed");
+    if (r.bytes < min_bytes)
+        verdict_fail("%s: only %llu bytes verified, want >= %llu", p->tag,
+                     r.bytes, min_bytes);
+    printf("QEMU_E2E_STREAM %s bytes=%llu ok\n", p->tag, r.bytes);
+    fflush(stdout);
+}
+
+/* On a failed split, say whether each pump is still exchanging or already
+ * gone. A pump that exited owns the reset the allocator then reports as a
+ * failed round; a live pump means the switch itself stalled. */
+static void note_pumps(struct pump *p, int n)
+{
+    int i;
+
+    for (i = 0; i < n; i++)
+    {
+        struct pollfd pfd;
+        struct pump_res r;
+        ssize_t m;
+
+        pfd.fd = p[i].res_fd;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+        if (poll(&pfd, 1, 0) <= 0)
+        {
+            printf("QEMU_E2E_NOTE %s still exchanging\n", p[i].tag);
+            continue;
+        }
+        memset(&r, 0, sizeof(r));
+        m = read(p[i].res_fd, &r, sizeof(r));
+        if (m == (ssize_t)sizeof(r))
+            printf("QEMU_E2E_NOTE %s exited ok=%u bytes=%llu why=%s\n",
+                   p[i].tag, r.ok, r.bytes, r.why);
+    }
+    fflush(stdout);
 }
 
 static void klog_clear(void)
@@ -871,7 +1277,7 @@ int main(void)
     raise_loopback();
     klog_clear();
     load_module();
-    printf("QEMU_E2E_MODULE loaded fec_groups_per_flow=16\n");
+    printf("QEMU_E2E_MODULE loaded fec_groups_per_flow=0\n");
 
     echo_pid = start_echo();
 
@@ -948,7 +1354,7 @@ int main(void)
             verdict_fail("SC-LDPC session did not drain after the refusal");
     }
 
-    /* --- phase 3: RLNC (grouped) multi-stream --------------------------- */
+    /* --- phase 3: RLNC grouped, runtime 1 -> 2 -> 4 -> 1 group split ---- */
     delete_tunnel(1);
     delete_tunnel(2);
     if (wait_tunnels_gone(6000))
@@ -958,74 +1364,99 @@ int main(void)
 
     configure("tunnel 1 role=far profile=raw listen=127.0.0.1:19001"
               " target=127.0.0.1:19070 n=4 m=4 fec=on mode=grouped"
-              " w=8 carriers=256 crypto=off dup=1\n",
+              " w=8 carriers=256 crypto=off dup=1 adaptive=off\n",
               "tunnel 2 role=near profile=raw listen=127.0.0.1:19000"
               " peer=127.0.0.1:19001 n=4 m=4 fec=on mode=grouped"
               " w=8 carriers=256 crypto=off dup=1"
-              " portblock=30600-31111\n");
+              " portblock=30600-31111 adaptive=off\n");
     if (wait_carriers(CARRIERS, UP_TIMEOUT_MS))
         verdict_fail("grouped carriers did not come up");
     printf("QEMU_E2E_UP grouped up=%u\n", CARRIERS);
     fflush(stdout);
 
     {
-        pid_t kids[2];
-        int active_rows = -1;
+        static const unsigned int want1[] = { 32 };
+        static const unsigned int want2[] = { 16, 16 };
+        static const unsigned int want3[] = { 10, 11, 11 };
+        static const unsigned int want4[] = { 8, 8, 8, 8 };
+        struct pump p[4];
+        char desc[256];
 
-        for (i = 0; i < 2; i++)
+        /* Flow 1 starts alone and owns every physical group. Its pump keeps
+         * sending through every later switch: a stopped donor never reaches
+         * the super-block boundary its own rebalance waits for. */
+        spawn_pump(&p[0], "alloc-1", 0x11000000u);
+        if (wait_flow_split(2, want1, 1, GROUP_TOTAL, 10000, desc,
+                            sizeof(desc)))
         {
-            kids[i] = fork();
-            if (kids[i] < 0)
-                verdict_fail("multistream: fork: %s", strerror(errno));
-            if (!kids[i])
-            {
-                int cfd = connect_client();
-                char cwhy[256] = "";
-
-                alarm(0);
-                if (cfd < 0)
-                {
-                    printf("QEMU_E2E_NOTE stream%d connect: %s\n", i,
-                           strerror(errno));
-                    _exit(1);
-                }
-                if (roundtrip(cfd, STREAM_BYTES, cwhy, sizeof(cwhy)))
-                {
-                    printf("QEMU_E2E_NOTE stream%d: %s\n", i, cwhy);
-                    _exit(1);
-                }
-                close_stream(cfd);
-                _exit(0);
-            }
-            msleep(200);
-            if (!i)
-            {
-                active_rows = count_stream_rows();
-                printf("QEMU_E2E_STATE multistream rows=%d\n", active_rows);
-                fflush(stdout);
-            }
-            else
-            {
-                active_rows = wait_stream_rows(2, 2000);
-                printf("QEMU_E2E_STATE multistream rows=%d\n", active_rows);
-                fflush(stdout);
-            }
+            note_pumps(p, 1);
+            verdict_fail("alloc: one-flow split: %s", desc);
         }
-        for (i = 0; i < 2; i++)
+        printf("QEMU_E2E_ALLOC 1 flow %s\n", desc);
+        dump_flow_masks(2);
+        msleep(400);
+
+        spawn_pump(&p[1], "alloc-2", 0x22000000u);
+        if (wait_flow_split(2, want2, 2, GROUP_TOTAL, 10000, desc,
+                            sizeof(desc)))
         {
-            int status = 0;
-
-            if (waitpid(kids[i], &status, 0) != kids[i] ||
-                !WIFEXITED(status) || WEXITSTATUS(status))
-                verdict_fail("RLNC concurrent stream %d failed", i);
+            note_pumps(p, 2);
+            verdict_fail("alloc: two-flow split: %s", desc);
         }
-        if (active_rows < 0)
-            printf("QEMU_E2E_NOTE stats file unavailable\n");
-        else if (active_rows < 2)
-            printf("QEMU_E2E_NOTE saw %d stream rows, expected 2\n",
-                   active_rows);
+        printf("QEMU_E2E_ALLOC 2 flows %s\n", desc);
+        dump_flow_masks(2);
         printf("QEMU_E2E_MULTISTREAM 2 streams ok\n");
         fflush(stdout);
+        msleep(300);
+
+        spawn_pump(&p[2], "alloc-3", 0x33000000u);
+        if (wait_flow_split(2, want3, 3, GROUP_TOTAL, 10000, desc,
+                            sizeof(desc)))
+        {
+            note_pumps(p, 3);
+            verdict_fail("alloc: three-flow split: %s", desc);
+        }
+        printf("QEMU_E2E_ALLOC 3 flows %s\n", desc);
+        dump_flow_masks(2);
+        fflush(stdout);
+        msleep(300);
+
+        spawn_pump(&p[3], "alloc-4", 0x44000000u);
+        if (wait_flow_split(2, want4, 4, GROUP_TOTAL, 10000, desc,
+                            sizeof(desc)))
+        {
+            note_pumps(p, 4);
+            verdict_fail("alloc: four-flow split: %s", desc);
+        }
+        printf("QEMU_E2E_ALLOC 4 flows %s\n", desc);
+        dump_flow_masks(2);
+        msleep(600);
+        /* All four pumps exchanged throughout; the split must still hold
+         * after that traffic and the bitmaps must still cover the pool. */
+        if (wait_flow_split(2, want4, 4, GROUP_TOTAL, 4000, desc,
+                            sizeof(desc)))
+        {
+            note_pumps(p, 4);
+            verdict_fail("alloc: four-flow split drifted: %s", desc);
+        }
+        printf("QEMU_E2E_MULTISTREAM 4 streams ok\n");
+        fflush(stdout);
+
+        for (i = 1; i < 4; i++)
+            stop_pump(&p[i]);
+        for (i = 1; i < 4; i++)
+            join_pump(&p[i], SUPER_BYTES);
+
+        /* Flow 1 never stopped; closing 2..4 returns their groups. */
+        if (wait_flow_split(2, want1, 1, GROUP_TOTAL, 12000, desc,
+                            sizeof(desc)))
+            verdict_fail("alloc: groups did not grow back: %s", desc);
+        printf("QEMU_E2E_ALLOC regrow %s\n", desc);
+        dump_flow_masks(2);
+        msleep(500);
+
+        stop_pump(&p[0]);
+        join_pump(&p[0], 2 * (unsigned long long)SUPER_BYTES);
         if (wait_idle(IDLE_TIMEOUT_MS))
             verdict_fail("grouped session did not drain after close");
     }

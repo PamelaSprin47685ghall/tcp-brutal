@@ -25,6 +25,35 @@ and moves independently of the module version.
   remainder order, insertion at the front), the P0/B0 switch arithmetic,
   and the initiator state machine including REQUEST retry, abort, the
   success path and convergence under 25% message loss.
+- `tests/qemu-e2e` drives the split on a real 7.0.14 kernel: one flow owns
+  32 groups, three more join while it keeps exchanging, the stats file must
+  show 16+16, 10+11+11 and 8+8+8+8 with disjoint masks, and the survivor
+  must grow back to 32 before `del`/`delete_module`.
+
+### Fixed
+
+- `FEC_ALLOC` records actually reach the wire. `tbt_fec_alloc_pack()` returns
+  the 64-byte body length on success, but `tbt_fec_send_alloc()` treated a
+  non-zero return as an error, so every REQUEST, ACK, DONE and ABORT was
+  dropped before the control queue and no rebalance ever completed.
+- An `FEC_ALLOC` ABORT rollback derived `next_super`/`highest_block` from the
+  switch packet instead of the restored block origin, so the records the
+  sender resumed with were classified as older than the cursor and dropped.
+- An RX-applied DONE lost in `COMMIT` is now retransmitted at the REQUEST
+  retry cadence instead of leaving the initiator and responder waiting.
+- A stream killed from a carrier RX work no longer calls
+  `kernel_sock_shutdown()` inline: the wake moved into `w_kill`, which
+  removes the recursive `k-sk_lock-AF_INET` lockdep report seen on 7.0.14.
+- `/proc/net/tbtun/stats` names each flow's `fec_groups`/`fec_mask` and the
+  session's rebalance round counters; the QEMU gate reads both.
+
+### Known issues
+
+- The QEMU 3-flow stage is still red: after the two donors shrink to 11+11,
+  the joining flow's round times out (`finished=1/2`) and the client is
+  refused. The near SM shows `peer_done=1, tx_swapped=1, rx_done=0`, and the
+  receiver holds an empty block at the switch point, so the RX never applies
+  and the responder keeps its TX held. The 1->2 and 2->1 stages pass.
 
 ## [0.4.0] - 2026-11-09
 
