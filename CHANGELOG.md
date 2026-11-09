@@ -27,12 +27,18 @@ and moves independently of the module version.
 - `/proc/net/tbtun/stats` appends `fec_groups=` and `fec_mask=` to each
   stream line (the flow's committed physical groups, copied from the flow
   table under `sess->lock`) and adds a `rebalance` line with the allocator
-  flag, `total`/`used` groups, and the begin/done/abort/retry/bad/overlap
-  counters. `scripts/qa/alloc-rebalance-accept.sh` consumes both.
+  flag, `total`/`used` groups, the begin/done/abort/retry/bad/overlap
+  counters and the round state (`round`/`flows`/`finished`/`pending`/
+  `grow`/`req`/`admit`); each stream row also carries the flow's allocator
+  state flags. `scripts/qa/alloc-rebalance-accept.sh` consumes both.
 - `scripts/qa/alloc-rebalance-accept.sh` drives four concurrent streams
   through 32 -> 16+16 -> 11+11+10 -> 8+8+8+8 and back to one 32-group flow
   as the others close, and checks disjoint masks, hole/reset deltas and the
   rebalance counters in both directions.
+- `tests/qemu-e2e` drives the split on a real 7.0.14 kernel: one flow owns
+  32 groups, three more join while it keeps exchanging, the stats file must
+  show 16+16, 10+11+11 and 8+8+8+8 with disjoint masks, and the survivor
+  must grow back to 32 before `del`/`delete_module`.
 
 ### Changed
 
@@ -44,6 +50,23 @@ and moves independently of the module version.
 
 ### Fixed
 
+- `FEC_ALLOC` records actually reach the wire. `tbt_fec_alloc_pack()` returns
+  the 64-byte body length on success, but `tbt_fec_send_alloc()` treated a
+  non-zero return as an error, so every REQUEST, ACK, DONE and ABORT was
+  dropped before the control queue and no rebalance ever completed.
+- An `FEC_ALLOC` ABORT rollback derived `next_super`/`highest_block` from the
+  switch packet instead of the restored block origin, so the records the
+  sender resumed with were classified as older than the cursor and dropped.
+- An RX-applied DONE lost in `COMMIT` is retransmitted at the REQUEST retry
+  cadence instead of leaving the initiator and responder waiting.
+- A stream killed from a carrier RX work no longer calls
+  `kernel_sock_shutdown()` inline: the wake moved into `w_kill`, which
+  removes the recursive `k-sk_lock-AF_INET` lockdep report seen on 7.0.14.
+- The RX allocation state is reset when the old plane is committed. It stayed
+  at `applied` after the first switch, and the ACK arm check (`state == 0`)
+  then rejected every later switch on the same flow: after two donors shrank
+  to 11+11 for a third stream their ACKs could never arm, no DONE was sent,
+  and the round timed out while the responder held its TX.
 - The HTTP container's FEC gate stopped at `TBT_FEC_FBK` (0x35), so an
   `FEC_ALLOC` (0x36) chunk fell into the old-frame scanner and reset the
   carrier with `record scan -EPROTO` under `profile=http-kal`. The

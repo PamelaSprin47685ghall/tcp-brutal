@@ -1257,8 +1257,6 @@ static void tbt_tx_purge_stream(struct tbt_session *sess, struct tbt_stream *st)
 
 void tbt_stream_kill(struct tbt_stream *st, u8 reason)
 {
-    struct sock *sk = READ_ONCE(st->sk);
-
     /* One winner.  A read-then-write let two carriers both queue w_kill and
      * leak one reference. */
     if (test_and_set_bit(TBT_STREAM_F_DYING, &st->attached))
@@ -1277,14 +1275,15 @@ void tbt_stream_kill(struct tbt_stream *st, u8 reason)
     tbt_stream_detach_from_session(st);
     tbt_tx_purge_stream(st->sess, st);
 
-    /* Wake anything asleep on the socket first: a delivery blocked in
-     * tcp_sendmsg_locked() would otherwise keep w_drain running and the reset
-     * work would wait forever in cancel_work_sync(). The reset close itself
-     * sleeps (detach, socket release), so it runs in a work item. */
-    if (sk && sk->sk_socket)
-        kernel_sock_shutdown(sk->sk_socket, SHUT_RDWR);
-
-    /* w_kill can outlive the hash reference; tbt_stream_schedule() takes the
+    /* The socket wake and the reset close both sleep (inet_shutdown and
+     * sock_release take the sk_lock), so w_kill does them in process context.
+     * A carrier RX callback must never do it: it already holds the carrier's
+     * sk_lock, and lockdep reports the second k-sk_lock-AF_INET acquisition
+     * as recursive even though the sockets differ. w_kill still wakes the
+     * socket before it cancels w_drain, so a sender blocked in
+     * tcp_sendmsg_locked() cannot stall the reset in cancel_work_sync().
+     *
+     * w_kill can outlive the hash reference; tbt_stream_schedule() takes the
      * reference the work entry will return. A refused schedule means the
      * stream is already leaving; clear DYING so a later kill may retry. */
     if (!tbt_stream_schedule(st, &st->w_kill, TBT_STREAM_F_SCHED_KILL))
