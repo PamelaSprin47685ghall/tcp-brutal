@@ -1661,6 +1661,19 @@ static void test_admit_ledger(void)
     tbt_ms_admit_detach(&a);
     ok(tbt_ms_admit_last(&a), "lookup-attached plane ends at detach", NULL);
 
+    /* Claim-first with three adopt copies: only the winner attaches. */
+    tbt_ms_admit_claim(&a);
+    tbt_ms_admit_claim(&a);
+    tbt_ms_admit_claim(&a);
+    tbt_ms_admit_attach(&a);
+    tbt_ms_admit_abort(&a);
+    tbt_ms_admit_abort(&a);
+    ok(!tbt_ms_admit_last(&a) && a.refs == 1 && a.pending == 0,
+       "two losing adopt copies cannot end the winner's plane", NULL);
+    tbt_ms_admit_detach(&a);
+    ok(tbt_ms_admit_last(&a), "three-adopt plane ends at its last detach",
+       NULL);
+
     a.pending = (u16)~0u;
     tbt_ms_admit_claim(&a);
     ok(a.pending == (u16)~0u, "claim saturates instead of wrapping", NULL);

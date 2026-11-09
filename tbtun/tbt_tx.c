@@ -221,6 +221,42 @@ static bool tbt_stream_announced(const struct tbt_stream *st,
            (READ_ONCE(c->gen) & 0xf);
 }
 
+/* Publish a carrier as OPEN-ready only when every usable stream's OPEN is on
+ * it. `up` is one flag per carrier, so a younger stream's queued OPEN would
+ * otherwise be overtaken the moment an older stream's OPEN completes. The
+ * scan and stream insertion share sess->lock: a stream created after the
+ * scan clears `up` in its own announce before any of its data can exist. A
+ * stream whose OPEN failed to queue keeps the carrier down until up_rescue
+ * re-announces it. */
+static void tbt_tx_carrier_publish_up(struct tbt_session *sess,
+                                      struct tbt_carrier *c)
+{
+    bool all = true;
+    u16 b;
+
+    spin_lock(&sess->lock);
+    for (b = 0; b < TBT_STREAM_HT && all; b++)
+    {
+        struct tbt_stream *st;
+
+        hlist_for_each_entry(st, &sess->streams[b], node)
+        {
+            if (!tbt_fec_tx_stream_usable(
+                    READ_ONCE(st->state) == TBT_ST_DEAD,
+                    test_bit(TBT_STREAM_F_ACTIVE, &st->attached),
+                    READ_ONCE(st->tombstone_until_ns)))
+                continue;
+            if (!tbt_stream_announced(st, c))
+            {
+                all = false;
+                break;
+            }
+        }
+    }
+    atomic_set(&c->up, all ? 1 : 0);
+    spin_unlock(&sess->lock);
+}
+
 /* Allocate this stream's declared-hole ring on first use. Called with
  * tx_lock held, so it must not sleep; a NULL result only skips hole
  * accounting, never the retransmit itself. */
@@ -3325,7 +3361,7 @@ ctl_fail:
                     WARN_ON_ONCE(1);
                     sess->dbg_announce_mismatch++;
                 }
-                atomic_set(&c->up, 1);
+                tbt_tx_carrier_publish_up(sess, c);
                 c->state = (c->spare && !c->active) ? TBT_CAR_SPARE : TBT_CAR_UP;
                 break;
             case TBT_F_FIN:
