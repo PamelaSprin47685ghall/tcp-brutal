@@ -105,7 +105,7 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.4.3`）。
+`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.4.4`）。
 线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x0007` 与 FEC 记录的
 `TBT_FEC_CONV=0x1007`，三者都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
