@@ -36,6 +36,9 @@ and moves independently of the module version.
   0/10/20/30/45 percent loss sweep.
   `host/bench_sclc_downlink` reports wire and payload MB/s per point and
   gates the wire rate at 250 MB/s when the host is not oversubscribed.
+- `host/sim_sclc_adaptive` runs a closed-loop 120 s BEC trace through the
+  real estimator, controller and downlink codec; `benches/adaptive/
+  sclc-bidir.sh` is the bidirectional acceptance driver.
 
 ### Fixed
 
@@ -48,6 +51,15 @@ and moves independently of the module version.
   FEC_CFGs. `case_ctl_legacy_nack` covers the 178/78 raise, its 151/105
   fallback and the 102/154 down step, each NACKed, with 180 s of silence
   after the refusals.
+
+### Verification
+
+- `host/sim_sclc_adaptive` on the unpunctured 0.4.3 graph (2026-11-09):
+  960 blocks, 7 switches, 0 ping-pong, all six ladder points round-trip.
+  Overall share recovery 99.29%; per phase 8% loss 100.0%, 22% 99.0%,
+  38% 99.2%, 2% 100.0%. Low-loss rate 70: 378 blocks, wire/app 1.4382
+  (nominal 1.4382) against 2.0000 at rate 50, a 28.1% wire-share saving;
+  the full trace saves 10.9% (1.7826 vs 2.0000).
 
 ## [0.4.2] - 2026-11-09
 
