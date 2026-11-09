@@ -7,12 +7,12 @@
 #   TBT_E2E_QEMU_TIMEOUT=180 scripts/qemu-e2e-smoke.sh
 #
 # What it proves, all inside one guest on 127.0.0.1:
-#   * a 256-carrier SC-LDPC pair (far TX 1x256, near TX 8x32) comes up, and
-#     three sequential streams each carry 128 KiB byte-exact with
-#     streams_active=0 in between;
-#   * four client streams share that one plane at once, each with its own
-#     pattern: three carry 128 KiB both ways byte-exact while the fourth
-#     resets mid-stream, and the survivors finish losslessly;
+#   * a 256-carrier SC-LDPC pair (far TX 1x256, near TX 8x32) comes up over
+#     profile=http-kal, and three sequential streams carry 128 KiB byte-exact
+#     with streams_active=0 in between;
+#   * six client streams share that one plane at once: four bulk streams move
+#     6 MiB per direction (past the 4 MiB plane credit), one 50 KiB stream
+#     closes with a forced tail MS_WIN, and one resets mid-stream;
 #   * a rebuilt n=4 m=4 grouped pair carries two concurrent streams (two sids);
 #   * del + delete_module return inside the deadline (no D state), the module
 #     leaves /proc/modules, and the kernel log gained no UBSAN, BUG, Oops,
@@ -35,7 +35,7 @@ CACHE=${TBT_E2E_CACHE:-$HOME/.cache/tbtun-e2e}
 KM_CACHE=${KM_CACHE:-$HOME/.cache/tbtun-kmatrix}
 MIRROR=${KM_KERNEL_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/kernel}
 JOBS=${TBT_E2E_JOBS:-$(nproc 2>/dev/null || echo 4)}
-QEMU_TIMEOUT=${TBT_E2E_QEMU_TIMEOUT:-180}
+QEMU_TIMEOUT=${TBT_E2E_QEMU_TIMEOUT:-300}
 HOSTCC=${HOSTCC:-cc}
 
 die() {
@@ -223,8 +223,11 @@ evidence=(
     "QEMU_E2E_STREAM sclc-seq-1"
     "QEMU_E2E_STREAM sclc-seq-2"
     "QEMU_E2E_STREAM sclc-seq-3"
-    "QEMU_E2E_CONCURRENT 4 active ok"
-    "QEMU_E2E_STREAMS 3 full + 1 reset ok"
+    "QEMU_E2E_CONCURRENT 6 active ok"
+    "QEMU_E2E_STREAMS 4 bulk + 1 short + 1 reset ok"
+    "QEMU_E2E_VOLUME far="
+    "QEMU_E2E_SHORT bytes=51200 ok"
+    "QEMU_E2E_HTTPKAL near_req="
     "QEMU_E2E_RST far="
     "QEMU_E2E_DRAIN sclc-concurrent ok"
     "QEMU_E2E_MULTISTREAM 2 streams ok"

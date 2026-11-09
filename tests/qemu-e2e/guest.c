@@ -57,9 +57,16 @@
 #define PORTBLOCK "30000-30511"
 #define STREAM_BYTES (128u * 1024u)
 #define CHUNK 32768u
-#define CONCURRENCY 4
+/* Four bulk streams carry 6 MiB per direction, past the 4 MiB plane
+ * credit; one 50 KiB stream exercises the sub-window FIN tail; one stream
+ * resets mid-flight. */
+#define BULK_STREAMS 4
+#define BULK_BYTES (1536u * 1024u)
+#define SHORT_BYTES (50u * 1024u)
+#define ABORT_BYTES (64u * 1024u)
+#define CONCURRENCY (BULK_STREAMS + 2)
 #define ABORT_AFTER_MS 200
-#define WATCHDOG_S 60
+#define WATCHDOG_S 120
 #define UP_TIMEOUT_MS 15000
 #define IDLE_TIMEOUT_MS 6000
 #define UNLOAD_TIMEOUT_MS 8000
@@ -935,6 +942,24 @@ static int wait_active_both(unsigned int want, int timeout_ms)
     return -1;
 }
 
+/* Bytes the tunnel has handed to its streams, from the rx_ready_calls line. */
+static int delivered_bytes(unsigned int id, unsigned long long *out)
+{
+    static char buf[4u * 1024u * 1024u];
+    char want[48];
+    char *line, *save;
+    int len = read_path("/proc/net/tbtun/stats", buf, sizeof(buf));
+
+    if (len < 0)
+        return -1;
+    snprintf(want, sizeof(want), "tunnel %u rx_ready_calls=", id);
+    for (line = strtok_r(buf, "\n", &save); line;
+         line = strtok_r(NULL, "\n", &save))
+        if (!strncmp(line, want, strlen(want)))
+            return line_kv(line, "rx_delivered", out);
+    return -1;
+}
+
 static void concurrent_child(int idx, uint32_t seed, size_t bytes)
 {
     char why[256] = "";
@@ -975,7 +1000,7 @@ static void abort_child(int idx, uint32_t seed, size_t bytes)
         _exit(1);
     }
     gate_wait(idx);
-    if (send_bytes(fd, bytes / 2, seed, why, sizeof(why)))
+    if (send_bytes(fd, bytes, seed, why, sizeof(why)))
     {
         printf("QEMU_E2E_NOTE abort%d send: %s\n", idx, why);
         _exit(1);
@@ -1010,11 +1035,11 @@ int main(void)
 
     echo_pid = start_echo();
 
-    /* --- phase 1: 256-carrier SC-LDPC, three sequential streams ---------- */
-    configure("tunnel 1 role=far profile=raw listen=127.0.0.1:19001"
+    /* --- phase 1: 256-carrier SC-LDPC (http-kal), three sequential ------- */
+    configure("tunnel 1 role=far profile=http-kal listen=127.0.0.1:19001"
               " target=127.0.0.1:19070 n=128 m=128 fec=on mode=sc-ldpc"
               " adaptive=off w=256 carriers=256 crypto=off dup=1\n",
-              "tunnel 2 role=near profile=raw listen=127.0.0.1:19000"
+              "tunnel 2 role=near profile=http-kal listen=127.0.0.1:19000"
               " peer=127.0.0.1:19001 n=8 m=24 fec=on mode=sc-ldpc"
               " adaptive=off w=128 carriers=256 crypto=off dup=1"
               " portblock=" PORTBLOCK "\n");
@@ -1036,12 +1061,20 @@ int main(void)
         fflush(stdout);
     }
 
-    /* --- phase 2: four streams share the one SC-LDPC plane -------------- */
+    /* --- phase 2: four bulk streams, one 50 KiB stream and one reset ----- *
+     * The bulk total is 4 x 1.5 MiB = 6 MiB per direction, past the 4 MiB
+     * plane credit. The short stream's tail is below window/8, so only the
+     * forced MS_WIN at FIN can close its sender gate. */
     {
         pid_t kids[CONCURRENCY];
         uint32_t seeds[CONCURRENCY];
+        unsigned long long far0 = 0, near0 = 0, far1 = 0, near1 = 0;
+        unsigned long long http_req = 0;
         int failed = 0;
+        char line[2048];
 
+        if (delivered_bytes(1, &far0) || delivered_bytes(2, &near0))
+            verdict_fail("delivered counters unreadable before the burst");
         for (i = 0; i < CONCURRENCY; i++)
             if (pipe(stream_gate[i]))
                 verdict_fail("concurrent: pipe: %s", strerror(errno));
@@ -1053,17 +1086,19 @@ int main(void)
                 verdict_fail("concurrent: fork: %s", strerror(errno));
             if (!kids[i])
             {
-                /* Stream 0 aborts mid-flight; the other three must finish. */
                 if (!i)
-                    abort_child(i, seeds[i], STREAM_BYTES);
-                concurrent_child(i, seeds[i], STREAM_BYTES);
+                    abort_child(i, seeds[i], ABORT_BYTES);
+                else if (i <= BULK_STREAMS)
+                    concurrent_child(i, seeds[i], BULK_BYTES);
+                else
+                    concurrent_child(i, seeds[i], SHORT_BYTES);
             }
-            msleep(40);
+            msleep(20);
         }
-        /* All four legs must stand on that one plane at the same moment.
+        /* Every leg must stand on that one plane at the same moment.
          * The children have not sent a byte yet, so no leg can finish early
          * and shrink the window. */
-        if (wait_active_both(CONCURRENCY, 5000))
+        if (wait_active_both(CONCURRENCY, 15000))
             verdict_fail("expected %d concurrent streams on both ends",
                          CONCURRENCY);
         for (i = 0; i < CONCURRENCY; i++)
@@ -1087,24 +1122,46 @@ int main(void)
         if (failed)
             verdict_fail("%d of %d concurrent streams failed", failed,
                          CONCURRENCY);
-        printf("QEMU_E2E_STREAMS 3 full + 1 reset ok\n");
+        printf("QEMU_E2E_STREAMS %d bulk + 1 short + 1 reset ok\n",
+               BULK_STREAMS);
         fflush(stdout);
-        {
-            char line[2048];
-            unsigned long long far = 0, near = 0;
 
-            if (stats_line(1, "c11", line, sizeof(line)) ||
-                line_kv(line, "fec_reset_user", &far))
-                verdict_fail("far reset counter unreadable");
-            if (stats_line(2, "c11", line, sizeof(line)) ||
-                line_kv(line, "fec_reset_user", &near))
-                verdict_fail("near reset counter unreadable");
-            if (!far || !near)
-                verdict_fail("reset did not cross the plane: far=%llu "
-                             "near=%llu", far, near);
-            printf("QEMU_E2E_RST far=%llu near=%llu\n", far, near);
-            fflush(stdout);
-        }
+        /* Kernel-side volume, not the guest's own byte count: each direction
+         * must hand more than 5 MiB to its streams, which is only possible
+         * if the plane's ACK credit keeps moving past 4 MiB. */
+        if (delivered_bytes(1, &far1) || delivered_bytes(2, &near1))
+            verdict_fail("delivered counters unreadable after the burst");
+        if (far1 - far0 <= 5u * 1024u * 1024u ||
+            near1 - near0 <= 5u * 1024u * 1024u)
+            verdict_fail("burst below 5 MiB: far=%llu near=%llu",
+                         far1 - far0, near1 - near0);
+        printf("QEMU_E2E_VOLUME far=%llu near=%llu\n", far1 - far0,
+               near1 - near0);
+        fflush(stdout);
+        printf("QEMU_E2E_SHORT bytes=%u ok\n", SHORT_BYTES);
+        fflush(stdout);
+
+        /* The MS_WIN records must survive the HTTP container dispatch. */
+        if (stats_line(2, "c8", line, sizeof(line)) ||
+            line_kv(line, "http_req", &http_req))
+            verdict_fail("near c8 unreadable");
+        if (!http_req)
+            verdict_fail("http-kal carried no request");
+        printf("QEMU_E2E_HTTPKAL near_req=%llu\n", http_req);
+        fflush(stdout);
+
+        if (stats_line(1, "c11", line, sizeof(line)) ||
+            line_kv(line, "fec_reset_user", &far1))
+            verdict_fail("far reset counter unreadable");
+        if (stats_line(2, "c11", line, sizeof(line)) ||
+            line_kv(line, "fec_reset_user", &near1))
+            verdict_fail("near reset counter unreadable");
+        if (!far1 || !near1)
+            verdict_fail("reset did not cross the plane: far=%llu "
+                         "near=%llu", far1, near1);
+        printf("QEMU_E2E_RST far=%llu near=%llu\n", far1, near1);
+        fflush(stdout);
+
         if (wait_idle(IDLE_TIMEOUT_MS))
             verdict_fail("SC-LDPC plane did not drain after the concurrent"
                          " streams");

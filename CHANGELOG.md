@@ -15,10 +15,11 @@ and moves independently of the module version.
   target stream in the record header's `sid`.
 - `host/test_fec` covers the MS_WIN body and its header rules.
 - `scripts/qemu-e2e-smoke.sh` boots 7.0.14 under KVM with lockdep, UBSAN and
-  DEBUG_ATOMIC_SLEEP and drives the shipped 1x256 downlink / 8x32 uplink pair:
-  three sequential streams, then four concurrent streams on the one plane
-  (three byte-exact 128 KiB round trips plus a mid-stream RST), a grouped
-  pair, and `del` + `delete_module` with a clean kernel log.
+  DEBUG_ATOMIC_SLEEP and drives the shipped 1x256 downlink / 8x32 uplink pair
+  over `profile=http-kal`: three sequential streams, then six concurrent
+  streams on the one plane (four bulk streams moving 6 MiB per direction,
+  one 50 KiB stream closing through a forced tail `MS_WIN`, one mid-stream
+  RST), a grouped pair, and `del` + `delete_module` with a clean kernel log.
 
 ### Changed
 
@@ -32,16 +33,24 @@ and moves independently of the module version.
 ### Fixed
 
 - The SC-LDPC TX mux lock was never initialised, so the first use turned the
-  locking validator off for the rest of the boot. Opening or closing a stream
-  ring allocates, so that lock is a sleepable `mutex` now.
-- A duplicate OPEN that lost the stream-creation race kept its `ms_refs`
-  admission slot. A sequential successor then shared a plane whose sid the
-  peer no longer knew and every record was dropped (`fec_drop_sid`).
+  locking validator off for the rest of the boot. A stream ring is now
+  allocated and freed outside that spinlock; only the pointer moves under it.
+- Duplicate OPENs leaked their admission reference, and a fresh flow did not
+  count its own admission at all: a losing carrier could abort a plane whose
+  winner had not attached yet. `ms_pending`/`ms_refs` are now split and both
+  are balanced, so the plane outlives every admission and attached leg.
 - Binding the first OPEN compared the peer's TX bitmap with the local TX
   bitmap, so the shipped asymmetric 1x256 / 8x32 pair never came up.
+- Detach unlinked the flow after it cleared `streams_active`, so a sequential
+  successor could share a plane that was already leaving.
 - Kill shut a socket down at the call site while a carrier RX actor already
   held another socket's lock, which lockdep reports as recursive
   `k-sk_lock-AF_INET` nesting; `w_kill` owns the shutdown now.
+- The HTTP container did not dispatch `MS_WIN` (0x37), the plane-level ACK
+  stopped updating with no single stream, and a sub-window tail never sent a
+  final `MS_WIN`; bulk multi-stream over `http-kal` stalled or left the
+  sender's FIN gate closed. `tbt_fec_record_type()`, the plane frontier and a
+  forced tail report cover all three.
 
 ## [0.4.0] - 2026-11-09
 
