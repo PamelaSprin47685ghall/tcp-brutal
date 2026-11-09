@@ -51,6 +51,22 @@ static const struct tbt_fec_ops *tbt_fec_ops_of_shape(
     const struct tbt_fec_shape *sh);
 static void tbt_fec_tx_init_tick(struct tbt_session *sess, struct tbt_fec_tx *tx);
 
+/* Give a pending switch shape its wire identity before it is stored or
+ * copied. An RLNC shape may arrive with variant 0 while its group count
+ * says grouped; the CFG and the peer's FBK both name variant 1. */
+static void tbt_fec_shape_wire_norm(struct tbt_fec_shape *sh)
+{
+    if (!sh)
+        return;
+    sh->codec_variant = tbt_fec_variant_norm(sh->codec_variant, sh->groups);
+    if (sh->codec_variant != 2)
+    {
+        sh->L = 0;
+        sh->block = 0;
+        sh->rate_ppm = 0;
+    }
+}
+
 /* The source ring is the capture's pause granularity: tbt_fec_tx_submit()
  * sets tx_paused only when the ring cannot take the next chunk. 256 KiB
  * paused capture every 32 packets while the credit window allowed 1024, so
@@ -2110,8 +2126,6 @@ static void tbt_fec_tx_send_cfg(struct tbt_session *sess,
     c.block_base = tx->switch_block;
     c.seed = tx->nonce;
     c.codec_variant = tx->switch_shape.codec_variant;
-    if (c.codec_variant != 2)
-        c.codec_variant = tx->switch_shape.groups > 1 ? 1 : 0;
     c.L = tx->switch_shape.L;
     c.block = tx->switch_shape.block;
     c.rate_ppm = tx->switch_shape.rate_ppm;
@@ -2319,6 +2333,7 @@ static void tbt_fec_tx_swap(struct tbt_session *sess, struct tbt_fec_tx *tx)
     tx->carrier_wait = false;
     tx->backpressure_counted = false;
     tx->outq_paused = false;
+    tbt_fec_shape_wire_norm(&tx->switch_shape);
     tx->shape_w = tx->switch_shape.w;
     tx->shape_k = tx->switch_shape.k;
     tx->shape_d = tx->switch_shape.d;
@@ -2387,6 +2402,7 @@ static void tbt_fec_tx_switch_begin_shape(struct tbt_session *sess,
     tx->switch_block = tx->cur_block;
     tx->switch_epoch = epoch;
     tx->switch_shape = *shape;
+    tbt_fec_shape_wire_norm(&tx->switch_shape);
     tx->switch_shape.base_pkt = tx->switch_pkt;
     tx->switch_shape.base_block = tx->switch_block;
     tx->switch_shape.slots = 0;
@@ -6231,9 +6247,9 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
          * ends disagree about the committed codec, so the values would be
          * meaningless. Drop it and count, as §7 requires. */
         if (!tbt_fec_bitmap_tail_zero(fb.carrier_bitmap, sess->n_car) ||
-            fb.codec_variant != tx->codec_variant ||
-            (fb.codec_variant == 2 &&
-             (fb.L != tx->sclc_L || fb.block != tx->sclc_block)))
+            !tbt_fec_fbk_variant_match(fb.codec_variant, fb.L, fb.block,
+                                       tx->codec_variant, tx->sclc_L,
+                                       tx->sclc_block, tx->groups))
         {
             atomic64_inc(&sess->fec_epoch_bad);
             return 0;

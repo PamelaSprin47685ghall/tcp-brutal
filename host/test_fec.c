@@ -1030,6 +1030,31 @@ static void test_cfg_sclc(void)
            "SC CFG extension CRC mismatch");
 }
 
+/* The P1 regression: an RLNC grouped switch stores variant 0 internally,
+ * while the CFG and the peer's FBK both say variant 1. The normalized match
+ * must accept the report after the swap, and SC-LDPC must compare L/block. */
+static void test_fbk_variant(void)
+{
+    ok(tbt_fec_variant_norm(0, 8) == 1, "grouped shape normalizes to 1",
+       NULL);
+    ok(tbt_fec_variant_norm(0, 1) == 0, "single shape stays 0", NULL);
+    ok(tbt_fec_variant_norm(2, 8) == 2, "SC-LDPC stays 2", NULL);
+    ok(tbt_fec_fbk_variant_match(1, 0, 0, 0, 0, 0, 8),
+       "grouped switch accepts the peer FBK variant 1", NULL);
+    ok(tbt_fec_fbk_variant_match(1, 0, 0, 1, 0, 0, 8),
+       "normalized grouped state accepts variant 1", NULL);
+    ok(!tbt_fec_fbk_variant_match(0, 0, 0, 0, 0, 0, 8),
+       "a grouped flow refuses a variant-0 report", NULL);
+    ok(tbt_fec_fbk_variant_match(0, 0, 0, 0, 0, 0, 1),
+       "a single flow accepts variant 0", NULL);
+    ok(tbt_fec_fbk_variant_match(2, 16, 128, 2, 16, 128, 8),
+       "uplink GF(16) block 128 matches", NULL);
+    ok(!tbt_fec_fbk_variant_match(2, 8, 128, 2, 16, 128, 8),
+       "an L mismatch is refused", NULL);
+    ok(!tbt_fec_fbk_variant_match(2, 16, 256, 2, 16, 128, 8),
+       "a block mismatch is refused", NULL);
+}
+
 /* ------------------------------------------------------------------ *
  * 5b. FEC_ALLOC (0x36): a 64-byte body that moves one flow between
  * physical group sets. ACK and DONE are the only body flags; the header
@@ -3138,6 +3163,7 @@ int main(void)
     test_bitmap();
     test_control();
     test_cfg_sclc();
+    test_fbk_variant();
     test_alloc();
     test_wire_version();
     test_rlnc_single();

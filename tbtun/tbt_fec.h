@@ -446,6 +446,32 @@ static inline void tbt_fec_fbk_set_epoch(struct tbt_fec_fbk *f, u32 epoch)
     f->epoch_hi = (u16)(epoch >> 16);
 }
 
+/* The wire carries one variant value. A shape built internally may leave
+ * variant 0 for an RLNC shape that has several groups; the wire form and
+ * the peer's report both name variant 1 in that case. Normalize from the
+ * group count, never from the caller's unset field. */
+static inline u8 tbt_fec_variant_norm(u8 variant, u16 groups)
+{
+    if (variant == 2)
+        return 2;
+    return groups > 1 ? 1 : 0;
+}
+
+/* An FBK names the receive shape. It matches only the codec this side
+ * committed: the normalized variant always, and L/block for SC-LDPC.
+ * `committed_variant` may still be the internal (unnormalized) value. */
+static inline bool
+tbt_fec_fbk_variant_match(u8 fb_variant, u8 fb_L, u16 fb_block,
+                          u8 committed_variant, u8 committed_L,
+                          u16 committed_block, u16 groups)
+{
+    u8 want = tbt_fec_variant_norm(committed_variant, groups);
+
+    if (fb_variant != want)
+        return false;
+    return want != 2 || (fb_L == committed_L && fb_block == committed_block);
+}
+
 /* 0.5.0 removes the SC-LDPC FBK overlay: p_fast_ppm moved to +48 and the
  * full 32-byte carrier bitmap is available again. codec_fail has no v8 wire
  * field (it is a local procfs diagnostic); the estimator computes it, but

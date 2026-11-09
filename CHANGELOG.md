@@ -29,6 +29,11 @@ and moves independently of the module version.
 - Host vectors cover the 64-byte CFG/FBK bodies, the 36-byte OPEN, the v8
   CFG extension CRC and the explicit rejection of v7 (`0x1007`, 48-byte
   CFG/FBK, 32-byte OPEN) records.
+- A switch normalizes an RLNC shape's `codec_variant` from its group count
+  (single 0, grouped 1) before storing it, and the FBK check normalizes the
+  committed value again. A grouped flow therefore keeps accepting the peer's
+  variant-1 reports after its first rate switch. The uplink GF(16)
+  `block=128` is documented as a legal variant-2 combination.
 
 ## [0.4.0] - 2026-11-09
 

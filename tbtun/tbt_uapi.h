@@ -284,7 +284,8 @@ typedef uint64_t u64;
  *   +44 u32 reserved    must be 0
  *   +48 u8  codec_variant 0=RLNC single, 1=RLNC grouped, 2=SC-LDPC
  *   +49 u8  L           variant 0/1: 0; variant 2: 8 or 16
- *   +50 u16 block       variant 0/1: 0; variant 2: 256 or 512
+ *   +50 u16 block       variant 0/1: 0; variant 2: 256 or 512, and the
+ *                       uplink GF(16) variant is 128
  *   +52 u32 rate_ppm    variant 0/1: 0; variant 2: 250000..700000
  *   +56 u32 crc32c_ext  CRC32C over bytes +48..+55
  *   +60 u32 reserved2   must be 0
@@ -339,7 +340,8 @@ typedef uint64_t u64;
  *   +48 u32 p_fast_ppm          SC-LDPC fast-window loss, parts per million
  *   +52 u8  codec_variant       receiver's installed variant
  *   +53 u8  L                   0/8/16, matching the variant
- *   +54 u16 block               0/256/512, matching the variant
+ *   +54 u16 block               0/256/512, matching the variant; the
+ *                               uplink GF(16) codec uses 128
  *   +56 u32 rate_ppm_current    receiver's current codec rate
  *   +60 u32 rate_ppm_target     the sender's announced CFG target rate
  */

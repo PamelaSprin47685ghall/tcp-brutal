@@ -913,10 +913,10 @@ int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], struct tbt_fec_cfg *c)
             return -EPROTO;
         if (L != 8 && L != 16)
             return -EPROTO;
-        /* 256/512 are the v8 block ladder. The existing GF(16) uplink
-         * codec still builds a 128-share block; keep that one combination
-         * valid until the uplink branch moves it, so the wire base does not
-         * break a live direction on its own. */
+        /* The v8 block ladder is 256/512; the uplink GF(16) codec's
+         * 128-share block is a legal variant-2 combination, not a
+         * transitional exception. It is valid only with L=16 and more than
+         * one group. */
         if (block != 256 && block != 512 &&
             !(block == TBT_FEC_SCLC_BLOCK_UP && groups > 1 && L == 16))
             return -EPROTO;
@@ -1005,6 +1005,8 @@ int tbt_fec_fbk_unpack(const u8 in[TBT_FEC_FBK_LEN], struct tbt_fec_fbk *f)
         return -EPROTO;
     if (variant == 2)
     {
+        /* Same block ladder as FEC_CFG: 256/512, plus 128 for the uplink
+         * GF(16) report. */
         if ((L != 8 && L != 16) ||
             (block != 256 && block != 512 &&
              !(block == TBT_FEC_SCLC_BLOCK_UP && L == 16)))
@@ -1974,6 +1976,7 @@ int tbt_fec_sclc_shape_of_cfg(const struct tbt_fec_cfg *cfg, u16 carriers,
         return -EINVAL;
     if (cfg->L != 8 && cfg->L != 16)
         return -EINVAL;
+    /* 256/512 are the v8 ladder; 128 is the uplink GF(16) block. */
     if (cfg->block != 256 && cfg->block != 512 &&
         !(cfg->block == TBT_FEC_SCLC_BLOCK_UP && cfg->groups > 1 &&
           cfg->L == 16))
