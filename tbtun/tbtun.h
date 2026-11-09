@@ -1019,9 +1019,11 @@ struct tbt_fec_flow
     /* 0 = free slot, 1 = active, 2 = draining, 3 = dead. Only the control
      * path writes it; carrier RX reads it to refuse a dying flow. */
     u8 state;
-    /* SC-LDPC shared plane: admission references that have not yet attached
-     * plus attached streams. The plane is unlinked only when this reaches
-     * zero; each stream detach drops one. */
+    /* SC-LDPC shared plane: ms_pending counts admitted references that have
+     * not attached yet; ms_refs counts attached mux legs. The plane is
+     * unlinked only when both reach zero. A duplicate OPEN takes a pending
+     * slot and must give it back through tbt_fec_flow_abort(). */
+    u16 ms_pending;
     u16 ms_refs;
     struct tbt_fec_tx *tx;
     struct tbt_fec_rx *rx;

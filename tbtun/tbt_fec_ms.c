@@ -254,6 +254,75 @@ void tbt_ms_tx_free(struct tbt_ms_tx *tx)
     tbt_ms_free(tx);
 }
 
+int tbt_ms_tx_ring_new(struct tbt_ms_tx *tx, u64 sid,
+                       struct tbt_ms_tx_ring *out)
+{
+    u32 cap;
+
+    if (!tx || !sid || !out)
+        return -EINVAL;
+    out->sid = sid;
+    out->ring = NULL;
+    out->cap = 0;
+    cap = tx->window + TBT_MS_RING_SLACK;
+    out->ring = tbt_ms_alloc(cap);
+    if (!out->ring)
+        return -ENOMEM;
+    out->cap = cap;
+    return 0;
+}
+
+void tbt_ms_tx_ring_free(struct tbt_ms_tx_ring *ring)
+{
+    if (!ring)
+        return;
+    tbt_ms_free(ring->ring);
+    ring->ring = NULL;
+    ring->cap = 0;
+}
+
+int tbt_ms_tx_install(struct tbt_ms_tx *tx, const struct tbt_ms_tx_ring *ring)
+{
+    struct tbt_ms_tx_stream *s;
+    u16 i, slot = tx ? tx->max_streams : 0;
+
+    if (!tx || !ring || !ring->sid || !ring->ring)
+        return -EINVAL;
+    if (tbt_ms_tx_find(tx, ring->sid))
+        return -EEXIST;
+    for (i = 0; i < tx->max_streams; i++)
+        if (!tx->streams[i].used)
+        {
+            slot = i;
+            break;
+        }
+    if (slot == tx->max_streams)
+        return -ENOSPC;
+    s = &tx->streams[slot];
+    s->used = true;
+    s->sid = ring->sid;
+    s->ring = ring->ring;
+    s->cap = ring->cap;
+    s->credit = tx->window;
+    s->peer_off = 0;
+    s->sent_off = 0;
+    s->tx_off = 0;
+    return 0;
+}
+
+int tbt_ms_tx_remove(struct tbt_ms_tx *tx, u64 sid, struct tbt_ms_tx_ring *out)
+{
+    struct tbt_ms_tx_stream *s = tbt_ms_tx_find(tx, sid);
+
+    if (!s || !out)
+        return -ENOENT;
+    out->sid = s->sid;
+    out->ring = s->ring;
+    out->cap = s->cap;
+    memset(s, 0, sizeof(*s));
+    return 0;
+}
+
 int tbt_ms_tx_open(struct tbt_ms_tx *tx, u64 sid)
 {
     struct tbt_ms_tx_stream *s;
@@ -587,6 +656,7 @@ struct tbt_ms_rx_leg
     bool fin_obs;
     bool reset;
     bool broken;
+    bool bad_obs; /* the delivery walk has already observed reset/broken */
     u64 sid;
     u8 *ring;
     u64 app_off;
@@ -612,7 +682,6 @@ struct tbt_ms_rx
      * a leg after its stream detached. The ring is bounded and only ever
      * holds sids, so churn cannot grow memory. */
     u64 closed[TBT_MS_MAX_STREAMS * 2];
-    u16 closed_next;
     u16 nclosed;
 };
 
@@ -643,11 +712,13 @@ static void tbt_ms_rx_closed_add(struct tbt_ms_rx *rx, u64 sid)
 {
     if (!sid || tbt_ms_rx_closed(rx, sid))
         return;
-    rx->closed[rx->closed_next] = sid;
-    rx->closed_next =
-        (u16)((rx->closed_next + 1) % (TBT_MS_MAX_STREAMS * 2));
-    if (rx->nclosed < TBT_MS_MAX_STREAMS * 2)
-        rx->nclosed++;
+    if (rx->nclosed == TBT_MS_MAX_STREAMS * 2)
+    {
+        memmove(rx->closed, rx->closed + 1,
+                (TBT_MS_MAX_STREAMS * 2 - 1) * sizeof(rx->closed[0]));
+        rx->nclosed--;
+    }
+    rx->closed[rx->nclosed++] = sid;
 }
 
 static void tbt_ms_rx_closed_del(struct tbt_ms_rx *rx, u64 sid)
@@ -656,7 +727,12 @@ static void tbt_ms_rx_closed_del(struct tbt_ms_rx *rx, u64 sid)
 
     for (i = 0; i < rx->nclosed; i++)
         if (rx->closed[i] == sid)
-            rx->closed[i] = rx->closed[--rx->nclosed];
+        {
+            memmove(rx->closed + i, rx->closed + i + 1,
+                    (size_t)(rx->nclosed - i - 1) * sizeof(rx->closed[0]));
+            rx->nclosed--;
+            return;
+        }
 }
 
 struct tbt_ms_rx *tbt_ms_rx_new(u16 max_streams, u32 window)
@@ -824,10 +900,9 @@ u32 tbt_ms_rx_feed(struct tbt_ms_rx *rx, const u8 *data, u32 len)
             rx->hdr_len = TBT_MS_HDR_LEN - 1;
             continue;
         }
+        /* Only an explicit tbt_ms_rx_open() creates a leg. A forged or
+         * late sid must not consume one of the fixed slots. */
         l = tbt_ms_rx_find(rx, h.sid);
-        if (!l && !tbt_ms_rx_closed(rx, h.sid) &&
-            rx->nlegs < rx->max_streams)
-            l = tbt_ms_rx_leg_new(rx, h.sid);
         if (h.type == TBT_MS_DATA)
         {
             u64 buffered;
@@ -887,6 +962,7 @@ u32 tbt_ms_rx_feed(struct tbt_ms_rx *rx, const u8 *data, u32 len)
         l->fin_off = 0;
         l->last_win_off = 0;
         l->broken = false;
+        l->bad_obs = false;
         l->reset = true;
     }
     return used;
@@ -1022,6 +1098,13 @@ int tbt_ms_rx_next(struct tbt_ms_rx *rx, u64 *sid)
         if (l->fin_seen && !l->fin_obs)
         {
             l->fin_obs = true;
+            rx->rr = (u16)((idx + 1) % rx->max_streams);
+            *sid = l->sid;
+            return 1;
+        }
+        if ((l->reset || l->broken) && !l->bad_obs)
+        {
+            l->bad_obs = true;
             rx->rr = (u16)((idx + 1) % rx->max_streams);
             *sid = l->sid;
             return 1;

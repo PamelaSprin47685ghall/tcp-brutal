@@ -100,6 +100,22 @@ void tbt_ms_tx_free(struct tbt_ms_tx *tx);
 int tbt_ms_tx_open(struct tbt_ms_tx *tx, u64 sid);
 /* Drop every queued byte and the stream state. */
 int tbt_ms_tx_close(struct tbt_ms_tx *tx, u64 sid);
+/* Allocation-free lifecycle for the kernel path: allocate the per-stream
+ * ring outside any spinlock, then install/remove only the pointer under the
+ * lock. install fails with -EEXIST/-ENOSPC and leaves the ring owned by the
+ * caller; remove fills `out` for a free outside the lock. */
+struct tbt_ms_tx_ring
+{
+    u64 sid;
+    u8 *ring;
+    u32 cap;
+};
+int tbt_ms_tx_ring_new(struct tbt_ms_tx *tx, u64 sid,
+                       struct tbt_ms_tx_ring *out);
+void tbt_ms_tx_ring_free(struct tbt_ms_tx_ring *ring);
+int tbt_ms_tx_install(struct tbt_ms_tx *tx, const struct tbt_ms_tx_ring *ring);
+int tbt_ms_tx_remove(struct tbt_ms_tx *tx, u64 sid,
+                     struct tbt_ms_tx_ring *out);
 /* Queue FIN after the bytes already accepted. Idempotent. */
 int tbt_ms_tx_fin(struct tbt_ms_tx *tx, u64 sid);
 /* Drop queued bytes (not yet sent) and queue RST at the current offset. */

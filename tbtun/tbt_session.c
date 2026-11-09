@@ -991,15 +991,20 @@ static bool tbt_stream_is_closing(const struct tbt_stream *st)
  * referenced flow or an ERR_PTR. Two carriers deliver the same OPEN, so a
  * lost admission race (-EEXIST) is resolved by looking the winner up. */
 static struct tbt_fec_flow *tbt_session_open_flow(struct tbt_session *sess,
-                                                  u64 sid, const u8 *body)
+                                                  u64 sid, const u8 *body,
+                                                  bool *admitted)
 {
     struct tbt_fec_flow *flow = tbt_fec_flow_lookup(sess, sid);
 
+    if (admitted)
+        *admitted = false;
     if (flow)
         return flow;
     flow = tbt_fec_flow_admit_mask(sess, sid, body);
     if (IS_ERR(flow) && PTR_ERR(flow) == -EEXIST)
         return tbt_fec_flow_lookup(sess, sid);
+    if (admitted && !IS_ERR(flow) && flow)
+        *admitted = true;
     return flow;
 }
 
@@ -1016,6 +1021,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
     bool near = sess->tunnel->cfg.role == TBT_ROLE_NEAR;
     bool adopt = false, drop = false, tombstone_open = false;
     struct tbt_fec_flow *flow = NULL;
+    bool flow_admitted = false;
 
     if (!sid)
         return TBT_BIND_DROP;
@@ -1104,7 +1110,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
         }
         else
         {
-            flow = tbt_session_open_flow(sess, sid, body);
+            flow = tbt_session_open_flow(sess, sid, body, &flow_admitted);
             if (IS_ERR(flow))
             {
                 err = PTR_ERR(flow);
@@ -1138,7 +1144,10 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
                 /* One sid, one bitmap. A repeated OPEN that renames the
                  * groups of a live flow is refused; the local allocation
                  * stands. */
-                tbt_fec_flow_put(flow);
+                if (flow_admitted)
+                    tbt_fec_flow_abort(sess, flow);
+                else
+                    tbt_fec_flow_put(flow);
                 atomic64_inc(&sess->bind_drop_no_stream);
                 return TBT_BIND_DROP;
             }
@@ -1158,7 +1167,12 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
                 WRITE_ONCE(sess->far_sid, 0);
             spin_unlock(&sess->lock);
             if (flow)
-                tbt_fec_flow_put(flow);
+            {
+                if (flow_admitted)
+                    tbt_fec_flow_abort(sess, flow);
+                else
+                    tbt_fec_flow_put(flow);
+            }
             return TBT_BIND_DROP;
         }
         /* 256 carriers deliver the same OPEN. tbt_stream_get_created()
@@ -1184,13 +1198,19 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
         }
         else if (flow)
         {
-            tbt_fec_flow_put(flow);
+            if (flow_admitted)
+                tbt_fec_flow_abort(sess, flow);
+            else
+                tbt_fec_flow_put(flow);
         }
         tbt_stream_put(ast);
     }
     else if (flow)
     {
-        tbt_fec_flow_put(flow);
+        if (flow_admitted)
+            tbt_fec_flow_abort(sess, flow);
+        else
+            tbt_fec_flow_put(flow);
     }
     return TBT_BIND_OK;
 }

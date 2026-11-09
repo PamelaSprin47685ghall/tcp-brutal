@@ -390,8 +390,8 @@ static void link_add(struct test_link *l, u16 i, u32 size, bool fin,
     fill_pattern(st->data, size ? size : 1,
                  (u32)(st->sid ^ (st->sid >> 32)) + 0x51u * i);
     ok_int(tbt_ms_tx_open(l->tx, st->sid), 0, "link tx open");
-    if (preopen)
-        ok_int(tbt_ms_rx_open(l->rx, st->sid), 0, "link rx open");
+    (void)preopen; /* RX legs are explicit; an unknown sid is dropped. */
+    ok_int(tbt_ms_rx_open(l->rx, st->sid), 0, "link rx open");
 }
 
 static void link_free(struct test_link *l)
@@ -1151,6 +1151,8 @@ static void test_broken_isolation(void)
     }
     ok_int(tbt_ms_tx_open(tx, sa), 0, "broken-isolation open A");
     ok_int(tbt_ms_tx_open(tx, sb), 0, "broken-isolation open B");
+    ok_int(tbt_ms_rx_open(rx, sa), 0, "broken-isolation rx open A");
+    ok_int(tbt_ms_rx_open(rx, sb), 0, "broken-isolation rx open B");
     ok_u32(tbt_ms_tx_write(tx, sa, a, asize), asize, "broken-isolation data A");
     ok_u32(tbt_ms_tx_write(tx, sb, b, bsize), bsize, "broken-isolation data B");
     wire = xalloc(asize + bsize + 8192);
@@ -1236,10 +1238,14 @@ static void test_rx_edges(void)
        "rx rejects too many streams", NULL);
 
     n = make_frame(frame, TBT_MS_DATA, a, 0, payload, 100);
-    ok_u32(tbt_ms_rx_feed(rx, frame, n), n, "auto-create DATA feed");
-    ok_u32(tbt_ms_rx_streams(rx), 1, "unknown sid auto-creates a leg");
-    ok_u32(tbt_ms_rx_avail(rx, a), 100, "auto-created leg buffers payload");
-    ok_u64(tbt_ms_rx_delivered(rx, a), 0, "auto-created leg starts at 0");
+    ok_u32(tbt_ms_rx_feed(rx, frame, n), n, "DATA before open is consumed");
+    ok_u32(tbt_ms_rx_streams(rx), 0, "an unknown sid does not create a leg");
+    ok_u32(tbt_ms_rx_avail(rx, a), 0, "a dropped frame buffers nothing");
+    ok_int(tbt_ms_rx_open(rx, a), 0, "explicit open creates the leg");
+    ok_u32(tbt_ms_rx_feed(rx, frame, n), n, "DATA after open");
+    ok_u32(tbt_ms_rx_streams(rx), 1, "explicit open owns one leg");
+    ok_u32(tbt_ms_rx_avail(rx, a), 100, "the leg buffers payload");
+    ok_u64(tbt_ms_rx_delivered(rx, a), 0, "the leg starts at 0");
     {
         const u8 *p = NULL;
         u32 len = 0;
@@ -1274,7 +1280,10 @@ static void test_rx_edges(void)
     }
 
     n = make_frame(frame, TBT_MS_RST, b, 0, NULL, 0);
-    ok_u32(tbt_ms_rx_feed(rx, frame, n), n, "RST auto-creates a leg");
+    ok_u32(tbt_ms_rx_feed(rx, frame, n), n, "RST before open is consumed");
+    ok_u32(tbt_ms_rx_streams(rx), 1, "RST does not create a leg");
+    ok_int(tbt_ms_rx_open(rx, b), 0, "explicit open before RST");
+    ok_u32(tbt_ms_rx_feed(rx, frame, n), n, "RST after open");
     ok(tbt_ms_rx_reset(rx, b), "rx reset state", NULL);
     ok_u32(tbt_ms_rx_avail(rx, b), 0, "reset leg is empty");
     n = make_frame(frame, TBT_MS_DATA, b, 0, payload, 50);
@@ -1304,6 +1313,8 @@ static void test_rx_edges(void)
     ok(rx != NULL, "rx walk constructor", NULL);
     if (!rx)
         return;
+    ok_int(tbt_ms_rx_open(rx, a), 0, "walk open A");
+    ok_int(tbt_ms_rx_open(rx, b), 0, "walk open B");
     n = make_frame(frame, TBT_MS_DATA, a, 0, payload, 10);
     ok_u32(tbt_ms_rx_feed(rx, frame, n), n, "walk DATA A");
     n = make_frame(frame, TBT_MS_DATA, b, 0, payload, 10);
@@ -1335,6 +1346,8 @@ static void test_rx_ordering(void)
     ok(rx != NULL, "ordering rx constructor", NULL);
     if (!rx)
         return;
+    ok_int(tbt_ms_rx_open(rx, a), 0, "ordering open A");
+    ok_int(tbt_ms_rx_open(rx, b), 0, "ordering open B");
     n = make_frame(frame, TBT_MS_DATA, a, 0, payload, 10);
     ok_u32(tbt_ms_rx_feed(rx, frame, n), n, "ordering first A frame");
     n = make_frame(frame, TBT_MS_DATA, b, 0, payload, 10);
@@ -1352,6 +1365,7 @@ static void test_rx_ordering(void)
     ok(rx != NULL, "full-ring rx constructor", NULL);
     if (!rx)
         return;
+    ok_int(tbt_ms_rx_open(rx, a), 0, "full-ring open A");
     n = make_frame(frame, TBT_MS_DATA, a, 0, payload, 10);
     ok_u32(tbt_ms_rx_feed(rx, frame, n), n, "fill the small leg ring");
     n = make_frame(frame, TBT_MS_DATA, a, 10, payload, 10);
