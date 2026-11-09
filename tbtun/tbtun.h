@@ -1935,7 +1935,6 @@ struct tbt_carrier
     u16 http_pending_len;
     char *http_tx;                /* one encoded chunk (TBT_HTTP_FRAME_MAX) */
     char *http_hdr;               /* peer header block (TBT_HTTP_HDR_MAX) */
-    char *fec_frame;              /* one FEC chunk frame (TBT_HTTP_FEC_FRAME_MAX) */
     u32 http_have;
     struct tbt_http_rx *http_rx;  /* RX record assembler (8 KiB) */
     u8 state;                     /* TBT_CAR_* */

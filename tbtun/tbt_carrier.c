@@ -34,6 +34,7 @@
 #include <net/tcp.h>
 
 #include "tbtun.h"
+#include "tbt_fec_batch.h"
 #include "tbt_tx_acct.h"
 
 /* One blocking wait inside kernel_connect(). A connect that has not completed
@@ -1320,12 +1321,7 @@ static int tbt_carrier_part_flush(struct tbt_carrier *c, struct sock *sk)
     return 0;
 }
 
-/* Write one whole record or HTTP frame. Flush an older tail first, then
- * pre-check the socket's free send memory so ordinary backpressure is
- * -EAGAIN, not a partial record. A kernel short write keeps the unwritten
- * tail in c->part; the next writer on this carrier flushes it before any new
- * bytes, so records stay in order and a control frame is never spliced into
- * the middle of a DATA record. */
+/* Ask the stack to call tbt_car_write_space() on the next ACK. */
 static void tbt_carrier_arm_nospace(struct tbt_carrier *c, struct sock *sk)
 {
     if (sk && sk->sk_socket)
@@ -1335,22 +1331,31 @@ static void tbt_carrier_arm_nospace(struct tbt_carrier *c, struct sock *sk)
     }
 }
 
-static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
-                                  const void *data, size_t len)
+/* Commit a segment list with one non-blocking socket write. Flush an older
+ * tail first, then pre-check the socket's free send memory so ordinary
+ * backpressure is -EAGAIN, not a partially written batch. A kernel short
+ * write keeps the unwritten tail in c->part; the next writer on this carrier
+ * flushes it before any new bytes, so records stay in order and a control
+ * frame is never spliced into the middle of a DATA record.
+ *
+ * The payload segments point straight at the caller's records: a full write
+ * copies no record byte and allocates nothing. Only a short write copies its
+ * tail, and a batch tail always fits c->part because total is bounded by it. */
+static int tbt_carrier_send_segs(struct tbt_carrier *c, struct sock *sk,
+                                 const struct tbt_fec_batch_seg *segs,
+                                 unsigned int nseg, size_t total)
 {
     struct msghdr msg = {};
-    struct kvec iov = { .iov_base = (void *)data, .iov_len = len };
+    struct kvec iov[TBT_BATCH_SEG_MAX];
     u32 wmem, sndbuf;
     u64 mem_avail;
+    unsigned int i;
     int err;
 
     lockdep_assert_held(&c->tx_lock);
     if (!sk)
         return -ENOTCONN;
-    /* Normal records fit one part buffer; a FEC batch may be up to eight
-     * concatenated frames. A short write still stores its tail in c->part,
-     * but the tail must fit that buffer (checked below). */
-    if (len > TBT_CAR_PART_MAX)
+    if (!nseg || nseg > TBT_BATCH_SEG_MAX || total > TBT_CAR_PART_MAX)
         return -EINVAL;
     err = tbt_carrier_part_flush(c, sk);
     if (err)
@@ -1362,9 +1367,9 @@ static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
     wmem = READ_ONCE(sk->sk_wmem_queued);
     sndbuf = READ_ONCE(sk->sk_sndbuf);
     mem_avail = sndbuf > wmem ? sndbuf - wmem : 0;
-    if (mem_avail < len)
+    if (mem_avail < total)
     {
-        /* The batch needs its whole byte range to fit, so this can refuse
+        /* The write needs its whole byte range to fit, so this can refuse
          * while sk_stream_memory_free() is still true.  Arm SOCK_NOSPACE:
          * the next ACK calls tbt_car_write_space(), which kicks the FEC
          * drain immediately.  The drain keeps its 2 ms timer as the bounded
@@ -1372,10 +1377,15 @@ static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
         tbt_carrier_arm_nospace(c, sk);
         return -EAGAIN;
     }
-    iov_iter_kvec(&msg.msg_iter, ITER_SOURCE, &iov, 1, len);
+    for (i = 0; i < nseg; i++)
+    {
+        iov[i].iov_base = (void *)segs[i].base;
+        iov[i].iov_len = segs[i].len;
+    }
+    iov_iter_kvec(&msg.msg_iter, ITER_SOURCE, iov, nseg, total);
     msg.msg_flags = MSG_DONTWAIT;
     lock_sock(sk);
-    err = tcp_sendmsg_locked(sk, &msg, len);
+    err = tcp_sendmsg_locked(sk, &msg, total);
     release_sock(sk);
     if (err < 0)
     {
@@ -1383,13 +1393,32 @@ static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
             tbt_carrier_arm_nospace(c, sk);
         return err == -EAGAIN ? -EAGAIN : err;
     }
-    if ((size_t)err < len)
+    if ((size_t)err < total)
     {
-        memcpy(c->part, (const u8 *)data + err, len - (size_t)err);
-        c->part_len = (u32)(len - (size_t)err);
+        u32 tail;
+
+        if (!tbt_fec_batch_tail(segs, nseg, total, (size_t)err, c->part,
+                                TBT_CAR_PART_MAX, &tail))
+            return -EIO;
+        c->part_len = tail;
         c->part_off = 0;
     }
     return 0;
+}
+
+/* Write one whole record or HTTP frame. The batch helper has the locking,
+ * tail-flush, memory-precheck and short-write rules; this wrapper supplies
+ * the one-segment list a single write needs. */
+static int tbt_carrier_send_whole(struct tbt_carrier *c, struct sock *sk,
+                                  const void *data, size_t len)
+    {
+    struct tbt_fec_batch_seg seg;
+
+    if (len > TBT_CAR_PART_MAX)
+        return -EINVAL;
+    seg.base = data;
+    seg.len = (u32)len;
+    return tbt_carrier_send_segs(c, sk, &seg, 1, len);
 }
 
 /* The request/response header block for this carrier segment. The near side
@@ -1536,9 +1565,11 @@ int tbt_carrier_send_fec_batch(struct tbt_carrier *c,
 {
     struct tbt_session *sess;
     struct sock *sk;
-    char *buf = NULL;
-    size_t cap, off = 0;
-    u16 i;
+    char hdr[TBT_BATCH_REC_MAX][TBT_HTTP_CHUNK_HDR_MAX];
+    struct tbt_fec_batch_seg seg[TBT_BATCH_SEG_MAX];
+    size_t total = 0;
+    unsigned int nseg;
+    bool http;
     int err = 0;
 
     if (sent)
@@ -1561,73 +1592,38 @@ int tbt_carrier_send_fec_batch(struct tbt_carrier *c,
         goto out;
     }
 
-    if (c->profile == 3)
-    {
-        cap = (size_t)count * TBT_HTTP_FEC_FRAME_MAX;
-        buf = count == 1 ? c->fec_frame
-                         : kmalloc_array(count, TBT_HTTP_FEC_FRAME_MAX,
-                                         GFP_KERNEL);
-        if (!buf)
-        {
-            err = -ENOMEM;
-            goto out;
-        }
-        for (i = 0; i < count; i++)
-        {
-            if (off + lens[i] > cap)
-            {
-                err = -EINVAL;
-                goto out_free;
-            }
-            memcpy(buf + off, recs[i], lens[i]);
-            off += lens[i];
-        }
-    }
-    else
+    http = c->profile != 3;
+    if (http)
     {
         /* The header block is part of this carrier's byte stream: write it
-         * once before the concatenated chunks. */
+         * once before the chunks. */
         err = tbt_carrier_http_begin(c, sk);
         if (err)
             goto out;
-        cap = (size_t)count * TBT_HTTP_FEC_FRAME_MAX;
-        buf = count == 1 ? c->fec_frame
-                         : kmalloc_array(count, TBT_HTTP_FEC_FRAME_MAX,
-                                         GFP_KERNEL);
-        if (!buf)
-        {
-            err = -ENOMEM;
-            goto out;
-        }
-        for (i = 0; i < count; i++)
-        {
-            size_t n = tbt_http_fec_chunk_encode(buf + off, cap - off,
-                                                 recs[i], lens[i]);
-
-            if (!n)
-            {
-                atomic64_inc(&sess->http_parse_err);
-                err = -EIO;
-                goto out_free;
-            }
-            off += n;
-        }
+    }
+    /* The records are already one contiguous buffer each (struct tbt_fec_out
+     * data[]), so the layout is a segment list over them: no batch buffer,
+     * no record memcpy. */
+    nseg = tbt_fec_batch_build(seg, &hdr[0][0], recs, lens, count, http, &total);
+    if (!nseg)
+    {
+        if (http)
+            atomic64_inc(&sess->http_parse_err);
+        err = http ? -EIO : -EINVAL;
+        goto out;
     }
 
-    err = tbt_carrier_send_whole(c, sk, buf, off);
+    err = tbt_carrier_send_segs(c, sk, seg, nseg, total);
     if (!err)
     {
         c->tx_frames += count;
-        c->tx_bytes += off;
+        c->tx_bytes += total;
         c->last_tx_ns = ktime_get_ns();
-        sess->carrier_bytes += off;
+        sess->carrier_bytes += total;
         if (sent)
             *sent = count;
     }
 
-out_free:
-    if (buf && buf != c->fec_frame)
-        kfree(buf);
 out:
     mutex_unlock(&c->tx_lock);
     tbt_carrier_sk_put(sk);
@@ -1909,7 +1905,6 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
     c->sess = sess;
     c->http_tx = kmalloc(TBT_HTTP_FRAME_MAX, GFP_KERNEL);
     c->http_hdr = kmalloc(TBT_HTTP_HDR_MAX, GFP_KERNEL);
-    c->fec_frame = kmalloc(TBT_HTTP_FEC_FRAME_MAX, GFP_KERNEL);
     c->part = kmalloc(TBT_CAR_PART_MAX, GFP_KERNEL);
     /* Zeroed is the defined initial state: have == 0 for the parser and a
      * SIZE-state chunk parser for the assembler. kmalloc() would hand the
@@ -1917,7 +1912,7 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
      * then drives an unbounded memmove() in tbt_http_rx_parse(). */
     c->parser = kzalloc(sizeof(*c->parser), GFP_KERNEL);
     c->http_rx = kzalloc(sizeof(*c->http_rx), GFP_KERNEL);
-    if (!c->http_tx || !c->http_hdr || !c->fec_frame || !c->part ||
+    if (!c->http_tx || !c->http_hdr || !c->part ||
         !c->parser || !c->http_rx)
     {
         /* ctor-fail: never linked, so the helper's unlink is a no-op. */
@@ -2573,7 +2568,6 @@ void tbt_carrier_free(struct tbt_carrier *c)
     list_del_init(&c->release_node);
     kfree(c->http_tx);
     kfree(c->http_hdr);
-    kfree(c->fec_frame);
     kfree(c->part);
     kfree(c->parser);
     kfree(c->http_rx);
@@ -3567,7 +3561,7 @@ void tbt_carrier_snapshot(struct tbt_session *sess)
     tbt_carrier_put(c);
 }
 
-/* The five buffers are pointers, not inline arrays. If someone turns one of
+/* The four buffers are pointers, not inline arrays. If someone turns one of
  * them into an array, kzalloc() still zeroes the whole struct and the buffer
  * storage, and the "birth is all zero" invariant silently changes meaning.
  * Reject that at compile time, and pin the buffer sizes to the largest record
@@ -3586,6 +3580,7 @@ static void tbt_carrier_birth_checks(void)
         typeof(((struct tbt_carrier *)0)->http_hdr), char *));
     BUILD_BUG_ON(TBT_CAR_PART_MAX < TBT_REC_MAX);
     BUILD_BUG_ON(TBT_CAR_PART_MAX < TBT_HTTP_FEC_FRAME_MAX);
+    BUILD_BUG_ON(TBT_BATCH_REC_MAX != TBT_FEC_BATCH_MAX);
     BUILD_BUG_ON(TBT_PARSER_BUF < TBT_REC_MAX);
     BUILD_BUG_ON(TBT_PARSER_BUF < TBT_FEC_REC_MAX);
 }
