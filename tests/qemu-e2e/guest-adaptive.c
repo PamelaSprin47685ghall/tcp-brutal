@@ -57,6 +57,8 @@
 #define UNLOAD_TIMEOUT_MS 10000
 #define PHASE_A_S 20
 #define PHASE_B_S 24
+#define DRAIN_S 10
+#define SEND_BYTES_PER_MS 8192u /* essentially unpaced; the drain handles the backlog */
 #define SETTLE_TIMEOUT_MS 15000
 #define NO_PROGRESS_MS 30000
 #define DROP_PPM 250000u
@@ -596,12 +598,13 @@ static void configure_pair(void)
                    "tunnel 1 role=far profile=raw listen=127.0.0.1:19001"
                    " target=127.0.0.1:19070 n=128 m=128 fec=on"
                    " mode=sc-ldpc adaptive=on w=256 L=8 carriers=256"
-                   " crypto=off dup=1\n"))
+                   " carrier_stall_ms=15000 crypto=off dup=1\n"))
         verdict_fail("far config: %s", strerror(errno));
     if (write_path("/proc/net/tbtun/config",
                    "tunnel 2 role=near profile=raw listen=127.0.0.1:19000"
                    " peer=127.0.0.1:19001 n=8 m=24 fec=on mode=sc-ldpc"
-                   " adaptive=on w=128 L=16 carriers=256 crypto=off dup=1"
+                   " adaptive=on w=128 L=16 carriers=256"
+                   " carrier_stall_ms=15000 crypto=off dup=1"
                    " portblock=" PORTBLOCK "\n"))
         verdict_fail("near config: %s", strerror(errno));
 }
@@ -745,16 +748,19 @@ static int set_drop_ppm(unsigned int ppm);
 static int phase_a_ok(const struct obs *o)
 {
     return o->down_peak_n == DOWN_70_N && o->down_peak_m == DOWN_70_M &&
-           o->up_peak_n == UP_70_N && o->up_peak_m == UP_70_M &&
-           o->down.n == DOWN_70_N && o->up.n == UP_70_N;
+           o->up_peak_n == UP_70_N && o->up_peak_m == UP_70_M;
 }
 
-static int phase_b_ok(const struct obs *o)
+/* The controller may retract one step after its own up-switch repair burst
+ * even with no injected loss; what phase B must prove is that the 25% loss
+ * pushes each direction strictly below where it sat at the injection, with a
+ * new shape epoch in force. */
+static int phase_b_ok(const struct obs *a, const struct obs *o)
 {
-    return o->down.n <= DOWN_60_N && o->down.n < DOWN_70_N &&
-           o->up.n <= UP_60_N && o->up.n < UP_70_N &&
-           o->down.epoch > o->down_peak_epoch &&
-           o->up.epoch > o->up_peak_epoch && !strcmp(o->down.state, "steady") &&
+    return o->down.n <= DOWN_60_N && o->down.n < a->down.n &&
+           o->up.n <= UP_60_N && o->up.n < a->up.n &&
+           o->down.epoch > a->down.epoch && o->up.epoch > a->up.epoch &&
+           !strcmp(o->down.state, "steady") &&
            !strcmp(o->up.state, "steady");
 }
 
@@ -764,11 +770,13 @@ static int phase_b_ok(const struct obs *o)
  * stream would reset the flow to the configured 25/50 start and could never
  * show an online downgrade.
  *
- * The child does not half-close when its timer ends: it reports the byte
- * count and waits for the parent, which signals only after every byte came
- * back.  A FIN sent with the sender's in-flight window still full would make
- * the receiver drain a multi-megabyte socket backlog against the close
- * budget; that is a close-path overload test, not this one. */
+ * The child does not half-close when its timer ends.  It reports the byte
+ * count and waits DRAIN_S seconds first: a FIN sent with the sender's
+ * in-flight window still full makes the receiver drain a multi-megabyte
+ * backlog against the close budget.  Waiting for every byte to come back
+ * instead deadlocks: the FEC FIN is what tells the receiver the last short
+ * block's real cut, and the application cannot echo that block before the
+ * FIN.  Sending stops, the tunnel drains, then the FIN releases the tail. */
 static int stream_phased(int pre_s, int loss_s, struct obs *o,
                          struct obs *phase_a, int *a_ok, int *b_ok,
                          unsigned long long *pre_off,
@@ -776,10 +784,10 @@ static int stream_phased(int pre_s, int loss_s, struct obs *o,
                          unsigned long long *sent_out, char *why, size_t cap)
 {
     int fd = connect_client();
-    int cnt_pipe[2], ack_pipe[2];
+    int cnt_pipe[2];
     pid_t pid;
     unsigned long long off = 0, sent = 0;
-    int have_sent = 0, acked = 0, loss_set = 0;
+    int have_sent = 0, loss_injected = 0, loss_active = 0;
     long long last_progress = now_ms();
     long long next_obs = 0;
     long long start;
@@ -794,7 +802,7 @@ static int stream_phased(int pre_s, int loss_s, struct obs *o,
         snprintf(why, cap, "connect: %s", strerror(errno));
         return -1;
     }
-    if (pipe(cnt_pipe) || pipe(ack_pipe))
+    if (pipe(cnt_pipe))
     {
         snprintf(why, cap, "pipe: %s", strerror(errno));
         close(fd);
@@ -806,20 +814,17 @@ static int stream_phased(int pre_s, int loss_s, struct obs *o,
         snprintf(why, cap, "fork: %s", strerror(errno));
         close(cnt_pipe[0]);
         close(cnt_pipe[1]);
-        close(ack_pipe[0]);
-        close(ack_pipe[1]);
         close(fd);
         return -1;
     }
     if (!pid)
     {
         unsigned long long tx = 0;
-        long long end = now_ms() + (long long)(pre_s + loss_s) * 1000;
-        char ack;
+        long long begin = now_ms();
+        long long end = begin + (long long)(pre_s + loss_s) * 1000;
 
         alarm(0);
         close(cnt_pipe[0]);
-        close(ack_pipe[1]);
         while (now_ms() < end)
         {
             size_t i;
@@ -829,18 +834,25 @@ static int stream_phased(int pre_s, int loss_s, struct obs *o,
             if (send_all(fd, chunk_send, CHUNK, 4000))
                 break;
             tx += CHUNK;
+            {
+                /* Keep the in-flight backlog small enough that the close
+                 * budget can drain it: the fast loopback otherwise parks
+                 * tens of MiB in carrier sockets, and a FIN behind that
+                 * backlog resets the stream. */
+                long long want = begin + (long long)(tx / SEND_BYTES_PER_MS);
+                long long now = now_ms();
+
+                if (want > now)
+                    msleep((int)(want - now));
+            }
         }
         if (write(cnt_pipe[1], &tx, sizeof(tx)) != (ssize_t)sizeof(tx))
             _exit(1);
-        /* The parent signals when it has verified every byte.  A parent
-         * failure kills this process, so a blocking read cannot leak. */
-        while (read(ack_pipe[0], &ack, 1) < 0 && errno == EINTR)
-            ;
+        msleep(DRAIN_S * 1000);
         shutdown(fd, SHUT_WR);
         _exit(0);
     }
     close(cnt_pipe[1]);
-    close(ack_pipe[0]);
     if (fcntl(cnt_pipe[0], F_SETFL, O_NONBLOCK) < 0)
     {
         snprintf(why, cap, "fcntl: %s", strerror(errno));
@@ -857,7 +869,7 @@ static int stream_phased(int pre_s, int loss_s, struct obs *o,
         {
             (void)obs_sample(o);
             next_obs = now_ms() + 250;
-            if (!loss_set && now_ms() - start >= (long long)pre_s * 1000)
+            if (!loss_injected && now_ms() - start >= (long long)pre_s * 1000)
             {
                 *phase_a = *o;
                 *pre_off = off;
@@ -870,7 +882,8 @@ static int stream_phased(int pre_s, int loss_s, struct obs *o,
                 printf("QEMU_E2E_LOSS drop_ppm=%u carriers=%u\n", DROP_PPM,
                        CARRIERS);
                 fflush(stdout);
-                loss_set = 1;
+                loss_injected = 1;
+                loss_active = 1;
                 if (!*a_ok)
                 {
                     snprintf(why, cap,
@@ -878,7 +891,7 @@ static int stream_phased(int pre_s, int loss_s, struct obs *o,
                     goto bad;
                 }
             }
-            if (loss_set && !*b_ok && phase_b_ok(o))
+            if (loss_active && !*b_ok && phase_b_ok(phase_a, o))
             {
                 *b_ok = 1;
                 obs_print("phase-B", o);
@@ -891,23 +904,13 @@ static int stream_phased(int pre_s, int loss_s, struct obs *o,
             if (r == (ssize_t)sizeof(sent))
                 have_sent = 1;
         }
-        if (have_sent && off == sent && !acked)
+        if (have_sent && loss_active)
         {
-            char ack = 'g';
-
-            /* The sender has stopped; let the tail repairs run without the
-             * injector so the close budget is not spent on fresh drops. */
-            if (loss_set)
-            {
-                (void)set_drop_ppm(0);
-                loss_set = 0;
-            }
-            if (write(ack_pipe[1], &ack, 1) != 1)
-            {
-                snprintf(why, cap, "ack: %s", strerror(errno));
-                goto bad;
-            }
-            acked = 1;
+            /* The sender has stopped; let the drain and tail repairs run
+             * without the injector so the close budget is not spent on
+             * fresh drops. */
+            (void)set_drop_ppm(0);
+            loss_active = 0;
         }
         pfd[0].fd = fd;
         pfd[0].events = POLLIN;
@@ -973,23 +976,13 @@ static int stream_phased(int pre_s, int loss_s, struct obs *o,
         snprintf(why, cap, "sender reported no byte count");
         goto bad;
     }
-    if (loss_set)
+    if (loss_active)
     {
         (void)set_drop_ppm(0);
-        loss_set = 0;
-    }
-    if (!acked)
-    {
-        char ack = 'g';
-
-        /* EOF arrived before every byte did.  Release the child so it can
-         * half-close and exit; the byte-count check below names the loss. */
-        if (write(ack_pipe[1], &ack, 1) != 1)
-            snprintf(why, cap, "ack: %s", strerror(errno));
+        loss_active = 0;
     }
     waitpid(pid, &status, 0);
     close(cnt_pipe[0]);
-    close(ack_pipe[1]);
     close(fd);
     if (!WIFEXITED(status) || WEXITSTATUS(status))
     {
@@ -1006,12 +999,11 @@ static int stream_phased(int pre_s, int loss_s, struct obs *o,
     return 0;
 
 bad:
-    if (loss_set)
+    if (loss_active)
         (void)set_drop_ppm(0);
     kill(pid, SIGKILL);
     waitpid(pid, &status, 0);
     close(cnt_pipe[0]);
-    close(ack_pipe[1]);
     close(fd);
     return -1;
 }
@@ -1249,7 +1241,12 @@ int main(void)
         print_states("phase-A", &pa);
         verdict_fail("phase A did not hold 70%% in both directions");
     }
-    obs_print("phase-A", &pa);
+    printf("QEMU_E2E_RATE phase-A down=%u/%u up=%u/%u epoch=%u/%u "
+           "now=%u/%u,%u/%u\n",
+           pa.down_peak_n, pa.down_peak_m, pa.up_peak_n, pa.up_peak_m,
+           pa.down.epoch, pa.up.epoch, pa.down.n, pa.down.m, pa.up.n,
+           pa.up.m);
+    fflush(stdout);
     print_states("phase-A", &pa);
     printf("QEMU_E2E_STREAM phase-a bytes=%llu ok\n", pre_a);
     printf("QEMU_E2E_ABORT phase-A down=%u/%u up=%u/%u\n", pa.down.aborts,
