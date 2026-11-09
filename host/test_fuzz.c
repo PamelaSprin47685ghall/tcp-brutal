@@ -43,7 +43,10 @@
 #define DOC_WINDOW_LEN 138u /* 8 + 8*16 + 2 */
 #define DOC_HELLO_LEN 23u   /* old ARQ: 1 + 1 + 16 + 2 + 2 + 1 */
 #define DOC_HELLO_LEN_V6 66u /* FEC v6: legacy 23 + crypto fields */
-#define DOC_OPEN_BODY_LEN 32u /* 0.4.0: 256-bit physical group bitmap */
+#define DOC_OPEN_BODY_LEN 36u /* 0.5.0: bitmap + route_slot + target_port */
+
+_Static_assert(DOC_OPEN_BODY_LEN == 36, "v8 OPEN body is 36 bytes");
+_Static_assert(DOC_HELLO_LEN_V6 == 66, "v8 FEC HELLO body is 66 bytes");
 
 static u64 rng_state = 1;
 static unsigned long case_no;
@@ -222,7 +225,8 @@ static void test_bounds_table(void)
     char d[64];
 
     case_no++;
-    check(TBT_HDR_LEN == 32 && TBT_CHUNK_MAX == 8228 && TBT_REC_MAX == 8224 && TBT_CONV == 0x0007,
+    check(TBT_HDR_LEN == 32 && TBT_CHUNK_MAX == 8228 && TBT_REC_MAX == 8224 &&
+              TBT_CONV == 0x0008 && TBT_WIRE_VERSION_V6 == 5,
           "design constants", NULL);
     for (i = 0; i < sizeof(want) / sizeof(want[0]); i++)
     {
@@ -401,6 +405,9 @@ static void test_header_ranges(void)
     tbt_put_le16(rec + TBT_H_CONV, TBT_CONV + 1);
     case_no++;
     expect("conv TBT_CONV+1", rec, n, TBT_REC_PROTO);
+    tbt_put_le16(rec + TBT_H_CONV, 0x0007);
+    case_no++;
+    expect("v7 conv 0x0007 refused", rec, n, TBT_REC_PROTO);
     tbt_put_le16(rec + TBT_H_CONV, TBT_CONV);
 }
 
@@ -466,17 +473,20 @@ static void test_adversarial(void)
     expect("DATA one byte over payload max", rec, TBT_HDR_LEN, TBT_REC_PROTO);
     n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, 0, DOC_OPEN_BODY_LEN);
     case_no++;
-    expect("OPEN with the 32-byte bitmap", rec, n, TBT_REC_OK);
+    expect("OPEN with the 36-byte body", rec, n, TBT_REC_OK);
     n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, 0, DOC_OPEN_BODY_LEN - 1);
     case_no++;
     expect("OPEN one byte short", rec, n, TBT_REC_PROTO);
+    n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, 0, 32);
+    case_no++;
+    expect("v7 32-byte OPEN refused", rec, n, TBT_REC_PROTO);
     n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, 0, DOC_OPEN_BODY_LEN + 1);
     case_no++;
     expect("OPEN one byte long", rec, n, TBT_REC_PROTO);
     n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, 0, 0);
     case_no++;
     expect("OPEN without a body", rec, n, TBT_REC_PROTO);
-    /* The bitmap bits are opaque to the framing layer: a random 32-byte
+    /* The body is opaque to the framing layer: a random 36-byte
      * body is a well-formed record and never changes the consumed length. */
     for (i = 0; i < 256; i++)
     {
@@ -486,7 +496,7 @@ static void test_adversarial(void)
         for (k = 0; k < DOC_OPEN_BODY_LEN; k++)
             rec[TBT_HDR_LEN + k] = (u8)rnd64();
         case_no++;
-        expect("OPEN with a random 32-byte bitmap", rec, n, TBT_REC_OK);
+        expect("OPEN with a random 36-byte body", rec, n, TBT_REC_OK);
     }
     n = rec_make(rec, TBT_F_FIN, 0, 0, 1, 0, 1);
     case_no++;

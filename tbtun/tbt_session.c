@@ -1019,10 +1019,49 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
 
     if (!sid)
         return TBT_BIND_DROP;
-    /* The wire checker bounds an OPEN to this length too; the check here is
-     * the one the bitmap admission relies on. */
-    if (open && sess->fec && (!body || len != TBT_FEC_BITMAP_BYTES))
-        return TBT_BIND_BAD;
+    /* v8 OPEN: fixed 36 bytes. Validate in the contract order — mask, route
+     * slot, target port — before any flow is admitted. A rejected step must
+     * not create a flow. */
+    BUILD_BUG_ON(TBT_OPEN_BODY_LEN != TBT_FEC_BITMAP_BYTES + 4);
+    BUILD_BUG_ON(TBT_HELLO_BODY_LEN_V6 != 66);
+    if (open)
+    {
+        u16 route_slot, target_port;
+
+        if (!body || len != TBT_OPEN_BODY_LEN)
+            return TBT_BIND_BAD;
+        if (sess->fec)
+        {
+            u16 count;
+
+            if (!tbt_fec_open_mask_valid(sess->fec_sclc,
+                                         sess->fec_groups_total, body,
+                                         &count))
+                return TBT_BIND_BAD;
+            route_slot = tbt_le16(body + TBT_OPEN_ROUTE_SLOT);
+            /* 0.5.0 has one route per tunnel. The multi-port branch replaces
+             * this with `route_slot < sess->routes_count`. */
+            if (route_slot != 0)
+                return TBT_BIND_BAD;
+            target_port = tbt_le16(body + TBT_OPEN_TARGET_PORT);
+            /* target_port 0 means "use the far config". A non-zero value
+             * guards against a config drift, it is not a routing source. */
+            if (target_port &&
+                (near ||
+                 target_port != ntohs(sess->tunnel->cfg.target_port)))
+                return TBT_BIND_BAD;
+        }
+        else
+        {
+            u16 i;
+
+            /* A non-FEC session has no bitmap, slot, or target: the whole
+             * body is zero so a stale v7 OPEN cannot pass as this one. */
+            for (i = 0; i < TBT_OPEN_BODY_LEN; i++)
+                if (body[i])
+                    return TBT_BIND_BAD;
+        }
+    }
 
     spin_lock(&sess->lock);
     if (READ_ONCE(sess->closing))

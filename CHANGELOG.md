@@ -3,6 +3,38 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.5.0] - 2026-11-09
+
+### Added
+
+- Wire v8 base for the 0.5.0 feature merge. `TBT_CONV` moves to `0x0008`,
+  `TBT_FEC_CONV` to `0x1008`, and FEC HELLO `body[0]` to version 5. A 0.4.0
+  peer is refused at the first HELLO, the first FEC conv check and the first
+  OPEN length check; there is no compatibility branch.
+- OPEN carries 36 bytes: the 32-byte physical group bitmap followed by
+  `route_slot` and `target_port` (both little-endian). The single-route base
+  sends 0/0, and the far validates a non-zero target port against its
+  configured target. Validation order is mask, route slot, target port.
+- `FEC_CFG` grows to 64 bytes. The v7 48-byte prefix is unchanged; the
+  extension names `codec_variant`, `L`, `block` and `rate_ppm`, protected by
+  a second CRC over `+48..+55`, with `reserved2` at `+60`.
+- `FEC_FBK` grows to 64 bytes and the full 256-bit `carrier_bitmap[32]` is
+  restored (the 0.4.0 SC overlay truncated it to 224 carriers). `p_fast_ppm`
+  moves to `+48`; the extension also carries the receiver's variant/L/block
+  and current/target rates. `codec_fail` has no v8 wire field and stays a
+  local procfs diagnostic.
+- `FEC_ALLOC` keeps its 64-byte body; the flags mask is `0x0f` so
+  `COMMITTED` (0x04) and `ABORT` (0x08) can join `ACK`/`DONE`, and the
+  reserved bytes are validated.
+- Host vectors cover the 64-byte CFG/FBK bodies, the 36-byte OPEN, the v8
+  CFG extension CRC and the explicit rejection of v7 (`0x1007`, 48-byte
+  CFG/FBK, 32-byte OPEN) records.
+- A switch normalizes an RLNC shape's `codec_variant` from its group count
+  (single 0, grouped 1) before storing it, and the FBK check normalizes the
+  committed value again. A grouped flow therefore keeps accepting the peer's
+  variant-1 reports after its first rate switch. The uplink GF(16)
+  `block=128` is documented as a legal variant-2 combination.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

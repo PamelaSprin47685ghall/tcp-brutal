@@ -21,6 +21,21 @@
 
 #include "tbt_fec.h"
 
+/* The v8 wire lengths and extension offsets are a contract, not a comment.
+ * A body that drifts from this block fails the build on both sides. The
+ * kernel half lives in tbt_fec_hdr_check(): BUILD_BUG_ON is a statement. */
+#ifndef __KERNEL__
+_Static_assert(TBT_FEC_HDR_LEN == 48, "FEC header must stay 48 bytes");
+_Static_assert(TBT_FEC_CFG_LEN == 64, "FEC_CFG body must be 64 bytes");
+_Static_assert(TBT_FEC_FBK_LEN == 64, "FEC_FBK body must be 64 bytes");
+_Static_assert(TBT_FEC_ALLOC_LEN == 64, "FEC_ALLOC body must be 64 bytes");
+_Static_assert(TBT_FEC_CFG_CRC_EXT == TBT_FEC_CFG_CODEC_VARIANT + 8,
+               "FEC_CFG extension CRC follows the eight extension bytes");
+_Static_assert(TBT_FEC_CFG_RESERVED2 == 60, "FEC_CFG reserved2 at +60");
+_Static_assert(TBT_FEC_FBK_P_FAST_PPM == 48, "FBK p_fast at +48");
+_Static_assert(TBT_FEC_FBK_RATE_TARGET == 60, "FBK rate target at +60");
+#endif
+
 /* ------------------------------------------------------------------ *
  * Allocation
  * ------------------------------------------------------------------ */
@@ -197,6 +212,14 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
 {
     u16 shares;
 
+#ifdef __KERNEL__
+    BUILD_BUG_ON(TBT_FEC_HDR_LEN != 48);
+    BUILD_BUG_ON(TBT_FEC_CFG_LEN != 64);
+    BUILD_BUG_ON(TBT_FEC_FBK_LEN != 64);
+    BUILD_BUG_ON(TBT_FEC_ALLOC_LEN != 64);
+    BUILD_BUG_ON(TBT_FEC_CFG_CRC_EXT != TBT_FEC_CFG_CODEC_VARIANT + 8);
+    BUILD_BUG_ON(TBT_FEC_FBK_P_FAST_PPM != 48);
+#endif
     if (!h)
         return -EPROTO;
     if (h->conv != TBT_FEC_CONV)
@@ -486,9 +509,14 @@ int tbt_fec_alloc_unpack(const u8 in[TBT_FEC_ALLOC_LEN],
     a->flags = in[TBT_FEC_ALLOC_FLAGS];
     if (a->flags & ~TBT_FEC_ALLOC_F_MASK)
         return -EPROTO;
+    if (in[TBT_FEC_ALLOC_FLAGS + 1] || in[TBT_FEC_ALLOC_FLAGS + 2] ||
+        in[TBT_FEC_ALLOC_FLAGS + 3])
+        return -EPROTO;
     a->switch_pkt = tbt_get_u64(in + TBT_FEC_ALLOC_SWITCH_PKT);
     a->block_base = tbt_get_u64(in + TBT_FEC_ALLOC_BLOCK_BASE);
     a->crc32c = tbt_get_u32(in + TBT_FEC_ALLOC_CRC);
+    if (tbt_get_u32(in + TBT_FEC_ALLOC_RESERVED2) != 0)
+        return -EPROTO;
     want = tbt_fec_crc32c(0, in, TBT_FEC_ALLOC_CRC_BYTES);
     if (want != a->crc32c)
         return -EPROTO;
@@ -780,15 +808,21 @@ void tbt_fec_nack_reset(struct tbt_fec_nack_state *st)
 
 int tbt_fec_cfg_pack(const struct tbt_fec_cfg *c, u8 out[TBT_FEC_CFG_LEN])
 {
+    u8 variant;
+
     if (!c || !out)
         return -EINVAL;
     memset(out, 0, TBT_FEC_CFG_LEN);
     tbt_put_u32(out + TBT_FEC_CFG_EPOCH, c->epoch);
     tbt_put_u16(out + TBT_FEC_CFG_N, c->n);
     tbt_put_u16(out + TBT_FEC_CFG_M, c->m);
-    tbt_put_u16(out + TBT_FEC_CFG_W, c->w);
-    tbt_put_u16(out + TBT_FEC_CFG_K, c->k);
-    out[TBT_FEC_CFG_D] = c->d;
+    variant = c->codec_variant;
+    /* An SC-LDPC body carries its graph in the extension; the original
+     * w/k/d bytes stay zero on the wire (0.5.0 §5). The in-kernel mirror in
+     * the struct is not a second wire encoding. */
+    tbt_put_u16(out + TBT_FEC_CFG_W, variant == 2 ? 0 : c->w);
+    tbt_put_u16(out + TBT_FEC_CFG_K, variant == 2 ? 0 : c->k);
+    out[TBT_FEC_CFG_D] = variant == 2 ? 0 : c->d;
     out[TBT_FEC_CFG_FLAGS] = c->flags;
     tbt_put_u16(out + TBT_FEC_CFG_GROUPS, c->groups);
     tbt_put_u64(out + TBT_FEC_CFG_SWITCH_PKT, c->switch_pkt);
@@ -797,6 +831,14 @@ int tbt_fec_cfg_pack(const struct tbt_fec_cfg *c, u8 out[TBT_FEC_CFG_LEN])
     tbt_put_u32(out + TBT_FEC_CFG_CRC,
                 tbt_fec_crc32c(0, out, TBT_FEC_CFG_CRC_BYTES));
     tbt_put_u32(out + TBT_FEC_CFG_RESERVED, 0);
+    out[TBT_FEC_CFG_CODEC_VARIANT] = variant;
+    out[TBT_FEC_CFG_L] = c->L;
+    tbt_put_u16(out + TBT_FEC_CFG_BLOCK, c->block);
+    tbt_put_u32(out + TBT_FEC_CFG_RATE_PPM, c->rate_ppm);
+    tbt_put_u32(out + TBT_FEC_CFG_CRC_EXT,
+                tbt_fec_crc32c(0, out + TBT_FEC_CFG_CODEC_VARIANT,
+                               TBT_FEC_CFG_CRC_EXT_BYTES));
+    tbt_put_u32(out + TBT_FEC_CFG_RESERVED2, 0);
     return 0;
 }
 
@@ -805,6 +847,9 @@ int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], struct tbt_fec_cfg *c)
     u32 crc;
     u32 shares;
     u16 n, m, groups;
+    u8 variant, L;
+    u16 block;
+    u32 rate_ppm;
 
     if (!in || !c)
         return -EINVAL;
@@ -816,6 +861,14 @@ int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], struct tbt_fec_cfg *c)
     if (tbt_get_u32(in + TBT_FEC_CFG_RESERVED) != 0)
         return -EPROTO;
     if (in[TBT_FEC_CFG_FLAGS] & ~TBT_FEC_CFG_F_MASK)
+        return -EPROTO;
+    /* The extension has its own CRC, so a truncated or v7-shaped body that
+     * happened to pass the prefix CRC cannot smuggle a variant in. */
+    if (tbt_get_u32(in + TBT_FEC_CFG_RESERVED2) != 0)
+        return -EPROTO;
+    if (tbt_get_u32(in + TBT_FEC_CFG_CRC_EXT) !=
+        tbt_fec_crc32c(0, in + TBT_FEC_CFG_CODEC_VARIANT,
+                       TBT_FEC_CFG_CRC_EXT_BYTES))
         return -EPROTO;
     c->epoch = tbt_get_u32(in + TBT_FEC_CFG_EPOCH);
     n = tbt_get_u16(in + TBT_FEC_CFG_N);
@@ -833,45 +886,81 @@ int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], struct tbt_fec_cfg *c)
     c->groups = groups;
     c->crc32c = crc;
     c->reserved = 0;
+    variant = in[TBT_FEC_CFG_CODEC_VARIANT];
+    L = in[TBT_FEC_CFG_L];
+    block = tbt_get_u16(in + TBT_FEC_CFG_BLOCK);
+    rate_ppm = tbt_get_u32(in + TBT_FEC_CFG_RATE_PPM);
+    c->codec_variant = variant;
+    c->L = L;
+    c->block = block;
+    c->rate_ppm = rate_ppm;
+    c->crc32c_ext = tbt_get_u32(in + TBT_FEC_CFG_CRC_EXT);
+    c->reserved2 = 0;
     shares = (u32)n + m; /* u32 first: 65535 + 65535 must not wrap */
     if (!n || !m || shares > TBT_FEC_MAX_SHARES)
         return -EPROTO;
-    if (!c->k || c->w > TBT_FEC_MAX_W)
+    if (!groups || groups > TBT_FEC_MAX_GROUPS ||
+        (u32)groups * shares > TBT_FEC_MAX_CARRIERS)
         return -EPROTO;
-    /* Three encodings share this body and (d, k vs w) tells them apart.
-     * RLNC has d >= 1, d <= w and k <= w (k is the window's data count).
-     * SC-LDPC binary has d == 0, k is the code rate in parts per thousand,
-     * and w is the codeword block, so w >= k does not describe it: the
-     * downlink is w=256, k=500. SC-LDPC GF(16) has k = codeword block,
-     * w = coupling length, d = rate in 1/256, so k > w and d may exceed w.
-     * Refusing these pairs here dropped every SC-LDPC CFG before the codec
-     * was built; the codec factory stays the authority on the exact set. */
-    if (c->d == 0)
+    if (variant == 2)
     {
-        if (c->k < 100 || c->k > 1000)
+        u32 want_n;
+
+        /* SC-LDPC: the extension names the codec, and the wire w/k/d are
+         * zero. The sender and receiver recompute n from the rate, so a
+         * body whose split does not follow its rate is refused. */
+        if (c->w || c->k || c->d)
             return -EPROTO;
+        if (L != 8 && L != 16)
+            return -EPROTO;
+        /* The v8 block ladder is 256/512; the uplink GF(16) codec's
+         * 128-share block is a legal variant-2 combination, not a
+         * transitional exception. It is valid only with L=16 and more than
+         * one group. */
+        if (block != 256 && block != 512 &&
+            !(block == TBT_FEC_SCLC_BLOCK_UP && groups > 1 && L == 16))
+            return -EPROTO;
+        if (rate_ppm < 250000u || rate_ppm > 700000u)
+            return -EPROTO;
+        want_n = (u32)(((u64)rate_ppm * shares) / 1000000u);
+        if (want_n != n)
+            return -EPROTO;
+        /* Keep one internal shape vocabulary for the mapping helpers and
+         * the codec factory. The wire bytes above were already checked to
+         * be zero; these fields are the host-side mirror only. */
+        if (groups == 1)
+        {
+            c->w = block;
+            c->k = (u16)(rate_ppm / 1000u);
+            c->d = 0;
+        }
+        else
+        {
+            c->w = L;
+            c->k = block;
+            c->d = (u8)((u32)n * 256u / shares);
+        }
+        return 0;
     }
-    else if (c->w < c->k)
-    {
-        /* GF(16): k is the codeword block, w the coupling length, d the rate
-         * in 1/256 units (its u8 range is already the valid set). The codec's
-         * own bounds are the discriminator: a codeword block is at least 16
-         * and even, and RLNC never has k > w. */
-        if (c->k < 16 || (c->k & 1) || c->w < 2)
-            return -EPROTO;
-    }
-    else
-    {
-        if (c->d > c->w)
-            return -EPROTO;
-        if (c->w > 1 && c->d == c->w)
-            return -EPROTO;
-    }
-    /* groups is the carrier geometry: one share per carrier, so n+m must
-     * divide the 256 carriers and groups must be exactly the quotient. */
-    if (!groups || (TBT_FEC_MAX_CARRIERS % shares) ||
-        groups != TBT_FEC_MAX_CARRIERS / shares)
+    if (variant != 0 && variant != 1)
         return -EPROTO;
+    /* RLNC single/grouped: the extension is zero and w/k/d keep their v7
+     * meaning (k is the window's data count, d the band width). */
+    if (L || block || rate_ppm)
+        return -EPROTO;
+    if (!c->k || !c->w || c->k > c->w || c->w > TBT_FEC_MAX_W ||
+        !c->d || c->d > c->w)
+        return -EPROTO;
+    if (c->w > 1 && c->d == c->w)
+        return -EPROTO;
+    {
+        /* A grouped RLNC shape carries one codec per group; the group
+         * geometry is bounded above. */
+        u32 total = (u32)groups * shares;
+
+        if (!total || total > TBT_FEC_MAX_CARRIERS)
+            return -EPROTO;
+    }
     return 0;
 }
 
@@ -891,15 +980,42 @@ int tbt_fec_fbk_pack(const struct tbt_fec_fbk *f, u8 out[TBT_FEC_FBK_LEN])
     out[TBT_FEC_FBK_N_CURRENT] = f->n_current;
     memcpy(out + TBT_FEC_FBK_BITMAP, f->carrier_bitmap,
            TBT_FEC_BITMAP_BYTES);
+    tbt_put_u32(out + TBT_FEC_FBK_P_FAST_PPM, f->p_fast_ppm);
+    out[TBT_FEC_FBK_CODEC_VARIANT] = f->codec_variant;
+    out[TBT_FEC_FBK_L] = f->L;
+    tbt_put_u16(out + TBT_FEC_FBK_BLOCK, f->block);
+    tbt_put_u32(out + TBT_FEC_FBK_RATE_CURRENT, f->rate_ppm_current);
+    tbt_put_u32(out + TBT_FEC_FBK_RATE_TARGET, f->rate_ppm_target);
     return 0;
 }
 
 int tbt_fec_fbk_unpack(const u8 in[TBT_FEC_FBK_LEN], struct tbt_fec_fbk *f)
 {
+    u8 variant, L;
+    u16 block;
+
     if (!in || !f)
         return -EINVAL;
     if (in[TBT_FEC_FBK_FLAGS] & ~TBT_FEC_FBK_F_MASK)
         return -EPROTO;
+    variant = in[TBT_FEC_FBK_CODEC_VARIANT];
+    L = in[TBT_FEC_FBK_L];
+    block = tbt_get_u16(in + TBT_FEC_FBK_BLOCK);
+    if (variant > 2)
+        return -EPROTO;
+    if (variant == 2)
+    {
+        /* Same block ladder as FEC_CFG: 256/512, plus 128 for the uplink
+         * GF(16) report. */
+        if ((L != 8 && L != 16) ||
+            (block != 256 && block != 512 &&
+             !(block == TBT_FEC_SCLC_BLOCK_UP && L == 16)))
+            return -EPROTO;
+    }
+    else if (L || block)
+    {
+        return -EPROTO;
+    }
     f->epoch_lo = tbt_get_u16(in + TBT_FEC_FBK_EPOCH_LO);
     f->m_current = in[TBT_FEC_FBK_M_CURRENT];
     f->m_target = in[TBT_FEC_FBK_M_TARGET];
@@ -911,6 +1027,12 @@ int tbt_fec_fbk_unpack(const u8 in[TBT_FEC_FBK_LEN], struct tbt_fec_fbk *f)
     f->n_current = in[TBT_FEC_FBK_N_CURRENT];
     memcpy(f->carrier_bitmap, in + TBT_FEC_FBK_BITMAP,
            TBT_FEC_BITMAP_BYTES);
+    f->p_fast_ppm = tbt_get_u32(in + TBT_FEC_FBK_P_FAST_PPM);
+    f->codec_variant = variant;
+    f->L = L;
+    f->block = block;
+    f->rate_ppm_current = tbt_get_u32(in + TBT_FEC_FBK_RATE_CURRENT);
+    f->rate_ppm_target = tbt_get_u32(in + TBT_FEC_FBK_RATE_TARGET);
     return 0;
 }
 
@@ -1841,23 +1963,34 @@ const struct tbt_fec_ops tbt_fec_ops_rlnc = {
 int tbt_fec_sclc_shape_of_cfg(const struct tbt_fec_cfg *cfg, u16 carriers,
                               struct tbt_fec_sclc_shape *out)
 {
+    u32 shares;
+
     if (!cfg || !out)
         return -EINVAL;
-    if (cfg->d == 0 && cfg->k >= 100 && cfg->k <= 1000)
-    {
-        /* Binary: w is the codeword block, k the rate. The binary codec's
-         * graph has no coupling-length parameter to carry. */
-        return tbt_fec_sclc_shape_of(cfg->n, cfg->m, carriers, cfg->w, 0,
-                                     out);
-    }
-    if (cfg->k > cfg->w)
-    {
-        /* GF(16): k is the codeword block, w the coupling length, d the
-         * rate in 1/256. */
-        return tbt_fec_sclc_shape_of(cfg->n, cfg->m, carriers, cfg->k,
-                                     cfg->w, out);
-    }
-    return -EINVAL;
+    /* v8 names the codec in the extension; the legacy w/k/d classification
+     * is gone from the wire. */
+    if (cfg->codec_variant != 2 || !cfg->n || !cfg->m)
+        return -EINVAL;
+    shares = (u32)cfg->n + cfg->m;
+    if (!shares || shares > TBT_FEC_MAX_SHARES)
+        return -EINVAL;
+    if (cfg->L != 8 && cfg->L != 16)
+        return -EINVAL;
+    /* 256/512 are the v8 ladder; 128 is the uplink GF(16) block. */
+    if (cfg->block != 256 && cfg->block != 512 &&
+        !(cfg->block == TBT_FEC_SCLC_BLOCK_UP && cfg->groups > 1 &&
+          cfg->L == 16))
+        return -EINVAL;
+    if (cfg->rate_ppm < 250000u || cfg->rate_ppm > 700000u)
+        return -EINVAL;
+    if ((u32)(((u64)cfg->rate_ppm * shares) / 1000000u) != cfg->n)
+        return -EINVAL;
+    if (tbt_fec_sclc_shape_of(cfg->n, cfg->m, carriers, cfg->block,
+                              cfg->L, out))
+        return -EINVAL;
+    if (out->block != cfg->block || out->L != cfg->L)
+        return -EINVAL;
+    return 0;
 }
 
 int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
