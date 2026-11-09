@@ -1088,32 +1088,49 @@ static int tbt_car_rx_actor(read_descriptor_t *desc, struct sk_buff *skb, unsign
 
     if (!c || atomic_read(&c->stopping))
         return 0;
+    /* One work item may not parse a whole multi-megabyte receive queue: the
+     * far side reported tbt_car_rx_work hogging a worker for >10 ms. Stop
+     * between pieces once the body's deadline is spent. A 0-byte actor
+     * return is "nothing consumed" to tcp_read_sock(): it stops the walk and
+     * leaves the remaining bytes in the socket, and tbt_car_rx_body()
+     * re-arms because copied_seq != rcv_nxt. */
+    if (tbt_rx_budget_stopped(&c->rx_budget, ktime_get_ns()))
+    {
+        atomic64_inc(&c->sess->rx_budget_yields);
+        return 0;
+    }
     atomic64_inc(&c->sess->rx_drain_entries);
     atomic64_add(len, &c->sess->rx_drain_bytes);
 
     while (used < len)
     {
         size_t n = 0;
+        size_t take = min_t(size_t, len - used, TBT_RX_RUN_SLICE);
 
-        err = tbt_rx_skb(c, skb, offset + used, len - used, &n);
+        err = tbt_rx_skb(c, skb, offset + used, take, &n);
         used += n;
+        tbt_rx_budget_charge(&c->rx_budget, n);
         if (err)
+            break;
+        /* A short return is legal: tcp_read_sock() advances copied_seq and
+         * calls the actor again for the same skb. The next call sees the
+         * deadline and returns 0, so the yield is always between pieces. */
+        if (tbt_rx_budget_stopped(&c->rx_budget, ktime_get_ns()))
             break;
     }
     if (err)
     {
         if (err == -EAGAIN)
         {
-            /* The stream's delivery ring is full. The bytes that were copied
-             * into the parser buffer are accounted for below; the record that
-             * did not fit stays there for the resume. */
-            desc->count += used;
+            /* The delivery ring is full. Return the consumed byte count so
+             * tcp_read_sock() advances copied_seq past exactly those bytes;
+             * the record that did not fit stays in the parser for the
+             * resume. */
             return used;
         }
         tbt_car_rx_error(c, err);
         return 0;
     }
-    desc->count += used;
     return used;
 }
 
@@ -1173,8 +1190,14 @@ static void tbt_car_rx_body(struct tbt_carrier *c)
         rcu_read_unlock();
     }
     desc.arg.data = c;
+    /* tcp_read_sock() stops after one whole skb when count is zero; any
+     * non-zero value lets it walk the queue. The core never decrements it,
+     * so the value is a flag, not a byte budget (the actor stops itself on
+     * the budget). */
+    desc.count = 1;
 
     atomic64_inc(&c->sess->rx_reads);
+    tbt_rx_budget_start(&c->rx_budget, ktime_get_ns());
     lock_sock(sk);
     /* Retry a record an earlier -EAGAIN left in the parser before reading the
      * socket. Without this, the record is unreachable: its bytes are already
@@ -1216,20 +1239,27 @@ static void tbt_car_rx_body(struct tbt_carrier *c)
     {
         tbt_carrier_lost(c->sess, c);
     }
-    else if (tbt_carrier_sk_present(c) &&
-             READ_ONCE(tcp_sk(sk)->copied_seq) !=
-                 READ_ONCE(tcp_sk(sk)->rcv_nxt))
+    else
     {
-        /* Bytes arrived after tcp_read_sock() stopped but before this work
-         * returned. Re-arm; sk_data_ready may have been coalesced.
+        /* One rule decides the wake this run owes (tbt_rx_budget.h):
          *
-         * Never re-arm for parser->have alone: those bytes were already
-         * copied out of the socket (copied_seq == rcv_nxt), so a re-run can
-         * copy nothing. It spins at 100% of a kworker until the rest of the
-         * record arrives, which is the normal case on a path whose segments
-         * are smaller than a record. The 50 ms poll already retries a held
-         * record, and sk_data_ready runs this work when the tail arrives. */
-        tbt_carrier_arm_rx(c);
+         *   - unread socket bytes: re-arm now. This covers both a budgeted
+         *     yield and bytes that arrived after tcp_read_sock() stopped
+         *     (sk_data_ready may have been coalesced); the two must not
+         *     diverge, or a budget stop would strand the remainder.
+         *   - parser->have alone: wait for the 50 ms poll or sk_data_ready.
+         *     Those bytes are already out of the socket (copied_seq ==
+         *     rcv_nxt), so a re-run copies nothing and spins at 100% of a
+         *     kworker until the tail arrives. */
+        enum tbt_rx_resume plan =
+            tbt_rx_resume_plan(atomic_read(&c->stopping),
+                               tbt_carrier_sk_present(c),
+                               READ_ONCE(tcp_sk(sk)->copied_seq) !=
+                                   READ_ONCE(tcp_sk(sk)->rcv_nxt),
+                               c->parser->have != 0);
+
+        if (plan == TBT_RX_RESUME_ARM)
+            tbt_carrier_arm_rx(c);
     }
 
     tbt_carrier_sk_put(sk);

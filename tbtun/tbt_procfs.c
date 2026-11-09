@@ -708,7 +708,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
             seq_printf(m, "tunnel %llu rx_ready_calls=%llu rx_reads=%llu rx_read_bytes=%llu "
                           "rx_read_zero=%llu rx_resume=%llu rx_resume_busy=%llu rx_last_drained=%u "
                           "rx_proto=%llu rx_errs=%llu rx_last_err=%d tx_submit_calls=%llu "
-                          "rx_delivered=%llu\n",
+                          "rx_delivered=%llu rx_budget_yields=%llu\n",
                        id, tbt_stat_read(&s->rx_ready_calls),
                        tbt_stat_read(&s->rx_reads),
                        tbt_stat_read(&s->rx_read_bytes),
@@ -720,7 +720,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                        tbt_stat_read(&s->rx_errs),
                        READ_ONCE(s->rx_last_err),
                        tbt_stat_read(&s->tx_submit_calls),
-                       tbt_stat_read(&s->rx_delivered_bytes));
+                       tbt_stat_read(&s->rx_delivered_bytes),
+                       tbt_stat_read(&s->rx_budget_yields));
             seq_printf(m, "tunnel %llu dbg rcv_nxt=%u copied=%u after=%u qlen=%u "
                           "allocf=%llu over=%llu copyf=%llu hiwat=%llu pdead=%llu "
                           "prun=%llu pmoved=%llu p_nocar=%llu p_down=%llu p_stop=%llu "

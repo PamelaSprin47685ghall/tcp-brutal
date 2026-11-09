@@ -124,6 +124,8 @@ static inline u64 tbt_stat_read(const atomic64_t *v)
 #include "tbt_proto.h"
 /* The HTTP/1.1 carrier container (C8); pure code, host-tested. */
 #include "tbt_http.h"
+/* One carrier RX work item's deadline; pure code, host-tested. */
+#include "tbt_rx_budget.h"
 
 struct tbt_hole {
     u64 sid;          /* 40-bit stream id; u64 avoids truncating the prefix */
@@ -1408,7 +1410,7 @@ struct tbt_session
     atomic64_t rx_paused_skips, rx_parse_proto, rx_records;
     u64 rx_adopt_events;  /* listen work only */
     atomic64_t rx_ready_calls, rx_work_early, rx_reads, rx_read_bytes;
-    atomic64_t rx_resume_calls, rx_read_zero;
+    atomic64_t rx_resume_calls, rx_read_zero, rx_budget_yields;
     atomic64_t rx_resume_busy;
     u32 rx_last_drained;  /* last value; carrier rx work */
     atomic64_t rx_errs;
@@ -1946,6 +1948,8 @@ struct tbt_carrier
     u8 index;
     u32 gen;                  /* session-unique; pinned frames carry it */
     struct tbt_parser *parser; /* this carrier's partial record (8 KiB) */
+    /* w_rx is the only writer and reader; see tbt_rx_budget.h. */
+    struct tbt_rx_budget rx_budget;
 };
 
 enum tbt_carrier_state
