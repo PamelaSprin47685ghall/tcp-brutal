@@ -88,6 +88,11 @@ and moves independently of the module version.
 - `tbt_carrier_init()` asserts that `fec_drop_ppm` covers
   `TBT_MAX_CARRIERS_LIMIT`; it is the array immediately before the session's
   `adaptive` flag. (eb8d242)
+- Near-side generated crypto keys are tunnel-level: the first near session
+  stores the generated key and TX nonce in the tunnel, and every later
+  session copies them (`source=inherited`) instead of generating a fresh
+  key. This keeps the far's pinned key valid across session/stream churn and
+  removes the G1 `crypto key changed` HELLO rejects. (0407b40)
 
 ### Changed
 
