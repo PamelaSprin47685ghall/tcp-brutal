@@ -519,8 +519,15 @@ void tbt_stream_init_work(struct tbt_stream *st)
 static void tbt_kill_body(struct tbt_stream *st)
 {
     struct tbt_session *sess = st->sess;
+    struct sock *sk = READ_ONCE(st->sk);
 
     might_sleep();
+    /* Wake a sender blocked in tcp_sendmsg_locked() before the detach below
+     * cancels w_drain. This takes the socket lock and may sleep, so it runs
+     * here, in the w_kill work item, never in the carrier RX callback that
+     * reported the reset (that callback holds another k-sk_lock-AF_INET). */
+    if (sk && sk->sk_socket)
+        kernel_sock_shutdown(sk->sk_socket, SHUT_RDWR);
     tbt_tx_rst_retry(sess, st);
     tbt_stream_cancel(st, &st->w_target, TBT_STREAM_F_SCHED_TARGET);
 
