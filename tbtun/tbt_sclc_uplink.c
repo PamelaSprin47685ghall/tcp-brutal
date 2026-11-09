@@ -130,12 +130,18 @@ static void sclc_shuffle(u8 *lab, u32 n, u64 seed)
 
 static int sclc_labels_fit(const u8 *lab, size_t count, u32 shares)
 {
-    u32 cnt[TBT_FEC_MAX_SHARES];
+    u16 cnt[TBT_FEC_MAX_SHARES];
     size_t i;
+    u32 s;
 
     memset(cnt, 0, (size_t)shares * sizeof(cnt[0]));
     for (i = 0; i < count; i++)
-        if (++cnt[lab[i]] > SCLC_SYM_PER_SHARE)
+    {
+        if (cnt[lab[i]] < 0xffffu)
+            cnt[lab[i]]++;
+    }
+    for (s = 0; s < shares; s++)
+        if (cnt[s] > SCLC_SYM_PER_SHARE)
             return 0;
     return 1;
 }
@@ -190,7 +196,7 @@ static int sclc_build_labels(struct tbt_sclc_uplink *u)
 
 /* Count the parity symbols each share receives under the interleaved map.
  * Returns the maximum, or 0 when a share would overflow. */
-static u32 sclc_parity_counts(const struct tbt_sclc_uplink *u, u32 *cnt)
+static u32 sclc_parity_counts(const struct tbt_sclc_uplink *u, u16 *cnt)
 {
     u32 c, j, max = 0;
 
@@ -292,7 +298,7 @@ struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
 
     if (u->mapping == TBT_SCLC_MAP_INTERLEAVED)
     {
-        u32 cnt[TBT_FEC_MAX_SHARES];
+        u16 cnt[TBT_FEC_MAX_SHARES];
 
         if (codes % par->n)
             goto fail; /* exact fill needs C a multiple of n */

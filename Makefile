@@ -184,7 +184,9 @@ tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
                    tbtun/tbt_sc_ldpc.o \
                    tbtun/tbt_sc_ldpc_gf16.o tbtun/tbt_sclc_uplink.o
 
-ccflags-y       := -std=gnu99 -I$(src)/tbtun
+# Keep every module frame small enough for the kernel stack: a 1 KiB bound
+# catches a TBT_STREAMS_MAX pointer array before it reaches a real call path.
+ccflags-y       := -std=gnu99 -I$(src)/tbtun -Wframe-larger-than=1024
 # ChaCha8 is a hot per-byte loop; keep the kernel's -O2 for the rest of the
 # module and let this one file unroll its fixed 8-round permutation. The
 # variable must name the object path Kbuild sees for a composite module.
@@ -549,6 +551,7 @@ clean: clean-dkms.conf clean-dkms-tarball
 	$(RM) $(HTTP_RFC_GEN) $(HTTP_RFC_GEN_SAN)
 	$(RM) $(HOST_RX_BUDGET) host/test_rx_budget_san
 	$(RM) $(HOST_BENCH_RXPATH)
+	$(RM) $(wildcard tbtun/*.su) $(wildcard host/*.su)
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
 
 load:

@@ -1121,8 +1121,8 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
      * rechecks its carrier, so a socket that dies mid-pass is skipped. */
     if (READ_ONCE(sess->fec_replay_queued))
     {
-        u8 usable[TBT_MAX_CARRIERS_LIMIT];
-        u32 pace[TBT_MAX_CARRIERS_LIMIT];
+        u8 *usable = sess->fec_replay_usable;
+        u32 *pace = sess->fec_replay_pace;
         u16 ncand = tbt_fec_replay_usable(sess, usable);
         u32 cap = tbt_fec_replay_cap(READ_ONCE(sess->fec_closing),
                                      TBT_FEC_REPLAY_BYTES_MAX);
@@ -2050,7 +2050,7 @@ static void tbt_fec_primary_publish(struct tbt_session *sess,
 static void tbt_fec_tx_work_body(struct tbt_session *sess)
 {
     struct tbt_fec_flow *primary;
-    struct tbt_fec_flow *flows[TBT_STREAMS_MAX];
+    struct tbt_fec_flow **flows = sess->fec_tx_snap;
     u16 n, i;
 
     if (READ_ONCE(sess->closing) || READ_ONCE(sess->fec_stopping))
@@ -2073,7 +2073,7 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
         goto out;
     }
 
-    n = tbt_fec_flow_snapshot(sess, flows, ARRAY_SIZE(flows));
+    n = tbt_fec_flow_snapshot(sess, flows, TBT_STREAMS_MAX);
     for (i = 0; i < n; i++)
         tbt_fec_tx_pump(sess, flows[i]);
     tbt_fec_flow_put_all(flows, n);
@@ -3243,6 +3243,90 @@ static void tbt_fec_reset_diag(struct tbt_session *sess,
  * next_super / next_deliver / ack_deliver do not move. The work item retries
  * in 2 ms and resumes from the cursor; no byte is skipped and no ACK runs
  * past a byte the application never received. */
+static noinline void tbt_fec_deliver_est_fold(struct tbt_session *sess,
+                                              struct tbt_fec_rx *rx, u64 s)
+{
+    bool sc_mode = rx->est_sclc && tbt_fec_grouped_mode(rx->codec) == 3 &&
+                   rx->groups <= TBT_FEC_ADAPT_GROUPS;
+    bool rlnc_mode = READ_ONCE(sess->adaptive) && rx->est &&
+                     rx->groups <= TBT_FEC_ADAPT_GROUPS &&
+                     (u16)(rx->n + rx->m) == TBT_FEC_ADAPT_SHARES;
+
+    if (sc_mode || rlnc_mode)
+    {
+        u64 est_now = ktime_get_ns();
+        u16 eg;
+
+        for (eg = 0; eg < rx->groups; eg++)
+        {
+            struct tbt_fec_blk *eb;
+            u16 real = 0;
+            u32 miss = 0, fail = 0;
+            u8 sc_miss[TBT_FEC_BITMAP_BYTES];
+            bool unknown = false;
+
+            spin_lock_bh(&rx->lock);
+            eb = tbt_fec_rx_blk(rx, eg, s);
+            if (!eb->used || eb->block_id != s || eb->judged)
+            {
+                spin_unlock_bh(&rx->lock);
+                continue;
+            }
+            eb->judged = true;
+            real = tbt_fec_blk_real_len(rx, eg, eb);
+            miss = eb->miss_mask;
+            if (sc_mode)
+            {
+                u16 si;
+
+                memcpy(sc_miss, eb->miss_bits, TBT_FEC_BITMAP_BYTES);
+                for (si = 0; si < real; si++)
+                {
+                    if (eb->dpresent[si])
+                        continue;
+                    tbt_fec_adapt_bitmap_set(sc_miss, si);
+                    if (tbt_fec_adapt_bitmap_test(eb->codec_fail_bits,
+                                                  si))
+                        fail++;
+                }
+            }
+            /* Without a parity cut and without the stream end, a block
+             * that never filled n slots has an unknown real length: do
+             * not estimate p from it. */
+            unknown = !eb->win_len_set && !rx->total_known &&
+                      eb->ndata < rx->n;
+            spin_unlock_bh(&rx->lock);
+            if (unknown)
+            {
+                if (sc_mode)
+                    tbt_fec_adapt_sclc_est_unknown(rx->est_sclc,
+                                                   est_now);
+                else
+                    tbt_fec_est_unknown(rx->est, est_now);
+            }
+            else if (real)
+            {
+                if (sc_mode)
+                {
+                    tbt_fec_adapt_sclc_est_block(
+                        rx->est_sclc, est_now, eg, real, sc_miss,
+                        rx->alive_bm);
+                    if (fail)
+                        tbt_fec_adapt_sclc_est_codec_fail(
+                            rx->est_sclc, est_now, fail);
+                }
+                else
+                    tbt_fec_est_block(rx->est, est_now, eg, real, miss,
+                                      rx->alive_bm);
+            }
+        }
+        if (sc_mode)
+            tbt_fec_adapt_sclc_est_super(rx->est_sclc, est_now);
+        else
+            tbt_fec_est_super(rx->est, est_now);
+    }
+}
+
 static int tbt_fec_deliver_ready(struct tbt_session *sess,
                                  struct tbt_fec_flow *f)
 {
@@ -3548,97 +3632,7 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess,
         /* Fold this super-block's repair evidence into the estimator before
          * next_super moves: a carrier reuses a slot as soon as the window
          * advances, and the mask belongs to the block just delivered. */
-        {
-            bool sc_mode = rx->est_sclc &&
-                           tbt_fec_grouped_mode(rx->codec) == 3 &&
-                           rx->groups <= TBT_FEC_ADAPT_GROUPS;
-            bool rlnc_mode =
-                READ_ONCE(sess->adaptive) && rx->est &&
-                rx->groups <= TBT_FEC_ADAPT_GROUPS &&
-                (u16)(rx->n + rx->m) == TBT_FEC_ADAPT_SHARES;
-
-            if (sc_mode || rlnc_mode)
-            {
-                u16 real_buf[TBT_FEC_ADAPT_GROUPS];
-                u32 miss_buf[TBT_FEC_ADAPT_GROUPS];
-                u32 fail_buf[TBT_FEC_ADAPT_GROUPS];
-                u8 sc_miss[TBT_FEC_ADAPT_GROUPS][TBT_FEC_BITMAP_BYTES];
-                bool unk_buf[TBT_FEC_ADAPT_GROUPS];
-                u64 est_now = ktime_get_ns();
-                u16 eg;
-
-                spin_lock_bh(&rx->lock);
-                for (eg = 0; eg < rx->groups; eg++)
-                {
-                    struct tbt_fec_blk *eb = tbt_fec_rx_blk(rx, eg, s);
-
-                    real_buf[eg] = 0;
-                    miss_buf[eg] = 0;
-                    fail_buf[eg] = 0;
-                    unk_buf[eg] = false;
-                    if (sc_mode)
-                        memset(sc_miss[eg], 0, TBT_FEC_BITMAP_BYTES);
-                    if (!eb->used || eb->block_id != s || eb->judged)
-                        continue;
-                    eb->judged = true;
-                    real_buf[eg] = tbt_fec_blk_real_len(rx, eg, eb);
-                    miss_buf[eg] = eb->miss_mask;
-                    if (sc_mode)
-                    {
-                        u16 si;
-
-                        memcpy(sc_miss[eg], eb->miss_bits,
-                               TBT_FEC_BITMAP_BYTES);
-                        for (si = 0; si < real_buf[eg]; si++)
-                        {
-                            if (eb->dpresent[si])
-                                continue;
-                            tbt_fec_adapt_bitmap_set(sc_miss[eg], si);
-                            if (tbt_fec_adapt_bitmap_test(
-                                    eb->codec_fail_bits, si))
-                                fail_buf[eg]++;
-                        }
-                    }
-                    /* Without a parity cut and without the stream end, a
-                     * block that never filled n slots has an unknown real
-                     * length: do not estimate p from it. */
-                    unk_buf[eg] = !eb->win_len_set && !rx->total_known &&
-                                  eb->ndata < rx->n;
-                }
-                spin_unlock_bh(&rx->lock);
-                for (eg = 0; eg < rx->groups; eg++)
-                {
-                    if (unk_buf[eg])
-                    {
-                        if (sc_mode)
-                            tbt_fec_adapt_sclc_est_unknown(rx->est_sclc,
-                                                           est_now);
-                        else
-                            tbt_fec_est_unknown(rx->est, est_now);
-                    }
-                    else if (real_buf[eg])
-                    {
-                        if (sc_mode)
-                        {
-                            tbt_fec_adapt_sclc_est_block(
-                                rx->est_sclc, est_now, eg, real_buf[eg],
-                                sc_miss[eg], rx->alive_bm);
-                            if (fail_buf[eg])
-                                tbt_fec_adapt_sclc_est_codec_fail(
-                                    rx->est_sclc, est_now, fail_buf[eg]);
-                        }
-                        else
-                            tbt_fec_est_block(rx->est, est_now, eg,
-                                              real_buf[eg], miss_buf[eg],
-                                              rx->alive_bm);
-                    }
-                }
-                if (sc_mode)
-                    tbt_fec_adapt_sclc_est_super(rx->est_sclc, est_now);
-                else
-                    tbt_fec_est_super(rx->est, est_now);
-            }
-        }
+        tbt_fec_deliver_est_fold(sess, rx, s);
         rx->deliver_partial = false;
         rx->deliver_p = 0;
         rx->deliver_g = 0;
@@ -4786,29 +4780,57 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess,
 
 static void tbt_fec_rx_fbk_kick(struct tbt_session *sess, u8 flags)
 {
-    struct tbt_fec_flow *flows[TBT_STREAMS_MAX];
+    struct tbt_fec_flow **flows;
+    bool owner;
     u16 n, i;
 
     if (!sess->fec)
         return;
-    n = tbt_fec_flow_snapshot(sess, flows, ARRAY_SIZE(flows));
-    for (i = 0; i < n; i++)
+    /* w_fec_rx and a carrier's CFG path can both kick at once. The slot has
+     * one owner; a second kick merges its flags and returns, and the owner
+     * drains them before it gives the slot back. Coalescing is safe because
+     * every flag applies to every live flow. */
+    spin_lock_bh(&sess->fec_fbk_lock);
+    owner = !sess->fec_fbk_busy;
+    if (owner)
+        sess->fec_fbk_busy = true;
+    else
+        sess->fec_fbk_pending |= flags;
+    spin_unlock_bh(&sess->fec_fbk_lock);
+    if (!owner)
+        return;
+    flows = sess->fec_fbk_snap;
+    for (;;)
     {
-        struct tbt_fec_flow *f = flows[i];
-        struct tbt_fec_rx *rx = f->rx;
+        n = tbt_fec_flow_snapshot(sess, flows, TBT_STREAMS_MAX);
+        for (i = 0; i < n; i++)
+        {
+            struct tbt_fec_flow *f = flows[i];
+            struct tbt_fec_rx *rx = f->rx;
 
-        if (!rx)
-            continue;
-        rx->fbk_flags |= flags;
-        if (flags & (TBT_FEC_FBK_F_CFG_ACK | TBT_FEC_FBK_F_CFG_NACK |
-                     TBT_FEC_FBK_F_SWITCH_DONE))
-            rx->fbk_epoch = rx->switch_state == TBT_FEC_SW_APPLIED
-                                ? rx->epoch
-                                : rx->pending_cfg.epoch;
-        tbt_fec_rx_fbk_send(sess, f, rx->fbk_flags);
-        rx->fbk_flags = 0;
+            if (!rx)
+                continue;
+            rx->fbk_flags |= flags;
+            if (flags & (TBT_FEC_FBK_F_CFG_ACK | TBT_FEC_FBK_F_CFG_NACK |
+                         TBT_FEC_FBK_F_SWITCH_DONE))
+                rx->fbk_epoch = rx->switch_state == TBT_FEC_SW_APPLIED
+                                    ? rx->epoch
+                                    : rx->pending_cfg.epoch;
+            tbt_fec_rx_fbk_send(sess, f, rx->fbk_flags);
+            rx->fbk_flags = 0;
+        }
+        tbt_fec_flow_put_all(flows, n);
+        spin_lock_bh(&sess->fec_fbk_lock);
+        flags = sess->fec_fbk_pending;
+        sess->fec_fbk_pending = 0;
+        if (!flags)
+        {
+            sess->fec_fbk_busy = false;
+            spin_unlock_bh(&sess->fec_fbk_lock);
+            break;
+        }
+        spin_unlock_bh(&sess->fec_fbk_lock);
     }
-    tbt_fec_flow_put_all(flows, n);
 }
 
 /* Clear the reorder tree and the NACK state for a new shape. The caller
@@ -5478,11 +5500,11 @@ static void tbt_fec_rx_work_body(struct tbt_session *sess)
         return;
     do
     {
-        struct tbt_fec_flow *flows[TBT_STREAMS_MAX];
+        struct tbt_fec_flow **flows = sess->fec_rx_snap;
         u16 n, i;
 
         again = false;
-        n = tbt_fec_flow_snapshot(sess, flows, ARRAY_SIZE(flows));
+        n = tbt_fec_flow_snapshot(sess, flows, TBT_STREAMS_MAX);
         for (i = 0; i < n; i++)
         {
             struct tbt_fec_flow *f = flows[i];
@@ -7666,6 +7688,9 @@ int tbt_fec_data_init(struct tbt_session *sess)
     for (i = 0; i < TBT_STREAM_HT; i++)
         INIT_HLIST_HEAD(&sess->fec_flows[i]);
     mutex_init(&sess->fec_alloc_lock);
+    spin_lock_init(&sess->fec_fbk_lock);
+    sess->fec_fbk_busy = false;
+    sess->fec_fbk_pending = 0;
     sess->n_fec_flows = 0;
     sess->fec_groups_total = groups;
     sess->fec_groups_used = 0;

@@ -133,10 +133,13 @@ static void tbt_carrier_unannounce(struct tbt_session *sess, u8 index)
 static void tbt_carrier_rescue_up(struct tbt_session *sess,
                                   struct tbt_carrier *c)
 {
-    struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
+    struct tbt_stream **snap;
     int n, i;
 
-    n = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
+    snap = kmalloc_array(TBT_STREAM_SNAP_MAX, sizeof(*snap), GFP_KERNEL);
+    if (!snap)
+        return; /* the next poll retries */
+    n = tbt_session_stream_snapshot(sess, snap, TBT_STREAM_SNAP_MAX);
     if (!n)
     {
         /* No stream needs an OPEN, so there is nothing left to announce;
@@ -145,6 +148,7 @@ static void tbt_carrier_rescue_up(struct tbt_session *sess,
          * frames, and the next stream announces itself on creation. */
         atomic_set(&c->up, 1);
         atomic64_inc(&sess->up_rescued);
+        kfree(snap);
         return;
     }
     for (i = 0; i < n; i++)
@@ -153,6 +157,7 @@ static void tbt_carrier_rescue_up(struct tbt_session *sess,
         tbt_tx_announce(sess, snap[i], GFP_KERNEL);
         tbt_stream_put(snap[i]);
     }
+    kfree(snap);
     atomic64_inc(&sess->up_rescued);
 }
 
@@ -2425,15 +2430,29 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c)
      * may reset its streams here. */
     if (sess->join_retries > 20 && tbt_carriers_all_dead(sess))
     {
-        struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
+        struct tbt_stream *batch[16];
+        unsigned int round;
         int n, i;
 
         atomic64_inc(&sess->stream_reset_tcp_failed);
-        n = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
-        for (i = 0; i < n; i++)
+        /* Carrier loss runs in atomic context. A small stack batch kills
+         * every stream without allocating; the killable snapshot skips a
+         * stream another killer already owns, so each round makes progress.
+         * n_active is bounded by TBT_STREAMS_MAX, hence the round cap. */
+        for (round = 0; round <= TBT_STREAMS_MAX / ARRAY_SIZE(batch);
+             round++)
         {
-            tbt_stream_kill(snap[i], TBT_ST_DEAD);
-            tbt_stream_put(snap[i]);
+            n = tbt_session_stream_snapshot_killable(sess, batch,
+                                                     ARRAY_SIZE(batch));
+            if (!n)
+                break;
+            for (i = 0; i < n; i++)
+            {
+                tbt_stream_kill(batch[i], TBT_ST_DEAD);
+                tbt_stream_put(batch[i]);
+            }
+            if (n < (int)ARRAY_SIZE(batch))
+                break;
         }
         return;
     }

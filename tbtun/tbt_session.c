@@ -924,9 +924,13 @@ struct tbt_stream *tbt_stream_get(struct tbt_session *sess, u64 sid,
 }
 
 /* Refcounted snapshot of the active streams. The caller processes the array
- * with sess->lock dropped and puts each entry afterwards. */
-int tbt_session_stream_snapshot(struct tbt_session *sess,
-                                struct tbt_stream **out, int max)
+ * with sess->lock dropped and puts each entry afterwards. killable skips
+ * streams another killer already marked and detached tombstones: a batch
+ * loop then always makes progress, and its candidate set is bounded by
+ * n_active rather than by the hash's tombstone population. */
+static int tbt_stream_snapshot(struct tbt_session *sess,
+                               struct tbt_stream **out, int max,
+                               bool killable)
 {
     int n = 0, i;
 
@@ -937,7 +941,10 @@ int tbt_session_stream_snapshot(struct tbt_session *sess,
 
         hlist_for_each_entry(st, &sess->streams[i], node)
         {
-            if (READ_ONCE(st->state) == TBT_ST_DEAD)
+            if (READ_ONCE(st->state) == TBT_ST_DEAD ||
+                (killable &&
+                 (test_bit(TBT_STREAM_F_DYING, &st->attached) ||
+                  !test_bit(TBT_STREAM_F_ACTIVE, &st->attached))))
                 continue;
             if (n >= max)
             {
@@ -952,6 +959,18 @@ int tbt_session_stream_snapshot(struct tbt_session *sess,
     }
     spin_unlock(&sess->lock);
     return n;
+}
+
+int tbt_session_stream_snapshot(struct tbt_session *sess,
+                                struct tbt_stream **out, int max)
+{
+    return tbt_stream_snapshot(sess, out, max, false);
+}
+
+int tbt_session_stream_snapshot_killable(struct tbt_session *sess,
+                                         struct tbt_stream **out, int max)
+{
+    return tbt_stream_snapshot(sess, out, max, true);
 }
 
 /* Hash lookup for callers that already hold sess->lock.  The hash reference
@@ -1893,7 +1912,7 @@ void tbt_session_retire(struct tbt_session *sess, u8 index, u8 gen)
 int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
 {
     struct tbt_carrier *old;
-    struct tbt_stream *snap[TBT_STREAM_SNAP_MAX];
+    struct tbt_stream **snap;
     struct sock *csk;
     __be32 src;
     int nsnap, i;
@@ -1992,8 +2011,18 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
     /* Our HELLO is the first frame in this direction. */
     tbt_tx_hello(sess, index, GFP_ATOMIC);
     /* Announce and target every active stream; the pump writes HELLO first
-     * because it is ahead in the queue. */
-    nsnap = tbt_session_stream_snapshot(sess, snap, ARRAY_SIZE(snap));
+     * because it is ahead in the queue. HELLO runs under the carrier's
+     * socket lock, so the snapshot is allocated atomically instead of
+     * costing a TBT_STREAM_SNAP_MAX array on the stack. A refused
+     * allocation is repaired by the 50 ms poll: a carrier whose up flag
+     * never rose has every stream's OPEN re-announced there. */
+    snap = kmalloc_array(TBT_STREAM_SNAP_MAX, sizeof(*snap), GFP_ATOMIC);
+    if (!snap)
+    {
+        tbt_fbk_kick(sess, false);
+        return 0;
+    }
+    nsnap = tbt_session_stream_snapshot(sess, snap, TBT_STREAM_SNAP_MAX);
     for (i = 0; i < nsnap; i++)
     {
         /* The stream's announce bookkeeping stores four bits of the carrier
@@ -2007,6 +2036,7 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
         tbt_carrier_open_target(snap[i]);
         tbt_stream_put(snap[i]);
     }
+    kfree(snap);
     tbt_fbk_kick(sess, false);
     return 0;
 }
