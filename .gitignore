@@ -368,3 +368,5 @@ tests/http_rfc9112_gen_san
 
 # release staging (make dkms-tarball consumers)
 build/
+host/test_fec_ms
+host/test_fec_ms_san

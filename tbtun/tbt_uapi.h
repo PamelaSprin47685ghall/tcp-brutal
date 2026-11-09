@@ -512,7 +512,7 @@ enum tbt_frame_type
  * sizes its dup array by it. */
 #define TBT_DUP_MAX 3
 
-/* OPEN body (0.5.0, TBT_CONV 0x0008): exactly TBT_OPEN_BODY_LEN bytes.
+/* OPEN body (0.6.0, TBT_CONV 0x0009): exactly TBT_OPEN_BODY_LEN bytes.
  *   +0  u8  group_mask[32]  bit p = physical FEC group p; bits at or above
  *                           carriers/(n+m) must be zero
  *   +32 u16 route_slot      near-side listen endpoint index (mapping slot)
