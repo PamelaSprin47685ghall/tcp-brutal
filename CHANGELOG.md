@@ -109,6 +109,16 @@ and moves independently of the module version.
   uplink → 1 GiB downlink sequence no longer returns `-EPROTO`. A concurrent
   second flow is still refused cleanly (`-EOPNOTSUPP`,
   `fec_stream_refused`). (7f2e180)
+- Stream teardown releases the FEC flow with the stream:
+  `tbt_stream_detach_from_session()` calls `tbt_fec_flow_detach()` immediately,
+  so the flow count and group reservation drop at detach instead of at the
+  2.2 s tombstone/reap. `tbt_tx_close_check()` computes its bound once via
+  `tbt_tx_close_bound()` (an unwritten peer FIN gets 3 s, a written FIN keeps
+  60 s / two wait budgets, and `rx_queued` keeps the longer bound), and
+  `tbt_stream_start_now()` retries one admission after retiring a closing old
+  stream while a concurrent live stream stays refused. Host `test_close_bound`
+  and `test_stream_peer_eof` cover the 3 s/60 s bounds and
+  RCV_SHUTDOWN/TCP_CLOSE EOF. (63ba0a1)
 
 ### Changed
 
