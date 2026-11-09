@@ -248,6 +248,16 @@ The wire is unchanged: `TBT_CONV` stays 0x0007 and `TBT_FEC_CONV` 0x1007.
 
 ### Fixed
 
+- F3 port-map defects on the 0.4.1 cascade. A near carrier whose
+  `tbt_port_alloc()` returns EXHAUSTED or ENOMEM now parks for the paced
+  retry before any socket exists: the dial path never falls back to an
+  ephemeral source port. A far-side HELLO that repeats the slot's current
+  four-bit peer generation now supersedes the half-open occupant (only an
+  older generation is a join duplicate), closes the old socket and arms
+  `w_replace` at once. The `peers` view hides a stopping far carrier, so it
+  cannot keep naming the replaced port. `host/test_carrier_policy` pins the
+  three decisions through the same `tbt_carrier_policy.h` the module
+  compiles (38 checks).
 - Session keys are now erased with `memzero_explicit()` before their storage
   is freed or a temporary key buffer goes out of scope: the session and
   tunnel key copies, the crypto schedules copied by `tbt_crypto_xor_at()`
