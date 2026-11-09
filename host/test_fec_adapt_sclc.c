@@ -401,10 +401,10 @@ static void case_est_pauses(void)
 
     feed_down(&e, t, 256, 0, alive);
     tbt_fec_adapt_sclc_est_super(&e, t);
-    tbt_fec_adapt_sclc_est_sample(&e, t + 199 * MS, &o);
-    ok(!o.pause_idle, "pause: 199 ms is not idle");
-    tbt_fec_adapt_sclc_est_sample(&e, t + 201 * MS, &o);
-    ok(o.pause_idle, "pause: 201 ms is idle");
+    tbt_fec_adapt_sclc_est_sample(&e, t + 1900 * MS, &o);
+    ok(!o.pause_idle, "pause: 1.9 s is not idle");
+    tbt_fec_adapt_sclc_est_sample(&e, t + 2100 * MS, &o);
+    ok(o.pause_idle, "pause: 2.1 s is idle");
 
     tbt_fec_adapt_sclc_est_carriers(&e, 89, 0, 100);
     tbt_fec_adapt_sclc_est_sample(&e, t, &o);

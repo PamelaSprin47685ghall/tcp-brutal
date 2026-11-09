@@ -173,7 +173,7 @@ bool tbt_fec_adapt_sclc_wire_compatible(const struct tbt_fec_cfg *cur,
  * (8x22, 1.4 MB payload, ~1 s), so the estimator sat "idle" between every
  * two blocks, the FBK dropped P_VALID, and the sender's control law never
  * saw a valid sample. Two seconds still freezes an idle app promptly. */
-#define TBT_FEC_ADAPT_SCLC_IDLE_NS (2ull * 1000ull * 1000ull)
+#define TBT_FEC_ADAPT_SCLC_IDLE_NS (2000ull * 1000ull * 1000ull)
 /* Minimum evidence before p is valid. */
 #define TBT_FEC_ADAPT_SCLC_MIN_SHARES 512u
 #define TBT_FEC_ADAPT_SCLC_MIN_SUPERS 8u
