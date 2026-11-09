@@ -1637,6 +1637,68 @@ static void test_grouped(void)
  * 9. Carrier/share/block mapping at 256 carriers.
  * ------------------------------------------------------------------ */
 
+/* SC-LDPC has TX groups=1 and RX/peer groups=8. The OPEN bitmap is the peer
+ * TX partition, so admission must validate it against the 256-bit wire map,
+ * not the local TX group count, and the later INIT must name the same count. */
+static void test_sclc_open_mask(void)
+{
+    u8 all[32], eight[32], one[32], high[32], empty[32];
+    u16 count = 0;
+
+    memset(all, 0xff, sizeof(all));
+    memset(eight, 0, sizeof(eight));
+    memset(one, 0, sizeof(one));
+    memset(high, 0, sizeof(high));
+    memset(empty, 0, sizeof(empty));
+    for (count = 0; count < 8; count++)
+        tbt_fec_bitmap_set(eight, count);
+    tbt_fec_bitmap_set(one, 1);
+    tbt_fec_bitmap_set(high, 255);
+
+    ok(tbt_fec_open_mask_valid(true, 1, all, &count),
+       "sclc mask: all 256 bits are a valid peer map", NULL);
+    ok_u32(count, 256, "sclc mask: all-ones count");
+    ok(!tbt_fec_open_mask_valid(false, 1, all, &count),
+       "non-sclc mask: local TX groups=1 rejects all-ones", NULL);
+
+    ok(tbt_fec_open_mask_valid(true, 1, eight, &count),
+       "sclc mask: eight peer groups fit TX groups=1", NULL);
+    ok_u32(count, 8, "sclc mask: eight-group count");
+    ok(!tbt_fec_open_mask_valid(false, 1, eight, &count),
+       "non-sclc mask: eight groups exceed local TX groups=1", NULL);
+
+    ok(tbt_fec_open_mask_valid(true, 1, one, &count),
+       "sclc mask: one group is valid", NULL);
+    ok_u32(count, 1, "sclc mask: one-group count");
+    ok(!tbt_fec_open_mask_valid(false, 1, one, &count),
+       "non-sclc mask: group 1 is outside TX groups=1", NULL);
+
+    ok(!tbt_fec_open_mask_valid(true, 1, empty, &count),
+       "sclc mask: empty is refused", NULL);
+    ok(tbt_fec_open_mask_valid(true, 1, high, &count),
+       "sclc mask: bit 255 is a valid physical group", NULL);
+    ok(!tbt_fec_open_mask_valid(false, 128, high, &count),
+       "non-sclc mask: bit 255 is outside 128 groups", NULL);
+
+    ok(tbt_fec_open_groups_match(true, eight, 8),
+       "sclc INIT: eight-group bitmap matches groups=8", NULL);
+    ok(!tbt_fec_open_groups_match(true, all, 8),
+       "sclc INIT: full-1 bitmap does not match groups=8", NULL);
+    ok(!tbt_fec_open_groups_match(true, one, 8),
+       "sclc INIT: single group does not match groups=8", NULL);
+    ok(!tbt_fec_open_groups_match(true, empty, 8),
+       "sclc INIT: empty bitmap does not match groups=8", NULL);
+    ok(tbt_fec_open_groups_match(false, all, 8),
+       "non-sclc INIT: the bitmap does not gate the shape", NULL);
+
+    ok(tbt_fec_primary_mask_match(true, all, eight),
+       "sclc primary: peer bitmap is accepted regardless of local TX mask", NULL);
+    ok(!tbt_fec_primary_mask_match(false, all, eight),
+       "non-sclc primary: a different bitmap is refused", NULL);
+    ok(tbt_fec_primary_mask_match(false, eight, eight),
+       "non-sclc primary: the same bitmap is accepted", NULL);
+}
+
 static void test_group_mapping(void)
 {
     u16 c;
@@ -2859,6 +2921,7 @@ int main(void)
     test_grouped();
     test_group_mapping();
     test_group_map();
+    test_sclc_open_mask();
     test_base_mapping();
     test_group_reassembly();
     test_credit_split();

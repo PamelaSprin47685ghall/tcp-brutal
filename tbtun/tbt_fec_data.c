@@ -5121,6 +5121,12 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
 
     if (!rx)
         return -EINVAL;
+    /* On the far side the flow mask came from the peer's OPEN, so the INIT
+     * shape must name the same peer group count. The near side's flow mask is
+     * its own TX partition, not this RX direction. */
+    if (sess->fec_sclc && sess->tunnel->cfg.role == TBT_ROLE_FAR &&
+        !tbt_fec_open_groups_match(true, f->rx->group_mask, cfg->groups))
+        return -EINVAL;
     memset(&sclc, 0, sizeof(sclc));
     spin_lock_bh(&rx->lock);
     same = rx->n == cfg->n && rx->m == cfg->m &&
@@ -5206,6 +5212,16 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     rx->m = cfg->m;
     rx->groups = cfg->groups;
     rx->slots = (u16)slots;
+    if (sess->fec_sclc)
+    {
+        u16 g;
+
+        memset(rx->group_mask, 0, TBT_FEC_BITMAP_BYTES);
+        for (g = 0; g < cfg->groups && g < TBT_FEC_MAX_GROUPS; g++)
+            tbt_fec_bitmap_set(rx->group_mask, g);
+        tbt_fec_group_map_build(rx->group_mask, TBT_FEC_MAX_GROUPS,
+                                rx->group_map);
+    }
     rx->blk = blk;
     rx->req_ns = req_ns;
     rx->req_block = req_block;
@@ -7223,13 +7239,16 @@ fail_unreserve:
     return ERR_PTR(err);
 }
 
-/* Bind the unbound primary flow to the first stream. Its planes were sized
- * at init from fec_groups_per_flow; a peer whose OPEN names a different
- * bitmap is a configuration mismatch, not something to resize under a live
- * carrier. The caller holds fec_alloc_lock and the spinlock. */
+/* Bind the unbound primary flow to the first stream. Its TX plane keeps the
+ * local shape; for SC-LDPC the OPEN bitmap names the peer's TX groups, which
+ * are this side's RX groups, so the RX plane's mask moves to that bitmap. The
+ * RX plane is reallocated later by FEC_CFG INIT, which also checks that the
+ * INIT group count matches this bitmap. The caller holds fec_alloc_lock and
+ * the spinlock. */
 static struct tbt_fec_flow *
 tbt_fec_flow_bind_primary_locked(struct tbt_session *sess,
-                                 struct tbt_fec_flow *f, u64 sid)
+                                 struct tbt_fec_flow *f, u64 sid,
+                                 const u8 mask[TBT_FEC_BITMAP_BYTES])
 {
     hlist_del_init(&f->node);
     f->sid = sid;
@@ -7239,6 +7258,14 @@ tbt_fec_flow_bind_primary_locked(struct tbt_session *sess,
     {
         f->rx->sid = sid;
         f->rx->stream_sid = sid;
+    }
+    if (sess->fec_sclc && f->rx)
+    {
+        /* The flow mask is this side's TX partition (used by OPEN announce);
+         * the peer bitmap belongs to the RX plane. The TX plane keeps its
+         * local shape, and CFG INIT later installs the RX geometry. */
+        memcpy(f->rx->group_mask, mask, TBT_FEC_BITMAP_BYTES);
+        tbt_fec_group_map_build(mask, TBT_FEC_MAX_GROUPS, f->rx->group_map);
     }
     hlist_add_head(&f->node, &sess->fec_flows[TBT_STREAM_BUCKET(sid)]);
     refcount_inc(&f->refs); /* caller reference */
@@ -7254,18 +7281,19 @@ struct tbt_fec_flow *tbt_fec_flow_admit_mask(struct tbt_session *sess, u64 sid,
 
     if (!sess || !sess->fec || !sid)
         return ERR_PTR(-EINVAL);
-    if (!tbt_fec_group_mask_valid(mask, sess->fec_groups_total, &count))
+    if (!tbt_fec_open_mask_valid(sess->fec_sclc, sess->fec_groups_total,
+                                 mask, &count))
         return ERR_PTR(-EPROTO);
     mutex_lock(&sess->fec_alloc_lock);
     spin_lock(&sess->lock);
     f = sess->fec_primary;
     if (f && !f->sid && sess->n_fec_flows == 1)
     {
-        if (memcmp(mask, f->group_mask, TBT_FEC_BITMAP_BYTES))
+        if (!tbt_fec_primary_mask_match(sess->fec_sclc, f->group_mask, mask))
             f = ERR_PTR(-EPROTO);
         else
         {
-            f = tbt_fec_flow_bind_primary_locked(sess, f, sid);
+            f = tbt_fec_flow_bind_primary_locked(sess, f, sid, mask);
             bound = true;
         }
     }
@@ -7301,7 +7329,7 @@ struct tbt_fec_flow *tbt_fec_flow_admit(struct tbt_session *sess, u64 sid,
         if (want && want != f->groups)
             f = ERR_PTR(-EPROTO);
         else
-            f = tbt_fec_flow_bind_primary_locked(sess, f, sid);
+            f = tbt_fec_flow_bind_primary_locked(sess, f, sid, mask);
         spin_unlock(&sess->lock);
         mutex_unlock(&sess->fec_alloc_lock);
         return f;
