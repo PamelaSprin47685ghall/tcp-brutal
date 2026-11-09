@@ -70,7 +70,29 @@
 #ifndef _TBT_CRYPTO_H
 #define _TBT_CRYPTO_H
 
+#ifdef __KERNEL__
+#include <linux/string.h>
+#else
+#include <string.h>
+#endif
+
 #include "tbt_uapi.h"
+
+/* Erase secret bytes so the compiler cannot drop the store. The kernel
+ * provides memzero_explicit(); the host build uses a volatile loop, which no
+ * optimiser may elide. Callers use this for every key copy, including the
+ * temporary stack schedules, not only for the session fields. */
+static inline void tbt_memzero_explicit(void *p, size_t n)
+{
+#ifdef __KERNEL__
+    memzero_explicit(p, n);
+#else
+    volatile u8 *b = (volatile u8 *)p;
+
+    while (n--)
+        *b++ = 0;
+#endif
+}
 
 #define TBT_CRYPTO_KEY_LEN 32   /* 256-bit session key */
 #define TBT_CRYPTO_NONCE_LEN 8  /* Bernstein layout, 64-bit counter */
@@ -177,7 +199,8 @@ int tbt_crypto_body_xor_flow(struct tbt_crypto_ctx *c, u64 sid, u64 seq,
                              bool parity, u16 share_index, u8 *payload,
                              u16 len);
 
-/* Erase the schedule, keystream and key material with volatile stores. */
+/* Erase the schedule, keystream and key material with stores the compiler
+ * cannot elide. */
 void tbt_crypto_wipe(struct tbt_crypto_ctx *c);
 
 /* ------------------------------------------------------------------------- */

@@ -90,7 +90,7 @@ static void tbt_cfg_drop_snapshot(struct tbt_cfg_file *cf)
 static int tbt_config_apply(char *line, struct net *net)
 {
     struct tbt_parse_error perr = { NULL, NULL };
-    struct tbt_cmd cmd;
+    struct tbt_cmd cmd = { 0 };
     int err;
 
     err = tbt_parse_line(line, &cmd, &perr);
@@ -101,28 +101,40 @@ static int tbt_config_apply(char *line, struct net *net)
         pr_debug("tbtun: config rejected (%s%s%s): %d\n",
                  perr.key ? perr.key : "", perr.key && perr.why ? ": " : "",
                  perr.why ? perr.why : "invalid line", err);
+        tbt_memzero_explicit(cmd.cfg.crypto_key, sizeof(cmd.cfg.crypto_key));
         return err;
     }
 
     switch (cmd.kind)
     {
     case TBT_CMD_NONE:
-        return 0;
+        err = 0;
+        break;
     case TBT_CMD_TUNNEL:
         /* tbt_tunnel_add() owns tbt_lock for the list/cap section and drops
          * it before the listener/session teardown. A stuck session destroy
          * must not block every /proc reader behind the global lock. */
-        return tbt_tunnel_add(&cmd.cfg, net);
+        err = tbt_tunnel_add(&cmd.cfg, net);
+        break;
     case TBT_CMD_DEL:
-        return tbt_tunnel_del(cmd.id);
+        err = tbt_tunnel_del(cmd.id);
+        break;
     case TBT_CMD_FLUSH:
         tbt_tunnel_shutdown();
-        return 0;
+        err = 0;
+        break;
     case TBT_CMD_CARRIER:
     case TBT_CMD_SESSION:
-        return tbt_action_apply(&cmd);
+        err = tbt_action_apply(&cmd);
+        break;
+    default:
+        err = -EINVAL;
+        break;
     }
-    return -EINVAL;
+    /* The parsed line may carry crypto_key=; the stack copy must not outlive
+     * the call once the tunnel has copied what it needs. */
+    tbt_memzero_explicit(cmd.cfg.crypto_key, sizeof(cmd.cfg.crypto_key));
+    return err;
 }
 
 // Parse whole lines out of the buffer; keep an unterminated tail. Returns the
@@ -453,7 +465,7 @@ static ssize_t tbt_peers_write(struct file *file, const char __user *ubuf, size_
 {
     char buf[TBT_LINE_MAX];
     struct tbt_parse_error perr = { NULL, NULL };
-    struct tbt_cmd cmd;
+    struct tbt_cmd cmd = { 0 };
     int err;
 
     if (!len)
@@ -465,10 +477,11 @@ static ssize_t tbt_peers_write(struct file *file, const char __user *ubuf, size_
     buf[len] = '\0';
     err = tbt_parse_line(buf, &cmd, &perr);
     if (err)
-        return err;
-    if (cmd.kind == TBT_CMD_NONE)
-        return len;
-    err = tbt_action_apply(&cmd);
+        goto wipe;
+    if (cmd.kind != TBT_CMD_NONE)
+        err = tbt_action_apply(&cmd);
+wipe:
+    tbt_memzero_explicit(cmd.cfg.crypto_key, sizeof(cmd.cfg.crypto_key));
     return err ? err : (ssize_t)len;
 }
 

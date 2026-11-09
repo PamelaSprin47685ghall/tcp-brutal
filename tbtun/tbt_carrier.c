@@ -3502,6 +3502,8 @@ int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp)
              (unsigned long long)t->cfg.id, index, hc ? hc->gen : 0, body[22]);
     rc = tbt_tx_control_pinned(sess, NULL, index, TBT_F_HELLO, 0, 0, body,
                                blen, false, gfp);
+    /* body may carry the session key in clear; do not leave it on the stack. */
+    tbt_memzero_explicit(body, sizeof(body));
     tbt_carrier_put(hc);
     return rc;
 }

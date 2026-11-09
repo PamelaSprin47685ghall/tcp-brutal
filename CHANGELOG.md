@@ -3,6 +3,24 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [Unreleased]
+
+### Fixed
+
+- Session keys are now erased with `memzero_explicit()` before their storage
+  is freed or a temporary key buffer goes out of scope: the session and
+  tunnel key copies, the crypto schedules copied by `tbt_crypto_xor_at()`
+  and `tbt_crypto_body_xor_share()/flow()`, the HELLO body, the RX HELLO
+  parse buffers, and the parsed `struct tbt_cmd` in the `/proc` writers.
+- `tbt_render_cfg()` and `tbt_render_action()` read stored `bool` fields
+  through `tbt_read_bool()`, which loads a byte and normalizes it to
+  true/false. The helper keeps the kernel compile-time type check and gains a
+  host variant, so `tbt_parse.c` builds warning-free under `-Werror` and a
+  flag byte left neither 0 nor 1 cannot trip UBSAN's `invalid-load`.
+- `review/lint.sh`'s render probe links `tbt_portmap.c` and
+  `tbt_fec_adapt_sclc.c`, the helpers `tbt_parse_line()` calls, so the
+  `render-fits-line-max` check runs instead of failing to link.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

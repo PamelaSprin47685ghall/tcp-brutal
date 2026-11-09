@@ -155,6 +155,9 @@ static void tbt_chacha8_block(const u32 state[16], u8 out[TBT_CRYPTO_BLOCK_LEN],
 
     for (i = 0; i < 16; i++)
         tbt_store32le(out + 4 * i, x[i] + state[i]);
+
+    /* x[] holds the expanded key schedule; do not leave it on the stack. */
+    tbt_memzero_explicit(x, sizeof(x));
 }
 
 /* XOR n bytes with a keystream run. Eight bytes at a time through a local
@@ -407,12 +410,14 @@ int tbt_crypto_xor_at(struct tbt_crypto_ctx *c, u64 counter, u8 *data, size_t le
         {
             /* The request crosses past block 2^64-1. The output written so
              * far is not a valid stream; the caller must discard it. */
-            memset(block, 0, sizeof(block));
+            tbt_memzero_explicit(block, sizeof(block));
+            tbt_memzero_explicit(st, sizeof(st));
             return -EINVAL;
         }
     }
 
-    memset(block, 0, sizeof(block));
+    tbt_memzero_explicit(block, sizeof(block));
+    tbt_memzero_explicit(st, sizeof(st));
     return 0;
 }
 
@@ -441,6 +446,7 @@ int tbt_crypto_body_xor_share(struct tbt_crypto_ctx *c, u64 seq, bool parity,
                               u16 share_index, u8 *payload, u16 len)
 {
     struct tbt_crypto_ctx tmp;
+    int rc;
 
     if (c == NULL)
         return -EINVAL;
@@ -457,7 +463,9 @@ int tbt_crypto_body_xor_share(struct tbt_crypto_ctx *c, u64 seq, bool parity,
      * the same counter space as body_xor. xor_at() does not touch c. */
     tmp = *c;
     tmp.state[15] ^= (u32)share_index;
-    return tbt_crypto_xor_at(&tmp, (seq << 8) | 0x80u, payload, len);
+    rc = tbt_crypto_xor_at(&tmp, (seq << 8) | 0x80u, payload, len);
+    tbt_memzero_explicit(&tmp, sizeof(tmp));
+    return rc;
 }
 
 int tbt_crypto_body_xor_flow(struct tbt_crypto_ctx *c, u64 sid, u64 seq,
@@ -465,6 +473,7 @@ int tbt_crypto_body_xor_flow(struct tbt_crypto_ctx *c, u64 sid, u64 seq,
                              u16 len)
 {
     struct tbt_crypto_ctx tmp;
+    int rc;
 
     if (c == NULL)
         return -EINVAL;
@@ -488,20 +497,18 @@ int tbt_crypto_body_xor_flow(struct tbt_crypto_ctx *c, u64 sid, u64 seq,
     tmp.state[15] ^= (u32)(sid >> 32);
     if (parity)
         tmp.state[15] ^= (u32)share_index;
-    return tbt_crypto_xor_at(&tmp, (seq << 8) | (parity ? 0x80u : 0u),
-                             payload, len);
+    rc = tbt_crypto_xor_at(&tmp, (seq << 8) | (parity ? 0x80u : 0u),
+                           payload, len);
+    tbt_memzero_explicit(&tmp, sizeof(tmp));
+    return rc;
 }
 
 void tbt_crypto_wipe(struct tbt_crypto_ctx *c)
 {
-    volatile u8 *p = (volatile u8 *)c;
-    size_t i;
-
     if (c == NULL)
         return;
 
-    for (i = 0; i < sizeof(*c); i++)
-        p[i] = 0;
+    tbt_memzero_explicit(c, sizeof(*c));
 }
 
 int tbt_chacha8_xor(const u8 *key, size_t key_len,

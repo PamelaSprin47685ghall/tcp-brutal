@@ -32,23 +32,6 @@
 #include <linux/workqueue.h>
 #include <net/net_namespace.h>
 
-/* /proc reads flags through this. The compile-time type check refuses a u8
- * mask or a bitfield passed as a bool. The load itself is a byte load, not a
- * `_Bool` load: a flag byte that a neighbouring carrier-indexed write left
- * neither 0 nor 1 would otherwise trip UBSAN's invalid-load check in every
- * /proc reader. Nonzero still means true, and the one-line warning names the
- * field and reader so the writer can be found on the next deployment. */
-#define tbt_read_bool(field) \
-    ({ \
-        u8 __tbt_bool_byte; \
-        BUILD_BUG_ON(!__builtin_types_compatible_p(__typeof__(field), bool)); \
-        __tbt_bool_byte = READ_ONCE(*(const u8 *)&(field)); \
-        if (__tbt_bool_byte > 1) \
-            pr_warn_ratelimited("tbtun: %s: %s is not a bool byte (%u)\n", \
-                                __func__, #field, __tbt_bool_byte); \
-        __tbt_bool_byte != 0; \
-    })
-
 /* Wire constants, /proc names and the version live in the shared header. */
 #include "tbt_uapi.h"
 /* The adaptive shape/switch structs and their mapping helpers. */
