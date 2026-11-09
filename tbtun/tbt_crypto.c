@@ -16,8 +16,9 @@
  *   - counter-wrap guard, wipe helper, no bool/XChaCha/feature flags;
  *   - explicit little-endian load/store on every target (the original's
  *     big-endian branch references an undefined SECURE_MEMCPY macro);
- *   - the fixed-round permutation is unrolled and the XOR runs eight bytes at
- *     a time; the session path is ChaCha8 (T0 §2.1);
+ *   - the fixed-round permutation is unrolled and a complete block is XORed
+ *     straight into the payload, so only a partial tail buffers keystream;
+ *     the session path is ChaCha8 (T0 §2.1);
  *   - the counter space of T0 §2.4, (seq << 8) | (parity << 7) | block, and
  *     the HELLO v6 key helpers.
  *
@@ -97,6 +98,34 @@
         QUARTER_ROUND(x[3], x[4], x[9], x[14]);  \
     } while (0)
 
+/* 8 and 12 are unrolled because the session path and the KAT pin them; any
+ * other even count runs the loop. The branch costs one test per call. */
+#define TBT_CHACHA_ROUNDS(x, rounds)          \
+    do {                                      \
+        int rest_ = (int)(rounds);            \
+        if (rest_ == 8)                       \
+        {                                     \
+            DOUBLE_ROUND(x);                  \
+            DOUBLE_ROUND(x);                  \
+            DOUBLE_ROUND(x);                  \
+            DOUBLE_ROUND(x);                  \
+        }                                     \
+        else if (rest_ == 12)                 \
+        {                                     \
+            DOUBLE_ROUND(x);                  \
+            DOUBLE_ROUND(x);                  \
+            DOUBLE_ROUND(x);                  \
+            DOUBLE_ROUND(x);                  \
+            DOUBLE_ROUND(x);                  \
+            DOUBLE_ROUND(x);                  \
+        }                                     \
+        else                                  \
+        {                                     \
+            for (rest_ = 0; rest_ < (int)(rounds); rest_ += 2) \
+                DOUBLE_ROUND(x);              \
+        }                                     \
+    } while (0)
+
 /* "expand 32-byte k" */
 static const u32 tbt_sigma[4] = {0x61707865u, 0x3320646eu, 0x79622d32u,
                                  0x6b206574u};
@@ -118,7 +147,18 @@ static void tbt_store32le(u8 *p, u32 x)
     p[3] = (u8)(x >> 24);
 }
 
-/* One 64-byte keystream block. `state` is not modified. */
+/* Volatile byte wipe for a local that held keystream. memset() on a dead
+ * array can be deleted by dead-store elimination, in the kernel and on the
+ * host alike; this loop cannot. */
+static void tbt_memzero(void *p, size_t n)
+{
+    volatile u8 *v = (volatile u8 *)p;
+
+    while (n-- != 0)
+        *v++ = 0;
+}
+
+/* One 64-byte keystream block written to `out`. `state` is not modified. */
 static void tbt_chacha8_block(const u32 state[16], u8 out[TBT_CRYPTO_BLOCK_LEN],
                               u32 rounds)
 {
@@ -128,33 +168,39 @@ static void tbt_chacha8_block(const u32 state[16], u8 out[TBT_CRYPTO_BLOCK_LEN],
     for (i = 0; i < 16; i++)
         x[i] = state[i];
 
-    /* A constant count lets the compiler keep x[] in registers and schedule
-     * the dependency chains. The session path always uses 8; 12 and 20 exist
-     * so the KAT can pin the shared permutation. */
-    if (rounds == 8)
-    {
-        DOUBLE_ROUND(x);
-        DOUBLE_ROUND(x);
-        DOUBLE_ROUND(x);
-        DOUBLE_ROUND(x);
-    }
-    else if (rounds == 12)
-    {
-        DOUBLE_ROUND(x);
-        DOUBLE_ROUND(x);
-        DOUBLE_ROUND(x);
-        DOUBLE_ROUND(x);
-        DOUBLE_ROUND(x);
-        DOUBLE_ROUND(x);
-    }
-    else
-    {
-        for (i = 0; i < rounds; i += 2)
-            DOUBLE_ROUND(x);
-    }
+    TBT_CHACHA_ROUNDS(x, rounds);
 
     for (i = 0; i < 16; i++)
         tbt_store32le(out + 4 * i, x[i] + state[i]);
+}
+
+/* One 64-byte keystream block XORed straight into `data`. Folding the final
+ * add and the XOR into the permutation keeps the keystream off the stack and
+ * removes the store/load round trip through `out`; this is the bulk path for
+ * every complete block.
+ *
+ * A four-block interleave was measured against this function and rejected:
+ * general kernel code is built with -mno-sse -mgeneral-regs-only, so four
+ * lanes are 64 live words in 15 registers and the spill traffic eats the
+ * gain (1536-1642 MB/s against 1697 here). The same source vectorises to
+ * 2477 MB/s when SIMD registers are allowed, but the kernel is not such a
+ * target. Numbers: review/0.4.2-crypto-mno-sse.md. */
+static void tbt_chacha8_block_xor(const u32 state[16], u8 *data, u32 rounds)
+{
+    u32 x[16];
+    u32 i;
+
+    for (i = 0; i < 16; i++)
+        x[i] = state[i];
+
+    TBT_CHACHA_ROUNDS(x, rounds);
+
+    for (i = 0; i < 16; i++)
+    {
+        u8 *p = data + 4 * i;
+
+        tbt_store32le(p, tbt_load32le(p) ^ (x[i] + state[i]));
+    }
 }
 
 /* XOR n bytes with a keystream run. Eight bytes at a time through a local
@@ -338,6 +384,21 @@ static int tbt_crypto_next_block(struct tbt_crypto_ctx *c)
     return 0;
 }
 
+/* Generate the block at the context counter straight into `data` and advance
+ * both copies of the counter. Used when the caller needs a whole block, so
+ * nothing has to be buffered. */
+static int tbt_crypto_next_block_xor(struct tbt_crypto_ctx *c, u8 *data)
+{
+    if (c->wrapped)
+        return -EINVAL;
+
+    tbt_chacha8_block_xor(c->state, data, c->rounds);
+    c->counter++;
+    if (!tbt_counter_inc(c->state))
+        c->wrapped = 1;
+    return 0;
+}
+
 int tbt_crypto_xor(struct tbt_crypto_ctx *c, u8 *data, size_t len)
 {
     size_t i = 0;
@@ -355,8 +416,20 @@ int tbt_crypto_xor(struct tbt_crypto_ctx *c, u8 *data, size_t len)
 
         if (c->pos == TBT_CRYPTO_BLOCK_LEN)
         {
-            int rc = tbt_crypto_next_block(c);
+            int rc;
 
+            /* A whole block goes straight into the caller's buffer; a shorter
+             * request takes the buffered-block path below. */
+            if (len - i >= TBT_CRYPTO_BLOCK_LEN)
+            {
+                rc = tbt_crypto_next_block_xor(c, data + i);
+                if (rc)
+                    return rc;
+                i += TBT_CRYPTO_BLOCK_LEN;
+                continue;
+            }
+
+            rc = tbt_crypto_next_block(c);
             if (rc)
                 return rc;
         }
@@ -396,23 +469,29 @@ int tbt_crypto_xor_at(struct tbt_crypto_ctx *c, u64 counter, u8 *data, size_t le
     {
         size_t take = len - i;
 
-        if (take > TBT_CRYPTO_BLOCK_LEN)
-            take = TBT_CRYPTO_BLOCK_LEN;
+        /* A whole block goes straight into the payload; only the tail needs a
+         * keystream buffer, so the wrap report lands on the same byte. */
+        if (take >= TBT_CRYPTO_BLOCK_LEN)
+        {
+            tbt_chacha8_block_xor(st, data + i, c->rounds);
+            i += TBT_CRYPTO_BLOCK_LEN;
+            if (i < len && !tbt_counter_inc(st))
+            {
+                /* The request crosses past block 2^64-1. The output written
+                 * so far is not a valid stream; the caller must discard it. */
+                return -EINVAL;
+            }
+            continue;
+        }
 
         tbt_chacha8_block(st, block, c->rounds);
         tbt_xor_bytes(data + i, data + i, block, take);
         i += take;
-
-        if (i < len && !tbt_counter_inc(st))
-        {
-            /* The request crosses past block 2^64-1. The output written so
-             * far is not a valid stream; the caller must discard it. */
-            memset(block, 0, sizeof(block));
-            return -EINVAL;
-        }
+        /* i == len here: the tail consumed the rest. No counter advance, and
+         * nothing to wipe on the error path. */
     }
 
-    memset(block, 0, sizeof(block));
+    tbt_memzero(block, sizeof(block));
     return 0;
 }
 

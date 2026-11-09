@@ -171,6 +171,85 @@ static void test_generated_256(void)
                     sizeof(key), nonce, 0, 8, 128, want);
 }
 
+/* The same stream continued to 512 bytes. Its first 128 bytes are the vector
+ * above; the rest was produced by the pre-0.4.2 core at master 5192dd0, so
+ * this vector is the reference the bulk XOR path is pinned to. Eight blocks
+ * cover the per-word final add, the counter advance and an in-place run
+ * longer than one block. */
+static const char *const bulk512 =
+    "9a1e949f0d71a3a307da58730300dea725342ee45cf066d8350095e3c443cee2"
+    "68db83e2ce8d899d90e96aef644b1c8493c228cdaa420c5603d745f14127b4ba"
+    "09d530f41df22ff51b7224cfb6fd90530a43b09fdb3ddfed8838cb908d28e129"
+    "b6e178a6abe6fea7d3876e9e681f63ec23b90e2eb1ddc251b6266796e415e88b"
+    "34fb372fc42014cc4c3c045b3fcb5933c647410c847bd8d6f51f9167683c51bc"
+    "e0d197eed2d7e7e91aff6346bb0d988bc350d0c9eb28d7f1fac289cd8f9917ce"
+    "e6c05f85393eafce93ab0d95f12d14909ecb9cb5b60c13d6d4ac552602cbf17a"
+    "e104f3abcf90a92914b75bc4645f8a0ab47d0e4e5a4687f2653eb2824f2ada77"
+    "8e5c72ffa44c8995fd1d90bc9ba1148cdca3edd17b00c8ab8572ab2d0ba0f4c5"
+    "d374d77d80abf540150fdc6567155e2d495c60bdb274c60a71ecf25aa5c2f9d9"
+    "c792180fb303c9769ac64d73e9be6c7596154ee268b18aa00bf7420a83bac233"
+    "87072c8b6c719cd2112296a0e0e8d83cbaa23493dd3b7f190295b8d3c87717a7"
+    "58a81e3228ac495017e668c201921c15e8bfa37d170ede73cd01072af9f394e5"
+    "8b29dcd2468ffe47937c0557749400f30543e16475396fda56f7545cdd5175d4"
+    "1740363d516a0952b10dcac5742f1af6d7702c419fb50cef1fb60964968e549f"
+    "e6653d043b993cdaa8d3553e7405609e95aac202e272af773b8bbfcd0fef1c8e";
+
+static void bulk_key_nonce(u8 key[32], u8 nonce[8])
+{
+    size_t i;
+
+    for (i = 0; i < 32; i++)
+        key[i] = (u8)i;
+    for (i = 0; i < 8; i++)
+        nonce[i] = (u8)(0xa0 + i);
+}
+
+static void test_bulk_kat(void)
+{
+    u8 key[32];
+    u8 nonce[8];
+    u8 one[512] = {0};
+    u8 at[512] = {0};
+    u8 want[512];
+    struct tbt_crypto_ctx ctx;
+
+    bulk_key_nonce(key, nonce);
+    if (from_hex(bulk512, want, sizeof(want)) != 0)
+    {
+        printf("FAIL bulk KAT: malformed vector\n");
+        failures++;
+        return;
+    }
+
+    if (tbt_chacha8_xor(key, sizeof(key), nonce, 0, 8, one, sizeof(one)) != 0 ||
+        memcmp(one, want, sizeof(want)) != 0)
+    {
+        printf("FAIL bulk KAT: 512-byte one-shot\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS bulk KAT: 512 bytes through the streaming path\n");
+    }
+
+    if (tbt_crypto_init(&ctx, key, nonce, 0) != 0)
+    {
+        printf("FAIL bulk KAT: init error\n");
+        failures++;
+        return;
+    }
+    if (tbt_crypto_xor_at(&ctx, 0, at, sizeof(at)) != 0 ||
+        memcmp(at, want, sizeof(want)) != 0)
+    {
+        printf("FAIL bulk KAT: xor_at 512 bytes\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS bulk KAT: 512 bytes through xor_at\n");
+    }
+}
+
 static void test_rfc8439_block(void)
 {
     static const char *want = "10f1e7e4d13b5915500fdd1fa32071c4"
@@ -378,6 +457,52 @@ static void test_streaming(void)
     }
 }
 
+/* Every length 1..320 must be the prefix of the pinned 512-byte stream, from
+ * the streaming entry and from the absolute one. The sweep walks every tail
+ * length the bulk path can meet: bytes 1..63 of a block, and the same tail
+ * after 0..4 whole blocks. */
+static void test_length_sweep(void)
+{
+    u8 key[32];
+    u8 nonce[8];
+    u8 want[512];
+    u8 buf[320];
+    struct tbt_crypto_ctx ctx;
+    size_t len;
+
+    bulk_key_nonce(key, nonce);
+    if (from_hex(bulk512, want, sizeof(want)) != 0)
+    {
+        printf("FAIL sweep: malformed vector\n");
+        failures++;
+        return;
+    }
+
+    for (len = 1; len <= sizeof(buf); len++)
+    {
+        memset(buf, 0, sizeof(buf));
+        if (tbt_crypto_init(&ctx, key, nonce, 0) != 0 ||
+            tbt_crypto_xor(&ctx, buf, len) != 0 ||
+            memcmp(buf, want, len) != 0)
+        {
+            printf("FAIL sweep: the streaming path breaks at length %zu\n",
+                   len);
+            failures++;
+            return;
+        }
+
+        memset(buf, 0, sizeof(buf));
+        if (tbt_crypto_xor_at(&ctx, 0, buf, len) != 0 ||
+            memcmp(buf, want, len) != 0)
+        {
+            printf("FAIL sweep: xor_at breaks at length %zu\n", len);
+            failures++;
+            return;
+        }
+    }
+    printf("PASS sweep: lengths 1..320 match the pinned stream, both paths\n");
+}
+
 static void test_xor_at(void)
 {
     u8 key[32];
@@ -464,7 +589,7 @@ static void test_counter_wrap(void)
 {
     u8 key[32] = {0};
     u8 nonce[8] = {0};
-    u8 buf[65] = {0};
+    u8 buf[160] = {0};
     struct tbt_crypto_ctx ctx;
     int rc;
 
@@ -508,6 +633,41 @@ static void test_counter_wrap(void)
     else
     {
         printf("PASS counter wrap: 65-byte call fails after first block\n");
+    }
+
+    if (tbt_crypto_init(&ctx, key, nonce, ~(u64)0) != 0)
+    {
+        printf("FAIL counter wrap: re-init error\n");
+        failures++;
+        return;
+    }
+    rc = tbt_crypto_xor(&ctx, buf, 128);
+    if (rc != -EINVAL)
+    {
+        printf("FAIL counter wrap: 128-byte call returned %d\n", rc);
+        failures++;
+    }
+    else
+    {
+        printf("PASS counter wrap: 128-byte call fails after the last block\n");
+    }
+
+    /* The absolute path reports the wrap on the same byte. */
+    if (tbt_crypto_init(&ctx, key, nonce, 0) != 0)
+    {
+        printf("FAIL counter wrap: xor_at init error\n");
+        failures++;
+        return;
+    }
+    rc = tbt_crypto_xor_at(&ctx, ~(u64)0, buf, 129);
+    if (rc != -EINVAL)
+    {
+        printf("FAIL counter wrap: xor_at 129 bytes returned %d\n", rc);
+        failures++;
+    }
+    else
+    {
+        printf("PASS counter wrap: xor_at stops at the last block\n");
     }
 }
 
@@ -1829,10 +1989,12 @@ int main(void)
     test_tc1();
     test_zero_key_256();
     test_generated_256();
+    test_bulk_kat();
     test_rfc8439_block();
     test_rfc8439_encrypt();
     test_counter_positions();
     test_streaming();
+    test_length_sweep();
     test_xor_at();
     test_counter_wrap();
     test_invalid_args();
