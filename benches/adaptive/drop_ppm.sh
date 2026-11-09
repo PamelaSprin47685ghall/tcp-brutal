@@ -6,8 +6,8 @@
 # it reaches the socket, so TCP never retransmits it: only parity/NACK can
 # repair the share. That isolates the estimator and the control law from TCP.
 #
-#   benches/adaptive/drop_ppm.sh --near root@192.168.123.82 \
-#       --far root@45.11.1.62 --near-ip 192.168.123.82 --far-ip 45.11.1.62 \
+#   benches/adaptive/drop_ppm.sh --near root@192.168.123.85 \
+#       --far root@45.11.1.62 --near-ip 192.168.123.85 --far-ip 45.11.1.62 \
 #       --carriers 256 --loss 0,1,3,5,10 --mode fixed,adaptive --repeats 1
 #
 # Each run: rewrite tunnel 1 on both ends (adaptive=on|off), wait for up=N,

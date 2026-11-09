@@ -1,8 +1,8 @@
 #!/bin/sh
 # short.sh - the real-host short benchmark: one 5 s download per shape.
 #
-#   benches/short.sh --near root@192.168.123.82 --far root@45.11.1.62 \
-#                    --near-ip 192.168.123.82 --far-ip 45.11.1.62 \
+#   benches/short.sh --near root@192.168.123.85 --far root@45.11.1.62 \
+#                    --near-ip 192.168.123.85 --far-ip 45.11.1.62 \
 #                    --carriers 32,64,256 --duration 5 \
 #                    [--near-module /root/tbtun-fix27/tbtun.ko] \
 #                    [--url http://127.0.0.1:9001/accept-1g.bin] \

@@ -9,8 +9,8 @@
 # matrix.csv, medians.csv, runs.jsonl, verdict.txt and summary.json land in
 # the parent directory.
 #
-#   benches/adaptive/matrix.sh --near root@192.168.123.82 \
-#       --far root@45.11.1.62 --near-ip 192.168.123.82 --far-ip 45.11.1.62
+#   benches/adaptive/matrix.sh --near root@192.168.123.85 \
+#       --far root@45.11.1.62 --near-ip 192.168.123.85 --far-ip 45.11.1.62
 #
 #   --inject both|ppm|netem   which injectors to run (default both)
 #   --repeats 3               per cell
