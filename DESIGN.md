@@ -1827,6 +1827,13 @@ Without that check the reference is owed to an instance that never exists, and
 bounded (`TBT_SESSION_DRAIN_MS`): a leak is reported with the remaining state and the
 session is leaked rather than pinning the writer and `rmmod` behind it.
 
+The stats renderer is the one `/proc` reader that drops `tbt_lock` while keeping a
+session reference. That reference keeps the `tbt_session` alive but not `car[]`,
+`fec_outq` or the stream hash, which destroy frees before the drained wait. The render
+therefore holds the read side of a per-session `stats_lock`; destroy takes the write side
+before the first child is cleared and releases it after `tbt_fec_data_free()`, before the
+wait. A reader that arrives after that sees the cleared pointers.
+
 ### 8.3 `/proc/net/tbtun/*` grammar
 
 `config` (read/write, one directive per write; a read renders the current config):
@@ -2461,10 +2468,11 @@ lockdown `none`. Headers are **not** installed at `/lib/modules/$(uname -r)/buil
 machine (Manjaro ships them as `linux72-headers`); `make` fails until they are installed —
 state this in the build docs, do not work around it.
 
-`system_dfl_wq` is used for replacement, drain and pending work; that workqueue exists
-from 6.5. 6.1 builds through the `TBT_WQ` shim (`system_unbound_wq`, unbound and
-concurrency-managed; the module's works are short and sleepable, so the difference does
-not change behavior). 7.2.9 is the measured target; 6.1.172 is the `.65` build target.
+`system_dfl_wq` is used for replacement, drain and pending work on 6.17 and later; the
+symbol first appeared there (commit 128ea9f6ccfb). 6.1..6.16 builds through the `TBT_WQ`
+shim (`system_unbound_wq`, unbound and concurrency-managed; the module's works are short
+and sleepable, so the difference does not change behavior). 7.2.9 is the measured target;
+6.1.172 is the `.65` build target.
 A kernel older than 6.1 fails at compile time with an explicit `#error`.
 
 Symbols the module needs and why they are safe:
@@ -2511,8 +2519,18 @@ it. `max_carriers` is enforced in `tbt_cfg_sane()`: `n + m > max_carriers` retur
 Unload always succeeds, in this order and no other: unregister `/proc` (no new writer can
 start) → `tbt_tunnel_shutdown()` stops listeners, cancels every work item, **detaches every
 stream** (clear `sk_user_data` under the callback lock, then `cancel_work_sync`, then
-release the socket) and every target socket, and stops carriers → `synchronize_rcu()` →
-`rcu_barrier()` → free the module state. There is no `flush_workqueue()` in the exit path.
+release the socket) and every target socket, and stops carriers → drain and destroy the
+module-owned FEC flow free workqueue (`destroy_workqueue()`) → `synchronize_rcu()` →
+`rcu_barrier()` → free the module state. There is no `flush_workqueue()` of a system-wide
+workqueue in the exit path.
+
+The FEC flow free is the one asynchronous free that is not owned by a session work item:
+the last `tbt_fec_flow_put()` can run inside `tbt_session_destroy()`. It queues
+`free_work` on the module-owned `tbt_fec_free_wq`, and `tbtun_exit()` calls
+`destroy_workqueue()` after `tbt_tunnel_shutdown()` and before the RCU barriers. Those
+barriers do not cover work items, and a system-wide queue would leave a queued
+`tbt_fec_flow_free_work` pointing into unmapped module text; `destroy_workqueue()` waits
+for queued and running frees, including each free's own `synchronize_rcu()`.
 
 The detach step is not optional: a socket carries our `sk_data_ready` pointer, so a socket
 that outlives the module and then receives a packet calls into freed text. Removing a

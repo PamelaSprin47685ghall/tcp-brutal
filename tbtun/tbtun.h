@@ -25,6 +25,7 @@
 #include <linux/refcount.h>
 #include <linux/rbtree.h>
 #include <linux/rcupdate.h>
+#include <linux/rwsem.h>
 #include <linux/sched.h>
 #include <linux/spinlock.h>
 #include <linux/smp.h>
@@ -63,7 +64,9 @@
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 #error "tbtun needs Linux 6.1 or newer (README, DESIGN §2)"
 #endif
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 5, 0)
+/* system_dfl_wq first appeared in 6.17 (commit 128ea9f6ccfb). 6.5..6.16 use
+ * system_unbound_wq, which is exported on every supported release. */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 17, 0)
 #define TBT_WQ system_dfl_wq
 #else
 #define TBT_WQ system_unbound_wq
@@ -1179,6 +1182,13 @@ struct tbt_session
      * &drained completed. tbt_session_destroy() waits on it and remains the
      * only freer; a put never frees (review/s2-merged-design.md §5.1). */
     struct completion drained;
+    /* Serialises /proc stats rendering against tbt_session_destroy(). The
+     * reader holds a session reference, but that reference does not keep
+     * car[], fec_outq or the stream hash alive. Destroy takes the write side
+     * before it tears those down and releases it before the final drained
+     * wait: a reader blocked here also holds a reference, so waiting under
+     * the write side would deadlock. */
+    struct rw_semaphore stats_lock;
     /* One bit per TBT_SW_* item, changed with atomic bit ops. Bit 1 means one
      * reference is reserved for that item: a queued instance owns it until its
      * entry returns it, or the arm that could not queue returns it itself. */
@@ -2076,6 +2086,11 @@ int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp);
 /* FEC v6 data plane (tbt_fec_data.c). */
 int tbt_fec_data_init(struct tbt_session *sess);
 void tbt_fec_data_free(struct tbt_session *sess);
+/* Module lifecycle for the workqueue that frees FEC flows. tbtun_exit() must
+ * call the exit half after tbt_tunnel_shutdown() and before the RCU
+ * barriers: a pending free would otherwise run after the text is unmapped. */
+int tbt_fec_data_module_init(void);
+void tbt_fec_data_module_exit(void);
 /* Flow table. `admit` allocates a flow for sid with `want` physical groups
  * (0 = the fair share) and returns it with one reference, or an ERR_PTR:
  * -ENOSPC when no group is free, -EEXIST for a duplicate sid. `lookup`

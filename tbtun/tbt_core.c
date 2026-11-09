@@ -137,10 +137,18 @@ static int __init tbtun_init(void)
 
     tbt_wire_layout_check();
 
+    ret = tbt_fec_data_module_init();
+    if (ret)
+    {
+        pr_err("tbtun: cannot create the FEC free workqueue: %d\n", ret);
+        return ret;
+    }
+
     ret = tbt_procfs_init();
     if (ret)
     {
         pr_err("tbtun: cannot create /proc/net/tbtun: %d\n", ret);
+        tbt_fec_data_module_exit();
         return ret;
     }
 
@@ -148,6 +156,7 @@ static int __init tbtun_init(void)
     if (err)
     {
         tbt_procfs_exit();
+        tbt_fec_data_module_exit();
         return err;
     }
     pr_info("tbtun %u.%u.%u loaded: %u tunnels max, %u carriers max\n",
@@ -165,9 +174,15 @@ static void __exit tbtun_exit(void)
      * sessions down outside it; a destroy that waits for work must not pin
      * the global lock. */
     tbt_tunnel_shutdown();
+    /* No flow can be put after the session teardown. Drain and destroy the
+     * module-owned flow free workqueue: session destroy queues the last puts
+     * there, and synchronize_rcu()/rcu_barrier() do not wait for work items.
+     * Without this barrier a tbt_fec_flow_free_work queued by the last put
+     * would run after the module text is unmapped. */
+    tbt_fec_data_module_exit();
     /* No module callback or work item is reachable now.  Wait for readers that
      * started before the teardown, then for the module-text RCU callbacks.
-     * flush_workqueue(system_wq) is not a barrier: it does not stop new
+     * flush_workqueue(system_wq) would not be a barrier: it does not stop new
      * scheduling, does not flush delayed work, and does not cover
      * TBT_WQ (w_kill, w_fbk, w_pump; system_dfl_wq on 6.5+, system_unbound_wq on 6.1). */
     synchronize_rcu();

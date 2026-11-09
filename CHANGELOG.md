@@ -3,6 +3,37 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.4.1] - 2026-11-09
+
+### Fixed
+
+- Module unload no longer races the asynchronous FEC flow free. The last
+  `tbt_fec_flow_put()` (typically from `tbt_session_destroy()` while
+  `rmmod` tears the tunnels down) queued `tbt_fec_flow_free_work` on the
+  system-wide workqueue that `schedule_work()` targets, but `tbtun_exit()`
+  waited only with `synchronize_rcu()` and `rcu_barrier()`, which do not
+  cover work items: the free could run after the module text was unmapped.
+  The free now runs on the module-owned `tbt_fec_free_wq`, and
+  `tbtun_exit()` calls `destroy_workqueue()` after `tbt_tunnel_shutdown()`
+  to drain queued and running frees before the RCU barriers.
+  `flush_scheduled_work()` is not used: it is deprecated and warns since
+  6.6, flushes unrelated system work, and changed its target queue in 7.0.
+- `host/test_lifetime` models the flow reference drop and the module-exit
+  drain: a queued free, a free already inside `synchronize_rcu()`, the old
+  RCU-only exit that leaves the work pending, and a late put after the
+  queue is destroyed.
+- `/proc/net/tbtun/stats` now renders a session under a per-session read
+  gate. `tbt_session_destroy()` sets the write side before it clears
+  `car[]`, the stream hash and `fec_outq`, and releases it before the
+  drained wait. A stats reader holds a session reference, but that
+  reference never kept those children alive: a concurrent `del`/`flush`
+  could free them under the reader. The gate also orders a late reader
+  after the teardown, where the child pointers are NULL.
+- `TBT_WQ` selects `system_dfl_wq` only on 6.17 and later. That symbol
+  first appeared in 6.17 (commit 128ea9f6ccfb), so the previous 6.5
+  threshold broke every 6.5..6.16 build, including the 6.6 and 6.12 LTS
+  trees; those releases keep using the exported `system_unbound_wq`.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added
