@@ -34,6 +34,7 @@ MIRROR=${KM_KERNEL_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/kernel}
 JOBS=${TBT_E2E_JOBS:-$(nproc 2>/dev/null || echo 4)}
 QEMU_TIMEOUT=${TBT_E2E_QEMU_TIMEOUT:-75}
 HOSTCC=${HOSTCC:-cc}
+GUEST=${TBT_E2E_GUEST:-$REPO/tests/qemu-e2e/guest.c}
 
 die() {
     echo "qemu-e2e-smoke: $*" >&2
@@ -184,7 +185,7 @@ fi
 
 echo "qemu-e2e-smoke: building the static guest init"
 "$HOSTCC" -static -O2 -Wall -Wextra -Werror \
-    -o "$INIT" "$REPO/tests/qemu-e2e/guest.c" ||
+    -o "$INIT" "$GUEST" ||
     die "guest init build failed"
 python3 "$REPO/tests/kernel-matrix/mkinitramfs.py" \
     --init "$INIT" --ko "$KO" --out "$INITRD" ||
@@ -230,6 +231,9 @@ evidence=(
     "QEMU_E2E_DEL grouped ok"
     "QEMU_E2E_UNLOAD ok"
 )
+if [ -n "${TBT_E2E_EVIDENCE:-}" ]; then
+    IFS='|' read -r -a evidence <<< "$TBT_E2E_EVIDENCE"
+fi
 
 bad_reason=
 if grep -aq '^QEMU_E2E_PASS' "$LOG"; then

@@ -168,11 +168,22 @@ bool tbt_fec_adapt_sclc_wire_compatible(const struct tbt_fec_cfg *cur,
     (TBT_FEC_ADAPT_SCLC_BUCKETS * TBT_FEC_ADAPT_SCLC_BUCKET_NS)
 /* A bucket is fast when it started less than 1 s ago (the last two buckets). */
 #define TBT_FEC_ADAPT_SCLC_FAST_NS (2ull * TBT_FEC_ADAPT_SCLC_BUCKET_NS)
-/* No block for this long means the application is idle: freeze. */
-#define TBT_FEC_ADAPT_SCLC_IDLE_NS (200ull * 1000ull * 1000ull)
+/* No super-block for this long means the application is idle: freeze.
+ * 200 ms was shorter than one uplink super-block at a loss-repaired rate
+ * (8x22, 1.4 MB payload, ~1 s), so the estimator sat "idle" between every
+ * two blocks, the FBK dropped P_VALID, and the sender's control law never
+ * saw a valid sample. Two seconds still freezes an idle app promptly. */
+#define TBT_FEC_ADAPT_SCLC_IDLE_NS (2000ull * 1000ull * 1000ull)
 /* Minimum evidence before p is valid. */
 #define TBT_FEC_ADAPT_SCLC_MIN_SHARES 512u
 #define TBT_FEC_ADAPT_SCLC_MIN_SUPERS 8u
+/* A multi-group uplink super-block carries groups * (n+m) shares (256) but
+ * its DATA side is groups * n, i.e. 176 shares at 70% on 8x22 versus 128 on
+ * the single-group downlink. Eight uplink super-blocks inside the 4 s window
+ * therefore demand ~2.9 MB/s of delivered payload; a 25% loss plus repair
+ * drops below that and P_VALID never rises. Four super-blocks still hold
+ * 704 shares (above the 512 floor) and keep the downlink at eight. */
+#define TBT_FEC_ADAPT_SCLC_MIN_SUPERS_UP 4u
 /* p_ewma += (p_block - p_ewma) / 2^TBT_FEC_ADAPT_SCLC_EWMA_SHIFT. */
 #define TBT_FEC_ADAPT_SCLC_EWMA_SHIFT 3
 /* A fast window this far above the slow estimate is a burst. */
