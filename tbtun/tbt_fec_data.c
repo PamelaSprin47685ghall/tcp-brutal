@@ -6995,9 +6995,18 @@ tbt_fec_rx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     rx->stream_sid = sid;
     rx->flow = flow;
     memcpy(rx->group_mask, mask, TBT_FEC_BITMAP_BYTES);
-    if (tbt_fec_group_map_build(mask, sess->fec_groups_total, rx->group_map) !=
-        groups)
-        goto fail;
+    {
+        u16 map_count = tbt_fec_group_map_build(
+            mask, sess->fec_sclc ? TBT_FEC_MAX_GROUPS
+                                 : sess->fec_groups_total,
+            rx->group_map);
+
+        /* SC-LDPC may start with the local TX group count while the peer
+         * bitmap already names the RX groups; CFG INIT installs the matching
+         * RX geometry later. */
+        if (!map_count || (!sess->fec_sclc && map_count != groups))
+            goto fail;
+    }
     spin_lock_init(&rx->lock);
     rx->n = n;
     rx->m = m;
@@ -7152,7 +7161,8 @@ bool tbt_fec_flow_can_admit(struct tbt_session *sess)
  * must never run under sess->lock. */
 static struct tbt_fec_flow *
 tbt_fec_flow_create(struct tbt_session *sess, u64 sid,
-                    const u8 mask[TBT_FEC_BITMAP_BYTES], u16 count)
+                    const u8 mask[TBT_FEC_BITMAP_BYTES], u16 count,
+                    const u8 *rx_mask)
 {
     struct tbt_fec_flow *f, *it;
     u16 p, b;
@@ -7215,7 +7225,8 @@ tbt_fec_flow_create(struct tbt_session *sess, u64 sid,
     }
     nonce = tbt_fec_base_nonce(sess);
     f->tx = tbt_fec_tx_plane_new(sess, f, count, sid, mask, nonce);
-    f->rx = tbt_fec_rx_plane_new(sess, f, count, sid, mask);
+    f->rx = tbt_fec_rx_plane_new(sess, f, count, sid,
+                                 rx_mask ? rx_mask : mask);
     if (!f->tx || !f->rx)
     {
         tbt_fec_tx_plane_free(f->tx);
@@ -7307,7 +7318,21 @@ struct tbt_fec_flow *tbt_fec_flow_admit_mask(struct tbt_session *sess, u64 sid,
         mutex_unlock(&sess->fec_alloc_lock);
         return f;
     }
-    f = tbt_fec_flow_create(sess, sid, mask, count);
+    if (sess->fec_sclc)
+    {
+        u8 local[TBT_FEC_BITMAP_BYTES];
+        u16 local_count = sess->fec_groups_total;
+        u16 g;
+
+        memset(local, 0, sizeof(local));
+        for (g = 0; g < local_count && g < TBT_FEC_MAX_GROUPS; g++)
+            tbt_fec_bitmap_set(local, g);
+        f = tbt_fec_flow_create(sess, sid, local, local_count, mask);
+    }
+    else
+    {
+        f = tbt_fec_flow_create(sess, sid, mask, count, NULL);
+    }
     mutex_unlock(&sess->fec_alloc_lock);
     return f;
 }
@@ -7346,7 +7371,7 @@ struct tbt_fec_flow *tbt_fec_flow_admit(struct tbt_session *sess, u64 sid,
         return ERR_PTR(-ENOSPC);
     }
     spin_unlock(&sess->lock);
-    f = tbt_fec_flow_create(sess, sid, mask, got);
+    f = tbt_fec_flow_create(sess, sid, mask, got, NULL);
     mutex_unlock(&sess->fec_alloc_lock);
     return f;
 }
@@ -7654,7 +7679,7 @@ int tbt_fec_data_init(struct tbt_session *sess)
         tbt_fec_bitmap_set(mask, (u16)i);
 
     mutex_lock(&sess->fec_alloc_lock);
-    f = tbt_fec_flow_create(sess, 0, mask, primary_groups);
+    f = tbt_fec_flow_create(sess, 0, mask, primary_groups, NULL);
     mutex_unlock(&sess->fec_alloc_lock);
     if (IS_ERR(f))
     {

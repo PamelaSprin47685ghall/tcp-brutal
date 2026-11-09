@@ -103,6 +103,12 @@ and moves independently of the module version.
   and `fec_stream_refused`), so the carrier stays up instead of being
   stopped by the peer's 8-group OPEN bitmap against local `groups=1`.
   (62cb504)
+- A sequential SC-LDPC flow is admitted with the peer RX mask: after the
+  previous flow is released, the new OPEN's 8-group peer bitmap is installed
+  into the RX plane while the TX mask stays local (`groups=1`), so the 60 s
+  uplink → 1 GiB downlink sequence no longer returns `-EPROTO`. A concurrent
+  second flow is still refused cleanly (`-EOPNOTSUPP`,
+  `fec_stream_refused`). (7f2e180)
 
 ### Changed
 
