@@ -322,7 +322,8 @@ static bool tbt_fec_is_share_type(u8 type)
 static bool tbt_fec_is_control_type(u8 type)
 {
     return type == TBT_FEC_ACK || type == TBT_FEC_NACK || type == TBT_FEC_CFG ||
-           type == TBT_FEC_FBK || type == TBT_FEC_ALLOC;
+           type == TBT_FEC_FBK || type == TBT_FEC_ALLOC ||
+           type == TBT_FEC_MS_WIN;
 }
 
 int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
@@ -432,9 +433,11 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
         return -EPROTO;
     /* ACK carries its frontier in header.seq; the others must leave it zero. */
     if ((h->type == TBT_FEC_CFG || h->type == TBT_FEC_FBK ||
-         h->type == TBT_FEC_NACK) && h->seq)
+         h->type == TBT_FEC_NACK || h->type == TBT_FEC_ALLOC ||
+         h->type == TBT_FEC_MS_WIN) && h->seq)
         return -EPROTO;
-    if (h->type == TBT_FEC_ALLOC && (h->seq || h->sid == 0))
+    /* ALLOC and MS_WIN name one stream. */
+    if ((h->type == TBT_FEC_ALLOC || h->type == TBT_FEC_MS_WIN) && !h->sid)
         return -EPROTO;
 
     switch (h->type)
@@ -449,6 +452,8 @@ int tbt_fec_hdr_check(const struct tbt_fec_hdr *h, u16 max_payload)
         return h->payload_len == TBT_FEC_FBK_LEN ? 0 : -EPROTO;
     case TBT_FEC_ALLOC:
         return h->payload_len == TBT_FEC_ALLOC_LEN ? 0 : -EPROTO;
+    case TBT_FEC_MS_WIN:
+        return h->payload_len == TBT_FEC_MS_WIN_LEN ? 0 : -EPROTO;
     default:
         return -EPROTO;
     }
@@ -656,12 +661,41 @@ int tbt_fec_alloc_unpack(const u8 in[TBT_FEC_ALLOC_LEN],
         return -EPROTO;
     if (a->flags & ~TBT_FEC_ALLOC_F_MASK)
         return -EPROTO;
+    if (in[TBT_FEC_ALLOC_FLAGS + 1] || in[TBT_FEC_ALLOC_FLAGS + 2] ||
+        in[TBT_FEC_ALLOC_FLAGS + 3])
+        return -EPROTO;
     /* A body that names no physical group cannot move a flow anywhere. */
     if (!tbt_fec_bitmap_count(a->group_mask))
         return -EPROTO;
     a->switch_pkt = tbt_get_u64(in + TBT_FEC_ALLOC_SWITCH_PKT);
     a->block_base = tbt_get_u64(in + TBT_FEC_ALLOC_BLOCK_BASE);
     a->crc32c = tbt_get_u32(in + TBT_FEC_ALLOC_CRC);
+    return 0;
+}
+
+int tbt_fec_ms_win_pack(const struct tbt_fec_ms_win *w,
+                        u8 out[TBT_FEC_MS_WIN_LEN])
+{
+    if (!w || !out)
+        return -EINVAL;
+    if (w->reserved)
+        return -EINVAL;
+    memset(out, 0, TBT_FEC_MS_WIN_LEN);
+    tbt_put_u64(out + TBT_FEC_MS_WIN_DELIVERED, w->delivered);
+    tbt_put_u32(out + TBT_FEC_MS_WIN_CREDIT, w->credit);
+    return 0;
+}
+
+int tbt_fec_ms_win_unpack(const u8 in[TBT_FEC_MS_WIN_LEN],
+                          struct tbt_fec_ms_win *w)
+{
+    if (!in || !w)
+        return -EINVAL;
+    if (tbt_get_u32(in + TBT_FEC_MS_WIN_RESERVED) != 0)
+        return -EPROTO;
+    w->delivered = tbt_get_u64(in + TBT_FEC_MS_WIN_DELIVERED);
+    w->credit = tbt_get_u32(in + TBT_FEC_MS_WIN_CREDIT);
+    w->reserved = 0;
     return 0;
 }
 
@@ -1044,13 +1078,6 @@ int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], u16 carriers,
         return -EPROTO;
     if (!groups || groups > TBT_FEC_MAX_GROUPS ||
         (u32)groups * shares > TBT_FEC_MAX_CARRIERS)
-        return -EPROTO;
-    /* groups is the carrier geometry: one share per carrier, so the body
-     * must name exactly this session's carrier count. The old rule divided
-     * a fixed 256 and refused every 32/64/128-carrier INIT and CFG. The
-     * codec factory stays the authority on which (n, m, groups) shapes are
-     * buildable, including the downlink 1-group SC-LDPC block. */
-    if ((u32)groups * shares != carriers)
         return -EPROTO;
     if (variant == 2)
     {

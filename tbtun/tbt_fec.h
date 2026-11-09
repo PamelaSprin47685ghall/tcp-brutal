@@ -1,4 +1,4 @@
-/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x1008), control frames, and the
+/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x1009), control frames, and the
  * GF(2) sliding-window RLNC codec.
  *
  * This file and tbt_fec.c compile twice: into the module and into the host
@@ -129,8 +129,10 @@ int tbt_fec_hdr_unpack(const u8 in[TBT_FEC_HDR_LEN], struct tbt_fec_hdr *h);
  *       win_len > 0: win_len <= n, payload_len == max_payload,
  *       epoch <= max_payload. The first PARITY of a block fixes
  *       (win_len, epoch); the receiver refuses a later PARITY that disagrees.
- * ACK/NACK/CFG/FBK: n==0, m==0, share_index==0, win_len==0, exact body
- *              lengths, payload_len <= max_payload.
+ * ACK/NACK/CFG/FBK/ALLOC/MS_WIN: n==0, m==0, share_index==0, win_len==0,
+ *              exact body lengths, payload_len <= max_payload. ALLOC and
+ *              MS_WIN also name a stream (sid != 0); MS_WIN leaves block_id
+ *              and seq zero.
  *
  * The caller must check header_crc32c before trusting any field; this
  * function is the second gate, not the first. */
@@ -284,59 +286,35 @@ static inline bool tbt_fec_groups_fit(u16 total, u16 used, u16 count)
     return count && used <= total && count <= (u16)(total - used);
 }
 
-/* Admission decision before any allocation. SC-LDPC has one flow, so a second
- * flow is a clean refusal (-EOPNOTSUPP) even when its peer bitmap is larger
- * than the local TX group count. The caller maps SECOND to -EOPNOTSUPP and
- * NO_GROUPS to -EPROTO. */
-enum tbt_fec_admit_check
-{
-    TBT_FEC_ADMIT_OK = 0,
-    TBT_FEC_ADMIT_SECOND_SCLC,
-    TBT_FEC_ADMIT_NO_GROUPS,
-};
-
-static inline enum tbt_fec_admit_check
-tbt_fec_flow_admit_check(bool sclc, u16 n_flows, u16 total, u16 count)
-{
-    if (sclc && n_flows)
-        return TBT_FEC_ADMIT_SECOND_SCLC;
-    if (!count || count > total)
-        return TBT_FEC_ADMIT_NO_GROUPS;
-    return TBT_FEC_ADMIT_OK;
-}
-
 /* One refusal code for flow creation. A duplicate sid must win over every
- * admission rule: concurrent OPEN copies of the same stream are duplicates,
- * not a second SC-LDPC flow, so they must return -EEXIST (not -EOPNOTSUPP). */
+ * admission rule: concurrent OPEN copies of the same stream are duplicates.
+ * SC-LDPC has exactly one physical flow; every later stream shares it (the
+ * admission path returns the primary with a reference instead of creating a
+ * second plane), so a create for a second SC-LDPC flow is also -EEXIST: the
+ * caller's retry must look up and share the existing plane. */
 static inline int tbt_fec_flow_create_code(bool sid_exists, bool sclc,
                                            u16 n_flows, u16 total,
                                            u16 count)
 {
-    if (sid_exists)
+    if (sid_exists || (sclc && n_flows))
         return -EEXIST;
-    switch (tbt_fec_flow_admit_check(sclc, n_flows, total, count))
-    {
-    case TBT_FEC_ADMIT_SECOND_SCLC:
-        return -EOPNOTSUPP;
-    case TBT_FEC_ADMIT_NO_GROUPS:
+    if (!count || count > total)
         return -EPROTO;
-    case TBT_FEC_ADMIT_OK:
-        break;
-    }
     return 0;
 }
 
-/* The single SC-LDPC primary binds the peer's bitmap without resizing its
- * local TX plane; the RX shape is installed later by FEC_CFG INIT. Other
- * modes keep the one-sid-one-bitmap rule. */
+/* Every OPEN of a stream on the same plane must name the same bitmap. The
+ * SC-LDPC primary binds the first one; later streams are only routing legs
+ * over that one plane, so a different bitmap is a protocol error. The
+ * caller passes the bitmap the plane already bound (near: its own TX mask,
+ * far: the peer RX mask). */
 static inline bool tbt_fec_primary_mask_match(bool sclc,
                                               const u8 *flow_mask,
                                               const u8 *open_mask)
 {
     u16 i;
 
-    if (sclc)
-        return true;
+    (void)sclc;
     for (i = 0; i < TBT_FEC_BITMAP_BYTES; i++)
         if (flow_mask[i] != open_mask[i])
             return false;
@@ -447,7 +425,25 @@ struct tbt_fec_alloc
     u32 crc32c;
 };
 
-/* Shape change request (0x1008, 64 bytes). See tbt_uapi.h for the byte
+/* Per-stream receive window (0x1009, 16 bytes). See tbt_uapi.h for the byte
+ * offsets; this struct is the host-side mirror, not the wire layout. The
+ * record header's sid names the target stream, not the FEC plane's flow. */
+struct tbt_fec_ms_win
+{
+    u64 delivered; /* stream byte offset the receiver has consumed */
+    u32 credit;    /* receive window bytes beyond delivered */
+    u32 reserved;  /* must be 0 */
+};
+
+/* Pack returns 0, or -EINVAL for a NULL argument or a non-zero reserved
+ * field. Unpack returns 0, -EINVAL for a NULL argument, or -EPROTO when the
+ * wire reserved word is non-zero. */
+int tbt_fec_ms_win_pack(const struct tbt_fec_ms_win *w,
+                        u8 out[TBT_FEC_MS_WIN_LEN]);
+int tbt_fec_ms_win_unpack(const u8 in[TBT_FEC_MS_WIN_LEN],
+                          struct tbt_fec_ms_win *w);
+
+/* Shape change request (0x1009, 64 bytes). See tbt_uapi.h for the byte
  * offsets; this struct is the host-side mirror, not the wire layout. The
  * extension fields name the codec explicitly; `codec_variant == 2` leaves
  * the wire w/k/d bytes zero, and w/k/d below carry the equivalent legacy

@@ -424,10 +424,8 @@ static void test_open_chunks(void)
             for (j = 0; j < sizeof(base); j += 8)
             {
                 u64 v = rnd64();
-                size_t left = sizeof(base) - j;
 
-                /* The 36-byte v8 OPEN is not a multiple of 8. */
-                memcpy(base + j, &v, left < sizeof(v) ? left : sizeof(v));
+                memcpy(base + j, &v, 8);
             }
         for (j = 0; j < sizeof(base); j++)
         {

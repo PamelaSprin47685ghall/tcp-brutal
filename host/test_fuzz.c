@@ -1,6 +1,6 @@
 /* test_fuzz.c - hostile-input tests for the peer-controlled parsers:
  * tbt_rec_scan() (record framing), tbt_hdr_check() (header validation),
- * tbt_fec_alloc_unpack()/tbt_fec_cfg_unpack() (0.4.0 v7 control bodies) and
+ * tbt_fec_alloc_unpack()/tbt_fec_cfg_unpack() (0.6.0 v9 control bodies) and
  * tbt_parse_line() (the /proc config grammar).
  *
  * Deterministic: xorshift64 seeded with 1, no fixtures, no external
@@ -28,9 +28,11 @@
  *     masks, every flag value, reserved bytes and reserved2, CRC faults and
  *     a full pack/unpack round trip for every accepted body.
  *   - 40k mutated FEC_CFG bodies seeded from the RLNC, SC-LDPC binary and
- *     SC-LDPC GF(16) profiles, bombarding n=0, m=0, n+m=65536, n+m>256 and
- *     groups=0; every verdict is compared with an independent reading of the
- *     documented rules, and every accepted body must repack byte for byte.
+ *     SC-LDPC GF(16) profiles: 64-byte v9 bodies with a prefix CRC over
+ *     +0..+39 and a second CRC over the +48..+55 extension, bombarding n=0,
+ *     m=0, n+m=65536, n+m>256, groups=0 and groups*shares>256; every verdict
+ *     is compared with an independent reading of the documented rules, and
+ *     every accepted body must repack byte for byte.
  *   - 8k mutated /proc lines aimed at portblock=, adaptive=, L= and
  *     mode=sc-ldpc, plus a canonical render/parse fixed-point check on every
  *     accepted tunnel line.
@@ -243,7 +245,7 @@ static void test_bounds_table(void)
 
     case_no++;
     check(TBT_HDR_LEN == 32 && TBT_CHUNK_MAX == 8228 && TBT_REC_MAX == 8224 &&
-              TBT_CONV == 0x0008 && TBT_WIRE_VERSION_V6 == 5,
+              TBT_CONV == 0x0009 && TBT_WIRE_VERSION_V6 == 6,
           "design constants", NULL);
     for (i = 0; i < sizeof(want) / sizeof(want[0]); i++)
     {
@@ -1001,7 +1003,7 @@ static void test_body_lengths(void)
 }
 
 /* ------------------------------------------------------------------------- */
-/* 0.4.0 v7 control bodies and the /proc config grammar. */
+/* 0.6.0 v9 control bodies and the /proc config grammar. */
 
 #define ALLOC_FUZZ 20000
 
@@ -1185,17 +1187,13 @@ static void test_alloc_body(void)
 #define CFG_FUZZ 40000
 #define PARSE_FUZZ 8000
 
-static void cfg_fix_crc(u8 *buf)
-{
-    tbt_put_le32(buf + TBT_FEC_CFG_CRC,
-                 tbt_fec_crc32c(0, buf, TBT_FEC_CFG_CRC_BYTES));
-}
-
-static void cfg_fix_crc_ext(u8 *buf)
+static void cfg_fix_crcs(u8 *buf)
 {
     tbt_put_le32(buf + TBT_FEC_CFG_CRC_EXT,
                  tbt_fec_crc32c(0, buf + TBT_FEC_CFG_CODEC_VARIANT,
                                 TBT_FEC_CFG_CRC_EXT_BYTES));
+    tbt_put_le32(buf + TBT_FEC_CFG_CRC,
+                 tbt_fec_crc32c(0, buf, TBT_FEC_CFG_CRC_BYTES));
 }
 
 static int cfg_unpack_copy(const u8 *src, struct tbt_fec_cfg *c)
@@ -1216,15 +1214,18 @@ static int cfg_unpack_copy(const u8 *src, struct tbt_fec_cfg *c)
 
 struct cfg_seed
 {
-    u16 n, m, w, k;
-    u8 d, flags;
+    u16 n, m, w, k, groups, block;
+    u8 d, flags, variant, L;
+    u32 rate_ppm;
 };
 
-/* Three legal shapes, one per encoding the FEC_CFG body shares. */
+/* Three legal v9 shapes, one per codec encoding the FEC_CFG body names. The
+ * SC-LDPC rows keep w/k/d zero on the wire: their graph lives in the
+ * extension. */
 static const struct cfg_seed cfg_seeds[3] = {
-    { 8, 8, 64, 32, 4, TBT_FEC_CFG_F_APPLY },      /* RLNC */
-    { 128, 128, 256, 500, 0, TBT_FEC_CFG_F_INIT }, /* SC-LDPC binary */
-    { 8, 24, 16, 128, 64, TBT_FEC_CFG_F_APPLY },   /* SC-LDPC GF(16) */
+    { 8, 8, 64, 32, 16, 0, 4, TBT_FEC_CFG_F_APPLY, 0, 0, 0 },
+    { 128, 128, 0, 0, 1, 256, 0, TBT_FEC_CFG_F_INIT, 2, 8, 500000 },
+    { 8, 24, 0, 0, 8, 128, 0, TBT_FEC_CFG_F_APPLY, 2, 16, 250000 },
 };
 
 static const u16 cfg_edges[] = { 0,    1,    2,    3,    5,    15,   16,
@@ -1239,13 +1240,28 @@ static u16 cfg_rand_u16(void)
     return (u16)rnd64();
 }
 
-static u16 cfg_groups_for(u16 n, u16 m)
+/* The parser keeps one in-kernel shape vocabulary: a variant-2 body is
+ * mirrored into w/k/d from its extension, while the wire bytes stay zero. */
+static void cfg_seed_mirror(const struct cfg_seed *s, u16 *w, u16 *k, u8 *d)
 {
-    u32 shares = (u32)n + m;
-
-    if (!shares || TBT_FEC_MAX_CARRIERS % shares)
-        return 0;
-    return (u16)(TBT_FEC_MAX_CARRIERS / shares);
+    if (s->variant != 2)
+    {
+        *w = s->w;
+        *k = s->k;
+        *d = s->d;
+    }
+    else if (s->groups == 1)
+    {
+        *w = s->block;
+        *k = (u16)(s->rate_ppm / 1000u);
+        *d = 0;
+    }
+    else
+    {
+        *w = s->L;
+        *k = s->block;
+        *d = (u8)((u32)s->n * 256u / ((u32)s->n + s->m));
+    }
 }
 
 static void cfg_pack_seed(unsigned which, u8 *buf)
@@ -1261,24 +1277,14 @@ static void cfg_pack_seed(unsigned which, u8 *buf)
     c.k = s->k;
     c.d = s->d;
     c.flags = s->flags;
-    c.groups = cfg_groups_for(s->n, s->m);
+    c.groups = s->groups;
     c.switch_pkt = 0x0102030405060708ull;
     c.block_base = 0x1112131415161718ull;
     c.seed = 0x2122232425262728ull;
-    if (which == 1)
-    {
-        c.codec_variant = 2;
-        c.L = 8;
-        c.block = 256;
-        c.rate_ppm = 500000;
-    }
-    else if (which == 2)
-    {
-        c.codec_variant = 2;
-        c.L = 16;
-        c.block = 128;
-        c.rate_ppm = 250000;
-    }
+    c.codec_variant = s->variant;
+    c.L = s->L;
+    c.block = s->block;
+    c.rate_ppm = s->rate_ppm;
     if (tbt_fec_cfg_pack(&c, buf))
     {
         printf("FAIL seed=1 case=%lu: CFG seed %u does not pack\n", case_no,
@@ -1310,11 +1316,11 @@ static int cfg_doc_accepts(const u8 *b)
     u16 w = tbt_le16(b + TBT_FEC_CFG_W);
     u16 k = tbt_le16(b + TBT_FEC_CFG_K);
     u16 groups = tbt_le16(b + TBT_FEC_CFG_GROUPS);
+    u16 block = tbt_le16(b + TBT_FEC_CFG_BLOCK);
+    u32 rate_ppm = tbt_le32(b + TBT_FEC_CFG_RATE_PPM);
     u8 d = b[TBT_FEC_CFG_D];
     u8 variant = b[TBT_FEC_CFG_CODEC_VARIANT];
     u8 L = b[TBT_FEC_CFG_L];
-    u16 block = tbt_le16(b + TBT_FEC_CFG_BLOCK);
-    u32 rate = tbt_le32(b + TBT_FEC_CFG_RATE_PPM);
     u32 shares = (u32)n + m;
 
     if (tbt_le32(b + TBT_FEC_CFG_CRC) !=
@@ -1335,10 +1341,10 @@ static int cfg_doc_accepts(const u8 *b)
     if (!groups || groups > TBT_FEC_MAX_GROUPS ||
         (u32)groups * shares > TBT_FEC_MAX_CARRIERS)
         return 0;
-    if ((u32)groups * shares != TBT_FEC_MAX_CARRIERS)
-        return 0;
     if (variant == 2)
     {
+        u32 want_n;
+
         if (w || k || d)
             return 0;
         if (L != 8 && L != 16)
@@ -1346,15 +1352,14 @@ static int cfg_doc_accepts(const u8 *b)
         if (block != 256 && block != 512 &&
             !(block == TBT_FEC_SCLC_BLOCK_UP && groups > 1 && L == 16))
             return 0;
-        if (rate < 250000u || rate > 700000u)
+        if (rate_ppm < 250000u || rate_ppm > 700000u)
             return 0;
-        if ((u32)(((u64)rate * shares) / 1000000u) != n)
-            return 0;
-        return 1;
+        want_n = (u32)(((u64)rate_ppm * shares) / 1000000u);
+        return want_n == n;
     }
     if (variant != 0 && variant != 1)
         return 0;
-    if (L || block || rate)
+    if (L || block || rate_ppm)
         return 0;
     if (!k || !w || k > w || w > TBT_FEC_MAX_W || !d || d > w)
         return 0;
@@ -1363,9 +1368,29 @@ static int cfg_doc_accepts(const u8 *b)
     return 1;
 }
 
-/* FEC_CFG (0x34): the three (d, k, w, n, m, groups) families, the zero and
- * overflow edges that would divide by zero downstream, and 40k mutations
- * checked against cfg_doc_accepts(). */
+/* Post-conditions an accepted body must leave behind, read from the parsed
+ * struct rather than from the wire. */
+static int cfg_shape_is_usable(const struct tbt_fec_cfg *c)
+{
+    u32 shares = (u32)c->n + c->m;
+
+    if (!c->n || !c->m || shares > TBT_FEC_MAX_SHARES)
+        return 0;
+    if (!c->groups || c->groups > TBT_FEC_MAX_GROUPS ||
+        (u32)c->groups * shares > TBT_FEC_MAX_CARRIERS)
+        return 0;
+    if (c->codec_variant == 2)
+        return c->L && c->block && c->rate_ppm >= 250000u &&
+               c->rate_ppm <= 700000u;
+    if (c->codec_variant != 0 && c->codec_variant != 1)
+        return 0;
+    return c->k && c->w && c->k <= c->w && c->w <= TBT_FEC_MAX_W &&
+           c->d && c->d <= c->w && !(c->w > 1 && c->d == c->w);
+}
+
+/* FEC_CFG (0x34): the v9 codec variants, the zero and overflow edges that
+ * would divide by zero downstream, both CRCs, and 40k mutations checked
+ * against cfg_doc_accepts(). */
 static void test_cfg_body(void)
 {
     static u8 seeds[3][TBT_FEC_CFG_LEN];
@@ -1373,34 +1398,40 @@ static void test_cfg_body(void)
     unsigned i, s;
 
     case_no++;
-    check(TBT_FEC_CFG_LEN == 64 && TBT_FEC_CONV == 0x1008u &&
-              TBT_FEC_CFG_CRC_BYTES == 40 && TBT_FEC_MAX_SHARES == 256,
+    check(TBT_FEC_CFG_LEN == 64 && TBT_FEC_CONV == 0x1009u &&
+              TBT_FEC_CFG_CRC_BYTES == 40 &&
+              TBT_FEC_CFG_CRC_EXT_BYTES == 8 &&
+              TBT_FEC_CFG_RESERVED2 == 60 && TBT_FEC_MAX_SHARES == 256,
           "FEC_CFG wire constants", NULL);
 
     for (s = 0; s < 3; s++)
     {
+        const struct cfg_seed *sd = &cfg_seeds[s];
         struct tbt_fec_cfg c;
-        u16 groups = cfg_groups_for(cfg_seeds[s].n, cfg_seeds[s].m);
+        u16 mw, mk;
+        u8 md;
 
         cfg_pack_seed(s, seeds[s]);
+        cfg_seed_mirror(sd, &mw, &mk, &md);
         memset(&c, 0, sizeof(c));
         case_no++;
         check(cfg_unpack_copy(seeds[s], &c) == 0 &&
-                  c.n == cfg_seeds[s].n && c.m == cfg_seeds[s].m &&
-                  c.w == cfg_seeds[s].w && c.k == cfg_seeds[s].k &&
-                  c.d == cfg_seeds[s].d && c.flags == cfg_seeds[s].flags &&
-                  c.groups == groups,
+                  c.n == sd->n && c.m == sd->m && c.flags == sd->flags &&
+                  c.groups == sd->groups && c.codec_variant == sd->variant &&
+                  c.L == sd->L && c.block == sd->block &&
+                  c.rate_ppm == sd->rate_ppm && c.w == mw && c.k == mk &&
+                  c.d == md,
               "CFG seed round trip", NULL);
 
         memcpy(buf, seeds[s], sizeof(buf));
         tbt_put_le16(buf + TBT_FEC_CFG_N, 0);
-        cfg_fix_crc(buf);
+        cfg_fix_crcs(buf);
         case_no++;
         cfg_expect("CFG n=0", buf, -EPROTO);
 
         memcpy(buf, seeds[s], sizeof(buf));
         tbt_put_le16(buf + TBT_FEC_CFG_M, 0);
-        cfg_fix_crc(buf);
+        cfg_fix_crcs(buf);
         case_no++;
         cfg_expect("CFG m=0", buf, -EPROTO);
 
@@ -1408,165 +1439,248 @@ static void test_cfg_body(void)
         memcpy(buf, seeds[s], sizeof(buf));
         tbt_put_le16(buf + TBT_FEC_CFG_N, 1);
         tbt_put_le16(buf + TBT_FEC_CFG_M, 0xffff);
-        cfg_fix_crc(buf);
+        cfg_fix_crcs(buf);
         case_no++;
         cfg_expect("CFG n+m=65536", buf, -EPROTO);
         memcpy(buf, seeds[s], sizeof(buf));
         tbt_put_le16(buf + TBT_FEC_CFG_N, 0xffff);
         tbt_put_le16(buf + TBT_FEC_CFG_M, 1);
-        cfg_fix_crc(buf);
+        cfg_fix_crcs(buf);
         case_no++;
         cfg_expect("CFG n+m=65536 (reversed)", buf, -EPROTO);
         memcpy(buf, seeds[s], sizeof(buf));
         tbt_put_le16(buf + TBT_FEC_CFG_N, 0xffff);
         tbt_put_le16(buf + TBT_FEC_CFG_M, 0xffff);
-        cfg_fix_crc(buf);
+        cfg_fix_crcs(buf);
         case_no++;
         cfg_expect("CFG n+m=131070", buf, -EPROTO);
 
         memcpy(buf, seeds[s], sizeof(buf));
         tbt_put_le16(buf + TBT_FEC_CFG_N, 200);
         tbt_put_le16(buf + TBT_FEC_CFG_M, 100);
-        cfg_fix_crc(buf);
+        cfg_fix_crcs(buf);
         case_no++;
         cfg_expect("CFG shares over 256", buf, -EPROTO);
 
-        /* 256 is not divisible by 5, so no groups value can describe it. */
-        memcpy(buf, seeds[s], sizeof(buf));
-        tbt_put_le16(buf + TBT_FEC_CFG_N, 3);
-        tbt_put_le16(buf + TBT_FEC_CFG_M, 2);
-        tbt_put_le16(buf + TBT_FEC_CFG_GROUPS, 51);
-        cfg_fix_crc(buf);
-        case_no++;
-        cfg_expect("CFG shares do not divide 256", buf, -EPROTO);
-
         memcpy(buf, seeds[s], sizeof(buf));
         tbt_put_le16(buf + TBT_FEC_CFG_GROUPS, 0);
-        cfg_fix_crc(buf);
+        cfg_fix_crcs(buf);
         case_no++;
         cfg_expect("CFG groups=0", buf, -EPROTO);
 
         memcpy(buf, seeds[s], sizeof(buf));
-        tbt_put_le16(buf + TBT_FEC_CFG_GROUPS,
-                     (u16)(cfg_groups_for(cfg_seeds[s].n, cfg_seeds[s].m) + 1));
-        cfg_fix_crc(buf);
+        tbt_put_le16(buf + TBT_FEC_CFG_GROUPS, (u16)(sd->groups + 1));
+        cfg_fix_crcs(buf);
         case_no++;
-        cfg_expect("CFG groups mismatch", buf, -EPROTO);
-
-        if (s == 0)
-        {
-            memcpy(buf, seeds[s], sizeof(buf));
-            tbt_put_le16(buf + TBT_FEC_CFG_K, 0);
-            cfg_fix_crc(buf);
-            case_no++;
-            cfg_expect("CFG k=0", buf, -EPROTO);
-
-            memcpy(buf, seeds[s], sizeof(buf));
-            tbt_put_le16(buf + TBT_FEC_CFG_W, TBT_FEC_MAX_W + 1);
-            cfg_fix_crc(buf);
-            case_no++;
-            cfg_expect("CFG w over the cap", buf, -EPROTO);
-        }
-        else
-        {
-            /* v8 SC-LDPC names its graph in the extension. */
-            memcpy(buf, seeds[s], sizeof(buf));
-            buf[TBT_FEC_CFG_CODEC_VARIANT] = 3;
-            cfg_fix_crc(buf);
-            cfg_fix_crc_ext(buf);
-            case_no++;
-            cfg_expect("CFG unknown variant", buf, -EPROTO);
-
-            memcpy(buf, seeds[s], sizeof(buf));
-            buf[TBT_FEC_CFG_L] = 4;
-            cfg_fix_crc(buf);
-            cfg_fix_crc_ext(buf);
-            case_no++;
-            cfg_expect("CFG bad L for variant 2", buf, -EPROTO);
-
-            memcpy(buf, seeds[s], sizeof(buf));
-            tbt_put_le16(buf + TBT_FEC_CFG_BLOCK, 300);
-            cfg_fix_crc(buf);
-            cfg_fix_crc_ext(buf);
-            case_no++;
-            cfg_expect("CFG bad block for variant 2", buf, -EPROTO);
-
-            memcpy(buf, seeds[s], sizeof(buf));
-            tbt_put_le32(buf + TBT_FEC_CFG_RATE_PPM,
-                         ((u32)(cfg_seeds[s].n + 1) * 1000000u +
-                          (u32)(cfg_seeds[s].n + cfg_seeds[s].m) - 1u) /
-                             (u32)(cfg_seeds[s].n + cfg_seeds[s].m));
-            cfg_fix_crc(buf);
-            cfg_fix_crc_ext(buf);
-            case_no++;
-            cfg_expect("CFG rate does not name n", buf, -EPROTO);
-        }
+        cfg_expect("CFG groups*shares over 256", buf, -EPROTO);
 
         memcpy(buf, seeds[s], sizeof(buf));
         buf[TBT_FEC_CFG_FLAGS] |= 0x08;
-        cfg_fix_crc(buf);
+        cfg_fix_crcs(buf);
         case_no++;
         cfg_expect("CFG unknown flag", buf, -EPROTO);
 
         memcpy(buf, seeds[s], sizeof(buf));
         buf[TBT_FEC_CFG_FLAGS] = 0xff;
-        cfg_fix_crc(buf);
+        cfg_fix_crcs(buf);
         case_no++;
         cfg_expect("CFG all flags", buf, -EPROTO);
 
         memcpy(buf, seeds[s], sizeof(buf));
         buf[TBT_FEC_CFG_RESERVED] = 1;
-        cfg_fix_crc(buf);
+        cfg_fix_crcs(buf);
         case_no++;
         cfg_expect("CFG reserved", buf, -EPROTO);
 
         memcpy(buf, seeds[s], sizeof(buf));
+        buf[TBT_FEC_CFG_RESERVED2] = 1;
+        cfg_fix_crcs(buf);
+        case_no++;
+        cfg_expect("CFG reserved2", buf, -EPROTO);
+
+        memcpy(buf, seeds[s], sizeof(buf));
         buf[TBT_FEC_CFG_CRC + 1] ^= 0x80;
         case_no++;
-        cfg_expect("CFG CRC fault", buf, -EPROTO);
+        cfg_expect("CFG prefix CRC fault", buf, -EPROTO);
 
-        /* The discriminator between the three encodings. */
         memcpy(buf, seeds[s], sizeof(buf));
-        if (s == 0)
+        buf[TBT_FEC_CFG_CRC_EXT + 1] ^= 0x80;
+        case_no++;
+        cfg_expect("CFG extension CRC fault", buf, -EPROTO);
+
+        memcpy(buf, seeds[s], sizeof(buf));
+        buf[TBT_FEC_CFG_CODEC_VARIANT] = 3;
+        cfg_fix_crcs(buf);
+        case_no++;
+        cfg_expect("CFG unknown variant", buf, -EPROTO);
+
+        if (sd->variant == 2)
         {
-            buf[TBT_FEC_CFG_D] = (u8)(cfg_seeds[s].w + 1);
-            cfg_fix_crc(buf);
-            case_no++;
-            cfg_expect("CFG RLNC d over w", buf, -EPROTO);
             memcpy(buf, seeds[s], sizeof(buf));
-            buf[TBT_FEC_CFG_D] = (u8)cfg_seeds[s].w;
-            cfg_fix_crc(buf);
+            tbt_put_le16(buf + TBT_FEC_CFG_W, 1);
+            cfg_fix_crcs(buf);
             case_no++;
-            cfg_expect("CFG RLNC d=w", buf, -EPROTO);
-        }
-        else if (s == 1)
-        {
-            tbt_put_le16(buf + TBT_FEC_CFG_BLOCK, 512);
-            cfg_fix_crc(buf);
-            cfg_fix_crc_ext(buf);
+            cfg_expect("CFG SC-LDPC wire w", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le16(buf + TBT_FEC_CFG_K, 1);
+            cfg_fix_crcs(buf);
             case_no++;
-            cfg_expect("CFG binary block 512", buf, 0);
+            cfg_expect("CFG SC-LDPC wire k", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            buf[TBT_FEC_CFG_D] = 1;
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG SC-LDPC wire d", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            buf[TBT_FEC_CFG_L] = 0;
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG SC-LDPC L=0", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            buf[TBT_FEC_CFG_L] = 4;
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG SC-LDPC L=4", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le16(buf + TBT_FEC_CFG_BLOCK, 1024);
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG SC-LDPC block ladder", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le32(buf + TBT_FEC_CFG_RATE_PPM, 249999);
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG SC-LDPC rate below 250k", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le32(buf + TBT_FEC_CFG_RATE_PPM, 700001);
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG SC-LDPC rate over 700k", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le32(buf + TBT_FEC_CFG_RATE_PPM, 600000);
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG SC-LDPC rate/split mismatch", buf, -EPROTO);
+
+            if (sd->block == TBT_FEC_SCLC_BLOCK_UP)
+            {
+                memcpy(buf, seeds[s], sizeof(buf));
+                buf[TBT_FEC_CFG_L] = 8;
+                cfg_fix_crcs(buf);
+                case_no++;
+                cfg_expect("CFG GF(16) block without L=16", buf, -EPROTO);
+
+                memcpy(buf, seeds[s], sizeof(buf));
+                tbt_put_le16(buf + TBT_FEC_CFG_GROUPS, 1);
+                cfg_fix_crcs(buf);
+                case_no++;
+                cfg_expect("CFG GF(16) block one group", buf, -EPROTO);
+
+                memcpy(buf, seeds[s], sizeof(buf));
+                tbt_put_le16(buf + TBT_FEC_CFG_GROUPS, 4);
+                cfg_fix_crcs(buf);
+                case_no++;
+                cfg_expect("CFG GF(16) groups*shares under 256", buf, 0);
+            }
+            else
+            {
+                memcpy(buf, seeds[s], sizeof(buf));
+                tbt_put_le16(buf + TBT_FEC_CFG_BLOCK,
+                             TBT_FEC_SCLC_BLOCK_UP);
+                cfg_fix_crcs(buf);
+                case_no++;
+                cfg_expect("CFG block 128 with one group", buf, -EPROTO);
+            }
         }
         else
         {
-            tbt_put_le16(buf + TBT_FEC_CFG_BLOCK, 256);
-            cfg_fix_crc(buf);
-            cfg_fix_crc_ext(buf);
-            case_no++;
-            cfg_expect("CFG variant 2 block 256 parses", buf, 0);
             memcpy(buf, seeds[s], sizeof(buf));
-            buf[TBT_FEC_CFG_L] = 8;
-            cfg_fix_crc(buf);
-            cfg_fix_crc_ext(buf);
+            buf[TBT_FEC_CFG_D] = (u8)(sd->w + 1);
+            cfg_fix_crcs(buf);
             case_no++;
-            cfg_expect("CFG GF16 L 8", buf, -EPROTO);
+            cfg_expect("CFG RLNC d over w", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            buf[TBT_FEC_CFG_D] = (u8)sd->w;
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG RLNC d=w", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            buf[TBT_FEC_CFG_D] = 0;
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG RLNC d=0", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le16(buf + TBT_FEC_CFG_K, 0);
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG RLNC k=0", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le16(buf + TBT_FEC_CFG_K, (u16)(sd->w + 1));
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG RLNC k over w", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le16(buf + TBT_FEC_CFG_W, 0);
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG RLNC w=0", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le16(buf + TBT_FEC_CFG_W, TBT_FEC_MAX_W + 1);
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG RLNC w over the cap", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            buf[TBT_FEC_CFG_L] = 1;
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG RLNC L nonzero", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le16(buf + TBT_FEC_CFG_BLOCK, 256);
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG RLNC block nonzero", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le32(buf + TBT_FEC_CFG_RATE_PPM, 500000);
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG RLNC rate nonzero", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le16(buf + TBT_FEC_CFG_GROUPS, 8);
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG RLNC groups*shares under 256", buf, 0);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            buf[TBT_FEC_CFG_CODEC_VARIANT] = 1;
+            cfg_fix_crcs(buf);
+            case_no++;
+            cfg_expect("CFG grouped RLNC shares the rules", buf, 0);
         }
     }
 
     for (i = 0; i < CFG_FUZZ; i++)
     {
         struct tbt_fec_cfg c;
-        unsigned muts = 1 + (unsigned)rnd_below(5);
+        unsigned muts = 1 + (unsigned)rnd_below(6);
+        unsigned crc_mut;
         int rc, want;
 
         case_no = i + 1;
@@ -1574,7 +1688,7 @@ static void test_cfg_body(void)
         memcpy(buf, seeds[s], sizeof(buf));
         while (muts--)
         {
-            switch (rnd_below(7))
+            switch (rnd_below(12))
             {
             case 0:
                 tbt_put_le16(buf + TBT_FEC_CFG_N, cfg_rand_u16());
@@ -1594,15 +1708,37 @@ static void test_cfg_body(void)
             case 5:
                 tbt_put_le16(buf + TBT_FEC_CFG_GROUPS, cfg_rand_u16());
                 break;
-            default:
+            case 6:
                 buf[TBT_FEC_CFG_FLAGS] = (u8)rnd64();
+                break;
+            case 7:
+                buf[TBT_FEC_CFG_CODEC_VARIANT] = (u8)rnd64();
+                break;
+            case 8:
+                buf[TBT_FEC_CFG_L] = (u8)rnd64();
+                break;
+            case 9:
+                tbt_put_le16(buf + TBT_FEC_CFG_BLOCK, cfg_rand_u16());
+                break;
+            case 10:
+                tbt_put_le32(buf + TBT_FEC_CFG_RATE_PPM, (u32)rnd64());
+                break;
+            default:
+                if (rnd64() & 1)
+                    buf[TBT_FEC_CFG_RESERVED + rnd_below(4)] |= (u8)rnd64();
+                else
+                    buf[TBT_FEC_CFG_RESERVED2 + rnd_below(4)] |= (u8)rnd64();
                 break;
             }
         }
-        if (!(rnd64() & 7))
+        crc_mut = (unsigned)rnd_below(16);
+        if (crc_mut == 0)
             buf[TBT_FEC_CFG_CRC + rnd_below(4)] ^= (u8)(1 + rnd_below(255));
+        else if (crc_mut == 1)
+            buf[TBT_FEC_CFG_CRC_EXT + rnd_below(4)] ^=
+                (u8)(1 + rnd_below(255));
         else
-            cfg_fix_crc(buf);
+            cfg_fix_crcs(buf);
         want = cfg_doc_accepts(buf);
         memset(&c, 0, sizeof(c));
         rc = cfg_unpack_copy(buf, &c);
@@ -1617,8 +1753,7 @@ static void test_cfg_body(void)
         if (!want)
             continue;
         checks++;
-        if (!c.n || !c.m || (u32)c.n + c.m > TBT_FEC_MAX_SHARES ||
-            !c.groups || !c.k || c.w > TBT_FEC_MAX_W)
+        if (!cfg_shape_is_usable(&c))
         {
             failures++;
             printf("FAIL seed=1 case=%lu: CFG accepted an unusable shape\n",

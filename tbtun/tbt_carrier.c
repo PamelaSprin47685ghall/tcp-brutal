@@ -145,9 +145,10 @@ static void tbt_carrier_rescue_up(struct tbt_session *sess,
     {
         /* No stream needs an OPEN, so there is nothing left to announce;
          * the HELLO write branch only left up==0 because it snapshotted a
-         * stream that has since died. The carrier is usable for control
-         * frames, and the next stream announces itself on creation. */
-        atomic_set(&c->up, 1);
+         * stream that has since died. Republish through the same scan the
+         * OPEN completion uses, so a stream created after the snapshot
+         * cannot be left with a queued OPEN behind an up=1 carrier. */
+        tbt_tx_carrier_publish_up(sess, c);
         atomic64_inc(&sess->up_rescued);
         kfree(snap);
         return;

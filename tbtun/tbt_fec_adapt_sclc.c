@@ -156,13 +156,10 @@ int tbt_fec_adapt_sclc_wire_of_cfg(const struct tbt_fec_cfg *cfg,
     if (cfg->groups == 1 && shares == TBT_FEC_MAX_SHARES)
     {
         kind = TBT_FEC_SCLC_DOWN;
-        /* v8 names the graph in the CFG extension; the w/k/d mirror is
-         * rebuilt by cfg_unpack and is not a second authority. */
-        block = cfg->block;
-        L = TBT_FEC_SCLC_L_DOWN;
-        if (cfg->groups != 1 || shares != TBT_FEC_MAX_SHARES ||
-            block != TBT_FEC_SCLC_BLOCK_DOWN ||
+        if (block != TBT_FEC_SCLC_BLOCK_DOWN ||
             !tbt_fec_sclc_down_split(cfg->n, cfg->m))
+            return -1;
+        if (L != TBT_FEC_SCLC_L_DOWN)
             return -1;
     }
     else if (cfg->groups > 1)

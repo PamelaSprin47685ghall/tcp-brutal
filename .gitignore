@@ -301,10 +301,10 @@ host/test_tx_index
 host/test_tx_publish
 host/test_portmap
 host/test_portmap_san
-host/test_carrier_policy
-host/test_carrier_policy_san
 host/test_map
 host/test_map_san
+host/test_carrier_policy
+host/test_carrier_policy_san
 host/test_lifetime
 host/test_lifetime_san
 host/test_sclc_uplink
@@ -330,13 +330,13 @@ host/test_wire_compat
 host/test_wire_compat_san
 host/test_tsan_race
 host/bench_sclc_uplink
+host/bench_sclc_recovery
 host/bench_sclc_downlink
 host/sim_sclc_adaptive
 host/bench_sclc_pipe
 host/test_rx_budget
 host/test_rx_budget_san
 host/bench_rx_stages
-host/bench_sclc_recovery
 # guest traffic checker (tests/qemu/mkinitramfs.sh)
 host/tbt_burst
 host/tbt_ping

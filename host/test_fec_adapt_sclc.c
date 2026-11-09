@@ -1863,7 +1863,16 @@ static void case_wire_profile(void)
     make_sclc_cfg(&cfg, 127, 129, 1, 8, 256, 500000);
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
            "wire: off-ladder downlink split rejected");
-    make_sclc_cfg(&cfg, 151, 105, 1, 8, 256, 592593);
+    cfg.n = 151;
+    cfg.m = 105;
+    cfg.w = 256;
+    cfg.k = 589;
+    cfg.d = 0;
+    cfg.codec_variant = 2;
+    cfg.block = 256;
+    cfg.L = 8;
+    cfg.rate_ppm = 592593;
+    cfg.groups = 1;
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), 0,
            "wire: rate 60 downlink accepted");
     eq_u32(w.rate_pct, 60, "wire: rate 60 label");
@@ -1873,10 +1882,12 @@ static void case_wire_profile(void)
     eq_u32(back.n, 151, "wire: rate 60 cfg n");
     eq_u32(back.m, 105, "wire: rate 60 cfg m");
     eq_u32(back.k, 589, "wire: rate 60 cfg k");
-    make_sclc_cfg(&cfg, 151, 105, 1, 8, 256, 594000);
+    cfg.rate_ppm = 600000;
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
-           "wire: rate must agree with n/m");
-    make_sclc_cfg(&cfg, 128, 128, 1, 8, 512, 500000);
+           "wire: downlink rate must agree with n/m");
+    cfg.n = 128;
+    cfg.m = 128;
+    cfg.w = 512;
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
            "wire: downlink block 512 rejected");
     make_sclc_cfg(&cfg, 128, 128, 2, 8, 256, 500000);
@@ -1965,8 +1976,22 @@ static void case_asymmetric_init(void)
     struct tbt_fec_cfg d, u;
     u8 idx, mask;
 
-    make_sclc_cfg(&d, 128, 128, 1, 8, 256, 500000);
-    make_sclc_cfg(&u, 8, 24, 8, 16, 128, 250000);
+    memset(&d, 0, sizeof(d));
+    d.n = 128;
+    d.m = 128;
+    d.groups = 1;
+    d.codec_variant = 2;
+    d.L = 8;
+    d.block = 256;
+    d.rate_ppm = 500000;
+    memset(&u, 0, sizeof(u));
+    u.n = 8;
+    u.m = 24;
+    u.groups = 8;
+    u.codec_variant = 2;
+    u.L = 16;
+    u.block = 128;
+    u.rate_ppm = 250000;
 
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&d, 256, &down), 0,
            "init: adaptive=on admits the downlink INIT");

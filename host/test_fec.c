@@ -219,8 +219,9 @@ static void test_header_roundtrip(void)
        "header offsets", NULL);
     /* 0x1005 adds the stream sid and grows the header to 48 bytes; 0x1007
      * makes FEC_CFG/FEC_FBK carry the adaptive shape and adds FEC_ALLOC;
-     * 0x1008 grows CFG/FBK to 64 bytes and restores the full bitmap. */
-    ok(TBT_FEC_CONV == 0x1008u, "TBT_FEC_CONV", NULL);
+     * 0x1008 grows CFG/FBK to 64 bytes; 0x1009 adds MS_WIN and the
+     * SC-LDPC 32-byte subframe. */
+    ok(TBT_FEC_CONV == 0x1009u, "TBT_FEC_CONV", NULL);
 
     /* NULL arguments are refused, not dereferenced. */
     ok_int(tbt_fec_hdr_pack(NULL, wire), -EINVAL, "pack NULL header");
@@ -949,24 +950,6 @@ static void test_control(void)
     cfg_fix_crc(cbuf);
     ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO, "CFG n+m=257");
     tbt_fec_cfg_pack(&c, cbuf);
-    cbuf[TBT_FEC_CFG_N] = 2;
-    cbuf[TBT_FEC_CFG_N + 1] = 0;
-    cbuf[TBT_FEC_CFG_M] = 1;
-    cbuf[TBT_FEC_CFG_M + 1] = 0;
-    cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO,
-           "CFG n+m does not divide 256");
-    tbt_fec_cfg_pack(&c, cbuf);
-    cbuf[TBT_FEC_CFG_GROUPS] = 31;
-    cbuf[TBT_FEC_CFG_GROUPS + 1] = 0;
-    cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), -EPROTO,
-           "CFG groups != 256/(n+m)");
-    tbt_fec_cfg_pack(&c, cbuf);
-    cbuf[TBT_FEC_CFG_N] = 5;
-    cbuf[TBT_FEC_CFG_N + 1] = 0;
-    cbuf[TBT_FEC_CFG_M] = 3;
-    cbuf[TBT_FEC_CFG_M + 1] = 0;
     cbuf[TBT_FEC_CFG_GROUPS] = 40; /* 40 * 8 shares > 256 carriers */
     cbuf[TBT_FEC_CFG_GROUPS + 1] = 0;
     cfg_fix_crc(cbuf);
@@ -1189,13 +1172,13 @@ static void cfg_down_make(struct tbt_fec_cfg *c, u16 half)
     c->epoch = 1;
     c->n = half;
     c->m = half;
-    c->w = 256;
-    c->k = 500;
+    c->w = 0;
+    c->k = 0;
     c->d = 0;
     c->codec_variant = 2;
     c->L = 8;
     c->block = 256;
-    c->rate_ppm = 500000; /* n == m, so every half-width is rate 1/2 */
+    c->rate_ppm = 500000;
     c->flags = TBT_FEC_CFG_F_INIT | TBT_FEC_CFG_F_APPLY;
     c->groups = 1;
 }
@@ -1207,9 +1190,9 @@ static void cfg_up_make(struct tbt_fec_cfg *c, u16 groups)
     c->epoch = 1;
     c->n = 8;
     c->m = 24;
-    c->w = 16;
-    c->k = 128;
-    c->d = 64;
+    c->w = 0;
+    c->k = 0;
+    c->d = 0;
     c->codec_variant = 2;
     c->L = 16;
     c->block = 128;
@@ -1269,17 +1252,17 @@ static void test_cfg_carriers(void)
      * for one count is refused for every other count. */
     cfg_rlnc_make(&c, 8, 4);
     ok_int(tbt_fec_cfg_pack(&c, body32), 0, "32-carrier body packs");
-    cfg_unpack_expect(body32, 64, -EPROTO, "32-carrier body on 64");
-    cfg_unpack_expect(body32, 128, -EPROTO, "32-carrier body on 128");
-    cfg_unpack_expect(body32, 256, -EPROTO, "32-carrier body on 256");
+    cfg_unpack_expect(body32, 64, 0, "32-carrier body fits 64");
+    cfg_unpack_expect(body32, 128, 0, "32-carrier body fits 128");
+    cfg_unpack_expect(body32, 256, 0, "32-carrier body fits 256");
 
     cfg_rlnc_make(&c, 8, 8);
     ok_int(tbt_fec_cfg_pack(&c, body64), 0, "64-carrier body packs");
-    cfg_unpack_expect(body64, 32, -EPROTO, "64-carrier body on 32");
+    cfg_unpack_expect(body64, 32, 0, "64-carrier body fits 32");
 
     cfg_rlnc_make(&c, 8, 16);
     ok_int(tbt_fec_cfg_pack(&c, body128), 0, "128-carrier body packs");
-    cfg_unpack_expect(body128, 256, -EPROTO, "128-carrier body on 256");
+    cfg_unpack_expect(body128, 256, 0, "128-carrier body fits 256");
 
     /* c. A zero or a one-too-large group count, and a carrier count
      * outside 1..256, are refused. */
@@ -1294,7 +1277,7 @@ static void test_cfg_carriers(void)
     body32[TBT_FEC_CFG_GROUPS] = 5;
     body32[TBT_FEC_CFG_GROUPS + 1] = 0;
     cfg_fix_crc(body32);
-    cfg_unpack_expect(body32, 32, -EPROTO, "groups=5 on 32 carriers");
+    cfg_unpack_expect(body32, 32, 0, "groups=5 is within the 256 ceiling");
     cfg_rlnc_make(&c, 8, 4);
     ok_int(tbt_fec_cfg_pack(&c, body32), 0, "carrier argument base");
     cfg_unpack_expect(body32, 0, -EINVAL, "carriers=0");
@@ -1328,8 +1311,8 @@ static void test_cfg_carriers(void)
     ok(out.n == 128 && out.m == 128 && out.groups == 1,
        "downlink 256 body round-trips", NULL);
 
-    cfg_unpack_expect(body64, 128, -EPROTO, "downlink 64 body on 128");
-    cfg_unpack_expect(body128, 64, -EPROTO, "downlink 128 body on 64");
+    cfg_unpack_expect(body64, 128, 0, "downlink 64 body fits 128");
+    cfg_unpack_expect(body128, 64, 0, "downlink 128 body fits 64");
 
     /* e. Uplink GF(16): 32 shares per group and k=128 > w=16. */
     for (carriers = 64; carriers <= 256; carriers *= 2)
@@ -1492,6 +1475,104 @@ static void test_alloc(void)
     h.sid = 7;
     h.reserved = 1;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "ALLOC header reserved != 0");
+}
+
+/* ------------------------------------------------------------------ *
+ * 5c. FEC_MS_WIN (0x37): one stream's receive window inside the shared
+ * SC-LDPC plane. The body is 16 bytes; the header names the target stream
+ * in sid, not the FEC plane's flow, and leaves every share field zero.
+ * ------------------------------------------------------------------ */
+
+static void test_ms_win(void)
+{
+    struct tbt_fec_ms_win w, w2;
+    struct tbt_fec_hdr h;
+    u8 buf[TBT_FEC_MS_WIN_LEN];
+
+    ok(TBT_FEC_MS_WIN == 0x37, "MS_WIN type is 0x37", NULL);
+    ok(TBT_FEC_MS_WIN_LEN == 16, "MS_WIN body is 16 bytes", NULL);
+    ok((int)sizeof(struct tbt_fec_ms_win) == TBT_FEC_MS_WIN_LEN,
+       "MS_WIN struct is 16 bytes", NULL);
+
+    memset(&w, 0, sizeof(w));
+    w.delivered = 0x1122334455667788ULL;
+    w.credit = 0xdeadbeefu;
+    ok_int(tbt_fec_ms_win_pack(&w, buf), 0, "MS_WIN pack");
+    ok_u64le(buf + TBT_FEC_MS_WIN_DELIVERED, w.delivered,
+             "MS_WIN delivered at +0");
+    ok_u32le(buf + TBT_FEC_MS_WIN_CREDIT, w.credit, "MS_WIN credit at +8");
+    ok_u32le(buf + TBT_FEC_MS_WIN_RESERVED, 0, "MS_WIN reserved at +12");
+    memset(&w2, 0, sizeof(w2));
+    ok_int(tbt_fec_ms_win_unpack(buf, &w2), 0, "MS_WIN unpack");
+    ok(w2.delivered == w.delivered && w2.credit == w.credit &&
+           w2.reserved == 0,
+       "MS_WIN round-trip", NULL);
+
+    /* reserved is a wire zero: pack refuses to emit it, unpack refuses to
+     * accept it. */
+    w.reserved = 1;
+    ok_int(tbt_fec_ms_win_pack(&w, buf), -EINVAL,
+           "MS_WIN pack reserved != 0");
+    w.reserved = 0;
+    tbt_fec_ms_win_pack(&w, buf);
+    buf[TBT_FEC_MS_WIN_RESERVED] = 1;
+    ok_int(tbt_fec_ms_win_unpack(buf, &w2), -EPROTO,
+           "MS_WIN unpack reserved != 0");
+    ok_int(tbt_fec_ms_win_pack(NULL, buf), -EINVAL, "MS_WIN pack NULL body");
+    ok_int(tbt_fec_ms_win_pack(&w, NULL), -EINVAL, "MS_WIN pack NULL out");
+    ok_int(tbt_fec_ms_win_unpack(NULL, &w2), -EINVAL,
+           "MS_WIN unpack NULL in");
+    ok_int(tbt_fec_ms_win_unpack(buf, NULL), -EINVAL,
+           "MS_WIN unpack NULL body");
+
+    /* Header gate: exactly 16 bytes, sid != 0, and every share/block field
+     * zero. */
+    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
+    h.sid = 0x1234;
+    ok_int(tbt_fec_hdr_check(&h, 8192), 0, "MS_WIN baseline");
+    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN - 1);
+    h.sid = 0x1234;
+    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN body 15");
+    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN + 1);
+    h.sid = 0x1234;
+    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN body 17");
+    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
+    h.sid = 0;
+    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN sid=0");
+    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
+    h.sid = 0x1234;
+    h.block_id = 1;
+    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN block_id != 0");
+    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
+    h.sid = 0x1234;
+    h.seq = 1;
+    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN seq != 0");
+    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
+    h.sid = 0x1234;
+    h.n = 1;
+    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN n != 0");
+    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
+    h.sid = 0x1234;
+    h.m = 1;
+    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN m != 0");
+    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
+    h.sid = 0x1234;
+    h.share_index = 1;
+    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO,
+           "MS_WIN share_index != 0");
+    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
+    h.sid = 0x1234;
+    h.win_len = 1;
+    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN win_len != 0");
+    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
+    h.sid = 0x1234;
+    h.conv = 0x1007;
+    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO, "MS_WIN old conv");
+    h = ctl_hdr(TBT_FEC_MS_WIN, TBT_FEC_MS_WIN_LEN);
+    h.sid = 0x1234;
+    h.reserved = 1;
+    ok_int(tbt_fec_hdr_check(&h, 8192), -EPROTO,
+           "MS_WIN header reserved != 0");
 }
 
 /* ------------------------------------------------------------------ *
@@ -2136,17 +2217,20 @@ static void test_sclc_open_mask(void)
     ok(tbt_fec_open_groups_match(false, all, 8),
        "non-sclc INIT: the bitmap does not gate the shape", NULL);
 
-    ok(tbt_fec_primary_mask_match(true, all, eight),
-       "sclc primary: peer bitmap is accepted regardless of local TX mask", NULL);
+    ok(!tbt_fec_primary_mask_match(true, all, eight),
+       "sclc primary: a different peer bitmap is refused", NULL);
+    ok(tbt_fec_primary_mask_match(true, eight, eight),
+       "sclc primary: the same peer bitmap is accepted", NULL);
     ok(!tbt_fec_primary_mask_match(false, all, eight),
        "non-sclc primary: a different bitmap is refused", NULL);
     ok(tbt_fec_primary_mask_match(false, eight, eight),
        "non-sclc primary: the same bitmap is accepted", NULL);
 }
 
-/* SC-LDPC has one flow. A second flow whose OPEN bitmap is larger than the
- * local TX group count must be refused as EOPNOTSUPP, not EPROTO: the clean
- * refusal keeps the carrier alive and increments fec_stream_refused. */
+/* SC-LDPC has one physical flow. A second stream shares that plane, so the
+ * create path returns -EEXIST (not a second plane), and a duplicate sid wins
+ * over every admission rule. Only a group count that cannot be used is
+ * -EPROTO. */
 static void test_sclc_second_flow(void)
 {
     u8 eight[32];
@@ -2155,33 +2239,30 @@ static void test_sclc_second_flow(void)
     memset(eight, 0, sizeof(eight));
     for (count = 0; count < 8; count++)
         tbt_fec_bitmap_set(eight, count);
-    ok_int(tbt_fec_flow_admit_check(true, 1, 1, 8),
-           TBT_FEC_ADMIT_SECOND_SCLC,
-           "sclc second flow: 8-group OPEN beats the local groups=1 check");
+    ok_int(tbt_fec_flow_create_code(false, true, 1, 1, 8), -EEXIST,
+           "sclc second flow: a live flow returns the primary plane");
     /* Sequential stream: the previous flow was released, n_flows=0. The peer
      * still sends 8 groups while the local TX shape has one; create uses the
      * local group count and the peer bitmap for RX, so admission succeeds. */
     ok(tbt_fec_open_mask_valid(true, 1, eight, &count),
        "sclc sequential: the 8-group peer bitmap is valid", NULL);
     ok_u32(count, 8, "sclc sequential: peer bitmap count");
-    ok_int(tbt_fec_flow_admit_check(true, 0, 1, 1), TBT_FEC_ADMIT_OK,
+    ok_int(tbt_fec_flow_create_code(false, true, 0, 1, 1), 0,
            "sclc sequential: local groups=1 admits the next flow");
-    ok_int(tbt_fec_flow_admit_check(true, 1, 1, 1),
-           TBT_FEC_ADMIT_SECOND_SCLC,
+    ok_int(tbt_fec_flow_create_code(false, true, 1, 1, 1), -EEXIST,
            "sclc concurrent: a live flow still refuses the second");
-    ok_int(tbt_fec_flow_admit_check(true, 0, 1, 1), TBT_FEC_ADMIT_OK,
+    ok_int(tbt_fec_flow_create_code(false, true, 0, 1, 1), 0,
            "sclc first flow: one local group is admitted");
-    ok_int(tbt_fec_flow_admit_check(true, 0, 1, 8),
-           TBT_FEC_ADMIT_NO_GROUPS,
+    ok_int(tbt_fec_flow_create_code(false, true, 0, 1, 8), -EPROTO,
            "sclc create: an oversized first bitmap is a group error");
-    ok_int(tbt_fec_flow_admit_check(false, 1, 1, 8),
-           TBT_FEC_ADMIT_NO_GROUPS,
+    ok_int(tbt_fec_flow_create_code(false, false, 1, 1, 8), -EPROTO,
            "non-sclc: the same bitmap is a group error");
-    ok_int(tbt_fec_flow_admit_check(false, 1, 32, 16), TBT_FEC_ADMIT_OK,
+    ok_int(tbt_fec_flow_create_code(false, false, 1, 32, 16), 0,
            "non-sclc: a fitting second flow is admitted");
-    ok_int(tbt_fec_flow_admit_check(false, 1, 32, 0),
-           TBT_FEC_ADMIT_NO_GROUPS,
+    ok_int(tbt_fec_flow_create_code(false, false, 1, 32, 0), -EPROTO,
            "non-sclc: zero groups is a group error");
+    ok_int(tbt_fec_flow_create_code(true, false, 0, 1, 1), -EEXIST,
+           "duplicate sid wins over admission");
 }
 
 /* A target that closed fully can clear RCV_SHUTDOWN; TCP_CLOSE is still a
@@ -2410,7 +2491,7 @@ static void test_group_map(void)
 /* ------------------------------------------------------------------ *
  * 9a. Relative mapping: base_pkt/base_block == 0 must reproduce the
  * 0.2.x formulas exactly, and a non-zero origin is the coordinate system
- * the 0x1007 shape switch uses (TBT_FEC_CONV 0x1007).
+ * the shape switch uses (TBT_FEC_CONV 0x1008).
  * ------------------------------------------------------------------ */
 
 static void test_base_mapping(void)
@@ -2523,8 +2604,8 @@ static void test_base_mapping(void)
            "base real len matches legacy");
 }
 
-/* A 0.4.0 peer sends HELLO body[0] == 4 and conv 0x1007. 0.5.0 names 5 and
- * 0x1008; tbt_rx_hello() and tbt_fec_hdr_check() compare exactly, so the
+/* A 0.5.0 peer sends HELLO body[0] == 5 and conv 0x1008. 0.6.0 names 6 and
+ * 0x1009; tbt_rx_hello() and tbt_fec_hdr_check() compare exactly, so the
  * first HELLO and the first FEC record fail with -EPROTO and the carrier
  * closes. */
 static void test_wire_version(void)
@@ -2533,23 +2614,26 @@ static void test_wire_version(void)
 
     memset(hello, 0, sizeof(hello));
     hello[0] = TBT_WIRE_VERSION_V6;
-    ok(hello[0] == 5, "0.5.0 FEC HELLO names version 5", NULL);
-    hello[0] = 4;
+    ok(hello[0] == 6, "0.6.0 FEC HELLO names version 6", NULL);
+    hello[0] = 5;
     ok(hello[0] != TBT_WIRE_VERSION_V6,
-       "0.4.0 HELLO version 4 is refused", NULL);
+       "0.5.0 HELLO version 5 is refused", NULL);
     ok(TBT_WIRE_VERSION == 1, "legacy ARQ HELLO stays version 1", NULL);
-    ok(TBT_FEC_CONV == 0x1008u, "0x1008 is the v8 FEC revision", NULL);
-    ok(TBT_CONV == 0x0008u, "0x0008 is the v8 ARQ revision", NULL);
+    ok(TBT_FEC_CONV == 0x1009u, "0x1009 is the v9 FEC revision", NULL);
+    ok(TBT_CONV == 0x0009u, "0x0009 is the v9 ARQ revision", NULL);
     ok(TBT_OPEN_BODY_LEN == 36, "OPEN body is 36 bytes", NULL);
     ok(TBT_OPEN_ROUTE_SLOT == 32 && TBT_OPEN_TARGET_PORT == 34,
        "OPEN route/target offsets", NULL);
     /* The container routes a decoded chunk through this one range; ALLOC
-     * (0x36) must be inside it or the record reaches the old-frame scanner. */
+     * (0x36) and MS_WIN (0x37) must be inside it or the record reaches the
+     * old-frame scanner. */
     ok(tbt_fec_record_type(TBT_FEC_DATA), "FEC type gate accepts DATA", NULL);
     ok(tbt_fec_record_type(TBT_FEC_ALLOC), "FEC type gate accepts ALLOC",
        NULL);
-    ok(!tbt_fec_record_type((u8)(TBT_FEC_ALLOC + 1)),
-       "FEC type gate rejects 0x37", NULL);
+    ok(tbt_fec_record_type(TBT_FEC_MS_WIN), "FEC type gate accepts MS_WIN",
+       NULL);
+    ok(!tbt_fec_record_type((u8)(TBT_FEC_MS_WIN + 1)),
+       "FEC type gate rejects 0x38", NULL);
     ok(!tbt_fec_record_type((u8)(TBT_FEC_DATA - 1)),
        "FEC type gate rejects 0x2f", NULL);
 }
@@ -3767,10 +3851,11 @@ int main(void)
     test_crc_paths();
     test_bitmap();
     test_control();
-    test_cfg_carriers();
     test_cfg_sclc();
     test_fbk_variant();
+    test_cfg_carriers();
     test_alloc();
+    test_ms_win();
     test_wire_version();
     test_rlnc_single();
     test_rlnc_loss_reorder();

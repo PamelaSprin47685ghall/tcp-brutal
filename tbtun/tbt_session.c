@@ -28,8 +28,8 @@
 #include <net/sock.h>
 
 #include "tbtun.h"
-#include "tbt_carrier_policy.h"
 #include "tbt_map.h"
+#include "tbt_carrier_policy.h"
 #include "tbt_portmap.h"
 
 struct tbt_portmap tbt_ports = {
@@ -1048,15 +1048,20 @@ static bool tbt_stream_is_closing(const struct tbt_stream *st)
  * referenced flow or an ERR_PTR. Two carriers deliver the same OPEN, so a
  * lost admission race (-EEXIST) is resolved by looking the winner up. */
 static struct tbt_fec_flow *tbt_session_open_flow(struct tbt_session *sess,
-                                                  u64 sid, const u8 *body)
+                                                  u64 sid, const u8 *body,
+                                                  bool *admitted)
 {
     struct tbt_fec_flow *flow = tbt_fec_flow_lookup(sess, sid);
 
+    if (admitted)
+        *admitted = false;
     if (flow)
         return flow;
     flow = tbt_fec_flow_admit_mask(sess, sid, body);
     if (IS_ERR(flow) && PTR_ERR(flow) == -EEXIST)
         return tbt_fec_flow_lookup(sess, sid);
+    if (admitted && !IS_ERR(flow) && flow)
+        *admitted = true;
     return flow;
 }
 
@@ -1075,6 +1080,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
     struct tbt_fec_flow *flow = NULL;
     u16 target_port = 0;
     u8 route_slot = 0;
+    bool flow_admitted = false;
 
     if (!sid)
         return TBT_BIND_DROP;
@@ -1090,16 +1096,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
 
         if (!body || len != TBT_OPEN_BODY_LEN)
             return TBT_BIND_BAD;
-        /* route_slot is a u16 on the wire but indexes an 8-entry table. Read
-         * it whole first: truncating 0x0100 to slot 0 would let a peer pick
-         * the default mapping with a value the config never named. */
-        {
-            u16 slot = tbt_le16(body + TBT_OPEN_ROUTE_SLOT);
-
-            if (slot > 0xff)
-                return TBT_BIND_BAD;
-            route_slot = (u8)slot;
-        }
+        route_slot = (u8)tbt_le16(body + TBT_OPEN_ROUTE_SLOT);
         target_port = tbt_le16(body + TBT_OPEN_TARGET_PORT);
         /* group_mask is the first 32 bytes on both planes, but only a FEC
          * session may set a bit. The OPEN mask is the peer's TX partition, so
@@ -1219,6 +1216,12 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
             /* The far side echoes the near's own bitmap. Never admit a flow
              * here: the near is the only allocator. */
             flow = tbt_fec_flow_lookup(sess, sid);
+            if (!flow && sess->fec_sclc)
+            {
+                /* A second stream's echoed OPEN names its own sid, while the
+                 * single SC-LDPC plane is keyed by the first stream's sid. */
+                flow = tbt_fec_flow_shared(sess);
+            }
             if (!flow)
             {
                 atomic64_inc(&sess->bind_drop_no_stream);
@@ -1227,7 +1230,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
         }
         else
         {
-            flow = tbt_session_open_flow(sess, sid, body);
+            flow = tbt_session_open_flow(sess, sid, body, &flow_admitted);
             if (IS_ERR(flow))
             {
                 err = PTR_ERR(flow);
@@ -1247,22 +1250,100 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
                 return TBT_BIND_DROP;
             }
         }
-        if (!tbt_fec_primary_mask_match(sess->fec_sclc, flow->group_mask,
-                                        body))
         {
-            /* One sid, one bitmap. A repeated OPEN that renames the groups of
-             * a live flow is refused; the local allocation stands. */
-            tbt_fec_flow_put(flow);
-            atomic64_inc(&sess->bind_drop_no_stream);
-            return TBT_BIND_DROP;
+            /* Near side compares the echoed bitmap with its own TX mask;
+             * the far side compares it with the peer bitmap bound at the
+             * first OPEN. A different bitmap on the same plane cannot be
+             * served by one codec. */
+            const u8 *bound = (!near && sess->fec_sclc && flow->rx)
+                                  ? flow->rx->group_mask
+                                  : flow->group_mask;
+
+            if (!tbt_fec_primary_mask_match(sess->fec_sclc, bound, body))
+            {
+                /* One sid, one bitmap. A repeated OPEN that renames the
+                 * groups of a live flow is refused; the local allocation
+                 * stands. */
+                if (flow_admitted)
+                    tbt_fec_flow_abort(sess, flow);
+                else
+                    tbt_fec_flow_put(flow);
+                atomic64_inc(&sess->bind_drop_no_stream);
+                return TBT_BIND_DROP;
+            }
         }
     }
 
     if (adopt && !near)
     {
         bool created = false;
-        struct tbt_stream *ast =
-            tbt_stream_get_created(sess, sid, true, false, &created);
+        struct tbt_stream *ast;
+
+        /* Every carrier that intends to adopt the stream owns one admission
+         * slot until it learns whether it won the creation. Claim a lookup
+         * flow's slot here, before get_created: otherwise the carrier that
+         * admitted the flow can abort the last remaining slot and unlink the
+         * plane while this winner is still between lookup and attach. A
+         * non-SC-LDPC flow belongs to one stream, so its lookup reference
+         * is not an admission and must stay a plain put. */
+        if (flow && !flow_admitted && sess->fec_sclc)
+        {
+            if (tbt_fec_flow_claim_slot(sess, flow))
+            {
+                /* The admitting carrier aborted the last other slot and
+                 * unlinked the plane just before this claim. Re-resolve
+                 * once: the dead flow is gone from the table, so a fresh
+                 * admission (or another carrier's fresh flow) is the normal
+                 * path. Only a second failure, against a plane that is also
+                 * dying, drops the OPEN. */
+                tbt_fec_flow_put(flow);
+                flow = tbt_session_open_flow(sess, sid, body,
+                                             &flow_admitted);
+                if (IS_ERR(flow))
+                {
+                    int rerr = PTR_ERR(flow);
+
+                    /* A malformed or overlapping bitmap is a framing error,
+                     * exactly as on the first admission. */
+                    if (rerr == -EPROTO)
+                        return TBT_BIND_BAD;
+                    atomic64_inc(&sess->fec_stream_refused);
+                    return TBT_BIND_DROP;
+                }
+                if (!flow)
+                {
+                    atomic64_inc(&sess->bind_drop_no_stream);
+                    return TBT_BIND_DROP;
+                }
+                {
+                    /* Re-run the one-sid-one-bitmap rule: the retry may
+                     * have built a fresh plane. */
+                    const u8 *bound = (!near && sess->fec_sclc && flow->rx)
+                                          ? flow->rx->group_mask
+                                          : flow->group_mask;
+
+                    if (!tbt_fec_primary_mask_match(sess->fec_sclc, bound,
+                                                    body))
+                    {
+                        if (flow_admitted)
+                            tbt_fec_flow_abort(sess, flow);
+                        else
+                            tbt_fec_flow_put(flow);
+                        atomic64_inc(&sess->bind_drop_no_stream);
+                        return TBT_BIND_DROP;
+                    }
+                }
+                if (!flow_admitted &&
+                    tbt_fec_flow_claim_slot(sess, flow))
+                {
+                    tbt_fec_flow_put(flow);
+                    atomic64_inc(&sess->bind_drop_no_stream);
+                    return TBT_BIND_DROP;
+                }
+            }
+            flow_admitted = true; /* now owns a pending slot */
+        }
+        ast = tbt_stream_get_created(sess, sid, true, false, &created);
 
         if (!ast)
         {
@@ -1271,7 +1352,12 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
                 WRITE_ONCE(sess->far_sid, 0);
             spin_unlock(&sess->lock);
             if (flow)
-                tbt_fec_flow_put(flow);
+            {
+                if (flow_admitted)
+                    tbt_fec_flow_abort(sess, flow);
+                else
+                    tbt_fec_flow_put(flow);
+            }
             return TBT_BIND_DROP;
         }
         /* 256 carriers deliver the same OPEN. tbt_stream_get_created()
@@ -1282,18 +1368,40 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
         if (created)
         {
             if (flow)
-                tbt_fec_flow_attach(ast, flow); /* moves the reference */
+            if (flow)
+            {
+                if (tbt_fec_flow_attach(ast, flow)) /* moves the reference */
+                {
+                    /* The shared mux could not take another leg; the OPEN
+                     * cannot be served, so drop it instead of leaving a
+                     * stream with no data plane. */
+                    tbt_stream_kill(ast, TBT_ST_DEAD);
+                    tbt_stream_put(ast);
+                    return TBT_BIND_DROP;
+                }
+            }
             tbt_far_open_seen(ast, route_slot, target_port);
         }
         else if (flow)
         {
-            tbt_fec_flow_put(flow);
+            /* created=false proves another OPEN copy created the stream. On
+             * the shared SC-LDPC plane abort() also returns this carrier's
+             * admission slot. A grouped flow belongs to the winner's single
+             * stream: use a plain put, because abort() would unlink the flow
+             * that stream is about to attach. */
+            if (sess->fec_sclc)
+                tbt_fec_flow_abort(sess, flow);
+            else
+                tbt_fec_flow_put(flow);
         }
         tbt_stream_put(ast);
     }
     else if (flow)
     {
-        tbt_fec_flow_put(flow);
+        if (flow_admitted)
+            tbt_fec_flow_abort(sess, flow);
+        else
+            tbt_fec_flow_put(flow);
     }
     return TBT_BIND_OK;
 }
@@ -1312,6 +1420,13 @@ void tbt_stream_detach_from_session(struct tbt_stream *st)
     struct tbt_session *sess = st->sess;
     bool detached;
 
+    /* Release the FEC flow before the readiness gate opens. A reader that
+     * sees streams_active=0 must see the plane unlinked, not "about to be":
+     * a sequential stream admitted inside this window shared a plane whose
+     * only owner was already leaving, and the peer dropped every record
+     * under the old sid. */
+    tbt_fec_flow_detach(st);
+
     spin_lock(&sess->lock);
     detached = test_and_clear_bit(TBT_STREAM_F_ACTIVE, &st->attached);
     if (detached && sess->n_active)
@@ -1320,11 +1435,6 @@ void tbt_stream_detach_from_session(struct tbt_stream *st)
         WRITE_ONCE(sess->far_sid, 0);
     tbt_stream_tombstone_locked(st);
     spin_unlock(&sess->lock);
-
-    /* Release the FEC flow with the stream, not at the tombstone/reap
-     * deadline: the next sequential stream must be able to admit its flow
-     * immediately, and n_fec_flows must reach zero here. */
-    tbt_fec_flow_detach(st);
 
     /* A graceful FIN path never queues w_kill, so without this the reaper
      * would never run and the tombstone (and its socket) would stay forever.

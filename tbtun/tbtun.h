@@ -37,6 +37,8 @@
 #include "tbt_uapi.h"
 /* The adaptive shape/switch structs and their mapping helpers. */
 #include "tbt_fec.h"
+/* The pure mux core also owns the shared-plane admission ledger. */
+#include "tbt_fec_ms.h"
 #include <linux/version.h>
 
 /* system_dfl_wq exists from 6.5. Its documented semantics are "unbound, not
@@ -718,6 +720,8 @@ struct tbt_fec_flow;
 struct tbt_fec_drain;
 struct tbt_fec_adapt_sclc_ctl;
 struct tbt_fec_adapt_sclc_est;
+struct tbt_ms_tx;
+struct tbt_ms_rx;
 
 /* One side of an FEC_ALLOC switch: the physical group set a flow will own
  * after the exchange, plus the flow-local packet/block origin of the first
@@ -877,6 +881,14 @@ struct tbt_fec_tx
     bool alloc_committed_resend; /* responder: repeat COMMITTED */
     bool alloc_abort_pending; /* responder: ABORT received */
     bool alloc_fail;       /* this flow's exchange failed */
+    /* SC-LDPC multistream (0.5.0): the packetizer packs whole subframe
+     * blocks from the session mux instead of this plane's capture ring.
+     * Only w_fec_tx touches these; the mux object itself is serialised by
+     * ms_lock against the softirq capture path and window updates. */
+    spinlock_t ms_lock;
+    const u8 *ms_blk; /* block returned by tbt_ms_tx_block() */
+    u32 ms_blk_len;
+    u32 ms_blk_off;
 };
 
 struct tbt_session;
@@ -892,6 +904,10 @@ struct tbt_fec_rx
     struct tbt_fec_flow *flow;
     bool closing;
     spinlock_t lock; /* carrier rx works assemble blocks concurrently */
+    /* Serialises the SC-LDPC mux legs: attach/detach open/close them from
+     * stream work, while w_fec_rx feeds and drains them. All are process
+     * context, so a mutex lets leg allocation stay GFP_KERNEL. */
+    struct mutex ms_lock;
     u16 n, m, s;
     u16 groups;
     u16 slots; /* block slots per group */
@@ -1074,6 +1090,11 @@ struct tbt_fec_flow
     /* 0 = free slot, 1 = active, 2 = draining, 3 = dead. Only the control
      * path writes it; carrier RX reads it to refuse a dying flow. */
     u8 state;
+    /* SC-LDPC shared plane: pending counts admitted references that have
+     * not attached yet; refs counts attached mux legs. The plane is
+     * unlinked only when both reach zero. A duplicate OPEN takes a pending
+     * slot and must give it back through tbt_fec_flow_abort(). */
+    struct tbt_ms_admit admit;
     struct tbt_fec_tx *tx;
     struct tbt_fec_rx *rx;
     /* Final reference may be dropped by a carrier RX lookup, where freeing a
@@ -1318,6 +1339,19 @@ struct tbt_session
     u8 fec_d;
     bool fec_sclc;
     struct tbt_fec_sclc_shape fec_sclc_shape;
+    /* SC-LDPC carries every stream on one FEC plane, so the payload byte
+     * stream is multiplexed: one TX packer and one RX parser per session.
+     * The shared flow's admission ledger counts admitted carriers and
+     * attached legs; the flow is destroyed only when both reach zero. */
+    struct tbt_ms_tx *fec_ms_tx;
+    struct tbt_ms_rx *fec_ms_rx;
+    /* Diagnostic counters for the subframe layer (0.5.0). */
+    atomic64_t fec_ms_parse_bad;
+    atomic64_t fec_ms_win_tx;
+    atomic64_t fec_ms_win_rx;
+    atomic64_t fec_ms_fin;
+    atomic64_t fec_ms_rst;
+    atomic64_t fec_ms_credit_wait;
     /* Serialises flow admission: the group check and the plane allocation
      * must not interleave between two carriers' OPEN handlers. */
     struct mutex fec_alloc_lock;
@@ -2140,6 +2174,9 @@ int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
 /* One OPEN per live carrier, so a carrier that dies before the first copy
  * still cannot strand the stream (DESIGN.md §3.6, C3). */
 void tbt_tx_announce(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp);
+/* Recompute a carrier's OPEN-ready flag from the session's usable streams:
+ * set only when every one of their OPENs is written on this carrier. */
+void tbt_tx_carrier_publish_up(struct tbt_session *sess, struct tbt_carrier *c);
 /* FIN with the stream's next byte offset as its seq, one copy per live
  * carrier; the receiver applies it only when every earlier byte arrived.
  * Returns the number of copies actually enqueued: 0 means no carrier was
@@ -2240,10 +2277,16 @@ struct tbt_fec_flow *tbt_fec_flow_admit_mask(struct tbt_session *sess,
                                              u64 sid,
                                              const u8 mask[TBT_FEC_BITMAP_BYTES]);
 struct tbt_fec_flow *tbt_fec_flow_lookup(struct tbt_session *sess, u64 sid);
+/* The shared SC-LDPC plane with one reference, or NULL. Used to validate an
+ * echoed OPEN for a stream that is not the plane's original sid. */
+struct tbt_fec_flow *tbt_fec_flow_shared(struct tbt_session *sess);
 void tbt_fec_flow_put(struct tbt_fec_flow *f);
 /* Bind a stream to its flow (one reference moves to the stream) and release
- * it at detach. */
-void tbt_fec_flow_attach(struct tbt_stream *st, struct tbt_fec_flow *f);
+ * it at detach. A nonzero return consumed the admission reference already. */
+int tbt_fec_flow_attach(struct tbt_stream *st, struct tbt_fec_flow *f);
+/* Take one admission slot for a stream whose flow came from lookup. Fails
+ * with -ESTALE when the plane died before the slot could be counted. */
+int tbt_fec_flow_claim_slot(struct tbt_session *sess, struct tbt_fec_flow *f);
 void tbt_fec_flow_abort(struct tbt_session *sess, struct tbt_fec_flow *f);
 void tbt_fec_flow_detach(struct tbt_stream *st);
 /* Build the next free group bitmap for a new flow. Returns the group count,

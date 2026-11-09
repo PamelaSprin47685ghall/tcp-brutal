@@ -413,14 +413,13 @@ int main(void)
 }
 EOF
     lim=$(awk '/#define TBT_LINE_MAX/{ print $3; exit }' "$1/tbtun/tbt_parse.h")
-    # tbt_parse_line() validates adaptive mode and portblock through the pure
-    # helpers, so the probe links the same sources as host-test
+    # tbt_parse_line() validates adaptive mode and portblock through the two
+    # pure helpers, so the probe links the same three sources as host-test
     # (Makefile HOST_TEST_SRCS). Linking only tbt_parse.c leaves the symbols
     # unresolved even though the probe never calls the parser.
     if ! cc -std=gnu99 -O2 -I "$1/tbtun" -o "$tmp/render_len" \
         "$tmp/render_len.c" "$1/tbtun/tbt_parse.c" "$1/tbtun/tbt_map.c" \
-        "$1/tbtun/tbt_portmap.c" "$1/tbtun/tbt_fec_adapt_sclc.c" \
-        2>"$tmp/cc.err"; then
+        "$1/tbtun/tbt_portmap.c" "$1/tbtun/tbt_fec_adapt_sclc.c" 2>"$tmp/cc.err"; then
         printf 'cannot compile probe: %s' "$(head -1 "$tmp/cc.err")"
         return 1
     fi

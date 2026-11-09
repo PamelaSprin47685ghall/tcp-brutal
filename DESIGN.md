@@ -270,132 +270,137 @@ GF(16) uplink, 512 reserved) and the rate follows `n/(n+m)`. The
 per-direction `FEC_CFG` INIT carries `L`, block and rate; the receiver uses
 the peer's shape. The codec lives in `tbt_fec_sclc.c`; `host/test_fec_sclc`
 and `host/test_fec_sclc_data` cover construction and the data-plane mapping.
-The uplink GF(16) codec uses the Wire v8 bit-plane share mapping
-(`TBT_SCLC_MAP_BITPLANE64`): 64-lane batches, four little-endian bit planes
-per symbol, and one symbol->share map per batch, so a lost share erases the
-same variable set in every lane. The legacy symbol-interleaved layout remains
-a host A/B control and is not wire-compatible with v8.
-SC-LDPC rate adaptation ships as a per-flow adaptive law (off by default):
-since 0.4.3 both the downlink 1x256 and the uplink 8x32 codecs switch along
-the six-point ladder. With an old 0.4.0..0.4.2 peer, a CFG_NACK makes the
-controller silently stay at 128/128.
+SC-LDPC rate adaptation ships in 0.4.0 as a per-flow adaptive law (off by
+default): the uplink GF(16) codec can switch along the ladder; the downlink
+binary codec stays at rate 50%.
 
 The **GF(2) band RLNC** data plane (`mode=rlnc` or `mode=grouped`) remains the
 low-CPU fallback. It is no longer tuned:
 the `n/m` class table is frozen and the SC-LDPC work does not extend it. The
 production shape is 32 groups of `n=4, m=4` (256 carriers).
 
-**Adaptive status (0.4.3).** Adaptive FEC is implemented
-for the GF(2) data plane, Phase 1 only: `n + m = 8`, `groups = 32`, and `m` in
-1..6. The receiver estimates the DATA-share loss rate from per-block miss
+**Adaptive status (0.4.0; wire values current to 0.6.0).** Adaptive FEC is
+implemented for the GF(2) data plane, Phase 1 only: `n + m = 8`,
+`groups = 32`, and `m` in 1..6. The receiver estimates the DATA-share loss
+rate from per-block miss
 bitmaps (1 s window, EWMA, at least 1024 alive-filtered shares and 4
 super-blocks); the sender runs the control law and switches shape through
-`FEC_CFG`/`FEC_FBK` (64-byte bodies, `TBT_FEC_CONV` 0x1008) at a super-block
-boundary. `adaptive=` follows `fec` for `mode=rlnc`/`grouped` (on when
-`fec=on`); for `mode=sc-ldpc` it defaults off. `session <id>
+`FEC_CFG`/`FEC_FBK` (64-byte bodies, `TBT_FEC_CONV` 0x1009) at a super-block
+boundary. `adaptive=` follows `fec` by default, and `session <id>
 adaptive=on|off` flips it at runtime; the `c13` line exports the state.
-Phase 2 (`n + m` other than 8) is not implemented for the GF(2) family. The
-SC-LDPC per-flow law uses the same `FEC_CFG`/`FEC_FBK` handshake: since 0.4.3
-both the downlink binary 1x256/L8 and the uplink GF(16) 8x32/L16 codecs build
-every ladder split and switch rates. With an old 0.4.0..0.4.2 peer, a CFG_NACK
-makes the controller silently stay at 128/128. `mode=sc-ldpc` defaults to
-`adaptive=off` and accepts `adaptive=on`.
+Phase 2 (`n + m` other than 8) is not implemented. The SC-LDPC per-flow law
+uses the same `FEC_CFG`/`FEC_FBK` handshake: in 0.4.0 the uplink GF(16)
+8x32/L16 codec switches along the ladder. In 0.6.0 (and the 0.5.0
+multistream line it merges) the subframe mux fixes the configured SC-LDPC
+shape for the whole session (the block span is part of the packing
+contract), so the controller reports but does not switch; the downlink
+binary 1x256/L8 codec is fixed at rate 50. `adaptive=` is off by default.
 
-**Multi-stream status.** FEC v7 (`0x1007`, carried by v8 as `0x1008`) gives
-every live application stream its own FEC TX/RX plane keyed by `sid`: block
-ids, credit, delivery
-cursors, NACK state and FIN are per flow, and the 48-byte record layout is
-unchanged. The carriers are split into physical groups
-(`carriers / (n + m)`; 32 on the production 256/4+4 shape). Each flow owns a
-disjoint group bitmap, carried in OPEN. `fec_groups_per_flow=` selects the
-allocation mode: `0` (the default) enables runtime rebalancing, while a
-non-zero value pins a static quota for A/B tests or a peer that does not
-implement `FEC_ALLOC` (`16` owns half of the 32 production groups).
+**Multi-stream status.** Two cuts share the same stream lifecycle. RLNC and
+other multi-group shapes (`0x1007`, 0.4.0) give each stream its own FEC flow
+and physical group subset. SC-LDPC (`0x1008`, 0.5.0; merged as `0x1009` in
+0.6.0) has one physical plane
+(downlink `1x256`, uplink `8x32`), so the plane's DATA/PARITY payload is a
+byte stream of 32-byte subframes, each naming `[sid, stream offset, length,
+type]` (`tbt_fec_ms.h`). One shared FEC flow serves up to 16 concurrent
+streams; per-stream capture rings, receive windows, FIN/RST subframes and an
+`MS_WIN` control record give independent flow control and close. The FEC
+sequence, block id and repair remain plane-wide: a lost share is repaired for
+every stream in that block. A single stream still finds the same plane
+geometry and pays the same 0.5% framing overhead (32 bytes per up-to-8192-byte
+subframe).
 
-With the default `0` the near side is the allocator. A joining stream
-takes its equal share (`total/(N+1)`, remainder to the lowest sids) from
-free groups, or the allocator sends `FEC_ALLOC` (`0x36`) to shrink the
-donors before admitting it. A stream close returns its groups and grows the
-survivors back. The exchange is two-sided and symmetric: each direction
-switches at its own super-block boundary, the receiver applies a mask only
-after its delivery frontier reached the sender's switch point, and the
-sender stays stopped until the peer confirms. A REQUEST is retried; a peer
-that never answers is abandoned and the old mask resumes at the same point.
-SC-LDPC keeps one flow (a second flow is still refused).
+**Plane lifetime and locks.** A plane lives exactly as long as the streams
+attached to it. `ms_pending` counts admissions that have not attached yet and
+`ms_refs` counts attached mux legs; the plane is unlinked only when both are
+zero, and a fresh flow's own admission is one pending slot. A duplicate OPEN
+that loses the stream-creation race gives its slot back through
+`tbt_fec_flow_abort()`; a carrier that wins the stream with a plane found by
+lookup claims its own slot first (`tbt_fec_flow_claim_slot()`), under the
+same allocation lock and only while the plane is still linked. The unlink
+path drops the table reference only if this caller removed the flow, so a
+second abort/detach cannot underflow it. The last stream's detach unlinks the
+flow *before* it clears the session's active count, so waiting for
+`streams_active=0` can never admit a successor onto a plane that is about to
+die. The TX mux lock is a spinlock and a stream ring is allocated and freed
+outside it; only the installed pointer moves under the lock. The RX mux uses
+a mutex because leg allocation sleeps, and only an explicit open creates a
+leg (a late subframe cannot exhaust the table). A kill shuts the stream's
+socket down in `w_kill`, never at the call site, because a kill can run inside
+a carrier RX actor that already holds another socket's lock.
 
 The 256-carrier performance target remains **90% of a direct/2 stream**. The
 0.2.1 measurement is 86.8% (97.3 Mbit/s against 112.1), 3.2 points short, and
 the gap stays open; 0.2.3's 256-carrier steady state is a different
 measurement (23.9 Mbit/s average over 60 s, 27.9 Mbit/s 10 s max).
 
-### 3.1.3 FEC v6..v8 over the container (current 0x1008)
+### 3.1.3 FEC v9 over the container (T0 0x1009)
 
-The FEC record format is independent, with a 48-byte header, not a wider old
-frame. It rides the same carriers and the same HTTP container. The current
-revision is
-`0x1008`; `0x1007` was the 0.4.0 multi-stream cut, `0x1006` the adaptive cut,
-`0x1005` the 0.2.2 stream-id cut, and 0.1.0 used `0x1001`. The 48-byte header
-layout and every offset stay unchanged. `0x1006` grew `FEC_CFG` to 48 bytes to name the
-shape switch, made `FEC_FBK` a 48-byte report, and moved HELLO body[0] to
-version 3; `0x1007` makes FEC `seq`/`block_id` stream-local, adds the 32-byte
-OPEN group bitmap and `FEC_ALLOC` (0x36), and moves HELLO body[0] to
-version 4; `0x1008` grows `FEC_CFG` and `FEC_FBK` to 64 bytes, restores the
-full 256-bit carrier bitmap, makes OPEN 36 bytes and moves HELLO body[0] to
-version 5. A 0.2.x or 0.4.x peer is refused at the first HELLO.
+The current FEC record revision is `0x1009` (0.6.0, HELLO version 6). 0.4.0
+took it to `0x1007` (multi-stream flows). The two parallel 0.5.0 cuts both
+claimed `0x1008`: one carried the 36-byte OPEN and the 64-byte
+`FEC_CFG`/`FEC_FBK`, the other the SC-LDPC subframe mux with `MS_WIN`
+(0x37). 0.6.0 merges them under one revision; the 48-byte record layout and
+every offset stay unchanged. The material below keeps the 0x1006 adaptive
+cut as history.
 
-- `profile=raw`: one FEC record follows another with no wrapper.
+The FEC v6 data plane uses an independent 48-byte record format
+(`conv=0x1009`; `0x1008` was the parallel 0.5.0 cut, `0x1007` was 0.4.0,
+`0x1006` was the adaptive cut, `0x1005` was the 0.2.2 stream-id cut, 0.1.0
+used `0x1001`), not a wider old frame. It rides the same carriers and the
+same HTTP container. The 0x1006 cut is the adaptive one: `FEC_CFG` grows to
+48 bytes and names the shape switch, `FEC_FBK` becomes a 48-byte report, and
+HELLO body[0] moves to version 3. A 0.2.x peer is refused at the first
+HELLO.
+
+- `profile=raw`: one 48-byte FEC record follows another with no wrapper.
 - `profile=http-kal` / `http-kal-drip`: one HTTP chunk body is exactly one FEC
   record. The request line, headers, `Transfer-Encoding: chunked`, chunk-size
   lines and CRLFs stay plaintext; only the FEC body may be encrypted by the
   optional ChaCha8 layer. A middlebox therefore still sees ordinary HTTP/1.1.
-- Control records (ACK/NACK/FEC_CFG/FEC_FBK/FEC_ALLOC) use the same
+- Control records (ACK/NACK/FEC_CFG/FEC_FBK/ALLOC/MS_WIN) use the same
   one-chunk-per-record rule. They are written only at record boundaries; a
   partial record is never interleaved with a control frame.
-- **FEC_ALLOC (0x36, 64-byte body).** One group rebalance. `epoch` is
-  monotonic, `group_mask[32]` names the physical groups, then `flags`
-  (`ACK 0x01`, `DONE 0x02`, `COMMITTED 0x04`, `ABORT 0x08`) and three
-  reserved zero bytes. `switch_pkt`/`block_base` name the sender's TX origin
-  on the new set
-  (a super-block boundary of the old one). The near side is the only
-  initiator: REQUEST -> ACK (far's TX origin) -> DONE (far applied its RX) ->
-  DONE (near applied its RX) -> COMMITTED (far swapped its TX). A REQUEST
-  that is never acknowledged is aborted, and both ends resume the old mask
-  at the same origin. The 64-byte body is unchanged from 0.4.4; the v8 cut
-  moves `TBT_FEC_CONV` to `0x1008`, and a pre-v8 peer is refused at the first
-  HELLO.
-- **PARITY block marker (`TBT_FEC_CONV` 0x1002; still present in 0x1008).** There is no
-  4-byte marker and no magic number. A marker is a set of values inside the
-  48-byte `struct tbt_fec_hdr`: `type = TBT_FEC_PARITY` (0x31), `flags = 0`,
-  `share_index = n` (parity 0), `epoch = 0`, `win_len = 0`, `payload_len = 0`,
-  `conv = 0x1008`, `payload_crc32c = 0` (the CRC32C of an empty payload).
+- **PARITY block marker (`TBT_FEC_CONV` 0x1009; introduced in 0x1002).**
+  There is no 4-byte marker and no magic number. A marker is a set of values
+  inside the 48-byte `struct tbt_fec_hdr`: `type = TBT_FEC_PARITY` (0x31),
+  `flags = 0`, `share_index = n` (parity 0), `epoch = 0`, `win_len = 0`,
+  `payload_len = 0`, `conv = 0x1009`, `payload_crc32c = 0` (the CRC32C of an
+  empty payload).
   `header_crc32c` still covers +0..+43 and must match. The receiver accepts
   `win_len == 0` only with `payload_len == 0 && epoch == 0`, rejects a marker
   for a block that already holds DATA/parity or `win_len_set`, and rejects DATA
   for a block after its marker. 0.1.0 required PARITY
   `payload_len == max_payload` and `win_len != 0`, so the marker and that
-  relaxation shipped together with 0x1002 and remains in 0x1008.
-- **Stream id (`TBT_FEC_CONV` 0x1005; still in 0x1008).** DATA and PARITY
-  carry a u64 `sid` at header +32; every per-stream control record
-  (ACK/NACK/CFG/FBK/ALLOC) carries the flow's sid, and 0 is reserved for a
-  session-wide record. The receiver routes a share or per-stream control
-  record by `sid`; a `sid` with no live flow is dropped. The sender tags the
-  old block's records with the old sid when a stream switches, so a queued old
-  record cannot reach the new stream. The header grew to 48 bytes in 0x1005:
-  `payload_crc32c` moves to +40 and
-  `header_crc32c` to +44 (covers +0..+43). A sequential new stream resets the
-  RX delivery state and rebases its window on the first block; switching
-  streams also clears the old TX state and closes the old target socket.
+  relaxation shipped together with 0x1002 and remain in the current revision.
+- **Stream id (`TBT_FEC_CONV` 0x1009; introduced in 0x1005).** DATA and
+  PARITY carry a u64 `sid` at header +32; control records carry 0. The
+  receiver drops a share whose sid is not its current stream, and the sender
+  tags the old block's records with the old sid when a stream switches, so a
+  queued old record cannot reach the new stream. The header grows to 48
+  bytes: `payload_crc32c` moves to +40 and `header_crc32c` to +44 (covers
+  +0..+43). A sequential new stream resets the RX delivery state and rebases
+  its window on the first block; switching streams also clears the old TX
+  state and closes the old target socket.
+- **64-byte shape bodies (`TBT_FEC_CONV` 0x1009).** `FEC_CFG` and `FEC_FBK`
+  are 64 bytes. The v7 48-byte prefix is unchanged; the extension names
+  `codec_variant`/`L`/`block`/`rate_ppm`, protected by a second CRC over
+  `+48..+55`, with `reserved2` at `+60`. FBK restores the full 256-bit
+  `carrier_bitmap[32]`, moves `p_fast_ppm` to `+48`, and carries the
+  receiver's variant/L/block and current/target rates.
+- **SC-LDPC single-plane stream mux (`TBT_FEC_CONV` 0x1009).** In
+  `mode=sc-ldpc` the DATA/PARITY payload is a stream of 32-byte subframes
+  tagged `[sid, offset, length, type]` (`tbt_fec_ms.h`), packed back to back
+  with no padding. Up to 16 streams share the one 1x256 downlink plane (or
+  the 8x32 GF(16) uplink); each has a 256 KiB receive window, independent
+  FIN/RST, and a 16-byte `MS_WIN` (0x37) report of delivered offset and
+  credit. FEC repair and the replay ring stay plane-wide, so a lost share is
+  rebuilt for every stream in its block.
 - `fec=on` maps one share to each carrier: `carriers = groups * (n + m)`,
   `group(c) = c / (n + m)`, `share(c) = c % (n + m)`. `mode=rlnc` is one group
   (`carriers == n + m`); `mode=grouped` is 32 groups of 8 in production
   (`carriers=256`, `n=4`, `m=4`). `profile=raw` and `http-kal` are both
   supported.
-- With `fec=on mode=grouped` and no explicit `carriers=`, the parser
-  picks the largest multiple of `n + m` not above 64 (`4+4` -> 64,
-  `5` -> 60, `n + m > 64` -> one group). The CFG receiver checks
-  `groups * (n + m) == carriers` against the session's effective
-  `carriers`, not a fixed 256, so 32/64/128-carrier FEC_CFG/FEC_INIT is
-  legal; explicit `carriers=256` remains the 32x8 production shape.
 - The global packet sequence is striped over the groups
   (`group = seq % groups`). Each group owns its block window, codec state and
   parity. A super-block is one block from every group; it covers the contiguous
@@ -563,22 +568,25 @@ version 5. A 0.2.x or 0.4.x peer is refused at the first HELLO.
   repaired by NACK; it is still held by TCP, and it becomes visible only when
   that TCP fails, exactly as a direct stream would. The inequality is not a
   promise that the tunnel never stalls.
-- **Single-stream default.** Before 0.4.0 the plane named one stream with
-  `far_sid` and kept one RX delivery state, so a second live stream was
-  refused (`-EOPNOTSUPP`, `fec_stream_refused`) and iperf3's control+data pair
-  could not run over `fec=on`. Measured on that WAN smoke: the control
-  connection sent 167 bytes, the far acknowledged 37, iperf3's server failed
-  its own cookie read, and the client reported an idle timeout after 114 s.
-  The v7 cut (`0x1007`, 0.4.0) adds per-flow RX/TX state, `sid` routing and the
-  `fec_groups_per_flow` quota. Since 0.4.4 the default `0` lets the near side
-  rebalance groups at runtime, so a non-SC-LDPC grouped shape admits a second
-  stream without a precomputed static quota; a non-zero value pins that quota.
-  SC-LDPC remains single-flow. A load tool with one connection per test
-  (`tbt_ping`/`tbt_burst`) is unaffected either way.
-- 0.4.0 makes the FEC packet sequence and block id stream-local; FIN's
-  `pkt_end`/`pkt_base` are stream-local too. DATA/PARITY and per-stream
-  control records carry the flow's `sid`, and delivery offsets are measured
-  from the byte at which the stream began (`stream_base`), so a sequential
+- **One live stream per session.** The plane names its stream with `far_sid`,
+  and the far side keeps one RX delivery state, so a second live stream would
+  have its bytes delivered to whichever stream is current. A FEC record does
+  carry a 64-bit `sid` (0x1005), but it only lets the receiver drop a queued
+  old-stream record; it is not a demultiplexer. A two-connection protocol --
+  iperf3 opens a control connection and a data connection, and keeps both open
+  for the whole test -- therefore cannot run over `fec=on`: the near's
+  `tbt_stream_start_now()` refuses the second connection (`-EOPNOTSUPP`,
+  `fec_stream_refused`), the public socket is reset, and the first connection
+  keeps its bytes. Measured on the WAN smoke: the control connection sent 167
+  bytes, the far acknowledged 37, iperf3's server failed its own cookie read,
+  and the client reported an idle timeout after 114 s. A load tool with one
+  connection per test (`tbt_ping`/`tbt_burst`) is unaffected; a multi-stream
+  FEC plane needs per-stream RX/TX state and a demux key, which the v7 cut
+  (`0x1007`, 0.4.0) provides (§3.1.2).
+- The FEC plane carries the session's packet sequence, not a per-stream one:
+  DATA/PARITY carry the current stream's `sid` for filtering, but delivery
+  offsets are measured from the byte at which the current stream began
+  (`stream_base`), so the next
   connection in the same session starts at stream byte 0 -- iperf3's data
   connection after its control connection, and any request/response protocol
   that reconnects.
@@ -591,7 +599,7 @@ version 5. A 0.2.x or 0.4.x peer is refused at the first HELLO.
   lost. Padding is never delivered.
 - The old 16-carrier ARQ record and its `path_ack_mask` are unchanged and are
   used only when `fec=off`. Its `path_id` is a carrier index and is *not*
-  limited to 16: the carrier layer has 256 slots, and a FEC v8 session with
+  limited to 16: the carrier layer has 256 slots, and a FEC v6 session with
   `carriers=256` sends HELLO/OPEN/FIN/RST with `path_id` 16..255. Only the
   per-path ack fields keep the 16-carrier width. Capping the index at 16 made
   every carrier from 16 up fail its own HELLO encoding, which surfaced as
@@ -745,7 +753,8 @@ Frame header, exactly 32 bytes (offsets add up):
 +24 u32  sid_lo       low 32 bits of the 40-bit stream id
 +28 u8   sid_hi       high 8 bits of the 40-bit stream id (v4 uses them)
 +29 u8   reserved2 (0)
-+30 u16  conv         0x0008 (0.4.0 used 0x0007; 0.2.0 used 0x0006)
++30 u16  conv         0x0009 (0.5.0 used 0x0008, 0.2.0 introduced 0x0006,
+                      0.1.0 used 0x0005)
 (total: 32 bytes)
 ```
 
@@ -763,21 +772,20 @@ Payload layouts:
 
 - **DATA**: payload = raw application bytes (1..8192); a zero-length DATA frame is
   refused on receive, because it wedges the receiver and the emitter never sends one.
-- **OPEN** (`TBT_CONV` 0x0008): payload exactly `TBT_OPEN_BODY_LEN` = 36
-  bytes. `+0 u8 group_mask[32]` names the flow's physical FEC groups (bits at
-  or above `carriers / (n + m)` must be zero; all zero without FEC);
-  `+32 u16 route_slot` is the near side's listen mapping slot;
+- **OPEN** (`TBT_CONV` 0x0009): payload exactly `TBT_OPEN_BODY_LEN` = 36
+  bytes. `+0 u8 group_mask[32]` names the flow's physical FEC groups (all zero
+  without FEC); `+32 u16 route_slot` is the near side's listen mapping slot;
   `+34 u16 target_port` is that slot's far-side destination port, both
   little-endian. Zero means "use the far side's configured port for this
-  slot", which is the 0.4.0 behavior; any other value must equal it or the
+  slot", which was the 0.4.0 behavior; any other value must equal it or the
   OPEN is dropped before a stream is created. The far echo repeats the slot
   and names no port. The header's `sid_hi:sid_lo` names the stream. A 0.4.0
   OPEN is 32 bytes and is refused by the length bound.
 - **FIN**: payload exactly `TBT_FIN_BODY_LEN` = 16 bytes, little-endian
-  (`TBT_CONV` 0x0008): `+0 u64 pkt_end` (this stream's packet seq after its
-  last DATA packet) and `+8 u64 pkt_base` (this stream's packet seq of its
-  first DATA packet, aligned to the super-block `groups*n`). Since 0x0007 both
-  fields are stream-local, not session-absolute. `tbt_body_bounds()` sets `TBT_F_FIN` to
+  (`TBT_CONV` 0x0009; the body dates from 0x0006): `+0 u64 pkt_end` (the absolute
+  session packet seq after this stream's last DATA packet) and `+8 u64 pkt_base`
+  (the absolute session packet seq of this stream's first DATA packet, aligned
+  to the super-block `groups*n`). `tbt_body_bounds()` sets `TBT_F_FIN` to
   `min = max = 16`; a non-FEC session sends the same 16 zero bytes, so one
   length rule covers both. A 0.1.0 peer sends an empty FIN body and is refused
   by the new bound.
@@ -795,9 +803,7 @@ Payload layouts:
   revision can add it without renumbering, but this revision's receiver refuses it with
   `-EPROTO`; no sender emits one.
 - **HELLO**: `u8 ver; u8 role; u8 nonce[16]; u16 payload_max; u16 chunk_max; u8
-  profile|gen`. `ver` is `TBT_WIRE_VERSION` (1) for the old ARQ and
-  `TBT_WIRE_VERSION_V6` (5) for a FEC v8 session, independent of the module
-  version. The last byte has exactly the §3.1.1 layout:
+  profile|gen`. `ver` is `TBT_WIRE_VERSION` (1), independent of the module version. The last byte has exactly the §3.1.1 layout:
 
   ```
   bit   7 6 | 5 4 3 2 | 1 0
@@ -843,7 +849,8 @@ than the emit rules, because it must accept a peer and a middlebox that only rel
   1) is filler and is discarded. PAD and drip may interleave between records. This is
   a security-relevant stance: it removes the ambiguous framing a hostile peer could
   use to smuggle bytes.
-- The frame layout is `TBT_CONV` 0x0008 (0.4.0 used 0x0007; 0.2.0 used 0x0006): `body_len` is the
+- The frame layout is `TBT_CONV` 0x0009 (0.5.0 used 0x0008, 0.1.0 used
+  0x0005): `body_len` is the
   u16 at header offset +6 and there is no 4-byte prefix. 0.2.0 adds the 16-byte
   FIN body; `tbt_uapi.h`/`tbt_proto.c` are authoritative for the current wire.
 - The response parser requires status 200, accepts HTTP/1.0 and HTTP/1.1 status lines,
@@ -893,11 +900,10 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
   first frame on every carrier MUST be HELLO, which carries the session nonce; the frame
   header's `path_id` is the carrier index. HELLO is what authorises the peer to name
   streams on that connection. A session carries up to `TBT_STREAMS_MAX` (128) concurrent
-  streams. In **FEC mode** 0.4.0 permits concurrent streams only when
-  `fec_groups_per_flow` reserves groups; with the default 0 (and always on
-  SC-LDPC) a second concurrent stream is refused (`-EOPNOTSUPP`,
-  `fec_stream_refused`). The v7 cut (`0x1007`) provides per-flow RX/TX state
-  and `sid` routing (§3.1.2). On the far side an OPEN for an unknown sid adopts that stream; DATA, FIN or RST
+  streams. In **FEC mode** this is narrowed to one live application stream: the far side
+  keeps one `far_sid` and one RX delivery state, a second concurrent stream is refused
+  (`-EOPNOTSUPP`, `fec_stream_refused`) before 0.4.0; concurrent multi-stream is the v7
+  cut (`0x1007`, 0.4.0) (§3.1.2). On the far side an OPEN for an unknown sid adopts that stream; DATA, FIN or RST
   for an unknown sid is dropped, because only OPEN may create a stream. OPEN is sent once
   per carrier for each stream. A FEC share is sent on a carrier only after this stream's
   OPEN has been written on it (`c->up`); a share that arrives before the far's stream
@@ -1419,17 +1425,12 @@ limit to 256 requires widening those to 256-bit masks and chunking or enlarging 
 and WINDOW bodies; that is a data-plane change and is deferred to the FEC block model.
 What is already scalable: the socket-buffer budget above, the port map (one absolute
 65536-bit bitmap, so any window over 1..65535 is fine), the per-stream limits, and the
-procfs renderers (per carrier, no fixed stride). Resource estimate at 256 carriers
-(0.4.2, from the constants the module allocates): 256 TCP sockets and their work
-items; 256 × 102,400 B (100 KiB) of carrier buffers for an ARQ session, 256 ×
-86,528 B (84.5 KiB) for a FEC `profile=http-kal` session (its encoder holds only
-control records), or 256 × 65,536 B (64 KiB) for `profile=raw`, which skips the
-three HTTP buffers. A per-carrier 50 ms poll = 5120 wakes/s, so the poll must stay
-one session-level scan. The FEC planes add one receive arena (16 MiB) per
-direction and, once the packetizer has a DATA packet to send, one replay window
-(~14.1 MiB at 256 carriers); every plane above 32 KiB is vmalloc-backed so it
-never takes a high-order slab page block. The 128 MiB socket-buffer budget bounds
-the kernel side.
+procfs renderers (per carrier, no fixed stride). Resource estimate at 256 carriers:
+256 TCP sockets and
+5 work structs each (poll/pump/rx/tx/connect), 256 × ~24 KiB of HTTP/parser state
+(~6 MiB), and a per-carrier 50 ms poll = 5120 wakes/s; the poll must become one
+session-level scan (20 wakes/s) before 256 is enabled, and the per-carrier keepalive
+must batch. The 128 MiB socket-buffer budget bounds the kernel side.
 
 **Platform.** 1G is the physical port; 500-750 Mbit/s at the application is
 the accepted target. The 256-carrier, 1G target is ARM64. The `.74` host
@@ -1884,13 +1885,6 @@ Without that check the reference is owed to an instance that never exists, and
 bounded (`TBT_SESSION_DRAIN_MS`): a leak is reported with the remaining state and the
 session is leaked rather than pinning the writer and `rmmod` behind it.
 
-The stats renderer is the one `/proc` reader that drops `tbt_lock` while keeping a
-session reference. That reference keeps the `tbt_session` alive but not `car[]`,
-`fec_outq` or the stream hash, which destroy frees before the drained wait. The render
-therefore holds the read side of a per-session `stats_lock`; destroy takes the write side
-before the first child is cleared and releases it after `tbt_fec_data_free()`, before the
-wait. A reader that arrives after that sees the cleared pointers.
-
 ### 8.3 `/proc/net/tbtun/*` grammar
 
 `config` (read/write, one directive per write; a read renders the current config):
@@ -2027,17 +2021,12 @@ random at tunnel creation).
   (`carriers = groups * (n + m)`, `group = carrier / (n + m)`,
   `share = carrier % (n + m)`); `mode=sc-ldpc` selects the SC-LDPC codec
   (§3.1.2); `w` is the codeword block (256 downlink, 128 GF(16) uplink), and
-  `carriers=0` resolves to `n + m`, except `fec=on mode=grouped`, which
-  takes the largest multiple of `n + m` not above 64 (one group when
-  `n + m > 64`); a nonzero `carriers` must be a multiple of `n + m`.
-  `fec=on` requires `m >= 1` and `carriers >= n + m`.
-- `adaptive=on|off` selects the shape control law (§3.1.2). For
-  `mode=rlnc`/`grouped` it defaults to `fec` (on when `fec=on`); for
-  `mode=sc-ldpc` it defaults off. It requires `fec=on`. The GF(2) family only
-  implements the `n + m = 8` shapes, where `adaptive=on` ignores `w` and uses
-  `w = 2n, d = n`; `mode=sc-ldpc` uses the SC-LDPC rate ladder and accepts
-  `adaptive=on` when the initial profile is on it. The configured `n/m` is
-  the initial class. `session <id> adaptive=on|off`
+  `carriers=0` resolves to `n + m`, and a nonzero `carriers` must be a multiple
+  of `n + m`. `fec=on` requires `m >= 1` and `carriers >= n + m`.
+- `adaptive=on|off` selects the 0.3.0 shape control law (§3.1.2). It defaults
+  to `fec` (on when `fec=on`), requires `fec=on`, and only the `n + m = 8`
+  family is implemented. `adaptive=on` ignores `w` and uses `w = 2n, d = n`;
+  the configured `n/m` is the initial class. `session <id> adaptive=on|off`
   flips it on the running session without rebuilding it. The `c13` line in
   `stats` reports the epoch, shape, class, `p_ppm`, `p_win_ppm`,
   `r_fail_ppm`, switches, aborts, rollbacks and pauses.
@@ -2163,8 +2152,7 @@ therefore a **per-open-file line buffer**:
 ### 8.4.2 `/proc` is the control surface, not `/sys`
 
 All tunables live under `/proc/net/tbtun/`. `/sys/module/tbtun/parameters/` holds only the
-load-time module params (`debug`, `max_tunnels`, `max_carriers`, `debug_loss`,
-`hold_enable`, `fec_groups_per_flow`).
+load-time module params (`debug`, `max_tunnels`, `max_carriers`, `debug_loss`, `hold_enable`).
 All are read-only after load except `hold_enable`, which stays writable (0644) so the
 peripheral BBR hold can be disabled at runtime. Reasons: sysfs module params are **per-module, not per-netns**, so
 two netns cannot have different tunnels; sysfs attributes cannot express lists or
@@ -2227,12 +2215,8 @@ holding the socket lock. The reset path (`tbt_kill_work -> tbt_sock_detach`) can
 work item, and `cancel_work_sync()` then waits for the sleeper forever: QEMU reported
 `INFO: task kworker blocked for more than 122 s` in exactly that stack. Delivery is
 therefore `MSG_DONTWAIT`, and the reset close runs on `system_dfl_wq` so it never shares
-a pool with the work it cancels. The `SHUT_RDWR` wake is part of `w_kill`, not
-`tbt_stream_kill()`: the RST path runs inside the carrier's `tcp_read_sock()` under
-`lock_sock(carrier)`, and `kernel_sock_shutdown()` takes `lock_sock()` on the stream
-socket; nesting the two trips lockdep's shared `sk_lock-AF_INET` class. The
-public/target socket gets 1 MiB send/receive buffers; a carrier's buffers are sized
-from its share of the sender window —
+a pool with the work it cancels. The public/target socket gets 1 MiB send/receive
+buffers; a carrier's buffers are sized from its share of the sender window —
 `clamp((window_share + 2 × TBT_CHUNK_MAX) / 2, 128 KiB, 4 MiB)`, set with
 `SO_SNDBUFFORCE`/`SO_RCVBUFFORCE` (§5.4) — so the FBK cannot trail the write by more than
 the window allows. The default 16 KiB buffer is not the first thing the tunnel hits.
@@ -2414,7 +2398,7 @@ cannot silently lose its atomicity again.
 |---|---|
 | capture | `capture_runs actor_calls submit_bytes tx wire err short` |
 | rx work | `rx_work_runs rx_drain_entries rx_drain_bytes rx_paused_skips rx_adopt_events rx_records carrier_write_space_runs poll_rescues` |
-| rx ready | `rx_ready_calls rx_reads rx_read_bytes rx_read_zero rx_resume rx_resume_busy rx_last_drained rx_proto rx_errs rx_last_err tx_submit_calls rx_delivered rx_budget_yields` |
+| rx ready | `rx_ready_calls rx_reads rx_read_bytes rx_read_zero rx_resume rx_resume_busy rx_last_drained rx_proto rx_errs rx_last_err tx_submit_calls rx_delivered` |
 | dbg | `dbg rcv_nxt copied after qlen allocf over copyf hiwat pdead prun pmoved p_nocar p_down p_stop p_empty p_qlen` |
 | live | `live rxq rxp txq txp pub_state pub_wmem pub_una pub_nxt car_wmem car_nxt car_copied car_rcvbuf car_sndbuf car_state car_stop car_ud car_ready car_ws txw_pend txw_busy` |
 | tx wake | `txwake txwake_busy txwork` |
@@ -2454,9 +2438,8 @@ Two internal fields are not rendered under their own names: the debug injector's
 per-carrier drop count appears as the `peers` column `dropped`, and
 `recv_partial_discard` has no view.
 
-`join_dup` counts a HELLO that named an older generation at an index
+`join_dup` counts a HELLO that named an index
 already occupied by a live carrier (the duplicate is closed, not the session);
-an equal or newer generation replaces that occupant and closes its socket;
 `join_src_reject` counts a far-side HELLO from an address other than the session anchor;
 `port_exhaust` counts a carrier that found every port in the global block in use, and
 `port_alloc_fail` counts a failed port-bitmap allocation; both leave the carrier alive
@@ -2509,7 +2492,7 @@ and a frame already written on two paths is a copy hole (§4.3). `dropped` count
 `drop_ppm` injector; control records (HELLO, OPEN, FBK, FIN, RST) are exempt, so a loss
 probe cannot lose a handshake and turn into a carrier-replacement probe. C8 adds
 `profile_mismatch, http_parse_err, http_status_err, http_req, http_resp, pad_tx,
-drip_tx`. C9 is the FEC v8 receive verdict (T0 §1.3): `fec_proto_fail` and
+drip_tx`. C9 is the FEC v6 receive verdict (T0 §1.3): `fec_proto_fail` and
 `fec_hdr_crc_fail` mean the 48-byte header could not be trusted, so the carrier closes;
 `fec_payload_crc_fail` means the framing was sound and only the body was damaged, so the
 share is dropped and the carrier stays. With `crypto=on` a wrong key is a payload CRC
@@ -2550,11 +2533,10 @@ lockdown `none`. Headers are **not** installed at `/lib/modules/$(uname -r)/buil
 machine (Manjaro ships them as `linux72-headers`); `make` fails until they are installed —
 state this in the build docs, do not work around it.
 
-`system_dfl_wq` is used for replacement, drain and pending work on 6.17 and later; the
-symbol first appeared there (commit 128ea9f6ccfb). 6.1..6.16 builds through the `TBT_WQ`
-shim (`system_unbound_wq`, unbound and concurrency-managed; the module's works are short
-and sleepable, so the difference does not change behavior). 7.2.9 is the measured target;
-6.1.172 is the `.65` build target.
+`system_dfl_wq` is used for replacement, drain and pending work; that workqueue exists
+from 6.5. 6.1 builds through the `TBT_WQ` shim (`system_unbound_wq`, unbound and
+concurrency-managed; the module's works are short and sleepable, so the difference does
+not change behavior). 7.2.9 is the measured target; 6.1.172 is the `.65` build target.
 A kernel older than 6.1 fails at compile time with an explicit `#error`.
 
 Symbols the module needs and why they are safe:
@@ -2582,20 +2564,12 @@ not symbol resolution.
 ### 8.9 Module parameters
 
 ```
-debug=0, max_tunnels=64, max_carriers=256, debug_loss=0,
-hold_enable=1, fec_groups_per_flow=0
+debug=0, max_tunnels=64, max_carriers=256, debug_loss=0
 ```
 
-These are read-only after load except `hold_enable`, which stays writable
-(§8.4.2). Everything else — `n`, `m`, `dup`, `profile`,
+These are read-only after load (§8.4.2). Everything else — `n`, `m`, `dup`, `profile`,
 `keepalive_ms`, `drip_ms`, `ports` — is a `config`/`ports` write, so it can differ per
 tunnel. The control surface is created in `init_net` only.
-
-`fec_groups_per_flow` caps the physical groups one FEC flow may own. `0` keeps
-the single-stream geometry (the first flow owns every group, so a second
-concurrent stream is refused with `-ENOSPC`); set it to `total_groups / N` and
-load the same value on both ends to admit `N` streams. SC-LDPC ignores it and
-remains single-flow.
 
 `max_tunnels` is enforced in `tbt_tunnel_add()` under `tbt_lock`: a new id at the cap
 returns `-ENOSPC` before `kzalloc`/list insert; re-sending an existing id still replaces
@@ -2609,18 +2583,8 @@ it. `max_carriers` is enforced in `tbt_cfg_sane()`: `n + m > max_carriers` retur
 Unload always succeeds, in this order and no other: unregister `/proc` (no new writer can
 start) → `tbt_tunnel_shutdown()` stops listeners, cancels every work item, **detaches every
 stream** (clear `sk_user_data` under the callback lock, then `cancel_work_sync`, then
-release the socket) and every target socket, and stops carriers → drain and destroy the
-module-owned FEC flow free workqueue (`destroy_workqueue()`) → `synchronize_rcu()` →
-`rcu_barrier()` → free the module state. There is no `flush_workqueue()` of a system-wide
-workqueue in the exit path.
-
-The FEC flow free is the one asynchronous free that is not owned by a session work item:
-the last `tbt_fec_flow_put()` can run inside `tbt_session_destroy()`. It queues
-`free_work` on the module-owned `tbt_fec_free_wq`, and `tbtun_exit()` calls
-`destroy_workqueue()` after `tbt_tunnel_shutdown()` and before the RCU barriers. Those
-barriers do not cover work items, and a system-wide queue would leave a queued
-`tbt_fec_flow_free_work` pointing into unmapped module text; `destroy_workqueue()` waits
-for queued and running frees, including each free's own `synchronize_rcu()`.
+release the socket) and every target socket, and stops carriers → `synchronize_rcu()` →
+`rcu_barrier()` → free the module state. There is no `flush_workqueue()` in the exit path.
 
 The detach step is not optional: a socket carries our `sk_data_ready` pointer, so a socket
 that outlives the module and then receives a packet calls into freed text. Removing a
@@ -2786,12 +2750,10 @@ clear error pointing at `raw`-inside-WireGuard.
    the first HELLO that passes the source check defines the nonce
    (trust-on-first-use) and every later carrier must present the same value; a configured
    near peer is checked by source address as well. A mismatch is rejected with
-   `join_nonce_reject++`/`session_join_bad++`. A HELLO naming an older generation
-   at an index whose current occupant is still live is a duplicate join: `join_dup`
-   is counted and that carrier is closed, never the session. An equal or newer
-   generation replaces the occupant and closes its old socket; so does an occupant
-   whose socket is already closed. This is how the near side's replacement rejoins,
-   including a retry that keeps the same four-bit generation.
+   `join_nonce_reject++`/`session_join_bad++`. A HELLO naming an
+   index whose current occupant is still live is a duplicate join: `join_dup` is
+   counted and that carrier is closed, never the session. An occupant whose socket is
+   already closed is replaced, which is how the near side's replacement rejoins.
 5. The far side opens exactly **one** target connection per stream, when that stream's
    OPEN arrives (or when a carrier joins a stream that is already open), not one per
    carrier. It sends its own HELLO on each accepted carrier before any stream frame. The
@@ -2939,31 +2901,37 @@ makes this design different from a generic L4 tunnel.
 | `tests/*.sh` | **new** |
 
 Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; this tree reports
-`0.5.0`. The wire revision `TBT_CONV=0x0008`
-and the FEC record revision `TBT_FEC_CONV=0x1008` bump independently of it.
+`0.6.0`. The wire revision `TBT_CONV=0x0009`
+and the FEC record revision `TBT_FEC_CONV=0x1009` bump independently of it.
 HELLO `body[0]` carries `TBT_WIRE_VERSION=1` for the old ARQ and
-`TBT_WIRE_VERSION_V6=5` for a FEC v8 session, not the module version, so the
+`TBT_WIRE_VERSION_V6=6` for a FEC v9 session, not the module version, so the
 module version and the wire version are decoupled. 0.2.0 flipped `TBT_CONV` to
 0x0006 (FIN carries a 16-byte body) and `TBT_FEC_CONV` through `0x1002`
 (PARITY block marker), `0x1003` (24-byte ACK with `deliver_bytes`) and
 `0x1004` (64-byte bitmap NACK) to `0x1005` (48-byte header with the u64 stream
 id); 0.3.0 moves it to `0x1006` (48-byte `FEC_CFG`, 48-byte `FEC_FBK` report,
-adaptive shape switch). 0.4.0 moves `TBT_CONV` to `0x0007` (32-byte OPEN
-group bitmap, stream-local FIN/FEC `seq`/`block_id`, ALLOC `0x36`) and
-`TBT_FEC_CONV` to `0x1007` (multi-stream), with `TBT_WIRE_VERSION_V6=4`.
-Peers of
-0.5.0 moves `TBT_CONV` to `0x0008` (36-byte OPEN with route slot and target
-port), `TBT_FEC_CONV` to `0x1008` (64-byte `FEC_CFG`/`FEC_FBK`), and the FEC
-HELLO version to 5. Peers of
-different wire revisions do not interoperate, because the first HELLO is
-rejected by the conv check.
+adaptive shape switch); 0.4.0 moves it to `0x1007` (multi-stream flows:
+per-flow streams, stream-local seq/block ids, 32-byte OPEN bitmap, ALLOC).
+
+0.5.0 split into two parallel cuts that both claimed `0x0008`/`0x1008` and
+HELLO version 5. One cut carries the 36-byte OPEN with route slot and target
+port, the 64-byte `FEC_CFG`/`FEC_FBK`, and the GF(16) bit-plane64 share
+mapping. The other carries the SC-LDPC single-plane stream mux: DATA/PARITY
+payloads are 32-byte subframes (`tbt_fec_ms.h`), `MS_WIN` (0x37) reports a
+stream's receive window, and up to 16 streams share the 1x256 plane. 0.6.0 is
+the merge cut: `TBT_CONV` 0x0009, `TBT_FEC_CONV` 0x1009, HELLO `body[0]` 6,
+and both 0.5.0 meanings become one contract. Peers of different wire
+revisions do not interoperate, because the first HELLO is rejected by the
+conv check; a 0.5.0 peer is refused at the first HELLO, the first FEC conv
+check and the first OPEN length check. The 48-byte FEC header and every
+offset stay unchanged.
 
 **Packaging.** `tbtun/tbt_uapi.h` is the single version authority: the
-`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/5/0`). `scripts/mkdkmsconf.sh`
+`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/6/0`). `scripts/mkdkmsconf.sh`
 parses those macros and emits `PACKAGE_VERSION="<major>.<minor>.<patch>"`; parsing
 failure is fatal and never falls back to an old value. `dkms.conf` is a generated file —
 `make dkms.conf` (or `make dkms-tarball`) writes it, and it must not be hand-edited; the
-current generated value is `PACKAGE_VERSION="0.5.0"`. `scripts/install_dkms.sh` reads
+current generated value is `PACKAGE_VERSION="0.6.0"`. `scripts/install_dkms.sh` reads
 the same value through `mkdkmsconf.sh --version`. A development suffix
 `.r<commits>.<sha>` is opt-in with `TBT_DKMS_GIT_SUFFIX=1`; it is not the default.
 
@@ -3018,7 +2986,7 @@ covers; no known leak remains but a long-soak kref/RCU audit is still worthwhile
 | R16 | Memory at 10 Gbps | `tx_window_bytes` bounds retention and the frame queue (`txq_max = tx_window + 8 chunks`) and sizes the carrier buffers from the same number; `rx_reorder_bytes` bounds the reorder tree per stream and per session; the 64 MiB delivery ring is the largest fixed cost and costs about 2× its payload in physical memory. Per session the bound is about 3× window + `rx_reorder_bytes` + 64 MiB per stream (§5.4). T8 measures the peak. |
 | R17 | Jitter adds RTT | The reorder tree is consulted only past a gap; the in-order path adds zero delay (T1 asserts). |
 | R18 | `inet_csk_reset_xmit_timer` etc. drift | Not used; stock timers only. |
-| R19 | Mixed wire revisions | Both wire revisions are hard-rejected: the first HELLO fails `tbt_hdr_check()` (any conv other than the current 0x0008), and a FEC record fails `tbt_fec_hdr_check()` (any older conv vs the current 0x1008). The HELLO `body[0]` version (1 legacy, 5 FEC v8) is checked separately. `rx_parse_proto`/`fec_proto_fail` make it visible. Upgrade both ends together; rollback is the previous binary. |
+| R19 | Mixed wire revisions | Mixed revisions are hard-rejected: the first HELLO fails the version/conv check, and a FEC record fails `tbt_fec_hdr_check()` (any conv other than the current 0x1009). A 0.5.0 peer fails at the first HELLO (version 6), the first FEC conv check and the first OPEN length check. `rx_parse_proto`/`fec_proto_fail` make it visible. Upgrade both ends together; rollback is the previous binary. |
 
 ---
 

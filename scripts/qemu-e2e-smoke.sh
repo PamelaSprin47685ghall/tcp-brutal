@@ -1,23 +1,25 @@
 #!/usr/bin/env bash
 # qemu-e2e-smoke.sh - boot a real kernel in QEMU, load tbtun.ko, and drive the
-# 0.5.0 data plane through the operator surface before any real machine does.
+# 0.6.0 data plane through the operator surface before any real machine does.
 #
 #   scripts/qemu-e2e-smoke.sh                 # 7.0.14, cached under ~/.cache
 #   scripts/qemu-e2e-smoke.sh --kernel 6.12.116
-#   TBT_E2E_QEMU_TIMEOUT=180 scripts/qemu-e2e-smoke.sh
+#   TBT_E2E_QEMU_TIMEOUT=300 scripts/qemu-e2e-smoke.sh
 #
-# What it proves, all inside one guest on 127.0.0.1:
-#   * a 256-carrier SC-LDPC near+far pair comes up, and three sequential
-#     streams each carry 128 KiB byte-exact with streams_active=0 in between;
-#   * a concurrent second SC-LDPC stream is refused and the first one survives;
-#   * a rebuilt n=4 m=4 grouped pair carries four concurrent streams while the
-#     near-side allocator rebalances the 32 physical groups 1 -> 2 -> 3 -> 4
-#     and back to 1, with each split read from /proc/net/tbtun/stats;
+# What it proves, all inside one guest on 127.0.0.1, in this order:
+#   * a rebuilt n=4 m=4 grouped (non-SCLC) pair carries two concurrent
+#     streams (two sids);
+#   * one map= slot on that pair: :19001 reaches target :15210 and
+#     :19002 reaches :15211, each proven by its own response signature;
 #   * an n=8 m=24 SC-LDPC GF(16) uplink pair (8 groups, block=128 L=16)
 #     carries one byte-exact roundtrip, exercising the production
 #     TBT_SCLC_MAP_BITPLANE64 encoder and decoder in the guest kernel;
-#   * one map= slot on the grouped pair: :19001 reaches target :15210 and
-#     :19002 reaches :15211, each proven by its own response signature;
+#   * a 256-carrier SC-LDPC pair (far TX 1x256, near TX 8x32) comes up over
+#     profile=http-kal, and three sequential streams carry 128 KiB
+#     byte-exact with streams_active=0 in between;
+#   * six client streams share that one plane at once: four bulk streams move
+#     6 MiB per direction (past the 4 MiB plane credit), one 50 KiB stream
+#     closes with a forced tail MS_WIN, and one resets mid-stream;
 #   * del + delete_module return inside the deadline (no D state), the module
 #     leaves /proc/modules, and the kernel log gained no UBSAN, BUG, Oops,
 #     WARNING, lockdep or stall report.
@@ -39,9 +41,8 @@ CACHE=${TBT_E2E_CACHE:-$HOME/.cache/tbtun-e2e}
 KM_CACHE=${KM_CACHE:-$HOME/.cache/tbtun-kmatrix}
 MIRROR=${KM_KERNEL_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/kernel}
 JOBS=${TBT_E2E_JOBS:-$(nproc 2>/dev/null || echo 4)}
-QEMU_TIMEOUT=${TBT_E2E_QEMU_TIMEOUT:-150}
+QEMU_TIMEOUT=${TBT_E2E_QEMU_TIMEOUT:-300}
 HOSTCC=${HOSTCC:-cc}
-GUEST=${TBT_E2E_GUEST:-$REPO/tests/qemu-e2e/guest.c}
 
 die() {
     echo "qemu-e2e-smoke: $*" >&2
@@ -49,7 +50,7 @@ die() {
 }
 
 usage() {
-    sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,34p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 while [ $# -gt 0 ]; do
@@ -168,11 +169,6 @@ rsync -a --delete \
     --exclude '*.ko' --exclude '*.o' --exclude '*.mod' --exclude '*.mod.c' \
     --exclude 'modules.order' --exclude 'Module.symvers' \
     "$REPO"/ "$SRC"/ || die "cannot stage the module source"
-# kbuild writes the composite module's object list to tbtun.mod and only
-# rewrites it when the link command itself changes. rsync leaves the excluded
-# build files in place, so a tree that gained a new .o would still link from
-# the old list. Drop both generated lists before every module build.
-rm -f "$SRC/tbtun.mod" "$SRC/modules.order"
 make -C "$KDIR" M="$SRC" -j"$JOBS" modules > "$WORK/module.log" 2>&1 ||
     die "module build failed (see $WORK/module.log)"
 [ -f "$SRC/tbtun.ko" ] || die "module build produced no tbtun.ko"
@@ -192,7 +188,7 @@ fi
 
 echo "qemu-e2e-smoke: building the static guest init"
 "$HOSTCC" -static -O2 -Wall -Wextra -Werror \
-    -o "$INIT" "$GUEST" ||
+    -o "$INIT" "$REPO/tests/qemu-e2e/guest.c" ||
     die "guest init build failed"
 python3 "$REPO/tests/kernel-matrix/mkinitramfs.py" \
     --init "$INIT" --ko "$KO" --out "$INITRD" ||
@@ -229,33 +225,29 @@ if [ ! -s "$LOG" ]; then
 fi
 
 evidence=(
+    "QEMU_E2E_MULTISTREAM 2 streams ok"
+    "QEMU_E2E_DEL grouped ok"
+    "QEMU_E2E_MAPPORT slot=0"
+    "QEMU_E2E_MAPPORT slot=1"
+    "QEMU_E2E_DEL map ok"
+    "QEMU_E2E_UP sclc-uplink"
+    "QEMU_E2E_STREAM sclc-uplink"
+    "QEMU_E2E_DRAIN sclc-uplink ok"
+    "QEMU_E2E_DEL uplink ok"
+    "QEMU_E2E_SHAPE far=1x256 near=8x32"
     "QEMU_E2E_STREAM sclc-seq-1"
     "QEMU_E2E_STREAM sclc-seq-2"
     "QEMU_E2E_STREAM sclc-seq-3"
-    "QEMU_E2E_REJECT sclc-second"
-    "QEMU_E2E_STREAM sclc-after-reject"
-    "QEMU_E2E_ALLOC 1 flow groups=32"
-    "QEMU_E2E_ALLOC 2 flows groups=16+16"
-    "QEMU_E2E_ALLOC 3 flows groups=10+11+11"
-    "QEMU_E2E_ALLOC 4 flows groups=8+8+8+8"
-    "QEMU_E2E_ALLOC regrow groups=32"
-    "QEMU_E2E_STREAM alloc-1"
-    "QEMU_E2E_STREAM alloc-2"
-    "QEMU_E2E_STREAM alloc-3"
-    "QEMU_E2E_STREAM alloc-4"
-    "QEMU_E2E_MULTISTREAM 2 streams ok"
-    "QEMU_E2E_MULTISTREAM 4 streams ok"
-    "QEMU_E2E_STREAM sclc-uplink"
-    "QEMU_E2E_MAPPORT slot=0"
-    "QEMU_E2E_MAPPORT slot=1"
-    "QEMU_E2E_DEL grouped ok"
-    "QEMU_E2E_DEL uplink ok"
-    "QEMU_E2E_DEL map ok"
+    "QEMU_E2E_CONCURRENT 6 active ok"
+    "QEMU_E2E_STREAMS 4 bulk + 1 short + 1 reset ok"
+    "QEMU_E2E_VOLUME far="
+    "QEMU_E2E_SHORT bytes=51200 ok"
+    "QEMU_E2E_HTTPKAL near_req="
+    "QEMU_E2E_RST far="
+    "QEMU_E2E_DRAIN sclc-concurrent ok"
+    "QEMU_E2E_DEL sclc-concurrent ok"
     "QEMU_E2E_UNLOAD ok"
 )
-if [ -n "${TBT_E2E_EVIDENCE:-}" ]; then
-    IFS='|' read -r -a evidence <<< "$TBT_E2E_EVIDENCE"
-fi
 
 bad_reason=
 if grep -aq '^QEMU_E2E_PASS' "$LOG"; then

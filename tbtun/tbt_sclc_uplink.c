@@ -20,18 +20,10 @@
  * positions [c*n_data, (c+1)*n_data).  It loses whole codewords when a data
  * share is lost; the host test measures the difference.
  *
- * Encoding is bit-sliced: a batch of 64 codewords shares the graph and the
- * check order, so one call to gf16_encode_planes() carries four uint64
- * planes per variable and replaces 64 scalar sweeps.  The gather and
- * scatter remain per codeword, which keeps the share offsets and therefore
- * the wire layout identical to the scalar path.
- *
- * Decoding keeps the scalar peel (each codeword erases a different symbol
- * set) but peels GF16_BATCH codewords in lockstep: independent adjacency
- * walks overlap their cache misses.  Both paths write byte-identical
- * output to the scalar reference.  The bit-plane 64 path peels one batch
- * with one control flow and runs one dense core elimination for all 64
- * lanes, which keeps its decoded output byte-identical as well.
+ * Encoding is bit-sliced in every mode: a batch of 64 codewords shares the
+ * graph and the check order, so one call to gf16_encode_planes() replaces
+ * 64 scalar sweeps.  The bit-plane decoder peels one batch with one
+ * control flow and runs one dense core elimination for all 64 lanes.
  *
  * This file does not touch tbt_fec_data.c; the data plane calls the ops
  * table or the direct API.
@@ -774,9 +766,6 @@ struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
     u->seed = par->seed;
     u->mem = sizeof(*u);
 
-    if (u->mapping == TBT_SCLC_MAP_INTERLEAVED && codes % par->n)
-        goto fail; /* exact fill needs C a multiple of n */
-
     u->g = sclc_zalloc((size_t)groups * sizeof(*u->g));
     if (!u->g)
         goto fail;
@@ -806,21 +795,29 @@ struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
          * above overestimates it on the 18/14 and 22/10 ladder splits, and
          * an underestimate would read past the staging buffer, so size the
          * codec from group 0's graph and require every other group to
-         * agree.
+         * agree.  The mapping tables follow the final nsym.
          */
-        if (gf16_n_data(g->code) != (int)n_data || gf16_n_par(g->code) <= 0)
-            goto fail; /* the share mapping assumes this payload size */
+        if ((u32)gf16_n_data(g->code) != u->n_data ||
+            gf16_n_par(g->code) <= 0)
+            goto fail;
         if (i == 0)
         {
             u->n_par = (u32)gf16_n_par(g->code);
-            u->nsym = n_data + u->n_par;
+            u->nsym = u->n_data + u->n_par;
             if ((u64)codes * u->n_par >
                 (u64)par->m * SCLC_SYM_PER_SHARE)
                 goto fail;
+            if (u->mapping == TBT_SCLC_MAP_BITPLANE64)
+            {
+                if (sclc_bmap_build(u) != 0)
+                    goto fail;
+            }
             if (u->mapping == TBT_SCLC_MAP_INTERLEAVED)
             {
                 u16 cnt[TBT_FEC_MAX_SHARES];
 
+                if (codes % par->n)
+                    goto fail; /* exact fill needs C a multiple of n */
                 if (sclc_parity_counts(u, cnt) > SCLC_SYM_PER_SHARE)
                     goto fail;
             }
@@ -828,9 +825,9 @@ struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
                 sclc_build_labels(u) != 0)
                 goto fail;
         }
-        else if (gf16_n(g->code) != (int)u->nsym ||
-                 gf16_n_par(g->code) != (int)u->n_par)
-            goto fail; /* every group must agree on the block size */
+        else if ((u32)gf16_n(g->code) != u->nsym ||
+                 (u32)gf16_n_par(g->code) != u->n_par)
+            goto fail;
         g->recv_b = sclc_zalloc((size_t)GF16_BATCH * u->nsym);
         g->erased_b = sclc_zalloc((size_t)GF16_BATCH * u->nsym);
         g->out_b = g->recv_b;
@@ -861,8 +858,6 @@ struct tbt_sclc_uplink *tbt_sclc_uplink_new(u16 groups,
                   (u32)(u->n > u->m ? u->n : u->m) * 2u * sizeof(u16) +
                   (u32)TBT_FEC_MAX_SHARES * 3u * sizeof(u32);
     }
-    if (u->mapping == TBT_SCLC_MAP_BITPLANE64 && sclc_bmap_build(u) != 0)
-        goto fail;
     return u;
 
 fail:

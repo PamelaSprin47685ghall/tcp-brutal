@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "tbt_fec.h"
+#include "tbt_fec_ms.h"
 
 #define S 64   /* the model uses a short slot; the code is size-agnostic */
 #define N 4    /* data shares per block */
@@ -489,7 +490,6 @@ static void test_sclc_admission(void)
     u8 empty[TBT_FEC_BITMAP_BYTES];
     u16 map[TBT_FEC_MAX_GROUPS];
     u16 count;
-    u16 n_flows;
     u16 i;
 
     memset(m8, 0, sizeof(m8));
@@ -522,10 +522,12 @@ static void test_sclc_admission(void)
        "map: every set bit maps in order");
     ok(map[0] == 0 && map[7] == 7, "map: the local order is ascending");
 
-    /* The unbound primary takes the first stream. SC-LDPC replaces the RX
-     * bitmap later by CFG INIT; the other modes keep one bitmap per sid. */
-    ok(tbt_fec_primary_mask_match(true, m8, m8b),
-       "primary: SC-LDPC binds a differing peer bitmap");
+    /* One plane, one bitmap: every stream's OPEN must repeat the same
+     * 32-byte mask. A differing mask is refused before it can attach. */
+    ok(!tbt_fec_primary_mask_match(true, m8, m8b),
+       "primary: SC-LDPC refuses a differing peer bitmap");
+    ok(tbt_fec_primary_mask_match(true, m8, m8),
+       "primary: SC-LDPC keeps the bound bitmap");
     ok(tbt_fec_primary_mask_match(false, m8, m8), "primary: RLNC keeps its mask");
     ok(!tbt_fec_primary_mask_match(false, m8, m8b),
        "primary: RLNC refuses a different mask");
@@ -536,47 +538,30 @@ static void test_sclc_admission(void)
     ok(tbt_fec_open_groups_match(false, m8, 32),
        "open: RLNC has no SC-LDPC group-count rule");
 
-    /* Admission: one flow per SC-LDPC session, sequential replacement. */
-    ok_int(tbt_fec_flow_admit_check(true, 1, 32, 32),
-           TBT_FEC_ADMIT_SECOND_SCLC,
-           "admit: a second SC-LDPC flow is refused");
-    ok_int(tbt_fec_flow_admit_check(true, 0, 32, 32), TBT_FEC_ADMIT_OK,
-           "admit: the first SC-LDPC flow is accepted");
-    ok_int(tbt_fec_flow_admit_check(true, 0, 32, 0), TBT_FEC_ADMIT_NO_GROUPS,
-           "admit: zero groups is refused");
-    ok_int(tbt_fec_flow_admit_check(true, 0, 32, 33), TBT_FEC_ADMIT_NO_GROUPS,
-           "admit: more groups than the pool is refused");
-    ok_int(tbt_fec_flow_admit_check(false, 1, 32, 8), TBT_FEC_ADMIT_OK,
-           "admit: RLNC admits a second flow");
+    /* Admission ledger: 256 carriers deliver one OPEN. Every copy claims a
+     * pending slot, the winner attaches, and the losers abort; the plane is
+     * only unlinked when both counters are zero. */
+    {
+        struct tbt_ms_admit a;
 
-    ok_int(tbt_fec_flow_create_code(true, true, 1, 32, 8), -EEXIST,
-           "create: a duplicate sid wins over the SC-LDPC refusal");
-    ok_int(tbt_fec_flow_create_code(true, false, 3, 32, 0), -EEXIST,
-           "create: a duplicate sid wins over no groups");
-    ok_int(tbt_fec_flow_create_code(false, true, 1, 32, 8), -EOPNOTSUPP,
-           "create: a concurrent SC-LDPC flow is refused");
-    ok_int(tbt_fec_flow_create_code(false, false, 1, 32, 0), -EPROTO,
-           "create: a flow with no groups is a shape error");
-    ok_int(tbt_fec_flow_create_code(false, false, 1, 32, 33), -EPROTO,
-           "create: a flow above the pool is a shape error");
-
-    /* The sequential replacement: A is detached (n_flows 0, groups freed),
-     * then B is admitted. While A is live, B never reserves anything. */
-    n_flows = 0;
-    ok_int(tbt_fec_flow_create_code(false, true, 0, 32, 32), 0,
-           "sclc: the first flow admits");
-    n_flows = 1;
-    ok_int(tbt_fec_flow_create_code(false, true, n_flows, 32, 32),
-           -EOPNOTSUPP,
-           "sclc: the concurrent replacement is refused");
-    ok_int((int)n_flows, 1, "sclc: the refusal leaves one live flow");
-    n_flows = 0; /* detach: no SC-LDPC flow remains */
-    ok_int(tbt_fec_flow_create_code(false, true, n_flows, 32, 32), 0,
-           "sclc: the sequential replacement admits");
-    n_flows = 1;
-    ok_int(tbt_fec_flow_admit_check(true, n_flows, 32, 32),
-           TBT_FEC_ADMIT_SECOND_SCLC,
-           "sclc: the replacement is the only live flow");
+        memset(&a, 0, sizeof(a));
+        for (i = 0; i < 16; i++)
+            tbt_ms_admit_claim(&a);
+        ok_int((int)a.pending, 16, "admit: sixteen carrier claims counted");
+        ok(!tbt_ms_admit_last(&a), "admit: a pending slot keeps the plane");
+        tbt_ms_admit_attach(&a);
+        for (i = 0; i < 15; i++)
+            tbt_ms_admit_abort(&a);
+        ok_int((int)a.pending, 0, "admit: winner attaches, losers abort");
+        ok_int((int)a.refs, 1, "admit: one mux leg is attached");
+        ok(!tbt_ms_admit_last(&a), "admit: an attached leg keeps the plane");
+        tbt_ms_admit_claim(&a);
+        tbt_ms_admit_attach(&a);
+        ok_int((int)a.refs, 2, "admit: streams share one plane");
+        tbt_ms_admit_detach(&a);
+        tbt_ms_admit_detach(&a);
+        ok(tbt_ms_admit_last(&a), "admit: the last detach frees the plane");
+    }
 
     /* The replacement starts on its own sid and window; the old flow's block
      * is not deliverable to it. */

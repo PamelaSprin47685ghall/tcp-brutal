@@ -396,7 +396,7 @@ gf16_code *gf16_build(const sc_params *p, uint64_t coef_seed, char *err,
         !c->ipiv) {
         snprintf(err, errlen, "out of memory");
         goto fail;
-    }
+            }
     }
 
     mem = sizeof(*c) +

@@ -3568,8 +3568,10 @@ static void test_fec_http(void)
        "ALLOC is inside the shared FEC type gate", NULL);
     ok(tbt_fec_record_type(TBT_FEC_DATA),
        "DATA is inside the shared FEC type gate", NULL);
-    ok(!tbt_fec_record_type((u8)(TBT_FEC_ALLOC + 1)),
-       "0x37 is outside the shared FEC type gate", NULL);
+    ok(tbt_fec_record_type(TBT_FEC_MS_WIN),
+       "0x37 is inside the shared FEC type gate", NULL);
+    ok(!tbt_fec_record_type((u8)(TBT_FEC_MS_WIN + 1)),
+       "0x38 is outside the shared FEC type gate", NULL);
     ok(!tbt_fec_record_type((u8)(TBT_FEC_DATA - 1)),
        "0x2f is outside the shared FEC type gate", NULL);
 

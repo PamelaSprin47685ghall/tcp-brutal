@@ -25,7 +25,7 @@ theory that the ISP's classifier gives HTTP priority. That theory is measured,
 not assumed; see [QoS caveat](#qos-caveat). If it turns out false, `profile=raw`
 turns the wrapping off and the per-flow gain remains.
 
-FEC v8 (`fec=on`) is an optional data plane: the application byte stream is cut
+FEC v6 (`fec=on`) is an optional data plane: the application byte stream is cut
 into 8 KiB DATA shares plus GF(2) band-RLNC parity shares, one share per
 carrier, and the receiver recovers missing shares from parity. A missing
 share in the last
@@ -33,9 +33,8 @@ share in the last
 the largest that fits the 15 MiB replay ring, up to 64); an
 older loss stays in the carrier's TCP send queue and TCP retransmits it. It
 rides both `profile=raw` and the HTTP chunk container; in the HTTP profile one
-chunk body is exactly one FEC record (48-byte header plus payload;
-`TBT_FEC_CONV=0x1008`; 0x1007 was
-the adaptive cut, 0x1005 was
+chunk body is exactly one 48-byte FEC record (`TBT_FEC_CONV=0x1009`; 0x1008
+and 0x1007 were the parallel 0.5.0 cuts, 0x1006 was the adaptive cut, 0x1005 was
 the 0.2.2 stream-id cut, 0.1.0 used `0x1001`), while the request line, headers
 and chunk framing stay
 plaintext. `mode=grouped` splits the carriers into `groups` groups of `n` DATA
@@ -53,36 +52,30 @@ uplink, 512 reserved) and the rate follows `n/(n+m)`. The per-direction
 `FEC_CFG` INIT carries `L`, block and rate, and the receiver uses the peer's
 shape. `mode=rlnc`/`grouped` remain as the GF(2) band RLNC fallback.
 
-Adaptive FEC (`adaptive=`) has two paths. For `mode=rlnc`/`grouped` it follows
-`fec` by default (on when `fec=on`); for `mode=sc-ldpc` it defaults to off.
-The GF(2) family keeps Phase 1: the shape stays in the `n + m = 8`, 32-group
-family and `m` moves in 1..6. `mode=sc-ldpc` uses the per-flow SC-LDPC
-estimator/controller: since 0.4.3 both the downlink binary 1x256/L8 and the
-uplink GF(16) 8x32/L16 codecs switch along the six-point rate ladder
-(`25, 30, 40, 50, 60, 70`); an old 0.4.0..0.4.2 peer that NACKs a CFG makes
-the controller silently stay at 128/128. The switch rides `FEC_CFG`/`FEC_FBK`
-(wire `0x1008`). `session <id> adaptive=off` disables it at runtime. Shapes
-with `n + m != 8` are not implemented for the GF(2) family.
+Adaptive FEC (`adaptive=`, off by default) has two paths. The GF(2)
+`mode=rlnc`/`grouped` family keeps Phase 1: the shape stays in the
+`n + m = 8`, 32-group family and `m` moves in 1..6. `mode=sc-ldpc` uses the
+per-flow SC-LDPC estimator/controller: the uplink GF(16) 8x32/L16 codec can
+switch along the rate ladder; the downlink binary 1x256/L8 codec is fixed at
+rate 50%, so its controller stays at 50 (known limitation). The switch rides
+`FEC_CFG`/`FEC_FBK` (wire `0x1009`). `session <id> adaptive=off` disables it
+at runtime. Shapes with `n + m != 8` are not implemented for the GF(2)
+family.
 
-A session can carry multiple concurrent FEC streams in 0.4.0 (v7, wire
-`0x1007`) on a non-SC-LDPC grouped shape. Each stream owns a per-flow FEC
-TX/RX context and an admission reference. Since 0.4.4,
-`fec_groups_per_flow` (module parameter, default `0`) selects the allocation
-mode: `0` gives the near side runtime dynamic group rebalancing, so a joining
-stream takes its equal share at the next super-block boundary, a close grows
-the survivors back, and `FEC_ALLOC` (0x36) carries the two-sided switch that
-the far side applies; a non-zero value pins a static quota instead (set it to
-`total_groups / N` and load the same value on both ends to admit `N` streams).
-A 0.4.0..0.4.3 peer ignores `FEC_ALLOC`; the allocator then aborts and keeps
-the static quota. SC-LDPC stays single-flow. A sequential connection after the
-previous one closes still resets the old FEC RX/TX state, rebases the window
-on its own first block, and closes the old target socket. DATA/PARITY carry
-the stream id (`0x1005`; carried through `0x1007`), so a queued old-stream
-record cannot reach the new stream.
+A session can carry multiple concurrent FEC streams in 0.6.0 (wire `0x1009`).
+The merged cut unifies the two 0.5.0 lines: the 36-byte OPEN with
+`route_slot`/`target_port`, the 64-byte `FEC_CFG`/`FEC_FBK` and the GF(16)
+bit-plane64 mapping are one contract with the subframe mux. Multi-group FEC
+gives each stream its own flow. SC-LDPC has one physical plane
+(downlink `1x256`, uplink `8x32`), so its DATA/PARITY payload is a stream of
+32-byte subframes tagged `[sid, offset, length, type]`; up to 16 streams share
+the plane with per-stream receive windows (`MS_WIN`, 0x37) and independent
+FIN/RST close. A lost share is repaired for the whole block, never for one
+stream. The stream id also rides in the FEC header (`0x1005`), so a queued
+old-stream record cannot reach a new stream.
 
-This tree implements C1–C8 of [DESIGN.md](DESIGN.md), plus the FEC v8 grouped
-and SC-LDPC data planes, adaptive FEC (GF(2) Phase 1 and the SC-LDPC rate
-law), multi-stream v7, and the 256-carrier extension: the `/proc`
+This tree implements C1–C8 of [DESIGN.md](DESIGN.md), plus the FEC v6 grouped
+data plane, adaptive Phase 1, and the 256-carrier extension: the `/proc`
 surface, the
 listener and the far side, spares and carrier replacement with the RETIRE
 handshake, duplication with the replay ring, hole repair from the retained
@@ -143,47 +136,49 @@ header payload instead of `/lib/modules/$(uname -r)/build`; see
 produces, and the pahole gotchas. `make check` sources that environment itself
 when it is present.
 
-The multi-kernel compatibility check is `scripts/kernel-matrix.sh`. It builds
-5.15, 6.6, 6.12 and 7.0 on x86_64 and aarch64 and loads each module in QEMU;
-6.6, 6.12 and 7.0 pass on both architectures, while the 5.15 cells are kept as
-the lower boundary and fail the module build because the source requires Linux
-6.1. See [docs/kernel-matrix.md](docs/kernel-matrix.md) for the cells, the
-current results and their cost.
+The multi-kernel compatibility check (5.15, 6.6, 6.12 and 7.0 on x86_64 and
+aarch64, including a QEMU load check) is `scripts/kernel-matrix.sh`; see
+[docs/kernel-matrix.md](docs/kernel-matrix.md) for the cells, the current
+results and their cost.
 
 ## Packaging
 
 The module version has one authority: `TBT_VERSION_MAJOR/MINOR/PATCH` in
-`tbtun/tbt_uapi.h` (currently `0.5.0`). The wire revisions are
-`TBT_CONV=0x0008` for the 32-byte frames, `TBT_WIRE_VERSION=1` for the legacy
-HELLO, `TBT_WIRE_VERSION_V6=5` for a FEC v8 session, and
-`TBT_FEC_CONV=0x1008` for the FEC records whose header is 48 bytes and whose
-`FEC_CFG`/`FEC_FBK` bodies are 64 bytes; they are independent of the
-module version. `TBT_CONV 0x0005` removed the unused PREDICT/CANCEL
+`tbtun/tbt_uapi.h` (currently `0.6.0`). The wire
+version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x0009` for the 32-byte frames
+and `TBT_FEC_CONV=0x1009` for the 48-byte FEC header and the 64-byte
+`FEC_CFG`/`FEC_FBK` records; all three are independent of
+the module version. `TBT_CONV 0x0005` removed the unused PREDICT/CANCEL
 placeholder frames: a peer that still sends one fails the header check and its
 carrier closes, and a 0x0004 peer is refused at the first header because its
 conv does not match.
 
-`TBT_CONV 0x0008` makes OPEN 36 bytes: the 32-byte FEC group bitmap, the
+`TBT_CONV 0x0009` makes OPEN 36 bytes: the 32-byte FEC group bitmap, the
 little-endian route slot (the near side's listen mapping), and the
 little-endian target port for that slot. Zero keeps the far side's configured
-port; any other value must equal it. `TBT_WIRE_VERSION_V6` moves to 5, so a
-0.4.0 FEC peer is refused at the first HELLO rather than at the first OPEN.
+port; any other value must equal it. `TBT_WIRE_VERSION_V6` moves to 6, so a
+0.5.0 FEC peer is refused at the first HELLO rather than at the first OPEN.
 
-The current FEC wire is `0x1008`. `TBT_CONV 0x0006` added FIN's 16-byte body
-(`pkt_end`, `pkt_base`; stream-local since `0x0007`); FEC `0x1002` added the
-PARITY block marker (`win_len=0`, `payload_len=0`, `epoch=0`); `0x1003` grew
-the ACK to 24 bytes and added `deliver_bytes`; `0x1004` made NACK a 64-byte
-bitmap repair request; `0x1005` added the 64-bit stream id at header +32 and
-grew the header to 48 bytes; `0x1006` grew `FEC_CFG` to 48 bytes, made
-`FEC_FBK` a 48-byte report, and moved HELLO body[0] to version 3 for the
-adaptive shape switch. `0x1007` is the multi-stream cut: stream-local FEC
-seq/block ids, a 32-byte OPEN group bitmap, and `FEC_ALLOC` (0x36); HELLO body[0]
-moves to version 4. `FEC_ALLOC` is wire-compatible with 0.4.0, but only 0.4.4
-sends and applies it (see Multi-stream above); older peers ignore it.
-`0x1008` grows `FEC_CFG` and `FEC_FBK` to 64 bytes, restores the full 256-bit
-carrier bitmap, makes OPEN 36 bytes and moves HELLO body[0] to version 5; all
-three wire version constants move together. A 0.2.x peer is refused at the
-first HELLO: both ends must be upgraded together.
+The current FEC wire is `0x1009`: `0x1002` added FIN's 16-byte body
+(`pkt_end`, `pkt_base`) and the PARITY block marker (`win_len=0`,
+`payload_len=0`, `epoch=0`); `0x1003` grew the ACK to 24 bytes and added
+`deliver_bytes`; `0x1004` made NACK a 64-byte bitmap repair request; `0x1005`
+added the 64-bit stream id at header +32 and grew the header to 48 bytes;
+`0x1006` grew `FEC_CFG` to 48 bytes, made `FEC_FBK` a 48-byte report, and moved
+HELLO body[0] to version 3 for the adaptive shape switch. `0x1007` is the
+multi-stream cut: stream-local FEC seq/block ids, a 32-byte OPEN group bitmap,
+and ALLOC (0x36); HELLO body[0] moves to version 4. A 0.2.x peer is refused at
+the first HELLO: both ends must be upgraded together. `0x1008` grows `FEC_CFG`
+and `FEC_FBK` to 64 bytes, restores the full 256-bit carrier bitmap, and moves
+HELLO body[0] to version 5; the parallel 0.5.0 multistream line also took
+0x1008, for the 32-byte subframes and MS_WIN (0x37), so the two revisions
+carry different meanings. `0x1009` is the 0.6.0 merge cut that unifies them:
+the 36-byte OPEN with `route_slot`/`target_port`, the 64-byte
+`FEC_CFG`/`FEC_FBK`, the GF(16) bit-plane64 mapping, the 32-byte subframe
+stream, the 16-stream 1x256 plane and `MS_WIN` (0x37) are one contract, and
+HELLO body[0] moves to version 6. All three wire version constants move
+together; a 0.5.0 peer fails the first HELLO, the first FEC conv check and the
+first OPEN length check, so both ends must be upgraded together.
 `scripts/mkdkmsconf.sh` derives
 `PACKAGE_VERSION="<major>.<minor>.<patch>"`; `dkms.conf` is generated by
 `make dkms.conf` / `make dkms-tarball`, so do not edit it by hand.
@@ -197,7 +192,7 @@ adds `.r<commits>.<sha>`; the default is the pure semantic version.
 sudo insmod tbtun.ko debug_loss=0
 ```
 
-Module parameters (read-only after load except `hold_enable`):
+Module parameters, read-only after load:
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -206,7 +201,6 @@ Module parameters (read-only after load except `hold_enable`):
 | `max_carriers` | `256` | Carrier sockets per session, `1..256`; `carriers` over the cap fails with `EINVAL` |
 | `debug_loss` | `0` | Allow `drop_ppm` writes, the deterministic loss injector |
 | `hold_enable` | `1` | BBR hold: the 50 ms carrier poll restores the last good cwnd/pacing across idle periods. On by default; write `0` to opt out. It writes `tcp_sock` fields directly, which is not a stable kernel API |
-| `fec_groups_per_flow` | `0` | Max physical FEC groups one flow may own. `0` = all groups (the first flow owns every group, so a second concurrent stream is refused). Set to `total_groups / N` for `N` streams; load the same value on both ends. SC-LDPC ignores it (single flow) |
 
 The control surface is created in `init_net` only; there is no per-netns view.
 Unload with `sudo rmmod tbtun`. Unloading flushes every tunnel and closes every
@@ -302,7 +296,7 @@ carried to `127.0.0.1:5201` on the far host over four carriers. Test it with
 `iperf3 -c 10.0.0.1 -p 9000 -t 60 -P 1` against an `iperf3 -s` bound to the
 target port.
 
-For FEC v8 over the HTTP container, one group with six carriers (four data,
+For FEC v6 over the HTTP container, one group with six carriers (four data,
 two parity):
 
 ```sh
@@ -398,11 +392,11 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `tx_retain_bytes` | `0` | Sender retention bytes, `0` = unlimited |
 | `carrier_stall_ms` | `0` | Cap on the stall threshold, `0..3600000` ms; `0` = auto: 5 × RTO (`SRTT + 4×RTTVAR`), clamped to 1..60 s. An explicit value only lowers the auto threshold |
 | `profile` | `http-kal` | `http-kal`, `http-kal-drip`, or `raw` |
-| `fec` | `off` | `off` (old ARQ) or `on` (FEC v8 data plane) |
-| `adaptive` | follows `fec` for `rlnc`/`grouped`; off for `sc-ldpc` | `on` lets the control law choose `n/m`: Phase 1 in the `n + m = 8` GF(2) family, or the SC-LDPC rate ladder for `mode=sc-ldpc`; `on` requires `fec=on` |
+| `fec` | `off` | `off` (old ARQ) or `on` (FEC v6 data plane) |
+| `adaptive` | follows `fec` | `on` lets the 0.3.0 control law choose `n/m` in the `n + m = 8` family; `on` requires `fec=on`; unset means the same as `fec` |
 | `mode` | `rlnc` | `rlnc` (one group), `grouped` (GF(2) band RLNC), or `sc-ldpc` (downlink 1×256 binary, uplink grouped GF(16); `w` is the codeword block) |
 | `w` | `0` | RLNC window, `0..1024`; `0` resolves to `2*n` |
-| `carriers` | `0` | Carrier slots, `0..256`; `0` resolves to `n + m`, except `fec=on mode=grouped`, which takes the largest multiple of `n + m` not above 64; must be a multiple of `n + m` |
+| `carriers` | `0` | Carrier slots, `0..256`; `0` resolves to `n + m`; must be a multiple of `n + m` |
 | `crypto` | follows `fec` | `on` ChaCha8-obfuscates the FEC DATA/PARITY payload; `on` requires `fec=on`; unset means the same as `fec` |
 | `crypto_key` | — | 64 hex digits: pre-shared 256-bit key; `-` clears it. Unset: the near side generates the key and sends it in HELLO (`key_id=1`) |
 | `portblock` | `0-0` | Near only: source-port window for this tunnel's carriers, `1..65535`; `0-0` = draw from the global block set through `/ports`. Must hold at least `n + m` ports (`carriers` with FEC). A far tunnel records it but never dials |
@@ -425,12 +419,10 @@ from another address is refused before the nonce is examined
 (`join_src_reject`), and a far `peer=` fixes the anchor at creation instead.
 The join counters separate the reasons: `join_bad` is a nonce mismatch,
 `join_nonce_reject` is a first HELLO from a source other than the configured far
-`peer=` when no nonce is pinned, and `join_dup` is an older generation at an
-occupied slot. An equal or newer generation replaces the occupant and closes
-its socket. The nonce travels in clear text in HELLO: it is a session
-identifier and an anti-confusion token, not a cryptographic secret. Use
-WireGuard when the path is hostile. A 64-hex-digit (256-bit) value is
-refused: the HELLO nonce field is 128 bits.
+`peer=` when no nonce is pinned, and `join_dup` is an occupied slot. The nonce
+travels in clear text in HELLO: it is a session identifier and an anti-confusion
+token, not a cryptographic secret. Use WireGuard when the path is hostile. A
+64-hex-digit (256-bit) value is refused: the HELLO nonce field is 128 bits.
 
 Other directives: `del <id>`, `flush`, `carrier <index> down|up|drop_ppm <n>`,
 and `session <id> nonce=<hex>` (pins the session nonce for reproducible tests).
@@ -608,7 +600,7 @@ real line.
   the FEC DATA/PARITY payload only. The 48-byte FEC header, the HTTP headers and
   every control frame stay in clear text, and there is no authentication. With
   `crypto_key=` unset, the near side generates a 32-byte session key and sends
-  it in the FEC HELLO body (`key_id=1`); the far side adopts it. With
+  it in the HELLO v6 body (`key_id=1`); the far side adopts it. With
   `crypto_key=` set on both ends, `key_id=0` and the HELLO key field is zero; a
   mismatch surfaces as a payload CRC failure on every share. The nonce is a
   session identifier, not a secret. Run it inside WireGuard on an untrusted
@@ -641,25 +633,18 @@ real line.
   guessing.
 - **SC-LDPC and its per-flow adaptive law are implemented.** `mode=sc-ldpc`
   runs the downlink binary block (1×256, `L=8`, rate 0.5) or the uplink
-  grouped GF(16) code (8×32, `L=16`, rate 1/4). The uplink GF(16) symbols
-  use the Wire v8 bit-plane share mapping (`TBT_SCLC_MAP_BITPLANE64`): 64-lane
-  batches, four little-endian bit planes per symbol. `adaptive=on` (off by default)
-  switches both the downlink 1x256 and the uplink 8x32 along the six-point
-  ladder; an old 0.4.0..0.4.2 peer that NACKs a CFG silently keeps 128/128.
+  grouped GF(16) code (8×32, `L=16`, rate 1/4); `adaptive=on` (off by default)
+  switches the uplink along the ladder and keeps the downlink at rate 50%.
   `rlnc`/`grouped` remain as the GF(2) band RLNC fallback.
 - **Adaptive FEC.** The GF(2) family keeps Phase 1: `adaptive=on` moves `m`
   in the fixed `n + m = 8`, 32-group family; `n + m != 8` is not implemented.
-  `mode=sc-ldpc` uses the per-flow SC-LDPC controller (off by default): since
-  0.4.3 the downlink 1x256 and the uplink 8x32 both support the six-point
-  switch; a CFG_NACK from an old 0.4.0..0.4.2 peer silently keeps 128/128.
-  `adaptive=off` keeps the configured shape.
-- **Multi-stream FEC v7.** A session can carry concurrent streams (0.4.0,
-  wire `0x1007`). Since 0.4.4 the default `fec_groups_per_flow=0` enables
-  runtime group rebalancing: the near side is the allocator and the far side
-  applies each `FEC_ALLOC` (0x36) switch; a non-zero value pins a static
-  quota instead. SC-LDPC remains single-flow. Each stream has its own FEC
-  TX/RX flow and admission reference. A sequential connection still resets
-  the old state and closes the old target.
+  `mode=sc-ldpc` keeps the configured shape in 0.6.0: the subframe mux fixes
+  the block span, so the controller reports but does not switch. The downlink
+  binary codec is fixed at rate 50%. `adaptive=off` keeps the configured shape.
+- **Multi-stream FEC.** A session can carry concurrent streams (0.6.0,
+  wire `0x1009`). Multi-group FEC gives each stream its own flow; SC-LDPC
+  multiplexes up to 16 streams inside its single plane with subframes and
+  per-stream windows.
 - **One anchor per far tunnel.** A single `peer=` (or the first HELLO) fixes the
   source address. A multi-homed near host, or a NAT that rebinds the source
   address, will have later HELLOs refused (`join_src_reject`); keep one stable
@@ -790,7 +775,7 @@ By default the tunnel neither encrypts nor authenticates. `crypto=on` (the
 default whenever `fec=on`) ChaCha8-obfuscates the FEC DATA/PARITY payload: it
 keeps application bytes out of naive DPI signatures, but it is not
 confidentiality. With `crypto_key=` unset the session key travels in clear text
-in the FEC HELLO body (`key_id=1`), and there is no message authentication. With
+in the HELLO v6 body (`key_id=1`), and there is no message authentication. With
 `crypto_key=` set on both ends, `key_id=0` and the HELLO key field is zero; a
 wrong key surfaces as a payload CRC failure, never as a silent downgrade. The
 48-byte FEC header, the HTTP headers, the chunk framing and every control frame
@@ -802,14 +787,12 @@ is the only sensible choice, because an HTTP parser cannot see inside TLS.
 ## Scope
 
 This is not a general-purpose VPN. It forwards TCP only, to one literal target
-per tunnel, with no routing, no NAT, no authentication, and no IPv6. FEC v8 is
+per tunnel, with no routing, no NAT, no authentication, and no IPv6. FEC v6 is
 optional (`fec=on`); `mode=sc-ldpc` is implemented (binary downlink, grouped
 GF(16) uplink), and `mode=rlnc`/`grouped` remain as the GF(2) band RLNC
 fallback with `carriers = groups * (n + m)` up to 256 carriers. Multiple
-concurrent FEC streams are supported in 0.4.0 (v7, `0x1007`); since 0.4.4 the
-default `fec_groups_per_flow=0` rebalances groups at runtime, while a non-zero
-value pins a static quota. SC-LDPC stays single-flow. `crypto=on` is ChaCha8
-body
+concurrent FEC streams are supported in 0.6.0 (`0x1009`). `crypto=on` is
+ChaCha8 body
 obfuscation, not encryption, and it does not authenticate. It exists to multiply
 a per-flow rate limit and to test whether a QoS profile helps. For anything
 else, use WireGuard.

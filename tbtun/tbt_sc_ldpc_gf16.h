@@ -99,7 +99,7 @@ gf16_dec_stat gf16_decode64(gf16_code *c, uint64_t *planes,
 /* Codewords processed together by gf16_decode_batch().  The graph is the
  * same for every slot; only recv/erased differ.  The slots are peeled in
  * lockstep so several independent walks hide each other's cache misses. */
-#define GF16_BATCH 2
+#define GF16_BATCH 4
 
 /* Decode B <= GF16_BATCH codewords of one graph.  recv_b and erased_b hold
  * B blocks of n bytes (slot cw at offset cw*n); out_b receives B blocks of

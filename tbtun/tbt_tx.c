@@ -221,6 +221,41 @@ static bool tbt_stream_announced(const struct tbt_stream *st,
            (READ_ONCE(c->gen) & 0xf);
 }
 
+/* Publish a carrier as OPEN-ready only when every usable stream's OPEN is on
+ * it. `up` is one flag per carrier, so a younger stream's queued OPEN would
+ * otherwise be overtaken the moment an older stream's OPEN completes. The
+ * scan and stream insertion share sess->lock: a stream created after the
+ * scan clears `up` in its own announce before any of its data can exist. A
+ * stream whose OPEN failed to queue keeps the carrier down until up_rescue
+ * re-announces it. */
+void tbt_tx_carrier_publish_up(struct tbt_session *sess, struct tbt_carrier *c)
+{
+    bool all = true;
+    u16 b;
+
+    spin_lock(&sess->lock);
+    for (b = 0; b < TBT_STREAM_HT && all; b++)
+    {
+        struct tbt_stream *st;
+
+        hlist_for_each_entry(st, &sess->streams[b], node)
+        {
+            if (!tbt_fec_tx_stream_usable(
+                    READ_ONCE(st->state) == TBT_ST_DEAD,
+                    test_bit(TBT_STREAM_F_ACTIVE, &st->attached),
+                    READ_ONCE(st->tombstone_until_ns)))
+                continue;
+            if (!tbt_stream_announced(st, c))
+            {
+                all = false;
+                break;
+            }
+        }
+    }
+    atomic_set(&c->up, all ? 1 : 0);
+    spin_unlock(&sess->lock);
+}
+
 /* Allocate this stream's declared-hole ring on first use. Called with
  * tx_lock held, so it must not sleep; a NULL result only skips hole
  * accounting, never the retransmit itself. */
@@ -334,10 +369,13 @@ static void tbt_tx_announce_carrier(struct tbt_session *sess,
     tbt_put_le16(body + TBT_OPEN_TARGET_PORT,
                  READ_ONCE(st->near) ? READ_ONCE(st->target_port) : 0);
     WRITE_ONCE(st->tx_open_sent, true);
+    /* `up` means "the OPEN is on the wire": the pump sets it in the OPEN
+     * completion case. The FEC data path writes to the carrier directly, so
+     * a queued-but-unwritten OPEN must not admit data here. A failed enqueue
+     * also leaves it clear; up_rescue re-announces. */
     atomic_set(&c->up, 0);
-    if (tbt_tx_control_pinned(sess, st, c->index, TBT_F_OPEN, st->sid, 0,
-                              body, sizeof(body), true, gfp))
-        atomic_set(&c->up, 1);
+    (void)tbt_tx_control_pinned(sess, st, c->index, TBT_F_OPEN, st->sid, 0,
+                                body, sizeof(body), true, gfp);
 }
 
 /* Announce the stream on every carrier that has sent its HELLO and has not
@@ -3341,7 +3379,7 @@ ctl_fail:
                     WARN_ON_ONCE(1);
                     sess->dbg_announce_mismatch++;
                 }
-                atomic_set(&c->up, 1);
+                tbt_tx_carrier_publish_up(sess, c);
                 c->state = (c->spare && !c->active) ? TBT_CAR_SPARE : TBT_CAR_UP;
                 break;
             case TBT_F_FIN:

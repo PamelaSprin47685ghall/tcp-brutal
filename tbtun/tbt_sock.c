@@ -523,6 +523,15 @@ static void tbt_kill_body(struct tbt_stream *st)
     struct sock *sk;
 
     might_sleep();
+    /* Wake anything asleep on the socket first: a delivery blocked in
+     * tcp_sendmsg_locked() would otherwise keep w_drain running and the
+     * release would wait forever in cancel_work_sync(). This runs in the kill
+     * work item, never at the call site: kill() can be called from a carrier
+     * RX actor that already holds another socket's lock, and taking this
+     * socket's lock there is a recursive k-sk_lock-AF_INET nesting. */
+    sk = READ_ONCE(st->sk);
+    if (sk && sk->sk_socket)
+        kernel_sock_shutdown(sk->sk_socket, SHUT_RDWR);
     tbt_tx_rst_retry(sess, st);
     tbt_stream_cancel(st, &st->w_target, TBT_STREAM_F_SCHED_TARGET);
 
@@ -753,6 +762,10 @@ static bool tbt_fec_retire_closing(struct tbt_session *sess)
     u64 sid;
     bool old = false;
 
+    /* SC-LDPC shares one plane, so there is no group to reclaim and no
+     * reason to kill a live stream when another connection arrives. */
+    if (!sess || sess->fec_sclc)
+        return false;
     spin_lock(&sess->lock);
     f = sess->fec_primary;
     sid = f ? f->sid : 0;
@@ -868,8 +881,14 @@ static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock,
             tbt_fec_flow_abort(sess, flow);
         return -ENOMEM;
     }
-    if (flow)
-        tbt_fec_flow_attach(st, flow); /* moves the reference */
+    if (flow && tbt_fec_flow_attach(st, flow)) /* moves the reference */
+    {
+        /* The shared mux leg could not be built. The stream never reached
+         * OPEN, so release it before the pending path resets the socket. */
+        tbt_stream_kill(st, TBT_ST_DEAD);
+        tbt_stream_put(st);
+        return -ENOMEM;
+    }
     st->sk = sock->sk;
     /* Slot 0 with target= unset sends 0: the far side's default target, the
      * exact 0.4.0 behavior. Every other slot names its configured port. */
