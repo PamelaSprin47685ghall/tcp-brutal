@@ -1585,6 +1585,30 @@ extern const struct tbt_fec_ops tbt_fec_ops_sclc;
 #define TBT_FEC_SCLC_BLOCK_UP 128
 #define TBT_FEC_SCLC_L_UP 16
 
+/* The binary downlink builds exactly these n/m splits of the 256 shares;
+ * the transmitted rate is n / 256. The order is the rate ladder used by
+ * tbt_fec_adapt_sclc.c: 25, 30, 40, 50, 60 and 70 percent. */
+static inline bool tbt_fec_sclc_down_split(u16 n, u16 m)
+{
+    switch (n)
+    {
+    case 64:
+        return m == 192;
+    case 76:
+        return m == 180;
+    case 102:
+        return m == 154;
+    case 128:
+        return m == 128;
+    case 151:
+        return m == 105;
+    case 178:
+        return m == 78;
+    default:
+        return false;
+    }
+}
+
 enum tbt_fec_sclc_variant
 {
     TBT_FEC_SCLC_NONE = 0,
