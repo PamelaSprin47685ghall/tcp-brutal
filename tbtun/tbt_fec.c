@@ -58,6 +58,7 @@ u32 tbt_fec_crc32c(u32 seed, const void *data, size_t len)
 
 #else
 
+/* Portable fallback: one reflected Castagnoli lookup per byte. */
 static u32 tbt_crc32c_table[256];
 static int tbt_crc32c_ready;
 
@@ -77,7 +78,7 @@ static void tbt_crc32c_init(void)
     tbt_crc32c_ready = 1;
 }
 
-u32 tbt_fec_crc32c(u32 seed, const void *data, size_t len)
+u32 tbt_fec_crc32c_soft(u32 seed, const void *data, size_t len)
 {
     const u8 *p = data;
     u32 crc = ~seed;
@@ -89,6 +90,126 @@ u32 tbt_fec_crc32c(u32 seed, const void *data, size_t len)
     while (len--)
         crc = tbt_crc32c_table[(crc ^ *p++) & 0xff] ^ (crc >> 8);
     return ~crc;
+}
+
+/*
+ * Hardware path. The instruction updates the same reflected Castagnoli
+ * register as the table, so the init complement and the final xor stay in the
+ * caller and both paths chain with any seed.
+ *
+ * x86_64 uses SSE4.2 crc32q behind a target attribute: the host build keeps
+ * its baseline ISA and the dispatcher checks the CPU at run time. aarch64
+ * uses the optional ARMv8 CRC32X extension behind HWCAP_CRC32; a CPU without
+ * it, or a compiler without the target attribute, keeps the table path.
+ */
+#if defined(__x86_64__)
+
+#include <nmmintrin.h>
+
+#define TBT_CRC32C_HW 1
+
+__attribute__((target("sse4.2"))) static u32
+tbt_crc32c_hw_update(u32 crc, const u8 *p, size_t len)
+{
+    /* crc32q reads memory, but an aligned pointer lets the core feed it one
+     * load per instruction instead of splitting a cache line. */
+    while (((uintptr_t)p & 7) && len)
+    {
+        crc = (u32)_mm_crc32_u8(crc, *p++);
+        len--;
+    }
+    while (len >= 8)
+    {
+        u64 v;
+
+        memcpy(&v, p, sizeof(v));
+        crc = (u32)_mm_crc32_u64(crc, v);
+        p += 8;
+        len -= 8;
+    }
+    while (len--)
+        crc = (u32)_mm_crc32_u8(crc, *p++);
+    return crc;
+}
+
+static int tbt_crc32c_hw_detect(void)
+{
+    return __builtin_cpu_supports("sse4.2") ? 1 : 0;
+}
+
+/* GCC documents the extension-only target string from 9 on; old compilers,
+ * Clang, a non-Linux libc without getauxval, and a big-endian ABI all keep
+ * the table path (CRC32X consumes the register's native byte order). */
+#elif defined(__aarch64__) && defined(__linux__) && defined(__GNUC__) && \
+    !defined(__clang__) && __GNUC__ >= 9 && defined(__BYTE_ORDER__) &&    \
+    __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+
+#include <arm_acle.h>
+#include <asm/hwcap.h>
+#include <sys/auxv.h>
+
+#define TBT_CRC32C_HW 1
+
+__attribute__((target("+crc"))) static u32
+tbt_crc32c_hw_update(u32 crc, const u8 *p, size_t len)
+{
+    while (((uintptr_t)p & 7) && len)
+    {
+        crc = __crc32cb(crc, *p++);
+        len--;
+    }
+    while (len >= 8)
+    {
+        u64 v;
+
+        memcpy(&v, p, sizeof(v));
+        crc = __crc32cd(crc, v);
+        p += 8;
+        len -= 8;
+    }
+    while (len--)
+        crc = __crc32cb(crc, *p++);
+    return crc;
+}
+
+static int tbt_crc32c_hw_detect(void)
+{
+    return (getauxval(AT_HWCAP) & (unsigned long)HWCAP_CRC32) != 0;
+}
+
+#endif
+
+int tbt_fec_crc32c_hw_available(void)
+{
+#ifdef TBT_CRC32C_HW
+    static int state = -1; /* two writers store the same value: benign race */
+
+    if (state < 0)
+        state = tbt_crc32c_hw_detect();
+    return state;
+#else
+    return 0;
+#endif
+}
+
+u32 tbt_fec_crc32c_hw(u32 seed, const void *data, size_t len)
+{
+    if (!len)
+        return seed;
+#ifdef TBT_CRC32C_HW
+    return ~tbt_crc32c_hw_update(~seed, data, len);
+#else
+    return tbt_fec_crc32c_soft(seed, data, len);
+#endif
+}
+
+u32 tbt_fec_crc32c(u32 seed, const void *data, size_t len)
+{
+    if (!len)
+        return seed;
+    if (tbt_fec_crc32c_hw_available())
+        return tbt_fec_crc32c_hw(seed, data, len);
+    return tbt_fec_crc32c_soft(seed, data, len);
 }
 
 #endif

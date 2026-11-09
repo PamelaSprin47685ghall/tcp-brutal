@@ -123,6 +123,16 @@ static inline bool tbt_fec_fin_valid(u64 pkt_end, u64 pkt_base, u64 span)
  * uses seed 0; chaining uses the previous return value as the next seed. */
 u32 tbt_fec_crc32c(u32 seed, const void *data, size_t len);
 
+#ifndef __KERNEL__
+/* Host-only halves of the CRC32C contract. The public call above dispatches
+ * to the instruction path when the CPU has one, and to the portable table
+ * otherwise. The host tests compare the two bit for bit; the module keeps
+ * only crc32c(). */
+u32 tbt_fec_crc32c_soft(u32 seed, const void *data, size_t len);
+u32 tbt_fec_crc32c_hw(u32 seed, const void *data, size_t len);
+int tbt_fec_crc32c_hw_available(void);
+#endif
+
 /* Fill payload_crc32c and header_crc32c. `payload` is payload_len bytes; it
  * may be NULL only when payload_len is 0. Returns 0 or -EINVAL. */
 int tbt_fec_hdr_seal(struct tbt_fec_hdr *h, const u8 *payload);

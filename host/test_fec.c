@@ -636,6 +636,94 @@ static void test_crc(void)
 }
 
 /* ------------------------------------------------------------------ *
+ * 3b. CRC32C instruction path vs the portable table path.
+ * ------------------------------------------------------------------ */
+
+/* 8 KiB payload + 48-byte header: the largest CRC this wire ever runs. */
+#define CRC_SWEEP_MAX 8240
+#define CRC_SWEEP_SLACK 16
+
+static void test_crc_paths(void)
+{
+    static u8 buf[CRC_SWEEP_MAX + CRC_SWEEP_SLACK];
+    size_t off, len;
+    int hw = tbt_fec_crc32c_hw_available();
+
+    fill_pattern(buf, sizeof(buf), 23);
+    ok_u32(tbt_fec_crc32c_hw(0, "123456789", 9), 0xe3069283u,
+           hw ? "CRC32C instruction vector" : "CRC32C fallback vector");
+
+    /* Every length at every byte offset: the dispatcher and the instruction
+     * path must equal the table path bit for bit. One aggregate check per
+     * offset keeps a broken build's output a pointer, not 131k lines. */
+    for (off = 0; off < CRC_SWEEP_SLACK; off++)
+    {
+        const u8 *p = buf + off;
+        size_t disp_bad = (size_t)-1, hw_bad = (size_t)-1;
+        char what[64], detail[64];
+
+        for (len = 0; len <= CRC_SWEEP_MAX; len++)
+        {
+            u32 soft = tbt_fec_crc32c_soft(0, p, len);
+
+            if (disp_bad == (size_t)-1 &&
+                tbt_fec_crc32c(0, p, len) != soft)
+                disp_bad = len;
+            if (hw && hw_bad == (size_t)-1 &&
+                tbt_fec_crc32c_hw(0, p, len) != soft)
+                hw_bad = len;
+        }
+
+        snprintf(what, sizeof(what), "CRC32C dispatch == table, offset %zu",
+                 off);
+        if (disp_bad == (size_t)-1)
+            ok(1, what, NULL);
+        else
+        {
+            snprintf(detail, sizeof(detail), "first bad length %zu", disp_bad);
+            ok(0, what, detail);
+        }
+        if (hw)
+        {
+            snprintf(what, sizeof(what),
+                     "CRC32C instruction == table, offset %zu", off);
+            if (hw_bad == (size_t)-1)
+                ok(1, what, NULL);
+            else
+            {
+                snprintf(detail, sizeof(detail), "first bad length %zu",
+                         hw_bad);
+                ok(0, what, detail);
+            }
+        }
+    }
+
+    /* Nonzero seeds and every split point: the init complement, the byte
+     * tail, and the chaining rule must match on both paths. */
+    for (len = 0; len <= 96; len++)
+    {
+        u32 seed = (u32)(len * 2654435761u + 7u);
+        u32 half = (u32)(len / 2);
+        u32 whole = tbt_fec_crc32c_soft(0, buf, len);
+        u32 soft_chain =
+            tbt_fec_crc32c_soft(tbt_fec_crc32c_soft(0, buf, half),
+                                buf + half, len - half);
+        u32 hw_chain = tbt_fec_crc32c_hw(
+            tbt_fec_crc32c_hw(0, buf, half), buf + half, len - half);
+        char what[64];
+
+        snprintf(what, sizeof(what), "CRC32C seed path, length %zu", len);
+        ok_u32(tbt_fec_crc32c_hw(seed, buf, len),
+               tbt_fec_crc32c_soft(seed, buf, len), what);
+        snprintf(what, sizeof(what), "CRC32C table chaining, length %zu", len);
+        ok_u32(soft_chain, whole, what);
+        snprintf(what, sizeof(what), "CRC32C instruction chaining, length %zu",
+                 len);
+        ok_u32(hw_chain, whole, what);
+    }
+}
+
+/* ------------------------------------------------------------------ *
  * 4. 256-bit carrier bitmap.
  * ------------------------------------------------------------------ */
 
@@ -2984,6 +3072,7 @@ int main(void)
     test_ack_bytes();
     test_fin_valid();
     test_crc();
+    test_crc_paths();
     test_bitmap();
     test_control();
     test_alloc();
