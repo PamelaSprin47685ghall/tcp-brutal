@@ -285,6 +285,8 @@ int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
     else
         list_add_tail(&fr->list, &sess->tx_q);
     sess->tx_queued += fr->len;
+    if (type != TBT_F_PAD)
+        sess->ctl_real++;
     sess->ctl_queued++;
     spin_unlock(&sess->tx_lock);
     if (type == TBT_F_HELLO)
@@ -2470,11 +2472,16 @@ static bool tbt_tx_should_backpressure(struct tbt_session *sess)
  * decremented only when the frame is finished. */
 static void tbt_tx_ctl_put(struct tbt_session *sess, struct tbt_frame *fr)
 {
-    if (!fr->pinned)
+    /* FBK is pinned to a spare but is not counted in ctl_queued/ctl_real:
+     * it bypasses the control-queue cap and its body bytes are in tx_queued.
+     * Every other pinned frame is counted by tbt_tx_control_pinned(). */
+    if (!fr->pinned || fr->hdr.type == TBT_F_FBK)
         return;
     spin_lock(&sess->tx_lock);
     if (sess->ctl_queued)
         sess->ctl_queued--;
+    if (fr->hdr.type != TBT_F_PAD && sess->ctl_real)
+        sess->ctl_real--;
     spin_unlock(&sess->tx_lock);
 }
 
@@ -4075,6 +4082,7 @@ void tbt_tx_free_queue(struct tbt_session *sess)
     }
     sess->tx_queued = 0;
     sess->ctl_queued = 0;
+    sess->ctl_real = 0;
     spin_unlock(&sess->tx_lock);
     list_for_each_entry_safe(fr, tmp, &free, list)
     {

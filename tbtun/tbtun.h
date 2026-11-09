@@ -1797,6 +1797,7 @@ struct tbt_session
     struct list_head tx_q;
     u32 tx_queued;            /* payload bytes queued */
     u32 ctl_queued;           /* pinned control frames queued or in a batch */
+    u32 ctl_real;             /* of ctl_queued, frames that are not PAD */
 };
 
 #define TBT_STREAM_BUCKET(sid) \

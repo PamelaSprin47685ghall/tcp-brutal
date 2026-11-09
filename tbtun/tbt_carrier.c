@@ -439,7 +439,8 @@ static bool tbt_car_hold_idle(struct tbt_session *sess)
     struct tbt_fec_tx *tx;
     bool busy = false;
 
-    if (READ_ONCE(sess->tx_queued) || READ_ONCE(sess->ctl_queued))
+    if (!tbt_hold_session_idle(READ_ONCE(sess->tx_queued),
+                               READ_ONCE(sess->ctl_real)))
         return false;
     if (!sess->fec)
         return true;
@@ -460,6 +461,7 @@ static void tbt_car_hold_apply(struct tbt_carrier *c, struct tcp_sock *tp,
                                struct sock *sk)
 {
     u32 cwnd = c->hold_cwnd;
+    enum tbt_hold_apply gate;
 
     if (!cwnd)
         return;
@@ -468,15 +470,25 @@ static void tbt_car_hold_apply(struct tbt_carrier *c, struct tcp_sock *tp,
     if (!cwnd)
         cwnd = 1;
     lock_sock(sk);
-    /* Real data or loss raced the poll: drop the hold instead of writing over
-     * a live BBR decision. */
-    if (READ_ONCE(tp->snd_una) != READ_ONCE(tp->snd_nxt) ||
-        READ_ONCE(tp->packets_out) != 0 ||
-        inet_csk(sk)->icsk_ca_state != TCP_CA_Open)
+    /* Re-check under the socket lock. A non-PAD writer clears hold_active
+     * before it queues bytes, so this catches the real race. The in-flight
+     * test must not end the hold: PAD is the only frame that leaves it active
+     * with packets_out set, and its writer exempts TBT_F_PAD on purpose. */
+    gate = tbt_hold_apply_gate(
+        READ_ONCE(c->hold_active),
+        inet_csk(sk)->icsk_ca_state == TCP_CA_Open,
+        READ_ONCE(tp->snd_una) == READ_ONCE(tp->snd_nxt),
+        READ_ONCE(tp->packets_out));
+    if (gate == TBT_HOLD_APPLY_EXIT)
     {
         release_sock(sk);
         WRITE_ONCE(c->hold_active, false);
         WRITE_ONCE(c->hold_since_ns, 0);
+        return;
+    }
+    if (gate == TBT_HOLD_APPLY_SKIP)
+    {
+        release_sock(sk);
         return;
     }
     tcp_snd_cwnd_set(tp, cwnd);
@@ -490,12 +502,11 @@ static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
                                struct sock *sk, u64 now)
 {
     bool enable = READ_ONCE(tbt_hold_enable);
-    bool real_data = !tbt_car_hold_idle(c->sess);
+    bool real_data;
     bool loss = READ_ONCE(c->stalled) || READ_ONCE(tp->lost_out) ||
                 inet_csk(sk)->icsk_ca_state != TCP_CA_Open;
     bool recent_loss;
     bool no_inflight;
-    bool app_limited;
     bool ca_open;
     u32 mss, wnd_pkts;
 
@@ -509,11 +520,11 @@ static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
         WRITE_ONCE(c->hold_since_ns, 0);
         return;
     }
+    real_data = !tbt_car_hold_idle(c->sess);
     mss = READ_ONCE(tp->mss_cache) ?: 1;
     wnd_pkts = READ_ONCE(tp->snd_wnd) / mss;
     no_inflight = READ_ONCE(tp->snd_una) == READ_ONCE(tp->snd_nxt) &&
                   READ_ONCE(tp->packets_out) == 0;
-    app_limited = READ_ONCE(tp->app_limited);
     ca_open = inet_csk(sk)->icsk_ca_state == TCP_CA_Open;
 
     if (c->hold_active)
@@ -528,12 +539,11 @@ static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
         tbt_car_hold_apply(c, tp, sk);
         return;
     }
-    if (!tbt_hold_enter(enable, app_limited, no_inflight, !real_data,
-                        ca_open, loss, recent_loss, c->hold_since_ns, now,
+    if (!tbt_hold_enter(enable, no_inflight, !real_data, ca_open, loss,
+                        recent_loss, c->hold_since_ns, now,
                         TBT_HOLD_ENTER_NS))
     {
-        if (enable && !real_data && !loss && ca_open &&
-            (app_limited || no_inflight))
+        if (enable && no_inflight && !real_data && !loss && ca_open)
         {
             if (!c->hold_since_ns)
                 WRITE_ONCE(c->hold_since_ns, now);
