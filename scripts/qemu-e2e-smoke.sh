@@ -11,6 +11,9 @@
 #     streams each carry 128 KiB byte-exact with streams_active=0 in between;
 #   * a concurrent second SC-LDPC stream is refused and the first one survives;
 #   * a rebuilt n=4 m=4 grouped pair carries two concurrent streams (two sids);
+#   * a 64-carrier http-kal FEC pair (8 x (4+4)) carries two concurrent
+#     streams and both ends report fbk_tx and fbk_rx, so the 340 B control
+#     encoder and the lazy replay ring run on both sides;
 #   * del + delete_module return inside the deadline (no D state), the module
 #     leaves /proc/modules, and the kernel log gained no UBSAN, BUG, Oops,
 #     WARNING, lockdep or stall report.
@@ -223,6 +226,10 @@ evidence=(
     "QEMU_E2E_STREAM sclc-after-reject"
     "QEMU_E2E_MULTISTREAM 2 streams ok"
     "QEMU_E2E_DEL grouped ok"
+    "QEMU_E2E_UP kal64 up=64"
+    "QEMU_E2E_STREAM kal64-bidir ok"
+    "QEMU_E2E_FBK both-ends ok"
+    "QEMU_E2E_DEL kal64 ok"
     "QEMU_E2E_UNLOAD ok"
 )
 

@@ -51,6 +51,7 @@
 #define CAR_PORT 19001
 #define TGT_PORT 19070
 #define CARRIERS 256
+#define CARRIERS_KAL 64
 #define PORTBLOCK "30000-30511"
 #define STREAM_BYTES (128u * 1024u)
 #define CHUNK 32768u
@@ -311,6 +312,47 @@ static int wait_idle(int timeout_ms)
     printf("QEMU_E2E_STATE streams far active=%u n=%u pend=%u "
            "near active=%u n=%u pend=%u\n",
            a.active, a.n_streams, a.pending, b.active, b.n_streams, b.pending);
+    return -1;
+}
+
+/* Read one c3 counter for tunnel `id`.  `key` carries its leading space so
+ * "fbk_tx" cannot match a longer field. */
+static int stat_u64(unsigned int id, const char *key, unsigned long long *out)
+{
+    char line[2048];
+
+    if (stats_line(id, "c3", line, sizeof(line)))
+        return -1;
+    return line_kv(line, key, out);
+}
+
+/* Both ends must have sent and received at least one FBK.  The receiver sends
+ * one when a window closes, and the 100 ms cadence covers the tail, so a FEC
+ * pair that carried DATA in both directions proves the full control path. */
+static int wait_fbk_pair(int timeout_ms)
+{
+    long long deadline = now_ms() + timeout_ms;
+    unsigned long long far_tx = 0, far_rx = 0, near_tx = 0, near_rx = 0;
+
+    while (now_ms() < deadline)
+    {
+        if (!stat_u64(1, " fbk_tx", &far_tx) &&
+            !stat_u64(1, " fbk_rx", &far_rx) &&
+            !stat_u64(2, " fbk_tx", &near_tx) &&
+            !stat_u64(2, " fbk_rx", &near_rx) && far_tx && far_rx && near_tx &&
+            near_rx)
+        {
+            printf("QEMU_E2E_FBK both-ends ok far_tx=%llu far_rx=%llu "
+                   "near_tx=%llu near_rx=%llu\n",
+                   far_tx, far_rx, near_tx, near_rx);
+            fflush(stdout);
+            return 0;
+        }
+        msleep(50);
+    }
+    printf("QEMU_E2E_STATE fbk far_tx=%llu far_rx=%llu near_tx=%llu "
+           "near_rx=%llu\n",
+           far_tx, far_rx, near_tx, near_rx);
     return -1;
 }
 
@@ -1030,6 +1072,73 @@ int main(void)
             verdict_fail("grouped session did not drain after close");
     }
 
+    /* --- phase 3b: 64-carrier http-kal FEC ------------------------------
+     * The 0.4.2 geometry fix derives the FEC_CFG/FEC_INIT shape from the
+     * session's carriers, so 8 groups x (4+4) == 64 must be accepted.  The
+     * memopt cut shrinks the FEC encoder buffer to TBT_HTTP_CTL_FRAME_MAX
+     * (340 B, the largest control record) and allocates the replay ring on
+     * the first packetizer pass.  Two concurrent roundtrips keep DATA
+     * flowing both ways, so both ends take that path and the 340 B FBK
+     * record is really encoded; the fbk_tx/fbk_rx counters prove it. */
+    delete_tunnel(1);
+    delete_tunnel(2);
+    if (wait_tunnels_gone(6000))
+        verdict_fail("grouped-256 tunnels did not go away after del");
+    printf("QEMU_E2E_DEL grouped ok\n");
+    fflush(stdout);
+
+    configure("tunnel 1 role=far profile=http-kal listen=127.0.0.1:19001"
+              " target=127.0.0.1:19070 n=4 m=4 fec=on mode=grouped"
+              " w=8 carriers=64 crypto=off dup=1\n",
+              "tunnel 2 role=near profile=http-kal listen=127.0.0.1:19000"
+              " peer=127.0.0.1:19001 n=4 m=4 fec=on mode=grouped"
+              " w=8 carriers=64 crypto=off dup=1"
+              " portblock=31600-32111\n");
+    if (wait_carriers(CARRIERS_KAL, UP_TIMEOUT_MS))
+        verdict_fail("http-kal 64-carrier FEC pair did not come up");
+    printf("QEMU_E2E_UP kal64 up=%u\n", CARRIERS_KAL);
+    fflush(stdout);
+
+    {
+        pid_t kids[2];
+
+        for (i = 0; i < 2; i++)
+        {
+            kids[i] = fork();
+            if (kids[i] < 0)
+                verdict_fail("kal64: fork: %s", strerror(errno));
+            if (!kids[i])
+            {
+                int cfd = connect_client();
+                char cwhy[256] = "";
+
+                alarm(0);
+                if (cfd < 0)
+                    _exit(1);
+                if (roundtrip(cfd, STREAM_BYTES, cwhy, sizeof(cwhy)))
+                    _exit(1);
+                close_stream(cfd);
+                _exit(0);
+            }
+        }
+        for (i = 0; i < 2; i++)
+        {
+            int status = 0;
+
+            if (waitpid(kids[i], &status, 0) != kids[i] ||
+                !WIFEXITED(status) || WEXITSTATUS(status))
+                verdict_fail("http-kal 64-carrier stream %d failed", i);
+        }
+        printf("QEMU_E2E_STREAM kal64-bidir ok\n");
+        fflush(stdout);
+        if (wait_idle(IDLE_TIMEOUT_MS))
+            verdict_fail("http-kal session did not drain after close");
+    }
+    if (wait_fbk_pair(3000))
+        verdict_fail("FBK did not flow on both ends of the http-kal pair");
+    printf("QEMU_E2E_KAL64 carriers=64 profile=http-kal ok\n");
+    fflush(stdout);
+
     /* --- phase 4: clean teardown ---------------------------------------- */
     kill(echo_pid, SIGKILL);
     waitpid(echo_pid, NULL, 0);
@@ -1039,7 +1148,7 @@ int main(void)
         verdict_fail("tunnels did not go away after del");
     if (wait_idle(IDLE_TIMEOUT_MS))
         verdict_fail("streams still active before unload");
-    printf("QEMU_E2E_DEL grouped ok\n");
+    printf("QEMU_E2E_DEL kal64 ok\n");
     fflush(stdout);
 
     unload_module();
