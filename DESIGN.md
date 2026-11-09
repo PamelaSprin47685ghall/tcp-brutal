@@ -1368,12 +1368,17 @@ limit to 256 requires widening those to 256-bit masks and chunking or enlarging 
 and WINDOW bodies; that is a data-plane change and is deferred to the FEC block model.
 What is already scalable: the socket-buffer budget above, the port map (one absolute
 65536-bit bitmap, so any window over 1..65535 is fine), the per-stream limits, and the
-procfs renderers (per carrier, no fixed stride). Resource estimate at 256 carriers:
-256 TCP sockets and
-5 work structs each (poll/pump/rx/tx/connect), 256 × ~24 KiB of HTTP/parser state
-(~6 MiB), and a per-carrier 50 ms poll = 5120 wakes/s; the poll must become one
-session-level scan (20 wakes/s) before 256 is enabled, and the per-carrier keepalive
-must batch. The 128 MiB socket-buffer budget bounds the kernel side.
+procfs renderers (per carrier, no fixed stride). Resource estimate at 256 carriers
+(0.4.2, from the constants the module allocates): 256 TCP sockets and their work
+items; 256 × 102,400 B (100 KiB) of carrier buffers for an ARQ session, 256 ×
+86,528 B (84.5 KiB) for a FEC `profile=http-kal` session (its encoder holds only
+control records), or 256 × 65,536 B (64 KiB) for `profile=raw`, which skips the
+three HTTP buffers. A per-carrier 50 ms poll = 5120 wakes/s, so the poll must stay
+one session-level scan. The FEC planes add one receive arena (16 MiB) per
+direction and, once the packetizer has a DATA packet to send, one replay window
+(~14.1 MiB at 256 carriers); every plane above 32 KiB is vmalloc-backed so it
+never takes a high-order slab page block. The 128 MiB socket-buffer budget bounds
+the kernel side.
 
 **Platform.** 1G is the physical port; 500-750 Mbit/s at the application is
 the accepted target. The 256-carrier, 1G target is ARM64. The `.74` host

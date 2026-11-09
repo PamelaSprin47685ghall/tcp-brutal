@@ -27,11 +27,7 @@
 
 static void *tbt_fec_alloc(size_t len)
 {
-#ifdef __KERNEL__
-    return kvzalloc(len, GFP_KERNEL);
-#else
-    return calloc(1, len);
-#endif
+    return tbt_fec_vzalloc(len);
 }
 
 static void tbt_fec_free(void *p)

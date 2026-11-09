@@ -1650,6 +1650,39 @@ static void tbt_fec_tx_finish(struct tbt_session *sess,
     tbt_fbk_kick(sess, false);
 }
 
+/* The replay ring is the largest per-flow object: on the 256-carrier shape K
+ * lands on 7 and the record plane alone is ~14.1 MiB. Only a sender needs it.
+ * Allocating it with the first DATA packet keeps a receive-only session from
+ * reserving a repair window it will never read. The packetizer runs in
+ * w_fec_tx (process context), so vzalloc() may sleep here. Failure is not
+ * fatal: the caller stops and retries, preserving the old "no repair ring,
+ * no DATA" contract instead of quietly losing repair ability. */
+static bool tbt_fec_tx_replay_ensure(struct tbt_session *sess,
+                                     struct tbt_fec_tx *tx)
+{
+    struct tbt_fec_replay *r;
+
+    if (READ_ONCE(tx->replay))
+        return true;
+    r = tbt_fec_replay_new_k(tx->groups, tx->n, tx->m, TBT_FEC_S,
+                             sess->fec_replay_k);
+    if (!r)
+    {
+        atomic64_inc(&sess->fec_replay_miss_no_ring);
+        return false;
+    }
+    spin_lock_bh(&tx->replay_lock);
+    if (tx->replay)
+    {
+        spin_unlock_bh(&tx->replay_lock);
+        tbt_fec_replay_free(r);
+        return true;
+    }
+    WRITE_ONCE(tx->replay, r);
+    spin_unlock_bh(&tx->replay_lock);
+    return true;
+}
+
 static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
                               struct tbt_stream *st, bool last)
 {
@@ -1925,6 +1958,15 @@ static void tbt_fec_tx_pump(struct tbt_session *sess, struct tbt_fec_flow *f)
             tx->fill += (u16)got;
         paused = tx->head == tx->tail && READ_ONCE(st->tx_paused);
         spin_unlock(&tx->lock);
+        /* Allocate the repair ring only when this flow actually has bytes to
+         * send. A receive-only session's TX ring stays empty, so it never
+         * reserves the ~14 MiB window. No ring means no DATA: stop and retry
+         * rather than send shares a NACK could never recover. */
+        if ((got || tx->fill) && !tbt_fec_tx_replay_ensure(sess, tx))
+        {
+            tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
+            break;
+        }
         if (got)
         {
             if (tx->fill == TBT_FEC_S && tbt_fec_tx_credit_ok(tx))
@@ -2297,7 +2339,7 @@ static void tbt_fec_tx_swap(struct tbt_session *sess, struct tbt_fec_tx *tx)
         tx->g[i].nreal = 0;
         tx->g[i].last_len = 0;
     }
-    rk = tbt_fec_replay_k(tx->replay);
+    rk = tx->replay ? tbt_fec_replay_k(tx->replay) : sess->fec_replay_k;
     tx->credit_cap = tbt_fec_credit_packets(tx->groups, tx->n, rk, 0,
                                             TBT_FEC_CREDIT_MAX);
     tx->credit = tx->credit_cap;
@@ -5054,8 +5096,7 @@ static void tbt_fec_rx_blk_free(struct tbt_fec_blk *blk, u32 total)
  * shares. Returns NULL on the first failure and releases what it took. */
 static struct tbt_fec_blk *tbt_fec_rx_blk_alloc(u32 total, u16 shares, u16 n)
 {
-    struct tbt_fec_blk *blk = kvzalloc((size_t)total * sizeof(*blk),
-                                       GFP_KERNEL);
+    struct tbt_fec_blk *blk = tbt_fec_vzalloc((size_t)total * sizeof(*blk));
     u32 i;
 
     if (!blk)
@@ -5064,7 +5105,7 @@ static struct tbt_fec_blk *tbt_fec_rx_blk_alloc(u32 total, u16 shares, u16 n)
     {
         struct tbt_fec_blk *b = &blk[i];
 
-        b->buf = kvzalloc((size_t)shares * TBT_FEC_S, GFP_KERNEL);
+        b->buf = tbt_fec_vzalloc((size_t)shares * TBT_FEC_S);
         b->dpresent = kvzalloc(TBT_FEC_MAX_SHARES, GFP_KERNEL);
         b->ppresent = kvzalloc(TBT_FEC_MAX_SHARES, GFP_KERNEL);
         b->dlen = kvzalloc(TBT_FEC_MAX_SHARES * sizeof(u16), GFP_KERNEL);
@@ -5193,7 +5234,7 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
             slots_per_share = tbt_fec_sclc_rec_slots(cfg, shares);
         if (slots_per_share < TBT_FEC_ADAPT_CLASSES)
             slots_per_share = TBT_FEC_ADAPT_CLASSES;
-        rec = kvzalloc((size_t)slots_per_share * TBT_FEC_S, GFP_KERNEL);
+        rec = tbt_fec_vzalloc((size_t)slots_per_share * TBT_FEC_S);
     }
     if (!blk || !req_ns || !req_block || !rec)
     {
@@ -5789,7 +5830,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
 
         if (tbt_fec_nack_unpack(rec + TBT_FEC_HDR_LEN, &n))
             return -EPROTO;
-        if (!tx || !tx->replay)
+        if (!tx || !READ_ONCE(tx->replay))
         {
             atomic64_inc(&sess->fec_replay_miss_no_ring);
             atomic64_inc(&sess->fec_replay_miss);
@@ -6929,8 +6970,9 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
             goto fail;
         }
     }
-    tx->replay = tbt_fec_replay_new_k(groups, n, m, TBT_FEC_S,
-                                      sess->fec_replay_k);
+    /* tx->replay is allocated lazily by tbt_fec_tx_replay_ensure() when the
+     * packetizer builds the first DATA packet. A receive-only session never
+     * pays the ~14 MiB repair window. */
     tx->groups = groups;
     tx->n = n;
     tx->m = m;
@@ -6951,23 +6993,23 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
             want = TBT_FEC_TX_RING;
         tx->ring_size = (u32)want;
     }
-    tx->ring = kvzalloc(tx->ring_size, GFP_KERNEL);
-    tx->pkt = kvzalloc(TBT_FEC_S, GFP_KERNEL);
-    tx->rec = kvzalloc(TBT_FEC_REC_MAX, GFP_KERNEL);
-    tx->g = kvzalloc((size_t)groups * sizeof(*tx->g), GFP_KERNEL);
+    tx->ring = tbt_fec_vzalloc(tx->ring_size);
+    tx->pkt = tbt_fec_vzalloc(TBT_FEC_S);
+    tx->rec = tbt_fec_vzalloc(TBT_FEC_REC_MAX);
+    tx->g = tbt_fec_vzalloc((size_t)groups * sizeof(*tx->g));
     tx->codec = tbt_fec_codec_new(sclc, groups, n, m, n, sess->fec_w,
                                   sess->fec_d, nonce);
     if (tx->codec)
         tx->band = tbt_fec_grouped_band(tx->codec, 0);
     if (!tx->ring || !tx->pkt || !tx->rec || !tx->g || !tx->codec ||
-        !tx->adapt || !tx->replay ||
+        !tx->adapt ||
         (sess->fec_sclc &&
          tbt_fec_adapt_sclc_rate_index_for_shape(n, m) != 0xff &&
          !tx->adapt_sclc))
         goto fail;
     for (i = 0; i < groups; i++)
     {
-        tx->g[i].buf = kvzalloc((size_t)shares * TBT_FEC_S, GFP_KERNEL);
+        tx->g[i].buf = tbt_fec_vzalloc((size_t)shares * TBT_FEC_S);
         if (!tx->g[i].buf)
             goto fail;
         tx->g[i].blk = tx->g[i].buf;
@@ -7039,12 +7081,10 @@ tbt_fec_rx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
         if (rx->est_sclc)
             tbt_fec_adapt_sclc_est_init(rx->est_sclc, shares);
     }
-    rx->nack = kvzalloc(sizeof(*rx->nack), GFP_KERNEL);
+    rx->nack = tbt_fec_vzalloc(sizeof(*rx->nack));
     rx->blk = tbt_fec_rx_blk_alloc(total, shares, n);
-    rx->req_ns = kvzalloc((size_t)total * shares * sizeof(*rx->req_ns),
-                          GFP_KERNEL);
-    rx->req_block = kvzalloc((size_t)total * sizeof(*rx->req_block),
-                             GFP_KERNEL);
+    rx->req_ns = tbt_fec_vzalloc((size_t)total * shares * sizeof(*rx->req_ns));
+    rx->req_block = tbt_fec_vzalloc((size_t)total * sizeof(*rx->req_block));
     rx->nack_cadence_ms = TBT_FEC_NACK_RETRY_MS;
     {
         u16 rec_slots = n > m ? n : m;
@@ -7066,9 +7106,9 @@ tbt_fec_rx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
                     rec_slots = sc_slots;
             }
         }
-        rx->rec = kvzalloc((size_t)rec_slots * TBT_FEC_S, GFP_KERNEL);
+        rx->rec = tbt_fec_vzalloc((size_t)rec_slots * TBT_FEC_S);
     }
-    rx->zero = kvzalloc(TBT_FEC_S, GFP_KERNEL);
+    rx->zero = tbt_fec_vzalloc(TBT_FEC_S);
     rx->codec = tbt_fec_codec_new(sclc, groups, n, m, n, sess->fec_w,
                                   sess->fec_d, tbt_fec_base_nonce(sess));
     if (!rx->blk || !rx->req_ns || !rx->req_block || !rx->codec ||
@@ -7609,9 +7649,8 @@ int tbt_fec_data_init(struct tbt_session *sess)
 
     /* Session scratch: the carrier queues and the drain works belong to the
      * session, not to one flow. */
-    sess->fec_outq = kvzalloc((size_t)t->cfg.carriers *
-                                  sizeof(*sess->fec_outq),
-                              GFP_KERNEL);
+    sess->fec_outq = tbt_fec_vzalloc((size_t)t->cfg.carriers *
+                                     sizeof(*sess->fec_outq));
     if (!sess->fec_outq)
         goto fail;
     for (i = 0; i < t->cfg.carriers; i++)

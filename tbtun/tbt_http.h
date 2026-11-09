@@ -74,6 +74,13 @@
 #define TBT_HTTP_FRAME_MAX (TBT_HTTP_CHUNK_HDR_MAX + TBT_REC_MAX + 2) /* 8244 */
 /* Same bound for a 40-byte FEC record. */
 #define TBT_HTTP_FEC_FRAME_MAX (TBT_HTTP_CHUNK_HDR_MAX + TBT_FEC_REC_MAX + 2)
+/* A FEC session never puts a DATA frame on a carrier: tbt_tx_submit() hands
+ * every DATA byte to the FEC packetizer, and only control records use the
+ * HTTP encoder. The largest control record is a full FBK (TBT_FBK_MAX body);
+ * WINDOW and HELLO are smaller. A non-FEC session still needs
+ * TBT_HTTP_FRAME_MAX, because its DATA record carries TBT_PAYLOAD_MAX. */
+#define TBT_HTTP_CTL_FRAME_MAX \
+    (TBT_HTTP_CHUNK_HDR_MAX + TBT_HDR_LEN + TBT_FBK_MAX + 2)
 
 /* /proc/net/tbtun/http keeps the first chunk's size line and this many bytes
  * of its record: enough to prove the framing without dumping payload
