@@ -3528,6 +3528,35 @@ static void test_alloc_fsm(void)
        NULL);
     ok_int(sm.state, TBT_FEC_ALLOC_DONE, "alloc fsm -> DONE");
 
+    /* A COMMIT with no COMMITTED survives up to the round timeout and fails
+     * at it. Pin the macro: the 0.4.4 WAN split needs 15 s, and a future
+     * shrink back to seconds would reopen the stall. */
+    tbt_fec_alloc_sm_init(&sm);
+    ok(tbt_fec_alloc_sm_start(&sm, t), "alloc fsm timeout start", NULL);
+    tbt_fec_alloc_sm_ack(&sm);
+    (void)tbt_fec_alloc_sm_step(&sm, t + 1000000ULL, false);
+    tbt_fec_alloc_sm_peer_done(&sm);
+    tbt_fec_alloc_sm_rx_done(&sm);
+    act = tbt_fec_alloc_sm_step(&sm, t + 2000000ULL, false);
+    tbt_fec_alloc_sm_tx_swapped(&sm, t + 2000000ULL);
+    ok_int(sm.state, TBT_FEC_ALLOC_COMMIT, "alloc fsm timeout -> COMMIT");
+    act = tbt_fec_alloc_sm_step(
+        &sm, t + 2000000ULL +
+                 (u64)TBT_FEC_ALLOC_TIMEOUT_MS * 1000000ULL - 1000000ULL,
+        false);
+    ok_int(sm.state, TBT_FEC_ALLOC_COMMIT,
+           "alloc fsm COMMIT survives just before the timeout");
+    ok(!(act & (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH)),
+       "alloc fsm does not resume before the timeout", NULL);
+    act = tbt_fec_alloc_sm_step(
+        &sm, t + 2000000ULL +
+                 (u64)TBT_FEC_ALLOC_TIMEOUT_MS * 1000000ULL + 1000000ULL,
+        false);
+    ok((act & (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH)) ==
+           (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH),
+       "alloc fsm resumes at the round timeout", NULL);
+    ok_int(sm.state, TBT_FEC_ALLOC_FAILED, "alloc fsm timeout -> FAILED");
+
     /* Packet-loss convergence: every event may be dropped, but the REQUEST
      * retry carries the same epoch and the peer repeats its last answer. */
     alloc_rng_state = 0x5eed1234u;

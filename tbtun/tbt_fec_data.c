@@ -3354,6 +3354,23 @@ static noinline void tbt_fec_alloc_tx_tick(struct tbt_session *sess,
         }
     }
     spin_lock_bh(&tx->alloc_lock);
+    /* The exchange is not stalled while our RX is still draining the old
+     * plane toward the peer's switch point. On a high-BDP WAN that drain can
+     * outlast the round timeout (5 MiB at 300 ms RTT took 3 s), so renew the
+     * deadline on real delivery progress. A silent peer never advances
+     * next_deliver, so the timeout still bounds it. */
+    if (f->rx)
+    {
+        u64 next = READ_ONCE(f->rx->next_deliver);
+
+        if (next > tx->alloc.rx_progress)
+        {
+            tx->alloc.rx_progress = next;
+            if (tx->alloc.state == TBT_FEC_ALLOC_WAIT ||
+                tx->alloc.state == TBT_FEC_ALLOC_COMMIT)
+                tx->alloc.start_ns = now;
+        }
+    }
     act = tbt_fec_alloc_sm_step(&tx->alloc, now,
                                 READ_ONCE(sess->closing) ||
                                     READ_ONCE(sess->fec_stopping));
@@ -6843,10 +6860,18 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
                  * look like an unknown future epoch (and be counted bad). */
                 rx->alloc_epoch = a->epoch;
             }
+            else if (rx->alloc_state == 3 &&
+                     rx->alloc.epoch == a->epoch)
+            {
+                /* A repeated ACK means the peer is still waiting for DONE.
+                 * Our plane is already applied, so answer again; the resend
+                 * is consumed by the RX work for the initiator as well. */
+                rx->alloc_done_resend = true;
+            }
             else if (a->epoch > rx->alloc_epoch)
                 atomic64_inc(&sess->fec_alloc_bad);
-            /* A duplicate ACK for an epoch already applied or armed is the
-             * peer repeating its last response; nothing to arm. */
+            /* A duplicate ACK for an armed epoch is the peer repeating its
+             * last response; the applied case above repeats our DONE. */
             spin_unlock_bh(&rx->lock);
             tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
             tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
@@ -7090,10 +7115,25 @@ static void tbt_fec_alloc_rx_tick(struct tbt_session *sess,
     spin_unlock_bh(&rx->lock);
     if (sess->fec_allocator)
     {
+        bool dead;
+
         spin_lock_bh(&tx->alloc_lock);
-        tbt_fec_alloc_sm_rx_done(&tx->alloc);
+        dead = tx->alloc.state == TBT_FEC_ALLOC_FAILED ||
+               !tx->alloc_role;
+        if (!dead)
+            tbt_fec_alloc_sm_rx_done(&tx->alloc);
         spin_unlock_bh(&tx->alloc_lock);
-        tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+        if (dead)
+        {
+            /* The round timeout released the state machine before this RX
+             * reached the peer's P0. The far responder still holds its TX
+             * at P0 waiting for DONE; send it from the plane just applied so
+             * the peer can commit and resume instead of holding forever. */
+            (void)tbt_fec_send_alloc(sess, f, TBT_FEC_ALLOC_F_DONE,
+                                     a.epoch, a.mask, a.pkt, a.block);
+        }
+        else
+            tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
     }
     else
     {
@@ -9221,8 +9261,8 @@ static struct tbt_fec_flow *tbt_fec_flow_admit_dynamic(struct tbt_session *sess,
     u8 mask[TBT_FEC_BITMAP_BYTES];
     u16 target, pos = 0, got = 0;
     u64 deadline = ktime_get_ns() +
-                   (u64)TBT_FEC_ALLOC_TIMEOUT_MS * TBT_FEC_NSEC_PER_MSEC +
-                   1000ULL * TBT_FEC_NSEC_PER_MSEC;
+                   (u64)TBT_FEC_ALLOC_ADMIT_WAIT_MS *
+                       TBT_FEC_NSEC_PER_MSEC;
 
     mutex_lock(&sess->fec_rebalance_lock);
     /* The primary flow is created by data_init without a sid. The first
