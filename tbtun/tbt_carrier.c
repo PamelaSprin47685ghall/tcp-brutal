@@ -73,6 +73,12 @@
 /* tcp_retries2 defaults to 15; at that count TCP itself is about to give up,
  * so a wire that has not moved either way is dead. */
 #define TBT_STALL_RETX_MAX 15
+/* BBR moves cwnd and pacing in cycles; snd_una can rest for an RTT or two
+ * with no loss at all. 0.7.0 pauses a carrier only after the ack clock has
+ * been frozen for this long AND TCP still has packets_out: an idle or fully
+ * acknowledged carrier cannot have stalled. */
+#define TBT_STALL_MS 1000
+#define TBT_STALL_FROZEN_NS ((u64)TBT_STALL_MS * NSEC_PER_MSEC)
 /* A carrier that wrote its HELLO but never queued an OPEN is connected and
  * invisible to the scheduler. Wait one poll interval before repairing it so
  * the normal HELLO->OPEN window inside one pump run is never touched. */
@@ -435,10 +441,10 @@ static bool tbt_car_paused(struct tbt_session *sess)
     return paused;
 }
 
-/* Peripheral BBR hold (hold_enable). BBR resets cwnd/pacing after an idle
- * period; this poll restores the last good values while the carrier has
- * nothing real to send. It never touches delivered/rate_delivered and never
- * changes the TCP sequence space. */
+/* Peripheral BBR hold (hold_enable). 0.7.0 leaves cwnd and pacing_rate to
+ * BBR: the module never writes either field. The poll only tracks whether a
+ * carrier is idle, and a real frame ends that state; PAD is exempt because
+ * keepalive must not make an idle carrier look busy. */
 #define TBT_HOLD_ENTER_NS (200ULL * NSEC_PER_MSEC)
 #define TBT_HOLD_MAX_NS (10ULL * NSEC_PER_SEC)
 #define TBT_HOLD_LOSS_GUARD_NS (1ULL * NSEC_PER_SEC)
@@ -448,6 +454,13 @@ static bool tbt_car_hold_idle(struct tbt_session *sess)
     struct tbt_fec_tx *tx;
     bool busy = false;
 
+    /* FEC data has its own queues. fec_outq_queued/fec_out_ctl_depth count
+     * bound records; fec_out_queued and fec_outq_bytes are the wider ledger
+     * the 0.7.0 data plane fills as soon as a share is ready. Any of them
+     * non-zero means this session has a share to put on a carrier, so no
+     * carrier may be parked, whatever the ARQ counters say. */
+    if (READ_ONCE(sess->fec_out_queued) || READ_ONCE(sess->fec_outq_bytes))
+        return false;
     if (!tbt_hold_session_idle(READ_ONCE(sess->tx_queued),
                                READ_ONCE(sess->ctl_real)))
         return false;
@@ -466,47 +479,6 @@ static bool tbt_car_hold_idle(struct tbt_session *sess)
            !READ_ONCE(sess->fec_replay_queued);
 }
 
-static void tbt_car_hold_apply(struct tbt_carrier *c, struct tcp_sock *tp,
-                               struct sock *sk)
-{
-    u32 cwnd = c->hold_cwnd;
-    enum tbt_hold_apply gate;
-
-    if (!cwnd)
-        return;
-    if (READ_ONCE(tp->snd_cwnd_clamp))
-        cwnd = min(cwnd, READ_ONCE(tp->snd_cwnd_clamp));
-    if (!cwnd)
-        cwnd = 1;
-    lock_sock(sk);
-    /* Re-check under the socket lock. A non-PAD writer clears hold_active
-     * before it queues bytes, so this catches the real race. The in-flight
-     * test must not end the hold: PAD is the only frame that leaves it active
-     * with packets_out set, and its writer exempts TBT_F_PAD on purpose. */
-    gate = tbt_hold_apply_gate(
-        READ_ONCE(c->hold_active),
-        inet_csk(sk)->icsk_ca_state == TCP_CA_Open,
-        READ_ONCE(tp->snd_una) == READ_ONCE(tp->snd_nxt),
-        READ_ONCE(tp->packets_out));
-    if (gate == TBT_HOLD_APPLY_EXIT)
-    {
-        release_sock(sk);
-        WRITE_ONCE(c->hold_active, false);
-        WRITE_ONCE(c->hold_since_ns, 0);
-        return;
-    }
-    if (gate == TBT_HOLD_APPLY_SKIP)
-    {
-        release_sock(sk);
-        return;
-    }
-    tcp_snd_cwnd_set(tp, cwnd);
-    if (c->hold_pacing)
-        (void)cmpxchg(&sk->sk_pacing_rate, READ_ONCE(sk->sk_pacing_rate),
-                      c->hold_pacing);
-    release_sock(sk);
-}
-
 static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
                                struct sock *sk, u64 now)
 {
@@ -517,7 +489,6 @@ static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
     bool recent_loss;
     bool no_inflight;
     bool ca_open;
-    u32 mss, wnd_pkts;
 
     if (loss)
         WRITE_ONCE(c->hold_last_loss_ns, now);
@@ -530,22 +501,17 @@ static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
         return;
     }
     real_data = !tbt_car_hold_idle(c->sess);
-    mss = READ_ONCE(tp->mss_cache) ?: 1;
-    wnd_pkts = READ_ONCE(tp->snd_wnd) / mss;
     no_inflight = READ_ONCE(tp->snd_una) == READ_ONCE(tp->snd_nxt) &&
                   READ_ONCE(tp->packets_out) == 0;
     ca_open = inet_csk(sk)->icsk_ca_state == TCP_CA_Open;
 
     if (c->hold_active)
     {
-        if (!tbt_hold_keep(true, real_data, loss, wnd_pkts < c->hold_cwnd,
-                           now, c->hold_until_ns))
+        if (!tbt_hold_keep(true, real_data, loss, now, c->hold_until_ns))
         {
             WRITE_ONCE(c->hold_active, false);
             WRITE_ONCE(c->hold_since_ns, 0);
-            return;
         }
-        tbt_car_hold_apply(c, tp, sk);
         return;
     }
     if (!tbt_hold_enter(enable, no_inflight, !real_data, ca_open, loss,
@@ -563,28 +529,8 @@ static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
         }
         return;
     }
-    {
-        u32 cwnd = READ_ONCE(tp->snd_cwnd);
-        unsigned long pacing = READ_ONCE(sk->sk_pacing_rate);
-
-        if (!cwnd)
-            return;
-        if (wnd_pkts)
-            cwnd = min(cwnd, wnd_pkts);
-        if (READ_ONCE(tp->snd_cwnd_clamp))
-            cwnd = min(cwnd, READ_ONCE(tp->snd_cwnd_clamp));
-        if (sk->sk_sndbuf > 0)
-            cwnd = min(cwnd, (u32)(sk->sk_sndbuf / mss));
-        if (!cwnd)
-            cwnd = 1;
-        if (sk->sk_max_pacing_rate && pacing > sk->sk_max_pacing_rate)
-            pacing = sk->sk_max_pacing_rate;
-        c->hold_cwnd = cwnd;
-        c->hold_pacing = pacing;
-        WRITE_ONCE(c->hold_until_ns, now + TBT_HOLD_MAX_NS);
-        WRITE_ONCE(c->hold_active, true);
-        tbt_car_hold_apply(c, tp, sk);
-    }
+    WRITE_ONCE(c->hold_until_ns, now + TBT_HOLD_MAX_NS);
+    WRITE_ONCE(c->hold_active, true);
 }
 
 /* C2/C3 liveness net, for one carrier. The session's 50 ms poll calls this for
@@ -911,15 +857,18 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
                      * the carrier here would discard shares the block can
                      * still rebuild. stall_dead bounds how long it may stay
                      * paused. */
-                    tbt_carrier_stall(sess, c);
+                    if (tbt_carrier_stall(sess, c))
+                        return;
+                    /* The BBR guard declined the pause: keep this pass's
+                     * keepalive tail instead of dropping it. */
                 }
                 else
                 {
                     /* ARQ has no parity to lean on, so an ACK-stalled path is a
                      * dead one: kill it and repath its frames now. */
                     tbt_carrier_lost(sess, c);
+                    return;
                 }
-                return;
             }
         }
         c->last_una_ns = stall_since_ns;
@@ -953,8 +902,13 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
             /* trylock failed: the pump owns this byte stream right now; the
              * next 50 ms pass drips instead. */
         }
+        /* FEC data keeps the path alive by itself. While any share waits in
+         * the out queues a PAD would only contend with real bytes, so neither
+         * the hold nor this keepalive may run. */
         else if (tbt_http_need_pad(c->last_tx_ns, now, ka_ms) &&
-                 !READ_ONCE(sess->tx_queued))
+                 !READ_ONCE(sess->tx_queued) &&
+                 !READ_ONCE(sess->fec_out_queued) &&
+                 !READ_ONCE(sess->fec_outq_bytes))
         {
             if (!tbt_tx_control_pinned(sess, NULL, c->index, TBT_F_PAD, 0, 0, NULL, 0,
                                        false, GFP_ATOMIC))
@@ -2032,37 +1986,54 @@ struct tbt_carrier *tbt_carrier_new(struct tbt_session *sess, u8 index)
  * The shares already in flight belong to the FEC data plane: it treats them as
  * lost and parity rebuilds them (or its 30 s bound resets the block). This
  * function deliberately drops nothing itself, so it never takes pump_lock and
- * never sleeps. */
-void tbt_carrier_stall(struct tbt_session *sess, struct tbt_carrier *c)
+ * never sleeps.
+ *
+ * Returns true when the carrier is paused (or was already): the caller stops
+ * processing this carrier for the pass. False means the BBR guard above
+ * declined to declare a stall, so the caller must keep running the rest of
+ * the poll (PAD/keepalive) instead of returning early. */
+bool tbt_carrier_stall(struct tbt_session *sess, struct tbt_carrier *c)
 {
     struct sock *sk;
+    struct tcp_sock *tp;
+    u32 packets_out;
+    u64 now = ktime_get_ns();
 
     if (!sess || !c || READ_ONCE(sess->closing) || atomic_read(&c->stopping))
-        return;
+        return false;
     if (READ_ONCE(c->stalled))
     {
         /* Already paused: refresh the stall clock only. The poll re-enters
          * this branch every carrier_stall_ms while the path stays silent, and
          * one stall must not be counted twice. */
-        c->last_una_ns = ktime_get_ns();
-        return;
+        c->last_una_ns = now;
+        return true;
+    }
+    /* BBR's probe cycles can hold snd_una flat without any loss. Pause only
+     * when the ack clock has been frozen for TBT_STALL_MS and TCP still owes
+     * packets; with no bytes outstanding there is nothing to lose. */
+    sk = tbt_carrier_sk_get(c);
+    if (!sk)
+        return false;
+    tp = tcp_sk(sk);
+    packets_out = READ_ONCE(tp->packets_out);
+    tbt_carrier_sk_put(sk);
+    if (!packets_out || now - c->last_una_move_ns < TBT_STALL_FROZEN_NS)
+    {
+        return false;
     }
     WRITE_ONCE(c->stalled, true);
-    c->stall_since_ns = ktime_get_ns();
+    c->stall_since_ns = now;
     /* Baseline for the stall_dead test: a wire that still moves packets is
      * alive even when no byte is acknowledged yet. */
-    sk = tbt_carrier_sk_get(c);
-    if (sk)
-    {
-        c->stall_packets_out = READ_ONCE(tcp_sk(sk)->packets_out);
-        tbt_carrier_sk_put(sk);
-    }
+    c->stall_packets_out = packets_out;
     /* Restart the window, so the 50 ms poll does not re-declare the same
      * stall on its next pass. */
     c->last_una_ns = c->stall_since_ns;
     atomic64_inc(&sess->stall_declared);
     pr_info_ratelimited("tbtun: carrier %u stalled: repath paused, new frames avoid it\n",
                         c->index);
+    return true;
 }
 
 /* Discrete RTO grid for the survival estimate. A stall that recovered or was
@@ -3301,36 +3272,54 @@ static void tbt_carrier_keepalive(struct socket *s)
         pr_info_ratelimited("tbtun: carrier keepalive setup failed: %d\n", err);
 }
 
-void tbt_car_setsockbuf(struct socket *s, const struct tbt_cfg *cfg, u16 n_pri)
+/* Give one carrier its 0.8 MiB send and receive buffer, then hand the socket
+ * back to TCP autotuning.
+ *
+ * 0.7.0 assigns sk_sndbuf/sk_rcvbuf directly instead of issuing SO_SNDBUF /
+ * SO_RCVBUF. The sockopt path stores a userlock (SOCK_SNDBUF_LOCK /
+ * SOCK_RCVBUF_LOCK) that freezes both fields, so tcp_sndbuf_expand() and
+ * tcp_rcv_space_adjust() could never grow them; a namespace without
+ * CAP_NET_ADMIN also had to fall back to the 208 KiB rmem_max cap. The direct
+ * assignment skips the kernel's "double the request" convention as well, so
+ * the value below is the whole buffer.
+ *
+ * The near and far listeners call this before bind: the handshake freezes the
+ * window scale from sk_rcvbuf, and sizing only the accepted socket afterwards
+ * leaves its receive window at 64 KiB. */
+void tbt_car_setsockbuf(struct socket *s)
 {
-    u32 win = cfg->tx_window_bytes;
-    u32 n = n_pri ? n_pri : 1;
-    u32 share, budget, per;
-    int v;
+    struct sock *sk;
 
-    if (!win)
-        win = cfg->rx_reorder_bytes;
-    /* Two bounds, both divided by the carrier count:
-     *   share  = this carrier's slice of the reorder/window budget + slack;
-     *   budget = the module's total carrier-buffer budget (64 MiB), so
-     *            128 carriers cannot turn an 8 MiB-per-carrier setting into
-     *            a 1 GiB allocation.
-     * The kernel doubles SO_*BUF, so pass half of the byte target. */
-    share = win / n + 2 * TBT_CHUNK_MAX;
-    budget = TBT_CAR_SOCKBUF_TOTAL / n;
-    per = max(share, budget);
-    v = clamp_t(u32, per / 2, 64 * 1024, 1024 * 1024);
+    if (!s || !s->sk)
+        return;
+    sk = s->sk;
+    WRITE_ONCE(sk->sk_sndbuf, TBT_CAR_SOCKBUF_PER);
+    WRITE_ONCE(sk->sk_rcvbuf, TBT_CAR_SOCKBUF_PER);
+    /* Keep SOCK_CONNECT_BIND and any other bit; clear only the two buffer
+     * locks so autotuning stays enabled. */
+    sk->sk_userlocks &= ~TBT_CAR_SOCKBUF_LOCK_MASK;
+}
 
-    /* The plain option is capped at net.core.wmem_max/rmem_max (208 KiB on a
-     * default boot), so a 256 KiB request reached the kernel as 208 KiB and
-     * 2 x 208 KiB was the most a carrier could hold -- less than one BDP on
-     * the 218 ms WAN. The FORCE option needs CAP_NET_ADMIN, which the
-     * module's workqueue has in the init namespace; a namespace that lacks it
-     * falls back to the capped option rather than failing the carrier. */
-    if (sock_setsockopt(s, SOL_SOCKET, SO_SNDBUFFORCE, KERNEL_SOCKPTR(&v), sizeof(v)))
-        sock_setsockopt(s, SOL_SOCKET, SO_SNDBUF, KERNEL_SOCKPTR(&v), sizeof(v));
-    if (sock_setsockopt(s, SOL_SOCKET, SO_RCVBUFFORCE, KERNEL_SOCKPTR(&v), sizeof(v)))
-        sock_setsockopt(s, SOL_SOCKET, SO_RCVBUF, KERNEL_SOCKPTR(&v), sizeof(v));
+/* Ask for BBR on one carrier. sock_setsockopt(SOL_TCP, TCP_CONGESTION) is the
+ * kernel entry point: tcp_setsockopt() reaches tcp_set_congestion_control()
+ * with the flag that loads a congestion-control module on demand. Calling
+ * tcp_set_congestion_control() directly is not an option for this module:
+ * the 7.2.9 build tree does not export it (nor tcp_ca_find) in
+ * Module.symvers. A kernel built without CONFIG_TCP_CONG_BBR, or one whose
+ * namespace lacks CAP_NET_ADMIN, refuses the request; the carrier then keeps
+ * the system default and still carries traffic. */
+static void tbt_car_set_bbr(struct socket *s)
+{
+    int err;
+
+    if (!s || !s->sk)
+        return;
+    err = sock_setsockopt(s, SOL_TCP, TCP_CONGESTION,
+                          KERNEL_SOCKPTR(TBT_CAR_CC_NAME),
+                          sizeof(TBT_CAR_CC_NAME));
+    if (err)
+        pr_debug("tbtun: carrier TCP_CONGESTION=%s failed: %d; keeping the default\n",
+                 TBT_CAR_CC_NAME, err);
 }
 
 /* Dial `addr` until the handshake finishes or TBT_CONNECT_BUDGET_MS is spent.
@@ -3456,7 +3445,8 @@ static void tbt_car_connect_work(struct work_struct *w)
              ntohs(addr.sin_port));
     /* Before the SYN: the handshake freezes the window scale from this
      * socket's receive buffer. */
-    tbt_car_setsockbuf(s, &t->cfg, sess->n_pri);
+    tbt_car_setsockbuf(s);
+    tbt_car_set_bbr(s);
     tbt_carrier_keepalive(s);
     s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
     {
@@ -3792,9 +3782,10 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
     newsock->sk->sk_state_change = tbt_car_state_change;
     write_unlock_bh(&newsock->sk->sk_callback_lock);
 
-    /* The listener already fixed the window scale; this sizes the accepted
-     * socket's buffers to the same share. */
-    tbt_car_setsockbuf(newsock, &sess->tunnel->cfg, sess->n_pri);
+    /* The listener already fixed the window scale; repeat the 0.8 MiB floor
+     * on the accepted socket so an inherited userlock cannot freeze it. */
+    tbt_car_setsockbuf(newsock);
+    tbt_car_set_bbr(newsock);
     tbt_carrier_keepalive(newsock);
     atomic_set(&c->connected, 1);
     sess->rx_adopt_events++;

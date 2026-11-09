@@ -1393,27 +1393,24 @@ show that the byte budget and the time budget agree, not just a throughput numbe
 twice: per stream, and by a session-wide aggregate of the same value, so 128 concurrent
 streams cannot hold 128 × 8 MiB. The ready-to-deliver queue stays at 64 MiB per stream
 (`TBT_RX_RING_MAX`). Per session, retention (≤ window) + the frame queue
-(`txq_max = tx_window + 8 × TBT_CHUNK_MAX`, §8.5) + the carrier socket buffers (each
-sized to its share of the configured window bound; the kernel doubles the setsockopt
-value) ≈ 3 × window; plus ≤ `rx_reorder_bytes` of reorder tree and ≤ 64 MiB of ready
+`txq_max = tx_window + 8 × TBT_CHUNK_MAX`, §8.5) + the carrier socket buffers (each a
+fixed 0.8 MiB floor plus whatever TCP autotuning grows it to; §5.4) ≈ 3 × window; plus
+≤ `rx_reorder_bytes` of reorder tree and ≤ 64 MiB of ready
 queue per stream.
 
-**Carrier buffers.** `SO_SNDBUF`/`SO_RCVBUF` are no longer a hardcoded 256 KiB. Each
-carrier gets `clamp(max(window_share, TBT_CAR_SOCKBUF_TOTAL / n_pri) / 2, 64 KiB, 1 MiB)`,
-where `window_share = (tx_window_bytes ?: rx_reorder_bytes) / n_pri`, the division by two
-is the kernel's own doubling, and `TBT_CAR_SOCKBUF_TOTAL` is 128 MiB. The total budget is
-what makes the layer scalable: at 256 carriers each carrier gets 512 KiB effective
-(128 MiB total), at n=1 it gets 2 MiB effective, and an 8 MiB-per-carrier setting can no
-longer become 2 GiB. The cap is an accounting limit, not a reservation; the demand is the
-in-flight share. The value is set with `SO_SNDBUFFORCE`/`SO_RCVBUFFORCE`,
-falling back to the plain option when the kernel refuses the force call (no
-`CAP_NET_ADMIN`): the plain option is clamped to `net.core.wmem_max`/`rmem_max` (208 KiB
-on a default boot), so a 256 KiB request reached the kernel as 208 KiB, 416 KiB effective
-per carrier after the kernel's doubling. `stats live` prints the result as `car_sndbuf`
-next to `car_rcvbuf`. The queueing delay is bounded by in-flight / rate, and in-flight is
-bounded by the window, so a buffer that holds one carrier's share adds no delay. The old
-fixed 256 KiB reached the kernel as ~512 KiB of unacked bytes per carrier and capped a
-1–8 MiB window.
+**Carrier buffers.** Every carrier owns `TBT_CAR_SOCKBUF_PER` = 838,861 B (0.8 MiB) of
+send buffer and the same of receive buffer, independent of the carrier count and of the
+configured window. `tbt_car_setsockbuf()` assigns `sk_sndbuf`/`sk_rcvbuf` directly. The
+`SO_SNDBUF`/`SO_RCVBUF` path stores `SOCK_SNDBUF_LOCK`/`SOCK_RCVBUF_LOCK`, and either bit
+freezes both fields and disables `tcp_sndbuf_expand()`/`tcp_rcv_space_adjust()`. The
+direct assignment also avoids the `net.core.wmem_max`/`rmem_max` cap (208 KiB on a
+default boot) and the kernel's request-doubling convention, so the value is the whole
+buffer, not half of it. The poll clears the two lock bits if a socket arrived with them
+inherited and keeps every other `sk_userlocks` bit. The floor is not a cap: autotuning
+may grow both buffers up to `tcp_wmem[2]`/`tcp_rmem[2]`. Listeners get the same floor
+before bind, because the handshake freezes the window scale from `sk_rcvbuf`; `stats
+live` prints the result as `car_sndbuf` next to `car_rcvbuf`. The per-carrier split by
+`n_pri` and the `SO_*BUFFORCE` fallback are gone.
 
 **Carrier-count scaling (256 target).** The current ABI limit is 16 carriers, not a
 tunable: `path_ack_mask` is a 16-bit wire field (`BUILD_BUG_ON(TBT_MAX_CARRIERS_LIMIT >
@@ -1423,14 +1420,14 @@ the ARQ path masks and per-path arrays are `u16`/`[16]` (`avoid_mask`, `path_mas
 `una_observed_ns[]`, `sched.order[]`, and the `unsigned long` FIN/RST masks). Raising the
 limit to 256 requires widening those to 256-bit masks and chunking or enlarging the FBK
 and WINDOW bodies; that is a data-plane change and is deferred to the FEC block model.
-What is already scalable: the socket-buffer budget above, the port map (one absolute
+What is already scalable: the fixed per-carrier buffer floor above, the port map (one absolute
 65536-bit bitmap, so any window over 1..65535 is fine), the per-stream limits, and the
 procfs renderers (per carrier, no fixed stride). Resource estimate at 256 carriers:
 256 TCP sockets and
 5 work structs each (poll/pump/rx/tx/connect), 256 × ~24 KiB of HTTP/parser state
 (~6 MiB), and a per-carrier 50 ms poll = 5120 wakes/s; the poll must become one
 session-level scan (20 wakes/s) before 256 is enabled, and the per-carrier keepalive
-must batch. The 128 MiB socket-buffer budget bounds the kernel side.
+must batch. The 0.8 MiB floor bounds the kernel side while TCP autotuning may raise it.
 
 **Platform.** 1G is the physical port; 500-750 Mbit/s at the application is
 the accepted target. The 256-carrier, 1G target is ARM64. The `.74` host
@@ -2800,13 +2797,12 @@ Implemented in C3, per session:
    `stall_dead` bound. A provisional carrier that has not presented a HELLO within 5 s
    is retired.
 
-   The poll also owns the BBR hold (`hold_enable=1` by default; write `0` to disable):
-   when a carrier has been idle long enough for the stack to reset its cwnd and pacing,
-   the poll restores the last good `snd_cwnd`/pacing rate instead of letting the next
-   burst restart from the initial window. The hold is released on loss, on a carrier
-   replacement, and when the saved rate is stale; `host/test_hold` covers those rules.
-   It writes `tcp_sock` fields directly, which is not a stable kernel API; keep
-   `hold_enable=0` as the rollback if a kernel change breaks the assumption.
+   The poll also tracks the peripheral idle hold (`hold_enable=1` by default; write `0`
+   to disable). 0.7.0 removed the old snapshot and restore of `snd_cwnd`/`sk_pacing_rate`:
+   the hold only marks a carrier that has been idle for 200 ms, and a real (non-PAD)
+   frame clears the mark. A carrier is never marked while any FEC byte sits in the out
+   queues. `host/test_hold` covers the enter/keep/exit rules; the module no longer writes
+   `tcp_sock` window fields, so the hold cannot fight BBR.
 2. `tbt_carrier_lost()` also runs on a carrier write error and on `carrier <n> down`. It
    excludes the path from scheduling immediately and marks every retained frame last sent
    on it overdue, so the normal scheduler re-sends them on the live paths. An ARQ stall

@@ -3,6 +3,30 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.7.0] - unreleased
+
+### Changed
+
+- Carrier transport is BBR-owned and carrier-count independent. Every
+  carrier socket gets a direct `sk_sndbuf`/`sk_rcvbuf` floor of 838,861 B
+  (0.8 MiB) with `SOCK_SNDBUF_LOCK`/`SOCK_RCVBUF_LOCK` cleared, so TCP
+  autotuning may grow both buffers. The per-`n_pri` split, the 128 MiB
+  `TBT_CAR_SOCKBUF_TOTAL` budget and the `SO_*BUFFORCE` fallback are gone.
+  Each dialled and adopted carrier asks for `TCP_CONGESTION=bbr` explicitly
+  and keeps the system default only when the kernel refuses it.
+- The peripheral idle hold no longer snapshots or restores `snd_cwnd` and
+  `sk_pacing_rate`; BBR keeps ownership. While FEC data sits in the out
+  queues no carrier is marked held and no PAD is queued.
+- A FEC carrier is paused only after `snd_una` has been frozen for at least
+  `TBT_STALL_MS` (1 s) with `packets_out > 0`, so a BBR probe cycle no
+  longer looks like a stall.
+
+### Tests
+
+- `host/test_carrier_policy` asserts the 0.8 MiB floor, the cleared buffer
+  userlocks and the BBR request path (including `-ENOENT` tolerance);
+  `host/test_hold` follows the snapshot-free hold state machine.
+
 ## [0.6.0] - 2026-11-09
 
 0.6.0 is the merge cut. Two parallel 0.5.0 lines had each taken the same

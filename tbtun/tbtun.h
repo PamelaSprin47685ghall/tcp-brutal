@@ -342,12 +342,10 @@ void tbt_listen_stop(struct tbt_tunnel *t);
  * kill, not a retransmit. */
 #define TBT_TX_WINDOW_AUTO_FLOOR (1024 * 1024)
 
-/* Total carrier socket-buffer budget, divided by the carrier count. At 256
- * carriers this is 512 KiB each (the kernel doubles the setsockopt value),
- * 128 MiB in total; at n=1 it is capped by the per-carrier 1 MiB setsockopt
- * value (2 MiB effective), enough for the 1 MiB window. Without this bound,
- * an 8 MiB per-carrier setting would allocate 2 GiB at 256 carriers. */
-#define TBT_CAR_SOCKBUF_TOTAL (128 * 1024 * 1024)
+/* Every carrier owns TBT_CAR_SOCKBUF_PER (0.8 MiB) of send and receive
+ * buffer, independent of the stripe width, and leaves the SNDBUF/RCVBUF
+ * userlocks clear. The constant lives in tbt_carrier_policy.h, where the
+ * host test asserts it. */
 
 /* A carrier that never presents a HELLO is retired after this long. */
 #define TBT_JOIN_TIMEOUT_MS 5000
@@ -2090,10 +2088,8 @@ struct tbt_carrier
     u64 last_rx_ns;
     u64 last_tx_ns;
     u64 join_deadline_ns;         /* provisional carriers only */
-    /* hold_enable: last good cwnd/pacing captured while the carrier is idle.
-     * The 50 ms poll restores them until real data, loss or the deadline. */
-    u32 hold_cwnd;
-    unsigned long hold_pacing;
+    /* hold_enable: the carrier stayed idle for the enter interval. 0.7.0
+     * leaves cwnd/pacing to BBR, so no snapshot is stored or restored. */
     u64 hold_until_ns;
     u64 hold_since_ns;
     u64 hold_last_loss_ns;
@@ -2245,14 +2241,16 @@ void tbt_carrier_stats_retire(struct tbt_session *sess, struct tbt_carrier *c);
 void tbt_carrier_free(struct tbt_carrier *c);
 void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c);
 /* Pause a live carrier whose snd_una has not moved: no RETIRE, no
- * replacement, no socket teardown, no path_lost. Its unacknowledged frames are
- * dropped and the pump stops picking it; the poll clears c->stalled when
- * snd_una moves again. */
-void tbt_carrier_stall(struct tbt_session *sess, struct tbt_carrier *c);
+ * replacement, no socket teardown, no path_lost, and no frame is dropped by
+ * this function; the pump stops picking it and the poll clears c->stalled when
+ * snd_una moves again. Returns true when the carrier is paused, false when
+ * the BBR guard (snd_una frozen for TBT_STALL_MS and packets_out > 0)
+ * declined. */
+bool tbt_carrier_stall(struct tbt_session *sess, struct tbt_carrier *c);
 int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c,
                      struct tbt_frame *fr);
 int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock);
-void tbt_car_setsockbuf(struct socket *s, const struct tbt_cfg *cfg, u16 n_pri);
+void tbt_car_setsockbuf(struct socket *s);
 int tbt_carrier_open_target(struct tbt_stream *st);
 void tbt_replace_work(struct work_struct *w);
 int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp);
