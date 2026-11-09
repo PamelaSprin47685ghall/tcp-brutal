@@ -24,9 +24,9 @@ and moves independently of the module version.
   `workqueue: tbt_car_rx_work [tbtun] hogged CPU for >10000us ...` reports on
   the 1 GiB gates, where one item could walk a 2 MiB carrier queue. A new
   `rx_budget_yields` counter in `/proc/net/tbtun/tunnels` shows the splits.
-  `tcp_read_sock()`'s loop flag is now set explicitly (`desc.count = 1`)
-  instead of accumulating consumed bytes in a field the kernel only tests
-  for zero.
+  `tcp_read_sock()`'s loop flag is now set explicitly to a non-zero sentinel
+  (`desc.count = SIZE_MAX`) instead of accumulating consumed bytes in a
+  field the kernel tests for zero.
 - `host/test_rx_budget` pins the deadline boundary, batched reads with no
   lost or duplicated byte, the resume truth table (budgeted stop, coalesced
   wake, held record, stopping carrier), and the two-bit wake machine.

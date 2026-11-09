@@ -29,6 +29,7 @@
  *     carrier.
  */
 #include <linux/ktime.h>
+#include <linux/limits.h>
 #include <linux/skbuff.h>
 #include <net/sock.h>
 #include <net/tcp.h>
@@ -1191,10 +1192,11 @@ static void tbt_car_rx_body(struct tbt_carrier *c)
     }
     desc.arg.data = c;
     /* tcp_read_sock() stops after one whole skb when count is zero; any
-     * non-zero value lets it walk the queue. The core never decrements it,
-     * so the value is a flag, not a byte budget (the actor stops itself on
-     * the budget). */
-    desc.count = 1;
+     * non-zero value lets it walk more. SIZE_MAX also stays non-zero if a
+     * core variant subtracts the used bytes (the splice actor does), so this
+     * is "not exhausted" on every kernel this module supports. The actor
+     * stops itself on the time budget instead. */
+    desc.count = SIZE_MAX;
 
     atomic64_inc(&c->sess->rx_reads);
     tbt_rx_budget_start(&c->rx_budget, ktime_get_ns());
