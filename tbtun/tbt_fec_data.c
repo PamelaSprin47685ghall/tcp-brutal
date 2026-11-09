@@ -2240,6 +2240,16 @@ static void tbt_fec_tx_pump_mux(struct tbt_session *sess,
     if (!tx || !sess->fec_ms_tx || f->state != 1 ||
         READ_ONCE(sess->closing) || READ_ONCE(sess->fec_stopping))
         return;
+    /* Same INIT gate as the legacy pump: the mux must not seal and send a
+     * short block while the peer still has the default RX shape. A 128 KiB
+     * interactive write would otherwise be emitted before FEC_CFG INIT is
+     * acknowledged and dropped wholesale on the far side. */
+    if (sess->fec_sclc && sess->n_fec_flows <= 1 && tx->sid &&
+        !tx->init_done)
+    {
+        tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
+        return;
+    }
     block_span = (u32)tx->groups * tx->n * TBT_FEC_S;
     WRITE_ONCE(tx->closing, false);
     for (;;)
