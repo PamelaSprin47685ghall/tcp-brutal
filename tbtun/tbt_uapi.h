@@ -28,15 +28,48 @@ typedef uint64_t u64;
 #endif
 
 #define TBT_VERSION_MAJOR 0
-#define TBT_VERSION_MINOR 4
-#define TBT_VERSION_PATCH 4
+#define TBT_VERSION_MINOR 5
+#define TBT_VERSION_PATCH 0
 #define TBT_VERSION ((TBT_VERSION_MAJOR << 16) | (TBT_VERSION_MINOR << 8) | TBT_VERSION_PATCH)
 
 /* Roles, as carried in HELLO and in the `role=` key. */
 #define TBT_ROLE_NEAR 2
 #define TBT_ROLE_FAR 3
 
-/* Wire protocol revision: u16 at frame offset +30, 0x0007. Independent of the
+/* One tunnel may carry this many listen/target mappings, slot 0 included.
+ * Slot 0 is the original listen= (near public port, far carrier port) and
+ * target= pair; map= adds slots 1..TBT_MAP_MAX-1. The limit keeps the
+ * canonical config line inside TBT_LINE_MAX and bounds the listener array. */
+#define TBT_MAP_MAX 8
+
+/* Network-order port <-> host-order port without arpa/inet.h, so the host
+ * parser and the module agree on the bytes. The network-order side is a u16
+ * so this header stays includable from userspace; a __be16 is the same type
+ * on the kernel side. */
+static inline u16 tbt_port_be16(u16 host)
+{
+    union {
+        u16 be;
+        u8 b[2];
+    } u;
+
+    u.b[0] = (u8)(host >> 8);
+    u.b[1] = (u8)(host & 0xff);
+    return u.be;
+}
+
+static inline u16 tbt_port_host16(u16 net)
+{
+    union {
+        u16 be;
+        u8 b[2];
+    } u;
+
+    u.be = net;
+    return (u16)((u16)u.b[0] << 8 | (u16)u.b[1]);
+}
+
+/* Wire protocol revision: u16 at frame offset +30, 0x0008. Independent of the
  * module version (DESIGN.md §11); bump it alone on any wire change.
  * 0x0002 moved body_len into the header (+6) and removed the 4-byte prefix.
  * 0x0003 carries RETIRE (24) and the HELLO profile|gen byte; a 0x0002 peer
@@ -65,12 +98,22 @@ typedef uint64_t u64;
  * 16 bytes for FIN, so the first HELLO fails with -EPROTO and the carrier
  * closes. Both ends must be upgraded together.
  * 0x0007 (0.4.0) makes a session carry several FEC streams. OPEN carries a
- * 32-byte physical group bitmap (TBT_OPEN_BODY_LEN) instead of an empty
+ * 32-byte physical group bitmap instead of an empty
  * body; FIN's pkt_end/pkt_base become stream-local packet seqs; and the FEC
  * plane adds ALLOC (0x36) for group rebalancing. A 0x0006 peer fails the
  * first HELLO (version 4) and the first OPEN length check, so the hard
- * cutover is explicit rather than a silent reinterpretation. */
-#define TBT_CONV 0x0007u
+ * cutover is explicit rather than a silent reinterpretation.
+ * 0x0008 (0.5.0) is the v8 cut: OPEN grows to 36 bytes (route_slot and
+ * target_port), FEC_CFG and FEC_FBK grow to 64 bytes with a new extension
+ * area, and all three wire version constants move together (TBT_CONV,
+ * TBT_FEC_CONV, HELLO body[0]). Multi-port mapping rides the same cut:
+ * route_slot names the near listen endpoint (mapping slot), and target_port
+ * selects that slot's far port (0 = the far side's configured default; any
+ * other value must equal it as a drift guard, not a routing source). A
+ * 0.4.0 peer fails the first HELLO (version 5), the first FEC record
+ * (0x1007) and the first OPEN length check; there is no compatibility
+ * branch. */
+#define TBT_CONV 0x0008u
 
 /* HELLO body[0]: wire-protocol version, independent of TBT_VERSION. The FEC
  * v6 session uses version 3 and the extended body below; the old ARQ keeps
@@ -80,12 +123,13 @@ typedef uint64_t u64;
  * the first HELLO with -EPROTO and its carrier closes; both ends must be
  * upgraded together. Version 4 is the multi-stream cut: TBT_FEC_CONV 0x1007,
  * a 32-byte OPEN group bitmap, stream-local FEC seq/block ids and ALLOC
- * (0x36). */
+ * (0x36). Version 5 is the v8 cut: TBT_FEC_CONV 0x1008, a 36-byte OPEN with
+ * route_slot and target_port, and 64-byte FEC_CFG/FEC_FBK bodies. */
 #define TBT_WIRE_VERSION 1
-#define TBT_WIRE_VERSION_V6 4
+#define TBT_WIRE_VERSION_V6 5
 
 /* ------------------------------------------------------------------ *
- * FEC wire: an independent record format, TBT_FEC_CONV 0x1007.
+ * FEC wire: an independent record format, TBT_FEC_CONV 0x1008.
  *
  * The old ARQ record above is frozen at 16 carriers: its path_ack_mask is
  * u16 and its FBK/WINDOW bodies have 16 entries. FEC never reuses those
@@ -111,7 +155,7 @@ typedef uint64_t u64;
  *   +16 u64 seq         DATA: packet sequence; PARITY: window end
  *   +24 u16 win_len     PARITY: covered packets; DATA: 0
  *   +26 u16 payload_len payload bytes following this header
- *   +28 u16 conv        0x1007
+ *   +28 u16 conv        0x1008
  *   +30 u16 reserved    must be 0
  *   +32 u64 sid         stream id this record belongs to. DATA/PARITY and
  *                       every per-stream control record (ACK/NACK/CFG/FBK/
@@ -125,7 +169,7 @@ typedef uint64_t u64;
  * Control frames are complete records of their own and must never be queued
  * behind a partial DATA record (the carrier writer emits each record whole).
  * ------------------------------------------------------------------ */
-#define TBT_FEC_CONV 0x1007u
+#define TBT_FEC_CONV 0x1008u
 /* 0.2.0 raises TBT_FEC_CONV from 0x1001 to 0x1004 in three wire steps;
  * 0.2.2 adds M5 below.
  * M2 (0x1002): a PARITY record may be a block marker: win_len == 0 &&
@@ -163,12 +207,18 @@ typedef uint64_t u64;
  * There is no 4-byte marker and no magic number on this wire. A marker is a
  * set of values inside the 48-byte tbt_fec_hdr: type TBT_FEC_PARITY (0x31),
  * flags 0, share_index n (parity 0), epoch 0, win_len 0, payload_len 0,
- * conv 0x1007, payload_crc32c 0 (CRC32C of an empty payload).
+ * conv 0x1008, payload_crc32c 0 (CRC32C of an empty payload).
  *
  * M7 (0x1007, 0.4.0): seq and block_id are stream-local; sid is the routing
  * key for every per-stream record, not an entry filter; OPEN names the
  * flow's physical group bitmap; ALLOC (0x36) moves a flow between group
- * sets. The 48-byte header layout is unchanged. */
+ * sets. The 48-byte header layout is unchanged.
+ *
+ * M8 (0x1008, 0.5.0): FEC_CFG and FEC_FBK grow to 64 bytes with a new
+ * extension area, so the FBK carrier bitmap is a full 256-bit vector again
+ * (the 0.4.0 SC overlay truncated it to 224 carriers). OPEN grows to 36
+ * bytes for route_slot and target_port. Every length and offset below is
+ * the v8 contract. */
 
 /* FEC record types. */
 #define TBT_FEC_DATA 0x30
@@ -241,23 +291,23 @@ static inline bool tbt_fec_record_type(u8 type)
  * super-block. A sender replays every selected share for every selected
  * group; a share that is already present is a harmless duplicate. */
 #define TBT_FEC_NACK_LEN (2 * TBT_FEC_BITMAP_BYTES)
-/* FEC_ALLOC body (64 bytes, 0x1007). The near-side arbiter names the new
- * physical group set for one stream. Each direction has its own switch
- * point, so the body is symmetric: switch_pkt/block_base always name the
- * sending side's TX origin.
+/* FEC_ALLOC body (64 bytes, 0x1008). The near-side arbiter names the new
+ * physical group set for one stream; the far side acknowledges (ACK) and
+ * then reports the applied switch point (DONE). The body is also valid as a
+ * sender-side announcement of its own TX switch for the reverse direction.
  *   +0  u32 epoch       allocation generation, starts at 1, monotonic
  *   +4  u8  group_mask[32]  physical groups; popcount >= 1
- *   +36 u8  flags       see TBT_FEC_ALLOC_F_*
+ *   +36 u8  flags       TBT_FEC_ALLOC_F_ACK / _DONE / _COMMITTED / _ABORT
  *   +37 u8  reserved[3] must be 0
  *   +40 u64 switch_pkt  flow-local seq of the first record on the new set
  *   +48 u64 block_base  flow-local block id of the first block on the new set
  *   +56 u32 crc32c      CRC32C over bytes +0..+55
  *   +60 u32 reserved2   must be 0
  *
- * The flags are a capability of 0.4.x: the body layout and TBT_FEC_CONV are
- * unchanged, but ACK/DONE/COMMITTED/ABORT form the full exchange. A 0.4.0
- * peer parses the body and ignores the record, so it never answers; the
- * arbiter then aborts and keeps the static per-flow quota it configured.
+ * The four flags were a 0.4.x capability and keep their meaning in v8: the
+ * body layout is unchanged, while TBT_FEC_CONV moves to 0x1008 with the wire
+ * cut. A 0.4.0 peer fails the FEC conv check before it can parse the body,
+ * so the arbiter aborts and keeps the static per-flow quota it configured.
  */
 #define TBT_FEC_ALLOC_LEN 64
 #define TBT_FEC_ALLOC_EPOCH 0
@@ -269,12 +319,12 @@ static inline bool tbt_fec_record_type(u8 type)
 #define TBT_FEC_ALLOC_CRC 56
 #define TBT_FEC_ALLOC_CRC_BYTES 56
 #define TBT_FEC_ALLOC_RESERVED2 60
-#define TBT_FEC_ALLOC_F_ACK 0x01
-#define TBT_FEC_ALLOC_F_DONE 0x02
-#define TBT_FEC_ALLOC_F_COMMITTED 0x04
-#define TBT_FEC_ALLOC_F_ABORT 0x08
+#define TBT_FEC_ALLOC_F_ACK 0x01       /* the peer accepts the new set */
+#define TBT_FEC_ALLOC_F_DONE 0x02      /* the switch point is reached */
+#define TBT_FEC_ALLOC_F_COMMITTED 0x04 /* the new set is in force */
+#define TBT_FEC_ALLOC_F_ABORT 0x08     /* cancel the pending allocation */
 #define TBT_FEC_ALLOC_F_MASK 0x0f
-/* FEC_CFG body (48 bytes, little-endian). One record carries a shape change
+/* FEC_CFG body (64 bytes, little-endian). One record carries a shape change
  * request; the flags say whether it applies or aborts one. The record
  * header leaves n/m/share_index/win_len/seq zero and names no block.
  *   +0  u32 epoch       configuration generation, starts at 1, monotonic
@@ -291,8 +341,15 @@ static inline bool tbt_fec_record_type(u8 type)
  *   +32 u64 seed        codec seed; both ends derive the group seeds from it
  *   +40 u32 crc32c      CRC32C over bytes +0..+39
  *   +44 u32 reserved    must be 0
+ *   +48 u8  codec_variant 0=RLNC single, 1=RLNC grouped, 2=SC-LDPC
+ *   +49 u8  L           variant 0/1: 0; variant 2: 8 or 16
+ *   +50 u16 block       variant 0/1: 0; variant 2: 256 or 512, and the
+ *                       uplink GF(16) variant is 128
+ *   +52 u32 rate_ppm    variant 0/1: 0; variant 2: 250000..700000
+ *   +56 u32 crc32c_ext  CRC32C over bytes +48..+55
+ *   +60 u32 reserved2   must be 0
  */
-#define TBT_FEC_CFG_LEN 48
+#define TBT_FEC_CFG_LEN 64
 #define TBT_FEC_CFG_EPOCH 0
 #define TBT_FEC_CFG_N 4
 #define TBT_FEC_CFG_M 6
@@ -307,6 +364,13 @@ static inline bool tbt_fec_record_type(u8 type)
 #define TBT_FEC_CFG_CRC 40
 #define TBT_FEC_CFG_RESERVED 44
 #define TBT_FEC_CFG_CRC_BYTES 40
+#define TBT_FEC_CFG_CODEC_VARIANT 48
+#define TBT_FEC_CFG_L 49
+#define TBT_FEC_CFG_BLOCK 50
+#define TBT_FEC_CFG_RATE_PPM 52
+#define TBT_FEC_CFG_CRC_EXT 56
+#define TBT_FEC_CFG_CRC_EXT_BYTES 8
+#define TBT_FEC_CFG_RESERVED2 60
 
 #define TBT_FEC_CFG_F_APPLY 0x01 /* the shape named here takes effect */
 #define TBT_FEC_CFG_F_ABORT 0x02 /* cancel the pending switch */
@@ -318,7 +382,7 @@ static inline bool tbt_fec_record_type(u8 type)
 #define TBT_FEC_CFG_F_INIT 0x04
 #define TBT_FEC_CFG_F_MASK 0x07
 
-/* FEC_FBK body (48 bytes). The receiver reports the loss it measured and the
+/* FEC_FBK body (64 bytes). The receiver reports the loss it measured and the
  * shape it holds; the flags carry the switch handshake. epoch is
  * ((u32)epoch_hi << 16) | epoch_lo, so a u32 generation fits the layout
  * that 0x1002 defined for the old 16-bit field.
@@ -331,9 +395,16 @@ static inline bool tbt_fec_record_type(u8 type)
  *   +12 u16 epoch_hi
  *   +14 u8  flags       TBT_FEC_FBK_F_*
  *   +15 u8  n_current
- *   +16 u8  carrier_bitmap[32]
+ *   +16 u8  carrier_bitmap[32]  full 256-bit carrier map
+ *   +48 u32 p_fast_ppm          SC-LDPC fast-window loss, parts per million
+ *   +52 u8  codec_variant       receiver's installed variant
+ *   +53 u8  L                   0/8/16, matching the variant
+ *   +54 u16 block               0/256/512, matching the variant; the
+ *                               uplink GF(16) codec uses 128
+ *   +56 u32 rate_ppm_current    receiver's current codec rate
+ *   +60 u32 rate_ppm_target     the sender's announced CFG target rate
  */
-#define TBT_FEC_FBK_LEN 48
+#define TBT_FEC_FBK_LEN 64
 #define TBT_FEC_FBK_EPOCH_LO 0
 #define TBT_FEC_FBK_M_CURRENT 2
 #define TBT_FEC_FBK_M_TARGET 3
@@ -344,6 +415,12 @@ static inline bool tbt_fec_record_type(u8 type)
 #define TBT_FEC_FBK_FLAGS 14
 #define TBT_FEC_FBK_N_CURRENT 15
 #define TBT_FEC_FBK_BITMAP 16
+#define TBT_FEC_FBK_P_FAST_PPM 48
+#define TBT_FEC_FBK_CODEC_VARIANT 52
+#define TBT_FEC_FBK_L 53
+#define TBT_FEC_FBK_BLOCK 54
+#define TBT_FEC_FBK_RATE_CURRENT 56
+#define TBT_FEC_FBK_RATE_TARGET 60
 
 #define TBT_FEC_FBK_F_CFG_ACK 0x01     /* CFG accepted, receiver ARMED */
 #define TBT_FEC_FBK_F_CFG_NACK 0x02    /* CFG refused, sender aborts */
@@ -410,11 +487,18 @@ enum tbt_frame_type
  * sizes its dup array by it. */
 #define TBT_DUP_MAX 3
 
-/* OPEN body (0.4.0, TBT_CONV 0x0007): exactly TBT_OPEN_BODY_LEN bytes.
- *   +0 u8 group_mask[32]  bit p = physical FEC group p; bits at or above
- *                         carriers/(n+m) must be zero
- * A non-FEC session sends 32 zero bytes so one length rule covers both. */
-#define TBT_OPEN_BODY_LEN TBT_FEC_BITMAP_BYTES
+/* OPEN body (0.5.0, TBT_CONV 0x0008): exactly TBT_OPEN_BODY_LEN bytes.
+ *   +0  u8  group_mask[32]  bit p = physical FEC group p; bits at or above
+ *                           carriers/(n+m) must be zero
+ *   +32 u16 route_slot      near-side listen endpoint index (mapping slot)
+ *   +34 u16 target_port     far target port for that slot; 0 = the far
+ *                           side's configured target for the slot
+ * A non-FEC session sends 36 zero bytes so one length rule covers both.
+ * A single-route session sends route_slot=0 and its target_port, or 0/0 to
+ * use the far side's configured target. */
+#define TBT_OPEN_BODY_LEN (TBT_FEC_BITMAP_BYTES + 4) /* 36 */
+#define TBT_OPEN_ROUTE_SLOT 32
+#define TBT_OPEN_TARGET_PORT 34
 
 /* Body length bounds per frame type (DESIGN.md §3.3, "Payload layouts").
  * tbt_hdr_check() accepts a type only if tbt_body_bounds() knows it and the

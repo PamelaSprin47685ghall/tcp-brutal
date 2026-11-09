@@ -29,6 +29,7 @@
 
 #include "tbtun.h"
 #include "tbt_carrier_policy.h"
+#include "tbt_map.h"
 #include "tbt_portmap.h"
 
 struct tbt_portmap tbt_ports = {
@@ -52,7 +53,7 @@ static const char *tbt_role_name(u8 role)
 
 static const char *tbt_state_name(const struct tbt_tunnel *t)
 {
-    if (t->lsock)
+    if (t->nlisteners)
         return "listening";
     return "idle";
 }
@@ -216,6 +217,13 @@ static bool tbt_cfg_sane(const struct tbt_cfg *c, int *err)
         *err = -EINVAL;
         return false;
     }
+    /* The parser already names the bad map entry; this is the kernel-side
+     * re-proof for any future caller that builds a struct tbt_cfg directly. */
+    if (tbt_map_check(c))
+    {
+        *err = -EINVAL;
+        return false;
+    }
     return true;
 }
 
@@ -335,6 +343,7 @@ int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net)
     struct tbt_tunnel *old, *t;
     int err = 0;
     bool listening = false;
+    u8 i;
 
     if (!tbt_cfg_sane(cfg, &err))
         return err;
@@ -364,7 +373,8 @@ int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net)
     // Initialised here, not in tbt_listen_start: the listening socket can
     // deliver data before start returns, and sk_data_ready would then
     // schedule an uninitialised work item.
-    INIT_WORK(&t->w_accept, tbt_accept_work);
+    for (i = 0; i < TBT_MAP_MAX; i++)
+        INIT_WORK(&t->listeners[i].w_accept, tbt_accept_work);
 
     if (old)
     {
@@ -394,7 +404,8 @@ int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net)
     /* A connection accepted before the session exists would reach
      * tbt_stream_start(NULL, ...); enable accepting only now. */
     atomic_set(&t->accepting, 1);
-    schedule_work(&t->w_accept);
+    for (i = 0; i < t->nlisteners; i++)
+        schedule_work(&t->listeners[i].w_accept);
     mutex_unlock(&tbt_lock);
 
     /* The old tunnel is off the list and its listener is stopped. Destroy its
@@ -1050,7 +1061,7 @@ static struct tbt_fec_flow *tbt_session_open_flow(struct tbt_session *sess,
 }
 
 /* Bind one frame's sid to the session. OPEN may create the stream and, on a
- * FEC session, the flow its 32-byte body describes. A repeated OPEN is
+ * FEC session, the flow its leading 32-byte bitmap describes. A repeated OPEN is
  * idempotent only when it names the groups the flow already owns. DATA, FIN
  * and RST never create a stream.
  *
@@ -1062,13 +1073,83 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
     bool near = sess->tunnel->cfg.role == TBT_ROLE_NEAR;
     bool adopt = false, drop = false, tombstone_open = false;
     struct tbt_fec_flow *flow = NULL;
+    u16 target_port = 0;
+    u8 route_slot = 0;
 
     if (!sid)
         return TBT_BIND_DROP;
-    /* The wire checker bounds an OPEN to this length too; the check here is
-     * the one the bitmap admission relies on. */
-    if (open && sess->fec && (!body || len != TBT_FEC_BITMAP_BYTES))
-        return TBT_BIND_BAD;
+    /* v8 OPEN: fixed 36 bytes. Validate in the contract order — mask, route
+     * slot, target port — before any flow is admitted. A rejected step must
+     * not create a flow. */
+    BUILD_BUG_ON(TBT_OPEN_BODY_LEN != TBT_FEC_BITMAP_BYTES + 4);
+    BUILD_BUG_ON(TBT_HELLO_BODY_LEN_V6 != 66);
+    if (open)
+    {
+        const struct tbt_cfg *cfg = &sess->tunnel->cfg;
+        u16 i;
+
+        if (!body || len != TBT_OPEN_BODY_LEN)
+            return TBT_BIND_BAD;
+        /* route_slot is a u16 on the wire but indexes an 8-entry table. Read
+         * it whole first: truncating 0x0100 to slot 0 would let a peer pick
+         * the default mapping with a value the config never named. */
+        {
+            u16 slot = tbt_le16(body + TBT_OPEN_ROUTE_SLOT);
+
+            if (slot > 0xff)
+                return TBT_BIND_BAD;
+            route_slot = (u8)slot;
+        }
+        target_port = tbt_le16(body + TBT_OPEN_TARGET_PORT);
+        /* group_mask is the first 32 bytes on both planes, but only a FEC
+         * session may set a bit. The OPEN mask is the peer's TX partition, so
+         * admission validates it against the 256-bit wire map, not the local
+         * TX group count. */
+        if (sess->fec)
+        {
+            u16 count;
+
+            if (!tbt_fec_open_mask_valid(sess->fec_sclc,
+                                         sess->fec_groups_total, body,
+                                         &count))
+                return TBT_BIND_BAD;
+        }
+        else
+        {
+            /* A non-FEC session has no group bitmap, so the whole mask must
+             * be zero and a stale v7 OPEN cannot pass as this one. The port
+             * mapping is independent of the FEC plane: route_slot and
+             * target_port keep their meaning below. */
+            for (i = 0; i < TBT_FEC_BITMAP_BYTES; i++)
+                if (body[i])
+                    return TBT_BIND_BAD;
+        }
+        /* route_slot indexes the mapping table both ends configure: slot 0 is
+         * the listen=/target= pair and map= fills 1..nmap. The far side is
+         * the security boundary; it may reach only a slot its own config
+         * names, and the wire's port must be that slot's port (0 means "the
+         * configured one"). A bad name is dropped, never allowed to close the
+         * carrier: one forged OPEN must not take the session down. */
+        if (!near)
+        {
+            if (!tbt_map_slot_target(cfg, route_slot, target_port,
+                                     &target_port))
+            {
+                pr_warn_ratelimited("tbtun: tunnel %llu refused OPEN for unconfigured target port %u on slot %u\n",
+                                    (unsigned long long)cfg->id,
+                                    target_port, route_slot);
+                return TBT_BIND_DROP;
+            }
+        }
+        else
+        {
+            /* The far side never names a port back to the near: the echo
+             * repeats the slot and nothing else. A near config may leave its
+             * slot 0 target unset (0), so only the slot range is checked. */
+            if (route_slot > cfg->nmap || target_port)
+                return TBT_BIND_DROP;
+        }
+    }
 
     spin_lock(&sess->lock);
     if (READ_ONCE(sess->closing))
@@ -1084,6 +1165,8 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
         if (!st || READ_ONCE(st->state) == TBT_ST_DEAD ||
             st->tombstone_until_ns)
             drop = true;
+        else if (open && st->route_slot != route_slot)
+            drop = true; /* the far echoed a different mapping slot */
     }
     else
     {
@@ -1200,7 +1283,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
         {
             if (flow)
                 tbt_fec_flow_attach(ast, flow); /* moves the reference */
-            tbt_far_open_seen(ast);
+            tbt_far_open_seen(ast, route_slot, target_port);
         }
         else if (flow)
         {

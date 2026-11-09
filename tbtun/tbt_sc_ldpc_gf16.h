@@ -79,6 +79,19 @@ const uint8_t *gf16_known(const gf16_code *c);
  * bit-exact. */
 void gf16_encode_planes(gf16_code *c, int B, uint64_t *vp);
 
+/* Decode one 64-lane batch in place.  planes[] holds four uint64 planes
+ * per variable (bits >= B are ignored); erased[v] is one byte for the whole
+ * batch, so lane c's symbol v is erased exactly when erased[v] is nonzero.
+ * The function reads a known plane and writes a decoded one at the same
+ * address; an unresolved variable is zeroed.  The peel runs once for the
+ * batch; after it stalls the dense core solve performs one GF(16)
+ * elimination on the shared coefficient matrix and carries the 64
+ * right-hand sides in planes.  Returns the batch statistics; unresolved ==
+ * 0 means every target variable decoded. */
+gf16_dec_stat gf16_decode64(gf16_code *c, uint64_t *planes,
+                            const uint8_t *erased, int target_data_only,
+                            int max_core);
+
 /* Lane count of the bit-sliced encoder: one uint64 plane holds 64
  * codewords at once. */
 #define GF16_LANES 64

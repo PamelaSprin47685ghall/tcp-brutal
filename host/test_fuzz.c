@@ -58,7 +58,10 @@
 #define DOC_WINDOW_LEN 138u /* 8 + 8*16 + 2 */
 #define DOC_HELLO_LEN 23u   /* old ARQ: 1 + 1 + 16 + 2 + 2 + 1 */
 #define DOC_HELLO_LEN_V6 66u /* FEC v6: legacy 23 + crypto fields */
-#define DOC_OPEN_BODY_LEN 32u /* 0.4.0: 256-bit physical group bitmap */
+#define DOC_OPEN_BODY_LEN 36u /* 0.5.0: bitmap + route_slot + target_port */
+
+_Static_assert(DOC_OPEN_BODY_LEN == 36, "v8 OPEN body is 36 bytes");
+_Static_assert(DOC_HELLO_LEN_V6 == 66, "v8 FEC HELLO body is 66 bytes");
 
 static u64 rng_state = 1;
 static unsigned long case_no;
@@ -182,8 +185,10 @@ static int doc_accepts(u8 type, u8 ackc, unsigned len)
     case TBT_F_DATA:
         return len >= 1;
     case TBT_F_OPEN:
-        /* 0.4.0: exactly the 32-byte physical group bitmap. A non-FEC
-         * session sends 32 zero bytes, so one length rule covers both. */
+        /* 0.5.0: the 32-byte physical group bitmap, the u16 route slot and
+         * the u16 target port (36 bytes). A non-FEC session sends a zero
+         * bitmap; the port mapping still applies, so one length rule covers
+         * both planes. */
         return len == DOC_OPEN_BODY_LEN;
     case TBT_F_RST:
     case TBT_F_PAD:
@@ -237,7 +242,8 @@ static void test_bounds_table(void)
     char d[64];
 
     case_no++;
-    check(TBT_HDR_LEN == 32 && TBT_CHUNK_MAX == 8228 && TBT_REC_MAX == 8224 && TBT_CONV == 0x0007,
+    check(TBT_HDR_LEN == 32 && TBT_CHUNK_MAX == 8228 && TBT_REC_MAX == 8224 &&
+              TBT_CONV == 0x0008 && TBT_WIRE_VERSION_V6 == 5,
           "design constants", NULL);
     for (i = 0; i < sizeof(want) / sizeof(want[0]); i++)
     {
@@ -416,6 +422,9 @@ static void test_header_ranges(void)
     tbt_put_le16(rec + TBT_H_CONV, TBT_CONV + 1);
     case_no++;
     expect("conv TBT_CONV+1", rec, n, TBT_REC_PROTO);
+    tbt_put_le16(rec + TBT_H_CONV, 0x0007);
+    case_no++;
+    expect("v7 conv 0x0007 refused", rec, n, TBT_REC_PROTO);
     tbt_put_le16(rec + TBT_H_CONV, TBT_CONV);
 }
 
@@ -481,17 +490,20 @@ static void test_adversarial(void)
     expect("DATA one byte over payload max", rec, TBT_HDR_LEN, TBT_REC_PROTO);
     n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, 0, DOC_OPEN_BODY_LEN);
     case_no++;
-    expect("OPEN with the 32-byte bitmap", rec, n, TBT_REC_OK);
+    expect("OPEN with the 36-byte body", rec, n, TBT_REC_OK);
     n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, 0, DOC_OPEN_BODY_LEN - 1);
     case_no++;
     expect("OPEN one byte short", rec, n, TBT_REC_PROTO);
+    n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, 0, 32);
+    case_no++;
+    expect("v7 32-byte OPEN refused", rec, n, TBT_REC_PROTO);
     n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, 0, DOC_OPEN_BODY_LEN + 1);
     case_no++;
     expect("OPEN one byte long", rec, n, TBT_REC_PROTO);
     n = rec_make(rec, TBT_F_OPEN, 0, 0, 1, 0, 0);
     case_no++;
     expect("OPEN without a body", rec, n, TBT_REC_PROTO);
-    /* The bitmap bits are opaque to the framing layer: a random 32-byte
+    /* The body is opaque to the framing layer: a random 36-byte
      * body is a well-formed record and never changes the consumed length. */
     for (i = 0; i < 256; i++)
     {
@@ -501,7 +513,7 @@ static void test_adversarial(void)
         for (k = 0; k < DOC_OPEN_BODY_LEN; k++)
             rec[TBT_HDR_LEN + k] = (u8)rnd64();
         case_no++;
-        expect("OPEN with a random 32-byte bitmap", rec, n, TBT_REC_OK);
+        expect("OPEN with a random 36-byte body", rec, n, TBT_REC_OK);
     }
     n = rec_make(rec, TBT_F_FIN, 0, 0, 1, 0, 1);
     case_no++;
@@ -1179,6 +1191,13 @@ static void cfg_fix_crc(u8 *buf)
                  tbt_fec_crc32c(0, buf, TBT_FEC_CFG_CRC_BYTES));
 }
 
+static void cfg_fix_crc_ext(u8 *buf)
+{
+    tbt_put_le32(buf + TBT_FEC_CFG_CRC_EXT,
+                 tbt_fec_crc32c(0, buf + TBT_FEC_CFG_CODEC_VARIANT,
+                                TBT_FEC_CFG_CRC_EXT_BYTES));
+}
+
 static int cfg_unpack_copy(const u8 *src, struct tbt_fec_cfg *c)
 {
     u8 *copy = malloc(TBT_FEC_CFG_LEN);
@@ -1246,6 +1265,20 @@ static void cfg_pack_seed(unsigned which, u8 *buf)
     c.switch_pkt = 0x0102030405060708ull;
     c.block_base = 0x1112131415161718ull;
     c.seed = 0x2122232425262728ull;
+    if (which == 1)
+    {
+        c.codec_variant = 2;
+        c.L = 8;
+        c.block = 256;
+        c.rate_ppm = 500000;
+    }
+    else if (which == 2)
+    {
+        c.codec_variant = 2;
+        c.L = 16;
+        c.block = 128;
+        c.rate_ppm = 250000;
+    }
     if (tbt_fec_cfg_pack(&c, buf))
     {
         printf("FAIL seed=1 case=%lu: CFG seed %u does not pack\n", case_no,
@@ -1278,6 +1311,10 @@ static int cfg_doc_accepts(const u8 *b)
     u16 k = tbt_le16(b + TBT_FEC_CFG_K);
     u16 groups = tbt_le16(b + TBT_FEC_CFG_GROUPS);
     u8 d = b[TBT_FEC_CFG_D];
+    u8 variant = b[TBT_FEC_CFG_CODEC_VARIANT];
+    u8 L = b[TBT_FEC_CFG_L];
+    u16 block = tbt_le16(b + TBT_FEC_CFG_BLOCK);
+    u32 rate = tbt_le32(b + TBT_FEC_CFG_RATE_PPM);
     u32 shares = (u32)n + m;
 
     if (tbt_le32(b + TBT_FEC_CFG_CRC) !=
@@ -1287,29 +1324,41 @@ static int cfg_doc_accepts(const u8 *b)
         return 0;
     if (b[TBT_FEC_CFG_FLAGS] & ~TBT_FEC_CFG_F_MASK)
         return 0;
+    if (tbt_le32(b + TBT_FEC_CFG_RESERVED2) != 0)
+        return 0;
+    if (tbt_le32(b + TBT_FEC_CFG_CRC_EXT) !=
+        tbt_fec_crc32c(0, b + TBT_FEC_CFG_CODEC_VARIANT,
+                       TBT_FEC_CFG_CRC_EXT_BYTES))
+        return 0;
     if (!n || !m || shares > TBT_FEC_MAX_SHARES)
         return 0;
-    if (!k || w > TBT_FEC_MAX_W)
+    if (!groups || groups > TBT_FEC_MAX_GROUPS ||
+        (u32)groups * shares > TBT_FEC_MAX_CARRIERS)
         return 0;
-    if (d == 0)
+    if ((u32)groups * shares != TBT_FEC_MAX_CARRIERS)
+        return 0;
+    if (variant == 2)
     {
-        if (k < 100 || k > 1000)
+        if (w || k || d)
             return 0;
+        if (L != 8 && L != 16)
+            return 0;
+        if (block != 256 && block != 512 &&
+            !(block == TBT_FEC_SCLC_BLOCK_UP && groups > 1 && L == 16))
+            return 0;
+        if (rate < 250000u || rate > 700000u)
+            return 0;
+        if ((u32)(((u64)rate * shares) / 1000000u) != n)
+            return 0;
+        return 1;
     }
-    else if (w < k)
-    {
-        if (k < 16 || (k & 1) || w < 2)
-            return 0;
-    }
-    else
-    {
-        if (d > w)
-            return 0;
-        if (w > 1 && d == w)
-            return 0;
-    }
-    if (!groups || TBT_FEC_MAX_CARRIERS % shares ||
-        groups != TBT_FEC_MAX_CARRIERS / shares)
+    if (variant != 0 && variant != 1)
+        return 0;
+    if (L || block || rate)
+        return 0;
+    if (!k || !w || k > w || w > TBT_FEC_MAX_W || !d || d > w)
+        return 0;
+    if (w > 1 && d == w)
         return 0;
     return 1;
 }
@@ -1324,7 +1373,7 @@ static void test_cfg_body(void)
     unsigned i, s;
 
     case_no++;
-    check(TBT_FEC_CFG_LEN == 48 && TBT_FEC_CONV == 0x1007u &&
+    check(TBT_FEC_CFG_LEN == 64 && TBT_FEC_CONV == 0x1008u &&
               TBT_FEC_CFG_CRC_BYTES == 40 && TBT_FEC_MAX_SHARES == 256,
           "FEC_CFG wire constants", NULL);
 
@@ -1404,17 +1453,54 @@ static void test_cfg_body(void)
         case_no++;
         cfg_expect("CFG groups mismatch", buf, -EPROTO);
 
-        memcpy(buf, seeds[s], sizeof(buf));
-        tbt_put_le16(buf + TBT_FEC_CFG_K, 0);
-        cfg_fix_crc(buf);
-        case_no++;
-        cfg_expect("CFG k=0", buf, -EPROTO);
+        if (s == 0)
+        {
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le16(buf + TBT_FEC_CFG_K, 0);
+            cfg_fix_crc(buf);
+            case_no++;
+            cfg_expect("CFG k=0", buf, -EPROTO);
 
-        memcpy(buf, seeds[s], sizeof(buf));
-        tbt_put_le16(buf + TBT_FEC_CFG_W, TBT_FEC_MAX_W + 1);
-        cfg_fix_crc(buf);
-        case_no++;
-        cfg_expect("CFG w over the cap", buf, -EPROTO);
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le16(buf + TBT_FEC_CFG_W, TBT_FEC_MAX_W + 1);
+            cfg_fix_crc(buf);
+            case_no++;
+            cfg_expect("CFG w over the cap", buf, -EPROTO);
+        }
+        else
+        {
+            /* v8 SC-LDPC names its graph in the extension. */
+            memcpy(buf, seeds[s], sizeof(buf));
+            buf[TBT_FEC_CFG_CODEC_VARIANT] = 3;
+            cfg_fix_crc(buf);
+            cfg_fix_crc_ext(buf);
+            case_no++;
+            cfg_expect("CFG unknown variant", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            buf[TBT_FEC_CFG_L] = 4;
+            cfg_fix_crc(buf);
+            cfg_fix_crc_ext(buf);
+            case_no++;
+            cfg_expect("CFG bad L for variant 2", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le16(buf + TBT_FEC_CFG_BLOCK, 300);
+            cfg_fix_crc(buf);
+            cfg_fix_crc_ext(buf);
+            case_no++;
+            cfg_expect("CFG bad block for variant 2", buf, -EPROTO);
+
+            memcpy(buf, seeds[s], sizeof(buf));
+            tbt_put_le32(buf + TBT_FEC_CFG_RATE_PPM,
+                         ((u32)(cfg_seeds[s].n + 1) * 1000000u +
+                          (u32)(cfg_seeds[s].n + cfg_seeds[s].m) - 1u) /
+                             (u32)(cfg_seeds[s].n + cfg_seeds[s].m));
+            cfg_fix_crc(buf);
+            cfg_fix_crc_ext(buf);
+            case_no++;
+            cfg_expect("CFG rate does not name n", buf, -EPROTO);
+        }
 
         memcpy(buf, seeds[s], sizeof(buf));
         buf[TBT_FEC_CFG_FLAGS] |= 0x08;
@@ -1455,32 +1541,25 @@ static void test_cfg_body(void)
         }
         else if (s == 1)
         {
-            tbt_put_le16(buf + TBT_FEC_CFG_K, 99);
+            tbt_put_le16(buf + TBT_FEC_CFG_BLOCK, 512);
             cfg_fix_crc(buf);
+            cfg_fix_crc_ext(buf);
             case_no++;
-            cfg_expect("CFG binary k below 100", buf, -EPROTO);
-            memcpy(buf, seeds[s], sizeof(buf));
-            tbt_put_le16(buf + TBT_FEC_CFG_K, 1001);
-            cfg_fix_crc(buf);
-            case_no++;
-            cfg_expect("CFG binary k over 1000", buf, -EPROTO);
+            cfg_expect("CFG binary block 512", buf, 0);
         }
         else
         {
-            tbt_put_le16(buf + TBT_FEC_CFG_K, 15);
+            tbt_put_le16(buf + TBT_FEC_CFG_BLOCK, 256);
             cfg_fix_crc(buf);
+            cfg_fix_crc_ext(buf);
             case_no++;
-            cfg_expect("CFG GF16 k=15", buf, -EPROTO);
+            cfg_expect("CFG variant 2 block 256 parses", buf, 0);
             memcpy(buf, seeds[s], sizeof(buf));
-            tbt_put_le16(buf + TBT_FEC_CFG_K, 17);
+            buf[TBT_FEC_CFG_L] = 8;
             cfg_fix_crc(buf);
+            cfg_fix_crc_ext(buf);
             case_no++;
-            cfg_expect("CFG GF16 odd k", buf, -EPROTO);
-            memcpy(buf, seeds[s], sizeof(buf));
-            tbt_put_le16(buf + TBT_FEC_CFG_W, 1);
-            cfg_fix_crc(buf);
-            case_no++;
-            cfg_expect("CFG GF16 w=1", buf, -EPROTO);
+            cfg_expect("CFG GF16 L 8", buf, -EPROTO);
         }
     }
 

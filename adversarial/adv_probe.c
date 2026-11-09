@@ -385,8 +385,9 @@ static int send_frame(int fd, const struct fr *f, const void *body, size_t blen)
     return send_chunk(fd, rec, 32 + blen);
 }
 
-/* OPEN names the flow's 256-bit physical group bitmap (TBT_CONV 0x0007).
- * A non-FEC flow sends 32 zero bytes; both use the same length rule. */
+/* OPEN names the flow's 256-bit physical group bitmap, then a u16 target port
+ * (TBT_CONV 0x0008). A non-FEC flow sends 32 zero bytes and port 0; both use
+ * the same length rule. Port 0 means the far side's configured target=. */
 static int send_open(int fd, int idx, uint32_t sid, uint8_t sidhi)
 {
     static const unsigned char mask[TBT_OPEN_BODY_LEN];

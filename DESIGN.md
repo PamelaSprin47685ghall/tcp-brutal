@@ -270,6 +270,11 @@ GF(16) uplink, 512 reserved) and the rate follows `n/(n+m)`. The
 per-direction `FEC_CFG` INIT carries `L`, block and rate; the receiver uses
 the peer's shape. The codec lives in `tbt_fec_sclc.c`; `host/test_fec_sclc`
 and `host/test_fec_sclc_data` cover construction and the data-plane mapping.
+The uplink GF(16) codec uses the Wire v8 bit-plane share mapping
+(`TBT_SCLC_MAP_BITPLANE64`): 64-lane batches, four little-endian bit planes
+per symbol, and one symbol->share map per batch, so a lost share erases the
+same variable set in every lane. The legacy symbol-interleaved layout remains
+a host A/B control and is not wire-compatible with v8.
 SC-LDPC rate adaptation ships as a per-flow adaptive law (off by default):
 since 0.4.3 both the downlink 1x256 and the uplink 8x32 codecs switch along
 the six-point ladder. With an old 0.4.0..0.4.2 peer, a CFG_NACK makes the
@@ -285,7 +290,7 @@ for the GF(2) data plane, Phase 1 only: `n + m = 8`, `groups = 32`, and `m` in
 1..6. The receiver estimates the DATA-share loss rate from per-block miss
 bitmaps (1 s window, EWMA, at least 1024 alive-filtered shares and 4
 super-blocks); the sender runs the control law and switches shape through
-`FEC_CFG`/`FEC_FBK` (48-byte bodies, `TBT_FEC_CONV` 0x1007) at a super-block
+`FEC_CFG`/`FEC_FBK` (64-byte bodies, `TBT_FEC_CONV` 0x1008) at a super-block
 boundary. `adaptive=` follows `fec` for `mode=rlnc`/`grouped` (on when
 `fec=on`); for `mode=sc-ldpc` it defaults off. `session <id>
 adaptive=on|off` flips it at runtime; the `c13` line exports the state.
@@ -296,8 +301,9 @@ every ladder split and switch rates. With an old 0.4.0..0.4.2 peer, a CFG_NACK
 makes the controller silently stay at 128/128. `mode=sc-ldpc` defaults to
 `adaptive=off` and accepts `adaptive=on`.
 
-**Multi-stream status.** FEC v7 (`0x1007`) gives every live application
-stream its own FEC TX/RX plane keyed by `sid`: block ids, credit, delivery
+**Multi-stream status.** FEC v7 (`0x1007`, carried by v8 as `0x1008`) gives
+every live application stream its own FEC TX/RX plane keyed by `sid`: block
+ids, credit, delivery
 cursors, NACK state and FIN are per flow, and the 48-byte record layout is
 unchanged. The carriers are split into physical groups
 (`carriers / (n + m)`; 32 on the production 256/4+4 shape). Each flow owns a
@@ -322,18 +328,20 @@ The 256-carrier performance target remains **90% of a direct/2 stream**. The
 the gap stays open; 0.2.3's 256-carrier steady state is a different
 measurement (23.9 Mbit/s average over 60 s, 27.9 Mbit/s 10 s max).
 
-### 3.1.3 FEC v6/v7 over the container (current 0x1007)
+### 3.1.3 FEC v6..v8 over the container (current 0x1008)
 
-FEC v6 is an independent record format with a 48-byte header, not a wider old
+The FEC record format is independent, with a 48-byte header, not a wider old
 frame. It rides the same carriers and the same HTTP container. The current
 revision is
-`0x1007` (0.4.0, multi-stream); `0x1006` was the adaptive cut, `0x1005` the
-0.2.2 stream-id cut, and 0.1.0 used `0x1001`. The 48-byte header layout and
-every offset stay unchanged. `0x1006` grew `FEC_CFG` to 48 bytes to name the
+`0x1008`; `0x1007` was the 0.4.0 multi-stream cut, `0x1006` the adaptive cut,
+`0x1005` the 0.2.2 stream-id cut, and 0.1.0 used `0x1001`. The 48-byte header
+layout and every offset stay unchanged. `0x1006` grew `FEC_CFG` to 48 bytes to name the
 shape switch, made `FEC_FBK` a 48-byte report, and moved HELLO body[0] to
 version 3; `0x1007` makes FEC `seq`/`block_id` stream-local, adds the 32-byte
 OPEN group bitmap and `FEC_ALLOC` (0x36), and moves HELLO body[0] to
-version 4. A 0.2.x peer is refused at the first HELLO.
+version 4; `0x1008` grows `FEC_CFG` and `FEC_FBK` to 64 bytes, restores the
+full 256-bit carrier bitmap, makes OPEN 36 bytes and moves HELLO body[0] to
+version 5. A 0.2.x or 0.4.x peer is refused at the first HELLO.
 
 - `profile=raw`: one FEC record follows another with no wrapper.
 - `profile=http-kal` / `http-kal-drip`: one HTTP chunk body is exactly one FEC
@@ -352,21 +360,21 @@ version 4. A 0.2.x peer is refused at the first HELLO.
   initiator: REQUEST -> ACK (far's TX origin) -> DONE (far applied its RX) ->
   DONE (near applied its RX) -> COMMITTED (far swapped its TX). A REQUEST
   that is never acknowledged is aborted, and both ends resume the old mask
-  at the same origin. The body and `TBT_FEC_CONV 0x1007` are unchanged from
-  0.4.0; a 0.4.0 peer parses but ignores the record, so the sender aborts
-  and keeps its static quota.
-- **PARITY block marker (`TBT_FEC_CONV` 0x1002; still present in 0x1007).** There is no
+  at the same origin. The 64-byte body is unchanged from 0.4.4; the v8 cut
+  moves `TBT_FEC_CONV` to `0x1008`, and a pre-v8 peer is refused at the first
+  HELLO.
+- **PARITY block marker (`TBT_FEC_CONV` 0x1002; still present in 0x1008).** There is no
   4-byte marker and no magic number. A marker is a set of values inside the
   48-byte `struct tbt_fec_hdr`: `type = TBT_FEC_PARITY` (0x31), `flags = 0`,
   `share_index = n` (parity 0), `epoch = 0`, `win_len = 0`, `payload_len = 0`,
-  `conv = 0x1007`, `payload_crc32c = 0` (the CRC32C of an empty payload).
+  `conv = 0x1008`, `payload_crc32c = 0` (the CRC32C of an empty payload).
   `header_crc32c` still covers +0..+43 and must match. The receiver accepts
   `win_len == 0` only with `payload_len == 0 && epoch == 0`, rejects a marker
   for a block that already holds DATA/parity or `win_len_set`, and rejects DATA
   for a block after its marker. 0.1.0 required PARITY
   `payload_len == max_payload` and `win_len != 0`, so the marker and that
-  relaxation shipped together with 0x1002 and remains in 0x1007.
-- **Stream id (`TBT_FEC_CONV` 0x1005; still in 0x1007).** DATA and PARITY
+  relaxation shipped together with 0x1002 and remains in 0x1008.
+- **Stream id (`TBT_FEC_CONV` 0x1005; still in 0x1008).** DATA and PARITY
   carry a u64 `sid` at header +32; every per-stream control record
   (ACK/NACK/CFG/FBK/ALLOC) carries the flow's sid, and 0 is reserved for a
   session-wide record. The receiver routes a share or per-stream control
@@ -583,7 +591,7 @@ version 4. A 0.2.x peer is refused at the first HELLO.
   lost. Padding is never delivered.
 - The old 16-carrier ARQ record and its `path_ack_mask` are unchanged and are
   used only when `fec=off`. Its `path_id` is a carrier index and is *not*
-  limited to 16: the carrier layer has 256 slots, and a FEC v6 session with
+  limited to 16: the carrier layer has 256 slots, and a FEC v8 session with
   `carriers=256` sends HELLO/OPEN/FIN/RST with `path_id` 16..255. Only the
   per-path ack fields keep the 16-carrier width. Capping the index at 16 made
   every carrier from 16 up fail its own HELLO encoding, which surfaced as
@@ -737,7 +745,7 @@ Frame header, exactly 32 bytes (offsets add up):
 +24 u32  sid_lo       low 32 bits of the 40-bit stream id
 +28 u8   sid_hi       high 8 bits of the 40-bit stream id (v4 uses them)
 +29 u8   reserved2 (0)
-+30 u16  conv         0x0007 (0.2.0 used 0x0006; 0.1.0 used 0x0005)
++30 u16  conv         0x0008 (0.4.0 used 0x0007; 0.2.0 used 0x0006)
 (total: 32 bytes)
 ```
 
@@ -755,13 +763,18 @@ Payload layouts:
 
 - **DATA**: payload = raw application bytes (1..8192); a zero-length DATA frame is
   refused on receive, because it wedges the receiver and the emitter never sends one.
-- **OPEN**: payload exactly `TBT_OPEN_BODY_LEN` = 32 bytes, little-endian: a
-  physical group bitmap (`bit p` = group p). Bits at or above
-  `carriers / (n + m)` must be zero. The header's `sid_hi:sid_lo` names the
-  stream. A non-FEC session sends 32 zero bytes, so one length rule covers
-  both.
+- **OPEN** (`TBT_CONV` 0x0008): payload exactly `TBT_OPEN_BODY_LEN` = 36
+  bytes. `+0 u8 group_mask[32]` names the flow's physical FEC groups (bits at
+  or above `carriers / (n + m)` must be zero; all zero without FEC);
+  `+32 u16 route_slot` is the near side's listen mapping slot;
+  `+34 u16 target_port` is that slot's far-side destination port, both
+  little-endian. Zero means "use the far side's configured port for this
+  slot", which is the 0.4.0 behavior; any other value must equal it or the
+  OPEN is dropped before a stream is created. The far echo repeats the slot
+  and names no port. The header's `sid_hi:sid_lo` names the stream. A 0.4.0
+  OPEN is 32 bytes and is refused by the length bound.
 - **FIN**: payload exactly `TBT_FIN_BODY_LEN` = 16 bytes, little-endian
-  (`TBT_CONV` 0x0007): `+0 u64 pkt_end` (this stream's packet seq after its
+  (`TBT_CONV` 0x0008): `+0 u64 pkt_end` (this stream's packet seq after its
   last DATA packet) and `+8 u64 pkt_base` (this stream's packet seq of its
   first DATA packet, aligned to the super-block `groups*n`). Since 0x0007 both
   fields are stream-local, not session-absolute. `tbt_body_bounds()` sets `TBT_F_FIN` to
@@ -783,7 +796,7 @@ Payload layouts:
   `-EPROTO`; no sender emits one.
 - **HELLO**: `u8 ver; u8 role; u8 nonce[16]; u16 payload_max; u16 chunk_max; u8
   profile|gen`. `ver` is `TBT_WIRE_VERSION` (1) for the old ARQ and
-  `TBT_WIRE_VERSION_V6` (4) for a FEC v7 session, independent of the module
+  `TBT_WIRE_VERSION_V6` (5) for a FEC v8 session, independent of the module
   version. The last byte has exactly the §3.1.1 layout:
 
   ```
@@ -830,7 +843,7 @@ than the emit rules, because it must accept a peer and a middlebox that only rel
   1) is filler and is discarded. PAD and drip may interleave between records. This is
   a security-relevant stance: it removes the ambiguous framing a hostile peer could
   use to smuggle bytes.
-- The frame layout is `TBT_CONV` 0x0007 (0.2.0 used 0x0006; 0.1.0 used 0x0005): `body_len` is the
+- The frame layout is `TBT_CONV` 0x0008 (0.4.0 used 0x0007; 0.2.0 used 0x0006): `body_len` is the
   u16 at header offset +6 and there is no 4-byte prefix. 0.2.0 adds the 16-byte
   FIN body; `tbt_uapi.h`/`tbt_proto.c` are authoritative for the current wire.
 - The response parser requires status 200, accepts HTTP/1.0 and HTTP/1.1 status lines,
@@ -1717,10 +1730,11 @@ costs one TCP handshake instead of a new session.
   failed-dial path below: `connect_fail++`, the port returns to the bitmap,
   and the 50 ms poll retries after 200 ms; the ratelimited log names the
   interface and the error. The far side's target connections are never bound.
-- Far side: binds `listen=` (the address carriers connect to). `srcaddrs` is a near-side
-  key: it selects the local source address for carriers, and only the first entry is used;
-  the remaining entries are recorded for round-trip. Multi-address listeners are not
-  implemented.
+- Far side: binds `listen=` (the address carriers connect to). A near side binds
+  `listen=` plus every `map=` listen port, all on `listen=`'s address; several
+  addresses for one tunnel are not implemented. `srcaddrs` is a near-side key: it
+  selects the local source address for carriers, and only the first entry is used;
+  the remaining entries are recorded for round-trip.
 - Allocation retry: a failed bind or connect frees the port and returns the carrier to the
   50 ms poll, which re-dials after 200 ms with a fresh draw from the bitmap. There is no
   fixed attempt count inside one dial; the carrier keeps retrying until the tunnel is
@@ -1887,12 +1901,14 @@ line.)
 # profile is one of: http-kal | http-kal-drip | raw
 # fec is off | on; mode is rlnc | grouped | sc-ldpc (implemented)
 tunnel 1 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443
+        map=9001:80,9002:443
         n=4 m=1 dup=1 keepalive=5000 drip_ms=1000
         profile=http-kal fec=on adaptive=on mode=grouped carriers=10 crypto=on
         portblock=40000-40063 dev=eth0 srcaddrs=10.0.0.10,10.0.0.11
         replay=8388608 tunnel_rate=0 max_inflate=2.0 hole_budget_ms=500
         rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=3000
 tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:7000
+        map=9001:80,9002:443
         nonce=00112233445566778899aabbccddeeff
         portblock=40000-40063 n=4 m=1 ...
 del 1
@@ -1912,6 +1928,16 @@ random at tunnel creation).
 - **Comments**: a line whose first non-blank character is `#` is a comment and is ignored.
   A `#` *after* a token is not a comment: the token is unknown and the whole line is
   rejected with `EINVAL` (nothing from it applies).
+- `map=listen_port:target_port[,listen_port:target_port...]` adds port slots to
+  one tunnel; `listen=`/`target=` remain slot 0, and at most `TBT_MAP_MAX - 1`
+  (7) extra entries fit. On a near line the listen port is a public port bound
+  on `listen=`'s address and the target port travels in OPEN; on a far line the
+  listen half is grammar symmetry and only the target ports matter, as the
+  allowed destination set. Ports are `1..65535`. A near line refuses a map
+  listen port that equals `listen=` or another map listen port; a far line
+  accepts those numbers because it binds none of them. A repeated `map=` on one
+  line replaces the earlier list, and the canonical render prints one
+  comma-separated key.
 - `portblock=lo-hi` (near only) is the source-port window for that tunnel's
   carriers; `0-0` means the global `/proc/net/tbtun/ports` block. The range must
   satisfy `1 <= lo <= hi <= 65535` and hold at least one port per carrier slot
@@ -2056,11 +2082,11 @@ cat /proc/net/tbtun/http     # debug >= 2: last emitted request header block
 
 `config` reads back in **canonical form**: one complete directive per line, a fixed key
 order, and **every scalar key rendered explicitly with its effective value**, defaults
-included. The list key (`srcaddrs`) and `nonce` are rendered only when set.
+included. The list keys (`map`, `srcaddrs`) and `nonce` are rendered only when set.
 The order is
 
 ```
-role listen [peer] [target] [peer] n m dup profile keepalive drip_ms replay
+role listen [peer] [target] [peer] [map] n m dup profile keepalive drip_ms replay
 tunnel_rate max_inflate hole_budget_ms rx_reorder_bytes tx_window_bytes
 tx_retain_bytes carrier_stall_ms portblock [dev] [nonce] [srcaddrs]
 ```
@@ -2070,12 +2096,14 @@ anchor on a `role=far` line (present only when configured); a far line therefore
 prints `target` before `peer`.
 
 `peer` is rendered for `role=near` always and for `role=far` only when it is configured
-(the source anchor); `target` is rendered only for `role=far`. A far tunnel without
+(the source anchor); `target` is required for `role=far` and rendered for `role=near`
+only when set (slot 0's target port; the address is filler). A far tunnel without
 `peer=` omits the key, so `peer=0.0.0.0:0` never appears in canonical output (it is not
 parseable: port 0 is refused).
 
-`dev` follows `portblock`; `nonce` follows `dev`, before the list key
-`srcaddrs`.
+`map` follows the role's `peer`/`target` keys and precedes `n`; it is one
+comma-separated list in slot order. `dev` follows `portblock`; `nonce` follows
+`dev`, before the list key `srcaddrs`.
 
 A saved file therefore round-trips **byte for byte**: `cat config > backup;
 cat backup > config` re-renders exactly what it read, and the text is a fixed point from
@@ -2481,7 +2509,7 @@ and a frame already written on two paths is a copy hole (§4.3). `dropped` count
 `drop_ppm` injector; control records (HELLO, OPEN, FBK, FIN, RST) are exempt, so a loss
 probe cannot lose a handshake and turn into a carrier-replacement probe. C8 adds
 `profile_mismatch, http_parse_err, http_status_err, http_req, http_resp, pad_tx,
-drip_tx`. C9 is the FEC v6 receive verdict (T0 §1.3): `fec_proto_fail` and
+drip_tx`. C9 is the FEC v8 receive verdict (T0 §1.3): `fec_proto_fail` and
 `fec_hdr_crc_fail` mean the 48-byte header could not be trusted, so the carrier closes;
 `fec_payload_crc_fail` means the framing was sound and only the body was damaged, so the
 share is dropped and the carrier stays. With `crypto=on` a wrong key is a payload CRC
@@ -2910,11 +2938,11 @@ makes this design different from a generic L4 tunnel.
 | `scripts/tbtunctl` | **never created** — no userspace program ships in any form |
 | `tests/*.sh` | **new** |
 
-Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the released tree reports
-`0.4.4`. The wire revision `TBT_CONV=0x0007`
-and the FEC record revision `TBT_FEC_CONV=0x1007` bump independently of it.
+Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; this tree reports
+`0.5.0`. The wire revision `TBT_CONV=0x0008`
+and the FEC record revision `TBT_FEC_CONV=0x1008` bump independently of it.
 HELLO `body[0]` carries `TBT_WIRE_VERSION=1` for the old ARQ and
-`TBT_WIRE_VERSION_V6=4` for a FEC v7 session, not the module version, so the
+`TBT_WIRE_VERSION_V6=5` for a FEC v8 session, not the module version, so the
 module version and the wire version are decoupled. 0.2.0 flipped `TBT_CONV` to
 0x0006 (FIN carries a 16-byte body) and `TBT_FEC_CONV` through `0x1002`
 (PARITY block marker), `0x1003` (24-byte ACK with `deliver_bytes`) and
@@ -2924,15 +2952,18 @@ adaptive shape switch). 0.4.0 moves `TBT_CONV` to `0x0007` (32-byte OPEN
 group bitmap, stream-local FIN/FEC `seq`/`block_id`, ALLOC `0x36`) and
 `TBT_FEC_CONV` to `0x1007` (multi-stream), with `TBT_WIRE_VERSION_V6=4`.
 Peers of
+0.5.0 moves `TBT_CONV` to `0x0008` (36-byte OPEN with route slot and target
+port), `TBT_FEC_CONV` to `0x1008` (64-byte `FEC_CFG`/`FEC_FBK`), and the FEC
+HELLO version to 5. Peers of
 different wire revisions do not interoperate, because the first HELLO is
 rejected by the conv check.
 
 **Packaging.** `tbtun/tbt_uapi.h` is the single version authority: the
-`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/4/4`). `scripts/mkdkmsconf.sh`
+`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/5/0`). `scripts/mkdkmsconf.sh`
 parses those macros and emits `PACKAGE_VERSION="<major>.<minor>.<patch>"`; parsing
 failure is fatal and never falls back to an old value. `dkms.conf` is a generated file —
 `make dkms.conf` (or `make dkms-tarball`) writes it, and it must not be hand-edited; the
-current generated value is `PACKAGE_VERSION="0.4.4"`. `scripts/install_dkms.sh` reads
+current generated value is `PACKAGE_VERSION="0.5.0"`. `scripts/install_dkms.sh` reads
 the same value through `mkdkmsconf.sh --version`. A development suffix
 `.r<commits>.<sha>` is opt-in with `TBT_DKMS_GIT_SUFFIX=1`; it is not the default.
 
@@ -2987,7 +3018,7 @@ covers; no known leak remains but a long-soak kref/RCU audit is still worthwhile
 | R16 | Memory at 10 Gbps | `tx_window_bytes` bounds retention and the frame queue (`txq_max = tx_window + 8 chunks`) and sizes the carrier buffers from the same number; `rx_reorder_bytes` bounds the reorder tree per stream and per session; the 64 MiB delivery ring is the largest fixed cost and costs about 2× its payload in physical memory. Per session the bound is about 3× window + `rx_reorder_bytes` + 64 MiB per stream (§5.4). T8 measures the peak. |
 | R17 | Jitter adds RTT | The reorder tree is consulted only past a gap; the in-order path adds zero delay (T1 asserts). |
 | R18 | `inet_csk_reset_xmit_timer` etc. drift | Not used; stock timers only. |
-| R19 | Mixed wire revisions | Both wire revisions are hard-rejected: the first HELLO fails `tbt_hdr_check()` (any conv other than the current 0x0007), and a FEC record fails `tbt_fec_hdr_check()` (any older conv vs the current 0x1007). The HELLO `body[0]` version (1 legacy, 4 FEC v7) is checked separately. `rx_parse_proto`/`fec_proto_fail` make it visible. Upgrade both ends together; rollback is the previous binary. |
+| R19 | Mixed wire revisions | Both wire revisions are hard-rejected: the first HELLO fails `tbt_hdr_check()` (any conv other than the current 0x0008), and a FEC record fails `tbt_fec_hdr_check()` (any older conv vs the current 0x1008). The HELLO `body[0]` version (1 legacy, 5 FEC v8) is checked separately. `rx_parse_proto`/`fec_proto_fail` make it visible. Upgrade both ends together; rollback is the previous binary. |
 
 ---
 
@@ -3005,10 +3036,12 @@ controls do not apply; these replace them.
   inbound filter. `srcaddrs` selects the local bind address for near-side carriers. What
   is enforced today is the `0600 root` config surface and the nonce/session check.
 - **What escapes**: the tunnel terminates TCP at the far side into a `kernel_connect` to a
-  literal `target=`. That target is a configured address, not attacker-chosen, so the public
-  side cannot proxy to arbitrary hosts (no SSRF surface beyond the operator's choice).
-  Per-stream target selection is *out of scope*; the module is a port mapper, and one
-  tunnel maps one target port (§19 Q6 covers lifting this).
+  literal `target=` address. The port comes from OPEN, but only after the far side
+  proves it is the configured `target=` or one `map=` target; an OPEN naming any
+  other port is dropped and logged before a stream or socket exists. The public
+  side therefore cannot proxy to arbitrary hosts or ports (no SSRF surface beyond
+  the operator's explicit mapping), and a forged port cannot cost the session its
+  carriers.
 - **Resource limits**: `max_tunnels` (new ids over the cap return `-ENOSPC`) and
   `max_carriers` (`n + m` over the cap returns `-EINVAL`) are enforced before allocation;
   per-tunnel `replay`, `tx_retain_bytes`, `tx_window_bytes` and `rx_reorder_bytes` bound

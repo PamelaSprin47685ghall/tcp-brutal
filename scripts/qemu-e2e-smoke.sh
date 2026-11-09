@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
 # qemu-e2e-smoke.sh - boot a real kernel in QEMU, load tbtun.ko, and drive the
-# 0.4.1 data plane through the operator surface before any real machine does.
+# 0.5.0 data plane through the operator surface before any real machine does.
 #
 #   scripts/qemu-e2e-smoke.sh                 # 7.0.14, cached under ~/.cache
 #   scripts/qemu-e2e-smoke.sh --kernel 6.12.116
-#   TBT_E2E_QEMU_TIMEOUT=90 scripts/qemu-e2e-smoke.sh
+#   TBT_E2E_QEMU_TIMEOUT=180 scripts/qemu-e2e-smoke.sh
 #
 # What it proves, all inside one guest on 127.0.0.1:
 #   * a 256-carrier SC-LDPC near+far pair comes up, and three sequential
 #     streams each carry 128 KiB byte-exact with streams_active=0 in between;
 #   * a concurrent second SC-LDPC stream is refused and the first one survives;
-#   * a rebuilt n=4 m=4 grouped pair carries two concurrent streams (two sids);
+#   * a rebuilt n=4 m=4 grouped pair carries four concurrent streams while the
+#     near-side allocator rebalances the 32 physical groups 1 -> 2 -> 3 -> 4
+#     and back to 1, with each split read from /proc/net/tbtun/stats;
+#   * an n=8 m=24 SC-LDPC GF(16) uplink pair (8 groups, block=128 L=16)
+#     carries one byte-exact roundtrip, exercising the production
+#     TBT_SCLC_MAP_BITPLANE64 encoder and decoder in the guest kernel;
+#   * one map= slot on the grouped pair: :19001 reaches target :15210 and
+#     :19002 reaches :15211, each proven by its own response signature;
 #   * del + delete_module return inside the deadline (no D state), the module
 #     leaves /proc/modules, and the kernel log gained no UBSAN, BUG, Oops,
 #     WARNING, lockdep or stall report.
@@ -32,7 +39,7 @@ CACHE=${TBT_E2E_CACHE:-$HOME/.cache/tbtun-e2e}
 KM_CACHE=${KM_CACHE:-$HOME/.cache/tbtun-kmatrix}
 MIRROR=${KM_KERNEL_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/kernel}
 JOBS=${TBT_E2E_JOBS:-$(nproc 2>/dev/null || echo 4)}
-QEMU_TIMEOUT=${TBT_E2E_QEMU_TIMEOUT:-75}
+QEMU_TIMEOUT=${TBT_E2E_QEMU_TIMEOUT:-150}
 HOSTCC=${HOSTCC:-cc}
 GUEST=${TBT_E2E_GUEST:-$REPO/tests/qemu-e2e/guest.c}
 
@@ -42,7 +49,7 @@ die() {
 }
 
 usage() {
-    sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 while [ $# -gt 0 ]; do
@@ -227,8 +234,23 @@ evidence=(
     "QEMU_E2E_STREAM sclc-seq-3"
     "QEMU_E2E_REJECT sclc-second"
     "QEMU_E2E_STREAM sclc-after-reject"
+    "QEMU_E2E_ALLOC 1 flow groups=32"
+    "QEMU_E2E_ALLOC 2 flows groups=16+16"
+    "QEMU_E2E_ALLOC 3 flows groups=10+11+11"
+    "QEMU_E2E_ALLOC 4 flows groups=8+8+8+8"
+    "QEMU_E2E_ALLOC regrow groups=32"
+    "QEMU_E2E_STREAM alloc-1"
+    "QEMU_E2E_STREAM alloc-2"
+    "QEMU_E2E_STREAM alloc-3"
+    "QEMU_E2E_STREAM alloc-4"
     "QEMU_E2E_MULTISTREAM 2 streams ok"
+    "QEMU_E2E_MULTISTREAM 4 streams ok"
+    "QEMU_E2E_STREAM sclc-uplink"
+    "QEMU_E2E_MAPPORT slot=0"
+    "QEMU_E2E_MAPPORT slot=1"
     "QEMU_E2E_DEL grouped ok"
+    "QEMU_E2E_DEL uplink ok"
+    "QEMU_E2E_DEL map ok"
     "QEMU_E2E_UNLOAD ok"
 )
 if [ -n "${TBT_E2E_EVIDENCE:-}" ]; then

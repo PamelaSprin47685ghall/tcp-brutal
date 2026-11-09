@@ -1,15 +1,11 @@
 /* tbt_sclc_uplink.h - uplink grouped GF(16) SC-IRA codec.
  *
- * Phase 1 shapes, all keeping 256 carriers:
- *   - primary:  8 groups x 32 shares, n=8,  m=24, rate 1/4;
- *   - measured: 8x32 n=14/m=18 rate 7/16, n=12/m=20 rate 3/8,
- *               n=10/m=22 rate 1/3;
- *   - fallback: 32 groups x 8 shares, n=4, m=4, rate 1/2.
- * The rate is n/(n+m) for every exact-fit shape; the receiver derives it
- * from n and m and no rate field travels on the wire.  The measured shapes
- * are kept because the host test reports their recovery: on a share-loss
- * channel the 7/16, 3/8 and 1/3 shapes miss the p=0.40 block target, while
- * 1/4 reaches the >0.99 floor.  See review/sc-ldpc-uplink-grouped.md.
+ * The uplink ladder keeps n+m=32 and uses the six splits the adaptive
+ * controller derives from its rate ladder:
+ *   8/24, 9/23, 12/20, 16/16, 18/14 and 22/10 (rate_num*256/32 is the
+ *   codec's `d`).  The receiver derives the split from n and m; no rate
+ *   field travels on the wire.  A 32-group x 8-share fallback also builds.
+ * See review/sc-ldpc-uplink-grouped.md for the recovery measurements.
  *
  * The codec is the SC-IRA construction of the host prototype
  * (review/fec-prototype/sc_ldpc on w-sclc-gf16), restricted to
@@ -17,17 +13,21 @@
  * bounded dense core solve.  No floating point, no libc, host/kernel dual
  * compile.
  *
- * Share<->symbol mapping, interleaved mode (production):
- *   - one GF(16) symbol is the interleave unit, packed two per byte,
- *     low nibble first;
- *   - the C codewords of a group block are interleaved: payload symbol j
- *     of codeword c sits at payload symbol position j*C + c, parity symbol
- *     j at parity position j*C + c;
- *   - data share d covers payload positions [d*2S, (d+1)*2S), parity share
- *     n+j covers parity positions [j*2S, (j+1)*2S).
- * A lost share therefore erases a thin slice of every codeword instead of
- * whole codewords.  The contiguous mode places codeword c at positions
- * [c*n_data, (c+1)*n_data) and exists for the host A/B test only.
+ * Share<->symbol mapping, bit-plane 64 (production, Wire v8):
+ *   - the C codewords split into batches of 64 (the tail batch holds the
+ *     remainder) and one uint64 bit plane carries one symbol bit of every
+ *     lane in the batch;
+ *   - inside a batch every codeword uses the same symbol->share map, so a
+ *     lost share erases exactly the same variable set in all 64 lanes;
+ *   - one variable of a batch occupies four planes, stored little-endian,
+ *     bit cw = lane cw.  The four planes are (lanes/8) bytes each, so the
+ *     block is still two symbols per byte;
+ *   - batch b owns a contiguous byte region in every share.  Its size is
+ *     chosen so every data share is filled exactly by the group block and
+ *     every parity share stays within S bytes.
+ * The peel and the GF(16) core elimination therefore run once per batch
+ * while four planes carry all 64 lanes.  `TBT_SCLC_MAP_INTERLEAVED` keeps
+ * the legacy symbol rotation for the host A/B test.
  *
  * This module does not touch tbt_fec_data.c.  tbt_fec_ops_sclc_gf16 is the
  * integration point: the data plane creates one context per group with
@@ -46,9 +46,10 @@
 
 enum tbt_sclc_mapping
 {
-    TBT_SCLC_MAP_INTERLEAVED = 0, /* production: bit/symbol-mask interleave */
+    TBT_SCLC_MAP_INTERLEAVED = 0, /* legacy symbol interleave, host A/B */
     TBT_SCLC_MAP_CONTIGUOUS = 1,  /* host A/B only */
     TBT_SCLC_MAP_RANDOM = 2,      /* seeded permutation, host A/B */
+    TBT_SCLC_MAP_BITPLANE64 = 3,  /* production (Wire v8) */
 };
 
 /* One group FEC block.  n + m <= 256, S is the share payload size.

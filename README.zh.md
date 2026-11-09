@@ -19,15 +19,15 @@
 见 [QoS 说明](#qos-说明)。如果测量结果相反，`profile=raw` 会关掉这层包装，
 按流分散带来的收益仍然存在。
 
-FEC v6（`fec=on`）是可选的第二数据面：应用的字节流被切成 8 KiB 的 DATA share
+FEC v8（`fec=on`）是可选的第二数据面：应用的字节流被切成 8 KiB 的 DATA share
 和 GF(2) band-RLNC 校验 share，每条载体承载一个 share；接收端先用同一块内的校验 share
 恢复丢失的 share。最近 `K` 个 super-block 内仍缺的 share 由 NACK 请求
 （`K` 是 15 MiB 重放环能容纳的最大值，最多 64）、
 发送端从重放环重发；更老的丢失留在载体的 TCP 发送队列里，由 TCP 重传。
 它同时支持 `profile=raw` 和 HTTP chunk 容器：
 HTTP 档位下一个 chunk body 恰好是一条 FEC 记录（48 字节头加负载；
-`TBT_FEC_CONV=0x1007`；
-`0x1006` 是自适应版本，`0x1005` 是 0.2.2 的 stream-id 版本，0.1.0 为 `0x1001`），请求行、头部和
+`TBT_FEC_CONV=0x1008`；
+`0x1007` 是多流版本，`0x1006` 是自适应版本，`0x1005` 是 0.2.2 的 stream-id 版本，0.1.0 为 `0x1001`），请求行、头部和
 chunk 分帧保持明文。`mode=grouped` 把载体分成 `groups` 组，每组 `n` 个 DATA
 加 `m` 个校验，`carriers = groups * (n + m)`，最多 256 条；生产形状是
 32 组 `n=4, m=4`。`crypto=on`（`fec=on` 时的默认值）只对 DATA/PARITY 的
@@ -47,7 +47,7 @@ GF(16) 上行 128、512 保留），码率由 `n/(n+m)` 决定。per-direction
 `m` 在 1..6 之间移动。`mode=sc-ldpc` 使用 per-flow SC-LDPC 估计器/控制器：
 0.4.3 起下行 1x256 与上行 8x32 均支持六档自适应切换（`25, 30, 40, 50, 60,
 70`）；与旧 0.4.0..0.4.2 混跑时遇 CFG_NACK 自动静默守住 128/128。切换走
-`FEC_CFG`/`FEC_FBK`（wire `0x1007`）。`session <id> adaptive=off` 可在运行时
+`FEC_CFG`/`FEC_FBK`（wire `0x1008`）。`session <id> adaptive=off` 可在运行时
 关闭。GF(2) 族的 `n + m != 8` 尚未实现。
 
 0.4.0 起，非 SC-LDPC 的 grouped 形状可承载多条并发 FEC 流（v7，wire
@@ -62,7 +62,7 @@ SC-LDPC 始终单流。前一个流关闭后的顺序新连接仍会重置旧 FE
 stream id（`0x1005` 引入，`0x1007` 仍在），因此排队中的旧流记录不会进入
 新流。
 
-当前代码实现了 [DESIGN.md](DESIGN.md) 的 C1–C8，以及 FEC v6 的 grouped 与
+当前代码实现了 [DESIGN.md](DESIGN.md) 的 C1–C8，以及 FEC v8 的 grouped 与
 SC-LDPC 数据面、自适应 FEC（GF(2) Phase 1 与 SC-LDPC 速率控制）、多流 v7
 和 256 载体扩展：`/proc` 控制面、监听器与远端、
 备用载体与带 RETIRE 握手的载体替换、带重放环的重复发送、保留字节重放的空洞修复，
@@ -120,23 +120,28 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.4.4`）。
-线上修订是旧帧的 `TBT_CONV=0x0007`、旧 ARQ HELLO 的 `TBT_WIRE_VERSION=1`、
-FEC v7 会话的 `TBT_WIRE_VERSION_V6=4`，以及 FEC 记录的
-`TBT_FEC_CONV=0x1007`；它们都与模块版本独立。
+`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.5.0`）。
+线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x0008` 与 FEC 头/FEC 记录的
+`TBT_FEC_CONV=0x1008`（48 字节头、64 字节 `FEC_CFG`/`FEC_FBK`），三者都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
 失败，其载体关闭；0x0004 的对端在第一个头部就会因为 conv 不匹配而被拒绝。
-当前 FEC wire 是 `0x1007`。`TBT_CONV 0x0006` 增加 FIN 的 16 字节 body
-（`pkt_end`/`pkt_base`，自 `0x0007` 起为 stream-local）；FEC `0x1002` 增加
-PARITY 空块 marker（`win_len=0`、`payload_len=0`、`epoch=0`）；`0x1003`
-把 ACK 扩到 24 字节并加入 `deliver_bytes`；`0x1004` 把 NACK 变成 64 字节
-位图修复请求；`0x1005` 在头部 +32 加入 64 位 stream id，并把头部扩到
-48 字节；`0x1006` 把 `FEC_CFG` 扩到 48 字节、把 `FEC_FBK` 变成 48 字节
-报告，并把 HELLO body[0] 升到版本 3，用于自适应形状切换。`0x1007` 是多流
-版本：stream-local FEC seq/block id、32 字节 OPEN group bitmap 与
-`FEC_ALLOC` (0x36)；HELLO body[0] 升到版本 4。`FEC_ALLOC` 与 0.4.0 的 wire
-兼容，但只有 0.4.4 发送并应用它（见上文的并发流说明）；旧对端会忽略它。
-0.2.x 与当前 wire 不互操作，首个 HELLO 即硬拒绝。
+`TBT_CONV 0x0008` 把 OPEN 扩到 36 字节：32 字节 FEC group bitmap、小端
+route slot（近端监听映射槽）与该槽的小端 target 端口。0 表示沿用远端该槽
+配置的端口；其他值必须与它相等。`TBT_WIRE_VERSION_V6` 升到 5，0.4.0 的
+FEC 对端会在第一条 HELLO 就被拒绝，而不是等到第一条 OPEN。
+当前 FEC wire 是 `0x1008`：`0x1002` 增加 FIN 的 16 字节 body
+（`pkt_end`/`pkt_base`）与 PARITY 空块 marker（`win_len=0`、
+`payload_len=0`、`epoch=0`）；`0x1003` 把 ACK 扩到 24 字节并加入
+`deliver_bytes`；`0x1004` 把 NACK 变成 64 字节位图修复请求；`0x1005`
+在头部 +32 加入 64 位 stream id，并把头部扩到 48 字节；`0x1006` 把
+`FEC_CFG` 扩到 48 字节、把 `FEC_FBK` 变成 48 字节报告，并把 HELLO body[0]
+升到版本 3，用于自适应形状切换。`0x1007` 是多流版本：stream-local FEC
+seq/block id、32 字节 OPEN group bitmap 与 ALLOC (0x36)；HELLO body[0] 升到
+版本 4。`FEC_ALLOC` 与 0.4.0 的 wire 兼容，但只有 0.4.4 发送并应用它（见
+上文的并发流说明）；旧对端会忽略它。`0x1008` 把 `FEC_CFG`/`FEC_FBK` 扩到
+64 字节、恢复完整 256 位 carrier 位图，把 OPEN 扩到 36 字节，并把 HELLO
+body[0] 升到版本 5；三个 wire 版本常量一起移动。0.2.x/0.4.x 与当前 wire
+不互操作，首个 HELLO 即硬拒绝。
 `scripts/mkdkmsconf.sh` 派生
 `PACKAGE_VERSION="<major>.<minor>.<patch>"`；`dkms.conf` 是生成物，由
 `make dkms.conf` / `make dkms-tarball` 写出，不要手改。
@@ -248,7 +253,7 @@ nonce。没有 `nonce=` 时，远端会采纳第一条 HELLO 的 nonce；如果�
 这条 HELLO 还会固定锚，并打印一次首连信任告警。地址只接受字面 IPv4：
 本版本不支持 DNS，也不支持 IPv6。
 
-HTTP 容器上的 FEC v6：一组六条载体（四条 DATA、两条校验）：
+HTTP 容器上的 FEC v8：一组六条载体（四条 DATA、两条校验）：
 
 ```sh
 # 近端
@@ -309,7 +314,8 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 | `role` | — | `near` 或 `far`，必填 |
 | `listen` | — | `a.b.c.d:port`；近端为对外地址，远端为载体地址 |
 | `peer` | — | 近端：载体的目的地；远端：唯一允许加入载体的近端源地址（锚），端口只是语法占位 |
-| `target` | — | 仅远端：负载投递到的字面地址 |
+| `target` | — | 远端：必填，负载投递到的字面 `ip:port`；slot 0 的目的地，也是 OPEN 里端口为 0 时的默认值。近端：可选的 slot 0 target 端口，地址只是语法占位（远端始终拨自己的 `target_addr`） |
+| `map` | — | `listen_port:target_port[,listen_port:target_port...]`，最多 7 个附加槽。近端在 `listen=` 的地址上监听每个 listen 端口，并把 target 端口写进 OPEN；远端把这些 target 端口作为允许的目的地（listen 半边不绑定）。slot 0 就是 `listen=`/`target=`。近端拒绝与 `listen=` 或彼此重复的 listen 端口 |
 | `n` | `4` | 每组的 DATA share 数，`1..255`；`n + m <= 256` |
 | `m` | `1` | 每组的校验 share 数，`0..255`；`fec=on` 需要 `m >= 1`；`n + m <= 256` |
 | `dup` | `1` | 重复度，`0..3` |
@@ -324,7 +330,7 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 | `tx_retain_bytes` | `0` | 发送端保留字节数，`0` 表示不限 |
 | `carrier_stall_ms` | `0` | stall 阈值的上限，毫秒，`0..3600000`；`0` 表示自动：5 × RTO（`SRTT + 4×RTTVAR`），钳制在 1..60 s。显式值只能调低自动阈值 |
 | `profile` | `http-kal` | `http-kal`、`http-kal-drip` 或 `raw` |
-| `fec` | `off` | `off`（旧 ARQ）或 `on`（FEC v6 数据面） |
+| `fec` | `off` | `off`（旧 ARQ）或 `on`（FEC v8 数据面） |
 | `adaptive` | `rlnc`/`grouped` 跟随 `fec`；`sc-ldpc` 默认 off | `on` 让控制律选择 `n/m`：GF(2) 的 Phase 1 在 `n + m = 8` 族内，`mode=sc-ldpc` 则沿 SC-LDPC 码率阶梯；`on` 需要 `fec=on` |
 | `mode` | `rlnc` | `rlnc`（单组）、`grouped`（GF(2) band RLNC），或 `sc-ldpc`（下行 1×256 binary、上行 grouped GF(16)；`w` 是 codeword block） |
 | `w` | `0` | RLNC 窗口，`0..1024`；`0` 解析为 `2*n` |
@@ -510,7 +516,7 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   时的默认值）对 FEC 的 DATA/PARITY 负载做 ChaCha8 混淆，目的是把应用字节
   从朴素的 DPI 特征里藏起来；48 字节 FEC 头、HTTP 头部和控制帧仍是明文，
   而且没有认证。未配置 `crypto_key=` 时，近端生成 32 字节会话密钥并在
-  HELLO v6 body 中明文发送（`key_id=1`），远端采纳；两端都配置
+  FEC HELLO body 中明文发送（`key_id=1`），远端采纳；两端都配置
   `crypto_key=` 时 `key_id=0`，HELLO 的 key 字段为零，密钥不匹配表现为每个
   share 的 payload CRC 失败。nonce 是会话标识，不是密钥。路径不可信时套
   WireGuard；此时只应选 `raw` 档位，因为 HTTP 解析器看不到 TLS 内部。
@@ -534,7 +540,9 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   纠删码；环里不再保留这些字节时，接收端重置流（`holes_unrecoverable`），
   而不是猜测。
 - **SC-LDPC 与其 per-flow 自适应已实现。** `mode=sc-ldpc` 运行下行 binary
-  块（1×256，`L=8`，rate 0.5）或上行 grouped GF(16)（8×32，`L=16`，rate 1/4）；
+  块（1×256，`L=8`，rate 0.5）或上行 grouped GF(16)（8×32，`L=16`，rate 1/4）。
+  上行 GF(16) 符号使用 Wire v8 bit-plane share 映射
+  （`TBT_SCLC_MAP_BITPLANE64`）：64 lane 一批，每个符号占四个小端 bit plane。
   `adaptive=on`（默认 off）沿六档阶梯切换下行 1x256 与上行 8x32；与旧
   0.4.0..0.4.2 混跑遇 CFG_NACK 时静默守住 128/128。
   `rlnc`/`grouped` 保留为 GF(2) band RLNC 回退。
@@ -649,7 +657,7 @@ cat /etc/tbtun.conf > /proc/net/tbtun/config
 
 默认不加密，也不认证。`crypto=on`（`fec=on` 时的默认值）对 FEC 的
 DATA/PARITY 负载做 ChaCha8 混淆：它把应用字节从朴素的 DPI 特征里藏起来，
-但不是机密性——未配置 `crypto_key=` 时会话密钥在 HELLO v6 body 里明文传输
+但不是机密性——未配置 `crypto_key=` 时会话密钥在 FEC HELLO body 里明文传输
 （`key_id=1`），而且没有消息认证。两端都配置 `crypto_key=` 时 `key_id=0`，
 密钥不匹配表现为 payload CRC 失败，连接不会静默降级。FEC 头、HTTP 头、
 chunk 分帧和控制帧始终是明文。配置仅限 root（`0600`），加载模块同样需要
@@ -659,7 +667,7 @@ root。如果两台主机之间的路径不可信，就把隧道放进 WireGuard
 ## 适用范围
 
 这不是通用 VPN。它只转发 TCP，每条隧道只对应一个字面目标地址，没有路由、没有 NAT、
-没有认证，也不支持 IPv6。FEC v6 可选（`fec=on`）；`mode=sc-ldpc` 已实现
+没有认证，也不支持 IPv6。FEC v8 可选（`fec=on`）；`mode=sc-ldpc` 已实现
 （binary 下行、grouped GF(16) 上行），`mode=rlnc`/`grouped` 保留为 GF(2)
 band RLNC 回退，`carriers = groups * (n + m)` 最多 256 条载体。0.4.0 支持
 多条并发 FEC 流（v7，`0x1007`）；0.4.4 起默认 `fec_groups_per_flow=0`

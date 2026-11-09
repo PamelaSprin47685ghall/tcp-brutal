@@ -3814,9 +3814,10 @@ static void tbt_target_body(struct tbt_stream *st)
 {
     struct tbt_session *sess = st->sess;
     struct tbt_tunnel *t = sess->tunnel;
+    u16 port = READ_ONCE(st->target_port);
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
-        .sin_port = t->cfg.target_port,
+        .sin_port = tbt_port_be16(port ? port : tbt_port_host16(t->cfg.target_port)),
         .sin_addr.s_addr = t->cfg.target_addr,
     };
     struct socket *s;

@@ -139,6 +139,19 @@ struct tbt_sk_ops
     void (*error_report)(struct sock *sk);
 };
 
+/* One bound listening socket. A near tunnel owns one per mapping slot (slot 0
+ * is listen=, slots 1..nmap come from map=); a far tunnel owns only slot 0,
+ * its carrier port. Embedded in the tunnel so a queued work item can never
+ * outlive the object that owns it. */
+struct tbt_listener
+{
+    struct tbt_tunnel *t;
+    struct socket *sock;
+    struct work_struct w_accept; /* scheduled from sock->sk->sk_data_ready */
+    struct tbt_sk_ops def_ops;   /* core callbacks, saved before tbt_ready */
+    u8 slot;                     /* mapping slot this listener accepts for */
+};
+
 /* A configured tunnel. One `/proc` line, one of these. */
 struct tbt_tunnel
 {
@@ -166,11 +179,12 @@ struct tbt_tunnel
     bool crypto_key_inherit_valid;
     bool crypto_tx_nonce_inherit_valid;
 
-    /* Listener, present for a near tunnel once bound. */
-    struct socket *lsock;
-    struct work_struct w_accept; /* scheduled from lsock->sk->sk_data_ready */
-    atomic_t accepting;          /* 1 while the accept loop may run */
-    struct tbt_sk_ops def_ops;   /* core callbacks, saved before tbt_ready */
+    /* Listeners, present once bound. nlisteners is 1 for a far tunnel and
+     * 1 + cfg.nmap for a near tunnel. */
+    struct tbt_listener listeners[TBT_MAP_MAX];
+    u8 nlisteners;
+    atomic_t accepting;          /* 1 while the accept loops may run */
+    struct tbt_sk_ops def_ops;   /* core callbacks, copied from listener 0 */
 
     u64 streams;      /* accepted connections seen so far */
 };
@@ -438,6 +452,14 @@ struct tbt_stream
     u8 state;                 /* TBT_ST_* */
     u8 kill_reason;
     bool near;                /* this end allocated the sid */
+    /* Host-order destination port. Near: the mapping slot's target, chosen
+     * when the stream is created and carried in OPEN. Far: the port OPEN
+     * named, resolved to cfg.target_port when the wire said 0. */
+    u16 target_port;
+    /* Mapping slot this stream belongs to: the near side's accept slot, or
+     * the route_slot the far side read from OPEN. The far echo repeats it so
+     * a mismatched OPEN is refused instead of building a parallel stream. */
+    u8 route_slot;
 
     /* The one socket this stream owns: the accepted public socket on the near
      * side, the target connection on the far side. Capture reads from it
@@ -791,6 +813,11 @@ struct tbt_fec_tx
     u16 shape_w;
     u16 shape_k;
     u8 shape_d;
+    /* v8 codec identity, copied to every CFG/FBK this plane emits. */
+    u8 codec_variant;
+    u8 sclc_L;
+    u16 sclc_block;
+    u32 rate_ppm;
     u8 init_tries;
     bool init_done;
     u64 init_ns;
@@ -815,8 +842,10 @@ struct tbt_fec_tx
     struct tbt_fec_adapt_sclc_ctl *adapt_sclc;
     /* Peer report from FEC_FBK plus the local residual counters. */
     u32 peer_p_ppm;
-    u32 peer_p_fast_ppm;     /* SC-LDPC: FBK bitmap tail, ppm/16 */
-    u32 peer_codec_fail_ppm; /* SC-LDPC: FBK bitmap tail, ppm/16 */
+    u32 peer_p_fast_ppm;     /* SC-LDPC: FBK +48, parts per million */
+    /* codec_fail has no v8 wire field (spec §7); it stays a local procfs
+     * diagnostic, so this sender-side mirror is always zero. */
+    u32 peer_codec_fail_ppm;
     u16 peer_expected;
     u16 peer_received;
     u32 peer_epoch;
@@ -2096,7 +2125,7 @@ void tbt_sk_ops_restore(struct sock *sk, const struct tbt_sk_ops *ops);
 void tbt_sock_abort_on_close(struct socket *sock);
 void tbt_carrier_resume(struct tbt_session *sess);
 void tbt_carrier_snapshot(struct tbt_session *sess);
-int tbt_stream_start(struct tbt_session *sess, struct socket *sock);
+int tbt_stream_start(struct tbt_session *sess, struct socket *sock, u8 slot);
 void tbt_pending_work(struct work_struct *w);
 void tbt_pending_drain(struct tbt_session *sess);
 
@@ -2258,7 +2287,7 @@ int tbt_carrier_send_fec_batch(struct tbt_carrier *c,
 /* Session-level 50 ms liveness poll (tbt_carrier.c), armed by tbt_session.c. */
 void tbt_session_poll_work(struct work_struct *w);
 
-void tbt_far_open_seen(struct tbt_stream *st);
+void tbt_far_open_seen(struct tbt_stream *st, u8 route_slot, u16 target_port);
 void tbt_target_detach(struct tbt_stream *st);
 void tbt_target_work_fn(struct work_struct *w);
 

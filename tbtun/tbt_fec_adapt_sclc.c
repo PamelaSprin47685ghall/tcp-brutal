@@ -143,32 +143,33 @@ int tbt_fec_adapt_sclc_wire_of_cfg(const struct tbt_fec_cfg *cfg,
     if (shares > TBT_FEC_MAX_SHARES ||
         (u32)cfg->groups * shares != carriers)
         return -1;
-    if (cfg->d == 0 && cfg->k >= 100 && cfg->k <= 1000)
+    /* v8 carries the codec identity in the CFG extension; the legacy
+     * w/k/d classification is no longer a second source of truth. */
+    if (cfg->codec_variant != 2 ||
+        (cfg->L != 8 && cfg->L != 16) ||
+        cfg->rate_ppm < 250000u || cfg->rate_ppm > 700000u)
+        return -1;
+    if ((u32)(((u64)cfg->rate_ppm * shares) / 1000000u) != cfg->n)
+        return -1;
+    block = cfg->block;
+    L = cfg->L;
+    if (cfg->groups == 1 && shares == TBT_FEC_MAX_SHARES)
     {
         kind = TBT_FEC_SCLC_DOWN;
-        block = cfg->w;
+        /* v8 names the graph in the CFG extension; the w/k/d mirror is
+         * rebuilt by cfg_unpack and is not a second authority. */
+        block = cfg->block;
         L = TBT_FEC_SCLC_L_DOWN;
         if (cfg->groups != 1 || shares != TBT_FEC_MAX_SHARES ||
             block != TBT_FEC_SCLC_BLOCK_DOWN ||
             !tbt_fec_sclc_down_split(cfg->n, cfg->m))
             return -1;
-        /* k is the codec rate in parts per thousand. It must agree with
-         * n/(n+m), or the receiver would build a graph the sender did not
-         * name. */
-        if (cfg->k != (u16)((u32)cfg->n * 1000u / shares))
-            return -1;
     }
-    else if (cfg->k > cfg->w)
+    else if (cfg->groups > 1)
     {
         kind = TBT_FEC_SCLC_UP;
-        block = cfg->k;
-        L = cfg->w;
         if (cfg->groups <= 1 || shares != 32 ||
             block != TBT_FEC_SCLC_BLOCK_UP || L != TBT_FEC_SCLC_L_UP)
-            return -1;
-        /* The wire d must agree with the n/m split; the codec derives its
-         * rate from n/m, so an inconsistent d is a malformed profile. */
-        if (cfg->d != (u8)((u32)cfg->n * 256u / shares))
             return -1;
     }
     else
@@ -210,13 +211,19 @@ int tbt_fec_adapt_sclc_wire_to_cfg(const struct tbt_fec_adapt_sclc_wire *p,
     cfg->n = p->n;
     cfg->m = p->m;
     cfg->groups = p->groups;
+    cfg->codec_variant = 2;
+    cfg->L = p->L;
+    cfg->block = p->block;
+    cfg->rate_ppm = p->rate_ppm;
+    if ((u32)(((u64)p->rate_ppm * shares) / 1000000u) != p->n)
+        return -1;
     if (p->kind == TBT_FEC_SCLC_DOWN)
     {
         if (shares != TBT_FEC_MAX_SHARES ||
             p->block != TBT_FEC_SCLC_BLOCK_DOWN)
             return -1;
+        /* Legacy mirror for the in-kernel shape vocabulary. */
         cfg->w = TBT_FEC_SCLC_BLOCK_DOWN;
-        /* Binary CFG k is parts per thousand, not ppm: 500 for rate 0.50. */
         cfg->k = (u16)((u32)p->n * 1000u / shares);
         cfg->d = 0;
     }

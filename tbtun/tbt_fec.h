@@ -1,4 +1,4 @@
-/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x1007), control frames, and the
+/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x1008), control frames, and the
  * GF(2) sliding-window RLNC codec.
  *
  * This file and tbt_fec.c compile twice: into the module and into the host
@@ -202,6 +202,21 @@ void tbt_fec_bitmap_set(u8 bm[TBT_FEC_BITMAP_BYTES], u16 index);
 void tbt_fec_bitmap_clear(u8 bm[TBT_FEC_BITMAP_BYTES], u16 index);
 bool tbt_fec_bitmap_test(const u8 bm[TBT_FEC_BITMAP_BYTES], u16 index);
 u16 tbt_fec_bitmap_count(const u8 bm[TBT_FEC_BITMAP_BYTES]);
+
+/* Every bit at or above `first` is clear. A wire bitmap describes only the
+ * carriers the session owns; the bits beyond the session are reserved. */
+static inline bool
+tbt_fec_bitmap_tail_zero(const u8 bm[TBT_FEC_BITMAP_BYTES], u16 first)
+{
+    u16 i;
+
+    if (first > TBT_FEC_MAX_CARRIERS)
+        first = TBT_FEC_MAX_CARRIERS;
+    for (i = first; i < TBT_FEC_MAX_CARRIERS; i++)
+        if (bm[i / 8] & (u8)(1u << (i % 8)))
+            return false;
+    return true;
+}
 
 /* v7 has no cross-stream TX gate. Each stream owns a TX plane, a ring and a
  * block; a detached stream is replaced by its flow lifetime (lookup, purge,
@@ -418,7 +433,7 @@ struct tbt_fec_nack
     u8 share_mask[TBT_FEC_BITMAP_BYTES];
 };
 
-/* Group rebalancing request/ack (0x1007, 64 bytes). See tbt_uapi.h for the
+/* Group rebalancing request/ack (0x1008, 64 bytes). See tbt_uapi.h for the
  * byte offsets; this struct is the host-side mirror, not the wire layout.
  * switch_pkt and block_base are flow-local, so the same body means the same
  * thing in either direction. */
@@ -432,8 +447,11 @@ struct tbt_fec_alloc
     u32 crc32c;
 };
 
-/* Shape change request (0x1006, 48 bytes). See tbt_uapi.h for the byte
- * offsets; this struct is the host-side mirror, not the wire layout. */
+/* Shape change request (0x1008, 64 bytes). See tbt_uapi.h for the byte
+ * offsets; this struct is the host-side mirror, not the wire layout. The
+ * extension fields name the codec explicitly; `codec_variant == 2` leaves
+ * the wire w/k/d bytes zero, and w/k/d below carry the equivalent legacy
+ * values only so the in-kernel consumers keep one shape vocabulary. */
 struct tbt_fec_cfg
 {
     u32 epoch;
@@ -449,9 +467,15 @@ struct tbt_fec_cfg
     u64 seed;
     u32 crc32c;  /* CRC32C over the first 40 bytes of this body */
     u32 reserved;
+    u8 codec_variant; /* 0 RLNC single, 1 RLNC grouped, 2 SC-LDPC */
+    u8 L;             /* variant 2: 8 or 16; otherwise 0 */
+    u16 block;        /* variant 2: 256 or 512; otherwise 0 */
+    u32 rate_ppm;     /* variant 2: 250000..700000; otherwise 0 */
+    u32 crc32c_ext;   /* CRC32C over the eight extension bytes +48..+55 */
+    u32 reserved2;
 };
 
-/* Receiver report (0x1006, 48 bytes). `epoch` is the 32-bit generation
+/* Receiver report (0x1008, 64 bytes). `epoch` is the 32-bit generation
  * assembled from epoch_lo/epoch_hi; the wire keeps the two halves apart so
  * the first 12 bytes stay at their 0x1002 offsets. */
 struct tbt_fec_fbk
@@ -466,6 +490,12 @@ struct tbt_fec_fbk
     u8 flags; /* TBT_FEC_FBK_F_* */
     u8 n_current;
     u8 carrier_bitmap[TBT_FEC_BITMAP_BYTES];
+    u32 p_fast_ppm; /* SC-LDPC fast-window loss */
+    u8 codec_variant;
+    u8 L;
+    u16 block;
+    u32 rate_ppm_current;
+    u32 rate_ppm_target;
 };
 
 static inline u32 tbt_fec_fbk_epoch(const struct tbt_fec_fbk *f)
@@ -479,52 +509,36 @@ static inline void tbt_fec_fbk_set_epoch(struct tbt_fec_fbk *f, u32 epoch)
     f->epoch_hi = (u16)(epoch >> 16);
 }
 
-/* SC-LDPC FBK overlay (mode=3, adaptive=on). The last four bytes of the
- * carrier bitmap carry p_fast and codec_fail in 16 ppm units, little-endian.
- * The alive bitmap then covers carriers 0..223; no current consumer reads
- * the bitmap, and the 48-byte body and every offset stay unchanged.
- * Merge note: w-0.4.0-multistream's 0x1007 changes per-flow FEC framing but
- * keeps this FBK body; a later per-flow FBK extension must recheck this
- * overlay and the 224-carrier truncation. */
-#define TBT_FEC_FBK_SC_P_FAST_OFF (TBT_FEC_BITMAP_BYTES - 4)
-#define TBT_FEC_FBK_SC_CODEC_FAIL_OFF (TBT_FEC_BITMAP_BYTES - 2)
-
-static inline u32 tbt_fec_fbk_sc_p_fast(const struct tbt_fec_fbk *f)
+/* The wire carries one variant value. A shape built internally may leave
+ * variant 0 for an RLNC shape that has several groups; the wire form and
+ * the peer's report both name variant 1 in that case. Normalize from the
+ * group count, never from the caller's unset field. */
+static inline u8 tbt_fec_variant_norm(u8 variant, u16 groups)
 {
-    u32 v = (u32)f->carrier_bitmap[TBT_FEC_FBK_SC_P_FAST_OFF] |
-            ((u32)f->carrier_bitmap[TBT_FEC_FBK_SC_P_FAST_OFF + 1] << 8);
-
-    return v * 16u;
+    if (variant == 2)
+        return 2;
+    return groups > 1 ? 1 : 0;
 }
 
-static inline void tbt_fec_fbk_sc_set_p_fast(struct tbt_fec_fbk *f, u32 ppm)
+/* An FBK names the receive shape. It matches only the codec this side
+ * committed: the normalized variant always, and L/block for SC-LDPC.
+ * `committed_variant` may still be the internal (unnormalized) value. */
+static inline bool
+tbt_fec_fbk_variant_match(u8 fb_variant, u8 fb_L, u16 fb_block,
+                          u8 committed_variant, u8 committed_L,
+                          u16 committed_block, u16 groups)
 {
-    u32 v = ppm / 16u;
+    u8 want = tbt_fec_variant_norm(committed_variant, groups);
 
-    if (v > 0xffffu)
-        v = 0xffffu;
-    f->carrier_bitmap[TBT_FEC_FBK_SC_P_FAST_OFF] = (u8)v;
-    f->carrier_bitmap[TBT_FEC_FBK_SC_P_FAST_OFF + 1] = (u8)(v >> 8);
+    if (fb_variant != want)
+        return false;
+    return want != 2 || (fb_L == committed_L && fb_block == committed_block);
 }
 
-static inline u32 tbt_fec_fbk_sc_codec_fail(const struct tbt_fec_fbk *f)
-{
-    u32 v = (u32)f->carrier_bitmap[TBT_FEC_FBK_SC_CODEC_FAIL_OFF] |
-            ((u32)f->carrier_bitmap[TBT_FEC_FBK_SC_CODEC_FAIL_OFF + 1] << 8);
-
-    return v * 16u;
-}
-
-static inline void tbt_fec_fbk_sc_set_codec_fail(struct tbt_fec_fbk *f,
-                                                 u32 ppm)
-{
-    u32 v = ppm / 16u;
-
-    if (v > 0xffffu)
-        v = 0xffffu;
-    f->carrier_bitmap[TBT_FEC_FBK_SC_CODEC_FAIL_OFF] = (u8)v;
-    f->carrier_bitmap[TBT_FEC_FBK_SC_CODEC_FAIL_OFF + 1] = (u8)(v >> 8);
-}
+/* 0.5.0 removes the SC-LDPC FBK overlay: p_fast_ppm moved to +48 and the
+ * full 32-byte carrier bitmap is available again. codec_fail has no v8 wire
+ * field (it is a local procfs diagnostic); the estimator computes it, but
+ * only p_fast crosses the wire. */
 
 int tbt_fec_ack_pack(const struct tbt_fec_ack *a, u8 out[TBT_FEC_ACK_LEN]);
 int tbt_fec_ack_unpack(const u8 in[TBT_FEC_ACK_LEN], struct tbt_fec_ack *a);
@@ -2161,6 +2175,13 @@ struct tbt_fec_shape
     u16 w;
     u16 k;
     u8 d;
+    /* v8 codec identity. `w/k/d` above stay the RLNC window (or, for an
+     * SC-LDPC shape, the legacy mirror derived by cfg_unpack) so the
+     * existing mapping helpers and codec selection read one vocabulary. */
+    u8 codec_variant; /* 0 RLNC single, 1 RLNC grouped, 2 SC-LDPC */
+    u8 L;             /* variant 2: 8 or 16; otherwise 0 */
+    u16 block;        /* variant 2: 256 or 512; otherwise 0 */
+    u32 rate_ppm;     /* variant 2: 250000..700000; otherwise 0 */
     u64 base_pkt;
     u64 base_block;
 };

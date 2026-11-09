@@ -7,7 +7,8 @@
  * test cannot drift from the module.
  *
  * The grammar is DESIGN.md §8.3; the line rules are §8.4.1. Tunnel keys render
- * canonically in the config view; the action verbs (carrier, session) are
+ * canonically in the config view, and the list keys (map, srcaddrs) only when
+ * set; the action verbs (carrier, session) are
  * runtime actions and are rendered only by tbt_render_action(), for the
  * tunnels/peers state view.
  */
@@ -64,6 +65,18 @@ static inline bool tbt_read_bool_at(const void *p)
 #define TBT_LINE_MAX 1024
 #define TBT_SRC_MAX 8      /* srcaddrs= entries recorded per tunnel */
 
+/* One additional port mapping. Slot 0 is the listen=/target= pair; map=
+ * entries fill slots 1..TBT_MAP_MAX-1 in the order written. Ports are host
+ * order: they are compared and rendered as numbers, and only the listener
+ * converts its own copy to a sockaddr. A near tunnel listens on
+ * listen_port and routes the stream to target_port; a far tunnel ignores
+ * listen_port and accepts target_port as an allowed destination. */
+struct tbt_map
+{
+    u16 listen_port;
+    u16 target_port;
+};
+
 /* Parse failures are negative errno values so the write() path can return them
  * unchanged and a shell sees a familiar errno. */
 #define TBT_PARSE_EINVAL (-EINVAL)
@@ -93,6 +106,8 @@ struct tbt_cfg
     __be16 peer_port;
     __be32 target_addr;
     __be16 target_port;
+    u8 nmap;                    /* extra mappings; slot 0 is listen/target */
+    struct tbt_map maps[TBT_MAP_MAX - 1];
     u16 n;
     u16 m;
     u8 dup;

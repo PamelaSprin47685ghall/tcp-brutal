@@ -58,6 +58,22 @@ static void tbt_fec_alloc_tx_tick(struct tbt_session *sess,
 static void tbt_fec_alloc_rx_release_old(struct tbt_session *sess,
                                          struct tbt_fec_flow *f);
 
+/* Give a pending switch shape its wire identity before it is stored or
+ * copied. An RLNC shape may arrive with variant 0 while its group count
+ * says grouped; the CFG and the peer's FBK both name variant 1. */
+static void tbt_fec_shape_wire_norm(struct tbt_fec_shape *sh)
+{
+    if (!sh)
+        return;
+    sh->codec_variant = tbt_fec_variant_norm(sh->codec_variant, sh->groups);
+    if (sh->codec_variant != 2)
+    {
+        sh->L = 0;
+        sh->block = 0;
+        sh->rate_ppm = 0;
+    }
+}
+
 /* The source ring is the capture's pause granularity: tbt_fec_tx_submit()
  * sets tx_paused only when the ring cannot take the next chunk. 256 KiB
  * paused capture every 32 packets while the credit window allowed 1024, so
@@ -2598,6 +2614,10 @@ static void tbt_fec_tx_send_cfg(struct tbt_session *sess,
     c.switch_pkt = tx->switch_pkt;
     c.block_base = tx->switch_block;
     c.seed = tx->nonce;
+    c.codec_variant = tx->switch_shape.codec_variant;
+    c.L = tx->switch_shape.L;
+    c.block = tx->switch_shape.block;
+    c.rate_ppm = tx->switch_shape.rate_ppm;
     if (tbt_fec_cfg_pack(&c, body))
         return;
     memset(&h, 0, sizeof(h));
@@ -2638,6 +2658,10 @@ static void tbt_fec_tx_send_init(struct tbt_session *sess,
     c.switch_pkt = 0;
     c.block_base = 0;
     c.seed = tx->nonce;
+    c.codec_variant = tx->codec_variant;
+    c.L = tx->sclc_L;
+    c.block = tx->sclc_block;
+    c.rate_ppm = tx->rate_ppm;
     if (tbt_fec_cfg_pack(&c, body))
         return;
     memset(&h, 0, sizeof(h));
@@ -3014,9 +3038,14 @@ static void tbt_fec_tx_swap(struct tbt_session *sess, struct tbt_fec_tx *tx)
     tx->carrier_wait = false;
     tx->backpressure_counted = false;
     tx->outq_paused = false;
+    tbt_fec_shape_wire_norm(&tx->switch_shape);
     tx->shape_w = tx->switch_shape.w;
     tx->shape_k = tx->switch_shape.k;
     tx->shape_d = tx->switch_shape.d;
+    tx->codec_variant = tx->switch_shape.codec_variant;
+    tx->sclc_L = tx->switch_shape.L;
+    tx->sclc_block = tx->switch_shape.block;
+    tx->rate_ppm = tx->switch_shape.rate_ppm;
     tx->switch_state = TBT_FEC_SW_STEADY;
     if (tbt_fec_sess_sclc(sess) && tx->adapt_sclc)
         tbt_fec_adapt_sclc_ctl_applied(tx->adapt_sclc, ktime_get_ns());
@@ -3081,6 +3110,7 @@ static void tbt_fec_tx_switch_begin_shape(struct tbt_session *sess,
     tx->switch_block = tx->cur_block;
     tx->switch_epoch = epoch;
     tx->switch_shape = *shape;
+    tbt_fec_shape_wire_norm(&tx->switch_shape);
     tx->switch_shape.base_pkt = tx->switch_pkt;
     tx->switch_shape.base_block = tx->switch_block;
     tx->switch_shape.slots = 0;
@@ -3439,6 +3469,10 @@ static bool tbt_fec_tx_sclc_next_shape(
     curcfg.w = tx->shape_w;
     curcfg.k = tx->shape_k;
     curcfg.d = tx->shape_d;
+    curcfg.codec_variant = tx->codec_variant;
+    curcfg.L = tx->sclc_L;
+    curcfg.block = tx->sclc_block;
+    curcfg.rate_ppm = tx->rate_ppm;
     if (tbt_fec_adapt_sclc_wire_of_cfg(&curcfg,
                                       (u16)(tx->groups * shares), &curw) ||
         tbt_fec_adapt_sclc_shape(sw->shape.rate_pct, shares, tx->groups, &s))
@@ -3459,6 +3493,10 @@ static bool tbt_fec_tx_sclc_next_shape(
     out->w = nextcfg.w;
     out->k = nextcfg.k;
     out->d = nextcfg.d;
+    out->codec_variant = nextcfg.codec_variant;
+    out->L = nextcfg.L;
+    out->block = nextcfg.block;
+    out->rate_ppm = nextcfg.rate_ppm;
     return true;
 }
 
@@ -5528,12 +5566,12 @@ static void tbt_fec_rx_fbk_send(struct tbt_session *sess,
     rx->fbk_epoch = 0;
     if (sc)
     {
-        u8 idx = tbt_fec_adapt_sclc_rate_index_for_shape(rx->n, rx->m);
-
-        f.m_current = idx == 0xff
-                          ? 0
-                          : tbt_fec_adapt_sclc_rate_at(idx)->pct;
-        f.m_target = f.m_current; /* the sender owns the control law */
+        /* v8 keeps m_current/m_target as parity share counts; the rate now
+         * has its own extension words and is no longer folded into them. */
+        f.m_current = (u8)rx->m;
+        f.m_target = READ_ONCE(rx->cfg_pending)
+                         ? (u8)rx->pending_cfg.m
+                         : f.m_current; /* the sender owns the control law */
     }
     else
     {
@@ -5556,12 +5594,17 @@ static void tbt_fec_rx_fbk_send(struct tbt_session *sess,
         extra |= TBT_FEC_FBK_F_P_VALID;
     f.flags = extra;
     memcpy(f.carrier_bitmap, rx->alive_bm, TBT_FEC_BITMAP_BYTES);
+    f.codec_variant = READ_ONCE(rx->shape.codec_variant);
+    f.L = READ_ONCE(rx->shape.L);
+    f.block = READ_ONCE(rx->shape.block);
     if (sc)
     {
-        /* SC-LDPC overlay: the last four bitmap bytes carry the values the
-         * sender's burst and rollback predicates need. */
-        tbt_fec_fbk_sc_set_p_fast(&f, so.p_fast_ppm);
-        tbt_fec_fbk_sc_set_codec_fail(&f, so.codec_fail_ppm);
+        /* p_fast moved to the extension; codec_fail stays local (procfs). */
+        f.p_fast_ppm = so.p_fast_ppm;
+        f.rate_ppm_current = READ_ONCE(rx->shape.rate_ppm);
+        f.rate_ppm_target = READ_ONCE(rx->cfg_pending)
+                                ? READ_ONCE(rx->pending_cfg.rate_ppm)
+                                : f.rate_ppm_current;
     }
     if (tbt_fec_fbk_pack(&f, body))
         return;
@@ -5893,6 +5936,10 @@ static void tbt_fec_rx_switch_apply(struct tbt_session *sess,
     rx->shape.w = c->w;
     rx->shape.k = c->k;
     rx->shape.d = c->d;
+    rx->shape.codec_variant = c->codec_variant;
+    rx->shape.L = c->L;
+    rx->shape.block = c->block;
+    rx->shape.rate_ppm = c->rate_ppm;
     rx->shape.base_pkt = rx->switch_pkt;
     rx->shape.base_block = rx->switch_block;
     rx->base_pkt = rx->switch_pkt;
@@ -6010,6 +6057,10 @@ static void tbt_fec_rx_switch_tick(struct tbt_session *sess,
         sh.w = rx->pending_cfg.w;
         sh.k = rx->pending_cfg.k;
         sh.d = rx->pending_cfg.d;
+        sh.codec_variant = rx->pending_cfg.codec_variant;
+        sh.L = rx->pending_cfg.L;
+        sh.block = rx->pending_cfg.block;
+        sh.rate_ppm = rx->pending_cfg.rate_ppm;
         codec = tbt_fec_grouped_new_ops(tbt_fec_ops_of_shape(&sh),
                                         sh.groups, sh.n, sh.m, sh.k, sh.w,
                                         TBT_FEC_S, sh.d,
@@ -6142,11 +6193,19 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     if (sess->fec_sclc && sess->tunnel->cfg.role == TBT_ROLE_FAR &&
         !tbt_fec_open_groups_match(true, f->rx->group_mask, cfg->groups))
         return -EINVAL;
+    /* The shape names every share the session's carriers carry: groups is
+     * carriers/(n+m), checked against the actual carrier count rather than
+     * a fixed 256. */
+    if ((u32)cfg->groups * shares != sess->n_car)
+        return -EINVAL;
     memset(&sclc, 0, sizeof(sclc));
     spin_lock_bh(&rx->lock);
     same = rx->n == cfg->n && rx->m == cfg->m &&
            rx->groups == cfg->groups && rx->shape.w == cfg->w &&
-           rx->shape.k == cfg->k && rx->shape.d == cfg->d;
+           rx->shape.k == cfg->k && rx->shape.d == cfg->d &&
+           rx->shape.codec_variant == cfg->codec_variant &&
+           rx->shape.L == cfg->L && rx->shape.block == cfg->block &&
+           rx->shape.rate_ppm == cfg->rate_ppm;
     fresh = rx->next_deliver == 0 && rx->next_super == 0 &&
             rx->highest_block == 0 && rx->epoch == 0;
     spin_unlock_bh(&rx->lock);
@@ -6163,8 +6222,11 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
      * legitimately differ (downlink L 8, uplink L 16). Using the local L here
      * built the peer's codec with the wrong coupling length, so every share
      * was placed by a graph the sender never encoded with. */
-    if (tbt_fec_sclc_shape_of_cfg(cfg, (u16)(cfg->groups * shares), &sclc) == 0)
+    if (cfg->codec_variant == 2)
     {
+        if (tbt_fec_sclc_shape_of_cfg(cfg, (u16)(cfg->groups * shares),
+                                      &sclc))
+            return -EINVAL;
         /* With adaptive on, the peer's INIT must name a shipped profile on
          * the rate ladder; an off-ladder split cannot be switched later. */
         if (READ_ONCE(sess->adaptive))
@@ -6257,6 +6319,10 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     rx->shape.w = cfg->w;
     rx->shape.k = cfg->k;
     rx->shape.d = cfg->d;
+    rx->shape.codec_variant = cfg->codec_variant;
+    rx->shape.L = cfg->L;
+    rx->shape.block = cfg->block;
+    rx->shape.rate_ppm = cfg->rate_ppm;
     rx->shape.base_pkt = 0;
     rx->shape.base_block = 0;
     rx->prev_shape = rx->shape;
@@ -6415,6 +6481,10 @@ static void tbt_fec_rx_on_cfg(struct tbt_session *sess,
         cur.w = rx->shape.w;
         cur.k = rx->shape.k;
         cur.d = rx->shape.d;
+        cur.codec_variant = rx->shape.codec_variant;
+        cur.L = rx->shape.L;
+        cur.block = rx->shape.block;
+        cur.rate_ppm = rx->shape.rate_ppm;
         if (!tbt_fec_adapt_sclc_wire_compatible(&cur, cfg, carriers) ||
             tbt_fec_adapt_sclc_wire_of_cfg(cfg, carriers, &nw))
         {
@@ -7857,12 +7927,20 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
             return -EPROTO;
         if (!tx)
             return 0;
+        /* The report names the receive shape; a mismatch means the two
+         * ends disagree about the committed codec, so the values would be
+         * meaningless. Drop it and count, as §7 requires. */
+        if (!tbt_fec_bitmap_tail_zero(fb.carrier_bitmap, sess->n_car) ||
+            !tbt_fec_fbk_variant_match(fb.codec_variant, fb.L, fb.block,
+                                       tx->codec_variant, tx->sclc_L,
+                                       tx->sclc_block, tx->groups))
+        {
+            atomic64_inc(&sess->fec_epoch_bad);
+            return 0;
+        }
         tx->peer_p_ppm = fb.p_ewma_ppm;
         if (sess->fec_sclc)
-        {
-            tx->peer_p_fast_ppm = tbt_fec_fbk_sc_p_fast(&fb);
-            tx->peer_codec_fail_ppm = tbt_fec_fbk_sc_codec_fail(&fb);
-        }
+            tx->peer_p_fast_ppm = fb.p_fast_ppm;
         tx->peer_expected = fb.expected_shares;
         tx->peer_received = fb.received_shares;
         tx->peer_epoch = tbt_fec_fbk_epoch(&fb);
@@ -8482,19 +8560,17 @@ struct tbt_fec_grouped *tbt_fec_sclc_new(const struct tbt_fec_sclc_shape *sh,
                                    nonce);
 }
 
-/* The wire names no codec, so a shape is classified the way cfg_unpack()
- * classifies it: d == 0 is the binary SC-LDPC block (k is the rate in parts
- * per thousand), k > w is the GF(16) block (k is the codeword block, w the
- * coupling length, d the rate in 1/256), and everything else is RLNC. */
+/* v8 names the codec in the CFG extension. The legacy w/k/d mirror is not a
+ * second classifier: a shape with variant 0/1 is RLNC whatever its window
+ * looks like. */
 static const struct tbt_fec_ops *tbt_fec_ops_of_shape(
     const struct tbt_fec_shape *sh)
 {
     if (!sh)
         return &tbt_fec_ops_rlnc;
-    if (sh->d == 0 && sh->k >= 100 && sh->k <= 1000)
-        return &tbt_fec_ops_sclc;
-    if (sh->k > sh->w)
-        return &tbt_fec_ops_sclc_gf16;
+    if (sh->codec_variant == 2)
+        return sh->groups == 1 ? &tbt_fec_ops_sclc
+                               : &tbt_fec_ops_sclc_gf16;
     return &tbt_fec_ops_rlnc;
 }
 
@@ -8508,7 +8584,7 @@ static struct tbt_fec_grouped *tbt_fec_codec_new(
 }
 
 /* ------------------------------------------------------------------ *
- * Flow table and per-flow planes (TBT_FEC_CONV 0x1007)
+ * Flow table and per-flow planes (TBT_FEC_CONV 0x1008)
  *
  * A flow owns a subset of the session's physical groups. Its TX and RX planes
  * are full copies of the old session planes, sized by G_i groups; the session
@@ -8702,6 +8778,20 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     tx->shape_w = sess->fec_w;
     tx->shape_k = sess->fec_k;
     tx->shape_d = sess->fec_d;
+    if (sclc)
+    {
+        /* The v8 CFG extension names the codec and its graph. The rate is
+         * derived from the announced split; cfg_unpack recomputes n from it
+         * with the same floor. */
+        tx->codec_variant = 2;
+        tx->sclc_L = sclc->L;
+        tx->sclc_block = sclc->block;
+        tx->rate_ppm = (u32)((((u64)n * 1000000u) + shares - 1) / shares);
+    }
+    else
+    {
+        tx->codec_variant = groups > 1 ? 1 : 0;
+    }
     tx->credit_cap = tbt_fec_credit_packets(groups, n, sess->fec_replay_k,
                                             sess->fec_slots,
                                             TBT_FEC_CREDIT_MAX);
@@ -8802,6 +8892,18 @@ tbt_fec_rx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     rx->shape.w = sess->fec_w;
     rx->shape.k = sess->fec_k;
     rx->shape.d = sess->fec_d;
+    if (sess->fec_sclc)
+    {
+        rx->shape.codec_variant = 2;
+        rx->shape.L = sess->fec_sclc_shape.L;
+        rx->shape.block = sess->fec_sclc_shape.block;
+        rx->shape.rate_ppm =
+            (u32)((((u64)n * 1000000u) + (n + m) - 1) / (n + m));
+    }
+    else
+    {
+        rx->shape.codec_variant = groups > 1 ? 1 : 0;
+    }
     rx->prev_shape = rx->shape;
     rx->replay_k = sess->fec_replay_k;
     rx->est = kzalloc(sizeof(*rx->est), GFP_KERNEL);

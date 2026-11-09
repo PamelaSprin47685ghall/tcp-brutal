@@ -3,6 +3,108 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.5.0] - 2026-11-09
+
+### Added
+
+- Multi-port mapping over one N+M carrier session. A `tunnel` line keeps its
+  original `listen=`/`target=` pair as slot 0 and adds `map=listen:target`
+  entries (comma-separated, up to `TBT_MAP_MAX - 1` extra slots) for the
+  others. A near tunnel binds every map listen port on `listen=`'s address and
+  accepts one stream per local port; a far tunnel ignores the listen half and
+  uses the map target ports as its authorized destination set. One session per
+  tunnel therefore serves every port instead of one 5-carrier (default) session
+  per port.
+- Far-side target authorization. The far tunnel accepts an OPEN only when the
+  slot exists in its own mapping table and the wire port matches that slot
+  (see OPEN under Changed). An unauthorized slot or port is dropped and
+  logged, never dialed and never allowed to close the carrier.
+  `tbtun/tbt_map.{c,h}` holds the pure slot-to-port resolver
+  `tbt_map_slot_target()`, and `host/test_map.c` pins it.
+- `FEC_ALLOC` keeps its 64-byte body; the flags mask widens to `0x0f` so
+  `COMMITTED` (0x04) and `ABORT` (0x08) join `ACK`/`DONE`, and the reserved
+  bytes are validated.
+- Uplink GF(16) SC-IRA now uses the Wire v8 bit-plane share mapping
+  (`TBT_SCLC_MAP_BITPLANE64`). The C codewords split into 64-lane batches,
+  every codeword of a batch uses the same symbol->share map, and one symbol
+  occupies four little-endian bit planes of lanes/8 bytes. A lost share
+  therefore erases one identical variable set in all 64 lanes and one
+  shared-control peel serves the batch. Per-share symbol counts are solved at
+  build time so every data share still fills S bytes exactly; parity shares
+  may keep a zero tail. The bytes inside a share change, so the legacy
+  symbol-interleaved layout is not wire-compatible: both peers must take the
+  Wire v8 cut.
+
+### Changed
+
+- Wire v8 base. `TBT_CONV` moves to `0x0008`, `TBT_FEC_CONV` to `0x1008`,
+  and FEC HELLO `body[0]` to version 5. A 0.4.0 peer is refused at the first
+  HELLO, the first FEC conv check and the first OPEN length check; there is
+  no compatibility branch.
+- OPEN carries 36 bytes: the 32-byte physical group bitmap, then `route_slot`
+  and `target_port` (both little-endian). The near side always sends its own
+  mapping slot and that slot's target port; the port is 0 only when the slot
+  has no `target=` configured. The far side resolves the slot in its own
+  `target=`/`map=` table and requires the wire port to equal that slot's port
+  (0 means "the configured one"). Validation order is mask, route slot,
+  target port.
+- `FEC_CFG` grows to 64 bytes. The v7 48-byte prefix is unchanged; the
+  extension names `codec_variant`, `L`, `block` and `rate_ppm`, protected by
+  a second CRC over `+48..+55`, with `reserved2` at `+60`.
+- `FEC_FBK` grows to 64 bytes and the full 256-bit `carrier_bitmap[32]` is
+  restored (the 0.4.0 SC overlay truncated it to 224 carriers). `p_fast_ppm`
+  moves to `+48`; the extension also carries the receiver's variant/L/block
+  and current/target rates. `codec_fail` has no v8 wire field and stays a
+  local procfs diagnostic.
+- A switch normalizes an RLNC shape's `codec_variant` from its group count
+  (single 0, grouped 1) before storing it, and the FBK check normalizes the
+  committed value again. A grouped flow therefore keeps accepting the peer's
+  variant-1 reports after its first rate switch. The uplink GF(16)
+  `block=128` is documented as a legal variant-2 combination.
+- Canonical config renders `map=` once, comma-separated, after the role's
+  peer/target keys. A repeated `map=` on one line replaces the earlier list.
+  A near line refuses a map listen port equal to `listen=` or to another map;
+  a far line accepts the same numbers because it does not bind them.
+
+### Performance
+
+- Uplink GF(16) SC-IRA: the encoder keeps the 64-lane bit-sliced sweep
+  (four uint64 planes per variable, 4x4 GF(16) multiply masks) and the
+  gather/scatter become four plane loads and stores per symbol. The
+  decoder runs one peel and one dense GF(16) elimination for all 64 lanes
+  of a batch; scratch is preallocated with kvzalloc and no hot path
+  allocates. Host, pinned core, p=0.30: rate 1/4 encode 43.5 -> 400 MB/s,
+  decode 6.5 -> 373 MB/s; rate 1/2 encode 57 -> 622 MB/s, decode 16 ->
+  666 MB/s. At p=0.13 rate 11/16 encodes 121 -> 540 MB/s and decodes
+  32 -> 826 MB/s; at p=0.40 rate 3/8 decodes 7.8 -> 409 MB/s. The
+  eight-group rate-1/4 footprint is 8.75 MiB.
+- Paired BEC comparison (same block and share-loss mask, six rates,
+  p=0.10..0.45): the bit-plane block recovery is never below the legacy
+  mapping and is higher at the high-rate operating points (22/10 p=0.20
+  0.69 -> 0.73; 18/14 p=0.30 0.68 -> 0.72; 16/16 p=0.35 0.77 -> 0.79).
+  The codec now uses `sc_build`'s quantized parity count, so 18/14 and
+  22/10 do not map the 28/17 padding slots that the graph never solves.
+- Speedups over the legacy per-codeword mapping, derived from the pinned-core
+  numbers above: decode 6.5 -> 373 MB/s at rate 1/4 (~57x) and 16 -> 666 MB/s
+  at rate 1/2 (~42x); encode 43.5 -> 400 MB/s at rate 1/4 (~9x) and
+  57 -> 622 MB/s at rate 1/2 (~11x). `make host-bench-sclc` /
+  `host/bench_sclc_uplink` reproduce the pairs. A 300-block paired BEC sweep
+  (same block, same share-loss mask, six rates x p=0.10..0.45) puts the
+  bit-plane block recovery at or above the legacy mapping at every point,
+  with the gains concentrated at high rate: 22/10 p=0.30 0.170 -> 0.217
+  (+4.7 pp), 12/20 p=0.45 0.780 -> 0.823 (+4.3 pp), 9/23 p=0.45 0.937 ->
+  0.973 (+3.7 pp). Reproduce with `make host-bench-recovery`.
+
+### Verification
+
+- Host vectors cover the 64-byte CFG/FBK bodies, the 36-byte OPEN, the v8
+  CFG extension CRC and the explicit rejection of v7 (`0x1007`, 48-byte
+  CFG/FBK, 32-byte OPEN) records.
+- `make check`, `make host-test-san` and `./review/lint.sh` pass. The host
+  tests cover parse/render round-trips, slot-to-target routing, unauthorized
+  slot/port refusal, near listen conflict detection, the maximal-line limit,
+  and both network-order port helpers.
+
 ## [0.4.4] - 2026-11-09
 
 ### Added

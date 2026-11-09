@@ -140,8 +140,8 @@ static void case_cfg_roundtrip(void)
     struct tbt_fec_cfg c, out;
     uint8_t body[TBT_FEC_CFG_LEN];
 
-    /* Downlink: w=256, k=500 (rate), d=0. The old w >= k rule refused it
-     * before the codec was ever built. */
+    /* Downlink: v8 names variant/L/block/rate in the extension; the wire
+     * w/k/d stay zero. */
     memset(&c, 0, sizeof(c));
     c.epoch = 1;
     c.n = 128;
@@ -149,6 +149,10 @@ static void case_cfg_roundtrip(void)
     c.w = 256;
     c.k = 500;
     c.d = 0;
+    c.codec_variant = 2;
+    c.L = 8;
+    c.block = 256;
+    c.rate_ppm = 500000;
     c.flags = TBT_FEC_CFG_F_APPLY | TBT_FEC_CFG_F_INIT;
     c.groups = 1;
     c.seed = 0x1234;
@@ -156,7 +160,8 @@ static void case_cfg_roundtrip(void)
     memset(&out, 0, sizeof(out));
     ok_int(tbt_fec_cfg_unpack(body, 256, &out), 0, "downlink CFG unpacks");
     ok(out.n == 128 && out.m == 128 && out.w == 256 && out.k == 500 &&
-           out.d == 0 && out.groups == 1,
+           out.d == 0 && out.groups == 1 && out.codec_variant == 2 &&
+           out.L == 8 && out.block == 256 && out.rate_ppm == 500000,
        "downlink CFG round-trips");
     ok(out.flags == (TBT_FEC_CFG_F_APPLY | TBT_FEC_CFG_F_INIT),
        "INIT flag survives the round trip");
@@ -169,6 +174,10 @@ static void case_cfg_roundtrip(void)
     c.w = 16;
     c.k = 128;
     c.d = 64;
+    c.codec_variant = 2;
+    c.L = 16;
+    c.block = 128;
+    c.rate_ppm = 250000;
     c.flags = TBT_FEC_CFG_F_APPLY | TBT_FEC_CFG_F_INIT;
     c.groups = 8;
     c.seed = 0x5678;
@@ -176,7 +185,8 @@ static void case_cfg_roundtrip(void)
     memset(&out, 0, sizeof(out));
     ok_int(tbt_fec_cfg_unpack(body, 256, &out), 0, "uplink CFG unpacks");
     ok(out.n == 8 && out.m == 24 && out.w == 16 && out.k == 128 &&
-           out.d == 64 && out.groups == 8,
+           out.d == 64 && out.groups == 8 && out.codec_variant == 2 &&
+           out.L == 16 && out.block == 128 && out.rate_ppm == 250000,
        "uplink CFG round-trips");
 
     /* An RLNC body with w < k stays invalid: k=4, w=2 is not a codeword
@@ -212,7 +222,7 @@ static void case_init_shape_from_cfg(void)
     struct tbt_fec_cfg c;
     struct tbt_fec_sclc_shape sh;
 
-    /* Uplink announcement from a peer: k=block, w=L, d=rate/256. */
+    /* Uplink announcement from a peer: variant 2, L=16, block=128, rate. */
     memset(&c, 0, sizeof(c));
     c.n = 8;
     c.m = 24;
@@ -220,17 +230,20 @@ static void case_init_shape_from_cfg(void)
     c.w = 16;
     c.k = 128;
     c.d = 64;
+    c.codec_variant = 2;
+    c.L = 16;
+    c.block = 128;
+    c.rate_ppm = 250000;
     memset(&sh, 0, sizeof(sh));
     ok_int(tbt_fec_sclc_shape_of_cfg(&c, 256, &sh), 0,
            "uplink INIT resolves");
     ok(sh.variant == TBT_FEC_SCLC_UP, "uplink INIT variant");
-    ok_u16(sh.block, 128, "uplink INIT block from k");
-    ok_u16(sh.L, 16, "uplink INIT L from w, not the local 8");
-    ok_u16(sh.rate_256, 64, "uplink INIT rate from d");
+    ok_u16(sh.block, 128, "uplink INIT block from the extension");
+    ok_u16(sh.L, 16, "uplink INIT L from the extension, not the local 8");
+    ok_u16(sh.rate_256, 64, "uplink INIT rate from the split");
     ok_u16(sh.groups, 8, "uplink INIT groups");
 
-    /* Downlink announcement: w=block, k=rate, d=0. The binary codec has no
-     * L, so the default is the only value. */
+    /* Downlink announcement: variant 2 with L=8 and block=256. */
     memset(&c, 0, sizeof(c));
     c.n = 128;
     c.m = 128;
@@ -238,12 +251,16 @@ static void case_init_shape_from_cfg(void)
     c.w = 256;
     c.k = 500;
     c.d = 0;
+    c.codec_variant = 2;
+    c.L = 8;
+    c.block = 256;
+    c.rate_ppm = 500000;
     memset(&sh, 0, sizeof(sh));
     ok_int(tbt_fec_sclc_shape_of_cfg(&c, 256, &sh), 0,
            "downlink INIT resolves");
     ok(sh.variant == TBT_FEC_SCLC_DOWN, "downlink INIT variant");
-    ok_u16(sh.block, 256, "downlink INIT block from w");
-    ok_u16(sh.rate_ppm, 500, "downlink INIT rate from k");
+    ok_u16(sh.block, 256, "downlink INIT block from the extension");
+    ok_u16(sh.rate_ppm, 500, "downlink INIT rate from the split");
 
     /* An RLNC body is not an SC-LDPC announcement. */
     memset(&c, 0, sizeof(c));
@@ -268,6 +285,10 @@ static void case_init_shape_from_cfg(void)
     c.w = 16;
     c.k = 128;
     c.d = 64;
+    c.codec_variant = 2;
+    c.L = 16;
+    c.block = 128;
+    c.rate_ppm = 250000;
     memset(&sh, 0, sizeof(sh));
     ok_int(tbt_fec_sclc_shape_of_cfg(&c, 256, &sh), 0,
            "the peer INIT resolves on a downlink-configured receiver");

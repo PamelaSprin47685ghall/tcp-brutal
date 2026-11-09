@@ -469,7 +469,10 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
         return tbt_rx_data(c, hdr, payload, len);
 
     case TBT_F_OPEN:
-        /* The body is the 32-byte group bitmap the flow admission uses. */
+        /* The body is the 36-byte v8 OPEN: group bitmap, route_slot and
+         * target_port. The session binds it after the contract-order checks:
+         * the bitmap admits the flow, then the route slot and target port are
+         * authorized against the mapping table. */
         return tbt_rx_bind_stream(c, hdr, true, payload, len);
 
     case TBT_F_FIN:
