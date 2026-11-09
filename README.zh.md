@@ -119,7 +119,7 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.4.3`）。
+`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.4.4`）。
 线上修订是旧帧的 `TBT_CONV=0x0007`、旧 ARQ HELLO 的 `TBT_WIRE_VERSION=1`、
 FEC v7 会话的 `TBT_WIRE_VERSION_V6=4`，以及 FEC 记录的
 `TBT_FEC_CONV=0x1007`；它们都与模块版本独立。
