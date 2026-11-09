@@ -1173,7 +1173,7 @@ size_t tbt_http_fec_frame_decode(struct tbt_http_rx *rx, const u8 *buf, size_t l
                 bool ok = false;
 
                 if (rx->chunk_size >= TBT_FEC_HDR_LEN &&
-                    rx->rec[0] >= TBT_FEC_DATA && rx->rec[0] <= TBT_FEC_ALLOC)
+                    tbt_fec_record_type(rx->rec[0]))
                 {
                     u16 plen = (u16)(rx->rec[TBT_FEC_H_PAYLEN] |
                                      ((u16)rx->rec[TBT_FEC_H_PAYLEN + 1] << 8));

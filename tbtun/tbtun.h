@@ -2209,7 +2209,6 @@ void tbt_fec_rx_new_stream(struct tbt_session *sess, u64 sid);
  * uses it to complete a final block whose parity and LAST flag were lost. */
 void tbt_fec_rx_fin(struct tbt_session *sess, struct tbt_stream *st,
                     u64 total_bytes, u64 pkt_end, u64 pkt_base);
-bool tbt_fec_record_type(u8 type);
 int tbt_fec_record_len(const u8 *buf, size_t have, size_t *need);
 /* tbt_carrier.c: write one whole record, no frame header. */
 int tbt_carrier_send_raw(struct tbt_carrier *c, const void *data, size_t len);
