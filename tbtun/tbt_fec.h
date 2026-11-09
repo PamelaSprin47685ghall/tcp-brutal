@@ -426,7 +426,7 @@ struct tbt_fec_alloc
 {
     u32 epoch;
     u8 group_mask[TBT_FEC_BITMAP_BYTES];
-    u8 flags; /* TBT_FEC_ALLOC_F_ACK / _DONE */
+    u8 flags; /* TBT_FEC_ALLOC_F_ACK / _DONE / _COMMITTED / _ABORT */
     u64 switch_pkt;
     u64 block_base;
     u32 crc32c;

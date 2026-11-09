@@ -672,7 +672,7 @@ static void test_control_bodies(void)
        "tampered FEC_ALLOC body CRC is refused", "alloc unpack accepted it");
     alloc[8] ^= 0x01;
 
-    alloc[TBT_FEC_ALLOC_FLAGS] = 0x04;
+    alloc[TBT_FEC_ALLOC_FLAGS] = 0x10;
     tbt_put_le32(alloc + TBT_FEC_ALLOC_CRC,
                  tbt_fec_crc32c(0, alloc, TBT_FEC_ALLOC_CRC_BYTES));
     ok(tbt_fec_alloc_unpack(alloc, &a) == -EPROTO,
