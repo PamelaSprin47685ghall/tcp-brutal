@@ -30,6 +30,15 @@ and moves independently of the module version.
   as a permanent profile mismatch (`-EINVAL`, CFG_NACK); the old RLNC fallback
   reported the factory's NULL as `-ENOMEM` and armed the wrong decoder for a
   valid-geometry 64/128-carrier downlink body.
+- The FEC drain work keeps carriers that returned `-EAGAIN` in a separate
+  `fec_drain_retry` bitmap, so a blocked carrier can no longer re-arm a
+  healthy one at the 2 ms retry tick. With 256 carriers and a full socket
+  in every eight-carrier window, the last healthy carrier waited 62 ms
+  before, and 4 ms with the first 16 full. Retry bits rejoin `ready` bit by
+  bit when the timer fires, and each run serves at most 64 carriers before
+  re-arming, so the pass cap bounds worker hold time rather than delivery
+  latency. `host/test_fec_out` covers the 256-carrier 16-full,
+  one-per-window and all-full shapes.
 
 ### Changed
 
