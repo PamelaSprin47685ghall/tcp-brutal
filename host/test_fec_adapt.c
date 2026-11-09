@@ -795,15 +795,18 @@ static void case_carrier_helpers(void)
     ok(tbt_fec_adapt_carrier_alive(true, false, true, now, now - 500 * MS,
                                    100000),
        "alive: 0.5 s at rtt 100 ms");
-    ok(!tbt_fec_adapt_carrier_alive(true, false, true, now, now - SEC,
+    ok(tbt_fec_adapt_carrier_alive(true, false, true, now, now - 3900 * MS,
+                                   100000),
+       "alive: 3.9 s at rtt 100 ms");
+    ok(!tbt_fec_adapt_carrier_alive(true, false, true, now, now - 4100 * MS,
                                     100000),
-       "alive: 1 s at rtt 100 ms");
-    ok(tbt_fec_adapt_carrier_alive(true, false, true, now, now - 1900 * MS,
+       "alive: 4.1 s at rtt 100 ms");
+    ok(tbt_fec_adapt_carrier_alive(true, false, true, now, now - 3900 * MS,
                                    500000),
-       "alive: 1.9 s at rtt 500 ms");
-    ok(!tbt_fec_adapt_carrier_alive(true, false, true, now, now - 2 * SEC,
+       "alive: 3.9 s at rtt 500 ms");
+    ok(!tbt_fec_adapt_carrier_alive(true, false, true, now, now - 4100 * MS,
                                     500000),
-       "alive: 2 s at rtt 500 ms");
+       "alive: 4.1 s at rtt 500 ms");
     ok(!tbt_fec_adapt_carrier_alive(false, false, true, now, now, 100000),
        "alive: down");
     ok(!tbt_fec_adapt_carrier_alive(true, true, true, now, now, 100000),
