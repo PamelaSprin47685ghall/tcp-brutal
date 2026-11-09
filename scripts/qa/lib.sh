@@ -205,12 +205,11 @@ qa_kw_source() { sed -n 's/^KW_SOURCE=//p' "$1" 2>/dev/null | head -n 1; }
 qa_kw_body() { sed '1d' "$1" 2>/dev/null; }
 
 qa_kw_state() { # file -> PASS|FAIL|SKIP
-    local body
-    body=$(qa_kw_body "$1")
-    if [[ -z ${body//[[:space:]]/} ]]; then
+    # Stream: a 1.3 MB journal window must not become a shell variable.
+    if ! sed '1d' "$1" 2>/dev/null | grep -q '[^[:space:]]'; then
         printf 'SKIP'
-    elif grep -qE 'BUG:|Oops|WARNING:|UBSAN:|general protection fault' \
-        <<<"$body"; then
+    elif sed '1d' "$1" 2>/dev/null |
+        grep -qE 'BUG:|Oops|WARNING:|UBSAN:|general protection fault'; then
         printf 'FAIL'
     else
         printf 'PASS'
