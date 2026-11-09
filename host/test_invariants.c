@@ -935,16 +935,17 @@ static void adapt_step(struct adapt *m)
 }
 
 /* Three deterministic scenarios make the named paths unconditional: a
- * refused CFG falls back one step, a bad raise rolls back, and a loss burst
- * skips the dwell. */
+ * refused down CFG keeps the current rate, a bad raise rolls back, and a
+ * loss burst skips the dwell. */
 static void adapt_scenarios(void)
 {
     struct adapt m;
     struct tbt_fec_adapt_sclc_out out;
     int i;
 
-    /* A refused down CFG: the controller does not retry it, and after the
-     * usual two samples it tries the one-step-lower fallback instead. */
+    /* A refused down CFG: the peer does not build the lower shape, so the
+     * controller keeps the rate both ends have used and bans further down
+     * steps (0.4.3 legacy-NACK hold) instead of walking down one rung. */
     adapt_setup(&m, 256, true, 3);
     out.switch_now = 0;
     for (i = 0; i < 12 && !out.switch_now; i++)
@@ -957,18 +958,15 @@ static void adapt_scenarios(void)
 
         tbt_fec_adapt_sclc_ctl_rejected(&m.ctl, m.now);
         eq64(m.ctl.cur, 3, "scenario: the refused CFG keeps rate 50");
-        ok(m.ctl.reject_target < refused,
-           "scenario: the fallback is below the refused rate");
+        eq64(m.ctl.reject_target, m.ctl.cur,
+             "scenario: the fallback is the kept rate");
+        ok(m.ctl.no_down, "scenario: a refused down step bans lower rates");
+        ok(m.ctl.refused_mask & (u8)(1u << refused),
+           "scenario: the refused rate is remembered");
         out.switch_now = 0;
         for (i = 0; i < 4 && !out.switch_now; i++)
             adapt_tick(&m, 400000, 0, &out);
-        ok(out.switch_now, "scenario: the refused rate is not retried");
-        if (out.switch_now)
-        {
-            eq64(out.to, m.ctl.reject_target,
-                 "scenario: the fallback target is used");
-            adapt_apply(&m, &out);
-        }
+        ok(!out.switch_now, "scenario: the refused rate is not retried");
     }
 
     /* A bad committed raise rolls back to the rate before it. */
