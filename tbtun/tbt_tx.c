@@ -3544,9 +3544,11 @@ ctl_fail:
         }
     }
     sess->dbg_pump_moved += moved;
-    mutex_unlock(&sess->pump_lock);
+    /* The snapshot owns tx_pump_snap; drop its references before the lock
+     * lets the next pump overwrite the slot. put is refcount + RCU only. */
     for (i = 0; i < nsnap; i++)
         tbt_stream_put(snap[i]);
+    mutex_unlock(&sess->pump_lock);
     return moved;
 }
 

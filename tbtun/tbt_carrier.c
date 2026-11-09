@@ -2403,27 +2403,32 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c)
      * may reset its streams here. */
     if (sess->join_retries > 20 && tbt_carriers_all_dead(sess))
     {
-        struct tbt_stream **snap;
+        struct tbt_stream *batch[16];
+        unsigned int round;
         int n, i;
 
         atomic64_inc(&sess->stream_reset_tcp_failed);
-        /* Carrier loss runs in atomic context, so the snapshot cannot sleep
-         * for a 1 KiB stack array. A refused allocation leaves the streams
-         * for the next loss; the replacement is already armed below. */
-        snap = kmalloc_array(TBT_STREAM_SNAP_MAX, sizeof(*snap),
-                             GFP_ATOMIC);
-        if (!snap)
-            goto arm_replace;
-        n = tbt_session_stream_snapshot(sess, snap, TBT_STREAM_SNAP_MAX);
-        for (i = 0; i < n; i++)
+        /* Carrier loss runs in atomic context. A small stack batch kills
+         * every stream without allocating; the killable snapshot skips a
+         * stream another killer already owns, so each round makes progress.
+         * n_active is bounded by TBT_STREAMS_MAX, hence the round cap. */
+        for (round = 0; round <= TBT_STREAMS_MAX / ARRAY_SIZE(batch);
+             round++)
         {
-            tbt_stream_kill(snap[i], TBT_ST_DEAD);
-            tbt_stream_put(snap[i]);
+            n = tbt_session_stream_snapshot_killable(sess, batch,
+                                                     ARRAY_SIZE(batch));
+            if (!n)
+                break;
+            for (i = 0; i < n; i++)
+            {
+                tbt_stream_kill(batch[i], TBT_ST_DEAD);
+                tbt_stream_put(batch[i]);
+            }
+            if (n < (int)ARRAY_SIZE(batch))
+                break;
         }
-        kfree(snap);
         return;
     }
-arm_replace:
     c->retry_at_ns = ktime_get_ns() + 50 * NSEC_PER_MSEC;
     tbt_session_arm(sess, TBT_SW_REPLACE, 0);
 }

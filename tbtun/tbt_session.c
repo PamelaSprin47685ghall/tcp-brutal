@@ -920,9 +920,12 @@ struct tbt_stream *tbt_stream_get(struct tbt_session *sess, u64 sid,
 }
 
 /* Refcounted snapshot of the active streams. The caller processes the array
- * with sess->lock dropped and puts each entry afterwards. */
-int tbt_session_stream_snapshot(struct tbt_session *sess,
-                                struct tbt_stream **out, int max)
+ * with sess->lock dropped and puts each entry afterwards. killable skips
+ * streams another killer already marked: a batch loop then always makes
+ * progress instead of re-selecting the same dying stream. */
+static int tbt_stream_snapshot(struct tbt_session *sess,
+                               struct tbt_stream **out, int max,
+                               bool killable)
 {
     int n = 0, i;
 
@@ -933,7 +936,8 @@ int tbt_session_stream_snapshot(struct tbt_session *sess,
 
         hlist_for_each_entry(st, &sess->streams[i], node)
         {
-            if (READ_ONCE(st->state) == TBT_ST_DEAD)
+            if (READ_ONCE(st->state) == TBT_ST_DEAD ||
+                (killable && test_bit(TBT_STREAM_F_DYING, &st->attached)))
                 continue;
             if (n >= max)
             {
@@ -948,6 +952,18 @@ int tbt_session_stream_snapshot(struct tbt_session *sess,
     }
     spin_unlock(&sess->lock);
     return n;
+}
+
+int tbt_session_stream_snapshot(struct tbt_session *sess,
+                                struct tbt_stream **out, int max)
+{
+    return tbt_stream_snapshot(sess, out, max, false);
+}
+
+int tbt_session_stream_snapshot_killable(struct tbt_session *sess,
+                                         struct tbt_stream **out, int max)
+{
+    return tbt_stream_snapshot(sess, out, max, true);
 }
 
 /* Hash lookup for callers that already hold sess->lock.  The hash reference

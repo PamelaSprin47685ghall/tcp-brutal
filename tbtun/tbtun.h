@@ -2167,6 +2167,11 @@ bool tbt_stream_cancel(struct tbt_stream *st, struct work_struct *w,
 struct tbt_stream *tbt_stream_get(struct tbt_session *sess, u64 sid, bool alloc, bool near);
 int tbt_session_stream_snapshot(struct tbt_session *sess,
                                 struct tbt_stream **out, int max);
+/* Same snapshot, skipping DEAD and already-DYING streams: a bounded batch
+ * loop can kill every remaining stream without re-selecting one another
+ * killer owns. */
+int tbt_session_stream_snapshot_killable(struct tbt_session *sess,
+                                         struct tbt_stream **out, int max);
 enum tbt_bind_result
 {
     TBT_BIND_OK = 0,
