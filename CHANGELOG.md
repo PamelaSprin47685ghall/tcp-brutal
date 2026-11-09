@@ -37,8 +37,14 @@ and moves independently of the module version.
   allocated and freed outside that spinlock; only the pointer moves under it.
 - Duplicate OPENs leaked their admission reference, and a fresh flow did not
   count its own admission at all: a losing carrier could abort a plane whose
-  winner had not attached yet. `ms_pending`/`ms_refs` are now split and both
-  are balanced, so the plane outlives every admission and attached leg.
+  winner had not attached yet. A carrier that found its flow by lookup also
+  consumed a slot it did not own. `ms_pending`/`ms_refs` are now split and
+  both are balanced, and a lookup-attached stream claims its own slot (or is
+  refused with `-ESTALE` if the plane is already dying), so the plane
+  outlives every admission and attached leg.
+- An unlink path that lost the race to another unlink no longer drops the
+  table reference a second time, so abort/detach cannot underflow the flow's
+  refcount.
 - Binding the first OPEN compared the peer's TX bitmap with the local TX
   bitmap, so the shipped asymmetric 1x256 / 8x32 pair never came up.
 - Detach unlinked the flow after it cleared `streams_active`, so a sequential
@@ -51,6 +57,17 @@ and moves independently of the module version.
   final `MS_WIN`; bulk multi-stream over `http-kal` stalled or left the
   sender's FIN gate closed. `tbt_fec_record_type()`, the plane frontier and a
   forced tail report cover all three.
+- A carrier marked itself OPEN-ready when the pinned OPEN *failed* to queue
+  (the success test was inverted), letting FEC data run before its OPEN. The
+  flag now stays clear until the pump writes the OPEN; the direct FEC data
+  path must not overtake the queued control frame.
+- The mux FIN tail report held a borrowed plane pointer across an unlock;
+  it now takes a referenced primary. The receiver's closed-sid table was dead
+  state once feed stopped creating legs, and is gone.
+- `host/test_fec_ms` covers the ring alloc/install/remove/free lifecycle, a
+  four-thread install/remove/pack stress, and the admission ledger under
+  concurrent claim/attach/abort (the kernel contract is one lock, as in the
+  module).
 
 ## [0.4.0] - 2026-11-09
 

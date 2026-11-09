@@ -311,16 +311,20 @@ subframe).
 attached to it. `ms_pending` counts admissions that have not attached yet and
 `ms_refs` counts attached mux legs; the plane is unlinked only when both are
 zero, and a fresh flow's own admission is one pending slot. A duplicate OPEN
-that loses the stream-creation race therefore gives its slot back through
-`tbt_fec_flow_abort()` without tearing the plane out from under the winner.
-The last stream's detach unlinks the flow *before* it clears the session's
-active count, so waiting for `streams_active=0` can never admit a successor
-onto a plane that is about to die. The TX mux lock is a spinlock and a stream
-ring is allocated and freed outside it; only the installed pointer moves
-under the lock. The RX mux uses a mutex because leg allocation sleeps. A kill
-shuts the stream's socket down in `w_kill`, never at the call site, because a
-kill can run inside a carrier RX actor that already holds another socket's
-lock.
+that loses the stream-creation race gives its slot back through
+`tbt_fec_flow_abort()`; a carrier that wins the stream with a plane found by
+lookup claims its own slot first (`tbt_fec_flow_claim_slot()`), under the
+same allocation lock and only while the plane is still linked. The unlink
+path drops the table reference only if this caller removed the flow, so a
+second abort/detach cannot underflow it. The last stream's detach unlinks the
+flow *before* it clears the session's active count, so waiting for
+`streams_active=0` can never admit a successor onto a plane that is about to
+die. The TX mux lock is a spinlock and a stream ring is allocated and freed
+outside it; only the installed pointer moves under the lock. The RX mux uses
+a mutex because leg allocation sleeps, and only an explicit open creates a
+leg (a late subframe cannot exhaust the table). A kill shuts the stream's
+socket down in `w_kill`, never at the call site, because a kill can run inside
+a carrier RX actor that already holds another socket's lock.
 
 The 256-carrier performance target remains **90% of a direct/2 stream**. The
 0.2.1 measurement is 86.8% (97.3 Mbit/s against 112.1), 3.2 points short, and

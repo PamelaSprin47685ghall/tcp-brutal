@@ -678,11 +678,6 @@ struct tbt_ms_rx
     u64 pay_off;
     struct tbt_ms_rx_leg *pay_leg;
     u32 skip_left;
-    /* Recently closed stream ids: a late subframe for one must not recreate
-     * a leg after its stream detached. The ring is bounded and only ever
-     * holds sids, so churn cannot grow memory. */
-    u64 closed[TBT_MS_MAX_STREAMS * 2];
-    u16 nclosed;
 };
 
 static struct tbt_ms_rx_leg *tbt_ms_rx_find(const struct tbt_ms_rx *rx,
@@ -696,43 +691,6 @@ static struct tbt_ms_rx_leg *tbt_ms_rx_find(const struct tbt_ms_rx *rx,
         if (rx->legs[i].used && rx->legs[i].sid == sid)
             return &rx->legs[i];
     return NULL;
-}
-
-static bool tbt_ms_rx_closed(const struct tbt_ms_rx *rx, u64 sid)
-{
-    u16 i;
-
-    for (i = 0; i < rx->nclosed; i++)
-        if (rx->closed[i] == sid)
-            return true;
-    return false;
-}
-
-static void tbt_ms_rx_closed_add(struct tbt_ms_rx *rx, u64 sid)
-{
-    if (!sid || tbt_ms_rx_closed(rx, sid))
-        return;
-    if (rx->nclosed == TBT_MS_MAX_STREAMS * 2)
-    {
-        memmove(rx->closed, rx->closed + 1,
-                (TBT_MS_MAX_STREAMS * 2 - 1) * sizeof(rx->closed[0]));
-        rx->nclosed--;
-    }
-    rx->closed[rx->nclosed++] = sid;
-}
-
-static void tbt_ms_rx_closed_del(struct tbt_ms_rx *rx, u64 sid)
-{
-    u16 i;
-
-    for (i = 0; i < rx->nclosed; i++)
-        if (rx->closed[i] == sid)
-        {
-            memmove(rx->closed + i, rx->closed + i + 1,
-                    (size_t)(rx->nclosed - i - 1) * sizeof(rx->closed[0]));
-            rx->nclosed--;
-            return;
-        }
 }
 
 struct tbt_ms_rx *tbt_ms_rx_new(u16 max_streams, u32 window)
@@ -801,8 +759,6 @@ int tbt_ms_rx_open(struct tbt_ms_rx *rx, u64 sid)
         return -EINVAL;
     if (tbt_ms_rx_find(rx, sid))
         return 0;
-    /* An explicit open for this sid is a new stream, not a late frame. */
-    tbt_ms_rx_closed_del(rx, sid);
     if (!tbt_ms_rx_leg_new(rx, sid))
         return -ENOSPC;
     return 0;
@@ -814,7 +770,6 @@ int tbt_ms_rx_close(struct tbt_ms_rx *rx, u64 sid)
 
     if (!l)
         return -ENOENT;
-    tbt_ms_rx_closed_add(rx, sid);
     if (rx->pay_leg == l)
         rx->pay_leg = NULL;
     tbt_ms_free(l->ring);

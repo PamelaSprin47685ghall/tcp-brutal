@@ -1028,6 +1028,11 @@ int main(void)
 
     if (mount("proc", "/proc", "proc", 0, NULL) < 0 && errno != EBUSY)
         verdict_fail("mount proc: %s", strerror(errno));
+    /* The console is the evidence channel. Drop its loglevel after boot so a
+     * per-carrier pr_info cannot interleave with a marker; the ring buffer
+     * still records every line klog_check reads, and errors/panics still
+     * reach the console. */
+    write_path("/proc/sys/kernel/printk", "4 4 1 7\n");
     raise_loopback();
     klog_clear();
     load_module();
