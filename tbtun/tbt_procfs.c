@@ -603,6 +603,12 @@ static int tbt_show_stats(struct seq_file *m, void *v)
         u32 rxq, rxp, txp, peer_paused;
         int skerr, tgt_err;
         u8 state, kill, tgt_state, fin_q, fin_w, rst_w, rxf, rxfd;
+        /* The flow's committed group set, copied from the session flow
+         * table under sess->lock after the RCU pass. The stream's own
+         * fec_flow pointer is not usable here: detach clears it before the
+         * flow's last reference is dropped. */
+        u16 fec_groups;
+        u8 fec_mask[TBT_FEC_BITMAP_BYTES];
     } *ss;
     u64 streams = 0, gaps = 0;
     char prefix[64];
@@ -995,6 +1001,22 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "n_pending=%u\n",
                            id, READ_ONCE(s->n_active),
                            READ_ONCE(s->n_streams), READ_ONCE(s->n_pending));
+                /* Dynamic group rebalance. `begin` counts rounds, `done`
+                 * counts per-flow commits (both ends), so it is not a round
+                 * counter; `bad` and `overlap` are the two failure counters
+                 * that must stay zero. allocator=1 names the near side. */
+                seq_printf(m, "tunnel %llu rebalance allocator=%u total=%u "
+                              "used=%u begin=%llu done=%llu abort=%llu "
+                              "retry=%llu bad=%llu overlap=%llu\n",
+                           id, s->fec_allocator ? 1 : 0,
+                           READ_ONCE(s->fec_groups_total),
+                           READ_ONCE(s->fec_groups_used),
+                           tbt_stat_read(&s->fec_alloc_begin),
+                           tbt_stat_read(&s->fec_alloc_done),
+                           tbt_stat_read(&s->fec_alloc_abort),
+                           tbt_stat_read(&s->fec_alloc_retry),
+                           tbt_stat_read(&s->fec_alloc_bad),
+                           tbt_stat_read(&s->fec_alloc_overlap));
                 /* Per-stream terminal state. Copy the fields under RCU
                  * into a heap snapshot; seq_printf() may sleep (it grows the
                  * seq_file buffer with GFP_KERNEL), and sleeping inside an
@@ -1038,13 +1060,49 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                             si++;
                         }
                     rcu_read_unlock();
+                    /* f->groups and f->group_mask are written under
+                     * sess->lock (tbt_fec_flow_mask_commit), so one pass
+                     * under that lock gives every rendered row a consistent
+                     * allocation snapshot; a closed sid has no entry and
+                     * keeps zeros. */
+                    if (si)
+                    {
+                        struct tbt_fec_flow *f;
+                        int bj;
+
+                        spin_lock(&s->lock);
+                        for (bi = 0; bi < TBT_STREAM_HT; bi++)
+                            hlist_for_each_entry(f, &s->fec_flows[bi], node)
+                                for (bj = 0; bj < si; bj++)
+                                    if (ss[bj].sid == f->sid)
+                                    {
+                                        ss[bj].fec_groups = f->groups;
+                                        memcpy(ss[bj].fec_mask, f->group_mask,
+                                               TBT_FEC_BITMAP_BYTES);
+                                        break;
+                                    }
+                        spin_unlock(&s->lock);
+                    }
                     for (bi = 0; bi < si; bi++)
+                    {
+                        static const char hex[] = "0123456789abcdef";
+                        char fec_hex[2 * TBT_FEC_BITMAP_BYTES + 1];
+                        int hj;
+
+                        for (hj = 0; hj < TBT_FEC_BITMAP_BYTES; hj++)
+                        {
+                            fec_hex[2 * hj] = hex[ss[bi].fec_mask[hj] >> 4];
+                            fec_hex[2 * hj + 1] =
+                                hex[ss[bi].fec_mask[hj] & 0xf];
+                        }
+                        fec_hex[2 * TBT_FEC_BITMAP_BYTES] = 0;
                         seq_printf(m, "tunnel %llu stream sid=%llu state=%u "
                                       "kill=%u attached=%#lx rxq=%u rxp=%u "
                                       "txp=%u peer_paused=%u skerr=%d "
                                       "tgt_state=%u tgt_err=%d "
                                       "fin_seq=%llu fin_q=%u fin_w=%u rst_w=%u "
-                                      "rxf=%u/%u dage_ms=%llu\n",
+                                      "rxf=%u/%u dage_ms=%llu "
+                                      "fec_groups=%u fec_mask=%s\n",
                                    id, ss[bi].sid, ss[bi].state,
                                    ss[bi].kill, ss[bi].attached,
                                    ss[bi].rxq, ss[bi].rxp, ss[bi].txp,
@@ -1053,7 +1111,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                                    ss[bi].fin_seq, ss[bi].fin_q,
                                    ss[bi].fin_w, ss[bi].rst_w,
                                    ss[bi].rxf, ss[bi].rxfd,
-                                   ss[bi].dage_ms);
+                                   ss[bi].dage_ms, ss[bi].fec_groups, fec_hex);
+                    }
                 }
                 seq_printf(m, "tunnel %llu c6 holes_declared=%llu holes_repaired=%llu "
                               "holes_unrecoverable=%llu rx_max_stall_us=%u "
