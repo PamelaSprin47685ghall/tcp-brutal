@@ -3,13 +3,13 @@
  * Construction and message semantics follow review/fec-prototype/sc_ldpc
  * (SC_TERM_ACC). The FEC block always has 256 shares and 8192 codewords;
  * n data shares and m = 256 - n parity shares select the transmitted code
- * rate. The graph itself stays at a rate-1/2-style shape: c = max(n, m)
- * parity variables and checks per coupling block, payload degree 5, check
- * degree at most 7. For n > m the extra parity variables are punctured, so
- * the encoder computes them and the decoder starts them as erasures. The
- * encoder is the bit64 forward sweep; the decoder is the bit-sliced peeling
- * decoder, one 64-codeword batch at a time. See tbt_fec_sclc.h for the
- * exact byte mapping and the graph shape.
+ * rate. Each coupling block holds n payload variables, m parity variables
+ * and m checks, so every parity variable is transmitted: nothing is
+ * punctured. The payload degree is 5 below or at rate 50% and 4 above it,
+ * which keeps the check degree at most 14 while the check count tracks the
+ * parity overhead. The encoder is the bit64 forward sweep; the decoder is
+ * the bit-sliced peeling decoder, one 64-codeword batch at a time. See
+ * tbt_fec_sclc.h for the exact byte mapping and the graph shape.
  *
  * The batch loop is a property of the share format (8192 bytes / 64 bytes =
  * 128 batches), never of n. Keeping it fixed is what lets every ladder point
@@ -207,17 +207,16 @@ static void sclc_shuffle(struct sclc_rng *r, int *a, int n)
 struct tbt_sclc
 {
     u16 n_shares; /* data shares per FEC block */
-    u16 m_shares; /* transmitted parity shares per FEC block */
+    u16 m_shares; /* parity shares and checks per FEC block */
     u16 k;        /* rate in parts per thousand */
     u16 w;        /* codeword block, 256 */
     size_t s;     /* share bytes, 8192 */
     u64 nonce;
 
-    int pc;      /* checks and internal parity variables per block */
-    int n;       /* internal variables per codeword, 8*(n_shares+pc) */
+    int n;       /* variables per codeword, 8*(n_shares+m_shares) */
     int n_data;  /* 8 * n_shares */
-    int n_par;   /* 8 * pc, including punctured variables */
-    int n_chk;   /* one check owns one internal parity variable */
+    int n_par;   /* 8 * m_shares */
+    int n_chk;   /* one check per parity variable */
     int batches; /* 8192 codewords / 64, always 128 */
     int edges;
     int dcs; /* encoder plan stride, max check degree */
@@ -233,7 +232,7 @@ struct tbt_sclc
     u64 *v;       /* n: encoder scratch, payload then parity */
     u64 *unk;     /* n: bit-sliced unknown mask */
     u64 *val;     /* n: bit-sliced known value */
-    u64 *cnt;     /* n_chk * 3: bit-sliced unknown count */
+    u64 *cnt;     /* n_chk * 4: bit-sliced unknown count */
     u64 *xr;      /* n_chk: XOR of known neighbours */
     u64 *act;     /* n_chk: exactly-one-unknown mask */
     u64 *resolve; /* n: resolved mask for this wave */
@@ -241,11 +240,6 @@ struct tbt_sclc
     int *stack;   /* n_chk */
     int *touched; /* n */
     u8 *tflag;    /* n */
-
-    /* Transmitted parity planes when pc != m_shares (rate above 50%). The
-     * flat index is a*m_shares + t for block a, position t. */
-    u64 *ptx;
-    u64 *prx;
 
     u8 *known;     /* n_shares: data share known */
     u8 *batch_ok;  /* batches: batch decoded */
@@ -255,36 +249,42 @@ struct tbt_sclc
 };
 
 /* ------------------------------------------------------------------ *
- * Bit-sliced 3-plane counters (check degree <= 7)
+ * Bit-sliced 4-plane counters (check degree <= 15)
  * ------------------------------------------------------------------ */
 
-static void cnt_add(u64 c[3], u64 m)
+static void cnt_add(u64 c[4], u64 m)
 {
     u64 n0 = c[0] ^ m;
     u64 k0 = c[0] & m;
     u64 n1 = c[1] ^ k0;
     u64 k1 = c[1] & k0;
+    u64 n2 = c[2] ^ k1;
+    u64 k2 = c[2] & k1;
 
     c[0] = n0;
     c[1] = n1;
-    c[2] ^= k1;
+    c[2] = n2;
+    c[3] ^= k2;
 }
 
-static void cnt_sub(u64 c[3], u64 m)
+static void cnt_sub(u64 c[4], u64 m)
 {
     u64 n0 = c[0] ^ m;
     u64 b0 = ~c[0] & m;
     u64 n1 = c[1] ^ b0;
     u64 b1 = ~c[1] & b0;
+    u64 n2 = c[2] ^ b1;
+    u64 b2 = ~c[2] & b1;
 
     c[0] = n0;
     c[1] = n1;
-    c[2] ^= b1;
+    c[2] = n2;
+    c[3] ^= b2;
 }
 
-static u64 cnt_one(const u64 c[3])
+static u64 cnt_one(const u64 c[4])
 {
-    return c[0] & ~c[1] & ~c[2];
+    return c[0] & ~c[1] & ~c[2] & ~c[3];
 }
 
 /* ------------------------------------------------------------------ *
@@ -310,61 +310,88 @@ static void sclc_graph_free(struct tbt_sclc *c)
 }
 
 /*
- * Payload block i owns n variables and connects to the five check
- * supernodes (i .. i+4) mod L, so every payload variable keeps degree 5.
- * Each supernode has pc = max(n, m) checks. Its five incoming payload
- * groups each have their own permutation and place their n edges on
- * distinct checks (n <= pc), so a check sees at most one payload edge from
- * each source block. Independent permutations keep the five groups from
- * aligning on the same bit position.
+ * A payload slot maps the n variables of one source block onto the pc
+ * checks of one supernode. Below or at rate 50% (n <= pc) one random
+ * permutation suffices: every variable gets its own check and pc - n checks
+ * stay empty for that group. Above rate 50% (n > pc) the slot array holds
+ * each check q = n / pc times plus one extra for the first n % pc checks,
+ * then shuffles: every check gets q or q + 1 edges from that group. The
+ * shuffle keeps the split random while bounding the degree, which is what
+ * the four-plane counter relies on.
+ */
+static void sclc_payload_slots(struct sclc_rng *rng, int n, int pc, int *slot)
+{
+    int b;
+
+    if (n <= pc)
+    {
+        for (b = 0; b < pc; b++)
+            slot[b] = b;
+        sclc_shuffle(rng, slot, pc);
+        return;
+    }
+    for (b = 0; b < n; b++)
+        slot[b] = b % pc;
+    sclc_shuffle(rng, slot, n);
+}
+
+/*
+ * Payload block i owns n variables and connects to dv check supernodes
+ * (i .. i+dv-1) mod L, so every payload variable has degree dv. dv is 5
+ * below or at rate 50% and 4 above it: with pc = m checks per supernode the
+ * higher rate has fewer checks, and degree 4 keeps every check within the
+ * four-plane counter while keeping the controller's upper boundary fully
+ * recoverable. Each incoming payload group has its own slot assignment, so a
+ * check sees at most ceil(n / pc) edges from each source block. Independent
+ * shuffled slots keep the groups from aligning on the same bit position.
  *
- * Every check also owns one internal parity variable of its supernode (a
- * bijection over the pc checks) and, except supernode 0, consumes one
- * parity variable from supernode j-1. That keeps the parity submatrix a
- * non-wrapping double diagonal and the encoder a forward sweep in supernode
- * order. The check order is the construction order: supernode a holds
- * checks a*pc .. a*pc+pc-1.
+ * Every check also owns one parity variable of its supernode (a bijection
+ * over the pc checks) and, except supernode 0, consumes one parity variable
+ * from supernode j-1. That keeps the parity submatrix a non-wrapping double
+ * diagonal and the encoder a forward sweep in supernode order. The check
+ * order is the construction order: supernode a holds checks a*pc .. a*pc+pc-1.
  *
- * For n > m the encoder still computes all pc parity variables per block,
- * but only the first m of them are transmitted. The punctured ones start
- * as erasures at the decoder.
+ * There is no puncturing: pc = m, so the encoder computes exactly the m
+ * parity variables it transmits, and the decoder never starts a parity
+ * variable as an erasure beyond the channel's own loss.
  */
 static int sclc_build_graph(struct tbt_sclc *c)
 {
     const int L = TBT_SCLC_L;
     const int n = c->n_shares;
     const int m = c->m_shares;
-    const int pc = n > m ? n : m;
+    const int pc = m;
+    const int dv = n > m ? TBT_SCLC_DV_HIGH : TBT_SCLC_DV;
     struct sclc_rng rng;
     int *vdeg = NULL, *cdeg = NULL, *cur = NULL, *ccur = NULL;
-    int *perm = NULL;
+    int *perm = NULL, *slot = NULL;
     int i, j, r, b, e, ck;
     int rc = -ENOMEM;
 
     if (!n || !m || (u32)n + m != TBT_SCLC_SHARES)
         return -EINVAL;
-    if (pc > TBT_SCLC_SHARES)
+    if (pc > TBT_SCLC_SHARES || n > TBT_SCLC_SHARES)
         return -EINVAL;
 
-    c->pc = pc;
     c->n_data = 8 * n;
     c->n_par = 8 * pc;
     c->n_chk = c->n_par;
     c->n = c->n_data + c->n_par;
     c->batches = TBT_SCLC_BATCHES;
-    c->edges = L * 5 * n + L * pc + (L - 1) * pc;
+    c->edges = L * dv * n + L * pc + (L - 1) * pc;
     if (c->batches != 128)
         return -EINVAL;
 
     vdeg = sclc_alloc((size_t)c->n * sizeof(int));
     cdeg = sclc_alloc((size_t)c->n_chk * sizeof(int));
     perm = sclc_alloc((size_t)pc * sizeof(int));
+    slot = sclc_alloc((size_t)(n > pc ? n : pc) * sizeof(int));
     c->voff = sclc_alloc((size_t)(c->n + 1) * sizeof(int));
     c->coff = sclc_alloc((size_t)(c->n_chk + 1) * sizeof(int));
     c->vadj = sclc_alloc((size_t)c->edges * sizeof(int));
     c->cadj = sclc_alloc((size_t)c->edges * sizeof(int));
     c->owned = sclc_alloc((size_t)c->n_chk * sizeof(int));
-    if (!vdeg || !cdeg || !perm || !c->voff || !c->coff || !c->vadj ||
+    if (!vdeg || !cdeg || !perm || !slot || !c->voff || !c->coff || !c->vadj ||
         !c->cadj || !c->owned)
         goto out;
 
@@ -375,13 +402,13 @@ static int sclc_build_graph(struct tbt_sclc *c)
     for (i = 0; i < c->n_chk; i++)
         cdeg[i] = 0;
 
-    /* Degree pass. Payload block i has n variables of degree 5. Parity
+    /* Degree pass. Payload block i has n variables of degree dv. Parity
      * block i has pc variables: degree 2 except the last block, which does
      * not feed an accumulator check. Each check owns one parity variable
      * and, for i > 0, consumes one from the previous block. */
     for (i = 0; i < L; i++)
         for (b = 0; b < n; b++)
-            vdeg[i * n + b] = 5;
+            vdeg[i * n + b] = dv;
     for (i = 0; i < L; i++)
         for (b = 0; b < pc; b++)
             vdeg[c->n_data + i * pc + b] = (i < L - 1) ? 2 : 1;
@@ -389,17 +416,15 @@ static int sclc_build_graph(struct tbt_sclc *c)
         for (b = 0; b < pc; b++)
             cdeg[i * pc + b] = 1 + (i ? 1 : 0);
 
-    /* Payload counts: one fresh permutation per (supernode, source slot).
-     * n <= pc, so each check receives at most one edge per group. */
+    /* Payload counts: one fresh slot assignment per (supernode, source
+     * slot). */
     for (j = 0; j < L; j++)
     {
-        for (r = 0; r < 5; r++)
+        for (r = 0; r < dv; r++)
         {
-            for (b = 0; b < pc; b++)
-                perm[b] = b;
-            sclc_shuffle(&rng, perm, pc);
+            sclc_payload_slots(&rng, n, pc, slot);
             for (b = 0; b < n; b++)
-                cdeg[j * pc + perm[b]]++;
+                cdeg[j * pc + slot[b]]++;
         }
     }
 
@@ -424,20 +449,18 @@ static int sclc_build_graph(struct tbt_sclc *c)
     memcpy(cur, c->voff, (size_t)c->n * sizeof(int));
     memcpy(ccur, c->coff, (size_t)c->n_chk * sizeof(int));
 
-    /* Payload edges: reseed and replay the same permutation stream. */
+    /* Payload edges: reseed and replay the same slot stream. */
     sclc_rng_seed(&rng, c->nonce);
     for (j = 0; j < L; j++)
     {
-        for (r = 0; r < 5; r++)
+        for (r = 0; r < dv; r++)
         {
             i = (j + L - r) % L;
-            for (b = 0; b < pc; b++)
-                perm[b] = b;
-            sclc_shuffle(&rng, perm, pc);
+            sclc_payload_slots(&rng, n, pc, slot);
             for (b = 0; b < n; b++)
             {
                 int v = i * n + b;
-                int ck = j * pc + perm[b];
+                int ck = j * pc + slot[b];
 
                 c->vadj[cur[v]++] = ck;
                 c->cadj[ccur[ck]++] = v;
@@ -534,6 +557,7 @@ out:
     sclc_free(cur);
     sclc_free(ccur);
     sclc_free(perm);
+    sclc_free(slot);
     return rc;
 }
 
@@ -544,9 +568,8 @@ out:
 /*
  * Batch b owns codewords b*64 .. b*64+63.  Gather segment b of every data
  * share into the payload planes, run the SC-IRA forward sweep, then
- * scatter segment b of every transmitted parity share. When the graph has
- * punctured parity variables (n > m), compact the transmitted ones into
- * the flat layout first: block a, position t sits at a*m_shares + t.
+ * scatter segment b of every parity share. pc == m_shares, so block a's
+ * parity variable t is share a*m_shares + t at the same position.
  */
 static void sclc_encode_batch(struct tbt_sclc *c, u8 *const data[],
                               u8 *const parity[], u32 b)
@@ -568,34 +591,16 @@ static void sclc_encode_batch(struct tbt_sclc *c, u8 *const data[],
         c->v[c->owned[ck]] = x;
     }
 
-    if (c->pc == c->m_shares)
-    {
-        for (s = 0; s < c->m_shares; s++)
-            seg_scatter(parity[s] + (size_t)b * 64,
-                        &c->v[c->n_data + s * 8]);
-        return;
-    }
-    for (s = 0; s < TBT_SCLC_L; s++)
-    {
-        int t;
-
-        for (t = 0; t < c->m_shares; t++)
-            c->ptx[(size_t)s * c->m_shares + t] =
-                c->v[c->n_data + s * c->pc + t];
-    }
     for (s = 0; s < c->m_shares; s++)
-        seg_scatter(parity[s] + (size_t)b * 64, &c->ptx[s * 8]);
+        seg_scatter(parity[s] + (size_t)b * 64,
+                    &c->v[c->n_data + s * 8]);
 }
 
 /* ------------------------------------------------------------------ *
  * Decoder: bit-sliced peeling for one 64-codeword batch
  * ------------------------------------------------------------------ */
 
-/*
- * Initialize payload and internal parity planes. Punctured parity
- * variables (position t >= m_shares in a block when n > m) always start
- * unknown. Transmitted parity is gathered through the flat share layout.
- */
+/* Initialize the payload and parity planes from the present shares. */
 static void sclc_decode_init(struct tbt_sclc *c, u8 *const data[],
                              u8 *const parity[], const u8 *data_present,
                              const u8 *parity_present, u32 b)
@@ -620,56 +625,26 @@ static void sclc_decode_init(struct tbt_sclc *c, u8 *const data[],
         }
     }
 
-    if (c->pc == c->m_shares)
+    for (s = 0; s < c->m_shares; s++)
     {
-        for (s = 0; s < c->m_shares; s++)
+        if (parity_present[s])
         {
-            if (parity_present[s])
-            {
-                seg_gather(&c->val[c->n_data + s * 8],
-                           parity[s] + (size_t)b * 64);
-                for (j = 0; j < 8; j++)
-                    c->unk[c->n_data + s * 8 + j] = 0;
-            }
-            else
-            {
-                for (j = 0; j < 8; j++)
-                {
-                    c->val[c->n_data + s * 8 + j] = 0;
-                    c->unk[c->n_data + s * 8 + j] = ~(u64)0;
-                }
-            }
+            seg_gather(&c->val[c->n_data + s * 8],
+                       parity[s] + (size_t)b * 64);
+            for (j = 0; j < 8; j++)
+                c->unk[c->n_data + s * 8 + j] = 0;
         }
-    }
-    else
-    {
-        for (s = 0; s < c->m_shares; s++)
-            if (parity_present[s])
-                seg_gather(&c->prx[s * 8], parity[s] + (size_t)b * 64);
-        for (s = 0; s < TBT_SCLC_L; s++)
+        else
         {
-            int vp = c->n_data + s * c->pc;
-            int t;
-
-            /* All internal parity starts unknown (this includes the
-             * punctured tail); then the transmitted bits of the block are
-             * copied in when their share arrived. */
-            memset(&c->val[vp], 0, (size_t)c->pc * sizeof(u64));
-            memset(&c->unk[vp], 0xff, (size_t)c->pc * sizeof(u64));
-            for (t = 0; t < c->m_shares; t++)
+            for (j = 0; j < 8; j++)
             {
-                int g = s * c->m_shares + t;
-
-                if (parity_present[g / 8])
-                {
-                    c->val[vp + t] = c->prx[g];
-                    c->unk[vp + t] = 0;
-                }
+                c->val[c->n_data + s * 8 + j] = 0;
+                c->unk[c->n_data + s * 8 + j] = ~(u64)0;
             }
         }
     }
 
-    memset(c->cnt, 0, (size_t)c->n_chk * 3 * sizeof(u64));
+    memset(c->cnt, 0, (size_t)c->n_chk * 4 * sizeof(u64));
     memset(c->xr, 0, (size_t)c->n_chk * sizeof(u64));
     memset(c->act, 0, (size_t)c->n_chk * sizeof(u64));
     memset(c->resolve, 0, (size_t)c->n * sizeof(u64));
@@ -685,12 +660,12 @@ static void sclc_decode_init(struct tbt_sclc *c, u8 *const data[],
             int ck = c->vadj[e];
 
             if (c->unk[v])
-                cnt_add(&c->cnt[(size_t)ck * 3], c->unk[v]);
+                cnt_add(&c->cnt[(size_t)ck * 4], c->unk[v]);
             c->xr[ck] ^= c->val[v];
         }
     }
     for (v = 0; v < c->n_chk; v++)
-        c->act[v] = cnt_one(&c->cnt[(size_t)v * 3]);
+        c->act[v] = cnt_one(&c->cnt[(size_t)v * 4]);
 }
 
 /*
@@ -750,9 +725,9 @@ static void sclc_decode_run(struct tbt_sclc *c)
             {
                 int ck = c->vadj[e];
 
-                cnt_sub(&c->cnt[(size_t)ck * 3], rv);
+                cnt_sub(&c->cnt[(size_t)ck * 4], rv);
                 c->xr[ck] ^= vb;
-                c->act[ck] = cnt_one(&c->cnt[(size_t)ck * 3]);
+                c->act[ck] = cnt_one(&c->cnt[(size_t)ck * 4]);
             }
             c->resolve[v] = 0;
             c->vbits[v] = 0;
@@ -823,7 +798,7 @@ static void *sclc_new(u16 n, u16 m, u16 k, u16 w, size_t s, u16 d, u64 nonce)
     c->v = sclc_alloc((size_t)c->n * sizeof(u64));
     c->unk = sclc_alloc((size_t)c->n * sizeof(u64));
     c->val = sclc_alloc((size_t)c->n * sizeof(u64));
-    c->cnt = sclc_alloc((size_t)c->n_chk * 3 * sizeof(u64));
+    c->cnt = sclc_alloc((size_t)c->n_chk * 4 * sizeof(u64));
     c->xr = sclc_alloc((size_t)c->n_chk * sizeof(u64));
     c->act = sclc_alloc((size_t)c->n_chk * sizeof(u64));
     c->resolve = sclc_alloc((size_t)c->n * sizeof(u64));
@@ -833,15 +808,9 @@ static void *sclc_new(u16 n, u16 m, u16 k, u16 w, size_t s, u16 d, u64 nonce)
     c->tflag = sclc_alloc((size_t)c->n);
     c->known = sclc_alloc(n);
     c->batch_ok = sclc_alloc((size_t)c->batches);
-    if (c->pc != c->m_shares)
-    {
-        c->ptx = sclc_alloc((size_t)8 * c->m_shares * sizeof(u64));
-        c->prx = sclc_alloc((size_t)8 * c->m_shares * sizeof(u64));
-    }
     if (!c->v || !c->unk || !c->val || !c->cnt || !c->xr || !c->act ||
         !c->resolve || !c->vbits || !c->stack || !c->touched || !c->tflag ||
-        !c->known || !c->batch_ok ||
-        (c->pc != c->m_shares && (!c->ptx || !c->prx)))
+        !c->known || !c->batch_ok)
     {
         sclc_graph_free(c);
         sclc_free(c->v);
@@ -857,8 +826,6 @@ static void *sclc_new(u16 n, u16 m, u16 k, u16 w, size_t s, u16 d, u64 nonce)
         sclc_free(c->tflag);
         sclc_free(c->known);
         sclc_free(c->batch_ok);
-        sclc_free(c->ptx);
-        sclc_free(c->prx);
         sclc_free(c);
         return NULL;
     }
@@ -885,8 +852,6 @@ static void sclc_free_ctx(void *ctx)
     sclc_free(c->tflag);
     sclc_free(c->known);
     sclc_free(c->batch_ok);
-    sclc_free(c->ptx);
-    sclc_free(c->prx);
     sclc_free(c);
 }
 

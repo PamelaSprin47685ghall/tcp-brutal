@@ -73,8 +73,9 @@ int tbt_fec_adapt_sclc_init_plan(u16 n, u16 m, u16 groups, u8 variant,
         return -1;
     if (i != 0xff)
     {
-        /* The binary downlink builds every ladder split: the graph keeps a
-         * rate-1/2-style check degree and punctures parity above 50%. */
+        /* The binary downlink builds every ladder split: above 50% the
+         * graph lowers the payload degree and adds one check per transmitted
+         * parity share, so nothing is punctured. */
         if (variant == TBT_FEC_SCLC_DOWN && groups == 1)
             msk = (u8)((1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u);
         else if (variant == TBT_FEC_SCLC_UP && groups > 1)

@@ -2,9 +2,10 @@
  *
  * Pins the six shipped splits, the encoder/decoder roundtrip and one-share
  * repair at every point, the erasure threshold at each point's controller
- * boundary, and the control law's suggestion shapes for a 0..45 percent
- * loss sweep. Every suggested shape is built and exercised, so the host
- * sanitizer build also covers the per-rate allocation and graph bounds.
+ * boundary, a margin check above the two high-rate boundaries, and the
+ * control law's suggestion shapes for a 0..45 percent loss sweep. Every
+ * suggested shape is built and exercised, so the host sanitizer build also
+ * covers the per-rate allocation and graph bounds.
  */
 #include "tbt_fec_adapt_sclc.h"
 #include "tbt_fec_sclc.h"
@@ -41,7 +42,7 @@ static const struct ladder
     {40, 102, 154, 400000u, 0.99},
     {50, 128, 128, 300000u, 0.99},
     {60, 151, 105, 207407u, 0.99},
-    {70, 178, 78, 104348u, 0.80},
+    {70, 178, 78, 104348u, 0.99},
 };
 
 static u64 rng_state = 0x9E3779B97F4A7C15ull;
@@ -244,13 +245,51 @@ static void test_erasure_thresholds(void)
     for (i = 0; i < LEVELS; i++)
     {
         const struct ladder *r = &ladder[i];
-        int blocks = r->pct == 70 ? 16 : 8;
+        int blocks = r->pct >= 60 ? 32 : 8;
         double got = erasure_run(r, r->boundary_ppm, blocks);
 
         printf("rate %u at p=%.4f: share recovery %.6f (min %.2f)\n",
                (unsigned)r->pct, (double)r->boundary_ppm / 1e6, got,
                r->min_recovery);
         check(got >= r->min_recovery, "ladder: erasure threshold");
+    }
+}
+
+/* The controller keeps a rate one down-step above p = boundary + 2 pp
+ * before it acts, and the up probe may sit anywhere inside that band. Pin
+ * both high-rate bands against the punctured construction's error floor:
+ * 60 percent must hold at 0.2274 and 70 percent at 0.15. */
+static void test_high_rate_margin(void)
+{
+    static const struct
+    {
+        u8 pct;
+        u32 p_ppm;
+        int blocks;
+    } cases[] = {
+        {60, 227407u, 32},
+        {70, 150000u, 32},
+    };
+    u32 i;
+
+    for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+    {
+        const struct ladder *r = NULL;
+        double got;
+        int j;
+
+        for (j = 0; j < LEVELS; j++)
+            if (ladder[j].pct == cases[i].pct)
+                r = &ladder[j];
+        if (!r)
+        {
+            check(0, "margin: ladder point exists");
+            continue;
+        }
+        got = erasure_run(r, cases[i].p_ppm, cases[i].blocks);
+        printf("rate %u at margin p=%.4f: share recovery %.6f (min 0.99)\n",
+               (unsigned)r->pct, (double)cases[i].p_ppm / 1e6, got);
+        check(got >= 0.99, "ladder: high-rate margin");
     }
 }
 
@@ -356,6 +395,7 @@ int main(void)
     test_params();
     test_roundtrip();
     test_erasure_thresholds();
+    test_high_rate_margin();
     test_controller_switch();
     if (failures)
     {

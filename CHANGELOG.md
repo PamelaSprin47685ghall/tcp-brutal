@@ -9,12 +9,19 @@ and moves independently of the module version.
 
 - Downlink binary SC-LDPC now builds the full 256-share rate ladder:
   64/192, 76/180, 102/154, 128/128, 151/105 and 178/78 (25/30/40/50/60/70
-  percent). The graph keeps `c = max(n, m)` parity variables and checks per
-  coupling block, payload degree 5 and check degree at most 7. For n > m the
-  extra parity variables are punctured: the encoder still computes them, the
-  decoder starts them as erasures, and only m parity shares are transmitted.
-  This keeps the underlying graph a strong rate-1/2-style SC-IRA code at
-  every point instead of raising the check degree with the rate.
+  percent). Each coupling block holds n payload variables, m parity
+  variables and m checks. Payload degree is 5 at or below rate 50% and 4
+  above it, check degree is at most 14, and the decoder counts unknowns in
+  four planes instead of three. Above 50% the graph no longer computes and
+  punctures `n - m` parity variables: every computed parity share is
+  transmitted, so the decoder starts a parity variable as unknown only when
+  the channel lost its share. At p = 0.1043 the 178/78 point recovered every
+  share over 1500 blocks (three graph nonces, 500 each); the punctured graph
+  left up to 2.2% of shares unresolved at the same loss (0.7% even at
+  p = 0.05), crossing the controller's 2% fail line on some graph nonces and
+  causing fail-down ping-pong. The 60/151/105 boundary (0.2074) and both
+  upper bands (60 at 0.2274, 70 at 0.15) also recover every share, so the
+  controller needs no boundary change.
 - The downlink `sclc_mask` opens all six ladder points, and FEC_CFG now
   accepts every ladder n/m with `block=256`, `groups=1`, `n+m=256` and a
   `k` that agrees with n/(n+m). Wire format `TBT_FEC_CONV 0x1007` is
@@ -24,8 +31,9 @@ and moves independently of the module version.
   falls back, so the failure is safe.
 - `host/test_fec_sclc` now uses workload-independent process CPU time for
   its throughput print. `host/test_fec_sclc_ladder` pins every split, the
-  one-share repair, the erasure threshold at each controller boundary, and
-  the suggested shapes for a 0/10/20/30/45 percent loss sweep.
+  one-share repair, the erasure threshold at each controller boundary, a
+  margin band above the 60/70 boundaries, and the suggested shapes for a
+  0/10/20/30/45 percent loss sweep.
   `host/bench_sclc_downlink` reports wire and payload MB/s per point and
   gates the wire rate at 250 MB/s when the host is not oversubscribed.
 

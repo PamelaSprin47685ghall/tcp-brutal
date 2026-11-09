@@ -79,8 +79,9 @@ u8 tbt_fec_adapt_sclc_rate_index_for_shape(u16 n, u16 m);
 /* Resolve the controller's initial ladder index and rate mask from a
  * configured SC-LDPC shape. `variant` is TBT_FEC_SCLC_DOWN or
  * TBT_FEC_SCLC_UP. Both directions support every ladder split: the binary
- * downlink keeps a rate-1/2-style check degree and punctures parity above
- * 50%, and the GF(16) uplink builds each split as its own graph. Returns 0
+ * downlink lowers its payload degree above 50% and adds one check per
+ * parity share (no puncturing), and the GF(16) uplink builds each split as
+ * its own graph. Returns 0
  * and fills idx/mask when n/m is on the ladder, or -1 with
  * idx=0xff/mask=0 when it is not or the variant/group count does not
  * match. */

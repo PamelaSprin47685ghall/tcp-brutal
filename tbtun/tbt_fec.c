@@ -1881,9 +1881,10 @@ int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
     if (groups == 1 && shares == TBT_FEC_MAX_SHARES)
     {
         /* The binary codec builds the six ladder splits of the 256 shares
-         * (25..70 percent). The graph keeps a rate-1/2-style check degree
-         * and punctures the parity above 50 percent, so every point on the
-         * ladder is a real encoded shape, not a share-count guess. */
+         * (25..70 percent). Above 50 percent it adds one check per parity
+         * share and lowers the payload degree, so every point on the ladder
+         * is a real encoded shape with no punctured parity, not a
+         * share-count guess. */
         if (!tbt_fec_sclc_down_split(n, m))
             return -EINVAL;
         out->variant = TBT_FEC_SCLC_DOWN;
