@@ -7159,14 +7159,18 @@ tbt_fec_flow_create(struct tbt_session *sess, u64 sid,
     u64 nonce;
     int err = -ENOMEM;
 
-    if (!count || count > sess->fec_groups_total)
-        return ERR_PTR(-EPROTO);
-
     spin_lock(&sess->lock);
-    if (sess->fec_sclc && sess->n_fec_flows)
+    switch (tbt_fec_flow_admit_check(sess->fec_sclc, sess->n_fec_flows,
+                                     sess->fec_groups_total, count))
     {
+    case TBT_FEC_ADMIT_SECOND_SCLC:
         spin_unlock(&sess->lock);
         return ERR_PTR(-EOPNOTSUPP);
+    case TBT_FEC_ADMIT_NO_GROUPS:
+        spin_unlock(&sess->lock);
+        return ERR_PTR(-EPROTO);
+    case TBT_FEC_ADMIT_OK:
+        break;
     }
     if (sid && tbt_fec_flow_find_locked(sess, sid))
     {
