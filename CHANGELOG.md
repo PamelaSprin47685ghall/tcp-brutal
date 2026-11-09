@@ -25,6 +25,11 @@ and moves independently of the module version.
   remainder order, insertion at the front), the P0/B0 switch arithmetic,
   and the initiator state machine including REQUEST retry, abort, the
   success path and convergence under 25% message loss.
+- `/proc/net/tbtun/stats` appends `fec_groups=` and `fec_mask=` to each
+  stream line (the flow's committed physical groups, copied from the flow
+  table under `sess->lock`) and adds a `rebalance` line with the allocator
+  flag, `total`/`used` groups, and the begin/done/abort/retry/bad/overlap
+  counters. `scripts/qa/alloc-rebalance-accept.sh` consumes both.
 ## [0.4.3] - 2026-11-09
 
 ### Added
