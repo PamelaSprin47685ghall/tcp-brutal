@@ -164,6 +164,7 @@ timeout --foreground "$QEMU_TIMEOUT" qemu-system-x86_64 \
     -kernel "$IMAGE" -initrd "$INITRD" \
     -append "console=ttyS0 panic=-1 panic_on_oops=1 loglevel=7 tsc=unstable" \
     -nic none -display none -monitor none -serial "file:$LOG" -no-reboot \
+    -device isa-debug-exit,iobase=0x501,iosize=0x04 \
     -d cpu_reset,guest_errors -D "$DEBUGLOG" \
     > "$WORK/qemu.stderr" 2>&1
 qrc=$?
@@ -175,14 +176,21 @@ tail -n 20 "$LOG" 2> /dev/null | sed 's/^/    /' || true
 [ -s "$LOG" ] || die "qemu wrote no console log (rc=$qrc, see $WORK/qemu.stderr)"
 
 bad_reason=
-if grep -aq 'QEMU_HAMMER_PASS' "$LOG"; then
+guest_verdict=
+case $qrc in
+33) guest_verdict=pass ;;
+35) guest_verdict=fail ;;
+esac
+
+if [ "$guest_verdict" = pass ] || grep -aq 'QEMU_HAMMER_PASS' "$LOG"; then
     # The guest asserts the twenty rounds, ten reload cycles and the empty
     # bad-line scan before it prints PASS.  Repeating the phase markers here
     # would only add a console-interleaving race: printk can split any line.
     bad_reason=$(grep -aE 'UBSAN|BUG:|kernel BUG at|Oops|WARNING:|Call Trace|general protection|invalid opcode|possible circular locking|possible recursive locking|inconsistent lock state|held lock|SOFTIRQ-safe -> SOFTIRQ-unsafe|sleeping function called from invalid context|list_add corruption|list_del corruption|refcount_t:|soft lockup|RCU stall|rcu_sched|blocked for more than|workqueue lockup|Kernel panic' "$LOG" |
         tail -n 1 || true)
-elif grep -aq 'QEMU_HAMMER_FAIL' "$LOG"; then
+elif [ "$guest_verdict" = fail ] || grep -aq 'QEMU_HAMMER_FAIL' "$LOG"; then
     bad_reason=$(grep -a 'QEMU_HAMMER_FAIL' "$LOG" | tail -n 1)
+    [ -n "$bad_reason" ] || bad_reason="guest reported failure (debug-exit 0x11)"
 else
     bad_reason=$(grep -aE 'Kernel panic|UBSAN|BUG:|Oops|Call Trace|general protection' "$LOG" |
         tail -n 1 || true)
