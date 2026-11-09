@@ -2365,6 +2365,15 @@ static void test_wire_version(void)
        "0.2.x HELLO version 2 is refused", NULL);
     ok(TBT_WIRE_VERSION == 1, "legacy ARQ HELLO stays version 1", NULL);
     ok(TBT_FEC_CONV == 0x1007u, "0x1007 is the multi-stream FEC revision", NULL);
+    /* The container routes a decoded chunk through this one range; ALLOC
+     * (0x36) must be inside it or the record reaches the old-frame scanner. */
+    ok(tbt_fec_record_type(TBT_FEC_DATA), "FEC type gate accepts DATA", NULL);
+    ok(tbt_fec_record_type(TBT_FEC_ALLOC), "FEC type gate accepts ALLOC",
+       NULL);
+    ok(!tbt_fec_record_type((u8)(TBT_FEC_ALLOC + 1)),
+       "FEC type gate rejects 0x37", NULL);
+    ok(!tbt_fec_record_type((u8)(TBT_FEC_DATA - 1)),
+       "FEC type gate rejects 0x2f", NULL);
 }
 
 /* ------------------------------------------------------------------ *

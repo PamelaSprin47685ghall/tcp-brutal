@@ -3501,11 +3501,6 @@ int tbt_fec_tx_flush(struct tbt_stream *st)
  * RX
  * ------------------------------------------------------------------ */
 
-bool tbt_fec_record_type(u8 type)
-{
-    return type >= TBT_FEC_DATA && type <= TBT_FEC_ALLOC;
-}
-
 int tbt_fec_record_len(const u8 *buf, size_t have, size_t *need)
 {
     u16 len;

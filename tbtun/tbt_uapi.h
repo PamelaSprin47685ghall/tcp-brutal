@@ -179,6 +179,15 @@ typedef uint64_t u64;
 #define TBT_FEC_FBK 0x35
 #define TBT_FEC_ALLOC 0x36
 
+/* Every record type the FEC data plane owns. The container uses this one
+ * range to route a decoded HTTP chunk; a raw range that stopped at FBK sent
+ * ALLOC (0x36) to the old-frame scanner. Kept here so host tests and the
+ * module share it. */
+static inline bool tbt_fec_record_type(u8 type)
+{
+    return type >= TBT_FEC_DATA && type <= TBT_FEC_ALLOC;
+}
+
 /* FEC header flags: bit0 LAST, all others reserved and refused. */
 #define TBT_FEC_FF_LAST 0x01
 #define TBT_FEC_FF_MASK 0x01
