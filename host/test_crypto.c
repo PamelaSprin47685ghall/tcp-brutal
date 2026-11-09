@@ -364,6 +364,59 @@ static void test_counter_positions(void)
     }
 }
 
+/* A 65-block run from 0xFFFFFFF0 carries the low counter word into the high
+ * one at block 16 and keeps going for 49 more blocks. The streaming and the
+ * absolute path must agree, and the run must continue exactly as a run that
+ * starts at 0x100000000 does: that is the positive assertion of the carry,
+ * the counter wrap test only covers the refusal past 2^64-1. */
+static void test_counter_carry_bulk(void)
+{
+    u8 key[32];
+    u8 nonce[8];
+    u8 one[65 * 64];
+    u8 at[65 * 64];
+    u8 next[49 * 64];
+    struct tbt_crypto_ctx ctx;
+    size_t i;
+
+    for (i = 0; i < sizeof(key); i++)
+        key[i] = (u8)(0x33 + i);
+    for (i = 0; i < sizeof(nonce); i++)
+        nonce[i] = (u8)(0x70 + i);
+    memset(one, 0, sizeof(one));
+    memset(at, 0, sizeof(at));
+
+    if (tbt_chacha8_xor(key, sizeof(key), nonce, 0xFFFFFFF0ULL, 8, one,
+                        sizeof(one)) != 0 ||
+        tbt_crypto_init(&ctx, key, nonce, 0) != 0 ||
+        tbt_crypto_xor_at(&ctx, 0xFFFFFFF0ULL, at, sizeof(at)) != 0 ||
+        memcmp(one, at, sizeof(one)) != 0)
+    {
+        printf("FAIL carry bulk: 65 blocks from 0xFFFFFFF0\n");
+        failures++;
+        return;
+    }
+    printf("PASS carry bulk: 65 blocks cross 0xFFFFFFFF, both paths agree\n");
+
+    /* 0xFFFFFFF0 + 16 blocks == 0x100000000, so the high word carried at
+     * block 16 and the remaining 49 blocks must be the same stream. */
+    if (tbt_crypto_xor_at(&ctx, 0x100000000ULL, next, sizeof(next)) != 0)
+    {
+        printf("FAIL carry bulk: continuation call\n");
+        failures++;
+        return;
+    }
+    if (memcmp(next, at + 16 * 64, sizeof(next)) != 0)
+    {
+        printf("FAIL carry bulk: the stream does not continue past the carry\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS carry bulk: 0x100000000 continues the same stream\n");
+    }
+}
+
 static void test_streaming(void)
 {
     u8 key[32];
@@ -1993,6 +2046,7 @@ int main(void)
     test_rfc8439_block();
     test_rfc8439_encrypt();
     test_counter_positions();
+    test_counter_carry_bulk();
     test_streaming();
     test_length_sweep();
     test_xor_at();
