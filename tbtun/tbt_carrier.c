@@ -35,6 +35,7 @@
 #include <net/tcp.h>
 
 #include "tbtun.h"
+#include "tbt_carrier_policy.h"
 #include "tbt_fec_batch.h"
 #include "tbt_tx_acct.h"
 
@@ -2963,10 +2964,11 @@ static void tbt_replace_body(struct tbt_session *sess)
                 enum tbt_port_alloc_err perr = TBT_PORT_ALLOC_OK;
 
                 nc->local_port = tbt_port_alloc(sess->tunnel, &perr);
-                if (!nc->local_port)
+                if (!tbt_carrier_dial_ready(nc->local_port,
+                                            perr != TBT_PORT_ALLOC_OK))
                 {
                     tbt_port_alloc_note(sess, (u8)i, perr);
-                    tbt_carrier_free(nc);
+                    tbt_carrier_discard(nc);
                     nc = NULL;
                     retry_slow = true;
                 }
@@ -3039,10 +3041,11 @@ static void tbt_replace_body(struct tbt_session *sess)
                 enum tbt_port_alloc_err perr = TBT_PORT_ALLOC_OK;
 
                 nc->local_port = tbt_port_alloc(sess->tunnel, &perr);
-                if (!nc->local_port)
+                if (!tbt_carrier_dial_ready(nc->local_port,
+                                            perr != TBT_PORT_ALLOC_OK))
                 {
                     tbt_port_alloc_note(sess, (u8)i, perr);
-                    tbt_carrier_free(nc);
+                    tbt_carrier_discard(nc);
                     nc = NULL;
                     retry_slow = true;
                 }
@@ -3401,8 +3404,16 @@ static void tbt_car_connect_work(struct work_struct *w)
         enum tbt_port_alloc_err perr = TBT_PORT_ALLOC_OK;
 
         c->local_port = tbt_port_alloc(t, &perr);
-        if (!c->local_port)
+        if (!tbt_carrier_dial_ready(c->local_port,
+                                    perr != TBT_PORT_ALLOC_OK))
         {
+            /* A port must never leak when the reason is not OK but the
+             * allocator still handed one out. */
+            if (c->local_port)
+            {
+                tbt_port_free(c->local_port);
+                c->local_port = 0;
+            }
             atomic64_inc(&sess->carrier_alloc_fail);
             tbt_port_alloc_note(sess, c->index, perr);
             c->retry_at_ns = ktime_get_ns() + 200 * NSEC_PER_MSEC;

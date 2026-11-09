@@ -1957,6 +1957,54 @@ static void test_fin_and_stale_replay(void)
     tbt_fec_replay_free(r);
 }
 
+/* A stream that adapted before its FIN failed tbt_fec_fin_valid_base():
+ * the receiver captured stream_span and stream_base_pkt lazily at FIN time,
+ * after the switch had moved base_pkt, so pkt_base looked older than the
+ * origin. The data plane freezes both at the stream's first DATA/PARITY
+ * record. This model pins that contract, including a short final packet
+ * whose pkt_end is not span-aligned. */
+static void test_fin_span_across_switch(void)
+{
+    const u64 old_span = 8u * 8u;  /* uplink 8 groups x 8 DATA shares */
+    const u64 new_span = 8u * 16u; /* a later switch to 16 DATA shares */
+    u64 stream_span = 0, stream_base = 0;
+    u64 base_pkt = 0;
+
+    /* The stream's first DATA record, before any switch. */
+    if (!stream_span)
+    {
+        stream_span = old_span;
+        stream_base = base_pkt;
+    }
+    ok(stream_span == 64 && stream_base == 0,
+       "fin span: the first record freezes origin and span");
+
+    /* A switch moves the shape origin. The frozen values must not move. */
+    base_pkt = 640;
+
+    /* A short final packet: pkt_end 641 is not span-aligned, and only the
+     * base has to be. The stream started at 0, so it still validates. */
+    ok(tbt_fec_fin_valid_base(641, 0, stream_base, stream_span),
+       "fin span: a short final packet validates against the frozen origin");
+    /* The old lazy capture read the post-switch origin and span, and the
+     * same FIN was rejected; this was the reset the field run reported. */
+    ok(!tbt_fec_fin_valid_base(641, 0, base_pkt, new_span),
+       "fin span: the lazy post-switch origin rejects the same FIN");
+
+    /* A stream that starts after the switch freezes the new origin. */
+    stream_span = 0;
+    stream_base = 0;
+    if (!stream_span)
+    {
+        stream_span = new_span;
+        stream_base = base_pkt;
+    }
+    ok(tbt_fec_fin_valid_base(700, 640, stream_base, stream_span),
+       "fin span: a stream born after the switch uses its own origin");
+    ok(!tbt_fec_fin_valid_base(700, 0, stream_base, stream_span),
+       "fin span: a stale base below the frozen origin is refused");
+}
+
 /* fix22: the far probed the idle uplink frontier for 2,756 s. Each probe
  * named parity 0 of all 32 groups; the near had no such block and counted
  * 274,389 never-stored lookups for 8,583 probes. A block the sender never
@@ -2316,6 +2364,7 @@ int main(void)
     test_nack_storm();
     test_replay_dedup_model();
     test_fin_and_stale_replay();
+    test_fin_span_across_switch();
     test_probe_and_absent();
     test_replay_high_water();
     test_frontier_first_replay();

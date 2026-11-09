@@ -28,6 +28,7 @@
 #include <net/sock.h>
 
 #include "tbtun.h"
+#include "tbt_carrier_policy.h"
 #include "tbt_portmap.h"
 
 struct tbt_portmap tbt_ports = {
@@ -560,6 +561,15 @@ void tbt_peers_show(struct seq_file *m)
 
             if (!c)
                 continue;
+            /* A far slot whose carrier is stopping holds the socket the
+             * near already replaced. Its peer port is stale; hide the row
+             * until w_replace closes the socket and frees the slot. */
+            if (!tbt_carrier_row_visible(t->cfg.role == TBT_ROLE_FAR,
+                                         atomic_read(&c->stopping) != 0))
+            {
+                tbt_carrier_put(c);
+                continue;
+            }
             sk = tbt_carrier_sk_get(c);
             sport = c->local_port;
             rtt = READ_ONCE(c->rtt_us);
@@ -1902,6 +1912,7 @@ void tbt_session_destroy(struct tbt_tunnel *t)
 void tbt_session_retire(struct tbt_session *sess, u8 index, u8 gen)
 {
     struct tbt_carrier *old;
+    bool retired = false;
 
     if (!sess || index >= sess->n_car)
         return;
@@ -1914,8 +1925,16 @@ void tbt_session_retire(struct tbt_session *sess, u8 index, u8 gen)
      * newer carrier and kill it. `peer_gen` is the generation the peer named
      * in its HELLO for this slot, which is what the RETIRE body carries. */
     if (old && (old->peer_gen & 0xf) == (gen & 0xf))
+    {
         atomic_set(&old->stopping, 1);
+        retired = true;
+    }
     spin_unlock(&sess->lock);
+    /* Close the replaced socket now, not at the next poll: until w_replace
+     * runs, the far holds a dead 5-tuple and its peers row names the old
+     * generation. */
+    if (retired)
+        tbt_session_arm(sess, TBT_SW_REPLACE, 0);
 }
 
 int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
@@ -1958,20 +1977,17 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
     old = sess->car[index];
     if (old && old != c && !tbt_carrier_dead(old))
     {
-        /* A HELLO from a *newer* generation supersedes the slot. The near
-         * replaces a carrier as soon as its own bytes stop being acknowledged,
-         * which is often before this side has noticed anything wrong with the
-         * old socket: the old connection is still ESTABLISHED here while the
-         * near has already abandoned it and dialled the replacement. Refusing
-         * the newer generation made the near retry forever -- one ACCEPTED
-         * "awaiting HELLO" per second, join_dup climbing, and the replacement
-         * never usable (measured on the WAN: lost=18 replaced=19 join_dup=13
-         * in one short smoke). The generation is four bits and wraps, so
-         * "newer" is the usual half-range comparison; the same or an older
-         * generation is still a duplicate. */
-        u8 diff = (u8)((c->peer_gen - old->peer_gen) & 0xf);
-
-        if (!diff || diff >= 8)
+        /* A HELLO from the same or a newer generation supersedes the slot.
+         * The near replaces a carrier as soon as its own bytes stop being
+         * acknowledged, which is often before this side has noticed anything
+         * wrong with the old socket: the old connection is still ESTABLISHED
+         * here while the near has already abandoned it and dialled the
+         * replacement. A retry of the same carrier keeps its generation, so
+         * an equal generation is also a replacement: refusing it left the far
+         * holding a half-open socket in the slot while the near retried
+         * forever. Only an older generation (the backward half of the
+         * four-bit ring) is a duplicate. */
+        if (!tbt_carrier_gen_supersedes(c->peer_gen, old->peer_gen))
         {
             sess->session_join_dup++;
             spin_unlock(&sess->lock);
