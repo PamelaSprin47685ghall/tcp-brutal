@@ -37,6 +37,18 @@ and moves independently of the module version.
   `host/bench_sclc_downlink` reports wire and payload MB/s per point and
   gates the wire rate at 250 MB/s when the host is not oversubscribed.
 
+### Fixed
+
+- The SC-LDPC rate controller remembers a CFG_NACK for the rest of the
+  session and never proposes that ladder point again. It still retries one
+  lower rung once after a refused raise (the transient-allocation case),
+  but a refused down step now keeps the current rate instead of walking
+  one rung lower every 30 s. A legacy 0.4.0..0.4.2 peer that supports only
+  128/128 therefore settles on 128/128 and stops emitting refused
+  FEC_CFGs. `case_ctl_legacy_nack` covers the 178/78 raise, its 151/105
+  fallback and the 102/154 down step, each NACKed, with 180 s of silence
+  after the refusals.
+
 ## [0.4.2] - 2026-11-09
 
 ### Fixed
@@ -147,15 +159,6 @@ and moves independently of the module version.
 
 ### Fixed
 
-- The SC-LDPC rate controller remembers a CFG_NACK for the rest of the
-  session and never proposes that ladder point again. It still retries one
-  lower rung once after a refused raise (the transient-allocation case),
-  but a refused down step now keeps the current rate instead of walking
-  one rung lower every 30 s. A legacy 0.4.0 peer that supports only
-  128/128 therefore settles on 128/128 and stops emitting refused
-  FEC_CFGs. `case_ctl_legacy_nack` covers the 178/78 raise, its 151/105
-  fallback and the 102/154 down step, each NACKed, with 180 s of silence
-  after the refusals.
 - FEC flow admission no longer self-deadlocks at init: the group
   reservation and publish take `sess->lock` briefly, while the flow and
   plane allocations run outside it. The SC-LDPC estimator's 32-entry arrays

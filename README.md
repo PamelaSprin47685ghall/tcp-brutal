@@ -55,9 +55,11 @@ shape. `mode=rlnc`/`grouped` remain as the GF(2) band RLNC fallback.
 Adaptive FEC (`adaptive=`, off by default) has two paths. The GF(2)
 `mode=rlnc`/`grouped` family keeps Phase 1: the shape stays in the
 `n + m = 8`, 32-group family and `m` moves in 1..6. `mode=sc-ldpc` uses the
-per-flow SC-LDPC estimator/controller: the uplink GF(16) 8x32/L16 codec can
-switch along the rate ladder; the downlink binary 1x256/L8 codec is fixed at
-rate 50%, so its controller stays at 50 (known limitation). The switch rides
+per-flow SC-LDPC estimator/controller: since 0.4.3 both the downlink binary
+1x256/L8 and the uplink GF(16) 8x32/L16 codecs switch along the six-point
+rate ladder (adaptive=off by default; when interoperating with an old
+0.4.0..0.4.2 peer, a CFG_NACK makes the controller silently stay at 128/128).
+The switch rides
 `FEC_CFG`/`FEC_FBK` (wire `0x1007`). `session <id> adaptive=off` disables it
 at runtime. Shapes with `n + m != 8` are not implemented for the GF(2)
 family.
@@ -611,13 +613,15 @@ real line.
 - **SC-LDPC and its per-flow adaptive law are implemented.** `mode=sc-ldpc`
   runs the downlink binary block (1×256, `L=8`, rate 0.5) or the uplink
   grouped GF(16) code (8×32, `L=16`, rate 1/4); `adaptive=on` (off by default)
-  switches the uplink along the ladder and keeps the downlink at rate 50%.
+  switches both the downlink 1x256 and the uplink 8x32 along the six-point
+  ladder; an old 0.4.0..0.4.2 peer that NACKs a CFG silently keeps 128/128.
   `rlnc`/`grouped` remain as the GF(2) band RLNC fallback.
 - **Adaptive FEC.** The GF(2) family keeps Phase 1: `adaptive=on` moves `m`
   in the fixed `n + m = 8`, 32-group family; `n + m != 8` is not implemented.
-  `mode=sc-ldpc` uses the per-flow SC-LDPC controller (off by default): the
-  uplink GF(16) codec switches along the ladder; the downlink binary codec is
-  fixed at rate 50%. `adaptive=off` keeps the configured shape.
+  `mode=sc-ldpc` uses the per-flow SC-LDPC controller (off by default): since
+  0.4.3 the downlink 1x256 and the uplink 8x32 both support the six-point
+  switch; a CFG_NACK from an old 0.4.0..0.4.2 peer silently keeps 128/128.
+  `adaptive=off` keeps the configured shape.
 - **Multi-stream FEC v7.** A session can carry concurrent streams (0.4.0,
   wire `0x1007`); each stream has its own FEC TX/RX flow and admission
   reference. A sequential connection still resets the old state and closes the

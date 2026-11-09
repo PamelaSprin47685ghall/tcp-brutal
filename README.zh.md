@@ -42,8 +42,9 @@ GF(16) 上行 128、512 保留），码率由 `n/(n+m)` 决定。per-direction
 
 自适应 FEC（`adaptive=`，默认 off）有两条路径。GF(2) 的 `mode=rlnc`/`grouped`
 保留 Phase 1：形状固定在 `n + m = 8`、32 组的族内，`m` 在 1..6 之间移动。
-`mode=sc-ldpc` 使用 per-flow SC-LDPC 估计器/控制器：上行 GF(16) 8x32/L16 可沿
-码率阶梯切换；下行 binary 1x256/L8 固定 rate 50%，控制器停在 50（已知限制）。
+`mode=sc-ldpc` 使用 per-flow SC-LDPC 估计器/控制器：0.4.3 起下行 1x256 与
+上行 8x32 均支持六档自适应切换（默认 adaptive=off；与旧 0.4.0..0.4.2 混跑时
+遇 CFG_NACK 自动静默守住 128/128）。
 切换走 `FEC_CFG`/`FEC_FBK`（wire `0x1007`）。`session <id> adaptive=off` 可在
 运行时关闭。GF(2) 族的 `n + m != 8` 尚未实现。
 
@@ -515,12 +516,14 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   而不是猜测。
 - **SC-LDPC 与其 per-flow 自适应已实现。** `mode=sc-ldpc` 运行下行 binary
   块（1×256，`L=8`，rate 0.5）或上行 grouped GF(16)（8×32，`L=16`，rate 1/4）；
-  `adaptive=on`（默认 off）沿阶梯切换上行，下行保持 rate 50%。
+  `adaptive=on`（默认 off）沿六档阶梯切换下行 1x256 与上行 8x32；与旧
+  0.4.0..0.4.2 混跑遇 CFG_NACK 时静默守住 128/128。
   `rlnc`/`grouped` 保留为 GF(2) band RLNC 回退。
 - **自适应 FEC。** GF(2) 族保留 Phase 1：`adaptive=on` 只在固定的 `n + m = 8`、
   32 组族内移动 `m`；`n + m != 8` 尚未实现。`mode=sc-ldpc` 使用 per-flow
-  SC-LDPC 控制器（默认 off）：上行 GF(16) 沿阶梯切换，下行 binary 固定
-  rate 50%。`adaptive=off` 保持配置的形状。
+  SC-LDPC 控制器（默认 off）：0.4.3 起下行 1x256 与上行 8x32 均支持六档
+  自适应切换；与旧 0.4.0..0.4.2 混跑时遇 CFG_NACK 自动静默守住 128/128。
+  `adaptive=off` 保持配置的形状。
 - **多流 FEC v7。** 0.4.0 起一个会话可承载并发流（wire `0x1007`）；每条流有
   自己的 FEC TX/RX flow 与 admission 引用。顺序连接仍会重置旧状态并关闭旧
   target。
