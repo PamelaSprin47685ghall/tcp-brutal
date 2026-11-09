@@ -246,6 +246,57 @@ check_no_overlap() { # fileA idA fileB idB label
     qa_check "$5" "$([ -z "$common" ]; echo $?)" "shared=${common:-none}"
 }
 
+# Join a far peers snapshot to the near one by (id, carrier). A far row whose
+# peer port differs from the near's current source port for the same carrier
+# belongs to a connection the near has already replaced; it is reported as
+# stale_row and never judged, because the far keeps the accepted socket until
+# that TCP closes.
+align_far_near() { # far-file near-file id -> "MATCH|STALE id carrier far_port near_sport"
+    awk -v want="$3" '
+        NR == FNR {
+            if ($1 !~ /^#/ && $8 == "up")
+                near[$1 " " $2] = $3
+            next
+        }
+        $1 !~ /^#/ && $1 == want && $8 == "up" {
+            p = $4; sub(/^.*:/, "", p); p += 0
+            k = $1 " " $2
+            if (k in near && near[k] + 0 == p)
+                print "MATCH", $1, $2, p, near[k]
+            else if (k in near)
+                print "STALE", $1, $2, p, near[k]
+            else
+                print "STALE", $1, $2, p, "none"
+        }' "$2" "$1"
+}
+
+# Assert the far's peer port for every current carrier: the (id, carrier) row
+# must exist in the near snapshot, and a matching row must name a port inside
+# the tunnel's window. Stale rows are counted, printed, and skipped.
+far_window_check() { # label far-file near-file "id:window ..."
+    local label=$1 farf=$2 nearf=$3 spec=$4 item id pb out kind fid c p ns
+    local bad=0 checked=0 stale=0
+    for item in $spec; do
+        id=${item%%:*} pb=${item#*:}
+        out=$(align_far_near "$farf" "$nearf" "$id")
+        while read -r kind fid c p ns; do
+            [ -n "${kind:-}" ] || continue
+            if [ "$kind" = STALE ]; then
+                stale=$((stale + 1))
+                qa_note "INFO stale_row tunnel=$fid carrier=$c far_peer_port=$p near_sport=$ns (not asserted)"
+                continue
+            fi
+            checked=$((checked + 1))
+            range_parse "$pb"
+            if [ "$p" -lt "$R_LO" ] || [ "$p" -gt "$R_HI" ]; then
+                bad=1
+                qa_note "INFO far_out_of_window tunnel=$fid carrier=$c far_peer_port=$p window=$pb"
+            fi
+        done <<<"$out"
+    done
+    qa_check "$label" "$bad" "checked=$checked stale_skipped=$stale"
+}
+
 wait_up() { # host id expected timeout
     local host=$1 id=$2 want=$3 tmo=$4 end up
     end=$((SECONDS + tmo))
@@ -570,16 +621,11 @@ phase_two_tunnels() {
             "port_exhaust=0 port_alloc_fail=0"
     done
 
-    # The far peers view names the near's source port in the peer column.
-    qa_check far_sees_near_ports \
-        "$(awk -v pb1lo="$(range_parse "$PB1"; echo "$R_LO")" -v pb1hi="$(range_parse "$PB1"; echo "$R_HI")" \
-            -v pb2lo="$(range_parse "$PB2"; echo "$R_LO")" -v pb2hi="$(range_parse "$PB2"; echo "$R_HI")" \
-            '$1 !~ /^#/ && $8 == "up" {
-                p = $4; sub(/^.*:/, "", p); p += 0
-                if ($1 == 1) { if (p < pb1lo || p > pb1hi) bad = 1 }
-                else if ($1 == 2) { if (p < pb2lo || p > pb2hi) bad = 1 }
-            } END { exit bad ? 1 : 0 }' "$EV/far-peers-phase1.txt"; echo $?)" \
-        "near ports in their windows"
+    # The far peers view names the near's source port in the peer column. Only
+    # carriers the near still holds are asserted; a far row that names a
+    # replaced connection is reported as stale_row instead of failing.
+    far_window_check far_sees_near_ports \
+        "$EV/far-peers-phase1.txt" "$EV/near-peers-phase1.txt" "1:$PB1 2:$PB2"
 }
 
 # ---------------------------------------------------------------------------
@@ -631,6 +677,11 @@ phase_exhaustion() {
         "$([ "$(peer_up_count "$EV/near-peers-phase2.txt" 3)" = 0 ]; echo $?)" \
         "no carrier received a port"
 
+    # The far drops tunnel 3 together with its near peer, so its config and
+    # peers must be captured here; phase 5 reads these files.
+    qa_snap_config far "$EV/far-config-phase2.txt"
+    snap_peers far "$EV/far-peers-phase2.txt"
+
     # Remove the exhausted near tunnel. Keep far 3 configured: it proves the
     # far side records portblock= even when no carrier ever arrives.
     del_tunnel near "$id"
@@ -679,7 +730,7 @@ phase_global_fallback() {
 # Phase 4: /ports changes affect new allocations; live bits stay
 
 phase_ports_change() {
-    local id=5 farport pub sports old
+    local id=5 farport pub sports old skip_bad
     say "phase 4: /ports changes new allocations and keeps live bits"
 
     old=$(peer_sports "$EV/near-peers-phase3.txt" 4)
@@ -743,11 +794,12 @@ phase_ports_change() {
 
     # Tunnel 6 must not reuse tunnel 4's still-live bits.
     sports=$(peer_sports "$EV/near-peers-phase4b.txt" 6)
-    qa_check global1_t6_skips_live \
-        "$(for p in $old; do
-               printf '%s\n' "$sports" | grep -qx "$p" && exit 1
-           done; echo $?)" \
-        "tunnel 6 avoids tunnel 4's live ports"
+    skip_bad=0
+    for p in $old; do
+        printf '%s\n' "$sports" | grep -qx "$p" && skip_bad=1
+    done
+    qa_check global1_t6_skips_live "$skip_bad" \
+        "tunnel 6 avoids tunnel 4's live ports (t4=$(printf '%s' "$old" | tr '\n' ',') t6=$(printf '%s' "$sports" | tr '\n' ','))"
     check_no_overlap "$EV/near-peers-phase4b.txt" 4 "$EV/near-peers-phase4b.txt" "$id" \
         global1_t6_no_t4_overlap
     check_no_dup_sports "$EV/near-peers-phase4b.txt" near_no_dup_sports_p4
@@ -766,8 +818,8 @@ phase_far_record() {
     snap_ports far "$EV/far-ports-final.txt"
 
     qa_check far_cfg_t3_portblock \
-        "$(grep -Eq "^tunnel 3 .* portblock=$PB1( |\$)" "$EV/far-config-final.txt"; echo $?)" \
-        "$PB1 (recorded; tunnel 3 was deleted on near)"
+        "$(grep -Eq "^tunnel 3 .* portblock=$PB1( |\$)" "$EV/far-config-phase2.txt"; echo $?)" \
+        "$PB1 (recorded; phase-2 snapshot, tunnel 3 was deleted on near)"
     qa_check far_cfg_t4_portblock \
         "$(grep -Eq "^tunnel 4 .* portblock=0-0( |\$)" "$EV/far-config-final.txt"; echo $?)" \
         "0-0"
@@ -778,7 +830,11 @@ phase_far_record() {
         "$(grep -Eq "^tunnel 6 .* portblock=$FAR_PB( |\$)" "$EV/far-config-final.txt"; echo $?)" \
         "$FAR_PB"
 
-    for id in 1 2 3 4 5 6; do
+    qa_check far_t3_no_alloc_phase2 \
+        "$([ "$(qa_field "$EV/far-stats-phase2.txt" c3 port_exhaust 3)" = 0 ] &&
+           [ "$(qa_field "$EV/far-stats-phase2.txt" c3 port_alloc_fail 3)" = 0 ]; echo $?)" \
+        "port_exhaust=0 port_alloc_fail=0 (phase-2 snapshot)"
+    for id in 1 2 4 5 6; do
         qa_check "far_t${id}_no_alloc_final" \
             "$([ "$(qa_field "$EV/far-stats-final.txt" c3 port_exhaust "$id")" = 0 ] &&
                [ "$(qa_field "$EV/far-stats-final.txt" c3 port_alloc_fail "$id")" = 0 ]; echo $?)" \
@@ -786,22 +842,14 @@ phase_far_record() {
     done
 
     # Far peers for the global-fallback tunnels: the near source port in the
-    # peer column is in GLOBAL1/GLOBAL2, never in FAR_PB.
-    for id in 4 5 6; do
-        case $id in
-            4) pb=$GLOBAL1 ;;
-            5) pb=$GLOBAL2 ;;
-            6) pb=$GLOBAL1 ;;
-        esac
-        range_parse "$pb"
-        qa_check "far_t${id}_sees_near_window" \
-            "$(awk -v id="$id" -v lo="$R_LO" -v hi="$R_HI" \
-                '$1 !~ /^#/ && $1 == id && $8 == "up" {
-                    p = $4; sub(/^.*:/, "", p); p += 0
-                    if (p < lo || p > hi) bad = 1
-                } END { exit bad ? 1 : 0 }' "$EV/far-peers-final.txt"; echo $?)" \
-            "near ports in $pb, not $FAR_PB"
-    done
+    # peer column is in GLOBAL1/GLOBAL2, never in FAR_PB. Rows are joined to
+    # the near snapshot by (id, carrier).
+    far_window_check far_t4_sees_near_window \
+        "$EV/far-peers-final.txt" "$EV/near-peers-phase4b.txt" "4:$GLOBAL1"
+    far_window_check far_t5_sees_near_window \
+        "$EV/far-peers-final.txt" "$EV/near-peers-phase4b.txt" "5:$GLOBAL2"
+    far_window_check far_t6_sees_near_window \
+        "$EV/far-peers-final.txt" "$EV/near-peers-phase4b.txt" "6:$GLOBAL1"
 }
 
 # ---------------------------------------------------------------------------

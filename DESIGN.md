@@ -2394,8 +2394,9 @@ Two internal fields are not rendered under their own names: the debug injector's
 per-carrier drop count appears as the `peers` column `dropped`, and
 `recv_partial_discard` has no view.
 
-`join_dup` counts a HELLO that named an index
+`join_dup` counts a HELLO that named an older generation at an index
 already occupied by a live carrier (the duplicate is closed, not the session);
+an equal or newer generation replaces that occupant and closes its socket;
 `join_src_reject` counts a far-side HELLO from an address other than the session anchor;
 `port_exhaust` counts a carrier that found every port in the global block in use, and
 `port_alloc_fail` counts a failed port-bitmap allocation; both leave the carrier alive
@@ -2725,10 +2726,12 @@ clear error pointing at `raw`-inside-WireGuard.
    the first HELLO that passes the source check defines the nonce
    (trust-on-first-use) and every later carrier must present the same value; a configured
    near peer is checked by source address as well. A mismatch is rejected with
-   `join_nonce_reject++`/`session_join_bad++`. A HELLO naming an
-   index whose current occupant is still live is a duplicate join: `join_dup` is
-   counted and that carrier is closed, never the session. An occupant whose socket is
-   already closed is replaced, which is how the near side's replacement rejoins.
+   `join_nonce_reject++`/`session_join_bad++`. A HELLO naming an older generation
+   at an index whose current occupant is still live is a duplicate join: `join_dup`
+   is counted and that carrier is closed, never the session. An equal or newer
+   generation replaces the occupant and closes its old socket; so does an occupant
+   whose socket is already closed. This is how the near side's replacement rejoins,
+   including a retry that keeps the same four-bit generation.
 5. The far side opens exactly **one** target connection per stream, when that stream's
    OPEN arrives (or when a carrier joins a stream that is already open), not one per
    carrier. It sends its own HELLO on each accepted carrier before any stream frame. The

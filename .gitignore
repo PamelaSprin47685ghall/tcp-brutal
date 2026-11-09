@@ -300,6 +300,8 @@ host/test_tx_index
 host/test_tx_publish
 host/test_portmap
 host/test_portmap_san
+host/test_carrier_policy
+host/test_carrier_policy_san
 host/test_lifetime
 host/test_lifetime_san
 host/test_sclc_uplink

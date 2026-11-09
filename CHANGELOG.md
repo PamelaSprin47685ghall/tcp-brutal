@@ -55,6 +55,22 @@ and moves independently of the module version.
 
 ### Fixed
 
+- The SC-LDPC adaptive INIT install carried by 0.4.0 is part of this release
+  too: with `adaptive=on` a pending peer INIT is applied before the switch
+  walk, the single SC-LDPC flow is held until the peer acks INIT, a stream
+  freezes `stream_span`/`stream_base_pkt` at its first DATA/PARITY record,
+  and a `drop_ppm`-armed carrier uses the per-record injector. Without it an
+  adaptive download carried zero bytes. (backport of 977cfba; also in 0.4.0)
+- F3 port-map defects on the 0.4.1 cascade. A near carrier whose
+  `tbt_port_alloc()` returns EXHAUSTED or ENOMEM now parks for the paced
+  retry before any socket exists: the dial path never falls back to an
+  ephemeral source port. A far-side HELLO that repeats the slot's current
+  four-bit peer generation now supersedes the half-open occupant (only an
+  older generation is a join duplicate), closes the old socket and arms
+  `w_replace` at once. The `peers` view hides a stopping far carrier, so it
+  cannot keep naming the replaced port. `host/test_carrier_policy` pins the
+  three decisions through the same `tbt_carrier_policy.h` the module
+  compiles (38 checks).
 - Session keys are now erased with `memzero_explicit()` before their storage
   is freed or a temporary key buffer goes out of scope: the session and
   tunnel key copies, the crypto schedules copied by `tbt_crypto_xor_at()`
