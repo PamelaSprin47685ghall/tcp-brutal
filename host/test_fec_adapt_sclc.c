@@ -1972,6 +1972,66 @@ static void case_fbk_overlay(void)
            "fbk: p_fast saturates");
 }
 
+/* The 0.4.0 pair runs adaptive=on with an asymmetric INIT: the near TX is
+ * the fixed binary downlink (1x256/L8/r0.50), the far TX is the GF(16)
+ * uplink (8x32/L16). tbt_fec_rx_apply_init() runs this resolution whenever
+ * adaptive is on, before the first share can be placed; if either direction
+ * failed it, no block would complete. Pin both admissions, the downlink
+ * ladder plan, and the fact that the two directions are an INIT, not a rate
+ * switch. */
+static void case_asymmetric_init(void)
+{
+    struct tbt_fec_adapt_sclc_wire down, up;
+    struct tbt_fec_cfg d, u;
+    u8 idx, mask;
+
+    memset(&d, 0, sizeof(d));
+    d.n = 128;
+    d.m = 128;
+    d.w = 256;
+    d.k = 500;
+    d.d = 0;
+    d.groups = 1;
+    memset(&u, 0, sizeof(u));
+    u.n = 8;
+    u.m = 24;
+    u.w = 16;
+    u.k = 128;
+    u.d = 64;
+    u.groups = 8;
+
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&d, 256, &down), 0,
+           "init: adaptive=on admits the downlink INIT");
+    eq_u32(down.kind, TBT_FEC_SCLC_DOWN, "init: near RX installs binary");
+    eq_u32(down.n, 128, "init: downlink n");
+    eq_u32(down.m, 128, "init: downlink m");
+    eq_u32(down.groups, 1, "init: downlink one group");
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&u, 256, &up), 0,
+           "init: adaptive=on admits the uplink INIT");
+    eq_u32(up.kind, TBT_FEC_SCLC_UP, "init: far RX installs gf16");
+    eq_u32(up.n, 8, "init: uplink n");
+    eq_u32(up.m, 24, "init: uplink m");
+    eq_u32(up.groups, 8, "init: uplink eight groups");
+    eq_u32(up.rate_pct, 25, "init: uplink starts at rate 25");
+    ok(!tbt_fec_adapt_sclc_wire_compatible(&d, &u, 256),
+       "init: the two directions are not a rate switch");
+
+    /* The 0.4.3 downlink opens the six-point ladder; the 0.4.0 peer's fixed
+     * 128/128 INIT is still admitted above. */
+    eq_u32((u32)tbt_fec_adapt_sclc_init_plan(128, 128, 1,
+                                             TBT_FEC_SCLC_DOWN, &idx, &mask),
+           0, "init: downlink plan");
+    eq_u32(idx, 3, "init: downlink starts at rate 50");
+    eq_u32(mask, (1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u,
+           "init: downlink supports the six-rung ladder");
+    eq_u32((u32)tbt_fec_adapt_sclc_init_plan(8, 24, 8, TBT_FEC_SCLC_UP,
+                                             &idx, &mask),
+           0, "init: uplink plan");
+    eq_u32(idx, 0, "init: uplink starts at the lowest rung");
+    eq_u32(mask, (1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u,
+           "init: uplink supports the six-rung ladder");
+}
+
 static void case_epoch_base(void)
 {
     struct tbt_fec_adapt_sclc_ctl c;
@@ -2051,6 +2111,7 @@ int main(void)
     case_init_plan();
     case_rate_mask();
     case_wire_profile();
+    case_asymmetric_init();
     case_fbk_overlay();
     case_epoch_base();
     case_ctl_fail_down_zero();
