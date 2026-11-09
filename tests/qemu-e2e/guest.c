@@ -1067,12 +1067,41 @@ int main(void)
             verdict_fail("grouped session did not drain after close");
     }
 
+    /* --- phase 3b: SC-LDPC GF(16) uplink, bit-plane 64 mapping ---------- *
+     * n=8 m=24 over 256 carriers is 8 groups of 32 shares, so the shape is
+     * TBT_FEC_SCLC_UP and the data plane builds tbt_fec_ops_sclc_gf16 with
+     * TBT_SCLC_MAP_BITPLANE64 in both directions. The echo crosses the far
+     * TX encoder and the near RX decoder, so a byte-exact roundtrip fails
+     * if the shared-control peel or the plane gather/scatter is wrong. */
+    delete_tunnel(1);
+    delete_tunnel(2);
+    if (wait_tunnels_gone(6000))
+        verdict_fail("tunnels did not go away before the uplink phase");
+    printf("QEMU_E2E_DEL grouped ok\n");
+    fflush(stdout);
+    configure("tunnel 1 role=far profile=raw listen=127.0.0.1:19001"
+              " target=127.0.0.1:19070 n=8 m=24 fec=on mode=sc-ldpc"
+              " adaptive=off w=128 L=16 carriers=256 crypto=off dup=1\n",
+              "tunnel 2 role=near profile=raw listen=127.0.0.1:19000"
+              " peer=127.0.0.1:19001 n=8 m=24 fec=on mode=sc-ldpc"
+              " adaptive=off w=128 L=16 carriers=256 crypto=off dup=1"
+              " portblock=" PORTBLOCK "\n");
+    if (wait_carriers(CARRIERS, UP_TIMEOUT_MS))
+        verdict_fail("GF(16) uplink carriers did not come up");
+    printf("QEMU_E2E_UP sclc-uplink up=%u\n", CARRIERS);
+    fflush(stdout);
+    stream_once("sclc-uplink", STREAM_BYTES);
+    if (wait_idle(IDLE_TIMEOUT_MS))
+        verdict_fail("GF(16) uplink session did not drain after close");
+    printf("QEMU_E2E_DRAIN sclc-uplink ok\n");
+    fflush(stdout);
+
     /* --- phase 4: two mappings on one tunnel, distinct signatures -------- */
     delete_tunnel(1);
     delete_tunnel(2);
     if (wait_tunnels_gone(6000))
         verdict_fail("tunnels did not go away before the map phase");
-    printf("QEMU_E2E_DEL grouped ok\n");
+    printf("QEMU_E2E_DEL uplink ok\n");
     fflush(stdout);
 
     /* Slot 0 keeps :19001 -> :15210 and the map= adds :19002 -> :15211.  The

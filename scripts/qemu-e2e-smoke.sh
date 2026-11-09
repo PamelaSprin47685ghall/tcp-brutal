@@ -11,6 +11,9 @@
 #     streams each carry 128 KiB byte-exact with streams_active=0 in between;
 #   * a concurrent second SC-LDPC stream is refused and the first one survives;
 #   * a rebuilt n=4 m=4 grouped pair carries two concurrent streams (two sids);
+#   * an n=8 m=24 SC-LDPC GF(16) uplink pair (8 groups, block=128 L=16)
+#     carries one byte-exact roundtrip, exercising the production
+#     TBT_SCLC_MAP_BITPLANE64 encoder and decoder in the guest kernel;
 #   * one map= slot on the grouped pair: :19001 reaches target :15210 and
 #     :19002 reaches :15211, each proven by its own response signature;
 #   * del + delete_module return inside the deadline (no D state), the module
@@ -224,9 +227,11 @@ evidence=(
     "QEMU_E2E_REJECT sclc-second"
     "QEMU_E2E_STREAM sclc-after-reject"
     "QEMU_E2E_MULTISTREAM 2 streams ok"
+    "QEMU_E2E_STREAM sclc-uplink"
     "QEMU_E2E_MAPPORT slot=0"
     "QEMU_E2E_MAPPORT slot=1"
     "QEMU_E2E_DEL grouped ok"
+    "QEMU_E2E_DEL uplink ok"
     "QEMU_E2E_DEL map ok"
     "QEMU_E2E_UNLOAD ok"
 )
