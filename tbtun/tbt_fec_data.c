@@ -6653,6 +6653,15 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
                     tx->alloc_committed_resend = true;
                 else if (tx->alloc_ack_sent)
                     tx->alloc_ack_resend = true;
+                else
+                {
+                    /* The role was released before this epoch's ACK went
+                     * out (a stale abort, or a stop that failed). Re-run
+                     * the responder: stop the TX and answer this REQUEST. */
+                    tx->alloc_abort_pending = false;
+                    tx->alloc_role = 2;
+                    tx->alloc_remote_req = true;
+                }
             }
             spin_unlock_bh(&tx->alloc_lock);
             tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
@@ -6677,6 +6686,14 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
                     tx->alloc_committed_resend = true;
                 else if (tx->alloc_ack_sent)
                     tx->alloc_ack_resend = true;
+                else if (tx->alloc_target.epoch == a->epoch)
+                {
+                    /* Same recovery as above for a REQUEST that named a
+                     * switch point this side already applied. */
+                    tx->alloc_abort_pending = false;
+                    tx->alloc_role = 2;
+                    tx->alloc_remote_req = true;
+                }
                 spin_unlock_bh(&tx->alloc_lock);
                 tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
                 return;
@@ -6698,7 +6715,10 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
             tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
             return;
         }
-        if (tx->alloc_role == 2 && tx->alloc_target.epoch != a->epoch)
+        /* Only an older epoch is stale. A newer REQUEST must take over a
+         * responder still holding the previous round (its ABORT may have
+         * been lost); the assignment below resets the whole target. */
+        if (tx->alloc_role == 2 && a->epoch < tx->alloc_target.epoch)
         {
             spin_unlock_bh(&tx->alloc_lock);
             atomic64_inc(&sess->fec_alloc_bad);
@@ -6716,6 +6736,9 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
         tx->alloc_committed = false;
         tx->alloc_commit_pending = false;
         tx->alloc_hold = false;
+        /* A stale abort from the previous epoch must not kill this REQUEST
+         * in responder_tick before the TX stops and the ACK goes out. */
+        tx->alloc_abort_pending = false;
         spin_unlock_bh(&tx->alloc_lock);
         spin_lock_bh(&rx->lock);
         tbt_fec_alloc_rx_retire_locked(rx, a->epoch);
@@ -6727,6 +6750,7 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
         rx->alloc.block = a->block_base;
         rx->alloc_state = 2; /* armed */
         rx->alloc_epoch = a->epoch;
+        rx->alloc_abort_pending = false;
         spin_unlock_bh(&rx->lock);
         tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
         tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
@@ -6784,11 +6808,19 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
             return;
         }
         spin_lock_bh(&rx->lock);
-        rx->alloc_abort_pending = true;
-        rx->alloc_abort_epoch = a->epoch;
+        /* Only an ABORT for the plane actually armed or applied may roll it
+         * back. A late ABORT from the previous epoch must not disarm the
+         * new one. */
+        if ((rx->alloc_state == 2 || rx->alloc_state == 3) &&
+            rx->alloc.epoch == a->epoch)
+        {
+            rx->alloc_abort_pending = true;
+            rx->alloc_abort_epoch = a->epoch;
+        }
         spin_unlock_bh(&rx->lock);
         spin_lock_bh(&tx->alloc_lock);
-        tx->alloc_abort_pending = true;
+        if (tx->alloc_role == 2 && tx->alloc_target.epoch == a->epoch)
+            tx->alloc_abort_pending = true;
         spin_unlock_bh(&tx->alloc_lock);
         tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
         tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
@@ -6796,7 +6828,29 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
     }
     if (near)
     {
+        u8 late_state;
+        u8 late_role;
+
         spin_lock_bh(&tx->alloc_lock);
+        /* The round is over on this side: ABORT is unwinding it or the SM
+         * already released. A late ACK must not arm rx->alloc_state and
+         * apply a mask the peer is no longer driving. */
+        if ((!tx->alloc_role ||
+             tx->alloc.state == TBT_FEC_ALLOC_ABORT ||
+             tx->alloc.state == TBT_FEC_ALLOC_FAILED) &&
+            (a->flags == TBT_FEC_ALLOC_F_ACK ||
+             a->flags == TBT_FEC_ALLOC_F_DONE ||
+             a->flags == TBT_FEC_ALLOC_F_COMMITTED))
+        {
+            late_state = tx->alloc.state;
+            late_role = tx->alloc_role;
+            spin_unlock_bh(&tx->alloc_lock);
+            if (debug)
+                pr_info_ratelimited("tbtun: alloc late %#x sid=%llu epoch=%u ignored state=%u role=%u\n",
+                                    a->flags, f->sid, a->epoch,
+                                    late_state, late_role);
+            return;
+        }
         if (a->epoch != tx->alloc_target.epoch)
         {
             spin_unlock_bh(&tx->alloc_lock);
@@ -6978,6 +7032,7 @@ static void tbt_fec_alloc_rx_tick(struct tbt_session *sess,
         rx->alloc_state = 0;
         rx->alloc_done_sent = false;
         rx->alloc_epoch = epoch; /* tombstone: never re-arm this epoch */
+        rx->rebase_pending = false;
         spin_unlock_bh(&rx->lock);
         if (drop_blk)
             tbt_fec_rx_blk_free(drop_blk, drop_total);
@@ -7033,8 +7088,10 @@ static void tbt_fec_alloc_rx_tick(struct tbt_session *sess,
         return;
     spin_lock_bh(&rx->lock);
     a = rx->alloc;
-    ready = !rx->rebase_pending && !rx->deliver_partial &&
-            rx->next_deliver == a.pkt &&
+    /* A reset left the reorder window empty for the next record; it must not
+     * hold the allocation switch back. The apply below installs the new base
+     * and clears the flag, and the rollback path clears it too. */
+    ready = !rx->deliver_partial && rx->next_deliver == a.pkt &&
             rx->switch_state == TBT_FEC_SW_STEADY;
     spin_unlock_bh(&rx->lock);
     if (!ready)
@@ -7110,6 +7167,7 @@ static void tbt_fec_alloc_rx_tick(struct tbt_session *sess,
     rx->alloc_epoch = a.epoch;
     rx->alloc_state = 3; /* applied */
     rx->alloc_done_sent = false;
+    rx->rebase_pending = false;
     tbt_fec_rx_reset_blocks_locked(rx);
     rx->work_pending = true;
     spin_unlock_bh(&rx->lock);

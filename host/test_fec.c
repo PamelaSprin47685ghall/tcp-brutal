@@ -3469,6 +3469,7 @@ static void test_alloc_fsm(void)
     struct tbt_fec_alloc_sm sm;
     u64 t = 1000000000ULL;
     u32 act;
+    int i;
 
     tbt_fec_alloc_sm_init(&sm);
     ok_int(sm.state, TBT_FEC_ALLOC_IDLE, "alloc fsm starts idle");
@@ -3482,28 +3483,75 @@ static void test_alloc_fsm(void)
     ok(act & TBT_FEC_ALLOC_ACT_REQ, "alloc fsm sends the first REQUEST",
        NULL);
 
-    /* No ACK: the REQUEST is retried twice, then the exchange is aborted. */
-    act = tbt_fec_alloc_sm_step(&sm, t + 40ULL * 1000000ULL, false);
+    /* No ACK: the REQUEST is retried at RETRY_MS up to the send cap, then
+     * the round aborts and waits the ABORT_MS budget for ABORT|ACK. A stale
+     * normal ACK must not shorten that wait (0.4.4 WAN 3->4 regression). */
+    act = tbt_fec_alloc_sm_step(
+        &sm, t + (u64)TBT_FEC_ALLOC_RETRY_MS * 500000ULL, false);
     ok(!(act & TBT_FEC_ALLOC_ACT_REQ), "alloc fsm waits before the retry",
        NULL);
-    act = tbt_fec_alloc_sm_step(&sm, t + 50ULL * 1000000ULL, false);
+    act = tbt_fec_alloc_sm_step(
+        &sm, t + (u64)TBT_FEC_ALLOC_RETRY_MS * 1000000ULL, false);
     ok(act & TBT_FEC_ALLOC_ACT_REQ, "alloc fsm retries the REQUEST", NULL);
-    act = tbt_fec_alloc_sm_step(&sm, t + 100ULL * 1000000ULL, false);
+    act = tbt_fec_alloc_sm_step(
+        &sm, t + 2ULL * TBT_FEC_ALLOC_RETRY_MS * 1000000ULL, false);
     ok(act & TBT_FEC_ALLOC_ACT_REQ, "alloc fsm retries again", NULL);
-    act = tbt_fec_alloc_sm_step(&sm, t + 160ULL * 1000000ULL, false);
-    ok(!(act & TBT_FEC_ALLOC_ACT_REQ), "alloc fsm stops after three sends",
+    for (i = 3; i < (int)TBT_FEC_ALLOC_RETRIES; i++)
+        act = tbt_fec_alloc_sm_step(
+            &sm, t + (u64)i * TBT_FEC_ALLOC_RETRY_MS * 1000000ULL,
+            false);
+    ok(act & TBT_FEC_ALLOC_ACT_REQ, "alloc fsm sends the last REQUEST",
        NULL);
-    act = tbt_fec_alloc_sm_step(&sm, t + 500ULL * 1000000ULL, false);
-    ok(act & TBT_FEC_ALLOC_ACT_ABORT, "alloc fsm aborts without an ACK",
+    act = tbt_fec_alloc_sm_step(
+        &sm, t + (u64)TBT_FEC_ALLOC_RETRIES * TBT_FEC_ALLOC_RETRY_MS *
+                     1000000ULL,
+        false);
+    ok(!(act & TBT_FEC_ALLOC_ACT_REQ), "alloc fsm stops at the send cap",
+       NULL);
+    act = tbt_fec_alloc_sm_step(
+        &sm, t + (u64)TBT_FEC_ALLOC_ABORT_MS * 1000000ULL - 1000000ULL,
+        false);
+    ok(!(act & TBT_FEC_ALLOC_ACT_ABORT) &&
+           sm.state == TBT_FEC_ALLOC_REQ,
+       "alloc fsm keeps the round alive for the abort budget", NULL);
+    act = tbt_fec_alloc_sm_step(
+        &sm, t + (u64)TBT_FEC_ALLOC_ABORT_MS * 1000000ULL + 1000000ULL,
+        false);
+    ok(act & TBT_FEC_ALLOC_ACT_ABORT, "alloc fsm aborts after the budget",
        NULL);
     ok_int(sm.state, TBT_FEC_ALLOC_ABORT, "alloc fsm -> ABORT");
-    act = tbt_fec_alloc_sm_step(&sm, t + 600ULL * 1000000ULL, false);
-    ok(act & TBT_FEC_ALLOC_ACT_ABORT, "alloc fsm repeats the ABORT", NULL);
-    act = tbt_fec_alloc_sm_step(&sm, t + 1100ULL * 1000000ULL, false);
+    sm.ack = true; /* the round's normal ACK is still set */
+    act = tbt_fec_alloc_sm_step(
+        &sm, t + (u64)TBT_FEC_ALLOC_ABORT_MS * 1000000ULL + 2000000ULL,
+        false);
+    ok(!(act & (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH)) &&
+           sm.state == TBT_FEC_ALLOC_ABORT,
+       "alloc fsm stale ACK does not end the abort wait", NULL);
+    tbt_fec_alloc_sm_abort_ack(&sm);
+    act = tbt_fec_alloc_sm_step(
+        &sm, t + (u64)TBT_FEC_ALLOC_ABORT_MS * 1000000ULL + 3000000ULL,
+        false);
     ok((act & (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH)) ==
            (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH),
-       "alloc fsm resumes the old mask after ABORT", NULL);
+       "alloc fsm ABORT|ACK resumes the old mask", NULL);
     ok_int(sm.state, TBT_FEC_ALLOC_FAILED, "alloc fsm -> FAILED");
+
+    /* A lost ABORT|ACK still ends at the abort budget. */
+    tbt_fec_alloc_sm_init(&sm);
+    ok(tbt_fec_alloc_sm_start(&sm, t), "alloc fsm lost-abort start", NULL);
+    (void)tbt_fec_alloc_sm_step(&sm, t, false);
+    act = tbt_fec_alloc_sm_step(
+        &sm, t + (u64)TBT_FEC_ALLOC_ABORT_MS * 1000000ULL + 1000000ULL,
+        false);
+    ok(act & TBT_FEC_ALLOC_ACT_ABORT, "alloc fsm lost-abort -> ABORT", NULL);
+    act = tbt_fec_alloc_sm_step(
+        &sm, t + 2ULL * (u64)TBT_FEC_ALLOC_ABORT_MS * 1000000ULL +
+                 2000000ULL,
+        false);
+    ok((act & (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH)) ==
+           (TBT_FEC_ALLOC_ACT_RESUME | TBT_FEC_ALLOC_ACT_FINISH),
+       "alloc fsm lost ABORT|ACK ends at the budget", NULL);
+    ok_int(sm.state, TBT_FEC_ALLOC_FAILED, "alloc fsm lost-abort -> FAILED");
 
     /* Success path: ACK, peer DONE, swap, RX done, COMMITTED. */
     tbt_fec_alloc_sm_init(&sm);
