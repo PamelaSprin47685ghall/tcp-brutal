@@ -1483,7 +1483,22 @@ static inline u32 tbt_fec_alloc_sm_step(struct tbt_fec_alloc_sm *sm, u64 now,
     case TBT_FEC_ALLOC_COMMIT:
     alloc_commit:
         if (!sm->tx_swapped || !sm->done_sent || !sm->peer_committed)
+        {
+            /* The peer commits its TX only after our RX-applied DONE. A
+             * single DONE that is lost would leave both sides waiting
+             * (observed: responder ack_sent=1, hold=1, initiator COMMIT
+             * forever). Repeat it at the REQUEST retry cadence; the peer
+             * answers a duplicate with COMMITTED. */
+            if (sm->done_sent && !sm->peer_committed &&
+                now >= sm->last_send_ns +
+                           (u64)TBT_FEC_ALLOC_RETRY_MS *
+                               TBT_FEC_NSEC_PER_MSEC)
+            {
+                sm->last_send_ns = now;
+                act |= TBT_FEC_ALLOC_ACT_DONE;
+            }
             break;
+        }
         sm->state = TBT_FEC_ALLOC_DONE;
         act |= TBT_FEC_ALLOC_ACT_FINISH;
         break;
