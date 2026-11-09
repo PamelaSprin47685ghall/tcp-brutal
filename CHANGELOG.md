@@ -98,6 +98,11 @@ and moves independently of the module version.
   1x256/L8 downlink (`groups=1`) now accepts the 8x32/L16 uplink's 8-group
   OPEN instead of returning `-EPROTO`; the peer bitmap is installed into the
   RX plane, and FEC_CFG INIT checks that its group count matches. (702e980)
+- A second SC-LDPC flow is refused cleanly before the group-count check:
+  SC-LDPC with a live flow returns `-EOPNOTSUPP` (mapped to `TBT_BIND_DROP`
+  and `fec_stream_refused`), so the carrier stays up instead of being
+  stopped by the peer's 8-group OPEN bitmap against local `groups=1`.
+  (62cb504)
 
 ### Changed
 

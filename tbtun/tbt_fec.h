@@ -181,6 +181,27 @@ static inline bool tbt_fec_groups_fit(u16 total, u16 used, u16 count)
     return count && used <= total && count <= (u16)(total - used);
 }
 
+/* Admission decision before any allocation. SC-LDPC has one flow, so a second
+ * flow is a clean refusal (-EOPNOTSUPP) even when its peer bitmap is larger
+ * than the local TX group count. The caller maps SECOND to -EOPNOTSUPP and
+ * NO_GROUPS to -EPROTO. */
+enum tbt_fec_admit_check
+{
+    TBT_FEC_ADMIT_OK = 0,
+    TBT_FEC_ADMIT_SECOND_SCLC,
+    TBT_FEC_ADMIT_NO_GROUPS,
+};
+
+static inline enum tbt_fec_admit_check
+tbt_fec_flow_admit_check(bool sclc, u16 n_flows, u16 total, u16 count)
+{
+    if (sclc && n_flows)
+        return TBT_FEC_ADMIT_SECOND_SCLC;
+    if (!count || count > total)
+        return TBT_FEC_ADMIT_NO_GROUPS;
+    return TBT_FEC_ADMIT_OK;
+}
+
 /* The single SC-LDPC primary binds the peer's bitmap without resizing its
  * local TX plane; the RX shape is installed later by FEC_CFG INIT. Other
  * modes keep the one-sid-one-bitmap rule. */

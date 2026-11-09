@@ -1699,6 +1699,29 @@ static void test_sclc_open_mask(void)
        "non-sclc primary: the same bitmap is accepted", NULL);
 }
 
+/* SC-LDPC has one flow. A second flow whose OPEN bitmap is larger than the
+ * local TX group count must be refused as EOPNOTSUPP, not EPROTO: the clean
+ * refusal keeps the carrier alive and increments fec_stream_refused. */
+static void test_sclc_second_flow(void)
+{
+    ok_int(tbt_fec_flow_admit_check(true, 1, 1, 8),
+           TBT_FEC_ADMIT_SECOND_SCLC,
+           "sclc second flow: 8-group OPEN beats the local groups=1 check");
+    ok_int(tbt_fec_flow_admit_check(true, 0, 1, 1), TBT_FEC_ADMIT_OK,
+           "sclc first flow: one local group is admitted");
+    ok_int(tbt_fec_flow_admit_check(true, 0, 1, 8),
+           TBT_FEC_ADMIT_NO_GROUPS,
+           "sclc create: an oversized first bitmap is a group error");
+    ok_int(tbt_fec_flow_admit_check(false, 1, 1, 8),
+           TBT_FEC_ADMIT_NO_GROUPS,
+           "non-sclc: the same bitmap is a group error");
+    ok_int(tbt_fec_flow_admit_check(false, 1, 32, 16), TBT_FEC_ADMIT_OK,
+           "non-sclc: a fitting second flow is admitted");
+    ok_int(tbt_fec_flow_admit_check(false, 1, 32, 0),
+           TBT_FEC_ADMIT_NO_GROUPS,
+           "non-sclc: zero groups is a group error");
+}
+
 static void test_group_mapping(void)
 {
     u16 c;
@@ -2922,6 +2945,7 @@ int main(void)
     test_group_mapping();
     test_group_map();
     test_sclc_open_mask();
+    test_sclc_second_flow();
     test_base_mapping();
     test_group_reassembly();
     test_credit_split();
