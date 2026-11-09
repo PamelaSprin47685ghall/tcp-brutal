@@ -8,6 +8,13 @@ on:
 permissions:
   contents: write
 
+# A tag can be pushed again after a failed build, and two runs of the same
+# tag would both upload assets. Queue them instead of cancelling: a cancelled
+# run can leave a half-written release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: Build
