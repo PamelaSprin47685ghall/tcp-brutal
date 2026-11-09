@@ -34,6 +34,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/io.h>
 #include <sys/klog.h>
 #include <sys/mount.h>
 #include <sys/reboot.h>
@@ -74,6 +75,17 @@
 #define SMALL_UP_TIMEOUT_MS 5000
 #define GONE_TIMEOUT_MS 5000
 #define UNLOAD_TIMEOUT_MS 6000
+#define DEBUG_EXIT_PORT 0x501
+
+/* The serial console can lose its tail when the guest powers off during a
+ * printk storm.  QEMU's isa-debug-exit gives the verdict a channel that does
+ * not depend on the console: QEMU exits with (code << 1) | 1.  When the
+ * device is absent the write is a no-op and the poweroff still happens. */
+static void debug_exit(unsigned char code)
+{
+    if (ioperm(DEBUG_EXIT_PORT, 1, 1) == 0)
+        outb(code, DEBUG_EXIT_PORT);
+}
 
 static long long now_ms(void)
 {
@@ -153,6 +165,7 @@ static void verdict_fail(const char *fmt, ...)
     printf("\n");
     fflush(stdout);
     dump_state();
+    debug_exit(0x11);
     poweroff_now();
 }
 
@@ -167,6 +180,7 @@ static void *watchdog_main(void *arg)
         {
             printf("QEMU_HAMMER_FAIL watchdog after %ds\n", WATCHDOG_S);
             fflush(stdout);
+            debug_exit(0x11);
             poweroff_now();
         }
     }
@@ -1099,6 +1113,7 @@ int main(void)
         fflush(stdout);
         msleep(50);
     }
+    debug_exit(0x10);
     poweroff_now();
     return 0;
 }
