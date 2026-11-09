@@ -142,6 +142,11 @@ HOST_WIRE_COMPAT_HDRS := tbtun/tbt_rec.h tbtun/tbt_proto.h tbtun/tbt_fec.h \
 HOST_BENCH_SCLC := host/bench_sclc_uplink
 HOST_BENCH_SCLC_SRCS := host/bench_sclc_uplink.c tbtun/tbt_sc_ldpc.c \
                    tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c
+HOST_BENCH_SCLC_PIPE := host/bench_sclc_pipe
+HOST_BENCH_SCLC_PIPE_SRCS := host/bench_sclc_pipe.c tbtun/tbt_fec.c \
+                   tbtun/tbt_fec_sclc.c tbtun/tbt_sclc_uplink.c \
+                   tbtun/tbt_sc_ldpc.c tbtun/tbt_sc_ldpc_gf16.c \
+                   tbtun/tbt_crypto.c tbtun/tbt_proto.c
 SAN_CFLAGS      := -g -fsanitize=address,undefined -fno-omit-frame-pointer
 
 obj-m           += tbtun.o
@@ -162,7 +167,7 @@ ccflags-y       := -std=gnu99 -I$(src)/tbtun
 # variable must name the object path Kbuild sees for a composite module.
 CFLAGS_tbtun/tbt_crypto.o := -O3
 
-.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-live host-bench-micro host-bench-sclc bench bench-full
+.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-live host-bench-micro host-bench-sclc host-bench-sclc-pipe bench bench-full
 
 all:
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) modules
@@ -350,6 +355,14 @@ $(HOST_BENCH_SCLC): $(HOST_BENCH_SCLC_SRCS) $(HOST_SCLC_HDRS)
 host-bench-sclc: $(HOST_BENCH_SCLC)
 	@./$(HOST_BENCH_SCLC) 8 8 24 1 4 0.3
 	@./$(HOST_BENCH_SCLC) 8 8 24 1 4 0.4
+
+# Full-chain production shapes: FEC, header CRCs and ChaCha8 for both
+# directions, at the report loss points. Not part of `check`.
+$(HOST_BENCH_SCLC_PIPE): $(HOST_BENCH_SCLC_PIPE_SRCS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_BENCH_SCLC_PIPE_SRCS)
+
+host-bench-sclc-pipe: $(HOST_BENCH_SCLC_PIPE)
+	@./$(HOST_BENCH_SCLC_PIPE)
 
 # The same tests with ASan and UBSan. A toolchain without the runtimes gets
 # a clear skip, not a build failure.
