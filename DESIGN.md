@@ -296,20 +296,25 @@ every ladder split and switch rates. With an old 0.4.0..0.4.2 peer, a CFG_NACK
 makes the controller silently stay at 128/128. `mode=sc-ldpc` defaults to
 `adaptive=off` and accepts `adaptive=on`.
 
-**Multi-stream status.** 0.4.0 (v7, `0x1007`) lets one session carry
-concurrent FEC streams on a non-SC-LDPC grouped shape, when the module
-parameter `fec_groups_per_flow` reserves physical groups for them. Each stream
-owns a per-flow FEC TX/RX context and an admission reference. The default `0`
-keeps the single-stream geometry: the first flow owns every group, so a second
-concurrent stream is refused (`-EOPNOTSUPP`, `fec_stream_refused`). Set the
-parameter to `total_groups / N` and load the same value on both ends to admit
-`N` streams; the far side's primary mask must match the near OPEN bitmap.
-SC-LDPC stays single-flow and refuses a second flow even when groups would
-fit. A sequential connection after the previous one closes remains supported:
-the new stream resets the FEC RX/TX state and rebases its window on its own
-first block. `FEC_ALLOC` (0x36) is defined on the wire but the 0.4.0 data
-plane does not emit or consume it: there is no runtime group rebalancing;
-group membership is fixed when OPEN creates the flow.
+**Multi-stream status.** FEC v7 (`0x1007`) gives every live application
+stream its own FEC TX/RX plane keyed by `sid`: block ids, credit, delivery
+cursors, NACK state and FIN are per flow, and the 48-byte record layout is
+unchanged. The carriers are split into physical groups
+(`carriers / (n + m)`; 32 on the production 256/4+4 shape). Each flow owns a
+disjoint group bitmap, carried in OPEN; `fec_groups_per_flow=` keeps the
+static quota for A/B tests (`0`: the first flow owns every group; `16`: it
+owns half) and for a peer that does not implement `FEC_ALLOC`.
+
+With the default quota the near side is the allocator. A joining stream
+takes its equal share (`total/(N+1)`, remainder to the lowest sids) from
+free groups, or the allocator sends `FEC_ALLOC` (`0x36`) to shrink the
+donors before admitting it. A stream close returns its groups and grows the
+survivors back. The exchange is two-sided and symmetric: each direction
+switches at its own super-block boundary, the receiver applies a mask only
+after its delivery frontier reached the sender's switch point, and the
+sender stays stopped until the peer confirms. A REQUEST is retried; a peer
+that never answers is abandoned and the old mask resumes at the same point.
+SC-LDPC keeps one flow (a second flow is still refused).
 
 The 256-carrier performance target remains **90% of a direct/2 stream**. The
 0.2.1 measurement is 86.8% (97.3 Mbit/s against 112.1), 3.2 points short, and
@@ -334,9 +339,21 @@ version 4. A 0.2.x peer is refused at the first HELLO.
   record. The request line, headers, `Transfer-Encoding: chunked`, chunk-size
   lines and CRLFs stay plaintext; only the FEC body may be encrypted by the
   optional ChaCha8 layer. A middlebox therefore still sees ordinary HTTP/1.1.
-- Control records (ACK/NACK/FEC_CFG/FEC_FBK/ALLOC) use the same one-chunk-per-record
-  rule. They are written only at record boundaries; a partial record is never
-  interleaved with a control frame.
+- Control records (ACK/NACK/FEC_CFG/FEC_FBK/FEC_ALLOC) use the same
+  one-chunk-per-record rule. They are written only at record boundaries; a
+  partial record is never interleaved with a control frame.
+- **FEC_ALLOC (0x36, 64-byte body).** One group rebalance. `epoch` is
+  monotonic, `group_mask[32]` names the physical groups, then `flags`
+  (`ACK 0x01`, `DONE 0x02`, `COMMITTED 0x04`, `ABORT 0x08`) and three
+  reserved zero bytes. `switch_pkt`/`block_base` name the sender's TX origin
+  on the new set
+  (a super-block boundary of the old one). The near side is the only
+  initiator: REQUEST -> ACK (far's TX origin) -> DONE (far applied its RX) ->
+  DONE (near applied its RX) -> COMMITTED (far swapped its TX). A REQUEST
+  that is never acknowledged is aborted, and both ends resume the old mask
+  at the same origin. The body and `TBT_FEC_CONV 0x1007` are unchanged from
+  0.4.0; a 0.4.0 peer parses but ignores the record, so the sender aborts
+  and keeps its static quota.
 - **PARITY block marker (`TBT_FEC_CONV` 0x1002; still present in 0x1007).** There is no
   4-byte marker and no magic number. A marker is a set of values inside the
   48-byte `struct tbt_fec_hdr`: `type = TBT_FEC_PARITY` (0x31), `flags = 0`,

@@ -233,17 +233,22 @@ typedef uint64_t u64;
  * group; a share that is already present is a harmless duplicate. */
 #define TBT_FEC_NACK_LEN (2 * TBT_FEC_BITMAP_BYTES)
 /* FEC_ALLOC body (64 bytes, 0x1007). The near-side arbiter names the new
- * physical group set for one stream; the far side acknowledges (ACK) and
- * then reports the applied switch point (DONE). The body is also valid as a
- * sender-side announcement of its own TX switch for the reverse direction.
+ * physical group set for one stream. Each direction has its own switch
+ * point, so the body is symmetric: switch_pkt/block_base always name the
+ * sending side's TX origin.
  *   +0  u32 epoch       allocation generation, starts at 1, monotonic
  *   +4  u8  group_mask[32]  physical groups; popcount >= 1
- *   +36 u8  flags       TBT_FEC_ALLOC_F_ACK / _DONE
+ *   +36 u8  flags       see TBT_FEC_ALLOC_F_*
  *   +37 u8  reserved[3] must be 0
  *   +40 u64 switch_pkt  flow-local seq of the first record on the new set
  *   +48 u64 block_base  flow-local block id of the first block on the new set
  *   +56 u32 crc32c      CRC32C over bytes +0..+55
  *   +60 u32 reserved2   must be 0
+ *
+ * The flags are a capability of 0.4.x: the body layout and TBT_FEC_CONV are
+ * unchanged, but ACK/DONE/COMMITTED/ABORT form the full exchange. A 0.4.0
+ * peer parses the body and ignores the record, so it never answers; the
+ * arbiter then aborts and keeps the static per-flow quota it configured.
  */
 #define TBT_FEC_ALLOC_LEN 64
 #define TBT_FEC_ALLOC_EPOCH 0
@@ -257,7 +262,9 @@ typedef uint64_t u64;
 #define TBT_FEC_ALLOC_RESERVED2 60
 #define TBT_FEC_ALLOC_F_ACK 0x01
 #define TBT_FEC_ALLOC_F_DONE 0x02
-#define TBT_FEC_ALLOC_F_MASK 0x03
+#define TBT_FEC_ALLOC_F_COMMITTED 0x04
+#define TBT_FEC_ALLOC_F_ABORT 0x08
+#define TBT_FEC_ALLOC_F_MASK 0x0f
 /* FEC_CFG body (48 bytes, little-endian). One record carries a shape change
  * request; the flags say whether it applies or aborts one. The record
  * header leaves n/m/share_index/win_len/seq zero and names no block.
