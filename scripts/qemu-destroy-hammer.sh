@@ -120,6 +120,11 @@ rsync -a --delete \
     --exclude '*.ko' --exclude '*.o' --exclude '*.mod' --exclude '*.mod.c' \
     --exclude 'modules.order' --exclude 'Module.symvers' \
     "$REPO"/ "$SRC"/ || die "cannot stage the module source"
+# kbuild writes the composite module's object list to tbtun.mod and only
+# rewrites it when the link command itself changes. rsync leaves the excluded
+# build files in place, so a tree that gained a new .o would still link from
+# the old list. Drop both generated lists before every module build.
+rm -f "$SRC/tbtun.mod" "$SRC/modules.order"
 make -C "$KDIR" M="$SRC" -j"$JOBS" modules > "$WORK/module.log" 2>&1 ||
     die "module build failed (see $WORK/module.log)"
 [ -f "$SRC/tbtun.ko" ] || die "module build produced no tbtun.ko"
