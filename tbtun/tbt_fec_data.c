@@ -84,12 +84,12 @@ static int tbt_fec_ms_drain(struct tbt_session *sess, struct tbt_fec_flow *f);
 #define TBT_FEC_MS_DRAIN_QUANTUM (64u * 1024u)
 /* A partial mux block waits this long for company, matching the legacy
  * packetizer's interactive-write coalescing. */
-#define TBT_FEC_MS_SHORT_MS 2
+#define TBT_FEC_MS_SHORT_MS 10
 /* Concurrent streams on the one SC-LDPC plane. The 0.6.0 target is 2..16. */
 #define TBT_FEC_MS_STREAMS 16
-/* Per-stream window. 16 streams then bound in-flight bytes to 4 MiB, below
- * the FEC credit budget; a block is shared by whatever streams are active. */
-#define TBT_FEC_MS_WINDOW (256u * 1024u)
+/* Per-stream window: four complete 1 MiB SC-LDPC blocks, so a bulk write
+ * is not cut into short blocks by the receive window. */
+#define TBT_FEC_MS_WINDOW TBT_MS_WINDOW
 
 /* The source ring is the capture's pause granularity: tbt_fec_tx_submit()
  * sets tx_paused only when the ring cannot take the next chunk. 256 KiB
@@ -3979,6 +3979,15 @@ size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,
              * count is what makes that FIN name the real end. */
             WRITE_ONCE(st->tx_seq, READ_ONCE(st->tx_seq) + done);
             atomic64_add(done, &sess->tx_submit_bytes);
+            /* Keep a block open while the local socket is still feeding:
+             * extending the short timer stops a 1 MiB block from being
+             * sealed in the middle of a bulk write. A full block still
+             * fires at once; the tail goes out 10 ms after the last byte. */
+            spin_lock(&tx->ms_lock);
+            if (tx->short_at_ns)
+                tx->short_at_ns = ktime_get_ns() +
+                    (u64)TBT_FEC_MS_SHORT_MS * NSEC_PER_MSEC;
+            spin_unlock(&tx->ms_lock);
         }
         if (err || done < len)
         {

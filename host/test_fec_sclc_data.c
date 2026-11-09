@@ -543,8 +543,12 @@ static void case_short_block_parity(void)
     /* The sender keeps row 0 alone for a short SC-LDPC block. */
     ok_u16(tbt_fec_tx_parity_count(1, 128, 128, true), 1,
            "short block: one cut row");
-    ok_u16(tbt_fec_tx_parity_count(127, 128, 128, true), 1,
-           "127-share short block: one cut row");
+    ok_u16(tbt_fec_tx_parity_count(2, 128, 128, true), 1,
+           "two-share block: one cut row");
+    ok_u16(tbt_fec_tx_parity_count(3, 128, 128, true), 128,
+           "three-share block: every parity row");
+    ok_u16(tbt_fec_tx_parity_count(127, 128, 128, true), 128,
+           "127-share block: every parity row");
     ok_u16(tbt_fec_tx_parity_count(128, 128, 128, true), 128,
            "full block: every parity row");
     ok_u16(tbt_fec_tx_parity_count(1, 128, 4, false), 4,
@@ -567,8 +571,12 @@ static void case_short_block_parity(void)
     /* Parity requests converge on the rows the sender kept. */
     ok_u16(tbt_fec_nack_parity_limit(false, 128, 128, 128, true), 1,
            "cut unknown: only the cut row");
-    ok_u16(tbt_fec_nack_parity_limit(true, 1, 128, 128, true), 1,
-           "short block: only the cut row exists");
+    ok_u16(tbt_fec_nack_parity_limit(true, 2, 128, 128, true), 1,
+           "two-share block: only the cut row exists");
+    ok_u16(tbt_fec_nack_parity_limit(true, 3, 128, 128, true), 128,
+           "three-share block: every row may be named");
+    ok_u16(tbt_fec_nack_parity_limit(true, 127, 128, 128, true), 128,
+           "127-share block: every row may be named");
     ok_u16(tbt_fec_nack_parity_limit(true, 128, 128, 128, true), 128,
            "full block: every row may be named");
     ok_u16(tbt_fec_nack_parity_limit(true, 1, 128, 4, false), 4,

@@ -1789,9 +1789,10 @@ static inline bool tbt_fec_nack_unstarted_group(u64 total_pkts, u16 groups,
 static inline u16 tbt_fec_tx_parity_count(u16 win_len, u16 n, u16 m,
                                           bool block_code)
 {
+    (void)n;
     if (!m)
         return 0;
-    if (block_code && win_len && win_len < n)
+    if (block_code && win_len <= 2)
         return 1;
     return m;
 }
@@ -1825,13 +1826,14 @@ static inline u16 tbt_fec_nack_data_limit(bool win_len_set, u16 real,
 static inline u16 tbt_fec_nack_parity_limit(bool win_len_set, u16 real,
                                             u16 n, u16 m, bool block_code)
 {
+    (void)n;
     if (!m)
         return 0;
     if (!block_code)
         return m;
     if (!win_len_set)
         return 1;
-    return real < n ? 1 : m;
+    return real <= 2 ? 1 : m;
 }
 
 /* Delivery length of share p in a block whose real share count is `real`.
