@@ -408,8 +408,11 @@ int main(void)
 }
 EOF
     lim=$(awk '/#define TBT_LINE_MAX/{ print $3; exit }' "$1/tbtun/tbt_parse.h")
+    # tbt_parse_line() calls the port-map and SC-LDPC mapping helpers, so the
+    # probe links the same sources as host/test_parse.
     if ! cc -std=gnu99 -O2 -I "$1/tbtun" -o "$tmp/render_len" \
-        "$tmp/render_len.c" "$1/tbtun/tbt_parse.c" 2>"$tmp/cc.err"; then
+        "$tmp/render_len.c" "$1/tbtun/tbt_parse.c" "$1/tbtun/tbt_portmap.c" \
+        "$1/tbtun/tbt_fec_adapt_sclc.c" 2>"$tmp/cc.err"; then
         printf 'cannot compile probe: %s' "$(head -1 "$tmp/cc.err")"
         return 1
     fi

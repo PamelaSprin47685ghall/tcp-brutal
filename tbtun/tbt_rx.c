@@ -592,6 +592,8 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
         *why = "crypto hello parse";
         pr_warn_ratelimited("tbtun: tunnel %llu: HELLO crypto parse failed: -EPROTO\n",
                             (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0));
+        tbt_memzero_explicit(hello_key, sizeof(hello_key));
+        tbt_memzero_explicit(key, sizeof(key));
         return -EPROTO;
     }
     TBT_DIAG("hello crypto parsed tunnel=%llu enabled=%d key_id=%u have_key=%d key_peer=%d",
@@ -666,6 +668,8 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
 
 out:
     spin_unlock(&sess->lock);
+    tbt_memzero_explicit(hello_key, sizeof(hello_key));
+    tbt_memzero_explicit(key, sizeof(key));
     if (err)
         pr_warn_ratelimited("tbtun: tunnel %llu: HELLO crypto resolve failed: %s (%d)\n",
                             (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),

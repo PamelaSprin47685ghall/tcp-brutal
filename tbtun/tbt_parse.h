@@ -15,8 +15,11 @@
 #define _TBT_PARSE_H
 
 #ifdef __KERNEL__
+#include <linux/build_bug.h>
+#include <linux/compiler.h>
 #include <linux/errno.h>
 #include <linux/if.h>
+#include <linux/printk.h>
 #include <linux/types.h>
 #else
 #include <errno.h>
@@ -30,6 +33,31 @@ typedef uint32_t __be32;
 
 #include "tbt_uapi.h"
 #include "tbt_crypto.h"
+
+/* Read a stored flag as a byte, then normalize it to true/false. A `_Bool`
+ * load assumes the value is 0 or 1; a byte left neither by a neighbouring
+ * write would otherwise be undefined and trip UBSAN's invalid-load check.
+ * The kernel form keeps the compile-time type check and names a bad writer;
+ * the host form only normalizes, so tbt_parse.c builds with a plain C
+ * compiler and -Werror. */
+#ifdef __KERNEL__
+#define tbt_read_bool(field) \
+    ({ \
+        u8 __tbt_bool_byte; \
+        BUILD_BUG_ON(!__builtin_types_compatible_p(__typeof__(field), bool)); \
+        __tbt_bool_byte = READ_ONCE(*(const u8 *)&(field)); \
+        if (__tbt_bool_byte > 1) \
+            pr_warn_ratelimited("tbtun: %s: %s is not a bool byte (%u)\n", \
+                                __func__, #field, __tbt_bool_byte); \
+        __tbt_bool_byte != 0; \
+    })
+#else
+static inline bool tbt_read_bool_at(const void *p)
+{
+    return *(const volatile u8 *)p != 0;
+}
+#define tbt_read_bool(field) tbt_read_bool_at(&(field))
+#endif
 
 /* Line buffer size. A line of TBT_LINE_MAX - 1 bytes is the longest accepted;
  * TBT_LINE_MAX itself is refused, so the buffer always has room for the NUL. */

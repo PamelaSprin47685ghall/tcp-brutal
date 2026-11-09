@@ -222,6 +222,10 @@ void tbt_tunnel_put(struct tbt_tunnel *t)
 {
     if (!t || !refcount_dec_and_test(&t->refs))
         return;
+    /* Both key copies outlive every session; this is their last holder. */
+    tbt_memzero_explicit(t->cfg.crypto_key, sizeof(t->cfg.crypto_key));
+    tbt_memzero_explicit(t->crypto_key_inherit,
+                         sizeof(t->crypto_key_inherit));
     put_net(t->net); // paired with the get_net() in tbt_tunnel_add()
     kfree_rcu(t, rcu);
 }
@@ -1849,6 +1853,7 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     }
 
     tbt_crypto_pair_wipe(&s->crypto_ctx);
+    tbt_memzero_explicit(s->crypto_key, sizeof(s->crypto_key));
     put_net(s->net);
     kfree(s);
 }

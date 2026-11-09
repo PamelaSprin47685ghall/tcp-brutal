@@ -1117,7 +1117,7 @@ int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
     {
         char kb[2 * TBT_CRYPTO_KEY_LEN + 1];
 
-        if (c->crypto_key_set)
+        if (tbt_read_bool(c->crypto_key_set))
             tbt_fmt_hex(c->crypto_key, sizeof(c->crypto_key), kb);
         else
         {
@@ -1157,13 +1157,13 @@ int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
     }
     if (rc)
         return rc;
-    if (c->dev_set)
+    if (tbt_read_bool(c->dev_set))
     {
         rc = tbt_addf(buf, size, &off, " dev=%s", c->dev);
         if (rc)
             return rc;
     }
-    if (c->nonce_set)
+    if (tbt_read_bool(c->nonce_set))
     {
         char nb[2 * sizeof(c->nonce) + 1];
 
@@ -1224,7 +1224,7 @@ int tbt_render_action(const struct tbt_cmd *c, char *buf, size_t size)
             return TBT_PARSE_EINVAL;
         break;
     case TBT_CMD_SESSION:
-        if (c->adaptive_set)
+        if (tbt_read_bool(c->adaptive_set))
             rc = tbt_addf(buf, size, &off, "session %llu adaptive=%s\n",
                           (unsigned long long)c->id, c->adaptive ? "on" : "off");
         else
