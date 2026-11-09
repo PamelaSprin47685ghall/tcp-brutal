@@ -63,9 +63,9 @@ static int tbt_fec_ms_drain(struct tbt_session *sess, struct tbt_fec_flow *f);
 #define TBT_FEC_MS_SHORT_MS 2
 /* Concurrent streams on the one SC-LDPC plane. The 0.5.0 target is 2..16. */
 #define TBT_FEC_MS_STREAMS 16
-/* One whole 1 MiB downlink block per stream: a single bulk stream can fill
- * the block and pay parity once, and the peer's uplink block is smaller. */
-#define TBT_FEC_MS_WINDOW (1024u * 1024u)
+/* Per-stream window. 16 streams then bound in-flight bytes to 4 MiB, below
+ * the FEC credit budget; a block is shared by whatever streams are active. */
+#define TBT_FEC_MS_WINDOW (256u * 1024u)
 
 /* The source ring is the capture's pause granularity: tbt_fec_tx_submit()
  * sets tx_paused only when the ring cannot take the next chunk. 256 KiB
@@ -2022,9 +2022,9 @@ static void tbt_fec_ms_wake_senders(struct tbt_session *sess,
 
         if (st->fec_flow == f && READ_ONCE(st->tx_paused))
         {
-            mutex_lock(&f->tx->ms_lock);
+            spin_lock(&f->tx->ms_lock);
             wake = tbt_ms_tx_space(sess->fec_ms_tx, st->sid) != 0;
-            mutex_unlock(&f->tx->ms_lock);
+            spin_unlock(&f->tx->ms_lock);
             if (wake)
             {
                 WRITE_ONCE(st->tx_paused, false);
@@ -2076,7 +2076,7 @@ static void tbt_fec_tx_pump_mux(struct tbt_session *sess,
         }
         tx->outq_paused = false;
         now = ktime_get_ns();
-        mutex_lock(&tx->ms_lock);
+        spin_lock(&tx->ms_lock);
         queued = tbt_ms_tx_queued(sess->fec_ms_tx);
         control = tbt_ms_tx_has_control(sess->fec_ms_tx);
         if (!tx->ms_blk_len)
@@ -2086,7 +2086,7 @@ static void tbt_fec_tx_pump_mux(struct tbt_session *sess,
 
             if (!ready)
             {
-                mutex_unlock(&tx->ms_lock);
+                spin_unlock(&tx->ms_lock);
                 if (queued && !tx->short_at_ns)
                 {
                     tx->short_at_ns =
@@ -2098,7 +2098,7 @@ static void tbt_fec_tx_pump_mux(struct tbt_session *sess,
             }
             if (tbt_ms_tx_block(sess->fec_ms_tx, &blk, &blen) || !blen)
             {
-                mutex_unlock(&tx->ms_lock);
+                spin_unlock(&tx->ms_lock);
                 break;
             }
             tx->ms_blk = blk;
@@ -2106,7 +2106,7 @@ static void tbt_fec_tx_pump_mux(struct tbt_session *sess,
             tx->ms_blk_off = 0;
             tx->short_at_ns = 0;
         }
-        mutex_unlock(&tx->ms_lock);
+        spin_unlock(&tx->ms_lock);
 
         while (tx->ms_blk_off < tx->ms_blk_len)
         {
@@ -2878,7 +2878,7 @@ size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,
         size_t done = 0;
         int err = 0;
 
-        mutex_lock(&tx->ms_lock);
+        spin_lock(&tx->ms_lock);
         while (done < len)
         {
             u32 want = (u32)min_t(size_t, len - done, U32_MAX);
@@ -2895,7 +2895,7 @@ size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,
             tbt_ms_tx_commit(sess->fec_ms_tx, st->sid, got);
             done += got;
         }
-        mutex_unlock(&tx->ms_lock);
+        spin_unlock(&tx->ms_lock);
         if (done)
         {
             /* The FIN path freezes tx_seq after the mux drains; the accepted
@@ -2956,9 +2956,9 @@ bool tbt_fec_tx_idle(struct tbt_stream *st)
         return true;
     if (sess->fec_ms_tx)
     {
-        mutex_lock(&f->tx->ms_lock);
+        spin_lock(&f->tx->ms_lock);
         idle = !tbt_ms_tx_pending(sess->fec_ms_tx, st->sid);
-        mutex_unlock(&f->tx->ms_lock);
+        spin_unlock(&f->tx->ms_lock);
     }
     else
     {
@@ -2986,9 +2986,9 @@ int tbt_fec_tx_flush(struct tbt_stream *st)
     {
         int err;
 
-        mutex_lock(&tx->ms_lock);
+        spin_lock(&tx->ms_lock);
         err = tbt_ms_tx_fin(sess->fec_ms_tx, st->sid);
-        mutex_unlock(&tx->ms_lock);
+        spin_unlock(&tx->ms_lock);
         if (err)
             return err;
         /* The shared plane never carries a per-stream FEC packet range: the
@@ -3616,6 +3616,35 @@ static int tbt_fec_ms_drain(struct tbt_session *sess, struct tbt_fec_flow *f)
                 tbt_fec_ms_win_send(sess, f, sid, delivered, credit);
             budget = len >= budget ? 0 : budget - len;
             progress = true;
+        }
+        {
+            bool fin_seen, reset_seen, broken_seen;
+            bool forced = false;
+            u64 fin_end = 0;
+
+            mutex_lock(&f->rx->ms_lock);
+            delivered = tbt_ms_rx_delivered(ms, sid);
+            fin_seen = tbt_ms_rx_fin(ms, sid, &fin_end);
+            reset_seen = tbt_ms_rx_reset(ms, sid);
+            broken_seen = tbt_ms_rx_broken(ms, sid);
+            if (fin_seen || reset_seen)
+            {
+                /* The tail may be shorter than window/8: close the FIN gate
+                 * with one last report instead of waiting for a threshold
+                 * the stream will never cross again. */
+                forced = tbt_ms_rx_win(ms, sid, &delivered, &credit, true) != 0;
+                if (forced)
+                    tbt_ms_rx_win_ack(ms, sid, delivered);
+            }
+            mutex_unlock(&f->rx->ms_lock);
+            if (forced)
+                tbt_fec_ms_win_send(sess, f, sid, delivered, credit);
+            if (reset_seen || broken_seen)
+            {
+                tbt_stream_kill(st, reset_seen ? TBT_ST_DEAD : TBT_ST_HOLE);
+                tbt_stream_put(st);
+                continue;
+            }
         }
         tbt_stream_put(st);
     }
@@ -6124,41 +6153,16 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
          * stream's own delivered offset. */
         st = sess->fec_ms_rx ? NULL :
              tbt_stream_get(sess, f->sid, false, false);
-        if (st && tx)
+        if (tx)
         {
-            /* A peer-controlled u64 must never become a byte count by a bare
-             * multiply: next_deliver * S wraps, and a frontier past tx->seq
-             * would acknowledge bytes this side never sent. Clamp the packet
-             * frontier first; it only gates credit. The byte count comes from
-             * the body's deliver_bytes, which names what the receiver really
-             * handed over. Deriving it from the frontier acknowledged bytes a
-             * short share or an early-closed block never delivered. */
             u64 sent = READ_ONCE(tx->seq);
-            u64 acked;
 
+            /* The plane frontier never moves past what this side sent. */
             if (a.next_deliver > sent)
             {
                 a.next_deliver = sent;
                 atomic64_inc(&sess->fec_ack_bad);
             }
-            acked = a.deliver_bytes;
-            if (acked > READ_ONCE(st->tx_seq))
-            {
-                /* The ACK belongs to another stream of this session, or its
-                 * byte count is hostile. Never acknowledge more than this
-                 * stream submitted. */
-                acked = READ_ONCE(st->tx_seq);
-                atomic64_inc(&sess->fec_ack_bad);
-            }
-            spin_lock(&sess->lock);
-            if (acked > READ_ONCE(st->tx_ack))
-            {
-                WRITE_ONCE(st->tx_ack, acked);
-                st->last_ack_ns = ktime_get_ns();
-                sess->tx_ack = acked;
-                sess->last_ack_ns = st->last_ack_ns;
-            }
-            spin_unlock(&sess->lock);
             /* Flow control: the peer has delivered up to this packet, and
              * grants the credit it sent. Wake the packetizer, which may have
              * stopped at the window. */
@@ -6201,8 +6205,34 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
             if (a.rtt_us)
                 WRITE_ONCE(tx->rtt_us, a.rtt_us);
             tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
-            /* The FIN pump holds the close until tx_ack covers tx_seq. */
             tbt_tx_wake(sess);
+        }
+        if (st)
+        {
+            /* A shared plane's byte frontier covers every stream, so only a
+             * non-mux flow may translate it into this stream's tx_ack.
+             * MS_WIN owns that update on the mux path. */
+            u64 acked = a.deliver_bytes;
+
+            if (sess->fec_ms_rx)
+                acked = 0;
+            if (acked > READ_ONCE(st->tx_seq))
+            {
+                acked = READ_ONCE(st->tx_seq);
+                atomic64_inc(&sess->fec_ack_bad);
+            }
+            if (acked)
+            {
+                spin_lock(&sess->lock);
+                if (acked > READ_ONCE(st->tx_ack))
+                {
+                    WRITE_ONCE(st->tx_ack, acked);
+                    st->last_ack_ns = ktime_get_ns();
+                    sess->tx_ack = acked;
+                    sess->last_ack_ns = st->last_ack_ns;
+                }
+                spin_unlock(&sess->lock);
+            }
         }
         if (st)
             tbt_stream_put(st);
@@ -7001,6 +7031,12 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         struct tbt_stream *st;
         u64 acked;
 
+        if (tbt_fec_crc32c(0, rec + TBT_FEC_HDR_LEN, h.payload_len) !=
+            h.payload_crc32c)
+        {
+            atomic64_inc(&sess->fec_payload_crc_fail);
+            return 0;
+        }
         if (tbt_fec_ms_win_unpack(rec + TBT_FEC_HDR_LEN, &w))
         {
             atomic64_inc(&sess->fec_proto_fail);
@@ -7012,10 +7048,10 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
             return 0;
         if (pf->tx && sess->fec_ms_tx)
         {
-            mutex_lock(&pf->tx->ms_lock);
+            spin_lock(&pf->tx->ms_lock);
             (void)tbt_ms_tx_window(sess->fec_ms_tx, h.sid, w.delivered,
                                    w.credit);
-            mutex_unlock(&pf->tx->ms_lock);
+            spin_unlock(&pf->tx->ms_lock);
         }
         st = tbt_stream_get(sess, h.sid, false, false);
         if (st)
@@ -7086,6 +7122,26 @@ void tbt_fec_rx_fin(struct tbt_session *sess, struct tbt_stream *st,
         /* A shared SC-LDPC plane has no per-stream packet range: the main
          * FIN's zero body must not become the plane's total_pkts, and the
          * mux FIN/byte count already names where this stream ends. */
+        struct tbt_fec_flow *mf = st->fec_flow;
+
+        if (mf && mf->rx)
+        {
+            u64 delivered;
+            u32 credit;
+            bool send = false;
+
+            mutex_lock(&mf->rx->ms_lock);
+            delivered = tbt_ms_rx_delivered(sess->fec_ms_rx, st->sid);
+            if (tbt_ms_rx_win(sess->fec_ms_rx, st->sid, &delivered,
+                              &credit, true))
+            {
+                tbt_ms_rx_win_ack(sess->fec_ms_rx, st->sid, delivered);
+                send = true;
+            }
+            mutex_unlock(&mf->rx->ms_lock);
+            if (send)
+                tbt_fec_ms_win_send(sess, mf, st->sid, delivered, credit);
+        }
         return;
     }
     f = st->fec_flow;
@@ -7388,9 +7444,9 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
         groups)
         goto fail;
     spin_lock_init(&tx->lock);
+    spin_lock_init(&tx->ms_lock);
     spin_lock_init(&tx->replay_lock);
     spin_lock_init(&tx->shape_lock);
-    mutex_init(&tx->ms_lock);
     tx->base_pkt = 0;
     tx->base_block = 0;
     tx->switch_state = TBT_FEC_SW_STEADY;
@@ -7738,7 +7794,7 @@ tbt_fec_flow_create(struct tbt_session *sess, u64 sid,
     }
     refcount_set(&f->refs, 2); /* one table reference, one caller reference */
     if (sess->fec_sclc && sid)
-        f->ms_refs = 1; /* the admission owns the first stream slot */
+        f->ms_pending = 1; /* this admission owns a pending slot */
     INIT_WORK(&f->free_work, tbt_fec_flow_free_work);
 
     spin_lock(&sess->lock);
@@ -7789,7 +7845,7 @@ tbt_fec_flow_bind_primary_locked(struct tbt_session *sess,
     hlist_add_head(&f->node, &sess->fec_flows[TBT_STREAM_BUCKET(sid)]);
     refcount_inc(&f->refs); /* caller reference */
     if (sess->fec_sclc)
-        f->ms_refs++; /* the admission owns one stream slot */
+        f->ms_pending++; /* the admission slot, released at attach/abort */
     return f;
 }
 
@@ -7846,7 +7902,7 @@ struct tbt_fec_flow *tbt_fec_flow_admit_mask(struct tbt_session *sess, u64 sid,
                 mask) &&
             refcount_inc_not_zero(&shared->refs))
         {
-            shared->ms_refs++;
+            shared->ms_pending++;
             spin_unlock(&sess->lock);
             mutex_unlock(&sess->fec_alloc_lock);
             return shared;
@@ -7903,7 +7959,7 @@ struct tbt_fec_flow *tbt_fec_flow_admit(struct tbt_session *sess, u64 sid,
     {
         /* SC-LDPC has one physical plane. A later stream shares it; the mux
          * gives each stream its own subframe queue and window. */
-        f->ms_refs++;
+        f->ms_pending++;
         spin_unlock(&sess->lock);
         mutex_unlock(&sess->fec_alloc_lock);
         return f;
@@ -7981,9 +8037,9 @@ void tbt_fec_flow_abort(struct tbt_session *sess, struct tbt_fec_flow *f)
          * same admission lock, so a concurrent share cannot slip in. */
         mutex_lock(&sess->fec_alloc_lock);
         spin_lock(&sess->lock);
-        if (f->ms_refs)
-            f->ms_refs--;
-        if (f->ms_refs)
+        if (f->ms_pending)
+            f->ms_pending--;
+        if (f->ms_pending || f->ms_refs)
         {
             spin_unlock(&sess->lock);
             mutex_unlock(&sess->fec_alloc_lock);
@@ -8038,24 +8094,39 @@ int tbt_fec_flow_attach(struct tbt_stream *st, struct tbt_fec_flow *f)
     if (f->sess->fec_sclc)
     {
         struct tbt_session *sess = f->sess;
+        struct tbt_ms_tx_ring ring;
+        bool installed = false;
         int err = -ENODEV;
 
-        if (sess->fec_ms_tx && sess->fec_ms_rx && f->tx)
+        if (sess->fec_ms_tx && sess->fec_ms_rx && f->tx && f->rx)
         {
-            mutex_lock(&f->tx->ms_lock);
-            err = tbt_ms_tx_open(sess->fec_ms_tx, st->sid);
-            mutex_unlock(&f->tx->ms_lock);
+            err = tbt_ms_tx_ring_new(sess->fec_ms_tx, st->sid, &ring);
+            if (!err)
+            {
+                spin_lock(&f->tx->ms_lock);
+                err = tbt_ms_tx_install(sess->fec_ms_tx, &ring);
+                spin_unlock(&f->tx->ms_lock);
+                if (err)
+                    tbt_ms_tx_ring_free(&ring);
+                else
+                    installed = true;
+            }
             if (!err)
             {
                 mutex_lock(&f->rx->ms_lock);
                 err = tbt_ms_rx_open(sess->fec_ms_rx, st->sid);
                 mutex_unlock(&f->rx->ms_lock);
             }
-            if (err && sess->fec_ms_tx)
+            if (err && installed)
             {
-                mutex_lock(&f->tx->ms_lock);
-                (void)tbt_ms_tx_close(sess->fec_ms_tx, st->sid);
-                mutex_unlock(&f->tx->ms_lock);
+                struct tbt_ms_tx_ring old;
+                bool removed;
+
+                spin_lock(&f->tx->ms_lock);
+                removed = !tbt_ms_tx_remove(sess->fec_ms_tx, st->sid, &old);
+                spin_unlock(&f->tx->ms_lock);
+                if (removed)
+                    tbt_ms_tx_ring_free(&old);
             }
         }
         if (err)
@@ -8065,6 +8136,11 @@ int tbt_fec_flow_attach(struct tbt_stream *st, struct tbt_fec_flow *f)
             tbt_fec_flow_abort(sess, f);
             return err;
         }
+        spin_lock(&sess->lock);
+        if (f->ms_pending)
+            f->ms_pending--;
+        f->ms_refs++; /* this stream now owns a mux leg */
+        spin_unlock(&sess->lock);
     }
     st->fec_flow = f; /* consumes the caller's reference */
     return 0;
@@ -8089,11 +8165,16 @@ void tbt_fec_flow_detach(struct tbt_stream *st)
          * leaves. */
         if (sess->fec_ms_tx && f->tx)
         {
-            mutex_lock(&f->tx->ms_lock);
-            (void)tbt_ms_tx_close(sess->fec_ms_tx, st->sid);
-            mutex_unlock(&f->tx->ms_lock);
+            struct tbt_ms_tx_ring old;
+            bool removed;
+
+            spin_lock(&f->tx->ms_lock);
+            removed = !tbt_ms_tx_remove(sess->fec_ms_tx, st->sid, &old);
+            spin_unlock(&f->tx->ms_lock);
+            if (removed)
+                tbt_ms_tx_ring_free(&old);
         }
-        if (sess->fec_ms_rx)
+        if (sess->fec_ms_rx && f->rx)
         {
             mutex_lock(&f->rx->ms_lock);
             (void)tbt_ms_rx_close(sess->fec_ms_rx, st->sid);
@@ -8107,7 +8188,7 @@ void tbt_fec_flow_detach(struct tbt_stream *st)
         spin_lock(&sess->lock);
         if (f->ms_refs)
             f->ms_refs--;
-        last = !f->ms_refs;
+        last = !f->ms_refs && !f->ms_pending;
         spin_unlock(&sess->lock);
         if (!last)
         {
@@ -8300,12 +8381,11 @@ int tbt_fec_data_init(struct tbt_session *sess)
     if (is_sclc)
     {
         u32 span = (u32)groups * n * TBT_FEC_S;
-        u32 window = span > TBT_FEC_MS_WINDOW ? span : TBT_FEC_MS_WINDOW;
+        u32 window = TBT_FEC_MS_WINDOW;
 
         sess->fec_sclc_shape = sclc;
-        /* The window is one whole FEC block so a single bulk stream can
-         * fill the block and pay parity once. The subframe layer shares the
-         * block across streams; per-stream windows bound memory. */
+        /* Per-stream windows bound memory; a block is shared by the streams
+         * that have credit, and the short-block timer seals a partial one. */
         sess->fec_ms_tx = tbt_ms_tx_new(TBT_FEC_MS_STREAMS, span, window,
                                         TBT_MS_QUANTUM * 1024u);
         sess->fec_ms_rx = tbt_ms_rx_new(TBT_FEC_MS_STREAMS, window);

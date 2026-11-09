@@ -835,10 +835,8 @@ struct tbt_fec_tx
     /* SC-LDPC multistream (0.5.0): the packetizer packs whole subframe
      * blocks from the session mux instead of this plane's capture ring.
      * Only w_fec_tx touches these; the mux object itself is serialised by
-     * ms_lock. Every mux caller runs in process context (capture work,
-     * carrier RX, the FEC work items), and opening or closing a stream ring
-     * allocates, so the lock must be sleepable. */
-    struct mutex ms_lock;
+     * ms_lock against the softirq capture path and window updates. */
+    spinlock_t ms_lock;
     const u8 *ms_blk; /* block returned by tbt_ms_tx_block() */
     u32 ms_blk_len;
     u32 ms_blk_off;
@@ -1021,9 +1019,11 @@ struct tbt_fec_flow
     /* 0 = free slot, 1 = active, 2 = draining, 3 = dead. Only the control
      * path writes it; carrier RX reads it to refuse a dying flow. */
     u8 state;
-    /* SC-LDPC shared plane: admission references that have not yet attached
-     * plus attached streams. The plane is unlinked only when this reaches
-     * zero; each stream detach drops one. */
+    /* SC-LDPC shared plane: ms_pending counts admitted references that have
+     * not attached yet; ms_refs counts attached mux legs. The plane is
+     * unlinked only when both reach zero. A duplicate OPEN takes a pending
+     * slot and must give it back through tbt_fec_flow_abort(). */
+    u16 ms_pending;
     u16 ms_refs;
     struct tbt_fec_tx *tx;
     struct tbt_fec_rx *rx;

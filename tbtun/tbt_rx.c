@@ -1028,7 +1028,7 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                 {
                     int err;
 
-                    if (frec[0] >= TBT_FEC_DATA && frec[0] <= TBT_FEC_FBK)
+                    if (tbt_fec_record_type(frec[0]))
                     {
                         if (!c->saw_hello)
                             return tbt_http_bad(c, "fec before hello", -EPROTO);
