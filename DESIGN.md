@@ -284,7 +284,7 @@ for the GF(2) data plane, Phase 1 only: `n + m = 8`, `groups = 32`, and `m` in
 1..6. The receiver estimates the DATA-share loss rate from per-block miss
 bitmaps (1 s window, EWMA, at least 1024 alive-filtered shares and 4
 super-blocks); the sender runs the control law and switches shape through
-`FEC_CFG`/`FEC_FBK` (48-byte bodies, `TBT_FEC_CONV` 0x1007) at a super-block
+`FEC_CFG`/`FEC_FBK` (64-byte bodies, `TBT_FEC_CONV` 0x1008) at a super-block
 boundary. `adaptive=` follows `fec` by default, and `session <id>
 adaptive=on|off` flips it at runtime; the `c13` line exports the state.
 Phase 2 (`n + m` other than 8) is not implemented. The SC-LDPC per-flow law
@@ -2851,11 +2851,11 @@ makes this design different from a generic L4 tunnel.
 | `scripts/tbtunctl` | **never created** — no userspace program ships in any form |
 | `tests/*.sh` | **new** |
 
-Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the released tree reports
-`0.5.0`. The wire revision `TBT_CONV=0x0008`
-and the FEC record revision `TBT_FEC_CONV=0x1007` bump independently of it.
+Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; this tree reports
+`0.5.0` (not yet released). The wire revision `TBT_CONV=0x0008`
+and the FEC record revision `TBT_FEC_CONV=0x1008` bump independently of it.
 HELLO `body[0]` carries `TBT_WIRE_VERSION=1` for the old ARQ and
-`TBT_WIRE_VERSION_V6=5` for a FEC v7 session, not the module version, so the
+`TBT_WIRE_VERSION_V6=5` for a FEC v8 session, not the module version, so the
 module version and the wire version are decoupled. 0.2.0 flipped `TBT_CONV` to
 0x0006 (FIN carries a 16-byte body) and `TBT_FEC_CONV` through `0x1002`
 (PARITY block marker), `0x1003` (24-byte ACK with `deliver_bytes`) and
@@ -2863,7 +2863,8 @@ module version and the wire version are decoupled. 0.2.0 flipped `TBT_CONV` to
 id); 0.3.0 moves it to `0x1006` (48-byte `FEC_CFG`, 48-byte `FEC_FBK` report,
 adaptive shape switch); 0.4.0 moves it to `0x1007` (multi-stream flows).
 0.5.0 moves `TBT_CONV` to `0x0008` (36-byte OPEN with route slot and target
-port) and the FEC HELLO version to 5. Peers of
+port), `TBT_FEC_CONV` to `0x1008` (64-byte `FEC_CFG`/`FEC_FBK`), and the FEC
+HELLO version to 5. Peers of
 different wire revisions do not interoperate, because the first HELLO is
 rejected by the conv check.
 
