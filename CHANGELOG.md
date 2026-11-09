@@ -3,6 +3,43 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.5.0] - 2026-11-09
+
+### Added
+
+- Multi-port mapping over one N+M carrier session. A `tunnel` line keeps its
+  original `listen=`/`target=` pair as slot 0 and adds `map=listen:target`
+  entries (comma-separated, up to `TBT_MAP_MAX - 1` extra slots) for the
+  others. A near tunnel binds every map listen port on `listen=`'s address and
+  accepts one stream per local port; a far tunnel ignores the listen half and
+  uses the map target ports as its authorized destination set. One session per
+  tunnel therefore serves every port instead of one 5-carrier (default) session
+  per port.
+- Far-side target authorization. OPEN now carries a u16 target port. Zero
+  keeps the old "use the far side's `target=`" intent; any other value is
+  accepted only when it equals that far side's `target=` or one `map=` target.
+  An unauthorized OPEN is dropped and logged, never dialed and never allowed to
+  close the carrier. `tbtun/tbt_map.{c,h}` holds the pure routing and allow-list
+  logic; `host/test_map.c` pins it.
+
+### Changed
+
+- Wire: `TBT_CONV` moves to `0x0008` and `TBT_WIRE_VERSION_V6` to 5. OPEN grows
+  from 32 to 34 bytes (`group_mask[32]` then `u16 target_port`). A 0.4.0 peer
+  fails the first header check and is refused; both ends must be upgraded
+  together.
+- Canonical config renders `map=` once, comma-separated, after the role's
+  peer/target keys. A repeated `map=` on one line replaces the earlier list.
+  A near line refuses a map listen port equal to `listen=` or to another map;
+  a far line accepts the same numbers because it does not bind them.
+
+### Verification
+
+- `make check`, `make host-test-san` and `./review/lint.sh` pass. The host
+  tests cover parse/render round-trips, slot-to-target routing, unauthorized
+  port refusal, near listen conflict detection, the maximal-line limit, and
+  both network-order port helpers.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

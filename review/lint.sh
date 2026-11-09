@@ -277,7 +277,7 @@ check_listen_order() {
     # writes the core callbacks.  Either form clears the wiring before the
     # accept work is cancelled.
     n_clr=$(printf '%s\n' "$body" | grep -nE 'sk_user_data = NULL|tbt_sk_ops_restore' | head -1 | cut -d: -f1)
-    n_can=$(printf '%s\n' "$body" | grep -nF 'cancel_work_sync(&t->w_accept)' | head -1 | cut -d: -f1)
+    n_can=$(printf '%s\n' "$body" | grep -nE 'cancel_work_sync\(&(t->w_accept|l->w_accept)\)' | head -1 | cut -d: -f1)
     if [ -n "$n_clr" ] && [ -n "$n_can" ] && [ "$n_clr" -lt "$n_can" ]; then
         return 0
     fi
@@ -400,6 +400,11 @@ int main(void)
     c.carrier_stall_ms = 3600000;
     c.portblock_lo = 65535;
     c.portblock_hi = 65535;
+    c.nmap = TBT_MAP_MAX - 1;
+    for (int i = 0; i < c.nmap; i++) {
+        c.maps[i].listen_port = 65535;
+        c.maps[i].target_port = 65535;
+    }
     c.nsrc = 8;
     for (int i = 0; i < 8; i++)
         c.srcaddrs[i] = 0xffffffff;
@@ -409,7 +414,8 @@ int main(void)
 EOF
     lim=$(awk '/#define TBT_LINE_MAX/{ print $3; exit }' "$1/tbtun/tbt_parse.h")
     if ! cc -std=gnu99 -O2 -I "$1/tbtun" -o "$tmp/render_len" \
-        "$tmp/render_len.c" "$1/tbtun/tbt_parse.c" 2>"$tmp/cc.err"; then
+        "$tmp/render_len.c" "$1/tbtun/tbt_parse.c" "$1/tbtun/tbt_map.c" \
+        "$1/tbtun/tbt_portmap.c" "$1/tbtun/tbt_fec_adapt_sclc.c" 2>"$tmp/cc.err"; then
         printf 'cannot compile probe: %s' "$(head -1 "$tmp/cc.err")"
         return 1
     fi

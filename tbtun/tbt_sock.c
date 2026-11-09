@@ -53,6 +53,7 @@
 #include <net/tcp.h>
 
 #include "tbtun.h"
+#include "tbt_map.h"
 
 /* One bit per stream work item; bit 1 means an instance is queued or running
  * and owns exactly one stream reference (review/s2-merged-design.md §1.4).
@@ -713,6 +714,7 @@ struct tbt_pending
 {
     struct list_head node;
     struct socket *sock;
+    u8 slot; /* near mapping slot this connection arrived on */
 };
 
 /* The near allocator's view of a sid: any object still in the hash owns the
@@ -763,7 +765,8 @@ static bool tbt_fec_retire_closing(struct tbt_session *sess)
     return old;
 }
 
-static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
+static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock,
+                                u8 slot)
 {
     struct tbt_stream *st;
     struct tbt_fec_flow *flow = NULL;
@@ -856,6 +859,9 @@ static int tbt_stream_start_now(struct tbt_session *sess, struct socket *sock)
     if (flow)
         tbt_fec_flow_attach(st, flow); /* moves the reference */
     st->sk = sock->sk;
+    /* Slot 0 with target= unset sends 0: the far side's default target, the
+     * exact 0.4.0 behavior. Every other slot names its configured port. */
+    st->target_port = tbt_map_target_for_slot(&sess->tunnel->cfg, slot);
     WRITE_ONCE(st->state, TBT_ST_OPEN);
 
     /* OPEN goes to every carrier that has sent HELLO; the pump writes it
@@ -902,7 +908,7 @@ static void tbt_pending_body(struct tbt_session *sess)
             continue;
         }
 
-        err = tbt_stream_start_now(sess, sock);
+        err = tbt_stream_start_now(sess, sock, p->slot);
         if (err == -EOPNOTSUPP)
         {
             /* The FEC flow table has no group left for this stream. Reset the
@@ -979,7 +985,7 @@ void tbt_pending_drain(struct tbt_session *sess)
     }
 }
 
-int tbt_stream_start(struct tbt_session *sess, struct socket *sock)
+int tbt_stream_start(struct tbt_session *sess, struct socket *sock, u8 slot)
 {
     struct tbt_pending *p;
 
@@ -987,6 +993,7 @@ int tbt_stream_start(struct tbt_session *sess, struct socket *sock)
     if (!p)
         return -ENOMEM;
     p->sock = sock;
+    p->slot = slot;
 
     spin_lock(&sess->lock);
     if (READ_ONCE(sess->closing))
@@ -1012,7 +1019,7 @@ int tbt_stream_start(struct tbt_session *sess, struct socket *sock)
 // ---------------------------------------------------------------------------
 // Far side: the stream bound to the target connection.
 
-void tbt_far_open_seen(struct tbt_stream *st)
+void tbt_far_open_seen(struct tbt_stream *st, u16 target_port)
 {
     struct tbt_session *sess = st->sess;
 
@@ -1029,6 +1036,10 @@ void tbt_far_open_seen(struct tbt_stream *st)
         spin_unlock(&sess->lock);
         return;
     }
+    /* Resolve the wire's target now, before any target work can read it.
+     * tbt_session_bind_sid() has already proven the port is configured. */
+    st->target_port = target_port ? target_port
+                                  : tbt_port_host16(sess->tunnel->cfg.target_port);
     WRITE_ONCE(st->state, TBT_ST_OPEN);
     spin_unlock(&sess->lock);
 

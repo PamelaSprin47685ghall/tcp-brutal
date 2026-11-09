@@ -28,6 +28,7 @@
 #include <net/sock.h>
 
 #include "tbtun.h"
+#include "tbt_map.h"
 #include "tbt_portmap.h"
 
 struct tbt_portmap tbt_ports = {
@@ -51,7 +52,7 @@ static const char *tbt_role_name(u8 role)
 
 static const char *tbt_state_name(const struct tbt_tunnel *t)
 {
-    if (t->lsock)
+    if (t->nlisteners)
         return "listening";
     return "idle";
 }
@@ -215,6 +216,13 @@ static bool tbt_cfg_sane(const struct tbt_cfg *c, int *err)
         *err = -EINVAL;
         return false;
     }
+    /* The parser already names the bad map entry; this is the kernel-side
+     * re-proof for any future caller that builds a struct tbt_cfg directly. */
+    if (tbt_map_check(c))
+    {
+        *err = -EINVAL;
+        return false;
+    }
     return true;
 }
 
@@ -330,6 +338,7 @@ int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net)
     struct tbt_tunnel *old, *t;
     int err = 0;
     bool listening = false;
+    u8 i;
 
     if (!tbt_cfg_sane(cfg, &err))
         return err;
@@ -359,7 +368,8 @@ int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net)
     // Initialised here, not in tbt_listen_start: the listening socket can
     // deliver data before start returns, and sk_data_ready would then
     // schedule an uninitialised work item.
-    INIT_WORK(&t->w_accept, tbt_accept_work);
+    for (i = 0; i < TBT_MAP_MAX; i++)
+        INIT_WORK(&t->listeners[i].w_accept, tbt_accept_work);
 
     if (old)
     {
@@ -389,7 +399,8 @@ int tbt_tunnel_add(const struct tbt_cfg *cfg, struct net *net)
     /* A connection accepted before the session exists would reach
      * tbt_stream_start(NULL, ...); enable accepting only now. */
     atomic_set(&t->accepting, 1);
-    schedule_work(&t->w_accept);
+    for (i = 0; i < t->nlisteners; i++)
+        schedule_work(&t->listeners[i].w_accept);
     mutex_unlock(&tbt_lock);
 
     /* The old tunnel is off the list and its listener is stopped. Destroy its
@@ -1004,7 +1015,7 @@ static struct tbt_fec_flow *tbt_session_open_flow(struct tbt_session *sess,
 }
 
 /* Bind one frame's sid to the session. OPEN may create the stream and, on a
- * FEC session, the flow its 32-byte body describes. A repeated OPEN is
+ * FEC session, the flow its leading 32-byte bitmap describes. A repeated OPEN is
  * idempotent only when it names the groups the flow already owns. DATA, FIN
  * and RST never create a stream.
  *
@@ -1016,13 +1027,29 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
     bool near = sess->tunnel->cfg.role == TBT_ROLE_NEAR;
     bool adopt = false, drop = false, tombstone_open = false;
     struct tbt_fec_flow *flow = NULL;
+    u16 target_port = 0;
 
     if (!sid)
         return TBT_BIND_DROP;
     /* The wire checker bounds an OPEN to this length too; the check here is
-     * the one the bitmap admission relies on. */
-    if (open && sess->fec && (!body || len != TBT_FEC_BITMAP_BYTES))
-        return TBT_BIND_BAD;
+     * the one the bitmap admission and the target authorization rely on. */
+    if (open)
+    {
+        if (!body || len != TBT_OPEN_BODY_LEN)
+            return TBT_BIND_BAD;
+        target_port = tbt_le16(body + TBT_OPEN_TARGET_PORT);
+        /* The far side is the security boundary: OPEN may name only a port
+         * this far tunnel already configured. 0 keeps the old "use target="
+         * intent. A bad name is dropped, never allowed to close the carrier:
+         * one forged OPEN must not take the session down. */
+        if (!near && !tbt_map_target_allowed(&sess->tunnel->cfg, target_port))
+        {
+            pr_warn_ratelimited("tbtun: tunnel %llu refused OPEN for unconfigured target port %u\n",
+                                (unsigned long long)sess->tunnel->cfg.id,
+                                target_port);
+            return TBT_BIND_DROP;
+        }
+    }
 
     spin_lock(&sess->lock);
     if (READ_ONCE(sess->closing))
@@ -1154,7 +1181,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
         {
             if (flow)
                 tbt_fec_flow_attach(ast, flow); /* moves the reference */
-            tbt_far_open_seen(ast);
+            tbt_far_open_seen(ast, target_port);
         }
         else if (flow)
         {

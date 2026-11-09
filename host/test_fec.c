@@ -2087,7 +2087,7 @@ static void test_wire_version(void)
 
     memset(hello, 0, sizeof(hello));
     hello[0] = TBT_WIRE_VERSION_V6;
-    ok(hello[0] == 4, "0.4.0 FEC HELLO names version 4", NULL);
+    ok(hello[0] == 5, "0.5.0 FEC HELLO names version 5", NULL);
     hello[0] = 2;
     ok(hello[0] != TBT_WIRE_VERSION_V6,
        "0.2.x HELLO version 2 is refused", NULL);

@@ -469,7 +469,9 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
         return tbt_rx_data(c, hdr, payload, len);
 
     case TBT_F_OPEN:
-        /* The body is the 32-byte group bitmap the flow admission uses. */
+        /* The body starts with the 32-byte group bitmap the flow admission
+         * uses; the trailing u16 is the target port bind checks and the far
+         * side authorizes. */
         return tbt_rx_bind_stream(c, hdr, true, payload, len);
 
     case TBT_F_FIN:

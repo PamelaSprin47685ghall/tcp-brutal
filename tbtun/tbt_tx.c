@@ -311,7 +311,7 @@ static void tbt_tx_announce_carrier(struct tbt_session *sess,
                                     struct tbt_stream *st,
                                     struct tbt_carrier *c, gfp_t gfp)
 {
-    u8 body[TBT_FEC_BITMAP_BYTES] = {0};
+    u8 body[TBT_OPEN_BODY_LEN] = {0};
     struct tbt_fec_flow *flow;
 
     if (!c || !atomic_read(&c->connected) || !READ_ONCE(c->hello_sent) ||
@@ -319,11 +319,14 @@ static void tbt_tx_announce_carrier(struct tbt_session *sess,
         return;
     if (tbt_stream_announced(st, c))
         return;
-    /* FEC: the OPEN body is this flow's physical group bitmap. A non-FEC
-     * session sends 32 zero bytes so one length rule covers both. */
+    /* FEC: the OPEN body starts with this flow's physical group bitmap. A
+     * non-FEC session sends 32 zero bytes so one length rule covers both.
+     * The trailing u16 names the mapping's target port; 0 means the far
+     * side's target= (the 0.4.0 behavior). */
     flow = READ_ONCE(st->fec_flow);
     if (sess->fec && flow)
-        memcpy(body, flow->group_mask, sizeof(body));
+        memcpy(body, flow->group_mask, TBT_FEC_BITMAP_BYTES);
+    tbt_put_le16(body + TBT_OPEN_TARGET_PORT, READ_ONCE(st->target_port));
     WRITE_ONCE(st->tx_open_sent, true);
     atomic_set(&c->up, 0);
     if (tbt_tx_control_pinned(sess, st, c->index, TBT_F_OPEN, st->sid, 0,
