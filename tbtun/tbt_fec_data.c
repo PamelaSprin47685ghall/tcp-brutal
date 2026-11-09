@@ -6494,6 +6494,7 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
         rx->alloc.pkt = a->switch_pkt;
         rx->alloc.block = a->block_base;
         rx->alloc_state = 2; /* armed */
+        rx->alloc_epoch = a->epoch;
         spin_unlock_bh(&rx->lock);
         tbt_session_arm(sess, TBT_SW_FEC_RX, 0);
         tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
@@ -6511,9 +6512,12 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
              * still sends on: release the old buffers and keep it. */
             spin_lock_bh(&rx->lock);
             if (READ_ONCE(tx->alloc.peer_committed) &&
-                rx->alloc_state == 3)
+                (rx->alloc_state == 3 || rx->alloc_old_codec))
             {
-                rx->alloc_state = 0;
+                if (rx->alloc_state == 3)
+                    rx->alloc_state = 0;
+                /* Let w_fec_rx free a rollback copy that a newer arm kept
+                 * past its epoch; state 2 alone owns no old plane. */
                 rx->alloc_commit_pending = true;
             }
             if (rx->alloc.epoch == a->epoch)
@@ -6613,6 +6617,9 @@ static void tbt_fec_rx_on_alloc(struct tbt_session *sess,
             {
                 rx->alloc = peer;
                 rx->alloc_state = 2;
+                /* The epoch is armed now: a duplicate of this ACK must not
+                 * look like an unknown future epoch (and be counted bad). */
+                rx->alloc_epoch = a->epoch;
             }
             else if (a->epoch > rx->alloc_epoch)
                 atomic64_inc(&sess->fec_alloc_bad);

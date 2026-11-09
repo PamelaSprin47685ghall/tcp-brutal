@@ -1465,10 +1465,30 @@ static inline u32 tbt_fec_alloc_sm_step(struct tbt_fec_alloc_sm *sm, u64 now,
     case TBT_FEC_ALLOC_WAIT:
     alloc_wait:
         if (sm->tx_swapped)
+        {
             sm->state = TBT_FEC_ALLOC_COMMIT;
+            sm->start_ns = now;
+        }
         else if (sm->peer_done)
             act |= TBT_FEC_ALLOC_ACT_SWAP;
-        if (now >= sm->start_ns +
+        /* A peer that never answers must not own this flow forever: after
+         * the round timeout the exchange aborts at the old mask. This is
+         * safe because no peer RX applied a mask we never swapped our TX
+         * to; the far restores its armed plane on the ABORT. */
+        if (sm->state == TBT_FEC_ALLOC_WAIT &&
+            now >= sm->start_ns +
+                       (u64)TBT_FEC_ALLOC_TIMEOUT_MS * TBT_FEC_NSEC_PER_MSEC &&
+            !sm->peer_done)
+        {
+            sm->state = TBT_FEC_ALLOC_ABORT;
+            sm->retries = 1;
+            sm->start_ns = now;
+            sm->last_send_ns = now;
+            act |= TBT_FEC_ALLOC_ACT_ABORT;
+            break;
+        }
+        if (sm->state == TBT_FEC_ALLOC_WAIT &&
+            now >= sm->start_ns +
                        (u64)TBT_FEC_ALLOC_TIMEOUT_MS * TBT_FEC_NSEC_PER_MSEC &&
             now >= sm->last_send_ns +
                        (u64)TBT_FEC_ALLOC_ABORT_MS * TBT_FEC_NSEC_PER_MSEC)
@@ -1486,6 +1506,19 @@ static inline u32 tbt_fec_alloc_sm_step(struct tbt_fec_alloc_sm *sm, u64 now,
     alloc_commit:
         if (!sm->tx_swapped || !sm->done_sent || !sm->peer_committed)
         {
+            /* Our TX already swapped, so an old-mask ABORT would misdescribe
+             * the wire; the only safe exit from a silent peer is to release
+             * the role and keep the new plane (both RX planes applied it).
+             * Without this, a lost COMMITTED held alloc_role forever. */
+            if (now >= sm->start_ns +
+                           (u64)TBT_FEC_ALLOC_TIMEOUT_MS *
+                               TBT_FEC_NSEC_PER_MSEC)
+            {
+                sm->state = TBT_FEC_ALLOC_FAILED;
+                act |= TBT_FEC_ALLOC_ACT_RESUME |
+                       TBT_FEC_ALLOC_ACT_FINISH;
+                break;
+            }
             /* The peer commits its TX only after our RX-applied DONE. A
              * single DONE that is lost would leave both sides waiting
              * (observed: responder ack_sent=1, hold=1, initiator COMMIT
