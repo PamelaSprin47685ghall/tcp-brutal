@@ -185,14 +185,21 @@ static inline void tbt_fec_adapt_bitmap_clear(
 }
 
 /* A carrier is alive when it is up, not stopping, TCP-established, and a
- * record arrived within max(4 RTT, 1 s). A carrier that never received has
- * last_rx_ns == 0 and is not alive. */
+ * record arrived within max(4 RTT, 4 s). A carrier that never received has
+ * last_rx_ns == 0 and is not alive.
+ *
+ * The floor was 1 s. A 256-carrier block gives each carrier one share per
+ * block, and the uplink's loss-repaired block interval approaches a second,
+ * so ten percent of the population looked dead between blocks and the FBK
+ * dropped P_VALID. Four seconds still names a dead carrier long before the
+ * 15 s stall bound; the stalled flag already covers a live-but-not-moving
+ * carrier. */
 static inline bool tbt_fec_adapt_carrier_alive(bool up, bool stopping,
                                                bool established, u64 now_ns,
                                                u64 last_rx_ns, u32 rtt_us)
 {
     u64 stale = (u64)rtt_us * 4000ull; /* 4 * rtt_us, in ns */
-    u64 limit = 1000ull * 1000ull * 1000ull;
+    u64 limit = 4000ull * 1000ull * 1000ull;
 
     if (stale > limit)
         limit = stale;
