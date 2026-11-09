@@ -717,10 +717,19 @@ out_unlock:
         struct tbt_carrier *c;
 
         if (!s || cmd->carrier >= s->n_car)
+        {
+            TBT_DIAG("carrier action tunnel=%llu carrier=%u skipped (sess=%d n_car=%u)",
+                     (unsigned long long)t->cfg.id, (unsigned)cmd->carrier,
+                     !!s, s ? (unsigned)s->n_car : 0u);
             continue;
+        }
         c = tbt_carrier_get(s, cmd->carrier);
         if (!c)
+        {
+            TBT_DIAG("carrier action tunnel=%llu carrier=%u skipped (no carrier object)",
+                     (unsigned long long)t->cfg.id, (unsigned)cmd->carrier);
             continue;
+        }
         if (cmd->carrier_action == TBT_CARRIER_DOWN)
         {
             /* Marking it down is what removes it from scheduling, counts
@@ -742,6 +751,10 @@ out_unlock:
         {
             WRITE_ONCE(c->drop_ppm, cmd->drop_ppm);
             WRITE_ONCE(s->fec_drop_ppm[cmd->carrier], cmd->drop_ppm);
+            TBT_DIAG("drop_ppm set tunnel=%llu carrier=%u value=%u sess_drop=%u",
+                     (unsigned long long)t->cfg.id, (unsigned)cmd->carrier,
+                     (unsigned)cmd->drop_ppm,
+                     (unsigned)READ_ONCE(s->fec_drop_ppm[cmd->carrier]));
             err = 0;
         }
         tbt_carrier_put(c);
