@@ -10,8 +10,8 @@
 # via a prio root qdisc and a u32 filter, so the ssh session and every other
 # flow on eth0 stay clean. --simple falls back to `root netem` (ssh included).
 #
-#   benches/adaptive/netem.sh --near root@192.168.123.82 \
-#       --far root@45.11.1.62 --near-ip 192.168.123.82 --far-ip 45.11.1.62 \
+#   benches/adaptive/netem.sh --near root@192.168.123.85 \
+#       --far root@45.11.1.62 --near-ip 192.168.123.85 --far-ip 45.11.1.62 \
 #       --carriers 32,64,256 --loss 0,1,3,5,10 --mode fixed,adaptive
 #
 #   --burst    add netem's 25% loss correlation (S11)

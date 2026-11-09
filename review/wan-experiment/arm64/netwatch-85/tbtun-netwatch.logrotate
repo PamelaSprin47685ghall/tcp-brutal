@@ -1,0 +1,10 @@
+/var/log/tbtun-watchdog.log {
+    daily
+    rotate 7
+    maxsize 10M
+    missingok
+    notifempty
+    compress
+    delaycompress
+    copytruncate
+}

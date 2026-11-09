@@ -43,8 +43,8 @@ ssh root@45.11.1.62 'SIZE_MIB=2048 FILE=accept-2g.bin sh /root/far-serve.sh --st
 先看计划，不连主机、不写任何东西：
 
 ```sh
-benches/adaptive/drop_ppm.sh --near root@192.168.123.82 --far root@45.11.1.62 \
-    --near-ip 192.168.123.82 --far-ip 45.11.1.62 --dry-run
+benches/adaptive/drop_ppm.sh --near root@192.168.123.85 --far root@45.11.1.62 \
+    --near-ip 192.168.123.85 --far-ip 45.11.1.62 --dry-run
 
 benches/adaptive/netem.sh  ... --dry-run --burst
 benches/adaptive/matrix.sh ... --dry-run --quick
