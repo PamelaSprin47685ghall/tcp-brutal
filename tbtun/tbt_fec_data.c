@@ -2518,7 +2518,10 @@ static int tbt_fec_send_alloc(struct tbt_session *sess, struct tbt_fec_flow *f,
     a.flags = flags;
     a.switch_pkt = switch_pkt;
     a.block_base = block_base;
-    if (tbt_fec_alloc_pack(&a, body))
+    /* pack() returns the body length on success, not 0: comparing it with
+     * true silently dropped every ALLOC record, so no exchange ever
+     * started. The host test pins the same contract. */
+    if (tbt_fec_alloc_pack(&a, body) != TBT_FEC_ALLOC_LEN)
         return -EINVAL;
     memset(&h, 0, sizeof(h));
     h.type = TBT_FEC_ALLOC;
