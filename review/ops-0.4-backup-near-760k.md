@@ -1,21 +1,29 @@
 # 760K（192.168.123.74）备用 near：操作步骤与回滚
 
 调查时间：2026-11-08 14:15 UTC。基线：`e723dff`。
-本轮**没有登录 `.74`，没有改任何配置**；只读取了本机 ARP、known_hosts 和仓库
-证据。下面每一步都给出只读检查、写操作和回滚。
+**实测更新（2026-11-09 13:02–13:05 CST）**：已在 `.74` 完成 root 免密、
+7.3.0-rc6 原生编译和 `45.11.1.62` 直达的实测，三项全部满足。边界：没有
+触碰 `.85` 与 `45.11.1.62` 的发布门负载，只向 `45.11.1.62` 发了 3 个
+ping；没有重启 mihomo，没有加载 tbtun.ko。下面保留操作步骤，每节的
+“实测”记录本轮结果。
 
 ## 1. 已知事实
 
 - `.74` 在本机 ARP 中 `REACHABLE`，MAC `94:de:80:be:00:22`。
+- 实测：root 免密已可用
+  （`ssh -o BatchMode=yes root@192.168.123.74 'id'` → `uid=0(root)`），
+  无需再装 key。
 - known_hosts 有 `.74` 的 ed25519 主机键
   `SHA256:FC60BmjSUvV2UIsINSyjnrtn18iN5eaBdYilyCcmLpU`，说明此前有人连过；
-  但**不能据此证明 root 免密可用**。
+  2026-11-09 实测 `BatchMode=yes` 登录成功，root 免密可用。
 - `review/0.3.2-scope-audit.md:154`：760K = `192.168.123.74`，AMD Athlon
   X4 760K；2026-11-06 在 `w-microbench` 做过 memcpy/XOR/GF(2) 微基准。
   没有 0.3.x tbtun 在 `.74` 的运行证据。
 - 本机 `~/.ssh/config` 没有 `.74` 的 Host 项；只有 `45.11.1.62` 和
   `192.168.123.84`。
-- 仓库的活动 near 默认值仍是 `.82`/`.65`，不是 `.85`；见
+- 仓库的活动 near 默认值已迁到 `.85`（`benches/adaptive/lib.sh`、
+  `review/wan-experiment/arm64/sclc-verify/verify-0.3.0.sh` 等）；
+  `prod-1g/run-1g.sh` 仍保留 `.65` 历史默认。迁移清单见
   `review/ops-0.4-ip85-migration.md`。
 
 ## 2. 只读就绪检查
@@ -38,7 +46,22 @@ ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=5 \
 期望 `0`、`x86_64`、以及一个明确的内核版本。`id -u` 不是 `0` 时，先读完
 第 3 节再决定是否装 key。
 
+实测（2026-11-09）：`id -u` 返回 `0`，`uname -r` 为
+`7.3.0-rc6-1-MANJARO`，`uname -m` 为 `x86_64`；
+`scripts/backup-near-check.sh` 的就绪项全部通过。
+
 ## 3. root 免密：检查、安装、回滚
+
+### 3.0 实测结论
+
+已满足，本轮不执行安装：
+
+- `ssh -o BatchMode=yes root@192.168.123.74 'id'` 返回 `uid=0(root)`。
+- 本机密钥 `~/.ssh/id_ed25519` 指纹
+  `SHA256:apK2E+1fSzd4puTTCFfqH6STRIpg6ZzSX+e5D8/vOu4` 验证通过。
+- `/root/.ssh/authorized_keys` 已有 5 行（含本机公钥），无需追加。
+
+下面的安装步骤只在换机或换钥时使用。
 
 检查失败时的最小安装（需要一次密码或串口/控制台）：
 ```
@@ -61,6 +84,23 @@ ssh -o BatchMode=yes -o StrictHostKeyChecking=yes \
 - 如果 `.74` 是共享主机，装 key 是安全变更，备用期结束后删除。
 
 ## 4. mihomo 对 `45.11.1.62` 的 DIRECT
+
+### 4.0 实测结果（2026-11-09）
+
+- mihomo Meta `v1.19.33`，TUN `auto-route`。
+- 原路由：`ip route get 45.11.1.62` →
+  `via 198.18.0.2 dev Meta table 2022 src 198.18.0.1`。
+- 配置 `/opt/mihomo/config.yaml` **已含**
+  `IP-CIDR,45.11.1.62/32,DIRECT`（sha256 `539f91c1…76492207`），
+  本轮没有改动配置。
+- 已执行 `ip rule add pref 100 to 45.11.1.62/32 lookup main`；现规则为
+  `100: from all to 45.11.1.62 lookup main`，优先级高于 mihomo 的
+  9000–9020。
+- 现路由：`45.11.1.62 via 192.168.123.254 dev enp2s0
+  src 192.168.123.74`，走物理网卡。
+- 可达性：`ping -c 3 -W 2 45.11.1.62` → 3/3 收到，270–310 ms。
+- 没有重启 mihomo；已有 frpc 连接 `192.168.123.74:55930 →
+  45.11.1.62:7000` 未受影响，新规则只作用于新流。
 
 目标：tbtun near 的 carrier 拨号必须走物理网卡，不能被 mihomo 的 TUN
 （Meta/198.18.0.1）劫持。仓库的既有做法是主机策略路由：
@@ -118,32 +158,37 @@ ip route get 45.11.1.62
 这条规则是仓库验证过的权威旁路；mihomo 的 DIRECT 只影响它自己的选路，
 不能保证 TUN `auto-route` 不抢先。
 
-### 4.4 持久化（可选但建议）
+### 4.4 持久化（已启用）
 
-`ip rule` 重启后消失。最简 oneshot：
-```
-# /etc/systemd/system/tbtun-far-bypass.service
-[Unit]
-Description=tbtun far bypass to 45.11.1.62
-After=network-online.target
-Wants=network-online.target
+实际落地（2026-11-09）：
 
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/sh -c "ip rule show | grep -q 'to 45.11.1.62/32 lookup main' || ip rule add to 45.11.1.62/32 lookup main pref 100"
-ExecStop=/bin/sh -c "ip rule del to 45.11.1.62/32 lookup main pref 100 2>/dev/null || true"
+- `/root/tbtun-bypass-far.sh`（0755）：幂等删/加 pref 100 规则、flush
+  cache，并打印 `ip route get`。
+- `/etc/systemd/system/tbtun-bypass-far.service`：`Type=oneshot`、
+  `After=mihomo.service`、`PartOf=mihomo.service`、
+  `WantedBy=multi-user.target`。
+- 状态：`enabled`、`active`、`Result=success`、`ExecMainStatus=0`。
+  开机自启；`systemctl restart mihomo` 会带动本单元重加强规则。
 
-[Install]
-WantedBy=multi-user.target
-```
-```
-systemctl daemon-reload
-systemctl enable --now tbtun-far-bypass.service
-```
-不要把它和 mihomo 的启动顺序做成强依赖；TUN 起来前规则存在没有坏处。
+`ip rule` 本身不持久，所以这条 unit 是持久化的唯一入口。
 
 ## 5. 作为 near 启动
+
+### 5.0 模块实测（2026-11-09）
+
+- 头文件：`/usr/lib/modules/7.3.0-rc6-1-MANJARO/build`
+  （`Module.symvers` 存在）。
+- 内核配置：`CONFIG_CC_IS_CLANG` 未启用（gcc 构建）；
+  `CONFIG_MODULE_SIG_FORCE` 未设。
+- 源码：commit `aceca3a060aaf408afa94b843f5f7c2e95c0f428`，用
+  `git archive | tar -x` 落到 `/tmp/tbt-760k-build`。
+- 构建：`make -j$(nproc) all` → EXIT 0，33.86 s。Makefile 没有
+  `tbtun.ko` 这个 target，直接用默认 target。
+- 产物：`/tmp/tbt-760k-build/tbtun.ko`，9.6 MiB，vermagic
+  `7.3.0-rc6-1-MANJARO SMP preempt mod_unload`，sha256
+  `2d3e740c2ea1aa296c17a77c9a5768399f45210fecca84d1abd3f2223cc616a3`。
+- 模块未签名；`CONFIG_MODULE_SIG_FORCE=n`，可以加载，但会 taint 内核。
+- 未执行 `insmod`：`lsmod` 无 tbtun，`/dev/tbtun` 不存在。
 
 前提：**同一时刻只有一个 near**。先停 `.85` 的 tunnel，或在 far 侧用不同的
 监听端口/隧道 id，避免两个 near 抢同一个 session。
@@ -174,6 +219,19 @@ carrier `up` 增长。不要在这台机器上同时跑微基准和 1 GiB，760K
 余量有限。
 
 ## 6. 回滚（顺序固定）
+
+### 6.1 本轮旁路的回滚（已落地）
+
+```
+systemctl disable --now tbtun-bypass-far.service
+ip rule del pref 100 to 45.11.1.62/32 lookup main
+# 可选：rm /root/tbtun-bypass-far.sh /etc/systemd/system/tbtun-bypass-far.service
+```
+
+mihomo 配置未修改，无需恢复；可用 4.0 节的 sha256 核对。frpc 连接未受
+影响。旁路规则只作用于新流，删除规则不会中断已建立的连接。
+
+### 6.2 备用 near 上线后的回滚
 
 ```
 # 1) 停 tunnel，等 1 s
@@ -208,3 +266,5 @@ ip route get 45.11.1.62
 - 两个 near 同时在线会让 far 的 session/端口冲突；先停 `.85`。
 - `.74` 是微基准机，可能有其他 CPU/网络负载；备用 near 的吞吐结论不能
   直接和 `.85` 对比。
+- 本轮只完成了待命就绪：没有重启 mihomo、没有加载 tbtun.ko；上述吞吐
+  与稳定性仍未在 `.74` 上实测。

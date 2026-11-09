@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # verify-0.3.0.sh - SC-LDPC 0.3.0 real-hardware acceptance.
 #
+# Historical 0.3.0 check. The default near address follows the current near
+# (.85); run records under results/ still name the .82 deployment. Pass
+# NEAR_HOST to reproduce an old run.
+#
 # The build agent has already deployed the module and joined the session.
 # This script judges that session: configuration, first connect, 256-carrier
 # steady state, then one 1 GiB single-stream transfer. It is single shot: a
@@ -23,7 +27,7 @@ set -uo pipefail
 
 PROG=${0##*/}
 MODE=run
-NEAR_HOST=${NEAR_HOST:-root@192.168.123.82}
+NEAR_HOST=${NEAR_HOST:-root@192.168.123.85}
 FAR_HOST=${FAR_HOST:-root@45.11.1.62}
 FAR_IP=${FAR_IP:-45.11.1.62}
 NEAR_PORT=${NEAR_PORT:-9001}
@@ -62,7 +66,7 @@ usage() {
 usage: $PROG [--run|--status|--cleanup] [--keep]
 
 Environment:
-  NEAR_HOST=root@192.168.123.82  FAR_HOST=root@45.11.1.62
+  NEAR_HOST=root@192.168.123.85  FAR_HOST=root@45.11.1.62
   WARMUP=20 MEASURE=60 ONE_G_MAX=7200
   KEEP=0    1: leave the deployment loaded/configured after the run
   EVIDENCE_ROOT=<repo>/review/wan-experiment/arm64

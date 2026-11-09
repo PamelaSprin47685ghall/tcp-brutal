@@ -70,7 +70,42 @@ git push origin refs/tags/v0.2.4
   不能把已存在的 annotated tag 原地改成 signed。
 - 本地 tag 不是发布证据；没有 push 就没有远端副本。
 
+### 1.4 正式处置结论（2026-11-09）
+
+- **保留本地 `v0.2.4` 不动**：不删除、不移动、不改指、不重签，也不推送。
+  它是 0.2.4 的本地历史标注，不属于 0.4.x 发布线。
+- 2026-11-09 复核：`git ls-remote --tags origin` 没有 `v0.2.4`；
+  `1b64df0` 不在 `master` 历史中。`git push --follow-tags` 从 0.4.x
+  分支不会带上它，但 `git push --tags` 会。
+- 发布时只推明确指定的 tag：
+  ```
+  git push origin refs/tags/v0.4.1
+  ```
+  不要使用 `git push --tags`。
+- 防误推工具：`scripts/pre-push-tag-guard.sh`。
+  - 发布前手动检查：`scripts/pre-push-tag-guard.sh origin`。它列出
+    `git push --tags` 会创建的 tag；`v0.2.4` 在列表内时退出 2。
+  - 可选 pre-push hook（linked worktree 也适用）：
+    ```
+    hook=$(git rev-parse --git-path hooks/pre-push)
+    mkdir -p "$(dirname "$hook")"
+    cat > "$hook" <<'EOF'
+    #!/bin/sh
+    root=$(git rev-parse --show-toplevel) || exit 1
+    exec "$root/scripts/pre-push-tag-guard.sh" --hook
+    EOF
+    chmod +x "$hook"
+    ```
+    hook 只在 `refs/tags/v0.2.4` 将被创建时拒绝推送，不改变任何 tag。
+  - 远端查询失败时脚本退出 3；此时同样不要用 `--tags`。
+- 如果将来需要 0.2.4 的修订，另打新 tag（如 `v0.2.4-<fix>`），不要复用
+  `v0.2.4`。
+
 ## 2. 本机 D 态重启
+
+本机是工作站（`linux 7.2.9-1-MANJARO`，不是 near）。2026-11-08 的检查
+发现 tbtun 在 teardown 后留下 D 态任务和损坏的模块引用计数；重启是本机
+唯一的干净退场路径。
 
 ### 2.1 现场证据
 
@@ -103,9 +138,10 @@ I，属于 btrfs endio，不是 tbtun 主因。
 `refcnt=-1`。本机是同一类 teardown 死锁：proc entry 已消失、模块引用计数
 损坏、rmmod 无法返回。
 
-### 2.2 只读检查
+### 2.2 重启前核查（只读）
 
 ```
+uname -r
 ps -eo pid,ppid,stat,wchan:32,comm,args --sort=pid | awk '$3 ~ /^D/'
 cat /sys/module/tbtun/refcnt
 ls -A /sys/module/tbtun/holders
@@ -122,7 +158,7 @@ scripts/local-dstate-check.sh --collect /var/tmp/tbtun-dstate-$(date -u +%Y%m%dT
 ```
 期望输出 `DSTATE_VERDICT REBOOT_REQUIRED`；退出码 2。
 
-### 2.3 清理/重启（不执行）
+### 2.3 重启（不自动执行）
 
 1. 停止所有新的 tbtun 测试。不要再次 `rmmod tbtun`，不要写
    `/proc/net/tbtun/config`，不要 `kill -9` D 态任务；这些只会增加新的
@@ -154,16 +190,41 @@ scripts/local-dstate-check.sh --collect /var/tmp/tbtun-dstate-$(date -u +%Y%m%dT
    echo b > /proc/sysrq-trigger
    ```
    仓库的 `.65` 设计明确写 `CONFIG_MAGIC_SYSRQ` 未编译；本机不要假设可用。
-6. 重启后复核：
-   ```
-   lsmod | grep '^tbtun' || echo tbtun-not-loaded
-   ls -ld /proc/net/tbtun 2>/dev/null || echo proc-gone
-   ps -eo pid,stat,comm,args | awk '$2 ~ /^D/'
-   ```
-   三者都干净后，才考虑重新构建/加载；在 0.4.x 修复 teardown 顺序前，不要
-   在本机重复加载。
+6. 重启后不要立即加载 tbtun；先完成 2.4 的全部核查。
 
-### 2.4 风险
+### 2.4 重启后核查（只读）
+
+**处置结论**：D 态任务不响应信号，`refcnt=-1` 没有安全的用户态卸载路径；
+`systemctl reboot` 是唯一正常退场，`reboot -f` 只在正常重启无效且能接受
+数据丢失时使用。重启前停止新测试，不要再次 `rmmod`、写
+`/proc/net/tbtun/config` 或 `kill -9` D 态任务。
+
+重启完成、能登录后先跑：
+```
+uname -r                                  # 期望 7.2.9-1-MANJARO
+lsmod | grep '^tbtun' || echo tbtun-not-loaded
+ls -ld /proc/net/tbtun 2>/dev/null || echo proc-gone
+cat /sys/module/tbtun/refcnt 2>/dev/null || echo module-gone
+ps -eo pid,ppid,stat,wchan:32,comm,args --sort=pid | awk '$3 ~ /^D/'
+scripts/local-dstate-check.sh
+dmesg -T | grep -E 'hung_task|tbtun|proc_entry_rundown' | tail -n 20
+journalctl -k -b --no-pager | grep -E 'hung_task|tbtun|proc_entry_rundown' | tail -n 20
+btrfs device stats / 2>/dev/null || true
+```
+
+判据：
+
+- `uname -r` 为 `7.2.9-1-MANJARO`（或重启后的新内核）。
+- `lsmod` 无 tbtun，`/proc/net/tbtun` 不存在，`refcnt` 读不到。
+- D 态扫描为空，`local-dstate-check.sh` 退出 0、`DSTATE_VERDICT OK`。
+- dmesg/journal 没有新的 `hung_task` 或 `proc_entry_rundown`。
+- btrfs stats 无新增错误；有错误先查盘，不要在故障窗口跑 scrub。
+
+以上全部满足，才重新构建并加载 0.4.x 模块。首次加载后先用一次 close
+（`del 1` 加 `rmmod`）验证 teardown，再恢复测试。0.4.x 的 teardown 修复
+已经落在 master（`aceca3a`、`5192dd0`）。
+
+### 2.5 风险
 
 - D 态任务不响应信号，`kill -9` 不能回收；等待不会自行恢复（已持续 7 天）。
 - 第二次 `rmmod` 可能再挂一个进程；再次写 `/proc/net/tbtun/config` 也可能
