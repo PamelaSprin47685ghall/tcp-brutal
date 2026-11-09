@@ -97,6 +97,11 @@ HOST_FEC_ADAPT_SCLC_HDRS := tbtun/tbt_fec_adapt_sclc.h tbtun/tbt_fec_adapt.h \
 HOST_FEC_SCLC   := host/test_fec_sclc
 HOST_FEC_SCLC_SRCS := host/test_fec_sclc.c tbtun/tbt_fec_sclc.c
 HOST_FEC_SCLC_HDRS := tbtun/tbt_fec_sclc.h tbtun/tbt_fec.h tbtun/tbt_uapi.h
+HOST_FEC_SCLC_LADDER := host/test_fec_sclc_ladder
+HOST_FEC_SCLC_LADDER_SRCS := host/test_fec_sclc_ladder.c tbtun/tbt_fec_sclc.c \
+                   tbtun/tbt_fec_adapt_sclc.c
+HOST_FEC_SCLC_LADDER_HDRS := tbtun/tbt_fec_sclc.h tbtun/tbt_fec_adapt_sclc.h \
+                   tbtun/tbt_fec_adapt.h tbtun/tbt_fec.h tbtun/tbt_uapi.h
 HOST_PORTMAP    := host/test_portmap
 HOST_PORTMAP_SRCS := host/test_portmap.c tbtun/tbt_portmap.c tbtun/tbt_parse.c \
                      tbtun/tbt_fec_adapt_sclc.c
@@ -123,6 +128,10 @@ HOST_FAULT_HDRS := tbtun/tbt_fec.h tbtun/tbt_crypto.h tbtun/tbt_uapi.h
 HOST_BENCH_SCLC := host/bench_sclc_uplink
 HOST_BENCH_SCLC_SRCS := host/bench_sclc_uplink.c tbtun/tbt_sc_ldpc.c \
                    tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c
+HOST_BENCH_SCLC_DOWN := host/bench_sclc_downlink
+HOST_BENCH_SCLC_DOWN_SRCS := host/bench_sclc_downlink.c tbtun/tbt_fec_sclc.c
+HOST_BENCH_SCLC_DOWN_HDRS := tbtun/tbt_fec_sclc.h tbtun/tbt_fec.h \
+                   tbtun/tbt_uapi.h
 SAN_CFLAGS      := -g -fsanitize=address,undefined -fno-omit-frame-pointer
 
 obj-m           += tbtun.o
@@ -142,7 +151,7 @@ ccflags-y       := -std=gnu99 -I$(src)/tbtun
 # variable must name the object path Kbuild sees for a composite module.
 CFLAGS_tbtun/tbt_crypto.o := -O3
 
-.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-live host-bench-micro host-bench-sclc bench bench-full
+.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-live host-bench-micro host-bench-sclc host-bench-sclc-down bench bench-full
 
 all:
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) modules
@@ -158,7 +167,7 @@ check:
 # root, no module and no kernel headers: the grammar test (tbt_parse.c), the
 # hostile-input test (tbt_rec.c + tbt_proto.c) and the HTTP container test
 # (tbt_http.c + tbt_proto.c).
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_LADDER) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
@@ -179,6 +188,7 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_FEC_ADAPT)
 	@./$(HOST_FEC_ADAPT_SCLC)
 	@./$(HOST_FEC_SCLC)
+	@./$(HOST_FEC_SCLC_LADDER)
 	@./$(HOST_PORTMAP)
 	@./$(HOST_LIFETIME)
 	@./$(HOST_SCLC)
@@ -294,6 +304,9 @@ $(HOST_FEC_ADAPT_SCLC): $(HOST_FEC_ADAPT_SCLC_SRCS) $(HOST_FEC_ADAPT_SCLC_HDRS)
 $(HOST_FEC_SCLC): $(HOST_FEC_SCLC_SRCS) $(HOST_FEC_SCLC_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_FEC_SCLC_SRCS)
 
+$(HOST_FEC_SCLC_LADDER): $(HOST_FEC_SCLC_LADDER_SRCS) $(HOST_FEC_SCLC_LADDER_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_FEC_SCLC_LADDER_SRCS)
+
 $(HOST_PORTMAP): $(HOST_PORTMAP_SRCS) $(HOST_PORTMAP_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_PORTMAP_SRCS)
 
@@ -315,9 +328,15 @@ host/test_fec_sclc_data_san: $(HOST_SCLC_DATA_SRCS) $(HOST_SCLC_DATA_HDRS)
 $(HOST_BENCH_SCLC): $(HOST_BENCH_SCLC_SRCS) $(HOST_SCLC_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_BENCH_SCLC_SRCS)
 
+$(HOST_BENCH_SCLC_DOWN): $(HOST_BENCH_SCLC_DOWN_SRCS) $(HOST_BENCH_SCLC_DOWN_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_BENCH_SCLC_DOWN_SRCS)
+
 host-bench-sclc: $(HOST_BENCH_SCLC)
 	@./$(HOST_BENCH_SCLC) 8 8 24 1 4 0.3
 	@./$(HOST_BENCH_SCLC) 8 8 24 1 4 0.4
+
+host-bench-sclc-down: $(HOST_BENCH_SCLC_DOWN)
+	@./$(HOST_BENCH_SCLC_DOWN)
 
 # The same tests with ASan and UBSan. A toolchain without the runtimes gets
 # a clear skip, not a build failure.
@@ -328,7 +347,7 @@ host-test-san:
 		echo "host-test-san: skipped, $(HOSTCC) cannot link -fsanitize=address,undefined"; \
 	fi
 
-host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san
+host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_ladder_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san
 	@./host/test_parse_san
 	@./host/test_fuzz_san
 	@./host/test_http_san
@@ -340,6 +359,7 @@ host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san hos
 	@./host/test_fec_adapt_san
 	@./host/test_fec_adapt_sclc_san
 	@./host/test_fec_sclc_san
+	@./host/test_fec_sclc_ladder_san
 	@./host/test_portmap_san
 	@./host/test_lifetime_san
 	@./host/test_sclc_uplink_san
@@ -383,6 +403,9 @@ host/test_fec_adapt_sclc_san: $(HOST_FEC_ADAPT_SCLC_SRCS) $(HOST_FEC_ADAPT_SCLC_
 host/test_fec_sclc_san: $(HOST_FEC_SCLC_SRCS) $(HOST_FEC_SCLC_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_FEC_SCLC_SRCS)
 
+host/test_fec_sclc_ladder_san: $(HOST_FEC_SCLC_LADDER_SRCS) $(HOST_FEC_SCLC_LADDER_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_FEC_SCLC_LADDER_SRCS)
+
 host/test_portmap_san: $(HOST_PORTMAP_SRCS) $(HOST_PORTMAP_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_PORTMAP_SRCS)
 
@@ -414,7 +437,7 @@ host-test-live: $(HOST_HTTP_LIVE)
 	fi
 
 clean: clean-dkms.conf clean-dkms-tarball
-	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_FAULT) $(HOST_BENCH_SCLC) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fault_san
+	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_LADDER) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_FAULT) $(HOST_BENCH_SCLC) $(HOST_BENCH_SCLC_DOWN) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_ladder_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fault_san
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
 
 load:

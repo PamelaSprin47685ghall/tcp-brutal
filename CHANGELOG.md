@@ -3,6 +3,32 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.5.0] - unreleased
+
+### Added
+
+- Downlink binary SC-LDPC now builds the full 256-share rate ladder:
+  64/192, 76/180, 102/154, 128/128, 151/105 and 178/78 (25/30/40/50/60/70
+  percent). The graph keeps `c = max(n, m)` parity variables and checks per
+  coupling block, payload degree 5 and check degree at most 7. For n > m the
+  extra parity variables are punctured: the encoder still computes them, the
+  decoder starts them as erasures, and only m parity shares are transmitted.
+  This keeps the underlying graph a strong rate-1/2-style SC-IRA code at
+  every point instead of raising the check degree with the rate.
+- The downlink `sclc_mask` opens all six ladder points, and FEC_CFG now
+  accepts every ladder n/m with `block=256`, `groups=1`, `n+m=256` and a
+  `k` that agrees with n/(n+m). Wire format `TBT_FEC_CONV 0x1007` is
+  unchanged: n/m, w/k/d/groups were already in the CFG body, and the
+  receiver derives the graph from them. Both ends must run 0.5.0 for an
+  adaptive downlink switch; an older peer NACKs the CFG and the controller
+  falls back, so the failure is safe.
+- `host/test_fec_sclc` now uses workload-independent process CPU time for
+  its throughput print. `host/test_fec_sclc_ladder` pins every split, the
+  one-share repair, the erasure threshold at each controller boundary, and
+  the suggested shapes for a 0/10/20/30/45 percent loss sweep.
+  `host/bench_sclc_downlink` reports wire and payload MB/s per point and
+  gates the wire rate at 250 MB/s when the host is not oversubscribed.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

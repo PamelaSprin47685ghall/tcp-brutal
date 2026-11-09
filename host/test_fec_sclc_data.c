@@ -98,10 +98,17 @@ static void case_shape_of(void)
     ok_u16(sh.L, TBT_FEC_SCLC_L_UP, "uplink default L");
     ok_u16(sh.rate_256, 64, "uplink rate in 1/256");
 
-    /* The binary codec's graph is 128+128; any other split of 256 shares is
-     * a shape error, not an allocation failure. */
-    ok_int(tbt_fec_sclc_shape_of(64, 192, 256, 0, 0, &sh), -EINVAL,
-           "downlink rejects a 64/192 split");
+    /* The binary codec builds every ladder split of the 256 shares. */
+    memset(&sh, 0, sizeof(sh));
+    ok_int(tbt_fec_sclc_shape_of(64, 192, 256, 0, 0, &sh), 0,
+           "downlink accepts a 64/192 split");
+    ok(sh.variant == TBT_FEC_SCLC_DOWN, "64/192 is the downlink variant");
+    ok_u16(sh.rate_ppm, 250, "64/192 rate");
+    ok_int(tbt_fec_sclc_shape_of(151, 105, 256, 0, 0, &sh), 0,
+           "downlink accepts a 151/105 split");
+    ok_u16(sh.rate_ppm, 589, "151/105 rate");
+    ok_int(tbt_fec_sclc_shape_of(127, 129, 256, 0, 0, &sh), -EINVAL,
+           "downlink rejects an off-ladder split");
     /* One group of fewer than 256 shares is neither shipped shape. */
     ok_int(tbt_fec_sclc_shape_of(4, 4, 8, 0, 0, &sh), -EINVAL,
            "one small group is not a shape");
@@ -604,12 +611,114 @@ static void case_short_block_parity(void)
     }
 }
 
+/* Every downlink ladder split must survive the grouped factory path the
+ * module uses: shape resolution -> tbt_fec_grouped_new_ops -> codec. */
+static void case_downlink_ladder(void)
+{
+    static const struct
+    {
+        uint16_t n, m, k;
+    } rate[6] = {
+        {64, 192, 250}, {76, 180, 296}, {102, 154, 398},
+        {128, 128, 500}, {151, 105, 589}, {178, 78, 695},
+    };
+    int r;
+
+    for (r = 0; r < 6; r++)
+    {
+        struct tbt_fec_sclc_shape sh;
+        struct tbt_fec_grouped *tx, *rx;
+        uint8_t **data, **parity, **rxdata, **rxparity;
+        uint8_t *pd, *pp;
+        uint16_t n = rate[r].n, m = rate[r].m;
+        int i, rc;
+
+        memset(&sh, 0, sizeof(sh));
+        ok_int(tbt_fec_sclc_shape_of(n, m, 256, 0, 0, &sh), 0,
+               "ladder shape resolves");
+        ok_u16(sh.rate_ppm, rate[r].k, "ladder rate");
+        tx = tbt_fec_grouped_new_ops(&tbt_fec_ops_sclc, 1, n, m,
+                                     sh.rate_ppm, sh.block, TBT_FEC_S, 0,
+                                     0x7000u + (unsigned)r);
+        ok(tx != NULL, "ladder tx factory builds");
+        if (!tx)
+            continue;
+        rx = tbt_fec_grouped_new_ops(&tbt_fec_ops_sclc, 1, n, m,
+                                     sh.rate_ppm, sh.block, TBT_FEC_S, 0,
+                                     0x7000u + (unsigned)r);
+        ok(rx != NULL, "ladder rx factory builds");
+        if (!rx)
+        {
+            tbt_fec_grouped_free(tx);
+            continue;
+        }
+        data = calloc(n, sizeof(*data));
+        parity = calloc(m, sizeof(*parity));
+        rxdata = calloc(n, sizeof(*rxdata));
+        rxparity = calloc(m, sizeof(*rxparity));
+        pd = calloc(n, 1);
+        pp = calloc(m, 1);
+        ok(data && parity && rxdata && rxparity && pd && pp,
+           "ladder buffers");
+        if (!(data && parity && rxdata && rxparity && pd && pp))
+            return;
+        for (i = 0; i < n; i++)
+        {
+            data[i] = calloc(1, TBT_FEC_S);
+            rxdata[i] = calloc(1, TBT_FEC_S);
+            ok(data[i] && rxdata[i], "ladder data buffer");
+            fill_pattern(data[i], TBT_FEC_S, (uint32_t)(i + 1 + r));
+        }
+        for (i = 0; i < m; i++)
+        {
+            parity[i] = calloc(1, TBT_FEC_S);
+            rxparity[i] = calloc(1, TBT_FEC_S);
+            ok(parity[i] && rxparity[i], "ladder parity buffer");
+        }
+        ok_int(tbt_fec_grouped_encode(tx, 0, data, n, parity), 0,
+               "ladder encode");
+        memset(pd, 1, n);
+        memset(pp, 1, m);
+        for (i = 0; i < n; i++)
+            if (i != 3)
+                memcpy(rxdata[i], data[i], TBT_FEC_S);
+        for (i = 0; i < m; i++)
+            memcpy(rxparity[i], parity[i], TBT_FEC_S);
+        pd[3] = 0;
+        rc = tbt_fec_grouped_decode(rx, 0, rxdata, rxparity, pd, pp, n);
+        ok(rc >= 0, "ladder decode returns a count");
+        ok(tbt_fec_grouped_is_known(rx, 0, 3) != 0,
+           "ladder lost share is known");
+        ok(memcmp(rxdata[3], data[3], TBT_FEC_S) == 0,
+           "ladder recovered share is byte-exact");
+        tbt_fec_grouped_free(rx);
+        tbt_fec_grouped_free(tx);
+        for (i = 0; i < n; i++)
+        {
+            free(data[i]);
+            free(rxdata[i]);
+        }
+        for (i = 0; i < m; i++)
+        {
+            free(parity[i]);
+            free(rxparity[i]);
+        }
+        free(data);
+        free(parity);
+        free(rxdata);
+        free(rxparity);
+        free(pd);
+        free(pp);
+    }
+}
+
 int main(void)
 {
     case_shape_of();
     case_cfg_roundtrip();
     case_init_shape_from_cfg();
     case_downlink_roundtrip();
+    case_downlink_ladder();
     case_uplink_roundtrip();
     case_rlnc_dispatch();
     case_short_block_parity();

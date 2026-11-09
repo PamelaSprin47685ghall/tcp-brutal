@@ -1579,7 +1579,12 @@ static void case_init_plan(void)
                                              TBT_FEC_SCLC_DOWN, &idx, &mask),
            0, "plan: downlink");
     eq_u32(idx, 3, "plan: downlink index");
-    eq_u32(mask, 1u << 3, "plan: downlink mask");
+    eq_u32(mask, (1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u,
+           "plan: downlink supports the ladder");
+    eq_u32((u32)tbt_fec_adapt_sclc_init_plan(151, 105, 1,
+                                             TBT_FEC_SCLC_DOWN, &idx, &mask),
+           0, "plan: downlink rate 60");
+    eq_u32(idx, 4, "plan: downlink rate 60 index");
 
     eq_u32((u32)tbt_fec_adapt_sclc_init_plan(8, 24, 8, TBT_FEC_SCLC_UP,
                                              &idx, &mask),
@@ -1660,6 +1665,9 @@ static void case_rate_mask(void)
 
     eq_u32(tbt_fec_adapt_sclc_max_side(256, 1u << 3), 128,
            "max side: downlink rate 50");
+    eq_u32(tbt_fec_adapt_sclc_max_side(256,
+                                       (1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u),
+           192, "max side: downlink full ladder");
     eq_u32(tbt_fec_adapt_sclc_max_side(32, 0), 24,
            "max side: uplink all rates");
     eq_u32(tbt_fec_adapt_sclc_max_side(32, 1u << 5), 22,
@@ -1767,7 +1775,25 @@ static void case_wire_profile(void)
     cfg.n = 127;
     cfg.m = 129;
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
-           "wire: downlink needs 128/128");
+           "wire: off-ladder downlink split rejected");
+    cfg.n = 151;
+    cfg.m = 105;
+    cfg.w = 256;
+    cfg.k = 589;
+    cfg.d = 0;
+    cfg.groups = 1;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), 0,
+           "wire: rate 60 downlink accepted");
+    eq_u32(w.rate_pct, 60, "wire: rate 60 label");
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_to_cfg(&w, 9,
+                                               TBT_FEC_CFG_F_APPLY, &back),
+           0, "wire: rate 60 downlink to cfg");
+    eq_u32(back.n, 151, "wire: rate 60 cfg n");
+    eq_u32(back.m, 105, "wire: rate 60 cfg m");
+    eq_u32(back.k, 589, "wire: rate 60 cfg k");
+    cfg.k = 590;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
+           "wire: downlink k must agree with n/m");
     cfg.n = 128;
     cfg.m = 128;
     cfg.w = 512;

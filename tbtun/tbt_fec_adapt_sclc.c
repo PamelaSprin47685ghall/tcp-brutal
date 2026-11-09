@@ -73,8 +73,10 @@ int tbt_fec_adapt_sclc_init_plan(u16 n, u16 m, u16 groups, u8 variant,
         return -1;
     if (i != 0xff)
     {
+        /* The binary downlink builds every ladder split: the graph keeps a
+         * rate-1/2-style check degree and punctures parity above 50%. */
         if (variant == TBT_FEC_SCLC_DOWN && groups == 1)
-            msk = (u8)(1u << i);
+            msk = (u8)((1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u);
         else if (variant == TBT_FEC_SCLC_UP && groups > 1)
             msk = (u8)((1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u);
         else
@@ -146,9 +148,13 @@ int tbt_fec_adapt_sclc_wire_of_cfg(const struct tbt_fec_cfg *cfg,
         block = cfg->w;
         L = TBT_FEC_SCLC_L_DOWN;
         if (cfg->groups != 1 || shares != TBT_FEC_MAX_SHARES ||
-            cfg->n != TBT_FEC_MAX_SHARES / 2 ||
-            cfg->m != TBT_FEC_MAX_SHARES / 2 ||
-            block != TBT_FEC_SCLC_BLOCK_DOWN)
+            block != TBT_FEC_SCLC_BLOCK_DOWN ||
+            !tbt_fec_sclc_down_split(cfg->n, cfg->m))
+            return -1;
+        /* k is the codec rate in parts per thousand. It must agree with
+         * n/(n+m), or the receiver would build a graph the sender did not
+         * name. */
+        if (cfg->k != (u16)((u32)cfg->n * 1000u / shares))
             return -1;
     }
     else if (cfg->k > cfg->w)

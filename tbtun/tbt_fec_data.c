@@ -5102,9 +5102,10 @@ static u16 tbt_fec_sclc_rec_slots(const struct tbt_fec_cfg *cfg, u16 shares)
         return side;
     if (tbt_fec_adapt_sclc_wire_of_cfg(cfg, (u16)(cfg->groups * shares), &w))
         return side;
-    mask = w.kind == TBT_FEC_SCLC_DOWN
-               ? (u8)(1u << 3)
-               : (u8)((1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u);
+    /* A rate switch changes n/m but not the arena, so size the recovered
+     * slots for the largest side over every ladder point the codec builds.
+     * The downlink now builds all of them. */
+    mask = (u8)((1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u);
     sc = tbt_fec_adapt_sclc_max_side(shares, mask);
     return sc > side ? sc : side;
 }
@@ -7564,8 +7565,8 @@ int tbt_fec_data_init(struct tbt_session *sess)
             d = sclc.rate_256;
         }
         /* The controller starts at the configured ladder point and may move
-         * only to the points this codec can build. The binary downlink is
-         * fixed at 128/128; the GF(16) uplink builds every ladder split. */
+         * only to the points this codec can build. Both the binary downlink
+         * and the GF(16) uplink build every ladder split. */
         if (tbt_fec_adapt_sclc_init_plan(n, m, groups, sclc.variant,
                                          &sclc_idx, &sclc_mask) &&
             READ_ONCE(sess->adaptive))

@@ -1688,9 +1688,15 @@ int main(void)
         ok(!strcmp(once, twice), "uplink adaptive line is a fixed point",
            twice);
 
-        refuse("sc-ldpc adaptive: downlink n/m",
+        parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+              " n=64 m=192 fec=on mode=sc-ldpc adaptive=on carriers=256",
+              &cmd, &perr);
+        ok(cmd.cfg.adaptive == 1 && cmd.cfg.mode == 3 &&
+               cmd.cfg.n == 64 && cmd.cfg.m == 192 && cmd.cfg.w == 256,
+           "adaptive", "downlink 25% accepted");
+        refuse("sc-ldpc adaptive: downlink off-ladder n/m",
                "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-               " n=64 m=192 fec=on mode=sc-ldpc adaptive=on carriers=256",
+               " n=127 m=129 fec=on mode=sc-ldpc adaptive=on carriers=256",
                TBT_PARSE_EINVAL, "adaptive", "supported profile");
         refuse("sc-ldpc adaptive: downlink block",
                "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"

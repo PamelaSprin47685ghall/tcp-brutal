@@ -2944,9 +2944,16 @@ static void test_sclc_wire_profiles(void)
            sh.rate_ppm == 250 && sh.rate_256 == 64,
        "sclc cfg up: profile", NULL);
 
-    /* A binary shape with a non-128/128 split is refused by the resolver. */
+    /* The binary resolver accepts every ladder split and refuses the rest. */
     c.n = 64;
     c.m = 192;
+    c.k = 250;
+    ok_int(tbt_fec_sclc_shape_of_cfg(&c, 256, &sh), 0,
+           "sclc cfg down: 25% split");
+    ok(sh.variant == TBT_FEC_SCLC_DOWN && sh.rate_ppm == 250,
+       "sclc cfg down: 25% profile", NULL);
+    c.n = 127;
+    c.m = 129;
     ok_int(tbt_fec_sclc_shape_of_cfg(&c, 256, &sh), -EINVAL,
            "sclc cfg down: bad split");
 
