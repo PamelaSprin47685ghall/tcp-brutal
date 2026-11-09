@@ -233,8 +233,26 @@ static void tbt_tunnel_inherit_crypto(struct tbt_tunnel *t,
 {
     struct tbt_session *s = old->sess;
 
-    if (!s || !t->cfg.crypto || t->cfg.role != old->cfg.role)
+    if (!t->cfg.crypto || t->cfg.role != old->cfg.role)
         return;
+    if (!s)
+    {
+        /* The old session is already gone; the tunnel-level key and nonce
+         * are the only state that can keep the far side's pin valid. */
+        if (old->crypto_key_inherit_valid)
+        {
+            memcpy(t->crypto_key_inherit, old->crypto_key_inherit,
+                   sizeof(t->crypto_key_inherit));
+            t->crypto_key_inherit_valid = true;
+        }
+        if (old->crypto_tx_nonce_inherit_valid)
+        {
+            memcpy(t->crypto_tx_nonce_inherit, old->crypto_tx_nonce_inherit,
+                   sizeof(t->crypto_tx_nonce_inherit));
+            t->crypto_tx_nonce_inherit_valid = true;
+        }
+        return;
+    }
     spin_lock(&s->lock);
     if (s->crypto)
     {
@@ -242,13 +260,31 @@ static void tbt_tunnel_inherit_crypto(struct tbt_tunnel *t,
                sizeof(t->crypto_tx_nonce_inherit));
         t->crypto_tx_nonce_inherit_valid = true;
     }
-    if (t->cfg.role == TBT_ROLE_NEAR && !t->cfg.crypto_key_set &&
-        s->crypto_have_key && !s->crypto_key_peer &&
-        s->crypto_key_id == TBT_CRYPTO_KEY_ID_HELLO)
+    else if (old->crypto_tx_nonce_inherit_valid)
     {
-        memcpy(t->crypto_key_inherit, s->crypto_key,
-               sizeof(t->crypto_key_inherit));
-        t->crypto_key_inherit_valid = true;
+        memcpy(t->crypto_tx_nonce_inherit, old->crypto_tx_nonce_inherit,
+               sizeof(t->crypto_tx_nonce_inherit));
+        t->crypto_tx_nonce_inherit_valid = true;
+    }
+    if (t->cfg.role == TBT_ROLE_NEAR && !t->cfg.crypto_key_set)
+    {
+        bool got = false;
+
+        if (s->crypto_have_key && !s->crypto_key_peer &&
+            s->crypto_key_id == TBT_CRYPTO_KEY_ID_HELLO)
+        {
+            memcpy(t->crypto_key_inherit, s->crypto_key,
+                   sizeof(t->crypto_key_inherit));
+            got = true;
+        }
+        if (!got && old->crypto_key_inherit_valid)
+        {
+            memcpy(t->crypto_key_inherit, old->crypto_key_inherit,
+                   sizeof(t->crypto_key_inherit));
+            got = true;
+        }
+        if (got)
+            t->crypto_key_inherit_valid = true;
     }
     spin_unlock(&s->lock);
 }
@@ -1513,6 +1549,7 @@ int tbt_session_create(struct tbt_tunnel *t)
      * advertises it with key_id=1. The far side learns it from the near's
      * HELLO before its own TX context can be initialized. */
     s->crypto = t->cfg.crypto;
+    bool inherited_key = false;
     if (t->cfg.crypto_key_set)
     {
         memcpy(s->crypto_key, t->cfg.crypto_key, sizeof(s->crypto_key));
@@ -1532,17 +1569,27 @@ int tbt_session_create(struct tbt_tunnel *t)
             memcpy(s->crypto_tx_nonce, t->crypto_tx_nonce_inherit,
                    sizeof(s->crypto_tx_nonce));
         else
+        {
             get_random_bytes(s->crypto_tx_nonce, sizeof(s->crypto_tx_nonce));
+            memcpy(t->crypto_tx_nonce_inherit, s->crypto_tx_nonce,
+                   sizeof(t->crypto_tx_nonce_inherit));
+            t->crypto_tx_nonce_inherit_valid = true;
+        }
         if (t->cfg.role == TBT_ROLE_NEAR && !s->crypto_have_key)
         {
-            /* The same rule for the key the far side adopted from us. Only a
-             * tunnel with no predecessor, or an explicit delete and re-add,
-             * generates a fresh key. */
-            if (t->crypto_key_inherit_valid)
-                memcpy(s->crypto_key, t->crypto_key_inherit,
-                       sizeof(s->crypto_key));
-            else
+            /* The tunnel owns the generated key: the first near session
+             * creates it, every later session for this tunnel reuses it. A
+             * fresh key would make the far reject every new HELLO. */
+            inherited_key = tbt_crypto_key_inherit(
+                s->crypto_key, t->crypto_key_inherit,
+                t->crypto_key_inherit_valid);
+            if (!inherited_key)
+            {
                 get_random_bytes(s->crypto_key, sizeof(s->crypto_key));
+                memcpy(t->crypto_key_inherit, s->crypto_key,
+                       sizeof(t->crypto_key_inherit));
+                t->crypto_key_inherit_valid = true;
+            }
             s->crypto_have_key = true;
             s->crypto_key_id = TBT_CRYPTO_KEY_ID_HELLO;
         }
@@ -1555,7 +1602,7 @@ int tbt_session_create(struct tbt_tunnel *t)
             TBT_DIAG("crypto tx init tunnel=%llu key_id=%u source=%s rc=%d nonce=%*phN",
                      (unsigned long long)t->cfg.id, s->crypto_key_id,
                      t->cfg.crypto_key_set ? "configured" :
-                     t->crypto_key_inherit_valid ? "inherited" : "generated",
+                     inherited_key ? "inherited" : "generated",
                      rc,
                      TBT_CRYPTO_NONCE_LEN, s->crypto_tx_nonce);
         }

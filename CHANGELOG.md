@@ -7,6 +7,11 @@ and moves independently of the module version.
 
 ### Fixed
 
+- Near-side generated crypto keys are now tunnel-level. The first near
+  session stores its generated key and TX nonce in the tunnel; every later
+  session for that tunnel copies them (`source=inherited`) instead of
+  generating a fresh key. This keeps the far side's pinned key valid across
+  session/stream churn and removes the G1 `crypto key changed` HELLO rejects.
 - TX path masks now cover all 256 carriers. `struct tbt_frame.avoid_mask` is
   a 256-bit bitmap, the scheduler folds it without a u16 shift, and the
   retain bookkeeping is guarded to its legacy 16 slots. This removes the
