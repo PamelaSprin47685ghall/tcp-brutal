@@ -23,6 +23,9 @@ SRCS            := Makefile \
                    tbtun/tbt_sc_ldpc.h tbtun/tbt_sc_ldpc_gf16.h tbtun/tbt_sclc_uplink.h \
                    scripts/mkdkmsconf.sh scripts/install_dkms.sh \
                    .clang-format
+# scripts/install_dkms.sh stages these beside tbtun/*.c and *.h. A staged
+# tree cannot configure itself if one of them leaves SRCS.
+DKMS_STAGE_FILES := Makefile .clang-format scripts/mkdkmsconf.sh scripts/install_dkms.sh
 FORMAT_SRCS     := $(filter %.c %.h,$(SRCS))
 
 HOSTCC          ?= cc
@@ -166,7 +169,7 @@ all:
 
 # One command for a human: resolves the header payload, prints the make line it
 # runs, then builds the module and runs all host tests (docs/build-env.md).
-check:
+check: dkms-srcs-check
 	@if [ -x ./scripts/build.sh ]; then ./scripts/build.sh; else \
 		$(MAKE) KERNEL_DIR=$(KERNEL_DIR) all; fi
 	@$(MAKE) --no-print-directory host-test
@@ -485,13 +488,27 @@ clean-dkms.conf:
 
 # A DKMS tarball must be buildable on a machine that has never seen this tree,
 # so every module source has to be in SRCS. Catch a new file that was not added
-# before the archive is written, not on the target machine.
+# before the archive is written, not on the target machine. The same gate
+# rejects a stale SRCS entry and a staging file that lost its SRCS entry.
 dkms-srcs-check:
 	@missing=$$(find tbtun \( -name '*.c' -o -name '*.h' \) | sort | while IFS= read -r f; do \
 		case " $(SRCS) " in *" $$f "*) ;; *) printf '%s\n' "$$f" ;; esac; done); \
 	if [ -n "$$missing" ]; then \
 		echo "dkms-srcs-check: SRCS omits:" >&2; \
 		printf '%s\n' "$$missing" >&2; \
+		exit 1; \
+	fi; \
+	absent=$$(for f in $(SRCS); do [ -e "$$f" ] || printf '%s\n' "$$f"; done); \
+	if [ -n "$$absent" ]; then \
+		echo "dkms-srcs-check: SRCS names missing files:" >&2; \
+		printf '%s\n' "$$absent" >&2; \
+		exit 1; \
+	fi; \
+	unlisted=$$(for f in $(DKMS_STAGE_FILES); do \
+		case " $(SRCS) " in *" $$f "*) ;; *) printf '%s\n' "$$f" ;; esac; done); \
+	if [ -n "$$unlisted" ]; then \
+		echo "dkms-srcs-check: SRCS omits a staged file:" >&2; \
+		printf '%s\n' "$$unlisted" >&2; \
 		exit 1; \
 	fi
 
