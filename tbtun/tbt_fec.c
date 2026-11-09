@@ -486,6 +486,13 @@ int tbt_fec_alloc_unpack(const u8 in[TBT_FEC_ALLOC_LEN],
     a->flags = in[TBT_FEC_ALLOC_FLAGS];
     if (a->flags & ~TBT_FEC_ALLOC_F_MASK)
         return -EPROTO;
+    /* Reserved bytes are covered by the CRC, but a peer that fills them is
+     * speaking a body this version does not understand: refuse it instead of
+     * silently ignoring the extension. */
+    if (in[TBT_FEC_ALLOC_RESERVED] || in[TBT_FEC_ALLOC_RESERVED + 1] ||
+        in[TBT_FEC_ALLOC_RESERVED + 2] ||
+        tbt_get_u32(in + TBT_FEC_ALLOC_RESERVED2))
+        return -EPROTO;
     a->switch_pkt = tbt_get_u64(in + TBT_FEC_ALLOC_SWITCH_PKT);
     a->block_base = tbt_get_u64(in + TBT_FEC_ALLOC_BLOCK_BASE);
     a->crc32c = tbt_get_u32(in + TBT_FEC_ALLOC_CRC);

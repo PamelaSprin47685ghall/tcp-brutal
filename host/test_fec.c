@@ -1003,6 +1003,26 @@ static void test_alloc(void)
     ok_int(tbt_fec_alloc_pack(&a, NULL), -EINVAL, "ALLOC pack NULL out");
     ok_int(tbt_fec_alloc_unpack(NULL, &a2), -EPROTO, "ALLOC unpack NULL");
 
+    /* Reserved bytes are inside the CRC but there is no extension bit: a
+     * peer that fills them speaks a body this version must refuse. */
+    tbt_fec_alloc_pack(&a, buf);
+    buf[TBT_FEC_ALLOC_RESERVED] = 1;
+    alloc_fix_crc(buf);
+    ok_int(tbt_fec_alloc_unpack(buf, &a2), -EPROTO, "ALLOC reserved byte");
+    tbt_fec_alloc_pack(&a, buf);
+    buf[TBT_FEC_ALLOC_RESERVED2] = 1;
+    alloc_fix_crc(buf);
+    ok_int(tbt_fec_alloc_unpack(buf, &a2), -EPROTO, "ALLOC reserved2");
+
+    /* One gate for the raw and HTTP carrier paths: ALLOC must be inside it. */
+    ok(tbt_fec_record_type(TBT_FEC_DATA), "FEC type gate accepts DATA", NULL);
+    ok(tbt_fec_record_type(TBT_FEC_ALLOC), "FEC type gate accepts ALLOC",
+       NULL);
+    ok(!tbt_fec_record_type((u8)(TBT_FEC_ALLOC + 1)),
+       "FEC type gate rejects 0x37", NULL);
+    ok(!tbt_fec_record_type((u8)(TBT_FEC_DATA - 1)),
+       "FEC type gate rejects 0x2f", NULL);
+
     /* Header gate: exactly 64 bytes, sid != 0, seq and block_id zero. */
     h = ctl_hdr(TBT_FEC_ALLOC, TBT_FEC_ALLOC_LEN);
     h.sid = 7;

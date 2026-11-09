@@ -971,6 +971,7 @@ struct pump
     pid_t pid;
     int stop_fd;
     int res_fd;
+    int pause_fd;
     const char *tag;
 };
 
@@ -1058,14 +1059,20 @@ static int pump_read(int cfd, int stop_fd, uint32_t seed,
     return 0;
 }
 
-static void pump_child(int stop_fd, int res_fd, uint32_t seed)
+static void pump_child(int stop_fd, int pause_fd, int res_fd, uint32_t seed)
 {
     struct pump_res r;
-    int cfd;
+    int cfd, paused = 0;
     unsigned long long off = 0;
 
     memset(&r, 0, sizeof(r));
     alarm(0);
+    {
+        int fl = fcntl(pause_fd, F_GETFL);
+
+        if (fl >= 0)
+            (void)fcntl(pause_fd, F_SETFL, fl | O_NONBLOCK);
+    }
     cfd = connect_client();
     if (cfd < 0)
     {
@@ -1075,8 +1082,21 @@ static void pump_child(int stop_fd, int res_fd, uint32_t seed)
     for (;;)
     {
         struct pollfd p;
+        char ctrl;
         size_t sent = 0, got = 0;
 
+        while (read(pause_fd, &ctrl, 1) == 1)
+            paused = ctrl == 'p';
+        if (paused)
+        {
+            /* Idle donor: no new app bytes, so the reverse direction drains
+             * and the next ALLOC switch sees an idle plane. */
+            p.fd = pause_fd;
+            p.events = POLLIN;
+            p.revents = 0;
+            (void)poll(&p, 1, 100);
+            continue;
+        }
         p.fd = stop_fd;
         p.events = POLLIN;
         p.revents = 0;
@@ -1196,9 +1216,9 @@ out:
 
 static void spawn_pump(struct pump *p, const char *tag, uint32_t seed)
 {
-    int sp[2], rp[2];
+    int sp[2], rp[2], pp[2];
 
-    if (pipe(sp) || pipe(rp))
+    if (pipe(sp) || pipe(rp) || pipe(pp))
         verdict_fail("%s: pipe: %s", tag, strerror(errno));
     p->pid = fork();
     if (p->pid < 0)
@@ -1207,12 +1227,15 @@ static void spawn_pump(struct pump *p, const char *tag, uint32_t seed)
     {
         close(sp[1]);
         close(rp[0]);
-        pump_child(sp[0], rp[1], seed);
+        close(pp[1]);
+        pump_child(sp[0], pp[0], rp[1], seed);
     }
     close(sp[0]);
     close(rp[1]);
+    close(pp[0]);
     p->stop_fd = sp[1];
     p->res_fd = rp[0];
+    p->pause_fd = pp[1];
     p->tag = tag;
 }
 
@@ -1221,6 +1244,20 @@ static void stop_pump(struct pump *p)
     char one = 1;
 
     (void)!write(p->stop_fd, &one, 1);
+}
+
+static void pause_pump(struct pump *p)
+{
+    char c = 'p';
+
+    (void)!write(p->pause_fd, &c, 1);
+}
+
+static void resume_pump(struct pump *p)
+{
+    char c = 'r';
+
+    (void)!write(p->pause_fd, &c, 1);
 }
 
 static void join_pump(struct pump *p, unsigned long long min_bytes)
@@ -1240,6 +1277,7 @@ static void join_pump(struct pump *p, unsigned long long min_bytes)
     }
     close(p->stop_fd);
     close(p->res_fd);
+    close(p->pause_fd);
     if (waitpid(p->pid, &status, 0) != p->pid)
         verdict_fail("%s: waitpid: %s", p->tag, strerror(errno));
     if (off != sizeof(r) || !r.ok || !WIFEXITED(status) ||
@@ -1528,7 +1566,13 @@ int main(void)
         }
         printf("QEMU_E2E_ALLOC 1 flow %s\n", desc);
         dump_flow_masks(2);
-        msleep(400);
+        msleep(300);
+        /* Idle the donor before the first rebalance: the switch point is the
+         * current origin, the reverse direction drains, and no new-plane
+         * record follows the apply. The next join then arms a second ACK on
+         * a plane that was applied but never committed by data. */
+        pause_pump(&p[0]);
+        msleep(300);
 
         spawn_pump(&p[1], "alloc-2", 0x22000000u);
         if (wait_flow_split(2, want2, 2, GROUP_TOTAL, 10000, desc,
@@ -1541,6 +1585,9 @@ int main(void)
         dump_flow_masks(2);
         printf("QEMU_E2E_MULTISTREAM 2 streams ok\n");
         fflush(stdout);
+        /* Keep both donors idle across the 3-flow switch. */
+        pause_pump(&p[0]);
+        pause_pump(&p[1]);
         msleep(300);
 
         spawn_pump(&p[2], "alloc-3", 0x33000000u);
@@ -1553,6 +1600,8 @@ int main(void)
         printf("QEMU_E2E_ALLOC 3 flows %s\n", desc);
         dump_flow_masks(2);
         fflush(stdout);
+        resume_pump(&p[0]);
+        resume_pump(&p[1]);
         msleep(300);
 
         spawn_pump(&p[3], "alloc-4", 0x44000000u);

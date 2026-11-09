@@ -1028,7 +1028,10 @@ static int tbt_http_rx_parse(struct tbt_carrier *c)
                 {
                     int err;
 
-                    if (frec[0] >= TBT_FEC_DATA && frec[0] <= TBT_FEC_FBK)
+                    /* The gate must name the same range the raw parser
+                     * uses: a range that stopped at FBK pushed ALLOC (0x36)
+                     * into the old-frame scanner and killed the carrier. */
+                    if (tbt_fec_record_type(frec[0]))
                     {
                         if (!c->saw_hello)
                             return tbt_http_bad(c, "fec before hello", -EPROTO);

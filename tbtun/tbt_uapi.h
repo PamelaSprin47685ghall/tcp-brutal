@@ -179,6 +179,14 @@ typedef uint64_t u64;
 #define TBT_FEC_FBK 0x35
 #define TBT_FEC_ALLOC 0x36
 
+/* One gate for both carrier paths (raw and HTTP container). ALLOC is a FEC
+ * record too: a range that stopped at FBK pushed it into the old-frame
+ * scanner, which killed the carrier under profile=http-kal. */
+static inline bool tbt_fec_record_type(u8 type)
+{
+    return type >= TBT_FEC_DATA && type <= TBT_FEC_ALLOC;
+}
+
 /* FEC header flags: bit0 LAST, all others reserved and refused. */
 #define TBT_FEC_FF_LAST 0x01
 #define TBT_FEC_FF_MASK 0x01
@@ -248,6 +256,7 @@ typedef uint64_t u64;
 #define TBT_FEC_ALLOC_EPOCH 0
 #define TBT_FEC_ALLOC_GROUPS 4
 #define TBT_FEC_ALLOC_FLAGS 36
+#define TBT_FEC_ALLOC_RESERVED 37
 #define TBT_FEC_ALLOC_SWITCH_PKT 40
 #define TBT_FEC_ALLOC_BLOCK_BASE 48
 #define TBT_FEC_ALLOC_CRC 56

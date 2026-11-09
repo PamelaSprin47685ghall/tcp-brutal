@@ -1401,9 +1401,11 @@ static inline void tbt_fec_alloc_sm_abort_ack(struct tbt_fec_alloc_sm *sm)
 {
     if (!sm)
         return;
+    /* Only raise the event: the ABORT case owns the transition to FAILED and
+     * the ACT_RESUME|ACT_FINISH that releases alloc_role/alloc_hold. Setting
+     * FAILED here swallowed that action, so an aborted exchange left the TX
+     * held and every later plan was refused by the role check. */
     sm->ack = true;
-    if (sm->state == TBT_FEC_ALLOC_ABORT)
-        sm->state = TBT_FEC_ALLOC_FAILED;
 }
 
 /* Advance the initiator and return the actions the caller must perform. It

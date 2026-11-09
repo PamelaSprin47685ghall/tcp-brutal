@@ -51,17 +51,28 @@ and moves independently of the module version.
   then rejected every later switch on the same flow: the second joining
   stream shrank the donors but could never arm its ACK, the round timed out
   after `finished=1/2`, and the client was refused.
-- An abandoned round releases the flows it started. A flow whose TX never
-  swapped kept `alloc_role`/`alloc_hold` after the round timed out, which
-  made every later plan fail on the role check while the flow retried its
-  REQUEST forever (the regrow stage of the QEMU gate). The initiator now
-  sends ABORT with the old mask, and an initiator that receives ABORT|ACK
-  disarms its armed RX (or rolls an applied plane back silently) instead of
-  leaving `alloc_state` set or bouncing the record back.
+- An applied RX plane that never sees a new-plane record is retired when a
+  strictly newer epoch arrives: carrier RX only marks it and `w_fec_rx`
+  frees the buffers, because vfree and the arena walk must not run under the
+  carrier's sk_lock/BH-disabled section. Local FINISH releases it too.
+  Leaving the state `applied` rejected every later ACK arm, and a round
+  must not abort a switch the peer may already have applied or committed:
+  the per-flow state machine owns ABORT and issues it only in REQ, before
+  any ACK. An initiator that receives ABORT|ACK disarms its armed RX, or
+  releases the old plane and keeps the new one when the peer's TX already
+  committed.
+- `tbt_fec_alloc_sm_abort_ack()` only raises the event. Setting FAILED
+  directly swallowed the ABORT case's `ACT_RESUME|ACT_FINISH`, leaving
+  `alloc_role`/`alloc_hold` set and every later plan refused.
+- The HTTP container's FEC gate uses `tbt_fec_record_type()` instead of a
+  range that stopped at 0x35: an ALLOC (0x36) chunk no longer falls into
+  the old-frame scanner and kills the carrier. The ALLOC body rejects
+  non-zero reserved bytes instead of ignoring a future extension.
 - The QEMU gate drives 1 -> 2 -> 3 -> 4 -> 1 at 32, 16+16, 10+11+11 and
-  8+8+8+8, then grows the survivor back to 32. Its pumps half-close on stop
-  and verify the flushed tail to EOF, so a deliberate stop does not look
-  like a data-plane hole.
+  8+8+8+8, then grows the survivor back to 32. It idles both donors across
+  the 2- and 3-flow switches (an applied plane with no following new-plane
+  record), half-closes each pump on stop and verifies the flushed tail to
+  EOF, so a deliberate stop does not look like a data-plane hole.
 
 ## [0.4.0] - 2026-11-09
 
