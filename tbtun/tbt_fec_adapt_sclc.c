@@ -73,9 +73,13 @@ int tbt_fec_adapt_sclc_init_plan(u16 n, u16 m, u16 groups, u8 variant,
         return -1;
     if (i != 0xff)
     {
-        if (variant == TBT_FEC_SCLC_DOWN && groups == 1)
+        /* A binary downlink keeps the single ladder point 0.50 whatever its
+         * group count; the uplink may move across the whole ladder. `groups`
+         * is the flow's own count: an 8x32 session split across flows may
+         * give one flow a single GF(16) group. */
+        if (variant == TBT_FEC_SCLC_DOWN && groups)
             msk = (u8)(1u << i);
-        else if (variant == TBT_FEC_SCLC_UP && groups > 1)
+        else if (variant == TBT_FEC_SCLC_UP && groups)
             msk = (u8)((1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u);
         else
             i = 0xff;
@@ -145,10 +149,12 @@ int tbt_fec_adapt_sclc_wire_of_cfg(const struct tbt_fec_cfg *cfg,
         kind = TBT_FEC_SCLC_DOWN;
         block = cfg->w;
         L = TBT_FEC_SCLC_L_DOWN;
-        if (cfg->groups != 1 || shares != TBT_FEC_MAX_SHARES ||
-            cfg->n != TBT_FEC_MAX_SHARES / 2 ||
-            cfg->m != TBT_FEC_MAX_SHARES / 2 ||
-            block != TBT_FEC_SCLC_BLOCK_DOWN)
+        /* One binary group is n == m shares and block = n+m; a session may
+         * hold 1, 2 or 4 such groups and give a flow a subset. The rate is
+         * the single ladder point 0.50. */
+        if (cfg->n != cfg->m ||
+            (shares != 64 && shares != 128 && shares != 256) ||
+            block != shares || cfg->k != 500)
             return -1;
     }
     else if (cfg->k > cfg->w)
@@ -156,7 +162,7 @@ int tbt_fec_adapt_sclc_wire_of_cfg(const struct tbt_fec_cfg *cfg,
         kind = TBT_FEC_SCLC_UP;
         block = cfg->k;
         L = cfg->w;
-        if (cfg->groups <= 1 || shares != 32 ||
+        if (!cfg->groups || shares != 32 ||
             block != TBT_FEC_SCLC_BLOCK_UP || L != TBT_FEC_SCLC_L_UP)
             return -1;
         /* The wire d must agree with the n/m split; the codec derives its
@@ -205,12 +211,13 @@ int tbt_fec_adapt_sclc_wire_to_cfg(const struct tbt_fec_adapt_sclc_wire *p,
     cfg->groups = p->groups;
     if (p->kind == TBT_FEC_SCLC_DOWN)
     {
-        if (shares != TBT_FEC_MAX_SHARES ||
-            p->block != TBT_FEC_SCLC_BLOCK_DOWN)
+        if (p->n != p->m ||
+            (shares != 64 && shares != 128 && shares != 256) ||
+            p->block != shares)
             return -1;
-        cfg->w = TBT_FEC_SCLC_BLOCK_DOWN;
+        cfg->w = p->block;
         /* Binary CFG k is parts per thousand, not ppm: 500 for rate 0.50. */
-        cfg->k = (u16)((u32)p->n * 1000u / shares);
+        cfg->k = 500;
         cfg->d = 0;
     }
     else if (p->kind == TBT_FEC_SCLC_UP)

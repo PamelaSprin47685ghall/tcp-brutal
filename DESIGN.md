@@ -289,10 +289,13 @@ boundary. `adaptive=` follows `fec` by default, and `session <id>
 adaptive=on|off` flips it at runtime; the `c13` line exports the state.
 Phase 2 (`n + m` other than 8) is not implemented. The SC-LDPC per-flow law
 uses the same `FEC_CFG`/`FEC_FBK` handshake: the uplink GF(16) 8x32/L16 codec
-can build every ladder split and switches rates; the downlink binary
-1x256/L8 codec is fixed at rate 50, so its controller stays at 50 (known
-limitation). `adaptive=` is off by default; `mode=sc-ldpc` accepts
-`adaptive=on` in 0.4.0.
+can build every ladder split and switches rates; the downlink binary codec is
+fixed at rate 50, so its controller stays at 50 (known limitation). From
+0.5.0 the binary downlink codec is parameterized: a group is `n == m` shares
+with `n` in {32, 64, 128} (block 64/128/256, L8), so a 256-carrier session
+can hold 1, 2 or 4 groups. `fec_groups_per_flow` gives each SC-LDPC flow a
+whole-group subset; `0` keeps the 1x256 single-flow shape. `adaptive=` is off
+by default; `mode=sc-ldpc` accepts `adaptive=on`.
 
 **Multi-stream status.** FEC v6 carries one live application stream per
 tunnel. A sequential connection after the previous one closes is supported:
@@ -302,7 +305,9 @@ first block. A second **concurrent** stream is refused (`-EOPNOTSUPP`,
 delivery state; the 64-bit `sid` in the record only keeps a queued old-stream
 record out of the new stream. Concurrent multi-stream is the **v7** cut
 (`0x1007`) and is implemented in 0.4.0: each stream owns a per-flow FEC TX/RX
-context and an admission reference.
+context and an admission reference. 0.5.0 (`0x1008`) adds the SC-LDPC group
+split: two flows on a `2x128` downlink, four on `4x64`, or split `8x32`
+uplink flows, each with its own group bitmap, replay and NACK state.
 
 The 256-carrier performance target remains **90% of a direct/2 stream**. The
 0.2.1 measurement is 86.8% (97.3 Mbit/s against 112.1), 3.2 points short, and
@@ -2829,25 +2834,26 @@ makes this design different from a generic L4 tunnel.
 | `tests/*.sh` | **new** |
 
 Version: `TBT_VERSION = (major<<16)|(minor<<8)|patch`; the released tree reports
-`0.4.0`. The wire revision `TBT_CONV=0x0007`
-and the FEC record revision `TBT_FEC_CONV=0x1007` bump independently of it.
+`0.5.0`. The wire revision `TBT_CONV=0x0007`
+and the FEC record revision `TBT_FEC_CONV=0x1008` bump independently of it.
 HELLO `body[0]` carries `TBT_WIRE_VERSION=1` for the old ARQ and
-`TBT_WIRE_VERSION_V6=4` for a FEC v7 session, not the module version, so the
+`TBT_WIRE_VERSION_V6=5` for a FEC v7 session, not the module version, so the
 module version and the wire version are decoupled. 0.2.0 flipped `TBT_CONV` to
 0x0006 (FIN carries a 16-byte body) and `TBT_FEC_CONV` through `0x1002`
 (PARITY block marker), `0x1003` (24-byte ACK with `deliver_bytes`) and
 `0x1004` (64-byte bitmap NACK) to `0x1005` (48-byte header with the u64 stream
 id); 0.3.0 moves it to `0x1006` (48-byte `FEC_CFG`, 48-byte `FEC_FBK` report,
-adaptive shape switch). Peers of
+adaptive shape switch); 0.4.0 to `0x1007` (multi-stream); 0.5.0 to `0x1008`
+(SC-LDPC 64/128/256-share groups and multi-flow group split). Peers of
 different wire revisions do not interoperate, because the first HELLO is
 rejected by the conv check.
 
 **Packaging.** `tbtun/tbt_uapi.h` is the single version authority: the
-`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/4/0`). `scripts/mkdkmsconf.sh`
+`TBT_VERSION_MAJOR/MINOR/PATCH` macros (currently `0/5/0`). `scripts/mkdkmsconf.sh`
 parses those macros and emits `PACKAGE_VERSION="<major>.<minor>.<patch>"`; parsing
 failure is fatal and never falls back to an old value. `dkms.conf` is a generated file —
 `make dkms.conf` (or `make dkms-tarball`) writes it, and it must not be hand-edited; the
-current generated value is `PACKAGE_VERSION="0.4.0"`. `scripts/install_dkms.sh` reads
+current generated value is `PACKAGE_VERSION="0.5.0"`. `scripts/install_dkms.sh` reads
 the same value through `mkdkmsconf.sh --version`. A development suffix
 `.r<commits>.<sha>` is opt-in with `TBT_DKMS_GIT_SUFFIX=1`; it is not the default.
 

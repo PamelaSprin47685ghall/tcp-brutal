@@ -3,6 +3,61 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.5.0] - unreleased
+
+### Added
+
+- Binary SC-LDPC geometry parameterization. One downlink group is still
+  `n == m` data/parity shares at rate 0.50, but `n` may now be 128, 64 or 32
+  (coupling block 256, 128 or 64; L stays 8). The 8 KiB share mapping, the
+  64-codeword batch and the 64-lane SWAR peeling schedule are unchanged.
+  `tbt_fec_sclc_new()` takes the number of codec contexts the flow owns, so
+  a session can hold `G` groups and give each flow a whole-group subset.
+- v7 multi-flow group split. With `fec_groups_per_flow=1` (or 2) an SC-LDPC
+  session admits 2 flows on `2x128`, 4 flows on `4x64`, or 4/2 flows on the
+  `8x32` GF(16) uplink; each flow keeps its own TX/RX/replay/NACK and its
+  own group bitmap in OPEN. `fec_groups_per_flow=0` keeps the 0.4.0
+  single-flow `1x256` semantics byte for byte. Admission now checks the
+  split geometry (`tbt_fec_sclc_split_ok`) and the per-flow cap.
+- `mode=sc-ldpc` accepts `w=64` for a `4x64` downlink and resolves `w=0` to
+  `n+m` when `n == m` and `n+m` is 64, 128 or 256.
+- Host coverage: codec round trips and erasure recovery for 128/64/32-share
+  groups, a per-flow two-context container isolation test, CFG profile
+  resolution for `2x128`/`4x64`, admission/bitmap-isolation cases, and parse
+  coverage for the new blocks.
+
+### Fixed
+
+- `tbt_fec_cfg_unpack()` no longer requires `groups == 256/(n+m)`. The CFG
+  names one flow's group count; the structural bound is now
+  `groups * (n+m) <= 256`. A per-flow INIT in a split session was otherwise
+  refused before the RX codec could be built.
+- `tbt_fec_rx_apply_init()` sizes each flow's RX arena against the session's
+  flow capacity, so N split flows cannot allocate N x 16 MiB.
+- The primary flow bind no longer copies an uninitialised stack bitmap into
+  `rx->group_mask`.
+- The TX stall check reads the stream's own flow credit window instead of
+  the session primary, so a non-primary flow waiting for peer credit is not
+  reset as a stalled stream.
+
+### Wire
+
+- `TBT_FEC_CONV` moves to `0x1008` and `TBT_WIRE_VERSION_V6` to 5
+  (module 0.5.0). The 48-byte FEC header and every control-body offset are
+  unchanged; only the meaning of the CFG shape widens. A 0.4.0 peer is
+  refused at the first HELLO, so a multi-group binary shape cannot be read
+  as the GF(16) variant by an old receiver.
+
+### Verification
+
+- `make check` (module build plus all host tests), `make host-test-san`
+  (ASan/UBSan), and the new shape/flow tests are green.
+- Host codec throughput on this machine (Ryzen 9 7940HS, -O2): encode
+  476/553/624 MB/s and decode with one erased share 277/326/312 MB/s for
+  the 128/64/32-share groups. Share recovery at p=0.30 is 1.000000 for all
+  three. The 1x256 codec is bit-identical to 0.4.0 on the same seed.
+- No real-machine A/B yet. Downlink adaptive remains at rate 50.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added

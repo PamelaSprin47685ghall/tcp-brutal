@@ -111,13 +111,14 @@ static void case_close_stamp(void)
 
 static void case_same_sid_priority(void)
 {
-    ok(tbt_fec_flow_create_code(true, true, 1, 1, 1) == -EEXIST,
+    ok(tbt_fec_flow_create_code(true, true, 1, 1, 1, 128, 128, 0) == -EEXIST,
        "same sid returns EEXIST before SC-LDPC admission");
-    ok(tbt_fec_flow_create_code(false, true, 1, 1, 1) == -EOPNOTSUPP,
+    ok(tbt_fec_flow_create_code(false, true, 1, 1, 1, 128, 128, 0) ==
+           -EOPNOTSUPP,
        "a genuinely new second SC-LDPC flow returns EOPNOTSUPP");
-    ok(tbt_fec_flow_create_code(true, false, 0, 1, 1) == -EEXIST,
+    ok(tbt_fec_flow_create_code(true, false, 0, 1, 1, 4, 4, 0) == -EEXIST,
        "same sid returns EEXIST for non-SCLC admission");
-    ok(tbt_fec_flow_create_code(false, false, 0, 0, 1) == -EPROTO,
+    ok(tbt_fec_flow_create_code(false, false, 0, 0, 1, 4, 4, 0) == -EPROTO,
        "missing group budget still returns EPROTO");
 }
 

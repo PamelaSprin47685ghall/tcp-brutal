@@ -14,8 +14,8 @@
 #include <string.h>
 #include <time.h>
 
-#define N (TBT_FEC_MAX_SHARES / 2) /* data shares per block, 128 */
-#define M (TBT_FEC_MAX_SHARES / 2) /* parity shares per block, 128 */
+#define N (TBT_FEC_MAX_SHARES / 2) /* 1x256 group: data shares, 128 */
+#define M (TBT_FEC_MAX_SHARES / 2) /* 1x256 group: parity shares, 128 */
 #define SHARE TBT_SCLC_SHARE
 #define BATCH TBT_SCLC_BATCH
 
@@ -122,6 +122,28 @@ static void test_params(void)
     check(ops->is_known(c, 0) == 0, "fresh codec knows nothing");
     check(ops->frontier(c) == 0, "fresh frontier 0");
     ops->free(c);
+
+    /* 0.5.0 group split: a group is n == m shares and block = 2n. */
+    c = ops->new(64, 64, 500, 128, SHARE, 0, 0x55);
+    check(c != NULL, "new accepts a 128-share group");
+    if (c)
+    {
+        check(ops->parity_count(c, 64) == 64, "128-share parity_count");
+        ops->free(c);
+    }
+    c = ops->new(32, 32, 500, 64, SHARE, 0, 0x66);
+    check(c != NULL, "new accepts a 64-share group");
+    if (c)
+    {
+        check(ops->parity_count(c, 32) == 32, "64-share parity_count");
+        ops->free(c);
+    }
+    check(ops->new(64, 64, 500, 256, SHARE, 0, 0x77) == NULL,
+          "block != 2n rejected");
+    check(ops->new(48, 48, 500, 96, SHARE, 0, 0x88) == NULL,
+          "unsupported group size rejected");
+    check(ops->new(64, 32, 500, 128, SHARE, 0, 0x99) == NULL,
+          "rate 2/3 group rejected");
 }
 
 static void test_roundtrip(void)
@@ -181,6 +203,64 @@ static void test_roundtrip(void)
     free_shares(data, N);
     free_shares(parity, M);
     ops->free(c);
+}
+
+/* Round trip one group of n data + n parity shares and recover one erased
+ * data share byte-exactly. The 64- and 32-share groups use the same codeword
+ * mapping, only the lifting factor changes. */
+static void roundtrip_shape(u16 n, u64 seed)
+{
+    struct tbt_fec_ops const *ops = &tbt_fec_ops_sclc;
+    void *c = ops->new(n, n, 500, (u16)(2 * n), SHARE, 0, seed);
+    u8 *data = alloc_shares(n), *parity = alloc_shares(n);
+    u8 **dp = share_ptrs(data, n), **pp = share_ptrs(parity, n);
+    u8 *mask = calloc((size_t)2 * n, 1);
+    u8 *orig = malloc(SHARE);
+    int i, rc;
+
+    if (!c || !orig)
+    {
+        check(0, "group roundtrip new");
+        free(orig);
+        free(mask);
+        free(dp);
+        free(pp);
+        free_shares(data, n);
+        free_shares(parity, n);
+        ops->free(c);
+        return;
+    }
+    for (i = 0; i < n; i++)
+        fill_random(data + (size_t)i * SHARE, SHARE);
+    rc = ops->encode(c, dp, n, pp);
+    check(rc == 0, "group encode returns 0");
+
+    memcpy(orig, data + (size_t)(n - 1) * SHARE, SHARE);
+    memset(data + (size_t)(n - 1) * SHARE, 0x5A, SHARE);
+    for (i = 0; i < n; i++)
+        mask[i] = (i == n - 1) ? 0 : 1;
+    for (i = 0; i < n; i++)
+        mask[n + i] = 1;
+    rc = ops->decode(c, dp, pp, mask, mask + n, n);
+    check(rc == 1, "group one missing share recovered");
+    check(!memcmp(orig, data + (size_t)(n - 1) * SHARE, SHARE),
+          "group recovered share is byte-exact");
+
+    free(orig);
+    free(mask);
+    free(dp);
+    free(pp);
+    free_shares(data, n);
+    free_shares(parity, n);
+    ops->free(c);
+}
+
+static void test_group_shapes(void)
+{
+    printf("sc-ldpc group shapes: 128, 64 and 32 data shares\n");
+    roundtrip_shape(128, 31);
+    roundtrip_shape(64, 32);
+    roundtrip_shape(32, 33);
 }
 
 static void test_mapping(void)
@@ -296,14 +376,14 @@ static void test_mapping(void)
     ops->free(c);
 }
 
-static double erasure_run(struct tbt_fec_ops const *ops, u32 p_ppm,
+static double erasure_run(struct tbt_fec_ops const *ops, u16 n, u32 p_ppm,
                           int blocks)
 {
-    void *c = ops->new(N, M, 500, 256, SHARE, 0, 0x51c1);
-    u8 *data = alloc_shares(N), *parity = alloc_shares(M);
-    u8 **dp = share_ptrs(data, N), **pp = share_ptrs(parity, M);
-    u8 *data_present = calloc(N, 1), *parity_present = calloc(M, 1);
-    u8 *truth = alloc_shares(N);
+    void *c = ops->new(n, n, 500, (u16)(2 * n), SHARE, 0, 0x51c1);
+    u8 *data = alloc_shares(n), *parity = alloc_shares(n);
+    u8 **dp = share_ptrs(data, n), **pp = share_ptrs(parity, n);
+    u8 *data_present = calloc(n, 1), *parity_present = calloc(n, 1);
+    u8 *truth = alloc_shares(n);
     u64 missing = 0, recovered = 0;
     int b, i;
 
@@ -314,19 +394,19 @@ static double erasure_run(struct tbt_fec_ops const *ops, u32 p_ppm,
     }
     for (b = 0; b < blocks; b++)
     {
-        for (i = 0; i < N; i++)
+        for (i = 0; i < n; i++)
             fill_random(data + (size_t)i * SHARE, SHARE);
-        memcpy(truth, data, (size_t)N * SHARE);
-        ops->encode(c, dp, N, pp);
-        for (i = 0; i < N; i++)
+        memcpy(truth, data, (size_t)n * SHARE);
+        ops->encode(c, dp, n, pp);
+        for (i = 0; i < n; i++)
             data_present[i] = (rnd64() % 1000000u) >= p_ppm;
-        for (i = 0; i < M; i++)
+        for (i = 0; i < n; i++)
             parity_present[i] = (rnd64() % 1000000u) >= p_ppm;
-        for (i = 0; i < N; i++)
+        for (i = 0; i < n; i++)
             if (!data_present[i])
                 missing++;
-        (void)ops->decode(c, dp, pp, data_present, parity_present, N);
-        for (i = 0; i < N; i++)
+        (void)ops->decode(c, dp, pp, data_present, parity_present, n);
+        for (i = 0; i < n; i++)
             if (!data_present[i] && ops->is_known(c, (u32)i))
             {
                 recovered++;
@@ -344,8 +424,8 @@ static double erasure_run(struct tbt_fec_ops const *ops, u32 p_ppm,
     free(parity_present);
     free(dp);
     free(pp);
-    free_shares(data, N);
-    free_shares(parity, M);
+    free_shares(data, n);
+    free_shares(parity, n);
     ops->free(c);
     return missing ? (double)recovered / (double)missing : 1.0;
 }
@@ -357,7 +437,7 @@ static void test_erasures(void)
 
     for (i = 0; i < 3; i++)
     {
-        double r = erasure_run(&tbt_fec_ops_sclc, ps[i], 24);
+        double r = erasure_run(&tbt_fec_ops_sclc, N, ps[i], 24);
 
         printf("sc-ldpc erasure p=%.2f: share recovery %.6f\n",
                (double)ps[i] / 1000000.0, r);
@@ -374,6 +454,22 @@ static void test_erasures(void)
             check(r > 0.001, "p=0.40 share recovery above 0.001");
         else
             check(r >= 0.0, "p=0.50 share recovery reported");
+    }
+
+    /* The smaller groups keep the 64-lane SWAR schedule and the same batch
+     * count; only the codeword is shorter. p=0.30 is the NACK boundary. */
+    {
+        static const u16 shapes[2] = {64, 32};
+        int s;
+
+        for (s = 0; s < 2; s++)
+        {
+            double r = erasure_run(&tbt_fec_ops_sclc, shapes[s], 300000, 24);
+
+            printf("sc-ldpc %u/%u erasure p=0.30: share recovery %.6f\n",
+                   shapes[s], shapes[s], r);
+            check(r > 0.01, "small group p=0.30 share recovery above 0.01");
+        }
     }
 }
 
@@ -495,14 +591,16 @@ static void test_advance(void)
     ops->free(c);
 }
 
-static void bench(void)
+/* Keep the encoded bytes per measurement comparable across group sizes:
+ * n shares x 8 KiB x reps = 32 MiB. */
+static void bench_shape(u16 n)
 {
     struct tbt_fec_ops const *ops = &tbt_fec_ops_sclc;
-    void *c = ops->new(N, M, 500, 256, SHARE, 0, 23);
-    u8 *data = alloc_shares(N), *parity = alloc_shares(M);
-    u8 **dp = share_ptrs(data, N), **pp = share_ptrs(parity, M);
-    u8 *data_present = calloc(N, 1), *parity_present = calloc(M, 1);
-    const int reps = 32;
+    void *c = ops->new(n, n, 500, (u16)(2 * n), SHARE, 0, 23);
+    u8 *data = alloc_shares(n), *parity = alloc_shares(n);
+    u8 **dp = share_ptrs(data, n), **pp = share_ptrs(parity, n);
+    u8 *data_present = calloc(n, 1), *parity_present = calloc(n, 1);
+    const int reps = (int)(4096 / n);
     u64 t0, t1;
     int i, r;
 
@@ -511,48 +609,114 @@ static void bench(void)
         check(0, "bench new");
         return;
     }
-    for (i = 0; i < N; i++)
+    for (i = 0; i < n; i++)
         fill_random(data + (size_t)i * SHARE, SHARE);
     t0 = now_ns();
     for (r = 0; r < reps; r++)
-        ops->encode(c, dp, N, pp);
+        ops->encode(c, dp, n, pp);
     t1 = now_ns();
-    printf("sc-ldpc encode: %.1f MB/s\n",
-           (double)reps * (double)N * SHARE * 1e9 / (double)(t1 - t0) / 1e6);
+    printf("sc-ldpc %u/%u encode: %.1f MB/s\n", n, n,
+           (double)reps * (double)n * SHARE * 1e9 /
+               (double)(t1 - t0) / 1e6);
 
-    for (i = 0; i < N; i++)
+    for (i = 0; i < n; i++)
         data_present[i] = (i == 0) ? 0 : 1;
-    for (i = 0; i < M; i++)
+    for (i = 0; i < n; i++)
         parity_present[i] = 1;
     t0 = now_ns();
     for (r = 0; r < reps; r++)
     {
-        for (i = 0; i < N; i++)
+        for (i = 0; i < n; i++)
             memset(data + (size_t)i * SHARE, 0x5A, SHARE);
-        ops->decode(c, dp, pp, data_present, parity_present, N);
+        ops->decode(c, dp, pp, data_present, parity_present, n);
     }
     t1 = now_ns();
-    printf("sc-ldpc decode (one share erased): %.1f MB/s\n",
-           (double)reps * (double)N * SHARE * 1e9 / (double)(t1 - t0) / 1e6);
+    printf("sc-ldpc %u/%u decode (one share erased): %.1f MB/s\n", n, n,
+           (double)reps * (double)n * SHARE * 1e9 /
+               (double)(t1 - t0) / 1e6);
 
     free(data_present);
     free(parity_present);
     free(dp);
     free(pp);
-    free_shares(data, N);
-    free_shares(parity, M);
+    free_shares(data, n);
+    free_shares(parity, n);
     ops->free(c);
+}
+
+static void bench(void)
+{
+    bench_shape(128);
+    bench_shape(64);
+    bench_shape(32);
+}
+
+/* Two flows' groups must be independent codec contexts: decoding a hole in
+ * group 0 must never consult or write group 1's planes. This is the per-flow
+ * container shape for a 4x64 session split two groups per flow. */
+static void test_group_container(void)
+{
+    struct tbt_fec_grouped *g = tbt_fec_grouped_new_ops(
+        &tbt_fec_ops_sclc, 2, 64, 64, 500, 128, SHARE, 0, 0xabc);
+    u8 *d0 = alloc_shares(64), *p0 = alloc_shares(64);
+    u8 *d1 = alloc_shares(64), *p1 = alloc_shares(64);
+    u8 **dp0 = share_ptrs(d0, 64), **pp0 = share_ptrs(p0, 64);
+    u8 **dp1 = share_ptrs(d1, 64), **pp1 = share_ptrs(p1, 64);
+    u8 present[64], par[64], *orig = malloc(SHARE), *d1_copy = malloc(SHARE);
+    int i, rc;
+
+    if (!g || !orig || !d1_copy)
+    {
+        check(0, "group container new");
+        return;
+    }
+    for (i = 0; i < 64; i++)
+    {
+        fill_random(d0 + (size_t)i * SHARE, SHARE);
+        fill_random(d1 + (size_t)i * SHARE, SHARE);
+    }
+    memcpy(orig, d0, SHARE);
+    memcpy(d1_copy, d1, SHARE);
+    check(tbt_fec_grouped_encode(g, 0, dp0, 64, pp0) == 0, "group 0 encode");
+    check(tbt_fec_grouped_encode(g, 1, dp1, 64, pp1) == 0, "group 1 encode");
+
+    memset(d0, 0x5A, SHARE);
+    for (i = 0; i < 64; i++)
+        present[i] = (i == 0) ? 0 : 1;
+    for (i = 0; i < 64; i++)
+        par[i] = 1;
+    rc = tbt_fec_grouped_decode(g, 0, dp0, pp0, present, par, 64);
+    check(rc == 1, "group 0 recovers one erased share");
+    check(memcmp(d0, orig, SHARE) == 0, "group 0 payload is byte-exact");
+    check(tbt_fec_grouped_is_known(g, 0, 0) == 1, "group 0 share known");
+    check(!memcmp(d1, d1_copy, SHARE), "group 1 payload untouched");
+    check(tbt_fec_grouped_is_known(g, 1, 0) == 0,
+          "group 1 codec state is independent");
+
+    free(orig);
+    free(d1_copy);
+    free(dp0);
+    free(pp0);
+    free(dp1);
+    free(pp1);
+    free_shares(d0, 64);
+    free_shares(p0, 64);
+    free_shares(d1, 64);
+    free_shares(p1, 64);
+    tbt_fec_grouped_free(g);
 }
 
 int main(void)
 {
     test_params();
     test_roundtrip();
+    test_group_shapes();
     test_mapping();
     test_short_tail();
     test_stopping_set();
     test_advance();
     test_erasures();
+    test_group_container();
     bench();
     if (failures)
     {

@@ -1,13 +1,15 @@
-/* tbt_fec_sclc.c - downlink SC-IRA codec (rate 0.50, block 256, L 8).
+/* tbt_fec_sclc.c - downlink SC-IRA codec (rate 0.50, block 64/128/256, L 8).
  *
  * Construction and message semantics follow review/fec-prototype/sc_ldpc
- * (SC_TERM_ACC).  Only the rate 0.50 path is kept: the downlink's first cut
- * fixes the graph, and a rate change is a later, separate graph.  The
- * encoder is the bit64 forward sweep; the decoder is the bit-sliced peeling
- * decoder, one 64-codeword batch at a time.  A share carries one 8-bit
- * segment of all 8192 codewords, so a lost share erases the same segment in
- * every batch and the 64 codewords of a batch share one mask.  See
- * tbt_fec_sclc.h for the exact byte mapping.
+ * (SC_TERM_ACC).  Only the rate 0.50 path is kept: every group has n data
+ * and n parity shares, and the coupling block is w = 2n.  n is 32, 64 or
+ * 128 (block 64/128/256), so a session can split its 256 carriers into
+ * 1, 2 or 4 independent codec groups.  A rate change is a later, separate
+ * graph.  The encoder is the bit64 forward sweep; the decoder is the
+ * bit-sliced peeling decoder, one 64-codeword batch at a time.  A share
+ * carries one 8-bit segment of all 8192 codewords, so a lost share erases
+ * the same segment in every batch and the 64 codewords of a batch share one
+ * mask.  See tbt_fec_sclc.h for the exact byte mapping.
  *
  * No allocation happens on the per-share path: the code object owns the
  * graph, the encoder plan, and one batch of decoder scratch.
@@ -201,16 +203,17 @@ struct tbt_sclc
 {
     u16 n_shares; /* data shares per FEC block */
     u16 m_shares; /* parity shares per FEC block */
+    u16 n_batches; /* 64-codeword batches in one share: s / SEG_BYTES */
     u16 k;        /* rate in parts per thousand, 500 */
-    u16 w;        /* codeword block, 256 */
+    u16 w;        /* codeword block, 2 * n_shares */
     size_t s;     /* share bytes, 8192 */
     u64 nonce;
 
     int m;      /* lifting factor, w / 2 */
-    int n;      /* variables per codeword, 2048 */
-    int n_data; /* 1024 */
-    int n_par;  /* 1024 */
-    int n_chk;  /* 1024 */
+    int n;      /* variables per codeword, 8 * (n_shares + m_shares) */
+    int n_data; /* 8 * n_shares */
+    int n_par;  /* 8 * m_shares */
+    int n_chk;  /* 8 * m_shares */
     int edges;
     int dcs; /* encoder plan stride, max check degree */
 
@@ -312,11 +315,16 @@ static int sclc_build_graph(struct tbt_sclc *c)
     int i, r, b, e, ck;
     int rc = -ENOMEM;
 
-    c->m = TBT_SCLC_BLOCK / 2;
+    /* The share mapping and the graph must describe the same codeword: a
+     * data share is eight payload variables, so n_data = 8 * n_shares, and
+     * the parity side is the same size at rate 0.50. */
+    c->m = c->w / 2;
     c->n_data = TBT_SCLC_L * c->m;
     c->n_par = TBT_SCLC_L * c->m;
     c->n_chk = TBT_SCLC_L * c->m;
     c->n = c->n_data + c->n_par;
+    if (c->n_data != 8 * c->n_shares || c->n_par != 8 * c->m_shares)
+        return -EINVAL;
     c->edges = TBT_SCLC_L * c->m * 5 /* payload */ +
                c->n_par + (TBT_SCLC_L - 1) * c->m; /* parity */
 
@@ -494,7 +502,7 @@ static void sclc_encode_batch(struct tbt_sclc *c, u8 *const data[],
 {
     int s, ck;
 
-    for (s = 0; s < TBT_SCLC_SEGS; s++)
+    for (s = 0; s < c->n_shares; s++)
         seg_gather(&c->v[s * 8], data[s] + (size_t)b * 64);
 
     for (ck = 0; ck < c->n_chk; ck++)
@@ -509,7 +517,7 @@ static void sclc_encode_batch(struct tbt_sclc *c, u8 *const data[],
         c->v[c->owned[ck]] = x;
     }
 
-    for (s = 0; s < TBT_SCLC_SEGS; s++)
+    for (s = 0; s < c->n_shares; s++)
         seg_scatter(parity[s] + (size_t)b * 64, &c->v[c->n_data + s * 8]);
 }
 
@@ -523,7 +531,7 @@ static void sclc_decode_init(struct tbt_sclc *c, u8 *const data[],
 {
     int s, j, v;
 
-    for (s = 0; s < TBT_SCLC_SEGS; s++)
+    for (s = 0; s < c->n_shares; s++)
     {
         if (data_present[s])
         {
@@ -655,10 +663,10 @@ static int sclc_decode_batch(struct tbt_sclc *c, u8 *const data[],
 {
     int s, v;
 
-    for (s = 0; s < TBT_SCLC_SEGS; s++)
+    for (s = 0; s < c->n_shares; s++)
         if (!data_present[s])
             break;
-    if (s == TBT_SCLC_SEGS)
+    if (s == c->n_shares)
         return 1;
 
     sclc_decode_init(c, data, parity, data_present, parity_present, b);
@@ -667,7 +675,7 @@ static int sclc_decode_batch(struct tbt_sclc *c, u8 *const data[],
     for (v = 0; v < c->n_data; v++)
         if (c->unk[v])
             return 0;
-    for (s = 0; s < TBT_SCLC_SEGS; s++)
+    for (s = 0; s < c->n_shares; s++)
         if (!data_present[s])
             seg_scatter(data[s] + (size_t)b * 64, &c->val[s * 8]);
     return 1;
@@ -681,11 +689,19 @@ static void *sclc_new(u16 n, u16 m, u16 k, u16 w, size_t s, u16 d, u64 nonce)
 {
     struct tbt_sclc *c;
 
-    if (!n || !m || (u32)n + m > TBT_FEC_MAX_SHARES)
+    /* A group is rate 0.50: n == m, block = 2n, and n is one of the three
+     * shipped group sizes (256, 128 or 64 carriers for data+parity). */
+    if (!n || !m || n != m || n > TBT_SCLC_MAX_SEGS ||
+        (u32)n + m > TBT_FEC_MAX_SHARES)
         return NULL;
-    if (n != TBT_SCLC_SEGS || m != TBT_SCLC_SEGS)
+    if (n != 32 && n != 64 && n != 128)
         return NULL;
-    if (s != TBT_SCLC_SHARE || w != TBT_SCLC_BLOCK || d != 0)
+    if (!w || w != (u16)(2 * n) || w > 2 * TBT_SCLC_MAX_SEGS)
+        return NULL;
+    if (s != TBT_SCLC_SHARE || d != 0)
+        return NULL;
+    if (s % TBT_SCLC_SEG_BYTES || !s / TBT_SCLC_SEG_BYTES ||
+        s / TBT_SCLC_SEG_BYTES > 0xffffu)
         return NULL;
     if (k != 0 && k != TBT_SCLC_RATE)
         return NULL;
@@ -695,6 +711,7 @@ static void *sclc_new(u16 n, u16 m, u16 k, u16 w, size_t s, u16 d, u64 nonce)
         return NULL;
     c->n_shares = n;
     c->m_shares = m;
+    c->n_batches = (u16)(s / TBT_SCLC_SEG_BYTES);
     c->k = k ? k : TBT_SCLC_RATE;
     c->w = w;
     c->s = s;
@@ -719,7 +736,7 @@ static void *sclc_new(u16 n, u16 m, u16 k, u16 w, size_t s, u16 d, u64 nonce)
     c->touched = sclc_alloc((size_t)c->n * sizeof(int));
     c->tflag = sclc_alloc((size_t)c->n);
     c->known = sclc_alloc(n);
-    c->batch_ok = sclc_alloc(n);
+    c->batch_ok = sclc_alloc(c->n_batches);
     if (!c->v || !c->unk || !c->val || !c->cnt || !c->xr || !c->act ||
         !c->resolve || !c->vbits || !c->stack || !c->touched || !c->tflag ||
         !c->known || !c->batch_ok)
@@ -807,32 +824,18 @@ static int sclc_encode(void *ctx, u8 *data[], u32 L, u8 *parity[])
     for (i = 0; i < L; i++)
         if (!data[i] || !parity[i])
             return -EINVAL;
-    for (i = L; i < c->m_shares; i++)
-        if (!parity[i])
-            return -EINVAL;
 
-    for (b = 0; b < c->n_shares; b++)
+    for (b = 0; b < c->n_batches; b++)
         sclc_encode_batch(c, data, parity, b);
-
-    /* The first cut accepts m > n; the spare parity shares repeat the
-     * primary ones so a lost primary has a second copy on the wire. */
-    for (i = L; i < c->m_shares; i++)
-        memcpy(parity[i], parity[i % L], c->s);
     return 0;
 }
 
-/* Find a present parity share for data share i: the primary slot first,
- * then any repeated copy.  Returns -1 when none is present. */
+/* Whether the parity share that covers data share i is present. */
 static int sclc_parity_source(const struct tbt_sclc *c, const u8 *present,
                               u32 i)
 {
-    u32 j;
-
     if (i < c->m_shares && present[i])
         return (int)i;
-    for (j = c->n_shares; j < c->m_shares; j++)
-        if (j % c->n_shares == i && present[j])
-            return (int)j;
     return -1;
 }
 
@@ -841,8 +844,8 @@ static int sclc_decode(void *ctx, u8 *data[], u8 *parity[],
                        u32 L)
 {
     struct tbt_sclc *c = ctx;
-    u8 *pp[TBT_SCLC_SEGS];
-    u8 pp_present[TBT_SCLC_SEGS];
+    u8 *pp[TBT_SCLC_MAX_SEGS];
+    u8 pp_present[TBT_SCLC_MAX_SEGS];
     u32 b, s;
     u32 recovered = 0;
     u32 missing = 0;
@@ -866,8 +869,8 @@ static int sclc_decode(void *ctx, u8 *data[], u8 *parity[],
         }
     }
 
-    memset(c->batch_ok, 0, c->n_shares);
-    for (b = 0; b < c->n_shares; b++)
+    memset(c->batch_ok, 0, c->n_batches);
+    for (b = 0; b < c->n_batches; b++)
         if (sclc_decode_batch(c, data, pp, data_present, pp_present, b))
             c->batch_ok[b] = 1;
 
@@ -875,10 +878,10 @@ static int sclc_decode(void *ctx, u8 *data[], u8 *parity[],
     {
         if (c->known[s])
             continue;
-        for (b = 0; b < c->n_shares; b++)
+        for (b = 0; b < c->n_batches; b++)
             if (!c->batch_ok[b])
                 break;
-        if (b == c->n_shares)
+        if (b == c->n_batches)
         {
             c->known[s] = 1;
             recovered++;

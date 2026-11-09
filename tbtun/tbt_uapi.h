@@ -28,7 +28,7 @@ typedef uint64_t u64;
 #endif
 
 #define TBT_VERSION_MAJOR 0
-#define TBT_VERSION_MINOR 4
+#define TBT_VERSION_MINOR 5
 #define TBT_VERSION_PATCH 0
 #define TBT_VERSION ((TBT_VERSION_MAJOR << 16) | (TBT_VERSION_MINOR << 8) | TBT_VERSION_PATCH)
 
@@ -80,12 +80,15 @@ typedef uint64_t u64;
  * the first HELLO with -EPROTO and its carrier closes; both ends must be
  * upgraded together. Version 4 is the multi-stream cut: TBT_FEC_CONV 0x1007,
  * a 32-byte OPEN group bitmap, stream-local FEC seq/block ids and ALLOC
- * (0x36). */
+ * (0x36). Version 5 is the 0.5.0 SC-LDPC group-split cut: TBT_FEC_CONV
+ * 0x1008, a binary downlink group may be 256, 128 or 64 shares and several
+ * flows may own disjoint groups. The 48-byte header and every offset stay
+ * unchanged; a 0.4.0 peer is refused at the first HELLO. */
 #define TBT_WIRE_VERSION 1
-#define TBT_WIRE_VERSION_V6 4
+#define TBT_WIRE_VERSION_V6 5
 
 /* ------------------------------------------------------------------ *
- * FEC wire: an independent record format, TBT_FEC_CONV 0x1007.
+ * FEC wire: an independent record format, TBT_FEC_CONV 0x1008.
  *
  * The old ARQ record above is frozen at 16 carriers: its path_ack_mask is
  * u16 and its FBK/WINDOW bodies have 16 entries. FEC never reuses those
@@ -111,7 +114,7 @@ typedef uint64_t u64;
  *   +16 u64 seq         DATA: packet sequence; PARITY: window end
  *   +24 u16 win_len     PARITY: covered packets; DATA: 0
  *   +26 u16 payload_len payload bytes following this header
- *   +28 u16 conv        0x1007
+ *   +28 u16 conv        0x1008
  *   +30 u16 reserved    must be 0
  *   +32 u64 sid         stream id this record belongs to. DATA/PARITY and
  *                       every per-stream control record (ACK/NACK/CFG/FBK/
@@ -125,7 +128,7 @@ typedef uint64_t u64;
  * Control frames are complete records of their own and must never be queued
  * behind a partial DATA record (the carrier writer emits each record whole).
  * ------------------------------------------------------------------ */
-#define TBT_FEC_CONV 0x1007u
+#define TBT_FEC_CONV 0x1008u
 /* 0.2.0 raises TBT_FEC_CONV from 0x1001 to 0x1004 in three wire steps;
  * 0.2.2 adds M5 below.
  * M2 (0x1002): a PARITY record may be a block marker: win_len == 0 &&
@@ -163,12 +166,20 @@ typedef uint64_t u64;
  * There is no 4-byte marker and no magic number on this wire. A marker is a
  * set of values inside the 48-byte tbt_fec_hdr: type TBT_FEC_PARITY (0x31),
  * flags 0, share_index n (parity 0), epoch 0, win_len 0, payload_len 0,
- * conv 0x1007, payload_crc32c 0 (CRC32C of an empty payload).
+ * conv 0x1008, payload_crc32c 0 (CRC32C of an empty payload).
  *
  * M7 (0x1007, 0.4.0): seq and block_id are stream-local; sid is the routing
  * key for every per-stream record, not an entry filter; OPEN names the
  * flow's physical group bitmap; ALLOC (0x36) moves a flow between group
- * sets. The 48-byte header layout is unchanged. */
+ * sets. The 48-byte header layout is unchanged.
+ *
+ * M8 (0x1008, 0.5.0): a binary SC-LDPC downlink group is n data + n parity
+ * shares with n in {32, 64, 128} (block 2n), so a 256-carrier session can
+ * hold 1, 2 or 4 groups and each flow owns a whole-group subset. The CFG
+ * body already carries n/m/groups/w/k; only their meaning widens. The
+ * 48-byte header and every control-body offset stay unchanged. A 0.4.0 peer
+ * would read a multi-group binary shape as the GF(16) variant and fail its
+ * codec, so the revision and HELLO version 5 make the cut explicit. */
 
 /* FEC record types. */
 #define TBT_FEC_DATA 0x30
@@ -261,7 +272,8 @@ typedef uint64_t u64;
  *   +10 u16 k
  *   +12 u8  d
  *   +13 u8  flags       TBT_FEC_CFG_F_APPLY / _ABORT
- *   +14 u16 groups      carriers/(n+m); must divide 256
+ *   +14 u16 groups      groups this flow owns (1..256/(n+m)); flow-local,
+ *                       not the session total: a 2x128 downlink sends 1
  *   +16 u64 switch_pkt  absolute packet seq of the first new-shape record
  *   +24 u64 block_base  block id of the first new-shape block
  *   +32 u64 seed        codec seed; both ends derive the group seeds from it

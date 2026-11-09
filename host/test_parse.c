@@ -1292,7 +1292,7 @@ int main(void)
            TBT_PARSE_EINVAL, "w", "0..1024");
     refuse("w below n", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=8 w=7",
            TBT_PARSE_EINVAL, "w", "at least n");
-    refuse("sc-ldpc w not 256 or 512",
+    refuse("sc-ldpc w not 64, 128, 256 or 512",
            "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 mode=sc-ldpc w=100",
            TBT_PARSE_EINVAL, "w", "256 or 512");
     refuse("carriers over 256",
@@ -1328,6 +1328,22 @@ int main(void)
           " mode=sc-ldpc w=512",
           &cmd, &perr);
     ok(cmd.cfg.w == 512, "sc-ldpc w=512 accepted", NULL);
+    /* 0.5.0 group split: a 2x128 downlink names block 128, and w=0 for an
+     * n == m group geometry resolves to that block (n+m). */
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=64 m=64"
+          " carriers=256 mode=sc-ldpc w=128",
+          &cmd, &perr);
+    ok(cmd.cfg.w == 128 && cmd.cfg.carriers == 256,
+       "sc-ldpc 2x128 downlink accepted", NULL);
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=32 m=32"
+          " carriers=256 mode=sc-ldpc w=64",
+          &cmd, &perr);
+    ok(cmd.cfg.w == 64 && cmd.cfg.carriers == 256,
+       "sc-ldpc 4x64 downlink accepted", NULL);
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=32 m=32"
+          " carriers=256 mode=sc-ldpc w=0",
+          &cmd, &perr);
+    ok(cmd.cfg.w == 64, "sc-ldpc 4x64 w=0 resolves to n+m", NULL);
     parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=1 w=16",
           &cmd, &perr);
     tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
@@ -1672,6 +1688,20 @@ int main(void)
         ok(!strcmp(once, twice), "downlink adaptive line is a fixed point",
            twice);
 
+        /* 0.5.0: a split downlink starts on the same rate-50 ladder point. */
+        parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+              " n=64 m=64 fec=on mode=sc-ldpc adaptive=on w=128"
+              " carriers=256",
+              &cmd, &perr);
+        ok(cmd.cfg.adaptive == 1 && cmd.cfg.mode == 3 &&
+               cmd.cfg.n == 64 && cmd.cfg.m == 64 && cmd.cfg.w == 128,
+           "2x128 adaptive=on parsed", NULL);
+        tbt_render_cfg(&cmd.cfg, once, sizeof(once));
+        parse(once, &again, &perr);
+        tbt_render_cfg(&again.cfg, twice, sizeof(twice));
+        ok(!strcmp(once, twice), "2x128 adaptive line is a fixed point",
+           twice);
+
         parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
               " n=8 m=24 fec=on mode=sc-ldpc adaptive=on w=128 carriers=256"
               " L=16",
@@ -1688,15 +1718,16 @@ int main(void)
         ok(!strcmp(once, twice), "uplink adaptive line is a fixed point",
            twice);
 
-        refuse("sc-ldpc adaptive: downlink n/m",
-               "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-               " n=64 m=192 fec=on mode=sc-ldpc adaptive=on carriers=256",
-               TBT_PARSE_EINVAL, "adaptive", "supported profile");
         refuse("sc-ldpc adaptive: downlink block",
+               "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+               " n=64 m=64 fec=on mode=sc-ldpc adaptive=on w=64"
+               " carriers=256",
+               TBT_PARSE_EINVAL, "adaptive", "block=n+m");
+        refuse("sc-ldpc adaptive: downlink block 512",
                "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
                " n=128 m=128 fec=on mode=sc-ldpc adaptive=on w=512"
                " carriers=256",
-               TBT_PARSE_EINVAL, "adaptive", "block=256");
+               TBT_PARSE_EINVAL, "adaptive", "block=n+m");
         refuse("sc-ldpc adaptive: uplink block",
                "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
                " n=8 m=24 fec=on mode=sc-ldpc adaptive=on carriers=256 L=16",

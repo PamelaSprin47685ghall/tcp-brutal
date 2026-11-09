@@ -1,4 +1,4 @@
-/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x1007), control frames, and the
+/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x1008), control frames, and the
  * GF(2) sliding-window RLNC codec.
  *
  * This file and tbt_fec.c compile twice: into the module and into the host
@@ -206,10 +206,11 @@ static inline bool tbt_fec_groups_fit(u16 total, u16 used, u16 count)
     return count && used <= total && count <= (u16)(total - used);
 }
 
-/* Admission decision before any allocation. SC-LDPC has one flow, so a second
- * flow is a clean refusal (-EOPNOTSUPP) even when its peer bitmap is larger
- * than the local TX group count. The caller maps SECOND to -EOPNOTSUPP and
- * NO_GROUPS to -EPROTO. */
+/* Admission decision before any allocation. SC-LDPC keeps one flow by
+ * default: fec_groups_per_flow == 0 means the first flow owns every group,
+ * so a second flow is a clean refusal (-EOPNOTSUPP) even when its peer
+ * bitmap is larger than the local TX group count. The caller maps SECOND to
+ * -EOPNOTSUPP and NO_GROUPS to -EPROTO. */
 enum tbt_fec_admit_check
 {
     TBT_FEC_ADMIT_OK = 0,
@@ -217,11 +218,37 @@ enum tbt_fec_admit_check
     TBT_FEC_ADMIT_NO_GROUPS,
 };
 
+/* True when the session's group geometry can be partitioned among several
+ * SC-LDPC flows. A binary downlink group is n data + n parity shares with
+ * n in {32, 64, 128} (block 64/128/256); a GF(16) uplink group is 32 shares.
+ * `per_flow` 0 disables the split and keeps the 0.4.x single-flow semantics;
+ * a one-group session has nothing to split. */
+static inline bool tbt_fec_sclc_split_ok(u16 n, u16 m, u16 total,
+                                         u16 per_flow)
+{
+    u16 shares = (u16)(n + m);
+
+    if (!per_flow || total < 2 || !n || !m ||
+        (u32)total * shares > TBT_FEC_MAX_CARRIERS)
+        return false;
+    if (n == m && (shares == 64 || shares == 128 || shares == 256))
+        return true;
+    return shares == 32; /* GF(16) uplink: one codec block per group */
+}
+
+/* `count` is the number of groups this admission would reserve, `per_flow`
+ * the configured cap. A second SC-LDPC flow is admitted only when the
+ * geometry is partitionable and the reservation fits that cap. Group
+ * exhaustion stays the caller's -ENOSPC check (tbt_fec_groups_fit). */
 static inline enum tbt_fec_admit_check
-tbt_fec_flow_admit_check(bool sclc, u16 n_flows, u16 total, u16 count)
+tbt_fec_flow_admit_check(bool sclc, u16 n_flows, u16 total, u16 count,
+                         u16 n, u16 m, u16 per_flow)
 {
     if (sclc && n_flows)
-        return TBT_FEC_ADMIT_SECOND_SCLC;
+    {
+        if (!tbt_fec_sclc_split_ok(n, m, total, per_flow) || count > per_flow)
+            return TBT_FEC_ADMIT_SECOND_SCLC;
+    }
     if (!count || count > total)
         return TBT_FEC_ADMIT_NO_GROUPS;
     return TBT_FEC_ADMIT_OK;
@@ -232,11 +259,13 @@ tbt_fec_flow_admit_check(bool sclc, u16 n_flows, u16 total, u16 count)
  * not a second SC-LDPC flow, so they must return -EEXIST (not -EOPNOTSUPP). */
 static inline int tbt_fec_flow_create_code(bool sid_exists, bool sclc,
                                            u16 n_flows, u16 total,
-                                           u16 count)
+                                           u16 count, u16 n, u16 m,
+                                           u16 per_flow)
 {
     if (sid_exists)
         return -EEXIST;
-    switch (tbt_fec_flow_admit_check(sclc, n_flows, total, count))
+    switch (tbt_fec_flow_admit_check(sclc, n_flows, total, count, n, m,
+                                     per_flow))
     {
     case TBT_FEC_ADMIT_SECOND_SCLC:
         return -EOPNOTSUPP;
@@ -248,9 +277,11 @@ static inline int tbt_fec_flow_create_code(bool sid_exists, bool sclc,
     return 0;
 }
 
-/* The single SC-LDPC primary binds the peer's bitmap without resizing its
- * local TX plane; the RX shape is installed later by FEC_CFG INIT. Other
- * modes keep the one-sid-one-bitmap rule. */
+/* An SC-LDPC flow has asymmetric directions: the OPEN bitmap names the
+ * peer's TX groups (this side's RX groups), which need not equal this side's
+ * TX partition. The RX shape is installed later by FEC_CFG INIT, and a
+ * duplicate OPEN is resolved by the sid lookup. Other modes keep the
+ * one-sid-one-bitmap rule. */
 static inline bool tbt_fec_primary_mask_match(bool sclc,
                                               const u8 *flow_mask,
                                               const u8 *open_mask)
@@ -1547,13 +1578,16 @@ extern const struct tbt_fec_ops tbt_fec_ops_rlnc;
 extern const struct tbt_fec_ops tbt_fec_ops_sclc;
 
 /* ------------------------------------------------------------------ *
- * SC-LDPC shape (mode 3, TBT_FEC_CONV 0x1006)
+ * SC-LDPC shape (mode 3, TBT_FEC_CONV 0x1008)
  *
  * The wire carries no codec field, so the shape itself names the codec
  * variant and its graph parameters. Both variants are block codes over one
  * FEC block of n data shares and m parity shares:
  *
- *   downlink   groups == 1: one binary SC-IRA block of n+m = 256 shares.
+ *   downlink   n == m and n+m in {64, 128, 256}: one binary SC-IRA block
+ *              per group, block = 2n and L = 8. The 256-share group is the
+ *              0.4.0 single-flow shape; the other two let 2 or 4 flows own
+ *              disjoint groups.
  *              block = w, L = L, rate = n/(n+m) in parts per thousand.
  *              tbt_fec_ops_sclc.new(n, m, rate_ppm, block, S, 0, seed).
  *   uplink     groups  > 1: one GF(16) SC-IRA block per group, n+m shares
@@ -1574,7 +1608,7 @@ extern const struct tbt_fec_ops tbt_fec_ops_sclc;
 enum tbt_fec_sclc_variant
 {
     TBT_FEC_SCLC_NONE = 0,
-    TBT_FEC_SCLC_DOWN = 1, /* binary, one group of 256 shares */
+    TBT_FEC_SCLC_DOWN = 1, /* binary, one block per group, block = 2n */
     TBT_FEC_SCLC_UP = 2,   /* GF(16), one block per group */
 };
 
@@ -1591,9 +1625,11 @@ struct tbt_fec_sclc_shape
 };
 
 /* Resolve a configured (mode, n, m, carriers, block, L) into the codec
- * variant and its graph parameters. `block`/`L` of 0 take the variant
- * default. Returns 0, or -EINVAL when the shape is not an SC-LDPC shape
- * (bad carrier multiple, n or m zero, unsupported block). */
+ * variant and its graph parameters. A binary shape with n == m and n+m in
+ * {64, 128, 256} is DOWN for any group count, so `n == m == 64, w == 128,
+ * carriers == 256` names two 128-share groups. `block`/`L` of 0 take the
+ * variant default. Returns 0, or -EINVAL when the shape is not an SC-LDPC
+ * shape (bad carrier multiple, n or m zero, unsupported block). */
 int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
                           struct tbt_fec_sclc_shape *out);
 
@@ -1609,11 +1645,13 @@ int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
 int tbt_fec_sclc_shape_of_cfg(const struct tbt_fec_cfg *cfg, u16 carriers,
                               struct tbt_fec_sclc_shape *out);
 
-/* Build one grouped container for a resolved shape. The downlink variant is
- * a single binary context; the uplink variant is one GF(16) context per
- * group. Returns NULL when the shape or the codec rejects the parameters. */
+/* Build one grouped container for a resolved shape, with `groups` codec
+ * contexts: the groups one flow owns, not the session's total. The downlink
+ * variant builds one binary context per group; the uplink variant one GF(16)
+ * context per group. Returns NULL when the shape or the codec rejects the
+ * parameters. */
 struct tbt_fec_grouped *tbt_fec_sclc_new(const struct tbt_fec_sclc_shape *sh,
-                                         size_t s, u64 nonce);
+                                         u16 groups, size_t s, u64 nonce);
 
 /* ------------------------------------------------------------------ *
  * Adaptive shape (0.3.0, TBT_FEC_CONV 0x1006)

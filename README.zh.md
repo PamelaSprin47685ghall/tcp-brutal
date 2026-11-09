@@ -43,11 +43,14 @@ GF(16) 上行 128、512 保留），码率由 `n/(n+m)` 决定。per-direction
 自适应 FEC（`adaptive=`，默认 off）有两条路径。GF(2) 的 `mode=rlnc`/`grouped`
 保留 Phase 1：形状固定在 `n + m = 8`、32 组的族内，`m` 在 1..6 之间移动。
 `mode=sc-ldpc` 使用 per-flow SC-LDPC 估计器/控制器：上行 GF(16) 8x32/L16 可沿
-码率阶梯切换；下行 binary 1x256/L8 固定 rate 50%，控制器停在 50（已知限制）。
-切换走 `FEC_CFG`/`FEC_FBK`（wire `0x1007`）。`session <id> adaptive=off` 可在
+码率阶梯切换；下行 binary 固定 rate 50%，控制器停在 50（已知限制）。0.5.0 起
+下行每组可为 256/128/64 shares，`fec_groups_per_flow` 可让 2 或 4 条流各自
+持有互不重叠的 group。切换走 `FEC_CFG`/`FEC_FBK`（wire `0x1008`）。
+`session <id> adaptive=off` 可在
 运行时关闭。GF(2) 族的 `n + m != 8` 尚未实现。
 
-0.4.0 起一个会话可承载多条并发 FEC 流（v7，wire `0x1007`）。每条流有自己的
+一个会话可承载多条并发 FEC 流（v7 自 0.4.0，wire `0x1007`；SC-LDPC group
+split 自 0.5.0，`0x1008`）。每条流有自己的
 per-flow FEC TX/RX 上下文与 admission 引用。前一个流关闭后的顺序新连接仍会重置
 旧 FEC RX/TX 状态、把窗口重定基到新流的第一个块，并关闭旧 target socket；
 DATA/PARITY 携带 stream id（`0x1005` 引入，`0x1007` 仍在），因此排队中的旧流
@@ -105,12 +108,12 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.4.0`）。
+`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.5.0`）。
 线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x0007` 与 FEC 记录的
-`TBT_FEC_CONV=0x1007`，三者都与模块版本独立。
+`TBT_FEC_CONV=0x1008`，三者都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
 失败，其载体关闭；0x0004 的对端在第一个头部就会因为 conv 不匹配而被拒绝。
-当前 FEC wire 是 `0x1007`：`0x1002` 增加 FIN 的 16 字节 body
+当前 FEC wire 是 `0x1008`：`0x1002` 增加 FIN 的 16 字节 body
 （`pkt_end`/`pkt_base`）与 PARITY 空块 marker（`win_len=0`、
 `payload_len=0`、`epoch=0`）；`0x1003` 把 ACK 扩到 24 字节并加入
 `deliver_bytes`；`0x1004` 把 NACK 变成 64 字节位图修复请求；`0x1005`
@@ -118,7 +121,9 @@ make check
 `FEC_CFG` 扩到 48 字节、把 `FEC_FBK` 变成 48 字节报告，并把 HELLO body[0]
 升到版本 3，用于自适应形状切换。`0x1007` 是多流版本：stream-local FEC
 seq/block id、32 字节 OPEN group bitmap 与 ALLOC (0x36)；HELLO body[0] 升到
-版本 4。0.2.x 与当前 wire 不互操作，首个 HELLO 即硬拒绝。
+版本 4。`0x1008` 把下行 binary SC-LDPC 的 group 几何扩到 256/128/64 shares，
+并允许多条流各持独立 group；HELLO body[0] 升到版本 5。旧端与当前 wire 不
+互操作，首个 HELLO 即硬拒绝。
 `scripts/mkdkmsconf.sh` 派生
 `PACKAGE_VERSION="<major>.<minor>.<patch>"`；`dkms.conf` 是生成物，由
 `make dkms.conf` / `make dkms-tarball` 写出，不要手改。

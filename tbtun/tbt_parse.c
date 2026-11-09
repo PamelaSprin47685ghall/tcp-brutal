@@ -675,14 +675,24 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     /* w=0 and carriers=0 mean "auto". Resolve them before validating, so the
      * struct holds the effective value and the canonical render is stable:
      * a written 0 reads back as the value it stands for. */
-    /* mode=3 reuses w as the codeword block: 256 is the binary downlink, 128
-     * the GF(16) uplink; 512 is reserved for the L16/block512 profile. It is
-     * not an RLNC window, so w >= n does not apply to it. */
-    if (cfg->mode == 3 && cfg->w && cfg->w != 128 && cfg->w != 256 &&
-        cfg->w != 512)
-        return tbt_fail(e, "w", "sc-ldpc w must be 128, 256 or 512");
+    /* mode=3 reuses w as the codeword block: 64/128/256 for the three binary
+     * downlink group sizes, 128 for the GF(16) uplink (its L lives in L);
+     * 512 is reserved for the L16/block512 profile. It is not an RLNC
+     * window, so w >= n does not apply to it. */
+    if (cfg->mode == 3 && cfg->w && cfg->w != 64 && cfg->w != 128 &&
+        cfg->w != 256 && cfg->w != 512)
+        return tbt_fail(e, "w", "sc-ldpc w must be 64, 128, 256 or 512");
     if (!cfg->w)
-        cfg->w = cfg->mode == 3 ? 256 : (u16)(2 * cfg->n);
+    {
+        u16 shares = (u16)(cfg->n + cfg->m);
+        bool down = cfg->n == cfg->m &&
+                    (shares == 64 || shares == 128 || shares == 256);
+
+        if (cfg->mode != 3)
+            cfg->w = (u16)(2 * cfg->n);
+        else
+            cfg->w = down ? shares : TBT_FEC_SCLC_BLOCK_DOWN;
+    }
     if (cfg->mode != 3 && cfg->w < cfg->n)
         return tbt_fail(e, "w", "w must be 0 or at least n");
     if (!cfg->carriers)
@@ -698,9 +708,10 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     if (cfg->fec && cfg->carriers < cfg->n + cfg->m)
         return tbt_fail(e, "carriers", "fec=on needs carriers >= n + m");
     /* mode=3 adaptive starts from a shipped codec profile on the rate
-     * ladder: binary 1x256/L8/r0.5, or GF(16) 8x32/L16 with n/m on the
-     * ladder. The CFG carries no L for binary, so the fixed L8 is part of
-     * the profile; the uplink carries L in w. */
+     * ladder: binary G groups of n+m shares with n == m and block = n+m
+     * (1x256, 2x128 or 4x64, always L8/r0.5), or GF(16) 8x32/L16 with n/m
+     * on the ladder. The CFG carries no L for binary, so the fixed L8 is
+     * part of the profile; the uplink carries L in w. */
     if (cfg->adaptive && cfg->mode == 3)
     {
         struct tbt_fec_cfg fc;
@@ -712,14 +723,15 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         fc.n = cfg->n;
         fc.m = cfg->m;
         fc.groups = groups;
-        if (groups == 1 && shares == TBT_FEC_MAX_SHARES)
+        if (cfg->n == cfg->m &&
+            (shares == 64 || shares == 128 || shares == 256))
         {
-            if (cfg->w != TBT_FEC_SCLC_BLOCK_DOWN ||
+            if (cfg->w != shares ||
                 (cfg->L && cfg->L != TBT_FEC_SCLC_L_DOWN))
                 return tbt_fail(e, "adaptive",
-                                "downlink adaptive needs block=256 L=8");
+                                "downlink adaptive needs block=n+m and L=8");
             fc.w = cfg->w;
-            fc.k = (u16)((u32)cfg->n * 1000u / shares);
+            fc.k = 500;
             fc.d = 0;
         }
         else

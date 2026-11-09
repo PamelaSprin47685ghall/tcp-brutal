@@ -95,7 +95,7 @@ HOST_FEC_ADAPT_SCLC_SRCS := host/test_fec_adapt_sclc.c tbtun/tbt_fec_adapt_sclc.
 HOST_FEC_ADAPT_SCLC_HDRS := tbtun/tbt_fec_adapt_sclc.h tbtun/tbt_fec_adapt.h \
                    tbtun/tbt_fec.h tbtun/tbt_uapi.h
 HOST_FEC_SCLC   := host/test_fec_sclc
-HOST_FEC_SCLC_SRCS := host/test_fec_sclc.c tbtun/tbt_fec_sclc.c
+HOST_FEC_SCLC_SRCS := host/test_fec_sclc.c tbtun/tbt_fec_sclc.c tbtun/tbt_fec.c
 HOST_FEC_SCLC_HDRS := tbtun/tbt_fec_sclc.h tbtun/tbt_fec.h tbtun/tbt_uapi.h
 HOST_PORTMAP    := host/test_portmap
 HOST_PORTMAP_SRCS := host/test_portmap.c tbtun/tbt_portmap.c tbtun/tbt_parse.c \

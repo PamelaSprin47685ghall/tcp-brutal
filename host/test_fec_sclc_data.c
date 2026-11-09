@@ -114,6 +114,26 @@ static void case_shape_of(void)
            "downlink explicit block/L");
     ok_u16(sh.block, 512, "explicit block kept");
     ok_u16(sh.L, 16, "explicit L kept");
+
+    /* 0.5.0 group split: the same binary variant at 128- and 64-share
+     * groups. `groups` is the session count at this layer. */
+    memset(&sh, 0, sizeof(sh));
+    ok_int(tbt_fec_sclc_shape_of(64, 64, 256, 0, 0, &sh), 0,
+           "2x128 downlink shape resolves");
+    ok(sh.variant == TBT_FEC_SCLC_DOWN, "2x128 variant");
+    ok_u16(sh.groups, 2, "2x128 two groups");
+    ok_u16(sh.block, 128, "2x128 block");
+    ok_u16(sh.rate_ppm, 500, "2x128 rate");
+
+    memset(&sh, 0, sizeof(sh));
+    ok_int(tbt_fec_sclc_shape_of(32, 32, 256, 0, 0, &sh), 0,
+           "4x64 downlink shape resolves");
+    ok_u16(sh.groups, 4, "4x64 four groups");
+    ok_u16(sh.block, 64, "4x64 block");
+
+    /* A flow's one-context container is covered by the grouped codec tests
+     * in host/test_fec_sclc.c; tbt_fec_sclc_new() lives in the kernel data
+     * plane and is not linked here. */
 }
 
 /* ---- FEC_CFG -------------------------------------------------------- */

@@ -1598,12 +1598,28 @@ static void case_init_plan(void)
            (u32)-1, "plan: off-ladder refused");
     eq_u32(idx, 0xff, "plan: off-ladder index");
     eq_u32(mask, 0, "plan: off-ladder mask");
-    eq_u32((u32)tbt_fec_adapt_sclc_init_plan(128, 128, 2,
+    /* 0.5.0: a downlink session may own more than one 128- or 64-share
+     * group; a flow's plan uses its own group count. */
+    eq_u32((u32)tbt_fec_adapt_sclc_init_plan(64, 64, 1,
                                              TBT_FEC_SCLC_DOWN, &idx, &mask),
-           (u32)-1, "plan: downlink needs one group");
+           0, "plan: 2x128 flow");
+    eq_u32(idx, 3, "plan: 2x128 flow index");
+    eq_u32(mask, 1u << 3, "plan: 2x128 flow mask");
+    eq_u32((u32)tbt_fec_adapt_sclc_init_plan(32, 32, 4,
+                                             TBT_FEC_SCLC_DOWN, &idx, &mask),
+           0, "plan: 4x64 session");
+    eq_u32(idx, 3, "plan: 4x64 session index");
+    eq_u32(mask, 1u << 3, "plan: 4x64 session mask");
+    eq_u32((u32)tbt_fec_adapt_sclc_init_plan(128, 128, 0,
+                                             TBT_FEC_SCLC_DOWN, &idx, &mask),
+           (u32)-1, "plan: downlink needs a group count");
+    /* A split uplink flow may own a single GF(16) group. */
     eq_u32((u32)tbt_fec_adapt_sclc_init_plan(8, 24, 1, TBT_FEC_SCLC_UP,
                                              &idx, &mask),
-           (u32)-1, "plan: uplink needs more than one group");
+           0, "plan: one-group uplink flow");
+    eq_u32(idx, 0, "plan: one-group uplink index");
+    eq_u32(mask, (1u << TBT_FEC_ADAPT_SCLC_LEVELS) - 1u,
+           "plan: one-group uplink mask");
 
     /* The resolved plan starts the controller at the configured point. */
     eq_u32((u32)tbt_fec_adapt_sclc_ctl_init(
@@ -1698,6 +1714,52 @@ static void case_wire_profile(void)
     eq_u32(back.k, 500, "wire: downlink cfg k");
     eq_u32(back.d, 0, "wire: downlink cfg d");
 
+    /* Binary group split: 2x128 and 4x64. A flow body names its own group
+     * count; the same shape with more groups describes the session. */
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.n = 64;
+    cfg.m = 64;
+    cfg.w = 128;
+    cfg.k = 500;
+    cfg.d = 0;
+    cfg.groups = 1;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, 128, &w), 0,
+           "wire: 2x128 flow accepted");
+    eq_u32(w.kind, TBT_FEC_SCLC_DOWN, "wire: 2x128 kind");
+    eq_u32(w.block, 128, "wire: 2x128 block");
+    eq_u32(w.groups, 1, "wire: 2x128 flow groups");
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_to_cfg(&w, 9,
+                                               TBT_FEC_CFG_F_APPLY, &back),
+           0, "wire: 2x128 to cfg");
+    eq_u32(back.w, 128, "wire: 2x128 cfg w");
+    eq_u32(back.k, 500, "wire: 2x128 cfg k");
+    eq_u32(back.groups, 1, "wire: 2x128 cfg groups");
+    cfg.groups = 2;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, 256, &w), 0,
+           "wire: 2x128 session accepted");
+    eq_u32(w.groups, 2, "wire: 2x128 session groups");
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.n = 32;
+    cfg.m = 32;
+    cfg.w = 64;
+    cfg.k = 500;
+    cfg.d = 0;
+    cfg.groups = 4;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, 256, &w), 0,
+           "wire: 4x64 session accepted");
+    eq_u32(w.block, 64, "wire: 4x64 block");
+    eq_u32(w.groups, 4, "wire: 4x64 groups");
+    cfg.w = 128;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, 256, &w), (u32)-1,
+           "wire: 4x64 block must be 64");
+    cfg.w = 64;
+    cfg.n = 48;
+    cfg.m = 48;
+    cfg.groups = 2;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, 192, &w), (u32)-1,
+           "wire: 96-share group is not shipped");
+
     /* Uplink 8x32/L16/r1/4. */
     memset(&cfg, 0, sizeof(cfg));
     cfg.n = 8;
@@ -1719,6 +1781,10 @@ static void case_wire_profile(void)
     eq_u32(back.w, 16, "wire: uplink cfg w");
     eq_u32(back.k, 128, "wire: uplink cfg k");
     eq_u32(back.d, 64, "wire: uplink cfg d");
+    cfg.groups = 1;
+    eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, 32, &w), 0,
+           "wire: one-group uplink flow accepted");
+    eq_u32(w.groups, 1, "wire: one-group uplink flow groups");
 
     /* The 60% ladder point is 18/14 of 32, d=144. */
     memset(&cfg, 0, sizeof(cfg));

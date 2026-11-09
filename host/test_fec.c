@@ -218,8 +218,9 @@ static void test_header_roundtrip(void)
            TBT_FEC_H_PAYCRC == 40 && TBT_FEC_H_HDRCRC == 44,
        "header offsets", NULL);
     /* 0x1005 adds the stream sid and grows the header to 48 bytes; 0x1007
-     * makes FEC_CFG/FEC_FBK carry the adaptive shape and adds FEC_ALLOC. */
-    ok(TBT_FEC_CONV == 0x1007u, "TBT_FEC_CONV", NULL);
+     * makes FEC_CFG/FEC_FBK carry the adaptive shape and adds FEC_ALLOC;
+     * 0x1008 widens the binary SC-LDPC group geometry. */
+    ok(TBT_FEC_CONV == 0x1008u, "TBT_FEC_CONV", NULL);
 
     /* NULL arguments are refused, not dereferenced. */
     ok_int(tbt_fec_hdr_pack(NULL, wire), -EINVAL, "pack NULL header");
@@ -833,12 +834,14 @@ static void test_control(void)
     cbuf[TBT_FEC_CFG_M] = 1;
     cbuf[TBT_FEC_CFG_M + 1] = 0;
     cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG n+m does not divide 256");
+    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), 0,
+           "CFG n+m need not divide 256 per flow");
     tbt_fec_cfg_pack(&c, cbuf);
-    cbuf[TBT_FEC_CFG_GROUPS] = 31;
+    cbuf[TBT_FEC_CFG_GROUPS] = 33;
     cbuf[TBT_FEC_CFG_GROUPS + 1] = 0;
     cfg_fix_crc(cbuf);
-    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO, "CFG groups != 256/(n+m)");
+    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), -EPROTO,
+           "CFG groups * (n+m) over 256 carriers");
     tbt_fec_cfg_pack(&c, cbuf);
     cbuf[TBT_FEC_CFG_K] = 0;
     cbuf[TBT_FEC_CFG_K + 1] = 0;
@@ -1710,7 +1713,7 @@ static void test_sclc_second_flow(void)
     memset(eight, 0, sizeof(eight));
     for (count = 0; count < 8; count++)
         tbt_fec_bitmap_set(eight, count);
-    ok_int(tbt_fec_flow_admit_check(true, 1, 1, 8),
+    ok_int(tbt_fec_flow_admit_check(true, 1, 1, 8, 128, 128, 0),
            TBT_FEC_ADMIT_SECOND_SCLC,
            "sclc second flow: 8-group OPEN beats the local groups=1 check");
     /* Sequential stream: the previous flow was released, n_flows=0. The peer
@@ -1719,24 +1722,98 @@ static void test_sclc_second_flow(void)
     ok(tbt_fec_open_mask_valid(true, 1, eight, &count),
        "sclc sequential: the 8-group peer bitmap is valid", NULL);
     ok_u32(count, 8, "sclc sequential: peer bitmap count");
-    ok_int(tbt_fec_flow_admit_check(true, 0, 1, 1), TBT_FEC_ADMIT_OK,
+    ok_int(tbt_fec_flow_admit_check(true, 0, 1, 1, 128, 128, 0),
+           TBT_FEC_ADMIT_OK,
            "sclc sequential: local groups=1 admits the next flow");
-    ok_int(tbt_fec_flow_admit_check(true, 1, 1, 1),
+    ok_int(tbt_fec_flow_admit_check(true, 1, 1, 1, 128, 128, 0),
            TBT_FEC_ADMIT_SECOND_SCLC,
            "sclc concurrent: a live flow still refuses the second");
-    ok_int(tbt_fec_flow_admit_check(true, 0, 1, 1), TBT_FEC_ADMIT_OK,
+    ok_int(tbt_fec_flow_admit_check(true, 0, 1, 1, 128, 128, 0),
+           TBT_FEC_ADMIT_OK,
            "sclc first flow: one local group is admitted");
-    ok_int(tbt_fec_flow_admit_check(true, 0, 1, 8),
+    ok_int(tbt_fec_flow_admit_check(true, 0, 1, 8, 128, 128, 0),
            TBT_FEC_ADMIT_NO_GROUPS,
            "sclc create: an oversized first bitmap is a group error");
-    ok_int(tbt_fec_flow_admit_check(false, 1, 1, 8),
+    ok_int(tbt_fec_flow_admit_check(false, 1, 1, 8, 4, 4, 0),
            TBT_FEC_ADMIT_NO_GROUPS,
            "non-sclc: the same bitmap is a group error");
-    ok_int(tbt_fec_flow_admit_check(false, 1, 32, 16), TBT_FEC_ADMIT_OK,
+    ok_int(tbt_fec_flow_admit_check(false, 1, 32, 16, 4, 4, 0),
+           TBT_FEC_ADMIT_OK,
            "non-sclc: a fitting second flow is admitted");
-    ok_int(tbt_fec_flow_admit_check(false, 1, 32, 0),
+    ok_int(tbt_fec_flow_admit_check(false, 1, 32, 0, 4, 4, 0),
            TBT_FEC_ADMIT_NO_GROUPS,
            "non-sclc: zero groups is a group error");
+}
+
+/* 0.5.0 group split: the same session geometry carries two 128-share groups
+ * or four 64-share groups, and each flow owns a whole-group subset. The
+ * default fec_groups_per_flow = 0 keeps the one-flow 1x256 semantics. */
+static void test_sclc_group_split(void)
+{
+    u8 mask_a[TBT_FEC_BITMAP_BYTES], mask_b[TBT_FEC_BITMAP_BYTES];
+    u16 map_a[TBT_FEC_MAX_GROUPS], map_b[TBT_FEC_MAX_GROUPS];
+    u16 count = 0;
+
+    /* Admission: two 128-share groups, one per flow. */
+    ok_int(tbt_fec_flow_admit_check(true, 1, 2, 1, 64, 64, 1),
+           TBT_FEC_ADMIT_OK, "2x128: second flow with one group admitted");
+    ok_int(tbt_fec_flow_admit_check(true, 1, 2, 1, 64, 64, 0),
+           TBT_FEC_ADMIT_SECOND_SCLC,
+           "2x128: default per_flow=0 keeps the single flow");
+    ok_int(tbt_fec_flow_admit_check(true, 1, 4, 1, 32, 32, 1),
+           TBT_FEC_ADMIT_OK, "4x64: second flow with one group admitted");
+    ok_int(tbt_fec_flow_admit_check(true, 1, 4, 2, 32, 32, 1),
+           TBT_FEC_ADMIT_SECOND_SCLC,
+           "4x64: a flow may not exceed fec_groups_per_flow");
+    ok_int(tbt_fec_flow_admit_check(true, 1, 2, 1, 128, 128, 1),
+           TBT_FEC_ADMIT_SECOND_SCLC,
+           "1x256: two 256-share groups exceed the carrier ceiling");
+    ok_int(tbt_fec_flow_admit_check(true, 1, 8, 4, 8, 24, 4),
+           TBT_FEC_ADMIT_OK, "8x32 uplink: second flow may own four groups");
+    ok_int(tbt_fec_flow_admit_check(true, 1, 8, 2, 8, 24, 1),
+           TBT_FEC_ADMIT_SECOND_SCLC,
+           "8x32 uplink: a flow may not exceed its group cap");
+    ok(tbt_fec_groups_fit(2, 1, 1), "2x128: one free group fits", NULL);
+    ok(!tbt_fec_groups_fit(2, 1, 2), "2x128: two groups do not fit", NULL);
+    ok(tbt_fec_groups_fit(4, 2, 2), "4x64: two free groups fit", NULL);
+
+    /* Bitmap isolation: flow A owns group 0, flow B group 1. A share of a
+     * 128-share group names carriers 0..127 and 128..255 respectively. */
+    memset(mask_a, 0, sizeof(mask_a));
+    memset(mask_b, 0, sizeof(mask_b));
+    tbt_fec_bitmap_set(mask_a, 0);
+    tbt_fec_bitmap_set(mask_b, 1);
+    ok(tbt_fec_group_mask_valid(mask_a, 2, &count), "flow A mask valid", NULL);
+    ok_u32(count, 1, "flow A owns one group");
+    ok_u32(tbt_fec_group_map_build(mask_a, 2, map_a), 1,
+           "flow A map build");
+    ok_u32(tbt_fec_group_map_build(mask_b, 2, map_b), 1,
+           "flow B map build");
+    ok_u32(tbt_fec_carrier_of_seq_map(0, 0, 1, 64, 64, map_a), 0,
+           "flow A first share is carrier 0");
+    ok_u32(tbt_fec_carrier_of_seq_map(0, 0, 1, 64, 64, map_b), 128,
+           "flow B first share is carrier 128");
+    ok_u32(tbt_fec_carrier_of_seq_map(63, 0, 1, 64, 64, map_a), 63,
+           "flow A last data share is carrier 63");
+    ok_u32(tbt_fec_carrier_of_seq_map(63, 0, 1, 64, 64, map_b), 191,
+           "flow B last data share is carrier 191");
+
+    /* Four 64-share groups: carriers 0..63, 64..127, 128..191, 192..255. */
+    {
+        u16 g, p, carriers[4] = {0, 64, 128, 192};
+
+        for (g = 0; g < 4; g++)
+        {
+            u8 m[TBT_FEC_BITMAP_BYTES];
+
+            memset(m, 0, sizeof(m));
+            tbt_fec_bitmap_set(m, g);
+            ok_u32(tbt_fec_group_map_build(m, 4, map_a), 1,
+                   "4x64 map build");
+            p = tbt_fec_carrier_of_seq_map(0, 0, 1, 32, 32, map_a);
+            ok_u32(p, carriers[g], "4x64 carrier partition");
+        }
+    }
 }
 
 /* A target that closed fully can clear RCV_SHUTDOWN; TCP_CLOSE is still a
@@ -2087,12 +2164,13 @@ static void test_wire_version(void)
 
     memset(hello, 0, sizeof(hello));
     hello[0] = TBT_WIRE_VERSION_V6;
-    ok(hello[0] == 4, "0.4.0 FEC HELLO names version 4", NULL);
+    ok(hello[0] == 5, "0.5.0 FEC HELLO names version 5", NULL);
     hello[0] = 2;
     ok(hello[0] != TBT_WIRE_VERSION_V6,
        "0.2.x HELLO version 2 is refused", NULL);
     ok(TBT_WIRE_VERSION == 1, "legacy ARQ HELLO stays version 1", NULL);
-    ok(TBT_FEC_CONV == 0x1007u, "0x1007 is the multi-stream FEC revision", NULL);
+    ok(TBT_FEC_CONV == 0x1008u,
+       "0x1008 is the SC-LDPC group-split revision", NULL);
 }
 
 /* ------------------------------------------------------------------ *
@@ -2924,6 +3002,51 @@ static void test_sclc_wire_profiles(void)
            sh.rate_ppm == 500,
        "sclc cfg down: profile", NULL);
 
+    /* 0.5.0 group split: the CFG names one flow's share of the session. A
+     * per-flow 2x128 INIT carries groups=1, n=m=64 and block 128; the same
+     * shape with groups=2 describes the whole 256-carrier session. */
+    memset(&c, 0, sizeof(c));
+    c.epoch = 4;
+    c.n = 64;
+    c.m = 64;
+    c.w = 128;
+    c.k = 500;
+    c.d = 0;
+    c.flags = TBT_FEC_CFG_F_APPLY;
+    c.groups = 1;
+    ok_int(tbt_fec_cfg_pack(&c, cbuf), 0, "sclc cfg 2x128: pack");
+    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), 0, "sclc cfg 2x128: unpack");
+    ok_int(tbt_fec_sclc_shape_of_cfg(&c2, 128, &sh), 0,
+           "sclc cfg 2x128: flow shape");
+    ok(sh.variant == TBT_FEC_SCLC_DOWN && sh.groups == 1 &&
+           sh.block == 128 && sh.L == 8 && sh.rate_ppm == 500,
+       "sclc cfg 2x128: flow profile", NULL);
+    c2.groups = 2;
+    ok_int(tbt_fec_sclc_shape_of_cfg(&c2, 256, &sh), 0,
+           "sclc cfg 2x128: session shape");
+    ok(sh.groups == 2 && sh.block == 128, "sclc cfg 2x128: session groups",
+       NULL);
+
+    memset(&c, 0, sizeof(c));
+    c.epoch = 5;
+    c.n = 32;
+    c.m = 32;
+    c.w = 64;
+    c.k = 500;
+    c.d = 0;
+    c.flags = TBT_FEC_CFG_F_APPLY;
+    c.groups = 4;
+    ok_int(tbt_fec_cfg_pack(&c, cbuf), 0, "sclc cfg 4x64: pack");
+    ok_int(tbt_fec_cfg_unpack(cbuf, &c2), 0, "sclc cfg 4x64: unpack");
+    ok_int(tbt_fec_sclc_shape_of_cfg(&c2, 256, &sh), 0,
+           "sclc cfg 4x64: session shape");
+    ok(sh.variant == TBT_FEC_SCLC_DOWN && sh.groups == 4 &&
+           sh.block == 64 && sh.rate_ppm == 500,
+       "sclc cfg 4x64: profile", NULL);
+    c2.k = 400;
+    ok_int(tbt_fec_sclc_shape_of_cfg(&c2, 256, &sh), -EINVAL,
+           "sclc cfg: binary rate must match n/m");
+
     memset(&c, 0, sizeof(c));
     c.epoch = 3;
     c.n = 8;
@@ -2995,6 +3118,7 @@ int main(void)
     test_group_map();
     test_sclc_open_mask();
     test_sclc_second_flow();
+    test_sclc_group_split();
     test_stream_peer_eof();
     test_close_bound();
     test_base_mapping();

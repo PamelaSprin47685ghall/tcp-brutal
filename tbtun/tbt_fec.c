@@ -867,10 +867,10 @@ int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], struct tbt_fec_cfg *c)
         if (c->w > 1 && c->d == c->w)
             return -EPROTO;
     }
-    /* groups is the carrier geometry: one share per carrier, so n+m must
-     * divide the 256 carriers and groups must be exactly the quotient. */
-    if (!groups || (TBT_FEC_MAX_CARRIERS % shares) ||
-        groups != TBT_FEC_MAX_CARRIERS / shares)
+    /* groups is this flow's group count, not the session total: a multi-flow
+     * session gives each flow a subset. One share per carrier, so the flow's
+     * own carrier span must fit the 256-carrier ceiling. */
+    if (!groups || (u32)groups * shares > TBT_FEC_MAX_CARRIERS)
         return -EPROTO;
     return 0;
 }
@@ -1846,9 +1846,15 @@ int tbt_fec_sclc_shape_of_cfg(const struct tbt_fec_cfg *cfg, u16 carriers,
     if (cfg->d == 0 && cfg->k >= 100 && cfg->k <= 1000)
     {
         /* Binary: w is the codeword block, k the rate. The binary codec's
-         * graph has no coupling-length parameter to carry. */
-        return tbt_fec_sclc_shape_of(cfg->n, cfg->m, carriers, cfg->w, 0,
-                                     out);
+         * graph has no coupling-length parameter to carry. The codec derives
+         * its rate from n/m, so a wire k that disagrees would describe a
+         * graph the peer is not running: refuse it instead of ignoring k. */
+        int rc = tbt_fec_sclc_shape_of(cfg->n, cfg->m, carriers, cfg->w, 0,
+                                       out);
+
+        if (!rc && cfg->k != out->rate_ppm)
+            return -EINVAL;
+        return rc;
     }
     if (cfg->k > cfg->w)
     {
@@ -1878,16 +1884,14 @@ int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
     out->groups = groups;
     out->rate_ppm = (u16)((u32)n * 1000u / shares);
     out->rate_256 = (u16)((u32)n * 256u / shares);
-    if (groups == 1 && shares == TBT_FEC_MAX_SHARES)
+    if (n == m && (shares == 64 || shares == 128 || shares == 256))
     {
-        /* The binary codec's graph is fixed at 128 payload + 128 parity
-         * variables per codeword block; any other split of the 256 shares
-         * cannot be encoded, so name it as a shape error instead of letting
-         * the codec factory fail as an allocation error. */
-        if (n != TBT_FEC_MAX_SHARES / 2 || m != TBT_FEC_MAX_SHARES / 2)
-            return -EINVAL;
+        /* One binary SC-IRA block per group: a group is n payload + n
+         * parity shares and the coupling block is 2n. The three shipped
+         * group sizes are 256, 128 and 64 shares, so a 256-carrier session
+         * can carry one, two or four independent flow groups. */
         out->variant = TBT_FEC_SCLC_DOWN;
-        out->block = block ? block : TBT_FEC_SCLC_BLOCK_DOWN;
+        out->block = block ? block : (u16)shares;
         out->L = L ? L : TBT_FEC_SCLC_L_DOWN;
     }
     else if (groups > 1)
@@ -1897,12 +1901,7 @@ int tbt_fec_sclc_shape_of(u16 n, u16 m, u16 carriers, u16 block, u16 L,
         out->L = L ? L : TBT_FEC_SCLC_L_UP;
     }
     else
-    {
-        /* One group of fewer than 256 shares is neither shipped shape. The
-         * binary codec's graph is bound to 128+128, so accepting it would
-         * build a codec that cannot encode the block. */
         return -EINVAL;
-    }
     if (!out->block || (out->block & 1) || !out->L)
         return -EINVAL;
     if (!out->rate_ppm || !out->rate_256)

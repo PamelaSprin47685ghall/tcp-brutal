@@ -5119,16 +5119,21 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     struct tbt_fec_blk *blk, *old_blk;
     u64 *req_ns, *req_block, *old_req_ns, *old_req_block;
     u8 *rec, *old_rec;
-    u32 per, slots, total, old_total;
+    u32 slots, total, old_total;
     u16 shares = (u16)(cfg->n + cfg->m);
     bool same, fresh, block_code = false;
 
     if (!rx)
         return -EINVAL;
-    /* On the far side the flow mask came from the peer's OPEN, so the INIT
-     * shape must name the same peer group count. The near side's flow mask is
-     * its own TX partition, not this RX direction. */
-    if (sess->fec_sclc && sess->tunnel->cfg.role == TBT_ROLE_FAR &&
+    /* The flow mask came from the peer's OPEN (far side) or is this side's
+     * local allocation (near side). In split mode both sides name the same
+     * flow-local group count, so the INIT must agree on either role; the
+     * single-flow path keeps 0.4.0's asymmetric allowance, where only the
+     * far side's RX mask comes from the peer bitmap. The physical groups may
+     * differ: the two directions partition independently. */
+    if (sess->fec_sclc &&
+        (tbt_fec_groups_per_flow ||
+         sess->tunnel->cfg.role == TBT_ROLE_FAR) &&
         !tbt_fec_open_groups_match(true, f->rx->group_mask, cfg->groups))
         return -EINVAL;
     memset(&sclc, 0, sizeof(sclc));
@@ -5164,7 +5169,7 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
                     cfg, (u16)(cfg->groups * shares), &w))
                 return -EINVAL;
         }
-        codec = tbt_fec_sclc_new(&sclc, TBT_FEC_S, cfg->seed);
+        codec = tbt_fec_sclc_new(&sclc, cfg->groups, TBT_FEC_S, cfg->seed);
         block_code = true;
     }
     else
@@ -5176,8 +5181,19 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     if (!codec)
         return -ENOMEM;
 
-    per = (u32)cfg->groups * shares * TBT_FEC_S;
-    slots = TBT_FEC_RX_BUDGET / per;
+    /* Every flow gets its own arena, and the session admits at most one flow
+     * per local group (a flow reserves at least one group). Divide the 16 MiB
+     * budget by that flow capacity times this flow's block size, so the sum
+     * stays bounded even when the peer names a shape with a different
+     * n+m. The floor of four slots keeps a tiny group usable. */
+    {
+        u64 flows = sess->fec_groups_total ? sess->fec_groups_total : 1;
+        u64 denom = flows * (u64)cfg->groups * shares * TBT_FEC_S;
+
+        if (!denom)
+            denom = (u64)cfg->groups * shares * TBT_FEC_S;
+        slots = denom ? (u32)(TBT_FEC_RX_BUDGET / denom) : 4;
+    }
     if (slots < 4)
         slots = 4;
     if (slots > 256)
@@ -6705,14 +6721,16 @@ void tbt_fec_data_free(struct tbt_session *sess)
 
 /* One grouped container for the configured shape. The RLNC path keeps the
  * caller's window; mode 3 resolves the variant to its ops table and the
- * parameter permutation that table documents (see tbt_fec.h). */
+ * parameter permutation that table documents (see tbt_fec.h). `groups` is
+ * the number of codec contexts this flow owns, not the session's total: a
+ * 2x128 downlink gives each of two flows one 128-share group. */
 struct tbt_fec_grouped *tbt_fec_sclc_new(const struct tbt_fec_sclc_shape *sh,
-                                         size_t s, u64 nonce)
+                                         u16 groups, size_t s, u64 nonce)
 {
     const struct tbt_fec_ops *ops;
     u16 k, w, d;
 
-    if (!sh)
+    if (!sh || !groups || groups > TBT_FEC_MAX_GROUPS)
         return NULL;
     if (sh->variant == TBT_FEC_SCLC_DOWN)
     {
@@ -6732,7 +6750,7 @@ struct tbt_fec_grouped *tbt_fec_sclc_new(const struct tbt_fec_sclc_shape *sh,
     {
         return NULL;
     }
-    return tbt_fec_grouped_new_ops(ops, sh->groups, sh->n, sh->m, k, w, s, d,
+    return tbt_fec_grouped_new_ops(ops, groups, sh->n, sh->m, k, w, s, d,
                                    nonce);
 }
 
@@ -6757,12 +6775,12 @@ static struct tbt_fec_grouped *tbt_fec_codec_new(
     u16 w, u8 d, u64 nonce)
 {
     if (sclc)
-        return tbt_fec_sclc_new(sclc, TBT_FEC_S, nonce);
+        return tbt_fec_sclc_new(sclc, groups, TBT_FEC_S, nonce);
     return tbt_fec_grouped_new(groups, n, m, k, w, TBT_FEC_S, d, nonce);
 }
 
 /* ------------------------------------------------------------------ *
- * Flow table and per-flow planes (TBT_FEC_CONV 0x1007)
+ * Flow table and per-flow planes (TBT_FEC_CONV 0x1008)
  *
  * A flow owns a subset of the session's physical groups. Its TX and RX planes
  * are full copies of the old session planes, sized by G_i groups; the session
@@ -7176,7 +7194,8 @@ tbt_fec_flow_create(struct tbt_session *sess, u64 sid,
     spin_lock(&sess->lock);
     err = tbt_fec_flow_create_code(
         sid && tbt_fec_flow_find_locked(sess, sid) != NULL,
-        sess->fec_sclc, sess->n_fec_flows, sess->fec_groups_total, count);
+        sess->fec_sclc, sess->n_fec_flows, sess->fec_groups_total, count,
+        sess->fec_n, sess->fec_m, (u16)tbt_fec_groups_per_flow);
     if (err)
     {
         spin_unlock(&sess->lock);
@@ -7316,13 +7335,38 @@ struct tbt_fec_flow *tbt_fec_flow_admit_mask(struct tbt_session *sess, u64 sid,
     if (sess->fec_sclc)
     {
         u8 local[TBT_FEC_BITMAP_BYTES];
-        u16 local_count = sess->fec_groups_total;
-        u16 g;
+        u16 want = count, got;
 
-        memset(local, 0, sizeof(local));
-        for (g = 0; g < local_count && g < TBT_FEC_MAX_GROUPS; g++)
-            tbt_fec_bitmap_set(local, g);
-        f = tbt_fec_flow_create(sess, sid, local, local_count, mask);
+        /* In split mode the OPEN names the peer TX group count and this
+         * side's TX plane must own that many complete groups: the per-flow
+         * CFG carries the flow-local count, not the session total. The
+         * single-flow default keeps the old asymmetric rule: the local TX
+         * plane owns every local group while the peer bitmap only describes
+         * this side's RX groups, so a peer session with more groups than the
+         * local one still works. */
+        if (sess->n_fec_flows && !tbt_fec_groups_per_flow)
+            f = ERR_PTR(-EOPNOTSUPP);
+        else if (!tbt_fec_groups_per_flow)
+        {
+            u16 g;
+
+            memset(local, 0, sizeof(local));
+            for (g = 0; g < sess->fec_groups_total; g++)
+                tbt_fec_bitmap_set(local, g);
+            f = tbt_fec_flow_create(sess, sid, local,
+                                    sess->fec_groups_total, mask);
+        }
+        else if (want > tbt_fec_groups_per_flow)
+            f = ERR_PTR(-EPROTO);
+        else
+        {
+            spin_lock(&sess->lock);
+            got = tbt_fec_free_groups_locked(sess, want, local);
+            spin_unlock(&sess->lock);
+            f = got == want
+                    ? tbt_fec_flow_create(sess, sid, local, got, mask)
+                    : ERR_PTR(-ENOSPC);
+        }
     }
     else
     {
@@ -7353,7 +7397,16 @@ struct tbt_fec_flow *tbt_fec_flow_admit(struct tbt_session *sess, u64 sid,
         if (want && want != f->groups)
             f = ERR_PTR(-EPROTO);
         else
+        {
+            /* The primary's RX mask is the peer's TX bitmap, which this
+             * synchronous admission does not have yet. Bind the flow-local
+             * TX mask as the placeholder: its count is the flow's group
+             * count, and FEC_CFG INIT replaces the bits before any record
+             * is decoded. Leaving the array uninitialised leaked stack bits
+             * into rx->group_mask. */
+            memcpy(mask, f->group_mask, TBT_FEC_BITMAP_BYTES);
             f = tbt_fec_flow_bind_primary_locked(sess, f, sid, mask);
+        }
         spin_unlock(&sess->lock);
         mutex_unlock(&sess->fec_alloc_lock);
         return f;
@@ -7659,13 +7712,15 @@ int tbt_fec_data_init(struct tbt_session *sess)
 
     /* The first flow owns one fair share from the start. fec_groups_per_flow
      * = 0 keeps the old single-stream geometry; 16 on 256 carriers leaves 16
-     * groups for a second flow. A far-side OPEN later replaces this mask. */
+     * groups for a second flow. For SC-LDPC the same cap now applies when
+     * the group geometry is splittable (2x128 or 4x64 downlink, 8x32
+     * uplink), so the per-flow CFG groups count is a flow-local count and
+     * not the session total. A far-side OPEN later replaces this mask. */
     primary_groups = groups;
-    /* SC-LDPC keeps the whole carrier geometry in its single flow: a partial
-     * group set would make the CFG groups field disagree with 256/(n+m) and
-     * the rate switch would be refused. */
-    if (!is_sclc && tbt_fec_groups_per_flow &&
-        tbt_fec_groups_per_flow < primary_groups)
+    if (tbt_fec_groups_per_flow &&
+        tbt_fec_groups_per_flow < primary_groups &&
+        (!is_sclc || tbt_fec_sclc_split_ok(n, m, groups,
+                                           (u16)tbt_fec_groups_per_flow)))
         primary_groups = (u16)tbt_fec_groups_per_flow;
     if (!primary_groups)
         primary_groups = 1;
