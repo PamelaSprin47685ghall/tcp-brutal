@@ -2621,6 +2621,13 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
                    so.p_fast_ppm > TBT_FEC_ADAPT_SCLC_BURST_PPM &&
                    so.p_fast_ppm >
                        so.p_ewma_ppm + TBT_FEC_ADAPT_SCLC_BURST_GAP_PPM;
+        if (debug)
+            pr_info_ratelimited("tbtun-diag: tx adapt tunnel=%llu p=%u fast=%u r=%u flags=%#x valid=%d idle=%d cur=%u busy=%u sw=%u exp=%u recv=%u\n",
+                                (unsigned long long)sess->tunnel->cfg.id,
+                                so.p_ppm, so.p_fast_ppm, so.r_fail_ppm,
+                                tx->peer_flags, so.p_valid, so.pause_idle,
+                                tx->adapt_sclc->cur, tx->adapt_sclc->busy,
+                                tx->switch_state, so.sent_win, so.miss_win);
         if (!so.pause_idle)
             tbt_fec_adapt_sclc_ctl_commit_failed(tx->adapt_sclc, &so, now);
         tbt_fec_adapt_sclc_ctl_eval(tx->adapt_sclc, &so, now, &sws);
@@ -4730,6 +4737,12 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess,
         rx->est_abandoned_last = abandoned;
     }
     tbt_fec_rx_sample(rx, now, &o, &so);
+    if (debug && sc)
+        pr_info_ratelimited("tbtun-diag: rx adapt tunnel=%llu valid=%d idle=%d carrier=%d abandoned=%d sent=%u supers=%u p=%u\n",
+                            (unsigned long long)sess->tunnel->cfg.id,
+                            so.p_valid, so.pause_idle, so.pause_carrier,
+                            so.pause_abandoned, so.sent_win, so.supers_win,
+                            so.p_ppm);
 
     a->epoch = rx->epoch;
     a->n = rx->n;

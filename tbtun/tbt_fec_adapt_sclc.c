@@ -494,8 +494,21 @@ void tbt_fec_adapt_sclc_est_sample(const struct tbt_fec_adapt_sclc_est *e,
     }
     o->p_ewma_ppm = e->p_ewma_ppm;
     o->p_ppm = o->p_win_ppm > o->p_ewma_ppm ? o->p_win_ppm : o->p_ewma_ppm;
-    o->p_valid =
-        sent >= TBT_FEC_ADAPT_SCLC_MIN_SHARES && supers >= TBT_FEC_ADAPT_SCLC_MIN_SUPERS;
+    {
+        /* The evidence floor follows the shape's super-block size: a
+         * multi-group uplink block carries groups*n DATA shares, so eight of
+         * them are a much higher byte rate than eight single-group downlink
+         * blocks. Keep the downlink at eight; ask the uplink for four, which
+         * is still above the 512-share floor at every ladder point. */
+        u16 groups = (e->carriers && e->shares)
+                         ? (u16)(e->carriers / e->shares)
+                         : 1;
+        u32 min_supers = groups > 1 ? TBT_FEC_ADAPT_SCLC_MIN_SUPERS_UP
+                                    : TBT_FEC_ADAPT_SCLC_MIN_SUPERS;
+
+        o->p_valid = sent >= TBT_FEC_ADAPT_SCLC_MIN_SHARES &&
+                     supers >= min_supers;
+    }
     o->r_valid = fast_pkts > 0;
     o->pause_idle = !e->last_activity_ns || now_ns < e->last_activity_ns ||
                     now_ns - e->last_activity_ns > TBT_FEC_ADAPT_SCLC_IDLE_NS;
