@@ -1157,8 +1157,49 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
     if (adopt && !near)
     {
         bool created = false;
-        struct tbt_stream *ast =
-            tbt_stream_get_created(sess, sid, true, false, &created);
+        struct tbt_stream *ast;
+
+        /* Every carrier that intends to adopt the stream owns one admission
+         * slot until it learns whether it won the creation. Claim a lookup
+         * flow's slot here, before get_created: otherwise the carrier that
+         * admitted the flow can abort the last remaining slot and unlink the
+         * plane while this winner is still between lookup and attach. A
+         * non-SC-LDPC flow belongs to one stream, so its lookup reference
+         * is not an admission and must stay a plain put. */
+        if (flow && !flow_admitted && sess->fec_sclc)
+        {
+            if (tbt_fec_flow_claim_slot(sess, flow))
+            {
+                /* The admitting carrier aborted the last other slot and
+                 * unlinked the plane just before this claim. Re-resolve
+                 * once: the dead flow is gone from the table, so a fresh
+                 * admission (or another carrier's fresh flow) is the normal
+                 * path. Only a second failure, against a plane that is also
+                 * dying, drops the OPEN. */
+                tbt_fec_flow_put(flow);
+                flow = tbt_session_open_flow(sess, sid, body,
+                                             &flow_admitted);
+                if (IS_ERR(flow))
+                {
+                    atomic64_inc(&sess->fec_stream_refused);
+                    return TBT_BIND_DROP;
+                }
+                if (!flow)
+                {
+                    atomic64_inc(&sess->bind_drop_no_stream);
+                    return TBT_BIND_DROP;
+                }
+                if (!flow_admitted &&
+                    tbt_fec_flow_claim_slot(sess, flow))
+                {
+                    tbt_fec_flow_put(flow);
+                    atomic64_inc(&sess->bind_drop_no_stream);
+                    return TBT_BIND_DROP;
+                }
+            }
+            flow_admitted = true; /* now owns a pending slot */
+        }
+        ast = tbt_stream_get_created(sess, sid, true, false, &created);
 
         if (!ast)
         {
@@ -1182,17 +1223,6 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
          * their flow reference and just put their stream reference. */
         if (created)
         {
-            if (flow && !flow_admitted &&
-                tbt_fec_flow_claim_slot(sess, flow))
-            {
-                /* The plane died between the lookup and this attach. The
-                 * stream has no data plane; drop it rather than attach to a
-                 * dead flow and underflow its table reference later. */
-                tbt_stream_kill(ast, TBT_ST_DEAD);
-                tbt_stream_put(ast);
-                tbt_fec_flow_put(flow);
-                return TBT_BIND_DROP;
-            }
             if (flow)
             {
                 if (tbt_fec_flow_attach(ast, flow)) /* moves the reference */
