@@ -46,6 +46,13 @@ HOST_HTTP_H11   := host/test_http_h11.py
 HOST_HTTP_FUZZ  := host/test_http_fuzz
 HOST_HTTP_FUZZ_SRCS := host/test_http_fuzz.c tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
 HOST_HTTP_FUZZ_HDRS := tbtun/tbt_http.h tbtun/tbt_uapi.h tbtun/tbt_proto.h tbtun/tbt_rec.h
+HTTP_RFC_GEN    := tests/http_rfc9112_gen
+HTTP_RFC_GEN_SRCS := tests/http_rfc9112_gen.c tbtun/tbt_http.c tbtun/tbt_proto.c \
+                   tbtun/tbt_rec.c tbtun/tbt_fec.c
+HTTP_RFC_GEN_HDRS := tbtun/tbt_http.h tbtun/tbt_uapi.h tbtun/tbt_proto.h \
+                   tbtun/tbt_rec.h tbtun/tbt_fec.h
+HTTP_RFC_GEN_SAN := tests/http_rfc9112_gen_san
+HTTP_RFC_AUDIT  := tests/http_rfc9112_audit.py
 HOST_CRYPTO     := host/test_crypto
 HOST_CRYPTO_SRCS := host/test_crypto.c tbtun/tbt_crypto.c tbtun/tbt_http.c tbtun/tbt_proto.c tbtun/tbt_rec.c
 HOST_CRYPTO_HDRS := tbtun/tbt_crypto.h tbtun/tbt_http.h tbtun/tbt_proto.h tbtun/tbt_rec.h tbtun/tbt_uapi.h
@@ -183,7 +190,7 @@ check: dkms-srcs-check
 # root, no module and no kernel headers: the grammar test (tbt_parse.c), the
 # hostile-input test (tbt_rec.c + tbt_proto.c) and the HTTP container test
 # (tbt_http.c + tbt_proto.c).
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_WIRE_COMPAT)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_WIRE_COMPAT) $(HTTP_RFC_GEN)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
@@ -220,6 +227,16 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	else \
 		echo "host-test: h11 cross-check skipped (uv or cached h11 unavailable)"; \
 	fi
+	@# The RFC 9112 audit drives tbt_http.c over many keep-alive cycles. uv
+	@# supplies h11 when its offline cache has it; the strict state machine in
+	@# the audit runs either way.
+	@if command -v uv >/dev/null 2>&1 && \
+		uv run --offline --no-project --with h11 -q python -c 'import h11' >/dev/null 2>&1; then \
+		uv run --offline --no-project --with h11 -q python $(HTTP_RFC_AUDIT) ./$(HTTP_RFC_GEN); \
+	else \
+		echo "host-test: http-rfc9112 audit runs without h11 (uv or cached h11 unavailable)"; \
+		python3 $(HTTP_RFC_AUDIT) ./$(HTTP_RFC_GEN); \
+	fi
 
 # Boot a kernel in QEMU and run the module there: the only way to exercise a
 # kernel module without root on this host. The build goes through `check`'s
@@ -238,6 +255,9 @@ $(HOST_FUZZ): $(HOST_FUZZ_SRCS) $(HOST_FUZZ_HDRS)
 
 $(HOST_HTTP): $(HOST_HTTP_SRCS) $(HOST_HTTP_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_HTTP_SRCS)
+
+$(HTTP_RFC_GEN): $(HTTP_RFC_GEN_SRCS) $(HTTP_RFC_GEN_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HTTP_RFC_GEN_SRCS)
 
 $(HOST_CRYPTO): $(HOST_CRYPTO_SRCS) $(HOST_CRYPTO_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_CRYPTO_SRCS)
@@ -373,7 +393,7 @@ host-test-san:
 		echo "host-test-san: skipped, $(HOSTCC) cannot link -fsanitize=address,undefined"; \
 	fi
 
-host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_batch_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_wire_compat_san
+host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_batch_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_wire_compat_san $(HTTP_RFC_GEN_SAN)
 	@./host/test_parse_san
 	@./host/test_fuzz_san
 	@./host/test_http_san
@@ -394,6 +414,7 @@ host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san hos
 	@./host/test_close_wake_san
 	@./host/test_fault_san
 	@./host/test_wire_compat_san
+	@python3 $(HTTP_RFC_AUDIT) ./$(HTTP_RFC_GEN_SAN)
 
 host/test_parse_san: $(HOST_TEST_SRCS) $(HOST_TEST_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_TEST_SRCS)
@@ -406,6 +427,9 @@ host/test_http_san: $(HOST_HTTP_SRCS) $(HOST_HTTP_HDRS)
 
 host/test_http_fuzz_san: $(HOST_HTTP_FUZZ_SRCS) $(HOST_HTTP_FUZZ_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_HTTP_FUZZ_SRCS)
+
+$(HTTP_RFC_GEN_SAN): $(HTTP_RFC_GEN_SRCS) $(HTTP_RFC_GEN_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HTTP_RFC_GEN_SRCS)
 
 host/test_crypto_san: $(HOST_CRYPTO_SRCS) $(HOST_CRYPTO_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_CRYPTO_SRCS)
@@ -472,6 +496,7 @@ host-test-live: $(HOST_HTTP_LIVE)
 
 clean: clean-dkms.conf clean-dkms-tarball
 	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_FAULT) $(HOST_WIRE_COMPAT) $(HOST_BENCH_SCLC) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_batch_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fault_san host/test_wire_compat_san
+	$(RM) $(HTTP_RFC_GEN) $(HTTP_RFC_GEN_SAN)
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) clean
 
 load:

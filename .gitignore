@@ -344,5 +344,9 @@ tests/probe2/probe2_user
 tests/probe2/initramfs_probe2_user
 tests/probe2/arm_repair
 
+# RFC 9112 audit generator (make host-test, make host-test-san)
+tests/http_rfc9112_gen
+tests/http_rfc9112_gen_san
+
 # release staging (make dkms-tarball consumers)
 build/
