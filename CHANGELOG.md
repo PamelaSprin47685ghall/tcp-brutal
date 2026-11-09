@@ -29,6 +29,10 @@ and moves independently of the module version.
   table under `sess->lock`) and adds a `rebalance` line with the allocator
   flag, `total`/`used` groups, and the begin/done/abort/retry/bad/overlap
   counters. `scripts/qa/alloc-rebalance-accept.sh` consumes both.
+- `scripts/qa/alloc-rebalance-accept.sh` drives four concurrent streams
+  through 32 -> 16+16 -> 11+11+10 -> 8+8+8+8 and back to one 32-group flow
+  as the others close, and checks disjoint masks, hole/reset deltas and the
+  rebalance counters in both directions.
 
 ### Changed
 
@@ -40,6 +44,12 @@ and moves independently of the module version.
 
 ### Fixed
 
+- The HTTP container's FEC gate stopped at `TBT_FEC_FBK` (0x35), so an
+  `FEC_ALLOC` (0x36) chunk fell into the old-frame scanner and reset the
+  carrier with `record scan -EPROTO` under `profile=http-kal`. The
+  DATA..ALLOC range is now `tbt_fec_record_type()` in `tbt_uapi.h`, used by
+  the HTTP decode and both raw-carrier paths; `host/test_http` covers the
+  ALLOC chunk through the gate.
 - A per-flow `FEC_CFG` is accepted when `groups * (n + m)` fits the
   session's carrier count instead of requiring equality, so the INIT of a
   split session (and an RLNC multi-flow INIT) reaches the RX codec instead
