@@ -147,19 +147,28 @@ static void tbt_fec_shape_wire_norm(struct tbt_fec_shape *sh)
  * default tcp_retries2 (15) is the point where TCP itself gives up. */
 #define TBT_FEC_TCP_RETX_MAX 15
 
-/* The credit cap in DATA packets for this session's shape. A SC-LDPC parent
- * runs the eight-round window: TBT_FEC_WINDOW_DOWN for the 1x256 downlink
- * and TBT_FEC_WINDOW_UP for the 8x32 uplink. TBT_FEC_S is the wire slot, so
- * the packet cap is the window divided by it; the RLNC path keeps the flat
- * TBT_FEC_CREDIT_MAX. Both places that grant or apply credit call this, so
- * the sender and the receiver agree on the same window. */
-static u32 tbt_fec_credit_max_packets(const struct tbt_session *sess)
+/* The credit cap in DATA packets for one direction. A SC-LDPC parent runs
+ * the sixteen-round downlink window and the eight-round uplink window;
+ * TBT_FEC_S is the wire slot, so the packet cap is the window divided by it.
+ * The RLNC path keeps the flat TBT_FEC_CREDIT_MAX.
+ *
+ * The direction must be the one the credit is for, not the local sender's:
+ * on the near end the local TX is the 8x32 uplink while the ACK it grants
+ * covers the far's 1x256 downlink. Choosing by fec_sclc_shape.variant there
+ * gave the downlink the uplink window and halved its credit. */
+static u32 tbt_fec_credit_max_packets_dir(const struct tbt_session *sess,
+                                          bool up)
 {
     if (!sess->fec_sclc)
         return TBT_FEC_CREDIT_MAX;
-    if (sess->fec_sclc_shape.variant == TBT_FEC_SCLC_UP)
-        return TBT_FEC_WINDOW_UP / TBT_FEC_S;
-    return TBT_FEC_WINDOW_DOWN / TBT_FEC_S;
+    return (up ? TBT_FEC_WINDOW_UP : TBT_FEC_WINDOW_DOWN) / TBT_FEC_S;
+}
+
+/* The local sender's cap, used for the TX credit and its own start value. */
+static u32 tbt_fec_credit_max_packets(const struct tbt_session *sess)
+{
+    return tbt_fec_credit_max_packets_dir(
+        sess, sess->fec_sclc_shape.variant == TBT_FEC_SCLC_UP);
 }
 
 /* Raise an atomic maximum without losing a concurrent larger sample. */
@@ -3148,13 +3157,16 @@ static void tbt_fec_ack(struct tbt_session *sess, struct tbt_fec_flow *f,
      * slack so a block the receiver can still NACK is never evicted. The
      * receiver's arena `slots` is the other bound (a sender inside the
      * credit cannot overrun it), and the parent window caps the packets
-     * (8 MiB downlink, 4 MiB uplink). The sender applies the same cap. */
+     * (16 MiB downlink, 8 MiB uplink). The sender applies the same cap.
+     * The cap follows the direction being ACKed: a multi-group receive
+     * flow is the peer's 8x32 uplink, a single-group one its 1x256
+     * downlink. Using the local TX variant here halved the downlink. */
     {
         struct tbt_fec_rx *rx = f->rx;
 
         a.credit_packets = tbt_fec_credit_packets(
             rx->groups, rx->n, rx->replay_k, rx->slots,
-            tbt_fec_credit_max_packets(sess));
+            tbt_fec_credit_max_packets_dir(sess, rx->groups > 1));
         /* The peer uses this as the replay round trip: a share asked again
          * before it can arrive would only duplicate the repair. The sample
          * is the NACK scan's carrier RTT gauge, 0 before the first one. */
