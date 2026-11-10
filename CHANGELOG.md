@@ -85,6 +85,15 @@ and moves independently of the module version.
   diagnostic stood before the `TBT_STREAM_F_DYING` test, so closing one
   application turned into a 256-line burst on both ends. The byte counters
   are unchanged by the move; only the duplicate lines are gone.
+- Carrier socket buffers come from one 64 MiB session budget and keep the
+  SNDBUF/RCVBUF userlocks. 0.7.0 cleared the locks so autotuning could grow
+  every socket; a 256-carrier session could then reach several GiB of socket
+  memory, and the 955 MB far host froze in direct reclaim during a 1 GiB
+  transfer (07:02 global OOM, 07:21 both logs stop together). A 256-carrier
+  session now holds at most 128 KiB per direction per carrier, while a
+  narrow stripe keeps the 0.8 MiB floor. The shared rule is
+  `tbt_car_sockbuf_of()` in `tbt_carrier_policy.h`, covered by
+  `host/test_carrier_policy.c`.
 
 ## [0.7.0] - 2026-11-10
 

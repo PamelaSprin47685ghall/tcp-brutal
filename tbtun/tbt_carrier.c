@@ -3346,32 +3346,33 @@ static void tbt_carrier_keepalive(struct socket *s)
         pr_info_ratelimited("tbtun: carrier keepalive setup failed: %d\n", err);
 }
 
-/* Give one carrier its 0.8 MiB send and receive buffer, then hand the socket
- * back to TCP autotuning.
+/* Give one carrier its share of the session's 64 MiB socket-buffer budget,
+ * then lock both fields so TCP autotuning cannot grow past it.
  *
- * 0.7.0 assigns sk_sndbuf/sk_rcvbuf directly instead of issuing SO_SNDBUF /
- * SO_RCVBUF. The sockopt path stores a userlock (SOCK_SNDBUF_LOCK /
- * SOCK_RCVBUF_LOCK) that freezes both fields, so tcp_sndbuf_expand() and
- * tcp_rcv_space_adjust() could never grow them; a namespace without
- * CAP_NET_ADMIN also had to fall back to the 208 KiB rmem_max cap. The direct
- * assignment skips the kernel's "double the request" convention as well, so
- * the value below is the whole buffer.
+ * 0.7.0 assigned sk_sndbuf/sk_rcvbuf directly and cleared the locks, so
+ * tcp_sndbuf_expand() and tcp_rcv_space_adjust() were free to raise every
+ * carrier to the system maxima. At 256 carriers that is several GiB of
+ * socket memory on a 955 MB host; the 2026-11-10 1 GiB transfer froze the
+ * far side in direct reclaim. The session budget makes the ceiling visible
+ * at the one place that creates carrier sockets.
  *
  * The near and far listeners call this before bind: the handshake freezes the
  * window scale from sk_rcvbuf, and sizing only the accepted socket afterwards
  * leaves its receive window at 64 KiB. */
-void tbt_car_setsockbuf(struct socket *s)
+void tbt_car_setsockbuf(struct socket *s, u32 carriers)
 {
     struct sock *sk;
+    u32 per;
 
     if (!s || !s->sk)
         return;
     sk = s->sk;
-    WRITE_ONCE(sk->sk_sndbuf, TBT_CAR_SOCKBUF_PER);
-    WRITE_ONCE(sk->sk_rcvbuf, TBT_CAR_SOCKBUF_PER);
-    /* Keep SOCK_CONNECT_BIND and any other bit; clear only the two buffer
-     * locks so autotuning stays enabled. */
-    sk->sk_userlocks &= ~TBT_CAR_SOCKBUF_LOCK_MASK;
+    per = tbt_car_sockbuf_of(carriers);
+    WRITE_ONCE(sk->sk_sndbuf, per);
+    WRITE_ONCE(sk->sk_rcvbuf, per);
+    /* Set only the two buffer locks; SOCK_CONNECT_BIND and every other bit
+     * survive. */
+    sk->sk_userlocks |= TBT_CAR_SOCKBUF_LOCK_MASK;
 }
 
 /* Ask for BBR on one carrier. sock_setsockopt(SOL_TCP, TCP_CONGESTION) is the
@@ -3549,7 +3550,7 @@ static void tbt_car_connect_work(struct work_struct *w)
              ntohs(addr.sin_port));
     /* Before the SYN: the handshake freezes the window scale from this
      * socket's receive buffer. */
-    tbt_car_setsockbuf(s);
+    tbt_car_setsockbuf(s, sess->n_car);
     /* Set before the SYN so the first cwnd starts under BBR. Some kernels
      * refuse TCP_CONGESTION until the socket leaves TCP_CLOSE; the retry
      * after a successful connect is the one that is counted. */
@@ -3893,9 +3894,9 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
     newsock->sk->sk_state_change = tbt_car_state_change;
     write_unlock_bh(&newsock->sk->sk_callback_lock);
 
-    /* The listener already fixed the window scale; repeat the 0.8 MiB floor
-     * on the accepted socket so an inherited userlock cannot freeze it. */
-    tbt_car_setsockbuf(newsock);
+    /* The listener already fixed the window scale; apply the session budget
+     * to the accepted socket as well, so its share matches the stripe. */
+    tbt_car_setsockbuf(newsock, sess->n_car);
     if (tbt_car_set_bbr(newsock))
         atomic64_inc(&sess->car_bbr_ok);
     else

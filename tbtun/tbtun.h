@@ -350,10 +350,10 @@ void tbt_listen_stop(struct tbt_tunnel *t);
  * kill, not a retransmit. */
 #define TBT_TX_WINDOW_AUTO_FLOOR (1024 * 1024)
 
-/* Every carrier owns TBT_CAR_SOCKBUF_PER (0.8 MiB) of send and receive
- * buffer, independent of the stripe width, and leaves the SNDBUF/RCVBUF
- * userlocks clear. The constant lives in tbt_carrier_policy.h, where the
- * host test asserts it. */
+/* Every carrier's send and receive buffer comes from one 64 MiB session
+ * budget (tbt_car_sockbuf_of()), and the SNDBUF/RCVBUF userlocks are set so
+ * autotuning cannot grow past it. The rule lives in tbt_carrier_policy.h,
+ * where the host test asserts it. */
 
 /* A carrier that never presents a HELLO is retired after this long. */
 #define TBT_JOIN_TIMEOUT_MS 5000
@@ -2166,7 +2166,7 @@ bool tbt_carrier_stall(struct tbt_session *sess, struct tbt_carrier *c);
 int tbt_carrier_xmit(struct tbt_session *sess, struct tbt_carrier *c,
                      struct tbt_frame *fr);
 int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock);
-void tbt_car_setsockbuf(struct socket *s);
+void tbt_car_setsockbuf(struct socket *s, u32 carriers);
 int tbt_carrier_open_target(struct tbt_stream *st);
 void tbt_replace_work(struct work_struct *w);
 int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp);

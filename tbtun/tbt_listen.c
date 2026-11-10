@@ -164,7 +164,8 @@ static int tbt_listener_start(struct tbt_listener *l, u8 slot, u16 port)
     if (t->cfg.role == TBT_ROLE_NEAR)
         tbt_parent_setsockbuf(s);
     else
-        tbt_car_setsockbuf(s);
+        tbt_car_setsockbuf(s, t->cfg.carriers ? t->cfg.carriers
+                                              : (u32)t->cfg.n + t->cfg.m);
 
     err = kernel_bind(s, (tbt_sockaddr *)&addr, sizeof(addr));
     if (err)

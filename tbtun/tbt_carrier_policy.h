@@ -13,17 +13,41 @@
 
 #include "tbt_uapi.h"
 
-/* 0.7.0 carrier transport: every subflow owns the same buffer floor and runs
- * BBR. The floor is 0.8 MiB — the kernel's own SO_*BUF path doubles a request
- * on the way to sk_sndbuf/sk_rcvbuf, but 0.7.0 assigns those fields directly,
- * so the byte count below is the whole buffer, not half of it. It must stay
- * inside the 0.75..1 MiB acceptance band (786,432 .. 1,048,576 B). */
+/* 0.7.1 carrier transport: every subflow runs BBR inside one session-wide
+ * 64 MiB buffer budget. The kernel's SO_*BUF path doubles a request on the
+ * way to sk_sndbuf/sk_rcvbuf, but the module assigns those fields directly,
+ * so the byte count is the whole buffer, not half of it.
+ *
+ * 0.7.0 cleared the buffer userlocks so TCP autotuning could grow every
+ * socket. On the 955 MB far host a 256-carrier session then held up to
+ * 256 x (tcp_wmem[2] + tcp_rmem[2]) and the host froze in direct reclaim
+ * during a 1 GiB transfer. The per-carrier cap keeps the same floor for a
+ * narrow stripe and 128 KiB for 256 carriers, where the whole stripe's
+ * in-flight window is a few MiB. */
 #define TBT_CAR_SOCKBUF_PER 838861u
+#define TBT_CAR_SOCKBUF_TOTAL (64u << 20)
+#define TBT_CAR_SOCKBUF_MIN (128u << 10)
 
 /* SOCK_SNDBUF_LOCK | SOCK_RCVBUF_LOCK from include/uapi/linux/socket.h.
- * Both must stay clear: either bit freezes sk_sndbuf/sk_rcvbuf and disables
- * the TCP send/receive autotuning that grows the buffer past the floor. */
+ * Both are set: the lock is what keeps sk_sndbuf/sk_rcvbuf inside the session
+ * budget, because tcp_sndbuf_expand() and tcp_rcv_space_adjust() grow a
+ * buffer whose lock bit is clear without any session-wide bound. */
 #define TBT_CAR_SOCKBUF_LOCK_MASK 3u
+
+/* Bytes for one direction of one carrier under the session budget. */
+static inline u32 tbt_car_sockbuf_of(u32 carriers)
+{
+    u32 per;
+
+    if (carriers < 1)
+        carriers = 1;
+    per = TBT_CAR_SOCKBUF_TOTAL / (2u * carriers);
+    if (per < TBT_CAR_SOCKBUF_MIN)
+        per = TBT_CAR_SOCKBUF_MIN;
+    if (per > TBT_CAR_SOCKBUF_PER)
+        per = TBT_CAR_SOCKBUF_PER;
+    return per;
+}
 
 /* The one congestion control 0.7.0 asks for by name. The module and the host
  * test share the literal, so a rename cannot pass the test while the kernel

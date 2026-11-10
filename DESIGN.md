@@ -1387,24 +1387,25 @@ show that the byte budget and the time budget agree, not just a throughput numbe
 twice: per stream, and by a session-wide aggregate of the same value, so 128 concurrent
 streams cannot hold 128 × 8 MiB. The ready-to-deliver queue stays at 64 MiB per stream
 (`TBT_RX_RING_MAX`). Per session, retention (≤ window) + the frame queue
-`txq_max = tx_window + 8 × TBT_CHUNK_MAX`, §8.5) + the carrier socket buffers (each a
-fixed 0.8 MiB floor plus whatever TCP autotuning grows it to; §5.4) ≈ 3 × window; plus
-≤ `rx_reorder_bytes` of reorder tree and ≤ 64 MiB of ready
-queue per stream.
+`txq_max = tx_window + 8 × TBT_CHUNK_MAX`, §8.5) + ≤ 64 MiB of carrier socket buffers
+for the whole session (§5.4) ≈ 3 × window; plus ≤ `rx_reorder_bytes` of reorder tree and
+≤ 64 MiB of ready queue per stream.
 
-**Carrier buffers.** Every carrier owns `TBT_CAR_SOCKBUF_PER` = 838,861 B (0.8 MiB) of
-send buffer and the same of receive buffer, independent of the carrier count and of the
-configured window. `tbt_car_setsockbuf()` assigns `sk_sndbuf`/`sk_rcvbuf` directly. The
-`SO_SNDBUF`/`SO_RCVBUF` path stores `SOCK_SNDBUF_LOCK`/`SOCK_RCVBUF_LOCK`, and either bit
-freezes both fields and disables `tcp_sndbuf_expand()`/`tcp_rcv_space_adjust()`. The
-direct assignment also avoids the `net.core.wmem_max`/`rmem_max` cap (208 KiB on a
-default boot) and the kernel's request-doubling convention, so the value is the whole
-buffer, not half of it. The poll clears the two lock bits if a socket arrived with them
-inherited and keeps every other `sk_userlocks` bit. The floor is not a cap: autotuning
-may grow both buffers up to `tcp_wmem[2]`/`tcp_rmem[2]`. Listeners get the same floor
-before bind, because the handshake freezes the window scale from `sk_rcvbuf`; `stats
-live` prints the result as `car_sndbuf` next to `car_rcvbuf`. The per-carrier split by
-`n_pri` and the `SO_*BUFFORCE` fallback are gone.
+**Carrier buffers.** One session owns 64 MiB of carrier socket buffers, split by
+`tbt_car_sockbuf_of()`: each direction of each carrier gets
+`TBT_CAR_SOCKBUF_TOTAL / (2 × carriers)`, clamped to 128 KiB..`TBT_CAR_SOCKBUF_PER`
+(838,861 B). A narrow stripe therefore keeps the 0.8 MiB floor, and 256 carriers get
+128 KiB each: 256 × 2 × 128 KiB = 64 MiB exactly. `tbt_car_setsockbuf()` assigns
+`sk_sndbuf`/`sk_rcvbuf` directly and sets `SOCK_SNDBUF_LOCK`/`SOCK_RCVBUF_LOCK`, so
+`tcp_sndbuf_expand()` and `tcp_rcv_space_adjust()` cannot raise either field past that
+share. The direct assignment also avoids the `net.core.wmem_max`/`rmem_max` cap (208 KiB
+on a default boot) and the kernel's request-doubling convention, so the value is the
+whole buffer, not half of it. Every other `sk_userlocks` bit is preserved. Listeners get
+the same share before bind, because the handshake freezes the window scale from
+`sk_rcvbuf`; `stats live` prints the result as `car_sndbuf` next to `car_rcvbuf`. The
+per-carrier split by `n_pri`, the `SO_*BUFFORCE` fallback and the unlocked autotuning
+policy are gone: 0.7.0 let 256 sockets grow to `tcp_wmem[2]`/`tcp_rmem[2]`, which is how
+the 955 MB far host froze.
 
 **Carrier-count scaling (256 target).** The current ABI limit is 16 carriers, not a
 tunable: `path_ack_mask` is a 16-bit wire field (`BUILD_BUG_ON(TBT_MAX_CARRIERS_LIMIT >
@@ -1421,7 +1422,8 @@ procfs renderers (per carrier, no fixed stride). Resource estimate at 256 carrie
 5 work structs each (poll/pump/rx/tx/connect), 256 × ~24 KiB of HTTP/parser state
 (~6 MiB), and a per-carrier 50 ms poll = 5120 wakes/s; the poll must become one
 session-level scan (20 wakes/s) before 256 is enabled, and the per-carrier keepalive
-must batch. The 0.8 MiB floor bounds the kernel side while TCP autotuning may raise it.
+must batch. The 64 MiB session budget bounds the kernel side, and the buffer locks keep
+autotuning inside it.
 
 **Platform.** 1G is the physical port; 500-750 Mbit/s at the application is
 the accepted target. The 256-carrier, 1G target is ARM64. The `.74` host
@@ -2209,8 +2211,8 @@ therefore `MSG_DONTWAIT`, and the reset close runs on `system_dfl_wq` so it neve
 a pool with the work it cancels. The public/target socket asks for 8 MiB
 send/receive with `SO_SNDBUFFORCE`/`SO_RCVBUFFORCE`, so the kernel holds 16 MiB per
 direction and falls back to the capped `SO_*BUF` without the capability; a carrier gets
-the direct 0.8 MiB floor and keeps TCP autotuning (§5.4). The default 16 KiB buffer is
-not the first thing the tunnel hits.
+its share of the 64 MiB session budget with the buffer locks set (§5.4). The default
+16 KiB buffer is not the first thing the tunnel hits.
 
 **Why not receive-queue injection.** `docs/recvmsg-probe.md` measured that the
 application's descriptor is its *client* socket, a different object from the accepted
