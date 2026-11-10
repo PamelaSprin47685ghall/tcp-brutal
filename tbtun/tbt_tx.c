@@ -395,7 +395,8 @@ void tbt_tx_announce(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
  * a FEC session the 16-byte body names flow-local packet seqs. One copy per
  * usable carrier, at most one per (stream, index). A second call is
  * idempotent: the per-index mask already names every copy. */
-int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
+int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp,
+               const char *tag)
 {
     u64 seq;
     u8 body[TBT_FIN_BODY_LEN] = {0};
@@ -404,13 +405,18 @@ int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
     /* Name this edge once: the 0.7.1 clean 1 GiB delivered 18-313 MB and
      * took a FIN with every reset counter zero. The caller tag separates a
      * capture EOF from a close timer or a starved retry. */
-    pr_info_ratelimited("tbtun: tx_fin entry sid=%llu rx_fin_done=%d state=%u fin_sent=%d tx_ack=%llu tx_seq=%llu close_since=%llu\n",
-                        (unsigned long long)st->sid,
-                        READ_ONCE(st->rx_fin_done) ? 1 : 0,
+    pr_info_ratelimited("tbtun: tx_fin entry tag=%s sid=%llu state=%u rx_seen=%d rx_done=%d rx_next=%llu rx_fin_seq=%llu fin_sent=%d fin_written=%d tx_ack=%llu tx_seq=%llu fec_fin=%d close_since=%llu\n",
+                        tag, (unsigned long long)st->sid,
                         READ_ONCE(st->state),
+                        READ_ONCE(st->rx_fin_seen) ? 1 : 0,
+                        READ_ONCE(st->rx_fin_done) ? 1 : 0,
+                        (unsigned long long)READ_ONCE(st->rx_next),
+                        (unsigned long long)READ_ONCE(st->rx_fin_seq),
                         READ_ONCE(st->tx_fin_sent) ? 1 : 0,
+                        READ_ONCE(st->tx_fin_written) ? 1 : 0,
                         (unsigned long long)READ_ONCE(st->tx_ack),
                         (unsigned long long)READ_ONCE(st->tx_seq),
+                        smp_load_acquire(&st->fec_finished) ? 1 : 0,
                         (unsigned long long)READ_ONCE(st->close_since_ns));
     /* The close budget starts at the first request, before the FEC early
      * returns. Otherwise a stream whose packetizer is not idle yet (credit
@@ -2629,7 +2635,7 @@ static void tbt_tx_ctl_fail(struct tbt_session *sess, struct tbt_frame *fr)
                     atomic64_inc(&sess->fin_starved);
                     pr_info_ratelimited("tbtun: tx_fin tag=starved sid=%llu\n",
                                         (unsigned long long)st->sid);
-                    tbt_tx_fin(sess, st, GFP_ATOMIC);
+                    tbt_tx_fin(sess, st, GFP_ATOMIC, "starved");
                 }
                 else
                 {
@@ -3313,7 +3319,7 @@ ctl_fail:
                     fr->ret->reserve_mask &= ~BIT(c->index);
                     spin_unlock(&sess->tx_lock);
                 }
-                tbt_carrier_lost(sess, c);
+                tbt_carrier_lost(sess, c, "pump-send-error");
                 if (fr->pinned)
                 {
                     /* -EIO may have written a prefix; the carrier dies, but
@@ -4109,8 +4115,8 @@ void tbt_fbk_work(struct work_struct *w)
         {
             pr_info_ratelimited("tbtun: tx_fin tag=closecheck sid=%llu\n",
                                 (unsigned long long)st->sid);
-            if (tbt_tx_fin(sess, st, GFP_KERNEL) > 0)
-            WRITE_ONCE(st->tx_fin_queued, true);
+            if (tbt_tx_fin(sess, st, GFP_KERNEL, "closecheck") > 0)
+                WRITE_ONCE(st->tx_fin_queued, true);
         }
         tbt_stream_maybe_detach(st);
         alive |= one_alive;

@@ -190,15 +190,20 @@ static void tbt_pub_capture_body(struct tbt_stream *st)
         /* Field diagnosis: an early FIN delivered 313 MB instead of 1 GiB
          * with no reset counter. Name the exact evidence here so the next run
          * can tell a real target EOF from a misread socket state. */
-        pr_info_ratelimited("tbtun: pub FIN sid=%llu shutdown=%u state=%u err=%d copied=%u rcv_nxt=%u st=%u paused=%d\n",
+        pr_info_ratelimited("tbtun: pub FIN sid=%llu shutdown=%u state=%u err=%d copied=%u rcv_nxt=%u st=%u paused=%d rx_seen=%d rx_done=%d rx_next=%llu rx_fin_seq=%llu tx_seq=%llu\n",
                             (unsigned long long)st->sid,
                             READ_ONCE(sk->sk_shutdown),
                             READ_ONCE(sk->sk_state), READ_ONCE(sk->sk_err),
                             tcp_sk(sk)->copied_seq, tcp_sk(sk)->rcv_nxt,
                             READ_ONCE(st->state),
-                            READ_ONCE(st->tx_paused) ? 1 : 0);
+                            READ_ONCE(st->tx_paused) ? 1 : 0,
+                            READ_ONCE(st->rx_fin_seen) ? 1 : 0,
+                            READ_ONCE(st->rx_fin_done) ? 1 : 0,
+                            (unsigned long long)READ_ONCE(st->rx_next),
+                            (unsigned long long)READ_ONCE(st->rx_fin_seq),
+                            (unsigned long long)READ_ONCE(st->tx_seq));
         WRITE_ONCE(st->tx_fin_sent, true);
-        queued = tbt_tx_fin(st->sess, st, GFP_KERNEL);
+        queued = tbt_tx_fin(st->sess, st, GFP_KERNEL, "pub");
         if (queued > 0)
         {
             WRITE_ONCE(st->tx_fin_queued, true);
@@ -262,6 +267,11 @@ static void tbt_pub_state_change(struct sock *sk)
     {
         struct tbt_stream *st = sk->sk_user_data;
 
+        pr_info_ratelimited("tbtun: pub state_change sid=%llu shutdown=%u state=%u err=%d copied=%u rcv_nxt=%u st=%u\n",
+                            (unsigned long long)st->sid,
+                            READ_ONCE(sk->sk_shutdown), READ_ONCE(sk->sk_state),
+                            READ_ONCE(sk->sk_err), tcp_sk(sk)->copied_seq,
+                            tcp_sk(sk)->rcv_nxt, READ_ONCE(st->state));
         tbt_stream_schedule(st, &st->w_ctrl, TBT_STREAM_F_SCHED_CTRL);
     }
     read_unlock_bh(&sk->sk_callback_lock);
@@ -316,6 +326,15 @@ void tbt_sock_shutdown_wr(struct tbt_stream *st)
 
     if (!sk || !(sock = sk->sk_socket))
         return;
+    pr_info_ratelimited("tbtun: shutdown_wr sid=%llu shutdown=%u state=%u err=%d rx_seen=%d rx_done=%d rx_next=%llu rx_fin_seq=%llu st=%u\n",
+                        (unsigned long long)st->sid,
+                        READ_ONCE(sk->sk_shutdown), READ_ONCE(sk->sk_state),
+                        READ_ONCE(sk->sk_err),
+                        READ_ONCE(st->rx_fin_seen) ? 1 : 0,
+                        READ_ONCE(st->rx_fin_done) ? 1 : 0,
+                        (unsigned long long)READ_ONCE(st->rx_next),
+                        (unsigned long long)READ_ONCE(st->rx_fin_seq),
+                        READ_ONCE(st->state));
     kernel_sock_shutdown(sock, SHUT_WR);
 }
 
@@ -393,11 +412,12 @@ static void tbt_drain_body(struct tbt_stream *st)
     if (st->rx_fin_seen && !st->rx_fin_done && list_empty(&st->rx_q) &&
         st->rx_next >= st->rx_fin_seq)
     {
-        pr_info_ratelimited("tbtun: peer FIN sid=%llu seq=%llu rx_next=%llu state=%u\n",
+        pr_info_ratelimited("tbtun: peer FIN sid=%llu seq=%llu rx_next=%llu state=%u tx_fin_written=%d\n",
                             (unsigned long long)st->sid,
                             (unsigned long long)st->rx_fin_seq,
                             (unsigned long long)st->rx_next,
-                            READ_ONCE(st->state));
+                            READ_ONCE(st->state),
+                            READ_ONCE(st->tx_fin_written) ? 1 : 0);
         st->rx_fin_done = true;
         st->rx_fin_done_ns = ktime_get_ns();
         eof = true;
@@ -471,6 +491,12 @@ static void tbt_ctrl_body(struct tbt_stream *st)
         return;
     if (READ_ONCE(sk->sk_err))
     {
+        pr_info_ratelimited("tbtun: ctrl err sid=%llu err=%d state=%u rx_seen=%d rx_next=%llu rx_fin_seq=%llu\n",
+                            (unsigned long long)st->sid, READ_ONCE(sk->sk_err),
+                            READ_ONCE(sk->sk_state),
+                            READ_ONCE(st->rx_fin_seen) ? 1 : 0,
+                            (unsigned long long)READ_ONCE(st->rx_next),
+                            (unsigned long long)READ_ONCE(st->rx_fin_seq));
         tbt_tx_rst_retry(st->sess, st);
         tbt_stream_kill(st, TBT_ST_DEAD);
         return;
@@ -482,6 +508,12 @@ static void tbt_ctrl_body(struct tbt_stream *st)
         /* The peer's FIN is graceful, whatever the TCP state name is: it may
          * already be CLOSE after FIN_WAIT2 -> tcp_time_wait -> tcp_done.  The
          * capture work item emits the FIN once the preceding bytes are in. */
+        pr_info_ratelimited("tbtun: ctrl peer_eof sid=%llu shutdown=%u state=%u err=%d rx_queued=%llu copied=%u rcv_nxt=%u\n",
+                            (unsigned long long)st->sid,
+                            READ_ONCE(sk->sk_shutdown), READ_ONCE(sk->sk_state),
+                            READ_ONCE(sk->sk_err),
+                            (unsigned long long)READ_ONCE(st->rx_queued),
+                            tcp_sk(sk)->copied_seq, tcp_sk(sk)->rcv_nxt);
         tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
         /* A target that closed with our delivery queue non-empty cannot take
          * those bytes any more; let w_drain discover the write error and

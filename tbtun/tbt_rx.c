@@ -500,6 +500,12 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
         {
             st->rx_fin_seen = true;
             st->rx_fin_seq = hdr->seq;
+            pr_info_ratelimited("tbtun: rx FIN sid=%llu seq=%llu carrier=%u state=%u rx_next=%llu\n",
+                                (unsigned long long)st->sid,
+                                (unsigned long long)hdr->seq,
+                                (unsigned int)c->index,
+                                READ_ONCE(st->state),
+                                (unsigned long long)READ_ONCE(st->rx_next));
         }
         spin_unlock_bh(&st->rx_lock);
         /* FEC delivers whole blocks; if the final block's parity and LAST
@@ -522,6 +528,10 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
     case TBT_F_RST:
         if (tbt_rx_bind_stream(c, hdr, false, NULL, 0))
             return -EPROTO;
+        pr_info_ratelimited("tbtun: rx RST sid=%llu seq=%llu carrier=%u\n",
+                            (unsigned long long)tbt_hdr_sid(hdr),
+                            (unsigned long long)hdr->seq,
+                            (unsigned int)c->index);
         tbt_stream_kill_by_sid(sess, tbt_hdr_sid(hdr), TBT_ST_DEAD);
         return 0;
 
@@ -552,7 +562,12 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
         WRITE_ONCE(st->peer_paused, payload[0] == 2);
         WRITE_ONCE(sess->peer_paused, READ_ONCE(st->peer_paused));
         if (payload[0] == 3)
+        {
+            pr_info_ratelimited("tbtun: rx SACK close sid=%llu code=3 carrier=%u\n",
+                                (unsigned long long)st->sid,
+                                (unsigned int)c->index);
             tbt_stream_kill(st, TBT_ST_DEAD);
+        }
         tbt_stream_put(st);
         return 0;
 

@@ -135,6 +135,11 @@ static int __init tbtun_init(void)
 
     tbt_wire_layout_check();
 
+    /* The evidence file and /proc identity must name the build that is
+     * running, not the .ko that was copied. A stale module made the first
+     * 0.7.1 FIN probes look absent. */
+    pr_info("tbtun: probe build 071-final-1\n");
+
     ret = tbt_fec_data_module_init();
     if (ret)
     {

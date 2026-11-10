@@ -2006,6 +2006,7 @@ struct tbt_carrier
     u8 profile;                   /* effective container: 1 http-kal, 2 drip, 3 raw */
     u8 peer_gen;                  /* peer's generation for this path (HELLO) */
     u8 dbg_stall_dumped;          /* debug>=2: the stall dump ran for this gen */
+    bool diag_stall_once;         /* one unconditional stall snapshot per gen */
     bool http_started;            /* our request/response header block is on the wire */
     struct mutex http_lock;       /* serialises the one-time header start */
     bool http_hdr_done;           /* peer header parsed; body stage */
@@ -2083,7 +2084,8 @@ void tbt_tx_carrier_publish_up(struct tbt_session *sess, struct tbt_carrier *c);
  * carrier; the receiver applies it only when every earlier byte arrived.
  * Returns the number of copies actually enqueued: 0 means no carrier was
  * usable and the caller must retry, not treat the FIN as sent. */
-int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp);
+int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp,
+               const char *tag);
 int tbt_tx_fbk(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp);
 int tbt_tx_sack(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp);
 int tbt_tx_rst(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp);
@@ -2145,7 +2147,8 @@ u8 tbt_carrier_profile(const struct tbt_session *sess, u8 index, bool spare);
 void tbt_carrier_retire(struct tbt_session *sess, struct tbt_carrier *c);
 void tbt_carrier_stats_retire(struct tbt_session *sess, struct tbt_carrier *c);
 void tbt_carrier_free(struct tbt_carrier *c);
-void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c);
+void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c,
+                      const char *why);
 /* Pause a live carrier whose snd_una has not moved: no RETIRE, no
  * replacement, no socket teardown, no path_lost, and no frame is dropped by
  * this function; the pump stops picking it and the poll clears c->stalled when
