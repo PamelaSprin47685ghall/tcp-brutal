@@ -75,11 +75,13 @@ static void tbt_fec_shape_wire_norm(struct tbt_fec_shape *sh)
  * sets tx_paused only when the ring cannot take the next chunk. 256 KiB
  * paused capture every 32 packets while the credit window allowed 1024, so
  * the pump had to resume capture repeatedly. Size the ring from the credit
- * window, with the old 256 KiB floor and a 64 MiB ceiling: 64 one-MiB source
- * blocks, the measured 400 ms x 128 MB/s BDP. The ceiling is allocated by
- * tbt_fec_vzalloc() (vzalloc/kvzalloc), never a high-order kzalloc. */
+ * window, with the old 256 KiB floor and a 16 MiB ceiling. The 64-block
+ * flight window lives in the lazy replay plane, not in this unencoded FIFO;
+ * 16 MiB already holds two 8 MiB writes ahead of the packetizer. The ceiling
+ * is allocated by tbt_fec_vzalloc() (vzalloc/kvzalloc), never a high-order
+ * kzalloc. */
 #define TBT_FEC_TX_RING (256 * 1024)
-#define TBT_FEC_TX_RING_MAX (64u * 1024 * 1024)
+#define TBT_FEC_TX_RING_MAX (16u * 1024 * 1024)
 
 /* tx->run / rx->run ownership bits. The sched bit in the session owns the
  * reference; this word owns the shared buffers and cursors. A work entry that

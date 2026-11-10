@@ -1410,7 +1410,8 @@ The replay ring keeps 66 logical slots and an 8-block hot pool inside
 first store and released when the ACK passes it. The RX arena keeps 66 logical slots,
 allocates each `(n+m)*S` block buffer on its first share, and returns it at delivery;
 the hot pool holds at most eight blocks (16 MiB at 2 MiB/block). The packetizer source
-ring is sized from the 64-block credit and capped at 64 MiB; output queues keep 4096
+ring is capped at 16 MiB (the 64-block flight window lives in the lazy replay
+planes, not in the unencoded FIFO); output queues keep 4096
 records under a 64 MiB byte mark; credit is 64 blocks (8192 packets), and both parent
 windows are 64 MiB. An eager 66-slot replay plane plus an eager 66-slot RX arena would
 be about 139 MiB + 132 MiB; the lazy form avoids that, and RX pages are committed only
