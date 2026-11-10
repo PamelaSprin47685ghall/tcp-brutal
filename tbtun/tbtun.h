@@ -967,6 +967,12 @@ struct tbt_fec_rx
      * replay does not crowd DATA. Zero means no backoff episode. */
     u64 nack_backoff_block;
     u32 nack_backoff_ms;
+    /* Block 0 is a legal id, so a zero block field cannot also mean "no
+     * episode". valid is cleared by every frontier advance and repair. */
+    bool nack_backoff_valid;
+    /* The last NACK put on the wire named only probe shares. A retry of that
+     * bitmap must not start or grow the block's backoff. */
+    bool nack_probe_only;
     u64 rtt_sample_ns;   /* last carrier RTT sample */
     u32 rtt_us;          /* largest carrier RTT: the replay path's bound */
     u32 nack_cadence_ms; /* adaptive retry interval, 20..500 ms */

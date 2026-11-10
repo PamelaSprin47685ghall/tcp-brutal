@@ -3998,7 +3998,8 @@ static u32 tbt_fec_retry_ms(const struct tbt_fec_rx *rx, u64 block)
 {
     u32 ms = rx->nack_cadence_ms;
 
-    if (rx->nack_backoff_block == block && rx->nack_backoff_ms > ms)
+    if (rx->nack_backoff_valid && rx->nack_backoff_block == block &&
+        rx->nack_backoff_ms > ms)
         ms = rx->nack_backoff_ms;
     return ms;
 }
@@ -4010,8 +4011,9 @@ static void tbt_fec_backoff_note(struct tbt_fec_rx *rx, u64 block)
 {
     u32 next;
 
-    if (rx->nack_backoff_block != block)
+    if (!rx->nack_backoff_valid || rx->nack_backoff_block != block)
     {
+        rx->nack_backoff_valid = true;
         rx->nack_backoff_block = block;
         rx->nack_backoff_ms = rx->nack_cadence_ms;
         return;
@@ -4076,7 +4078,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
             rx->nack_cadence_ms =
                 tbt_fec_nack_cadence_ms(rx->nack_cadence_ms, dt);
             rx->repair_first_ns = 0;
-            rx->nack_backoff_block = 0;
+            rx->nack_backoff_valid = false;
             rx->nack_backoff_ms = 0;
             tbt_fec_nack_reset(rx->nack);
         }
@@ -4084,10 +4086,10 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
 
     /* The frontier advanced past the block that was backing off: the next
      * block starts with the plain cadence. */
-    if (rx->nack_backoff_block &&
+    if (rx->nack_backoff_valid &&
         rx->nack_backoff_block < rx->next_super)
     {
-        rx->nack_backoff_block = 0;
+        rx->nack_backoff_valid = false;
         rx->nack_backoff_ms = 0;
     }
 
@@ -4481,7 +4483,10 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
             {
                 atomic64_inc(&sess->fec_nack_tx);
                 tbt_fec_nack_stamp(rx, last_block, &last, now, false);
-                tbt_fec_backoff_note(rx, last_block);
+                /* The bitmap is a subset of the last sent one; if that one
+                 * was only a shape probe, this retry is too. */
+                if (!rx->nack_probe_only)
+                    tbt_fec_backoff_note(rx, last_block);
                 if (!rx->repair_first_ns ||
                     rx->repair_block != last_block)
                 {
@@ -4520,6 +4525,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
         {
             atomic64_inc(&sess->fec_nack_tx);
             tbt_fec_nack_stamp(rx, s, &n, now, any_probe);
+            rx->nack_probe_only = probe_only;
             /* A shape probe is not a repair request; its own 250 ms pacing
              * already bounds it, and backing off here would delay the first
              * real repair of a block that starts late. */
@@ -5081,6 +5087,9 @@ static void tbt_fec_rx_reset_blocks_locked(struct tbt_fec_rx *rx)
            (size_t)total * (rx->n + rx->m) * sizeof(*rx->req_ns));
     memset(rx->req_block, 0, (size_t)total * sizeof(*rx->req_block));
     tbt_fec_nack_reset(rx->nack);
+    rx->nack_backoff_valid = false;
+    rx->nack_backoff_ms = 0;
+    rx->nack_probe_only = false;
 }
 
 /* Install the armed shape at P0. The old codec is kept until the first
