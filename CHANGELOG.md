@@ -7,6 +7,27 @@ and moves independently of the module version.
 
 ### Fixed
 
+- An unrecoverable hole or a vanished peer now reaches the application as a
+  reset, not a FIN. The kill path called `kernel_sock_shutdown(SHUT_RDWR)`,
+  which sends a real FIN before the `SO_LINGER=0` close sends its RST; the
+  1 GiB run whose far host disappeared at 522,190,848 B ended as `curl
+  rc=18` (clean EOF), so the application could not tell a truncated stream
+  from a complete one. The wake now uses `SHUT_RD` plus `ECONNRESET`.
+  `stream_reset_user` and `stream_reset_tcp_failed` now count the FEC reset
+  path that they documented but never incremented.
+- `cc_bbr_ok`/`cc_bbr_fail` count the congestion control the carrier
+  actually runs, read from `inet_csk(sk)->icsk_ca_ops->name` after the
+  request. A kernel that refuses `TCP_CONGESTION=bbr` on a socket that
+  already uses BBR (the 6.1.172 near host returns EINVAL while
+  `tcp_congestion_control` is bbr) is no longer counted as a failure. The
+  refusal and the actual algorithm are logged instead.
+- Diagnostics name the stream close edge: FIN requests carry their caller
+  (`pub`, `starved`, `closecheck`), and the public socket's state change,
+  ctrl error/peer EOF, `shutdown_wr`, peer FIN, `maybe_detach` and
+  `stream_kill` paths print their stream state. Every carrier retirement
+  prints its reason, and one unconditional per-generation stall snapshot
+  (`una/nxt/wnd/wmem/packets_out/retrans/srtt/mdev`) records why a carrier
+  stopped being acknowledged.
 - The 1 GiB downlink no longer collapses after its first minute. On the
   300 ms WAN the 10 s samples showed repair traffic rising from 47 MB to
   270 MB per two minutes while payload fell from 3.1 MB/s to 0.65-1.0 MB/s.
