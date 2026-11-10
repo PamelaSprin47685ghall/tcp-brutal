@@ -57,6 +57,12 @@ and moves independently of the module version.
   two blocks (4 MiB at 2 MiB/block), and memory pressure stops new
   buffers only below the hard floor. A receive-light side commits only its
   live reassembly blocks.
+- Carrier sockets set `tcp_sock.notsent_lowat` to 32 KiB, and the FEC drain
+  refuses a carrier whose `write_seq - snd_nxt` exceeds 32 KiB. A fast
+  subflow keeps that queue near zero because cwnd immediately admits the
+  records; a slow subflow stops after four records instead of buffering
+  hundreds of KiB behind a 14 KiB cwnd. The next sid no longer waits behind
+  the previous stream's unsent tail.
 - The session output FIFO keeps 4096 queued records (8192 pointer slots)
   and its byte mark rises to 64 MiB for the 64-block window; records stay
   per-share allocations, not a static byte array. A slow carrier is evicted

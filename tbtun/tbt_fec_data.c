@@ -885,7 +885,12 @@ static int tbt_fec_out_dispatch(struct tbt_session *sess,
                     idx = 0;
                 continue;
             }
-            err = sk_stream_wspace(sk) < (int)o->len ? -EAGAIN : 0;
+            {
+                u32 notsent = READ_ONCE(tcp_sk(sk)->write_seq) -
+                              READ_ONCE(tcp_sk(sk)->snd_nxt);
+                err = (notsent > TBT_CAR_NOTSENT_MAX ||
+                       sk_stream_wspace(sk) < (int)o->len) ? -EAGAIN : 0;
+            }
             tbt_carrier_sk_put(sk);
             if (err)
             {

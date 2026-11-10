@@ -356,6 +356,11 @@ void tbt_listen_stop(struct tbt_tunnel *t);
  * test asserts it; the lazy FEC buffers and the 180 MiB floor are the OOM
  * guard, not a per-session socket budget. */
 
+/* Maximum bytes queued behind the carrier cwnd: write_seq - snd_nxt.
+ * The FEC drain stops offering this carrier new records above it, so a
+ * cwnd=14 KiB subflow never buffers hundreds of KiB it cannot send. */
+#define TBT_CAR_NOTSENT_MAX 32768u
+
 /* A carrier that never presents a HELLO is retired after this long. */
 #define TBT_JOIN_TIMEOUT_MS 5000
 
