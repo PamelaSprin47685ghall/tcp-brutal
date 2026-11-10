@@ -2953,8 +2953,8 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
     {
         memset(&so, 0, sizeof(so));
         {
-            u32 p_adj = tx->peer_p_ppm > 40000u ?
-                        tx->peer_p_ppm - 40000u : 0;
+            u32 p_adj = tx->peer_p_ppm > 65000u ?
+                        tx->peer_p_ppm - 65000u : 0;
 
             so.p_ppm = p_adj;
             so.p_ewma_ppm = p_adj;
@@ -6331,10 +6331,25 @@ static void tbt_fec_rx_work_body(struct tbt_session *sess)
  * (the locked check below then decides) -- it cannot call a live block
  * late. A shape switch is refused here: the fields are read without the
  * lock, and the placement path rechecks the shape. */
-static void tbt_fec_rx_late_data_credit(struct tbt_fec_rx *rx, u8 type)
+static void tbt_fec_rx_late_data_credit(struct tbt_fec_rx *rx, u8 type,
+                                        bool locked)
 {
     if (type != TBT_FEC_DATA)
         return;
+    if (!locked)
+    {
+        spin_lock_bh(&rx->lock);
+        if (rx->est_sclc &&
+            tbt_fec_adapt_sclc_est_credit_late(rx->est_sclc))
+        {
+            spin_unlock_bh(&rx->lock);
+            return;
+        }
+        if (atomic_read(&rx->late_data_credit) < (int)(rx->n * 4))
+            atomic_inc(&rx->late_data_credit);
+        spin_unlock_bh(&rx->lock);
+        return;
+    }
     if (atomic_read(&rx->late_data_credit) < (int)(rx->n * 4))
         atomic_inc(&rx->late_data_credit);
 }
@@ -6458,7 +6473,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
 
             if (tbt_fec_rx_late_fast(rx, &h))
             {
-                tbt_fec_rx_late_data_credit(rx, h.type);
+                tbt_fec_rx_late_data_credit(rx, h.type, false);
                 atomic64_inc(&sess->fec_late_share);
                 return 0;
             }
@@ -6535,7 +6550,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
             }
             if (late)
             {
-                tbt_fec_rx_late_data_credit(rx, h.type);
+                tbt_fec_rx_late_data_credit(rx, h.type, false);
                 atomic64_inc(&sess->fec_late_share);
                 return 0;
             }
@@ -7172,6 +7187,15 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
         if (h.n != (u8)cur_n || h.m != (u8)cur_m)
         {
             spin_unlock_bh(&rx->lock);
+            /* A DATA tail from the previous shape after the switch base is
+             * late, not a foreign epoch. Credit it so the estimator can
+             * cancel the parity-recovered miss it caused. */
+            if (h.seq < cur_base && h.type == TBT_FEC_DATA)
+            {
+                tbt_fec_rx_late_data_credit(rx, h.type, false);
+                atomic64_inc(&sess->fec_late_share);
+                return 0;
+            }
             if (prev_match)
             {
                 rx->rollback_pending = true;
@@ -7217,7 +7241,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
                                   rx->next_super, h.block_id, block_end,
                                   rx->next_deliver))
         {
-            tbt_fec_rx_late_data_credit(rx, h.type);
+            tbt_fec_rx_late_data_credit(rx, h.type, true);
             atomic64_inc(&sess->fec_late_share);
             spin_unlock_bh(&rx->lock);
             return 0;
@@ -7280,7 +7304,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
         break;
     }
     case TBT_FEC_RX_WIN_LATE:
-        tbt_fec_rx_late_data_credit(rx, h.type);
+        tbt_fec_rx_late_data_credit(rx, h.type, true);
         atomic64_inc(&sess->fec_late_share);
         spin_unlock_bh(&rx->lock);
         return 0; /* already delivered */
@@ -7363,7 +7387,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
             share < tbt_fec_blk_real_len(rx, group, b) &&
             !b->dpresent[share])
         {
-            tbt_fec_rx_late_data_credit(rx, h.type);
+            tbt_fec_rx_late_data_credit(rx, h.type, true);
             atomic64_inc(&sess->fec_late_data);
         }
         spin_unlock_bh(&rx->lock);

@@ -277,6 +277,9 @@ void tbt_fec_adapt_sclc_est_block(
  * with no alive-filtered share is dropped, not counted. */
 void tbt_fec_adapt_sclc_est_super(struct tbt_fec_adapt_sclc_est *e,
                                   u64 now_ns);
+/* A late DATA share cancels one parity-recovered miss in the current or
+ * previous bucket. Returns true when a bucket was credited. */
+bool tbt_fec_adapt_sclc_est_credit_late(struct tbt_fec_adapt_sclc_est *e);
 
 /* A block whose real DATA count is unknown: count it as a quality sample and
  * do not estimate p from it. */
