@@ -1688,25 +1688,25 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
  * buffer. Before this was enforced the packetizer ran as far ahead as the
  * carriers would carry it, the receiver dropped 1527 shares as "too far ahead"
  * (fec_drop_window), and the blocks they belonged to could never complete: the
- * stream stalled with the application's bytes still in the ring. */
+ * stream stalled with the application's bytes still in the ring.
+ *
+ * The window is spent in whole super-blocks. A block closed before it
+ * filled advances `seq` to the next block boundary without sending the
+ * skipped slots, so a packet distance spends a full block of credit for a
+ * one-share block and can close in the middle of the next block. The block
+ * gate is the unit the receiver buffers (`slots` blocks) and the replay
+ * ring holds (K), so a short cut costs exactly one block and a block the
+ * packetizer started can always be finished. See tbt_fec_credit_block_ok(). */
 static bool tbt_fec_tx_credit_ok(const struct tbt_fec_tx *tx)
 {
-    u64 acked = READ_ONCE(tx->peer_pkts);
-    u64 seq = READ_ONCE(tx->seq);
-    u32 credit = READ_ONCE(tx->credit);
-
     /* Zero credit is a closed window, not an open one. The receiver always
-     * grants at least one packet, so zero means no grant has arrived (or a
+     * grants at least one block, so zero means no grant has arrived (or a
      * bug); sending on it would overrun the receiver's block slots and the
      * shares would come back as fec_drop_window. */
-    if (!credit)
-        return false;
-    /* An ACK names packets the receiver has delivered, so it can never be
-     * ahead of what was sent. Clamp a nonsensical frontier instead of letting
-     * the unsigned subtraction wrap into a huge outstanding count. */
-    if (acked >= seq)
-        return true;
-    return seq - acked < (u64)credit;
+    return !tbt_fec_credit_waiting(READ_ONCE(tx->peer_pkts),
+                                   READ_ONCE(tx->seq), READ_ONCE(tx->credit),
+                                   tx->base_pkt, tx->base_block, tx->groups,
+                                   tx->n);
 }
 
 /* The session FIFO at or above its high-water mark. The packetizer checks
@@ -1905,7 +1905,14 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
             tx->fill += (u16)got;
             pulled = true;
         }
-        paused = tx->head == tx->tail && READ_ONCE(st->tx_paused);
+        /* Resume capture at half, not only when the ring is empty. The
+         * parent socket's receive window is all the application sees: holding
+         * it shut until the last byte drains collapses the sender (field:
+         * far loopback BBR 22 kbps, rwnd_limited 34 %, then 2 KB per RTO and
+         * one-share blocks for 118 s). tbt_sock.c already documents the half
+         * contract; this is the pump that honours it. */
+        paused = READ_ONCE(st->tx_paused) &&
+                 (u32)(tx->head - tx->tail) <= tx->ring_size / 2;
         spin_unlock(&tx->lock);
         /* Allocate the repair ring only when this flow actually has bytes to
          * send. A receive-only session's TX ring stays empty, so it never

@@ -634,6 +634,52 @@ static inline u32 tbt_fec_credit_packets(u16 groups, u16 n, u16 k_ring,
     return blocks ? blocks * per_block : 1;
 }
 
+/* How many whole super-blocks a packet grant is worth. The credit arrives
+ * in packets because that is what the receiver's arena counts; the sender
+ * spends it in blocks, which is the unit that survives a short cut. */
+static inline u32 tbt_fec_credit_blocks(u32 credit_packets, u16 groups,
+                                        u16 n)
+{
+    u32 per_block = (u32)groups * n;
+    u32 blocks;
+
+    if (!per_block || !credit_packets)
+        return 0;
+    blocks = credit_packets / per_block;
+    return blocks ? blocks : 1;
+}
+
+/* The sender's credit gate, in whole super-blocks.
+ *
+ * The old gate compared packet sequence numbers (`seq - peer_pkts <
+ * credit`). That identity holds only while every block carries groups*n
+ * shares: `tbt_fec_tx_close_block(advance)` moves seq to the next block
+ * boundary when a block is cut early, so a short block spends a full
+ * block of the packet window while carrying only win_len shares. The
+ * window then no longer bounds blocks, and the packetizer can close it in
+ * the middle of the next block. A block cut after one 2 KB share is the
+ * field case: 0.7.0 delivered 383 MB and then spent 118 s sending
+ * one-share blocks, the receiver's frontier stuck on a block with no
+ * stored share (fec_replay_miss_never_stored +84, gap_us 28.8 s).
+ *
+ * The window is what the receiver actually buffers: `slots` super-blocks,
+ * minus two for the ACK in flight, and the replay ring holds the same K.
+ * Counting blocks makes a short block cost one block, exactly like a full
+ * one, so the arena and the ring agree whatever the cut. It also lets the
+ * packetizer finish a block it started: the block id does not change while
+ * the block fills, so a gate that was open when the block began stays
+ * open until the cut. Zero credit is a closed window, never an open one.
+ */
+static inline bool tbt_fec_credit_block_ok(u64 blk, u64 frontier,
+                                           u32 credit_blocks)
+{
+    if (!credit_blocks)
+        return false;
+    if (blk < frontier)
+        blk = frontier;
+    return blk - frontier < credit_blocks;
+}
+
 /* Store one complete encoded record (header included). A share outside
  * [0, n+m) or a record longer than header+S is refused. */
 int tbt_fec_replay_store(struct tbt_fec_replay *r, u64 block_id, u16 group,
@@ -1106,6 +1152,30 @@ static inline u64 tbt_fec_block_of_seq_base(u64 seq, u64 base_pkt,
 static inline u64 tbt_fec_block_of_seq(u64 seq, u16 groups, u16 k)
 {
     return tbt_fec_block_of_seq_base(seq, 0, 0, groups, (u16)k);
+}
+
+/* The same gate over the fields the TX stall path can read under RCU. Both
+ * the packetizer and tbt_tx.c's reset decision must use this one definition:
+ * a mirror that still compared packet numbers would call a block-credit wait
+ * a dead ACK path and reset a stream the receiver is still draining. */
+static inline bool tbt_fec_credit_waiting(u64 peer_pkts, u64 seq,
+                                          u32 credit, u64 base_pkt,
+                                          u64 base_block, u16 groups, u16 n)
+{
+    u32 credit_blocks;
+    u64 frontier, blk;
+
+    if (!credit || !groups || !n)
+        return true;
+    credit_blocks = tbt_fec_credit_blocks(credit, groups, n);
+    if (peer_pkts < base_pkt)
+        peer_pkts = base_pkt;
+    if (seq < base_pkt)
+        seq = base_pkt;
+    frontier = tbt_fec_block_of_seq_base(peer_pkts, base_pkt, base_block,
+                                         groups, n);
+    blk = tbt_fec_block_of_seq_base(seq, base_pkt, base_block, groups, n);
+    return !tbt_fec_credit_block_ok(blk, frontier, credit_blocks);
 }
 
 /* A stream owns a subset of the session's physical groups. `mask` is the

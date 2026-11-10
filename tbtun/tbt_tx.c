@@ -1877,27 +1877,23 @@ u64 tbt_tx_wait_budget_ns(struct tbt_session *sess, struct tbt_stream *st)
 /* True while the FEC packetizer is stopped by the peer's credit window: the
  * receiver has not delivered enough of its buffer for the sender to emit the
  * next packet. That is flow control, not a TX-path stall; only the receiver's
- * bounded reset or the next ACK can move it. Mirrors the FEC-owned
- * tbt_fec_tx_credit_ok() without touching that file. */
-static bool tbt_fec_credit_waiting(const struct tbt_session *sess)
+ * bounded reset or the next ACK can move it. Uses the one shared definition
+ * the packetizer also uses, read under RCU. */
+static bool tbt_tx_fec_credit_waiting(const struct tbt_session *sess)
 {
     const struct tbt_fec_tx *tx;
-    u64 acked, seq;
-    u32 credit;
     bool waiting = false;
 
     rcu_read_lock();
     tx = rcu_dereference(sess->fec_tx);
     if (tx)
-    {
-        acked = READ_ONCE(tx->peer_pkts);
-        seq = READ_ONCE(tx->seq);
-        credit = READ_ONCE(tx->credit);
-        /* Zero credit is a closed window: no grant has arrived yet. An ACK
-         * cannot name packets that were not sent; clamp instead of letting
-         * the unsigned subtraction wrap into a huge outstanding count. */
-        waiting = !credit || (acked < seq && seq - acked >= (u64)credit);
-    }
+        /* One definition for both users: the packetizer and this reset
+         * decision must agree on what "waiting for credit" means, or a
+         * block-credit wait would look like a dead ACK path. */
+        waiting = tbt_fec_credit_waiting(READ_ONCE(tx->peer_pkts),
+                                         READ_ONCE(tx->seq),
+                                         READ_ONCE(tx->credit), tx->base_pkt,
+                                         tx->base_block, tx->groups, tx->n);
     rcu_read_unlock();
     return waiting;
 }
@@ -1982,7 +1978,7 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
          * receiver's own bounded reset. When the window opens again, the ACK
          * that opened it also advances last_ack_ns, so a genuinely dead ACK
          * path still reaches the budget below. */
-        if (tbt_fec_credit_waiting(sess))
+        if (tbt_tx_fec_credit_waiting(sess))
             start = now;
     }
     {
@@ -2169,7 +2165,7 @@ static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
     if (sess->fec &&
         tbt_tx_close_hold_fec(true,
                               tbt_fec_repair_active(sess, now, budget),
-                              tbt_fec_credit_waiting(sess),
+                              tbt_tx_fec_credit_waiting(sess),
                               now - start, TBT_FEC_REPAIR_MAX_NS))
     {
         atomic64_inc(&sess->close_hold_fec);

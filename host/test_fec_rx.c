@@ -2404,6 +2404,64 @@ static void test_block_late(void)
        "late: the short block is late after delivery");
 }
 
+/* The sender's credit window, in whole super-blocks.
+ *
+ * 0.7.0 spent the window in packet numbers. A block cut before it filled
+ * advances seq to the next block boundary without sending the skipped
+ * slots, so a one-share 2 KB block spends a full 128-packet block of the
+ * window. The field run then cut a one-share block per ACK: 118 s of
+ * 4-8 KB per 10 s, the frontier stuck on a block the sender had not built
+ * (fec_replay_miss_never_stored +84, gap_us 28.8 s). Counting blocks makes
+ * a short block cost exactly what the receiver buffers, and the block id
+ * does not change while a block fills, so a started block can always be
+ * finished.
+ */
+static void test_credit_window(void)
+{
+    const u32 credit_pkts = 640; /* 1x256 downlink: 5 super-blocks */
+    const u32 blocks = tbt_fec_credit_blocks(credit_pkts, 1, 128);
+    int i;
+
+    ok_int(blocks, 5, "credit: the packet grant names five super-blocks");
+    ok_int(tbt_fec_credit_blocks(512, 8, 8), 8,
+           "credit: the uplink grant is counted in its own super-blocks");
+    ok_int(tbt_fec_credit_blocks(0, 1, 128), 0,
+           "credit: no grant is no block");
+
+    /* The four blocks beyond the frontier may be opened; the fifth may not. */
+    ok(tbt_fec_credit_block_ok(4, 0, blocks),
+       "credit: the fourth block beyond the frontier is open");
+    ok(!tbt_fec_credit_block_ok(5, 0, blocks),
+       "credit: the fifth block beyond the frontier is closed");
+
+    /* The regression: a stream of one-share blocks advances block ids, not
+     * packet counters. With the packet gate, 128 such blocks fit in the
+     * 640-packet window and the sender could churn them without the
+     * receiver ever delivering; the block gate stops after K-2. */
+    for (i = 0; i < 4; i++)
+        ok(tbt_fec_credit_block_ok((u64)i, 0, blocks),
+           "credit: a one-share block spends one block of the window");
+    ok(!tbt_fec_credit_block_ok(5, 0, blocks),
+       "credit: the sixth one-share block is closed");
+
+    /* While a block fills, its id does not change, so a gate that was open
+     * when it began stays open for every share: the packetizer can finish
+     * the block instead of leaving an unsealed frontier. */
+    for (i = 0; i < 128; i++)
+        ok(tbt_fec_credit_block_ok(4, 0, blocks),
+           "credit: every share of the started block is admitted");
+
+    /* A delivered block moves the frontier and reopens one slot. */
+    ok(tbt_fec_credit_block_ok(5, 1, blocks),
+       "credit: a delivered block moves the window");
+    /* A stale frontier below the shape origin is clamped, not wrapped. */
+    ok(tbt_fec_credit_block_ok(0, 9, blocks),
+       "credit: a frontier past the block id is clamped");
+    /* Zero credit is a closed window, not an open one. */
+    ok(!tbt_fec_credit_block_ok(0, 0, 0),
+       "credit: zero blocks is closed");
+}
+
 int main(void)
 {
     src_init();
@@ -2434,6 +2492,7 @@ int main(void)
     test_rx_poll();
     test_decode_wake();
     test_block_late();
+    test_credit_window();
     test_replay_window();
     test_nack_filter();
     test_nack_storm();

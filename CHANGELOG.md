@@ -101,6 +101,22 @@ window are sized for the whole tunnel.
   before its INIT arrived: the peer dropped the INIT as an unknown sid, sent
   no CFG ACK, and the stream stalled at 0 bytes. The mux remnants
   `tbt_fec_flow_claim_slot()` and `tbt_fec_flow_shared()` are gone.
+- FEC credit is counted in whole super-blocks, not packet sequence numbers.
+  A block closed before it filled advances `seq` to the next block boundary
+  without sending the skipped slots, so the packet gate spent a full block
+  of credit for a one-share block and could close in the middle of the next
+  block. The field run cut a one-share 2 KB block per ACK and stalled for
+  118 s at 383 MB (`fec super 380 stuck: ... nreal=1 short=2048`,
+  `fec_replay_miss_never_stored` +84, gap 28.81 s). The window now matches
+  what the receiver buffers (K-2 super-blocks, `slots` blocks) and the
+  replay ring holds, and the block id does not change while a block fills,
+  so a started block can always be finished.
+- The FEC packetizer resumes capture at half the source ring instead of only
+  when it is completely empty. The parent socket's receive window is what
+  the application sees; holding it shut until the last byte drained let the
+  far loopback reach `rwnd_limited` with BBR at 22 kbps, after which the
+  application delivered 2 KB per RTO and every block was cut at one share.
+  `tbt_sock.c` already documented the half contract; the pump now honours it.
 
 ### Tests
 
@@ -114,6 +130,9 @@ window are sized for the whole tunnel.
 - `host/test_fec_switch` models the first flow's detach, the second OPEN's
   stream-creation race and its INIT/CFG ACK: the losing carrier must keep
   the winner's plane.
+- `host/test_fec_rx` pins the block credit window: a short cut spends one
+  block, five blocks may be open, a started block admits every share, and a
+  stale frontier is clamped instead of wrapping.
 
 ## [0.6.0] - 2026-11-09
 
