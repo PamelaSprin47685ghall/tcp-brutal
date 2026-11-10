@@ -5226,8 +5226,18 @@ static void tbt_fec_rx_fbk_send(struct tbt_session *sess,
     h.sid = flow->sid;
     if (tbt_fec_make_record(sess, &h, body, rec, &len))
         return;
-    if (!tbt_fec_send_record(sess, 0, rec, len, true, false, flow))
-        rx->fbk_last_ns = now;
+    {
+        int err = tbt_fec_send_record(sess, 0, rec, len, true, false,
+                                      flow);
+
+        if (debug)
+            pr_info_ratelimited("tbtun-diag: fbk tx sid=%llu flags=%#x p=%u exp=%u recv=%u err=%d\n",
+                                (unsigned long long)flow->sid, f.flags,
+                                f.p_ewma_ppm, f.expected_shares,
+                                f.received_shares, err);
+        if (!err)
+            rx->fbk_last_ns = now;
+    }
 }
 
 static void tbt_fec_rx_switch_tick(struct tbt_session *sess,
@@ -7005,6 +7015,11 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
             return -EPROTO;
         if (!tx)
             return 0;
+        if (debug)
+            pr_info_ratelimited("tbtun-diag: fbk rx sid=%llu flags=%#x p=%u exp=%u recv=%u\n",
+                                (unsigned long long)h.sid, fb.flags,
+                                fb.p_ewma_ppm, fb.expected_shares,
+                                fb.received_shares);
         /* The report names the receive shape; a mismatch means the two
          * ends disagree about the committed codec, so the values would be
          * meaningless. Drop it and count, as §7 requires. */
