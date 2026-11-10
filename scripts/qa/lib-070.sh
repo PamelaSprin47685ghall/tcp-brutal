@@ -403,9 +403,9 @@ q070_kv() { # key "k=v k=v"
 }
 
 q070_ring_k() { # groups shares
-    local g=$1 sh=$2 k=64
+    local g=$1 sh=$2 k=32
     while [ "$k" -gt 1 ]; do
-        [ $((k * g * sh * (8192 + 48))) -le $((15 * 1024 * 1024)) ] && break
+        [ $((k * g * sh * (8192 + 48))) -le $((64 * 1024 * 1024)) ] && break
         k=$((k - 1))
     done
     printf '%s' "$k"
@@ -414,7 +414,7 @@ q070_ring_k() { # groups shares
 q070_arena_slots() { # groups shares
     local per=$(( $1 * $2 * 8192 )) slots
     [ "$per" -gt 0 ] || { printf 'NA'; return 0; }
-    slots=$(( (16 * 1024 * 1024) / per ))
+    slots=$(( (64 * 1024 * 1024) / per ))
     [ "$slots" -lt 4 ] && slots=4
     [ "$slots" -gt 256 ] && slots=256
     printf '%s' "$slots"
@@ -424,9 +424,9 @@ q070_credit() { # groups n k slots
     local per_block=$(( $1 * $2 )) k=$3 slots=$4 blocks limit
     [ "$per_block" -gt 0 ] || { printf '1'; return 0; }
     [ "$slots" -gt 0 ] && [ "$k" -gt "$slots" ] && k=$slots
-    [ "$k" -gt 64 ] && k=64
+    [ "$k" -gt 32 ] && k=32
     if [ "$k" -gt 2 ]; then blocks=$((k - 2)); else blocks=1; fi
-    limit=$(( 1024 / per_block ))
+    limit=$(( 2048 / per_block ))
     [ "$blocks" -gt "$limit" ] && blocks=$limit
     [ "$blocks" -gt 0 ] || blocks=1
     printf '%s' $((blocks * per_block))

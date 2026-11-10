@@ -3,6 +3,30 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.7.1] - 2026-11-10
+
+### Fixed
+
+- The 1 GiB downlink no longer collapses after its first minute. On the
+  300 ms WAN the 10 s samples showed repair traffic rising from 47 MB to
+  270 MB per two minutes while payload fell from 3.1 MB/s to 0.65-1.0 MB/s.
+  Replay K rises from 7 to 31 (64 MiB ring, 64 MiB RX arena, 16 MiB credit),
+  so a frontier repairing behind a full in-flight window never falls outside
+  the NACK window.
+- A frontier block that survives several NACKs now doubles its retry interval
+  up to 2 s, and the per-share hold follows that backoff. A duplicate replay
+  no longer queues ahead of DATA on every repair round.
+- A closed credit window no longer ages the block-cut clock. Reopening credit
+  cannot seal a short block that was only waiting for the next round; the
+  new `fec_short_blocks` counter separates warm-up cuts from a steady leak.
+- A carrier that the FEC drain kept marking slow with `snd_una` frozen for
+  8 s is retired and redialled, at most once per second. It no longer holds
+  the credit frontier behind a path that is not draining.
+- `c3` exports `cc_bbr_ok` / `cc_bbr_fail` and `slow_evicted`, so a field run
+  can prove every carrier accepted `TCP_CONGESTION=bbr`.
+- `scripts/qa/stats-sampler-070.sh` keeps c3/c6/c9/c10/c11/c12 on disk once
+  per interval for long-run attribution.
+
 ## [0.7.0] - 2026-11-10
 
 0.7.0 removes the 0.6.0 kernel stream multiplexer and the shared FEC plane
