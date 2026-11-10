@@ -385,7 +385,7 @@ echo "== tbtun guest: $(uname -r) probes=$PROBES"
 # Probe I/J/K need it; the loopback probes do not.
 # The NIC's driver is a module chain in this kernel; load it before asking
 # for eth0. Absent modules mean the image was built without --net.
-for _m in failover net_failover virtio_net sch_htb sch_netem cls_u32 sch_tbf; do
+for _m in failover net_failover virtio_net sch_htb sch_netem cls_u32 sch_tbf tcp_bbr; do
     [ -f "/$_m.ko" ] && insmod "/$_m.ko" 2> /dev/null
 done
 
