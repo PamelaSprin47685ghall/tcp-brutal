@@ -34,6 +34,7 @@
 #include <linux/string.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
+#include <net/inet_sock.h>
 #include <net/sock.h>
 #include <net/net_namespace.h>
 
