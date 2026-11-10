@@ -3356,8 +3356,8 @@ static bool tbt_car_set_bbr(struct socket *s)
                           KERNEL_SOCKPTR(TBT_CAR_CC_NAME),
                           sizeof(TBT_CAR_CC_NAME));
     if (err)
-        pr_debug("tbtun: carrier TCP_CONGESTION=%s failed: %d; keeping the default\n",
-                 TBT_CAR_CC_NAME, err);
+        pr_info_ratelimited("tbtun: carrier TCP_CONGESTION=%s failed: %d; keeping the default\n",
+                            TBT_CAR_CC_NAME, err);
     return err == 0;
 }
 

@@ -187,6 +187,16 @@ static void tbt_pub_capture_body(struct tbt_stream *st)
     {
         int queued;
 
+        /* Field diagnosis: an early FIN delivered 313 MB instead of 1 GiB
+         * with no reset counter. Name the exact evidence here so the next run
+         * can tell a real target EOF from a misread socket state. */
+        pr_info_ratelimited("tbtun: pub FIN sid=%llu shutdown=%u state=%u err=%d copied=%u rcv_nxt=%u st=%u paused=%d\n",
+                            (unsigned long long)st->sid,
+                            READ_ONCE(sk->sk_shutdown),
+                            READ_ONCE(sk->sk_state), READ_ONCE(sk->sk_err),
+                            tcp_sk(sk)->copied_seq, tcp_sk(sk)->rcv_nxt,
+                            READ_ONCE(st->state),
+                            READ_ONCE(st->tx_paused) ? 1 : 0);
         WRITE_ONCE(st->tx_fin_sent, true);
         queued = tbt_tx_fin(st->sess, st, GFP_KERNEL);
         if (queued > 0)
