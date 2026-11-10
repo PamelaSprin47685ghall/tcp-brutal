@@ -357,9 +357,10 @@ void tbt_listen_stop(struct tbt_tunnel *t);
  * guard, not a per-session socket budget. */
 
 /* Maximum bytes queued behind the carrier cwnd: write_seq - snd_nxt.
- * The FEC drain stops offering this carrier new records above it, so a
- * cwnd=14 KiB subflow never buffers hundreds of KiB it cannot send. */
-#define TBT_CAR_NOTSENT_MAX 32768u
+ * 256 KiB (32 records) leaves a fast subflow enough reserve that a 350 ms
+ * aggregated ACK/SACK recovery does not drain it and mark BBR app-limited;
+ * a slow subflow still stops after 32 records instead of hundreds of KiB. */
+#define TBT_CAR_NOTSENT_MAX 262144u
 
 /* A carrier that never presents a HELLO is retired after this long. */
 #define TBT_JOIN_TIMEOUT_MS 5000

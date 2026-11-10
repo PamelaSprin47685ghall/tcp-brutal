@@ -39,8 +39,9 @@ and moves independently of the module version.
   8192 packets (64 MiB of source at S=8192), `TBT_FEC_REPLAY_K_MAX` is 66
   (64 blocks of credit plus two of slack), and both FEC windows are 64 MiB.
   At 400 ms RTT the old 2048-packet/16-block cap held the protocol to
-  35 MiB/s; 64 blocks cover the 51.2 MB BDP of 128 MB/s. The parent socket
-  asks for 32 MiB (64 MiB after the kernel's doubling) and the packetizer's
+  35 MiB/s; 64 blocks cover the 51.2 MB BDP of 128 MB/s. The parent loopback
+  socket asks for 8 MiB (16 MiB after doubling; the BDP is on the carriers),
+  and the packetizer's
   unencoded capture FIFO is capped at 16 MiB; the 64-block flight window
   lives in the lazy replay planes, not in that FIFO. `rx_reorder_bytes` and
   `tx_window_bytes` now default to 64 MiB; a line that lowers the reorder
@@ -57,12 +58,11 @@ and moves independently of the module version.
   two blocks (4 MiB at 2 MiB/block), and memory pressure stops new
   buffers only below the hard floor. A receive-light side commits only its
   live reassembly blocks.
-- Carrier sockets set `tcp_sock.notsent_lowat` to 32 KiB, and the FEC drain
-  refuses a carrier whose `write_seq - snd_nxt` exceeds 32 KiB. A fast
-  subflow keeps that queue near zero because cwnd immediately admits the
-  records; a slow subflow stops after four records instead of buffering
-  hundreds of KiB behind a 14 KiB cwnd. The next sid no longer waits behind
-  the previous stream's unsent tail.
+- Carrier sockets set `tcp_sock.notsent_lowat` to 256 KiB, and the FEC
+  drain refuses a carrier whose `write_seq - snd_nxt` exceeds 256 KiB. The
+  reserve covers a 350 ms aggregated ACK/SACK recovery without marking BBR
+  app-limited; a slow subflow stops after 32 records instead of buffering
+  hundreds of KiB behind a 14 KiB cwnd.
 - The session output FIFO keeps 4096 queued records (8192 pointer slots)
   and its byte mark rises to 64 MiB for the 64-block window; records stay
   per-share allocations, not a static byte array. A slow carrier is evicted
@@ -93,6 +93,11 @@ and moves independently of the module version.
 - `host/test_fec.c`, `host/test_fec_rx.c` and `host/test_mem_budget.c`
   assert K=66, the 8192-packet credit, the block-granular 20 MiB replay
   ledger and the 66-slot lazy RX arena.
+
+- A local application close (`SEND_SHUTDOWN` or `TCP_CLOSE` while
+  `rx_fin_done` is false) now sends the tunnel RST immediately instead of
+  waiting for `rx_queued` to become non-empty. The old stream no longer
+  survives for seconds and collides with the next one after a curl timeout.
 
 ### Verification
 

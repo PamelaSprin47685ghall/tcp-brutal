@@ -501,6 +501,24 @@ static void tbt_ctrl_body(struct tbt_stream *st)
         tbt_stream_kill(st, TBT_ST_DEAD);
         return;
     }
+    /* The local application closed its read side (curl timeout/close)
+     * while the peer stream is still running. It will never consume another
+     * downlink byte, so waiting for rx_queued to become non-empty lets the
+     * old stream occupy the tunnel for seconds and collide with the next
+     * one. RST immediately; far aborts and frees its block planes. */
+    if (((READ_ONCE(sk->sk_shutdown) & SEND_SHUTDOWN) ||
+         READ_ONCE(sk->sk_state) == TCP_CLOSE) &&
+        !READ_ONCE(st->rx_fin_done))
+    {
+        pr_info_ratelimited("tbtun: ctrl local close sid=%llu shutdown=%u state=%u rx_fin=%d rx_queued=%llu\n",
+                            (unsigned long long)st->sid,
+                            READ_ONCE(sk->sk_shutdown), READ_ONCE(sk->sk_state),
+                            READ_ONCE(st->rx_fin_done) ? 1 : 0,
+                            (unsigned long long)READ_ONCE(st->rx_queued));
+        tbt_tx_rst_retry(st->sess, st);
+        tbt_stream_kill(st, TBT_ST_DEAD);
+        return;
+    }
     if (tbt_stream_peer_eof(
             (READ_ONCE(sk->sk_shutdown) & RCV_SHUTDOWN) != 0,
             READ_ONCE(sk->sk_state) == TCP_CLOSE, false))
@@ -639,13 +657,14 @@ static void tbt_kill_work(struct work_struct *w)
 
 /* The parent stream carries the application's bytes: the near accepted
  * socket and the far target socket both use it. The kernel doubles
- * SO_*BUF, so 32 MiB here is a 64 MiB buffer per direction: the 400 ms x
- * 128 MB/s BDP needs 64 MiB of source in flight. FORCE ignores
+ * SO_*BUF, so 8 MiB here is a 16 MiB buffer per direction. The 400 ms BDP
+ * lives on the carrier subflows, not on this local loopback parent socket.
+ * FORCE ignores
  * rmem_max/wmem_max; when the caller lacks the capability the capped
  * option is the fallback, never a failed attach. */
 void tbt_parent_setsockbuf(struct socket *s)
 {
-    int v = 32 * 1024 * 1024;
+    int v = 8 * 1024 * 1024;
 
     if (!s)
         return;
