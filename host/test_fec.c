@@ -3333,6 +3333,19 @@ static void test_replay_alloc_balance(void)
     tbt_fec_replay_free(r);
     ok(tbt_fec_host_live_allocs() == before,
        "replay create/shrink/free leaves zero allocations", NULL);
+
+    {
+        u8 bm[TBT_FEC_BITMAP_BYTES] = {0};
+
+        tbt_fec_bitmap_set(bm, 255);
+        ok(tbt_fec_bitmap_test(bm, 255),
+           "late bitmap: share 255 is addressable", NULL);
+        ok(tbt_fec_bitmap_count(bm) == 1,
+           "late bitmap: share 255 counts once", NULL);
+        tbt_fec_bitmap_clear(bm, 255);
+        ok(!tbt_fec_bitmap_test(bm, 255),
+           "late bitmap: share 255 clears", NULL);
+    }
 }
 
 int main(void)

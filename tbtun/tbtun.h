@@ -961,8 +961,10 @@ struct tbt_fec_late_rec
     u8 folded;
     u8 bucket;
     u16 miss;
+    u64 bucket_start_ns;
     u8 pending[TBT_FEC_BITMAP_BYTES];
     u8 settled[TBT_FEC_BITMAP_BYTES];
+    u8 miss_bits[TBT_FEC_BITMAP_BYTES];
 };
 
 struct tbt_fec_rx
