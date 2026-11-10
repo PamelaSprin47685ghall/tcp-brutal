@@ -72,6 +72,11 @@ and moves independently of the module version.
   64 MiB. RX and replay resets keep at most two hot planes and free the
   rest immediately; flow abort/detach calls both resets before the delayed
   flow_put, and clears stale `req_block`/NACK state for the next sid.
+- Stream abort/detach retires the old sid's queued DATA/replay records before
+  the final flow put, so a FIFO record can no longer hold a flow reference
+  and strand its 16 MiB TX ring (three 16 MiB orphans after three streams).
+  `host/test_fec.c` now asserts the replay allocator returns to its baseline
+  after create -> ensure/store -> reset -> free.
 
 ### Tests
 

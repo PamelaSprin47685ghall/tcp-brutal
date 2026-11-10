@@ -620,6 +620,10 @@ u16 tbt_fec_replay_k(const struct tbt_fec_replay *r);
  * value. */
 u16 tbt_fec_replay_k_for(u16 groups, u16 n, u16 m, u16 s);
 size_t tbt_fec_replay_bytes(u16 groups, u16 n, u16 m, u16 s, u16 k);
+#ifndef __KERNEL__
+/* Host allocation ledger: every tbt_fec_alloc/free pair must balance. */
+long tbt_fec_host_live_allocs(void);
+#endif
 
 /* The FEC in-flight window in DATA packets, derived from the effective K.
  *

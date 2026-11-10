@@ -3297,8 +3297,33 @@ static void test_sclc_wire_profiles(void)
        "sclc fbk: extension round-trip", NULL);
 }
 
+static void test_replay_alloc_balance(void)
+{
+    struct tbt_fec_replay *r;
+    tbt_fec_spinlock_t host_lock = 0;
+    u8 rec[96] = {0};
+    long before;
+    int i;
+
+    before = tbt_fec_host_live_allocs();
+    r = tbt_fec_replay_new_k(32, 4, 4, 8192, 66);
+    ok(r != NULL, "balance: ring", NULL);
+    for (i = 0; i < 10; i++)
+    {
+        ok_int(tbt_fec_replay_ensure_block(r, (u64)i, &host_lock), 0,
+               "balance: block plane");
+        ok_int(tbt_fec_replay_store(r, (u64)i, 0, 0, rec, sizeof(rec)), 0,
+               "balance: store");
+    }
+    tbt_fec_replay_reset(r);
+    tbt_fec_replay_free(r);
+    ok(tbt_fec_host_live_allocs() == before,
+       "replay create/shrink/free leaves zero allocations", NULL);
+}
+
 int main(void)
 {
+    test_replay_alloc_balance();
     test_header_roundtrip();
     test_hdr_check();
     test_ack_bytes();

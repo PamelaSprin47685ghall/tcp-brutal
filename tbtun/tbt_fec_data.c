@@ -8227,6 +8227,10 @@ void tbt_fec_flow_abort(struct tbt_session *sess, struct tbt_fec_flow *f)
     if (f->tx && READ_ONCE(f->tx->replay))
         tbt_fec_replay_shrink(f->tx->replay, false, 2,
                               &f->tx->replay_lock);
+    /* Retire every queued record for this sid before the reference count
+     * can decide the flow's fate; a FIFO DATA record holds a flow reference
+     * and otherwise strands the 16 MiB TX ring until session destroy. */
+    tbt_fec_tx_clear_data_queues(sess);
     /* Purge after the flow is unreachable: a racing producer now refuses at
      * tbt_fec_out_push(), and an in-flight flush owns a record reference. */
     tbt_fec_flow_purge(sess, f);
@@ -8282,6 +8286,7 @@ void tbt_fec_flow_detach(struct tbt_stream *st)
     if (f->tx && READ_ONCE(f->tx->replay))
         tbt_fec_replay_shrink(f->tx->replay, false, 2,
                               &f->tx->replay_lock);
+    tbt_fec_tx_clear_data_queues(sess);
     tbt_fec_flow_purge(sess, f);
     if (unlinked)
         tbt_fec_flow_put(f); /* table reference, only if we took it out */

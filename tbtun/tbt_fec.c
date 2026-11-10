@@ -47,16 +47,34 @@ _Static_assert(TBT_FEC_FBK_RATE_TARGET == 60, "FBK rate target at +60");
  * Allocation
  * ------------------------------------------------------------------ */
 
+#ifndef __KERNEL__
+static long tbt_fec_live_allocs;
+
+long tbt_fec_host_live_allocs(void)
+{
+    return tbt_fec_live_allocs;
+}
+#endif
+
 static void *tbt_fec_alloc(size_t len)
 {
-    return tbt_fec_vzalloc(len);
+    void *p = tbt_fec_vzalloc(len);
+
+#ifndef __KERNEL__
+    if (p)
+        tbt_fec_live_allocs++;
+#endif
+    return p;
 }
 
 static void tbt_fec_free(void *p)
 {
+    if (!p)
+        return;
 #ifdef __KERNEL__
     kvfree(p);
 #else
+    tbt_fec_live_allocs--;
     free(p);
 #endif
 }
