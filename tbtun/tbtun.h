@@ -276,7 +276,10 @@ void tbt_listen_stop(struct tbt_tunnel *t);
  * wait. The harness raises the socket maxima to 64 MiB and moves 40 MiB. */
 #define TBT_RX_RING_MAX (64 * 1024 * 1024) /* ready-to-deliver queue cap, bytes  */
 #define TBT_RX_READY_LOW (TBT_RX_RING_MAX / 2)
-#define TBT_RX_PAUSED_MARK (2 * 1024 * 1024) /* FBK rx_state=2 above this   */
+/* Pause the carriers above eight megabytes of ready data: the parent socket
+ * now holds a 16 MiB buffer, and a 2 MiB mark left most of it unused while
+ * the FBK reported a full queue. */
+#define TBT_RX_PAUSED_MARK (8 * 1024 * 1024) /* FBK rx_state=2 above this   */
 /* The carrier write admission is the kernel's own sk_stream_memory_free()
  * (sk_wmem_queued < sk_sndbuf), not a fixed high-water line: the carrier's
  * TCP applies backpressure, sk_write_space is the fast resume, and a 2 ms
@@ -2009,6 +2012,7 @@ enum tbt_stall_replace_reason
 void tbt_sock_kick(struct tbt_stream *st);
 int tbt_sock_deliver(struct tbt_stream *st, const u8 *data, size_t len);
 void tbt_stream_init_work(struct tbt_stream *st);
+void tbt_parent_setsockbuf(struct socket *s);
 void tbt_sock_attach(struct tbt_stream *st);
 void tbt_sock_detach(struct tbt_stream *st);
 void tbt_stream_release_socket(struct tbt_stream *st);

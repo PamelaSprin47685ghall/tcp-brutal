@@ -455,11 +455,12 @@ static bool tbt_car_hold_idle(struct tbt_session *sess)
     bool busy = false;
 
     /* FEC data has its own queues. fec_outq_queued/fec_out_ctl_depth count
-     * bound records; fec_out_queued and fec_outq_bytes are the wider ledger
-     * the 0.7.0 data plane fills as soon as a share is ready. Any of them
-     * non-zero means this session has a share to put on a carrier, so no
-     * carrier may be parked, whatever the ARQ counters say. */
-    if (READ_ONCE(sess->fec_out_queued) || READ_ONCE(sess->fec_outq_bytes))
+     * bound records; fec_outq_bytes is the byte ledger the 0.7.0 session
+     * FIFO fills as soon as a share is ready. Any of them non-zero means
+     * this session has a share to put on a carrier, so no carrier may be
+     * parked, whatever the ARQ counters say. */
+    if (atomic_read(&sess->fec_outq_queued) ||
+        atomic_read(&sess->fec_outq_bytes))
         return false;
     if (!tbt_hold_session_idle(READ_ONCE(sess->tx_queued),
                                READ_ONCE(sess->ctl_real)))
@@ -907,8 +908,8 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
          * the hold nor this keepalive may run. */
         else if (tbt_http_need_pad(c->last_tx_ns, now, ka_ms) &&
                  !READ_ONCE(sess->tx_queued) &&
-                 !READ_ONCE(sess->fec_out_queued) &&
-                 !READ_ONCE(sess->fec_outq_bytes))
+                 !atomic_read(&sess->fec_outq_queued) &&
+                 !atomic_read(&sess->fec_outq_bytes))
         {
             if (!tbt_tx_control_pinned(sess, NULL, c->index, TBT_F_PAD, 0, 0, NULL, 0,
                                        false, GFP_ATOMIC))

@@ -75,9 +75,11 @@ static void tbt_fec_shape_wire_norm(struct tbt_fec_shape *sh)
  * sets tx_paused only when the ring cannot take the next chunk. 256 KiB
  * paused capture every 32 packets while the credit window allowed 1024, so
  * the pump had to resume capture repeatedly. Size the ring from the credit
- * window, with the old 256 KiB floor and a 1 MiB ceiling. */
+ * window, with the old 256 KiB floor and a 16 MiB ceiling. The ceiling is
+ * allocated by tbt_fec_vzalloc() (vzalloc/kvzalloc), never a high-order
+ * kzalloc. */
 #define TBT_FEC_TX_RING (256 * 1024)
-#define TBT_FEC_TX_RING_MAX (1024 * 1024)
+#define TBT_FEC_TX_RING_MAX (16u * 1024 * 1024)
 
 /* tx->run / rx->run ownership bits. The sched bit in the session owns the
  * reference; this word owns the shared buffers and cursors. A work entry that
@@ -131,6 +133,21 @@ static void tbt_fec_shape_wire_norm(struct tbt_fec_shape *sh)
 /* No carrier TCP is left to deliver a share: a retransmit count at the
  * default tcp_retries2 (15) is the point where TCP itself gives up. */
 #define TBT_FEC_TCP_RETX_MAX 15
+
+/* The credit cap in DATA packets for this session's shape. A SC-LDPC parent
+ * runs the eight-round window: TBT_FEC_WINDOW_DOWN for the 1x256 downlink
+ * and TBT_FEC_WINDOW_UP for the 8x32 uplink. TBT_FEC_S is the wire slot, so
+ * the packet cap is the window divided by it; the RLNC path keeps the flat
+ * TBT_FEC_CREDIT_MAX. Both places that grant or apply credit call this, so
+ * the sender and the receiver agree on the same window. */
+static u32 tbt_fec_credit_max_packets(const struct tbt_session *sess)
+{
+    if (!sess->fec_sclc)
+        return TBT_FEC_CREDIT_MAX;
+    if (sess->fec_sclc_shape.variant == TBT_FEC_SCLC_UP)
+        return TBT_FEC_WINDOW_UP / TBT_FEC_S;
+    return TBT_FEC_WINDOW_DOWN / TBT_FEC_S;
+}
 
 /* Raise an atomic maximum without losing a concurrent larger sample. */
 static void tbt_fec_stat_max(atomic64_t *max, u64 v)
@@ -2239,7 +2256,7 @@ static void tbt_fec_tx_swap(struct tbt_session *sess, struct tbt_fec_tx *tx)
     }
     rk = tx->replay ? tbt_fec_replay_k(tx->replay) : sess->fec_replay_k;
     tx->credit_cap = tbt_fec_credit_packets(tx->groups, tx->n, rk, 0,
-                                            TBT_FEC_CREDIT_MAX);
+                                            tbt_fec_credit_max_packets(sess));
     tx->credit = tx->credit_cap;
     spin_lock_bh(&tx->replay_lock);
     tbt_fec_replay_reset(tx->replay);
@@ -2963,13 +2980,14 @@ static void tbt_fec_ack(struct tbt_session *sess, struct tbt_fec_flow *f,
     /* The credit is K_eff-2 super-blocks: the ring holds K, and two are
      * slack so a block the receiver can still NACK is never evicted. The
      * receiver's arena `slots` is the other bound (a sender inside the
-     * credit cannot overrun it), and TBT_FEC_CREDIT_MAX caps the packets
-     * (8 MiB at S=8192). The sender applies the same cap. */
+     * credit cannot overrun it), and the parent window caps the packets
+     * (8 MiB downlink, 4 MiB uplink). The sender applies the same cap. */
     {
         struct tbt_fec_rx *rx = f->rx;
 
         a.credit_packets = tbt_fec_credit_packets(
-            rx->groups, rx->n, rx->replay_k, rx->slots, TBT_FEC_CREDIT_MAX);
+            rx->groups, rx->n, rx->replay_k, rx->slots,
+            tbt_fec_credit_max_packets(sess));
         /* The peer uses this as the replay round trip: a share asked again
          * before it can arrive would only duplicate the repair. The sample
          * is the NACK scan's carrier RTT gauge, 0 before the first one. */
@@ -7109,7 +7127,7 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     }
     tx->credit_cap = tbt_fec_credit_packets(groups, n, sess->fec_replay_k,
                                             sess->fec_slots,
-                                            TBT_FEC_CREDIT_MAX);
+                                            tbt_fec_credit_max_packets(sess));
     tx->credit = tx->credit_cap;
     {
         u64 want = (u64)tx->credit * TBT_FEC_S;

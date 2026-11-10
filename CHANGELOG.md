@@ -8,7 +8,8 @@ and moves independently of the module version.
 0.7.0 removes the 0.6.0 kernel stream multiplexer and the shared FEC plane
 that carried it. One session carries one FEC flow again, and the DATA/PARITY
 payload is the application byte stream itself. Carrier transport is now
-BBR-owned and carrier-count independent.
+BBR-owned and carrier-count independent, and the parent stream and its FEC
+window are sized for the whole tunnel.
 
 ### Removed
 
@@ -47,6 +48,18 @@ BBR-owned and carrier-count independent.
   carrier without room for `TBT_SKIP_MS` (20 ms) is marked slow and tried
   last; room again clears the mark. The receiver is unchanged: it places a
   share by its header, not by arrival order.
+- The parent stream socket (public accept and far target) asks for an 8 MiB
+  `SO_SNDBUF`/`SO_RCVBUF` through `SO_SNDBUFFORCE`/`SO_RCVBUFFORCE`, so the
+  kernel holds 16 MiB per direction; the near listener reserves the same
+  buffer before the handshake, and an unprivileged context falls back to the
+  capped `SO_*BUF`. The parent receive pause mark rises from 2 to 8 MiB.
+- The parent FEC window is eight rounds: 8 MiB downlink (eight 1 MiB blocks)
+  and 4 MiB uplink, not 256 carriers x 1 MiB. `TBT_FEC_CREDIT_MAX` stays at
+  1024 packets (8 MiB at S=8192) downlink; the uplink credit is capped at
+  512 packets in the same byte unit.
+- `TBT_FEC_TX_RING_MAX` rises from 1 to 16 MiB. The ring is allocated with
+  `tbt_fec_vzalloc()` (`vzalloc`/`kvzalloc`) and released with `kvfree`, so
+  the ceiling never asks for a high-order page.
 - Carrier transport is BBR-owned and carrier-count independent. Every
   carrier socket gets a direct `sk_sndbuf`/`sk_rcvbuf` floor of 838,861 B
   (0.8 MiB) with `SOCK_SNDBUF_LOCK`/`SOCK_RCVBUF_LOCK` cleared, so TCP
@@ -67,7 +80,6 @@ BBR-owned and carrier-count independent.
 - `host/test_carrier_policy` asserts the 0.8 MiB floor, the cleared buffer
   userlocks and the BBR request path (including `-ENOENT` tolerance);
   `host/test_hold` follows the snapshot-free hold state machine.
-
 ## [0.6.0] - 2026-11-09
 
 0.6.0 is the merge cut. Two parallel 0.5.0 lines had each taken the same

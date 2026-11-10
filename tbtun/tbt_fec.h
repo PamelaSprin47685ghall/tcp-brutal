@@ -555,9 +555,17 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
  * effective K. */
 #define TBT_FEC_REPLAY_K_MAX 64
 #define TBT_FEC_REPLAY_BUDGET (15u * 1024 * 1024)
-/* The ACK grants at most this many DATA packets of FEC credit. The credit
- * bounds the sender's in-flight data; the ring bounds the repair storage,
- * and both are constant-size for a given shape. */
+/* The parent FEC window is eight rounds, not 256 carriers x 1 MiB. The
+ * downlink 1x256 block is 1 MiB, so 8 MiB is eight rounds; the uplink 8x32
+ * block is smaller and its return window is 4 MiB. tbt_fec_credit_packets()
+ * converts the window to DATA packets; neither window multiplies again by
+ * the carrier count. */
+#define TBT_FEC_WINDOW_DOWN (8u * 1024 * 1024)
+#define TBT_FEC_WINDOW_UP (4u * 1024 * 1024)
+/* The RLNC ACK grants at most this many DATA packets of FEC credit, and the
+ * SC-LDPC downlink window (TBT_FEC_WINDOW_DOWN / TBT_FEC_S) resolves to the
+ * same number. The credit bounds the sender's in-flight data; the ring
+ * bounds the repair storage, and both are constant-size for a given shape. */
 #define TBT_FEC_CREDIT_MAX 1024u
 
 struct tbt_fec_replay;

@@ -569,6 +569,27 @@ static void tbt_kill_work(struct work_struct *w)
         tbt_stream_put(st);
 }
 
+/* The parent stream carries the application's bytes: the near accepted
+ * socket and the far target socket both use it. The kernel doubles
+ * SO_*BUF, so 8 MiB here is a 16 MiB buffer per direction. FORCE ignores
+ * rmem_max/wmem_max; when the caller lacks the capability the capped
+ * option is the fallback, never a failed attach. */
+void tbt_parent_setsockbuf(struct socket *s)
+{
+    int v = 8 * 1024 * 1024;
+
+    if (!s)
+        return;
+    if (sock_setsockopt(s, SOL_SOCKET, SO_SNDBUFFORCE, KERNEL_SOCKPTR(&v),
+                        sizeof(v)))
+        sock_setsockopt(s, SOL_SOCKET, SO_SNDBUF, KERNEL_SOCKPTR(&v),
+                        sizeof(v));
+    if (sock_setsockopt(s, SOL_SOCKET, SO_RCVBUFFORCE, KERNEL_SOCKPTR(&v),
+                        sizeof(v)))
+        sock_setsockopt(s, SOL_SOCKET, SO_RCVBUF, KERNEL_SOCKPTR(&v),
+                        sizeof(v));
+}
+
 void tbt_sock_attach(struct tbt_stream *st)
 {
     struct sock *sk = st->sk;
@@ -580,18 +601,10 @@ void tbt_sock_attach(struct tbt_stream *st)
     if (test_and_set_bit(TBT_STREAM_F_ATTACHED, &st->attached))
         return;
 
-    /* The output socket's buffer is the app's/target's window into the
-     * tunnel; 1 MiB keeps a shaped or slow reader from stalling on the
-     * default 16 KiB before TCP's own window takes over. */
+    /* The output socket is the parent stream's window into the tunnel; the
+     * shared setter gives it the 16 MiB buffer the listener reserved. */
     if (sk->sk_socket)
-    {
-        int v = 1024 * 1024;
-
-        sock_setsockopt(sk->sk_socket, SOL_SOCKET, SO_SNDBUF,
-                        KERNEL_SOCKPTR(&v), sizeof(v));
-        sock_setsockopt(sk->sk_socket, SOL_SOCKET, SO_RCVBUF,
-                        KERNEL_SOCKPTR(&v), sizeof(v));
-    }
+        tbt_parent_setsockbuf(sk->sk_socket);
     write_lock_bh(&sk->sk_callback_lock);
     sk->sk_user_data = st;
     sk->sk_data_ready = tbt_pub_ready;

@@ -157,9 +157,14 @@ static int tbt_listener_start(struct tbt_listener *l, u8 slot, u16 port)
      * connection's window scale and window_clamp from this socket's receive
      * buffer. Sizing only the accepted socket afterwards leaves the receive
      * window at 64 KiB (measured: SO_RCVBUF 4 MiB set after accept still
-     * advertises rcv_wnd 65483), below a 218 ms BDP. Both roles get the same
-     * 0.8 MiB floor; the stream layer sizes application sockets itself. */
-    tbt_car_setsockbuf(s);
+     * advertises rcv_wnd 65483), below a 218 ms BDP. A near listener accepts
+     * the parent application connections, so it reserves the parent buffer
+     * (8 MiB, doubled to 16 MiB); a far listener accepts carriers and gets
+     * one carrier's 0.8 MiB floor. */
+    if (t->cfg.role == TBT_ROLE_NEAR)
+        tbt_parent_setsockbuf(s);
+    else
+        tbt_car_setsockbuf(s);
 
     err = kernel_bind(s, (tbt_sockaddr *)&addr, sizeof(addr));
     if (err)
