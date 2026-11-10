@@ -863,7 +863,7 @@ struct tbt_fec_tx
     /* Bound data records this flow still has on the carrier queues. The FIN
      * gate reads it instead of the session-wide count, so one stream's
      * backlog cannot hold another stream's close. */
-    u32 queued;
+    atomic_t queued;
     /* This flow is closing: its replay admission uses the close budget. */
     bool closing;
     u64 cur_block; /* block being built, shared by every group */

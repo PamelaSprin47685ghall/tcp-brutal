@@ -352,8 +352,8 @@ static void tbt_fec_out_free(struct tbt_session *sess, struct tbt_fec_out *o)
         atomic_dec(&sess->fec_outq_queued);
         atomic_sub(o->len, &sess->fec_outq_bytes);
     }
-    if (o->owner && o->owner->queued)
-        o->owner->queued--;
+    if (o->owner && atomic_read(&o->owner->queued))
+        atomic_dec(&o->owner->queued);
     tbt_fec_out_put(o);
 }
 
@@ -432,7 +432,7 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
     if (!o)
         return -ENOMEM;
     refcount_set(&o->refs, 1); /* the queue reference */
-    o->queued = false;
+    __atomic_store_n(&o->queued, false, __ATOMIC_RELAXED);
     o->flow = flow;
     if (flow && !refcount_inc_not_zero(&flow->refs))
     {
@@ -544,23 +544,30 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
                 sess->fec_fifo_tail;
         o->owner = owner;
         if (owner)
-            owner->queued++;
+            atomic_inc(&owner->queued);
+        /* Publish queued and the counters before the FIFO release-store:
+         * the lockless drain may pop the record immediately. */
+        __atomic_store_n(&o->queued, true, __ATOMIC_RELEASE);
+        atomic_inc(&sess->fec_outq_queued);
+        atomic_add(len, &sess->fec_outq_bytes);
         if (!tbt_fec_out_fifo_push(sess, o))
         {
+            __atomic_store_n(&o->queued, false, __ATOMIC_RELAXED);
+            atomic_dec(&sess->fec_outq_queued);
+            atomic_sub(len, &sess->fec_outq_bytes);
             if (owner)
-                owner->queued--;
+                atomic_dec(&owner->queued);
             spin_unlock(&sess->fec_out_lock);
             tbt_fec_out_put(o);
             atomic64_inc(&sess->fec_outq_drop);
             return -ENOSPC;
         }
-        atomic_inc(&sess->fec_outq_queued);
-        atomic_add(len, &sess->fec_outq_bytes);
         depth = (u32)atomic_read(&sess->fec_outq_queued);
         if (depth > sess->fec_outq_depth_max)
             sess->fec_outq_depth_max = depth;
     }
-    o->queued = true;
+    if (control || replay)
+        __atomic_store_n(&o->queued, true, __ATOMIC_RELEASE);
     spin_unlock(&sess->fec_out_lock);
     if (!control && !replay)
     {
@@ -1947,7 +1954,7 @@ static bool tbt_fec_tx_is_idle(struct tbt_session *sess,
                !READ_ONCE(tx->flush_req);
     spin_unlock(&tx->lock);
     spin_lock(&sess->fec_out_lock);
-    queued = tx->queued;
+    queued = (u32)atomic_read(&tx->queued);
     spin_unlock(&sess->fec_out_lock);
     /* Only new DATA orders the FIN. Replay records are duplicates of shares
      * already sent once and control records carry no stream bytes, so an
