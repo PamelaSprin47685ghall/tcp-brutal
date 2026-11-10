@@ -6410,7 +6410,18 @@ static void tbt_fec_rx_late_credit(struct tbt_fec_rx *rx, u8 type,
             spin_unlock_bh(&rx->lock);
         return;
     }
-    rec = tbt_fec_rx_late_get(rx, block_id);
+    rec = tbt_fec_rx_late_find(rx, block_id);
+    if (!rec && block_id < READ_ONCE(rx->next_super))
+    {
+        /* The block was already folded without a counted miss (or its
+         * record was evicted); there is nothing to settle. */
+        atomic64_inc(&rx->flow->sess->fec_late_unknown);
+        if (!locked)
+            spin_unlock_bh(&rx->lock);
+        return;
+    }
+    if (!rec)
+        rec = tbt_fec_rx_late_get(rx, block_id);
     bit = (u16)(group * (n + m) + share);
     duplicate = tbt_fec_adapt_bitmap_test(rec->pending, bit) ||
                 tbt_fec_adapt_bitmap_test(rec->settled, bit);
