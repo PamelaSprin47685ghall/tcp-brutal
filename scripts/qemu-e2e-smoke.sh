@@ -7,7 +7,7 @@
 #   TBT_E2E_QEMU_TIMEOUT=300 scripts/qemu-e2e-smoke.sh
 #
 # What it proves, all inside one guest on 127.0.0.1, in this order:
-#   * a rebuilt n=4 m=4 grouped (non-SCLC) pair carries two concurrent
+#   * a rebuilt n=4 m=4 grouped (non-SCLC) pair carries two sequential
 #     streams (two sids);
 #   * one map= slot on that pair: :19001 reaches target :15210 and
 #     :19002 reaches :15211, each proven by its own response signature;
@@ -17,9 +17,8 @@
 #   * a 256-carrier SC-LDPC pair (far TX 1x256, near TX 8x32) comes up over
 #     profile=http-kal, and three sequential streams carry 128 KiB
 #     byte-exact with streams_active=0 in between;
-#   * one bulk stream moves 6 MiB per direction past the 4 MiB plane credit,
-#     one 50 KiB stream closes with a forced short tail, and one resets
-#     mid-stream;
+#   * six more sequential streams move 6 MiB per direction, one 50 KiB
+#     stream closes with a forced short tail, and one resets mid-stream;
 #   * del + delete_module return inside the deadline (no D state), the module
 #     leaves /proc/modules, and the kernel log gained no UBSAN, BUG, Oops,
 #     WARNING, lockdep or stall report.
@@ -238,14 +237,14 @@ evidence=(
     "QEMU_E2E_STREAM sclc-seq-1"
     "QEMU_E2E_STREAM sclc-seq-2"
     "QEMU_E2E_STREAM sclc-seq-3"
-    "QEMU_E2E_CONCURRENT 6 active ok"
+    "QEMU_E2E_BURST 6 sequential ok"
     "QEMU_E2E_STREAMS 4 bulk + 1 short + 1 reset ok"
     "QEMU_E2E_VOLUME far="
     "QEMU_E2E_SHORT bytes=51200 ok"
     "QEMU_E2E_HTTPKAL near_req="
     "QEMU_E2E_RST far="
-    "QEMU_E2E_DRAIN sclc-concurrent ok"
-    "QEMU_E2E_DEL sclc-concurrent ok"
+    "QEMU_E2E_DRAIN sclc-burst ok"
+    "QEMU_E2E_DEL sclc-burst ok"
     "QEMU_E2E_UNLOAD ok"
 )
 

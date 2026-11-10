@@ -2142,15 +2142,10 @@ struct tbt_fec_flow *tbt_fec_flow_admit_mask(struct tbt_session *sess,
                                              u64 sid,
                                              const u8 mask[TBT_FEC_BITMAP_BYTES]);
 struct tbt_fec_flow *tbt_fec_flow_lookup(struct tbt_session *sess, u64 sid);
-/* The shared SC-LDPC plane with one reference, or NULL. Used to validate an
- * echoed OPEN for a stream that is not the plane's original sid. */
-struct tbt_fec_flow *tbt_fec_flow_shared(struct tbt_session *sess);
 void tbt_fec_flow_put(struct tbt_fec_flow *f);
-/* Bind a stream to its flow (one reference moves to the stream) and release
- * it at detach. A nonzero return consumed the admission reference already. */
+/* Bind a stream to its flow and release it at detach. On success one
+ * reference moves to the stream; on failure it stays with the caller. */
 int tbt_fec_flow_attach(struct tbt_stream *st, struct tbt_fec_flow *f);
-/* Check that a flow found by lookup is still alive. -ESTALE means it died. */
-int tbt_fec_flow_claim_slot(struct tbt_session *sess, struct tbt_fec_flow *f);
 void tbt_fec_flow_abort(struct tbt_session *sess, struct tbt_fec_flow *f);
 void tbt_fec_flow_detach(struct tbt_stream *st);
 /* Whether any FEC flow can still be admitted (free groups exist). */

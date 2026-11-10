@@ -7579,13 +7579,6 @@ struct tbt_fec_flow *tbt_fec_flow_admit(struct tbt_session *sess, u64 sid,
     return f;
 }
 
-/* One stream per session: an echoed OPEN of a second stream has no plane. */
-struct tbt_fec_flow *tbt_fec_flow_shared(struct tbt_session *sess)
-{
-    (void)sess;
-    return NULL;
-}
-
 /* Drop this flow's control and replay records. DATA records stay in the
  * session FIFO: the drain work is their only consumer, and it drops one
  * whose flow is no longer live before writing it. Walking the FIFO here
@@ -7646,14 +7639,6 @@ void tbt_fec_flow_abort(struct tbt_session *sess, struct tbt_fec_flow *f)
     if (unlinked)
         tbt_fec_flow_put(f); /* table reference, only if we took it out */
     tbt_fec_flow_put(f); /* caller's admission reference */
-}
-
-/* A stream that found its flow by lookup must not attach to a dying plane. */
-int tbt_fec_flow_claim_slot(struct tbt_session *sess, struct tbt_fec_flow *f)
-{
-    if (!sess || !f)
-        return -EINVAL;
-    return READ_ONCE(f->state) == 1 ? 0 : -ESTALE;
 }
 
 int tbt_fec_flow_attach(struct tbt_stream *st, struct tbt_fec_flow *f)

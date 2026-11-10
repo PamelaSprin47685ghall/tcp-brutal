@@ -75,11 +75,27 @@ window are sized for the whole tunnel.
   longer looks like a stall.
 - Module version is `0.7.0`.
 
+### Fixed
+
+- A sequential SC-LDPC stream now completes its FEC INIT/CFG handshake.
+  Every carrier that receives the same OPEN resolves the one flow, but only
+  the carrier that creates the stream may attach it; a carrier that lost
+  that race now drops its reference instead of unlinking the plane the
+  winner is about to use. The removed shared-plane admission ledger made
+  abort the loser's duty, so the 0.7.0 second stream's flow was unlinked
+  before its INIT arrived: the peer dropped the INIT as an unknown sid, sent
+  no CFG ACK, and the stream stalled at 0 bytes. The mux remnants
+  `tbt_fec_flow_claim_slot()` and `tbt_fec_flow_shared()` are gone.
+
 ### Tests
 
 - `host/test_carrier_policy` asserts the 0.8 MiB floor, the cleared buffer
   userlocks and the BBR request path (including `-ENOENT` tolerance);
   `host/test_hold` follows the snapshot-free hold state machine.
+- `host/test_fec_switch` models the first flow's detach, the second OPEN's
+  stream-creation race and its INIT/CFG ACK: the losing carrier must keep
+  the winner's plane.
+
 ## [0.6.0] - 2026-11-09
 
 0.6.0 is the merge cut. Two parallel 0.5.0 lines had each taken the same

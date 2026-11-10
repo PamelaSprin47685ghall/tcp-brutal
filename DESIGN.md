@@ -309,6 +309,10 @@ overhead went with the subframe header.
 **Flow lifetime and locks.** One FEC flow belongs to one stream. The stream's
 open creates the flow and its delivery leg; the stream's close or reset tears
 both down, so no shared plane table, admission ledger or mux lock exists.
+Every carrier that receives the same OPEN resolves that flow, but exactly
+one creates the stream; the others drop their reference and never the plane,
+so the sender's FEC INIT still finds it and the receiver can install and
+acknowledge the shape.
 Only an explicit open creates a leg (a late record cannot exhaust the table).
 A kill shuts the stream's socket down in `w_kill`, never at the call site,
 because a kill can run inside a carrier RX actor that already holds another

@@ -303,6 +303,18 @@ static inline int tbt_fec_flow_create_code(bool sid_exists, bool sclc,
     return 0;
 }
 
+/* Every carrier that receives the same OPEN resolves it to one flow, but
+ * exactly one of them creates the stream. Only that carrier may move the
+ * flow reference into the stream. A carrier that did not create it drops
+ * its reference, even when it was the one that admitted the flow: the
+ * winner is about to attach that plane. Unlinking is reserved for an
+ * admission that found no stream at all, because nothing else can use it. */
+static inline bool tbt_fec_open_unlink_ok(bool created, bool admitted,
+                                          bool no_stream)
+{
+    return !created && no_stream && admitted;
+}
+
 /* A repeated OPEN must name the same bitmap the plane already bound. The
  * caller passes that bitmap (near: its own TX mask, far: the peer RX mask). */
 static inline bool tbt_fec_primary_mask_match(bool sclc,
