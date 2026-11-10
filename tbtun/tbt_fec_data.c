@@ -3249,12 +3249,19 @@ void tbt_fec_rx_shrink(struct tbt_fec_rx *rx, bool reset)
     total = (u32)rx->groups * rx->slots;
     keep = reset ? 2 : 0;
     spin_lock_bh(&rx->lock);
+    if (reset)
+        WRITE_ONCE(rx->stopping, true);
     if (reset && rx->blk)
     {
         for (i = 0; i < total; i++)
         {
             struct tbt_fec_blk *b = &rx->blk[i];
 
+            /* The decoder reads b->data/b->parity outside rx->lock. The
+             * block owns its plane until its own re-lock path clears
+             * decoding and frees it. */
+            if (b->decoding)
+                continue;
             if (!b->buf)
                 continue;
             *(u8 **)b->buf = free_list;
@@ -4918,6 +4925,20 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
 
     rc = tbt_fec_blk_decode(sess, f, group, b);
     spin_lock_bh(&rx->lock);
+    b->decoding = false;
+    if (READ_ONCE(rx->stopping) || !b->used)
+    {
+        u8 *stale = b->buf;
+
+        b->buf = NULL;
+        b->data = NULL;
+        b->parity = NULL;
+        b->used = false;
+        b->ready = false;
+        spin_unlock_bh(&rx->lock);
+        kvfree(stale);
+        return false;
+    }
     if (rc == 0)
     {
         bool commit_block_code = tbt_fec_grouped_mode(rx->codec) == 3;
@@ -7060,6 +7081,14 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
     b = &rx->blk[slot];
     if (!b->used || b->block_id != h.block_id)
     {
+        /* A block being decoded owns its plane outside rx->lock; a new
+         * block must not reset that slot under the decoder. */
+        if (b->decoding)
+        {
+            atomic64_inc(&sess->fec_rx_nobuf);
+            spin_unlock_bh(&rx->lock);
+            return 0;
+        }
         /* An empty-block marker stores no bytes; it needs no buffer. */
         bool needs_buf = !(h.type == TBT_FEC_PARITY && h.win_len == 0);
 

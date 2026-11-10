@@ -20,6 +20,13 @@ and moves independently of the module version.
   (3.07 MB/s). `tbt_car_sockbuf_of()` now returns 838,861 B for every
   subflow, and `tbt_car_setsockbuf()` clears both locks.
 
+- A stream reset no longer frees an RX block plane while the decoder reads it.
+  `tbt_fec_rx_shrink()` skips `b->decoding` blocks; `tbt_fec_rx_decode_one()`
+  clears `decoding` under the lock after the decode and frees its own plane
+  when `rx->stopping` or `!b->used`; slot placement refuses a decoding slot.
+  The TX replay shrink was already under `tx->replay_lock` for every
+  `blk_rec` access.
+
 ### Changed
 
 - The ChaCha8 bulk path uses four-block interleaved SSE2 on x86_64, entered
