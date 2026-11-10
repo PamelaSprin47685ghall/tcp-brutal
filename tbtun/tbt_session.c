@@ -1214,14 +1214,9 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
         if (near)
         {
             /* The far side echoes the near's own bitmap. Never admit a flow
-             * here: the near is the only allocator. */
+             * here: the near is the only allocator, so a missing flow is a
+             * late OPEN, not a new stream. */
             flow = tbt_fec_flow_lookup(sess, sid);
-            if (!flow && sess->fec_sclc)
-            {
-                /* A second stream's echoed OPEN names its own sid, while the
-                 * single SC-LDPC plane is keyed by the first stream's sid. */
-                flow = tbt_fec_flow_shared(sess);
-            }
             if (!flow)
             {
                 atomic64_inc(&sess->bind_drop_no_stream);
@@ -1284,71 +1279,6 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
         bool created = false;
         struct tbt_stream *ast;
 
-        /* Every carrier that intends to adopt the stream owns one admission
-         * slot until it learns whether it won the creation. Claim a lookup
-         * flow's slot here, before get_created: otherwise the carrier that
-         * admitted the flow can abort the last remaining slot and unlink the
-         * plane while this winner is still between lookup and attach. A
-         * non-SC-LDPC flow belongs to one stream, so its lookup reference
-         * is not an admission and must stay a plain put. */
-        if (flow && !flow_admitted && sess->fec_sclc)
-        {
-            if (tbt_fec_flow_claim_slot(sess, flow))
-            {
-                /* The admitting carrier aborted the last other slot and
-                 * unlinked the plane just before this claim. Re-resolve
-                 * once: the dead flow is gone from the table, so a fresh
-                 * admission (or another carrier's fresh flow) is the normal
-                 * path. Only a second failure, against a plane that is also
-                 * dying, drops the OPEN. */
-                tbt_fec_flow_put(flow);
-                flow = tbt_session_open_flow(sess, sid, body,
-                                             &flow_admitted);
-                if (IS_ERR(flow))
-                {
-                    int rerr = PTR_ERR(flow);
-
-                    /* A malformed or overlapping bitmap is a framing error,
-                     * exactly as on the first admission. */
-                    if (rerr == -EPROTO)
-                        return TBT_BIND_BAD;
-                    atomic64_inc(&sess->fec_stream_refused);
-                    return TBT_BIND_DROP;
-                }
-                if (!flow)
-                {
-                    atomic64_inc(&sess->bind_drop_no_stream);
-                    return TBT_BIND_DROP;
-                }
-                {
-                    /* Re-run the one-sid-one-bitmap rule: the retry may
-                     * have built a fresh plane. */
-                    const u8 *bound = (sess->fec_sclc && flow->rx)
-                                          ? flow->rx->group_mask
-                                          : flow->group_mask;
-
-                    if (!near &&
-                        !tbt_fec_primary_mask_match(sess->fec_sclc, bound,
-                                                    body))
-                    {
-                        if (flow_admitted)
-                            tbt_fec_flow_abort(sess, flow);
-                        else
-                            tbt_fec_flow_put(flow);
-                        atomic64_inc(&sess->bind_drop_no_stream);
-                        return TBT_BIND_DROP;
-                    }
-                }
-                if (!flow_admitted &&
-                    tbt_fec_flow_claim_slot(sess, flow))
-                {
-                    tbt_fec_flow_put(flow);
-                    atomic64_inc(&sess->bind_drop_no_stream);
-                    return TBT_BIND_DROP;
-                }
-            }
-            flow_admitted = true; /* now owns a pending slot */
-        }
         ast = tbt_stream_get_created(sess, sid, true, false, &created);
 
         if (!ast)
@@ -1359,7 +1289,7 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
             spin_unlock(&sess->lock);
             if (flow)
             {
-                if (flow_admitted)
+                if (tbt_fec_open_unlink_ok(created, flow_admitted, true))
                     tbt_fec_flow_abort(sess, flow);
                 else
                     tbt_fec_flow_put(flow);
@@ -1369,33 +1299,29 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
         /* 256 carriers deliver the same OPEN. tbt_stream_get_created()
          * double-checks under sess->lock, so exactly one caller sees
          * created=true; only that caller attaches the flow and may
-         * announce/target the stream. The others hold the same object, put
-         * their flow reference and just put their stream reference. */
+         * announce/target the stream. The others hold the same object and
+         * drop their references: DROP the flow, never unlink it, because
+         * the winner is about to attach that plane. */
         if (created)
         {
-            if (flow)
-            if (flow)
+            if (flow && tbt_fec_flow_attach(ast, flow)) /* moves the ref */
             {
-                if (tbt_fec_flow_attach(ast, flow)) /* moves the reference */
-                {
-                    /* The shared mux could not take another leg; the OPEN
-                     * cannot be served, so drop it instead of leaving a
-                     * stream with no data plane. */
-                    tbt_stream_kill(ast, TBT_ST_DEAD);
-                    tbt_stream_put(ast);
-                    return TBT_BIND_DROP;
-                }
+                /* The plane could not join the stream; the OPEN cannot be
+                 * served, so drop it instead of leaving a stream with no
+                 * data plane. Attach did not consume the reference. */
+                tbt_fec_flow_put(flow);
+                tbt_stream_kill(ast, TBT_ST_DEAD);
+                tbt_stream_put(ast);
+                return TBT_BIND_DROP;
             }
             tbt_far_open_seen(ast, route_slot, target_port);
         }
         else if (flow)
         {
-            /* created=false proves another OPEN copy created the stream. On
-             * the shared SC-LDPC plane abort() also returns this carrier's
-             * admission slot. A grouped flow belongs to the winner's single
-             * stream: use a plain put, because abort() would unlink the flow
-             * that stream is about to attach. */
-            if (sess->fec_sclc)
+            /* created=false proves another OPEN copy created the stream.
+             * That copy owns this plane; unlinking it here is what stalled
+             * the second sequential stream (the INIT then found no flow). */
+            if (tbt_fec_open_unlink_ok(created, flow_admitted, false))
                 tbt_fec_flow_abort(sess, flow);
             else
                 tbt_fec_flow_put(flow);

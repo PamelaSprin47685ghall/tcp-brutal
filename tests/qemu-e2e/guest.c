@@ -19,10 +19,10 @@
  *      (8 groups of 32 shares) carries one byte-exact roundtrip through the
  *      production TBT_SCLC_MAP_BITPLANE64 encoder and decoder.
  *   4. SC-LDPC single-stream over profile=http-kal: the 1x256 downlink /
- *      8x32 uplink pair carries sequential streams. One bulk stream moves
- *      6 MiB per direction past the 4 MiB plane credit, one 50 KiB stream
- *      closes with a forced short tail, and one resets mid-stream; the RST
- *      must cross the plane on both ends.
+ *      8x32 uplink pair carries sequential streams. Four 1.5 MiB bulk legs
+ *      follow, then one 50 KiB stream that closes with a forced short tail,
+ *      and one that resets mid-stream; the RST must cross the plane on both
+ *      ends. One flow per session means each leg releases its flow first.
  *   5. del both tunnels and delete_module.  The unload must return within the
  *      deadline (no D-state hang), and the kernel log must hold no UBSAN,
  *      BUG, Oops, WARNING, lockdep or stall report.
@@ -73,14 +73,14 @@
 #define PORTBLOCK "30000-30511"
 #define STREAM_BYTES (128u * 1024u)
 #define CHUNK 32768u
-/* Four bulk streams carry 6 MiB per direction, past the 4 MiB plane credit;
+/* The burst carries 6 MiB per direction across four 1.5 MiB bulk streams;
  * one 50 KiB stream exercises the sub-window FIN tail; one stream resets
- * mid-flight. */
+ * mid-flight. 0.7.0 runs them one flow at a time. */
 #define BULK_STREAMS 4
 #define BULK_BYTES (1536u * 1024u)
 #define SHORT_BYTES (50u * 1024u)
 #define ABORT_BYTES (64u * 1024u)
-#define CONCURRENCY (BULK_STREAMS + 2)
+#define BURST_STREAMS (BULK_STREAMS + 2)
 #define ABORT_AFTER_MS 200
 #define WATCHDOG_S 240
 #define UP_TIMEOUT_MS 15000
@@ -503,10 +503,9 @@ static int recv_all(int fd, unsigned char *buf, size_t len, int timeout_ms)
 static unsigned char chunk_send[CHUNK];
 static unsigned char chunk_recv[CHUNK];
 
-/* One gate per concurrent child. The parent opens them only after both ends
- * report all six legs active, so the data and the mid-stream reset provably
- * overlap instead of racing the admission. */
-static int stream_gate[CONCURRENCY][2];
+/* One gate per burst child: the parent opens a gate only after the child has
+ * connected, so each child's roundtrip starts at a known point. */
+static int stream_gate[BURST_STREAMS][2];
 
 static void gate_wait(int idx)
 {
@@ -951,26 +950,6 @@ static void check_shape(void)
     fflush(stdout);
 }
 
-/* Both ends must show `want` legs attached to the session at once. */
-static int wait_active_both(unsigned int want, int timeout_ms)
-{
-    long long deadline = now_ms() + timeout_ms;
-    struct stream_state a = { 0, 0, 0 }, b = { 0, 0, 0 };
-
-    while (now_ms() < deadline)
-    {
-        int ra = tunnel_streams(1, &a);
-        int rb = tunnel_streams(2, &b);
-
-        if (!ra && !rb && a.active >= want && b.active >= want)
-            return 0;
-        msleep(50);
-    }
-    printf("QEMU_E2E_STATE concurrent far active=%u near active=%u want=%u\n",
-           a.active, b.active, want);
-    return -1;
-}
-
 /* Bytes the tunnel has handed to its streams, from the rx_ready_calls line. */
 static int delivered_bytes(unsigned int id, unsigned long long *out)
 {
@@ -989,7 +968,7 @@ static int delivered_bytes(unsigned int id, unsigned long long *out)
     return -1;
 }
 
-static void concurrent_child(int idx, uint32_t seed, size_t bytes)
+static void burst_child(int idx, uint32_t seed, size_t bytes)
 {
     char why[256] = "";
     int fd;
@@ -998,14 +977,13 @@ static void concurrent_child(int idx, uint32_t seed, size_t bytes)
     fd = connect_client();
     if (fd < 0)
     {
-        printf("QEMU_E2E_NOTE concurrent%d connect: %s\n", idx,
-               strerror(errno));
+        printf("QEMU_E2E_NOTE burst%d connect: %s\n", idx, strerror(errno));
         _exit(1);
     }
     gate_wait(idx);
     if (roundtrip(fd, bytes, seed, why, sizeof(why)))
     {
-        printf("QEMU_E2E_NOTE concurrent%d: %s\n", idx, why);
+        printf("QEMU_E2E_NOTE burst%d: %s\n", idx, why);
         _exit(1);
     }
     close_stream(fd);
@@ -1246,7 +1224,7 @@ int main(void)
     delete_tunnel(1);
     delete_tunnel(2);
     if (wait_tunnels_gone(6000))
-        verdict_fail("tunnels did not go away before the concurrent phase");
+        verdict_fail("tunnels did not go away before the burst phase");
     printf("QEMU_E2E_DEL uplink ok\n");
     fflush(stdout);
 
@@ -1276,13 +1254,14 @@ int main(void)
         fflush(stdout);
     }
 
-    /* --- phase 4 (burst): six streams, a 50 KiB tail and a reset -------- *
-     * The bulk total is 4 x 1.5 MiB = 6 MiB per direction, past the 4 MiB
-     * plane credit. The short stream is shorter than one window, so only the
-     * forced short tail at FIN can close its sender gate. */
+    /* --- phase 4 (burst): six sequential streams ----------------------- *
+     * 0.7.0 carries one flow per session, so the four bulk legs, the 50 KiB
+     * tail and the reset run one after another, each waiting for its flow
+     * to be released. The bulk total is 4 x 1.5 MiB = 6 MiB per direction.
+     * The short stream is shorter than one window, so only the forced short
+     * tail at FIN can close its sender gate. */
     {
-        pid_t kids[CONCURRENCY];
-        uint32_t seeds[CONCURRENCY];
+        uint32_t seeds[BURST_STREAMS];
         unsigned long long far0 = 0, near0 = 0, far1 = 0, near1 = 0;
         unsigned long long http_req = 0;
         int failed = 0;
@@ -1290,60 +1269,49 @@ int main(void)
 
         if (delivered_bytes(1, &far0) || delivered_bytes(2, &near0))
             verdict_fail("delivered counters unreadable before the burst");
-        for (i = 0; i < CONCURRENCY; i++)
+        for (i = 0; i < BURST_STREAMS; i++)
             if (pipe(stream_gate[i]))
-                verdict_fail("concurrent: pipe: %s", strerror(errno));
-        for (i = 0; i < CONCURRENCY; i++)
+                verdict_fail("burst: pipe: %s", strerror(errno));
+        for (i = 0; i < BURST_STREAMS; i++)
         {
+            int status = 0;
+            pid_t kid;
+
             seeds[i] = 0x51ed0000u + (uint32_t)i * 0x9e3779b9u;
-            kids[i] = fork();
-            if (kids[i] < 0)
-                verdict_fail("concurrent: fork: %s", strerror(errno));
-            if (!kids[i])
+            kid = fork();
+            if (kid < 0)
+                verdict_fail("burst: fork: %s", strerror(errno));
+            if (!kid)
             {
                 if (!i)
                     abort_child(i, seeds[i], ABORT_BYTES);
                 else if (i <= BULK_STREAMS)
-                    concurrent_child(i, seeds[i], BULK_BYTES);
+                    burst_child(i, seeds[i], BULK_BYTES);
                 else
-                    concurrent_child(i, seeds[i], SHORT_BYTES);
+                    burst_child(i, seeds[i], SHORT_BYTES);
             }
-            msleep(20);
-        }
-        /* Every leg must stand on that one plane at the same moment.
-         * The children have not sent a byte yet, so no leg can finish early
-         * and shrink the window. */
-        if (wait_active_both(CONCURRENCY, 15000))
-            verdict_fail("expected %d concurrent streams on both ends",
-                         CONCURRENCY);
-        for (i = 0; i < CONCURRENCY; i++)
-        {
             if (write(stream_gate[i][1], "x", 1) != 1)
-                verdict_fail("concurrent: gate %d: %s", i,
-                             strerror(errno));
+                verdict_fail("burst: gate %d: %s", i, strerror(errno));
             close(stream_gate[i][1]);
-        }
-        printf("QEMU_E2E_CONCURRENT %d active ok\n", CONCURRENCY);
-        fflush(stdout);
-
-        for (i = 0; i < CONCURRENCY; i++)
-        {
-            int status = 0;
-
-            if (waitpid(kids[i], &status, 0) != kids[i] ||
+            if (waitpid(kid, &status, 0) != kid ||
                 !WIFEXITED(status) || WEXITSTATUS(status))
                 failed++;
+            /* The next stream may only open after this flow is gone. */
+            if (wait_idle(IDLE_TIMEOUT_MS))
+                verdict_fail("burst stream %d did not release its flow", i);
         }
         if (failed)
-            verdict_fail("%d of %d concurrent streams failed", failed,
-                         CONCURRENCY);
+            verdict_fail("%d of %d burst streams failed", failed,
+                         BURST_STREAMS);
+        printf("QEMU_E2E_BURST %d sequential ok\n", BURST_STREAMS);
+        fflush(stdout);
         printf("QEMU_E2E_STREAMS %d bulk + 1 short + 1 reset ok\n",
                BULK_STREAMS);
         fflush(stdout);
 
         /* Kernel-side volume, not the guest's own byte count: each direction
-         * must hand more than 5 MiB to its streams, which is only possible
-         * if the plane's ACK credit keeps moving past 4 MiB. */
+         * must hand more than 5 MiB to its streams across the six sequential
+         * flows. */
         if (delivered_bytes(1, &far1) || delivered_bytes(2, &near1))
             verdict_fail("delivered counters unreadable after the burst");
         if (far1 - far0 <= 5u * 1024u * 1024u ||
@@ -1378,9 +1346,8 @@ int main(void)
         fflush(stdout);
 
         if (wait_idle(IDLE_TIMEOUT_MS))
-            verdict_fail("SC-LDPC plane did not drain after the concurrent"
-                         " streams");
-        printf("QEMU_E2E_DRAIN sclc-concurrent ok\n");
+            verdict_fail("SC-LDPC plane did not drain after the burst");
+        printf("QEMU_E2E_DRAIN sclc-burst ok\n");
         fflush(stdout);
     }
 
@@ -1396,7 +1363,7 @@ int main(void)
         verdict_fail("tunnels did not go away after del");
     if (wait_idle(IDLE_TIMEOUT_MS))
         verdict_fail("streams still active before unload");
-    printf("QEMU_E2E_DEL sclc-concurrent ok\n");
+    printf("QEMU_E2E_DEL sclc-burst ok\n");
     fflush(stdout);
 
     unload_module();

@@ -11,6 +11,7 @@
  *   tbt_fec_blk_sid_match()     another stream's block never delivers;
  *   tbt_fec_rx_window_step()    the new stream rebases its reorder window;
  *   tbt_fec_flow_create_code()  one SC-LDPC flow, duplicates first.
+ *   tbt_fec_open_unlink_ok()    only a failed stream creation unlinks.
  *
  * The field failure these models pin is a switch under backpressure: the old
  * stream's data was still queued and its block still resident when the new
@@ -554,12 +555,92 @@ static void test_sclc_admission(void)
     ok(!tbt_fec_groups_fit(32, 0, 0), "groups: zero is never a fit");
 }
 
+/* ------------------------------------------------------------------ *
+ * 5. The second sequential stream's OPEN and INIT reach the winner's
+ *    plane.
+ * ------------------------------------------------------------------ */
+
+/* The receive-side lifecycle of tbt_session_bind_sid() and the INIT that
+ * follows it, reduced to the decisions a host build can link: the live flow
+ * table, the stream-creation race between OPEN copies, and the sid lookup
+ * the INIT uses. */
+struct seq_plane
+{
+    bool live;
+    u16 groups_used;
+    u64 sid;
+};
+
+static bool seq_flow_lookup(const struct seq_plane *p, u64 sid)
+{
+    return p->live && p->sid == sid;
+}
+
+static void test_sequential_init(void)
+{
+    struct seq_plane plane = { false, 0, 0 };
+    const u16 total = 1; /* far side: one local TX group */
+    const u64 sid1 = 0x51, sid2 = 0x52;
+    u8 fbk_flags = 0;
+    u32 fbk_epoch = 0;
+
+    /* The first stream admits the one flow and attaches it. */
+    ok_int(tbt_fec_flow_create_code(false, true, plane.live ? 1 : 0,
+                                    total, total), 0,
+           "seq init: the first OPEN admits a flow");
+    plane.live = true;
+    plane.groups_used = total;
+    plane.sid = sid1;
+    ok(seq_flow_lookup(&plane, sid1),
+       "seq init: the first INIT finds its flow");
+
+    /* Its close detaches the flow and returns its groups; the replacement
+     * is admitted only after that release. */
+    plane.live = false;
+    plane.groups_used = 0;
+    ok_int(tbt_fec_flow_create_code(false, true, plane.live ? 1 : 0,
+                                    total, total), 0,
+           "seq init: the second OPEN is admitted after detach");
+    plane.live = true;
+    plane.groups_used = total;
+    plane.sid = sid2;
+
+    /* Two carriers resolve that flow; one creates the stream, the other
+     * loses the race. The loser holds a lookup or admission reference, not
+     * the plane's ownership. Dropping it must not unlink the flow: if it
+     * did, the sender's INIT below would find no sid and never be acked
+     * (field: sclc-seq-2 stalled at 0/131072 while fec_drop_sid climbed). */
+    ok(!tbt_fec_open_unlink_ok(false, true, false),
+       "seq init: the carrier that lost stream creation keeps the plane");
+    ok(!tbt_fec_open_unlink_ok(false, false, false),
+       "seq init: a lookup reference is only dropped");
+    ok(!tbt_fec_open_unlink_ok(true, true, true),
+       "seq init: the stream creator never unlinks its plane");
+    ok(tbt_fec_open_unlink_ok(false, true, true),
+       "seq init: an admission with no stream is rolled back");
+
+    /* With the plane intact, the second INIT's sid lookup succeeds, so the
+     * RX applies the shape and the ACK names epoch 1: that ACK is what
+     * stops the sender's six retries. */
+    if (seq_flow_lookup(&plane, sid2))
+    {
+        fbk_flags |= TBT_FEC_FBK_F_CFG_ACK;
+        fbk_epoch = 1;
+    }
+    ok((fbk_flags & TBT_FEC_FBK_F_CFG_ACK) != 0,
+       "seq init: the second INIT has a flow and is acked");
+    ok_int((int)fbk_epoch, 1, "seq init: the ACK names epoch 1");
+    ok_int((int)plane.groups_used, (int)total,
+           "seq init: the replacement owns the one group");
+}
+
 int main(void)
 {
     test_flow_isolation();
     test_purge_vs_commit();
     test_rapid_reconnect();
     test_sclc_admission();
+    test_sequential_init();
 
     printf("test_fec_switch: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
