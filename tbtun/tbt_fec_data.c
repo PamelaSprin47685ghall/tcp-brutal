@@ -2889,35 +2889,21 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
         so.p_ewma_ppm = tx->peer_p_ppm;
         so.p_win_ppm = tx->peer_p_ppm;
         so.p_fast_ppm = tx->peer_p_fast_ppm;
-        so.r_fail_ppm = r_ppm;
-        so.r_valid = r_valid;
+        /* Residual failure is the peer's real codec failure, not the
+         * speculative NACK rate: a slow subflow can be NACKed one RTT
+         * before its parity decodes the block cleanly. */
+        so.r_fail_ppm = tx->peer_codec_fail_ppm;
+        so.r_valid = so.p_valid;
         so.codec_fail_ppm = tx->peer_codec_fail_ppm;
         so.sent_win = tx->peer_expected;
         so.miss_win = tx->peer_expected >= tx->peer_received
                           ? tx->peer_expected - tx->peer_received
                           : 0;
         so.supers_win = (tx->peer_flags & TBT_FEC_FBK_F_P_VALID) ? 8 : 0;
-        /* If the peer FBK path is not delivering, the sender's own NACK
-         * rate is still a live loss estimate. Use it instead of idling the
-         * control law forever at the initial 50% shape. */
-        {
-            bool r_ok = r_valid && tx->data_pkts_sent;
-
-            so.p_valid = (tx->peer_est_valid &&
-                          (tx->peer_flags & TBT_FEC_FBK_F_P_VALID) != 0) ||
-                         r_ok;
-            so.pause_idle =
-                (!tx->peer_est_valid && !r_ok) ||
-                (tx->peer_est_valid &&
-                 now - tx->peer_est_ns > 500000000ULL);
-            if (!tx->peer_est_valid && r_ok)
-            {
-                so.p_ppm = r_ppm;
-                so.p_ewma_ppm = r_ppm;
-                so.p_win_ppm = r_ppm;
-                so.p_fast_ppm = 0;
-            }
-        }
+        so.p_valid = tx->peer_est_valid &&
+                     (tx->peer_flags & TBT_FEC_FBK_F_P_VALID) != 0;
+        so.pause_idle = !tx->peer_est_valid ||
+                        now - tx->peer_est_ns > 500000000ULL;
         so.burst = so.p_fast_ppm && so.p_fast_ppm > so.p_ppm &&
                    so.p_fast_ppm > TBT_FEC_ADAPT_SCLC_BURST_PPM &&
                    so.p_fast_ppm >
@@ -2926,7 +2912,7 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
             pr_info_ratelimited("tbtun-diag: tx adapt tunnel=%llu p=%u fast=%u r=%u rv=%d flags=%#x valid=%d idle=%d cur=%u busy=%u sw=%u exp=%u recv=%u\n",
                                 (unsigned long long)sess->tunnel->cfg.id,
                                 so.p_ppm, so.p_fast_ppm, so.r_fail_ppm,
-                                r_valid, tx->peer_flags, so.p_valid,
+                                so.r_valid, tx->peer_flags, so.p_valid,
                                 so.pause_idle, tx->adapt_sclc->cur,
                                 tx->adapt_sclc->busy, tx->switch_state,
                                 so.sent_win, so.miss_win);
@@ -2936,10 +2922,19 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
         if (sws.switch_now)
         {
             struct tbt_fec_shape shape;
+            int nrc = tbt_fec_tx_sclc_next_shape(tx, &sws, &shape);
 
-            if (tbt_fec_tx_sclc_next_shape(tx, &sws, &shape))
+            if (debug)
+                pr_info_ratelimited("tbtun-diag: switch suggest from=%u to=%u n=%u m=%u epoch=%u reason=%u next=%d\n",
+                                    sws.from, sws.to, sws.shape.n,
+                                    sws.shape.m, sws.epoch, sws.reason, nrc);
+            if (!nrc)
             {
                 tbt_fec_tx_switch_begin_shape(sess, tx, &shape, sws.epoch);
+                if (debug)
+                    pr_info_ratelimited("tbtun-diag: switch begin n=%u m=%u state=%u\n",
+                                        shape.n, shape.m,
+                                        tx->switch_state);
                 if (tx->switch_state == TBT_FEC_SW_STEADY)
                     tbt_fec_adapt_sclc_ctl_abort(tx->adapt_sclc);
             }
@@ -2948,7 +2943,7 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
         }
         spin_lock(&sess->lock);
         sess->adapt.class = tx->adapt_sclc->cur;
-        sess->adapt.r_fail_ppm = r_ppm;
+        sess->adapt.r_fail_ppm = so.r_fail_ppm;
         if (tx->peer_est_valid)
         {
             sess->adapt.n = tx->n;
