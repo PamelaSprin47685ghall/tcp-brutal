@@ -106,8 +106,8 @@ and moves independently of the module version.
   stalled all 256 carriers and the next stream sat at 0 B until timeout.
 - The memory floor no longer blocks a new stream at 0 B. Below 180 MiB the
   packetizer first frees hot/ACKed planes but keeps every unacknowledged
-  block; it opens no new block while eight are unacked and waits 5 ms for the
-  ACK frontier, and pauses only below 80 MiB with two or more active blocks.
+  block; it opens no new block above the memory-tier max (64/32/16/8 at
+  512/220/160 MiB) and never above k-2, so replay `-ENOSPC` cannot occur.
   Evicting the frontier block would turn its NACK into -ESTALE and kill the
   stream after 30 s, so shrink never touches `block_start >= ack_floor`. A new stream is refused below
   64 MiB. RX and replay resets keep at most two hot planes and free the

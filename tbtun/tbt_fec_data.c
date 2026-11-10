@@ -955,17 +955,6 @@ static int tbt_fec_out_dispatch(struct tbt_session *sess,
             tbt_carrier_put(c);
             return -EAGAIN;
         }
-        {
-            u32 notsent = READ_ONCE(tcp_sk(sk)->write_seq) -
-                          READ_ONCE(tcp_sk(sk)->snd_nxt);
-
-            if (notsent > TBT_FEC_DISPATCH_FALLBACK_NOTSENT)
-            {
-                tbt_carrier_sk_put(sk);
-                tbt_carrier_put(c);
-                return -EAGAIN;
-            }
-        }
         tbt_carrier_sk_put(sk);
         tbt_fec_out_slow_note(c, true);
         err = tbt_carrier_send_fec(c, o->data, o->len);
@@ -2022,15 +2011,15 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
         hard = k > 2 ? k - 2 : 1;
         if (mem >= 512L * 1024L)
             max_unacked = 64;
-        else if (mem >= 240L * 1024L)
-            max_unacked = 20;
-        else if (mem >= TBT_FEC_MEM_PAUSE_KB)
-            max_unacked = 12;
+        else if (mem >= 220L * 1024L)
+            max_unacked = 32;
+        else if (mem >= 160L * 1024L)
+            max_unacked = 16;
         else
             max_unacked = 8;
         if (max_unacked > hard)
             max_unacked = hard;
-        if (mem < TBT_FEC_MEM_PAUSE_KB && tx->replay)
+        if (mem < 160L * 1024L && tx->replay)
             tbt_fec_replay_shrink(tx->replay, true, 0, &tx->replay_lock);
         if (unacked >= max_unacked && tx->fill == 0 &&
             !tbt_fec_tx_block_dirty(tx))
