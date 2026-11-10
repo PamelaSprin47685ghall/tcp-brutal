@@ -1429,6 +1429,13 @@ static void tbt_tx_purge_stream(struct tbt_session *sess, struct tbt_stream *st)
 
 void tbt_stream_kill(struct tbt_stream *st, u8 reason)
 {
+    /* One winner.  A read-then-write let two carriers both queue w_kill and
+     * leak one reference. */
+    if (test_and_set_bit(TBT_STREAM_F_DYING, &st->attached))
+        return;
+    /* Print only the winner. A reset is broadcast once per carrier, so the
+     * losing calls arrive 255 times for one stream; printing before the
+     * winner gate turned one application close into a 256-line burst. */
     pr_info_ratelimited("tbtun: stream_kill sid=%llu reason=%u state=%u rx_seen=%d rx_done=%d rx_next=%llu rx_fin_seq=%llu tx_fin_written=%d tx_ack=%llu tx_seq=%llu\n",
                         (unsigned long long)st->sid, reason,
                         READ_ONCE(st->state),
@@ -1439,10 +1446,6 @@ void tbt_stream_kill(struct tbt_stream *st, u8 reason)
                         READ_ONCE(st->tx_fin_written) ? 1 : 0,
                         (unsigned long long)READ_ONCE(st->tx_ack),
                         (unsigned long long)READ_ONCE(st->tx_seq));
-    /* One winner.  A read-then-write let two carriers both queue w_kill and
-     * leak one reference. */
-    if (test_and_set_bit(TBT_STREAM_F_DYING, &st->attached))
-        return;
     st->kill_reason = reason;
     /* A FEC stream torn down by the user, the peer or the application (not
      * by the FEC TCP-failed reset) is the external-reset half of the

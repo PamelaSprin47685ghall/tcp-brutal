@@ -304,7 +304,14 @@ void tbt_listen_stop(struct tbt_tunnel *t);
 #define TBT_CTL_MAX_RETRIES 4
 #define TBT_CTL_RETRY_MS 2
 #define TBT_CTL_PATH_RETRY_MS 100
-#define TBT_CTL_QUEUE_MAX 256
+/* A 256-carrier start queues one HELLO and one OPEN per carrier before the
+ * pump can drain any of them. At 256 the second half's HELLO was refused with
+ * -ENOSPC, the carrier waited out its 5 s join deadline, and the near side
+ * redialled it: a replacement storm that doubles the socket-buffer footprint
+ * on a 1 GiB host. The queue is bounded by frames, not bytes; a HELLO/OPEN
+ * is a few dozen bytes, so 1024 holds a full bring-up wave with room for
+ * PAD, FIN and RST. */
+#define TBT_CTL_QUEUE_MAX 1024
 
 /* Retransmit timer: a retained frame whose last write is older than this and
  * that the peer has not delivered is re-sent on another path. The timeout is

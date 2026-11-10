@@ -57,6 +57,34 @@ and moves independently of the module version.
   can prove every carrier accepted `TCP_CONGESTION=bbr`.
 - `scripts/qa/stats-sampler-070.sh` keeps c3/c6/c9/c10/c11/c12 on disk once
   per interval for long-run attribution.
+- A 256-carrier bring-up no longer overflows the pinned control queue. At
+  `TBT_CTL_QUEUE_MAX=256` the second half of a simultaneous HELLO/OPEN wave
+  was refused with `-ENOSPC`, the carrier waited out its 5 s join deadline
+  and the peer redialled it, so one overflow became a replacement storm that
+  doubled the socket-buffer footprint on the 955 MB far host. The queue is
+  now 1024 frames, and the poll requeues a HELLO that was never enqueued
+  (paced at 100 ms while the queue has room) instead of waiting for the
+  deadline. Field evidence: 622,081 `ctl queue full` diagnostics in two days,
+  a global OOM at 07:02, and a full-system freeze at 07:21 where both
+  `/var/log/syslog` and `/var/log/kern.log` stop together.
+- Stall, recovery and per-generation stall-snapshot lines are silent at the
+  production default and at `debug=1`; they print only at `debug>=2`, still
+  rate limited. The per-frame `ctl queue full` warning moves to `debug>=2`.
+  At 256 carriers the stall/recover pair fired thousands of times per hour
+  even though 99% of the pauses recovered inside 200 ms, and the lines were
+  the last kernel output before the freeze.
+- The session poll no longer calls `tbt_car_poll_one()` under `sess->lock`
+  for provisional carriers. That branch prints at `debug>=1` and can
+  allocate; a printk inside the session spinlock stops every other CPU on
+  the same lock while the printk ring buffer or console makes progress. The
+  provisional list now takes a carrier reference, drops the lock, and polls
+  like the joined slots. The peer-pause stream-hash scan also runs once per
+  poll pass instead of once per carrier.
+- `tbt_stream_kill()` prints only the kill winner. A RST is queued once per
+  carrier, and the losing calls arrive up to 255 times for one stream; the
+  diagnostic stood before the `TBT_STREAM_F_DYING` test, so closing one
+  application turned into a 256-line burst on both ends. The byte counters
+  are unchanged by the move; only the duplicate lines are gone.
 
 ## [0.7.0] - 2026-11-10
 

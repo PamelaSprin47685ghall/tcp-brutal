@@ -2461,8 +2461,11 @@ the RST retry path both write it; `ctl_retry`/`ctl_requeue`/`ctl_obsolete` are p
 generation; HELLO/OPEN/RETIRE of a replaced generation are obsolete and counted in
 `ctl_obsolete`. Only a frame that exhausts the bound is abandoned, as `ctl_lost`; a FIN
 with no written copy then kills the stream rather than leaving the peer half-open.
-`ctl_queued` is the live control-queue depth against `TBT_CTL_QUEUE_MAX` (256); a producer
-that reaches it gets `-ENOSPC` and retries after the pump drains.
+`ctl_queued` is the live control-queue depth against `TBT_CTL_QUEUE_MAX` (1024); a producer
+that reaches it gets `-ENOSPC` and retries after the pump drains. The bound holds one
+HELLO and one OPEN for every carrier of a 256-carrier bring-up wave; a HELLO that still
+cannot be queued is requeued by the 50 ms poll while the queue has room, so a full queue
+no longer costs the carrier its 5 s join deadline.
 
 The write-space contract of §5.5 keeps `pump_hw_disarmed` as a plain field (not rendered);
 `pump_hw_armed` and `pump_hw_fired` are rendered on the `c3` line. The rendered key is

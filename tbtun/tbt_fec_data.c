@@ -3597,7 +3597,7 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess,
                     continue;
                 for (k = 0; k < rx->n; k++)
                     have = (u16)(have + (sb->dpresent[k] ? 1 : 0));
-                if (debug)
+                if (debug >= 2)
                     pr_info_ratelimited("tbtun: fec super %llu stuck: next=%llu total_known=%d total_pkts=%llu next_deliver=%llu deliver_bytes=%llu group=%u/%u used=%d ready=%d id=%llu nreal=%u shares=%u/%u parity=%u wset=%d empty=%d short=%u cnt=%d gap_us=%llu\n",
                                         s, READ_ONCE(rx->next_super), known,
                                         total_pkts,

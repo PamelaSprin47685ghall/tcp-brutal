@@ -310,9 +310,13 @@ int tbt_tx_control_pinned(struct tbt_session *sess, struct tbt_stream *st,
     {
         spin_unlock(&sess->tx_lock);
         tbt_frame_free(fr);
-        TBT_DIAG_WARN("ctl queue full tunnel=%llu path=%u type=%u len=%u ctl_queued=%u: -ENOSPC",
-                      (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
-                      path, type, len, READ_ONCE(sess->ctl_queued));
+        /* One line per refused frame turned a 256-carrier bring-up into
+         * 622k lines in two days. The counter is the primary evidence; this
+         * trace is for debug>=2 only and is rate limited even there. */
+        if (debug >= 2)
+            pr_warn_ratelimited("tbtun: ctl queue full tunnel=%llu path=%u type=%u len=%u ctl_queued=%u: -ENOSPC\n",
+                                (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
+                                path, type, len, READ_ONCE(sess->ctl_queued));
         return -ENOSPC;
     }
     if (head)

@@ -561,7 +561,7 @@ static void tbt_car_hold_check(struct tbt_carrier *c, struct tcp_sock *tp,
  *
  * Deletion condition: remove the queue re-arm when probes B/C/D and T7 record
  * poll_rescues = 0; the health check has no other driver. */
-static void tbt_car_poll_one(struct tbt_carrier *c)
+static void tbt_car_poll_one(struct tbt_carrier *c, bool paused)
 {
     struct tbt_session *sess = c->sess;
     struct tbt_stream *st;
@@ -665,7 +665,12 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
      * path retries it. Repair it once per poll interval, and only when the
      * control queue has room, so the retry cannot pile onto the same
      * backpressure that caused it. */
-    if (READ_ONCE(c->hello_sent) && !atomic_read(&c->up))
+    /* A HELLO refused by the control queue (or dropped by the pump before
+     * hello_sent was set) is retried here. Without this the carrier waited
+     * out TBT_JOIN_TIMEOUT_MS and the peer redialled it, so a full 256-carrier
+     * bring-up whose queue overflowed became a replacement storm. The retry
+     * is paced by up_rescue_ns and only runs when the queue has room. */
+    if (!atomic_read(&c->up))
     {
         if (!c->up_rescue_ns)
             c->up_rescue_ns = now;
@@ -673,7 +678,10 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
                  READ_ONCE(sess->ctl_queued) < TBT_CTL_QUEUE_MAX)
         {
             c->up_rescue_ns = now;
-            tbt_carrier_rescue_up(sess, c);
+            if (!READ_ONCE(c->hello_sent))
+                (void)tbt_tx_hello(sess, c->index, GFP_ATOMIC);
+            else
+                tbt_carrier_rescue_up(sess, c);
         }
     }
     else
@@ -688,7 +696,6 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
         u32 wnd = READ_ONCE(tp->snd_wnd);
         u32 wmem = READ_ONCE(sk->sk_wmem_queued);
         bool progress = una != c->last_una;
-        bool paused = tbt_car_paused(sess);
         /* Auto is k x this carrier's RTO (SRTT + 4 x RTTVAR, floored at
          * 200 ms), clamped to [1 s, 60 s]. A configured carrier_stall_ms is a
          * cap, never a replacement: it can lower the threshold, not raise it. */
@@ -800,10 +807,11 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
                 /* Feed the survival estimate: a path that came back tells
                  * the next decision how long this kind of dip lasts. */
                 tbt_stall_grid_note(sess, recover_ns, true);
-                pr_info_ratelimited("tbtun: carrier %u recovered after %llu ms: back in the stripe\n",
-                                    c->index,
-                                    (unsigned long long)(recover_ns /
-                                                         NSEC_PER_MSEC));
+                if (debug >= 2)
+                    pr_info_ratelimited("tbtun: carrier %u recovered after %llu ms: back in the stripe\n",
+                                        c->index,
+                                        (unsigned long long)(recover_ns /
+                                                             NSEC_PER_MSEC));
             }
         }
         c->last_nxt = nxt;
@@ -882,24 +890,26 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
                             (unsigned long long)((now - stall_since_ns) /
                                                  NSEC_PER_MSEC));
                 }
-                /* One unconditional snapshot per generation: the 0.7.1 field
-                 * run lost all 256 carriers with no line saying whether the
-                 * send window, the queue or the peer's ACK bookkeeping had
-                 * stopped. debug=0 hides the dump above, so keep a compact
-                 * copy that a real run can afford. */
+                /* One compact snapshot per generation, at debug>=2 only.
+                 * The 0.7.1 field run lost all 256 carriers with no line
+                 * saying whether the send window, the queue or the peer's
+                 * ACK bookkeeping had stopped; a run that needs that answer
+                 * enables this line, and a production run keeps only the
+                 * counters. */
                 if (!READ_ONCE(c->diag_stall_once))
                 {
                     WRITE_ONCE(c->diag_stall_once, true);
-                    pr_info("tbtun: carrier stall snapshot idx=%u gen=%u state=%u una=%u nxt=%u wnd=%u wmem=%u sndbuf=%u packets_out=%u retrans=%u srtt_us=%u mdev_us=%u unacked_ms=%llu\n",
-                            c->index, c->gen, READ_ONCE(sk->sk_state),
-                            una, nxt, wnd, wmem,
-                            READ_ONCE(sk->sk_sndbuf),
-                            READ_ONCE(tp->packets_out),
-                            inet_csk(sk)->icsk_retransmits,
-                            READ_ONCE(tp->srtt_us),
-                            READ_ONCE(tp->mdev_us),
-                            (unsigned long long)((now - stall_since_ns) /
-                                                 NSEC_PER_MSEC));
+                    if (debug >= 2)
+                        pr_info("tbtun: carrier stall snapshot idx=%u gen=%u state=%u una=%u nxt=%u wnd=%u wmem=%u sndbuf=%u packets_out=%u retrans=%u srtt_us=%u mdev_us=%u unacked_ms=%llu\n",
+                                c->index, c->gen, READ_ONCE(sk->sk_state),
+                                una, nxt, wnd, wmem,
+                                READ_ONCE(sk->sk_sndbuf),
+                                READ_ONCE(tp->packets_out),
+                                inet_csk(sk)->icsk_retransmits,
+                                READ_ONCE(tp->srtt_us),
+                                READ_ONCE(tp->mdev_us),
+                                (unsigned long long)((now - stall_since_ns) /
+                                                     NSEC_PER_MSEC));
                 }
                 tbt_carrier_sk_put(sk);
                 if (sess->fec)
@@ -1023,6 +1033,7 @@ static void tbt_session_poll_body(struct tbt_session *sess)
 {
     struct tbt_carrier *c;
     unsigned int nprov = 0;
+    bool paused;
     int i;
 
     if (!sess->tunnel || READ_ONCE(sess->closing))
@@ -1030,12 +1041,16 @@ static void tbt_session_poll_body(struct tbt_session *sess)
     /* Single writer: one delayed work owns this pass. The per-carrier poll
      * reads it only to bound its first-pass snapshots. */
     sess->diag_poll_round++;
+    /* The peer-pause gate scans the stream hash. One scan per pass, not one
+     * per carrier: at 256 carriers the per-carrier form was 256 RCU walks
+     * every 50 ms. */
+    paused = tbt_car_paused(sess);
     for (i = 0; i < sess->n_car; i++)
     {
         c = tbt_carrier_get(sess, (u8)i);
         if (c)
         {
-            tbt_car_poll_one(c);
+            tbt_car_poll_one(c, paused);
             tbt_carrier_put(c);
         }
     }
@@ -1053,19 +1068,19 @@ static void tbt_session_poll_body(struct tbt_session *sess)
         }
         c = list_first_entry(&sess->prov, struct tbt_carrier, node);
         list_move_tail(&c->node, &sess->prov);
-        if (c->provisional)
-        {
-            tbt_car_poll_one(c);
-            spin_unlock(&sess->lock);
-            continue;
-        }
         if (!refcount_inc_not_zero(&c->refs))
         {
             spin_unlock(&sess->lock);
             continue;
         }
         spin_unlock(&sess->lock);
-        tbt_car_poll_one(c);
+        /* Provisional carriers are polled with the lock dropped too. Their
+         * branch prints at debug>=1 and can allocate; a printk inside
+         * sess->lock holds the whole session while the console or the printk
+         * ring buffer makes progress, and every other CPU spins on the same
+         * lock. The reference keeps the object alive while w_replace()
+         * unlinks it. */
+        tbt_car_poll_one(c, paused);
         tbt_carrier_put(c);
     }
     /* Backpressure is the last resort: only a session with no usable carrier
@@ -2088,8 +2103,9 @@ bool tbt_carrier_stall(struct tbt_session *sess, struct tbt_carrier *c)
      * stall on its next pass. */
     c->last_una_ns = c->stall_since_ns;
     atomic64_inc(&sess->stall_declared);
-    pr_info_ratelimited("tbtun: carrier %u stalled: repath paused, new frames avoid it\n",
-                        c->index);
+    if (debug >= 2)
+        pr_info_ratelimited("tbtun: carrier %u stalled: repath paused, new frames avoid it\n",
+                            c->index);
     return true;
 }
 
