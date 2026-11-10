@@ -709,6 +709,7 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o,
          * credit window. */
         struct tbt_fec_tx *tx = o->flow ? o->flow->tx : NULL;
         u16 start = tx ? tx->ctl_rot : 0;
+        u16 fallback = 0xffff;
         int rc = -ENODEV;
         int err;
 
@@ -730,6 +731,28 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o,
                 tbt_carrier_put(c);
                 continue;
             }
+            {
+                struct sock *sk = tbt_carrier_sk_get(c);
+                u32 notsent;
+
+                if (!sk || sk_stream_wspace(sk) < (int)o->len)
+                {
+                    if (sk)
+                        tbt_carrier_sk_put(sk);
+                    tbt_carrier_put(c);
+                    continue;
+                }
+                notsent = READ_ONCE(tcp_sk(sk)->write_seq) -
+                          READ_ONCE(tcp_sk(sk)->snd_nxt);
+                tbt_carrier_sk_put(sk);
+                if (notsent > 32768u)
+                {
+                    if (fallback == 0xffff)
+                        fallback = idx;
+                    tbt_carrier_put(c);
+                    continue;
+                }
+            }
             err = tbt_carrier_send_fec(c, o->data, o->len);
             tbt_carrier_put(c);
             if (!err)
@@ -750,6 +773,43 @@ static int tbt_fec_out_try(struct tbt_session *sess, struct tbt_fec_out *o,
              * one is dead: -EAGAIN wins over -ENODEV. */
             if (err == -EAGAIN)
                 rc = -EAGAIN;
+        }
+        /* No light carrier: use the first one with socket space, without a
+         * notsent test. A CFG/FBK must not wait behind 192 KiB of DATA. */
+        if (fallback != 0xffff)
+        {
+            struct sock *sk;
+
+            c = tbt_carrier_get(sess, (u8)fallback);
+            if (c)
+            {
+                sk = tbt_carrier_sk_get(c);
+                if (sk && sk_stream_wspace(sk) >= (int)o->len)
+                {
+                    tbt_carrier_sk_put(sk);
+                    err = tbt_carrier_send_fec(c, o->data, o->len);
+                    tbt_carrier_put(c);
+                    if (!err)
+                    {
+                        if (tx)
+                        {
+                            tx->ctl_rot =
+                                (u16)((fallback + 1) % sess->n_car);
+                            tx->carrier_wait = false;
+                            tx->backpressure_counted = false;
+                        }
+                        if (sent)
+                            *sent = true;
+                        return 0;
+                    }
+                }
+                else
+                {
+                    if (sk)
+                        tbt_carrier_sk_put(sk);
+                    tbt_carrier_put(c);
+                }
+            }
         }
         /* No usable carrier. Keep the record queued and ask the replacement
          * path for a carrier: the receiver sends an ACK only when delivery
@@ -2520,6 +2580,9 @@ static bool tbt_fec_sess_sclc(const struct tbt_session *sess)
 static void tbt_fec_tx_switch_abort(struct tbt_session *sess,
                                     struct tbt_fec_tx *tx, bool tell_peer)
 {
+    if (debug && tx)
+        pr_info_ratelimited("tbtun-diag: switch abort state=%u epoch=%u tell=%d\n",
+                            tx->switch_state, tx->switch_epoch, tell_peer);
 
     if (!tx)
         return;
@@ -2544,6 +2607,10 @@ static void tbt_fec_tx_switch_abort(struct tbt_session *sess,
  * late NACK cannot dereference freed state. */
 static void tbt_fec_tx_swap(struct tbt_session *sess, struct tbt_fec_tx *tx)
 {
+    if (debug)
+        pr_info_ratelimited("tbtun-diag: switch swap n=%u m=%u epoch=%u\n",
+                            tx->switch_shape.n, tx->switch_shape.m,
+                            tx->switch_epoch);
     struct tbt_fec_grouped *codec;
     struct tbt_stream *st;
     u16 i, rk;
@@ -2728,13 +2795,13 @@ static void tbt_fec_tx_switch_tick(struct tbt_session *sess,
             spin_unlock(&sess->lock);
             return;
         }
-        if (now - tx->switch_start_ns >= 500000000ULL)
+        if (now - tx->switch_start_ns >= 3000000000ULL)
         {
             tbt_fec_tx_switch_abort(sess, tx, true);
             return;
         }
-        if (tx->switch_retries < 3 &&
-            now - tx->switch_cfg_ns >= 50000000ULL)
+        if (tx->switch_retries < 8 &&
+            now - tx->switch_cfg_ns >= 200000000ULL)
         {
             tbt_fec_tx_send_cfg(sess, tx, TBT_FEC_CFG_F_APPLY);
             tx->switch_retries++;
@@ -2756,7 +2823,7 @@ static void tbt_fec_tx_switch_tick(struct tbt_session *sess,
             tbt_fec_tx_swap(sess, tx);
             return;
         }
-        if (now - tx->switch_start_ns >= 2000000000ULL)
+        if (now - tx->switch_start_ns >= 10000000000ULL)
         {
             tbt_fec_tx_switch_abort(sess, tx, true);
             return;
@@ -2885,9 +2952,14 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
     if (sc)
     {
         memset(&so, 0, sizeof(so));
-        so.p_ppm = tx->peer_p_ppm;
-        so.p_ewma_ppm = tx->peer_p_ppm;
-        so.p_win_ppm = tx->peer_p_ppm;
+        {
+            u32 p_adj = tx->peer_p_ppm > 40000u ?
+                        tx->peer_p_ppm - 40000u : 0;
+
+            so.p_ppm = p_adj;
+            so.p_ewma_ppm = p_adj;
+            so.p_win_ppm = p_adj;
+        }
         so.p_fast_ppm = tx->peer_p_fast_ppm;
         /* Residual failure is the peer's real codec failure, not the
          * speculative NACK rate: a slow subflow can be NACKed one RTT
@@ -2949,7 +3021,7 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
             sess->adapt.n = tx->n;
             sess->adapt.m = tx->m;
             sess->adapt.groups = tx->groups;
-            sess->adapt.p_ppm = tx->peer_p_ppm;
+            sess->adapt.p_ppm = so.p_ppm;
         }
         spin_unlock(&sess->lock);
         return;
@@ -5545,6 +5617,9 @@ static void tbt_fec_rx_reset_blocks_locked(struct tbt_fec_rx *rx)
 static void tbt_fec_rx_switch_apply(struct tbt_session *sess,
                                     struct tbt_fec_flow *f)
 {
+    if (debug && f->rx)
+        pr_info_ratelimited("tbtun-diag: rx switch apply epoch=%u n=%u m=%u\n",
+                            f->rx->epoch, f->rx->n, f->rx->m);
     struct tbt_fec_rx *rx = f->rx;
     struct tbt_fec_cfg *c = &rx->pending_cfg;
     struct tbt_stream *st;
@@ -5722,7 +5797,7 @@ static void tbt_fec_rx_switch_tick(struct tbt_session *sess,
     case TBT_FEC_SW_ARMED:
         if (rx->next_deliver >= rx->switch_pkt)
             tbt_fec_rx_switch_apply(sess, f);
-        else if (now - rx->switch_start_ns >= 2000000000ULL)
+        else if (now - rx->switch_start_ns >= 10000000000ULL)
             tbt_fec_rx_switch_rollback(sess, f);
         break;
     case TBT_FEC_SW_APPLIED:
@@ -6055,6 +6130,9 @@ static void tbt_fec_rx_on_cfg(struct tbt_session *sess,
                               struct tbt_fec_flow *f,
                               const struct tbt_fec_cfg *cfg)
 {
+    if (debug)
+        pr_info_ratelimited("tbtun-diag: rx cfg flags=%#x epoch=%u n=%u m=%u\n",
+                            cfg->flags, cfg->epoch, cfg->n, cfg->m);
     struct tbt_fec_rx *rx = f->rx;
     u64 span;
     bool ack = false;
