@@ -207,6 +207,7 @@ struct tbt_fec_adapt_sclc_win
 struct tbt_fec_adapt_sclc_sample
 {
     u64 super_id;
+    u64 bucket_start_ns;
     u16 sent;
     u16 miss;
     u8 bucket;

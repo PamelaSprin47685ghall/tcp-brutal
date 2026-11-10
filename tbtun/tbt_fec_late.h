@@ -118,8 +118,10 @@ tbt_fec_late_credit(struct tbt_fec_late_ctx *ctx, u64 block_id, u16 group,
     *has_miss = false;
     if (!ctx->n || !ctx->m || group >= ctx->groups ||
         share >= (u16)(ctx->n + ctx->m) ||
+        (u32)ctx->groups * (ctx->n + ctx->m) >
+            TBT_FEC_BITMAP_BYTES * 8u ||
         block_id > ctx->next_super ||
-        block_id + TBT_FEC_LATE_RECS - 1 < ctx->next_super)
+        ctx->next_super - block_id >= TBT_FEC_LATE_RECS)
         return TBT_FEC_LATE_UNKNOWN;
     rec = tbt_fec_late_find(ctx, block_id);
     if (!rec && block_id < ctx->next_super)
@@ -127,6 +129,8 @@ tbt_fec_late_credit(struct tbt_fec_late_ctx *ctx, u64 block_id, u16 group,
     if (!rec)
         rec = tbt_fec_late_get(ctx, block_id);
     bit = (u16)(group * (ctx->n + ctx->m) + share);
+    if (bit >= TBT_FEC_BITMAP_BYTES * 8u)
+        return TBT_FEC_LATE_UNKNOWN;
     if (tbt_fec_late_bit(rec->pending, bit) ||
         tbt_fec_late_bit(rec->settled, bit))
         return TBT_FEC_LATE_DUP;
@@ -151,11 +155,14 @@ static inline void tbt_fec_late_take(struct tbt_fec_late_ctx *ctx,
     if (!rec)
         return;
     shares = (u16)(ctx->n + ctx->m);
+    if ((u32)ctx->groups * shares > TBT_FEC_BITMAP_BYTES * 8u)
+        return;
     for (i = 0; i < shares; i++)
     {
         u16 bit = (u16)(group * shares + i);
 
-        if (!tbt_fec_late_bit(rec->pending, bit))
+        if (bit >= TBT_FEC_BITMAP_BYTES * 8u ||
+            !tbt_fec_late_bit(rec->pending, bit))
             continue;
         tbt_fec_late_clear(rec->pending, bit);
         tbt_fec_late_set(rec->settled, bit);
@@ -176,8 +183,12 @@ static inline bool tbt_fec_late_note_miss(struct tbt_fec_late_ctx *ctx,
     u16 i, shares = (u16)(ctx->n + ctx->m);
     bool any = false;
 
+    if ((u32)ctx->groups * shares > TBT_FEC_BITMAP_BYTES * 8u ||
+        real > TBT_FEC_MAX_SHARES)
+        return false;
     for (i = 0; i < real; i++)
-        if (tbt_fec_late_bit(sc_miss, i) &&
+        if ((u32)group * shares + i < TBT_FEC_BITMAP_BYTES * 8u &&
+            tbt_fec_late_bit(sc_miss, i) &&
             !tbt_fec_late_bit(codec_fail, i) &&
             (u32)group * shares + i < limit &&
             tbt_fec_late_bit(alive, (u16)(group * shares + i)))
@@ -192,7 +203,8 @@ static inline bool tbt_fec_late_note_miss(struct tbt_fec_late_ctx *ctx,
     {
         u16 bit = (u16)(group * shares + i);
 
-        if (!tbt_fec_late_bit(sc_miss, i) ||
+        if (bit >= TBT_FEC_BITMAP_BYTES * 8u ||
+            !tbt_fec_late_bit(sc_miss, i) ||
             tbt_fec_late_bit(codec_fail, i) ||
             (u32)bit >= limit || !tbt_fec_late_bit(alive, bit) ||
             tbt_fec_late_bit(rec->miss_bits, bit))

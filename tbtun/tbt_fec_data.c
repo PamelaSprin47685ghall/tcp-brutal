@@ -6360,8 +6360,14 @@ static void tbt_fec_rx_late_credit(struct tbt_fec_rx *rx, u8 type,
         if (!rec || !tbt_fec_adapt_sclc_est_correct_super(
                          rx->est_sclc, rec->super_id))
             atomic64_inc(&rx->flow->sess->fec_late_unknown);
-        else if (rec->miss)
-            rec->miss--;
+        else
+        {
+            u16 bit = (u16)(group * (rx->n + rx->m) + share);
+
+            tbt_fec_late_clear(rec->miss_bits, bit);
+            if (rec->miss)
+                rec->miss--;
+        }
     }
     if (!locked)
         spin_unlock_bh(&rx->lock);

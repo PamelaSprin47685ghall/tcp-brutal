@@ -514,6 +514,25 @@ static void case_est_ewma_ring(void)
     }
     ok(!tbt_fec_adapt_sclc_est_correct_super(&e, 1),
        "ewma ring: evicted super cannot be corrected");
+
+    {
+        struct tbt_fec_adapt_sclc_est r;
+        u8 one[TBT_FEC_BITMAP_BYTES] = {0};
+        u32 before;
+
+        memset(&r, 0, sizeof(r));
+        tbt_fec_adapt_sclc_est_init(&r, 256);
+        r.carriers = 256;
+        tbt_fec_adapt_bitmap_set(one, 0);
+        tbt_fec_adapt_sclc_est_block(&r, now, 0, 1, one, alive);
+        tbt_fec_adapt_sclc_est_super(&r, now);
+        before = r.win[0].miss;
+        r.win[0].start_ns++;
+        ok(!tbt_fec_adapt_sclc_est_correct_super(&r, 1),
+           "ewma ring: reused bucket generation rejects correction");
+        eq_u32(r.win[0].miss, before,
+               "ewma ring: reused bucket miss is unchanged");
+    }
 }
 
 static void case_est_alive(void)

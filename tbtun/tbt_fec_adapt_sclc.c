@@ -400,6 +400,7 @@ bool tbt_fec_adapt_sclc_est_correct_super(struct tbt_fec_adapt_sclc_est *e,
         if (!smp->used || smp->super_id != super_id)
             continue;
         if (!smp->miss || smp->bucket >= TBT_FEC_ADAPT_SCLC_BUCKETS ||
+            e->win[smp->bucket].start_ns != smp->bucket_start_ns ||
             !e->win[smp->bucket].miss)
             return false;
         smp->miss--;
@@ -455,6 +456,7 @@ static void tbt_fec_adapt_sclc_push_sample(struct tbt_fec_adapt_sclc_est *e,
     smp = &e->ewma_ring[(e->ewma_head + e->ewma_n) %
                         TBT_FEC_ADAPT_SCLC_EWMA_RING];
     smp->super_id = ++e->super_id;
+    smp->bucket_start_ns = e->win[bucket].start_ns;
     smp->sent = sent;
     smp->miss = miss;
     smp->bucket = bucket;
