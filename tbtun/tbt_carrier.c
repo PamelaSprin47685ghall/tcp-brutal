@@ -761,10 +761,17 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
          * that is not draining. Retire it instead of keeping it in the
          * aggregate window forever. A zero peer window or a delivery pause
          * still means the peer is alive, so neither is evicted. */
-        if (READ_ONCE(c->slow) && c->slow_since && !paused && wnd &&
+        if (READ_ONCE(c->slow) && READ_ONCE(c->slow_since) && !paused && wnd &&
             time_after(jiffies,
-                       c->slow_since +
+                       READ_ONCE(c->slow_since) +
                            msecs_to_jiffies(TBT_CAR_SLOW_EVICT_MS)) &&
+            /* slow_since is the queue-full clock, not an ACK clock: a
+             * saturated but healthy carrier with a 300 ms RTT can have no
+             * ACK inside one 50 ms poll. Require the carrier's own snd_una
+             * freeze clock to cover the same 8 s, so only a path that has
+             * really stopped delivering is retired. */
+            now - READ_ONCE(c->last_una_move_ns) >=
+                (u64)TBT_CAR_SLOW_EVICT_MS * NSEC_PER_MSEC &&
             una == c->last_una && READ_ONCE(sk->sk_wmem_queued) > 0 &&
             now - sess->last_slow_evict_ns >= NSEC_PER_SEC)
         {

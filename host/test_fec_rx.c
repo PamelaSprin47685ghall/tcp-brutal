@@ -1681,18 +1681,18 @@ static void test_replay_window(void)
     tbt_fec_replay_free(r);
 
     /* Production shapes at S=8192. K is the largest ring the 64 MiB budget
-     * holds, capped at TBT_FEC_REPLAY_K_MAX=32; the credit is K_eff-2
+     * holds, capped at TBT_FEC_REPLAY_K_MAX=64; the credit is K_eff-2
      * super-blocks, capped at 2048 packets. 32 and 64 carriers reach the K
      * cap; the 256-carrier shapes reach K=31. */
-    ok_int(tbt_fec_replay_k_for(4, 4, 4, 8192), 32, "32-carrier K");
-    ok_int(tbt_fec_replay_k_for(8, 4, 4, 8192), 32, "64-carrier K");
+    ok_int(tbt_fec_replay_k_for(4, 4, 4, 8192), 64, "32-carrier K");
+    ok_int(tbt_fec_replay_k_for(8, 4, 4, 8192), 64, "64-carrier K");
     ok_int(tbt_fec_replay_k_for(32, 4, 4, 8192), 31,
            "256-carrier grouped K");
     ok_int(tbt_fec_replay_k_for(1, 192, 64, 8192), 31,
            "256-carrier single K");
-    ok_int((int)tbt_fec_credit_packets(4, 4, 32, 64, TBT_FEC_CREDIT_MAX),
-           480, "32-carrier credit");
-    ok_int((int)tbt_fec_credit_packets(8, 4, 32, 32, TBT_FEC_CREDIT_MAX),
+    ok_int((int)tbt_fec_credit_packets(4, 4, 64, 64, TBT_FEC_CREDIT_MAX),
+           992, "32-carrier credit");
+    ok_int((int)tbt_fec_credit_packets(8, 4, 64, 32, TBT_FEC_CREDIT_MAX),
            960, "64-carrier credit");
     ok_int((int)tbt_fec_credit_packets(32, 4, 31, 8, TBT_FEC_CREDIT_MAX),
            768, "256-carrier grouped credit");
@@ -1702,9 +1702,9 @@ static void test_replay_window(void)
     /* The three bounds hold for every shape and do not depend on the stream
      * length: the ring stays inside 64 MiB and the credit inside 2048
      * packets (16 MiB of payload). */
-    ok(tbt_fec_replay_bytes(4, 4, 4, 8192, 32) <= TBT_FEC_REPLAY_BUDGET,
+    ok(tbt_fec_replay_bytes(4, 4, 4, 8192, 64) <= TBT_FEC_REPLAY_BUDGET,
        "32-carrier ring stays inside 64 MiB");
-    ok(tbt_fec_replay_bytes(8, 4, 4, 8192, 32) <= TBT_FEC_REPLAY_BUDGET,
+    ok(tbt_fec_replay_bytes(8, 4, 4, 8192, 64) <= TBT_FEC_REPLAY_BUDGET,
        "64-carrier ring stays inside 64 MiB");
     ok(tbt_fec_replay_bytes(32, 4, 4, 8192, 31) <= TBT_FEC_REPLAY_BUDGET,
        "256-carrier grouped ring stays inside 64 MiB");

@@ -3068,15 +3068,15 @@ static void test_replay(void)
     tbt_fec_replay_free(r);
 
     /* Small shapes grow the ring to the K cap: 32 and 64 carriers both get
-     * K=32 inside the 64 MiB budget, so the credit can cover the aggregate
+     * K=64 inside the 64 MiB budget, so the credit can cover the aggregate
      * TX window. */
-    ok_u32(tbt_fec_replay_k_for(4, 4, 4, 8192), 32,
+    ok_u32(tbt_fec_replay_k_for(4, 4, 4, 8192), 64,
            "32-carrier K from the budget");
-    ok_u32(tbt_fec_replay_k_for(8, 4, 4, 8192), 32,
+    ok_u32(tbt_fec_replay_k_for(8, 4, 4, 8192), 64,
            "64-carrier K from the budget");
-    ok(tbt_fec_replay_bytes(4, 4, 4, 8192, 32) <= TBT_FEC_REPLAY_BUDGET,
+    ok(tbt_fec_replay_bytes(4, 4, 4, 8192, 64) <= TBT_FEC_REPLAY_BUDGET,
        "32-carrier ring fits the budget", NULL);
-    ok(tbt_fec_replay_bytes(8, 4, 4, 8192, 32) <= TBT_FEC_REPLAY_BUDGET,
+    ok(tbt_fec_replay_bytes(8, 4, 4, 8192, 64) <= TBT_FEC_REPLAY_BUDGET,
        "64-carrier ring fits the budget", NULL);
 
     /* A shape that cannot hold one super-block in the budget gets no ring. */
