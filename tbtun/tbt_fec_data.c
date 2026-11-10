@@ -2913,12 +2913,13 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
                    so.p_fast_ppm >
                        so.p_ewma_ppm + TBT_FEC_ADAPT_SCLC_BURST_GAP_PPM;
         if (debug)
-            pr_info_ratelimited("tbtun-diag: tx adapt tunnel=%llu p=%u fast=%u r=%u flags=%#x valid=%d idle=%d cur=%u busy=%u sw=%u exp=%u recv=%u\n",
+            pr_info_ratelimited("tbtun-diag: tx adapt tunnel=%llu p=%u fast=%u r=%u rv=%d flags=%#x valid=%d idle=%d cur=%u busy=%u sw=%u exp=%u recv=%u\n",
                                 (unsigned long long)sess->tunnel->cfg.id,
                                 so.p_ppm, so.p_fast_ppm, so.r_fail_ppm,
-                                tx->peer_flags, so.p_valid, so.pause_idle,
-                                tx->adapt_sclc->cur, tx->adapt_sclc->busy,
-                                tx->switch_state, so.sent_win, so.miss_win);
+                                r_valid, tx->peer_flags, so.p_valid,
+                                so.pause_idle, tx->adapt_sclc->cur,
+                                tx->adapt_sclc->busy, tx->switch_state,
+                                so.sent_win, so.miss_win);
         if (!so.pause_idle)
             tbt_fec_adapt_sclc_ctl_commit_failed(tx->adapt_sclc, &so, now);
         tbt_fec_adapt_sclc_ctl_eval(tx->adapt_sclc, &so, now, &sws);
@@ -7015,15 +7016,23 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
             atomic64_inc(&sess->fec_epoch_bad);
             return 0;
         }
-        tx->peer_p_ppm = fb.p_ewma_ppm;
-        if (sess->fec_sclc)
-            tx->peer_p_fast_ppm = fb.p_fast_ppm;
-        tx->peer_expected = fb.expected_shares;
-        tx->peer_received = fb.received_shares;
+        /* A CFG_ACK-only FBK can carry zero sample fields and must not
+         * overwrite a real p sample that arrived earlier. */
+        if ((fb.flags & TBT_FEC_FBK_F_P_VALID) || fb.expected_shares ||
+            fb.p_ewma_ppm)
+        {
+            tx->peer_p_ppm = fb.p_ewma_ppm;
+            if (sess->fec_sclc)
+                tx->peer_p_fast_ppm = fb.p_fast_ppm;
+            tx->peer_expected = fb.expected_shares;
+            tx->peer_received = fb.received_shares;
+            tx->peer_flags = fb.flags;
+            tx->peer_est_ns = ktime_get_ns();
+            tx->peer_est_valid = true;
+        }
+        else
+            tx->peer_flags = fb.flags;
         tx->peer_epoch = tbt_fec_fbk_epoch(&fb);
-        tx->peer_flags = fb.flags;
-        tx->peer_est_ns = ktime_get_ns();
-        tx->peer_est_valid = true;
         tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
         return 0;
     }
