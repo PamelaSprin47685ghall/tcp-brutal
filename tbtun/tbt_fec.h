@@ -244,7 +244,10 @@ static inline bool tbt_fec_flow_live(u8 state)
  * record; only the winner unlinks it and charges the queue counters. */
 static inline bool tbt_fec_out_unlink_once(bool *queued)
 {
-    return __atomic_exchange_n(queued, false, __ATOMIC_ACQ_REL);
+    if (!*queued)
+        return false;
+    *queued = false;
+    return true;
 }
 
 /* The peer's FIN reached the application but our FIN never left the wire: the

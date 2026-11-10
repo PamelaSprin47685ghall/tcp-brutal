@@ -352,8 +352,8 @@ static void tbt_fec_out_free(struct tbt_session *sess, struct tbt_fec_out *o)
         atomic_dec(&sess->fec_outq_queued);
         atomic_sub(o->len, &sess->fec_outq_bytes);
     }
-    if (o->owner && atomic_read(&o->owner->queued))
-        atomic_dec(&o->owner->queued);
+    if (o->owner && o->owner->queued)
+        o->owner->queued--;
     tbt_fec_out_put(o);
 }
 
@@ -432,7 +432,7 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
     if (!o)
         return -ENOMEM;
     refcount_set(&o->refs, 1); /* the queue reference */
-    __atomic_store_n(&o->queued, false, __ATOMIC_RELAXED);
+    o->queued = false;
     o->flow = flow;
     if (flow && !refcount_inc_not_zero(&flow->refs))
     {
@@ -544,19 +544,19 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
                 sess->fec_fifo_tail;
         o->owner = owner;
         if (owner)
-            atomic_inc(&owner->queued);
+            owner->queued++;
         /* Publish queued and the counters before the FIFO release-store:
          * the lockless drain may pop the record immediately. */
-        __atomic_store_n(&o->queued, true, __ATOMIC_RELEASE);
+        o->queued = true;
         atomic_inc(&sess->fec_outq_queued);
         atomic_add(len, &sess->fec_outq_bytes);
         if (!tbt_fec_out_fifo_push(sess, o))
         {
-            __atomic_store_n(&o->queued, false, __ATOMIC_RELAXED);
+            o->queued = false;
             atomic_dec(&sess->fec_outq_queued);
             atomic_sub(len, &sess->fec_outq_bytes);
             if (owner)
-                atomic_dec(&owner->queued);
+                owner->queued--;
             spin_unlock(&sess->fec_out_lock);
             tbt_fec_out_put(o);
             atomic64_inc(&sess->fec_outq_drop);
@@ -567,7 +567,7 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
             sess->fec_outq_depth_max = depth;
     }
     if (control || replay)
-        __atomic_store_n(&o->queued, true, __ATOMIC_RELEASE);
+        o->queued = true;
     spin_unlock(&sess->fec_out_lock);
     if (!control && !replay)
     {
@@ -1088,14 +1088,18 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
         if (o->flow && !tbt_fec_flow_live(READ_ONCE(o->flow->state)))
         {
             tbt_fec_out_fifo_pop(sess);
+            spin_lock(&sess->fec_out_lock);
             tbt_fec_out_free(sess, o);
+            spin_unlock(&sess->fec_out_lock);
             continue;
         }
         /* A shape switch retired the record while it waited. */
         if (o->epoch != READ_ONCE(sess->fec_out_epoch))
         {
             tbt_fec_out_fifo_pop(sess);
+            spin_lock(&sess->fec_out_lock);
             tbt_fec_out_free(sess, o);
+            spin_unlock(&sess->fec_out_lock);
             continue;
         }
         /* The injector is keyed by the share's scheduled carrier: it models
@@ -1111,7 +1115,9 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
                              drop);
                 sess->dropped_by_ppm++;
                 tbt_fec_out_fifo_pop(sess);
+                spin_lock(&sess->fec_out_lock);
                 tbt_fec_out_free(sess, o);
+                spin_unlock(&sess->fec_out_lock);
                 continue;
             }
         }
@@ -1125,7 +1131,9 @@ static void tbt_fec_out_drain_work(struct work_struct *w)
             return;
         }
         tbt_fec_out_fifo_pop(sess);
+        spin_lock(&sess->fec_out_lock);
         tbt_fec_out_free(sess, o);
+        spin_unlock(&sess->fec_out_lock);
         if (err)
         {
             /* A dead socket or a framing error: do not spin on it. */
@@ -1954,7 +1962,7 @@ static bool tbt_fec_tx_is_idle(struct tbt_session *sess,
                !READ_ONCE(tx->flush_req);
     spin_unlock(&tx->lock);
     spin_lock(&sess->fec_out_lock);
-    queued = (u32)atomic_read(&tx->queued);
+    queued = tx->queued;
     spin_unlock(&sess->fec_out_lock);
     /* Only new DATA orders the FIN. Replay records are duplicates of shares
      * already sent once and control records carry no stream bytes, so an
