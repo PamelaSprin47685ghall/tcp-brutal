@@ -328,6 +328,31 @@ static void case_est_ewma(void)
        "est: EWMA converges to the block rate");
 }
 
+static void case_est_late_credit(void)
+{
+    struct tbt_fec_adapt_sclc_est e;
+
+    memset(&e, 0, sizeof(e));
+    e.shares = 256;
+    e.cur = 1;
+    e.win[0].sent = 1000;
+    e.win[0].miss = 100;
+    tbt_fec_adapt_sclc_est_recompute(&e);
+    eq_u32(e.p_ewma_ppm, 100000, "late credit: true 10% loss");
+    ok(tbt_fec_adapt_sclc_est_correct_miss(&e, 0),
+       "late credit: exact bucket corrected");
+    eq_u32(e.p_ewma_ppm, 99000,
+           "late credit: p drops by the exact 1/1000, not 7800");
+    ok(!tbt_fec_adapt_sclc_est_correct_miss(&e, 1),
+       "late credit: an empty bucket cannot be credited");
+    eq_u32(e.p_ewma_ppm, 99000,
+           "late credit: empty-bucket correction leaves p unchanged");
+    ok(tbt_fec_adapt_sclc_est_correct_miss(&e, 0),
+       "late credit: a second real miss still corrects");
+    eq_u32(e.p_ewma_ppm, 98000,
+           "late credit: second correction is exact");
+}
+
 static void case_est_alive(void)
 {
     struct tbt_fec_adapt_sclc_est e;
@@ -2069,6 +2094,7 @@ int main(void)
     case_shape_reject();
     case_est_window();
     case_est_ewma();
+    case_est_late_credit();
     case_est_alive();
     case_est_groups();
     case_est_pauses();

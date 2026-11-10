@@ -2952,14 +2952,9 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
     if (sc)
     {
         memset(&so, 0, sizeof(so));
-        {
-            u32 p_adj = tx->peer_p_ppm > 65000u ?
-                        tx->peer_p_ppm - 65000u : 0;
-
-            so.p_ppm = p_adj;
-            so.p_ewma_ppm = p_adj;
-            so.p_win_ppm = p_adj;
-        }
+        so.p_ppm = tx->peer_p_ppm;
+        so.p_ewma_ppm = tx->peer_p_ppm;
+        so.p_win_ppm = tx->peer_p_ppm;
         so.p_fast_ppm = tx->peer_p_fast_ppm;
         /* Residual failure is the peer's real codec failure, not the
          * speculative NACK rate: a slow subflow can be NACKed one RTT
@@ -3393,7 +3388,7 @@ void tbt_fec_rx_shrink(struct tbt_fec_rx *rx, bool reset)
     keep = reset ? 2 : 0;
     spin_lock_bh(&rx->lock);
     if (reset)
-        atomic_set(&rx->late_data_credit, 0);
+        memset(rx->late, 0, sizeof(rx->late));
     if (reset && rx->blk)
     {
         for (i = 0; i < total; i++)
@@ -3873,7 +3868,8 @@ static noinline void tbt_fec_deliver_est_fold(struct tbt_session *sess,
     if (sc_mode || rlnc_mode)
     {
         u64 est_now = ktime_get_ns();
-        u16 eg;
+        u16 eg, total_miss = 0;
+        u8 late_bits[TBT_FEC_BITMAP_BYTES];
 
         for (eg = 0; eg < rx->groups; eg++)
         {
@@ -3913,28 +3909,32 @@ static noinline void tbt_fec_deliver_est_fold(struct tbt_session *sess,
              * not estimate p from it. */
             unknown = !eb->win_len_set && !rx->total_known &&
                       eb->ndata < rx->n;
+            if (sc_mode)
+            {
+                memset(late_bits, 0, sizeof(late_bits));
+                tbt_fec_rx_late_take(rx, s, eg, rx->n, rx->m,
+                                     late_bits);
+            }
             spin_unlock_bh(&rx->lock);
-            /* Physical conservation: a parity-recovered DATA share that
-             * arrives late was in flight, not lost. Cancel one such miss
-             * per late DATA share. codec_fail shares are not cancelled:
-             * the codec could not recover them at all. */
+            /* A late share attributed to this exact (epoch, block, group)
+             * clears only its own parity-recovered miss. */
             if (sc_mode)
             {
                 u16 si;
 
                 for (si = 0; si < real; si++)
                 {
-                    if (!tbt_fec_adapt_bitmap_test(sc_miss, si) ||
-                        tbt_fec_adapt_bitmap_test(eb->codec_fail_bits, si) ||
-                        atomic_read(&rx->late_data_credit) <= 0)
+                    if (!late_bits[si] ||
+                        !tbt_fec_adapt_bitmap_test(sc_miss, si) ||
+                        tbt_fec_adapt_bitmap_test(eb->codec_fail_bits, si))
                         continue;
-                    if (atomic_dec_if_positive(&rx->late_data_credit) >= 0)
-                    {
-                        tbt_fec_adapt_bitmap_clear(sc_miss, si);
-                        if (si < 32)
-                            miss &= ~(1u << si);
-                    }
+                    tbt_fec_adapt_bitmap_clear(sc_miss, si);
+                    if (si < 32)
+                        miss &= ~(1u << si);
                 }
+                for (si = 0; si < real; si++)
+                    if (tbt_fec_adapt_bitmap_test(sc_miss, si))
+                        total_miss++;
             }
             if (unknown)
             {
@@ -3961,7 +3961,11 @@ static noinline void tbt_fec_deliver_est_fold(struct tbt_session *sess,
             }
         }
         if (sc_mode)
+        {
             tbt_fec_adapt_sclc_est_super(rx->est_sclc, est_now);
+            tbt_fec_rx_late_finalize(rx, s, total_miss,
+                                     rx->est_sclc->cur);
+        }
         else
             tbt_fec_est_super(rx->est, est_now);
     }
@@ -5574,7 +5578,7 @@ static void tbt_fec_rx_reset_blocks_locked(struct tbt_fec_rx *rx)
     u32 total = (u32)rx->groups * rx->slots;
     u32 i;
 
-    atomic_set(&rx->late_data_credit, 0);
+    memset(rx->late, 0, sizeof(rx->late));
 
     for (i = 0; i < total; i++)
     {
@@ -6331,27 +6335,139 @@ static void tbt_fec_rx_work_body(struct tbt_session *sess)
  * (the locked check below then decides) -- it cannot call a live block
  * late. A shape switch is refused here: the fields are read without the
  * lock, and the placement path rechecks the shape. */
-static void tbt_fec_rx_late_data_credit(struct tbt_fec_rx *rx, u8 type,
-                                        bool locked)
+static struct tbt_fec_late_rec *tbt_fec_rx_late_find(struct tbt_fec_rx *rx,
+                                                    u64 block_id)
 {
+    u16 i;
+
+    for (i = 0; i < TBT_FEC_LATE_RECS; i++)
+        if (rx->late[i].used && rx->late[i].block_id == block_id &&
+            rx->late[i].epoch == rx->epoch)
+            return &rx->late[i];
+    return NULL;
+}
+
+static struct tbt_fec_late_rec *tbt_fec_rx_late_get(struct tbt_fec_rx *rx,
+                                                    u64 block_id)
+{
+    struct tbt_fec_late_rec *rec = tbt_fec_rx_late_find(rx, block_id);
+    u16 i, victim = 0;
+
+    if (rec)
+        return rec;
+    for (i = 0; i < TBT_FEC_LATE_RECS; i++)
+    {
+        if (!rx->late[i].used)
+        {
+            victim = i;
+            break;
+        }
+        if (rx->late[i].block_id < rx->late[victim].block_id)
+            victim = i;
+    }
+    rec = &rx->late[victim];
+    memset(rec, 0, sizeof(*rec));
+    rec->used = true;
+    rec->epoch = rx->epoch;
+    rec->block_id = block_id;
+    return rec;
+}
+
+/* Attribute a late DATA share to (current epoch, block, group, share). A
+ * share outside the current shape or the retained block window is counted
+ * unknown, never credited as either arrival or loss. */
+static void tbt_fec_rx_late_credit(struct tbt_fec_rx *rx, u8 type,
+                                   u64 block_id, u16 group, u16 share,
+                                   u16 n, u16 m, bool locked)
+{
+    struct tbt_fec_late_rec *rec;
+    u16 bit;
+    bool duplicate;
+
     if (type != TBT_FEC_DATA)
         return;
     if (!locked)
-    {
         spin_lock_bh(&rx->lock);
-        if (rx->est_sclc &&
-            tbt_fec_adapt_sclc_est_credit_late(rx->est_sclc))
-        {
+    if (!rx->est_sclc || !n || !m || group >= rx->groups ||
+        share >= (u16)(n + m) || block_id + TBT_FEC_LATE_RECS <
+                                     READ_ONCE(rx->next_super))
+    {
+        atomic64_inc(&rx->flow->sess->fec_late_unknown);
+        if (!locked)
             spin_unlock_bh(&rx->lock);
-            return;
-        }
-        if (atomic_read(&rx->late_data_credit) < (int)(rx->n * 4))
-            atomic_inc(&rx->late_data_credit);
-        spin_unlock_bh(&rx->lock);
         return;
     }
-    if (atomic_read(&rx->late_data_credit) < (int)(rx->n * 4))
-        atomic_inc(&rx->late_data_credit);
+    rec = tbt_fec_rx_late_get(rx, block_id);
+    bit = (u16)(group * (n + m) + share);
+    duplicate = tbt_fec_adapt_bitmap_test(rec->pending, bit) ||
+                tbt_fec_adapt_bitmap_test(rec->settled, bit);
+    if (!duplicate)
+    {
+        if (!rec->folded)
+            tbt_fec_adapt_bitmap_set(rec->pending, bit);
+        else
+        {
+            tbt_fec_adapt_bitmap_set(rec->settled, bit);
+            if (rec->miss &&
+                tbt_fec_adapt_sclc_est_correct_miss(rx->est_sclc,
+                                                    rec->bucket))
+                rec->miss--;
+        }
+    }
+    if (!locked)
+        spin_unlock_bh(&rx->lock);
+}
+
+/* Consume pending late bits for one group at fold; the caller holds
+ * rx->lock. out[share] is set for each late DATA share. */
+static void tbt_fec_rx_late_take(struct tbt_fec_rx *rx, u64 block_id,
+                                 u16 group, u16 n, u16 m, u8 *out)
+{
+    struct tbt_fec_late_rec *rec = tbt_fec_rx_late_find(rx, block_id);
+    u16 i;
+
+    if (!rec)
+        return;
+    for (i = 0; i < (u16)(n + m); i++)
+    {
+        u16 bit = (u16)(group * (n + m) + i);
+
+        if (!tbt_fec_adapt_bitmap_test(rec->pending, bit))
+            continue;
+        tbt_fec_adapt_bitmap_clear(rec->pending, bit);
+        tbt_fec_adapt_bitmap_set(rec->settled, bit);
+        out[i] = 1;
+    }
+}
+
+/* Mark the block folded and settle any pending bit that raced the group
+ * loop. The caller does not hold rx->lock. */
+static void tbt_fec_rx_late_finalize(struct tbt_fec_rx *rx, u64 block_id,
+                                     u16 total_miss, u8 bucket)
+{
+    struct tbt_fec_late_rec *rec;
+    u16 i;
+
+    spin_lock_bh(&rx->lock);
+    rec = tbt_fec_rx_late_find(rx, block_id);
+    if (rec)
+    {
+        rec->folded = true;
+        rec->bucket = bucket;
+        rec->miss = total_miss;
+        for (i = 0; i < TBT_FEC_BITMAP_BYTES * 8u; i++)
+        {
+            if (!tbt_fec_adapt_bitmap_test(rec->pending, i))
+                continue;
+            tbt_fec_adapt_bitmap_clear(rec->pending, i);
+            tbt_fec_adapt_bitmap_set(rec->settled, i);
+            if (rec->miss &&
+                tbt_fec_adapt_sclc_est_correct_miss(rx->est_sclc,
+                                                    rec->bucket))
+                rec->miss--;
+        }
+    }
+    spin_unlock_bh(&rx->lock);
 }
 
 static bool tbt_fec_rx_late_fast(const struct tbt_fec_rx *rx,
@@ -6473,7 +6589,19 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
 
             if (tbt_fec_rx_late_fast(rx, &h))
             {
-                tbt_fec_rx_late_data_credit(rx, h.type, false);
+                if (h.type == TBT_FEC_DATA &&
+                    h.n == READ_ONCE(rx->n) && h.m == READ_ONCE(rx->m))
+                {
+                    u16 lg = tbt_fec_group_of_seq_base(
+                        h.seq, READ_ONCE(rx->base_pkt),
+                        READ_ONCE(rx->groups));
+
+                    tbt_fec_rx_late_credit(rx, h.type, h.block_id, lg,
+                                           h.share_index, READ_ONCE(rx->n),
+                                           READ_ONCE(rx->m), false);
+                }
+                else
+                    atomic64_inc(&sess->fec_late_unknown);
                 atomic64_inc(&sess->fec_late_share);
                 return 0;
             }
@@ -6550,7 +6678,8 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
             }
             if (late)
             {
-                tbt_fec_rx_late_data_credit(rx, h.type, false);
+                tbt_fec_rx_late_credit(rx, h.type, h.block_id, cg, csh,
+                                       rx->n, rx->m, false);
                 atomic64_inc(&sess->fec_late_share);
                 return 0;
             }
@@ -7192,7 +7321,9 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
              * cancel the parity-recovered miss it caused. */
             if (h.seq < cur_base && h.type == TBT_FEC_DATA)
             {
-                tbt_fec_rx_late_data_credit(rx, h.type, false);
+                /* The record predates this shape's base: its epoch is not
+                 * recoverable, so count it unknown rather than crediting. */
+                atomic64_inc(&sess->fec_late_unknown);
                 atomic64_inc(&sess->fec_late_share);
                 return 0;
             }
@@ -7241,7 +7372,8 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
                                   rx->next_super, h.block_id, block_end,
                                   rx->next_deliver))
         {
-            tbt_fec_rx_late_data_credit(rx, h.type, true);
+            tbt_fec_rx_late_credit(rx, h.type, h.block_id, group, share,
+                                   rx->n, rx->m, true);
             atomic64_inc(&sess->fec_late_share);
             spin_unlock_bh(&rx->lock);
             return 0;
@@ -7304,7 +7436,8 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
         break;
     }
     case TBT_FEC_RX_WIN_LATE:
-        tbt_fec_rx_late_data_credit(rx, h.type, true);
+        tbt_fec_rx_late_credit(rx, h.type, h.block_id, group, share,
+                               rx->n, rx->m, true);
         atomic64_inc(&sess->fec_late_share);
         spin_unlock_bh(&rx->lock);
         return 0; /* already delivered */
@@ -7387,7 +7520,8 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
             share < tbt_fec_blk_real_len(rx, group, b) &&
             !b->dpresent[share])
         {
-            tbt_fec_rx_late_data_credit(rx, h.type, true);
+            tbt_fec_rx_late_credit(rx, h.type, h.block_id, group, share,
+                                   rx->n, rx->m, true);
             atomic64_inc(&sess->fec_late_data);
         }
         spin_unlock_bh(&rx->lock);

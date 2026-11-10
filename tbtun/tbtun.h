@@ -952,6 +952,19 @@ struct tbt_fec_tx
 
 struct tbt_session;
 
+#define TBT_FEC_LATE_RECS 16
+struct tbt_fec_late_rec
+{
+    u64 block_id;
+    u32 epoch;
+    u8 used;
+    u8 folded;
+    u8 bucket;
+    u16 miss;
+    u8 pending[TBT_FEC_BITMAP_BYTES];
+    u8 settled[TBT_FEC_BITMAP_BYTES];
+};
+
 struct tbt_fec_rx
 {
     /* This receive plane belongs to one stream; sid is the routing key and
@@ -1114,9 +1127,11 @@ struct tbt_fec_rx
     struct tbt_fec_adapt_sclc_est *est_sclc;
     u8 alive_bm[TBT_FEC_BITMAP_BYTES];
     atomic64_t abandoned_shares; /* counted by blk_reset, folded by w_fec_rx */
-    /* DATA shares that arrived after the 0 ms decode used parity to fill
-     * them. Each cancels one parity-recovered "miss" in the estimator. */
-    atomic_t late_data_credit;
+    /* Bounded late-DATA settlement, keyed by current epoch and block id.
+     * pending bits are cleared from sc_miss at fold; settled bits have
+     * already corrected the estimator bucket, so duplicates cannot credit
+     * twice. */
+    struct tbt_fec_late_rec late[TBT_FEC_LATE_RECS];
     u64 est_abandoned_last;
     bool est_paused;
     u64 pause_start_ns;
@@ -1879,6 +1894,7 @@ struct tbt_session
     atomic64_t fec_late_share;        /* share for a block already ready */
     atomic64_t fec_drop_sid;          /* share from a non-current stream */
     atomic64_t fec_late_data;         /* late DATA whose slot is still absent */
+    atomic64_t fec_late_unknown;      /* late DATA with no current epoch/block */
     atomic64_t fec_pad_share;         /* empty-block marker received */
     atomic64_t fec_dup_marker;        /* replayed marker for a settled block */
     atomic64_t fec_marker_conflict;   /* marker and real shares disagree */

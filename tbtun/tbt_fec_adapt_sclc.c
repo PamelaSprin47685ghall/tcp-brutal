@@ -356,23 +356,29 @@ void tbt_fec_adapt_sclc_est_block(
     e->last_activity_ns = now_ns;
 }
 
-bool tbt_fec_adapt_sclc_est_credit_late(struct tbt_fec_adapt_sclc_est *e)
+void tbt_fec_adapt_sclc_est_recompute(struct tbt_fec_adapt_sclc_est *e)
 {
-    u32 *miss;
-    u8 prev;
+    u32 sent = 0, miss = 0;
+    u8 i;
 
     if (!e)
+        return;
+    for (i = 0; i < TBT_FEC_ADAPT_SCLC_BUCKETS; i++)
+    {
+        sent += e->win[i].sent;
+        miss += e->win[i].miss;
+    }
+    e->p_ewma_ppm = sent ? (u32)((u64)miss * 1000000ull / sent) : 0;
+}
+
+bool tbt_fec_adapt_sclc_est_correct_miss(struct tbt_fec_adapt_sclc_est *e,
+                                         u8 bucket)
+{
+    if (!e || bucket >= TBT_FEC_ADAPT_SCLC_BUCKETS ||
+        !e->win[bucket].miss)
         return false;
-    prev = (u8)((e->cur + TBT_FEC_ADAPT_SCLC_BUCKETS - 1) %
-                TBT_FEC_ADAPT_SCLC_BUCKETS);
-    if (e->win[e->cur].miss)
-        miss = &e->win[e->cur].miss;
-    else if (e->win[prev].miss)
-        miss = &e->win[prev].miss;
-    else
-        return false;
-    (*miss)--;
-    e->p_ewma_ppm = e->p_ewma_ppm > 7800u ? e->p_ewma_ppm - 7800u : 0;
+    e->win[bucket].miss--;
+    tbt_fec_adapt_sclc_est_recompute(e);
     return true;
 }
 

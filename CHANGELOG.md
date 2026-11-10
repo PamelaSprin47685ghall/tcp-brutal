@@ -149,6 +149,14 @@ and moves independently of the module version.
   waiting for `rx_queued` to become non-empty. The old stream no longer
   survives for seconds and collides with the next one after a curl timeout.
 
+- Late DATA settlement is bounded and attributed: a 16-record ledger keyed
+  by current epoch, block id, group and share deduplicates repeats. Pending
+  bits clear only that block's `sc_miss` at fold; a share that arrives after
+  the fold corrects only that block's exact bucket and recomputes p from the
+  window totals. Old-epoch or unattributable tails increment
+  `fec_late_unknown` and never credit. The fixed 65,000 ppm p offset and
+  7,800 ppm EWMA subtraction are removed; p is the true estimator value.
+
 ### Verification
 
 - On the 7.3.0-rc6 host at 400 ms RTT (200 ms netem on lo), three 20 s
