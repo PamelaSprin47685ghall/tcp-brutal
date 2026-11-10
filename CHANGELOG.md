@@ -94,6 +94,10 @@ and moves independently of the module version.
 
 ### Verification
 
+- On the 7.3.0-rc6 host at 400 ms RTT (200 ms netem on lo), three 20 s
+  streams measured 5.770, 5.770 and 5.793 MB/s: the second and third did not
+  decay behind the first stream's unsent tail. `del 1`, `del 2` and `rmmod`
+  then left 0 tbt vmalloc entries.
 - On the 7.3.0-rc6 host, five 8 MB/s streams aborted after 2 s each left
   `/proc/vmallocinfo` tbt entries at 2 / 139,264 B after every stream (no
   16 MiB TX-ring accumulation); `del 1`, `del 2` and `rmmod tbtun` left
