@@ -52,15 +52,16 @@ uplink, 512 reserved) and the rate follows `n/(n+m)`. The per-direction
 `FEC_CFG` INIT carries `L`, block and rate, and the receiver uses the peer's
 shape. `mode=rlnc`/`grouped` remain as the GF(2) band RLNC fallback.
 
-Adaptive FEC (`adaptive=`, off by default) has two paths. The GF(2)
+Adaptive FEC (`adaptive=`) defaults on when `fec=on`. The GF(2)
 `mode=rlnc`/`grouped` family keeps Phase 1: the shape stays in the
 `n + m = 8`, 32-group family and `m` moves in 1..6. `mode=sc-ldpc` uses the
-per-flow SC-LDPC estimator/controller: the uplink GF(16) 8x32/L16 codec can
-switch along the rate ladder; the downlink binary 1x256/L8 codec is fixed at
-rate 50%, so its controller stays at 50 (known limitation). The switch rides
-`FEC_CFG`/`FEC_FBK` (wire `0x100a`). `session <id> adaptive=off` disables it
-at runtime. Shapes with `n + m != 8` are not implemented for the GF(2)
-family.
+per-flow SC-LDPC estimator/controller and moves the split along the shipped
+rate ladder (downlink `n+m=256` with `n` in 64/76/102/128/151/178; uplink
+`n+m=32` with `n` in 8/16/20/24). The switch rides `FEC_CFG`/`FEC_FBK`
+(wire `0x100a`). A `mode=sc-ldpc` line whose split is not on that ladder
+stays `adaptive=off`, so a fixed test shape keeps its configured `n/m`.
+`adaptive=off` always wins; `session <id> adaptive=off` disables it at
+runtime. Shapes with `n + m != 8` are not implemented for the GF(2) family.
 
 One session carries one FEC flow (wire `0x100a`). The 0.6.0 subframe mux and
 its receive-window record are gone, so a DATA or PARITY payload is plain
@@ -375,10 +376,10 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | Key | Default | Meaning |
 |---|---|---|
 | `role` | — | `near` or `far`; required |
-| `listen` | — | `a.b.c.d:port`; near: public address; far: carrier address |
-| `peer` | — | near: where carriers are sent; far: the only near source address allowed to join (the anchor; the port is grammar filler) |
-| `target` | — | far: required literal `ip:port` the payload is delivered to; slot 0's destination and the default for OPENs that name port 0. Near: optional slot-0 target port; the address is grammar filler (the far side always dials its own `target_addr`) |
-| `map` | — | `listen_port:target_port[,listen_port:target_port...]`, up to 7 extra slots. Near: bind each listen port on `listen=`'s address and send its target in OPEN. Far: accept those target ports as destinations (the listen half is ignored). Slot 0 is the `listen=`/`target=` pair. A near line refuses duplicate listen ports or one equal to `listen=` |
+| `listen` | — | `a.b.c.d:port` or `[v6]:port`; near: public address (`[::]` binds the IPv6 wildcard; IPv4-mapped clients follow the host's `bindv6only` setting); far: carrier address |
+| `peer` | — | `a.b.c.d:port` or `[v6]:port`; near: where carriers are sent; far: the only near source address allowed to join (the anchor; the port is grammar filler) |
+| `target` | — | `a.b.c.d:port` or `[v6]:port`; far: required literal destination; slot 0's destination and the default for OPENs that name port 0. Near: optional slot-0 target port; the address is grammar filler (the far side always dials its own `target_addr`) |
+| `map` | — | `listen_port:target_port[,listen_port:target_port...]`, up to 7 extra slots. Ports only; every mapped listener binds on `listen=`'s address. Near: bind each listen port and send its target in OPEN. Far: accept those target ports as destinations (the listen half is ignored). Slot 0 is the `listen=`/`target=` pair. A near line refuses duplicate listen ports or one equal to `listen=` |
 | `n` | `4` | DATA shares per group, `1..255`; `n + m <= 256` |
 | `m` | `1` | Parity shares per group, `0..255`; `fec=on` needs `m >= 1`; `n + m <= 256` |
 | `dup` | `1` | Duplication degree, `0..3` |
@@ -388,13 +389,13 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `tunnel_rate` | `0` | Bytes/s ceiling, `0` = unset |
 | `max_inflate` | `2.000` | Duplication inflation ceiling |
 | `hole_budget_ms` | `0` | How long a hole may stay open, `0..60000` ms; `0` = auto from the measured RTT (floor 2 s) |
-| `rx_reorder_bytes` | `8388608` | Receiver reorder budget, bytes, `1..268435456`; bounds each stream's reorder tree and the session-wide sum; `0` is refused |
-| `tx_window_bytes` | `0` | Sender window bytes; `0` = auto from the carriers' BBR samples and aggregate advertised window (the cap scales with the carrier count); an explicit value must not exceed `rx_reorder_bytes` and is never truncated |
+| `rx_reorder_bytes` | `67108864` | Receiver reorder budget, bytes, `1..268435456`; bounds each stream's reorder tree and the session-wide sum; `0` is refused |
+| `tx_window_bytes` | `67108864` | Sender window bytes; `0` = auto from the carriers' BBR samples and aggregate advertised window (the cap scales with the carrier count); an explicit value must not exceed `rx_reorder_bytes` and is never truncated |
 | `tx_retain_bytes` | `0` | Sender retention bytes, `0` = unlimited |
 | `carrier_stall_ms` | `0` | Cap on the stall threshold, `0..3600000` ms; `0` = auto: 5 × RTO (`SRTT + 4×RTTVAR`), clamped to 1..60 s. An explicit value only lowers the auto threshold |
 | `profile` | `http-kal` | `http-kal`, `http-kal-drip`, or `raw` |
 | `fec` | `off` | `off` (old ARQ) or `on` (FEC v6 data plane) |
-| `adaptive` | follows `fec` | `on` lets the 0.3.0 control law choose `n/m` in the `n + m = 8` family; `on` requires `fec=on`; unset means the same as `fec` |
+| `adaptive` | `on` when `fec=on` | `on` lets the control law move `n/m`; `on` requires `fec=on`; with `mode=sc-ldpc` the default is `on` only for a split on the shipped ladder, otherwise `off`; `adaptive=off` always wins |
 | `mode` | `rlnc` | `rlnc` (one group), `grouped` (GF(2) band RLNC), or `sc-ldpc` (downlink 1×256 binary, uplink grouped GF(16); `w` is the codeword block) |
 | `w` | `0` | RLNC window, `0..1024`; `0` resolves to `2*n` |
 | `carriers` | `0` | Carrier slots, `0..256`; `0` resolves to `n + m`; must be a multiple of `n + m` |
@@ -402,7 +403,7 @@ ignored; a `#` after a token is not a comment and the line is refused.
 | `crypto_key` | — | 64 hex digits: pre-shared 256-bit key; `-` clears it. Unset: the near side generates the key and sends it in HELLO (`key_id=1`) |
 | `portblock` | `0-0` | Near only: source-port window for this tunnel's carriers, `1..65535`; `0-0` = draw from the global block set through `/ports`. Must hold at least `n + m` ports (`carriers` with FEC). A far tunnel records it but never dials |
 | `dev` | — | Near only: bind each dialling carrier socket to this interface (`SO_BINDTODEVICE`) before connect, `1..15` bytes. A bind failure is a dial failure: `connect_fail` climbs and the carrier retries after 200 ms. Forces a direct path around a multi-homed or proxy-TUN route |
-| `srcaddrs` | — | Comma-separated local source addresses; only the first is used |
+| `srcaddrs` | — | Comma-separated local source addresses, IPv4 or IPv6 literals; only the first is used; a near `srcaddrs=` must match `peer=`'s address family |
 | `nonce` | — | `16` or `32` hex digits: pin the session nonce; near uses it locally, far requires it from the near side |
 
 Keys that were parsed but never acted on (`framing=`, `chunk=`, `max_retry=`,
@@ -596,7 +597,23 @@ real line.
 
 - **No DNS.** Every address is a literal: `listen=`, `peer=`, and `target=`
   accept `a.b.c.d:port` or `[ipv6]:port`; `srcaddrs=` accepts `a.b.c.d` or an
-  IPv6 literal. There is no name resolution.
+  IPv6 literal. There is no name resolution. `listen=[::]:port` binds the IPv6
+  wildcard; dual-stack acceptance is the host's `bindv6only` policy. `map=`
+  maps ports only, not addresses.
+
+  An IPv6 pair uses the same grammar; the near host is `2001:db8::2`, the far
+  host `2001:db8::1`, and the service listens on `[::1]:5201`:
+
+  ```sh
+  # near
+  echo 'tunnel 1 role=near listen=[::]:9000 peer=[2001:db8::1]:9000 n=4 m=1' \
+       > /proc/net/tbtun/config
+  # far
+  echo 'tunnel 1 role=far listen=[2001:db8::1]:9000 target=[::1]:5201 n=4 m=1 peer=[2001:db8::2]:9000' \
+       > /proc/net/tbtun/config
+  ```
+
+  `srcaddrs=` must use the same family as `peer=` on a near tunnel.
 - **No encryption and no authentication by default; `crypto=on` is
   obfuscation.** `crypto=on` (the default whenever `fec=on`) ChaCha8-obfuscates
   the FEC DATA/PARITY payload only. The 48-byte FEC header, the HTTP headers and
@@ -634,15 +651,13 @@ real line.
   the bytes, the receiver resets the stream (`holes_unrecoverable`) instead of
   guessing.
 - **SC-LDPC and its per-flow adaptive law are implemented.** `mode=sc-ldpc`
-  runs the downlink binary block (1×256, `L=8`, rate 0.5) or the uplink
-  grouped GF(16) code (8×32, `L=16`, rate 1/4); `adaptive=on` (off by default)
-  switches the uplink along the ladder and keeps the downlink at rate 50%.
-  `rlnc`/`grouped` remain as the GF(2) band RLNC fallback.
+  runs the downlink binary block (1×256) or the uplink grouped GF(16) code
+  (8×32, `L=16`); `adaptive=on` moves the split along the shipped rate ladder
+  in both directions. `rlnc`/`grouped` remain as the GF(2) band RLNC fallback.
 - **Adaptive FEC.** The GF(2) family keeps Phase 1: `adaptive=on` moves `m`
   in the fixed `n + m = 8`, 32-group family; `n + m != 8` is not implemented.
-  `mode=sc-ldpc` keeps the configured shape: the 1x256 block fixes the span
-  for the session, so the controller reports but does not switch. The downlink
-  binary codec is fixed at rate 50%. `adaptive=off` keeps the configured shape.
+  `mode=sc-ldpc` moves the configured split along the ladder; a non-ladder
+  split stays fixed. `adaptive=off` keeps the configured shape.
 - **Single-stream FEC.** A session carries one FEC flow (`0x100a`). The
   DATA/PARITY payload is the application byte stream, and an 8 KiB write is
   one DATA share, so no per-stream demux or window state exists.

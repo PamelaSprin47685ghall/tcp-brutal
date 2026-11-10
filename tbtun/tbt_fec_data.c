@@ -2580,9 +2580,6 @@ static bool tbt_fec_sess_sclc(const struct tbt_session *sess)
 static void tbt_fec_tx_switch_abort(struct tbt_session *sess,
                                     struct tbt_fec_tx *tx, bool tell_peer)
 {
-    if (debug && tx)
-        pr_info_ratelimited("tbtun-diag: switch abort state=%u epoch=%u tell=%d\n",
-                            tx->switch_state, tx->switch_epoch, tell_peer);
 
     if (!tx)
         return;
@@ -2607,10 +2604,6 @@ static void tbt_fec_tx_switch_abort(struct tbt_session *sess,
  * late NACK cannot dereference freed state. */
 static void tbt_fec_tx_swap(struct tbt_session *sess, struct tbt_fec_tx *tx)
 {
-    if (debug)
-        pr_info_ratelimited("tbtun-diag: switch swap n=%u m=%u epoch=%u\n",
-                            tx->switch_shape.n, tx->switch_shape.m,
-                            tx->switch_epoch);
     struct tbt_fec_grouped *codec;
     struct tbt_stream *st;
     u16 i, rk;
@@ -2975,14 +2968,6 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
                    so.p_fast_ppm > TBT_FEC_ADAPT_SCLC_BURST_PPM &&
                    so.p_fast_ppm >
                        so.p_ewma_ppm + TBT_FEC_ADAPT_SCLC_BURST_GAP_PPM;
-        if (debug)
-            pr_info_ratelimited("tbtun-diag: tx adapt tunnel=%llu p=%u fast=%u r=%u rv=%d flags=%#x valid=%d idle=%d cur=%u busy=%u sw=%u exp=%u recv=%u\n",
-                                (unsigned long long)sess->tunnel->cfg.id,
-                                so.p_ppm, so.p_fast_ppm, so.r_fail_ppm,
-                                so.r_valid, tx->peer_flags, so.p_valid,
-                                so.pause_idle, tx->adapt_sclc->cur,
-                                tx->adapt_sclc->busy, tx->switch_state,
-                                so.sent_win, so.miss_win);
         if (!so.pause_idle)
             tbt_fec_adapt_sclc_ctl_commit_failed(tx->adapt_sclc, &so, now);
         tbt_fec_adapt_sclc_ctl_eval(tx->adapt_sclc, &so, now, &sws);
@@ -2991,17 +2976,9 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
             struct tbt_fec_shape shape;
             bool nrc = tbt_fec_tx_sclc_next_shape(tx, &sws, &shape);
 
-            if (debug)
-                pr_info_ratelimited("tbtun-diag: switch suggest from=%u to=%u n=%u m=%u epoch=%u reason=%u next=%d\n",
-                                    sws.from, sws.to, sws.shape.n,
-                                    sws.shape.m, sws.epoch, sws.reason, nrc);
             if (nrc)
             {
                 tbt_fec_tx_switch_begin_shape(sess, tx, &shape, sws.epoch);
-                if (debug)
-                    pr_info_ratelimited("tbtun-diag: switch begin n=%u m=%u state=%u\n",
-                                        shape.n, shape.m,
-                                        tx->switch_state);
                 if (tx->switch_state == TBT_FEC_SW_STEADY)
                     tbt_fec_adapt_sclc_ctl_abort(tx->adapt_sclc);
             }
@@ -5328,11 +5305,6 @@ static void tbt_fec_rx_fbk_send(struct tbt_session *sess,
         int err = tbt_fec_send_record(sess, 0, rec, len, true, false,
                                       flow);
 
-        if (debug)
-            pr_info_ratelimited("tbtun-diag: fbk tx sid=%llu flags=%#x p=%u exp=%u recv=%u err=%d\n",
-                                (unsigned long long)flow->sid, f.flags,
-                                f.p_ewma_ppm, f.expected_shares,
-                                f.received_shares, err);
         if (!err)
             rx->fbk_last_ns = now;
     }
@@ -5439,12 +5411,6 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess,
     }
     spin_unlock_bh(&rx->lock);
     tbt_fec_rx_sample(rx, now, &o, &so);
-    if (debug && sc)
-        pr_info_ratelimited("tbtun-diag: rx adapt tunnel=%llu valid=%d idle=%d carrier=%d abandoned=%d sent=%u supers=%u p=%u\n",
-                            (unsigned long long)sess->tunnel->cfg.id,
-                            so.p_valid, so.pause_idle, so.pause_carrier,
-                            so.pause_abandoned, so.sent_win, so.supers_win,
-                            so.p_ppm);
 
     /* A receive-idle side must not overwrite the live TX view with its own
      * zero-window estimate; the TX tick publishes the peer FBK below. */
@@ -5642,9 +5608,6 @@ static void tbt_fec_rx_reset_blocks_locked(struct tbt_fec_rx *rx)
 static void tbt_fec_rx_switch_apply(struct tbt_session *sess,
                                     struct tbt_fec_flow *f)
 {
-    if (debug && f->rx)
-        pr_info_ratelimited("tbtun-diag: rx switch apply epoch=%u n=%u m=%u\n",
-                            f->rx->epoch, f->rx->n, f->rx->m);
     struct tbt_fec_rx *rx = f->rx;
     struct tbt_fec_cfg *c = &rx->pending_cfg;
     struct tbt_stream *st;
@@ -6157,9 +6120,6 @@ static void tbt_fec_rx_on_cfg(struct tbt_session *sess,
                               struct tbt_fec_flow *f,
                               const struct tbt_fec_cfg *cfg)
 {
-    if (debug)
-        pr_info_ratelimited("tbtun-diag: rx cfg flags=%#x epoch=%u n=%u m=%u\n",
-                            cfg->flags, cfg->epoch, cfg->n, cfg->m);
     struct tbt_fec_rx *rx = f->rx;
     u64 span;
     bool ack = false;
@@ -7220,11 +7180,6 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
             return -EPROTO;
         if (!tx)
             return 0;
-        if (debug)
-            pr_info_ratelimited("tbtun-diag: fbk rx sid=%llu flags=%#x p=%u exp=%u recv=%u\n",
-                                (unsigned long long)h.sid, fb.flags,
-                                fb.p_ewma_ppm, fb.expected_shares,
-                                fb.received_shares);
         /* The report names the receive shape; a mismatch means the two
          * ends disagree about the committed codec, so the values would be
          * meaningless. Drop it and count, as §7 requires. */
