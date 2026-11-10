@@ -108,6 +108,13 @@ static void tbt_fec_shape_wire_norm(struct tbt_fec_shape *sh)
  * request timeout (so a request/response stream that never half-closes is
  * delivered). FIN still closes the final block at once. */
 #define TBT_FEC_BLOCK_IDLE_MS 25
+/* After a block is sealed mid-write, the bytes left in the packetizer belong
+ * to the same application write. A relay's source arrives in whole delivered
+ * blocks, so the next bytes of that write can be a scheduling quantum late;
+ * flushing the remainder on the same 25 ms timer turns every block-quantised
+ * source into a short share at the next block's first slot. Give the seam one
+ * longer, still sub-second window before the interactive tail takes it. */
+#define TBT_FEC_CUT_GRACE_MS 100
 /* A super-block that has not become ready for this long cannot become ready:
  * this wire has no NACK and no retransmission, so a share that never arrived
  * is never fetched. The bound is well above any recovery the parity can do
@@ -1424,7 +1431,7 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess,
             sess,
             (u16)(tx->group_map[group] * (tx->n + tx->m) + tx->n + i),
             tx->rec, rec_len, false, false, tx->flow);
-        if (debug >= 2)
+        if (debug >= 3)
             pr_info("tbtun: fec parity tx block=%llu group=%u parity=%u win_len=%u epoch=%u store=%d send=%d\n",
                     block_id, group, i, win_len, h.epoch, st, err);
         if (err)
@@ -1473,7 +1480,7 @@ static void tbt_fec_tx_emit_empty(struct tbt_session *sess,
      * receiver has already settled was one source of the duplicate-marker
      * protocol errors. A NACK for share n gets a fresh marker from
      * tbt_fec_send_empty_marker() instead. */
-    if (debug >= 2)
+    if (debug >= 3)
         pr_info("tbtun: fec empty tx block=%llu group=%u share=%u\n",
                 block_id, group, tx->n);
     /* A marker is control-like: it must ride any up carrier. The parity-0
@@ -1483,7 +1490,7 @@ static void tbt_fec_tx_emit_empty(struct tbt_session *sess,
                               tx->flow);
     if (err)
     {
-        if (debug >= 2)
+        if (debug >= 3)
             pr_info("tbtun: fec empty tx block=%llu group=%u send=%d; retry\n",
                     block_id, group, err);
         /* The ring keeps the marker; the peer's NACK probe can replay it.
@@ -1522,7 +1529,7 @@ static void tbt_fec_tx_close_block(struct tbt_session *sess,
         struct tbt_fec_gtx *g = &tx->g[group];
         u16 len = g->nreal;
 
-        if (debug >= 2)
+        if (debug >= 3)
             pr_info("tbtun: fec close block=%llu group=%u gblk=%llu nreal=%u path=%s\n",
                     block_id, group, g->blk_id, len,
                     g->blk_id != block_id ? "empty" :
@@ -1670,7 +1677,13 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
     tx->short_at_ns = 0;
     tx->block_at_ns = 0;
     if (len < TBT_FEC_S)
+    {
         atomic64_inc(&sess->fec_short_tx);
+        if (debug >= 2)
+            pr_info("tbtun: fec short tx len=%u seq=%llu block=%llu group=%u share=%u base=%llu last=%d\n",
+                    len, seq, block_id, group, share,
+                    st ? READ_ONCE(st->fec_pkt_base) : 0, last);
+    }
     memset(&h, 0, sizeof(h));
     h.type = TBT_FEC_DATA;
     h.flags = last ? TBT_FEC_FF_LAST : 0;
@@ -2065,20 +2078,40 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
 
         if (now >= deadline && tbt_fec_tx_credit_ok(tx))
         {
-            if (tx->fill)
+            /* The block idle deadline ends the block at its last real
+             * share. A partial packet that happens to be in front of it is
+             * stream bytes, not a share of this block yet: cutting it into
+             * a short DATA record gives one extra share for the same bytes,
+             * an unaligned final tail, and a block of credit spent on fewer
+             * than groups*n shares. Those bytes instead start the next
+             * block, where more of the same write usually follows and they
+             * coalesce into a full share. */
+            bool cut_block = block_dirty && tx->block_at_ns &&
+                             now >= tx->block_at_ns;
+
+            if (tx->fill && !cut_block)
             {
                 tbt_fec_packetize(sess, tx, st, false);
                 tx->short_at_ns = 0;
             }
             /* The partial tail is the interactive cut: seal it now. A block
-             * with no partial tail waits for its own idle deadline, so a
-             * full 8 KiB share never cuts the block. */
-            if (fill_ready ||
-                (tx->block_at_ns && now >= tx->block_at_ns))
+             * that is merely waiting for its next share keeps the partial
+             * packet buffered and gets its own tail deadline below. */
+            if (fill_ready || cut_block)
             {
                 tbt_fec_tx_close_block(sess, tx, true);
                 tx->block_at_ns = 0;
                 tx->short_at_ns = 0;
+                /* The bytes kept above still need the interactive tail:
+                 * closing the block is a new quiet interval, not the end
+                 * of the stream. Without this arm the pump would sleep
+                 * forever after sealing a block mid-write. */
+                if (cut_block && tx->fill)
+                    tx->short_at_ns =
+                        now + (u64)(READ_ONCE(st->fec_pkt_base_set)
+                                        ? TBT_FEC_CUT_GRACE_MS
+                                        : TBT_FEC_SHORT_MS) *
+                                  NSEC_PER_MSEC;
             }
         }
         /* Credit is a closed window, not a lost deadline: the ACK that
@@ -5974,7 +6007,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
                 }
             }
             spin_unlock_bh(&rx->lock);
-            if (debug >= 2 && (dup || late))
+            if (debug >= 3 && (dup || late))
                 pr_info("tbtun: fec %s share block=%llu group=%u share=%u type=%u win_len=%u epoch=%u next=%llu\n",
                         late ? "late" : "dup", h.block_id, cg, csh, h.type,
                         h.win_len, h.epoch, next);
@@ -6724,7 +6757,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
     b->used = true;
     if (h.block_id > rx->highest_block)
         rx->highest_block = h.block_id;
-    if (debug >= 2)
+    if (debug >= 3)
         pr_info("tbtun: fec marker rx block=%llu next=%llu used=%d ready=%d empty=%d type=%u win_len=%u\n",
                 h.block_id, READ_ONCE(rx->next_super), b->used, b->ready,
                 b->empty, h.type, h.win_len);
@@ -6834,7 +6867,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
         b->ready = true;
         atomic64_inc(&sess->fec_pad_share);
         rx->work_pending = true;
-        if (debug >= 2)
+        if (debug >= 3)
             pr_info("tbtun: fec marker placed block=%llu group=%u next=%llu empty=%d ready=%d\n",
                     h.block_id, group, READ_ONCE(rx->next_super), b->empty,
                     b->ready);
