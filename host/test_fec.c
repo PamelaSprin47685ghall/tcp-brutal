@@ -3315,6 +3315,20 @@ static void test_replay_alloc_balance(void)
         ok_int(tbt_fec_replay_store(r, (u64)i, 0, 0, rec, sizeof(rec)), 0,
                "balance: store");
     }
+    /* Memory pressure may drop only hot/ACKed planes: every unacknowledged
+     * frontier block survives the shrink. */
+    tbt_fec_replay_shrink(r, true, 0, &host_lock);
+    for (i = 0; i < 10; i++)
+        ok(tbt_fec_replay_has(r, (u64)i, 0, 0),
+           "balance: unacked block survives shrink", NULL);
+    tbt_fec_replay_ack(r, 5, false, &host_lock);
+    tbt_fec_replay_shrink(r, true, 0, &host_lock);
+    for (i = 0; i < 5; i++)
+        ok(!tbt_fec_replay_has(r, (u64)i, 0, 0),
+           "balance: ACKed block released", NULL);
+    for (i = 5; i < 10; i++)
+        ok(tbt_fec_replay_has(r, (u64)i, 0, 0),
+           "balance: newer unacked block kept", NULL);
     tbt_fec_replay_reset(r);
     tbt_fec_replay_free(r);
     ok(tbt_fec_host_live_allocs() == before,

@@ -1049,8 +1049,7 @@ void tbt_fec_replay_shrink(struct tbt_fec_replay *r, bool keep_active,
                            u32 keep_hot, tbt_fec_spinlock_t *lock)
 {
     u8 *drop[TBT_FEC_REPLAY_K_MAX + TBT_FEC_REPLAY_HOT_MAX];
-    u32 i, n = 0, unacked = 0;
-    u64 max_id = 0, threshold = 0;
+    u32 i, n = 0;
 
     if (!r)
         return;
@@ -1062,26 +1061,15 @@ void tbt_fec_replay_shrink(struct tbt_fec_replay *r, bool keep_active,
     r->hot_n = 0;
     for (i = 0; i < r->k; i++)
     {
-        if (!r->blk_rec[i] || r->block_start[i] == ~0ULL)
-            continue;
-        if (r->block_start[i] >= r->ack_floor)
-        {
-            unacked++;
-            if (r->block_start[i] > max_id)
-                max_id = r->block_start[i];
-        }
-    }
-    if (keep_active && unacked > TBT_FEC_REPLAY_HOT_MAX)
-        threshold = max_id - (TBT_FEC_REPLAY_HOT_MAX - 1);
-    for (i = 0; i < r->k; i++)
-    {
         bool keep = false;
 
         if (!r->blk_rec[i] || r->block_start[i] == ~0ULL)
             continue;
+        /* Never evict an unacknowledged block: the frontier block is exactly
+         * the one the receiver is NACKing, and dropping it turns the repair
+         * into -ESTALE and a 30 s stall kill. Only hot/ACKed planes go. */
         if (keep_active)
-            keep = r->block_start[i] >= r->ack_floor &&
-                   r->block_start[i] >= threshold;
+            keep = r->block_start[i] >= r->ack_floor;
         if (keep)
             continue;
         drop[n++] = r->blk_rec[i];

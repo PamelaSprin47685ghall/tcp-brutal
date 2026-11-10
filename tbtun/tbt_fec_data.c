@@ -1971,6 +1971,15 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
                                 mem);
             break;
         }
+        /* At 180 MiB and eight unacked blocks, stop opening a new block
+         * until the ACK frontier moves; never evict the old ones (they are
+         * exactly what NACK repair needs). Only gate between blocks. */
+        if (mem < TBT_FEC_MEM_PAUSE_KB && unacked >= TBT_FEC_REPLAY_HOT_MAX &&
+            tx->fill == 0 && !tbt_fec_tx_block_dirty(tx))
+        {
+            tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(5));
+            break;
+        }
         if ((tx->switch_state == TBT_FEC_SW_CFG_SENT ||
              tx->switch_state == TBT_FEC_SW_DRAIN) &&
             tx->seq >= tx->switch_pkt)
