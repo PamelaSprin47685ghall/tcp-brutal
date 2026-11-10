@@ -503,9 +503,10 @@ adaptive one: `FEC_CFG` grows to 48 bytes and names the shape switch,
   `K = 7` and smaller shapes get a larger window. It re-queues the requested
   records on any up, non-stalled carrier. The share index stays the same; the
   carrier does not. The ACK credit is `K_eff - 2` super-blocks, capped at
-  `TBT_FEC_CREDIT_MAX` (1024 packets, 8 MiB at S=8192), so the oldest block the
-  receiver can still NACK is never evicted; the two spare blocks absorb a block
-  boundary and the in-flight parity.
+  `TBT_FEC_CREDIT_MAX` (1024 packets, 8 MiB at S=8192) downlink and
+  `TBT_FEC_WINDOW_UP / TBT_FEC_S` (512 packets, 4 MiB) uplink, so the oldest
+  block the receiver can still NACK is never evicted; the two spare blocks
+  absorb a block boundary and the in-flight parity.
 - **The replay buffers are constant.** The ring is `K * groups * (n + m)`
   slots of `TBT_FEC_HDR_LEN + S` bytes plus 10 bytes of metadata, capped at
   `TBT_FEC_REPLAY_BUDGET` (15 MiB; the production 32-group shape uses about
@@ -513,7 +514,8 @@ adaptive one: `FEC_CFG` grows to 48 bytes and names the shape switch,
   cannot hold one super-block gets no ring and falls back to parity and TCP.
   The receive window is the ACK credit over the same `groups * (n+m) * S`
   arena (16 MiB), but the grant is `K_eff - 2` super-blocks, capped to
-  `TBT_FEC_CREDIT_MAX`; the sender applies the same cap. The total FEC
+  `TBT_FEC_CREDIT_MAX` downlink and `TBT_FEC_WINDOW_UP / TBT_FEC_S` uplink;
+  the sender applies the same cap. The total FEC
   memory is therefore at most 16 MiB RX + 15 MiB replay = 31 MiB, independent
   of the stream length. The replay queue itself is capped at
   `TBT_FEC_REPLAY_QUEUE_MAX` (256 records); a full queue is a repair miss that
@@ -783,7 +785,8 @@ Payload layouts:
   used for inflight and negative proof, not as a per-stream delivery proof. `recv_cnt`
   is the DATA records received on that path; `rtt_us` is the receiver's TCP SRTT for the
   carrier (0 when unmeasured). `rx_state`: 0 ok, 1 the stream has an out-of-order
-  backlog, 2 the stream's delivery queue is at or above 2 MiB, 3 the stream is dead.
+  backlog, 2 the stream's delivery queue is at or above `TBT_RX_PAUSED_MARK`
+  (8 MiB), 3 the stream is dead.
   Per-stream state travels in SACK.
 - **WINDOW**: reserved. The type and its exact 138-byte body are defined so a later
   revision can add it without renumbering, but this revision's receiver refuses it with
@@ -2199,11 +2202,11 @@ holding the socket lock. The reset path (`tbt_kill_work -> tbt_sock_detach`) can
 work item, and `cancel_work_sync()` then waits for the sleeper forever: QEMU reported
 `INFO: task kworker blocked for more than 122 s` in exactly that stack. Delivery is
 therefore `MSG_DONTWAIT`, and the reset close runs on `system_dfl_wq` so it never shares
-a pool with the work it cancels. The public/target socket gets 1 MiB send/receive
-buffers; a carrier's buffers are sized from its share of the sender window —
-`clamp((window_share + 2 × TBT_CHUNK_MAX) / 2, 128 KiB, 4 MiB)`, set with
-`SO_SNDBUFFORCE`/`SO_RCVBUFFORCE` (§5.4) — so the FBK cannot trail the write by more than
-the window allows. The default 16 KiB buffer is not the first thing the tunnel hits.
+a pool with the work it cancels. The public/target socket asks for 8 MiB
+send/receive with `SO_SNDBUFFORCE`/`SO_RCVBUFFORCE`, so the kernel holds 16 MiB per
+direction and falls back to the capped `SO_*BUF` without the capability; a carrier gets
+the direct 0.8 MiB floor and keeps TCP autotuning (§5.4). The default 16 KiB buffer is
+not the first thing the tunnel hits.
 
 **Why not receive-queue injection.** `docs/recvmsg-probe.md` measured that the
 application's descriptor is its *client* socket, a different object from the accepted
