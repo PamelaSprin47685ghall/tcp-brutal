@@ -3388,7 +3388,7 @@ void tbt_fec_rx_shrink(struct tbt_fec_rx *rx, bool reset)
     keep = reset ? 2 : 0;
     spin_lock_bh(&rx->lock);
     if (reset)
-        memset(rx->late, 0, sizeof(rx->late));
+        memset(&rx->late, 0, sizeof(rx->late));
     if (reset && rx->blk)
     {
         for (i = 0; i < total; i++)
@@ -5599,7 +5599,7 @@ static void tbt_fec_rx_reset_blocks_locked(struct tbt_fec_rx *rx)
     u32 total = (u32)rx->groups * rx->slots;
     u32 i;
 
-    memset(rx->late, 0, sizeof(rx->late));
+    memset(&rx->late, 0, sizeof(rx->late));
 
     for (i = 0; i < total; i++)
     {
