@@ -76,7 +76,11 @@ if [ "$net" -eq 1 ]; then
     mkdir -p "$netdir"
     # The qdiscs and the u32 classifier are modules too; tc loads them by name
     # through /lib/modules, which the guest does not have.
-    for m in failover net_failover virtio_net sch_htb sch_netem cls_u32 sch_tbf; do
+    # tcp_bbr is not part of the data path's framing, but the module sets
+    # TCP_CONGESTION=bbr on every carrier. Without the congestion module the
+    # guest silently keeps cubic ("failed: -22 actual=cubic"), which is not
+    # the transport the production tunnel and probe I measure.
+    for m in failover net_failover virtio_net sch_htb sch_netem cls_u32 sch_tbf tcp_bbr; do
         src=$(find "/usr/lib/modules/$rel/kernel" -name "$m.ko.zst" 2> /dev/null | head -1)
         [ -n "$src" ] || die "no $m module for $rel under /usr/lib/modules"
         dst=$netdir/$m.ko
