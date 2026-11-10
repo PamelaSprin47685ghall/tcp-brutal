@@ -28,6 +28,16 @@ and moves independently of the module version.
   prints its reason, and one unconditional per-generation stall snapshot
   (`una/nxt/wnd/wmem/packets_out/retrans/srtt/mdev`) records why a carrier
   stopped being acknowledged.
+- Probe N's 1x256 grouped 16 MiB run no longer reports `fec_short_tx` or
+  `fec_credit_wait`. A block sealed by the 25 ms idle timer used to flush the
+  partial packet in front of it as a short DATA share; that share forced one
+  extra share, an unaligned final tail, and one extra super-block of credit,
+  so a 16 MiB transfer (exactly the 16-block window) stalled until the ACK
+  frontier caught up. The partial packet now starts the next block, with a
+  100 ms seam deadline after a mid-write cut, so it coalesces into a full
+  share. The per-record FEC traces move to `debug=3`; at `debug=2` the nine
+  lines per share slowed the guest enough that the 25 ms timer fired on its
+  own and turned a healthy transfer into a cut-block storm.
 - The 1 GiB downlink no longer collapses after its first minute. On the
   300 ms WAN the 10 s samples showed repair traffic rising from 47 MB to
   270 MB per two minutes while payload fell from 3.1 MB/s to 0.65-1.0 MB/s.
