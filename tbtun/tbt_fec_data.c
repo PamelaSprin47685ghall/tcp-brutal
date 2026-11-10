@@ -1977,6 +1977,7 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
     bool pulled = false;
     bool fill_ready;
     bool block_dirty;
+    u32 pass = 0;
 
     if (!tx || f->state != 1 || READ_ONCE(sess->closing) ||
         READ_ONCE(sess->fec_stopping))
@@ -2008,6 +2009,15 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
     for (;;)
     {
         u32 got, k, hard, max_unacked;
+
+        /* Yield after one burst so the control-law tick, FBK and ACK work
+         * get a turn. An unbounded pump can run for the whole transfer and
+         * never let tx_adapt_tick switch the shape. */
+        if (pass++ >= 64)
+        {
+            tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+            break;
+        }
         long mem;
         u32 unacked;
 
