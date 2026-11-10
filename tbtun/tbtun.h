@@ -754,6 +754,10 @@ struct tbt_fec_tx
     /* When the packetizer may emit the partial packet it holds. Set when the
      * ring ran dry with bytes in `pkt`, cleared when it emits. 0 = not armed. */
     u64 short_at_ns;
+    /* When a block that holds real shares may be sealed after the ring ran
+     * dry. A bulk stream must reach groups*n shares before parity; only FIN
+     * or this idle deadline cuts it short. 0 = not armed. */
+    u64 block_at_ns;
     u16 groups, n, m, s;
     /* Bound data records this flow still has on the carrier queues. The FIN
      * gate reads it instead of the session-wide count, so one stream's
@@ -1109,7 +1113,7 @@ struct tbt_fec_out
  * match, not at the speed the NACKs arrive. */
 #define TBT_FEC_NACK_REQ_THROTTLED 4u
 
-/* The eight session work items whose reference is owned by the bit in
+/* The nine session work items whose reference is owned by the bit in
  * tbt_session.sched (review/s2-merged-design.md §1.3/§5.1). The order is the
  * destroy cancel order in §5.2; do not renumber without updating it. */
 enum tbt_sess_work
@@ -1124,6 +1128,10 @@ enum tbt_sess_work
     TBT_SW_TX,
     TBT_SW_FEC_TICK,
     TBT_SW_FEC_RX_POLL,
+    /* Idle cut for a block that still holds real shares. Kept off
+     * w_fec_tx so a queued 25 ms block timer cannot swallow the 0 ms submit
+     * wake of the next 8 KiB write. The entry asks w_fec_tx for one pass. */
+    TBT_SW_FEC_CUT,
 };
 
 /* Adaptive FEC control-surface snapshot (0.3.0). The estimator/controller in
@@ -1278,6 +1286,9 @@ struct tbt_session
      * instance. The entry asks w_fec_tx for one pass; that body re-arms this
      * work while the cadence is still needed. */
     struct delayed_work w_fec_tick;
+    /* Idle block cut. Kept off w_fec_tx so the next submit's 0 ms wake is
+     * never queued behind this 25 ms timer. */
+    struct delayed_work w_fec_cut;
     /* Slow RX cadence (NACK retry, estimator sample, stall poll). Kept off
      * w_fec_rx so a ready block's 0 ms wake is never queued behind a 10 ms,
      * 100 ms or 30 s poll. The entry asks w_fec_rx for one pass. */

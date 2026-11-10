@@ -1282,6 +1282,24 @@ static void test_window_rebase(void)
      * at the base: a lost first block is NACKed from there, never skipped. */
     ok_int(tbt_fec_rx_window_step(0, 3, 8, false, false),
            TBT_FEC_RX_WIN_PLACE, "rebase: the first stream keeps block 0");
+
+    /* A short block owns a whole block of packet ids. Cutting it early after
+     * one share does not shrink its span: the next block is 141, so its
+     * shares place, and only the delivered short block's own shares are late.
+     * Before delivery the window floor may still be lowered, so a short
+     * block below next_super is a rebase, never a late drop. */
+    ok_int(tbt_fec_rx_window_step(140, 140, 8, false, true),
+           TBT_FEC_RX_WIN_PLACE,
+           "short block: the frontier places after a cut");
+    ok_int(tbt_fec_rx_window_step(141, 141, 8, false, true),
+           TBT_FEC_RX_WIN_PLACE,
+           "short block: the next block places after a cut");
+    ok_int(tbt_fec_rx_window_step(141, 140, 8, false, true),
+           TBT_FEC_RX_WIN_LATE,
+           "short block: its own share is late after delivery");
+    ok_int(tbt_fec_rx_window_step(141, 140, 8, false, false),
+           TBT_FEC_RX_WIN_REBASE,
+           "short block: below the floor before delivery is a rebase");
 }
 
 /* A v7 flow owns its reorder state. After an abort or detach the old flow's
@@ -2377,6 +2395,13 @@ static void test_block_late(void)
     ok(!tbt_fec_rx_block_late(true, true, next_super, 4, 5 * 128,
                               next_deliver),
        "late: a pending rebase owns the window");
+    /* A block cut after one real share still ends at the next block base:
+     * its padding slots carry no stream bytes, so a later share of the same
+     * block is late only once next_deliver passes that base. */
+    ok(!tbt_fec_rx_block_late(false, true, 6, 6, 7 * 128, 6 * 128),
+       "late: the frontier short block is not late");
+    ok(tbt_fec_rx_block_late(false, true, 6, 6, 7 * 128, 7 * 128),
+       "late: the short block is late after delivery");
 }
 
 int main(void)

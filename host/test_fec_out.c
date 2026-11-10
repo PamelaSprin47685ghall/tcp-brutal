@@ -1019,6 +1019,35 @@ static void case_replay_identity(void)
     sched_free(&s);
 }
 
+/* Releasing a replay record must not touch the DATA outq counters. The
+ * kernel free path used to decrement them for replay objects, which
+ * underflowed its signed counters; the unsigned high-water test then read
+ * the negative value as a huge positive and blocked the packetizer (field:
+ * 0 ms 64-carrier run stalled at block 6 with outq=-2/-16480). */
+static void case_replay_free_keeps_outq(void)
+{
+    struct sched s;
+    struct rec *r;
+
+    sched_init(&s);
+    push(&s, 0, false, false, 0, 1); /* one DATA record */
+    push(&s, 0, false, true, 0, 2);  /* one replay record */
+    ok_u32(s.outq_queued, 1, "replay free: one DATA record queued");
+    ok_u32(s.outq_bytes, REC_LEN, "replay free: DATA bytes queued");
+
+    r = s.replay_head;
+    s.replay_head = r->next;
+    if (!s.replay_head)
+        s.replay_tail = NULL;
+    rec_free(&s, r);
+    ok_u32(s.outq_queued, 1, "replay free: DATA queue unchanged");
+    ok_u32(s.outq_bytes, REC_LEN, "replay free: DATA bytes unchanged");
+    ok_u32(s.replay_queued, 0, "replay free: replay queue empty");
+    ok_u32(s.replay_bytes, 0, "replay free: replay bytes empty");
+    ok(!outq_high(&s), "replay free: the packetizer is not paused", NULL);
+    sched_free(&s);
+}
+
 int main(void)
 {
     case_dispatch_256_224_idle();
@@ -1031,6 +1060,7 @@ int main(void)
     case_replay_fallback();
     case_replay_priority_and_isolation();
     case_replay_identity();
+    case_replay_free_keeps_outq();
     case_open_gate();
     case_stream_switch_cleanup();
 
