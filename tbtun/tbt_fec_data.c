@@ -3856,6 +3856,11 @@ static void tbt_fec_reset_diag(struct tbt_session *sess,
  * next_super / next_deliver / ack_deliver do not move. The work item retries
  * in 2 ms and resumes from the cursor; no byte is skipped and no ACK runs
  * past a byte the application never received. */
+static void tbt_fec_rx_late_take(struct tbt_fec_rx *rx, u64 block_id,
+                                 u16 group, u16 n, u16 m, u8 *out);
+static void tbt_fec_rx_late_finalize(struct tbt_fec_rx *rx, u64 block_id,
+                                     u16 total_miss, u8 bucket);
+
 static noinline void tbt_fec_deliver_est_fold(struct tbt_session *sess,
                                               struct tbt_fec_rx *rx, u64 s)
 {
