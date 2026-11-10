@@ -381,9 +381,11 @@ int main(void)
     memset(&c, 0, sizeof c);
     c.id = ~0ull;
     c.role = TBT_ROLE_NEAR;
-    c.listen_addr = 0xffffffff;
+    c.listen.family = TBT_AF_INET;
+    c.listen.u.v4 = 0xffffffff;
     c.listen_port = 0xffff;
-    c.peer_addr = 0xffffffff;
+    c.peer.family = TBT_AF_INET;
+    c.peer.u.v4 = 0xffffffff;
     c.peer_port = 0xffff;
     c.n = 16;
     c.m = 0;
@@ -407,7 +409,10 @@ int main(void)
     }
     c.nsrc = 8;
     for (int i = 0; i < 8; i++)
-        c.srcaddrs[i] = 0xffffffff;
+    {
+        c.srcaddrs[i].family = TBT_AF_INET;
+        c.srcaddrs[i].u.v4 = 0xffffffff;
+    }
     printf("%d\n", tbt_render_cfg(&c, buf, sizeof buf));
     return 0;
 }

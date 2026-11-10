@@ -202,6 +202,22 @@ static bool tbt_cfg_sane(const struct tbt_cfg *c, int *err)
     //   near: listen= (public port, where apps connect) and peer= (the far end)
     //   far:  listen= (carrier port, where carriers arrive) and target=
     // The other role's fields are legitimately zero and must not be demanded.
+    /* The parser admits only AF_INET and AF_INET6; re-prove it here for any
+     * caller that builds a struct tbt_cfg directly, so a bad family reaches
+     * sock_create_kern() as a refusal, never as a socket of the wrong cache. */
+    if (c->listen.family != TBT_AF_INET && c->listen.family != TBT_AF_INET6)
+    {
+        *err = -EINVAL;
+        return false;
+    }
+    if ((c->peer.family != TBT_AF_UNSPEC && c->peer.family != TBT_AF_INET &&
+         c->peer.family != TBT_AF_INET6) ||
+        (c->target.family != TBT_AF_UNSPEC && c->target.family != TBT_AF_INET &&
+         c->target.family != TBT_AF_INET6))
+    {
+        *err = -EINVAL;
+        return false;
+    }
     if (!c->listen_port)
     {
         *err = -EINVAL;
@@ -500,12 +516,25 @@ void tbt_tunnel_show(struct seq_file *m)
     mutex_lock(&tbt_lock);
     list_for_each_entry_rcu(t, &tbt_tunnels, node)
     {
-        seq_printf(m, "%llu %s %s %pI4:%u %pI4:%u ", t->cfg.id,
+        char ls[TBT_ENDPOINT_STRLEN], ps[TBT_ENDPOINT_STRLEN];
+        char ts[TBT_ENDPOINT_STRLEN];
+        struct tbt_addr peer = t->cfg.peer;
+
+        tbt_endpoint_format(&t->cfg.listen, t->cfg.listen_port, ls, sizeof(ls));
+        /* An unset far peer= used to render as 0.0.0.0:0; keep that spelling
+         * so the columns stay aligned and the header stays truthful. */
+        if (!tbt_addr_set(&peer))
+        {
+            peer.family = TBT_AF_INET;
+            peer.u.v4 = 0;
+        }
+        tbt_endpoint_format(&peer, t->cfg.peer_port, ps, sizeof(ps));
+        tbt_endpoint_format(&t->cfg.target, t->cfg.target_port, ts, sizeof(ts));
+        seq_printf(m, "%llu %s %s %s %s ", t->cfg.id,
                    tbt_role_name(t->cfg.role), tbt_state_name(t),
-                   &t->cfg.listen_addr, ntohs(t->cfg.listen_port),
-                   &t->cfg.peer_addr, ntohs(t->cfg.peer_port));
+                   ls, ps);
         if (t->cfg.role == TBT_ROLE_FAR)
-            seq_printf(m, "%pI4:%u ", &t->cfg.target_addr, ntohs(t->cfg.target_port));
+            seq_printf(m, "%s ", ts);
         else
             seq_puts(m, "- ");
         seq_printf(m, "%u %u %llu\n", t->cfg.n, t->cfg.m, t->streams);
@@ -562,7 +591,7 @@ void tbt_peers_show(struct seq_file *m)
         {
             struct tbt_carrier *c = tbt_carrier_get(s, (u8)i);
             struct sock *sk;
-            __be32 peer = t->cfg.peer_addr;
+            struct tbt_addr peer = t->cfg.peer;
             __be16 port = t->cfg.peer_port;
             u16 sport;
             u32 inflight, rx_lag_ppm = 0, retx_ppm = 0, rtt;
@@ -586,9 +615,14 @@ void tbt_peers_show(struct seq_file *m)
             rtt = READ_ONCE(c->rtt_us);
             if (sk)
             {
-                peer = inet_sk(sk)->inet_daddr;
+                tbt_sk_peer_addr(sk, &peer);
                 port = inet_sk(sk)->inet_dport;
                 sport = ntohs(inet_sk(sk)->inet_sport);
+            }
+            else if (!tbt_addr_set(&peer))
+            {
+                peer.family = TBT_AF_INET;
+                peer.u.v4 = 0;
             }
             uack = READ_ONCE(c->uack);
             inflight = READ_ONCE(c->payload_bytes_sent) > uack ?
@@ -646,13 +680,18 @@ void tbt_peers_show(struct seq_file *m)
                 retx_ppm = unique ? (u32)min_t(u64, copies * 1000000 / unique,
                                                1000000) : 0;
             }
-            seq_printf(m, "%llu %u %u %pI4:%u %llu %u %u %s %s %u %u %u %llu %llu %llu %u %llu %u %u %u %u %u %u\n",
-                       t->cfg.id, i, sport, &peer, ntohs(port), uack,
+            {
+                char peer_s[TBT_ENDPOINT_STRLEN];
+
+                tbt_endpoint_format(&peer, port, peer_s, sizeof(peer_s));
+                seq_printf(m, "%llu %u %u %s %llu %u %u %s %s %u %u %u %llu %llu %llu %u %llu %u %u %u %u %u %u\n",
+                       t->cfg.id, i, sport, peer_s, uack,
                        rtt, inflight, tbt_car_state_name(c->state),
                        tbt_profile_name(c->profile), READ_ONCE(c->recv_cnt),
                        rx_lag_ppm, READ_ONCE(c->rtt_min_us), frames, bytes,
                        dropped, retx_ppm, delivery_bps, cwnd_bytes, snd_wnd,
                        wscale, rcv_wnd, window_clamp, rmem_alloc);
+            }
             tbt_carrier_sk_put(sk);
             tbt_carrier_put(c);
         }
@@ -1874,12 +1913,12 @@ int tbt_session_create(struct tbt_tunnel *t)
      * address only.  Without `peer=` or `nonce=` the first HELLO that passes
      * the nonce check still fixes the anchor (trust-on-first-use), but say so
      * once because that first connection chooses the session. */
-    if (t->cfg.role == TBT_ROLE_FAR && t->cfg.peer_addr)
+    if (t->cfg.role == TBT_ROLE_FAR && tbt_addr_set(&t->cfg.peer))
     {
-        s->anchor_addr = t->cfg.peer_addr;
+        s->anchor = t->cfg.peer;
         s->anchor_set = true;
     }
-    if (t->cfg.role == TBT_ROLE_FAR && !t->cfg.nonce_set && !t->cfg.peer_addr)
+    if (t->cfg.role == TBT_ROLE_FAR && !t->cfg.nonce_set && !tbt_addr_set(&t->cfg.peer))
         pr_warn_once("tbtun: tunnel %llu far side uses trust-on-first-use; "
                      "configure nonce= or peer= to pin it\n",
                      (unsigned long long)t->cfg.id);
@@ -2121,7 +2160,7 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
     struct tbt_carrier *old;
     struct tbt_stream **snap;
     struct sock *csk;
-    __be32 src;
+    struct tbt_addr src;
     int nsnap, i;
 
     if (!c || index >= sess->n_car)
@@ -2129,7 +2168,7 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
     csk = tbt_carrier_sk_get(c);
     if (!csk)
         return -EINVAL;
-    src = inet_sk(csk)->inet_daddr;
+    tbt_sk_peer_addr(csk, &src);
     tbt_carrier_sk_put(csk);
     spin_lock(&sess->lock);
     /* w_replace() marks a provisional carrier stopping when it moves it to
@@ -2140,7 +2179,7 @@ int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index)
         spin_unlock(&sess->lock);
         return -ENOTCONN;
     }
-    if (!sess->anchor_set || src != sess->anchor_addr)
+    if (!sess->anchor_set || !tbt_addr_eq(&src, &sess->anchor))
     {
         /* tbt_rx_hello() is the only caller and already counted this
          * rejection; fail closed for any future caller.  Do not count it

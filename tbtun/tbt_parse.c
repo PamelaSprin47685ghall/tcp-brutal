@@ -42,18 +42,6 @@ static int tbt_fail(struct tbt_parse_error *e, const char *key, const char *why)
     return TBT_PARSE_EINVAL;
 }
 
-/* IPv6 is a distinct refusal: the operator asked for a family this version
- * does not speak, and the errno says so (§8.3). */
-static int tbt_fail_ipv6(struct tbt_parse_error *e)
-{
-    if (e)
-    {
-        e->key = NULL;
-        e->why = "IPv6 is unsupported in v0; use an IPv4 literal";
-    }
-    return TBT_PARSE_EAFNOSUPPORT;
-}
-
 /* ------------------------------------------------------------------------- */
 /* Primitives. No libc beyond string.h, so the host build and the kernel build
  * run the same code. */
@@ -142,16 +130,14 @@ static int tbt_parse_u16(const char *s, u16 *out)
     return 0;
 }
 
-/* a.b.c.d, nothing else. Rejects names and IPv6 with distinct reasons, because
- * the operator needs to know which rule they hit (§1.1, §8.3). */
+/* a.b.c.d, nothing else. A name gets its own reason because the operator has
+ * to know that DNS is never resolved (§1.1, §8.3). */
 static int tbt_parse_ipv4(const char *s, __be32 *out, struct tbt_parse_error *e)
 {
     u8 b[4];
     const char *p = s;
     int i;
 
-    if (*p == '[' || *p == ':')
-        return tbt_fail_ipv6(e);
     for (i = 0; i < 4; i++)
     {
         unsigned v = 0;
@@ -184,6 +170,146 @@ static int tbt_parse_ipv4(const char *s, __be32 *out, struct tbt_parse_error *e)
     return 0;
 }
 
+/* One 1..4 digit hexadecimal group of an IPv6 literal. */
+static int tbt_parse_hex16(const char *s, size_t n, u16 *out)
+{
+    u16 v = 0;
+    size_t i;
+
+    if (!n || n > 4)
+        return -EINVAL;
+    for (i = 0; i < n; i++)
+    {
+        char c = s[i];
+        u16 d;
+
+        if (c >= '0' && c <= '9')
+            d = (u16)(c - '0');
+        else if (c >= 'a' && c <= 'f')
+            d = (u16)(c - 'a' + 10);
+        else if (c >= 'A' && c <= 'F')
+            d = (u16)(c - 'A' + 10);
+        else
+            return -EINVAL;
+        v = (u16)(v << 4 | d);
+    }
+    *out = v;
+    return 0;
+}
+
+/* Parse the colon-separated groups of one half of an IPv6 literal. Returns the
+ * number of 16-bit groups, or -EINVAL. `allow_v4` admits one dotted quad in
+ * the final position; it occupies the last two groups (RFC 4291 §2.2). */
+static int tbt_parse_v6_half(const char *s, size_t len, u16 *out, int max, bool allow_v4)
+{
+    const char *p = s;
+    const char *end = s + len;
+    int n = 0;
+
+    if (p == end)
+        return 0;
+    for (;;)
+    {
+        const char *colon = p;
+        const char *dot = NULL;
+
+        while (colon < end && *colon != ':')
+        {
+            if (*colon == '.')
+                dot = colon;
+            colon++;
+        }
+        if (dot)
+        {
+            __be32 v4;
+            struct tbt_parse_error ignored = { NULL, NULL };
+            char quad[16];
+            size_t qlen = (size_t)(colon - p);
+            const u8 *qb = (const u8 *)&v4;
+
+            if (!allow_v4 || colon != end || n > max - 2)
+                return -EINVAL;
+            if (qlen >= sizeof(quad))
+                return -EINVAL;
+            memcpy(quad, p, qlen);
+            quad[qlen] = '\0';
+            if (tbt_parse_ipv4(quad, &v4, &ignored))
+                return -EINVAL;
+            /* v4 holds the four network-order bytes; split them into two
+             * 16-bit groups explicitly instead of copying the __be32 over
+             * the u16 array, whose byte order is the host's. */
+            out[n] = (u16)((u16)qb[0] << 8 | qb[1]);
+            out[n + 1] = (u16)((u16)qb[2] << 8 | qb[3]);
+            return n + 2;
+        }
+        if (colon == p || n >= max)
+            return -EINVAL;
+        if (tbt_parse_hex16(p, (size_t)(colon - p), &out[n]))
+            return -EINVAL;
+        n++;
+        if (colon == end)
+            return n;
+        p = colon + 1;
+        if (p == end)
+            return -EINVAL; /* a trailing single colon */
+    }
+}
+
+/* A full IPv6 literal: no brackets, no port. `::` may appear once and stands
+ * for at least one zero group. */
+static int tbt_parse_ipv6(const char *s, struct tbt_addr *out, struct tbt_parse_error *e)
+{
+    u16 head[8], tail[8];
+    int nhead, ntail = 0;
+    const char *dc = NULL;
+    const char *p;
+    u8 bytes[16];
+    int i;
+
+    for (p = s; *p; p++)
+    {
+        if (*p == ':' && p[1] == ':')
+        {
+            if (dc)
+                return tbt_fail(e, NULL, "IPv6 literal has more than one ::");
+            dc = p++;
+        }
+    }
+    if (dc)
+    {
+        nhead = tbt_parse_v6_half(s, (size_t)(dc - s), head, 8, false);
+        ntail = tbt_parse_v6_half(dc + 2, strlen(dc + 2), tail, 8, true);
+        if (nhead < 0 || ntail < 0)
+            return tbt_fail(e, NULL, "invalid IPv6 group");
+        if (nhead + ntail > 7)
+            return tbt_fail(e, NULL, ":: must stand for at least one zero group");
+    }
+    else
+    {
+        nhead = tbt_parse_v6_half(s, strlen(s), head, 8, true);
+        if (nhead < 0)
+            return tbt_fail(e, NULL, "invalid IPv6 group");
+        if (nhead != 8)
+            return tbt_fail(e, NULL, "an IPv6 literal needs 8 groups or ::");
+    }
+    memset(bytes, 0, sizeof(bytes));
+    for (i = 0; i < nhead; i++)
+    {
+        bytes[2 * i] = (u8)(head[i] >> 8);
+        bytes[2 * i + 1] = (u8)head[i];
+    }
+    for (i = 0; i < ntail; i++)
+    {
+        int slot = 8 - ntail + i;
+
+        bytes[2 * slot] = (u8)(tail[i] >> 8);
+        bytes[2 * slot + 1] = (u8)tail[i];
+    }
+    out->family = TBT_AF_INET6;
+    memcpy(out->u.v6, bytes, sizeof(bytes));
+    return 0;
+}
+
 /* Ports are stored in network byte order without arpa/inet.h, so the host and
  * the kernel agree on the byte layout. */
 static __be16 tbt_port_store(u16 host_order)
@@ -196,27 +322,43 @@ static u16 tbt_port_load(__be16 net_order)
     return tbt_port_host16(net_order);
 }
 
-static int tbt_parse_addr(const char *s, __be32 *addr, __be16 *port,
+static int tbt_parse_addr(const char *s, struct tbt_addr *addr, __be16 *port,
                           struct tbt_parse_error *e)
 {
-    char buf[64];
+    char buf[80];
     char *colon;
     u16 p;
+    size_t len = strlen(s);
 
-    if (strlen(s) >= sizeof(buf))
+    if (len >= sizeof(buf))
         return tbt_fail(e, NULL, "address field too long");
-    memcpy(buf, s, strlen(s) + 1);
-    colon = strrchr(buf, ':');
-    if (!colon)
-        return tbt_fail(e, NULL, "expected address:port");
-    *colon = '\0';
-    if (strchr(buf, ':') || strchr(buf, '['))
-        return tbt_fail_ipv6(e);
+    memcpy(buf, s, len + 1);
+    if (buf[0] == '[')
     {
-        int rc = tbt_parse_ipv4(buf, addr, e);
+        char *close = strchr(buf, ']');
+        int rc;
 
+        if (!close)
+            return tbt_fail(e, NULL, "expected ] after an IPv6 literal");
+        if (close[1] != ':')
+            return tbt_fail(e, NULL, "expected :port after the IPv6 literal");
+        *close = '\0';
+        rc = tbt_parse_ipv6(buf + 1, addr, e);
         if (rc)
             return rc;
+        colon = close + 1;
+    }
+    else
+    {
+        colon = strrchr(buf, ':');
+        if (!colon)
+            return tbt_fail(e, NULL, "expected address:port");
+        *colon = '\0';
+        if (strchr(buf, ':'))
+            return tbt_fail(e, NULL, "an IPv6 literal must be bracketed: [addr]:port");
+        addr->family = TBT_AF_INET;
+        if (tbt_parse_ipv4(buf, &addr->u.v4, e))
+            return TBT_PARSE_EINVAL;
     }
     if (tbt_parse_u16(colon + 1, &p) || !p)
         return tbt_fail(e, NULL, "port must be 1..65535");
@@ -338,9 +480,35 @@ static int tbt_parse_inflate(const char *s, u32 *out, struct tbt_parse_error *e)
     return 0;
 }
 
+/* One srcaddrs entry: a bare literal, or an IPv6 literal in brackets for
+ * symmetry with the listen=/peer=/target= grammar. The list separator is a
+ * comma, so a bare IPv6 literal is unambiguous too. */
+static int tbt_parse_srcaddr_one(const char *s, struct tbt_addr *out,
+                                 struct tbt_parse_error *e)
+{
+    size_t len = strlen(s);
+
+    if (len >= 2 && s[0] == '[' && s[len - 1] == ']')
+    {
+        char buf[TBT_ADDR_STRLEN];
+
+        if (len - 2 >= sizeof(buf))
+            return tbt_fail(e, NULL, "srcaddrs entry too long");
+        memcpy(buf, s + 1, len - 2);
+        buf[len - 2] = '\0';
+        return tbt_parse_ipv6(buf, out, e);
+    }
+    if (strchr(s, ':'))
+        return tbt_parse_ipv6(s, out, e);
+    out->family = TBT_AF_INET;
+    return tbt_parse_ipv4(s, &out->u.v4, e);
+}
+
 static int tbt_parse_srcaddrs(const char *v, struct tbt_cfg *cfg, struct tbt_parse_error *e)
 {
-    char buf[128];
+    /* Eight full IPv6 literals plus commas: 8 * 45 + 7, still inside one
+     * TBT_LINE_MAX line. */
+    char buf[384];
     char *p = buf, *tok;
 
     if (strlen(v) >= sizeof(buf))
@@ -358,7 +526,7 @@ static int tbt_parse_srcaddrs(const char *v, struct tbt_cfg *cfg, struct tbt_par
             *comma = '\0';
             if (cfg->nsrc >= TBT_SRC_MAX)
                 return tbt_fail(e, NULL, "too many srcaddrs entries");
-            rc = tbt_parse_ipv4(one, &cfg->srcaddrs[cfg->nsrc], e);
+            rc = tbt_parse_srcaddr_one(one, &cfg->srcaddrs[cfg->nsrc], e);
             if (rc)
                 return rc;
             cfg->nsrc++;
@@ -366,7 +534,7 @@ static int tbt_parse_srcaddrs(const char *v, struct tbt_cfg *cfg, struct tbt_par
         }
         if (cfg->nsrc >= TBT_SRC_MAX)
             return tbt_fail(e, NULL, "too many srcaddrs entries");
-        rc = tbt_parse_ipv4(one, &cfg->srcaddrs[cfg->nsrc], e);
+        rc = tbt_parse_srcaddr_one(one, &cfg->srcaddrs[cfg->nsrc], e);
         if (rc)
             return rc;
         cfg->nsrc++;
@@ -485,7 +653,7 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         }
         else if (!strcmp(key, "listen"))
         {
-            int rc = tbt_parse_addr(val, &cfg->listen_addr, &cfg->listen_port, e);
+            int rc = tbt_parse_addr(val, &cfg->listen, &cfg->listen_port, e);
 
             if (rc)
                 return rc;
@@ -493,7 +661,7 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         }
         else if (!strcmp(key, "peer"))
         {
-            int rc = tbt_parse_addr(val, &cfg->peer_addr, &cfg->peer_port, e);
+            int rc = tbt_parse_addr(val, &cfg->peer, &cfg->peer_port, e);
 
             if (rc)
                 return rc;
@@ -501,7 +669,7 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         }
         else if (!strcmp(key, "target"))
         {
-            int rc = tbt_parse_addr(val, &cfg->target_addr, &cfg->target_port, e);
+            int rc = tbt_parse_addr(val, &cfg->target, &cfg->target_port, e);
 
             if (rc)
                 return rc;
@@ -712,6 +880,18 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
         return tbt_fail(e, "peer", "role=near needs peer=addr:port");
     if (cfg->role == TBT_ROLE_FAR && !have_target)
         return tbt_fail(e, "target", "role=far needs target=addr:port");
+    /* A near carrier binds srcaddrs[0] on the socket that dials peer=; a
+     * source address of the other family can only fail that bind at runtime,
+     * so refuse the line now. A far tunnel records srcaddrs but never dials. */
+    if (cfg->role == TBT_ROLE_NEAR && cfg->nsrc)
+    {
+        int i;
+
+        for (i = 0; i < cfg->nsrc; i++)
+            if (cfg->srcaddrs[i].family != cfg->peer.family)
+                return tbt_fail(e, "srcaddrs",
+                                "srcaddrs must match the peer= address family");
+    }
     /* A near tunnel binds slot 0 and every map on the same address, so two
      * equal listen ports cannot both exist. A far tunnel ignores the map
      * listen half, so its numbers need not be distinct. */
@@ -1155,6 +1335,133 @@ static void tbt_fmt_ipv4(__be32 addr, char *out)
     }
 }
 
+/* Minimal-width lowercase hexadecimal, 1..4 digits. */
+static size_t tbt_fmt_hex16(char *out, u16 v)
+{
+    static const char hex[] = "0123456789abcdef";
+    size_t n = 0;
+    int shift;
+
+    for (shift = 12; shift > 0 && !(v >> shift); shift -= 4)
+        ;
+    for (; shift >= 0; shift -= 4)
+        out[n++] = hex[(v >> shift) & 0xf];
+    return n;
+}
+
+/* RFC 5952: lowercase, no leading zeros, the longest run of two or more zero
+ * groups (leftmost on a tie) compressed to "::". An IPv4-mapped address keeps
+ * the ::ffff:a.b.c.d spelling, exactly as %pI6c renders it. */
+static void tbt_fmt_ipv6(const u8 addr[16], char *out, size_t size)
+{
+    static const u8 mapped[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff };
+    u16 g[8];
+    int best = -1, best_len = 0;
+    size_t n = 0;
+    int i;
+
+    if (size < TBT_ADDR_STRLEN)
+    {
+        if (size)
+            out[0] = '\0';
+        return;
+    }
+    if (!memcmp(addr, mapped, sizeof(mapped)))
+    {
+        out[n++] = ':';
+        out[n++] = ':';
+        out[n++] = 'f';
+        out[n++] = 'f';
+        out[n++] = 'f';
+        out[n++] = 'f';
+        out[n++] = ':';
+        n += tbt_fmt_octet(out + n, addr[12]);
+        out[n++] = '.';
+        n += tbt_fmt_octet(out + n, addr[13]);
+        out[n++] = '.';
+        n += tbt_fmt_octet(out + n, addr[14]);
+        out[n++] = '.';
+        n += tbt_fmt_octet(out + n, addr[15]);
+        out[n] = '\0';
+        return;
+    }
+    for (i = 0; i < 8; i++)
+        g[i] = (u16)((u16)addr[2 * i] << 8 | addr[2 * i + 1]);
+    for (i = 0; i < 8;)
+    {
+        int j = i;
+
+        while (j < 8 && !g[j])
+            j++;
+        if (j - i >= 2 && j - i > best_len)
+        {
+            best = i;
+            best_len = j - i;
+        }
+        i = j > i ? j : i + 1;
+    }
+    for (i = 0; i < 8;)
+    {
+        if (i == best)
+        {
+            out[n++] = ':';
+            out[n++] = ':';
+            i += best_len;
+            continue;
+        }
+        if (n && out[n - 1] != ':')
+            out[n++] = ':';
+        n += tbt_fmt_hex16(out + n, g[i]);
+        i++;
+    }
+    out[n] = '\0';
+}
+
+void tbt_addr_format(const struct tbt_addr *a, char *out, size_t size)
+{
+    if (!out || !size)
+        return;
+    if (!a || !tbt_addr_set(a))
+    {
+        out[0] = '\0';
+        return;
+    }
+    if (a->family == TBT_AF_INET6)
+    {
+        tbt_fmt_ipv6(a->u.v6, out, size);
+        return;
+    }
+    if (size < 16)
+    {
+        out[0] = '\0';
+        return;
+    }
+    tbt_fmt_ipv4(a->u.v4, out);
+}
+
+void tbt_endpoint_format(const struct tbt_addr *a, __be16 port, char *out, size_t size)
+{
+    char addr[TBT_ADDR_STRLEN];
+    size_t n;
+    u16 p;
+
+    if (!out || !size)
+        return;
+    if (!a || !tbt_addr_set(a))
+    {
+        out[0] = '\0';
+        return;
+    }
+    tbt_addr_format(a, addr, sizeof(addr));
+    p = tbt_port_load(port);
+    if (a->family == TBT_AF_INET6)
+        n = (size_t)snprintf(out, size, "[%s]:%u", addr, p);
+    else
+        n = (size_t)snprintf(out, size, "%s:%u", addr, p);
+    if (n >= size)
+        out[0] = '\0';
+}
+
 static void tbt_fmt_hex(const u8 *in, size_t n, char *out);
 
 int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
@@ -1162,23 +1469,23 @@ int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
     static const char *const profiles[] = { "http-kal", "http-kal", "http-kal-drip", "raw" };
     static const char *const fec_modes[] = { "off", "on" };
     static const char *const modes[] = { "rlnc", "rlnc", "grouped", "sc-ldpc" };
-    char la[16], pa[16], ta[16];
+    char ls[TBT_ENDPOINT_STRLEN], ps[TBT_ENDPOINT_STRLEN], ts[TBT_ENDPOINT_STRLEN];
     size_t off = 0;
     int i, rc;
 
-    tbt_fmt_ipv4(c->listen_addr, la);
-    tbt_fmt_ipv4(c->peer_addr, pa);
-    tbt_fmt_ipv4(c->target_addr, ta);
+    tbt_endpoint_format(&c->listen, c->listen_port, ls, sizeof(ls));
+    tbt_endpoint_format(&c->peer, c->peer_port, ps, sizeof(ps));
+    tbt_endpoint_format(&c->target, c->target_port, ts, sizeof(ts));
 
-    rc = tbt_addf(buf, size, &off, "tunnel %llu role=%s listen=%s:%u",
+    rc = tbt_addf(buf, size, &off, "tunnel %llu role=%s listen=%s",
                   (unsigned long long)c->id,
                   c->role == TBT_ROLE_NEAR ? "near" : "far",
-                  la, tbt_port_load(c->listen_port));
+                  ls);
     if (rc)
         return rc;
     if (c->role == TBT_ROLE_NEAR)
     {
-        rc = tbt_addf(buf, size, &off, " peer=%s:%u", pa, tbt_port_load(c->peer_port));
+        rc = tbt_addf(buf, size, &off, " peer=%s", ps);
         if (rc)
             return rc;
         /* A near tunnel may name slot 0's target port explicitly; the address
@@ -1186,24 +1493,22 @@ int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
          * Rendered when set, so the line still round-trips. */
         if (c->target_port)
         {
-            rc = tbt_addf(buf, size, &off, " target=%s:%u", ta,
-                          tbt_port_load(c->target_port));
+            rc = tbt_addf(buf, size, &off, " target=%s", ts);
             if (rc)
                 return rc;
         }
     }
     else
     {
-        rc = tbt_addf(buf, size, &off, " target=%s:%u", ta, tbt_port_load(c->target_port));
+        rc = tbt_addf(buf, size, &off, " target=%s", ts);
         if (rc)
             return rc;
         /* Far: the near source address allowed to join carriers.  The port is
          * grammar filler; only the address is used.  Omitted when unset, so a
          * far line without an anchor stays unchanged. */
-        if (c->peer_addr && c->peer_port)
+        if (tbt_addr_set(&c->peer) && c->peer_port)
         {
-            rc = tbt_addf(buf, size, &off, " peer=%s:%u", pa,
-                          tbt_port_load(c->peer_port));
+            rc = tbt_addf(buf, size, &off, " peer=%s", ps);
             if (rc)
                 return rc;
         }
@@ -1286,8 +1591,8 @@ int tbt_render_cfg(const struct tbt_cfg *c, char *buf, size_t size)
             return rc;
         for (i = 0; i < c->nsrc && i < TBT_SRC_MAX; i++)
         {
-            tbt_fmt_ipv4(c->srcaddrs[i], la);
-            rc = tbt_addf(buf, size, &off, i ? ",%s" : "%s", la);
+            tbt_addr_format(&c->srcaddrs[i], ls, sizeof(ls));
+            rc = tbt_addf(buf, size, &off, i ? ",%s" : "%s", ls);
             if (rc)
                 return rc;
         }

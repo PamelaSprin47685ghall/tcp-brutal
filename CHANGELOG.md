@@ -3,6 +3,30 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [Unreleased]
+
+### Added
+
+- IPv6 endpoints. `listen=`, `peer=`, `target=` and `srcaddrs=` accept an IPv4
+  literal or a bracketed IPv6 literal (`[2001:db8::1]:9000`), and one tunnel
+  line may mix families. The listener, carrier dial and target dial create the
+  socket in the configured address family; a carrier's `portblock` source port
+  is bound with `sockaddr_in6`; the far-side anchor comparison folds an
+  IPv4-mapped IPv6 source back to IPv4; the HTTP `Host` header uses
+  `[v6]:port`. `/proc/net/tbtun/config` and the `tunnels`/`peers` views render
+  IPv6 in RFC 5952 compressed form. IPv4 configuration and output are
+  byte-for-byte unchanged. The `sk_prot` override now copies `tcpv6_prot` for
+  an IPv6 carrier, so the socket is released through the cache it was
+  allocated from.
+
+### Changed
+
+- `struct tbt_cfg` stores each endpoint as `struct tbt_addr` (family plus
+  network-order bytes) instead of `__be32`. This structure is internal to the
+  module and the host tests; the `/proc` grammar is the operator ABI and gains
+  the bracketed IPv6 form. The unused `TBT_PARSE_EAFNOSUPPORT` error code is
+  gone.
+
 ## [0.7.2] - 2026-11-10
 
 ### Fixed

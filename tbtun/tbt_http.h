@@ -51,7 +51,7 @@
  * kernel caller can put the block on the stack; the builder returns 0 rather
  * than truncate, and the actual block is ~340 bytes. */
 #define TBT_HTTP_REQ_MAX 4096 /* covers TBT_HTTP_HDR_MAX; requests are ~380 B */
-#define TBT_HTTP_HOST_MAX 64  /* IPv4 literal plus an optional ":port" */
+#define TBT_HTTP_HOST_MAX 64  /* IPv4 or [IPv6] literal plus an optional ":port" */
 #define TBT_HTTP_REQID_LEN 26 /* DESIGN §3.2: 26 lowercase base32 characters */
 
 /* Response header block bound. The far side emits ~150 bytes; the bound only

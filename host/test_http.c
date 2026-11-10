@@ -1146,7 +1146,7 @@ static void test_request(void)
     {
         static const char *const bad[] = {
             "", "example.com", "10.0.0.256", "10.0.0.01", "10.0.0.1:0",
-            "10.0.0.1:", "10.0.0.1:65536", "[::1]:443", "10.0.0.1:080",
+            "10.0.0.1:", "10.0.0.1:65536", "10.0.0.1:080",
             "10.0.0", "10.0.0.1.2", "10.0.0.-1", "10.0.0.1 x",
             "1.2.3.4:5:6", "010.0.0.1",
         };
@@ -1159,6 +1159,38 @@ static void test_request(void)
                 good = 0;
         }
         ok(good, "invalid Host literals are refused", NULL);
+    }
+
+    /* IPv6 authorities use the bracketed form; the same one-spelling rule
+     * applies to the literal inside the brackets. */
+    {
+        static const char *const good6[] = {
+            "[::1]", "[::1]:443", "[2001:db8::1]:8443",
+            "[::ffff:192.0.2.1]:443", "[1:2:3:4:5:6:7:8]",
+        };
+        static const char *const bad6[] = {
+            "[::1", "[::1]x", "[1::2::3]:80", "[1:2:3:4:5:6:7:8:9]:80",
+            "[::1]:0", "[::1]:65536", "[::1]:080", "[gggg::1]:80",
+            "[:]:80", "[::1]:", "[]:80",
+        };
+
+        good = 1;
+        for (i = 0; i < sizeof(good6) / sizeof(good6[0]); i++)
+        {
+            cfg_set(&cfg, good6[i], "abcdefghijklmnopqrstuvwxyz");
+            if (tbt_http_req_header(buf, sizeof(buf), &cfg) == 0)
+                good = 0;
+        }
+        ok(good, "IPv6 Host literals are accepted", NULL);
+
+        good = 1;
+        for (i = 0; i < sizeof(bad6) / sizeof(bad6[0]); i++)
+        {
+            cfg_set(&cfg, bad6[i], "abcdefghijklmnopqrstuvwxyz");
+            if (tbt_http_req_header(buf, sizeof(buf), &cfg) != 0)
+                good = 0;
+        }
+        ok(good, "invalid IPv6 Host literals are refused", NULL);
     }
 
     /* A host field without a NUL inside its bound is refused, not scanned. */

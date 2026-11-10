@@ -755,7 +755,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
     if (t->cfg.role == TBT_ROLE_FAR)
     {
         struct sock *csk = tbt_carrier_sk_get(c);
-        __be32 src;
+        struct tbt_addr src;
 
         if (h->path_id >= sess->n_car || !csk)
         {
@@ -763,12 +763,12 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
                 tbt_carrier_sk_put(csk);
             return tbt_hello_bad(c, "path id");
         }
-        src = inet_sk(csk)->inet_daddr;
+        tbt_sk_peer_addr(csk, &src);
         spin_lock(&sess->lock);
         /* An established anchor rejects every other source, free carrier
          * index included, before the nonce is even examined: a stranger
          * cannot probe the nonce. */
-        if (sess->anchor_set && src != sess->anchor_addr)
+        if (sess->anchor_set && !tbt_addr_eq(&src, &sess->anchor))
         {
             atomic64_inc(&sess->join_src_reject);
             spin_unlock(&sess->lock);
@@ -792,8 +792,8 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
              * session without the secret. A far tunnel has no configured
              * peer (0), so the first HELLO defines it and every later one
              * must match; a configured peer must match its source address. */
-            if (!csk || (t->cfg.peer_addr &&
-                         inet_sk(csk)->inet_daddr != t->cfg.peer_addr))
+            if (!csk || (tbt_addr_set(&t->cfg.peer) &&
+                         !tbt_addr_eq(&src, &t->cfg.peer)))
             {
                 atomic64_inc(&sess->join_nonce_reject);
                 spin_unlock(&sess->lock);
@@ -813,7 +813,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
         /* Only a HELLO that passed the nonce check may fix the anchor. */
         if (!sess->anchor_set)
         {
-            sess->anchor_addr = src;
+            sess->anchor = src;
             sess->anchor_set = true;
         }
         spin_unlock(&sess->lock);

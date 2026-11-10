@@ -21,6 +21,7 @@
 #include <linux/errno.h>
 #include <linux/if.h>
 #include <linux/printk.h>
+#include <linux/string.h>
 #include <linux/types.h>
 #else
 #include <errno.h>
@@ -28,6 +29,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 typedef uint16_t __be16;
 typedef uint32_t __be32;
 #endif
@@ -65,6 +67,65 @@ static inline bool tbt_read_bool_at(const void *p)
 #define TBT_LINE_MAX 1024
 #define TBT_SRC_MAX 8      /* srcaddrs= entries recorded per tunnel */
 
+/* Address families, as the Linux ABI numbers. The module and the host test
+ * share these values, so a parsed configuration means the same thing in both
+ * builds and tbt_parse.h needs no <sys/socket.h>. */
+#define TBT_AF_UNSPEC 0
+#define TBT_AF_INET 2
+#define TBT_AF_INET6 10
+
+/* One configured address: a family plus network-order bytes. Every endpoint
+ * carries its own family, because one tunnel line may mix them: a near side
+ * can listen on IPv6 while it dials an IPv4 peer, and a far side's target is
+ * independent of its carrier family.
+ *
+ * `family == TBT_AF_UNSPEC` means "not configured". A configured 0.0.0.0 or
+ * :: is a real wildcard, so the bytes alone cannot be the presence test. */
+struct tbt_addr
+{
+    u8 family;
+    union
+    {
+        __be32 v4;
+        u8 v6[16];
+    } u;
+};
+
+/* ::ffff:a.b.c.d and a.b.c.d name one endpoint. A dual-stack listener reports
+ * an IPv4 connection in the mapped form, so an address comparison must fold
+ * it back or a configured IPv4 peer would never match. */
+static inline bool tbt_addr_v4mapped(const struct tbt_addr *a)
+{
+    static const u8 prefix[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff };
+
+    return a->family == TBT_AF_INET6 && !memcmp(a->u.v6, prefix, sizeof(prefix));
+}
+
+static inline bool tbt_addr_set(const struct tbt_addr *a)
+{
+    return a->family != TBT_AF_UNSPEC;
+}
+
+/* Equal endpoints, with the IPv4-mapped form folded to IPv4. An unset address
+ * equals nothing, not even another unset one: callers use tbt_addr_set() for
+ * presence and this for identity. */
+static inline bool tbt_addr_eq(const struct tbt_addr *a, const struct tbt_addr *b)
+{
+    if (!tbt_addr_set(a) || !tbt_addr_set(b))
+        return false;
+    if (a->family == b->family)
+    {
+        if (a->family == TBT_AF_INET6)
+            return !memcmp(a->u.v6, b->u.v6, sizeof(a->u.v6));
+        return a->u.v4 == b->u.v4;
+    }
+    if (a->family == TBT_AF_INET6 && tbt_addr_v4mapped(a))
+        return !memcmp(a->u.v6 + 12, &b->u.v4, sizeof(b->u.v4));
+    if (b->family == TBT_AF_INET6 && tbt_addr_v4mapped(b))
+        return !memcmp(b->u.v6 + 12, &a->u.v4, sizeof(a->u.v4));
+    return false;
+}
+
 /* One additional port mapping. Slot 0 is the listen=/target= pair; map=
  * entries fill slots 1..TBT_MAP_MAX-1 in the order written. Ports are host
  * order: they are compared and rendered as numbers, and only the listener
@@ -81,7 +142,6 @@ struct tbt_map
  * unchanged and a shell sees a familiar errno. */
 #define TBT_PARSE_EINVAL (-EINVAL)
 #define TBT_PARSE_E2BIG (-E2BIG)
-#define TBT_PARSE_EAFNOSUPPORT (-EAFNOSUPPORT)
 
 /* Parsed tunnel configuration: one `tunnel` line, defaults filled in. */
 struct tbt_cfg
@@ -100,11 +160,11 @@ struct tbt_cfg
                  * the shape fixed, so the value only has to match within a
                  * session. */
     u16 carriers; /* effective slots: a multiple of n+m, or n+m resolved from 0 */
-    __be32 listen_addr;
+    struct tbt_addr listen;
     __be16 listen_port;
-    __be32 peer_addr;
+    struct tbt_addr peer;
     __be16 peer_port;
-    __be32 target_addr;
+    struct tbt_addr target;
     __be16 target_port;
     u8 nmap;                    /* extra mappings; slot 0 is listen/target */
     struct tbt_map maps[TBT_MAP_MAX - 1];
@@ -131,7 +191,7 @@ struct tbt_cfg
     u32 tx_window_bytes;  /* sender window, default 67108864 */
     u32 tx_retain_bytes;  /* C3 replay retention, 0 = unlimited */
     u32 carrier_stall_ms; /* C3 stall detector, 0 = auto (the default) */
-    __be32 srcaddrs[TBT_SRC_MAX];
+    struct tbt_addr srcaddrs[TBT_SRC_MAX];
     /* Near carriers bind their dialling socket to this interface
      * (SO_BINDTODEVICE) before connect, so a TUN policy route cannot capture
      * them. Empty unless dev= was present. */
@@ -213,8 +273,8 @@ struct tbt_parse_error
 
 /* Parse one line in place (NUL-terminated, mutable, shorter than
  * TBT_LINE_MAX). Returns 0 on success and fills *out, including for a blank
- * line or comment (TBT_CMD_NONE). On failure returns TBT_PARSE_EINVAL,
- * TBT_PARSE_E2BIG or TBT_PARSE_EAFNOSUPPORT and fills *err.
+ * line or comment (TBT_CMD_NONE). On failure returns TBT_PARSE_EINVAL or
+ * TBT_PARSE_E2BIG and fills *err.
  *
  * Crash-regression contract: this function takes the line, the command and the
  * error sink, and nothing else. It never reads `current`, a net namespace, or
@@ -226,6 +286,19 @@ int tbt_parse_line(char *line, struct tbt_cmd *out, struct tbt_parse_error *err)
  * `ports 0-0`, leaves *lo and *hi zero and returns 0; the caller treats that
  * as a no-op and leaves the block unchanged. */
 int tbt_parse_ports(const char *line, u16 *lo, u16 *hi, struct tbt_parse_error *err);
+
+/* Longest rendered address and address:port, NUL included. An IPv6 literal is
+ * 45 bytes; the endpoint adds "[]", ":" and up to five port digits. */
+#define TBT_ADDR_STRLEN 46
+#define TBT_ENDPOINT_STRLEN (TBT_ADDR_STRLEN + 2 + 1 + 5 + 1)
+
+/* Render an address without a port: a dotted quad, or the RFC 5952 compressed
+ * IPv6 spelling that %pI6c produces. An unset address renders as "". */
+void tbt_addr_format(const struct tbt_addr *a, char *out, size_t size);
+
+/* Render `address:port`: "a.b.c.d:p" for IPv4 and "[v6]:p" for IPv6, the
+ * bracket form both the tunnel grammar and the Host header require. */
+void tbt_endpoint_format(const struct tbt_addr *a, __be16 port, char *out, size_t size);
 
 /* Render one tunnel in canonical form: every scalar key, defaults included,
  * in a fixed order; the list key (srcaddrs) only when set. Returns

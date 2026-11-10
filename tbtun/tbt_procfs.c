@@ -96,8 +96,6 @@ static int tbt_config_apply(char *line, struct net *net)
     err = tbt_parse_line(line, &cmd, &perr);
     if (err)
     {
-        if (err == TBT_PARSE_EAFNOSUPPORT)
-            pr_info_once("tbtun: IPv6 is unsupported in v0; rejected a config line\n");
         pr_debug("tbtun: config rejected (%s%s%s): %d\n",
                  perr.key ? perr.key : "", perr.key && perr.why ? ": " : "",
                  perr.why ? perr.why : "invalid line", err);

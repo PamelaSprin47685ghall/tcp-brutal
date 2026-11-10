@@ -45,17 +45,165 @@ static size_t http_puts(char *buf, size_t cap, size_t off, const char *src)
     return http_put(buf, cap, off, src, strlen(src));
 }
 
-/* A canonical IPv4 literal with an optional ":port", which is what §3.2 means
- * by "peer address literal". Rejecting hostnames and IPv6 here is deliberate:
- * the module only carries IPv4 (tbt_parse.c refuses IPv6), and a Host header
- * that does not match the connection target is worse than no carrier. Leading
- * zeros are rejected so one address has exactly one spelling. */
+/* One hexadecimal group of an IPv6 literal: 1..4 digits. */
+static bool http_hex_group(const char *s, size_t n)
+{
+    size_t i;
+
+    if (!n || n > 4)
+        return false;
+    for (i = 0; i < n; i++)
+    {
+        char c = s[i];
+
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+              (c >= 'A' && c <= 'F')))
+            return false;
+    }
+    return true;
+}
+
+/* A dotted quad with the same no-leading-zero rule as the IPv4 host form. */
+static bool http_quad_ok(const char *s, size_t n)
+{
+    unsigned octet = 0, digits = 0, dots = 0;
+    size_t i;
+
+    for (i = 0; i < n; i++)
+    {
+        char c = s[i];
+
+        if (c == '.')
+        {
+            if (!digits || dots == 3)
+                return false;
+            dots++;
+            octet = 0;
+            digits = 0;
+            continue;
+        }
+        if (c < '0' || c > '9')
+            return false;
+        if (digits == 3)
+            return false;
+        if (digits == 1 && octet == 0)
+            return false;
+        octet = octet * 10 + (unsigned)(c - '0');
+        digits++;
+        if (octet > 255)
+            return false;
+    }
+    return dots == 3 && digits > 0;
+}
+
+/* Number of 16-bit groups in one colon-separated half, or -1. A trailing
+ * dotted quad is two groups and is legal only in the final half. */
+static int http_v6_half(const char *s, size_t len, bool v4)
+{
+    size_t off = 0;
+    int groups = 0;
+
+    if (!len)
+        return 0;
+    while (off < len)
+    {
+        size_t end = off;
+        size_t dot;
+        size_t glen;
+
+        while (end < len && s[end] != ':')
+            end++;
+        glen = end - off;
+        dot = off;
+        while (dot < end && s[dot] != '.')
+            dot++;
+        if (dot < end)
+        {
+            if (!v4 || end != len || !http_quad_ok(s + off, glen))
+                return -1;
+            groups += 2;
+        }
+        else
+        {
+            if (!http_hex_group(s + off, glen))
+                return -1;
+            groups++;
+        }
+        if (end == len)
+            break;
+        off = end + 1;
+        if (off == len)
+            return -1; /* a trailing single colon */
+    }
+    return groups;
+}
+
+/* A bare IPv6 literal, no brackets: 8 groups, or fewer with one "::". */
+static bool http_in6_ok(const char *s, size_t len)
+{
+    size_t dc = len;
+    size_t i;
+    int head, tail;
+
+    for (i = 0; i + 1 < len; i++)
+    {
+        if (s[i] == ':' && s[i + 1] == ':')
+        {
+            if (dc != len)
+                return false;
+            dc = i;
+            i++;
+        }
+    }
+    if (dc == len)
+        return http_v6_half(s, len, true) == 8;
+    head = http_v6_half(s, dc, false);
+    tail = http_v6_half(s + dc + 2, len - dc - 2, true);
+    return head >= 0 && tail >= 0 && head + tail <= 7;
+}
+
+/* A canonical IPv4 literal, or a bracketed IPv6 literal, with an optional
+ * ":port": what §3.2 means by "peer address literal". Hostnames stay refused
+ * because DNS is never resolved, and a Host header that does not match the
+ * connection target is worse than no carrier. Leading zeros are rejected so
+ * one address has exactly one spelling. */
 static bool http_host_ok(const char *h)
 {
     unsigned octet = 0, port = 0;
     unsigned digits = 0, port_digits = 0, dots = 0;
     bool in_port = false;
     size_t i;
+
+    if (h[0] == '[')
+    {
+        size_t inner = 1;
+
+        while (h[inner] && h[inner] != ']')
+            inner++;
+        if (h[inner] != ']' || inner == 1 || inner - 1 > 45)
+            return false;
+        if (!http_in6_ok(h + 1, inner - 1))
+            return false;
+        i = inner + 1;
+        if (!h[i])
+            return true;
+        if (h[i] != ':')
+            return false;
+        for (i++; h[i]; i++)
+        {
+            if (h[i] < '0' || h[i] > '9')
+                return false;
+            if (port_digits == 1 && port == 0)
+                return false;
+            if (port_digits >= 5)
+                return false;
+            port = port * 10 + (unsigned)(h[i] - '0');
+            port_digits++;
+            if (port > 65535)
+                return false;
+        }
+        return port_digits > 0 && port > 0;
+    }
 
     for (i = 0; i <= TBT_HTTP_HOST_MAX; i++)
     {

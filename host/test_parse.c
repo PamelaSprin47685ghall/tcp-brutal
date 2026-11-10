@@ -778,11 +778,16 @@ static void maximal_cfg(struct tbt_cfg *c, u64 id)
     memset(c, 0, sizeof(*c));
     c->id = id;
     c->role = TBT_ROLE_FAR;
-    c->listen_addr = (__be32)0xffffffffu;
+    /* All-ones IPv6 is the longest literal the grammar accepts, so the
+     * maximal line stays maximal after the family was added. */
+    c->listen.family = TBT_AF_INET6;
+    memset(c->listen.u.v6, 0xff, sizeof(c->listen.u.v6));
     c->listen_port = (__be16)0xffff;
-    c->peer_addr = (__be32)0xffffffffu;
+    c->peer.family = TBT_AF_INET6;
+    memset(c->peer.u.v6, 0xff, sizeof(c->peer.u.v6));
     c->peer_port = (__be16)0xffff;
-    c->target_addr = (__be32)0xffffffffu;
+    c->target.family = TBT_AF_INET6;
+    memset(c->target.u.v6, 0xff, sizeof(c->target.u.v6));
     c->target_port = (__be16)0xffff;
     c->nmap = TBT_MAP_MAX - 1;
     for (i = 0; i < c->nmap; i++)
@@ -814,7 +819,10 @@ static void maximal_cfg(struct tbt_cfg *c, u64 id)
     c->carrier_stall_ms = 3600000;
     c->nsrc = TBT_SRC_MAX;
     for (i = 0; i < TBT_SRC_MAX; i++)
-        c->srcaddrs[i] = (__be32)0xffffffffu;
+    {
+        c->srcaddrs[i].family = TBT_AF_INET6;
+        memset(c->srcaddrs[i].u.v6, 0xff, sizeof(c->srcaddrs[i].u.v6));
+    }
     c->nonce_set = true;
     memset(c->nonce, 0xa5, sizeof(c->nonce));
 }
@@ -895,8 +903,8 @@ static void test_config_matrix(void)
                 if (mask & 1)
                 {
                     cmd.cfg.nsrc = 2;
-                    cmd.cfg.srcaddrs[0] = cmd.cfg.listen_addr;
-                    cmd.cfg.srcaddrs[1] = r ? cmd.cfg.target_addr : cmd.cfg.peer_addr;
+                    cmd.cfg.srcaddrs[0] = cmd.cfg.listen;
+                    cmd.cfg.srcaddrs[1] = r ? cmd.cfg.target : cmd.cfg.peer;
                 }
                 n = tbt_render_cfg(&cmd.cfg, text, sizeof(text));
                 if (n <= 0)
@@ -918,6 +926,151 @@ static void test_config_matrix(void)
             }
         }
     }
+}
+
+/* Parse, render, and check one canonical substring; then parse the rendered
+ * line and require a fixed point. This is the IPv6 contract: the canonical
+ * spelling is the compressed one, and it parses back to the same bytes. */
+static void ipv6_roundtrip(const char *what, const char *text, const char *want)
+{
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+    char out[TBT_LINE_MAX * 2], again[TBT_LINE_MAX * 2];
+    int n, n2;
+
+    if (parse(text, &cmd, &perr))
+    {
+        ok(0, what, perr.why ? perr.why : "input was refused");
+        return;
+    }
+    n = tbt_render_cfg(&cmd.cfg, out, sizeof(out));
+    if (n <= 0)
+    {
+        ok(0, what, "render failed");
+        return;
+    }
+    ok(strstr(out, want) != NULL, what, out);
+    if (parse(out, &cmd, &perr))
+    {
+        ok(0, what, "rendered line was refused");
+        return;
+    }
+    n2 = tbt_render_cfg(&cmd.cfg, again, sizeof(again));
+    ok(n2 == n && !strcmp(out, again), what, again);
+}
+
+static void test_ipv6_cfg(void)
+{
+    /* A near side may mix families: the application-facing listener is IPv6
+     * while the carrier path to the peer is IPv4. */
+    ipv6_roundtrip("IPv6 near listen and peer",
+                   "tunnel 1 role=near listen=[2001:db8::1]:9000 peer=[2001:db8::2]:443",
+                   "listen=[2001:db8::1]:9000 peer=[2001:db8::2]:443");
+    ipv6_roundtrip("IPv6 near listener with IPv4 peer",
+                   "tunnel 2 role=near listen=[::]:9000 peer=10.0.0.2:443",
+                   "listen=[::]:9000 peer=10.0.0.2:443");
+    ipv6_roundtrip("IPv4 listener with IPv6 target",
+                   "tunnel 3 role=far listen=0.0.0.0:9000 target=[::1]:5201",
+                   "listen=0.0.0.0:9000 target=[::1]:5201");
+    ipv6_roundtrip("IPv6 far target and anchor",
+                   "tunnel 4 role=far listen=[::]:9000 target=[2001:db8::5]:80"
+                   " peer=[2001:db8::9]:1",
+                   "target=[2001:db8::5]:80 peer=[2001:db8::9]:1");
+    /* RFC 5952 compression and lowercase are the canonical spelling. */
+    ipv6_roundtrip("IPv6 literal is compressed",
+                   "tunnel 5 role=far listen=[2001:0DB8:0000:0000:0000:0000:0000:0001]:9000"
+                   " target=[::1]:80",
+                   "listen=[2001:db8::1]:9000");
+    ipv6_roundtrip("IPv4-mapped literal keeps its form",
+                   "tunnel 6 role=far listen=[::ffff:192.0.2.1]:9000 target=[::]:80",
+                   "listen=[::ffff:192.0.2.1]:9000");
+    ipv6_roundtrip("IPv6 srcaddrs and map",
+                   "tunnel 7 role=near listen=[::1]:9000 peer=[::1]:443"
+                   " srcaddrs=2001:db8::7,[::1] map=9001:80,9002:81",
+                   "srcaddrs=2001:db8::7,::1");
+
+    /* A source address of the other family cannot bind the peer's socket. */
+    refuse("IPv6 srcaddrs with IPv4 peer",
+           "tunnel 8 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
+           " srcaddrs=2001:db8::7",
+           TBT_PARSE_EINVAL, "srcaddrs", "address family");
+
+    /* Malformed IPv6 is refused with a reason, never a silent fallback. */
+    refuse("unbracketed IPv6", "tunnel 9 role=near listen=::1:9000 peer=10.0.0.2:443",
+           TBT_PARSE_EINVAL, NULL, "bracketed");
+    refuse("IPv6 without a port", "tunnel 9 role=near listen=[::1] peer=10.0.0.2:443",
+           TBT_PARSE_EINVAL, NULL, "port");
+    refuse("IPv6 port zero", "tunnel 9 role=near listen=[::1]:0 peer=10.0.0.2:443",
+           TBT_PARSE_EINVAL, NULL, "1..65535");
+    refuse("IPv6 double ::", "tunnel 9 role=near listen=[1::2::3]:80 peer=10.0.0.2:443",
+           TBT_PARSE_EINVAL, NULL, "more than one");
+    refuse("IPv6 :: with eight groups",
+           "tunnel 9 role=near listen=[1:2:3:4:5:6:7:8::]:80 peer=10.0.0.2:443",
+           TBT_PARSE_EINVAL, NULL, "zero group");
+    refuse("IPv6 too many groups",
+           "tunnel 9 role=near listen=[1:2:3:4:5:6:7:8:9]:80 peer=10.0.0.2:443",
+           TBT_PARSE_EINVAL, NULL, "invalid IPv6 group");
+    refuse("IPv6 missing bracket", "tunnel 9 role=near listen=[::1:9000 peer=10.0.0.2:443",
+           TBT_PARSE_EINVAL, NULL, "]");
+    refuse("IPv6 bad hex", "tunnel 9 role=near listen=[gggg::1]:80 peer=10.0.0.2:443",
+           TBT_PARSE_EINVAL, NULL, "invalid IPv6 group");
+}
+
+static void expect_addr(const char *what, const char *literal, const char *want)
+{
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+    char line[TBT_LINE_MAX], out[TBT_ADDR_STRLEN];
+
+    snprintf(line, sizeof(line), "tunnel 1 role=far listen=%s:1 target=%s:2",
+             literal, literal);
+    if (parse(line, &cmd, &perr))
+    {
+        ok(0, what, perr.why ? perr.why : "input was refused");
+        return;
+    }
+    tbt_addr_format(&cmd.cfg.listen, out, sizeof(out));
+    ok(!strcmp(out, want), what, out);
+}
+
+static void test_ipv6_format(void)
+{
+    char ep[TBT_ENDPOINT_STRLEN];
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+
+    expect_addr("format ::1", "[::1]", "::1");
+    expect_addr("format 2001:db8::1", "[2001:db8::1]", "2001:db8::1");
+    expect_addr("format expands zero groups",
+                "[2001:0db8:0000:0000:0000:0000:0000:0001]", "2001:db8::1");
+    expect_addr("format all zero", "[0:0:0:0:0:0:0:0]", "::");
+    expect_addr("format full", "[1:2:3:4:5:6:7:8]", "1:2:3:4:5:6:7:8");
+    expect_addr("format single zero group", "[2001:db8:0:1:1:1:1:1]",
+                "2001:db8:0:1:1:1:1:1");
+    expect_addr("format longest zero run", "[1:0:0:2:0:0:0:3]", "1:0:0:2::3");
+    expect_addr("format leftmost tie", "[2001:db8:0:0:1:0:0:1]",
+                "2001:db8::1:0:0:1");
+    expect_addr("format IPv4-mapped", "[::ffff:192.0.2.1]", "::ffff:192.0.2.1");
+
+    /* The endpoint form is what config and the Host header share. */
+    if (!parse("tunnel 1 role=near listen=[2001:db8::1]:9000 peer=[::1]:443", &cmd, &perr))
+    {
+        tbt_endpoint_format(&cmd.cfg.listen, cmd.cfg.listen_port, ep, sizeof(ep));
+        ok(!strcmp(ep, "[2001:db8::1]:9000"), "endpoint formats IPv6", ep);
+        tbt_endpoint_format(&cmd.cfg.peer, cmd.cfg.peer_port, ep, sizeof(ep));
+        ok(!strcmp(ep, "[::1]:443"), "endpoint formats compressed IPv6", ep);
+    }
+    else
+        ok(0, "endpoint test parses", perr.why);
+
+    /* IPv4 must not gain brackets: the canonical line is unchanged. */
+    if (!parse("tunnel 1 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443", &cmd, &perr))
+    {
+        tbt_endpoint_format(&cmd.cfg.listen, cmd.cfg.listen_port, ep, sizeof(ep));
+        ok(!strcmp(ep, "10.0.0.1:9000"), "endpoint keeps IPv4 form", ep);
+    }
+    else
+        ok(0, "IPv4 endpoint test parses", perr.why);
 }
 
 static void test_far_peer(void)
@@ -1369,11 +1522,9 @@ int main(void)
         ok(tbt_parse_line(longline, &cmd, &perr) == TBT_PARSE_E2BIG, "over-long line refused", NULL);
     }
 
-    /* 9. IPv6 is refused, and says so. */
-    refuse("IPv6 listen", "tunnel 1 role=near listen=[::1]:9000 peer=10.0.0.2:2",
-           TBT_PARSE_EAFNOSUPPORT, NULL, "IPv6");
-    refuse("IPv6 peer", "tunnel 1 role=near listen=10.0.0.1:1 peer=[2001:db8::1]:2",
-           TBT_PARSE_EAFNOSUPPORT, NULL, "IPv6");
+    /* 9. IPv6 endpoints parse, render canonically, and round-trip. */
+    test_ipv6_cfg();
+    test_ipv6_format();
 
     /* 10. Hostnames are refused, never resolved. */
     refuse("hostname", "tunnel 1 role=near listen=example.com:9000 peer=10.0.0.2:2",

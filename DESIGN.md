@@ -61,9 +61,10 @@ carrier manager, no userspace accept/connect (§2.1, §8.5, §11).
   on a parser-classified line (§19 Q4).
 - No DNS in the kernel: targets and peers are literal addresses in `/proc` configuration
   (§8.3).
-- **v0 is IPv4-only.** The public listener, carriers and targets are all `AF_INET`; a
-  config line containing a `:` in any address field is rejected with a message saying IPv6
-  is not supported in v0. Dual-stack is a later commit (§19 Q5), not a silent gap.
+- **Dual-stack addresses.** `listen=`, `peer=`, `target=` and `srcaddrs=` accept an IPv4
+  literal (`a.b.c.d`) or a bracketed IPv6 literal (`[2001:db8::1]`) where the key takes a
+  port. One line may mix families: the public listener, the carrier path and the target
+  are independent endpoints (§19 Q5). There is still no DNS.
 - No accept policy beyond the configured tunnel: every connection to the public listener
   is accepted. There is no hook, no port set, and no uid/device filter. No `SCM_RIGHTS`,
   no per-app credentials (§8.5).
@@ -678,9 +679,10 @@ cosmetics; §10 T13 has a parser-based conformance check.
   because it appears in the response block below; §9.3 also names it as a varying field,
   but the explicit request block in this section has no `Date`, and a browser request
   normally has none. The emitter follows this section; `Date` is a response header.
-- `Host` is a canonical IPv4 literal followed by `:port` (`203.0.113.9:443`; the emitter
-  always includes the port, including port 80). No hostname, no IPv6 literal, no leading
-  zeros. The value matches the connection target as this section requires.
+- `Host` is a canonical address literal followed by `:port` (`203.0.113.9:443`, or
+  `[2001:db8::1]:443` for IPv6; the emitter always includes the port, including port 80).
+  No hostname, no leading zeros, and an IPv6 literal is bracketed. The value matches the
+  connection target as this section requires.
 - `X-Request-Id` is exactly 26 characters from the lowercase RFC 4648 base32 alphabet
   `[a-z2-7]`; the caller supplies it, because the container unit has no random source.
 - `Transfer-Encoding` is emitted after `Content-Type` and before `Connection`, following
@@ -689,10 +691,11 @@ cosmetics; §10 T13 has a parser-based conformance check.
 
 **Implementation ruling (request validation).** The far side accepts exactly the block
 this section emits and nothing else: the request-line literal, the eight headers in the
-fixed order with their fixed values, a valid IPv4 literal (optional `:port`) in `Host`, a
-26-character `[a-z2-7]` `X-Request-Id`, and a blank line within `TBT_HTTP_HDR_MAX` (4096
-bytes). Extension headers, `Content-Length`, `Expect`, duplicates, lowercase names and
-reordering are protocol errors. Nothing in the block identifies the carrier: there is no
+fixed order with their fixed values, a valid IPv4 literal or bracketed IPv6 literal
+(optional `:port`) in `Host`, a 26-character `[a-z2-7]` `X-Request-Id`, and a blank line
+within `TBT_HTTP_HDR_MAX` (4096 bytes). Extension headers, `Content-Length`, `Expect`,
+duplicates, lowercase names and reordering are protocol errors. Nothing in the block
+identifies the carrier: there is no
 `X-TBTUN-Carrier` or equivalent, and "tbtun" never appears on the wire. The carrier index
 is the frame header's `path_id` (§3.3). A skip-only scan for the bounded CRLFCRLF
 (`tbt_http_skip_request_header`) exists for the receiver's header/body stage change; it
@@ -1931,9 +1934,9 @@ shows them. `session <tunnel> nonce=<32 hex>` pins the 128-bit session nonce
 for reproducible tests (a 16-digit value pins the low 64 bits; the default is
 random at tunnel creation).
 
-- All addresses are literal **IPv4** (`a.b.c.d:port`). **No DNS**: a hostname is rejected
-  with `EINVAL` and the error text says so. **No IPv6 in v0**: a line with a `:` inside an
-  address field is rejected with a message naming IPv6 as unsupported (§1.1, §19 Q5).
+- Addresses are literals: **IPv4** (`a.b.c.d:port`) or **IPv6** (`[2001:db8::1]:port`,
+  with the brackets mandatory because the port separator is a colon). **No DNS**: a
+  hostname is rejected with `EINVAL` and the error text says so (§1.1, §19 Q5).
 - **Comments**: a line whose first non-blank character is `#` is a comment and is ignored.
   A `#` *after* a token is not a comment: the token is unknown and the whole line is
   rejected with `EINVAL` (nothing from it applies).
@@ -2157,9 +2160,11 @@ therefore a **per-open-file line buffer**:
 - The global `ports` file accepts `ports lo-hi` with `1 <= lo <= hi <= 65535`. A blank
   line and `ports 0-0` are no-ops: they leave the block unchanged. `ports 0-0` does not
   clear the block, because carriers need a non-empty block.
-- An IPv6 literal in an address field is refused with `-EAFNOSUPPORT` and a message
-  naming IPv6; a hostname is refused with `-EINVAL` and a message naming DNS. Both are
-  decided by inspection — no resolver is ever consulted.
+- A malformed address literal is refused with `-EINVAL` and a message naming the rule it
+  broke: an unbracketed IPv6 literal, a missing `]`, a `::` that compresses no group, a
+  bad hexadecimal group, or a port outside 1..65535. A hostname is refused with `-EINVAL`
+  and a message naming DNS. Both are decided by inspection — no resolver is ever
+  consulted.
 - The grammar compiles twice: into the module and into `host/test_parse.c`
   (`make host-test`). Every rule in this section is executable without root, and the
   test links the same `tbt_parse.c` the module is built from.
@@ -2757,7 +2762,8 @@ clear error pointing at `raw`-inside-WireGuard.
 2. require `Transfer-Encoding: chunked`, `POST`, a path from a configured set (all matched
    the same, so no per-path state);
 3. the accepted socket belongs to the tunnel whose listener accepted it. The HTTP `Host`
-   value is validated as a literal IPv4 `ip:port` but is not a session key. The
+   value is validated as a literal IPv4 or bracketed IPv6 `ip:port` but is not a session
+   key. The
    `X-Request-Id` is per-segment only, so a carrier cannot be reassigned by guessing an
    id.
 4. Carrier index and session key: the first record on every accepted carrier MUST be
@@ -3472,10 +3478,11 @@ belief is wrong or the classifier is SNI-based, and the design must be told (§1
 4. **Does the priority class survive WireGuard?** If confidentiality is needed and the
    classifier sits on the outer tunnel, the plaintext header block is invisible and the
    class is lost. Product decision: confidentiality xor QoS.
-5. **IPv6 carriers (v0.2)**: v0 is IPv4-only and rejects IPv6 literals loudly (§1.1).
-   The dual-stack version is symmetric work — one listener per `(family, addr, port)`, a
-   `sockaddr_storage` still in `tbt_cfg`, and `tcpv6_prot` in the `sk_prot` override — but
-   it is not in C1/C2 and must not be half-done.
+5. **IPv6 carriers (resolved)**: the dual-stack cut is implemented. Each endpoint carries
+   its own family in `tbt_cfg`, one listener is bound per mapping slot on the configured
+   family, the carrier dial and the target dial build a `sockaddr_in6` when the endpoint
+   is IPv6, and the `sk_prot` override copies `tcpv6_prot` for an IPv6 socket. A line may
+   mix families, but a near `srcaddrs=` must match its `peer=` family.
 5b. **`keepalive_ms` default (5 s) and `drip_ms` (1 s)**: assumptions about classifier idle
    timers (§16.4). If §17 shows carriers being reaped, lower both; the cost is PAD volume.
 6. **Session pooling is implemented; per-stream cost remains.** One session carries up to

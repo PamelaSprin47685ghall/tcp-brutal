@@ -1606,8 +1606,7 @@ static int parse_case(const char *text, const char *what)
 
     rc = tbt_parse_line(buf, &cmd, &perr);
     checks++;
-    if (rc != 0 && rc != TBT_PARSE_EINVAL && rc != TBT_PARSE_E2BIG &&
-        rc != TBT_PARSE_EAFNOSUPPORT)
+    if (rc != 0 && rc != TBT_PARSE_EINVAL && rc != TBT_PARSE_E2BIG)
     {
         failures++;
         printf("FAIL seed=1 case=%lu: %s: unexpected rc=%d\n", case_no, what,

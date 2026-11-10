@@ -18,6 +18,8 @@
 #include <linux/atomic.h>
 #include <linux/build_bug.h>
 #include <linux/completion.h>
+#include <linux/in.h>
+#include <linux/in6.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/net.h>
@@ -29,8 +31,10 @@
 #include <linux/sched.h>
 #include <linux/spinlock.h>
 #include <linux/smp.h>
+#include <linux/string.h>
 #include <linux/types.h>
 #include <linux/workqueue.h>
+#include <net/sock.h>
 #include <net/net_namespace.h>
 
 /* Wire constants, /proc names and the version live in the shared header. */
@@ -126,6 +130,86 @@ struct tbt_hole {
 /* The absolute source-port bitmap and its window helpers are pure code,
  * shared with the host test (tbt_portmap.h). */
 #include "tbt_portmap.h"
+
+/* The module's bridge from a configured address to a socket. Every bind and
+ * connect goes through these three helpers, so the family decision lives in
+ * one place instead of one sockaddr_in per call site. */
+
+/* Fill `ss` from a configured address and a network-order port. Returns the
+ * sockaddr length kernel_bind()/kernel_connect() expect. */
+static inline int tbt_addr_to_sockaddr(const struct tbt_addr *a, __be16 port,
+                                       struct sockaddr_storage *ss)
+{
+    memset(ss, 0, sizeof(*ss));
+    if (a->family == TBT_AF_INET6)
+    {
+        struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ss;
+
+        sin6->sin6_family = AF_INET6;
+        sin6->sin6_port = port;
+        memcpy(&sin6->sin6_addr, a->u.v6, sizeof(sin6->sin6_addr));
+        return sizeof(*sin6);
+    }
+    {
+        struct sockaddr_in *sin = (struct sockaddr_in *)ss;
+
+        sin->sin_family = AF_INET;
+        sin->sin_port = port;
+        sin->sin_addr.s_addr = a->u.v4;
+        return sizeof(*sin);
+    }
+}
+
+/* The peer address of an established socket. A dual-stack listener reports an
+ * IPv4 peer as ::ffff:a.b.c.d; tbt_addr_eq() folds that form back. */
+static inline void tbt_sk_peer_addr(const struct sock *sk, struct tbt_addr *out)
+{
+    if (sk->sk_family == TBT_AF_INET6)
+    {
+        out->family = TBT_AF_INET6;
+        memcpy(out->u.v6, &sk->sk_v6_daddr, sizeof(out->u.v6));
+    }
+    else
+    {
+        out->family = TBT_AF_INET;
+        out->u.v4 = inet_sk(sk)->inet_daddr;
+    }
+}
+
+/* The local address of an established socket, for diagnostics. */
+static inline void tbt_sk_local_addr(const struct sock *sk, struct tbt_addr *out)
+{
+    if (sk->sk_family == TBT_AF_INET6)
+    {
+        out->family = TBT_AF_INET6;
+        memcpy(out->u.v6, &sk->sk_v6_rcv_saddr, sizeof(out->u.v6));
+    }
+    else
+    {
+        out->family = TBT_AF_INET;
+        out->u.v4 = inet_sk(sk)->inet_saddr;
+    }
+}
+
+/* The configured source address for a dial of `family`, else the wildcard of
+ * that family. The parser refuses a mixed-family srcaddrs list, so the loop
+ * either finds a match or the configuration asked for the wildcard. */
+static inline void tbt_src_addr_for(const struct tbt_cfg *cfg, u8 family,
+                                    struct tbt_addr *out)
+{
+    int i;
+
+    memset(out, 0, sizeof(*out));
+    out->family = family;
+    for (i = 0; i < cfg->nsrc; i++)
+    {
+        if (cfg->srcaddrs[i].family == family)
+        {
+            *out = cfg->srcaddrs[i];
+            return;
+        }
+    }
+}
 
 /* The four callbacks sock_init_data() installs.  Take the snapshot from a
  * fresh sock_create_kern() socket, before this module replaces anything.
@@ -1396,7 +1480,7 @@ struct tbt_session
      * configured `peer=` at session creation, else fixed by the first HELLO
      * that passes the nonce check.  A session property: it survives carrier
      * death and replacement. */
-    __be32 anchor_addr;
+    struct tbt_addr anchor;
     bool anchor_set;
 
     struct delayed_work w_replace; /* dials replacements for dead carriers;

@@ -29,6 +29,7 @@
  *     carrier.
  */
 #include <linux/ktime.h>
+#include <linux/kconfig.h>
 #include <linux/limits.h>
 #include <linux/skbuff.h>
 #include <net/sock.h>
@@ -98,10 +99,37 @@ static u64 tbt_stall_dead_ns(u64 stall_ns)
     return min_t(u64, 4 * stall_ns, TBT_STALL_DEAD_MAX_NS);
 }
 
-// A private copy of tcp_prot so carriers carry our sendmsg/recvmsg. Same shape
-// as the deleted brutal_sockopt.c used, for a different reason: there we wanted
-// a setsockopt hook, here we want the TX/RX to be ours without a kprobe.
+// A private copy of tcp_prot (and of tcpv6_prot for IPv6) so carriers carry
+// our sendmsg/recvmsg. Same shape as the deleted brutal_sockopt.c used, for a
+// different reason: there we wanted a setsockopt hook, here we want the TX/RX
+// to be ours without a kprobe. The copy must match the socket's own family:
+// the proto owns the slab the sock was allocated from, so releasing an IPv6
+// socket through the IPv4 proto would free it to the wrong cache.
 static struct proto tbt_tcp_prot __ro_after_init;
+#if IS_ENABLED(CONFIG_IPV6)
+extern struct proto tcpv6_prot;
+static struct proto tbt_tcpv6_prot __ro_after_init;
+#endif
+
+/* The private proto installed on a carrier socket, and the core proto it must
+ * be restored to. Both choose by the socket's own family, never by config. */
+static struct proto *tbt_car_proto(u8 family)
+{
+#if IS_ENABLED(CONFIG_IPV6)
+    if (family == TBT_AF_INET6)
+        return &tbt_tcpv6_prot;
+#endif
+    return &tbt_tcp_prot;
+}
+
+static struct proto *tbt_car_core_proto(u8 family)
+{
+#if IS_ENABLED(CONFIG_IPV6)
+    if (family == TBT_AF_INET6)
+        return &tcpv6_prot;
+#endif
+    return &tcp_prot;
+}
 
 static void tbt_car_connect_work(struct work_struct *w);
 int tbt_carrier_send_raw(struct tbt_carrier *c, const void *data, size_t len);
@@ -190,7 +218,7 @@ u8 tbt_carrier_profile(const struct tbt_session *sess, u8 index, bool spare)
 
 static void tbt_carrier_install_proto(struct sock *sk)
 {
-    sk->sk_prot = &tbt_tcp_prot;
+    sk->sk_prot = tbt_car_proto(sk->sk_family);
 }
 
 /* Take one reference on the published socket. The RCU read section covers
@@ -863,24 +891,30 @@ static void tbt_car_poll_one(struct tbt_carrier *c, bool paused)
             {
                 if (debug >= 2 && c->dbg_stall_dumped != (u8)(c->gen & 0xff))
                 {
+                    struct tbt_addr laddr, paddr;
+                    char local[TBT_ENDPOINT_STRLEN], peer[TBT_ENDPOINT_STRLEN];
+
                     /* One dump per generation. A carrier that stops being
                      * acknowledged is the WAN's remaining failure mode, and the
                      * counters above cannot tell a peer that stopped reading
                      * from a TCP that stopped sending: the queue, the window and
                      * the retransmit state can. */
                     c->dbg_stall_dumped = (u8)(c->gen & 0xff);
+                    tbt_sk_local_addr(sk, &laddr);
+                    tbt_sk_peer_addr(sk, &paddr);
+                    tbt_endpoint_format(&laddr, inet_sk(sk)->inet_sport, local,
+                                        sizeof(local));
+                    tbt_endpoint_format(&paddr, inet_sk(sk)->inet_dport, peer,
+                                        sizeof(peer));
                     pr_info("tbtun: carrier stall idx=%u gen=%u state=%u "
-                            "local=%pI4:%u peer=%pI4:%u "
+                            "local=%s peer=%s "
                             "una=%u nxt=%u write_seq=%u "
                             "wmem=%u sndbuf=%u rcvbuf=%u "
                             "snd_wnd=%u rcv_wnd=%u rcv_nxt=%u copied=%u "
                             "packets_out=%u retrans=%u "
                             "unacked_ms=%llu\n",
                             c->index, c->gen, READ_ONCE(sk->sk_state),
-                            &inet_sk(sk)->inet_saddr,
-                            ntohs(inet_sk(sk)->inet_sport),
-                            &inet_sk(sk)->inet_daddr,
-                            ntohs(inet_sk(sk)->inet_dport), una, nxt,
+                            local, peer, una, nxt,
                             READ_ONCE(tp->write_seq), wmem,
                             READ_ONCE(sk->sk_sndbuf), READ_ONCE(sk->sk_rcvbuf),
                             wnd, READ_ONCE(tp->rcv_wnd),
@@ -1507,8 +1541,10 @@ static size_t tbt_http_header_build(struct tbt_carrier *c, char *buf, size_t cap
         struct tbt_http_cfg cfg = {};
         int i;
 
-        snprintf(cfg.host, sizeof(cfg.host), "%pI4:%u", &t->cfg.peer_addr,
-                 ntohs(t->cfg.peer_port));
+        /* The Host header names the endpoint the carrier dialled, in the
+         * same bracket form an IPv6 URL uses. */
+        tbt_endpoint_format(&t->cfg.peer, t->cfg.peer_port, cfg.host,
+                            sizeof(cfg.host));
         for (i = 0; i < TBT_HTTP_REQID_LEN; i++)
             cfg.request_id[i] = b32[get_random_u32() % 32];
         return tbt_http_req_header(buf, cap, &cfg);
@@ -2574,7 +2610,7 @@ static void tbt_carrier_unpublish(struct tbt_session *sess,
         /* write_lock_bh() inside restore waits for every in-flight callback;
          * after it returns no new pump/rx wake can be queued from sk_user_data. */
         tbt_sk_ops_restore(s->sk, &sess->def_ops);
-        sock_replace_proto(s->sk, &tcp_prot);
+        sock_replace_proto(s->sk, tbt_car_core_proto(s->sk->sk_family));
     }
     rcu_assign_pointer(c->sk, NULL);
     mutex_unlock(&c->tx_lock);
@@ -3424,14 +3460,13 @@ static bool tbt_car_set_bbr(struct socket *s)
  * logged `awaiting HELLO`. A second call re-enters SS_CONNECTING and waits
  * another window; -EALREADY is the same "still in progress" answer. */
 static int tbt_connect_bounded(struct tbt_session *sess, struct socket *s,
-                               const struct sockaddr_in *addr)
+                               const struct sockaddr *addr, int addrlen)
 {
     unsigned long deadline = jiffies + msecs_to_jiffies(TBT_CONNECT_BUDGET_MS);
 
     for (;;)
     {
-        int err = kernel_connect(s, (tbt_sockaddr *)addr,
-                                 sizeof(*addr), 0);
+        int err = kernel_connect(s, (tbt_sockaddr *)addr, addrlen, 0);
 
         if (!err || err == -EISCONN)
             return 0;
@@ -3448,18 +3483,9 @@ static void tbt_car_connect_work(struct work_struct *w)
     struct tbt_carrier *c = container_of(w, struct tbt_carrier, w_connect);
     struct tbt_session *sess = c->sess;
     struct tbt_tunnel *t = sess->tunnel;
-    struct sockaddr_in addr = {
-        .sin_family = AF_INET,
-        .sin_port = t->cfg.peer_port,
-        .sin_addr.s_addr = t->cfg.peer_addr,
-    };
-    /* Source address: the configured local address for the carrier, else the
-     * wildcard, which lets the route pick the right source toward `peer`. */
-    struct sockaddr_in local = {
-        .sin_family = AF_INET,
-        .sin_port = 0,
-        .sin_addr.s_addr = t->cfg.srcaddrs[0] ? t->cfg.srcaddrs[0] : htonl(INADDR_ANY),
-    };
+    struct sockaddr_storage peer_ss, local_ss;
+    struct tbt_addr src;
+    int peer_len, local_len;
     struct socket *s;
     int err;
 
@@ -3498,9 +3524,13 @@ static void tbt_car_connect_work(struct work_struct *w)
             return;
         }
     }
-    local.sin_port = htons(c->local_port);
+    /* Source address: the configured local address for the carrier, else the
+     * wildcard, which lets the route pick the right source toward `peer`. */
+    tbt_src_addr_for(&t->cfg, t->cfg.peer.family, &src);
+    peer_len = tbt_addr_to_sockaddr(&t->cfg.peer, t->cfg.peer_port, &peer_ss);
+    local_len = tbt_addr_to_sockaddr(&src, tbt_port_be16(c->local_port), &local_ss);
 
-    err = sock_create_kern(sess->net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &s);
+    err = sock_create_kern(sess->net, t->cfg.peer.family, SOCK_STREAM, IPPROTO_TCP, &s);
     if (err)
         goto fail;
     TBT_DIAG("tunnel=%llu carrier=%u gen=%u sock_create ok",
@@ -3524,13 +3554,17 @@ static void tbt_car_connect_work(struct work_struct *w)
     /* The replacement carrier often reuses the port the dead one just freed,
      * which may still be in TIME_WAIT. */
     sock_set_reuseaddr(s->sk);
-    err = kernel_bind(s, (tbt_sockaddr *)&local, sizeof(local));
+    err = kernel_bind(s, (tbt_sockaddr *)&local_ss, local_len);
     if (err)
         goto release;
-    TBT_DIAG("tunnel=%llu carrier=%u gen=%u bind ok local=%pI4:%u peer=%pI4:%u",
-             (unsigned long long)t->cfg.id, c->index, c->gen,
-             &local.sin_addr, ntohs(local.sin_port), &addr.sin_addr,
-             ntohs(addr.sin_port));
+    {
+        char local[TBT_ENDPOINT_STRLEN], peer[TBT_ENDPOINT_STRLEN];
+
+        tbt_endpoint_format(&src, tbt_port_be16(c->local_port), local, sizeof(local));
+        tbt_endpoint_format(&t->cfg.peer, t->cfg.peer_port, peer, sizeof(peer));
+        TBT_DIAG("tunnel=%llu carrier=%u gen=%u bind ok local=%s peer=%s",
+                 (unsigned long long)t->cfg.id, c->index, c->gen, local, peer);
+    }
     /* Before the SYN: the handshake freezes the window scale from this
      * socket's receive buffer. */
     tbt_car_setsockbuf(s, sess->n_car);
@@ -3544,7 +3578,7 @@ static void tbt_car_connect_work(struct work_struct *w)
         u64 t0 = ktime_get_ns();
         u64 elapsed;
 
-        err = tbt_connect_bounded(sess, s, &addr);
+        err = tbt_connect_bounded(sess, s, (const struct sockaddr *)&peer_ss, peer_len);
         elapsed = ktime_get_ns() - t0;
         TBT_DIAG("tunnel=%llu carrier=%u gen=%u connect ret=%d elapsed_ms=%llu sk_state=%u",
                  (unsigned long long)t->cfg.id, c->index, c->gen, err,
@@ -3601,10 +3635,14 @@ static void tbt_car_connect_work(struct work_struct *w)
              (unsigned long long)t->cfg.id, c->index, c->gen);
     /* One line per dial: 256 of them at a 256-carrier start, so it follows the
      * same debug>=1 gate as the rest of the bring-up trace. */
-    TBT_DIAG("tunnel=%llu carrier=%u gen=%u dialed lport=%u peer=%pI4:%u",
-             (unsigned long long)t->cfg.id, c->index, c->gen,
-             ntohs(inet_sk(s->sk)->inet_sport), &t->cfg.peer_addr,
-             ntohs(t->cfg.peer_port));
+    {
+        char peer[TBT_ENDPOINT_STRLEN];
+
+        tbt_endpoint_format(&t->cfg.peer, t->cfg.peer_port, peer, sizeof(peer));
+        TBT_DIAG("tunnel=%llu carrier=%u gen=%u dialed lport=%u peer=%s",
+                 (unsigned long long)t->cfg.id, c->index, c->gen,
+                 ntohs(inet_sk(s->sk)->inet_sport), peer);
+    }
     {
         int herr = tbt_tx_hello(sess, c->index, GFP_KERNEL);
 
@@ -3808,6 +3846,9 @@ int tbt_carrier_init(void)
     BUILD_BUG_ON(TBT_STREAM_F_SCHED_TARGET >= BITS_PER_LONG);
     tbt_carrier_birth_checks();
     tbt_tcp_prot = tcp_prot; // field-by-field copy of the live TCP proto
+#if IS_ENABLED(CONFIG_IPV6)
+    tbt_tcpv6_prot = tcpv6_prot; // the same copy for the IPv6 socket cache
+#endif
     return 0;
 }
 
@@ -3890,7 +3931,7 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
     /* Assert the wiring we just installed. A carrier that is connected but never
      * given our callbacks/proto looks exactly like a silent peer. */
     WARN_ON_ONCE(newsock->sk->sk_data_ready != tbt_car_ready);
-    WARN_ON_ONCE(newsock->sk->sk_prot == &tcp_prot);
+    WARN_ON_ONCE(newsock->sk->sk_prot == tbt_car_core_proto(newsock->sk->sk_family));
     tbt_carrier_arm_rx(c);
     /* One line per connection is a console flood under a connect storm (HND0
      * logged 330 accepts/s). Keep the event visible but bounded. */
@@ -3905,23 +3946,21 @@ static void tbt_target_body(struct tbt_stream *st)
     struct tbt_session *sess = st->sess;
     struct tbt_tunnel *t = sess->tunnel;
     u16 port = READ_ONCE(st->target_port);
-    struct sockaddr_in addr = {
-        .sin_family = AF_INET,
-        .sin_port = tbt_port_be16(port ? port : tbt_port_host16(t->cfg.target_port)),
-        .sin_addr.s_addr = t->cfg.target_addr,
-    };
+    u16 host_port = port ? port : tbt_port_host16(t->cfg.target_port);
+    struct sockaddr_storage ss;
+    int alen = tbt_addr_to_sockaddr(&t->cfg.target, tbt_port_be16(host_port), &ss);
     struct socket *s;
     int err;
 
     if (READ_ONCE(st->state) == TBT_ST_DEAD)
         return;
-    err = sock_create_kern(t->net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &s);
+    err = sock_create_kern(t->net, t->cfg.target.family, SOCK_STREAM, IPPROTO_TCP, &s);
     if (err)
         goto fail;
     /* Same bound as a carrier dial: session teardown cancels w_target, and
      * the default connect timeout is the full SYN retry schedule. */
     s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
-    err = tbt_connect_bounded(sess, s, &addr);
+    err = tbt_connect_bounded(sess, s, (const struct sockaddr *)&ss, alen);
     if (err)
     {
         sock_release(s);

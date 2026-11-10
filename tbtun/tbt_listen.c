@@ -125,15 +125,15 @@ void tbt_accept_work(struct work_struct *w)
 static int tbt_listener_start(struct tbt_listener *l, u8 slot, u16 port)
 {
     struct tbt_tunnel *t = l->t;
-    struct sockaddr_in addr = {
-        .sin_family = AF_INET,
-        .sin_port = tbt_port_be16(port),
-        .sin_addr.s_addr = t->cfg.listen_addr,
-    };
+    struct sockaddr_storage ss;
+    int alen = tbt_addr_to_sockaddr(&t->cfg.listen, tbt_port_be16(port), &ss);
     struct socket *s;
     int err;
 
-    err = sock_create_kern(t->net, AF_INET, SOCK_STREAM, IPPROTO_TCP, &s);
+    /* The shared TBT_AF_* constants are the Linux ABI numbers; fail the build
+     * rather than a bind if a future kernel renumbers a family. */
+    BUILD_BUG_ON(TBT_AF_INET != AF_INET || TBT_AF_INET6 != AF_INET6);
+    err = sock_create_kern(t->net, t->cfg.listen.family, SOCK_STREAM, IPPROTO_TCP, &s);
     if (err)
         return err;
 
@@ -167,7 +167,7 @@ static int tbt_listener_start(struct tbt_listener *l, u8 slot, u16 port)
         tbt_car_setsockbuf(s, t->cfg.carriers ? t->cfg.carriers
                                               : (u32)t->cfg.n + t->cfg.m);
 
-    err = kernel_bind(s, (tbt_sockaddr *)&addr, sizeof(addr));
+    err = kernel_bind(s, (tbt_sockaddr *)&ss, alen);
     if (err)
         goto fail;
 

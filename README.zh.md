@@ -240,8 +240,8 @@ cat /proc/net/tbtun/tunnels
 近端的 `peer` 是载体发往的地址。远端的 `peer` 是锚：只有来自 `10.0.0.1` 的 HELLO 才能加入，
 far `peer=` 里的端口只是语法占位。给两行加上相同的 `nonce=<32 个 hex 字符>` 可以固定会话
 nonce。没有 `nonce=` 时，远端会采纳第一条 HELLO 的 nonce；如果连 `peer=` 也没有，
-这条 HELLO 还会固定锚，并打印一次首连信任告警。地址只接受字面 IPv4：
-本版本不支持 DNS，也不支持 IPv6。
+这条 HELLO 还会固定锚，并打印一次首连信任告警。地址接受字面 IPv4
+（`a.b.c.d:port`）或方括号 IPv6（`[addr]:port`）；本版本不支持 DNS。
 
 HTTP 容器上的 FEC v6：一组六条载体（四条 DATA、两条校验）：
 
@@ -499,8 +499,9 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
 
 ## 已知限制
 
-- **没有 IPv6，也没有 DNS。** 所有地址都是字面 IPv4：`listen=`、`peer=`、
-  `target=`、`srcaddrs=` 只接受 `a.b.c.d`；不做域名解析。
+- **没有 DNS。** 所有地址都是字面量：`listen=`、`peer=`、`target=` 接受
+  `a.b.c.d:port` 或 `[ipv6]:port`，`srcaddrs=` 接受 `a.b.c.d` 或 IPv6
+  字面量；不做域名解析。
 - **默认不加密，也不认证；`crypto=on` 只是混淆。** `crypto=on`（`fec=on`
   时的默认值）对 FEC 的 DATA/PARITY 负载做 ChaCha8 混淆，目的是把应用字节
   从朴素的 DPI 特征里藏起来；48 字节 FEC 头、HTTP 头部和控制帧仍是明文，
@@ -649,7 +650,7 @@ root。如果两台主机之间的路径不可信，就把隧道放进 WireGuard
 ## 适用范围
 
 这不是通用 VPN。它只转发 TCP，每条隧道只对应一个字面目标地址，没有路由、没有 NAT、
-没有认证，也不支持 IPv6。FEC v6 可选（`fec=on`）；`mode=sc-ldpc` 已实现
+没有认证。FEC v6 可选（`fec=on`）；`mode=sc-ldpc` 已实现
 （binary 下行、grouped GF(16) 上行），`mode=rlnc`/`grouped` 保留为 GF(2)
 band RLNC 回退，`carriers = groups * (n + m)` 最多 256 条载体。0.7.0 每个
 会话只承载一条 FEC 流（`0x100a`）。

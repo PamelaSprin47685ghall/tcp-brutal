@@ -340,8 +340,8 @@ join, and the port in a far `peer=` is grammar filler. Add a shared
 `nonce=<32 hex digits>` to both lines to pin the session nonce. Without
 `nonce=`, the far side adopts the nonce from the first HELLO; if `peer=` is also
 absent, that first HELLO fixes the anchor and the module logs one
-trust-on-first-use warning. Addresses are literal IPv4 only — no DNS, no IPv6
-in 0.2.x.
+trust-on-first-use warning. Addresses are literals — IPv4 `a.b.c.d:port` or
+IPv6 `[addr]:port`; there is no DNS.
 
 ## What you can observe
 
@@ -594,8 +594,9 @@ real line.
 
 ## Known limitations
 
-- **No IPv6 and no DNS.** Every address is literal IPv4: `listen=`, `peer=`,
-  `target=`, and `srcaddrs=` accept only `a.b.c.d`; there is no name resolution.
+- **No DNS.** Every address is a literal: `listen=`, `peer=`, and `target=`
+  accept `a.b.c.d:port` or `[ipv6]:port`; `srcaddrs=` accepts `a.b.c.d` or an
+  IPv6 literal. There is no name resolution.
 - **No encryption and no authentication by default; `crypto=on` is
   obfuscation.** `crypto=on` (the default whenever `fec=on`) ChaCha8-obfuscates
   the FEC DATA/PARITY payload only. The 48-byte FEC header, the HTTP headers and
@@ -787,7 +788,7 @@ is the only sensible choice, because an HTTP parser cannot see inside TLS.
 ## Scope
 
 This is not a general-purpose VPN. It forwards TCP only, to one literal target
-per tunnel, with no routing, no NAT, no authentication, and no IPv6. FEC v6 is
+per tunnel, with no routing, no NAT, and no authentication. FEC v6 is
 optional (`fec=on`); `mode=sc-ldpc` is implemented (binary downlink, grouped
 GF(16) uplink), and `mode=rlnc`/`grouped` remain as the GF(2) band RLNC
 fallback with `carriers = groups * (n + m)` up to 256 carriers. Multiple
