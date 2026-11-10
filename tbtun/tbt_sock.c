@@ -558,12 +558,33 @@ void tbt_stream_init_work(struct tbt_stream *st)
     INIT_WORK(&st->w_target, tbt_target_work_fn);
 }
 
+/* Wake every waiter on a dying socket without sending a FIN. SHUT_RD alone
+ * clears the receive half and wakes a blocked recvmsg, but a sender waits on
+ * SEND_SHUTDOWN or sk_err, so raise ECONNRESET as well. A SHUT_RDWR here sent
+ * a real FIN first: the 1 GiB far-host loss ended as curl rc=18 (clean EOF)
+ * instead of a reset, and the application could no longer tell a truncated
+ * stream from a complete one. */
+static void tbt_sock_kill_wake(struct sock *sk)
+{
+    struct socket *sock = sk->sk_socket;
+
+    if (!sock)
+        return;
+    kernel_sock_shutdown(sock, SHUT_RD);
+    lock_sock(sk);
+    if (!READ_ONCE(sk->sk_err))
+        WRITE_ONCE(sk->sk_err, ECONNRESET);
+    release_sock(sk);
+    if (sk->sk_error_report)
+        sk->sk_error_report(sk);
+}
+
 /* A killed stream must reach the application as a reset, not a half-close: a
  * FIN leaves the application free to keep sending into a socket whose reader
  * is gone, and a blocked send() then hangs until its own timeout (measured:
  * probe H took 41 s instead of 0.5 s). Detach first (clears callbacks and
- * cancels the other work items), then close with SO_LINGER=0, which is the
- * exported way to make tcp_close send RST. */
+ * cancels the other work items), then wake without FIN and close with
+ * SO_LINGER=0, which is the exported way to make tcp_close send RST. */
 static void tbt_kill_body(struct tbt_stream *st)
 {
     struct tbt_session *sess = st->sess;
@@ -577,8 +598,8 @@ static void tbt_kill_body(struct tbt_stream *st)
      * RX actor that already holds another socket's lock, and taking this
      * socket's lock there is a recursive k-sk_lock-AF_INET nesting. */
     sk = READ_ONCE(st->sk);
-    if (sk && sk->sk_socket)
-        kernel_sock_shutdown(sk->sk_socket, SHUT_RDWR);
+    if (sk)
+        tbt_sock_kill_wake(sk);
     tbt_tx_rst_retry(sess, st);
     tbt_stream_cancel(st, &st->w_target, TBT_STREAM_F_SCHED_TARGET);
 
@@ -590,8 +611,8 @@ static void tbt_kill_body(struct tbt_stream *st)
      * lock_sock(stream) -- a nested sk_lock-AF_INET lockdep report. w_target
      * is cancelled above, so st->sk cannot change before release closes it. */
     sk = READ_ONCE(st->sk);
-    if (sk && sk->sk_socket)
-        kernel_sock_shutdown(sk->sk_socket, SHUT_RDWR);
+    if (sk)
+        tbt_sock_kill_wake(sk);
 
     /* No self cancel: this is the w_kill work item. */
     tbt_stream_release_socket_now(st);
