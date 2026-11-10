@@ -157,9 +157,12 @@ and moves independently of the module version.
   matches. p is recomputed from the window sent/miss totals. Old-epoch,
   evicted or unattributable tails increment `fec_late_unknown` and never
   credit. The fixed 65,000 ppm p offset and 7,800 ppm EWMA subtraction are
-  removed. All estimator mutation and `alive_bm` updates are serialized by
-  `rx->lock`. Host tests cover exact-bucket correction and the 256-share
-  bitmap boundary.
+  removed. `p_ewma` is a 64-super sent/miss ring with an anchor; correcting
+  a committed super replays the ring, so `p_win` and `p_ewma` both reflect
+  the corrected history. All estimator mutation and `alive_bm` updates are
+  serialized by `rx->lock`. The ledger lives in `tbt_fec_late.h`; host tests
+  cover six deterministic cases (in-flight cancellation, duplicate, block
+  isolation, old epoch, eviction, share 255) plus exact EWMA replay.
 
 ### Verification
 
