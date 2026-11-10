@@ -2575,6 +2575,9 @@ static void tbt_fec_tx_swap(struct tbt_session *sess, struct tbt_fec_tx *tx)
     tx->credit_cap = tbt_fec_credit_packets(tx->groups, tx->n, rk, 0,
                                             tbt_fec_credit_max_packets(sess));
     tx->credit = tx->credit_cap;
+    spin_lock(&sess->lock);
+    sess->adapt.switches++;
+    spin_unlock(&sess->lock);
     {
         u8 *drop[TBT_FEC_REPLAY_K_MAX + TBT_FEC_REPLAY_HOT_MAX];
         u32 ndrop = 0, di;
@@ -2918,6 +2921,13 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
         spin_lock(&sess->lock);
         sess->adapt.class = tx->adapt_sclc->cur;
         sess->adapt.r_fail_ppm = r_ppm;
+        if (tx->peer_est_valid)
+        {
+            sess->adapt.n = tx->n;
+            sess->adapt.m = tx->m;
+            sess->adapt.groups = tx->groups;
+            sess->adapt.p_ppm = tx->peer_p_ppm;
+        }
         spin_unlock(&sess->lock);
         return;
     }
@@ -3287,6 +3297,8 @@ void tbt_fec_rx_shrink(struct tbt_fec_rx *rx, bool reset)
     total = (u32)rx->groups * rx->slots;
     keep = reset ? 2 : 0;
     spin_lock_bh(&rx->lock);
+    if (reset)
+        atomic_set(&rx->late_data_credit, 0);
     if (reset && rx->blk)
     {
         for (i = 0; i < total; i++)
@@ -3807,6 +3819,28 @@ static noinline void tbt_fec_deliver_est_fold(struct tbt_session *sess,
             unknown = !eb->win_len_set && !rx->total_known &&
                       eb->ndata < rx->n;
             spin_unlock_bh(&rx->lock);
+            /* Physical conservation: a parity-recovered DATA share that
+             * arrives late was in flight, not lost. Cancel one such miss
+             * per late DATA share. codec_fail shares are not cancelled:
+             * the codec could not recover them at all. */
+            if (sc_mode)
+            {
+                u16 si;
+
+                for (si = 0; si < real; si++)
+                {
+                    if (!tbt_fec_adapt_bitmap_test(sc_miss, si) ||
+                        tbt_fec_adapt_bitmap_test(eb->codec_fail_bits, si) ||
+                        atomic_read(&rx->late_data_credit) <= 0)
+                        continue;
+                    if (atomic_dec_if_positive(&rx->late_data_credit) >= 0)
+                    {
+                        tbt_fec_adapt_bitmap_clear(sc_miss, si);
+                        if (si < 32)
+                            miss &= ~(1u << si);
+                    }
+                }
+            }
             if (unknown)
             {
                 if (sc_mode)
@@ -5282,6 +5316,10 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess,
                             so.pause_abandoned, so.sent_win, so.supers_win,
                             so.p_ppm);
 
+    /* A receive-idle side must not overwrite the live TX view with its own
+     * zero-window estimate; the TX tick publishes the peer FBK below. */
+    if (o.pause_idle && !o.sent_win && f->tx && f->tx->peer_est_valid)
+        return;
     a->epoch = rx->epoch;
     a->n = rx->n;
     a->m = rx->m;
@@ -5431,6 +5469,8 @@ static void tbt_fec_rx_reset_blocks_locked(struct tbt_fec_rx *rx)
     u32 total = (u32)rx->groups * rx->slots;
     u32 i;
 
+    atomic_set(&rx->late_data_credit, 0);
+
     for (i = 0; i < total; i++)
     {
         struct tbt_fec_blk *b = &rx->blk[i];
@@ -5515,6 +5555,9 @@ static void tbt_fec_rx_switch_apply(struct tbt_session *sess,
     rx->cfg_pending = false;
     rx->fbk_flags |= TBT_FEC_FBK_F_SWITCH_DONE;
     tbt_fec_est_init(rx->est, (u16)(rx->n + rx->m));
+    if (rx->est_sclc)
+        tbt_fec_adapt_sclc_est_init(rx->est_sclc,
+                                    (u16)(rx->n + rx->m));
     rx->est_abandoned_last = (u64)atomic64_read(&rx->abandoned_shares);
     spin_unlock_bh(&rx->lock);
 
@@ -5563,6 +5606,9 @@ static void tbt_fec_rx_switch_rollback(struct tbt_session *sess,
         rx->highest_block = rx->switch_block;
         rx->fbk_flags |= TBT_FEC_FBK_F_ROLLBACK;
         tbt_fec_est_init(rx->est, (u16)(rx->n + rx->m));
+        if (rx->est_sclc)
+            tbt_fec_adapt_sclc_est_init(rx->est_sclc,
+                                        (u16)(rx->n + rx->m));
         rx->est_abandoned_last = (u64)atomic64_read(&rx->abandoned_shares);
     }
     rx->switch_state = TBT_FEC_SW_STEADY;
@@ -6174,6 +6220,14 @@ static void tbt_fec_rx_work_body(struct tbt_session *sess)
  * (the locked check below then decides) -- it cannot call a live block
  * late. A shape switch is refused here: the fields are read without the
  * lock, and the placement path rechecks the shape. */
+static void tbt_fec_rx_late_data_credit(struct tbt_fec_rx *rx, u8 type)
+{
+    if (type != TBT_FEC_DATA)
+        return;
+    if (atomic_read(&rx->late_data_credit) < (int)(rx->n * 4))
+        atomic_inc(&rx->late_data_credit);
+}
+
 static bool tbt_fec_rx_late_fast(const struct tbt_fec_rx *rx,
                                  const struct tbt_fec_hdr *h)
 {
@@ -6293,6 +6347,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
 
             if (tbt_fec_rx_late_fast(rx, &h))
             {
+                tbt_fec_rx_late_data_credit(rx, h.type);
                 atomic64_inc(&sess->fec_late_share);
                 return 0;
             }
@@ -6369,6 +6424,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
             }
             if (late)
             {
+                tbt_fec_rx_late_data_credit(rx, h.type);
                 atomic64_inc(&sess->fec_late_share);
                 return 0;
             }
@@ -7037,6 +7093,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
                                   rx->next_super, h.block_id, block_end,
                                   rx->next_deliver))
         {
+            tbt_fec_rx_late_data_credit(rx, h.type);
             atomic64_inc(&sess->fec_late_share);
             spin_unlock_bh(&rx->lock);
             return 0;
@@ -7099,6 +7156,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
         break;
     }
     case TBT_FEC_RX_WIN_LATE:
+        tbt_fec_rx_late_data_credit(rx, h.type);
         atomic64_inc(&sess->fec_late_share);
         spin_unlock_bh(&rx->lock);
         return 0; /* already delivered */
@@ -7180,7 +7238,10 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
         if (h.type == TBT_FEC_DATA &&
             share < tbt_fec_blk_real_len(rx, group, b) &&
             !b->dpresent[share])
+        {
+            tbt_fec_rx_late_data_credit(rx, h.type);
             atomic64_inc(&sess->fec_late_data);
+        }
         spin_unlock_bh(&rx->lock);
         return 0;
     case TBT_FEC_ARR_DUP_MARKER:

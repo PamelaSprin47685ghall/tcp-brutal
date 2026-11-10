@@ -27,6 +27,23 @@ and moves independently of the module version.
   the bracketed IPv6 form. The unused `TBT_PARSE_EAFNOSUPPORT` error code is
   gone.
 
+## [0.7.3] - 2026-11-11
+
+### Fixed
+
+- SC-LDPC adaptive rate is enabled by default when `fec=on` and the configured
+  split is on the shipped rate ladder (`128/128`, `154/102`, `178/78`,
+  `8/24`, ...); `adaptive=off` still wins. Previously mode=3 defaulted off.
+- The SC-LDPC estimator no longer counts DATA shares recovered by parity at
+  the 0 ms early decode as network loss. A late DATA share cancels one such
+  in-flight credit (`rx->late_data_credit`), so a real ~9% loss no longer
+  reads 36-42% and parks the controller in the 50% dead zone.
+- A shape switch increments `c13 switches`; an RX-idle side no longer
+  overwrites the live TX view, and the TX tick publishes the peer FBK shape
+  and p into `sess->adapt`.
+- `est_sclc` is reinitialised on INIT, switch apply/rollback and stream reset;
+  the late-data credit is cleared with the block arena.
+
 ## [0.7.2] - 2026-11-10
 
 ### Fixed

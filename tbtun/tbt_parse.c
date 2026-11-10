@@ -867,9 +867,22 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     if (cfg->crypto && !cfg->fec)
         return tbt_fail(e, "crypto", "crypto=on requires fec=on");
     /* Adaptive is meaningful only where a control law runs. Unset, it
-     * follows fec, so an old line keeps the old fixed shape. */
+     * follows fec; mode=3 defaults on only for a split on the shipped rate
+     * ladder, so a special fixed test shape still parses as adaptive=off. */
     if (!have_adaptive)
-        cfg->adaptive = cfg->fec && cfg->mode != 3;
+    {
+        u16 shares = (u16)(cfg->n + cfg->m);
+        bool ladder = false;
+
+        if (cfg->fec && cfg->mode == 3)
+            ladder = (shares == TBT_FEC_MAX_SHARES &&
+                      (cfg->n == 64 || cfg->n == 76 || cfg->n == 102 ||
+                       cfg->n == 128 || cfg->n == 151 || cfg->n == 178)) ||
+                     (shares == 32 &&
+                      (cfg->n == 8 || cfg->n == 16 || cfg->n == 20 ||
+                       cfg->n == 24));
+        cfg->adaptive = cfg->fec && (cfg->mode != 3 || ladder);
+    }
     if (cfg->adaptive && !cfg->fec)
         return tbt_fail(e, "adaptive", "adaptive=on requires fec=on");
     if (!cfg->role)

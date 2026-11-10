@@ -1114,6 +1114,9 @@ struct tbt_fec_rx
     struct tbt_fec_adapt_sclc_est *est_sclc;
     u8 alive_bm[TBT_FEC_BITMAP_BYTES];
     atomic64_t abandoned_shares; /* counted by blk_reset, folded by w_fec_rx */
+    /* DATA shares that arrived after the 0 ms decode used parity to fill
+     * them. Each cancels one parity-recovered "miss" in the estimator. */
+    atomic_t late_data_credit;
     u64 est_abandoned_last;
     bool est_paused;
     u64 pause_start_ns;

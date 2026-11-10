@@ -1982,7 +1982,7 @@ int main(void)
         ok(cmd.cfg.mode == 3 && cmd.cfg.w == 256 && cmd.cfg.n == 128 &&
                cmd.cfg.m == 128 && cmd.cfg.L == 0,
            "downlink sc-ldpc shape parsed", NULL);
-        ok(cmd.cfg.adaptive == 0, "mode=3 defaults adaptive off", NULL);
+        ok(cmd.cfg.adaptive == 1, "mode=3 ladder defaults adaptive on", NULL);
         tbt_render_cfg(&cmd.cfg, once, sizeof(once));
         ok(strstr(once, " L=0") != NULL, "L is rendered for mode 3", once);
         parse(once, &again, &perr);
@@ -1993,7 +1993,7 @@ int main(void)
         ok(cmd.cfg.mode == 3 && cmd.cfg.w == 128 && cmd.cfg.n == 8 &&
                cmd.cfg.m == 24 && cmd.cfg.L == 16,
            "uplink sc-ldpc shape parsed", NULL);
-        ok(cmd.cfg.adaptive == 0, "uplink mode=3 defaults adaptive off", NULL);
+        ok(cmd.cfg.adaptive == 1, "uplink mode=3 ladder defaults adaptive on", NULL);
         tbt_render_cfg(&cmd.cfg, once, sizeof(once));
         ok(strstr(once, " L=16") != NULL, "uplink L is rendered", once);
         parse(once, &again, &perr);
