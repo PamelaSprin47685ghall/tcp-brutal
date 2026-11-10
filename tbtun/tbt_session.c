@@ -759,7 +759,7 @@ out_unlock:
         {
             /* Marking it down is what removes it from scheduling, counts
              * carrier_lost once, and asks the replacement worker to dial. */
-            tbt_carrier_lost(s, c);
+            tbt_carrier_lost(s, c, "user-down");
             err = 0;
         }
         else if (cmd->carrier_action == TBT_CARRIER_UP)
@@ -1389,6 +1389,11 @@ void tbt_stream_maybe_detach(struct tbt_stream *st)
         return;
     if (!test_bit(TBT_STREAM_F_ACTIVE, &st->attached))
         return;
+    pr_info_ratelimited("tbtun: maybe_detach sid=%llu state=%u rx_next=%llu rx_fin_seq=%llu tx_seq=%llu\n",
+                        (unsigned long long)st->sid, READ_ONCE(st->state),
+                        (unsigned long long)READ_ONCE(st->rx_next),
+                        (unsigned long long)READ_ONCE(st->rx_fin_seq),
+                        (unsigned long long)READ_ONCE(st->tx_seq));
     tbt_stream_detach_from_session(st);
 }
 
@@ -1424,6 +1429,16 @@ static void tbt_tx_purge_stream(struct tbt_session *sess, struct tbt_stream *st)
 
 void tbt_stream_kill(struct tbt_stream *st, u8 reason)
 {
+    pr_info_ratelimited("tbtun: stream_kill sid=%llu reason=%u state=%u rx_seen=%d rx_done=%d rx_next=%llu rx_fin_seq=%llu tx_fin_written=%d tx_ack=%llu tx_seq=%llu\n",
+                        (unsigned long long)st->sid, reason,
+                        READ_ONCE(st->state),
+                        READ_ONCE(st->rx_fin_seen) ? 1 : 0,
+                        READ_ONCE(st->rx_fin_done) ? 1 : 0,
+                        (unsigned long long)READ_ONCE(st->rx_next),
+                        (unsigned long long)READ_ONCE(st->rx_fin_seq),
+                        READ_ONCE(st->tx_fin_written) ? 1 : 0,
+                        (unsigned long long)READ_ONCE(st->tx_ack),
+                        (unsigned long long)READ_ONCE(st->tx_seq));
     /* One winner.  A read-then-write let two carriers both queue w_kill and
      * leak one reference. */
     if (test_and_set_bit(TBT_STREAM_F_DYING, &st->attached))

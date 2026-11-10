@@ -648,7 +648,7 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
     {
         if (READ_ONCE(c->stalled))
             tbt_stall_grid_note(sess, now - c->stall_since_ns, false);
-        tbt_carrier_lost(sess, c);
+        tbt_carrier_lost(sess, c, "poll-no-sk");
         return;
     }
     if (READ_ONCE(sk->sk_state) != TCP_ESTABLISHED)
@@ -656,7 +656,7 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
         if (READ_ONCE(c->stalled))
             tbt_stall_grid_note(sess, now - c->stall_since_ns, false);
         tbt_carrier_sk_put(sk);
-        tbt_carrier_lost(sess, c);
+        tbt_carrier_lost(sess, c, "poll-not-established");
         return;
     }
     /* A connected carrier with a written HELLO and up==0 is not schedulable:
@@ -726,7 +726,7 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
             tbt_stall_grid_note(sess, now - c->stall_since_ns, false);
             sess->last_stall_replace_ns = now;
             tbt_carrier_sk_put(sk);
-            tbt_carrier_lost(sess, c);
+            tbt_carrier_lost(sess, c, "stall-replace");
             return;
         }
 
@@ -751,7 +751,7 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
             tbt_stall_grid_note(sess, now - c->stall_since_ns, false);
             sess->last_stall_replace_ns = now;
             tbt_carrier_sk_put(sk);
-            tbt_carrier_lost(sess, c);
+            tbt_carrier_lost(sess, c, "stall-dead");
             return;
         }
 
@@ -778,7 +778,7 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
             atomic64_inc(&sess->slow_evicted);
             sess->last_slow_evict_ns = now;
             tbt_carrier_sk_put(sk);
-            tbt_carrier_lost(sess, c);
+            tbt_carrier_lost(sess, c, "slow-evict");
             return;
         }
 
@@ -882,6 +882,25 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
                             (unsigned long long)((now - stall_since_ns) /
                                                  NSEC_PER_MSEC));
                 }
+                /* One unconditional snapshot per generation: the 0.7.1 field
+                 * run lost all 256 carriers with no line saying whether the
+                 * send window, the queue or the peer's ACK bookkeeping had
+                 * stopped. debug=0 hides the dump above, so keep a compact
+                 * copy that a real run can afford. */
+                if (!READ_ONCE(c->diag_stall_once))
+                {
+                    WRITE_ONCE(c->diag_stall_once, true);
+                    pr_info("tbtun: carrier stall snapshot idx=%u gen=%u state=%u una=%u nxt=%u wnd=%u wmem=%u sndbuf=%u packets_out=%u retrans=%u srtt_us=%u mdev_us=%u unacked_ms=%llu\n",
+                            c->index, c->gen, READ_ONCE(sk->sk_state),
+                            una, nxt, wnd, wmem,
+                            READ_ONCE(sk->sk_sndbuf),
+                            READ_ONCE(tp->packets_out),
+                            inet_csk(sk)->icsk_retransmits,
+                            READ_ONCE(tp->srtt_us),
+                            READ_ONCE(tp->mdev_us),
+                            (unsigned long long)((now - stall_since_ns) /
+                                                 NSEC_PER_MSEC));
+                }
                 tbt_carrier_sk_put(sk);
                 if (sess->fec)
                 {
@@ -900,7 +919,7 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
                 {
                     /* ARQ has no parity to lean on, so an ACK-stalled path is a
                      * dead one: kill it and repath its frames now. */
-                    tbt_carrier_lost(sess, c);
+                    tbt_carrier_lost(sess, c, "arq-stall");
                     return;
                 }
             }
@@ -1245,7 +1264,7 @@ static void tbt_car_rx_body(struct tbt_carrier *c)
      * read with a non-established socket is the end of this path. */
     if (drained <= 0 && READ_ONCE(sk->sk_state) != TCP_ESTABLISHED)
     {
-        tbt_carrier_lost(c->sess, c);
+        tbt_carrier_lost(c->sess, c, "peer-closed");
     }
     else
     {
@@ -2406,7 +2425,8 @@ static void tbt_carrier_capacity_check(struct tbt_session *sess)
 /* Mark a carrier unusable once, count it, and ask the replacement worker to
  * put a new one at the same index. Safe from work, softirq and /proc context;
  * it never sleeps. */
-void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c)
+void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c,
+                      const char *why)
 {
     if (!sess || !c || READ_ONCE(sess->closing) || atomic_read(&c->stopping))
         return;
@@ -2423,9 +2443,9 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c)
         atomic64_inc(&sess->carrier_lost);
         /* Presence only; the socket state is in the debug snapshot and in
          * /proc instead. */
-        pr_warn_ratelimited("tbtun: tunnel %llu carrier %u gen %u lost: sock=%d connected=%d hello_sent=%d up=%d\n",
+        pr_warn_ratelimited("tbtun: tunnel %llu carrier %u gen %u lost: why=%s sock=%d connected=%d hello_sent=%d up=%d\n",
                             (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id : 0),
-                            c->index, c->gen,
+                            c->index, c->gen, why,
                             tbt_carrier_sk_present(c),
                             atomic_read(&c->connected),
                             READ_ONCE(c->hello_sent), atomic_read(&c->up));
@@ -3346,6 +3366,18 @@ void tbt_car_setsockbuf(struct socket *s)
  * Module.symvers. A kernel built without CONFIG_TCP_CONG_BBR, or one whose
  * namespace lacks CAP_NET_ADMIN, refuses the request; the carrier then keeps
  * the system default and still carries traffic. */
+/* The congestion control the socket is actually using. The request below can
+ * fail while the namespace default already is BBR, so the only honest proof
+ * is the algorithm the socket carries, not the setsockopt return. */
+static const char *tbt_car_cc_actual(struct sock *sk)
+{
+    struct inet_connection_sock *icsk = inet_csk(sk);
+
+    if (!icsk || !icsk->icsk_ca_ops || !icsk->icsk_ca_ops->name)
+        return "?";
+    return icsk->icsk_ca_ops->name;
+}
+
 static bool tbt_car_set_bbr(struct socket *s)
 {
     int err;
@@ -3361,10 +3393,21 @@ static bool tbt_car_set_bbr(struct socket *s)
         err = sock_setsockopt(s, SOL_TCP, TCP_CONGESTION,
                               KERNEL_SOCKPTR(TBT_CAR_CC_NAME),
                               sizeof(TBT_CAR_CC_NAME));
+    /* The socket's actual algorithm decides: a kernel that refuses the
+     * option but already runs BBR is a correct carrier, and counting it as a
+     * failure hid that. A refusal on a non-BBR default still keeps the
+     * carrier alive, but must be named once. */
+    if (strcmp(tbt_car_cc_actual(s->sk), TBT_CAR_CC_NAME))
+    {
+        pr_info_ratelimited("tbtun: carrier TCP_CONGESTION=%s failed: %d actual=%s; keeping it\n",
+                            TBT_CAR_CC_NAME, err,
+                            tbt_car_cc_actual(s->sk));
+        return false;
+    }
     if (err)
-        pr_info_ratelimited("tbtun: carrier TCP_CONGESTION=%s failed: %d; keeping the default\n",
+        pr_info_ratelimited("tbtun: carrier TCP_CONGESTION=%s refused: %d but actual=bbr\n",
                             TBT_CAR_CC_NAME, err);
-    return err == 0;
+    return true;
 }
 
 /* Dial `addr` until the handshake finishes or TBT_CONNECT_BUDGET_MS is spent.
