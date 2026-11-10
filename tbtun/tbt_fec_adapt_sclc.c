@@ -371,6 +371,8 @@ void tbt_fec_adapt_sclc_est_recompute(struct tbt_fec_adapt_sclc_est *e)
     e->p_ewma_ppm = sent ? (u32)((u64)miss * 1000000ull / sent) : 0;
 }
 
+static void tbt_fec_adapt_sclc_replay_ewma(struct tbt_fec_adapt_sclc_est *e);
+
 bool tbt_fec_adapt_sclc_est_correct_miss(struct tbt_fec_adapt_sclc_est *e,
                                          u8 bucket)
 {
@@ -382,12 +384,89 @@ bool tbt_fec_adapt_sclc_est_correct_miss(struct tbt_fec_adapt_sclc_est *e,
     return true;
 }
 
+bool tbt_fec_adapt_sclc_est_correct_super(struct tbt_fec_adapt_sclc_est *e,
+                                          u64 super_id)
+{
+    u8 i;
+
+    if (!e)
+        return false;
+    for (i = 0; i < e->ewma_n; i++)
+    {
+        struct tbt_fec_adapt_sclc_sample *smp =
+            &e->ewma_ring[(e->ewma_head + i) %
+                          TBT_FEC_ADAPT_SCLC_EWMA_RING];
+
+        if (!smp->used || smp->super_id != super_id)
+            continue;
+        if (!smp->miss || smp->bucket >= TBT_FEC_ADAPT_SCLC_BUCKETS ||
+            !e->win[smp->bucket].miss)
+            return false;
+        smp->miss--;
+        e->win[smp->bucket].miss--;
+        tbt_fec_adapt_sclc_replay_ewma(e);
+        return true;
+    }
+    return false;
+}
+
+static void tbt_fec_adapt_sclc_replay_ewma(struct tbt_fec_adapt_sclc_est *e)
+{
+    u32 p = e->ewma_anchor_ppm;
+    u8 i;
+
+    for (i = 0; i < e->ewma_n; i++)
+    {
+        struct tbt_fec_adapt_sclc_sample *smp =
+            &e->ewma_ring[(e->ewma_head + i) %
+                          TBT_FEC_ADAPT_SCLC_EWMA_RING];
+        u32 p_block = smp->sent ?
+                      (u32)((u64)smp->miss * 1000000ull / smp->sent) : 0;
+        int delta = (int)p_block - (int)p;
+
+        p = (u32)((int)p + delta / (1 << TBT_FEC_ADAPT_SCLC_EWMA_SHIFT));
+        if (p > 1000000u)
+            p = 1000000u;
+    }
+    e->p_ewma_ppm = p;
+}
+
+static void tbt_fec_adapt_sclc_push_sample(struct tbt_fec_adapt_sclc_est *e,
+                                           u16 sent, u16 miss, u8 bucket)
+{
+    struct tbt_fec_adapt_sclc_sample *smp;
+
+    if (e->ewma_n == TBT_FEC_ADAPT_SCLC_EWMA_RING)
+    {
+        smp = &e->ewma_ring[e->ewma_head];
+        {
+            u32 p_block = smp->sent ?
+                          (u32)((u64)smp->miss * 1000000ull / smp->sent) : 0;
+            int delta = (int)p_block - (int)e->ewma_anchor_ppm;
+
+            e->ewma_anchor_ppm =
+                (u32)((int)e->ewma_anchor_ppm +
+                      delta / (1 << TBT_FEC_ADAPT_SCLC_EWMA_SHIFT));
+        }
+        e->ewma_head = (u8)((e->ewma_head + 1) %
+                            TBT_FEC_ADAPT_SCLC_EWMA_RING);
+        e->ewma_n--;
+    }
+    smp = &e->ewma_ring[(e->ewma_head + e->ewma_n) %
+                        TBT_FEC_ADAPT_SCLC_EWMA_RING];
+    smp->super_id = ++e->super_id;
+    smp->sent = sent;
+    smp->miss = miss;
+    smp->bucket = bucket;
+    smp->used = true;
+    e->ewma_n++;
+    tbt_fec_adapt_sclc_replay_ewma(e);
+}
+
 void tbt_fec_adapt_sclc_est_super(struct tbt_fec_adapt_sclc_est *e,
                                   u64 now_ns)
 {
     struct tbt_fec_adapt_sclc_win *w;
-    int delta;
-    u32 p_block;
 
     e->last_activity_ns = now_ns;
     tbt_fec_adapt_sclc_rotate(e, now_ns);
@@ -401,13 +480,10 @@ void tbt_fec_adapt_sclc_est_super(struct tbt_fec_adapt_sclc_est *e,
     w->miss += e->sb_miss;
     w->supers++;
 
-    p_block = (u32)((u64)e->sb_miss * 1000000ull / e->sb_sent);
-    delta = (int)p_block - (int)e->p_ewma_ppm;
-    e->p_ewma_ppm =
-        (u32)((int)e->p_ewma_ppm + delta / (1 << TBT_FEC_ADAPT_SCLC_EWMA_SHIFT));
-    if (e->p_ewma_ppm > 1000000u)
-        e->p_ewma_ppm = 1000000u;
-
+    tbt_fec_adapt_sclc_push_sample(e, (u16)(e->sb_sent > 0xffffu ?
+                                            0xffffu : e->sb_sent),
+                                   (u16)(e->sb_miss > 0xffffu ?
+                                         0xffffu : e->sb_miss), e->cur);
     e->sb_sent = 0;
     e->sb_miss = 0;
 }

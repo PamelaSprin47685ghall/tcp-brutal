@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "tbt_fec_adapt_sclc.h"
+#include "tbt_fec_late.h"
 
 static int checks;
 static int failures;
@@ -328,6 +329,114 @@ static void case_est_ewma(void)
        "est: EWMA converges to the block rate");
 }
 
+static void case_late_ledger(void)
+{
+    struct tbt_fec_late_ctx ctx;
+    struct tbt_fec_late_rec *rec;
+    u8 alive[TBT_FEC_BITMAP_BYTES] = {0};
+    u8 sc[TBT_FEC_BITMAP_BYTES] = {0};
+    u8 cf[TBT_FEC_BITMAP_BYTES] = {0};
+    u8 out[TBT_FEC_MAX_SHARES];
+    u8 correct[TBT_FEC_BITMAP_BYTES];
+    bool has;
+    int i;
+
+    for (i = 0; i < 256; i++)
+        tbt_fec_late_set(alive, (u16)i);
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.epoch = 7;
+    ctx.n = 128;
+    ctx.m = 128;
+    ctx.groups = 1;
+    ctx.next_super = 100;
+    for (i = 0; i < 51; i++)
+        tbt_fec_late_set(sc, (u16)i);
+    ok(tbt_fec_late_note_miss(&ctx, 100, 0, sc, cf, alive, 256, 128),
+       "ledger: note 51 counted misses");
+    memset(correct, 0, sizeof(correct));
+    tbt_fec_late_finalize(&ctx, 100, 42, correct);
+    rec = tbt_fec_late_find(&ctx, 100);
+    eq_u32(rec ? rec->miss : 0, 51, "ledger: 51 misses committed");
+    for (i = 0; i < 38; i++)
+    {
+        enum tbt_fec_late_evt ev = tbt_fec_late_credit(
+            &ctx, 100, 0, (u16)i, &has);
+
+        ok(ev == TBT_FEC_LATE_SETTLED && has,
+           "ledger: post-fold miss settles once");
+        if (ev == TBT_FEC_LATE_SETTLED && has && rec->miss)
+            rec->miss--;
+    }
+    eq_u32(rec->miss, 13, "ledger: 38 in-flight shares cancel to 13");
+    ok(tbt_fec_late_credit(&ctx, 100, 0, 0, &has) == TBT_FEC_LATE_DUP,
+       "ledger: repeated late share is a duplicate");
+    ok(tbt_fec_late_credit(&ctx, 100, 0, 40, &has) ==
+           TBT_FEC_LATE_SETTLED && has,
+       "ledger: a new late share still settles");
+    ok(tbt_fec_late_credit(&ctx, 100, 0, 40, &has) == TBT_FEC_LATE_DUP,
+       "ledger: the second copy is a duplicate");
+
+    /* Block B's miss is untouched by block A's late share. */
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.epoch = 7;
+    ctx.n = 128;
+    ctx.m = 128;
+    ctx.groups = 1;
+    ctx.next_super = 102;
+    memset(sc, 0, sizeof(sc));
+    tbt_fec_late_set(sc, 0);
+    tbt_fec_late_note_miss(&ctx, 100, 0, sc, cf, alive, 256, 128);
+    tbt_fec_late_note_miss(&ctx, 101, 0, sc, cf, alive, 256, 128);
+    memset(correct, 0, sizeof(correct));
+    tbt_fec_late_finalize(&ctx, 100, 1, correct);
+    tbt_fec_late_finalize(&ctx, 101, 2, correct);
+    ok(tbt_fec_late_credit(&ctx, 100, 0, 0, &has) ==
+           TBT_FEC_LATE_SETTLED,
+       "ledger: block A settles");
+    eq_u32(tbt_fec_late_find(&ctx, 101)->miss, 1,
+           "ledger: block B miss is untouched");
+
+    /* Old epoch is unknown, never credited. */
+    ctx.epoch = 8;
+    ok(tbt_fec_late_credit(&ctx, 100, 0, 0, &has) ==
+           TBT_FEC_LATE_UNKNOWN,
+       "ledger: old epoch is unknown");
+
+    /* Eviction is bounded and old records become unknown. */
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.epoch = 9;
+    ctx.n = 128;
+    ctx.m = 128;
+    ctx.groups = 1;
+    ctx.next_super = 1000;
+    memset(sc, 0, sizeof(sc));
+    tbt_fec_late_set(sc, 0);
+    for (i = 0; i < TBT_FEC_LATE_RECS + 1; i++)
+    {
+        tbt_fec_late_note_miss(&ctx, (u64)(900 + i), 0, sc, cf, alive,
+                               256, 128);
+        memset(correct, 0, sizeof(correct));
+        tbt_fec_late_finalize(&ctx, (u64)(900 + i), (u64)i, correct);
+    }
+    ok(tbt_fec_late_credit(&ctx, 900, 0, 0, &has) ==
+           TBT_FEC_LATE_UNKNOWN,
+       "ledger: evicted record is unknown");
+
+    /* share 255 on a 1x256 shape is in bounds. */
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.epoch = 10;
+    ctx.n = 128;
+    ctx.m = 128;
+    ctx.groups = 1;
+    ctx.next_super = 200;
+    memset(out, 0, sizeof(out));
+    ok(tbt_fec_late_credit(&ctx, 200, 0, 255, &has) ==
+           TBT_FEC_LATE_PENDING,
+       "ledger: share 255 pending");
+    tbt_fec_late_take(&ctx, 200, 0, out);
+    ok(out[255] == 1, "ledger: share 255 take is in bounds");
+}
+
 static void case_est_late_credit(void)
 {
     struct tbt_fec_adapt_sclc_est e;
@@ -351,6 +460,60 @@ static void case_est_late_credit(void)
        "late credit: a second real miss still corrects");
     eq_u32(e.p_ewma_ppm, 98000,
            "late credit: second correction is exact");
+}
+
+static void case_est_ewma_ring(void)
+{
+    struct tbt_fec_adapt_sclc_est e;
+    struct tbt_fec_adapt_sclc_est_out o;
+    u8 alive[TBT_FEC_BITMAP_BYTES] = {0};
+    u8 miss[TBT_FEC_BITMAP_BYTES] = {0};
+    u64 now = 1000000000ull;
+    int i;
+
+    memset(&e, 0, sizeof(e));
+    tbt_fec_adapt_sclc_est_init(&e, 256);
+    e.carriers = 256;
+    for (i = 0; i < 256; i++)
+        tbt_fec_adapt_bitmap_set(alive, (u16)i);
+    for (i = 0; i < 51; i++)
+        tbt_fec_adapt_bitmap_set(miss, (u16)i);
+    tbt_fec_adapt_sclc_est_block(&e, now, 0, 128, miss, alive);
+    tbt_fec_adapt_sclc_est_super(&e, now);
+    for (i = 0; i < 38; i++)
+        ok(tbt_fec_adapt_sclc_est_correct_super(&e, 1),
+           "ewma ring: in-flight miss corrects");
+    memset(&o, 0, sizeof(o));
+    tbt_fec_adapt_sclc_est_sample(&e, now, &o);
+    eq_u32(o.p_win_ppm, 101562, "ewma ring: p_win exact 13/128");
+    {
+        u8 miss13[TBT_FEC_BITMAP_BYTES] = {0};
+
+        for (i = 0; i < 13; i++)
+            tbt_fec_adapt_bitmap_set(miss13, (u16)i);
+        for (i = 0; i < 63; i++)
+        {
+            tbt_fec_adapt_sclc_est_block(&e, now, 0, 128, miss13, alive);
+            tbt_fec_adapt_sclc_est_super(&e, now);
+        }
+    }
+    memset(&o, 0, sizeof(o));
+    tbt_fec_adapt_sclc_est_sample(&e, now, &o);
+    eq_u32(o.p_win_ppm, 101562, "ewma ring: p_win exact 13/128");
+    ok(o.p_ewma_ppm > 99500 && o.p_ewma_ppm < 103500,
+       "ewma ring: p_ewma converges to the corrected history");
+
+    {
+        u8 zero[TBT_FEC_BITMAP_BYTES] = {0};
+
+        for (i = 0; i < 65; i++)
+        {
+            tbt_fec_adapt_sclc_est_block(&e, now, 0, 1, zero, alive);
+            tbt_fec_adapt_sclc_est_super(&e, now);
+        }
+    }
+    ok(!tbt_fec_adapt_sclc_est_correct_super(&e, 1),
+       "ewma ring: evicted super cannot be corrected");
 }
 
 static void case_est_alive(void)
@@ -2095,6 +2258,8 @@ int main(void)
     case_est_window();
     case_est_ewma();
     case_est_late_credit();
+    case_late_ledger();
+    case_est_ewma_ring();
     case_est_alive();
     case_est_groups();
     case_est_pauses();

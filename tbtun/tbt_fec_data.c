@@ -2960,7 +2960,6 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
          * speculative NACK rate: a slow subflow can be NACKed one RTT
          * before its parity decodes the block cleanly. */
         so.r_fail_ppm = tx->peer_codec_fail_ppm;
-        so.r_valid = so.p_valid;
         so.codec_fail_ppm = tx->peer_codec_fail_ppm;
         so.sent_win = tx->peer_expected;
         so.miss_win = tx->peer_expected >= tx->peer_received
@@ -2969,6 +2968,7 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
         so.supers_win = (tx->peer_flags & TBT_FEC_FBK_F_P_VALID) ? 8 : 0;
         so.p_valid = tx->peer_est_valid &&
                      (tx->peer_flags & TBT_FEC_FBK_F_P_VALID) != 0;
+        so.r_valid = so.p_valid;
         so.pause_idle = !tx->peer_est_valid ||
                         now - tx->peer_est_ns > 500000000ULL;
         so.burst = so.p_fast_ppm && so.p_fast_ppm > so.p_ppm &&
@@ -3974,8 +3974,8 @@ static noinline void tbt_fec_deliver_est_fold(struct tbt_session *sess,
         {
             spin_lock_bh(&rx->lock);
             tbt_fec_adapt_sclc_est_super(rx->est_sclc, est_now);
-            spin_unlock_bh(&rx->lock);
             tbt_fec_rx_late_finalize(rx, s, rx->est_sclc->cur);
+            spin_unlock_bh(&rx->lock);
         }
         else
             tbt_fec_est_super(rx->est, est_now);
@@ -5257,6 +5257,7 @@ static void tbt_fec_rx_fbk_send(struct tbt_session *sess,
     struct tbt_fec_shape suggest;
     u8 body[TBT_FEC_FBK_LEN];
     u8 rec[TBT_FEC_HDR_LEN + TBT_FEC_FBK_LEN];
+    u8 alive_snap[TBT_FEC_BITMAP_BYTES];
     u16 len;
     u64 now = ktime_get_ns();
     u32 expected;
@@ -5266,6 +5267,9 @@ static void tbt_fec_rx_fbk_send(struct tbt_session *sess,
         return;
     sc = tbt_fec_rx_sc_mode(rx);
     tbt_fec_rx_sample(rx, now, &o, &so);
+    spin_lock_bh(&rx->lock);
+    memcpy(alive_snap, rx->alive_bm, sizeof(alive_snap));
+    spin_unlock_bh(&rx->lock);
     memset(&f, 0, sizeof(f));
     tbt_fec_fbk_set_epoch(&f, rx->fbk_epoch ? rx->fbk_epoch : rx->epoch);
     rx->fbk_epoch = 0;
@@ -5298,7 +5302,7 @@ static void tbt_fec_rx_fbk_send(struct tbt_session *sess,
         !o.pause_abandoned)
         extra |= TBT_FEC_FBK_F_P_VALID;
     f.flags = extra;
-    memcpy(f.carrier_bitmap, rx->alive_bm, TBT_FEC_BITMAP_BYTES);
+    memcpy(f.carrier_bitmap, alive_snap, TBT_FEC_BITMAP_BYTES);
     f.codec_variant = READ_ONCE(rx->shape.codec_variant);
     f.L = READ_ONCE(rx->shape.L);
     f.block = READ_ONCE(rx->shape.block);
@@ -6082,10 +6086,12 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     kvfree(old_req_block);
     kvfree(old_rec);
     tbt_fec_grouped_free(old_codec);
+    spin_lock_bh(&rx->lock);
     if (rx->est)
         tbt_fec_est_init(rx->est, shares);
     if (rx->est_sclc)
         tbt_fec_adapt_sclc_est_init(rx->est_sclc, shares);
+    spin_unlock_bh(&rx->lock);
     pr_info_ratelimited("tbtun: tunnel %llu: fec rx shape from peer: n=%u m=%u groups=%u slots=%u block=%u L=%u rate=%u\n",
                         (unsigned long long)(sess->tunnel ? sess->tunnel->cfg.id
                                                           : 0),
@@ -6352,211 +6358,94 @@ static void tbt_fec_rx_work_body(struct tbt_session *sess)
  * (the locked check below then decides) -- it cannot call a live block
  * late. A shape switch is refused here: the fields are read without the
  * lock, and the placement path rechecks the shape. */
-static struct tbt_fec_late_rec *tbt_fec_rx_late_find(struct tbt_fec_rx *rx,
-                                                    u64 block_id)
+static void tbt_fec_rx_late_sync(struct tbt_fec_rx *rx)
 {
-    u16 i;
-
-    for (i = 0; i < TBT_FEC_LATE_RECS; i++)
-        if (rx->late[i].used && rx->late[i].block_id == block_id &&
-            rx->late[i].epoch == rx->epoch)
-            return &rx->late[i];
-    return NULL;
+    rx->late.epoch = rx->epoch;
+    rx->late.next_super = READ_ONCE(rx->next_super);
+    rx->late.n = rx->n;
+    rx->late.m = rx->m;
+    rx->late.groups = rx->groups;
 }
 
-static struct tbt_fec_late_rec *tbt_fec_rx_late_get(struct tbt_fec_rx *rx,
-                                                    u64 block_id)
-{
-    struct tbt_fec_late_rec *rec = tbt_fec_rx_late_find(rx, block_id);
-    u16 i, victim = 0;
-
-    if (rec)
-        return rec;
-    for (i = 0; i < TBT_FEC_LATE_RECS; i++)
-    {
-        if (!rx->late[i].used)
-        {
-            victim = i;
-            break;
-        }
-        if (rx->late[i].block_id < rx->late[victim].block_id)
-            victim = i;
-    }
-    rec = &rx->late[victim];
-    memset(rec, 0, sizeof(*rec));
-    rec->used = true;
-    rec->epoch = rx->epoch;
-    rec->block_id = block_id;
-    return rec;
-}
-
-/* Attribute a late DATA share to (current epoch, block, group, share). A
- * share outside the current shape or the retained block window is counted
- * unknown, never credited as either arrival or loss. */
+/* The post-fold correction needs the record's super id; the generic
+ * tbt_fec_late_credit() above only reports SETTLED. Do the lookup here so
+ * the estimator is corrected under the same rx->lock. */
 static void tbt_fec_rx_late_credit(struct tbt_fec_rx *rx, u8 type,
-                                   u64 block_id, u16 group, u16 share,
-                                   u16 n, u16 m, bool locked)
+                                    u64 block_id, u16 group, u16 share,
+                                    u16 n, u16 m, bool locked)
 {
     struct tbt_fec_late_rec *rec;
-    u16 bit;
-    bool duplicate;
+    enum tbt_fec_late_evt ev;
+    bool has_miss = false;
 
     if (type != TBT_FEC_DATA)
         return;
     if (!locked)
         spin_lock_bh(&rx->lock);
-    if (!rx->est_sclc || !n || !m || n != rx->n || m != rx->m ||
-        group >= rx->groups || share >= (u16)(n + m) ||
-        block_id > READ_ONCE(rx->next_super) ||
-        block_id + TBT_FEC_LATE_RECS < READ_ONCE(rx->next_super))
+    if (!rx->est_sclc || !n || !m || n != rx->n || m != rx->m)
     {
         atomic64_inc(&rx->flow->sess->fec_late_unknown);
         if (!locked)
             spin_unlock_bh(&rx->lock);
         return;
     }
-    rec = tbt_fec_rx_late_find(rx, block_id);
-    if (!rec && block_id < READ_ONCE(rx->next_super))
-    {
-        /* The block was already folded without a counted miss (or its
-         * record was evicted); there is nothing to settle. */
+    tbt_fec_rx_late_sync(rx);
+    rec = tbt_fec_late_find(&rx->late, block_id);
+    ev = tbt_fec_late_credit(&rx->late, block_id, group, share,
+                             &has_miss);
+    if (ev == TBT_FEC_LATE_UNKNOWN)
         atomic64_inc(&rx->flow->sess->fec_late_unknown);
-        if (!locked)
-            spin_unlock_bh(&rx->lock);
-        return;
-    }
-    if (!rec)
-        rec = tbt_fec_rx_late_get(rx, block_id);
-    bit = (u16)(group * (n + m) + share);
-    duplicate = tbt_fec_adapt_bitmap_test(rec->pending, bit) ||
-                tbt_fec_adapt_bitmap_test(rec->settled, bit);
-    if (!duplicate)
+    else if (ev == TBT_FEC_LATE_SETTLED && has_miss)
     {
-        if (!rec->folded)
-            tbt_fec_adapt_bitmap_set(rec->pending, bit);
-        else
-        {
-            tbt_fec_adapt_bitmap_set(rec->settled, bit);
-            if (!tbt_fec_adapt_bitmap_test(rec->miss_bits, bit))
-                ; /* not a counted miss: no estimator correction */
-            else if (rx->est_sclc->win[rec->bucket].start_ns !=
-                     rec->bucket_start_ns)
-            {
-                tbt_fec_adapt_bitmap_clear(rec->miss_bits, bit);
-                atomic64_inc(&rx->flow->sess->fec_late_unknown);
-            }
-            else
-            {
-                tbt_fec_adapt_bitmap_clear(rec->miss_bits, bit);
-                if (rec->miss &&
-                    tbt_fec_adapt_sclc_est_correct_miss(rx->est_sclc,
-                                                        rec->bucket))
-                    rec->miss--;
-            }
-        }
+        if (!rec || !tbt_fec_adapt_sclc_est_correct_super(
+                         rx->est_sclc, rec->super_id))
+            atomic64_inc(&rx->flow->sess->fec_late_unknown);
+        else if (rec->miss)
+            rec->miss--;
     }
     if (!locked)
         spin_unlock_bh(&rx->lock);
 }
 
-/* Consume pending late bits for one group at fold; the caller holds
- * rx->lock. out[share] is set for each late DATA share. */
 static void tbt_fec_rx_late_take(struct tbt_fec_rx *rx, u64 block_id,
                                  u16 group, u16 n, u16 m, u8 *out)
 {
-    struct tbt_fec_late_rec *rec = tbt_fec_rx_late_find(rx, block_id);
-    u16 i;
-
-    if (!rec)
-        return;
-    for (i = 0; i < (u16)(n + m); i++)
-    {
-        u16 bit = (u16)(group * (n + m) + i);
-
-        if (!tbt_fec_adapt_bitmap_test(rec->pending, bit))
-            continue;
-        tbt_fec_adapt_bitmap_clear(rec->pending, bit);
-        tbt_fec_adapt_bitmap_set(rec->settled, bit);
-        out[i] = 1;
-    }
+    (void)n;
+    (void)m;
+    tbt_fec_rx_late_sync(rx);
+    tbt_fec_late_take(&rx->late, block_id, group, out);
 }
 
-/* Record exactly the misses that est_block() will count for this group:
- * real, present-filtered by alive/limit, and not codec_fail. The caller
- * holds rx->lock. */
 static void tbt_fec_rx_late_note_miss(struct tbt_fec_rx *rx, u64 block_id,
                                       u16 group, u16 n, u16 m,
                                       const u8 *sc_miss,
                                       const u8 *codec_fail, u16 real)
 {
-    struct tbt_fec_adapt_sclc_est *e = rx->est_sclc;
-    struct tbt_fec_late_rec *rec;
-    u16 i, shares = (u16)(n + m);
-    u32 limit = e && e->carriers ? e->carriers : TBT_FEC_MAX_CARRIERS;
-    bool any = false;
+    u32 limit = rx->est_sclc && rx->est_sclc->carriers ?
+                rx->est_sclc->carriers : TBT_FEC_MAX_CARRIERS;
 
-    if (!e)
-        return;
-    for (i = 0; i < real; i++)
-        if (tbt_fec_adapt_bitmap_test(sc_miss, i) &&
-            !tbt_fec_adapt_bitmap_test(codec_fail, i) &&
-            (u32)group * shares + i < limit &&
-            tbt_fec_adapt_bitmap_test(rx->alive_bm,
-                                      (u16)(group * shares + i)))
-        {
-            any = true;
-            break;
-        }
-    if (!any)
-        return;
-    rec = tbt_fec_rx_late_get(rx, block_id);
-    for (i = 0; i < real; i++)
-    {
-        u16 bit = (u16)(group * shares + i);
-
-        if (!tbt_fec_adapt_bitmap_test(sc_miss, i) ||
-            tbt_fec_adapt_bitmap_test(codec_fail, i) ||
-            (u32)bit >= limit ||
-            !tbt_fec_adapt_bitmap_test(rx->alive_bm, bit) ||
-            tbt_fec_adapt_bitmap_test(rec->miss_bits, bit))
-            continue;
-        tbt_fec_adapt_bitmap_set(rec->miss_bits, bit);
-    }
+    (void)n;
+    (void)m;
+    tbt_fec_rx_late_sync(rx);
+    tbt_fec_late_note_miss(&rx->late, block_id, group, sc_miss,
+                           codec_fail, rx->alive_bm, limit, real);
 }
 
-/* Mark the block folded and settle pending bits that raced the group loop.
- * The caller does not hold rx->lock. */
 static void tbt_fec_rx_late_finalize(struct tbt_fec_rx *rx, u64 block_id,
                                      u8 bucket)
 {
-    struct tbt_fec_late_rec *rec;
+    u8 correct[TBT_FEC_BITMAP_BYTES] = {0};
     u16 i;
 
-    spin_lock_bh(&rx->lock);
-    rec = tbt_fec_rx_late_find(rx, block_id);
-    if (rec)
-    {
-        rec->folded = true;
-        rec->bucket = bucket;
-        rec->bucket_start_ns = rx->est_sclc->win[bucket].start_ns;
-        rec->miss = tbt_fec_bitmap_count(rec->miss_bits);
-        for (i = 0; i < TBT_FEC_BITMAP_BYTES * 8u; i++)
-        {
-            if (!tbt_fec_adapt_bitmap_test(rec->pending, i))
-                continue;
-            tbt_fec_adapt_bitmap_clear(rec->pending, i);
-            tbt_fec_adapt_bitmap_set(rec->settled, i);
-            if (tbt_fec_adapt_bitmap_test(rec->miss_bits, i))
-            {
-                tbt_fec_adapt_bitmap_clear(rec->miss_bits, i);
-                if (rec->miss)
-                    rec->miss--;
-                tbt_fec_adapt_sclc_est_correct_miss(rx->est_sclc,
-                                                    rec->bucket);
-            }
-        }
-    }
-    spin_unlock_bh(&rx->lock);
+    (void)bucket;
+    tbt_fec_rx_late_sync(rx);
+    tbt_fec_late_finalize(&rx->late, block_id, rx->est_sclc->super_id,
+                          correct);
+    for (i = 0; i < TBT_FEC_BITMAP_BYTES * 8u; i++)
+        if (correct[i] &&
+            !tbt_fec_adapt_sclc_est_correct_super(rx->est_sclc,
+                                                  rx->est_sclc->super_id))
+            atomic64_inc(&rx->flow->sess->fec_late_unknown);
 }
 
 static bool tbt_fec_rx_late_fast(const struct tbt_fec_rx *rx,

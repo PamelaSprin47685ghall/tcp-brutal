@@ -42,6 +42,7 @@
 #include "tbt_uapi.h"
 /* The adaptive shape/switch structs and their mapping helpers. */
 #include "tbt_fec.h"
+#include "tbt_fec_late.h"
 #include <linux/version.h>
 
 /* system_dfl_wq exists from 6.5. Its documented semantics are "unbound, not
@@ -952,21 +953,6 @@ struct tbt_fec_tx
 
 struct tbt_session;
 
-#define TBT_FEC_LATE_RECS 16
-struct tbt_fec_late_rec
-{
-    u64 block_id;
-    u32 epoch;
-    u8 used;
-    u8 folded;
-    u8 bucket;
-    u16 miss;
-    u64 bucket_start_ns;
-    u8 pending[TBT_FEC_BITMAP_BYTES];
-    u8 settled[TBT_FEC_BITMAP_BYTES];
-    u8 miss_bits[TBT_FEC_BITMAP_BYTES];
-};
-
 struct tbt_fec_rx
 {
     /* This receive plane belongs to one stream; sid is the routing key and
@@ -1133,7 +1119,7 @@ struct tbt_fec_rx
      * pending bits are cleared from sc_miss at fold; settled bits have
      * already corrected the estimator bucket, so duplicates cannot credit
      * twice. */
-    struct tbt_fec_late_rec late[TBT_FEC_LATE_RECS];
+    struct tbt_fec_late_ctx late;
     u64 est_abandoned_last;
     bool est_paused;
     u64 pause_start_ns;

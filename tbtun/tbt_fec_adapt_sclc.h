@@ -186,6 +186,7 @@ bool tbt_fec_adapt_sclc_wire_compatible(const struct tbt_fec_cfg *cur,
 #define TBT_FEC_ADAPT_SCLC_MIN_SUPERS_UP 4u
 /* p_ewma += (p_block - p_ewma) / 2^TBT_FEC_ADAPT_SCLC_EWMA_SHIFT. */
 #define TBT_FEC_ADAPT_SCLC_EWMA_SHIFT 3
+#define TBT_FEC_ADAPT_SCLC_EWMA_RING 64
 /* A fast window this far above the slow estimate is a burst. */
 #define TBT_FEC_ADAPT_SCLC_BURST_PPM 100000u
 #define TBT_FEC_ADAPT_SCLC_BURST_GAP_PPM 50000u
@@ -203,10 +204,24 @@ struct tbt_fec_adapt_sclc_win
     u32 codec_fail; /* missing shares the codec could not recover */
 };
 
+struct tbt_fec_adapt_sclc_sample
+{
+    u64 super_id;
+    u16 sent;
+    u16 miss;
+    u8 bucket;
+    u8 used;
+};
+
 struct tbt_fec_adapt_sclc_est
 {
     u16 shares; /* n+m for one group: 256 downlink, 32 uplink */
     u8 cur;     /* current bucket, 0..7 */
+    u8 ewma_head;
+    u8 ewma_n;
+    u64 super_id;
+    u32 ewma_anchor_ppm;
+    struct tbt_fec_adapt_sclc_sample ewma_ring[TBT_FEC_ADAPT_SCLC_EWMA_RING];
     /* The super-block being filled by tbt_fec_adapt_sclc_est_block(). */
     u32 sb_sent;
     u32 sb_miss;
@@ -283,6 +298,10 @@ void tbt_fec_adapt_sclc_est_recompute(struct tbt_fec_adapt_sclc_est *e);
 /* Remove one miss from an exact bucket; returns false when it has none. */
 bool tbt_fec_adapt_sclc_est_correct_miss(struct tbt_fec_adapt_sclc_est *e,
                                          u8 bucket);
+/* Correct one miss in the exact committed super-block. Replays the 64-super
+ * EWMA ring so p_ewma matches the corrected history. */
+bool tbt_fec_adapt_sclc_est_correct_super(struct tbt_fec_adapt_sclc_est *e,
+                                          u64 super_id);
 
 /* A block whose real DATA count is unknown: count it as a quality sample and
  * do not estimate p from it. */
