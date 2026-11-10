@@ -401,6 +401,17 @@ int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
     u8 body[TBT_FIN_BODY_LEN] = {0};
     int i, queued = 0, err = 0;
 
+    /* Name this edge once: the 0.7.1 clean 1 GiB delivered 18-313 MB and
+     * took a FIN with every reset counter zero. The caller tag separates a
+     * capture EOF from a close timer or a starved retry. */
+    pr_info_ratelimited("tbtun: tx_fin entry sid=%llu rx_fin_done=%d state=%u fin_sent=%d tx_ack=%llu tx_seq=%llu close_since=%llu\n",
+                        (unsigned long long)st->sid,
+                        READ_ONCE(st->rx_fin_done) ? 1 : 0,
+                        READ_ONCE(st->state),
+                        READ_ONCE(st->tx_fin_sent) ? 1 : 0,
+                        (unsigned long long)READ_ONCE(st->tx_ack),
+                        (unsigned long long)READ_ONCE(st->tx_seq),
+                        (unsigned long long)READ_ONCE(st->close_since_ns));
     /* The close budget starts at the first request, before the FEC early
      * returns. Otherwise a stream whose packetizer is not idle yet (credit
      * or outq backpressure) would retry this function forever with
@@ -2616,6 +2627,8 @@ static void tbt_tx_ctl_fail(struct tbt_session *sess, struct tbt_frame *fr)
                     /* The FIN was starved, not lost: requeue it under the
                      * close timer and count the starvation. */
                     atomic64_inc(&sess->fin_starved);
+                    pr_info_ratelimited("tbtun: tx_fin tag=starved sid=%llu\n",
+                                        (unsigned long long)st->sid);
                     tbt_tx_fin(sess, st, GFP_ATOMIC);
                 }
                 else
@@ -4092,9 +4105,13 @@ void tbt_fbk_work(struct work_struct *w)
          * delivered (tbt_stream_maybe_detach), never on the queued copy. */
         if (one_alive && READ_ONCE(st->tx_fin_sent) &&
             !READ_ONCE(st->tx_fin_queued) &&
-            test_bit(TBT_STREAM_F_ACTIVE, &st->attached) &&
-            tbt_tx_fin(sess, st, GFP_KERNEL) > 0)
+            test_bit(TBT_STREAM_F_ACTIVE, &st->attached))
+        {
+            pr_info_ratelimited("tbtun: tx_fin tag=closecheck sid=%llu\n",
+                                (unsigned long long)st->sid);
+            if (tbt_tx_fin(sess, st, GFP_KERNEL) > 0)
             WRITE_ONCE(st->tx_fin_queued, true);
+        }
         tbt_stream_maybe_detach(st);
         alive |= one_alive;
     }

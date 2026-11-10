@@ -393,6 +393,11 @@ static void tbt_drain_body(struct tbt_stream *st)
     if (st->rx_fin_seen && !st->rx_fin_done && list_empty(&st->rx_q) &&
         st->rx_next >= st->rx_fin_seq)
     {
+        pr_info_ratelimited("tbtun: peer FIN sid=%llu seq=%llu rx_next=%llu state=%u\n",
+                            (unsigned long long)st->sid,
+                            (unsigned long long)st->rx_fin_seq,
+                            (unsigned long long)st->rx_next,
+                            READ_ONCE(st->state));
         st->rx_fin_done = true;
         st->rx_fin_done_ns = ktime_get_ns();
         eof = true;

@@ -3352,9 +3352,15 @@ static bool tbt_car_set_bbr(struct socket *s)
 
     if (!s || !s->sk)
         return false;
+    /* Some kernels reject the trailing NUL in optlen; try the exact name
+     * length first, then the literal size for kernels that want it. */
     err = sock_setsockopt(s, SOL_TCP, TCP_CONGESTION,
                           KERNEL_SOCKPTR(TBT_CAR_CC_NAME),
-                          sizeof(TBT_CAR_CC_NAME));
+                          (unsigned int)strlen(TBT_CAR_CC_NAME));
+    if (err)
+        err = sock_setsockopt(s, SOL_TCP, TCP_CONGESTION,
+                              KERNEL_SOCKPTR(TBT_CAR_CC_NAME),
+                              sizeof(TBT_CAR_CC_NAME));
     if (err)
         pr_info_ratelimited("tbtun: carrier TCP_CONGESTION=%s failed: %d; keeping the default\n",
                             TBT_CAR_CC_NAME, err);
@@ -3485,10 +3491,10 @@ static void tbt_car_connect_work(struct work_struct *w)
     /* Before the SYN: the handshake freezes the window scale from this
      * socket's receive buffer. */
     tbt_car_setsockbuf(s);
-    if (tbt_car_set_bbr(s))
-        atomic64_inc(&sess->car_bbr_ok);
-    else
-        atomic64_inc(&sess->car_bbr_fail);
+    /* Set before the SYN so the first cwnd starts under BBR. Some kernels
+     * refuse TCP_CONGESTION until the socket leaves TCP_CLOSE; the retry
+     * after a successful connect is the one that is counted. */
+    tbt_car_set_bbr(s);
     tbt_carrier_keepalive(s);
     s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
     {
@@ -3513,6 +3519,10 @@ static void tbt_car_connect_work(struct work_struct *w)
         goto release;
 
     tcp_sk(s->sk)->nonagle = TCP_NAGLE_OFF;
+    if (tbt_car_set_bbr(s))
+        atomic64_inc(&sess->car_bbr_ok);
+    else
+        atomic64_inc(&sess->car_bbr_fail);
     tbt_carrier_install_proto(s->sk);
     c->sock = s;
     rcu_assign_pointer(c->sk, s->sk);
