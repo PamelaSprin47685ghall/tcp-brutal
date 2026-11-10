@@ -2562,7 +2562,7 @@ static void test_group_reassembly(void)
 
 static void test_credit_split(void)
 {
-    enum { N = 4, K = 32, SLOTS = 64 };
+    enum { N = 4, K = TBT_FEC_REPLAY_K_MAX, SLOTS = 64 };
     u32 prev = 0;
     u32 credit;
     u16 g;
@@ -3048,9 +3048,9 @@ static void test_replay(void)
     ok(tbt_fec_nack_unstarted_group(1024, 32, 4, 0, 1, true),
        "non-final missing block may be requested after total_known", NULL);
 
-    /* The production 32-group shape (256 carriers, n=4, m=4) reaches K=31
-     * inside the 64 MiB budget; credit is capped to K-2 super-blocks. */
-    ok_u32(tbt_fec_replay_k_for(32, 4, 4, 8192), 31,
+    /* The production 32-group shape (256 carriers, n=4, m=4) reaches the K
+     * cap of 16 inside the 33 MiB budget; credit is K-2 super-blocks. */
+    ok_u32(tbt_fec_replay_k_for(32, 4, 4, 8192), 16,
            "production K from the shape");
     ok(tbt_fec_replay_k_for(32, 4, 4, 8192) >= 6,
        "production K is at least 6", NULL);
@@ -3061,18 +3061,16 @@ static void test_replay(void)
            "over-budget shape has no K");
     r = tbt_fec_replay_new(32, 4, 4, 8192);
     ok(r != NULL, "production replay ring allocated", NULL);
-    ok_u32(tbt_fec_replay_k(r), 31, "production replay K=31");
-    ok(tbt_fec_replay_bytes(32, 4, 4, 8192, 31) <=
+    ok_u32(tbt_fec_replay_k(r), 16, "production replay K=16");
+    ok(tbt_fec_replay_bytes(32, 4, 4, 8192, 16) <=
            TBT_FEC_REPLAY_BUDGET,
        "production replay fits the budget", NULL);
     tbt_fec_replay_free(r);
 
-    /* Small shapes grow the ring to the K cap: 32 and 64 carriers both get
-     * K=64 inside the 64 MiB budget, so the credit can cover the aggregate
-     * TX window. */
-    ok_u32(tbt_fec_replay_k_for(4, 4, 4, 8192), 64,
+    /* Every stripe now reaches the K cap of 16; the ring is ~32.2 MiB. */
+    ok_u32(tbt_fec_replay_k_for(4, 4, 4, 8192), 16,
            "32-carrier K from the budget");
-    ok_u32(tbt_fec_replay_k_for(8, 4, 4, 8192), 64,
+    ok_u32(tbt_fec_replay_k_for(8, 4, 4, 8192), 16,
            "64-carrier K from the budget");
     ok(tbt_fec_replay_bytes(4, 4, 4, 8192, 64) <= TBT_FEC_REPLAY_BUDGET,
        "32-carrier ring fits the budget", NULL);

@@ -557,17 +557,18 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
  * super-blocks of slack: a block the receiver can still NACK is never
  * evicted. K is derived from the shape: the ring is allocated at the largest
  * K that fits TBT_FEC_REPLAY_BUDGET, up to TBT_FEC_REPLAY_K_MAX. The
- * 256-carrier shape lands on K=31: on a 300 ms WAN a block can sit behind
- * the whole in-flight window, and K=7 dropped the frontier out of the NACK
- * window during a repair stall. The bounds do not depend on the stream
- * length:
- *   ring   <= TBT_FEC_REPLAY_BUDGET (64 MiB of records),
- *   arena  <= TBT_FEC_RX_BUDGET (64 MiB, tbt_fec_data.c),
- *   credit <= TBT_FEC_CREDIT_MAX packets (16 MiB at S=8192).
+ * 256-carrier shape lands on K=16: on a 300 ms WAN a block can sit behind
+ * the in-flight window, and K=7 dropped the frontier out of the NACK window
+ * during a repair stall. 0.7.1 caps the ring at 16 blocks (32 MiB) because
+ * the 955 MB far host cannot hold the 31-block/64 MiB version plus its
+ * arena and the system. The bounds do not depend on the stream length:
+ *   ring   <= TBT_FEC_REPLAY_BUDGET (33 MiB; 16 blocks are ~32.2 MiB),
+ *   arena  <= TBT_FEC_RX_BUDGET (32 MiB, tbt_fec_data.c),
+ *   credit <= K_eff - 2 blocks, capped at TBT_FEC_CREDIT_MAX packets.
  * A shape that cannot hold K=1 gets no ring; the credit cap follows the
  * effective K. */
-#define TBT_FEC_REPLAY_K_MAX 64
-#define TBT_FEC_REPLAY_BUDGET (64u * 1024 * 1024)
+#define TBT_FEC_REPLAY_K_MAX 16
+#define TBT_FEC_REPLAY_BUDGET (33u * 1024 * 1024)
 /* The parent FEC window is sixteen rounds, not 256 carriers x 1 MiB. The
  * downlink 1x256 block is 1 MiB, so 16 MiB is sixteen rounds; the uplink
  * 8x32 block is smaller and its return window is 8 MiB. The window must

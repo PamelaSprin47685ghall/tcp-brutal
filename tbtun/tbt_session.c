@@ -891,6 +891,15 @@ static struct tbt_stream *tbt_stream_get_created(struct tbt_session *sess,
     if (!alloc)
         return NULL;
 
+    /* Below the hard floor a new stream would only feed the direct-reclaim
+     * path that froze the 955 MB far host. Refuse the connection instead of
+     * letting the OOM killer decide which process dies. */
+    if (tbt_mem_avail_kb() < TBT_FEC_MEM_REFUSE_KB)
+    {
+        pr_warn_ratelimited("tbtun: refusing a new stream: MemAvailable=%ld KB\n",
+                            tbt_mem_avail_kb());
+        return NULL;
+    }
     st = kzalloc(sizeof(*st), GFP_ATOMIC);
     if (!st)
         return NULL;

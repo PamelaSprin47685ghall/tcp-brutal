@@ -1641,10 +1641,10 @@ static void test_replay_window(void)
     ok(tbt_fec_replay_bytes(G, N, M, S, k) <= TBT_FEC_REPLAY_BUDGET,
        "replay window: K fits the budget");
 
-    /* The arena formula from tbt_fec_data_init(): 64 MiB of super-blocks,
+    /* The arena formula from tbt_fec_data_init(): 32 MiB of super-blocks,
      * clamped to [4, 256] slots per group. */
     per = (u32)G * (N + M) * S;
-    slots = (64u * 1024 * 1024) / per;
+    slots = (32u * 1024 * 1024) / per;
     if (slots < 4)
         slots = 4;
     if (slots > 256)
@@ -1680,20 +1680,19 @@ static void test_replay_window(void)
            "replay window: past the cap the stalled block is evicted");
     tbt_fec_replay_free(r);
 
-    /* Production shapes at S=8192. K is the largest ring the 64 MiB budget
-     * holds, capped at TBT_FEC_REPLAY_K_MAX=64; the credit is K_eff-2
-     * super-blocks, capped at 2048 packets. 32 and 64 carriers reach the K
-     * cap; the 256-carrier shapes reach K=31. */
-    ok_int(tbt_fec_replay_k_for(4, 4, 4, 8192), 64, "32-carrier K");
-    ok_int(tbt_fec_replay_k_for(8, 4, 4, 8192), 64, "64-carrier K");
-    ok_int(tbt_fec_replay_k_for(32, 4, 4, 8192), 31,
+    /* Production shapes at S=8192. K is the largest ring the 32 MiB budget
+     * holds, capped at TBT_FEC_REPLAY_K_MAX=16; the credit is K_eff-2
+     * super-blocks. Every production stripe now reaches the K cap. */
+    ok_int(tbt_fec_replay_k_for(4, 4, 4, 8192), 16, "32-carrier K");
+    ok_int(tbt_fec_replay_k_for(8, 4, 4, 8192), 16, "64-carrier K");
+    ok_int(tbt_fec_replay_k_for(32, 4, 4, 8192), 16,
            "256-carrier grouped K");
-    ok_int(tbt_fec_replay_k_for(1, 192, 64, 8192), 31,
+    ok_int(tbt_fec_replay_k_for(1, 192, 64, 8192), 16,
            "256-carrier single K");
     ok_int((int)tbt_fec_credit_packets(4, 4, 64, 64, TBT_FEC_CREDIT_MAX),
-           992, "32-carrier credit");
+           224, "32-carrier credit");
     ok_int((int)tbt_fec_credit_packets(8, 4, 64, 32, TBT_FEC_CREDIT_MAX),
-           960, "64-carrier credit");
+           448, "64-carrier credit");
     ok_int((int)tbt_fec_credit_packets(32, 4, 31, 8, TBT_FEC_CREDIT_MAX),
            768, "256-carrier grouped credit");
     ok_int((int)tbt_fec_credit_packets(1, 192, 31, 8, TBT_FEC_CREDIT_MAX),
@@ -1706,9 +1705,9 @@ static void test_replay_window(void)
        "32-carrier ring stays inside 64 MiB");
     ok(tbt_fec_replay_bytes(8, 4, 4, 8192, 64) <= TBT_FEC_REPLAY_BUDGET,
        "64-carrier ring stays inside 64 MiB");
-    ok(tbt_fec_replay_bytes(32, 4, 4, 8192, 31) <= TBT_FEC_REPLAY_BUDGET,
+    ok(tbt_fec_replay_bytes(32, 4, 4, 8192, 16) <= TBT_FEC_REPLAY_BUDGET,
        "256-carrier grouped ring stays inside 64 MiB");
-    ok(tbt_fec_replay_bytes(1, 192, 64, 8192, 31) <= TBT_FEC_REPLAY_BUDGET,
+    ok(tbt_fec_replay_bytes(1, 192, 64, 8192, 16) <= TBT_FEC_REPLAY_BUDGET,
        "256-carrier single ring stays inside 64 MiB");
     ok((u64)32 * 4 * 8 * 8192 <= 64u * 1024 * 1024,
        "32-carrier arena stays inside 64 MiB");

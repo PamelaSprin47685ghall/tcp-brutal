@@ -94,6 +94,18 @@ and moves independently of the module version.
   narrow stripe keeps the 0.8 MiB floor. The shared rule is
   `tbt_car_sockbuf_of()` in `tbt_carrier_policy.h`, covered by
   `host/test_carrier_policy.c`.
+- The FEC plane fits in 256 MiB. Replay `K` falls from 31 to 16
+  (`TBT_FEC_REPLAY_BUDGET` 33 MiB, ~32.2 MiB used), the RX arena from 64 to
+  32 MiB (`TBT_FEC_RX_BUDGET`), and the output FIFO from 4096 to 2048
+  slots; credit follows K-2 blocks, so the 16-round downlink / 8-round
+  uplink parent window stays the cap. `tbt_mem_avail_kb()` now guards the
+  data plane: below 180 MiB the packetizer opens no new block and re-arms in
+  2 s; below 100 MiB a new stream is refused. This is the memory that
+  actually froze the 955 MB far host: at 09:59 on 2026-11-10 journald
+  reported memory pressure right after the last tbtun line, and the kernel
+  died in `skb_page_frag_refill` (reported `python3 invoked oom-killer`).
+  The acceptance source is now a static C `sendfile()` binary with no
+  application buffer.
 
 ## [0.7.0] - 2026-11-10
 

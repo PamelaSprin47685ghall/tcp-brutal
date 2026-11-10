@@ -124,12 +124,13 @@ static void tbt_fec_shape_wire_norm(struct tbt_fec_shape *sh)
 #define TBT_FEC_STALL_MS 30000
 #define TBT_FEC_NONCE_GOLDEN 0x9e3779b97f4a7c15ULL
 /* The RX arena holds at most 64 MiB of super-blocks: slots is the per-group
- * block count, and the ACK credit is additionally capped to
- * TBT_FEC_CREDIT_MAX packets (16 MiB at S=8192) and to K-2 super-blocks.
- * The arena must hold at least the credit window plus the two-block slack;
- * 64 MiB gives the 1x256 shape 32 slots, so K=31 and a 16-block credit both
- * fit and a NACKed block is never evicted before its repair can return. */
-#define TBT_FEC_RX_BUDGET (64u * 1024 * 1024)
+ * block count, and the ACK credit is additionally capped to K-2
+ * super-blocks. The arena must hold at least the credit window plus the
+ * two-block slack; 32 MiB gives the 1x256 shape 16 slots, so K=16 and a
+ * 14-block credit both fit and a NACKed block is never evicted before its
+ * repair can return. 0.7.1 halves 0.7.0's 64 MiB arena; the 955 MB far host
+ * cannot hold two of them plus the system. */
+#define TBT_FEC_RX_BUDGET (32u * 1024 * 1024)
 /* One FEC drain run sends at most this many batches before yielding to the
  * packetizer and the other carriers. A full 256-carrier burst is served in
  * four such runs, each of which re-arms with no delay while fresh bits
@@ -1936,6 +1937,18 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
     {
         u32 got;
 
+        /* The 955 MB far host froze in direct reclaim during a 1 GiB
+         * transfer (09:59, journald had already reported memory pressure).
+         * Stop opening new blocks while the system is short of memory; the
+         * packetizer keeps its ring, and a 2 s re-arm resumes when the
+         * repair backlog has drained. */
+        if (tbt_mem_avail_kb() < TBT_FEC_MEM_PAUSE_KB)
+        {
+            tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2000));
+            pr_info_ratelimited("tbtun: memory low (%ld KB): FEC TX paused for 2 s\n",
+                                tbt_mem_avail_kb());
+            break;
+        }
         if ((tx->switch_state == TBT_FEC_SW_CFG_SENT ||
              tx->switch_state == TBT_FEC_SW_DRAIN) &&
             tx->seq >= tx->switch_pkt)

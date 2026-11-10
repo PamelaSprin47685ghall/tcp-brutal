@@ -1091,7 +1091,17 @@ struct tbt_fec_out
  * with acquire/release, so a record never queues behind one congested
  * carrier. The ring is the power of two above the hard record ceiling, so
  * the record cap trips before the ring does. */
-#define TBT_FEC_OUTQ_FIFO_SIZE 4096u
+#define TBT_FEC_OUTQ_FIFO_SIZE 2048u
+
+/* Memory floor for the FEC data plane, in KiB as returned by
+ * tbt_mem_avail_kb(). Below TBT_FEC_MEM_PAUSE_KB the packetizer stops
+ * opening new blocks and re-arms in 2 s; below TBT_FEC_MEM_REFUSE_KB a new
+ * stream is refused instead of letting the host reach the OOM killer. The
+ * 955 MB far host froze in direct reclaim at 09:59 on 2026-11-10 with
+ * journald already reporting memory pressure. */
+#define TBT_FEC_MEM_PAUSE_KB (180L * 1024L)
+#define TBT_FEC_MEM_REFUSE_KB (100L * 1024L)
+long tbt_mem_avail_kb(void);
 
 /* Session-wide bound on DATA records. One record per carrier would be 256;
  * the packetizer can build a burst while the drain is behind, so the bound

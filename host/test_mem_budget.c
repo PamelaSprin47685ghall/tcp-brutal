@@ -175,7 +175,7 @@ static void test_carrier_ledger(void)
 
 /* One super-block is groups * (n + m) * S; the arena keeps the budget in
  * whole super-blocks. Near: 8 groups of 8+24 shares. Far: 1 group of 128+128
- * shares. Both are 2 MiB per super-block; the 64 MiB arena keeps 32. */
+ * shares. Both are 2 MiB per super-block; the 32 MiB arena keeps 16. */
 static void test_fec_arena(void)
 {
     const size_t s = TBT_FEC_S;
@@ -183,8 +183,8 @@ static void test_fec_arena(void)
     size_t far_per = 1u * 256u * s;
     size_t near_buf = 32u * s;
     size_t far_buf = 256u * s;
-    size_t near_blocks = 8u * 32u; /* groups x slots */
-    size_t far_blocks = 1u * 32u;
+    size_t near_blocks = 8u * 16u; /* groups x slots */
+    size_t far_blocks = 1u * 16u;
     size_t ring = 256u * 1024u;
 
     CHECK(near_per == 2u * 1024u * 1024u);
@@ -200,7 +200,7 @@ static void test_fec_arena(void)
            near_blocks, near_buf / 1024u, far_blocks, far_buf / 1024u);
 }
 
-/* A 256-carrier shape lands on K=7 and the replay plane is the largest
+/* A 256-carrier shape lands on K=16 and the replay plane is the largest
  * per-flow object. It is vmalloc-backed and, since 0.4.2, allocated by the
  * first packetizer pass instead of at flow creation. */
 static void test_replay_ledger(void)
@@ -208,10 +208,10 @@ static void test_replay_ledger(void)
     u16 k = tbt_fec_replay_k_for(1, 128, 128, TBT_FEC_S);
     size_t bytes;
 
-    CHECK(k == 31);
+    CHECK(k == 16);
     bytes = tbt_fec_replay_bytes(1, 128, 128, TBT_FEC_S, k);
-    CHECK(bytes > 62u * 1024u * 1024u);
-    CHECK(bytes <= 64u * 1024u * 1024u);
+    CHECK(bytes > 32u * 1024u * 1024u);
+    CHECK(bytes <= 33u * 1024u * 1024u);
     CHECK(tbt_fec_plane_uses_vmalloc(bytes));
     /* The same carrier count in 8 groups has the same slot total; only the
      * one block-generation word per (slot, group) grows. */

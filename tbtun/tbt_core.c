@@ -16,9 +16,27 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/mm.h>
+#include <linux/vmstat.h>
 #include <linux/vmalloc.h>
 
 #include "tbtun.h"
+
+/* Approximate MemAvailable in KiB: free pages plus reclaimable page cache
+ * and slab, minus a small watermark reserve. si_mem_available() is exported
+ * on the far kernel but its declaration and unit are not part of the header
+ * payload this module builds against; the counters below are stable ABI. */
+long tbt_mem_avail_kb(void)
+{
+    unsigned long free_pages = global_zone_page_state(NR_FREE_PAGES);
+    unsigned long file_pages = global_node_page_state(NR_FILE_PAGES);
+    unsigned long reserve = totalram_pages() / 32;
+    long pages = (long)free_pages + (long)file_pages - (long)reserve;
+
+    if (pages < 0)
+        pages = 0;
+    return pages * (long)(PAGE_SIZE / 1024);
+}
 
 LIST_HEAD(tbt_tunnels);
 DEFINE_MUTEX(tbt_lock);

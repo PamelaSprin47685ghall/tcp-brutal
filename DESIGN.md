@@ -1407,6 +1407,17 @@ per-carrier split by `n_pri`, the `SO_*BUFFORCE` fallback and the unlocked autot
 policy are gone: 0.7.0 let 256 sockets grow to `tcp_wmem[2]`/`tcp_rmem[2]`, which is how
 the 955 MB far host froze.
 
+**FEC memory bound (0.7.1).** One session's FEC plane fits in 256 MiB: replay
+`TBT_FEC_REPLAY_K_MAX = 16` blocks inside `TBT_FEC_REPLAY_BUDGET` (33 MiB, ~32.2 MiB
+used), RX arena `TBT_FEC_RX_BUDGET` (32 MiB, 16 slots for the 1x256 shape), capture ring
+up to 16 MiB, output queues bounded at 32 MiB / 2304 records, credit K-2 blocks, parent
+window 16 MiB downlink and 8 MiB uplink, plus the 64 MiB carrier socket budget above.
+The packetizer stops opening new blocks when `tbt_mem_avail_kb()` falls below
+`TBT_FEC_MEM_PAUSE_KB` (180 MiB) and re-arms in 2 s; a new stream is refused below
+`TBT_FEC_MEM_REFUSE_KB` (100 MiB). The far host froze in direct reclaim at 09:59 on
+2026-11-10 with 0.7.0's 64 MiB replay ring, 64 MiB arena and unbounded socket
+autotuning; journald had already reported memory pressure.
+
 **Carrier-count scaling (256 target).** The current ABI limit is 16 carriers, not a
 tunable: `path_ack_mask` is a 16-bit wire field (`BUILD_BUG_ON(TBT_MAX_CARRIERS_LIMIT >
 16)`), the FBK body is `18 × 16 = 288` bytes and the WINDOW body is `8 + 8 × 16 + 2`, and
