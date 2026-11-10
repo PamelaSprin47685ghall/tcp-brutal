@@ -700,10 +700,10 @@ static int tbt_show_stats(struct seq_file *m, void *v)
             u32 qdepth = 0, qbytes = 0, qmax = 0;
             u32 qctl = 0, qctl_bytes = 0;
             u32 rq = 0, rb = 0;
-            int i, ci;
+            int i;
 
             /* The session reference keeps this struct alive, but destroy
-             * frees car[] and fec_outq before it waits for that reference.
+             * frees car[] and fec_fifo before it waits for that reference.
              * Render under the gate destroy takes before the first child
              * goes; a reader that starts after the teardown sees NULL. */
             down_read(&s->stats_lock);
@@ -1221,18 +1221,12 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                  * FEC-owned reset, and it requires every carrier TCP to be
                  * gone. fec_nack_lat_ns now measures NACK receipt to the
                  * carrier write, not to enqueue. */
-                if (s->fec_outq)
+                if (s->fec_fifo)
                 {
                     spin_lock(&s->fec_out_lock);
-                    for (ci = 0; ci < s->n_car; ci++)
-                    {
-                        u32 d = s->fec_outq[ci].depth;
-
-                        qdepth += d;
-                        qbytes += s->fec_outq[ci].bytes;
-                        if (d > qmax)
-                            qmax = d;
-                    }
+                    qdepth = (u32)atomic_read(&s->fec_outq_queued);
+                    qbytes = (u32)atomic_read(&s->fec_outq_bytes);
+                    qmax = READ_ONCE(s->fec_outq_depth_max);
                     qctl = s->fec_out_ctl_depth;
                     qctl_bytes = s->fec_out_ctl_bytes;
                     rq = s->fec_replay_queued;
@@ -1356,23 +1350,31 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            READ_ONCE(s->fec_repair_last_ns),
                            tbt_stat_read(&s->fec_short_parity_saved),
                            tbt_stat_read(&s->fec_nack_pad_skip));
-                /* Per-carrier data queue detail: index:records/bytes.
-                 * Only non-empty queues are printed; a healthy session emits
-                 * one short line, a congested one names the carriers. */
-                if (s->fec_outq)
+                /* Session FIFO detail: records/bytes still waiting for a
+                 * socket, the next carrier cursor, and how many carriers are
+                 * marked slow. A healthy session keeps the FIFO empty or
+                 * shallow; a congested one shows the carriers the drain now
+                 * tries last. */
+                if (s->fec_fifo)
                 {
+                    u32 slow = 0;
                     int ci;
 
-                    seq_printf(m, "tunnel %llu c12 fec_outq", id);
                     for (ci = 0; ci < s->n_car; ci++)
                     {
-                        u32 d = READ_ONCE(s->fec_outq[ci].depth);
+                        struct tbt_carrier *c = tbt_carrier_get(s, (u8)ci);
 
-                        if (d)
-                            seq_printf(m, " %d:%u/%u", ci, d,
-                                       READ_ONCE(s->fec_outq[ci].bytes));
+                        if (!c)
+                            continue;
+                        if (READ_ONCE(c->slow))
+                            slow++;
+                        tbt_carrier_put(c);
                     }
-                    seq_printf(m, "\n");
+                    seq_printf(m, "tunnel %llu c12 fec_outq fifo=%u/%u "
+                                  "rot=%u slow=%u\n", id,
+                               atomic_read(&s->fec_outq_queued),
+                               atomic_read(&s->fec_outq_bytes),
+                               atomic_read(&s->async_rot), slow);
                 }
                 /* c13: the adaptive control surface. The shape is the one in
                  * force (updated by the data plane on every epoch), and the

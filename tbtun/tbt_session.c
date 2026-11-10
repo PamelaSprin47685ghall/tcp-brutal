@@ -1973,7 +1973,7 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     s->closing = true;
     spin_unlock(&s->lock);
     /* Stats readers hold a session reference but not the child objects it
-     * renders (car[], fec_outq, streams). Block them before the first child
+     * renders (car[], fec_fifo, streams). Block them before the first child
      * is cleared. The write side is released before the drained wait, since
      * a blocked reader holds one of the references that wait is for. */
     down_write(&s->stats_lock);

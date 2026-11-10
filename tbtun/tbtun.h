@@ -1025,8 +1025,10 @@ struct tbt_fec_flow
     struct work_struct free_work;
 };
 
-/* One queued FEC record waiting for a carrier. Control records may be sent on
- * any up carrier; data records are bound to their share's carrier. */
+/* One queued FEC record waiting for a carrier. Control and replay records use
+ * the session lists; DATA records wait in one session FIFO and are written by
+ * whichever carrier the drain reaches first. `carrier` is the share's
+ * scheduled index, kept only for the debug loss injector. */
 struct tbt_fec_out
 {
     struct list_head node;
@@ -1034,6 +1036,10 @@ struct tbt_fec_out
     bool queued;     /* still linked; unlink is once-only */
     u16 carrier;
     u16 len;
+    /* Shape generation of a DATA record. A shape switch bumps the session
+     * epoch instead of walking the single-consumer FIFO; the drain drops a
+     * record whose epoch is older than the one in force. */
+    u32 epoch;
     u8 control;
     u8 replay; /* queued from the replay ring: charged to the byte budget */
     /* Replay only: the super-block this record belongs to. The flush frees
@@ -1056,40 +1062,18 @@ struct tbt_fec_out
     u8 data[];
 };
 
-/* One carrier's bound share queue. The flush walks every carrier and takes
- * this queue's head; -EAGAIN leaves that head here and moves on, so a full
- * socket never stops the other carriers. Control and replay records do not
- * use these queues: an ACK, a NACK, or a repair must not wait behind a
- * congested carrier's data. */
-struct tbt_fec_outq
-{
-    struct list_head queue;
-    u32 depth;
-    u32 bytes;
-};
+/* Every DATA record waiting for a socket sits in one session FIFO. A single
+ * producer (the packetizer) and a single consumer (the drain work) share it
+ * with acquire/release, so a record never queues behind one congested
+ * carrier. The ring is the power of two above the hard record ceiling, so
+ * the record cap trips before the ring does. */
+#define TBT_FEC_OUTQ_FIFO_SIZE 4096u
 
-/* One carrier may hold at most this many records / bytes. This is the hard
- * cap, the last line of defence: the packetizer stops building new DATA
- * before any queue reaches the high-water mark, so a healthy session never
- * gets here. The cap stays above the high-water mark by more than one FEC
- * block's parity burst (m <= 128), because a block closes by queueing all of
- * its parity at once. */
-#define TBT_FEC_OUTQ_DEPTH_MAX 384u
-#define TBT_FEC_OUTQ_BYTES_MAX (TBT_FEC_OUTQ_DEPTH_MAX * TBT_FEC_REC_MAX)
-
-/* High-water mark of one carrier's bound queue. The packetizer checks this
- * before building the next DATA packet and pauses until the carrier drains,
- * which pushes the pressure into the capture ring and then into the
- * application. Dropping the record instead is what made a 1 GiB run pay a
- * 7.8 s NACK repair for 22 shares: the replay ring still had them, but only
- * after the receiver noticed the gap. */
-#define TBT_FEC_OUTQ_HIGH_DEPTH 160u
-#define TBT_FEC_OUTQ_HIGH_BYTES (TBT_FEC_OUTQ_HIGH_DEPTH * TBT_FEC_REC_MAX)
-
-/* Session-wide bound on bound data records. 256 carriers times the per-
- * carrier cap would be 1.3 GiB, so the sum has its own record and byte
- * ceiling. 32 MiB is 7.6 s of queue at the 4.215 MB/s app target: enough to
- * ride out a burst of slow carriers, bounded regardless of carrier count. */
+/* Session-wide bound on DATA records. One record per carrier would be 256;
+ * the packetizer can build a burst while the drain is behind, so the bound
+ * keeps room for several FEC blocks. 2048 records / 16 MiB is 7.6 s of
+ * queue at the 4.215 MB/s app target: enough to ride out a burst of slow
+ * carriers, bounded regardless of carrier count. */
 #define TBT_FEC_OUTQ_QUEUE_HIGH 2048u
 #define TBT_FEC_OUTQ_QUEUE_BYTES_HIGH (16u * 1024 * 1024)
 /* The hard session ceiling stays one FEC block (n+m <= 256 records) above
@@ -1196,7 +1180,7 @@ struct tbt_session
     struct completion drained;
     /* Serialises /proc stats rendering against tbt_session_destroy(). The
      * reader holds a session reference, but that reference does not keep
-     * car[], fec_outq or the stream hash alive. Destroy takes the write side
+     * car[], fec_fifo or the stream hash alive. Destroy takes the write side
      * before it tears those down and releases it before the final drained
      * wait: a reader blocked here also holds a reference, so waiting under
      * the write side would deadlock. */
@@ -1271,24 +1255,20 @@ struct tbt_session
      * flow. */
     u16 fec_ctl_rot;
     bool fec_stopping;
-    /* One delayed work drains every ready carrier's bound data queue. A
-     * carrier is set in fec_drain_ready when the packetizer or write_space
-     * wakes it; the work takes one batch from each ready carrier in a
-     * round-robin cursor, up to TBT_FEC_DRAIN_PASS_MAX carriers per run, so
-     * a burst cannot monopolise the worker.
-     *
-     * A carrier that refuses its batch with -EAGAIN moves to
-     * fec_drain_retry and waits for the 2 ms timer; the two bitmaps never
-     * gate each other, so a blocked carrier cannot delay a fresh one by a
-     * single timer tick. When the timer fires, the retry bits rejoin
-     * fec_drain_ready and are served by the same bounded loop.
-     * fec_retry_at is the jiffies deadline for that merge, 0 while idle.
-     * The cursor and both bitmaps are owned by the work. */
+    /* One delayed work drains the session FIFO: peek the head, send it on the
+     * first carrier from async_rot whose socket has room, and advance the
+     * cursor after each success so the healthy carriers keep taking records.
+     * No carrier owns a queue, so a full socket costs the scan one skipped
+     * index, not the record a place behind it. When every socket is full the
+     * record stays at the FIFO head and the work retries in 2 ms.
+     * A carrier that stays full for TBT_SKIP_MS is marked slow and skipped
+     * first on later scans; having room again clears the mark. */
     struct delayed_work fec_drain_work;
-    DECLARE_BITMAP(fec_drain_ready, TBT_MAX_CARRIERS_LIMIT);
-    DECLARE_BITMAP(fec_drain_retry, TBT_MAX_CARRIERS_LIMIT);
-    unsigned long fec_retry_at;
-    u16 fec_drain_cursor;
+    struct tbt_fec_out **fec_fifo; /* DATA records waiting for a carrier */
+    u32 fec_fifo_head;             /* consumer position; drain work only */
+    u32 fec_fifo_tail;             /* producer position; packetizer only */
+    u32 fec_out_epoch;             /* shape generation of FIFO records */
+    atomic_t async_rot;            /* carrier cursor for the next DATA record */
     u16 fec_ndrain;
     struct delayed_work w_fec_tx; /* packetizer + control/replay writer */
     /* Slow FEC cadence (INIT retry, adaptation, crypto key wait). Kept off
@@ -1321,11 +1301,9 @@ struct tbt_session
     u32 fec_replay_pace[TBT_MAX_CARRIERS_LIMIT];
     struct list_head fec_out_ctl;    /* ACK/NACK: any up, non-stalled carrier */
     struct list_head fec_out_replay; /* NACK repairs: any up carrier, byte-budgeted */
-    struct tbt_fec_outq *fec_outq; /* n_car queues, indexed by the share's carrier */
-    u32 fec_out_queued;          /* records on every queue, control included */
-    u32 fec_outq_queued;         /* bound data records across carrier queues */
-    u32 fec_outq_bytes;          /* bound data bytes across carrier queues */
-    u32 fec_outq_depth_max;      /* high-water per-carrier depth */
+    atomic_t fec_outq_queued;    /* DATA records in the session FIFO */
+    atomic_t fec_outq_bytes;     /* DATA bytes in the session FIFO */
+    u32 fec_outq_depth_max;      /* FIFO high-water depth; packetizer writes */
     u32 fec_out_ctl_depth;       /* control records queued */
     u32 fec_out_ctl_bytes;       /* control bytes queued */
     u32 fec_replay_bytes;        /* replay bytes queued across carriers */
@@ -1609,18 +1587,18 @@ struct tbt_session
     atomic64_t fec_ack_tx;
     atomic64_t fec_ack_rx;
     atomic64_t fec_credit_wait;
-    /* Per-carrier sender scheduling: a flush pass that skipped a carrier on
-     * -EAGAIN, the records it wrote, and the records left behind a skipped
-     * head. fec_outq_drop names shares refused because their own carrier's
-     * queue reached TBT_FEC_OUTQ_DEPTH_MAX/BYTES_MAX; the replay ring still
-     * holds them, so a NACK repairs the loss. */
+    /* FEC sender scheduling. fec_flush_pass counts accepted DATA records.
+     * fec_flush_skip and fec_hol_wait are kept for the old per-carrier queue
+     * accounting; the session FIFO never queues a record behind one socket,
+     * so both stay at 0 on a healthy run. fec_outq_drop names shares refused
+     * by the session record/byte ceiling; the replay ring still holds them,
+     * so a NACK repairs the loss. */
     atomic64_t fec_flush_skip;
     atomic64_t fec_flush_pass;
     atomic64_t fec_hol_wait;
     atomic64_t fec_outq_drop;
-    /* Packetizer pauses spent waiting for a bound data queue to fall below
-     * its high-water mark. Non-zero proves the backpressure path ran; a
-     * healthy session with no slow carrier keeps it at 0. */
+    /* Packetizer pauses spent waiting for the session FIFO to fall below its
+     * high-water mark. Non-zero proves the backpressure path ran. */
     atomic64_t fec_outq_high_wait;
     /* A parity encode refused by the codec: the block can then be repaired
      * only by NACKing its shares, never by its own parity. */
@@ -1924,6 +1902,13 @@ struct tbt_carrier
      * if it never does. Only the 50 ms poll writes it, the pump and /proc read
      * it, so WRITE_ONCE/READ_ONCE is enough: one writer, no atomic. */
     bool stalled;
+    /* The drain found this socket without room for a record for longer than
+     * TBT_SKIP_MS: later scans try it last and only to detect recovery. Set
+     * and cleared by the drain work alone; /proc reads it with READ_ONCE.
+     * A slow socket still retransmits its own TCP bytes: this flag filters
+     * new FEC dispatch only. */
+    bool slow;
+    unsigned long slow_since;     /* first refusal of the current episode */
     bool spare;                   /* index >= n_pri: idle unless activated */
     bool active;                  /* spare that now carries DATA */
     u32 drop_ppm;                 /* debug-only loss injection, 0..1e6 */
@@ -2173,9 +2158,11 @@ size_t tbt_fec_tx_submit(struct tbt_stream *st, struct sk_buff *skb,
 int tbt_fec_tx_flush(struct tbt_stream *st);
 bool tbt_fec_tx_idle(struct tbt_stream *st);
 void tbt_fec_tx_work(struct work_struct *w);
-/* Wake the per-carrier FEC data-queue drain. The packetizer calls it when a
- * bound queue turns non-empty; the carrier write-space path may call it too. */
-void tbt_fec_out_kick(struct tbt_session *sess, u16 carrier);
+/* Wake the session FEC FIFO drain. The packetizer calls it when the FIFO
+ * turns non-empty; a carrier's write-space path calls it when a socket
+ * gains room, so the blocked head leaves without waiting for the 2 ms
+ * fallback. */
+void tbt_fec_out_kick(struct tbt_session *sess);
 /* Decode outside rx->lock, then deliver ready super-blocks in order. */
 void tbt_fec_rx_work(struct work_struct *w);
 int tbt_rx_fec_deliver(struct tbt_stream *st, u64 off, const u8 *data, u16 len);

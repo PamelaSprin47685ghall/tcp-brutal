@@ -341,10 +341,10 @@ static void tbt_car_write_space(struct sock *sk)
     tbt_tx_wake(c->sess);
     if (c->sess->fec)
     {
-        /* Wake this carrier's own FEC drain now that the socket has room.
-         * The packetizer still runs on the session work; the drain is the
-         * per-carrier writer that can use the freed send memory immediately. */
-        tbt_fec_out_kick(c->sess, c->index);
+        /* Wake the session FEC drain now that this socket has room. The
+         * packetizer still runs on the session work; the drain is the
+         * writer that can use the freed send memory immediately. */
+        tbt_fec_out_kick(c->sess);
         /* Through the session bit, not schedule_work(): a raw queue takes no
          * session reference and is silently dropped while a cancel has the
          * work disabled. */
@@ -461,7 +461,7 @@ static bool tbt_car_hold_idle(struct tbt_session *sess)
     rcu_read_unlock();
     if (busy)
         return false;
-    return !READ_ONCE(sess->fec_outq_queued) &&
+    return !atomic_read(&sess->fec_outq_queued) &&
            !READ_ONCE(sess->fec_out_ctl_depth) &&
            !READ_ONCE(sess->fec_replay_queued);
 }
@@ -1988,6 +1988,10 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
     }
     c->index = index;
     c->gen = ++sess->carrier_gen;
+    /* The FEC drain starts every carrier in the normal scan. slow_since is
+     * the first refusal of the current episode; zero means none yet. */
+    c->slow = false;
+    c->slow_since = 0;
     /* 0xff is the provisional far-side index: not a spare, and the join sets
      * the real role when HELLO names the slot. */
     c->spare = spare;

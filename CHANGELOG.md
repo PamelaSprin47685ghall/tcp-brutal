@@ -37,6 +37,15 @@ payload is the application byte stream itself.
   at present shares >= n + 2. A failed attempt keeps its 50..400 ms backoff,
   and a fresh share clears it; a share for a block behind the delivery
   frontier is dropped as `fec_late_share` before decryption or placement.
+- Lock-free FEC dispatch. A DATA record is no longer bound to carrier i's
+  private queue: it waits in one session FIFO and the drain sends it on the
+  first carrier from an atomic rotation cursor whose send space holds it. A
+  full socket costs the scan one skipped index, not the record a place
+  behind it, so `fec_hol_wait` and `fec_flush_skip` stay at 0. When every
+  socket is full the head stays in the FIFO and the work retries in 2 ms. A
+  carrier without room for `TBT_SKIP_MS` (20 ms) is marked slow and tried
+  last; room again clears the mark. The receiver is unchanged: it places a
+  share by its header, not by arrival order.
 - Module version is `0.7.0`.
 
 ## [0.6.0] - 2026-11-09
