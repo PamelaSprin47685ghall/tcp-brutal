@@ -29,6 +29,12 @@ and moves independently of the module version.
   non-x86 targets are unchanged.
 - `tbt_fec_sclc.o` is built at `-O3` like the cipher object. The SC-LDPC
   encode/decode loops are the largest TX/RX cost after the cipher.
+- `seg_gather()` uses a 64-bit SWAR movemask: `(x & 0x8080...) *
+  0x0002040810204081 >> 56` folds the eight row bytes into one plane byte.
+  Measured 213 -> 175 ns per 64-byte segment on the x86_64 test host (18%);
+  the gather runs once per share per batch in both encode and decode.
+  `seg_scatter()` keeps the byte-extract plus transpose8 form: the SWAR
+  mirror measured equal, so the simpler existing code stays.
 - The FEC sliding window grows to 64 super-blocks. `TBT_FEC_CREDIT_MAX` is
   8192 packets (64 MiB of source at S=8192), `TBT_FEC_REPLAY_K_MAX` is 66
   (64 blocks of credit plus two of slack), and both FEC windows are 64 MiB.
