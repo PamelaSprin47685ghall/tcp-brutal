@@ -65,12 +65,13 @@ and moves independently of the module version.
   two blocks (4 MiB at 2 MiB/block), and memory pressure stops new
   buffers only below the hard floor. A receive-light side commits only its
   live reassembly blocks.
-- Carrier sockets set `tcp_sock.notsent_lowat` to 128 KiB, and the FEC drain
-  gates each carrier on its live cwnd: `max_notsent = clamp(cwnd_bytes,
-  32 KiB, 256 KiB)` and `max_unacked = max(2 * cwnd_bytes, 32 KiB)`. A fast
-  subflow keeps a 1-2x cwnd reserve and does not mark BBR app-limited after a
-  350 ms aggregated ACK/SACK recovery; a 10 KiB-cwnd slow subflow is held to
-  32 KiB and cannot queue hundreds of KiB for the next stream.
+- FEC dispatch uses two passes instead of hard-rejecting on notsent. Pass 1
+  prefers a carrier with socket space and `write_seq - snd_nxt <= 64 KiB`;
+  if none exists, the first carrier with socket space is used anyway, with
+  no notsent test. `notsent_lowat` stays at the kernel default. This keeps
+  BBR from going app-limited (the 32/256 KiB hard gates measured 171/100 s
+  against 90.9 s for no gate) while still preferring an empty-queue subflow
+  when a stream switches.
 - The session output FIFO keeps 4096 queued records (8192 pointer slots)
   and its byte mark rises to 64 MiB for the 64-block window; records stay
   per-share allocations, not a static byte array. A slow carrier is evicted

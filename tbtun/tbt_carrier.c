@@ -3350,9 +3350,9 @@ void tbt_car_setsockbuf(struct socket *s, u32 carriers)
     sk = s->sk;
     WRITE_ONCE(sk->sk_sndbuf, TBT_CAR_SOCKBUF_PER);
     WRITE_ONCE(sk->sk_rcvbuf, TBT_CAR_SOCKBUF_PER);
-    /* Wake sk_write_space/poll at 128 KiB behind cwnd; the dispatch gate
-     * below then adapts the real reserve to this subflow's cwnd. */
-    WRITE_ONCE(tcp_sk(sk)->notsent_lowat, TBT_CAR_NOTSENT_LOWAT);
+    /* Keep the kernel default notsent_lowat: the FEC drain does a two-pass
+     * light/fallback choice instead of hard-rejecting a carrier, so BBR is
+     * never forced app_limited by the wake threshold. */
     /* Clear only the two buffer locks; SOCK_CONNECT_BIND and every other bit
      * survive. */
     sk->sk_userlocks &= ~TBT_CAR_SOCKBUF_LOCK_MASK;

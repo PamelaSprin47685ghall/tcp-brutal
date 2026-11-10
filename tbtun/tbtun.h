@@ -356,15 +356,11 @@ void tbt_listen_stop(struct tbt_tunnel *t);
  * test asserts it; the lazy FEC buffers and the 180 MiB floor are the OOM
  * guard, not a per-session socket budget. */
 
-/* Adaptive queue bounds behind the carrier cwnd. The drain derives both from
- * the subflow's live cwnd: a fast subflow gets 1x cwnd of notsent reserve and
- * 2x cwnd of unacked, clamped to [32 KiB, 256 KiB]; a 10 KiB-cwnd subflow is
- * held to 32 KiB and cannot queue hundreds of KiB for the next stream. */
-#define TBT_CAR_NOTSENT_MIN 32768u
-#define TBT_CAR_NOTSENT_CAP 262144u
-/* TCP_NOTSENT_LOWAT wake threshold: 128 KiB, between the slow floor and the
- * fast cap so it does not itself force app_limited on a fast subflow. */
-#define TBT_CAR_NOTSENT_LOWAT 131072u
+/* Dispatch prefers a carrier with at most 64 KiB queued behind cwnd
+ * (write_seq - snd_nxt). If no carrier is that light, the first carrier
+ * with socket space is used anyway: never reject a record on notsent, or
+ * BBR goes app_limited and loses the window. */
+#define TBT_FEC_DISPATCH_LIGHT_NOTSENT 65536u
 
 /* A carrier that never presents a HELLO is retired after this long. */
 #define TBT_JOIN_TIMEOUT_MS 5000

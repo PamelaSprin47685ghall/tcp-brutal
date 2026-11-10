@@ -831,6 +831,7 @@ static int tbt_fec_out_dispatch(struct tbt_session *sess,
                                 struct tbt_fec_out *o)
 {
     u16 start = (u16)(atomic_read(&sess->async_rot) % sess->n_car);
+    u16 fallback = 0xffff;
     bool skipped_slow = false;
     int round;
 
@@ -885,47 +886,33 @@ static int tbt_fec_out_dispatch(struct tbt_session *sess,
                     idx = 0;
                 continue;
             }
+            if (sk_stream_wspace(sk) < (int)o->len)
             {
-                struct tcp_sock *tp = tcp_sk(sk);
-                u32 mss = max_t(u32, READ_ONCE(tp->mss_cache), 1400U);
-                u64 cwnd_bytes = (u64)READ_ONCE(tp->snd_cwnd) * mss;
-                u32 notsent = READ_ONCE(tp->write_seq) -
-                              READ_ONCE(tp->snd_nxt);
-                u32 unacked = READ_ONCE(tp->write_seq) -
-                              READ_ONCE(tp->snd_una);
-                u32 max_notsent = cwnd_bytes < TBT_CAR_NOTSENT_MIN ?
-                                  TBT_CAR_NOTSENT_MIN :
-                                  cwnd_bytes > TBT_CAR_NOTSENT_CAP ?
-                                  TBT_CAR_NOTSENT_CAP : (u32)cwnd_bytes;
-                u64 unacked_limit = cwnd_bytes * 2;
-
-                if (unacked_limit < TBT_CAR_NOTSENT_MIN)
-                    unacked_limit = TBT_CAR_NOTSENT_MIN;
-                if (unacked_limit > 0xffffffffULL)
-                    unacked_limit = 0xffffffffULL;
-                {
-                    u32 max_unacked = (u32)unacked_limit;
-
-                    err = (notsent > max_notsent ||
-                           unacked > max_unacked ||
-                           sk_stream_wspace(sk) < (int)o->len) ? -EAGAIN : 0;
-                }
-            }
-            tbt_carrier_sk_put(sk);
-            if (err)
-            {
+                tbt_carrier_sk_put(sk);
                 tbt_fec_out_slow_note(c, false);
                 tbt_carrier_put(c);
                 if (++idx == sess->n_car)
                     idx = 0;
                 continue;
             }
+            {
+                u32 notsent = READ_ONCE(tcp_sk(sk)->write_seq) -
+                              READ_ONCE(tcp_sk(sk)->snd_nxt);
+
+                if (notsent > TBT_FEC_DISPATCH_LIGHT_NOTSENT)
+                {
+                    if (fallback == 0xffff)
+                        fallback = idx;
+                    tbt_carrier_sk_put(sk);
+                    tbt_carrier_put(c);
+                    if (++idx == sess->n_car)
+                        idx = 0;
+                    continue;
+                }
+            }
+            tbt_carrier_sk_put(sk);
             tbt_fec_out_slow_note(c, true);
             err = tbt_carrier_send_fec(c, o->data, o->len);
-            /* The carrier's write pre-check includes the framing bytes, so
-             * it can refuse a record whose bare length fit. Count that
-             * refusal as no room too, or the scan retries the same socket
-             * on every pass. */
             if (err == -EAGAIN)
                 tbt_fec_out_slow_note(c, false);
             tbt_carrier_put(c);
@@ -943,6 +930,46 @@ static int tbt_fec_out_dispatch(struct tbt_session *sess,
             }
             return err;
         }
+    }
+    /* No light carrier: use the first one with socket space, without any
+     * notsent test. Rejecting here is what made BBR app-limited. */
+    if (fallback != 0xffff)
+    {
+        struct tbt_carrier *c = tbt_carrier_get(sess, (u8)fallback);
+        struct sock *sk;
+        int err;
+
+        if (!c)
+            return -EAGAIN;
+        if (!atomic_read(&c->up) || atomic_read(&c->stopping) ||
+            !atomic_read(&c->connected) || READ_ONCE(c->stalled))
+        {
+            tbt_carrier_put(c);
+            return -EAGAIN;
+        }
+        sk = tbt_carrier_sk_get(c);
+        if (!sk || sk_stream_wspace(sk) < (int)o->len)
+        {
+            if (sk)
+                tbt_carrier_sk_put(sk);
+            tbt_carrier_put(c);
+            return -EAGAIN;
+        }
+        tbt_carrier_sk_put(sk);
+        tbt_fec_out_slow_note(c, true);
+        err = tbt_carrier_send_fec(c, o->data, o->len);
+        if (err == -EAGAIN)
+            tbt_fec_out_slow_note(c, false);
+        tbt_carrier_put(c);
+        if (!err)
+        {
+            atomic_set(&sess->async_rot,
+                       (u16)((fallback + 1) % sess->n_car));
+            return 0;
+        }
+        if (err == -EAGAIN || err == -ENOTCONN || err == -ENODEV)
+            return -EAGAIN;
+        return err;
     }
     return -EAGAIN;
 }
