@@ -723,8 +723,8 @@ static void case_rlnc_dispatch(void)
     }
 }
 
-/* 0.3.1: a short block sends one cut row, and the NACK scan names only
- * shares the sender could have written.
+/* A short block sends one parity row per real share, and the NACK scan names
+ * only shares the sender could have written.
  *
  * The sender's data-plane code is kernel-only, so the decisions it makes are
  * the two pure helpers in tbt_fec.h; this case pins them and the exact bytes
@@ -737,17 +737,21 @@ static void case_short_block_parity(void)
     uint8_t wire[TBT_FEC_HDR_LEN], wire2[TBT_FEC_HDR_LEN];
     int i;
 
-    /* The sender keeps row 0 alone for a short SC-LDPC block. */
+    /* A short SC-LDPC block sends one covering row per real share. */
     ok_u16(tbt_fec_tx_parity_count(1, 128, 128, true), 1,
            "short block: one cut row");
-    ok_u16(tbt_fec_tx_parity_count(2, 128, 128, true), 1,
-           "two-share block: one cut row");
-    ok_u16(tbt_fec_tx_parity_count(3, 128, 128, true), 128,
-           "three-share block: every parity row");
-    ok_u16(tbt_fec_tx_parity_count(127, 128, 128, true), 128,
-           "127-share block: every parity row");
+    ok_u16(tbt_fec_tx_parity_count(2, 128, 128, true), 2,
+           "two-share block: two covering rows");
+    ok_u16(tbt_fec_tx_parity_count(3, 128, 128, true), 3,
+           "three-share block: three covering rows");
+    ok_u16(tbt_fec_tx_parity_count(127, 128, 128, true), 127,
+           "127-share block: one row per real share");
     ok_u16(tbt_fec_tx_parity_count(128, 128, 128, true), 128,
            "full block: every parity row");
+    ok_u16(tbt_fec_tx_parity_count(7, 8, 24, true), 7,
+           "uplink short block: one row per real share");
+    ok_u16(tbt_fec_tx_parity_count(8, 8, 24, true), 24,
+           "uplink full block: every parity row");
     ok_u16(tbt_fec_tx_parity_count(1, 128, 4, false), 4,
            "RLNC short block: every row");
     ok_u16(tbt_fec_tx_parity_count(1, 128, 0, true), 0,
@@ -768,12 +772,12 @@ static void case_short_block_parity(void)
     /* Parity requests converge on the rows the sender kept. */
     ok_u16(tbt_fec_nack_parity_limit(false, 128, 128, 128, true), 1,
            "cut unknown: only the cut row");
-    ok_u16(tbt_fec_nack_parity_limit(true, 2, 128, 128, true), 1,
-           "two-share block: only the cut row exists");
-    ok_u16(tbt_fec_nack_parity_limit(true, 3, 128, 128, true), 128,
-           "three-share block: every row may be named");
-    ok_u16(tbt_fec_nack_parity_limit(true, 127, 128, 128, true), 128,
-           "127-share block: every row may be named");
+    ok_u16(tbt_fec_nack_parity_limit(true, 2, 128, 128, true), 2,
+           "two-share block: two covering rows exist");
+    ok_u16(tbt_fec_nack_parity_limit(true, 3, 128, 128, true), 3,
+           "three-share block: three covering rows exist");
+    ok_u16(tbt_fec_nack_parity_limit(true, 127, 128, 128, true), 127,
+           "127-share block: one covering row per real share");
     ok_u16(tbt_fec_nack_parity_limit(true, 128, 128, 128, true), 128,
            "full block: every row may be named");
     ok_u16(tbt_fec_nack_parity_limit(true, 1, 128, 4, false), 4,
@@ -835,6 +839,75 @@ static void case_short_block_parity(void)
         free(data[i]);
         free(parity[i]);
     }
+}
+
+/* A short GF(16) block sends one covering row per real share, and those rows
+ * can recover a lost real share. n = 8, m = 24, six shares written: the old
+ * row-0-only rule left share 5 with no covering equation. The coupled graph
+ * is not a per-share MDS code, so this pins the case the row set does solve
+ * rather than claiming every short-block loss is parity-recoverable; the
+ * NACK replay covers the rest. */
+static void case_short_block_decode(void)
+{
+    const u16 nreal = 6, lost = 5;
+    struct tbt_fec_grouped *tx, *rx;
+    u8 *data[8] = {0}, *parity[24] = {0};
+    u8 *rd[8] = {0}, *rp[24] = {0};
+    u8 pd[8] = {0}, pp[24] = {0};
+    u16 rows, i;
+    int known, exact;
+
+    tx = tbt_fec_grouped_new_ops(&tbt_fec_ops_sclc_gf16, 2, 8, 24, 128, 16,
+                                 TBT_FEC_S, 64, 0x6b6b);
+    rx = tbt_fec_grouped_new_ops(&tbt_fec_ops_sclc_gf16, 2, 8, 24, 128, 16,
+                                 TBT_FEC_S, 64, 0x6b6b);
+    ok(tx != NULL && rx != NULL, "short decode: GF(16) codecs build");
+    if (!tx || !rx)
+        goto out;
+    for (i = 0; i < 8; i++)
+    {
+        data[i] = calloc(1, TBT_FEC_S);
+        rd[i] = calloc(1, TBT_FEC_S);
+    }
+    for (i = 0; i < 24; i++)
+    {
+        parity[i] = calloc(1, TBT_FEC_S);
+        rp[i] = calloc(1, TBT_FEC_S);
+    }
+    for (i = 0; i < nreal; i++)
+        fill_pattern(data[i], TBT_FEC_S, 0x200 + i);
+    ok_int(tbt_fec_grouped_encode(tx, 0, data, 8, parity), 0,
+           "short decode: encode");
+
+    rows = tbt_fec_tx_parity_count(nreal, 8, 24, true);
+    ok_u16(rows, nreal, "short decode: one covering row per real share");
+    for (i = 0; i < nreal; i++)
+        if (i != lost)
+        {
+            memcpy(rd[i], data[i], TBT_FEC_S);
+            pd[i] = 1;
+        }
+    for (i = 0; i < rows; i++)
+    {
+        memcpy(rp[i], parity[i], TBT_FEC_S);
+        pp[i] = 1;
+    }
+    ok(tbt_fec_grouped_decode(rx, 0, rd, rp, pd, pp, 8) >= 0,
+       "short decode: decode returns a count");
+    known = tbt_fec_grouped_is_known(rx, 0, lost);
+    exact = known && memcmp(rd[lost], data[lost], TBT_FEC_S) == 0;
+    ok(known, "short decode: the covering rows recover the lost share");
+    ok(exact, "short decode: the recovered share is byte-exact");
+
+out:
+    if (tx)
+        tbt_fec_grouped_free(tx);
+    if (rx)
+        tbt_fec_grouped_free(rx);
+    for (i = 0; i < 8; i++)
+        free(data[i]), free(rd[i]);
+    for (i = 0; i < 24; i++)
+        free(parity[i]), free(rp[i]);
 }
 
 /* Every downlink ladder split must survive the grouped factory path the
@@ -949,6 +1022,7 @@ int main(void)
     case_immediate_decode();
     case_rlnc_dispatch();
     case_short_block_parity();
+    case_short_block_decode();
     printf("%s: %d checks, %d failures\n",
            failures ? "FAIL" : "PASS", checks, failures);
     return failures ? 1 : 0;

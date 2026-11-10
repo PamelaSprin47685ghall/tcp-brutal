@@ -77,6 +77,21 @@ window are sized for the whole tunnel.
 
 ### Fixed
 
+- A sustained 8 KiB cut-through stream no longer seals a one-share block per
+  write. The 2 ms timer now flushes a partial packet only on the stream's
+  first packet; a block that holds real shares waits `TBT_FEC_BLOCK_IDLE_MS`
+  (25 ms) without new bytes, and FIN still closes it at once. The idle cut
+  lives on its own `TBT_SW_FEC_CUT` work so its timer can never hold the next
+  write's 0 ms submit wake behind it. A sealed short block sends
+  `min(m, win_len)` parity rows instead of row 0 alone; a full block keeps
+  all m rows.
+- The FEC DATA outq counters no longer underflow when a replay record is
+  freed. `tbt_fec_out_free()` decremented the DATA counters for replay
+  objects that never entered the DATA FIFO; the unsigned high-water test
+  then read the negative value as a huge positive and stopped the packetizer
+  (0 ms 64-carrier run: block 6, outq=-2/-16480, full TX ring). The release
+  path now charges each record to its own queue, and the high-water and hard
+  cap comparisons are signed.
 - A sequential SC-LDPC stream now completes its FEC INIT/CFG handshake.
   Every carrier that receives the same OPEN resolves the one flow, but only
   the carrier that creates the stream may attach it; a carrier that lost
@@ -89,6 +104,10 @@ window are sized for the whole tunnel.
 
 ### Tests
 
+- `host/test_fec_sclc_data` pins `min(m, win_len)` parity for short blocks
+  and recovers a lost GF(16) share from those rows; `host/test_fec_rx` pins
+  the short-block reorder-window and late-share rules; `host/test_fec_out`
+  asserts that freeing a replay record leaves the DATA outq unchanged.
 - `host/test_carrier_policy` asserts the 0.8 MiB floor, the cleared buffer
   userlocks and the BBR request path (including `-ENOENT` tolerance);
   `host/test_hold` follows the snapshot-free hold state machine.

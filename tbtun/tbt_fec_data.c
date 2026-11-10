@@ -94,10 +94,20 @@ static void tbt_fec_shape_wire_norm(struct tbt_fec_shape *sh)
  * share only when its packet is full, so an application that writes a small
  * request and then waits for the answer -- an HTTP request, iperf3's control
  * cookie -- would wait for 8192 bytes that never come, and the tunnel would
- * look connected and silent. 2 ms is above the gap between two writes of a
- * saturating sender, so bulk traffic still fills its packets, and far below
- * any round trip, so an interactive exchange pays one tick. */
+ * look connected and silent. This timer is the interactive tail only: a
+ * block that merely holds real shares is not sealed on it (see
+ * TBT_FEC_BLOCK_IDLE_MS), or a 1 MB/s stream that drains the ring after
+ * every 8 KiB write would cut a one-share block per write. */
 #define TBT_FEC_SHORT_MS 2
+/* A block that still holds real shares is sealed after this much silence.
+ * The receiver learns a short block's cut only from its PARITY win_len, so a
+ * stream that stops between blocks without closing must eventually say so.
+ * 25 ms is inside the 20-50 ms short-block window: above the 8 ms gap
+ * between the writes of a 1 MB/s sender (so a sustained block fills to
+ * groups*n shares and sends parity only then), below any user-visible
+ * request timeout (so a request/response stream that never half-closes is
+ * delivered). FIN still closes the final block at once. */
+#define TBT_FEC_BLOCK_IDLE_MS 25
 /* A super-block that has not become ready for this long cannot become ready:
  * this wire has no NACK and no retransmission, so a share that never arrived
  * is never fetched. The bound is well above any recovery the parity can do
@@ -303,7 +313,12 @@ static void tbt_fec_out_free(struct tbt_session *sess, struct tbt_fec_out *o)
         if (sess->fec_replay_bytes >= o->len)
             sess->fec_replay_bytes -= o->len;
     }
-    if (o->control)
+    /* A replay record owns the replay counters, not the DATA outq: it never
+     * entered the DATA FIFO, so decrementing those counters here underflows
+     * them. The unsigned high-water test then reads the negative value as a
+     * huge positive and blocks the packetizer forever (field: 30 s 64-carrier
+     * run stopped at block 6 with outq=-2/-16480 and a full TX ring). */
+    else if (o->control)
     {
         if (sess->fec_out_ctl_depth)
             sess->fec_out_ctl_depth--;
@@ -366,6 +381,7 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
 {
     struct tbt_fec_out *o;
     struct tbt_fec_tx *owner = flow ? flow->tx : NULL;
+    s64 queued, bytes;
     bool first = false;
 
     /* A record is per-flow work. Refuse one whose flow is already dying:
@@ -441,10 +457,11 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
      * parity burst larger than the margin, or a shape switch). The replay
      * ring still holds the share and a NACK repairs it, but every hit is a
      * multi-second repair, so it stays counted and visible. */
+    queued = atomic_read(&sess->fec_outq_queued);
+    bytes = atomic_read(&sess->fec_outq_bytes);
     if (!control && !replay &&
-        (atomic_read(&sess->fec_outq_queued) >= TBT_FEC_OUTQ_QUEUE_MAX ||
-         atomic_read(&sess->fec_outq_bytes) + len >
-             TBT_FEC_OUTQ_QUEUE_BYTES_MAX))
+        (queued >= (s64)TBT_FEC_OUTQ_QUEUE_MAX ||
+         bytes + (s64)len > (s64)TBT_FEC_OUTQ_QUEUE_BYTES_MAX))
     {
         spin_unlock(&sess->fec_out_lock);
         tbt_fec_out_put(o);
@@ -1297,9 +1314,10 @@ static u32 tbt_fec_ring_get(struct tbt_fec_tx *tx, u8 *dst, u32 len)
  * win_len is the number of real DATA packets in the block: n for a full
  * block, less for a block the short-write path closed early. The unused
  * positions are already zero-filled. A full block sends all m rows; a short
- * SC-LDPC block sends row 0 alone, which states win_len/epoch so the receiver
- * stops waiting for shares the sender never wrote, and leaves the few real
- * shares to the NACK replay (see tbt_fec_tx_parity_count()). */
+ * SC-LDPC block sends min(m, win_len) rows, the first of which states
+ * win_len/epoch so the receiver stops waiting for shares the sender never
+ * wrote. The rows cover shares 0..win_len-1; the coupled graph may still
+ * need a NACK replay for a loss (see tbt_fec_tx_parity_count()). */
 static void tbt_fec_tx_emit_parity(struct tbt_session *sess,
                                    struct tbt_fec_tx *tx, u16 group,
                                    u64 block_id, u16 win_len)
@@ -1610,6 +1628,7 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
         atomic64_inc(&sess->fec_tx_share_gap);
 
     tx->short_at_ns = 0;
+    tx->block_at_ns = 0;
     if (len < TBT_FEC_S)
         atomic64_inc(&sess->fec_short_tx);
     memset(&h, 0, sizeof(h));
@@ -1698,12 +1717,17 @@ static bool tbt_fec_tx_credit_ok(const struct tbt_fec_tx *tx)
  * as the last line of defence. */
 static bool tbt_fec_tx_outq_high(struct tbt_session *sess)
 {
+    s64 queued, bytes;
     bool high = false;
 
     if (!sess->fec_fifo)
         return false;
-    if (atomic_read(&sess->fec_outq_queued) >= TBT_FEC_OUTQ_QUEUE_HIGH ||
-        atomic_read(&sess->fec_outq_bytes) >= TBT_FEC_OUTQ_QUEUE_BYTES_HIGH)
+    /* Signed: an accounting bug must not turn a negative counter into a
+     * huge unsigned high-water hit and stop the packetizer. */
+    queued = atomic_read(&sess->fec_outq_queued);
+    bytes = atomic_read(&sess->fec_outq_bytes);
+    if (queued >= (s64)TBT_FEC_OUTQ_QUEUE_HIGH ||
+        bytes >= (s64)TBT_FEC_OUTQ_QUEUE_BYTES_HIGH)
         high = true;
     spin_lock(&sess->fec_out_lock);
     if (sess->fec_replay_bytes >=
@@ -1776,6 +1800,46 @@ static void tbt_fec_tx_stall_diag(struct tbt_session *sess,
                         (now - last) / NSEC_PER_USEC);
 }
 
+/* True when any group holds real shares in the block under construction.
+ * Full blocks reset nreal when their parity leaves, so this is exactly the
+ * "a short block is waiting to be sealed" state. Only the packetizer writes
+ * g[].nreal, and every caller runs in w_fec_tx. */
+static bool tbt_fec_tx_block_dirty(const struct tbt_fec_tx *tx)
+{
+    u16 group;
+
+    for (group = 0; group < tx->groups; group++)
+        if (tx->g[group].nreal)
+            return true;
+    return false;
+}
+
+/* Ask w_fec_cut to run at the earliest live deadline. The bit owns its
+ * reference, so an arm while an earlier instance is queued is a no-op; that
+ * instance wakes w_fec_tx, which recomputes and arms the remainder. Keeping
+ * both deadlines off w_fec_tx leaves its 0 ms submit wake untouched. */
+static void tbt_fec_tx_cut_arm(struct tbt_session *sess,
+                               const struct tbt_fec_tx *tx)
+{
+    u64 now = ktime_get_ns();
+    u64 deadline = 0;
+    unsigned long delay = 0;
+
+    if (tx->short_at_ns && (!deadline || tx->short_at_ns < deadline))
+        deadline = tx->short_at_ns;
+    if (tx->block_at_ns && (!deadline || tx->block_at_ns < deadline))
+        deadline = tx->block_at_ns;
+    /* An expired deadline that could not act is waiting for credit, and the
+     * ACK that reopens the window arms w_fec_tx itself. Arming a 0 ms cut
+     * here would spin the two works against a closed credit window. */
+    if (!deadline || deadline <= now)
+        return;
+    delay = nsecs_to_jiffies(deadline - now);
+    if (!delay)
+        delay = 1;
+    tbt_session_arm(sess, TBT_SW_FEC_CUT, delay);
+}
+
 /* Kept out of line: inlining it into the work body doubled that frame, which
  * already holds the 128-entry flow snapshot. */
 static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
@@ -1784,7 +1848,8 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
     struct tbt_fec_tx *tx = f->tx;
     struct tbt_stream *st;
     bool paused = false;
-    bool short_ready;
+    bool pulled = false;
+    bool fill_ready;
     bool block_dirty;
 
     if (!tx || f->state != 1 || READ_ONCE(sess->closing) ||
@@ -1836,7 +1901,10 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
         spin_lock(&tx->lock);
         got = tbt_fec_ring_get(tx, tx->pkt + tx->fill, TBT_FEC_S - tx->fill);
         if (got)
+        {
             tx->fill += (u16)got;
+            pulled = true;
+        }
         paused = tx->head == tx->tail && READ_ONCE(st->tx_paused);
         spin_unlock(&tx->lock);
         /* Allocate the repair ring only when this flow actually has bytes to
@@ -1877,61 +1945,97 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
         }
         break;
     }
-    /* A block must be sealed after this much silence even when its last share
-     * filled a packet exactly. The receiver learns the cut only from the
-     * PARITY's win_len, so a stream that stops on a block boundary -- an
-     * HTTP request of exactly N*S bytes, a sender waiting for the response --
-     * would otherwise leave the block open until FIN and never be delivered.
-     * The same 2 ms idle rule that already cuts a partial packet now cuts
-     * the block; any share that arrives first clears the timer. */
-    short_ready = false;
-    block_dirty = false;
-    if (tx->seq > tbt_fec_seq_of_block_pkt_base(
-                      READ_ONCE(tx->cur_block), 0, 0, tx->base_pkt,
-                      tx->base_block, tx->groups, tx->n))
-        block_dirty = true;
+    /* New bytes push both idle deadlines forward. A partial fill is not a
+     * pause while TCP is still delivering the same 8 KiB write one segment
+     * at a time: at 1 MB/s the gaps between segments can exceed the 2 ms
+     * interactive tail, and flushing there would emit a short share and cut
+     * the block per segment. The tail deadline is therefore measured from
+     * the last byte, not from the last full share. */
+    if (pulled)
+    {
+        tx->short_at_ns = 0;
+        tx->block_at_ns = 0;
+    }
+    /* The interactive tail keeps its 2 ms; a block that merely holds real
+     * shares waits for TBT_FEC_BLOCK_IDLE_MS. Sealing on the 2 ms timer was
+     * the release blocker: at 1 MB/s one 8 KiB write every 8 ms drains the
+     * ring after every share, so the pump cut a one-share block per write
+     * (0 ms field run: 123 blocks in 14 s). The receiver then NACKed padding
+     * shares the sender never wrote and waited for a cut the next short block
+     * kept replacing (400 ms: peer_pkts=144, frontier=9, cur=9, s=8).
+     *
+     * A full share arrives with `fill == 0`; a partial packet arms the 2 ms
+     * tail only on the stream's first packet, where the request must not wait
+     * for 8 KiB that never come. Later partials are TCP segmentation of the
+     * bulk stream and wait for the same block idle threshold, so they
+     * coalesce into a full share. FIN still closes at once. Both deadlines
+     * live on w_fec_cut: tbt_session_arm() never retimes a pending item, and
+     * a 25 ms timer on w_fec_tx would swallow the next write's 0 ms wake. */
+    fill_ready = tx->fill != 0;
+    block_dirty = tbt_fec_tx_block_dirty(tx);
     spin_lock(&tx->lock);
-    if ((tx->fill || block_dirty) && tx->head == tx->tail)
-        short_ready = true;
+    if (tx->head != tx->tail)
+        fill_ready = block_dirty = false;
     spin_unlock(&tx->lock);
-    if (short_ready && !READ_ONCE(tx->flush_req) &&
+    if ((fill_ready || block_dirty) && !READ_ONCE(tx->flush_req) &&
         !tbt_fec_tx_outq_high(sess) &&
         tx->switch_state != TBT_FEC_SW_CFG_SENT &&
         tx->switch_state != TBT_FEC_SW_DRAIN)
     {
         u64 now = ktime_get_ns();
+        u64 deadline = 0;
 
-        if (!tx->short_at_ns)
+        if (fill_ready)
         {
-            tx->short_at_ns = now + (u64)TBT_FEC_SHORT_MS * NSEC_PER_MSEC;
-            tbt_session_arm(sess, TBT_SW_FEC_TX,
-                            msecs_to_jiffies(TBT_FEC_SHORT_MS));
-        }
-        else if (now >= tx->short_at_ns)
-        {
-            if (tbt_fec_tx_credit_ok(tx))
-            {
-                if (tx->fill)
-                    tbt_fec_packetize(sess, tx, st, false);
-                tbt_fec_tx_close_block(sess, tx, true);
-                tx->short_at_ns = 0;
-            }
-            /* Credit is a closed window, not a lost deadline: the ACK that
-             * reopens it is the wake this wait needs. */
+            u64 wait_ns = (READ_ONCE(st->fec_pkt_base_set)
+                               ? TBT_FEC_BLOCK_IDLE_MS
+                               : TBT_FEC_SHORT_MS) *
+                          NSEC_PER_MSEC;
+
+            if (!tx->short_at_ns)
+                tx->short_at_ns = now + wait_ns;
+            deadline = tx->short_at_ns;
         }
         else
+            tx->short_at_ns = 0;
+        if (block_dirty)
         {
-            /* An earlier wake consumed this instance before the deadline: a
-             * 0 ms flush, ACK or submit ran the pump with now < short_at_ns.
-             * Re-arm the short cut here or it would wait for the next
-             * unrelated wake. */
-            tbt_session_arm(sess, TBT_SW_FEC_TX,
-                            msecs_to_jiffies(TBT_FEC_SHORT_MS));
+            if (!tx->block_at_ns)
+                tx->block_at_ns =
+                    now + (u64)TBT_FEC_BLOCK_IDLE_MS * NSEC_PER_MSEC;
+            if (!deadline || tx->block_at_ns < deadline)
+                deadline = tx->block_at_ns;
         }
+        else
+            tx->block_at_ns = 0;
+
+        if (now >= deadline && tbt_fec_tx_credit_ok(tx))
+        {
+            if (tx->fill)
+            {
+                tbt_fec_packetize(sess, tx, st, false);
+                tx->short_at_ns = 0;
+            }
+            /* The partial tail is the interactive cut: seal it now. A block
+             * with no partial tail waits for its own idle deadline, so a
+             * full 8 KiB share never cuts the block. */
+            if (fill_ready ||
+                (tx->block_at_ns && now >= tx->block_at_ns))
+            {
+                tbt_fec_tx_close_block(sess, tx, true);
+                tx->block_at_ns = 0;
+                tx->short_at_ns = 0;
+            }
+        }
+        /* Credit is a closed window, not a lost deadline: the ACK that
+         * reopens it is the wake this wait needs. */
+        if (tx->short_at_ns || tx->block_at_ns)
+            tbt_fec_tx_cut_arm(sess, tx);
     }
     else
     {
         tx->short_at_ns = 0;
+        tx->block_at_ns = 0;
     }
     if (paused)
     {
@@ -2263,6 +2367,7 @@ static void tbt_fec_tx_swap(struct tbt_session *sess, struct tbt_fec_tx *tx)
     spin_unlock_bh(&tx->replay_lock);
     tbt_fec_tx_clear_data_queues(sess);
     tx->short_at_ns = 0;
+    tx->block_at_ns = 0;
     tx->carrier_wait = false;
     tx->backpressure_counted = false;
     tx->outq_paused = false;
@@ -2633,8 +2738,8 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
  * the 10 ms wait for the crypto TX key. The entry owns no data-plane state;
  * it asks w_fec_tx for one pass, and that body arms this work again while
  * the cadence is still needed. Keeping every delay above the short cut on a
- * separate work leaves w_fec_tx free for the 0 ms wake and the 2 ms block
- * cut, which tbt_session_arm() must never place behind a queued slow timer
+ * separate work leaves w_fec_tx free for the 0 ms wake and the 2 ms packet
+ * tail, which tbt_session_arm() must never place behind a queued slow timer
  * (measured: a 200-byte echo waited out the 500 ms INIT retry in each
  * direction, 1113 ms round trip). */
 static void tbt_fec_tick_work(struct work_struct *w)
@@ -2642,6 +2747,23 @@ static void tbt_fec_tick_work(struct work_struct *w)
     struct tbt_session *sess =
         container_of(to_delayed_work(w), struct tbt_session, w_fec_tick);
     bool owned = test_and_clear_bit(TBT_SW_FEC_TICK, &sess->sched);
+
+    if (!READ_ONCE(sess->closing) && !READ_ONCE(sess->fec_stopping))
+        tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+    if (owned)
+        tbt_session_put(sess);
+}
+
+/* Idle deadlines for the packetizer's current block. The entry owns no state:
+ * it asks w_fec_tx for one pass, which either cuts the block or recomputes
+ * the remaining delay. A dedicated bit is required because a 25 ms deadline
+ * queued on w_fec_tx would hold the next write's 0 ms submit wake behind it
+ * (tbt_session_arm() never retimes a pending instance). */
+static void tbt_fec_cut_work(struct work_struct *w)
+{
+    struct tbt_session *sess =
+        container_of(to_delayed_work(w), struct tbt_session, w_fec_cut);
+    bool owned = test_and_clear_bit(TBT_SW_FEC_CUT, &sess->sched);
 
     if (!READ_ONCE(sess->closing) && !READ_ONCE(sess->fec_stopping))
         tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
@@ -7855,6 +7977,7 @@ int tbt_fec_data_init(struct tbt_session *sess)
     INIT_DELAYED_WORK(&sess->w_fec_rx, tbt_fec_rx_work);
     INIT_DELAYED_WORK(&sess->w_fec_tick, tbt_fec_tick_work);
     INIT_DELAYED_WORK(&sess->w_fec_rx_poll, tbt_fec_rx_poll_work);
+    INIT_DELAYED_WORK(&sess->w_fec_cut, tbt_fec_cut_work);
     sess->fec = true;
 
     /* One flow per session owns the whole carrier geometry. A far-side OPEN

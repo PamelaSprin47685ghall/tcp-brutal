@@ -1327,25 +1327,24 @@ static inline bool tbt_fec_nack_unstarted_group(u64 total_pkts, u16 groups,
 
 /* How many parity rows the sender emits for one block.
  *
- * An SC-LDPC block code does not repair a lost DATA share from one parity
- * row: the erased share touches checks across five coupling blocks, and a
- * short block's prefix of rows recovers a different share than a full set
- * does. Trimming a short block to `win_len` rows would therefore leave real
- * losses unrecoverable while still paying tens of rows per short write. The
- * short block instead sends row 0 alone as a cut announcement (win_len and
- * epoch) and leaves the few real shares to the NACK replay, which is a
- * round trip on a share that was lost, not a megabyte of parity per block
- * that was not. Every other codec keeps all m rows: there m is small and
- * the rows themselves are the repair.
+ * A short block must state its cut (win_len and epoch) and cover the shares
+ * it actually wrote. Both SC-LDPC codecs route DATA share s to parity row
+ * s mod m, so rows 0..win_len-1 each cover one of the first win_len shares.
+ * The old row-0-only rule left shares 1..win_len-1 with no covering row at
+ * all, and a lost one could only return through a NACK replay. A full set of
+ * m rows would put a megabyte of parity behind a one-share interactive
+ * write, so a short SC-LDPC block sends min(m, win_len); a block that
+ * reached win_len == n is full and keeps all m rows. The coupled graph can
+ * still need more equations than one row per share; the NACK replay remains
+ * the fallback for the rest. Every other codec keeps all m rows.
  */
 static inline u16 tbt_fec_tx_parity_count(u16 win_len, u16 n, u16 m,
                                           bool block_code)
 {
-    (void)n;
-    if (!m)
+    if (!m || !win_len)
         return 0;
-    if (block_code && win_len <= 2)
-        return 1;
+    if (block_code)
+        return win_len >= n ? m : (win_len < m ? win_len : m);
     return m;
 }
 
@@ -1370,10 +1369,10 @@ static inline u16 tbt_fec_nack_data_limit(bool win_len_set, u16 real,
 
 /* How many parity rows a NACK may name for one block.
  *
- * Before win_len arrives only row 0 is named: it states the cut, and a short
- * block stored no other row. After the cut is known, a short SC-LDPC block
- * still has row 0 only, while a full block has all m. Every other codec
- * keeps m, because there the rows are the repair.
+ * Before win_len arrives only row 0 is named: it states the cut, and until
+ * then the block may hold any number of rows. After the cut is known, a
+ * short SC-LDPC block has min(m, real) rows, while a full block has all m.
+ * Every other codec keeps m, because there the rows are the repair.
  */
 static inline u16 tbt_fec_nack_parity_limit(bool win_len_set, u16 real,
                                             u16 n, u16 m, bool block_code)
@@ -1385,7 +1384,7 @@ static inline u16 tbt_fec_nack_parity_limit(bool win_len_set, u16 real,
         return m;
     if (!win_len_set)
         return 1;
-    return real <= 2 ? 1 : m;
+    return real < m ? real : m;
 }
 
 /* Delivery length of share p in a block whose real share count is `real`.
