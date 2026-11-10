@@ -1448,7 +1448,10 @@ void tbt_stream_kill(struct tbt_stream *st, u8 reason)
      * by the FEC TCP-failed reset) is the external-reset half of the
      * E_tunnel subset-of E_direct argument. Keep the two causes separate. */
     if (st->sess && READ_ONCE(st->sess->fec) && reason != TBT_ST_HOLE)
+    {
         atomic64_inc(&st->sess->fec_reset_user);
+        atomic64_inc(&st->sess->stream_reset_user);
+    }
     WRITE_ONCE(st->state, TBT_ST_DEAD);
 
     /* Detach the sid from the session now: this is the gate that lets the

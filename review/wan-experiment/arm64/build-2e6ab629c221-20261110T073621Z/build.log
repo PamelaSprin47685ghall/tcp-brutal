@@ -1,0 +1,39 @@
+warning: the compiler differs from the one used to build the kernel
+  The kernel was built by: aarch64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+  You are using:           gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_core.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_session.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_procfs.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_listen.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_proto.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_carrier.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_sock.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_tx.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_rx.o
+/root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_carrier.c: In function ‘tbt_car_cc_actual’:
+/root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_carrier.c:3376:40: warning: the comparison will always evaluate as ‘true’ for the address of ‘name’ will never be NULL [-Waddress]
+ 3376 |     if (!icsk || !icsk->icsk_ca_ops || !icsk->icsk_ca_ops->name)
+      |                                        ^
+In file included from /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_carrier.c:35:
+./include/net/tcp.h:1130:33: note: ‘name’ declared here
+ 1130 |         char                    name[TCP_CA_NAME_MAX];
+      |                                 ^~~~
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_rec.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_parse.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_http.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_fec_batch.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_crypto.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_portmap.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_map.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_fec.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_fec_data.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_fec_adapt.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_fec_adapt_sclc.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_fec_sclc.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_sc_ldpc.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_sc_ldpc_gf16.o
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun/tbt_sclc_uplink.o
+  LD [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun.o
+  MODPOST /root/tbtun-t52-arm64-2e6ab629c221/Module.symvers
+  CC [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun.mod.o
+  LD [M]  /root/tbtun-t52-arm64-2e6ab629c221/tbtun.ko

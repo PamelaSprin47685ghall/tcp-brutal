@@ -3643,6 +3643,9 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess,
                 atomic64_inc(&sess->fec_reset_tcp_failed);
                 atomic64_inc(&sess->fec_reset_hole);
                 atomic64_inc(&sess->holes_unrecoverable);
+                /* The stream reset the same edge: keep the session-level
+                 * cause counter truthful for runs that read c3/c9 only. */
+                atomic64_inc(&sess->stream_reset_tcp_failed);
                 if (st)
                     tbt_stream_kill(st, TBT_ST_HOLE);
                 break;
