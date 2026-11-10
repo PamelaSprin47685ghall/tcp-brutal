@@ -7,11 +7,10 @@
  *       (no ARQ/FEC data; a queued PAD does not count), TCP has no bytes in
  *       flight, CA is Open, no loss, and the idle interval has lasted
  *       enter_ns;
- *     - keep only while there is no real data, loss, window shrink or
- *       deadline expiry;
- *     - exit on real data, loss, window shrink or the 10 s idle cap.
- *     - a write is skipped, not cancelled, while only a PAD is in flight;
- *       it exits only when the hold is gone or CA left Open.
+ *     - keep only while there is no real data, loss or deadline expiry;
+ *     - exit on real data, loss or the 10 s idle cap.
+ *   Since 0.7.0 the module never restores cwnd or pacing from a snapshot:
+ *   holding only marks the carrier idle, and BBR keeps ownership of both.
  *
  *   The model mirrors the poll: idle -> wait enter_ns -> active -> exit.
  *   It does not execute the kernel; the predicates are the shared code.
@@ -73,36 +72,20 @@ static void case_keep(void)
 {
     u64 until = 10 * 1000 * MS;
 
-    ok(!tbt_hold_keep(false, false, false, false, 100, until),
+    ok(!tbt_hold_keep(false, false, false, 100, until),
        "keep: inactive");
-    ok(tbt_hold_keep(true, false, false, false, 100, until),
+    ok(tbt_hold_keep(true, false, false, 100, until),
        "keep: active and idle");
-    ok(!tbt_hold_keep(true, true, false, false, 100, until),
+    ok(!tbt_hold_keep(true, true, false, 100, until),
        "keep: real data exits");
-    ok(!tbt_hold_keep(true, false, true, false, 100, until),
+    ok(!tbt_hold_keep(true, false, true, 100, until),
        "keep: loss exits");
-    ok(!tbt_hold_keep(true, false, false, true, 100, until),
-       "keep: window shrink exits");
-    ok(!tbt_hold_keep(true, false, false, false, until + 1, until),
+    ok(!tbt_hold_keep(true, false, false, until + 1, until),
        "keep: deadline exits");
-    ok(tbt_hold_keep(true, false, false, false, until, until),
+    ok(tbt_hold_keep(true, false, false, until, until),
        "keep: exactly at the deadline");
-    ok(tbt_hold_keep(true, false, false, false, 100, 0),
+    ok(tbt_hold_keep(true, false, false, 100, 0),
        "keep: zero deadline means no cap");
-}
-
-static void case_apply(void)
-{
-    ok(tbt_hold_apply_gate(true, true, true, 0) == TBT_HOLD_APPLY_OK,
-       "apply: idle carrier writes");
-    ok(tbt_hold_apply_gate(true, true, true, 1) == TBT_HOLD_APPLY_SKIP,
-       "apply: PAD in flight skips, does not cancel");
-    ok(tbt_hold_apply_gate(true, true, false, 1) == TBT_HOLD_APPLY_SKIP,
-       "apply: unacked PAD skips");
-    ok(tbt_hold_apply_gate(false, true, true, 0) == TBT_HOLD_APPLY_EXIT,
-       "apply: a non-PAD write cancelled the hold");
-    ok(tbt_hold_apply_gate(true, false, true, 0) == TBT_HOLD_APPLY_EXIT,
-       "apply: CA left Open exits");
 }
 
 struct session_q
@@ -136,7 +119,7 @@ static void case_pad_session(void)
         real_data[i] = !tbt_hold_session_idle(q.tx_queued, q.ctl_real);
     ok(!real_data[0] && !real_data[1] && !real_data[2] && !real_data[3],
        "pad: a queued PAD leaves every carrier idle in the same pass");
-    ok(tbt_hold_keep(true, real_data[3], false, false, 100, 10 * 1000 * MS),
+    ok(tbt_hold_keep(true, real_data[3], false, 100, 10 * 1000 * MS),
        "pad: a later carrier keeps the hold in the same pass");
 
     /* A real DATA frame queued in the same pass is still real data. */
@@ -167,12 +150,11 @@ struct model
 };
 
 static void model_step(struct model *m, u64 now, bool idle, bool no_inflight,
-                       bool loss, bool real_data, bool wnd_shrunk)
+                       bool loss, bool real_data)
 {
     if (m->active)
     {
-        if (!tbt_hold_keep(true, real_data, loss, wnd_shrunk, now,
-                           m->until))
+        if (!tbt_hold_keep(true, real_data, loss, now, m->until))
         {
             m->active = false;
             m->since = 0;
@@ -201,37 +183,31 @@ static void case_state(void)
 {
     struct model m = {0};
 
-    model_step(&m, 1, true, true, false, false, false);
+    model_step(&m, 1, true, true, false, false);
     ok(m.since == 1 && !m.active, "state: idle starts the enter timer");
-    model_step(&m, 100 * MS, true, true, false, false, false);
+    model_step(&m, 100 * MS, true, true, false, false);
     ok(!m.active, "state: still inside the enter delay");
-    model_step(&m, 200 * MS + 1, true, true, false, false, false);
+    model_step(&m, 200 * MS + 1, true, true, false, false);
     ok(m.active, "state: enters after 200 ms");
-    model_step(&m, 1 * 1000 * MS, true, true, false, false, false);
+    model_step(&m, 1 * 1000 * MS, true, true, false, false);
     ok(m.active, "state: holds while idle");
-    model_step(&m, 11 * 1000 * MS, true, true, false, false, false);
+    model_step(&m, 11 * 1000 * MS, true, true, false, false);
     ok(!m.active, "state: 10 s idle cap exits");
 
     m = (struct model){0};
-    model_step(&m, 1, true, true, false, false, false);
-    model_step(&m, 200 * MS + 1, true, true, false, false, false);
+    model_step(&m, 1, true, true, false, false);
+    model_step(&m, 200 * MS + 1, true, true, false, false);
     ok(m.active, "state: re-enters");
-    model_step(&m, 300 * MS, true, true, false, true, false);
+    model_step(&m, 300 * MS, true, true, false, true);
     ok(!m.active, "state: real data exits");
-    model_step(&m, 400 * MS, true, true, false, true, false);
+    model_step(&m, 400 * MS, true, true, false, true);
     ok(!m.active && m.since == 0, "state: stays out while real data");
 
     m = (struct model){0};
-    model_step(&m, 1, true, true, false, false, false);
-    model_step(&m, 200 * MS + 1, true, true, false, false, false);
-    model_step(&m, 300 * MS, true, true, true, false, false);
+    model_step(&m, 1, true, true, false, false);
+    model_step(&m, 200 * MS + 1, true, true, false, false);
+    model_step(&m, 300 * MS, true, true, true, false);
     ok(!m.active, "state: loss exits");
-
-    m = (struct model){0};
-    model_step(&m, 1, true, true, false, false, false);
-    model_step(&m, 200 * MS + 1, true, true, false, false, false);
-    model_step(&m, 300 * MS, true, true, false, false, true);
-    ok(!m.active, "state: window shrink exits");
 }
 
 static void case_default_on(void)
@@ -240,13 +216,13 @@ static void case_default_on(void)
     ok(tbt_hold_enter(true, true, true, true, false, false,
                       100, 300 * MS, 200 * MS),
        "default: hold enters with the shipped default");
-    ok(tbt_hold_keep(true, false, false, false, 100, 10 * 1000 * MS),
+    ok(tbt_hold_keep(true, false, false, 100, 10 * 1000 * MS),
        "default: hold keeps while idle");
     /* Opt-out: hold_enable=0 must leave BBR untouched. */
     ok(!tbt_hold_enter(false, true, true, true, false, false,
                        100, 300 * MS, 200 * MS),
        "opt-out: hold never enters");
-    ok(!tbt_hold_keep(false, false, false, false, 100, 10 * 1000 * MS),
+    ok(!tbt_hold_keep(false, false, false, 100, 10 * 1000 * MS),
        "opt-out: inactive hold never keeps");
 }
 
@@ -254,7 +230,6 @@ int main(void)
 {
     case_enter();
     case_keep();
-    case_apply();
     case_pad_session();
     case_state();
     case_default_on();

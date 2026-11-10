@@ -13,6 +13,23 @@
 
 #include "tbt_uapi.h"
 
+/* 0.7.0 carrier transport: every subflow owns the same buffer floor and runs
+ * BBR. The floor is 0.8 MiB — the kernel's own SO_*BUF path doubles a request
+ * on the way to sk_sndbuf/sk_rcvbuf, but 0.7.0 assigns those fields directly,
+ * so the byte count below is the whole buffer, not half of it. It must stay
+ * inside the 0.75..1 MiB acceptance band (786,432 .. 1,048,576 B). */
+#define TBT_CAR_SOCKBUF_PER 838861u
+
+/* SOCK_SNDBUF_LOCK | SOCK_RCVBUF_LOCK from include/uapi/linux/socket.h.
+ * Both must stay clear: either bit freezes sk_sndbuf/sk_rcvbuf and disables
+ * the TCP send/receive autotuning that grows the buffer past the floor. */
+#define TBT_CAR_SOCKBUF_LOCK_MASK 3u
+
+/* The one congestion control 0.7.0 asks for by name. The module and the host
+ * test share the literal, so a rename cannot pass the test while the kernel
+ * still requests the old name. */
+#define TBT_CAR_CC_NAME "bbr"
+
 /* A near carrier may create, bind and connect a socket only after
  * tbt_port_alloc() returned a real port with TBT_PORT_ALLOC_OK. A zero port
  * or any failure reason (EXHAUSTED/ENOSPC, NOMEM) must park the carrier for

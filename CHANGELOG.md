@@ -7,7 +7,8 @@ and moves independently of the module version.
 
 0.7.0 removes the 0.6.0 kernel stream multiplexer and the shared FEC plane
 that carried it. One session carries one FEC flow again, and the DATA/PARITY
-payload is the application byte stream itself.
+payload is the application byte stream itself. Carrier transport is now
+BBR-owned and carrier-count independent.
 
 ### Removed
 
@@ -46,7 +47,26 @@ payload is the application byte stream itself.
   carrier without room for `TBT_SKIP_MS` (20 ms) is marked slow and tried
   last; room again clears the mark. The receiver is unchanged: it places a
   share by its header, not by arrival order.
+- Carrier transport is BBR-owned and carrier-count independent. Every
+  carrier socket gets a direct `sk_sndbuf`/`sk_rcvbuf` floor of 838,861 B
+  (0.8 MiB) with `SOCK_SNDBUF_LOCK`/`SOCK_RCVBUF_LOCK` cleared, so TCP
+  autotuning may grow both buffers. The per-`n_pri` split, the 128 MiB
+  `TBT_CAR_SOCKBUF_TOTAL` budget and the `SO_*BUFFORCE` fallback are gone.
+  Each dialled and adopted carrier asks for `TCP_CONGESTION=bbr` explicitly
+  and keeps the system default only when the kernel refuses it.
+- The peripheral idle hold no longer snapshots or restores `snd_cwnd` and
+  `sk_pacing_rate`; BBR keeps ownership. While FEC data sits in the out
+  queues no carrier is marked held and no PAD is queued.
+- A FEC carrier is paused only after `snd_una` has been frozen for at least
+  `TBT_STALL_MS` (1 s) with `packets_out > 0`, so a BBR probe cycle no
+  longer looks like a stall.
 - Module version is `0.7.0`.
+
+### Tests
+
+- `host/test_carrier_policy` asserts the 0.8 MiB floor, the cleared buffer
+  userlocks and the BBR request path (including `-ENOENT` tolerance);
+  `host/test_hold` follows the snapshot-free hold state machine.
 
 ## [0.6.0] - 2026-11-09
 

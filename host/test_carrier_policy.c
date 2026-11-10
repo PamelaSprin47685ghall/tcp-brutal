@@ -11,12 +11,17 @@
  *      generation is still a duplicate.
  *   3. tbt_peers_show() hides a stopping far carrier, so the view names only
  *      the current generation.
+ *   4. tbt_car_setsockbuf() assigns a 0.8 MiB floor to sk_sndbuf/sk_rcvbuf
+ *      and clears the buffer userlocks, so TCP autotuning can grow them;
+ *      tbt_car_set_bbr() asks for BBR and keeps the carrier's default CC
+ *      when the kernel does not provide it.
  *
  * The slot and socket models below follow those functions line by line.
  * Change both together.
  */
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "tbt_carrier_policy.h"
 
@@ -206,12 +211,83 @@ static void test_peers_render(void)
     ok_int(rows[0], 6, "far peers: the row names the new generation");
 }
 
+/* --- 4. carrier transport: 0.8 MiB floor, no userlock, BBR ------------ */
+
+/* The four fields tbt_car_setsockbuf() and tbt_car_set_bbr() touch. The
+ * starting values describe a socket that inherited SO_SNDBUF/SO_RCVBUF
+ * locks: the direct assignment must still leave autotuning enabled. */
+struct transport {
+    unsigned int sndbuf;
+    unsigned int rcvbuf;
+    unsigned short userlocks;
+    char cc[16];
+};
+
+/* tbt_car_setsockbuf(): plain field assignments, then clear only the two
+ * buffer-lock bits. SOCK_CONNECT_BIND (16) and every other bit survive. */
+static void model_setsockbuf(struct transport *t)
+{
+    t->sndbuf = TBT_CAR_SOCKBUF_PER;
+    t->rcvbuf = TBT_CAR_SOCKBUF_PER;
+    t->userlocks &= ~TBT_CAR_SOCKBUF_LOCK_MASK;
+}
+
+/* tbt_car_set_bbr(): one setsockopt(SOL_TCP, TCP_CONGESTION, "bbr", 4),
+ * where optlen counts the terminating NUL. -ENOENT (no CONFIG_TCP_CONG_BBR)
+ * is ignored and the carrier keeps the CC it already had. */
+static int model_set_bbr(struct transport *t, bool kernel_has_bbr)
+{
+    if (!kernel_has_bbr)
+        return -2; /* -ENOENT */
+    strcpy(t->cc, TBT_CAR_CC_NAME);
+    return 0;
+}
+
+static void test_carrier_transport(void)
+{
+    struct transport t = {
+        .sndbuf = 65536,
+        .rcvbuf = 65536,
+        .userlocks = TBT_CAR_SOCKBUF_LOCK_MASK | 16, /* | SOCK_CONNECT_BIND */
+        .cc = "cubic",
+    };
+
+    ok(TBT_CAR_SOCKBUF_PER >= 786432,
+       "transport: the floor is at least 0.75 MiB");
+    ok(TBT_CAR_SOCKBUF_PER <= 1024 * 1024,
+       "transport: the floor stays inside the 1 MiB tier");
+
+    model_setsockbuf(&t);
+    ok_int(t.sndbuf, TBT_CAR_SOCKBUF_PER,
+           "transport: sk_sndbuf is assigned directly");
+    ok_int(t.rcvbuf, TBT_CAR_SOCKBUF_PER,
+           "transport: sk_rcvbuf is assigned directly");
+    ok(t.sndbuf >= 786432 && t.rcvbuf >= 786432,
+       "transport: both buffers are at least 0.75 MiB");
+    ok_int(t.userlocks, 16,
+           "transport: the SNDBUF/RCVBUF locks are gone, other bits stay");
+    ok(!(t.userlocks & TBT_CAR_SOCKBUF_LOCK_MASK),
+       "transport: autotuning can grow both buffers");
+
+    ok_int(model_set_bbr(&t, true), 0,
+           "bbr: the setsockopt path accepts BBR");
+    ok(!strcmp(t.cc, "bbr"),
+       "bbr: the carrier requests the shared TBT_CAR_CC_NAME");
+    ok_int((int)sizeof(TBT_CAR_CC_NAME), 4,
+           "bbr: optlen covers the three letters and the NUL");
+    ok_int(model_set_bbr(&t, false), -2,
+           "bbr: a kernel without BBR answers -ENOENT");
+    ok(!strcmp(t.cc, "bbr"),
+       "bbr: a refused request keeps the carrier's current CC");
+}
+
 int main(void)
 {
     test_exhausted_never_dials();
     test_generation_supersedes();
     test_replacement_closes_old_socket();
     test_peers_render();
+    test_carrier_transport();
 
     if (failures)
     {
