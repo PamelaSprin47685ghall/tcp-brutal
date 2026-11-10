@@ -204,15 +204,15 @@ static inline bool tbt_fec_late_note_miss(struct tbt_fec_late_ctx *ctx,
 
 /* Set the committed super id and settle pending bits that raced the group
  * loop. Returns true for each pending miss the caller must correct. */
-static inline void tbt_fec_late_finalize(struct tbt_fec_late_ctx *ctx,
-                                         u64 block_id, u64 super_id,
-                                         u8 *correct_bits)
+static inline struct tbt_fec_late_rec *
+tbt_fec_late_finalize(struct tbt_fec_late_ctx *ctx, u64 block_id,
+                      u64 super_id, u8 *correct_bits)
 {
     struct tbt_fec_late_rec *rec = tbt_fec_late_find(ctx, block_id);
     u16 i;
 
     if (!rec)
-        return;
+        return NULL;
     rec->folded = true;
     rec->super_id = super_id;
     rec->miss = tbt_fec_late_count(rec->miss_bits);
@@ -223,13 +223,9 @@ static inline void tbt_fec_late_finalize(struct tbt_fec_late_ctx *ctx,
         tbt_fec_late_clear(rec->pending, i);
         tbt_fec_late_set(rec->settled, i);
         if (tbt_fec_late_bit(rec->miss_bits, i))
-        {
-            tbt_fec_late_clear(rec->miss_bits, i);
-            if (rec->miss)
-                rec->miss--;
-            correct_bits[i] = 1;
-        }
+            tbt_fec_late_set(correct_bits, i);
     }
+    return rec;
 }
 
 #endif

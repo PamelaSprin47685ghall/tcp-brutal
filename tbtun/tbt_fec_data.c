@@ -6395,17 +6395,27 @@ static void tbt_fec_rx_late_finalize(struct tbt_fec_rx *rx, u64 block_id,
                                      u8 bucket)
 {
     u8 correct[TBT_FEC_BITMAP_BYTES] = {0};
+    struct tbt_fec_late_rec *rec;
     u16 i;
 
     (void)bucket;
     tbt_fec_rx_late_sync(rx);
-    tbt_fec_late_finalize(&rx->late, block_id, rx->est_sclc->super_id,
-                          correct);
+    rec = tbt_fec_late_finalize(&rx->late, block_id,
+                                rx->est_sclc->super_id, correct);
     for (i = 0; i < TBT_FEC_BITMAP_BYTES * 8u; i++)
-        if (correct[i] &&
-            !tbt_fec_adapt_sclc_est_correct_super(rx->est_sclc,
-                                                  rx->est_sclc->super_id))
+    {
+        if (!tbt_fec_late_bit(correct, i))
+            continue;
+        if (!rec || !tbt_fec_adapt_sclc_est_correct_super(
+                         rx->est_sclc, rec->super_id))
             atomic64_inc(&rx->flow->sess->fec_late_unknown);
+        else
+        {
+            tbt_fec_late_clear(rec->miss_bits, i);
+            if (rec->miss)
+                rec->miss--;
+        }
+    }
 }
 
 static bool tbt_fec_rx_late_fast(const struct tbt_fec_rx *rx,
