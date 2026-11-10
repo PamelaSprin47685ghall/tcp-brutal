@@ -60,6 +60,9 @@
 #ifdef __KERNEL__
 #include <linux/errno.h>
 #include <linux/string.h>
+#if defined(CONFIG_X86_64)
+#include <asm/fpu/api.h>
+#endif
 #else
 #include <errno.h>
 #include <string.h>
@@ -134,6 +137,23 @@ static const u32 tbt_sigma[4] = {0x61707865u, 0x3320646eu, 0x79622d32u,
 static const u32 tbt_tau[4] = {0x61707865u, 0x3120646eu, 0x79622d36u,
                                0x6b206574u};
 
+/* One load/store instead of four byte accesses. The kernel and every target
+ * this module supports are little-endian; the shift form stays for a
+ * big-endian host build, where a plain memcpy would swap the word. */
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
+static u32 tbt_load32le(const u8 *p)
+{
+    u32 v;
+
+    memcpy(&v, p, sizeof(v));
+    return v;
+}
+
+static void tbt_store32le(u8 *p, u32 x)
+{
+    memcpy(p, &x, sizeof(x));
+}
+#else
 static u32 tbt_load32le(const u8 *p)
 {
     return (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24);
@@ -146,6 +166,16 @@ static void tbt_store32le(u8 *p, u32 x)
     p[2] = (u8)(x >> 16);
     p[3] = (u8)(x >> 24);
 }
+#endif
+
+/* Skip -ftrivial-auto-var-init for the two bulk scratch arrays: every element
+ * is assigned before it is read, and the zero-init call blocks SLP
+ * vectorisation of the column rounds. */
+#if defined(__GNUC__) && (__GNUC__ >= 12) && !defined(__clang__)
+#define TBT_CHACHA_UNINITIALIZED __attribute__((uninitialized))
+#else
+#define TBT_CHACHA_UNINITIALIZED
+#endif
 
 /* One 64-byte keystream block written to `out`. `state` is not modified. */
 static void tbt_chacha8_block(const u32 state[16], u8 out[TBT_CRYPTO_BLOCK_LEN],
@@ -166,66 +196,229 @@ static void tbt_chacha8_block(const u32 state[16], u8 out[TBT_CRYPTO_BLOCK_LEN],
     tbt_memzero_explicit(x, sizeof(x));
 }
 
-/* `blocks` consecutive keystream blocks XORed straight into `data`, advancing
+/* The portable bulk body. x86_64 takes the explicit four-block SSE2 path
+ * below and uses this only for a tail shorter than four blocks; other
+ * architectures run it for the whole share.
+ *
+ * `blocks` consecutive keystream blocks XORed straight into `data`, advancing
  * the counter in `st` past them. Folding the final add and the XOR into the
  * permutation keeps the keystream off the stack and removes the store/load
- * round trip through `out`; this is the bulk path. The caller guarantees that
- * every block lies at or below 2^64-1.
+ * round trip through `out`. The caller guarantees that every block lies at or
+ * below 2^64-1.
  *
  * The counter lives in a local u64 for the whole run; advancing it in st[]
- * between blocks costs 4.96 us per 8 KiB share against 4.28 us here, because
- * the read-modify-write on st[] sits in the loop's critical path.
+ * between blocks puts a read-modify-write in the loop's critical path.
  *
  * x[] and base[] are one frame slot each, reused by every block, so wiping
- * them once after the loop erases the only copy that outlives the run. A
- * per-block wipe costs the whole gain: 16 volatile stores plus the compiler
- * barrier per 64 payload bytes measured 5.52-5.66 us per 8 KiB share, i.e.
- * back to the pre-0.4.2 baseline. The erasure contract is unchanged: no word
- * of x[] or base[] outlives the function.
+ * them once after the loop erases the only copy that outlives the run. */
+#define TBT_CHACHA8_BULK(st, data, blocks, rounds)                    \
+    do {                                                              \
+        TBT_CHACHA_UNINITIALIZED u32 x[16];                           \
+        TBT_CHACHA_UNINITIALIZED u32 base[16];                        \
+        u64 ctr = (u64)(st)[12] | ((u64)(st)[13] << 32);              \
+        size_t b;                                                     \
+        u32 i;                                                        \
+                                                                      \
+        for (i = 0; i < 16; i++)                                      \
+            base[i] = (st)[i];                                        \
+        for (b = 0; b < (blocks); b++)                                \
+        {                                                             \
+            base[12] = (u32)ctr;                                      \
+            base[13] = (u32)(ctr >> 32);                              \
+            ctr++;                                                    \
+            for (i = 0; i < 16; i++)                                  \
+                x[i] = base[i];                                       \
+            TBT_CHACHA_ROUNDS(x, rounds);                             \
+            for (i = 0; i < 16; i++)                                  \
+            {                                                         \
+                u8 *p = (data) + b * TBT_CRYPTO_BLOCK_LEN + 4 * i;    \
+                                                                      \
+                tbt_store32le(p, tbt_load32le(p) ^ (x[i] + base[i])); \
+            }                                                         \
+        }                                                             \
+        (st)[12] = (u32)ctr;                                          \
+        (st)[13] = (u32)(ctr >> 32);                                  \
+        tbt_memzero_explicit(x, sizeof(x));                           \
+        tbt_memzero_explicit(base, sizeof(base));                     \
+    } while (0)
+
+static void tbt_chacha8_blocks_xor_scalar(u32 st[16], u8 *data, size_t blocks,
+                                          u32 rounds)
+{
+    TBT_CHACHA8_BULK(st, data, blocks, rounds);
+}
+
+/* Four-block interleaved SSE2. Each block keeps its four state rows in four
+ * 128-bit vectors, so one quarter-round advances the four columns of a block
+ * at once and the diagonal round only rotates the lanes of B, C and D. Four
+ * blocks give the scheduler independent chains to overlap.
  *
- * A four-block interleave was measured against this function and rejected:
- * general kernel code is built with -mno-sse -mgeneral-regs-only, so four
- * lanes are 64 live words in 15 registers and the spill traffic eats the
- * gain (1536-1642 MB/s against 1697 here). The same source vectorises to
- * 2477 MB/s when SIMD registers are allowed, but the kernel is not such a
- * target. Numbers: review/0.4.2-crypto-mno-sse.md. */
+ * This is an explicit vector form, not a hint to the SLP pass: the kernel
+ * builds with -mno-sse, and -ftrivial-auto-var-init turns the scalar scratch
+ * arrays into .DEFERRED_INIT calls that stop SLP from vectorising them. The
+ * target attribute re-enables SSE for this function only; the dispatcher owns
+ * kernel_fpu_begin()/kernel_fpu_end(). Measured on the x86_64 test host:
+ * 774 MB/s for one 8 KiB share against 370 MB/s for the scalar -mno-sse
+ * build. */
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+#define TBT_CHACHA_SSE2 1
+
+#ifdef __KERNEL__
+#define TBT_CHACHA_NOINLINE noinline
+#else
+#define TBT_CHACHA_NOINLINE __attribute__((noinline))
+#endif
+
+typedef u32 tbt_chacha_v4u32 __attribute__((vector_size(16)));
+typedef u8 tbt_chacha_v16u8 __attribute__((vector_size(16)));
+
+#define TBT_CHACHA_V4(a, b, c, d) \
+    ((tbt_chacha_v4u32){ (a), (b), (c), (d) })
+
+#define TBT_CHACHA_TARGET __attribute__((target("sse2")))
+
+TBT_CHACHA_TARGET static inline tbt_chacha_v4u32
+tbt_chacha_vrotl(tbt_chacha_v4u32 x, u32 n)
+{
+    return (x << n) | (x >> (32 - n));
+}
+
+/* Lane rotations for the diagonal round. */
+TBT_CHACHA_TARGET static inline tbt_chacha_v4u32
+tbt_chacha_vsh1(tbt_chacha_v4u32 x)
+{
+    return __builtin_shufflevector(x, x, 1, 2, 3, 0);
+}
+
+TBT_CHACHA_TARGET static inline tbt_chacha_v4u32
+tbt_chacha_vsh2(tbt_chacha_v4u32 x)
+{
+    return __builtin_shufflevector(x, x, 2, 3, 0, 1);
+}
+
+TBT_CHACHA_TARGET static inline tbt_chacha_v4u32
+tbt_chacha_vsh3(tbt_chacha_v4u32 x)
+{
+    return __builtin_shufflevector(x, x, 3, 0, 1, 2);
+}
+
+#define TBT_CHACHA_VQR(a, b, c, d)            \
+    do {                                       \
+        (a) += (b);                            \
+        (d) ^= (a);                            \
+        (d) = tbt_chacha_vrotl((d), 16);       \
+        (c) += (d);                            \
+        (b) ^= (c);                            \
+        (b) = tbt_chacha_vrotl((b), 12);       \
+        (a) += (b);                            \
+        (d) ^= (a);                            \
+        (d) = tbt_chacha_vrotl((d), 8);        \
+        (c) += (d);                            \
+        (b) ^= (c);                            \
+        (b) = tbt_chacha_vrotl((b), 7);        \
+    } while (0)
+
+#define TBT_CHACHA_VDOUBLE(a, b, c, d)  \
+    do {                                 \
+        TBT_CHACHA_VQR(a, b, c, d);      \
+        (b) = tbt_chacha_vsh1(b);        \
+        (c) = tbt_chacha_vsh2(c);        \
+        (d) = tbt_chacha_vsh3(d);        \
+        TBT_CHACHA_VQR(a, b, c, d);      \
+        (b) = tbt_chacha_vsh3(b);        \
+        (c) = tbt_chacha_vsh2(c);        \
+        (d) = tbt_chacha_vsh1(d);        \
+    } while (0)
+
+TBT_CHACHA_TARGET TBT_CHACHA_NOINLINE
+static void tbt_chacha8_blocks_xor_sse2(u32 st[16], u8 *data, size_t blocks,
+                                        u32 rounds)
+{
+    tbt_chacha_v4u32 ba = TBT_CHACHA_V4(st[0], st[1], st[2], st[3]);
+    tbt_chacha_v4u32 bb = TBT_CHACHA_V4(st[4], st[5], st[6], st[7]);
+    tbt_chacha_v4u32 bc = TBT_CHACHA_V4(st[8], st[9], st[10], st[11]);
+    tbt_chacha_v4u32 A[4], B[4], C[4], D[4];
+    u64 ctr = (u64)st[12] | ((u64)st[13] << 32);
+    size_t g;
+    u32 l;
+
+    for (g = 0; g < blocks; g += 4)
+    {
+        u32 r;
+
+        for (l = 0; l < 4; l++)
+        {
+            u64 c = ctr + l;
+
+            A[l] = ba;
+            B[l] = bb;
+            C[l] = bc;
+            D[l] = TBT_CHACHA_V4((u32)c, (u32)(c >> 32), st[14], st[15]);
+        }
+        for (r = 0; r < rounds / 2; r++)
+            for (l = 0; l < 4; l++)
+                TBT_CHACHA_VDOUBLE(A[l], B[l], C[l], D[l]);
+        for (l = 0; l < 4; l++)
+        {
+            u64 c = ctr + l;
+            u8 *p = data + (g + l) * TBT_CRYPTO_BLOCK_LEN;
+            tbt_chacha_v4u32 o;
+            tbt_chacha_v16u8 q;
+
+            o = A[l] + ba;
+            memcpy(&q, p, 16);
+            q ^= (tbt_chacha_v16u8)o;
+            memcpy(p, &q, 16);
+            o = B[l] + bb;
+            memcpy(&q, p + 16, 16);
+            q ^= (tbt_chacha_v16u8)o;
+            memcpy(p + 16, &q, 16);
+            o = C[l] + bc;
+            memcpy(&q, p + 32, 16);
+            q ^= (tbt_chacha_v16u8)o;
+            memcpy(p + 32, &q, 16);
+            o = D[l] + TBT_CHACHA_V4((u32)c, (u32)(c >> 32), st[14], st[15]);
+            memcpy(&q, p + 48, 16);
+            q ^= (tbt_chacha_v16u8)o;
+            memcpy(p + 48, &q, 16);
+        }
+        ctr += 4;
+    }
+    st[12] = (u32)ctr;
+    st[13] = (u32)(ctr >> 32);
+    tbt_memzero_explicit(A, sizeof(A));
+    tbt_memzero_explicit(B, sizeof(B));
+    tbt_memzero_explicit(C, sizeof(C));
+    tbt_memzero_explicit(D, sizeof(D));
+}
+#endif
+
 static void tbt_chacha8_blocks_xor(u32 st[16], u8 *data, size_t blocks,
                                    u32 rounds)
 {
-    u32 x[16];
-    u32 base[16];
-    u64 ctr = (u64)st[12] | ((u64)st[13] << 32);
-    size_t b;
-    u32 i;
-
-    for (i = 0; i < 16; i++)
-        base[i] = st[i];
-
-    for (b = 0; b < blocks; b++)
+    if (blocks == 0)
+        return;
+#ifdef TBT_CHACHA_SSE2
     {
-        base[12] = (u32)ctr;
-        base[13] = (u32)(ctr >> 32);
-        ctr++;
+        size_t n = blocks & ~(size_t)3;
 
-        for (i = 0; i < 16; i++)
-            x[i] = base[i];
-
-        TBT_CHACHA_ROUNDS(x, rounds);
-
-        for (i = 0; i < 16; i++)
+        if (n)
         {
-            u8 *p = data + b * TBT_CRYPTO_BLOCK_LEN + 4 * i;
-
-            tbt_store32le(p, tbt_load32le(p) ^ (x[i] + base[i]));
+#ifdef __KERNEL__
+            kernel_fpu_begin();
+#endif
+            tbt_chacha8_blocks_xor_sse2(st, data, n, rounds);
+#ifdef __KERNEL__
+            kernel_fpu_end();
+#endif
         }
+        if (n != blocks)
+            tbt_chacha8_blocks_xor_scalar(st, data + n * TBT_CRYPTO_BLOCK_LEN,
+                                          blocks - n, rounds);
     }
-
-    st[12] = (u32)ctr;
-    st[13] = (u32)(ctr >> 32);
-
-    /* x[] holds the expanded key schedule; do not leave it on the stack. */
-    tbt_memzero_explicit(x, sizeof(x));
-    tbt_memzero_explicit(base, sizeof(base));
+#else
+    tbt_chacha8_blocks_xor_scalar(st, data, blocks, rounds);
+#endif
 }
 
 /* XOR n bytes with a keystream run. Eight bytes at a time through a local

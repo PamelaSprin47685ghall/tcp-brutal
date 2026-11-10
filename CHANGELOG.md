@@ -7,6 +7,10 @@ and moves independently of the module version.
 
 ### Fixed
 
+- `tbt_car_cc_actual()` tested the address of `icsk_ca_ops->name`, a
+  `char[TCP_CA_NAME_MAX]` that is never NULL; an empty name was reported as
+  a valid algorithm. It now tests `name[0] == '\0'` and the module builds
+  without that warning.
 - Carrier subflows get their 0.8 MiB per-direction buffer back and the
   `SOCK_SNDBUF_LOCK`/`SOCK_RCVBUF_LOCK` bits stay clear. 0.7.1 split one
   64 MiB session budget over 256 carriers (128 KiB per direction) and locked
@@ -18,6 +22,13 @@ and moves independently of the module version.
 
 ### Changed
 
+- The ChaCha8 bulk path uses four-block interleaved SSE2 on x86_64, entered
+  through `kernel_fpu_begin()`/`kernel_fpu_end()`, for 2.1x the previous
+  `-mno-sse` throughput (370 -> 774 MB/s per 8 KiB share on the x86_64 test
+  host). A tail shorter than four blocks stays on the portable scalar body;
+  non-x86 targets are unchanged.
+- `tbt_fec_sclc.o` is built at `-O3` like the cipher object. The SC-LDPC
+  encode/decode loops are the largest TX/RX cost after the cipher.
 - The FEC sliding window grows to 64 super-blocks. `TBT_FEC_CREDIT_MAX` is
   8192 packets (64 MiB of source at S=8192), `TBT_FEC_REPLAY_K_MAX` is 66
   (64 blocks of credit plus two of slack), and both FEC windows are 64 MiB.

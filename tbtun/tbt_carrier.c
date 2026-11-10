@@ -3370,7 +3370,7 @@ static const char *tbt_car_cc_actual(struct sock *sk)
 {
     struct inet_connection_sock *icsk = inet_csk(sk);
 
-    if (!icsk || !icsk->icsk_ca_ops || !icsk->icsk_ca_ops->name)
+    if (!icsk || !icsk->icsk_ca_ops || icsk->icsk_ca_ops->name[0] == '\0')
         return "?";
     return icsk->icsk_ca_ops->name;
 }
