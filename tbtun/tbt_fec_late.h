@@ -123,14 +123,14 @@ tbt_fec_late_credit(struct tbt_fec_late_ctx *ctx, u64 block_id, u16 group,
         block_id > ctx->next_super ||
         ctx->next_super - block_id >= TBT_FEC_LATE_RECS)
         return TBT_FEC_LATE_UNKNOWN;
+    bit = (u16)(group * (ctx->n + ctx->m) + share);
+    if (bit >= TBT_FEC_BITMAP_BYTES * 8u)
+        return TBT_FEC_LATE_UNKNOWN;
     rec = tbt_fec_late_find(ctx, block_id);
     if (!rec && block_id < ctx->next_super)
         return TBT_FEC_LATE_UNKNOWN;
     if (!rec)
         rec = tbt_fec_late_get(ctx, block_id);
-    bit = (u16)(group * (ctx->n + ctx->m) + share);
-    if (bit >= TBT_FEC_BITMAP_BYTES * 8u)
-        return TBT_FEC_LATE_UNKNOWN;
     if (tbt_fec_late_bit(rec->pending, bit) ||
         tbt_fec_late_bit(rec->settled, bit))
         return TBT_FEC_LATE_DUP;

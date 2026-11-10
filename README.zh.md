@@ -41,12 +41,13 @@ GF(16) 上行 128、512 保留），码率由 `n/(n+m)` 决定。per-direction
 `FEC_CFG` INIT 携带 `L`/block/rate，接收端使用对端形状。
 `mode=rlnc`/`grouped` 保留为 GF(2) band RLNC 回退。
 
-自适应 FEC（`adaptive=`，默认 off）有两条路径。GF(2) 的 `mode=rlnc`/`grouped`
+自适应 FEC（`adaptive=`）在 `fec=on` 时默认开启。GF(2) 的 `mode=rlnc`/`grouped`
 保留 Phase 1：形状固定在 `n + m = 8`、32 组的族内，`m` 在 1..6 之间移动。
-`mode=sc-ldpc` 使用 per-flow SC-LDPC 估计器/控制器：上行 GF(16) 8x32/L16 可沿
-码率阶梯切换；下行 binary 1x256/L8 固定 rate 50%，控制器停在 50（已知限制）。
-切换走 `FEC_CFG`/`FEC_FBK`（wire `0x100a`）。`session <id> adaptive=off` 可在
-运行时关闭。GF(2) 族的 `n + m != 8` 尚未实现。
+`mode=sc-ldpc` 使用 per-flow SC-LDPC 估计器/控制器，沿出厂码率阶梯切换
+（下行 `n+m=256`，`n` 为 64/76/102/128/151/178；上行 `n+m=32`，`n` 为
+8/16/20/24）。切换走 `FEC_CFG`/`FEC_FBK`（wire `0x100a`）。非阶梯形状的
+`mode=sc-ldpc` 仍默认 `adaptive=off`；显式 `adaptive=off` 永远优先，
+`session <id> adaptive=off` 可在运行时关闭。GF(2) 族的 `n + m != 8` 尚未实现。
 
 每个会话只承载一条 FEC 流（wire `0x100a`）。0.6.0 的子帧复用与其每流接收
 窗口记录已经移除，DATA/PARITY 载荷重新就是应用字节。一次完整的 8 KiB 写入直接
@@ -302,10 +303,10 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 | 键 | 默认值 | 含义 |
 |---|---|---|
 | `role` | — | `near` 或 `far`，必填 |
-| `listen` | — | `a.b.c.d:port`；近端为对外地址，远端为载体地址 |
-| `peer` | — | 近端：载体的目的地；远端：唯一允许加入载体的近端源地址（锚），端口只是语法占位 |
-| `target` | — | 远端：必填，负载投递到的字面 `ip:port`；slot 0 的目的地，也是 OPEN 里端口为 0 时的默认值。近端：可选的 slot 0 target 端口，地址只是语法占位（远端始终拨自己的 `target_addr`） |
-| `map` | — | `listen_port:target_port[,listen_port:target_port...]`，最多 7 个附加槽。近端在 `listen=` 的地址上监听每个 listen 端口，并把 target 端口写进 OPEN；远端把这些 target 端口作为允许的目的地（listen 半边不绑定）。slot 0 就是 `listen=`/`target=`。近端拒绝与 `listen=` 或彼此重复的 listen 端口 |
+| `listen` | — | `a.b.c.d:port` 或 `[v6]:port`；近端为对外地址（`[::]` 绑定 IPv6 通配地址，是否同时接受 IPv4 客户端取决于内核 `bindv6only`），远端为载体地址 |
+| `peer` | — | `a.b.c.d:port` 或 `[v6]:port`；近端：载体的目的地；远端：唯一允许加入载体的近端源地址（锚），端口只是语法占位 |
+| `target` | — | `a.b.c.d:port` 或 `[v6]:port`；远端：必填的字面目的地；slot 0 的目的地，也是 OPEN 里端口为 0 时的默认值。近端：可选的 slot 0 target 端口，地址只是语法占位（远端始终拨自己的 `target_addr`） |
+| `map` | — | `listen_port:target_port[,listen_port:target_port...]`，最多 7 个附加槽；只映射端口，所有映射监听都绑定在 `listen=` 的地址上。近端监听每个 listen 端口并把 target 端口写进 OPEN；远端把这些 target 端口作为允许的目的地（listen 半边不绑定）。slot 0 就是 `listen=`/`target=`。近端拒绝与 `listen=` 或彼此重复的 listen 端口 |
 | `n` | `4` | 每组的 DATA share 数，`1..255`；`n + m <= 256` |
 | `m` | `1` | 每组的校验 share 数，`0..255`；`fec=on` 需要 `m >= 1`；`n + m <= 256` |
 | `dup` | `1` | 重复度，`0..3` |
@@ -315,13 +316,13 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 | `tunnel_rate` | `0` | 字节/秒上限，`0` 表示不设 |
 | `max_inflate` | `2.000` | 重复膨胀上限 |
 | `hole_budget_ms` | `0` | 空洞允许存在的时间，毫秒，`0..60000`；`0` 表示按 RTT 自动推导（下限 2 s） |
-| `rx_reorder_bytes` | `8388608` | 接收端重排预算，字节，`1..268435456`；同时约束每条流的重排树和全会话总和；`0` 会被拒绝 |
-| `tx_window_bytes` | `0` | 发送端窗口字节数；`0` 表示按各载体的 BBR 样本与聚合通告窗口自动推导（上限随载体数缩放）；显式值不得大于 `rx_reorder_bytes`，且不会被截断 |
+| `rx_reorder_bytes` | `67108864` | 接收端重排预算，字节，`1..268435456`；同时约束每条流的重排树和全会话总和；`0` 会被拒绝 |
+| `tx_window_bytes` | `67108864` | 发送端窗口字节数；`0` 表示按各载体的 BBR 样本与聚合通告窗口自动推导（上限随载体数缩放）；显式值不得大于 `rx_reorder_bytes`，且不会被截断 |
 | `tx_retain_bytes` | `0` | 发送端保留字节数，`0` 表示不限 |
 | `carrier_stall_ms` | `0` | stall 阈值的上限，毫秒，`0..3600000`；`0` 表示自动：5 × RTO（`SRTT + 4×RTTVAR`），钳制在 1..60 s。显式值只能调低自动阈值 |
 | `profile` | `http-kal` | `http-kal`、`http-kal-drip` 或 `raw` |
 | `fec` | `off` | `off`（旧 ARQ）或 `on`（FEC v6 数据面） |
-| `adaptive` | 跟随 `fec` | `on` 让 0.3.0 控制律在 `n + m = 8` 族内选择 `n/m`；`on` 需要 `fec=on`；不写时等于 `fec` |
+| `adaptive` | `fec=on` 时 `on` | `on` 让控制律移动 `n/m`；`on` 需要 `fec=on`；`mode=sc-ldpc` 仅在出厂码率阶梯形状上默认 `on`，否则 `off`；显式 `adaptive=off` 永远优先 |
 | `mode` | `rlnc` | `rlnc`（单组）、`grouped`（GF(2) band RLNC），或 `sc-ldpc`（下行 1×256 binary、上行 grouped GF(16)；`w` 是 codeword block） |
 | `w` | `0` | RLNC 窗口，`0..1024`；`0` 解析为 `2*n` |
 | `carriers` | `0` | 载体槽，`0..256`；`0` 解析为 `n + m`；必须是 `n + m` 的整数倍 |
@@ -329,7 +330,7 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 | `crypto_key` | — | 64 个 hex 字符的预共享 256 位密钥；`-` 清除。不配置时由近端生成并在 HELLO 中明文携带（`key_id=1`） |
 | `portblock` | `0-0` | 仅近端：本条隧道载体的源端口窗口，`1..65535`；`0-0` 表示使用 `/ports` 的全局端口段。至少容纳 `n + m` 个端口（FEC 时为 `carriers`）。远端只记录，不拨号 |
 | `dev` | — | 仅近端：拨号前把每条 carrier socket 用 `SO_BINDTODEVICE` 绑到该网卡，`1..15` 字节。绑定失败按拨号失败处理：`connect_fail` 增加，200 ms 后重试。用于多网卡或代理 TUN 环境强制直连 |
-| `srcaddrs` | — | 逗号分隔的本地源地址；只有第一项被使用 |
+| `srcaddrs` | — | 逗号分隔的本地源地址，IPv4 或 IPv6 字面量；只有第一项被使用；近端 `srcaddrs=` 必须与 `peer=` 同地址族 |
 | `nonce` | — | `16` 或 `32` 个 hex 字符：固定会话 nonce；近端本地使用，远端要求对端使用 |
 
 曾被解析但从未生效的键（`framing=`、`chunk=`、`max_retry=`、`uid=`）
@@ -530,13 +531,11 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   纠删码；环里不再保留这些字节时，接收端重置流（`holes_unrecoverable`），
   而不是猜测。
 - **SC-LDPC 与其 per-flow 自适应已实现。** `mode=sc-ldpc` 运行下行 binary
-  块（1×256，`L=8`，rate 0.5）或上行 grouped GF(16)（8×32，`L=16`，rate 1/4）；
-  `adaptive=on`（默认 off）沿阶梯切换上行，下行保持 rate 50%。
-  `rlnc`/`grouped` 保留为 GF(2) band RLNC 回退。
+  块（1×256）或上行 grouped GF(16)（8×32，`L=16`）；`adaptive=on` 沿出厂
+  码率阶梯双向切换。`rlnc`/`grouped` 保留为 GF(2) band RLNC 回退。
 - **自适应 FEC。** GF(2) 族保留 Phase 1：`adaptive=on` 只在固定的 `n + m = 8`、
-  32 组族内移动 `m`；`n + m != 8` 尚未实现。`mode=sc-ldpc` 使用 per-flow
-  SC-LDPC 控制器（默认 off）：1x256 块固定会话的跨度，因此只报告不切换；
-  下行 binary 固定 rate 50%。`adaptive=off` 保持配置的形状。
+  32 组族内移动 `m`；`n + m != 8` 尚未实现。`mode=sc-ldpc` 沿阶梯移动配置的
+  split；非阶梯 split 保持固定。`adaptive=off` 保持配置的形状。
 - **单流 FEC。** 每个会话承载一条 FEC 流（`0x100a`）。DATA/PARITY 载荷就是
   应用字节，一次 8 KiB 写入就是一个 DATA share，没有 per-stream 解复用或窗口状态。
 - **每条远端隧道只有一个锚。** 一个 `peer=`（或第一条 HELLO）固定源地址。
@@ -560,7 +559,7 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   `rx_reorder_bytes`，因为接收端的预算不在线上传输：发送端只能用自己的配置值
   给自己封顶。将来由 WINDOW 帧通告接收信用后，这个配置契约就不再需要。
 - **重排树和就绪队列是两笔不同的开销。** 乱序到达的帧等待在隧道的重排树里
-  （`rx_reorder_bytes`，默认 8 MiB，全会话共享）；已按序到达但应用尚未读取的字节
+  （`rx_reorder_bytes`，默认 64 MiB，全会话共享）；已按序到达但应用尚未读取的字节
   等待在 64 MiB 的就绪队列里。发送窗口只需要装下前者；后者是普通的背压。
 - **客户机 CPU 是瓶颈。** 最新 QEMU 运行中 `kworker` 约占一个 vCPU 的 99%。
   上面的绝对 Mbit/s 是这个客户机给出的下限，不是线路的属性。
