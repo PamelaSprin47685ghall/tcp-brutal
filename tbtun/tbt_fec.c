@@ -21,6 +21,14 @@
 
 #include "tbt_fec.h"
 
+#ifdef __KERNEL__
+#define tbt_fec_lock(l) spin_lock_bh(l)
+#define tbt_fec_unlock(l) spin_unlock_bh(l)
+#else
+#define tbt_fec_lock(l) ((void)(l))
+#define tbt_fec_unlock(l) ((void)(l))
+#endif
+
 /* The v8 wire lengths and extension offsets are a contract, not a comment.
  * A body that drifts from this block fails the build on both sides. The
  * kernel half lives in tbt_fec_hdr_check(): BUILD_BUG_ON is a statement. */
@@ -617,16 +625,23 @@ struct tbt_fec_replay
 {
     u16 groups, n, m, s, k;
     u16 stride; /* TBT_FEC_HDR_LEN + s */
-    u32 slots;  /* k * groups * (n + m) */
-    u32 bslots; /* k * groups: one resident-block id per (slot, group) */
+    u32 slots;       /* k * groups * (n + m): record descriptors */
+    u32 bslots;      /* k * groups: one resident-block id per group */
+    u32 block_bytes; /* groups * (n + m) * stride: one block plane */
     u64 *block_id;
-    u64 *block_gen; /* block id of the resident block, or ~0 */
+    u64 *block_gen;   /* block id of the resident block, or ~0 */
+    u64 *block_start; /* [k] block id owning blk_rec[i], or ~0 */
     /* When a share was last queued as a replay. The NACK handler stamps it
      * and skips a share whose reply is still in flight; storage and this
      * stamp are both protected by the caller's TX replay lock. */
     u64 *sent_ns;
     u16 *len;
-    u8 *rec;
+    /* Only resident block planes are allocated. blk_rec[b] is NULL until the
+     * first record of that block is stored; an ACK that passes the block
+     * returns it to hot[] (bounded by TBT_FEC_REPLAY_HOT_MAX) or frees it. */
+    u8 *blk_rec[TBT_FEC_REPLAY_K_MAX];
+    u8 *hot[TBT_FEC_REPLAY_HOT_MAX];
+    u32 hot_n;
 };
 
 u16 tbt_fec_replay_k(const struct tbt_fec_replay *r)
@@ -638,13 +653,19 @@ size_t tbt_fec_replay_bytes(u16 groups, u16 n, u16 m, u16 s, u16 k)
 {
     size_t shares = (size_t)n + m;
     size_t stride = TBT_FEC_HDR_LEN + s;
-    size_t per = stride + 2 * sizeof(u64) + sizeof(u16);
+    size_t block_bytes;
+    size_t desc;
 
-    if (!groups || !shares || !k || !s)
+    if (!groups || !n || !m || !k || !s)
         return 0;
-    return sizeof(struct tbt_fec_replay) +
-           (size_t)k * groups * shares * per +
-           (size_t)k * groups * sizeof(u64);
+    block_bytes = (size_t)groups * shares * stride;
+    desc = sizeof(struct tbt_fec_replay) +
+           (size_t)k * groups * shares * (sizeof(u64) + sizeof(u16)) +
+           (size_t)k * groups * shares * sizeof(u64) +
+           (size_t)k * groups * sizeof(u64) + (size_t)k * sizeof(u64);
+    return desc +
+           (size_t)(k < TBT_FEC_REPLAY_HOT_MAX ? k : TBT_FEC_REPLAY_HOT_MAX) *
+               block_bytes;
 }
 
 u16 tbt_fec_replay_k_for(u16 groups, u16 n, u16 m, u16 s)
@@ -654,12 +675,10 @@ u16 tbt_fec_replay_k_for(u16 groups, u16 n, u16 m, u16 s)
     if (!groups || groups > TBT_FEC_MAX_GROUPS || !n || !m ||
         (u32)n + m > TBT_FEC_MAX_SHARES || !s || s > TBT_FEC_PAYLOAD_MAX)
         return 0;
-    /* Start at the cap and shrink until the ring fits the budget. A small
-     * shape therefore gets the largest ring the budget allows (32 carriers
-     * K=59, 64 carriers K=29) instead of the old fixed K=7; the 256-carrier
-     * shape still lands on K=7. A shape that cannot hold one super-block
-     * gets no ring; the data plane then relies on parity and the carrier TCP
-     * retransmission. */
+    /* Start at the cap and shrink until the descriptor plane plus the hot
+     * block pool fits the budget. The 64-block window needs K=66; a shape
+     * that cannot hold one block gets no ring and falls back to parity and
+     * the carrier TCP retransmission. */
     while (k > 0 && tbt_fec_replay_bytes(groups, n, m, s, k) >
                         TBT_FEC_REPLAY_BUDGET)
         k--;
@@ -675,13 +694,18 @@ struct tbt_fec_replay *tbt_fec_replay_new_k(u16 groups, u16 n, u16 m, u16 s,
     struct tbt_fec_replay *r;
     size_t shares = (size_t)n + m;
     size_t stride, slots;
+    size_t block_bytes;
     u32 i;
 
-    if (!groups || !shares || !s || s > TBT_FEC_PAYLOAD_MAX || !k)
+    if (!groups || !n || !m || !s || s > TBT_FEC_PAYLOAD_MAX || !k ||
+        k > TBT_FEC_REPLAY_K_MAX)
         return NULL;
     stride = TBT_FEC_HDR_LEN + s;
     slots = (size_t)k * groups * shares;
+    block_bytes = (size_t)groups * shares * stride;
     if (slots > 0xffffffffu)
+        return NULL;
+    if (block_bytes > 0xffffffffu)
         return NULL;
     r = tbt_fec_alloc(sizeof(*r));
     if (!r)
@@ -694,12 +718,14 @@ struct tbt_fec_replay *tbt_fec_replay_new_k(u16 groups, u16 n, u16 m, u16 s,
     r->stride = (u16)stride;
     r->slots = (u32)slots;
     r->bslots = (u32)((size_t)k * groups);
+    r->block_bytes = (u32)block_bytes;
     r->block_id = tbt_fec_alloc(slots * sizeof(*r->block_id));
     r->block_gen = tbt_fec_alloc((size_t)r->bslots * sizeof(*r->block_gen));
+    r->block_start = tbt_fec_alloc((size_t)k * sizeof(*r->block_start));
     r->sent_ns = tbt_fec_alloc(slots * sizeof(*r->sent_ns));
     r->len = tbt_fec_alloc(slots * sizeof(*r->len));
-    r->rec = tbt_fec_alloc(slots * stride);
-    if (!r->block_id || !r->block_gen || !r->sent_ns || !r->len || !r->rec)
+    if (!r->block_id || !r->block_gen || !r->block_start || !r->sent_ns ||
+        !r->len)
     {
         tbt_fec_replay_free(r);
         return NULL;
@@ -708,6 +734,8 @@ struct tbt_fec_replay *tbt_fec_replay_new_k(u16 groups, u16 n, u16 m, u16 s,
         r->block_id[i] = ~0ULL;
     for (i = 0; i < r->bslots; i++)
         r->block_gen[i] = ~0ULL;
+    for (i = 0; i < r->k; i++)
+        r->block_start[i] = ~0ULL;
     return r;
 }
 
@@ -719,13 +747,19 @@ struct tbt_fec_replay *tbt_fec_replay_new(u16 groups, u16 n, u16 m, u16 s)
 
 void tbt_fec_replay_free(struct tbt_fec_replay *r)
 {
+    u32 i;
+
     if (!r)
         return;
     tbt_fec_free(r->block_id);
     tbt_fec_free(r->block_gen);
+    tbt_fec_free(r->block_start);
     tbt_fec_free(r->sent_ns);
     tbt_fec_free(r->len);
-    tbt_fec_free(r->rec);
+    for (i = 0; i < r->k; i++)
+        tbt_fec_free(r->blk_rec[i]);
+    for (i = 0; i < r->hot_n; i++)
+        tbt_fec_free(r->hot[i]);
     tbt_fec_free(r);
 }
 
@@ -744,16 +778,100 @@ static u32 tbt_fec_replay_bslot(const struct tbt_fec_replay *r, u64 block_id,
     return (u32)((block_id % r->k) * r->groups + group);
 }
 
+/* Ensure the ring has a record plane for block_id. Called in process context
+ * before the caller takes replay_lock: the plane is allocated here, never
+ * under the spinlock. A block's plane is reused from hot[] when possible. */
+int tbt_fec_replay_ensure_block(struct tbt_fec_replay *r, u64 block_id,
+                                tbt_fec_spinlock_t *lock)
+{
+    u32 b, i, row, per_block;
+    u8 *buf;
+
+    if (!r || !r->k)
+        return -EINVAL;
+    b = (u32)(block_id % r->k);
+    tbt_fec_lock(lock);
+    if (r->block_start[b] == block_id && r->blk_rec[b])
+    {
+        tbt_fec_unlock(lock);
+        return 0;
+    }
+    /* A different block in this slot is outside the K window: reuse its
+     * plane rather than allocate, exactly as the circular ring evicts the
+     * oldest block. */
+    if (r->blk_rec[b])
+    {
+        buf = r->blk_rec[b];
+        r->blk_rec[b] = NULL;
+        r->block_start[b] = ~0ULL;
+    }
+    else
+        buf = r->hot_n ? r->hot[--r->hot_n] : NULL;
+    tbt_fec_unlock(lock);
+    if (!buf)
+    {
+        buf = tbt_fec_alloc(r->block_bytes);
+        if (!buf)
+            return -ENOMEM;
+    }
+    tbt_fec_lock(lock);
+    if (r->block_start[b] != ~0ULL || r->blk_rec[b])
+    {
+        /* Racing ensure: keep this plane for the next block. */
+        if (r->hot_n < TBT_FEC_REPLAY_HOT_MAX)
+            r->hot[r->hot_n++] = buf;
+        else
+        {
+            tbt_fec_unlock(lock);
+            tbt_fec_free(buf);
+            return 0;
+        }
+        tbt_fec_unlock(lock);
+        return 0;
+    }
+    memset(buf, 0, r->block_bytes);
+    r->blk_rec[b] = buf;
+    r->block_start[b] = block_id;
+    per_block = (u32)r->groups * (u32)(r->n + r->m);
+    for (i = 0; i < per_block; i++)
+    {
+        row = b * per_block + i;
+        r->block_id[row] = ~0ULL;
+        r->sent_ns[row] = 0;
+        r->len[row] = 0;
+    }
+    for (i = 0; i < r->groups; i++)
+        r->block_gen[b * r->groups + i] = ~0ULL;
+    tbt_fec_unlock(lock);
+    return 0;
+}
+
 int tbt_fec_replay_store(struct tbt_fec_replay *r, u64 block_id, u16 group,
                          u16 share, const u8 *rec, u16 len)
 {
-    u32 slot;
+    u32 b, slot;
 
     if (!r || !rec || group >= r->groups || share >= (u16)(r->n + r->m) ||
         len > r->stride)
         return -EINVAL;
+#ifndef __KERNEL__
+    /* The host tests drive the ring single-threaded and have no separate
+     * process-context phase; allocate the block plane on first store. */
+    {
+        static tbt_fec_spinlock_t host_lock;
+        u32 hb = (u32)(block_id % r->k);
+
+        if (!r->blk_rec[hb] || r->block_start[hb] != block_id)
+            tbt_fec_replay_ensure_block(r, block_id, &host_lock);
+    }
+#endif
+    b = (u32)(block_id % r->k);
+    if (r->block_start[b] != block_id || !r->blk_rec[b])
+        return -ESTALE;
     slot = tbt_fec_replay_slot(r, block_id, group, share);
-    memcpy(r->rec + (size_t)slot * r->stride, rec, len);
+    memcpy(r->blk_rec[b] +
+               (size_t)((size_t)group * (r->n + r->m) + share) * r->stride,
+           rec, len);
     r->block_id[slot] = block_id;
     r->block_gen[tbt_fec_replay_bslot(r, block_id, group)] = block_id;
     r->sent_ns[slot] = 0; /* a fresh share has no replay in flight */
@@ -764,47 +882,55 @@ int tbt_fec_replay_store(struct tbt_fec_replay *r, u64 block_id, u16 group,
 int tbt_fec_replay_get(const struct tbt_fec_replay *r, u64 block_id,
                        u16 group, u16 share, u8 *out, u16 cap)
 {
-    u32 slot;
+    u32 b, slot;
     u16 len;
 
     if (!r || !out || group >= r->groups || share >= (u16)(r->n + r->m))
         return -EINVAL;
+    b = (u32)(block_id % r->k);
+    if (r->block_start[b] != block_id || !r->blk_rec[b])
+        return -ESTALE;
     slot = tbt_fec_replay_slot(r, block_id, group, share);
-    if (r->block_gen[tbt_fec_replay_bslot(r, block_id, group)] != block_id)
-        return -ESTALE; /* the block was evicted: the slot holds another */
     if (r->block_id[slot] != block_id)
-        return -ENODATA; /* the block is resident, this share never stored */
+        return -ENODATA;
     len = r->len[slot];
     if (!len)
-        return -ENODATA; /* the block is resident, this share never stored */
+        return -ENODATA;
     if (cap < len)
         return -ENOSPC;
-    memcpy(out, r->rec + (size_t)slot * r->stride, len);
+    memcpy(out, r->blk_rec[b] +
+                    (size_t)((size_t)group * (r->n + r->m) + share) *
+                        r->stride,
+           len);
     return len;
 }
 
 bool tbt_fec_replay_has(const struct tbt_fec_replay *r, u64 block_id,
                         u16 group, u16 share)
 {
-    u32 slot;
+    u32 b, slot;
 
     if (!r || group >= r->groups || share >= (u16)(r->n + r->m))
         return false;
+    b = (u32)(block_id % r->k);
+    if (r->block_start[b] != block_id || !r->blk_rec[b])
+        return false;
     slot = tbt_fec_replay_slot(r, block_id, group, share);
-    return r->block_gen[tbt_fec_replay_bslot(r, block_id, group)] == block_id &&
-           r->block_id[slot] == block_id && r->len[slot] != 0;
+    return r->block_id[slot] == block_id && r->len[slot] != 0;
 }
 
 u64 tbt_fec_replay_sent_ns(const struct tbt_fec_replay *r, u64 block_id,
                            u16 group, u16 share)
 {
-    u32 slot;
+    u32 b, slot;
 
     if (!r || group >= r->groups || share >= (u16)(r->n + r->m))
         return 0;
+    b = (u32)(block_id % r->k);
+    if (r->block_start[b] != block_id || !r->blk_rec[b])
+        return 0;
     slot = tbt_fec_replay_slot(r, block_id, group, share);
-    if (r->block_gen[tbt_fec_replay_bslot(r, block_id, group)] != block_id ||
-        r->block_id[slot] != block_id)
+    if (r->block_id[slot] != block_id)
         return 0;
     return r->sent_ns[slot];
 }
@@ -812,23 +938,43 @@ u64 tbt_fec_replay_sent_ns(const struct tbt_fec_replay *r, u64 block_id,
 void tbt_fec_replay_mark_sent(struct tbt_fec_replay *r, u64 block_id,
                               u16 group, u16 share, u64 now_ns)
 {
-    u32 slot;
+    u32 b, slot;
 
     if (!r || group >= r->groups || share >= (u16)(r->n + r->m))
         return;
+    b = (u32)(block_id % r->k);
+    if (r->block_start[b] != block_id || !r->blk_rec[b])
+        return;
     slot = tbt_fec_replay_slot(r, block_id, group, share);
-    if (r->block_gen[tbt_fec_replay_bslot(r, block_id, group)] != block_id ||
-        r->block_id[slot] != block_id || !r->len[slot])
+    if (r->block_id[slot] != block_id || !r->len[slot])
         return;
     r->sent_ns[slot] = now_ns;
 }
 
-void tbt_fec_replay_reset(struct tbt_fec_replay *r)
+/* Detach every resident plane under replay_lock. The caller frees drop[]
+ * after unlocking. */
+void tbt_fec_replay_reset_locked(struct tbt_fec_replay *r, u8 **drop,
+                                 u32 *ndrop, u32 cap)
 {
-    u32 i;
+    u32 i, n = *ndrop;
 
     if (!r)
         return;
+    for (i = 0; i < r->k; i++)
+    {
+        if (!r->blk_rec[i])
+            continue;
+        if (n < cap)
+            drop[n++] = r->blk_rec[i];
+        r->blk_rec[i] = NULL;
+        r->block_start[i] = ~0ULL;
+    }
+    for (i = 0; i < r->hot_n; i++)
+    {
+        if (n < cap)
+            drop[n++] = r->hot[i];
+    }
+    r->hot_n = 0;
     for (i = 0; i < r->slots; i++)
     {
         r->block_id[i] = ~0ULL;
@@ -837,6 +983,59 @@ void tbt_fec_replay_reset(struct tbt_fec_replay *r)
     }
     for (i = 0; i < r->bslots; i++)
         r->block_gen[i] = ~0ULL;
+    *ndrop = n;
+}
+
+/* Host-test / teardown form: no lock is held by the caller. */
+void tbt_fec_replay_reset(struct tbt_fec_replay *r)
+{
+    u8 *drop[TBT_FEC_REPLAY_K_MAX + TBT_FEC_REPLAY_HOT_MAX];
+    u32 i, n = 0;
+
+    tbt_fec_replay_reset_locked(r, drop, &n,
+                                (u32)(sizeof(drop) / sizeof(drop[0])));
+    for (i = 0; i < n; i++)
+        tbt_fec_free(drop[i]);
+}
+
+/* Release block planes the peer has acknowledged. Blocks below frontier are
+ * delivered; keeping their records would only hold memory. The hot pool is
+ * capped at 8 (4 under the 220 MiB memory floor). */
+void tbt_fec_replay_ack(struct tbt_fec_replay *r, u64 frontier, bool low_mem,
+                        tbt_fec_spinlock_t *lock)
+{
+    u8 *drop[TBT_FEC_REPLAY_K_MAX];
+    u32 i, n = 0, hot_max = low_mem ? TBT_FEC_REPLAY_HOT_LOW :
+                                      TBT_FEC_REPLAY_HOT_MAX;
+
+    if (!r)
+        return;
+    tbt_fec_lock(lock);
+    for (i = 0; i < r->k; i++)
+    {
+        if (r->blk_rec[i] && r->block_start[i] != ~0ULL &&
+            r->block_start[i] < frontier)
+        {
+            drop[n++] = r->blk_rec[i];
+            r->blk_rec[i] = NULL;
+            r->block_start[i] = ~0ULL;
+        }
+    }
+    tbt_fec_unlock(lock);
+    for (i = 0; i < n; i++)
+    {
+        bool kept = false;
+
+        tbt_fec_lock(lock);
+        if (r->hot_n < hot_max)
+        {
+            r->hot[r->hot_n++] = drop[i];
+            kept = true;
+        }
+        tbt_fec_unlock(lock);
+        if (!kept)
+            tbt_fec_free(drop[i]);
+    }
 }
 
 /* ------------------------------------------------------------------ *

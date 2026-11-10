@@ -1628,7 +1628,7 @@ static void test_ack_split(void)
 static void test_replay_window(void)
 {
     struct tbt_fec_replay *r;
-    u32 per, slots, credit, blocks;
+    u32 slots, credit, blocks;
     u16 k;
     u64 b;
     u8 buf[S];
@@ -1641,14 +1641,10 @@ static void test_replay_window(void)
     ok(tbt_fec_replay_bytes(G, N, M, S, k) <= TBT_FEC_REPLAY_BUDGET,
        "replay window: K fits the budget");
 
-    /* The arena formula from tbt_fec_data_init(): 32 MiB of super-blocks,
-     * clamped to [4, 256] slots per group. */
-    per = (u32)G * (N + M) * S;
-    slots = (32u * 1024 * 1024) / per;
-    if (slots < 4)
-        slots = 4;
-    if (slots > 256)
-        slots = 256;
+    /* tbt_fec_data_init(): 66 logical slots hold the 64-block window plus
+     * two blocks of slack. Only descriptors are eager; block planes are
+     * allocated on the first share and returned at delivery. */
+    slots = 66;
 
     /* The credit is K_eff-2 super-blocks, K_eff = min(ring K, arena slots),
      * capped to TBT_FEC_CREDIT_MAX packets. For this shape the ring binds. */
@@ -1658,7 +1654,7 @@ static void test_replay_window(void)
     ok_int((int)blocks, (int)k - 2,
            "replay window: credit is K-2 super-blocks");
     ok(credit <= TBT_FEC_CREDIT_MAX,
-       "replay window: credit is capped at 2048 packets");
+       "replay window: credit is capped at 8192 packets");
 
     /* The receiver delivered up to block 3 and stalls on block 4. The sender
      * closes blocks 4..(3 + credit blocks): the cap, one short share each. */
@@ -1680,52 +1676,51 @@ static void test_replay_window(void)
            "replay window: past the cap the stalled block is evicted");
     tbt_fec_replay_free(r);
 
-    /* Production shapes at S=8192. K is the largest ring the 32 MiB budget
-     * holds, capped at TBT_FEC_REPLAY_K_MAX=16; the credit is K_eff-2
-     * super-blocks. Every production stripe now reaches the K cap. */
-    ok_int(tbt_fec_replay_k_for(4, 4, 4, 8192), 16, "32-carrier K");
-    ok_int(tbt_fec_replay_k_for(8, 4, 4, 8192), 16, "64-carrier K");
-    ok_int(tbt_fec_replay_k_for(32, 4, 4, 8192), 16,
+    /* Production shapes at S=8192. K=66 is the 64-block window plus the
+     * two-block slack; only descriptors and eight hot block planes are
+     * resident. */
+    ok_int(tbt_fec_replay_k_for(4, 4, 4, 8192), 66, "32-carrier K");
+    ok_int(tbt_fec_replay_k_for(8, 4, 4, 8192), 66, "64-carrier K");
+    ok_int(tbt_fec_replay_k_for(32, 4, 4, 8192), 66,
            "256-carrier grouped K");
-    ok_int(tbt_fec_replay_k_for(1, 192, 64, 8192), 16,
+    ok_int(tbt_fec_replay_k_for(1, 192, 64, 8192), 66,
            "256-carrier single K");
-    ok_int((int)tbt_fec_credit_packets(4, 4, 64, 64, TBT_FEC_CREDIT_MAX),
-           224, "32-carrier credit");
-    ok_int((int)tbt_fec_credit_packets(8, 4, 64, 32, TBT_FEC_CREDIT_MAX),
-           448, "64-carrier credit");
-    ok_int((int)tbt_fec_credit_packets(32, 4, 31, 8, TBT_FEC_CREDIT_MAX),
-           768, "256-carrier grouped credit");
-    ok_int((int)tbt_fec_credit_packets(1, 192, 31, 8, TBT_FEC_CREDIT_MAX),
-           1152, "256-carrier single credit");
+    ok_int((int)tbt_fec_credit_packets(4, 4, 66, 66, TBT_FEC_CREDIT_MAX),
+           1024, "32-carrier credit");
+    ok_int((int)tbt_fec_credit_packets(8, 4, 66, 66, TBT_FEC_CREDIT_MAX),
+           2048, "64-carrier credit");
+    ok_int((int)tbt_fec_credit_packets(32, 4, 66, 66, TBT_FEC_CREDIT_MAX),
+           8192, "256-carrier grouped credit");
+    ok_int((int)tbt_fec_credit_packets(1, 192, 66, 66, TBT_FEC_CREDIT_MAX),
+           8064, "256-carrier single credit (8192 / 192 blocks)");
 
-    /* The three bounds hold for every shape and do not depend on the stream
-     * length: the ring stays inside 64 MiB and the credit inside 2048
-     * packets (16 MiB of payload). */
-    ok(tbt_fec_replay_bytes(4, 4, 4, 8192, 64) <= TBT_FEC_REPLAY_BUDGET,
-       "32-carrier ring stays inside 64 MiB");
-    ok(tbt_fec_replay_bytes(8, 4, 4, 8192, 64) <= TBT_FEC_REPLAY_BUDGET,
-       "64-carrier ring stays inside 64 MiB");
-    ok(tbt_fec_replay_bytes(32, 4, 4, 8192, 16) <= TBT_FEC_REPLAY_BUDGET,
-       "256-carrier grouped ring stays inside 64 MiB");
-    ok(tbt_fec_replay_bytes(1, 192, 64, 8192, 16) <= TBT_FEC_REPLAY_BUDGET,
-       "256-carrier single ring stays inside 64 MiB");
-    ok((u64)32 * 4 * 8 * 8192 <= 64u * 1024 * 1024,
-       "32-carrier arena stays inside 64 MiB");
-    ok((u64)64 * 8 * 8 * 8192 <= 64u * 1024 * 1024,
-       "64-carrier arena stays inside 64 MiB");
-    ok((u64)8 * 32 * 8 * 8192 <= 16u * 1024 * 1024,
-       "256-carrier grouped arena stays inside 16 MiB");
-    ok((u64)8 * 1 * 256 * 8192 <= 16u * 1024 * 1024,
-       "256-carrier single arena stays inside 16 MiB");
-    ok(tbt_fec_credit_packets(4, 4, 59, 64, TBT_FEC_CREDIT_MAX) <=
+    /* The ring stays inside 20 MiB (descriptors + 8 hot block planes) and
+     * the credit inside 8192 packets (64 MiB of payload). */
+    ok(tbt_fec_replay_bytes(4, 4, 4, 8192, 66) <= TBT_FEC_REPLAY_BUDGET,
+       "32-carrier ring stays inside 20 MiB");
+    ok(tbt_fec_replay_bytes(8, 4, 4, 8192, 66) <= TBT_FEC_REPLAY_BUDGET,
+       "64-carrier ring stays inside 20 MiB");
+    ok(tbt_fec_replay_bytes(32, 4, 4, 8192, 66) <= TBT_FEC_REPLAY_BUDGET,
+       "256-carrier grouped ring stays inside 20 MiB");
+    ok(tbt_fec_replay_bytes(1, 192, 64, 8192, 66) <= TBT_FEC_REPLAY_BUDGET,
+       "256-carrier single ring stays inside 20 MiB");
+    ok((u64)32 * 66 * 8 * 8192 <= 160u * 1024 * 1024,
+       "32-carrier 66-slot address space");
+    ok((u64)64 * 66 * 8 * 8192 <= 320u * 1024 * 1024,
+       "64-carrier 66-slot address space");
+    ok((u64)8 * 66 * 8 * 8192 <= 40u * 1024 * 1024,
+       "256-carrier grouped 66-slot address space");
+    ok((u64)1 * 66 * 256 * 8192 <= 140u * 1024 * 1024,
+       "256-carrier single 66-slot address space");
+    ok(tbt_fec_credit_packets(4, 4, 66, 66, TBT_FEC_CREDIT_MAX) <=
            TBT_FEC_CREDIT_MAX &&
-           tbt_fec_credit_packets(8, 4, 29, 32, TBT_FEC_CREDIT_MAX) <=
+           tbt_fec_credit_packets(8, 4, 66, 66, TBT_FEC_CREDIT_MAX) <=
                TBT_FEC_CREDIT_MAX &&
-           tbt_fec_credit_packets(32, 4, 7, 8, TBT_FEC_CREDIT_MAX) <=
+           tbt_fec_credit_packets(32, 4, 66, 66, TBT_FEC_CREDIT_MAX) <=
                TBT_FEC_CREDIT_MAX &&
-           tbt_fec_credit_packets(1, 192, 7, 8, TBT_FEC_CREDIT_MAX) <=
+           tbt_fec_credit_packets(1, 192, 66, 66, TBT_FEC_CREDIT_MAX) <=
                TBT_FEC_CREDIT_MAX,
-       "credit stays inside the 1024-packet cap");
+       "credit stays inside the 8192-packet cap");
 }
 
 /* ------------------------------------------------------------------ *

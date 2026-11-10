@@ -75,11 +75,11 @@ static void tbt_fec_shape_wire_norm(struct tbt_fec_shape *sh)
  * sets tx_paused only when the ring cannot take the next chunk. 256 KiB
  * paused capture every 32 packets while the credit window allowed 1024, so
  * the pump had to resume capture repeatedly. Size the ring from the credit
- * window, with the old 256 KiB floor and a 16 MiB ceiling. The ceiling is
- * allocated by tbt_fec_vzalloc() (vzalloc/kvzalloc), never a high-order
- * kzalloc. */
+ * window, with the old 256 KiB floor and a 64 MiB ceiling: 64 one-MiB source
+ * blocks, the measured 400 ms x 128 MB/s BDP. The ceiling is allocated by
+ * tbt_fec_vzalloc() (vzalloc/kvzalloc), never a high-order kzalloc. */
 #define TBT_FEC_TX_RING (256 * 1024)
-#define TBT_FEC_TX_RING_MAX (16u * 1024 * 1024)
+#define TBT_FEC_TX_RING_MAX (64u * 1024 * 1024)
 
 /* tx->run / rx->run ownership bits. The sched bit in the session owns the
  * reference; this word owns the shared buffers and cursors. A work entry that
@@ -123,14 +123,14 @@ static void tbt_fec_shape_wire_norm(struct tbt_fec_shape *sh)
  * silent stall. */
 #define TBT_FEC_STALL_MS 30000
 #define TBT_FEC_NONCE_GOLDEN 0x9e3779b97f4a7c15ULL
-/* The RX arena holds at most 64 MiB of super-blocks: slots is the per-group
- * block count, and the ACK credit is additionally capped to K-2
- * super-blocks. The arena must hold at least the credit window plus the
- * two-block slack; 32 MiB gives the 1x256 shape 16 slots, so K=16 and a
- * 14-block credit both fit and a NACKed block is never evicted before its
- * repair can return. 0.7.1 halves 0.7.0's 64 MiB arena; the 955 MB far host
- * cannot hold two of them plus the system. */
-#define TBT_FEC_RX_BUDGET (32u * 1024 * 1024)
+/* 66 logical RX slots hold the 64-block sliding window (K-2) plus two
+ * blocks of slack. Only the 66 lightweight descriptors are eager; a slot
+ * allocates its (n+m)*S block buffer on the first valid share and returns
+ * it at delivery, so a receive-light side commits only its live blocks. */
+#define TBT_FEC_RX_SLOTS 66u
+/* Free block buffers kept for reuse: at most eight hot blocks, 16 MiB at
+ * the 2 MiB 1x256 block size. Active blocks hold their own until delivery. */
+#define TBT_FEC_RX_POOL_BLOCKS 8u
 /* One FEC drain run sends at most this many batches before yielding to the
  * packetizer and the other carriers. A full 256-carrier burst is served in
  * four such runs, each of which re-arms with no delay while fresh bits
@@ -1402,6 +1402,10 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess,
     last_seq = tbt_fec_seq_of_block_pkt_base(
         block_id, group, (u16)(win_len - 1), tx->base_pkt, tx->base_block,
         tx->groups, tx->n);
+    if (tx->replay &&
+        tbt_fec_replay_ensure_block(tx->replay, block_id,
+                                    &tx->replay_lock) < 0)
+        atomic64_inc(&sess->fec_replay_miss_alloc);
     for (i = 0; i < count; i++)
     {
         memset(&h, 0, sizeof(h));
@@ -1706,6 +1710,9 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
         WRITE_ONCE(tx->last_share, share);
         if (tx->replay)
         {
+            if (tbt_fec_replay_ensure_block(tx->replay, block_id,
+                                            &tx->replay_lock) < 0)
+                atomic64_inc(&sess->fec_replay_miss_alloc);
             spin_lock_bh(&tx->replay_lock);
             tbt_fec_replay_store(tx->replay, block_id, group, share,
                                  rec, rec_len);
@@ -2462,9 +2469,17 @@ static void tbt_fec_tx_swap(struct tbt_session *sess, struct tbt_fec_tx *tx)
     tx->credit_cap = tbt_fec_credit_packets(tx->groups, tx->n, rk, 0,
                                             tbt_fec_credit_max_packets(sess));
     tx->credit = tx->credit_cap;
-    spin_lock_bh(&tx->replay_lock);
-    tbt_fec_replay_reset(tx->replay);
-    spin_unlock_bh(&tx->replay_lock);
+    {
+        u8 *drop[TBT_FEC_REPLAY_K_MAX + TBT_FEC_REPLAY_HOT_MAX];
+        u32 ndrop = 0, di;
+
+        spin_lock_bh(&tx->replay_lock);
+        tbt_fec_replay_reset_locked(tx->replay, drop, &ndrop,
+                                    ARRAY_SIZE(drop));
+        spin_unlock_bh(&tx->replay_lock);
+        for (di = 0; di < ndrop; di++)
+            kvfree(drop[di]);
+    }
     tbt_fec_tx_clear_data_queues(sess);
     tx->short_at_ns = 0;
     tx->block_at_ns = 0;
@@ -3004,11 +3019,111 @@ int tbt_fec_record_len(const u8 *buf, size_t have, size_t *need)
     return have < *need ? TBT_REC_NEED_MORE : TBT_REC_OK;
 }
 
+/* Lazy block buffers. The free list lives on the first word of each buffer;
+ * push and pop run under rx->lock, while allocation and freeing run in
+ * process context outside it. */
+static void tbt_fec_rx_buf_push_locked(struct tbt_fec_rx *rx, u8 *buf)
+{
+    if (!buf)
+        return;
+    *(u8 **)buf = rx->buf_pool;
+    rx->buf_pool = buf;
+    rx->buf_pool_n++;
+}
+
+static u8 *tbt_fec_rx_buf_pop_locked(struct tbt_fec_rx *rx)
+{
+    u8 *buf = rx->buf_pool;
+
+    if (!buf)
+        return NULL;
+    rx->buf_pool = *(u8 **)buf;
+    rx->buf_pool_n--;
+    return buf;
+}
+
+static void tbt_fec_rx_buf_free_list(u8 *buf)
+{
+    while (buf)
+    {
+        u8 *next = *(u8 **)buf;
+
+        kvfree(buf);
+        buf = next;
+    }
+}
+
+/* A DATA/PARITY record is about to take rx->lock. If the free list is empty,
+ * allocate one block buffer now, in process context, so the placement path
+ * never allocates under the leaf lock. The record's own block may already
+ * have a buffer; the spare then stays pooled for the next new block. */
+static void tbt_fec_rx_buf_prepare(struct tbt_fec_rx *rx)
+{
+    u32 bytes;
+    u8 *buf;
+
+    /* One refill at a time: a 256-record burst must not transiently
+     * allocate one block buffer per record while only the pool winner
+     * keeps it. */
+    mutex_lock(&rx->buf_alloc_lock);
+    spin_lock_bh(&rx->lock);
+    bytes = rx->buf_bytes;
+    if (rx->buf_pool || !bytes)
+    {
+        spin_unlock_bh(&rx->lock);
+        mutex_unlock(&rx->buf_alloc_lock);
+        return;
+    }
+    spin_unlock_bh(&rx->lock);
+    if (tbt_mem_avail_kb() < TBT_FEC_MEM_PAUSE_KB)
+    {
+        mutex_unlock(&rx->buf_alloc_lock);
+        return;
+    }
+    buf = tbt_fec_vzalloc(bytes);
+    if (!buf)
+    {
+        mutex_unlock(&rx->buf_alloc_lock);
+        return;
+    }
+    spin_lock_bh(&rx->lock);
+    if (rx->buf_bytes == bytes && !rx->buf_pool)
+    {
+        tbt_fec_rx_buf_push_locked(rx, buf);
+        buf = NULL;
+    }
+    spin_unlock_bh(&rx->lock);
+    kvfree(buf);
+    mutex_unlock(&rx->buf_alloc_lock);
+}
+
+/* Return a buffer to the capped hot pool. Overflow is linked through the
+ * buffer itself and freed by the caller after it drops rx->lock. */
+static void tbt_fec_rx_buf_shed(struct tbt_fec_rx *rx, u8 *buf, u8 **overflow)
+{
+    if (!buf)
+        return;
+    if (rx->buf_pool_n + 1 > TBT_FEC_RX_POOL_BLOCKS)
+    {
+        *(u8 **)buf = *overflow;
+        *overflow = buf;
+        return;
+    }
+    tbt_fec_rx_buf_push_locked(rx, buf);
+}
+
 /* Re-slice the shape-invariant buffer for the current n/m. A switch keeps the
- * allocation and moves only these two pointers. */
+ * allocation and moves only these two pointers. A lazy slot with no buffer
+ * yet has neither pointer. */
 static void tbt_fec_blk_slice(const struct tbt_fec_rx *rx,
                               struct tbt_fec_blk *b)
 {
+    if (!b->buf)
+    {
+        b->data = NULL;
+        b->parity = NULL;
+        return;
+    }
     b->data = b->buf;
     b->parity = b->buf + (size_t)rx->n * rx->s;
 }
@@ -3556,6 +3671,8 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess,
     bool delivered = false;
     bool blocked = false;
     const char *blocked_why = "?";
+    u8 *overflow = NULL;
+    u16 dg;
 
     if (READ_ONCE(rx->rebase_pending))
         return 0;
@@ -3860,6 +3977,26 @@ static int tbt_fec_deliver_ready(struct tbt_session *sess,
          * next_super moves: a carrier reuses a slot as soon as the window
          * advances, and the mask belongs to the block just delivered. */
         tbt_fec_deliver_est_fold(sess, rx, s);
+        /* Every group's bytes for s are now out of the block buffers, so
+         * return those buffers to the hot pool before the slot can be
+         * reused. Detach under the leaf lock; free overflow after it. */
+        spin_lock_bh(&rx->lock);
+        for (dg = 0; dg < rx->groups; dg++)
+        {
+            struct tbt_fec_blk *db = tbt_fec_rx_blk(rx, dg, s);
+
+            if (db->used && db->block_id == s && db->buf)
+            {
+                u8 *buf = db->buf;
+
+                db->buf = NULL;
+                tbt_fec_blk_slice(rx, db);
+                tbt_fec_rx_buf_shed(rx, buf, &overflow);
+            }
+        }
+        spin_unlock_bh(&rx->lock);
+        tbt_fec_rx_buf_free_list(overflow);
+        overflow = NULL;
         rx->deliver_partial = false;
         rx->deliver_p = 0;
         rx->deliver_g = 0;
@@ -5348,30 +5485,31 @@ static void tbt_fec_rx_blk_free(struct tbt_fec_blk *blk, u32 total)
     kvfree(blk);
 }
 
-/* `total` block slots of `shares` shares each, sliced for a block of `n` DATA
- * shares. Returns NULL on the first failure and releases what it took. */
+/* `total` block slots of `shares` shares each. Only the small metadata is
+ * eager; a slot's (n+m)*S buffer is allocated on its first share. Returns
+ * NULL on the first failure and releases what it took. */
 static struct tbt_fec_blk *tbt_fec_rx_blk_alloc(u32 total, u16 shares, u16 n)
 {
     struct tbt_fec_blk *blk = tbt_fec_vzalloc((size_t)total * sizeof(*blk));
     u32 i;
 
+    (void)shares;
+    (void)n;
     if (!blk)
         return NULL;
     for (i = 0; i < total; i++)
     {
         struct tbt_fec_blk *b = &blk[i];
 
-        b->buf = tbt_fec_vzalloc((size_t)shares * TBT_FEC_S);
         b->dpresent = kvzalloc(TBT_FEC_MAX_SHARES, GFP_KERNEL);
         b->ppresent = kvzalloc(TBT_FEC_MAX_SHARES, GFP_KERNEL);
         b->dlen = kvzalloc(TBT_FEC_MAX_SHARES * sizeof(u16), GFP_KERNEL);
-        if (!b->buf || !b->dpresent || !b->ppresent || !b->dlen)
+        if (!b->dpresent || !b->ppresent || !b->dlen)
         {
             tbt_fec_rx_blk_free(blk, total);
             return NULL;
         }
-        b->data = b->buf;
-        b->parity = b->buf + (size_t)n * TBT_FEC_S;
+        tbt_fec_blk_slice(NULL, b);
     }
     return blk;
 }
@@ -5417,7 +5555,8 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     struct tbt_fec_blk *blk, *old_blk;
     u64 *req_ns, *req_block, *old_req_ns, *old_req_block;
     u8 *rec, *old_rec;
-    u32 per, slots, total, old_total;
+    u8 *old_pool;
+    u32 slots, total, old_total;
     u16 shares = (u16)(cfg->n + cfg->m);
     bool same, fresh, block_code = false;
 
@@ -5493,8 +5632,7 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     if (!codec)
         return -ENOMEM;
 
-    per = (u32)cfg->groups * shares * TBT_FEC_S;
-    slots = TBT_FEC_RX_BUDGET / per;
+    slots = TBT_FEC_RX_SLOTS;
     if (slots < 4)
         slots = 4;
     if (slots > 256)
@@ -5528,11 +5666,15 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     old_req_block = rx->req_block;
     old_rec = rx->rec;
     old_codec = rx->codec;
+    old_pool = rx->buf_pool;
     old_total = (u32)rx->groups * rx->slots;
     rx->n = cfg->n;
     rx->m = cfg->m;
     rx->groups = cfg->groups;
     rx->slots = (u16)slots;
+    rx->buf_pool = NULL;
+    rx->buf_pool_n = 0;
+    rx->buf_bytes = (u32)shares * TBT_FEC_S;
     if (sess->fec_sclc)
     {
         u16 g;
@@ -5571,6 +5713,7 @@ static int tbt_fec_rx_apply_init(struct tbt_session *sess,
     spin_unlock_bh(&rx->lock);
 
     tbt_fec_rx_blk_free(old_blk, old_total);
+    tbt_fec_rx_buf_free_list(old_pool);
     kvfree(old_req_ns);
     kvfree(old_req_block);
     kvfree(old_rec);
@@ -6083,6 +6226,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
         if (tx)
         {
             u64 sent = READ_ONCE(tx->seq);
+            bool ack_advanced = false;
 
             /* The plane frontier never moves past what this side sent. */
             if (a.next_deliver > sent)
@@ -6107,9 +6251,26 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
                     u64 prev = cmpxchg(&tx->peer_pkts, cur, a.next_deliver);
 
                     if (prev == cur)
+                    {
+                        ack_advanced = true;
                         break;
+                    }
                     cur = prev;
                 }
+            }
+            /* Release the record planes of blocks this ACK has delivered.
+             * The frontier is cumulative; only a forward move can retire a
+             * block. */
+            if (ack_advanced && READ_ONCE(tx->replay))
+            {
+                u64 frontier = tbt_fec_block_of_seq_base(
+                    READ_ONCE(tx->peer_pkts), tx->base_pkt, tx->base_block,
+                    tx->groups, tx->n);
+
+                tbt_fec_replay_ack(
+                    tx->replay, frontier,
+                    tbt_mem_avail_kb() < TBT_FEC_REPLAY_MEM_LOW_KB,
+                    &tx->replay_lock);
             }
             /* Zero credit is not "unlimited": it would stop the packetizer
              * forever if it replaced a real window, and accepting it as a
@@ -6615,6 +6776,9 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
         return 0;
 
     payload = rec + TBT_FEC_HDR_LEN;
+    /* The carrier RX work is process context: refill the lazy block buffer
+     * pool before entering the leaf lock. */
+    tbt_fec_rx_buf_prepare(rx);
     spin_lock_bh(&rx->lock);
     if (READ_ONCE(rx->stopping))
     {
@@ -6764,6 +6928,24 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
     b = &rx->blk[slot];
     if (!b->used || b->block_id != h.block_id)
     {
+        /* An empty-block marker stores no bytes; it needs no buffer. */
+        bool needs_buf = !(h.type == TBT_FEC_PARITY && h.win_len == 0);
+
+        if (needs_buf && !b->buf)
+        {
+            b->buf = tbt_fec_rx_buf_pop_locked(rx);
+            if (!b->buf)
+            {
+                /* The pool and the allocation both failed; the share is
+                 * repaired by the NACK path once memory is available. */
+                atomic64_inc(&sess->fec_rx_nobuf);
+                spin_unlock_bh(&rx->lock);
+                return 0;
+            }
+            tbt_fec_blk_slice(rx, b);
+        }
+        else if (!needs_buf)
+            tbt_fec_blk_slice(rx, b);
         tbt_fec_blk_reset(sess, f, b, h.block_id);
         b->sid = f->sid;
     }
@@ -7297,6 +7479,7 @@ static void tbt_fec_rx_plane_free(struct tbt_fec_rx *rx)
         return;
     total = (u32)rx->groups * rx->slots;
     tbt_fec_rx_blk_free(rx->blk, total);
+    tbt_fec_rx_buf_free_list(rx->buf_pool);
     kvfree(rx->rec);
     kvfree(rx->zero);
     kvfree(rx->nack);
@@ -7507,11 +7690,13 @@ tbt_fec_rx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
             goto fail;
     }
     spin_lock_init(&rx->lock);
+    mutex_init(&rx->buf_alloc_lock);
     rx->n = n;
     rx->m = m;
     rx->s = TBT_FEC_S;
     rx->groups = groups;
     rx->slots = sess->fec_slots;
+    rx->buf_bytes = (u32)shares * TBT_FEC_S;
     rx->base_pkt = 0;
     rx->base_block = 0;
     rx->epoch = 0;
@@ -8001,7 +8186,7 @@ int tbt_fec_data_init(struct tbt_session *sess)
     struct tbt_fec_flow *f;
     bool is_sclc = t->cfg.mode == 3;
     u16 n = t->cfg.n, m = t->cfg.m, shares, groups, w, d;
-    u32 per, slots, total, i;
+    u32 slots, total, i;
     u8 mask[TBT_FEC_BITMAP_BYTES];
     u16 primary_groups;
     u8 sclc_idx, sclc_mask;
@@ -8094,8 +8279,7 @@ int tbt_fec_data_init(struct tbt_session *sess)
      * whole RX arena at or below 16 MiB: 32x8 gets 8 slots, one group keeps
      * the historical 256. The slots value is per session: every flow's arena
      * is G_i*slots blocks, so sum(G_i)*slots is the single-stream total. */
-    per = (u32)groups * shares * TBT_FEC_S;
-    slots = TBT_FEC_RX_BUDGET / per;
+    slots = TBT_FEC_RX_SLOTS;
     if (slots < 4)
         slots = 4;
     if (slots > 256)

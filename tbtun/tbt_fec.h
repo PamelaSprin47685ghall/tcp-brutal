@@ -32,12 +32,22 @@
 #include <linux/errno.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
+#include <linux/spinlock.h>
 #include <linux/vmalloc.h>
 #include <linux/string.h>
 #else
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#endif
+
+/* The replay ring is serialised by the TX plane's replay spinlock. Host
+ * tests are single-threaded and use a no-op type so the same signatures
+ * compile on both sides. */
+#ifdef __KERNEL__
+typedef spinlock_t tbt_fec_spinlock_t;
+#else
+typedef int tbt_fec_spinlock_t;
 #endif
 
 /* S: one packet slot on the wire, the only packet size this cut encodes.
@@ -544,9 +554,11 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
  *
  * The sender keeps the last K super-blocks of encoded DATA+PARITY records.
  * The receiver may ask for any missing share in that window with a NACK.
- * Both buffers are constant-size: the ring is K * groups * (n+m) records,
- * capped by TBT_FEC_REPLAY_BUDGET, and the receive window is bounded by the
- * credit the ACK grants. No buffer grows with the stream length.
+ * The K logical slots are fixed, but each block's record plane is allocated
+ * on its first store and returned to an 8-block hot pool when the peer's
+ * ACK passes it; TBT_FEC_REPLAY_BUDGET bounds the descriptor plane plus that
+ * pool, not K times the full record plane. No buffer grows with the stream
+ * length.
  *
  * The ring is storage only. The caller serialises store/get: the data plane
  * uses one spinlock per TX direction. The host test calls it single-threaded.
@@ -556,33 +568,39 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
  * super-blocks by the data plane. K must therefore hold the window plus two
  * super-blocks of slack: a block the receiver can still NACK is never
  * evicted. K is derived from the shape: the ring is allocated at the largest
- * K that fits TBT_FEC_REPLAY_BUDGET, up to TBT_FEC_REPLAY_K_MAX. The
- * 256-carrier shape lands on K=16: on a 300 ms WAN a block can sit behind
- * the in-flight window, and K=7 dropped the frontier out of the NACK window
- * during a repair stall. 0.7.1 caps the ring at 16 blocks (32 MiB) because
- * the 955 MB far host cannot hold the 31-block/64 MiB version plus its
- * arena and the system. The bounds do not depend on the stream length:
- *   ring   <= TBT_FEC_REPLAY_BUDGET (33 MiB; 16 blocks are ~32.2 MiB),
- *   arena  <= TBT_FEC_RX_BUDGET (32 MiB, tbt_fec_data.c),
- *   credit <= K_eff - 2 blocks, capped at TBT_FEC_CREDIT_MAX packets.
+ * K that fits TBT_FEC_REPLAY_BUDGET, up to TBT_FEC_REPLAY_K_MAX. 0.7.2 needs
+ * a 64-block sliding window: at 400 ms RTT and 128 MB/s the source BDP is
+ * 51.2 MB (about 50 source blocks), and the old 16-block/2048-packet cap
+ * held the protocol to 35 MB/s. K=66 leaves the required two-block slack
+ * above the 64-block credit. The record plane is block-granular, so K=66
+ * costs 66 descriptors plus an 8-block hot pool (~17 MiB static); planes of
+ * unacknowledged blocks are allocated on write and released on ACK, so the
+ * steady resident set follows the ACK frontier rather than K times 2 MiB.
+ *   static ring   <= TBT_FEC_REPLAY_BUDGET (20 MiB: descriptors + 8 blocks),
+ *   arena         <= 66 slots, block planes lazy (8-block hot pool),
+ *   credit        <= K_eff - 2 blocks, capped at TBT_FEC_CREDIT_MAX packets.
  * A shape that cannot hold K=1 gets no ring; the credit cap follows the
  * effective K. */
-#define TBT_FEC_REPLAY_K_MAX 16
-#define TBT_FEC_REPLAY_BUDGET (33u * 1024 * 1024)
-/* The parent FEC window is sixteen rounds, not 256 carriers x 1 MiB. The
- * downlink 1x256 block is 1 MiB, so 16 MiB is sixteen rounds; the uplink
- * 8x32 block is smaller and its return window is 8 MiB. The window must
- * stay two rounds below the ring K so a NACKed block is never evicted while
- * the receiver can still ask for it. tbt_fec_credit_packets() converts the
- * window to DATA packets; neither window multiplies again by the carrier
- * count. */
-#define TBT_FEC_WINDOW_DOWN (16u * 1024 * 1024)
-#define TBT_FEC_WINDOW_UP (8u * 1024 * 1024)
+#define TBT_FEC_REPLAY_K_MAX 66
+#define TBT_FEC_REPLAY_BUDGET (20u * 1024 * 1024)
+/* The sliding window is 64 super-blocks of source data, the measured BDP
+ * of 128 MB/s over 400 ms. The window must stay two blocks below the ring K
+ * so a NACKed block is never evicted while the receiver can still ask for
+ * it. tbt_fec_credit_packets() converts the window to DATA packets; neither
+ * window multiplies again by the carrier count. */
+#define TBT_FEC_WINDOW_DOWN (64u * 1024 * 1024)
+#define TBT_FEC_WINDOW_UP (64u * 1024 * 1024)
 /* The RLNC ACK grants at most this many DATA packets of FEC credit, and the
  * SC-LDPC downlink window (TBT_FEC_WINDOW_DOWN / TBT_FEC_S) resolves to the
  * same number. The credit bounds the sender's in-flight data; the ring
  * bounds the repair storage, and both are constant-size for a given shape. */
-#define TBT_FEC_CREDIT_MAX 2048u
+#define TBT_FEC_CREDIT_MAX 8192u
+
+/* Block planes resident in the replay hot pool. Eight 2 MiB blocks are
+ * 16 MiB; below TBT_FEC_REPLAY_MEM_LOW_KB the pool shrinks to four. */
+#define TBT_FEC_REPLAY_HOT_MAX 8u
+#define TBT_FEC_REPLAY_HOT_LOW 4u
+#define TBT_FEC_REPLAY_MEM_LOW_KB (220L * 1024L)
 
 struct tbt_fec_replay;
 
@@ -684,13 +702,19 @@ static inline bool tbt_fec_credit_block_ok(u64 blk, u64 frontier,
     return blk - frontier < credit_blocks;
 }
 
+/* Ensure the block's record plane exists. Process context: this may
+ * allocate one block plane (or reuse a hot one) and must run before the
+ * caller takes the TX replay spinlock. */
+int tbt_fec_replay_ensure_block(struct tbt_fec_replay *r, u64 block_id,
+                                tbt_fec_spinlock_t *lock);
 /* Store one complete encoded record (header included). A share outside
- * [0, n+m) or a record longer than header+S is refused. */
+ * [0, n+m) or a record longer than header+S is refused; a block whose plane
+ * was not ensured is refused with -ESTALE. */
 int tbt_fec_replay_store(struct tbt_fec_replay *r, u64 block_id, u16 group,
                          u16 share, const u8 *rec, u16 len);
-/* Copy a stored record into out. Returns its length, -ENOENT when the block
- * is no longer in the ring or that share was never stored, or -ENOSPC when
- * out is too small. */
+/* Copy a stored record into out. Returns its length, -ESTALE when the block
+ * plane is no longer resident, -ENODATA when that share was never stored, or
+ * -ENOSPC when out is too small. */
 int tbt_fec_replay_get(const struct tbt_fec_replay *r, u64 block_id,
                        u16 group, u16 share, u8 *out, u16 cap);
 bool tbt_fec_replay_has(const struct tbt_fec_replay *r, u64 block_id,
@@ -703,11 +727,17 @@ u64 tbt_fec_replay_sent_ns(const struct tbt_fec_replay *r, u64 block_id,
  * hold is ignored: there is nothing in flight to deduplicate. */
 void tbt_fec_replay_mark_sent(struct tbt_fec_replay *r, u64 block_id,
                               u16 group, u16 share, u64 now_ns);
-/* Drop every resident block and its stamps. A shape switch calls this after
- * it stops the old block: a replay for a block below the new base must not
- * survive, and the ring geometry (groups, n+m, K) is unchanged in Phase 1.
- * The caller holds the TX replay lock. */
+/* Detach every resident plane under the TX replay lock. The caller frees
+ * drop[] after unlocking; cap must hold k + hot_n entries. */
+void tbt_fec_replay_reset_locked(struct tbt_fec_replay *r, u8 **drop,
+                                 u32 *ndrop, u32 cap);
+/* Drop every resident block and its stamps. Caller holds no replay lock
+ * (host test and teardown). */
 void tbt_fec_replay_reset(struct tbt_fec_replay *r);
+/* Return block planes the peer has acknowledged to the hot pool (max 8, or
+ * 4 when low_mem). Runs in process context and frees overflow. */
+void tbt_fec_replay_ack(struct tbt_fec_replay *r, u64 frontier, bool low_mem,
+                        tbt_fec_spinlock_t *lock);
 
 /* NACK pacing. The first NACK for a block goes out once the gap has been
  * visible for one round trip (the carrier TCP still holds the share and the

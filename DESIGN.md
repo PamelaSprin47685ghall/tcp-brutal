@@ -501,27 +501,26 @@ adaptive one: `FEC_CFG` grows to 48 bytes and names the shape switch,
   empty group of the blocked super-block, not only the frontier group. A
   block outside the NACK window is not NACKed: its bytes are
   still in the carrier TCP send queue, and that TCP owns the retransmission.
-  The sender keeps the last `K` super-blocks of encoded DATA+PARITY records in
-  a replay ring; `K` is the largest value up to `TBT_FEC_REPLAY_K_MAX` (64)
-  whose records fit the 15 MiB budget, so the 256-carrier shape lands on
-  `K = 7` and smaller shapes get a larger window. It re-queues the requested
-  records on any up, non-stalled carrier. The share index stays the same; the
-  carrier does not. The ACK credit is `K_eff - 2` super-blocks, capped at
-  `TBT_FEC_CREDIT_MAX` (1024 packets, 8 MiB at S=8192) downlink and
-  `TBT_FEC_WINDOW_UP / TBT_FEC_S` (512 packets, 4 MiB) uplink, so the oldest
-  block the receiver can still NACK is never evicted; the two spare blocks
-  absorb a block boundary and the in-flight parity.
-- **The replay buffers are constant.** The ring is `K * groups * (n + m)`
-  slots of `TBT_FEC_HDR_LEN + S` bytes plus 10 bytes of metadata, capped at
-  `TBT_FEC_REPLAY_BUDGET` (15 MiB; the production 32-group shape uses about
-  14.08 MiB). The effective K shrinks until the shape fits; a shape that
-  cannot hold one super-block gets no ring and falls back to parity and TCP.
-  The receive window is the ACK credit over the same `groups * (n+m) * S`
-  arena (16 MiB), but the grant is `K_eff - 2` super-blocks, capped to
-  `TBT_FEC_CREDIT_MAX` downlink and `TBT_FEC_WINDOW_UP / TBT_FEC_S` uplink;
-  the sender applies the same cap. The total FEC
-  memory is therefore at most 16 MiB RX + 15 MiB replay = 31 MiB, independent
-  of the stream length. The replay queue itself is capped at
+  The sender keeps the last `K = 66` super-blocks of encoded DATA+PARITY
+  records: the 64-block sliding window plus two blocks of slack. At 400 ms
+  RTT and 128 MB/s the source BDP is 51.2 MB, so the old 2048-packet/16-block
+  cap was the 35 MiB/s ceiling. The sender re-queues the requested records on
+  any up, non-stalled carrier. The share index stays the same; the carrier
+  does not. The ACK credit is `K_eff - 2` super-blocks, capped at
+  `TBT_FEC_CREDIT_MAX` (8192 packets, 64 MiB at S=8192) in both directions,
+  so the oldest block the receiver can still NACK is never evicted; the two
+  spare blocks absorb a block boundary and the in-flight parity.
+- **The replay record plane is block-granular.** The ring keeps 66 logical
+  block slots and per-record descriptors, but a block's
+  `groups * (n+m) * (HDR+S)` record plane is allocated when its first record
+  is stored. An ACK that passes the block returns the plane to an 8-block hot
+  pool (4 below the 220 MiB floor) or frees it. The static ring is therefore
+  about 17 MiB, not 139 MiB; active unacknowledged planes are allocated only
+  while they are in flight. A NACK for a resident block copies the record
+  from its plane; an evicted block returns `-ESTALE`. The receive arena keeps
+  66 descriptors but allocates a block's `(n+m) * S` bytes on its first share
+  and returns them at delivery; an 8-block hot pool absorbs reuse. The replay
+  queue itself is capped at
   `TBT_FEC_REPLAY_QUEUE_MAX` (256 records); a full queue is a repair miss that
   the next NACK retries, never a source-frame drop. A replay miss is split
   into `fec_replay_miss_no_ring`, `fec_replay_miss_alloc` and
@@ -1387,36 +1386,40 @@ show that the byte budget and the time budget agree, not just a throughput numbe
 twice: per stream, and by a session-wide aggregate of the same value, so 128 concurrent
 streams cannot hold 128 × 8 MiB. The ready-to-deliver queue stays at 64 MiB per stream
 (`TBT_RX_RING_MAX`). Per session, retention (≤ window) + the frame queue
-`txq_max = tx_window + 8 × TBT_CHUNK_MAX`, §8.5) + ≤ 64 MiB of carrier socket buffers
-for the whole session (§5.4) ≈ 3 × window; plus ≤ `rx_reorder_bytes` of reorder tree and
-≤ 64 MiB of ready queue per stream.
+`txq_max = tx_window + 8 × TBT_CHUNK_MAX`, §8.5) + the carriers' initial
+0.8 MiB per-direction buffers (§5.4) ≈ 3 × window; plus ≤ `rx_reorder_bytes` of reorder
+tree and ≤ 64 MiB of ready queue per stream.
 
-**Carrier buffers.** One session owns 64 MiB of carrier socket buffers, split by
-`tbt_car_sockbuf_of()`: each direction of each carrier gets
-`TBT_CAR_SOCKBUF_TOTAL / (2 × carriers)`, clamped to 128 KiB..`TBT_CAR_SOCKBUF_PER`
-(838,861 B). A narrow stripe therefore keeps the 0.8 MiB floor, and 256 carriers get
-128 KiB each: 256 × 2 × 128 KiB = 64 MiB exactly. `tbt_car_setsockbuf()` assigns
-`sk_sndbuf`/`sk_rcvbuf` directly and sets `SOCK_SNDBUF_LOCK`/`SOCK_RCVBUF_LOCK`, so
-`tcp_sndbuf_expand()` and `tcp_rcv_space_adjust()` cannot raise either field past that
-share. The direct assignment also avoids the `net.core.wmem_max`/`rmem_max` cap (208 KiB
-on a default boot) and the kernel's request-doubling convention, so the value is the
-whole buffer, not half of it. Every other `sk_userlocks` bit is preserved. Listeners get
-the same share before bind, because the handshake freezes the window scale from
-`sk_rcvbuf`; `stats live` prints the result as `car_sndbuf` next to `car_rcvbuf`. The
-per-carrier split by `n_pri`, the `SO_*BUFFORCE` fallback and the unlocked autotuning
-policy are gone: 0.7.0 let 256 sockets grow to `tcp_wmem[2]`/`tcp_rmem[2]`, which is how
-the 955 MB far host froze.
+**Carrier buffers.** Every subflow starts with `TBT_CAR_SOCKBUF_PER` (838,861 B)
+in each direction. `tbt_car_setsockbuf()` assigns `sk_sndbuf`/`sk_rcvbuf`
+directly and clears `SOCK_SNDBUF_LOCK`/`SOCK_RCVBUF_LOCK`, so
+`tcp_sndbuf_expand()` and `tcp_rcv_space_adjust()` may grow each subflow toward
+its own BDP. At 400 ms RTT and 0.5 MB/s a subflow needs 200 KiB of payload;
+with skb truesize near twice the payload, 0.8 MiB is the working size, and
+256 unlocked sockets can reach 128 MB/s. The direct assignment avoids the
+`net.core.wmem_max`/`rmem_max` cap (208 KiB on a default boot) and the
+kernel's request-doubling convention, so the value is the whole buffer.
+Every other `sk_userlocks` bit is preserved. Listeners get the same size before
+bind, because the handshake freezes the window scale from `sk_rcvbuf`; `stats
+live` prints the result as `car_sndbuf` next to `car_rcvbuf`. The OOM guard is
+the lazy FEC plane below and the 180 MiB floor, not a session-wide socket cap.
 
-**FEC memory bound (0.7.1).** One session's FEC plane fits in 256 MiB: replay
-`TBT_FEC_REPLAY_K_MAX = 16` blocks inside `TBT_FEC_REPLAY_BUDGET` (33 MiB, ~32.2 MiB
-used), RX arena `TBT_FEC_RX_BUDGET` (32 MiB, 16 slots for the 1x256 shape), capture ring
-up to 16 MiB, output queues bounded at 32 MiB / 2304 records, credit K-2 blocks, parent
-window 16 MiB downlink and 8 MiB uplink, plus the 64 MiB carrier socket budget above.
+**FEC memory bound (0.7.2).** One session's FEC plane allocates block planes lazily.
+The replay ring keeps 66 logical slots and an 8-block hot pool inside
+`TBT_FEC_REPLAY_BUDGET` (20 MiB static); a block's record plane is allocated on its
+first store and released when the ACK passes it. The RX arena keeps 66 logical slots,
+allocates each `(n+m)*S` block buffer on its first share, and returns it at delivery;
+the hot pool holds at most eight blocks (16 MiB at 2 MiB/block). The packetizer source
+ring is sized from the 64-block credit and capped at 64 MiB; output queues keep 4096
+records under a 64 MiB byte mark; credit is 64 blocks (8192 packets), and both parent
+windows are 64 MiB. An eager 66-slot replay plane plus an eager 66-slot RX arena would
+be about 139 MiB + 132 MiB; the lazy form avoids that, and RX pages are committed only
+while blocks are live.
 The packetizer stops opening new blocks when `tbt_mem_avail_kb()` falls below
 `TBT_FEC_MEM_PAUSE_KB` (180 MiB) and re-arms in 2 s; a new stream is refused below
 `TBT_FEC_MEM_REFUSE_KB` (100 MiB). The far host froze in direct reclaim at 09:59 on
-2026-11-10 with 0.7.0's 64 MiB replay ring, 64 MiB arena and unbounded socket
-autotuning; journald had already reported memory pressure.
+2026-11-10 with 0.7.0's eager replay/arena and unlocked socket buffers at their old
+defaults; 0.7.2 keeps the unlocked windows and removes the eager planes instead.
 
 **Carrier-count scaling (256 target).** The current ABI limit is 16 carriers, not a
 tunable: `path_ack_mask` is a 16-bit wire field (`BUILD_BUG_ON(TBT_MAX_CARRIERS_LIMIT >
@@ -2222,8 +2225,9 @@ therefore `MSG_DONTWAIT`, and the reset close runs on `system_dfl_wq` so it neve
 a pool with the work it cancels. The public/target socket asks for 8 MiB
 send/receive with `SO_SNDBUFFORCE`/`SO_RCVBUFFORCE`, so the kernel holds 16 MiB per
 direction and falls back to the capped `SO_*BUF` without the capability; a carrier gets
-its share of the 64 MiB session budget with the buffer locks set (§5.4). The default
-16 KiB buffer is not the first thing the tunnel hits.
+its own 0.8 MiB per-direction buffer with the locks clear, so BBR autotuning can grow
+it toward the subflow BDP (§5.4). The default 16 KiB buffer is not the first thing the
+tunnel hits.
 
 **Why not receive-queue injection.** `docs/recvmsg-probe.md` measured that the
 application's descriptor is its *client* socket, a different object from the accepted

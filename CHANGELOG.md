@@ -3,6 +3,60 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.7.2] - 2026-11-10
+
+### Fixed
+
+- Carrier subflows get their 0.8 MiB per-direction buffer back and the
+  `SOCK_SNDBUF_LOCK`/`SOCK_RCVBUF_LOCK` bits stay clear. 0.7.1 split one
+  64 MiB session budget over 256 carriers (128 KiB per direction) and locked
+  both fields, so TCP/BBR could not grow a subflow to its BDP. At 400 ms RTT
+  one subflow at 0.5 MB/s needs 200 KiB of payload plus skb truesize; with
+  the locks set the WAN 1 GiB run fell from 95.22 s (11.28 MB/s) to 350.12 s
+  (3.07 MB/s). `tbt_car_sockbuf_of()` now returns 838,861 B for every
+  subflow, and `tbt_car_setsockbuf()` clears both locks.
+
+### Changed
+
+- The FEC sliding window grows to 64 super-blocks. `TBT_FEC_CREDIT_MAX` is
+  8192 packets (64 MiB of source at S=8192), `TBT_FEC_REPLAY_K_MAX` is 66
+  (64 blocks of credit plus two of slack), and both FEC windows are 64 MiB.
+  At 400 ms RTT the old 2048-packet/16-block cap held the protocol to
+  35 MiB/s; 64 blocks cover the 51.2 MB BDP of 128 MB/s. The parent socket
+  asks for 32 MiB (64 MiB after the kernel's doubling) and the packetizer's
+  source ring is capped at 64 MiB.
+- The TX replay ring is block-granular. It keeps K=66 descriptors but only
+  allocates a block's record plane when its first record is stored; an ACK
+  that passes the block returns the plane to an 8-block hot pool (4 below
+  the 220 MiB memory floor) or frees it. The static ring is about 17 MiB
+  rather than the 139 MiB an eager 66-block plane would need; active
+  unacknowledged blocks are allocated only while they are in flight.
+- The RX arena has 66 logical slots but no eager block planes. A slot takes
+  its `(n+m)*S` buffer on the first valid share and returns it when the
+  super-block is delivered or the slot is reused; the hot pool holds at most
+  eight blocks (16 MiB at 2 MiB/block), and memory pressure stops new
+  buffers below the 180 MiB floor. A receive-light side commits only its
+  live reassembly blocks.
+- The session output FIFO keeps 4096 queued records (8192 pointer slots)
+  and its byte mark rises to 64 MiB for the 64-block window; records stay
+  per-share allocations, not a static byte array. A slow carrier is evicted
+  after 15 s of frozen `snd_una` (was 8 s), so 310–400 ms RTT jitter does
+  not start a replacement storm.
+
+### Tests
+
+- `host/test_carrier_policy.c` asserts 838,861 B for every carrier count
+  and that both buffer locks are clear.
+- `host/test_fec.c`, `host/test_fec_rx.c` and `host/test_mem_budget.c`
+  assert K=66, the 8192-packet credit, the block-granular 20 MiB replay
+  ledger and the 66-slot lazy RX arena.
+
+### Compatibility
+
+- Wire unchanged: `TBT_CONV` 0x000a, `TBT_FEC_CONV` 0x100a, HELLO v7.
+  0.7.1 and 0.7.2 peers interoperate; the replay and arena changes are
+  local memory policies.
+
 ## [0.7.1] - 2026-11-10
 
 ### Fixed

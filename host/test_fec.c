@@ -2562,7 +2562,7 @@ static void test_group_reassembly(void)
 
 static void test_credit_split(void)
 {
-    enum { N = 4, K = TBT_FEC_REPLAY_K_MAX, SLOTS = 64 };
+    enum { N = 4, K = TBT_FEC_REPLAY_K_MAX, SLOTS = 66 };
     u32 prev = 0;
     u32 credit;
     u16 g;
@@ -3049,11 +3049,11 @@ static void test_replay(void)
        "non-final missing block may be requested after total_known", NULL);
 
     /* The production 32-group shape (256 carriers, n=4, m=4) reaches the K
-     * cap of 16 inside the 33 MiB budget; credit is K-2 super-blocks. */
-    ok_u32(tbt_fec_replay_k_for(32, 4, 4, 8192), 16,
+     * cap of 66: the 64-block sliding window plus two blocks of slack. */
+    ok_u32(tbt_fec_replay_k_for(32, 4, 4, 8192), 66,
            "production K from the shape");
-    ok(tbt_fec_replay_k_for(32, 4, 4, 8192) >= 6,
-       "production K is at least 6", NULL);
+    ok(tbt_fec_replay_k_for(32, 4, 4, 8192) >= 24,
+       "production K is at least 24", NULL);
     ok((u32)(tbt_fec_replay_k_for(32, 4, 4, 8192) - 2) + 2 <=
            tbt_fec_replay_k_for(32, 4, 4, 8192),
        "credit window plus slack fits the ring", NULL);
@@ -3061,20 +3061,21 @@ static void test_replay(void)
            "over-budget shape has no K");
     r = tbt_fec_replay_new(32, 4, 4, 8192);
     ok(r != NULL, "production replay ring allocated", NULL);
-    ok_u32(tbt_fec_replay_k(r), 16, "production replay K=16");
-    ok(tbt_fec_replay_bytes(32, 4, 4, 8192, 16) <=
+    ok_u32(tbt_fec_replay_k(r), 66, "production replay K=66");
+    ok(tbt_fec_replay_bytes(32, 4, 4, 8192, 66) <=
            TBT_FEC_REPLAY_BUDGET,
-       "production replay fits the budget", NULL);
+       "production replay descriptors and hot pool fit", NULL);
     tbt_fec_replay_free(r);
 
-    /* Every stripe now reaches the K cap of 16; the ring is ~32.2 MiB. */
-    ok_u32(tbt_fec_replay_k_for(4, 4, 4, 8192), 16,
+    /* Every stripe now reaches the K cap of 66; only 8 block planes are
+     * resident, so the ring stays inside 20 MiB. */
+    ok_u32(tbt_fec_replay_k_for(4, 4, 4, 8192), 66,
            "32-carrier K from the budget");
-    ok_u32(tbt_fec_replay_k_for(8, 4, 4, 8192), 16,
+    ok_u32(tbt_fec_replay_k_for(8, 4, 4, 8192), 66,
            "64-carrier K from the budget");
-    ok(tbt_fec_replay_bytes(4, 4, 4, 8192, 64) <= TBT_FEC_REPLAY_BUDGET,
+    ok(tbt_fec_replay_bytes(4, 4, 4, 8192, 66) <= TBT_FEC_REPLAY_BUDGET,
        "32-carrier ring fits the budget", NULL);
-    ok(tbt_fec_replay_bytes(8, 4, 4, 8192, 64) <= TBT_FEC_REPLAY_BUDGET,
+    ok(tbt_fec_replay_bytes(8, 4, 4, 8192, 66) <= TBT_FEC_REPLAY_BUDGET,
        "64-carrier ring fits the budget", NULL);
 
     /* A shape that cannot hold one super-block in the budget gets no ring. */

@@ -639,12 +639,13 @@ static void tbt_kill_work(struct work_struct *w)
 
 /* The parent stream carries the application's bytes: the near accepted
  * socket and the far target socket both use it. The kernel doubles
- * SO_*BUF, so 8 MiB here is a 16 MiB buffer per direction. FORCE ignores
+ * SO_*BUF, so 32 MiB here is a 64 MiB buffer per direction: the 400 ms x
+ * 128 MB/s BDP needs 64 MiB of source in flight. FORCE ignores
  * rmem_max/wmem_max; when the caller lacks the capability the capped
  * option is the fallback, never a failed attach. */
 void tbt_parent_setsockbuf(struct socket *s)
 {
-    int v = 8 * 1024 * 1024;
+    int v = 32 * 1024 * 1024;
 
     if (!s)
         return;

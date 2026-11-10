@@ -11,9 +11,9 @@
  *      generation is still a duplicate.
  *   3. tbt_peers_show() hides a stopping far carrier, so the view names only
  *      the current generation.
- *   4. tbt_car_setsockbuf() splits a 64 MiB session budget across the
- *      carriers and sets the buffer userlocks, so autotuning cannot grow
- *      past it;
+ *   4. tbt_car_setsockbuf() gives every carrier one 0.8 MiB buffer per
+ *      direction and clears the buffer userlocks, so TCP/BBR autotuning
+ *      may grow both fields;
  *      tbt_car_set_bbr() asks for BBR and keeps the carrier's default CC
  *      when the kernel does not provide it.
  *
@@ -212,11 +212,12 @@ static void test_peers_render(void)
     ok_int(rows[0], 6, "far peers: the row names the new generation");
 }
 
-/* --- 4. carrier transport: session budget, locked buffers, BBR -------- */
+/* --- 4. carrier transport: 0.8 MiB buffers, autotuning, BBR ----------- */
 
 /* The four fields tbt_car_setsockbuf() and tbt_car_set_bbr() touch. The
- * starting values describe a socket that inherited SO_SNDBUF/SO_RCVBUF
- * locks: the assignment must keep both locks and stay inside the budget. */
+ * starting values describe a socket whose buffer fields were locked by an
+ * earlier SO_SNDBUF/SO_RCVBUF request: the assignment must clear both lock
+ * bits and keep every other bit. */
 struct transport {
     unsigned int sndbuf;
     unsigned int rcvbuf;
@@ -224,14 +225,13 @@ struct transport {
     char cc[16];
 };
 
-/* tbt_car_setsockbuf(): per-direction bytes from the session budget, then
- * set only the two buffer locks. SOCK_CONNECT_BIND (16) and every other bit
- * survive. */
+/* tbt_car_setsockbuf(): one 0.8 MiB buffer per direction, then clear only
+ * the two buffer locks. SOCK_CONNECT_BIND (16) and every other bit survive. */
 static void model_setsockbuf(struct transport *t, unsigned int carriers)
 {
     t->sndbuf = tbt_car_sockbuf_of(carriers);
     t->rcvbuf = t->sndbuf;
-    t->userlocks |= TBT_CAR_SOCKBUF_LOCK_MASK;
+    t->userlocks &= ~TBT_CAR_SOCKBUF_LOCK_MASK;
 }
 
 /* tbt_car_set_bbr(): one setsockopt(SOL_TCP, TCP_CONGESTION, "bbr", 4),
@@ -254,30 +254,28 @@ static void test_carrier_transport(void)
         .cc = "cubic",
     };
 
-    ok(TBT_CAR_SOCKBUF_PER >= 786432,
-       "transport: the floor is at least 0.75 MiB");
-    ok(TBT_CAR_SOCKBUF_PER <= 1024 * 1024,
-       "transport: the floor stays inside the 1 MiB tier");
-    ok_int(tbt_car_sockbuf_of(256), 128 * 1024,
-           "transport: 256 carriers get 128 KiB per direction");
-    ok_int(tbt_car_sockbuf_of(128), 256 * 1024,
-           "transport: 128 carriers get 256 KiB per direction");
-    ok_int(tbt_car_sockbuf_of(1), TBT_CAR_SOCKBUF_PER,
-           "transport: a narrow stripe keeps the 0.8 MiB floor");
-    ok_int(tbt_car_sockbuf_of(8), TBT_CAR_SOCKBUF_PER,
-           "transport: a small stripe is capped at the floor");
+    ok_int(TBT_CAR_SOCKBUF_PER, 838861,
+           "transport: one direction holds 0.8 MiB");
     ok_int(tbt_car_sockbuf_of(0), TBT_CAR_SOCKBUF_PER,
-           "transport: a zero carrier count still has a valid size");
+           "transport: zero carriers still get 0.8 MiB per direction");
+    ok_int(tbt_car_sockbuf_of(1), TBT_CAR_SOCKBUF_PER,
+           "transport: one carrier gets 0.8 MiB per direction");
+    ok_int(tbt_car_sockbuf_of(8), TBT_CAR_SOCKBUF_PER,
+           "transport: eight carriers get 0.8 MiB per direction");
+    ok_int(tbt_car_sockbuf_of(128), TBT_CAR_SOCKBUF_PER,
+           "transport: 128 carriers get 0.8 MiB per direction");
+    ok_int(tbt_car_sockbuf_of(256), TBT_CAR_SOCKBUF_PER,
+           "transport: 256 carriers get 0.8 MiB per direction");
 
     model_setsockbuf(&t, 256);
-    ok_int(t.sndbuf, 128 * 1024,
-           "transport: sk_sndbuf takes the 256-carrier share");
-    ok_int(t.rcvbuf, 128 * 1024,
-           "transport: sk_rcvbuf takes the 256-carrier share");
-    ok_int(t.userlocks, TBT_CAR_SOCKBUF_LOCK_MASK | 16,
-           "transport: both buffer locks are set, other bits stay");
-    ok(t.userlocks & TBT_CAR_SOCKBUF_LOCK_MASK,
-       "transport: autotuning cannot grow past the session budget");
+    ok_int(t.sndbuf, TBT_CAR_SOCKBUF_PER,
+           "transport: sk_sndbuf takes the per-carrier size");
+    ok_int(t.rcvbuf, TBT_CAR_SOCKBUF_PER,
+           "transport: sk_rcvbuf takes the per-carrier size");
+    ok_int(t.userlocks, 16,
+           "transport: both buffer locks are clear, other bits stay");
+    ok(!(t.userlocks & TBT_CAR_SOCKBUF_LOCK_MASK),
+       "transport: autotuning is enabled on both buffers");
 
     ok_int(model_set_bbr(&t, true), 0,
            "bbr: the setsockopt path accepts BBR");

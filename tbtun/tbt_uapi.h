@@ -29,7 +29,7 @@ typedef uint64_t u64;
 
 #define TBT_VERSION_MAJOR 0
 #define TBT_VERSION_MINOR 7
-#define TBT_VERSION_PATCH 1
+#define TBT_VERSION_PATCH 2
 #define TBT_VERSION ((TBT_VERSION_MAJOR << 16) | (TBT_VERSION_MINOR << 8) | TBT_VERSION_PATCH)
 
 /* Roles, as carried in HELLO and in the `role=` key. */

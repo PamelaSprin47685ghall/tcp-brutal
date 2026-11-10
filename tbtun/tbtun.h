@@ -350,10 +350,11 @@ void tbt_listen_stop(struct tbt_tunnel *t);
  * kill, not a retransmit. */
 #define TBT_TX_WINDOW_AUTO_FLOOR (1024 * 1024)
 
-/* Every carrier's send and receive buffer comes from one 64 MiB session
- * budget (tbt_car_sockbuf_of()), and the SNDBUF/RCVBUF userlocks are set so
- * autotuning cannot grow past it. The rule lives in tbt_carrier_policy.h,
- * where the host test asserts it. */
+/* Every carrier starts with a 0.8 MiB send and receive buffer and keeps the
+ * SNDBUF/RCVBUF userlocks clear, so TCP/BBR autotuning grows each subflow
+ * toward its own BDP. The rule lives in tbt_carrier_policy.h, where the host
+ * test asserts it; the lazy FEC buffers and the 180 MiB floor are the OOM
+ * guard, not a per-session socket budget. */
 
 /* A carrier that never presents a HELLO is retired after this long. */
 #define TBT_JOIN_TIMEOUT_MS 5000
@@ -932,6 +933,14 @@ struct tbt_fec_rx
     u64 next_fin_bytes;
     bool next_fin_valid;
     struct tbt_fec_blk *blk; /* groups * slots */
+    /* Lazy block buffers. A slot takes a buffer from this free list on
+     * its first share and returns it when the super-block is delivered
+     * or the slot is reused. buf_bytes is the current block size. */
+    u8 *buf_pool;
+    u32 buf_pool_n;
+    u32 buf_bytes;
+    /* Serialises the one-at-a-time refill of the lazy block buffer pool. */
+    struct mutex buf_alloc_lock;
     struct tbt_fec_grouped *codec;
     u8 *data_ptrs[TBT_FEC_MAX_SHARES];   /* decode scratch */
     u8 *parity_ptrs[TBT_FEC_MAX_SHARES]; /* decode scratch */
@@ -1089,9 +1098,10 @@ struct tbt_fec_out
 /* Every DATA record waiting for a socket sits in one session FIFO. A single
  * producer (the packetizer) and a single consumer (the drain work) share it
  * with acquire/release, so a record never queues behind one congested
- * carrier. The ring is the power of two above the hard record ceiling, so
- * the record cap trips before the ring does. */
-#define TBT_FEC_OUTQ_FIFO_SIZE 2048u
+ * carrier. 0.7.2 keeps 4096 queued records (the matching pointer ring is
+ * 8192 slots, 64 KiB); the records themselves are allocated per share and
+ * freed on dequeue, not held in a static byte array. */
+#define TBT_FEC_OUTQ_FIFO_SIZE 8192u
 
 /* Memory floor for the FEC data plane, in KiB as returned by
  * tbt_mem_avail_kb(). Below TBT_FEC_MEM_PAUSE_KB the packetizer stops
@@ -1105,16 +1115,16 @@ long tbt_mem_avail_kb(void);
 
 /* Session-wide bound on DATA records. One record per carrier would be 256;
  * the packetizer can build a burst while the drain is behind, so the bound
- * keeps room for several FEC blocks. 2048 records / 16 MiB is 7.6 s of
- * queue at the 4.215 MB/s app target: enough to ride out a burst of slow
- * carriers, bounded regardless of carrier count. */
-#define TBT_FEC_OUTQ_QUEUE_HIGH 2048u
-#define TBT_FEC_OUTQ_QUEUE_BYTES_HIGH (16u * 1024 * 1024)
+ * keeps room for several FEC blocks. 4096 records / 64 MiB covers the
+ * 64-block sliding window at S=8192; the byte mark is checked before a
+ * block opens, and the hard ceiling adds one block of records. */
+#define TBT_FEC_OUTQ_QUEUE_HIGH 4096u
+#define TBT_FEC_OUTQ_QUEUE_BYTES_HIGH (64u * 1024 * 1024)
 /* The hard session ceiling stays one FEC block (n+m <= 256 records) above
  * the mark: the packetizer checks the mark before a block, and the block
  * then queues its n+m records without touching the ceiling. */
 #define TBT_FEC_OUTQ_QUEUE_MAX (TBT_FEC_OUTQ_QUEUE_HIGH + TBT_FEC_MAX_SHARES)
-#define TBT_FEC_OUTQ_QUEUE_BYTES_MAX (32u * 1024 * 1024)
+#define TBT_FEC_OUTQ_QUEUE_BYTES_MAX (96u * 1024 * 1024)
 
 /* One NACK may name at most this many shares; the receiver retries the rest.
  * This bounds the work one NACK can create, not the storage it needs. */
@@ -1651,6 +1661,9 @@ struct tbt_session
      * by the session record/byte ceiling; the replay ring still holds them,
      * so a NACK repairs the loss. */
     atomic64_t fec_flush_skip;
+    /* A lazy RX block buffer was unavailable (pool empty and the memory
+     * floor stopped allocation); the share is left to NACK repair. */
+    atomic64_t fec_rx_nobuf;
     atomic64_t fec_flush_pass;
     atomic64_t fec_hol_wait;
     atomic64_t fec_outq_drop;

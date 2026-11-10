@@ -13,40 +13,23 @@
 
 #include "tbt_uapi.h"
 
-/* 0.7.1 carrier transport: every subflow runs BBR inside one session-wide
- * 64 MiB buffer budget. The kernel's SO_*BUF path doubles a request on the
- * way to sk_sndbuf/sk_rcvbuf, but the module assigns those fields directly,
- * so the byte count is the whole buffer, not half of it.
- *
- * 0.7.0 cleared the buffer userlocks so TCP autotuning could grow every
- * socket. On the 955 MB far host a 256-carrier session then held up to
- * 256 x (tcp_wmem[2] + tcp_rmem[2]) and the host froze in direct reclaim
- * during a 1 GiB transfer. The per-carrier cap keeps the same floor for a
- * narrow stripe and 128 KiB for 256 carriers, where the whole stripe's
- * in-flight window is a few MiB. */
+/* 0.7.2 carrier transport: one 0.8 MiB buffer per direction on every
+ * subflow, with TCP/BBR autotuning enabled. One subflow at 400 ms RTT and
+ * 0.5 MB/s needs 200 KiB of payload BDP; an skb truesize near twice the
+ * payload makes 0.8 MiB the working size. */
 #define TBT_CAR_SOCKBUF_PER 838861u
-#define TBT_CAR_SOCKBUF_TOTAL (64u << 20)
-#define TBT_CAR_SOCKBUF_MIN (128u << 10)
 
 /* SOCK_SNDBUF_LOCK | SOCK_RCVBUF_LOCK from include/uapi/linux/socket.h.
- * Both are set: the lock is what keeps sk_sndbuf/sk_rcvbuf inside the session
- * budget, because tcp_sndbuf_expand() and tcp_rcv_space_adjust() grow a
- * buffer whose lock bit is clear without any session-wide bound. */
+ * tbt_car_setsockbuf() clears both bits, so tcp_sndbuf_expand() and
+ * tcp_rcv_space_adjust() may grow sk_sndbuf and sk_rcvbuf. */
 #define TBT_CAR_SOCKBUF_LOCK_MASK 3u
 
-/* Bytes for one direction of one carrier under the session budget. */
+/* Bytes for one direction of one carrier. The size does not depend on the
+ * carrier count: each subflow carries its own BDP. */
 static inline u32 tbt_car_sockbuf_of(u32 carriers)
 {
-    u32 per;
-
-    if (carriers < 1)
-        carriers = 1;
-    per = TBT_CAR_SOCKBUF_TOTAL / (2u * carriers);
-    if (per < TBT_CAR_SOCKBUF_MIN)
-        per = TBT_CAR_SOCKBUF_MIN;
-    if (per > TBT_CAR_SOCKBUF_PER)
-        per = TBT_CAR_SOCKBUF_PER;
-    return per;
+    (void)carriers;
+    return TBT_CAR_SOCKBUF_PER;
 }
 
 /* The one congestion control 0.7.0 asks for by name. The module and the host
