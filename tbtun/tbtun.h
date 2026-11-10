@@ -445,7 +445,8 @@ void tbt_listen_stop(struct tbt_tunnel *t);
  * (write_seq - snd_nxt). If no carrier is that light, the first carrier
  * with socket space is used anyway: never reject a record on notsent, or
  * BBR goes app_limited and loses the window. */
-#define TBT_FEC_DISPATCH_LIGHT_NOTSENT 65536u
+#define TBT_FEC_DISPATCH_LIGHT_NOTSENT 32768u
+#define TBT_FEC_DISPATCH_FALLBACK_NOTSENT 196608u
 
 /* A carrier that never presents a HELLO is retired after this long. */
 #define TBT_JOIN_TIMEOUT_MS 5000
