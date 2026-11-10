@@ -961,6 +961,12 @@ struct tbt_fec_rx
      * measured from here, not from the last differing NACK. */
     u64 repair_block;
     u64 repair_first_ns;
+    /* Exponential retry for one frontier block: the block the backoff
+     * belongs to and the current interval. A block that needs several
+     * repairs is served slower after each unanswered request, so a duplicate
+     * replay does not crowd DATA. Zero means no backoff episode. */
+    u64 nack_backoff_block;
+    u32 nack_backoff_ms;
     u64 rtt_sample_ns;   /* last carrier RTT sample */
     u32 rtt_us;          /* largest carrier RTT: the replay path's bound */
     u32 nack_cadence_ms; /* adaptive retry interval, 20..500 ms */
@@ -1480,6 +1486,17 @@ struct tbt_session
     atomic64_t stall_dead;       /* poll: a paused carrier outlived its bound
                                   * and was declared lost after all */
     atomic64_t stall_replaced;   /* poll: a long stall replaced its carrier */
+    /* A slow carrier that stayed full with a frozen snd_una for
+     * TBT_CAR_SLOW_EVICT_MS is removed and replaced. One per second at most:
+     * replacing a whole congested stripe at once would discard the shares
+     * the FEC window is still repairing. */
+    atomic64_t slow_evicted;
+    u64 last_slow_evict_ns;
+    /* Carrier congestion-control setup: one increment per dialled or adopted
+     * socket that accepted / refused TCP_CONGESTION=bbr. A field run can
+     * prove all n_car sockets are BBR from /proc instead of inferring it. */
+    atomic64_t car_bbr_ok;
+    atomic64_t car_bbr_fail;
     /* Economic stall decision (poll). The discrete RTO grid estimates the
      * recovery survival function online; risk[i] counts stalls that were
      * still running at grid[i], events[i] those that recovered in
@@ -1581,6 +1598,11 @@ struct tbt_session
      * row 0 alone as its cut announcement, and the NACK replay repairs the
      * few real shares. Counted in shares, so a 128-row block saves 127. */
     atomic64_t fec_short_parity_saved;
+    /* Short super-blocks sealed mid-stream: the count behind
+     * fec_short_parity_saved. A sustained bulk stream should leave this at
+     * its warm-up value; a rising count means the cut timer, not the
+     * application, is ending blocks. */
+    atomic64_t fec_short_blocks;
     /* Shares the receiver dropped before they reached a block: outside the
      * block window, or a DATA/PARITY share that arrived before the session key
      * was installed. Both leave the block to its parity, and a recovered share

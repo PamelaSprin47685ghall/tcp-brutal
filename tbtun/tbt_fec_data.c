@@ -116,10 +116,13 @@ static void tbt_fec_shape_wire_norm(struct tbt_fec_shape *sh)
  * silent stall. */
 #define TBT_FEC_STALL_MS 30000
 #define TBT_FEC_NONCE_GOLDEN 0x9e3779b97f4a7c15ULL
-/* The RX arena holds at most 16 MiB of super-blocks: slots is the per-group
+/* The RX arena holds at most 64 MiB of super-blocks: slots is the per-group
  * block count, and the ACK credit is additionally capped to
- * TBT_FEC_CREDIT_MAX packets (8 MiB at S=8192) and to K-2 super-blocks. */
-#define TBT_FEC_RX_BUDGET (16u * 1024 * 1024)
+ * TBT_FEC_CREDIT_MAX packets (16 MiB at S=8192) and to K-2 super-blocks.
+ * The arena must hold at least the credit window plus the two-block slack;
+ * 64 MiB gives the 1x256 shape 32 slots, so K=31 and a 16-block credit both
+ * fit and a NACKed block is never evicted before its repair can return. */
+#define TBT_FEC_RX_BUDGET (64u * 1024 * 1024)
 /* One FEC drain run sends at most this many batches before yielding to the
  * packetizer and the other carriers. A full 256-carrier burst is served in
  * four such runs, each of which re-arms with no delay while fresh bits
@@ -1522,6 +1525,7 @@ static void tbt_fec_tx_close_block(struct tbt_session *sess,
         }
         if (!len || len >= tx->n)
             continue; /* full: parity already sent */
+        atomic64_inc(&sess->fec_short_blocks);
         memset(g->blk + (size_t)len * TBT_FEC_S, 0,
                (size_t)(tx->n - len) * TBT_FEC_S);
         tbt_fec_tx_emit_parity(sess, tx, group, block_id, len);
@@ -1964,6 +1968,13 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
         if (tx->fill == TBT_FEC_S)
         {
             atomic64_inc(&sess->fec_credit_wait);
+            /* A closed credit window is not stream idle: the block may be
+             * partial only because the peer has not granted the next round.
+             * Restart both idle clocks, so reopening credit does not seal a
+             * short block the moment a deadline that expired during the wait
+             * is rechecked. */
+            tx->short_at_ns = 0;
+            tx->block_at_ns = 0;
             break;
         }
         if (READ_ONCE(tx->flush_req) && tx->head == tx->tail)
@@ -3967,6 +3978,39 @@ static void tbt_fec_nack_stamp(struct tbt_fec_rx *rx, u64 block_id,
  *     loss cannot fill the sender's 8 MiB replay queue with one request.
  * A shape probe for an unbuilt block runs at TBT_FEC_NACK_PROBE_MS, not at
  * the repair cadence, and probes only shares whose hold has expired. */
+/* Retry interval for one block: the repair cadence, raised by the block's
+ * own exponential backoff. A frontier that survives several NACKs is either
+ * waiting on a replay that is still queued or naming shares the sender no
+ * longer holds; asking faster only doubles the repair traffic. */
+static u32 tbt_fec_retry_ms(const struct tbt_fec_rx *rx, u64 block)
+{
+    u32 ms = rx->nack_cadence_ms;
+
+    if (rx->nack_backoff_block == block && rx->nack_backoff_ms > ms)
+        ms = rx->nack_backoff_ms;
+    return ms;
+}
+
+/* One unanswered request doubles this block's interval, up to the cap. The
+ * first request starts at the current cadence, so a healthy repair keeps the
+ * old timing and only a stuck frontier backs off. */
+static void tbt_fec_backoff_note(struct tbt_fec_rx *rx, u64 block)
+{
+    u32 next;
+
+    if (rx->nack_backoff_block != block)
+    {
+        rx->nack_backoff_block = block;
+        rx->nack_backoff_ms = rx->nack_cadence_ms;
+        return;
+    }
+    next = rx->nack_backoff_ms ? rx->nack_backoff_ms * 2
+                               : rx->nack_cadence_ms;
+    if (next > TBT_FEC_NACK_BACKOFF_MAX_MS)
+        next = TBT_FEC_NACK_BACKOFF_MAX_MS;
+    rx->nack_backoff_ms = next;
+}
+
 static void tbt_fec_nack_scan(struct tbt_session *sess,
                               struct tbt_fec_flow *f)
 {
@@ -4020,14 +4064,28 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
             rx->nack_cadence_ms =
                 tbt_fec_nack_cadence_ms(rx->nack_cadence_ms, dt);
             rx->repair_first_ns = 0;
+            rx->nack_backoff_block = 0;
+            rx->nack_backoff_ms = 0;
             tbt_fec_nack_reset(rx->nack);
         }
+    }
+
+    /* The frontier advanced past the block that was backing off: the next
+     * block starts with the plain cadence. */
+    if (rx->nack_backoff_block &&
+        rx->nack_backoff_block < rx->next_super)
+    {
+        rx->nack_backoff_block = 0;
+        rx->nack_backoff_ms = 0;
     }
 
     /* How long a requested share is left alone: one round trip, never less
      * than two repair intervals. Computed after the cadence update so this
      * pass uses the latency the last repair taught. */
-    hold = tbt_fec_nack_hold_ns(rx->rtt_us, rx->nack_cadence_ms);
+    hold = tbt_fec_nack_hold_ns(
+        rx->rtt_us, rx->nack_backoff_ms > rx->nack_cadence_ms
+                       ? rx->nack_backoff_ms
+                       : rx->nack_cadence_ms);
 
     hi = READ_ONCE(rx->highest_block);
     /* The delivery frontier may be ahead of the highest block seen: every
@@ -4398,7 +4456,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
             return;
         }
         if (tbt_fec_nack_due_at(rx->nack, now, last_block, &last,
-                                rx->nack_cadence_ms))
+                                tbt_fec_retry_ms(rx, last_block)))
         {
             int err = tbt_fec_send_nack(sess, f, last_block, &last);
 
@@ -4411,6 +4469,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
             {
                 atomic64_inc(&sess->fec_nack_tx);
                 tbt_fec_nack_stamp(rx, last_block, &last, now, false);
+                tbt_fec_backoff_note(rx, last_block);
                 if (!rx->repair_first_ns ||
                     rx->repair_block != last_block)
                 {
@@ -4436,7 +4495,7 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
                         msecs_to_jiffies(TBT_FEC_RX_POLL_SLOW_MS));
         return;
     }
-    if (tbt_fec_nack_due_at(rx->nack, now, s, &n, rx->nack_cadence_ms))
+    if (tbt_fec_nack_due_at(rx->nack, now, s, &n, tbt_fec_retry_ms(rx, s)))
     {
         int err;
 
@@ -4449,6 +4508,11 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
         {
             atomic64_inc(&sess->fec_nack_tx);
             tbt_fec_nack_stamp(rx, s, &n, now, any_probe);
+            /* A shape probe is not a repair request; its own 250 ms pacing
+             * already bounds it, and backing off here would delay the first
+             * real repair of a block that starts late. */
+            if (!probe_only)
+                tbt_fec_backoff_note(rx, s);
             if (!rx->repair_first_ns || rx->repair_block != s)
             {
                 rx->repair_block = s;

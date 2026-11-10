@@ -933,7 +933,9 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "retx_notup=%llu retx_notann=%llu retx_batch=%llu "
                               "retx_eagain=%llu retx_memshort=%llu retx_wndshort=%llu "
                               "prov_now=%d prov_peak=%u prov_reject=%llu "
-                              "dead_release=%u carrier_retired=%llu\n",
+                              "dead_release=%u carrier_retired=%llu "
+                              "cc_bbr_ok=%llu cc_bbr_fail=%llu "
+                              "slow_evicted=%llu\n",
                            id, n, up, replacing, empty,
                            tbt_stat_read(&s->carrier_lost),
                            tbt_stat_read(&s->carrier_replaced),
@@ -1011,7 +1013,10 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            READ_ONCE(s->dbg_retx_wndshort),
                            atomic_read(&s->n_prov), READ_ONCE(s->prov_peak),
                            READ_ONCE(s->prov_reject), dead_release,
-                           tbt_stat_read(&s->carrier_retired));
+                           tbt_stat_read(&s->carrier_retired),
+                           tbt_stat_read(&s->car_bbr_ok),
+                           tbt_stat_read(&s->car_bbr_fail),
+                           tbt_stat_read(&s->slow_evicted));
                 /* Review 22: pinned control-frame lifetime. ctl_queued is the
                  * live control-queue depth; the other four are the retry,
                  * re-pin, obsolete-generation and explicit-loss record. */
@@ -1285,7 +1290,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "tx_stall_suppressed_fec=%llu "
                               "fec_repair_last_ns=%llu "
                               "fec_short_parity_saved=%llu "
-                              "fec_nack_pad_skip=%llu\n",
+                              "fec_nack_pad_skip=%llu "
+                              "fec_short_blocks=%llu\n",
                            id,
                            tbt_stat_read(&s->fec_nack_tx),
                            tbt_stat_read(&s->fec_nack_rx),
@@ -1349,7 +1355,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->tx_stall_suppressed_fec),
                            READ_ONCE(s->fec_repair_last_ns),
                            tbt_stat_read(&s->fec_short_parity_saved),
-                           tbt_stat_read(&s->fec_nack_pad_skip));
+                           tbt_stat_read(&s->fec_nack_pad_skip),
+                           tbt_stat_read(&s->fec_short_blocks));
                 /* Session FIFO detail: records/bytes still waiting for a
                  * socket, the next carrier cursor, and how many carriers are
                  * marked slow. A healthy session keeps the FIFO empty or

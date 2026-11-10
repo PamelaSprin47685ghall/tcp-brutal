@@ -175,7 +175,7 @@ static void test_carrier_ledger(void)
 
 /* One super-block is groups * (n + m) * S; the arena keeps the budget in
  * whole super-blocks. Near: 8 groups of 8+24 shares. Far: 1 group of 128+128
- * shares. Both are 2 MiB per super-block and therefore 8 slots / 16 MiB. */
+ * shares. Both are 2 MiB per super-block; the 64 MiB arena keeps 32. */
 static void test_fec_arena(void)
 {
     const size_t s = TBT_FEC_S;
@@ -183,8 +183,8 @@ static void test_fec_arena(void)
     size_t far_per = 1u * 256u * s;
     size_t near_buf = 32u * s;
     size_t far_buf = 256u * s;
-    size_t near_blocks = 8u * 8u; /* groups x slots */
-    size_t far_blocks = 1u * 8u;
+    size_t near_blocks = 8u * 32u; /* groups x slots */
+    size_t far_blocks = 1u * 32u;
     size_t ring = 256u * 1024u;
 
     CHECK(near_per == 2u * 1024u * 1024u);
@@ -208,10 +208,10 @@ static void test_replay_ledger(void)
     u16 k = tbt_fec_replay_k_for(1, 128, 128, TBT_FEC_S);
     size_t bytes;
 
-    CHECK(k == 7);
+    CHECK(k == 31);
     bytes = tbt_fec_replay_bytes(1, 128, 128, TBT_FEC_S, k);
-    CHECK(bytes > 14u * 1024u * 1024u);
-    CHECK(bytes <= 15u * 1024u * 1024u);
+    CHECK(bytes > 62u * 1024u * 1024u);
+    CHECK(bytes <= 64u * 1024u * 1024u);
     CHECK(tbt_fec_plane_uses_vmalloc(bytes));
     /* The same carrier count in 8 groups has the same slot total; only the
      * one block-generation word per (slot, group) grows. */

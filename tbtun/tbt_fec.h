@@ -556,29 +556,32 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
  * super-blocks by the data plane. K must therefore hold the window plus two
  * super-blocks of slack: a block the receiver can still NACK is never
  * evicted. K is derived from the shape: the ring is allocated at the largest
- * K that fits TBT_FEC_REPLAY_BUDGET, up to TBT_FEC_REPLAY_K_MAX, so a shape
- * with small super-blocks (32/64 carriers) gets a window that covers the
- * carrier aggregate BDP, while the 256-carrier shape still lands on K=7.
- * The bounds do not depend on the stream length:
- *   ring   <= TBT_FEC_REPLAY_BUDGET (15 MiB of records),
- *   arena  <= TBT_FEC_RX_BUDGET (16 MiB, tbt_fec_data.c),
- *   credit <= TBT_FEC_CREDIT_MAX packets (8 MiB at S=8192).
+ * K that fits TBT_FEC_REPLAY_BUDGET, up to TBT_FEC_REPLAY_K_MAX. The
+ * 256-carrier shape lands on K=31: on a 300 ms WAN a block can sit behind
+ * the whole in-flight window, and K=7 dropped the frontier out of the NACK
+ * window during a repair stall. The bounds do not depend on the stream
+ * length:
+ *   ring   <= TBT_FEC_REPLAY_BUDGET (64 MiB of records),
+ *   arena  <= TBT_FEC_RX_BUDGET (64 MiB, tbt_fec_data.c),
+ *   credit <= TBT_FEC_CREDIT_MAX packets (16 MiB at S=8192).
  * A shape that cannot hold K=1 gets no ring; the credit cap follows the
  * effective K. */
-#define TBT_FEC_REPLAY_K_MAX 64
-#define TBT_FEC_REPLAY_BUDGET (15u * 1024 * 1024)
-/* The parent FEC window is eight rounds, not 256 carriers x 1 MiB. The
- * downlink 1x256 block is 1 MiB, so 8 MiB is eight rounds; the uplink 8x32
- * block is smaller and its return window is 4 MiB. tbt_fec_credit_packets()
- * converts the window to DATA packets; neither window multiplies again by
- * the carrier count. */
-#define TBT_FEC_WINDOW_DOWN (8u * 1024 * 1024)
-#define TBT_FEC_WINDOW_UP (4u * 1024 * 1024)
+#define TBT_FEC_REPLAY_K_MAX 32
+#define TBT_FEC_REPLAY_BUDGET (64u * 1024 * 1024)
+/* The parent FEC window is sixteen rounds, not 256 carriers x 1 MiB. The
+ * downlink 1x256 block is 1 MiB, so 16 MiB is sixteen rounds; the uplink
+ * 8x32 block is smaller and its return window is 8 MiB. The window must
+ * stay two rounds below the ring K so a NACKed block is never evicted while
+ * the receiver can still ask for it. tbt_fec_credit_packets() converts the
+ * window to DATA packets; neither window multiplies again by the carrier
+ * count. */
+#define TBT_FEC_WINDOW_DOWN (16u * 1024 * 1024)
+#define TBT_FEC_WINDOW_UP (8u * 1024 * 1024)
 /* The RLNC ACK grants at most this many DATA packets of FEC credit, and the
  * SC-LDPC downlink window (TBT_FEC_WINDOW_DOWN / TBT_FEC_S) resolves to the
  * same number. The credit bounds the sender's in-flight data; the ring
  * bounds the repair storage, and both are constant-size for a given shape. */
-#define TBT_FEC_CREDIT_MAX 1024u
+#define TBT_FEC_CREDIT_MAX 2048u
 
 struct tbt_fec_replay;
 
@@ -717,6 +720,12 @@ void tbt_fec_replay_reset(struct tbt_fec_replay *r);
  * NACKs; asking faster only adds duplicate work ahead of the shares already
  * queued. */
 #define TBT_FEC_NACK_RETRY_MAX_MS 500
+/* A block that stays on the frontier after several NACKs doubles its retry
+ * interval up to this cap. The repair latency on the 300 ms WAN reached
+ * 850 ms while the retry cadence stayed below it; every extra request put a
+ * duplicate replay ahead of DATA. The cap is well above one repair so a
+ * genuinely lost request still retries. */
+#define TBT_FEC_NACK_BACKOFF_MAX_MS 2000
 /* A shape probe asks the sender to describe a super-block it may not have
  * sent yet; repeating it at the repair cadence puts a NACK on the wire for
  * every retry interval of an idle connection. Pace it instead, and probe one

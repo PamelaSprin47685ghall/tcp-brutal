@@ -79,6 +79,12 @@
  * acknowledged carrier cannot have stalled. */
 #define TBT_STALL_MS 1000
 #define TBT_STALL_FROZEN_NS ((u64)TBT_STALL_MS * NSEC_PER_MSEC)
+/* A socket the FEC drain has refused for this long with snd_una frozen is
+ * not merely busy: it is holding unacked shares and the credit frontier
+ * behind a path that is not moving. Retire it and let the near side redial.
+ * One per second at most; a whole congested stripe must not be replaced in
+ * one pass. */
+#define TBT_CAR_SLOW_EVICT_MS 8000u
 /* A carrier that wrote its HELLO but never queued an OPEN is connected and
  * invisible to the scheduler. Wait one poll interval before repairing it so
  * the normal HELLO->OPEN window inside one pump run is never touched. */
@@ -744,6 +750,26 @@ static void tbt_car_poll_one(struct tbt_carrier *c)
             WRITE_ONCE(sess->stall_replace_reason, TBT_STALL_REPLACE_DEAD);
             tbt_stall_grid_note(sess, now - c->stall_since_ns, false);
             sess->last_stall_replace_ns = now;
+            tbt_carrier_sk_put(sk);
+            tbt_carrier_lost(sess, c);
+            return;
+        }
+
+        /* The FEC drain marked this socket slow because it had no room, and
+         * the mark has outlived a repair window while snd_una never moved.
+         * It is holding shares the credit frontier is waiting for on a path
+         * that is not draining. Retire it instead of keeping it in the
+         * aggregate window forever. A zero peer window or a delivery pause
+         * still means the peer is alive, so neither is evicted. */
+        if (READ_ONCE(c->slow) && c->slow_since && !paused && wnd &&
+            time_after(jiffies,
+                       c->slow_since +
+                           msecs_to_jiffies(TBT_CAR_SLOW_EVICT_MS)) &&
+            una == c->last_una && READ_ONCE(sk->sk_wmem_queued) > 0 &&
+            now - sess->last_slow_evict_ns >= NSEC_PER_SEC)
+        {
+            atomic64_inc(&sess->slow_evicted);
+            sess->last_slow_evict_ns = now;
             tbt_carrier_sk_put(sk);
             tbt_carrier_lost(sess, c);
             return;
@@ -3313,18 +3339,19 @@ void tbt_car_setsockbuf(struct socket *s)
  * Module.symvers. A kernel built without CONFIG_TCP_CONG_BBR, or one whose
  * namespace lacks CAP_NET_ADMIN, refuses the request; the carrier then keeps
  * the system default and still carries traffic. */
-static void tbt_car_set_bbr(struct socket *s)
+static bool tbt_car_set_bbr(struct socket *s)
 {
     int err;
 
     if (!s || !s->sk)
-        return;
+        return false;
     err = sock_setsockopt(s, SOL_TCP, TCP_CONGESTION,
                           KERNEL_SOCKPTR(TBT_CAR_CC_NAME),
                           sizeof(TBT_CAR_CC_NAME));
     if (err)
         pr_debug("tbtun: carrier TCP_CONGESTION=%s failed: %d; keeping the default\n",
                  TBT_CAR_CC_NAME, err);
+    return err == 0;
 }
 
 /* Dial `addr` until the handshake finishes or TBT_CONNECT_BUDGET_MS is spent.
@@ -3451,7 +3478,10 @@ static void tbt_car_connect_work(struct work_struct *w)
     /* Before the SYN: the handshake freezes the window scale from this
      * socket's receive buffer. */
     tbt_car_setsockbuf(s);
-    tbt_car_set_bbr(s);
+    if (tbt_car_set_bbr(s))
+        atomic64_inc(&sess->car_bbr_ok);
+    else
+        atomic64_inc(&sess->car_bbr_fail);
     tbt_carrier_keepalive(s);
     s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
     {
@@ -3790,7 +3820,10 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
     /* The listener already fixed the window scale; repeat the 0.8 MiB floor
      * on the accepted socket so an inherited userlock cannot freeze it. */
     tbt_car_setsockbuf(newsock);
-    tbt_car_set_bbr(newsock);
+    if (tbt_car_set_bbr(newsock))
+        atomic64_inc(&sess->car_bbr_ok);
+    else
+        atomic64_inc(&sess->car_bbr_fail);
     tbt_carrier_keepalive(newsock);
     atomic_set(&c->connected, 1);
     sess->rx_adopt_events++;
