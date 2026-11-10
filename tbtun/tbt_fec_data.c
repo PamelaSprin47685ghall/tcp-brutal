@@ -3276,8 +3276,6 @@ void tbt_fec_rx_shrink(struct tbt_fec_rx *rx, bool reset)
     total = (u32)rx->groups * rx->slots;
     keep = reset ? 2 : 0;
     spin_lock_bh(&rx->lock);
-    if (reset)
-        WRITE_ONCE(rx->stopping, true);
     if (reset && rx->blk)
     {
         for (i = 0; i < total; i++)
@@ -6264,8 +6262,11 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
          * before decryption so a non-zero return leaves the bytes untouched;
          * the raw parser consumes the record on any return, so a retry can
          * never decrypt the same buffer twice. */
+        /* A stale record after teardown is consumed silently. Returning
+         * -ESHUTDOWN here made the carrier RX actor kill a persistent TCP
+         * carrier for every in-flight tail record. */
         if (READ_ONCE(sess->fec_stopping) || READ_ONCE(rx->stopping))
-            return -ESHUTDOWN;
+            return 0;
         /* A duplicate record must be dropped before decryption. The record
          * buffer is decrypted in place; a second pass XORs the plaintext and
          * fails the payload CRC, which looks like wire corruption and hides
@@ -6963,7 +6964,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
     if (READ_ONCE(rx->stopping))
     {
         spin_unlock_bh(&rx->lock);
-        return -ESHUTDOWN;
+        return 0;
     }
     /* Shape validation belongs under rx->lock: w_fec_rx applies a switch
      * here. A record of the previous shape after APPLIED means the sender
@@ -7356,7 +7357,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         return -EPROTO;
     }
     if (READ_ONCE(sess->fec_stopping))
-        return -ESHUTDOWN;
+        return 0;
     if (!h.sid)
     {
         /* v7 requires a routing key on every FEC record. A zero sid is a
@@ -8131,6 +8132,9 @@ tbt_fec_flow_bind_primary_locked(struct tbt_session *sess,
     {
         f->rx->sid = sid;
         f->rx->stream_sid = sid;
+        /* A prior shrink/reset left this persistent plane marked stopping;
+         * the new stream must be able to receive FEC_CFG and DATA. */
+        WRITE_ONCE(f->rx->stopping, false);
     }
     if (sess->fec_sclc && f->rx)
     {
