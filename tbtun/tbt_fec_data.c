@@ -955,6 +955,17 @@ static int tbt_fec_out_dispatch(struct tbt_session *sess,
             tbt_carrier_put(c);
             return -EAGAIN;
         }
+        {
+            u32 notsent = READ_ONCE(tcp_sk(sk)->write_seq) -
+                          READ_ONCE(tcp_sk(sk)->snd_nxt);
+
+            if (notsent > TBT_FEC_DISPATCH_FALLBACK_NOTSENT)
+            {
+                tbt_carrier_sk_put(sk);
+                tbt_carrier_put(c);
+                return -EAGAIN;
+            }
+        }
         tbt_carrier_sk_put(sk);
         tbt_fec_out_slow_note(c, true);
         err = tbt_carrier_send_fec(c, o->data, o->len);
@@ -1996,35 +2007,35 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
     tbt_fec_tx_stall_diag(sess, tx, st);
     for (;;)
     {
-        u32 got;
+        u32 got, k, hard, max_unacked;
         long mem;
         u32 unacked;
 
-        /* Below 180 MiB first shrink the replay plane instead of stopping:
-         * free hot/ACKed planes and keep only the newest eight unacked
-         * blocks. Only below 90 MiB with at least two active blocks is it
-         * worth pausing. A new stream at 120-175 MiB must still open its
-         * first block, or it deadlocks at 0 B until the application times
-         * out. */
+        /* Smooth step window. Never open a block when the replay ring has
+         * k-2 unacked blocks: ensure_block would return -ENOSPC and the
+         * share would be sent but never stored. The tier below keeps far's
+         * vmalloc flat instead of sawtoothing between 97 and 254 MiB. */
         mem = tbt_mem_avail_kb();
         unacked = tx->replay ?
                   tbt_fec_replay_unacked(tx->replay, &tx->replay_lock) : 0;
+        k = tx->replay ? tbt_fec_replay_k(tx->replay) : 0;
+        hard = k > 2 ? k - 2 : 1;
+        if (mem >= 512L * 1024L)
+            max_unacked = 64;
+        else if (mem >= 240L * 1024L)
+            max_unacked = 20;
+        else if (mem >= TBT_FEC_MEM_PAUSE_KB)
+            max_unacked = 12;
+        else
+            max_unacked = 8;
+        if (max_unacked > hard)
+            max_unacked = hard;
         if (mem < TBT_FEC_MEM_PAUSE_KB && tx->replay)
             tbt_fec_replay_shrink(tx->replay, true, 0, &tx->replay_lock);
-        if (mem < TBT_FEC_MEM_HARD_KB && unacked >= 2)
+        if (unacked >= max_unacked && tx->fill == 0 &&
+            !tbt_fec_tx_block_dirty(tx))
         {
-            tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2000));
-            pr_info_ratelimited("tbtun: memory hard low (%ld KB): FEC TX paused for 2 s\n",
-                                mem);
-            break;
-        }
-        /* At 180 MiB and eight unacked blocks, stop opening a new block
-         * until the ACK frontier moves; never evict the old ones (they are
-         * exactly what NACK repair needs). Only gate between blocks. */
-        if (mem < TBT_FEC_MEM_PAUSE_KB && unacked >= TBT_FEC_REPLAY_HOT_MAX &&
-            tx->fill == 0 && !tbt_fec_tx_block_dirty(tx))
-        {
-            tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(5));
+            tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2));
             break;
         }
         if ((tx->switch_state == TBT_FEC_SW_CFG_SENT ||
