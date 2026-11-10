@@ -886,10 +886,30 @@ static int tbt_fec_out_dispatch(struct tbt_session *sess,
                 continue;
             }
             {
-                u32 notsent = READ_ONCE(tcp_sk(sk)->write_seq) -
-                              READ_ONCE(tcp_sk(sk)->snd_nxt);
-                err = (notsent > TBT_CAR_NOTSENT_MAX ||
-                       sk_stream_wspace(sk) < (int)o->len) ? -EAGAIN : 0;
+                struct tcp_sock *tp = tcp_sk(sk);
+                u32 mss = max_t(u32, READ_ONCE(tp->mss_cache), 1400U);
+                u64 cwnd_bytes = (u64)READ_ONCE(tp->snd_cwnd) * mss;
+                u32 notsent = READ_ONCE(tp->write_seq) -
+                              READ_ONCE(tp->snd_nxt);
+                u32 unacked = READ_ONCE(tp->write_seq) -
+                              READ_ONCE(tp->snd_una);
+                u32 max_notsent = cwnd_bytes < TBT_CAR_NOTSENT_MIN ?
+                                  TBT_CAR_NOTSENT_MIN :
+                                  cwnd_bytes > TBT_CAR_NOTSENT_CAP ?
+                                  TBT_CAR_NOTSENT_CAP : (u32)cwnd_bytes;
+                u64 unacked_limit = cwnd_bytes * 2;
+
+                if (unacked_limit < TBT_CAR_NOTSENT_MIN)
+                    unacked_limit = TBT_CAR_NOTSENT_MIN;
+                if (unacked_limit > 0xffffffffULL)
+                    unacked_limit = 0xffffffffULL;
+                {
+                    u32 max_unacked = (u32)unacked_limit;
+
+                    err = (notsent > max_notsent ||
+                           unacked > max_unacked ||
+                           sk_stream_wspace(sk) < (int)o->len) ? -EAGAIN : 0;
+                }
             }
             tbt_carrier_sk_put(sk);
             if (err)

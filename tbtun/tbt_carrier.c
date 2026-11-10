@@ -3350,10 +3350,9 @@ void tbt_car_setsockbuf(struct socket *s, u32 carriers)
     sk = s->sk;
     WRITE_ONCE(sk->sk_sndbuf, TBT_CAR_SOCKBUF_PER);
     WRITE_ONCE(sk->sk_rcvbuf, TBT_CAR_SOCKBUF_PER);
-    /* Wake sk_write_space/poll once fewer than 32 FEC records are queued
-     * behind cwnd. The reserve is large enough for 350 ms ACK aggregation
-     * and SACK recovery; it still bounds a slow subflow's bufferbloat. */
-    WRITE_ONCE(tcp_sk(sk)->notsent_lowat, TBT_CAR_NOTSENT_MAX);
+    /* Wake sk_write_space/poll at 128 KiB behind cwnd; the dispatch gate
+     * below then adapts the real reserve to this subflow's cwnd. */
+    WRITE_ONCE(tcp_sk(sk)->notsent_lowat, TBT_CAR_NOTSENT_LOWAT);
     /* Clear only the two buffer locks; SOCK_CONNECT_BIND and every other bit
      * survive. */
     sk->sk_userlocks &= ~TBT_CAR_SOCKBUF_LOCK_MASK;
