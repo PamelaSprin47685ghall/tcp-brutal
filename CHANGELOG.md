@@ -86,6 +86,13 @@ and moves independently of the module version.
   assert K=66, the 8192-packet credit, the block-granular 20 MiB replay
   ledger and the 66-slot lazy RX arena.
 
+### Verification
+
+- On the 7.3.0-rc6 host, five 8 MB/s streams aborted after 2 s each left
+  `/proc/vmallocinfo` tbt entries at 2 / 139,264 B after every stream (no
+  16 MiB TX-ring accumulation); `del 1`, `del 2` and `rmmod tbtun` left
+  0 tbt entries and 0 `0xffffffffc0` orphan blocks.
+
 ### Compatibility
 
 - Wire unchanged: `TBT_CONV` 0x000a, `TBT_FEC_CONV` 0x100a, HELLO v7.
