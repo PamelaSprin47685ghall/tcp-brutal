@@ -891,6 +891,9 @@ static void tbt_stream_free_rcu(struct rcu_head *head)
     tbt_rx_free_queue(st);
     tbt_tx_free_stream(st);
     kfree(st->holes);
+    /* A stream freed without an explicit detach must not strand its flow. */
+    if (READ_ONCE(st->fec_flow))
+        tbt_fec_flow_detach(st);
     /* Every published stream holds one session reference from
      * tbt_stream_get() until this callback. */
     tbt_session_put(st->sess);

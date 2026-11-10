@@ -464,6 +464,14 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
     o->stamp_ns = stamp_ns;
     memcpy(o->data, buf, len);
     spin_lock(&sess->fec_out_lock);
+    if (READ_ONCE(sess->closing) || READ_ONCE(sess->fec_stopping) ||
+        !sess->fec ||
+        (flow && !tbt_fec_flow_live(READ_ONCE(flow->state))))
+    {
+        spin_unlock(&sess->fec_out_lock);
+        tbt_fec_out_put(o);
+        return -ESHUTDOWN;
+    }
     if (replay &&
         sess->fec_replay_bytes + len >
             tbt_fec_replay_cap(READ_ONCE(sess->fec_closing),
@@ -7783,8 +7791,9 @@ void tbt_fec_data_module_exit(void)
     if (!tbt_fec_free_wq)
         return;
     /* tbt_tunnel_shutdown() has returned, so no session, stream or work item
-     * can take another flow reference. Draining here waits for queued and
-     * running frees; each free's own synchronize_rcu() completes first. */
+     * can take another flow reference. Flush every pending stream RCU
+     * callback first: each may detach and enqueue the last flow_put. */
+    rcu_barrier();
     destroy_workqueue(tbt_fec_free_wq);
     tbt_fec_free_wq = NULL;
 }
@@ -8593,8 +8602,13 @@ void tbt_fec_flow_abort(struct tbt_session *sess, struct tbt_fec_flow *f)
 {
     bool unlinked = false;
 
-    if (!sess || !sess->fec || !f)
+    if (!f)
         return;
+    if (!sess || !sess->fec)
+    {
+        tbt_fec_flow_put(f); /* consume the caller's admission reference */
+        return;
+    }
     mutex_lock(&sess->fec_alloc_lock);
     spin_lock(&sess->lock);
     /* Publish the death before unlinking: a snapshot or a send that already
@@ -8650,10 +8664,11 @@ void tbt_fec_flow_detach(struct tbt_stream *st)
     struct tbt_fec_flow *f;
     bool unlinked = false;
 
-    if (!st || !st->fec_flow)
+    if (!st)
         return;
-    f = st->fec_flow;
-    st->fec_flow = NULL;
+    f = xchg(&st->fec_flow, NULL);
+    if (!f)
+        return;
     sess = f->sess;
     mutex_lock(&sess->fec_alloc_lock);
     spin_lock(&sess->lock);
