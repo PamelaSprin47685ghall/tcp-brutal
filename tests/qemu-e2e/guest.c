@@ -2,17 +2,19 @@
  * guest.c - PID 1 for scripts/qemu-e2e-smoke.sh.
  *
  * Boots in a QEMU guest with one file, /tbtun.ko, beside it.  It mounts proc,
- * raises loopback, loads the module with fec_groups_per_flow=16, and drives
+ * raises loopback, loads the module (0.7.0 ignores fec_groups_per_flow), and drives
  * the real data plane through /proc/net/tbtun/{ports,config,stats,streams}.
  * Every stage runs in one boot, in this order:
  *
  *   1. grouped (non-SCLC) baseline: a 256-carrier n=4 m=4 grouped pair
- *      carries two concurrent streams with distinct sids, both echo-verified.
- *      fec_groups_per_flow=16 splits the 32 groups into two 16-group flows.
+ *      carries two sequential streams with distinct sids, both echo-verified.
+ *      0.7.0 admits one FEC flow that owns all 32 groups per session.
  *   2. multi-port MAPPORT: slot 0 public :19001 routes to :15210 and slot 1
  *      public :19002 to :15211, backed by targets with distinct response
- *      signatures.  Concurrent clients on both ports must see their own
- *      target's signature, so a swapped slot cannot pass.
+ *      signatures.  Each client must see its own target's signature, so a
+ *      swapped slot cannot pass.  The two slots are exercised sequentially:
+ *      0.7.0 admits one FEC flow per session, so a second concurrent stream
+ *      is refused by design.
  *   3. SC-LDPC GF(16) BITPLANE64 uplink: an n=8 m=24, block=128 L=16 pair
  *      (8 groups of 32 shares) carries one byte-exact roundtrip through the
  *      production TBT_SCLC_MAP_BITPLANE64 encoder and decoder.
@@ -780,8 +782,7 @@ static void delete_tunnel(unsigned int id)
 }
 
 /* The per-stream snapshot lives in /proc/net/tbtun/stats, one
- * "tunnel N stream sid=..." line per live/tombstoned stream.  Two ends times
- * two concurrent streams is four. */
+ * "tunnel N stream sid=..." line per live/tombstoned stream. */
 static int count_stream_rows(void)
 {
     static char buf[4u * 1024u * 1024u];
@@ -795,21 +796,6 @@ static int count_stream_rows(void)
          line = strtok_r(NULL, "\n", &save))
         if (strstr(line, "stream sid="))
             n++;
-    return n;
-}
-
-static int wait_stream_rows(int want, int timeout_ms)
-{
-    long long deadline = now_ms() + timeout_ms;
-    int n = -1;
-
-    while (now_ms() < deadline)
-    {
-        n = count_stream_rows();
-        if (n >= want)
-            return n;
-        msleep(100);
-    }
     return n;
 }
 
@@ -1099,15 +1085,16 @@ int main(void)
     fflush(stdout);
 
     {
-        pid_t kids[2];
         int active_rows = -1;
 
         for (i = 0; i < 2; i++)
         {
-            kids[i] = fork();
-            if (kids[i] < 0)
+            pid_t kid = fork();
+            int status = 0;
+
+            if (kid < 0)
                 verdict_fail("multistream: fork: %s", strerror(errno));
-            if (!kids[i])
+            if (!kid)
             {
                 int cfd = connect_client();
                 char cwhy[256] = "";
@@ -1129,36 +1116,24 @@ int main(void)
                 _exit(0);
             }
             msleep(200);
-            if (!i)
-            {
-                active_rows = count_stream_rows();
-                printf("QEMU_E2E_STATE multistream rows=%d\n", active_rows);
-                fflush(stdout);
-            }
-            else
-            {
-                active_rows = wait_stream_rows(2, 2000);
-                printf("QEMU_E2E_STATE multistream rows=%d\n", active_rows);
-                fflush(stdout);
-            }
-        }
-        for (i = 0; i < 2; i++)
-        {
-            int status = 0;
-
-            if (waitpid(kids[i], &status, 0) != kids[i] ||
+            active_rows = count_stream_rows();
+            printf("QEMU_E2E_STATE multistream rows=%d\n", active_rows);
+            fflush(stdout);
+            if (waitpid(kid, &status, 0) != kid ||
                 !WIFEXITED(status) || WEXITSTATUS(status))
-                verdict_fail("RLNC concurrent stream %d failed", i);
+                verdict_fail("RLNC stream %d failed", i);
+            /* One FEC flow per session: the next stream may start only
+             * after this one's flow is gone. */
+            if (wait_idle(IDLE_TIMEOUT_MS))
+                verdict_fail("grouped stream %d did not release its flow", i);
         }
         if (active_rows < 0)
             printf("QEMU_E2E_NOTE stats file unavailable\n");
-        else if (active_rows < 2)
-            printf("QEMU_E2E_NOTE saw %d stream rows, expected 2\n",
+        else if (active_rows < 1)
+            printf("QEMU_E2E_NOTE saw %d stream rows, expected at least 1\n",
                    active_rows);
         printf("QEMU_E2E_MULTISTREAM 2 streams ok\n");
         fflush(stdout);
-        if (wait_idle(IDLE_TIMEOUT_MS))
-            verdict_fail("grouped session did not drain after close");
     }
 
     delete_tunnel(1);
@@ -1188,14 +1163,15 @@ int main(void)
     {
         static const uint16_t ports[2] = { MP_PUB0, MP_PUB1 };
         static const unsigned char sigs[2] = { 0x00, MP_SIG1 };
-        pid_t kids[2];
 
         for (i = 0; i < 2; i++)
         {
-            kids[i] = fork();
-            if (kids[i] < 0)
+            pid_t kid = fork();
+            int status = 0;
+
+            if (kid < 0)
                 verdict_fail("map client %d: fork: %s", i, strerror(errno));
-            if (!kids[i])
+            if (!kid)
             {
                 char cwhy[256] = "";
                 int cfd;
@@ -1219,14 +1195,14 @@ int main(void)
                 close_stream(cfd);
                 _exit(0);
             }
-        }
-        for (i = 0; i < 2; i++)
-        {
-            int status = 0;
-
-            if (waitpid(kids[i], &status, 0) != kids[i] ||
+            if (waitpid(kid, &status, 0) != kid ||
                 !WIFEXITED(status) || WEXITSTATUS(status))
                 verdict_fail("map stream on port %u failed", ports[i]);
+            /* One FEC flow per session: the next slot may connect only after
+             * the previous stream's flow is gone. */
+            if (wait_idle(IDLE_TIMEOUT_MS))
+                verdict_fail("map stream on port %u did not release its flow",
+                             ports[i]);
         }
         printf("QEMU_E2E_MAPPORT slot=0 port=%u target=%u sig=00 ok\n",
                MP_PUB0, MP_TGT0);
