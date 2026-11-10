@@ -2887,10 +2887,27 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
                           ? tx->peer_expected - tx->peer_received
                           : 0;
         so.supers_win = (tx->peer_flags & TBT_FEC_FBK_F_P_VALID) ? 8 : 0;
-        so.p_valid = tx->peer_est_valid &&
-                     (tx->peer_flags & TBT_FEC_FBK_F_P_VALID) != 0;
-        so.pause_idle = !tx->peer_est_valid ||
-                        now - tx->peer_est_ns > 500000000ULL;
+        /* If the peer FBK path is not delivering, the sender's own NACK
+         * rate is still a live loss estimate. Use it instead of idling the
+         * control law forever at the initial 50% shape. */
+        {
+            bool r_ok = r_valid && tx->data_pkts_sent;
+
+            so.p_valid = (tx->peer_est_valid &&
+                          (tx->peer_flags & TBT_FEC_FBK_F_P_VALID) != 0) ||
+                         r_ok;
+            so.pause_idle =
+                (!tx->peer_est_valid && !r_ok) ||
+                (tx->peer_est_valid &&
+                 now - tx->peer_est_ns > 500000000ULL);
+            if (!tx->peer_est_valid && r_ok)
+            {
+                so.p_ppm = r_ppm;
+                so.p_ewma_ppm = r_ppm;
+                so.p_win_ppm = r_ppm;
+                so.p_fast_ppm = 0;
+            }
+        }
         so.burst = so.p_fast_ppm && so.p_fast_ppm > so.p_ppm &&
                    so.p_fast_ppm > TBT_FEC_ADAPT_SCLC_BURST_PPM &&
                    so.p_fast_ppm >
