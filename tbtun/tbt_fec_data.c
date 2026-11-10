@@ -571,6 +571,28 @@ static u16 tbt_fec_replay_usable(struct tbt_session *sess, u8 *usable);
 static u16 tbt_fec_replay_pick(struct tbt_session *sess, const u8 *usable,
                                const u32 *pace);
 
+/* Bytes this carrier still holds in its TCP send queue. The repair flush
+ * appends to that FIFO, so this is the wire delay a replay pays there. A
+ * hint only: the socket may change before the write, and the write's own
+ * wspace check still decides. */
+static u32 tbt_fec_car_backlog(struct tbt_session *sess, u16 index)
+{
+    struct tbt_carrier *c = tbt_carrier_get(sess, (u8)index);
+    struct sock *sk;
+    u32 queued = 0;
+
+    if (!c)
+        return 0;
+    sk = tbt_carrier_sk_get(c);
+    if (sk)
+    {
+        queued = (u32)READ_ONCE(sk->sk_wmem_queued);
+        tbt_carrier_sk_put(sk);
+    }
+    tbt_carrier_put(c);
+    return queued;
+}
+
 /* Write one replay record. The carrier is not part of the record's identity:
  * start at the emptiest usable queue, then rotate so one full socket cannot
  * hold the repair. `usable` is a per-flush snapshot; every candidate is
@@ -1026,10 +1048,15 @@ static int tbt_fec_out_flush(struct tbt_session *sess, u32 *written)
         u32 bytes, limit;
         bool over;
 
-        /* No carrier owns a queue any more: a repair pass spreads by the
-         * bytes written in this pass alone. */
+        /* Start from each carrier's TCP send backlog. A repair is appended
+         * to that FIFO, so the bytes already waiting are the delay it pays
+         * before it reaches the wire. The replay queue reads 0 while the
+         * record sits behind megabytes of DATA in one socket: the field run
+         * saw fec_nack_repair_max_ns 120.8 s with fec_replay_queued 0. Pick
+         * the least-loaded usable carrier, then spread this pass's writes on
+         * top of it. */
         for (i = 0; i < sess->n_car; i++)
-            pace[i] = 0;
+            pace[i] = usable[i] ? tbt_fec_car_backlog(sess, i) : 0;
         spin_lock(&sess->fec_out_lock);
         bytes = sess->fec_replay_bytes;
         spin_unlock(&sess->fec_out_lock);
@@ -6307,6 +6334,22 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
                     u64 cur = READ_ONCE(tx->cur_block);
                     u16 rk = tbt_fec_replay_k(tx->replay);
 
+                    /* A probe for a block this side has not built yet is not
+                     * a storage miss: the receiver is at the packet frontier
+                     * waiting for application bytes, and the block will
+                     * exist when they arrive. Counting it as
+                     * never_stored made a 200 s application stall look like a
+                     * replay-ring defect (field: +124 on a 1 GiB rerun). Do
+                     * not answer it (a marker would falsely close a future
+                     * block); the receiver retries on its probe cadence. */
+                    if (h.block_id > cur)
+                    {
+                        atomic64_inc(&sess->fec_nack_req_invalid);
+                        if (debug >= 2)
+                            pr_info("tbtun: fec NACK ahead block=%llu group=%u share=%u cur=%llu\n",
+                                    h.block_id, g, s, cur);
+                        continue;
+                    }
                     /* -ESTALE means "this block is not resident". A block
                      * the sender never built reads the same as one the ring
                      * has wrapped past; counting both as evictions makes a

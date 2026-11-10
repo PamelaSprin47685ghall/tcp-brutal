@@ -1370,11 +1370,32 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                             slow++;
                         tbt_carrier_put(c);
                     }
-                    seq_printf(m, "tunnel %llu c12 fec_outq fifo=%u/%u "
-                                  "rot=%u slow=%u\n", id,
-                               atomic_read(&s->fec_outq_queued),
-                               atomic_read(&s->fec_outq_bytes),
-                               atomic_read(&s->async_rot), slow);
+                    {
+                        struct tbt_fec_tx *tx;
+                        u32 ring = 0, queued = 0;
+
+                        /* The source ring is what `tx_paused` reflects and
+                         * what the application's window sees. A freeze with
+                         * a non-empty ring and a closed application window
+                         * is a capture resume problem; an empty ring is an
+                         * application or link problem. */
+                        rcu_read_lock();
+                        tx = rcu_dereference(s->fec_tx);
+                        if (tx)
+                        {
+                            ring = READ_ONCE(tx->ring_size);
+                            spin_lock(&tx->lock);
+                            queued = tx->head - tx->tail;
+                            spin_unlock(&tx->lock);
+                        }
+                        rcu_read_unlock();
+                        seq_printf(m, "tunnel %llu c12 fec_outq fifo=%u/%u "
+                                      "rot=%u slow=%u txring=%u/%u\n", id,
+                                   atomic_read(&s->fec_outq_queued),
+                                   atomic_read(&s->fec_outq_bytes),
+                                   atomic_read(&s->async_rot), slow, queued,
+                                   ring);
+                    }
                 }
                 /* c13: the adaptive control surface. The shape is the one in
                  * force (updated by the data plane on every epoch), and the

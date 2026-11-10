@@ -144,15 +144,15 @@ static void tbt_pub_capture_body(struct tbt_stream *st)
     might_sleep();
     if (!sk)
         return;
-    /* The session queue is full: tbt_tx_submit() left the remaining bytes in
-     * this socket's receive queue, so TCP advertises a closed window and the
-     * application's send() is blocked in the kernel.  Re-entering
-     * tcp_read_sock() cannot take a byte; it only contends for the socket
-     * lock on every sk_data_ready.  The pump clears tx_paused and schedules
-     * this work once the queue is back below half (tbt_tx_pump), so skipping
-     * here never loses the wake. */
-    if (READ_ONCE(st->tx_paused))
-        return;
+    /* A paused capture is not a reason to skip this wake. The pump clears
+     * tx_paused and schedules this work, but that resume can be missed: the
+     * ring may never fall to half while the application's window is shut, so
+     * no new submit arms the pump, and the pump is not otherwise woken. The
+     * 1 GiB field run froze for 200 s while the application was down to one
+     * 2 KB zero-window probe per RTO and no resume was in sight. Reading
+     * while paused is bounded: the actor returns 0 once
+     * tbt_fec_tx_submit() cannot take a byte, and tcp_read_sock() stops on
+     * that return, so the attempt costs one socket lock and no copy. */
     read_lock_bh(&sk->sk_callback_lock);
     if (sk->sk_user_data != st)
     {

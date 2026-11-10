@@ -117,6 +117,24 @@ window are sized for the whole tunnel.
   far loopback reach `rwnd_limited` with BBR at 22 kbps, after which the
   application delivered 2 KB per RTO and every block was cut at one share.
   `tbt_sock.c` already documented the half contract; the pump now honours it.
+- A paused capture no longer drops the socket's data-ready wake. The pump's
+  resume was the only path back, and it can be missed while the ring never
+  falls to its resume mark, so the application's window stayed shut and the
+  stream froze for 200 s. The read attempt is
+  bounded: the actor returns 0 when the ring takes nothing and
+  `tcp_read_sock()` stops on that return.
+- A NACK probe for a super-block this side has not built yet is counted as
+  `fec_nack_req_invalid`, not as `fec_replay_miss_never_stored`. The receiver
+  at the packet frontier probes the next block while the application is
+  stalled; the block does not exist yet and will when bytes arrive. Counting
+  it as a storage miss made a 200 s application stall look like a replay-ring
+  defect (+124 on the 1 GiB rerun); the probe gets no answer and retries.
+- A NACK replay starts on the usable carrier with the smallest TCP send
+  backlog, not on the first empty per-pass counter. The repair is appended to
+  that socket's FIFO, so a carrier holding megabytes of DATA delays it even
+  though `fec_replay_queued` reads 0. The field run measured
+  `fec_nack_repair_max_ns` 120.8 s with an empty replay queue; the same
+  frontier block then waited on carrier TCP retransmission.
 
 ### Tests
 
