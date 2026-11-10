@@ -738,6 +738,13 @@ void tbt_fec_replay_reset(struct tbt_fec_replay *r);
  * 4 when low_mem). Runs in process context and frees overflow. */
 void tbt_fec_replay_ack(struct tbt_fec_replay *r, u64 frontier, bool low_mem,
                         tbt_fec_spinlock_t *lock);
+/* Count resident planes at or above the ACK floor. */
+u32 tbt_fec_replay_unacked(struct tbt_fec_replay *r, tbt_fec_spinlock_t *lock);
+/* Reclaim planes under memory pressure or on a stream reset. keep_active
+ * keeps the newest 8 unacknowledged planes; otherwise all active planes are
+ * freed. Up to keep_hot free planes remain for reuse. */
+void tbt_fec_replay_shrink(struct tbt_fec_replay *r, bool keep_active,
+                           u32 keep_hot, tbt_fec_spinlock_t *lock);
 
 /* NACK pacing. The first NACK for a block goes out once the gap has been
  * visible for one round trip (the carrier TCP still holds the share and the

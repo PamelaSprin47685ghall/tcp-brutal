@@ -37,14 +37,24 @@ and moves independently of the module version.
 - The RX arena has 66 logical slots but no eager block planes. A slot takes
   its `(n+m)*S` buffer on the first valid share and returns it when the
   super-block is delivered or the slot is reused; the hot pool holds at most
-  eight blocks (16 MiB at 2 MiB/block), and memory pressure stops new
-  buffers below the 180 MiB floor. A receive-light side commits only its
+  two blocks (4 MiB at 2 MiB/block), and memory pressure stops new
+  buffers only below the hard floor. A receive-light side commits only its
   live reassembly blocks.
 - The session output FIFO keeps 4096 queued records (8192 pointer slots)
   and its byte mark rises to 64 MiB for the 64-block window; records stay
   per-share allocations, not a static byte array. A slow carrier is evicted
   after 15 s of frozen `snd_una` (was 8 s), so 310–400 ms RTT jitter does
   not start a replacement storm.
+- A FEC stream switch no longer clears `c->up` on the persistent carriers.
+  The legacy ARQ OPEN completion owned that flag; in FEC mode clearing it
+  stalled all 256 carriers and the next stream sat at 0 B until timeout.
+- The memory floor no longer blocks a new stream at 0 B. Below 180 MiB the
+  packetizer first shrinks the replay pool (free hot/ACKed planes, keep the
+  newest eight unacked) and keeps opening blocks; it pauses only below
+  80 MiB with two or more active blocks. A new stream is refused below
+  64 MiB. RX and replay resets keep at most two hot planes and free the
+  rest immediately; flow abort/detach calls both resets before the delayed
+  flow_put, and clears stale `req_block`/NACK state for the next sid.
 
 ### Tests
 

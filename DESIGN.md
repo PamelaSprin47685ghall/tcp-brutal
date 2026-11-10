@@ -898,10 +898,11 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
   0.6.0 mux (`0x1009`) lifted that restriction for a while; 0.7.0 restores it (§3.1.2).
   On the far side an OPEN for an unknown sid adopts that stream; DATA, FIN or RST
   for an unknown sid is dropped, because only OPEN may create a stream. OPEN is sent once
-  per carrier for each stream. A FEC share is sent on a carrier only after this stream's
-  OPEN has been written on it (`c->up`); a share that arrives before the far's stream
-  exists is dropped by this rule (`bind_drop_no_stream`) and is never NACKed, so the
-  sender waits instead of consuming it. A late OPEN for a stream that is already closing is
+  per carrier for each stream. In FEC mode `c->up` names the carrier handshake, not a
+  per-stream OPEN: the persistent carrier stays up across a stream switch, and the
+  OPEN binds the new sid in parallel. A non-FEC share still waits for its OPEN to be
+  written; a FEC share that arrives before the far's stream exists is dropped by the
+  far binding rule (`bind_drop_no_stream`) and is never NACKed. A late OPEN for a stream that is already closing is
   dropped. The HELLO gate is stronger than C2's OPEN gate: a port-reusing or hostile
   connection cannot name a stream at all without the session nonce. On the far side the
   nonce is pinned by `nonce=`, or adopted from the first HELLO that passes the source
@@ -1414,16 +1415,17 @@ The replay ring keeps 66 logical slots and an 8-block hot pool inside
 `TBT_FEC_REPLAY_BUDGET` (20 MiB static); a block's record plane is allocated on its
 first store and released when the ACK passes it. The RX arena keeps 66 logical slots,
 allocates each `(n+m)*S` block buffer on its first share, and returns it at delivery;
-the hot pool holds at most eight blocks (16 MiB at 2 MiB/block). The packetizer source
+the hot pool holds at most two blocks (4 MiB at 2 MiB/block). The packetizer source
 ring is capped at 16 MiB (the 64-block flight window lives in the lazy replay
 planes, not in the unencoded FIFO); output queues keep 4096
 records under a 64 MiB byte mark; credit is 64 blocks (8192 packets), and both parent
 windows are 64 MiB. An eager 66-slot replay plane plus an eager 66-slot RX arena would
 be about 139 MiB + 132 MiB; the lazy form avoids that, and RX pages are committed only
 while blocks are live.
-The packetizer stops opening new blocks when `tbt_mem_avail_kb()` falls below
-`TBT_FEC_MEM_PAUSE_KB` (180 MiB) and re-arms in 2 s; a new stream is refused below
-`TBT_FEC_MEM_REFUSE_KB` (100 MiB). The far host froze in direct reclaim at 09:59 on
+Below `TBT_FEC_MEM_PAUSE_KB` (180 MiB) the packetizer shrinks the replay pool and
+keeps opening blocks; it pauses only below `TBT_FEC_MEM_HARD_KB` (80 MiB) with two
+or more active blocks, and refuses a new stream below `TBT_FEC_MEM_REFUSE_KB`
+(64 MiB). The far host froze in direct reclaim at 09:59 on
 2026-11-10 with 0.7.0's eager replay/arena and unlocked socket buffers at their old
 defaults; 0.7.2 keeps the unlocked windows and removes the eager planes instead.
 

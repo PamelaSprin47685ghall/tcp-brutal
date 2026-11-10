@@ -891,6 +891,11 @@ static struct tbt_stream *tbt_stream_get_created(struct tbt_session *sess,
     if (!alloc)
         return NULL;
 
+    /* A finished 1 GiB stream can leave its lazy replay/RX planes resident
+     * and hold MemAvailable just under the old 180 MiB floor. Release them
+     * before judging the new stream. */
+    if (sess->fec)
+        tbt_fec_mem_shrink(sess);
     /* Below the hard floor a new stream would only feed the direct-reclaim
      * path that froze the 955 MB far host. Refuse the connection instead of
      * letting the OOM killer decide which process dies. */

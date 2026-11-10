@@ -1103,14 +1103,16 @@ struct tbt_fec_out
  * freed on dequeue, not held in a static byte array. */
 #define TBT_FEC_OUTQ_FIFO_SIZE 8192u
 
-/* Memory floor for the FEC data plane, in KiB as returned by
- * tbt_mem_avail_kb(). Below TBT_FEC_MEM_PAUSE_KB the packetizer stops
- * opening new blocks and re-arms in 2 s; below TBT_FEC_MEM_REFUSE_KB a new
- * stream is refused instead of letting the host reach the OOM killer. The
- * 955 MB far host froze in direct reclaim at 09:59 on 2026-11-10 with
- * journald already reporting memory pressure. */
+/* Memory floors for the FEC data plane, in KiB as returned by
+ * tbt_mem_avail_kb(). Below TBT_FEC_MEM_PAUSE_KB the packetizer shrinks the
+ * replay hot pool and keeps the newest eight unacked blocks but still opens
+ * new blocks; below TBT_FEC_MEM_HARD_KB it pauses only when at least two
+ * blocks are active; below TBT_FEC_MEM_REFUSE_KB a new stream is refused.
+ * The hard pause at 180 MiB deadlocked a new stream at 0 B because the idle
+ * pools themselves held far just under the floor. */
 #define TBT_FEC_MEM_PAUSE_KB (180L * 1024L)
-#define TBT_FEC_MEM_REFUSE_KB (100L * 1024L)
+#define TBT_FEC_MEM_HARD_KB (80L * 1024L)
+#define TBT_FEC_MEM_REFUSE_KB (64L * 1024L)
 long tbt_mem_avail_kb(void);
 
 /* Session-wide bound on DATA records. One record per carrier would be 256;
@@ -2196,6 +2198,10 @@ int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp);
 /* FEC v6 data plane (tbt_fec_data.c). */
 int tbt_fec_data_init(struct tbt_session *sess);
 void tbt_fec_data_free(struct tbt_session *sess);
+/* Release a finished stream's lazy FEC planes before a new accept. */
+void tbt_fec_mem_shrink(struct tbt_session *sess);
+/* Free RX block planes on a stream reset (reset) or only the idle pool. */
+void tbt_fec_rx_shrink(struct tbt_fec_rx *rx, bool reset);
 /* Module lifecycle for the workqueue that frees FEC flows. tbtun_exit() must
  * call the exit half after tbt_tunnel_shutdown() and before the RCU
  * barriers: a pending free would otherwise run after the text is unmapped. */

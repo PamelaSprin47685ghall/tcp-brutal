@@ -1004,17 +1004,90 @@ void tbt_fec_replay_reset_locked(struct tbt_fec_replay *r, u8 **drop,
     *ndrop = n;
 }
 
-/* Host-test / teardown form: no lock is held by the caller. */
-void tbt_fec_replay_reset(struct tbt_fec_replay *r)
+
+/* Number of resident block planes the peer has not acknowledged. The
+ * packetizer uses this to keep opening blocks under the 180 MiB floor. */
+u32 tbt_fec_replay_unacked(struct tbt_fec_replay *r, tbt_fec_spinlock_t *lock)
 {
-    u8 *drop[TBT_FEC_REPLAY_K_MAX + TBT_FEC_REPLAY_HOT_MAX];
     u32 i, n = 0;
 
-    tbt_fec_replay_reset_locked(r, drop, &n,
-                                (u32)(sizeof(drop) / sizeof(drop[0])));
+    if (!r)
+        return 0;
+    tbt_fec_lock(lock);
+    for (i = 0; i < r->k; i++)
+        if (r->blk_rec[i] && r->block_start[i] != ~0ULL &&
+            r->block_start[i] >= r->ack_floor)
+            n++;
+    tbt_fec_unlock(lock);
+    return n;
+}
+
+/* Low-memory and stream-reset reclaim. Free every hot plane; when
+ * keep_active is false (stream reset) free every active plane and keep only
+ * keep_hot planes for reuse. When keep_active is true, ACKed planes are
+ * freed and the newest 8 unacknowledged planes are kept (older ones are
+ * evicted only under memory pressure). */
+void tbt_fec_replay_shrink(struct tbt_fec_replay *r, bool keep_active,
+                           u32 keep_hot, tbt_fec_spinlock_t *lock)
+{
+    u8 *drop[TBT_FEC_REPLAY_K_MAX + TBT_FEC_REPLAY_HOT_MAX];
+    u32 i, n = 0, unacked = 0;
+    u64 max_id = 0, threshold = 0;
+
+    if (!r)
+        return;
+    if (keep_hot > TBT_FEC_REPLAY_HOT_MAX)
+        keep_hot = TBT_FEC_REPLAY_HOT_MAX;
+    tbt_fec_lock(lock);
+    for (i = 0; i < r->hot_n; i++)
+        drop[n++] = r->hot[i];
+    r->hot_n = 0;
+    for (i = 0; i < r->k; i++)
+    {
+        if (!r->blk_rec[i] || r->block_start[i] == ~0ULL)
+            continue;
+        if (r->block_start[i] >= r->ack_floor)
+        {
+            unacked++;
+            if (r->block_start[i] > max_id)
+                max_id = r->block_start[i];
+        }
+    }
+    if (keep_active && unacked > TBT_FEC_REPLAY_HOT_MAX)
+        threshold = max_id - (TBT_FEC_REPLAY_HOT_MAX - 1);
+    for (i = 0; i < r->k; i++)
+    {
+        bool keep = false;
+
+        if (!r->blk_rec[i] || r->block_start[i] == ~0ULL)
+            continue;
+        if (keep_active)
+            keep = r->block_start[i] >= r->ack_floor &&
+                   r->block_start[i] >= threshold;
+        if (keep)
+            continue;
+        drop[n++] = r->blk_rec[i];
+        r->blk_rec[i] = NULL;
+        r->block_start[i] = ~0ULL;
+    }
+    while (n > 0 && r->hot_n < keep_hot)
+        r->hot[r->hot_n++] = drop[--n];
+    tbt_fec_unlock(lock);
     for (i = 0; i < n; i++)
         tbt_fec_free(drop[i]);
 }
+
+#ifndef __KERNEL__
+/* Host-test form: no lock is held by the caller. The kernel resets through
+ * tbt_fec_replay_reset_locked() or tbt_fec_replay_shrink() with the TX
+ * replay spinlock. */
+void tbt_fec_replay_reset(struct tbt_fec_replay *r)
+{
+    tbt_fec_spinlock_t host_lock = 0;
+
+    tbt_fec_replay_shrink(r, false, 2, &host_lock);
+}
+#endif
 
 /* Release block planes the peer has acknowledged. Blocks below frontier are
  * delivered; keeping their records would only hold memory. The hot pool is

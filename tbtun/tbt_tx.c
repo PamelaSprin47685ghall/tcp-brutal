@@ -373,11 +373,12 @@ static void tbt_tx_announce_carrier(struct tbt_session *sess,
     tbt_put_le16(body + TBT_OPEN_TARGET_PORT,
                  READ_ONCE(st->near) ? READ_ONCE(st->target_port) : 0);
     WRITE_ONCE(st->tx_open_sent, true);
-    /* `up` means "the OPEN is on the wire": the pump sets it in the OPEN
-     * completion case. The FEC data path writes to the carrier directly, so
-     * a queued-but-unwritten OPEN must not admit data here. A failed enqueue
-     * also leaves it clear; up_rescue re-announces. */
-    atomic_set(&c->up, 0);
+    /* `up` means "the OPEN is on the wire" for the legacy ARQ path. FEC
+     * carriers are persistent and stream switches ride a new sid/control
+     * frame; clearing `up` here froze all 256 carriers until an OPEN that
+     * the FEC drain never needed was written. */
+    if (!sess->fec)
+        atomic_set(&c->up, 0);
     (void)tbt_tx_control_pinned(sess, st, c->index, TBT_F_OPEN, st->sid, 0,
                                 body, sizeof(body), true, gfp);
 }
@@ -3356,9 +3357,12 @@ ctl_fail:
                          c->state);
                 if (nsnap)
                 {
-                    /* The OPEN goes in front of every queued DATA frame, and
-                     * `up` stays clear until it is written. */
-                    atomic_set(&c->up, 0);
+                    /* The OPEN goes in front of every queued DATA frame.
+                     * Legacy ARQ keeps `up` clear until it is written; FEC
+                     * carriers stay up because their data path is sid-keyed
+                     * and must not stall on the announce. */
+                    if (!sess->fec)
+                        atomic_set(&c->up, 0);
                     for (i = 0; i < nsnap; i++)
                         tbt_tx_announce_carrier(sess, snap[i], c,
                                                 GFP_KERNEL);

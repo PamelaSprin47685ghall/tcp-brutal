@@ -130,9 +130,9 @@ static void tbt_fec_shape_wire_norm(struct tbt_fec_shape *sh)
  * allocates its (n+m)*S block buffer on the first valid share and returns
  * it at delivery, so a receive-light side commits only its live blocks. */
 #define TBT_FEC_RX_SLOTS 66u
-/* Free block buffers kept for reuse: at most eight hot blocks, 16 MiB at
- * the 2 MiB 1x256 block size. Active blocks hold their own until delivery. */
-#define TBT_FEC_RX_POOL_BLOCKS 8u
+/* Free block buffers kept for reuse: at most two hot blocks, 4 MiB at the
+ * 2 MiB 1x256 block size. Active blocks hold their own until delivery. */
+#define TBT_FEC_RX_POOL_BLOCKS 2u
 /* One FEC drain run sends at most this many batches before yielding to the
  * packetizer and the other carriers. A full 256-carrier burst is served in
  * four such runs, each of which re-arms with no delay while fresh bits
@@ -1945,17 +1945,25 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
     for (;;)
     {
         u32 got;
+        long mem;
+        u32 unacked;
 
-        /* The 955 MB far host froze in direct reclaim during a 1 GiB
-         * transfer (09:59, journald had already reported memory pressure).
-         * Stop opening new blocks while the system is short of memory; the
-         * packetizer keeps its ring, and a 2 s re-arm resumes when the
-         * repair backlog has drained. */
-        if (tbt_mem_avail_kb() < TBT_FEC_MEM_PAUSE_KB)
+        /* Below 180 MiB first shrink the replay plane instead of stopping:
+         * free hot/ACKed planes and keep only the newest eight unacked
+         * blocks. Only below 90 MiB with at least two active blocks is it
+         * worth pausing. A new stream at 120-175 MiB must still open its
+         * first block, or it deadlocks at 0 B until the application times
+         * out. */
+        mem = tbt_mem_avail_kb();
+        unacked = tx->replay ?
+                  tbt_fec_replay_unacked(tx->replay, &tx->replay_lock) : 0;
+        if (mem < TBT_FEC_MEM_PAUSE_KB && tx->replay)
+            tbt_fec_replay_shrink(tx->replay, true, 0, &tx->replay_lock);
+        if (mem < TBT_FEC_MEM_HARD_KB && unacked >= 2)
         {
             tbt_session_arm(sess, TBT_SW_FEC_TX, msecs_to_jiffies(2000));
-            pr_info_ratelimited("tbtun: memory low (%ld KB): FEC TX paused for 2 s\n",
-                                tbt_mem_avail_kb());
+            pr_info_ratelimited("tbtun: memory hard low (%ld KB): FEC TX paused for 2 s\n",
+                                mem);
             break;
         }
         if ((tx->switch_state == TBT_FEC_SW_CFG_SENT ||
@@ -2396,6 +2404,30 @@ static void tbt_fec_tx_clear_data_queues(struct tbt_session *sess)
         tbt_fec_out_free(sess, o);
     spin_unlock(&sess->fec_out_lock);
     tbt_fec_out_kick(sess);
+}
+
+/* Release a finished stream's FEC planes before a new accept is judged
+ * against the memory floor. Keeps two planes per ring and drops every queued
+ * record from the old sid. Runs in process context. */
+void tbt_fec_mem_shrink(struct tbt_session *sess)
+{
+    struct tbt_fec_flow *f;
+
+    if (!sess)
+        return;
+    f = tbt_fec_primary_get(sess);
+    if (!f)
+        return;
+    if (f->tx)
+    {
+        if (READ_ONCE(f->tx->replay))
+            tbt_fec_replay_shrink(f->tx->replay, false, 2,
+                                  &f->tx->replay_lock);
+        tbt_fec_tx_clear_data_queues(sess);
+    }
+    if (f->rx)
+        tbt_fec_rx_shrink(f->rx, true);
+    tbt_fec_flow_put(f);
 }
 
 static bool tbt_fec_sess_sclc(const struct tbt_session *sess)
@@ -3078,6 +3110,8 @@ static void tbt_fec_rx_buf_prepare(struct tbt_fec_rx *rx)
     }
     spin_unlock_bh(&rx->lock);
     if (tbt_mem_avail_kb() < TBT_FEC_MEM_PAUSE_KB)
+        tbt_fec_rx_shrink(rx, false);
+    if (tbt_mem_avail_kb() < TBT_FEC_MEM_HARD_KB)
     {
         mutex_unlock(&rx->buf_alloc_lock);
         return;
@@ -3165,6 +3199,68 @@ static void tbt_fec_blk_reset(struct tbt_session *sess,
     memset(b->dpresent, 0, TBT_FEC_MAX_SHARES);
     memset(b->ppresent, 0, TBT_FEC_MAX_SHARES);
     memset(b->dlen, 0, TBT_FEC_MAX_SHARES * sizeof(u16));
+}
+
+/* Release block buffers on a stream reset or under memory pressure. reset
+ * frees every active and pooled plane except two; the low-memory form frees
+ * only the idle pool. It also clears the NACK request/stamp state so a new
+ * sid cannot inherit an old stream's req_block entries. */
+void tbt_fec_rx_shrink(struct tbt_fec_rx *rx, bool reset)
+{
+    u8 *free_list = NULL, *buf;
+    u32 i, total, keep;
+
+    if (!rx)
+        return;
+    total = (u32)rx->groups * rx->slots;
+    keep = reset ? 2 : 0;
+    spin_lock_bh(&rx->lock);
+    if (reset && rx->blk)
+    {
+        for (i = 0; i < total; i++)
+        {
+            struct tbt_fec_blk *b = &rx->blk[i];
+
+            if (!b->buf)
+                continue;
+            *(u8 **)b->buf = free_list;
+            free_list = b->buf;
+            b->buf = NULL;
+            b->data = NULL;
+            b->parity = NULL;
+            b->used = false;
+            b->ready = false;
+            b->decoding = false;
+            b->block_id = ~0ULL;
+        }
+        if (rx->req_block)
+            memset(rx->req_block, 0xff,
+                   (size_t)total * sizeof(*rx->req_block));
+        if (rx->req_ns)
+            memset(rx->req_ns, 0,
+                   (size_t)total * (rx->n + rx->m) * sizeof(*rx->req_ns));
+        if (rx->nack)
+            memset(rx->nack, 0, sizeof(*rx->nack));
+    }
+    while ((buf = tbt_fec_rx_buf_pop_locked(rx)) != NULL)
+    {
+        *(u8 **)buf = free_list;
+        free_list = buf;
+    }
+    while (keep > 0 && free_list)
+    {
+        buf = free_list;
+        free_list = *(u8 **)free_list;
+        tbt_fec_rx_buf_push_locked(rx, buf);
+        keep--;
+    }
+    spin_unlock_bh(&rx->lock);
+    while (free_list)
+    {
+        buf = free_list;
+        free_list = *(u8 **)free_list;
+        kvfree(buf);
+    }
 }
 
 /* Real length of this block, or 0 when the group has no packet in it. The
@@ -8125,7 +8221,12 @@ void tbt_fec_flow_abort(struct tbt_session *sess, struct tbt_fec_flow *f)
         spin_lock_bh(&f->rx->lock);
         WRITE_ONCE(f->rx->stopping, true);
         spin_unlock_bh(&f->rx->lock);
+        /* Release the RX block planes now, not after the RCU flow_put. */
+        tbt_fec_rx_shrink(f->rx, true);
     }
+    if (f->tx && READ_ONCE(f->tx->replay))
+        tbt_fec_replay_shrink(f->tx->replay, false, 2,
+                              &f->tx->replay_lock);
     /* Purge after the flow is unreachable: a racing producer now refuses at
      * tbt_fec_out_push(), and an in-flight flush owns a record reference. */
     tbt_fec_flow_purge(sess, f);
@@ -8174,7 +8275,13 @@ void tbt_fec_flow_detach(struct tbt_stream *st)
         spin_lock_bh(&f->rx->lock);
         WRITE_ONCE(f->rx->stopping, true);
         spin_unlock_bh(&f->rx->lock);
+        /* Return every RX block plane to the kernel before the delayed
+         * flow_put; a new stream can start immediately after detach. */
+        tbt_fec_rx_shrink(f->rx, true);
     }
+    if (f->tx && READ_ONCE(f->tx->replay))
+        tbt_fec_replay_shrink(f->tx->replay, false, 2,
+                              &f->tx->replay_lock);
     tbt_fec_flow_purge(sess, f);
     if (unlinked)
         tbt_fec_flow_put(f); /* table reference, only if we took it out */
