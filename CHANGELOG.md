@@ -25,7 +25,9 @@ and moves independently of the module version.
   35 MiB/s; 64 blocks cover the 51.2 MB BDP of 128 MB/s. The parent socket
   asks for 32 MiB (64 MiB after the kernel's doubling) and the packetizer's
   unencoded capture FIFO is capped at 16 MiB; the 64-block flight window
-  lives in the lazy replay planes, not in that FIFO.
+  lives in the lazy replay planes, not in that FIFO. `rx_reorder_bytes` and
+  `tx_window_bytes` now default to 64 MiB; a line that lowers the reorder
+  budget without naming a sender window clamps the sender window to it.
 - The TX replay ring is block-granular. It keeps K=66 descriptors but only
   allocates a block's record plane when its first record is stored; an ACK
   that passes the block returns the plane to an 8-block hot pool (4 below

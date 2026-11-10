@@ -1628,6 +1628,7 @@ static void test_ack_split(void)
 static void test_replay_window(void)
 {
     struct tbt_fec_replay *r;
+    tbt_fec_spinlock_t host_lock = 0;
     u32 slots, credit, blocks;
     u16 k;
     u64 b;
@@ -1667,9 +1668,9 @@ static void test_replay_window(void)
     ok_int(tbt_fec_replay_get(r, 4, 0, 0, buf, S), S,
            "replay window: the stalled block replays after the NACK delay");
 
-    /* The bound is exact: block 4 + K shares block 4's slot. The data plane
-     * never lets the sender get there; this is what the cap prevents, and
-     * what a NACK reply must not do to a live slot either. */
+    /* The bound is exact: block 4 + K shares block 4's slot after the peer
+     * ACKs block 4. The data plane never lets the sender get there. */
+    tbt_fec_replay_ack(r, 5, false, &host_lock);
     ok_int(tbt_fec_replay_store(r, 4 + k, 0, 0, src, S), 0,
            "replay window: one block past the cap is storable");
     ok_int(tbt_fec_replay_get(r, 4, 0, 0, buf, S), -ESTALE,

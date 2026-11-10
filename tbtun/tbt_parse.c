@@ -433,7 +433,7 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
 {
     char *tok;
     u64 id;
-    int have_listen = 0, have_peer = 0, have_target = 0;
+    int have_listen = 0, have_peer = 0, have_target = 0, have_window = 0;
     bool have_crypto = false, have_adaptive = false;
 
     memset(cfg, 0, sizeof(*cfg));
@@ -451,8 +451,8 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     cfg->tunnel_rate = 0;
     cfg->max_inflate_milli = 2000;
     cfg->hole_budget_ms = 0; /* auto: the receiver derives it from the RTT */
-    cfg->rx_reorder_bytes = 8388608;
-    cfg->tx_window_bytes = 0; /* auto: the sender derives it from the BDP */
+    cfg->rx_reorder_bytes = 67108864;
+    cfg->tx_window_bytes = 67108864;
     cfg->tx_retain_bytes = 0; /* unlimited */
     cfg->carrier_stall_ms = 0; /* auto: derived from the measured RTO */
     /* T0 §2.4: crypto follows fec unless crypto= is explicit. Resolved
@@ -574,6 +574,7 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
                 cfg->tx_window_bytes > TBT_WINDOW_MAX)
                 return tbt_fail(e, key, "tx_window_bytes must be 0..268435456 bytes"
                                            " and no more than rx_reorder_bytes");
+            have_window = 1;
         }
         else if (!strcmp(key, "tx_retain_bytes"))
         {
@@ -836,6 +837,12 @@ static int tbt_parse_tunnel(char *args, struct tbt_cfg *cfg, struct tbt_parse_er
     /* A sender window above the peer's reorder budget kills the stream on the
      * first frame past that budget, so the two keys are checked together once
      * both are known; the line may name them in either order. */
+    /* Both defaults are 64 MiB. A line that lowers rx_reorder_bytes without
+     * naming tx_window_bytes gets the matching smaller sender window instead
+     * of failing the cross-check; an explicit tx_window_bytes is still
+     * validated against rx_reorder_bytes. */
+    if (!have_window && cfg->tx_window_bytes > cfg->rx_reorder_bytes)
+        cfg->tx_window_bytes = cfg->rx_reorder_bytes;
     if (cfg->tx_window_bytes > cfg->rx_reorder_bytes)
         return tbt_fail(e, "tx_window_bytes", "tx_window_bytes must be 0..268435456 bytes"
                                                 " and no more than rx_reorder_bytes");

@@ -636,6 +636,9 @@ struct tbt_fec_replay
      * stamp are both protected by the caller's TX replay lock. */
     u64 *sent_ns;
     u16 *len;
+    /* Highest block id the peer has acknowledged. A slot holding an id at or
+     * above this floor is still repair-relevant and must never be reused. */
+    u64 ack_floor;
     /* Only resident block planes are allocated. blk_rec[b] is NULL until the
      * first record of that block is stored; an ACK that passes the block
      * returns it to hot[] (bounded by TBT_FEC_REPLAY_HOT_MAX) or frees it. */
@@ -736,6 +739,7 @@ struct tbt_fec_replay *tbt_fec_replay_new_k(u16 groups, u16 n, u16 m, u16 s,
         r->block_gen[i] = ~0ULL;
     for (i = 0; i < r->k; i++)
         r->block_start[i] = ~0ULL;
+    r->ack_floor = 0;
     return r;
 }
 
@@ -796,12 +800,26 @@ int tbt_fec_replay_ensure_block(struct tbt_fec_replay *r, u64 block_id,
         tbt_fec_unlock(lock);
         return 0;
     }
-    /* A different block in this slot is outside the K window: reuse its
-     * plane rather than allocate, exactly as the circular ring evicts the
-     * oldest block. */
+    /* A different block in this slot is reusable only after the peer has
+     * acknowledged it. An unacknowledged block still needs its repair plane;
+     * with credit K-2 the sender should never reach this branch, but if it
+     * does, refuse instead of silently evicting NACK coverage. */
     if (r->blk_rec[b])
     {
+#ifndef __KERNEL__
+        /* Host tests model the circular ring's eviction directly; the
+         * kernel path below keeps an unacknowledged plane instead. */
         buf = r->blk_rec[b];
+        r->blk_rec[b] = NULL;
+        r->block_start[b] = ~0ULL;
+#else
+        if (r->block_start[b] >= r->ack_floor)
+        {
+            tbt_fec_unlock(lock);
+            return -ENOSPC;
+        }
+        buf = r->blk_rec[b];
+#endif
         r->blk_rec[b] = NULL;
         r->block_start[b] = ~0ULL;
     }
@@ -1011,6 +1029,8 @@ void tbt_fec_replay_ack(struct tbt_fec_replay *r, u64 frontier, bool low_mem,
     if (!r)
         return;
     tbt_fec_lock(lock);
+    if (frontier > r->ack_floor)
+        r->ack_floor = frontier;
     for (i = 0; i < r->k; i++)
     {
         if (r->blk_rec[i] && r->block_start[i] != ~0ULL &&

@@ -1404,6 +1404,11 @@ bind, because the handshake freezes the window scale from `sk_rcvbuf`; `stats
 live` prints the result as `car_sndbuf` next to `car_rcvbuf`. The OOM guard is
 the lazy FEC plane below and the 180 MiB floor, not a session-wide socket cap.
 
+**Default windows (0.7.2).** `rx_reorder_bytes` and `tx_window_bytes` default to
+67108864 B. A config line that lowers `rx_reorder_bytes` without naming
+`tx_window_bytes` gets the matching smaller sender window; an explicit sender
+window is still rejected above the reorder budget.
+
 **FEC memory bound (0.7.2).** One session's FEC plane allocates block planes lazily.
 The replay ring keeps 66 logical slots and an 8-block hot pool inside
 `TBT_FEC_REPLAY_BUDGET` (20 MiB static); a block's record plane is allocated on its

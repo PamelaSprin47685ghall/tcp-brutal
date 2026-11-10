@@ -2962,6 +2962,7 @@ static void test_framing(void)
 static void test_replay(void)
 {
     struct tbt_fec_replay *r;
+    tbt_fec_spinlock_t host_lock = 0;
     u8 rec[96], out[96];
     u16 len = 80;
     u16 k;
@@ -2995,7 +2996,8 @@ static void test_replay(void)
     ok_int(tbt_fec_replay_store(r, 7, 0, 0, rec,
                                 TBT_FEC_HDR_LEN + 64 + 1), -EINVAL,
            "replay record too long");
-    /* A block K later reuses the slot: the old block is gone. */
+    /* A block K later reuses the slot only after the peer ACKs it. */
+    tbt_fec_replay_ack(r, 8, false, &host_lock);
     ok_int(tbt_fec_replay_store(r, 7 + k, 1, 5, rec, len), 0,
            "replay evicting store");
     ok(!tbt_fec_replay_has(r, 7, 1, 5), "replay evicted", NULL);
@@ -3024,6 +3026,7 @@ static void test_replay(void)
            NULL);
     ok_int(tbt_fec_replay_get(r, 0, 0, 1, out, sizeof(out)), -ENODATA,
            "resident block with an unstored share is -ENODATA");
+    tbt_fec_replay_ack(r, 1, false, &host_lock);
     ok_int(tbt_fec_replay_store(r, k, 0, 0, rec, len), 0,
            "store one past the window");
     ok(!tbt_fec_replay_has(r, 0, 0, 0), "oldest window block evicted", NULL);

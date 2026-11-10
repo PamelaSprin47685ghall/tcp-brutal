@@ -219,7 +219,7 @@ static void test_tunnel_nonce(void)
         " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
         " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-        " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+        " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
         " carrier_stall_ms=0"
         " portblock=0-0 nonce=00112233445566778899aabbccddeeff\n";
     char text[TBT_LINE_MAX];
@@ -237,7 +237,7 @@ static void test_tunnel_nonce(void)
               " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
               " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
               " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-              " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+              " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
               " carrier_stall_ms=0"
               " portblock=0-0 nonce=00000000000000000011223344556677\n");
 
@@ -253,7 +253,7 @@ static void test_tunnel_nonce(void)
               " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
               " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
               " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-              " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+              " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
               " carrier_stall_ms=0"
               " portblock=0-0 nonce=00112233445566778899aabbccddeeff\n");
 
@@ -310,21 +310,21 @@ static void test_crypto_cfg(void)
         " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
         " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-        " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+        " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
         " carrier_stall_ms=0 portblock=0-0\n";
     static const char *const canon_on =
         "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
         " n=4 m=1 fec=on adaptive=on mode=rlnc w=8 carriers=5 crypto=on crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
         " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-        " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+        " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
         " carrier_stall_ms=0 portblock=0-0\n";
     static const char *const canon_on_crypto_off =
         "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
         " n=4 m=1 fec=on adaptive=on mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
         " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-        " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+        " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
         " carrier_stall_ms=0 portblock=0-0\n";
     static const char *const key_hex =
         "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
@@ -366,7 +366,7 @@ static void test_crypto_cfg(void)
         strncat(want,
                 " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
                 " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-                " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+                " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
                 " carrier_stall_ms=0 portblock=0-0\n",
                 sizeof(want) - strlen(want) - 1);
         roundtrip("crypto_key set", text, want);
@@ -428,8 +428,8 @@ static void test_adaptive_cfg(void)
         " n=4 m=1 fec=on adaptive=off mode=rlnc w=8 carriers=5"
         " crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000"
         " drip_ms=1000 replay=8388608 tunnel_rate=0"
-        " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608"
-        " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0"
+        " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=67108864"
+        " tx_window_bytes=67108864 tx_retain_bytes=0 carrier_stall_ms=0"
         " portblock=0-0\n";
     char text[TBT_LINE_MAX];
     struct tbt_cmd cmd;
@@ -554,8 +554,8 @@ static void test_dev_cfg(void)
         " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000"
         " drip_ms=1000 replay=8388608 tunnel_rate=0"
-        " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608"
-        " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0"
+        " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=67108864"
+        " tx_window_bytes=67108864 tx_retain_bytes=0 carrier_stall_ms=0"
         " portblock=0-0";
     char text[TBT_LINE_MAX], want[TBT_LINE_MAX];
     struct tbt_cmd cmd;
@@ -597,7 +597,7 @@ static void test_map_cfg(void)
         " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
         " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-        " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+        " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
         " carrier_stall_ms=0"
         " portblock=0-0\n";
     char text[TBT_LINE_MAX], want[TBT_LINE_MAX * 2], list[160];
@@ -627,7 +627,7 @@ static void test_map_cfg(void)
               " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
               " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
               " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-              " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+              " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
               " carrier_stall_ms=0"
               " portblock=0-0\n");
     parse("tunnel 1 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
@@ -644,7 +644,7 @@ static void test_map_cfg(void)
               " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
               " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
               " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-              " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+              " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
               " carrier_stall_ms=0"
               " portblock=0-0\n");
 
@@ -658,7 +658,7 @@ static void test_map_cfg(void)
               " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
               " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
               " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
-              " rx_reorder_bytes=8388608 tx_window_bytes=0 tx_retain_bytes=0"
+              " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
               " carrier_stall_ms=0"
               " portblock=0-0\n");
 
@@ -1260,16 +1260,16 @@ int main(void)
         " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=1 profile=http-kal keepalive=5000"
         " drip_ms=1000 replay=8388608 tunnel_rate=0"
-        " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608"
-        " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0"
+        " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=67108864"
+        " tx_window_bytes=67108864 tx_retain_bytes=0 carrier_stall_ms=0"
         " portblock=0-0\n";
     static const char *const full_near =
         "tunnel 7 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443"
         " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
         " dup=2 profile=http-kal-drip keepalive=5000"
         " drip_ms=1000 replay=8388608 tunnel_rate=0"
-        " max_inflate=2.000 hole_budget_ms=500 rx_reorder_bytes=8388608"
-        " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=3000"
+        " max_inflate=2.000 hole_budget_ms=500 rx_reorder_bytes=67108864"
+        " tx_window_bytes=67108864 tx_retain_bytes=0 carrier_stall_ms=3000"
         " portblock=40000-40063"
         " srcaddrs=10.0.0.10,10.0.0.11\n";
     static const char *const full_far =
@@ -1277,8 +1277,8 @@ int main(void)
         " target=127.0.0.1:7000 n=2 m=0 fec=off adaptive=off mode=rlnc w=4 carriers=2"
         " crypto=off crypto_key=- dup=0 profile=raw keepalive=1000"
         " drip_ms=250 replay=0 tunnel_rate=1048576"
-        " max_inflate=1.500 hole_budget_ms=50 rx_reorder_bytes=8388608"
-        " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=3000"
+        " max_inflate=1.500 hole_budget_ms=50 rx_reorder_bytes=67108864"
+        " tx_window_bytes=67108864 tx_retain_bytes=0 carrier_stall_ms=3000"
         " portblock=0-0\n";
     /* A far peer= is an anchor: the renderer emits it when set and never
      * emits peer=0.0.0.0:0 (port 0 is not parseable). */
@@ -1288,7 +1288,7 @@ int main(void)
         " n=2 m=0 fec=off adaptive=off mode=rlnc w=4 carriers=2 crypto=off crypto_key=-"
         " dup=0 profile=raw keepalive=1000"
         " drip_ms=250 replay=0 tunnel_rate=1048576 max_inflate=1.500"
-        " hole_budget_ms=50 rx_reorder_bytes=8388608 tx_window_bytes=0"
+        " hole_budget_ms=50 rx_reorder_bytes=67108864 tx_window_bytes=67108864"
         " tx_retain_bytes=0 carrier_stall_ms=3000 portblock=0-0\n";
     struct tbt_cmd cmd;
     struct tbt_parse_error perr;
@@ -1552,8 +1552,8 @@ int main(void)
               " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
               " dup=1 profile=http-kal keepalive=5000"
               " drip_ms=1000 replay=8388608 tunnel_rate=0"
-              " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=8388608"
-              " tx_window_bytes=0 tx_retain_bytes=0 carrier_stall_ms=0"
+              " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=67108864"
+              " tx_window_bytes=67108864 tx_retain_bytes=0 carrier_stall_ms=0"
               " portblock=40000-44095\n");
 
     refuse("dup=4", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 dup=4", TBT_PARSE_EINVAL, "dup", NULL);
@@ -1636,7 +1636,7 @@ int main(void)
           " rx_reorder_bytes=4096 tx_retain_bytes=1024 carrier_stall_ms=250",
           &cmd, &perr);
     tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
-    ok(strstr(buf, " rx_reorder_bytes=4096 tx_window_bytes=0 tx_retain_bytes=1024"
+    ok(strstr(buf, " rx_reorder_bytes=4096 tx_window_bytes=4096 tx_retain_bytes=1024"
                     " carrier_stall_ms=250 ") != NULL,
        "C3 keys render canonically", buf);
     {
@@ -1650,16 +1650,16 @@ int main(void)
     parse("tunnel 4 role=near listen=10.0.0.1:1 peer=10.0.0.2:2", &cmd, &perr);
     tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
     ok(cmd.cfg.hole_budget_ms == 0 && cmd.cfg.carrier_stall_ms == 0 &&
-           cmd.cfg.rx_reorder_bytes == 8388608 && cmd.cfg.tx_window_bytes == 0,
+           cmd.cfg.rx_reorder_bytes == 67108864 && cmd.cfg.tx_window_bytes == 67108864,
        "C3 budgets default when omitted", NULL);
-    ok(strstr(buf, " hole_budget_ms=0 rx_reorder_bytes=8388608 tx_window_bytes=0"
+    ok(strstr(buf, " hole_budget_ms=0 rx_reorder_bytes=67108864 tx_window_bytes=67108864"
                     " tx_retain_bytes=0 carrier_stall_ms=0 ") != NULL,
        "C3 defaults render when omitted", buf);
     /* tx_window_bytes: 0 means auto and is the default; an explicit window
      * above the peer's reorder budget kills the stream, so both keys are
      * validated together once the whole line has been read. */
     parse("tunnel 5 role=near listen=10.0.0.1:1 peer=10.0.0.2:2", &cmd, &perr);
-    ok(cmd.cfg.tx_window_bytes == 0, "tx_window_bytes defaults to auto", NULL);
+    ok(cmd.cfg.tx_window_bytes == 67108864, "tx_window_bytes defaults to 64 MiB", NULL);
     parse("tunnel 5 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
           " rx_reorder_bytes=1048576 tx_window_bytes=524288",
           &cmd, &perr);
@@ -1692,7 +1692,7 @@ int main(void)
     ok(cmd.cfg.hole_budget_ms == 0 && cmd.cfg.carrier_stall_ms == 0,
        "auto budgets accept 0", NULL);
     tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
-    ok(strstr(buf, " hole_budget_ms=0 rx_reorder_bytes=8388608") != NULL &&
+    ok(strstr(buf, " hole_budget_ms=0 rx_reorder_bytes=67108864") != NULL &&
            strstr(buf, " carrier_stall_ms=0 ") != NULL,
        "auto budgets render as 0", buf);
     {
@@ -1738,7 +1738,7 @@ int main(void)
            " tx_window_bytes=4097 rx_reorder_bytes=4096",
            TBT_PARSE_EINVAL, "tx_window_bytes", "rx_reorder_bytes");
     refuse("tx_window_bytes above the default rx_reorder_bytes",
-           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 tx_window_bytes=8388609",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 tx_window_bytes=67108865",
            TBT_PARSE_EINVAL, "tx_window_bytes", "rx_reorder_bytes");
     refuse("tx_retain_bytes over u32",
            "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 tx_retain_bytes=4294967296",
