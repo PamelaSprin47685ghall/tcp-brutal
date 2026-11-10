@@ -5210,7 +5210,9 @@ static void tbt_fec_rx_sample(struct tbt_fec_rx *rx, u64 now,
 {
     if (tbt_fec_rx_sc_mode(rx))
     {
+        spin_lock_bh(&rx->lock);
         tbt_fec_adapt_sclc_est_sample(rx->est_sclc, now, so);
+        spin_unlock_bh(&rx->lock);
         memset(o, 0, sizeof(*o));
         o->p_ppm = so->p_ppm;
         o->p_ewma_ppm = so->p_ewma_ppm;
@@ -5411,12 +5413,14 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess,
             stalled++;
         tbt_carrier_put(c);
     }
+    abandoned = (u64)atomic64_read(&rx->abandoned_shares);
+    spin_lock_bh(&rx->lock);
+    memcpy(rx->alive_bm, alive_bm, sizeof(rx->alive_bm));
     if (rx->est)
         tbt_fec_est_carriers(rx->est, alive, stalled, sess->n_car);
     if (rx->est_sclc)
         tbt_fec_adapt_sclc_est_carriers(rx->est_sclc, alive, stalled,
                                         sess->n_car);
-    abandoned = (u64)atomic64_read(&rx->abandoned_shares);
     if (abandoned > rx->est_abandoned_last)
     {
         if (rx->est)
@@ -5429,6 +5433,7 @@ static void tbt_fec_rx_adapt_tick(struct tbt_session *sess,
                 (u32)(abandoned - rx->est_abandoned_last));
         rx->est_abandoned_last = abandoned;
     }
+    spin_unlock_bh(&rx->lock);
     tbt_fec_rx_sample(rx, now, &o, &so);
     if (debug && sc)
         pr_info_ratelimited("tbtun-diag: rx adapt tunnel=%llu valid=%d idle=%d carrier=%d abandoned=%d sent=%u supers=%u p=%u\n",
@@ -6402,7 +6407,7 @@ static void tbt_fec_rx_late_credit(struct tbt_fec_rx *rx, u8 type,
         spin_lock_bh(&rx->lock);
     if (!rx->est_sclc || !n || !m || n != rx->n || m != rx->m ||
         group >= rx->groups || share >= (u16)(n + m) ||
-        block_id >= READ_ONCE(rx->next_super) ||
+        block_id > READ_ONCE(rx->next_super) ||
         block_id + TBT_FEC_LATE_RECS < READ_ONCE(rx->next_super))
     {
         atomic64_inc(&rx->flow->sess->fec_late_unknown);
