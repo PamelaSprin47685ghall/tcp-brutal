@@ -2922,13 +2922,13 @@ static void tbt_fec_tx_adapt_tick(struct tbt_session *sess,
         if (sws.switch_now)
         {
             struct tbt_fec_shape shape;
-            int nrc = tbt_fec_tx_sclc_next_shape(tx, &sws, &shape);
+            bool nrc = tbt_fec_tx_sclc_next_shape(tx, &sws, &shape);
 
             if (debug)
                 pr_info_ratelimited("tbtun-diag: switch suggest from=%u to=%u n=%u m=%u epoch=%u reason=%u next=%d\n",
                                     sws.from, sws.to, sws.shape.n,
                                     sws.shape.m, sws.epoch, sws.reason, nrc);
-            if (!nrc)
+            if (nrc)
             {
                 tbt_fec_tx_switch_begin_shape(sess, tx, &shape, sws.epoch);
                 if (debug)
