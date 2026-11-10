@@ -1316,7 +1316,7 @@ int tbt_fec_cfg_unpack(const u8 in[TBT_FEC_CFG_LEN], u16 carriers,
         if (groups == 1)
         {
             c->w = block;
-            c->k = (u16)(rate_ppm / 1000u);
+            c->k = (u16)((u32)n * 1000u / shares);
             c->d = 0;
         }
         else
