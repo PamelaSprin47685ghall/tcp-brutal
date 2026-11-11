@@ -286,6 +286,9 @@ host/test_fec_san
 host/test_fec_out
 host/test_fec_out_san
 host/test_batch
+host/tbt_client
+host/test_client_loopback
+host/test_client_loopback_san
 host/test_batch_san
 host/test_fec_rx
 host/test_fec_rx_san
