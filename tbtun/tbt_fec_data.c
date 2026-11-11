@@ -1966,6 +1966,11 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
     h.share_index = share;
     h.n = (u8)tx->blk_n;
     h.m = (u8)tx->blk_m;
+    if (debug >= 2 && share == 0)
+        pr_info("tbtun: fec tx hdr block=%llu n=%u m=%u want_m=%u tx_n=%u tx_m=%u blk_n=%u blk_m=%u peer_epoch=%llu\n",
+                block_id, h.n, h.m, READ_ONCE(tx->want_m),
+                READ_ONCE(tx->n), READ_ONCE(tx->m), tx->blk_n, tx->blk_m,
+                READ_ONCE(tx->peer_epoch));
     h.block_id = block_id;
     h.seq = seq;
     /* epoch is block-level and belongs to PARITY only: a mid-block short
@@ -2137,8 +2142,10 @@ static void tbt_fec_tx_stall_diag(struct tbt_session *sess,
                         READ_ONCE(st->tx_ack), READ_ONCE(st->tx_seq),
                         tx_pkts, peer_pkts,
                         (long long)(tx_pkts - peer_pkts), credit,
-                        credit_blocks, n, groups, frontier,
-                        READ_ONCE(tx->cur_block),
+                        credit_blocks, n, groups,
+                        READ_ONCE(tx->blk_n), READ_ONCE(tx->blk_m),
+                        READ_ONCE(tx->want_m), READ_ONCE(tx->peer_epoch),
+                        frontier, READ_ONCE(tx->cur_block),
                         READ_ONCE(tx->last_group), READ_ONCE(tx->last_share),
                         rq, rb, READ_ONCE(sess->fec_replay_over_high),
                         atomic64_read(&sess->fec_replay_pass_throttled),
