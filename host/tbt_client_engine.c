@@ -1304,14 +1304,15 @@ static int flow_send_cfg(struct flow *f)
  * not shrink with its real share count. */
 static u32 flow_rx_credit_update(struct flow *f)
 {
-    u32 shares = (u32)f->rx_n + f->rx_m;
-    u32 credit = (u32)(TBT_RX_SLOTS - 1) * shares;
-    u32 cap = (u32)TBT_RX_SLOTS * shares;
+    u64 block = (u64)f->rx_groups * ((u32)f->rx_n + f->rx_m);
+    u64 credit = (u64)(TBT_RX_SLOTS - 1) * block;
+    u64 cap = (u64)TBT_RX_SLOTS * block;
 
-    if (!shares || credit < shares || credit > cap)
+    if (!block || credit < block || credit > cap ||
+        credit > (u64)0xffffffffu)
         f->rx_credit_bad++;
-    f->rx_credit_packets = credit;
-    return credit;
+    f->rx_credit_packets = (u32)credit;
+    return (u32)credit;
 }
 
 static int flow_send_ack(struct flow *f)
