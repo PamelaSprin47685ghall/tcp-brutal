@@ -42,6 +42,8 @@
 #include "tbt_fec_adapt_sclc.h"
 #include "tbt_sclc_uplink.h"
 #include "tbt_rec.h"
+#include "tbt_http.h"
+#include "tbt_rcvq.h"
 
 static struct tbt_fec_blk *tbt_fec_rx_blk(struct tbt_fec_rx *rx, u16 group,
                                           u64 block_id);
@@ -3113,6 +3115,7 @@ static void tbt_fec_blk_reset(struct tbt_session *sess,
     memset(b->dpresent, 0, TBT_FEC_MAX_SHARES);
     memset(b->ppresent, 0, TBT_FEC_MAX_SHARES);
     memset(b->dlen, 0, TBT_FEC_MAX_SHARES * sizeof(u16));
+    memset(b->src_carrier, TBT_RCVQ_NO_CARRIER, sizeof(b->src_carrier));
     tbt_fec_blk_slice(rx, b);
 }
 
@@ -4929,6 +4932,41 @@ static void tbt_fec_nack_scan(struct tbt_session *sess,
  * The snapshot is what the codec sees; a share that arrives during the decode
  * is placed into b->data as usual, and the commit only writes slots that are
  * still missing. */
+/* Build and queue one repaired wire record after a parity decode.  Runs in
+ * w_fec_rx, outside rx->lock: the plaintext and header were snapshotted under
+ * the lock, so the block slot may be reused while the wire is built here. */
+static void tbt_fec_rcvq_enqueue(struct tbt_session *sess, u8 carrier,
+                                 const struct tbt_fec_hdr *h,
+                                 const u8 *plain, u16 plen)
+{
+    struct tbt_carrier *c;
+    struct tbt_rcvq_repair *r;
+    u16 out_len = 0;
+
+    c = tbt_carrier_get(sess, carrier);
+    if (!c)
+        return;
+    r = tbt_rcvq_alloc(TBT_HTTP_FEC_FRAME_MAX);
+    if (!r)
+        goto out;
+    if (tbt_rcvq_rebuild_wire(h, plain,
+                              sess->crypto ? &sess->crypto_ctx.rx : NULL,
+                              c->profile, r->wire,
+                              TBT_HTTP_FEC_FRAME_MAX, &out_len) ||
+        !out_len)
+    {
+        tbt_rcvq_free(r);
+        goto out;
+    }
+    r->wire_len = out_len;
+    r->delta = 0;
+    r->inject_len = out_len;
+    if (tbt_rcvq_enqueue(c, r) == 0)
+        tbt_carrier_arm_rx(c);
+out:
+    tbt_carrier_put(c);
+}
+
 static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
                                   struct tbt_fec_flow *f, u16 group,
                                   u16 slot)
@@ -4944,6 +4982,10 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
     u16 sample_e = 0, sample_s = 0, sample_real = 0;
     bool sample_first = false;
     u64 now = ktime_get_ns();
+    bool rcvq_have = false;
+    u16 rcvq_plen = 0;
+    u8 rcvq_carrier = 0;
+    struct tbt_fec_hdr rcvq_h;
     int rc;
 
     if (!snap)
@@ -5093,6 +5135,42 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
                 if (i < 32)
                     b->miss_mask |= 1u << i;
                 tbt_fec_adapt_bitmap_set(b->miss_bits, i);
+                if (!rcvq_have)
+                {
+                    u16 span = (u16)(b->n + b->m);
+                    u16 base = (u16)(rx->group_map[group] * span);
+                    u64 seq = tbt_fec_data_seq(b->seq0, group, b->n, i);
+                    u8 carrier;
+
+                    /* The sender marks the stream's last DATA share with
+                     * TBT_FEC_FF_LAST.  This first cut does not rebuild that
+                     * flag, so a last share stays with the FIN path. */
+                    if (rx->total_known && seq + 1 >= rx->total_pkts)
+                        ;
+                    else if (tbt_rcvq_pick_carrier(b->src_carrier, span, base,
+                                                   span, &carrier) == 0)
+                    {
+                        u16 plen = (i + 1 == real && b->short_len) ?
+                                       b->short_len : rx->s;
+
+                        memcpy(rx->rcvq_plain,
+                               b->data + (size_t)i * rx->s, plen);
+                        memset(&rcvq_h, 0, sizeof(rcvq_h));
+                        rcvq_h.type = TBT_FEC_DATA;
+                        rcvq_h.share_index = i;
+                        rcvq_h.n = b->n;
+                        rcvq_h.m = b->m;
+                        rcvq_h.block_id = b->block_id;
+                        rcvq_h.seq = seq;
+                        rcvq_h.payload_len = plen;
+                        rcvq_h.conv = TBT_FEC_CONV;
+                        rcvq_h.reserved = group;
+                        rcvq_h.sid = b->sid;
+                        rcvq_carrier = carrier;
+                        rcvq_plen = plen;
+                        rcvq_have = true;
+                    }
+                }
             }
             k++;
         }
@@ -5138,6 +5216,9 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
     }
     b->decoding = false;
     spin_unlock_bh(&rx->lock);
+    if (rcvq_have)
+        tbt_fec_rcvq_enqueue(sess, rcvq_carrier, &rcvq_h, rx->rcvq_plain,
+                             rcvq_plen);
     if (sample && rx->ctl.ready)
     {
         /* The wake line used this block's own n (a switch may have moved
@@ -6388,7 +6469,8 @@ out:
 
 static int tbt_fec_rx_record_body(struct tbt_session *sess,
                                   struct tbt_fec_flow *f,
-                                  struct tbt_fec_hdr *hp, u8 *rec, size_t len)
+                                  struct tbt_fec_hdr *hp, u8 *rec, size_t len,
+                                  u8 carrier_index)
 {
     struct tbt_fec_rx *rx = f->rx;
     struct tbt_fec_hdr h = *hp;
@@ -7407,6 +7489,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
         break;
     }
 
+    b->src_carrier[share] = carrier_index;
     if (h.type == TBT_FEC_DATA)
     {
         /* A PARITY record may have fixed this block's cut before this share
@@ -7598,7 +7681,7 @@ int tbt_fec_rx_record(struct tbt_carrier *c, u8 *rec, size_t len)
         atomic64_inc(&sess->fec_drop_sid);
         return 0;
     }
-    rc = tbt_fec_rx_record_body(sess, f, &h, rec, len);
+    rc = tbt_fec_rx_record_body(sess, f, &h, rec, len, c->index);
     tbt_fec_flow_put(f);
     return rc;
 }
@@ -7902,6 +7985,7 @@ static void tbt_fec_rx_plane_free(struct tbt_fec_rx *rx)
     kvfree(rx->rec);
     kvfree(rx->zero);
     kvfree(rx->decode_snap);
+    kvfree(rx->rcvq_plain);
     kvfree(rx->nack);
     kvfree(rx->req_ns);
     kvfree(rx->req_block);
@@ -8173,6 +8257,7 @@ tbt_fec_rx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     }
     rx->zero = tbt_fec_vzalloc(TBT_FEC_S);
     rx->decode_snap = tbt_fec_vzalloc(sizeof(*rx->decode_snap));
+    rx->rcvq_plain = tbt_fec_vzalloc(TBT_FEC_S);
     if (sclc)
     {
         struct tbt_fec_codec_key key;
@@ -8206,7 +8291,8 @@ tbt_fec_rx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
         rx->codec = tbt_fec_codec_new(NULL, groups, n, m, n, sess->fec_w,
                                       sess->fec_d, tbt_fec_base_nonce(sess));
     if (!rx->blk || !rx->req_ns || !rx->req_block || !rx->codec ||
-        !rx->rec || !rx->zero || !rx->decode_snap || !rx->est || !rx->nack ||
+        !rx->rec || !rx->zero || !rx->decode_snap || !rx->rcvq_plain ||
+        !rx->est || !rx->nack ||
         (sess->fec_sclc && !rx->est_sclc))
         goto fail;
     return rx;

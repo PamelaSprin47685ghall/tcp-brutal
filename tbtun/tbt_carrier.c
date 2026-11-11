@@ -39,6 +39,7 @@
 #include "tbt_carrier_policy.h"
 #include "tbt_fec_batch.h"
 #include "tbt_tx_acct.h"
+#include "tbt_rcvq.h"
 
 /* One blocking wait inside kernel_connect(). A connect that has not completed
  * inside this window is retried by the session poll.
@@ -1341,6 +1342,10 @@ static void tbt_car_rx_body(struct tbt_carrier *c)
     atomic64_inc(&c->sess->rx_reads);
     tbt_rx_budget_start(&c->rx_budget, ktime_get_ns());
     lock_sock(sk);
+    /* Fill any FEC-recovered carrier hole before the parser walks the socket.
+     * The queue is empty on almost every pass; when it is not, the apply
+     * advances rcv_nxt and merges the out-of-order queue under this lock. */
+    tbt_rcvq_apply_pending(c, sk);
     /* Retry a record an earlier -EAGAIN left in the parser before reading the
      * socket. Without this, the record is unreachable: its bytes are already
      * out of the socket (copied_seq == rcv_nxt), so neither sk_data_ready nor
@@ -2132,6 +2137,9 @@ static struct tbt_carrier *tbt_carrier_new_locked(struct tbt_session *sess,
              c->http_rx ? c->http_rx->chunk.state : -1);
     mutex_init(&c->http_lock);
     mutex_init(&c->tx_lock);
+    spin_lock_init(&c->rcvq_lock);
+    INIT_LIST_HEAD(&c->rcvq_q);
+    c->rcvq_queued = 0;
     INIT_WORK(&c->w_connect, tbt_car_connect_work);
     INIT_WORK(&c->w_rx, tbt_car_rx_work);
     INIT_DELAYED_WORK(&c->w_pump, tbt_pump_work);
@@ -2795,6 +2803,19 @@ void tbt_carrier_free(struct tbt_carrier *c)
         return;
     list_del_init(&c->node);
     list_del_init(&c->release_node);
+    {
+        struct tbt_rcvq_repair *r, *tmp;
+        unsigned long flags;
+
+        spin_lock_irqsave(&c->rcvq_lock, flags);
+        list_for_each_entry_safe(r, tmp, &c->rcvq_q, node)
+        {
+            list_del_init(&r->node);
+            c->rcvq_queued--;
+            tbt_rcvq_free(r);
+        }
+        spin_unlock_irqrestore(&c->rcvq_lock, flags);
+    }
     kfree(c->http_tx);
     kfree(c->http_hdr);
     kfree(c->part);

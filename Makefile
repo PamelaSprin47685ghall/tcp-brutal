@@ -190,6 +190,14 @@ HOST_WIRE_COMPAT_HDRS := tbtun/tbt_rec.h tbtun/tbt_proto.h tbtun/tbt_fec.h \
 HOST_RX_BUDGET  := host/test_rx_budget
 HOST_RX_BUDGET_SRCS := host/test_rx_budget.c
 HOST_RX_BUDGET_HDRS := tbtun/tbt_rx_budget.h tbtun/tbt_uapi.h
+HOST_RCVQ       := host/test_rcvq
+HOST_RCVQ_SRCS  := host/test_rcvq.c host/test_rcvq_wire.c \
+                   host/test_rcvq_plan.c tbtun/tbt_rcvq_wire.c \
+                   tbtun/tbt_rcvq_plan.c tbtun/tbt_fec.c tbtun/tbt_http.c \
+                   tbtun/tbt_crypto.c tbtun/tbt_proto.c tbtun/tbt_rec.c
+HOST_RCVQ_HDRS  := tbtun/tbt_rcvq.h tbtun/tbt_fec.h tbtun/tbt_http.h \
+                   tbtun/tbt_crypto.h tbtun/tbt_uapi.h tbtun/tbt_proto.h \
+                   tbtun/tbt_rec.h
 HOST_BENCH_SCLC := host/bench_sclc_uplink
 HOST_BENCH_SCLC_SRCS := host/bench_sclc_uplink.c tbtun/tbt_sc_ldpc.c \
                    tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c
@@ -234,7 +242,9 @@ tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
                    tbtun/tbt_fec_sclc.o \
                    tbtun/tbt_fec_codec_cache.o \
                    tbtun/tbt_sc_ldpc.o \
-                   tbtun/tbt_sc_ldpc_gf16.o tbtun/tbt_sclc_uplink.o
+                   tbtun/tbt_sc_ldpc_gf16.o tbtun/tbt_sclc_uplink.o \
+                   tbtun/tbt_rcvq.o tbtun/tbt_rcvq_wire.o \
+                   tbtun/tbt_rcvq_plan.o
 
 # Keep every module frame small enough for the kernel stack: a 1 KiB bound
 # catches a TBT_STREAMS_MAX pointer array before it reaches a real call path.
@@ -269,7 +279,7 @@ check: dkms-srcs-check
 host-test: $(HOST_CARRIER_POLICY)
 host-test-san-run: host/test_carrier_policy_san
 
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_CODEC_CACHE) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_SHAPES) $(HOST_PORTMAP) $(HOST_MAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_INVARIANTS) $(HOST_WIRE_COMPAT) $(HTTP_RFC_GEN) $(HOST_RX_BUDGET)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_CODEC_CACHE) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_SHAPES) $(HOST_PORTMAP) $(HOST_MAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_INVARIANTS) $(HOST_WIRE_COMPAT) $(HTTP_RFC_GEN) $(HOST_RX_BUDGET) $(HOST_RCVQ)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
@@ -305,6 +315,7 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_INVARIANTS)
 	@./$(HOST_WIRE_COMPAT)
 	@./$(HOST_RX_BUDGET)
+	@./$(HOST_RCVQ)
 	@# Third-party cross-check: h11 is not a build dependency. uv with a cached
 	@# h11 runs it offline; anything else gets a clear skip, not a failure.
 	@if command -v uv >/dev/null 2>&1 && \
@@ -480,6 +491,9 @@ $(HOST_WIRE_COMPAT): $(HOST_WIRE_COMPAT_SRCS) $(HOST_WIRE_COMPAT_HDRS)
 $(HOST_RX_BUDGET): $(HOST_RX_BUDGET_SRCS) $(HOST_RX_BUDGET_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_RX_BUDGET_SRCS)
 
+$(HOST_RCVQ): $(HOST_RCVQ_SRCS) $(HOST_RCVQ_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_RCVQ_SRCS)
+
 host/test_fec_sclc_data_san: $(HOST_SCLC_DATA_SRCS) $(HOST_SCLC_DATA_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_SCLC_DATA_SRCS)
 
@@ -530,7 +544,7 @@ host-test-san:
 		echo "host-test-san: skipped, $(HOSTCC) cannot link -fsanitize=address,undefined"; \
 	fi
 
-host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_mem_budget_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_batch_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_shapes_san host/test_close_wake_san host/test_hold_san host/test_portmap_san host/test_map_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_invariants_san host/test_wire_compat_san host/test_rx_budget_san $(HTTP_RFC_GEN_SAN)
+host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_mem_budget_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_batch_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_shapes_san host/test_close_wake_san host/test_hold_san host/test_portmap_san host/test_map_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_invariants_san host/test_wire_compat_san host/test_rx_budget_san host/test_rcvq_san $(HTTP_RFC_GEN_SAN)
 host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san
 	@./host/test_parse_san
 	@./host/test_fuzz_san
@@ -559,6 +573,7 @@ host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san hos
 	@./host/test_invariants_san
 	@./host/test_wire_compat_san
 	@./host/test_rx_budget_san
+	@./host/test_rcvq_san
 	@python3 $(HTTP_RFC_AUDIT) ./$(HTTP_RFC_GEN_SAN)
 
 host/test_parse_san: $(HOST_TEST_SRCS) $(HOST_TEST_HDRS)
@@ -641,6 +656,9 @@ host/test_wire_compat_san: $(HOST_WIRE_COMPAT_SRCS) $(HOST_WIRE_COMPAT_HDRS)
 host/test_rx_budget_san: $(HOST_RX_BUDGET_SRCS) $(HOST_RX_BUDGET_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_RX_BUDGET_SRCS)
 
+host/test_rcvq_san: $(HOST_RCVQ_SRCS) $(HOST_RCVQ_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_RCVQ_SRCS)
+
 # The concurrent host contracts under ThreadSanitizer. Opt-in, like
 # host-test-san: `check` stays free of a sanitizer runtime. A toolchain
 # without the TSan runtime gets a clear skip, not a build failure. The test
@@ -685,7 +703,7 @@ clean: clean-dkms.conf clean-dkms-tarball
 	$(RM) host/test_hold_san
 	$(RM) $(HOST_BATCH) $(HOST_WIRE_COMPAT) $(HOST_TSAN) host/test_batch_san host/test_wire_compat_san
 	$(RM) $(HTTP_RFC_GEN) $(HTTP_RFC_GEN_SAN)
-	$(RM) $(HOST_RX_BUDGET) host/test_rx_budget_san
+	$(RM) $(HOST_RX_BUDGET) host/test_rx_budget_san $(HOST_RCVQ) host/test_rcvq_san
 	$(RM) $(HOST_BENCH_RXPATH)
 	$(RM) $(HOST_BENCH_SCLC_BUILD)
 	$(RM) $(HOST_CARRIER_POLICY) host/test_carrier_policy_san
