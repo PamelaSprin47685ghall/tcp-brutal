@@ -6802,9 +6802,11 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
             u32 per_block = (u32)tx->groups *
                             ((u32)tx->n + tx->m);
 
+            /* The grant is in shares and may name a partial block during
+             * a shape switch; the sender floors it. Only a grant below one
+             * whole block is a unit error. */
             if (a.credit_packets && per_block &&
-                (a.credit_packets < per_block ||
-                 a.credit_packets % per_block))
+                a.credit_packets < per_block)
                 atomic64_inc(&sess->fec_credit_unit_bad);
 
             /* The plane frontier never moves past what this side sent. */
