@@ -1924,7 +1924,8 @@ static bool tbt_tx_fec_credit_waiting(const struct tbt_session *sess)
                 waiting = false;
             else
                 waiting = tbt_fec_credit_waiting(
-                    READ_ONCE(tx->peer_pkts), seq, READ_ONCE(tx->credit));
+                    READ_ONCE(tx->peer_pkts), seq, READ_ONCE(tx->credit),
+                    (u32)READ_ONCE(tx->groups) * READ_ONCE(tx->n));
         }
     rcu_read_unlock();
     return waiting;
@@ -2137,7 +2138,9 @@ void tbt_tx_fec_rearm_if_pending(struct tbt_session *sess, struct tbt_stream *st
     peer = READ_ONCE(tx->peer_pkts);
     seq = READ_ONCE(tx->seq);
     now = ktime_get_ns();
-    if (ring && !tbt_fec_credit_waiting(peer, seq, credit) &&
+    if (ring && !tbt_fec_credit_waiting(
+                    peer, seq, credit,
+                    (u32)READ_ONCE(tx->groups) * READ_ONCE(tx->n)) &&
         READ_ONCE(tx->last_pump_seq) == seq &&
         (!READ_ONCE(tx->last_pump_ns) ||
          (now > READ_ONCE(tx->last_pump_ns) &&

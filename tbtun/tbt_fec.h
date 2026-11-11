@@ -1297,11 +1297,18 @@ static inline u64 tbt_fec_block_of_seq(u64 seq, u16 groups, u16 k)
  * report a closed window while the packet lead is below credit. Replay and
  * NACK use block ids; the sender does not.
  */
-static inline bool tbt_fec_credit_waiting(u64 peer_pkts, u64 seq, u32 credit)
+static inline bool tbt_fec_credit_waiting(u64 peer_pkts, u64 seq, u32 credit,
+                                          u32 block_pkts)
 {
     if (!credit)
         return true;
-    return seq > peer_pkts && seq - peer_pkts >= credit;
+    /* One block of headroom: a block that has started must finish, so the
+     * next block may open while the previous one spent up to block_pkts
+     * beyond the granted window. Without it, a full block can leave
+     * lead > credit and deadlock the next block against the receiver's
+     * ACK (measured: lead 962, credit 952, rx_next waiting for block 106). */
+    return seq > peer_pkts &&
+           seq - peer_pkts >= (u64)credit + block_pkts;
 }
 
 /* A stream owns a subset of the session's physical groups. `mask` is the

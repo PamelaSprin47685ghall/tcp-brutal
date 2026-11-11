@@ -1887,7 +1887,8 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
         /* Mid-block sends are exempt: the receiver cannot ACK a partial
          * block, so finishing it is the contract, not a violation. Only a
          * new block that opens past the packet window is counted. */
-        if (!started && tx->seq > peer && tx->seq - peer >= credit)
+        if (!started && tx->seq > peer &&
+            tx->seq - peer >= (u64)credit + (u64)tx->groups * tx->n)
         {
             atomic64_inc(&sess->fec_credit_violation);
             if (debug)
@@ -2082,7 +2083,9 @@ static bool tbt_fec_tx_credit_ok(const struct tbt_fec_tx *tx)
      * shares would come back as fec_drop_window. */
     return !tbt_fec_credit_waiting(READ_ONCE(tx->peer_pkts),
                                    READ_ONCE(tx->seq),
-                                   READ_ONCE(tx->credit));
+                                   READ_ONCE(tx->credit),
+                                   (u32)READ_ONCE(tx->groups) *
+                                       READ_ONCE(tx->n));
 }
 
 /* The session FIFO at or above its high-water mark. The packetizer checks
@@ -2452,6 +2455,9 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
                                      struct tbt_fec_flow *f)
 {
     struct tbt_fec_tx *tx = f->tx;
+
+    WRITE_ONCE(tx->last_pump_ns, ktime_get_ns());
+    WRITE_ONCE(tx->last_pump_seq, READ_ONCE(tx->seq));
     struct tbt_stream *st;
     bool paused = false;
     bool pulled = false;
