@@ -2185,6 +2185,9 @@ static void tbt_fec_tx_stall_diag(struct tbt_session *sess,
     u32 credit_blocks = tbt_fec_credit_blocks(credit, groups, n);
     u64 base_pkt = READ_ONCE(tx->base_pkt);
     u64 base_block = READ_ONCE(tx->base_block);
+    u32 ring_bytes = (u32)(READ_ONCE(tx->head) - READ_ONCE(tx->tail)) +
+                     READ_ONCE(tx->fill);
+    u32 tx_run = atomic_read(&sess->fec_tx_run);
     u32 rq, rb;
 
     /* An idle stream has nothing outstanding: ack == txseq is not a stall.
@@ -2213,6 +2216,8 @@ static void tbt_fec_tx_stall_diag(struct tbt_session *sess,
                         (unsigned long long)READ_ONCE(tx->peer_epoch),
                         READ_ONCE(tx->cur_block), base_pkt, base_block,
                         atomic64_read(&sess->fec_credit_wait),
+                        READ_ONCE(st->tx_paused) ? 1 : 0, ring_bytes, tx_run,
+                        test_bit(TBT_SW_FEC_TX, &sess->sched),
                         READ_ONCE(tx->last_group), READ_ONCE(tx->last_share),
                         rq, rb, READ_ONCE(sess->fec_replay_over_high),
                         atomic64_read(&sess->fec_replay_pass_throttled),
