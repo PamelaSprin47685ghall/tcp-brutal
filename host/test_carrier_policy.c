@@ -14,8 +14,8 @@
  *   4. tbt_car_setsockbuf() gives every carrier one 0.8 MiB buffer per
  *      direction and clears the buffer userlocks, so TCP/BBR autotuning
  *      may grow both fields;
- *      tbt_car_set_bbr() asks for BBR and keeps the carrier's default CC
- *      when the kernel does not provide it.
+ *      tbt_car_set_cc() asks for the configured carrier CC (bbr by default)
+ *      and keeps the carrier's default when the kernel refuses it.
  *
  * The slot and socket models below follow those functions line by line.
  * Change both together.
@@ -214,7 +214,7 @@ static void test_peers_render(void)
 
 /* --- 4. carrier transport: 0.8 MiB buffers, autotuning, BBR ----------- */
 
-/* The four fields tbt_car_setsockbuf() and tbt_car_set_bbr() touch. The
+/* The four fields tbt_car_setsockbuf() and tbt_car_set_cc() touch. The
  * starting values describe a socket whose buffer fields were locked by an
  * earlier SO_SNDBUF/SO_RCVBUF request: the assignment must clear both lock
  * bits and keep every other bit. */
@@ -234,7 +234,7 @@ static void model_setsockbuf(struct transport *t, unsigned int carriers)
     t->userlocks &= ~TBT_CAR_SOCKBUF_LOCK_MASK;
 }
 
-/* tbt_car_set_bbr(): one setsockopt(SOL_TCP, TCP_CONGESTION, "bbr", 4),
+/* tbt_car_set_cc(): one setsockopt(SOL_TCP, TCP_CONGESTION, "bbr", 4),
  * where optlen counts the terminating NUL. -ENOENT (no CONFIG_TCP_CONG_BBR)
  * is ignored and the carrier keeps the CC it already had. */
 static int model_set_bbr(struct transport *t, bool kernel_has_bbr)
