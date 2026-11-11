@@ -1,0 +1,47 @@
+# deploy/090/near.yaml.in
+# Rendered by deploy/090/Makefile; do not edit the generated copy.
+#
+# Trap 1: the generic mux key is `smux`, not `mux`. A bare `mux:` is never read
+#         by adapter/parser.go:234 and the config will silently run without mux.
+# Trap 2: smux and XUDP are independent. With only-tcp: false, UDP rides smux on
+#         the same TCP connection, which keeps the far side at one FEC flow.
+#         only-tcp: true sends UDP over VLESS XUDP on a SECOND TCP connection;
+#         the 0.8 far side admits only one FEC flow, so that second connection is
+#         refused with fec_stream_refused. The default is therefore false.
+# Trap 3: padding must agree with the far side. A far listener with
+#         mux-option.padding: true rejects a non-padded client.
+# Trap 4: packet-encoding / packet-addr silently override xudp. Do not write them
+#         when xudp: true is intended.
+# Trap 5: without max-connections: 1, sing-mux opens a second TCP session once
+#         the stream count reaches min-streams (sing-mux/client.go:180-189).
+#         That also breaks the one-FEC-flow limit.
+
+mixed-port: @MIXED_PORT@
+external-controller: 127.0.0.1:9090
+mode: rule
+log-level: info
+
+proxies:
+  - name: tbtun
+    type: vless
+    server: 127.0.0.1
+    port: @PORT@
+    uuid: @UUID@
+    network: tcp          # outer transport only; VLESS still carries TCP and UDP
+    tls: false            # plaintext by design; see the security note in 090-packaging.md
+    udp: true
+    xudp: true            # supported in code (vless.go:69), absent from upstream docs/config.yaml
+    smux:
+      enabled: true
+      protocol: h2mux     # smux / yamux / h2mux
+      max-connections: 1  # keep TCP and UDP on one carrier-visible byte stream
+      only-tcp: false     # UDP rides this same smux connection; see Trap 2
+      padding: false      # must match the far mux-option.padding
+
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies: [tbtun, DIRECT]
+
+rules:
+  - MATCH,PROXY
