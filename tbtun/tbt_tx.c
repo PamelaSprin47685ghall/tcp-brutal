@@ -2181,11 +2181,16 @@ void tbt_tx_fec_rearm_if_pending(struct tbt_session *sess, struct tbt_stream *st
      * ring still has data and the pump has not run for a second, clear the
      * stale run word and ask for a fresh body. This is a recovery for a
      * lost/mis-accounted body, not a second concurrent packetizer. */
-    if ((atomic_read(&sess->fec_tx_run) & 1u) && ring &&
-        READ_ONCE(tx->last_pump_ns) &&
-        now > READ_ONCE(tx->last_pump_ns) &&
-        now - READ_ONCE(tx->last_pump_ns) > NSEC_PER_SEC)
+    if (tbt_fec_run_word_stale(
+            atomic_read(&sess->fec_tx_run), ring != 0, now,
+            READ_ONCE(tx->last_pump_ns),
+            (work_busy(&sess->w_fec_tx.work) & WORK_BUSY_RUNNING) != 0))
     {
+        /* Clear the run word only when its body is not running. A body that
+         * has been in flight for over a second still owns the packetizer;
+         * clearing the bit underneath it let a second body enter and made
+         * the first one count fec_tx_run_leak on exit. A lost run word (no
+         * body at all) still takes this path. */
         atomic_fetch_and(~1u, &sess->fec_tx_run);
         atomic_fetch_or(2u, &sess->fec_tx_run);
         atomic64_inc(&sess->fec_tx_pump_rearm);

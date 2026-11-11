@@ -51,16 +51,6 @@ and moves independently of the module version.
   count, `tbt_fec_credit_packets()` converts the byte window once, and the
   TX gate compares absolute packet frontiers.
 
-### Fixed
-
-- A userspace receiver holds its first NACK for one carrier round trip and
-  its retry for another, instead of a fixed 30 ms and 20 ms. Its ACK now
-  carries the measured carrier RTT instead of a 1 ms placeholder, so the
-  sender's replay dedup window covers the same trip. On a 200-300 ms WAN the
-  old hold named shares still in flight; field evidence: 342,721 late shares
-  for 537 delivered blocks (2.5x the shares those blocks carry), and the TX
-  flush then stalled behind the replay queue for 2.4 s at a time.
-
 ### Known limitations
 
 - At `S=1024, block=64, L=8` the uplink `22/10` split needs more parity symbols
@@ -187,6 +177,20 @@ and moves independently of the module version.
   the first burst after an idle period started from BBR's collapsed window.
   `host/test_hold` pins the save bounds, the apply gate and the save/restore
   loop.
+- A userspace receiver holds its first NACK for one carrier round trip and
+  its retry for another, instead of a fixed 30 ms and 20 ms. Its ACK now
+  carries the measured carrier RTT instead of a 1 ms placeholder, so the
+  sender's replay dedup window covers the same trip. On a 200-300 ms WAN the
+  old hold named shares still in flight; field evidence: 342,721 late shares
+  for 537 delivered blocks (2.5x the shares those blocks carry), and the TX
+  flush then stalled behind the replay queue for 2.4 s at a time.
+- The FEC TX pump wakes capture whenever the source ring is below half, not
+  only when `tx_paused` is set. A target that drained its window left
+  `ring=9`, `credit=1792` and `seq` frozen 2.4 s at a time while its next
+  zero-window probe waited for an RTO; the field dmesg showed
+  `run=1 sched=0 stall_us=2404156` and `fec_tx_run_leak=1`. The stale
+  run-word recovery now also refuses to clear a word whose body is still
+  running, so a long body is no longer raced by a second packetizer.
 
 ## [0.7.3] - 2026-11-11
 
