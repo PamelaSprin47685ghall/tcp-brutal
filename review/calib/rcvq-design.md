@@ -294,12 +294,12 @@ if (tp->rx_opt.num_sacks)
 
 /* 5. 立即累计 ACK，取消对端重传 */
 tp->rcv_wup = tp->rcv_nxt;
-tbt_rcvq_send_ack(sk, tp->rcv_nxt);   /* 7.0+: (sk,nxt,0)；6.1..6.12: (sk,nxt) */
+tbt_rcvq_send_ack(sk, tp->rcv_nxt);   /* 6.1.y: (sk,nxt)；6.6.162/6.12.116/7.x: (sk,nxt,0) */
 ```
 
 要点：
 
-- **不依赖未导出符号**：`tcp_send_rcvq()`/`tcp_rcv_established()` 在部分内核未导出；`__sk_mem_schedule`（`EXPORT_SYMBOL`）与 `__tcp_send_ack`（`EXPORT_SYMBOL_GPL`）已导出。`tbt_rcvq.c` 用 `LINUX_VERSION_CODE >= 7.0` 适配 `__tcp_send_ack` 的 2/3 参数签名（6.1/6.6/6.12 是 2 参数，7.0+ 是 3 参数），覆盖 6.1/6.6/6.12/7.0/7.2/7.3。
+- **不依赖未导出符号**：`tcp_send_rcvq()`/`tcp_rcv_established()` 在部分内核未导出；`__sk_mem_schedule`（`EXPORT_SYMBOL`）与 `__tcp_send_ack`（`EXPORT_SYMBOL_GPL`）已导出。`tbt_rcvq.c` 用 `LINUX_VERSION_CODE >= 6.6` 适配 `__tcp_send_ack` 的 2/3 参数签名：6.1.y 是 2 参数；6.6.162/6.12.116/7.x 的 stable 已 backport `flags`，是 3 参数。
 - **内存记账**：`tcp_try_rmem_schedule()` 先检查 `sk_rmem_alloc + truesize <= sk_rcvbuf`，再 `sk_rmem_schedule()`（内部调导出的 `__sk_mem_schedule`）。这里显式做同样的检查；失败就丢弃修复，TCP 重传兜底。
 - **不要用 `tcp_queue_rcv()` 搬 ooo skb**：它在 `tcp_data_queue_ofo()` 里已经 `skb_set_owner_r()` 计过 rmem；再用会重复计费。排空用 `__skb_queue_tail()`/`tcp_add_receive_queue()`，只推进 `rcv_nxt`/`bytes_received`。
 - **排空最后一个 ooo 节点时必须更新 `tp->ooo_last_skb`**：否则 `tcp_data_queue_ofo()` 的精确相邻合并会解引用已释放的 skb（UAF）。擦除后取 `rb_last()`，空树则为 NULL。
@@ -492,7 +492,7 @@ int tbt_rcvq_apply(struct tbt_carrier *c, struct sock *sk,
 4. **多记录洞/重放/子区间**：首版只做“洞 == 整条记录、记录起点 == rcv_nxt”的特例；真实 MSS 下丢失段通常只是记录的子区间，必须等阶段 2 的 `FEC_MAP` 提供 `record_start_seq` 后才能覆盖。不要为了“全都能补”而在歧义时猜 `delta`/顺序——猜错就是永久流损坏。
 5. **不要碰 `tp->repair`**：注入不需要 repair；`repair=1` 会让应用非 PEEK 读 `-EPERM`、close 不发 FIN（`docs/inject-probe.md:151-164`）。carrier socket 没有应用读，但仍不应引入 repair。
 6. **不要创建接收队列洞**：只在 `rcv_nxt` 追加，只排空 `seq == rcv_nxt` 的整段；重叠/部分段留给内核，不要自己 trim（`tcp_trim_head` 未导出，且容易破坏 `tcp_collapse` 不变式）。
-7. **内核版本漂移**：公开字段（`rcv_nxt`/`rcv_wup`/`ooo_last_skb`/`selective_acks`）跨 6.1..7.3 稳定；`__tcp_send_ack` 在 7.0 增加 `flags` 参数，`tbt_rcvq.c` 用 `LINUX_VERSION_CODE` 适配。仍需在支持矩阵上跑集成测试，并用 `BUILD_BUG_ON` 固定结构布局/常量。
+7. **内核版本漂移**：公开字段（`rcv_nxt`/`rcv_wup`/`ooo_last_skb`/`selective_acks`）跨 6.1..7.3 稳定；`__tcp_send_ack` 的 `flags` 参数已 backport 到 6.6/6.12 stable，6.1.y 仍是 2 参数；`tbt_rcvq.c` 用 `LINUX_VERSION_CODE >= 6.6` 适配。仍需在支持矩阵上跑集成测试，并用 `BUILD_BUG_ON` 固定结构布局/常量。
 8. **安全边界**：FEC 头/payload CRC 不是密码学认证；双端可控是前提。不要在不可信 peer 上把“恢复字节”当可信输入。
 9. **拥塞控制副作用**：迟到原段被 D-SACK 丢弃会让发送端看到一次伪重传；`__tcp_send_ack` 的累计 ACK 会尽快清除。对 carrier CC 是可接受的代价；若观测到明显退化，可在注入后标记/统计，而不是抑制 DSACK。
 10. **不改变 FEC 交付路径**：恢复 share 的 payload 仍按现有 `tbt_rx_fec_deliver()` 交付；注入只修 carrier TCP 流，不改变隧道层的字节序。注入记录被 FEC 判重是预期行为，不要让它再次交付。
