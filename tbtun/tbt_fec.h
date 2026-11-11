@@ -1281,7 +1281,7 @@ static inline bool tbt_fec_credit_waiting(u64 peer_pkts, u64 seq,
      * the frontier back to zero and open another full window. O(1), exact,
      * and independent of n/m changing mid-stream.
      */
-    if (seq > peer_pkts && seq - peer_pkts > credit)
+    if (seq > peer_pkts && seq - peer_pkts >= credit)
         return true;
     credit_blocks = tbt_fec_credit_blocks(credit, groups, n);
     if (peer_pkts < base_pkt)

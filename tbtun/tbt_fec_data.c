@@ -1873,7 +1873,7 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
         u64 peer = READ_ONCE(tx->peer_pkts);
         u32 credit = READ_ONCE(tx->credit);
 
-        if (tx->seq > peer && tx->seq - peer > credit)
+        if (tx->seq > peer && tx->seq - peer >= credit)
         {
             atomic64_inc(&sess->fec_credit_violation);
             if (debug)
