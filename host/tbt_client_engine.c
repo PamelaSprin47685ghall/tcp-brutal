@@ -240,6 +240,7 @@ struct flow
     bool fin_applied;
     u64 close_at_ns;
     u64 half_open_since_ns; /* local FIN sent, peer FIN still missing */
+    u64 last_rx_progress_ns; /* last accepted share or delivered block */
     u64 rx_last_ack_ns;
     u32 rtt_us;
 
@@ -1875,6 +1876,14 @@ static void flow_rx_check(struct flow *f)
     }
 }
 
+/* The idle reclaim of a half-open flow must not fire while the receive
+ * direction is still moving. Every accepted share refreshes this stamp;
+ * flow_tick compares it with the idle threshold. */
+static void flow_rx_progress(struct flow *f, u64 now)
+{
+    f->last_rx_progress_ns = now;
+}
+
 static void flow_rx_store(struct flow *f, const struct tbt_fec_hdr *h,
                           const u8 *payload)
 {
@@ -1922,6 +1931,7 @@ static void flow_rx_store(struct flow *f, const struct tbt_fec_hdr *h,
     g->present[share] = 1;
     g->plen[share] = (h->flags & TBT_FEC_FF_PADDED) ? h->win_len
                                                     : h->payload_len;
+    flow_rx_progress(f, now_ns());
     if (share < h->n)
         g->ndata++;
     else
@@ -2799,24 +2809,26 @@ static void flow_tick(struct flow *f, u64 now)
     }
     /* Half-open close: the local side has finished sending but the peer's
      * FIN never arrives, so fin_applied stays false and the normal release
-     * path below can never run. Reclaim the slot on an idle deadline, but
-     * only after every byte this side queued is acknowledged. A pending ACK
-     * keeps the flow until the hard cap, so a slow link is never killed by
-     * the idle rule. */
+     * path below can never run. Reclaim the slot only when the receive
+     * direction has also been idle for the whole window: a long download
+     * that keeps accepting shares must never be freed at the idle
+     * threshold. A pending ACK additionally holds the flow until the hard
+     * cap, so an unacknowledged tail is not cut short either. */
     if ((f->fin_sent || f->tx_finished) && !f->fin_recv && !f->fin_applied)
     {
+        u64 idle_from;
+        bool rx_idle;
+
         if (!f->half_open_since_ns)
             f->half_open_since_ns = now;
-        if (f->tx_ack_next >= f->tx_seq)
-        {
-            if (now - f->half_open_since_ns >= TBT_FLOW_IDLE_NS)
-            {
-                flow_free(e, f);
-                return;
-            }
-        }
-        else if (now - f->half_open_since_ns >=
-                 TBT_FLOW_IDLE_NS + TBT_FLOW_CLOSE_NS)
+        idle_from = f->half_open_since_ns;
+        if (f->last_rx_progress_ns > idle_from)
+            idle_from = f->last_rx_progress_ns;
+        rx_idle = now > idle_from && now - idle_from >= TBT_FLOW_IDLE_NS;
+        if (rx_idle &&
+            (f->tx_ack_next >= f->tx_seq ||
+             now - f->half_open_since_ns >=
+                 TBT_FLOW_IDLE_NS + TBT_FLOW_CLOSE_NS))
         {
             flow_free(e, f);
             return;

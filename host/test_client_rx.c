@@ -1227,6 +1227,7 @@ static void test_half_open_reclaim(void)
 {
     struct flow *f;
     u64 t0 = 5000000000ull;
+    int i;
 
     f = tx_flow_new();
     CHECK(f != NULL, "half-open: acked flow allocated");
@@ -1243,6 +1244,37 @@ static void test_half_open_reclaim(void)
     f = flow_alloc(&tx_e, 100, -1, true, NULL);
     CHECK(f != NULL, "half-open: the freed slot is reusable");
     flow_free(&tx_e, f);
+
+    /* A legal half-close followed by a long download: the local GET was
+     * acknowledged immediately, but the receive direction keeps moving for
+     * 120 s. The idle reclaim must never fire while shares keep arriving;
+     * only a full idle window after the last one may release the flow. */
+    f = tx_flow_new();
+    CHECK(f != NULL, "half-open: long download allocated");
+    f->fin_sent = true;
+    f->tx_seq = 0;
+    f->tx_ack_next = 0;
+    flow_tick(f, t0);
+    for (i = 1; i <= 12 && tx_e.flow[0] == f; i++)
+    {
+        u64 at = t0 + (u64)i * (TBT_FLOW_IDLE_NS / 3);
+
+        flow_rx_progress(f, at);
+        flow_tick(f, at);
+    }
+    CHECK(tx_e.flow[0] == f,
+          "half-open: 120 s of rx progress keeps the download");
+    if (tx_e.flow[0] == f)
+    {
+        u64 last = t0 + 12ull * (TBT_FLOW_IDLE_NS / 3);
+
+        flow_tick(f, last + TBT_FLOW_IDLE_NS - 1);
+        CHECK(tx_e.flow[0] == f,
+              "half-open: release waits for the rx idle window");
+        flow_tick(f, last + TBT_FLOW_IDLE_NS);
+        CHECK(tx_e.flow[0] == NULL,
+              "half-open: an idle rx releases the half-open flow");
+    }
 
     f = tx_flow_new();
     CHECK(f != NULL, "half-open: unacked flow allocated");
