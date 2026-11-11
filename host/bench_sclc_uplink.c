@@ -62,7 +62,7 @@ int main(int argc, char **argv)
     par.L = 16;
     par.rate_num = rn;
     par.rate_den = rd;
-    par.max_core = 256;
+    par.max_core = 512;
     par.mapping = mapping;
     par.seed = 1;
     u = tbt_sclc_uplink_new(groups, &par);

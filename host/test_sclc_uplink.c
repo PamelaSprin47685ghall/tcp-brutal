@@ -1229,6 +1229,148 @@ static void test_reject(void)
     ok(u == NULL, "reject: bad mapping", "accepted");
 }
 
+/* The 512-variable core: a mask whose core the 256 cap skips must decode
+ * with the raised cap, and a core above 512 must fall back without claiming
+ * a missing share.  The same mask drives both codecs, so the comparison is
+ * paired. */
+static void test_core512(void)
+{
+    const u16 n = 22, m = 10;
+    struct tbt_sclc_params p;
+    struct tbt_sclc_uplink *u256, *u512, *u0, *u8g;
+    struct block blk;
+    u8 pd[256], pp[256];
+    int found = 0, over = 0, t;
+
+    memset(&p, 0, sizeof(p));
+    p.n = n;
+    p.m = m;
+    p.block = 128;
+    p.L = 16;
+    p.rate_num = 176;
+    p.rate_den = 256;
+    p.mapping = TBT_SCLC_MAP_BITPLANE64;
+    p.seed = 1;
+    p.max_core = 256;
+    u256 = tbt_sclc_uplink_new(1, &p);
+    p.max_core = 512;
+    u512 = tbt_sclc_uplink_new(1, &p);
+    p.max_core = 0;
+    u0 = tbt_sclc_uplink_new(1, &p);
+    p.max_core = 512;
+    u8g = tbt_sclc_uplink_new(8, &p);
+    ok(u256 && u512 && u0 && u8g, "core512: codecs build", "");
+    if (!u256 || !u512 || !u0 || !u8g)
+        goto out;
+    ok(tbt_sclc_uplink_mem(u8g) < 7u * 1024u * 1024u,
+       "core512: 8-group codec stays under 7 MiB", "");
+    ok(tbt_sclc_uplink_mem(u512) > 512u * 1024u,
+       "core512: per-codec matrix is at least 512 KiB", "");
+    if (block_alloc(&blk, n, m) != 0)
+    {
+        ok(0, "core512: block alloc", "");
+        goto out;
+    }
+
+    /* p=0.1: the 256 cap skips the larger cores, the 512 cap solves them. */
+    rng_seed(0xC0DE512ULL);
+    for (t = 0; t < 2000 && !found; t++)
+    {
+        struct tbt_sclc_stat s256, s512;
+        int r256, r512;
+        u16 i;
+
+        for (i = 0; i < n; i++)
+            pd[i] = (u8)(rng_mil() >= 100000);
+        for (i = 0; i < m; i++)
+            pp[i] = (u8)(rng_mil() >= 100000);
+        block_restore(&blk);
+        if (tbt_sclc_uplink_encode(u512, 0, blk.data, blk.parity) != 0)
+            break;
+        r512 = tbt_sclc_uplink_decode(u512, 0, blk.data, blk.parity, pd, pp);
+        tbt_sclc_uplink_stat(u512, 0, &s512);
+        block_restore(&blk);
+        if (tbt_sclc_uplink_encode(u256, 0, blk.data, blk.parity) != 0)
+            break;
+        r256 = tbt_sclc_uplink_decode(u256, 0, blk.data, blk.parity, pd, pp);
+        tbt_sclc_uplink_stat(u256, 0, &s256);
+        if (r512 == (int)n && r256 < (int)n && s256.core_skipped > 0 &&
+            s512.core_solved > 0)
+            found = 1;
+    }
+    ok(found, "core512: 512 solves a core the 256 cap skips", "");
+    if (found)
+    {
+        block_restore(&blk);
+        if (tbt_sclc_uplink_encode(u512, 0, blk.data, blk.parity) == 0 &&
+            tbt_sclc_uplink_decode(u512, 0, blk.data, blk.parity, pd, pp) ==
+                (int)n)
+            ok(block_compare_known(u512, 0, &blk) == 0,
+               "core512: rescued shares are byte-exact", "");
+        else
+            ok(0, "core512: rescued decode", "");
+    }
+
+    /* p=0.5: a core above 512 (or over the matrix budget) must skip, leave
+     * the missing shares unknown, and never claim them. */
+    rng_seed(0xBAD512ULL);
+    for (t = 0; t < 400 && !over; t++)
+    {
+        struct tbt_sclc_stat st;
+        int r, known = 0;
+        u16 i;
+
+        for (i = 0; i < n; i++)
+            pd[i] = (u8)(rng_mil() >= 500000);
+        for (i = 0; i < m; i++)
+            pp[i] = (u8)(rng_mil() >= 500000);
+        block_restore(&blk);
+        if (tbt_sclc_uplink_encode(u512, 0, blk.data, blk.parity) != 0)
+            break;
+        r = tbt_sclc_uplink_decode(u512, 0, blk.data, blk.parity, pd, pp);
+        tbt_sclc_uplink_stat(u512, 0, &st);
+        for (i = 0; i < n; i++)
+            known += tbt_sclc_uplink_share_known(u512, 0, i);
+        if (st.core_skipped > 0 && r < (int)n)
+        {
+            over = 1;
+            ok_int(r, known, "core512: over-limit return matches known");
+            ok(known < (int)n, "core512: over-limit leaves a share unknown",
+               "");
+        }
+    }
+    ok(over, "core512: over-limit core is skipped", "");
+
+    /* max_core=0 is the no-core fallback: peel only, no core call. */
+    {
+        struct tbt_sclc_stat st;
+        int r, known = 0;
+        u16 i;
+
+        for (i = 0; i < n; i++)
+            pd[i] = (u8)(rng_mil() >= 500000);
+        for (i = 0; i < m; i++)
+            pp[i] = (u8)(rng_mil() >= 500000);
+        block_restore(&blk);
+        if (tbt_sclc_uplink_encode(u0, 0, blk.data, blk.parity) == 0)
+        {
+            r = tbt_sclc_uplink_decode(u0, 0, blk.data, blk.parity, pd, pp);
+            tbt_sclc_uplink_stat(u0, 0, &st);
+            for (i = 0; i < n; i++)
+                known += tbt_sclc_uplink_share_known(u0, 0, i);
+            ok_int(r, known, "core512: no-core return matches known");
+            ok_int((int)st.core_calls, 0, "core512: no-core path skips solve");
+        }
+    }
+    block_free(&blk);
+
+out:
+    tbt_sclc_uplink_free(u256);
+    tbt_sclc_uplink_free(u512);
+    tbt_sclc_uplink_free(u0);
+    tbt_sclc_uplink_free(u8g);
+}
+
 int main(void)
 {
     test_shapes();
@@ -1244,6 +1386,7 @@ int main(void)
     test_full_queue();
     test_gf16_full_queue();
     test_queue_full_scan();
+    test_core512();
     test_reject();
 
     printf("%s: %d checks, %d failures\n", failures ? "FAIL" : "PASS", checks,

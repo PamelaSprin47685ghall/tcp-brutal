@@ -8,10 +8,11 @@
 
 #include "tbt_sc_ldpc_gf16.h"
 
-/* Dense core budget, in bytes, for the coefficient matrix.  256 KiB covers
- * the max_core=256 stopping sets that the GF(16) core actually solves;
- * a larger pathological set is skipped instead of growing without bound. */
-#define GF16_CORE_BUDGET (256u * 1024u)
+/* Dense core budget, in bytes, for the coefficient matrix.  512 KiB covers
+ * a max_core=512 stopping set: the worst shipped uplink shape has
+ * nr ~ 1.5*nu, so nr*(nu+1) ~ 400 KiB at nu=512.  A larger pathological
+ * set is skipped instead of growing without bound. */
+#define GF16_CORE_BUDGET (512u * 1024u)
 
 /* ------------------------------------------------------------------ */
 /* GF(16), primitive polynomial x^4 + x + 1 (0x13)                     */

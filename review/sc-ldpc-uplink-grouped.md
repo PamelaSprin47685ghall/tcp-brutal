@@ -64,8 +64,8 @@
 ## 1. 码型与参数
 
 - 码型：SC-IRA `SC_TERM_ACC`，GF(16) 符号，系统化前向编码，BEC peeling
-  + 有界 GF(16) core solve（`max_core=256`，矩阵/GF(2) 伴随矩阵各
-  512 KiB 上限）。
+  + 有界 GF(16) core solve（`max_core=512`，矩阵预算 512 KiB；
+  核大于 512 或 nr>1022 时走 `core_skipped` 回退）。
 - 每 codeword：`block=128` 变量/耦合块，`L=16`，`n_data=L*block/2=1024`
   符号（512 B payload）。码率由 `n_par` 决定；per-group 形状取
   `n_par = n_data*(den-num)/num`（向下取整）。
@@ -143,6 +143,29 @@ ops 内部约定，不是 wire 字段。**
 |---|---:|---:|---:|---:|
 | 8×32 1/4 (8+24) | 30.5 | 20.8 | 6.05 | 5.69 |
 | 8×32 7/16 (14+18) | 57 | 37 | 11.1 | 11.6 |
+
+### 4.1 core 上限 512 与 Δ_core
+
+- `GF16_CORE_BUDGET` 256→512 KiB，`sclc_ops_new` 的 max_core 256→512；
+  核 512 时 nr≤1022（512 KiB/513），更大的核走 `core_skipped`，不分配、
+  不写错字节。
+- 8 组 codec 的 `tbt_sclc_uplink_mem()`：5489 KiB (n=22) 到 11008 KiB
+  (n=8)，比 256 KiB 预算多 2 MiB；LRU 4×2 MiB=8 MiB，合计 13.4–18.8 MiB，
+  far 955 MiB 无压力。
+- Δ_core=max(0, m−floor(512*32/N))，N=n_data+n_par：
+
+| pct | n | m | N | k_core | Δ_core |
+|---|---|---|---|---|---|
+| 25 | 8 | 24 | 4096 | 4 | 20 |
+| 30 | 9 | 23 | 3640 | 4 | 19 |
+| 40 | 12 | 20 | 2730 | 6 | 14 |
+| 50 | 16 | 16 | 2048 | 8 | 8 |
+| 60 | 18 | 14 | 1792 | 9 | 5 |
+| 70 | 22 | 10 | 1472 | 11 | 0 |
+
+- 最坏 CPU（n=22, core 512, 500 超块/点）：p=0.10 p99 2.1 ms/组、
+  max 25.7 ms；p=0.15 p99 20.2 ms、max 26.6 ms。n=18 p=0.15 p99 0.28 ms、
+  max 34.8 ms。8 组最坏 p99 约 17 ms（n=22 p=0.10），2 vCPU 可承受。
 
 ## 5. 风险与下一步
 
