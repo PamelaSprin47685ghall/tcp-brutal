@@ -306,6 +306,12 @@ struct engine
     u64 drops;
     u64 rx_unknown_sid;
 
+    /* The carrier RTT as the kernel sees it. The ACK carries it to the peer
+     * and the NACK hold uses it: a request for a share that is still in
+     * flight only buys a duplicate. */
+    u32 rtt_us;
+    u64 rtt_sample_ns;
+
     struct pending_ctl pending[TBT_CTL_PENDING];
     int npending;
 };
@@ -1325,7 +1331,7 @@ static int flow_send_ack(struct flow *f)
     memset(&a, 0, sizeof(a));
     a.next_deliver = f->rx_ack_frontier;
     a.credit_packets = flow_rx_credit_update(f);
-    a.rtt_us = f->rtt_us ? f->rtt_us : 1000;
+    a.rtt_us = e->rtt_us ? e->rtt_us : 1000;
     a.deliver_bytes = f->rx_deliver_bytes;
     if (tbt_fec_ack_pack(&a, body))
         return -EINVAL;
@@ -1972,6 +1978,10 @@ static void flow_send_nack_group(struct flow *f, struct rx_block *b,
 
 static void flow_rx_nack(struct flow *f, u64 now)
 {
+    struct engine *e = f->e;
+    u64 rtt_ns = (u64)e->rtt_us * 1000ull;
+    u64 first_ns = TBT_NACK_FIRST_NS + rtt_ns;
+    u64 retry_ns = TBT_NACK_RETRY_NS + rtt_ns;
     u32 off;
 
     /* The window head is the only NACK anchor. Scanning by slot let a stale
@@ -1985,9 +1995,9 @@ static void flow_rx_nack(struct flow *f, u64 now)
 
         if (!b->used || b->id != id)
             continue;
-        if (now - b->first_ns < TBT_NACK_FIRST_NS)
+        if (now - b->first_ns < first_ns)
             continue;
-        if (now - b->last_nack_ns < TBT_NACK_RETRY_NS)
+        if (now - b->last_nack_ns < retry_ns)
             continue;
         for (group = 0; group < b->groups; group++)
         {
@@ -3042,11 +3052,42 @@ static void engine_accept_carrier(struct engine *e)
     }
 }
 
+/* Sample the carrier RTT once per half second. The NACK hold and the ACK's
+ * rtt field both need one carrier round trip: a NACK sent before the first
+ * copy could arrive asks for a share still in flight, and the replay it
+ * buys then competes with the DATA it was meant to repair. The maximum keeps
+ * the hold safe on a skewed pool; zero leaves the 30 ms floor in place. */
+static void engine_sample_rtt(struct engine *e, u64 now)
+{
+    u16 i;
+    u32 max_us = 0;
+
+    if (e->rtt_sample_ns && now - e->rtt_sample_ns < 500ull * 1000 * 1000)
+        return;
+    e->rtt_sample_ns = now;
+    for (i = 0; i < e->n_car; i++)
+    {
+        struct carrier *c = e->car[i];
+        struct tcp_info ti;
+        socklen_t len = sizeof(ti);
+
+        if (!c || c->fd < 0 || c->dead || !c->up)
+            continue;
+        memset(&ti, 0, sizeof(ti));
+        if (!getsockopt(c->fd, IPPROTO_TCP, TCP_INFO, &ti, &len) &&
+            ti.tcpi_rtt > max_us)
+            max_us = ti.tcpi_rtt;
+    }
+    if (max_us)
+        e->rtt_us = max_us < 2000000u ? max_us : 2000000u;
+}
+
 static void engine_tick(struct engine *e)
 {
     u64 now = now_ns();
     int i;
 
+    engine_sample_rtt(e, now);
     pending_flush(e);
     for (i = 0; i < TBT_FLOW_MAX; i++)
         if (e->flow[i])

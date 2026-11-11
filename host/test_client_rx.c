@@ -374,6 +374,16 @@ static int last_ack_credit(void)
     return -1;
 }
 
+static int last_ack_rtt(void)
+{
+    int i;
+
+    for (i = e.npending - 1; i >= 0; i--)
+        if (e.pending[i].rec[0] == TBT_FEC_ACK)
+            return (int)tbt_le32(e.pending[i].rec + 60);
+    return -1;
+}
+
 /* Full, short, marker, marker, marker, marker, full. The frontier must be
  * 64 + 16 + 0 + 0 + 0 + 0 + 64 = 144, while rx_next_block reaches 7. */
 static void test_marker_short_sequence(void)
@@ -499,6 +509,55 @@ static void test_window_and_nack_base(void)
     send_data(0, 0, 8, 24, 0, 0, TBT_FEC_S, false);
     CHECK(f.rx_late_share == 1, "late: old replay counted");
     CHECK(f.rx_next_block == 9, "late: cursor unchanged");
+}
+
+/* A 200 ms carrier RTT: the first NACK waits one trip after the gap first
+ * appeared, not the 30 ms floor, and the ACK carries the sampled value
+ * instead of the old 1 ms placeholder. The retry interval follows the same
+ * trip, so a replay still in flight is not requested twice. */
+static void test_nack_hold_follows_rtt(void)
+{
+    u64 ids[16];
+    u64 t0;
+    u64 now;
+
+    clear_engine();
+    e.rtt_us = 200000;
+    e.rtt_sample_ns = 0;
+
+    /* One real share leaves block 0 incomplete, so it is NACK-eligible. */
+    send_data(0, 0, 8, 24, 0, 0, TBT_FEC_S, false);
+    CHECK(f.rx_next_block == 0, "rtt: head is block 0");
+    t0 = now_ns();
+    f.rx[0].first_ns = t0;
+    f.rx[0].last_nack_ns = 0;
+    f.rx[0].nack_tries = 0;
+
+    clear_pending();
+    flow_rx_nack(&f, t0 + TBT_NACK_FIRST_NS + 1000000ull);
+    CHECK(count_nacks(ids, 16) == 0,
+          "rtt: 30 ms is too early at a 200 ms RTT");
+
+    now = t0 + TBT_NACK_FIRST_NS + 200000000ull + 1000000ull;
+    clear_pending();
+    flow_rx_nack(&f, now);
+    CHECK(count_nacks(ids, 16) >= 1,
+          "rtt: 30 ms + RTT releases the first NACK");
+
+    clear_pending();
+    flow_rx_nack(&f, now + TBT_NACK_RETRY_NS + 1000000ull);
+    CHECK(count_nacks(ids, 16) == 0,
+          "rtt: the retry also waits the RTT");
+
+    clear_pending();
+    flow_rx_nack(&f, now + TBT_NACK_RETRY_NS + 200000000ull + 1000000ull);
+    CHECK(count_nacks(ids, 16) >= 1,
+          "rtt: retry after one RTT releases again");
+
+    clear_pending();
+    CHECK(flow_send_ack(&f) == 0, "rtt: ACK sent");
+    CHECK(last_ack_rtt() == 200000,
+          "rtt: ACK carries the measured RTT, not 1000 us");
 }
 
 /* Consecutive blocks use different n/m; the cursor must follow real packets
@@ -1223,6 +1282,7 @@ int main(void)
     test_marker_short_sequence();
     test_credit_inflight();
     test_window_and_nack_base();
+    test_nack_hold_follows_rtt();
     test_multishape_sequence();
     test_16m_boundary();
     test_downlink_shapes();

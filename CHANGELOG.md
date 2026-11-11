@@ -51,6 +51,16 @@ and moves independently of the module version.
   count, `tbt_fec_credit_packets()` converts the byte window once, and the
   TX gate compares absolute packet frontiers.
 
+### Fixed
+
+- A userspace receiver holds its first NACK for one carrier round trip and
+  its retry for another, instead of a fixed 30 ms and 20 ms. Its ACK now
+  carries the measured carrier RTT instead of a 1 ms placeholder, so the
+  sender's replay dedup window covers the same trip. On a 200-300 ms WAN the
+  old hold named shares still in flight; field evidence: 342,721 late shares
+  for 537 delivered blocks (2.5x the shares those blocks carry), and the TX
+  flush then stalled behind the replay queue for 2.4 s at a time.
+
 ### Known limitations
 
 - At `S=1024, block=64, L=8` the uplink `22/10` split needs more parity symbols
