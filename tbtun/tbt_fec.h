@@ -1885,19 +1885,22 @@ static inline bool tbt_fec_block_shape_ok(u16 n, u16 m, u16 ref_n, u16 ref_m,
  * presence and payload lengths. Placing a share (or resetting the slot)
  * bumps the block's generation; the commit then rejects a result that
  * describes an older state, and the next pass retakes the snapshot. */
-static inline bool tbt_fec_rx_snap_current(bool used, bool ready,
-                                           u64 snap_block_id, u64 block_id,
-                                           u16 snap_n, u16 n,
-                                           u16 snap_m, u16 m,
-                                           bool snap_short_unknown,
-                                           bool short_unknown)
+static inline bool tbt_fec_rx_snap_current(
+    bool used, bool ready, u64 snap_block_id, u64 block_id,
+    u16 snap_n, u16 n, u16 snap_m, u16 m,
+    bool snap_win_len_set, bool win_len_set,
+    u16 snap_nreal, u16 nreal, u16 snap_short_len, u16 short_len,
+    bool snap_short_unknown, bool short_unknown)
 {
     /* A share placed while the codec runs only fills a slot the commit
-     * already skips; it must not discard a successful decode. Only a reused
-     * slot, a ready block, a shape change or a new short-length conflict
-     * invalidates the snapshot. */
+     * already skips; it must not discard a successful decode. A first
+     * PARITY can change win_len_set/nreal/short_len, which changes how the
+     * result is delivered, so those must match. A reused slot, a ready
+     * block or a new short-length conflict also invalidates the snapshot. */
     return used && !ready && snap_block_id == block_id && snap_n == n &&
-           snap_m == m && snap_short_unknown == short_unknown;
+           snap_m == m && snap_win_len_set == win_len_set &&
+           snap_nreal == nreal && snap_short_len == short_len &&
+           snap_short_unknown == short_unknown;
 }
 
 /* The extra present shares beyond the block's real DATA length that an

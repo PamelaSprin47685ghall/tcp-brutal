@@ -3254,6 +3254,8 @@ struct tbt_fec_decode_snap
     u32 gen;
     u16 n, m, real;
     u16 short_len;
+    u16 nreal;
+    bool win_len_set;
     bool short_unknown;
     struct tbt_fec_codec_entry *codec_entry;
     u8 *data;
@@ -5066,6 +5068,8 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
             snap->m = b->m;
             snap->real = real;
             snap->short_len = b->short_len;
+            snap->nreal = b->nreal;
+            snap->win_len_set = b->win_len_set;
             snap->short_unknown = b->short_unknown;
             snap->codec_entry = b->codec_entry;
             snap->data = b->data;
@@ -5104,9 +5108,12 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
      * block, makes this result describe an older state. Discard it without
      * touching the block; the placement path already cleared the retry
      * deadline, so the next pass snapshots the new state. */
-    if (!tbt_fec_rx_snap_current(b->used, b->ready, snap->block_id,
-                                 b->block_id, snap->n, b->n, snap->m, b->m,
-                                 snap->short_unknown, b->short_unknown))
+    if (!tbt_fec_rx_snap_current(
+            b->used, b->ready, snap->block_id, b->block_id,
+            snap->n, b->n, snap->m, b->m,
+            snap->win_len_set, b->win_len_set, snap->nreal, b->nreal,
+            snap->short_len, b->short_len, snap->short_unknown,
+            b->short_unknown))
     {
         spin_unlock_bh(&rx->lock);
         return false;

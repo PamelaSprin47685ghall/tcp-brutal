@@ -2395,6 +2395,8 @@ struct rx_snap_model
     u32 gen;
     u16 n, m, real;
     u16 short_len;
+    u16 nreal;
+    bool win_len_set;
     bool short_unknown;
     u16 dlen[8];
     u8 dpresent[8];
@@ -2408,6 +2410,8 @@ struct rx_blk_model
     u32 gen;
     u16 n, m, real;
     u16 short_len;
+    u16 nreal;
+    bool win_len_set;
     bool short_unknown;
     u16 dlen[8];
     u8 dpresent[8];
@@ -2423,6 +2427,8 @@ static void rx_snap_take(struct rx_snap_model *s, const struct rx_blk_model *b)
     s->m = b->m;
     s->real = b->real;
     s->short_len = b->short_len;
+    s->nreal = b->nreal;
+    s->win_len_set = b->win_len_set;
     s->short_unknown = b->short_unknown;
     memcpy(s->dlen, b->dlen, sizeof(s->dlen));
     memcpy(s->dpresent, b->dpresent, sizeof(s->dpresent));
@@ -2472,30 +2478,48 @@ static void test_decode_snapshot(void)
        "snapshot: a share placed during decode does not change the input");
     ok(s.dpresent[2] == 0,
        "snapshot: presence seen by the codec is the claimed state");
-    ok(tbt_fec_rx_snap_current(b.used, false, s.block_id, b.block_id,
-                               s.n, b.n, s.m, b.m, s.short_unknown,
-                               b.short_unknown),
+    ok(tbt_fec_rx_snap_current(
+            b.used, false, s.block_id, b.block_id, s.n, b.n, s.m, b.m,
+            s.win_len_set, b.win_len_set, s.nreal, b.nreal,
+            s.short_len, b.short_len, s.short_unknown, b.short_unknown),
        "snapshot: a filled missing slot does not discard the decode");
 
     /* A PARITY record fixes the cut during the same decode. */
     b.ppresent[1] = 1;
     b.gen++;
-    ok(tbt_fec_rx_snap_current(b.used, false, s.block_id, b.block_id,
-                               s.n, b.n, s.m, b.m, s.short_unknown,
-                               b.short_unknown),
+    ok(tbt_fec_rx_snap_current(
+            b.used, false, s.block_id, b.block_id, s.n, b.n, s.m, b.m,
+            s.win_len_set, b.win_len_set, s.nreal, b.nreal,
+            s.short_len, b.short_len, s.short_unknown, b.short_unknown),
        "snapshot: an extra PARITY does not discard the decode");
+
+    /* A first PARITY during the same decode changes win_len_set/nreal/
+     * short_len; the commit must reject the old-state result. */
+    b.win_len_set = true;
+    b.nreal = 3;
+    b.short_len = 100;
+    ok(!tbt_fec_rx_snap_current(
+           b.used, false, s.block_id, b.block_id, s.n, b.n, s.m, b.m,
+           s.win_len_set, b.win_len_set, s.nreal, b.nreal,
+           s.short_len, b.short_len, s.short_unknown, b.short_unknown),
+       "snapshot: a first PARITY changes the commit basis");
+    b.win_len_set = s.win_len_set;
+    b.nreal = s.nreal;
+    b.short_len = s.short_len;
 
     /* The slot is reused for another block: same generation is not enough. */
     b.block_id = 43;
     b.gen = s.gen;
-    ok(!tbt_fec_rx_snap_current(b.used, false, s.block_id, b.block_id,
-                                s.n, b.n, s.m, b.m, s.short_unknown,
-                                b.short_unknown),
+    ok(!tbt_fec_rx_snap_current(
+            b.used, false, s.block_id, b.block_id, s.n, b.n, s.m, b.m,
+            s.win_len_set, b.win_len_set, s.nreal, b.nreal,
+            s.short_len, b.short_len, s.short_unknown, b.short_unknown),
        "snapshot: a reused slot rejects the commit");
     b.block_id = 42;
-    ok(tbt_fec_rx_snap_current(b.used, false, s.block_id, b.block_id,
-                               s.n, b.n, s.m, b.m, s.short_unknown,
-                               b.short_unknown),
+    ok(tbt_fec_rx_snap_current(
+            b.used, false, s.block_id, b.block_id, s.n, b.n, s.m, b.m,
+            s.win_len_set, b.win_len_set, s.nreal, b.nreal,
+            s.short_len, b.short_len, s.short_unknown, b.short_unknown),
        "snapshot: the unchanged block still commits");
 
     /* The next pass retakes the snapshot: the arrived share is now part of
