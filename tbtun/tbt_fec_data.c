@@ -43,6 +43,8 @@
 #include "tbt_sclc_uplink.h"
 #include "tbt_rec.h"
 
+static struct tbt_fec_blk *tbt_fec_rx_blk(struct tbt_fec_rx *rx, u16 group,
+                                          u64 block_id);
 static struct tbt_fec_grouped *tbt_fec_codec_new(
     const struct tbt_fec_sclc_shape *sclc, u16 groups, u16 n, u16 m, u16 k,
     u16 w, u8 d, u64 nonce);
