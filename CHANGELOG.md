@@ -93,6 +93,13 @@ and moves independently of the module version.
 
 ### Fixed
 
+- A sequential connection no longer races the previous stream's FIN. The
+  session carries one FEC flow, and the flow is released only when the old
+  stream detaches after both FINs; a `connect()` that arrived inside that
+  window was reset with `ECONNRESET`. The pending path now holds the
+  connection for a closing stream (50 ms probe, extended once to the 3 s
+  peer-FIN bound) and still refuses a genuinely concurrent stream, counted
+  in `fec_stream_refused`.
 - The ACK credit is now counted in shares (`groups*(n+m)` per block), not
   DATA packets; it supersedes the 0.8.0 packet-credit model. The cap is
   16384 shares (64 blocks x 256); the host formula is

@@ -1100,6 +1100,34 @@ static bool tbt_stream_is_closing(const struct tbt_stream *st)
     return false;
 }
 
+/* The session carries one FEC flow; report whether the stream that owns it
+ * already left the data path (FIN requested, peer FIN seen, or its socket in
+ * the close handshake). A pending connection waits for that stream to detach
+ * instead of resetting the connection: the transport is still carrying the
+ * previous stream's FIN, not a concurrent application stream. */
+bool tbt_session_flow_owner_closing(struct tbt_session *sess)
+{
+    struct tbt_fec_flow *f;
+    struct tbt_stream *st;
+    u64 sid;
+    bool closing;
+
+    if (!sess || !sess->fec)
+        return false;
+    spin_lock(&sess->lock);
+    f = sess->fec_primary;
+    sid = f ? f->sid : 0;
+    spin_unlock(&sess->lock);
+    if (!sid)
+        return false;
+    st = tbt_stream_get(sess, sid, false, false);
+    if (!st)
+        return false;
+    closing = READ_ONCE(st->tx_fin_sent) || tbt_stream_is_closing(st);
+    tbt_stream_put(st);
+    return closing;
+}
+
 /* Find the flow an OPEN names, or admit one from its bitmap. Returns a
  * referenced flow or an ERR_PTR. Two carriers deliver the same OPEN, so a
  * lost admission race (-EEXIST) is resolved by looking the winner up. */
