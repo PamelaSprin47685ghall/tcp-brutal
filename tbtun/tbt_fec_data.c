@@ -1598,6 +1598,10 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess,
 
     if (!tx->codec || !win_len || win_len > tx->blk_n)
         return;
+    if (win_len >= tx->blk_n)
+        atomic64_inc(&sess->fec_tx_block_complete);
+    else
+        atomic64_inc(&sess->fec_tx_block_partial);
     count = tbt_fec_tx_parity_count(win_len, tx->blk_n, tx->blk_m,
                                     block_code);
     if (!count)
@@ -1645,6 +1649,7 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess,
         h.reserved = group;
         if (tbt_fec_make_record(sess, &h, tx->parity_ptrs[i], tx->rec, &rec_len))
             continue;
+        tbt_fec_bitmap_set(tx->g[group].sent, (u16)(tx->blk_n + i));
         WRITE_ONCE(tx->last_group, group);
         WRITE_ONCE(tx->last_share, (u16)(tx->blk_n + i));
         st = -EINVAL;
@@ -1702,6 +1707,7 @@ static void tbt_fec_tx_emit_empty(struct tbt_session *sess,
     h.reserved = group;
     if (tbt_fec_make_record(sess, &h, NULL, tx->rec, &rec_len))
         return;
+    tbt_fec_bitmap_set(tx->g[group].sent, tx->blk_n);
     WRITE_ONCE(tx->last_group, group);
     WRITE_ONCE(tx->last_share, tx->blk_n);
     /* A marker is not stored in the replay ring: it is a statement about a
@@ -1936,6 +1942,7 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
         tx->g[group].blk_id = block_id;
         tx->g[group].nreal = 0;
         tx->g[group].last_len = 0;
+        memset(tx->g[group].sent, 0, sizeof(tx->g[group].sent));
     }
     if (share != tx->g[group].nreal)
         atomic64_inc(&sess->fec_tx_share_gap);
@@ -2001,6 +2008,7 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
                                  rec, rec_len);
             spin_unlock_bh(&tx->replay_lock);
         }
+        tbt_fec_bitmap_set(tx->g[group].sent, share);
         (void)tbt_fec_send_record_flow(sess, carrier, rec, rec_len, false,
                                        false, tx->flow);
         tx->data_pkts_sent++;
@@ -2120,6 +2128,30 @@ static bool tbt_fec_tx_is_idle(struct tbt_session *sess,
     return tbt_fec_fin_ready(pkt_idle, queued);
 }
 
+/* Debug-only bitmaps. out must hold 2*TBT_FEC_BITMAP_BYTES+1 bytes. */
+static void tbt_fec_diag_bm(char *out, const u8 *src, u16 first, u16 count)
+{
+    u8 bm[TBT_FEC_BITMAP_BYTES];
+    u16 i;
+
+    memset(bm, 0, sizeof(bm));
+    for (i = 0; i < count; i++)
+        if (tbt_fec_bitmap_test(src, (u16)(first + i)))
+            tbt_fec_bitmap_set(bm, i);
+    for (i = 0; i < TBT_FEC_BITMAP_BYTES; i++)
+        snprintf(out + (size_t)i * 2, 3, "%02x", bm[i]);
+    out[TBT_FEC_BITMAP_BYTES * 2] = 0;
+}
+
+static void tbt_fec_diag_hex(char *out, const u8 *bm)
+{
+    u16 i;
+
+    for (i = 0; i < TBT_FEC_BITMAP_BYTES; i++)
+        snprintf(out + (size_t)i * 2, 3, "%02x", bm[i]);
+    out[TBT_FEC_BITMAP_BYTES * 2] = 0;
+}
+
 /* The bounded TX reset in tbt_tx.c fires after 30 s without an ACK advance.
  * Acceptance runs debug=0, so its TXSTALLKILL line is invisible; this
  * ratelimited line names the same state from the FEC side before the reset:
@@ -2172,6 +2204,23 @@ static void tbt_fec_tx_stall_diag(struct tbt_session *sess,
                         rq, rb, READ_ONCE(sess->fec_replay_over_high),
                         atomic64_read(&sess->fec_replay_pass_throttled),
                         (now - last) / NSEC_PER_USEC);
+    if (debug >= 1)
+    {
+        u16 g;
+
+        for (g = 0; g < tx->groups; g++)
+        {
+            char dh[TBT_FEC_BITMAP_BYTES * 2 + 1];
+            char ph[TBT_FEC_BITMAP_BYTES * 2 + 1];
+
+            tbt_fec_diag_bm(dh, tx->g[g].sent, 0, tx->blk_n);
+            tbt_fec_diag_bm(ph, tx->g[g].sent, tx->blk_n, tx->blk_m);
+            pr_info_ratelimited("tbtun: fec TX block bitmap block=%llu group=%u n=%u m=%u seq0=%llu data=%s parity=%s\n",
+                                READ_ONCE(tx->cur_block), g,
+                                READ_ONCE(tx->blk_n), READ_ONCE(tx->blk_m),
+                                READ_ONCE(tx->blk_seq0), dh, ph);
+        }
+    }
 }
 
 /* Move to the next block when the one under construction is closed: every
@@ -6816,6 +6865,29 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
         atomic64_inc(&sess->fec_nack_rx);
         atomic64_add(tbt_fec_bitmap_count(n.share_mask),
                      &sess->fec_nack_req_shares);
+        if (debug >= 1)
+        {
+            char req[TBT_FEC_BITMAP_BYTES * 2 + 1];
+
+            tbt_fec_diag_hex(req, n.share_mask);
+            for (g = 0; g < tg; g++)
+            {
+                u8 avail[TBT_FEC_BITMAP_BYTES];
+                char ah[TBT_FEC_BITMAP_BYTES * 2 + 1];
+                u16 s;
+
+                if (!tbt_fec_bitmap_test(n.group_mask, g))
+                    continue;
+                memset(avail, 0, sizeof(avail));
+                for (s = 0; s < shares; s++)
+                    if (tbt_fec_bitmap_test(n.share_mask, s) &&
+                        tbt_fec_replay_has(tx->replay, h.block_id, g, s))
+                        tbt_fec_bitmap_set(avail, s);
+                tbt_fec_diag_hex(ah, avail);
+                pr_info_ratelimited("tbtun: fec NACK bitmap block=%llu group=%u n=%u m=%u req=%s avail=%s\n",
+                                    h.block_id, g, tn, tm, req, ah);
+            }
+        }
         /* Repair is active from this point: the sender is about to build and
          * queue replay records, and the TX stall check must not kill the
          * stream while that work is in flight. */
@@ -6884,6 +6956,8 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
                 len = tbt_fec_replay_get(tx->replay, h.block_id, g, s, buf,
                                          TBT_FEC_REC_MAX);
                 spin_unlock_bh(&tx->replay_lock);
+                if (len == -ESTALE)
+                    atomic64_inc(&sess->fec_replay_evicted_before_nack);
                 if (len > 0)
                 {
                     u64 last;
@@ -6939,6 +7013,8 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
                         plen0 = tbt_fec_replay_get(tx->replay, h.block_id, g,
                                                    tn, buf, TBT_FEC_REC_MAX);
                         spin_unlock_bh(&tx->replay_lock);
+                        if (plen0 == -ESTALE)
+                            atomic64_inc(&sess->fec_replay_evicted_before_nack);
                         if (plen0 > 0 && !tbt_fec_hdr_unpack(buf, &ph0) &&
                             ph0.win_len && s >= ph0.win_len)
                             atomic64_inc(&sess->fec_nack_pad_skip);
@@ -7012,6 +7088,8 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
                                                   (u16)(tn + r), buf,
                                                   TBT_FEC_REC_MAX);
                         spin_unlock_bh(&tx->replay_lock);
+                        if (plen == -ESTALE)
+                            atomic64_inc(&sess->fec_replay_evicted_before_nack);
                         if (plen <= 0)
                             continue;
                         spin_lock_bh(&tx->replay_lock);

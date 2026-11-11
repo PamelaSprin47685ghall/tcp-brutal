@@ -843,6 +843,10 @@ struct tbt_fec_gtx
      * full. It travels in the parity record's epoch field so a receiver that
      * recovers that share still knows how many bytes it carried. */
     u16 last_len;
+    /* Shares actually written into this block (0..n+m-1): DATA when the
+     * packetizer sends it, PARITY when the encoder emits it. Debug only;
+     * the replay ring remains the authority for what can be replayed. */
+    u8 sent[TBT_FEC_BITMAP_BYTES];
 };
 
 struct tbt_fec_replay;
@@ -1821,6 +1825,9 @@ struct tbt_session
     atomic64_t fec_credit_wait;
     atomic64_t fec_credit_violation;
     atomic64_t fec_credit_midblock_wait;
+    atomic64_t fec_tx_block_complete;
+    atomic64_t fec_tx_block_partial;
+    atomic64_t fec_replay_evicted_before_nack;
     /* FEC sender scheduling. fec_flush_pass counts accepted DATA records.
      * fec_flush_skip and fec_hol_wait are kept for the old per-carrier queue
      * accounting; the session FIFO never queues a record behind one socket,
