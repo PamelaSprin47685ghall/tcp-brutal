@@ -12,10 +12,11 @@
  *   3. tbt_peers_show() hides a stopping far carrier, so the view names only
  *      the current generation.
  *   4. tbt_car_setsockbuf() gives every carrier one 0.8 MiB buffer per
- *      direction and clears the buffer userlocks, so TCP/BBR autotuning
- *      may grow both fields;
- *      tbt_car_set_bbr() asks for BBR and keeps the carrier's default CC
- *      when the kernel does not provide it.
+ *      direction and clears the buffer userlocks, so TCP autotuning may grow
+ *      both fields;
+ *      tbt_car_set_cc() asks for this module's tbt_cc first and falls back to
+ *      BBR, keeping the carrier's default CC only when the kernel provides
+ *      neither.
  *
  * The slot and socket models below follow those functions line by line.
  * Change both together.
@@ -212,9 +213,9 @@ static void test_peers_render(void)
     ok_int(rows[0], 6, "far peers: the row names the new generation");
 }
 
-/* --- 4. carrier transport: 0.8 MiB buffers, autotuning, BBR ----------- */
+/* --- 4. carrier transport: 0.8 MiB buffers, autotuning, CC ------------ */
 
-/* The four fields tbt_car_setsockbuf() and tbt_car_set_bbr() touch. The
+/* The four fields tbt_car_setsockbuf() and tbt_car_set_cc() touch. The
  * starting values describe a socket whose buffer fields were locked by an
  * earlier SO_SNDBUF/SO_RCVBUF request: the assignment must clear both lock
  * bits and keep every other bit. */
@@ -234,15 +235,24 @@ static void model_setsockbuf(struct transport *t, unsigned int carriers)
     t->userlocks &= ~TBT_CAR_SOCKBUF_LOCK_MASK;
 }
 
-/* tbt_car_set_bbr(): one setsockopt(SOL_TCP, TCP_CONGESTION, "bbr", 4),
- * where optlen counts the terminating NUL. -ENOENT (no CONFIG_TCP_CONG_BBR)
- * is ignored and the carrier keeps the CC it already had. */
-static int model_set_bbr(struct transport *t, bool kernel_has_bbr)
+/* tbt_car_set_cc(): one setsockopt(SOL_TCP, TCP_CONGESTION) for tbt_cc,
+ * then one for the BBR fallback. -ENOENT (the kernel lacks that algorithm)
+ * is ignored; the socket's actual name is the proof. The carrier keeps the
+ * CC it already had when both requests fail. */
+static int model_set_cc(struct transport *t, bool kernel_has_tbt_cc,
+                        bool kernel_has_bbr)
 {
-    if (!kernel_has_bbr)
-        return -2; /* -ENOENT */
-    strcpy(t->cc, TBT_CAR_CC_NAME);
-    return 0;
+    if (kernel_has_tbt_cc)
+    {
+        strcpy(t->cc, TBT_CAR_CC_NAME);
+        return 0;
+    }
+    if (kernel_has_bbr)
+    {
+        strcpy(t->cc, TBT_CAR_CC_FALLBACK);
+        return 0;
+    }
+    return -2; /* -ENOENT */
 }
 
 static void test_carrier_transport(void)
@@ -277,16 +287,21 @@ static void test_carrier_transport(void)
     ok(!(t.userlocks & TBT_CAR_SOCKBUF_LOCK_MASK),
        "transport: autotuning is enabled on both buffers");
 
-    ok_int(model_set_bbr(&t, true), 0,
-           "bbr: the setsockopt path accepts BBR");
-    ok(!strcmp(t.cc, "bbr"),
-       "bbr: the carrier requests the shared TBT_CAR_CC_NAME");
-    ok_int((int)sizeof(TBT_CAR_CC_NAME), 4,
-           "bbr: optlen covers the three letters and the NUL");
-    ok_int(model_set_bbr(&t, false), -2,
-           "bbr: a kernel without BBR answers -ENOENT");
-    ok(!strcmp(t.cc, "bbr"),
-       "bbr: a refused request keeps the carrier's current CC");
+    ok_int(model_set_cc(&t, true, true), 0,
+           "cc: the setsockopt path accepts tbt_cc");
+    ok(!strcmp(t.cc, TBT_CAR_CC_NAME),
+       "cc: the carrier requests the shared TBT_CAR_CC_NAME");
+    ok_int((int)sizeof(TBT_CAR_CC_NAME), 7,
+           "cc: optlen covers the six letters and the NUL");
+    ok_int(model_set_cc(&t, false, true), 0,
+           "cc: a kernel without tbt_cc accepts the BBR fallback");
+    ok(!strcmp(t.cc, TBT_CAR_CC_FALLBACK),
+       "cc: the fallback is the stock BBR name");
+    strcpy(t.cc, "cubic");
+    ok_int(model_set_cc(&t, false, false), -2,
+           "cc: a kernel without either answers -ENOENT");
+    ok(!strcmp(t.cc, "cubic"),
+       "cc: a refused request keeps the carrier's current CC");
 }
 
 int main(void)

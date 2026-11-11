@@ -221,6 +221,18 @@ static void tbt_carrier_install_proto(struct sock *sk)
     sk->sk_prot = tbt_car_proto(sk->sk_family);
 }
 
+/* True only for a socket that still carries the private carrier proto. tbt_cc
+ * uses this before it treats sk_user_data as a struct tbt_carrier: a public
+ * stream socket may also have tbt_cc selected (a system-wide default), and
+ * its sk_user_data is a struct tbt_stream. The caller holds the socket's
+ * callback lock, which also serialises the proto restore in unpublish. */
+bool tbt_carrier_owns_sk(const struct sock *sk)
+{
+    if (!sk)
+        return false;
+    return sk->sk_prot == tbt_car_proto(sk->sk_family);
+}
+
 /* Take one reference on the published socket. The RCU read section covers
  * only "read the pointer + take a reference"; the caller may sleep, take the
  * socket lock and send until tbt_carrier_sk_put(). NULL means the carrier has
@@ -3460,17 +3472,14 @@ void tbt_car_setsockbuf(struct socket *s, u32 carriers)
     sk->sk_userlocks &= ~TBT_CAR_SOCKBUF_LOCK_MASK;
 }
 
-/* Ask for BBR on one carrier. sock_setsockopt(SOL_TCP, TCP_CONGESTION) is the
- * kernel entry point: tcp_setsockopt() reaches tcp_set_congestion_control()
- * with the flag that loads a congestion-control module on demand. Calling
- * tcp_set_congestion_control() directly is not an option for this module:
- * the 7.2.9 build tree does not export it (nor tcp_ca_find) in
- * Module.symvers. A kernel built without CONFIG_TCP_CONG_BBR, or one whose
- * namespace lacks CAP_NET_ADMIN, refuses the request; the carrier then keeps
- * the system default and still carries traffic. */
-/* The congestion control the socket is actually using. The request below can
- * fail while the namespace default already is BBR, so the only honest proof
- * is the algorithm the socket carries, not the setsockopt return. */
+/* Ask for one congestion control by name. sock_setsockopt(SOL_TCP,
+ * TCP_CONGESTION) is the kernel entry point: tcp_setsockopt() reaches
+ * tcp_set_congestion_control() with the flag that loads a congestion-control
+ * module on demand. Calling tcp_set_congestion_control() directly is not an
+ * option for this module: the 7.2.9 build tree does not export it (nor
+ * tcp_ca_find) in Module.symvers. A kernel without the named algorithm, or a
+ * namespace without CAP_NET_ADMIN, refuses the request; the caller then keeps
+ * whatever the socket already runs. */
 static const char *tbt_car_cc_actual(struct sock *sk)
 {
     struct inet_connection_sock *icsk = inet_csk(sk);
@@ -3480,36 +3489,57 @@ static const char *tbt_car_cc_actual(struct sock *sk)
     return icsk->icsk_ca_ops->name;
 }
 
-static bool tbt_car_set_bbr(struct socket *s)
+static bool tbt_car_set_one_cc(struct socket *s, const char *name)
 {
     int err;
 
-    if (!s || !s->sk)
-        return false;
     /* Some kernels reject the trailing NUL in optlen; try the exact name
      * length first, then the literal size for kernels that want it. */
     err = sock_setsockopt(s, SOL_TCP, TCP_CONGESTION,
-                          KERNEL_SOCKPTR(TBT_CAR_CC_NAME),
-                          (unsigned int)strlen(TBT_CAR_CC_NAME));
+                          KERNEL_SOCKPTR((void *)name),
+                          (unsigned int)strlen(name));
     if (err)
         err = sock_setsockopt(s, SOL_TCP, TCP_CONGESTION,
-                              KERNEL_SOCKPTR(TBT_CAR_CC_NAME),
-                              sizeof(TBT_CAR_CC_NAME));
-    /* The socket's actual algorithm decides: a kernel that refuses the
-     * option but already runs BBR is a correct carrier, and counting it as a
-     * failure hid that. A refusal on a non-BBR default still keeps the
-     * carrier alive, but must be named once. */
-    if (strcmp(tbt_car_cc_actual(s->sk), TBT_CAR_CC_NAME))
+                              KERNEL_SOCKPTR((void *)name),
+                              (unsigned int)strlen(name) + 1);
+    /* The socket's actual algorithm decides: a kernel that refuses the option
+     * but already runs the requested algorithm is a correct carrier. */
+    if (strcmp(tbt_car_cc_actual(s->sk), name))
     {
-        pr_info_ratelimited("tbtun: carrier TCP_CONGESTION=%s failed: %d actual=%s; keeping it\n",
-                            TBT_CAR_CC_NAME, err,
-                            tbt_car_cc_actual(s->sk));
+        if (err)
+            pr_info_ratelimited("tbtun: carrier TCP_CONGESTION=%s failed: %d actual=%s\n",
+                                name, err, tbt_car_cc_actual(s->sk));
         return false;
     }
-    if (err)
-        pr_info_ratelimited("tbtun: carrier TCP_CONGESTION=%s refused: %d but actual=bbr\n",
-                            TBT_CAR_CC_NAME, err);
     return true;
+}
+
+/* Prefer this module's loss-tolerant controller; BBR is the fallback when the
+ * kernel or namespace refuses the name. The carrier stays usable either way. */
+static bool tbt_car_set_cc(struct socket *s)
+{
+    if (!s || !s->sk)
+        return false;
+    if (tbt_car_set_one_cc(s, TBT_CAR_CC_NAME))
+        return true;
+    if (tbt_car_set_one_cc(s, TBT_CAR_CC_FALLBACK))
+        return true;
+    pr_info_ratelimited("tbtun: carrier has neither %s nor %s: actual=%s; keeping it\n",
+                        TBT_CAR_CC_NAME, TBT_CAR_CC_FALLBACK,
+                        tbt_car_cc_actual(s->sk));
+    return false;
+}
+
+/* One FEC record must own one skb: the downlink shell retransmission replaces
+ * a whole record in place, and a GSO super-skb would span several records with
+ * no boundary to match. Clearing the route caps also stops TCP from handing a
+ * multi-segment skb to the device. */
+static void tbt_car_no_gso(struct sock *sk)
+{
+    if (!sk)
+        return;
+    sk->sk_route_caps &= ~(NETIF_F_GSO_MASK | NETIF_F_SG);
+    WRITE_ONCE(sk->sk_gso_max_segs, 1);
 }
 
 /* Dial `addr` until the handshake finishes or TBT_CONNECT_BUDGET_MS is spent.
@@ -3634,10 +3664,10 @@ static void tbt_car_connect_work(struct work_struct *w)
     /* Before the SYN: the handshake freezes the window scale from this
      * socket's receive buffer. */
     tbt_car_setsockbuf(s, sess->n_car);
-    /* Set before the SYN so the first cwnd starts under BBR. Some kernels
-     * refuse TCP_CONGESTION until the socket leaves TCP_CLOSE; the retry
-     * after a successful connect is the one that is counted. */
-    tbt_car_set_bbr(s);
+    /* Set before the SYN so the first cwnd starts under the carrier
+     * controller. Some kernels refuse TCP_CONGESTION until the socket leaves
+     * TCP_CLOSE; the retry after a successful connect is the one counted. */
+    tbt_car_set_cc(s);
     tbt_carrier_keepalive(s);
     s->sk->sk_sndtimeo = msecs_to_jiffies(TBT_CONNECT_TIMEOUT_MS);
     {
@@ -3662,7 +3692,9 @@ static void tbt_car_connect_work(struct work_struct *w)
         goto release;
 
     tcp_sk(s->sk)->nonagle = TCP_NAGLE_OFF;
-    if (tbt_car_set_bbr(s))
+    /* One record per skb: the downlink shell retransmission depends on it. */
+    tbt_car_no_gso(s->sk);
+    if (tbt_car_set_cc(s))
         atomic64_inc(&sess->car_bbr_ok);
     else
         atomic64_inc(&sess->car_bbr_fail);
@@ -3987,7 +4019,8 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
     /* The listener already fixed the window scale; apply the per-direction
      * buffer size to the accepted socket as well. */
     tbt_car_setsockbuf(newsock, sess->n_car);
-    if (tbt_car_set_bbr(newsock))
+    tbt_car_no_gso(newsock->sk);
+    if (tbt_car_set_cc(newsock))
         atomic64_inc(&sess->car_bbr_ok);
     else
         atomic64_inc(&sess->car_bbr_fail);

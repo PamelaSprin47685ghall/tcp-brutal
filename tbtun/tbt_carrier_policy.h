@@ -32,10 +32,12 @@ static inline u32 tbt_car_sockbuf_of(u32 carriers)
     return TBT_CAR_SOCKBUF_PER;
 }
 
-/* The one congestion control 0.7.0 asks for by name. The module and the host
- * test share the literal, so a rename cannot pass the test while the kernel
- * still requests the old name. */
-#define TBT_CAR_CC_NAME "bbr"
+/* The congestion control the carrier asks for, and the stock fallback. The
+ * module and the host test share both literals, so a rename cannot pass the
+ * test while the kernel still requests the old name. tbt_cc is registered by
+ * this module; BBR is the fallback for a kernel or namespace that refuses it. */
+#define TBT_CAR_CC_NAME "tbt_cc"
+#define TBT_CAR_CC_FALLBACK "bbr"
 
 /* A near carrier may create, bind and connect a socket only after
  * tbt_port_alloc() returned a real port with TBT_PORT_ALLOC_OK. A zero port

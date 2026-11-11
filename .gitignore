@@ -295,6 +295,9 @@ host/test_fin_priority
 host/test_close_wake
 host/test_hold
 host/test_hold_san
+host/test_cc_shell
+host/test_cc_shell_san
+__pycache__/
 host/test_multistream
 host/test_anchor
 host/test_tx_index

@@ -7,6 +7,28 @@ and moves independently of the module version.
 
 ### Added
 
+- The carrier sockets run `tbt_cc`, a loss-tolerant congestion control
+  registered by this module. It keeps the maximum delivery rate of the last
+  ten RTTs and paces at `max_bw / (1 - p)`, with `p` the peer's FEC_FBK loss
+  estimate for this direction, clamped to a 1 MB/s floor and the tunnel's
+  configured or measured rate. `snd_cwnd` stays at twice the BDP and
+  `ssthresh`/`undo_cwnd` report that same window, so a SACK loss never halves
+  the carrier window; `CA_EVENT_CWND_RESTART` is ignored so the peripheral
+  BBR hold keeps the idle window. Carrier sockets clear the GSO route caps and
+  set `sk_gso_max_segs = 1`, so one FEC record owns one skb.
+- Downlink shell retransmission. `tbt_cc`'s `in_ack_event` walks the carrier's
+  retransmit queue up to `highest_sack` and, for an un-SACKed,
+  un-retransmitted, private, linear hole whose length equals one framed FEC
+  record, replaces the payload in place with the session FIFO head. The
+  original record stays in the FEC replay ring and the peer repairs it with a
+  NACK. The 64-slot `mut_ring` records the hole's real TCP sequence, and a
+  real DSACK block that names it pushes the replacement record back onto the
+  replay queue (`car_shell_dsack_rescued`). `skb->cb` is never touched.
+- `tests/coexist/coexist.sh` and `make coexist-test`: the coexistence
+  acceptance. One stock TCP flow and the tbtun carriers share a shaped veth
+  bottleneck; the measured criterion is the stock flow's throughput drop
+  (`<= 10%` by default), not tbtun's own goodput. Needs root, `ip`, `tc` and
+  python3; otherwise it exits 77 as a skip.
 - IPv6 endpoints. `listen=`, `peer=`, `target=` and `srcaddrs=` accept an IPv4
   literal or a bracketed IPv6 literal (`[2001:db8::1]:9000`), and one tunnel
   line may mix families. The listener, carrier dial and target dial create the

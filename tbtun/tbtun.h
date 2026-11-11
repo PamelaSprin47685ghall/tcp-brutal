@@ -45,6 +45,7 @@
 #include "tbt_fec_codec_cache.h"
 #include "tbt_fec_adapt_sclc.h"
 #include "tbt_fec_late.h"
+#include "tbt_cc.h"
 #include <linux/version.h>
 
 /* system_dfl_wq exists from 6.5. Its documented semantics are "unbound, not
@@ -1218,6 +1219,11 @@ struct tbt_fec_out
     u16 len;
     u8 control;
     u8 replay; /* queued from the replay ring: charged to the byte budget */
+    /* One consumer (the drain work or the shell retransmit path) owns this
+     * record while claimed is set. The FIFO head does not move until that
+     * owner releases it, so a failed write puts the record back without a
+     * rewind and the other consumer cannot take the same record twice. */
+    u8 claimed;
     /* Replay only: the super-block this record belongs to. The flush frees
      * it without a write once the peer's delivered frontier passes that
      * block, so an acked repair never sits ahead of the tail. */
@@ -1520,6 +1526,10 @@ struct tbt_session
      * repair is in progress; only this file writes it. */
     u64 fec_repair_last_ns;
     spinlock_t fec_out_lock;
+    /* Serialises the FIFO head between the drain work and the shell
+     * retransmit path in tbt_cc.c. The producer (packetizer) stays lockless;
+     * this lock covers only the head slot, the claim flag and the advance. */
+    spinlock_t fec_fifo_lock;
     /* Debug-only FEC share loss, indexed by the share's scheduled carrier.
      * It lives on the session, not the carrier object, so the injector keeps
      * dropping that share after its carrier dies and is replaced. */
@@ -1530,6 +1540,10 @@ struct tbt_session
      * read by the c13 stats line. */
     bool adaptive;
     struct tbt_fec_adapt_ctl adapt;
+    /* The peer's FEC_FBK loss estimate for this direction, mirrored here so
+     * tbt_cc's ACK path reads one session word instead of walking the flow
+     * table. Written by the FBK handler, read by tbt_cc.c. */
+    u32 cc_loss_ppm;
     bool closing; /* session teardown started: no new joins, no new work */
     struct list_head prov; /* accepted carriers waiting for HELLO */
     /* Join-replaced carriers whose socket release is deferred out of the
@@ -1683,10 +1697,16 @@ struct tbt_session
     atomic64_t slow_evicted;
     u64 last_slow_evict_ns;
     /* Carrier congestion-control setup: one increment per dialled or adopted
-     * socket that accepted / refused TCP_CONGESTION=bbr. A field run can
-     * prove all n_car sockets are BBR from /proc instead of inferring it. */
+     * socket that ended on tbt_cc or its BBR fallback (ok), or on neither
+     * (fail). A field run can prove every carrier socket left the system
+     * default from /proc instead of inferring it. */
     atomic64_t car_bbr_ok;
     atomic64_t car_bbr_fail;
+    /* Downlink shell retransmission: holes whose payload was replaced with a
+     * fresh FEC record, and replacement records the peer DSACKed and the
+     * replay queue was asked to resend. Written by tbt_cc.c. */
+    atomic64_t car_shell_retrans_mutated;
+    atomic64_t car_shell_dsack_rescued;
     /* Economic stall decision (poll). The discrete RTO grid estimates the
      * recovery survival function online; risk[i] counts stalls that were
      * still running at grid[i], events[i] those that recovered in
@@ -2191,6 +2211,11 @@ struct tbt_carrier
     u64 hold_since_ns;
     u64 hold_last_loss_ns;
     bool hold_active;
+    /* tbt_cc controller state and the holes it filled. Only this socket's
+     * ACK path writes them; the ring is read there too, never by /proc. */
+    struct tbt_cc_state cc;
+    struct tbt_cc_mut mut_ring[TBT_CC_MUT_SLOTS];
+    u32 mut_next;
     u64 retry_at_ns;              /* next connect attempt */
     u64 rx_frames;                /* DATA frames received here; this rx work */
     u64 rx_bytes;                 /* bytes received here; this rx work */
@@ -2321,6 +2346,8 @@ struct tbt_carrier *tbt_carrier_get(struct tbt_session *sess, u8 index);
 void tbt_carrier_put(struct tbt_carrier *c);
 u32 tbt_carrier_gen(struct tbt_session *sess, u8 index);
 struct sock *tbt_carrier_sk_get(struct tbt_carrier *c);
+/* True while `sk` still carries the private carrier proto. */
+bool tbt_carrier_owns_sk(const struct sock *sk);
 void tbt_carrier_sk_put(struct sock *sk);
 /* Existence check only: no reference, no sleep. Safe under RCU, and safe for
  * the advisory checks in lost/action/connect work. */
@@ -2422,6 +2449,17 @@ int tbt_carrier_send_fec(struct tbt_carrier *c, const u8 *rec, size_t len);
 int tbt_carrier_send_fec_batch(struct tbt_carrier *c,
                                const u8 *const *recs, const u16 *lens,
                                u16 count, u16 *sent);
+/* Shell retransmission: claim the FIFO head when its framed wire length
+ * equals payload_len and payload still starts with that record's frame. The
+ * caller copies the record, then calls tbt_fec_out_shell_done(). */
+struct tbt_fec_out *tbt_fec_out_claim_shell(struct tbt_session *sess,
+                                            const u8 *payload,
+                                            u16 payload_len, bool http);
+void tbt_fec_out_shell_done(struct tbt_session *sess, struct tbt_fec_out *o);
+/* Push one share named by block/group/share from the primary TX replay ring
+ * back onto the session replay queue. Returns 0 when queued. */
+int tbt_fec_replay_share(struct tbt_session *sess, u64 block_id, u16 group,
+                         u16 share);
 /* Session-level 50 ms liveness poll (tbt_carrier.c), armed by tbt_session.c. */
 void tbt_session_poll_work(struct work_struct *w);
 

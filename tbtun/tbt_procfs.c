@@ -1237,7 +1237,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                  * carrier write, not to enqueue. */
                 if (s->fec_fifo)
                 {
-                    spin_lock(&s->fec_out_lock);
+                    spin_lock_bh(&s->fec_out_lock);
                     qdepth = (u32)atomic_read(&s->fec_outq_queued);
                     qbytes = (u32)atomic_read(&s->fec_outq_bytes);
                     qmax = READ_ONCE(s->fec_outq_depth_max);
@@ -1245,7 +1245,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                     qctl_bytes = s->fec_out_ctl_bytes;
                     rq = s->fec_replay_queued;
                     rb = s->fec_replay_bytes;
-                    spin_unlock(&s->fec_out_lock);
+                    spin_unlock_bh(&s->fec_out_lock);
                 }
                 seq_printf(m, "tunnel %llu c11 fec_nack_tx=%llu "
                               "fec_nack_rx=%llu fec_nack_retx=%llu "
@@ -1406,11 +1406,15 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                         }
                         rcu_read_unlock();
                         seq_printf(m, "tunnel %llu c12 fec_outq fifo=%u/%u "
-                                      "rot=%u slow=%u txring=%u/%u\n", id,
+                                      "rot=%u slow=%u txring=%u/%u "
+                                      "shell_mutated=%llu shell_dsack_rescued=%llu\n",
+                                   id,
                                    atomic_read(&s->fec_outq_queued),
                                    atomic_read(&s->fec_outq_bytes),
                                    atomic_read(&s->async_rot), slow, queued,
-                                   ring);
+                                   ring,
+                                   tbt_stat_read(&s->car_shell_retrans_mutated),
+                                   tbt_stat_read(&s->car_shell_dsack_rescued));
                     }
                 }
                 /* c13: the adaptive control surface. The shape is the one in

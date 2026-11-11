@@ -169,10 +169,20 @@ static int __init tbtun_init(void)
         return ret;
     }
 
+    /* Before any carrier socket: tbt_car_set_cc() asks for this name first
+     * and falls back to BBR only when the kernel has no tbt_cc. */
+    ret = tbt_cc_register();
+    if (ret)
+    {
+        tbt_fec_data_module_exit();
+        return ret;
+    }
+
     ret = tbt_procfs_init();
     if (ret)
     {
         pr_err("tbtun: cannot create /proc/net/tbtun: %d\n", ret);
+        tbt_cc_unregister();
         tbt_fec_data_module_exit();
         return ret;
     }
@@ -181,6 +191,7 @@ static int __init tbtun_init(void)
     if (err)
     {
         tbt_procfs_exit();
+        tbt_cc_unregister();
         tbt_fec_data_module_exit();
         return err;
     }
@@ -199,6 +210,9 @@ static void __exit tbtun_exit(void)
      * sessions down outside it; a destroy that waits for work must not pin
      * the global lock. */
     tbt_tunnel_shutdown();
+    /* Every carrier socket is closed now, so no icsk_ca_ops still names the
+     * ops this module registered. */
+    tbt_cc_unregister();
     /* No flow can be put after the session teardown. Drain and destroy the
      * module-owned flow free workqueue: session destroy queues the last puts
      * there, and synchronize_rcu()/rcu_barrier() do not wait for work items.
