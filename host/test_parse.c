@@ -2037,9 +2037,9 @@ int main(void)
         ok(cmd.cfg.adaptive == 1 && cmd.cfg.mode == 3 &&
                cmd.cfg.n == 64 && cmd.cfg.m == 192 && cmd.cfg.w == 256,
            "adaptive", "downlink 25% accepted");
-        refuse("sc-ldpc adaptive: downlink off-ladder n/m",
+        refuse("sc-ldpc adaptive: downlink n out of range",
                "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-               " n=127 m=129 fec=on mode=sc-ldpc adaptive=on carriers=256",
+               " n=193 m=63 fec=on mode=sc-ldpc adaptive=on carriers=256",
                TBT_PARSE_EINVAL, "adaptive", "supported profile");
         refuse("sc-ldpc adaptive: downlink block",
                "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
@@ -2052,7 +2052,7 @@ int main(void)
                TBT_PARSE_EINVAL, "adaptive", "block=128");
         refuse("sc-ldpc adaptive: uplink off-ladder n/m",
                "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-               " n=14 m=18 fec=on mode=sc-ldpc adaptive=on w=128"
+               " n=19 m=13 fec=on mode=sc-ldpc adaptive=on w=128"
                " carriers=256 L=16",
                TBT_PARSE_EINVAL, "adaptive", "rate ladder");
     }

@@ -5,7 +5,7 @@
  *   modules the FEC and session state machines are built from:
  *
  *     - tbt_portmap.c, the carrier source-port allocator;
- *     - the SC-LDPC estimator and rate controller in
+ *     - the SC-LDPC continuous rate controller in
  *       tbt_fec_adapt_sclc.c;
  *     - the receiver reorder-window classifier tbt_fec_rx_window_step().
  *
@@ -14,8 +14,9 @@
  *
  *     P  allocated source ports are unique, the bitmap and the shadow set
  *        agree, and a freed port is immediately allocatable again;
- *     A  every controller output derives n + m == shares, keeps
- *        groups * shares <= 256 and names a rate inside rate_mask;
+ *     A  every controller output derives n + m == shares, names a
+ *        buildable split inside [m_min, m_max], keeps its continuous
+ *        quantities bounded, and holds m while carriers are paused;
  *     R  the reorder cursor never moves backwards inside one window
  *        generation; a rebase starts a new generation only before delivery.
  *
@@ -252,322 +253,230 @@ static void port_check(void)
  * A: SC-LDPC estimator and rate controller
  * ------------------------------------------------------------------ */
 
-#define ADAPT_LEVELS TBT_FEC_ADAPT_SCLC_LEVELS
-
 struct adapt
 {
-    struct tbt_fec_adapt_sclc_est est;
-    struct tbt_fec_adapt_sclc_ctl ctl;
-    struct tbt_fec_adapt_sclc_est_out o;
+    struct tbt_fec_adapt_sclc_ctl c;
+    struct tbt_fec_adapt_sclc_out out;
     u16 shares;
     u16 groups;
-    u64 now;
-    u32 loss_ppm;
+    u16 extra;
+    u16 n_init;
+    u16 n_prev;
+    u16 n_cap;
+    u16 d;
     u16 alive;
-    u16 loss_hold;
-    u32 applied;
-    u32 aborted;
-    u32 rejected;
-    u32 rollbacks;
-    u32 reasons[32];
+    u16 stalled;
+    u16 m_prev;
+    u32 w_ppm;
+    u32 abandoned;
+    u32 tick_delivered;
+    u32 ticks;
+    u32 frozen;
+    u32 reasons[8];
+    u8 variant;
+    u64 now;
 };
 
-static const u16 adapt_shares[4] = {32, 64, 128, 256};
-
-static void adapt_setup(struct adapt *m, u16 shares, bool enabled, u8 rate_idx)
+static void adapt_setup(struct adapt *m, u8 variant)
 {
-    const struct tbt_fec_adapt_sclc_rate *r =
-        tbt_fec_adapt_sclc_rate_at(rate_idx);
     int rc;
 
     memset(m, 0, sizeof(*m));
-    m->shares = shares;
-    m->groups = (u16)(TBT_FEC_MAX_CARRIERS / shares);
-    m->now = SEC;
-    m->loss_ppm = 5000;
-    m->alive = 256;
-    tbt_fec_adapt_sclc_est_init(&m->est, shares);
-    tbt_fec_adapt_sclc_est_carriers(&m->est, 256, 0, 256);
-    ok(r != NULL, "adapt: starting rate is on the ladder");
-    rc = tbt_fec_adapt_sclc_ctl_init(&m->ctl, enabled, r->pct, shares,
-                                     m->groups);
+    m->variant = variant;
+    if (variant == TBT_FEC_SCLC_UP)
+    {
+        m->shares = 32;
+        m->groups = 8;
+        m->extra = 2;
+        m->n_init = 16;
+    }
+    else
+    {
+        m->shares = 256;
+        m->groups = 1;
+        m->extra = 8;
+        m->n_init = 128;
+    }
+    rc = tbt_fec_adapt_sclc_init(&m->c, m->shares, m->groups, m->extra,
+                                 m->n_init, variant);
     eq64((u64)(u32)rc, 0, "adapt: controller init");
-    tbt_fec_adapt_sclc_ctl_set_epoch(&m->ctl, 1);
-    tbt_fec_adapt_sclc_ctl_set_rate_mask(
-        &m->ctl, (u8)((1u << ADAPT_LEVELS) - 1u));
-}
-
-static void adapt_feed(struct adapt *m, u32 loss_ppm, u32 r_ppm)
-{
-    u8 miss[TBT_FEC_ADAPT_BITMAP_BYTES];
-    u8 alive[TBT_FEC_ADAPT_BITMAP_BYTES];
-    u16 i, g, miss_n;
-    u32 pkts = 256u;
-    u32 req;
-
-    memset(miss, 0, sizeof(miss));
-    memset(alive, 0xff, sizeof(alive));
-    miss_n = (u16)(((u64)loss_ppm * m->shares) / 1000000ull);
-    if (miss_n > m->shares)
-        miss_n = m->shares;
-    for (i = 0; i < miss_n; i++)
-        tbt_fec_adapt_bitmap_set(miss, i);
-    for (g = 0; g < m->groups; g++)
-        tbt_fec_adapt_sclc_est_block(&m->est, m->now, g, m->shares, miss,
-                                     alive);
-    tbt_fec_adapt_sclc_est_super(&m->est, m->now);
-    req = (u32)(((u64)r_ppm * pkts + 500000ull) / 1000000ull);
-    tbt_fec_adapt_sclc_est_fail(&m->est, m->now, req, pkts);
+    m->now = SEC;
+    m->d = 1;
+    m->w_ppm = 1000000;
+    m->alive = (u16)(m->groups * m->shares);
+    m->m_prev = (u16)(m->shares - m->n_init);
+    m->n_cap = m->n_init;
+    ok(m->c.ready != 0, "adapt: controller is ready");
+    eq64(m->c.shares, m->shares, "adapt: controller shares");
+    eq64(m->c.groups, m->groups, "adapt: controller groups");
+    eq64(m->c.variant, variant, "adapt: controller variant");
 }
 
 static void adapt_check(struct adapt *m,
                         const struct tbt_fec_adapt_sclc_out *out)
 {
-    u8 idx = out->switch_now ? out->to : m->ctl.cur;
-    const struct tbt_fec_adapt_sclc_rate *r;
-    u32 p_used;
+    u32 total = (u32)m->groups * m->shares;
+    bool pause;
 
-    ok(m->ctl.ready != 0, "adapt: controller is ready");
-    eq64(m->ctl.shares, m->shares, "adapt: controller shares");
-    eq64(m->ctl.groups, m->groups, "adapt: controller groups");
-    ok(m->ctl.cur < ADAPT_LEVELS, "adapt: current index is on the ladder");
-    ok((m->ctl.rate_mask & (1u << m->ctl.cur)) != 0,
-       "adapt: current rate is inside rate_mask");
-    ok(m->ctl.rate_mask != 0 && (m->ctl.rate_mask & ~0x3fu) == 0,
-       "adapt: rate_mask is a nonempty ladder subset");
-    ok((u32)m->groups * m->shares <= 256,
-       "adapt: groups * shares fits the carrier pool");
-    ok(idx < ADAPT_LEVELS, "adapt: output index is on the ladder");
-    ok((m->ctl.rate_mask & (1u << idx)) != 0,
-       "adapt: output rate is inside rate_mask");
-    eq64(out->from, m->ctl.cur, "adapt: from is the current index");
-    if (!out->switch_now)
-        eq64(out->to, m->ctl.cur, "adapt: a quiet output names the current");
-    eq64((u64)out->shape.n + out->shape.m, m->shares,
+    ok(out->reason <= TBT_FEC_ADAPT_SCLC_R_SATURATED,
+       "adapt: reason is in the enum");
+    /* A paused or cold tick reports the burst of the last control tick; that
+     * burst was capped by the n in force then, which is not today's n. */
+    if (out->reason != TBT_FEC_ADAPT_SCLC_R_PAUSED &&
+        out->reason != TBT_FEC_ADAPT_SCLC_R_COLD)
+        m->n_cap = m->n_prev;
+    eq64((u64)out->n_target + out->m_target, m->shares,
          "adapt: n + m == shares");
-    ok(out->shape.n > 0 && out->shape.m > 0, "adapt: both sides are nonempty");
-    eq64(out->shape.groups, m->groups, "adapt: shape groups");
-    r = tbt_fec_adapt_sclc_rate_at(idx);
-    ok(r != NULL, "adapt: output index has a ladder rate");
-    if (r)
-    {
-        eq64(out->shape.rate_pct, r->pct, "adapt: shape rate_pct");
-        eq64(out->shape.rate_ppm, r->ppm, "adapt: shape rate_ppm");
-    }
-    if (!m->ctl.enabled)
-    {
-        ok(!out->switch_now, "adapt: a disabled controller never switches");
-        eq64(out->reason, TBT_FEC_ADAPT_SCLC_R_DISABLED,
-             "adapt: a disabled controller says so");
-    }
-    if (out->reason == TBT_FEC_ADAPT_SCLC_R_ROLLBACK)
-    {
-        eq64(out->to, m->ctl.commit_from, "adapt: rollback returns to the base");
-        ok(out->to < m->ctl.cur, "adapt: rollback lowers the rate");
-    }
+    ok(out->m_target >= m->c.m_min && out->m_target <= m->c.m_max,
+       "adapt: m_target is inside the clamp");
+    ok(tbt_fec_adapt_sclc_buildable(m->variant, out->n_target,
+                                    out->m_target),
+       "adapt: the output split is buildable");
+    ok(out->eps_q16 >= 65536u / m->shares,
+       "adapt: eps is at least one share");
+    ok(out->eps_q16 <= TBT_FEC_ADAPT_SCLC_EPS_MAX_Q16,
+       "adapt: eps is at most 5%");
+    ok(out->sigma_q16 >= TBT_FEC_ADAPT_SCLC_SIGMA_MIN_Q16,
+       "adapt: sigma is at least one share");
+    ok(out->burst_q16 <= ((u32)m->n_cap << 16) / 4u,
+       "adapt: burst is bounded by a quarter block");
+    ok(out->q_raw_q16 < ((u32)m->shares << 16),
+       "adapt: q_raw is inside the block");
+    ok(out->delta_q16 < ((u32)m->shares << 16),
+       "adapt: delta is inside the block");
+    ok(out->backup <= m->shares, "adapt: backup fits the block");
 
-    p_used = m->o.p_win_ppm > m->o.p_ewma_ppm ? m->o.p_win_ppm
-                                              : m->o.p_ewma_ppm;
-    eq64(m->o.p_ppm, p_used, "adapt: p_used is max(window, EWMA)");
-    ok(m->o.p_ppm <= 1000000u, "adapt: p_ppm is a share");
-    ok(m->o.p_ewma_ppm <= 1000000u, "adapt: EWMA is a share");
-    ok(m->o.p_win_ppm <= 1000000u, "adapt: window p is a share");
-    ok(m->o.p_fast_ppm <= 1000000u, "adapt: fast p is a share");
-    ok(m->o.r_fail_ppm <= 1000000u, "adapt: r_fail is a share");
-    ok(m->o.codec_fail_ppm <= 1000000u, "adapt: codec failure is a share");
-    eq64(m->est.shares, m->shares, "adapt: estimator shares");
-}
-
-static void adapt_tick(struct adapt *m, u32 loss_ppm, u32 r_ppm,
-                       struct tbt_fec_adapt_sclc_out *out)
-{
-    m->now += 250ull * MS;
-    tbt_fec_adapt_sclc_est_carriers(&m->est, m->alive, 0, 256);
-    adapt_feed(m, loss_ppm, r_ppm);
-    tbt_fec_adapt_sclc_est_sample(&m->est, m->now, &m->o);
-    tbt_fec_adapt_sclc_ctl_eval(&m->ctl, &m->o, m->now, out);
-    if (out->reason < 32)
-        m->reasons[out->reason]++;
-    adapt_check(m, out);
-}
-
-static void adapt_apply(struct adapt *m,
-                        const struct tbt_fec_adapt_sclc_out *out)
-{
-    u8 to = out->to;
-
-    tbt_fec_adapt_sclc_ctl_applied(&m->ctl, m->now);
-    eq64(m->ctl.cur, to, "adapt: applied moves the current rate");
-    ok(!m->ctl.busy, "adapt: applied clears the pending switch");
-    ok((m->ctl.rate_mask & (1u << m->ctl.cur)) != 0,
-       "adapt: the applied rate stays inside rate_mask");
-    m->applied++;
-}
-
-static void adapt_switch_action(struct adapt *m,
-                                const struct tbt_fec_adapt_sclc_out *out)
-{
-    u32 act = rnd_below(100);
-
-    if (out->reason == TBT_FEC_ADAPT_SCLC_R_ROLLBACK)
-        m->rollbacks++;
-    if (act < 62)
-    {
-        adapt_apply(m, out);
-        if (m->ctl.commit_raise && rnd_below(3) == 0)
-        {
-            struct tbt_fec_adapt_sclc_est_out bad = m->o;
-
-            bad.r_valid = true;
-            bad.r_fail_ppm = 30000;
-            bad.codec_fail_ppm = 0;
-            tbt_fec_adapt_sclc_ctl_commit_failed(&m->ctl, &bad, m->now);
-        }
-    }
-    else if (act < 82)
-    {
-        u8 cur = m->ctl.cur;
-
-        tbt_fec_adapt_sclc_ctl_abort(&m->ctl);
-        eq64(m->ctl.cur, cur, "adapt: abort keeps the rate");
-        ok(!m->ctl.busy, "adapt: abort clears the pending switch");
-        m->aborted++;
-    }
+    pause = m->alive == 0 || (u32)m->stalled * 10u > total;
+    if (m->tick_delivered)
+        pause = pause || (u64)m->abandoned * 100u > m->tick_delivered;
     else
+        pause = pause || m->abandoned != 0;
+    if (pause)
     {
-        u8 cur = m->ctl.cur;
-
-        tbt_fec_adapt_sclc_ctl_rejected(&m->ctl, m->now);
-        eq64(m->ctl.cur, cur, "adapt: a refused CFG keeps the rate");
-        ok(!m->ctl.busy, "adapt: a refused CFG clears the pending switch");
-        ok(m->ctl.reject_target < ADAPT_LEVELS,
-           "adapt: a refused CFG names a valid fallback");
-        m->rejected++;
+        eq64(out->frozen, 1, "adapt: a paused tick is frozen");
+        eq64(out->m_target, m->m_prev, "adapt: a paused tick holds m");
     }
+    if (out->frozen)
+        m->frozen++;
+    m->m_prev = out->m_target;
 }
 
-static void adapt_step(struct adapt *m)
+static void adapt_feed(struct adapt *m, u16 E, u16 S, bool first_ok,
+                       u16 real)
 {
-    static const u32 levels[5] = {0u, 30000u, 150000u, 350000u, 600000u};
-    struct tbt_fec_adapt_sclc_out out;
-
-    /* Sustained loss phases, not white noise: the controller needs several
-     * samples and a dwell before it may move, so a one-tick jump would only
-     * exercise the filters. A phase is 2..17 s. */
-    if (!m->loss_hold)
-    {
-        m->loss_ppm = levels[rnd_below(5)];
-        m->loss_hold = (u16)(40 + rnd_below(120));
-    }
-    m->loss_hold--;
-
-    /* Rarely starve the carrier population; the estimator must freeze and
-     * the controller must not switch from that sample. */
-    m->alive = (rnd_below(2000) == 0) ? 180 : 256;
-
-    if (rnd_below(3000) == 0)
-        tbt_fec_adapt_sclc_ctl_set_enabled(&m->ctl, !m->ctl.enabled, m->now);
-
-    /* A rate plan may change only between epochs: a mask that dropped the
-     * pending target would leave applied() naming an unsupported rate. */
-    if (!m->ctl.busy && rnd_below(700) == 0)
-    {
-        u8 mask = (u8)(1u << m->ctl.cur);
-        u8 i;
-
-        for (i = 0; i < ADAPT_LEVELS; i++)
-            if (rnd_below(2) == 0)
-                mask |= (u8)(1u << i);
-        tbt_fec_adapt_sclc_ctl_set_rate_mask(&m->ctl, mask);
-        eq64(m->ctl.rate_mask, mask, "adapt: a supported plan is installed");
-    }
-
-    adapt_tick(m, m->loss_ppm,
-               rnd_below(100) < 10 ? 25000u + rnd_below(20000u)
-                                   : rnd_below(5000u),
-               &out);
-    if (out.switch_now)
-        adapt_switch_action(m, &out);
+    tbt_fec_adapt_sclc_block_sample(&m->c, E, S, first_ok, real);
+    m->now += 10ull * MS;
+    m->tick_delivered = m->c.delivered;
+    m->n_prev = m->c.n_cur;
+    tbt_fec_adapt_sclc_tick(&m->c, m->now, m->d, m->w_ppm, m->alive,
+                            m->stalled, m->abandoned, &m->out);
+    if (m->out.reason < 8)
+        m->reasons[m->out.reason]++;
+    m->ticks++;
+    adapt_check(m, &m->out);
 }
 
-/* Three deterministic scenarios make the named paths unconditional: a
- * refused down CFG holds the current rate, a bad raise rolls back, and a
- * loss burst skips the dwell. */
-static void adapt_scenarios(void)
+static void adapt_random_feed(struct adapt *m)
 {
-    struct adapt m;
-    struct tbt_fec_adapt_sclc_out out;
+    u16 real = m->c.n_cur;
+
+    m->d = (u16)rnd_below(9);
+    m->w_ppm = 500000u + rnd_below(1500001u);
+    m->alive = (u16)(200u + rnd_below(57u));
+    m->stalled = (u16)rnd_below(31u);
+    m->abandoned = rnd_below(4u);
+    adapt_feed(m, (u16)rnd_below(m->shares / 2u),
+               (u16)(m->extra + rnd_below(9u)),
+               rnd_below(100u) < 95u, real);
+}
+
+/* A deterministic warm start: the 16 cold samples and a few steady ticks. */
+static void adapt_warm(struct adapt *m)
+{
     int i;
 
-    /* A refused down CFG: the peer does not build even lower shapes, so the
-     * controller keeps the rate both ends already use and bans further down
-     * steps instead of walking one rung lower. */
-    adapt_setup(&m, 256, true, 3);
-    out.switch_now = 0;
-    for (i = 0; i < 12 && !out.switch_now; i++)
-        adapt_tick(&m, 400000, 0, &out);
-    ok(out.switch_now, "scenario: 40% loss switches down");
-    eq64(out.to, 2, "scenario: the down target is rate 40");
-    if (out.switch_now)
-    {
-        tbt_fec_adapt_sclc_ctl_rejected(&m.ctl, m.now);
-        eq64(m.ctl.cur, 3, "scenario: the refused CFG keeps rate 50");
-        eq64(m.ctl.reject_target, 3,
-             "scenario: the refused down keeps the current rate");
-        eq64(m.ctl.no_down, 1,
-             "scenario: further down steps are banned");
-        out.switch_now = 0;
-        for (i = 0; i < 16 && !out.switch_now; i++)
-            adapt_tick(&m, 400000, 0, &out);
-        ok(!out.switch_now,
-           "scenario: the refused down is neither retried nor stepped past");
-    }
+    for (i = 0; i < 24; i++)
+        adapt_feed(m, (u16)(m->shares / 8u), m->extra, true, m->c.n_cur);
+}
 
-    /* A bad committed raise rolls back to the rate before it. */
-    adapt_setup(&m, 256, true, 3);
-    out.switch_now = 0;
-    for (i = 0; i < 12 && !out.switch_now; i++)
-        adapt_tick(&m, 0, 0, &out);
-    ok(out.switch_now, "scenario: a clean line raises");
-    eq64(out.to, 5, "scenario: the raise goes to rate 70");
-    if (out.switch_now)
-    {
-        struct tbt_fec_adapt_sclc_est_out bad = m.o;
+/* Both directions, every tick field drawn from the stream. */
+static void adapt_random(void)
+{
+    struct adapt down;
+    struct adapt up;
+    u32 i;
 
-        adapt_apply(&m, &out);
-        bad.r_valid = true;
-        bad.r_fail_ppm = 30000;
-        bad.codec_fail_ppm = 0;
-        tbt_fec_adapt_sclc_ctl_commit_failed(&m.ctl, &bad, m.now);
-        adapt_tick(&m, 0, 0, &out);
-        eq64(out.reason, TBT_FEC_ADAPT_SCLC_R_ROLLBACK,
-             "scenario: a bad raise requests a rollback");
-        ok(out.switch_now, "scenario: the rollback is a switch");
-        if (out.switch_now)
-        {
-            eq64(out.to, 3, "scenario: the rollback returns to rate 50");
-            adapt_apply(&m, &out);
-        }
+    adapt_setup(&down, TBT_FEC_SCLC_DOWN);
+    adapt_setup(&up, TBT_FEC_SCLC_UP);
+    for (i = 0; i < 20000u; i++)
+    {
+        adapt_random_feed(&down);
+        adapt_random_feed(&up);
     }
+}
 
-    /* A loss burst larger than the 4 s window uses the fast path. */
-    adapt_setup(&m, 256, true, 3);
-    out.switch_now = 0;
-    for (i = 0; i < 20; i++)
+/* The freeze paths are unconditional: a dead population, more than 10%
+ * stalled carriers, and abandoned shares above 1% of the block. */
+static void adapt_freeze_cases(void)
+{
+    struct adapt m;
+    u16 held;
+
+    adapt_setup(&m, TBT_FEC_SCLC_DOWN);
+    adapt_warm(&m);
+    held = m.out.m_target;
+    m.alive = 0;
+    adapt_feed(&m, 32, m.extra, true, m.c.n_cur);
+    eq64(m.out.reason, TBT_FEC_ADAPT_SCLC_R_PAUSED,
+         "freeze: a dead population pauses");
+    eq64(m.out.m_target, held, "freeze: a dead population holds m");
+
+    adapt_setup(&m, TBT_FEC_SCLC_DOWN);
+    adapt_warm(&m);
+    held = m.out.m_target;
+    m.stalled = 27;
+    adapt_feed(&m, 32, m.extra, true, m.c.n_cur);
+    eq64(m.out.reason, TBT_FEC_ADAPT_SCLC_R_PAUSED,
+         "freeze: 27 stalled of 256 pauses");
+    eq64(m.out.m_target, held, "freeze: stalled carriers hold m");
+
+    adapt_setup(&m, TBT_FEC_SCLC_DOWN);
+    adapt_warm(&m);
+    held = m.out.m_target;
+    m.abandoned = 3;
+    adapt_feed(&m, 12, m.extra, true, 256);
+    eq64(m.out.reason, TBT_FEC_ADAPT_SCLC_R_PAUSED,
+         "freeze: 3 abandoned shares of 256 pause");
+    eq64(m.out.m_target, held, "freeze: abandoned shares hold m");
+}
+
+/* The 16-sample warm start holds m; the 17th sample lets it move. */
+static void adapt_low_sample(void)
+{
+    struct adapt m;
+    u16 held;
+    u32 q;
+    int i;
+
+    adapt_setup(&m, TBT_FEC_SCLC_DOWN);
+    held = (u16)(m.shares - m.n_init);
+    for (i = 0; i < 16; i++)
     {
-        adapt_tick(&m, 220000, 0, &out);
-        ok(!out.switch_now, "scenario: 22% loss is steady at rate 50");
+        adapt_feed(&m, 12, m.extra, true, m.c.n_cur);
+        eq64(m.out.m_target, held, "cold: m is held for 16 samples");
     }
-    for (i = 0; i < 2 && !out.switch_now; i++)
-        adapt_tick(&m, 600000, 0, &out);
-    ok(out.switch_now, "scenario: a 60% burst switches at once");
-    if (out.switch_now)
-    {
-        eq64(out.reason, TBT_FEC_ADAPT_SCLC_R_BURST,
-             "scenario: the burst path is named");
-        ok(out.to < 3, "scenario: the burst target steps down");
-        adapt_apply(&m, &out);
-    }
+    q = m.out.q_raw_q16;
+    held = m.out.m_target;
+    adapt_feed(&m, 12, m.extra, true, m.c.n_cur);
+    ok(m.out.q_raw_q16 != q || m.out.m_target != held,
+       "cold: the 17th sample moves q or m");
+}
+
+static void adapt_scenarios(void)
+{
+    adapt_random();
+    adapt_freeze_cases();
+    adapt_low_sample();
 }
 
 /* ------------------------------------------------------------------ *
@@ -749,8 +658,8 @@ static int run(u32 steps, u64 seed)
     fail_prints = 0;
 
     port_init();
-    adapt_setup(&adapt, adapt_shares[rnd_below(4)], true,
-                (u8)rnd_below(ADAPT_LEVELS));
+    adapt_setup(&adapt, (u8)(rnd_below(2) ? TBT_FEC_SCLC_UP
+                                          : TBT_FEC_SCLC_DOWN));
     rx_init(&rx);
 
     for (s = 1; s <= steps; s++)
@@ -758,23 +667,23 @@ static int run(u32 steps, u64 seed)
         cur_step = s;
         port_step();
         port_check();
-        adapt_step(&adapt);
+        adapt_random_feed(&adapt);
         rx_step(&rx);
     }
 
     adapt_scenarios();
 
     printf("test_invariants: %u steps, %d checks, %d failures "
-           "(adapt: applied=%u aborted=%u rejected=%u rollbacks=%u; "
+           "(adapt: ticks=%u frozen=%u; "
            "rx: rebases=%llu rewinds=%llu)\n",
-           steps, checks, failures, adapt.applied, adapt.aborted,
-           adapt.rejected, adapt.rollbacks, (unsigned long long)rx.rebases,
+           steps, checks, failures, adapt.ticks, adapt.frozen,
+           (unsigned long long)rx.rebases,
            (unsigned long long)rx.rewinds);
     {
         int r;
 
         printf("adapt reasons:");
-        for (r = 0; r < 32; r++)
+        for (r = 0; r < 8; r++)
             if (adapt.reasons[r])
                 printf(" %d=%u", r, adapt.reasons[r]);
         printf("\n");
