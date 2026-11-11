@@ -252,8 +252,8 @@ static int wait_ready(u16 port, int ms)
 static int echo_server(u16 port)
 {
     struct sockaddr_in sin;
-    int lfd, fd;
     int one = 1;
+    int lfd, fd;
     u8 buf[65536];
 
     lfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -322,7 +322,12 @@ int main(void)
     /* A tail that is not a multiple of S forces one PADDED short DATA
      * share, so the loopback covers the 0.8.0 constant-frame path. */
     size_t total = (size_t)TBT_LOOPBACK_MB * 1024 * 1024 + 10000;
-    u16 base = (u16)(21000 + (getpid() % 1500) * 3);
+    /* Three consecutive ports. Two concurrent runs must not share them, so
+     * allow a caller to partition the range (the same reason the QEMU host
+     * partitions its hostfwd ports). */
+    const char *base_env = getenv("TBT_LOOPBACK_BASE");
+    u16 base = base_env ? (u16)atoi(base_env)
+                        : (u16)(21000 + (getpid() % 1500) * 3);
     struct tbt_engine_cfg near_cfg, far_cfg;
     char far_log[128], near_log[128];
     pid_t far_pid, near_pid, echo_pid;
