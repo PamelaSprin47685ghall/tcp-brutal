@@ -173,7 +173,8 @@ static bool tbt_rx_tree_insert_locked(struct tbt_stream *st, struct tbt_frame *f
 static int tbt_rx_bind_stream(struct tbt_carrier *c, const struct tbt_hdr *h,
                               bool open, const u8 *body, u16 len)
 {
-    int r = tbt_session_bind_sid(c->sess, tbt_hdr_sid(h), open, body, len);
+    int r = tbt_session_bind_sid(c->sess, tbt_hdr_sid(h), open, body, len,
+                                 c->index);
 
     return r == TBT_BIND_BAD ? -EPROTO : 0;
 }

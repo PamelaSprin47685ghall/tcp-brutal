@@ -785,6 +785,7 @@ static void test_shape_rejection(void)
 static struct engine tx_e;
 static struct engine rx_e;
 static int tx_fake_fd = -1;
+static int tx_peer_fd = -1;
 static int tx_dead_fd = -1;
 
 static void tx_fake_carriers(void)
@@ -794,6 +795,7 @@ static void tx_fake_carriers(void)
 
     if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, sv))
         abort();
+    tx_peer_fd = sv[0];
     tx_fake_fd = sv[1];
     for (i = 0; i < TBT_CAR_MAX; i++)
     {
@@ -823,6 +825,102 @@ static void tx_clear_carriers(void)
         close(tx_fake_fd);
         tx_fake_fd = -1;
     }
+    if (tx_peer_fd >= 0)
+    {
+        close(tx_peer_fd);
+        tx_peer_fd = -1;
+    }
+}
+
+/* Decode the records the fake carriers have written since the last drain.
+ * The carrier container is the same chunked HTTP framing the engine emits,
+ * so the test reads the wire, not an internal counter. */
+static int wire_drain(u8 *types, int max)
+{
+    static struct tbt_http_rx rx;
+    static u8 buf[1 << 16];
+    ssize_t n;
+    size_t off = 0;
+    int count = 0;
+
+    if (tx_peer_fd < 0)
+        return 0;
+    tbt_http_rx_new_message(&rx);
+    n = read(tx_peer_fd, buf, sizeof(buf));
+    if (n <= 0)
+        return 0;
+    while (off < (size_t)n && count < max)
+    {
+        const u8 *rec = NULL;
+        size_t rlen = 0;
+        int err = TBT_RX_NEED_MORE;
+        size_t used = tbt_http_fec_frame_decode(&rx, buf + off,
+                                                (size_t)n - off, &rec, &rlen,
+                                                &err);
+
+        off += used;
+        if (err == TBT_RX_OK && rec)
+        {
+            types[count++] = rec[0];
+            if (!used)
+                break;
+            continue;
+        }
+        break;
+    }
+    return count;
+}
+
+/* One drain, then report which close controls were on the wire. */
+static void wire_close_controls(bool *rst, bool *fin)
+{
+    u8 types[64];
+    int i, n = wire_drain(types, (int)(sizeof(types) / sizeof(types[0])));
+
+    *rst = false;
+    *fin = false;
+    for (i = 0; i < n; i++)
+    {
+        if (types[i] == TBT_F_RST)
+            *rst = true;
+        if (types[i] == TBT_F_FIN)
+            *fin = true;
+    }
+}
+
+/* The app fd is a TCP socket in production, and SO_LINGER 0 means RST only
+ * there: the same close on an AF_UNIX socketpair is a clean EOF. */
+static void app_tcp_pair(int sv[2])
+{
+    struct sockaddr_in a;
+    socklen_t alen = sizeof(a);
+    int lfd = socket(AF_INET, SOCK_STREAM, 0);
+
+    if (lfd < 0)
+        abort();
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (bind(lfd, (struct sockaddr *)&a, sizeof(a)) || listen(lfd, 1) ||
+        getsockname(lfd, (struct sockaddr *)&a, &alen))
+        abort();
+    sv[0] = socket(AF_INET, SOCK_STREAM, 0);
+    if (sv[0] < 0 || connect(sv[0], (struct sockaddr *)&a, sizeof(a)))
+        abort();
+    sv[1] = accept(lfd, NULL, NULL);
+    if (sv[1] < 0)
+        abort();
+    close(lfd);
+}
+
+/* -2 when the app never woke, otherwise the read result. */
+static int app_read_result(int fd)
+{
+    struct pollfd p = { .fd = fd, .events = POLLIN };
+
+    if (poll(&p, 1, 500) <= 0)
+        return -2;
+    return (int)read(fd, payload, sizeof(payload));
 }
 
 /* A socket whose peer is gone: every write fails with EPIPE, exactly like a
@@ -1329,6 +1427,110 @@ static void test_ctl_dead_carrier(void)
 
     flow_free(&tx_e, tx);
     tx_close_dead();
+    tx_clear_carriers();
+}
+
+/* A received RST ends the stream in both directions: the application must
+ * see ECONNRESET at once (not a clean FIN for a transfer that never
+ * finished), and the peer learns the stream is gone. */
+static void test_rx_rst_aborts_app(void)
+{
+    struct tbt_hdr h;
+    struct carrier c;
+    struct flow *tx = tx_flow_new();
+    u8 rec[TBT_HDR_LEN];
+    int sv[2];
+    bool rst, fin;
+
+    app_tcp_pair(sv);
+    tx_fake_carriers();
+    tx->app_fd = sv[0];
+    memset(&h, 0, sizeof(h));
+    h.type = TBT_F_RST;
+    h.conv = TBT_CONV;
+    h.sid_lo = (u32)tx->sid;
+    h.sid_hi = (u8)(tx->sid >> 32);
+    tbt_raw_put_hdr(rec, &h, 0);
+    memset(&c, 0, sizeof(c));
+    c.e = &tx_e;
+    c.index = 0;
+    CHECK(handle_record(&tx_e, &c, rec, sizeof(rec)) == 0,
+          "rx rst: the record is accepted");
+    CHECK(tx->dead, "rx rst: the flow is aborted");
+    CHECK(tx->app_fd == -1, "rx rst: the app fd is closed");
+    CHECK(app_read_result(sv[1]) < 0 && errno == ECONNRESET,
+          "rx rst: the app sees ECONNRESET, not a clean EOF");
+    wire_close_controls(&rst, &fin);
+    CHECK(rst && !fin, "rx rst: the answer is RST, never FIN");
+    flow_tick(tx, now_ns());
+    CHECK(tx_e.flow[0] == NULL && tx_e.flow_freed == 1,
+          "rx rst: the slot is released on the next tick");
+    close(sv[1]);
+    tx_clear_carriers();
+}
+
+/* EPIPE on the app fd (the application stopped reading mid-download) is a
+ * full abort: the peer gets RST. A FIN would be stream-ordered and leave the
+ * far target open until its close cap, because the aborted upload can never
+ * complete. */
+static void test_app_epipe_sends_rst(void)
+{
+    struct flow *tx = tx_flow_new();
+    struct linger lg = { .l_onoff = 1, .l_linger = 0 };
+    struct pollfd p;
+    u8 data[64];
+    int sv[2];
+    bool rst, fin;
+
+    app_tcp_pair(sv);
+    tx_fake_carriers();
+    /* The application is gone: SO_LINGER 0 makes the close a reset, and the
+     * RST must be visible before the engine writes or the first write still
+     * succeeds into the send buffer. */
+    (void)setsockopt(sv[1], SOL_SOCKET, SO_LINGER, &lg, sizeof(lg));
+    close(sv[1]);
+    memset(&p, 0, sizeof(p));
+    p.fd = sv[0];
+    p.events = POLLIN | POLLOUT;
+    (void)poll(&p, 1, 500);
+    tx->app_fd = sv[0];
+    memset(data, 0x77, sizeof(data));
+    CHECK(flow_out_append(tx, data, sizeof(data)) == 0,
+          "app epipe: the flush consumes the write error");
+    CHECK(tx->dead, "app epipe: the flow is aborted");
+    CHECK(tx->app_fd == -1, "app epipe: the app fd is closed");
+    CHECK(!tx->fin_sent, "app epipe: a half-close FIN is never sent");
+    wire_close_controls(&rst, &fin);
+    CHECK(rst && !fin, "app epipe: the peer sees RST and no FIN");
+    flow_tick(tx, now_ns());
+    CHECK(tx_e.flow[0] == NULL && tx_e.flow_freed == 1,
+          "app epipe: the slot is released on the next tick");
+    tx_clear_carriers();
+}
+
+/* EOF is the legitimate half-close and must keep its FIN: the app may still
+ * be reading its downlink. */
+static void test_app_eof_sends_fin(void)
+{
+    struct flow *tx = tx_flow_new();
+    int sv[2];
+    bool rst, fin;
+
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, sv))
+        abort();
+    tx_fake_carriers();
+    tx->app_fd = sv[0];
+    if (write(sv[1], payload, 32) != 32)
+        abort();
+    flow_app_read(tx);
+    CHECK(shutdown(sv[1], SHUT_WR) == 0, "app eof: half-close the sender");
+    flow_app_read(tx);
+    CHECK(tx->fin_sent && !tx->dead, "app eof: EOF sends FIN, not an abort");
+    CHECK(tx->app_fd == sv[0], "app eof: the fd stays for the downlink");
+    wire_close_controls(&rst, &fin);
+    CHECK(fin && !rst, "app eof: the wire carries FIN and no RST");
+    flow_free(&tx_e, tx);
+    close(sv[1]);
     tx_clear_carriers();
 }
 
@@ -2434,6 +2636,9 @@ int main(void)
     test_tx_dead_carrier_app_read();
     test_tx_all_carriers_down();
     test_ctl_dead_carrier();
+    test_rx_rst_aborts_app();
+    test_app_epipe_sends_rst();
+    test_app_eof_sends_fin();
     test_tx_encode_failure();
     test_tx_replay_alloc_failure();
     test_fbk_commit();

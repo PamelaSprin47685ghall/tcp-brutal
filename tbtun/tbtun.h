@@ -1854,6 +1854,10 @@ struct tbt_session
     /* A public connection refused because the FEC data plane already carries
      * a live stream: one stream per session is all the FEC record can name. */
     atomic64_t fec_stream_refused;
+    /* Of those refusals, the OPENs answered with an RST on their own path.
+     * A refusal without an answer left the near side waiting for its app
+     * timeout, so this counter must track fec_stream_refused. */
+    atomic64_t fec_refused_rst;
     /* Far side: a DATA/FIN/RST dropped because no stream existed yet. A FEC
      * share sent before its stream's OPEN is consumed by the sender and can
      * never be NACKed; this counter proves that path. */
@@ -2357,6 +2361,9 @@ int tbt_tx_fin(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp,
 int tbt_tx_fbk(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp);
 int tbt_tx_sack(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp);
 int tbt_tx_rst(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp);
+/* One RST back on the path a refused OPEN arrived on. The near side has no
+ * other way to learn that the far created no stream for that sid. */
+int tbt_tx_refuse_open(struct tbt_session *sess, u16 path, u64 sid, gfp_t gfp);
 void tbt_fbk_work(struct work_struct *w);
 void tbt_fbk_kick(struct tbt_session *sess, bool now);
 void tbt_tx_ack(struct tbt_session *sess, struct tbt_carrier *c,
@@ -2535,7 +2542,7 @@ enum tbt_bind_result
     TBT_BIND_BAD,
 };
 int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
-                         const u8 *body, u16 len);
+                         const u8 *body, u16 len, u16 path);
 void tbt_stream_put(struct tbt_stream *st);
 void tbt_stream_detach_from_session(struct tbt_stream *st);
 void tbt_tx_fec_rearm_if_pending(struct tbt_session *sess, struct tbt_stream *st);

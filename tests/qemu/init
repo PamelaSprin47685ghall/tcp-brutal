@@ -46,6 +46,11 @@
 #      new one, not dropped (the carrier_lost path never ran for a carrier
 #      removed by RETIRE/join-supersede, so its retain path bits stayed set
 #      and the retransmit was queued but never picked).
+#   T. the deployed pair in one guest: userspace `tbt_client` near in front of
+#      the kernel far. A second OPEN while the far's one flow is live must be
+#      answered with RST on the ingress path and reset the application in
+#      under 3 s; after the held stream closes the far must release the flow
+#      and accept the next connection.
 # J and K are byte-exactness probes under carrier-TCP loss; they need no
 # placeholder frame, because the sender repairs holes from the replay ring.
 #
@@ -2178,6 +2183,104 @@ probe_s() {
     echo "== probe S: pass"
 }
 
+# --- probe T: the 090 shape, userspace near in front of the kernel far ------
+# This is the deployed pair: tbt_client accepts application TCP and dials the
+# carriers, the module is the far. Two refusal paths are judged here.
+#   (a) A second OPEN while the far's one flow is live is refused -ENOSPC.
+#       The far must answer it with RST on the ingress path; the client must
+#       reset the application at once. The old code dropped the OPEN, so the
+#       application waited out its own handshake timeout (30 s on mihomo).
+#   (b) After the held stream closes, the far's flow must be gone and the
+#       next connection must attach, not be refused for the rest of
+#       close_hard_cap_ms (600 s).
+probe_t() {
+    echo "== probe T: userspace near, refused OPEN and aborted stream"
+    if [ ! -x /bin/tbt_client ]; then
+        fail "probe T: no /bin/tbt_client (tests/qemu/run.sh --bin host/tbt_client)"
+    fi
+    flush_and_wait
+    restart_echo
+    echo 'ports 41024-41535' > "$PORTS" || fail "probe T: ports directive rejected"
+    # The deployment's shapes: far TX 1x256 down, client TX 8x24 up.
+    echo "tunnel 1 role=far profile=http-kal listen=127.0.0.1:$CAR_PORT target=127.0.0.1:$TARGET_PORT2 n=128 m=128 w=256 L=8 fec=on mode=sc-ldpc carriers=256 crypto=off adaptive=off keepalive=5000" \
+        > "$CFG" || fail "probe T: far tunnel rejected"
+    /bin/tbt_client role=near listen=127.0.0.1:"$PUB_PORT" \
+        peer=127.0.0.1:"$CAR_PORT" target=127.0.0.1:"$TARGET_PORT2" \
+        n=8 m=24 w=64 L=8 fec=on mode=sc-ldpc carriers=256 crypto=off \
+        adaptive=off verbose=0 > /tmp/tbt_client.log 2>&1 &
+    _tpid=$!
+    _i=0
+    while [ "$_i" -lt 80 ]; do
+        [ "$(tunnel_stat 1 up)" = 256 ] && break
+        kill -0 "$_tpid" 2> /dev/null || break
+        sleep 0.5
+        _i=$((_i + 1))
+    done
+    if [ "$(tunnel_stat 1 up)" != 256 ]; then
+        echo "   client log:"; tail -n 20 /tmp/tbt_client.log 2> /dev/null
+        kill "$_tpid" 2> /dev/null
+        fail "probe T: the far did not bring up 256 carriers (up=$(tunnel_stat 1 up))"
+    fi
+    echo "   far up=$(tunnel_stat 1 up)"
+    # Hold one stream open so the far's only flow is owned when the second
+    # OPEN arrives.
+    /bin/tbt_ping 127.0.0.1 "$PUB_PORT" 37 15 8000 &
+    _hold=$!
+    _i=0
+    while [ "$_i" -lt 80 ]; do
+        [ "${_active:-0}" -ge 1 ] && break
+        _active=$(tunnel_stat 1 streams_active)
+        [ "${_active:-0}" -ge 1 ] && break
+        sleep 0.25
+        _i=$((_i + 1))
+    done
+    [ "${_active:-0}" -ge 1 ] ||
+        fail "probe T: the held stream never reached the far"
+    _t0=$(cut -d' ' -f1 /proc/uptime)
+    probe_ping_bounded "probe T refused" 65536 10
+    _rc2=$?
+    _t1=$(cut -d' ' -f1 /proc/uptime)
+    _ms=$(awk -v a="$_t0" -v b="$_t1" 'BEGIN { printf "%.0f", (b - a) * 1000 }')
+    wait "$_hold"
+    _rc1=$?
+    _ref=$(tunnel_stat 1 fec_stream_refused)
+    _rst=$(tunnel_stat 1 fec_refused_rst)
+    echo "   first rc=$_rc1 second rc=$_rc2 after ${_ms}ms refused=${_ref:-0} rst=${_rst:-0}"
+    [ "$_rc1" -eq 0 ] ||
+        fail "probe T: the held connection failed while the second was refused"
+    [ "$_rc2" -ne 0 ] ||
+        fail "probe T: the second connection was accepted while the first was live"
+    [ "${_ref:-0}" -ge 1 ] ||
+        fail "probe T: fec_stream_refused=${_ref:-0}, expected at least 1"
+    [ "${_rst:-0}" -ge 1 ] ||
+        fail "probe T: fec_refused_rst=${_rst:-0}: the refused OPEN got no RST"
+    [ "$_ms" -lt 3000 ] ||
+        fail "probe T: the refusal took ${_ms}ms; the application was not reset at once"
+    # The far must release the closed stream's flow. If it does not, the next
+    # OPEN is refused -ENOSPC for the rest of close_hard_cap_ms (600 s).
+    _i=0
+    _left=-1
+    while [ "$_i" -lt 40 ]; do
+        _cur=$(tunnel_stat 1 streams_active)
+        case "$_cur" in
+        '' | *[!0-9]*) ;;
+        *) _left=$_cur ;;
+        esac
+        [ "$_left" -eq 0 ] && break
+        sleep 0.25
+        _i=$((_i + 1))
+    done
+    echo "   far streams_active after the close: $_left"
+    [ "$_left" -eq 0 ] ||
+        fail "probe T: the far kept streams_active=$_left after the stream closed"
+    probe_ping_bounded "probe T after close" 65536 15 ||
+        fail "probe T: the session did not accept a connection after the held stream closed"
+    kill "$_tpid" 2> /dev/null
+    wait "$_tpid" 2> /dev/null
+    echo "   client tail:"; tail -n 5 /tmp/tbt_client.log 2> /dev/null
+    echo "== probe T: pass"
+}
+
 # --- run the selected probes ------------------------------------------------
 want A && run_probe A
 if want A; then
@@ -2206,6 +2309,7 @@ want P && run_probe P
 want Q && run_probe Q
 want R && run_probe R
 want S && run_probe S
+want T && run_probe T
 
 echo 'flush' > "$CFG" 2> /dev/null || true
 for _p in "$echo_pid" "${echo2_pid:-}" "${echo3_pid:-}"; do
