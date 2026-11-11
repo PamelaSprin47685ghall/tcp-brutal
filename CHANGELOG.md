@@ -93,6 +93,16 @@ and moves independently of the module version.
 
 ### Fixed
 
+- A paused carrier is no longer declared dead before TCP's own recovery can
+  finish. The backstop was `4 x stall_ns`, which is 4 s once the 1 s
+  detection floor applies: inside the RTO ladder of one lost segment
+  (0.2+0.4+0.8+1.6+3.2 = 6.2 s for five failed attempts) and a seventh of
+  the 30 s TCP keepalive the design names as its first line of
+  defence. On the far side, which cannot dial, every such call spent a
+  near-side redial: a 256-carrier run logged 9 `stall-dead` losses in 305 s
+  with 61,525 shares, all byte-exact. The bound is now
+  `max(4 x stall_ns, 30 s)`, capped at 300 s, and the predicate lives in
+  `tbt_carrier_policy.h` where `host/test_carrier_policy.c` compiles it.
 - The ACK credit is now counted in shares (`groups*(n+m)` per block), not
   DATA packets; it supersedes the 0.8.0 packet-credit model. The cap is
   16384 shares (64 blocks x 256); the host formula is
