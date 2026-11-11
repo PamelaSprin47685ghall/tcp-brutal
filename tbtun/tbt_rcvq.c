@@ -20,11 +20,12 @@
 #include "tbt_http.h"
 #include "tbt_rcvq.h"
 
-/* __tcp_send_ack() gained a flags argument in 7.0.  Keep the 6.1..6.12
- * signature working so the module loads across the supported matrix. */
+/* __tcp_send_ack() gained a flags argument upstream, and the 6.6/6.12
+ * stable tarballs carry the backport; 6.1.y still has two arguments.  The
+ * supported matrix is 6.1.y (two) and 6.6.162/6.12.116/7.x (three). */
 static void tbt_rcvq_send_ack(struct sock *sk, u32 rcv_nxt)
 {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(7, 0, 0)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
     __tcp_send_ack(sk, rcv_nxt, 0);
 #else
     __tcp_send_ack(sk, rcv_nxt);
