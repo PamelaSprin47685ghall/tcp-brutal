@@ -2206,7 +2206,7 @@ static void tbt_fec_tx_stall_diag(struct tbt_session *sess,
      * compares packets, so a byte-count difference is not a packet lead. At
      * S=1024, 9152 "packets" derived from bytes is 9152*1024 bytes of
      * submitted application data, most of it still in the TX ring. */
-    pr_info_ratelimited("tbtun: fec TX stall diag ack_bytes=%llu tx_bytes=%llu tx_pkts=%llu peer_pkts=%llu lead_pkts=%lld credit_pkts=%u credit_blocks=%u n=%u groups=%u hdr_n=%u hdr_m=%u want_m=%u peer_epoch=%llu cur_block=%llu base_pkt=%llu base_block=%llu credit_wait=%llu g=%u s=%u replay_q=%u replay_bytes=%u high=%d replay_throttled=%llu age_us=%llu\n",
+    pr_info_ratelimited("tbtun: fec TX stall diag ack_bytes=%llu tx_bytes=%llu tx_pkts=%llu peer_pkts=%llu lead_pkts=%lld credit_pkts=%u credit_blocks=%u n=%u groups=%u hdr_n=%u hdr_m=%u want_m=%u peer_epoch=%llu cur_block=%llu base_pkt=%llu base_block=%llu credit_wait=%llu txp=%d txq=%u fec_tx_run=%u sched_tx=%d g=%u s=%u replay_q=%u replay_bytes=%u high=%d replay_throttled=%llu age_us=%llu\n",
                         READ_ONCE(st->tx_ack), READ_ONCE(st->tx_seq),
                         tx_pkts, peer_pkts,
                         (long long)(tx_pkts - peer_pkts), credit,
