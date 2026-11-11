@@ -2035,8 +2035,23 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
  * gate is the unit the receiver buffers (`slots` blocks) and the replay
  * ring holds (K), so a short cut costs exactly one block and a block the
  * packetizer started can always be finished. See tbt_fec_credit_block_ok(). */
+/* True while the packetizer is inside a block it has already started. The
+ * credit gate must never stop there: a partial block at the receiver is
+ * invisible to its ACK (rx_next waits for the whole block), so a mid-block
+ * stop is a deadlock, not backpressure. */
+static bool tbt_fec_tx_block_started(const struct tbt_fec_tx *tx)
+{
+    u64 span = (u64)tx->groups * tx->blk_n;
+
+    return span && tx->seq > tx->blk_seq0 && tx->seq - tx->blk_seq0 < span;
+}
+
 static bool tbt_fec_tx_credit_ok(const struct tbt_fec_tx *tx)
 {
+    /* The gate is a block-boundary gate. Once the block has a share, send
+     * the whole block; the next block start checks the window again. */
+    if (tbt_fec_tx_block_started(tx))
+        return true;
     /* Zero credit is a closed window, not an open one. The receiver always
      * grants at least one block, so zero means no grant has arrived (or a
      * bug); sending on it would overrun the receiver's block slots and the
@@ -2486,6 +2501,20 @@ static noinline void tbt_fec_tx_pump(struct tbt_session *sess,
         if (tx->fill == TBT_FEC_S)
         {
             atomic64_inc(&sess->fec_credit_wait);
+            if (tbt_fec_tx_block_started(tx))
+            {
+                atomic64_inc(&sess->fec_credit_midblock_wait);
+                if (debug)
+                    pr_info_ratelimited("tbtun: fec credit mid-block wait block=%llu seq=%llu base=%llu blk_n=%u g=%u s=%u credit=%u peer=%llu\n",
+                                        READ_ONCE(tx->cur_block),
+                                        READ_ONCE(tx->seq),
+                                        READ_ONCE(tx->blk_seq0),
+                                        READ_ONCE(tx->blk_n),
+                                        READ_ONCE(tx->last_group),
+                                        READ_ONCE(tx->last_share),
+                                        READ_ONCE(tx->credit),
+                                        READ_ONCE(tx->peer_pkts));
+            }
             /* A closed credit window is not stream idle: the block may be
              * partial only because the peer has not granted the next round.
              * Restart both idle clocks, so reopening credit does not seal a
@@ -8076,9 +8105,9 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
          * whose arena may be smaller; the receiver dropped the excess and
          * its ACK froze. Start with one super-block and let the first ACK
          * open the window it can actually buffer. */
-        u32 one = (u32)groups * n;
+        u32 two = 2u * (u32)groups * n;
 
-        tx->credit = one && one < tx->credit_cap ? one : tx->credit_cap;
+        tx->credit = two && two < tx->credit_cap ? two : tx->credit_cap;
     }
     {
         u64 want = (u64)tx->credit * TBT_FEC_S;

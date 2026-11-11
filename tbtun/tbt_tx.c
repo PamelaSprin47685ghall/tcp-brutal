@@ -1912,9 +1912,20 @@ static bool tbt_tx_fec_credit_waiting(const struct tbt_session *sess)
         /* One definition for both users: the packetizer and this reset
          * decision must agree on what "waiting for credit" means, or a
          * block-credit wait would look like a dead ACK path. */
-        waiting = tbt_fec_credit_waiting(READ_ONCE(tx->peer_pkts),
-                                         READ_ONCE(tx->seq),
-                                         READ_ONCE(tx->credit));
+        {
+            u64 span = (u64)READ_ONCE(tx->groups) * READ_ONCE(tx->blk_n);
+            u64 seq = READ_ONCE(tx->seq);
+            u64 base = READ_ONCE(tx->blk_seq0);
+
+            /* A started block is not a credit wait: the packetizer must
+             * finish it, and the receiver's ACK cannot advance until it
+             * does. Treating it as one reset a live stream. */
+            if (span && seq > base && seq - base < span)
+                waiting = false;
+            else
+                waiting = tbt_fec_credit_waiting(
+                    READ_ONCE(tx->peer_pkts), seq, READ_ONCE(tx->credit));
+        }
     rcu_read_unlock();
     return waiting;
 }
