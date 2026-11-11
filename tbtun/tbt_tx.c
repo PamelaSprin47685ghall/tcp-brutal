@@ -2278,6 +2278,18 @@ static void tbt_tx_close_check(struct tbt_session *sess, struct tbt_stream *st)
             return;
         }
     }
+    /* A peer FIN with our TX still unacked starts the normal close budget
+     * even when the local target has not requested its own FIN. Otherwise
+     * this branch returned with since == 0 and the 30 s cap never ran. */
+    if (!since && peer_fin && tx_unacked)
+    {
+        u64 t = READ_ONCE(st->rx_fin_done_ns);
+
+        if (!t)
+            t = now;
+        WRITE_ONCE(st->close_since_ns, t);
+        since = t;
+    }
     if (!since)
         return;
     if (READ_ONCE(st->tx_fin_written))
