@@ -139,7 +139,16 @@ static inline u16 tbt_ul_pin_share_len(u16 s, u16 real, u16 share,
 /* The LAST flag of a DATA record. The sender sets it on the stream's final
  * packet only, and neither parity nor the block carries it; the stream end
  * does. A replay is therefore only allowed once the end is known, and then
- * the flag is exact: the final packet has it, every earlier one does not. */
+ * the flag is exact: the final packet has it, every earlier one does not.
+ *
+ * This is a deliberate hole in coverage: a stream whose final packet was lost
+ * before its FIN arrived cannot be replayed, because no field on the wire
+ * states that bit and a guessed 0 would not be byte-identical. Such a share
+ * waits for the carrier's own TCP retransmission, which owns the recovery.
+ * The restriction is safe for the same reason it is sharp: one RX plane
+ * serves exactly one stream (a detached flow is unlinked and a new stream
+ * builds a new plane), so total_known/total_pkts describe this stream and
+ * nothing else. A later stream cannot inherit the previous end. */
 static inline bool tbt_ul_pin_flags_known(bool total_known, u64 seq,
                                           u64 total_pkts)
 {

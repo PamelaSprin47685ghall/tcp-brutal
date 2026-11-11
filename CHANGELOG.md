@@ -20,7 +20,7 @@ and moves independently of the module version.
   out-of-order tree, advances `rcv_nxt`, and sends the cumulative ACK. The
   replay only runs when the stream end is known, because neither parity nor
   the block carries the LAST flag; without that proof the segment cannot be
-  promised identical and TCP retransmission keeps ownership. Both ends of
+  promised identical and TCP retransmission keeps ownership instead. Both ends of
   every carrier are this module; nothing here looks at a socket the module
   did not create. `host/test_ul_pin_inject` pins the mapping, the wrap-safe
   chunk position, the slice bounds and the byte identity in both crypto

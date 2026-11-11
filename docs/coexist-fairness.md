@@ -141,6 +141,43 @@ The comparison script takes the median of the steady-state samples and prints
 `loss_b`, `overhead`, `share_u`, `J`, `RTT_b` p50/p99 and `retrans_b` in one
 row per run.
 
+## Uncovered cases
+
+**A lost last packet with no stream end is not replayed.** The sender sets the
+LAST bit on the stream's final DATA record only. Neither the parity shares nor
+the block state carry that bit, and the field is inside the header CRC, so a
+guessed value would produce a self-consistent record that is not the bytes the
+peer sent. A share recovered from parity is therefore replayed only once the
+stream end is known (`rx->total_known`, set by this stream's LAST or its FIN),
+which makes the bit exact. Until then the share waits for the carrier's own
+TCP retransmission. This is a deliberate coverage hole, not an oversight: the
+uplink's repair is best-effort for the final packet of a stream, and correct
+by construction for every packet before it.
+
+**The end belongs to one stream.** `total_known`/`total_pkts` are written once
+per RX plane by that plane's own LAST or FIN, and no runtime path resets them.
+A plane serves exactly one stream: detach/abort unlinks the flow and shrinks
+its arena, and the next stream allocates a new flow with a new plane. An
+arriving LAST therefore never changes what an earlier stream meant, and a
+later stream on the same sid cannot inherit the previous end. A LAST that
+arrives while an earlier gap is still open does not change the flag's meaning
+either: the gap delays `next_deliver`, while `total_pkts` still names this
+stream's final packet, so every replayed `seq < total_pkts` keeps the right
+bit.
+
+The one intra-flow switch path (`rx->rebase_pending`) has no writer today.
+If it is enabled later, the arena reset must also clear `total_known` and
+`total_pkts`; `tbt_fec_rx_shrink(reset = true)` does not do that.
+
+**Not covered by the replay at all:** the raw profile (`profile == 3`, no
+chunk positions), ARQ sessions (`fec=off`), and the near side's downlink. The
+near side keeps its adaptive dispatch; only the far side's uplink receive
+path is pinned and replayed.
+
+**Not measured yet.** This document is the design. No coexistence number is
+claimed in this release; the run matrix above must be executed on the target
+kernel before the thresholds mean anything.
+
 ## Why this is not a microbenchmark
 
 The interesting failures are queueing and aggregation effects: a control

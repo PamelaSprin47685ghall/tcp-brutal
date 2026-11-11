@@ -218,8 +218,12 @@ int tbt_ul_pin_repair(struct tbt_session *sess, struct tbt_fec_flow *f,
     seq = tbt_fec_data_seq(seq0, group, n, share);
     /* Neither parity nor the block states the LAST bit, so a replay is only
      * possible once the stream end is known and the flag is exact. Without
-     * that proof the segment cannot be promised byte-identical; TCP
-     * retransmission still owns the recovery. */
+     * that proof the segment cannot be promised byte-identical, so it is not
+     * replayed at all: the carrier's TCP retransmission owns that recovery.
+     * The flag states nothing about the hole's position; a stream whose LAST
+     * arrived while an earlier gap is still open takes the normal replay path
+     * for every seq below total_pkts. One rx plane serves one stream, so the
+     * value cannot belong to a later stream on the same sid. */
     if (!tbt_ul_pin_flags_known(READ_ONCE(rx->total_known),
                                 seq, READ_ONCE(rx->total_pkts)))
     {
