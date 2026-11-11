@@ -372,6 +372,16 @@ static void tbt_drain_body(struct tbt_stream *st)
              * resets its application, instead of holding the backlog until
              * its own stall budget (measured: the far held 2.65 MB with
              * tgt_state=7 while the near kept sending). */
+            if (tbt_sock_half_close_hold(st))
+            {
+                atomic64_inc(&st->sess->close_hold_fec);
+                pr_info_ratelimited("tbtun: drain EPIPE held sid=%llu rx_fin=%d tx_ack=%llu tx_seq=%llu\n",
+                                    (unsigned long long)st->sid,
+                                    READ_ONCE(st->rx_fin_done) ? 1 : 0,
+                                    (unsigned long long)READ_ONCE(st->tx_ack),
+                                    (unsigned long long)READ_ONCE(st->tx_seq));
+                break;
+            }
             tbt_stream_kill(st, TBT_ST_DEAD);
             break;
         }
@@ -480,6 +490,13 @@ static void tbt_tx_rst_retry(struct tbt_session *sess, struct tbt_stream *st)
     atomic64_inc(&sess->ctl_lost);
 }
 
+static bool tbt_sock_half_close_hold(const struct tbt_stream *st)
+{
+    return tbt_tx_half_close_hold(READ_ONCE(st->rx_fin_done),
+                                  READ_ONCE(st->tx_ack) <
+                                      READ_ONCE(st->tx_seq));
+}
+
 static void tbt_ctrl_body(struct tbt_stream *st)
 {
     struct sock *sk = READ_ONCE(st->sk);
@@ -497,6 +514,16 @@ static void tbt_ctrl_body(struct tbt_stream *st)
                             READ_ONCE(st->rx_fin_seen) ? 1 : 0,
                             (unsigned long long)READ_ONCE(st->rx_next),
                             (unsigned long long)READ_ONCE(st->rx_fin_seq));
+        if (tbt_sock_half_close_hold(st))
+        {
+            atomic64_inc(&st->sess->close_hold_fec);
+            pr_info_ratelimited("tbtun: ctrl err held sid=%llu err=%d rx_fin=%d tx_ack=%llu tx_seq=%llu\n",
+                                (unsigned long long)st->sid, READ_ONCE(sk->sk_err),
+                                READ_ONCE(st->rx_fin_done) ? 1 : 0,
+                                (unsigned long long)READ_ONCE(st->tx_ack),
+                                (unsigned long long)READ_ONCE(st->tx_seq));
+            return;
+        }
         tbt_tx_rst_retry(st->sess, st);
         tbt_stream_kill(st, TBT_ST_DEAD);
         return;

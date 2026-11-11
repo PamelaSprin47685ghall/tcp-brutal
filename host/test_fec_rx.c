@@ -1496,6 +1496,12 @@ static void test_peer_fin_close_bound(void)
     ok(!tbt_tx_peer_fin_close_allowed(true, true, false, t, t + bound + 1,
                                       bound),
        "close bound: a written FIN takes the detach path");
+    ok(!tbt_tx_half_close_hold(false, true),
+       "half close: unacked TX without a peer FIN is not a half-close hold");
+    ok(!tbt_tx_half_close_hold(true, false),
+       "half close: a peer FIN with acked TX is not held");
+    ok(tbt_tx_half_close_hold(true, true),
+       "half close: a peer FIN with unacked TX holds the reverse flow");
 }
 
 /* Init creates the primary flow before any OPEN. The default quota takes all

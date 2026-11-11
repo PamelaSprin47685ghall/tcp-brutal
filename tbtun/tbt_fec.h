@@ -293,6 +293,14 @@ static inline bool tbt_tx_peer_fin_close_expired(bool rx_fin_done,
            now > rx_fin_done_ns && now - rx_fin_done_ns > bound;
 }
 
+/* A peer FIN closes only the receive direction. The transmit direction
+ * keeps draining until its data is acknowledged; a target-side close or
+ * error during that window must not reset the reverse flow. */
+static inline bool tbt_tx_half_close_hold(bool rx_fin_done, bool tx_unacked)
+{
+    return rx_fin_done && tx_unacked;
+}
+
 /* The short peer-FIN close bound is a half-close rule: it may release the
  * stream only after our TX direction has nothing unacknowledged. While
  * tx_ack < tx_seq the reverse direction is still draining, and killing it
