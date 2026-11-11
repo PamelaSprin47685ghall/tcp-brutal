@@ -1984,20 +1984,36 @@ void tbt_session_destroy(struct tbt_tunnel *t)
     down_write(&s->stats_lock);
 
     /* Stop the two FEC entry points. rx->lock is a leaf; the stopping flag
-     * makes record()/arm() refuse new work after this point. */
+     * makes record()/arm() refuse new work after this point.
+     *
+     * The primary planes are RCU-published and freed by
+     * tbt_fec_flow_free_work() after a grace period. A stream that is being
+     * torn down concurrently calls tbt_fec_flow_detach(), which unpublishes
+     * them and can drop the last flow reference before the stream sweep
+     * below reaches that stream. Read them through the same RCU side as
+     * every other reader; a bare load can outlive the grace period and
+     * write into freed planes. */
     WRITE_ONCE(s->fec_stopping, true);
-    if (s->fec_rx)
+    rcu_read_lock();
     {
-        spin_lock_bh(&s->fec_rx->lock);
-        s->fec_rx->stopping = true;
-        spin_unlock_bh(&s->fec_rx->lock);
+        struct tbt_fec_rx *rx = rcu_dereference(s->fec_rx);
+        struct tbt_fec_tx *tx = rcu_dereference(s->fec_tx);
+
+        /* The FEC transmit work must not re-arm after this point:
+         * tbt_tx_fin() can still run during the stream sweep, and its flush
+         * would otherwise queue a packetizer pass behind the cancel. The
+         * flag makes flush and the work body return -ESHUTDOWN / do
+         * nothing. */
+        if (rx)
+        {
+            spin_lock_bh(&rx->lock);
+            WRITE_ONCE(rx->stopping, true);
+            spin_unlock_bh(&rx->lock);
+        }
+        if (tx)
+            WRITE_ONCE(tx->stopping, true);
     }
-    /* The FEC transmit work must not re-arm after this point: tbt_tx_fin()
-     * can still run during the stream sweep, and its flush would otherwise
-     * queue a packetizer pass behind the cancel. The flag makes flush and
-     * the work body return -ESHUTDOWN / do nothing. */
-    if (s->fec_tx)
-        WRITE_ONCE(s->fec_tx->stopping, true);
+    rcu_read_unlock();
 
     /* Every session work returns its reference through this cancel. w_fec_rx
      * is inert until its work function is initialised; tbt_sess_dw() returns

@@ -1193,6 +1193,31 @@ static void case_block_switch_boundary(void)
     }
 }
 
+/* A rate switch moves the TX shape origin at a block boundary. Blocks built
+ * just before it lie below the new base_block but are still in flight, so a
+ * NACK for one is not stale while the replay ring still names it. The old
+ * base-relative delivered test cannot answer across the switch either: the
+ * peer frontier is below base_pkt, and the block's own span is the truth. */
+static void case_nack_after_switch(void)
+{
+    /* base_pkt=64, base_block=4; block 3 was built at origin 48 with n=4
+     * over 4 groups (span 16). */
+    ok(!tbt_fec_nack_stale(3, 4, true),
+       "nack switch: a resident pre-switch block is not stale");
+    ok(tbt_fec_nack_stale(3, 4, false),
+       "nack switch: an identity the ring forgot is stale");
+    ok(!tbt_fec_nack_stale(4, 4, false),
+       "nack switch: the new base is not stale");
+    ok(!tbt_fec_block_delivered_base(3, 50, 64, 4, 4, 4),
+       "nack switch: the base form cannot see across the origin");
+    ok(!tbt_fec_block_delivered_seq0(48, 4, 4, 50),
+       "nack switch: block 3 is still in flight at 50");
+    ok(tbt_fec_block_delivered_seq0(48, 4, 4, 64),
+       "nack switch: block 3 is delivered at its span end");
+    ok(tbt_fec_block_delivered_seq0(64, 4, 2, 72),
+       "nack switch: the post-switch block uses its own shorter span");
+}
+
 int main(void)
 {
     case_shape_of();
@@ -1201,6 +1226,7 @@ int main(void)
     case_downlink_roundtrip();
     case_downlink_ladder();
     case_block_switch_boundary();
+    case_nack_after_switch();
     case_uplink_roundtrip();
     case_immediate_decode();
     case_rlnc_dispatch();

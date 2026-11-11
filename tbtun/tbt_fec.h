@@ -975,6 +975,12 @@ void tbt_fec_replay_reset(struct tbt_fec_replay *r);
  * 4 when low_mem). Runs in process context and frees overflow. */
 void tbt_fec_replay_ack(struct tbt_fec_replay *r, u64 frontier, bool low_mem,
                         tbt_fec_spinlock_t *lock);
+/* Release every plane whose own recorded (seq0, n) span ends at or below
+ * peer_pkts. A rate switch moves the shape origin at a block boundary, so a
+ * block id is not comparable with a packet count across the switch; this
+ * form reads each block's interval instead. */
+void tbt_fec_replay_ack_seq(struct tbt_fec_replay *r, u64 peer_pkts,
+                            bool low_mem, tbt_fec_spinlock_t *lock);
 /* Count resident planes at or above the ACK floor. */
 u32 tbt_fec_replay_unacked(struct tbt_fec_replay *r, tbt_fec_spinlock_t *lock);
 /* Reclaim planes under memory pressure or on a stream reset. keep_active
@@ -1118,6 +1124,16 @@ static inline bool tbt_fec_replay_dup(u64 now_ns, u64 last_sent_ns,
     return last_sent_ns && now_ns - last_sent_ns < hold_ns;
 }
 
+/* A NACK below the shape origin is stale only when the replay ring no
+ * longer remembers that block. A rate switch moves base_block to the next
+ * block boundary, and the blocks built just before it are exactly the ones
+ * still in flight; their per-block shape is the authority, not base_block. */
+static inline bool tbt_fec_nack_stale(u64 block_id, u64 base_block,
+                                      bool in_ring)
+{
+    return block_id < base_block && !in_ring;
+}
+
 /* The whole block lies below the peer's delivered packet frontier. The
  * frontier is absolute, so the comparison is against the shape origin. */
 static inline bool tbt_fec_block_delivered_base(u64 block_id, u64 peer_pkts,
@@ -1136,6 +1152,18 @@ static inline bool tbt_fec_block_delivered(u64 block_id, u64 peer_pkts,
                                            u16 groups, u16 n)
 {
     return tbt_fec_block_delivered_base(block_id, peer_pkts, 0, 0, groups, n);
+}
+
+/* The same test stated by the block's own origin and split. This is the
+ * only form that stays correct across a rate switch: base_pkt/base_block
+ * move to the next block boundary, so a pre-switch block lies below the new
+ * origin while its packets may still be in flight. */
+static inline bool tbt_fec_block_delivered_seq0(u64 seq0, u16 groups, u16 n,
+                                                u64 peer_pkts)
+{
+    u64 span = (u64)groups * n;
+
+    return span && seq0 + span <= peer_pkts;
 }
 
 /* The FIN may be queued once the packetizer and every new DATA record are
@@ -1444,12 +1472,33 @@ static inline u64 tbt_fec_block_of_seq(u64 seq, u16 groups, u16 k)
     return tbt_fec_block_of_seq_base(seq, 0, 0, groups, (u16)k);
 }
 
+/* Release the replay planes one ACK has delivered. A rate switch moves
+ * base_pkt/base_block at a block boundary, so a block-id frontier cannot
+ * describe the blocks built before it; an SCLC ring answers by each block's
+ * recorded (seq0, n) interval. A fixed-shape ring keeps the cheaper
+ * block-id frontier. */
+static inline void
+tbt_fec_replay_ack_peer(struct tbt_fec_replay *r, bool sclc, u64 peer_pkts,
+                        u64 base_pkt, u64 base_block, u16 groups, u16 n,
+                        bool low_mem, tbt_fec_spinlock_t *lock)
+{
+    if (!r)
+        return;
+    if (sclc)
+        tbt_fec_replay_ack_seq(r, peer_pkts, low_mem, lock);
+    else
+        tbt_fec_replay_ack(r,
+                           tbt_fec_block_of_seq_base(peer_pkts, base_pkt,
+                                                     base_block, groups, n),
+                           low_mem, lock);
+}
+
 /* The TX credit gate. `credit` is a share grant; the gate converts it to
  * whole blocks and then to the DATA-packet budget it compares with seq.
  * The conversion is exact for full blocks, short blocks and every n/m
  * change. Block ids are not comparable across a shape switch
  * (base_pkt/base_block move), so only the packet budget gates; replay and
- * NACK use block ids.
+ * NACK identify a block by its own recorded span instead.
  */
 static inline bool tbt_fec_credit_waiting(u64 peer_pkts, u64 seq, u32 credit,
                                           u16 groups, u16 n, u16 m)

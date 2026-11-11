@@ -530,6 +530,15 @@ static void tbt_chacha8_blocks_xor(u32 st[16], u8 *data, size_t blocks,
     {
         size_t n = blocks & ~(size_t)3;
 
+#if defined(TBT_CHACHA_SSE2) && defined(__KERNEL__)
+        /* kernel_fpu_begin() may only run where the live FPU state can be
+         * saved. A hardirq or softirq can interrupt a task inside its own
+         * FPU section; using the vector body there corrupts state the
+         * interrupted context owns. Fall back to scalar ChaCha8 when
+         * irq_fpu_usable() says this context cannot take the FPU. */
+        if (n && !irq_fpu_usable())
+            n = 0;
+#endif
         if (n)
         {
 #ifdef __KERNEL__

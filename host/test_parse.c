@@ -2056,6 +2056,32 @@ int main(void)
                " n=19 m=13 fec=on mode=sc-ldpc adaptive=on w=64"
                " carriers=256 L=8",
                TBT_PARSE_EINVAL, "adaptive", "rate ladder");
+
+        /* The inferred ladder must be the buildable one. The 0.8.0 GF(16)
+         * codec caps the uplink at n=21, so 24/8 and 20/12 cannot be built;
+         * defaulting them to adaptive=on turned a fixed shape into an
+         * "unsupported profile" error during parse. */
+        ok(parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                 " n=24 m=8 fec=on mode=sc-ldpc w=64 carriers=256 L=8",
+                 &cmd, &perr) == 0,
+           "sc-ldpc: unbuildable uplink 24/8 parses", perr.why);
+        ok(cmd.cfg.adaptive == 0,
+           "sc-ldpc: unbuildable uplink 24/8 defaults adaptive off", NULL);
+        tbt_render_cfg(&cmd.cfg, once, sizeof(once));
+        ok(strstr(once, "adaptive=off") != NULL,
+           "sc-ldpc: unbuildable uplink renders adaptive off", once);
+        ok(parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                 " n=20 m=12 fec=on mode=sc-ldpc w=64 carriers=256 L=8",
+                 &cmd, &perr) == 0,
+           "sc-ldpc: unbuildable uplink 20/12 parses", perr.why);
+        ok(cmd.cfg.adaptive == 0,
+           "sc-ldpc: unbuildable uplink 20/12 defaults adaptive off", NULL);
+        ok(parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                 " n=16 m=16 fec=on mode=sc-ldpc w=64 carriers=256 L=8",
+                 &cmd, &perr) == 0,
+           "sc-ldpc: buildable uplink 16/16 parses", perr.why);
+        ok(cmd.cfg.adaptive == 1,
+           "sc-ldpc: buildable uplink 16/16 defaults adaptive on", NULL);
     }
 
     /* 25. The frozen /proc/net/tbtun/http text contract. */

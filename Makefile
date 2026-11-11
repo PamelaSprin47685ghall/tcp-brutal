@@ -10,7 +10,8 @@ SRCS            := Makefile \
                    tbtun/tbtun.h tbtun/tbt_uapi.h tbtun/tbt_parse.h tbtun/tbt_proto.h \
                    tbtun/tbt_rec.h tbtun/tbt_http.h tbtun/tbt_fec_batch.h \
                    tbtun/tbt_crypto.h tbtun/tbt_mux.h \
-                   tbtun/tbt_fec.h tbtun/tbt_fec_adapt.h tbtun/tbt_fec_adapt_sclc.h \
+                   tbtun/tbt_fec.h tbtun/tbt_fec_late.h tbtun/tbt_fec_adapt.h \
+                   tbtun/tbt_fec_adapt_sclc.h \
                    tbtun/tbt_fec_sclc_delta.h \
                    tbtun/tbt_portmap.h tbtun/tbt_map.h tbtun/tbt_carrier_policy.h \
                    tbtun/tbt_tx_acct.h \
@@ -279,9 +280,6 @@ tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
                    tbtun/tbt_sock.o tbtun/tbt_tx.o tbtun/tbt_rx.o tbtun/tbt_rec.o \
                    tbtun/tbt_parse.o tbtun/tbt_http.o tbtun/tbt_fec_batch.o tbtun/tbt_crypto.o \
                    tbtun/tbt_portmap.o tbtun/tbt_map.o tbtun/tbt_fec.o tbtun/tbt_fec_data.o \
-                   tbtun/tbt_parse.o tbtun/tbt_http.o tbtun/tbt_crypto.o \
-                   tbtun/tbt_portmap.o tbtun/tbt_fec.o \
-                   tbtun/tbt_fec_data.o \
                    tbtun/tbt_fec_adapt.o tbtun/tbt_fec_adapt_sclc.o \
                    tbtun/tbt_mux.o \
                    tbtun/tbt_fec_sclc.o \
@@ -765,6 +763,10 @@ clean: clean-dkms.conf clean-dkms-tarball
 	$(RM) $(HOST_INVARIANTS) host/test_invariants_san
 	$(RM) $(HOST_MEM_BUDGET) host/test_mem_budget_san
 	$(RM) $(HOST_CELL_TAIL) host/test_cell_tail_san
+	$(RM) $(HOST_ACK) $(HOST_FIN_TAIL) $(HOST_MAP) $(HOST_SCLC_DATA) $(HOST_MUX)
+	$(RM) host/test_fin_tail_san host/test_map_san host/test_fec_sclc_data_san
+	$(RM) host/test_mux_san
+	$(RM) $(HOST_BENCH_RECOVERY)
 	$(RM) $(HOST_CODEC_CACHE)
 	$(RM) host/test_hold_san
 	$(RM) $(HOST_BATCH) $(HOST_WIRE_COMPAT) $(HOST_TSAN) host/test_batch_san host/test_wire_compat_san
