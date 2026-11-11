@@ -458,6 +458,51 @@ static void test_downlink_shapes(void)
           "down: a split above 192 is refused");
 }
 
+/* A 16 MiB boundary: 128 full 128/128 downlink blocks, then a short block
+ * and a marker. The old b->seq0 + blk_pkts formula jumped the delivery
+ * frontier at the marker; this run must keep counting real packets. */
+static void test_16m_boundary(void)
+{
+    int i;
+    u16 s;
+
+    clear_engine();
+    set_downlink_shape();
+    for (i = 0; i < 128; i++)
+    {
+        full_block((u64)i, (u64)i * 128, 128, 128);
+        if ((i & 31) == 31)
+            clear_pending();
+    }
+    CHECK(f.rx_deliver_bytes == 128u * 128u * TBT_FEC_S,
+          "16m: exactly 16 MiB delivered");
+    CHECK(f.rx_next_deliver == 16384, "16m: frontier is 16384 packets");
+    CHECK(f.rx_next_block == 128, "16m: 128 blocks delivered");
+
+    clear_pending();
+    for (s = 0; s < 101; s++)
+        send_data_payload(128, 128 * 128, 128, 128, 0, s,
+                          s + 1 == 101 ? 784 : TBT_FEC_S, s + 1 == 101,
+                          payload);
+    send_parity_payload(128, 128 * 128, 128, 128, 0, 0, 101, 784, payload);
+    CHECK(f.rx_next_block == 129, "16m: short block crosses the boundary");
+    CHECK(f.rx_next_deliver == 16485, "16m: short block adds 101 packets");
+    CHECK(f.rx_deliver_bytes == 128u * 128u * TBT_FEC_S + 100u * TBT_FEC_S +
+                                    784u,
+          "16m: short block adds its real bytes");
+
+    marker_block(129, 129 * 128, 146, 110);
+    CHECK(f.rx_next_block == 130, "16m: marker crosses the boundary");
+    CHECK(f.rx_next_deliver == 16485, "16m: marker adds no packets");
+    CHECK(f.rx_n == 146 && f.rx_m == 110,
+          "16m: the marker's split is adopted");
+    CHECK(f.rx_window_drop == 0 && f.rx_inflight_bad == 0 &&
+              f.rx_shape_bad == 0,
+          "16m: no window or shape error");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 146u),
+          "16m: credit follows the post-boundary split");
+}
+
 /* The far ladder observed in .92: 128 -> 139/117 -> 140/116 -> 146/110
  * with markers and a short block in between. Each block must place and
  * decode with its own header. */
@@ -543,6 +588,30 @@ static void test_shape_rejection(void)
     CHECK(f.rx_shape_bad == 3, "reject: three inconsistent shapes counted");
 }
 
+/* The stall dump must fire once for an incomplete head and expose both
+ * counters: rx_block_stalled and rx_shape_mismatch (a record whose h.n/h.m
+ * differs from the committed split). */
+static void test_stall_dump(void)
+{
+    u64 now;
+
+    clear_engine();
+    set_downlink_shape();
+    e.cfg.verbose = 1;
+    send_data(0, 0, 128, 128, 0, 0, TBT_FEC_S, false);
+    send_data(1, 0, 139, 117, 0, 0, TBT_FEC_S, false);
+    CHECK(f.rx_shape_mismatch == 1, "stall: one mismatched record counted");
+
+    now = now_ns();
+    f.rx[0].first_ns = now - 300000000ull;
+    flow_tick(&f, now);
+    CHECK(f.rx_block_stalled == 1, "stall: incomplete head counted once");
+    CHECK(f.rx[0].stall_reported, "stall: head marked reported");
+    flow_tick(&f, now + 100000000ull);
+    CHECK(f.rx_block_stalled == 1, "stall: a second tick does not double count");
+    e.cfg.verbose = 0;
+}
+
 /* The FBK target is a commitment: the reported m_current/m_target and
  * n_current are the split this receiver just adopted, not a suggestion that
  * its RX ignores. */
@@ -580,10 +649,12 @@ int main(void)
     test_credit_inflight();
     test_window_and_nack_base();
     test_multishape_sequence();
+    test_16m_boundary();
     test_downlink_shapes();
     test_far_shape_ladder();
     test_downlink_erasure();
     test_shape_rejection();
+    test_stall_dump();
     test_fbk_commit();
 
     printf("test_client_rx: %d checks, %d failures\n", checks, failures);

@@ -33,7 +33,7 @@
 #include <unistd.h>
 
 #ifndef TBT_LOOPBACK_MB
-#define TBT_LOOPBACK_MB 16
+#define TBT_LOOPBACK_MB 64
 #endif
 #ifndef TBT_LOOPBACK_DROP
 #define TBT_LOOPBACK_DROP 100000

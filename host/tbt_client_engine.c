@@ -159,6 +159,7 @@ struct rx_block
     u64 first_ns;
     u64 last_nack_ns;
     u8 nack_tries;
+    bool stall_reported;
     bool done;
     struct rx_group *g;
 };
@@ -221,6 +222,8 @@ struct flow
     u64 rx_stale_nack;
     u64 rx_window_drop;
     u64 rx_inflight_bad;
+    u64 rx_block_stalled;
+    u64 rx_shape_mismatch;
     u16 rx_used;
     u64 rx_deliver_bytes;
     u64 peer_fin_end;
@@ -293,6 +296,7 @@ struct engine
     u32 drop_ppm;
     u64 rng;
     u64 drops;
+    u64 rx_unknown_sid;
 
     struct pending_ctl pending[TBT_CTL_PENDING];
     int npending;
@@ -1694,6 +1698,46 @@ static void rx_group_try(struct flow *f, struct rx_block *b, u16 group)
     }
 }
 
+static void rx_bitmap_str(const u8 *present, u16 start, u16 count, char *out,
+                          size_t cap)
+{
+    size_t o = 0;
+    u16 i;
+
+    for (i = 0; i < count && o + 1 < cap; i++)
+        out[o++] = present[start + i] ? '1' : '0';
+    out[o] = '\0';
+}
+
+/* A head block that stayed incomplete for 200 ms. The bitmaps separate
+ * "the record never arrived" from "a record arrived under a different
+ * shape"; the record log below prints the same h.n/h.m and match flag. */
+static void flow_rx_dump_stall(struct flow *f, struct rx_block *b, u64 now)
+{
+    char dbits[TBT_FEC_MAX_SHARES + 1];
+    char pbits[TBT_FEC_MAX_SHARES + 1];
+    u16 g;
+
+    logmsg(f->e,
+           "tbt_client: rx STALL sid=%llu block=%llu n=%u m=%u groups=%u next=%llu deliver=%llu age_ms=%llu\n",
+           (unsigned long long)f->sid, (unsigned long long)b->id, b->n, b->m,
+           b->groups, (unsigned long long)f->rx_next_block,
+           (unsigned long long)f->rx_next_deliver,
+           (unsigned long long)((now - b->first_ns) / 1000000ull));
+    for (g = 0; g < b->groups; g++)
+    {
+        struct rx_group *rg = &b->g[g];
+        u16 real = rg->marker ? 0 : (rg->real_set ? rg->real : b->n);
+
+        rx_bitmap_str(rg->present, 0, b->n, dbits, sizeof(dbits));
+        rx_bitmap_str(rg->present, b->n, b->m, pbits, sizeof(pbits));
+        logmsg(f->e,
+               "tbt_client: rx STALL group=%u marker=%d real=%u/%u ndata=%u nparity=%u data=%s parity=%s\n",
+               g, rg->marker ? 1 : 0, real, b->n, rg->ndata, rg->nparity,
+               dbits, pbits);
+    }
+}
+
 static void flow_rx_check(struct flow *f)
 {
     for (;;)
@@ -1766,14 +1810,28 @@ static void flow_rx_store(struct flow *f, const struct tbt_fec_hdr *h,
     struct rx_group *g;
     u16 shares = (u16)(h->n + h->m);
 
-    b = rx_block_get(f, h, group, share);
-    if (!b)
-        return;
-    if (b->id >= f->rx_shape_block)
     {
-        f->rx_shape_block = b->id;
-        f->rx_n = b->n;
-        f->rx_m = b->m;
+        u16 committed_n = f->rx_n;
+        u16 committed_m = f->rx_m;
+        bool match = (h->n == committed_n && h->m == committed_m);
+
+        if (!match)
+            f->rx_shape_mismatch++;
+        b = rx_block_get(f, h, group, share);
+        if (h->block_id == f->rx_next_block)
+            logmsg(f->e,
+                   "tbt_client: rx rec block=%llu type=%u group=%u share=%u n=%u m=%u committed=%u/%u match=%d accepted=%d\n",
+                   (unsigned long long)h->block_id, h->type, group, share,
+                   h->n, h->m, committed_n, committed_m, match ? 1 : 0,
+                   b ? 1 : 0);
+        if (!b)
+            return;
+        if (b->id >= f->rx_shape_block)
+        {
+            f->rx_shape_block = b->id;
+            f->rx_n = b->n;
+            f->rx_m = b->m;
+        }
     }
     g = &b->g[group];
     if (share >= shares)
@@ -2113,7 +2171,10 @@ static int handle_fec(struct engine *e, struct carrier *c, const u8 *rec,
     if (!f)
     {
         /* A DATA share that outran its OPEN is not repairable here; the
-         * sender's NACK/replay path will resend it once the flow exists. */
+         * sender's NACK/replay path will resend it once the flow exists.
+         * Count it so a silent sid change or stream rebuild is visible. */
+        if (h.type == TBT_FEC_DATA || h.type == TBT_FEC_PARITY)
+            e->rx_unknown_sid++;
         return 0;
     }
     switch (h.type)
@@ -2517,6 +2578,31 @@ static void flow_tick(struct flow *f, u64 now)
     }
     flow_out_flush(f);
     flow_fin_maybe(f);
+    if (f->rx_shape_set)
+    {
+        u32 hs = (u32)(f->rx_next_block % TBT_RX_SLOTS);
+        struct rx_block *hb = &f->rx[hs];
+
+        if (hb->used && hb->id == f->rx_next_block)
+        {
+            u16 g;
+            bool ready = true;
+
+            for (g = 0; g < hb->groups; g++)
+                if (!hb->g[g].decoded && !hb->g[g].marker)
+                {
+                    ready = false;
+                    break;
+                }
+            if (!ready && now - hb->first_ns >= 200000000ull &&
+                !hb->stall_reported)
+            {
+                hb->stall_reported = true;
+                f->rx_block_stalled++;
+                flow_rx_dump_stall(f, hb, now);
+            }
+        }
+    }
     if (e->cfg.verbose && now - f->last_stat_ns >= 1000000000ull)
     {
         f->last_stat_ns = now;
@@ -2524,6 +2610,7 @@ static void flow_tick(struct flow *f, u64 now)
                "tbt_client: flow %llu near=%d tx_seq=%llu ack_next=%llu "
                "rx_next=%llu rx_bytes=%llu rx_used=%u rx_late=%llu "
                "rx_win_drop=%llu rx_stale=%llu rx_inflight_bad=%llu "
+               "rx_stalled=%llu rx_shape_mismatch=%llu rx_unknown_sid=%llu "
                "out=%zu/%zu up=%u\n",
                (unsigned long long)f->sid, f->near,
                (unsigned long long)f->tx_seq,
@@ -2533,7 +2620,10 @@ static void flow_tick(struct flow *f, u64 now)
                (unsigned long long)f->rx_late_share,
                (unsigned long long)f->rx_window_drop,
                (unsigned long long)f->rx_stale_nack,
-               (unsigned long long)f->rx_inflight_bad, f->out_len,
+               (unsigned long long)f->rx_inflight_bad,
+               (unsigned long long)f->rx_block_stalled,
+               (unsigned long long)f->rx_shape_mismatch,
+               (unsigned long long)e->rx_unknown_sid, f->out_len,
                f->out_off, e->up_count);
     }
     if (f->fin_sent && f->fin_applied)
