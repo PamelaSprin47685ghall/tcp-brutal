@@ -1,0 +1,31 @@
+# Dirty worktree backups (patches under ~/.cache/tbtun-dirty-backups/)
+# Captured before the worktree cleanup; every entry had uncommitted tracked changes.
+/home/kunweiz/tbtun-worktrees/arm64 | branch=w-arm64-recon | head=ccafdeb | tracked=126 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/arm64.patch | bytes=2286264
+/home/kunweiz/tbtun-worktrees/arm64-build | branch=w-arm64-build | head=b41b259 | tracked=226 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/arm64-build.patch | bytes=4917784
+/home/kunweiz/tbtun-worktrees/crypto | branch=w-crypto | head=63c0a83 | tracked=223 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/crypto.patch | bytes=4912180
+/home/kunweiz/tbtun-worktrees/fec | branch=w-fec | head=ef5f956 | tracked=128 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/fec.patch | bytes=2315020
+/home/kunweiz/tbtun-worktrees/fec-grouped | branch=w-fec-grouped | head=aec862e | tracked=126 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/fec-grouped.patch | bytes=2286264
+/home/kunweiz/tbtun-worktrees/fec-survey | branch=w-fec-survey | head=040304a | tracked=126 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/fec-survey.patch | bytes=2286264
+/home/kunweiz/tbtun-worktrees/fec-v6 | branch=w-fec-v6 | head=fc5ac01 | tracked=126 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/fec-v6.patch | bytes=2286264
+/home/kunweiz/tbtun-worktrees/fec-v6-merge | branch=w-fec-v6-mergeprobe | head=a767b63 | tracked=157 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/fec-v6-merge.patch | bytes=2300564
+/home/kunweiz/tbtun-worktrees/mips | branch=w-mips-recon | head=833b28e | tracked=126 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/mips.patch | bytes=2286264
+/home/kunweiz/tbtun-worktrees/qa-080-credit-20261111T101418Z/client-fixed | branch=HEAD | head=a9f87d8 | tracked=1 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/client-fixed.patch | bytes=686
+/home/kunweiz/tbtun-worktrees/sclc-algo | branch=w-sclc-algo | head=345682d | tracked=128 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/sclc-algo.patch | bytes=2315020
+/home/kunweiz/tbtun-worktrees/sclc-bench | branch=w-sclc-bench | head=ef5f956 | tracked=128 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/sclc-bench.patch | bytes=2315020
+/home/kunweiz/tbtun-worktrees/sclc-encode | branch=w-sclc-encode | head=bc0d717 | tracked=128 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/sclc-encode.patch | bytes=2315020
+/home/kunweiz/tbtun-worktrees/sclc-gf16 | branch=w-sclc-gf16 | head=897e237 | tracked=128 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/sclc-gf16.patch | bytes=2315020
+/home/kunweiz/tbtun-worktrees/sclc-simd | branch=w-sclc-simd | head=c2dc109 | tracked=128 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/sclc-simd.patch | bytes=2315020
+/home/kunweiz/tbtun-worktrees/t52-credit | branch=w-t52-credit | head=de206c7 | tracked=225 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/t52-credit.patch | bytes=4915661
+/home/kunweiz/tbtun-worktrees/t52-debug2 | branch=w-t52-debug2 | head=51780c3 | tracked=225 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/t52-debug2.patch | bytes=4915661
+/home/kunweiz/tbtun-worktrees/t52-debug3 | branch=w-t52-debug3 | head=734c15a | tracked=2 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/t52-debug3.patch | bytes=3014
+/home/kunweiz/tbtun-worktrees/t52-fec-loss | branch=w-t52-fec-loss | head=849519b | tracked=223 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/t52-fec-loss.patch | bytes=4912180
+/home/kunweiz/tbtun-worktrees/t52-pace | branch=w-t52-pace | head=21e8eb2 | tracked=226 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/t52-pace.patch | bytes=4917784
+/home/kunweiz/tbtun-worktrees/window | branch=w-window | head=bed07a1 | tracked=126 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/window.patch | bytes=2286264
+/tmp/tbt-041-rc | branch=w-0.4.1-rc | head=6a257bf | tracked=3 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/tbt-041-rc.patch | bytes=15725
+/tmp/tbt-041-tsan | branch=w-0.4.1-tsan | head=cb94ad4 | tracked=1 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/tbt-041-tsan.patch | bytes=373
+/tmp/tbt-042-rc | branch=w-0.4.2-rc | head=e944dbf | tracked=2 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/tbt-042-rc.patch | bytes=14133
+/tmp/tbt-043-rc | branch=w-0.4.3-rc | head=e96e069 | tracked=2 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/tbt-043-rc.patch | bytes=14133
+/tmp/tbt-070-base | branch=HEAD | head=cb2e990 | tracked=1 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/tbt-070-base.patch | bytes=6496
+/tmp/tbt-072-ipv6 | branch=w-ipv6-072 | head=1f7b825 | tracked=17 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/tbt-072-ipv6.patch | bytes=84617
+/tmp/tbt-072-simd | branch=w-0.7.2-simd | head=0dcd49e | tracked=5 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/tbt-072-simd.patch | bytes=18045
+/tmp/tbt-b144-qemu | branch=HEAD | head=b144c75 | tracked=1 | patch=/home/kunweiz/.cache/tbtun-dirty-backups/tbt-b144-qemu.patch | bytes=27612
