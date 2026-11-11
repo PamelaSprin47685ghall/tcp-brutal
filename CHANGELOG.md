@@ -70,9 +70,7 @@ and moves independently of the module version.
   IPv4-mapped IPv6 source back to IPv4; the HTTP `Host` header uses
   `[v6]:port`. `/proc/net/tbtun/config` and the `tunnels`/`peers` views render
   IPv6 in RFC 5952 compressed form. IPv4 configuration and output are
-  byte-for-byte unchanged. The `sk_prot` override now copies `tcpv6_prot` for
-  an IPv6 carrier, so the socket is released through the cache it was
-  allocated from.
+  byte-for-byte unchanged.
 - A userspace Linux client shares the FEC code with the module: the SC-LDPC
   engine in `host/tbt_client_engine.c` and the `host/tbt_client_main.c` entry
   point drive the near and far roles over the same wire, and
@@ -90,6 +88,19 @@ and moves independently of the module version.
   gone.
 - The uplink FEC window rises from 4 MiB to 16 MiB: both directions now cap
   the credit at 64 x 256 x `S`, which is 16 MiB at `S=1024`.
+- Queued FEC output records come from one fixed-size slab
+  (`sizeof(struct tbt_fec_out) + TBT_FEC_REC_MAX`) instead of a per-share
+  `kmalloc(..., GFP_ATOMIC)` / `kfree()`. At 1 Gbps with `S=1024` the old
+  path allocated about 120k records a second. `tbt_fec_out_push()` refuses a
+  record longer than `TBT_FEC_REC_MAX` before it can overrun the object, and
+  `tbt_fec_data_module_exit()` destroys the cache after the session teardown
+  drains every queue, so `kmem_cache_destroy()` reports a leaked record.
+- Carrier sockets keep the kernel's `tcp_prot` / `tcpv6_prot`; the shallow
+  copy, the `sk->sk_prot` installation and the `sock_replace_proto()`
+  restore are gone. The copy overrode no field, only duplicated the core
+  operations through a module-owned object that a FIN_WAIT socket could still
+  read after `rmmod`. Sending and receiving already call
+  `tcp_sendmsg_locked()` and `tcp_read_sock()` directly.
 
 ### Fixed
 
