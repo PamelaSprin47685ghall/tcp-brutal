@@ -32,6 +32,24 @@ and moves independently of the module version.
   uplink GF(16) codec defaults to `block=64, L=8` (`C = n*8`).
 - The FEC window and out-queue byte marks are scaled to the 1 KiB cell
   (16 MiB / 4 MiB), and the AArch64 hardware CRC32C path is enabled for Clang.
+- Every DATA/PARITY block names its own `n`/`m` in the header word at `+30`,
+  together with the group; a block's sequence is
+  `block_seq0 + group * n + share_index` for DATA and `block_seq0` for
+  PARITY, so a single session may carry blocks of different shapes.
+- Continuous SC-LDPC rate control (`tbt_fec_adapt_sclc.c`): the controller
+  works in Q16.16 shares and moves the uplink split without a CFG switch
+  stall. Codecs are kept in a small LRU per TX/RX plane
+  (`tbt_fec_codec_cache.h`), so a returning rate reuses its built graph.
+- FIN and half-close fixes: a FIN's `header.seq` is the stream's packet end,
+  TX freezes `last_real_end` before the block jump, and RX keeps
+  `rx_fin_seq` at `U64_MAX` until the delivery frontier reaches `pkt_end`.
+  `fec_fin_with_undelivered` counts a FIN that arrived with missing packets.
+- Replay ring slots are reclaimed by their own block span, not by an
+  approximate packet span, and the c9 counters expose the reclaim path
+  (`tbt_fec_replay_reclaimable`).
+- FEC credit is counted in DATA packets end to end: the ACK grants a packet
+  count, `tbt_fec_credit_packets()` converts the byte window once, and the
+  TX gate compares absolute packet frontiers.
 
 ### Known limitations
 
