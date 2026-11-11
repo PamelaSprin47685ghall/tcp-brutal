@@ -5,6 +5,10 @@
 # Prerequisites
 *.d
 
+# Python bytecode (host test helpers and QA scripts)
+__pycache__/
+*.pyc
+
 # Object files
 *.o
 *.ko
@@ -380,3 +384,14 @@ tests/http_rfc9112_gen_san
 
 # release staging (make dkms-tarball consumers)
 build/
+
+# WAN experiment run evidence. Each arm64 run writes a timestamped directory
+# of logs, CSV and sampler dumps; those are archived outside the worktree,
+# never tracked. Durable harnesses live in the three named directories.
+/review/wan-experiment/arm64/*
+!/review/wan-experiment/arm64/*.sh
+!/review/wan-experiment/arm64/*.md
+!/review/wan-experiment/arm64/*.py
+!/review/wan-experiment/arm64/sclc-verify/
+!/review/wan-experiment/arm64/prod-1g/
+!/review/wan-experiment/arm64/perf-0.3.3/
