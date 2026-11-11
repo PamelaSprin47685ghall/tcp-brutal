@@ -1678,6 +1678,20 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess,
     }
     if (count < tx->blk_m)
         atomic64_add((u64)(tx->blk_m - count), &sess->fec_short_parity_saved);
+    if (tx->replay && win_len >= tx->blk_n)
+    {
+        u16 s;
+
+        for (s = 0; s < (u16)(tx->blk_n + tx->blk_m); s++)
+            if (!tbt_fec_replay_has(tx->replay, block_id, group, s))
+            {
+                atomic64_inc(&sess->fec_block_complete_without_replay);
+                if (debug >= 1)
+                    pr_info_ratelimited("tbtun: fec complete block without replay block=%llu group=%u share=%u\n",
+                                        block_id, group, s);
+                break;
+            }
+    }
 }
 
 /* One PARITY record that says "this group has no packet in this block".
@@ -6807,12 +6821,8 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
              * block. */
             if (ack_advanced && READ_ONCE(tx->replay))
             {
-                u64 frontier = tbt_fec_block_of_seq_base(
-                    READ_ONCE(tx->peer_pkts), tx->base_pkt, tx->base_block,
-                    tx->groups, tx->n);
-
-                tbt_fec_replay_ack(
-                    tx->replay, frontier,
+                tbt_fec_replay_ack_pkts(
+                    tx->replay, READ_ONCE(tx->peer_pkts),
                     tbt_mem_avail_kb() < TBT_FEC_REPLAY_MEM_LOW_KB,
                     &tx->replay_lock);
             }

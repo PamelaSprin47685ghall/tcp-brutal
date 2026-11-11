@@ -1178,7 +1178,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                               "bind_drop_no_stream=%llu "
                               "fec_drop_window=%llu fec_drop_sid=%llu fec_drop_crypto=%llu "
                               "fec_ack_tx=%llu fec_ack_rx=%llu "
-                              "fec_credit_wait=%llu fec_credit_violation=%llu fec_credit_midblock_wait=%llu fec_tx_block_complete=%llu fec_tx_block_partial=%llu fec_replay_evicted_before_nack=%llu fec_tx_pump_rearm=%llu fec_tx_run_leak=%llu fec_unacked_ring_drain=%llu fec_fin_frozen_with_pending=%llu\n",
+                              "fec_credit_wait=%llu fec_credit_violation=%llu fec_credit_midblock_wait=%llu fec_tx_block_complete=%llu fec_tx_block_partial=%llu fec_replay_evicted_before_nack=%llu fec_tx_pump_rearm=%llu fec_tx_run_leak=%llu fec_unacked_ring_drain=%llu fec_fin_frozen_with_pending=%llu fec_block_complete_without_replay=%llu\n",
                            id, tbt_stat_read(&s->fec_proto_fail),
                            tbt_stat_read(&s->fec_hdr_crc_fail),
                            tbt_stat_read(&s->fec_payload_crc_fail),
@@ -1200,7 +1200,8 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_tx_pump_rearm),
                            tbt_stat_read(&s->fec_tx_run_leak),
                            tbt_stat_read(&s->fec_unacked_ring_drain),
-                           tbt_stat_read(&s->fec_fin_frozen_with_pending));
+                           tbt_stat_read(&s->fec_fin_frozen_with_pending),
+                           tbt_stat_read(&s->fec_block_complete_without_replay));
                 /* Every way a share or a block can be lost. Without these a
                  * stalled FEC stream reports zero errors: the counters that
                  * name the loss were simply not exported. */
