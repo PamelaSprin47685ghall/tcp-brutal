@@ -1451,6 +1451,16 @@ struct tbt_session
     struct tbt_crypto_pair crypto_ctx;
     bool crypto_tx_ready; /* published after tx context init */
     bool crypto_ready;    /* rx nonce learned; both contexts initialized */
+    /* Re-incarnation (HELLO wire version 9). `crypto_epoch` is the near
+     * side's nonce generation, strictly increasing across its restarts; it
+     * is the only thing that authorises a new crypto nonce, a new session
+     * nonce, or a moved anchor. `crypto_tx_epoch` is this side's own TX
+     * generation and travels in our HELLO. A TX rotation is deferred to
+     * `crypto_tx_pending` because only w_fec_tx may touch crypto_ctx.tx. */
+    bool crypto_epoch_set;
+    u64 crypto_epoch;
+    u64 crypto_tx_epoch;
+    bool crypto_tx_pending;
     /* FEC flows, keyed by sid. `fec_tx`/`fec_rx` name the primary flow (the
      * first live one) for the old single-stream readers; every data-plane
      * path looks its flow up by sid and never assumes these are the only
@@ -2051,6 +2061,8 @@ struct tbt_session
     u64 session_join_dup; /* tbt_session_join(), under sess->lock */
     atomic64_t session_join_bad, join_nonce_reject;
     atomic64_t join_src_reject; /* far: HELLO from a source other than the anchor */
+    atomic64_t hello_tag_reject;      /* far: no PSK tag, so no re-incarnation */
+    atomic64_t crypto_reincarnations; /* far: accepted restarts of the near */
     u64 fbk_tx;             /* w_fbk work only */
     atomic64_t fbk_rx;
     u64 retx_frames, retx_bytes; /* pump only */
@@ -2519,6 +2531,8 @@ bool tbt_session_arm(struct tbt_session *s, enum tbt_sess_work w,
 void tbt_session_cancel(struct tbt_session *s, enum tbt_sess_work w);
 void tbt_session_destroy(struct tbt_tunnel *t);
 int tbt_session_create(struct tbt_tunnel *t);
+/* The HELLO wire-version-9 generation clock: realtime microseconds. */
+u64 tbt_hello_epoch_now(void);
 int tbt_session_join(struct tbt_session *sess, struct tbt_carrier *c, u8 index);
 void tbt_session_retire(struct tbt_session *sess, u8 index, u8 gen);
 bool tbt_carrier_dead(struct tbt_carrier *c);

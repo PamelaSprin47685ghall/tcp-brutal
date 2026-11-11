@@ -427,8 +427,8 @@ static void test_legacy_framing(void)
 static void test_hello_versions(void)
 {
     ok(TBT_CONV == 0x000bu && TBT_FEC_CONV == 0x100bu &&
-           TBT_WIRE_VERSION_V6 == 8,
-       "0.8.0 wire constants", "the current constants are not the v12 cut");
+           TBT_WIRE_VERSION_V6 == 9,
+       "0.9.0 wire constants", "the current constants are not the v13 cut");
 
     expect_hello_refused(1, TBT_HELLO_BODY_LEN, "HELLO v1 (0.1.x/0.2.x ARQ)");
     expect_hello_refused(2, TBT_HELLO_BODY_LEN_V6, "HELLO v2 (0.2.x FEC)");
@@ -437,10 +437,14 @@ static void test_hello_versions(void)
     expect_hello_refused(5, TBT_HELLO_BODY_LEN_V6, "HELLO v5 (0.5.0 FEC)");
     expect_hello_refused(6, TBT_HELLO_BODY_LEN_V6, "HELLO v6 (0.6.0 FEC)");
     expect_hello_refused(7, TBT_HELLO_BODY_LEN_V6, "HELLO v7 (0.7.0 FEC)");
+    /* 0.8.0 sent 66 bytes at version 8. Its body fits the v9 framing bound,
+     * so the version byte is the only gate that keeps the two revisions
+     * apart; pin that here with the frozen 0.8 length. */
+    expect_hello_refused(8, 66, "HELLO v8 (0.8.0 FEC, 66-byte body)");
     expect_hello_refused(99, TBT_HELLO_BODY_LEN_V6, "HELLO v99 (future)");
 
     expect_hello_ok(TBT_WIRE_VERSION_V6, TBT_HELLO_BODY_LEN_V6, true,
-                    TBT_ROLE_FAR, "HELLO v8 passes the FEC gate");
+                    TBT_ROLE_FAR, "HELLO v9 passes the FEC gate");
     expect_hello_ok(TBT_WIRE_VERSION, TBT_HELLO_BODY_LEN, false,
                     TBT_ROLE_FAR, "HELLO v1 still passes the ARQ gate");
 

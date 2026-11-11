@@ -64,7 +64,7 @@ ARQ_BOUNDS = {
     0x15: (0, 0),
     0x20: (0, 288),
     0x21: (138, 138),
-    0x22: (23, 66),
+    0x22: (23, 90),
     0x23: (0, 0),
     0x24: (1, 1),
     0x25: (1, 1),
@@ -677,11 +677,11 @@ def audit_message(msg, direction, carrier, round_no, audit, ctx):
     if round_no == 0:
         hello = next(r for r in arq if r["name"] == "HELLO")
         audit.need(
-            hello["body_len"] == 66,
-            f"{ctx}: HELLO uses the 66-byte v6 body",
+            hello["body_len"] == 90,
+            f"{ctx}: HELLO uses the 90-byte v9 body",
         )
         audit.need(
-            hello["body"][0] == 8,
+            hello["body"][0] == 9,
             f"{ctx}: HELLO body[0] is TBT_WIRE_VERSION_V6",
         )
         audit.need(

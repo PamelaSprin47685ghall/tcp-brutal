@@ -2873,6 +2873,23 @@ static void tbt_fec_tx_work_body(struct tbt_session *sess)
     if (sess->n_fec_flows <= 1)
         tbt_fec_tx_init_tick(sess, primary->tx);
 
+    /* A near-side re-incarnation rotated the session's TX nonce. This work
+     * item is the only reader of crypto_ctx.tx (every DATA/PARITY record is
+     * encrypted by the pump below), so the schedule is rebuilt here and the
+     * carrier RX work never touches it. The carrier RX work cleared
+     * crypto_tx_ready before it announced the new nonce; re-publishing it
+     * here is what lets the pump send again, so no frame is ever sealed with
+     * a nonce the peer has not been told. */
+    if (sess->crypto && smp_load_acquire(&sess->crypto_tx_pending))
+    {
+        u8 nonce[TBT_CRYPTO_NONCE_LEN];
+
+        memcpy(nonce, sess->crypto_tx_nonce, sizeof(nonce));
+        smp_store_release(&sess->crypto_tx_pending, false);
+        (void)tbt_crypto_init(&sess->crypto_ctx.tx, sess->crypto_key, nonce, 0);
+        tbt_memzero_explicit(nonce, sizeof(nonce));
+        smp_store_release(&sess->crypto_tx_ready, true);
+    }
     if (sess->crypto && !smp_load_acquire(&sess->crypto_tx_ready))
     {
         tbt_session_arm(sess, TBT_SW_FEC_TICK, msecs_to_jiffies(10));

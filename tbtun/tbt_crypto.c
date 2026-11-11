@@ -153,6 +153,19 @@ static void tbt_store32le(u8 *p, u32 x)
 {
     memcpy(p, &x, sizeof(x));
 }
+
+static u64 tbt_load64le(const u8 *p)
+{
+    u64 v;
+
+    memcpy(&v, p, sizeof(v));
+    return v;
+}
+
+static void tbt_store64le(u8 *p, u64 x)
+{
+    memcpy(p, &x, sizeof(x));
+}
 #else
 static u32 tbt_load32le(const u8 *p)
 {
@@ -165,6 +178,17 @@ static void tbt_store32le(u8 *p, u32 x)
     p[1] = (u8)(x >> 8);
     p[2] = (u8)(x >> 16);
     p[3] = (u8)(x >> 24);
+}
+
+static u64 tbt_load64le(const u8 *p)
+{
+    return (u64)tbt_load32le(p) | ((u64)tbt_load32le(p + 4) << 32);
+}
+
+static void tbt_store64le(u8 *p, u64 x)
+{
+    tbt_store32le(p, (u32)x);
+    tbt_store32le(p + 4, (u32)(x >> 32));
 }
 #endif
 
@@ -1075,4 +1099,121 @@ int tbt_crypto_resolve_key(bool local_key_wins,
         return -EPROTO;
     memcpy(out, hello_key, TBT_CRYPTO_KEY_LEN);
     return 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* HELLO v9 authenticated generation.                                       */
+
+static u64 tbt_rotl64(u64 x, unsigned int n)
+{
+    return (x << n) | (x >> (64 - n));
+}
+
+/* One SipHash round (Aumasson & Bernstein, "SipHash: a fast short-input
+ * PRF", the 2-4 variant). */
+static void tbt_sip_round(u64 v[4])
+{
+    v[0] += v[1];
+    v[1] = tbt_rotl64(v[1], 13);
+    v[1] ^= v[0];
+    v[0] = tbt_rotl64(v[0], 32);
+    v[2] += v[3];
+    v[3] = tbt_rotl64(v[3], 16);
+    v[3] ^= v[2];
+    v[0] += v[3];
+    v[3] = tbt_rotl64(v[3], 21);
+    v[3] ^= v[0];
+    v[2] += v[1];
+    v[1] = tbt_rotl64(v[1], 17);
+    v[1] ^= v[2];
+    v[2] = tbt_rotl64(v[2], 32);
+}
+
+u64 tbt_siphash24(const u8 key[16], const u8 *msg, size_t len)
+{
+    u64 k0 = tbt_load64le(key);
+    u64 k1 = tbt_load64le(key + 8);
+    u64 v[4];
+    u64 b;
+    size_t i = 0;
+
+    v[0] = k0 ^ 0x736f6d6570736575ULL;
+    v[1] = k1 ^ 0x646f72616e646f6dULL;
+    v[2] = k0 ^ 0x6c7967656e657261ULL;
+    v[3] = k1 ^ 0x7465646279746573ULL;
+
+    for (; i + 8 <= len; i += 8)
+    {
+        u64 m = tbt_load64le(msg + i);
+
+        v[3] ^= m;
+        tbt_sip_round(v);
+        tbt_sip_round(v);
+        v[0] ^= m;
+    }
+
+    /* Final block: the remaining bytes, little-endian, under a length byte in
+     * the top octet. Bytes above the real length stay zero. */
+    b = (u64)(len & 0xff) << 56;
+    {
+        size_t rem = len - i;
+
+        while (rem)
+        {
+            rem--;
+            b |= (u64)msg[i + rem] << (8 * rem);
+        }
+    }
+    v[3] ^= b;
+    tbt_sip_round(v);
+    tbt_sip_round(v);
+    v[0] ^= b;
+    v[2] ^= 0xff;
+    tbt_sip_round(v);
+    tbt_sip_round(v);
+    tbt_sip_round(v);
+    tbt_sip_round(v);
+
+    return v[0] ^ v[1] ^ v[2] ^ v[3];
+}
+
+/* 128 tag bits from two SipHash keys: the two 128-bit halves of the 256-bit
+ * PSK are independent, so an attacker has to forge both halves. No key
+ * derivation and no second primitive, so there is nothing to get wrong. */
+static void tbt_hello_tag(const u8 *hello, const u8 key[TBT_CRYPTO_KEY_LEN],
+                          u8 out[TBT_CRYPTO_HELLO_TAG_LEN])
+{
+    tbt_store64le(out, tbt_siphash24(key, hello, TBT_CRYPTO_HELLO_TAG));
+    tbt_store64le(out + 8,
+                  tbt_siphash24(key + 16, hello, TBT_CRYPTO_HELLO_TAG));
+}
+
+void tbt_crypto_hello_auth_fill(u8 hello[TBT_CRYPTO_HELLO_AUTH_LEN], u64 epoch,
+                                const u8 key[TBT_CRYPTO_KEY_LEN])
+{
+    if (hello == NULL)
+        return;
+
+    tbt_store64le(hello + TBT_CRYPTO_HELLO_EPOCH, epoch);
+    if (key != NULL)
+        tbt_hello_tag(hello, key, hello + TBT_CRYPTO_HELLO_TAG);
+    else
+        memset(hello + TBT_CRYPTO_HELLO_TAG, 0, TBT_CRYPTO_HELLO_TAG_LEN);
+}
+
+bool tbt_crypto_hello_auth_ok(const u8 *hello, size_t len,
+                              const u8 key[TBT_CRYPTO_KEY_LEN])
+{
+    u8 want[TBT_CRYPTO_HELLO_TAG_LEN];
+    u8 diff = 0;
+    size_t i;
+
+    if (hello == NULL || key == NULL || len < TBT_CRYPTO_HELLO_AUTH_LEN)
+        return false;
+
+    tbt_hello_tag(hello, key, want);
+    for (i = 0; i < TBT_CRYPTO_HELLO_TAG_LEN; i++)
+        diff |= (u8)(hello[TBT_CRYPTO_HELLO_TAG + i] ^ want[i]);
+    tbt_memzero_explicit(want, sizeof(want));
+    return diff == 0;
 }

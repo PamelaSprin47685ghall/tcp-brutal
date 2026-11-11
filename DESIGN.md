@@ -917,11 +917,15 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
   anchor at session creation. Without `nonce=`/`peer=` the first connection chooses the
   session, and the module logs one `trust-on-first-use` warning at session creation;
   configure both to remove that race.
-- **One anchor, one source address.** The anchor is a single address, not a set. A near
-  host that sources carriers from several addresses (multi-homed, or a NAT that rebinds
-  mid-session) is rejected on every carrier whose source differs from the anchor, even
-  with the correct nonce. Recovery is a new session from the anchored address; pin
-  `srcaddrs=` to the address the far side will anchor on.
+- **One anchor, one source address.** The anchor is a single address, not a set. A
+  carrier whose source differs from it is refused before its nonce is examined, so a
+  stranger cannot probe the session. The one exception is a HELLO that proved the
+  configured `crypto_key=` (wire version 9): it may move the anchor to its own source,
+  which is what lets a re-leased PPPoE address or a Wi-Fi/5G switch rejoin instead of
+  locking the tunnel out forever. A configured `peer=` is absolute and never moves, and
+  an unauthenticated source change still counts `join_src_reject`. A near host that
+  sources carriers from several addresses at once should pin `srcaddrs=` to the address
+  the far side anchors on; the anchor is one address, not a set of allowed ones.
 - **Initiator rule**: only the near side allocates sids and only the near side opens
   carriers. The far side never initiates. The far side's *public* connections (target-side)
   are created by the module but their stream ids come from the same near-side allocator —
@@ -3051,9 +3055,13 @@ controls do not apply; these replace them.
   not the host.
 - **Carrier integrity**: HELLO's 128-bit nonce, the far tunnel's listener and the optional
   configured peer address prevent a third party from injecting into a session; a wrong
-  nonce poisons the carrier and counts `join_bad` or `join_nonce_reject`. There is no
-  cryptographic authentication in v0 — the tunnel is a transport, not a security boundary.
-  Wrap in WireGuard if peers are untrusted.
+  nonce poisons the carrier and counts `join_bad` or `join_nonce_reject`. With a
+  configured `crypto_key=`, the v9 HELLO also carries a 128-bit SipHash-2-4 tag over every
+  byte that names the session, so only a PSK holder can rotate a crypto nonce, rename the
+  session or move the anchor; `hello_tag_reject` counts the refusals. Without
+  `crypto_key=` the HELLO is unauthenticated and the tunnel is a transport, not a
+  security boundary. The data plane still has only a payload CRC, so wrap in WireGuard
+  when peers are untrusted or confidentiality matters.
 - **Body obfuscation, not confidentiality**: `crypto=on` (the default whenever
   `fec=on`) ChaCha8-obfuscates only the FEC DATA/PARITY payload. The 48-byte
   FEC header, the HTTP headers, the chunk framing and every control record stay

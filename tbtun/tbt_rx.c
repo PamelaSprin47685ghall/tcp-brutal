@@ -632,16 +632,27 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
     }
 }
 
-/* Crypto fields of a FEC v6 HELLO. The session lock serializes the one-time
- * key adoption and rx-context init: several carriers may present HELLO at the
- * same time. body_xor() is read-only after init, so the data paths do not take
- * this lock.
+/* The generation facts of one HELLO that the far gate needs before the crypto
+ * step runs. It deliberately holds no key material: the gate decides the
+ * anchor and the session nonce, the crypto step owns the key. */
+struct tbt_hello_gen
+{
+    const u8 *nonce; /* the peer's 8-byte TX nonce inside the body */
+    u64 epoch;       /* the peer's nonce generation */
+    bool psk;        /* the tag proves the configured crypto_key= */
+};
+
+/* Crypto fields of a FEC HELLO. The session lock serializes the one-time key
+ * adoption, the generation rotation and the rx-context init: several carriers
+ * may present HELLO at the same time. body_xor() is read-only after init, so
+ * the data paths do not take this lock.
  *
  * `why` names the check that refused the HELLO. Every failure here is -EPROTO,
  * and a wrong key rule is indistinguishable from a wrong key on the wire
  * without it. */
 static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
-                               size_t len, const char **why)
+                               size_t len, const struct tbt_hello_gen *g,
+                               const char **why)
 {
     bool enabled = false;
     u8 key_id = TBT_CRYPTO_KEY_ID_NONE;
@@ -672,6 +683,20 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
     if (enabled != sess->crypto)
     {
         *why = "crypto enabled mismatch";
+        err = -EPROTO;
+        goto out;
+    }
+    /* A configured PSK must be proved on every HELLO, with or without the
+     * data-plane cipher. This check runs before any write, so a tag-less or
+     * forged HELLO neither adopts a key nor moves a nonce. Without a
+     * configured key there is nothing to prove: with key_id 0 the far
+     * resolves from its own key anyway, and with key_id 1 the key is in the
+     * message, so a tag over it would be public. */
+    if (sess->tunnel->cfg.crypto_key_set &&
+        !tbt_crypto_hello_auth_ok(body, len, sess->tunnel->cfg.crypto_key))
+    {
+        atomic64_inc(&sess->hello_tag_reject);
+        *why = "crypto tag";
         err = -EPROTO;
         goto out;
     }
@@ -715,12 +740,53 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
 
     if (sess->crypto_ready)
     {
-        /* Every carrier of one session repeats the same TX nonce. */
-        if (memcmp(sess->crypto_rx_nonce, peer_nonce, sizeof(peer_nonce)) != 0)
+        /* Every carrier of one generation repeats the same TX nonce. A
+         * different nonce is a restarted near side, and only a HELLO that
+         * proved the PSK and named a strictly later generation may install
+         * it: a replayed HELLO carries an older epoch, a stranger has no
+         * tag, and neither can reset a keystream. */
+        if (memcmp(sess->crypto_rx_nonce, peer_nonce, sizeof(peer_nonce)) == 0)
+            goto out;
+        if (!g->psk ||
+            (sess->crypto_epoch_set && g->epoch <= sess->crypto_epoch))
         {
             *why = "crypto nonce changed";
             err = -EPROTO;
+            goto out;
         }
+        memcpy(sess->crypto_rx_nonce, peer_nonce, sizeof(peer_nonce));
+        if (tbt_crypto_init(&sess->crypto_ctx.rx, key, peer_nonce, 0))
+        {
+            *why = "crypto rx init";
+            err = -EPROTO;
+            goto out;
+        }
+        /* On the far side the downlink rotates too: its old nonce met flow
+         * counters that the restarted near side will meet again from zero,
+         * so reusing it could repeat a keystream. Only the far side owns the
+         * downlink; on the near side this HELLO is the far's restart and
+         * only the RX direction may move. The context is rebuilt in
+         * w_fec_tx(), the only reader of crypto_ctx.tx, and the HELLO that
+         * tbt_session_join() sends next already names the new nonce. */
+        if (sess->tunnel->cfg.role == TBT_ROLE_FAR)
+        {
+            u64 now;
+
+            /* Stop the pump before the announcement: a frame sealed with
+             * the old nonce after the peer learned the new one would be
+             * dropped. The pump re-enables the gate once it has rebuilt the
+             * schedule, so the stall is one pump pass, not a timeout. */
+            smp_store_release(&sess->crypto_tx_ready, false);
+            get_random_bytes(sess->crypto_tx_nonce,
+                             sizeof(sess->crypto_tx_nonce));
+            now = tbt_hello_epoch_now();
+            sess->crypto_tx_epoch =
+                (now > sess->crypto_tx_epoch) ? now : sess->crypto_tx_epoch + 1;
+            smp_store_release(&sess->crypto_tx_pending, true);
+        }
+        sess->crypto_epoch = g->epoch;
+        sess->crypto_epoch_set = true;
+        atomic64_inc(&sess->crypto_reincarnations);
         goto out;
     }
 
@@ -731,6 +797,8 @@ static int tbt_rx_hello_crypto(struct tbt_session *sess, const u8 *body,
         err = -EPROTO;
         goto out;
     }
+    sess->crypto_epoch = g->epoch;
+    sess->crypto_epoch_set = true;
     smp_store_release(&sess->crypto_ready, true);
 
 out:
@@ -768,30 +836,58 @@ static int tbt_hello_bad(struct tbt_carrier *c, const char *why)
  * held both times. Several carriers can pass the precheck together, so the
  * second call repeats every check against whatever the winner committed;
  * only then does it adopt an unset nonce, fix the anchor and record the peer
- * generation. Each refusal is counted exactly once, here. */
+ * generation. Each refusal is counted exactly once, here.
+ *
+ * A HELLO that proved the configured PSK is the session owner: it may rename
+ * the session nonce on a later generation, and it may move the anchor to a
+ * new source address. That is what lets a restarted client or a re-leased
+ * dynamic address rejoin instead of being refused forever. A pinned `peer=`
+ * stays absolute; a pinned `nonce=` keeps its value. */
 static int tbt_hello_far_gate(struct tbt_session *sess, struct tbt_carrier *c,
-                              const u8 *body, const struct tbt_addr *src,
-                              u8 gen, bool commit, const char **why)
+                              const u8 *body, const struct tbt_hello_gen *g,
+                              const struct tbt_addr *src, u8 gen, bool commit,
+                              const char **why)
 {
     struct tbt_tunnel *t = sess->tunnel;
     bool adopt = false;
+    bool rename_nonce = false;
+    /* Owner: this HELLO carries the generation the session already serves
+     * (the crypto nonce match covers the carriers that follow the winner of
+     * a rotation), or a strictly later one. A replay from an older
+     * generation is neither. */
+    bool owner = g->psk &&
+                 ((sess->crypto_ready &&
+                   !memcmp(sess->crypto_rx_nonce, g->nonce,
+                           sizeof(sess->crypto_rx_nonce))) ||
+                  !sess->crypto_epoch_set || g->epoch > sess->crypto_epoch);
 
     /* An established anchor rejects every other source, free carrier index
      * included, before the nonce is even examined: a stranger cannot probe
-     * the nonce. */
+     * the nonce. Only an owner may move it, and a configured peer= never
+     * moves. */
     if (sess->anchor_set && !tbt_addr_eq(src, &sess->anchor))
     {
-        atomic64_inc(&sess->join_src_reject);
-        *why = "source address";
-        return -EPROTO;
+        if (tbt_addr_set(&t->cfg.peer) || !owner)
+        {
+            atomic64_inc(&sess->join_src_reject);
+            *why = "source address";
+            return -EPROTO;
+        }
     }
     if (sess->nonce_pinned || sess->nonce_set)
     {
         if (memcmp(body + 2, sess->nonce, sizeof(sess->nonce)))
         {
-            atomic64_inc(&sess->session_join_bad);
-            *why = "session nonce";
-            return -EPROTO;
+            /* A restarted near side may name a new session nonce; the PSK
+             * tag is what makes that name trustworthy now, so a pinned
+             * nonce= stays absolute and a stranger never renames it. */
+            if (sess->nonce_pinned || !owner)
+            {
+                atomic64_inc(&sess->session_join_bad);
+                *why = "session nonce";
+                return -EPROTO;
+            }
+            rename_nonce = true;
         }
     }
     else
@@ -811,13 +907,13 @@ static int tbt_hello_far_gate(struct tbt_session *sess, struct tbt_carrier *c,
     }
     if (!commit)
         return 0;
-    if (adopt)
+    if (adopt || rename_nonce)
     {
         memcpy(sess->nonce, body + 2, sizeof(sess->nonce));
         sess->nonce_set = true;
     }
-    /* Only a HELLO that passed every check may fix the anchor. */
-    if (!sess->anchor_set)
+    /* Only a HELLO that passed every check may fix or move the anchor. */
+    if (!sess->anchor_set || !tbt_addr_eq(src, &sess->anchor))
     {
         sess->anchor = *src;
         sess->anchor_set = true;
@@ -842,10 +938,23 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
     bool far = t->cfg.role == TBT_ROLE_FAR;
     u8 want_role = far ? TBT_ROLE_NEAR : TBT_ROLE_FAR;
     struct tbt_addr src;
+    struct tbt_hello_gen hg;
     u8 gen = 0;
 
     if (!tbt_hello_admit(sess->fec, h->body_len, body, want_role))
         return tbt_hello_bad(c, "length/version/role");
+    /* The v9 generation tail. Only a configured PSK can authenticate it: the
+     * gate and the crypto step both use `psk`, and with key_id 1 the key
+     * travels in the body, so a tag over it would prove nothing. */
+    memset(&hg, 0, sizeof(hg));
+    if (sess->fec)
+    {
+        hg.nonce = body + TBT_CRYPTO_HELLO_NONCE;
+        hg.epoch = tbt_le64(body + TBT_CRYPTO_HELLO_EPOCH);
+        hg.psk = t->cfg.crypto_key_set &&
+                 body[TBT_CRYPTO_HELLO_KEY_ID] == TBT_CRYPTO_KEY_ID_NONE &&
+                 tbt_crypto_hello_auth_ok(body, h->body_len, t->cfg.crypto_key);
+    }
     /* The last HELLO byte names the container. Both ends derive the expected
      * value from the carrier index (spares of an http-kal tunnel drip), so a
      * restart with a different profile is refused here instead of being
@@ -881,7 +990,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
         tbt_sk_peer_addr(csk, &src);
         tbt_carrier_sk_put(csk);
         spin_lock(&sess->lock);
-        gerr = tbt_hello_far_gate(sess, c, body, &src, gen, false, &why);
+        gerr = tbt_hello_far_gate(sess, c, body, &hg, &src, gen, false, &why);
         spin_unlock(&sess->lock);
         if (gerr)
             return tbt_hello_bad(c, why);
@@ -897,7 +1006,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
     if (sess->fec)
     {
         const char *why = "crypto fields";
-        int cerr = tbt_rx_hello_crypto(sess, body, h->body_len, &why);
+        int cerr = tbt_rx_hello_crypto(sess, body, h->body_len, &hg, &why);
 
         if (cerr)
             return tbt_hello_bad(c, why);
@@ -912,7 +1021,7 @@ int tbt_rx_hello(struct tbt_carrier *c, const struct tbt_hdr *h, const u8 *body)
         int err;
 
         spin_lock(&sess->lock);
-        gerr = tbt_hello_far_gate(sess, c, body, &src, gen, true, &why);
+        gerr = tbt_hello_far_gate(sess, c, body, &hg, &src, gen, true, &why);
         spin_unlock(&sess->lock);
         if (gerr)
             return tbt_hello_bad(c, why);
