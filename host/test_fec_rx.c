@@ -2754,6 +2754,16 @@ static void test_credit_window(void)
            "credit: 1792 shares are 7 blocks at 146/110");
     ok_int(tbt_fec_credit_blocks(1792, 1, 192, 64), 7,
            "credit: 1792 shares are 7 blocks at 192/64");
+    ok_int(tbt_fec_credit_packets(1, 128, 128, 66, 9, 0), 1792,
+           "credit: groups=1 7-block grant is 1792 shares");
+    ok_int(tbt_fec_credit_packets(8, 8, 24, 66, 9, 0), 1792,
+           "credit: groups=8 7-block grant is 1792 shares");
+    ok_int(tbt_fec_credit_blocks(1792, 8, 8, 24), 7,
+           "credit: groups=8 1792 shares are 7 blocks");
+    ok_int(TBT_FEC_WINDOW_UP / TBT_FEC_S, 16384,
+           "credit: uplink window is 64 blocks of 256 shares");
+    ok_int(TBT_FEC_CREDIT_MAX, 16384,
+           "credit: cap is 64 blocks of 256 shares");
     ok_int(tbt_fec_credit_blocks(512, 8, 8, 24), 2,
            "credit: the uplink grant is counted in its own super-blocks");
     ok_int(tbt_fec_credit_blocks(0, 1, 128, 128), 0,

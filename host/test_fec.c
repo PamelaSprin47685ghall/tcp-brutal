@@ -2591,7 +2591,7 @@ static void test_credit_split(void)
     {
         credit = tbt_fec_credit_packets(g, N, M, K, SLOTS, 0);
         ok_u32(credit % ((u32)g * N), 0, "credit is whole super-blocks");
-        ok(credit <= (u32)(K - 2) * g * N,
+        ok(credit <= (u32)(K - 2) * g * (N + M),
            "credit is at most K-2 super-blocks", NULL);
         ok(credit >= prev, "credit is monotonic in groups", NULL);
         prev = credit;
@@ -2600,7 +2600,8 @@ static void test_credit_split(void)
            tbt_fec_credit_packets(32, N, M, K, SLOTS, 0),
            "two G=16 flows equal one G=32 flow");
     ok_u32(tbt_fec_credit_packets(32, N, M, K, SLOTS, 0),
-           (u32)(K - 2) * 32 * N, "G=32 credit is K-2 super-blocks");
+           (u32)(K - 2) * 32 * (N + M),
+           "G=32 credit is K-2 super-blocks");
 
     /* A packet cap bounds every shape. */
     for (g = 1; g <= 32; g++)
@@ -2611,16 +2612,16 @@ static void test_credit_split(void)
     }
 
     /* A small arena slot count caps K before the ring K does. */
-    ok_u32(tbt_fec_credit_packets(32, N, M, K, 8, 0), 6 * 32 * N,
+    ok_u32(tbt_fec_credit_packets(32, N, M, K, 8, 0), 6 * 32 * (N + M),
            "slots cap the credit to K-2 blocks");
     ok_u32(tbt_fec_credit_packets(16, N, M, K, 8, 0) * 2,
            tbt_fec_credit_packets(32, N, M, K, 8, 0),
            "two capped G=16 flows equal one capped G=32 flow");
 
     /* A K too small for the two-block slack still grants one super-block. */
-    ok_u32(tbt_fec_credit_packets(32, N, M, 2, SLOTS, 0), 32 * N,
+    ok_u32(tbt_fec_credit_packets(32, N, M, 2, SLOTS, 0), 32 * (N + M),
            "K=2 grants one super-block");
-    ok_u32(tbt_fec_credit_packets(32, N, M, 0, SLOTS, 0), 32 * N,
+    ok_u32(tbt_fec_credit_packets(32, N, M, 0, SLOTS, 0), 32 * (N + M),
            "K=0 grants one super-block");
     /* A cap below one super-block returns the single-packet floor. */
     ok_u32(tbt_fec_credit_packets(32, N, M, K, SLOTS, 1), 1,

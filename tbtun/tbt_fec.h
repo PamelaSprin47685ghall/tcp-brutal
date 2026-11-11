@@ -655,7 +655,7 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
  * tbt_fec_credit_packets() converts these bytes to DATA packets; neither
  * window multiplies again by the carrier count. */
 #define TBT_FEC_WINDOW_DOWN (64u * TBT_FEC_MAX_SHARES * TBT_FEC_S)
-#define TBT_FEC_WINDOW_UP (64u * 32u * TBT_FEC_S)
+#define TBT_FEC_WINDOW_UP (64u * TBT_FEC_MAX_SHARES * TBT_FEC_S)
 /* The ACK grants at most this many DATA packets of FEC credit. Credit is in shares (n+m per block): 16384 shares are 64 blocks of
  * 256, exactly the downlink window; the uplink window resolves to 2048. The credit bounds the sender's in-flight
  * data; the ring bounds the repair storage, and both are constant-size for
@@ -2024,6 +2024,13 @@ static inline u16 tbt_fec_frontier_shape_n(bool used, u64 block_id,
                                            u16 session_n)
 {
     return (used && block_id == frontier && block_n) ? block_n : session_n;
+}
+
+static inline u16 tbt_fec_frontier_shape_m(bool used, u64 block_id,
+                                           u64 frontier, u16 block_m,
+                                           u16 session_m)
+{
+    return (used && block_id == frontier && block_m) ? block_m : session_m;
 }
 
 static inline u16 tbt_fec_sclc_wake_extra_down(u16 n)
