@@ -1,0 +1,32 @@
+# deploy/090/far.yaml.in
+# Rendered by deploy/090/Makefile; do not edit the generated copy.
+#
+# Trap 1: `allow-insecure` here does not skip certificate verification. It means
+#         "permit a listener with no TLS layer". listener/sing_vless/server.go:
+#         265-277 reaches this check only after certificate, shadow-tls, res-tls,
+#         jls, reality and decryption are all absent. Without it, startup fails.
+# Trap 2: a VLESS listener has no mux switch. smux is triggered by the magic
+#         destination sp.mux.sing-box.arpa:444 and is always available.
+# Trap 3: if mux-option.padding is ever enabled here, the near client must also
+#         set smux.padding: true; a non-padded client is rejected.
+# Trap 4: bind to loopback so the only ingress is the local tbtun module.
+
+mixed-port: 0
+mode: rule
+log-level: info
+
+listeners:
+  - name: vless-in
+    type: vless
+    listen: 127.0.0.1
+    port: @PORT@
+    users:
+      - username: tbtun
+        uuid: @UUID@
+        # flow: xtls-rprx-vision is intentionally omitted.
+    allow-insecure: true   # permit a non-TLS listener; see the comment above
+    # mux-option:
+    #   padding: false       # keep false unless the near side sets smux.padding: true
+
+rules:
+  - MATCH,DIRECT

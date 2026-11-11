@@ -58,9 +58,9 @@ dist/090/near/   mihomo  tbt_client  config.yaml  tbtun.conf  install-near.sh
 dist/090/far/    mihomo  tbtun.ko    config.yaml  tbtun.conf  install-far.sh
 ```
 
-受“只新增一个设计文件”的约束，下面四个文件的内容以代码块给出；落地时原样保存为
-`deploy/090/Makefile`、`deploy/090/near.yaml.in`、`deploy/090/far.yaml.in`、
-`deploy/090/install-near.sh`、`deploy/090/install-far.sh`。
+这些文件现已落在 `deploy/090/`。下面代码块是设计快照；可执行版本以目录中的
+`Makefile`、`near.yaml.in`、`far.yaml.in`、`install-near.sh`、`install-far.sh`
+为准。
 
 ### 2.1 `deploy/090/Makefile`
 
@@ -74,7 +74,8 @@ dist/090/far/    mihomo  tbtun.ko    config.yaml  tbtun.conf  install-far.sh
 SHELL        := /bin/sh
 REPO_ROOT    := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../..)
 DIST         ?= $(REPO_ROOT)/dist/090
-KERNEL_DIR   ?= /lib/modules/$(shell uname -r)/build
+# Honor KDIR from docs/build-env.md's env.sh when exported.
+KERNEL_DIR   ?= $(if $(KDIR),$(KDIR),/lib/modules/$(shell uname -r)/build)
 UNAME_M      := $(shell uname -m)
 GOARCH       ?= $(if $(filter x86_64,$(UNAME_M)),amd64,$(if $(filter aarch64,$(UNAME_M)),arm64,$(UNAME_M)))
 
@@ -123,7 +124,10 @@ client: $(DIST)/near/tbt_client
 # Kernel module only exists on the far side.
 $(DIST)/far/tbtun.ko: FORCE
 	@mkdir -p $(dir $@)
-	$(MAKE) -C $(KERNEL_DIR) M=$(REPO_ROOT) modules
+	@test -d "$(KERNEL_DIR)" || { \
+	  echo "KERNEL_DIR=$(KERNEL_DIR) not found; see docs/build-env.md"; \
+	  exit 1; }
+	$(MAKE) -C $(REPO_ROOT) KERNEL_DIR=$(KERNEL_DIR) all
 	install -m 0644 $(REPO_ROOT)/tbtun.ko $@
 	modinfo $@ | sed -n '1,8p'
 
@@ -147,14 +151,14 @@ package-near: mihomo client $(DIST)/near/config.yaml
 	printf '%s\n' \
 	  "tunnel 1 role=near listen=127.0.0.1:$(NEAR_PORT) peer=$(FAR_IP):$(FAR_PORT) target=127.0.0.1:$(VLESS_PORT) n=4 m=4 fec=on mode=grouped carriers=256" \
 	  > $(DIST)/near/tbtun.conf
-	install -m 0755 $(REPO_ROOT)/deploy/090/install-near.sh $(DIST)/near/install.sh
+	install -m 0755 $(REPO_ROOT)/deploy/090/install-near.sh $(DIST)/near/install-near.sh
 
 package-far: mihomo module $(DIST)/far/config.yaml
 	install -m 0755 $(DIST)/mihomo $(DIST)/far/mihomo
 	printf '%s\n' \
 	  "tunnel 1 role=far listen=0.0.0.0:$(FAR_PORT) target=127.0.0.1:$(VLESS_PORT) n=4 m=4 fec=on mode=grouped carriers=256 peer=$(NEAR_IP)" \
 	  > $(DIST)/far/tbtun.conf
-	install -m 0755 $(REPO_ROOT)/deploy/090/install-far.sh $(DIST)/far/install.sh
+	install -m 0755 $(REPO_ROOT)/deploy/090/install-far.sh $(DIST)/far/install-far.sh
 
 package: package-near package-far
 	{ $(DIST)/mihomo -v; \

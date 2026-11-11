@@ -1,0 +1,40 @@
+# deploy/090/near.yaml.in
+# Rendered by deploy/090/Makefile; do not edit the generated copy.
+#
+# Trap 1: the generic mux key is `smux`, not `mux`. A bare `mux:` is never read
+#         by adapter/parser.go:234 and the config will silently run without mux.
+# Trap 2: smux and XUDP are independent. With only-tcp: false, UDP rides smux and
+#         VLESS XUDP is bypassed. Set only-tcp: true to actually use XUDP.
+# Trap 3: padding must agree with the far side. A far listener with
+#         mux-option.padding: true rejects a non-padded client.
+# Trap 4: packet-encoding / packet-addr silently override xudp. Do not write them
+#         when xudp: true is intended.
+
+mixed-port: @MIXED_PORT@
+external-controller: 127.0.0.1:9090
+mode: rule
+log-level: info
+
+proxies:
+  - name: tbtun
+    type: vless
+    server: 127.0.0.1
+    port: @PORT@
+    uuid: @UUID@
+    network: tcp          # outer transport only; VLESS still carries TCP and UDP
+    tls: false            # plaintext by design; see the security note in 090-packaging.md
+    udp: true
+    xudp: true            # supported in code (vless.go:69), absent from upstream docs/config.yaml
+    smux:
+      enabled: true
+      protocol: h2mux     # smux / yamux / h2mux
+      only-tcp: true      # required for UDP to take the VLESS XUDP path
+      padding: false      # must match the far mux-option.padding
+
+proxy-groups:
+  - name: PROXY
+    type: select
+    proxies: [tbtun, DIRECT]
+
+rules:
+  - MATCH,PROXY
