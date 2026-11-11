@@ -394,6 +394,38 @@ static int last_ack_rtt(void)
     return -1;
 }
 
+/* The NACK record one group's request occupies. The engine sends one NACK per
+ * group, so a block with several groups has one record per group and the group
+ * bitmap says which. */
+static const u8 *nack_for_group(u16 group)
+{
+    int i;
+
+    for (i = 0; i < e.npending; i++)
+        if (e.pending[i].rec[0] == TBT_FEC_NACK &&
+            (e.pending[i].rec[TBT_FEC_HDR_LEN + group / 8] &
+             (u8)(1u << (group % 8))))
+            return e.pending[i].rec;
+    return NULL;
+}
+
+static bool nack_names(const u8 *rec, u16 share)
+{
+    return (rec[TBT_FEC_HDR_LEN + TBT_FEC_BITMAP_BYTES + share / 8] &
+            (u8)(1u << (share % 8))) != 0;
+}
+
+static int nack_bit_count(const u8 *rec)
+{
+    u16 s;
+    int n = 0;
+
+    for (s = 0; s < TBT_FEC_MAX_SHARES; s++)
+        if (nack_names(rec, s))
+            n++;
+    return n;
+}
+
 /* Full, short, marker, marker, marker, marker, full. The frontier must be
  * 64 + 16 + 0 + 0 + 0 + 0 + 64 = 144, while rx_next_block reaches 7. */
 static void test_marker_short_sequence(void)
@@ -519,6 +551,91 @@ static void test_window_and_nack_base(void)
     send_data(0, 0, 8, 24, 0, 0, TBT_FEC_S, false);
     CHECK(f.rx_late_share == 1, "late: old replay counted");
     CHECK(f.rx_next_block == 9, "late: cursor unchanged");
+}
+
+/* A short 1x256 downlink block: three DATA shares present, share 3 missing,
+ * no PARITY yet. The kernel's tbt_fec_nack_data_limit()/parity_limit() name
+ * only what the receiver can prove: the DATA gap below the highest present
+ * share, and parity row 0, which states the cut. Naming the 125 padding DATA
+ * slots and the 127 parity rows a short block never had is the
+ * fec_replay_miss_never_stored storm (762 -> 1016 on HKG0 V6). */
+static void test_nack_short_block_limits(void)
+{
+    const u8 *nack;
+    u64 ids[8];
+    u64 t1, t2;
+    u16 s;
+
+    clear_engine();
+    set_downlink_shape();
+    e.rtt_us = 0;
+    send_data(0, 0, 128, 128, 0, 0, TBT_FEC_S, false);
+    send_data(0, 0, 128, 128, 0, 1, TBT_FEC_S, false);
+    send_data(0, 0, 128, 128, 0, 2, TBT_FEC_S, false);
+    clear_pending();
+
+    t1 = now_ns() + TBT_NACK_FIRST_NS + 1000000ull;
+    flow_rx_nack(&f, t1);
+    nack = nack_for_group(0);
+    CHECK(nack != NULL, "nack limits: the head group is requested");
+    if (!nack)
+        return;
+    /* Share 3 is not proven missing: win_len may be 3 and the sender may
+     * never have written it. Only parity row 0 can say, so it is the whole
+     * request. The old rule named 125 padding DATA slots and all 128 rows. */
+    CHECK(nack_bit_count(nack) == 1,
+          "nack limits: parity 0 alone, not the whole block");
+    CHECK(nack_names(nack, 128), "nack limits: parity row 0 asks for the cut");
+    for (s = 0; s < 128; s++)
+        if (nack_names(nack, s))
+            break;
+    CHECK(s == 128, "nack limits: no DATA share is proven missing yet");
+    for (s = 129; s < 256; s++)
+        if (nack_names(nack, s))
+            break;
+    CHECK(s == 256, "nack limits: no parity row past row 0 before the cut");
+
+    /* Row 0 was lost and row 1 arrived. Every PARITY row carries the block's
+     * (win_len, epoch), so a single row states the cut and the request
+     * becomes exact: the two real DATA gaps and the rows below win_len. No
+     * widening to m is needed, and none may happen. */
+    send_parity_payload(0, 0, 128, 128, 0, 1, 5, 784, payload);
+    CHECK(f.rx[0].g[0].real_set && f.rx[0].g[0].real == 5,
+          "nack limits: parity row 1 states the cut");
+    clear_pending();
+    t2 = t1 + TBT_NACK_RETRY_NS + 1000000ull;
+    flow_rx_nack(&f, t2);
+    nack = nack_for_group(0);
+    CHECK(nack != NULL, "nack limits: the retry is sent");
+    if (!nack)
+        return;
+    CHECK(nack_bit_count(nack) == 6,
+          "nack limits: two DATA gaps and four parity rows below win_len");
+    CHECK(nack_names(nack, 3) && nack_names(nack, 4),
+          "nack limits: both real DATA gaps are named");
+    CHECK(nack_names(nack, 128) && nack_names(nack, 130) &&
+              nack_names(nack, 131) && nack_names(nack, 132),
+          "nack limits: the missing rows below win_len are named");
+    CHECK(!nack_names(nack, 129), "nack limits: a present row is not named");
+    for (s = 133; s < 256; s++)
+        if (nack_names(nack, s))
+            break;
+    CHECK(s == 256, "nack limits: no parity row at or above win_len");
+
+    /* The cut is what made the block decodable: the two missing DATA shares
+     * complete it with no codec at all. */
+    send_data(0, 0, 128, 128, 0, 3, TBT_FEC_S, false);
+    send_data(0, 0, 128, 128, 0, 4, 784, true);
+    CHECK(f.rx_next_block == 1 && f.rx_next_deliver == 5,
+          "nack limits: the short block delivers five packets");
+    CHECK(f.rx_deliver_bytes == 4u * TBT_FEC_S + 784u,
+          "nack limits: the padded tail delivers its real length");
+    CHECK(f.rx_decode_ok == 0 && f.rx_decode_fail == 0,
+          "nack limits: a systematic block needs no codec decode");
+    clear_pending();
+    flow_rx_nack(&f, t2 + TBT_NACK_RETRY_NS + 1000000ull);
+    CHECK(count_nacks(ids, 8) == 0,
+          "nack limits: a delivered block is never named again");
 }
 
 /* A 200 ms carrier RTT: the first NACK waits one trip after the gap first
@@ -892,6 +1009,8 @@ static void test_downlink_erasure(void)
     CHECK(f.rx_deliver_bytes == 139u * TBT_FEC_S,
           "erasure: all 139 shares delivered");
     CHECK(f.rx_shape_bad == 0, "erasure: no shape rejection");
+    CHECK(f.rx_decode_ok == 1 && f.rx_decode_fail >= 1,
+          "erasure: one successful codec decode, its failures counted");
     for (i = 0; i < 117; i++)
         free(parity[i]);
 }
@@ -2059,6 +2178,123 @@ static void test_carrier_replace(void)
           "carrier: closing the replacement drains the far side");
 }
 
+/* ---- Peer carrier retirement ----------------------------------------- */
+
+/* One slot with a real socket, the shape engine_start_carriers() leaves on a
+ * near side: retained (the slot survives a reconnect), up, HELLO exchanged. */
+static struct carrier *slot_with_socket(u16 index, bool retained, bool up)
+{
+    int sv[2];
+    struct carrier *c;
+
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, sv))
+        abort();
+    c = carrier_new(&e, sv[0], (int)index, retained);
+    if (!c)
+        abort();
+    close(sv[1]);
+    e.car[index] = c;
+    c->hello_sent = true;
+    c->hello_recv = true;
+    if (up)
+    {
+        c->up = true;
+        e.up_count++;
+    }
+    return c;
+}
+
+/* One RETIRE exactly as the kernel emits it (tbt_carrier.c:2610): type 0x24
+ * on the TBT_CONV record, one body byte naming the victim's slot, the peer's
+ * 4-bit generation in the header's seq, and the notice riding a different
+ * carrier in path_id. */
+static size_t retire_record(u8 *rec, u8 victim, u8 gen, u8 path)
+{
+    struct tbt_hdr h;
+
+    memset(&h, 0, sizeof(h));
+    h.type = TBT_F_RETIRE;
+    h.path_id = path;
+    h.seq = gen & 0xf;
+    h.conv = TBT_CONV;
+    return tbt_raw_put(rec, &h, &victim, 1);
+}
+
+/* A RETIRE names one slot and that slot only. The near must close the named
+ * carrier and arm its redial for the next tick: a path the peer has already
+ * replaced stays ESTABLISHED for the kernel's retries2 budget, which is how
+ * HKG0 V6 kept 256 -> 98 sockets that no side was using. The record used to
+ * fall into handle_record()'s default and return -EPROTO, so it closed the
+ * healthy carrier that carried it and left the named one untouched. */
+static void test_retire_carrier(void)
+{
+    struct carrier *c0, *c1, *c2;
+    u8 rec[TBT_HDR_LEN + 1];
+    u64 armed;
+    size_t len;
+
+    clear_engine();
+    e.near = true;
+    e.n_car = 4;
+    c0 = slot_with_socket(0, true, true);
+    c1 = slot_with_socket(1, true, true);
+    c2 = slot_with_socket(2, true, true);
+    clear_pending();
+
+    len = retire_record(rec, 1, 7, 2);
+    CHECK(rec[0] == TBT_F_RETIRE && tbt_le16(rec + 6) == 1 &&
+              tbt_le64(rec + 8) == 7,
+          "retire: one body byte, generation in seq");
+    CHECK(handle_record(&e, c2, rec, len) == 0,
+          "retire: the notice is a record, not a carrier fault");
+    CHECK(e.rx_retire == 1 && e.rx_retire_bad == 0,
+          "retire: the accepted notice is counted");
+    CHECK(c1->dead && c1->fd == -1, "retire: the named carrier is closed");
+    CHECK(c1->retry_at_ns <= now_ns(),
+          "retire: the redial is armed for the next tick");
+    CHECK(e.car[1] == c1 && c1->retained && c1->index == 1,
+          "retire: the slot stays for the redial");
+    CHECK(e.car_live == 3, "retire: nothing is detached from the engine");
+    CHECK(!c0->dead && c0->fd >= 0 && !c2->dead && c2->fd >= 0,
+          "retire: the other carriers keep their sockets");
+    CHECK(e.up_count == 2, "retire: one carrier left the ready set");
+    CHECK(!f.dead && f.rx_next_block == 0 && f.rx_used == 0,
+          "retire: no flow state changes");
+
+    /* A notice naming a slot this engine does not have is a peer whose
+     * carriers= disagrees. Count it apart and keep the carrier that carried
+     * it: the record itself is well formed. */
+    len = retire_record(rec, 40, 7, 2);
+    CHECK(handle_record(&e, c2, rec, len) == 0,
+          "retire: an out-of-range index is not a carrier fault");
+    CHECK(e.rx_retire == 1 && e.rx_retire_bad == 1,
+          "retire: the out-of-range notice is counted apart");
+    CHECK(!c0->dead && !c2->dead, "retire: the notice never hurts its sender");
+
+    /* A duplicate for a slot already down must not restart the backoff its
+     * own failing dial earned. */
+    armed = now_ns() + 60000000000ull;
+    c1->retry_at_ns = armed;
+    len = retire_record(rec, 1, 7, 2);
+    CHECK(handle_record(&e, c2, rec, len) == 0 && c1->retry_at_ns == armed,
+          "retire: a duplicate leaves the armed redial alone");
+    CHECK(e.rx_retire == 2, "retire: a duplicate is still a notice");
+
+    /* The far keeps its slot: its HELLO path replaces an occupant, so a
+     * replacement joins without this notice, and the near may still be
+     * sending on the old socket until it dials. */
+    clear_engine();
+    e.near = false;
+    e.n_car = 2;
+    c0 = slot_with_socket(0, false, false);
+    len = retire_record(rec, 0, 3, 0);
+    CHECK(handle_record(&e, c0, rec, len) == 0,
+          "retire: the far accepts the notice");
+    CHECK(e.rx_retire == 1 && !c0->dead && c0->fd >= 0,
+          "retire: the far keeps the slot for the replacement HELLO");
+    clear_engine();
+}
+
 /* The parser owns the length and format: 32 hex digits are the full value,
  * 16 pin the low 64 bits (the documented rule), and every other length is
  * refused rather than truncated. */
@@ -2536,6 +2772,7 @@ int main(void)
     test_marker_short_sequence();
     test_credit_inflight();
     test_window_and_nack_base();
+    test_nack_short_block_limits();
     test_nack_hold_follows_rtt();
     test_carrier_keepalive_sockopts();
     test_multishape_sequence();
@@ -2553,6 +2790,7 @@ int main(void)
     test_carrier_lifecycle();
     test_far_accept_reap();
     test_carrier_replace();
+    test_retire_carrier();
     test_stall_dump();
     test_tx_idle_empty();
     test_tx_peer_credit();

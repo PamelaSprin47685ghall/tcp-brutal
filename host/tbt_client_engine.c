@@ -240,6 +240,12 @@ struct flow
     u64 rx_inflight_bad;
     u64 rx_block_stalled;
     u64 rx_shape_mismatch;
+    /* Codec decodes of one group: `ok` produced every real share, `fail`
+     * left one unknown and the next arriving share retries with a larger
+     * rank. A block whose fail count keeps growing without an ok is one the
+     * codec cannot finish from the shares that arrive. */
+    u64 rx_decode_ok;
+    u64 rx_decode_fail;
     u32 rx_credit_shares; /* units: shares, one block is groups*(n+m) */
     u64 rx_credit_bad;
     u16 rx_used;
@@ -338,6 +344,12 @@ struct engine
      * replay ring, so a retry or the peer's NACK still delivers it. */
     u64 tx_carrier_dropped;
     u64 rx_unknown_sid;
+    /* RETIRE notices: `rx_retire` names a slot this engine has, and
+     * `rx_retire_bad` names none (a peer whose carriers= disagrees). The
+     * notice is the only carrier-scoped statement a near can receive, so a
+     * field run needs both halves of it. */
+    u64 rx_retire;
+    u64 rx_retire_bad;
 
     /* The carrier RTT as the kernel sees it. The ACK carries it to the peer
      * and the NACK hold uses it, together with its deviation: a request for
@@ -1007,6 +1019,34 @@ static void carrier_close(struct engine *e, struct carrier *c)
             e->car[c->index] == c)
             e->car[c->index] = NULL;
     }
+}
+
+/* A peer's RETIRE names one of this side's carrier slots, and says that slot
+ * is being replaced. Close it now: a carrier whose path blackholed stays
+ * ESTABLISHED for the kernel's retries2 budget (minutes), and a near that
+ * waits for that timeout holds a dead connection it has already been told
+ * about.
+ *
+ * The redial is armed for the next tick, not carrier_close()'s 200 ms retry:
+ * the peer has already freed its side, so the replacement HELLO should reach
+ * that slot as soon as this side can dial. A notice for a slot that is
+ * already down is a duplicate (the control queue retries, and tbt_tx moves
+ * the notice to another carrier); it must not restart a backoff that the
+ * carrier's own failing dial earned.
+ *
+ * This engine allocates no per-carrier generation (its HELLO carries the
+ * profile only, so `seq` is the peer's generation and there is nothing here
+ * to compare it with). The index alone decides, which is also the only thing
+ * the replacement HELLO needs. */
+static void carrier_retire(struct engine *e, u16 index)
+{
+    struct carrier *c = carrier_at(e, index);
+
+    if (!c || c->dead)
+        return;
+    carrier_close(e, c);
+    c->retry_at_ns = now_ns();
+    logmsg(e, "tbt_client: carrier %d retired by the peer\n", c->index);
 }
 
 static void carrier_unlink(struct engine *e, struct carrier *c)
@@ -1977,11 +2017,19 @@ static void rx_group_try(struct flow *f, struct rx_block *b, u16 group)
     }
     if (ok)
     {
+        f->rx_decode_ok++;
         g->decoded = true;
         g->real = real;
         g->real_set = true;
         g->epoch = g->present[real - 1] ? g->plen[real - 1] : g->epoch;
         flow_sample_block(f, g, real);
+    }
+    else
+    {
+        /* Not a per-share error: the next arriving share re-enters with one
+         * more equation. A block that keeps failing without ever succeeding
+         * is one the codec cannot finish from the shares that arrive. */
+        f->rx_decode_fail++;
     }
 }
 
@@ -2191,7 +2239,8 @@ static void flow_send_nack_group(struct flow *f, struct rx_block *b,
     struct rx_group *g = &b->g[group];
     u8 body[TBT_FEC_NACK_LEN];
     u16 real = g->real_set ? g->real : b->n;
-    u16 s;
+    u16 seen_hi = 0;
+    u16 dlimit, plimit, s;
     bool any = false;
 
     if (b->id < f->rx_next_block)
@@ -2204,7 +2253,19 @@ static void flow_send_nack_group(struct flow *f, struct rx_block *b,
     }
     memset(&n, 0, sizeof(n));
     tbt_fec_bitmap_set(n.group_mask, group);
-    for (s = 0; s < real; s++)
+    /* The kernel's tbt_fec_nack_data_limit(): a present DATA share j proves
+     * the block holds shares 0..j, because real shares carry no hole. Until
+     * a PARITY states win_len, a missing share above the highest present one
+     * may be padding the sender never wrote, and naming it buys a round trip
+     * that answers nothing. */
+    for (s = b->n; s > 0; s--)
+        if (g->present[s - 1])
+        {
+            seen_hi = s;
+            break;
+        }
+    dlimit = g->real_set ? real : (seen_hi < real ? seen_hi : real);
+    for (s = 0; s < dlimit; s++)
     {
         if (!g->present[s])
         {
@@ -2212,17 +2273,23 @@ static void flow_send_nack_group(struct flow *f, struct rx_block *b,
             any = true;
         }
     }
-    if (!g->real_set)
+    /* tbt_fec_nack_parity_limit(): before win_len arrives, only parity row 0
+     * is named. Row 0 states the cut (win_len, epoch), and so does every
+     * later row -- the sender stamps each row with the block's win_len --
+     * so a lost row 0 whose row 1 arrived has already set real_set. Rows
+     * past a short block's win_len were never emitted: naming all m of them
+     * is what the far answered with fec_replay_miss_never_stored (m = 128 on
+     * the 1x256 downlink). After the cut, a short block has min(real, m)
+     * rows and a full block has m. A retry keeps naming row 0 and never
+     * widens: every row states the same cut, so widening buys no new
+     * information and re-names rows a short block never stored. */
+    plimit = !b->m ? 0 : (g->real_set ? (real < b->m ? real : b->m) : 1);
+    for (s = 0; s < plimit; s++)
     {
-        /* The parity that names win_len is missing: ask for every parity
-         * share so the real length and the epoch arrive. */
-        for (s = b->n; s < b->n + b->m; s++)
+        if (!g->present[b->n + s])
         {
-            if (!g->present[s])
-            {
-                tbt_fec_bitmap_set(n.share_mask, s);
-                any = true;
-            }
+            tbt_fec_bitmap_set(n.share_mask, (u16)(b->n + s));
+            any = true;
         }
     }
     if (!any)
@@ -3115,6 +3182,7 @@ static void flow_tick(struct flow *f, u64 now)
                "rx_next=%llu rx_bytes=%llu rx_used=%u rx_late=%llu "
                "rx_win_drop=%llu rx_stale=%llu rx_inflight_bad=%llu "
                "rx_stalled=%llu rx_shape_mismatch=%llu "
+               "rx_dec_ok=%llu rx_dec_fail=%llu "
                "rx_credit_shares=%u rx_credit_blocks=%u "
                "rx_credit_bad=%llu rx_unknown_sid=%llu out=%zu/%zu up=%u\n",
                (unsigned long long)f->sid, f->near,
@@ -3128,6 +3196,8 @@ static void flow_tick(struct flow *f, u64 now)
                (unsigned long long)f->rx_inflight_bad,
                (unsigned long long)f->rx_block_stalled,
                (unsigned long long)f->rx_shape_mismatch,
+               (unsigned long long)f->rx_decode_ok,
+               (unsigned long long)f->rx_decode_fail,
                f->rx_credit_shares, rx_credit_blocks,
                (unsigned long long)f->rx_credit_bad,
                (unsigned long long)e->rx_unknown_sid, f->out_len,
@@ -3213,6 +3283,34 @@ static int handle_record(struct engine *e, struct carrier *c, const u8 *buf,
 
         if (f)
             flow_free(e, f);
+        return 0;
+    }
+    case TBT_F_RETIRE:
+    {
+        u8 index = rec.body[0];
+
+        /* The peer retired carrier `index`: body[0] is the victim's slot in
+         * the numbering both sides share (the near dials slot i and names it
+         * in its HELLO, so the far installs the same i), and hdr.seq is the
+         * peer's 4-bit generation of it. tbt_rec_scan() already enforced
+         * body_len == 1. A slot this engine does not have is a peer whose
+         * carriers= disagrees: refuse the notice, never the carrier that
+         * carried it -- an unknown record type used to do exactly that and
+         * took a healthy carrier down with it. */
+        if (index >= e->n_car)
+        {
+            e->rx_retire_bad++;
+            return 0;
+        }
+        e->rx_retire++;
+        /* Only the near redials, so only the near has a slot to rearm. On a
+         * far the notice changes nothing: one accepted connection owns its
+         * slot, the retired peer socket closes or RSTs and carrier_close()
+         * detaches the slot, and handle_hello() gives an occupant's slot to
+         * the replacement. Closing it here would only drop a path the near
+         * may still be sending on until that dial. */
+        if (e->near)
+            carrier_retire(e, index);
         return 0;
     }
     case TBT_F_PAD:
@@ -3322,6 +3420,11 @@ static void carrier_read(struct engine *e, struct carrier *c)
                 carrier_close(e, c);
                 return;
             }
+            /* A record can retire the carrier it arrived on (RETIRE names
+             * any slot, including the sender's). The fd is closed by then,
+             * so read no more of it. */
+            if (c->dead)
+                return;
             continue;
         }
         if (n == 0)
@@ -3842,9 +3945,12 @@ int tbt_engine_run(const struct tbt_engine_cfg *cfg)
                 active++;
         fprintf(stderr,
                 "tbt_client: stop up=%u drops=%llu tx_carrier_dropped=%llu "
+                "rx_retire=%llu rx_retire_bad=%llu "
                 "active=%u accepted=%llu refused=%llu freed=%llu peak=%u\n",
                 e->up_count, (unsigned long long)e->drops,
-                (unsigned long long)e->tx_carrier_dropped, active,
+                (unsigned long long)e->tx_carrier_dropped,
+                (unsigned long long)e->rx_retire,
+                (unsigned long long)e->rx_retire_bad, active,
                 (unsigned long long)e->flow_accepted,
                 (unsigned long long)e->flow_refused,
                 (unsigned long long)e->flow_freed, e->flow_peak);
