@@ -203,6 +203,10 @@ struct flow
     struct rx_block rx[TBT_RX_SLOTS];
     u64 rx_next_block;
     u64 rx_next_deliver;
+    bool rx_deliver_started;
+    u64 rx_late_share;
+    u64 rx_stale_nack;
+    u64 rx_window_drop;
     u64 rx_deliver_bytes;
     u64 peer_fin_end;
     bool peer_fin_end_set;
@@ -1265,7 +1269,10 @@ static int flow_send_ack(struct flow *f)
 
     memset(&a, 0, sizeof(a));
     a.next_deliver = f->rx_next_deliver;
-    a.credit_packets = TBT_FEC_CREDIT_MAX;
+    /* The peer may only send the blocks this side can buffer. Granting the
+     * 8192-packet credit let a far side run 64 blocks ahead of an 8-slot
+     * reorder ring, so a NACK could name a block already evicted. */
+    a.credit_packets = (u32)TBT_RX_SLOTS * f->rx_n;
     a.rtt_us = f->rtt_us ? f->rtt_us : 1000;
     a.deliver_bytes = f->rx_deliver_bytes;
     if (tbt_fec_ack_pack(&a, body))
@@ -1351,9 +1358,18 @@ static struct rx_block *rx_block_get(struct flow *f,
     if (!f->rx_shape_set || !f->rx_groups)
         return NULL;
     if (id < f->rx_next_block)
+    {
+        /* A replay that arrived after delivery moved past its block. The
+         * counter is the deadlock sentinel: a NACK must never name a block
+         * below rx_next_block, or the pair can spin forever. */
+        f->rx_late_share++;
         return NULL;
+    }
     if (id >= f->rx_next_block + TBT_RX_SLOTS)
+    {
+        f->rx_window_drop++;
         return NULL;
+    }
     if (h->n != f->rx_n || h->m != f->rx_m || h->reserved >= f->rx_groups)
         return NULL;
     if (h->type == TBT_FEC_DATA)
@@ -1601,7 +1617,16 @@ static void flow_rx_check(struct flow *f)
                 f->rx_deliver_bytes += len;
             }
         }
-        f->rx_next_deliver = b->seq0 + blk_pkts;
+        /* The delivery frontier counts real packets, not block-aligned
+         * slots: a marker block adds 0 and a short block adds the sum of its
+         * group win_len values. Using b->seq0 here made marker blocks jump
+         * the frontier and left a later NACK naming a block already passed. */
+        if (!f->rx_deliver_started)
+        {
+            f->rx_next_deliver = b->seq0;
+            f->rx_deliver_started = true;
+        }
+        f->rx_next_deliver += blk_pkts;
         f->rx_next_block = b->id + 1;
         rx_block_release(b);
         flow_fin_maybe(f);
@@ -1670,6 +1695,14 @@ static void flow_send_nack_group(struct flow *f, struct rx_block *b,
     u16 s;
     bool any = false;
 
+    if (b->id < f->rx_next_block)
+    {
+        /* The caller must only NACK the window head or a block inside the
+         * 8-slot ring. Reaching this branch is the stale-request deadlock
+         * the counters exist to expose. */
+        f->rx_stale_nack++;
+        return;
+    }
     memset(&n, 0, sizeof(n));
     tbt_fec_bitmap_set(n.group_mask, group);
     for (s = 0; s < real; s++)
@@ -1704,14 +1737,18 @@ static void flow_send_nack_group(struct flow *f, struct rx_block *b,
 
 static void flow_rx_nack(struct flow *f, u64 now)
 {
-    u32 i;
+    u32 off;
 
-    for (i = 0; i < TBT_RX_SLOTS; i++)
+    /* The window head is the only NACK anchor. Scanning by slot let a stale
+     * block id below rx_next_block stay in the ring while the delivery
+     * frontier moved, so the pair kept requesting a block already passed. */
+    for (off = 0; off < TBT_RX_SLOTS; off++)
     {
-        struct rx_block *b = &f->rx[i];
+        u64 id = f->rx_next_block + off;
+        struct rx_block *b = &f->rx[id % TBT_RX_SLOTS];
         u16 group;
 
-        if (!b->used || b->id < f->rx_next_block)
+        if (!b->used || b->id != id)
             continue;
         if (now - b->first_ns < TBT_NACK_FIRST_NS)
             continue;

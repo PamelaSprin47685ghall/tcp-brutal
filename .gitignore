@@ -291,6 +291,8 @@ host/test_client_loopback
 host/test_client_loopback_san
 host/test_client_wire
 host/test_client_wire_san
+host/test_client_rx
+host/test_client_rx_san
 host/test_mux
 host/test_mux_san
 host/test_batch_san
