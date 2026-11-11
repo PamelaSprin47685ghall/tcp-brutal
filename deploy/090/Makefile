@@ -53,7 +53,11 @@ NEAR_PORT    ?= 19000
 FAR_PORT     ?= 19002
 VLESS_PORT   ?= 19001
 MIXED_PORT   ?= 7890
+API_PORT     ?= 9090
 FAR_IP       ?= 203.0.113.10
+# A bare IPv6 literal (the HKG0 V6 test address) must be bracketed inside the
+# peer= URL; a value already written as [addr] is left alone.
+FAR_IP_URL   := $(if $(findstring :,$(FAR_IP)),$(if $(filter [%,$(FAR_IP)),$(FAR_IP),[$(FAR_IP)]),$(FAR_IP))
 # Empty by default: a near client behind a dynamic ISP address or CGNAT has
 # no stable public address to pin. The far side then admits the first client
 # that presents the configured CRYPTO_KEY and NONCE, and keeps that anchor
@@ -140,7 +144,8 @@ $(DIST)/near/config.yaml: $(REPO_ROOT)/deploy/090/near.yaml.in FORCE
 	@mkdir -p $(dir $@)
 	sed -e 's/@UUID@/$(UUID)/g' \
 	    -e 's/@PORT@/$(NEAR_PORT)/g' \
-	    -e 's/@MIXED_PORT@/$(MIXED_PORT)/g' $< > $@
+	    -e 's/@MIXED_PORT@/$(MIXED_PORT)/g' \
+	    -e 's/@API_PORT@/$(API_PORT)/g' $< > $@
 
 $(DIST)/far/config.yaml: $(REPO_ROOT)/deploy/090/far.yaml.in FORCE
 	@mkdir -p $(dir $@)
@@ -160,7 +165,7 @@ $(DIST)/far/systemd/%.service: $(REPO_ROOT)/deploy/090/systemd/%.service.in FORC
 package-near: mihomo client $(DIST)/near/config.yaml $(NEAR_UNITS)
 	install -m 0755 $(DIST)/mihomo $(DIST)/near/mihomo
 	printf '%s\n' \
-	  "tunnel 1 role=near listen=127.0.0.1:$(NEAR_PORT) peer=$(FAR_IP):$(FAR_PORT) target=127.0.0.1:$(VLESS_PORT) n=8 m=24 w=64 L=8 fec=on mode=sc-ldpc carriers=256 crypto=on crypto_key=$(CRYPTO_KEY) nonce=$(NONCE) adaptive=off" \
+	  "tunnel 1 role=near listen=127.0.0.1:$(NEAR_PORT) peer=$(FAR_IP_URL):$(FAR_PORT) target=127.0.0.1:$(VLESS_PORT) n=8 m=24 w=64 L=8 fec=on mode=sc-ldpc carriers=256 crypto=on crypto_key=$(CRYPTO_KEY) nonce=$(NONCE) adaptive=off" \
 	  > $(DIST)/near/tbtun.conf
 	install -m 0755 $(REPO_ROOT)/deploy/090/install-near.sh $(DIST)/near/install-near.sh
 

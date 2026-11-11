@@ -23,7 +23,7 @@
 #         not matched and still ride smux.
 
 mixed-port: @MIXED_PORT@
-external-controller: 127.0.0.1:9090
+external-controller: 127.0.0.1:@API_PORT@
 mode: rule
 log-level: info
 
