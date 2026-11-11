@@ -621,6 +621,66 @@ static void test_flows(void)
     }
 }
 
+/* A window wider than one WIN must not strand credit. rx_unacked can pass
+ * TBT_MUX_WINDOW_MAX while the u16 grant cannot carry the whole sum, so the
+ * drain subtracts the grant and keeps the remainder charged. */
+static void test_rx_credit_drain(void)
+{
+    struct tbt_mux_flows f;
+    struct tbt_mux_stream *s;
+    u32 charged;
+    u32 granted;
+    u16 grant;
+    int drains;
+    int rc;
+    int i;
+
+    /* Half of this window is exactly one WIN, so the byte that crosses the
+     * threshold makes rx_unacked one byte larger than a grant can carry. */
+    tbt_mux_flows_init(&f, 2 * TBT_MUX_WINDOW_MAX);
+    s = tbt_mux_flow_open(&f, 0x500, 0);
+    ok(s != NULL, "drain: open", NULL);
+
+    /* 65535 unacked bytes sit exactly on the threshold; the next byte makes
+     * 65536, which the u16 grant can cover only up to 65535. The odd byte
+     * must stay charged. */
+    grant = 0;
+    ok_int(tbt_mux_rx_charge(&f, 0x500, TBT_MUX_WINDOW_MAX, &grant), 0,
+           "drain: a full WIN waits on the half window");
+    ok_u32(grant, 0, "drain: a waiting charge grants nothing");
+    ok_int(tbt_mux_rx_charge(&f, 0x500, 1, &grant), 1,
+           "drain: one byte past a full WIN grants");
+    ok_u32(grant, TBT_MUX_WINDOW_MAX, "drain: claim is one WIN wide");
+    ok_u32(s ? s->rx_unacked : 0, 1, "drain: the odd byte stays charged");
+
+    /* Charge 400 DATA frames across several drains. Every charged byte is
+     * either granted (at most one WIN per drain) or still charged. */
+    tbt_mux_flows_init(&f, 4 * TBT_MUX_WINDOW_MAX);
+    s = tbt_mux_flow_open(&f, 0x501, 0);
+    ok(s != NULL, "drain loop: open", NULL);
+    charged = 0;
+    granted = 0;
+    drains = 0;
+    for (i = 0; i < 400; i++) {
+        grant = 0;
+        rc = tbt_mux_rx_charge(&f, 0x501, TBT_MUX_PAYLOAD_MAX, &grant);
+        ok(rc == 0 || rc == 1, "drain loop: return code", NULL);
+        charged += TBT_MUX_PAYLOAD_MAX;
+        if (rc == 1) {
+            drains++;
+            ok(grant > 0, "drain loop: a drain carries credit", NULL);
+            granted += grant;
+        } else {
+            ok_u32(grant, 0, "drain loop: no drain stores 0");
+        }
+        ok_u32((s ? s->rx_unacked : 0) + granted, charged,
+               "drain loop: no credit is lost");
+    }
+    ok(drains > 1, "drain loop: a wide window drains more than once", NULL);
+    ok((s ? s->rx_unacked : 0) > TBT_MUX_WINDOW_MAX,
+       "drain loop: the residual outgrows one WIN", NULL);
+}
+
 static void same_capture(const struct capture *a, const struct capture *b,
                          const char *what)
 {
@@ -753,6 +813,7 @@ int main(void)
     test_encode();
     test_parser();
     test_flows();
+    test_rx_credit_drain();
     test_end_to_end();
 
     printf("%d checks, %d failures\n", checks, failures);

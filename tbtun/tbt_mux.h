@@ -28,10 +28,12 @@
  * conversion stays inside these two functions.
  *
  * Flow control is separate from framing. A receiver charges every DATA byte
- * to rx_unacked. When that sum exceeds half of rx_window, it grants the whole
- * sum back in one WIN and clears rx_unacked; smaller sums wait for the next
- * DATA frame. A sender may send a DATA frame only while tx_credit covers its
- * length; WIN adds credit and saturates at 0xffffffff.
+ * to rx_unacked. When that sum exceeds half of rx_window, it grants back as
+ * much as one WIN can carry (at most TBT_MUX_WINDOW_MAX) and subtracts that
+ * from rx_unacked. A sum wider than the u16 credit field drains across
+ * successive charges, so no credited byte is lost; smaller sums wait for the
+ * next DATA frame. A sender may send a DATA frame only while tx_credit covers
+ * its length; WIN adds credit and saturates at 0xffffffff.
  *
  * Stream states:
  *
@@ -174,9 +176,10 @@ int tbt_mux_tx_charge(struct tbt_mux_flows *f, u32 id, u16 len);
 int tbt_mux_tx_credit(struct tbt_mux_flows *f, u32 id, u16 credit);
 
 /* Charge len received DATA bytes. When rx_unacked exceeds rx_window / 2,
- * store the whole sum in *grant, clear rx_unacked, and return 1. Otherwise
- * store 0 in *grant and return 0. Returns -ENOENT for an unknown id and
- * -EINVAL when grant is NULL. */
+ * store one WIN of credit in *grant, subtract it from rx_unacked, and return
+ * 1. A sum above TBT_MUX_WINDOW_MAX drains over successive calls instead of
+ * discarding the remainder. Otherwise store 0 in *grant and return 0.
+ * Returns -ENOENT for an unknown id and -EINVAL when grant is NULL. */
 int tbt_mux_rx_charge(struct tbt_mux_flows *f, u32 id, u16 len, u16 *grant);
 
 #endif /* _TBT_MUX_H */

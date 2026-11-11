@@ -334,6 +334,6 @@ int tbt_mux_rx_charge(struct tbt_mux_flows *f, u32 id, u16 len, u16 *grant)
 
     *grant = s->rx_unacked > TBT_MUX_WINDOW_MAX ? TBT_MUX_WINDOW_MAX
                                                 : (u16)s->rx_unacked;
-    s->rx_unacked = 0;
+    s->rx_unacked -= *grant;
     return 1;
 }

@@ -122,9 +122,11 @@ nonce；PARITY 必须参与，否则同一块的每个 parity share 会复用 ke
 - WIN：`len`=授予对端的信用字节数（0..65535），无 body，`slot=0`
 
 解析器只把 DATA 的 len 当 body 长度；WIN 的 len 是信用，不读 body。流控：
-接收端累计 `rx_unacked`，超过 `rx_window/2` 时回一个 WIN 并清零；发送端
-`tx_credit` 不足时不能发 DATA。`mux_stream.bin/json` 是一条交错了两条流
-的确定性字节流，含 OPEN/DATA/WIN/FIN。
+接收端累计 `rx_unacked`，超过 `rx_window/2` 时回一个 WIN（len 最多
+65535），并从 `rx_unacked` 中扣除这一 WIN 已归还的字节；余额若仍超过
+65535，在后续 WIN 中继续归还，不能清零丢弃。发送端 `tx_credit` 不足时
+不能发 DATA。`mux_stream.bin/json` 是一条交错了两条流的确定性字节流，
+含 OPEN/DATA/WIN/FIN。
 
 ## 6. 下行 SC-LDPC（binary，S=1024）
 
