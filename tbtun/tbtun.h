@@ -1842,6 +1842,8 @@ struct tbt_session
     atomic64_t fec_tx_pump_rearm;
     atomic64_t fec_tx_run_leak;
     atomic64_t fec_unacked_ring_drain;
+    atomic64_t fec_replay_false_enospc;
+    atomic64_t fec_block_complete_without_replay;
     atomic64_t fec_fin_frozen_with_pending;
     /* FEC sender scheduling. fec_flush_pass counts accepted DATA records.
      * fec_flush_skip and fec_hol_wait are kept for the old per-carrier queue
