@@ -601,6 +601,7 @@ struct tbt_stream
     bool tx_fin_queued;       /* at least one FIN copy entered tx_q */
     bool tx_fin_written;      /* at least one FIN copy reached the wire */
     bool tx_fin_seq_set;      /* tx_fin_seq frozen at the first request */
+    bool fin_pending_counted; /* fec_fin_frozen_with_pending counted once */
     u64 tx_fin_seq;           /* byte offset every FIN copy names */
     /* FEC FIN body (TBT_FIN_BODY_LEN): absolute session packet seqs, frozen
      * with tx_fin_seq. Non-FEC streams leave them zero. */
@@ -1841,6 +1842,7 @@ struct tbt_session
     atomic64_t fec_tx_pump_rearm;
     atomic64_t fec_tx_run_leak;
     atomic64_t fec_unacked_ring_drain;
+    atomic64_t fec_fin_frozen_with_pending;
     /* FEC sender scheduling. fec_flush_pass counts accepted DATA records.
      * fec_flush_skip and fec_hol_wait are kept for the old per-carrier queue
      * accounting; the session FIFO never queues a record behind one socket,
