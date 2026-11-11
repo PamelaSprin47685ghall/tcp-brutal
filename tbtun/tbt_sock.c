@@ -456,9 +456,12 @@ static void tbt_drain_body(struct tbt_stream *st)
          * source ring paused capture earlier, resume it now; otherwise the
          * remaining target bytes never enter the FEC ring and the pump has
          * nothing to send. */
-        if (READ_ONCE(st->tx_paused))
-            WRITE_ONCE(st->tx_paused, false);
+        /* The peer's FIN is not a reason to leave capture paused or the FEC
+         * pump unarmed. Clear the pause unconditionally and arm the pump;
+         * the pump will read whatever the target still has queued. */
+        WRITE_ONCE(st->tx_paused, false);
         tbt_stream_schedule(st, &st->w_read, TBT_STREAM_F_SCHED_READ);
+        tbt_session_arm(st->sess, TBT_SW_FEC_TX, 0);
         tbt_tx_fec_rearm_if_pending(st->sess, st);
         /* rx_fin_done is half of the detach gate; the FBK tick owns the
          * other half (tx_fin_written) and the close bound. Wake it even when
