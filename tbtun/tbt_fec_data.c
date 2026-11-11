@@ -1586,6 +1586,27 @@ static u32 tbt_fec_ring_get(struct tbt_fec_tx *tx, u8 *dst, u32 len)
  * win_len/epoch so the receiver stops waiting for shares the sender never
  * wrote. The rows cover shares 0..win_len-1; the coupled graph may still
  * need a NACK replay for a loss (see tbt_fec_tx_parity_count()). */
+/* Account a replay ensure failure. -ENOSPC means the slot still holds an
+ * unacked block; -ENOMEM is a real allocation failure. A -ENOSPC that the
+ * exact slot test calls reclaimable is a race, counted separately. */
+static void tbt_fec_replay_account(struct tbt_session *sess,
+                                   struct tbt_fec_tx *tx, u64 block_id,
+                                   int er)
+{
+    if (!er)
+        return;
+    if (er == -ENOSPC)
+    {
+        if (tbt_fec_replay_reclaimable(tx->replay, block_id,
+                                       READ_ONCE(tx->peer_pkts),
+                                       &tx->replay_lock))
+            atomic64_inc(&sess->fec_replay_false_enospc);
+        atomic64_inc(&sess->fec_replay_miss_enospc);
+    }
+    else
+        atomic64_inc(&sess->fec_replay_miss_alloc);
+}
+
 static void tbt_fec_tx_emit_parity(struct tbt_session *sess,
                                    struct tbt_fec_tx *tx, u16 group,
                                    u64 block_id, u16 win_len)
@@ -1626,11 +1647,13 @@ static void tbt_fec_tx_emit_parity(struct tbt_session *sess,
                             tbt_fec_grouped_mode(tx->codec));
         return;
     }
-    if (tx->replay &&
-        tbt_fec_replay_ensure_block(tx->replay, block_id, tx->blk_n,
-                                    tx->blk_m, tx->blk_seq0,
-                                    &tx->replay_lock) < 0)
-        atomic64_inc(&sess->fec_replay_miss_alloc);
+    if (tx->replay)
+        tbt_fec_replay_account(sess, tx, block_id,
+                               tbt_fec_replay_ensure_block(
+                                   tx->replay, block_id, tx->blk_n,
+                                   tx->blk_m, tx->blk_seq0,
+                                   READ_ONCE(tx->peer_pkts),
+                                   &tx->replay_lock));
     for (i = 0; i < count; i++)
     {
         memset(&h, 0, sizeof(h));
@@ -2001,11 +2024,13 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
         WRITE_ONCE(tx->last_share, share);
         if (tx->replay)
         {
-            if (tbt_fec_replay_ensure_block(tx->replay, block_id,
+            tbt_fec_replay_account(
+                sess, tx, block_id,
+                tbt_fec_replay_ensure_block(tx->replay, block_id,
                                             tx->blk_n, tx->blk_m,
                                             tx->blk_seq0,
-                                            &tx->replay_lock) < 0)
-                atomic64_inc(&sess->fec_replay_miss_alloc);
+                                            READ_ONCE(tx->peer_pkts),
+                                            &tx->replay_lock));
             spin_lock_bh(&tx->replay_lock);
             tbt_fec_replay_store(tx->replay, block_id, group, share,
                                  rec, rec_len);

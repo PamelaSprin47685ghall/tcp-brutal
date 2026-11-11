@@ -859,8 +859,27 @@ static void tbt_fec_replay_shape_set(struct tbt_fec_replay *r, u32 b,
  * was built with. Called in process context before the caller takes
  * replay_lock: the plane is allocated here, never under the spinlock. A
  * block's plane is reused from hot[] when possible. */
+bool tbt_fec_replay_reclaimable(const struct tbt_fec_replay *r,
+                                u64 block_id, u64 peer_pkts,
+                                tbt_fec_spinlock_t *lock)
+{
+    u32 b;
+    u64 end;
+    bool ok;
+
+    if (!r || !r->k)
+        return false;
+    b = (u32)(block_id % r->k);
+    tbt_fec_lock(lock);
+    end = r->shape_seq0[b] + (u64)r->groups * r->shape_n[b];
+    ok = r->blk_rec[b] && r->block_start[b] != ~0ULL && r->shape_n[b] &&
+         end <= peer_pkts;
+    tbt_fec_unlock(lock);
+    return ok;
+}
+
 int tbt_fec_replay_ensure_block(struct tbt_fec_replay *r, u64 block_id,
-                                u16 n, u16 m, u64 seq0,
+                                u16 n, u16 m, u64 seq0, u64 peer_pkts,
                                 tbt_fec_spinlock_t *lock)
 {
     u32 b, i, row, per_block;
@@ -885,20 +904,24 @@ int tbt_fec_replay_ensure_block(struct tbt_fec_replay *r, u64 block_id,
     {
 #ifndef __KERNEL__
         /* Host tests model the circular ring's eviction directly; the
-         * kernel path below keeps an unacknowledged plane instead. */
+         * kernel path below uses the slot's own packet span. */
+        (void)peer_pkts;
         buf = r->blk_rec[b];
         r->blk_rec[b] = NULL;
         r->block_start[b] = ~0ULL;
 #else
-        if (r->block_start[b] >= r->ack_floor)
+        u64 end = r->shape_seq0[b] +
+                  (u64)r->groups * r->shape_n[b];
+
+        if (!r->shape_n[b] || end > peer_pkts)
         {
             tbt_fec_unlock(lock);
             return -ENOSPC;
         }
         buf = r->blk_rec[b];
-#endif
         r->blk_rec[b] = NULL;
         r->block_start[b] = ~0ULL;
+#endif
     }
     else
         buf = r->hot_n ? r->hot[--r->hot_n] : NULL;
@@ -979,7 +1002,7 @@ int tbt_fec_replay_store(struct tbt_fec_replay *r, u64 block_id, u16 group,
         u32 hb = (u32)(block_id % r->k);
 
         if (!r->blk_rec[hb] || r->block_start[hb] != block_id)
-            tbt_fec_replay_ensure_block(r, block_id, r->n, r->m, 0,
+            tbt_fec_replay_ensure_block(r, block_id, r->n, r->m, 0, 0,
                                         &host_lock);
     }
 #endif

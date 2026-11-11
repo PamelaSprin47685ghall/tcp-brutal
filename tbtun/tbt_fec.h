@@ -782,7 +782,12 @@ static inline bool tbt_fec_credit_block_ok(u64 blk, u64 frontier,
  * the caller takes the TX replay spinlock. n + m must equal the ring's
  * share count. */
 int tbt_fec_replay_ensure_block(struct tbt_fec_replay *r, u64 block_id,
-                                u16 n, u16 m, u64 seq0,
+                                u16 n, u16 m, u64 seq0, u64 peer_pkts,
+                                tbt_fec_spinlock_t *lock);
+/* True when the ring slot for block_id can be reclaimed: it holds another
+ * block whose stored seq0 + groups*n is at or below peer_pkts. */
+bool tbt_fec_replay_reclaimable(const struct tbt_fec_replay *r,
+                                u64 block_id, u64 peer_pkts,
                                 tbt_fec_spinlock_t *lock);
 /* The shape and origin stored for block_id, false when this slot no longer
  * names that block. The caller holds the TX replay lock. */

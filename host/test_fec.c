@@ -3027,14 +3027,14 @@ static void test_replay(void)
             u16 sn = 0, sm = 0;
             u64 s0 = 0;
 
-            ok_int(tbt_fec_replay_ensure_block(rs, 21, 6, 2, 100, &hlock),
+            ok_int(tbt_fec_replay_ensure_block(rs, 21, 6, 2, 100, 0, &hlock),
                    0, "replay records the block's own n/m");
             ok(tbt_fec_replay_shape(rs, 21, &sn, &sm, &s0) &&
                    sn == 6 && sm == 2 && s0 == 100,
                "replay returns the block's own n/m and origin", NULL);
-            ok_int(tbt_fec_replay_ensure_block(rs, 22, 5, 3, 0, &hlock),
+            ok_int(tbt_fec_replay_ensure_block(rs, 22, 5, 3, 0, 0, &hlock),
                    0, "replay accepts another split of the same count");
-            ok_int(tbt_fec_replay_ensure_block(rs, 23, 5, 4, 0, &hlock),
+            ok_int(tbt_fec_replay_ensure_block(rs, 23, 5, 4, 0, 0, &hlock),
                    -EINVAL, "replay refuses a different share count");
         }
         ok_int(tbt_fec_replay_store(rs, 21, 0, 5, brec, sizeof(brec)), 0,
@@ -3395,7 +3395,7 @@ static void test_replay_alloc_balance(void)
     ok(r != NULL, "balance: ring", NULL);
     for (i = 0; i < 10; i++)
     {
-        ok_int(tbt_fec_replay_ensure_block(r, (u64)i, 4, 4, 0,
+        ok_int(tbt_fec_replay_ensure_block(r, (u64)i, 4, 4, 0, 0,
                                            &host_lock), 0,
                "balance: block plane");
         ok_int(tbt_fec_replay_store(r, (u64)i, 0, 0, rec, sizeof(rec)), 0,
