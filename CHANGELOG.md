@@ -3,6 +3,18 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [Unreleased]
+
+### Fixed
+
+- The userspace client marks a short block's zero padding DATA slots as
+  known zero before an SC-LDPC decode, as the module already did. A
+  `64/192` block with `real=1` was handed 64 unknowns and one parity
+  equation, so the final `478 B` of a `760K -> HKG0` transfer never
+  decoded. `host/test_client_rx` pins that exact case (drop `DATA[0]`,
+  decode from `PARITY[0]` alone) and a `128/128` block with two lost
+  shares; both deliver byte-exact, with no padding bytes leaking.
+
 ## [0.10.0] - 2026-11-11
 
 ### Added

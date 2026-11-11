@@ -2036,7 +2036,18 @@ static void rx_group_try(struct flow *f, struct rx_block *b, u16 group)
         for (i = 0; i < n; i++)
         {
             data_ptrs[i] = g->buf + (size_t)i * TBT_FEC_S;
-            dp[i] = g->present[i] ? 1 : 0;
+            if (i < real)
+                dp[i] = g->present[i] ? 1 : 0;
+            else
+            {
+                /* A short block leaves every DATA slot from real to n-1
+                 * zero-filled: the sender knows those bits are zero. They
+                 * are known, not erased. Marking them unknown gave a
+                 * 64/192 real=1 block 64 unknowns and one equation, so the
+                 * final 478 B never decoded. */
+                memset(data_ptrs[i], 0, TBT_FEC_S);
+                dp[i] = 1;
+            }
         }
         for (i = 0; i < m; i++)
         {
