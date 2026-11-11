@@ -482,9 +482,10 @@ static bool tbt_car_paused(struct tbt_session *sess)
  * burst does not start from the idle window. It never touches
  * delivered/rate_delivered, never changes the TCP sequence space and never
  * writes a BBR mode field: the apply gate requires CA_Open and an empty send
- * path, and every non-PAD writer clears hold_active before it queues bytes,
- * so the first real ACK owns the next decision. PAD is exempt because
- * keepalive must not make an idle carrier look busy. */
+ * path. Every non-PAD writer ends the hold under c->tx_lock and installs the
+ * cwnd/pacing snapshot before it queues its first record, so the burst starts
+ * from the kept window; the first real ACK then owns the next decision. PAD
+ * is exempt because keepalive must not make an idle carrier look busy. */
 #define TBT_HOLD_ENTER_NS (200ULL * NSEC_PER_MSEC)
 #define TBT_HOLD_MAX_NS (10ULL * NSEC_PER_SEC)
 #define TBT_HOLD_LOSS_GUARD_NS (1ULL * NSEC_PER_SEC)

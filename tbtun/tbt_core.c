@@ -68,9 +68,10 @@ MODULE_PARM_DESC(debug_loss, "Allow carrier drop_ppm (frame loss injection) writ
  * snd_cwnd and sk_pacing_rate, then restores both while the session stays
  * idle and TCP has nothing in flight, so BBR does not start the next burst
  * from an idle-collapsed window. The snapshot is bounded by snd_wnd/mss,
- * snd_cwnd_clamp, sk_sndbuf/mss and sk_max_pacing_rate. A non-PAD write
- * cancels the hold before it queues bytes, so BBR's first real ACK owns the
- * next decision. Default on; write 0 to
+ * snd_cwnd_clamp, sk_sndbuf/mss and sk_max_pacing_rate. The first non-PAD
+ * write ends the hold under c->tx_lock and installs both values before it
+ * queues the record; the first real ACK then owns the next decision. Default
+ * on; write 0 to
  * /sys/module/tbtun/parameters/hold_enable to opt out. It writes tcp_sock
  * fields directly, which is not a stable kernel API. */
 bool tbt_hold_enable = true;
