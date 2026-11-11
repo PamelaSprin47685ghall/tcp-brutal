@@ -13,7 +13,7 @@
 3. 接收端不需要发送端告知**洞的** TCP seq：洞的起点就是本端载体 socket 的 `tp->rcv_nxt`。若洞恰好等于整条记录（大 MSS/测试环境），`tcp_seq = rcv_nxt`，只需 `(carrier_id, wire_len, wire_bytes)`；若洞只是记录的子区间（真实 MSS 分段），manifest 还需携带记录起始 `record_start_seq`，接收端用 `delta = rcv_nxt - record_start_seq` 定位，见 §3.4。
 4. `wire_bytes` 可以逐字节重建：48B FEC 头（由块元数据重算 CRC）+ 恢复出的明文 payload 经 `tbt_crypto_body_xor_flow()` 重加密 + 规范 HTTP chunk 头尾。全量 share 的 wire 长度固定为 `6 + 48 + 8192 + 2 = 8248`；短 share 由块内 `short_len`/`dlen` 决定，chunk 头长度随之变化。
 5. `carrier_id` 的最小来源是**同块已收 share 的载体集合差**：块内 `(group, share) → carrier` 在正常调度下是双射（`carrier = group_map[group]*(n+m)+share`，`tbt_fec_data.c:1883`）；缺一份 share 时，缺的 carrier 就是补集。重放/回退到别的载体时，需要一份轻量 `FEC_MAP` 清单（或每 share 头携带原始 carrier_id）才能无歧义。
-6. 最小注入路径：在载体 RX work 已持有的 `lock_sock(sk)` 下，用 `tcp_send_rcvq()`（原型可复用 `tests/probe2` 的 one-shot kprobe；产品化可复制其 ~30 行实现）把重建的 wire 字节压入 `sk_receive_queue`，随后**精确匹配**地排空 `out_of_order_queue` 队头，再调用已导出的 `__tcp_send_ack()` 立即回累计 ACK。迟到原始段由内核按旧数据丢弃。
+6. 最小注入路径：在载体 RX work 已持有的 `lock_sock(sk)` 下，**直接操作公开的 `struct tcp_sock` 字段**（`rcv_nxt`/`rcv_wup`/`out_of_order_queue`/`ooo_last_skb`/`selective_acks`），用导出的 `__sk_mem_schedule()` 预留内存、`__tcp_send_ack()` 立即回累计 ACK。不依赖 `tcp_send_rcvq()`/`tcp_rcv_established()`/kprobe；QEMU/KVM 7.2.9 原型已实测 wire 字节 memcmp 100% 匹配、洞合并、迟到段 D-SACK。
 7. 首版只做**单洞、单记录、DATA share**；多记录洞、PARITY、重放/manifest 作为第二阶段。控制记录（HELLO/ACK/NACK/FBK/FIN）不受 FEC 保护，其丢失仍只能等 TCP 重传，这是本设计的明确边界。
 
 ---
@@ -120,7 +120,7 @@ injected bytes                == peer 原始 wire bytes（逐字节）
 ```
 
 则：
-- 注入先到：`tcp_queue_rcv()` 把它追加到 `sk_receive_queue`，`tcp_rcv_nxt_update()` 把 `rcv_nxt` 推到 `seq+wire_len`；若 `out_of_order_queue` 非空，`tcp_data_queue()` 的同序号分支会调用 `tcp_ofo_queue()` 把队头连续段并入接收队列（但 `tcp_send_rcvq()` 直接调 `tcp_queue_rcv()`，**不会**自动调用 `tcp_ofo_queue()`，需要模块显式排空，见 §5.1）。
+- 注入先到：本实现把 skb 追加到 `sk_receive_queue`，推进 `rcv_nxt`；随后**显式**排空 `out_of_order_queue` 中 `seq == rcv_nxt` 的整段（`tcp_ofo_queue()` 是 static，不能直接调用）。`tcp_send_rcvq()` 只做入队、不排空 ooo，也不是本实现使用的路径。
 - 原始段后到：若 `end_seq < rcv_wup`，先在 `tcp_sequence()` 以 `TCP_OLD_SEQUENCE` 丢弃并发 D-SACK；否则通过 validate，在 `tcp_data_queue()` 命中上面的旧数据分支，`TCP_OLD_DATA` + D-SACK + quick ACK + 丢弃。两条路都不破坏流同步；注入后立即 `__tcp_send_ack()` 会把 `rcv_wup` 设为 `rcv_nxt`，所以 `rcv_wup <= rcv_nxt` 恒成立。
 - 原始段先到：注入前在 `lock_sock` 下重读 `rcv_nxt`，若洞已被真实段填上，放弃注入（或把恢复字节当重复丢弃）。`lock_sock` 期间新输入走 `sk_backlog`，不会与检查并发。
 
@@ -243,59 +243,69 @@ carrier = group_map[group] * (n + m) + share
 
 ## 5. 注入路径：两条路线的对比与选择
 
-### 5.1 路径 A：构造 skb，走 `tcp_send_rcvq()` / 等价入队（推荐）
+### 5.1 路径 A：直接操作公开字段 + `__sk_mem_schedule` + `__tcp_send_ack`（推荐，已实测）
+
+QEMU/KVM 7.2.9 原型（`/tmp/rcvq-probe/tbt_rcvq.c`）已验证：在 `lock_sock(sk)` 下填 `[rcv_nxt, ooo_seq)`，合并 ooo、推进 `rcv_nxt`/`rcv_wup`、发累计 ACK；随后到达的 100B 全重叠段被 D-SACK 丢弃，350B 部分重叠段只交付新增的 50B。生产路径不依赖 `tcp_send_rcvq()`、`tcp_rcv_established()` 或 kprobe：`struct tcp_sock` 的 `rcv_nxt`/`rcv_wup`/`out_of_order_queue`/`ooo_last_skb`/`rx_opt` 都是公开字段，`__sk_mem_schedule()` 与 `__tcp_send_ack()` 都已导出。实现见 `tbtun/tbt_rcvq.c` 的 `tbt_car_rcvq_apply()`。
 
 在 carrier RX work（`tbt_car_rx_body`）已持有 `lock_sock(sk)` 的上下文中，按顺序做：
 
 ```c
-/* 1. 重读并校验洞 */
+/* 1. 重读并校验洞；inject_len <= gap */
 tp = tcp_sk(sk);
-if (READ_ONCE(tp->rcv_nxt) != intent->seq) return;      /* 洞已被真实段填上 */
-ooo = rb_first(&tp->out_of_order_queue);
-hole_end = ooo ? TCP_SKB_CB(rb_to_skb(ooo))->seq : tp->rcv_nxt;
-if (intent->wire_len > hole_end - tp->rcv_nxt) return;  /* 重叠/超洞，放弃 */
+if (READ_ONCE(sk->sk_state) != TCP_ESTABLISHED) return -ENOTCONN;
+if (RB_EMPTY_ROOT(&tp->out_of_order_queue)) return -ENOENT;
+gap = TCP_SKB_CB(rb_to_skb(rb_first(&tp->out_of_order_queue)))->seq -
+      tp->rcv_nxt;
+if (!gap || inject_len > gap) return -E2BIG;
 
-/* 2. 入队。tcp_send_rcvq() 自己盖 seq = rcv_nxt、end_seq、ack_seq */
-iov_iter_kvec(&msg.msg_iter, ITER_SOURCE, &iov, 1, intent->wire_len);
-err = tcp_send_rcvq(sk, &msg, intent->wire_len);        /* 或模块内等价实现 */
-if (err != intent->wire_len) return;
+/* 2. 构造接收队列 skb；不带 TCP header（不走 tcp_rcv_established） */
+skb = alloc_skb(inject_len, GFP_KERNEL);
+skb_put_data(skb, wire + delta, inject_len);
+memset(TCP_SKB_CB(skb), 0, sizeof(struct tcp_skb_cb));
+TCP_SKB_CB(skb)->seq = tp->rcv_nxt;
+TCP_SKB_CB(skb)->end_seq = tp->rcv_nxt + inject_len;
+TCP_SKB_CB(skb)->ack_seq = tp->snd_una;      /* 旧 ACK，不确认未发送数据 */
+TCP_SKB_CB(skb)->tcp_flags = TCPHDR_ACK;
+skb->ip_summed = CHECKSUM_UNNECESSARY;
+if (atomic_read(&sk->sk_rmem_alloc) + skb->truesize > sk->sk_rcvbuf ||
+    !sk_rmem_schedule(sk, skb, skb->truesize)) { kfree_skb(skb); return -ENOMEM; }
+__skb_queue_tail(&sk->sk_receive_queue, skb);
+skb_set_owner_r(skb, sk);
+tp->bytes_received += inject_len;
+WRITE_ONCE(tp->rcv_nxt, seq + inject_len);
 
 /* 3. 精确排空 ooo 队头（只处理 seq == rcv_nxt 的整段） */
 while ((skb = rb_entry_safe(rb_first(&tp->out_of_order_queue), ...))) {
-    seq = TCP_SKB_CB(skb)->seq; end = TCP_SKB_CB(skb)->end_seq;
-    if (seq != tp->rcv_nxt) break;                      /* 有洞/重叠：停 */
-    if (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_FIN) break; /* FIN 交给内核 */
+    end = TCP_SKB_CB(skb)->end_seq;
+    if (TCP_SKB_CB(skb)->seq != tp->rcv_nxt) break;
+    if (TCP_SKB_CB(skb)->tcp_flags & TCPHDR_FIN) break;
     rb_erase(&skb->rbnode, &tp->out_of_order_queue);
-    if (tp->ooo_last_skb == skb)                        /* 维护 ooo 尾指针 */
+    if (tp->ooo_last_skb == skb)
         tp->ooo_last_skb = rb_entry_safe(rb_last(&tp->out_of_order_queue),
                                          struct sk_buff, rbnode);
-    __skb_queue_tail(&sk->sk_receive_queue, skb);       /* 已 charge，不重复 set_owner */
-    tp->bytes_received += end - seq;
+    __skb_queue_tail(&sk->sk_receive_queue, skb);   /* 已 charge，不重复 set_owner */
+    tp->bytes_received += end - tp->rcv_nxt;
     WRITE_ONCE(tp->rcv_nxt, end);
 }
 
 /* 4. 删除已被累计 ACK 覆盖的 SACK block（复制 tcp_sack_remove()；static） */
 if (tp->rx_opt.num_sacks)
-    tbt_tcp_sack_remove(tp);                            /* 只删 end_seq <= rcv_nxt 的块 */
+    tbt_rcvq_sack_remove(tp);
 
-/* 5. 立即累计 ACK，取消对端重传；并唤醒读者 */
-if (READ_ONCE(sk->sk_state) == TCP_ESTABLISHED)
-    __tcp_send_ack(sk, tp->rcv_nxt, 0);                 /* EXPORT_SYMBOL_GPL */
-READ_ONCE(sk->sk_data_ready)(sk);                       /* 或 tbt_carrier_arm_rx(c) */
+/* 5. 立即累计 ACK，取消对端重传 */
+tp->rcv_wup = tp->rcv_nxt;
+tbt_rcvq_send_ack(sk, tp->rcv_nxt);   /* 7.2: (sk,nxt,0)；6.1..7.0: (sk,nxt) */
 ```
 
 要点：
 
-- `tcp_send_rcvq()` 不导出（7.2.9 `Module.symvers` 零命中）。原型可复用 `tests/probe2/tbt_probe2.c:482-490` 的 one-shot kprobe；产品化建议把 `tcp_send_rcvq()` + `tcp_queue_rcv()` 的 ~30 行复制进模块（GPL），用公开 inline 助手 `sk_rmem_schedule()`、`tcp_add_receive_queue()`、`skb_set_owner_r()`，并复制 `tcp_rcv_nxt_update()` 的 4 行（`bytes_received += delta; rcv_nxt = seq`）。`tcp_rcv_nxt_update()` 里有 `sock_owned_by_me()` 断言，必须持 `lock_sock`。
-- 复制版可以**跳过 `tcp_try_coalesce()`**（它是 static，且只影响 skb 合并）：直接 `tcp_rcv_nxt_update()` + `tcp_add_receive_queue()` + `skb_set_owner_r()`。接收队列多一个 skb 不影响 `tcp_read_sock()` 的顺序读取，也不影响 `tcp_collapse()` 的连续性；只有 `sk_rmem_alloc` 的 truesize 记账会略高。
-- `tcp_send_rcvq()` 内部调用 `tcp_try_rmem_schedule()`；失败返回 `-ENOMEM`，此时放弃注入，TCP 重传兜底。carrier 的 rcvbuf 约 0.8 MiB，单条 ≤8.3 KiB，正常不会失败。
-- `tcp_queue_rcv()` 会尝试与接收队列尾合并；合并成功时新 skb 被释放，字节进尾 skb，语义不变。
-- **不要**在注入后只调 `tcp_send_rcvq()` 就结束：它不排空 `out_of_order_queue`、不发 ACK、不唤醒读者。ooo 队头会一直等到下一个真实段到达；若对端已发完在等 ACK，就等成 RTO。
-- **ooo skb 不能再走 `tcp_queue_rcv()`**：它在 `tcp_data_queue_ofo()` 里已经 `skb_set_owner_r()` 计过 rmem；再用 `tcp_queue_rcv()` 会重复计费。排空用 `tcp_add_receive_queue()`/`__skb_queue_tail()`，然后只推进 `rcv_nxt`/`bytes_received`。
+- **不依赖未导出符号**：`tcp_send_rcvq()`/`tcp_rcv_established()` 在部分内核未导出；`__sk_mem_schedule`（`EXPORT_SYMBOL`）与 `__tcp_send_ack`（`EXPORT_SYMBOL_GPL`）已导出。`tbt_rcvq.c` 用 `LINUX_VERSION_CODE` 适配 `__tcp_send_ack` 的 2/3 参数签名，覆盖 6.1/6.6/6.12/7.0/7.2/7.3。
+- **内存记账**：`tcp_try_rmem_schedule()` 先检查 `sk_rmem_alloc + truesize <= sk_rcvbuf`，再 `sk_rmem_schedule()`（内部调导出的 `__sk_mem_schedule`）。这里显式做同样的检查；失败就丢弃修复，TCP 重传兜底。
+- **不要用 `tcp_queue_rcv()` 搬 ooo skb**：它在 `tcp_data_queue_ofo()` 里已经 `skb_set_owner_r()` 计过 rmem；再用会重复计费。排空用 `__skb_queue_tail()`/`tcp_add_receive_queue()`，只推进 `rcv_nxt`/`bytes_received`。
 - **排空最后一个 ooo 节点时必须更新 `tp->ooo_last_skb`**：否则 `tcp_data_queue_ofo()` 的精确相邻合并会解引用已释放的 skb（UAF）。擦除后取 `rb_last()`，空树则为 NULL。
-- **推进 `rcv_nxt` 后要清 SACK**：`tcp_sack_remove()` 是 static，模块需复制其逻辑（只删 `end_seq <= rcv_nxt` 的 `selective_acks`）；否则对端会继续 SACK/DSACK 已累计确认的区间，干扰 `sacked_out`/undo。MVP 若排空后 ooo 为空，可退化为清空 `rx_opt.num_sacks`；仍有 ooo 时必须只删低于 `rcv_nxt` 的块。
-- **不要**创建 `[copied_seq, rcv_nxt)` 内的洞：`tcp_prune_queue()` → `tcp_collapse()` 对窗口内的不连续 skb 有 `BUG_ON(offset < 0)`（`docs/prior-art.md:845-848`）。注入只追加在 `rcv_nxt`，排空只移动 `seq == rcv_nxt` 的整段，窗口始终连续。
-- `__tcp_send_ack(sk, rcv_nxt, 0)` 在 7.2.9 是 `EXPORT_SYMBOL_GPL`（`Module.symvers` 命中 `__tcp_send_ack`），声明在 `include/net/tcp.h:771`；`tcp_transmit_skb()` 会顺带把 `tp->rcv_wup = tp->rcv_nxt`，满足 `rcv_wup <= rcv_nxt` 的不变式。
+- **推进 `rcv_nxt` 后要清 SACK**：`tcp_sack_remove()` 是 static，模块复制其逻辑（只删 `end_seq <= rcv_nxt` 的 `selective_acks`）；否则对端会继续 SACK/DSACK 已累计确认的区间，干扰 `sacked_out`/undo。
+- **不要创建 `[copied_seq, rcv_nxt)` 内的洞**：`tcp_prune_queue()` → `tcp_collapse()` 对窗口内的不连续 skb 有 `BUG_ON(offset < 0)`（`docs/prior-art.md:845-848`）。注入只追加在 `rcv_nxt`，排空只移动 `seq == rcv_nxt` 的整段，窗口始终连续。
+- **ACK 语义**：`ack_seq = tp->snd_una` 是旧 ACK，不确认本端未发送数据；`tp->rcv_wup = tp->rcv_nxt` 后再 `__tcp_send_ack()`，满足 `rcv_wup <= rcv_nxt`。迟到原段的 `end_seq <= rcv_nxt`，由 `tcp_data_queue()` 的 `TCP_OLD_DATA`/D-SACK 丢弃；若 `end_seq < rcv_wup`，先由 `tcp_sequence()` 的 `TCP_OLD_SEQUENCE` 丢弃。
 
 ### 5.2 路径 B：在 `tbt_car_rx` 层直接消费并推进/对齐 `rcv_nxt`
 
@@ -316,7 +326,7 @@ READ_ONCE(sk->sk_data_ready)(sk);                       /* 或 tbt_carrier_arm_r
 
 - carrier RX work 是进程上下文（workqueue），已经在 `tbt_car_rx_body()` 里 `lock_sock(sk)`（`tbt_carrier.c:1277`），随后才 `tcp_read_sock()`（`:1302`）。注入应放在同一段 `lock_sock` 内、`tcp_read_sock` 之前，避免二次加锁。
 - 入站软中断 `tcp_v4_rcv()` 用 `bh_lock_sock()`；当 socket 被 `lock_sock()` 持有时，新段进入 `sk_backlog`，不会并发执行 `tcp_data_queue()`。因此持 `lock_sock` 检查并修改 `rcv_nxt`/`out_of_order_queue` 是安全的。
-- **不要**在 `bh_lock_sock`/softirq 下调用 `tcp_send_rcvq()`：它可能分配/睡眠；`tcp_rcv_nxt_update()` 断言 `sock_owned_by_me()`，`bh_lock_sock` 不满足。也不要在持 `rx->lock`（FEC 的 leaf spinlock，`tbtun.h:1028` 注释）时取 `lock_sock`。
+- **不要**在 `bh_lock_sock`/softirq 下做这套手术：`alloc_skb(GFP_KERNEL)` 可能睡眠，`lock_sock` 也不能在 softirq 取。也不要在持 `rx->lock`（FEC 的 leaf spinlock，`tbtun.h:1028` 注释）时取 `lock_sock`。
 - FEC 解码在 `w_fec_rx` 里运行，不能直接拿 carrier 的 `lock_sock`（会与 `rx->lock` 形成反向顺序）。正确做法：`w_fec_rx` 重建 wire 字节，推入 per-carrier 的 repair 队列（spinlock `irqsave`），然后 `tbt_carrier_arm_rx(c)` 唤醒 carrier RX work；由后者在 `lock_sock` 下应用。
 - repair 队列要有界（建议 8 条/载体）；满了就丢弃最旧或拒绝新 intent，回退 TCP 重传。wire 缓冲 ≤8248 B，可用每载体预分配池（GFP_ATOMIC 只做指针入队）。
 - 载体代次：intent 记录 `c->gen`；应用前检查 `c->gen` 未变、`sk_state == TCP_ESTABLISHED`、`c->sk` 仍指向同一 socket。载体被替换/关闭则丢弃 intent。
@@ -342,18 +352,18 @@ READ_ONCE(sk->sk_data_ready)(sk);                       /* 或 tbt_carrier_arm_r
    - `tbt_carrier_arm_rx(c)`。
 2. `tbt_car_rx_body()` 在 `lock_sock` 后、`tcp_read_sock` 前调用 `tbt_carrier_repair_apply(c)`：
    - 取 intent；校验 `c->gen`、`sk_state`、`rcv_nxt`、ooo 洞长；
-   - 调 `tcp_send_rcvq()`（kprobe 原型）或模块内等价入队；
+   - 调 `tbt_car_rcvq_apply()`：直接操作公开字段 + `__sk_mem_schedule()` + `__tcp_send_ack()`；
    - 精确排空 ooo 队头；
    - `__tcp_send_ack()`；
    - 计数器：`repair_injected/skipped_nohole/skipped_short/skipped_gen/rmem_fail`。
 3. 解析器随后通过 `tcp_read_sock` 读到注入记录。`tbt_fec_rx_record()` 会把它判为重复（`dpresent`/`late`）并丢弃，不会二次交付；若想省掉重复解密/CRC，可在 carrier 上维护一个小的“已注入区间”ledger，解析到该区间时只消费、不喂 FEC（首版可不做，依赖现有重复门）。
 4. 测试：单段丢失（netem/drop_ppm）、短 share、反向并发流量、RTO 前注入、迟到原段被 `TCP_OLD_DATA`/DSACK 丢弃、应用字节逐位一致。
 
-### 阶段 2：PARITY、多记录洞、manifest、去 kprobe
+### 阶段 2：PARITY、多记录洞、manifest、FEC_MAP 子区间
 
 1. PARITY share 的 `win_len`/`epoch` 从块状态取；同样重建。
 2. 多记录洞：用 `FEC_MAP`（§3.3）或按 `seq` 顺序 + wire_len 匹配；只有顺序/长度都无歧义才注入，否则回退。
-3. 把 `tcp_send_rcvq()`/`tcp_queue_rcv()` 的实现复制进模块，去掉 kprobe；加 `BUILD_BUG_ON` 固定结构布局/常量，按内核矩阵测试。
+3. 按内核矩阵（6.1/6.6/6.12/7.0/7.2/7.3）验证公开字段与 `__tcp_send_ack` 签名；加 `BUILD_BUG_ON` 固定结构布局/常量。
 4. 可选：每 share 头携带 `carrier_id`（改 `TBT_FEC_CONV`），用于重放场景的原始 carrier 识别；若做，必须同时保留 `FEC_MAP` 或集合差作为丢失 share 的兜底。
 
 ### 原型骨架（只写进设计，不改内核）
@@ -416,8 +426,8 @@ int tbt_rcvq_apply(struct tbt_carrier *c, struct sock *sk,
         return -EAGAIN;                /* earlier record / already received */
     inject = min_t(u16, hole_end - seq, it->wire_len - delta);
     if (!inject) return -ENOENT;
-    /* tcp_send_rcvq()/copied helper with iov_base = it->wire + delta,
-     * iov_len = inject; seq=rcv_nxt, end=seq+inject, rmem, queue */
+    /* tbt_car_rcvq_apply(): alloc skb, queue at rcv_nxt, advance rcv_nxt,
+     * merge ooo, clear SACK, __tcp_send_ack() */
     /* then exact-match ooo drain, ooo_last_skb, tcp_sack_remove, ACK, wake */
     return 0;
 }
@@ -482,7 +492,7 @@ int tbt_rcvq_apply(struct tbt_carrier *c, struct sock *sk,
 4. **多记录洞/重放/子区间**：首版只做“洞 == 整条记录、记录起点 == rcv_nxt”的特例；真实 MSS 下丢失段通常只是记录的子区间，必须等阶段 2 的 `FEC_MAP` 提供 `record_start_seq` 后才能覆盖。不要为了“全都能补”而在歧义时猜 `delta`/顺序——猜错就是永久流损坏。
 5. **不要碰 `tp->repair`**：注入不需要 repair；`repair=1` 会让应用非 PEEK 读 `-EPERM`、close 不发 FIN（`docs/inject-probe.md:151-164`）。carrier socket 没有应用读，但仍不应引入 repair。
 6. **不要创建接收队列洞**：只在 `rcv_nxt` 追加，只排空 `seq == rcv_nxt` 的整段；重叠/部分段留给内核，不要自己 trim（`tcp_trim_head` 未导出，且容易破坏 `tcp_collapse` 不变式）。
-7. **内核版本漂移**：复制 `tcp_send_rcvq`/`tcp_queue_rcv` 的实现要按 7.2.9 固定，并在支持矩阵（6.1/7.0/7.2）上跑集成测试；`__tcp_send_ack` 的 `flags` 参数在旧内核可能没有，需要版本适配。
+7. **内核版本漂移**：公开字段（`rcv_nxt`/`rcv_wup`/`ooo_last_skb`/`selective_acks`）跨 6.1..7.3 稳定；`__tcp_send_ack` 在 7.2 增加 `flags` 参数，`tbt_rcvq.c` 用 `LINUX_VERSION_CODE` 适配。仍需在支持矩阵上跑集成测试，并用 `BUILD_BUG_ON` 固定结构布局/常量。
 8. **安全边界**：FEC 头/payload CRC 不是密码学认证；双端可控是前提。不要在不可信 peer 上把“恢复字节”当可信输入。
 9. **拥塞控制副作用**：迟到原段被 D-SACK 丢弃会让发送端看到一次伪重传；`__tcp_send_ack` 的累计 ACK 会尽快清除。对 carrier CC 是可接受的代价；若观测到明显退化，可在注入后标记/统计，而不是抑制 DSACK。
 10. **不改变 FEC 交付路径**：恢复 share 的 payload 仍按现有 `tbt_rx_fec_deliver()` 交付；注入只修 carrier TCP 流，不改变隧道层的字节序。注入记录被 FEC 判重是预期行为，不要让它再次交付。
@@ -509,6 +519,13 @@ int tbt_rcvq_apply(struct tbt_carrier *c, struct sock *sk,
 
 ---
 
-## 10. 一句话总结
+## 10. 实现与验证（本分支 w-rcvq-design）
+
+- 模块：`tbtun/tbt_rcvq.h`（接口）、`tbtun/tbt_rcvq_wire.c`（wire 重建）、`tbtun/tbt_rcvq_plan.c`（carrier 集合差 + 洞计划）、`tbtun/tbt_rcvq.c`（repair 队列 + `tbt_car_rcvq_apply()`）。
+- 集成：`tbt_fec_blk.src_carrier` 记录来源 carrier；`tbt_fec_rx_decode_one` 在块解码后重建并排队；`tbt_car_rx_body` 在 `lock_sock` 下先 `tbt_rcvq_apply_pending()` 再 `tcp_read_sock()`；`tbt_carrier` 持有有界 repair 队列，`tbt_carrier_free()` 清空。
+- 测试：`host/test_rcvq.c` + `host/test_rcvq_wire.c` + `host/test_rcvq_plan.c`，253 checks/0 failures；`make host-test`、`make host-test-san`、`review/lint.sh` 全过；7.2.9 模块 `make` 通过（modpost/BTF）。
+- MVP 边界：单缺失 DATA、整条记录洞（`hole == wire_len`）、非 LAST；PARITY、多记录、MSS 子区间（`record_seq`/`FEC_MAP`）为阶段 2；控制记录洞仍等 TCP 重传。
+
+## 11. 一句话总结
 
 历史否决的是“往 public socket 的接收队列写任意字节”；本设计做的是“往 carrier socket 的接收队列写 FEC 逐位还原的、序号正好等于本端 `rcv_nxt` 的原始 wire 字节”，并用精确的 ooo 排空和立即累计 ACK 把“同序号后到即丢弃”的内核语义变成消除载体队头阻塞与重传等待的机制。首版只做单洞单记录 DATA，其余用 manifest/回退逐步扩展。

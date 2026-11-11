@@ -797,6 +797,10 @@ struct tbt_fec_blk
     u8 *dpresent; /* n flags */
     u8 *ppresent; /* m flags */
     u16 *dlen;    /* n payload lengths */
+    /* Carrier that placed each share, indexed like dpresent/ppresent.  A
+     * missing share stays TBT_RCVQ_NO_CARRIER, so the single-missing repair
+     * path can recover its carrier from the block's set difference. */
+    u8 src_carrier[TBT_FEC_MAX_SHARES];
     /* Payload length of the block's last real share when it is short, from the
      * parity record's epoch field. A recovered share has no payload_len of its
      * own, so without this a receiver that decoded the block from parity would
@@ -1042,6 +1046,10 @@ struct tbt_fec_rx
     u64 progress_ns;
     u8 *rec;                /* m * s: recovered-slot scratch */
     u8 *zero;               /* s zero bytes: padding and absent parity */
+    /* tbt_rcvq: one recovered payload snapshot.  w_fec_rx is its only user;
+     * the payload is copied under rx->lock so the block slot can be reused
+     * while the wire record is built outside it. */
+    u8 *rcvq_plain;         /* TBT_FEC_S bytes */
     u8 dpresent_snap[TBT_FEC_MAX_SHARES];
     u8 ppresent_snap[TBT_FEC_MAX_SHARES];
     u64 stream_pkt_base;    /* absolute seq of the bound stream's first packet */
@@ -1648,6 +1656,10 @@ struct tbt_session
     atomic64_t rx_ready_calls, rx_work_early, rx_reads, rx_read_bytes;
     atomic64_t rx_resume_calls, rx_read_zero, rx_budget_yields;
     atomic64_t rx_resume_busy;
+    /* Carrier receive-queue repair (tbt_rcvq.c).  Several carrier RX works
+     * inject concurrently, so these are atomic. */
+    atomic64_t car_rcvq_injected_segs, car_rcvq_injected_bytes;
+    atomic64_t car_rcvq_skipped;
     u32 rx_last_drained;  /* last value; carrier rx work */
     atomic64_t rx_errs;
     s32 rx_last_err;      /* last value; carrier rx work */
@@ -2207,6 +2219,11 @@ struct tbt_carrier
     u16 local_port;
     u8 *part;                     /* unwritten tail (TBT_CAR_PART_MAX) */
     u32 part_len, part_off;
+    /* FEC-recovered wire records waiting for this carrier's w_rx.  Entries
+     * are allocated by tbt_rcvq_alloc() and freed after the locked apply. */
+    spinlock_t rcvq_lock;
+    struct list_head rcvq_q;
+    u32 rcvq_queued;
     u8 index;
     u32 gen;                  /* session-unique; pinned frames carry it */
     struct tbt_parser *parser; /* this carrier's partial record (8 KiB) */

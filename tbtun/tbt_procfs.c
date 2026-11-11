@@ -778,6 +778,11 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                        tbt_stat_read(&s->tx_submit_calls),
                        tbt_stat_read(&s->rx_delivered_bytes),
                        tbt_stat_read(&s->rx_budget_yields));
+            seq_printf(m, "tunnel %llu rcvq_injected_segs=%llu "
+                          "rcvq_injected_bytes=%llu rcvq_skipped=%llu\n",
+                       id, tbt_stat_read(&s->car_rcvq_injected_segs),
+                       tbt_stat_read(&s->car_rcvq_injected_bytes),
+                       tbt_stat_read(&s->car_rcvq_skipped));
             seq_printf(m, "tunnel %llu dbg rcv_nxt=%u copied=%u after=%u qlen=%u "
                           "allocf=%llu over=%llu copyf=%llu hiwat=%llu pdead=%llu "
                           "prun=%llu pmoved=%llu p_nocar=%llu p_down=%llu p_stop=%llu "

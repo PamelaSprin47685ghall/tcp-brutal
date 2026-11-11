@@ -283,6 +283,8 @@ host/bench_micro
 host/bench_txpath
 host/test_fec
 host/test_fec_san
+host/test_rcvq
+host/test_rcvq_san
 host/test_fec_out
 host/test_fec_out_san
 host/test_batch
