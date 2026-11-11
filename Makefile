@@ -9,7 +9,7 @@ CLANG_FORMAT    ?= clang-format-18
 SRCS            := Makefile \
                    tbtun/tbtun.h tbtun/tbt_uapi.h tbtun/tbt_parse.h tbtun/tbt_proto.h \
                    tbtun/tbt_rec.h tbtun/tbt_http.h tbtun/tbt_fec_batch.h \
-                   tbtun/tbt_crypto.h \
+                   tbtun/tbt_crypto.h tbtun/tbt_mux.h \
                    tbtun/tbt_fec.h tbtun/tbt_fec_adapt.h tbtun/tbt_fec_adapt_sclc.h \
                    tbtun/tbt_fec_sclc_delta.h \
                    tbtun/tbt_portmap.h tbtun/tbt_map.h tbtun/tbt_carrier_policy.h \
@@ -27,6 +27,7 @@ SRCS            := Makefile \
                    tbtun/tbt_portmap.c tbtun/tbt_map.c \
                    tbtun/tbt_sc_ldpc.c tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c \
                    tbtun/tbt_sc_ldpc.h tbtun/tbt_sc_ldpc_gf16.h tbtun/tbt_sclc_uplink.h \
+                   tbtun/tbt_mux.c \
                    scripts/mkdkmsconf.sh scripts/install_dkms.sh \
                    .clang-format
 # scripts/install_dkms.sh stages these beside tbtun/*.c and *.h. A staged
@@ -190,31 +191,9 @@ HOST_WIRE_COMPAT_HDRS := tbtun/tbt_rec.h tbtun/tbt_proto.h tbtun/tbt_fec.h \
 HOST_RX_BUDGET  := host/test_rx_budget
 HOST_RX_BUDGET_SRCS := host/test_rx_budget.c
 HOST_RX_BUDGET_HDRS := tbtun/tbt_rx_budget.h tbtun/tbt_uapi.h
-HOST_BENCH_SCLC := host/bench_sclc_uplink
-HOST_BENCH_SCLC_SRCS := host/bench_sclc_uplink.c tbtun/tbt_sc_ldpc.c \
-                   tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c
-HOST_BENCH_RECOVERY := host/bench_sclc_recovery
-HOST_BENCH_RECOVERY_SRCS := host/bench_sclc_recovery.c tbtun/tbt_sc_ldpc.c \
-                   tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c
-HOST_BENCH_SCLC_DOWN := host/bench_sclc_downlink
-HOST_BENCH_SCLC_DOWN_SRCS := host/bench_sclc_downlink.c tbtun/tbt_fec_sclc.c
-HOST_BENCH_SCLC_DOWN_HDRS := tbtun/tbt_fec_sclc.h tbtun/tbt_fec.h \
-                   tbtun/tbt_uapi.h
-HOST_BENCH_SCLC_PIPE := host/bench_sclc_pipe
-HOST_BENCH_SCLC_PIPE_SRCS := host/bench_sclc_pipe.c tbtun/tbt_fec.c \
-                   tbtun/tbt_fec_sclc.c tbtun/tbt_sclc_uplink.c \
-                   tbtun/tbt_sc_ldpc.c tbtun/tbt_sc_ldpc_gf16.c \
-                   tbtun/tbt_crypto.c tbtun/tbt_proto.c
-HOST_BENCH_SCLC_BUILD := host/bench_sclc_build
-HOST_BENCH_SCLC_BUILD_SRCS := host/bench_sclc_build.c tbtun/tbt_fec.c \
-                   tbtun/tbt_fec_sclc.c tbtun/tbt_sclc_uplink.c \
-                   tbtun/tbt_sc_ldpc.c tbtun/tbt_sc_ldpc_gf16.c
-HOST_BENCH_SCLC_BUILD_HDRS := tbtun/tbt_fec.h tbtun/tbt_fec_sclc.h \
-                   tbtun/tbt_sclc_uplink.h tbtun/tbt_sc_ldpc.h \
-                   tbtun/tbt_sc_ldpc_gf16.h tbtun/tbt_uapi.h
-HOST_TSAN       := host/test_tsan_race
-HOST_TSAN_SRCS  := host/test_tsan_race.c tbtun/tbt_crypto.c
-HOST_TSAN_HDRS  := tbtun/tbt_fec.h tbtun/tbt_crypto.h tbtun/tbt_uapi.h
+HOST_MUX        := host/test_mux
+HOST_MUX_SRCS   := host/test_mux.c tbtun/tbt_mux.c
+HOST_MUX_HDRS   := tbtun/tbt_mux.h
 
 # The userspace client links the module's pure C units and adds only the
 # session/socket engine. The library is the reusable half: 0.8.x Android and
@@ -245,6 +224,40 @@ HOST_CLIENT_WIRE_SRCS := host/test_client_wire.c tbtun/tbt_proto.c \
                    tbtun/tbt_rec.c tbtun/tbt_fec.c tbtun/tbt_http.c
 HOST_CLIENT_WIRE_HDRS := tbtun/tbt_fec.h tbtun/tbt_http.h tbtun/tbt_proto.h \
                    tbtun/tbt_rec.h tbtun/tbt_uapi.h
+GOLDEN_V080     := tests/golden_v080/gen_golden
+GOLDEN_V080_SRCS := tests/golden_v080/gen_golden.c tbtun/tbt_fec.c \
+                   tbtun/tbt_crypto.c tbtun/tbt_proto.c tbtun/tbt_http.c \
+                   tbtun/tbt_rec.c tbtun/tbt_fec_sclc.c \
+                   tbtun/tbt_sclc_uplink.c tbtun/tbt_sc_ldpc.c \
+                   tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_mux.c
+GOLDEN_V080_HDRS := tbtun/tbt_fec.h tbtun/tbt_crypto.h tbtun/tbt_proto.h \
+                   tbtun/tbt_http.h tbtun/tbt_mux.h tbtun/tbt_uapi.h \
+                   tbtun/tbt_fec_sclc.h tbtun/tbt_sclc_uplink.h
+HOST_BENCH_SCLC := host/bench_sclc_uplink
+HOST_BENCH_SCLC_SRCS := host/bench_sclc_uplink.c tbtun/tbt_sc_ldpc.c \
+                   tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c
+HOST_BENCH_RECOVERY := host/bench_sclc_recovery
+HOST_BENCH_RECOVERY_SRCS := host/bench_sclc_recovery.c tbtun/tbt_sc_ldpc.c \
+                   tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c
+HOST_BENCH_SCLC_DOWN := host/bench_sclc_downlink
+HOST_BENCH_SCLC_DOWN_SRCS := host/bench_sclc_downlink.c tbtun/tbt_fec_sclc.c
+HOST_BENCH_SCLC_DOWN_HDRS := tbtun/tbt_fec_sclc.h tbtun/tbt_fec.h \
+                   tbtun/tbt_uapi.h
+HOST_BENCH_SCLC_PIPE := host/bench_sclc_pipe
+HOST_BENCH_SCLC_PIPE_SRCS := host/bench_sclc_pipe.c tbtun/tbt_fec.c \
+                   tbtun/tbt_fec_sclc.c tbtun/tbt_sclc_uplink.c \
+                   tbtun/tbt_sc_ldpc.c tbtun/tbt_sc_ldpc_gf16.c \
+                   tbtun/tbt_crypto.c tbtun/tbt_proto.c
+HOST_BENCH_SCLC_BUILD := host/bench_sclc_build
+HOST_BENCH_SCLC_BUILD_SRCS := host/bench_sclc_build.c tbtun/tbt_fec.c \
+                   tbtun/tbt_fec_sclc.c tbtun/tbt_sclc_uplink.c \
+                   tbtun/tbt_sc_ldpc.c tbtun/tbt_sc_ldpc_gf16.c
+HOST_BENCH_SCLC_BUILD_HDRS := tbtun/tbt_fec.h tbtun/tbt_fec_sclc.h \
+                   tbtun/tbt_sclc_uplink.h tbtun/tbt_sc_ldpc.h \
+                   tbtun/tbt_sc_ldpc_gf16.h tbtun/tbt_uapi.h
+HOST_TSAN       := host/test_tsan_race
+HOST_TSAN_SRCS  := host/test_tsan_race.c tbtun/tbt_crypto.c
+HOST_TSAN_HDRS  := tbtun/tbt_fec.h tbtun/tbt_crypto.h tbtun/tbt_uapi.h
 SAN_CFLAGS      := -g -fsanitize=address,undefined -fno-omit-frame-pointer
 # A sanitizer run must stop at the first undefined-behaviour report instead
 # of continuing through the rest of the suite.
@@ -261,6 +274,7 @@ tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
                    tbtun/tbt_portmap.o tbtun/tbt_fec.o \
                    tbtun/tbt_fec_data.o \
                    tbtun/tbt_fec_adapt.o tbtun/tbt_fec_adapt_sclc.o \
+                   tbtun/tbt_mux.o \
                    tbtun/tbt_fec_sclc.o \
                    tbtun/tbt_fec_codec_cache.o \
                    tbtun/tbt_sc_ldpc.o \
@@ -278,7 +292,7 @@ CFLAGS_tbtun/tbt_crypto.o := -O3
 # block encode on the host and leaves the object the same size class.
 CFLAGS_tbtun/tbt_fec_sclc.o := -O3
 
-.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-tsan host-test-live host-bench-micro host-bench-sclc host-bench-sclc-down host-bench-sclc-sim host-bench-sclc-pipe host-bench-sclc-build host-bench-rxpath bench bench-full
+.PHONY: all check clean load unload qemu-test host-test host-test-san host-test-san-run host-test-tsan host-test-live host-bench-micro host-bench-sclc host-bench-sclc-down host-bench-sclc-sim host-bench-sclc-pipe host-bench-sclc-build host-bench-rxpath bench bench-full golden-v080
 
 all:
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) $(KBUILD_LLVM) modules
@@ -297,9 +311,16 @@ check: dkms-srcs-check
 # The carrier policy test is header-only; its dependency sits on its own line
 # so the long host-test list stays readable.
 host-test: $(HOST_CARRIER_POLICY)
+$(GOLDEN_V080): $(GOLDEN_V080_SRCS) $(GOLDEN_V080_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(GOLDEN_V080_SRCS)
+
+# Regenerate the 0.8.0 F# golden vectors from the shipping C units.
+golden-v080: $(GOLDEN_V080)
+	@./$(GOLDEN_V080)
+
 host-test-san-run: host/test_carrier_policy_san
 
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_CODEC_CACHE) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_SHAPES) $(HOST_PORTMAP) $(HOST_MAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_INVARIANTS) $(HOST_WIRE_COMPAT) $(HTTP_RFC_GEN) $(HOST_RX_BUDGET) $(HOST_CLIENT) $(HOST_CLIENT_LOOPBACK) $(HOST_CLIENT_WIRE)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_CODEC_CACHE) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_SHAPES) $(HOST_PORTMAP) $(HOST_MAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_INVARIANTS) $(HOST_WIRE_COMPAT) $(HTTP_RFC_GEN) $(HOST_RX_BUDGET) $(HOST_MUX) $(HOST_CLIENT) $(HOST_CLIENT_LOOPBACK) $(HOST_CLIENT_WIRE)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
@@ -335,6 +356,7 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_INVARIANTS)
 	@./$(HOST_WIRE_COMPAT)
 	@./$(HOST_RX_BUDGET)
+	@./$(HOST_MUX)
 	@./$(HOST_CLIENT_LOOPBACK)
 	@./$(HOST_CLIENT_WIRE)
 	@# Third-party cross-check: h11 is not a build dependency. uv with a cached
@@ -512,33 +534,6 @@ $(HOST_WIRE_COMPAT): $(HOST_WIRE_COMPAT_SRCS) $(HOST_WIRE_COMPAT_HDRS)
 $(HOST_RX_BUDGET): $(HOST_RX_BUDGET_SRCS) $(HOST_RX_BUDGET_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_RX_BUDGET_SRCS)
 
-host/client-%.o: tbtun/%.c $(HOST_CLIENT_HDRS)
-	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -c -o $@ $<
-
-host/client-engine.o: host/tbt_client_engine.c $(HOST_CLIENT_HDRS)
-	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -c -o $@ $<
-
-host/client-main.o: host/tbt_client_main.c $(HOST_CLIENT_HDRS)
-	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -c -o $@ $<
-
-$(HOST_CLIENT_LIB): $(HOST_CLIENT_OBJS)
-	$(AR) rcs $@ $^
-
-$(HOST_CLIENT): host/client-main.o $(HOST_CLIENT_LIB)
-	$(HOSTCC) $(HOST_CFLAGS) -o $@ host/client-main.o $(HOST_CLIENT_LIB)
-
-$(HOST_CLIENT_LOOPBACK): host/test_client_loopback.c $(HOST_CLIENT_LIB) $(HOST_CLIENT_HDRS)
-	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ host/test_client_loopback.c $(HOST_CLIENT_LIB)
-
-host/test_client_loopback_san: host/test_client_loopback.c $(HOST_CLIENT_LIB_SRCS) $(HOST_CLIENT_HDRS)
-	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -DTBT_LOOPBACK_MB=1 -I tbtun -o $@ host/test_client_loopback.c $(HOST_CLIENT_LIB_SRCS)
-
-$(HOST_CLIENT_WIRE): $(HOST_CLIENT_WIRE_SRCS) $(HOST_CLIENT_WIRE_HDRS)
-	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_CLIENT_WIRE_SRCS)
-
-host/test_client_wire_san: $(HOST_CLIENT_WIRE_SRCS) $(HOST_CLIENT_WIRE_HDRS)
-	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_CLIENT_WIRE_SRCS)
-
 host/test_fec_sclc_data_san: $(HOST_SCLC_DATA_SRCS) $(HOST_SCLC_DATA_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_SCLC_DATA_SRCS)
 
@@ -589,8 +584,8 @@ host-test-san:
 		echo "host-test-san: skipped, $(HOSTCC) cannot link -fsanitize=address,undefined"; \
 	fi
 
-host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_mem_budget_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_batch_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_shapes_san host/test_close_wake_san host/test_hold_san host/test_portmap_san host/test_map_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_invariants_san host/test_wire_compat_san host/test_rx_budget_san host/test_client_loopback_san host/test_client_wire_san $(HTTP_RFC_GEN_SAN)
-host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san
+host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_mem_budget_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_batch_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_shapes_san host/test_close_wake_san host/test_hold_san host/test_portmap_san host/test_map_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_invariants_san host/test_wire_compat_san host/test_rx_budget_san $(HTTP_RFC_GEN_SAN)
+host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_mux_san host/test_client_loopback_san host/test_client_wire_san
 	@./host/test_parse_san
 	@./host/test_fuzz_san
 	@./host/test_http_san
@@ -618,6 +613,7 @@ host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san hos
 	@./host/test_invariants_san
 	@./host/test_wire_compat_san
 	@./host/test_rx_budget_san
+	@./host/test_mux_san
 	@./host/test_client_loopback_san
 	@./host/test_client_wire_san
 	@python3 $(HTTP_RFC_AUDIT) ./$(HTTP_RFC_GEN_SAN)
@@ -819,3 +815,36 @@ dkms-tarball: $(DKMS_TARBALL)
 
 clean-dkms-tarball:
 	$(RM) $(DKMS_TARBALL)
+
+$(HOST_MUX): $(HOST_MUX_SRCS) $(HOST_MUX_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_MUX_SRCS)
+
+host/test_mux_san: $(HOST_MUX_SRCS) $(HOST_MUX_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_MUX_SRCS)
+
+host/client-%.o: tbtun/%.c $(HOST_CLIENT_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -c -o $@ $<
+
+host/client-engine.o: host/tbt_client_engine.c $(HOST_CLIENT_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -c -o $@ $<
+
+host/client-main.o: host/tbt_client_main.c $(HOST_CLIENT_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -c -o $@ $<
+
+$(HOST_CLIENT_LIB): $(HOST_CLIENT_OBJS)
+	$(AR) rcs $@ $^
+
+$(HOST_CLIENT): host/client-main.o $(HOST_CLIENT_LIB)
+	$(HOSTCC) $(HOST_CFLAGS) -o $@ host/client-main.o $(HOST_CLIENT_LIB)
+
+$(HOST_CLIENT_LOOPBACK): host/test_client_loopback.c $(HOST_CLIENT_LIB) $(HOST_CLIENT_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ host/test_client_loopback.c $(HOST_CLIENT_LIB)
+
+host/test_client_loopback_san: host/test_client_loopback.c $(HOST_CLIENT_LIB_SRCS) $(HOST_CLIENT_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -DTBT_LOOPBACK_MB=1 -I tbtun -o $@ host/test_client_loopback.c $(HOST_CLIENT_LIB_SRCS)
+
+$(HOST_CLIENT_WIRE): $(HOST_CLIENT_WIRE_SRCS) $(HOST_CLIENT_WIRE_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_CLIENT_WIRE_SRCS)
+
+host/test_client_wire_san: $(HOST_CLIENT_WIRE_SRCS) $(HOST_CLIENT_WIRE_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_CLIENT_WIRE_SRCS)

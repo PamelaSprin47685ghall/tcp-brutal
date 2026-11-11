@@ -1260,24 +1260,24 @@ long tbt_mem_avail_kb(void);
 
 /* Session-wide bound on DATA records. One record per carrier would be 256;
  * the packetizer can build a burst while the drain is behind, so the bound
- * keeps room for several FEC blocks. 4096 records / 64 MiB covers the
- * 64-block sliding window at S=8192; the byte mark is checked before a
- * block opens, and the hard ceiling adds one block of records. */
+ * keeps room for several FEC blocks. At S=1024 a full record is 1072 bytes,
+ * so 4096 records are about 4.4 MiB and the 4 MiB byte mark is the real
+ * bound; the hard ceiling adds one block of records. */
 #define TBT_FEC_OUTQ_QUEUE_HIGH 4096u
-#define TBT_FEC_OUTQ_QUEUE_BYTES_HIGH (64u * 1024 * 1024)
+#define TBT_FEC_OUTQ_QUEUE_BYTES_HIGH (4u * 1024 * 1024)
 /* The hard session ceiling stays one FEC block (n+m <= 256 records) above
  * the mark: the packetizer checks the mark before a block, and the block
  * then queues its n+m records without touching the ceiling. */
 #define TBT_FEC_OUTQ_QUEUE_MAX (TBT_FEC_OUTQ_QUEUE_HIGH + TBT_FEC_MAX_SHARES)
-#define TBT_FEC_OUTQ_QUEUE_BYTES_MAX (96u * 1024 * 1024)
+#define TBT_FEC_OUTQ_QUEUE_BYTES_MAX (8u * 1024 * 1024)
 
 /* One NACK may name at most this many shares; the receiver retries the rest.
  * This bounds the work one NACK can create, not the storage it needs. */
 #define TBT_FEC_NACK_REQ_MAX 256u
 
 /* Replay records in flight across every carrier queue: a byte budget, not a
- * record count. One NACK names at most 64 shares (512 KiB), so 8 MiB holds
- * sixteen bursts; a slow carrier must not consume it, and the records
+ * record count. One NACK names at most 64 shares (68 KiB at S=1024), so
+ * 8 MiB holds more than a hundred bursts; a slow carrier must not consume it, and the records
  * spread over the carriers by their queue bytes. A miss is retried by the
  * receiver's NACK, not turned into a source-frame drop. fix23 measured a
  * 4 MiB cap with a one-record high-water throttle: the repair drain fell

@@ -1245,6 +1245,8 @@ static int flow_send_cfg(struct flow *f)
     c.rate_ppm = (u32)(((u64)f->tx_shape.n * 1000000u +
                         (f->tx_shape.n + f->tx_shape.m) - 1u) /
                        (f->tx_shape.n + f->tx_shape.m));
+    logmsg(e, "tbt_client: flow %llu cfg tx n=%u m=%u groups=%u block=%u L=%u\n",
+           (unsigned long long)f->sid, c.n, c.m, c.groups, c.block, c.L);
     if (tbt_fec_cfg_pack(&c, body))
         return -EINVAL;
     return send_ctl_record(e, f, TBT_FEC_CFG, f->sid, 0, 0, body, sizeof(body));
@@ -2019,6 +2021,9 @@ static int handle_cfg(struct flow *f, const u8 *body)
         (void)flow_send_fbk(f, TBT_FEC_FBK_F_CFG_NACK, c.epoch);
         return -ENOMEM;
     }
+    logmsg(e, "tbt_client: flow %llu cfg rx n=%u m=%u groups=%u block=%u L=%u\n",
+           (unsigned long long)f->sid, sh.n, sh.m, sh.groups, sh.block,
+           sh.L);
     f->rx_shape = sh;
     f->rx_shape_set = true;
     f->rx_n = sh.n;

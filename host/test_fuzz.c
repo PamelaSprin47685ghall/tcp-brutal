@@ -1171,15 +1171,13 @@ static int cfg_doc_accepts(const u8 *b)
             !(block == TBT_FEC_SCLC_BLOCK_UP && groups > 1 &&
               L == TBT_FEC_SCLC_L_UP))
             return 0;
+        if (block == TBT_FEC_SCLC_BLOCK_UP && groups > 1 && shares == 32 &&
+            !tbt_fec_sclc_up_buildable_64_8(n, m))
+            return 0;
         if (rate_ppm < 250000u || rate_ppm > 700000u)
             return 0;
         want_n = (u32)(((u64)rate_ppm * shares) / 1000000u);
-        if (want_n != n)
-            return 0;
-        if (block == TBT_FEC_SCLC_BLOCK_UP &&
-            !tbt_fec_sclc_up_buildable_64_8(n, m))
-            return 0;
-        return 1;
+        return want_n == n;
     }
     if (variant != 0 && variant != 1)
         return 0;
@@ -1836,12 +1834,12 @@ static void test_parse_bomb(void)
                  0);
     parse_expect("uplink adaptive L wrong",
                  "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-                 " n=8 m=24 fec=on mode=sc-ldpc adaptive=on w=64"
-                 " carriers=256 L=7",
+                 " n=8 m=24 fec=on mode=sc-ldpc adaptive=on w=128"
+                 " carriers=256 L=15",
                  TBT_PARSE_EINVAL);
     parse_expect("adaptive off-ladder n/m",
                  "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-                 " n=20 m=12 fec=on mode=sc-ldpc adaptive=on w=64"
+                 " n=19 m=13 fec=on mode=sc-ldpc adaptive=on w=64"
                  " carriers=256 L=8",
                  TBT_PARSE_EINVAL);
 

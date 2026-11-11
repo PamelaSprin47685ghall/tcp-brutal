@@ -1,0 +1,15 @@
+{
+  "codec": "sc-ldpc-binary",
+  "n": 128,
+  "m": 128,
+  "block": 256,
+  "L": 8,
+  "S": 1024,
+  "seed": 17,
+  "data_file": "sclc_downlink_data.bin",
+  "parity_file": "sclc_downlink_parity.bin",
+  "data_present_hex": "ffffff00ffffffffffffffffffffffff",
+  "parity_present_hex": "ffffffffffffffffffffffffffffffff",
+  "decoded_data_shares": 1,
+  "recovered_file": "sclc_downlink_recovered.bin"
+}

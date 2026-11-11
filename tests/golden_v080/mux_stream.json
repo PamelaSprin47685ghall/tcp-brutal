@@ -1,0 +1,14 @@
+{
+  "byte_order": "big-endian for len and stream_id",
+  "stream_file": "mux_stream.bin",
+  "stream_len": 53,
+  "stream_hex": "010200000102030402000003010203041122330500100001020304010100000a0b0c0d020000020a0b0c0d44550300000001020304",
+  "frames": [
+    {"cmd": 1, "slot": 2, "len": 0, "stream_id": 16909060},
+    {"cmd": 2, "slot": 0, "len": 3, "stream_id": 16909060, "payload_hex": "112233"},
+    {"cmd": 5, "slot": 0, "len": 4096, "stream_id": 16909060},
+    {"cmd": 1, "slot": 1, "len": 0, "stream_id": 168496141},
+    {"cmd": 2, "slot": 0, "len": 2, "stream_id": 168496141, "payload_hex": "4455"},
+    {"cmd": 3, "slot": 0, "len": 0, "stream_id": 16909060}
+  ]
+}

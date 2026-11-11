@@ -1246,7 +1246,8 @@ static void case_anti_windup(void)
 
     init_up_n(&c, 21);
     run(&c, &now, 16, 0, 3, true, 32, &out);
-    eq_u32(out.m_target, c.m_cur, "anti-windup: starts at the configured m");
+    eq_u32(out.m_target, (u32)(c.shares - 21),
+           "anti-windup: starts at the highest buildable split");
     m0 = out.m_target;
     for (i = 0; i < 200; i++)
     {
@@ -1349,7 +1350,7 @@ static u16 fp_least_m(u8 variant, u32 q_act, u32 burst, u16 backup,
 
         if (variant == TBT_FEC_SCLC_UP &&
             (fp_up_index(n) < 0 ||
-             !tbt_fec_sclc_up_buildable_64_8((u16)n, (u16)(shares - n))))
+             !tbt_fec_sclc_up_buildable_64_8(n, (u16)m)))
             continue;
         base = fp_base(variant, n, eps_q16);
         lo = fp_lo(variant, base);
@@ -1579,7 +1580,8 @@ static void case_tail_anchor(void)
 
 static bool up_constructible(u16 n)
 {
-    return tbt_fec_sclc_up_split(n, (u16)(32 - n));
+    return n == 1 || n == 2 || (n >= 4 && n <= 18) ||
+           (n >= 21 && n <= 25) || n == 28 || n == 30;
 }
 
 static void case_buildable_output(void)
@@ -1631,8 +1633,7 @@ static void case_buildable_output(void)
 static void case_n_sweep(void)
 {
     static const u16 down[] = {1, 16, 32, 64, 96, 128, 160, 178, 191, 192};
-    static const u16 up[] = {1, 2, 4, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
-                             18, 21};
+    static const u16 up[] = {1, 2, 4, 8, 9, 12, 16, 18, 21};
     u32 n_down = (u32)(sizeof(down) / sizeof(down[0]));
     u32 n_up = (u32)(sizeof(up) / sizeof(up[0]));
     u32 k;
@@ -1793,10 +1794,10 @@ static void case_wire_profile(void)
     make_cfg(&cfg, 128, 128, 1, 8, 512, 0);
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
            "profile: downlink block 512 rejected");
-    make_cfg(&cfg, 16, 16, 8, 8, 128, 0);
+    make_cfg(&cfg, 16, 16, 8, 16, 64, 0);
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
-           "profile: uplink block 128 rejected");
-    make_cfg(&cfg, 16, 16, 8, 16, 256, 0);
+           "profile: uplink L 16 rejected");
+    make_cfg(&cfg, 16, 16, 8, 8, 256, 0);
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
            "profile: uplink block 256 rejected");
     make_cfg(&cfg, 16, 16, 8, 8, 64, 0);

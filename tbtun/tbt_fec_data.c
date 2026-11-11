@@ -223,7 +223,7 @@ static struct tbt_fec_grouped *tbt_fec_codec_build(
 /* How long a partial packet may wait for company. The packetizer emits a
  * share only when its packet is full, so an application that writes a small
  * request and then waits for the answer -- an HTTP request, iperf3's control
- * cookie -- would wait for 8192 bytes that never come, and the tunnel would
+ * cookie -- would wait for S bytes that never come, and the tunnel would
  * look connected and silent. This timer is the interactive tail only: a
  * block that merely holds real shares is not sealed on it (see
  * TBT_FEC_BLOCK_IDLE_MS), or a 1 MB/s stream that drains the ring after
@@ -1930,13 +1930,27 @@ static void tbt_fec_packetize(struct tbt_session *sess, struct tbt_fec_tx *tx,
     memset(&h, 0, sizeof(h));
     h.type = TBT_FEC_DATA;
     h.flags = last ? TBT_FEC_FF_LAST : 0;
+    /* 0.8.0 constant frame: a short slot goes on the wire as a full S-byte
+     * body, zero-filled after the real bytes, and win_len names the real
+     * length. The receiver decrypts and CRC-checks the whole slot, then
+     * delivers only win_len bytes. */
+    if (len < TBT_FEC_S)
+    {
+        h.flags |= TBT_FEC_FF_PADDED;
+        h.win_len = len;
+        h.payload_len = TBT_FEC_S;
+        memset(tx->pkt + len, 0, TBT_FEC_S - len);
+    }
+    else
+    {
+        h.win_len = 0;
+        h.payload_len = len;
+    }
     h.share_index = share;
     h.n = (u8)tx->blk_n;
     h.m = (u8)tx->blk_m;
     h.block_id = block_id;
     h.seq = seq;
-    h.win_len = 0;
-    h.payload_len = len;
     /* epoch is block-level and belongs to PARITY only: a mid-block short
      * share that carried it overwrote the block's last-share length. */
     h.epoch = 0;
@@ -7413,7 +7427,7 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
          * arrived. If the cut says this slot holds no stream byte, placing the
          * share would make it invisible to the delivery walk (which skips
          * every slot at or past the cut) while the packet frontier and the
-         * ACK ran past it: the exact silent 8192-byte deletion this check
+         * ACK ran past it: the exact silent S-byte deletion this check
          * exists to refuse. */
         if (tbt_fec_share_past_cut(b->win_len_set, b->nreal, share))
         {
@@ -7438,7 +7452,10 @@ static int tbt_fec_rx_record_body(struct tbt_session *sess,
             if (h.payload_len < rx->s)
                 memset(b->data + (size_t)share * rx->s + h.payload_len, 0,
                        rx->s - h.payload_len);
-            b->dlen[share] = h.payload_len;
+            /* A PADDED share fills the slot but carries win_len real bytes;
+             * the delivery walk must see the real length, never S. */
+            b->dlen[share] = (h.flags & TBT_FEC_FF_PADDED) ?
+                                 h.win_len : h.payload_len;
             b->dpresent[share] = 1;
             b->gen++;
             /* ndata counts present shares inside the block's current real

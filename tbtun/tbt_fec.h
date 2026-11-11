@@ -1846,8 +1846,9 @@ static inline bool tbt_fec_sclc_down_split(u16 n, u16 m)
     }
 }
 
-/* Splits the 0.8.0 uplink GF(16) codec can actually build at its production
- * shape (block=64, L=8, S=1024). The table below is measured from the real
+/* Splits the 0.8.0 uplink wire accepts: the GF(16) codec builds them at
+ * its production shape (block=64, L=8, S=1024) and their rate stays at or
+ * below the 70% wire cap. The table below is measured from the real
  * constructor: the graph parity count and the bitplane region plan both
  * depend on the block size, and several splits that built at the old
  * 128/L16 shape do not fit 1024-byte shares. In particular 22/10 needs more

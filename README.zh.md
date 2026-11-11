@@ -108,14 +108,14 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.7.0`）。
-线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x000a` 与 FEC 头/FEC 记录的
-`TBT_FEC_CONV=0x100a`（48 字节头、64 字节 `FEC_CFG`/`FEC_FBK`），三者都与模块版本独立。
+`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.8.0`）。
+线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x000b` 与 FEC 头/FEC 记录的
+`TBT_FEC_CONV=0x100b`（48 字节头、64 字节 `FEC_CFG`/`FEC_FBK`），三者都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
 失败，其载体关闭；0x0004 的对端在第一个头部就会因为 conv 不匹配而被拒绝。
 36 字节 OPEN 沿用 0.6.0 的定义：32 字节 FEC group bitmap、小端
 route slot（近端监听映射槽）与该槽的小端 target 端口。0 表示沿用远端该槽
-配置的端口；其他值必须与它相等。`TBT_WIRE_VERSION_V6` 升到 7，0.6.0 的
+配置的端口；其他值必须与它相等。`TBT_WIRE_VERSION_V6` 为 8，0.7.3 的
 FEC 对端会在第一条 HELLO 就被拒绝，而不是等到第一条 OPEN。
 当前 FEC wire 是 `0x100a`：`0x1002` 增加 FIN 的 16 字节 body
 （`pkt_end`/`pkt_base`）与 PARITY 空块 marker（`win_len=0`、

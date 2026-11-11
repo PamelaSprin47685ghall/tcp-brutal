@@ -164,7 +164,7 @@ static void test_invalid_construction(void)
 }
 
 /* Share-level recovery over random DATA and parity losses. A share counts
- * as delivered only when all 16 batches recover, so this is a strict
+ * as delivered only when all 128 batches recover, so this is a strict
  * lower bound on the codeword decoder and matches what the data plane
  * sees. */
 static double erasure_run(u16 n, u16 m, u32 p_ppm, int blocks, u64 nonce)
@@ -278,8 +278,8 @@ static bool in_set(u16 n, const u16 *set, size_t len)
 
 static void test_buildable_sets(void)
 {
-    static const u16 up_yes[] = {1, 2, 4, 8, 9, 10, 11, 12, 13, 14, 15,
-                                 16, 17, 18, 21};
+    static const u16 up_yes[] = {1, 2, 4, 8, 9, 10, 11, 12, 13, 14,
+                                 15, 16, 17, 18, 21};
     static const u16 down_yes[] = {1, 64, 128, 192};
     static const u16 down_no[] = {0, 193, 255};
     size_t i;

@@ -3,6 +3,43 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.8.0] - 2026-11-11
+
+### Added
+
+- Constant-frame FEC cells at `S = 1024`. A short DATA record is zero-padded to
+  the full slot (`payload_len = 1024`), and the real length 1..1024 travels in
+  the header word at `+24` under `TBT_FEC_FF_PADDED (0x02)`. Every data-bearing
+  DATA/PARITY record is 1072 bytes raw, or a 1079-byte http-kal chunk
+  (`"430\r\n" + 48 + 1024 + "\r\n"`). The empty-block marker stays 48 bytes:
+  it carries no share.
+- Single-flow mux subframes (`tbtun/tbt_mux.h`, `tbtun/tbt_mux.c`): an 8-byte
+  big-endian header with OPEN/DATA/FIN/RST/WIN, a stateless encoder, a
+  zero-allocation streaming parser and a per-`stream_id` credit window. The
+  module and a Linux userspace client compile the same C99 source.
+- `tests/golden_v080/`: deterministic binary/JSON vectors for an independent
+  F# 0.9.x client (HELLO v8, padded DATA/PARITY chunks, ChaCha8, CRC32C, mux
+  subframes, binary and GF(16) SC-LDPC encode/decode), plus
+  `review/spec-080-fsharp.md`.
+
+### Changed
+
+- `TBT_VERSION` is 0.8.0 and `TBT_CONV` is `0x000b`. `TBT_FEC_CONV` stays
+  `0x100b` and HELLO `body[0]` stays 8 because the 48-byte FEC header layout is
+  unchanged; the `TBT_CONV` bump refuses a 0.7.3 peer at its first HELLO.
+- `TBT_FEC_PAYLOAD_MAX` / `TBT_FEC_S` fall to 1024, so `TBT_FEC_REC_MAX` is
+  1072. The downlink SC-LDPC share is 1024 bytes and has 16 batches; the
+  uplink GF(16) codec defaults to `block=64, L=8` (`C = n*8`).
+- The FEC window and out-queue byte marks are scaled to the 1 KiB cell
+  (16 MiB / 4 MiB), and the AArch64 hardware CRC32C path is enabled for Clang.
+
+### Known limitations
+
+- At `S=1024, block=64, L=8` the uplink `22/10` split needs more parity symbols
+  than its ten shares carry; the codec and wire reject it. The highest
+  buildable uplink split is `21/11` (65.6%). Restoring the 70% point needs
+  `L=16` or a new uplink graph, not a validation-only change.
+
 ## [Unreleased]
 
 ### Added

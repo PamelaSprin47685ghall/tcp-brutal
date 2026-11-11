@@ -428,7 +428,7 @@ static void test_hello_versions(void)
 {
     ok(TBT_CONV == 0x000bu && TBT_FEC_CONV == 0x100bu &&
            TBT_WIRE_VERSION_V6 == 8,
-       "0.8.0 wire constants", "the current constants are not the v11 cut");
+       "0.8.0 wire constants", "the current constants are not the v12 cut");
 
     expect_hello_refused(1, TBT_HELLO_BODY_LEN, "HELLO v1 (0.1.x/0.2.x ARQ)");
     expect_hello_refused(2, TBT_HELLO_BODY_LEN_V6, "HELLO v2 (0.2.x FEC)");

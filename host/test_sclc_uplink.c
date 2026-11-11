@@ -1010,7 +1010,7 @@ static void test_full_queue(void)
 }
 
 /* Every n/m split the SC-LDPC rate ladder derives for 8x32 must build with
- * the production GF(16) parameters (block 128, L 16, interleaved). */
+ * the production GF(16) parameters (block 64, L 8, bitplane). */
 static void test_ladder_shapes(void)
 {
     static const u16 n[6] = {8, 9, 12, 16, 18, 21};
@@ -1043,6 +1043,43 @@ static void test_ladder_shapes(void)
         if (u)
         {
             ok_u32(tbt_sclc_uplink_n_par(u), npar[i], "ladder: n_par");
+            tbt_sclc_uplink_free(u);
+        }
+    }
+
+    /* The wire predicate must match the constructor for every split the
+     * 32-share table names. This is the contract tbt_fec.h documents. */
+    {
+        u16 n;
+
+        for (n = 1; n <= 31; n++)
+        {
+            struct tbt_sclc_params p;
+            struct tbt_sclc_uplink *u;
+            char what[96];
+
+            memset(&p, 0, sizeof(p));
+            p.n = n;
+            p.m = (u16)(32 - n);
+            p.block = TBT_FEC_SCLC_BLOCK_UP;
+            p.L = TBT_FEC_SCLC_L_UP;
+            p.rate_num = (u16)(n * 256 / 32);
+            p.rate_den = 256;
+            p.max_core = 256;
+            p.mapping = TBT_SCLC_MAP_BITPLANE64;
+            p.seed = 1;
+            if ((u32)n * 1000000u / 32u > 700000u)
+            {
+                snprintf(what, sizeof(what), "uplink predicate n=%u", n);
+                ok(!tbt_fec_sclc_up_buildable_64_8(n, (u16)(32 - n)),
+                   what, "a split above the 70% wire cap is accepted");
+                continue;
+            }
+            u = tbt_sclc_uplink_new(1, &p);
+            snprintf(what, sizeof(what), "uplink predicate n=%u", n);
+            ok((u != NULL) ==
+                   tbt_fec_sclc_up_buildable_64_8(n, (u16)(32 - n)),
+               what, "predicate and constructor disagree");
             tbt_sclc_uplink_free(u);
         }
     }
