@@ -393,10 +393,18 @@ void tbt_cc_set_tunnel(struct sock *sk, u32 rate_cap_bps, u32 loss_ppm)
 
 void tbt_cc_set_hold(struct sock *sk, bool hold)
 {
-    struct tbt_cc_state *st = tbt_cc_attached(sk);
+    const struct tcp_congestion_ops *ops;
+    struct tbt_cc_state *st;
 
-    if (st)
-        WRITE_ONCE(st->hold, hold);
+    if (!sk)
+        return;
+    ops = READ_ONCE(inet_csk(sk)->icsk_ca_ops);
+    if (ops != &tbt_cc_ops)
+        return;
+    /* Lazy-init as set_tunnel() does: a carrier that entered the hold before
+     * its first data ACK still has an all-zero private block. */
+    st = tbt_cc_get(sk);
+    WRITE_ONCE(st->hold, hold);
 }
 
 bool tbt_cc_snapshot(struct sock *sk, struct tbt_cc_info *out)
