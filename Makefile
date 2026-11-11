@@ -21,7 +21,9 @@ SRCS            := Makefile \
                    tbtun/tbt_crypto.c tbtun/tbt_fec.c \
                    tbtun/tbt_fec_data.c tbtun/tbt_fec_adapt.c \
                    tbtun/tbt_fec_adapt_sclc.c tbtun/tbt_fec_sclc.c \
-                   tbtun/tbt_fec_sclc.h tbtun/tbt_portmap.c tbtun/tbt_map.c \
+                   tbtun/tbt_fec_sclc.h tbtun/tbt_fec_codec_cache.c \
+                   tbtun/tbt_fec_codec_cache.h \
+                   tbtun/tbt_portmap.c tbtun/tbt_map.c \
                    tbtun/tbt_sc_ldpc.c tbtun/tbt_sc_ldpc_gf16.c tbtun/tbt_sclc_uplink.c \
                    tbtun/tbt_sc_ldpc.h tbtun/tbt_sc_ldpc_gf16.h tbtun/tbt_sclc_uplink.h \
                    scripts/mkdkmsconf.sh scripts/install_dkms.sh \
@@ -118,6 +120,11 @@ HOST_FEC_SWITCH_SRCS := host/test_fec_switch.c tbtun/tbt_fec.c
 HOST_FEC_SWITCH_HDRS := tbtun/tbt_fec.h tbtun/tbt_uapi.h
 HOST_FEC_OUT    := host/test_fec_out
 HOST_FEC_OUT_SRCS := host/test_fec_out.c
+HOST_CODEC_CACHE := host/test_fec_codec_cache
+HOST_CODEC_CACHE_SRCS := host/test_fec_codec_cache.c \
+                   tbtun/tbt_fec_codec_cache.c
+HOST_CODEC_CACHE_HDRS := tbtun/tbt_fec_codec_cache.h tbtun/tbt_fec.h \
+                   tbtun/tbt_uapi.h
 HOST_BATCH      := host/test_batch
 HOST_BATCH_SRCS := host/test_batch.c tbtun/tbt_fec_batch.c tbtun/tbt_http.c \
                    tbtun/tbt_proto.c tbtun/tbt_rec.c
@@ -226,6 +233,7 @@ tbtun-objs      := tbtun/tbt_core.o tbtun/tbt_session.o tbtun/tbt_procfs.o \
                    tbtun/tbt_fec_data.o \
                    tbtun/tbt_fec_adapt.o tbtun/tbt_fec_adapt_sclc.o \
                    tbtun/tbt_fec_sclc.o \
+                   tbtun/tbt_fec_codec_cache.o \
                    tbtun/tbt_sc_ldpc.o \
                    tbtun/tbt_sc_ldpc_gf16.o tbtun/tbt_sclc_uplink.o
 
@@ -262,7 +270,7 @@ check: dkms-srcs-check
 host-test: $(HOST_CARRIER_POLICY)
 host-test-san-run: host/test_carrier_policy_san
 
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_LADDER) $(HOST_PORTMAP) $(HOST_MAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_INVARIANTS) $(HOST_WIRE_COMPAT) $(HTTP_RFC_GEN) $(HOST_RX_BUDGET)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_CODEC_CACHE) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_LADDER) $(HOST_PORTMAP) $(HOST_MAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_INVARIANTS) $(HOST_WIRE_COMPAT) $(HTTP_RFC_GEN) $(HOST_RX_BUDGET)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
@@ -282,6 +290,7 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_FEC_RX)
 	@./$(HOST_FEC_SWITCH)
 	@./$(HOST_FEC_OUT)
+	@./$(HOST_CODEC_CACHE)
 	@./$(HOST_BATCH)
 	@./$(HOST_FEC_ADAPT)
 	@./$(HOST_FEC_ADAPT_SCLC)
@@ -423,6 +432,9 @@ $(HOST_FEC_SWITCH): $(HOST_FEC_SWITCH_SRCS) $(HOST_FEC_SWITCH_HDRS)
 
 $(HOST_FEC_OUT): $(HOST_FEC_OUT_SRCS)
 	$(HOSTCC) $(HOST_CFLAGS) -o $@ $(HOST_FEC_OUT_SRCS)
+
+$(HOST_CODEC_CACHE): $(HOST_CODEC_CACHE_SRCS) $(HOST_CODEC_CACHE_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_CODEC_CACHE_SRCS)
 
 $(HOST_BATCH): $(HOST_BATCH_SRCS) $(HOST_BATCH_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_BATCH_SRCS)
@@ -679,6 +691,7 @@ clean: clean-dkms.conf clean-dkms-tarball
 	$(RM) $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_HTTP_LIVE) $(HOST_CRYPTO) $(HOST_BENCH_CRYPTO) $(HOST_BENCH_MICRO) $(HOST_BENCH_TXPATH) $(HOST_REORDER) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_LADDER) $(HOST_PORTMAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_FAULT) $(HOST_BENCH_SCLC) $(HOST_BENCH_SCLC_DOWN) $(HOST_BENCH_SCLC_SIM) $(HOST_BENCH_SCLC_PIPE) host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_ladder_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fault_san
 	$(RM) $(HOST_INVARIANTS) host/test_invariants_san
 	$(RM) $(HOST_MEM_BUDGET) host/test_mem_budget_san
+	$(RM) $(HOST_CODEC_CACHE)
 	$(RM) host/test_hold_san
 	$(RM) $(HOST_BATCH) $(HOST_WIRE_COMPAT) $(HOST_TSAN) host/test_batch_san host/test_wire_compat_san
 	$(RM) $(HTTP_RFC_GEN) $(HTTP_RFC_GEN_SAN)
