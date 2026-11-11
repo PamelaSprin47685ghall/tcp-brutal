@@ -229,6 +229,8 @@ struct flow
     u64 rx_inflight_bad;
     u64 rx_block_stalled;
     u64 rx_shape_mismatch;
+    u32 rx_credit_packets;
+    u64 rx_credit_bad;
     u16 rx_used;
     u64 rx_deliver_bytes;
     u64 peer_fin_end;
@@ -1296,6 +1298,22 @@ static int flow_send_cfg(struct flow *f)
     return send_ctl_record(e, f, TBT_FEC_CFG, f->sid, 0, 0, body, sizeof(body));
 }
 
+/* One ring slot holds a whole block: n + m shares, DATA and PARITY alike.
+ * The grant is slots-1 blocks of shares, leaving one slot for the block
+ * under delivery. A short block still occupies the slot, so the grant does
+ * not shrink with its real share count. */
+static u32 flow_rx_credit_update(struct flow *f)
+{
+    u32 shares = (u32)f->rx_n + f->rx_m;
+    u32 credit = (u32)(TBT_RX_SLOTS - 1) * shares;
+    u32 cap = (u32)TBT_RX_SLOTS * shares;
+
+    if (!shares || credit < shares || credit > cap)
+        f->rx_credit_bad++;
+    f->rx_credit_packets = credit;
+    return credit;
+}
+
 static int flow_send_ack(struct flow *f)
 {
     struct engine *e = f->e;
@@ -1304,10 +1322,7 @@ static int flow_send_ack(struct flow *f)
 
     memset(&a, 0, sizeof(a));
     a.next_deliver = f->rx_ack_frontier;
-    /* The peer may only send the blocks this side can buffer. One slot must
-     * stay free for the block being delivered: N in-flight + 1 head <=
-     * TBT_RX_SLOTS, so the grant is TBT_RX_SLOTS - 1 blocks of packets. */
-    a.credit_packets = (u32)(TBT_RX_SLOTS - 1) * f->rx_n;
+    a.credit_packets = flow_rx_credit_update(f);
     a.rtt_us = f->rtt_us ? f->rtt_us : 1000;
     a.deliver_bytes = f->rx_deliver_bytes;
     if (tbt_fec_ack_pack(&a, body))
@@ -1385,6 +1400,7 @@ static bool flow_commit_shape(struct flow *f, u16 n, u16 m)
         f->rx_m = m;
         logmsg(f->e, "tbt_client: flow %llu cfg rx n=%u m=%u (fbk)\n",
                (unsigned long long)f->sid, n, m);
+        (void)flow_rx_credit_update(f);
     }
     if (f->rx_shape_block < f->rx_next_block)
         f->rx_shape_block = f->rx_next_block;
@@ -2288,6 +2304,7 @@ static int handle_cfg(struct flow *f, const u8 *body)
     f->rx_m = sh.m;
     f->rx_groups = sh.groups;
     f->rx_shares = (u16)(sh.n + sh.m);
+    (void)flow_rx_credit_update(f);
     f->rx_shape_block = 0;
     f->cfg_epoch = c.epoch;
     if (!flow_rx_codec(f, sh.n, sh.m))
@@ -2662,8 +2679,8 @@ static void flow_tick(struct flow *f, u64 now)
                "tbt_client: flow %llu near=%d tx_seq=%llu ack_next=%llu "
                "rx_next=%llu rx_bytes=%llu rx_used=%u rx_late=%llu "
                "rx_win_drop=%llu rx_stale=%llu rx_inflight_bad=%llu "
-               "rx_stalled=%llu rx_shape_mismatch=%llu rx_unknown_sid=%llu "
-               "out=%zu/%zu up=%u\n",
+               "rx_stalled=%llu rx_shape_mismatch=%llu rx_credit=%u "
+               "rx_credit_bad=%llu rx_unknown_sid=%llu out=%zu/%zu up=%u\n",
                (unsigned long long)f->sid, f->near,
                (unsigned long long)f->tx_seq,
                (unsigned long long)f->tx_ack_next,
@@ -2675,6 +2692,8 @@ static void flow_tick(struct flow *f, u64 now)
                (unsigned long long)f->rx_inflight_bad,
                (unsigned long long)f->rx_block_stalled,
                (unsigned long long)f->rx_shape_mismatch,
+               f->rx_credit_packets,
+               (unsigned long long)f->rx_credit_bad,
                (unsigned long long)e->rx_unknown_sid, f->out_len,
                f->out_off, e->up_count);
     }

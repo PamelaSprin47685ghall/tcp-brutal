@@ -10,7 +10,7 @@
  *   - NACK anchors on rx_next_block, never on a delivery frontier that marker
  *     blocks leave behind;
  *   - rx_next_deliver advances by real packets: marker 0, short sum(win_len);
- *   - ACK credit is (TBT_RX_SLOTS - 1) * the current rx_n;
+ *   - ACK credit is (TBT_RX_SLOTS - 1) * (rx_n + rx_m) shares;
  *   - n/m are read from every block header, not from the session's first CFG.
  * Counters check that a stale slot below rx_next_block can never be NACKed
  * and that a late replay is counted instead of silently wedging.
@@ -286,8 +286,10 @@ static void test_marker_short_sequence(void)
                                     8u * (TBT_FEC_S + 784u) +
                                     64u * TBT_FEC_S,
           "sequence: delivered bytes");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 8u),
-          "sequence: ACK credit is 7 slots * n");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * (8u + 24u)) &&
+              f.rx_credit_packets == (TBT_RX_SLOTS - 1) * (8u + 24u),
+          "sequence: ACK credit is 7 blocks of n+m");
+    CHECK(f.rx_credit_bad == 0, "sequence: credit invariant holds");
     CHECK(f.rx_stale_nack == 0 && f.rx_late_share == 0 &&
               f.rx_window_drop == 0 && f.rx_shape_bad == 0,
           "sequence: no stale request or late drop");
@@ -315,8 +317,10 @@ static void test_credit_inflight(void)
     CHECK(f.rx_inflight_bad == 0, "credit: in-flight count is within slots-1");
     clear_pending();
     CHECK(flow_send_ack(&f) == 0, "credit: ACK sent");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 132u),
-          "credit: ACK grants slots-1 blocks");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * (132u + 124u)) &&
+              f.rx_credit_packets == (TBT_RX_SLOTS - 1) * (132u + 124u),
+          "credit: ACK grants slots-1 whole blocks");
+    CHECK(f.rx_credit_bad == 0, "credit: credit invariant holds");
 
     /* Complete the head; the seven markers drain behind it. */
     send_parity(0, 0, 132, 124, 0, 1, 0);
@@ -330,7 +334,8 @@ static void test_credit_inflight(void)
     CHECK(f.rx_next_block == 9, "credit: post-drain block accepted");
     CHECK(f.rx_used == 0 && f.rx_window_drop == 0,
           "credit: post-drain ring empty and no drop");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 146u),
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * (146u + 110u)) &&
+              f.rx_credit_packets == (TBT_RX_SLOTS - 1) * (146u + 110u),
           "credit: post-drain credit follows the new split");
 }
 
@@ -376,7 +381,7 @@ static void test_window_and_nack_base(void)
     CHECK(f.rx_next_block == 8, "window: blocks 0..7 drained");
     CHECK(f.rx_next_deliver == 1, "window: frontier is the one real share");
     CHECK(f.rx_deliver_bytes == TBT_FEC_S, "window: delivered one share");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 8u),
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * (8u + 24u)),
           "window: ACK credit follows the ring");
 
     full_block(8, 8 * 64, 8, 24);
@@ -407,8 +412,10 @@ static void test_multishape_sequence(void)
           "shape: delivered bytes");
     CHECK(f.rx_n == 9 && f.rx_m == 23,
           "shape: current split follows the newest block");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 9u),
-          "shape: credit follows the current rx_n");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * (9u + 23u)) &&
+              f.rx_credit_packets == (TBT_RX_SLOTS - 1) * (9u + 23u),
+          "shape: credit follows the current n+m");
+    CHECK(f.rx_credit_bad == 0, "shape: credit invariant holds");
     CHECK(f.rx_shape_bad == 0, "shape: all per-block splits accepted");
     CHECK(flow_rx_codec(&f, 9, 23) != NULL, "shape: 9/23 codec builds");
     CHECK(flow_rx_codec(&f, 12, 20) != NULL, "shape: 12/20 codec builds");
@@ -440,16 +447,20 @@ static void test_downlink_shapes(void)
           "down: 132/124 marker accepted");
     CHECK(f.rx_n == 132 && f.rx_m == 124,
           "down: current split follows the marker");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 132u),
-          "down: credit is 8 * 132");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * (132u + 124u)) &&
+              f.rx_credit_packets == (TBT_RX_SLOTS - 1) * 256u,
+          "down: credit is 7 * 256 shares");
+    CHECK(f.rx_credit_bad == 0, "down: credit invariant holds");
 
     full_block(1, 146, 146, 110);
     CHECK(f.rx_next_block == 2 && f.rx_next_deliver == 146,
           "down: 146/110 full block delivered");
     CHECK(f.rx_n == 146 && f.rx_m == 110,
           "down: current split follows the full block");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 146u),
-          "down: credit is 8 * 146");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * (146u + 110u)) &&
+              f.rx_credit_packets == (TBT_RX_SLOTS - 1) * 256u,
+          "down: credit is 7 * 256 shares after switch");
+    CHECK(f.rx_credit_bad == 0, "down: credit invariant holds after switch");
     CHECK(flow_rx_codec(&f, 132, 124) != NULL,
           "down: 132/124 codec builds");
     CHECK(flow_rx_codec(&f, 146, 110) != NULL,
@@ -499,8 +510,10 @@ static void test_16m_boundary(void)
     CHECK(f.rx_window_drop == 0 && f.rx_inflight_bad == 0 &&
               f.rx_shape_bad == 0,
           "16m: no window or shape error");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 146u),
-          "16m: credit follows the post-boundary split");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * (146u + 110u)) &&
+              f.rx_credit_packets == (TBT_RX_SLOTS - 1) * 256u,
+          "16m: credit is 7 * 256 shares after boundary");
+    CHECK(f.rx_credit_bad == 0, "16m: credit invariant holds");
 }
 
 /* The far ladder observed in .92: 128 -> 139/117 -> 140/116 -> 146/110
@@ -520,8 +533,10 @@ static void test_far_shape_ladder(void)
     CHECK(f.rx_next_deliver == 148, "ladder: frontier 2 + 146");
     CHECK(f.rx_n == 146 && f.rx_m == 110,
           "ladder: current split follows the latest block");
-    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 146u),
-          "ladder: credit follows the latest rx_n");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * (146u + 110u)) &&
+              f.rx_credit_packets == (TBT_RX_SLOTS - 1) * 256u,
+          "ladder: credit is 7 * 256 shares on the ladder");
+    CHECK(f.rx_credit_bad == 0, "ladder: credit invariant holds");
     CHECK(f.rx_shape_bad == 0, "ladder: no shape rejection");
     CHECK(flow_rx_codec(&f, 139, 117) != NULL,
           "ladder: 139/117 codec builds");
@@ -753,7 +768,7 @@ static void test_tx_idle_3(void)
 
     memset(&a, 0, sizeof(a));
     a.next_deliver = 1;
-    a.credit_packets = (u32)(TBT_RX_SLOTS - 1) * 8u;
+    a.credit_packets = (u32)(TBT_RX_SLOTS - 1) * (8u + 24u);
     a.deliver_bytes = 3;
     CHECK(tbt_fec_ack_pack(&a, body) == 0, "idle3: pack ACK");
     memset(&h, 0, sizeof(h));
@@ -859,6 +874,9 @@ static void test_fbk_commit(void)
     }
     CHECK(found == 1, "fbk: one report queued");
     CHECK(f.rx_n == 9 && f.rx_m == 23, "fbk: RX expectation moves with it");
+    CHECK(f.rx_credit_packets == (TBT_RX_SLOTS - 1) * 32u,
+          "fbk: credit recomputed from n+m");
+    CHECK(f.rx_credit_bad == 0, "fbk: credit invariant holds");
 }
 
 int main(void)
