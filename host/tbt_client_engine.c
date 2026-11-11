@@ -72,6 +72,7 @@
 #define TBT_FBK_NS (100ull * 1000 * 1000)
 #define TBT_ACK_NS (10ull * 1000 * 1000)
 #define TBT_FLOW_IDLE_NS (30ull * 1000 * 1000 * 1000)
+#define TBT_FLOW_CLOSE_NS (10ull * 1000 * 1000 * 1000)
 #define TBT_CONNECT_RETRY_NS (200ull * 1000 * 1000)
 
 enum ep_kind
@@ -244,6 +245,8 @@ struct flow
     bool peer_fin_end_set;
     bool fin_applied;
     u64 close_at_ns;
+    u64 half_open_since_ns; /* local FIN sent, peer FIN still missing */
+    u64 last_rx_progress_ns; /* last accepted share or delivered block */
     u64 rx_last_ack_ns;
     u32 rtt_us;
 
@@ -283,6 +286,10 @@ struct engine
     struct carrier *car_list; /* every carrier, joined or not */
     u32 car_live;
     u64 next_sid;
+    u64 flow_accepted;
+    u64 flow_refused;
+    u64 flow_freed;
+    u16 flow_peak;
     u64 start_ns;
     u64 stop_at_ns;
 
@@ -992,19 +999,34 @@ static void handle_nack(struct flow *f, const struct tbt_fec_hdr *h,
                         const u8 *body);
 static void handle_fbk(struct flow *f, const u8 *body);
 
-static struct flow *flow_alloc(struct engine *e, u64 sid, int app_fd, bool near)
+/* why, when non-NULL, receives -ENOSPC when every slot is taken and
+ * -ENOMEM when the flow or one of its buffers cannot be allocated. */
+static struct flow *flow_alloc(struct engine *e, u64 sid, int app_fd, bool near,
+                               int *why)
 {
     struct flow *f;
     int i;
 
+    if (why)
+        *why = 0;
     for (i = 0; i < TBT_FLOW_MAX; i++)
         if (!e->flow[i])
             break;
     if (i == TBT_FLOW_MAX)
+    {
+        if (why)
+            *why = -ENOSPC;
+        e->flow_refused++;
         return NULL;
+    }
     f = calloc(1, sizeof(*f));
     if (!f)
+    {
+        if (why)
+            *why = -ENOMEM;
+        e->flow_refused++;
         return NULL;
+    }
     f->e = e;
     f->sid = sid;
     f->app_fd = app_fd;
@@ -1025,11 +1047,25 @@ static struct flow *flow_alloc(struct engine *e, u64 sid, int app_fd, bool near)
         if (f->tx_codec)
             tbt_fec_grouped_free(f->tx_codec);
         free(f);
+        if (why)
+            *why = -ENOMEM;
+        e->flow_refused++;
         return NULL;
     }
     f->ep.kind = EP_FLOW_APP;
     f->ep.p = f;
     e->flow[i] = f;
+    e->flow_accepted++;
+    {
+        u16 active = 0;
+        int j;
+
+        for (j = 0; j < TBT_FLOW_MAX; j++)
+            if (e->flow[j])
+                active++;
+        if (active > e->flow_peak)
+            e->flow_peak = active;
+    }
     return f;
 }
 
@@ -1060,6 +1096,7 @@ static void flow_free(struct engine *e, struct flow *f)
            (unsigned long long)f->sid, f->near, f->fin_sent, f->fin_recv,
            (unsigned long long)f->tx_seq,
            (unsigned long long)f->tx_ack_next, f->out_len, f->out_off);
+    e->flow_freed++;
     f->dead = true;
     if (f->app_fd >= 0)
     {
@@ -1976,6 +2013,14 @@ static void flow_rx_check(struct flow *f)
     }
 }
 
+/* The idle reclaim of a half-open flow must not fire while the receive
+ * direction is still moving. Every accepted share refreshes this stamp;
+ * flow_tick compares it with the idle threshold. */
+static void flow_rx_progress(struct flow *f, u64 now)
+{
+    f->last_rx_progress_ns = now;
+}
+
 static void flow_rx_store(struct flow *f, const struct tbt_fec_hdr *h,
                           const u8 *payload)
 {
@@ -2023,6 +2068,7 @@ static void flow_rx_store(struct flow *f, const struct tbt_fec_hdr *h,
     g->present[share] = 1;
     g->plen[share] = (h->flags & TBT_FEC_FF_PADDED) ? h->win_len
                                                     : h->payload_len;
+    flow_rx_progress(f, now_ns());
     if (share < h->n)
         g->ndata++;
     else
@@ -2265,7 +2311,7 @@ static int handle_open(struct engine *e, struct flow *f, const u8 *body,
     }
     if (f)
         return 0;
-    f = flow_alloc(e, sid, -1, false);
+    f = flow_alloc(e, sid, -1, false, NULL);
     if (!f)
         return -ENOMEM;
     port = tbt_le16(body + TBT_OPEN_TARGET_PORT);
@@ -2904,6 +2950,33 @@ static void flow_tick(struct flow *f, u64 now)
                (unsigned long long)e->rx_unknown_sid, f->out_len,
                f->out_off, e->up_count);
     }
+    /* Half-open close: the local side has finished sending but the peer's
+     * FIN never arrives, so fin_applied stays false and the normal release
+     * path below can never run. Reclaim the slot only when the receive
+     * direction has also been idle for the whole window: a long download
+     * that keeps accepting shares must never be freed at the idle
+     * threshold. A pending ACK additionally holds the flow until the hard
+     * cap, so an unacknowledged tail is not cut short either. */
+    if ((f->fin_sent || f->tx_finished) && !f->fin_recv && !f->fin_applied)
+    {
+        u64 idle_from;
+        bool rx_idle;
+
+        if (!f->half_open_since_ns)
+            f->half_open_since_ns = now;
+        idle_from = f->half_open_since_ns;
+        if (f->last_rx_progress_ns > idle_from)
+            idle_from = f->last_rx_progress_ns;
+        rx_idle = now > idle_from && now - idle_from >= TBT_FLOW_IDLE_NS;
+        if (rx_idle &&
+            (f->tx_ack_next >= f->tx_seq ||
+             now - f->half_open_since_ns >=
+                 TBT_FLOW_IDLE_NS + TBT_FLOW_CLOSE_NS))
+        {
+            flow_free(e, f);
+            return;
+        }
+    }
     if (f->fin_sent && f->fin_applied)
     {
         /* Keep the replay ring alive until the peer acknowledged every byte
@@ -2911,7 +2984,7 @@ static void flow_tick(struct flow *f, u64 now)
          * last DATA block, and a NACK for that block must still find it. The
          * timeout is the liveness bound when the final ACK was lost. */
         if (!f->close_at_ns)
-            f->close_at_ns = now + 10ull * 1000 * 1000 * 1000;
+            f->close_at_ns = now + TBT_FLOW_CLOSE_NS;
         if (f->tx_ack_next >= f->tx_seq || now >= f->close_at_ns)
             flow_free(e, f);
     }
@@ -3124,6 +3197,7 @@ static void engine_accept_app(struct engine *e)
                          SOCK_NONBLOCK | SOCK_CLOEXEC);
         struct flow *f;
         int one = 1;
+        int why = 0;
 
         if (fd < 0)
         {
@@ -3132,9 +3206,12 @@ static void engine_accept_app(struct engine *e)
             return;
         }
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
-        f = flow_alloc(e, e->next_sid++, fd, true);
+        f = flow_alloc(e, e->next_sid++, fd, true, &why);
         if (!f)
         {
+            logmsg(e, "tbt_client: accept refused sid=%llu: %s\n",
+                   (unsigned long long)(e->next_sid - 1),
+                   why == -ENOSPC ? "flow table full" : "out of memory");
             close(fd);
             continue;
         }
@@ -3526,11 +3603,22 @@ int tbt_engine_run(const struct tbt_engine_cfg *cfg)
         engine_tick(e);
     }
     if (e->cfg.verbose)
+    {
+        u16 active = 0;
+        int i;
+
+        for (i = 0; i < TBT_FLOW_MAX; i++)
+            if (e->flow[i])
+                active++;
         fprintf(stderr,
-                "tbt_client: stop up=%u drops=%llu tx_carrier_dropped=%llu flows=%d\n",
+                "tbt_client: stop up=%u drops=%llu tx_carrier_dropped=%llu "
+                "active=%u accepted=%llu refused=%llu freed=%llu peak=%u\n",
                 e->up_count, (unsigned long long)e->drops,
-                (unsigned long long)e->tx_carrier_dropped,
-                e->flow[0] ? 1 : 0);
+                (unsigned long long)e->tx_carrier_dropped, active,
+                (unsigned long long)e->flow_accepted,
+                (unsigned long long)e->flow_refused,
+                (unsigned long long)e->flow_freed, e->flow_peak);
+    }
     engine_cleanup(e);
     free(e);
     return err;

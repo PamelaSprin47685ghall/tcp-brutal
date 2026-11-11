@@ -804,7 +804,7 @@ static struct flow *tx_flow_new(void)
     tx_e.tx_n = 8;
     tx_e.tx_m = 24;
     tx_e.tx_groups = 8;
-    return flow_alloc(&tx_e, 1, -1, true);
+    return flow_alloc(&tx_e, 1, -1, true, NULL);
 }
 
 /* A fresh RX flow that matches the TX shape and seed. */
@@ -819,7 +819,7 @@ static struct flow *tx_rx_new(struct flow *tx)
     rx_e.tx_m = 24;
     rx_e.tx_groups = 8;
     rx_e.tx_shape = tx_e.tx_shape;
-    rx = flow_alloc(&rx_e, 1, -1, false);
+    rx = flow_alloc(&rx_e, 1, -1, false, NULL);
     rx->rx_shape = tx->tx_shape;
     rx->rx_shape_set = true;
     rx->rx_seed = tx_e.tx_seed;
@@ -1974,6 +1974,125 @@ static void test_fbk_commit(void)
     CHECK(f.rx_credit_bad == 0, "fbk: credit invariant holds");
 }
 
+/* A local FIN whose peer FIN never arrives used to occupy a flow slot
+ * forever: fin_applied stays false, so the normal release path cannot run.
+ * The idle reclaim must free an acknowledged flow at TBT_FLOW_IDLE_NS, must
+ * wait for the hard cap when data is still unacknowledged, and must never
+ * touch a flow that is still sending. */
+static void test_half_open_reclaim(void)
+{
+    struct flow *f;
+    u64 t0 = 5000000000ull;
+    int i;
+
+    f = tx_flow_new();
+    CHECK(f != NULL, "half-open: acked flow allocated");
+    f->fin_sent = true;
+    f->tx_seq = 0;
+    f->tx_ack_next = 0;
+    flow_tick(f, t0);
+    CHECK(tx_e.flow[0] == f, "half-open: the first tick arms the deadline");
+    flow_tick(f, t0 + TBT_FLOW_IDLE_NS - 1);
+    CHECK(tx_e.flow[0] == f, "half-open: acked flow waits for the threshold");
+    flow_tick(f, t0 + TBT_FLOW_IDLE_NS);
+    CHECK(tx_e.flow[0] == NULL, "half-open: acked flow freed at the threshold");
+    CHECK(tx_e.flow_freed == 1, "half-open: the reclaim is counted");
+    f = flow_alloc(&tx_e, 100, -1, true, NULL);
+    CHECK(f != NULL, "half-open: the freed slot is reusable");
+    flow_free(&tx_e, f);
+
+    /* A legal half-close followed by a long download: the local GET was
+     * acknowledged immediately, but the receive direction keeps moving for
+     * 120 s. The idle reclaim must never fire while shares keep arriving;
+     * only a full idle window after the last one may release the flow. */
+    f = tx_flow_new();
+    CHECK(f != NULL, "half-open: long download allocated");
+    f->fin_sent = true;
+    f->tx_seq = 0;
+    f->tx_ack_next = 0;
+    flow_tick(f, t0);
+    for (i = 1; i <= 12 && tx_e.flow[0] == f; i++)
+    {
+        u64 at = t0 + (u64)i * (TBT_FLOW_IDLE_NS / 3);
+
+        flow_rx_progress(f, at);
+        flow_tick(f, at);
+    }
+    CHECK(tx_e.flow[0] == f,
+          "half-open: 120 s of rx progress keeps the download");
+    if (tx_e.flow[0] == f)
+    {
+        u64 last = t0 + 12ull * (TBT_FLOW_IDLE_NS / 3);
+
+        flow_tick(f, last + TBT_FLOW_IDLE_NS - 1);
+        CHECK(tx_e.flow[0] == f,
+              "half-open: release waits for the rx idle window");
+        flow_tick(f, last + TBT_FLOW_IDLE_NS);
+        CHECK(tx_e.flow[0] == NULL,
+              "half-open: an idle rx releases the half-open flow");
+    }
+
+    f = tx_flow_new();
+    CHECK(f != NULL, "half-open: unacked flow allocated");
+    f->fin_sent = true;
+    f->tx_seq = 10;
+    f->tx_ack_next = 5;
+    flow_tick(f, t0);
+    flow_tick(f, t0 + TBT_FLOW_IDLE_NS);
+    CHECK(tx_e.flow[0] == f,
+          "half-open: unacked flow survives the idle threshold");
+    flow_tick(f, t0 + TBT_FLOW_IDLE_NS + TBT_FLOW_CLOSE_NS - 1);
+    CHECK(tx_e.flow[0] == f, "half-open: unacked flow waits for the hard cap");
+    flow_tick(f, t0 + TBT_FLOW_IDLE_NS + TBT_FLOW_CLOSE_NS);
+    CHECK(tx_e.flow[0] == NULL, "half-open: unacked flow freed at the hard cap");
+
+    f = tx_flow_new();
+    CHECK(f != NULL, "half-open: sending flow allocated");
+    flow_tick(f, t0 + 365ull * 24ull * 3600ull * 1000000000ull);
+    CHECK(tx_e.flow[0] == f,
+          "half-open: a flow that never sent FIN is never idle-reclaimed");
+    flow_free(&tx_e, f);
+}
+
+/* The eighth slot is the last one; the ninth allocation is refused with
+ * -ENOSPC and the refusal is visible. Releasing one flow lets the next
+ * allocation succeed without clearing the counter. */
+static void test_flow_table_refusal(void)
+{
+    struct flow *f;
+    int why = 0;
+    int i;
+
+    f = tx_flow_new();
+    CHECK(f != NULL, "table: first flow allocated");
+    for (i = 1; i < TBT_FLOW_MAX; i++)
+    {
+        f = flow_alloc(&tx_e, (u64)i + 1, -1, true, &why);
+        CHECK(f != NULL, "table: flow fits under the limit");
+    }
+    CHECK(tx_e.flow_accepted == TBT_FLOW_MAX,
+          "table: accepted counter reaches the limit");
+    CHECK(tx_e.flow_peak == TBT_FLOW_MAX, "table: peak reaches the limit");
+    why = 0;
+    f = flow_alloc(&tx_e, 100, -1, true, &why);
+    CHECK(f == NULL && why == -ENOSPC,
+          "table: the ninth flow is refused with ENOSPC");
+    CHECK(tx_e.flow_refused == 1, "table: the refusal is counted");
+    CHECK(tx_e.flow_accepted == TBT_FLOW_MAX,
+          "table: a refusal does not increment accepted");
+    flow_free(&tx_e, tx_e.flow[3]);
+    CHECK(tx_e.flow_freed == 1, "table: the slot release is counted");
+    why = 0;
+    f = flow_alloc(&tx_e, 101, -1, true, &why);
+    CHECK(f != NULL, "table: a released slot accepts the next flow");
+    CHECK(tx_e.flow_accepted == TBT_FLOW_MAX + 1,
+          "table: accepted increments after reuse");
+    CHECK(tx_e.flow_refused == 1, "table: reuse does not increment refused");
+    for (i = 0; i < TBT_FLOW_MAX; i++)
+        if (tx_e.flow[i])
+            flow_free(&tx_e, tx_e.flow[i]);
+}
+
 int main(void)
 {
     signal(SIGPIPE, SIG_IGN);
@@ -2009,6 +2128,8 @@ int main(void)
     test_tx_encode_failure();
     test_tx_replay_alloc_failure();
     test_fbk_commit();
+    test_half_open_reclaim();
+    test_flow_table_refusal();
 
     printf("test_client_rx: %d checks, %d failures\n", checks, failures);
     free(f.out);
