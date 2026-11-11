@@ -1,0 +1,12 @@
+scenario,n,p_ppm,trials,events,rate,note
+iid,128,300000,1000,1,0.001,"nonce 0xD0+50; 1 block failed"
+iid,128,350000,1000,6,0.006,"nonce 0xD0+50"
+iid,128,400000,1000,134,0.134,"nonce 0xD0+50"
+iid,151,200000,1000,2,0.002,"nonce 0xD0+60"
+iid,151,250000,1000,3,0.003,"nonce 0xD0+60"
+iid,151,300000,1000,59,0.059,"nonce 0xD0+60"
+iid,178,150000,5100,4,0.000784,"batch scenario; 4 failing masks in 5100 iid attempts"
+first,178,100000,200,200,1.0,"n+8=186 present; 200/200 first attempts failed"
+ks,128,300000,50,0,,"kstar p50=144, p90=147; attempts_mean=9.52; first_fail=1.0"
+ks,178,100000,50,0,,"kstar p50=191, p90=193; attempts_mean=6.42; first_fail=1.0"
+batch,128,400000,50,0,0.0,"50 failing blocks, 0 absent shares partially written; all 128 batches fail together"
