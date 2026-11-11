@@ -1467,6 +1467,62 @@ static void test_carrier_lifecycle(void)
     }
 }
 
+/* The real accept path, driven 32 times: every connection is accepted,
+ * added to epoll, closed before HELLO, and must leave no carrier behind. */
+static void test_far_accept_reap(void)
+{
+    struct sockaddr_in sin;
+    socklen_t slen = sizeof(sin);
+    int lfd, epfd;
+    int i;
+
+    clear_engine();
+    e.near = false;
+    e.n_car = 1;
+    epfd = epoll_create1(EPOLL_CLOEXEC);
+    lfd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+    CHECK(epfd >= 0 && lfd >= 0, "accept: epoll and listener");
+    if (epfd < 0 || lfd < 0)
+        return;
+    memset(&sin, 0, sizeof(sin));
+    sin.sin_family = AF_INET;
+    sin.sin_addr.s_addr = htonl(0x7f000001u);
+    sin.sin_port = 0;
+    CHECK(bind(lfd, (struct sockaddr *)&sin, sizeof(sin)) == 0,
+          "accept: bind an ephemeral port");
+    CHECK(listen(lfd, 16) == 0, "accept: listen");
+    CHECK(getsockname(lfd, (struct sockaddr *)&sin, &slen) == 0,
+          "accept: read the bound port");
+    e.epfd = epfd;
+    e.listen_fd = lfd;
+
+    for (i = 0; i < 32; i++)
+    {
+        int cfd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+
+        CHECK(cfd >= 0, "accept: client socket");
+        if (cfd < 0)
+            break;
+        CHECK(connect(cfd, (struct sockaddr *)&sin, sizeof(sin)) == 0,
+              "accept: client connects");
+        engine_accept_carrier(&e);
+        CHECK(e.car_live == 1, "accept: one carrier admitted");
+        close(cfd);
+        if (e.car_list)
+            carrier_event(&e, e.car_list, EPOLLIN | EPOLLRDHUP);
+        CHECK(e.car_live == 1, "accept: close defers the free");
+        engine_tick(&e);
+        CHECK(e.car_live == 0 && e.car_list == NULL,
+              "accept: a failed handshake is reaped");
+    }
+
+    e.epfd = -1;
+    e.listen_fd = -1;
+    close(epfd);
+    close(lfd);
+    clear_engine();
+}
+
 /* A HELLO that names an occupied index replaces the old carrier. The old
  * buffer must be released while the new connection keeps the slot. */
 static void test_carrier_replace(void)
@@ -1637,6 +1693,7 @@ int main(void)
     test_session_nonce_hello();
     test_session_nonce_parse();
     test_carrier_lifecycle();
+    test_far_accept_reap();
     test_carrier_replace();
     test_stall_dump();
     test_tx_idle_empty();
