@@ -623,17 +623,38 @@ static struct carrier *ctl_carrier(struct engine *e)
     return NULL;
 }
 
-/* Wrap one FEC record in the HTTP carrier container and write it to that
- * carrier. Returns 0, -EAGAIN while the carrier's buffer is full, the
- * carrier's write errno after marking it dead, or -EINVAL when the record
- * did not encode. -EINVAL is a local fault, not a carrier fault. */
+/* Wrap one record in the HTTP carrier container and write it to that
+ * carrier. A FEC record and a session record (HELLO/OPEN/FIN/RST/PAD) share
+ * the carrier but not the encoder: the FEC encoder refuses anything shorter
+ * than its 48-byte header, so it can never carry the 32-byte RST. Sending a
+ * session record through it dropped every RST silently, which is how a
+ * refused or aborted stream left the peer's target open.
+ *
+ * Returns 0, -EAGAIN while the carrier's buffer is full, the carrier's write
+ * errno after marking it dead, or -EINVAL when the record did not encode.
+ * -EINVAL is a local fault, not a carrier fault. */
 static int carrier_send_record(struct carrier *c, const u8 *rec, size_t len)
 {
     char frame[TBT_HTTP_FEC_FRAME_MAX];
     size_t flen;
     int err;
 
-    flen = tbt_http_fec_chunk_encode(frame, sizeof(frame), rec, len);
+    if (tbt_fec_record_type(rec[0]))
+        flen = tbt_http_fec_chunk_encode(frame, sizeof(frame), rec, len);
+    else
+    {
+        struct tbt_hdr h;
+        struct tbt_http_out out;
+
+        if (len < TBT_HDR_LEN)
+            return -EINVAL;
+        tbt_hdr_decode(rec, &h);
+        if (len != TBT_HDR_LEN + (size_t)h.body_len)
+            return -EINVAL;
+        out.hdr = &h;
+        out.body = h.body_len ? rec + TBT_HDR_LEN : NULL;
+        flen = tbt_http_frame_encode(frame, sizeof(frame), &out);
+    }
     if (!flen)
         return -EINVAL;
     if (!c)
@@ -1109,7 +1130,7 @@ static void carrier_event(struct engine *e, struct carrier *c,
 static void flow_free(struct engine *e, struct flow *f);
 static void flow_out_flush(struct flow *f);
 static void flow_fin_maybe(struct flow *f);
-static void flow_app_close(struct flow *f);
+static void flow_abort(struct flow *f);
 static void flow_tx_finish(struct flow *f);
 static bool flow_tx_seal_block(struct flow *f, bool finish);
 static int flow_send_fin(struct flow *f);
@@ -1887,7 +1908,10 @@ static void flow_out_flush(struct flow *f)
         }
         if (n < 0 && errno == EINTR)
             continue;
-        flow_app_close(f);
+        /* EPIPE/ECONNRESET: the app stopped reading its downlink, so the
+         * download has no consumer. Reset the peer instead of half-closing
+         * and then buffering bytes nobody will read. */
+        flow_abort(f);
         return;
     }
     if (f->app_eof)
@@ -2113,9 +2137,13 @@ static void flow_rx_check(struct flow *f)
 
                 if (flow_out_append(f, g->buf + (size_t)s * TBT_FEC_S, len))
                 {
-                    f->dead = true;
+                    flow_abort(f);
                     return;
                 }
+                /* A write error aborted the flow inside flow_out_append();
+                 * stop handing it bytes it can never consume. */
+                if (f->dead)
+                    return;
                 f->rx_deliver_bytes += len;
             }
         }
@@ -2816,7 +2844,7 @@ static void handle_fbk(struct flow *f, const u8 *body)
     if (fb.flags & TBT_FEC_FBK_F_CFG_ACK)
         f->tx_ready_at_ns = 0;
     if (fb.flags & TBT_FEC_FBK_F_CFG_NACK)
-        f->dead = true;
+        flow_abort(f); /* the peer refused this flow's shape: reset the app */
     f->peer_m_target = fb.m_target;
     f->peer_n_target = fb.n_current;
 }
@@ -3001,22 +3029,40 @@ static bool flow_tx_block_credit_ok(const struct flow *f)
     return outstanding < limit;
 }
 
-/* Close the local application socket without discarding the FEC flow: the
- * peer may still NACK a block this side sent. The replay ring lives until
- * the ACK frontier or the close timeout. */
-static void flow_app_close(struct flow *f)
+/* This stream is over in both directions: the peer reset it, or the local
+ * application aborted it (a write failed, EPOLLERR/EPOLLHUP, or its receive
+ * buffer overflowed because it stopped reading). Tell the peer with an RST
+ * and close the app socket with SO_LINGER 0 so the application sees
+ * ECONNRESET immediately instead of a clean FIN for a transfer that never
+ * completed.
+ *
+ * A legitimate half-close is not this path: EOF from the app sends FIN in
+ * flow_app_read() and keeps the flow for the peer's remaining bytes.
+ *
+ * The flow is only marked dead here. flow_tick() owns the release, because
+ * this runs inside the RX delivery loop that still holds f->rx blocks. */
+static void flow_abort(struct flow *f)
 {
     struct engine *e = f->e;
 
+    if (!f || f->dead)
+        return;
+    logmsg(e,
+           "tbt_client: flow %llu abort near=%d fin_sent=%d fin_recv=%d tx=%llu ack=%llu out=%zu/%zu\n",
+           (unsigned long long)f->sid, f->near, f->fin_sent, f->fin_recv,
+           (unsigned long long)f->tx_seq,
+           (unsigned long long)f->tx_ack_next, f->out_len, f->out_off);
+    f->dead = true;
+    (void)flow_send_rst(f);
     if (f->app_fd >= 0)
     {
+        struct linger lg = { .l_onoff = 1, .l_linger = 0 };
+
+        (void)setsockopt(f->app_fd, SOL_SOCKET, SO_LINGER, &lg, sizeof(lg));
         ep_del(e, f->app_fd);
         close(f->app_fd);
         f->app_fd = -1;
     }
-    f->app_eof = true;
-    flow_tx_finish(f);
-    (void)flow_send_fin(f);
 }
 
 static void flow_app_read(struct flow *f)
@@ -3037,8 +3083,7 @@ static void flow_app_read(struct flow *f)
         {
             if (flow_tx_feed(f, f->rbuf, (size_t)n))
             {
-                (void)flow_send_rst(f);
-                flow_free(e, f);
+                flow_abort(f);
                 return;
             }
             continue;
@@ -3062,7 +3107,9 @@ static void flow_app_read(struct flow *f)
             return;
         if (errno == EINTR)
             continue;
-        flow_app_close(f);
+        /* ECONNRESET/ECONNABORTED/EPIPE: the application aborted the
+         * connection mid-stream, so the peer must learn it now. */
+        flow_abort(f);
         return;
     }
 }
@@ -3079,7 +3126,10 @@ static void flow_target_event(struct flow *f, uint32_t events)
         if (getsockopt(f->app_fd, SOL_SOCKET, SO_ERROR, &soerr, &slen) ||
             soerr)
         {
-            flow_free(e, f);
+            /* The target refused or the connect failed: the near side is
+             * still waiting for the stream, so reset it instead of
+             * disappearing. */
+            flow_abort(f);
             return;
         }
         f->target_connecting = false;
@@ -3092,20 +3142,23 @@ static void flow_target_event(struct flow *f, uint32_t events)
     if (events & (EPOLLIN | EPOLLRDHUP))
         flow_app_read(f);
     if (events & (EPOLLERR | EPOLLHUP))
-    {
-        if (f->target_connecting)
-            flow_free(e, f);
-        else
-            flow_app_close(f);
-    }
+        /* Both roles abort here: a target connect that failed, or an
+         * application that reset its side. This is not the half-close case
+         * (EOF arrives as EPOLLRDHUP and is handled by flow_app_read()). */
+        flow_abort(f);
 }
 
 static void flow_tick(struct flow *f, u64 now)
 {
     struct engine *e = f->e;
 
+    /* A flow aborted by flow_abort() is released here, never at the abort
+     * site: the RX delivery loop may still hold its block planes. */
     if (f->dead)
+    {
+        flow_free(e, f);
         return;
+    }
     if (!f->open_sent && e->up_count && (e->near || f->app_fd >= 0))
     {
         (void)flow_send_open(f, !e->near);
@@ -3132,6 +3185,8 @@ static void flow_tick(struct flow *f, u64 now)
             (void)flow_send_fbk(f, 0, 1);
     }
     flow_out_flush(f);
+    if (f->dead)
+        return; /* the flush aborted on a dead app; release on the next tick */
     flow_fin_maybe(f);
     if (!f->tx_finished && f->tx_activity_ns &&
         now - f->tx_activity_ns >= TBT_TX_IDLE_SEAL_NS &&
@@ -3282,7 +3337,11 @@ static int handle_record(struct engine *e, struct carrier *c, const u8 *buf,
         struct flow *f = flow_find(e, tbt_hdr_sid(&rec.hdr));
 
         if (f)
-            flow_free(e, f);
+            /* An RST ends the stream in both directions: reset the app and
+             * answer on the wire. A plain free closed the app socket with
+             * FIN and left mihomo reading a truncated transfer as if it had
+             * completed. */
+            flow_abort(f);
         return 0;
     }
     case TBT_F_RETIRE:

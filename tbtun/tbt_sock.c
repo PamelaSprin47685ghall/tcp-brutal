@@ -898,10 +898,11 @@ static bool tbt_sid_in_use_locked(struct tbt_session *sess, u64 sid)
 }
 
 /* A new stream may arrive while the previous flow is still live only because
- * its stream has not detached yet. If that old stream has already seen the
- * peer FIN (or is a tombstone), stop it now so its flow is released and the
- * sequential stream can admit; a genuinely concurrent live stream is left
- * alone and the new one is refused. */
+ * its stream has not detached yet. If that old stream has already finished its
+ * direction (peer FIN delivered, or FIN seen in the grouped modes that always
+ * accepted it), or is dead or a tombstone, stop it now so its flow is
+ * released and the sequential stream can admit; a genuinely concurrent live
+ * stream is left alone and the new one is refused. */
 static bool tbt_fec_retire_closing(struct tbt_session *sess)
 {
     struct tbt_fec_flow *f;
@@ -909,9 +910,7 @@ static bool tbt_fec_retire_closing(struct tbt_session *sess)
     u64 sid;
     bool old = false;
 
-    /* SC-LDPC shares one plane, so there is no group to reclaim and no
-     * reason to kill a live stream when another connection arrives. */
-    if (!sess || sess->fec_sclc)
+    if (!sess)
         return false;
     spin_lock(&sess->lock);
     f = sess->fec_primary;
@@ -922,9 +921,24 @@ static bool tbt_fec_retire_closing(struct tbt_session *sess)
     st = tbt_stream_get(sess, sid, false, false);
     if (!st)
         return false;
-    old = READ_ONCE(st->rx_fin_seen) ||
-          READ_ONCE(st->state) == TBT_ST_DEAD ||
+    old = READ_ONCE(st->state) == TBT_ST_DEAD ||
           READ_ONCE(st->tombstone_until_ns);
+    if (!old)
+    {
+        /* The limit is the flow count, not the group count: SC-LDPC admits one
+         * flow per session exactly like the grouped modes (tbt_fec_flow_admit
+         * returns -ENOSPC while n_fec_flows is non-zero). Skipping the
+         * reclaim in SC-LDPC never protected the live plane; it only made the
+         * successor wait out the close window and then be refused.
+         *
+         * The grouped modes reclaim a group bitmap and have always retired a
+         * stream as soon as the peer's FIN was seen. SC-LDPC's one plane is
+         * exclusive, so keep a FIN-seen stream with a queued tail alive until
+         * the FIN is delivered, or the reclaim itself would truncate the
+         * download the application is still reading. */
+        old = READ_ONCE(st->rx_fin_done) ||
+              (!sess->fec_sclc && READ_ONCE(st->rx_fin_seen));
+    }
     if (old)
     {
         if (READ_ONCE(st->state) != TBT_ST_DEAD)

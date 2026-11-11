@@ -1215,7 +1215,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                 seq_printf(m, "tunnel %llu c9 fec_proto_fail=%llu "
                               "fec_hdr_crc_fail=%llu fec_payload_crc_fail=%llu "
                               "fec_short_tx=%llu fec_short_unknown=%llu "
-                              "fec_stream_refused=%llu "
+                              "fec_stream_refused=%llu fec_refused_rst=%llu "
                               "bind_drop_no_stream=%llu "
                               "fec_drop_window=%llu fec_drop_sid=%llu fec_drop_crypto=%llu "
                               "fec_ack_tx=%llu fec_ack_rx=%llu "
@@ -1226,6 +1226,7 @@ static int tbt_show_stats(struct seq_file *m, void *v)
                            tbt_stat_read(&s->fec_short_tx),
                            tbt_stat_read(&s->fec_short_unknown),
                            tbt_stat_read(&s->fec_stream_refused),
+                           tbt_stat_read(&s->fec_refused_rst),
                            tbt_stat_read(&s->bind_drop_no_stream),
                            tbt_stat_read(&s->fec_drop_window),
                            tbt_stat_read(&s->fec_drop_sid),

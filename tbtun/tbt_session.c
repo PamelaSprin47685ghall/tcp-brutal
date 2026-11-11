@@ -1149,15 +1149,35 @@ static struct tbt_fec_flow *tbt_session_open_flow(struct tbt_session *sess,
     return flow;
 }
 
+/* An OPEN this side adopted but cannot serve is answered with one RST on the
+ * path it arrived on, and the adopted far_sid is withdrawn. Without that
+ * answer the near side cannot tell "still opening" from "refused" and waits
+ * for its application's own connect timeout (measured: 30 s on a refused
+ * mihomo stream). */
+static void tbt_session_refuse_open(struct tbt_session *sess, u16 path,
+                                    u64 sid, bool adopted)
+{
+    if (adopted)
+    {
+        spin_lock(&sess->lock);
+        if (READ_ONCE(sess->far_sid) == sid)
+            WRITE_ONCE(sess->far_sid, 0);
+        spin_unlock(&sess->lock);
+    }
+    if (!tbt_tx_refuse_open(sess, path, sid, GFP_KERNEL))
+        atomic64_inc(&sess->fec_refused_rst);
+}
+
 /* Bind one frame's sid to the session. OPEN may create the stream and, on a
  * FEC session, the flow its leading 32-byte bitmap describes. A repeated OPEN is
  * idempotent only when it names the groups the flow already owns. DATA, FIN
- * and RST never create a stream.
+ * and RST never create a stream. `path` is the carrier the frame arrived on;
+ * a refused OPEN answers there.
  *
  * The flow admission allocates its planes with GFP_KERNEL, so this runs in
  * the carrier RX work item, never in softirq. */
 int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
-                         const u8 *body, u16 len)
+                         const u8 *body, u16 len, u16 path)
 {
     bool near = sess->tunnel->cfg.role == TBT_ROLE_NEAR;
     bool adopt = false, drop = false, tombstone_open = false;
@@ -1321,13 +1341,16 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
                 if (err == -EPROTO)
                     return TBT_BIND_BAD;
                 atomic64_inc(&sess->fec_stream_refused);
+                tbt_session_refuse_open(sess, path, sid, adopt);
                 return TBT_BIND_DROP;
             }
             if (!flow)
             {
                 /* The flow vanished between the admission race and the
-                 * lookup: a stream without one would have no FEC plane. */
+                 * lookup: a stream without one would have no FEC plane, and
+                 * the near side still holds the OPEN unanswered. */
                 atomic64_inc(&sess->bind_drop_no_stream);
+                tbt_session_refuse_open(sess, path, sid, adopt);
                 return TBT_BIND_DROP;
             }
         }

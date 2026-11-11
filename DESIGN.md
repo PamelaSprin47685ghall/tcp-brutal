@@ -2458,7 +2458,7 @@ cannot silently lose its atomicity again.
 | streams | `streams streams_active n_streams n_pending` |
 | c6 | `c6 holes_declared holes_repaired holes_unrecoverable rx_max_stall_us hole_checks gate_fail depth_fail time_fail` |
 | c8 | `c8 profile_mismatch http_parse_err http_status_err http_req http_resp pad_tx drip_tx` |
-| c9 | `c9 fec_proto_fail fec_hdr_crc_fail fec_payload_crc_fail fec_short_tx fec_short_unknown fec_stream_refused bind_drop_no_stream fec_drop_window fec_drop_crypto` |
+| c9 | `c9 fec_proto_fail fec_hdr_crc_fail fec_payload_crc_fail fec_short_tx fec_short_unknown fec_stream_refused fec_refused_rst bind_drop_no_stream fec_drop_window fec_drop_crypto` |
 | c10 | `c10 fec_decode_blocks fec_decode_recovered fec_decode_nomem fec_deliver_nomem fec_deliver_dup fec_deliver_ooo fec_deliver_bad fec_dup_share fec_late_share fec_late_data fec_pad_share fec_epoch_conflict fec_slot_past_cut fec_fin_bad fec_ack_bad fec_tx_share_gap fec_empty_block` |
 | c11 | `c11 fec_nack_tx fec_nack_rx fec_nack_retx fec_nack_drop fec_nack_bad fec_replay_hit fec_replay_miss fec_nack_retx_bytes fec_replace_retx_bytes fec_nack_lat_ns fec_nack_lat_max_ns fec_nack_repair_ns fec_nack_repair_max_ns fec_reset_tcp_failed fec_reset_user fec_wait_carrier fec_backpressure` |
 | c5 | `c5 dup_tx dup_used dup_suppressed dup_same_path inflate_ppm dup_bytes` |

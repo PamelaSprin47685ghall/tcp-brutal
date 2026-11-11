@@ -154,6 +154,14 @@ and moves independently of the module version.
   `setsockopt(TCP_CONGESTION)` on a carrier socket; it is never written to
   `net.ipv4.tcp_congestion_control` and never reaches a socket this module did
   not create.
+- `fec_refused_rst` in the `c9` stats line: refused OPENs that were answered
+  with an RST on the path they arrived on. It tracks `fec_stream_refused`;
+  a refusal without an answer is the defect, not the counter.
+- QEMU probe T: the deployed pair (userspace `tbt_client` near, kernel far) in
+  one guest. It holds one stream, requires a second OPEN to be refused with an
+  RST in under 3 s, and then requires the far to release the closed stream and
+  accept the next connection. `tests/qemu/run.sh` builds and adds
+  `/bin/tbt_client`; run it with `--probes T`.
 - `tbtun/tbt_cc.c`: delivery bandwidth as a tumbling maximum over ten RTTs of
   the `rate_sample`, pacing at `max_bw / (1 - p)` with `p` from the FEC
   feedback path (module parameter `loss_ppm` pins it), and `ssthresh` /
@@ -312,6 +320,42 @@ and moves independently of the module version.
   `-EBUSY` (`TCP: bbr already registered or non-unique key`), so the module
   could not load at all with the default; `carrier_cc` still selects bbr by
   default, and `carrier_cc=tbtcc` opts into the module's algorithm.
+- A far side that refuses an OPEN because no FEC flow is free (`-ENOSPC`,
+  `fec_stream_refused`) now answers it with one `TBT_F_RST(sid)` on the path
+  the OPEN arrived on, and withdraws the `far_sid` it had adopted. The silent
+  drop left the near side unable to tell "still opening" from "refused": it
+  sent no DATA (the near engine waits for the OPEN echo) and the application
+  waited out its own handshake timeout — 30 s on the `HKG0 V6` run. One copy
+  per OPEN copy keeps the answer proportional to the OPEN wave; answering on
+  every carrier would turn 256 OPEN copies into 65k RSTs. The near kernel
+  already resets its accepted socket on a received RST; the userspace client
+  now does the same (below).
+- The userspace client encoded every record with
+  `tbt_http_fec_chunk_encode()`, which refuses anything shorter than the
+  48-byte FEC header. A `TBT_F_RST` is a 32-byte session record, so the
+  encoder returned 0, `carrier_send_record()` returned `-EINVAL`, and no RST
+  could ever leave the client — the abort paths that already called
+  `flow_send_rst()` were dead code. Session records (HELLO/OPEN/FIN/RST/PAD)
+  now use `tbt_http_frame_encode()`, the same 32-byte-header container the
+  kernel's `tbt_carrier_xmit()` writes; FEC records keep the FEC encoder.
+- The userspace client now tells an abort from a half-close. EOF from the
+  application still sends FIN (the peer's remaining bytes keep flowing); a
+  read error, `EPIPE`/`ECONNRESET` on a downlink write, `EPOLLERR`/`EPOLLHUP`,
+  a peer `TBT_F_RST`, a refused flow shape and a failed target connect all
+  call `flow_abort()`: it sends `TBT_F_RST`, closes the app socket with
+  `SO_LINGER 0` so the application sees `ECONNRESET` immediately, and marks
+  the flow dead. `flow_tick()` releases the slot on the next pass because the
+  abort may run inside the RX delivery loop that still holds the block
+  planes. Previously `flow_app_close()` sent a stream-ordered FIN and kept
+  the flow: with the upload block incomplete, the far's FIN could never
+  complete, so its target stayed open with `fin_w=0, tgt_state=1` until
+  `close_hard_cap_ms` (600 s) and every later OPEN was refused.
+- `tbt_fec_retire_closing()` no longer skips SC-LDPC. The session admits one
+  flow in every mode (`tbt_fec_flow_admit()` returns `-ENOSPC` while
+  `n_fec_flows` is non-zero), so the skip did not protect a live plane; it
+  only made a successor wait out the close window and then be refused. The
+  existing "peer FIN seen / dead / tombstoned" predicate still leaves a
+  genuinely live stream untouched.
 
 ## [0.7.3] - 2026-11-11
 

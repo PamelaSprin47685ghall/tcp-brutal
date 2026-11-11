@@ -119,6 +119,19 @@ if [ -f "$root/host/tbt_flood.c" ]; then
     bins="$bins --bin $root/host/tbt_flood"
 fi
 
+# Probe T's near endpoint: the 090 deployment is the userspace client in front
+# of the kernel far, and only that pair can drive an OPEN the far refuses for
+# want of a free flow.
+if [ -f "$root/host/tbt_client_main.c" ]; then
+    if [ ! -x "$root/host/tbt_client" ] ||
+        [ "$root/host/tbt_client_engine.c" -nt "$root/host/tbt_client" ] ||
+        [ "$root/host/tbt_client_main.c" -nt "$root/host/tbt_client" ]; then
+        make -C "$root" host/tbt_client >&2 ||
+            die "cannot build $root/host/tbt_client"
+    fi
+    bins="$bins --bin $root/host/tbt_client"
+fi
+
 # The probe list travels as a file in the image: /proc/cmdline is empty in this
 # guest (the kernel accepts tbt_probes= but does not publish it), and a file is
 # the same channel on every kernel.

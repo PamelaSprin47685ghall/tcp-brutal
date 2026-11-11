@@ -567,6 +567,36 @@ int tbt_tx_rst(struct tbt_session *sess, struct tbt_stream *st, gfp_t gfp)
     return queued ? queued : err;
 }
 
+/* Refuse an OPEN that named an sid this side could not serve. There is no
+ * stream to own the copy, so the frame is session-level (st == NULL) and the
+ * pump treats it like HELLO: the path in the header decides where it goes.
+ *
+ * Exactly one copy is queued, on the path the OPEN arrived on. The near side
+ * sends the same OPEN on every carrier, so each copy answers on its own path
+ * and the refusal wave is proportional to the OPEN wave; answering on every
+ * carrier instead would multiply 256 OPEN copies into 65k RSTs. */
+int tbt_tx_refuse_open(struct tbt_session *sess, u16 path, u64 sid, gfp_t gfp)
+{
+    struct tbt_carrier *c;
+    int err;
+
+    if (!sess || path >= sess->n_car)
+        return -EINVAL;
+    c = READ_ONCE(sess->car[path]);
+    if (!c || !READ_ONCE(c->hello_sent) || atomic_read(&c->stopping))
+        return -ENOTCONN;
+    err = tbt_tx_control_pinned(sess, NULL, path, TBT_F_RST, sid, 0, NULL, 0,
+                                false, gfp);
+    if (err)
+    {
+        if (err == -ENOMEM)
+            atomic64_inc(&sess->dbg_alloc_fail);
+        return err;
+    }
+    tbt_tx_wake(sess);
+    return 0;
+}
+
 // ---------------------------------------------------------------------------
 // Retention and the send window
 
