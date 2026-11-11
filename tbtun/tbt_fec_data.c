@@ -3407,7 +3407,7 @@ static void tbt_fec_ack(struct tbt_session *sess, struct tbt_fec_flow *f,
         struct tbt_fec_rx *rx = f->rx;
 
         a.credit_packets = tbt_fec_credit_packets(
-            rx->groups, tbt_fec_frontier_n(rx, next_deliver),
+            rx->groups, tbt_fec_frontier_n(rx, READ_ONCE(rx->next_super)),
             rx->replay_k, rx->slots,
             tbt_fec_credit_max_packets_dir(sess, rx->groups > 1));
         /* The peer uses this as the replay round trip: a share asked again
