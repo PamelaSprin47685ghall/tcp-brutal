@@ -2023,6 +2023,26 @@ static void tbt_tx_stall_check(struct tbt_session *sess,
          * one run in three, age_us=18446744073709519). */
         would_kill = start && now > start && ack < READ_ONCE(st->tx_seq) &&
                      now - start > budget;
+        /* Peer half-close with our TX still unacked: the reverse direction
+         * is alive even if this instant shows no ACK movement. Do not reset
+         * the stream; re-arm the FEC pump so a missed wake cannot turn into a
+         * truncated response. The close budget and the receiver's own reset
+         * remain the true bound. */
+        if (would_kill &&
+            tbt_tx_half_close_hold(READ_ONCE(st->rx_fin_done),
+                                   ack < READ_ONCE(st->tx_seq)))
+        {
+            atomic64_inc(&sess->tx_stall_suppressed_fec);
+            if (debug >= 2)
+                pr_info_ratelimited("tbtun: HALFCLOSEHOLD sid=%llu ack=%llu txseq=%llu age_us=%llu\n",
+                                    (unsigned long long)st->sid, ack,
+                                    READ_ONCE(st->tx_seq),
+                                    (now - start) / NSEC_PER_USEC);
+            if (sess->fec)
+                tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+            start = now;
+            would_kill = false;
+        }
         /* FEC repair is progress even when the tunnel ack has not moved: the
          * receiver is asking for and receiving replay shares. Hold the kill,
          * but only inside the hard no-progress cap; a repair that never
