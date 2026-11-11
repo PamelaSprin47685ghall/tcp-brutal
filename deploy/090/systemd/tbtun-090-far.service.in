@@ -1,0 +1,22 @@
+# deploy/090/systemd/tbtun-090-far.service.in
+# Rendered by deploy/090/Makefile for tbtun @TBTUN_COMMIT@.
+# Far side. The unit loads the module and applies the tunnel line once; the
+# module keeps its state after the unit reaches active (RemainAfterExit=yes).
+# Requires= makes a stopped mihomo VLESS listener stop this tunnel too: a
+# tunnel without its target listener cannot carry a stream.
+[Unit]
+Description=tbtun 0.9.0 kernel tunnel (far side)
+After=mihomo-090-far.service
+Requires=mihomo-090-far.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/sbin/modprobe tbtun
+ExecStart=/bin/sh -c 'cat /etc/tbtun-090.conf > /proc/net/tbtun/config'
+Restart=on-failure
+RestartSec=2
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

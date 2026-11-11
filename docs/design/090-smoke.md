@@ -4,6 +4,14 @@
 适用基线：`w-090-design`（0.8 用户态客户端 + 0.8 内核模块）。
 禁止在 near/far 生产环境执行；下面所有命令只用于一对实验机。
 
+**配置冻结**：全程使用 `adaptive=off`。Route-A 的 NACK 修复与 `adaptive=on`
+的 KVM 验证完成前，不要在本清单里把它翻成 `adaptive=on`；那会把 FEC 形状
+变量混进 mihomo 集成验收。
+
+**加密基线**：`/etc/tbtun-090.conf` 必须带两端一致的 `crypto_key=`（64 hex）
+与 `nonce=`（32 hex）。未配置 `crypto_key` 时 near 会在每个 HELLO 里广播会话
+密钥；本清单不覆盖那种形态。下面只比较这两个字段的哈希，不打印密钥。
+
 拓扑与端口见 `docs/design/090-packaging.md`。本文的“层”只有三种：
 
 - **M**：mihomo 配置/协议层（VLESS、smux、XUDP 的解析与线格式）。
@@ -54,6 +62,16 @@ ssh "$FAR" 'mihomo -t -f /etc/mihomo-090/config.yaml'
 ss -lntp | grep -E ':(7890|19000)\b'
 ssh "$FAR" 'ss -lntp | grep -E ":(19001|19002)\b"; cat /proc/net/tbtun/config'
 
+# 两端 crypto_key / nonce 一致；只比较哈希
+for k in crypto_key nonce; do
+  a=$(ssh "$NEAR" "sed -n 's/.*$k=\([0-9a-f]*\).*/\1/p' /etc/tbtun-090.conf | sha256sum")
+  b=$(ssh "$FAR"  "sed -n 's/.*$k=\([0-9a-f]*\).*/\1/p' /etc/tbtun-090.conf | sha256sum")
+  [ "$a" = "$b" ] || echo "$k: near/far differ"
+done
+
+# QUIC 规则被配置接受（不是被静默忽略）
+grep -q 'AND,((NETWORK,UDP),(DST-PORT,443)),REJECT' /etc/mihomo-090/config.yaml
+
 # mux 确实被配置接受（不是静默关闭）
 curl -s http://127.0.0.1:9090/proxies/tbtun \
   | python3 -c 'import json,sys; p=json.load(sys.stdin); print("type",p.get("type"),"smux",p.get("smux"))'
@@ -64,6 +82,7 @@ curl -s http://127.0.0.1:9090/proxies/tbtun \
 - 两端 `mihomo -v` 版本相同。
 - 两个 `-t` 都打印 `test is successful`。
 - near 有 `:7890`、`:19000`；far 有 `:19001`、`:19002`。
+- 两端的 `crypto_key` 与 `nonce` 哈希相同；near 配置含 QUIC `REJECT` 行。
 - `/proxies/tbtun` 输出 `smux True`。
 
 失败证据：两份 `config.yaml`、`mihomo -v`、`ss -lntp`、
@@ -159,6 +178,10 @@ near mihomo 日志；`/proc/net/tbtun/stats`。
 
 默认配置是 `only-tcp: false` + `max-connections: 1`：UDP 由 smux 在同一条 TCP
 连接上承载，不触发 VLESS XUDP。本步验证产品默认路径。
+
+**只测 DNS 的 UDP:53。** near 的规则把 `UDP:443`（QUIC）显式 `REJECT`，让
+浏览器立即回落到 HTTP/2 over TCP。把查询改成 443 会得到拒绝，那是设计行为，
+不是 smux 或 tbtun 的故障。
 
 把下面的脚本存成 `/tmp/tbt-udp.py`，然后执行：
 
@@ -307,6 +330,9 @@ FEC flow（`README.md:661-662`），第二条 TCP 必然被拒。记录两次连
 触发方式：重启 **near mihomo**，让 near→19000 的 tbtun 应用流关闭，同时 smux
 会话消失；随后新请求必须建立新的 tbtun 流与新的 smux 会话。
 
+本步**不重启 `tbt_client`**：那样会命中 §8.5 的 `crypto nonce changed` 阻断，
+把会话未回收与重连行为混在一起。客户端重启单独记 BLOCKED。
+
 ```sh
 # 记录基线
 ssh "$FAR" 'grep -o "fec_stream_refused=[0-9]*" /proc/net/tbtun/stats'
@@ -380,6 +406,15 @@ ssh "$FAR" 'dmesg | grep -i fec_stream_refused || true'
    （`vless.go:369-404`），far 只允许一条 FEC flow（`README.md:661-662`），
    第二条被 `fec_stream_refused` 拒绝。S4b 因此预期 BLOCKED；产品默认保持
    `only-tcp: false`，UDP 走 smux。
+5. **near 客户端重启后的 `crypto nonce changed`。** 重启 `tbt_client` 会新建
+   session 与新的 `crypto_tx_nonce`；若 far 的旧 session 仍未回收，新 HELLO
+   会被 `-EPROTO` 拒绝，far 日志是 `crypto nonce changed`。PSK session
+   re-incarnation 落地前记为 BLOCKED，不要靠反复重启把它“跑绿”。S5 只重启
+   near mihomo，不动 `tbt_client`，所以不触发这一条；单独重启客户端才会。
+6. **bufferbloat 调优。** near 父监听 socket 是 8 MiB，FEC 环是 16 MiB。长 RTT
+   下排队延迟会明显膨胀；S2 的慢与 RTT 抖动不要全部归因于吞吐缺陷，记录
+   `/proc/net/tbtun/stats` 与 `ss -ti` 的 RTT 一并判断。
 
-在这四项关闭前，本清单只能证明“装配正确、配置被接受、单流功能可用”，不能证明
-0.9.0 的端到端产品目标。
+`adaptive=off` 是本次验收的固定前提：Route-A 的 NACK 修复与 `adaptive=on` 的
+KVM 验证完成前，不把自适应形状纳入本清单。在上述各项关闭前，本清单只能证明
+“装配正确、配置被接受、单流功能可用”，不能证明 0.9.0 的端到端产品目标。

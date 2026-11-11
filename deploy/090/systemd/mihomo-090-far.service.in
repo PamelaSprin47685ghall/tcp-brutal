@@ -1,0 +1,19 @@
+# deploy/090/systemd/mihomo-090-far.service.in
+# Rendered by deploy/090/Makefile for tbtun @TBTUN_COMMIT@.
+# Far side. The VLESS listener binds 127.0.0.1:19001, which the module dials
+# as target= for every stream; tbtun-090-far.service starts after this unit.
+[Unit]
+Description=mihomo 0.9.0 VLESS listener (far side)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/mihomo -d /etc/mihomo-090 -f /etc/mihomo-090/config.yaml
+WorkingDirectory=/etc/mihomo-090
+Restart=on-failure
+RestartSec=2
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
