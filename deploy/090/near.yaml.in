@@ -15,6 +15,12 @@
 # Trap 5: without max-connections: 1, sing-mux opens a second TCP session once
 #         the stream count reaches min-streams (sing-mux/client.go:180-189).
 #         That also breaks the one-FEC-flow limit.
+# Trap 6: browser QUIC (UDP:443) must not enter smux. QUIC has its own
+#         congestion control and loss recovery; carrying it inside a reliable
+#         ordered smux stream over one FEC flow adds a second congestion
+#         controller and head-of-line blocking on top. REJECT makes the browser
+#         fall back to HTTP/2 over TCP immediately. DNS and other UDP ports are
+#         not matched and still ride smux.
 
 mixed-port: @MIXED_PORT@
 external-controller: 127.0.0.1:9090
@@ -44,4 +50,5 @@ proxy-groups:
     proxies: [tbtun, DIRECT]
 
 rules:
+  - AND,((NETWORK,UDP),(DST-PORT,443)),REJECT
   - MATCH,PROXY

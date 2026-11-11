@@ -1,0 +1,20 @@
+# deploy/090/systemd/mihomo-090-near.service.in
+# Rendered by deploy/090/Makefile for tbtun @TBTUN_COMMIT@.
+# Near side. Requires= keeps the hard order: mihomo's VLESS outbound dials
+# 127.0.0.1:19000 and fails until tbt_client listens there.
+[Unit]
+Description=mihomo 0.9.0 proxy (near side)
+Wants=network-online.target
+After=network-online.target tbt-client-090.service
+Requires=tbt-client-090.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/mihomo -d /etc/mihomo-090 -f /etc/mihomo-090/config.yaml
+WorkingDirectory=/etc/mihomo-090
+Restart=on-failure
+RestartSec=2
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,18 @@
+# deploy/090/systemd/tbt-client-090.service.in
+# Rendered by deploy/090/Makefile for tbtun @TBTUN_COMMIT@.
+# Near side only. The client must listen before mihomo dials 127.0.0.1:19000,
+# which is why mihomo-090-near.service lists this unit in After= and Requires=.
+[Unit]
+Description=tbtun 0.9.0 userspace client (near side)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/tbt_client --config /etc/tbtun-090.conf
+Restart=on-failure
+RestartSec=2
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

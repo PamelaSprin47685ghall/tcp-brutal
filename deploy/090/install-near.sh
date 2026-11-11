@@ -30,14 +30,55 @@ install -m 0755 "$here/tbt_client" /usr/local/bin/tbt_client
 install -m 0644 "$here/config.yaml" /etc/mihomo-090/config.yaml
 install -m 0644 "$here/tbtun.conf"  /etc/tbtun-090.conf
 
+# Optional systemd units. Minimal images (Alpine, OpenWrt) have no systemd;
+# the pid-file start below stays the supported smoke path there.
+if [ -d "$here/systemd" ] && [ -d /run/systemd/system ] && \
+   command -v systemctl >/dev/null 2>&1; then
+    for u in "$here"/systemd/*.service; do
+        [ -f "$u" ] || continue
+        install -m 0644 "$u" /etc/systemd/system/
+    done
+    systemctl daemon-reload
+    echo "install-near: systemd units installed"
+    echo "install-near: enable with: systemctl enable --now tbt-client-090 mihomo-090-near"
+fi
+
+# A systemd-managed deployment must not race pid-file instances of the same
+# two binaries. Checked only when --start would spawn them.
+systemd_owns() {
+    [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1 && \
+        systemctl is-active --quiet "$1" 2>/dev/null
+}
+
 port=$(sed -n 's/.*listen=127\.0\.0\.1:\([0-9][0-9]*\).*/\1/p' /etc/tbtun-090.conf | head -n 1)
 [ -n "$port" ] || { echo "install-near: no listen=127.0.0.1:PORT in tbtun.conf" >&2; exit 1; }
+
+# Is one TCP port in state LISTEN? Prefer ss; minimal images ship without
+# iproute2, so fall back to the kernel's own table: /proc/net/tcp field 2 is
+# HEXADDR:HEXPORT and field 4 is the state, where 0A means LISTEN.
+port_is_listening() {
+    p=$1
+    if command -v ss >/dev/null 2>&1; then
+        ss -lnt 2>/dev/null | awk -v suffix=":$p" \
+            'length($4) >= length(suffix) && substr($4, length($4) - length(suffix) + 1) == suffix { found = 1 }
+             END { exit found ? 0 : 1 }'
+        return $?
+    fi
+    hex=$(printf '%04X' "$p")
+    for f in /proc/net/tcp /proc/net/tcp6; do
+        [ -r "$f" ] || continue
+        awk -v suffix=":$hex" \
+            '$4 == "0A" && length($2) >= length(suffix) && substr($2, length($2) - length(suffix) + 1) == suffix { found = 1 }
+             END { exit found ? 0 : 1 }' "$f" && return 0
+    done
+    return 1
+}
 
 wait_port() {
     p=$1
     n=${2:-50}
     while [ "$n" -gt 0 ]; do
-        if ss -lnt 2>/dev/null | awk '{print $4}' | grep -q ":$p\$"; then
+        if port_is_listening "$p"; then
             return 0
         fi
         sleep 0.2
@@ -47,6 +88,11 @@ wait_port() {
 }
 
 if [ "$start" -eq 1 ]; then
+    if systemd_owns tbt-client-090 || systemd_owns mihomo-090-near; then
+        echo "install-near: systemd owns this deployment; not starting pid-file instances"
+        echo "install-near: roll out with: systemctl restart tbt-client-090 mihomo-090-near"
+        exit 0
+    fi
     # 1. userspace client listens on 19000
     # tbt_client accepts --config FILE only as argv[1]; the file's first
     # non-comment line is the tunnel line (host/tbt_client_main.c:128-170).
