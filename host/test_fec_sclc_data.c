@@ -171,12 +171,12 @@ static void case_cfg_roundtrip(void)
     c.epoch = 1;
     c.n = 8;
     c.m = 24;
-    c.w = 16;
-    c.k = 128;
+    c.w = 8;
+    c.k = 64;
     c.d = 64;
     c.codec_variant = 2;
-    c.L = 16;
-    c.block = 128;
+    c.L = 8;
+    c.block = 64;
     c.rate_ppm = 250000;
     c.flags = TBT_FEC_CFG_F_APPLY | TBT_FEC_CFG_F_INIT;
     c.groups = 8;
@@ -184,9 +184,9 @@ static void case_cfg_roundtrip(void)
     ok_int(tbt_fec_cfg_pack(&c, body), 0, "uplink CFG packs");
     memset(&out, 0, sizeof(out));
     ok_int(tbt_fec_cfg_unpack(body, 256, &out), 0, "uplink CFG unpacks");
-    ok(out.n == 8 && out.m == 24 && out.w == 16 && out.k == 128 &&
+    ok(out.n == 8 && out.m == 24 && out.w == 8 && out.k == 64 &&
            out.d == 64 && out.groups == 8 && out.codec_variant == 2 &&
-           out.L == 16 && out.block == 128 && out.rate_ppm == 250000,
+           out.L == 8 && out.block == 64 && out.rate_ppm == 250000,
        "uplink CFG round-trips");
 
     /* An RLNC body with w < k stays invalid: k=4, w=2 is not a codeword
@@ -214,7 +214,7 @@ static void case_cfg_roundtrip(void)
 }
 
 /* The receiver must take every graph parameter from the announced shape.
- * A downlink peer runs L=8, an uplink peer L=16, and the two directions of
+ * A downlink peer runs L=8, an uplink peer L=8 with block 64, and the two
  * one session legitimately differ; using the local L built the peer's codec
  * with the wrong coupling length. */
 static void case_init_shape_from_cfg(void)
@@ -222,24 +222,24 @@ static void case_init_shape_from_cfg(void)
     struct tbt_fec_cfg c;
     struct tbt_fec_sclc_shape sh;
 
-    /* Uplink announcement from a peer: variant 2, L=16, block=128, rate. */
+    /* Uplink announcement from a peer: variant 2, L=8, block=64, rate. */
     memset(&c, 0, sizeof(c));
     c.n = 8;
     c.m = 24;
     c.groups = 8;
-    c.w = 16;
-    c.k = 128;
+    c.w = 8;
+    c.k = 64;
     c.d = 64;
     c.codec_variant = 2;
-    c.L = 16;
-    c.block = 128;
+    c.L = 8;
+    c.block = 64;
     c.rate_ppm = 250000;
     memset(&sh, 0, sizeof(sh));
     ok_int(tbt_fec_sclc_shape_of_cfg(&c, 256, &sh), 0,
            "uplink INIT resolves");
     ok(sh.variant == TBT_FEC_SCLC_UP, "uplink INIT variant");
-    ok_u16(sh.block, 128, "uplink INIT block from the extension");
-    ok_u16(sh.L, 16, "uplink INIT L from the extension, not the local 8");
+    ok_u16(sh.block, 64, "uplink INIT block from the extension");
+    ok_u16(sh.L, 8, "uplink INIT L from the extension, not the local downlink L");
     ok_u16(sh.rate_256, 64, "uplink INIT rate from the split");
     ok_u16(sh.groups, 8, "uplink INIT groups");
 
@@ -274,26 +274,26 @@ static void case_init_shape_from_cfg(void)
            "RLNC body is not an SC-LDPC INIT");
 
     /* The point is the direction of the lookup: the same INIT body resolves
-     * to L=16 no matter what the receiving side configured for its own
-     * transmit codec. The resolver has no local-L input at all, so the
+     * to its own L=8/block=64 no matter what the receiving side configured
+     * for its own transmit codec. The resolver has no local-L input at all, so the
      * field failure (far built the uplink codec with its own L=8) cannot
      * recur through this path. */
     memset(&c, 0, sizeof(c));
     c.n = 8;
     c.m = 24;
     c.groups = 8;
-    c.w = 16;
-    c.k = 128;
+    c.w = 8;
+    c.k = 64;
     c.d = 64;
     c.codec_variant = 2;
-    c.L = 16;
-    c.block = 128;
+    c.L = 8;
+    c.block = 64;
     c.rate_ppm = 250000;
     memset(&sh, 0, sizeof(sh));
     ok_int(tbt_fec_sclc_shape_of_cfg(&c, 256, &sh), 0,
            "the peer INIT resolves on a downlink-configured receiver");
-    ok_u16(sh.L, 16, "and carries the peer's L, not the receiver's");
-    ok_u16(sh.block, 128, "and the peer's block");
+    ok_u16(sh.L, 8, "and carries the peer's L, not the receiver's");
+    ok_u16(sh.block, 64, "and the peer's block");
 }
 
 /* ---- downlink: one group of 128+128 --------------------------------- */

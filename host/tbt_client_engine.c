@@ -165,6 +165,8 @@ struct flow
     bool open_acked;
     bool fin_sent;
     bool fin_recv;
+    bool app_eof;
+    bool tx_finished;
     bool dead;
     bool target_connecting;
     u64 created_ns;
@@ -200,7 +202,12 @@ struct flow
     u16 rx_n, rx_m, rx_groups;
     struct rx_block rx[TBT_RX_SLOTS];
     u64 rx_next_block;
+    u64 rx_next_deliver;
     u64 rx_deliver_bytes;
+    u64 peer_fin_end;
+    bool peer_fin_end_set;
+    bool fin_applied;
+    u64 close_at_ns;
     u64 rx_last_ack_ns;
     u32 rtt_us;
 
@@ -609,7 +616,7 @@ client_sclc_new(const struct tbt_fec_sclc_shape *sh, size_t s, u64 nonce)
 }
 
 static int send_ctl_record(struct engine *e, struct flow *f, u8 type, u64 sid,
-                           u64 seq, const u8 *body, u16 len)
+                           u64 seq, u64 block_id, const u8 *body, u16 len)
 {
     struct tbt_fec_hdr h;
     u8 rec[TBT_FEC_HDR_LEN + TBT_FEC_CFG_LEN];
@@ -624,6 +631,7 @@ static int send_ctl_record(struct engine *e, struct flow *f, u8 type, u64 sid,
     h.conv = TBT_FEC_CONV;
     h.sid = sid;
     h.seq = seq;
+    h.block_id = block_id;
     if (make_record(e, &h, body, rec, &rlen))
         return -EINVAL;
     (void)f;
@@ -807,6 +815,10 @@ static void carrier_event(struct engine *e, struct carrier *c,
 
 static void flow_free(struct engine *e, struct flow *f);
 static void flow_out_flush(struct flow *f);
+static void flow_fin_maybe(struct flow *f);
+static void flow_app_close(struct flow *f);
+static void flow_tx_finish(struct flow *f);
+static int flow_send_fin(struct flow *f);
 static void flow_tick(struct flow *f, u64 now);
 static int flow_target_connect(struct flow *f, u16 port);
 static int handle_cfg(struct flow *f, const u8 *body);
@@ -878,9 +890,10 @@ static void flow_free(struct engine *e, struct flow *f)
 
     if (!f)
         return;
-    logmsg(e, "tbt_client: flow %llu free near=%d fin_sent=%d fin_recv=%d out=%zu/%zu\n",
+    logmsg(e, "tbt_client: flow %llu free near=%d fin_sent=%d fin_recv=%d tx=%llu ack=%llu out=%zu/%zu\n",
            (unsigned long long)f->sid, f->near, f->fin_sent, f->fin_recv,
-           f->out_len, f->out_off);
+           (unsigned long long)f->tx_seq,
+           (unsigned long long)f->tx_ack_next, f->out_len, f->out_off);
     f->dead = true;
     if (f->app_fd >= 0)
     {
@@ -967,19 +980,35 @@ static int flow_send_data(struct flow *f, u16 group, u16 share, u16 len,
     memset(&h, 0, sizeof(h));
     h.type = TBT_FEC_DATA;
     h.flags = last ? TBT_FEC_FF_LAST : 0;
+    if (len < TBT_FEC_S)
+    {
+        logmsg(e, "tbt_client: flow %llu short data group=%u share=%u len=%u\n",
+               (unsigned long long)f->sid, group, share, len);
+        /* 0.8.0 constant frame: the slot is always S bytes on the wire.
+         * The real length travels in win_len and the tail is zero, because
+         * the payload CRC covers the full slot. */
+        h.flags |= TBT_FEC_FF_PADDED;
+        h.win_len = len;
+        h.payload_len = TBT_FEC_S;
+        memset(plane + len, 0, TBT_FEC_S - len);
+    }
+    else
+    {
+        h.win_len = 0;
+        h.payload_len = len;
+    }
     h.share_index = share;
     h.n = (u8)f->n;
     h.m = (u8)f->m;
     h.block_id = f->tx_block;
     h.seq = f->tx_blk_seq0 + (u64)group * f->n + share;
-    h.win_len = 0;
-    h.payload_len = len;
     h.conv = TBT_FEC_CONV;
     h.sid = f->sid;
     h.reserved = group;
     if (make_record(e, &h, plane, rec, &rlen))
         return -EIO;
     (void)replay_store(f, f->tx_block, group, share, rec, rlen);
+    f->tx_last_len = len;
     f->tx_seq = h.seq + 1;
     if (!f->tx_pkt_base_set)
     {
@@ -1218,7 +1247,7 @@ static int flow_send_cfg(struct flow *f)
                        (f->tx_shape.n + f->tx_shape.m));
     if (tbt_fec_cfg_pack(&c, body))
         return -EINVAL;
-    return send_ctl_record(e, f, TBT_FEC_CFG, f->sid, 0, body, sizeof(body));
+    return send_ctl_record(e, f, TBT_FEC_CFG, f->sid, 0, 0, body, sizeof(body));
 }
 
 static int flow_send_ack(struct flow *f)
@@ -1228,16 +1257,14 @@ static int flow_send_ack(struct flow *f)
     u8 body[TBT_FEC_ACK_LEN];
 
     memset(&a, 0, sizeof(a));
-    a.next_deliver = f->rx_next_block ? f->rx_next_block * (u64)f->rx_groups *
-                                            f->rx_n
-                                    : 0;
+    a.next_deliver = f->rx_next_deliver;
     a.credit_packets = TBT_FEC_CREDIT_MAX;
     a.rtt_us = f->rtt_us ? f->rtt_us : 1000;
     a.deliver_bytes = f->rx_deliver_bytes;
     if (tbt_fec_ack_pack(&a, body))
         return -EINVAL;
     f->rx_last_ack_ns = now_ns();
-    return send_ctl_record(e, f, TBT_FEC_ACK, f->sid, 0, body, sizeof(body));
+    return send_ctl_record(e, f, TBT_FEC_ACK, f->sid, 0, 0, body, sizeof(body));
 }
 
 static int flow_send_fbk(struct flow *f, u8 flags, u32 epoch)
@@ -1285,7 +1312,7 @@ static int flow_send_fbk(struct flow *f, u8 flags, u32 epoch)
     if (tbt_fec_fbk_pack(&fb, body))
         return -EINVAL;
     f->last_fbk_ns = now;
-    return send_ctl_record(e, f, TBT_FEC_FBK, f->sid, 0, body, sizeof(body));
+    return send_ctl_record(e, f, TBT_FEC_FBK, f->sid, 0, 0, body, sizeof(body));
 }
 
 /* ------------------------------------------------------------------ *
@@ -1389,11 +1416,22 @@ static void flow_out_flush(struct flow *f)
         }
         if (n < 0 && errno == EINTR)
             continue;
-        f->dead = true;
+        flow_app_close(f);
         return;
     }
-    f->out_off = f->out_len = 0;
-    (void)ep_mod(e, f->app_fd, EPOLLIN | EPOLLRDHUP, &f->ep);
+    if (f->app_eof)
+    {
+        f->out_off = f->out_len = 0;
+        /* The read side is done and there is nothing left to write: stop
+         * polling this fd until FIN processing closes it. */
+        ep_del(e, f->app_fd);
+    }
+    else
+    {
+        f->out_off = f->out_len = 0;
+        (void)ep_mod(e, f->app_fd, EPOLLIN | EPOLLRDHUP, &f->ep);
+    }
+    flow_fin_maybe(f);
 }
 
 static int flow_out_append(struct flow *f, const u8 *data, size_t len)
@@ -1517,6 +1555,7 @@ static void flow_rx_check(struct flow *f)
         u32 slot = (u32)(f->rx_next_block % TBT_RX_SLOTS);
         struct rx_block *b = &f->rx[slot];
         u16 group;
+        u64 blk_pkts = 0;
         bool ready = true;
 
         if (!b->used || b->id != f->rx_next_block)
@@ -1539,10 +1578,13 @@ static void flow_rx_check(struct flow *f)
             u16 real = g->marker ? 0 : (g->real_set ? g->real : f->rx_n);
             u16 s;
 
+            blk_pkts += real;
             for (s = 0; s < real; s++)
             {
-                u16 len = (s + 1 == real && g->epoch) ? g->epoch
-                                                      : TBT_FEC_S;
+                u16 len = g->plen[s]
+                              ? g->plen[s]
+                              : ((s + 1 == real && g->epoch) ? g->epoch
+                                                             : TBT_FEC_S);
 
                 if (flow_out_append(f, g->buf + (size_t)s * TBT_FEC_S, len))
                 {
@@ -1552,8 +1594,10 @@ static void flow_rx_check(struct flow *f)
                 f->rx_deliver_bytes += len;
             }
         }
+        f->rx_next_deliver = b->seq0 + blk_pkts;
         f->rx_next_block = b->id + 1;
         rx_block_release(b);
+        flow_fin_maybe(f);
         (void)flow_send_ack(f);
     }
 }
@@ -1583,7 +1627,8 @@ static void flow_rx_store(struct flow *f, const struct tbt_fec_hdr *h,
     }
     memcpy(g->buf + (size_t)share * TBT_FEC_S, payload, h->payload_len);
     g->present[share] = 1;
-    g->plen[share] = h->payload_len;
+    g->plen[share] = (h->flags & TBT_FEC_FF_PADDED) ? h->win_len
+                                                    : h->payload_len;
     if (share < h->n)
         g->ndata++;
     else
@@ -1647,7 +1692,7 @@ static void flow_send_nack_group(struct flow *f, struct rx_block *b,
         return;
     b->last_nack_ns = now;
     b->nack_tries++;
-    (void)send_ctl_record(e, f, TBT_FEC_NACK, f->sid, 0, body, sizeof(body));
+    (void)send_ctl_record(e, f, TBT_FEC_NACK, f->sid, 0, b->id, body, sizeof(body));
 }
 
 static void flow_rx_nack(struct flow *f, u64 now)
@@ -1808,15 +1853,36 @@ static int handle_open(struct engine *e, struct flow *f, const u8 *body,
     return flow_target_connect(f, port);
 }
 
-static int handle_fin(struct engine *e, struct flow *f)
+/* The peer's FIN names the packet after its last DATA packet. The target
+ * write must stay open until every block up to that frontier is delivered;
+ * a FIN on the control carrier can overtake the last DATA block on the data
+ * carriers, and shutting down early silently drops that block. */
+static void flow_fin_maybe(struct flow *f)
+{
+    if (!f || f->dead || !f->fin_recv || f->fin_applied)
+        return;
+    if (f->peer_fin_end_set && f->rx_next_deliver < f->peer_fin_end)
+        return;
+    if (f->out_len != f->out_off)
+        return;
+    if (f->app_fd >= 0)
+        (void)shutdown(f->app_fd, SHUT_WR);
+    f->fin_applied = true;
+}
+
+static int handle_fin(struct engine *e, struct flow *f, const u8 *body,
+                      u16 blen)
 {
     if (!f)
         return 0;
+    if (blen >= 8)
+    {
+        f->peer_fin_end = tbt_le64(body);
+        f->peer_fin_end_set = true;
+    }
     f->fin_recv = true;
-    if (f->app_fd >= 0)
-        (void)shutdown(f->app_fd, SHUT_WR);
-    if (f->fin_sent && f->out_len == f->out_off)
-        flow_free(e, f);
+    flow_fin_maybe(f);
+    (void)e;
     return 0;
 }
 
@@ -2064,6 +2130,13 @@ static void flow_tx_finish(struct flow *f)
 {
     u16 g;
 
+    if (f->tx_finished)
+        return;
+    f->tx_finished = true;
+    logmsg(f->e, "tbt_client: flow %llu finish cur=%zu group=%u share=%u last=%llu\n",
+           (unsigned long long)f->sid, f->tx_cur_len, f->tx_group,
+           f->tx_share, (unsigned long long)f->tx_last_len);
+
     if (f->tx_cur_len)
     {
         u8 *plane = f->tx_plane +
@@ -2119,11 +2192,29 @@ static bool flow_tx_credit_ok(const struct flow *f)
     return f->tx_seq <= f->tx_ack_next + window;
 }
 
+/* Close the local application socket without discarding the FEC flow: the
+ * peer may still NACK a block this side sent. The replay ring lives until
+ * the ACK frontier or the close timeout. */
+static void flow_app_close(struct flow *f)
+{
+    struct engine *e = f->e;
+
+    if (f->app_fd >= 0)
+    {
+        ep_del(e, f->app_fd);
+        close(f->app_fd);
+        f->app_fd = -1;
+    }
+    f->app_eof = true;
+    flow_tx_finish(f);
+    (void)flow_send_fin(f);
+}
+
 static void flow_app_read(struct flow *f)
 {
     struct engine *e = f->e;
 
-    if (f->dead || f->app_fd < 0)
+    if (f->dead || f->app_fd < 0 || f->app_eof)
         return;
     for (;;)
     {
@@ -2145,16 +2236,24 @@ static void flow_app_read(struct flow *f)
         }
         if (n == 0)
         {
-            flow_tx_finish(f);
-            (void)flow_send_fin(f);
-            (void)ep_mod(e, f->app_fd, EPOLLOUT | EPOLLRDHUP, &f->ep);
+            if (!f->app_eof)
+            {
+                f->app_eof = true;
+                logmsg(e,
+                       "tbt_client: flow %llu app eof cur=%zu group=%u share=%u\n",
+                       (unsigned long long)f->sid, f->tx_cur_len,
+                       f->tx_group, f->tx_share);
+                flow_tx_finish(f);
+                (void)flow_send_fin(f);
+            }
+            (void)ep_mod(e, f->app_fd, EPOLLOUT, &f->ep);
             return;
         }
         if (errno == EAGAIN || errno == EWOULDBLOCK)
             return;
         if (errno == EINTR)
             continue;
-        flow_free(e, f);
+        flow_app_close(f);
         return;
     }
 }
@@ -2184,7 +2283,12 @@ static void flow_target_event(struct flow *f, uint32_t events)
     if (events & (EPOLLIN | EPOLLRDHUP))
         flow_app_read(f);
     if (events & (EPOLLERR | EPOLLHUP))
-        flow_free(e, f);
+    {
+        if (f->target_connecting)
+            flow_free(e, f);
+        else
+            flow_app_close(f);
+    }
 }
 
 static void flow_tick(struct flow *f, u64 now)
@@ -2202,7 +2306,7 @@ static void flow_tick(struct flow *f, u64 now)
     {
         if (f->target_connecting)
             ;
-        else if (f->app_fd >= 0)
+        else if (f->app_fd >= 0 && !f->app_eof)
         {
             (void)ep_mod(e, f->app_fd, EPOLLIN | EPOLLRDHUP, &f->ep);
             if (f->out_len > f->out_off)
@@ -2219,6 +2323,7 @@ static void flow_tick(struct flow *f, u64 now)
             (void)flow_send_fbk(f, 0, 1);
     }
     flow_out_flush(f);
+    flow_fin_maybe(f);
     if (e->cfg.verbose && now - f->last_stat_ns >= 1000000000ull)
     {
         f->last_stat_ns = now;
@@ -2232,8 +2337,17 @@ static void flow_tick(struct flow *f, u64 now)
                (unsigned long long)f->rx_deliver_bytes, f->out_len,
                f->out_off, e->up_count);
     }
-    if (f->fin_sent && f->fin_recv && f->out_len == f->out_off)
-        flow_free(e, f);
+    if (f->fin_sent && f->fin_applied)
+    {
+        /* Keep the replay ring alive until the peer acknowledged every byte
+         * this side sent. A FIN on the control carrier can arrive before the
+         * last DATA block, and a NACK for that block must still find it. The
+         * timeout is the liveness bound when the final ACK was lost. */
+        if (!f->close_at_ns)
+            f->close_at_ns = now + 10ull * 1000 * 1000 * 1000;
+        if (f->tx_ack_next >= f->tx_seq || now >= f->close_at_ns)
+            flow_free(e, f);
+    }
 }
 
 /* ------------------------------------------------------------------ *
@@ -2268,7 +2382,8 @@ static int handle_record(struct engine *e, struct carrier *c, const u8 *buf,
         return handle_open(e, flow_find(e, tbt_hdr_sid(&rec.hdr)), rec.body,
                            rec.body_len, tbt_hdr_sid(&rec.hdr));
     case TBT_F_FIN:
-        return handle_fin(e, flow_find(e, tbt_hdr_sid(&rec.hdr)));
+        return handle_fin(e, flow_find(e, tbt_hdr_sid(&rec.hdr)), rec.body,
+                          rec.body_len);
     case TBT_F_RST:
     {
         struct flow *f = flow_find(e, tbt_hdr_sid(&rec.hdr));

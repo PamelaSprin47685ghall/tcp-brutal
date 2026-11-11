@@ -69,12 +69,12 @@ static void test_size_classes(void)
 {
     /* Pin the classes the ledger quotes. If a constant moves, the table and
      * the module move together. */
-    CHECK(slab_bytes(TBT_HTTP_FEC_FRAME_MAX) == 16384);
+    CHECK(slab_bytes(TBT_HTTP_FEC_FRAME_MAX) == 2048);
     CHECK(slab_bytes(TBT_HTTP_FRAME_MAX) == 16384);
     CHECK(slab_bytes(TBT_PARSER_BUF) == 16384);
     CHECK(slab_bytes(sizeof(struct tbt_http_rx)) == 16384);
     CHECK(slab_bytes(TBT_HTTP_HDR_MAX) == 4096);
-    CHECK(slab_bytes(TBT_HTTP_FEC_FRAME_MAX * TBT_FEC_BATCH_MAX) == 32768);
+    CHECK(slab_bytes(TBT_HTTP_FEC_FRAME_MAX * TBT_FEC_BATCH_MAX) == 4096);
     CHECK(slab_bytes(TBT_HTTP_CTL_FRAME_MAX) == 512);
     CHECK(TBT_HTTP_CTL_FRAME_MAX < TBT_HTTP_FRAME_MAX);
 }
@@ -156,9 +156,9 @@ static void test_carrier_ledger(void)
     size_t fec_saved_ho = (size_t)CARRIERS * (base_ho - fec_ho);
     size_t raw_saved_ho = (size_t)CARRIERS * (base_ho - raw_ho);
 
-    CHECK(base == 86016u);
-    CHECK(fec == 70144u);
-    CHECK(raw == 49152u);
+    CHECK(base == 57344u);
+    CHECK(fec == 41472u);
+    CHECK(raw == 20480u);
     CHECK(slab_bytes(TBT_HTTP_CTL_FRAME_MAX) == 512);
     CHECK(fec_saved == 256u * (16384u - 512u));
     CHECK(raw_saved == 256u * (16384u + 4096u + 16384u));
@@ -174,8 +174,9 @@ static void test_carrier_ledger(void)
 }
 
 /* One super-block is groups * (n + m) * S. Near: 8 groups of 8+24 shares.
- * Far: 1 group of 128+128 shares. Both are 2 MiB per super-block; the arena
- * keeps 66 logical slots but allocates each block plane on demand. */
+ * Far: 1 group of 128+128 shares. At S=1024 both are 256 KiB per
+ * super-block; the arena keeps 66 logical slots but allocates each block
+ * plane on demand. */
 static void test_fec_arena(void)
 {
     const size_t s = TBT_FEC_S;
@@ -187,10 +188,10 @@ static void test_fec_arena(void)
     size_t far_blocks = 1u * 66u;
     size_t ring = 256u * 1024u;
 
-    CHECK(near_per == 2u * 1024u * 1024u);
-    CHECK(far_per == 2u * 1024u * 1024u);
-    CHECK(near_buf == 256u * 1024u);
-    CHECK(far_buf == 2u * 1024u * 1024u);
+    CHECK(near_per == 256u * 1024u);
+    CHECK(far_per == 256u * 1024u);
+    CHECK(near_buf == 32u * 1024u);
+    CHECK(far_buf == 256u * 1024u);
     CHECK(tbt_fec_plane_uses_vmalloc(near_buf));
     CHECK(tbt_fec_plane_uses_vmalloc(far_buf));
     CHECK(tbt_fec_plane_uses_vmalloc(ring));
@@ -210,7 +211,7 @@ static void test_replay_ledger(void)
 
     CHECK(k == 66);
     bytes = tbt_fec_replay_bytes(1, 128, 128, TBT_FEC_S, k);
-    CHECK(bytes > 16u * 1024u * 1024u);
+    CHECK(bytes > 2u * 1024u * 1024u);
     CHECK(bytes <= TBT_FEC_REPLAY_BUDGET);
     CHECK(tbt_fec_plane_uses_vmalloc(bytes));
     /* The same carrier count in 8 groups has the same slot total; only the

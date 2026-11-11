@@ -49,7 +49,8 @@ bool tbt_fec_adapt_sclc_buildable(u8 variant, u16 n, u16 m)
     if (variant == TBT_FEC_SCLC_DOWN)
         return shares == TBT_FEC_MAX_SHARES && n <= 192;
     if (variant == TBT_FEC_SCLC_UP)
-        return shares == 32 && tbt_fec_adapt_sclc_up_has(n);
+        return shares == 32 && tbt_fec_adapt_sclc_up_has(n) &&
+               tbt_fec_sclc_up_buildable_64_8(n, m);
     return false;
 }
 
@@ -1232,7 +1233,16 @@ void tbt_fec_adapt_sclc_tick(struct tbt_fec_adapt_sclc_ctl *c, u64 now_ns,
             {
                 u32 n = tbt_fec_sclc_up_n[i];
                 u32 m = (u32)c->shares - n;
-                u32 base = tbt_fec_adapt_sclc_delta_base(
+                u32 base;
+
+                /* The 0.8.0 uplink shape (block=64, L=8, S=1024) cannot
+                 * build every table entry. Skip the ones it cannot carry
+                 * instead of asking the data plane for a codec that will
+                 * fail on every block. */
+                if (!tbt_fec_adapt_sclc_buildable(c->variant, (u16)n,
+                                                  (u16)m))
+                    continue;
+                base = tbt_fec_adapt_sclc_delta_base(
                     c, (u16)n, c->eps_q16);
                 int lo = tbt_fec_adapt_sclc_delta_lo(c->variant, base);
                 int off = c->delta_off_q16;

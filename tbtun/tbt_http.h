@@ -72,6 +72,10 @@
 #define TBT_HTTP_CHUNK_LINE_MAX 1024
 /* Worst-case encoded chunk: size line + one full record + CRLF. */
 #define TBT_HTTP_FRAME_MAX (TBT_HTTP_CHUNK_HDR_MAX + TBT_REC_MAX + 2) /* 8244 */
+/* Largest chunk-data body the size-line encoder accepts. A non-FEC session
+ * still sends TBT_REC_MAX records, so the ceiling is the larger of the two
+ * record formats; tbt_http_fec_frame() separately enforces TBT_FEC_REC_MAX. */
+#define TBT_HTTP_CHUNK_DATA_MAX     (TBT_FEC_REC_MAX > TBT_CHUNK_MAX ? TBT_FEC_REC_MAX : TBT_CHUNK_MAX)
 /* Same bound for a 40-byte FEC record. */
 #define TBT_HTTP_FEC_FRAME_MAX (TBT_HTTP_CHUNK_HDR_MAX + TBT_FEC_REC_MAX + 2)
 /* A FEC session never puts a DATA frame on a carrier: tbt_tx_submit() hands
@@ -450,7 +454,10 @@ enum tbt_http_rx_kind
 struct tbt_http_rx
 {
     struct tbt_http_chunk_parser chunk;
-    u8 rec[TBT_FEC_REC_MAX];
+    /* The larger of the legacy and FEC record formats: one assembler serves
+     * both, and shrinking it to the FEC record would reject a legal legacy
+     * DATA chunk. */
+    u8 rec[TBT_HTTP_CHUNK_DATA_MAX];
     u32 rec_len;     /* bytes assembled for the current record */
     u32 rec_need;    /* TBT_HDR_LEN + body_len once the header is known */
     u32 chunk_size;  /* announced size of the current chunk */

@@ -1244,9 +1244,9 @@ static void case_anti_windup(void)
     ok(out.delta_q16 <= 2u * TBT_FEC_ADAPT_SCLC_ONE,
        "anti-windup: delta_off learned down to about two shares");
 
-    init_up_n(&c, 30);
+    init_up_n(&c, 21);
     run(&c, &now, 16, 0, 3, true, 32, &out);
-    eq_u32(out.m_target, c.m_min, "anti-windup: starts at m_min");
+    eq_u32(out.m_target, c.m_cur, "anti-windup: starts at the configured m");
     m0 = out.m_target;
     for (i = 0; i < 200; i++)
     {
@@ -1347,7 +1347,9 @@ static u16 fp_least_m(u8 variant, u32 q_act, u32 burst, u16 backup,
         u32 base, delta, rhs;
         int lo, off;
 
-        if (variant == TBT_FEC_SCLC_UP && fp_up_index(n) < 0)
+        if (variant == TBT_FEC_SCLC_UP &&
+            (fp_up_index(n) < 0 ||
+             !tbt_fec_sclc_up_buildable_64_8((u16)n, (u16)(shares - n))))
             continue;
         base = fp_base(variant, n, eps_q16);
         lo = fp_lo(variant, base);
@@ -1445,7 +1447,7 @@ static bool fixed_check(u8 variant, u32 q, int off, u16 n_init)
 static void case_fixed_point(void)
 {
     static const u16 down_n[] = {192, 128, 64};
-    static const u16 up_n[] = {16, 30, 8};
+    static const u16 up_n[] = {16, 21, 8};
     static const int offs[] = {0, -4 * (int)TBT_FEC_ADAPT_SCLC_ONE,
                                2 * (int)TBT_FEC_ADAPT_SCLC_ONE,
                                8 * (int)TBT_FEC_ADAPT_SCLC_ONE};
@@ -1577,8 +1579,7 @@ static void case_tail_anchor(void)
 
 static bool up_constructible(u16 n)
 {
-    return n == 1 || n == 2 || (n >= 4 && n <= 18) ||
-           (n >= 21 && n <= 25) || n == 28 || n == 30;
+    return tbt_fec_sclc_up_split(n, (u16)(32 - n));
 }
 
 static void case_buildable_output(void)
@@ -1630,8 +1631,8 @@ static void case_buildable_output(void)
 static void case_n_sweep(void)
 {
     static const u16 down[] = {1, 16, 32, 64, 96, 128, 160, 178, 191, 192};
-    static const u16 up[] = {1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-                             16, 17, 18, 21, 22, 23, 24, 25, 28, 30};
+    static const u16 up[] = {1, 2, 4, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17,
+                             18, 21};
     u32 n_down = (u32)(sizeof(down) / sizeof(down[0]));
     u32 n_up = (u32)(sizeof(up) / sizeof(up[0]));
     u32 k;
@@ -1746,28 +1747,28 @@ static void case_wire_profile(void)
     eq_u32(back.d, 0, "profile: downlink 101/155 cfg d");
 
     /* Continuous uplink: 16/16 of 8x32. */
-    make_cfg(&cfg, 16, 16, 8, 16, 128, 0);
+    make_cfg(&cfg, 16, 16, 8, 8, 64, 0);
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), 0,
            "profile: uplink 16/16");
     eq_u32(w.kind, TBT_FEC_SCLC_UP, "profile: uplink kind");
     eq_u32(w.symbol, 1, "profile: uplink gf16");
-    eq_u32(w.block, 128, "profile: uplink block");
-    eq_u32(w.L, 16, "profile: uplink L");
+    eq_u32(w.block, 64, "profile: uplink block");
+    eq_u32(w.L, 8, "profile: uplink L");
     eq_u32(w.rate_pct, 50, "profile: uplink 16/16 rate");
     eq_u32(w.rate_ppm, 500000, "profile: uplink 16/16 ppm");
     eq_u32((u32)tbt_fec_adapt_sclc_wire_to_cfg(&w, 9,
                                                TBT_FEC_CFG_F_APPLY, &back),
            0, "profile: uplink to cfg");
-    eq_u32(back.w, 16, "profile: uplink cfg w");
-    eq_u32(back.k, 128, "profile: uplink cfg k");
+    eq_u32(back.w, 8, "profile: uplink cfg w");
+    eq_u32(back.k, 64, "profile: uplink cfg k");
     eq_u32(back.d, 128, "profile: uplink cfg d");
     eq_u32(back.codec_variant, 2, "profile: uplink cfg variant");
-    eq_u32(back.L, 16, "profile: uplink cfg L");
-    eq_u32(back.block, 128, "profile: uplink cfg block");
+    eq_u32(back.L, 8, "profile: uplink cfg L");
+    eq_u32(back.block, 64, "profile: uplink cfg block");
     eq_u32(back.rate_ppm, 500000, "profile: uplink cfg rate");
 
     /* Continuous uplink: 17/15 is buildable but was never on the ladder. */
-    make_cfg(&cfg, 17, 15, 8, 16, 128, 0);
+    make_cfg(&cfg, 17, 15, 8, 8, 64, 0);
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), 0,
            "profile: uplink 17/15");
     eq_u32(w.rate_pct, 53, "profile: uplink 17/15 rate");
@@ -1794,11 +1795,11 @@ static void case_wire_profile(void)
            "profile: downlink block 512 rejected");
     make_cfg(&cfg, 16, 16, 8, 8, 128, 0);
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
-           "profile: uplink L 8 rejected");
+           "profile: uplink block 128 rejected");
     make_cfg(&cfg, 16, 16, 8, 16, 256, 0);
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
            "profile: uplink block 256 rejected");
-    make_cfg(&cfg, 16, 16, 8, 16, 128, 0);
+    make_cfg(&cfg, 16, 16, 8, 8, 64, 0);
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, 255, &w), (u32)-1,
            "profile: carriers must match groups*(n+m)");
 
@@ -1806,14 +1807,14 @@ static void case_wire_profile(void)
     {
         struct tbt_fec_cfg a, b;
 
-        make_cfg(&a, 16, 16, 8, 16, 128, 0);
+        make_cfg(&a, 16, 16, 8, 8, 64, 0);
         b = a;
         b.n = 17;
         b.m = 15;
         ok(tbt_fec_adapt_sclc_wire_compatible(&a, &b, carriers),
            "profile: an uplink rate change is compatible");
         b = a;
-        b.L = 8;
+        b.L = 16;
         ok(!tbt_fec_adapt_sclc_wire_compatible(&a, &b, carriers),
            "profile: an L change is incompatible");
         b = a;
@@ -1860,7 +1861,7 @@ static void case_wire_continuous(void)
     make_cfg(&cfg, 193, 63, 1, 8, 256, 0);
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
            "wire: downlink n above 192 rejected");
-    make_cfg(&cfg, 3, 29, 8, 16, 128, 0);
+    make_cfg(&cfg, 3, 29, 8, 8, 64, 0);
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&cfg, carriers, &w), (u32)-1,
            "wire: uplink n = 3 rejected");
     make_cfg(&cfg, 192, 64, 1, 8, 256, 0);
@@ -1881,7 +1882,7 @@ static void case_asymmetric_init(void)
     struct tbt_fec_cfg d, u;
 
     make_cfg(&d, 128, 128, 1, 8, 256, 500000);
-    make_cfg(&u, 8, 24, 8, 16, 128, 250000);
+    make_cfg(&u, 8, 24, 8, 8, 64, 250000);
 
     eq_u32((u32)tbt_fec_adapt_sclc_wire_of_cfg(&d, 256, &down), 0,
            "init: adaptive=on admits the downlink INIT");

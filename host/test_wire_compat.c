@@ -1,6 +1,6 @@
 /* test_wire_compat.c - cross-version wire refusal regression.
  *
- * The 0.8.0 wire (TBT_CONV 0x000a, TBT_FEC_CONV 0x100b, HELLO v8) is a hard
+ * The 0.8.0 wire (TBT_CONV 0x000b, TBT_FEC_CONV 0x100b, HELLO v8) is a hard
  * cutover: a peer from 0.7.0 or older must be refused by the first record,
  * never guessed at. This test builds the historical byte vectors and feeds
  * them to the same functions the receive path runs:
@@ -426,7 +426,7 @@ static void test_legacy_framing(void)
 
 static void test_hello_versions(void)
 {
-    ok(TBT_CONV == 0x000au && TBT_FEC_CONV == 0x100bu &&
+    ok(TBT_CONV == 0x000bu && TBT_FEC_CONV == 0x100bu &&
            TBT_WIRE_VERSION_V6 == 8,
        "0.8.0 wire constants", "the current constants are not the v11 cut");
 

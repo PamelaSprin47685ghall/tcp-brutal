@@ -33,7 +33,7 @@
 #include "tbt_sc_ldpc.h"
 #include "tbt_sc_ldpc_gf16.h"
 
-#define SCLC_SYM_PER_SHARE (TBT_FEC_S * 2) /* 8192 bytes = 16384 GF(16) */
+#define SCLC_SYM_PER_SHARE (TBT_FEC_S * 2) /* 1024 bytes = 2048 GF(16) */
 #define SCLC_COEF_SALT 0xD1B54A32D192ED03ULL
 #define SCLC_BATCH_LANES 64
 #define SCLC_MAX_BATCHES 64
@@ -529,9 +529,9 @@ static int sclc_bmap_build(struct tbt_sclc_uplink *u)
         return -EINVAL;
     /* A symbol block is lanes/8 * 4 bytes, so the tail lane count must
      * divide S for the data shares to fill exactly.  The shipped uplink
-     * shape (block 128, L 16) leaves tails of 16 or 32 lanes; 8 and 64
-     * also work.  A shape that would need 24/40/48/56 lanes is rejected
-     * instead of leaving holes in a share. */
+     * shape (block 64, L 8) yields 64 lanes; 8, 16 and 32 also work.  A
+     * shape that would need 24/40/48/56 lanes is rejected instead of
+     * leaving holes in a share. */
     for (b = 0; b < u->nb; b++)
     {
         u32 left = u->codes - b * SCLC_BATCH_LANES;

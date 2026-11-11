@@ -2,7 +2,7 @@
  *
  * The delivery walk lives in tbt_fec_data.c, which pulls in the kernel
  * headers and cannot be linked here. The two decisions that let the 1 GiB
- * acceptance run lose 8192-byte slots without a single counter moving are
+ * acceptance run lose S-byte slots without a single counter moving are
  * pure, so they live in tbt_fec.h and are exercised here against a model of
  * that walk:
  *
@@ -1677,14 +1677,14 @@ static void test_replay_window(void)
            "replay window: past the cap the stalled block is evicted");
     tbt_fec_replay_free(r);
 
-    /* Production shapes at S=8192. K=66 is the 64-block window plus the
+    /* Production shapes at S=1024. K=66 is the 64-block window plus the
      * two-block slack; only descriptors and eight hot block planes are
      * resident. */
-    ok_int(tbt_fec_replay_k_for(4, 4, 4, 8192), 66, "32-carrier K");
-    ok_int(tbt_fec_replay_k_for(8, 4, 4, 8192), 66, "64-carrier K");
-    ok_int(tbt_fec_replay_k_for(32, 4, 4, 8192), 66,
+    ok_int(tbt_fec_replay_k_for(4, 4, 4, TBT_FEC_S), 66, "32-carrier K");
+    ok_int(tbt_fec_replay_k_for(8, 4, 4, TBT_FEC_S), 66, "64-carrier K");
+    ok_int(tbt_fec_replay_k_for(32, 4, 4, TBT_FEC_S), 66,
            "256-carrier grouped K");
-    ok_int(tbt_fec_replay_k_for(1, 192, 64, 8192), 66,
+    ok_int(tbt_fec_replay_k_for(1, 192, 64, TBT_FEC_S), 66,
            "256-carrier single K");
     ok_int((int)tbt_fec_credit_packets(4, 4, 66, 66, TBT_FEC_CREDIT_MAX),
            1024, "32-carrier credit");
@@ -1696,14 +1696,15 @@ static void test_replay_window(void)
            8064, "256-carrier single credit (8192 / 192 blocks)");
 
     /* The ring stays inside 20 MiB (descriptors + 8 hot block planes) and
-     * the credit inside 8192 packets (64 MiB of payload). */
-    ok(tbt_fec_replay_bytes(4, 4, 4, 8192, 66) <= TBT_FEC_REPLAY_BUDGET,
+     * the credit inside 8192 packets (8 MiB of payload at S=1024). */
+    ok(tbt_fec_replay_bytes(4, 4, 4, TBT_FEC_S, 66) <= TBT_FEC_REPLAY_BUDGET,
        "32-carrier ring stays inside 20 MiB");
-    ok(tbt_fec_replay_bytes(8, 4, 4, 8192, 66) <= TBT_FEC_REPLAY_BUDGET,
+    ok(tbt_fec_replay_bytes(8, 4, 4, TBT_FEC_S, 66) <= TBT_FEC_REPLAY_BUDGET,
        "64-carrier ring stays inside 20 MiB");
-    ok(tbt_fec_replay_bytes(32, 4, 4, 8192, 66) <= TBT_FEC_REPLAY_BUDGET,
+    ok(tbt_fec_replay_bytes(32, 4, 4, TBT_FEC_S, 66) <= TBT_FEC_REPLAY_BUDGET,
        "256-carrier grouped ring stays inside 20 MiB");
-    ok(tbt_fec_replay_bytes(1, 192, 64, 8192, 66) <= TBT_FEC_REPLAY_BUDGET,
+    ok(tbt_fec_replay_bytes(1, 192, 64, TBT_FEC_S, 66) <=
+           TBT_FEC_REPLAY_BUDGET,
        "256-carrier single ring stays inside 20 MiB");
     ok((u64)32 * 66 * 8 * 8192 <= 160u * 1024 * 1024,
        "32-carrier 66-slot address space");
@@ -2356,8 +2357,11 @@ static void test_block_seq_formula(void)
     ok(tbt_fec_block_shape_ok(16, 16, 0, 0, 32, 8, true), "uplink 16/16");
     ok(tbt_fec_block_shape_ok(17, 15, 0, 0, 32, 8, true), "uplink 17/15");
     ok(tbt_fec_block_shape_ok(18, 14, 0, 0, 32, 8, true), "uplink 18/14");
-    ok(tbt_fec_block_shape_ok(22, 10, 0, 0, 32, 8, true), "uplink 22/10");
-    ok(tbt_fec_block_shape_ok(30, 2, 0, 0, 32, 8, true), "uplink 30/2");
+    ok(tbt_fec_block_shape_ok(21, 11, 0, 0, 32, 8, true), "uplink 21/11");
+    ok(!tbt_fec_block_shape_ok(22, 10, 0, 0, 32, 8, true),
+       "uplink 22/10 does not build at S=1024/block64");
+    ok(!tbt_fec_block_shape_ok(30, 2, 0, 0, 32, 8, true),
+       "uplink 30/2 does not build at S=1024/block64");
     ok(!tbt_fec_block_shape_ok(3, 29, 0, 0, 32, 8, true),
        "uplink 3/29 is not constructible");
     ok(!tbt_fec_block_shape_ok(20, 12, 0, 0, 32, 8, true),

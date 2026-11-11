@@ -202,8 +202,8 @@ static void test_shapes(void)
         memset(&p, 0, sizeof(p));
         p.n = shapes[s].n;
         p.m = shapes[s].m;
-        p.block = 128;
-        p.L = 16;
+        p.block = TBT_FEC_SCLC_BLOCK_UP;
+        p.L = TBT_FEC_SCLC_L_UP;
         p.rate_num = shapes[s].rate_num;
         p.rate_den = shapes[s].rate_den;
         p.max_core = 256;
@@ -217,9 +217,9 @@ static void test_shapes(void)
         snprintf(what, sizeof(what), "%s: shares", shapes[s].name);
         ok_u32(tbt_sclc_uplink_shares(u), (u32)p.n + p.m, what);
         snprintf(what, sizeof(what), "%s: codes", shapes[s].name);
-        ok_u32(tbt_sclc_uplink_codes(u), (u32)p.n * 16, what);
+        ok_u32(tbt_sclc_uplink_codes(u), (u32)p.n * 8, what);
         snprintf(what, sizeof(what), "%s: n_data", shapes[s].name);
-        ok_u32(tbt_sclc_uplink_n_data(u), 1024, what);
+        ok_u32(tbt_sclc_uplink_n_data(u), 256, what);
         snprintf(what, sizeof(what), "%s: mem", shapes[s].name);
         ok(tbt_sclc_uplink_mem(u) > 0, what, "memory accounting is zero");
         tbt_sclc_uplink_free(u);
@@ -243,8 +243,8 @@ static void test_roundtrip(void)
         memset(&p, 0, sizeof(p));
         p.n = shapes[s].n;
         p.m = shapes[s].m;
-        p.block = 128;
-        p.L = 16;
+        p.block = TBT_FEC_SCLC_BLOCK_UP;
+        p.L = TBT_FEC_SCLC_L_UP;
         p.rate_num = shapes[s].rate_num;
         p.rate_den = shapes[s].rate_den;
         p.max_core = 256;
@@ -364,8 +364,8 @@ static void test_single_erasure(void)
         memset(&p, 0, sizeof(p));
         p.n = shapes[s].n;
         p.m = shapes[s].m;
-        p.block = 128;
-        p.L = 16;
+        p.block = TBT_FEC_SCLC_BLOCK_UP;
+        p.L = TBT_FEC_SCLC_L_UP;
         p.rate_num = shapes[s].rate_num;
         p.rate_den = shapes[s].rate_den;
         p.max_core = 256;
@@ -439,8 +439,8 @@ static struct p_result run_p(u16 groups, u16 n, u16 m, u16 rn, u16 rd,
     memset(&pp, 0, sizeof(pp));
     pp.n = n;
     pp.m = m;
-    pp.block = 128;
-    pp.L = 16;
+    pp.block = TBT_FEC_SCLC_BLOCK_UP;
+    pp.L = TBT_FEC_SCLC_L_UP;
     pp.rate_num = rn;
     pp.rate_den = rd;
     pp.max_core = (u16)max_core;
@@ -599,9 +599,9 @@ static void test_bitplane_recovery(void)
 #else
     const int blocks = 60;
 #endif
-    static const u16 n[6] = {8, 9, 12, 16, 18, 22};
-    static const u16 m[6] = {24, 23, 20, 16, 14, 10};
-    static const u16 d[6] = {64, 72, 96, 128, 144, 176};
+    static const u16 n[6] = {8, 9, 12, 16, 18, 21};
+    static const u16 m[6] = {24, 23, 20, 16, 14, 11};
+    static const u16 d[6] = {64, 72, 96, 128, 144, 168};
     int i;
 
     for (i = 0; i < 6; i++)
@@ -639,14 +639,14 @@ static void test_contiguous_ab(void)
     struct p_result a, c;
 
     rng_seed(31);
-    a = run_p(1, 14, 18, 7, 16, TBT_SCLC_MAP_INTERLEAVED, 0.30, blocks, 256);
+    a = run_p(1, 14, 18, 7, 16, TBT_SCLC_MAP_BITPLANE64, 0.30, blocks, 256);
     rng_seed(31);
     c = run_p(1, 14, 18, 7, 16, TBT_SCLC_MAP_CONTIGUOUS, 0.30, blocks, 256);
-    printf("mapping p=0.30: interleaved cw %.6f block %.4f; "
+    printf("mapping p=0.30: bitplane cw %.6f block %.4f; "
            "contiguous cw %.6f block %.4f\n",
            a.cw_rec, a.block_ok, c.cw_rec, c.block_ok);
-    ok(a.cw_rec >= c.cw_rec, "interleaved beats contiguous",
-       "interleaved recovery is lower");
+    ok(a.cw_rec >= c.cw_rec, "bitplane beats contiguous",
+       "bitplane recovery is lower");
 }
 
 static void test_grouped(void)
@@ -661,8 +661,8 @@ static void test_grouped(void)
     memset(&p, 0, sizeof(p));
     p.n = 8;
     p.m = 24;
-    p.block = 128;
-    p.L = 16;
+    p.block = TBT_FEC_SCLC_BLOCK_UP;
+    p.L = TBT_FEC_SCLC_L_UP;
     p.rate_num = 1;
     p.rate_den = 4;
     p.max_core = 256;
@@ -706,9 +706,9 @@ static void test_grouped(void)
         struct tbt_sclc_stat st;
 
         tbt_sclc_uplink_stat(u, 0, &st);
-        ok_u32(st.codes, 128, "grouped: group 0 codes");
+        ok_u32(st.codes, 64, "grouped: group 0 codes");
         tbt_sclc_uplink_stat(u, 7, &st);
-        ok_u32(st.codes, 128, "grouped: group 7 codes");
+        ok_u32(st.codes, 64, "grouped: group 7 codes");
     }
     block_free(&blk);
     tbt_sclc_uplink_free(u);
@@ -724,7 +724,8 @@ static void test_ops(void)
     rng_seed(51);
     ok_int(ops->mode, 3, "ops: mode");
     ok(strcmp(ops->name, "sc-ldpc-gf16") == 0, "ops: name", "wrong name");
-    ctx = ops->new(8, 24, 128, 16, TBT_FEC_S, 64, 1);
+    ctx = ops->new(8, 24, TBT_FEC_SCLC_BLOCK_UP, TBT_FEC_SCLC_L_UP,
+                   TBT_FEC_S, 64, 1);
     ok(ctx != NULL, "ops: new 8x32 shape", "allocation failed");
     if (!ctx)
         return;
@@ -753,9 +754,11 @@ static void test_ops(void)
 /* ladder codec and scalar reference                                   */
 /* ------------------------------------------------------------------ */
 
-#define LADDER_SHAPES 6
-static const u16 ladder_n[LADDER_SHAPES] = {8, 9, 12, 16, 18, 22};
-static const u16 ladder_m[LADDER_SHAPES] = {24, 23, 20, 16, 14, 10};
+/* The interleaved mapping cannot build 9/23 at block=64/L=8; the bitplane
+ * production mapping is covered by test_bitplane_recovery instead. */
+#define LADDER_SHAPES 5
+static const u16 ladder_n[LADDER_SHAPES] = {8, 12, 16, 18, 21};
+static const u16 ladder_m[LADDER_SHAPES] = {24, 20, 16, 14, 11};
 
 static inline u8 ref_get_sym(const u8 *buf, u32 off)
 {
@@ -874,8 +877,8 @@ static void test_ladder_codec(void)
         memset(&p, 0, sizeof(p));
         p.n = ladder_n[i];
         p.m = ladder_m[i];
-        p.block = 128;
-        p.L = 16;
+        p.block = TBT_FEC_SCLC_BLOCK_UP;
+        p.L = TBT_FEC_SCLC_L_UP;
         p.rate_num = (u16)(ladder_n[i] * 256 /
                            (ladder_n[i] + ladder_m[i]));
         p.rate_den = 256;
@@ -958,8 +961,8 @@ static void test_full_queue(void)
     memset(&p, 0, sizeof(p));
     p.n = 8;
     p.m = 24;
-    p.block = 128;
-    p.L = 16;
+    p.block = TBT_FEC_SCLC_BLOCK_UP;
+    p.L = TBT_FEC_SCLC_L_UP;
     p.rate_num = 1;
     p.rate_den = 4;
     p.max_core = 256;
@@ -1010,12 +1013,14 @@ static void test_full_queue(void)
  * the production GF(16) parameters (block 128, L 16, interleaved). */
 static void test_ladder_shapes(void)
 {
-    static const u16 n[6] = {8, 9, 12, 16, 18, 22};
-    static const u16 m[6] = {24, 23, 20, 16, 14, 10};
+    static const u16 n[6] = {8, 9, 12, 16, 18, 21};
+    static const u16 m[6] = {24, 23, 20, 16, 14, 11};
     /* sc_build rounds n_base down above rate 1/2, so the codec's parity
-     * count is 768 for 18/14 and 448 for 22/10, not the share-ratio
-     * estimate.  The wire keeps the extra slots as zero padding. */
-    static const u32 npar[6] = {3072, 2616, 1706, 1024, 768, 448};
+     * count is 192 for 18/14 and 128 for 21/11, not the share-ratio
+     * estimate.  The wire keeps the extra slots as zero padding. 22/10 is
+     * not buildable at S=1024/block=64/L=8: its graph needs 50% parity,
+     * more than its ten shares carry. */
+    static const u32 npar[6] = {768, 654, 426, 256, 192, 128};
     int i;
 
     for (i = 0; i < 6; i++)
@@ -1026,8 +1031,8 @@ static void test_ladder_shapes(void)
         memset(&p, 0, sizeof(p));
         p.n = n[i];
         p.m = m[i];
-        p.block = 128;
-        p.L = 16;
+        p.block = TBT_FEC_SCLC_BLOCK_UP;
+        p.L = TBT_FEC_SCLC_L_UP;
         p.rate_num = (u16)(n[i] * 256 / (n[i] + m[i]));
         p.rate_den = 256;
         p.max_core = 256;
@@ -1204,8 +1209,8 @@ static void test_reject(void)
     memset(&p, 0, sizeof(p));
     p.n = 14;
     p.m = 18;
-    p.block = 128;
-    p.L = 16;
+    p.block = TBT_FEC_SCLC_BLOCK_UP;
+    p.L = TBT_FEC_SCLC_L_UP;
     p.rate_num = 7;
     p.rate_den = 16;
     p.max_core = 256;

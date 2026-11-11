@@ -240,6 +240,11 @@ HOST_CLIENT_OBJS := host/client-engine.o \
 HOST_CLIENT     := host/tbt_client
 HOST_CLIENT_LIB := host/libtbtun_client.a
 HOST_CLIENT_LOOPBACK := host/test_client_loopback
+HOST_CLIENT_WIRE := host/test_client_wire
+HOST_CLIENT_WIRE_SRCS := host/test_client_wire.c tbtun/tbt_proto.c \
+                   tbtun/tbt_rec.c tbtun/tbt_fec.c tbtun/tbt_http.c
+HOST_CLIENT_WIRE_HDRS := tbtun/tbt_fec.h tbtun/tbt_http.h tbtun/tbt_proto.h \
+                   tbtun/tbt_rec.h tbtun/tbt_uapi.h
 SAN_CFLAGS      := -g -fsanitize=address,undefined -fno-omit-frame-pointer
 # A sanitizer run must stop at the first undefined-behaviour report instead
 # of continuing through the rest of the suite.
@@ -294,7 +299,7 @@ check: dkms-srcs-check
 host-test: $(HOST_CARRIER_POLICY)
 host-test-san-run: host/test_carrier_policy_san
 
-host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_CODEC_CACHE) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_SHAPES) $(HOST_PORTMAP) $(HOST_MAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_INVARIANTS) $(HOST_WIRE_COMPAT) $(HTTP_RFC_GEN) $(HOST_RX_BUDGET) $(HOST_CLIENT) $(HOST_CLIENT_LOOPBACK)
+host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER) $(HOST_ACK) $(HOST_CONTROL) $(HOST_TX_PUBLISH) $(HOST_TX_INDEX) $(HOST_FIN_PRIORITY) $(HOST_CLOSE_WAKE) $(HOST_HOLD) $(HOST_MULTISTREAM) $(HOST_ANCHOR) $(HOST_FEC) $(HOST_MEM_BUDGET) $(HOST_FEC_RX) $(HOST_FEC_SWITCH) $(HOST_FEC_OUT) $(HOST_CODEC_CACHE) $(HOST_BATCH) $(HOST_FEC_ADAPT) $(HOST_FEC_ADAPT_SCLC) $(HOST_FEC_SCLC) $(HOST_FEC_SCLC_SHAPES) $(HOST_PORTMAP) $(HOST_MAP) $(HOST_LIFETIME) $(HOST_SCLC) $(HOST_SCLC_DATA) $(HOST_FAULT) $(HOST_INVARIANTS) $(HOST_WIRE_COMPAT) $(HTTP_RFC_GEN) $(HOST_RX_BUDGET) $(HOST_CLIENT) $(HOST_CLIENT_LOOPBACK) $(HOST_CLIENT_WIRE)
 	@./$(HOST_TEST)
 	@./$(HOST_FUZZ)
 	@./$(HOST_HTTP)
@@ -331,6 +336,7 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_WIRE_COMPAT)
 	@./$(HOST_RX_BUDGET)
 	@./$(HOST_CLIENT_LOOPBACK)
+	@./$(HOST_CLIENT_WIRE)
 	@# Third-party cross-check: h11 is not a build dependency. uv with a cached
 	@# h11 runs it offline; anything else gets a clear skip, not a failure.
 	@if command -v uv >/dev/null 2>&1 && \
@@ -527,6 +533,12 @@ $(HOST_CLIENT_LOOPBACK): host/test_client_loopback.c $(HOST_CLIENT_LIB) $(HOST_C
 host/test_client_loopback_san: host/test_client_loopback.c $(HOST_CLIENT_LIB_SRCS) $(HOST_CLIENT_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -DTBT_LOOPBACK_MB=1 -I tbtun -o $@ host/test_client_loopback.c $(HOST_CLIENT_LIB_SRCS)
 
+$(HOST_CLIENT_WIRE): $(HOST_CLIENT_WIRE_SRCS) $(HOST_CLIENT_WIRE_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(HOST_CLIENT_WIRE_SRCS)
+
+host/test_client_wire_san: $(HOST_CLIENT_WIRE_SRCS) $(HOST_CLIENT_WIRE_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_CLIENT_WIRE_SRCS)
+
 host/test_fec_sclc_data_san: $(HOST_SCLC_DATA_SRCS) $(HOST_SCLC_DATA_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_SCLC_DATA_SRCS)
 
@@ -577,7 +589,7 @@ host-test-san:
 		echo "host-test-san: skipped, $(HOSTCC) cannot link -fsanitize=address,undefined"; \
 	fi
 
-host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_mem_budget_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_batch_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_shapes_san host/test_close_wake_san host/test_hold_san host/test_portmap_san host/test_map_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_invariants_san host/test_wire_compat_san host/test_rx_budget_san host/test_client_loopback_san $(HTTP_RFC_GEN_SAN)
+host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_mem_budget_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_batch_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_shapes_san host/test_close_wake_san host/test_hold_san host/test_portmap_san host/test_map_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_invariants_san host/test_wire_compat_san host/test_rx_budget_san host/test_client_loopback_san host/test_client_wire_san $(HTTP_RFC_GEN_SAN)
 host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fec_rx_san host/test_fec_out_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_close_wake_san host/test_portmap_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san
 	@./host/test_parse_san
 	@./host/test_fuzz_san
@@ -607,6 +619,7 @@ host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san hos
 	@./host/test_wire_compat_san
 	@./host/test_rx_budget_san
 	@./host/test_client_loopback_san
+	@./host/test_client_wire_san
 	@python3 $(HTTP_RFC_AUDIT) ./$(HTTP_RFC_GEN_SAN)
 
 host/test_parse_san: $(HOST_TEST_SRCS) $(HOST_TEST_HDRS)
@@ -736,6 +749,7 @@ clean: clean-dkms.conf clean-dkms-tarball
 	$(RM) $(HOST_RX_BUDGET) host/test_rx_budget_san
 	$(RM) $(HOST_CLIENT) $(HOST_CLIENT_LIB) $(HOST_CLIENT_OBJS) host/client-main.o
 	$(RM) $(HOST_CLIENT_LOOPBACK) host/test_client_loopback_san
+	$(RM) $(HOST_CLIENT_WIRE) host/test_client_wire_san
 	$(RM) $(HOST_BENCH_RXPATH)
 	$(RM) $(HOST_BENCH_SCLC_BUILD)
 	$(RM) $(HOST_CARRIER_POLICY) host/test_carrier_policy_san

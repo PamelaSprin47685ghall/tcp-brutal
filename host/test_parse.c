@@ -1974,7 +1974,7 @@ int main(void)
             " n=128 m=128 fec=on mode=sc-ldpc w=256 carriers=256";
         static const char *const up =
             "tunnel 2 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
-            " n=8 m=24 fec=on mode=sc-ldpc w=128 carriers=256 L=16";
+            " n=8 m=24 fec=on mode=sc-ldpc w=64 carriers=256 L=8";
         char once[TBT_LINE_MAX * 2], twice[TBT_LINE_MAX * 2];
         struct tbt_cmd again;
 
@@ -1990,12 +1990,12 @@ int main(void)
         ok(!strcmp(once, twice), "downlink sc-ldpc line is a fixed point", twice);
 
         parse(up, &cmd, &perr);
-        ok(cmd.cfg.mode == 3 && cmd.cfg.w == 128 && cmd.cfg.n == 8 &&
-               cmd.cfg.m == 24 && cmd.cfg.L == 16,
+        ok(cmd.cfg.mode == 3 && cmd.cfg.w == 64 && cmd.cfg.n == 8 &&
+               cmd.cfg.m == 24 && cmd.cfg.L == 8,
            "uplink sc-ldpc shape parsed", NULL);
         ok(cmd.cfg.adaptive == 1, "uplink mode=3 ladder defaults adaptive on", NULL);
         tbt_render_cfg(&cmd.cfg, once, sizeof(once));
-        ok(strstr(once, " L=16") != NULL, "uplink L is rendered", once);
+        ok(strstr(once, " L=8") != NULL, "uplink L is rendered", once);
         parse(once, &again, &perr);
         tbt_render_cfg(&again.cfg, twice, sizeof(twice));
         ok(!strcmp(once, twice), "uplink sc-ldpc line is a fixed point", twice);
@@ -2016,12 +2016,12 @@ int main(void)
            twice);
 
         parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-              " n=8 m=24 fec=on mode=sc-ldpc adaptive=on w=128 carriers=256"
-              " L=16",
+              " n=8 m=24 fec=on mode=sc-ldpc adaptive=on w=64 carriers=256"
+              " L=8",
               &cmd, &perr);
         ok(cmd.cfg.adaptive == 1 && cmd.cfg.mode == 3 &&
-               cmd.cfg.n == 8 && cmd.cfg.m == 24 && cmd.cfg.w == 128 &&
-               cmd.cfg.L == 16,
+               cmd.cfg.n == 8 && cmd.cfg.m == 24 && cmd.cfg.w == 64 &&
+               cmd.cfg.L == 8,
            "uplink adaptive=on parsed", NULL);
         tbt_render_cfg(&cmd.cfg, once, sizeof(once));
         ok(strstr(once, "adaptive=on") != NULL,
@@ -2048,12 +2048,13 @@ int main(void)
                TBT_PARSE_EINVAL, "adaptive", "block=256");
         refuse("sc-ldpc adaptive: uplink block",
                "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-               " n=8 m=24 fec=on mode=sc-ldpc adaptive=on carriers=256 L=16",
-               TBT_PARSE_EINVAL, "adaptive", "block=128");
+               " n=8 m=24 fec=on mode=sc-ldpc adaptive=on w=256"
+               " carriers=256 L=8",
+               TBT_PARSE_EINVAL, "adaptive", "block=64");
         refuse("sc-ldpc adaptive: uplink off-ladder n/m",
                "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-               " n=19 m=13 fec=on mode=sc-ldpc adaptive=on w=128"
-               " carriers=256 L=16",
+               " n=19 m=13 fec=on mode=sc-ldpc adaptive=on w=64"
+               " carriers=256 L=8",
                TBT_PARSE_EINVAL, "adaptive", "rate ladder");
     }
 

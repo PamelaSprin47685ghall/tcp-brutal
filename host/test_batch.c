@@ -272,10 +272,10 @@ static void test_http_size_lines(void)
         {49, 2},              /* 49  -> "31"      */
         {255, 2},             /* 255 -> "ff"      */
         {256, 3},             /* 256 -> "100"     */
-        {4095, 3},            /* 4095 -> "fff"    */
-        {4096, 4},            /* 4096 -> "1000"   */
-        {8239, 4},            /* 8239 -> "202f"   */
-        {TBT_FEC_REC_MAX, 4}, /* 8240 -> "2030"   */
+        {1023, 3},            /* 1023 -> "3ff"    */
+        {1024, 3},            /* 1024 -> "400"    */
+        {TBT_FEC_REC_MAX - 1, 3}, /* 1071 -> "42f" */
+        {TBT_FEC_REC_MAX, 3},     /* 1072 -> "430" */
     };
     struct tbt_fec_batch_seg seg[TBT_BATCH_SEG_MAX];
     char scratch[TBT_BATCH_REC_MAX * TBT_HTTP_CHUNK_HDR_MAX];
@@ -427,12 +427,13 @@ static void test_short_write_order(void)
     struct tbt_fec_batch_seg seg[TBT_BATCH_SEG_MAX];
     char scratch[TBT_BATCH_REC_MAX * TBT_HTTP_CHUNK_HDR_MAX];
     size_t atotal = 0, btotal = 0, part_len, stream_len = 0;
-    size_t k = 5000, accepted, bsent;
+    size_t k, accepted, bsent;
     unsigned int nseg;
     u32 tail = 0;
 
     nseg = build_batch(true, TBT_BATCH_REC_MAX, TBT_FEC_REC_MAX, 0x11, seg, scratch, buf_a,
                        &atotal);
+    k = atotal / 2;
     ok(nseg != 0 && atotal > k, "order: build A", NULL);
     if (!nseg)
         return;
@@ -484,12 +485,13 @@ static void test_eagain(void)
     struct tbt_fec_batch_seg seg[TBT_BATCH_SEG_MAX];
     char scratch[TBT_BATCH_REC_MAX * TBT_HTTP_CHUNK_HDR_MAX];
     static u8 snapshot[BATCH_BUF_MAX];
-    size_t total = 0, k = 7000, part_len = 0, stream_len = 0, before;
+    size_t total = 0, k, part_len = 0, stream_len = 0, before;
     unsigned int nseg;
     u32 tail = 0;
 
     nseg = build_batch(true, TBT_BATCH_REC_MAX, TBT_FEC_REC_MAX, 0x33, seg, scratch,
                        buf_expect, &total);
+    k = total / 2;
     ok(nseg != 0 && total > 0, "eagain: build batch", NULL);
     if (!nseg)
         return;

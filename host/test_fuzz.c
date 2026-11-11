@@ -242,7 +242,7 @@ static void test_bounds_table(void)
 
     case_no++;
     check(TBT_HDR_LEN == 32 && TBT_CHUNK_MAX == 8228 && TBT_REC_MAX == 8224 &&
-              TBT_CONV == 0x000a && TBT_WIRE_VERSION_V6 == 8,
+              TBT_CONV == 0x000b && TBT_WIRE_VERSION_V6 == 8,
           "design constants", NULL);
     for (i = 0; i < sizeof(want) / sizeof(want[0]); i++)
     {
@@ -1043,7 +1043,7 @@ struct cfg_seed
 static const struct cfg_seed cfg_seeds[3] = {
     { 8, 8, 64, 32, 16, 0, 4, TBT_FEC_CFG_F_APPLY, 0, 0, 0 },
     { 128, 128, 0, 0, 1, 256, 0, TBT_FEC_CFG_F_INIT, 2, 8, 500000 },
-    { 8, 24, 0, 0, 8, 128, 0, TBT_FEC_CFG_F_APPLY, 2, 16, 250000 },
+    { 8, 24, 0, 0, 8, 64, 0, TBT_FEC_CFG_F_APPLY, 2, 8, 250000 },
 };
 
 static const u16 cfg_edges[] = { 0,    1,    2,    3,    5,    15,   16,
@@ -1168,12 +1168,18 @@ static int cfg_doc_accepts(const u8 *b)
         if (L != 8 && L != 16)
             return 0;
         if (block != 256 && block != 512 &&
-            !(block == TBT_FEC_SCLC_BLOCK_UP && groups > 1 && L == 16))
+            !(block == TBT_FEC_SCLC_BLOCK_UP && groups > 1 &&
+              L == TBT_FEC_SCLC_L_UP))
             return 0;
         if (rate_ppm < 250000u || rate_ppm > 700000u)
             return 0;
         want_n = (u32)(((u64)rate_ppm * shares) / 1000000u);
-        return want_n == n;
+        if (want_n != n)
+            return 0;
+        if (block == TBT_FEC_SCLC_BLOCK_UP &&
+            !tbt_fec_sclc_up_buildable_64_8(n, m))
+            return 0;
+        return 1;
     }
     if (variant != 0 && variant != 1)
         return 0;
@@ -1391,10 +1397,10 @@ static void test_cfg_body(void)
             if (sd->block == TBT_FEC_SCLC_BLOCK_UP)
             {
                 memcpy(buf, seeds[s], sizeof(buf));
-                buf[TBT_FEC_CFG_L] = 8;
+                buf[TBT_FEC_CFG_L] = 16;
                 cfg_fix_crcs(buf);
                 case_no++;
-                cfg_expect("CFG GF(16) block without L=16", buf, -EPROTO);
+                cfg_expect("CFG GF(16) block without L=8", buf, -EPROTO);
 
                 memcpy(buf, seeds[s], sizeof(buf));
                 tbt_put_le16(buf + TBT_FEC_CFG_GROUPS, 1);
@@ -1415,7 +1421,7 @@ static void test_cfg_body(void)
                              TBT_FEC_SCLC_BLOCK_UP);
                 cfg_fix_crcs(buf);
                 case_no++;
-                cfg_expect("CFG block 128 with one group", buf, -EPROTO);
+                cfg_expect("CFG block 64 with one group", buf, -EPROTO);
             }
         }
         else
@@ -1808,7 +1814,7 @@ static void test_parse_bomb(void)
     parse_suffix("L trailing", "L=16x", TBT_PARSE_EINVAL);
 
     parse_suffix("mode sc-ldpc", "mode=sc-ldpc", 0);
-    parse_suffix("mode sc-ldpc w=128", "mode=sc-ldpc w=128", 0);
+    parse_suffix("mode sc-ldpc w=64", "mode=sc-ldpc w=64", 0);
     parse_suffix("mode sc-ldpc w=256", "mode=sc-ldpc w=256", 0);
     parse_suffix("mode sc-ldpc w=512", "mode=sc-ldpc w=512", 0);
     parse_suffix("mode sc-ldpc w=100", "mode=sc-ldpc w=100",
@@ -1825,18 +1831,18 @@ static void test_parse_bomb(void)
                  0);
     parse_expect("uplink adaptive profile",
                  "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-                 " n=8 m=24 fec=on mode=sc-ldpc adaptive=on w=128"
-                 " carriers=256 L=16",
+                 " n=8 m=24 fec=on mode=sc-ldpc adaptive=on w=64"
+                 " carriers=256 L=8",
                  0);
     parse_expect("uplink adaptive L wrong",
                  "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-                 " n=8 m=24 fec=on mode=sc-ldpc adaptive=on w=128"
-                 " carriers=256 L=15",
+                 " n=8 m=24 fec=on mode=sc-ldpc adaptive=on w=64"
+                 " carriers=256 L=7",
                  TBT_PARSE_EINVAL);
     parse_expect("adaptive off-ladder n/m",
                  "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
-                 " n=19 m=13 fec=on mode=sc-ldpc adaptive=on w=128"
-                 " carriers=256 L=16",
+                 " n=20 m=12 fec=on mode=sc-ldpc adaptive=on w=64"
+                 " carriers=256 L=8",
                  TBT_PARSE_EINVAL);
 
     for (i = 0; i < PARSE_FUZZ; i++)
@@ -1852,8 +1858,8 @@ static void test_parse_bomb(void)
             " n=128 m=128 fec=on adaptive=on mode=sc-ldpc w=256"
             " carriers=256 portblock=40000-44095",
             "tunnel 2 role=far listen=10.0.0.1:1 target=10.0.0.2:2"
-            " n=8 m=24 fec=on adaptive=on mode=sc-ldpc w=128 carriers=256"
-            " L=16",
+            " n=8 m=24 fec=on adaptive=on mode=sc-ldpc w=64 carriers=256"
+            " L=8",
         };
         size_t len;
 

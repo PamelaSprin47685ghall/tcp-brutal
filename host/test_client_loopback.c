@@ -317,7 +317,9 @@ static void dump_log(const char *tag, const char *path)
 
 int main(void)
 {
-    size_t total = (size_t)TBT_LOOPBACK_MB * 1024 * 1024;
+    /* A tail that is not a multiple of S forces one PADDED short DATA
+     * share, so the loopback covers the 0.8.0 constant-frame path. */
+    size_t total = (size_t)TBT_LOOPBACK_MB * 1024 * 1024 + 10000;
     u16 base = (u16)(21000 + (getpid() % 1500) * 3);
     struct tbt_engine_cfg near_cfg, far_cfg;
     char far_log[128], near_log[128];
@@ -330,6 +332,7 @@ int main(void)
     char hex_tx[65], hex_rx[65];
     size_t sent = 0, got = 0;
     u64 rng = 0x123456789abcdefull;
+    bool shut = false;
     int status = 0;
     int i;
 
@@ -452,10 +455,18 @@ int main(void)
                 break;
             }
         }
-        if (sent == total && got == total)
+        if (sent == total && !shut)
+        {
+            /* The echo lags the last block by a NACK/ACK round trip. Shut
+             * the write side now, or the reader would wait for an echo that
+             * the far side cannot produce until it sees EOF. */
+            (void)shutdown(fd, SHUT_WR);
+            shut = true;
+        }
+        if (got == total)
             break;
     }
-    if (sent == total)
+    if (sent == total && !shut)
         (void)shutdown(fd, SHUT_WR);
     close(fd);
     sha_final(&sha_rx, dig_rx);
@@ -469,8 +480,8 @@ int main(void)
         status = 1;
     }
     if (status == 0)
-        printf("PASS: %d MiB echo sha256=%s drop_ppm=%u\n", TBT_LOOPBACK_MB,
-               hex_tx, (unsigned)TBT_LOOPBACK_DROP);
+        printf("PASS: %d MiB + 10000 B echo sha256=%s drop_ppm=%u\n",
+               TBT_LOOPBACK_MB, hex_tx, (unsigned)TBT_LOOPBACK_DROP);
     free(data);
     free(back);
 

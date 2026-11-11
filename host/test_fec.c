@@ -166,7 +166,7 @@ static void test_header_roundtrip(void)
     hi.block_id = ~(u64)0;
     hi.seq = (1ULL << 63) - 1;
     hi.win_len = 1024;
-    hi.payload_len = 8192;
+    hi.payload_len = TBT_FEC_S;
     hi.conv = TBT_FEC_CONV;
     hi.reserved = 0;
     hi.sid = ~(u64)0;
@@ -186,7 +186,7 @@ static void test_header_roundtrip(void)
     le.block_id = 0x1122334455667788ULL;
     le.seq = 0x0102030405060708ULL;
     le.win_len = 0x0400;   /* 1024 */
-    le.payload_len = 0x2000; /* 8192 */
+    le.payload_len = 0x0400; /* 1024 */
     le.conv = TBT_FEC_CONV;
     le.reserved = 0;
     le.sid = 0x8877665544332211ULL;
@@ -355,10 +355,10 @@ static void test_hdr_check(void)
     h.payload_len = 65;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "DATA payload_len=S+1");
     h = data_hdr();
-    h.payload_len = 8192;
-    ok_int(tbt_fec_hdr_check(&h, 8192), 0, "DATA payload_len=S=8192");
+    h.payload_len = TBT_FEC_S;
+    ok_int(tbt_fec_hdr_check(&h, TBT_FEC_S), 0, "DATA payload_len=S=1024");
     h = data_hdr();
-    h.payload_len = 8192;
+    h.payload_len = TBT_FEC_S;
     ok_int(tbt_fec_hdr_check(&h, 64), -EPROTO, "DATA payload_len over configured S");
 
     /* epoch is block-level and PARITY only: a DATA record that carries it
@@ -560,22 +560,28 @@ static void test_ack_bytes(void)
     ok_u64(tbt_fec_ack_bytes(0, 0, 0), 0, "ack 0/0/0");
     ok_u64(tbt_fec_ack_bytes(0, 100, 1000), 0, "frontier before pkt_base");
     ok_u64(tbt_fec_ack_bytes(100, 100, 0), 0, "frontier == base, tx_seq 0");
-    ok_u64(tbt_fec_ack_bytes(1, 0, 8192), 8192, "one full packet");
-    ok_u64(tbt_fec_ack_bytes(2, 0, 8192), 8192, "frontier past tx_seq clamps");
+    ok_u64(tbt_fec_ack_bytes(1, 0, TBT_FEC_S), TBT_FEC_S, "one full packet");
+    ok_u64(tbt_fec_ack_bytes(2, 0, TBT_FEC_S), TBT_FEC_S,
+           "frontier past tx_seq clamps");
     ok_u64(tbt_fec_ack_bytes(UINT64_MAX, 0, 1000), 1000, "U64_MAX frontier");
     ok_u64(tbt_fec_ack_bytes(UINT64_MAX, 100, 1000), 1000, "U64_MAX with base");
     ok_u64(tbt_fec_ack_bytes(UINT64_MAX, UINT64_MAX, 1000), 0,
            "U64_MAX frontier and base");
-    ok_u64(tbt_fec_ack_bytes(9, 0, 81920), 73728, "rel below tx_seq");
-    ok_u64(tbt_fec_ack_bytes(10, 0, 81920), 81920, "rel at tx_seq");
-    ok_u64(tbt_fec_ack_bytes(11, 0, 81920), 81920, "rel past tx_seq");
-    ok_u64(tbt_fec_ack_bytes(3, 0, 16384), 16384, "saturate one past limit");
-    ok_u64(tbt_fec_ack_bytes(2, 0, 16384), 16384, "rel at tx_seq/S");
+    ok_u64(tbt_fec_ack_bytes(9, 0, 10 * TBT_FEC_S), 9 * TBT_FEC_S,
+           "rel below tx_seq");
+    ok_u64(tbt_fec_ack_bytes(10, 0, 10 * TBT_FEC_S), 10 * TBT_FEC_S,
+           "rel at tx_seq");
+    ok_u64(tbt_fec_ack_bytes(11, 0, 10 * TBT_FEC_S), 10 * TBT_FEC_S,
+           "rel past tx_seq");
+    ok_u64(tbt_fec_ack_bytes(3, 0, 2 * TBT_FEC_S), 2 * TBT_FEC_S,
+           "saturate one past limit");
+    ok_u64(tbt_fec_ack_bytes(2, 0, 2 * TBT_FEC_S), 2 * TBT_FEC_S,
+           "rel at tx_seq/S");
     ok_u64(tbt_fec_ack_bytes(UINT64_MAX / 2, 0, UINT64_MAX / 2),
            UINT64_MAX / 2, "huge frontier saturates to tx_seq");
-    ok_u64(tbt_fec_ack_bytes(105, 100, 5 * 8192), 5 * 8192,
+    ok_u64(tbt_fec_ack_bytes(105, 100, 5 * TBT_FEC_S), 5 * TBT_FEC_S,
            "stream-relative base");
-    ok_u64(tbt_fec_ack_bytes(106, 100, 5 * 8192), 5 * 8192,
+    ok_u64(tbt_fec_ack_bytes(106, 100, 5 * TBT_FEC_S), 5 * TBT_FEC_S,
            "stream-relative overrun clamps");
 }
 
@@ -658,8 +664,8 @@ static void test_crc(void)
  * 3b. CRC32C instruction path vs the portable table path.
  * ------------------------------------------------------------------ */
 
-/* 8 KiB payload + 48-byte header: the largest CRC this wire ever runs. */
-#define CRC_SWEEP_MAX 8240
+/* S-byte payload + 48-byte header: the largest CRC this wire ever runs. */
+#define CRC_SWEEP_MAX TBT_FEC_REC_MAX
 #define CRC_SWEEP_SLACK 16
 
 static void test_crc_paths(void)
@@ -1146,11 +1152,11 @@ static void test_fbk_variant(void)
        "a grouped flow refuses a variant-0 report", NULL);
     ok(tbt_fec_fbk_variant_match(0, 0, 0, 0, 0, 0, 1),
        "a single flow accepts variant 0", NULL);
-    ok(tbt_fec_fbk_variant_match(2, 16, 128, 2, 16, 128, 8),
-       "uplink GF(16) block 128 matches", NULL);
-    ok(!tbt_fec_fbk_variant_match(2, 8, 128, 2, 16, 128, 8),
+    ok(tbt_fec_fbk_variant_match(2, 8, 64, 2, 8, 64, 8),
+       "uplink GF(16) block 64 matches", NULL);
+    ok(!tbt_fec_fbk_variant_match(2, 16, 64, 2, 8, 64, 8),
        "an L mismatch is refused", NULL);
-    ok(!tbt_fec_fbk_variant_match(2, 16, 256, 2, 16, 128, 8),
+    ok(!tbt_fec_fbk_variant_match(2, 8, 128, 2, 8, 64, 8),
        "a block mismatch is refused", NULL);
 }
 
@@ -1203,8 +1209,8 @@ static void cfg_up_make(struct tbt_fec_cfg *c, u16 groups)
     c->k = 0;
     c->d = 0;
     c->codec_variant = 2;
-    c->L = 16;
-    c->block = 128;
+    c->L = TBT_FEC_SCLC_L_UP;
+    c->block = TBT_FEC_SCLC_BLOCK_UP;
     c->rate_ppm = 250000;
     c->flags = TBT_FEC_CFG_F_INIT | TBT_FEC_CFG_F_APPLY;
     c->groups = groups;
@@ -1334,7 +1340,7 @@ static void test_cfg_carriers(void)
         ok_int(tbt_fec_cfg_unpack(body, carriers, &out), 0, what);
         ok(out.n == 8 && out.m == 24 && out.groups == c.groups &&
                out.flags == (TBT_FEC_CFG_F_INIT | TBT_FEC_CFG_F_APPLY) &&
-               out.k == 128 && out.w == 16 && out.d == 64,
+               out.k == 64 && out.w == 8 && out.d == 64,
            what, "round-trip changed n/m/groups/flags");
     }
 }
@@ -2384,7 +2390,7 @@ static void test_wire_version(void)
        "0.7.0 HELLO version 7 is refused", NULL);
     ok(TBT_WIRE_VERSION == 1, "legacy ARQ HELLO stays version 1", NULL);
     ok(TBT_FEC_CONV == 0x100bu, "0x100b is the v11 FEC revision", NULL);
-    ok(TBT_CONV == 0x000au, "0x000a is the v10 ARQ revision", NULL);
+    ok(TBT_CONV == 0x000bu, "0x000b is the v11 ARQ revision", NULL);
     ok(TBT_OPEN_BODY_LEN == 36, "OPEN body is 36 bytes", NULL);
     ok(TBT_OPEN_ROUTE_SLOT == 32 && TBT_OPEN_TARGET_PORT == 34,
        "OPEN route/target offsets", NULL);
@@ -3128,36 +3134,36 @@ static void test_replay(void)
 
     /* The production 32-group shape (256 carriers, n=4, m=4) reaches the K
      * cap of 66: the 64-block sliding window plus two blocks of slack. */
-    ok_u32(tbt_fec_replay_k_for(32, 4, 4, 8192), 66,
+    ok_u32(tbt_fec_replay_k_for(32, 4, 4, TBT_FEC_S), 66,
            "production K from the shape");
-    ok(tbt_fec_replay_k_for(32, 4, 4, 8192) >= 24,
+    ok(tbt_fec_replay_k_for(32, 4, 4, TBT_FEC_S) >= 24,
        "production K is at least 24", NULL);
-    ok((u32)(tbt_fec_replay_k_for(32, 4, 4, 8192) - 2) + 2 <=
-           tbt_fec_replay_k_for(32, 4, 4, 8192),
+    ok((u32)(tbt_fec_replay_k_for(32, 4, 4, TBT_FEC_S) - 2) + 2 <=
+           tbt_fec_replay_k_for(32, 4, 4, TBT_FEC_S),
        "credit window plus slack fits the ring", NULL);
-    ok_u32(tbt_fec_replay_k_for(256, 128, 128, 8192), 0,
+    ok_u32(tbt_fec_replay_k_for(256, 128, 128, TBT_FEC_S), 0,
            "over-budget shape has no K");
-    r = tbt_fec_replay_new(32, 4, 4, 8192);
+    r = tbt_fec_replay_new(32, 4, 4, TBT_FEC_S);
     ok(r != NULL, "production replay ring allocated", NULL);
     ok_u32(tbt_fec_replay_k(r), 66, "production replay K=66");
-    ok(tbt_fec_replay_bytes(32, 4, 4, 8192, 66) <=
+    ok(tbt_fec_replay_bytes(32, 4, 4, TBT_FEC_S, 66) <=
            TBT_FEC_REPLAY_BUDGET,
        "production replay descriptors and hot pool fit", NULL);
     tbt_fec_replay_free(r);
 
     /* Every stripe now reaches the K cap of 66; only 8 block planes are
      * resident, so the ring stays inside 20 MiB. */
-    ok_u32(tbt_fec_replay_k_for(4, 4, 4, 8192), 66,
+    ok_u32(tbt_fec_replay_k_for(4, 4, 4, TBT_FEC_S), 66,
            "32-carrier K from the budget");
-    ok_u32(tbt_fec_replay_k_for(8, 4, 4, 8192), 66,
+    ok_u32(tbt_fec_replay_k_for(8, 4, 4, TBT_FEC_S), 66,
            "64-carrier K from the budget");
-    ok(tbt_fec_replay_bytes(4, 4, 4, 8192, 66) <= TBT_FEC_REPLAY_BUDGET,
+    ok(tbt_fec_replay_bytes(4, 4, 4, TBT_FEC_S, 66) <= TBT_FEC_REPLAY_BUDGET,
        "32-carrier ring fits the budget", NULL);
-    ok(tbt_fec_replay_bytes(8, 4, 4, 8192, 66) <= TBT_FEC_REPLAY_BUDGET,
+    ok(tbt_fec_replay_bytes(8, 4, 4, TBT_FEC_S, 66) <= TBT_FEC_REPLAY_BUDGET,
        "64-carrier ring fits the budget", NULL);
 
     /* A shape that cannot hold one super-block in the budget gets no ring. */
-    r = tbt_fec_replay_new(256, 128, 128, 8192);
+    r = tbt_fec_replay_new(256, 128, 128, TBT_FEC_S);
     ok(r == NULL, "replay refuses a shape over budget", NULL);
     tbt_fec_replay_free(r);
     ok_u32(tbt_fec_replay_k(NULL), 0, "replay K of NULL");
@@ -3308,20 +3314,20 @@ static void test_sclc_wire_profiles(void)
     c.k = 128;
     c.d = 64;
     c.codec_variant = 2;
-    c.L = 16;
-    c.block = 128;
+    c.L = TBT_FEC_SCLC_L_UP;
+    c.block = TBT_FEC_SCLC_BLOCK_UP;
     c.rate_ppm = 250000;
     c.flags = TBT_FEC_CFG_F_APPLY;
     c.groups = 8;
     ok_int(tbt_fec_cfg_pack(&c, cbuf), 0, "sclc cfg up: pack");
     ok_int(tbt_fec_cfg_unpack(cbuf, 256, &c2), 0, "sclc cfg up: unpack");
-    ok(c2.n == 8 && c2.m == 24 && c2.w == 16 && c2.k == 128 &&
+    ok(c2.n == 8 && c2.m == 24 && c2.w == 8 && c2.k == 64 &&
            c2.d == 64 && c2.groups == 8 && c2.codec_variant == 2 &&
-           c2.L == 16 && c2.block == 128 && c2.rate_ppm == 250000,
+           c2.L == 8 && c2.block == 64 && c2.rate_ppm == 250000,
        "sclc cfg up: round-trip", NULL);
     ok_int(tbt_fec_sclc_shape_of_cfg(&c2, 256, &sh), 0,
            "sclc cfg up: shape");
-    ok(sh.variant == TBT_FEC_SCLC_UP && sh.block == 128 && sh.L == 16 &&
+    ok(sh.variant == TBT_FEC_SCLC_UP && sh.block == 64 && sh.L == 8 &&
            sh.rate_ppm == 250 && sh.rate_256 == 64,
        "sclc cfg up: profile", NULL);
 
@@ -3329,6 +3335,9 @@ static void test_sclc_wire_profiles(void)
     c.n = 64;
     c.m = 192;
     c.k = 250;
+    c.L = TBT_FEC_SCLC_L_DOWN;
+    c.block = TBT_FEC_SCLC_BLOCK_DOWN;
+    c.groups = 1;
     ok_int(tbt_fec_sclc_shape_of_cfg(&c, 256, &sh), 0,
            "sclc cfg down: 25% split");
     ok(sh.variant == TBT_FEC_SCLC_DOWN && sh.rate_ppm == 250,
@@ -3350,8 +3359,8 @@ static void test_sclc_wire_profiles(void)
     f.flags = TBT_FEC_FBK_F_P_VALID;
     f.p_fast_ppm = 400000;
     f.codec_variant = 2;
-    f.L = 16;
-    f.block = 128;
+    f.L = TBT_FEC_SCLC_L_UP;
+    f.block = TBT_FEC_SCLC_BLOCK_UP;
     f.rate_ppm_current = 250000;
     f.rate_ppm_target = 400000;
     tbt_fec_bitmap_set(f.carrier_bitmap, 0);
@@ -3368,7 +3377,7 @@ static void test_sclc_wire_profiles(void)
     ok(fbuf[TBT_FEC_FBK_BITMAP + 31] == 0x80,
        "sclc fbk: bitmap byte 31 is not overlaid", NULL);
     ok(f2.p_fast_ppm == 400000, "sclc fbk: p_fast at +48", NULL);
-    ok(f2.codec_variant == 2 && f2.L == 16 && f2.block == 128 &&
+    ok(f2.codec_variant == 2 && f2.L == 8 && f2.block == 64 &&
            f2.rate_ppm_current == 250000 && f2.rate_ppm_target == 400000,
        "sclc fbk: extension round-trip", NULL);
 }
@@ -3382,7 +3391,7 @@ static void test_replay_alloc_balance(void)
     int i;
 
     before = tbt_fec_host_live_allocs();
-    r = tbt_fec_replay_new_k(32, 4, 4, 8192, 66);
+    r = tbt_fec_replay_new_k(32, 4, 4, TBT_FEC_S, 66);
     ok(r != NULL, "balance: ring", NULL);
     for (i = 0; i < 10; i++)
     {
