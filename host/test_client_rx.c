@@ -17,6 +17,7 @@
  */
 #define _GNU_SOURCE
 
+#define TBT_CLIENT_TEST_HOOKS 1
 #include "tbt_client_engine.h"
 #include "tbt_client_engine.c"
 
@@ -725,6 +726,7 @@ static void test_shape_rejection(void)
 static struct engine tx_e;
 static struct engine rx_e;
 static int tx_fake_fd = -1;
+static int tx_dead_fd = -1;
 
 static void tx_fake_carriers(void)
 {
@@ -764,6 +766,28 @@ static void tx_clear_carriers(void)
     }
 }
 
+/* A socket whose peer is gone: every write fails with EPIPE, exactly like a
+ * carrier that died between two records. */
+static void tx_kill_carrier(u16 index)
+{
+    int sv[2];
+
+    if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, sv))
+        abort();
+    close(sv[0]);
+    tx_dead_fd = sv[1];
+    tx_e.car[index]->fd = tx_dead_fd;
+}
+
+static void tx_close_dead(void)
+{
+    if (tx_dead_fd >= 0)
+    {
+        close(tx_dead_fd);
+        tx_dead_fd = -1;
+    }
+}
+
 static struct flow *tx_flow_new(void)
 {
     memset(&tx_e, 0, sizeof(tx_e));
@@ -783,11 +807,10 @@ static struct flow *tx_flow_new(void)
     return flow_alloc(&tx_e, 1, -1, true);
 }
 
-/* Feed every record the TX stored for its blocks into a fresh RX flow. */
-static void tx_deliver(struct flow *tx, size_t *bytes, u64 *next)
+/* A fresh RX flow that matches the TX shape and seed. */
+static struct flow *tx_rx_new(struct flow *tx)
 {
     struct flow *rx;
-    int b;
 
     memset(&rx_e, 0, sizeof(rx_e));
     rx_e.near = false;
@@ -804,6 +827,14 @@ static void tx_deliver(struct flow *tx, size_t *bytes, u64 *next)
     rx->rx_m = 24;
     rx->rx_groups = 8;
     rx->rx_shares = 32;
+    return rx;
+}
+
+/* Feed every record the TX stored for its blocks into the RX flow. */
+static void tx_rx_feed(struct flow *tx, struct flow *rx)
+{
+    int b;
+
     for (b = 0; b < TBT_REPLAY_BLOCKS; b++)
     {
         struct replay_block *r = &tx->replay[b];
@@ -826,8 +857,29 @@ static void tx_deliver(struct flow *tx, size_t *bytes, u64 *next)
                 flow_rx_store(rx, &h, rec + TBT_FEC_HDR_LEN);
             }
     }
+}
+
+static void tx_deliver(struct flow *tx, size_t *bytes, u64 *next)
+{
+    struct flow *rx = tx_rx_new(tx);
+
+    tx_rx_feed(tx, rx);
     *bytes = rx->rx_deliver_bytes;
     *next = rx->rx_next_block;
+    flow_free(&rx_e, rx);
+}
+
+/* Deliver and compare the bytes the application would have received. */
+static void tx_deliver_check(struct flow *tx, const u8 *expect, size_t len)
+{
+    struct flow *rx = tx_rx_new(tx);
+
+    tx_rx_feed(tx, rx);
+    CHECK(rx->rx_deliver_bytes == len,
+          "dead carrier: peer delivers the whole block");
+    CHECK(rx->out_len == len &&
+              (len == 0 || memcmp(rx->out, expect, len) == 0),
+          "dead carrier: delivered bytes match the source");
     flow_free(&rx_e, rx);
 }
 
@@ -1014,6 +1066,253 @@ static void test_tx_block_credit(void)
     CHECK(!flow_tx_block_credit_ok(tx),
           "blocks: seven unacked blocks remain the limit");
     CHECK(tx->tx_cur_len == 0, "blocks: no partial state after the seal");
+    flow_free(&tx_e, tx);
+    tx_clear_carriers();
+}
+
+/* One carrier dies with a block in flight. Its share handoff is refused and
+ * counted, the retry carries the share on a live carrier, the flow survives,
+ * and the peer's NACK replays it again from the ring. */
+static void test_tx_dead_carrier_share(void)
+{
+    const size_t nbytes = (size_t)8 * 8 * TBT_FEC_S; /* groups * n shares */
+    struct flow *tx = tx_flow_new();
+    struct tbt_fec_nack n;
+    struct tbt_fec_hdr h;
+    u8 body[TBT_FEC_NACK_LEN];
+    u8 *expect = malloc(nbytes);
+    size_t i;
+    u64 before;
+
+    if (!expect)
+        abort();
+    for (i = 0; i < nbytes; i++)
+        expect[i] = (u8)(0x91 + i * 7u);
+
+    tx_fake_carriers();
+    tx_kill_carrier(0);
+    CHECK(flow_tx_feed(tx, expect, nbytes) == 0,
+          "dead carrier: the feed does not fail the flow");
+    CHECK(!tx->dead, "dead carrier: the flow stays alive");
+    CHECK(tx_e.tx_carrier_dropped == 1,
+          "dead carrier: exactly the refused handoff is counted");
+    CHECK(tx_e.car[0]->dead && tx_e.car[0]->tx_records == 0,
+          "dead carrier: the written carrier is marked dead");
+    CHECK(tx_e.car[1]->tx_records == 2 && tx_e.car[2]->tx_records == 1,
+          "dead carrier: the retry rides a live carrier, the rest keep working");
+    CHECK(tx->tx_seq == nbytes / TBT_FEC_S && tx->tx_block == 1,
+          "dead carrier: the block still advances normally");
+    CHECK(tx->replay[0].used && tx->replay[0].lens[0] != 0,
+          "dead carrier: the dropped share stays in the replay ring");
+
+    memset(&n, 0, sizeof(n));
+    tbt_fec_bitmap_set(n.group_mask, 0);
+    tbt_fec_bitmap_set(n.share_mask, 0);
+    CHECK(tbt_fec_nack_pack(&n, body) == TBT_FEC_NACK_LEN,
+          "dead carrier: NACK packs");
+    memset(&h, 0, sizeof(h));
+    h.type = TBT_FEC_NACK;
+    h.sid = tx->sid;
+    h.block_id = 0;
+    h.payload_len = sizeof(body);
+    before = tx_e.car[1]->tx_records;
+    handle_nack(tx, &h, body);
+    CHECK(tx_e.car[1]->tx_records == before + 1,
+          "dead carrier: the NACK replay takes a live carrier");
+    CHECK(tx_e.car[0]->tx_records == 0,
+          "dead carrier: the replay never retries the dead carrier");
+
+    tx_deliver_check(tx, expect, nbytes);
+
+    /* Every carrier down: the share is dropped for the NACK, not fatal. */
+    for (i = 0; i < TBT_CAR_MAX; i++)
+        tx_e.car[i]->dead = true;
+    before = tx_e.tx_carrier_dropped;
+    CHECK(flow_tx_feed(tx, expect, TBT_FEC_S) == 0,
+          "dead carrier: no usable carrier does not fail the flow");
+    CHECK(tx_e.tx_carrier_dropped == before + 1,
+          "dead carrier: the unclaimed share waits for a NACK");
+    CHECK(!tx->dead, "dead carrier: the flow survives a full carrier outage");
+
+    free(expect);
+    flow_free(&tx_e, tx);
+    tx_close_dead();
+    tx_clear_carriers();
+}
+
+/* The application read loop is the path that used to RST and free the flow
+ * when one carrier refused its share. */
+static void test_tx_dead_carrier_app_read(void)
+{
+    const size_t nbytes = (size_t)8 * TBT_FEC_S;
+    struct flow *tx = tx_flow_new();
+    u8 *in = malloc(nbytes);
+    int sv[2];
+    size_t off = 0;
+
+    if (!in || socketpair(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK, 0, sv))
+        abort();
+    memset(in, 0x3c, nbytes);
+    tx_fake_carriers();
+    tx_kill_carrier(0);
+    while (off < nbytes)
+    {
+        ssize_t n = write(sv[1], in + off, nbytes - off);
+
+        if (n <= 0)
+            abort();
+        off += (size_t)n;
+    }
+    tx->app_fd = sv[0];
+    flow_app_read(tx);
+    CHECK(tx_e.flow[0] == tx && !tx->dead,
+          "dead carrier: the app read loop keeps the flow");
+    CHECK(tx_e.tx_carrier_dropped == 1,
+          "dead carrier: the app read loop counts the refusal");
+    CHECK(tx->tx_seq == (u64)nbytes / TBT_FEC_S,
+          "dead carrier: the app read loop sends every share");
+
+    close(sv[0]);
+    close(sv[1]);
+    tx->app_fd = -1;
+    free(in);
+    flow_free(&tx_e, tx);
+    tx_close_dead();
+    tx_clear_carriers();
+}
+
+/* The whole carrier population is unusable for one block: every handoff is
+ * counted, the flow survives, and once the carriers are back a NACK replays
+ * the block from the ring on its mapped carriers. */
+static void test_tx_all_carriers_down(void)
+{
+    const size_t nbytes = (size_t)8 * 8 * TBT_FEC_S;
+    struct flow *tx = tx_flow_new();
+    struct tbt_fec_nack n;
+    struct tbt_fec_hdr h;
+    u8 body[TBT_FEC_NACK_LEN];
+    u8 *expect = malloc(nbytes);
+    u64 total = 0;
+    size_t i;
+
+    if (!expect)
+        abort();
+    for (i = 0; i < nbytes; i++)
+        expect[i] = (u8)(0x20 + i * 5u);
+
+    tx_fake_carriers();
+    for (i = 0; i < TBT_CAR_MAX; i++)
+        tx_e.car[i]->dead = true;
+    CHECK(flow_tx_feed(tx, expect, nbytes) == 0,
+          "all down: the feed does not fail the flow");
+    CHECK(!tx->dead, "all down: the flow stays alive");
+    CHECK(tx_e.tx_carrier_dropped == (u64)8 * 32,
+          "all down: every DATA and PARITY handoff is counted");
+    CHECK(tx->replay[0].used, "all down: the block stays in the ring");
+
+    for (i = 0; i < TBT_CAR_MAX; i++)
+        tx_e.car[i]->dead = false;
+    memset(&n, 0, sizeof(n));
+    for (i = 0; i < 8; i++)
+        tbt_fec_bitmap_set(n.group_mask, (u16)i);
+    for (i = 0; i < 32; i++)
+        tbt_fec_bitmap_set(n.share_mask, (u16)i);
+    CHECK(tbt_fec_nack_pack(&n, body) == TBT_FEC_NACK_LEN,
+          "all down: the NACK packs");
+    memset(&h, 0, sizeof(h));
+    h.type = TBT_FEC_NACK;
+    h.sid = tx->sid;
+    h.block_id = 0;
+    h.payload_len = sizeof(body);
+    handle_nack(tx, &h, body);
+    for (i = 0; i < TBT_CAR_MAX; i++)
+        total += tx_e.car[i]->tx_records;
+    CHECK(total == (u64)8 * 32,
+          "all down: the NACK replays the whole block");
+    tx_deliver_check(tx, expect, nbytes);
+
+    free(expect);
+    flow_free(&tx_e, tx);
+    tx_clear_carriers();
+}
+
+/* A control record whose preferred carrier died moves to another carrier;
+ * with no carrier at all it waits in the pending array and leaves on the
+ * next flush. Carrier faults never drop control records. */
+static void test_ctl_dead_carrier(void)
+{
+    struct flow *tx = tx_flow_new();
+    u64 before;
+    int i;
+
+    tx_fake_carriers();
+    tx_kill_carrier(8); /* flow_send_marker(group 0) prefers carrier 8 */
+    before = tx_e.car[0]->tx_records;
+    CHECK(flow_send_marker(tx, 0) == 0,
+          "control: the marker survives its dead carrier");
+    CHECK(tx_e.npending == 0, "control: a live carrier takes the record");
+    CHECK(tx_e.car[0]->tx_records == before + 1,
+          "control: the record moved to another carrier");
+    CHECK(tx_e.tx_carrier_dropped == 0,
+          "control: a carrier fault is not a data drop");
+
+    for (i = 0; i < TBT_CAR_MAX; i++)
+        tx_e.car[i]->up = false;
+    CHECK(flow_send_open(tx, true) == 0,
+          "control: OPEN parks when no carrier is up");
+    CHECK(tx_e.npending == 1, "control: one record is queued");
+    tx_e.car[5]->up = true;
+    before = tx_e.car[5]->tx_records;
+    pending_flush(&tx_e);
+    CHECK(tx_e.npending == 0, "control: the pending flush empties the queue");
+    CHECK(tx_e.car[5]->tx_records == before + 1,
+          "control: the parked record leaves on the revived carrier");
+
+    flow_free(&tx_e, tx);
+    tx_close_dead();
+    tx_clear_carriers();
+}
+
+/* A local encode failure is not a carrier fault: the flow must die. */
+static void test_tx_encode_failure(void)
+{
+    static const u8 key[TBT_CRYPTO_KEY_LEN];
+    static const u8 nonce[TBT_CRYPTO_NONCE_LEN];
+    struct flow *tx = tx_flow_new();
+
+    tx_fake_carriers();
+    memset(payload, 0x5a, sizeof(payload));
+    CHECK(tbt_crypto_init(&tx_e.crypto.tx, key, nonce, 0) == 0,
+          "encode failure: crypto context");
+    tx_e.crypto_on = true;
+    tx->tx_blk_seq0 = TBT_CRYPTO_SEQ_MAX + 1;
+    CHECK(flow_tx_feed(tx, payload, TBT_FEC_S) == -EIO,
+          "encode failure fails the flow feed");
+    CHECK(tx_e.tx_carrier_dropped == 0,
+          "encode failure is not a carrier drop");
+    CHECK(tx_e.car[0]->tx_records == 0 && !tx_e.car[0]->dead,
+          "encode failure never reaches a carrier");
+    CHECK(tx->tx_seq == 0 && !tx->replay[0].used,
+          "encode failure stops before replay and TX accounting");
+    flow_free(&tx_e, tx);
+    tx_clear_carriers();
+}
+
+/* A replay allocation failure is not a carrier fault either: the flow must
+ * die instead of sending a share it cannot repair. */
+static void test_tx_replay_alloc_failure(void)
+{
+    struct flow *tx = tx_flow_new();
+
+    tx_fake_carriers();
+    memset(payload, 0x5a, sizeof(payload));
+    tx_e.fail_replay_alloc = true;
+    CHECK(flow_tx_feed(tx, payload, TBT_FEC_S) == -EIO,
+          "replay ENOMEM fails the flow feed");
+    CHECK(tx_e.tx_carrier_dropped == 0,
+          "replay ENOMEM is not a carrier drop");
+    CHECK(tx_e.car[0]->tx_records == 0 && !tx_e.car[0]->dead,
+          "replay ENOMEM never touches a carrier");
     flow_free(&tx_e, tx);
     tx_clear_carriers();
 }
@@ -1677,6 +1976,7 @@ static void test_fbk_commit(void)
 
 int main(void)
 {
+    signal(SIGPIPE, SIG_IGN);
     test_marker_short_sequence();
     test_credit_inflight();
     test_window_and_nack_base();
@@ -1702,6 +2002,12 @@ int main(void)
     test_tx_idle_3();
     test_tx_idle_200();
     test_tx_idle_short_then_long();
+    test_tx_dead_carrier_share();
+    test_tx_dead_carrier_app_read();
+    test_tx_all_carriers_down();
+    test_ctl_dead_carrier();
+    test_tx_encode_failure();
+    test_tx_replay_alloc_failure();
     test_fbk_commit();
 
     printf("test_client_rx: %d checks, %d failures\n", checks, failures);

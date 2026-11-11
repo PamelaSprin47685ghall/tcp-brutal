@@ -124,6 +124,14 @@ and moves independently of the module version.
   with 61,525 shares, all byte-exact. The bound is now
   `max(4 x stall_ns, 30 s)`, capped at 300 s, and the predicate lives in
   `tbt_carrier_policy.h` where `host/test_carrier_policy.c` compiles it.
+- A single dead carrier no longer terminates a userspace client flow. A
+  DATA/PARITY write that the mapped carrier refuses is a dropped share, not a
+  flow-fatal error: the handoff is counted in `tx_carrier_dropped`, the copy
+  is retried on another up carrier, and if no carrier takes it the replay
+  ring and the peer's NACK own the repair. Control records retry across the
+  up carriers and fall back to `pending[]` on any carrier fault, and a HELLO
+  stays on its own carrier instead of being parked for another one. Local
+  encode and replay-allocation failures still fail the flow.
 - The ACK credit is now counted in shares (`groups*(n+m)` per block), not
   DATA packets; it supersedes the 0.8.0 packet-credit model. The cap is
   16384 shares (64 blocks x 256); the host formula is

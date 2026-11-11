@@ -312,10 +312,16 @@ struct engine
     u32 drop_ppm;
     u64 rng;
     u64 drops;
+    /* DATA/PARITY share handoffs a carrier refused. The record stays in the
+     * replay ring, so a retry or the peer's NACK still delivers it. */
+    u64 tx_carrier_dropped;
     u64 rx_unknown_sid;
 
     struct pending_ctl pending[TBT_CTL_PENDING];
     int npending;
+#ifdef TBT_CLIENT_TEST_HOOKS
+    bool fail_replay_alloc; /* in-process tests force replay_store ENOMEM */
+#endif
 };
 
 static u64 now_ns(void)
@@ -521,58 +527,114 @@ static struct carrier *ctl_carrier(struct engine *e)
     return NULL;
 }
 
-/* Wrap one FEC record in the HTTP carrier container and write it. A data
- * record that finds its carrier full is dropped; the peer's NACK replays it.
- * A control record is queued for the timer instead. */
-static int send_record_to(struct engine *e, struct carrier *c, const u8 *rec,
-                          size_t len, bool control)
+/* Wrap one FEC record in the HTTP carrier container and write it to that
+ * carrier. Returns 0, -EAGAIN while the carrier's buffer is full, the
+ * carrier's write errno after marking it dead, or -EINVAL when the record
+ * did not encode. -EINVAL is a local fault, not a carrier fault. */
+static int carrier_send_record(struct carrier *c, const u8 *rec, size_t len)
 {
     char frame[TBT_HTTP_FEC_FRAME_MAX];
     size_t flen;
     int err;
 
-    if (!c)
-        return -ENOTCONN;
     flen = tbt_http_fec_chunk_encode(frame, sizeof(frame), rec, len);
     if (!flen)
         return -EINVAL;
+    if (!c)
+        return -ENOTCONN;
     err = carrier_queue(c, (const u8 *)frame, flen);
-    if (err == -EAGAIN)
-    {
-        if (control)
-        {
-            if (e->npending < TBT_CTL_PENDING && len <= TBT_FEC_REC_MAX)
-            {
-                memcpy(e->pending[e->npending].rec, rec, len);
-                e->pending[e->npending].len = (u16)len;
-                e->npending++;
-                return 0;
-            }
-        }
-        return -EAGAIN;
-    }
     if (!err)
         c->tx_records++;
     return err;
 }
 
-static int send_record(struct engine *e, struct carrier *c, const u8 *rec,
-                       size_t len, bool control)
+/* Try a control record on its preferred carrier, then on every other up
+ * carrier. A carrier that dies or fills mid-attempt is skipped; the record
+ * is never dropped here. Returns 0, -EINVAL for a bad record, or -ENOTCONN
+ * when no carrier could take it. */
+static int ctl_try_carriers(struct engine *e, struct carrier *prefer,
+                            const u8 *rec, size_t len)
 {
-    if (!c)
-        c = ctl_carrier(e);
-    if (!c)
+    u16 i;
+    int err = -ENOTCONN;
+
+    if (!prefer)
+        prefer = ctl_carrier(e);
+    if (prefer && prefer->up && !prefer->dead && prefer->fd >= 0)
+        err = carrier_send_record(prefer, rec, len);
+    if (!err)
+        return 0;
+    if (err == -EINVAL)
+        return err;
+    for (i = 0; i < e->n_car; i++)
     {
-        if (control && e->npending < TBT_CTL_PENDING && len <= TBT_FEC_REC_MAX)
-        {
-            memcpy(e->pending[e->npending].rec, rec, len);
-            e->pending[e->npending].len = (u16)len;
-            e->npending++;
+        struct carrier *c = e->car[i];
+
+        if (!c || c == prefer || !c->up || c->dead || c->fd < 0)
+            continue;
+        err = carrier_send_record(c, rec, len);
+        if (!err)
             return 0;
-        }
-        return -ENOTCONN;
+        if (err == -EINVAL)
+            return err;
     }
-    return send_record_to(e, c, rec, len, control);
+    return -ENOTCONN;
+}
+
+/* Control records must survive a carrier that is unavailable right now:
+ * park the record in the pending array and let pending_flush() retry it on
+ * the next tick. A full pending array is the only control loss, and it is
+ * reported to the caller. */
+static int ctl_send(struct engine *e, struct carrier *prefer, const u8 *rec,
+                    size_t len)
+{
+    int err = ctl_try_carriers(e, prefer, rec, len);
+
+    if (!err)
+        return 0;
+    if (err == -EINVAL)
+        return err;
+    if (len <= TBT_FEC_REC_MAX && e->npending < TBT_CTL_PENDING)
+    {
+        memcpy(e->pending[e->npending].rec, rec, len);
+        e->pending[e->npending].len = (u16)len;
+        e->npending++;
+        return 0;
+    }
+    return -ENOTCONN;
+}
+
+/* Send one DATA or PARITY share. replay_store() has already kept the record,
+ * so a carrier that cannot take this copy costs one share, not the stream:
+ * the peer NACKs the share and handle_nack() replays it from the ring. The
+ * failed handoff is counted at once; the copy is then retried on the other
+ * carriers, and if none takes it the share waits for the NACK instead.
+ * Returns 0 for every outcome but a local encode failure (-EIO). */
+static int send_share(struct engine *e, u16 index, const u8 *rec, size_t len)
+{
+    struct carrier *c = carrier_at(e, index);
+    u32 i;
+    int err;
+
+    err = carrier_send_record(c, rec, len);
+    if (!err)
+        return 0;
+    if (err == -EINVAL)
+        return -EIO;
+    e->tx_carrier_dropped++;
+    for (i = 1; i <= e->n_car; i++)
+    {
+        struct carrier *alt = e->car[(index + i) % e->n_car];
+
+        if (!alt || alt == c || !alt->up || alt->dead || alt->fd < 0)
+            continue;
+        err = carrier_send_record(alt, rec, len);
+        if (!err)
+            return 0;
+        if (err == -EINVAL)
+            return -EIO;
+    }
+    return 0;
 }
 
 static void pending_flush(struct engine *e)
@@ -585,8 +647,8 @@ static void pending_flush(struct engine *e)
 
         if (!c)
             break;
-        if (send_record_to(e, c, e->pending[i].rec, e->pending[i].len,
-                           false) == 0)
+        if (ctl_try_carriers(e, c, e->pending[i].rec,
+                             e->pending[i].len) == 0)
         {
             e->pending[i] = e->pending[--e->npending];
             continue;
@@ -678,7 +740,7 @@ static int send_ctl_record(struct engine *e, struct flow *f, u8 type, u64 sid,
     if (make_record(e, &h, body, rec, &rlen))
         return -EINVAL;
     (void)f;
-    err = send_record(e, NULL, rec, rlen, true);
+    err = ctl_send(e, NULL, rec, rlen);
     return err;
 }
 
@@ -712,7 +774,8 @@ static int carrier_send_hello(struct engine *e, struct carrier *c)
     h.conv = TBT_CONV;
     tbt_raw_put_hdr(rec, &h, sizeof(body));
     memcpy(rec + TBT_HDR_LEN, body, sizeof(body));
-    err = send_record_to(e, c, rec, sizeof(rec), true);
+    /* HELLO belongs to this carrier; it must never move to another one. */
+    err = carrier_send_record(c, rec, sizeof(rec));
     if (!err)
         c->hello_sent = true;
     return err;
@@ -1048,6 +1111,10 @@ static int replay_store(struct flow *f, u64 block_id, u16 group, u16 share,
     {
         if (!r->recs)
         {
+#ifdef TBT_CLIENT_TEST_HOOKS
+            if (f->e->fail_replay_alloc)
+                return -ENOMEM;
+#endif
             r->recs = calloc(total, TBT_FEC_REC_MAX);
             r->lens = calloc(total, sizeof(*r->lens));
             if (!r->recs || !r->lens)
@@ -1114,7 +1181,9 @@ static int flow_send_data(struct flow *f, u16 group, u16 share, u16 len,
     h.reserved = group;
     if (make_record(e, &h, plane, rec, &rlen))
         return -EIO;
-    (void)replay_store(f, f->tx_block, group, share, rec, rlen);
+    err = replay_store(f, f->tx_block, group, share, rec, rlen);
+    if (err)
+        return err;
     f->tx_last_len = len;
     f->tx_seq = h.seq + 1;
     if (!f->tx_pkt_base_set)
@@ -1128,8 +1197,7 @@ static int flow_send_data(struct flow *f, u16 group, u16 share, u16 len,
         e->drops++;
         return 0;
     }
-    err = send_record(e, carrier_at(e, carrier), rec, rlen, false);
-    return err == -EAGAIN ? 0 : err;
+    return send_share(e, carrier, rec, rlen);
 }
 
 static int flow_send_parity(struct flow *f, u16 group, u16 win_len,
@@ -1174,16 +1242,17 @@ static int flow_send_parity(struct flow *f, u16 group, u16 win_len,
         h.reserved = group;
         if (make_record(e, &h, parity_ptrs[i], rec, &rlen))
             return -EIO;
-        (void)replay_store(f, f->tx_block, group, (u16)(f->n + i), rec,
-                           rlen);
+        if (replay_store(f, f->tx_block, group, (u16)(f->n + i), rec,
+                         rlen))
+            return -EIO;
         carrier = (u16)(group * (f->n + f->m) + f->n + i);
         if (e->drop_ppm && (u32)(rng_next(e) % 1000000u) < e->drop_ppm)
         {
             e->drops++;
             continue;
         }
-        err = send_record(e, carrier_at(e, carrier), rec, rlen, false);
-        if (err && err != -EAGAIN)
+        err = send_share(e, carrier, rec, rlen);
+        if (err)
             return err;
     }
     return 0;
@@ -1212,9 +1281,10 @@ static int flow_send_marker(struct flow *f, u16 group)
     h.reserved = group;
     if (make_record(e, &h, NULL, rec, &rlen))
         return -EIO;
-    (void)replay_store(f, f->tx_block, group, f->n, rec, rlen);
+    if (replay_store(f, f->tx_block, group, f->n, rec, rlen))
+        return -EIO;
     carrier = (u16)(group * (f->n + f->m) + f->n);
-    return send_record(e, carrier_at(e, carrier), rec, rlen, true);
+    return ctl_send(e, carrier_at(e, carrier), rec, rlen);
 }
 
 static void flow_tx_advance(struct flow *f)
@@ -1295,7 +1365,7 @@ static int flow_send_open(struct flow *f, bool echo)
     tbt_raw_put_hdr(rec, &h, sizeof(body));
     memcpy(rec + TBT_HDR_LEN, body, sizeof(body));
     f->open_sent = true;
-    return send_record(e, NULL, rec, sizeof(rec), true);
+    return ctl_send(e, NULL, rec, sizeof(rec));
 }
 
 static int flow_send_fin(struct flow *f)
@@ -1320,7 +1390,7 @@ static int flow_send_fin(struct flow *f)
     tbt_raw_put_hdr(rec, &h, sizeof(body));
     memcpy(rec + TBT_HDR_LEN, body, sizeof(body));
     f->fin_sent = true;
-    return send_record(e, NULL, rec, sizeof(rec), true);
+    return ctl_send(e, NULL, rec, sizeof(rec));
 }
 
 static int flow_send_rst(struct flow *f)
@@ -1336,7 +1406,7 @@ static int flow_send_rst(struct flow *f)
     h.sid_lo = (u32)f->sid;
     h.sid_hi = (u8)(f->sid >> 32);
     tbt_raw_put_hdr(rec, &h, 0);
-    return send_record(e, NULL, rec, sizeof(rec), true);
+    return ctl_send(e, NULL, rec, sizeof(rec));
 }
 
 static int flow_send_cfg(struct flow *f)
@@ -2434,9 +2504,9 @@ static void handle_nack(struct flow *f, const struct tbt_fec_hdr *h,
             carrier = (u16)(group * (r->n + r->m) + share);
             /* A replay is a response to an observed loss, so it bypasses
              * the test-only drop injector. */
-            (void)send_record(e, carrier_at(e, carrier),
-                              r->recs + (size_t)idx * TBT_FEC_REC_MAX,
-                              r->lens[idx], false);
+            (void)send_share(e, carrier,
+                             r->recs + (size_t)idx * TBT_FEC_REC_MAX,
+                             r->lens[idx]);
         }
     }
 }
@@ -3457,8 +3527,9 @@ int tbt_engine_run(const struct tbt_engine_cfg *cfg)
     }
     if (e->cfg.verbose)
         fprintf(stderr,
-                "tbt_client: stop up=%u drops=%llu flows=%d\n", e->up_count,
-                (unsigned long long)e->drops,
+                "tbt_client: stop up=%u drops=%llu tx_carrier_dropped=%llu flows=%d\n",
+                e->up_count, (unsigned long long)e->drops,
+                (unsigned long long)e->tx_carrier_dropped,
                 e->flow[0] ? 1 : 0);
     engine_cleanup(e);
     free(e);
