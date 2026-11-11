@@ -2213,12 +2213,25 @@ static void tbt_fec_tx_stall_diag(struct tbt_session *sess,
             char dh[TBT_FEC_BITMAP_BYTES * 2 + 1];
             char ph[TBT_FEC_BITMAP_BYTES * 2 + 1];
 
+            u8 rbm[TBT_FEC_BITMAP_BYTES];
+            char rdh[TBT_FEC_BITMAP_BYTES * 2 + 1];
+            char rph[TBT_FEC_BITMAP_BYTES * 2 + 1];
+            u16 s;
+
             tbt_fec_diag_bm(dh, tx->g[g].sent, 0, tx->blk_n);
             tbt_fec_diag_bm(ph, tx->g[g].sent, tx->blk_n, tx->blk_m);
-            pr_info_ratelimited("tbtun: fec TX block bitmap block=%llu group=%u n=%u m=%u seq0=%llu data=%s parity=%s\n",
+            memset(rbm, 0, sizeof(rbm));
+            if (tx->replay)
+                for (s = 0; s < (u16)(tx->blk_n + tx->blk_m); s++)
+                    if (tbt_fec_replay_has(tx->replay,
+                                           READ_ONCE(tx->cur_block), g, s))
+                        tbt_fec_bitmap_set(rbm, s);
+            tbt_fec_diag_bm(rdh, rbm, 0, tx->blk_n);
+            tbt_fec_diag_bm(rph, rbm, tx->blk_n, tx->blk_m);
+            pr_info_ratelimited("tbtun: fec TX block bitmap block=%llu group=%u n=%u m=%u seq0=%llu data=%s parity=%s replay_data=%s replay_parity=%s\n",
                                 READ_ONCE(tx->cur_block), g,
                                 READ_ONCE(tx->blk_n), READ_ONCE(tx->blk_m),
-                                READ_ONCE(tx->blk_seq0), dh, ph);
+                                READ_ONCE(tx->blk_seq0), dh, ph, rdh, rph);
         }
     }
 }
