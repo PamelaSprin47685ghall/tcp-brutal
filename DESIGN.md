@@ -489,15 +489,19 @@ adaptive one: `FEC_CFG` grows to 48 bytes and names the shape switch,
   the delivery frontier even when no share of it was seen: the receiver asks
   parity 0 for each group, and the sender's ring states the shape. A stale
   final-block tail of 0 with a present DATA share is not treated as empty;
-  the share is kept and parity/NACK states the real cut. The parity reply
-  starts at row `s % m`, which always covers DATA share `s` under the band
-  matrix, and falls back to the other covering rows; a fixed row 0 does not
-  cover shares with `s % m >= band`. A closed short block (`win_len < n`)
-  sends row 0 only, with the real `win_len`/`epoch`; the receiver does not
-  NACK its padding DATA shares (`fec_nack_pad_skip` counts a skipped
+  the share is kept and parity/NACK states the real cut. A parity reply
+  names the rows the sender kept: `tbt_fec_tx_parity_count` is
+  `min(m, win_len)` for a short downlink block and `max(win_len, 10)` for a
+  32-share uplink group, and a full block keeps all `m`. The downlink codec
+  gives wire parity bit `b` the check that carries payload bit `b` of the
+  same coupling block, so rows `0..win_len-1` cover the first `win_len`
+  DATA shares one for one (no extra wire bytes); its wake line drops the
+  delta0 margin when `real * 8 <= n && n <= m`. A closed short block
+  (`win_len < n`) states the real `win_len`/`epoch`, and the receiver does
+  not NACK its padding DATA shares (`fec_nack_pad_skip` counts a skipped
   request), so it learns the cut instead of waiting for a share that never
-  exists. A short block also keeps at most 8 KiB of parity rather than a full
-  1 MiB block (`fec_short_parity_saved`). The empty
+  exists. A short block keeps at most `rows` shares of parity rather than a
+  full `m`-share block (`fec_short_parity_saved`). The empty
   marker is a control record: it rides any up carrier, is stored in the replay
   ring, and a failed send is logged and re-armed; the NACK scan probes every
   empty group of the blocked super-block, not only the frontier group. A
@@ -1441,10 +1445,13 @@ The replay ring keeps 66 logical slots and an 8-block hot pool inside
 first store and released when the ACK passes it. The RX arena keeps 66 logical slots,
 allocates each `(n+m)*S` block buffer on its first share, and returns it at delivery;
 the hot pool holds at most two blocks (4 MiB at 2 MiB/block). The packetizer source
-ring is capped at 16 MiB (the 64-block flight window lives in the lazy replay
-planes, not in the unencoded FIFO); output queues keep 4096
-records under a 64 MiB byte mark; credit is 64 blocks (16384 shares), and both
-parent windows are 16 MiB at S=1024 (64 MiB of source at S=8192). An eager 66-slot replay plane plus an eager 66-slot RX arena would
+ring is capped by `local_queue_bytes / 2` (16 MiB ceiling; 512 KiB at the
+default 1 MiB budget), while the 64-block flight window lives in the lazy
+replay planes, not in the unencoded FIFO. Output queues keep 4096
+records under a 64 MiB byte mark; credit is 64 blocks (16384 shares), and the
+parent socket asks `local_queue_bytes / 4` per direction (256 KiB, 512 KiB
+effective, at the default 1 MiB; 8 MiB, 16 MiB effective, at the 32 MiB
+high-BDP setting). An eager 66-slot replay plane plus an eager 66-slot RX arena would
 be about 139 MiB + 132 MiB; the lazy form avoids that, and RX pages are committed only
 while blocks are live.
 Below `TBT_FEC_MEM_PAUSE_KB` (180 MiB) the packetizer shrinks the replay pool and
@@ -2264,9 +2271,11 @@ holding the socket lock. The reset path (`tbt_kill_work -> tbt_sock_detach`) can
 work item, and `cancel_work_sync()` then waits for the sleeper forever: QEMU reported
 `INFO: task kworker blocked for more than 122 s` in exactly that stack. Delivery is
 therefore `MSG_DONTWAIT`, and the reset close runs on `system_dfl_wq` so it never shares
-a pool with the work it cancels. The public/target socket asks for 8 MiB
-send/receive with `SO_SNDBUFFORCE`/`SO_RCVBUFFORCE`, so the kernel holds 16 MiB per
-direction and falls back to the capped `SO_*BUF` without the capability; a carrier gets
+a pool with the work it cancels. The public/target socket asks for
+`local_queue_bytes / 4` send/receive with
+`SO_SNDBUFFORCE`/`SO_RCVBUFFORCE`: 256 KiB at the default 1 MiB budget (512 KiB per
+direction after the kernel's doubling), or 8 MiB (16 MiB per direction) at the 32 MiB
+high-BDP setting. It falls back to the capped `SO_*BUF` without the capability; a carrier gets
 its own 0.8 MiB per-direction buffer with the locks clear, so BBR autotuning can grow
 it toward the subflow BDP (§5.4). The default 16 KiB buffer is not the first thing the
 tunnel hits.

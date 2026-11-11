@@ -27,6 +27,7 @@ struct tbt_engine_cfg
     struct tbt_cfg cfg;
     u32 drop_ppm;  /* drop this share of first-flight DATA/PARITY records */
     u32 run_ms;    /* stop after this long; 0 = run until a fatal error */
+    u32 local_queue_bytes; /* app-socket buffer bound; 0 = default */
     int verbose;
 };
 

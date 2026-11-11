@@ -236,6 +236,13 @@ static void fill_cfg(struct tbt_engine_cfg *ec, bool near, u16 base,
     }
     ec->drop_ppm = drop_ppm;
     ec->run_ms = 120000;
+    /* A/B aid for the local queue bound; the default is the measured one. */
+    {
+        const char *lq = getenv("TBT_LOOPBACK_LOCAL_QUEUE");
+
+        ec->local_queue_bytes = lq ? (u32)strtoul(lq, NULL, 0)
+                                   : TBT_LOCAL_QUEUE_DEFAULT;
+    }
     ec->verbose = 1;
 }
 
@@ -340,6 +347,8 @@ int main(void)
     size_t sent = 0, got = 0;
     u64 rng = 0x123456789abcdefull;
     bool shut = false;
+    struct timespec t0, t1;
+    double mbps;
     int status = 0;
     int i;
 
@@ -411,6 +420,7 @@ int main(void)
     sha_update(&sha_tx, data, total);
     sha_final(&sha_tx, dig_tx);
     sha_init(&sha_rx);
+    clock_gettime(CLOCK_MONOTONIC, &t0);
 
     while (sent < total || got < total)
     {
@@ -476,6 +486,10 @@ int main(void)
     if (sent == total && !shut)
         (void)shutdown(fd, SHUT_WR);
     close(fd);
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    mbps = (double)total * 2.0 * 1000.0 /
+           ((double)(t1.tv_sec - t0.tv_sec) * 1000.0 +
+            (double)(t1.tv_nsec - t0.tv_nsec) / 1e6) / 1e6;
     sha_final(&sha_rx, dig_rx);
     sha_hex(dig_tx, hex_tx);
     sha_hex(dig_rx, hex_rx);
@@ -487,8 +501,10 @@ int main(void)
         status = 1;
     }
     if (status == 0)
-        printf("PASS: %d MiB + 10000 B echo sha256=%s drop_ppm=%u\n",
-               TBT_LOOPBACK_MB, hex_tx, (unsigned)TBT_LOOPBACK_DROP);
+        printf("PASS: %d MiB + 10000 B echo sha256=%s drop_ppm=%u "
+               "local_queue=%u rate=%.1f MB/s\n",
+               TBT_LOOPBACK_MB, hex_tx, (unsigned)TBT_LOOPBACK_DROP,
+               near_cfg.local_queue_bytes, mbps);
     free(data);
     free(back);
 

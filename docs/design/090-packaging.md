@@ -679,9 +679,12 @@ make -f deploy/090/Makefile package MIHOMO_VERSION=vX.Y.Z
    在 PSK session re-incarnation 落地前，near 重启后必须先让 far 的旧 session
    失效（重启模块或等它回收）才能重新建链。
 6. **`tbt_parent_setsockbuf` 的 8 MiB 与 16 MiB 环形缓冲会放大 bufferbloat。**
-   near 父监听 socket 设 8 MiB（`tbt_sock.c:707-710`），FEC 环是 16 MiB。长 RTT
-   链路上两者把排队延迟推高，吞吐提升的代价是 RTT 膨胀。这项调优单独跟踪，
-   0.9.0 不在这里改。
+   near 父监听 socket 设 8 MiB（`tbt_sock.c:709`），FEC 环是 16 MiB。0.9.0 用
+   `local_queue_bytes` 把它收成一个默认 1 MiB 的本地队列预算：socket 请求
+   256 KiB（内核翻倍为 512 KiB），未编码环 512 KiB；一个 PING/DNS 帧在饱和上传
+   后面最多等约 1 MiB，而不是 32 MiB。400 ms / 128 MB/s 的高 BDP 实验把该参数
+   设为 32 MiB（33554432）即恢复旧的 8 MiB 请求 + 16 MiB 环。宿主客户端用同名
+   userspace 键。
 
 因此交付顺序应为：
 

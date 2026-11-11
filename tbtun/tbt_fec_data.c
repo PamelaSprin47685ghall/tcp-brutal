@@ -8413,9 +8413,17 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     }
     {
         u64 want = (u64)tx->credit * TBT_FEC_S;
+        u32 cap = tbt_local_ring_cap(READ_ONCE(local_queue_bytes));
 
         if (want > TBT_FEC_TX_RING_MAX)
             want = TBT_FEC_TX_RING_MAX;
+        /* The other half of the local queue budget: the parent socket
+         * buffers hold local_queue / 2, this unencoded capture FIFO the
+         * rest. The credit window and the 64-block flight window live in
+         * the replay plane, not here, so the cap does not shrink the
+         * carrier BDP. */
+        if (want > cap)
+            want = cap;
         if (want < TBT_FEC_TX_RING)
             want = TBT_FEC_TX_RING;
         tx->ring_size = (u32)want;

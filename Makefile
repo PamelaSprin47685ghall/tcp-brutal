@@ -204,6 +204,8 @@ HOST_MUX_SRCS   := host/test_mux.c tbtun/tbt_mux.c
 HOST_MUX_HDRS   := tbtun/tbt_mux.h
 HOST_CAPTURE_POKE := host/test_capture_poke
 HOST_CAPTURE_POKE_HDRS := tbtun/tbt_fec.h tbtun/tbt_uapi.h
+HOST_LOCAL_QUEUE := host/test_local_queue
+HOST_LOCAL_QUEUE_HDRS := tbtun/tbt_uapi.h
 
 # The userspace client links the module's pure C units and adds only the
 # session/socket engine. The library is the reusable half: 0.8.x Android and
@@ -359,6 +361,7 @@ check: dkms-srcs-check
 # so the long host-test list stays readable.
 host-test: $(HOST_CARRIER_POLICY)
 host-test: $(HOST_CAPTURE_POKE)
+host-test: $(HOST_LOCAL_QUEUE)
 $(GOLDEN_V080): $(GOLDEN_V080_SRCS) $(GOLDEN_V080_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ $(GOLDEN_V080_SRCS)
 
@@ -407,6 +410,7 @@ host-test: $(HOST_TEST) $(HOST_FUZZ) $(HOST_HTTP) $(HOST_CRYPTO) $(HOST_REORDER)
 	@./$(HOST_WIRE_COMPAT)
 	@./$(HOST_RX_BUDGET)
 	@./$(HOST_CAPTURE_POKE)
+	@./$(HOST_LOCAL_QUEUE)
 	@./$(HOST_MUX)
 	@./$(HOST_CLIENT_LOOPBACK)
 	@./$(HOST_CLIENT_WIRE)
@@ -595,6 +599,9 @@ $(HOST_RX_BUDGET): $(HOST_RX_BUDGET_SRCS) $(HOST_RX_BUDGET_HDRS)
 $(HOST_CAPTURE_POKE): host/test_capture_poke.c $(HOST_CAPTURE_POKE_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ host/test_capture_poke.c
 
+$(HOST_LOCAL_QUEUE): host/test_local_queue.c $(HOST_LOCAL_QUEUE_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) -I tbtun -o $@ host/test_local_queue.c
+
 host/test_fec_sclc_data_san: $(HOST_SCLC_DATA_SRCS) $(HOST_SCLC_DATA_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ $(HOST_SCLC_DATA_SRCS)
 
@@ -704,7 +711,7 @@ host-test-san: host/test_capture_poke_san
 		echo "host-test-san: skipped, $(HOSTCC) cannot link -fsanitize=address,undefined"; \
 	fi
 
-host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fin_tail_san host/test_cell_tail_san host/test_mem_budget_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_batch_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_shapes_san host/test_close_wake_san host/test_hold_san host/test_portmap_san host/test_map_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_invariants_san host/test_wire_compat_san host/test_rx_budget_san host/test_mux_san host/test_client_loopback_san host/test_client_wire_san host/test_client_rx_san $(HTTP_RFC_GEN_SAN)
+host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san host/test_http_fuzz_san host/test_crypto_san host/test_fec_san host/test_fin_tail_san host/test_cell_tail_san host/test_mem_budget_san host/test_fec_rx_san host/test_fec_switch_san host/test_fec_out_san host/test_batch_san host/test_fec_adapt_san host/test_fec_adapt_sclc_san host/test_fec_sclc_san host/test_fec_sclc_shapes_san host/test_close_wake_san host/test_hold_san host/test_portmap_san host/test_map_san host/test_lifetime_san host/test_sclc_uplink_san host/test_fec_sclc_data_san host/test_fault_san host/test_invariants_san host/test_wire_compat_san host/test_rx_budget_san host/test_local_queue_san host/test_mux_san host/test_client_loopback_san host/test_client_wire_san host/test_client_rx_san $(HTTP_RFC_GEN_SAN)
 	@./host/test_parse_san
 	@./host/test_fuzz_san
 	@./host/test_http_san
@@ -735,6 +742,7 @@ host-test-san-run: host/test_parse_san host/test_fuzz_san host/test_http_san hos
 	@./host/test_wire_compat_san
 	@./host/test_rx_budget_san
 	@./host/test_capture_poke_san
+	@./host/test_local_queue_san
 	@./host/test_mux_san
 	@./host/test_client_loopback_san
 	@./host/test_client_wire_san
@@ -830,6 +838,9 @@ host/test_rx_budget_san: $(HOST_RX_BUDGET_SRCS) $(HOST_RX_BUDGET_HDRS)
 host/test_capture_poke_san: host/test_capture_poke.c $(HOST_CAPTURE_POKE_HDRS)
 	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ host/test_capture_poke.c
 
+host/test_local_queue_san: host/test_local_queue.c $(HOST_LOCAL_QUEUE_HDRS)
+	$(HOSTCC) $(HOST_CFLAGS) $(SAN_CFLAGS) -I tbtun -o $@ host/test_local_queue.c
+
 # The concurrent host contracts under ThreadSanitizer. Opt-in, like
 # host-test-san: `check` stays free of a sanitizer runtime. A toolchain
 # without the TSan runtime gets a clear skip, not a build failure. The test
@@ -883,6 +894,7 @@ clean: clean-dkms.conf clean-dkms-tarball
 	$(RM) $(HTTP_RFC_GEN) $(HTTP_RFC_GEN_SAN)
 	$(RM) $(HOST_RX_BUDGET) host/test_rx_budget_san
 	$(RM) $(HOST_CAPTURE_POKE) host/test_capture_poke_san
+	$(RM) $(HOST_LOCAL_QUEUE) host/test_local_queue_san
 	$(RM) $(HOST_CLIENT) $(HOST_CLIENT_LIB) $(HOST_CLIENT_OBJS) host/client-main.o
 	$(RM) $(HOST_CLIENT_LOOPBACK) host/test_client_loopback_san
 	$(RM) $(HOST_CLIENT_WIRE) host/test_client_wire_san

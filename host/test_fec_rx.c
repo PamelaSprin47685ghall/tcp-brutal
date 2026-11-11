@@ -2670,6 +2670,20 @@ static void test_decode_wake(void)
     ok(!tbt_fec_sclc_decode_wake(128, 128, 128, 1, 0, 128),
        "downlink: missing 128 == m does not wake");
 
+    /* A short block whose real shares all sit in coupling block 0 is
+     * covered one for one by the sender's p = real rows; the delta0 margin
+     * would otherwise wait for a row the sender never writes. */
+    ok(tbt_fec_sclc_decode_wake(1, 128, 128, 1, 0, 1),
+       "downlink short: one lost share with one row wakes");
+    ok(tbt_fec_sclc_decode_wake(16, 128, 128, 1, 15, 16),
+       "downlink short: 16 real shares with 16 rows wake");
+    ok(!tbt_fec_sclc_decode_wake(17, 128, 128, 1, 16, 16),
+       "downlink: a block past block 0 keeps the delta0 margin");
+    ok(tbt_fec_sclc_decode_wake(17, 128, 128, 1, 16, 17),
+       "downlink: the delta0 line still wakes");
+    ok(!tbt_fec_sclc_decode_wake(1, 178, 78, 1, 0, 1),
+       "downlink high rate: no short-block cap");
+
     /* Uplink 8x32 group: n=8, m=24, wakes at present n + 2 = 10. */
     ok(tbt_fec_sclc_decode_wake(8, 8, 24, 8, 8, 0),
        "uplink: complete DATA wakes without parity");

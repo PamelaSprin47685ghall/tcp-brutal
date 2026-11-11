@@ -329,6 +329,45 @@ static inline bool tbt_fec_record_type(u8 type)
 #define TBT_FEC_MAX_D 256
 #define TBT_FEC_MAX_GROUPS 256
 
+/* Local queue between the application socket and the FEC capture ring.
+ *
+ * The kernel doubles SO_SNDBUF/SO_RCVBUF, so a request of local_queue / 4
+ * is local_queue / 2 of effective socket buffer in one direction; the
+ * unencoded capture ring takes the other half. The default 1 MiB is four
+ * super-blocks of 256 KiB: a PING or DNS frame written behind a saturated
+ * upload waits for at most that much local data, not the 32 MiB the 8 MiB
+ * parent request and 16 MiB ring used to allow. 32 MiB restores that old
+ * sizing (8 MiB request -> 16 MiB effective, 16 MiB ring) for the 400 ms
+ * high-BDP lab. The module parameter is local_queue_bytes; the host client
+ * takes the same userspace key. New flows read it, so a raised value
+ * applies to the next stream/flow without reloading the module. */
+#define TBT_LOCAL_QUEUE_MIN (256u * 1024u)
+#define TBT_LOCAL_QUEUE_MAX (32u * 1024u * 1024u)
+#define TBT_LOCAL_QUEUE_DEFAULT (1024u * 1024u)
+
+static inline u32 tbt_local_queue_clamp(u32 bytes)
+{
+    if (bytes < TBT_LOCAL_QUEUE_MIN)
+        return TBT_LOCAL_QUEUE_DEFAULT;
+    if (bytes > TBT_LOCAL_QUEUE_MAX)
+        return TBT_LOCAL_QUEUE_MAX;
+    return bytes;
+}
+
+/* SO_SNDBUF/SO_RCVBUF request: the kernel's doubling makes this half of
+ * the queue budget. */
+static inline u32 tbt_local_sockbuf_request(u32 local_queue)
+{
+    return tbt_local_queue_clamp(local_queue) / 4u;
+}
+
+/* Unencoded capture-ring cap. tbt_fec_data.c still applies its own
+ * TBT_FEC_TX_RING floor and TBT_FEC_TX_RING_MAX ceiling. */
+static inline u32 tbt_local_ring_cap(u32 local_queue)
+{
+    return tbt_local_queue_clamp(local_queue) / 2u;
+}
+
 /* Grouped FEC with an omitted carriers= starts at the largest whole number of
  * groups that fits 64 carriers: 64 measured +21.5% app over 256 at lower CPU
  * (CHANGELOG 0.2.1), and a shape with n+m > 64 keeps one group. An explicit

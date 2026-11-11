@@ -388,7 +388,7 @@ static int sclc_build_graph(struct tbt_sclc *c)
     const int dv = n > m ? TBT_SCLC_DV_HIGH : TBT_SCLC_DV;
     struct sclc_rng rng;
     int *vdeg = NULL, *cdeg = NULL, *cur = NULL, *ccur = NULL;
-    int *perm = NULL, *slot = NULL;
+    int *perm = NULL, *slot = NULL, *slot0 = NULL, *inv_slot = NULL;
     int i, j, r, b, e, ck;
     int rc = -ENOMEM;
 
@@ -410,13 +410,15 @@ static int sclc_build_graph(struct tbt_sclc *c)
     cdeg = sclc_alloc((size_t)c->n_chk * sizeof(int));
     perm = sclc_alloc((size_t)pc * sizeof(int));
     slot = sclc_alloc((size_t)(n > pc ? n : pc) * sizeof(int));
+    slot0 = sclc_alloc((size_t)L * pc * sizeof(int));
+    inv_slot = sclc_alloc((size_t)pc * sizeof(int));
     c->voff = sclc_alloc((size_t)(c->n + 1) * sizeof(int));
     c->coff = sclc_alloc((size_t)(c->n_chk + 1) * sizeof(int));
     c->vadj = sclc_alloc((size_t)c->edges * sizeof(int));
     c->cadj = sclc_alloc((size_t)c->edges * sizeof(int));
     c->owned = sclc_alloc((size_t)c->n_chk * sizeof(int));
-    if (!vdeg || !cdeg || !perm || !slot || !c->voff || !c->coff || !c->vadj ||
-        !c->cadj || !c->owned)
+    if (!vdeg || !cdeg || !perm || !slot || !slot0 || !inv_slot ||
+        !c->voff || !c->coff || !c->vadj || !c->cadj || !c->owned)
         goto out;
 
     sclc_rng_seed(&rng, c->nonce);
@@ -481,6 +483,11 @@ static int sclc_build_graph(struct tbt_sclc *c)
         {
             i = (j + L - r) % L;
             sclc_payload_slots(&rng, n, pc, slot);
+            /* r == 0 is source block j feeding check supernode j: the
+             * mapping a parity wire position must align with. */
+            if (r == 0)
+                memcpy(slot0 + (size_t)j * pc, slot,
+                       (size_t)pc * sizeof(int));
             for (b = 0; b < n; b++)
             {
                 int v = i * n + b;
@@ -493,20 +500,38 @@ static int sclc_build_graph(struct tbt_sclc *c)
     }
 
     /* Parity edges: own check, then the accumulator check of the next
-     * supernode. Both maps are bijections over the pc checks. */
+     * supernode. Both maps are bijections over the pc checks.
+     *
+     * Wire-order relabel: a parity variable travels in the bit-plane
+     * position that indexes it, and a short block sends only the first
+     * win_len parity rows. Give the variable whose own check is slot[b]
+     * the id of wire position b (wv = slot^-1[perm[b]]), so row b owns
+     * the check that also carries payload bit b of the same block. The
+     * graph is the same edge set under this renaming, so full-block
+     * thresholds are unchanged; only the share a parity bit travels in
+     * moves. n > pc has no bijection between payload slots and checks, so
+     * that shape keeps the identity order. */
     for (i = 0; i < L; i++)
     {
         int pbase = c->n_data + i * pc;
 
+        if (n <= pc)
+            for (b = 0; b < pc; b++)
+                inv_slot[slot0[(size_t)i * pc + b]] = b;
         for (b = 0; b < pc; b++)
             perm[b] = b;
         sclc_shuffle(&rng, perm, pc);
         for (b = 0; b < pc; b++)
         {
+            int wv = (n <= pc) ? inv_slot[perm[b]] : b;
+
+            /* slot[] is free now; keep the variable's wire id for the
+             * accumulator edge drawn from the second shuffle. */
+            slot[b] = wv;
             ck = i * pc + perm[b];
-            c->vadj[cur[pbase + b]++] = ck;
-            c->cadj[ccur[ck]++] = pbase + b;
-            c->owned[ck] = pbase + b;
+            c->vadj[cur[pbase + wv]++] = ck;
+            c->cadj[ccur[ck]++] = pbase + wv;
+            c->owned[ck] = pbase + wv;
         }
         if (i < L - 1)
         {
@@ -516,8 +541,8 @@ static int sclc_build_graph(struct tbt_sclc *c)
             for (b = 0; b < pc; b++)
             {
                 ck = (i + 1) * pc + perm[b];
-                c->vadj[cur[pbase + b]++] = ck;
-                c->cadj[ccur[ck]++] = pbase + b;
+                c->vadj[cur[pbase + slot[b]]++] = ck;
+                c->cadj[ccur[ck]++] = pbase + slot[b];
             }
         }
     }
@@ -582,6 +607,8 @@ out:
     sclc_free(ccur);
     sclc_free(perm);
     sclc_free(slot);
+    sclc_free(slot0);
+    sclc_free(inv_slot);
     return rc;
 }
 
