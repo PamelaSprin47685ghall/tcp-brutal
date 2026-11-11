@@ -1020,6 +1020,120 @@ static void test_downlink_erasure(void)
         free(parity[i]);
 }
 
+/* The 760K -> HKG0 regression: block 520 of a 64/192 downlink block has
+ * real=1. The final 478 bytes ride in DATA[0]; PARITY[0] declares
+ * win_len=1 epoch=478 and is the only share that arrives. DATA[1..63] are
+ * the sender's zero padding slots: it marks them known zero before the
+ * decode, so the receiver must do the same or the block holds 64 unknowns
+ * and one equation. */
+static void test_short_block_known_zero_padding(void)
+{
+    struct tbt_fec_grouped *codec;
+    u8 *plane;
+    u8 *data_ptrs[64];
+    u8 *parity_ptrs[192];
+    u8 expect[478];
+    u16 i;
+
+    clear_engine();
+    set_downlink_shape();
+    f.rx_shape.n = 64;
+    f.rx_shape.m = 192;
+    f.rx_n = 64;
+    f.rx_m = 192;
+    codec = flow_rx_codec(&f, 64, 192);
+    CHECK(codec != NULL, "short pad: 64/192 codec builds");
+    if (!codec)
+        return;
+    plane = calloc((size_t)64 + 192, TBT_FEC_S);
+    CHECK(plane != NULL, "short pad: share arena");
+    if (!plane)
+        return;
+    for (i = 0; i < 64; i++)
+        data_ptrs[i] = plane + (size_t)i * TBT_FEC_S;
+    for (i = 0; i < 192; i++)
+        parity_ptrs[i] = plane + (size_t)(64 + i) * TBT_FEC_S;
+    for (i = 0; i < 478; i++)
+        expect[i] = (u8)(i * 7u + 13u);
+    memcpy(data_ptrs[0], expect, sizeof(expect));
+    CHECK(tbt_fec_grouped_encode(codec, 0, data_ptrs, 64, parity_ptrs) == 0,
+          "short pad: encode 64/192");
+
+    send_parity_payload(0, 0, 64, 192, 0, 0, 1, 478, parity_ptrs[0]);
+
+    CHECK(f.rx_decode_ok == 1,
+          "short pad: the one covering row recovers DATA[0]");
+    CHECK(f.rx_decode_fail == 0, "short pad: no failed decode");
+    CHECK(f.rx_next_block == 1, "short pad: block delivered");
+    CHECK(f.rx_deliver_bytes == 478,
+          "short pad: exactly the epoch's 478 bytes");
+    CHECK(f.out_len == 478 && f.out_off == 0 &&
+              memcmp(f.out, expect, sizeof(expect)) == 0,
+          "short pad: DATA[0] byte-exact with no padding leak");
+    free(plane);
+}
+
+/* A 128/128 short block with real=16 and two lost DATA shares. DATA[1..14]
+ * arrive full; DATA[0] and DATA[15] are erased, and the last real share's
+ * 333-byte length comes from PARITY[0]'s epoch. DATA[16..127] are known
+ * zero padding. Sixteen parity rows recover both shares. */
+static void test_short_block_two_lost_shares(void)
+{
+    struct tbt_fec_grouped *codec;
+    u8 *plane;
+    u8 *data_ptrs[128];
+    u8 *parity_ptrs[128];
+    u8 *expect;
+    size_t expect_len = 15u * TBT_FEC_S + 333u;
+    u16 i;
+
+    clear_engine();
+    set_downlink_shape();
+    codec = flow_rx_codec(&f, 128, 128);
+    CHECK(codec != NULL, "short two: 128/128 codec builds");
+    if (!codec)
+        return;
+    plane = calloc((size_t)128 + 128, TBT_FEC_S);
+    expect = calloc(1, expect_len);
+    CHECK(plane != NULL && expect != NULL, "short two: share arena");
+    if (!plane || !expect)
+    {
+        free(plane);
+        free(expect);
+        return;
+    }
+    for (i = 0; i < 128; i++)
+    {
+        data_ptrs[i] = plane + (size_t)i * TBT_FEC_S;
+        parity_ptrs[i] = plane + (size_t)(128 + i) * TBT_FEC_S;
+    }
+    for (i = 0; i < 15; i++)
+    {
+        memset(data_ptrs[i], 0x30 + i, TBT_FEC_S);
+        memcpy(expect + (size_t)i * TBT_FEC_S, data_ptrs[i], TBT_FEC_S);
+    }
+    memset(data_ptrs[15], 0x80, 333);
+    memcpy(expect + 15u * TBT_FEC_S, data_ptrs[15], 333);
+    CHECK(tbt_fec_grouped_encode(codec, 0, data_ptrs, 128, parity_ptrs) == 0,
+          "short two: encode 128/128");
+
+    for (i = 1; i < 15; i++)
+        send_data_payload(0, 0, 128, 128, 0, i, TBT_FEC_S, false,
+                          data_ptrs[i]);
+    for (i = 0; i < 16; i++)
+        send_parity_payload(0, 0, 128, 128, 0, i, 16, 333, parity_ptrs[i]);
+
+    CHECK(f.rx_decode_ok == 1, "short two: the sixteen rows decode the block");
+    CHECK(f.rx_next_block == 1, "short two: block delivered");
+    CHECK(f.rx_deliver_bytes == expect_len,
+          "short two: 15 full shares plus the 333-byte tail");
+    CHECK(f.out_len == expect_len && f.out_off == 0 &&
+              memcmp(f.out, expect, expect_len) == 0,
+          "short two: delivery byte-exact across both recovered shares");
+    free(plane);
+    free(expect);
+}
+
 /* The shape gate must count a bad share sum, a bad block ladder and a
  * second n/m for an existing block id. */
 static void test_shape_rejection(void)
@@ -3086,6 +3200,8 @@ int main(void)
     test_downlink_shapes();
     test_far_shape_ladder();
     test_downlink_erasure();
+    test_short_block_known_zero_padding();
+    test_short_block_two_lost_shares();
     test_shape_rejection();
     test_shape_switch_stream();
     test_shape_switch_inflight();
