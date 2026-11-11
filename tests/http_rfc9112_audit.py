@@ -38,8 +38,8 @@ from dataclasses import dataclass
 from email.utils import formatdate
 from pathlib import Path
 
-TBT_CONV = 0x000C
-TBT_FEC_CONV = 0x100B
+TBT_CONV = 0x000D
+TBT_FEC_CONV = 0x100C
 TBT_HDR_LEN = 32
 TBT_REC_MAX = 32 + 8192
 TBT_FEC_HDR_LEN = 48
@@ -244,7 +244,7 @@ def parse_arq_record(body, audit, ctx):
 
     audit.need(typ in ARQ_TYPES, f"{ctx}: ARQ type 0x{typ:02x} is defined")
     audit.need(TBT_HDR_LEN + body_len == len(body), f"{ctx}: ARQ body_len matches chunk")
-    audit.need(conv == TBT_CONV, f"{ctx}: ARQ conv is 0x000c")
+    audit.need(conv == TBT_CONV, f"{ctx}: ARQ conv is 0x000d")
     audit.need(flags & ~0x3F == 0, f"{ctx}: ARQ flags fit TBT_FF_MASK")
     audit.need(ack_count <= 16, f"{ctx}: path_ack_count <= 16")
     audit.need(ack_mask & ~0xFFFF == 0, f"{ctx}: path_ack_mask is 16 bits")
@@ -286,7 +286,7 @@ def parse_fec_record(body, audit, ctx):
     header_crc = le32(body, 44)
 
     audit.need(typ in FEC_TYPES, f"{ctx}: FEC type 0x{typ:02x} is defined")
-    audit.need(conv == TBT_FEC_CONV, f"{ctx}: FEC conv is 0x100b")
+    audit.need(conv == TBT_FEC_CONV, f"{ctx}: FEC conv is 0x100c")
     audit.need(reserved == 0, f"{ctx}: FEC reserved is zero")
     audit.need(flags & ~0x03 == 0, f"{ctx}: FEC flags fit TBT_FEC_FF_MASK")
     audit.need(

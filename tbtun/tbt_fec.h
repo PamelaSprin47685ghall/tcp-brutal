@@ -1,4 +1,4 @@
-/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x100b), control frames, and the
+/* tbt_fec.h - FEC wire (TBT_FEC_CONV 0x100c), control frames, and the
  * GF(2) sliding-window RLNC codec.
  *
  * This file and tbt_fec.c compile twice: into the module and into the host
@@ -653,7 +653,7 @@ struct tbt_fec_nack
 };
 
 
-/* Shape change request (0x100b, 64 bytes). See tbt_uapi.h for the byte
+/* Shape change request (0x100c, 64 bytes). See tbt_uapi.h for the byte
  * offsets; this struct is the host-side mirror, not the wire layout. The
  * extension fields name the codec explicitly; `codec_variant == 2` leaves
  * the wire w/k/d bytes zero, and w/k/d below carry the equivalent legacy

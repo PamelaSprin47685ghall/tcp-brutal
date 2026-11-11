@@ -242,7 +242,7 @@ static void test_bounds_table(void)
 
     case_no++;
     check(TBT_HDR_LEN == 32 && TBT_CHUNK_MAX == 8228 && TBT_REC_MAX == 8224 &&
-              TBT_CONV == 0x000c && TBT_WIRE_VERSION_V6 == 9,
+              TBT_CONV == 0x000d && TBT_WIRE_VERSION_V6 == 9,
           "design constants", NULL);
     for (i = 0; i < sizeof(want) / sizeof(want[0]); i++)
     {
@@ -1220,7 +1220,7 @@ static void test_cfg_body(void)
     unsigned i, s;
 
     case_no++;
-    check(TBT_FEC_CFG_LEN == 64 && TBT_FEC_CONV == 0x100bu &&
+    check(TBT_FEC_CFG_LEN == 64 && TBT_FEC_CONV == 0x100cu &&
               TBT_FEC_CFG_CRC_BYTES == 40 &&
               TBT_FEC_CFG_CRC_EXT_BYTES == 8 &&
               TBT_FEC_CFG_RESERVED2 == 60 && TBT_FEC_MAX_SHARES == 256,

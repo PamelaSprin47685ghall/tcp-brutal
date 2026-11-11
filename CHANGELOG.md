@@ -3,166 +3,7 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
-## [Unreleased]
-
-### Fixed
-
-- Host carrier sockets use a 15 s / 5 s x 3 TCP keepalive and a 30 s
-  `TCP_USER_TIMEOUT`. The 2 h kernel default left a near socket half-open
-  ESTABLISHED after the far side reaped its carrier and the FIN was lost on a
-  lossy WAN (HKG0 V6: 256 carriers decayed to 98).
-- The client NACK hold adds four RTT deviations (`tcpi_rttvar`) to the sampled
-  RTT, capped at 4 s. On the HKG0 V6 path (149 ms mean, 212 ms deviation) the
-  mean alone re-requested in-flight shares four to eight times. ACKs still
-  report the mean.
-- `tbt_cc.c` guards `TBT_CC_HAVE_CONG_CTRL_ACK` with `#ifdef`, removing the
-  `-Wundef` warning on 6.8 kernels.
-- `deploy/090`: `far.yaml.in` sets `ipv6: true` (mihomo defaults it off, which
-  broke IPv6-only egress), and the far unit `Wants=` mihomo instead of
-  `Requires=`, so restarting the listener leaves the tunnel running.
-
-## [0.9.0] - 2026-11-11
-
-### Added
-
-- Authenticated session re-incarnation and anchor roaming. The FEC HELLO body
-  grows from 66 to 90 bytes and `TBT_WIRE_VERSION_V6` moves from 8 to 9:
-  `boot_epoch` (u64 LE, realtime microseconds) at `+66` and a 128-bit tag at
-  `+74`. The tag is SipHash-2-4 twice over `body[0..73]`, keyed by the two
-  independent 128-bit halves of the 256-bit `crypto_key=`, so it covers the
-  version, role, session nonce, ceilings, profile/generation byte, every
-  crypto field and the epoch. `tbt_crypto.c` implements SipHash so the module
-  and the host tests run one implementation; `host/test_crypto.c` pins the
-  reference vectors, including the 74-byte tag input.
-  Without `crypto_key=` the tag is zero and the HELLO stays unauthenticated,
-  exactly as before.
-- A near side may restart with a fresh `crypto_tx_nonce` (reusing the old one
-  from `seq = 0` would repeat a ChaCha8 keystream) and may rejoin from a new
-  source address. The far side accepts either only from a HELLO whose tag
-  proved the PSK and whose `boot_epoch` is strictly later than the one the
-  session serves. Accepting it rotates both directions: the near's new uplink
-  nonce and a fresh far downlink nonce, because a restarted near side meets
-  flow counters that start at zero again. A replayed HELLO carries an older
-  epoch and cannot reset anything; a stranger has no tag. A configured
-  `peer=` still pins the source, and a pinned `nonce=` still keeps its value.
-- `hello_tag_reject` and `crypto_reincarnations` in the `c3` stats line.
-  `join_src_reject` now counts only an *unauthenticated* source change.
-
-### Changed
-
-- SC-LDPC short blocks recover a loss on the first attempt. The downlink
-  codec now gives wire parity bit `b` the check that carries payload bit `b`
-  of the same coupling block (`tbt_fec_sclc.c` relabels the parity variable
-  by `slot^-1[perm[b]]`); rows `0..win_len-1` therefore cover the first
-  `win_len` DATA shares one for one with the existing `min(m, win_len)`
-  parity count, i.e. no extra wire bytes. The graph is the same edge set
-  under a vertex renaming: over 1000 iid decode trials on each of 128/128,
-  151/105 and 178/78 the failure counts were identical to the old mapping
-  (675/676, 625/625, 803/803) and a 40-nonce probe recovered 21,200/21,200
-  single- and double-loss cases on win_len 1..16. `tbt_fec_sclc_decode_wake`
-  drops the delta0 margin when `real * 8 <= n` and `n <= m`, so those blocks
-  attempt on the rows the sender actually writes (16/128 was blocked by the
-  old `real + 16` line). The 32-share uplink groups keep the wire rule but
-  floor the parity rows at 10: across 200 nonces the one-row-per-share rule
-  recovered no case at win_len 1 or 2 and still failed 127/1400 at p = 5,
-  26/1400 at p = 6 and 16/1400 at p = 7, while p = 10 recovered 9400/9400.
-  The floor costs at most nine 1 KiB shares on
-  a short uplink seal. The NACK parity limit now equals the sender's row
-  count for every block, so a full 32-share block can also name rows
-  8..23. The downlink relabel is codec-visible but not a wire
-  format change (`TBT_FEC_CONV` stays `0x100b`); both ends must run the same
-  build, as every SC-LDPC graph change already requires.
-- Local queuing in front of the wire is bounded by the `local_queue_bytes`
-  module parameter (default 1 MiB; new flows read it). The parent socket
-  asks for a quarter per direction (the kernel doubles it) and the
-  unencoded capture ring takes half: 256 KiB request + 512 KiB ring at the
-  default, 8 MiB + 16 MiB at the maximum 32 MiB. This bounds a PING or DNS
-  frame behind a saturated upload to about 1 MiB of local data instead of
-  the old 32 MiB. On a real loopback pair the default queued 982,722 B
-  (7.32 ms at 128 MB/s) against 10,461,797 B (77.95 ms) at the maximum, and
-  `host/test_local_queue.c` pins the rule. The host client takes the same
-  `local_queue_bytes=` userspace key and sets both app-socket buffers.
-  Carrier buffers and the 64-block FEC flight window are untouched.
-
-- `TBT_VERSION` is `0.9.0` and `TBT_CONV` moves to `0x000c`. `TBT_FEC_CONV`
-  stays `0x100b` because the 48-byte FEC header and every offset are
-  unchanged, exactly as the `0x000b` cut left it; the HELLO's own version
-  moves to 9. A 0.8.x peer is refused at its first HELLO header
-  (`0x000b != 0x000c`), and even a 66-byte body that passed framing would
-  fail the version/length gate. Both ends must be upgraded together
-  (`host/test_wire_compat.c` pins the 66-byte v8 refusal;
-  `host/test_client_wire.c` pins the 0.8.x conv refusal).
-- The far side keeps the adopted key rule unchanged: a HELLO naming a
-  different key is still refused. Only the nonce, the session name and the
-  anchor may be re-named, and only by a PSK holder.
-- The near side verifies the far's tag too, accepts a rotated far nonce, and
-  ignores a stale (older-epoch) HELLO instead of failing the carrier.
-
-### Known limitations
-
-- A near host whose wall clock steps backwards cannot order a new generation;
-  the far side refuses it and counts `crypto_reincarnations` no further. A far
-  session re-created (tunnel delete and re-add) clears the high-water mark.
-- A single PSK shared by several near hosts is not supported: the session has
-  one anchor and one generation order, so the host with the largest clock
-  wins. Use one `crypto_key=` per near side.
-
-## [0.8.0] - 2026-11-11
-
-### Added
-
-- Constant-frame FEC cells at `S = 1024`. A short DATA record is zero-padded to
-  the full slot (`payload_len = 1024`), and the real length 1..1024 travels in
-  the header word at `+24` under `TBT_FEC_FF_PADDED (0x02)`. Every data-bearing
-  DATA/PARITY record is 1072 bytes raw, or a 1079-byte http-kal chunk
-  (`"430\r\n" + 48 + 1024 + "\r\n"`). The empty-block marker stays 48 bytes:
-  it carries no share.
-- Single-flow mux subframes (`tbtun/tbt_mux.h`, `tbtun/tbt_mux.c`): an 8-byte
-  big-endian header with OPEN/DATA/FIN/RST/WIN, a stateless encoder, a
-  zero-allocation streaming parser and a per-`stream_id` credit window. The
-  module and a Linux userspace client compile the same C99 source.
-- `tests/golden_v080/`: deterministic binary/JSON vectors for an independent
-  F# 0.9.x client (HELLO v8, padded DATA/PARITY chunks, ChaCha8, CRC32C, mux
-  subframes, binary and GF(16) SC-LDPC encode/decode), plus
-  `review/spec-080-fsharp.md`.
-
-### Changed
-
-- `TBT_VERSION` is 0.8.0 and `TBT_CONV` is `0x000b`. `TBT_FEC_CONV` stays
-  `0x100b` and HELLO `body[0]` stays 8 because the 48-byte FEC header layout is
-  unchanged; the `TBT_CONV` bump refuses a 0.7.3 peer at its first HELLO.
-- `TBT_FEC_PAYLOAD_MAX` / `TBT_FEC_S` fall to 1024, so `TBT_FEC_REC_MAX` is
-  1072. The downlink SC-LDPC share is 1024 bytes and has 16 batches; the
-  uplink GF(16) codec defaults to `block=64, L=8` (`C = n*8`).
-- The FEC window and out-queue byte marks are scaled to the 1 KiB cell
-  (16 MiB / 4 MiB), and the AArch64 hardware CRC32C path is enabled for Clang.
-- Every DATA/PARITY block names its own `n`/`m` in the header word at `+30`,
-  together with the group; a block's sequence is
-  `block_seq0 + group * n + share_index` for DATA and `block_seq0` for
-  PARITY, so a single session may carry blocks of different shapes.
-- Continuous SC-LDPC rate control (`tbt_fec_adapt_sclc.c`): the controller
-  works in Q16.16 shares and moves the uplink split without a CFG switch
-  stall. Codecs are kept in a small LRU per TX/RX plane
-  (`tbt_fec_codec_cache.h`), so a returning rate reuses its built graph.
-- FIN and half-close fixes: a FIN's `header.seq` is the stream's packet end,
-  TX freezes `last_real_end` before the block jump, and RX keeps
-  `rx_fin_seq` at `U64_MAX` until the delivery frontier reaches `pkt_end`.
-  `fec_fin_with_undelivered` counts a FIN that arrived with missing packets.
-- Replay ring slots are reclaimed by their own block span, not by an
-  approximate packet span, and the c9 counters expose the reclaim path
-  (`tbt_fec_replay_reclaimable`).
-- FEC credit is counted in DATA packets end to end: the ACK grants a packet
-  count, `tbt_fec_credit_packets()` converts the byte window once, and the
-  TX gate compares absolute packet frontiers.
-
-### Known limitations
-
-- At `S=1024, block=64, L=8` the uplink `22/10` split needs more parity symbols
-  than its ten shares carry; the codec and wire reject it. The highest
-  buildable uplink split is `21/11` (65.6%). Restoring the 70% point needs
-  `L=16` or a new uplink graph, not a validation-only change.
-
-## [Unreleased]
+## [0.10.0] - 2026-11-11
 
 ### Added
 
@@ -206,6 +47,11 @@ and moves independently of the module version.
 - `/proc/net/tbtun/stats` gains one `cc` line per tunnel: summed `max_bw`,
   current pacing, clamp activations, hold enter/exit edges and the measured
   `p`.
+- The userspace client acts on `TBT_F_RETIRE`. A near closes the named slot
+  and re-dials it at once instead of waiting for its own stall detection, and
+  counts `rx_retire` (a slot it has) and `rx_retire_bad` (a peer whose
+  `carriers=` disagrees) in the stop line; a far has no slot to rearm, so the
+  record only counts there. `host/test_client_rx` runs both verdicts.
 
 ### Changed
 
@@ -229,9 +75,76 @@ and moves independently of the module version.
   operations through a module-owned object that a FIN_WAIT socket could still
   read after `rmmod`. Sending and receiving already call
   `tcp_sendmsg_locked()` and `tcp_read_sock()` directly.
+- SC-LDPC short blocks recover a loss on the first attempt. The downlink
+  codec now gives wire parity bit `b` the check that carries payload bit `b`
+  of the same coupling block (`tbt_fec_sclc.c` relabels the parity variable
+  by `slot^-1[perm[b]]`); rows `0..win_len-1` therefore cover the first
+  `win_len` DATA shares one for one with the existing `min(m, win_len)`
+  parity count, i.e. no extra wire bytes. The graph is the same edge set
+  under a vertex renaming: over 1000 iid decode trials on each of 128/128,
+  151/105 and 178/78 the failure counts were identical to the old mapping
+  (675/676, 625/625, 803/803) and a 40-nonce probe recovered 21,200/21,200
+  single- and double-loss cases on win_len 1..16. `tbt_fec_sclc_decode_wake`
+  drops the delta0 margin when `real * 8 <= n` and `n <= m`, so those blocks
+  attempt on the rows the sender actually writes (16/128 was blocked by the
+  old `real + 16` line). The 32-share uplink groups keep the wire rule but
+  floor the parity rows at 10: across 200 nonces the one-row-per-share rule
+  recovered no case at win_len 1 or 2 and still failed 127/1400 at p = 5,
+  26/1400 at p = 6 and 16/1400 at p = 7, while p = 10 recovered 9400/9400.
+  The floor costs at most nine 1 KiB shares on
+  a short uplink seal. The NACK parity limit now equals the sender's row
+  count for every block, so a full 32-share block can also name rows
+  8..23. The downlink relabel is codec-visible and moves `TBT_FEC_CONV` to
+  `0x100c`, so both ends must run the same build, as every SC-LDPC graph
+  change already requires.
+- Local queuing in front of the wire is bounded by the `local_queue_bytes`
+  module parameter (default 1 MiB; new flows read it). The parent socket
+  asks for a quarter per direction (the kernel doubles it) and the
+  unencoded capture ring takes half: 256 KiB request + 512 KiB ring at the
+  default, 8 MiB + 16 MiB at the maximum 32 MiB. This bounds a PING or DNS
+  frame behind a saturated upload to about 1 MiB of local data instead of
+  the old 32 MiB. On a real loopback pair the default queued 982,722 B
+  (7.32 ms at 128 MB/s) against 10,461,797 B (77.95 ms) at the maximum, and
+  `host/test_local_queue.c` pins the rule. The host client takes the same
+  `local_queue_bytes=` userspace key and sets both app-socket buffers.
+  Carrier buffers and the 64-block FEC flight window are untouched.
+- `TBT_VERSION` is `0.10.0`, `TBT_CONV` moves to `0x000d` and `TBT_FEC_CONV`
+  to `0x100c`. The SC-LDPC downlink relabel is codec-visible, so 0.9.0 and
+  0.10.0 must not interop: a 0.9.0 peer fails the first HELLO header
+  (`0x000c != 0x000d`) and, for a record that reached the FEC path, the first
+  FEC record (`0x100b != 0x100c`). `TBT_WIRE_VERSION_V6` stays 9 and no header
+  offset moves. Both ends must be upgraded together; `host/test_client_wire`
+  and `host/test_wire_compat` pin the new refusals, the latter keeping
+  `0x100b` in its historical vector list.
 
 ### Fixed
 
+- Host carrier sockets use a 15 s / 5 s x 3 TCP keepalive and a 30 s
+  `TCP_USER_TIMEOUT`. The 2 h kernel default left a near socket half-open
+  ESTABLISHED after the far side reaped its carrier and the FIN was lost on a
+  lossy WAN (HKG0 V6: 256 carriers decayed to 98).
+- The client NACK hold adds four RTT deviations (`tcpi_rttvar`) to the sampled
+  RTT, capped at 4 s. On the HKG0 V6 path (149 ms mean, 212 ms deviation) the
+  mean alone re-requested in-flight shares four to eight times. ACKs still
+  report the mean.
+- `tbt_cc.c` guards `TBT_CC_HAVE_CONG_CTRL_ACK` with `#ifdef`, removing the
+  `-Wundef` warning on 6.8 kernels.
+- `deploy/090`: `far.yaml.in` sets `ipv6: true` (mihomo defaults it off, which
+  broke IPv6-only egress), and the far unit `Wants=` mihomo instead of
+  `Requires=`, so restarting the listener leaves the tunnel running.
+- The far side now emits `TBT_F_RETIRE` for a carrier it gives up, on a live
+  carrier. Before, only the near emitted it, so a far `stall-dead` left the
+  near sending into a half-open socket until `TCP_KEEPIDLE` (30 s) noticed;
+  the near now closes and re-dials the slot in about 150 ms. A provisional
+  far-side connection (index `0xff`, not yet joined) names no victim and
+  never emits. The record is symmetric because HELLO is: each side stores the
+  peer's 4-bit generation as `peer_gen`, which is what `tbt_session_retire()`
+  compares.
+- The NACK request names only what the receiver can prove missing. With
+  `real_set` unset it names one PARITY row, the cut that states `win_len`,
+  instead of the 125 padding DATA slots and 127 parity rows a short block
+  never had; `host/test_client_rx` pins the 1-bit first request and the
+  6-bit exact retry.
 - The userspace client admits a HELLO in the right order: the session nonce
   and the carrier index are checked before `hello_crypto()` commits the peer
   key and RX nonce, and an unset far adopts the nonce only after every check
@@ -390,6 +303,113 @@ and moves independently of the module version.
   only made a successor wait out the close window and then be refused. The
   existing "peer FIN seen / dead / tombstoned" predicate still leaves a
   genuinely live stream untouched.
+
+## [0.9.0] - 2026-11-11
+
+### Added
+
+- Authenticated session re-incarnation and anchor roaming. The FEC HELLO body
+  grows from 66 to 90 bytes and `TBT_WIRE_VERSION_V6` moves from 8 to 9:
+  `boot_epoch` (u64 LE, realtime microseconds) at `+66` and a 128-bit tag at
+  `+74`. The tag is SipHash-2-4 twice over `body[0..73]`, keyed by the two
+  independent 128-bit halves of the 256-bit `crypto_key=`, so it covers the
+  version, role, session nonce, ceilings, profile/generation byte, every
+  crypto field and the epoch. `tbt_crypto.c` implements SipHash so the module
+  and the host tests run one implementation; `host/test_crypto.c` pins the
+  reference vectors, including the 74-byte tag input.
+  Without `crypto_key=` the tag is zero and the HELLO stays unauthenticated,
+  exactly as before.
+- A near side may restart with a fresh `crypto_tx_nonce` (reusing the old one
+  from `seq = 0` would repeat a ChaCha8 keystream) and may rejoin from a new
+  source address. The far side accepts either only from a HELLO whose tag
+  proved the PSK and whose `boot_epoch` is strictly later than the one the
+  session serves. Accepting it rotates both directions: the near's new uplink
+  nonce and a fresh far downlink nonce, because a restarted near side meets
+  flow counters that start at zero again. A replayed HELLO carries an older
+  epoch and cannot reset anything; a stranger has no tag. A configured
+  `peer=` still pins the source, and a pinned `nonce=` still keeps its value.
+- `hello_tag_reject` and `crypto_reincarnations` in the `c3` stats line.
+  `join_src_reject` now counts only an *unauthenticated* source change.
+
+### Changed
+
+- `TBT_VERSION` is `0.9.0` and `TBT_CONV` moves to `0x000c`. `TBT_FEC_CONV`
+  stays `0x100b` because the 48-byte FEC header and every offset are
+  unchanged, exactly as the `0x000b` cut left it; the HELLO's own version
+  moves to 9. A 0.8.x peer is refused at its first HELLO header
+  (`0x000b != 0x000c`), and even a 66-byte body that passed framing would
+  fail the version/length gate. Both ends must be upgraded together
+  (`host/test_wire_compat.c` pins the 66-byte v8 refusal;
+  `host/test_client_wire.c` pins the 0.8.x conv refusal).
+- The far side keeps the adopted key rule unchanged: a HELLO naming a
+  different key is still refused. Only the nonce, the session name and the
+  anchor may be re-named, and only by a PSK holder.
+- The near side verifies the far's tag too, accepts a rotated far nonce, and
+  ignores a stale (older-epoch) HELLO instead of failing the carrier.
+
+### Known limitations
+
+- A near host whose wall clock steps backwards cannot order a new generation;
+  the far side refuses it and counts `crypto_reincarnations` no further. A far
+  session re-created (tunnel delete and re-add) clears the high-water mark.
+- A single PSK shared by several near hosts is not supported: the session has
+  one anchor and one generation order, so the host with the largest clock
+  wins. Use one `crypto_key=` per near side.
+
+## [0.8.0] - 2026-11-11
+
+### Added
+
+- Constant-frame FEC cells at `S = 1024`. A short DATA record is zero-padded to
+  the full slot (`payload_len = 1024`), and the real length 1..1024 travels in
+  the header word at `+24` under `TBT_FEC_FF_PADDED (0x02)`. Every data-bearing
+  DATA/PARITY record is 1072 bytes raw, or a 1079-byte http-kal chunk
+  (`"430\r\n" + 48 + 1024 + "\r\n"`). The empty-block marker stays 48 bytes:
+  it carries no share.
+- Single-flow mux subframes (`tbtun/tbt_mux.h`, `tbtun/tbt_mux.c`): an 8-byte
+  big-endian header with OPEN/DATA/FIN/RST/WIN, a stateless encoder, a
+  zero-allocation streaming parser and a per-`stream_id` credit window. The
+  module and a Linux userspace client compile the same C99 source.
+- `tests/golden_v080/`: deterministic binary/JSON vectors for an independent
+  F# 0.9.x client (HELLO v8, padded DATA/PARITY chunks, ChaCha8, CRC32C, mux
+  subframes, binary and GF(16) SC-LDPC encode/decode), plus
+  `review/spec-080-fsharp.md`.
+
+### Changed
+
+- `TBT_VERSION` is 0.8.0 and `TBT_CONV` is `0x000b`. `TBT_FEC_CONV` stays
+  `0x100b` and HELLO `body[0]` stays 8 because the 48-byte FEC header layout is
+  unchanged; the `TBT_CONV` bump refuses a 0.7.3 peer at its first HELLO.
+- `TBT_FEC_PAYLOAD_MAX` / `TBT_FEC_S` fall to 1024, so `TBT_FEC_REC_MAX` is
+  1072. The downlink SC-LDPC share is 1024 bytes and has 16 batches; the
+  uplink GF(16) codec defaults to `block=64, L=8` (`C = n*8`).
+- The FEC window and out-queue byte marks are scaled to the 1 KiB cell
+  (16 MiB / 4 MiB), and the AArch64 hardware CRC32C path is enabled for Clang.
+- Every DATA/PARITY block names its own `n`/`m` in the header word at `+30`,
+  together with the group; a block's sequence is
+  `block_seq0 + group * n + share_index` for DATA and `block_seq0` for
+  PARITY, so a single session may carry blocks of different shapes.
+- Continuous SC-LDPC rate control (`tbt_fec_adapt_sclc.c`): the controller
+  works in Q16.16 shares and moves the uplink split without a CFG switch
+  stall. Codecs are kept in a small LRU per TX/RX plane
+  (`tbt_fec_codec_cache.h`), so a returning rate reuses its built graph.
+- FIN and half-close fixes: a FIN's `header.seq` is the stream's packet end,
+  TX freezes `last_real_end` before the block jump, and RX keeps
+  `rx_fin_seq` at `U64_MAX` until the delivery frontier reaches `pkt_end`.
+  `fec_fin_with_undelivered` counts a FIN that arrived with missing packets.
+- Replay ring slots are reclaimed by their own block span, not by an
+  approximate packet span, and the c9 counters expose the reclaim path
+  (`tbt_fec_replay_reclaimable`).
+- FEC credit is counted in DATA packets end to end: the ACK grants a packet
+  count, `tbt_fec_credit_packets()` converts the byte window once, and the
+  TX gate compares absolute packet frontiers.
+
+### Known limitations
+
+- At `S=1024, block=64, L=8` the uplink `22/10` split needs more parity symbols
+  than its ten shares carry; the codec and wire reject it. The highest
+  buildable uplink split is `21/11` (65.6%). Restoring the 70% point needs
+  `L=16` or a new uplink graph, not a validation-only change.
 
 ## [0.7.3] - 2026-11-11
 

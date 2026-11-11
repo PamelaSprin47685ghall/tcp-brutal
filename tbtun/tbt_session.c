@@ -2213,10 +2213,12 @@ void tbt_session_destroy(struct tbt_tunnel *t)
  * duplicate join: count it and refuse this carrier without touching the
  * session. A dead occupant (already stopping, or its socket is gone) is
  * replaced, which is how the far side accepts the near side's replacement. */
-/* A near-side replacement must retire the far's slot for the old generation
- * before its HELLO can join. Marking the old carrier dead here is what lets
+/* A replacement must retire the peer's slot for the old generation before the
+ * new HELLO can join. Marking the old carrier dead here is what lets
  * tbt_session_join() accept the new generation instead of returning EALREADY
- * (a join_dup storm, measured: 15 duplicates, 191 replacements, 32 s hole). */
+ * (a join_dup storm, measured: 15 duplicates, 191 replacements, 32 s hole).
+ * Either role sends RETIRE; the gen argument is the sender's own generation
+ * for the slot, which the peer stored as peer_gen from its HELLO. */
 void tbt_session_retire(struct tbt_session *sess, u8 index, u8 gen)
 {
     struct tbt_carrier *old;

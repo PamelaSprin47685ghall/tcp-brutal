@@ -586,9 +586,11 @@ static int tbt_rx_frame(struct tbt_carrier *c, struct tbt_hdr *hdr, const u8 *pa
         return 0;
 
     case TBT_F_RETIRE:
-        /* The near is about to replace carrier `body[0]` at generation
-         * `hdr->seq`; free the far-side slot now so the replacement's HELLO
-         * joins instead of returning EALREADY. */
+        /* The peer has given up carrier `body[0]` at generation `hdr->seq`
+         * and is about to replace it; free this side's slot now so the
+         * replacement's HELLO joins instead of returning EALREADY. Either
+         * role sends it: the far cannot dial, so this is how it tells the
+         * near to redial a slot it has retired. */
         if (hdr->body_len != 1)
             return -EPROTO;
         tbt_session_retire(sess, payload[0], (u8)hdr->seq);

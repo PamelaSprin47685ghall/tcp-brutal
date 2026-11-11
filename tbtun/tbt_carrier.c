@@ -2380,7 +2380,9 @@ static u64 tbt_stall_replace_cost(struct tbt_session *sess,
  *
  * The far side never replaces: it cannot dial, so a replacement there only
  * clears the slot and forces the near side to redial, discarding the shares
- * already in flight. It waits for the near side's RETIRE or recovery. */
+ * already in flight. It waits for the near side's RETIRE or recovery, and
+ * sends its own RETIRE when it gives up a carrier so the near redials at once
+ * instead of waiting for its own stall detection. */
 #define TBT_STALL_EPS_PCT 20
 static bool tbt_stall_should_replace(struct tbt_carrier *c, u64 now)
 {
@@ -2587,10 +2589,16 @@ void tbt_carrier_lost(struct tbt_session *sess, struct tbt_carrier *c,
                             atomic_read(&c->connected),
                             READ_ONCE(c->hello_sent), atomic_read(&c->up));
     }
-    /* Tell the far to free this (index, gen) before the replacement dials.
-     * Without it the replacement's HELLO hits join_dup and the two sides
-     * storm (measured: 15 join_dup, 191 replacements, 32 s receiver hole). */
-    if (sess->tunnel && sess->tunnel->cfg.role == TBT_ROLE_NEAR)
+    /* Tell the peer to retire this (index, gen) now, from either role. On the
+     * near the far must free the slot before the replacement dials, or the
+     * replacement's HELLO hits join_dup and the two sides storm (measured:
+     * 15 join_dup, 191 replacements, 32 s receiver hole). On the far the near
+     * must close and redial the slot at once; otherwise it keeps sending into
+     * a socket only TCP keepalive can detect, and the slot stays half-open
+     * for TCP_KEEPIDLE (30 s) instead of the ~150 ms a RETIRE costs. A
+     * provisional carrier has no slot yet (index 0xff), so it names no
+     * victim, and a session with no tunnel has no peer to tell. */
+    if (sess->tunnel && !c->provisional && c->index < sess->n_car)
     {
         int j;
 

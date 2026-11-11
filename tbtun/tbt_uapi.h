@@ -28,7 +28,7 @@ typedef uint64_t u64;
 #endif
 
 #define TBT_VERSION_MAJOR 0
-#define TBT_VERSION_MINOR 9
+#define TBT_VERSION_MINOR 10
 #define TBT_VERSION_PATCH 0
 #define TBT_VERSION ((TBT_VERSION_MAJOR << 16) | (TBT_VERSION_MINOR << 8) | TBT_VERSION_PATCH)
 
@@ -69,7 +69,7 @@ static inline u16 tbt_port_host16(u16 net)
     return (u16)((u16)u.b[0] << 8 | (u16)u.b[1]);
 }
 
-/* Wire protocol revision: u16 at frame offset +30, 0x000c. Independent of the
+/* Wire protocol revision: u16 at frame offset +30, 0x000d. Independent of the
  * module version (DESIGN.md §11); bump it alone on any wire change.
  * 0x0002 moved body_len into the header (+6) and removed the 4-byte prefix.
  * 0x0003 carries RETIRE (24) and the HELLO profile|gen byte; a 0x0002 peer
@@ -130,8 +130,16 @@ static inline u16 tbt_port_host16(u16 net)
  * and HELLO body[0] moves to version 9. TBT_FEC_CONV stays 0x100b because the
  * 48-byte FEC header and every offset are unchanged, exactly as 0x000b left
  * it. The TBT_CONV bump is the session gate: a 0.8.x peer fails the first
- * HELLO header (0x000b != 0x000c), so the two revisions never mix. */
-#define TBT_CONV 0x000cu
+ * HELLO header (0x000b != 0x000c), so the two revisions never mix.
+ * 0x000d (0.10.0) is the SC-LDPC parity relabel cut: wire parity bit b of a
+ * downlink block now owns the check that carries payload bit b of the same
+ * coupling block (TBT_FEC_CONV 0x100c), and either role may send RETIRE
+ * (0x24) for a carrier it has given up. TBT_WIRE_VERSION_V6 stays 9 and no
+ * header offset moves, so a 0.9.0 peer passes the HELLO version and length
+ * gate and is refused by the first FEC record (0x100b != 0x100c); the
+ * TBT_CONV bump still refuses it at the first HELLO header (0x000c !=
+ * 0x000d). Both ends must be upgraded together. */
+#define TBT_CONV 0x000du
 
 /* HELLO body[0]: wire-protocol version, independent of TBT_VERSION. The FEC
  * v6 session uses the extended body below; the old ARQ keeps version 1 and
@@ -165,7 +173,7 @@ static inline u16 tbt_port_host16(u16 net)
 #define TBT_WIRE_VERSION_V6 9
 
 /* ------------------------------------------------------------------ *
- * FEC wire: an independent record format, TBT_FEC_CONV 0x100b.
+ * FEC wire: an independent record format, TBT_FEC_CONV 0x100c.
  *
  * The old ARQ record above is frozen at 16 carriers: its path_ack_mask is
  * u16 and its FBK/WINDOW bodies have 16 entries. FEC never reuses those
@@ -197,7 +205,7 @@ static inline u16 tbt_port_host16(u16 net)
  *                       the real payload bytes 1..S (the rest is zero pad)
  *   +26 u16 payload_len payload bytes following this header; with PADDED
  *                       DATA this is exactly S
- *   +28 u16 conv        0x100b
+ *   +28 u16 conv        0x100c
  *   +30 u16 group       DATA/PARITY: group index 0..groups-1.
  *                       Control records (ACK/NACK/CFG/FBK): must be 0.
  *   +32 u64 sid         stream id this record belongs to. DATA/PARITY and
@@ -212,7 +220,7 @@ static inline u16 tbt_port_host16(u16 net)
  * Control frames are complete records of their own and must never be queued
  * behind a partial DATA record (the carrier writer emits each record whole).
  * ------------------------------------------------------------------ */
-#define TBT_FEC_CONV 0x100bu
+#define TBT_FEC_CONV 0x100cu
 /* 0.2.0 raises TBT_FEC_CONV from 0x1001 to 0x1004 in three wire steps;
  * 0.2.2 adds M5 below.
  * M2 (0x1002): a PARITY record may be a block marker: win_len == 0 &&
@@ -268,7 +276,14 @@ static inline u16 tbt_port_host16(u16 net)
  * PARITY, and gives every block its own n/m; every length and offset above
  * is the 0.8.0 contract. The 0.8.0 constant-frame cut keeps this revision:
  * S becomes 1024 and DATA may set PADDED (0x02) with the real length in
- * win_len. TBT_CONV 0x000b is the gate that keeps a 0.7.3 peer out. */
+ * win_len. TBT_CONV 0x000b is the gate that keeps a 0.7.3 peer out.
+ *
+ * M12 (0x100c, 0.10.0) is the SC-LDPC downlink relabel: the parity variable
+ * whose own check carries payload bit b now travels in wire row b
+ * (wv = slot^-1[perm[b]]), so rows 0..win_len-1 cover the first win_len DATA
+ * shares one for one with the sender's min(m, win_len) rows. The graph is the
+ * same edge set under a vertex renaming, so the 48-byte header, every offset
+ * and every record type are unchanged. TBT_CONV 0x000d is the session gate. */
 
 /* FEC record types. */
 #define TBT_FEC_DATA 0x30
@@ -506,8 +521,9 @@ enum tbt_frame_type
     TBT_F_WINDOW = 0x21,
     TBT_F_HELLO = 0x22,
     TBT_F_PAD = 0x23,
-    /* Retire a far-side carrier slot before a replacement at the same index
-     * joins: body = u8 index, seq = the retired generation. */
+    /* Retire the peer's carrier slot before a replacement at the same index
+     * joins: body = u8 index, seq = the retired generation. Either role
+     * sends it; the near redials, the far only frees the slot. */
     TBT_F_RETIRE = 0x24,
     TBT_F_SACK = 0x25,
 };

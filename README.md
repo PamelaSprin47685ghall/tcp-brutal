@@ -33,9 +33,10 @@ share in the last
 the largest that fits the 15 MiB replay ring, up to 64); an
 older loss stays in the carrier's TCP send queue and TCP retransmits it. It
 rides both `profile=raw` and the HTTP chunk container; in the HTTP profile one
-chunk body is exactly one 48-byte FEC record (`TBT_FEC_CONV=0x100a`; 0x1009
-was the 0.6.0 cut, 0x1008 and 0x1007 were the parallel 0.5.0 cuts, 0x1006 was
-the adaptive cut, 0x1005 was the 0.2.2 stream-id cut, 0.1.0 used `0x1001`),
+chunk body is exactly one 48-byte FEC record (`TBT_FEC_CONV=0x100c`; 0x100b
+was the 0.8.0 cut, 0x100a the 0.7.0 cut, 0x1009 was the 0.6.0 cut, 0x1008 and
+0x1007 were the parallel 0.5.0 cuts, 0x1006 was the adaptive cut, 0x1005 was
+the 0.2.2 stream-id cut, 0.1.0 used `0x1001`),
 while the request line, headers and chunk framing stay
 plaintext. `mode=grouped` splits the carriers into `groups` groups of `n` DATA
 plus `m` parity shares, `carriers = groups * (n + m)`, up to 256; the production
@@ -58,12 +59,12 @@ Adaptive FEC (`adaptive=`) defaults on when `fec=on`. The GF(2)
 per-flow SC-LDPC estimator/controller and moves the split along the shipped
 rate ladder (downlink `n+m=256` with `n` in 64/76/102/128/151/178; uplink
 `n+m=32` with `n` in 8/16/20/24). The switch rides `FEC_CFG`/`FEC_FBK`
-(wire `0x100a`). A `mode=sc-ldpc` line whose split is not on that ladder
+(wire `0x100c`). A `mode=sc-ldpc` line whose split is not on that ladder
 stays `adaptive=off`, so a fixed test shape keeps its configured `n/m`.
 `adaptive=off` always wins; `session <id> adaptive=off` disables it at
 runtime. Shapes with `n + m != 8` are not implemented for the GF(2) family.
 
-One session carries one FEC flow (wire `0x100a`). The 0.6.0 subframe mux and
+One session carries one FEC flow (wire `0x100c`). The 0.6.0 subframe mux and
 its receive-window record are gone, so a DATA or PARITY payload is plain
 application bytes again. An 8 KiB write becomes one full DATA share as the
 write completes (cut-through); `TBT_FEC_SHORT_MS` (2) covers only the
@@ -143,9 +144,9 @@ results and their cost.
 ## Packaging
 
 The module version has one authority: `TBT_VERSION_MAJOR/MINOR/PATCH` in
-`tbtun/tbt_uapi.h` (currently `0.9.0`). The wire
-version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x000c` for the 32-byte frames
-and `TBT_FEC_CONV=0x100b` for the 48-byte FEC header and the 64-byte
+`tbtun/tbt_uapi.h` (currently `0.10.0`). The wire
+version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x000d` for the 32-byte frames
+and `TBT_FEC_CONV=0x100c` for the 48-byte FEC header and the 64-byte
 `FEC_CFG`/`FEC_FBK` records; all three are independent of
 the module version. `TBT_CONV 0x0005` removed the unused PREDICT/CANCEL
 placeholder frames: a peer that still sends one fails the header check and its
@@ -163,7 +164,7 @@ SipHash tag over the session-naming bytes. A configured `crypto_key=` (the
 nonce and a client whose address changed may re-anchor; without the key the
 tag is absent and the HELLO stays unauthenticated.
 
-The current FEC wire is `0x100b`: `0x1002` added FIN's 16-byte body
+The current FEC wire is `0x100c`: `0x1002` added FIN's 16-byte body
 (`pkt_end`, `pkt_base`) and the PARITY block marker (`win_len=0`,
 `payload_len=0`, `epoch=0`); `0x1003` grew the ACK to 24 bytes and added
 `deliver_bytes`; `0x1004` made NACK a 64-byte bitmap repair request; `0x1005`
@@ -669,7 +670,7 @@ real line.
   in the fixed `n + m = 8`, 32-group family; `n + m != 8` is not implemented.
   `mode=sc-ldpc` moves the configured split along the ladder; a non-ladder
   split stays fixed. `adaptive=off` keeps the configured shape.
-- **Single-stream FEC.** A session carries one FEC flow (`0x100a`). The
+- **Single-stream FEC.** A session carries one FEC flow (`0x100c`). The
   DATA/PARITY payload is the application byte stream, and an 8 KiB write is
   one DATA share, so no per-stream demux or window state exists.
 - **One anchor per far tunnel.** A single `peer=` (or the first HELLO) fixes the
@@ -823,7 +824,7 @@ optional (`fec=on`); `mode=sc-ldpc` is implemented (binary downlink, grouped
 GF(16) uplink), and `mode=rlnc`/`grouped` remain as the GF(2) band RLNC
 fallback with `carriers = groups * (n + m)` up to 256 carriers. Multiple
 concurrent FEC streams are not supported: one session carries one FEC flow
-(`0x100a`). `crypto=on` is ChaCha8 body
+(`0x100c`). `crypto=on` is ChaCha8 body
 obfuscation, not encryption, and it does not authenticate. It exists to multiply
 a per-flow rate limit and to test whether a QoS profile helps. For anything
 else, use WireGuard.

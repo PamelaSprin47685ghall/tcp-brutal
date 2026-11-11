@@ -630,8 +630,12 @@ static void test_nack_short_block_limits(void)
           "nack limits: the short block delivers five packets");
     CHECK(f.rx_deliver_bytes == 4u * TBT_FEC_S + 784u,
           "nack limits: the padded tail delivers its real length");
-    CHECK(f.rx_decode_ok == 0 && f.rx_decode_fail == 0,
-          "nack limits: a systematic block needs no codec decode");
+    /* The short-block wake line admits an attempt as soon as the present
+     * shares can cover `real`, so a failed try may be counted before the
+     * last DATA shares arrive. The block still delivers through the
+     * systematic path, never through a successful decode. */
+    CHECK(f.rx_decode_ok == 0,
+          "nack limits: the short block delivers without a successful decode");
     clear_pending();
     flow_rx_nack(&f, t2 + TBT_NACK_RETRY_NS + 1000000ull);
     CHECK(count_nacks(ids, 8) == 0,

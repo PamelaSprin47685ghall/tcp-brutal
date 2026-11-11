@@ -1,6 +1,6 @@
 /* test_wire_compat.c - cross-version wire refusal regression.
  *
- * The 0.9.0 wire (TBT_CONV 0x000c, TBT_FEC_CONV 0x100b, HELLO v9) is a hard
+ * The 0.10.0 wire (TBT_CONV 0x000d, TBT_FEC_CONV 0x100c, HELLO v9) is a hard
  * cutover: a peer from 0.7.0 or older must be refused by the first record,
  * never guessed at. This test builds the historical byte vectors and feeds
  * them to the same functions the receive path runs:
@@ -426,9 +426,10 @@ static void test_legacy_framing(void)
 
 static void test_hello_versions(void)
 {
-    ok(TBT_CONV == 0x000cu && TBT_FEC_CONV == 0x100bu &&
+    ok(TBT_CONV == 0x000du && TBT_FEC_CONV == 0x100cu &&
            TBT_WIRE_VERSION_V6 == 9,
-       "0.9.0 wire constants", "the current constants are not the v13 cut");
+       "0.10.0 wire constants",
+       "the current constants are not the v13 ARQ / 0x100c FEC cut");
 
     expect_hello_refused(1, TBT_HELLO_BODY_LEN, "HELLO v1 (0.1.x/0.2.x ARQ)");
     expect_hello_refused(2, TBT_HELLO_BODY_LEN_V6, "HELLO v2 (0.2.x FEC)");
@@ -522,19 +523,19 @@ static void test_fec_headers(void)
 {
     static const u8 types[] = {TBT_FEC_DATA, TBT_FEC_PARITY, TBT_FEC_CFG,
                                TBT_FEC_FBK, TBT_FEC_NACK};
-    static const u16 old_convs[] = {0x1005, 0x1006, 0x1009, 0x100a};
+    static const u16 old_convs[] = {0x1005, 0x1006, 0x1009, 0x100a, 0x100b};
     size_t i, j;
 
     for (j = 0; j < sizeof(old_convs) / sizeof(old_convs[0]); j++)
         for (i = 0; i < sizeof(types) / sizeof(types[0]); i++)
             expect_historical_fec(old_convs[j], types[i]);
 
-    expect_current_fec_ok(TBT_FEC_DATA, "0.8.0 DATA header passes");
-    expect_current_fec_ok(TBT_FEC_PARITY, "0.8.0 PARITY header passes");
-    expect_current_fec_ok(TBT_FEC_ACK, "0.8.0 ACK header passes");
-    expect_current_fec_ok(TBT_FEC_NACK, "0.8.0 NACK header passes");
-    expect_current_fec_ok(TBT_FEC_CFG, "0.8.0 CFG header passes");
-    expect_current_fec_ok(TBT_FEC_FBK, "0.8.0 FBK header passes");
+    expect_current_fec_ok(TBT_FEC_DATA, "0.10.0 DATA header passes");
+    expect_current_fec_ok(TBT_FEC_PARITY, "0.10.0 PARITY header passes");
+    expect_current_fec_ok(TBT_FEC_ACK, "0.10.0 ACK header passes");
+    expect_current_fec_ok(TBT_FEC_NACK, "0.10.0 NACK header passes");
+    expect_current_fec_ok(TBT_FEC_CFG, "0.10.0 CFG header passes");
+    expect_current_fec_ok(TBT_FEC_FBK, "0.10.0 FBK header passes");
 }
 
 static void test_fec_short_records(void)

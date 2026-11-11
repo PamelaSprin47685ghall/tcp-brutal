@@ -25,9 +25,10 @@ FEC v6（`fec=on`）是可选的第二数据面：应用的字节流被切成 8 
 （`K` 是 15 MiB 重放环能容纳的最大值，最多 64）、
 发送端从重放环重发；更老的丢失留在载体的 TCP 发送队列里，由 TCP 重传。
 它同时支持 `profile=raw` 和 HTTP chunk 容器：
-HTTP 档位下一个 chunk body 恰好是一条 48 字节 FEC 记录（`TBT_FEC_CONV=0x100a`；
-`0x1009` 是 0.6.0 版本，`0x1008`/`0x1007` 是两条并行的 0.5.0 版本，
-`0x1006` 是自适应版本，`0x1005` 是 0.2.2 的 stream-id 版本，0.1.0 为 `0x1001`），
+HTTP 档位下一个 chunk body 恰好是一条 48 字节 FEC 记录（`TBT_FEC_CONV=0x100c`；
+`0x100b` 是 0.8.0 版本，`0x100a` 是 0.7.0 版本，`0x1009` 是 0.6.0 版本，
+`0x1008`/`0x1007` 是两条并行的 0.5.0 版本，`0x1006` 是自适应版本，
+`0x1005` 是 0.2.2 的 stream-id 版本，0.1.0 为 `0x1001`），
 请求行、头部和 chunk 分帧保持明文。`mode=grouped` 把载体分成 `groups` 组，
 每组 `n` 个 DATA 加 `m` 个校验，`carriers = groups * (n + m)`，最多 256 条；生产形状是
 32 组 `n=4, m=4`。`crypto=on`（`fec=on` 时的默认值）只对 DATA/PARITY 的
@@ -45,11 +46,11 @@ GF(16) 上行 128、512 保留），码率由 `n/(n+m)` 决定。per-direction
 保留 Phase 1：形状固定在 `n + m = 8`、32 组的族内，`m` 在 1..6 之间移动。
 `mode=sc-ldpc` 使用 per-flow SC-LDPC 估计器/控制器，沿出厂码率阶梯切换
 （下行 `n+m=256`，`n` 为 64/76/102/128/151/178；上行 `n+m=32`，`n` 为
-8/16/20/24）。切换走 `FEC_CFG`/`FEC_FBK`（wire `0x100a`）。非阶梯形状的
+8/16/20/24）。切换走 `FEC_CFG`/`FEC_FBK`（wire `0x100c`）。非阶梯形状的
 `mode=sc-ldpc` 仍默认 `adaptive=off`；显式 `adaptive=off` 永远优先，
 `session <id> adaptive=off` 可在运行时关闭。GF(2) 族的 `n + m != 8` 尚未实现。
 
-每个会话只承载一条 FEC 流（wire `0x100a`）。0.6.0 的子帧复用与其每流接收
+每个会话只承载一条 FEC 流（wire `0x100c`）。0.6.0 的子帧复用与其每流接收
 窗口记录已经移除，DATA/PARITY 载荷重新就是应用字节。一次完整的 8 KiB 写入直接
 成为一个 DATA share（cut-through），`TBT_FEC_SHORT_MS`（2）只用于交互式尾部。
 一个 1x256 块是 128 个 DATA share，之后才是校验 share。36 字节 OPEN 的
@@ -108,9 +109,9 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.9.0`）。
-线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x000c` 与 FEC 头/FEC 记录的
-`TBT_FEC_CONV=0x100b`（48 字节头、64 字节 `FEC_CFG`/`FEC_FBK`），三者都与模块版本独立。
+`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.10.0`）。
+线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x000d` 与 FEC 头/FEC 记录的
+`TBT_FEC_CONV=0x100c`（48 字节头、64 字节 `FEC_CFG`/`FEC_FBK`），三者都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
 失败，其载体关闭；0x0004 的对端在第一个头部就会因为 conv 不匹配而被拒绝。
 36 字节 OPEN 沿用 0.6.0 的定义：32 字节 FEC group bitmap、小端
@@ -121,7 +122,7 @@ body 扩到 90 字节，尾部是 `boot_epoch` 与覆盖全部会话身份字节
 SipHash tag。配了 `crypto_key=`（256 位 PSK）才能证明该 tag，因此重启的客户端
 可以带新的 crypto nonce 重连，地址变化的客户端可以重新锚定；没配 key 时 tag
 为空，HELLO 仍然不加认证。
-当前 FEC wire 是 `0x100a`：`0x1002` 增加 FIN 的 16 字节 body
+当前 FEC wire 是 `0x100c`：`0x1002` 增加 FIN 的 16 字节 body
 （`pkt_end`/`pkt_base`）与 PARITY 空块 marker（`win_len=0`、
 `payload_len=0`、`epoch=0`）；`0x1003` 把 ACK 扩到 24 字节并加入
 `deliver_bytes`；`0x1004` 把 NACK 变成 64 字节位图修复请求；`0x1005`
@@ -545,7 +546,7 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
 - **自适应 FEC。** GF(2) 族保留 Phase 1：`adaptive=on` 只在固定的 `n + m = 8`、
   32 组族内移动 `m`；`n + m != 8` 尚未实现。`mode=sc-ldpc` 沿阶梯移动配置的
   split；非阶梯 split 保持固定。`adaptive=off` 保持配置的形状。
-- **单流 FEC。** 每个会话承载一条 FEC 流（`0x100a`）。DATA/PARITY 载荷就是
+- **单流 FEC。** 每个会话承载一条 FEC 流（`0x100c`）。DATA/PARITY 载荷就是
   应用字节，一次 8 KiB 写入就是一个 DATA share，没有 per-stream 解复用或窗口状态。
 - **每条远端隧道只有一个锚。** 一个 `peer=`（或第一条 HELLO）固定源地址。
   近端多宿主，或者 NAT 重绑源地址时，未认证的 HELLO 会被拒绝（`join_src_reject`）；
@@ -662,8 +663,8 @@ root。如果两台主机之间的路径不可信，就把隧道放进 WireGuard
 这不是通用 VPN。它只转发 TCP，每条隧道只对应一个字面目标地址，没有路由、没有 NAT、
 没有认证。FEC v6 可选（`fec=on`）；`mode=sc-ldpc` 已实现
 （binary 下行、grouped GF(16) 上行），`mode=rlnc`/`grouped` 保留为 GF(2)
-band RLNC 回退，`carriers = groups * (n + m)` 最多 256 条载体。0.7.0 每个
-会话只承载一条 FEC 流（`0x100a`）。
+band RLNC 回退，`carriers = groups * (n + m)` 最多 256 条载体。自 0.7.0 起
+每个会话只承载一条 FEC 流（当前 `0x100c`）。
 `crypto=on` 只做 ChaCha8 body
 混淆，不是加密，也不做认证。它的用途是放大"每流限速"的额度，并验证某个
 QoS 档位是否有效。其它场景请用 WireGuard。
