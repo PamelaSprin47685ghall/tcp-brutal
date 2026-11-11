@@ -821,6 +821,86 @@ static void test_tx_idle_short_then_long(void)
     tx_clear_carriers();
 }
 
+/* Tx credit: a one-block peer grant is stop-and-wait; a seven-block grant
+ * converts to seven blocks for both groups=1 and groups=8. */
+static void test_tx_peer_credit(void)
+{
+    struct flow *tx = tx_flow_new();
+    u64 block_shares;
+
+    tx_fake_carriers();
+    block_shares = (u64)tx->groups * (tx->n + tx->m);
+    tx->tx_credit_shares = block_shares; /* one block */
+    CHECK(flow_tx_credit_ok(tx), "peer1: first block open");
+    tx->tx_seq = (u64)tx->groups * tx->n;
+    CHECK(flow_tx_credit_ok(tx), "peer1: the one granted block fits");
+    tx->tx_seq = (u64)tx->groups * tx->n + 1;
+    CHECK(!flow_tx_credit_ok(tx), "peer1: the next packet waits");
+
+    tx->tx_credit_shares = 7 * block_shares;
+    tx->tx_seq = 0;
+    CHECK(tx->tx_credit_shares / block_shares == 7,
+          "peer7: groups=8 converts to seven blocks");
+    tx->tx_seq = 4 * (u64)tx->groups * tx->n;
+    CHECK(flow_tx_credit_ok(tx), "peer7: four-block local cap is open");
+    tx->tx_seq = 4 * (u64)tx->groups * tx->n + 1;
+    CHECK(!flow_tx_credit_ok(tx), "peer7: beyond the four-block cap stops");
+
+    /* groups=1 downlink: the same seven-block conversion. */
+    tx->groups = 1;
+    tx->n = 128;
+    tx->m = 128;
+    block_shares = (u64)tx->groups * (tx->n + tx->m);
+    tx->tx_credit_shares = 7 * block_shares;
+    tx->tx_seq = 4 * (u64)tx->groups * tx->n;
+    CHECK(tx->tx_credit_shares / block_shares == 7,
+          "peer7: groups=1 converts to seven blocks");
+    CHECK(flow_tx_credit_ok(tx), "peer7: groups=1 four-block cap is open");
+    tx->tx_seq = 4 * (u64)tx->groups * tx->n + 1;
+    CHECK(!flow_tx_credit_ok(tx), "peer7: groups=1 stops at the cap");
+    flow_free(&tx_e, tx);
+    tx_clear_carriers();
+}
+
+/* Consecutive short blocks cost one replay slot each. Seven may be
+ * outstanding; the eighth waits for an ACK, so the ring never wraps. */
+static void test_tx_block_credit(void)
+{
+    struct flow *tx = tx_flow_new();
+    u64 block_shares;
+    int i;
+
+    tx_fake_carriers();
+    block_shares = (u64)tx->groups * (tx->n + tx->m);
+    tx->tx_credit_shares = 7 * block_shares;
+    for (i = 0; i < 7; i++)
+    {
+        CHECK(flow_tx_block_credit_ok(tx), "blocks: next short block allowed");
+        tx_feed_byte_pattern(tx, 3, (u8)(0x20 + i));
+        tx_tick_idle(tx);
+        CHECK(tx->tx_block == (u64)i + 1, "blocks: short block sealed");
+    }
+    CHECK(!flow_tx_block_credit_ok(tx),
+          "blocks: the eighth unacked block is refused");
+
+    /* Bypass the app gate: the idle sealer itself must refuse to wrap. */
+    tx_feed_byte_pattern(tx, 3, 0x77);
+    tx_tick_idle(tx);
+    CHECK(tx->tx_block == 7, "blocks: idle sealer holds the eighth block");
+    CHECK(tx->tx_cur_len == 3, "blocks: the refused block stays partial");
+
+    /* One ACK frees exactly one slot; the held short block then seals. */
+    tx->tx_ack_next = (u64)tx->groups * tx->n;
+    CHECK(flow_tx_block_credit_ok(tx), "blocks: ACK opens one slot");
+    tx_tick_idle(tx);
+    CHECK(tx->tx_block == 8, "blocks: the held block seals after the ACK");
+    CHECK(!flow_tx_block_credit_ok(tx),
+          "blocks: seven unacked blocks remain the limit");
+    CHECK(tx->tx_cur_len == 0, "blocks: no partial state after the seal");
+    flow_free(&tx_e, tx);
+    tx_clear_carriers();
+}
+
 /* The stall dump must fire once for an incomplete head and expose both
  * counters: rx_block_stalled and rx_shape_mismatch (a record whose h.n/h.m
  * differs from the committed split). */
@@ -892,6 +972,8 @@ int main(void)
     test_shape_rejection();
     test_stall_dump();
     test_tx_idle_empty();
+    test_tx_peer_credit();
+    test_tx_block_credit();
     test_tx_idle_3();
     test_tx_idle_200();
     test_tx_idle_short_then_long();

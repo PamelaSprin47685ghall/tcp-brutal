@@ -1914,8 +1914,8 @@ static bool tbt_tx_fec_credit_waiting(const struct tbt_session *sess)
          * block-credit wait would look like a dead ACK path. */
         waiting = tbt_fec_credit_waiting(READ_ONCE(tx->peer_pkts),
                                          READ_ONCE(tx->seq),
-                                         READ_ONCE(tx->credit), tx->base_pkt,
-                                         tx->base_block, tx->groups, tx->n);
+                                         READ_ONCE(tx->credit), tx->groups,
+                                         tx->n, tx->m);
     rcu_read_unlock();
     return waiting;
 }

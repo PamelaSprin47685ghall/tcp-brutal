@@ -1649,13 +1649,13 @@ static void test_replay_window(void)
 
     /* The credit is K_eff-2 super-blocks, K_eff = min(ring K, arena slots),
      * capped to TBT_FEC_CREDIT_MAX packets. For this shape the ring binds. */
-    credit = tbt_fec_credit_packets(G, N, k, (u16)slots,
+    credit = tbt_fec_credit_packets(G, N, M, k, (u16)slots,
                                     TBT_FEC_CREDIT_MAX);
-    blocks = credit / ((u32)G * N);
+    blocks = credit / ((u32)G * (N + M));
     ok_int((int)blocks, (int)k - 2,
            "replay window: credit is K-2 super-blocks");
     ok(credit <= TBT_FEC_CREDIT_MAX,
-       "replay window: credit is capped at 8192 packets");
+       "replay window: credit is capped at 16384 shares");
 
     /* The receiver delivered up to block 3 and stalls on block 4. The sender
      * closes blocks 4..(3 + credit blocks): the cap, one short share each. */
@@ -1686,14 +1686,14 @@ static void test_replay_window(void)
            "256-carrier grouped K");
     ok_int(tbt_fec_replay_k_for(1, 192, 64, TBT_FEC_S), 66,
            "256-carrier single K");
-    ok_int((int)tbt_fec_credit_packets(4, 4, 66, 66, TBT_FEC_CREDIT_MAX),
-           1024, "32-carrier credit");
-    ok_int((int)tbt_fec_credit_packets(8, 4, 66, 66, TBT_FEC_CREDIT_MAX),
-           2048, "64-carrier credit");
-    ok_int((int)tbt_fec_credit_packets(32, 4, 66, 66, TBT_FEC_CREDIT_MAX),
-           8192, "256-carrier grouped credit");
-    ok_int((int)tbt_fec_credit_packets(1, 192, 66, 66, TBT_FEC_CREDIT_MAX),
-           8064, "256-carrier single credit (8192 / 192 blocks)");
+    ok_int((int)tbt_fec_credit_packets(4, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX),
+           2048, "32-carrier credit");
+    ok_int((int)tbt_fec_credit_packets(8, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX),
+           4096, "64-carrier credit");
+    ok_int((int)tbt_fec_credit_packets(32, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX),
+           16384, "256-carrier grouped credit");
+    ok_int((int)tbt_fec_credit_packets(1, 192, 64, 66, 66, TBT_FEC_CREDIT_MAX),
+           16384, "256-carrier single credit (16384 shares)");
 
     /* The ring stays inside 20 MiB (descriptors + 8 hot block planes) and
      * the credit inside 8192 packets (8 MiB of payload at S=1024). */
@@ -1714,15 +1714,15 @@ static void test_replay_window(void)
        "256-carrier grouped 66-slot address space");
     ok((u64)1 * 66 * 256 * 8192 <= 140u * 1024 * 1024,
        "256-carrier single 66-slot address space");
-    ok(tbt_fec_credit_packets(4, 4, 66, 66, TBT_FEC_CREDIT_MAX) <=
+    ok(tbt_fec_credit_packets(4, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX) <=
            TBT_FEC_CREDIT_MAX &&
-           tbt_fec_credit_packets(8, 4, 66, 66, TBT_FEC_CREDIT_MAX) <=
+           tbt_fec_credit_packets(8, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX) <=
                TBT_FEC_CREDIT_MAX &&
-           tbt_fec_credit_packets(32, 4, 66, 66, TBT_FEC_CREDIT_MAX) <=
+           tbt_fec_credit_packets(32, 4, 4, 66, 66, TBT_FEC_CREDIT_MAX) <=
                TBT_FEC_CREDIT_MAX &&
-           tbt_fec_credit_packets(1, 192, 66, 66, TBT_FEC_CREDIT_MAX) <=
+           tbt_fec_credit_packets(1, 192, 64, 66, 66, TBT_FEC_CREDIT_MAX) <=
                TBT_FEC_CREDIT_MAX,
-       "credit stays inside the 8192-packet cap");
+       "credit stays inside the 16384-share cap");
 }
 
 /* ------------------------------------------------------------------ *
@@ -2727,37 +2727,37 @@ static void test_block_late(void)
  */
 static void test_credit_window(void)
 {
-    const u32 credit_pkts = 640; /* 1x256 downlink: 5 super-blocks */
-    const u32 blocks = tbt_fec_credit_blocks(credit_pkts, 1, 128);
+    const u32 credit_pkts = 7u * (128u + 128u); /* 7 x 1x256 downlink */
+    const u32 blocks = tbt_fec_credit_blocks(credit_pkts, 1, 128, 128);
     int i;
 
-    ok_int(blocks, 5, "credit: the packet grant names five super-blocks");
-    ok_int(tbt_fec_credit_blocks(512, 8, 8), 8,
-           "credit: the uplink grant is counted in its own super-blocks");
-    ok_int(tbt_fec_credit_blocks(0, 1, 128), 0,
+    ok_int(blocks, 7, "credit: the share grant names seven downlink blocks");
+    ok_int(tbt_fec_credit_blocks(7u * 8u * (8u + 24u), 8, 8, 24), 7,
+           "credit: the uplink grant is seven 8x32 blocks");
+    ok_int(tbt_fec_credit_blocks(0, 1, 128, 128), 0,
            "credit: no grant is no block");
 
-    /* The four blocks beyond the frontier may be opened; the fifth may not. */
-    ok(tbt_fec_credit_block_ok(4, 0, blocks),
-       "credit: the fourth block beyond the frontier is open");
-    ok(!tbt_fec_credit_block_ok(5, 0, blocks),
-       "credit: the fifth block beyond the frontier is closed");
+    /* The six blocks beyond the frontier may be opened; the seventh may not. */
+    ok(tbt_fec_credit_block_ok(6, 0, blocks),
+       "credit: the sixth block beyond the frontier is open");
+    ok(!tbt_fec_credit_block_ok(7, 0, blocks),
+       "credit: the seventh block beyond the frontier is closed");
 
     /* The regression: a stream of one-share blocks advances block ids, not
      * packet counters. With the packet gate, 128 such blocks fit in the
      * 640-packet window and the sender could churn them without the
      * receiver ever delivering; the block gate stops after K-2. */
-    for (i = 0; i < 4; i++)
+    for (i = 0; i < 6; i++)
         ok(tbt_fec_credit_block_ok((u64)i, 0, blocks),
            "credit: a one-share block spends one block of the window");
-    ok(!tbt_fec_credit_block_ok(5, 0, blocks),
-       "credit: the sixth one-share block is closed");
+    ok(!tbt_fec_credit_block_ok(7, 0, blocks),
+       "credit: the seventh one-share block is closed");
 
     /* While a block fills, its id does not change, so a gate that was open
      * when it began stays open for every share: the packetizer can finish
      * the block instead of leaving an unsealed frontier. */
     for (i = 0; i < 128; i++)
-        ok(tbt_fec_credit_block_ok(4, 0, blocks),
+        ok(tbt_fec_credit_block_ok(6, 0, blocks),
            "credit: every share of the started block is admitted");
 
     /* A delivered block moves the frontier and reopens one slot. */

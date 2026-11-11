@@ -203,6 +203,7 @@ struct flow
     bool tx_pkt_base_set;
     u64 tx_last_len;
     u64 tx_ack_next;
+    u64 tx_credit_shares;
     u64 last_stat_ns;
     struct replay_block replay[TBT_REPLAY_BLOCKS];
 
@@ -229,7 +230,7 @@ struct flow
     u64 rx_inflight_bad;
     u64 rx_block_stalled;
     u64 rx_shape_mismatch;
-    u32 rx_credit_packets;
+    u32 rx_credit_packets; /* units: shares, one block is groups*(n+m) */
     u64 rx_credit_bad;
     u16 rx_used;
     u64 rx_deliver_bytes;
@@ -2235,9 +2236,12 @@ static int handle_fec(struct engine *e, struct carrier *c, const u8 *rec,
 
         if (h.payload_len != TBT_FEC_ACK_LEN)
             return -EPROTO;
-        if (!tbt_fec_ack_unpack(payload, &a) &&
-            a.next_deliver > f->tx_ack_next)
-            f->tx_ack_next = a.next_deliver;
+        if (!tbt_fec_ack_unpack(payload, &a))
+        {
+            if (a.next_deliver > f->tx_ack_next)
+                f->tx_ack_next = a.next_deliver;
+            f->tx_credit_shares = a.credit_packets;
+        }
         break;
     }
     case TBT_FEC_FBK:
@@ -2496,13 +2500,56 @@ static int flow_tx_ready(struct flow *f, u64 now)
     return 1;
 }
 
+/* The peer's ACK credit is in shares. One block is groups*(n+m) shares and
+ * groups*n DATA packets; convert to a local packet window capped at four
+ * blocks. A missing grant still allows one block so the first ACK can
+ * arrive; a one-block grant is stop-and-wait. */
 static bool flow_tx_credit_ok(const struct flow *f)
 {
-    u64 window = (u64)f->groups * f->n * 4;
+    u64 block_shares = (u64)f->groups * (f->n + f->m);
+    u64 data_block = (u64)f->groups * f->n;
+    u64 credit_blocks;
+    u64 peer_window;
+    u64 window;
 
-    if (!window)
-        window = 256;
+    if (!block_shares || !data_block)
+        return false;
+    credit_blocks = f->tx_credit_shares / block_shares;
+    if (!credit_blocks)
+        credit_blocks = 1;
+    peer_window = credit_blocks * data_block;
+    window = peer_window < 4u * data_block ? peer_window : 4u * data_block;
     return f->tx_seq <= f->tx_ack_next + window;
+}
+
+/* Block billing, not packet billing: a short block costs one replay slot.
+ * The sender may hold at most TBT_REPLAY_BLOCKS-1 unacknowledged blocks,
+ * further capped by the peer's credit_blocks. A block that already started
+ * is not interrupted here; the caller stops before opening the next one. */
+static bool flow_tx_block_credit_ok(const struct flow *f)
+{
+    u64 block_shares = (u64)f->groups * (f->n + f->m);
+    u64 span = (u64)f->groups * f->n;
+    u64 ack_blocks = 0;
+    u64 outstanding;
+    u64 peer_blocks;
+    u64 limit = TBT_REPLAY_BLOCKS - 1;
+
+    if (!block_shares || !span)
+        return false;
+    if (f->tx_ack_next > f->tx_pkt_base)
+        ack_blocks = (f->tx_ack_next - f->tx_pkt_base) / span;
+    if (ack_blocks > f->tx_block)
+        ack_blocks = f->tx_block;
+    outstanding = f->tx_block - ack_blocks;
+    peer_blocks = f->tx_credit_shares / block_shares;
+    if (!peer_blocks)
+        peer_blocks = 1;
+    if (peer_blocks < limit)
+        limit = peer_blocks;
+    if (!limit)
+        limit = 1;
+    return outstanding < limit;
 }
 
 /* Close the local application socket without discarding the FEC flow: the
@@ -2533,7 +2580,7 @@ static void flow_app_read(struct flow *f)
     {
         ssize_t n;
 
-        if (!flow_tx_credit_ok(f))
+        if (!flow_tx_credit_ok(f) || !flow_tx_block_credit_ok(f))
             return;
         n = read(f->app_fd, f->rbuf, sizeof(f->rbuf));
 
@@ -2639,7 +2686,8 @@ static void flow_tick(struct flow *f, u64 now)
     flow_fin_maybe(f);
     if (!f->tx_finished && f->tx_activity_ns &&
         now - f->tx_activity_ns >= TBT_TX_IDLE_SEAL_NS &&
-        (f->tx_cur_len || f->tx_share || f->tx_group))
+        (f->tx_cur_len || f->tx_share || f->tx_group) &&
+        flow_tx_block_credit_ok(f))
     {
         if (flow_tx_seal_block(f, false))
             logmsg(e,

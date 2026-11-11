@@ -610,7 +610,7 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
  * steady resident set follows the ACK frontier rather than K times a block.
  *   static ring   <= TBT_FEC_REPLAY_BUDGET (20 MiB: descriptors + 8 blocks),
  *   arena         <= 66 slots, block planes lazy (8-block hot pool),
- *   credit        <= K_eff - 2 blocks, capped at TBT_FEC_CREDIT_MAX packets.
+ *   credit        <= K_eff - 2 blocks, capped at TBT_FEC_CREDIT_MAX shares.
  * A shape that cannot hold K=1 gets no ring; the credit cap follows the
  * effective K. */
 #define TBT_FEC_REPLAY_K_MAX 66
@@ -618,16 +618,15 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
 /* The sliding window is 64 super-blocks of source data, the measured BDP
  * of 128 MB/s over 400 ms. The window must stay two blocks below the ring K
  * so a NACKed block is never evicted while the receiver can still ask for
- * it. tbt_fec_credit_packets() converts the window to DATA packets; neither
+ * it. tbt_fec_credit_packets() converts the window to shares; neither
  * window multiplies again by the carrier count. */
 #define TBT_FEC_WINDOW_DOWN (64u * TBT_FEC_MAX_SHARES * TBT_FEC_S)
 #define TBT_FEC_WINDOW_UP (64u * TBT_FEC_MAX_SHARES * TBT_FEC_S)
-/* The RLNC ACK grants at most this many DATA packets of FEC credit. The
- * SC-LDPC window is a byte budget (64 blocks of 256 shares at S), so at
- * S=1024 it resolves to 16384 packets and the effective cap is the ring's
- * K-2 blocks. The credit bounds the sender's in-flight data; the ring bounds
- * the repair storage, and both are constant-size for a given shape. */
-#define TBT_FEC_CREDIT_MAX 8192u
+/* The ACK grants at most this many shares of FEC credit (n+m per block). At
+ * 256 shares per block this is 64 blocks; the uplink window resolves to
+ * fewer. The credit bounds the sender's in-flight data; the ring bounds the
+ * repair storage, and both are constant-size for a given shape. */
+#define TBT_FEC_CREDIT_MAX 16384u
 
 /* Block planes resident in the replay hot pool. Eight 256 KiB blocks are
  * 2 MiB at S=1024; below TBT_FEC_REPLAY_MEM_LOW_KB the pool shrinks to
@@ -659,7 +658,9 @@ size_t tbt_fec_replay_bytes(u16 groups, u16 n, u16 m, u16 s, u16 k);
 long tbt_fec_host_live_allocs(void);
 #endif
 
-/* The FEC in-flight window in DATA packets, derived from the effective K.
+/* The FEC in-flight window in shares (n+m per block), derived from the
+ * effective K. The credit arrives in the same unit the receiver's arena
+ * counts: one slot holds a whole block, DATA and PARITY alike.
  *
  * The sender may run at most K-2 super-blocks past the delivered frontier:
  * the ring holds K, and two are slack for the ACK in flight. K_eff is the
@@ -667,13 +668,14 @@ long tbt_fec_host_live_allocs(void);
  * TBT_FEC_REPLAY_K_MAX; `slots` may be 0 when the caller has no arena. The
  * result is rounded down to whole super-blocks so the sender never opens a
  * partial block the ring cannot cover, and capped to `max_packets`
- * (TBT_FEC_CREDIT_MAX) to bound memory. A K too small to hold the two-block
- * slack still grants one super-block: the stream must move, and repair is
- * already unavailable. */
-static inline u32 tbt_fec_credit_packets(u16 groups, u16 n, u16 k_ring,
-                                         u16 slots, u32 max_packets)
+ * (TBT_FEC_CREDIT_MAX shares) to bound memory. A K too small to hold the
+ * two-block slack still grants one super-block: the stream must move, and
+ * repair is already unavailable. */
+static inline u32 tbt_fec_credit_packets(u16 groups, u16 n, u16 m,
+                                         u16 k_ring, u16 slots,
+                                         u32 max_packets)
 {
-    u32 per_block = (u32)groups * n;
+    u32 per_block = (u32)groups * ((u32)n + m);
     u32 k_eff = k_ring;
     u32 blocks;
 
@@ -694,13 +696,13 @@ static inline u32 tbt_fec_credit_packets(u16 groups, u16 n, u16 k_ring,
     return blocks ? blocks * per_block : 1;
 }
 
-/* How many whole super-blocks a packet grant is worth. The credit arrives
- * in packets because that is what the receiver's arena counts; the sender
+/* How many whole super-blocks a share grant is worth. The credit arrives
+ * in shares because that is what the receiver's arena counts; the sender
  * spends it in blocks, which is the unit that survives a short cut. */
 static inline u32 tbt_fec_credit_blocks(u32 credit_packets, u16 groups,
-                                        u16 n)
+                                        u16 n, u16 m)
 {
-    u32 per_block = (u32)groups * n;
+    u32 per_block = (u32)groups * ((u32)n + m);
     u32 blocks;
 
     if (!per_block || !credit_packets)
@@ -709,26 +711,14 @@ static inline u32 tbt_fec_credit_blocks(u32 credit_packets, u16 groups,
     return blocks ? blocks : 1;
 }
 
-/* The sender's credit gate, in whole super-blocks.
+/* The sender's credit gate, in absolute DATA packets.
  *
- * The old gate compared packet sequence numbers (`seq - peer_pkts <
- * credit`). That identity holds only while every block carries groups*n
- * shares: `tbt_fec_tx_close_block(advance)` moves seq to the next block
- * boundary when a block is cut early, so a short block spends a full
- * block of the packet window while carrying only win_len shares. The
- * window then no longer bounds blocks, and the packetizer can close it in
- * the middle of the next block. A block cut after one 2 KB share is the
- * field case: 0.7.0 delivered 383 MB and then spent 118 s sending
- * one-share blocks, the receiver's frontier stuck on a block with no
- * stored share (fec_replay_miss_never_stored +84, gap_us 28.8 s).
- *
- * The window is what the receiver actually buffers: `slots` super-blocks,
- * minus two for the ACK in flight, and the replay ring holds the same K.
- * Counting blocks makes a short block cost one block, exactly like a full
- * one, so the arena and the ring agree whatever the cut. It also lets the
- * packetizer finish a block it started: the block id does not change while
- * the block fills, so a gate that was open when the block began stays
- * open until the cut. Zero credit is a closed window, never an open one.
+ * Only packets participate: the receiver buffers `credit` DATA packets
+ * ahead of its delivered packet frontier, and that is exact for full
+ * blocks, short blocks and every n/m change. Block ids are not comparable
+ * across a shape switch (base_pkt/base_block move), so a block gate can
+ * report a closed window while the packet lead is below credit. Replay and
+ * NACK use block ids; the sender does not.
  */
 static inline bool tbt_fec_credit_block_ok(u64 blk, u64 frontier,
                                            u32 credit_blocks)
@@ -1256,26 +1246,24 @@ static inline u64 tbt_fec_block_of_seq(u64 seq, u16 groups, u16 k)
 
 /* The same gate over the fields the TX stall path can read under RCU. Both
  * the packetizer and tbt_tx.c's reset decision must use this one definition:
- * a mirror that still compared packet numbers would call a block-credit wait
- * a dead ACK path and reset a stream the receiver is still draining. */
+ * a mirror that still compared block ids would call a packet-credit wait a
+ * dead ACK path and reset a stream the receiver is still draining. */
 static inline bool tbt_fec_credit_waiting(u64 peer_pkts, u64 seq,
-                                          u32 credit, u64 base_pkt,
-                                          u64 base_block, u16 groups, u16 n)
+                                          u32 credit, u16 groups, u16 n,
+                                          u16 m)
 {
+    u32 per_block_shares = (u32)groups * ((u32)n + m);
+    u32 per_block_data = (u32)groups * n;
     u32 credit_blocks;
-    u64 frontier, blk;
+    u64 credit_data;
 
-    if (!credit || !groups || !n)
+    if (!credit || !per_block_shares || !per_block_data)
         return true;
-    credit_blocks = tbt_fec_credit_blocks(credit, groups, n);
-    if (peer_pkts < base_pkt)
-        peer_pkts = base_pkt;
-    if (seq < base_pkt)
-        seq = base_pkt;
-    frontier = tbt_fec_block_of_seq_base(peer_pkts, base_pkt, base_block,
-                                         groups, n);
-    blk = tbt_fec_block_of_seq_base(seq, base_pkt, base_block, groups, n);
-    return !tbt_fec_credit_block_ok(blk, frontier, credit_blocks);
+    credit_blocks = credit / per_block_shares;
+    credit_data = (u64)credit_blocks * per_block_data;
+    /* One block of headroom: a block that has started must finish. */
+    return seq > peer_pkts &&
+           seq - peer_pkts >= credit_data + per_block_data;
 }
 
 /* A stream owns a subset of the session's physical groups. `mask` is the
@@ -1952,6 +1940,13 @@ static inline bool tbt_fec_rx_snap_current(bool used, u64 snap_block_id,
  * the old six-point table fell back to the largest measured value. */
 /* The ACK/FBK shape must come from the frontier block when that slot is
  * occupied, not from a late block or the session's last published shape. */
+static inline u16 tbt_fec_frontier_shape_m(bool used, u64 block_id,
+                                           u64 frontier, u16 block_m,
+                                           u16 session_m)
+{
+    return (used && block_id == frontier && block_m) ? block_m : session_m;
+}
+
 static inline u16 tbt_fec_frontier_shape_n(bool used, u64 block_id,
                                            u64 frontier, u16 block_n,
                                            u16 session_n)

@@ -2021,8 +2021,7 @@ static bool tbt_fec_tx_credit_ok(const struct tbt_fec_tx *tx)
      * shares would come back as fec_drop_window. */
     return !tbt_fec_credit_waiting(READ_ONCE(tx->peer_pkts),
                                    READ_ONCE(tx->seq), READ_ONCE(tx->credit),
-                                   tx->base_pkt, tx->base_block, tx->groups,
-                                   tx->n);
+                                   tx->groups, tx->n, tx->m);
 }
 
 /* The session FIFO at or above its high-water mark. The packetizer checks
@@ -2269,7 +2268,8 @@ static void tbt_fec_tx_codec_tick(struct tbt_session *sess,
     spin_unlock_bh(&tx->shape_lock);
     rk = tx->replay ? tbt_fec_replay_k(tx->replay) : sess->fec_replay_k;
     tx->credit_cap = tbt_fec_credit_packets(
-        tx->groups, n, rk, sess->fec_slots, tbt_fec_credit_max_packets(sess));
+        tx->groups, n, want_m, rk, sess->fec_slots,
+        tbt_fec_credit_max_packets(sess));
     if (tx->credit > tx->credit_cap)
         tx->credit = tx->credit_cap;
     if (tx->codec_entry)
@@ -3396,6 +3396,18 @@ static u16 tbt_fec_frontier_n(struct tbt_fec_rx *rx, u64 s)
     return n;
 }
 
+static u16 tbt_fec_frontier_m(struct tbt_fec_rx *rx, u64 s)
+{
+    struct tbt_fec_blk *b;
+    u16 m;
+
+    spin_lock_bh(&rx->lock);
+    b = tbt_fec_rx_blk(rx, 0, s);
+    m = tbt_fec_frontier_shape_m(b->used, b->block_id, s, b->m, rx->m);
+    spin_unlock_bh(&rx->lock);
+    return m;
+}
+
 static void tbt_fec_ack(struct tbt_session *sess, struct tbt_fec_flow *f,
                         struct tbt_stream *st, u64 next_deliver,
                         u64 deliver_bytes)
@@ -3422,7 +3434,8 @@ static void tbt_fec_ack(struct tbt_session *sess, struct tbt_fec_flow *f,
 
         a.credit_packets = tbt_fec_credit_packets(
             rx->groups, tbt_fec_frontier_n(rx, READ_ONCE(rx->next_super)),
-            rx->replay_k, rx->slots,
+            tbt_fec_frontier_m(rx, READ_ONCE(rx->next_super)), rx->replay_k,
+            rx->slots,
             tbt_fec_credit_max_packets_dir(sess, rx->groups > 1));
         /* The peer uses this as the replay round trip: a share asked again
          * before it can arrive would only duplicate the repair. The sample
@@ -8030,7 +8043,7 @@ tbt_fec_tx_plane_new(struct tbt_session *sess, struct tbt_fec_flow *flow,
     {
         tx->codec_variant = groups > 1 ? 1 : 0;
     }
-    tx->credit_cap = tbt_fec_credit_packets(groups, n, sess->fec_replay_k,
+    tx->credit_cap = tbt_fec_credit_packets(groups, n, m, sess->fec_replay_k,
                                             sess->fec_slots,
                                             tbt_fec_credit_max_packets(sess));
     tx->credit = tx->credit_cap;
