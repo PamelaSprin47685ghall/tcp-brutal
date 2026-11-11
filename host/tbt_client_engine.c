@@ -220,6 +220,8 @@ struct flow
     u64 rx_late_share;
     u64 rx_stale_nack;
     u64 rx_window_drop;
+    u64 rx_inflight_bad;
+    u16 rx_used;
     u64 rx_deliver_bytes;
     u64 peer_fin_end;
     bool peer_fin_end_set;
@@ -1286,10 +1288,10 @@ static int flow_send_ack(struct flow *f)
 
     memset(&a, 0, sizeof(a));
     a.next_deliver = f->rx_next_deliver;
-    /* The peer may only send the blocks this side can buffer. Granting the
-     * 8192-packet credit let a far side run 64 blocks ahead of an 8-slot
-     * reorder ring, so a NACK could name a block already evicted. */
-    a.credit_packets = (u32)TBT_RX_SLOTS * f->rx_n;
+    /* The peer may only send the blocks this side can buffer. One slot must
+     * stay free for the block being delivered: N in-flight + 1 head <=
+     * TBT_RX_SLOTS, so the grant is TBT_RX_SLOTS - 1 blocks of packets. */
+    a.credit_packets = (u32)(TBT_RX_SLOTS - 1) * f->rx_n;
     a.rtt_us = f->rtt_us ? f->rtt_us : 1000;
     a.deliver_bytes = f->rx_deliver_bytes;
     if (tbt_fec_ack_pack(&a, body))
@@ -1433,12 +1435,14 @@ static int flow_send_fbk(struct flow *f, u8 flags, u32 epoch)
  * Receive side: reorder window, SC-LDPC decode, ordered delivery
  * ------------------------------------------------------------------ */
 
-static void rx_block_release(struct rx_block *b)
+static void rx_block_release(struct flow *f, struct rx_block *b)
 {
     int g;
 
     if (!b->used)
         return;
+    if (f && f->rx_used)
+        f->rx_used--;
     for (g = 0; g < b->groups; g++)
         free(b->g[g].buf);
     free(b->g);
@@ -1492,9 +1496,10 @@ static struct rx_block *rx_block_get(struct flow *f,
     slot = (u32)(id % TBT_RX_SLOTS);
     b = &f->rx[slot];
     if (b->used && b->id != id)
-        rx_block_release(b);
+        rx_block_release(f, b);
     if (!b->used)
     {
+        f->rx_used++;
         b->used = true;
         b->id = id;
         b->seq0 = seq0;
@@ -1505,6 +1510,8 @@ static struct rx_block *rx_block_get(struct flow *f,
         b->g = calloc(b->groups, sizeof(*b->g));
         if (!b->g)
         {
+            if (f->rx_used)
+                f->rx_used--;
             memset(b, 0, sizeof(*b));
             return NULL;
         }
@@ -1744,7 +1751,7 @@ static void flow_rx_check(struct flow *f)
         }
         f->rx_next_deliver += blk_pkts;
         f->rx_next_block = b->id + 1;
-        rx_block_release(b);
+        rx_block_release(f, b);
         flow_fin_maybe(f);
         (void)flow_send_ack(f);
     }
@@ -1804,6 +1811,16 @@ static void flow_rx_store(struct flow *f, const struct tbt_fec_hdr *h,
     }
     rx_group_try(f, b, group);
     flow_rx_check(f);
+    {
+        u16 inflight = f->rx_used;
+        u32 head = (u32)(f->rx_next_block % TBT_RX_SLOTS);
+
+        if (inflight && f->rx[head].used &&
+            f->rx[head].id == f->rx_next_block)
+            inflight--;
+        if (inflight > TBT_RX_SLOTS - 1)
+            f->rx_inflight_bad++;
+    }
 }
 
 static void flow_send_nack_group(struct flow *f, struct rx_block *b,
@@ -2505,12 +2522,18 @@ static void flow_tick(struct flow *f, u64 now)
         f->last_stat_ns = now;
         logmsg(e,
                "tbt_client: flow %llu near=%d tx_seq=%llu ack_next=%llu "
-               "rx_next=%llu rx_bytes=%llu out=%zu/%zu up=%u\n",
+               "rx_next=%llu rx_bytes=%llu rx_used=%u rx_late=%llu "
+               "rx_win_drop=%llu rx_stale=%llu rx_inflight_bad=%llu "
+               "out=%zu/%zu up=%u\n",
                (unsigned long long)f->sid, f->near,
                (unsigned long long)f->tx_seq,
                (unsigned long long)f->tx_ack_next,
                (unsigned long long)f->rx_next_block,
-               (unsigned long long)f->rx_deliver_bytes, f->out_len,
+               (unsigned long long)f->rx_deliver_bytes, f->rx_used,
+               (unsigned long long)f->rx_late_share,
+               (unsigned long long)f->rx_window_drop,
+               (unsigned long long)f->rx_stale_nack,
+               (unsigned long long)f->rx_inflight_bad, f->out_len,
                f->out_off, e->up_count);
     }
     if (f->fin_sent && f->fin_applied)

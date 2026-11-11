@@ -10,7 +10,7 @@
  *   - NACK anchors on rx_next_block, never on a delivery frontier that marker
  *     blocks leave behind;
  *   - rx_next_deliver advances by real packets: marker 0, short sum(win_len);
- *   - ACK credit is TBT_RX_SLOTS * the current rx_n;
+ *   - ACK credit is (TBT_RX_SLOTS - 1) * the current rx_n;
  *   - n/m are read from every block header, not from the session's first CFG.
  * Counters check that a stale slot below rx_next_block can never be NACKed
  * and that a late replay is counted instead of silently wedging.
@@ -104,6 +104,8 @@ static void clear_pending(void)
 {
     e.npending = 0;
 }
+
+static void set_downlink_shape(void);
 
 static void send_data(u64 block, u64 seq0, u16 n, u16 m, u16 group,
                       u16 share, u16 len, bool padded)
@@ -284,8 +286,8 @@ static void test_marker_short_sequence(void)
                                     8u * (TBT_FEC_S + 784u) +
                                     64u * TBT_FEC_S,
           "sequence: delivered bytes");
-    CHECK(last_ack_credit() == (int)(TBT_RX_SLOTS * 8u),
-          "sequence: ACK credit is 8 slots * n");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 8u),
+          "sequence: ACK credit is 7 slots * n");
     CHECK(f.rx_stale_nack == 0 && f.rx_late_share == 0 &&
               f.rx_window_drop == 0 && f.rx_shape_bad == 0,
           "sequence: no stale request or late drop");
@@ -295,9 +297,46 @@ static void test_marker_short_sequence(void)
     CHECK(count_nacks(ids, 16) == 0, "sequence: no NACK for delivered blocks");
 }
 
-/* Eight slots hold blocks 0..7. Block 8 must be refused until block 0
- * completes; NACK must name block 0 only; the stub block 0 then completes
- * with one real share and seven markers. */
+/* The sender spends the full credit of TBT_RX_SLOTS-1 blocks: one head under
+ * delivery plus seven in flight fill all eight slots, and no block is
+ * dropped. This is the capacity invariant the old 8-block credit broke. */
+static void test_credit_inflight(void)
+{
+    int i;
+
+    clear_engine();
+    set_downlink_shape();
+    send_data(0, 0, 132, 124, 0, 0, TBT_FEC_S, false);
+    for (i = 1; i < TBT_RX_SLOTS; i++)
+        marker_block((u64)i, (u64)i * 132, 132, 124);
+
+    CHECK(f.rx_used == TBT_RX_SLOTS, "credit: eight slots held");
+    CHECK(f.rx_window_drop == 0, "credit: full credit causes no drop");
+    CHECK(f.rx_inflight_bad == 0, "credit: in-flight count is within slots-1");
+    clear_pending();
+    CHECK(flow_send_ack(&f) == 0, "credit: ACK sent");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 132u),
+          "credit: ACK grants slots-1 blocks");
+
+    /* Complete the head; the seven markers drain behind it. */
+    send_parity(0, 0, 132, 124, 0, 1, 0);
+    CHECK(f.rx_next_block == 8, "credit: head and in-flight blocks drained");
+    CHECK(f.rx_used == 0, "credit: ring empty after drain");
+    CHECK(f.rx_window_drop == 0, "credit: drain caused no drop");
+    CHECK(f.rx_inflight_bad == 0, "credit: invariant held through drain");
+
+    /* The next block fits because one slot was reserved for delivery. */
+    marker_block(8, 8 * 132, 146, 110);
+    CHECK(f.rx_next_block == 9, "credit: post-drain block accepted");
+    CHECK(f.rx_used == 0 && f.rx_window_drop == 0,
+          "credit: post-drain ring empty and no drop");
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 146u),
+          "credit: post-drain credit follows the new split");
+}
+
+/* Eight slots hold blocks 0..7. A ninth block before the head completes is
+ * a sender violation and must be refused; NACK must name block 0 only; the
+ * stub block 0 then completes with one real share and seven markers. */
 static void test_window_and_nack_base(void)
 {
     u64 ids[16];
@@ -337,7 +376,7 @@ static void test_window_and_nack_base(void)
     CHECK(f.rx_next_block == 8, "window: blocks 0..7 drained");
     CHECK(f.rx_next_deliver == 1, "window: frontier is the one real share");
     CHECK(f.rx_deliver_bytes == TBT_FEC_S, "window: delivered one share");
-    CHECK(last_ack_credit() == (int)(TBT_RX_SLOTS * 8u),
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 8u),
           "window: ACK credit follows the ring");
 
     full_block(8, 8 * 64, 8, 24);
@@ -368,7 +407,7 @@ static void test_multishape_sequence(void)
           "shape: delivered bytes");
     CHECK(f.rx_n == 9 && f.rx_m == 23,
           "shape: current split follows the newest block");
-    CHECK(last_ack_credit() == (int)(TBT_RX_SLOTS * 9u),
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 9u),
           "shape: credit follows the current rx_n");
     CHECK(f.rx_shape_bad == 0, "shape: all per-block splits accepted");
     CHECK(flow_rx_codec(&f, 9, 23) != NULL, "shape: 9/23 codec builds");
@@ -401,7 +440,7 @@ static void test_downlink_shapes(void)
           "down: 132/124 marker accepted");
     CHECK(f.rx_n == 132 && f.rx_m == 124,
           "down: current split follows the marker");
-    CHECK(last_ack_credit() == (int)(TBT_RX_SLOTS * 132u),
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 132u),
           "down: credit is 8 * 132");
 
     full_block(1, 146, 146, 110);
@@ -409,7 +448,7 @@ static void test_downlink_shapes(void)
           "down: 146/110 full block delivered");
     CHECK(f.rx_n == 146 && f.rx_m == 110,
           "down: current split follows the full block");
-    CHECK(last_ack_credit() == (int)(TBT_RX_SLOTS * 146u),
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 146u),
           "down: credit is 8 * 146");
     CHECK(flow_rx_codec(&f, 132, 124) != NULL,
           "down: 132/124 codec builds");
@@ -436,7 +475,7 @@ static void test_far_shape_ladder(void)
     CHECK(f.rx_next_deliver == 148, "ladder: frontier 2 + 146");
     CHECK(f.rx_n == 146 && f.rx_m == 110,
           "ladder: current split follows the latest block");
-    CHECK(last_ack_credit() == (int)(TBT_RX_SLOTS * 146u),
+    CHECK(last_ack_credit() == (int)((TBT_RX_SLOTS - 1) * 146u),
           "ladder: credit follows the latest rx_n");
     CHECK(f.rx_shape_bad == 0, "ladder: no shape rejection");
     CHECK(flow_rx_codec(&f, 139, 117) != NULL,
@@ -538,6 +577,7 @@ static void test_fbk_commit(void)
 int main(void)
 {
     test_marker_short_sequence();
+    test_credit_inflight();
     test_window_and_nack_base();
     test_multishape_sequence();
     test_downlink_shapes();
