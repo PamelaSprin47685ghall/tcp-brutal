@@ -88,7 +88,7 @@ Backpressure is not loss. The stall threshold is 5 × the carrier's RTO
 (`SRTT + 4×RTTVAR`), clamped to 1..60 s; `carrier_stall_ms=` is a cap that can
 only lower it. Under FEC a stall pauses the carrier: new shares avoid it, the
 shares already in flight are treated as lost and rebuilt from parity, and the
-carrier is replaced only after `min(2×stall, 300 s)` with no wire progress
+carrier is replaced only after `max(4×stall, 30 s)`, capped at 300 s, with no wire progress
 (`stall_dead`). Under the old ARQ a stalled carrier is still killed and its
 retained frames are repathed immediately. An idle carrier, a delivery pause and
 a closed peer window restart the clock (`stall_idle_skips`,
@@ -494,7 +494,7 @@ snapshot, `txwake`, `c3` (carriers, joins, retransmission, reorder, gates),
 | `join_src_reject`, `join_nonce_reject`, `join_bad`, `join_dup` | HELLO refused by the anchor, by the first-HELLO source, by the nonce, or by an occupied slot |
 | `ctl_lost`, `ctl_retry`, `ctl_requeue`, `ctl_obsolete`, `ctl_queued` | pinned control frames: explicit loss after the retry bound, retries, requeues, obsolete generation, live depth |
 | `stall_paused_skips`, `win_block`, `win_resume` | stall decision deferred while paused / DATA held at the peer-window gate / released |
-| `stall_idle_skips`, `stall_declared`, `stall_recovered`, `stall_drop`, `stall_dead` | stall clock restarted because nothing was unacked / a FEC carrier was paused / its ack moved again / frames dropped by the ARQ pause helper (no caller yet, stays 0) / a paused carrier outlived `min(2×stall, 300 s)` and was replaced |
+| `stall_idle_skips`, `stall_declared`, `stall_recovered`, `stall_drop`, `stall_dead` | stall clock restarted because nothing was unacked / a FEC carrier was paused / its ack moved again / frames dropped by the ARQ pause helper (no caller yet, stays 0) / a paused carrier outlived `max(4×stall, 30 s)`, capped at 300 s, and was replaced |
 | `tx_window`, `rtt_mean_us`, `rttvar_us`, `rtt_max_us`, `txq_max` | effective sender window and its inputs / frame-queue bound |
 | `holes_declared`, `holes_repaired`, `holes_unrecoverable`, `rx_max_stall_us` | hole accounting |
 | `dup_tx`, `dup_used`, `dup_suppressed`, `inflate_ppm` | duplication |

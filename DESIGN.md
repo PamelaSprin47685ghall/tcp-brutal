@@ -959,7 +959,7 @@ is 8224 bytes); GSO may merge chunks into larger skbs without changing framing.
   only lower it. The clock runs only while unacked bytes are outstanding;
   an idle carrier, a delivery pause and a closed peer window reset it (§5.5). The
   FEC plane pauses the carrier and replaces it only after
-  `min(2×stall, 300 s)` without wire progress; ARQ kills and repaths it at
+  `max(4×stall, 30 s)`, capped at 300 s, without wire progress; ARQ kills and repaths it at
   once (§5.5, §9.7).
 
 ---
@@ -1546,10 +1546,13 @@ What a stall does depends on the data plane. Under FEC it **pauses** the carrier
 new shares, and the shares already in flight are the FEC plane's loss -- parity rebuilds
 the block, or its 30 s bound resets the stream. `stall_recovered` counts the pause that
 ends when `snd_una` moves again. A paused carrier is declared dead only when it outlives
-`min(2×stall, 300 s)` with `snd_una` frozen and no wire progress (`packets_out` unchanged
+`max(4×stall, 30 s)` (capped at 300 s) with `snd_una` frozen and no wire progress (`packets_out` unchanged
 or the RTO retransmit count at `TBT_STALL_RETX_MAX`); that path counts `stall_dead` and
 takes the normal replacement path. A zero peer window or our own delivery pause is
-evidence the peer is alive and never feeds the dead bound. Under the old ARQ a stall is
+evidence the peer is alive and never feeds the dead bound. The 30 s floor is deliberate:
+4×stall is 4 s once the detection clock sits at its 1 s floor, inside the RTO ladder of
+one lost segment (five failed retransmissions span 6.2 s) and below the 30 s TCP
+keepalive, so a late ACK is not a carrier loss. Under the old ARQ a stall is
 immediately a loss: the carrier is killed and its retained frames are repathed
 (`tbt_tx_path_lost`), because ARQ has retain and no parity to recover from.
 
@@ -1665,7 +1668,7 @@ replacement worker dials a fresh carrier at the same index on a fresh port; its 
 re-joins the session. The stats keys `lost` and `replaced` count the two events.
 Under FEC a stall does not repath anything: the carrier is paused, the shares already in
 flight are recovered by parity, and only `stall_dead` (no wire progress for
-`min(2×stall, 300 s)`) triggers the same replacement path. FEC has no ARQ retain entries
+`max(4×stall, 30 s)`, capped at 300 s) triggers the same replacement path. FEC has no ARQ retain entries
 to re-send.
 
 ---
@@ -2447,7 +2450,7 @@ poll that restarted the stall clock for delivery backpressure or a closed peer w
 `stall_idle_skips` counts one that found nothing unacked (`snd_una == snd_nxt`);
 `stall_declared` counts a FEC carrier paused by the poll, `stall_recovered` counts a
 paused carrier whose `snd_una` moved again, and `stall_dead` counts a paused carrier
-that outlived `min(2×stall, 300 s)` without wire progress and was replaced. `stall_drop`
+that outlived `max(4×stall, 30 s)`, capped at 300 s, without wire progress and was replaced. `stall_drop`
 is the ARQ pause helper's frame counter; it has no caller today and stays 0. `tx_window` is the
 effective sender window, `rtt_mean_us` the delivery-weighted mean SRTT, `rttvar_us` the
 largest carrier `mdev_us` (the jitter term), `rtt_max_us` the largest carrier SRTT (a
@@ -2813,7 +2816,7 @@ Implemented in C3, per session:
    (`RTO = SRTT + 4×RTTVAR`, floored at 200 ms), clamped to 1..60 s;
    `carrier_stall_ms=` is a cap that can only lower it. Under FEC the poll pauses the
    carrier (`stall_declared`): new shares avoid it, the shares in flight are recovered
-   by parity, and only `min(2×stall, 300 s)` without wire progress declares it dead
+   by parity, and only `max(4×stall, 30 s)` (capped at 300 s) without wire progress declares it dead
    (`stall_dead`) and replaces it. Under ARQ the same clock marks the carrier lost at
    once (`carrier_lost++`) and repaths its retained frames. Backpressure is not a stall:
    the clock runs only while

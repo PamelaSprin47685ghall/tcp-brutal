@@ -66,7 +66,7 @@ GF(16) 上行 128、512 保留），码率由 `n/(n+m)` 决定。per-direction
 背压不是丢包。stall 阈值是 5 × 该载体的 RTO（`SRTT + 4×RTTVAR`），
 钳制在 1..60 s；`carrier_stall_ms=` 只是上限，只能把它调低。FEC 下 stall
 暂停载体：新 share 绕开它，已发未确认的 share 按丢失处理并由 parity 恢复，
-只有 `min(2×stall, 300 s)` 内线路毫无进展时才替换（`stall_dead`）。旧 ARQ
+只有 `max(4×stall, 30 s)`（上限 300 s）内线路毫无进展时才替换（`stall_dead`）。旧 ARQ
 仍然激进：stall 即杀载体，并用 retain 立即改派。空闲载体、投递暂停和对端窗口
 关闭都会重置计时器（`stall_idle_skips`、`stall_paused_skips`）。每条载体
 socket 还启用 TCP keepalive（空闲 30 s、间隔 10 s、3 次探测），半开路径会先在
@@ -412,7 +412,7 @@ HELLO 的源地址会成为会话锚：之后来自其他地址的 HELLO 在检�
 | `join_src_reject`、`join_nonce_reject`、`join_bad`、`join_dup` | HELLO 被锚、首条 HELLO 的来源、nonce 或已占用槽位拒绝 |
 | `ctl_lost`、`ctl_retry`、`ctl_requeue`、`ctl_obsolete`、`ctl_queued` | 被钉住的控制帧：重试上限后的显式丢失、重试、重新入队、过期代、当前队列深度 |
 | `stall_paused_skips`、`win_block`、`win_resume` | 暂停时推迟失效判定 / DATA 在对端窗口门限处被挡住 / 放行 |
-| `stall_idle_skips`、`stall_declared`、`stall_recovered`、`stall_drop`、`stall_dead` | 因没有未确认字节而重置计时 / 暂停了一个 FEC 载体 / 该载体 ack 又开始前进 / 被 ARQ 暂停助手丢弃的帧（当前无调用者，恒为 0）/ 暂停载体超过 `min(2×stall, 300 s)` 无进展而被替换 |
+| `stall_idle_skips`、`stall_declared`、`stall_recovered`、`stall_drop`、`stall_dead` | 因没有未确认字节而重置计时 / 暂停了一个 FEC 载体 / 该载体 ack 又开始前进 / 被 ARQ 暂停助手丢弃的帧（当前无调用者，恒为 0）/ 暂停载体超过 `max(4×stall, 30 s)`（上限 300 s）无进展而被替换 |
 | `tx_window`、`rtt_mean_us`、`rttvar_us`、`rtt_max_us`、`txq_max` | 生效的发送窗口及其输入 / 帧队列上限 |
 | `holes_declared`、`holes_repaired`、`holes_unrecoverable`、`rx_max_stall_us` | 空洞统计 |
 | `dup_tx`、`dup_used`、`dup_suppressed`、`inflate_ppm` | 重复发送 |

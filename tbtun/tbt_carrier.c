@@ -66,14 +66,6 @@
 #define TBT_STALL_MIN_NS (1ULL * NSEC_PER_SEC)
 #define TBT_STALL_MAX_NS (60ULL * NSEC_PER_SEC)
 
-/* Final backstop: a carrier that stayed paused through every economic
- * decision and shows no wire life either is dead even if the replacement
- * could not run (allocation failure, a closing session). Four stall windows,
- * capped at 300 s, so the economic rule always gets the first word. */
-#define TBT_STALL_DEAD_MAX_NS (300ULL * NSEC_PER_SEC)
-/* tcp_retries2 defaults to 15; at that count TCP itself is about to give up,
- * so a wire that has not moved either way is dead. */
-#define TBT_STALL_RETX_MAX 15
 /* BBR moves cwnd and pacing in cycles; snd_una can rest for an RTT or two
  * with no loss at all. 0.7.0 pauses a carrier only after the ack clock has
  * been frozen for this long AND TCP still has packets_out: an idle or fully
@@ -93,11 +85,6 @@
 /* Growth is paced like a dial: one new carrier per second at most, so a peer
  * that refuses the new index cannot turn growth into a connect storm. */
 #define TBT_CARRIER_ADD_COOLDOWN_MS 1000
-
-static u64 tbt_stall_dead_ns(u64 stall_ns)
-{
-    return min_t(u64, 4 * stall_ns, TBT_STALL_DEAD_MAX_NS);
-}
 
 // A private copy of tcp_prot (and of tcpv6_prot for IPv6) so carriers carry
 // our sendmsg/recvmsg. Same shape as the deleted brutal_sockopt.c used, for a
@@ -831,20 +818,28 @@ static void tbt_car_poll_one(struct tbt_carrier *c, bool paused)
             return;
         }
 
-        /* Bound on a paused carrier. Keepalive normally closes a half-open
-         * socket first, but a path can black-hole without the socket ever
-         * seeing an error. When the pause outlives the bound and the wire
-         * shows no life (snd_una frozen, packets_out unchanged or the RTO
-         * retransmit count at its limit), the stall was a death after all:
-         * count stall_dead and take the normal loss path. A zero peer window
-         * or our own delivery pause is evidence the peer is alive, so neither
-         * ever feeds the dead bound. */
-        if (READ_ONCE(c->stalled) &&
-            !paused && wnd &&
-            now - c->stall_since_ns > tbt_stall_dead_ns(stall_ns) &&
-            una == c->last_una &&
-            (READ_ONCE(tp->packets_out) == c->stall_packets_out ||
-             READ_ONCE(inet_csk(sk)->icsk_retransmits) >= TBT_STALL_RETX_MAX))
+        /* Bound on a paused carrier. Keepalive closes a half-open socket at
+         * 30 s idle, but a path can black-hole without the socket ever seeing
+         * an error, and one lost segment keeps snd_una frozen across several
+         * RTO doublings. The decision lives in tbt_carrier_stall_is_dead(): a
+         * pause outlives tbt_carrier_stall_bound_ns(), the peer window stays
+         * open, snd_una has not moved, and TCP either still owes exactly the
+         * packets it owed when the pause began or has reached tcp_retries2.
+         * The bound never drops below the keepalive horizon, so a transient
+         * loss episode is not converted into a carrier loss. A zero peer
+         * window or our own delivery pause is evidence the peer is alive, so
+         * neither ever feeds the dead bound. */
+        if (tbt_carrier_stall_is_dead(&(struct tbt_stall_view){
+                .stalled = READ_ONCE(c->stalled),
+                .paused = paused,
+                .una_frozen = una == c->last_una,
+                .snd_wnd = wnd,
+                .packets_out = READ_ONCE(tp->packets_out),
+                .packets_out_at_stall = c->stall_packets_out,
+                .retransmits = READ_ONCE(inet_csk(sk)->icsk_retransmits),
+                .silent_ns = now - c->stall_since_ns,
+            },
+            tbt_carrier_stall_bound_ns(stall_ns)))
         {
             atomic64_inc(&sess->stall_dead);
             atomic64_inc(&sess->stall_replace_dead);

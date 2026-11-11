@@ -1,10 +1,10 @@
-/* tbt_carrier_policy.h - pure carrier admission and visibility rules.
+/* tbt_carrier_policy.h - pure carrier admission, visibility and liveness rules.
  *
  * The kernel module and host/test_carrier_policy.c compile this same header.
- * Keeping the three rules here means a host test proves the decision, not a
+ * Keeping the rules here means a host test proves the decision, not a
  * second copy of it: whether a dial may create a socket, whether a far-side
- * HELLO supersedes the slot occupant, and whether a peers row is still the
- * current generation.
+ * HELLO supersedes the slot occupant, whether a peers row is still the
+ * current generation, and whether a paused carrier is dead.
  *
  * No kernel types beyond tbt_uapi.h. No state, no allocation, no locks.
  */
@@ -68,6 +68,75 @@ static inline bool tbt_carrier_gen_supersedes(u8 newer, u8 older)
 static inline bool tbt_carrier_row_visible(bool far, bool stopping)
 {
     return !(far && stopping);
+}
+
+/* Stall-dead: when a paused FEC carrier counts as a loss.
+ *
+ * A FEC stall pauses a carrier instead of killing it: the shares it owed are
+ * rebuilt from parity. Only a wire that shows no life at all may end the
+ * pause with a loss, and the far side pays the most for that call: it cannot
+ * dial, so killing one of its carriers makes the near side redial and
+ * discards the shares in flight.
+ *
+ * The detection clock (5 x RTO, floored at 1 s) is deliberately short, so a
+ * BBR probe cycle or one lost ACK does not keep a dead path in the stripe.
+ * The backstop must not inherit that floor: 4 x 1 s is 4 s, which is inside
+ * the RTO ladder of an ordinary multi-loss episode (0.2+0.4+0.8+1.6+3.2 =
+ * 6.2 s for five failed attempts) and a seventh of the 30 s TCP keepalive
+ * this design calls its first line of defence. The 30 s floor sits
+ * behind both: seven RTO doublings without one ACK, and a half-open socket
+ * still closes at the keepalive before the 300 s cap. */
+#define TBT_STALL_DEAD_MIN_NS 30000000000ULL
+#define TBT_STALL_DEAD_MAX_NS 300000000000ULL
+/* tcp_retries2 defaults to 15; at that count TCP itself is about to give up,
+ * so a wire that has not moved either way is dead. */
+#define TBT_STALL_RETX_MAX 15
+
+/* The observable state of one carrier pause, as the 50 ms poll samples it
+ * without the socket lock. `silent_ns` counts from the pause, not from the
+ * last ACK: an idle carrier never reaches this decision, because the poll
+ * declares a stall only with packets_out > 0, and any snd_una movement
+ * clears `stalled` on that same pass. */
+struct tbt_stall_view {
+    bool stalled;             /* c->stalled: the pump avoids this carrier */
+    bool paused;              /* our own delivery queue is full */
+    bool una_frozen;          /* sampled snd_una equals c->last_una */
+    u32 snd_wnd;              /* peer's advertised window */
+    u32 packets_out;          /* TCP segments on the wire, unacknowledged */
+    u32 packets_out_at_stall; /* the same sample when the pause began */
+    u32 retransmits;          /* icsk_retransmits */
+    u64 silent_ns;            /* now - c->stall_since_ns */
+};
+
+/* Four detection windows, but never less than the keepalive horizon and
+ * never more than the backstop cap. */
+static inline u64 tbt_carrier_stall_bound_ns(u64 stall_ns)
+{
+    u64 bound = 4 * stall_ns;
+
+    if (bound < TBT_STALL_DEAD_MIN_NS)
+        bound = TBT_STALL_DEAD_MIN_NS;
+    if (bound > TBT_STALL_DEAD_MAX_NS)
+        bound = TBT_STALL_DEAD_MAX_NS;
+    return bound;
+}
+
+/* The poll's stall-dead rule, shared with host/test_carrier_policy.c so the
+ * test decides with the module's own code. `dead_ns` is
+ * tbt_carrier_stall_bound_ns(stall_ns). */
+static inline bool tbt_carrier_stall_is_dead(const struct tbt_stall_view *v,
+                                             u64 dead_ns)
+{
+    if (!v->stalled || v->paused || !v->snd_wnd || !v->una_frozen)
+        return false;
+    /* Either TCP still owes exactly the packets it owed when the pause
+     * began, or its retry count has reached the point where TCP itself
+     * gives up. A wire that moved packets is alive even when no byte was
+     * acknowledged. */
+    if (v->retransmits < TBT_STALL_RETX_MAX &&
+        v->packets_out != v->packets_out_at_stall)
+        return false;
+    return v->silent_ns > dead_ns;
 }
 
 #endif /* _TBT_CARRIER_POLICY_H */
