@@ -615,18 +615,24 @@ int tbt_fec_nack_unpack(const u8 in[TBT_FEC_NACK_LEN], struct tbt_fec_nack *n);
  * effective K. */
 #define TBT_FEC_REPLAY_K_MAX 66
 #define TBT_FEC_REPLAY_BUDGET (20u * 1024 * 1024)
-/* The sliding window is 64 super-blocks of source data, the measured BDP
- * of 128 MB/s over 400 ms. The window must stay two blocks below the ring K
- * so a NACKed block is never evicted while the receiver can still ask for
- * it. tbt_fec_credit_packets() converts the window to DATA packets; neither
+/* The sliding window is 64 super-blocks of source data. A super-block
+ * holds groups*n DATA packets, not n+m shares: only DATA shares carry
+ * application bytes, and the credit counter is in DATA packets. The old
+ * 64 MiB constant matched the downlink 1 x 128 x 8192 shape; after S fell
+ * to 1024 the same geometry is 64 x 128 x 1024 = 8 MiB. Using 256 shares
+ * here doubled the packet window to 16384 and made the window stop binding
+ * before the K cap. Uplink is 64 blocks of 8 groups x 8 DATA = 4096
+ * packets. The window must stay two blocks below the ring K so a NACKed
+ * block is never evicted while the receiver can still ask for it.
+ * tbt_fec_credit_packets() converts these bytes to DATA packets; neither
  * window multiplies again by the carrier count. */
-#define TBT_FEC_WINDOW_DOWN (64u * TBT_FEC_MAX_SHARES * TBT_FEC_S)
-#define TBT_FEC_WINDOW_UP (64u * TBT_FEC_MAX_SHARES * TBT_FEC_S)
-/* The RLNC ACK grants at most this many DATA packets of FEC credit. The
- * SC-LDPC window is a byte budget (64 blocks of 256 shares at S), so at
- * S=1024 it resolves to 16384 packets and the effective cap is the ring's
- * K-2 blocks. The credit bounds the sender's in-flight data; the ring bounds
- * the repair storage, and both are constant-size for a given shape. */
+#define TBT_FEC_WINDOW_DOWN (64u * 128u * TBT_FEC_S)
+#define TBT_FEC_WINDOW_UP (64u * 8u * 8u * TBT_FEC_S)
+/* The ACK grants at most this many DATA packets of FEC credit. At S=1024
+ * 8192 packets are 8 MiB, exactly the downlink 64 x 128 x 1024 window; the
+ * uplink window resolves to 4096. The credit bounds the sender's in-flight
+ * data; the ring bounds the repair storage, and both are constant-size for
+ * a given shape. */
 #define TBT_FEC_CREDIT_MAX 8192u
 
 /* Block planes resident in the replay hot pool. Eight 256 KiB blocks are

@@ -2090,9 +2090,14 @@ static void tbt_fec_tx_stall_diag(struct tbt_session *sess,
     u64 now = ktime_get_ns();
     u64 last = READ_ONCE(st->last_ack_ns);
     u64 budget = tbt_tx_wait_budget_ns(sess, st);
+    u64 tx_pkts = READ_ONCE(tx->seq);
+    u64 peer_pkts = READ_ONCE(tx->peer_pkts);
+    u16 n = READ_ONCE(tx->n);
+    u16 groups = READ_ONCE(tx->groups);
+    u32 credit = READ_ONCE(tx->credit);
+    u32 credit_blocks = tbt_fec_credit_blocks(credit, groups, n);
     u64 frontier = tbt_fec_block_of_seq_base(
-        READ_ONCE(tx->peer_pkts), tx->base_pkt, tx->base_block, tx->groups,
-        tx->n);
+        peer_pkts, tx->base_pkt, tx->base_block, groups, n);
     u32 rq, rb;
 
     /* An idle stream has nothing outstanding: ack == txseq is not a stall.
@@ -2106,9 +2111,16 @@ static void tbt_fec_tx_stall_diag(struct tbt_session *sess,
     rq = sess->fec_replay_queued;
     rb = sess->fec_replay_bytes;
     spin_unlock(&sess->fec_out_lock);
-    pr_info_ratelimited("tbtun: fec TX stall diag ack=%llu txseq=%llu peer_pkts=%llu frontier=%llu cur=%llu g=%u s=%u replay_q=%u replay_bytes=%u high=%d throttled=%llu age_us=%llu\n",
+    /* Units matter: st->tx_seq/tx_ack are application bytes, while
+     * tx->seq/peer_pkts are FEC DATA packets (S bytes each). The credit gate
+     * compares packets, so a byte-count difference is not a packet lead. At
+     * S=1024, 9152 "packets" derived from bytes is 9152*1024 bytes of
+     * submitted application data, most of it still in the TX ring. */
+    pr_info_ratelimited("tbtun: fec TX stall diag ack_bytes=%llu tx_bytes=%llu tx_pkts=%llu peer_pkts=%llu lead_pkts=%lld credit_pkts=%u credit_blocks=%u n=%u groups=%u frontier=%llu cur=%llu g=%u s=%u replay_q=%u replay_bytes=%u high=%d throttled=%llu age_us=%llu\n",
                         READ_ONCE(st->tx_ack), READ_ONCE(st->tx_seq),
-                        READ_ONCE(tx->peer_pkts), frontier,
+                        tx_pkts, peer_pkts,
+                        (long long)(tx_pkts - peer_pkts), credit,
+                        credit_blocks, n, groups, frontier,
                         READ_ONCE(tx->cur_block),
                         READ_ONCE(tx->last_group), READ_ONCE(tx->last_share),
                         rq, rb, READ_ONCE(sess->fec_replay_over_high),
