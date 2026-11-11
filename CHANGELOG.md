@@ -3,6 +3,58 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
+## [0.9.0] - 2026-11-11
+
+### Added
+
+- Authenticated session re-incarnation and anchor roaming. The FEC HELLO body
+  grows from 66 to 90 bytes and `TBT_WIRE_VERSION_V6` moves from 8 to 9:
+  `boot_epoch` (u64 LE, realtime microseconds) at `+66` and a 128-bit tag at
+  `+74`. The tag is SipHash-2-4 twice over `body[0..73]`, keyed by the two
+  independent 128-bit halves of the 256-bit `crypto_key=`, so it covers the
+  version, role, session nonce, ceilings, profile/generation byte, every
+  crypto field and the epoch. `tbt_crypto.c` implements SipHash so the module
+  and the host tests run one implementation; `host/test_crypto.c` pins the
+  reference vectors, including the 74-byte tag input.
+  Without `crypto_key=` the tag is zero and the HELLO stays unauthenticated,
+  exactly as before.
+- A near side may restart with a fresh `crypto_tx_nonce` (reusing the old one
+  from `seq = 0` would repeat a ChaCha8 keystream) and may rejoin from a new
+  source address. The far side accepts either only from a HELLO whose tag
+  proved the PSK and whose `boot_epoch` is strictly later than the one the
+  session serves. Accepting it rotates both directions: the near's new uplink
+  nonce and a fresh far downlink nonce, because a restarted near side meets
+  flow counters that start at zero again. A replayed HELLO carries an older
+  epoch and cannot reset anything; a stranger has no tag. A configured
+  `peer=` still pins the source, and a pinned `nonce=` still keeps its value.
+- `hello_tag_reject` and `crypto_reincarnations` in the `c3` stats line.
+  `join_src_reject` now counts only an *unauthenticated* source change.
+
+### Changed
+
+- `TBT_VERSION` is `0.9.0` and `TBT_CONV` moves to `0x000c`. `TBT_FEC_CONV`
+  stays `0x100b` because the 48-byte FEC header and every offset are
+  unchanged, exactly as the `0x000b` cut left it; the HELLO's own version
+  moves to 9. A 0.8.x peer is refused at its first HELLO header
+  (`0x000b != 0x000c`), and even a 66-byte body that passed framing would
+  fail the version/length gate. Both ends must be upgraded together
+  (`host/test_wire_compat.c` pins the 66-byte v8 refusal;
+  `host/test_client_wire.c` pins the 0.8.x conv refusal).
+- The far side keeps the adopted key rule unchanged: a HELLO naming a
+  different key is still refused. Only the nonce, the session name and the
+  anchor may be re-named, and only by a PSK holder.
+- The near side verifies the far's tag too, accepts a rotated far nonce, and
+  ignores a stale (older-epoch) HELLO instead of failing the carrier.
+
+### Known limitations
+
+- A near host whose wall clock steps backwards cannot order a new generation;
+  the far side refuses it and counts `crypto_reincarnations` no further. A far
+  session re-created (tunnel delete and re-add) clears the high-water mark.
+- A single PSK shared by several near hosts is not supported: the session has
+  one anchor and one generation order, so the host with the largest clock
+  wins. Use one `crypto_key=` per near side.
+
 ## [0.8.0] - 2026-11-11
 
 ### Added

@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from email.utils import formatdate
 from pathlib import Path
 
-TBT_CONV = 0x000B
+TBT_CONV = 0x000C
 TBT_FEC_CONV = 0x100B
 TBT_HDR_LEN = 32
 TBT_REC_MAX = 32 + 8192
@@ -64,7 +64,7 @@ ARQ_BOUNDS = {
     0x15: (0, 0),
     0x20: (0, 288),
     0x21: (138, 138),
-    0x22: (23, 66),
+    0x22: (23, 90),
     0x23: (0, 0),
     0x24: (1, 1),
     0x25: (1, 1),
@@ -244,7 +244,7 @@ def parse_arq_record(body, audit, ctx):
 
     audit.need(typ in ARQ_TYPES, f"{ctx}: ARQ type 0x{typ:02x} is defined")
     audit.need(TBT_HDR_LEN + body_len == len(body), f"{ctx}: ARQ body_len matches chunk")
-    audit.need(conv == TBT_CONV, f"{ctx}: ARQ conv is 0x000b")
+    audit.need(conv == TBT_CONV, f"{ctx}: ARQ conv is 0x000c")
     audit.need(flags & ~0x3F == 0, f"{ctx}: ARQ flags fit TBT_FF_MASK")
     audit.need(ack_count <= 16, f"{ctx}: path_ack_count <= 16")
     audit.need(ack_mask & ~0xFFFF == 0, f"{ctx}: path_ack_mask is 16 bits")
@@ -677,11 +677,11 @@ def audit_message(msg, direction, carrier, round_no, audit, ctx):
     if round_no == 0:
         hello = next(r for r in arq if r["name"] == "HELLO")
         audit.need(
-            hello["body_len"] == 66,
-            f"{ctx}: HELLO uses the 66-byte v6 body",
+            hello["body_len"] == 90,
+            f"{ctx}: HELLO uses the 90-byte v9 body",
         )
         audit.need(
-            hello["body"][0] == 8,
+            hello["body"][0] == 9,
             f"{ctx}: HELLO body[0] is TBT_WIRE_VERSION_V6",
         )
         audit.need(

@@ -305,6 +305,18 @@ struct engine
     u8 key_id;
     u8 rx_nonce[TBT_CRYPTO_NONCE_LEN];
     struct tbt_crypto_pair crypto;
+    /* Wire version 9. `psk` is a configured crypto_key= (the only thing that
+     * can authenticate a HELLO); `epoch` is this process's nonce generation
+     * and `peer_epoch` the last one the peer named. `hello_owner` is set by
+     * hello_crypto() for the HELLO being processed: its tag proved the PSK
+     * and it carries the current or a newer generation, so it may rename the
+     * session. */
+    bool psk;
+    u64 epoch;
+    u64 peer_epoch;
+    bool peer_epoch_set;
+    bool hello_owner;
+    bool tx_rotate; /* this HELLO re-incarnated the peer: re-announce our nonce */
 
     /* The two 0.8 FEC directions. The uplink is always the 8x32 GF(16)
      * shape; it never inherits the configured downlink n/m. tx_shape is the
@@ -343,6 +355,19 @@ static u64 now_ns(void)
 
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (u64)ts.tv_sec * 1000000000ull + (u64)ts.tv_nsec;
+}
+
+/* The HELLO generation clock: realtime microseconds, so a restarted client
+ * names a later generation than the process it replaces and the far side can
+ * tell a restart from a replay. A host whose wall clock steps backwards is
+ * the one case this cannot order; the far side then refuses the new
+ * generation and counts it instead of silently resetting a nonce. */
+static u64 epoch_now(void)
+{
+    struct timespec ts;
+
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (u64)ts.tv_sec * 1000000ull + (u64)ts.tv_nsec / 1000ull;
 }
 
 static void logmsg(const struct engine *e, const char *fmt, ...)
@@ -780,6 +805,10 @@ static int carrier_send_hello(struct engine *e, struct carrier *c)
     tbt_crypto_hello_fill(body, e->crypto_on, e->key_id, e->tx_nonce,
                           e->key_id == TBT_CRYPTO_KEY_ID_HELLO ? e->key
                                                                : NULL);
+    /* Wire version 9: this process's generation and, with a configured PSK,
+     * the tag the far side needs to accept a restarted near. A generated key
+     * is public, so it tags nothing. */
+    tbt_crypto_hello_auth_fill(body, e->epoch, e->psk ? e->key : NULL);
     memset(&h, 0, sizeof(h));
     h.type = TBT_F_HELLO;
     h.path_id = (u8)c->index;
@@ -2204,16 +2233,29 @@ static int hello_crypto(struct engine *e, const u8 *body, size_t len)
     u8 peer_nonce[TBT_CRYPTO_NONCE_LEN];
     u8 hello_key[TBT_CRYPTO_KEY_LEN];
     u8 key[TBT_CRYPTO_KEY_LEN];
+    u64 epoch;
     bool local_wins;
     int err;
 
+    e->hello_owner = false;
+    e->tx_rotate = false;
     if (tbt_crypto_hello_parse(body, len, &enabled, &kid, peer_nonce,
                                hello_key))
         return -EPROTO;
+    /* The tag is a HELLO property, not a data-plane one: a configured PSK
+     * must be proved even when crypto=off, and it is proved before any
+     * state moves. */
+    if (e->psk && !tbt_crypto_hello_auth_ok(body, len, e->key))
+        return -EPROTO;
+    epoch = tbt_le64(body + TBT_CRYPTO_HELLO_EPOCH);
+    e->hello_owner = e->psk &&
+                     ((e->rx_ready &&
+                       !memcmp(e->rx_nonce, peer_nonce, sizeof(e->rx_nonce))) ||
+                      !e->peer_epoch_set || epoch >= e->peer_epoch);
     if (enabled != e->crypto_on)
         return -EPROTO;
     if (!e->crypto_on)
-        return 0;
+        goto record;
     local_wins = e->key_owned && !e->key_peer;
     err = tbt_crypto_resolve_key(local_wins, e->key, enabled, kid, hello_key,
                                  key);
@@ -2240,8 +2282,70 @@ static int hello_crypto(struct engine *e, const u8 *body, size_t len)
     }
     else if (memcmp(e->rx_nonce, peer_nonce, sizeof(e->rx_nonce)))
     {
-        return -EPROTO;
+        /* A different nonce is a restarted peer. Without a PSK there is no
+         * way to tell it from an injection, so it stays refused. With a PSK
+         * the tag above already proved the sender: a later generation
+         * installs the new nonce, and an older one is a HELLO that was in
+         * flight when the peer rotated. That one is ignored rather than
+         * failed, so a late copy cannot roll the direction back or close a
+         * carrier that is already correct. */
+        if (!e->psk)
+            return -EPROTO;
+        if (epoch > e->peer_epoch)
+        {
+            memcpy(e->rx_nonce, peer_nonce, sizeof(e->rx_nonce));
+            if (tbt_crypto_init(&e->crypto.rx, e->key, peer_nonce, 0))
+                return -EPROTO;
+            logmsg(e, "tbt_client: peer re-incarnated, rx nonce rotated\n");
+            /* The far role answers on the downlink: rotate our own nonce in
+             * the same step, so neither direction can reuse a keystream
+             * across the peer's restart. handle_hello() re-announces it. */
+            if (!e->near)
+            {
+                u64 now = epoch_now();
+
+                fill_random(e, e->tx_nonce, sizeof(e->tx_nonce));
+                if (e->key_owned &&
+                    tbt_crypto_init(&e->crypto.tx, e->key, e->tx_nonce, 0))
+                    return -EPROTO;
+                e->epoch = (now > e->epoch) ? now : e->epoch + 1;
+                e->tx_rotate = true;
+            }
+        }
     }
+
+record:
+    /* The generation high-water is session identity, not cipher state: it
+     * must advance with crypto=off too, or peer_epoch_set stays false, the
+     * owner rule degenerates to "any valid tag", and a replayed HELLO could
+     * rename the session. It is written last so the rotation decision above
+     * still compares against the previous generation. */
+    if (e->psk && (!e->peer_epoch_set || epoch > e->peer_epoch))
+    {
+        e->peer_epoch = epoch;
+        e->peer_epoch_set = true;
+    }
+    return 0;
+}
+
+/* Adopt the session nonce, or rename it when hello_crypto() proved that the
+ * sender owns the current or a newer generation. A session name is not a
+ * secret: the PSK tag is what decides who may change it. */
+static int hello_session_nonce(struct engine *e, const u8 *body)
+{
+    if (!e->session_nonce_set)
+    {
+        memcpy(e->session_nonce, body + 2, sizeof(e->session_nonce));
+        e->session_nonce_set = true;
+        return 0;
+    }
+    if (!memcmp(body + 2, e->session_nonce, sizeof(e->session_nonce)))
+        return 0;
+    /* A configured nonce= is absolute, exactly as nonce_pinned is on the
+     * module side: an authenticated restart still has to present it. */
+    if (e->cfg.cfg.nonce_set || !e->hello_owner)
+        return -EPROTO;
+    memcpy(e->session_nonce, body + 2, sizeof(e->session_nonce));
     return 0;
 }
 
@@ -2285,17 +2389,25 @@ static int handle_hello(struct engine *e, struct carrier *c,
     {
         u16 index = rec->hdr.path_id;
 
-        if (!e->session_nonce_set)
-        {
-            memcpy(e->session_nonce, rec->body + 2, 16);
-            e->session_nonce_set = true;
-        }
+        if (index >= e->n_car)
+            return -EPROTO;
+        if (hello_session_nonce(e, rec->body))
+            return -EPROTO;
         if (e->car[index] && e->car[index] != c)
             carrier_close(e, e->car[index]);
         c->index = (int)index;
         e->car[index] = c;
     }
     c->hello_recv = true;
+    /* A re-incarnated peer rotated our downlink nonce in hello_crypto(); the
+     * HELLO already sent on this carrier names the old one, so send it
+     * again. The peer is a fresh process and has not installed a nonce yet,
+     * and one already installed would compare older and be ignored. */
+    if (e->tx_rotate)
+    {
+        e->tx_rotate = false;
+        c->hello_sent = false;
+    }
     if (!c->hello_sent)
     {
         err = carrier_send_hello(e, c);
@@ -3512,12 +3624,20 @@ int tbt_engine_run(const struct tbt_engine_cfg *cfg)
     e->tx_groups = e->tx_shape.groups;
     e->tx_seed = rng_next(e) | 1;
 
+    /* A configured crypto_key= is the PSK. It is loaded whether or not the
+     * data plane encrypts: the HELLO tag is the one thing it proves, and a
+     * restarted client is only accepted behind a valid tag. */
+    e->psk = cfg->cfg.crypto_key_set;
+    if (e->psk)
+        memcpy(e->key, cfg->cfg.crypto_key, sizeof(e->key));
+    e->epoch = epoch_now();
+    if (!e->epoch)
+        e->epoch = 1;
     e->crypto_on = cfg->cfg.crypto != 0;
     if (e->crypto_on)
     {
-        if (cfg->cfg.crypto_key_set)
+        if (e->psk)
         {
-            memcpy(e->key, cfg->cfg.crypto_key, sizeof(e->key));
             e->key_owned = true;
             e->key_id = TBT_CRYPTO_KEY_ID_NONE;
         }

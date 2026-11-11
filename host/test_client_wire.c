@@ -1,10 +1,12 @@
-/* test_client_wire.c - 0.7.3/0.8.0 wire rejection matrix.
+/* test_client_wire.c - 0.7.3/0.8.x/0.9.0 wire rejection matrix.
  *
  * The 0.8.0 constant-frame cut is a hard revision change: TBT_CONV moves to
  * 0x000b, S falls to 1024, short DATA gains PADDED, and the uplink codec
  * moves to block=64/L=8. This test feeds the old shapes to the new checks
  * and the new shapes to a frozen snapshot of the old checks, so a silent
  * reinterpretation shows up as a wrong verdict instead of a passing tunnel.
+ * 0.9.0 keeps that frame shape and moves TBT_CONV to 0x000c for the 90-byte
+ * HELLO, so a 0.8.x peer is refused at its first HELLO header.
  *
  * The "old" helpers below are a deliberate 0.7.3 rule snapshot: constants
  * and the fields that the two cuts disagree on. They are not the old
@@ -21,6 +23,7 @@
 #include <string.h>
 
 #define OLD_CONV 0x000au
+#define PREV_CONV 0x000bu /* 0.8.x: same frames, 66-byte HELLO */
 #define OLD_S 8192u
 #define OLD_FF_MASK 0x01u
 #define OLD_BLOCK_UP 128u
@@ -126,7 +129,7 @@ int main(void)
 
     /* Pin the new constants first: a build that still links the old headers
      * must not pass this test. */
-    ok(TBT_CONV == 0x000bu, "TBT_CONV is 0x000b");
+    ok(TBT_CONV == 0x000cu, "TBT_CONV is 0x000c");
     ok(TBT_FEC_PAYLOAD_MAX == 1024u, "S is 1024");
     ok(TBT_FEC_REC_MAX == 1072u, "record max is 1072");
     ok(TBT_FEC_FF_MASK == 0x03u, "PADDED is in the flag mask");
@@ -134,16 +137,18 @@ int main(void)
     ok(TBT_FEC_SCLC_L_UP == 8u, "uplink L is 8");
     ok(TBT_HTTP_CHUNK_DATA_MAX == 8228u, "chunk data max is 8228");
 
-    /* Session gate: HELLO conv 0x000a vs 0x000b. */
+    /* Session gate: HELLO conv 0x000a (0.7.3), 0x000b (0.8.x), 0x000c. */
     memset(&h, 0, sizeof(h));
     h.type = TBT_F_HELLO;
     h.body_len = TBT_HELLO_BODY_LEN_V6;
     h.conv = OLD_CONV;
-    ok(tbt_hdr_check(&h) == -EPROTO, "0.7.3 HELLO rejected by 0.8");
+    ok(tbt_hdr_check(&h) == -EPROTO, "0.7.3 HELLO rejected by 0.9");
     ok(old_hdr_check(&h) == 0, "0.7.3 HELLO accepted by 0.7.3 snapshot");
+    h.conv = PREV_CONV;
+    ok(tbt_hdr_check(&h) == -EPROTO, "0.8.x HELLO rejected by 0.9");
     h.conv = TBT_CONV;
-    ok(tbt_hdr_check(&h) == 0, "0.8 HELLO accepted by 0.8");
-    ok(old_hdr_check(&h) == -EPROTO, "0.8 HELLO rejected by 0.7.3 snapshot");
+    ok(tbt_hdr_check(&h) == 0, "0.9 HELLO accepted by 0.9");
+    ok(old_hdr_check(&h) == -EPROTO, "0.9 HELLO rejected by 0.7.3 snapshot");
 
     /* Full 0.7.3 DATA: 8192 bytes exceeds the 0.8 slot. */
     memset(&f, 0, sizeof(f));

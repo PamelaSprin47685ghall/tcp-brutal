@@ -56,11 +56,11 @@
 #define DOC_FBK_MAX_ENTRIES 16u
 #define DOC_WINDOW_LEN 138u /* 8 + 8*16 + 2 */
 #define DOC_HELLO_LEN 23u   /* old ARQ: 1 + 1 + 16 + 2 + 2 + 1 */
-#define DOC_HELLO_LEN_V6 66u /* FEC v6: legacy 23 + crypto fields */
+#define DOC_HELLO_LEN_V6 90u /* FEC v9: legacy 23 + crypto fields + epoch/tag */
 #define DOC_OPEN_BODY_LEN 36u /* 0.5.0: bitmap + route_slot + target_port */
 
 _Static_assert(DOC_OPEN_BODY_LEN == 36, "v8 OPEN body is 36 bytes");
-_Static_assert(DOC_HELLO_LEN_V6 == 66, "v8 FEC HELLO body is 66 bytes");
+_Static_assert(DOC_HELLO_LEN_V6 == 90, "v9 FEC HELLO body is 90 bytes");
 
 static u64 rng_state = 1;
 static unsigned long case_no;
@@ -242,7 +242,7 @@ static void test_bounds_table(void)
 
     case_no++;
     check(TBT_HDR_LEN == 32 && TBT_CHUNK_MAX == 8228 && TBT_REC_MAX == 8224 &&
-              TBT_CONV == 0x000b && TBT_WIRE_VERSION_V6 == 8,
+              TBT_CONV == 0x000c && TBT_WIRE_VERSION_V6 == 9,
           "design constants", NULL);
     for (i = 0; i < sizeof(want) / sizeof(want[0]); i++)
     {

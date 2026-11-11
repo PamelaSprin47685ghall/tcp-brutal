@@ -1172,7 +1172,9 @@ int tbt_session_bind_sid(struct tbt_session *sess, u64 sid, bool open,
      * slot, target port — before any flow is admitted. A rejected step must
      * not create a flow. */
     BUILD_BUG_ON(TBT_OPEN_BODY_LEN != TBT_FEC_BITMAP_BYTES + 4);
-    BUILD_BUG_ON(TBT_HELLO_BODY_LEN_V6 != 66);
+    BUILD_BUG_ON(TBT_HELLO_BODY_LEN_V6 != TBT_CRYPTO_HELLO_AUTH_LEN);
+    BUILD_BUG_ON(TBT_HELLO_BODY_LEN_V6 !=
+                 TBT_CRYPTO_HELLO_TAG + TBT_CRYPTO_HELLO_TAG_LEN);
     if (open)
     {
         const struct tbt_cfg *cfg = &sess->tunnel->cfg;
@@ -1798,6 +1800,17 @@ void tbt_session_cancel(struct tbt_session *s, enum tbt_sess_work w)
 // ---------------------------------------------------------------------------
 // Session lifecycle (C3: one session per tunnel, n carriers, one stream)
 
+/* The HELLO generation clock: realtime microseconds. A restarted process or
+ * a recreated session then names a later generation than its predecessor,
+ * which is what the far side orders. The only case this cannot order is a
+ * backwards wall-clock step on the near host; the far side refuses the
+ * generation, counts it, and says so, instead of silently resetting a
+ * crypto nonce that a replayed HELLO could then name. */
+u64 tbt_hello_epoch_now(void)
+{
+    return (u64)(ktime_get_real_ns() / NSEC_PER_USEC);
+}
+
 int tbt_session_create(struct tbt_tunnel *t)
 {
     struct tbt_session *s;
@@ -1879,6 +1892,12 @@ int tbt_session_create(struct tbt_tunnel *t)
      * advertises it with key_id=1. The far side learns it from the near's
      * HELLO before its own TX context can be initialized. */
     s->crypto = t->cfg.crypto;
+    /* Our own HELLO generation. It only has to increase when our TX nonce
+     * changes; a session replacement inherits the nonce and needs no new
+     * value, but a later rotation always names a later one. */
+    s->crypto_tx_epoch = tbt_hello_epoch_now();
+    if (!s->crypto_tx_epoch)
+        s->crypto_tx_epoch = 1;
     bool inherited_key = false;
     if (t->cfg.crypto_key_set)
     {

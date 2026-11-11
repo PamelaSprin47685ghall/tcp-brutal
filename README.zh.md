@@ -108,15 +108,19 @@ make check
 ## 打包
 
 模块版本只有一个权威：`tbtun/tbt_uapi.h` 中的
-`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.8.0`）。
-线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x000b` 与 FEC 头/FEC 记录的
+`TBT_VERSION_MAJOR/MINOR/PATCH`（当前 `0.9.0`）。
+线上版本是 `TBT_WIRE_VERSION=1`、旧帧的 `TBT_CONV=0x000c` 与 FEC 头/FEC 记录的
 `TBT_FEC_CONV=0x100b`（48 字节头、64 字节 `FEC_CFG`/`FEC_FBK`），三者都与模块版本独立。
 `TBT_CONV 0x0005` 移除了未使用的 PREDICT/CANCEL 占位帧：仍发送它们的对端会在头部检查处
 失败，其载体关闭；0x0004 的对端在第一个头部就会因为 conv 不匹配而被拒绝。
 36 字节 OPEN 沿用 0.6.0 的定义：32 字节 FEC group bitmap、小端
 route slot（近端监听映射槽）与该槽的小端 target 端口。0 表示沿用远端该槽
-配置的端口；其他值必须与它相等。`TBT_WIRE_VERSION_V6` 为 8，0.7.3 的
-FEC 对端会在第一条 HELLO 就被拒绝，而不是等到第一条 OPEN。
+配置的端口；其他值必须与它相等。`TBT_WIRE_VERSION_V6` 为 9，0.8.x 的
+FEC 对端会在第一条 HELLO 就被拒绝，而不是等到第一条 OPEN：版本 9 把 HELLO
+body 扩到 90 字节，尾部是 `boot_epoch` 与覆盖全部会话身份字节的 128 位
+SipHash tag。配了 `crypto_key=`（256 位 PSK）才能证明该 tag，因此重启的客户端
+可以带新的 crypto nonce 重连，地址变化的客户端可以重新锚定；没配 key 时 tag
+为空，HELLO 仍然不加认证。
 当前 FEC wire 是 `0x100a`：`0x1002` 增加 FIN 的 16 字节 body
 （`pkt_end`/`pkt_base`）与 PARITY 空块 marker（`win_len=0`、
 `payload_len=0`、`epoch=0`）；`0x1003` 把 ACK 扩到 24 字节并加入
@@ -342,8 +346,10 @@ echo 'tunnel 1 role=far listen=203.0.113.9:443 target=127.0.0.1:5201 n=4 m=4 fec
 `role=far` 时它是远端要求近端使用的 nonce，每一条 HELLO 都必须匹配。未配置
 `nonce=` 时，far 会采纳第一条 HELLO 的 nonce；如果连 `peer=` 也没有，这条 HELLO
 还会固定锚（首连信任，TOFU），模块会打印一次告警。第一条通过 nonce 检查的
-HELLO 的源地址会成为会话锚：之后来自其他地址的 HELLO 在检查 nonce 之前就被拒绝
-（`join_src_reject`）；far 的 `peer=` 则在创建会话时就固定锚。加入计数器区分原因：
+HELLO 的源地址会成为会话锚：之后来自其他地址、又没带有效 tag 的 HELLO 在检查
+nonce 之前就被拒绝（`join_src_reject`）；带有效 tag 的 HELLO 可以把锚移到自己的
+源地址，far 的 `peer=` 则在创建会话时就固定锚、任何 HELLO 都不能移动它。
+加入计数器区分原因：
 `join_bad` 是 nonce 不匹配，`join_nonce_reject` 是未固定 nonce 时第一条 HELLO
 来自 far `peer=` 之外的地址，`join_dup` 是槽位已被占用。nonce 在 HELLO 里明文
 传输：它是会话标识与反混淆 token，不是密码；链路不可信时套 WireGuard。
@@ -509,8 +515,9 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
   时的默认值）对 FEC 的 DATA/PARITY 负载做 ChaCha8 混淆，目的是把应用字节
   从朴素的 DPI 特征里藏起来；48 字节 FEC 头、HTTP 头部和控制帧仍是明文，
   而且没有认证。未配置 `crypto_key=` 时，近端生成 32 字节会话密钥并在
-  HELLO v6 body 中明文发送（`key_id=1`），远端采纳；两端都配置
-  `crypto_key=` 时 `key_id=0`，HELLO 的 key 字段为零，密钥不匹配表现为每个
+  HELLO body 中明文发送（`key_id=1`），远端采纳，HELLO 本身不做认证；两端
+  都配置 `crypto_key=` 时 `key_id=0`，HELLO 的 key 字段为零，v9 tag 会认证
+  HELLO，并允许重启或换址的客户端重新接回会话，而密钥不匹配表现为每个
   share 的 payload CRC 失败。nonce 是会话标识，不是密钥。路径不可信时套
   WireGuard；此时只应选 `raw` 档位，因为 HTTP 解析器看不到 TLS 内部。
 - **FEC 可选；grouped GF(2) 是生产形状。** `fec=on` 支持单组
@@ -541,8 +548,9 @@ writer 探针覆盖两种契约。`pub.writer` 中应用从不读取，一直阻
 - **单流 FEC。** 每个会话承载一条 FEC 流（`0x100a`）。DATA/PARITY 载荷就是
   应用字节，一次 8 KiB 写入就是一个 DATA share，没有 per-stream 解复用或窗口状态。
 - **每条远端隧道只有一个锚。** 一个 `peer=`（或第一条 HELLO）固定源地址。
-  近端多宿主，或者 NAT 重绑源地址，都会让后续 HELLO 被拒绝（`join_src_reject`）；
-  请保持一个稳定的源地址，例如用 `srcaddrs=`。
+  近端多宿主，或者 NAT 重绑源地址时，未认证的 HELLO 会被拒绝（`join_src_reject`）；
+  配了 `crypto_key=` 时，带有效 tag 的 HELLO 可以把锚移到新源地址，重启或换址的
+  近端因此能接回原会话。想保持固定，仍可用 `peer=` 或 `srcaddrs=` 钉住地址。
 - **不固定就是首连信任。** 既没有 `nonce=` 也没有 `peer=` 时，第一条 HELLO
   同时固定 nonce 和锚，模块会打印一次告警。路径不可信时把两者都固定。
 - **吞吐会逐次波动。** 最终 `n=4` 运行是 10.74 Mbit/s（`retx_ppm` 2,333，
@@ -615,8 +623,8 @@ cat /etc/tbtun.conf > /proc/net/tbtun/config
   （`ENOMEM`）；两种情况下载体都会重试。
 - `win_block` 上升而 `wire` 停住，说明限制来自对端通告窗口，而不是丢包；
   窗口打开后 `win_resume` 会跟着上升。
-- `join_src_reject` 上升，说明有锚之外的近端源地址在尝试加入；
-  常见原因是近端多宿主或 NAT 重绑源地址。
+- `join_src_reject` 上升，说明有锚之外、又没带有效 tag 的近端源地址在尝试加入；
+  常见原因是近端多宿主或 NAT 重绑源地址，且没有配置 `crypto_key=`。
 - `debug_loss=1` 配合 `carrier <i> drop_ppm 10000`，会在载体的写边界按比例丢弃整条记录，
   从而在没有丢包线路的情况下演练丢包处理。`peers` 里的 `dropped` 列会计数。
 - `__memcpy` 里的 `Internal error: Oops`，且栈上是
@@ -641,9 +649,10 @@ cat /etc/tbtun.conf > /proc/net/tbtun/config
 
 默认不加密，也不认证。`crypto=on`（`fec=on` 时的默认值）对 FEC 的
 DATA/PARITY 负载做 ChaCha8 混淆：它把应用字节从朴素的 DPI 特征里藏起来，
-但不是机密性——未配置 `crypto_key=` 时会话密钥在 HELLO v6 body 里明文传输
+但不是机密性——未配置 `crypto_key=` 时会话密钥在 HELLO body 里明文传输
 （`key_id=1`），而且没有消息认证。两端都配置 `crypto_key=` 时 `key_id=0`，
-密钥不匹配表现为 payload CRC 失败，连接不会静默降级。FEC 头、HTTP 头、
+v9 tag 会认证 HELLO，并允许重启或换址的客户端重新接回会话，但数据面仍然只有
+CRC。密钥不匹配表现为 payload CRC 失败，连接不会静默降级。FEC 头、HTTP 头、
 chunk 分帧和控制帧始终是明文。配置仅限 root（`0600`），加载模块同样需要
 root。如果两台主机之间的路径不可信，就把隧道放进 WireGuard 里跑：载体走在
 加密链路之上，此时只应选择 `raw` 档位，因为 HTTP 解析器看不到 TLS 内部。

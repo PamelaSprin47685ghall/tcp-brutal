@@ -143,8 +143,8 @@ results and their cost.
 ## Packaging
 
 The module version has one authority: `TBT_VERSION_MAJOR/MINOR/PATCH` in
-`tbtun/tbt_uapi.h` (currently `0.8.0`). The wire
-version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x000b` for the 32-byte frames
+`tbtun/tbt_uapi.h` (currently `0.9.0`). The wire
+version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x000c` for the 32-byte frames
 and `TBT_FEC_CONV=0x100b` for the 48-byte FEC header and the 64-byte
 `FEC_CFG`/`FEC_FBK` records; all three are independent of
 the module version. `TBT_CONV 0x0005` removed the unused PREDICT/CANCEL
@@ -155,8 +155,13 @@ conv does not match.
 The 36-byte OPEN stays as 0.6.0 defined it: the 32-byte FEC group bitmap, the
 little-endian route slot (the near side's listen mapping), and the
 little-endian target port for that slot. Zero keeps the far side's configured
-port; any other value must equal it. `TBT_WIRE_VERSION_V6` is 8, so a
-0.7.3 FEC peer is refused at the first HELLO rather than at the first OPEN.
+port; any other value must equal it. `TBT_WIRE_VERSION_V6` is 9, so a
+0.8.x FEC peer is refused at the first HELLO rather than at the first OPEN:
+version 9 grows the HELLO body to 90 bytes with a `boot_epoch` and a 128-bit
+SipHash tag over the session-naming bytes. A configured `crypto_key=` (the
+256-bit PSK) proves the tag, so a restarted client may present a fresh crypto
+nonce and a client whose address changed may re-anchor; without the key the
+tag is absent and the HELLO stays unauthenticated.
 
 The current FEC wire is `0x100b`: `0x1002` added FIN's 16-byte body
 (`pkt_end`, `pkt_base`) and the PARITY block marker (`win_len=0`,
@@ -417,9 +422,10 @@ tunnel it is the nonce the far side requires from the near side: every HELLO
 must match it. Without `nonce=`, a far tunnel adopts the nonce from the first
 HELLO; if `peer=` is also absent, that first HELLO fixes the anchor too, and the
 module logs one trust-on-first-use warning. The source address of the first
-HELLO that passes the nonce check becomes the session anchor: every later HELLO
-from another address is refused before the nonce is examined
-(`join_src_reject`), and a far `peer=` fixes the anchor at creation instead.
+HELLO that passes the nonce check becomes the session anchor: every later
+unauthenticated HELLO from another address is refused before the nonce is
+examined (`join_src_reject`). A HELLO that proves the configured `crypto_key=`
+may move the anchor, and a far `peer=` fixes the anchor at creation instead.
 The join counters separate the reasons: `join_bad` is a nonce mismatch,
 `join_nonce_reject` is a first HELLO from a source other than the configured far
 `peer=` when no nonce is pinned, and `join_dup` is an occupied slot. The nonce
@@ -620,14 +626,16 @@ real line.
 - **No encryption and no authentication by default; `crypto=on` is
   obfuscation.** `crypto=on` (the default whenever `fec=on`) ChaCha8-obfuscates
   the FEC DATA/PARITY payload only. The 48-byte FEC header, the HTTP headers and
-  every control frame stay in clear text, and there is no authentication. With
-  `crypto_key=` unset, the near side generates a 32-byte session key and sends
-  it in the HELLO v6 body (`key_id=1`); the far side adopts it. With
-  `crypto_key=` set on both ends, `key_id=0` and the HELLO key field is zero; a
-  mismatch surfaces as a payload CRC failure on every share. The nonce is a
-  session identifier, not a secret. Run it inside WireGuard on an untrusted
-  path; the `raw` profile is then the only sensible choice, because an HTTP
-  parser cannot see inside TLS.
+  every control frame stay in clear text, and a HELLO is authenticated only
+  when `crypto_key=` is configured. With `crypto_key=` unset, the near side
+  generates a 32-byte session key and sends it in the HELLO body (`key_id=1`);
+  the far side adopts it. With `crypto_key=` set on both ends, `key_id=0` and
+  the HELLO key field is zero; the v9 tag authenticates the HELLO and lets a
+  restarted client or a moved source address rejoin, while a mismatch surfaces
+  as a payload CRC failure on every share. The nonce is a session identifier,
+  not a secret. Run it inside WireGuard on an untrusted path; the `raw` profile
+  is then the only sensible choice, because an HTTP parser cannot see inside
+  TLS.
 - **FEC is optional; grouped GF(2) is the production shape.** `fec=on` supports one
   group (`carriers == n + m`) and grouped sessions
   (`carriers = groups * (n + m)`, up to 256 carriers; 32 groups of `n=4, m=4`
@@ -666,8 +674,9 @@ real line.
   one DATA share, so no per-stream demux or window state exists.
 - **One anchor per far tunnel.** A single `peer=` (or the first HELLO) fixes the
   source address. A multi-homed near host, or a NAT that rebinds the source
-  address, will have later HELLOs refused (`join_src_reject`); keep one stable
-  source address, for example with `srcaddrs=`.
+  address, has its unauthenticated HELLOs refused (`join_src_reject`); a HELLO
+  that proves the configured `crypto_key=` may move the anchor instead. To keep
+  the anchor fixed, pin `peer=` or one source address with `srcaddrs=`.
 - **Trust on first use (TOFU) unless pinned.** Without `nonce=` and `peer=`, the first
   HELLO fixes both the nonce and the anchor, and the module logs one warning.
   Pin both on an untrusted path.
@@ -760,8 +769,9 @@ The module itself must be loaded first, by `/etc/modules-load.d/tbtun.conf` or
   (`ENOMEM`); the carrier retries either way.
 - `win_block` climbing while `wire` stalls means the peer's advertised window is
   the limit, not loss; `win_resume` follows when the window opens.
-- `join_src_reject` climbing means a near source address other than the anchor
-  is trying to join; a multi-homed near host or a NAT address rebind is the usual cause.
+- `join_src_reject` climbing means an unauthenticated near source address other
+  than the anchor is trying to join; a multi-homed near host or a NAT address
+  rebind without `crypto_key=` is the usual cause.
 - `debug_loss=1` plus `carrier <i> drop_ppm 10000` drops one record in a hundred
   at the carrier's write boundary, so loss handling can be exercised without a
   lossy line. The `dropped` column in `peers` counts it.
@@ -794,9 +804,11 @@ By default the tunnel neither encrypts nor authenticates. `crypto=on` (the
 default whenever `fec=on`) ChaCha8-obfuscates the FEC DATA/PARITY payload: it
 keeps application bytes out of naive DPI signatures, but it is not
 confidentiality. With `crypto_key=` unset the session key travels in clear text
-in the HELLO v6 body (`key_id=1`), and there is no message authentication. With
-`crypto_key=` set on both ends, `key_id=0` and the HELLO key field is zero; a
-wrong key surfaces as a payload CRC failure, never as a silent downgrade. The
+in the HELLO body (`key_id=1`), and there is no message authentication. With
+`crypto_key=` set on both ends, `key_id=0` and the HELLO key field is zero; the
+v9 tag then authenticates the HELLO and authorises a restarted client or a
+moved source address, but the data plane still has only a CRC. A wrong key
+surfaces as a payload CRC failure, never as a silent downgrade. The
 48-byte FEC header, the HTTP headers, the chunk framing and every control frame
 are always plaintext. Configuration is root-only (`0600`), and so is loading the
 module. If the path between the hosts is untrusted, run the tunnel inside

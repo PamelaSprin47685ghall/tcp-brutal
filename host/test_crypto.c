@@ -2165,6 +2165,224 @@ static void test_vector_vs_scalar(void)
     }
 }
 
+/* ------------------------------------------------------------------------- */
+/* HELLO v9: SipHash-2-4 and the PSK tag.                                    */
+
+static void sip_expect(const char *name, size_t len, const char *want_hex)
+{
+    u8 key[16];
+    u8 msg[80];
+    u8 got[8];
+    u64 v;
+    size_t i;
+
+    for (i = 0; i < sizeof(key); i++)
+        key[i] = (u8)i;
+    for (i = 0; i < sizeof(msg); i++)
+        msg[i] = (u8)i;
+    v = tbt_siphash24(key, msg, len);
+    for (i = 0; i < sizeof(got); i++)
+        got[i] = (u8)(v >> (8 * i));
+    check_bytes(name, got, want_hex, sizeof(got));
+}
+
+/* The reference implementation's vectors_sip64.h: key 000102..0f and message
+ * 00 01 .. n-1. The 74-byte case is the exact length the HELLO tag covers. */
+static void test_siphash(void)
+{
+    sip_expect("SipHash-2-4 empty message", 0, "310e0edd47db6f72");
+    sip_expect("SipHash-2-4 1-byte message", 1, "fd67dc93c539f874");
+    sip_expect("SipHash-2-4 2-byte message", 2, "5a4fa9d909806c0d");
+    sip_expect("SipHash-2-4 3-byte message", 3, "2d7efbd796666785");
+    sip_expect("SipHash-2-4 8-byte message", 8, "6224939a79f5f593");
+    sip_expect("SipHash-2-4 15-byte message", 15, "e545be4961ca29a1");
+    sip_expect("SipHash-2-4 63-byte message", 63, "724506eb4c328a95");
+    sip_expect("SipHash-2-4 64-byte message", 64, "d8ca02850bc4d2ac");
+    sip_expect("SipHash-2-4 74-byte message", 74, "7768b225f5b92af8");
+}
+
+/* Build the KAT body: the first byte of every authenticated byte range is
+ * distinct, so a loop over all 74 bytes proves the tag covers all of them. */
+static void hello_auth_body(u8 body[TBT_CRYPTO_HELLO_AUTH_LEN],
+                            u8 key[TBT_CRYPTO_KEY_LEN])
+{
+    size_t i;
+
+    memset(body, 0, TBT_CRYPTO_HELLO_AUTH_LEN);
+    body[0] = TBT_WIRE_VERSION_V6;
+    body[1] = TBT_ROLE_NEAR;
+    for (i = 2; i < TBT_CRYPTO_HELLO_EPOCH; i++)
+        body[i] = (u8)(i * 7 + 3);
+    for (i = 0; i < TBT_CRYPTO_KEY_LEN; i++)
+        key[i] = (u8)(i * 11 + 5);
+}
+
+static void test_hello_auth(void)
+{
+    static const u64 epoch = 1700000000123456ull;
+    u8 body[TBT_CRYPTO_HELLO_AUTH_LEN];
+    u8 other[TBT_CRYPTO_HELLO_AUTH_LEN];
+    u8 key[TBT_CRYPTO_KEY_LEN];
+    u8 wrong[TBT_CRYPTO_KEY_LEN];
+    size_t i;
+    int bad = 0;
+
+    hello_auth_body(body, key);
+    tbt_crypto_hello_auth_fill(body, epoch, key);
+    check_bytes("HELLO v9 tag over body[0..73]",
+                body + TBT_CRYPTO_HELLO_TAG,
+                "f56e1077acf1f2cb9e9b264ed84a6891", TBT_CRYPTO_HELLO_TAG_LEN);
+
+    if (!tbt_crypto_hello_auth_ok(body, sizeof(body), key))
+    {
+        printf("FAIL hello-auth: a valid tag was refused\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS hello-auth: valid tag accepted\n");
+    }
+
+    /* Every authenticated byte is inside the tag. */
+    for (i = 0; i < TBT_CRYPTO_HELLO_TAG; i++)
+    {
+        body[i] ^= 0x01;
+        if (tbt_crypto_hello_auth_ok(body, sizeof(body), key))
+            bad++;
+        body[i] ^= 0x01;
+    }
+    if (bad)
+    {
+        printf("FAIL hello-auth: %d of body[0..73] are not covered by the tag\n",
+               bad);
+        failures++;
+    }
+    else
+    {
+        printf("PASS hello-auth: every body byte 0..73 is authenticated\n");
+    }
+
+    body[TBT_CRYPTO_HELLO_TAG + 3] ^= 0x80;
+    if (tbt_crypto_hello_auth_ok(body, sizeof(body), key))
+    {
+        printf("FAIL hello-auth: a flipped tag byte was accepted\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS hello-auth: a flipped tag byte is refused\n");
+    }
+    body[TBT_CRYPTO_HELLO_TAG + 3] ^= 0x80;
+
+    for (i = 0; i < sizeof(wrong); i++)
+        wrong[i] = (u8)(key[i] ^ 0x80);
+    if (tbt_crypto_hello_auth_ok(body, sizeof(body), wrong) ||
+        tbt_crypto_hello_auth_ok(body, sizeof(body), NULL) ||
+        tbt_crypto_hello_auth_ok(body, sizeof(body) - 1, key))
+    {
+        printf("FAIL hello-auth: wrong key, NULL key or short body accepted\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS hello-auth: wrong key, NULL key and short body refused\n");
+    }
+
+    /* The epoch is inside the tag: a replayed body with a bumped generation
+     * cannot keep the old tag. */
+    memcpy(other, body, sizeof(other));
+    tbt_crypto_hello_auth_fill(other, epoch + 1, key);
+    if (memcmp(other + TBT_CRYPTO_HELLO_TAG, body + TBT_CRYPTO_HELLO_TAG,
+               TBT_CRYPTO_HELLO_TAG_LEN) == 0 ||
+        !tbt_crypto_hello_auth_ok(other, sizeof(other), key))
+    {
+        printf("FAIL hello-auth: the epoch is not authenticated\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS hello-auth: a changed epoch needs a new tag\n");
+    }
+
+    /* No PSK: the epoch is still written and the tag is zero, so a receiver
+     * can tell "no key" from "tag matched nothing". */
+    hello_auth_body(other, key);
+    tbt_crypto_hello_auth_fill(other, epoch, NULL);
+    {
+        u8 zero[TBT_CRYPTO_HELLO_TAG_LEN] = {0};
+
+        if (memcmp(other + TBT_CRYPTO_HELLO_TAG, zero, sizeof(zero)) != 0 ||
+            other[TBT_CRYPTO_HELLO_EPOCH] !=
+                (u8)(epoch & 0xff) ||
+            tbt_crypto_hello_auth_ok(other, sizeof(other), key))
+        {
+            printf("FAIL hello-auth: no-key fill must write a zero tag\n");
+            failures++;
+        }
+        else
+        {
+            printf("PASS hello-auth: no PSK writes the epoch and a zero tag\n");
+        }
+    }
+}
+
+/* Two-time pad guard for a re-incarnation: the same flow, sequence and block
+ * under a rotated nonce must never reproduce the old keystream, while the old
+ * nonce must still reproduce it exactly (determinism, not a wipe). */
+static void test_reincarnation_nonce(void)
+{
+    u8 key[TBT_CRYPTO_KEY_LEN];
+    u8 old_nonce[TBT_CRYPTO_NONCE_LEN];
+    u8 new_nonce[TBT_CRYPTO_NONCE_LEN];
+    u8 a[128];
+    u8 b[128];
+    struct tbt_crypto_ctx ctx;
+    size_t i;
+
+    for (i = 0; i < sizeof(key); i++)
+        key[i] = (u8)(i + 1);
+    for (i = 0; i < sizeof(old_nonce); i++)
+    {
+        old_nonce[i] = (u8)(0x10 + i);
+        new_nonce[i] = (u8)(0x80 + i);
+    }
+    memset(a, 0x5a, sizeof(a));
+    memcpy(b, a, sizeof(a));
+
+    if (tbt_crypto_init(&ctx, key, old_nonce, 0) ||
+        tbt_crypto_body_xor_flow(&ctx, 7, 0, 0, 0, a, sizeof(a)) ||
+        tbt_crypto_init(&ctx, key, new_nonce, 0) ||
+        tbt_crypto_body_xor_flow(&ctx, 7, 0, 0, 0, b, sizeof(b)))
+    {
+        printf("FAIL reincarnation: crypto call failed\n");
+        failures++;
+        return;
+    }
+    if (memcmp(a, b, sizeof(a)) == 0)
+    {
+        printf("FAIL reincarnation: a rotated nonce repeated the keystream\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS reincarnation: a rotated nonce changes the keystream\n");
+    }
+
+    memset(b, 0x5a, sizeof(b));
+    if (tbt_crypto_init(&ctx, key, old_nonce, 0) ||
+        tbt_crypto_body_xor_flow(&ctx, 7, 0, 0, 0, b, sizeof(b)) ||
+        memcmp(a, b, sizeof(a)) != 0)
+    {
+        printf("FAIL reincarnation: the old nonce is not reproducible\n");
+        failures++;
+    }
+    else
+    {
+        printf("PASS reincarnation: the old nonce still reproduces its keystream\n");
+    }
+    tbt_crypto_wipe(&ctx);
+}
+
 int main(void)
 {
     test_tc1();
@@ -2185,6 +2403,9 @@ int main(void)
     test_body_xor();
     test_body_share();
     test_crypto_flow();
+    test_siphash();
+    test_hello_auth();
+    test_reincarnation_nonce();
     test_hello();
     test_direction_nonce();
     test_pair();

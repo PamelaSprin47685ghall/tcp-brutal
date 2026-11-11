@@ -2384,13 +2384,13 @@ static void test_wire_version(void)
 
     memset(hello, 0, sizeof(hello));
     hello[0] = TBT_WIRE_VERSION_V6;
-    ok(hello[0] == 8, "0.8.0 FEC HELLO names version 8", NULL);
+    ok(hello[0] == 9, "0.9.0 FEC HELLO names version 9", NULL);
     hello[0] = 7;
     ok(hello[0] != TBT_WIRE_VERSION_V6,
        "0.7.0 HELLO version 7 is refused", NULL);
     ok(TBT_WIRE_VERSION == 1, "legacy ARQ HELLO stays version 1", NULL);
     ok(TBT_FEC_CONV == 0x100bu, "0x100b is the v11 FEC revision", NULL);
-    ok(TBT_CONV == 0x000bu, "0x000b is the v11 ARQ revision", NULL);
+    ok(TBT_CONV == 0x000cu, "0x000c is the v12 ARQ revision", NULL);
     ok(TBT_OPEN_BODY_LEN == 36, "OPEN body is 36 bytes", NULL);
     ok(TBT_OPEN_ROUTE_SLOT == 32 && TBT_OPEN_TARGET_PORT == 34,
        "OPEN route/target offsets", NULL);

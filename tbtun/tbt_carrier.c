@@ -3799,11 +3799,19 @@ int tbt_tx_hello(struct tbt_session *sess, u8 index, gfp_t gfp)
     body[22] = (hc ? hc->profile : t->cfg.profile) |
                (u8)(((hc ? hc->gen : 0) & 0xf) << 2);
     if (sess->fec)
+    {
         tbt_crypto_hello_fill(body, sess->crypto, sess->crypto_key_id,
                               sess->crypto_tx_nonce,
                               sess->crypto_key_id == TBT_CRYPTO_KEY_ID_HELLO
                                   ? sess->crypto_key
                                   : NULL);
+        /* Wire version 9: this side's nonce generation and, when a PSK is
+         * configured, the tag that lets the peer accept a new generation.
+         * A generated key (key_id 1) is public, so it tags nothing. */
+        tbt_crypto_hello_auth_fill(body, sess->crypto_tx_epoch,
+                                   t->cfg.crypto_key_set ? t->cfg.crypto_key
+                                                         : NULL);
+    }
     TBT_DIAG("HELLO body filled tunnel=%llu carrier=%u gen=%u profile_gen_byte=%u",
              (unsigned long long)t->cfg.id, index, hc ? hc->gen : 0, body[22]);
     rc = tbt_tx_control_pinned(sess, NULL, index, TBT_F_HELLO, 0, 0, body,

@@ -2152,6 +2152,255 @@ static void test_flow_table_refusal(void)
             flow_free(&tx_e, tx_e.flow[i]);
 }
 
+/* ------------------------------------------------------------------ *
+ * Wire v9: the PSK-authenticated HELLO tail.
+ * ------------------------------------------------------------------ */
+
+static void mk_hello_v9(struct engine *e, u8 *body, u8 role,
+                        const u8 session_nonce[16], const u8 tx_nonce[8],
+                        u64 epoch, const u8 *psk)
+{
+    memset(body, 0, TBT_HELLO_BODY_LEN_V6);
+    body[0] = TBT_WIRE_VERSION_V6;
+    body[1] = role;
+    memcpy(body + 2, session_nonce, 16);
+    tbt_put_le16(body + 18, TBT_PAYLOAD_MAX);
+    tbt_put_le16(body + 20, TBT_CHUNK_MAX);
+    body[22] = (u8)(e->cfg.cfg.profile & 3);
+    tbt_crypto_hello_fill(body, e->crypto_on, TBT_CRYPTO_KEY_ID_NONE, tx_nonce,
+                          NULL);
+    tbt_crypto_hello_auth_fill(body, epoch, psk);
+}
+
+/* Seal one uplink frame at (sid, seq) under `nonce` and open it with the
+ * engine's current RX context. True means that context holds `nonce`. */
+static bool rx_opens(struct engine *e, const u8 *nonce, const u8 *plain,
+                     u64 sid, u64 seq)
+{
+    struct tbt_crypto_ctx tx;
+    u8 buf[32];
+    size_t len = sizeof(buf);
+
+    memcpy(buf, plain, len);
+    if (tbt_crypto_init(&tx, e->key, nonce, 0) ||
+        tbt_crypto_body_xor_flow(&tx, sid, seq, false, 0, buf, (u16)len))
+        return false;
+    tbt_crypto_wipe(&tx);
+    if (tbt_crypto_body_xor_flow(&e->crypto.rx, sid, seq, false, 0, buf,
+                                 (u16)len))
+        return false;
+    return memcmp(buf, plain, len) == 0;
+}
+
+/* A near-side restart must rotate both directions. The uplink (this side's
+ * RX) moves to the new HELLO nonce; the downlink (this side's TX) gets a
+ * fresh nonce of its own and a later generation so the HELLO that carries it
+ * is not treated as stale. A wrong PSK, a replayed HELLO and a tag-less
+ * HELLO may not move either, and may not rename the session. */
+static void test_hello_reincarnation(void)
+{
+    u8 body[TBT_HELLO_BODY_LEN_V6];
+    u8 psk[TBT_CRYPTO_KEY_LEN];
+    u8 wrong_psk[TBT_CRYPTO_KEY_LEN];
+    u8 n1[TBT_CRYPTO_NONCE_LEN], n2[TBT_CRYPTO_NONCE_LEN];
+    u8 n3[TBT_CRYPTO_NONCE_LEN];
+    u8 sess_a[16], sess_b[16];
+    u8 plain[32];
+    u8 old_tx[TBT_CRYPTO_NONCE_LEN];
+    u64 old_epoch;
+    size_t i;
+
+    for (i = 0; i < sizeof(psk); i++)
+    {
+        psk[i] = (u8)(i * 5 + 7);
+        wrong_psk[i] = (u8)(psk[i] ^ 0x40);
+    }
+    for (i = 0; i < sizeof(plain); i++)
+        plain[i] = (u8)(0x80 + i);
+    memset(sess_a, 0x11, sizeof(sess_a));
+    memset(sess_b, 0x22, sizeof(sess_b));
+    memset(n1, 0x31, sizeof(n1));
+    memset(n2, 0x42, sizeof(n2));
+    memset(n3, 0x53, sizeof(n3));
+
+    clear_engine();
+    e.near = false; /* the far role receives the near's HELLOs */
+    e.crypto_on = true;
+    e.psk = true;
+    e.key_owned = true;
+    e.key_id = TBT_CRYPTO_KEY_ID_NONE;
+    memcpy(e.key, psk, sizeof(psk));
+    e.rng = 0x123456789abcdefull;
+
+    /* Generation 1: first contact adopts the key, nonce and name. */
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_a, n1, 1000, psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == 0,
+          "v9: the first HELLO adopts generation 1");
+    CHECK(e.rx_ready && memcmp(e.rx_nonce, n1, sizeof(n1)) == 0,
+          "v9: generation 1 nonce installed");
+    CHECK(e.peer_epoch == 1000, "v9: generation 1 recorded");
+    CHECK(rx_opens(&e, n1, plain, 7, 9),
+          "v9: uplink opens under generation 1");
+    CHECK(hello_session_nonce(&e, body) == 0 && e.session_nonce_set,
+          "v9: the session name is adopted");
+
+    /* Process #2: fresh crypto nonce, later generation, same PSK and name. */
+    memcpy(old_tx, e.tx_nonce, sizeof(old_tx));
+    old_epoch = e.epoch;
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_a, n2, 2000, psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == 0,
+          "v9: a restarted near re-incarnates");
+    CHECK(memcmp(e.rx_nonce, n2, sizeof(n2)) == 0 && e.peer_epoch == 2000,
+          "v9: the uplink nonce and generation rotate");
+    CHECK(rx_opens(&e, n2, plain, 7, 9),
+          "v9: uplink opens under generation 2");
+    CHECK(!rx_opens(&e, n1, plain, 7, 9),
+          "v9: the old uplink nonce no longer opens");
+    CHECK(memcmp(e.tx_nonce, old_tx, sizeof(old_tx)) != 0,
+          "v9: the downlink nonce rotated");
+    CHECK(e.epoch > old_epoch, "v9: the downlink generation advanced");
+    CHECK(e.tx_rotate, "v9: the far side re-announces its HELLO");
+    {
+        struct tbt_crypto_ctx rx;
+        u8 sealed[32];
+        u8 buf[32];
+
+        /* Seal on the engine's real TX context, then open as the peer's
+         * fresh RX context keyed by the announced nonce. */
+        memcpy(sealed, plain, sizeof(sealed));
+        CHECK(tbt_crypto_body_xor_flow(&e.crypto.tx, 7, 9, false, 0, sealed,
+                                       sizeof(sealed)) == 0,
+              "v9: the far seals on the rotated downlink nonce");
+        memcpy(buf, sealed, sizeof(buf));
+        CHECK(tbt_crypto_init(&rx, psk, e.tx_nonce, 0) == 0 &&
+                  tbt_crypto_body_xor_flow(&rx, 7, 9, false, 0, buf,
+                                           sizeof(buf)) == 0 &&
+                  memcmp(buf, plain, sizeof(buf)) == 0,
+              "v9: downlink opens under the rotated nonce");
+        tbt_crypto_wipe(&rx);
+    }
+    e.tx_rotate = false; /* handle_hello() consumes it */
+
+    /* A replayed generation 1 after generation 2: valid tag, older epoch. */
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_a, n1, 1000, psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == 0 &&
+              memcmp(e.rx_nonce, n2, sizeof(n2)) == 0 && e.peer_epoch == 2000,
+          "v9: a replayed HELLO cannot roll the nonce back");
+    CHECK(rx_opens(&e, n2, plain, 7, 9),
+          "v9: the replay left the RX context intact");
+
+    /* Generation 3 also renames the session (a restart without nonce=). */
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_b, n3, 3000, psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == 0 &&
+              memcmp(e.rx_nonce, n3, sizeof(n3)) == 0,
+          "v9: generation 3 installs its nonce");
+    CHECK(hello_session_nonce(&e, body) == 0 &&
+              memcmp(e.session_nonce, sess_b, sizeof(sess_b)) == 0,
+          "v9: an authenticated restart renames the session");
+    e.tx_rotate = false;
+
+    /* A stranger that knows the session name but not the PSK: the tag fails,
+     * and nothing may move -- nonce, generation, downlink nonce or name. */
+    memcpy(old_tx, e.tx_nonce, sizeof(old_tx));
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_a, n1, 4000, wrong_psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) != 0,
+          "v9: a wrong PSK is refused");
+    CHECK(hello_session_nonce(&e, body) != 0,
+          "v9: a wrong PSK cannot rename the session");
+    CHECK(memcmp(e.rx_nonce, n3, sizeof(n3)) == 0 && e.peer_epoch == 3000 &&
+              memcmp(e.tx_nonce, old_tx, sizeof(old_tx)) == 0,
+          "v9: the wrong-PSK refusal left zero state");
+    CHECK(rx_opens(&e, n3, plain, 7, 9),
+          "v9: the wrong-PSK refusal did not poison the RX context");
+
+    /* No PSK at the sender: the tail carries a zero tag, which proves
+     * nothing and may not rotate anything. */
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_a, n1, 5000, NULL);
+    CHECK(hello_crypto(&e, body, sizeof(body)) != 0,
+          "v9: an unauthenticated nonce change is refused");
+    CHECK(hello_session_nonce(&e, body) != 0 &&
+              memcmp(e.session_nonce, sess_b, sizeof(sess_b)) == 0,
+          "v9: an unauthenticated HELLO cannot rename the session");
+    CHECK(memcmp(e.rx_nonce, n3, sizeof(n3)) == 0 && e.peer_epoch == 3000,
+          "v9: the unauthenticated HELLO left zero state");
+
+    /* Another carrier of the same generation repeats the nonce: a no-op. */
+    memcpy(old_tx, e.tx_nonce, sizeof(old_tx));
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_b, n3, 3000, psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == 0 &&
+              memcmp(e.tx_nonce, old_tx, sizeof(old_tx)) == 0 && !e.tx_rotate,
+          "v9: a repeated carrier HELLO does not rotate");
+}
+
+/* crypto=off keeps the PSK tag but has no crypto nonce to compare, so the
+ * generation high-water is the only replay defence. It must be recorded even
+ * then, and a configured nonce= must stay absolute. */
+static void test_hello_reincarnation_off(void)
+{
+    u8 body[TBT_HELLO_BODY_LEN_V6];
+    u8 psk[TBT_CRYPTO_KEY_LEN];
+    u8 n1[TBT_CRYPTO_NONCE_LEN], n2[TBT_CRYPTO_NONCE_LEN];
+    u8 sess_a[16], sess_b[16];
+    size_t i;
+
+    for (i = 0; i < sizeof(psk); i++)
+        psk[i] = (u8)(i * 9 + 3);
+    memset(sess_a, 0x11, sizeof(sess_a));
+    memset(sess_b, 0x22, sizeof(sess_b));
+    memset(n1, 0x31, sizeof(n1));
+    memset(n2, 0x42, sizeof(n2));
+
+    clear_engine();
+    e.near = false;
+    e.crypto_on = false; /* cipher off, PSK still configured */
+    e.psk = true;
+    e.key_owned = true;
+    e.key_id = TBT_CRYPTO_KEY_ID_NONE;
+    memcpy(e.key, psk, sizeof(psk));
+
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_a, n1, 2000, psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == 0,
+          "v9-off: the first HELLO is accepted with the cipher off");
+    CHECK(e.peer_epoch_set && e.peer_epoch == 2000,
+          "v9-off: the generation is recorded with the cipher off");
+    CHECK(hello_session_nonce(&e, body) == 0,
+          "v9-off: the session is adopted");
+
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_b, n2, 3000, psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == 0,
+          "v9-off: a later generation is accepted");
+    CHECK(hello_session_nonce(&e, body) == 0 &&
+              memcmp(e.session_nonce, sess_b, sizeof(sess_b)) == 0,
+          "v9-off: a later generation renames the session");
+
+    /* A replayed generation 2 carries a valid tag but an older epoch. */
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_a, n1, 2000, psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == 0,
+          "v9-off: a replay is not a crypto error");
+    CHECK(hello_session_nonce(&e, body) != 0 &&
+              memcmp(e.session_nonce, sess_b, sizeof(sess_b)) == 0,
+          "v9-off: a replayed HELLO cannot rename the session");
+    CHECK(e.peer_epoch == 3000, "v9-off: a replay cannot lower the generation");
+
+    /* A configured nonce= is absolute even for an authenticated restart. */
+    clear_engine();
+    e.near = false;
+    e.crypto_on = true;
+    e.psk = true;
+    e.key_owned = true;
+    e.key_id = TBT_CRYPTO_KEY_ID_NONE;
+    memcpy(e.key, psk, sizeof(psk));
+    e.cfg.cfg.nonce_set = true;
+    memcpy(e.session_nonce, sess_a, sizeof(sess_a));
+    e.session_nonce_set = true;
+    mk_hello_v9(&e, body, TBT_ROLE_NEAR, sess_b, n1, 2000, psk);
+    CHECK(hello_crypto(&e, body, sizeof(body)) == 0,
+          "v9: an authenticated HELLO passes with a pinned nonce");
+    CHECK(hello_session_nonce(&e, body) != 0 &&
+              memcmp(e.session_nonce, sess_a, sizeof(sess_a)) == 0,
+          "v9: a pinned nonce= is never renamed");
+}
+
 int main(void)
 {
     signal(SIGPIPE, SIG_IGN);
@@ -2190,6 +2439,8 @@ int main(void)
     test_fbk_commit();
     test_half_open_reclaim();
     test_flow_table_refusal();
+    test_hello_reincarnation();
+    test_hello_reincarnation_off();
 
     printf("test_client_rx: %d checks, %d failures\n", checks, failures);
     free(f.out);
