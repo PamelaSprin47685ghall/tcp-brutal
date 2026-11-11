@@ -5023,6 +5023,21 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
         if (b->empty || b->ndata >= real)
         {
             b->ready = true; /* complete without the codec */
+            if (!b->empty && !b->wake_sampled)
+            {
+                /* E=0: every DATA share arrived before the wake line. This
+                 * is a valid zero-loss sample, not a block to skip. */
+                b->wake_sampled = 1;
+                b->wake_first_ok = 1;
+                b->wake_real = real;
+                b->wake_ndata = b->ndata;
+                b->wake_nparity = b->nparity;
+                sample_e = 0;
+                sample_s = (u16)(rx->ctl.extra + 1);
+                sample_real = real;
+                sample_first = true;
+                sample = true;
+            }
         }
         else if (block_code ? tbt_fec_sclc_decode_wake(
                                   real, b->n, b->m, rx->groups, b->ndata,
@@ -5089,8 +5104,9 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
      * block, makes this result describe an older state. Discard it without
      * touching the block; the placement path already cleared the retry
      * deadline, so the next pass snapshots the new state. */
-    if (!tbt_fec_rx_snap_current(b->used, snap->block_id, snap->gen,
-                                 b->block_id, b->gen))
+    if (!tbt_fec_rx_snap_current(b->used, b->ready, snap->block_id,
+                                 b->block_id, snap->n, b->n, snap->m, b->m,
+                                 snap->short_unknown, b->short_unknown))
     {
         spin_unlock_bh(&rx->lock);
         return false;
@@ -5202,7 +5218,7 @@ static bool tbt_fec_rx_decode_one(struct tbt_session *sess,
             b->decode_next_ns = deadline;
         atomic64_inc(&sess->fec_decode_backoff);
     }
-    if (b->wake_attempts == 1 && !b->wake_sampled)
+    if (!b->wake_sampled)
     {
         b->wake_first_ok = (u8)(rc == 0 && b->ready);
         b->wake_sampled = 1;

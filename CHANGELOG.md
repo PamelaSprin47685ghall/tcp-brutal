@@ -3,7 +3,31 @@
 All notable changes to tbtun are recorded here. The wire revision is `TBT_CONV`
 and moves independently of the module version.
 
-## [Unreleased]
+## [0.7.4] - 2026-11-11
+
+### Added
+
+- Carrier receive-queue hole filling (`tbt_rcvq`): FEC-recovered bytes are
+  written into the carrier's TCP receive queue at the exact stream seq, so a
+  lost carrier segment no longer leaves a permanent hole. Wire compatible;
+  host `test_rcvq`, `test_rcvq_plan` and `test_rcvq_wire` cover the plan and
+  the ACK path.
+- Route A data plane: every FEC DATA/PARITY record carries its block's n/m
+  and group; `block_seq0` is explicit. FEC conv is 0x100b and HELLO v8; old
+  peers fail closed. TX/RX keep a small codec LRU (down 4, up 4) and only
+  switch n/m after the target codec is ready.
+- Continuous SC-LDPC controller (`init/block_sample/tick`), with per-block
+  wake snapshots and `m_target` in FBK. c13 shows n/m, m_target, q, delta,
+  delta_off, burst, eps, sigma, backup, reason and frozen.
+
+### Fixed
+
+- Wake sampling now records E=0 blocks and no longer discards a successful
+  decode because a later share bumped the block generation.
+- ACK credit uses the frontier block's own n, not a packet seq compared with a
+  block id.
+- BBR hold restores cwnd and pacing after a hold.
+
 
 ### Added
 

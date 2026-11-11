@@ -2472,26 +2472,30 @@ static void test_decode_snapshot(void)
        "snapshot: a share placed during decode does not change the input");
     ok(s.dpresent[2] == 0,
        "snapshot: presence seen by the codec is the claimed state");
-    ok(!tbt_fec_rx_snap_current(b.used, s.block_id, s.gen, b.block_id,
-                                b.gen),
-       "snapshot: a placement during decode rejects the commit");
+    ok(tbt_fec_rx_snap_current(b.used, false, s.block_id, b.block_id,
+                               s.n, b.n, s.m, b.m, s.short_unknown,
+                               b.short_unknown),
+       "snapshot: a filled missing slot does not discard the decode");
 
     /* A PARITY record fixes the cut during the same decode. */
     b.ppresent[1] = 1;
     b.gen++;
-    ok(!tbt_fec_rx_snap_current(b.used, s.block_id, s.gen, b.block_id,
-                                b.gen),
-       "snapshot: a PARITY arrival also rejects the commit");
+    ok(tbt_fec_rx_snap_current(b.used, false, s.block_id, b.block_id,
+                               s.n, b.n, s.m, b.m, s.short_unknown,
+                               b.short_unknown),
+       "snapshot: an extra PARITY does not discard the decode");
 
     /* The slot is reused for another block: same generation is not enough. */
     b.block_id = 43;
     b.gen = s.gen;
-    ok(!tbt_fec_rx_snap_current(b.used, s.block_id, s.gen, b.block_id,
-                                b.gen),
+    ok(!tbt_fec_rx_snap_current(b.used, false, s.block_id, b.block_id,
+                                s.n, b.n, s.m, b.m, s.short_unknown,
+                                b.short_unknown),
        "snapshot: a reused slot rejects the commit");
     b.block_id = 42;
-    ok(tbt_fec_rx_snap_current(b.used, s.block_id, s.gen, b.block_id,
-                               b.gen),
+    ok(tbt_fec_rx_snap_current(b.used, false, s.block_id, b.block_id,
+                               s.n, b.n, s.m, b.m, s.short_unknown,
+                               b.short_unknown),
        "snapshot: the unchanged block still commits");
 
     /* The next pass retakes the snapshot: the arrived share is now part of
