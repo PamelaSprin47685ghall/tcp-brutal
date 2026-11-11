@@ -2138,6 +2138,27 @@ void tbt_tx_fec_rearm_if_pending(struct tbt_session *sess, struct tbt_stream *st
     peer = READ_ONCE(tx->peer_pkts);
     seq = READ_ONCE(tx->seq);
     now = ktime_get_ns();
+    /* A body that entered the FEC TX work but never cleared the RUN word
+     * (bit 0) leaves the work bit clear and every later arm a no-op. If the
+     * ring still has data and the pump has not run for a second, clear the
+     * stale run word and ask for a fresh body. This is a recovery for a
+     * lost/mis-accounted body, not a second concurrent packetizer. */
+    if ((atomic_read(&sess->fec_tx_run) & 1u) && ring &&
+        READ_ONCE(tx->last_pump_ns) &&
+        now > READ_ONCE(tx->last_pump_ns) &&
+        now - READ_ONCE(tx->last_pump_ns) > NSEC_PER_SEC)
+    {
+        atomic_fetch_and(~1u, &sess->fec_tx_run);
+        atomic_fetch_or(2u, &sess->fec_tx_run);
+        atomic64_inc(&sess->fec_tx_pump_rearm);
+        pr_info_ratelimited("tbtun: FEC pump stuck sid=%llu ring=%llu seq=%llu run=%u sched=%d\n",
+                            (unsigned long long)st->sid,
+                            (unsigned long long)ring,
+                            (unsigned long long)seq,
+                            atomic_read(&sess->fec_tx_run),
+                            test_bit(TBT_SW_FEC_TX, &sess->sched));
+        tbt_session_arm(sess, TBT_SW_FEC_TX, 0);
+    }
     if (ring && !tbt_fec_credit_waiting(
                     peer, seq, credit,
                     (u32)READ_ONCE(tx->groups) * READ_ONCE(tx->n)) &&
