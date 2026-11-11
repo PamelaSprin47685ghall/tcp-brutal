@@ -1,0 +1,2 @@
+ratio tunnel/direct: app 10.3%, wire 22.6%, app vs direct/2 20.7%, far cores/Mbit 7.2x, near 6.1x
+tunnel window: tx_window=386814 B, bdp=128938 B, k=3, rtt_mean=166727 us; far snd_wnd_sum=4349800 B, cwnd_sum=8667308 B
