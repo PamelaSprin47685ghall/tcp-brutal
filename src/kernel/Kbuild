@@ -1,0 +1,44 @@
+# Kbuild for the tbtun module. The top-level Makefile calls this directory
+# with M=$(CURDIR)/src/kernel and MO=$(CURDIR)/build/kernel; all objects land
+# under the build root, never in the source tree.
+
+obj-m += tbtun.o
+tbtun-objs := tbt_core.o tbt_session.o tbt_procfs.o \
+              tbt_listen.o tbt_proto.o tbt_carrier.o tbt_cc.o \
+              tbt_sock.o tbt_tx.o tbt_rx.o tbt_rec.o \
+              tbt_parse.o tbt_http.o tbt_fec_batch.o tbt_crypto.o \
+              tbt_portmap.o tbt_map.o tbt_fec.o tbt_fec_data.o \
+              tbt_fec_adapt.o tbt_fec_adapt_sclc.o \
+              tbt_fec_sclc.o \
+              tbt_fec_codec_cache.o \
+              tbt_sc_ldpc.o \
+              tbt_sc_ldpc_gf16.o tbt_sclc_uplink.o
+
+# Keep every module frame small enough for the kernel stack: a 1 KiB bound
+# catches a TBT_STREAMS_MAX pointer array before it reaches a real call path.
+ccflags-y := -std=gnu99 -I$(src) -Wframe-larger-than=1024
+
+# tbt_cc.c's ACK hook is selected from the installed header, not from a
+# version number: this tree declares cong_control(sk, ack, flag, rs), earlier
+# ones declare cong_control(sk, rs) or only the cong_avoid/pkts_acked pair.
+# The two cong_control forms are both valid function-pointer types, so a C
+# feature test cannot tell them apart; read the declaration. A header that
+# changes either signature fails the build instead of attaching the wrong
+# arguments.
+TBT_CC_TCP_H := $(firstword $(wildcard $(srctree)/include/net/tcp.h) \
+                            $(wildcard $(objtree)/include/net/tcp.h))
+TBT_CC_ACK_HOOK := $(shell [ -n "$(TBT_CC_TCP_H)" ] && \
+        grep -qs 'u32 ack, int flag, const struct rate_sample' $(TBT_CC_TCP_H) && echo 1)
+TBT_CC_INIT_HOOK := $(shell [ -n "$(TBT_CC_TCP_H)" ] && \
+        grep -qs 'void (\*init)(struct sock \*sk);' $(TBT_CC_TCP_H) && echo 1)
+ccflags-y += $(if $(TBT_CC_ACK_HOOK),-DTBT_CC_HAVE_CONG_CTRL_ACK=1) \
+             $(if $(TBT_CC_INIT_HOOK),-DTBT_CC_HAVE_INIT=1)
+
+# ChaCha8 is a hot per-byte loop; keep the kernel's -O2 for the rest of the
+# module and let this one file unroll its fixed 8-round permutation.
+CFLAGS_tbt_crypto.o := -O3
+
+# The SC-LDPC inner loops (bit transpose, peeling sweep) are the second
+# largest TX/RX cost after the cipher; -O3 measured 6.9 -> 6.4 us per 2 MiB
+# block encode on the host and leaves the object the same size class.
+CFLAGS_tbt_fec_sclc.o := -O3

@@ -98,38 +98,40 @@ fi
 
 # The small-message helper: one write, one reply, socket still open. Probe P
 # needs it because tbt_burst cannot express "37 bytes and no more".
-if [ -f "$root/host/tbt_ping.c" ]; then
+if [ -f "$root/tests/tools/tbt_ping.c" ]; then
     # Rebuild when the source is newer: a stale binary is a wrong-size message,
     # not a tunnel failure (it reported "bad usage" once MAX_MSG grew).
-    if [ ! -x "$root/host/tbt_ping" ] || [ "$root/host/tbt_ping.c" -nt "$root/host/tbt_ping" ]; then
+    mkdir -p "$root/build/bin"
+    if [ ! -x "$root/build/bin/tbt_ping" ] || [ "$root/tests/tools/tbt_ping.c" -nt "$root/build/bin/tbt_ping" ]; then
         "${HOSTCC:-cc}" -std=gnu99 -O2 -Wall -Wextra -Werror \
-            -o "$root/host/tbt_ping" "$root/host/tbt_ping.c" ||
-            die "cannot build $root/host/tbt_ping"
+            -o "$root/build/bin/tbt_ping" "$root/tests/tools/tbt_ping.c" ||
+            die "cannot build $root/build/bin/tbt_ping"
     fi
-    bins="$bins --bin $root/host/tbt_ping"
+    bins="$bins --bin $root/build/bin/tbt_ping"
 fi
 
 # Probe Q's connect flood: connections that never complete HELLO.
-if [ -f "$root/host/tbt_flood.c" ]; then
-    if [ ! -x "$root/host/tbt_flood" ] || [ "$root/host/tbt_flood.c" -nt "$root/host/tbt_flood" ]; then
+if [ -f "$root/tests/tools/tbt_flood.c" ]; then
+    mkdir -p "$root/build/bin"
+    if [ ! -x "$root/build/bin/tbt_flood" ] || [ "$root/tests/tools/tbt_flood.c" -nt "$root/build/bin/tbt_flood" ]; then
         "${HOSTCC:-cc}" -std=gnu99 -O2 -Wall -Wextra -Werror \
-            -o "$root/host/tbt_flood" "$root/host/tbt_flood.c" ||
-            die "cannot build $root/host/tbt_flood"
+            -o "$root/build/bin/tbt_flood" "$root/tests/tools/tbt_flood.c" ||
+            die "cannot build $root/build/bin/tbt_flood"
     fi
-    bins="$bins --bin $root/host/tbt_flood"
+    bins="$bins --bin $root/build/bin/tbt_flood"
 fi
 
 # Probe T's near endpoint: the 090 deployment is the userspace client in front
 # of the kernel far, and only that pair can drive an OPEN the far refuses for
 # want of a free flow.
-if [ -f "$root/host/tbt_client_main.c" ]; then
-    if [ ! -x "$root/host/tbt_client" ] ||
-        [ "$root/host/tbt_client_engine.c" -nt "$root/host/tbt_client" ] ||
-        [ "$root/host/tbt_client_main.c" -nt "$root/host/tbt_client" ]; then
-        make -C "$root" host/tbt_client >&2 ||
-            die "cannot build $root/host/tbt_client"
+if [ -f "$root/src/client/tbt_client_main.c" ]; then
+    if [ ! -x "$root/build/bin/tbt_client" ] ||
+        [ "$root/src/client/tbt_client_engine.c" -nt "$root/build/bin/tbt_client" ] ||
+        [ "$root/src/client/tbt_client_main.c" -nt "$root/build/bin/tbt_client" ]; then
+        make -C "$root" "$root/build/bin/tbt_client" >&2 ||
+            die "cannot build $root/build/bin/tbt_client"
     fi
-    bins="$bins --bin $root/host/tbt_client"
+    bins="$bins --bin $root/build/bin/tbt_client"
 fi
 
 # The probe list travels as a file in the image: /proc/cmdline is empty in this

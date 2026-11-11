@@ -363,8 +363,8 @@ ssh "$FAR" 'dmesg | grep -i fec_stream_refused || true'
 - far 的 `fec_stream_refused` 计数与基线相同（通常为 0）。
 - `dmesg` 没有新的 `fec_stream_refused`。
 
-**当前会被已知缺陷阻断（半开流不回收）：** 0.8 的流对象只在会话销毁时回收
-（`review/analysis/multiconn.md:26-27`）。重启 near mihomo 会让旧流以半开/关闭
+**当前会被已知缺陷阻断（半开流不回收）：** 流对象只在会话销毁时回收。
+重启 near mihomo 会让旧流以半开/关闭
 状态留下；新流可能被拒绝，从而出现 `fec_stream_refused` 增长或首次请求失败。
 若出现，**记录为 0.8 缺陷证据，不记为 mihomo 配置失败**，也不要通过反复重试把它
 “跑绿”。
@@ -397,10 +397,9 @@ ssh "$FAR" 'dmesg | grep -i fec_stream_refused || true'
 ## 8. 当前已知阻断（0.8）
 
 1. **吞吐约 0.55 MB/s。** S2 会慢；不是 mihomo 的问题。
-2. **半开流不回收。** S5 可能失败并出现 `fec_stream_refused`；这是 0.8 的流生命
-   周期缺陷，见 `review/analysis/multiconn.md:26-27`。
-3. **载体 stall-dead 抖动。** 256 载体下 stall/recover 每小时数千次
-   （`CHANGELOG.md:336-341`）。S2/S3 期间若出现周期性卡顿，先看
+2. **半开流不回收。** S5 可能失败并出现 `fec_stream_refused`。
+3. **载体 stall-dead 抖动。** 256 载体下 stall/recover 每小时数千次。
+   S2/S3 期间若出现周期性卡顿，先看
    `/proc/net/tbtun/stats` 的 `stall_*`，不要先怀疑 mihomo。
 4. **单 FEC flow 限制。** `only-tcp: true` 的 XUDP 会为 UDP 另拨一条 TCP
    （`vless.go:369-404`），far 只允许一条 FEC flow（`README.md:661-662`），

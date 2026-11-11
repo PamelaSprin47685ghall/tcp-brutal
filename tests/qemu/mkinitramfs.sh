@@ -6,7 +6,7 @@
 # The image is a cpio.gz holding:
 #   /init            the test itself (tests/qemu/init)
 #   /<module>.ko     the module under test, under its own file name
-#   /bin/tbt_burst   either the static helper (host/tbt_burst) or the busybox
+#   /bin/tbt_burst   either the static helper (tests/tools/tbt_burst) or the busybox
 #                    applet symlink when the helper is absent
 #   /bin/nc /bin/sha256sum /bin/dd ...   busybox applets
 #   /usr/lib/...     the dynamic loader and libraries tbt_burst needs when it is
@@ -52,7 +52,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 out=${out:-$cache/qemu/initramfs.cpio.gz}
-endpoint=${endpoint:-$root/host/tbt_burst}
+endpoint=${endpoint:-$root/tests/tools/tbt_burst}
 
 die() {
     echo "mkinitramfs: $*" >&2
@@ -67,10 +67,10 @@ die() {
 # static build would be nicer; glibc's crt files are not installed, so only a
 # musl toolchain could produce one, and mkinitramfs bundles the loader and the
 # libraries instead.
-if [ ! -x "$endpoint" ] && [ -f "$root/host/tbt_burst.c" ]; then
+if [ ! -x "$endpoint" ] && [ -f "$root/tests/tools/tbt_burst.c" ]; then
     "${HOSTCC:-cc}" -std=gnu99 -O2 -Wall -Wextra -Werror \
-        -o "$endpoint" "$root/host/tbt_burst.c" ||
-        die "cannot build $root/host/tbt_burst"
+        -o "$endpoint" "$root/tests/tools/tbt_burst.c" ||
+        die "cannot build $root/tests/tools/tbt_burst"
     echo "mkinitramfs: built $endpoint with ${HOSTCC:-cc}"
 fi
 

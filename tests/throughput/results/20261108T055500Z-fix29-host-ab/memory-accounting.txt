@@ -1,0 +1,38 @@
+FEC frame memory accounting (0.3.0 / fix29 A-B)
+================================================
+
+Constants (src/kernel/tbt_http.h, tbtun/tbtun.h):
+  TBT_HTTP_FEC_FRAME_MAX = 18 + 8240 + 2 = 8260 B
+  TBT_FEC_BATCH_MAX      = 8
+  TBT_CAR_PART_MAX       = 8260 * 8 = 66080 B
+
+Near kernel 6.1.172 (aarch64) has KMALLOC_SHIFT_HIGH = PAGE_SHIFT + 1 and
+KMALLOC_MAX_CACHE_SIZE = 8192 (review/analysis/stability.md:76, citing
+.../build/include/linux/slab.h:663).  Larger kmalloc() calls go through
+kmalloc_large() -> alloc_pages():
+  8260 B  -> order-2 page block = 16384 B (16 KiB)
+  66080 B -> order-5 page block = 131072 B (128 KiB)
+
+Per 256-carrier session:
+  fec_frame reuse (v0.3.0, count==1 path):
+    256 * 16 KiB = 4.0 MiB resident
+    requested bytes 256 * 8260 = 2.02 MiB (page-block reality 4.0 MiB)
+  part buffer (already present, unrelated to fix29):
+    256 * 128 KiB = 32.0 MiB
+    fec_frame adds +12.5% to the per-carrier scratch total
+  reuse-off (the A/B arm):
+    no steady fec_frame; one 16 KiB page block per single-record send,
+    one 128 KiB page block per 8-record batch, freed after the send.
+
+Host malloc model (host/bench_txpath, glibc malloc, not kmalloc):
+  v0.3.0 reuses fec_frame only when count == 1; count > 1 already calls
+  kmalloc_array(count, ...) in both the baseline and the reuse-off arm.
+  Therefore the relevant model row is push_alloc.8k (one 8260 B record
+  allocation), not the batch_alloc8/batch_reuse8 pair (which models a
+  count == 8 buffer and is unchanged by this arm).
+  2026-11-08 push_alloc.8k: 99.0, 63.9, 66.4 ns/record (3 runs, CPU 2,
+  load ~6); the 2026-11-07 idle baseline was 63.2 ns/record.  The C arm
+  adds this one allocation per single-record send, ~0.02% of one core at
+  3400 records/s in the glibc model.  glibc malloc does not model
+  kmalloc_large/page allocator, so this is a lower bound; the real-machine
+  C arm is the authoritative test.

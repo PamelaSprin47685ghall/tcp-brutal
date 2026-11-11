@@ -1,6 +1,6 @@
 # `http-kal` carrier integration (C8)
 
-Status: the container is implemented and host-tested in `tbtun/tbt_http.c`; the
+Status: the container is implemented and host-tested in `src/kernel/tbt_http.c`; the
 trunk owner wires it into `tbt_carrier.c`/`tbt_tx.c`/`tbt_rx.c`. This note is
 the interface, not a second design.
 
@@ -22,7 +22,7 @@ the interface, not a second design.
    transcript.
 4. **Snapshot, not stream**: reading returns the current last-written values;
    never clears. `cat` twice gives the same text.
-5. **Harness contract**: `host/test_http_live` accepts this exact text (reads
+5. **Harness contract**: `tests/unit/test_http_live` accepts this exact text (reads
    `<field>=<value>` lines, unescapes), *or* a raw binary capture file with a
    `TBT-HTTP-CAPTURE 1` magic and `request <len>` / `response <len>` framing for
    offline byte dumps. Implement both; the proc text path is what the QEMU test
@@ -85,7 +85,7 @@ Then verify:
 make host-test-live FILE=capture.txt
 ```
 
-The target runs `host/test_http_live` and, when `uv` plus a cached `h11` are
+The target runs `tests/unit/test_http_live` and, when `uv` plus a cached `h11` are
 available, the independent h11 oracle. It is deliberately not part of
 `make check` or `make host-test`: it needs a capture.
 

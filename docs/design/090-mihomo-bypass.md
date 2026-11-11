@@ -27,7 +27,7 @@
 2. **mihomo 的 sing-mux 把多条应用 TCP 连接复用到一条底层 TCP 上。** 这条
    底层 TCP 就是 tbtun 搬运的唯一一条字节流。当前 tbtun（0.8.0）的 FEC 数据面
    **只允许一条并发 FEC 流**（`n_fec_flows != 0` 时直接 `-ENOSPC`，
-   `tbtun/tbt_fec_data.c:8813-8818`、`:8764-8769`）。mux 与这个限制正好互补：
+   `src/kernel/tbt_fec_data.c:8813-8818`、`:8764-8769`）。mux 与这个限制正好互补：
    不需要给 tbtun 增加任何子流复用。
 
 3. **mux 与 XUDP 在当前 tbtun 上不能同时生效。** 这不是配置写法问题，是路径
@@ -68,7 +68,7 @@
 - 隧道内只承载**一条** mihomo 底层 TCP；浏览器/应用的多条连接由 mihomo 的
   mux 合并。
 - 外层流量保持 tbtun 现有的 HTTP/1.1 chunked keep-alive 外观
-  （`tbtun/tbt_http.h:39-48`）。
+  （`src/kernel/tbt_http.h:39-48`）。
 - 交付可复现的装配目标（Makefile / Dockerfile / compose），只组装，不改上游。
 
 ### 1.2 非目标
@@ -126,7 +126,7 @@
 | far | mihomo | 按 rules 直连 | 访问真实网站 |
 
 谁发起 carrier：**near 发起**。far 只监听 `19000`，不主动连 near
-（`tbtun/tbt_parse.c:890-895` 要求 near 有 `peer=`、far 有 `target=`）。
+（`src/kernel/tbt_parse.c:890-895` 要求 near 有 `peer=`、far 有 `target=`）。
 
 ### 2.2 far：内核 tbtun 配置
 
@@ -163,7 +163,7 @@ profile=http-kal keepalive=5000 nonce=<32-hex>' \
 
 - near 的 `listen=` 是**应用监听**：mihomo 的 VLESS 出站连到这里。
 - near 的 `target=` 可以省略；内核 near 发给 far 的 OPEN 目标端口默认是 0
-  （`tbtun/tbt_tx.c:370-374`），far 用自身的 `target=`。这与用户态客户端
+  （`src/kernel/tbt_tx.c:370-374`），far 用自身的 `target=`。这与用户态客户端
   不同（见 §2.4）。
 - near 的 `n/m` **决定它自己的 TX 形状**。`n=8 m=24` + `carriers=256` 得到
   `groups=8`，走 GF(16) 上行（`tbt_fec.c:2496-2534`：`groups == 1` 才是
@@ -186,7 +186,7 @@ profile=http-kal keepalive=5000 nonce=<32-hex>' \
 同一套 0.8 wire，但有三处配置差异，必须写清楚：
 
 ```sh
-host/tbt_client role=near listen=127.0.0.1:19080 peer=<far-ip>:19000 \
+src/client/tbt_client role=near listen=127.0.0.1:19080 peer=<far-ip>:19000 \
   target=127.0.0.1:19100 n=8 m=24 mode=sc-ldpc carriers=256 \
   fec=on crypto=on adaptive=off verbose=1
 ```
@@ -194,20 +194,20 @@ host/tbt_client role=near listen=127.0.0.1:19080 peer=<far-ip>:19000 \
 差异：
 
 1. `carriers` 必须是 **256**，否则启动直接报错
-   （`host/tbt_client_engine.c:3212-3216`）。
+   （`src/client/tbt_client_engine.c:3212-3216`）。
 2. 只实现 `mode=sc-ldpc`（`:3190-3193`）。
 3. `target=` 的端口会被塞进 OPEN，far 用它覆盖自己的 `target=` 端口
-   （`host/tbt_client_engine.c:1202-1232`；far 端 `:2385-2414`）。
+   （`src/client/tbt_client_engine.c:1202-1232`；far 端 `:2385-2414`）。
    near 的 `target=` 地址本身不用于拨号，但 `tbt_parse_line` 需要它非零才能
    产出端口。**所以用户态 near 必须写 `target=127.0.0.1:19100`**，否则 OPEN
    带 0，far 会去连端口 0。
 4. 用户态客户端的 TX 形状是固定的：near 发 8x24 上行，far 发 128x128
-   下行（`host/tbt_client_engine.c:3219-3257`）。所以 `n/m` 在 near 上只
+   下行（`src/client/tbt_client_engine.c:3219-3257`）。所以 `n/m` 在 near 上只
    影响 `down_shape` 的初始值；写 8/24 或 128/128 都能启动，但写 8/24 与
    内核 near 的配置一致，便于对照。
 
 用户态 near 的并发上限是 `TBT_FLOW_MAX = 8`
-（`host/tbt_client_engine.c:52-53`），第 9 条应用连接在 accept 后被立即
+（`src/client/tbt_client_engine.c:52-53`），第 9 条应用连接在 accept 后被立即
 `close()`（`:2991-2996`）。内核 near 的上限是**一条 FEC 流**（§4.1）。
 两者都不要和“256 条 carrier”混淆：carrier 是传输子流，不是应用流。
 
@@ -354,8 +354,7 @@ mux；“写 mux”也不会多开一个端口。
 
 ### 2.9 near 生产机的隔离
 
-near 上已有生产 mihomo 监听 `127.0.0.1:7890`（当时的快照见 `review/arm64-v6/`；
-原始日志已随仓库精简移除）。
+near 上已有生产 mihomo 监听 `127.0.0.1:7890`。
 本设计额外起一个**独立** mihomo 进程，端口 7899；两者互不 reload、互不共享
 配置目录。tbtun 的 carrier 拨号必须绕开生产 mihomo 的 TUN，否则 carrier 会被
 自己的 TUN 抓走形成环路。仓库已有做法是主机策略路由：
@@ -365,7 +364,7 @@ ip rule add pref 100 to <far-ip>/32 lookup main   # 已存在则跳过
 ip route get <far-ip>                            # 必须显示物理网卡，不是 Meta/198.18.0.1
 ```
 
-证据：`benches/short.sh:42-43`、`:120-123`（注释明确写 mihomo 的 TUN 会把
+证据：`tests/throughput/short.sh:42-43`、`:120-123`（注释明确写 mihomo 的 TUN 会把
 carrier 送进 Meta）。这条规则只作用于到 far 的新流，不重启生产 mihomo。
 
 ---
@@ -560,7 +559,7 @@ if vc.dst.Mux {
 
 内核侧：
 
-- `tbtun/tbt_fec_data.c:8813-8818`：
+- `src/kernel/tbt_fec_data.c:8813-8818`：
 
   ```c
   if (sess->n_fec_flows)
@@ -596,7 +595,7 @@ if vc.dst.Mux {
 
 用户态侧：
 
-- `TBT_FLOW_MAX = 8`（`host/tbt_client_engine.c:52-53`）。每条应用连接一个
+- `TBT_FLOW_MAX = 8`（`src/client/tbt_client_engine.c:52-53`）。每条应用连接一个
   `flow` 槽；第 9 条在 `engine_accept_app` 里 `flow_alloc` 失败后立即
   `close(fd)`（`:2991-2996`），没有 RST、没有日志（除非 verbose）。
 - 用户态没有 `fec_stream_refused` 计数器；它的“拒绝”表现为 accept 后关闭。
@@ -711,10 +710,9 @@ mihomo 的 mux 客户端没有“重连”这个显式动作；它是在下一�
 
 ### 5.1 固定的“MTU”
 
-tbtun 0.8.0 的 FEC cell 是固定的：
+FEC cell 是固定的：
 
-- `TBT_FEC_S = 1024`：每个 DATA/PARITY 槽 1024 字节
-  （`CHANGELOG.md:29-32`；`review/spec-080-fsharp.md:7-17`）。
+- `TBT_FEC_S = 1024`：每个 DATA/PARITY 槽 1024 字节。
 - FEC 记录 = 48 字节头 + 1024 字节体 = **1072 字节**。
 - http-kal chunk = `"430\r\n"`（5）+ 1072 + `"\r\n"`（2）= **1079 字节**。
 - 没有 `S=` 或 `mtu=` 配置键。`S` 是编译期常量，不能按链路调。
@@ -741,11 +739,11 @@ tbtun 0.8.0 的 FEC cell 是固定的：
 “封口”定时器：
 
 - 用户态客户端：`TBT_TX_IDLE_SEAL_NS = 25 ms`
-  （`host/tbt_client_engine.c:64-66`），在 `flow_tick` 里检查
+  （`src/client/tbt_client_engine.c:64-66`），在 `flow_tick` 里检查
   （`:2697-2705`）。所以一个方向至少 +25 ms。
 - 内核 near：交互尾部 `TBT_FEC_SHORT_MS = 2 ms`，但只对“流的第一个
   partial packet”生效；后续 partial 等 `TBT_FEC_BLOCK_IDLE_MS = 25 ms`
-  （`tbtun/tbt_fec.h:216-233`，逻辑在 `tbt_fec_data.c:2726-2740`）。
+  （`src/kernel/tbt_fec.h:216-233`，逻辑在 `tbt_fec_data.c:2726-2740`）。
   还有一个 `TBT_FEC_CUT_GRACE_MS = 100 ms` 的接缝宽限
   （`tbt_fec.h:234-240`）。
 - 两个方向都要封口：请求一次、响应一次。所以**交互请求的额外时延大约是
@@ -773,7 +771,7 @@ tbtun 0.8.0 的 FEC cell 是固定的：
   - 容器装配：用户态 `tbt_client` + mihomo 二进制。near 可以走这条；far 若
     不用 ko 也可以。
 - **升级 mihomo 只换 ref 与校验和**，不改我们的文件；升级后按 §3 重跑
-  字段核对（`deploy/scripts/verify-versions.sh`）。
+  字段核对（`deploy/tools/verify-versions.sh`）。
 
 ### 6.2 文件布局
 
@@ -796,7 +794,7 @@ deploy/
     tbtun-far.service
     mihomo-near.service
     mihomo-far.service
-  scripts/
+  tools/
     render-config.sh
     verify-versions.sh
     smoke-netns.sh
@@ -842,10 +840,10 @@ OUT           ?= $(CURDIR)/out
 2. `dist-tbtun`
    - 模块：`$(MAKE) -C .. all`，产物
      `../tbtun.ko`，复制到 `$(OUT)/bin/tbtun.ko`。
-   - 用户态：`$(MAKE) -C .. host/tbt_client`，复制到
+   - 用户态：`$(MAKE) -C .. src/client/tbt_client`，复制到
      `$(OUT)/bin/tbt_client`。
    - 记录 `git -C .. rev-parse HEAD`、`TBT_VERSION`（从
-     `../tbtun/tbt_uapi.h` 解析）到 `$(OUT)/tbtun.version`。
+     `../src/kernel/tbt_uapi.h` 解析）到 `$(OUT)/tbtun.version`。
 
 3. `dist-configs`
    - 对每个 `.tmpl` 用 `envsubst` 渲染；必需变量：
@@ -862,7 +860,7 @@ OUT           ?= $(CURDIR)/out
 5. `dist-verify`
    - 对 `out/bin/mihomo-*` 跑 `-v`；对 `mihomo` 源码目录
      `git diff --quiet`（证明没改）；对 `tbtun.ko` 跑 `modinfo`。
-   - `deploy/scripts/verify-versions.sh` 重跑 §3 的源码行号检查（见 6.6）。
+   - `deploy/tools/verify-versions.sh` 重跑 §3 的源码行号检查（见 6.6）。
 
 6. `dist-compose-up` / `dist-compose-down`
    - 只用于 near 的容器变体或实验室；生产 far 用 systemd + ko。
@@ -922,7 +920,7 @@ far 的 compose 同理，只是配置反过来；但生产 far 推荐 systemd + 
 容器（模块在宿主，容器里的 tbt_client 不是同一条路径）。
 
 **注意**：默认 bridge netns 的容器看不到 `/proc/net/tbtun/*`。tbtun 的控制面
-只创建在 init_net（`tbtun/tbt_procfs.c:199-202` 的
+只创建在 init_net（`src/kernel/tbt_procfs.c:199-202` 的
 `cf->net = get_net(&init_net)`，`:1600-1605` 的 `init_net.proc_net`）。
 `network_mode: host` 的容器与宿主共享 netns，理论上可以写这个文件，但这要求
 root/CAP_NET_ADMIN，且把内核模块的配置权限交给容器并不划算。生产 far 用
@@ -934,7 +932,7 @@ root/CAP_NET_ADMIN，且把内核模块的配置权限交给容器并不划算�
 - 升级流程：
   1. 改 `MIHOMO_REF`；
   2. `make dist-mihomo`；
-  3. `deploy/scripts/verify-versions.sh` 重新核对本文 §3 的行号与字段；
+  3. `deploy/tools/verify-versions.sh` 重新核对本文 §3 的行号与字段；
   4. 若行号漂移但字段仍在，更新文档的行号；若字段消失，按 §3.5 的替代方案
      改配置，不 patch；
   5. 跑 S1–S3。
@@ -943,7 +941,7 @@ root/CAP_NET_ADMIN，且把内核模块的配置权限交给容器并不划算�
   - `adapter/outbound/vless.go` 里 `XUDP` / `PacketEncoding` / `Network` 字段；
   - `adapter/outbound/singmux.go` 里 `only-tcp` / `max-connections`；
   - `listener/sing_vless/server.go` 里 `allow-insecure` 的报错；
-  - `tbtun/tbt_fec_data.c` 里 `n_fec_flows` 的 `-ENOSPC`。
+  - `src/kernel/tbt_fec_data.c` 里 `n_fec_flows` 的 `-ENOSPC`。
   - 用 `grep -n` 定位后与本文记录的行号对比，输出 drift 报告。
 
 ---
@@ -954,7 +952,7 @@ root/CAP_NET_ADMIN，且把内核模块的配置权限交给容器并不划算�
 一台 QEMU guest”，guest 跑 far）。**不碰 near/far 生产机。**
 
 为什么不用 network namespace：tbtun 的控制面只创建在 init_net。
-`tbtun/tbt_procfs.c:199-202` 明确写 `cf->net = get_net(&init_net)`，
+`src/kernel/tbt_procfs.c:199-202` 明确写 `cf->net = get_net(&init_net)`，
 `:1600-1605` 用 `init_net.proc_net` 创建 `/proc/net/tbtun`；同一段注释
 还明确说不要靠 bind-mount 的 `/proc` 把 tunnel 移进调用者的 netns。
 netns 里看不到 `/proc/net/tbtun/config`，把 tbtun 放进 netns 的冒烟方案
@@ -1088,7 +1086,7 @@ ssh $NEAR 'sha256sum /tmp/c*.out' | awk -v want="$FAR_SUM" '$1!=want{print "BAD"
 
 ### S4 — UDP 走 mux（`only-tcp: false`）
 
-需要两个脚本（放在 `deploy/scripts/`，随装配包分发）：
+需要两个脚本（放在 `deploy/tools/`，随装配包分发）：
 
 - `udp-echo.py`：far 上 `bind(("0.0.0.0", 18081))`，回 `echo:` + 原数据。
 - `smoke-udp.py`：near 上连 `127.0.0.1:7899`，做 SOCKS5 无认证握手；
@@ -1098,14 +1096,14 @@ ssh $NEAR 'sha256sum /tmp/c*.out' | awk -v want="$FAR_SUM" '$1!=want{print "BAD"
 far 上的 UDP echo：
 
 ```sh
-scp deploy/scripts/udp-echo.py $FAR:/tmp/udp-echo.py
+scp deploy/tools/udp-echo.py $FAR:/tmp/udp-echo.py
 ssh $FAR 'python3 /tmp/udp-echo.py >/tmp/udp-echo.log 2>&1 &'
 ```
 
 运行：
 
 ```sh
-scp deploy/scripts/smoke-udp.py $NEAR:/tmp/smoke-udp.py
+scp deploy/tools/smoke-udp.py $NEAR:/tmp/smoke-udp.py
 ssh $NEAR "python3 /tmp/smoke-udp.py 127.0.0.1 7899 $FAR_IP 18081 hello"
 ssh $NEAR "ss -tn '( dport = :19080 )' | tail -n +2 | wc -l"  # 仍期望 1
 ```

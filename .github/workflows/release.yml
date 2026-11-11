@@ -28,7 +28,7 @@ jobs:
 
       - name: Check that the tag matches the module version
         run: |
-          version=$(./scripts/mkdkmsconf.sh --version)
+          version=$(./tools/mkdkmsconf.sh --version)
           if [ "v$version" != "$GITHUB_REF_NAME" ]; then
             echo "module version is $version but the tag is $GITHUB_REF_NAME"
             exit 1
@@ -52,7 +52,7 @@ jobs:
           make host-test-san
 
       - name: Run the static invariant checks
-        run: bash review/lint.sh
+        run: bash tools/lint.sh
 
       - name: Select the newest generic header tree
         id: kernel
@@ -74,7 +74,7 @@ jobs:
       - name: Build the DKMS tarball
         run: |
           make dkms-srcs-check dkms-tarball
-          version=$(./scripts/mkdkmsconf.sh --version)
+          version=$(./tools/mkdkmsconf.sh --version)
           tar xOf dkms.tar.gz ./dkms_source_tree/dkms.conf > /tmp/dkms.conf
           grep -qx "PACKAGE_VERSION=\"$version\"" /tmp/dkms.conf
           mkdir -p build
@@ -88,7 +88,7 @@ jobs:
             -C /tmp/dkms-check
           (cd /tmp/dkms-check/dkms_source_tree &&
             make KERNEL_DIR="${{ steps.kernel.outputs.kdir }}" all)
-          ko=/tmp/dkms-check/dkms_source_tree/tbtun.ko
+          ko=/tmp/dkms-check/dkms_source_tree/build/kernel/tbtun.ko
           test -s "$ko"
           cp "$ko" "build/tbtun-${{ steps.kernel.outputs.release }}.ko"
 

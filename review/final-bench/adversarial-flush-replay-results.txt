@@ -1,5 +1,0 @@
-ADV_RESULT init.flush_midstream PASS sha=0b8f0006a7a10fe3 flush mid-transfer: app closed cleanly, ECHO_ABORT op=read errno=104 bytes=1114112
-ADV_RESULT init.echo_after_flush PASS sha=0b8f0006a7a10fe3 ECHO_OK bytes=1048576
-ADV_RESULT init.cfg_replay PASS sha=0b8f0006a7a10fe3 line-by-line config replay rc=0, transfer closed cleanly: ECHO_ABORT op=read errno=104 bytes=1114112
-ADV_RESULT init.echo_after_replay PASS sha=0b8f0006a7a10fe3 ECHO_OK bytes=1048576
-ADV_RESULT ctl.close_flush PASS sha=0b8f0006a7a10fe3 the guest survived the close flush (console: /home/kunweiz/tbtun-worktrees/final-bench/adversarial/crash-console.log)

@@ -1,0 +1,2093 @@
+/* test_parse.c - host conformance test for the /proc/net/tbtun grammar.
+ *
+ * Links src/kernel/tbt_parse.c, the same object the module is built from, so a rule
+ * that passes here is a rule the kernel enforces. No root, no module, no
+ * kernel headers, no fixture files: it runs in milliseconds and exits non-zero
+ * on the first broken rule (it keeps going, to list every failure).
+ *
+ *   make host-test
+ */
+#include <stdio.h>
+#include <string.h>
+
+#include "tbt_parse.h"
+#include "tbt_map.h"
+
+static int failures;
+static int checks;
+
+static void ok(int cond, const char *what, const char *detail)
+{
+    checks++;
+    if (cond)
+        return;
+    failures++;
+    printf("FAIL %s%s%s\n", what, detail && *detail ? ": " : "", detail ? detail : "");
+}
+
+/* Parse a copy of `text`; the parser writes NULs into the line. */
+static int parse(const char *text, struct tbt_cmd *cmd, struct tbt_parse_error *perr)
+{
+    char buf[TBT_LINE_MAX + 1];
+    static char keybuf[TBT_LINE_MAX + 1];
+    int rc;
+
+    if (strlen(text) > TBT_LINE_MAX)
+        return -1; /* the caller is testing over-long input separately */
+    strcpy(buf, text);
+    rc = tbt_parse_line(buf, cmd, perr);
+    /* perr->key may point into buf, which dies with this frame; keep a copy so
+     * the caller can report it (tbt_parse.h documents that rule). */
+    if (perr->key)
+    {
+        snprintf(keybuf, sizeof(keybuf), "%s", perr->key);
+        perr->key = keybuf;
+    }
+    return rc;
+}
+
+/* Parse `text`, render it, and compare with `want` byte for byte. */
+static void roundtrip(const char *what, const char *text, const char *want)
+{
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+    char out[TBT_LINE_MAX * 2];
+    int n;
+
+    if (parse(text, &cmd, &perr))
+    {
+        ok(0, what, "input was refused");
+        return;
+    }
+    n = tbt_render_cfg(&cmd.cfg, out, sizeof(out));
+    if (n < 0)
+    {
+        ok(0, what, "render failed");
+        return;
+    }
+    ok(cmd.kind == TBT_CMD_TUNNEL, what, "not parsed as a tunnel");
+    ok(!strcmp(out, want), what, out);
+}
+
+static void refuse(const char *what, const char *text, int want_err, const char *want_key,
+                   const char *want_why)
+{
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+    int rc = parse(text, &cmd, &perr);
+
+    ok(rc == want_err, what, rc == 0 ? "accepted" : "wrong errno");
+    if (want_key)
+        ok(perr.key && !strcmp(perr.key, want_key), what, perr.key ? perr.key : "no key");
+    if (want_why)
+        ok(perr.why && strstr(perr.why, want_why), what, perr.why ? perr.why : "no reason");
+}
+
+/* An action verb must render to exactly `want`, and that text must parse back
+ * into the same command: this is the contract the kernel-side parser and the
+ * peers renderer must meet. */
+static void action_roundtrip(const char *what, const char *text, const char *want)
+{
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+    char out[256];
+    int n;
+
+    if (parse(text, &cmd, &perr))
+    {
+        ok(0, what, "input was refused");
+        return;
+    }
+    n = tbt_render_action(&cmd, out, sizeof(out));
+    if (n < 0)
+    {
+        ok(0, what, "render failed");
+        return;
+    }
+    ok(!strcmp(out, want), what, out);
+    {
+        struct tbt_cmd again;
+        struct tbt_parse_error perr2 = { NULL, NULL };
+
+        if (parse(out, &again, &perr2))
+        {
+            ok(0, what, "rendered line was refused");
+            return;
+        }
+        ok(again.kind == cmd.kind && again.id == cmd.id && again.carrier == cmd.carrier &&
+               again.carrier_action == cmd.carrier_action && again.drop_ppm == cmd.drop_ppm &&
+               again.adaptive == cmd.adaptive && again.adaptive_set == cmd.adaptive_set &&
+               !memcmp(again.nonce, cmd.nonce, sizeof(cmd.nonce)),
+           what, "round-trip changed the action");
+    }
+}
+
+static void test_actions(void)
+{
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+    char buf[TBT_LINE_MAX * 2];
+
+    /* Canonical text, exactly as the kernel side must accept it. */
+    action_roundtrip("carrier 0 down", "carrier 0 down", "carrier 0 down\n");
+    action_roundtrip("carrier 15 down", "carrier 15 down", "carrier 15 down\n");
+    action_roundtrip("carrier index leading zeros", "carrier 03 down", "carrier 3 down\n");
+    action_roundtrip("carrier 0 up", "carrier 0 up", "carrier 0 up\n");
+    action_roundtrip("carrier 15 up", "carrier 15 up", "carrier 15 up\n");
+    action_roundtrip("carrier 3 up", "carrier 3 up", "carrier 3 up\n");
+    action_roundtrip("carrier drop_ppm 0", "carrier 3 drop_ppm 0", "carrier 3 drop_ppm 0\n");
+    action_roundtrip("carrier drop_ppm max", "carrier 3 drop_ppm 1000000", "carrier 3 drop_ppm 1000000\n");
+    action_roundtrip("drop_ppm leading zeros", "carrier 3 drop_ppm 00042", "carrier 3 drop_ppm 42\n");
+    action_roundtrip("session nonce 128-bit", "session 7 nonce=00112233445566778899aabbccddeeff",
+                     "session 7 nonce=00112233445566778899aabbccddeeff\n");
+    action_roundtrip("session nonce 64-bit pin", "session 7 nonce=0011223344556677",
+                     "session 7 nonce=00000000000000000011223344556677\n");
+    action_roundtrip("session nonce uppercase", "session 7 nonce=00112233445566778899AABBCCDDEEFF",
+                     "session 7 nonce=00112233445566778899aabbccddeeff\n");
+    action_roundtrip("session adaptive off", "session 7 adaptive=off",
+                     "session 7 adaptive=off\n");
+    action_roundtrip("session adaptive on", "session 7 adaptive=on",
+                     "session 7 adaptive=on\n");
+    ok(parse("carrier 3 down\r\n", &cmd, &perr) == 0 && cmd.kind == TBT_CMD_CARRIER,
+       "action line with CRLF", NULL);
+
+    /* Action verbs live outside the config view. */
+    parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2", &cmd, &perr);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(!strstr(buf, "carrier ") && !strstr(buf, "drop_ppm") && !strstr(buf, "session "),
+       "config render has no action verbs", buf);
+    ok(!strncmp(buf, "tunnel ", 7), "config render is a tunnel line", buf);
+    ok(tbt_render_action(&cmd, buf, sizeof(buf)) == TBT_PARSE_EINVAL,
+       "a config command is not an action", NULL);
+
+    action_roundtrip("carrier index 255", "carrier 255 down", "carrier 255 down\n");
+    refuse("carrier index 256", "carrier 256 down", TBT_PARSE_EINVAL, "index", "0..255");
+    refuse("carrier index missing", "carrier", TBT_PARSE_EINVAL, "index", "0..255");
+    refuse("carrier action missing", "carrier 3", TBT_PARSE_EINVAL, "carrier", "down, up or drop_ppm");
+    refuse("carrier action unknown", "carrier 3 side", TBT_PARSE_EINVAL, "side", "down, up or drop_ppm");
+    refuse("drop_ppm over max", "carrier 3 drop_ppm 1000001", TBT_PARSE_EINVAL, "drop_ppm", "0..1000000");
+    refuse("drop_ppm missing", "carrier 3 drop_ppm", TBT_PARSE_EINVAL, "drop_ppm", "0..1000000");
+    refuse("drop_ppm not a number", "carrier 3 drop_ppm x", TBT_PARSE_EINVAL, "drop_ppm", "0..1000000");
+    refuse("carrier trailing token", "carrier 3 down extra", TBT_PARSE_EINVAL, "carrier", "trailing");
+    refuse("carrier up trailing token", "carrier 3 up extra", TBT_PARSE_EINVAL, "carrier", "trailing");
+    refuse("drop_ppm trailing token", "carrier 3 drop_ppm 1 extra", TBT_PARSE_EINVAL, "carrier", "trailing");
+    refuse("carrier with a tunnel id", "carrier 1 3 drop_ppm 1000001", TBT_PARSE_EINVAL, "3",
+           "down, up or drop_ppm");
+    refuse("up index 256", "carrier 256 up", TBT_PARSE_EINVAL, "index", "0..255");
+    refuse("up without index", "carrier up", TBT_PARSE_EINVAL, "index", "0..255");
+
+    refuse("session id 0", "session 0 nonce=00112233445566778899aabbccddeeff", TBT_PARSE_EINVAL, "session",
+           "non-zero");
+    refuse("session without nonce", "session 7", TBT_PARSE_EINVAL, "nonce", "nonce");
+    refuse("session short nonce", "session 7 nonce=0011", TBT_PARSE_EINVAL, "nonce", "16 or 32");
+    refuse("session non-hex nonce", "session 7 nonce=zz112233445566778899aabbccddeeff", TBT_PARSE_EINVAL,
+           "nonce", "hex");
+    refuse("session unknown key", "session 7 frob=1", TBT_PARSE_EINVAL, "frob", "unknown key");
+    refuse("session adaptive maybe", "session 7 adaptive=maybe", TBT_PARSE_EINVAL,
+           "adaptive", "on or off");
+    refuse("session adaptive trailing token", "session 7 adaptive=on extra",
+           TBT_PARSE_EINVAL, "session", "trailing");
+    refuse("session trailing token", "session 7 nonce=00112233445566778899aabbccddeeff extra",
+           TBT_PARSE_EINVAL, "session", "trailing");
+
+    refuse("unknown action verb", "carrierx 1 down", TBT_PARSE_EINVAL, "carrierx", "unknown directive");
+    refuse("peers is read-only", "peers", TBT_PARSE_EINVAL, "peers", "unknown directive");
+
+    /* The debug_loss gate is visible in stats, and its refusal text names the
+     * parameter the operator must set. */
+    {
+        char line[32];
+
+        ok(tbt_render_debug_loss(false, line, sizeof(line)) == 13 && !strcmp(line, "debug_loss=0\n"),
+           "stats debug_loss=0", line);
+        ok(tbt_render_debug_loss(true, line, sizeof(line)) == 13 && !strcmp(line, "debug_loss=1\n"),
+           "stats debug_loss=1", line);
+        ok(tbt_render_debug_loss(true, line, 5) == TBT_PARSE_E2BIG, "short stats buffer refused", NULL);
+    }
+    ok(strstr(TBT_DROP_PPM_GATE_MSG, "debug_loss=1") != NULL,
+       "drop_ppm refusal names debug_loss=1", TBT_DROP_PPM_GATE_MSG);
+}
+
+/* Tunnel-level nonce=: the same 128-bit / 64-bit-pin rule as the runtime
+ * `session <id> nonce=` action, but part of the canonical config. */
+static void test_tunnel_nonce(void)
+{
+    static const char *const base_near =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2";
+    static const char *const canon_near =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+        " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+        " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+        " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+        " carrier_stall_ms=0"
+        " portblock=0-0 nonce=00112233445566778899aabbccddeeff\n";
+    char text[TBT_LINE_MAX];
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+    char out[TBT_LINE_MAX * 2];
+
+    snprintf(text, sizeof(text), "%s nonce=00112233445566778899aabbccddeeff", base_near);
+    roundtrip("tunnel nonce 128-bit", text, canon_near);
+
+    /* 16 hex digits pin the low 64 bits and render left-padded. */
+    snprintf(text, sizeof(text), "%s nonce=0011223344556677", base_near);
+    roundtrip("tunnel nonce 64-bit pin", text,
+              "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+              " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+              " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+              " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+              " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+              " carrier_stall_ms=0"
+              " portblock=0-0 nonce=00000000000000000011223344556677\n");
+
+    /* Uppercase input normalises to lowercase. */
+    snprintf(text, sizeof(text), "%s nonce=00112233445566778899AABBCCDDEEFF", base_near);
+    roundtrip("tunnel nonce uppercase", text, canon_near);
+
+    /* A far tunnel accepts the key too; it is the pinned peer nonce. */
+    roundtrip("tunnel nonce far",
+              "tunnel 2 role=far listen=10.0.0.1:1 target=10.0.0.2:2"
+              " nonce=00112233445566778899aabbccddeeff",
+              "tunnel 2 role=far listen=10.0.0.1:1 target=10.0.0.2:2"
+              " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+              " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+              " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+              " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+              " carrier_stall_ms=0"
+              " portblock=0-0 nonce=00112233445566778899aabbccddeeff\n");
+
+    /* A line without the key must not grow one. */
+    parse(base_near, &cmd, &perr);
+    tbt_render_cfg(&cmd.cfg, out, sizeof(out));
+    ok(!strstr(out, "nonce="), "no nonce= when unset", out);
+    ok(!cmd.cfg.nonce_set, "nonce_set is false by default", NULL);
+
+    /* Invalid lengths and characters are refused with -EINVAL. */
+    refuse("tunnel nonce empty",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 nonce=",
+           TBT_PARSE_EINVAL, "nonce", "empty");
+    refuse("tunnel nonce 4 hex",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 nonce=0011",
+           TBT_PARSE_EINVAL, "nonce", "16 or 32");
+    refuse("tunnel nonce 15 hex",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+           " nonce=001122334455667",
+           TBT_PARSE_EINVAL, "nonce", "16 or 32");
+    refuse("tunnel nonce 17 hex",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+           " nonce=00112233445566778",
+           TBT_PARSE_EINVAL, "nonce", "16 or 32");
+    refuse("tunnel nonce 31 hex",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+           " nonce=00112233445566778899aabbccddee",
+           TBT_PARSE_EINVAL, "nonce", "16 or 32");
+    refuse("tunnel nonce 33 hex",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+           " nonce=00112233445566778899aabbccddeeff0",
+           TBT_PARSE_EINVAL, "nonce", "16 or 32");
+    refuse("tunnel nonce 64 hex",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+           " nonce=00112233445566778899aabbccddeeff"
+           "00112233445566778899aabbccddeeff",
+           TBT_PARSE_EINVAL, "nonce", "16 or 32");
+    refuse("tunnel nonce non-hex",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+           " nonce=zz112233445566778899aabbccddeeff",
+           TBT_PARSE_EINVAL, "nonce", "hex");
+}
+
+/* --- crypto= / crypto_key= (T0 §4): default, off, key round-trip, clear,
+ * and the refusals. The canonical position is right after m=. -------------- */
+static void test_crypto_cfg(void)
+{
+    static const char *const base =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2";
+    static const char *const base_on =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 fec=on";
+    static const char *const canon_off =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+        " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+        " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+        " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+        " carrier_stall_ms=0 portblock=0-0\n";
+    static const char *const canon_on =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+        " n=4 m=1 fec=on adaptive=on mode=rlnc w=8 carriers=5 crypto=on crypto_key=-"
+        " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+        " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+        " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+        " carrier_stall_ms=0 portblock=0-0\n";
+    static const char *const canon_on_crypto_off =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+        " n=4 m=1 fec=on adaptive=on mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+        " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+        " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+        " carrier_stall_ms=0 portblock=0-0\n";
+    static const char *const key_hex =
+        "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+    char text[TBT_LINE_MAX];
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+
+    /* fec=off defaults crypto off; fec=on defaults crypto on. */
+    roundtrip("crypto default off with fec=off", base, canon_off);
+    parse(base, &cmd, &perr);
+    ok(cmd.cfg.crypto == 0, "crypto defaults off when fec=off", NULL);
+    ok(!cmd.cfg.crypto_key_set, "crypto_key is unset by default", NULL);
+
+    roundtrip("crypto default on with fec=on", base_on, canon_on);
+    parse(base_on, &cmd, &perr);
+    ok(cmd.cfg.crypto == 1, "crypto defaults on when fec=on", NULL);
+
+    /* crypto=off with fec=on is explicit and round-trips. */
+    snprintf(text, sizeof(text), "%s crypto=off", base_on);
+    roundtrip("crypto off with fec=on", text, canon_on_crypto_off);
+
+    /* crypto=on with fec=off has no data plane to hook: reject. */
+    snprintf(text, sizeof(text), "%s crypto=on", base);
+    refuse("crypto on without fec", text, TBT_PARSE_EINVAL, "crypto", "fec=on");
+    snprintf(text, sizeof(text), "%s fec=off crypto=on", base);
+    refuse("crypto on with explicit fec=off", text, TBT_PARSE_EINVAL, "crypto",
+           "fec=on");
+
+    /* crypto_key= stores 64 hex digits and renders them. */
+    snprintf(text, sizeof(text), "%s crypto_key=%s", base_on, key_hex);
+    {
+        char want[TBT_LINE_MAX * 2];
+
+        snprintf(want, sizeof(want), "%s",
+                 "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                 " n=4 m=1 fec=on adaptive=on mode=rlnc w=8 carriers=5"
+                 " crypto=on crypto_key=");
+        strncat(want, key_hex, sizeof(want) - strlen(want) - 1);
+        strncat(want,
+                " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+                " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+                " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+                " carrier_stall_ms=0 portblock=0-0\n",
+                sizeof(want) - strlen(want) - 1);
+        roundtrip("crypto_key set", text, want);
+    }
+    parse(text, &cmd, &perr);
+    ok(cmd.cfg.crypto_key_set, "crypto_key_set is true", NULL);
+    ok(cmd.cfg.crypto_key[0] == 0x00 && cmd.cfg.crypto_key[31] == 0x1f,
+       "crypto_key bytes are big-endian hex", NULL);
+
+    /* Uppercase hex is accepted and stored byte-identically. */
+    {
+        char upper[sizeof(text)];
+        char upper_key[64 + 1];
+        size_t i;
+
+        for (i = 0; key_hex[i]; i++)
+            upper_key[i] = (key_hex[i] >= 'a' && key_hex[i] <= 'f')
+                               ? (char)(key_hex[i] - 'a' + 'A')
+                               : key_hex[i];
+        upper_key[i] = '\0';
+        snprintf(upper, sizeof(upper), "%s crypto_key=%s", base_on, upper_key);
+        parse(upper, &cmd, &perr);
+        ok(cmd.cfg.crypto_key_set && cmd.cfg.crypto_key[0] == 0x00 &&
+               cmd.cfg.crypto_key[31] == 0x1f,
+           "crypto_key uppercase hex is accepted", perr.why);
+    }
+
+    /* crypto_key=- clears a previous key. */
+    snprintf(text, sizeof(text), "%s crypto_key=%s crypto_key=-", base_on,
+             key_hex);
+    roundtrip("crypto_key clear", text, canon_on);
+
+    /* Refusals. */
+    snprintf(text, sizeof(text), "%s crypto=maybe", base_on);
+    refuse("crypto value", text, TBT_PARSE_EINVAL, "crypto", "on or off");
+    snprintf(text, sizeof(text), "%s crypto=1", base_on);
+    refuse("crypto numeric", text, TBT_PARSE_EINVAL, "crypto", "on or off");
+    snprintf(text, sizeof(text), "%s crypto_key=0011", base_on);
+    refuse("crypto_key short", text, TBT_PARSE_EINVAL, "crypto_key", "64 hex");
+    snprintf(text, sizeof(text), "%s crypto_key=%s00", base_on, key_hex);
+    refuse("crypto_key long", text, TBT_PARSE_EINVAL, "crypto_key", "64 hex");
+    snprintf(text, sizeof(text), "%s crypto_key=zz%s", base_on, key_hex + 2);
+    refuse("crypto_key non-hex", text, TBT_PARSE_EINVAL, "crypto_key", "64 hex");
+    snprintf(text, sizeof(text), "%s crypto_key=", base_on);
+    refuse("crypto_key empty", text, TBT_PARSE_EINVAL, "crypto_key", "empty");
+}
+
+/* --- adaptive= (0.3.0): the control-law switch. It follows fec by default;
+ * adaptive=on needs fec=on, and the configured n/m stay as the initial shape
+ * and the upper hint (design §4.5). --------------------------------------- */
+static void test_adaptive_cfg(void)
+{
+    static const char *const base =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2";
+    static const char *const base_on =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 fec=on";
+    static const char *const canon_off =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+        " n=4 m=1 fec=on adaptive=off mode=rlnc w=8 carriers=5"
+        " crypto=on crypto_key=- dup=1 profile=http-kal keepalive=5000"
+        " drip_ms=1000 replay=8388608 tunnel_rate=0"
+        " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=67108864"
+        " tx_window_bytes=67108864 tx_retain_bytes=0 carrier_stall_ms=0"
+        " portblock=0-0\n";
+    char text[TBT_LINE_MAX];
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+
+    /* The default follows fec: off for the legacy plane, on with FEC. */
+    parse(base, &cmd, &perr);
+    ok(cmd.cfg.adaptive == 0, "adaptive defaults off with fec=off", NULL);
+    parse(base_on, &cmd, &perr);
+    ok(cmd.cfg.adaptive == 1, "adaptive defaults on with fec=on", NULL);
+
+    /* An explicit off keeps the configured pair fixed and round-trips. */
+    snprintf(text, sizeof(text), "%s adaptive=off", base_on);
+    roundtrip("adaptive off with fec=on", text, canon_off);
+    parse(text, &cmd, &perr);
+    ok(cmd.cfg.n == 4 && cmd.cfg.m == 1 && cmd.cfg.adaptive == 0,
+       "adaptive=off keeps the configured n/m", NULL);
+
+    /* Explicit n/m under adaptive are hints, not rewritten by the parser. */
+    parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=5 m=3"
+          " fec=on adaptive=on", &cmd, &perr);
+    ok(cmd.cfg.adaptive == 1 && cmd.cfg.n == 5 && cmd.cfg.m == 3,
+       "adaptive=on keeps explicit n/m as the initial hint", NULL);
+
+    refuse("adaptive on without fec",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 adaptive=on",
+           TBT_PARSE_EINVAL, "adaptive", "fec=on");
+    snprintf(text, sizeof(text), "%s adaptive=maybe", base_on);
+    refuse("adaptive value", text, TBT_PARSE_EINVAL, "adaptive", "on or off");
+    snprintf(text, sizeof(text), "%s adaptive=1", base_on);
+    refuse("adaptive numeric", text, TBT_PARSE_EINVAL, "adaptive", "on or off");
+}
+
+/* --- stats prefix: a key=value parser, so a stray space or a missing '='
+ * in a future counter fails this test rather than an operator's script. ---- */
+
+struct kv_pair
+{
+    char key[32];
+    u64 val;
+};
+
+/* Parse `key=value\n` lines: exactly one '=' per line, no spaces or tabs in
+ * the key, a non-empty decimal value, and a newline after every line. */
+static int parse_kv_block(const char *text, struct kv_pair *out, size_t max, size_t *count)
+{
+    const char *p = text;
+    size_t n = 0;
+
+    while (*p)
+    {
+        const char *eol = strchr(p, '\n');
+        const char *eq;
+        size_t klen, vlen, i;
+        u64 v = 0;
+
+        if (!eol)
+            return -1;
+        eq = memchr(p, '=', (size_t)(eol - p));
+        if (!eq || eq == p)
+            return -1;
+        klen = (size_t)(eq - p);
+        vlen = (size_t)(eol - eq - 1);
+        if (!vlen || klen >= sizeof(out[0].key) || n == max)
+            return -1;
+        for (i = 0; i < klen; i++)
+        {
+            if (p[i] == ' ' || p[i] == '\t')
+                return -1;
+            out[n].key[i] = p[i];
+}
+        out[n].key[klen] = '\0';
+        for (i = 0; i < vlen; i++)
+        {
+            if (eq[1 + i] < '0' || eq[1 + i] > '9')
+                return -1;
+            v = v * 10 + (u64)(eq[1 + i] - '0');
+}
+        out[n].val = v;
+        n++;
+        p = eol + 1;
+    }
+    *count = n;
+    return 0;
+}
+
+static size_t count_words(const char *s)
+{
+    size_t n = 0;
+
+    while (*s)
+    {
+        while (*s == ' ')
+            s++;
+        if (!*s)
+            break;
+        n++;
+        while (*s && *s != ' ')
+            s++;
+    }
+    return n;
+}
+
+static size_t count_lines(const char *s)
+{
+    size_t n = 0;
+
+    for (; *s; s++)
+        if (*s == '\n')
+            n++;
+    return n;
+}
+
+/* 24d. dev=: the near carrier bind interface. Canonical order is after
+ * portblock and before nonce/srcaddrs. */
+static void test_dev_cfg(void)
+{
+    static const char *const base =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2";
+    static const char *const base_canon =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+        " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " dup=1 profile=http-kal keepalive=5000"
+        " drip_ms=1000 replay=8388608 tunnel_rate=0"
+        " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=67108864"
+        " tx_window_bytes=67108864 tx_retain_bytes=0 carrier_stall_ms=0"
+        " portblock=0-0";
+    char text[TBT_LINE_MAX], want[TBT_LINE_MAX];
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+
+    snprintf(text, sizeof(text), "%s dev=eth0", base);
+    snprintf(want, sizeof(want), "%s dev=eth0\n", base_canon);
+    roundtrip("dev round-trip", text, want);
+
+    /* 15 bytes is the longest name IFNAMSIZ can carry with its NUL. */
+    snprintf(text, sizeof(text), "%s dev=abcdefghijklmno", base);
+    ok(!parse(text, &cmd, &perr), "dev 15 bytes accepted", NULL);
+    ok(cmd.cfg.dev_set && !strcmp(cmd.cfg.dev, "abcdefghijklmno"),
+       "dev 15 bytes stored", cmd.cfg.dev);
+
+    snprintf(text, sizeof(text), "%s dev=abcdefghijklmnop", base);
+    refuse("dev 16 bytes refused", text, TBT_PARSE_EINVAL, "dev",
+           "interface name");
+    snprintf(text, sizeof(text), "%s dev=", base);
+    refuse("dev empty refused", text, TBT_PARSE_EINVAL, "dev", "empty value");
+    snprintf(text, sizeof(text), "%s dev=eth 0", base);
+    refuse("dev with space refused", text, TBT_PARSE_EINVAL, NULL, NULL);
+    snprintf(text, sizeof(text), "%s dev=eth\0010", base);
+    refuse("dev with control refused", text, TBT_PARSE_EINVAL, "dev",
+           "interface name");
+    snprintf(text, sizeof(text), "%s dev=eth/0", base);
+    refuse("dev with slash refused", text, TBT_PARSE_EINVAL, "dev",
+           "interface name");
+}
+
+/* map=listen:target[,listen:target...]: the parser, the canonical render, the
+ * near-side listen conflict rules, and the far-side role (listen half is
+ * ignored, target half is the allow list). */
+static void test_map_cfg(void)
+{
+    static const char *const base_near =
+        "tunnel 1 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443";
+    static const char *const suffix =
+        " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+        " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+        " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+        " carrier_stall_ms=0"
+        " portblock=0-0\n";
+    char text[TBT_LINE_MAX], want[TBT_LINE_MAX * 2], list[160];
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+    int i;
+
+    snprintf(text, sizeof(text), "%s map=9001:80,9002:443", base_near);
+    snprintf(want, sizeof(want),
+             "tunnel 1 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
+             " map=9001:80,9002:443%s", suffix);
+    roundtrip("near map list", text, want);
+    parse(text, &cmd, &perr);
+    ok(cmd.cfg.nmap == 2 && cmd.cfg.maps[0].listen_port == 9001 &&
+           cmd.cfg.maps[0].target_port == 80 &&
+           cmd.cfg.maps[1].listen_port == 9002 &&
+           cmd.cfg.maps[1].target_port == 443,
+       "near map list is stored in order", NULL);
+
+    /* A near target= names slot 0's port (the address is filler) and must
+     * survive the canonical render, or a reload would drop it. */
+    roundtrip("near explicit slot 0 target",
+              "tunnel 1 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
+              " target=10.0.0.2:80 map=9001:81",
+              "tunnel 1 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
+              " target=10.0.0.2:80 map=9001:81"
+              " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+              " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+              " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+              " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+              " carrier_stall_ms=0"
+              " portblock=0-0\n");
+    parse("tunnel 1 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
+          " target=10.0.0.2:80",
+          &cmd, &perr);
+    ok(tbt_map_target_for_slot(&cmd.cfg, 0) == 80,
+       "near target= resolves slot 0", NULL);
+
+    roundtrip("far map list",
+              "tunnel 2 role=far listen=10.0.0.1:7000 target=10.0.0.2:8080"
+              " map=9001:80,9002:443",
+              "tunnel 2 role=far listen=10.0.0.1:7000 target=10.0.0.2:8080"
+              " map=9001:80,9002:443"
+              " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+              " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+              " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+              " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+              " carrier_stall_ms=0"
+              " portblock=0-0\n");
+
+    /* A far tunnel ignores the listen half, so the same two listen numbers
+     * are legal there and must still round-trip. */
+    roundtrip("far duplicate map listen ports",
+              "tunnel 2 role=far listen=10.0.0.1:7000 target=10.0.0.2:8080"
+              " map=9001:80,9001:81",
+              "tunnel 2 role=far listen=10.0.0.1:7000 target=10.0.0.2:8080"
+              " map=9001:80,9001:81"
+              " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+              " dup=1 profile=http-kal keepalive=5000 drip_ms=1000"
+              " replay=8388608 tunnel_rate=0 max_inflate=2.000 hole_budget_ms=0"
+              " rx_reorder_bytes=67108864 tx_window_bytes=67108864 tx_retain_bytes=0"
+              " carrier_stall_ms=0"
+              " portblock=0-0\n");
+
+    /* A repeated map= replaces the earlier list, like every other key. */
+    snprintf(text, sizeof(text), "%s map=9001:80 map=9002:443", base_near);
+    parse(text, &cmd, &perr);
+    ok(cmd.cfg.nmap == 1 && cmd.cfg.maps[0].listen_port == 9002 &&
+           cmd.cfg.maps[0].target_port == 443,
+       "a repeated map= replaces the list", NULL);
+
+    snprintf(text, sizeof(text), "%s map=9000:80", base_near);
+    refuse("map listen collides with listen=", text,
+           TBT_PARSE_EINVAL, "map", "collides");
+
+    snprintf(text, sizeof(text), "%s map=9001:80,9001:81", base_near);
+    refuse("duplicate map listen port", text,
+           TBT_PARSE_EINVAL, "map", "duplicate");
+
+    snprintf(text, sizeof(text), "%s map=9001:0", base_near);
+    refuse("map target port 0", text, TBT_PARSE_EINVAL, "map", "1..65535");
+
+    snprintf(text, sizeof(text), "%s map=0:80", base_near);
+    refuse("map listen port 0", text, TBT_PARSE_EINVAL, "map", "1..65535");
+
+    snprintf(text, sizeof(text), "%s map=9001", base_near);
+    refuse("map entry without a colon", text,
+           TBT_PARSE_EINVAL, "map", "listen_port:target_port");
+
+    snprintf(text, sizeof(text), "%s map=9001:80,", base_near);
+    refuse("map trailing comma", text, TBT_PARSE_EINVAL, "map", "empty map entry");
+
+    snprintf(text, sizeof(text), "%s map=9001:80:1", base_near);
+    refuse("map entry with two colons", text,
+           TBT_PARSE_EINVAL, "map", "listen_port:target_port");
+
+    /* TBT_MAP_MAX includes slot 0, so 7 extra entries fit and the 8th is
+     * refused before it can reach the listener array. */
+    list[0] = '\0';
+    for (i = 0; i < TBT_MAP_MAX; i++)
+    {
+        char one[24];
+
+        snprintf(one, sizeof(one), "%s%u:1", i ? "," : "", 9001 + i);
+        strncat(list, one, sizeof(list) - strlen(list) - 1);
+    }
+    snprintf(text, sizeof(text), "%s map=%s", base_near, list);
+    refuse("too many map entries", text, TBT_PARSE_EINVAL, "map", "too many");
+
+    list[0] = '\0';
+    for (i = 0; i < 40; i++)
+        strncat(list, "1:1,", sizeof(list) - strlen(list) - 1);
+    snprintf(text, sizeof(text), "%s map=%s", base_near, list);
+    refuse("map list too long", text, TBT_PARSE_EINVAL, "map", "too long");
+}
+
+static void test_stats_prefix(void)
+{
+    static const char *const want[] = { "debug_loss", "gaps_total", "streams_total" };
+    char text[128], again[128];
+    struct kv_pair kv[8];
+    size_t n = 0, i, off = 0;
+
+    ok(tbt_render_stats_prefix(true, 7, 42, text, sizeof(text)) > 0, "stats prefix renders", NULL);
+    ok(!strcmp(text, "debug_loss=1\ngaps_total=7\nstreams_total=42\n"),
+       "stats prefix is key=value, debug_loss first, counters sorted", text);
+    ok(count_lines(text) == 3, "stats prefix is exactly three lines", NULL);
+    ok(parse_kv_block(text, kv, 8, &n) == 0, "stats prefix parses as key=value", NULL);
+    ok(n == 3, "stats prefix has three keys", NULL);
+    for (i = 0; i < n && i < 3; i++)
+        ok(!strcmp(kv[i].key, want[i]), "stats key order", kv[i].key);
+    for (i = 0; i < n; i++)
+        off += (size_t)snprintf(again + off, sizeof(again) - off, "%s=%llu\n", kv[i].key,
+                                (unsigned long long)kv[i].val);
+    ok(!strcmp(again, text), "stats prefix round-trips", again);
+    ok(tbt_render_stats_prefix(false, 0, 0, text, 8) == TBT_PARSE_E2BIG,
+       "short stats buffer refused", NULL);
+
+    /* A stray space, a missing '=', or an empty value is a contract break. */
+    ok(parse_kv_block("gaps_total 7\n", kv, 8, &n) != 0, "space-separated counter rejected", NULL);
+    ok(parse_kv_block("gaps_total7\n", kv, 8, &n) != 0, "missing = rejected", NULL);
+    ok(parse_kv_block("gaps_total=\n", kv, 8, &n) != 0, "empty value rejected", NULL);
+}
+
+/* A valid tunnel line padded with spaces to exactly `len` content bytes.
+ * Trailing spaces are between-token whitespace, so the line stays valid. */
+static void make_line(char *out, size_t len)
+{
+    static const char base[] = "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2";
+    size_t blen = strlen(base);
+
+    memcpy(out, base, blen);
+    memset(out + blen, ' ', len - blen);
+    out[len] = '\0';
+}
+
+static void test_line_limit(void)
+{
+    char line[TBT_LINE_MAX + 2];
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr;
+
+    make_line(line, TBT_LINE_MAX - 1);
+    ok(tbt_parse_line(line, &cmd, &perr) == 0 && cmd.kind == TBT_CMD_TUNNEL,
+       "line at TBT_LINE_MAX-1 accepted", NULL);
+    make_line(line, TBT_LINE_MAX);
+    ok(tbt_parse_line(line, &cmd, &perr) == TBT_PARSE_E2BIG, "line at TBT_LINE_MAX refused", NULL);
+    make_line(line, TBT_LINE_MAX + 1);
+    ok(tbt_parse_line(line, &cmd, &perr) == TBT_PARSE_E2BIG, "line at TBT_LINE_MAX+1 refused", NULL);
+}
+
+/* Every key at its maximum, so the canonical line is as long as the grammar
+ * allows. */
+static void maximal_cfg(struct tbt_cfg *c, u64 id)
+{
+    int i;
+
+    memset(c, 0, sizeof(*c));
+    c->id = id;
+    c->role = TBT_ROLE_FAR;
+    /* All-ones IPv6 is the longest literal the grammar accepts, so the
+     * maximal line stays maximal after the family was added. */
+    c->listen.family = TBT_AF_INET6;
+    memset(c->listen.u.v6, 0xff, sizeof(c->listen.u.v6));
+    c->listen_port = (__be16)0xffff;
+    c->peer.family = TBT_AF_INET6;
+    memset(c->peer.u.v6, 0xff, sizeof(c->peer.u.v6));
+    c->peer_port = (__be16)0xffff;
+    c->target.family = TBT_AF_INET6;
+    memset(c->target.u.v6, 0xff, sizeof(c->target.u.v6));
+    c->target_port = (__be16)0xffff;
+    c->nmap = TBT_MAP_MAX - 1;
+    for (i = 0; i < c->nmap; i++)
+    {
+        c->maps[i].listen_port = 65535;
+        c->maps[i].target_port = 65535;
+    }
+    /* The widest legal line: a full 256-carrier FEC session (n + m = 256,
+     * m >= 1), the longest mode name, and the largest window it accepts. */
+    c->n = TBT_MAX_CARRIERS_LIMIT - 1;
+    c->m = 1;
+    c->fec = 1;
+    c->mode = 3; /* sc-ldpc, the longest name */
+    c->w = 512;
+    c->carriers = TBT_MAX_CARRIERS_LIMIT;
+    c->dup = 3;
+    c->keepalive_ms = 86400000;
+    c->portblock_lo = 65535;
+    c->portblock_hi = 65535;
+    c->profile = 2; /* http-kal-drip, the longest name */
+    c->drip_ms = 3600000;
+    c->replay = 268435456;
+    c->tunnel_rate = 0xffffffffu;
+    c->max_inflate_milli = 1000000;
+    c->hole_budget_ms = 60000;
+    c->rx_reorder_bytes = 268435456;
+    c->tx_window_bytes = 268435456; /* equal to the reorder budget is legal */
+    c->tx_retain_bytes = 0xffffffffu;
+    c->carrier_stall_ms = 3600000;
+    c->nsrc = TBT_SRC_MAX;
+    for (i = 0; i < TBT_SRC_MAX; i++)
+    {
+        c->srcaddrs[i].family = TBT_AF_INET6;
+        memset(c->srcaddrs[i].u.v6, 0xff, sizeof(c->srcaddrs[i].u.v6));
+    }
+    c->nonce_set = true;
+    memset(c->nonce, 0xa5, sizeof(c->nonce));
+}
+
+static void test_maximal_lines(void)
+{
+    struct tbt_cfg cfg;
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr;
+    char line[TBT_LINE_MAX * 2], again[TBT_LINE_MAX * 2];
+    int n, n2;
+
+    maximal_cfg(&cfg, ~(u64)0);
+    n = tbt_render_cfg(&cfg, line, sizeof(line));
+    ok(n > 0 && n < TBT_LINE_MAX, "maximal render fits TBT_LINE_MAX", NULL);
+    ok(parse(line, &cmd, &perr) == 0 && cmd.kind == TBT_CMD_TUNNEL, "maximal line parses", NULL);
+    n2 = tbt_render_cfg(&cmd.cfg, again, sizeof(again));
+    ok(n2 == n && !strcmp(line, again), "maximal line round-trips", again);
+
+    /* Three maximal lines in one config block, as `cat config` would emit. */
+    {
+        char block[3 * TBT_LINE_MAX];
+        size_t off = 0;
+        int k, parsed = 0;
+        char *p, *nl;
+
+        memset(block, 0, sizeof(block));
+        for (k = 0; k < 3; k++)
+        {
+            maximal_cfg(&cfg, ~(u64)0 - (u64)k);
+            n = tbt_render_cfg(&cfg, block + off, sizeof(block) - off);
+            if (n <= 0)
+                break;
+            off += (size_t)n;
+        }
+        ok(k == 3, "three maximal lines render", NULL);
+        for (p = block; (nl = strchr(p, '\n')) != NULL; p = nl + 1)
+        {
+            *nl = '\0';
+            if (parse(p, &cmd, &perr) == 0 && cmd.kind == TBT_CMD_TUNNEL)
+                parsed++;
+        }
+        ok(parsed == 3, "three maximal lines parse back", NULL);
+    }
+}
+
+/* The canonical text must be a fixed point for every role/profile and for
+ * each optional key present or absent. The parser is pure: it takes no
+ * task/net argument, so the release-path flush (where `current` may be
+ * unusable) cannot fault inside it. */
+static void test_config_matrix(void)
+{
+    static const char *const profiles[] = { "http-kal", "http-kal-drip", "raw" };
+    static const char *const near_base =
+        "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2";
+    static const char *const far_base =
+        "tunnel 1 role=far listen=10.0.0.1:1 target=10.0.0.2:2";
+    int r, p, mask;
+
+    for (r = 0; r < 2; r++)
+    {
+        for (p = 0; p < 3; p++)
+        {
+            for (mask = 0; mask < 2; mask++)
+            {
+                struct tbt_cmd cmd, again;
+                struct tbt_parse_error perr = { NULL, NULL };
+                char line[TBT_LINE_MAX], text[TBT_LINE_MAX], twice[TBT_LINE_MAX];
+                int n, n2;
+
+                snprintf(line, sizeof(line), "%s profile=%s", r ? far_base : near_base,
+                         profiles[p]);
+                if (parse(line, &cmd, &perr))
+                {
+                    ok(0, "config matrix: base line parses", line);
+                    continue;
+                }
+                if (mask & 1)
+                {
+                    cmd.cfg.nsrc = 2;
+                    cmd.cfg.srcaddrs[0] = cmd.cfg.listen;
+                    cmd.cfg.srcaddrs[1] = r ? cmd.cfg.target : cmd.cfg.peer;
+                }
+                n = tbt_render_cfg(&cmd.cfg, text, sizeof(text));
+                if (n <= 0)
+                {
+                    ok(0, "config matrix: render", NULL);
+                    continue;
+                }
+                if (r)
+                    ok(strstr(text, " peer=") == NULL, "far line renders no peer", text);
+                else
+                    ok(strstr(text, " peer=") != NULL, "near line renders peer", text);
+                if (parse(text, &again, &perr))
+                {
+                    ok(0, "config matrix: rendered line parses", text);
+                    continue;
+                }
+                n2 = tbt_render_cfg(&again.cfg, twice, sizeof(twice));
+                ok(n2 == n && !strcmp(text, twice), "config matrix round-trip", text);
+            }
+        }
+    }
+}
+
+/* Parse, render, and check one canonical substring; then parse the rendered
+ * line and require a fixed point. This is the IPv6 contract: the canonical
+ * spelling is the compressed one, and it parses back to the same bytes. */
+static void ipv6_roundtrip(const char *what, const char *text, const char *want)
+{
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+    char out[TBT_LINE_MAX * 2], again[TBT_LINE_MAX * 2];
+    int n, n2;
+
+    if (parse(text, &cmd, &perr))
+    {
+        ok(0, what, perr.why ? perr.why : "input was refused");
+        return;
+    }
+    n = tbt_render_cfg(&cmd.cfg, out, sizeof(out));
+    if (n <= 0)
+    {
+        ok(0, what, "render failed");
+        return;
+    }
+    ok(strstr(out, want) != NULL, what, out);
+    if (parse(out, &cmd, &perr))
+    {
+        ok(0, what, "rendered line was refused");
+        return;
+    }
+    n2 = tbt_render_cfg(&cmd.cfg, again, sizeof(again));
+    ok(n2 == n && !strcmp(out, again), what, again);
+}
+
+static void test_ipv6_cfg(void)
+{
+    /* A near side may mix families: the application-facing listener is IPv6
+     * while the carrier path to the peer is IPv4. */
+    ipv6_roundtrip("IPv6 near listen and peer",
+                   "tunnel 1 role=near listen=[2001:db8::1]:9000 peer=[2001:db8::2]:443",
+                   "listen=[2001:db8::1]:9000 peer=[2001:db8::2]:443");
+    ipv6_roundtrip("IPv6 near listener with IPv4 peer",
+                   "tunnel 2 role=near listen=[::]:9000 peer=10.0.0.2:443",
+                   "listen=[::]:9000 peer=10.0.0.2:443");
+    ipv6_roundtrip("IPv4 listener with IPv6 target",
+                   "tunnel 3 role=far listen=0.0.0.0:9000 target=[::1]:5201",
+                   "listen=0.0.0.0:9000 target=[::1]:5201");
+    ipv6_roundtrip("IPv6 far target and anchor",
+                   "tunnel 4 role=far listen=[::]:9000 target=[2001:db8::5]:80"
+                   " peer=[2001:db8::9]:1",
+                   "target=[2001:db8::5]:80 peer=[2001:db8::9]:1");
+    /* RFC 5952 compression and lowercase are the canonical spelling. */
+    ipv6_roundtrip("IPv6 literal is compressed",
+                   "tunnel 5 role=far listen=[2001:0DB8:0000:0000:0000:0000:0000:0001]:9000"
+                   " target=[::1]:80",
+                   "listen=[2001:db8::1]:9000");
+    ipv6_roundtrip("IPv4-mapped literal keeps its form",
+                   "tunnel 6 role=far listen=[::ffff:192.0.2.1]:9000 target=[::]:80",
+                   "listen=[::ffff:192.0.2.1]:9000");
+    ipv6_roundtrip("IPv6 srcaddrs and map",
+                   "tunnel 7 role=near listen=[::1]:9000 peer=[::1]:443"
+                   " srcaddrs=2001:db8::7,[::1] map=9001:80,9002:81",
+                   "srcaddrs=2001:db8::7,::1");
+
+    /* A source address of the other family cannot bind the peer's socket. */
+    refuse("IPv6 srcaddrs with IPv4 peer",
+           "tunnel 8 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
+           " srcaddrs=2001:db8::7",
+           TBT_PARSE_EINVAL, "srcaddrs", "address family");
+
+    /* Malformed IPv6 is refused with a reason, never a silent fallback. */
+    refuse("unbracketed IPv6", "tunnel 9 role=near listen=::1:9000 peer=10.0.0.2:443",
+           TBT_PARSE_EINVAL, NULL, "bracketed");
+    refuse("IPv6 without a port", "tunnel 9 role=near listen=[::1] peer=10.0.0.2:443",
+           TBT_PARSE_EINVAL, NULL, "port");
+    refuse("IPv6 port zero", "tunnel 9 role=near listen=[::1]:0 peer=10.0.0.2:443",
+           TBT_PARSE_EINVAL, NULL, "1..65535");
+    refuse("IPv6 double ::", "tunnel 9 role=near listen=[1::2::3]:80 peer=10.0.0.2:443",
+           TBT_PARSE_EINVAL, NULL, "more than one");
+    refuse("IPv6 :: with eight groups",
+           "tunnel 9 role=near listen=[1:2:3:4:5:6:7:8::]:80 peer=10.0.0.2:443",
+           TBT_PARSE_EINVAL, NULL, "zero group");
+    refuse("IPv6 too many groups",
+           "tunnel 9 role=near listen=[1:2:3:4:5:6:7:8:9]:80 peer=10.0.0.2:443",
+           TBT_PARSE_EINVAL, NULL, "invalid IPv6 group");
+    refuse("IPv6 missing bracket", "tunnel 9 role=near listen=[::1:9000 peer=10.0.0.2:443",
+           TBT_PARSE_EINVAL, NULL, "]");
+    refuse("IPv6 bad hex", "tunnel 9 role=near listen=[gggg::1]:80 peer=10.0.0.2:443",
+           TBT_PARSE_EINVAL, NULL, "invalid IPv6 group");
+}
+
+static void expect_addr(const char *what, const char *literal, const char *want)
+{
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+    char line[TBT_LINE_MAX], out[TBT_ADDR_STRLEN];
+
+    snprintf(line, sizeof(line), "tunnel 1 role=far listen=%s:1 target=%s:2",
+             literal, literal);
+    if (parse(line, &cmd, &perr))
+    {
+        ok(0, what, perr.why ? perr.why : "input was refused");
+        return;
+    }
+    tbt_addr_format(&cmd.cfg.listen, out, sizeof(out));
+    ok(!strcmp(out, want), what, out);
+}
+
+static void test_ipv6_format(void)
+{
+    char ep[TBT_ENDPOINT_STRLEN];
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+
+    expect_addr("format ::1", "[::1]", "::1");
+    expect_addr("format 2001:db8::1", "[2001:db8::1]", "2001:db8::1");
+    expect_addr("format expands zero groups",
+                "[2001:0db8:0000:0000:0000:0000:0000:0001]", "2001:db8::1");
+    expect_addr("format all zero", "[0:0:0:0:0:0:0:0]", "::");
+    expect_addr("format full", "[1:2:3:4:5:6:7:8]", "1:2:3:4:5:6:7:8");
+    expect_addr("format single zero group", "[2001:db8:0:1:1:1:1:1]",
+                "2001:db8:0:1:1:1:1:1");
+    expect_addr("format longest zero run", "[1:0:0:2:0:0:0:3]", "1:0:0:2::3");
+    expect_addr("format leftmost tie", "[2001:db8:0:0:1:0:0:1]",
+                "2001:db8::1:0:0:1");
+    expect_addr("format IPv4-mapped", "[::ffff:192.0.2.1]", "::ffff:192.0.2.1");
+
+    /* The endpoint form is what config and the Host header share. */
+    if (!parse("tunnel 1 role=near listen=[2001:db8::1]:9000 peer=[::1]:443", &cmd, &perr))
+    {
+        tbt_endpoint_format(&cmd.cfg.listen, cmd.cfg.listen_port, ep, sizeof(ep));
+        ok(!strcmp(ep, "[2001:db8::1]:9000"), "endpoint formats IPv6", ep);
+        tbt_endpoint_format(&cmd.cfg.peer, cmd.cfg.peer_port, ep, sizeof(ep));
+        ok(!strcmp(ep, "[::1]:443"), "endpoint formats compressed IPv6", ep);
+    }
+    else
+        ok(0, "endpoint test parses", perr.why);
+
+    /* IPv4 must not gain brackets: the canonical line is unchanged. */
+    if (!parse("tunnel 1 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443", &cmd, &perr))
+    {
+        tbt_endpoint_format(&cmd.cfg.listen, cmd.cfg.listen_port, ep, sizeof(ep));
+        ok(!strcmp(ep, "10.0.0.1:9000"), "endpoint keeps IPv4 form", ep);
+    }
+    else
+        ok(0, "IPv4 endpoint test parses", perr.why);
+}
+
+static void test_far_peer(void)
+{
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr = { NULL, NULL };
+    char buf[TBT_LINE_MAX * 2];
+
+    /* peer=0.0.0.0:0 is the old far render and is not parseable: port 0 is
+     * refused, with the port named. */
+    refuse("far with peer port 0",
+           "tunnel 9 role=far listen=203.0.113.9:443 target=127.0.0.1:7000 peer=0.0.0.0:0",
+           TBT_PARSE_EINVAL, NULL, "port");
+    /* A far line that does carry a valid peer parses and renders it: the
+     * address is the only near source allowed to join the session. */
+    ok(parse("tunnel 9 role=far listen=203.0.113.9:443 target=127.0.0.1:7000"
+             " peer=198.51.100.7:8443",
+             &cmd, &perr) == 0,
+       "far line with a valid peer parses", NULL);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(strstr(buf, " peer=198.51.100.7:8443") != NULL,
+       "far line renders its peer anchor", buf);
+    /* Without peer= the canonical far line stays anchor-free. */
+    ok(parse("tunnel 9 role=far listen=203.0.113.9:443 target=127.0.0.1:7000",
+             &cmd, &perr) == 0,
+       "far line without a peer parses", NULL);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(strstr(buf, " peer=") == NULL, "far line without a peer omits it", buf);
+}
+
+/* ------------------------------------------------------------------------- */
+/* /proc/net/tbtun/http frozen text format (docs/http-profile-integration.md):
+ *   req=<escaped>, resp=<escaped>, first_chunk=<escaped>, req_len=<n>,
+ *   resp_len=<n>
+ * in that order. \r and \n are two-character escapes, a non-printable byte is
+ * \xNN, and a literal backslash is \x5c. A partial snapshot is NEED_MORE
+ * (SKIP), never an error; malformed text is PROTO. */
+
+enum http_block_status
+{
+    HTTP_BLOCK_OK = 0,
+    HTTP_BLOCK_NEED_MORE,
+    HTTP_BLOCK_PROTO,
+};
+
+struct http_block
+{
+    u8 req[1024], resp[1024], first[512];
+    size_t req_len, resp_len, first_len;
+    size_t req_declared, resp_declared;
+};
+
+static int http_hexval(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+static int unescape_value(const char *s, size_t n, u8 *out, size_t cap, size_t *out_len)
+{
+    size_t o = 0, i;
+
+    for (i = 0; i < n; i++)
+    {
+        unsigned char c = (unsigned char)s[i];
+
+        if (c != '\\')
+        {
+            if (c < 0x20 || c > 0x7e || o == cap)
+                return -1;
+            out[o++] = c;
+            continue;
+        }
+        i++;
+        if (i >= n)
+            return -1;
+        if (s[i] == 'r')
+            c = '\r';
+        else if (s[i] == 'n')
+            c = '\n';
+        else if (s[i] == '\\')
+            c = '\\';
+        else if (s[i] == 'x')
+        {
+            int hi, lo;
+
+            if (i + 2 >= n)
+                return -1;
+            hi = http_hexval(s[i + 1]);
+            lo = http_hexval(s[i + 2]);
+            if (hi < 0 || lo < 0)
+                return -1;
+            c = (unsigned char)(hi * 16 + lo);
+            i += 2;
+        }
+        else
+        {
+            return -1;
+        }
+        if (o == cap)
+            return -1;
+        out[o++] = c;
+    }
+    *out_len = o;
+    return 0;
+}
+
+static int parse_decimal(const char *s, size_t n, size_t *out)
+{
+    size_t v = 0, i;
+
+    if (!n)
+        return -1;
+    for (i = 0; i < n; i++)
+    {
+        if (s[i] < '0' || s[i] > '9')
+            return -1;
+        v = v * 10 + (size_t)(s[i] - '0');
+        if (v > (1u << 20))
+            return -1;
+    }
+    *out = v;
+    return 0;
+}
+
+static int parse_http_block(const char *text, struct http_block *b)
+{
+    static const char *const names[] = { "req", "resp", "first_chunk", "req_len", "resp_len" };
+    size_t expect = 0;
+    const char *p = text;
+
+    memset(b, 0, sizeof(*b));
+    while (*p)
+    {
+        const char *nl = strchr(p, '\n');
+        const char *eq;
+        size_t len, name_len, value_len;
+
+        if (!nl)
+            return HTTP_BLOCK_PROTO;
+        len = (size_t)(nl - p);
+        if (len && p[len - 1] == '\r')
+            len--;
+        eq = memchr(p, '=', len);
+        if (!eq || eq == p)
+            return HTTP_BLOCK_PROTO;
+        name_len = (size_t)(eq - p);
+        value_len = len - name_len - 1;
+        if (expect >= sizeof(names) / sizeof(names[0]) || name_len != strlen(names[expect]) ||
+            memcmp(p, names[expect], name_len) != 0)
+            return HTTP_BLOCK_PROTO; /* unknown, duplicate or out of order */
+        switch (expect)
+        {
+        case 0:
+            if (unescape_value(eq + 1, value_len, b->req, sizeof(b->req), &b->req_len))
+                return HTTP_BLOCK_PROTO;
+            break;
+        case 1:
+            if (unescape_value(eq + 1, value_len, b->resp, sizeof(b->resp), &b->resp_len))
+                return HTTP_BLOCK_PROTO;
+            break;
+        case 2:
+            if (unescape_value(eq + 1, value_len, b->first, sizeof(b->first), &b->first_len))
+                return HTTP_BLOCK_PROTO;
+            break;
+        case 3:
+            if (parse_decimal(eq + 1, value_len, &b->req_declared))
+                return HTTP_BLOCK_PROTO;
+            break;
+        case 4:
+            if (parse_decimal(eq + 1, value_len, &b->resp_declared))
+                return HTTP_BLOCK_PROTO;
+            break;
+        }
+        expect++;
+        p = nl + 1;
+    }
+    return expect == 5 ? HTTP_BLOCK_OK : HTTP_BLOCK_NEED_MORE;
+}
+
+static size_t escape_value(char *out, size_t cap, const u8 *in, size_t n)
+{
+    static const char hex[] = "0123456789abcdef";
+    size_t o = 0, i;
+
+    for (i = 0; i < n; i++)
+    {
+        char tmp[4];
+        const char *rep;
+        size_t rl;
+
+        if (in[i] == '\r')
+        {
+            rep = "\\r";
+            rl = 2;
+        }
+        else if (in[i] == '\n')
+        {
+            rep = "\\n";
+            rl = 2;
+        }
+        else if (in[i] == '\\')
+        {
+            rep = "\\x5c";
+            rl = 4;
+        }
+        else if (in[i] < 0x20 || in[i] > 0x7e)
+        {
+            tmp[0] = '\\';
+            tmp[1] = 'x';
+            tmp[2] = hex[in[i] >> 4];
+            tmp[3] = hex[in[i] & 0x0f];
+            rep = tmp;
+            rl = 4;
+        }
+        else
+        {
+            tmp[0] = (char)in[i];
+            rep = tmp;
+            rl = 1;
+        }
+        if (o + rl >= cap)
+            return 0;
+        memcpy(out + o, rep, rl);
+        o += rl;
+    }
+    out[o] = '\0';
+    return o;
+}
+
+static size_t make_http_block(char *out, size_t cap, const u8 *req, size_t req_len,
+                              const u8 *resp, size_t resp_len, const u8 *first, size_t first_len)
+{
+    char er[4096], ep[4096], ef[1024];
+    size_t nr, np, nf;
+
+    nr = escape_value(er, sizeof(er), req, req_len);
+    np = escape_value(ep, sizeof(ep), resp, resp_len);
+    nf = escape_value(ef, sizeof(ef), first, first_len);
+    if (!nr || !np || !nf)
+        return 0;
+    return (size_t)snprintf(out, cap, "req=%s\nresp=%s\nfirst_chunk=%s\nreq_len=%zu\nresp_len=%zu\n",
+                            er, ep, ef, req_len, resp_len);
+}
+
+/* A realistic 512-byte request header block, ending in CRLFCRLF, with one
+ * literal backslash so the \x5c rule is exercised. */
+static size_t make_http_req(u8 *out, size_t cap)
+{
+    static const char head[] = "POST /api/v2/upload HTTP/1.1\r\nHost: 203.0.113.9\r\n";
+    size_t n = sizeof(head) - 1, pad;
+
+    if (cap < 512)
+        return 0;
+    memcpy(out, head, n);
+    memcpy(out + n, "X-Pad: ", 7);
+    n += 7;
+    pad = 512 - n - 4;
+    memset(out + n, 'a', pad);
+    n += pad;
+    out[n - 3] = '\\';
+    memcpy(out + n, "\r\n\r\n", 4);
+    return n + 4;
+}
+
+static void test_http_contract(void)
+{
+    static const char resp_text[] =
+        "HTTP/1.1 200 OK\r\nServer: nginx\r\nDate: Thu, 01 Jan 1970 00:00:00 GMT\r\n\r\n";
+    u8 req[512], resp[256], first[128];
+    size_t req_len, resp_len, first_len;
+    char block[8192];
+    struct http_block b;
+    size_t i, start, maxline = 0;
+
+    req_len = make_http_req(req, sizeof(req));
+    resp_len = sizeof(resp_text) - 1;
+    memcpy(resp, resp_text, resp_len);
+    memcpy(first, "2020\r\n", 6);
+    memset(first + 6, 'B', 64);
+    first_len = 70;
+
+    ok(req_len == 512, "http: 512-byte request block", NULL);
+    ok(make_http_block(block, sizeof(block), req, req_len, resp, resp_len, first, first_len) > 0,
+       "http: block renders", NULL);
+    for (i = 0, start = 0; block[i]; i++)
+    {
+        if (block[i] == '\n')
+        {
+            size_t len = i - start;
+
+            if (len > maxline)
+                maxline = len;
+            start = i + 1;
+        }
+    }
+    ok(maxline <= TBT_LINE_MAX, "http: every escaped line fits TBT_LINE_MAX", NULL);
+
+    ok(parse_http_block(block, &b) == HTTP_BLOCK_OK, "http: block parses", NULL);
+    ok(b.req_len == req_len && !memcmp(b.req, req, req_len), "http: req unescapes to the original",
+       NULL);
+    ok(b.req_declared == req_len, "http: req_len equals the original length", NULL);
+    ok(b.resp_len == resp_len && !memcmp(b.resp, resp, resp_len), "http: resp unescapes", NULL);
+    ok(b.resp_declared == resp_len, "http: resp_len equals the original length", NULL);
+    ok(b.first_len == first_len && !memcmp(b.first, first, first_len), "http: first_chunk unescapes",
+       NULL);
+    ok(strstr(block, "\\x5c") != NULL, "http: literal backslash is \\x5c", NULL);
+
+    /* A partial snapshot is SKIP (NEED_MORE), not an error. */
+    ok(parse_http_block("req=abc\n", &b) == HTTP_BLOCK_NEED_MORE,
+       "http: missing fields are NEED_MORE", NULL);
+    ok(parse_http_block("", &b) == HTTP_BLOCK_NEED_MORE, "http: empty snapshot is NEED_MORE", NULL);
+    ok(parse_http_block("req=abc\nresp=def\n", &b) == HTTP_BLOCK_NEED_MORE,
+       "http: block prefix is NEED_MORE", NULL);
+
+    /* Malformed text is PROTO. */
+    ok(parse_http_block("req=abc\\q\n", &b) == HTTP_BLOCK_PROTO, "http: bad escape is PROTO", NULL);
+    ok(parse_http_block("req=abc\nreq=def\n", &b) == HTTP_BLOCK_PROTO, "http: duplicate is PROTO",
+       NULL);
+    ok(parse_http_block("resp=abc\n", &b) == HTTP_BLOCK_PROTO, "http: out of order is PROTO", NULL);
+    ok(parse_http_block("req=abc\nresp=def\nfirst_chunk=g\nreq_len=x\nresp_len=3\n", &b) ==
+           HTTP_BLOCK_PROTO,
+       "http: bad decimal is PROTO", NULL);
+    ok(parse_http_block("req=ab\001c\n", &b) == HTTP_BLOCK_PROTO, "http: raw control byte is PROTO",
+       NULL);
+    ok(parse_http_block("nonsense\n", &b) == HTTP_BLOCK_PROTO, "http: line without = is PROTO", NULL);
+}
+
+int main(void)
+{
+    static const char *const minimal =
+        "tunnel 1 role=near listen=10.123.0.1:9000 peer=10.123.0.2:443";
+    static const char *const minimal_canon =
+        "tunnel 1 role=near listen=10.123.0.1:9000 peer=10.123.0.2:443"
+        " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " dup=1 profile=http-kal keepalive=5000"
+        " drip_ms=1000 replay=8388608 tunnel_rate=0"
+        " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=67108864"
+        " tx_window_bytes=67108864 tx_retain_bytes=0 carrier_stall_ms=0"
+        " portblock=0-0\n";
+    static const char *const full_near =
+        "tunnel 7 role=near listen=10.0.0.1:9000 peer=203.0.113.9:443"
+        " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+        " dup=2 profile=http-kal-drip keepalive=5000"
+        " drip_ms=1000 replay=8388608 tunnel_rate=0"
+        " max_inflate=2.000 hole_budget_ms=500 rx_reorder_bytes=67108864"
+        " tx_window_bytes=67108864 tx_retain_bytes=0 carrier_stall_ms=3000"
+        " portblock=40000-40063"
+        " srcaddrs=10.0.0.10,10.0.0.11\n";
+    static const char *const full_far =
+        "tunnel 9 role=far listen=203.0.113.9:443 peer=198.51.100.7:8443"
+        " target=127.0.0.1:7000 n=2 m=0 fec=off adaptive=off mode=rlnc w=4 carriers=2"
+        " crypto=off crypto_key=- dup=0 profile=raw keepalive=1000"
+        " drip_ms=250 replay=0 tunnel_rate=1048576"
+        " max_inflate=1.500 hole_budget_ms=50 rx_reorder_bytes=67108864"
+        " tx_window_bytes=67108864 tx_retain_bytes=0 carrier_stall_ms=3000"
+        " portblock=0-0\n";
+    /* A far peer= is an anchor: the renderer emits it when set and never
+     * emits peer=0.0.0.0:0 (port 0 is not parseable). */
+    static const char *const full_far_canon =
+        "tunnel 9 role=far listen=203.0.113.9:443 target=127.0.0.1:7000"
+        " peer=198.51.100.7:8443"
+        " n=2 m=0 fec=off adaptive=off mode=rlnc w=4 carriers=2 crypto=off crypto_key=-"
+        " dup=0 profile=raw keepalive=1000"
+        " drip_ms=250 replay=0 tunnel_rate=1048576 max_inflate=1.500"
+        " hole_budget_ms=50 rx_reorder_bytes=67108864 tx_window_bytes=67108864"
+        " tx_retain_bytes=0 carrier_stall_ms=3000 portblock=0-0\n";
+    struct tbt_cmd cmd;
+    struct tbt_parse_error perr;
+    char buf[TBT_LINE_MAX * 2];
+    int i;
+
+    /* 1. Canonical form is a fixed point, from the first read. */
+    roundtrip("minimal line", minimal, minimal_canon);
+    roundtrip("full near line", full_near, full_near);
+    roundtrip("full far line", full_far, full_far_canon);
+
+    /* 2. Rendering twice changes nothing. */
+    parse(full_near, &cmd, &perr);
+    {
+        char once[TBT_LINE_MAX * 2], twice[TBT_LINE_MAX * 2];
+        int n1 = tbt_render_cfg(&cmd.cfg, once, sizeof(once));
+        struct tbt_cmd again;
+
+        parse(once, &again, &perr);
+        tbt_render_cfg(&again.cfg, twice, sizeof(twice));
+        ok(n1 > 0 && !strcmp(once, twice), "render is idempotent", twice);
+    }
+
+    /* 3. portblock is rendered, not silently dropped. */
+    parse(full_near, &cmd, &perr);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(strstr(buf, "portblock=40000-40063") != NULL, "portblock is rendered", buf);
+
+    /* 4. profile=0 (unset) becomes the effective default http-kal. */
+    parse(minimal, &cmd, &perr);
+    ok(cmd.cfg.profile == 1, "unset profile normalises to http-kal", NULL);
+    ok(strstr(minimal_canon, "profile=http-kal") != NULL, "canonical text names it", NULL);
+
+    /* 5. dup is stored in a u8 without touching its neighbours. */
+    parse("tunnel 3 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 dup=2", &cmd, &perr);
+    ok(cmd.cfg.dup == 2, "dup=2 stored", NULL);
+    ok(cmd.cfg.drip_ms == 1000, "dup did not overwrite drip_ms", NULL);
+    ok(cmd.cfg.keepalive_ms == 5000, "dup did not overwrite keepalive", NULL);
+
+    /* 6. Unknown keys are refused and named. */
+    refuse("unknown key", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 frobnicate=1",
+           TBT_PARSE_EINVAL, "frobnicate", "unknown key");
+    refuse("unknown directive", "wibble 1", TBT_PARSE_EINVAL, "wibble", "unknown directive");
+    refuse("hash after a token", "tunnel 1 # not a comment", TBT_PARSE_EINVAL, NULL, NULL);
+
+    /* 6b. Keys removed in 0.0.1 are unknown, not silently ignored. */
+    refuse("framing removed",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 framing=ext",
+           TBT_PARSE_EINVAL, "framing", "unknown key");
+    refuse("chunk removed",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 chunk=1024",
+           TBT_PARSE_EINVAL, "chunk", "unknown key");
+    refuse("max_retry removed",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 max_retry=3",
+           TBT_PARSE_EINVAL, "max_retry", "unknown key");
+    refuse("uid removed",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 uid=1000",
+           TBT_PARSE_EINVAL, "uid", "unknown key");
+    refuse("src is not a key",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 src=10.0.0.0/8",
+           TBT_PARSE_EINVAL, "src", "unknown key");
+
+    /* 7. Comments and blanks are no-ops. */
+    {
+        struct tbt_cmd c;
+
+        ok(parse("# a comment", &c, &perr) == 0 && c.kind == TBT_CMD_NONE, "comment ignored", NULL);
+        ok(parse("   # indented", &c, &perr) == 0 && c.kind == TBT_CMD_NONE, "indented comment ignored", NULL);
+        ok(parse("", &c, &perr) == 0 && c.kind == TBT_CMD_NONE, "blank line ignored", NULL);
+    }
+
+    /* 8. Over-long lines are refused, with the line-too-long errno. */
+    {
+        char longline[TBT_LINE_MAX + 2];
+
+        memset(longline, 'a', sizeof(longline) - 1);
+        longline[sizeof(longline) - 1] = '\0';
+        ok(tbt_parse_line(longline, &cmd, &perr) == TBT_PARSE_E2BIG, "over-long line refused", NULL);
+    }
+
+    /* 9. IPv6 endpoints parse, render canonically, and round-trip. */
+    test_ipv6_cfg();
+    test_ipv6_format();
+
+    /* 10. Hostnames are refused, never resolved. */
+    refuse("hostname", "tunnel 1 role=near listen=example.com:9000 peer=10.0.0.2:2",
+           TBT_PARSE_EINVAL, NULL, "hostname");
+
+    /* 11. Out-of-range values are refused. */
+    refuse("n=0", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=0", TBT_PARSE_EINVAL, "n", NULL);
+    refuse("n=257", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=257",
+           TBT_PARSE_EINVAL, "n", "1..256");
+    refuse("n+m=257", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=256 m=1 fec=on",
+           TBT_PARSE_EINVAL, "n", "256");
+    refuse("m=257", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 m=257",
+           TBT_PARSE_EINVAL, "m", "0..256");
+    /* The old ARQ data plane names at most 16 carriers; a wider session needs
+     * fec=on, which is the only route to 256. */
+    refuse("legacy n=17", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=17",
+           TBT_PARSE_EINVAL, "fec",
+           "legacy ARQ supports n+m<=16; set fec=on for 256 carriers");
+    refuse("legacy n=16 m=1",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=16 m=1 fec=off",
+           TBT_PARSE_EINVAL, "fec", "set fec=on");
+    ok(parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=15 m=1 fec=off",
+             &cmd, &perr) == 0 &&
+           cmd.cfg.n == 15 && cmd.cfg.m == 1 && cmd.cfg.fec == 0,
+       "legacy 15+1 accepted with fec=off", NULL);
+    ok(parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=224 m=32 fec=on",
+             &cmd, &perr) == 0 &&
+           cmd.cfg.n == 224 && cmd.cfg.m == 32 && cmd.cfg.fec == 1,
+       "FEC 224+32 accepted with fec=on", NULL);
+    ok(parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=255 m=1 fec=on",
+             &cmd, &perr) == 0 && cmd.cfg.n == 255 && cmd.cfg.m == 1 &&
+           cmd.cfg.w == 510 && cmd.cfg.carriers == 256,
+       "FEC 255+1 accepted with fec=on", NULL);
+    refuse("fec=on without parity",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=16 m=0 fec=on",
+           TBT_PARSE_EINVAL, "m", "fec=on needs m>=1");
+    refuse("fec=rlnc", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 fec=rlnc",
+           TBT_PARSE_EINVAL, "fec", "off or on");
+    refuse("fec=1", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 fec=1",
+           TBT_PARSE_EINVAL, "fec", "off or on");
+    refuse("rlnc carriers mismatch",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=1 fec=on"
+           " mode=rlnc carriers=10",
+           TBT_PARSE_EINVAL, "carriers", "mode=rlnc needs carriers = n + m");
+
+    /* 11b. mode=/w=/carriers= are canonical. 0 means auto and reads back as
+     * the effective value, so a second render is byte-identical. */
+    refuse("mode unknown", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 mode=ldpc",
+           TBT_PARSE_EINVAL, "mode", "rlnc, grouped or sc-ldpc");
+    refuse("w over max", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 w=1025",
+           TBT_PARSE_EINVAL, "w", "0..1024");
+    refuse("w below n", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=8 w=7",
+           TBT_PARSE_EINVAL, "w", "at least n");
+    refuse("sc-ldpc w not 256 or 512",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 mode=sc-ldpc w=100",
+           TBT_PARSE_EINVAL, "w", "256 or 512");
+    refuse("carriers over 256",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 carriers=257",
+           TBT_PARSE_EINVAL, "carriers", "0..256");
+    refuse("carriers not a multiple of n+m",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=1 carriers=4",
+           TBT_PARSE_EINVAL, "carriers", "multiple of n + m");
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=1"
+          " mode=grouped w=0 carriers=10",
+          &cmd, &perr);
+    ok(cmd.cfg.mode == 2 && cmd.cfg.w == 8 && cmd.cfg.carriers == 10,
+       "grouped w=0 resolves to 2*n, carriers=10 accepted", NULL);
+    /* An auto value reads back as its effective value, and the rendered line
+     * is a fixed point from then on. */
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(strstr(buf, " mode=grouped w=8 carriers=10 ") != NULL,
+       "auto w renders its effective value", buf);
+    {
+        struct tbt_cmd again;
+        char twice[TBT_LINE_MAX * 2];
+
+        parse(buf, &again, &perr);
+        tbt_render_cfg(&again.cfg, twice, sizeof(twice));
+        ok(!strcmp(buf, twice), "auto value line is a render fixed point", twice);
+    }
+    /* An omitted carriers= on grouped FEC starts at the largest whole number
+     * of groups that fits 64 carriers (TBT_FEC_DEFAULT_GROUPED_CARRIERS). */
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=4 fec=on"
+          " mode=grouped",
+          &cmd, &perr);
+    ok(cmd.cfg.mode == 2 && cmd.cfg.w == 8 && cmd.cfg.carriers == 64,
+       "grouped fec=on defaults to 64 carriers", NULL);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(strstr(buf, " mode=grouped w=8 carriers=64 ") != NULL,
+       "grouped carriers default renders its effective value", buf);
+    {
+        struct tbt_cmd again;
+        char twice[TBT_LINE_MAX * 2];
+
+        parse(buf, &again, &perr);
+        ok(again.cfg.carriers == 64, "grouped carriers default reparses as 64", NULL);
+        tbt_render_cfg(&again.cfg, twice, sizeof(twice));
+        ok(!strcmp(buf, twice), "grouped carriers default is a render fixed point",
+           twice);
+    }
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=1 fec=on"
+          " mode=grouped",
+          &cmd, &perr);
+    ok(cmd.cfg.carriers == 60, "grouped default rounds down to whole groups", NULL);
+    /* An explicit carriers= is used as written, so the operator keeps the
+     * exact group count. */
+    {
+        static const u16 given[] = { 32, 64, 128, 256 };
+        size_t i;
+
+        for (i = 0; i < sizeof(given) / sizeof(given[0]); i++)
+        {
+            char line[TBT_LINE_MAX + 1];
+
+            snprintf(line, sizeof(line),
+                     "tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                     " n=4 m=4 fec=on mode=grouped w=8 carriers=%u",
+                     (unsigned int)given[i]);
+            ok(parse(line, &cmd, &perr) == 0 && cmd.cfg.carriers == given[i],
+               "explicit carriers= survives the grouped default", line);
+        }
+    }
+    /* rlnc is one group, so its default stays n + m. */
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=1 fec=on"
+          " mode=rlnc",
+          &cmd, &perr);
+    ok(cmd.cfg.carriers == 5, "rlnc default stays n + m", NULL);
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=1"
+          " mode=sc-ldpc w=0",
+          &cmd, &perr);
+    ok(cmd.cfg.w == 256 && cmd.cfg.carriers == 5,
+       "sc-ldpc w=0 resolves to 256", NULL);
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=1"
+          " mode=sc-ldpc w=512",
+          &cmd, &perr);
+    ok(cmd.cfg.w == 512, "sc-ldpc w=512 accepted", NULL);
+    /* sc-ldpc ships explicit 256-carrier profiles, so its default stays n + m
+     * under the grouped-carrier rule. */
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=4 fec=on"
+          " mode=sc-ldpc",
+          &cmd, &perr);
+    ok(cmd.cfg.mode == 3 && cmd.cfg.w == 256 && cmd.cfg.carriers == 8,
+       "sc-ldpc fec=on default stays n + m", NULL);
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=4 m=1 w=16",
+          &cmd, &perr);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(strstr(buf, " mode=rlnc w=16 carriers=5 ") != NULL,
+       "explicit w and auto carriers render", buf);
+
+    /* 11c. fec= is canonical: off by default, on renders after profile, and
+     * the line round-trips through the render. */
+    parse("tunnel 8 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 n=224 m=32 fec=on",
+          &cmd, &perr);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(strstr(buf, " fec=on adaptive=on mode=rlnc w=448 carriers=256 crypto=on"
+                    " crypto_key=- dup=1 profile=http-kal keepalive=") != NULL,
+       "fec=on renders in canonical order", buf);
+    {
+        struct tbt_cmd again;
+
+        parse(buf, &again, &perr);
+        ok(again.cfg.fec == 1 && again.cfg.n == 224 && again.cfg.m == 32 &&
+               again.cfg.mode == 1 && again.cfg.w == 448 &&
+               again.cfg.carriers == 256,
+           "fec=on line round-trips", NULL);
+    }
+    parse("tunnel 8 role=near listen=10.0.0.1:1 peer=10.0.0.2:2", &cmd, &perr);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(strstr(buf, " fec=off adaptive=off mode=rlnc w=8 carriers=5 ") != NULL,
+       "fec/mode/w/carriers defaults render in canonical text", buf);
+
+    /* 11d. The 4096-port default block round-trips. */
+    roundtrip("portblock 40000-44095",
+              "tunnel 5 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 portblock=40000-44095",
+              "tunnel 5 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+              " n=4 m=1 fec=off adaptive=off mode=rlnc w=8 carriers=5 crypto=off crypto_key=-"
+              " dup=1 profile=http-kal keepalive=5000"
+              " drip_ms=1000 replay=8388608 tunnel_rate=0"
+              " max_inflate=2.000 hole_budget_ms=0 rx_reorder_bytes=67108864"
+              " tx_window_bytes=67108864 tx_retain_bytes=0 carrier_stall_ms=0"
+              " portblock=40000-44095\n");
+
+    refuse("dup=4", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 dup=4", TBT_PARSE_EINVAL, "dup", NULL);
+    refuse("replay too big", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 replay=268435457",
+           TBT_PARSE_EINVAL, "replay", NULL);
+    refuse("portblock reversed", "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 portblock=500-400",
+           TBT_PARSE_EINVAL, NULL, NULL);
+    refuse("port 0", "tunnel 1 role=near listen=10.0.0.1:0 peer=10.0.0.2:2", TBT_PARSE_EINVAL, NULL, NULL);
+
+    /* 12. Required keys. */
+    refuse("no role", "tunnel 1 listen=10.0.0.1:1 peer=10.0.0.2:2", TBT_PARSE_EINVAL, "role", NULL);
+    refuse("near without peer", "tunnel 1 role=near listen=10.0.0.1:1", TBT_PARSE_EINVAL, "peer", NULL);
+    refuse("far without target", "tunnel 1 role=far listen=10.0.0.1:1", TBT_PARSE_EINVAL, "target", NULL);
+    refuse("tunnel without id", "tunnel role=near", TBT_PARSE_EINVAL, NULL, NULL);
+
+    /* 13. del / flush. */
+    ok(parse("del 5", &cmd, &perr) == 0 && cmd.kind == TBT_CMD_DEL && cmd.id == 5, "del 5", NULL);
+    refuse("del without id", "del", TBT_PARSE_EINVAL, "del", NULL);
+    ok(parse("flush", &cmd, &perr) == 0 && cmd.kind == TBT_CMD_FLUSH, "flush", NULL);
+    refuse("flush with junk", "flush now", TBT_PARSE_EINVAL, "flush", NULL);
+
+    /* 14. The ports file. */
+    {
+        u16 lo = 0, hi = 0;
+
+        ok(tbt_parse_ports("ports 41000-41015\n", &lo, &hi, &perr) == 0 && lo == 41000 && hi == 41015,
+           "ports 41000-41015", NULL);
+        ok(tbt_parse_ports("  \n", &lo, &hi, &perr) == 0 && !lo && !hi, "blank ports line", NULL);
+        ok(tbt_parse_ports("ports 0-0\n", &lo, &hi, &perr) == 0 && !lo && !hi,
+           "ports 0-0 is a no-op", NULL);
+        ok(tbt_parse_ports("ports 0-1\n", &lo, &hi, &perr) != 0, "ports 0-1 refused", NULL);
+        ok(tbt_parse_ports("ports 41015-41000\n", &lo, &hi, &perr) != 0, "reversed ports refused", NULL);
+    }
+
+    /* 15. A short output buffer is an error, not a truncated line. */
+    parse(full_near, &cmd, &perr);
+    ok(tbt_render_cfg(&cmd.cfg, buf, 40) == TBT_PARSE_E2BIG, "short buffer refused", NULL);
+
+    /* 15b. The render length is exact: size == n has no room for the NUL, so
+     * it must be refused; size == n + 1 is the smallest accepted buffer. This
+     * is the pure-logic half of the procfs snapshot contract (the kernel side
+     * is exercised by adversarial cat.cfg_self / init.cfg_roundtrip). */
+    {
+        int need = tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+
+        ok(need > 0, "render length measured", NULL);
+        ok(tbt_render_cfg(&cmd.cfg, buf, (size_t)need) == TBT_PARSE_E2BIG,
+           "buffer without room for NUL refused", NULL);
+        ok(tbt_render_cfg(&cmd.cfg, buf, (size_t)need + 1) == need,
+           "exact-size buffer accepted", NULL);
+    }
+
+    /* 16. Every key of the grammar survives one parse. */
+    parse(full_far, &cmd, &perr);
+    ok(cmd.cfg.n == 2 && cmd.cfg.m == 0 && cmd.cfg.dup == 0, "far n/m/dup", NULL);
+    ok(cmd.cfg.profile == 3, "far profile=raw", NULL);
+    ok(cmd.cfg.drip_ms == 250 && cmd.cfg.replay == 0, "far drip/replay", NULL);
+    ok(cmd.cfg.tunnel_rate == 1048576 && cmd.cfg.max_inflate_milli == 1500, "far rate/inflate", NULL);
+    ok(cmd.cfg.hole_budget_ms == 50, "far hole budget", NULL);
+    parse(full_near, &cmd, &perr);
+    ok(cmd.cfg.nsrc == 2, "near srcaddrs list", NULL);
+    ok(cmd.cfg.portblock_lo == 40000 && cmd.cfg.portblock_hi == 40063, "near portblock", NULL);
+
+    /* 17. The t1_skeleton read-back prefix still holds. */
+    parse("tunnel 1 role=near listen=10.123.0.1:9000 peer=10.123.0.2:443 n=2 m=1", &cmd, &perr);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(strncmp(buf, "tunnel 1 role=near listen=10.123.0.1:9000 peer=10.123.0.2:443 n=2 m=1 ",
+               strlen("tunnel 1 role=near listen=10.123.0.1:9000 peer=10.123.0.2:443 n=2 m=1 ")) == 0,
+       "t1 read-back prefix", buf);
+
+    /* 18. C3 queue keys: bounds, explicit values, canonical render. */
+    parse("tunnel 2 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+          " rx_reorder_bytes=1 hole_budget_ms=1 tx_retain_bytes=4294967295"
+          " carrier_stall_ms=3600000",
+          &cmd, &perr);
+    ok(cmd.cfg.rx_reorder_bytes == 1 && cmd.cfg.hole_budget_ms == 1 &&
+           cmd.cfg.tx_retain_bytes == 4294967295u && cmd.cfg.carrier_stall_ms == 3600000,
+       "C3 keys at their bounds", NULL);
+    parse("tunnel 2 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+          " rx_reorder_bytes=4096 tx_retain_bytes=1024 carrier_stall_ms=250",
+          &cmd, &perr);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(strstr(buf, " rx_reorder_bytes=4096 tx_window_bytes=4096 tx_retain_bytes=1024"
+                    " carrier_stall_ms=250 ") != NULL,
+       "C3 keys render canonically", buf);
+    {
+        struct tbt_cmd again;
+
+        parse(buf, &again, &perr);
+        ok(again.cfg.rx_reorder_bytes == 4096 && again.cfg.tx_retain_bytes == 1024 &&
+               again.cfg.carrier_stall_ms == 250,
+           "C3 keys round-trip through the render", NULL);
+    }
+    parse("tunnel 4 role=near listen=10.0.0.1:1 peer=10.0.0.2:2", &cmd, &perr);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(cmd.cfg.hole_budget_ms == 0 && cmd.cfg.carrier_stall_ms == 0 &&
+           cmd.cfg.rx_reorder_bytes == 67108864 && cmd.cfg.tx_window_bytes == 67108864,
+       "C3 budgets default when omitted", NULL);
+    ok(strstr(buf, " hole_budget_ms=0 rx_reorder_bytes=67108864 tx_window_bytes=67108864"
+                    " tx_retain_bytes=0 carrier_stall_ms=0 ") != NULL,
+       "C3 defaults render when omitted", buf);
+    /* tx_window_bytes: 0 means auto and is the default; an explicit window
+     * above the peer's reorder budget kills the stream, so both keys are
+     * validated together once the whole line has been read. */
+    parse("tunnel 5 role=near listen=10.0.0.1:1 peer=10.0.0.2:2", &cmd, &perr);
+    ok(cmd.cfg.tx_window_bytes == 67108864, "tx_window_bytes defaults to 64 MiB", NULL);
+    parse("tunnel 5 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+          " rx_reorder_bytes=1048576 tx_window_bytes=524288",
+          &cmd, &perr);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(strstr(buf, " rx_reorder_bytes=1048576 tx_window_bytes=524288 ") != NULL,
+       "tx_window_bytes renders after rx_reorder_bytes", buf);
+    {
+        struct tbt_cmd again;
+
+        parse(buf, &again, &perr);
+        ok(again.cfg.rx_reorder_bytes == 1048576 && again.cfg.tx_window_bytes == 524288,
+           "tx_window_bytes round-trips through the render", NULL);
+    }
+    /* Equal to the reorder budget is the largest accepted window. */
+    parse("tunnel 5 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+          " tx_window_bytes=4096 rx_reorder_bytes=4096",
+          &cmd, &perr);
+    ok(cmd.cfg.tx_window_bytes == 4096, "tx_window_bytes equal to rx_reorder_bytes accepted", NULL);
+    /* A zero reorder bound kills the first out-of-order frame, so it is
+     * refused before the tunnel exists. The two time budgets accept 0 as
+     * auto; their upper bounds are checked below. */
+    refuse("rx_reorder_bytes=0",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 rx_reorder_bytes=0",
+           TBT_PARSE_EINVAL, "rx_reorder_bytes", "1..268435456");
+    /* Zero is the auto setting for both time budgets: it parses, renders and
+     * round-trips like any other value. */
+    parse("tunnel 6 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+          " hole_budget_ms=0 carrier_stall_ms=0",
+          &cmd, &perr);
+    ok(cmd.cfg.hole_budget_ms == 0 && cmd.cfg.carrier_stall_ms == 0,
+       "auto budgets accept 0", NULL);
+    tbt_render_cfg(&cmd.cfg, buf, sizeof(buf));
+    ok(strstr(buf, " hole_budget_ms=0 rx_reorder_bytes=67108864") != NULL &&
+           strstr(buf, " carrier_stall_ms=0 ") != NULL,
+       "auto budgets render as 0", buf);
+    {
+        struct tbt_cmd again;
+
+        parse(buf, &again, &perr);
+        ok(again.cfg.hole_budget_ms == 0 && again.cfg.carrier_stall_ms == 0,
+           "auto budgets round-trip through the render", NULL);
+    }
+    refuse("hole_budget_ms over max",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 hole_budget_ms=60001",
+           TBT_PARSE_EINVAL, "hole_budget_ms", "0..60000");
+    refuse("hole_budget_ms negative",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 hole_budget_ms=-1",
+           TBT_PARSE_EINVAL, "hole_budget_ms", "0..60000");
+    refuse("hole_budget_ms non-numeric",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 hole_budget_ms=abc",
+           TBT_PARSE_EINVAL, "hole_budget_ms", "0..60000");
+    refuse("rx_reorder_bytes over max",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 rx_reorder_bytes=268435457",
+           TBT_PARSE_EINVAL, "rx_reorder_bytes", "268435456");
+    refuse("rx_reorder_bytes over u32",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 rx_reorder_bytes=4294967296",
+           TBT_PARSE_EINVAL, "rx_reorder_bytes", "268435456");
+    refuse("rx_reorder_bytes negative",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 rx_reorder_bytes=-1",
+           TBT_PARSE_EINVAL, "rx_reorder_bytes", "268435456");
+    refuse("rx_reorder_bytes non-numeric",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 rx_reorder_bytes=abc",
+           TBT_PARSE_EINVAL, "rx_reorder_bytes", "268435456");
+    refuse("tx_window_bytes over max",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 tx_window_bytes=268435457",
+           TBT_PARSE_EINVAL, "tx_window_bytes", "0..268435456");
+    refuse("tx_window_bytes negative",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 tx_window_bytes=-1",
+           TBT_PARSE_EINVAL, "tx_window_bytes", "0..268435456");
+    refuse("tx_window_bytes non-numeric",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 tx_window_bytes=abc",
+           TBT_PARSE_EINVAL, "tx_window_bytes", "0..268435456");
+    /* Key order does not matter: rx_reorder_bytes may follow the window. */
+    refuse("tx_window_bytes above rx_reorder_bytes",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+           " tx_window_bytes=4097 rx_reorder_bytes=4096",
+           TBT_PARSE_EINVAL, "tx_window_bytes", "rx_reorder_bytes");
+    refuse("tx_window_bytes above the default rx_reorder_bytes",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 tx_window_bytes=67108865",
+           TBT_PARSE_EINVAL, "tx_window_bytes", "rx_reorder_bytes");
+    refuse("tx_retain_bytes over u32",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 tx_retain_bytes=4294967296",
+           TBT_PARSE_EINVAL, "tx_retain_bytes", "4294967295");
+    refuse("tx_retain_bytes negative",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 tx_retain_bytes=-1",
+           TBT_PARSE_EINVAL, "tx_retain_bytes", "4294967295");
+    refuse("tx_retain_bytes non-numeric",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 tx_retain_bytes=abc",
+           TBT_PARSE_EINVAL, "tx_retain_bytes", "4294967295");
+    refuse("carrier_stall_ms over max",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 carrier_stall_ms=3600001",
+           TBT_PARSE_EINVAL, "carrier_stall_ms", "3600000");
+    refuse("carrier_stall_ms negative",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 carrier_stall_ms=-1",
+           TBT_PARSE_EINVAL, "carrier_stall_ms", "3600000");
+    refuse("carrier_stall_ms non-numeric",
+           "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2 carrier_stall_ms=abc",
+           TBT_PARSE_EINVAL, "carrier_stall_ms", "3600000");
+
+    /* 19. FBK body: 18-byte entries, 0..16 of them, no padding. */
+    ok(TBT_FBK_ENTRY_LEN == 18 && TBT_FBK_MAX == 288, "FBK entry is 18 bytes, 16 entries", NULL);
+    ok(TBT_FBK_ENTRY_LEN == 1 + 1 + 8 + 4 + 4, "FBK entry fields add up", NULL);
+    ok(TBT_FBK_PATH == 0 && TBT_FBK_RXSTATE == 1 && TBT_FBK_UACK == 2 && TBT_FBK_RECVCNT == 10 &&
+           TBT_FBK_RTT == 14 && TBT_FBK_RTT + 4 == TBT_FBK_ENTRY_LEN,
+       "FBK entry offsets", NULL);
+    {
+        u16 min = 1, max = 0;
+        unsigned n;
+
+        ok(tbt_body_bounds(TBT_F_FBK, &min, &max) && min == 0 && max == TBT_FBK_MAX,
+           "FBK body bounds are 0..16 x 18", NULL);
+        for (n = 0; n <= TBT_LEGACY_MAX_CARRIERS; n++)
+            ok((unsigned)n * TBT_FBK_ENTRY_LEN <= TBT_FBK_MAX, "FBK n x 18 fits the max", NULL);
+        ok((unsigned)TBT_LEGACY_MAX_CARRIERS * TBT_FBK_ENTRY_LEN == TBT_FBK_MAX,
+           "FBK max is exactly 16 entries", NULL);
+    }
+
+    /* 20. The peers column contract, pinned verbatim. */
+    ok(!strcmp(TBT_PEERS_COLUMNS, "id carrier sport peer uack rtt_us inflight state class"
+                                  " recv_cnt rx_lag_ppm minrtt_us tx_frames tx_bytes dropped"
+                                  " retx_ppm delivery_rate_bps cwnd_bytes snd_wnd"
+                                  " wscale rcv_wnd window_clamp rmem_alloc"),
+       "peers column contract", TBT_PEERS_COLUMNS);
+    ok(count_words(TBT_PEERS_COLUMNS) == 23, "peers has exactly 23 columns", NULL);
+    ok(count_words(TBT_TUNNELS_COLUMNS) == 9, "tunnels has exactly 9 columns", NULL);
+
+    /* 21. Action verbs: canonical text, round-trip, refusals, config exclusion. */
+    test_actions();
+
+    /* 22. The stable stats prefix: keys, order, key=value form, round-trip. */
+    test_stats_prefix();
+
+    /* 23. The line limit and maximal-length config lines. */
+    test_line_limit();
+    test_maximal_lines();
+
+    /* 24. Role/profile/optional-key round-trips, and the far-line peer fix. */
+    test_config_matrix();
+    test_far_peer();
+
+    /* 24b. Tunnel-level nonce=: 128-bit, 64-bit pin, refusals, render. */
+    test_tunnel_nonce();
+
+    /* 24c. crypto= / crypto_key=: default on, off, key, clear, refusals. */
+    test_crypto_cfg();
+
+    /* 24c2. adaptive=: default follows fec, explicit off, hint n/m, refusals. */
+    test_adaptive_cfg();
+
+    /* 24d. dev= interface bind. */
+    test_dev_cfg();
+
+    /* 24d2. map=: multi-port slots, near listen conflicts, far allow list. */
+    test_map_cfg();
+
+    /* 24e. mode=sc-ldpc: L is rendered only for mode 3, adaptive defaults
+     * off, and both directions round-trip through the canonical line. */
+    {
+        static const char *const down =
+            "tunnel 2 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
+            " n=128 m=128 fec=on mode=sc-ldpc w=256 carriers=256";
+        static const char *const up =
+            "tunnel 2 role=near listen=10.0.0.1:9000 peer=10.0.0.2:443"
+            " n=8 m=24 fec=on mode=sc-ldpc w=64 carriers=256 L=8";
+        char once[TBT_LINE_MAX * 2], twice[TBT_LINE_MAX * 2];
+        struct tbt_cmd again;
+
+        parse(down, &cmd, &perr);
+        ok(cmd.cfg.mode == 3 && cmd.cfg.w == 256 && cmd.cfg.n == 128 &&
+               cmd.cfg.m == 128 && cmd.cfg.L == 0,
+           "downlink sc-ldpc shape parsed", NULL);
+        ok(cmd.cfg.adaptive == 1, "mode=3 ladder defaults adaptive on", NULL);
+        tbt_render_cfg(&cmd.cfg, once, sizeof(once));
+        ok(strstr(once, " L=0") != NULL, "L is rendered for mode 3", once);
+        parse(once, &again, &perr);
+        tbt_render_cfg(&again.cfg, twice, sizeof(twice));
+        ok(!strcmp(once, twice), "downlink sc-ldpc line is a fixed point", twice);
+
+        parse(up, &cmd, &perr);
+        ok(cmd.cfg.mode == 3 && cmd.cfg.w == 64 && cmd.cfg.n == 8 &&
+               cmd.cfg.m == 24 && cmd.cfg.L == 8,
+           "uplink sc-ldpc shape parsed", NULL);
+        ok(cmd.cfg.adaptive == 1, "uplink mode=3 ladder defaults adaptive on", NULL);
+        tbt_render_cfg(&cmd.cfg, once, sizeof(once));
+        ok(strstr(once, " L=8") != NULL, "uplink L is rendered", once);
+        parse(once, &again, &perr);
+        tbt_render_cfg(&again.cfg, twice, sizeof(twice));
+        ok(!strcmp(once, twice), "uplink sc-ldpc line is a fixed point", twice);
+
+        /* adaptive=on is accepted from a shipped profile on the ladder. */
+        parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+              " n=128 m=128 fec=on mode=sc-ldpc adaptive=on carriers=256",
+              &cmd, &perr);
+        ok(cmd.cfg.adaptive == 1 && cmd.cfg.mode == 3 &&
+               cmd.cfg.n == 128 && cmd.cfg.m == 128 && cmd.cfg.w == 256,
+           "downlink adaptive=on parsed", NULL);
+        tbt_render_cfg(&cmd.cfg, once, sizeof(once));
+        ok(strstr(once, "adaptive=on") != NULL,
+           "downlink adaptive renders on", once);
+        parse(once, &again, &perr);
+        tbt_render_cfg(&again.cfg, twice, sizeof(twice));
+        ok(!strcmp(once, twice), "downlink adaptive line is a fixed point",
+           twice);
+
+        parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+              " n=8 m=24 fec=on mode=sc-ldpc adaptive=on w=64 carriers=256"
+              " L=8",
+              &cmd, &perr);
+        ok(cmd.cfg.adaptive == 1 && cmd.cfg.mode == 3 &&
+               cmd.cfg.n == 8 && cmd.cfg.m == 24 && cmd.cfg.w == 64 &&
+               cmd.cfg.L == 8,
+           "uplink adaptive=on parsed", NULL);
+        tbt_render_cfg(&cmd.cfg, once, sizeof(once));
+        ok(strstr(once, "adaptive=on") != NULL,
+           "uplink adaptive renders on", once);
+        parse(once, &again, &perr);
+        tbt_render_cfg(&again.cfg, twice, sizeof(twice));
+        ok(!strcmp(once, twice), "uplink adaptive line is a fixed point",
+           twice);
+
+        parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+              " n=64 m=192 fec=on mode=sc-ldpc adaptive=on carriers=256",
+              &cmd, &perr);
+        ok(cmd.cfg.adaptive == 1 && cmd.cfg.mode == 3 &&
+               cmd.cfg.n == 64 && cmd.cfg.m == 192 && cmd.cfg.w == 256,
+           "adaptive", "downlink 25% accepted");
+        refuse("sc-ldpc adaptive: downlink n out of range",
+               "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+               " n=193 m=63 fec=on mode=sc-ldpc adaptive=on carriers=256",
+               TBT_PARSE_EINVAL, "adaptive", "supported profile");
+        refuse("sc-ldpc adaptive: downlink block",
+               "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+               " n=128 m=128 fec=on mode=sc-ldpc adaptive=on w=512"
+               " carriers=256",
+               TBT_PARSE_EINVAL, "adaptive", "block=256");
+        refuse("sc-ldpc adaptive: uplink block",
+               "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+               " n=8 m=24 fec=on mode=sc-ldpc adaptive=on w=256"
+               " carriers=256 L=8",
+               TBT_PARSE_EINVAL, "adaptive", "block=64");
+        refuse("sc-ldpc adaptive: uplink off-ladder n/m",
+               "tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+               " n=19 m=13 fec=on mode=sc-ldpc adaptive=on w=64"
+               " carriers=256 L=8",
+               TBT_PARSE_EINVAL, "adaptive", "rate ladder");
+
+        /* The inferred ladder must be the buildable one. The 0.8.0 GF(16)
+         * codec caps the uplink at n=21, so 24/8 and 20/12 cannot be built;
+         * defaulting them to adaptive=on turned a fixed shape into an
+         * "unsupported profile" error during parse. */
+        ok(parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                 " n=24 m=8 fec=on mode=sc-ldpc w=64 carriers=256 L=8",
+                 &cmd, &perr) == 0,
+           "sc-ldpc: unbuildable uplink 24/8 parses", perr.why);
+        ok(cmd.cfg.adaptive == 0,
+           "sc-ldpc: unbuildable uplink 24/8 defaults adaptive off", NULL);
+        tbt_render_cfg(&cmd.cfg, once, sizeof(once));
+        ok(strstr(once, "adaptive=off") != NULL,
+           "sc-ldpc: unbuildable uplink renders adaptive off", once);
+        ok(parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                 " n=20 m=12 fec=on mode=sc-ldpc w=64 carriers=256 L=8",
+                 &cmd, &perr) == 0,
+           "sc-ldpc: unbuildable uplink 20/12 parses", perr.why);
+        ok(cmd.cfg.adaptive == 0,
+           "sc-ldpc: unbuildable uplink 20/12 defaults adaptive off", NULL);
+        ok(parse("tunnel 1 role=near listen=10.0.0.1:1 peer=10.0.0.2:2"
+                 " n=16 m=16 fec=on mode=sc-ldpc w=64 carriers=256 L=8",
+                 &cmd, &perr) == 0,
+           "sc-ldpc: buildable uplink 16/16 parses", perr.why);
+        ok(cmd.cfg.adaptive == 1,
+           "sc-ldpc: buildable uplink 16/16 defaults adaptive on", NULL);
+    }
+
+    /* 25. The frozen /proc/net/tbtun/http text contract. */
+    test_http_contract();
+
+    (void)i;
+    printf("%d checks, %d failures\n", checks, failures);
+    return failures ? 1 : 0;
+}

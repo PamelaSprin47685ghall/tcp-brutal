@@ -7,7 +7,7 @@ mihomo 基线：`v1.19.34`，`0455d0d28c4526937380505153e65a843d8612e8`，源码
 `https://proxy.golang.org/github.com/metacubex/mihomo/@v/v1.19.34.zip`。
 
 > 版本提醒：master `66ecd19`（0.7.3）只有内核模块。0.8 分支才引入用户态客户端：
-> `host/tbt_client_main.c`、`host/tbt_client_engine.c`、`host/tbt_client_engine.h`，
+> `src/client/tbt_client_main.c`、`src/client/tbt_client_engine.c`、`src/client/tbt_client_engine.h`，
 > 构建目标在 `Makefile:865-866`。本设计以 0.8 为准。
 > 0.8 的 `README.md:10-19` 仍写着“no userspace process”，那是 0.7 的残留文本，
 > 不要拿它当 0.8 的行为依据。
@@ -16,17 +16,17 @@ mihomo 基线：`v1.19.34`，`0455d0d28c4526937380505153e65a843d8612e8`，源码
 
 | 侧 | 数据面 | 产物 | 是否需要 root 装载模块 |
 | --- | --- | --- | --- |
-| near | 用户态 `tbt_client`：监听应用、拨 256 条载体 | `host/tbt_client` 可执行文件 | 否 |
+| near | 用户态 `tbt_client`：监听应用、拨 256 条载体 | `src/client/tbt_client` 可执行文件 | 否 |
 | far | 内核模块 `tbtun.ko`：接受载体、按流拨 `target=` | `tbtun.ko` | 是（`insmod`） |
 
 证据：
 
-- `host/tbt_client_engine.h:1-20`：引擎是“一端”：near 接受应用 TCP 并拨载体池，
+- `src/client/tbt_client_engine.h:1-20`：引擎是“一端”：near 接受应用 TCP 并拨载体池，
   far 接受载体池并连 `target`；它链接模块同一批纯 C 编码器，所以线格式一致。
-- `host/tbt_client_main.c:1-12`：`tbt_client role=near listen=... peer=...
+- `src/client/tbt_client_main.c:1-12`：`tbt_client role=near listen=... peer=...
   target=... n=... m=... mode=... carriers=...`，与
   `/proc/net/tbtun/config` 同一套行语法；`role` 默认 `near`。
-- `Makefile:206-235`：`HOST_CLIENT := host/tbt_client`；
+- `Makefile:206-235`：`HOST_CLIENT := src/client/tbt_client`；
   `Makefile:865-866` 是它的链接规则。
 
 因此 near 侧**不装 `tbtun.ko`**；far 侧**不装 `tbt_client`**。安装脚本必须分开。
@@ -130,8 +130,8 @@ mihomo: $(DIST)/mihomo
 # 0.8 userspace client; Makefile:865-866 owns the link rule.
 $(DIST)/near/tbt_client: FORCE
 	@mkdir -p $(dir $@)
-	$(MAKE) -C $(REPO_ROOT) host/tbt_client
-	install -m 0755 $(REPO_ROOT)/host/tbt_client $@
+	$(MAKE) -C $(REPO_ROOT) src/client/tbt_client
+	install -m 0755 $(REPO_ROOT)/src/client/tbt_client $@
 
 client: $(DIST)/near/tbt_client
 
@@ -218,7 +218,7 @@ FORCE:
 
 要点：
 
-- 客户端构建直接复用 0.8 的 `host/tbt_client` 目标（`Makefile:865-866`），不新增
+- 客户端构建直接复用 0.8 的 `src/client/tbt_client` 目标（`Makefile:865-866`），不新增
   第二套编译逻辑。
 - 模块构建复用根 `Makefile` 的 `all` 规则（0.8 的 `Makefile:306-307`：
   `$(MAKE) -C $(KERNEL_DIR) M=$(PWD) modules`）。
@@ -496,7 +496,7 @@ tunnel 1 role=far listen=0.0.0.0:19002 target=127.0.0.1:19001 n=128 m=128 w=256 
 
 **部署门**：near 的载体拨号不能被本机 mihomo 的 TUN `auto-route` 抢走。仓库既有
 做法是主机策略路由 `ip rule add pref 100 to FAR_IP/32 lookup main`
-（`benches/short.sh:42-43,121-123`；`review/ops-0.4-backup-near-760k.md:86-108`）。
+（`tests/throughput/short.sh:42-43,121-123`）。
 
 **安全边界**：`tls: false` 是设计选择。VLESS 的 UUID 只做身份校验，不做加密；
 smux/XUDP 也不加密。机密性完全来自 tbtun 的 `crypto=on`：ChaCha8 对 body 做
@@ -658,11 +658,10 @@ make -f deploy/090/Makefile package MIHOMO_VERSION=vX.Y.Z
 与 `adaptive=on` 的 KVM 验证都完成之前，不要把它翻成 `adaptive=on`。0.9.0 的
 打包与烟测只验证固定形状：near 8×24、`w=64`，far 128×128、`w=256`。
 
-1. **吞吐只有约 0.55 MB/s。** 0.8 的验收数字；分支内可佐证的同级数据是
-   `CHANGELOG.md:308-310`：300 ms WAN 下 payload 从 3.1 MB/s 掉到 0.65–1.0 MB/s，
+1. **吞吐只有约 0.55 MB/s。** 300 ms WAN 下 payload 从 3.1 MB/s 掉到 0.65–1.0 MB/s，
    修复流量从 47 MB 涨到 270 MB/2 min。这个量级不足以承载 0.9.0 的“任意站点”目标。
-2. **半开流永不回收。** `review/analysis/multiconn.md:26-27` 记录：流对象与
-   `far_sid` 在会话销毁前不回收；`DESIGN.md:939-944` 的 TCP keepalive 只是把
+2. **半开流永不回收。** 流对象与
+   `far_sid` 在会话销毁前不回收；TCP keepalive 只是把
    carrier socket 关闭，没有证明流对象会随之释放。0.8 的验收仍把它列为未解决。
 3. **载体 stall-dead 抖动未定。** `CHANGELOG.md:336-341` 记录：256 载体下
    stall/recover 每小时触发数千次，99% 在 200 ms 内恢复，且这些日志曾是内核冻结前
@@ -704,10 +703,10 @@ make -f deploy/090/Makefile package MIHOMO_VERSION=vX.Y.Z
 
 ```sh
 make dkms-tarball                 # 生成 dkms.tar.gz（含 dkms.conf 与模块源）
-sudo scripts/install_dkms.sh      # 需要 /lib/modules/$(uname -r)/build
+sudo tools/install_dkms.sh      # 需要 /lib/modules/$(uname -r)/build
 ```
 
-`scripts/install_dkms.sh` 只安装模块，不写 `/usr/bin` 或 `/usr/local/bin`；
+`tools/install_dkms.sh` 只安装模块，不写 `/usr/bin` 或 `/usr/local/bin`；
 `--uninstall` 删除 DKMS 条目与暂存树。每次内核升级后 DKMS 自动重编，
 `modprobe tbtun` 仍然可用。
 
@@ -748,7 +747,7 @@ UDP 走 smux，`UDP:443` 在规则层被 `REJECT` 以便浏览器回落 HTTP/2�
 变体受单 FEC flow 限制，见 smoke S4b），
 far 一个原生 VLESS 入站（`allow-insecure: true` 允许无 TLS），中间 near 跑
 `tbt_client`、far 跑 `tbtun.ko`。打包只做三件事：取上游 mihomo 二进制、构建
-`host/tbt_client` 与 `tbtun.ko`、渲染两份 YAML、两行隧道配置与四个 systemd
+`src/client/tbt_client` 与 `tbtun.ko`、渲染两份 YAML、两行隧道配置与四个 systemd
 单元。一次 `package` 为两端写入同一份随机 `crypto_key`/`nonce`，near 的 HELLO
 不再广播会话密钥；`NEAR_IP` 默认为空，far 不写 `peer=`。升级的唯一开关是
 `MIHOMO_VERSION`，两端必须同版本。`adaptive=off` 在 Route-A NACK 修复与

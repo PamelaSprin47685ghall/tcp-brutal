@@ -1,9 +1,0 @@
-near_module_loaded=no
-far_module_loaded=yes
-near_proc=absent
-far_proc=present
-near_listen_9001=no
-far_listen_9000=yes
-far_listen_5202=yes
-near_rule=absent
-near_sysctl=212992 212992 

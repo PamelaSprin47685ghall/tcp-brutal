@@ -2,7 +2,7 @@
 #
 # Build one deployable set from this tree without patching mihomo:
 #   - vanilla mihomo, downloaded from the upstream GitHub release;
-#   - the 0.8 userspace client (host/tbt_client) for the near side;
+#   - the 0.8 userspace client (src/client/tbt_client) for the near side;
 #   - tbtun.ko from the existing Kbuild rules for the far side.
 #
 # Usage:
@@ -117,11 +117,10 @@ mihomo-digest:
 print(next((a.get("digest","") for a in d.get("assets",[]) if a.get("name")==n), "not found"))' \
 	    "$(MIHOMO_ASSET)"
 
-# 0.8 userspace client. Makefile:865-866 owns the link rule.
 $(DIST)/near/tbt_client: FORCE
 	@mkdir -p $(dir $@)
-	$(MAKE) -C $(REPO_ROOT) host/tbt_client
-	install -m 0755 $(REPO_ROOT)/host/tbt_client $@
+	$(MAKE) -C $(REPO_ROOT) $(REPO_ROOT)/build/bin/tbt_client
+	install -m 0755 $(REPO_ROOT)/build/bin/tbt_client $@
 
 client: $(DIST)/near/tbt_client
 
@@ -132,7 +131,7 @@ $(DIST)/far/tbtun.ko: FORCE
 	  echo "KERNEL_DIR=$(KERNEL_DIR) not found; see docs/build-env.md"; \
 	  exit 1; }
 	$(MAKE) -C $(REPO_ROOT) KERNEL_DIR=$(KERNEL_DIR) all
-	install -m 0644 $(REPO_ROOT)/tbtun.ko $@
+	install -m 0644 $(REPO_ROOT)/build/kernel/tbtun.ko $@
 	modinfo $@ | sed -n '1,8p'
 
 module: $(DIST)/far/tbtun.ko

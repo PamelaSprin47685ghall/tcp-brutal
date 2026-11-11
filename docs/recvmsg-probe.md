@@ -243,7 +243,7 @@ cd ../.. && tests/qemu/run.sh \
 - The probe runs on 127.0.0.1 only; the guest has no NIC. Ops replacement is a
   socket-local change, so the result does not depend on the route.
 - `probe_user` is dynamically linked against the host glibc, like
-  `host/tbt_burst`; `mkinitramfs.sh` copies the loader and libraries.
+  `tests/tools/tbt_burst`; `mkinitramfs.sh` copies the loader and libraries.
 - Phase A's "no POLLIN" is the *expected* outcome under the different-socket
   model, so it is reported as `NOTE`, and the assertion that fails the run is
   the counter check (`phase A must not enter the module's ops`). A future kernel

@@ -1,4 +1,0 @@
-=== qemu processes ===
-none
-=== port 19101 ===
-no listeners

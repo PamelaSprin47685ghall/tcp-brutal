@@ -7,7 +7,7 @@
  * second time, then powers the machine off.  Every step prints one
  * "KMATRIX ..." line to /dev/console; qemu's serial log is the artifact.
  *
- * Build (scripts/kernel-matrix.sh does this):
+ * Build (tools/kernel-matrix.sh does this):
  *   gcc -static -nostdlib -ffreestanding -O2 -o init_x86_64 init.c
  *   aarch64-linux-gnu-gcc -static -nostdlib -ffreestanding -O2 -o init_aarch64 init.c
  *

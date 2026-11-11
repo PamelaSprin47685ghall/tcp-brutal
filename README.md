@@ -33,10 +33,7 @@ share in the last
 the largest that fits the 15 MiB replay ring, up to 64); an
 older loss stays in the carrier's TCP send queue and TCP retransmits it. It
 rides both `profile=raw` and the HTTP chunk container; in the HTTP profile one
-chunk body is exactly one 48-byte FEC record (`TBT_FEC_CONV=0x100c`; 0x100b
-was the 0.8.0 cut, 0x100a the 0.7.0 cut, 0x1009 was the 0.6.0 cut, 0x1008 and
-0x1007 were the parallel 0.5.0 cuts, 0x1006 was the adaptive cut, 0x1005 was
-the 0.2.2 stream-id cut, 0.1.0 used `0x1001`),
+chunk body is exactly one 48-byte FEC record (`TBT_FEC_CONV=0x100c`),
 while the request line, headers and chunk framing stay
 plaintext. `mode=grouped` splits the carriers into `groups` groups of `n` DATA
 plus `m` parity shares, `carriers = groups * (n + m)`, up to 256; the production
@@ -64,9 +61,8 @@ stays `adaptive=off`, so a fixed test shape keeps its configured `n/m`.
 `adaptive=off` always wins; `session <id> adaptive=off` disables it at
 runtime. Shapes with `n + m != 8` are not implemented for the GF(2) family.
 
-One session carries one FEC flow (wire `0x100c`). The 0.6.0 subframe mux and
-its receive-window record are gone, so a DATA or PARITY payload is plain
-application bytes again. An 8 KiB write becomes one full DATA share as the
+One session carries one FEC flow (wire `0x100c`). There is no subframe mux:
+a DATA or PARITY payload is plain application bytes. An 8 KiB write becomes one full DATA share as the
 write completes (cut-through); `TBT_FEC_SHORT_MS` (2) covers only the
 interactive tail. A 1x256 block is 128 DATA shares followed by its parity
 shares. The 36-byte OPEN with `route_slot`/`target_port`, the 64-byte
@@ -74,9 +70,8 @@ shares. The 36-byte OPEN with `route_slot`/`target_port`, the 64-byte
 bit-plane64 mapping stay. The stream id still rides in the FEC header
 (`0x1005`), so a queued old-stream record cannot reach a new stream.
 
-This tree implements C1–C8 of [DESIGN.md](DESIGN.md), plus the FEC v6 grouped
-data plane, adaptive Phase 1, and the 256-carrier extension: the `/proc`
-surface, the
+The tree implements the FEC v6 grouped data plane, adaptive Phase 1 and the
+256-carrier extension: the `/proc` surface, the
 listener and the far side, spares and carrier replacement with the RETIRE
 handshake, duplication with the replay ring, hole repair from the retained
 bytes, and the `http-kal`/`http-kal-drip` containers. A gap in a carrier's
@@ -114,21 +109,40 @@ payload bytes are queued.
 - Root to load the module and to write `/proc/net/tbtun/*` (the files are `0600`;
   the debug-only `http` is `0400`).
 
+## Layout
+
+| Path | Contents |
+| --- | --- |
+| `src/kernel/` | kernel module sources and `Kbuild` |
+| `src/client/` | userspace client |
+| `tests/unit/` | host conformance tests |
+| `tests/bench/` | codec benchmarks and calibration |
+| `tests/tools/` | guest-side helpers (`tbt_burst`, `tbt_ping`, `tbt_flood`) |
+| `tests/qemu/` | QEMU boot harness |
+| `tests/throughput/` | throughput harness and recorded runs |
+| `tests/adversarial/` | attack and crash suite |
+| `tests/http/` | RFC 9112 generator and audit |
+| `tests/calib/` | codec calibration data |
+| `tests/manual/` | manual acceptance scripts |
+| `tools/` | build, DKMS, lint and QA scripts |
+| `deploy/` | packaging for the two-host deployment |
+| `docs/` | design and build notes |
+| `build/` | out-of-source build output (generated) |
+
+Every target writes under `build/`: `build/kernel/tbtun.ko`, `build/bin/`,
+`build/obj/` and `build/lib/`. The source tree stays clean.
+
 ## Build
 
 ```sh
 make check
 ```
 
-`check` builds `tbtun.ko` and then runs the host tests — grammar, fuzz, the
+`check` builds `build/kernel/tbtun.ko` and then runs the host tests — grammar, fuzz, the
 HTTP container, and the reorder/ack/control/multistream/anchor models — which
 need no root, no module and no kernel headers.
 `make host-test` runs only those tests.
 
-`test_parse` now reports 357 checks; 365 was the older snapshot taken before the
-five dead keys `framing`/`chunk`/`max_retry`/`dev`/`uid` and their parse cases
-were deleted. What was deleted is the tests for keys already removed from the
-grammar, not behavioural coverage; `make check` still reports 0 failures.
 
 If the distribution's headers are not installed, the build can use an extracted
 header payload instead of `/lib/modules/$(uname -r)/build`; see
@@ -137,60 +151,38 @@ produces, and the pahole gotchas. `make check` sources that environment itself
 when it is present.
 
 The multi-kernel compatibility check (5.15, 6.6, 6.12 and 7.0 on x86_64 and
-aarch64, including a QEMU load check) is `scripts/kernel-matrix.sh`; see
+aarch64, including a QEMU load check) is `tools/kernel-matrix.sh`; see
 [docs/kernel-matrix.md](docs/kernel-matrix.md) for the cells, the current
 results and their cost.
 
 ## Packaging
 
 The module version has one authority: `TBT_VERSION_MAJOR/MINOR/PATCH` in
-`tbtun/tbt_uapi.h` (currently `0.10.0`). The wire
+`src/kernel/tbt_uapi.h` (currently `0.10.0`). The wire
 version is `TBT_WIRE_VERSION=1`, with `TBT_CONV=0x000d` for the 32-byte frames
 and `TBT_FEC_CONV=0x100c` for the 48-byte FEC header and the 64-byte
 `FEC_CFG`/`FEC_FBK` records; all three are independent of
-the module version. `TBT_CONV 0x0005` removed the unused PREDICT/CANCEL
-placeholder frames: a peer that still sends one fails the header check and its
-carrier closes, and a 0x0004 peer is refused at the first header because its
-conv does not match.
+the module version. A peer whose conv does not match is refused at the first
+header, and a FEC record with the wrong `TBT_FEC_CONV` closes its carrier, so
+both ends must run the same build.
 
-The 36-byte OPEN stays as 0.6.0 defined it: the 32-byte FEC group bitmap, the
+The 36-byte OPEN carries: the 32-byte FEC group bitmap, the
 little-endian route slot (the near side's listen mapping), and the
 little-endian target port for that slot. Zero keeps the far side's configured
-port; any other value must equal it. `TBT_WIRE_VERSION_V6` is 9, so a
-0.8.x FEC peer is refused at the first HELLO rather than at the first OPEN:
+port; any other value must equal it. `TBT_WIRE_VERSION_V6` is 9:
 version 9 grows the HELLO body to 90 bytes with a `boot_epoch` and a 128-bit
 SipHash tag over the session-naming bytes. A configured `crypto_key=` (the
 256-bit PSK) proves the tag, so a restarted client may present a fresh crypto
 nonce and a client whose address changed may re-anchor; without the key the
 tag is absent and the HELLO stays unauthenticated.
 
-The current FEC wire is `0x100c`: `0x1002` added FIN's 16-byte body
-(`pkt_end`, `pkt_base`) and the PARITY block marker (`win_len=0`,
-`payload_len=0`, `epoch=0`); `0x1003` grew the ACK to 24 bytes and added
-`deliver_bytes`; `0x1004` made NACK a 64-byte bitmap repair request; `0x1005`
-added the 64-bit stream id at header +32 and grew the header to 48 bytes;
-`0x1006` grew `FEC_CFG` to 48 bytes, made `FEC_FBK` a 48-byte report, and moved
-HELLO body[0] to version 3 for the adaptive shape switch. `0x1007` was the
-multi-stream cut: stream-local FEC seq/block ids, a 32-byte OPEN group bitmap,
-and ALLOC (0x36); HELLO body[0] moved to version 4. A 0.2.x peer is refused at
-the first HELLO: both ends must be upgraded together. `0x1008` grew `FEC_CFG`
-and `FEC_FBK` to 64 bytes, restored the full 256-bit carrier bitmap, and moved
-HELLO body[0] to version 5; the parallel 0.5.0 multistream line also took
-0x1008, for the 32-byte subframes and the receive-window record (0x37), so
-the two revisions carry different meanings. `0x1009` was the 0.6.0 merge cut
-that unified them: the 36-byte OPEN with `route_slot`/`target_port`, the
-64-byte `FEC_CFG`/`FEC_FBK`, the GF(16) bit-plane64 mapping, the 32-byte subframe
-stream, the 16-stream 1x256 plane and the receive-window record (0x37) were
-one contract, and HELLO body[0] was version 6. 0.7.0 removes that mux, the
-receive-window record and `FEC_ALLOC`: `0x100a` keeps the 48-byte header,
-every offset and the record types 0x30..0x35, and HELLO body[0] moves to
-version 7. All three wire version constants move together; a 0.6.0 peer
-fails the first HELLO and the
-first FEC conv check, so both ends must be upgraded together.
-`scripts/mkdkmsconf.sh` derives
+The current FEC wire is `0x100c`. Its record layout, offsets and record types
+are the contract in `src/kernel/tbt_uapi.h`; a peer with any other conv is
+refused at the first FEC record.
+`tools/mkdkmsconf.sh` derives
 `PACKAGE_VERSION="<major>.<minor>.<patch>"`; `dkms.conf` is generated by
 `make dkms.conf` / `make dkms-tarball`, so do not edit it by hand.
-`scripts/install_dkms.sh` reads the same value with
+`tools/install_dkms.sh` reads the same value with
 `mkdkmsconf.sh --version`. For development builds, `TBT_DKMS_GIT_SUFFIX=1`
 adds `.r<commits>.<sha>`; the default is the pure semantic version.
 
@@ -217,11 +209,10 @@ listener and carrier.
 
 ### Production deployment
 
-Both ends must run the same fixed build. The 2026-11-06 field crash was memory
-corruption inside the module: `tbt_carrier_new_locked()` allocated the
-per-carrier `parser` and `http_rx` with `kmalloc()`, so a reused slab object
-could leave `parser->have` dirty, and `tbt_http_rx_parse()` uses that value as
-a `memmove()` length. The symptom is an `Internal error: Oops` within seconds
+Both ends must run the same fixed build. A stale build can corrupt kernel memory. The per-carrier `parser` and
+`http_rx` must be zeroed: a reused slab object otherwise leaves
+`parser->have` dirty, and `tbt_http_rx_parse()` uses that value as a
+`memmove()` length. The symptom is an `Internal error: Oops` within seconds
 of load, often in an unrelated process, because the damage is slab-wide. A
 mixed pair does not degrade gracefully: the unfixed end corrupts memory on its
 own, whatever the other end does.
@@ -265,15 +256,10 @@ One controlled check, run once, never in a loop:
 
 ```sh
 # against a tunnel already configured to listen on 127.0.0.1:9001
-timeout 10 ./host/tbt_burst 127.0.0.1 9001 1 5 interleaved   # 1 MiB over 5 s
+timeout 10 ./tests/tools/tbt_burst 127.0.0.1 9001 1 5 interleaved   # 1 MiB over 5 s
 cat /proc/net/tbtun/stats | head -3
 dmesg | tail -20
 ```
-
-A retry hides the bug it is meant to expose: the second load starts on a slab
-the first one already damaged, so a clean second run proves nothing. The full
-harness — identity, visibility preflight, join gate, one burst, evidence
-collection — is `review/wan-experiment/arm64/controlled-c8-once.sh`.
 
 ## Two-host example
 
@@ -537,72 +523,6 @@ re-sending its tunnel line, which replaces the tunnel and its session. Reserve
 every block in use in `net.ipv4.ip_local_reserved_ports`, not only the global
 one.
 
-## Verified performance
-
-Measured with [benches/](benches/), which drives the same operator surface from
-a KVM guest: virtio-net, one 10 Mbit htb class per source port with
-`delay 20ms 10ms` netem, 40 MiB sent through `tbt_burst`'s strict
-send-then-read phase (byte-exact), one configuration per boot. The control is a
-single `dd | nc` flow on one shaped 5-tuple. `app` is the near tunnel's
-`submit_bytes` rate; `wire/app` is whole-run carrier bytes over application
-bytes; `retx_ppm` is copies per million unique DATA records. The module under
-test is sha256 `0b8f0006…`, the module the final tree `f1282df` builds; raw
-CSVs, consoles and the acceptance table are in `review/final-bench/`.
-
-| Carriers | Control (Mbit/s) | App (Mbit/s) | App/control | wire/app | retx_ppm | strict / rc | CSV |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `n=1` | 2.43 | 3.11 | 1.28x | 1.0198 | 0 | `strict=1`, `rc=0` | `review/final-bench/` (`20261106T003712`) |
-| `n=4` | 2.73 | 10.74 | 3.93x | 1.0138 | 2,333 | `strict=1`, `rc=0` | `review/final-bench/` (`20261106T004314`) |
-| `n=8` | 2.58 | 22.36 | 8.67x | 1.0123 | 2,041 | `strict=1`, `rc=0` | `review/final-bench/` (`20261106T004635`) |
-| `n=16` | 2.63 | 32.75 | 12.45x | 1.0268 | 12,719 | `strict=1`, `rc=0` | `review/final-bench/` (`20261106T004925`) |
-
-Every row is byte-exact, with `holes_unrecoverable=0`; the whole-run `wire/app`
-range is 1.0123–1.0268 and `retx_ppm` is 0–12,719, so every row clears the
-current targets (`wire/app < 1.2`, `retx_ppm < 100k`). The `wire/app` column is
-the whole-run ratio; the CSV's 2 s window reads 1.0333 at `n=4`. One earlier
-`n=4` run of the same module (`0b8f0006…`) measured 8.38 Mbit/s (`wire/app`
-1.0146, `retx_ppm` 1,842) and another 11.37 Mbit/s, so the spread is real; the
-ratio is the claim. `n=16` is 10.5x the one-carrier app rate. The full matrix
-and CSVs are in `review/final-bench/summary.md`.
-
-Acceptance evidence for tree `f1282df` (module `0b8f0006…`, evidence commit
-`af3b9ba`): host, QEMU A–K (11/11) and adversarial (18 groups plus the crash
-repro, 91 PASS / 0 FAIL / 0 SKIP in 284.4 s) results are in `review/final/`
-and `review/final-qemu/`; throughput, flush and writer results are in
-`review/final-bench/`; the DKMS install/load/unload run on a clean guest kernel
-is in `review/dkms-qemu/`.
-
-The writer probes cover two contracts. `pub.writer`, where the application
-never reads, stays blocked inside `write()`: the 100 MiB offer is still blocked
-at `sent=73400320/104857600` and the 1 GiB offer at
-`sent=74448896/1073741824`, both with `errno=0 eagain=0 blocked=1`, so there is
-no `EAGAIN` (the probe sets no `SO_SNDTIMEO`); memory stays bounded
-(`oom=0->0`), and `flush` returns the memory in 0.03 s. `pub.writer_drain` and
-`pub.writer_drain_1g`, where the application drains, complete: the 100 MiB run
-reports `sent=104857600/104857600`, `got=104857600/104857600`, 71.5 MiB/s in
-1.40 s; the 1 GiB run reports `sent=1073741824/1073741824`,
-`got=1073741824/1073741824`, 69.9 MiB/s in 14.64 s. Both report
-`errno=0/0 eagain=0 blocked=0 oom=0->0`, and `flush` takes 0.01 s. See
-`review/final/README.md`.
-
-The ratio is still the claim: `N` five-tuples beat one. These are laboratory
-numbers from QEMU/slirp with one 10 Mbit htb class per source port and netem
-`delay 20ms 10ms`; they are not an ISP measurement. The absolute values depend on
-this QEMU/slirp path, not on a 10 Mbit bucket.
-
-The cost table below is from earlier bench runs; the latest `n=1`/`n=4`
-throughput runs above did not re-measure it.
-
-| Cost | Measured |
-| --- | --- |
-| `http-kal` container vs `raw` | about 1% more bytes (one chunk per ~4 KB record) and about 3.5 percentage points more system CPU per vCPU |
-| Hole repair, per-path loss | the knee is at the first 1%: app throughput 9.85 → 6.91 Mbit/s, then flat to 5.40 at 10%; `holes_unrecoverable` stayed 0 at 1%, 5% and 10% |
-| Latency, 1 KB echo | +156 µs at p50, +274 µs at p99 over the direct path; one repaired hole moves p99 to about 24 ms, with a 32 ms maximum |
-
-These are laboratory numbers from one host. They say nothing about whether an
-ISP prioritises HTTP; that is [DESIGN.md §17](DESIGN.md)'s measurement, on a
-real line.
-
 ## Known limitations
 
 - **No DNS.** Every address is a literal: `listen=`, `peer=`, and `target=`
@@ -681,12 +601,7 @@ real line.
 - **Trust on first use (TOFU) unless pinned.** Without `nonce=` and `peer=`, the first
   HELLO fixes both the nonce and the anchor, and the module logs one warning.
   Pin both on an untrusted path.
-- **Throughput varies run to run.** The final `n=4` run measured 10.74 Mbit/s
-  (`retx_ppm` 2,333, whole-run `wire/app` 1.0138); one earlier run of the same
-  module measured 8.38 Mbit/s (`retx_ppm` 1,842, `wire/app` 1.0146) and another
-  11.37 Mbit/s. The final `n=1`/`n=8`/`n=16` rows are 3.11/22.36/32.75 Mbit/s;
-  the full matrix is in `review/final-bench/`.
-- **The sender window is the larger of `k × mean BDP` and the carrier
+ `k × mean BDP` and the carrier
   aggregate.** `tx_window_bytes=0` takes `sum(snd_wnd)` (or `n_car × per-carrier
   BDP` when no window sample exists) as a floor over the single-flow `k × mean
   BDP` target, with a bootstrap floor of `max(1 MiB, n_car × 8 × payload)`.
@@ -715,24 +630,6 @@ real line.
   strict send-then-read transfer also holds the echo in the public socket's
   receive queue; the guest's used memory peaked at about twice the 40 MiB
   transferred (75 MB → 163 MB in the memory row). Size the guest accordingly.
-- **DKMS install was verified in a clean guest kernel, not on this host.** The
-  host cannot run it: `sudo` needs a password, and neither `dkms` nor the
-  matching kernel headers is installed. In a QEMU guest booting the clean
-  `7.2.9-1-MANJARO` kernel with the real `dkms 3.4.4` and the `linux72` headers,
-  `scripts/install_dkms.sh` staged, built and installed `tbtun/0.0.1`,
-  `modprobe` published `/proc/net/tbtun`, a tunnel line round-tripped
-  canonically, `rmmod` unloaded it, a second `modprobe`/`rmmod` passed, and
-  `--uninstall` removed every entry and file: 38 steps, 39 checks, 0 failures
-  (`review/dkms-qemu/`). Do not read that as a host install.
-- **Builds older than the 2026-11-07 fix corrupt kernel memory.** The
-  per-carrier `parser` and `http_rx` were allocated with `kmalloc()`, so a
-  reused slab object could leave `parser->have` dirty and
-  `tbt_http_rx_parse()` used it as a `memmove()` length; the field host
-  produced six Oopses within seconds of load. Fixed builds zero both objects
-  (`kzalloc()`, plus an explicit `memset()` on the reuse path), and
-  `tbt_rx_parse_pending()` refuses a carrier whose `have` exceeds its buffer
-  as a second line of defence. Nothing on the wire distinguishes the two
-  builds; check `srcversion` on both ends.
 
 ## Operations
 
@@ -780,8 +677,7 @@ The module itself must be loaded first, by `/etc/modules-load.d/tbtun.conf` or
   `tbt_http_rx_parse → tbt_rx_parse_pending → tbt_car_rx_work` in the stack is
   the uninitialised-parser bug, not a network fault. Check
   `cat /sys/module/tbtun/srcversion` on both ends against the artifact you
-  meant to load. The 2026-11-06 evidence and the collection procedure are in
-  `review/wan-experiment/arm64/stop-65-down-20261106T2250Z/forensics-65/`.
+  meant to load.
 - Unloading the module closes every listener and carrier; connected clients see
   EOF, not a hang.
 
@@ -790,9 +686,9 @@ The module itself must be loaded first, by `/etc/modules-load.d/tbtun.conf` or
 The `http-kal` profile is a bet that the ISP classifies HTTP/1.1 as priority
 traffic. It is not a fact, and the module cannot make a classifier privilege
 anything. The bet is cheap to test, and testing it is part of using this
-software: [DESIGN.md §17](DESIGN.md) gives a ten-minute procedure with four
-configurations — plain TCP, one `http-kal` carrier, four carriers, four `raw`
-carriers — and tells you what each result means.
+software: a ten-minute run with four configurations — plain TCP, one
+`http-kal` carrier, four carriers, four `raw` carriers — tells you what each
+result means.
 
 If the measurement shows no gain from the HTTP profile, set `profile=raw`: the
 per-5-tuple gain is independent of it. If it shows no gain from `N + M` either,

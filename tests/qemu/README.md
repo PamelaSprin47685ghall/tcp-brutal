@@ -31,9 +31,9 @@ probes, all through the operator surface only (`echo` into `/proc/net/tbtun/*`):
 | L | FEC v6 over the raw container: `n=4 m=2 carriers=6`, 256 KiB byte-exact |
 | M | FEC v6 over HTTP: `n=4 m=2 carriers=6`, 256 KiB byte-exact |
 | N | FEC v6 grouped over HTTP, the production shape: `n=4 m=4 carriers=256` (32 groups), 16 MiB interleaved byte-exact, all 256 carriers up, `http_parse_err=0`, `tx_ack` full on both ends, every c9 counter zero, no new kernel warning. Before carrier 0 is taken down, `drop_ppm` drops every FEC record scheduled for it, which reproduces the lost-share block (3 DATA + 4 PARITY) deterministically |
-| P | one small write and one reply with the socket still open (`host/tbt_ping`): 37, 8191, 8192, 8193, 65536 and 262144 bytes, the same 37-byte exchange with `crypto=on`, two connections in one session, and a real HTTP request/response handshake |
+| P | one small write and one reply with the socket still open (`tests/tools/tbt_ping`): 37, 8191, 8192, 8193, 65536 and 262144 bytes, the same 37-byte exchange with `crypto=on`, two connections in one session, and a real HTTP request/response handshake |
 | O | the T5.2 smoke's shape (`profile=http-kal`, `n=1 m=1`, `carriers=2`, `fec=on`, `mode=grouped`) with `crypto=off`, with `crypto=on`, with carrier 0 taken down mid-transfer, and with a 700 ms loopback delay that makes a dial outlive one `kernel_connect` wait window |
-| Q | the HND0 hang shape: 256 carriers plus `host/tbt_flood` connections that never complete HELLO, with carrier-down waves. The far's provisional peak must stay at its cap (`n + n/4`), the list must drain, userspace must keep running, and a legitimate replacement must still join |
+| Q | the HND0 hang shape: 256 carriers plus `tests/tools/tbt_flood` connections that never complete HELLO, with carrier-down waves. The far's provisional peak must stay at its cap (`n + n/4`), the list must drain, userspace must keep running, and a legitimate replacement must still join |
 | R | link-flap-then-replace: every carrier's near->far egress is blackholed with netem, so the near declares the carriers lost and dials newer generations while the far (long `carrier_stall_ms`, no RETIRE received) still holds the old sockets ESTABLISHED. The replacement's HELLO must supersede the live slot (`join_dup` stays 0, the far's own `lost` stays 0) and the burst comes back byte-exact |
 | T | the deployed pair in one guest: userspace `tbt_client` near in front of the kernel far. A second OPEN while the far's one flow is live is refused with RST on the ingress path and resets the application in under 3 s; after the held stream closes the far releases the flow and accepts the next connection |
 | U | near-client restart inside the far's 2 s tombstone window: no startup delay, the new incarnation's first 64 KiB echo is byte-exact, the far retires the previous tombstone, and no `dropped OPEN for tombstoned sid` warning fires |
@@ -186,7 +186,7 @@ happens: the strict phase is byte-exact every time.
 | kernel image | `linux72` package, `usr/lib/modules/<rel>/vmlinuz` | `~/.cache/tbtun-build/dl/vmlinuz-<rel>` |
 | busybox | `busybox` package (static) | `~/.cache/tbtun-build/busybox/usr/bin/busybox` |
 | module | `make check` | `./tbtun.ko` |
-| checker | built from `host/tbt_burst.c` | `./host/tbt_burst` |
+| checker | built from `tests/tools/tbt_burst.c` | `./tests/tools/tbt_burst` |
 | NIC and qdisc modules | `/usr/lib/modules/<rel>/kernel`, decompressed | `~/.cache/tbtun-build/qemu/net/` |
 | `tc` | the host's `/usr/bin/tc`, with its libraries | copied into the image |
 

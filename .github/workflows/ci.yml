@@ -32,17 +32,17 @@ jobs:
           make host-test-san
 
       - name: Run the static invariant checks
-        run: bash review/lint.sh
+        run: bash tools/lint.sh
 
       - name: Build the DKMS tarball
         run: |
           make dkms-srcs-check dkms-tarball
           tar tzf dkms.tar.gz > /tmp/dkms.list
-          for path in dkms.conf Makefile tbtun/tbtun.h tbtun/tbt_core.c \
-              scripts/mkdkmsconf.sh; do
+          for path in dkms.conf Makefile src/kernel/tbtun.h src/kernel/tbt_core.c \
+              tools/mkdkmsconf.sh; do
             grep -qx "./dkms_source_tree/$path" /tmp/dkms.list
           done
-          version=$(./scripts/mkdkmsconf.sh --version)
+          version=$(./tools/mkdkmsconf.sh --version)
           tar xOf dkms.tar.gz ./dkms_source_tree/dkms.conf > /tmp/dkms.conf
           grep -qx "PACKAGE_VERSION=\"$version\"" /tmp/dkms.conf
 
@@ -85,7 +85,7 @@ jobs:
           tar xzf dkms.tar.gz -C /tmp/dkms-check
           (cd /tmp/dkms-check/dkms_source_tree &&
             make KERNEL_DIR="${{ steps.kernel.outputs.kdir }}" all)
-          ko=/tmp/dkms-check/dkms_source_tree/tbtun.ko
+          ko=/tmp/dkms-check/dkms_source_tree/build/kernel/tbtun.ko
           test -s "$ko"
           test "$(modinfo -F name "$ko")" = tbtun
           modinfo -F vermagic "$ko"

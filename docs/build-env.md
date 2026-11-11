@@ -31,7 +31,7 @@ make host-test      # both host tests, no kernel tree needed
 make host-test-san  # the same with AddressSanitizer and UBSan
 ```
 
-`host-test` runs `host/test_parse` (the `/proc` grammar) and `host/test_fuzz`
+`host-test` runs `tests/unit/test_parse` (the `/proc` grammar) and `tests/unit/test_fuzz`
 (200 000 random record buffers through every split size, 200 000 random length
 prefixes, an adversarial set, and the full frame-type × body-length matrix).
 `host-test-san` rebuilds both with `-fsanitize=address,undefined`; a compiler
@@ -59,7 +59,7 @@ payload's `Module.symvers`.
 
 - **pahole version must match.** `CONFIG_PAHOLE_VERSION=132`; the tree selects
   `--btf_features=...` flags by that number, so use pahole 1.32. A missing pahole
-  is a hard error (`scripts/gen-btf.sh: line 72: pahole: command not found`,
+  is a hard error (`tools/gen-btf.sh: line 72: pahole: command not found`,
   exit 127), not a silent BTF skip, because the tree ships `vmlinux`.
 - **`PAHOLE` in the environment is ignored.** The kernel Makefile assigns
   `PAHOLE = pahole`, which overrides the environment. Pass it on the *make
@@ -81,13 +81,13 @@ payload's `Module.symvers`.
 
 Building never needs root. Loading does: `insmod` requires `CAP_SYS_MODULE`.
 
-`scripts/install_dkms.sh` is the exception: it writes `/usr/src` and
+`tools/install_dkms.sh` is the exception: it writes `/usr/src` and
 `/lib/modules`, so it needs root, and it requires the distribution headers at
 `/lib/modules/$(uname -r)/build`. The extracted payload below serves `make` and
-`scripts/build.sh` only; DKMS resolves its own kernel source tree and does not
+`tools/build.sh` only; DKMS resolves its own kernel source tree and does not
 read `env.sh`. On a host without the headers package, stage the sources with
-`DKMS_ROOT=<writable dir> scripts/install_dkms.sh --stage-only` and build with
-`scripts/build.sh`.
+`DKMS_ROOT=<writable dir> tools/install_dkms.sh --stage-only` and build with
+`tools/build.sh`.
 
 > **Warning:** on this box `pkexec` runs commands as root *without*
 > authentication, and no `/usr/share/polkit-1/rules.d` rule appears to grant

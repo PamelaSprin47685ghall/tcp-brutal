@@ -1,6 +1,6 @@
 # Kernel matrix
 
-`scripts/kernel-matrix.sh` builds tbtun against several kernel series on two
+`tools/kernel-matrix.sh` builds tbtun against several kernel series on two
 architectures, runs the host tests in every cell, and loads the module in QEMU
 where a QEMU binary for the architecture exists.  It is the 0.4.x compatibility
 check.  It does not install anything and it does not run on real hardware.
@@ -71,10 +71,10 @@ exist.  The module log keeps the warnings.
 ## Running
 
 ```sh
-scripts/kernel-matrix.sh                     # the whole matrix, load checks on
-scripts/kernel-matrix.sh --no-load           # build + host tests only
-scripts/kernel-matrix.sh --only 6.12.116:x86_64 --keep
-scripts/kernel-matrix.sh --list
+tools/kernel-matrix.sh                     # the whole matrix, load checks on
+tools/kernel-matrix.sh --no-load           # build + host tests only
+tools/kernel-matrix.sh --only 6.12.116:x86_64 --keep
+tools/kernel-matrix.sh --list
 ```
 
 | Option | Meaning |
@@ -134,7 +134,7 @@ tests or the load check: the source refuses that series and the 5.15 headers
 lack `pde_data`.  The host tests still run, and only the module and the guest
 check are skipped.
 
-The 5.15 cells fail before any API check can run: `tbtun/tbtun.h` contains
+The 5.15 cells fail before any API check can run: `src/kernel/tbtun.h` contains
 `#error "tbtun needs Linux 6.1 or newer (README, DESIGN §2)"`, and the compiler
 also reports `pde_data` missing.  The matrix records this as a `kernel-api`
 failure, which is the intended boundary, not a regression.
