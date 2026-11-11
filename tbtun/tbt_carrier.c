@@ -11,8 +11,9 @@
  *     kernel_connect blocks.
  *   - adopting a far-side carrier: the accepted socket becomes a provisional
  *     carrier until its HELLO names a slot (DESIGN.md §9.5).
- *   - writing records with tcp_sendmsg_locked through a private struct proto,
- *     so a carrier never needs a kprobe and never exposes a userspace API.
+ *   - writing records with tcp_sendmsg_locked on the carrier's own TCP
+ *     socket, so a carrier never needs a kprobe and never exposes a
+ *     userspace API.
  *   - draining carrier input with tcp_read_sock and feeding tbt_rx.
  *   - liveness: a 50 ms poll that re-arms queues and asks the session's
  *     replacement worker to dial a new carrier when one is dead. An
@@ -99,38 +100,6 @@ static u64 tbt_stall_dead_ns(u64 stall_ns)
     return min_t(u64, 4 * stall_ns, TBT_STALL_DEAD_MAX_NS);
 }
 
-// A private copy of tcp_prot (and of tcpv6_prot for IPv6) so carriers carry
-// our sendmsg/recvmsg. Same shape as the deleted brutal_sockopt.c used, for a
-// different reason: there we wanted a setsockopt hook, here we want the TX/RX
-// to be ours without a kprobe. The copy must match the socket's own family:
-// the proto owns the slab the sock was allocated from, so releasing an IPv6
-// socket through the IPv4 proto would free it to the wrong cache.
-static struct proto tbt_tcp_prot __ro_after_init;
-#if IS_ENABLED(CONFIG_IPV6)
-extern struct proto tcpv6_prot;
-static struct proto tbt_tcpv6_prot __ro_after_init;
-#endif
-
-/* The private proto installed on a carrier socket, and the core proto it must
- * be restored to. Both choose by the socket's own family, never by config. */
-static struct proto *tbt_car_proto(u8 family)
-{
-#if IS_ENABLED(CONFIG_IPV6)
-    if (family == TBT_AF_INET6)
-        return &tbt_tcpv6_prot;
-#endif
-    return &tbt_tcp_prot;
-}
-
-static struct proto *tbt_car_core_proto(u8 family)
-{
-#if IS_ENABLED(CONFIG_IPV6)
-    if (family == TBT_AF_INET6)
-        return &tcpv6_prot;
-#endif
-    return &tcp_prot;
-}
-
 static void tbt_car_connect_work(struct work_struct *w);
 int tbt_carrier_send_raw(struct tbt_carrier *c, const void *data, size_t len);
 static void tbt_pump_work(struct work_struct *w);
@@ -214,11 +183,6 @@ u8 tbt_carrier_profile(const struct tbt_session *sess, u8 index, bool spare)
     if (p == 1 && spare)
         p = 2;
     return p;
-}
-
-static void tbt_carrier_install_proto(struct sock *sk)
-{
-    sk->sk_prot = tbt_car_proto(sk->sk_family);
 }
 
 /* Take one reference on the published socket. The RCU read section covers
@@ -2677,7 +2641,6 @@ static void tbt_carrier_unpublish(struct tbt_session *sess,
         /* write_lock_bh() inside restore waits for every in-flight callback;
          * after it returns no new pump/rx wake can be queued from sk_user_data. */
         tbt_sk_ops_restore(s->sk, &sess->def_ops);
-        sock_replace_proto(s->sk, tbt_car_core_proto(s->sk->sk_family));
     }
     rcu_assign_pointer(c->sk, NULL);
     mutex_unlock(&c->tx_lock);
@@ -3667,7 +3630,6 @@ static void tbt_car_connect_work(struct work_struct *w)
         atomic64_inc(&sess->car_bbr_ok);
     else
         atomic64_inc(&sess->car_bbr_fail);
-    tbt_carrier_install_proto(s->sk);
     c->sock = s;
     rcu_assign_pointer(c->sk, s->sk);
 
@@ -3912,10 +3874,6 @@ int tbt_carrier_init(void)
                  TBT_MAX_CARRIERS_LIMIT);
     BUILD_BUG_ON(TBT_STREAM_F_SCHED_TARGET >= BITS_PER_LONG);
     tbt_carrier_birth_checks();
-    tbt_tcp_prot = tcp_prot; // field-by-field copy of the live TCP proto
-#if IS_ENABLED(CONFIG_IPV6)
-    tbt_tcpv6_prot = tcpv6_prot; // the same copy for the IPv6 socket cache
-#endif
     return 0;
 }
 
@@ -3947,7 +3905,6 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
         return -ENOMEM;
     c->provisional = true;
     tcp_sk(newsock->sk)->nonagle = TCP_NAGLE_OFF;
-    tbt_carrier_install_proto(newsock->sk);
     c->sock = newsock;
 
     /* Publish the object on prov before any callback can find it. A softirq
@@ -3996,9 +3953,8 @@ int tbt_carrier_adopt(struct tbt_tunnel *t, struct socket *newsock)
     atomic_set(&c->connected, 1);
     sess->rx_adopt_events++;
     /* Assert the wiring we just installed. A carrier that is connected but never
-     * given our callbacks/proto looks exactly like a silent peer. */
+     * given our callbacks looks exactly like a silent peer. */
     WARN_ON_ONCE(newsock->sk->sk_data_ready != tbt_car_ready);
-    WARN_ON_ONCE(newsock->sk->sk_prot == tbt_car_core_proto(newsock->sk->sk_family));
     tbt_carrier_arm_rx(c);
     /* One line per connection is a console flood under a connect storm (HND0
      * logged 330 accepts/s). Keep the event visible but bounded. */

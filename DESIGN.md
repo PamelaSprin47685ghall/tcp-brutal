@@ -1856,7 +1856,7 @@ struct tbt_stream {
 struct tbt_carrier {
     struct list_head node;      /* sess->prov or sess->dead */
     struct socket *sock;
-    struct sock *sk;            /* sk_prot = &tbt_tcp_prot (§9.2) */
+    struct sock *sk;            /* kernel's tcp_prot/tcpv6_prot (§9.2) */
     struct tbt_session *sess;
     struct work_struct w_connect;
     struct work_struct w_rx;    /* tcp_read_sock -> tbt_rx */
@@ -2632,7 +2632,6 @@ kernel_bind(s, src_addr:port_from_bitmap)
 s->sk->sk_sndtimeo = 1000 ms              /* TBT_CONNECT_TIMEOUT_MS */
 tbt_connect_bounded(s, peer, peer_port)   /* blocking; 4 s total, §9.1.1 */
 tcp_sk(s->sk)->nonagle = TCP_NAGLE_OFF
-tbt_carrier_install_proto(s->sk)          /* sk->sk_prot = &tbt_tcp_prot (§9.2) */
 SO_SNDBUF = SO_RCVBUF = tbt_car_sockbuf(sess)  /* share of the window (§5.4) */
                                           /* via SO_*BUFFORCE, plain fallback */
 sk_user_data = c; sk_data_ready/sk_write_space/sk_state_change = tbt_car_*
@@ -2660,13 +2659,19 @@ far logged `awaiting HELLO`. `connect_retry` counts the dials that outlived one 
 a path whose SYN round trip (or a retransmission) needs a second wait is visible without a
 failure.
 
-### 9.2 The carrier `sk_prot` override
+### 9.2 Carriers keep the core `sk_prot`
 
-The carrier installs a `__ro_after_init` copy of `tcp_prot` on `sk->sk_prot`
-(`tbt_carrier_install_proto()`), but the copy exists for lifetime, not for I/O. It keeps
-`sk_prot->destroy` in module text while the socket belongs to the module;
-`tbt_carrier_release()` restores `&tcp_prot` with `sock_replace_proto()` before
-`sock_release()`, so a socket that lingers in FIN_WAIT cannot call into unloaded code.
+A carrier socket keeps the TCP proto the kernel installed. The module overrides no
+`struct proto` field: sending calls `tcp_sendmsg_locked()` directly, receiving calls
+`tcp_read_sock()`, and the carrier's behaviour lives in its `sk_data_ready`,
+`sk_write_space` and `sk_state_change` callbacks. An earlier version installed a
+`__ro_after_init` copy of `tcp_prot` on `sk->sk_prot`, but it changed no field. The copy
+only turned a module-owned data object into the socket's proto, which left a socket that
+outlived the module pointing into unmapped `.data`, and it required a
+`sock_replace_proto()` restore before `sock_release()`. Both the copy and the restore are
+gone. A released socket still returns to the cache it was allocated from, because
+`sk_prot_free()` uses `sk_prot_creator`, which neither path ever changed.
+
 There is no `.sendmsg`/`.recvmsg` override.
 
 Sending calls `tcp_sendmsg_locked()` directly; receiving drains the socket with
@@ -2753,7 +2758,7 @@ segment, which is what a real client does.
 Not supported on carriers. The QoS profile's premise is a *plaintext* property for a parser-based
 classifier: the header block must be visible. If confidentiality is required, wrap the whole
 path in WireGuard. A TLS ULP on a carrier would hide the header block from the classifier
-and also conflict with our `sk_prot` override; the config parser rejects `profile=tls` with a
+and also conflict with the carrier's core TCP socket; the config parser rejects `profile=tls` with a
 clear error pointing at `raw`-inside-WireGuard.
 
 ### 9.5 Far side: accept, parse, pair
@@ -3014,7 +3019,7 @@ covers; no known leak remains but a long-soak kref/RCU audit is still worthwhile
 | R10 | Congestion collapse from duplicates | Stock CC, `max_inflate` cap (§5.4). |
 | R11 | **Kernel-only listener surprises the app** (no fd visible) | Documented: apps must connect to the tunnel port, not bind it. Apps that bind the port need REDIRECT (§8.6). |
 | R12 | No DNS | Config is literal only; the operator resolves names out-of-band (e.g. `dig +short`) and writes the address. |
-| R13 | `sk_prot` override + BPF sockops interactions | Refuse bind if `sock_flag(SOCK_BPF_ATTACHED)`; carriers are module-created so no foreign BPF. No repair mode is ever set. |
+| R13 | BPF sockops interactions on carrier sockets | Refuse bind if `sock_flag(SOCK_BPF_ATTACHED)`; carriers are module-created so no foreign BPF. No repair mode is ever set. |
 | R14 | `CONFIG_DEBUG_INFO_BTF_MODULES=y` requires pahole | Document in build; DKMS `MAKE` already inherits kernel config. |
 | R15 | Manjaro headers package name | Build doc: `sudo pacman -S linux72-headers` (or matching `linux-*-headers`), then `make`. |
 | R16 | Memory at 10 Gbps | `tx_window_bytes` bounds retention and the frame queue (`txq_max = tx_window + 8 chunks`) and sizes the carrier buffers from the same number; `rx_reorder_bytes` bounds the reorder tree per stream and per session; the 64 MiB delivery ring is the largest fixed cost and costs about 2× its payload in physical memory. Per session the bound is about 3× window + `rx_reorder_bytes` + 64 MiB per stream (§5.4). T8 measures the peak. |
@@ -3489,7 +3494,7 @@ belief is wrong or the classifier is SNI-based, and the design must be told (§1
 5. **IPv6 carriers (resolved)**: the dual-stack cut is implemented. Each endpoint carries
    its own family in `tbt_cfg`, one listener is bound per mapping slot on the configured
    family, the carrier dial and the target dial build a `sockaddr_in6` when the endpoint
-   is IPv6, and the `sk_prot` override copies `tcpv6_prot` for an IPv6 socket. A line may
+   is IPv6, and the carrier socket keeps that family's core proto. A line may
    mix families, but a near `srcaddrs=` must match its `peer=` family.
 5b. **`keepalive_ms` default (5 s) and `drip_ms` (1 s)**: assumptions about classifier idle
    timers (§16.4). If §17 shows carriers being reaped, lower both; the cost is PAD volume.

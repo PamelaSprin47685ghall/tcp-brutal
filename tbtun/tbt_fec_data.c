@@ -51,6 +51,13 @@ static struct tbt_fec_grouped *tbt_fec_codec_new(
 static void tbt_fec_tx_init_tick(struct tbt_session *sess, struct tbt_fec_tx *tx);
 static void tbt_fec_tx_sent_clear(struct tbt_fec_tx *tx);
 static struct workqueue_struct *tbt_fec_free_wq;
+/* Every queued output record is at most TBT_FEC_REC_MAX bytes: the seal and
+ * the replay ring both bound a record to that size, and tbt_fec_out_push()
+ * refuses anything larger. A 1 Gbps stream at S=1024 queues about 120k
+ * shares a second, so a fixed slab keeps that per-share alloc/free out of
+ * the variable-size kmalloc caches. */
+static struct kmem_cache *tbt_fec_out_cache;
+#define TBT_FEC_OUT_SLAB_SIZE (sizeof(struct tbt_fec_out) + TBT_FEC_REC_MAX)
 static void tbt_fec_rx_blk_attach_locked(struct tbt_fec_rx *rx,
                                          struct tbt_fec_blk *b);
 static void tbt_fec_rx_codec_queue_locked(struct tbt_fec_rx *rx,
@@ -366,7 +373,7 @@ static void tbt_fec_out_put(struct tbt_fec_out *o)
     if (refcount_dec_and_test(&o->refs))
     {
         tbt_fec_flow_put(o->flow);
-        kfree(o);
+        kmem_cache_free(tbt_fec_out_cache, o);
     }
 }
 
@@ -464,6 +471,12 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
     s64 queued, bytes;
     bool first = false;
 
+    /* The slab object holds exactly TBT_FEC_REC_MAX data bytes. Every
+     * producer seals a header into a TBT_FEC_REC_MAX record and the replay
+     * ring refuses a longer one, so this is a guard against a future caller
+     * that grows a record past the bound, not a live path. */
+    if (len > TBT_FEC_REC_MAX)
+        return -EMSGSIZE;
     /* A record is per-flow work. Refuse one whose flow is already dying:
      * purge may have run, and this would otherwise reach a carrier after the
      * flow left the table. A NULL flow is reserved for session-wide records
@@ -486,7 +499,7 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
         if (carrier >= sess->n_car || !sess->fec_fifo)
             return -EINVAL;
     }
-    o = kmalloc(struct_size(o, data, len), GFP_ATOMIC);
+    o = kmem_cache_alloc(tbt_fec_out_cache, GFP_ATOMIC);
     if (!o)
         return -ENOMEM;
     refcount_set(&o->refs, 1); /* the queue reference */
@@ -496,7 +509,7 @@ static int tbt_fec_out_push(struct tbt_session *sess, u16 carrier,
     {
         /* The caller raced the final put. Do not publish a record that
          * outlives its flow. */
-        kfree(o);
+        kmem_cache_free(tbt_fec_out_cache, o);
         return -ESHUTDOWN;
     }
     o->carrier = carrier;
@@ -8010,19 +8023,39 @@ int tbt_fec_data_module_init(void)
 {
     tbt_fec_free_wq = alloc_workqueue("tbt_fec_free",
                                       WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
-    return tbt_fec_free_wq ? 0 : -ENOMEM;
+    if (!tbt_fec_free_wq)
+        return -ENOMEM;
+    tbt_fec_out_cache = kmem_cache_create("tbtun_fec_out",
+                                          TBT_FEC_OUT_SLAB_SIZE, 0,
+                                          SLAB_HWCACHE_ALIGN, NULL);
+    if (!tbt_fec_out_cache)
+    {
+        destroy_workqueue(tbt_fec_free_wq);
+        tbt_fec_free_wq = NULL;
+        return -ENOMEM;
+    }
+    return 0;
 }
 
 void tbt_fec_data_module_exit(void)
 {
-    if (!tbt_fec_free_wq)
-        return;
     /* tbt_tunnel_shutdown() has returned, so no session, stream or work item
      * can take another flow reference. Flush every pending stream RCU
      * callback first: each may detach and enqueue the last flow_put. */
-    rcu_barrier();
-    destroy_workqueue(tbt_fec_free_wq);
-    tbt_fec_free_wq = NULL;
+    if (tbt_fec_free_wq)
+    {
+        rcu_barrier();
+        destroy_workqueue(tbt_fec_free_wq);
+        tbt_fec_free_wq = NULL;
+    }
+    /* The session teardown freed every queued record before this point, so
+     * the cache must be empty. kmem_cache_destroy() warns when it is not,
+     * which turns a leaked record into a visible rmmod failure. */
+    if (tbt_fec_out_cache)
+    {
+        kmem_cache_destroy(tbt_fec_out_cache);
+        tbt_fec_out_cache = NULL;
+    }
 }
 
 void tbt_fec_data_free(struct tbt_session *sess)
